@@ -1,0 +1,1073 @@
+= Migration-Safe Concurrent Allocator — A Cross-Thread Free Path for `runtime.mem`
+:author: Graeme Geldenhuys
+:revdate: 2026-06-29
+:toc: left
+:toclevels: 3
+:source-highlighter: rouge
+:icons: font
+:sectanchors:
+:sectnums:
+
+== Purpose
+
+`runtime.mem.pas` is Blaise's `malloc` replacement: a `threadvar`-based,
+per-thread allocator backed by `mmap`/`munmap`. It underlies every heap
+allocation in the language — `_ClassAlloc`/`_ClassRelease`,
+`_BlaiseGetMem`/`_BlaiseFreeMem`, string and dynamic-array allocation in
+`runtime.arc` and `runtime.str`. Its header states a contract in plain words
+(`runtime.mem.pas:37-44`):
+
+[quote]
+____
+All allocator state (arenas, freelists, large-block cache) is declared as
+`threadvar` … *Memory allocated on one thread must not be freed on another (the
+freelist push would go to the wrong thread's list).*
+____
+
+That contract is sound for today's programs — including the self-hosting
+compiler — because they free on the thread that allocated. It is *broken* by the
+fiber runtime specified in `async-networking-design.adoc`. Under the M:N
+work-stealing scheduler a fiber allocates an object on worker A, migrates, and is
+released on worker B. The free then pushes a block belonging to A's arena onto
+B's `threadvar` freelist. The next allocation on B hands that block out, while A
+still believes it owns the underlying arena bytes — silent cross-arena
+corruption or a permanent leak.
+
+`async-networking-design.adoc` § "Core-RTL prerequisites" names this as
+prerequisite *P2* and calls it "the single largest piece of novel RTL risk in
+the whole design". This document is the detailed design behind that one bullet.
+It specifies a *migration-safe* allocator: the existing per-thread fast path is
+preserved exactly, and a *cross-thread free path* — a per-arena MPSC
+(multi-producer, single-consumer) remote-free queue, the mimalloc model — is
+added so a block freed on a foreign thread is routed back to its owning thread's
+allocator instead of being pushed onto the wrong freelist.
+
+[IMPORTANT]
+====
+This is an *extension*, not a rewrite. The fast path (single-threaded and
+non-fiber programs, which is every program today including the bootstrap) must
+stay byte-for-byte identical in behaviour and within a couple of instructions in
+cost. `runtime.mem.pas` is self-hosting-critical and a prior layout-sensitive RTL
+refactor was reverted for destabilising the bootstrap
+(`native-target-architecture.adoc` § "The kernel leaf is a link-time swap"). The
+design is therefore organised around *minimum blast radius* and verification
+against `./scripts/fixpoint.sh` at every step (<<bootstrap>>).
+====
+
+== Scope
+
+In scope:
+
+* A per-arena MPSC remote-free queue and the block→arena ownership link that
+  makes it addressable.
+* New atomic primitives in `runtime.atomic.pas` — compare-and-swap of a pointer,
+  atomic exchange of a pointer, and a 64-bit fetch-add — as x86-64 System V
+  inline-asm leaves in the established `assembler; nostackframe; asm … end` style.
+* The concurrency protocol: foreign-thread enqueue (atomic push), owner drain
+  (on its own fast path), the memory-ordering requirements, and why the design is
+  ABA-immune.
+* Abandoned-arena reclamation: what happens to an arena whose owning thread exits
+  while other threads still hold its blocks.
+* The exact diff to `runtime.mem.pas` — what changes, what stays.
+
+Out of scope (explicitly):
+
+* arm64 atomic siblings. x86-64 is v1; the arm64 `ldxr`/`stxr` (or LSE
+  `casal`/`swpal`) versions are a sibling leaf added later, exactly as
+  `async-networking-design.adoc` adds an arm64 `FiberSwap`. The Pascal interface
+  is CPU-invariant; only the asm body differs.
+* Replacing the size-class scheme, the arena size, or the large-block strategy.
+  Those are kept identical so the change is auditable as a pure addition.
+* A general lock-free allocator (Michael-Scott free lists, hazard pointers). The
+  MPSC-per-arena model deliberately avoids that complexity — see
+  <<alternatives>>.
+* Making the allocator usable from the static/libc-free build's worker threads.
+  That depends on per-thread `%fs`/TLS setup for libc-free threads, an unresolved
+  blocker tracked in `async-networking-design.adoc` § "Freestanding (static)
+  builds". This design assumes the dynamic (pthreads) build, where the loader
+  establishes each thread's TLS base so `threadvar` works.
+
+== Current allocator — the parts that matter
+
+Read `runtime.mem.pas` in full before this section; the summary below fixes the
+exact facts the design builds on.
+
+=== Size classes and headers (kept verbatim)
+
+[cols="1,3",options="header"]
+|===
+| Constant | Value
+
+| Small size classes | 16, 32, 64, 128, 256, 512, 1024, 2048 (8 classes, indices 0..7)
+| `LARGE_THRESHOLD` | 2048 — above this, a block is "large"
+| `ARENA_SIZE` | 65536 (64 KiB), one `mmap` region, bump-allocated
+| `HEADER_SIZE` | 8 — the small-block header
+| `LARGE_HEADER` | 16 — the large-block header
+| `LARGE_CACHE_MAX` | 32 — LIFO cache of retired large blocks
+|===
+
+The small header today is two `Integer`s:
+
+[source,pascal]
+----
+PBlockHeader = ^TBlockHeader;
+TBlockHeader = record
+  AllocSize: Integer;   { user-requested size }
+  Flags:     Integer;   { FLAG_SMALL (0) or FLAG_LARGE (1) }
+end;
+----
+
+A freed small block is recycled by overwriting its *user* bytes with a one-word
+freelist node (`TFreeNode.Next`); the 8-byte header is untouched and `AllocSize`
+is rewritten on reuse. The freelist is a `threadvar` array indexed by size class
+(`FreeLists: array[0..7] of PFreeNode`).
+
+=== The critical gap: a block does not know its arena
+
+The fast-path free, `SmallFreeMem`, recovers the size class from
+`Hdr^.AllocSize` and pushes the block onto `FreeLists[Idx]` — *the freelist of
+whatever thread is running the free*. Nothing in the block records which arena,
+or which thread, it came from. That missing back-pointer is precisely why
+cross-thread free is unsafe today, and supplying it is the foundation of this
+design.
+
+[NOTE]
+====
+The large path has the same hazard (a large block freed on a foreign thread
+lands on that thread's `LargeFreeHead` LIFO and its `TotalMapped` accounting),
+but it is simpler: a large block is its own `mmap` region with a self-describing
+16-byte header, so its remote-free handling is a thin variant of the small-block
+queue rather than a separate mechanism (<<large-path>>).
+====
+
+== The chosen model: per-arena MPSC remote-free queue
+
+The decision is to adopt *mimalloc's* free-routing model, scaled to Blaise's
+existing arena structure:
+
+. Every allocation can be traced back to its *owning arena*, and every arena to
+  its *owning thread*'s allocator instance.
+. Freeing on the *owning* thread is unchanged — the existing `threadvar`
+  freelist push, zero atomics, zero contention.
+. Freeing on a *foreign* thread does not touch any freelist. It atomically
+  *pushes* the block onto the owning arena's *remote-free queue* — a singly
+  linked, lock-free MPSC stack.
+. The owning thread *drains* its arenas' remote-free queues onto its normal
+  freelists, cheaply and amortised, from its own allocate/free fast path. The
+  blocks then re-enter circulation exactly as locally-freed blocks do.
+
+The asymmetry is the whole point. There are *many* possible foreign producers
+(any worker the fiber migrated through) but exactly *one* consumer (the owning
+thread). MPSC is therefore the natural and minimal synchronisation discipline:
+producers need one atomic CAS to push; the single consumer needs one atomic
+exchange to claim the whole list and can then walk it with no atomics at all.
+
+----
+  Owning thread T_own                         Foreign threads T1..Tn
+  -------------------                         -----------------------
+   alloc fast path  --.                          free(p) where p's arena
+   free  fast path  --+--> FreeLists[idx]          is owned by T_own
+                      |     (threadvar, no atomics)         |
+                      |                                     | one CAS push
+                      v                                     v
+              drain remote queue  <----[ MPSC remote-free stack ]----<
+              (one XCHG to claim,         head: atomic Pointer
+               then walk with no          nodes: the freed user blocks
+               atomics, push each          themselves (intrusive)
+               onto FreeLists[idx])
+----
+
+=== Why this model, and not the alternatives
+
+[cols="2,3,3",options="header"]
+|===
+| Alternative | What it buys | Why rejected for Blaise
+
+| *Global lock around the whole allocator*
+| Trivially correct; tiny code.
+| Serialises every alloc/free across all workers — the exact contention the
+  fiber runtime exists to avoid. It also *regresses the fast path for
+  single-threaded programs*, violating "zero cost if unused" and putting a lock
+  on the hottest function in the self-compile (~350M string releases per
+  bootstrap). Non-starter.
+
+| *Sharded locks (a lock per size class, or per arena)*
+| Less contention than one global lock; simple to reason about.
+| Still puts a lock — and therefore an atomic — on the *local* fast path, which
+  is the path every existing program takes. The whole win of the per-thread
+  allocator is that the common case needs no atomic at all; sharded locks throw
+  that away to solve a problem only fiber programs have.
+
+| *Fully lock-free allocator (Michael-Scott MPMC free lists, hazard pointers)*
+| Maximal concurrency; no owner/consumer distinction.
+| Far more complex, needs hazard pointers or epoch reclamation to be ABA-safe on
+  a multi-producer multi-consumer stack, and buys nothing here: the access
+  pattern is genuinely single-consumer (one owning thread), so MPMC machinery is
+  unused generality. This is the over-engineering `native-target-architecture.adoc`
+  warns against.
+
+| *Pin every fiber's allocations to its origin worker*
+| No allocator change at all.
+| Defeats work-stealing for allocation-heavy fibers — the scheduler can no longer
+  freely migrate them — which undermines the load-balancing the runtime is built
+  for. `async-networking-design.adoc` P2 names this the fallback, "if the
+  remote-free queue slips", not the design.
+
+| *Per-arena MPSC remote-free queue (mimalloc) — CHOSEN*
+| Zero-atomic local fast path preserved; one CAS per foreign free; one XCHG per
+  drain; ABA-immune by construction (below).
+| Matches the actual access pattern exactly. The local path — every existing
+  program — is untouched. Only foreign frees, which only happen under fibers,
+  pay an atomic. This is the literal embodiment of "zero cost if unused".
+|===
+
+=== Design patterns applied
+
+* *Strategy (GoF), expressed as a fast-path/slow-path split.* `_BlaiseFreeMem`
+  already dispatches large-vs-small. It gains a second axis: *owner-vs-foreign*.
+  The owner strategy is the existing freelist push; the foreign strategy is the
+  atomic enqueue. The selection is a single pointer comparison
+  (`ArenaOwnerTid = CurrentTid`), so the hot path is one extra compare, not a
+  virtual call.
+* *Producer–Consumer.* The remote-free queue is a textbook bounded-asymmetry
+  producer–consumer channel: N producers, one consumer, intrusive nodes, no
+  allocation in the channel itself (the freed block *is* the node).
+* *Null Object, for the non-fiber case.* When no worker pool ever runs (every
+  program today), no thread is ever foreign to an arena, the remote queue stays
+  permanently empty, and the drain step finds `head = nil` and returns
+  immediately. The concurrent machinery is present but inert — "zero cost if
+  unused" realised as a never-taken branch.
+
+== Data structures
+
+=== Block → arena ownership: the back-pointer
+
+The minimal addition that makes a block routable is a pointer from the block's
+header to its owning arena. The small header grows from 8 to 16 bytes:
+
+[source,pascal]
+----
+const
+  HEADER_SIZE     = 16;   { was 8 — now carries the owning-arena back-pointer }
+
+type
+  PBlockHeader = ^TBlockHeader;
+  TBlockHeader = record
+    AllocSize: Integer;   { user-requested size (unchanged) }
+    Flags:     Integer;   { FLAG_SMALL / FLAG_LARGE (unchanged) }
+    Arena:     PArena;    { NEW: owning arena; the routing key }
+  end;
+----
+
+[IMPORTANT]
+.Header-size change is the one invasive edit — justify and contain it
+====
+Growing `HEADER_SIZE` from 8 to 16 changes every small allocation's footprint
+and every `Ptr - HEADER_SIZE` header computation. This is the single most
+blast-radius-sensitive line in the design and must be handled as follows:
+
+* The constant `HEADER_SIZE` is *already* used everywhere the header is reached
+  (`ArenaAlloc`, `SmallGetMem`, `SmallFreeMem`, `IsLarge`, `GetAllocSize`,
+  `_BlaiseReallocMem`), so changing the constant propagates correctly with no
+  hand-edited offsets. Verify by `grep -n 'HEADER_SIZE\|- 8\b' runtime.mem.pas`
+  and confirm there is *no* bare literal `8` standing in for the header.
+* The large header (`LARGE_HEADER = 16`) is unaffected; large blocks already
+  self-describe via `TotalMapped`, and the large remote path reuses that
+  (<<large-path>>).
+* Alignment is preserved: 16 is a multiple of 8, so the existing "all returned
+  pointers are 8-byte aligned" guarantee is *strengthened* (now 16-byte aligned),
+  never weakened.
+* The cost is 8 extra bytes per small allocation. At Blaise's size classes
+  (smallest is 16 usable bytes) this is at worst a doubling of per-object
+  overhead for the 16-byte class and proportionally less above; it is the price
+  of routability and is accepted. An alternative that avoids it (a side table
+  mapping arena base→owner, addressed by masking the block pointer to its arena
+  base) is discussed in <<alternatives>> and rejected as more fragile.
+====
+
+=== Arena record: owner, remote queue, and the arena registry
+
+`TArena` gains the owning-thread identity and the remote-free queue head. The
+remote head is a *raw pointer slot manipulated only through the atomic
+primitives* — it is deliberately not a managed field.
+
+[source,pascal]
+----
+type
+  PArena = ^TArena;
+  TArena = record
+    Base:        Pointer;     { unchanged }
+    Offset:      Integer;     { unchanged — bump pointer }
+    Capacity:    Integer;     { unchanged }
+    Next:        PArena;      { unchanged — owner's arena list }
+    { ---- NEW fields ---- }
+    OwnerTid:    Int64;       { thread id that owns this arena; 0 = abandoned }
+    RemoteHead:  Pointer;     { MPSC stack head; touched only via CAS/XCHG }
+    RemoteList:  PArena;      { intrusive link for the global abandoned-arena list }
+  end;
+----
+
+A freed block's intrusive node, when it lives on the *remote* queue, reuses the
+block's user bytes exactly as the local `TFreeNode` does, but it must also carry
+its size class so the draining owner can file it correctly without re-reading a
+header it would otherwise have to chase:
+
+[source,pascal]
+----
+type
+  PRemoteNode = ^TRemoteNode;
+  TRemoteNode = record
+    Next:      PRemoteNode;   { next on the MPSC stack }
+    SizeClass: Integer;       { 0..7 — which FreeLists[] bucket on drain }
+  end;
+----
+
+`SizeOf(TRemoteNode)` is 12 bytes (pointer + Integer), well within the 16-byte
+smallest size class's usable region, so even a class-0 block has room for its
+remote node. (The owner could instead recompute the class from the header on
+drain; storing it costs nothing and keeps the drain loop header-free.)
+
+=== Free-list vs remote-queue split — invariant
+
+At any instant a free small block is on *exactly one* of two structures:
+
+[cols="1,3",options="header"]
+|===
+| Structure | Holds
+
+| `FreeLists[idx]` (threadvar, per owner)
+| Blocks freed by the *owning* thread, ready for O(1) local reuse. No atomics.
+
+| `arena^.RemoteHead` (atomic, per arena)
+| Blocks freed by a *foreign* thread, awaiting the owner's next drain. CAS to
+  push, XCHG to drain.
+|===
+
+The drain moves a block from the second structure to the first; allocation moves
+it back to in-use. A block is never on both, never on neither while free, and
+the only writer to `FreeLists` is the owner — preserving the original
+single-writer property of the per-thread design.
+
+=== Thread identity and the arena→owner link
+
+`OwnerTid` is the owning thread's id, captured when the arena is created. The
+fast-path "am I the owner?" test compares it against the current thread's id. To
+keep this cheap and dependency-free, the allocator caches the current thread id
+in a `threadvar` set lazily on first use:
+
+[source,pascal]
+----
+function _libc_pthread_self: Int64; external name 'pthread_self';
+
+threadvar
+  CurrentTid: Int64;   { 0 = not yet cached }
+
+function MyTid: Int64;
+begin
+  Result := CurrentTid;
+  if Result = 0 then
+  begin
+    Result := _libc_pthread_self();
+    CurrentTid := Result;
+  end;
+end;
+----
+
+`pthread_self` is already available via the pthreads link the dynamic build uses
+(`runtime.thread.pas` binds `pthread_create`/`pthread_join`); binding
+`pthread_self` is one more `external name` in the same family. `OwnerTid` is set
+from `MyTid` in `AllocArena`.
+
+== The concurrency protocol
+
+=== Foreign free — the producer side (atomic push)
+
+A free runs on the thread executing `_BlaiseFreeMem`. It reads the block's
+`Arena` back-pointer, then its `Arena^.OwnerTid`. If that equals `MyTid`, it is a
+local free — the existing fast path. Otherwise it is a *remote* free and pushes
+onto the arena's MPSC stack:
+
+[source,pascal]
+----
+procedure RemoteFreePush(Arena: PArena; Ptr: Pointer; SizeClass: Integer);
+var
+  Node: PRemoteNode;
+  OldHead: Pointer;
+begin
+  Node := PRemoteNode(Ptr);
+  Node^.SizeClass := SizeClass;
+  repeat
+    OldHead := Arena^.RemoteHead;          { plain read of current head }
+    Node^.Next := PRemoteNode(OldHead);    { link new node above it }
+  until _AtomicCASPtr(@Arena^.RemoteHead,  { publish: head := Node iff unchanged }
+                      OldHead, Pointer(Node));
+end;
+----
+
+`_AtomicCASPtr(Ptr, Expected, NewVal)` performs, atomically: if `Ptr^ = Expected`
+then `Ptr^ := NewVal` and return `True`, else return `False` (a standard
+compare-and-swap returning success). The loop retries on contention from another
+producer. This is a Treiber stack push.
+
+*Memory ordering.* The CAS must have *release* semantics so that the writes to
+`Node^.SizeClass` and `Node^.Next` are visible to the consumer before the new
+head is published. On x86-64 this is free: `lock cmpxchg` is a full barrier, so
+the published store cannot be reordered before the node-field stores. The arm64
+sibling will use `casal` (acquire-release) or an `stxr` with the appropriate
+barrier; the Pascal protocol is unchanged.
+
+=== Owner drain — the consumer side (atomic claim, then no atomics)
+
+The owner drains by atomically swapping the whole stack out for `nil` in a single
+exchange, then walking the claimed list with no further synchronisation (it is
+now private to the owner):
+
+[source,pascal]
+----
+procedure DrainRemoteFrees(Arena: PArena);
+var
+  Claimed, Node, Nxt: PRemoteNode;
+begin
+  if Arena^.RemoteHead = nil then Exit;          { Null-Object fast bail }
+  Claimed := PRemoteNode(_AtomicXchgPtr(@Arena^.RemoteHead, nil));
+  Node := Claimed;
+  while Node <> nil do
+  begin
+    Nxt := Node^.Next;
+    { File the block back onto the owner's local freelist, exactly as a
+      local free would — the block re-enters normal circulation. }
+    PFreeNode(Node)^.Next := FreeLists[Node^.SizeClass];
+    FreeLists[Node^.SizeClass] := PFreeNode(Node);
+    Node := Nxt;
+  end;
+end;
+----
+
+`_AtomicXchgPtr(Ptr, NewVal)` atomically stores `NewVal` into `Ptr^` and returns
+the previous value. The exchange must have *acquire* semantics so that the node
+fields written by the producers (visible because their CAS was release) are
+observed by the consumer. On x86-64 `xchg` to memory carries an implicit `lock`
+and is a full barrier, so acquire is free.
+
+[NOTE]
+.The single-consumer guarantee is what makes the walk atomic-free
+====
+Only the owning thread ever calls `DrainRemoteFrees` for its own arenas. After
+the `xchg`, the claimed list is unreachable by any producer (the shared head is
+now `nil`; new pushes build a fresh list), so the owner can traverse and re-file
+it with ordinary loads and stores. This is the entire payoff of choosing MPSC
+over MPMC: the consumer side needs *one* atomic, not one-per-node.
+====
+
+=== When and how often the owner drains
+
+The drain is *amortised onto the owner's own fast path*, never a background
+thread:
+
+. *On allocation*, when a size class's local freelist is empty
+  (`SmallGetMem` is about to fall through to `ArenaAlloc`), drain the *head
+  arena's* remote queue first. A foreign free that returned a block of the
+  needed class then satisfies the request without growing the arena — the drain
+  pays for itself.
+. *On free*, opportunistically: every Nth local free (a small counter, e.g.
+  every 64th, kept in a `threadvar`) drain the head arena. This bounds how long a
+  foreign-freed block can sit unreclaimed without adding an atomic to every free.
+. *On arena exhaustion*, before `mmap`-ing a fresh arena, drain *all* of the
+  owner's arenas' remote queues (walk the existing `ArenaHead → Next` list,
+  which the owner already owns). Reclaiming foreign frees can avoid the `mmap`
+  entirely. This is the only full-list walk, and it is on the cold path.
+
+This keeps the common allocate/free path free of any unconditional drain cost —
+the `RemoteHead = nil` check is a single load and predicted-not-taken branch in
+non-fiber programs — while guaranteeing forward progress: a foreign-freed block
+is reclaimed by the owner's next allocation of that class at the latest, and the
+periodic free-side drain bounds the worst case for an allocation-light owner.
+
+----
+  Owner allocate(class c):
+     drain head-arena remote queue        (1 xchg if non-empty, else 1 load)
+     node := FreeLists[c]
+     if node <> nil: pop and return        (fast path, no atomics)
+     else: ArenaAlloc(...)                 (may drain ALL arenas, then mmap)
+
+  Owner free(p):                            (p's arena owned by me)
+     push p onto FreeLists[classOf(p)]      (no atomics)
+     if (++freeCount and 63) = 0: drain head-arena remote queue
+
+  Foreign free(p):                          (p's arena owned by someone else)
+     RemoteFreePush(p.arena, p, classOf(p)) (1 CAS, retry on contention)
+----
+
+=== The ABA problem and why this design avoids it
+
+The classic ABA hazard on a Treiber stack is: a consumer reads head = A, is
+preempted; meanwhile A is popped, B is pushed and popped, and A is pushed again;
+the consumer's CAS(head, A→A.next) succeeds against a *stale* A whose `Next` now
+points into a recycled structure. This design is *immune* by construction, on two
+independent grounds:
+
+. *The consumer never CASes the head.* It *exchanges* the entire head for `nil`
+  in one atomic (`_AtomicXchgPtr`). An unconditional exchange has no
+  compare step, so there is no stale-comparison window — ABA cannot arise on the
+  consumer side at all. (This is precisely why mimalloc uses xchg-drain rather
+  than per-node CAS-pop.)
+. *Producers only ever push, never pop.* A foreign thread cannot remove a node;
+  removal is the sole privilege of the single consumer via the exchange. With no
+  concurrent pop, the producer's CAS can only contend with another *push*, and a
+  push that succeeds against `OldHead` is correct regardless of how many other
+  pushes happened — the only requirement is that `RemoteHead` still equals the
+  `OldHead` the producer linked behind, which the CAS checks. There is no
+  scenario where a node is freed-to-OS and re-pushed underneath a producer,
+  because a node is "freed" only by being moved to the owner's *private*
+  freelist, off the shared structure entirely.
+
+Because nodes are never returned to the OS while on the queue (a small block's
+backing arena is `munmap`-ed only on abandoned-arena reclamation, <<teardown>>,
+which is serialised against draining), the pointer-identity reuse that ABA
+exploits never occurs on the shared head. No tagged pointers, hazard pointers, or
+epoch counters are needed — which is why the 64-bit-only CAS suffices and the
+generation-counter machinery of a general lock-free stack is absent.
+
+== The new atomic primitives
+
+`runtime.atomic.pas` today exports only `_AtomicAddInt32`/`_AtomicSubInt32`
+(`lock xaddl`, 32-bit). The remote-free protocol needs three more, all on
+pointer-width (64-bit) words. They are added as inline-asm leaves in the exact
+style of the existing ones (`assembler; nostackframe; asm … end`, System V AMD64,
+native backend only) and follow `inline-asm-design.adoc`: the body references
+registers directly and owns its frame.
+
+System V AMD64 register facts used below: arg1 → `%rdi`, arg2 → `%rsi`, arg3 →
+`%rdx`; a 64-bit result returns in `%rax`; `cmpxchg` compares against `%rax` and,
+on success, stores the source operand and sets `ZF`.
+
+[source,pascal]
+----
+{ Append to runtime.atomic.pas interface }
+
+{ Atomic compare-and-swap of a pointer-sized word.
+  If Ptr^ = Expected, set Ptr^ := NewVal and return True; else return False.
+  Ptr -> %rdi, Expected -> %rsi, NewVal -> %rdx. }
+function _AtomicCASPtr(Ptr: Pointer; Expected, NewVal: Pointer): Boolean;
+
+{ Atomic exchange of a pointer-sized word.
+  Store NewVal into Ptr^ and return the previous value.
+  Ptr -> %rdi, NewVal -> %rsi. }
+function _AtomicXchgPtr(Ptr: Pointer; NewVal: Pointer): Pointer;
+
+{ Atomic fetch-and-add of a 64-bit word; return the PREVIOUS value.
+  Ptr -> %rdi, Delta -> %rsi. (Used for 64-bit counters/stats; the
+  size-class accounting and the abandoned-arena epoch use it.) }
+function _AtomicAddInt64(Ptr: Pointer; Delta: Int64): Int64;
+----
+
+[source,pascal]
+----
+{ Append to runtime.atomic.pas implementation }
+
+{ cmpxchg sets ZF on success; SETE -> AL gives the Boolean result.
+  `lock cmpxchg %rdx, (%rdi)`:
+     if (%rdi) = %rax  then (%rdi) := %rdx, ZF := 1
+     else %rax := (%rdi),                  ZF := 0
+  We load Expected into %rax first (cmpxchg's implicit comparand). }
+function _AtomicCASPtr(Ptr: Pointer; Expected, NewVal: Pointer): Boolean;
+  assembler; nostackframe;
+asm
+    movq %rsi, %rax
+    lock cmpxchgq %rdx, (%rdi)
+    sete %al
+    movzbl %al, %eax
+    ret
+end;
+
+{ xchg with a memory operand carries an implicit LOCK and is a full barrier.
+  It atomically swaps %rsi with (%rdi); the old value ends up in %rsi, which
+  we move to %rax to return it. }
+function _AtomicXchgPtr(Ptr: Pointer; NewVal: Pointer): Pointer;
+  assembler; nostackframe;
+asm
+    xchgq %rsi, (%rdi)
+    movq  %rsi, %rax
+    ret
+end;
+
+{ 64-bit sibling of _AtomicAddInt32 — return *Ptr (old); *Ptr += Delta. }
+function _AtomicAddInt64(Ptr: Pointer; Delta: Int64): Int64;
+  assembler; nostackframe;
+asm
+    movq %rsi, %rax
+    lock xaddq %rax, (%rdi)
+    ret
+end;
+----
+
+[NOTE]
+.arm64 siblings (later, not v1)
+====
+The arm64 versions live in a sibling unit selected by the CPU-keyed leaf
+mechanism (the same axis as `FiberSwap` and the existing atomic stubs). They are
+either LSE one-instruction forms (`casal` for CAS, `swpal` for exchange, `ldaddal`
+for fetch-add — all acquire-release) on ARMv8.1+, or an `ldaxr`/`stxr` retry loop
+with `dmb ish` barriers on baseline ARMv8. The Pascal interface and the
+remote-free protocol are *identical*; only the asm body differs, which is exactly
+the cross-CPU posture `native-target-architecture.adoc` mandates. They are out of
+scope for v1 (x86-64).
+====
+
+[NOTE]
+.Boolean ABI
+====
+Blaise lowers `Boolean` to a byte-wide result in `%al` zero-extended to `%eax`
+(the `movzbl %al, %eax` above). If the verified codegen convention for a
+`Boolean` return differs, match whatever `_StringEquals`/`_InheritsFrom` already
+emit — those functions return `Boolean`/`Integer` and pin the convention. The
+asm above follows the standard SysV "byte in AL, zero-extended" rule, which is
+the safe default; the e2e test (<<testing>>) confirms it.
+====
+
+== Interaction with the existing threadvar arenas — exact diff
+
+The design *extends* `runtime.mem.pas`; the following is the complete inventory
+of what changes and what is left verbatim.
+
+=== What stays identical
+
+* The size-class scheme (`SizeClassIndex`, `SizeClassBytes`, `RoundUpToClass`) —
+  unchanged.
+* The bump-allocation arena model and the head-arena-only allocation policy.
+* The `threadvar FreeLists`, `ArenaHead`, `LargeFreeHead`, `LargeFreeCount`
+  declarations — they keep their meaning; the owner's local structures are
+  untouched.
+* The large-block path's `mmap`/`mremap`/`munmap` strategy and `LARGE_CACHE_MAX`
+  LIFO — unchanged except for remote routing (<<large-path>>).
+* `_BlaiseReallocMem` — its in-place fast paths are unchanged; the only effect of
+  the 16-byte header is that `HEADER_SIZE` is larger, which it already reads
+  symbolically.
+* The public API signatures: `_BlaiseGetMem`, `_BlaiseFreeMem`,
+  `_BlaiseReallocMem`. *No call site in `runtime.arc.pas` or anywhere else
+  changes* — the migration safety is entirely internal to the allocator.
+
+=== What changes (and where)
+
+[cols="2,4",options="header"]
+|===
+| Site | Change
+
+| `const HEADER_SIZE`
+| `8` → `16` (back-pointer room). The one footprint-affecting edit.
+
+| `TBlockHeader`
+| Add `Arena: PArena` field.
+
+| `TArena`
+| Add `OwnerTid`, `RemoteHead`, `RemoteList` fields.
+
+| new `threadvar CurrentTid; FreeDrainCounter: Integer;`
+| Cached thread id and the periodic-drain counter.
+
+| `AllocArena`
+| Set `A^.OwnerTid := MyTid; A^.RemoteHead := nil`. Register the arena for
+  abandoned-arena reclamation (<<teardown>>).
+
+| `ArenaAlloc`
+| When writing a block header, also set `Hdr^.Arena := A`. Before `mmap`-ing a
+  fresh arena, `DrainAllRemoteFrees` (cold path).
+
+| `SmallGetMem`
+| Before falling through to `ArenaAlloc` on an empty freelist, drain the head
+  arena's remote queue and retry the freelist once.
+
+| `SmallFreeMem`
+| Read `Hdr^.Arena`; if `Arena^.OwnerTid = MyTid`, push onto `FreeLists` (today's
+  code); else `RemoteFreePush`. Periodic drain on the local branch.
+
+| new helpers
+| `MyTid`, `RemoteFreePush`, `DrainRemoteFrees`, `DrainAllRemoteFrees`, and the
+  thread-exit/abandonment hooks (<<teardown>>).
+|===
+
+The rewritten `SmallFreeMem` is the heart of the change and stays tiny:
+
+[source,pascal]
+----
+procedure SmallFreeMem(Ptr: Pointer);
+var
+  Hdr:   PBlockHeader;
+  Idx:   Integer;
+  Arena: PArena;
+  Node:  PFreeNode;
+begin
+  Hdr   := PBlockHeader(Pointer(PtrUInt(Ptr) - HEADER_SIZE));
+  Idx   := SizeClassIndex(Hdr^.AllocSize);
+  Arena := Hdr^.Arena;
+
+  if Arena^.OwnerTid = MyTid then
+  begin
+    { ---- LOCAL fast path: identical to today, zero atomics ---- }
+    Node := PFreeNode(Ptr);
+    Node^.Next := FreeLists[Idx];
+    FreeLists[Idx] := Node;
+    Inc(FreeDrainCounter);
+    if (FreeDrainCounter and 63) = 0 then
+      DrainRemoteFrees(ArenaHead);
+  end
+  else
+    { ---- FOREIGN path: route to the owner, never touch FreeLists ---- }
+    RemoteFreePush(Arena, Ptr, Idx);
+end;
+----
+
+[#large-path]
+=== The large-block remote path
+
+A large block is its own `mmap` region with a self-describing 16-byte
+`TLargeHeader` (`TotalMapped`, `AllocSize`, `Flags`). It has no arena, so it
+cannot use the per-arena queue. Two options:
+
+. *Per-thread large remote queue.* Give each owner a single MPSC remote queue for
+  large blocks (a `threadvar`-rooted head reached via the owner record), keyed the
+  same way — store the owning tid in a spare slot of `TLargeHeader` (it currently
+  has room: `TotalMapped:Int64; AllocSize:Integer; Flags:Integer` = 16 bytes; add
+  the owner tid by widening to 24, or pack it where the freed block's body
+  begins). On a foreign large-free, push onto the owner's large remote queue;
+  the owner drains it alongside the small queues.
+. *Immediate `munmap` on foreign large-free.* Because a large block is a
+  standalone mapping, a foreign thread *can* safely `munmap` it directly — the
+  region is not shared with any arena or freelist. This is the simplest correct
+  behaviour and needs *no* remote queue for large blocks: a foreign large-free
+  just unmaps; only a *local* large-free uses the LIFO cache.
+
+*Recommendation: option 2.* It is strictly simpler, correct (the mapping is
+self-contained), and the only cost is that a foreign-freed large block is not
+recycled into the owner's LIFO cache — an acceptable loss given large frees are
+rare relative to small ones. Option 1 is the optimisation to reach for only if
+profiling shows foreign large-free `munmap` churn matters. The decision is
+recorded here so the implementer does not have to make it.
+
+The foreign-vs-local test for large blocks needs the owner tid; with option 2 the
+test is simply "is the freeing thread the one that allocated?" — but since the
+foreign branch just `munmap`s, *the allocator does not even need to know the
+owner for correctness*; it can `munmap` on any thread because the region is
+private. The owner tid is therefore only needed to decide whether to *cache*
+(local) or *unmap* (foreign). Store it as a fourth field of `TLargeHeader`
+(widening to 24 bytes, still 8-aligned):
+
+[source,pascal]
+----
+PLargeHeader = ^TLargeHeader;
+TLargeHeader = record
+  TotalMapped: Int64;
+  AllocSize:   Integer;
+  Flags:       Integer;
+  OwnerTid:    Int64;    { NEW }
+end;
+const
+  LARGE_HEADER = 24;     { was 16 }
+----
+
+`LargeFreeMem` then caches on the local branch (today's code) and `munmap`s on
+the foreign branch.
+
+[#bootstrap]
+== Bootstrap sensitivity and blast radius
+
+`runtime.mem.pas` is self-hosting-critical: the compiler allocates through it
+while compiling itself, and `native-target-architecture.adoc` records that a
+prior RTL refactor (the `TKernelABI` runtime port) was *implemented and reverted*
+because adding vtable/global surface to layout-sensitive RTL units destabilised
+the bootstrap in a non-converging, hard-to-debug way. That history dictates the
+discipline here.
+
+=== Why this change is lower-risk than the reverted one
+
+* *No new managed global, no new vtable.* The reverted change added an abstract
+  class and a third managed RTL global. This change adds *fields to existing
+  records* and *free functions* plus *leaf asm* — the same shapes the RTL already
+  contains (`runtime.atomic` is leaf asm; `TArena` is a plain record). There is no
+  virtual dispatch and no managed-global initialisation order to perturb.
+* *The fast path is unchanged in shape.* For every program that does not spawn
+  workers — which is *every* program today, including the bootstrap — the
+  `Arena^.OwnerTid = MyTid` test is always true, the foreign branch is never
+  taken, the remote queue is always `nil`, and the drain is a single
+  predicted-not-taken load. The bootstrap's allocation behaviour is therefore
+  identical bar the wider header and one compare/branch.
+
+=== The header-size change is the watch item
+
+The only behaviour-affecting edit is `HEADER_SIZE` 8→16. It is contained because
+the header is *always* reached symbolically (`PtrUInt(Ptr) - HEADER_SIZE`), never
+via a bare `8`. The verification gate is explicit:
+
+. `grep -n '\- 8\b\|HEADER_SIZE\|HeaderSize' runtime.mem.pas` and confirm every
+  header reach uses the constant; fix any literal before changing the constant.
+. The fixpoint is the real test. `runtime.mem` is linked into the compiler, so a
+  wrong header offset corrupts the compiler's own heap and the fixpoint diverges
+  immediately and loudly.
+
+=== Verification ladder (every step gated on fixpoint)
+
+The change is split so each commit is independently fixpoint-verified, in this
+order, so a regression bisects to one commit:
+
+. *Atomic primitives only.* Add `_AtomicCASPtr`/`_AtomicXchgPtr`/`_AtomicAddInt64`
+  to `runtime.atomic.pas` with unit + e2e tests. No allocator change yet. Run
+  `./scripts/fixpoint.sh` — must stay clean (the new functions are unused, so the
+  compiler is byte-identical).
+. *Header widening + back-pointer, no remote path.* Grow `HEADER_SIZE`, add
+  `TBlockHeader.Arena`, set it in `ArenaAlloc`. Free still always local. Run the
+  full `test_blaise_mem` suite and `./scripts/fixpoint.sh` — this is the
+  blast-radius commit; it must produce a clean fixpoint *before* any concurrency
+  is added. If the fixpoint diverges here, a header offset is wrong and nothing
+  downstream is built on it.
+. *Remote queue + drain, single-threaded inert.* Add `OwnerTid`, `RemoteHead`,
+  the foreign branch, the drain. With no worker pool the foreign branch is dead
+  code; the fixpoint must stay clean and `test_blaise_mem` must pass unchanged.
+. *Concurrency tests* (<<testing>>) — the multi-thread stress and race check,
+  which exercise the foreign path the bootstrap never reaches.
+
+Only after step 3 produces a clean fixpoint does the foreign path ship. The
+guiding rule, from the reverted-refactor lesson: *prove the single-threaded
+self-host is byte-identical before relying on any concurrent path.*
+
+== Zero-cost-if-unused: the fast path budget
+
+For a single-threaded or non-fiber program the *only* added cost over today is:
+
+* *Allocation:* one extra `Hdr^.Arena := A` store per arena allocation; a
+  `RemoteHead = nil` load + not-taken branch on the empty-freelist refill path.
+* *Free:* the `Arena^.OwnerTid = MyTid` compare (one `threadvar` load for
+  `CurrentTid`, cached after first use; one field load for `OwnerTid`; one
+  compare/branch), plus the `(FreeDrainCounter and 63) = 0` test which is itself
+  a not-taken branch 63/64 of the time and, when taken, hits an empty remote
+  queue and returns on the `nil` check.
+* *Header:* 8 extra bytes per small block.
+
+No atomic instruction is executed on any local path. The `lock`-prefixed
+instructions appear *only* on the foreign-free and drain paths, which are
+unreachable unless a fiber actually migrated across workers. This satisfies the
+"zero cost if unused" principle at the only layer it can hold for an
+*always-linked* RTL unit: no atomics, no contention, no lock for programs that do
+not use the fiber runtime — the one residual is the wider header and a couple of
+arithmetic instructions, which is the irreducible price of routability and is
+explicitly accepted.
+
+[#teardown]
+== Teardown: abandoned-arena reclamation
+
+The hard case mimalloc is designed for: *a thread exits while other threads still
+hold blocks from its arenas.* If worker A exits, its `threadvar` `ArenaHead` list
+is gone, but a fiber that migrated to worker B may still hold — and later free —
+a block from one of A's arenas. That free will `RemoteFreePush` onto an arena
+whose owner no longer exists to drain it, and the arena's bytes must not be
+`munmap`-ed while any such block is live.
+
+=== The mechanism: a global abandoned-arena list and adoption
+
+. *Global registry.* Every arena, at creation, is also linked onto a
+  process-global, lock-protected (or lock-free via CAS) list of *live arenas*
+  through its `RemoteList` field. (The per-thread `ArenaHead → Next` list is the
+  owner's working set; the global list is the reclamation registry.)
+. *On thread exit*, the allocator's thread-exit hook walks the exiting thread's
+  `ArenaHead` list and marks each arena *abandoned* by atomically setting
+  `OwnerTid := 0`. It does **not** `munmap` them — foreign blocks may still be
+  live. Abandoned arenas stay on the global list, moved to an *abandoned* sub-list.
+. *Adoption.* When any thread `RemoteFreePush`es onto an arena it discovers is
+  abandoned (`OwnerTid = 0`), or when an allocating thread scans the abandoned
+  list during an arena refill, it may *adopt* the arena: atomically CAS
+  `OwnerTid` from `0` to its own tid. The adopting thread then owns the arena,
+  drains its remote queue, links it onto its own `ArenaHead`, and treats it as
+  its own thereafter. Adoption is the mimalloc move that prevents both leaks and
+  premature unmapping.
+. *Reclamation.* An arena is `munmap`-ed only when it is *fully free* — every
+  block returned, bump `Offset` back to the initial `SizeOf(TArena)` watermark
+  with an empty remote queue — and it is abandoned (no owner). A per-arena live
+  block counter (maintained with `_AtomicAddInt64`: +1 on alloc-from-arena, −1 on
+  any free of an arena block, local or remote) reaching zero on an abandoned arena
+  is the unmap trigger. The thread that drives the count to zero performs the
+  `munmap`, after unlinking the arena from the global list under the registry
+  lock.
+
+----
+  Arena lifecycle:
+     created (OwnerTid := T)  --alloc/free by T--.  live, owned
+                                                   |
+            T exits ---> OwnerTid := 0  (abandoned, NOT unmapped)
+                                                   |
+            other thread adopts (CAS 0 -> U) ------+---> live, owned by U
+                                                   |
+            live-block count hits 0 while abandoned ---> munmap + unlink
+----
+
+=== Why a thread-exit hook exists, and how
+
+pthreads provides `pthread_key_create` with a destructor that runs on thread
+exit; the allocator registers a key whose destructor invokes the
+"mark-my-arenas-abandoned" walk. This is the standard idiom for per-thread
+allocator teardown and needs only `external name 'pthread_key_create'`/
+`'pthread_setspecific'` bindings in the same family as the existing `pthread_*`
+imports. For the main thread, an `__cxa_atexit` handler (already used by the leak
+tracker in `runtime.arc.pas:377`) performs the same final sweep.
+
+[NOTE]
+.Teardown is phase 2, not the GO/NO-GO gate
+====
+The hot-path remote-free queue (the P2 gate in `async-networking-design.adoc`) is
+correct and testable *without* abandoned-arena reclamation, as long as workers
+outlive the fibers that touch their arenas — which is the normal scheduler
+lifetime (workers live for the whole scheduler run; fibers come and go on them).
+Teardown matters for *worker shutdown* and *dynamic worker pools*. The phased plan
+(<<plan>>) lands the queue + drain first, gates on it, then adds abandonment, so
+the riskiest hot-path work is validated before the teardown bookkeeping is built.
+====
+
+== Testing strategy
+
+Per project TDD policy, each layer is tested at the lowest level that proves it,
+following the existing `runtime/src/test/pascal/test_blaise_mem.pas` (punit) and
+`bench_blaise_mem.pas` harnesses. punit is the correct framework: the allocator
+has zero dependency on stdlib or ARC.
+
+=== Unit tests (punit, extend `test_blaise_mem.pas`)
+
+* *Atomics.* `_AtomicCASPtr` succeeds when the word matches and fails (leaving it
+  unchanged) when it does not; `_AtomicXchgPtr` returns the prior value and
+  installs the new one; `_AtomicAddInt64` returns the previous and adds. These run
+  single-threaded — they prove the asm and the Boolean ABI before any concurrency.
+* *Header integrity.* After the 8→16 header change: alloc/free/realloc round-trips
+  for every size class; `GetAllocSize` and `IsLarge` still correct; the
+  back-pointer `Hdr^.Arena` points at an arena whose `Base..Base+Capacity` range
+  contains the block.
+* *Local path unchanged.* The full existing `test_blaise_mem` suite must pass
+  verbatim — it is the regression guard that the fast path did not move.
+* *Drain semantics (single-thread, synthetic).* Manually push synthetic nodes
+  onto an arena's `RemoteHead` via `RemoteFreePush`, call `DrainRemoteFrees`, and
+  assert every node landed on the correct `FreeLists[]` bucket and the
+  `RemoteHead` is `nil`.
+
+=== Cross-thread free test (the P2 acceptance test)
+
+Directly mirrors `async-networking-design.adoc` § Testing P2: *allocate on thread
+1, hand the pointer to thread 2, free it there, assert no corruption and that the
+block returns to the owning arena.* Concretely (pthreads, dynamic build):
+
+. Thread 1 allocates N blocks across all size classes, records their pointers and
+  expected contents, and writes a known pattern into each.
+. The pointers are handed to thread 2 (via a shared array + a barrier).
+. Thread 2 frees all N — every free takes the foreign branch and
+  `RemoteFreePush`es onto thread 1's arenas.
+. Thread 1 drains (triggered by a subsequent allocation), then re-allocates the
+  same classes and asserts the recycled blocks are exactly the ones thread 2
+  freed (pointer identity), proving they returned to the owning arena's freelist
+  rather than leaking or landing on thread 2's list.
+. A control assertion: thread 2's own freelists are empty (it never locally freed
+  anything), proving the routing.
+
+=== The 100k-fiber stress
+
+The acceptance-grade stress from the async doc: spawn 100k fibers under the
+scheduler, each allocating and freeing across size classes with deliberate
+migration (force-yield between alloc and free so the free lands on a different
+worker than the alloc with high probability). Assert: no crash, no leak (the leak
+tracker, run scheduler-safe or disabled per the async doc, reports zero
+survivors), and steady-state RSS bounded (arenas are reclaimed/recycled, not
+grown without limit). This is the test that the *whole* design — queue, drain,
+adoption, reclamation — holds under realistic churn.
+
+=== Race detection (TSan-style)
+
+A TSan-style data-race check over the cross-thread free test and a reduced stress
+(e.g. 8 workers, 10k blocks, heavy migration), run wherever a thread sanitizer is
+available. The expectation: *zero reported races*. Every shared word
+(`RemoteHead`, `OwnerTid`, the per-arena live-block counter) is touched only
+through the atomic primitives or under the registry lock; any plain concurrent
+access is a bug the sanitizer must surface. Because Blaise's own toolchain has no
+TSan, this lane builds the test through a TSan-capable C toolchain against the
+same RTL objects, or runs the logic under a known-good external checker; the
+methodology mirrors the async doc's "TSan-style run where available".
+
+=== Fixpoint
+
+`./scripts/fixpoint.sh` after each commit in the verification ladder
+(<<bootstrap>>). The allocator is linked into the compiler, so a clean fixpoint
+is the strongest possible evidence that the single-threaded path is byte-identical
+and the header change is offset-correct. A divergent fixpoint *blocks the commit*.
+
+[#plan]
+== Phased implementation plan
+
+. *Atomic leaves.* Add `_AtomicCASPtr`, `_AtomicXchgPtr`, `_AtomicAddInt64` to
+  `runtime.atomic.pas` (x86-64). Unit + e2e tests; fixpoint clean (unused, so
+  byte-identical). *Self-contained, zero allocator risk.*
+. *Header widening + back-pointer.* `HEADER_SIZE` 8→16, `TBlockHeader.Arena`, set
+  in `ArenaAlloc`. Free stays always-local. Full `test_blaise_mem` + fixpoint.
+  *This is the blast-radius gate — must be clean before anything builds on it.*
+. *Remote queue + drain (inert single-threaded).* `TArena.OwnerTid`/`RemoteHead`,
+  `MyTid`, `RemoteFreePush`, `DrainRemoteFrees`, the foreign branch in
+  `SmallFreeMem`, drain hooks in `SmallGetMem`/`ArenaAlloc`. Single-threaded: the
+  foreign branch is dead code; fixpoint clean, `test_blaise_mem` unchanged.
+. *Cross-thread free test + 100k stress + TSan-style run.* The P2 acceptance
+  tests (above). *This is the GO/NO-GO gate for `async-networking-design.adoc`
+  P2.* Large-block foreign path: `munmap`-on-foreign-free (option 2).
+. *Abandoned-arena reclamation.* Global arena registry, thread-exit hook
+  (`pthread_key` destructor + `__cxa_atexit` main sweep), adoption, per-arena
+  live-block counter and unmap-when-empty-and-abandoned. Stress with worker
+  churn (workers spawned and joined mid-run).
+. *(Later) arm64 atomic siblings.* `casal`/`swpal`/`ldaddal` (LSE) or
+  `ldaxr`/`stxr` leaf, selected by the CPU-keyed mechanism. Same Pascal interface,
+  same protocol.
+
+== Risks
+
+* *Header-size regression (highest, bootstrap).* A stray literal `8` for the
+  header, or a missed `HEADER_SIZE` use, corrupts the compiler's own heap.
+  Mitigation: the grep audit + the step-2 fixpoint gate; the change does not ship
+  past step 2 until the fixpoint is clean.
+* *Memory-ordering bug on a weaker CPU.* x86-64's strong model makes the v1
+  primitives' barriers free, which can mask an ordering bug that only manifests on
+  arm64. Mitigation: the protocol is specified with explicit acquire/release
+  intent (release CAS publish, acquire xchg claim) so the arm64 sibling encodes
+  the right barriers; the TSan-style run on x86-64 catches missing-atomic bugs
+  even where the model hides ordering ones.
+* *Drain starvation.* An allocation-light owner could let foreign frees
+  accumulate. Mitigation: the periodic free-side drain (every 64th local free)
+  bounds the backlog independently of allocation; the arena-refill full drain is
+  the backstop.
+* *Abandoned-arena leak or premature unmap.* The hardest correctness surface.
+  Mitigation: the live-block counter is the single source of truth for "safe to
+  unmap"; reclamation is staged after the hot path is proven (phase 5), and the
+  worker-churn stress targets exactly this.
+* *Boolean/pointer ABI mismatch in the asm leaves.* Mitigation: match the
+  convention `_StringEquals`/`_InheritsFrom` already emit; the single-threaded
+  atomics unit test pins it before any concurrent use.
+* *`pthread_self`/`pthread_key` unavailable in the static build.* Mitigation:
+  out of scope for v1 (the static/libc-free worker-thread path is an independent
+  unresolved blocker in the async doc); the dynamic build is the target and has
+  these symbols.
+
+[#alternatives]
+== Alternatives considered
+
+* *Global lock / sharded locks / full lock-free MPMC / pin-to-origin.* Compared
+  head-to-head in <<the-chosen-model-per-arena-mpsc-remote-free-queue>>. All
+  rejected: the first three put a cost on the local fast path that every existing
+  program pays; the fourth defeats work-stealing. The MPSC-per-arena model is the
+  only one whose cost falls *only* on the foreign path that only fibers reach.
+* *Side table (arena base lookup) instead of a header back-pointer.* Instead of
+  growing the header, mask a block pointer down to its 64 KiB arena base and look
+  the owner up in a global hash/radix table. Avoids the 8-byte header growth, but:
+  arenas are not necessarily 64 KiB-aligned (the `mmap` base is page-aligned, not
+  arena-size-aligned), so masking is unreliable; a lookup table adds a global,
+  shared, concurrently-mutated structure (the very thing the reverted refactor
+  warns against) and a cache-missing indirection on every free. The header
+  back-pointer is O(1), needs no global, and is read on the same cache line as the
+  size — strictly simpler and safer here. Rejected.
+* *Background drain thread.* A dedicated thread that drains all arenas' remote
+  queues. Rejected: it adds a thread, needs its own wake-up (futex/eventfd), and
+  the owner is already the cheapest, most cache-local place to drain (it is about
+  to touch those freelists anyway). Amortising the drain onto the owner's fast
+  path is both simpler and faster.
+* *Deferred-coalescing / size-class remote queues per (arena,class).* Finer
+  routing so the drain need not re-derive the class. Rejected as premature: the
+  `TRemoteNode.SizeClass` field already lets the drain file in O(1) without
+  per-class queues, and per-class queues multiply the atomic head count for no
+  measured benefit. Revisit only if drain profiling demands it.

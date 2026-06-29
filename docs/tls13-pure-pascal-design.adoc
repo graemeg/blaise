@@ -1,0 +1,1199 @@
+= A Pure-Pascal TLS 1.3 Provider for the Blaise Standard Library
+:author: Graeme Geldenhuys
+:revdate: 2026-06-29
+:toc: left
+:toclevels: 3
+:source-highlighter: rouge
+:icons: font
+:sectanchors:
+:sectnums:
+
+== Purpose
+
+`docs/async-networking-design.adoc` names a single long-term goal for the TLS
+layer (L4): replace the dynamic OpenSSL binding (`TOpenSSLProvider`) with a
+**pure-Pascal TLS provider** — `TBlaiseTlsProvider` — that
+
+* removes the dynamic `libssl.so`/`libcrypto.so` dependency (`PT_INTERP`), and
+* is *what finally lets the static/freestanding (libc-free) build speak TLS*.
+
+That document deliberately deferred the design: "It is a substantial component
+in its own right (comparable to a regex engine in scope) and warrants its own
+design document." This is that document.
+
+It specifies, to a build-ready level of detail, a **TLS 1.3 client** (RFC 8446)
+written entirely in Blaise Pascal on top of an expanded `Security.Crypto`. The
+client is scoped first deliberately, to bound the work; the server is a later
+phase (<<out-of-scope>>). The provider slots into the existing
+`TTlsProvider`/`TTlsConn` port from the networking document with **zero change
+to any L5 component** — `Net.Http.Client`, `Net.WebSockets`, `Net.Smtp` — by
+swapping `GTlsProvider`.
+
+[IMPORTANT]
+====
+The single most important architectural constraint inherited from the
+networking design is the **memory-BIO discipline**: the TLS engine never
+touches a socket. It is a pure state machine fed ciphertext from a byte buffer
+and producing ciphertext into a byte buffer, surfacing `WANT_READ`/`WANT_WRITE`
+so the *caller* (a fiber on the L3 reactor) parks and pumps bytes. Every
+interface in this document is designed around that boundary. This is what makes
+the engine transport-agnostic and trivially compatible with the fiber
+scheduler, IOCP, and `io_uring` alike.
+====
+
+== Scope and ground truth
+
+=== What exists in `Security.Crypto` today
+
+A full read of `stdlib/src/main/pascal/security.crypto.pas` (the *entire* unit)
+yields exactly two public functions:
+
+[cols="2,5",options="header"]
+|===
+| Symbol | Provides
+
+| `Sha1(const AData: string): string` | Raw 20-byte SHA-1 digest, bytes-in/bytes-out.
+| `Sha1Hex(const AData: string): string` | The same as a 40-char lowercase hex string.
+|===
+
+There is **no** SHA-256, **no** SHA-384, **no** HMAC, **no** HKDF, **no** AEAD
+cipher, **no** elliptic-curve code, **no** ASN.1/X.509, and **no** signature
+verification. Every cryptographic primitive TLS 1.3 needs is therefore *missing*
+and is designed below from scratch. The only adjacent assets are:
+
+* `Security.Guid` — `NewGuidRaw` calls `getrandom(2)` via `external name
+  'getrandom'`; the CSPRNG sourcing pattern we extend in <<csprng>>.
+* `Encoding.Base64` — `Base64Encode`/`Decode`, reused verbatim for PEM parsing.
+* `Net.Sockets` — the raw-byte socket idioms and the `TStringBuilder`/`Byte(S[I])`
+  conventions every primitive here follows.
+* The kernel leaf `runtime.syscall.linux.pas` already defines a raw
+  `getrandom` syscall stub (`SYS_getrandom = 318`) for the static build — so
+  CSPRNG sourcing works in *both* build profiles with no new syscall.
+
+=== Blaise language constraints (these are load-bearing here)
+
+This is binary-heavy code; the dialect's quirks bite hardest exactly here.
+They are restated because every primitive below depends on them.
+
+[cols="1,4",options="header"]
+|===
+| Constraint | Consequence for this design
+
+| *Single UTF-8 `string`, byte-addressable, 0-based*
+| There is no separate byte-array type in the stdlib today; the established
+  idiom (`Net.Sockets`, `Security.Crypto`, `Encoding.Base64`) is *`string` =
+  raw bytes*, indexed `S[0]..S[Length(S)-1]`, built with
+  `TStringBuilder.AppendByte`. We adopt a thin `RawBytes = string` *alias* (a
+  documentation type, not a new RTL type) for every wire/binary value, so a
+  signature reads `function Sha256(const AData: RawBytes): RawBytes` and the
+  intent is unmistakable. **All indexing is 0-based** — the single largest bug
+  source in ported crypto. Every loop in this document is written `for I := 0
+  to Length(X) - 1`. There is no `1..Length`.
+
+| *`Byte('x')` on a char literal does NOT give the code point*
+| As `Encoding.Base64` documents, a casting a *char literal* takes a pointer,
+  not the byte. Byte constants are numeric (`CH_CR = 13`). A byte read *from* a
+  string (`Byte(S[I])`) is correct. All protocol constants here are numeric.
+
+| *Shifts / `not` are not masked to the type width*
+| `Security.Crypto` wraps every 32-bit op with `and $FFFFFFFF`. SHA-256 inherits
+  this; SHA-512/384 needs `and $FFFFFFFFFFFFFFFF` masking on `UInt64`. Stated
+  per-primitive below — it is not optional.
+
+| *Full ARC; `[Weak]` for back-references*
+| `TTlsContext`, `TTlsConn`, `TCertificate`, the parsed chain — all ARC-managed
+  classes. A child that points back at its owner (e.g. a `TTlsConn` referencing
+  its `TTlsContext`) uses `[Weak]` to avoid a cycle, exactly as the networking
+  doc prescribes for the scheduler back-refs.
+
+| *Reified generics + `Generics.Collections`*
+| `TList<TCertificate>` for a chain, `TList<TExtension>` for parsed extensions,
+  `TDictionary<string, TTrustAnchor>` for the trust store index. Buffers use
+  `streams.pas`' `TBuffer` (segmented, both `IInputStream` and `IOutputStream`)
+  for the record-layer queues.
+
+| *No `{$IFDEF}`*
+| Per `docs/native-target-architecture.adoc`: every OS divergence is a runtime
+  port (object selected at startup) or a link-time symbol swap. The *only* OS
+  divergence in this whole component is the trust-store loader and the CSPRNG
+  source; both go behind small ports (<<trust-store>>, <<csprng>>). The crypto,
+  the record layer, the handshake, and the ASN.1/X.509 parser are 100%
+  target-invariant pure Pascal.
+|===
+
+[NOTE]
+.Constant-time is a first-class requirement, not a footnote
+====
+Secret-dependent branches and memory accesses leak secrets through timing.
+Three classes of code in this document MUST be constant-time and are flagged at
+each site: (1) **MAC/tag comparison** (`ConstTimeEquals`), (2) **secret-key
+arithmetic** (X25519 field ops, GCM's `GHASH`, ChaCha20), and (3) **padding/PKCS
+checks** (none in TLS 1.3 record layer — a reason 1.3 is *easier* to make
+constant-time than 1.2). Where a primitive cannot reasonably be constant-time in
+this dialect (e.g. a table-driven AES S-box is cache-timing-vulnerable), the
+risk is called out explicitly in <<risks>> with the mitigation.
+====
+
+== Unit layout
+
+A new `security.crypto.*` family for primitives, a new `security.x509.*` family
+for certificates, and `net.tls.blaise.pas` for the provider. Naming mirrors the
+networking doc's `net.tls.openssl.pas`. No existing file is *edited* to add a
+primitive — Open/Closed, as the native-target architecture requires.
+
+----
+stdlib/src/main/pascal/
+  security.crypto.pas              EXISTING (SHA-1); gains nothing — left alone
+  security.crypto.sha2.pas         NEW  SHA-256, SHA-384, SHA-512 (+ block fns)
+  security.crypto.hmac.pas         NEW  HMAC<hash>, generic over a digest descriptor
+  security.crypto.hkdf.pas         NEW  HKDF-Extract/Expand + TLS Expand-Label/Derive-Secret
+  security.crypto.aead.pas         NEW  IAead port + AES-GCM + ChaCha20-Poly1305
+  security.crypto.aes.pas          NEW  AES-128/256 block cipher (GCM dependency)
+  security.crypto.ghash.pas        NEW  GF(2^128) GHASH for GCM
+  security.crypto.chacha.pas       NEW  ChaCha20 + Poly1305
+  security.crypto.x25519.pas       NEW  X25519 ECDH (Curve25519)
+  security.crypto.p256.pas         LATER  NIST P-256 ECDHE + ECDSA verify
+  security.crypto.ed25519.pas      NEW  Ed25519 signature verification
+  security.crypto.rsa.pas          NEW  RSA-PSS / RSA-PKCS1 signature verification (bigint)
+  security.bigint.pas              NEW  fixed-width unsigned bigint for RSA/P-256
+  security.random.pas              NEW  CSPRNG port (getrandom / getentropy / BCrypt)
+  security.asn1.pas                NEW  minimal DER decoder
+  security.x509.pas                NEW  certificate parse + chain path validation + hostname
+  security.x509.trust.pas          NEW  TTrustStore port + bundled-PEM loader
+  security.x509.trust.linux.pas    NEW  /etc/ssl/certs loader
+  security.x509.trust.macos.pas    LATER Security.framework loader
+  net.tls.pas                      EXISTING (port: TTlsProvider/TTlsConn) — unchanged
+  net.tls.blaise.pas               NEW  TBlaiseTlsProvider: record layer + handshake SM
+----
+
+Dependency direction (lower depends on nothing above it):
+
+----
+                         net.tls.blaise            <- the provider / state machine
+                          /     |      \
+              security.x509  aead/hkdf  x25519/ed25519/rsa/p256
+                  |            |  |          \
+            security.asn1   hmac sha2     security.bigint
+                  |            |  |
+            (Encoding.Base64) sha2  <- everything roots on sha2 + random
+                               |
+                       security.random  <- CSPRNG port (getrandom)
+----
+
+== Part I — the missing crypto primitives
+
+Each primitive is its own subsection: what it is, the exact Blaise signature,
+the algorithm, the test vectors, and the constant-time posture.
+
+[#sha2]
+=== SHA-256 / SHA-384 / SHA-512 (`security.crypto.sha2.pas`)
+
+TLS 1.3's only mandatory cipher suites use SHA-256 (`TLS_AES_128_GCM_SHA256`,
+`TLS_CHACHA20_POLY1305_SHA256`) and SHA-384 (`TLS_AES_256_GCM_SHA384`). The
+*transcript hash* and the entire key schedule are parameterised on this hash.
+SHA-384 is SHA-512 truncated with a different IV, so one 64-bit core serves
+both.
+
+These are *not* secret-dependent (a hash of public transcript data), so
+constant-time is not required — but they are performance-critical (the
+transcript is rehashed-incrementally on every handshake message), so the design
+exposes a **streaming** API, not only one-shot.
+
+[source,pascal]
+----
+type
+  RawBytes = string;            { documentation alias: a string holding raw bytes, 0-based }
+
+  { Incremental hashing. One object per running hash (the transcript needs
+    several alive at once during the handshake). ARC-managed. }
+  THashAlg = (haSha256, haSha384, haSha512);
+
+  IDigest = interface
+    procedure Update(const AData: RawBytes);
+    procedure UpdatePtr(ABuf: Pointer; ALen: Integer);
+    function  Finish: RawBytes;     { returns the digest; object is spent }
+    function  Clone: IDigest;       { snapshot — REQUIRED: transcript hash is
+                                      finished multiple times mid-handshake }
+    function  DigestSize: Integer;  { 32 / 48 / 64 }
+    function  BlockSize: Integer;   { 64 / 128 / 128 — needed by HMAC }
+  end;
+
+function NewDigest(AAlg: THashAlg): IDigest;
+
+{ One-shot convenience. }
+function Sha256(const AData: RawBytes): RawBytes;
+function Sha384(const AData: RawBytes): RawBytes;
+function Sha512(const AData: RawBytes): RawBytes;
+----
+
+Implementation notes:
+
+* *SHA-256* follows the SHA-1 unit's structure exactly: a 64-byte message block,
+  a 64-word `W[]` schedule, the eight working variables `a..h`, and every 32-bit
+  op masked `and $FFFFFFFF`. The differences from SHA-1: the message schedule
+  uses the `σ0/σ1` functions, the round uses `Σ0/Σ1/Ch/Maj`, and there is a
+  64-entry constant table `K[]`. Eight `UInt32` state words → 32-byte digest.
+* *SHA-512/384* uses `UInt64` state, a 128-byte block, an 80-round schedule, and
+  a 128-bit length field. **Every 64-bit op masked `and $FFFFFFFFFFFFFFFF`** —
+  the backend does not auto-mask (the SHA-1 unit's header warns of this for 32
+  bits; it applies identically to 64). SHA-384 = SHA-512 with the SHA-384 IV and
+  output truncated to the first 48 bytes.
+* `Clone` is non-negotiable: the TLS transcript hash must be *finalised at
+  several points* (for `CertificateVerify` and both `Finished` MACs) while
+  *continuing to absorb* later messages. The implementation snapshots the
+  state words + the partial-block buffer + the length counter.
+
+*Test vectors* (TDD, <<testing>>): NIST CAVP SHA test vectors, plus the RFC 6234
+worked examples, plus the empty-string and "abc" digests, plus a >block-size
+multi-update equality check (`Update("ab"); Update("c")` == `Sha256("abc")`).
+
+[#hmac]
+=== HMAC (`security.crypto.hmac.pas`)
+
+HMAC (RFC 2104) is the MAC underpinning HKDF and the PRF. It is keyed with a
+secret, so the *comparison* of HMAC outputs must be constant-time — but the
+HMAC computation itself is not branch-on-secret (it is hash composition), so the
+function body needs no special treatment beyond using a constant-time compare at
+verification sites.
+
+[source,pascal]
+----
+{ HMAC over any IDigest. Key and message are raw bytes. }
+function Hmac(AAlg: THashAlg; const AKey, AData: RawBytes): RawBytes;
+----
+
+`Hmac(K, m) = H((K' xor opad) || H((K' xor ipad) || m))`, with `K'` = K padded
+to `BlockSize` (or `H(K)` first if longer). `ipad`=0x36, `opad`=0x5C repeated.
+Built directly on `NewDigest`, reading `BlockSize` from the digest descriptor so
+the same code serves SHA-256 (64) and SHA-384 (128).
+
+*Test vectors:* RFC 4231 (HMAC-SHA-256/384/512 test cases 1–7).
+
+[#hkdf]
+=== HKDF + the TLS labels (`security.crypto.hkdf.pas`)
+
+HKDF (RFC 5869) is the key-derivation backbone of TLS 1.3's key schedule, and
+TLS adds two thin wrappers (RFC 8446 §7.1). This is the highest-leverage small
+unit in the whole stack — get it exactly right and the key schedule falls out
+mechanically.
+
+[source,pascal]
+----
+{ RFC 5869 core. }
+function HkdfExtract(AAlg: THashAlg; const ASalt, AIkm: RawBytes): RawBytes;          { = PRK }
+function HkdfExpand (AAlg: THashAlg; const APrk, AInfo: RawBytes; ALen: Integer): RawBytes;
+
+{ RFC 8446 §7.1 — HKDF-Expand-Label. The HkdfLabel struct is:
+    struct {
+      uint16 length = ALen;
+      opaque label<7..255>  = "tls13 " + ALabel;   { the 6-byte prefix is literal }
+      opaque context<0..255> = AContext;
+    }
+  serialised, then HkdfExpand'd. }
+function ExpandLabel(AAlg: THashAlg; const ASecret: RawBytes;
+                     const ALabel: RawBytes; const AContext: RawBytes;
+                     ALen: Integer): RawBytes;
+
+{ RFC 8446 §7.1 — Derive-Secret(Secret, Label, Messages) =
+    ExpandLabel(Secret, Label, Transcript-Hash(Messages), Hash.length) }
+function DeriveSecret(AAlg: THashAlg; const ASecret: RawBytes;
+                      const ALabel: RawBytes; const ATranscriptHash: RawBytes): RawBytes;
+----
+
+[IMPORTANT]
+====
+The `"tls13 "` prefix is **six bytes including the trailing space**
+(`74 6c 73 31 33 20`). The label length octet counts the prefix + the label.
+This is the single most common interop bug in hand-written TLS 1.3 — wire it
+against the RFC 8446 Appendix A test vectors before anything else depends on it.
+====
+
+*Test vectors:* RFC 5869 §A (HKDF test cases 1–3) for the core, and the
+**RFC 8446 §7.1 / RFC 8448** worked handshake-trace values for `ExpandLabel`,
+`DeriveSecret`, and the full key schedule (these tie the whole stack together —
+see <<testing>>).
+
+[#aead]
+=== AEAD: the cipher port + two suites (`security.crypto.aead.pas`)
+
+TLS 1.3 records are protected with an AEAD (RFC 5116). Three suites are in v1
+scope; all share one interface so the record layer is cipher-agnostic.
+
+[source,pascal]
+----
+type
+  TAeadAlg = (aeadAes128Gcm, aeadAes256Gcm, aeadChaCha20Poly1305);
+
+  { An AEAD instance is created with the traffic key and reused for many
+    records (the nonce changes per record — see the record layer). ARC. }
+  IAead = interface
+    { Encrypt: out = ciphertext||tag (tag is 16 bytes for all three). }
+    function Seal(const ANonce, AAad, APlain: RawBytes): RawBytes;
+    { Decrypt+verify: returns False (and APlain := '') on tag mismatch.
+      The verification is CONSTANT-TIME. }
+    function Open(const ANonce, AAad, ACipher: RawBytes; out APlain: RawBytes): Boolean;
+    function KeyLen: Integer;     { 16 / 32 / 32 }
+    function NonceLen: Integer;   { 12 for all three }
+    function TagLen: Integer;     { 16 for all three }
+  end;
+
+function NewAead(AAlg: TAeadAlg; const AKey: RawBytes): IAead;
+----
+
+==== AES-128/256 block cipher (`security.crypto.aes.pas`)
+
+The Rijndael block cipher, 128-bit blocks, 10/14 rounds for 128/256-bit keys.
+Provides only the *forward* direction (`EncryptBlock`) — GCM never uses
+decryption, and TLS 1.3 has no CBC, so the inverse cipher and key schedule are
+*omitted* (smaller, less to get wrong).
+
+[source,pascal]
+----
+type
+  TAesKey = class                 { holds the expanded round keys; ARC }
+    constructor Create(const AKey: RawBytes);   { 16 or 32 bytes }
+    procedure EncryptBlock(const AIn: RawBytes; out AOut: RawBytes);  { 16->16 }
+  end;
+----
+
+[WARNING]
+.AES timing posture (a stated, accepted risk)
+====
+A table-driven (T-box / S-box) AES is **cache-timing-vulnerable**: key-dependent
+table indices leak through the data cache. The constant-time options are (a) a
+bitsliced AES, or (b) using a CPU AES-NI path. Bitslicing is a large, fiddly
+effort; AES-NI needs inline `asm` (native-backend-only, and CPU detection). The
+**v1 decision** is: implement a clean table-driven AES, document the timing
+caveat, and *prefer ChaCha20-Poly1305* in the ClientHello cipher-suite ordering
+(ChaCha20 is naturally constant-time, see below). A bitsliced or AES-NI AES is a
+tracked follow-up (<<risks>>). This is the one place v1 knowingly accepts a
+side-channel, and it is the same trade-off most pure-software stacks make before
+they add an AES-NI path.
+====
+
+==== GHASH and AES-GCM (`security.crypto.ghash.pas` + GCM in `aead`)
+
+GCM (NIST SP 800-38D) = AES-CTR for confidentiality + GHASH (a `GF(2^128)`
+universal hash) for authentication.
+
+* *CTR mode:* nonce (12 bytes) || 32-bit counter starting at 1 for the
+  keystream; counter 0 (`J0`) encrypts the GHASH result to form the tag.
+* *GHASH:* polynomial evaluation in `GF(2^128)` of the AAD and ciphertext
+  blocks under the hash subkey `H = AES_K(0^128)`. Implemented **constant-time**
+  with the standard 4-bit-table-free shift-and-xor reduction (the
+  carry-less-multiply-by-reduction loop), or a constant-time windowed table that
+  does *not* branch on data. No data-dependent branches.
+* *Tag:* `tag = GHASH(...) xor AES_K(J0)`, compared with `ConstTimeEquals`.
+
+==== ChaCha20-Poly1305 (`security.crypto.chacha.pas`)
+
+RFC 8439. ChaCha20 is an ARX (add-rotate-xor) stream cipher and Poly1305 is a
+one-time MAC over `GF(2^130 − 5)`. Both are *inherently constant-time* — no
+tables, no data-dependent branches — which is why this is the **preferred**
+suite for a pure-software stack.
+
+* ChaCha20: 16 `UInt32` state (constants || 256-bit key || 32-bit counter ||
+  96-bit nonce), 20 rounds of the quarter-round, masked `and $FFFFFFFF`
+  throughout (same discipline as SHA/SHA-1). The keystream XORs the plaintext.
+* Poly1305: clamp `r`, accumulate `(acc + block) * r mod p`. The 130-bit
+  arithmetic is done in `UInt64` limbs. The AEAD construction per RFC 8439 §2.8:
+  Poly1305 key = first 32 bytes of `ChaCha20(key, counter=0, nonce)`; MAC over
+  `AAD || pad16 || ciphertext || pad16 || len(AAD) || len(C)`.
+
+*AEAD test vectors:* NIST GCM (`gcmEncryptExtIV`) test vectors; RFC 8439 §2.8.2
+(ChaCha20-Poly1305) and the §2.4.2/§2.5.2 component vectors; and the **RFC 8448**
+record-protection vectors (which exercise the exact TLS nonce construction).
+
+[#x25519]
+=== X25519 (`security.crypto.x25519.pas`)
+
+The default (and MTI-equivalent, universally deployed) key-exchange group for
+TLS 1.3. X25519 (RFC 7748) is a Montgomery-ladder scalar multiplication on
+Curve25519 over `GF(2^255 − 19)`. **This is secret-key arithmetic and MUST be
+fully constant-time** — the Montgomery ladder is chosen precisely because it is
+naturally constant-time (the same operations run regardless of the scalar bits,
+with a constant-time `cswap`).
+
+[source,pascal]
+----
+{ Generate an ephemeral keypair. APriv/APub are each 32 raw bytes. }
+procedure X25519GenerateKeypair(out APriv, APub: RawBytes);
+{ Compute the shared secret = X25519(scalar=APriv, point=APeerPub). 32 bytes.
+  Returns False if the result is all-zero (a contributory-behaviour / small-
+  subgroup reject, per RFC 7748 §6.1). }
+function  X25519(const APriv, APeerPub: RawBytes; out AShared: RawBytes): Boolean;
+----
+
+Implementation:
+
+* Field arithmetic in `GF(2^255 − 19)` using the standard 64-bit limb
+  representation (e.g. 5×51-bit or 10×25.5-bit limbs). All `add`/`sub`/`mul`/
+  `square`/`invert` are constant-time (`invert` via Fermat — a fixed addition
+  chain, *never* a branchy binary-GCD).
+* The scalar is clamped per RFC 7748 (clear bits 0,1,2 of byte 0; clear bit 7
+  and set bit 6 of byte 31).
+* `cswap(swap, a, b)` is a masked swap (`mask := 0 - swap`), never an `if`.
+* The keypair private scalar comes from the CSPRNG port (<<csprng>>).
+
+*Test vectors:* RFC 7748 §5.2 (the two scalar-mult vectors and the 1-iteration /
+1000-iteration ladder tests) and §6.1 (the Alice/Bob ECDH example).
+
+[NOTE]
+.P-256 (`security.crypto.p256.pas`) — designed, deferred to v1.1
+====
+Some servers (and many enterprise/government endpoints) require `secp256r1`.
+P-256 ECDHE *and* ECDSA-P256 *verification* share the same field/group code, so
+the unit is designed now but built after the X25519 path proves the integration.
+P-256 needs constant-time field arithmetic over a less friendly prime and a
+constant-time scalar multiply; it is meaningfully more work than X25519 and
+reuses `security.bigint`. v1 ships X25519-only `key_share` and advertises only
+`x25519` in `supported_groups`, which interoperates with effectively the entire
+modern web.
+====
+
+[#signatures]
+=== Signature verification (Ed25519, ECDSA-P256, RSA-PSS)
+
+The client *verifies* `CertificateVerify` and the certificate-chain signatures;
+it never *signs* (no client certs in v1). Verification is over public data, so
+constant-time is not strictly required, but the implementations avoid secret-
+independent shortcuts anyway for hygiene.
+
+==== Ed25519 (`security.crypto.ed25519.pas`)
+
+RFC 8032 verification on Edwards25519. Reuses the `GF(2^255 − 19)` field from
+X25519 (factor the field into a shared internal unit, or duplicate the minimal
+ops) plus Edwards-curve point addition and a double-scalar multiply
+(`[S]B = R + [k]A`). Verification only — no key generation, no signing.
+
+[source,pascal]
+----
+function Ed25519Verify(const APubKey, AMessage, ASignature: RawBytes): Boolean;  { pub=32, sig=64 }
+----
+
+==== RSA (`security.crypto.rsa.pas` + `security.bigint.pas`)
+
+The dominant certificate signature on the public web is still RSA. TLS 1.3
+mandates **RSA-PSS** for `CertificateVerify` (`rsa_pss_rsae_sha256/384/512`),
+while certificate *chains* still commonly carry **RSA PKCS#1 v1.5** signatures
+(allowed for certificates, RFC 8446 §4.2.3). Both verification paths are needed.
+
+This requires modular exponentiation over a fixed-width unsigned big integer:
+
+[source,pascal]
+----
+{ security.bigint.pas — a minimal fixed-width unsigned bigint sized for RSA
+  (up to 4096-bit) and P-256. Stored as an array of UInt32/UInt64 limbs in a
+  managed buffer. Only what verification needs: compare, add, sub, mul,
+  Montgomery modular reduction, modpow. }
+type
+  TBigInt = class
+    class function FromBytes(const ABytes: RawBytes): TBigInt;  { big-endian }
+    function ToBytes(ALen: Integer): RawBytes;
+    function ModPow(const AExp, AModulus: TBigInt): TBigInt;    { Montgomery }
+    // compare/add/sub/mul ...
+  end;
+
+{ RSA verify: m = sig^e mod n (e is small, usually 65537), then check the
+  encoded message against the expected scheme. }
+function RsaPssVerify  (const ANModulus, AEPublicExp, AMessage, ASignature: RawBytes;
+                        AHash: THashAlg): Boolean;
+function RsaPkcs1Verify(const ANModulus, AEPublicExp, AMessage, ASignature: RawBytes;
+                        AHash: THashAlg): Boolean;
+----
+
+* RSA verification is `m = S^e mod n` with the *public* exponent (small), so even
+  a non-Montgomery `modpow` is fast enough; Montgomery reduction is used for
+  constant-ish performance and simplicity, not secrecy (the operands are public).
+* RSA-PSS: EMSA-PSS-VERIFY (RFC 8017 §9.1.2) — MGF1 mask, salt recovery, `H'`
+  recomputation, constant-time-ish final compare.
+* PKCS#1 v1.5: rebuild the `00 01 FF..FF 00 || DigestInfo || H` encoding and
+  compare (the standard "construct and compare", not "parse" — parsing PKCS#1
+  v1.5 padding is the classic Bleichenbacher-class footgun and is avoided).
+
+==== ECDSA-P256 (`security.crypto.p256.pas`, with P-256 ECDHE) — v1.1
+
+ECDSA-P256 verification reuses the P-256 group code; deferred with P-256 ECDHE.
+
+*Signature test vectors:* RFC 8032 §7.1 (Ed25519 test vectors 1–4 + the long
+one); NIST FIPS 186 / RFC 8017 PSS and PKCS#1 examples for RSA; Wycheproof JSON
+test vectors for all three (the gold standard for malleability/edge cases — a
+batch importer for Wycheproof is part of the test plan).
+
+[#csprng]
+=== Secure randomness (`security.random.pas`)
+
+A tiny **port**, because the source is the one piece of genuinely OS-specific
+crypto code. The networking/native-target rule (no `{$IFDEF}`) applies.
+
+[source,pascal]
+----
+type
+  TRandomSource = class
+    procedure GetBytes(ABuf: Pointer; ALen: Integer); virtual; abstract;  { must not return short }
+  end;
+var
+  GRandom: TRandomSource;     { selected at startup, like GRtlPlatform / GReactor }
+
+procedure RandomBytes(out ABytes: RawBytes; ALen: Integer);   { the public API }
+----
+
+[cols="2,4",options="header"]
+|===
+| Source | Backing call
+
+| `TGetRandomSource` (Linux, FreeBSD)
+| `getrandom(2)` — *already bound both ways*: `external name 'getrandom'`
+  (libc build, as `Security.Guid` does) and the raw `SYS_getrandom = 318`
+  syscall stub in `runtime.syscall.linux.pas` (static build). **This is the key
+  enabler for TLS on the static/libc-free build** — the CSPRNG works there with
+  no new kernel leaf. Loop on short reads / EINTR.
+| `TGetEntropySource` (macOS) — later
+| `getentropy(3)` (≤256 bytes/call, loop) — macOS has no `getrandom`.
+| `TBCryptSource` (Windows) — later
+| `BCryptGenRandom`.
+|===
+
+`Security.Guid` should be refactored to call `RandomBytes` so there is one
+CSPRNG path, but that is opportunistic, not required.
+
+== Part II — the TLS record layer
+
+The record layer (RFC 8446 §5) frames every byte on the wire and is the *only*
+component that touches the AEAD after the handshake. It is driven entirely by
+the memory-BIO buffers; it never reads a socket.
+
+=== Framing
+
+A `TLSPlaintext`/`TLSCiphertext` record is a 5-byte header + payload:
+
+----
+  byte 0      ContentType   (22=handshake, 23=application_data, 21=alert,
+                             20=change_cipher_spec[compat])
+  bytes 1..2  legacy_record_version = 0x0303 (TLS 1.2, frozen for compat)
+  bytes 3..4  length (big-endian uint16, <= 2^14 + 256 for ciphertext)
+  bytes 5..   fragment (plaintext early in handshake; ciphertext once keyed)
+----
+
+Encrypted records carry `opaque_type = application_data (23)` on the wire; the
+*real* content type is the **last non-zero byte of the decrypted plaintext**
+(TLS 1.3's inner content type + zero padding). Parsing:
+
+----
+  decrypted = AEAD.Open(...)
+  strip trailing 0x00 bytes -> the byte before them is the real ContentType
+----
+
+=== Nonce construction (RFC 8446 §5.3) — a 0-based byte exercise
+
+This is a classic off-by-one / endianness trap; specified concretely.
+
+----
+  per-direction:  write_key  (KeyLen bytes), write_iv (12 bytes), seq_num : UInt64 = 0
+  per record:
+    nonce[0..11] := write_iv[0..11]                 { copy 12 bytes }
+    { XOR the 64-bit big-endian seq_num into the LAST 8 bytes }
+    for i := 0 to 7 do
+      nonce[11 - i] := nonce[11 - i] xor Byte(seq_num shr (8 * i))
+    seq_num := seq_num + 1     { incremented AFTER each record; never reused }
+----
+
+The AAD for the AEAD is the **5-byte record header of the ciphertext record**
+(`opaque_type || 0x0303 || length`), exactly as on the wire (RFC 8446 §5.2).
+
+[#record-flow]
+=== Record-layer ASCII flow
+
+----
+  PLAINTEXT OUT (app/handshake)                 CIPHERTEXT IN (from peer)
+        |                                              |
+   build inner = data || real_type || zeros      read 5-byte header
+        |                                         (need full record? -> WANT_READ)
+   nonce = iv XOR seq++                                |
+   aad = ciphertext header                       nonce = iv XOR seq++
+        |                                         aad  = this record's header
+   ct = AEAD.Seal(nonce, aad, inner)                   |
+        |                                         pt = AEAD.Open(nonce,aad,body)
+   emit hdr || ct  -> wbio (ciphertext out)            |  (False => bad_record_mac alert)
+                                                  strip zeros -> real_type, data
+                                                        |
+                                                  dispatch by real_type:
+                                                   handshake -> SM; appdata -> app;
+                                                   alert -> close/err; CCS -> ignore
+----
+
+=== Key updates (RFC 8446 §4.6.3)
+
+Either peer may send `KeyUpdate` to rotate its application traffic key:
+`application_traffic_secret_N+1 = HKDF-Expand-Label(secret_N, "traffic upd", "",
+Hash.length)`, then re-derive `key`/`iv` and **reset `seq_num` to 0**. A
+received `KeyUpdate(update_requested)` obliges the client to send its own
+`KeyUpdate` and rotate its *write* key. Handled in the record layer with a small
+state flag; the engine surfaces it as a transparent internal event.
+
+== Part III — the client handshake state machine
+
+`net.tls.blaise.pas` houses the engine. The handshake (RFC 8446 §2, §4) is a
+single round trip for the client's purposes: send `ClientHello`, receive the
+server's whole flight, send `Finished`.
+
+=== State machine (ASCII)
+
+----
+                         start
+                           |
+                           v
+                +----------------------+   (build CH; transition keys not yet set)
+                |  ST_START            |---- emit ClientHello ---> wbio
+                |  (send ClientHello)  |
+                +----------------------+
+                           |
+                           v   need bytes? -> return WANT_READ (fiber parks)
+                +----------------------+
+                |  ST_WAIT_SH          |<--- recv ServerHello (plaintext) ----+
+                +----------------------+                                       |
+                   | parse key_share, supported_versions(=0x0304),            |
+                   | selected cipher suite; do ECDHE:                          |
+                   |   shared = X25519(our_priv, server_pub)                   |
+                   |   -> KEY SCHEDULE: handshake secrets + traffic keys       |
+                   | (HelloRetryRequest? -> resend CH w/ correct group) ------+
+                   v   [from here ALL records are AEAD-encrypted w/ hs keys]
+                +----------------------+
+                |  ST_WAIT_EE          |<--- EncryptedExtensions (ALPN, etc.)
+                +----------------------+
+                           |
+                           v
+                +----------------------+    (CertificateRequest? -> v1: we do
+                |  ST_WAIT_CERT        |     NOT present a cert; just record it)
+                +----------------------+<--- Certificate (the chain, DER)
+                           |
+                           v
+                +----------------------+    verify CertificateVerify signature
+                |  ST_WAIT_CV          |     over the transcript hash using the
+                +----------------------+<--- leaf's public key + sig scheme
+                           |                  CertificateVerify
+                           |  *** X.509 PATH VALIDATION happens here:
+                           |  *** chain build + sig-up-chain + dates + hostname
+                           v
+                +----------------------+    recompute server Finished MAC over
+                |  ST_WAIT_FIN         |     transcript; ConstTimeEquals -> ok
+                +----------------------+<--- Finished (server)
+                           |
+                           v   compute MASTER secret + app traffic keys
+                +----------------------+
+                |  ST_SEND_FIN         |---- emit client Finished --> wbio
+                +----------------------+     (switch to app traffic keys)
+                           |
+                           v
+                +----------------------+
+                |  ST_CONNECTED        |  Read/Write now carry application_data
+                +----------------------+
+                           |
+                  any step: bad parse / bad MAC / cert fail / unexpected msg
+                           v
+                +----------------------+
+                |  ST_ERROR (fatal     |  emit alert, mark conn dead, surface
+                |  alert + close)      |  the error to the caller
+                +----------------------+
+----
+
+=== ClientHello contents (RFC 8446 §4.1.2)
+
+[cols="2,5",options="header"]
+|===
+| Field / Extension | v1 value
+
+| `legacy_version` | `0x0303` (1.2 — frozen; real version is in the extension)
+| `random` | 32 bytes from `RandomBytes`
+| `legacy_session_id` | 32 random bytes (middlebox-compat mode, RFC 8446 §4.1.2)
+| `cipher_suites` | `TLS_CHACHA20_POLY1305_SHA256` *first* (constant-time
+  preference), then `TLS_AES_256_GCM_SHA384`, `TLS_AES_128_GCM_SHA256`
+| `supported_versions` (43) | `[0x0304]` — **TLS 1.3 only, no downgrade**
+| `supported_groups` (10) | `[x25519]` (v1; `[x25519, secp256r1]` in v1.1)
+| `key_share` (51) | the X25519 ephemeral public key (32 bytes)
+| `signature_algorithms` (13) | `ed25519, rsa_pss_rsae_sha256/384/512,
+  ecdsa_secp256r1_sha256, rsa_pkcs1_sha256/384` (the last two only for cert
+  chain verification; PSS for CertificateVerify)
+| `server_name` (0) — SNI | the target hostname, ASCII, `host_name(0)` entry
+| `application_layer_protocol_negotiation` (16) — ALPN | caller-supplied list
+  (e.g. `["http/1.1"]`, later `["h2","http/1.1"]`)
+|===
+
+=== The key schedule (RFC 8446 §7.1) — concrete
+
+`Hash` and `Hash.length` are the selected suite's hash (SHA-256 or SHA-384).
+`Transcript-Hash(...)` is the running transcript over handshake messages.
+
+----
+             0
+             |
+             v
+   PSK ->  HKDF-Extract  = Early Secret        (PSK = 0^Hash.length in v1: no PSK)
+             |
+             +--> Derive-Secret(., "derived", "")
+             v
+  (EC)DHE ->  HKDF-Extract = Handshake Secret
+             |
+             +--> Derive-Secret(., "c hs traffic", CH..SH) = client_hs_traffic_secret
+             +--> Derive-Secret(., "s hs traffic", CH..SH) = server_hs_traffic_secret
+             |       |
+             |       +-- key = ExpandLabel(secret, "key", "", KeyLen)
+             |       +-- iv  = ExpandLabel(secret, "iv",  "", 12)
+             |
+             +--> Derive-Secret(., "derived", "")
+             v
+   0 ->    HKDF-Extract = Master Secret
+             |
+             +--> Derive-Secret(., "c ap traffic", CH..server Finished) = client_app_secret
+             +--> Derive-Secret(., "s ap traffic", CH..server Finished) = server_app_secret
+                     +-- key/iv via ExpandLabel as above
+
+  Finished MAC:  finished_key = ExpandLabel(<dir> hs_traffic_secret, "finished", "", Hash.length)
+                 verify_data  = HMAC(finished_key, Transcript-Hash(up to but excluding this Finished))
+----
+
+The transcript-hash *snapshots* (via `IDigest.Clone`) are taken at the exact
+points the RFC specifies (`CH..SH`, `CH..EE`, `..Certificate`, `..CertVerify`,
+`..server Finished`). This is why `Clone` is mandatory in <<sha2>>.
+
+== Part IV — X.509 certificate handling
+
+This is the largest sub-component after the handshake itself. It is pure Pascal
+and target-invariant except for the trust-anchor source (a port).
+
+[#asn1]
+=== A minimal DER decoder (`security.asn1.pas`)
+
+Certificates are DER (a canonical BER subset). We need a *parser* only (no
+encoder) and only the types X.509 uses. DER is TLV (tag-length-value):
+
+[source,pascal]
+----
+type
+  TAsn1Tag = (atBoolean, atInteger, atBitString, atOctetString, atNull,
+              atOid, atUtf8String, atPrintableString, atIa5String,
+              atUtcTime, atGeneralizedTime, atSequence, atSet, atContext, atOther);
+
+  { A cursor over a RawBytes buffer. 0-based offsets throughout. Non-allocating
+    where possible: a node points at (offset,len) into the original buffer. }
+  TAsn1Node = record
+    Tag:        Integer;       { raw tag octet }
+    Constructed: Boolean;
+    HeaderLen:  Integer;       { bytes consumed by tag+length }
+    ContentOff: Integer;       { 0-based offset of content in the source buffer }
+    ContentLen: Integer;
+  end;
+
+  TAsn1Reader = class
+    constructor Create(const ASource: RawBytes);
+    constructor Create(const ASource: RawBytes; AOffset, ALen: Integer);  { sub-region }
+    function ReadNode(out ANode: TAsn1Node): Boolean;       { advance cursor }
+    function EnterSequence(const ANode: TAsn1Node): TAsn1Reader;  { sub-reader }
+    function AtEnd: Boolean;
+    // typed extractors: ReadInteger, ReadOid (-> dotted string), ReadTime, ...
+  end;
+----
+
+Hardening (security-critical — a parser is attack surface):
+
+* **Bounds-checked on every read** (a length must not exceed the remaining
+  buffer; reject indefinite-length encodings — they are not valid DER).
+* Reject trailing garbage after the top-level SEQUENCE.
+* Cap nesting depth and total node count (a depth/breadth bomb defence).
+* Length must be the minimal (DER canonical) form; reject non-minimal lengths.
+
+*Test vectors:* hand-built TLV fixtures for each type + edge cases (long-form
+length, empty SEQUENCE, truncated input), and parsing a corpus of real certs
+(Let's Encrypt, DigiCert, ISRG Root X1) round-tripped against a reference parse.
+
+=== Certificate model (`security.x509.pas`)
+
+[source,pascal]
+----
+type
+  TCertificate = class            { ARC-managed; one parsed cert }
+    RawDer:       RawBytes;       { the original bytes — needed to re-verify sig }
+    TbsDer:       RawBytes;       { the signed tbsCertificate region }
+    Subject:      TDistinguishedName;
+    Issuer:       TDistinguishedName;
+    NotBefore:    TDateTime;
+    NotAfter:     TDateTime;
+    PublicKeyAlg: TPublicKeyAlg;  { rsa / ec-p256 / ed25519 }
+    PublicKey:    RawBytes;       { SPKI bits, alg-specific encoding }
+    SigAlg:       TSignatureAlg;
+    Signature:    RawBytes;
+    SanDnsNames:  TList<string>;  { Subject Alternative Names, dNSName entries }
+    IsCa:         Boolean;        { BasicConstraints }
+    KeyUsage:     TKeyUsageSet;
+    // ... serialNumber, AKI/SKI for chain building
+  end;
+
+  TCertChain = TList<TCertificate>;
+----
+
+=== Path validation (`security.x509.pas`) — RFC 5280 §6, profiled
+
+Validation is the security crux. The algorithm, in order, **failing closed** at
+each step:
+
+1. *Parse* every cert in the server's `Certificate` message (leaf first).
+2. *Build the chain* leaf → … → a trust anchor, matching each cert's `Issuer`
+   to the next cert's `Subject` (and AKI→SKI where present). The server-sent
+   order is a hint, not trusted; reorder/dedupe defensively. Reject if no chain
+   to a configured trust anchor exists.
+3. *Verify each signature up the chain*: cert[i] is signed by cert[i+1]'s public
+   key — dispatch to the right verifier (`RsaPssVerify`/`RsaPkcs1Verify`/
+   `Ed25519Verify`/`EcdsaP256Verify`) over the child's `TbsDer`. The trust
+   anchor's own signature is *not* checked (it is trusted by being in the store).
+4. *Validity dates*: `NotBefore <= now <= NotAfter` for every cert. `now` from
+   the platform clock; reject expired/not-yet-valid.
+5. *Basic constraints*: every non-leaf must be `CA:TRUE`; enforce `pathLenConstraint`.
+6. *Key usage / EKU*: leaf must allow `serverAuth`; CAs must allow `keyCertSign`.
+7. *Hostname verification* (RFC 6125): match the SNI hostname against the leaf's
+   `subjectAltName` dNSName entries (preferred). Wildcard `*.example.com` matches
+   exactly one left-most label and only there. **CN matching is OFF by default**
+   (deprecated; CN is checked only behind an explicit opt-in for legacy interop).
+   Comparison is ASCII-case-insensitive; IP-address SANs matched literally.
+
+[source,pascal]
+----
+type
+  TVerifyResult = (vrOk, vrUntrustedRoot, vrExpired, vrNotYetValid,
+                   vrBadSignature, vrHostnameMismatch, vrMalformed,
+                   vrUnsupportedSigAlg, vrBasicConstraints);
+
+function ValidateChain(AChain: TCertChain; const AHostName: string;
+                       ATrust: TTrustStore; ANow: TDateTime): TVerifyResult;
+----
+
+[#trust-store]
+=== Trust anchors (`security.x509.trust.pas` + per-OS loaders)
+
+The trust source is the *only* X.509 OS divergence → a port (no `{$IFDEF}`).
+
+[source,pascal]
+----
+type
+  TTrustStore = class
+    function Anchors: TList<TCertificate>; virtual; abstract;
+    function FindIssuer(const ASubject: TDistinguishedName): TCertificate; virtual; abstract;
+  end;
+
+  { Always available: a bundle of PEM certs (e.g. a Mozilla CA bundle shipped
+    with the app). The freestanding/static build uses THIS — no OS store. }
+  TPemBundleTrustStore = class(TTrustStore)
+    constructor Create(const APemText: string);   { parses many "-----BEGIN CERTIFICATE-----" }
+  end;
+
+var
+  GTrustStore: TTrustStore;     { selected at startup, like GReactor / GRandom }
+----
+
+[cols="2,4",options="header"]
+|===
+| Loader | Source
+
+| `TPemBundleTrustStore` (all targets, incl. static)
+| A bundled PEM file (Mozilla CA list). Uses `Encoding.Base64` + the ASN.1
+  parser. **This is the default for the libc-free static build** — it has no OS
+  store and no `libssl`, so a shipped bundle is the only option.
+| `TLinuxTrustStore` (Linux)
+| Read `/etc/ssl/certs/ca-certificates.crt` (or the distro path); fall back to
+  the bundle. Pure file I/O via `streams.pas`.
+| `TMacTrustStore` (macOS) — later
+| `Security.framework` `SecTrustCopyAnchorCertificates`, behind the same port.
+| `TWinTrustStore` (Windows) — later
+| The `ROOT` system certificate store.
+|===
+
+== Part V — the transport-agnostic, non-blocking API
+
+The provider implements the *existing* `TTlsProvider`/`TTlsConn` port verbatim
+(`net.tls.pas`, from the networking doc). Components depend only on `TTlsConn`;
+swapping `GTlsProvider := TBlaiseTlsProvider.Create` is the entire integration.
+
+=== The engine and its memory BIOs
+
+[source,pascal]
+----
+type
+  TTlsWant = (twNone, twRead, twWrite);   { the WANT_READ/WANT_WRITE-equivalent }
+
+  TBlaiseTlsProvider = class(TTlsProvider)
+    function CreateClientContext(const AVerify: Boolean): TTlsContext; override;
+    { server context is a later phase }
+  end;
+
+  { The pure state machine. NO socket, NO fiber awareness. Two byte queues
+    (TBuffer from streams.pas) are the memory BIOs. }
+  TBlaiseTlsConn = class(TTlsConn)
+  strict private
+    [Weak] FCtx: TTlsContext;          { back-ref: weak, no ARC cycle }
+    FState:   TTlsHandshakeState;
+    FRecvBio: TBuffer;                 { ciphertext IN  (peer -> us) }
+    FSendBio: TBuffer;                 { ciphertext OUT (us -> peer) }
+    FAppIn:   TBuffer;                 { decrypted plaintext ready for Read }
+    // traffic keys, seq nums, transcript IDigest, ephemeral X25519 keypair...
+  public
+    { Caller feeds ciphertext it read from the socket. }
+    procedure FeedCiphertext(const AData: RawBytes);
+    { Caller drains ciphertext to write to the socket (may be empty). }
+    function  TakeCiphertext: RawBytes;
+
+    { Drive the handshake one step. Returns twRead/twWrite when it needs the
+      caller to move bytes; twNone when the handshake is complete. }
+    function  Handshake: TTlsWant;
+
+    { Application data. Read returns plaintext already decrypted (0 = need more
+      ciphertext, signalled via LastWant = twRead). Write enqueues ciphertext
+      into FSendBio for the caller to flush. }
+    function  Read (ABuf: Pointer; ACount: Integer): Integer; override;
+    function  Write(const AData: RawBytes): Integer; override;
+    function  LastWant: TTlsWant;
+
+    procedure Shutdown;   { emit close_notify into FSendBio }
+  end;
+----
+
+=== The pump loop (how a fiber uses it)
+
+This is the *identical discipline* the networking doc specifies for the
+OpenSSL memory-BIO provider — so `Net.Tls` needs no special-casing:
+
+[source,pascal]
+----
+{ Pseudocode of TTlsClient.Connect, running on an L3 fiber. }
+function TlsConnect(AFd: Integer; AConn: TBlaiseTlsConn): Boolean;
+var Want: TTlsWant; Chunk: RawBytes; N: Int64;
+begin
+  repeat
+    Want := AConn.Handshake;             { advance the state machine }
+    Chunk := AConn.TakeCiphertext;       { anything to send? }
+    if Length(Chunk) > 0 then
+      FiberSend(AFd, PChar(Chunk), Length(Chunk));    { parks on writable }
+    if Want = twRead then
+    begin
+      N := FiberRecv(AFd, @Buf, SizeOf(Buf));         { parks on readable }
+      if N <= 0 then Exit(False);                     { EOF/err before handshake done }
+      AConn.FeedCiphertext(BytesToString(@Buf, N));
+    end;
+  until Want = twNone;                   { handshake complete }
+  Result := True;
+end;
+----
+
+`twRead` ≙ "park on readable", `twWrite` ≙ "park on writable" — a direct map onto
+the scheduler's park-and-resume, with no scheduler dependency *inside* the
+engine. The same engine runs unchanged under a blocking loop (tests) and a
+proactor (IOCP) — it only ever moves bytes through two `TBuffer`s.
+
+== Security posture (v1 defaults)
+
+* **Certificate verification ON by default.** `CreateClientContext(AVerify :=
+  True)` is the only sane default; opting out is an explicit, loud
+  `AVerify := False` (and should log). Indy's historically weak defaults are the
+  cautionary tale.
+* **TLS 1.3 only — no downgrade.** `supported_versions` is `[0x0304]`; a
+  `ServerHello` not selecting 1.3 is a fatal `protocol_version` alert. The
+  RFC 8446 §4.1.3 downgrade-sentinel check on `ServerHello.random` is also
+  enforced. No 1.2 fallback exists to be downgraded *to*.
+* **Constant-time comparisons** (`ConstTimeEquals`) for every MAC/tag/Finished
+  check and `cswap`-style masked selection in X25519.
+* **Secure randomness** from the `GRandom` port (`getrandom`, working in both
+  build profiles).
+* **Cipher preference** orders ChaCha20-Poly1305 first (constant-time) ahead of
+  the table-driven AES-GCM.
+* **Fail closed:** any parse error, unknown extension that must be understood,
+  bad MAC, or chain failure → fatal alert + dead connection, never a silent
+  downgrade or "ignore and continue".
+
+[#out-of-scope]
+== Explicitly out of scope for v1 (with rationale)
+
+[cols="2,5",options="header"]
+|===
+| Excluded | Rationale
+
+| *TLS 1.2 and earlier* | A second protocol with CBC/MAC-then-encrypt,
+  RSA key transport, renegotiation, and the Lucky-13/BEAST/POODLE family of
+  side channels — roughly doubling the attack surface and the code. TLS 1.3 is
+  universally deployed server-side; 1.3-only is a *security feature*, not a gap.
+| *Server side* | The client is the dominant use case (`Net.Http.Client`, mail
+  clients, the load generator). The server needs cert/key loading, signing
+  (private-key ops we deliberately avoid in v1), session tickets, and
+  client-cert request logic. It reuses ~80% of this (record layer, key schedule,
+  crypto) and is a clean phase 2.
+| *Session resumption / PSK / 0-RTT* | 0-RTT has subtle replay-safety
+  requirements (RFC 8446 §8) that are easy to get dangerously wrong; PSK adds a
+  second key-schedule path. Pure performance optimisation — correctness first.
+| *Client certificates* | Requires *signing* with a client private key (the one
+  primitive family — RSA/Ed25519/ECDSA *signing* — we otherwise never need).
+  Rare for the target clients. Deferred with the server.
+| *P-256 / RSA key-exchange-equivalent* | X25519 alone interoperates with
+  essentially the entire modern web; P-256 ECDHE (+ ECDSA verify) is designed
+  but lands in v1.1 to bound the constant-time field-arithmetic work.
+| *Post-quantum / hybrid key exchange* | Moving target; not yet load-bearing for
+  general clients. A future `key_share` group behind the same extension code.
+| *Certificate revocation (CRL / OCSP)* | A networked, policy-heavy concern;
+  OCSP stapling is a reasonable v1.1 add (it arrives in the handshake), full CRL
+  fetching is not. Documented as a known limitation.
+| *Renegotiation* | Does not exist in TLS 1.3 (replaced by `KeyUpdate`, which
+  *is* in scope) — nothing to exclude, noted for completeness.
+|===
+
+[#testing]
+== Testing strategy (TDD, bottom-up)
+
+Per project policy, each layer is tested at the lowest level that proves it,
+with known-answer vectors before any integration, and a fixpoint of the existing
+suite. The crucial property: **every primitive has a published test vector, so
+we never "test our implementation against our implementation."**
+
+1. *Primitives (KATs first).* SHA-2 (NIST CAVP, RFC 6234); HMAC (RFC 4231);
+   HKDF (RFC 5869 §A); AES-GCM (NIST GCM vectors); ChaCha20-Poly1305 (RFC 8439);
+   X25519 (RFC 7748 §5.2/§6.1, incl. the 1000-iteration ladder); Ed25519/RSA/
+   ECDSA (RFC 8032, RFC 8017, plus a **Wycheproof** JSON importer for
+   malleability/edge cases). Each as a `blaise.testing` case with a table of
+   `(input, expected)` literals.
+2. *Key schedule against RFC 8448.* RFC 8448 ("Example Handshake Traces for TLS
+   1.3") gives byte-exact intermediate values for the entire key schedule and
+   record protection. A test feeds the recorded ClientHello/ServerHello and
+   asserts every derived secret, key, IV, and `verify_data` matches. This single
+   test catches ~all `ExpandLabel`/`DeriveSecret`/transcript-ordering bugs.
+3. *Record layer.* Encrypt/decrypt round-trips; the RFC 8448 record-protection
+   vectors; nonce-construction unit test (the 0-based XOR); a deliberately tiny
+   `FeedCiphertext` chunking test to prove partial-record handling and `WANT_READ`.
+4. *ASN.1 / X.509.* TLV fixtures + edge cases; parse a corpus of real certs;
+   path-validation matrix: valid chain (ok), expired (vrExpired), wrong host
+   (vrHostnameMismatch), self-signed-not-in-store (vrUntrustedRoot), tampered
+   `tbsCertificate` byte (vrBadSignature), wildcard match/non-match.
+5. *Handshake state machine (offline).* Replay recorded server flights (captured
+   from a real server) through the engine with a stub transport; assert it
+   reaches `ST_CONNECTED` and the negotiated parameters. Negative cases:
+   version<1.3 → alert; bad Finished MAC → alert; bad cert → alert.
+6. *Interop (the real proof).* Handshake against a known server over loopback —
+   first a local OpenSSL `s_server` (TLS 1.3, a test cert + the test CA in our
+   trust store), then a curated set of public endpoints in a CI smoke test
+   (e.g. `cloudflare.com`, `google.com`, a Let's Encrypt site) to exercise the
+   real CA chains and SNI/ALPN.
+7. *Differential / fuzzing.* Fuzz the ASN.1 and record parsers (they are the
+   attack surface); assert no crash and fail-closed. Optionally differential-test
+   parse results against OpenSSL while both providers still ship.
+8. *Fixpoint.* This is stdlib (opt-in), so it does not touch the compiler
+   self-hosting fixpoints; the stdlib test suite gains all of the above and must
+   stay green.
+
+== Phased implementation plan
+
+The ordering is bottom-up so every phase is testable against published vectors
+*before* anything depends on it, and the riskiest crypto (constant-time
+field arithmetic) is isolated.
+
+. *Hashes + MAC + KDF* — `sha2`, `hmac`, `hkdf` (incl. `ExpandLabel`/
+  `DeriveSecret`), `security.random`. Gated on RFC 6234/4231/5869 KATs **and**
+  the RFC 8446 §7.1 label vectors. Foundation for everything.
+. *AEAD* — `chacha` (first: constant-time, no AES timing question), then `aes` +
+  `ghash` + GCM. Gated on RFC 8439 and NIST GCM vectors.
+. *Record layer* — framing, nonce, AEAD records, key update, the two `TBuffer`
+  BIOs. Gated on RFC 8448 record vectors + chunking tests. *(No handshake yet —
+  test with pre-shared keys from the vectors.)*
+. *Key exchange* — `x25519` (constant-time). Gated on RFC 7748.
+. *Handshake state machine* — ClientHello build, ServerHello/EE/Cert/CV/Finished
+  parse + the key schedule wiring. Gated on RFC 8448 full-trace + offline replay.
+  **At this point the engine completes a handshake against a trusted-but-
+  unverified peer.**
+. *Signatures* — `bigint`, `rsa` (PSS + PKCS1), `ed25519`. Gated on RFC 8032/
+  8017 + Wycheproof. Wires up `CertificateVerify`.
+. *ASN.1 + X.509 + trust* — `asn1`, `x509`, `x509.trust` (+ Linux loader +
+  PEM bundle). Gated on the path-validation matrix. **Turns on full
+  verification — the security-complete milestone.**
+. *Integration* — `net.tls.blaise.pas` implements `TTlsProvider`; swap
+  `GTlsProvider`; run the existing `Net.Tls`/`Net.Http.Client` tests over the
+  pure-Pascal provider. Interop smoke test (phase 6 of <<testing>>).
+. *v1.1 follow-ups* — `p256` (ECDHE + ECDSA verify), AES-NI/bitsliced AES,
+  macOS/Windows trust + CSPRNG loaders, OCSP stapling.
+. *Phase 2 (separate effort)* — the **server** side; session resumption/PSK;
+  client certificates (the signing primitives).
+
+== Risks and mitigations
+
+[cols="2,5",options="header"]
+|===
+| Risk | Mitigation
+
+| *Constant-time correctness* (the dominant crypto risk). A "working" X25519/
+  GHASH/compare that leaks via timing is worse than none — it gives false
+  confidence.
+| Choose naturally constant-time algorithms (Montgomery ladder, ChaCha20,
+  shift-xor GHASH); `ConstTimeEquals` everywhere; masked `cswap`; **prefer
+  ChaCha20** over the table-AES. Document the AES-GCM cache-timing caveat as a
+  known v1 limitation; track AES-NI/bitslice as the fix. Where possible verify
+  with `dudect`-style timing tests in CI.
+| *Backend masking quirk* (shifts/`not` unmasked — the SHA-1 unit's documented
+  trap). A missing `and $FFFFFFFF`/`$FFFFFFFFFFFFFFFF` is a silent wrong-answer
+  bug.
+| Make masking a reviewed checklist item per primitive; the KAT tests catch it
+  immediately (a single unmasked op fails the first vector). 64-bit primitives
+  (SHA-512, Poly1305, bigint limbs) get explicit attention.
+| *0-based / off-by-one in wire parsing.* The whole stack is byte-precise and
+  the dialect is 0-based; ported reference code is usually 1-based or C 0-based
+  with different conventions.
+| Every loop written `0 to Length-1`; the nonce/transcript/ASN.1 offsets are
+  spelled out in this doc; fixtures pin exact byte offsets; fuzzing the parsers.
+| *ASN.1 parser as attack surface.* Malicious certs are the classic RCE/DoS
+  vector in TLS stacks.
+| Strict DER (reject indefinite length, non-minimal lengths, trailing bytes);
+  depth/size caps; bounds-check every read; fuzz; fail closed. Parser does *no*
+  allocation proportional to attacker-controlled length fields without a cap.
+| *Scope / effort* — this is "regex-engine-sized" (the networking doc's own
+  estimate). Risk of a half-built stack that handshakes but mis-validates.
+| The phased plan makes *full verification* an explicit milestone (phase 7); the
+  engine is *not shipped* as a default until path validation passes its matrix.
+  Until then `TOpenSSLProvider` remains the default `GTlsProvider`.
+| *Interop surprises* — real servers send chains/extensions the offline tests
+  miss (cross-signed roots, intermediate-only chains, odd SAN encodings).
+| The interop smoke test against real public endpoints (phase 6) is mandatory
+  before flipping the default provider; keep the OpenSSL provider as a runtime-
+  selectable fallback during rollout.
+| *Trust-store drift* — a stale bundled PEM rejects new roots; an OS store path
+  varies by distro.
+| Linux loader reads the OS store first, bundle as fallback; document bundle
+  refresh; the port keeps this out of the core engine.
+| *Maintaining crypto long-term* — crypto is a perpetual-maintenance burden
+  (new attacks, new suites).
+| Minimal suite surface (3 AEADs, X25519, the MTI signatures); published-vector
+  tests make regressions loud; the port boundary lets OpenSSL stay as a fallback
+  indefinitely.
+|===
+
+== Alternatives considered
+
+* **Keep wrapping OpenSSL forever** (the status quo `TOpenSSLProvider`).
+  Rejected as the *long-term* answer for three concrete reasons, though it stays
+  as the *default and the fallback* until this provider is verification-complete:
+  (1) it is a *dynamic* dependency (`PT_INTERP`, `libssl.so.3`/`.1.1`,
+  `libcrypto`) that is **fundamentally incompatible with the freestanding/static
+  build** — the static, libc-free target has *no TLS at all* without a pure-
+  Pascal provider, which is the single hardest requirement driving this work;
+  (2) OpenSSL ABI/soname skew is an ongoing porting and packaging tax (the
+  networking doc binds functions-only to survive it, but the dependency remains);
+  (3) it ties Blaise's TLS posture and CVE exposure to an external C library's
+  release cadence. The memory-BIO port boundary is what makes both coexist and
+  the swap a one-liner.
+* **Bind a smaller C TLS library** (mbedTLS, BearSSL, s2n, rustls-ffi).
+  Cheaper than writing crypto, and BearSSL in particular is constant-time and
+  tiny — but it is *still a C dependency* (static or dynamic) against the clean-
+  dependency philosophy, *still* needs per-target build/packaging, and does not
+  advance the "pure Pascal, freestanding-capable stdlib" thesis. Rejected for
+  the same reason the networking doc rejected libuv: we own the thin layer.
+* **TLS 1.2 + 1.3 from the start.** Rejected: doubles the code and the side-
+  channel surface (CBC padding oracles, RSA key transport, renegotiation) for a
+  protocol that modern servers no longer require. 1.3-only is simpler *and* more
+  secure.
+* **Generic arbitrary-precision bigint** (instead of fixed-width for RSA).
+  Rejected: a general bignum is more code and harder to keep constant-time;
+  verification needs only fixed-width modpow with a known modulus size.
+* **Reuse SHA-1's exact one-shot style for SHA-2** (no streaming `IDigest`).
+  Rejected: the transcript hash *must* be incrementally updated and cloned mid-
+  handshake; a one-shot-only API would force re-hashing the whole transcript
+  repeatedly and cannot snapshot. Streaming is required, not a nicety.

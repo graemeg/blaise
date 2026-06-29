@@ -1,0 +1,1131 @@
+= macOS arm64 (Apple Silicon) Native Backend and Cross-Compilation — Design
+:author: Graeme Geldenhuys
+:revdate: 2026-06-29
+:toc: left
+:toclevels: 3
+:source-highlighter: rouge
+:icons: font
+:sectanchors:
+:sectnums:
+
+== Context
+
+This document specifies a `macos-arm64` (Apple Silicon) native target for
+Blaise: Mach-O object/executable emission, AArch64 code generation, the AAPCS64
+calling convention, the macOS/arm64 kernel-access path (libSystem vs. raw
+syscalls), and the ad-hoc code signing that macOS requires before an arm64
+binary will execute.
+
+It is the README's *Phase 8* macOS deliverable, and it is the target that lets
+the project's author — currently on an Apple Silicon Mac and therefore unable to
+*run* Blaise output at all — finally use the compiler natively.  macOS arm64 is
+also the first target that exercises *two* new axes at once: a new *container*
+(Mach-O, not ELF) and a new *CPU* (AArch64, not x86-64).  FreeBSD added neither
+— it reused the ELF writer and the System V AMD64 backend verbatim
+(`docs/freebsd-x86_64-backend-design.adoc`).  macOS arm64 is therefore the
+proof that the multi-target architecture in
+`docs/native-target-architecture.adoc` actually decouples those axes.
+
+The hard constraint, repeated from the architecture doc and never relaxed
+below: *target divergence is expressed by object selection, link-time symbol
+swap, or the Abstract-Factory toolkit — never by `{$IFDEF}`.*  This is not a
+stylistic preference; it is the property that lets Linux CI structurally test a
+macOS backend it cannot run.  A fresh engineer handed this document should be
+able to build the target by adding new adapter files and *one* registry line,
+touching no existing target's code.
+
+=== Is this possible?
+
+Yes, and the codebase is already staged for it.  `blaise.codegen.target.pas`
+already enumerates `osMacOS` and `cpuArm64`, and `ParseTargetName` already
+accepts `"macos-arm64"` (it returns `(osMacOS, cpuArm64)` today, with no backend
+behind it).  The linker header
+(`compiler/src/main/pascal/blaise.linker.elf.pas`) already anticipates "a
+sibling writer behind the same TLinker symbol/relocation core" for "PE/Mach-O".
+The `TTargetToolkit` Abstract Factory, the `TTargetRegistry`, and the
+`TPlatformLayout` runtime port all exist and are exercised by the Linux and
+FreeBSD targets.
+
+The work is real but *bounded into four new, independent surfaces*, each behind
+an existing seam:
+
+. a *Mach-O container writer* (`TMachOWriter`) behind the linker's Bridge;
+. an *AArch64 backend* (`TArm64Backend`) as a Template-Method leaf of
+  `TNativeBackend`;
+. a *Darwin/arm64 kernel + layout leaf* — a link-time symbol swap binding the
+  RTL's `external name` symbols to *libSystem*, plus a Darwin `TPlatformLayout`;
+. an *ad-hoc code-signature emitter* (`LC_CODE_SIGNATURE` + the embedded
+  code-directory hashes).
+
+Plus the `TMacOSArm64Toolkit` (`MakeBackend` + `MakeLinkTarget`) and the single
+`TargetRegistry.Register` line.
+
+== Where this differs from the FreeBSD target
+
+FreeBSD was "one new adapter family on clean seams" with *zero* container or CPU
+work.  macOS arm64 is materially larger because it touches both new axes.  The
+table makes the difference explicit so the effort is not under-scoped.
+
+[cols="2,3,3",options="header"]
+|===
+| Axis | FreeBSD x86_64 | macOS arm64
+
+| Container
+| ELF, reused unchanged.
+| *Mach-O* — a new sibling writer behind the Bridge (the big new item).
+
+| CPU / instruction selection
+| System V AMD64, `TX86_64Backend` reused unchanged.
+| *AArch64* — a new `TArm64Backend` leaf; the ARC/record-classifier walkers
+  lift into the base as template methods (the deferred "arm64 groundwork" from
+  the architecture doc finally lands here).
+
+| Calling convention
+| System V AMD64 (shared with Linux).
+| *AAPCS64* (x0–x7 args, x8 indirect result, x29/x30, d8–d15 callee-saved) —
+  plus Darwin's *divergences* (variadic args on the stack, see <<aapcs64>>).
+
+| Kernel access
+| Strategy B: raw FreeBSD syscalls into a static `ET_EXEC`.
+| *libSystem* (the only supported macOS path) — a dynamic Mach-O linking
+  `/usr/lib/libSystem.B.dylib`.  Raw `svc #0` syscalls are documented but
+  *rejected* for v1 (<<kernel-leaf>>).
+
+| Executability
+| Runs as soon as it is emitted (no signature needed).
+| *Must be code-signed* (even ad-hoc) or the kernel kills it on `exec`
+  (<<codesign>>).
+|===
+
+The two new axes are deliberately *independent*: the Mach-O writer is
+CPU-agnostic (it would serve a hypothetical `macos-x86_64` unchanged), and the
+AArch64 backend is container-agnostic (it would serve a hypothetical
+`linux-arm64` behind the ELF writer).  That independence is the whole point of
+the Bridge (container × CPU vary separately) and is what keeps macOS arm64 from
+being "a second backend" — it is *two orthogonal leaves plus a kernel/layout
+leaf*.
+
+== The architecture this slots into
+
+Recapping `docs/native-target-architecture.adoc` only as far as the seams this
+target uses (read that document in full first):
+
+* *Abstract Factory* — `TTargetToolkit` (`blaise.codegen.toolkit.pas`) produces
+  a *coherent family*: `MakeBackend: TNativeBackend` and
+  `MakeLinkTarget: TLinkTarget`.  A macOS backend paired with an ELF link target
+  is a bug the factory makes unrepresentable.
+* *Registry* — `TTargetRegistry` maps `"macos-arm64"` → `TMacOSArm64Toolkit`.
+  Adding the target is one `Register` call in `EnsureRegistry`; no `case`
+  statement is edited (Open/Closed).
+* *Bridge* — the linker's OS-agnostic symbol/relocation core × the container
+  writer.  ELF today; the macOS work adds the Mach-O writer behind the *same*
+  core.  This is the seam the linker header explicitly reserves.
+* *Template Method* — `TNativeBackend` base holds the target-independent
+  algorithms (the ARC field-kind walk, `ClassifyRecordReturn`); the per-CPU leaf
+  supplies the emission primitives.  Today only `TX86_64Backend` is a leaf; this
+  target adds `TArm64Backend` and forces the long-deferred lift of the walkers
+  into the base.
+* *`TPlatformLayout`* — a runtime RTL port (`rtl.platform.pas`) carrying
+  `struct stat` offsets and `O_*`/`S_*`/`CLOCK_*`/`SEEK_*` constants per target.
+  macOS gets `TPlatformLayoutDarwinArm64`.
+* *Kernel leaf* — a *link-time symbol swap*, NOT a runtime port (a runtime
+  `TKernelABI` was tried and reverted; see the architecture doc's kernel-leaf
+  note).  The RTL keeps its `external name 'open'`/`'read'`/… bindings; *which
+  object resolves them* is the per-target choice.  On macOS that object is the
+  libSystem import (the dylib already exports `open`, `read`, … as the same
+  POSIX names), so the macOS kernel leaf is almost free.
+
+ASCII view of where the new pieces attach:
+
+----
+                         blaise (one binary, all toolkits registered)
+                                       |
+                       TTargetRegistry.Resolve("macos-arm64")
+                                       |
+                            +----------v-----------+
+                            |   TMacOSArm64Toolkit  |  (Abstract Factory)
+                            +----+-------------+----+
+                       MakeBackend           MakeLinkTarget
+                            |                      |
+                  +---------v--------+   +---------v-----------+
+                  |  TArm64Backend   |   |  MachOArm64Target   |  (TLinkTarget)
+                  | (TNativeBackend  |   |  CPU_TYPE=ARM64     |
+                  |  Template-Method |   |  minos, dylibs,     |
+                  |  leaf)           |   |  __PAGEZERO base    |
+                  +---------+--------+   +----------+----------+
+                            |                       |
+                            |  AArch64 asm text     | container-writer choice
+                            v                       v
+                  +-------------------------------------------------+
+                  |   TLinker  (OS-agnostic symbol/reloc CORE)      |
+                  |   merge -> layout -> resolve -> relocate        |
+                  +----------------------+--------------------------+
+                          Bridge:        |  pick container writer
+                +----------+-------------+--------------+
+                |  TElfWriter (ELF)      |   TMachOWriter (Mach-O)  |  <-- NEW
+                +------------------------+-------------------------+
+                                       |
+                              +--------v---------+
+                              |  ad-hoc signer   |  LC_CODE_SIGNATURE  <-- NEW
+                              +------------------+
+----
+
+And on the produced binary's side (the RTL it links), the per-target adapter set
+selected by `EnsureRTLObjects` for `macos-arm64`:
+
+----
+  rtl.platform.posix.pas        (shared POSIX method bodies — unchanged)
+        |  reads layout via      |  binds kernel via
+        v   TPlatformLayout port v  external name 'open' / 'read' / ...
+  rtl.platform.layout.darwin.arm64.pas        runtime.libsystem.darwin (import leaf)
+   (struct stat offsets, O_* flags)            -> /usr/lib/libSystem.B.dylib
+                                               runtime.start.darwin.arm64 (LC_MAIN / _start)
+  runtime.atomic.arm64.pas   runtime.setjmp.arm64.pas   (CPU-keyed inline-asm leaves)
+----
+
+== The Mach-O container writer
+
+=== Why a writer, not a translation of ELF
+
+The linker core (`TLinker`) is OS- and container-agnostic: it merges input
+sections, lays out addresses, resolves symbols, and applies relocations against
+a symbol's *final* virtual address.  The container writer's only job is to
+serialise that resolved image into the on-disk format.  ELF and Mach-O disagree
+about *headers, load commands, segment/section nesting, the symbol-table
+encoding, and the relocation/fixup model* — but they agree about everything the
+core computes.  This is exactly the Bridge the linker header reserves: *one
+symbol/reloc core, N container writers*.
+
+`TMachOWriter` is therefore a sibling of `TElfWriter`
+(`blaise.elfwriter.pas`)/`blaise.linker.elf.pas`, exposing the same
+append-oriented API the assembler and linker already drive against
+`TElfWriter`:
+
+* select a section (`__text`, `__const`, `__data`, `__bss`, …),
+* append code/data bytes,
+* define a symbol at the current offset (with bind/type),
+* record a relocation,
+* `Finish()` → a byte buffer.
+
+The assembler (`blaise.assembler.*`) and `TLinker` must reach the writer through
+an *interface* (`IContainerWriter`) so they hold a `TElfWriter` or a
+`TMachOWriter` without a `case`.  Extracting that interface from the current
+`TElfWriter` surface is the first refactor (Phase 1 below); it is
+behaviour-preserving on the ELF targets and is the structural prerequisite for
+the Bridge to carry a second container.
+
+=== Mach-O object vs. executable
+
+Two kinds of Mach-O file are produced, mirroring ELF's `ET_REL` and `ET_EXEC`:
+
+* `MH_OBJECT` — the relocatable object the in-process assembler emits per
+  compilation unit (the Mach-O analogue of `TElfWriter`'s `ET_REL`).  Sections
+  carry external relocations against undefined symbols.
+* `MH_EXECUTE` — the final linked executable the linker emits, fully laid out
+  with load commands, a dynamic-linker reference, and a code signature.
+
+Both share the `mach_header_64` + load-command machinery below; `MH_OBJECT` uses
+a single unnamed `LC_SEGMENT_64` holding every section and an `LC_SYMTAB`, while
+`MH_EXECUTE` uses the full segment/load-command set.
+
+=== `mach_header_64`
+
+[cols="2,1,4",options="header"]
+|===
+| Field | Value (macos-arm64) | Note
+
+| `magic`      | `0xFEEDFACF` (`MH_MAGIC_64`) | 64-bit little-endian.
+| `cputype`    | `0x0100000C` (`CPU_TYPE_ARM64` = `CPU_TYPE_ARM \| CPU_ARCH_ABI64`) | The CPU axis.
+| `cpusubtype` | `0x00000000` (`CPU_SUBTYPE_ARM64_ALL`) | *Not* `_E` (that is arm64e/PAC — see <<arm64e>>).
+| `filetype`   | `MH_EXECUTE` (2) / `MH_OBJECT` (1) | Per above.
+| `ncmds`      | computed | number of load commands.
+| `sizeofcmds` | computed | total bytes of load commands.
+| `flags`      | `MH_NOUNDEFS \| MH_DYLDLINK \| MH_TWOLEVEL \| MH_PIE` | PIE is effectively mandatory on arm64 macOS.
+| `reserved`   | 0 | 64-bit padding.
+|===
+
+=== Load commands and the segment layout
+
+A modern macOS arm64 `MH_EXECUTE` is a *PIE* image with this segment/load-command
+shape.  The diagram is the literal layout `TMachOWriter` emits:
+
+----
+  file offset 0
+  +-----------------------------------------------------------+
+  | mach_header_64                                            |
+  +-----------------------------------------------------------+
+  | LC_SEGMENT_64  __PAGEZERO   vmaddr 0,        vmsize 4GiB,  |  no file bytes;
+  |                              fileoff 0, filesize 0        |  traps NULL deref
+  +-----------------------------------------------------------+
+  | LC_SEGMENT_64  __TEXT       vmaddr 0x100000000 (base),    |  r-x
+  |    section __text   (code)                                |
+  |    section __const  (rodata, string lits)                 |
+  |    section __unwind_info (optional; OPDF makes it          |
+  |                           non-essential)                  |
+  +-----------------------------------------------------------+
+  | LC_SEGMENT_64  __DATA_CONST vmaddr ...,  rw- (relro-like) |  GOT-ish: bound
+  |    section __got                                          |  pointers
+  +-----------------------------------------------------------+
+  | LC_SEGMENT_64  __DATA       vmaddr ...,  rw-              |
+  |    section __data   (initialised globals)                 |
+  |    section __bss    (S_ZEROFILL; no file bytes)           |
+  +-----------------------------------------------------------+
+  | LC_SEGMENT_64  __LINKEDIT   vmaddr ...,  r--              |  all the tables
+  |    (chained fixups, exports trie, symtab, strtab,         |  below live in
+  |     indirect-symbol table, code signature)                |  __LINKEDIT
+  +-----------------------------------------------------------+
+  | LC_DYLD_CHAINED_FIXUPS      -> __LINKEDIT range           |  modern fixups
+  | LC_DYLD_EXPORTS_TRIE        -> __LINKEDIT range           |  exported syms
+  | LC_SYMTAB                   nsyms, stroff, symoff         |  classic nlist_64
+  | LC_DYSYMTAB                 local/extdef/undef ranges,    |  + indirect table
+  |                             indirectsymoff                |
+  | LC_LOAD_DYLINKER            "/usr/lib/dyld"               |  the dynamic loader
+  | LC_BUILD_VERSION            platform=PLATFORM_MACOS,      |  minos/sdk; gates
+  |                             minos, sdk, ntools            |  loadability
+  | LC_LOAD_DYLIB               "/usr/lib/libSystem.B.dylib"  |  the only NEEDED
+  |                             current/compat version        |  dylib (v1)
+  | LC_MAIN                     entryoff (file offset of      |  entry; NOT
+  |                             _main), stacksize             |  LC_UNIXTHREAD
+  | LC_CODE_SIGNATURE           -> __LINKEDIT range (last)    |  ad-hoc sig blob
+  +-----------------------------------------------------------+
+----
+
+Notes that the writer must get exactly right (each is a documented "binary won't
+load" failure mode):
+
+* *`__PAGEZERO`* is a 4 GiB unmapped segment at vmaddr 0 (`vmsize` =
+  `0x100000000`).  It exists only to make NULL and low-address dereferences
+  fault.  The real load base for `__TEXT` is `0x100000000`.  `TLinkTarget` for
+  macOS therefore carries `BaseAddr = 0x100000000` and `PageSize = 0x4000`
+  (16 KiB pages — arm64 macOS uses 16 KiB, *not* 4 KiB; this is a frequent
+  porting bug and is a per-target knob exactly like FreeBSD's `0x200000`
+  alignment).
+* *`LC_BUILD_VERSION`* with `platform = PLATFORM_MACOS` and a sane `minos`
+  (e.g. 11.0 for the first Apple-Silicon macOS) is checked by `dyld`; an absent
+  or malformed one makes the binary unloadable on modern macOS.  This is the
+  Mach-O analogue of ELF's `EI_OSABI` and lives as a `TLinkTarget` knob.
+* *`LC_MAIN`* (entry = file offset of `_main`) is preferred over the legacy
+  `LC_UNIXTHREAD` (which carries a full register-state thread context).  With
+  `LC_MAIN`, `dyld` runs libSystem's start glue, which calls our `_main(argc,
+  argv, envp, apple)`; we do *not* provide our own `_start` on the libSystem
+  path (contrast the Linux freestanding `_start`).  See <<entry>>.
+* *`LC_LOAD_DYLINKER`* names `/usr/lib/dyld`.  *`LC_LOAD_DYLIB`* names
+  `/usr/lib/libSystem.B.dylib` — the umbrella that re-exports the C library and
+  the kernel-call stubs.  v1 needs exactly this one dylib.
+* *Chained fixups.*  Modern macOS (11+) binaries use
+  `LC_DYLD_CHAINED_FIXUPS` + `LC_DYLD_EXPORTS_TRIE` instead of the legacy
+  `LC_DYLD_INFO` rebase/bind opcode streams.  Chained fixups encode
+  rebases/binds as a linked list threaded through the pointer slots themselves
+  (a `dyld_chained_fixups_header` in `__LINKEDIT` plus per-page starts).  v1 may
+  legitimately start with the *legacy* `LC_DYLD_INFO_ONLY` bind/rebase opcodes
+  (simpler to emit, still accepted by current dyld for a `MH_EXECUTE`) and
+  migrate to chained fixups once the basic image loads — this is called out as
+  an explicit phasing choice in <<phasing>> and in <<risks>>.
+
+=== Relocations and the shared core (the Bridge in practice)
+
+The linker core resolves every reference to a final vmaddr; the writer then
+encodes the residual relocations the *loader* still needs.  Two distinct
+relocation worlds, and the design keeps both behind the same core:
+
+. *Object-file (`MH_OBJECT`) relocations* — `relocation_info` /
+  `scattered_relocation_info` records with AArch64 reloc types:
+  `ARM64_RELOC_BRANCH26` (bl/b), `ARM64_RELOC_PAGE21` +
+  `ARM64_RELOC_PAGEOFF12` (the `adrp`/`add` or `adrp`/`ldr` pair),
+  `ARM64_RELOC_GOT_LOAD_PAGE21` + `ARM64_RELOC_GOT_LOAD_PAGEOFF12` (GOT-indirect
+  loads), `ARM64_RELOC_UNSIGNED` (absolute 64-bit pointers in data), and
+  `ARM64_RELOC_ADDEND` (a pseudo-reloc carrying an addend for the following
+  record).  These are the AArch64 analogues of the x86-64 set the ELF writer
+  already understands (`R_X86_64_PC32`, `GOTPCREL`, …); they are *architecture*
+  facts, not OS facts, so they belong to the CPU axis.
+. *Executable (`MH_EXECUTE`) fixups* — for a fully-linked PIE the loader needs
+  only *rebases* (slide every absolute pointer by the load-bias dyld chose) and
+  *binds* (resolve imported libSystem symbols).  Internal PC-relative branches
+  and `adrp/add` pairs are fully resolved at link time and need no loader fixup.
+  These rebases/binds are what the chained-fixups (or legacy bind opcode) tables
+  encode.
+
+The split mirrors ELF exactly (`.rela.*` in the object → `R_*_RELATIVE` /
+`JUMP_SLOT` / `GLOB_DAT` in the executable's `.rela.dyn`/`.rela.plt`).  Because
+the *resolution* math is identical, it stays in the core; only the *encoding*
+differs, and that lives in the writer.  Concretely, the core hands the writer a
+list of `(targetSection, offset, kind, symbol, addend)` tuples and the writer
+chooses ELF `.rela` records or Mach-O `relocation_info`/chained-fixup entries.
+
+== AArch64 code generation — `TArm64Backend`
+
+=== A Template-Method leaf of `TNativeBackend`
+
+`TArm64Backend` subclasses `TNativeBackend` exactly as `TX86_64Backend` does,
+overriding `EmitProgram`, `EmitUnit`, `FinalizeEmit`, and the emission helpers,
+and emitting *AArch64 GNU-AT&T-syntax assembly text* into the inherited
+`FAsm: TStringBuilder` (the in-process assembler then turns that text into a
+Mach-O `MH_OBJECT`).
+
+The architecture doc's *deferred* item now lands: lift the
+target-independent walkers into the base as template methods with abstract
+per-CPU leaves.  The split is:
+
+[cols="3,3",options="header"]
+|===
+| Shared in `TNativeBackend` (Template Method) | Per-CPU leaf (`TX86_64Backend` / `TArm64Backend`)
+
+| The ARC field-kind walk (which fields of a record are strings/classes/
+  interfaces/dyn-arrays/weak/unretained, and the recursion into nested records
+  and static arrays).
+| The *emission* of one release/retain at an offset from a base register —
+  which mnemonic loads the slot, which callee-saved register holds the base
+  across a call.
+
+| `ClassifyRecordReturn` (eightbyte INTEGER/SSE classification — see below for
+  the AArch64 reinterpretation).
+| Selecting the return registers and the indirect-result register from the
+  classification.
+
+| The frame model (param/Result/local slot assignment, exception-frame
+  accounting, loop label stacks).
+| Slot *addressing* (`-N(%rbp)` vs. an `fp`-relative `[x29, #-N]`) and the
+  prologue/epilogue mnemonics.
+|===
+
+Today the field-kind walk and the release/retain emission are entangled inside
+`TX86_64Backend` (`EmitRecordFieldReleases`, `EmitManagedReleaseAt`,
+`EmitStaticArrayReleaseElems`, `EmitRecordFieldRetains`).  The lift extracts the
+*walk order and the field-kind decisions* into protected template methods on the
+base, calling abstract primitives like `EmitReleaseManagedAt(AKind; ABaseReg;
+AOffset)` that each leaf implements.  This is a behaviour-preserving refactor on
+x86-64 (verify the full Linux suite + fixpoints) done *before* the arm64 leaf is
+written, so the arm64 leaf inherits the walk and implements only the primitives.
+It is the same discipline FreeBSD used for the structural steps.
+
+=== Register usage
+
+[cols="2,4",options="header"]
+|===
+| Register(s) | Role in `TArm64Backend`
+
+| `x0`–`x7` | Integer/pointer argument and return registers (AAPCS64).
+| `x8`      | Indirect result location register (the sret pointer) — the
+              AArch64 analogue of x86-64's `%rdi`-as-hidden-first-arg.
+| `x9`–`x15`| Caller-saved scratch (temporaries, address computation).
+| `x16`,`x17` | Intra-procedure-call scratch (`IP0`/`IP1`); also `x16` is the
+              syscall number register on the raw-syscall path (not used in v1).
+| `x18`     | *Reserved* (the platform register; Apple reserves it — never use).
+| `x19`–`x28` | Callee-saved.  The ARC-base-across-a-call register (the role
+              `%rbx` plays on x86-64) comes from here.
+| `x29` (`fp`) | Frame pointer.  Darwin *requires* a frame pointer chain
+              (`x29`/`x30` saved pair) for correct unwinding/sampling — see
+              <<aapcs64>>.
+| `x30` (`lr`) | Link register (return address); saved with `fp` in the prologue.
+| `sp`        | Stack pointer; must be *16-byte aligned* at every public call
+              boundary.
+| `d0`–`d7`   | FP/SIMD argument and return registers.
+| `d8`–`d15`  | Callee-saved (only the low 64 bits are preserved).
+| `d16`–`d31` | Caller-saved.
+|===
+
+A standard prologue/epilogue for a non-leaf function (the shape the leaf emits):
+
+----
+    stp   x29, x30, [sp, #-FRAME]!     ; save fp/lr, allocate frame
+    mov   x29, sp                       ; establish frame pointer
+    stp   x19, x20, [sp, #16]           ; save any callee-saved temps used
+    ...
+    ldp   x19, x20, [sp, #16]
+    ldp   x29, x30, [sp], #FRAME        ; restore fp/lr, deallocate
+    ret
+----
+
+`FRAME` is 16-byte-aligned; locals live at positive `[x29, #N]`/`[sp, #N]`
+offsets (contrast x86-64's negative `%rbp` offsets).  `VarOperand` and the
+frame-builder in the leaf change from `-N(%rbp)` to `[x29, #N]`, but `BuildFrame`
+itself (slot assignment, exception frames) is shared.
+
+=== Instruction-selection surface
+
+The expression/statement lowering the leaf must provide (mapping the operations
+the existing x86-64 leaf already lowers onto AArch64):
+
+* *Loads/stores*: `ldr`/`str` (+ `ldrb`/`ldrh`/`ldrsw` for the width/signedness
+  the slot's static type implies — the same width logic `EmitLoadVar`/
+  `EmitStoreVar` already encode, retargeted).
+* *Address materialisation*: `adrp xN, sym@PAGE` + `add xN, xN, sym@PAGEOFF`
+  for a static symbol's address (PIE-safe); `adrp` + `ldr ..., [xN,
+  sym@GOTPAGEOFF]` for a GOT-indirect (imported) symbol.  This replaces x86-64's
+  `leaq sym(%rip)`.
+* *Arithmetic/logic*: `add`/`sub`/`mul`/`sdiv`/`udiv` (+ `msub` to synthesise
+  the remainder, since AArch64 has no modulo instruction), `and`/`orr`/`eor`,
+  `lsl`/`lsr`/`asr`.
+* *Comparisons/branches*: `cmp`/`subs` setting NZCV, `b.cond`, `cbz`/`cbnz`,
+  `tbz`/`tbnz`; unconditional `b`; calls `bl sym` (→ `ARM64_RELOC_BRANCH26`),
+  indirect `blr xN` (vtable/itab/procedural dispatch).
+* *FP*: `fadd`/`fsub`/`fmul`/`fdiv`, `fcmp`, `scvtf`/`fcvtzs` conversions,
+  `fmov` between GP and FP registers.
+* *The div-by-zero guard*: AArch64 integer divide does *not* trap on a zero
+  divisor (`sdiv x, x, #0` yields 0, not a fault).  The x86-64 backend relies on
+  the CPU trap when `DivGuardAvailable` is false; the arm64 leaf must therefore
+  *always* emit an explicit `cbz`-divisor guard (raising `EDivByZero` when
+  SysUtils is in scope, else a deliberate trap via `brk #0`).  This is a genuine
+  CPU-behaviour divergence and is called out in <<risks>>.
+
+The atomics, setjmp/longjmp, and FiberSwap are *not* emitted by the
+instruction selector — they are inline-asm RTL leaves (<<asm-leaves>>).
+
+== AAPCS64 and the macOS-arm64 ABI divergences [[aapcs64]]
+
+The Procedure Call Standard for AArch64 (AAPCS64) governs the common case, but
+*Apple's arm64 ABI deliberately diverges from it in ways that silently corrupt
+calls if missed*.  These are the items a fresh engineer most often gets wrong.
+
+[cols="3,4",options="header"]
+|===
+| Topic | macOS arm64 rule (and how it differs)
+
+| Integer args / return
+| First eight in `x0`–`x7`; return in `x0` (and `x1` for a 16-byte
+  two-register aggregate).  Same as generic AAPCS64.
+
+| Indirect (sret) result
+| Caller passes the result buffer pointer in *`x8`*; the callee writes through
+  it and returns nothing in `x0`.  This is the `FSretFunc` path retargeted from
+  `%rdi`.
+
+| FP/SIMD args / return
+| First eight in `d0`–`d7`; return in `d0`.
+
+| Stack alignment
+| `sp` 16-byte aligned at every call.  Same as AAPCS64 but strictly enforced —
+  a misaligned `sp` faults on `stp`/`ldp` with `sp` base.
+
+| Callee-saved
+| `x19`–`x28`, `x29` (fp), `x30` (lr), and the *low 64 bits* of `d8`–`d15`.
+
+| *Argument-slot packing (the big divergence)*
+| Generic AAPCS64 widens every stack-passed argument to 8 bytes.  *Apple packs
+  each stack argument to its natural size* and aligns it to its natural
+  alignment.  A `Byte`/`SmallInt` stack argument occupies 1/2 bytes on Darwin,
+  not 8.  The leaf's stack-argument marshalling must follow the Apple rule, or
+  the callee reads the wrong offsets.
+
+| *Variadic arguments (the other big divergence)*
+| Generic AAPCS64 passes variadic args in registers like any other.  *Apple
+  passes all variadic arguments on the stack* (none in `x0`–`x7`/`d0`–`d7`
+  beyond the fixed prototype).  Any call to a libSystem variadic function
+  (`printf`, `open` with a mode arg, `ioctl`, …) must place the variadic
+  portion on the stack.  The leaf marks the boundary at the last named
+  parameter and spills the rest.
+
+| Frame pointer
+| Darwin *requires* the `x29`/`x30` frame-pointer chain to be maintained in
+  every non-leaf function (for `sample`/crash unwinding and for the signed
+  binary's validation tooling).  The leaf always emits the `stp x29,x30` /
+  `mov x29,sp` prologue; it does not omit it as an optimisation.
+
+| `ClassifyRecordReturn` reinterpretation
+| The shared classifier's eightbyte INTEGER/SSE result maps onto AArch64's
+  *HFA/HVA* (homogeneous float aggregate) and "≤16 bytes in two registers, else
+  indirect via `x8`" rules.  The base classification (all-int / all-float /
+  mixed / too-big → sret) is reused; the *register choice* it drives is the
+  per-CPU leaf step.  An all-float ≤4-member record is an HFA returned in
+  `d0`–`d3`; a ≤16-byte mixed record returns in `x0:x1`; anything larger is
+  sret via `x8`.
+|===
+
+[#arm64e]
+[NOTE]
+.v1 targets arm64, NOT arm64e (pointer authentication)
+====
+Apple Silicon supports *pointer authentication* (PAC) via the `arm64e` ABI:
+return addresses and certain pointers carry a cryptographic signature checked
+with `pacibsp`/`autibsp`/`braa` instructions, and binaries are tagged
+`CPU_SUBTYPE_ARM64E`.
+
+*v1 targets plain `arm64` (`CPU_SUBTYPE_ARM64_ALL`), not `arm64e`, and does not
+emit PAC instructions.*  Rationale:
+
+* arm64e is *not* required to run on Apple Silicon — ordinary third-party apps
+  ship as arm64.  arm64e is currently reserved for the platform/system binaries
+  and is still ABI-unstable for third parties.
+* PAC adds `pac*`/`aut*` instrumentation to every prologue/epilogue and an
+  authenticated-pointer relocation/fixup variant — pure cost for v1 with no
+  functional gain.
+* Emitting plain arm64 keeps `TArm64Backend` a clean Template-Method leaf with
+  no signing-key/diversifier coupling.
+
+A future `macos-arm64e` would be a *separate registered toolkit* (its own
+`cpusubtype`, its own prologue primitives) — the Open/Closed way to add it, not
+an `{$IFDEF}` inside `TArm64Backend`.
+====
+
+== The kernel/runtime leaf — libSystem, not raw syscalls [[kernel-leaf]]
+
+=== The decision: link libSystem
+
+macOS has a hard ABI fact that flips the FreeBSD decision on its head:
+
+[IMPORTANT]
+.Raw syscalls are unsupported and unstable on macOS; v1 links libSystem.
+====
+On Linux and FreeBSD the syscall numbers and the trap convention are a stable
+kernel ABI, so Blaise's *Strategy B* (raw `syscall`/`svc`, no libc, static
+executable) is a legitimate, durable target.  *On macOS it is not.*  Apple
+explicitly documents that the *only supported way to enter the kernel is through
+libSystem*; the raw `svc #0` trap layer (numbers, the `0x2000000` BSD class
+offset, even the trap mechanism) is private and *has changed between macOS
+releases*.  A statically-linked, syscall-direct macOS binary is both unsupported
+and *non-portable across OS updates* — and modern macOS makes truly static
+executables effectively impossible anyway (there is no static `crt0`/libc to
+link, and the kernel expects `dyld`).
+
+*Therefore the macOS arm64 kernel leaf links `/usr/lib/libSystem.B.dylib`* — the
+exact opposite of the FreeBSD Strategy-B choice, and entirely consistent with
+the architecture: the kernel leaf is *"which object resolves the RTL's `external
+name` symbols"*, chosen per target.  On Linux it can be libc or a raw-syscall
+stub; on FreeBSD it is a raw-syscall stub; *on macOS it is libSystem's exported
+POSIX symbols*.  The RTL's `external name 'open'` / `'read'` / `'write'` bindings
+are *unchanged* — libSystem exports those very names — so the macOS kernel leaf
+is the cheapest of the three: it is a `LC_LOAD_DYLIB` + the bind fixups, not a
+hand-written syscall trampoline.
+====
+
+For completeness (and because the architecture doc requires both be addressed):
+the *raw-syscall shape* on macOS arm64 would be `svc #0` with the syscall number
+in `x16` and BSD numbering carrying the `0x2000000` class offset (e.g. `write` =
+`0x2000004`), errors via the carry flag (translated to a negative return like
+the FreeBSD leaf).  This shape is documented here as the *rejected alternative*
+(<<alternatives>>); it is not on the v1 path.
+
+=== What the leaf actually is
+
+Three small per-target files compiled into the `macos-arm64` RTL by
+`EnsureRTLObjects` (the same unit-list mechanism FreeBSD uses), in place of the
+Linux/FreeBSD leaf files:
+
+. *`runtime.libsystem.darwin`* — the import leaf.  It declares the POSIX
+  primitives (`open`/`read`/`write`/`close`/`lseek`/`fstat`/`stat`/`mmap`/
+  `munmap`/`nanosleep`/`clock_gettime`/`pthread_*`/…) as `external` symbols
+  bound to libSystem.  Because libSystem provides `pthread_*`, `mmap`,
+  `localtime_r`, `memcpy`, and `atexit` natively, *the entire "hardest-last"
+  work-breakdown that FreeBSD Strategy B faced disappears* — there is no need to
+  reimplement threads on `_umtx_op`, no missing-`mremap` allocator fallback, no
+  pure-Pascal tz reimplementation.  This is the decisive practical advantage of
+  the libSystem path and the reason it is correct beyond mere supportedness.
+. *`runtime.start.darwin.arm64`* — the entry glue (see <<entry>>).
+. *`rtl.platform.layout.darwin.arm64`* — the Darwin `TPlatformLayout`
+  (see <<layout>>).
+
+=== Entry: `LC_MAIN` and `_main`, not a freestanding `_start` [[entry]]
+
+On the Linux static path the RTL ships its own `_start`
+(`runtime.start.static.linux.pas`) that reads `argc`/`argv` off the bare kernel
+stack, sets up TLS, and calls `main`.  *On macOS we do the opposite*: `dyld`
+loads libSystem, libSystem's start glue establishes the C runtime (TLS, the
+`apple[]` array, the initial `pthread`), and then calls our entry point named by
+`LC_MAIN`.
+
+So the macOS entry is the conventional C `main`:
+
+[source,pascal]
+----
+{ runtime.start.darwin.arm64 — the LC_MAIN entry. }
+function main(argc: Integer; argv: Pointer; envp: Pointer;
+              apple: Pointer): Integer; cdecl;
+begin
+  environ := envp;               { same global the POSIX layer reads      }
+  _SetArgs(argc, argv);          { the existing runtime arg capture        }
+  RunProgramBody;                { the backend-emitted program entry       }
+  Result := 0;                   { libSystem's glue calls exit() for us    }
+end;
+----
+
+`LC_MAIN`'s `entryoff` is the file offset of this `main`.  The backend's
+`EmitProgram` for arm64 still emits an exported `main(argc, argv)`-shaped entry
+exactly as the x86-64 backend does for the libc-linked Linux path — the
+divergence is purely *which start mechanism reaches it* (libSystem glue via
+`LC_MAIN`), and that is a link-time/container fact, not a codegen `{$IFDEF}`.
+TLS setup is libSystem's job, so the auxv/`PT_TLS` walk the Linux static `_start`
+performs is simply absent here — there is no auxv on the libSystem path.
+
+=== `TPlatformLayout` for Darwin [[layout]]
+
+`TPlatformLayoutDarwinArm64` (sibling of `rtl.platform.layout.linux` /
+`rtl.platform.layout.freebsd`) supplies Darwin's struct layouts and constants.
+Darwin's `struct stat` is *different again* from both Linux and FreeBSD:
+
+[cols="2,2,2,2",options="header"]
+|===
+| Field | Linux off | FreeBSD off | Darwin off (arm64)
+
+| `st_mode`        | 24  | 24  | 4   (`st_mode` is a `mode_t` early in `struct stat`)
+| `st_size`        | 48  | 112 | 96
+| `st_mtimespec.tv_sec` | 88 | 64 | 32  (`struct timespec st_mtimespec`)
+| `sizeof(struct stat)` | 144 | 224 | 144
+|===
+
+[NOTE]
+The Darwin offsets above are the *shape* to implement against `<sys/stat.h>` for
+the pinned macOS major (e.g. macOS 11+, `__DARWIN_64_BIT_INO_T` which is the
+default on 64-bit Darwin).  *They must be confirmed against the SDK header on a
+real Mac before shipping* — getting them wrong yields silently-garbage file
+sizes/dates, the same high-risk item flagged for FreeBSD.  The structural test
+(<<testing>>) plants sentinels at these offsets to catch a typo on the Linux
+host, but only a native/`stat`-a-known-file test confirms them.
+
+Constants the adapter overrides (Darwin values differ from Linux): `O_CREAT`
+(`0x0200`), `O_TRUNC` (`0x0400`), `O_APPEND` (`0x0008`), `O_EXCL` (`0x0800`);
+`CLOCK_REALTIME`, `SEEK_*`, `S_IFDIR`/`S_IFMT` (the `S_*` and `SEEK_*` happen to
+match Linux, like FreeBSD; the `O_*` flags do not).  `errno` on the libSystem
+path is libSystem's thread-local `errno` reached via `__error()` — the POSIX
+layer's `if Fd < 0` tests work because libSystem already returns `-1` + sets
+`errno` (we are *not* on the raw-syscall negative-return convention here, unlike
+the freestanding leaves).
+
+== The arm64 inline-asm leaves [[asm-leaves]]
+
+Inline asm is *native-backend-only* (`docs/inline-asm-design.adoc`); these
+CPU-keyed `asm … end` units are the AArch64 siblings of the existing x86-64
+leaves.  They are *OS-invariant* — identical on `linux-arm64` and `macos-arm64`
+— so they key on CPU, not OS (the architecture doc's "CPU-keyed asm leaf"
+category, like `runtime.atomic`/`runtime.setjmp`).
+
+=== Atomics — `runtime.atomic.arm64`
+
+ARC reference counting needs `_AtomicAddInt32`/`_AtomicSubInt32` returning the
+*previous* value (xadd semantics).  AArch64 offers two encodings:
+
+* *LSE (Armv8.1+)* — a single `ldadd`/`ldadddl` (atomic load-add returning the
+  old value) and `swp`.  Apple Silicon implements LSE, so this is the preferred
+  form: one instruction, no loop.
+* *LL/SC fallback* — an `ldaxr`/`stlxr` retry loop, portable to any Armv8.0
+  core:
++
+[source,pascal]
+----
+function _AtomicAddInt32(Ptr: Pointer; Delta: Integer): Integer;
+  assembler; nostackframe;
+asm
+    { x0 = Ptr, w1 = Delta; return old value in w0 (LSE form) }
+    ldaddal w1, w2, [x0]     { w2 := old; [x0] := old + w1, acq+rel }
+    mov     w0, w2
+    ret
+end;
+----
+
+v1 emits the LSE form (Apple Silicon always has it).  `_AtomicSubInt32` negates
+the delta and `ldaddal`s, mirroring the x86-64 `negl; lock xadd`.
+
+=== setjmp/longjmp — `runtime.setjmp.arm64`
+
+The exception runtime's `_blaise_setjmp`/`_blaise_longjmp` save/restore the
+AArch64 `jmp_buf`: the callee-saved GP set `x19`–`x28`, the frame pointer `x29`,
+the link register `x30`, the stack pointer `sp`, and the callee-saved FP set
+`d8`–`d15`.  Layout (a contiguous block, mirroring the x86-64 64-byte buffer):
+
+----
+  off 0   x19   off 8   x20  ...  off 72  x28
+  off 80  x29(fp)  off 88  x30(lr)  off 96  sp
+  off 104 d8 ... off 160 d15        (low 64 bits each)
+----
+
+`_blaise_setjmp` stores these and returns 0; `_blaise_longjmp` reloads them,
+moves the (1-normalised) value into `w0`, sets `sp`, and `br x30` to resume.
+`nostackframe` so the body owns the frame, exactly as the x86-64 setjmp leaf
+does.
+
+=== FiberSwap — `runtime.fiber.arm64` (tie-in)
+
+`docs/async-networking-design.adoc` builds the stackful fiber runtime on a
+`FiberSwap(ACur, ANext: PFiberCtx)` primitive that "save[s]/restore[s]
+callee-saved regs + SP" and is a "bidirectional generalisation of
+setjmp/longjmp" — its x86-64 form swaps the System V callee-saved set
+(`rbx`/`rbp`/`r12`–`r15` + `rsp` + return address).  The AArch64 FiberSwap is the
+direct analogue:
+
+* *save* into `ACur`: `x19`–`x28`, `x29` (fp), `x30` (lr), `sp`, and `d8`–`d15`;
+* *load* the same set from `ANext` and `br x30` to resume on `ANext`'s stack.
+
+This is the *identical register set* as the arm64 `jmp_buf` above — the same
+"strongest evidence the approach is sound" the async doc cites for x86-64 holds
+on arm64.  The fiber design's three core-RTL changes (per-fiber exception state,
+the migration-safe allocator, atomic ARC) are CPU-independent and live above
+this leaf; only `FiberSwap` itself is the per-CPU asm primitive, and it ships in
+the same CPU-keyed family as the atomics/setjmp leaves.  No `macos-arm64`
+fiber-specific work exists beyond providing this one leaf when the arm64 backend
+lands — it is listed here so the fiber milestone inherits it for free.
+
+== Code signing — the executability gate [[codesign]]
+
+=== Why it is mandatory
+
+On Apple Silicon, *the kernel refuses to `exec` an unsigned arm64 binary* — it
+kills the process at load with a code-signing failure (`SIGKILL`).  This is not
+optional hardening; an ad-hoc (self-)signature is the *minimum* to run a binary
+at all.  An ELF-style "chmod +x and run" does not exist on arm64 macOS.  This is
+the single most surprising difference from every other Blaise target and the one
+most likely to make a fresh engineer think "the codegen is broken" when in fact
+the *signature* is missing.
+
+A code signature is an `LC_CODE_SIGNATURE` load command pointing at a blob at the
+*very end* of `__LINKEDIT` (it must be last, since it hashes everything before
+it).  The blob is a `SuperBlob` containing:
+
+* a *CodeDirectory* — the core: a header (identifier, flags, the special-slot
+  hashes for entitlements/requirements, the page hash size and count) followed
+  by a SHA-256 hash *of every page of the file up to the signature*;
+* an (optional) *Requirements* blob and *Entitlements* blob;
+* for ad-hoc, an empty *CMS signature* slot (ad-hoc = "signed by nobody"; the
+  `CodeDirectory` flags carry the `adhoc` bit `0x2`).
+
+`dyld`/the kernel recompute the page hashes at load and compare against the
+CodeDirectory; a mismatch (or a missing signature) is fatal.
+
+ASCII of the signed tail:
+
+----
+  __LINKEDIT  ... [chained fixups][exports trie][symtab][strtab][indirect syms]
+              ... [ CODE SIGNATURE SuperBlob: ]
+                    SuperBlob header (magic 0xfade0cc0, count, blobs[])
+                    +-- CodeDirectory (magic 0xfade0c02)
+                    |     ident, flags(adhoc), hashOffset, nCodeSlots,
+                    |     pageSize=4096, hashType=SHA256,
+                    |     [ SHA256(page 0) ][ SHA256(page 1) ] ... up to here
+                    +-- (Requirements / Entitlements — optional)
+                    +-- CMS blob (empty for ad-hoc)
+  LC_CODE_SIGNATURE.dataoff/datasize -> this SuperBlob
+----
+
+=== Recommended approach: emit the ad-hoc signature directly, with a `codesign` fallback
+
+Two ways to produce the signature:
+
+. *Shell out to `codesign --sign - --force <output>`* (the `-` identity =
+  ad-hoc).  Trivial to wire (a post-link step the driver runs when the host is
+  macOS), and it is the canonical tool.  *But* it only works *on a macOS host* —
+  it cannot sign during a *cross-compile from Linux CI*, which is exactly where
+  most structural testing happens, and it reintroduces an external-tool
+  dependency the rest of the toolchain has shed.
+. *Emit the ad-hoc signature directly in `TMachOWriter`* — compute the SHA-256
+  page hashes over the laid-out image, build the `SuperBlob`/`CodeDirectory`,
+  and write it into the reserved `__LINKEDIT` tail.  This is *host-independent*
+  (a Linux host can produce a runnable, validly ad-hoc-signed macOS binary),
+  keeps the toolchain external-tool-free, and matches the "no host toolchain in
+  the loop" goal that motivated Strategy B for FreeBSD.
+
+*Recommendation:* implement direct ad-hoc signing in `TMachOWriter` (option 2)
+as the primary path; keep shelling out to `codesign` (option 1) as an optional
+verification/fallback when running natively on macOS (it is also the easiest way
+to *cross-check* the directly-emitted signature during bring-up — sign two
+copies, diff the CodeDirectory).  The only new dependency option 2 adds is a
+SHA-256 implementation, which is small and pure-computation (a CPU/OS-invariant
+RTL helper, not a port).
+
+The signing is *the last writer step*: layout → fixups → symtab → compute
+CodeDirectory hashes over the now-final bytes → append SuperBlob → patch
+`LC_CODE_SIGNATURE.datasize` and the header's `sizeofcmds`.  Because the
+signature hashes everything before it, nothing may change after it is written
+(the writer reserves the `__LINKEDIT` slot, computes everything else, then fills
+the signature last).
+
+=== Entitlements (debugger tie-in)
+
+`docs/future-improvements.adoc` (§ "macOS — Debugging and Code-Signing") notes
+that a *debugger* needs the `com.apple.security.get-task-allow` entitlement (and
+post-SIP the *debuggee* needs it too) before `task_for_pid`/`ptrace` are
+permitted.  Entitlements are an *Entitlements blob* slot in the same
+`SuperBlob`.  v1's ad-hoc signer should therefore accept an optional
+entitlements plist and emit the Entitlements blob + its special-slot hash, so a
+`--debug` build can carry `get-task-allow` without a separate `codesign`
+re-run.  The debug-server architecture (a separately-signed `blaisedbgserver`)
+is the longer-term path and is out of scope here; v1 only needs the
+*entitlement-carrying ad-hoc signature* hook.
+
+== The `TMacOSArm64Toolkit` and registry wiring
+
+The toolkit is the Abstract Factory binding the family together, identical in
+shape to `TLinuxX86_64Toolkit`/`TFreeBSDX86_64Toolkit` in
+`blaise.codegen.toolkit.pas`:
+
+[source,pascal]
+----
+type
+  TMacOSArm64Toolkit = class(TTargetToolkit)
+  public
+    function Name: string; override;                 { 'macos-arm64' }
+    function MakeBackend: TNativeBackend; override;   { TArm64Backend }
+    function MakeLinkTarget: TLinkTarget; override;   { MachOArm64Target() }
+  end;
+
+function TMacOSArm64Toolkit.Name: string;
+begin
+  Result := 'macos-arm64';
+end;
+
+function TMacOSArm64Toolkit.MakeBackend: TNativeBackend;
+var
+  T: TTargetDesc;
+begin
+  MakeTarget(osMacOS, cpuArm64, T);
+  Result := TArm64Backend.Create(T);
+end;
+
+function TMacOSArm64Toolkit.MakeLinkTarget: TLinkTarget;
+begin
+  Result := MachOArm64Target();   { CPU_TYPE_ARM64, MH_EXECUTE, PIE,
+                                     BaseAddr 0x100000000, PageSize 0x4000,
+                                     minos, /usr/lib/libSystem.B.dylib }
+end;
+----
+
+`MachOArm64Target` is the Mach-O analogue of `LinuxX86_64Target`/
+`FreeBSDX86_64Target`.  `TLinkTarget` grows the container-distinguishing knob the
+header already implies ("Container format … is implied by per-OS knobs") — a
+`Container: (cElf, cMachO)` field (or a polymorphic `MakeWriter` on the link
+target) that the linker reads to pick `TElfWriter` vs. `TMachOWriter` via the
+`IContainerWriter` Bridge.  The Mach-O target also carries `minos`/`sdk`, the
+dylib list, and the page-zero/load-base facts.
+
+The *single registry line* (in `EnsureRegistry`):
+
+[source,pascal]
+----
+R.Register(TLinuxX86_64Toolkit.Create());
+R.Register(TFreeBSDX86_64Toolkit.Create());
+R.Register(TMacOSArm64Toolkit.Create());          { <-- the only dispatch edit }
+----
+
+=== How `--target macos-arm64` resolves
+
+. `Blaise.pas` threads `--target macos-arm64` into `AOpts.Target`.
+. `ParseTargetName('macos-arm64', …)` already returns `(osMacOS, cpuArm64)`
+  (no change needed — it is already there).
+. `RegisteredHasNativeBackend((osMacOS, cpuArm64))` returns `True` once the
+  toolkit is registered (no edit to the old `TargetHasNativeBackend` `case` —
+  resolution is via the registry).
+. `ResolveToolkit` returns `TMacOSArm64Toolkit`; the driver calls
+  `MakeBackend` (→ `TArm64Backend`) and `MakeLinkTarget` (→ Mach-O target).
+. `EnsureRTLObjects` selects the macOS adapter unit set
+  (`rtl.platform.layout.darwin.arm64` + `runtime.libsystem.darwin` +
+  `runtime.start.darwin.arm64` + the arm64 asm leaves) in place of the Linux
+  set — a *unit-list* change keyed off `AOpts.Target`, exactly as FreeBSD's
+  Step 5.
+. The linker emits a Mach-O `MH_EXECUTE`, then the ad-hoc signer finalises it.
+
+No existing target's code path is touched; `linux-x86_64` and `freebsd-x86_64`
+resolve to their own toolkits unchanged.
+
+== Implementation plan (phased) [[phasing]]
+
+Each phase states a verification check, per the project's goal-driven
+convention.  Phases are ordered so each lands on clean seams and is testable
+(structurally on Linux CI, behaviourally on macOS) before the next.
+
+=== Phase 0 — Structural prerequisites (refactors, no behaviour change)
+
+* *0a — `IContainerWriter` Bridge.*  Extract the writer interface the assembler
+  and linker drive `TElfWriter` through; make `TElfWriter` implement it.  No
+  behaviour change on ELF targets.  *Verify:* full Linux suite + all four
+  fixpoints unchanged.
+* *0b — Lift the ARC/record walkers into `TNativeBackend`.*  Move the
+  field-kind walk and `ClassifyRecordReturn`-driven register choice into base
+  template methods with abstract per-CPU primitives; `TX86_64Backend`
+  reimplements only the primitives.  This is the architecture doc's deferred
+  "arm64 groundwork".  *Verify:* Linux suite + fixpoints unchanged (pure
+  refactor on x86-64).
+
+=== Phase 1 — Mach-O writer (CPU-agnostic)
+
+* Implement `TMachOWriter` behind `IContainerWriter`: `mach_header_64`, the
+  `LC_SEGMENT_64` set (`__PAGEZERO`/`__TEXT`/`__DATA_CONST`/`__DATA`/
+  `__LINKEDIT`), `LC_SYMTAB`/`LC_DYSYMTAB`, `LC_LOAD_DYLINKER`,
+  `LC_LOAD_DYLIB`, `LC_BUILD_VERSION`, `LC_MAIN`, and the relocation encoding
+  (`MH_OBJECT` `relocation_info`).  Start with *legacy* `LC_DYLD_INFO_ONLY`
+  bind/rebase opcodes (simpler) before chained fixups.
+* *Verify:* the existing ELF-shape structural tests gain a Mach-O sibling — emit
+  a probe object/executable, parse it back with a Mach-O reader, assert the
+  header (`MH_MAGIC_64`, `CPU_TYPE_ARM64`, `MH_EXECUTE`), the segment set, the
+  `LC_MAIN`/dylib/build-version commands.  Runs on Linux CI.
+
+=== Phase 2 — AArch64 codegen (container-agnostic)
+
+* Implement `TArm64Backend` as the Template-Method leaf: prologue/epilogue,
+  frame addressing (`[x29,#N]`), the instruction-selection surface, AAPCS64 +
+  Darwin divergences (x8 sret, stack-packed args, variadic-on-stack), the
+  always-on div-by-zero guard, and the AArch64 object relocations.
+* *Verify:* compile a probe through `TArm64Backend` → `TMachOWriter`; assert the
+  emitted `__text` disassembles to the expected AArch64 (a small built-in
+  decoder check for the prologue/`bl`/`adrp` shapes), still on Linux CI.
+
+=== Phase 3 — Kernel/runtime leaf + Darwin layout
+
+* `runtime.libsystem.darwin` (the libSystem import leaf),
+  `runtime.start.darwin.arm64` (`main` for `LC_MAIN`),
+  `rtl.platform.layout.darwin.arm64` (the Darwin `struct stat` + constants), and
+  the arm64 inline-asm leaves (`runtime.atomic.arm64`, `runtime.setjmp.arm64`).
+  Wire `EnsureRTLObjects` to select this set for `macos-arm64`.
+* *Verify:* a `--target macos-arm64` program links the Darwin layout + libSystem
+  import and contains no Linux/FreeBSD RTL code; the `struct stat` sentinel test
+  passes on Linux CI.
+
+=== Phase 4 — Ad-hoc code signing
+
+* SHA-256 page-hash helper; `SuperBlob`/`CodeDirectory` emission as the final
+  `TMachOWriter` step; the entitlements-blob hook for `--debug`.
+* *Verify:* the emitted `LC_CODE_SIGNATURE` blob validates structurally on Linux
+  CI (recompute the page hashes and compare); on a macOS host, `codesign
+  --verify` accepts it and the binary `exec`s.
+
+=== Phase 5 — Toolkit + registry + CLI
+
+* Add `TMacOSArm64Toolkit`, the one `Register` line, the `MachOArm64Target`
+  facts, and the `--target` threading.
+* *Verify:* `blaise --source hello.pas --target macos-arm64 --output hello`
+  produces a Mach-O `MH_EXECUTE` whose header/load-commands/signature validate
+  structurally on Linux CI.
+
+=== Phase 6 — Bring-up on macOS
+
+* Run the produced binaries natively on an Apple-Silicon Mac: hello-world,
+  file-I/O smoke test, the ARC/exception/string suites.  Migrate the writer from
+  legacy bind opcodes to `LC_DYLD_CHAINED_FIXUPS` + `LC_DYLD_EXPORTS_TRIE` if
+  the target macOS version requires it.  On a macOS host the test runner
+  self-targets (`HostTarget()` → the macOS toolkit) and exercises the family
+  natively.
+* *Verify:* hello-world prints and exits 0 on macOS; the core suites pass
+  natively.  This is the milestone that lets the author run Blaise.
+
+== Testing strategy [[testing]]
+
+The payoff of run-time toolkit selection (per `docs/native-target-architecture.adoc`)
+is that *Linux CI gets real coverage of a backend it cannot run*:
+
+* *Structural / cross-target (Linux CI, every push).*  The e2e harness loops
+  over *every registered toolkit*, compiles a probe, and asserts the emitted
+  object/executable is correctly shaped — for macOS that means: Mach-O magic and
+  `CPU_TYPE_ARM64`; the segment set incl. `__PAGEZERO` at vmaddr 0 and `__TEXT`
+  at `0x100000000`; `LC_MAIN` present and `LC_UNIXTHREAD` absent;
+  `LC_LOAD_DYLIB` names libSystem; `LC_BUILD_VERSION` platform = macOS; the
+  AArch64 reloc kinds in the object; the `struct stat` sentinel offsets; and the
+  `LC_CODE_SIGNATURE` page-hash recomputation matches.  None of this needs a Mac
+  — it is the macOS analogue of the FreeBSD `EI_OSABI`/`e_type`/no-`PT_INTERP`
+  assertions, and it catches every *codegen and container* regression.
+* *Behavioural / native (macOS host or runner).*  Run the binary: hello-world,
+  file-I/O (the only way to catch a wrong `struct stat` offset or a libSystem
+  binding mistake), the ARC/exception suites.  On a macOS host the runner
+  self-targets and exercises the adapter family with no special flag.
+
+This is strictly better than `{$IFDEF}`-frozen targets, where the only testable
+target is the one the test binary was built for.
+
+== Risks and mitigations [[risks]]
+
+[cols="2,1,3",options="header"]
+|===
+| Risk | Likelihood | Mitigation
+
+| Code signature wrong/absent → kernel SIGKILLs the binary at `exec`, looking
+  like a codegen bug.
+| High.
+| Implement direct ad-hoc signing early (Phase 4) and structurally recompute the
+  page hashes on Linux CI; cross-check against `codesign --sign -` on a Mac
+  during bring-up.  Document "must be signed" prominently.
+
+| Darwin `struct stat` offsets wrong → silent garbage in file sizes/dates.
+| High.
+| Pin to a macOS major against `<sys/stat.h>`; plant offset sentinels in the
+  structural test; add a native "stat a known file, assert size" test.  Same
+  high-risk item as FreeBSD.
+
+| AArch64 integer divide does not trap on zero divisor (unlike x86-64).
+| Medium (certain if forgotten).
+| The arm64 leaf *always* emits an explicit `cbz` divisor guard; never relies on
+  a hardware trap.  A unit test divides by a runtime zero and asserts
+  `EDivByZero` (or a deliberate `brk`).
+
+| Apple ABI divergences (variadic-on-stack, natural-size stack arg packing)
+  missed → libSystem calls read garbage.
+| Medium.
+| Encode the Apple rules in the leaf's call-marshalling from the start;
+  behavioural test calls a libSystem variadic function with mixed-width args.
+
+| Chained-fixups complexity (modern macOS prefers them over legacy bind opcodes).
+| Medium.
+| Phase the writer: legacy `LC_DYLD_INFO_ONLY` first (loads on current macOS for
+  a simple `MH_EXECUTE`), migrate to `LC_DYLD_CHAINED_FIXUPS` in Phase 6 if the
+  target version demands it.
+
+| 16 KiB page size on arm64 macOS (not 4 KiB) → misaligned segments, load
+  failure.
+| Medium.
+| `PageSize = 0x4000` is a `TLinkTarget` knob; a structural test asserts segment
+  vmaddr/fileoff are 16 KiB-aligned.
+
+| No macOS execution environment in CI → behavioural bugs ship untested.
+| Medium.
+| Structural lane covers all codegen/container shape on Linux; stand up a macOS
+  runner (or the author's own Mac) for the behavioural lane — this target exists
+  precisely because the author has one.
+
+| Scope under-estimation (two new axes at once vs. FreeBSD's zero).
+| Medium.
+| The phased plan keeps the Mach-O writer (CPU-agnostic) and the AArch64 backend
+  (container-agnostic) independent and separately testable; neither blocks the
+  other until the toolkit wires them together in Phase 5.
+|===
+
+== Alternatives considered [[alternatives]]
+
+* *Raw `svc #0` syscalls into a static executable (the FreeBSD Strategy B
+  shape).*  Rejected for macOS: Apple's syscall layer is private and *unstable
+  across OS releases*, truly-static macOS executables are effectively
+  unsupported (no static libc/crt0, the kernel expects `dyld`), and the libSystem
+  path makes threads/`mmap`/tz/`memcpy`/`atexit` *free* (libSystem provides them)
+  rather than the "hardest-last" reimplementation burden FreeBSD accepted.  The
+  `x16`/`svc #0`/`0x2000000`-offset shape is documented (<<kernel-leaf>>) only as
+  the rejected alternative.
+* *`arm64e` (pointer authentication) as the v1 ABI.*  Rejected (<<arm64e>>):
+  arm64e is not required to run on Apple Silicon, is still ABI-unstable for
+  third parties, and adds pure-cost PAC instrumentation.  A future
+  `macos-arm64e` is a *separate registered toolkit*, not an `{$IFDEF}`.
+* *`{$IFDEF DARWIN}` woven through the existing units (the FPC model).*  Rejected
+  on the same grounds the architecture doc rejects it: it freezes the target at
+  compile time, makes the macOS path untestable from Linux CI, and scatters
+  per-OS code.  macOS divergence is object selection (`TArm64Backend`,
+  `TMachOWriter`, the Darwin layout/leaf) and link-time symbol swap (libSystem),
+  composed by the toolkit — never conditional compilation.
+* *Shelling out to a host toolchain (`clang`/`ld`/`codesign`) on macOS.*  Rejected
+  as the *primary* path: it reintroduces the external-tool dependency the
+  internal assembler/linker exist to remove and cannot cross-compile from Linux.
+  `codesign` is retained only as an optional native-host verification/fallback.
+* *`LC_UNIXTHREAD` entry instead of `LC_MAIN`.*  Rejected: `LC_UNIXTHREAD`
+  (legacy, carries a full register thread state and implies our own `_start`) is
+  unnecessary when libSystem's start glue is present; `LC_MAIN` + a C `main` is
+  simpler and is what the libSystem path expects.
+
+== Summary
+
+A `macos-arm64` native backend is feasible and the codebase is staged for it:
+`osMacOS`/`cpuArm64` and `ParseTargetName("macos-arm64")` already exist, the
+`TTargetToolkit`/`TTargetRegistry`/`TPlatformLayout` seams are in place, and the
+linker header already reserves the Bridge for a Mach-O sibling writer.
+
+macOS arm64 is the first target to add *two* new axes — a Mach-O container and an
+AArch64 CPU — but the architecture keeps them independent: `TMachOWriter` is
+CPU-agnostic behind the linker's Bridge, and `TArm64Backend` is
+container-agnostic as a Template-Method leaf of `TNativeBackend` (forcing the
+long-deferred lift of the ARC/record walkers into the base).  The kernel leaf is
+the *cheapest* of all targets — a `LC_LOAD_DYLIB` binding to `libSystem.B.dylib`,
+the only supported macOS path, which also makes threads/`mmap`/tz/`memcpy`
+free — paired with a Darwin `TPlatformLayout` for the (different again) `struct
+stat` and `O_*` constants.  The one genuinely macOS-unique gate is *ad-hoc code
+signing*: the kernel will not `exec` an unsigned arm64 binary, so `TMachOWriter`
+emits an `LC_CODE_SIGNATURE` `SuperBlob`/`CodeDirectory` directly (host-
+independent, so Linux CI can produce a runnable, signed binary), with `codesign`
+kept only as a native verification fallback.
+
+Structurally this is *one new adapter family plus two orthogonal leaves and a
+signer* — composed by an Abstract-Factory toolkit, resolved from the registry,
+with zero `{$IFDEF}` and no target code scattered across units.  Linux CI tests
+the whole codegen/container/signature *shape* even though it cannot run the
+binary; the author's own Apple-Silicon Mac runs the behavioural lane — which is
+the entire point: Phase 8's macOS target is what finally lets the project's
+author use Blaise.

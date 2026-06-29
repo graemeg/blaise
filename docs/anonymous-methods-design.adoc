@@ -1,0 +1,983 @@
+= Anonymous Methods and Closures — `reference to` Types, Capturing Literals, ARC-Correct Environments
+:author: Graeme Geldenhuys
+:revdate: 2026-06-29
+:toc: left
+:toclevels: 3
+:source-highlighter: rouge
+:icons: font
+:sectanchors:
+:sectnums:
+
+== Purpose
+
+Blaise has three flavours of "code value" today:
+
+* *Bare procedural pointers* — `type TProc = procedure(X: Integer);`
+  A single code pointer (8 bytes). Value is `@SomeRoutine`.
+* *Method pointers* — `type TNotify = procedure(Sender: TObject) of object;`
+  A 16-byte _(Code, Data)_ fat value: the code pointer plus the `Self`
+  receiver. Value is `@Obj.Method`. (See `TProceduralTypeDef.IsMethodPtr`
+  in `uAST.pas` and `TProceduralTypeDesc.IsMethodPtr` in `uSymbolTable.pas`.)
+
+Neither can capture a *surrounding lexical environment*. The closest thing
+Blaise offers is the *nested-procedure capture* path (`uSemantic.pas`
+`CollectCaptures`/`MaybeCaptureName`, `uAST.pas` `TMethodDecl.CapturedVars`):
+a `procedure` declared inside another procedure's `var` block may read/write
+the enclosing frame's locals, lowered as hidden by-pointer parameters. That
+mechanism is *frame-scoped* — it works only while the enclosing frame is
+live, so the nested proc cannot _escape_ (be stored, returned, or handed to a
+scheduler). `uAST.pas` line 794 records the gap explicitly:
+
+[quote]
+____
+Bare procedural pointers — not 'of object' (method pointers) and not
+'reference to' (anonymous methods); both are out of scope for this iteration.
+____
+
+This document specifies the third flavour: *anonymous methods / closures* —
+the `reference to procedure/function` type and the anonymous
+`procedure(...) begin ... end` / `function(...): T begin ... end` literal
+that captures surrounding variables and may *escape* its defining frame,
+ARC-correct.
+
+`docs/future-improvements.adoc` § Language lists this as unimplemented and
+flags the ARC capture-lifetime difficulty. This is the design that resolves
+it. It directly unblocks the ergonomic concurrency API in
+`docs/async-networking-design.adoc` (line 533):
+
+[source,pascal]
+----
+Group.Spawn(procedure begin FireOneRequest(I); end);  { needs anonymous methods }
+----
+
+and is broadly useful for callbacks, comparers (`Generics.Collections`
+sorting), and event handlers.
+
+== Scope and non-goals
+
+In scope:
+
+* The `reference to procedure(...)` / `reference to function(...): T` *type*.
+* Anonymous `procedure`/`function` literals as *expressions*.
+* Capture *by reference* (Delphi semantics) of enclosing locals, parameters,
+  and `Self`.
+* An ARC-managed, heap-allocated *environment record* shared between the
+  enclosing frame and every closure created in it.
+* `[Weak]` capture to break the closure-stored-in-its-own-object cycle.
+* Assignment compatibility between literals, ordinary routines, method
+  pointers, and `reference to` values; overload/conversion rules.
+* Native x86-64 codegen and `.bif` serialisation.
+* Interaction with reified generics (monomorphisation).
+
+Out of scope (deferred, noted under <<alternatives>> / <<risks>>):
+
+* `cdecl`/`stdcall` markers on `reference to` types (tracked separately in
+  future-improvements).
+* Closures as `published` event-handler RTTI targets.
+* Capture *by value* qualifiers (no Delphi precedent; not required).
+
+== Constraints carried from the Blaise dialect
+
+These are load-bearing throughout and shape every decision below:
+
+[cols="1,3"]
+|===
+| Constraint | Consequence for closures
+
+| Full ARC, no manual/auto split; `Free` ≡ release
+| The environment record is an ARC heap block. Its lifetime is *purely*
+  refcount-driven. There is no GC sweep to fall back on.
+
+| `[Weak]` breaks cycles; weak slots auto-nil
+| A closure capturing the object that *owns* it forms a cycle; `[Weak]`
+  capture is the documented escape (mirrors `[Weak]` class fields).
+
+| Single UTF-8 ref-counted string
+| A captured `string` field in the environment is just another ARC slot;
+  reuse `_StringAddRef`/`_StringRelease`.
+
+| 0-based indexing
+| The loop-variable-capture worked example uses `for I := 0 to N-1`.
+
+| Reified generics (monomorphisation, NOT erasure)
+| A `reference to` inside a generic body is monomorphised per instantiation,
+  exactly like any other type in the body. A captured `T`-typed value is
+  captured at its concrete monomorphised type.
+
+| Zero-GUID interfaces, vtable dispatch at compile time
+| We *consider* modelling closures as interfaces (the interface fat-pointer
+  and itab machinery already exists), but recommend a dedicated fat value —
+  see <<representation>>.
+
+| Lean on `Generics.Collections`
+| `TTaskGroup` etc. store `reference to` values in `TList<T>`; the element
+  type is just an ARC-managed 16-byte value.
+
+| No `{$IFDEF}`
+| No conditional-compilation tricks in the runtime; one code path.
+|===
+
+== Existing machinery we build on
+
+Grounding the design in what already exists (verified in-tree):
+
+`uAST.pas`::
+* `TProceduralTypeDef` (line 797): `Params`, `ReturnTypeName`, `IsFunction`,
+  `IsMethodPtr`. We add `IsReference: Boolean` here.
+* `TMethodDecl` (line 841): the carrier for a routine body. `CapturedVars:
+  TStringList` (line 890) and `[Unretained] EnclosingDecl: TMethodDecl`
+  (line 891) already drive nested-proc capture.
+* `TASTExpr` (line 29) is the expression base — the anonymous literal is a
+  new `TASTExpr` subclass.
+
+`uSymbolTable.pas`::
+* `TProceduralTypeDesc` (line 190): resolved type with `IsMethodPtr` and
+  `IsCompatibleWith`. We add `IsReference: Boolean`. The method-pointer note
+  at line 185 already documents the 16-byte _(Code, Data)_ layout — we reuse
+  that representation almost verbatim.
+
+`runtime.arc.pas`::
+* Class header (line 19): `[RefCount:4][pad:4][cleanup ptr:8]` then user
+  data. `CLASS_HDR = 16`.
+* `_ClassAlloc(Size, Cleanup)` (line 384): zeroed heap block + cleanup
+  pointer.
+* `_ClassRelease` (line 399): atomic dec; at zero → `_WeakZeroSlots` →
+  `Cleanup(UserPtr)` → free. *This is exactly the environment-record
+  destruction path we need.*
+* `_ClassAddRef` (line 744): atomic inc.
+* `TFieldCleanupProc = procedure(Self: Pointer)` (line 39).
+* `_StringAddRef`/`_StringRelease`, `_WeakZeroSlots`.
+
+`uSemantic.pas`::
+* `CollectCaptures` (line 6568) / `MaybeCaptureName` (line 6556): the
+  capture-analysis BFS over a nested body. We *generalise* this walk to drive
+  environment promotion.
+* `FCurrentEnclosingDecl` (line 87): the lexical-nesting cursor.
+
+`blaise.codegen.native.x86_64.pas`::
+* `AddSlot` (line 3951): a method-pointer / interface slot is 16 bytes.
+* `FCapturedVars` (line 137): per-function set of captured names.
+* `EmitMethodPtrCall` (line 788): loads both halves of a fat value and emits
+  `call code(data, args...)` — the call mechanism we reuse for closures.
+
+`uUnitInterfaceIO.pas`::
+* `WriteProcPayload` (line 562) / `ReadProcPayload` (line 2227): the `.bif`
+  encoding for procedural types. We extend it with the `IsReference` bool
+  and bump the `.bif` version.
+
+This is the central insight of the whole design: *a closure is a method
+pointer whose `Data` half is an ARC-managed environment record instead of a
+`Self` object.* Almost everything — the 16-byte slot, `AddSlot`,
+`EmitMethodPtrCall`, the `.bif` payload, ARC release of the `Data` half — is
+a small generalisation of code that already ships.
+
+[#syntax]
+== Syntax
+
+=== The `reference to` type
+
+[source,pascal]
+----
+type
+  TProc       = reference to procedure;
+  TIntProc    = reference to procedure(AValue: Integer);
+  TComparer   = reference to function(const A, B: TItem): Integer;
+  TThunk<T>   = reference to function: T;        { generic, monomorphised }
+----
+
+Grammar (extends the procedural-type production; see EBNF fragment below).
+`reference to` is the only new surface form; the inner
+`procedure`/`function` signature reuses the *existing* `ParseProceduralTypeDef`
+logic verbatim.
+
+Rationale for `reference to` (Delphi-compatible):
+
+* Delphi spells it `reference to procedure`; copying it lets the large body
+  of existing Object Pascal closure code port unchanged, and matches the
+  spelling already used in `future-improvements.adoc` and the async doc.
+* It reads as a *type*, not a directive, so it slots naturally after `=` in a
+  type declaration, and `of object` (a suffix) vs `reference to` (a prefix)
+  stay visually distinct.
+* `reference` and `to` are already tokens (`tkIdent` "reference" as a *soft*
+  keyword + `tkTo`). We treat `reference` as a soft keyword (like `static`
+  and `object`): it is a `reference to` type *only* when immediately followed
+  by `to procedure`/`to function`; a variable or field literally named
+  `Reference` still parses as an identifier.
+
+=== The anonymous literal expression
+
+[source,pascal]
+----
+{ statement context — passed as an argument }
+Group.Spawn(procedure begin FireOneRequest(I); end);
+
+{ assigned to a reference-typed variable }
+var Cmp: TComparer :=
+  function(const A, B: TItem): Integer
+  begin
+    Result := A.Key - B.Key;
+  end;
+
+{ with captures — Total and Prefix are enclosing locals }
+var Total: Integer := 0;
+var Prefix: string := 'item-';
+var OnEach: TIntProc :=
+  procedure(AValue: Integer)
+  begin
+    Total := Total + AValue;          { write-captures Total  }
+    WriteLn(Prefix + IntToStr(AValue)); { read-captures Prefix }
+  end;
+----
+
+A literal is an *expression*. The body is a full statement block, identical
+in structure to a routine body (its own `var`/`const`/nested decls allowed).
+There is *no* trailing name and *no* forward declaration: the literal is
+self-contained.
+
+Disambiguation: an anonymous literal begins with `procedure`/`function`
+*immediately followed by* `(` (params), `:` (function return), or `begin`.
+In *expression* position this can only be a literal — a type declaration
+(`type T = procedure...`) is never an expression. The parser already
+distinguishes expression vs. type context, so no new lookahead heuristic is
+needed beyond "if we are parsing a primary expression and see
+`procedure`/`function`, parse an anonymous literal".
+
+[#representation]
+== Closure representation
+
+=== Decision: a "fat" 16-byte value, NOT an interface
+
+We model a `reference to` value as a *fat value* identical in shape to a
+method pointer:
+
+----
+  reference-to value (16 bytes, the variable's slot)
+  +------------------+------------------+
+  |  Code  (+0, 8B)  |  Env   (+8, 8B)  |
+  +------------------+------------------+
+        ^                   ^
+        |                   +-- ARC-managed environment record (user ptr), or
+        |                       nil for a capture-free closure / plain routine
+        +-- code pointer of the lifted closure body (the "thunk")
+----
+
+The `Env` half is an ARC heap block allocated by `_ClassAlloc`; the closure
+value holds a *strong* reference to it. This is the crux of the lifetime
+story and is detailed in <<arc>>.
+
+Why a fat value rather than an ARC interface object:
+
+[cols="1,3"]
+|===
+| Option | Assessment
+
+| *Fat value (Code, Env)* — RECOMMENDED
+| Reuses the entire method-pointer path: `AddSlot` already sizes a 16-byte
+  procedural slot (line 3962), `EmitMethodPtrCall` already calls
+  `code(data, args...)`, the `.bif` proc payload already exists. The `Env`
+  half is released exactly like an interface/object slot. Zero new dispatch
+  machinery. The ARC cost is one slot (`Env`), released with `_ClassRelease`.
+
+| Interface object (`IClosure` with `Invoke`)
+| Blaise interfaces are zero-GUID, vtable-dispatched fat pointers
+  _(obj, itab)_ — *also* 16 bytes. Tempting because the obj half is already
+  ARC-managed. But it forces every closure to be a full heap class with a
+  vtable and an `Invoke` method, adds an indirect vtable load on every call,
+  and complicates interop with plain `procedure` / `of object` values (which
+  are not interfaces). It buys nothing the fat value lacks.
+
+| Boxed single pointer (env contains code+captures)
+| Saves 8 bytes in the slot but forces a heap allocation for *every* closure,
+  even capture-free ones, and an indirection on every call. Rejected.
+|===
+
+The fat value also gives us a clean *uniform calling representation*: a
+plain `procedure`, a method pointer, and a closure can all be coerced into a
+`reference to` slot (see <<conversions>>), because they are all "(code,
+data)" where `data` is `nil` / `Self` / `Env` respectively.
+
+=== The environment record
+
+The captured variables of an enclosing frame are *promoted* into a single
+heap-allocated environment record, ARC-managed with the standard class
+header so `_ClassAlloc`/`_ClassRelease` apply unchanged:
+
+----
+  Environment record  (heap block returned by _ClassAlloc)
+  base-16  +----------------+
+           |  RefCount  4B  |
+           |  (pad)     4B  |   <- standard CLASS_HDR (16 bytes)
+           |  cleanup   8B  |---> $__env_cleanup_<id>  (TFieldCleanupProc)
+  user ptr +----------------+ <- Env half of every closure points HERE
+           |  Total   : i64 |   promoted capture #0  (was an enclosing local)
+           |  Prefix  : str |   promoted capture #1  (ARC string slot)
+           |  Self    : ptr |   promoted capture #2  (when a method captures Self)
+           |  ...           |
+           +----------------+
+----
+
+Properties:
+
+* *One environment per enclosing frame that has captures*, shared by every
+  closure literal created in that frame (so two closures in the same scope
+  see the *same* `Total` — required for by-reference semantics).
+* Field order = order of first capture; offsets are 8-byte aligned, ARC slots
+  (string/object/interface) get the same treatment as record fields.
+* The `cleanup` pointer targets a compiler-emitted *field-cleanup proc*
+  (`$__env_cleanup_<id>`) that releases every ARC-managed promoted field —
+  exactly mirroring record/class field cleanup (`runtime.arc.pas`
+  `_ClassRelease` → `Cleanup(UserPtr)`).
+
+[#capture]
+== Capture semantics — by reference
+
+Blaise captures *by reference*, matching Delphi. A captured local is no
+longer a stack slot in the enclosing frame; it *is* a field of the heap
+environment record. Both the enclosing frame and every closure access it
+through the same environment pointer, so a write in one is visible in the
+other.
+
+=== Capture flow (ASCII)
+
+----
+  Enclosing routine FRAME (stack)            ENV record (heap, ARC)
+  +---------------------------+              +----------------------+
+  | env : ptr  ───────────────┼──────strong──▶ RefCount = 1 + N      |
+  | (other non-captured locals)|              | cleanup ───▶ $__env_  |
+  +---------------------------+              | Total : i64           |
+        creates                              | Prefix: str           |
+          │                                  +----------────────────+
+          ▼                                     ▲           ▲
+  closure value (Code, Env) ───strong───────────┘           │
+          │                                                  │
+          │ may ESCAPE (stored in TList, returned, Spawned)  │
+          ▼                                                  │
+  another closure value (Code, Env) ───strong────────────────┘
+----
+
+The enclosing frame holds one reference (so the env survives until frame
+exit). Each *escaping* closure holds one more. The env dies only when the
+frame *and* all closures derived from it are gone — automatic, refcount-driven.
+
+=== Promotion algorithm (informal)
+
+For each routine being analysed (the *enclosing* routine):
+
+1. Run the existing capture walk (generalised `CollectCaptures`) over *all*
+   anonymous literals nested in the routine body, accumulating the union of
+   captured enclosing names into `EnvCaptures`.
+2. If `EnvCaptures` is empty → no environment; closures are capture-free (Env
+   = nil). Done.
+3. Otherwise allocate one `TEnvTypeDesc` (a synthetic record type) with one
+   field per captured name, typed by the captured variable's resolved type.
+4. *Rewrite* every reference to a captured name — in the enclosing body *and*
+   in every closure body — to a field access `env^.Name`.
+5. At enclosing-frame entry, after locals are set up, emit `env := _ClassAlloc(
+   sizeof(TEnv), @$__env_cleanup_<id>)` and initialise each field from the
+   original initial value.
+6. A `var`/`out` parameter captured by reference is promoted as a *pointer*
+   field (the env stores the address), mirroring how the existing nested-proc
+   path already passes var-params by pointer (`CollectCaptures` comment at
+   `uSemantic.pas` line 6603).
+
+=== The loop-variable-capture case
+
+The classic trap. Consider:
+
+[source,pascal]
+----
+var Handlers: TList<TProc> := TList<TProc>.Create;
+var I: Integer;
+for I := 0 to 2 do
+  Handlers.Add(procedure begin WriteLn(I); end);   { captures I by reference }
+{ later }
+Handlers[0](); Handlers[1](); Handlers[2]();
+----
+
+With *by-reference* capture and a *single* `I` slot, all three closures share
+the same env field `I`. After the loop, `I = 3` (loop ran 0,1,2 then the
+post-increment to 3 on the failing test). *All three print `3`.* This is
+exactly Delphi's behaviour and is the documented, intentional outcome.
+
+Blaise's stance — *match Delphi, document the gotcha, give an idiom*: to
+capture the *per-iteration* value, introduce a fresh binding inside the loop
+body:
+
+[source,pascal]
+----
+for I := 0 to 2 do
+begin
+  var Snapshot: Integer := I;                 { fresh local PER iteration }
+  Handlers.Add(procedure begin WriteLn(Snapshot); end);  { captures Snapshot }
+end;
+{ prints 0, 1, 2 }
+----
+
+Because `Snapshot` is declared *inside* the loop body, each iteration's
+closure captures a *distinct* environment field. Implementation note: a
+`var` declared inside a loop body is a new lexical scope per iteration *for
+capture purposes* — the promotion algorithm allocates a *fresh* environment
+record on each iteration that creates a closure (the env-alloc site is inside
+the loop body, so it runs each pass; the previous iteration's env stays alive
+through the closure stored in `Handlers`). This is the one place the
+promotion algorithm must respect *block* scope, not just *routine* scope; see
+<<phasing>> Phase 4.
+
+== ARC correctness
+
+=== Refcount management of the Env half
+
+The `Env` half of a `reference to` value is treated *identically to an object
+reference slot*:
+
+* *Assignment* `Dst := Src` (both `reference to`): `_ClassAddRef(Src.Env)`;
+  `_ClassRelease(Dst.Env)`; copy both halves. (Order: addref-new before
+  release-old, the standard self-assignment-safe order already used for class
+  fields.)
+* *Argument passing*: a `reference to` passed by value is addref'd by the
+  callee-consumes / caller-retains convention already in place for objects
+  and interfaces (`akIntfConsume` etc. in the native backend).
+* *Scope exit*: a local `reference to` slot is released at frame teardown,
+  exactly like a local object slot. `AddSlot` already reserves 16 bytes; the
+  teardown emitter releases the `Env` half (`Code` is a raw pointer, no ARC).
+* *Capture-free closure / coerced plain routine*: `Env = nil`;
+  `_ClassRelease(nil)` is a no-op (guarded at `runtime.arc.pas` line 406).
+
+=== Captured strings/objects/interfaces inside the env
+
+Promoted fields are ordinary ARC slots. The compiler emits, for the env type,
+a field-cleanup proc `$__env_cleanup_<id>` that walks the fields and emits the
+correct release per managed field — *identical to record/class field cleanup*:
+
+----
+  $__env_cleanup_<id>(Self: Pointer):
+    _StringRelease(PString(Self + off_Prefix)^)   ; string field
+    _ClassRelease (PPtr  (Self + off_Obj)^)        ; object field (strong)
+    ; intf field: release the obj half of its fat pointer
+    ; [Weak] field: handled by _WeakZeroSlots before cleanup runs — skip
+    ; [Unretained] field: no-op
+    ; value-type field (Integer/Double/...): no-op
+----
+
+`_ClassRelease` calls this proc once, at the env's last release, before
+freeing the block (`runtime.arc.pas` lines 414-420). Because `_WeakZeroSlots`
+runs *first* (line 413), weakly-captured slots are already nil'd by the time
+cleanup runs — so a weak capture never over-releases.
+
+=== Cycle risk and the `[Weak]` escape
+
+The dangerous case: a closure captures `Self`, and the object stores that
+closure in a field:
+
+[source,pascal]
+----
+type
+  TButton = class
+    FOnClick: TProc;          { strong ref to a closure }
+    procedure Wire;
+  end;
+
+procedure TButton.Wire;
+begin
+  FOnClick := procedure begin Self.DoClick; end;   { closure captures Self }
+end;
+----
+
+This forms a cycle: `Self` → `FOnClick` (strong) → env (strong) → `Self`
+(strong, the captured field). Neither refcount ever reaches zero. Same
+problem, same solution as `[Weak]` class fields. Blaise offers a `[Weak]`
+capture annotation on the literal:
+
+[source,pascal]
+----
+  FOnClick := procedure [Weak Self] begin Self.DoClick; end;
+----
+
+Syntax: a bracketed `[Weak <name> {, <name>}]` capture-modifier list
+immediately after the `procedure`/`function` keyword (before params). Each
+named capture is promoted as a `[Weak]` env field: stored via the weak
+registry, auto-nil'd when the referent dies, and *skipped* by
+`$__env_cleanup_<id>` (because `_WeakZeroSlots` already cleared it). A
+weakly-captured `Self` that has died reads back as `nil`; the closure body is
+responsible for a `nil` check (same contract as any `[Weak]` field deref).
+
+Rationale for an explicit annotation over auto-weak-Self: Blaise's ARC is
+*explicit about cycle-breaking everywhere* (`[Weak]` on fields is never
+inferred); inferring weak capture would be surprising and inconsistent. The
+default is *strong* capture (correct for the common escaping-callback case);
+`[Weak]` is the opt-in for the self-storing case.
+
+== Semantic pass
+
+All work lands in `uSemantic.pas`, reusing the capture infrastructure.
+
+=== New / changed types
+
+* `uAST.pas`: `TProceduralTypeDef.IsReference: Boolean` (parallels
+  `IsMethodPtr`). A new expression node:
++
+[source,pascal]
+----
+  { Anonymous procedure/function literal as an expression. }
+  TAnonMethodExpr = class(TASTExpr)
+  public
+    Decl:        TMethodDecl;     { owned — the lifted body, params, return }
+    WeakCaptures: TStringList;    { owned; names listed in [Weak ...]; nil = none }
+    [Unretained] EnvType: TEnvTypeDesc;  { set by uSemantic — shared env, or nil }
+    LiftedName:  string;          { set by uSemantic — symbol of the thunk }
+    constructor Create;
+    destructor Destroy; override;
+  end;
+----
+
+* `uSymbolTable.pas`: `TProceduralTypeDesc.IsReference: Boolean`;
+  `IsCompatibleWith` extended to require matching `IsReference`. A synthetic
+  `TEnvTypeDesc = class(TRecordTypeDesc)` (it *is* a record for layout/cleanup
+  purposes; subclassing reuses field-offset and cleanup-proc generation).
+
+=== Capture analysis (generalised)
+
+`CollectCaptures` today walks *one nested `TMethodDecl`*. Generalise to:
+
+1. When resolving a routine body, collect every `TAnonMethodExpr` in it
+   (depth-first; closures may nest).
+2. For each, run the existing BFS (the statement/expression walk at
+   `uSemantic.pas` lines 6614-6714) to find references to *enclosing* names
+   (the enclosing routine's locals/params, transitively through outer
+   closures and `Self`).
+3. Union the per-closure capture sets into the enclosing routine's
+   `EnvCaptures`. Build one `TEnvTypeDesc`; record it on every literal's
+   `EnvType`.
+4. Resolve each captured name's type to size the env field. `Self` capture
+   adds a field typed as the owning class.
+
+The walk already handles assignments, field/array writes, calls, and all
+control flow — it is reused unchanged; only the *driver* (which decls to walk
+and where to deposit results) changes.
+
+=== Assignment compatibility and conversions [[conversions]]
+
+A `reference to` target accepts, with these rules (checked in
+`AreAssignmentCompatible` / the proc-type branch at `uSemantic.pas` line 1013):
+
+[cols="2,3"]
+|===
+| Source | Rule
+
+| Anonymous literal
+| Signature must match the target `reference to` type (params pairwise by
+  type + mode, return type). Env is synthesised. *Primary case.*
+
+| Another `reference to` of identical signature
+| Direct — `IsCompatibleWith` true. Refcounted copy.
+
+| A plain `procedure`/`function` symbol `@Foo`
+| *Allowed*: coerced to a closure with `Env = nil`, `Code = @Foo`. The thunk
+  ABI (env as hidden first arg) means a plain routine cannot be called
+  directly through a closure slot, so the compiler emits a tiny *adapter
+  thunk* `$__adapt_<Foo>(env, args...) = Foo(args...)` and stores its address
+  in `Code`. (Adapter is emitted once per referenced routine, cached.)
+
+| A method pointer `@Obj.M` / `of object` value
+| *Allowed*: `Env := Obj` (strong-retained as the receiver), `Code` :=
+  adapter `$__adapt_method(env, args...) = M(env, args...)` — `env` *is* the
+  `Self`, so the adapter is the identity call. The closure now strong-holds
+  `Obj`; this changes lifetime vs. a bare method pointer, which is the
+  correct ARC behaviour (the callback keeps its receiver alive).
+
+| `nil`
+| Both halves nil. Calling a nil closure raises (same as nil method-pointer
+  call).
+|===
+
+Reverse direction (`reference to` → plain `procedure`) is *rejected*: a
+closure carries an environment a bare pointer cannot represent. Overload
+resolution treats `reference to` as a distinct, non-coercible-from-record
+category; an anonymous literal argument participates in overload resolution
+by its synthesised signature against each candidate's `reference to`
+parameter.
+
+== Codegen (native x86-64)
+
+Lands in `blaise.codegen.native.x86_64.pas`; the QBE backend
+(`blaise.codegen.qbe.pas`) mirrors it (closures are backend-agnostic — fat
+value + indirect call).
+
+=== Lowering a literal
+
+For each `TAnonMethodExpr`:
+
+1. *Emit the thunk* as a hidden top-level routine
+   `$__closure_<unit>_<n>(env: Pointer; <declared params>): <ret>`.
+   The body is the literal's `Decl.Body` with captured-name references
+   already rewritten to `env^.Field` loads/stores by the semantic pass
+   (env arrives in the first integer-arg register, `%rdi`, then spilled to a
+   frame slot like any param). Non-captured locals are ordinary stack slots.
+2. *At the creation site* (inside the enclosing frame): materialise the
+   16-byte value — `Code := $__closure_<unit>_<n>`, `Env := <enclosing env
+   ptr>` with an `_ClassAddRef` (the closure takes its own strong ref).
+   Capture-free literal: `Env := nil`, no addref.
+
+=== Allocating the environment
+
+Emitted *once* per enclosing frame, at the point where the first captured
+variable would have been initialised:
+
+----
+  ; pseudo-asm at enclosing frame setup
+  mov   $sizeof_TEnv, %rdi
+  lea   $__env_cleanup_<id>(%rip), %rsi
+  call  _ClassAlloc                 ; %rax = env user ptr, RefCount = 1
+  mov   %rax, env_slot(%rbp)        ; frame holds one strong ref
+  ; initialise promoted fields from their initial expressions
+  ; (var-param captures store the &address instead)
+----
+
+At enclosing-frame teardown, `_ClassRelease(env_slot)` drops the frame's ref;
+the env outlives the frame iff a closure still references it.
+
+=== Calling through a `reference to` value
+
+Reuse `EmitMethodPtrCall` (line 788) almost verbatim — the only difference
+from a method pointer is *what the Data half means* (env vs. Self), which is
+transparent to the call:
+
+----
+  ; call clos(args...) where clos is a (Code, Env) slot at -off(%rbp)
+  mov   -off+0(%rbp), %rax          ; Code
+  mov   -off+8(%rbp), %rdi          ; Env  -> hidden first arg
+  ; declared args go in %rsi, %rdx, ... (shifted by one for the env)
+  call  *%rax
+----
+
+The env occupies the first integer-argument slot; declared parameters shift
+right by one, identical to how `of object` shifts for `Self`.
+
+=== Interop summary
+
+[cols="1,1,2"]
+|===
+| Value kind | Slot | Call lowering
+
+| Bare `procedure`
+| 8B (Code)
+| `call *code(args...)`
+
+| `of object`
+| 16B (Code, Self)
+| `call *code(self, args...)` — `EmitMethodPtrCall`
+
+| `reference to` (closure)
+| 16B (Code, Env)
+| `call *code(env, args...)` — same path, Env in the Self slot
+
+| coerced plain routine
+| 16B (adapter, nil)
+| adapter discards nil env, tail-calls the real routine
+|===
+
+== Generics interaction
+
+Blaise generics are *reified / monomorphised* (`uSemantic.pas`
+`InstantiateGeneric*`, `FindTypeOrInstantiate`), not erased. Consequences:
+
+* A `reference to` *used inside* a generic body is monomorphised with the
+  body: `TThunk<T> = reference to function: T` instantiated at `T = Integer`
+  becomes a concrete `reference to function: Integer`, its thunk and env
+  types emitted per instantiation, name-mangled like any other monomorphised
+  symbol. There is *no* boxing of `T` — the captured `T`-typed value sits in
+  the env at its concrete size.
+* *Capturing a type parameter's value*: when a closure inside a generic body
+  captures a `T`-typed local, the env field is typed `T`, resolved at
+  monomorphisation to the concrete type; its ARC treatment (managed vs.
+  value) is decided per instantiation by `TEnvTypeDesc` field-cleanup
+  generation, which runs *after* substitution. A `reference to function: T`
+  monomorphised at a managed `T` (e.g. `string`) gets a cleanup that releases
+  the field; at `T = Integer` the cleanup is a no-op.
+* Generic *bodies are serialised as templates* in `.bif`
+  (`uSemanticExport.pas` `ExportGenericBodies`): an anonymous literal inside a
+  generic body travels as part of the cloned `TBlock`, with `TAnonMethodExpr`
+  nodes intact, and is monomorphised at the importing site — so closures
+  compose with cross-unit generics for free, provided `CloneBlock`/
+  `CloneMethodDecl` are taught to deep-clone `TAnonMethodExpr` (Phase 6).
+
+== `.bif` serialisation
+
+Two concerns: the `reference to` *type* form, and closure-typed *signatures*
+that cross a unit boundary.
+
+=== Type payload (extend `WriteProcPayload`/`ReadProcPayload`)
+
+`uUnitInterfaceIO.pas` already serialises `IsFunction` and `IsMethodPtr` for
+a procedural type (lines 570-571, 2236-2237). Add one bool:
+
+[source,pascal]
+----
+  { WriteProcPayload — append after IsMethodPtr }
+  EncodeBool(Def.IsReference) +
+  ...
+  { ReadProcPayload — read after IsMethodPtr }
+  Def.IsReference := DecodeBool(AText, APos);
+----
+
+This is a *format-version bump* of the `.bif` header (older readers must
+reject the new field). Bump `BIF_VERSION` and add a round-trip test
+(<<testing>>).
+
+=== Closure values do NOT cross units
+
+A *closure value* (code+env) is a runtime object and is never serialised — it
+has no compile-time identity. What crosses a unit boundary is:
+
+* The *type* `reference to ...` (above).
+* A routine *signature* that takes/returns a `reference to` parameter — its
+  `TMethodParam.TypeName` is the named `reference to` type, already handled by
+  the existing param encoding (`EncodeLpstr(P.TypeName)`).
+* The *thunk* and *env-cleanup* symbols of closures defined in an exported
+  generic body — emitted at the importer's monomorphisation site, so they
+  are *regenerated*, not serialised (consistent with how monomorphised code
+  is always regenerated, never cached as machine code across units).
+
+No env layouts, no thunk bodies, and no adapter thunks appear in `.bif`.
+
+== EBNF fragment
+
+Append to `docs/grammar.ebnf` (Types and Expressions sections):
+
+----
+(* --- Types --- *)
+ProceduralType    = [ "reference" "to" ] ( "procedure" | "function" )
+                    [ "(" [ ParamList ] ")" ]
+                    [ ":" TypeName ]            (* required iff "function" *)
+                    [ "of" "object" ] ;
+                    (* "reference to" and "of object" are mutually exclusive *)
+
+(* --- Expressions --- *)
+Primary           = ... | AnonMethod ;
+AnonMethod        = ( "procedure" | "function" )
+                    [ WeakCaptureList ]
+                    [ "(" [ ParamList ] ")" ]
+                    [ ":" TypeName ]            (* required iff "function" *)
+                    Block ;                     (* full begin..end body *)
+WeakCaptureList   = "[" "Weak" Ident { "," Ident } "]" ;
+----
+
+Notes: `reference` is a soft keyword — recognised only in the
+`reference to procedure|function` position. `AnonMethod` is reachable only
+from expression (`Primary`) context, so it never collides with a type
+declaration.
+
+== AST node sketches
+
+[source,pascal]
+----
+{ uAST.pas — extend the existing procedural type def }
+TProceduralTypeDef = class(TASTTypeDef)
+public
+  Params:         TObjectList;
+  ReturnTypeName: string;
+  IsFunction:     Boolean;
+  IsMethodPtr:    Boolean;
+  IsReference:    Boolean;     { NEW — 'reference to' anonymous-method type }
+  constructor Create;
+  destructor Destroy; override;
+end;
+
+{ uAST.pas — new expression node }
+TAnonMethodExpr = class(TASTExpr)
+public
+  Decl:         TMethodDecl;   { owned: params, return, Body }
+  WeakCaptures: TStringList;   { owned; nil = none }
+  [Unretained] EnvType: TEnvTypeDesc;  { set by uSemantic; nil = capture-free }
+  LiftedName:   string;        { set by uSemantic; thunk symbol }
+  constructor Create;
+  destructor Destroy; override;
+end;
+
+{ uSymbolTable.pas — synthetic env type, reuses record layout + cleanup }
+TEnvTypeDesc = class(TRecordTypeDesc)
+public
+  EnclosingRoutine: string;    { for diagnostics / mangling }
+  { fields are TFieldInfo with IsWeak set for [Weak] captures }
+end;
+----
+
+[#phasing]
+== Phased implementation plan
+
+Each phase is independently testable and leaves the compiler green.
+
+Phase 0 — Type form only (no literals)::
+Parse `reference to procedure/function`; set `IsReference`. Resolve to
+`TProceduralTypeDesc` with `IsReference := True`. `.bif` round-trip the new
+bool (version bump). Declare variables of the type, assign `nil`, assign a
+*plain routine* (adapter thunk). _No capture yet._ Tests: parse, resolve,
+compatibility, `.bif` round-trip.
+
+Phase 1 — Capture-free literals::
+Parse `TAnonMethodExpr`. Lower the body as a thunk with a `nil` env. Assign
+to a `reference to` var; call it. Covers `Spawn(procedure begin Foo; end)`
+when the body captures nothing. Tests: IR (thunk emitted, fat value built),
+E2E (calls run).
+
+Phase 2 — Strong capture + environment record::
+Generalise `CollectCaptures` to drive `TEnvTypeDesc` promotion; rewrite
+captured refs to `env^.Field`; emit `_ClassAlloc`, env-cleanup proc, frame
+addref/release. Strings + value types first, then objects/interfaces. Tests:
+ARC refcount E2E (env freed exactly once), captured-string no-leak, the
+loop-capture worked example.
+
+Phase 3 — `Self` capture + method-pointer/closure interop::
+Capture `Self`; coerce `of object` values into closures (adapter +
+strong-retain receiver). Tests: closure stored in object field (leaks
+without Phase 5).
+
+Phase 4 — Block-scoped capture (loop idiom)::
+Make the promotion algorithm respect block scope so a `var` inside a loop
+body gets a fresh env per iteration. Tests: the "prints 0,1,2" idiom.
+
+Phase 5 — `[Weak]` capture::
+Parse `[Weak ...]`; promote as `[Weak]` env fields (weak registry,
+`_WeakZeroSlots`, skip in cleanup). Tests: self-storing closure does *not*
+leak; weak-captured `Self` reads nil after the object dies.
+
+Phase 6 — Generics::
+Deep-clone `TAnonMethodExpr` in `CloneBlock`/`CloneMethodDecl`; monomorphise
+env field types and cleanup per instantiation; `.bif` generic-body template
+carries closures. Tests: `reference to function: T` instantiated at `Integer`
+and at `string`; cross-unit generic body with a closure.
+
+Phase 7 — Concurrency hookup::
+Add the `reference to`-typed `TTaskGroup.Spawn` overload in the async stdlib
+(unblocks `docs/async-networking-design.adoc`). Tests: E2E spawn-with-closure.
+
+[#testing]
+== TDD testing strategy
+
+Matching `docs/testing-strategy.adoc`'s layered model. Tests are written
+*before* each phase's code (red → green → refactor).
+
+Compiler IR tests (`compiler/src/test/pascal/cp.test.anonmethods.pas`)::
+* `reference to` type parses and resolves; `IsReference` set; incompatible
+  with `of object` / bare proc of same signature.
+* Anonymous literal parses as an expression in arg and assignment position.
+* Capture analysis: a literal referencing `Total`, `Prefix`, `Self` yields a
+  `TEnvTypeDesc` with the right fields; capture-free literal yields nil env.
+* Codegen IR: thunk symbol `$__closure_*` emitted with env as first param;
+  fat value `(Code, Env)` materialised; call lowered as `code(env, args...)`;
+  `_ClassAlloc`/`_ClassAddRef`/`_ClassRelease` emitted at the right sites.
+* Adapter-thunk emission for coerced plain routines and method pointers.
+* Rejection: `reference to` → bare `procedure` assignment errors; nil-env
+  call of a function vs. procedure return shape.
+
+Compiler E2E tests (`cp.test.e2e.anonmethods.pas`)::
+* Capture-free closure runs and produces correct stdout.
+* By-reference capture: two closures sharing one env observe each other's
+  writes.
+* Loop-variable capture prints `3,3,3`; the block-scoped idiom prints
+  `0,1,2`.
+* `Self`-capturing event-handler callback fires correctly.
+* Closure stored in `TList<TProc>`, retrieved, and invoked after the
+  creating frame exits (escape).
+
+ARC / leak tests (leak tracker, mirroring runtime ARC tests)::
+* Env allocated once, released exactly once; `_LeakTrackerEnable` reports
+  zero leaks for capture-of-string, capture-of-object, capture-of-interface.
+* Cycle test *without* `[Weak]`: closure-in-own-field *leaks* (asserted, to
+  document the trap) — then *with* `[Weak]`: zero leaks, weak slot nil'd.
+* Double-free guard: releasing a coerced-plain-routine closure (nil env) is a
+  no-op.
+
+`.bif` round-trip tests (`cp.test.unitinterface.pas`, alongside
+`TestRoundTrip_ProceduralType`)::
+* A `reference to procedure`/`function` type survives export→import with
+  `IsReference`, params, and return intact.
+* A routine signature with a `reference to` parameter round-trips.
+* Old-version `.bif` (without the new bool) is *rejected* by the version bump.
+
+Fixpoint / self-host::
+* After landing, the stage-2 self-hosting fixpoints (QBE, native,
+  internal-assembler, warm-cache) must still converge — closures are a
+  compiler-internal feature first used by the async stdlib, so the compiler
+  itself need not use them, but the *runtime* env-cleanup path must be exercised
+  by the stdlib `TTaskGroup` tests in the fixpoint suite.
+
+== Risks and mitigations
+
+[cols="1,2,2"]
+|===
+| Risk | Impact | Mitigation
+
+| Env over-/under-release (the central ARC risk)
+| Use-after-free or leak of captured strings/objects
+| Reuse the *exact* `_ClassAlloc`/`_ClassRelease`/field-cleanup path that
+  records already use; do not invent a new lifetime mechanism. Leak-tracker
+  E2E gates every phase.
+
+| Block-scoped loop capture mis-allocation
+| Wrong env shared across iterations (subtle correctness bug)
+| Phase 4 is isolated and has the explicit `0,1,2` vs `3,3,3` test pair;
+  env-alloc site is emitted at the *declaring block*, not the routine entry.
+
+| Cycle leaks via self-capture
+| Quiet memory growth in event-handler-heavy code
+| `[Weak]` capture (Phase 5) + a documented leak test that *asserts* the
+  strong-capture cycle leaks, so the behaviour is intentional and visible.
+
+| `.bif` format break
+| Stale caches mis-parse
+| Version bump + reject-old-version test; matches existing `.bif` discipline.
+
+| Generic deep-clone misses `TAnonMethodExpr`
+| Closures inside generic bodies silently dropped or shared
+| Phase 6 adds explicit clone coverage; `CloneBlock` already deep-clones
+  expression trees, so this is an additive case, not a rewrite.
+
+| Adapter-thunk proliferation
+| Code bloat if every `@Foo` coercion emits a thunk
+| Cache adapters per referenced routine; emit once.
+
+| Escaping closure outlives a captured *var-parameter's* storage
+| Dangling pointer (a var-param's storage is the caller's frame)
+| For escaping closures, capturing a `var`/`out` parameter *by pointer* is
+  unsafe once the caller frame dies. Mitigation: the semantic pass *rejects*
+  capturing a `var`/`out` param in a closure that can escape (assigned to a
+  field, returned, or passed as an argument), with a clear diagnostic
+  suggesting capture of a local copy. Frame-local (non-escaping) closures may
+  capture var-params by pointer as the nested-proc path already does.
+|===
+
+[#alternatives]
+== Alternatives considered
+
+Closures as zero-GUID interfaces (`IClosure.Invoke`)::
+Rejected for the call-path indirection, the forced full-class-with-vtable per
+closure, and the awkward interop with non-interface `procedure`/`of object`
+values. The fat value reuses *more* existing machinery for *less* cost. (Kept
+in mind as a fallback if a future need for closure RTTI/reflection arises —
+an interface carries a typeinfo the fat value does not.)
+
+Capture by value (copy-in)::
+No Delphi precedent, surprising for shared-mutable patterns, and the
+by-reference single-env model is required for two closures in one scope to
+agree on a counter. The block-scoped-`var` idiom gives per-iteration value
+semantics where wanted, without a language qualifier.
+
+Stack-allocated env with escape analysis::
+A non-escaping closure could keep its env on the stack and skip the heap
+allocation. Rejected for v1 as premature optimisation: it needs a sound
+escape analysis (the `Spawn`/store/return cases all escape), and the
+`_ClassAlloc` path is cheap and uniform. Listed as a *future* optimisation
+(akin to the stack-allocation idea in `future-improvements.adoc`).
+
+Boxing every closure into a single heap pointer::
+Saves 8 bytes per slot at the cost of a mandatory allocation and an extra
+indirection on every call, including capture-free closures. Rejected.
+
+GoF / compiler-pattern notes::
+The environment record is the *Function Object* / *Closure conversion* (a.k.a.
+*lambda lifting* + *closure conversion* from the functional-compiler
+literature): free variables are lifted into an explicit record passed as a
+hidden parameter. The adapter thunks for plain-routine and method-pointer
+coercion are the *Adapter* pattern. The fat (Code, Env) value is the standard
+*closure representation* used by most ahead-of-time functional/OO compilers.

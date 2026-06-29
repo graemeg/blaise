@@ -1,0 +1,1051 @@
+= Operator Overloading Design
+:author: Graeme Geldenhuys
+:revdate: 2026-06-29
+:toc: left
+:toclevels: 3
+:source-highlighter: rouge
+:icons: font
+:sectanchors:
+:sectnums:
+
+== Motivation
+
+Blaise's exact-decimal type (`TDecimal` in `Numerics.Decimal`) and the
+currency-aware wrapper (`TMoney` in `Numerics.Money`) today expose arithmetic
+as *named methods*:
+
+[source,pascal]
+----
+Total := UnitPrice.Multiply(DecFromInt(Qty)).Add(Shipping);
+if A.Compare(B) < 0 then ...
+if A.Equals(B) then ...
+----
+
+This reads poorly compared with the obvious infix form:
+
+[source,pascal]
+----
+Total := UnitPrice * DecFromInt(Qty) + Shipping;
+if A < B then ...
+if A = B then ...
+----
+
+`docs/future-improvements.adoc` (§ "Operator overloading for `TDecimal`")
+records that operator overloading "is a compiler feature in its own right and
+warrants a separate design document". *This is that document.* It specifies a
+build-ready design: a fresh engineer should be able to read it and implement
+the feature.
+
+The scope is *user-defined operators on records and classes*: a type may
+declare an operator (e.g. `+`) whose body is an ordinary method, and the
+compiler lowers an operator expression `A + B` to a call to that method. The
+motivating goal is to let `A + B`, `A * B`, and the comparison operators layer
+*additively* onto `TDecimal`/`TMoney` without removing the existing named
+methods, while `Divide` stays a named method (it requires an explicit scale and
+rounding mode and so has no natural operator form).
+
+=== Design tenets
+
+The design is constrained by, and leans on, Blaise's existing dialect
+(see `docs/language-rationale.adoc`):
+
+* *Records are value types under ARC; classes are heap/reference under ARC.*
+  Operator results have lifetimes that the existing ARC machinery must manage.
+  A record-returning operator uses the same hidden-result-pointer (sret) ABI as
+  any record-returning function.
+* *Full ARC, no GC.* Result temporaries from operator calls are released by the
+  same temporary-lifetime rules that already cover record- and string-returning
+  function calls.
+* *Single UTF-8 string type.* The existing built-in `+` on `string` must keep
+  working unchanged; operator overloading layers *beside* the built-in operator
+  rules, it does not replace them.
+* *Reified generics (monomorphisation, not erasure).* This is the subtle part:
+  an operator used inside a generic body must resolve per monomorphised
+  instantiation. We exploit reification rather than introducing erasure-style
+  constraints.
+* *Zero-GUID interfaces; lean on `Generics.Collections` / `Generics.Defaults`.*
+  Where comparison operators connect to ordering/equality, they connect through
+  `IComparer<T>` / `IEqualityComparer<T>`, not a new mechanism.
+* *No `{$IFDEF}`; no new language feature unless designed here.* The one new
+  surface syntax is the operator declaration form (§3); everything else reuses
+  existing AST, semantic, codegen, and `.bif` machinery.
+
+== Background: how the relevant machinery works today
+
+This section records the *current* on-disk behaviour the design hooks into, so
+the integration points are unambiguous.
+
+=== AST representation of operators (today)
+
+Binary and unary operators are built-in, fixed enumerations in
+`compiler/src/main/pascal/uAST.pas`:
+
+[source,pascal]
+----
+{ uAST.pas:208 }
+TBinaryOp = (boAdd, boSub, boMul, boSlash, boDiv, boMod,
+             boEQ, boNE, boLT, boGT, boLE, boGE,
+             boAnd, boOr, boXor, boIn, boShl, boShr, boSar);
+
+TBinaryExpr = class(TASTExpr)
+public
+  Op:    TBinaryOp;
+  Left:  TASTExpr;  { owned }
+  Right: TASTExpr;  { owned }
+end;
+
+TNotExpr = class(TASTExpr)
+public
+  Expr: TASTExpr;  { owned — must be Boolean }
+end;
+----
+
+Two facts from the parser (`uParser.pas`) are load-bearing for the unary cases:
+
+* *Unary minus is desugared at parse time* into `0 - Factor`: `ParseFactor`
+  builds a `TBinaryExpr` with `Op = boSub`, a `TIntLiteral(0)` on the left, and
+  the operand on the right. *There is no dedicated negation node.* This means
+  unary `-` on a user type would arrive at the semantic pass as
+  `0 - A` — a binary `boSub` with an integer-literal left operand and a
+  record/class right operand. The design handles this (§6.4).
+* `not` is a real `TNotExpr` node.
+
+Every `TASTExpr` carries `[Unretained] ResolvedType: TTypeDesc`, filled by the
+semantic pass.
+
+=== Semantic analysis of binary expressions (today)
+
+`TSemanticAnalyser.AnalyseBinaryExpr` (`uSemantic.pas:12000`) is the single
+chokepoint. It analyses both operands (setting their `ResolvedType`), then
+dispatches on `Op` and the operand kinds:
+
+* `boIn` (set membership), set arithmetic/equality, logical `and`/`or`/`xor`,
+  comparison ops, string `+`, pointer arithmetic, shifts, then numeric
+  arithmetic with float promotion.
+* If none of the built-in rules fire, it raises a `SemanticError` such as
+  "Left operand of '+' must be numeric, got 'TDecimal'".
+
+Operator overloading inserts a *new fallback*: when the built-in rules do not
+apply and at least one operand is a record or class, attempt operator overload
+resolution before raising the error. Crucially the built-in rules are tried
+first, so `string + string`, `Integer + Integer`, set algebra, etc., are
+untouched.
+
+=== Method calls, overload resolution, and mangling (today)
+
+Method declarations are `TMethodDecl` (`uAST.pas:841`). Relevant existing
+fields the design reuses verbatim:
+
+* `IsStatic: Boolean` — a static (class-level) method receives *no* implicit
+  `Self`. Operator methods are static-like: they take their operands as
+  explicit parameters and have no `Self`.
+* `IsRecordMethod: Boolean` — owner type is a record.
+* `IsOverload: Boolean` — declared `overload`; multiple same-named decls merge
+  into one overload group.
+* `ResolvedQbeName: string` — mangled link symbol.
+* `Visibility`, `OwningUnit`, `ResolvedReturnType`, `Params` (a `TObjectList`
+  of `TMethodParam`).
+
+Overload resolution lives in two methods that already do exactly the
+candidate-gathering + scoring we need:
+
+* `ResolveMethodOverload(ATypeName, AMethodName, AArgs, ...)`
+  (`uSemantic.pas:6239`) — walks the inheritance chain from `ATypeName`,
+  collects candidates from the `FMethodGroups` index keyed `'Type.Method'`,
+  filters by arity, scores each argument with `ArgMatchScore`, and applies the
+  tie-breakers (highest total score; fewer defaulted slots; more exact
+  matches).
+* `ArgMatchScore(AParam, AArg, AArgExpr)` (`uSemantic.pas:9018`) — returns
+  `2` exact, `1` widening, `0` no-match. The integer-literal special-case
+  (`A + 1` against an `Integer` parameter scores 2) and the
+  `CheckTypesMatch` fall-through (subtype/conversion) are reused unchanged.
+
+Per-parameter type mangling for the link symbol is `MangleTypeCode`
+(`uSemantic.pas:8725`): records mangle as `'R' + Name`, classes as `'K' + Name`,
+etc. Operator methods reuse this so distinct operator overloads get distinct
+link symbols.
+
+=== Record-return ABI and ARC (today)
+
+`blaise.codegen.pas` carries a *shared* System V / Win64 record-return ABI
+classifier (`RecretClassify` and the `Recret*` leaf predicates,
+`blaise.codegen.pas:94`+) used identically by the QBE backend
+(`blaise.codegen.pas`) and the native backend
+(`blaise.codegen.native.x86_64.pas`). A record-returning function either:
+
+* returns small all-integer/all-float aggregates *in registers*; or
+* takes a hidden *sret* (structure-return) pointer to caller-allocated storage
+  for managed or large records.
+
+`TDecimal` contains a managed field (`FMag: TDigitMag`, a dynamic array) and is
+therefore *managed* — it always returns via the sret path. ARC retain/release
+of the returned record and any result temporary is already emitted by the
+record-returning-call codegen path. *Operator calls reuse this path verbatim*:
+after resolution, an operator expression is a record-returning (or
+scalar-returning) function call like any other.
+
+=== `.bif` serialisation of routines (today)
+
+`uUnitInterfaceIO.pas` serialises a unit's interface so importers do not
+re-parse source. `EncodeMethodSig`/`ReadMethodSig` (around `:339`/`:1911`)
+round-trip a `TRoutineSig` including `IsStatic`, `IsOverload`, visibility, and
+the parameter list. `EncodeMethodDecl`/`ReadMethodDecl` (`:440`/`:2000`) do the
+same off the AST node. The on-disk format is versioned (see the version-history
+comment block at the top of the file). Operators add *one bit* (`IsOperator`)
+plus an operator-kind tag to these records (§8).
+
+== Surface syntax
+
+=== Decision: Delphi-style `class operator`
+
+Two established Object Pascal forms exist:
+
+[cols="1,3a",options="header"]
+|===
+| Dialect | Form
+| Delphi  | `class operator Add(const A, B: TFoo): TFoo;`
+| FPC     | `operator + (A, B: TFoo): TFoo;` (and `operator + (A, B: TFoo) C: TFoo;`)
+|===
+
+*Recommendation: adopt the Delphi `class operator` form, declared inside the
+record/class type body.* Justification:
+
+. *Reuses the existing method-declaration parser.* `class operator Add(...)` is
+  lexically `static`-ish `function`-with-a-keyword: the operator name (`Add`,
+  `Multiply`, `Equal`, ...) is an *identifier*, parsed by the existing
+  `ParseMethodDecl`. The FPC form puts a *symbol token* (`+`, `*`, `<=`) where
+  a method name goes, which would require special-casing the symbol tokens in
+  the member-parsing loop and a separate name→operator mapping. The Delphi form
+  needs only a new leading keyword.
+. *Consistent with Blaise's existing `static` class methods.* Operator methods
+  are exactly static methods (no `Self`, type-associated dispatch). The dialect
+  already has `static function`/`static procedure` inside records and classes
+  (`uParser.pas:2004`+, `:2143`+). `class operator` is the same shape with a
+  distinguishing keyword and a fixed, known set of operator names.
+. *Declared inside the type, so candidate-gathering is type-scoped.* Operators
+  must be looked up on the operand *types*, not via ordinary name scope (§6).
+  Putting the declaration inside the record/class body means the existing
+  `FMethodGroups` index (keyed `'Type.Method'`) already collects them with no
+  new index.
+. *No standalone-operator ambiguity.* The FPC standalone form (`operator +`
+  outside any type, in a unit's interface) raises questions about which unit's
+  operators are visible and how they interact with `uses` order. The Delphi
+  form sidesteps this: an operator belongs to a type, and a type is already
+  resolved through the uses chain, so operator visibility == type visibility.
+
+The cost is that `class operator` is slightly more verbose than `operator +`,
+and the operator *name* (e.g. `Add`) must be spelled rather than the symbol.
+This is acceptable and, in fact, desirable: the spelled name is what we mangle
+into the link symbol and serialise to `.bif`, and it gives a natural,
+greppable identifier.
+
+=== Operator names
+
+Each overloadable operator has a fixed reserved *operator name* used after the
+`operator` keyword. These names are recognised *only* in the
+`class operator` position (they are not new global reserved words), mirroring
+how `static`, `overload`, etc., are contextual identifiers in the parser
+(`SameText(FCurrent.Value, 'overload')`).
+
+[cols="1,1,2",options="header"]
+|===
+| Operator | Operator name | Notes
+| `+`  | `Add`           | binary
+| `-`  | `Subtract`      | binary
+| `*`  | `Multiply`      | binary
+| `/`  | `Divide`        | binary (real division)
+| `=`  | `Equal`         | binary, returns Boolean
+| `<>` | `NotEqual`      | binary, returns Boolean
+| `<`  | `LessThan`      | binary, returns Boolean
+| `>`  | `GreaterThan`   | binary, returns Boolean
+| `<=` | `LessThanOrEqual`    | binary, returns Boolean
+| `>=` | `GreaterThanOrEqual` | binary, returns Boolean
+| unary `-` | `Negative` | unary
+| `Implicit` | `Implicit`  | conversion (deferred to v2, see §5)
+| `Explicit` | `Explicit`  | conversion (deferred to v2, see §5)
+|===
+
+The names match Delphi's `System` unit operator-method names exactly, which
+helps source-level portability and gives migrating code a familiar mapping.
+
+=== Declaration inside a record
+
+[source,pascal]
+----
+type
+  TDecimal = record
+    FCompact:  Int64;
+    FMag:      TDigitMag;
+    FScale:    Integer;
+    FNegative: Boolean;
+    FInflated: Boolean;
+
+    { existing named methods stay — operators layer on additively }
+    function Add(const B: TDecimal): TDecimal;
+    function Compare(const B: TDecimal): Integer;
+    function Equals(const B: TDecimal): Boolean;
+
+    { new: operator declarations }
+    class operator Add(const A, B: TDecimal): TDecimal;
+    class operator Subtract(const A, B: TDecimal): TDecimal;
+    class operator Multiply(const A, B: TDecimal): TDecimal;
+    class operator Negative(const A: TDecimal): TDecimal;
+    class operator Equal(const A, B: TDecimal): Boolean;
+    class operator NotEqual(const A, B: TDecimal): Boolean;
+    class operator LessThan(const A, B: TDecimal): Boolean;
+    class operator GreaterThan(const A, B: TDecimal): Boolean;
+    class operator LessThanOrEqual(const A, B: TDecimal): Boolean;
+    class operator GreaterThanOrEqual(const A, B: TDecimal): Boolean;
+  end;
+----
+
+Implementations are ordinary out-of-line method bodies, using the existing
+`TypeName.OperatorName` impl syntax — but because two operator overloads can
+share a name (e.g. `TMoney.Add` for money+money and a future money+decimal),
+implementations are matched to declarations by full signature, exactly as
+overloaded methods already are. The recommended body delegates to the existing
+named method so there is one source of truth:
+
+[source,pascal]
+----
+class operator TDecimal.Add(const A, B: TDecimal): TDecimal;
+begin
+  Result := A.Add(B);     { delegate to the existing instance method }
+end;
+
+class operator TDecimal.Negative(const A: TDecimal): TDecimal;
+begin
+  Result := A.Negate();
+end;
+
+class operator TDecimal.LessThan(const A, B: TDecimal): Boolean;
+begin
+  Result := A.Compare(B) < 0;
+end;
+----
+
+=== Declaration inside a class
+
+Identical shape; the operands are references (the class is a heap type under
+ARC) and the result is usually a freshly allocated instance:
+
+[source,pascal]
+----
+type
+  TVector2 = class
+    X, Y: Double;
+    constructor Create(AX, AY: Double);
+
+    class operator Add(const A, B: TVector2): TVector2;
+    class operator Equal(const A, B: TVector2): Boolean;
+  end;
+
+class operator TVector2.Add(const A, B: TVector2): TVector2;
+begin
+  Result := TVector2.Create(A.X + B.X, A.Y + B.Y);   { caller owns the result }
+end;
+----
+
+ARC manages the returned reference exactly as for any reference-returning
+function (§7.2).
+
+== Operator set for v1
+
+[cols="1,1,3a",options="header"]
+|===
+| Group | v1? | Rationale
+| Binary arithmetic `+ - * /` | *yes* | The motivating case. Each maps to one operator name.
+| Integer `div` / `mod`       | *no (v1)* | `div`/`mod` are integer-only by definition in Blaise; a user record that wanted them is exotic. Deferring keeps `boDiv`/`boMod` semantics simple. Trivial to add later (reserve names `IntDivide`, `Modulus`).
+| Comparison `= <> < > <= >=` | *yes* | Needed for `if A < B`, sorting, and the `IComparer`/`IEqualityComparer` bridge (§7.4).
+| Unary `-` (`Negative`)      | *yes* | Natural for numerics; handled via the desugared `0 - A` form (§6.4).
+| Unary `not`                 | *no (v1)* | `not` is Boolean-only in Blaise; a `not` on a user type has no compelling case yet. `TNotExpr` is a separate node, so adding it later is isolated.
+| `in`, `shl`/`shr`/`sar`, `and`/`or`/`xor` | *no* | Bit/set/membership semantics are intrinsic; not overloadable.
+| Conversion `Implicit`/`Explicit` | *no (v1), designed for v2* | Powerful but risky for resolution (they interact with every assignment and argument bind). v1 ships without them; §5.2 records the v2 design so the AST/`.bif` reserve room.
+|===
+
+=== `/` for `TDecimal`: operator yes, but division stays a named method
+
+There is a subtlety. `Numerics.Decimal` deliberately has *no* zero-argument
+`Divide`: every division carries an explicit `TargetScale` and rounding
+`Mode`/`Strategy` (`numerics.decimal.pas:213`). There is therefore *no natural
+`A / B`* for `TDecimal` — the result scale is undefined. Per
+`future-improvements.adoc`, *`Divide` stays a named method for `TDecimal`*.
+
+The compiler still *supports* a `Divide` operator in general (a type may declare
+`class operator Divide`), but `TDecimal`/`TMoney` simply *do not declare one*.
+Writing `A / B` on two `TDecimal` values then produces the normal
+"operator '/' not defined for 'TDecimal'" error, steering the author to
+`A.Divide(B, Scale, Mode)`. This is the intended ergonomics: the type opts into
+exactly the operators that have unambiguous semantics.
+
+=== Interaction of `=`/`<>` with default identity/value equality
+
+Today (`AnalyseBinaryExpr`, comparison branch, `uSemantic.pas:12131`):
+
+* *Classes* compare by *reference identity* when both operands are class-typed
+  and subtype-compatible (or one is `TObject`). `A = B` is pointer equality.
+* *Records* have *no* built-in `=`/`<>` — comparing two records is currently a
+  semantic error (the comparison branch's `CheckTypesMatch` rejects records
+  that are not in the allow-list).
+
+The overload rules preserve both:
+
+* For *records*, since there is no built-in `=`, a declared `Equal` operator is
+  the *only* meaning of `=` — no conflict. If a record declares neither
+  `Equal` nor `NotEqual`, `A = B` stays an error (unchanged).
+* For *classes*, the built-in reference-identity `=` is tried *first* and wins
+  when both sides are class-typed and compatible. A class's `Equal` operator is
+  therefore consulted *only* when the built-in rule does not apply — in
+  practice this means a class operator `Equal` does *not* silently change the
+  meaning of existing `Obj1 = Obj2` identity tests. This is the conservative,
+  least-surprising choice and matches Delphi (where `class operator Equal`
+  overrides identity comparison) only partially: *Blaise keeps identity
+  semantics for classes by default.* A type author who wants value equality on
+  a class should expose `Equals` (the method) and use it explicitly, or use the
+  `IEqualityComparer<T>` bridge (§7.4). This avoids a footgun where adding an
+  `Equal` operator quietly breaks identity-based collection lookups.
++
+NOTE: This is a deliberate divergence from Delphi, recorded as an alternative
+in §11. Records get value equality from operators; classes keep identity unless
+the author uses the explicit method/comparer path.
+
+* `<>` is *not* auto-derived from `=`. A type must declare `NotEqual`
+  explicitly (the recommended body is `Result := not (A = B)` written as a
+  delegation). Auto-deriving `<>` from `=` (and `>` from `<`) is recorded as a
+  possible v2 convenience in §11; v1 keeps the rule "you wrote it, it exists" to
+  avoid surprising synthesised behaviour.
+
+== Conversion operators (v2 design, not in v1)
+
+Recorded here so the AST node and `.bif` record reserve the encoding and a
+later engineer has the full plan.
+
+=== `Implicit` and `Explicit`
+
+[source,pascal]
+----
+class operator TDecimal.Implicit(const A: Integer): TDecimal;   { Integer → TDecimal, no cast }
+class operator TDecimal.Explicit(const A: TDecimal): Double;     { Double(D), explicit cast only }
+----
+
+* `Implicit` participates in *assignment* and *argument binding*: `D := 5;`
+  or passing an `Integer` where a `TDecimal const` parameter is expected.
+* `Explicit` participates *only* under an explicit type-cast syntax
+  `Double(D)`.
+
+=== Why deferred
+
+Conversion operators perturb the *whole* type-compatibility surface
+(`CheckTypesMatch`, `ArgMatchScore`, assignment checking), not just one
+fallback in `AnalyseBinaryExpr`. They can also create resolution ambiguities
+(two implicit conversions reaching the same target). v1 ships arithmetic and
+comparison — the motivating need — and `Implicit`/`Explicit` are a self-contained
+follow-up. The AST/`.bif` operator-kind enum (§6.1, §8) reserves `opImplicit`
+and `opExplicit` values so v2 needs no format bump.
+
+== Overload resolution: the hard part
+
+=== AST additions
+
+A new operator-kind enum and a flag/field on `TMethodDecl` in `uAST.pas`:
+
+[source,pascal]
+----
+{ uAST.pas — near TBinaryOp }
+TOperatorKind = (
+  opNone,            { not an operator method }
+  opAdd, opSubtract, opMultiply, opDivide,
+  opEqual, opNotEqual, opLessThan, opGreaterThan,
+  opLessThanOrEqual, opGreaterThanOrEqual,
+  opNegative,
+  opImplicit, opExplicit );   { reserved for v2 }
+
+{ uAST.pas — TMethodDecl, new field }
+TMethodDecl = class(TASTNode)
+public
+  ...
+  IsOperator:   Boolean;        { declared with `class operator` }
+  OperatorKind: TOperatorKind;  { opNone unless IsOperator }
+  ...
+end;
+----
+
+An operator method is recorded as a *static method* (`IsStatic := True`,
+`VTableSlot := -1`) whose `Name` is the operator name (`'Add'`, `'Equal'`,
+...). Setting `IsStatic` means existing codegen and `.bif` paths treat it as a
+no-`Self` static call automatically — we are reusing the static-method machinery
+wholesale.
+
+A small helper maps `TBinaryOp`/unary → required `TOperatorKind` and the
+spelled name:
+
+[source,pascal]
+----
+{ uSemantic.pas — new helpers }
+function BinaryOpToOperatorKind(AOp: TBinaryOp): TOperatorKind;
+{ boAdd→opAdd, boSub→opSubtract, boMul→opMultiply, boSlash→opDivide,
+  boEQ→opEqual, boNE→opNotEqual, boLT→opLessThan, boGT→opGreaterThan,
+  boLE→opLessThanOrEqual, boGE→opGreaterThanOrEqual; else opNone }
+
+function OperatorKindName(AKind: TOperatorKind): string;
+{ opAdd→'Add', ... — the method-index key suffix }
+----
+
+=== Candidate gathering — operators are looked up on the operand TYPES
+
+This is the rule that differs from ordinary calls. For ordinary calls the
+method/proc name comes from source and is resolved through scope. For an
+operator there is no source name; the *operand types* determine which operator
+methods are candidates. The procedure:
+
+. Analyse both operands (already done at the top of `AnalyseBinaryExpr`),
+  giving `LType` and `RType` with their `ResolvedType`.
+. Compute `Kind := BinaryOpToOperatorKind(ABin.Op)`. If `opNone` (e.g. `boIn`,
+  `boShl`), operators do not apply — leave the built-in error path.
+. Gather candidates from the operator-bearing operand types. For a binary
+  operator, the candidate set is the *union* of:
++
+[loweralpha]
+.. operators named `OperatorKindName(Kind)` declared on `LType` (if `LType` is
+   a record or class), walking its inheritance chain — exactly
+   `ResolveMethodOverload(LType.Name, Name, ...)`'s candidate walk; and
+.. operators named `OperatorKindName(Kind)` declared on `RType` (if a record or
+   class).
++
+Both contribute via the *existing* `FMethodGroups` index keyed
+`LType.Name + '.' + Name` / `RType.Name + '.' + Name`. No new index is needed.
+. Filter to *operator* candidates only (`Cand.IsOperator and
+  (Cand.OperatorKind = Kind)`), with arity 2 (binary) / 1 (unary).
+. Score each candidate's two parameters against `(LType, RType)` using the
+  *existing* `ArgMatchScore`. Both operands must score > 0.
+. Apply the *existing* tie-breakers from `ResolveMethodOverload`
+  (`uSemantic.pas:6324`+): highest summed score; then fewer defaulted slots;
+  then more exact (score-2) arguments. Genuine ties raise
+  "ambiguous operator '%s' for '%s' and '%s'".
+
+Because candidates from `LType` and `RType` are pooled and then scored, a
+mixed-type operator (e.g. a future `class operator Multiply(const A: TMoney;
+const B: TDecimal): TMoney` declared on `TMoney`) is found when the expression
+is `MoneyVal * DecVal`, even though the *left* type owns it. De-duplication: if
+the same `TMethodDecl` is reachable from both operand types (commutative
+same-type operator like `TDecimal.Add`), it is counted once (compare by node
+identity before adding to the candidate list).
+
+=== Resolution flow diagram
+
+[source]
+----
+                    AnalyseBinaryExpr(ABin)
+                            │
+              analyse Left, Right → LType, RType
+                            │
+        ┌───────────────────┴───────────────────┐
+        │  Built-in rules (UNCHANGED, tried 1st) │
+        │  boIn / set algebra / and-or-xor /     │
+        │  comparison(num,class-id,float) /      │
+        │  string '+' / pointer arith / shifts / │
+        │  numeric arith + float promotion       │
+        └───────────────────┬───────────────────┘
+                            │ matched?
+                  ┌─────────┴──────────┐
+                yes                    no
+                  │                     │
+            return built-in       ┌─────┴───────────────────────┐
+            ResolvedType          │ Kind := BinaryOpToOperator-  │
+                                  │          Kind(ABin.Op)        │
+                                  └─────┬─────────────────────────┘
+                                        │ opNone?
+                              ┌─────────┴─────────┐
+                            yes                   no
+                              │                    │
+                       raise built-in       LType/RType a record|class?
+                       "operator not          ┌──────┴──────┐
+                        defined" error        no            yes
+                                              │              │
+                                       raise built-in   gather candidates on
+                                       error            LType ∪ RType chains,
+                                                        filter IsOperator &
+                                                        OperatorKind=Kind,
+                                                        score with ArgMatchScore
+                                                              │
+                                                   ┌──────────┴──────────┐
+                                              0 candidates          ≥1 candidate
+                                                   │                      │
+                                          raise "operator not    pick best (tie-
+                                          defined for T"          breakers); set
+                                                                  ABin.ResolvedOp
+                                                                  := Best;
+                                                                  ResolvedType :=
+                                                                  Best.ReturnType
+----
+
+=== Unary minus: the `0 - A` problem
+
+Because the parser desugars `-A` into `TBinaryExpr(boSub, IntLit(0), A)`
+(`uParser.pas` `ParseFactor`, `tkMinus` branch), a unary minus on a record
+*arrives as a binary subtraction* `0 - A`. The semantic pass must recognise
+this shape so it can dispatch to the *unary* `Negative` operator rather than
+fruitlessly looking for `class operator Subtract(Integer, TDecimal)`.
+
+Rule, applied at the start of the operator fallback when
+`ABin.Op = boSub`:
+
+* If `ABin.Left` is a `TIntLiteral` with `Value = 0` *and* the synthesised
+  zero's source position equals the operator's (the desugaring stamps both with
+  the `-` token's line/col, distinguishing it from an authored `0 - A`), *and*
+  `RType` is a record/class that declares a `Negative` operator, then resolve to
+  the `Negative` operator with `RType` as the single operand. Otherwise fall
+  through to normal binary `Subtract` resolution.
+
+[NOTE]
+====
+A cleaner long-term fix is to give unary minus its own AST node
+(`TUnaryExpr` / `TNegExpr`) so the desugaring no longer fabricates a literal
+zero. That is a small, separable refactor recorded as an alternative in §11; the
+`0 - A` recognition above keeps v1 self-contained without touching the parser's
+existing numeric-folding behaviour.
+====
+
+`not` (a real `TNotExpr`) is *not* overloadable in v1 (§4), so `AnalyseExpr`'s
+`TNotExpr` branch is unchanged.
+
+=== Interaction with implicit conversions and promotions
+
+The operator fallback runs *after* the built-in numeric/float/string/pointer
+rules, so existing implicit promotions (Integer→Double, Single→Double,
+integer-literal→any-integer) are applied first and are never shadowed by an
+operator. Within operator scoring, `ArgMatchScore`'s existing widening and
+`CheckTypesMatch` fall-through give the natural behaviour:
+
+* `DecVal + 1` against `class operator Add(const A, B: TDecimal)` scores `0`
+  for the second arg today (an `Integer` is not assignable to a `TDecimal`
+  without a conversion operator), so this *fails to resolve* in v1 — the author
+  writes `DecVal + DecFromInt(1)`. Once `Implicit(Integer): TDecimal` lands
+  (v2), the conversion makes `DecVal + 1` resolve. This staging is intentional:
+  arithmetic operators ship first; implicit numeric literals come with
+  conversion operators.
+
+=== The resolved call is recorded on the node
+
+`TBinaryExpr` gains one field so codegen needs no re-resolution:
+
+[source,pascal]
+----
+TBinaryExpr = class(TASTExpr)
+public
+  Op:    TBinaryOp;
+  Left:  TASTExpr;
+  Right: TASTExpr;
+  [Unretained] ResolvedOperator: TObject;  { TMethodDecl when an overloaded
+                                             operator was selected; nil for a
+                                             built-in operator }
+end;
+----
+
+When `ResolvedOperator <> nil`, codegen lowers to a static method call;
+otherwise the existing built-in lowering runs unchanged.
+
+== Codegen: lowering an operator expression to a method call
+
+=== General shape
+
+In both backends, the binary-expression emitter gains a single guard at the
+top:
+
+[source]
+----
+emit TBinaryExpr(B):
+    if B.ResolvedOperator <> nil then
+        return EmitOperatorCall(B)        // NEW
+    ... existing built-in lowering by B.Op ...
+----
+
+`EmitOperatorCall` synthesises the equivalent of a static call to
+`B.ResolvedOperator` with two argument expressions (`B.Left`, `B.Right`) — or
+one (`B.Right`, for the recognised unary-minus shape). The arguments are passed
+exactly as the operator's parameters declare them: `const` record parameters are
+passed by reference (a pointer to the operand's storage), `const` class
+parameters pass the reference. This is *literally the existing static
+method-call lowering path* — `EmitOperatorCall` builds a transient
+`TMethodCallExpr`-equivalent or, more cheaply, calls the same internal
+"emit a call to this `TMethodDecl` with these arg nodes" helper the
+method-call path already uses. The link symbol is `ResolvedOperator.ResolvedQbeName`.
+
+There is no new ABI. The whole point of choosing method-call lowering is that
+operators inherit calling-convention, argument marshalling, sret, and ARC
+behaviour for free.
+
+=== Result lifetime — records (value types under ARC)
+
+When the operator returns a record (the `TDecimal`/`TMoney` case):
+
+* The result type is *managed* (`TDecimal.FMag` is a dynamic array), so
+  `RecretClassify` selects the *sret* path. The caller allocates result
+  storage; the operator writes through the hidden result pointer; ARC retains
+  the managed fields as part of normal record assignment.
+* In a *nested* expression `A + B + C`, the inner `A + B` produces a *result
+  temporary*. The temporary's lifetime is governed by the *existing*
+  record-returning-call temporary-management rules — the same rules that
+  already make `A.Add(B).Add(C)` correct today (the method form is already a
+  record-returning call chain). Because the operator lowers to the identical
+  call, no new temporary-ARC logic is required; the emitter reuses the
+  function-result temporary slot and its release.
+
+[IMPORTANT]
+====
+The correctness argument is *equivalence*: `A + B` lowers to a call that is
+byte-for-byte the same as the call `TDecimal.Add(A, B)` (a static operator) or
+`A.Add(B)` (instance method) would emit. Anything already correct for the named
+method is correct for the operator. The TDD plan (§9) asserts this by comparing
+generated IR/output of the operator form against the method form.
+====
+
+=== Result lifetime — classes (reference types under ARC)
+
+A class-returning operator (`TVector2.Add`) returns a *new heap reference*. ARC
+retain/release on the returned reference and any intermediate temporary is
+emitted by the existing reference-returning-call path. Authors must allocate the
+result (`Result := TVector2.Create(...)`); the returned strong reference is
+released by the caller's normal scope-exit ARC, identical to any
+function-returning-a-class today.
+
+=== Comparison operators returning Boolean
+
+`Equal`/`LessThan`/etc. return `Boolean` (a scalar) — the simplest case: a plain
+register-returning static call, no sret, no ARC. The result feeds `if`,
+`while`, etc., unchanged.
+
+== Generics interaction (reified)
+
+This is the subtle correctness point given Blaise's *reified* (monomorphising)
+generics.
+
+=== The mechanism: monomorphisation resolves operators at instantiation
+
+Consider a generic that uses `+` on its type parameter:
+
+[source,pascal]
+----
+generic function SumAll<T>(const Items: array of T): T;
+var I: Integer;
+begin
+  Result := Items[0];
+  for I := 1 to High(Items) do
+    Result := Result + Items[I];   { '+' on T }
+end;
+----
+
+Because Blaise *monomorphises* (it does not erase), the body is re-analysed *per
+instantiation* with `T` bound to a concrete type. The analyser already registers
+type-parameter bindings as `skType` aliases (`T = Integer`, `T = TDecimal`)
+while analysing an instantiated generic body (`FActiveTypeParams`,
+`uSemantic.pas:76`+). Therefore, inside `SumAll<TDecimal>`, the expression
+`Result + Items[I]` has `LType = RType = TDecimal`, and the *normal* operator
+fallback (§6) resolves it to `TDecimal`'s `Add` operator. Inside
+`SumAll<Integer>`, the same expression takes the *built-in* integer `+`. *No new
+machinery, no constraint, is required* — reification means operator resolution
+"just works" per instantiation, exactly as method calls on `T` already do.
+
+[source]
+----
+   generic body  SumAll<T>   (T is a skType alias during analysis)
+        │
+        │   instantiate SumAll<TDecimal>          instantiate SumAll<Integer>
+        ▼                                          ▼
+  re-analyse body with T=TDecimal           re-analyse body with T=Integer
+        │                                          │
+  '+' fallback finds TDecimal.Add operator   built-in Integer '+'
+        │                                          │
+  lower to call $Numerics.Decimal_Add...     lower to add instruction
+----
+
+=== Do we need a constraint?
+
+*No constraint is required for correctness.* If a generic is instantiated with a
+type that supports the operator, it compiles; if not, the *normal* "operator not
+defined for 'T'" error is reported *at the instantiation site's re-analysis*,
+pointing at the offending instantiation. This matches how a missing method on
+`T` is already reported.
+
+A constraint is offered as an *optional ergonomic* (v2): the existing
+`TypeParamConstraints` slot (`uAST.pas:877`) could carry a constraint such as
+`<T: Numeric>` or a comparer-shaped constraint, so the error is reported at the
+*generic declaration* rather than each instantiation. v1 ships without it
+(consistent with reified generics' "errors surface at instantiation" model).
+
+=== Relationship to `Generics.Defaults` comparers
+
+For *ordered/keyed containers* (`Generics.Collections`), the connection between
+`<`/`=` operators and `IComparer<T>` / `IEqualityComparer<T>`
+(`generics.defaults.pas`) is deliberately *explicit*, not automatic:
+
+* A collection that needs ordering takes an `IComparer<T>` (e.g.
+  `TIntegerComparer`). Operators do *not* secretly satisfy a comparer interface
+  — Blaise has zero-GUID interfaces and reified generics, and we do not
+  synthesise an interface implementation from an operator.
+* The recommended bridge is a *generic default comparer* that, when
+  monomorphised for a `T` whose type declares the relevant operators, has a body
+  written in terms of `<` / `=`:
++
+[source,pascal]
+----
+{ Generics.Defaults — future addition, opt-in }
+type
+  TComparer<T> = class(IComparer<T>)
+    function Compare(A, B: T): Integer;
+  end;
+
+function TComparer<T>.Compare(A, B: T): Integer;
+begin
+  if A < B then Result := -1            { resolves per instantiation: }
+  else if A > B then Result := 1        { built-in for Integer, the }
+  else Result := 0;                      { LessThan/GreaterThan operator for TDecimal }
+end;
+----
++
+Because the body is monomorphised, `TComparer<TDecimal>` resolves `<`/`>` to
+`TDecimal`'s operators, and `TComparer<Integer>` to built-in integer
+comparison. A `TList<TDecimal>` can then sort with
+`TComparer<TDecimal>.Create` with no special-casing in the container. This is
+the additive payoff: declaring `<` on `TDecimal` makes it sortable through the
+existing comparer-driven collections. (Shipping `TComparer<T>` itself is
+out of scope for this document; it is noted as the natural follow-on.)
+
+== `.bif` serialisation
+
+Operators declared in a unit *interface* (e.g. `TDecimal`'s operators in
+`Numerics.Decimal`) must round-trip through the unit's `.bif` so that a
+*separate compilation* importing `Numerics.Decimal` can resolve `A + B` without
+re-parsing the source.
+
+=== What to serialise
+
+Operators are methods on a type, so they already travel inside the type's method
+list in the `'TYPE'`/`'ROUT'` records. The two flags added in §6.1 must be
+serialised:
+
+* `EncodeMethodSig`/`ReadMethodSig` and `EncodeMethodDecl`/`ReadMethodDecl`
+  (`uUnitInterfaceIO.pas`) gain *one extra boolean* (`IsOperator`) followed by
+  *one small integer* (`Ord(OperatorKind)`), written immediately after the
+  existing `IsOverload` field, mirroring how `IsStatic`/`IsOverload` were added
+  in earlier format revisions (see the version-history block at the top of
+  `uUnitInterfaceIO.pas`). The reader must read them in the *same order*.
+* Bump the `.bif` format version constant and add a version-history entry
+  ("vN: TRoutineSig/TMethodDecl gain IsOperator + OperatorKind").
+
+Because operator methods are `IsStatic := True`, the *existing* static-method
+serialisation already carries the parameter types and return type needed for
+cross-unit overload scoring; only the operator-discriminator fields are new.
+
+=== Importer side
+
+On import, `ReadMethodSig`/`ReadMethodDecl` set `IsOperator`/`OperatorKind`, and
+the imported decls are registered into `FMethodGroups` under
+`'TDecimal.Add'` etc. exactly as today. The operator fallback in
+`AnalyseBinaryExpr` then finds them with no awareness that they came from a
+`.bif` rather than source. A `.bif` *round-trip test* (§9) asserts that a
+program using `A + B` on an imported `TDecimal` compiles identically whether
+`Numerics.Decimal` was compiled from source or loaded from its cached `.bif`.
+
+== Testing strategy (TDD)
+
+Following `docs/testing-strategy.adoc`'s three layers plus the project's
+fixpoint discipline. Tests are written *first*, red, then made green.
+
+=== Unit tests (punit, compiler-internal)
+
+In `compiler/src/test/pascal/` (new `cp.test.operators.pas`, plus additions to
+the existing `cp.test.numerics.decimal.pas` / `cp.test.numerics.money.pas`):
+
+. *Parser*: `class operator Add(const A, B: TFoo): TFoo;` inside a record and
+  inside a class produces a `TMethodDecl` with `IsOperator = True`,
+  `OperatorKind = opAdd`, `IsStatic = True`, correct params/return.
+. *Parser negatives*: unknown operator name (`class operator Frobnicate`) is a
+  parse/semantic error; wrong arity (`class operator Add` with one param)
+  errors.
+. *Resolution*: `BinaryOpToOperatorKind` mapping; candidate gathering pulls from
+  *both* operand types; tie-break selects the more-exact overload; genuine
+  ambiguity raises.
+. *Unary-minus shape*: `-D` (parsed as `0 - D`) resolves to `Negative`, while an
+  authored `Zero - D` resolves to `Subtract`.
+. *Built-in precedence*: `string + string`, `Integer + Integer`, set algebra are
+  unaffected (operator fallback not consulted).
+. *Class `=` identity preserved*: a class with an `Equal` operator still
+  compares by identity for `Obj1 = Obj2` per §4.3.
+
+=== End-to-end tests (compiled programs)
+
+In `tests/e2e/` (or the project's e2e fixtures), small programs whose *output*
+is checked:
+
+. `A + B`, `A - B`, `A * B`, `-A` on `TDecimal` print the same strings as the
+  equivalent `A.Add(B)` etc. — the *equivalence* assertion of §7.2.
+. Comparison operators drive `if`/sorting: `if A < B`, and a `TList<TDecimal>`
+  sorted via a comparer whose body uses `<`.
+. `TMoney` arithmetic with `+`/`-` honouring `EMoneyMismatch` (the operator
+  delegates to `Add`, which raises) — confirms exception flow is identical.
+. ARC stress: `A + B + C + D` in a loop with no leaks (run under the existing
+  ARC leak-check harness); a class-returning `+` in a loop.
+
+=== `.bif` round-trip test
+
+. Compile `Numerics.Decimal` to `.bif`. Compile a client that uses `A + B`
+  *against the `.bif`* (source not visible). Assert it resolves and produces the
+  same output as a source-visible compilation. Assert the operator's
+  `IsOperator`/`OperatorKind` survive `Encode`→`Read`.
+
+=== Fixpoint test
+
+Per the release discipline, after the feature lands the compiler must still
+reach its self-hosting fixpoints (QBE, native, internal-assembler, warm-cache).
+The operator feature touches the compiler's own toolchain only if the compiler
+sources adopt operators; they need not, so the fixpoint requirement is simply
+"the new compiler still builds itself bit-identically". The CI fixpoint job is
+the gate.
+
+=== Before/after for the motivating case
+
+*Before* (today, `numerics.decimal`/`money` named methods):
+
+[source,pascal]
+----
+var Subtotal, Tax, Total: TDecimal;
+begin
+  Subtotal := UnitPrice.Multiply(DecFromInt(Qty));
+  Tax      := Subtotal.Multiply(TaxRate);
+  Total    := Subtotal.Add(Tax);
+  if Total.Compare(Budget) > 0 then ReportOverBudget();
+end;
+
+var A, B: TMoney;
+begin
+  A := MoneyFromStr('19.99', 'USD');
+  B := MoneyFromStr('5.00',  'USD');
+  Sum := A.Add(B);
+  if A.Compare(B) > 0 then ...
+end;
+----
+
+*After* (operators layered on; named methods retained, `Divide` still named):
+
+[source,pascal]
+----
+var Subtotal, Tax, Total: TDecimal;
+begin
+  Subtotal := UnitPrice * DecFromInt(Qty);
+  Tax      := Subtotal * TaxRate;
+  Total    := Subtotal + Tax;
+  if Total > Budget then ReportOverBudget();
+end;
+
+var A, B: TMoney;
+begin
+  A := MoneyFromStr('19.99', 'USD');
+  B := MoneyFromStr('5.00',  'USD');
+  Sum := A + B;
+  if A > B then ...
+  { division unchanged — needs explicit scale + mode: }
+  PerHead := Total.Divide(DecFromInt(HeadCount), 2, rmHalfEven);
+end;
+----
+
+The only stdlib change is *adding* the `class operator` declarations and their
+one-line delegating bodies to `TDecimal` and `TMoney`; no existing method is
+removed or altered.
+
+== Phased implementation plan
+
+[cols="1,4a",options="header"]
+|===
+| Phase | Work
+| *1. AST + parser*
+| Add `TOperatorKind`, `TMethodDecl.IsOperator`/`OperatorKind`,
+  `TBinaryExpr.ResolvedOperator`. Parse `class operator <Name>(...)` inside
+  record and class bodies (extend the member loop next to the `static`
+  handling); validate the operator name against the reserved set and the arity
+  (2 binary / 1 unary). Link out-of-line `Type.OperatorName` impls by signature.
+| *2. Semantic resolution*
+| Add `BinaryOpToOperatorKind` / `OperatorKindName`. Add the operator fallback
+  at the end of `AnalyseBinaryExpr` (after built-ins), including the `0 - A`
+  unary-minus recognition. Reuse `ResolveMethodOverload`-style candidate walk +
+  `ArgMatchScore` scoring + tie-breakers, pooling candidates from both operand
+  types. Set `ResolvedOperator` and `ResolvedType`. Preserve class-identity `=`.
+| *3. Codegen*
+| Add the `ResolvedOperator <> nil` guard at the top of the binary-expression
+  emitter in *both* backends; route to the existing static method-call
+  lowering. Verify record sret + ARC and Boolean-return paths via the
+  equivalence tests. No ABI change.
+| *4. `.bif` serialisation*
+| Add `IsOperator` + `OperatorKind` to `EncodeMethodSig`/`ReadMethodSig` and
+  `EncodeMethodDecl`/`ReadMethodDecl`; bump the format version; add the
+  round-trip test.
+| *5. Stdlib adoption*
+| Add `class operator` declarations + delegating bodies to `TDecimal` and
+  `TMoney`. Add operator tests to the numerics suites. Update
+  `numerics.decimal.pas`/`numerics.money.pas` header comments and
+  `future-improvements.adoc` (mark the item done).
+| *6. Generics + comparer bridge (optional, can trail)*
+| Confirm operator-in-generic resolves per instantiation (test
+  `SumAll<TDecimal>` vs `SumAll<Integer>`). Optionally add a `TComparer<T>`
+  whose body uses `<`/`=` to bridge to `Generics.Collections` sorting.
+|===
+
+Phases 1–4 are the compiler feature; phase 5 is the payoff. Each phase is
+independently testable and lands behind its own tests (TDD).
+
+== Risks and mitigations
+
+[cols="1,3a",options="header"]
+|===
+| Risk | Mitigation
+| *Silent change to existing `=` on classes* | Operator fallback runs *after*
+  built-in class-identity `=`; class `Equal` operators do not override identity
+  (§4.3). Documented divergence from Delphi; explicit test.
+| *Resolution ambiguity / surprising overloads* | Pool-and-score reuses the
+  battle-tested `ArgMatchScore`/tie-breakers; genuine ties are a hard error, not
+  an arbitrary pick. No implicit conversions in v1, so the scoring surface stays
+  small.
+| *Unary-minus `0 - A` misfire* | Recognition is gated on the synthesised
+  literal's position matching the operator token; authored `0 - A` still means
+  subtraction. Long-term: a dedicated `TUnaryExpr` node (§11).
+| *`.bif` format drift between writer and reader* | Single ordered append after
+  `IsOverload`, version bump, dedicated round-trip test; mirrors prior
+  `IsStatic`/`IsOverload` additions.
+| *Backend divergence (QBE vs native)* | Operators add *no* new ABI; they reuse
+  the shared `RecretClassify` and the existing static-call path in both
+  backends. Equivalence e2e tests run on both.
+| *Fixpoint regression* | Compiler sources need not adopt operators; the
+  self-hosting fixpoint job gates the merge.
+| *Generic operator errors surfacing late* | Consistent with reified generics
+  (errors at instantiation). Optional v2 constraint moves the error to the
+  declaration if desired.
+|===
+
+== Alternatives considered
+
+. *FPC standalone `operator + (A, B: TFoo): TFoo;`* — rejected for v1: requires
+  symbol-token method names, a separate operator-name table, and raises
+  unit-visibility questions that the type-scoped Delphi form avoids (§3.1).
+  Could be added later as alternative syntax mapping to the same `TMethodDecl`.
+. *Auto-derive `<>` from `=` and `>`/`>=` from `<`* — rejected for v1 to keep
+  "declared == exists" simple and predictable; a clean v2 convenience once the
+  base feature is proven.
+. *Value equality for classes via `Equal` operator (full Delphi semantics)* —
+  rejected for v1 because it silently changes identity-based comparisons and
+  collection lookups. Records get operator equality (no built-in to conflict
+  with); classes keep identity unless the author opts in explicitly.
+. *Dedicated `TUnaryExpr` / `TNegExpr` AST node* — preferable long-term to the
+  `0 - A` desugaring, but a parser refactor with its own constant-folding
+  ripple. Deferred; the `0 - A` recognition makes v1 self-contained.
+. *A `Numeric`/`Comparable` constraint required on generic type parameters* —
+  rejected: reified generics already report missing-operator errors at
+  instantiation, so a constraint is ergonomic sugar, not a correctness need.
+  Reserved in `TypeParamConstraints` for v2.
+. *Synthesising an `IComparer<T>` from operators automatically* — rejected:
+  zero-GUID interfaces + reification make explicit, monomorphised comparer
+  bodies (`TComparer<T>` whose body uses `<`) clearer and avoids hidden
+  interface generation.
+. *`Implicit`/`Explicit` in v1* — rejected: they perturb the whole
+  type-compatibility surface and can create conversion ambiguities; shipped as a
+  designed v2 follow-up with reserved enum values so no format bump is needed
+  (§5).
