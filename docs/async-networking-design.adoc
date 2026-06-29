@@ -93,14 +93,25 @@ offer.
 
 == Design principles and non-goals
 
-. *No language change.* The entire runtime is a stdlib library: pure Pascal plus
-  one small CPU-specific inline-assembly leaf. No parser, semantic, or codegen
-  feature is required. (Contrast: async/await is a multi-week compiler feature.)
+. *No new language feature is required for the runtime itself.* The scheduler,
+  reactor, and I/O layers are pure Pascal plus one small CPU-specific
+  inline-assembly leaf — no parser, semantic, or codegen change. (Contrast:
+  async/await is a multi-week compiler feature.) *Caveat:* the runtime needs
+  three *core-RTL* changes that are not in `Async.Fibers` itself — see
+  <<rtl-prerequisites>> — and the *ergonomic* public API (anonymous-procedure
+  `Spawn`) depends on the separately-tracked anonymous-methods feature
+  (`future-improvements.adoc` § Language). The available-today API uses a plain
+  `procedure(Arg: Pointer)` + argument; both forms are shown in <<components>>.
 . *Synchronous-looking, opt-in at the application level.* `uses Async.Fibers`
   switches the I/O primitives to their fiber-aware implementations; a program
-  that does not use it pays *zero* overhead and keeps today's blocking
-  behaviour. This mirrors Java's opt-in virtual threads rather than Go's
-  always-on runtime.
+  that does not use it keeps today's blocking behaviour. This mirrors Java's
+  opt-in virtual threads rather than Go's always-on runtime. *Honest scope of
+  "opt-in":* the *scheduler and I/O* are opt-in and cost nothing if unused, but
+  the RTL primitives the runtime hardens (atomic ARC — already global today; a
+  migration-safe allocator; per-fiber exception state) live in the core RTL, not
+  in `Async.Fibers`. They change for *every* program linking that RTL, not only
+  fiber programs. "Zero cost if unused" holds at the API layer, not the RTL
+  primitive layer (<<rtl-prerequisites>>).
 . *Hexagonal, `{$IFDEF}`-free, multi-target from day one.* Every axis of OS/CPU
   divergence is expressed as object selection at run time or symbol selection at
   link time — never conditional compilation — exactly as
@@ -118,6 +129,116 @@ yield points — adequate for I/O-bound servers); a QBE path for the fiber runti
 (inline asm is native-backend-only — see <<constraints>>); io_uring (a later
 optimisation behind the same reactor port); HTTP/2 and HTTP/3 (layer on top once
 the foundation lands).
+
+[#rtl-prerequisites]
+== Core-RTL prerequisites (must land before the scheduler is correct)
+
+The fiber runtime does *not* sit cleanly on top of today's RTL. Three RTL
+behaviours, verified against the current source, are load-bearing and must
+change. None lives in `Async.Fibers`; all three touch the always-linked core
+RTL, which is why the "zero cost if unused" principle is qualified above. These
+are GO/NO-GO prerequisites for <<scheduler>>, not implementation details.
+
+=== P1. Per-fiber exception state (the setjmp/longjmp landmine)
+
+The exception machine is `setjmp`/`longjmp` over a frame chain rooted in
+*`threadvar`* globals — `g_exc_top` and `g_current_exception`
+(`runtime.exc.pas:61`). `_PushExcFrame`/`_PopExcFrame` mutate `g_exc_top`
+(`runtime.exc.pas:95,105`), and the captured `jmp_buf` stores the caller's
+*RSP*, which points into the running fiber's stack (`runtime.setjmp.pas:41-44`;
+`_blaise_longjmp` restores it at `:64`).
+
+A `threadvar` is per-*OS-thread*, but M:N scheduling puts *many fibers on one
+worker thread*. So:
+
+* Fiber A enters a `try` (pushes a frame onto worker T's `g_exc_top`, RSP into
+  A's stack), then suspends. Fiber B resumes on T and sees A's chain. B's
+  `_PushExcFrame` chains onto A's frame on A's *now-inactive* stack; a raise in B
+  `longjmp`s an RSP into A's stack → corruption.
+* Under work-stealing, A may resume on a *different* worker T2, whose `g_exc_top`
+  is unrelated to the frames A pushed.
+
+*Required:* `FiberSwap` must save and restore `g_exc_top` and
+`g_current_exception` as part of the fiber context (store them in the fiber
+control block on save, reinstate on resume). Until this lands, *any* `try` across
+a suspension is unsound — which means the entire cancellation/cleanup story
+(<<scheduler>>, `EFiberCancelled`) is unsound, since it relies on `try/finally`
+running correctly at the suspension point.
+
+=== P2. A migration-safe allocator (not "add arenas")
+
+`runtime.mem.pas` is *already* per-thread: its arenas, freelists, and large-block
+cache are `threadvar`. Its header states the contract outright
+(`runtime.mem.pas:37-44`): *"Memory allocated on one thread must not be freed on
+another (the freelist push would go to the wrong thread's list)."*
+
+Work-stealing migration breaks exactly this: a fiber allocates an object on
+worker A, migrates, and is released on worker B — the free pushes onto B's
+freelist for a block from A's arena. Silent corruption or leak.
+
+The problem is the *opposite* of what an earlier draft of this design implied
+("add per-worker arenas"): the arenas exist; cross-thread *free* is what is
+forbidden. *Required:* a cross-thread free path — a per-arena remote-free queue
+(the mimalloc model: a thread frees foreign blocks onto the owning arena's
+MPSC queue, drained by the owner) — or pin every fiber's allocations to its
+origin worker (which defeats work-stealing for allocation-heavy fibers). The
+remote-free queue is the right answer; it is an allocator-model change, and it
+is the single largest piece of novel RTL risk in the whole design.
+
+=== P3. `errno`/EAGAIN detection (the primitive the hot path assumes)
+
+The L3 readiness loop branches on "would block". But `errno` is *not bound
+anywhere in this RTL*: `net.sockets.pas` binds `recv`/`send` to libc and never
+reads `errno`; the raw syscall leaves deliberately avoid it by returning
+`-errno` (`runtime.syscall.linux.pas:27-30`). Worse, the two build profiles need
+*different* conventions:
+
+* *libc build* — `recv` returns `-1` and sets glibc `errno`, which is
+  `*__errno_location()` (a TLS-indirect call). The runtime must bind
+  `__errno_location` and read EAGAIN/EWOULDBLOCK (= 11 on Linux x86-64) through
+  it.
+* *static/libc-free build* — the raw syscall returns `-EAGAIN` *directly*; there
+  is no `errno` variable. The loop tests the negative return value.
+
+*Required:* a single `WouldBlock(n)` abstraction with two implementations behind
+the kernel-leaf seam, so L3 has one call site and the convention divergence lives
+in one place. The doc's original `if errno = EAGAIN` sketch is wrong for both
+profiles.
+
+=== Status of the previously-stated "atomic ARC" risk
+
+An earlier draft flagged "make ARC refcounts atomic" as the top risk. *That work
+is already done and is unconditional:* `_ClassAddRef`/`_ClassRelease`/
+`_StringRelease`/dyn-array release all go through `_AtomicAddInt32`/
+`_AtomicSubInt32`, which are `lock xaddl` (`runtime.atomic.pas:38-49`;
+`runtime.arc.pas:408,464,750`). Two real consequences remain:
+
+* Atomic ARC is *already global*, so every program — fiber or not — already pays
+  the `lock`-prefixed refcount cost today. Making it *non-atomic by default and
+  atomic only under fibers* would be a strictly harder codegen problem (two ARC
+  variants) and is explicitly *not* proposed.
+* A few ARC paths are *not* atomic and must be audited for true parallel
+  sharing: copy-on-write string uniqueness reads the refcount non-atomically
+  before mutating in place (`runtime.str.pas:352`); `_StringRelease` reads the
+  length/capacity header fields before the atomic decrement
+  (`runtime.arc.pas:458-463`); and the *leak tracker* (`GLTEnabled` →
+  `LTInsert`/`LTDelete`, `runtime.arc.pas:169-207`) is a global open-addressed
+  table with no locking — it must be disabled (or guarded) whenever the
+  scheduler runs N workers, or it will corrupt under concurrent
+  create/release.
+
+[NOTE]
+.One thing the RTL gets right for free
+====
+Blaise's memory model is *reference counting, not tracing GC*. There is no
+mark/sweep collector that must discover and scan roots, so the runtime never has
+to register mmap'd fiber stacks with a collector or stop-the-world across a
+switch — a problem stackful coroutines cause in tracing-GC languages (Go's
+stack maps, the JVM's). ARC cleanup is driven by scope exit and `try/finally`,
+which is exactly why P1 (per-fiber exception state) is non-negotiable: it is the
+*only* mechanism that releases a parked/cancelled fiber's held references, so a
+pooled-and-reused stack does not leak them. P1 and stack pooling are coupled.
+====
 
 == Architecture overview
 
@@ -194,6 +315,21 @@ type
 procedure FiberSwap(ACur, ANext: PFiberCtx); assembler; nostackframe;
 ----
 
+[IMPORTANT]
+.The register swap is not the whole context — threadvar state must swap too
+====
+Saving `rbx/rbp/r12-r15/rsp` is necessary but *not sufficient*. The exception
+machine's `g_exc_top`/`g_current_exception` are `threadvar`s (per-OS-thread,
+shared by every fiber on a worker — <<rtl-prerequisites>> P1), so the
+scheduler's switch path must *also* save the outgoing fiber's exception-chain
+head + current-exception into its control block and restore the incoming
+fiber's, around `FiberSwap`. The same applies to any other `threadvar` that is
+logically per-fiber (audit the allocator's threadvar state under the migration
+model, P2). The bare `FiberSwap` asm swaps registers; the Pascal wrapper that
+calls it owns the threadvar save/restore. Treat "context" as *registers + SP +
+per-fiber threadvar snapshot*, not registers alone.
+====
+
 x86-64 System V sketch (the only architecture for v1; `nostackframe` so the body
 owns the frame, exactly as `runtime.setjmp` and the syscall leaves do):
 
@@ -231,6 +367,23 @@ stack so the first `FiberSwap` into it `ret`s into a trampoline:
   proc + argument from its control block, calls it, and on return calls
   `FiberExit` (which marks the fiber dead and swaps back to the scheduler — it
   never returns).
+
+Two subtleties the trampoline must respect:
+
+* *Keep it in Pascal.* Inline `asm` cannot reference Pascal locals/args by name
+  (`docs/inline-asm-design.adoc` § Scope — out of scope: "`@result` / typed
+  local references"). So only the minimal frame synthesis is asm (register/ABI
+  conventions, like `FiberSwap`); reading the control block and calling the
+  entry proc is ordinary Pascal. The trampoline is the fiddliest, least-tested
+  part of L0 — budget for it explicitly.
+* *FiberExit must drain the entry frame's ARC refs.* When the entry proc
+  returns normally, its ARC-managed locals are released by the compiler's
+  scope-exit emission as usual. But a fiber *cancelled* mid-call unwinds via the
+  `EFiberCancelled` raise (<<scheduler>>), which only releases refs correctly if
+  P1 (per-fiber exception state) holds. A stack that is pooled and reused
+  (below) *without* that unwind leaks every object the parked fiber held — so
+  stack pooling is correct only in combination with P1. This coupling is the
+  reason P1 is a hard prerequisite, not a nicety.
 
 === Stacks: allocation, guard pages, pooling
 
@@ -287,6 +440,7 @@ backend is selected) rather than emit a cryptic QBE diagnostic on the `asm`
 body.
 ====
 
+[#scheduler]
 == L1 — The M:N scheduler
 
 Pure Pascal, target-invariant — the bulk of the runtime, and the part that needs
@@ -330,6 +484,7 @@ A per-worker 4-ary min-heap keyed by absolute deadline (`clock_gettime`,
 concurrency scope timeouts. The nearest deadline bounds the reactor wait so
 timers fire promptly without a dedicated timer thread.
 
+[#scheduler-cancellation]
 === Cancellation and structured concurrency
 
 Modern concurrency (Swift `TaskGroup`, Kotlin/Java structured scopes, Trio
@@ -340,27 +495,47 @@ servers (drop a request that blew its deadline).
 * Each fiber carries a `Cancelled` flag and an optional deadline.
 * Cancelling a fiber wakes it from its park with a *cancelled* result; the
   fiber-aware I/O call then returns an error / raises `EFiberCancelled` at the
-  suspension point, so cleanup runs through normal `try/finally` (ARC-friendly).
+  suspension point, so cleanup runs through normal `try/finally`. *This is only
+  sound once per-fiber exception state lands* (<<rtl-prerequisites>> P1) — the
+  `try/finally` that releases ARC refs runs on the parking fiber's stack, and the
+  exception chain must travel with it across the swap.
 * A `TTaskGroup` (nursery) owns child fibers, propagates cancellation to all
   children when the scope exits or any child fails, and *joins* on scope exit so
   no fiber leaks. This is the recommended public API for spawning concurrency.
 
+*Available-today form* — `Spawn` takes a plain procedure + an untyped argument,
+exactly as `SpawnFiber` does (no language change):
+
 [source,pascal]
 ----
-var Group := TTaskGroup.Create(Deadline := 30_000); { ms }
+procedure FireOne(Arg: Pointer);
+begin
+  FireOneRequest(Integer(Arg));
+end;
+
+var Group := TTaskGroup.Create(30_000); { ms deadline }
 try
   for I := 0 to 9999 do
-    Group.Spawn(procedure begin FireOneRequest(I); end);
+    Group.Spawn(@FireOne, Pointer(I));
   Group.Wait;   { all children, or cancel-all on first failure / deadline }
 finally
   Group.Free;   { joins + cancels stragglers — no leaks by construction }
 end;
 ----
 
-(`Group.Spawn` taking an anonymous procedure presumes the
-"reference to procedure" language item listed in `future-improvements.adoc` §
-Language; until that lands, the API takes a plain `procedure(Arg: Pointer)` +
-arg, exactly as `SpawnFiber` does.)
+*Ergonomic form (future)* — the closure version below depends on the
+anonymous-methods language feature (`future-improvements.adoc` § Language —
+"reference to function/procedure"), which is *not* implemented. It is the target
+API, not today's:
+
+[source,pascal]
+----
+Group.Spawn(procedure begin FireOneRequest(I); end);  { needs anonymous methods }
+----
+
+The runtime needs no compiler change; this ergonomic *sugar* does. The
+distinction matters because the design's "no language change" claim is about the
+runtime, not about this API surface.
 
 === Fiber-aware synchronisation
 
@@ -377,29 +552,32 @@ Brief, non-suspending critical sections may still use a raw spun/`pthread`
 mutex; the rule is *never hold an OS-level lock across a fiber suspension*.
 
 [#arc-atomicity]
-=== ARC under work-stealing (the critical prerequisite)
+=== ARC and the allocator under work-stealing
 
-Because a fiber can migrate between workers (work-stealing), two OS threads can
-touch the same object's refcount concurrently. Therefore Blaise's ARC refcount
-mutations (`_ClassAddRef`/`_ClassRelease`, the string/interface release helpers)
-**must be atomic** when the scheduler is active. The atomic primitives already
-exist (`_AtomicAddInt32`/`_AtomicSubInt32`, `blaise_atomic_x86_64`); the work is
-to ensure the codegen-emitted ARC paths use them — at minimum whenever
-`Async.Fibers` is linked.
+Because a fiber can migrate between workers, two OS threads can touch shared
+state concurrently. The good news, verified against the source: ARC refcount
+mutations are *already* atomic and unconditional (`lock xaddl` via
+`_AtomicAddInt32`/`_AtomicSubInt32` — `runtime.atomic.pas:38-49`,
+`runtime.arc.pas:408,464,750`). So the refcount itself is safe today; the
+residual ARC work is the *non-atomic* paths audit in <<rtl-prerequisites>>
+(string copy-on-write, the leak tracker).
 
-Two consequences to design for up front:
+The allocator is the real hazard, and it is the inverse of "add a lock":
+`runtime.mem.pas` is *already* per-thread (`threadvar` arenas/freelists) and
+explicitly forbids freeing on a thread other than the one that allocated
+(`runtime.mem.pas:37-44`). Migration violates that contract directly. The fix is
+a cross-thread free path (a per-arena remote-free queue, mimalloc-style), spelt
+out in <<rtl-prerequisites>> P2 — *not* "add per-worker arenas", which already
+exist.
 
-* *Allocator contention.* `blaise_mem` must tolerate concurrent
-  `GetMem`/`FreeMem` from N workers. Per-worker arenas / thread-local free lists
-  (the standard tcmalloc/jemalloc approach) avoid a global allocator lock
-  becoming the throughput ceiling. This is the second-biggest scaling risk after
-  ARC atomicity.
 * *Pinning.* A fiber holding a non-migratable resource (or in a tight CPU loop)
   can be pinned to its worker; CPU-bound fibers should yield periodically.
+  Pinning allocation-heavy fibers is the fallback if the remote-free queue
+  slips.
 
-This subsection is flagged as the top implementation risk in <<risks>>; it is
-the one place the fiber runtime reaches *into* existing RTL behaviour rather than
-sitting cleanly on top of it.
+This is the one place the runtime reaches *into* core RTL behaviour rather than
+sitting on top of it — hence the dedicated <<rtl-prerequisites>> section and the
+GO/NO-GO gate in the phased plan.
 
 == L2 — The reactor port
 
@@ -472,16 +650,33 @@ The adapters above bind `epoll_*`/`kqueue`/`kevent`/`eventfd`/`accept4` via libc
 *static, libc-free* build direction (FreeBSD Strategy B,
 `docs/native-target-architecture.adoc`), these become raw `syscall` stubs added
 to the per-target kernel leaf (`runtime.syscall.linux`/`...freebsd`) — a
-link-time symbol swap, no adapter change. Both paths are supported; the dynamic
-build is the default.
+link-time symbol swap, no adapter change.
+
+*Unresolved blocker for the static path.* The scheduler's worker threads, the
+exception chain, the allocator, and the `WouldBlock` errno read all depend on
+`threadvar`, which the native backend lowers to `%fs:NAME@tpoff` (local-exec
+TLS) — verified in `blaise.codegen.native.x86_64.pas`. Under glibc/pthreads the
+loader sets each thread's `%fs` base; in the *static, libc-free* build the
+thread spawner must do that itself (`arch_prctl(ARCH_SET_FS)` with a per-thread
+TLS block), and `runtime.start.static.linux.pas` has no such setup today. So the
+static-build reactor claim is *not* currently supported end-to-end: per-worker
+threadvar storage on libc-free threads is unproven and must be built before the
+static path works. The dynamic (libc-linked) build is the default and has no
+such gap.
 
 == L3 — Fiber I/O: the "blocking that isn't"
 
 This layer is what makes the components synchronous-looking. Each primitive
-tries the operation; on `EAGAIN` it registers interest with the reactor, parks,
-and retries when woken — but if *no scheduler is running* (a plain program), it
-falls back to a true blocking call. The same source therefore works in both
-worlds; `uses Async.Fibers` is the only switch.
+tries the operation; on a would-block result it registers interest with the
+reactor, parks, and retries when woken — but if *no scheduler is running* (a
+plain program), it falls back to a true blocking call. The same source therefore
+works in both worlds; `uses Async.Fibers` is the only switch.
+
+The "would block" test is *not* a plain `errno` read — `errno` is unbound in
+this RTL and the two build profiles report it differently (<<rtl-prerequisites>>
+P3). It goes through a single `WouldBlock(n)` abstraction: the libc build reads
+`*__errno_location()`; the static build inspects the raw `-EAGAIN` return. The
+sketch uses `WouldBlock`, not `errno`:
 
 [source,pascal]
 ----
@@ -491,19 +686,27 @@ begin
   repeat
     N := Recv(AFd, ABuf, ALen, 0);
     if N >= 0 then Exit(N);
-    if (errno = EAGAIN) and CurrentFiberActive then
+    if WouldBlock(N) and CurrentFiberActive then  { P3: one abstraction, two impls }
     begin
       GReactor.Add(AFd, [ioRead], CurrentFiberToken);
       ParkCurrentFiber;          { scheduler runs other fibers; resumes on ready/timeout/cancel }
       if CurrentFiberCancelled then raise EFiberCancelled.Create;
       { loop and retry the recv }
     end
+    else if Interrupted(N) then  { EINTR: retry, do not surface as error }
+      Continue
     else
       Exit(N);                   { real error, or blocking fallback already returned }
   until False;
 end;
 ----
 
+* *Distinguish EOF / would-block / error.* The existing `RecvString`
+  (`net.sockets.pas:326`) collapses EOF *and* error to `''`, and the socket layer
+  has no EINTR retry. The fiber primitives cannot inherit that ambiguity — they
+  must return the raw signed count so the caller can tell `0` (peer closed) from
+  would-block from a real negative error. `RecvString`-style helpers layer on
+  top; they are not the fiber I/O primitive.
 * Sockets created in fiber mode are set non-blocking (`O_NONBLOCK` /
   `accept4(SOCK_NONBLOCK)`); the per-OS flag values are the
   `Net.Sockets`/`TPlatformLayout` porting boundary already documented.
@@ -623,6 +826,7 @@ The memory-BIO port boundary means it slots in by swapping `GTlsProvider` —
 *zero* change to any L5 component — and it is what finally lets the
 static/libc-free build speak TLS.
 
+[#components]
 == L5 — The Indy-class component surface
 
 With L0–L4 in place, the components are ordinary synchronous Pascal — one fiber
@@ -650,6 +854,11 @@ per connection/request — with no I/O-multiplexing logic of their own.
 |===
 
 === Example: a high-concurrency server
+
+The two examples below use the *ergonomic (future)* closure form for brevity;
+they require the anonymous-methods feature (see the dual-form note under
+<<scheduler-cancellation>>). The available-today form passes a named procedure
++ argument.
 
 [source,pascal]
 ----
@@ -724,6 +933,7 @@ and the `TThread` self-referential-ARC guidance in the same note remains valid
 and complementary (a `TThread` can run *on* the worker pool). This document
 should be cross-referenced from that section.
 
+[#performance]
 == Performance model and targets
 
 Why the numbers are reachable: with epoll/kqueue's O(1) readiness delivery,
@@ -795,9 +1005,25 @@ e2e behaviour on top:
 * *L0* — an e2e program that spawns a fiber, swaps in/out N times, asserts values
   survive across switches; a guard-page overflow test asserts a clean fault, not
   corruption.
+* *RTL prerequisites (mandatory, derived from the P0 failure modes)* —
+  ** *Exception state across a swap (P1):* fiber A enters a `try`, swaps to fiber
+     B which enters its own `try` and raises; assert B's handler runs and A's
+     chain is intact when A resumes. Then a raise in A after resume hits A's
+     handler, not B's. This is the regression test for the
+     `threadvar`-exception-chain landmine — without it the bug is invisible until
+     a real handler corrupts a stack.
+  ** *Cross-thread free (P2):* allocate on worker 1, force-migrate the fiber to
+     worker 2, free there; assert no corruption and the block returns to the
+     owning arena. Run under the 100k-fiber stress with allocation churn.
+  ** *Would-block (P3):* assert `WouldBlock` returns true for EAGAIN in *both*
+     build profiles (libc `__errno_location` and static `-EAGAIN`).
+  ** *Cancellation unwind:* a cancelled fiber mid-`try/finally` releases its
+     ARC-held locals before its stack is pooled (leak assertion via the leak
+     tracker, which must itself be scheduler-safe or disabled).
 * *L1* — scheduler unit tests: round-robin fairness, work-stealing under
   imbalance, timer ordering, cancellation/`TTaskGroup` join-and-cancel, channel
-  semantics. A stress test spawns 100k fibers doing ping-pong over channels.
+  semantics. A stress test spawns 100k fibers doing ping-pong over channels,
+  run under a TSan-style race check where available.
 * *L2* — reactor unit tests against socketpairs: readiness delivery, edge-trigger
   drain, `Wake` interrupting a blocked `Wait`. Cross-target *structural*
   coverage (per the native-target doc) selects each adapter on its host.
@@ -814,24 +1040,53 @@ e2e behaviour on top:
 
 == Phased implementation plan
 
-. *L0 context switch (x86-64 SysV)* — `FiberSwap`, trampoline, guard-page stacks,
-  stack pool. E2e swap test. *Foundation; everything gates on this.*
+Two structural decisions shape the ordering: (a) the foundation milestone is a
+*GO/NO-GO gate* — the protocol breadth (L4 TLS, L5 mail/FTP) is not committed
+until the gate proves the runtime hits its numbers; (b) the riskiest work is the
+RTL prerequisites, so they land *before* the multicore milestone that depends on
+them, and the single-worker prototype is treated as a *correctness* step, not a
+proof of the throughput thesis (it cannot be — throughput is multicore-bound).
+
+. *L0 context switch (x86-64 SysV)* — `FiberSwap` (registers + per-fiber
+  threadvar snapshot — <<rtl-prerequisites>> P1), trampoline, guard-page stacks,
+  stack pool. E2e swap test, including a `try/except` that survives a swap.
+  *Foundation; everything gates on this.*
+. *RTL prerequisites* — the three core-RTL changes (<<rtl-prerequisites>>):
+  per-fiber exception-state save/restore in the switch path; the migration-safe
+  allocator (remote-free queue); the `WouldBlock` errno abstraction. Disable or
+  guard the leak tracker under the scheduler. *These are the genuinely novel,
+  RTL-invasive risk — land and test them in isolation before building on them.*
 . *L1 single-worker scheduler* — run queue, park/resume, `FiberSleep` + timer
-  heap, `SpawnFiber`/`RunScheduler`/yield. Defer work-stealing.
+  heap, `SpawnFiber`/`RunScheduler`/yield. Defer work-stealing. *Correctness
+  milestone; proves the scheduler + exception-state handling, not throughput.*
 . *L2 epoll reactor + L3 fiber I/O (Linux)* — non-blocking sockets,
-  `FiberRecv/Send/Accept/Connect`, deadlines, blocking fallback. First milestone
-  that does real network I/O.
-. *L1 multicore* — N workers, Chase–Lev work-stealing, **ARC-atomicity +
-  allocator-contention work (<<arc-atomicity>>)**, fiber-aware sync + channels,
-  `SO_REUSEPORT`. First milestone that scales across cores.
-. *L5 first components* — `Net.Tcp`, rewritten `Net.Http.Server`, `Net.Uri`;
-  benchmark vs the current server. *Proves the 10k req/s thesis.*
+  `FiberRecv/Send/Accept/Connect`, deadlines, EINTR/EOF/would-block disambiguation,
+  blocking fallback. First milestone that does real network I/O.
+. *L1 multicore* — N workers, Chase–Lev work-stealing (depends on the
+  prerequisites phase), fiber-aware sync + channels, `SO_REUSEPORT`. First
+  milestone that scales across cores.
++
+[IMPORTANT]
+.GO/NO-GO gate
+====
+Before any L4/L5 work, build a minimal `Net.Tcp` + rewritten `Net.Http.Server`
+and run the benchmark suite (<<performance>>) against the current one-at-a-time
+server and a thread-per-connection variant. *Pass:* the req/s and concurrent-
+connection targets hold and the exception/allocator model survives the
+100k-fiber stress under a TSan-style run. *Fail:* stop and reconsider the
+approach (or fall back to the async/await direction) before spending effort on
+the derivative protocol breadth. This is where the innovation token is proven
+or returned.
+====
+. *L5 first components* (gate artifact) — `Net.Tcp`, rewritten
+  `Net.Http.Server`, `Net.Uri`. The benchmark here *is* the gate above.
 . *L4 TLS (OpenSSL memory-BIO)* + `Net.Tls`, `https` in `Net.Http.Client`,
-  `wss`.
+  `wss`. (Post-gate.)
 . *L5 breadth* — `Net.Http.Client` keep-alive pools, `Net.WebSockets`
-  client+server, `Net.Dns`, then SMTP/POP3/IMAP/FTP.
+  client+server, `Net.Dns`, then SMTP/POP3/IMAP/FTP. (Post-gate.)
 . *Portability* — `TKqueueReactor` (FreeBSD/macOS) + AArch64 context leaf;
-  kernel-leaf raw syscalls for the static build.
+  kernel-leaf raw syscalls **and per-thread `%fs`/TLS setup** for the static
+  build (the unresolved blocker noted under L2 freestanding builds).
 . *Long term* — `TBlaiseTlsProvider` (pure-Pascal TLS 1.3); Windows
   (`TIocpReactor` + Win64 context + SChannel/OpenSSL); `io_uring` behind the
   reactor port; HTTP/2 over ALPN.
@@ -839,15 +1094,30 @@ e2e behaviour on top:
 [#risks]
 == Risks
 
-* *ARC atomicity & allocator contention (highest).* Refcounts must be atomic
-  under work-stealing, and `blaise_mem` must scale to N concurrent workers. This
-  is the one place the design reaches into core RTL behaviour. Mitigation:
-  enable atomic ARC whenever `Async.Fibers` is linked; add per-worker allocator
-  arenas; validate with the 100k-fiber stress + a race detector / TSan-style
-  run if available. *Prototype single-worker first (phase 2) to defer this.*
+* *Per-fiber exception state (highest — P0).* The `threadvar` exception chain
+  over `setjmp`/`longjmp` into stack-bound RSPs means a naive switch corrupts
+  unwinding (<<rtl-prerequisites>> P1). Mitigation: swap `g_exc_top` +
+  `g_current_exception` in the switch path; the L0 e2e test must include a
+  `try/except` that survives a swap and a cancellation that runs `finally`.
+* *Migration-safe allocator (P0).* The current allocator forbids cross-thread
+  free; work-stealing requires it (<<rtl-prerequisites>> P2). Mitigation: a
+  per-arena remote-free queue (mimalloc model), validated with the 100k-fiber
+  stress + a TSan-style run. This is the largest piece of novel RTL work — it is
+  why the prerequisites are their own phase and gate.
+* *`errno` is unbound; two build conventions (P1).* The `WouldBlock` abstraction
+  (<<rtl-prerequisites>> P3) is a prerequisite, not a porting footnote.
+* *ARC is already atomic (de-risked) but globally so.* Refcounts use `lock
+  xaddl` today (good); the residual work is auditing the *non-atomic* paths
+  (string COW, leak tracker) and accepting that "zero cost if unused" holds at
+  the API layer, not the RTL primitive layer.
+* *Static-build threadvar TLS (P1).* `%fs` base setup per libc-free worker
+  thread is unbuilt; blocks the static reactor path (noted under L2).
 * *Stack overflow.* Fixed stacks + deep protocol recursion (e.g. TLS + chunked +
   gzip layers) can overflow. Mitigation: guard pages (deterministic fault),
   generous default + per-spawn sizing, and later growable stacks.
+* *Stack pooling vs leak/UAF.* A pooled, reused stack must have run its
+  `try/finally` ARC cleanup first; this depends on P1. Mitigation: never recycle
+  a stack whose fiber did not complete its cancellation unwind.
 * *Fiber-unaware blocking calls.* Any libc call that blocks the OS thread
   (`getaddrinfo`, file I/O, a user's `Sleep`, a raw `pthread_mutex` held across a
   suspension) stalls a whole worker and its fibers. Mitigation: the blocking-
