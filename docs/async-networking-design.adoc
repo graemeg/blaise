@@ -1,0 +1,883 @@
+= High-Concurrency Networking — Fiber Runtime and an Indy-class Component Set
+:author: Graeme Geldenhuys
+:revdate: 2026-06-29
+:toc: left
+:toclevels: 3
+:source-highlighter: rouge
+:icons: font
+:sectanchors:
+:sectnums:
+
+== Purpose
+
+Blaise's stdlib already ships the protocol *breadth* an Object Pascal developer
+expects — TCP sockets, a WebSocket codec, a minimal HTTP/1.1 server — but it is
+built on a *thread-per-connection-or-nothing* foundation: `Net.Http.Server`
+services one connection at a time, and `Net.Sockets` is a thin blocking libc
+binding. That is the Indy model, and it caps a single machine at one or two
+thousand concurrent connections.
+
+This document specifies how to give Blaise the *concurrency* story that matches
+its breadth: an Indy-class catalogue of networking components (HTTP client and
+server, WebSocket, SMTP/POP3/IMAP, FTP, DNS, TLS) running on a runtime that
+sustains tens of thousands of connections and 10 000+ requests/second on a
+single host — the performance class of Go goroutines, Java 21 virtual threads,
+and load generators such as Gatling.
+
+The central thesis is that this is achievable in Blaise *without any language
+or compiler change* — no `async`/`await`, no function colouring, no
+state-machine transform — by building a **stackful fiber runtime** as a pure
+runtime + inline-assembly library. The components stay synchronous-looking;
+the runtime makes "blocking" calls park a green thread instead of an OS thread.
+
+[IMPORTANT]
+====
+This design deliberately diverges from the *recommended progression* in
+`future-improvements.adoc` § "Concurrency", which names async/await as the
+primary modern primitive and green threads as a long-term, high-investment
+option. <<relationship-to-future-improvements>> reconciles the two: for the
+specific goal of an Indy replacement that runs synchronous-looking protocol
+code at high concurrency, the trade-offs invert, and a recent capability the
+older note pre-dates — inline assembly on the native backend — removes the main
+obstacle it cited.
+====
+
+== Why thread-per-connection fails, and why fibers win
+
+=== The Indy ceiling
+
+Indy (and a naïve `THttpServer` thread-per-client) maps one OS thread to one
+connection. Two costs dominate as connection count grows:
+
+* *Memory.* A default pthread stack is 1–8 MiB of reserved address space. At 10
+  000 connections that is 10–80 GiB of reservation; even lazily faulted, the
+  committed working set and page-table overhead are large.
+* *Scheduling.* The kernel scheduler is general-purpose and preemptive; 10 000
+  runnable threads means heavyweight context switches (full register file, FPU
+  state, kernel-mode transition, TLB effects) and run-queue contention.
+
+The practical ceiling is ~1–2k concurrent connections before throughput
+collapses. Short-lived request/response can reach higher request *rates* by
+recycling threads, but long-lived connections (WebSocket, SSE, streaming, slow
+clients, keep-alive) hit the wall directly. This is the classic
+https://en.wikipedia.org/wiki/C10k_problem[C10k problem].
+
+=== The green-thread answer
+
+Go, Java virtual threads, and Erlang all solve C10k (and C100k) the same way:
+a user-mode scheduler multiplexes *millions* of cheap green threads onto a
+*small* pool of OS threads (one per core), and a kernel readiness API
+(`epoll`/`kqueue`/IOCP) drives wake-ups. A green thread that issues a "blocking"
+read does not block its OS thread — the scheduler parks it and runs another.
+
+[cols="1,1,1,1",options="header"]
+|===
+| | Thread-per-conn (Indy) | Callback reactor | Stackful fibers (this design)
+
+| Stack per task | 1–8 MiB | none (heap state) | 16–256 KiB, pooled
+| Concurrent conns | ~1–2k | ~100k+ | ~100k+
+| Code style | synchronous | callbacks / "hell" | *synchronous*
+| Function colouring | none | n/a | *none*
+| Runs existing blocking protocol code | yes | no (rewrite) | *yes, unmodified*
+| Multicore | yes | needs sharding | yes (M:N + work-stealing)
+| Compiler change needed | no | no | *no*
+|===
+
+The decisive property for an *Indy replacement* is the last three rows: a
+stackful fiber preserves the entire call stack across a suspension, so any
+function — however deep — can "block" without the language needing to mark it
+`async`. Existing synchronous protocol code (the current `Net.Http.Server`,
+ported Indy/Synapse logic, a user's request handler) runs *unmodified* at high
+concurrency. That is precisely what callback reactors and async/await cannot
+offer.
+
+== Design principles and non-goals
+
+. *No language change.* The entire runtime is a stdlib library: pure Pascal plus
+  one small CPU-specific inline-assembly leaf. No parser, semantic, or codegen
+  feature is required. (Contrast: async/await is a multi-week compiler feature.)
+. *Synchronous-looking, opt-in at the application level.* `uses Async.Fibers`
+  switches the I/O primitives to their fiber-aware implementations; a program
+  that does not use it pays *zero* overhead and keeps today's blocking
+  behaviour. This mirrors Java's opt-in virtual threads rather than Go's
+  always-on runtime.
+. *Hexagonal, `{$IFDEF}`-free, multi-target from day one.* Every axis of OS/CPU
+  divergence is expressed as object selection at run time or symbol selection at
+  link time — never conditional compilation — exactly as
+  `docs/native-target-architecture.adoc` mandates.
+. *Clean dependency posture.* TLS wraps the system `libssl`/`libcrypto` *now*
+  behind a port, with a pure-Pascal TLS provider as the long-term replacement,
+  so the dynamic dependency is contained and ultimately removable.
+. *Reuse the existing seams.* Inline `asm` (the native backend),
+  `runtime.setjmp` (the proven context-save mechanism), the kernel syscall
+  leaves, `TRtlPlatform`/`TPlatformLayout`, pthreads, and the `blaise_atomic`
+  stubs are all already present. This design composes them; it invents little.
+
+*Non-goals:* preemptive scheduling of fibers (cooperation is at I/O and explicit
+yield points — adequate for I/O-bound servers); a QBE path for the fiber runtime
+(inline asm is native-backend-only — see <<constraints>>); io_uring (a later
+optimisation behind the same reactor port); HTTP/2 and HTTP/3 (layer on top once
+the foundation lands).
+
+== Architecture overview
+
+Six layers, built bottom-up. Each layer depends only on those below it, and each
+OS/CPU divergence is isolated to exactly one layer.
+
+[cols="1,4,2",options="header"]
+|===
+| Layer | Responsibility | Divergence axis & mechanism
+
+| L5 Components
+| Indy-class protocol surface: HTTP client/server, WebSocket, SMTP/POP3/IMAP,
+  FTP, DNS, URI. Synchronous-looking; one fiber per request/connection.
+| None (portable Pascal over L3/L4)
+
+| L4 TLS
+| `TTlsProvider` port; `TOpenSSLProvider` now (memory-BIO), pure-Pascal later.
+| *Per-OS library* → runtime port + opt-in dynamic link
+
+| L3 Fiber I/O
+| The "blocking that isn't": `FiberRecv`/`FiberSend`/`FiberAccept`/`FiberConnect`
+  park-and-resume; non-blocking sockets; deadlines; DNS/file offload.
+| Per-OS socket flags → `Net.Sockets` porting boundary
+
+| L2 Reactor
+| `TReactor` port: register fd interest, wait for readiness, dispatch wake-ups.
+| *Per-OS mechanism* (epoll/kqueue/IOCP) → runtime port
+
+| L1 Scheduler
+| M:N scheduler: per-worker run queues, work-stealing, timers, cancellation,
+  fiber-aware sync primitives and channels. Pure Pascal, target-invariant.
+| None (portable Pascal over L0/L2)
+
+| L0 Context switch
+| `FiberSwap` — save/restore callee-saved regs + SP; fresh-stack bootstrap;
+  guard-page stacks.
+| *Per-CPU/ABI* → inline-asm leaf, native backend only
+|===
+
+The pattern matches the runtime's existing split exactly: *mechanism that
+differs per OS and is read by shared code* becomes a **runtime port** (like
+`TReactor`, `TTlsProvider`, mirroring `TPlatformLayout`); *a different symbol
+implementation chosen at build time* becomes a **link-time swap** (the epoll/
+kqueue raw syscalls in the kernel leaf, for freestanding builds); *CPU-specific
+instruction sequences identical across OSes* become a **CPU-keyed asm leaf**
+(like `blaise_atomic`/`blaise_setjmp`).
+
+== L0 — Context switching
+
+=== The primitive
+
+A fiber is a stack plus a saved register context. Switching fibers means: save
+the current fiber's callee-saved registers and stack pointer into its context,
+load the target fiber's, and resume. This is a *bidirectional* generalisation of
+the `setjmp`/`longjmp` already implemented in `runtime.setjmp.pas` — and it uses
+the identical mechanism (the System V AMD64 callee-saved set `rbx`, `rbp`,
+`r12`–`r15`, plus `rsp` and the return address), which is the strongest evidence
+that the approach is sound and already supported.
+
+[source,pascal]
+----
+type
+  { Opaque saved context: just a stack-pointer slot. The callee-saved
+    registers and return address are pushed onto the fiber's OWN stack by
+    FiberSwap, so the context is a single saved RSP (the Go/boost.context
+    model). }
+  TFiberCtx = record
+    SP: Pointer;
+  end;
+  PFiberCtx = ^TFiberCtx;
+
+{ Save the current context into ACur, load Anext, resume on Anext's stack.
+  When something later swaps back into ACur, FiberSwap returns here. }
+procedure FiberSwap(ACur, ANext: PFiberCtx); assembler; nostackframe;
+----
+
+x86-64 System V sketch (the only architecture for v1; `nostackframe` so the body
+owns the frame, exactly as `runtime.setjmp` and the syscall leaves do):
+
+[source,asm]
+----
+    { %rdi = ACur, %rsi = ANext }
+    pushq %rbp
+    pushq %rbx
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+    movq  %rsp, (%rdi)      { ACur^.SP := current RSP (return addr already on stack) }
+    movq  (%rsi), %rsp      { RSP := ANext^.SP }
+    popq  %r15
+    popq  %r14
+    popq  %r13
+    popq  %r12
+    popq  %rbx
+    popq  %rbp
+    ret                     { jump to ANext's saved return address }
+----
+
+=== Bootstrapping a fresh fiber
+
+A newly created fiber has no saved context yet. `SpawnFiber` lays out the new
+stack so the first `FiberSwap` into it `ret`s into a trampoline:
+
+. `mmap` a stack region (see below); set `SP` near the top (16-byte aligned per
+  the SysV ABI).
+. Push a synthetic frame: the trampoline address as the "return address", and
+  zeroed slots where `FiberSwap`'s `popq` sequence expects the saved
+  callee-saved registers.
+. The trampoline (`procedure FiberTrampoline; cdecl;`) reads the fiber's entry
+  proc + argument from its control block, calls it, and on return calls
+  `FiberExit` (which marks the fiber dead and swaps back to the scheduler — it
+  never returns).
+
+=== Stacks: allocation, guard pages, pooling
+
+* *Allocation* via `mmap` (already bound in `runtime.syscall.linux`/`...freebsd`)
+  — `PROT_READ | PROT_WRITE`, `MAP_PRIVATE | MAP_ANONYMOUS`.
+* *Guard page.* Reserve one `PROT_NONE` page at the low end (stacks grow down)
+  so an overflow faults deterministically (`SIGSEGV`) instead of silently
+  corrupting an adjacent stack. This is essential: stackful coroutines have
+  fixed stacks and overflow is the classic failure mode.
+* *Size.* Default 64 KiB usable + 1 guard page; configurable per `SpawnFiber`.
+  Generous fixed stacks are simpler than Go's segmented/growable stacks and
+  adequate for protocol handlers; growable stacks are a later option.
+* *Pooling.* A free-list of retired stacks (size-classed) avoids `mmap`/`munmap`
+  churn on the hot connection-accept path — the single biggest per-connection
+  cost after the stack itself.
+
+=== Cross-CPU / cross-ABI table
+
+The context switch is the *only* CPU-specific code in the whole runtime, and it
+is identical across OSes for a given CPU/ABI (like the existing atomic/setjmp
+stubs). Adding an architecture is one new `asm` leaf.
+
+[cols="2,3,3",options="header"]
+|===
+| Target | Callee-saved set to swap | Notes
+
+| x86-64 System V (Linux, FreeBSD, macOS)
+| `rbx rbp r12 r13 r14 r15` + `rsp` + ret addr
+| v1 target. SSE control/status (MXCSR) and x87 CW are caller-saved across
+  calls, so not switched.
+
+| AArch64 AAPCS (Linux/macOS arm64)
+| `x19`–`x28`, `fp(x29)`, `lr(x30)`, `sp`, + `d8`–`d15` (callee-saved SIMD)
+| Must also save/restore the 8 low halves of `v8`–`v15`. macOS arm64 uses the
+  same AAPCS.
+
+| x86-64 Windows
+| `rbx rbp rdi rsi r12`–`r15` + `xmm6`–`xmm15` + `rsp`
+| Larger set (xmm6–15 are callee-saved on Win64). Must also swap the TEB stack
+  fields (`StackBase`/`StackLimit`/`DeallocationStack`) so SEH and stack-probe
+  checks see the active fiber's bounds. Done with Windows support.
+|===
+
+[#constraints]
+[NOTE]
+.Native backend only
+====
+Inline `asm` is supported by the *native* backend and rejected by QBE
+(`docs/inline-asm-design.adoc` § "Codegen — QBE"). The native backend is the
+default since v0.12.0, so this is acceptable, but it is a hard constraint: *a
+program using `Async.Fibers` must be built with the native backend.* The
+`Async.Fibers` unit should carry a compile-time guard (a clear error if the QBE
+backend is selected) rather than emit a cryptic QBE diagnostic on the `asm`
+body.
+====
+
+== L1 — The M:N scheduler
+
+Pure Pascal, target-invariant — the bulk of the runtime, and the part that needs
+no per-platform code at all.
+
+=== Workers and run queues
+
+* *N worker OS threads*, N defaulting to `GetCPUCount` (already in
+  `runtime.thread`), each created with `pthread_create`. Each worker runs a
+  scheduler loop and pins (optionally) to a core via `sched_getaffinity`.
+* *Per-worker run queue* — a Chase–Lev work-stealing deque (the structure Go's
+  scheduler, Tokio, and the Java ForkJoinPool all use). The owning worker pushes/
+  pops at one end lock-free; thieves steal from the other end.
+* *LIFO hand-off slot* per worker (Tokio-style) for the just-unparked fiber, to
+  keep a woken request hot in cache on the worker that woke it.
+* *Global injector queue* for fibers spawned from outside any worker (e.g. the
+  main thread) and for overflow.
+
+The loop: take next ready fiber (LIFO slot → local deque → steal from a random
+peer → global queue → poll the reactor); `FiberSwap` into it; when it parks,
+yields, or exits, repeat.
+
+=== Parking and wake-up
+
+A fiber that issues a fiber-aware I/O call that would block is *parked*: removed
+from all run queues and its resumption ownership handed to either
+
+* the *reactor* (keyed by fd + interest) — woken when the fd is ready; or
+* the *timer heap* (keyed by deadline) — woken when the timer fires
+  (`FiberSleep`, and the deadline arm of every I/O timeout).
+
+On wake-up the fiber is pushed back onto a run queue (preferably the waker's, via
+the LIFO slot). The scheduler never busy-waits: when no fiber is ready, a worker
+blocks in `reactor.Wait(timeout)` with the timeout set to the nearest timer
+deadline.
+
+=== Timers
+
+A per-worker 4-ary min-heap keyed by absolute deadline (`clock_gettime`,
+`CLOCK_MONOTONIC`). It serves `FiberSleep`, I/O deadlines, and structured-
+concurrency scope timeouts. The nearest deadline bounds the reactor wait so
+timers fire promptly without a dedicated timer thread.
+
+=== Cancellation and structured concurrency
+
+Modern concurrency (Swift `TaskGroup`, Kotlin/Java structured scopes, Trio
+nurseries) ties task lifetime to lexical scope and propagates cancellation. This
+matters for a load generator (Gatling-style ramps/deadlines) and for robust
+servers (drop a request that blew its deadline).
+
+* Each fiber carries a `Cancelled` flag and an optional deadline.
+* Cancelling a fiber wakes it from its park with a *cancelled* result; the
+  fiber-aware I/O call then returns an error / raises `EFiberCancelled` at the
+  suspension point, so cleanup runs through normal `try/finally` (ARC-friendly).
+* A `TTaskGroup` (nursery) owns child fibers, propagates cancellation to all
+  children when the scope exits or any child fails, and *joins* on scope exit so
+  no fiber leaks. This is the recommended public API for spawning concurrency.
+
+[source,pascal]
+----
+var Group := TTaskGroup.Create(Deadline := 30_000); { ms }
+try
+  for I := 0 to 9999 do
+    Group.Spawn(procedure begin FireOneRequest(I); end);
+  Group.Wait;   { all children, or cancel-all on first failure / deadline }
+finally
+  Group.Free;   { joins + cancels stragglers — no leaks by construction }
+end;
+----
+
+(`Group.Spawn` taking an anonymous procedure presumes the
+"reference to procedure" language item listed in `future-improvements.adoc` §
+Language; until that lands, the API takes a plain `procedure(Arg: Pointer)` +
+arg, exactly as `SpawnFiber` does.)
+
+=== Fiber-aware synchronisation
+
+A normal `pthread_mutex` held across a suspension would block the *entire
+worker* (and every other fiber on it) — a deadlock-class bug. Fiber code must
+use *fiber-aware* primitives that park the fiber, not the OS thread:
+
+* `TFiberMutex`, `TFiberEvent`, `TFiberWaitGroup` — park/resume via the
+  scheduler.
+* `TChannel<T>` — a Go-style bounded/unbounded channel for fiber-to-fiber
+  hand-off, the idiomatic alternative to shared-state locking.
+
+Brief, non-suspending critical sections may still use a raw spun/`pthread`
+mutex; the rule is *never hold an OS-level lock across a fiber suspension*.
+
+[#arc-atomicity]
+=== ARC under work-stealing (the critical prerequisite)
+
+Because a fiber can migrate between workers (work-stealing), two OS threads can
+touch the same object's refcount concurrently. Therefore Blaise's ARC refcount
+mutations (`_ClassAddRef`/`_ClassRelease`, the string/interface release helpers)
+**must be atomic** when the scheduler is active. The atomic primitives already
+exist (`_AtomicAddInt32`/`_AtomicSubInt32`, `blaise_atomic_x86_64`); the work is
+to ensure the codegen-emitted ARC paths use them — at minimum whenever
+`Async.Fibers` is linked.
+
+Two consequences to design for up front:
+
+* *Allocator contention.* `blaise_mem` must tolerate concurrent
+  `GetMem`/`FreeMem` from N workers. Per-worker arenas / thread-local free lists
+  (the standard tcmalloc/jemalloc approach) avoid a global allocator lock
+  becoming the throughput ceiling. This is the second-biggest scaling risk after
+  ARC atomicity.
+* *Pinning.* A fiber holding a non-migratable resource (or in a tight CPU loop)
+  can be pinned to its worker; CPU-bound fibers should yield periodically.
+
+This subsection is flagged as the top implementation risk in <<risks>>; it is
+the one place the fiber runtime reaches *into* existing RTL behaviour rather than
+sitting cleanly on top of it.
+
+== L2 — The reactor port
+
+The readiness mechanism is the single largest per-OS divergence, and it is a
+*runtime port* (not a link-time swap) because the whole call sequence and data
+model differ per OS and are driven by shared scheduler code — the same rationale
+that makes `TPlatformLayout` a runtime object in
+`docs/native-target-architecture.adoc`.
+
+[source,pascal]
+----
+type
+  TIoInterest = (ioRead, ioWrite);
+  TIoInterests = set of TIoInterest;
+
+  TReactor = class
+  public
+    { Register/modify interest in AFd; when ready, the scheduler resumes
+      the fiber recorded in AToken. }
+    procedure Add(AFd: Integer; AInterest: TIoInterests; AToken: Pointer); virtual; abstract;
+    procedure Modify(AFd: Integer; AInterest: TIoInterests; AToken: Pointer); virtual; abstract;
+    procedure Remove(AFd: Integer); virtual; abstract;
+    { Block up to ATimeoutMs (or until a wake) and deliver ready tokens.
+      Returns the count; AReady is filled with (token, events) pairs. }
+    function  Wait(ATimeoutMs: Integer; var AReady: TReadyList): Integer; virtual; abstract;
+    { Self-pipe / eventfd used to interrupt a blocked Wait from another worker. }
+    procedure Wake; virtual; abstract;
+  end;
+
+var
+  GReactor: TReactor;   { selected at scheduler startup, like GRtlPlatform }
+----
+
+[cols="2,4",options="header"]
+|===
+| Adapter | Implementation
+
+| `TEpollReactor` (Linux)
+| `epoll_create1`, `epoll_ctl`, `epoll_wait`. *Edge-triggered* (`EPOLLET`) with
+  non-blocking sockets drained until `EAGAIN` — the highest-throughput
+  configuration. `Wake` via `eventfd`. `accept4(SOCK_NONBLOCK)` to skip a
+  per-accept `fcntl`.
+
+| `TKqueueReactor` (FreeBSD, macOS)
+| `kqueue`, `kevent` with `EVFILT_READ`/`EVFILT_WRITE`, `EV_CLEAR` for
+  edge-triggered semantics. `Wake` via `EVFILT_USER`. Covers two OSes with one
+  adapter (matching how `TRtlPlatformPosix` spans Linux+FreeBSD).
+
+| `TIocpReactor` (Windows) — later
+| IOCP is a *completion* (proactor) model, not a *readiness* (reactor) one, so
+  this adapter shims completions into the same wake-token delivery (and the L3
+  I/O calls submit overlapped operations rather than retry-on-`EAGAIN`). Called
+  out now so the `TReactor` surface stays proactor-compatible; the memory-BIO
+  TLS design (L4) is chosen partly for the same reason.
+|===
+
+=== Listener scaling: `SO_REUSEPORT`
+
+For the server path, each worker opens its *own* listening socket on the same
+port with `SO_REUSEPORT`; the kernel load-balances incoming connections across
+them. This eliminates the accept thundering-herd and the single-acceptor
+bottleneck and is how NGINX/Envoy scale accept throughput. Each worker then
+accepts, spawns a handler fiber, and services it locally — no cross-worker
+hand-off on the hot path.
+
+=== Freestanding (static) builds
+
+The adapters above bind `epoll_*`/`kqueue`/`kevent`/`eventfd`/`accept4` via libc
+`external name`, exactly as `Net.Sockets` binds `socket`/`bind`/`recv`. For the
+*static, libc-free* build direction (FreeBSD Strategy B,
+`docs/native-target-architecture.adoc`), these become raw `syscall` stubs added
+to the per-target kernel leaf (`runtime.syscall.linux`/`...freebsd`) — a
+link-time symbol swap, no adapter change. Both paths are supported; the dynamic
+build is the default.
+
+== L3 — Fiber I/O: the "blocking that isn't"
+
+This layer is what makes the components synchronous-looking. Each primitive
+tries the operation; on `EAGAIN` it registers interest with the reactor, parks,
+and retries when woken — but if *no scheduler is running* (a plain program), it
+falls back to a true blocking call. The same source therefore works in both
+worlds; `uses Async.Fibers` is the only switch.
+
+[source,pascal]
+----
+function FiberRecv(AFd: Integer; ABuf: Pointer; ALen: Int64): Int64;
+var N: Int64;
+begin
+  repeat
+    N := Recv(AFd, ABuf, ALen, 0);
+    if N >= 0 then Exit(N);
+    if (errno = EAGAIN) and CurrentFiberActive then
+    begin
+      GReactor.Add(AFd, [ioRead], CurrentFiberToken);
+      ParkCurrentFiber;          { scheduler runs other fibers; resumes on ready/timeout/cancel }
+      if CurrentFiberCancelled then raise EFiberCancelled.Create;
+      { loop and retry the recv }
+    end
+    else
+      Exit(N);                   { real error, or blocking fallback already returned }
+  until False;
+end;
+----
+
+* Sockets created in fiber mode are set non-blocking (`O_NONBLOCK` /
+  `accept4(SOCK_NONBLOCK)`); the per-OS flag values are the
+  `Net.Sockets`/`TPlatformLayout` porting boundary already documented.
+* `FiberConnect` parks on writable then checks `SO_ERROR`; `FiberAccept` parks on
+  readable; `FiberSend` parks on writable for short writes.
+* *Deadlines.* Every primitive accepts an optional timeout; parking arms a timer
+  so the call returns `ETIMEDOUT` if readiness never comes.
+
+=== The two pinning hazards: DNS and disk
+
+Not everything has an async kernel equivalent:
+
+* *DNS* — `getaddrinfo`/`gethostbyname` are synchronous libc calls that *block
+  the OS thread*. Two options: (a) offload to a small dedicated *blocking thread
+  pool* (the route Java virtual threads take for pinned calls — simple, correct,
+  works today); (b) a pure-Pascal async resolver (UDP query to the configured
+  resolver, parse the response) that integrates with the reactor. Recommend (a)
+  first, (b) (`Net.Dns`) as a follow-up so the static/libc-free build has a
+  resolver at all.
+* *Regular-file I/O* — `epoll`/`kqueue` do not report readiness for regular
+  files (they are "always ready" but the read can still block on disk). File I/O
+  in a fiber must use the blocking offload pool, or (later) `io_uring` on Linux
+  behind the reactor port. Servers that only touch sockets are unaffected.
+
+== L4 — TLS: wrap `libssl` now, pure-Pascal later
+
+Per the explicit requirement: bind the system OpenSSL/LibreSSL now, behind a port
+that a pure-Pascal provider can replace without touching any component.
+
+=== The port
+
+[source,pascal]
+----
+type
+  TTlsProvider = class
+  public
+    function CreateClientContext(const AVerify: Boolean): TTlsContext; virtual; abstract;
+    function CreateServerContext(const ACertPem, AKeyPem: string): TTlsContext; virtual; abstract;
+  end;
+  { A TTlsConn wraps a transport (an fd via L3) and exposes Read/Write that
+    drive the TLS state machine; it is what Net.Http.Client(s)/Net.WebSockets
+    talk to. Components depend on TTlsConn, never on OpenSSL symbols. }
+
+var
+  GTlsProvider: TTlsProvider;   { TOpenSSLProvider now; TBlaiseTlsProvider later }
+----
+
+=== `TOpenSSLProvider` — the memory-BIO design
+
+Bind a *minimal function-only* surface of `libssl`/`libcrypto` via
+`external name` (the `Net.Sockets` pattern). Crucially, bind **functions only,
+never struct fields** — OpenSSL 1.1+ made structs opaque precisely so binders
+survive minor-version changes; this neutralises most ABI skew.
+
+Use the *memory-BIO* model rather than handing OpenSSL the socket fd:
+
+. Create an `SSL` with two `BIO_s_mem()` BIOs (`rbio` = ciphertext in, `wbio` =
+  ciphertext out) via `SSL_set_bio`.
+. The app calls `SSL_read`/`SSL_write` (plaintext). When OpenSSL needs network
+  I/O it returns `SSL_ERROR_WANT_READ`/`WANT_WRITE`.
+. The wrapper then *pumps* bytes between the memory BIOs and the socket using the
+  fiber-aware `FiberRecv`/`FiberSend`, and retries.
+
+This maps `WANT_READ`/`WANT_WRITE` directly onto "park on readable/writable, then
+retry" — the *identical* discipline as plaintext fiber I/O — so TLS drops into
+the scheduler with no special cases. It is also proactor-compatible (no reliance
+on a readiness fd), which keeps the door open for Windows IOCP and `io_uring`.
+
+Minimal bound surface: `OPENSSL_init_ssl`, `TLS_method`/`TLS_client_method`/
+`TLS_server_method`, `SSL_CTX_new/free`, `SSL_CTX_set_verify`,
+`SSL_CTX_load_verify_locations` (+ default trust path per OS),
+`SSL_CTX_use_certificate/PrivateKey`, `SSL_new/free`, `BIO_new(BIO_s_mem())`,
+`SSL_set_bio`, `SSL_set_tlsext_host_name` (SNI), `SSL_set1_host` (hostname
+verification), `SSL_do_handshake`, `SSL_read`/`SSL_write`, `SSL_get_error`,
+`BIO_write`/`BIO_read`, `SSL_CTX_set_alpn_protos` (for HTTP/2 later).
+
+=== Security defaults
+
+Certificate verification **on by default** for clients (`SSL_CTX_set_verify`
+`SSL_VERIFY_PEER` + the OS trust store), SNI sent, and hostname matching via
+`SSL_set1_host`. Opting out is explicit and loud. (Indy's historically weak
+defaults are a cautionary tale here.)
+
+=== Dependency posture and the static-build conflict
+
+`libssl` is a *dynamic* dependency (`PT_INTERP`, `libssl.so.3`/`libssl.so.1.1`,
+`libcrypto`), which is incompatible with the freestanding/static FreeBSD
+Strategy-B direction. Therefore:
+
+* TLS is *opt-in* and available only in the libc-linked/dynamic build profile.
+  The static, libc-free build has *no* TLS until the pure-Pascal provider exists.
+* Components degrade cleanly: `Net.Http.Client` works over plaintext in any
+  build; `https`/`wss`/`smtps` require a `GTlsProvider`, and asking for them
+  without one is a clear runtime error, not a link failure.
+
+=== Cross-target
+
+[cols="2,3",options="header"]
+|===
+| OS | Provider today
+
+| Linux | `libssl.so.3` (or `.1.1`); detect soname at link/load.
+| FreeBSD | base or ports OpenSSL via the same bindings.
+| macOS | `/usr/lib/libssl` (LibreSSL) via the same OpenSSL ABI; a
+  `Network.framework`/Secure Transport adapter is a later option.
+| Windows | ship OpenSSL DLLs, or a future `TSChannelProvider` adapter behind the
+  same port.
+|===
+
+=== The pure-Pascal future (`TBlaiseTlsProvider`)
+
+The long-term replacement is a pure-Pascal TLS 1.3 stack built on an expanded
+`Security.Crypto` (AEAD ciphers, ECDHE/X25519, the needed hashes/HKDF, X.509
+parsing + path validation). It is a substantial component in its own right
+(comparable to a regex engine in scope) and warrants its own design document.
+The memory-BIO port boundary means it slots in by swapping `GTlsProvider` —
+*zero* change to any L5 component — and it is what finally lets the
+static/libc-free build speak TLS.
+
+== L5 — The Indy-class component surface
+
+With L0–L4 in place, the components are ordinary synchronous Pascal — one fiber
+per connection/request — with no I/O-multiplexing logic of their own.
+
+[cols="2,4",options="header"]
+|===
+| Unit | Surface
+
+| `Net.Uri` | URL/URI parse + build (scheme, host, port, path, query, userinfo).
+| `Net.Dns` | Resolver (offload now; async UDP resolver later).
+| `Net.Tcp` | `TTcpClient` (connect/read/write/readline), `TTcpServer`
+  (accept-loop spawning a handler fiber per connection).
+| `Net.Udp` | Datagram socket wrapper.
+| `Net.Tls` | `TTlsClient`/`TTlsServer` layered over `Net.Tcp` via `TTlsConn`.
+| `Net.Http.Client` | HTTP/1.1 client: keep-alive pools, chunked transfer,
+  redirects, gzip (later), `https` via `Net.Tls`. Built to fire thousands of
+  concurrent requests from fibers (the Gatling use case).
+| `Net.Http.Server` | *Rewritten* on fibers: keep-alive, request bodies, a
+  router; HTTP/2 over ALPN later. Supersedes today's one-at-a-time server.
+| `Net.WebSockets` | Client + server over the existing RFC 6455 codec; one fiber
+  per socket replaces the current broadcast-list polling.
+| `Net.Smtp` / `Net.Pop3` / `Net.Imap` | Mail protocols (the Indy breadth).
+| `Net.Ftp` | File transfer (control + data connections, both fiber-driven).
+|===
+
+=== Example: a high-concurrency server
+
+[source,pascal]
+----
+uses Async.Fibers, Net.Http.Server;
+
+procedure Pong(ARequest: THttpRequest; AResponse: THttpResponse);
+begin
+  AResponse.SetText(200, 'text/plain', 'pong');   { reads like blocking code }
+end;
+
+begin
+  RunScheduler(procedure
+  begin
+    THttpServer.Create(8080)
+      .Route('GET', '/ping', @Pong)
+      .Serve;     { accept-loop on every worker (SO_REUSEPORT); a fiber per request }
+  end);
+  { 10k slow clients cost ~10k * 64 KiB = 640 MiB of pooled stack — fine. }
+end.
+----
+
+=== Example: a Gatling-style load generator
+
+[source,pascal]
+----
+uses Async.Fibers, Net.Http.Client;
+
+var Group := TTaskGroup.Create(Deadline := 60_000);
+try
+  for I := 0 to 9999 do
+    Group.Spawn(procedure
+    begin
+      var R := THttpClient.Get('https://target.local/api/items');  { parks, not blocks }
+      RecordLatency(R.Elapsed, R.StatusCode);
+    end);
+  Group.Wait;   { 10 000 requests in flight on N workers — bounded by net/CPU, not threads }
+finally
+  Group.Free;
+end;
+----
+
+[#relationship-to-future-improvements]
+== Relationship to the existing Concurrency note
+
+`future-improvements.adoc` § "Concurrency" recommends async/await
+(state-machine transform) as the *primary* modern primitive and lists virtual/
+green threads as a *long-term, high-investment* option, citing a QBE concern:
+"Green threads would require platform-specific context switching … harder to
+express through QBE." This design takes the opposite primary choice for the
+networking goal, for three reasons the older note pre-dates or weighs
+differently:
+
+. *The QBE objection is moot for the chosen path.* Blaise has since gained inline
+  `asm` on the *native* backend (the default), and `runtime.setjmp.pas` already
+  proves the exact save/restore mechanism works. The context switch is therefore
+  a ~30-line existing-pattern leaf, not a QBE problem — green threads need *no*
+  compiler feature, whereas async/await is explicitly costed in the same note at
+  "Large … 4–6 weeks" of *compiler* work (parser + semantic + codegen
+  state-machine transform).
+. *Function colouring defeats an Indy replacement.* async/await colours every
+  I/O-touching function `async`, so the existing synchronous protocol code, and
+  any ported Indy/Synapse logic, must be rewritten to compile — the opposite of
+  a drop-in high-concurrency upgrade. Stackful fibers run that code *unmodified*.
+. *Stackful fibers are strictly more general for I/O-bound servers.* They give
+  the synchronous code style async/await promises, plus true multicore execution
+  (M:N + work-stealing) that a single async event loop lacks.
+
+The two are *not* mutually exclusive, and this design does not foreclose
+async/await as a later language feature for other use cases. But for "an Indy
+that hits Gatling numbers", stackful fibers are the right primary foundation,
+and the `TThread` self-referential-ARC guidance in the same note remains valid
+and complementary (a `TThread` can run *on* the worker pool). This document
+should be cross-referenced from that section.
+
+== Performance model and targets
+
+Why the numbers are reachable: with epoll/kqueue's O(1) readiness delivery,
+pooled small stacks, lock-free per-worker run queues with work-stealing, and
+`SO_REUSEPORT` accept distribution, the per-request cost collapses to a stack
+checkout, two context switches, and the actual syscalls — the bottleneck moves
+from *thread count* to *CPU and network*, which is exactly why Go/Java-VT/Gatling
+reach 10k+ req/s on one host.
+
+Targets to measure (extending the existing `docs/benchmark.txt` methodology —
+median of repeated runs, recorded with git revision and host):
+
+* *Throughput* — req/s on a trivial handler (ping/pong), keep-alive on and off.
+* *Concurrency* — sustained concurrent connections at fixed memory (target
+  100k idle WebSocket connections).
+* *Latency* — p50/p99/p99.9 under load (tail latency exposes scheduler/GC-style
+  stalls; here, allocator contention and ARC atomics).
+* *Per-connection memory* — committed RSS / connection.
+* *Baselines* — vs the current one-at-a-time `THttpServer`, and vs a
+  thread-per-connection variant, to quantify the win.
+
+A `bench_http_server`/`bench_http_client` pair (mirroring the
+`bench_blaise_mem` programs) drives these.
+
+== Where it lives, and the module layout
+
+A new opt-in stdlib namespace; protocols stay under `net.*`. The fiber runtime
+is *not* always-linked RTL — it is opt-in like the rest of stdlib, matching the
+"zero cost if unused" principle.
+
+----
+stdlib/src/main/pascal/
+  async.fibers.pas                 L1 scheduler + public API (SpawnFiber, RunScheduler, TTaskGroup, yield, sleep)
+  async.fibers.context.x86_64.pas  L0 FiberSwap + trampoline (inline asm; native backend only)
+  async.sync.pas                   L1 TFiberMutex/Event/WaitGroup, TChannel<T>
+  async.reactor.pas                L2 TReactor port (abstract) + GReactor selection
+  async.reactor.epoll.pas          L2 TEpollReactor (Linux)
+  async.reactor.kqueue.pas         L2 TKqueueReactor (FreeBSD, macOS)
+  async.io.pas                     L3 FiberRecv/Send/Accept/Connect, deadlines, blocking-offload pool
+  net.tls.pas                      L4 TTlsProvider port + TTlsConn
+  net.tls.openssl.pas              L4 TOpenSSLProvider (memory-BIO bindings)
+  net.uri.pas / net.dns.pas / net.tcp.pas / net.udp.pas            L5
+  net.http.client.pas              L5
+  net.http.server.pas              L5 (rewritten on fibers)
+  net.websockets.pas               L5 (client+server; reuses existing codec)
+  net.smtp.pas / net.pop3.pas / net.imap.pas / net.ftp.pas         L5
+----
+
+Adding a CPU: one `async.fibers.context.<cpu>.pas`. Adding an OS reactor: one
+`async.reactor.<mech>.pas` + one registration. Adding a TLS provider: one
+`net.tls.<impl>.pas` + swap `GTlsProvider`. No existing file is edited to extend
+any axis — Open/Closed, as the native-target architecture requires.
+
+== Build and dependency posture
+
+* *Default (dynamic) build* — links libc and, when TLS is requested, `libssl`/
+  `libcrypto`. Full component set including `https`/`wss`/`smtps`.
+* *Freestanding/static build* — epoll/kqueue via the kernel-leaf raw syscalls
+  (link-time swap); *no TLS* until `TBlaiseTlsProvider`. Plaintext components
+  work fully.
+* *Backend* — native only (inline asm). The `Async.Fibers` unit guards against a
+  QBE build with a clear diagnostic.
+
+== Testing strategy
+
+Per project policy, each layer is tested at the lowest level that proves it, with
+e2e behaviour on top:
+
+* *L0* — an e2e program that spawns a fiber, swaps in/out N times, asserts values
+  survive across switches; a guard-page overflow test asserts a clean fault, not
+  corruption.
+* *L1* — scheduler unit tests: round-robin fairness, work-stealing under
+  imbalance, timer ordering, cancellation/`TTaskGroup` join-and-cancel, channel
+  semantics. A stress test spawns 100k fibers doing ping-pong over channels.
+* *L2* — reactor unit tests against socketpairs: readiness delivery, edge-trigger
+  drain, `Wake` interrupting a blocked `Wait`. Cross-target *structural*
+  coverage (per the native-target doc) selects each adapter on its host.
+* *L3* — loopback echo at high concurrency; deadline/timeout correctness;
+  blocking-fallback when no scheduler is running (same source, both modes).
+* *L4* — TLS handshake + echo against a loopback `TTlsServer`; `WANT_READ/WRITE`
+  pumping under a deliberately tiny BIO; cert-verification on/off; SNI/hostname
+  match/mismatch.
+* *L5* — protocol conformance (HTTP keep-alive, chunked, redirects; WS
+  ping/pong/close; SMTP transaction) over loopback, plus the benchmark programs.
+* *Fixpoints* — the runtime is stdlib (opt-in), so it does not affect the
+  compiler self-hosting fixpoints; but the stdlib test suite (`blaise.testing`)
+  gains the above.
+
+== Phased implementation plan
+
+. *L0 context switch (x86-64 SysV)* — `FiberSwap`, trampoline, guard-page stacks,
+  stack pool. E2e swap test. *Foundation; everything gates on this.*
+. *L1 single-worker scheduler* — run queue, park/resume, `FiberSleep` + timer
+  heap, `SpawnFiber`/`RunScheduler`/yield. Defer work-stealing.
+. *L2 epoll reactor + L3 fiber I/O (Linux)* — non-blocking sockets,
+  `FiberRecv/Send/Accept/Connect`, deadlines, blocking fallback. First milestone
+  that does real network I/O.
+. *L1 multicore* — N workers, Chase–Lev work-stealing, **ARC-atomicity +
+  allocator-contention work (<<arc-atomicity>>)**, fiber-aware sync + channels,
+  `SO_REUSEPORT`. First milestone that scales across cores.
+. *L5 first components* — `Net.Tcp`, rewritten `Net.Http.Server`, `Net.Uri`;
+  benchmark vs the current server. *Proves the 10k req/s thesis.*
+. *L4 TLS (OpenSSL memory-BIO)* + `Net.Tls`, `https` in `Net.Http.Client`,
+  `wss`.
+. *L5 breadth* — `Net.Http.Client` keep-alive pools, `Net.WebSockets`
+  client+server, `Net.Dns`, then SMTP/POP3/IMAP/FTP.
+. *Portability* — `TKqueueReactor` (FreeBSD/macOS) + AArch64 context leaf;
+  kernel-leaf raw syscalls for the static build.
+. *Long term* — `TBlaiseTlsProvider` (pure-Pascal TLS 1.3); Windows
+  (`TIocpReactor` + Win64 context + SChannel/OpenSSL); `io_uring` behind the
+  reactor port; HTTP/2 over ALPN.
+
+[#risks]
+== Risks
+
+* *ARC atomicity & allocator contention (highest).* Refcounts must be atomic
+  under work-stealing, and `blaise_mem` must scale to N concurrent workers. This
+  is the one place the design reaches into core RTL behaviour. Mitigation:
+  enable atomic ARC whenever `Async.Fibers` is linked; add per-worker allocator
+  arenas; validate with the 100k-fiber stress + a race detector / TSan-style
+  run if available. *Prototype single-worker first (phase 2) to defer this.*
+* *Stack overflow.* Fixed stacks + deep protocol recursion (e.g. TLS + chunked +
+  gzip layers) can overflow. Mitigation: guard pages (deterministic fault),
+  generous default + per-spawn sizing, and later growable stacks.
+* *Fiber-unaware blocking calls.* Any libc call that blocks the OS thread
+  (`getaddrinfo`, file I/O, a user's `Sleep`, a raw `pthread_mutex` held across a
+  suspension) stalls a whole worker and its fibers. Mitigation: the blocking-
+  offload pool for known offenders; fiber-aware sync primitives; documentation;
+  optionally a debug "blocked-too-long" watchdog.
+* *OpenSSL ABI/version skew.* Mitigation: bind functions only (opaque structs),
+  detect soname, pin the minimal surface, test against 1.1 and 3.x.
+* *Debugging stackful coroutines.* Swapped stacks confuse a debugger that assumes
+  one stack per OS thread. Mitigation: the OPDF debugger should learn to walk a
+  fiber's saved `SP`; until then, document the limitation. (This is a genuine
+  follow-on for the first-class-debugger goal.)
+* *SIGPIPE / thundering herd / fd limits.* Keep `IgnoreSigPipe`; `SO_REUSEPORT`
+  for accept; raise `RLIMIT_NOFILE` and document the tuning for C100k.
+
+== Alternatives considered
+
+* *async/await state-machine transform* (the `future-improvements.adoc`
+  primary). Rejected as the *foundation* for the networking goal: large compiler
+  feature, function colouring forces rewriting existing/ported synchronous
+  protocol code, and a single event loop is not multicore. Still viable as a
+  *later, orthogonal* language feature. (<<relationship-to-future-improvements>>.)
+* *Thread-per-connection (Indy/the status quo).* The very ceiling this design
+  removes.
+* *Callback reactor (bare epoll + callbacks).* Reaches C100k but inverts control
+  flow into callback chains — no synchronous code, hard to compose, and again
+  forces a protocol rewrite.
+* *Bind libuv.* Gets a mature cross-platform reactor cheaply, but adds a large C
+  dependency against the clean-dependency philosophy, *still* needs fibers for
+  synchronous-looking code on top, and duplicates what epoll/kqueue bindings
+  already give us. Rejected; we own the thin reactor instead.
+* *Always-on runtime (Go model).* Rejected in favour of opt-in (Java VT model):
+  zero cost for programs that do not use fibers, and no disruption to the
+  existing single-threaded RTL/stdlib.
