@@ -1,6 +1,6 @@
 = Anonymous Methods and Closures — `reference to` Types, Capturing Literals, ARC-Correct Environments
 :author: Graeme Geldenhuys
-:revdate: 2026-06-29
+:revdate: 2026-06-30
 :toc: left
 :toclevels: 3
 :source-highlighter: rouge
@@ -75,6 +75,135 @@ Out of scope (deferred, noted under <<alternatives>> / <<risks>>):
   future-improvements).
 * Closures as `published` event-handler RTTI targets.
 * Capture *by value* qualifiers (no Delphi precedent; not required).
+
+[#ceo-scope-expansion]
+== Scope expansion — the functional layer this unlocks (CEO review, 2026-06-30)
+
+A `/plan-ceo-review` pass reframed the strategic value of this feature. Anonymous
+methods are not plumbing for the fiber API; they are the keystone of a
+*functional collections layer* — the everyday ergonomic payoff that makes Blaise
+feel like a modern language rather than 1990s Pascal. The closure primitive
+specified in the rest of this document is the engine; the items below are the
+car built around it. All build *on top of* the primitive (Phases 0-7) and add no
+new runtime machinery beyond what the closure itself introduces.
+
+Accepted into scope (CEO review): E1, E2, E3, E5. Deferred to `TODOS.md`: E4.
+
+=== E1 — Functional type vocabulary (accepted)
+
+A small `Functional` unit of named `reference to` aliases so the whole layer
+shares one vocabulary instead of spelling out signatures inline:
+
+[source,pascal]
+----
+type
+  TFunc<T, R>     = reference to function(const AValue: T): R;
+  TPredicate<T>   = reference to function(const AValue: T): Boolean;
+  TAction<T>      = reference to procedure(const AValue: T);
+  TComparison<T>  = reference to function(const A, B: T): Integer;
+----
+
+Bridges to `Generics.Defaults` (a `TComparison<T>` adapts to `IComparer<T>`).
+Foundational and tiny; everything below uses these names.
+
+=== E2 — Eager LINQ-lite over `Generics.Collections` (accepted)
+
+`Map<R>` / `Where` / `Reduce<R>` / `ForEach` / `Any` / `All` / `Find` returning
+*new* concrete collections (eager, not lazy — predictable allocation and simple
+mental model). The everyday payoff:
+
+[source,pascal]
+----
+Adults := People
+  .Where(IsAdult)                                  { TPredicate<TPerson> }
+  .Map<string>((P) -> P.Name);                     { TFunc<TPerson,string> }
+----
+
+*Eng-review decision (2026-06-30): fluent methods on `TList<T>`.* The ops are
+added directly to `TList<T>` in `generics.collections.pas` (not free functions,
+not a wrapper type) so chains read `list.Where(p).Map(f)` — the ergonomic payoff
+that motivated the whole layer. Reified generics emit a method only for the
+instantiations that actually use it, so unused ops cost nothing.
+
+Two feasibility points the build must confirm first:
+
+* `Map<R>` on `TList<T>` is a *generic method on a generic class* — a
+  double instantiation `(T = TPerson, R = string)`. Generic methods exist
+  (`FGenericMethodTemplates`, `InstantiateGenericMethod` in `uSemantic.pas`), but
+  the simultaneous owner-param + method-param case must be verified end-to-end
+  (monomorphisation + codegen) before E2 is committed; a probe test gates it.
+* Adding the ops makes `generics.collections` depend on the closure types — keep
+  the dependency to the `reference to` signatures (or the E1 `Functional` unit),
+  not a cycle.
+
+=== E3 — Lambda `Sort` + binary search (accepted)
+
+`TList<T>.Sort` / `BinarySearch` taking a `TComparison<T>` closure, bridged to
+the existing `Generics.Defaults` comparer machinery. The most common closure use
+case in practice; small.
+
+=== E5 — Terse lambda syntax `->` (accepted)
+
+Without concise syntax the E2 layer reads heavy enough to undercut the
+"feels modern" win, so a terse arrow lowering to the *same* closure machinery is
+in scope. **Decision: `->` (not `=>`).** Rationale:
+
+* `->` is *free* in Blaise — pointer dereference is `^` (`tkCaret`), return types
+  use `:`, and function types use `reference to function(...): T`, so `->`
+  collides with nothing (unlike C's deref or Rust/Swift's return-type arrow).
+* `=>` was rejected: Blaise uses a *single* `=` for equality (unlike the `==`
+  languages that use `=>`), so `=>` would sit one glyph from `=` and visually
+  mirror `>=`/`<=`, three `=`-glyph meanings in one expression. `->` avoids that
+  entirely.
+* Lexer impact is one `else if` arm: `->` arrives as a 2-char symbol token
+  exactly like `:=`/`<=`/`>=` (`uLexer.pas` ~737); no tokeniser rework, no parse
+  ambiguity (`a -> b` and `a - b` are distinct token streams).
+
+Form (two sub-decisions, both accepted):
+
+* *Expression OR block body.* `(P) -> P.Age >= 18` implies `Result :=` of the
+  single expression; multi-statement bodies keep the full
+  `function(...) begin … end` literal. (Mirrors Java's `x -> expr` vs
+  `x -> { … }` split.)
+* *Parameter type inference from the target.* `(P) -> P.Name` infers `P`'s type
+  from the target `reference to` type (target-typing) so the terse form is
+  actually terse; an explicit `(const P: TPerson) -> …` is always allowed. This
+  is the one piece that needs real semantic work (target-typed inference); the
+  arrow desugars into a `TAnonMethodExpr` before codegen, so codegen and ARC are
+  unchanged.
+
+The arrow is pure front-end sugar: parse → desugar to `TAnonMethodExpr` →
+existing closure lowering. No new runtime. This *supersedes* the original
+"out of scope" stance on terser syntax noted under <<alternatives>>.
+
+[IMPORTANT]
+.Eng-review decision (2026-06-30): full two-phase deferred analysis
+====
+Target-typed param inference fights the *bottom-up* type checker. Today
+`ResolveStandaloneOverload`/`ResolveMethodOverload` score candidates from
+arguments that are *already analysed with `ResolvedType` set* (`uSemantic.pas`
+:282-301) — arguments are typed *before* the overload is chosen. That works for
+assignment/return position (the target type is known up front) but not for the
+headline argument position `List.Where((P) -> ...)`, where you must know
+`Where`'s parameter type to type `P`, yet the resolver wants `P` typed to pick
+`Where`.
+
+*Decision: build the two-phase deferred path* — a lambda argument is first
+gathered by arity/shape, the chosen candidate's parameter types are pushed in as
+*expected context*, then the lambda body is analysed against them. This is the
+single largest and riskiest piece of the whole feature: it re-architects argument
+analysis from pure synthesis to bidirectional, and it touches
+`ResolveStandaloneOverload`/`ResolveMethodOverload` and `ArgMatchScore` — which
+have *no covering tests today*. Treat the overload-resolver change as its own
+sub-phase with a regression-test net written *first* (see <<testing>>).
+====
+
+=== E4 — Lazy enumerable pipelines (DEFERRED to `TODOS.md`)
+
+Deferred. Deferred (allocation-free `Map`/`Where` chains via an iterator
+protocol composing with `for..in`) is genuinely valuable but needs an iterator/
+enumerator protocol that is a meaningfully bigger lift than E2's eager ops. It is
+the natural successor once E1-E3 land; captured in `TODOS.md`.
 
 == Constraints carried from the Blaise dialect
 
@@ -753,19 +882,31 @@ ProceduralType    = [ "reference" "to" ] ( "procedure" | "function" )
                     (* "reference to" and "of object" are mutually exclusive *)
 
 (* --- Expressions --- *)
-Primary           = ... | AnonMethod ;
+Primary           = ... | AnonMethod | ArrowLambda ;
 AnonMethod        = ( "procedure" | "function" )
                     [ WeakCaptureList ]
                     [ "(" [ ParamList ] ")" ]
                     [ ":" TypeName ]            (* required iff "function" *)
                     Block ;                     (* full begin..end body *)
 WeakCaptureList   = "[" "Weak" Ident { "," Ident } "]" ;
+
+(* terse lambda (E5) — desugars to AnonMethod before semantic analysis *)
+ArrowLambda       = LambdaParams "->" ( Expression | Block ) ;
+LambdaParams      = Ident                            (* single inferred param *)
+                  | "(" [ InferredOrTypedParams ] ")" ;
+InferredOrTypedParams =
+                    ( Ident { "," Ident }            (* types inferred from target *)
+                    | ParamList ) ;                  (* or fully typed, as today *)
 ----
 
 Notes: `reference` is a soft keyword — recognised only in the
 `reference to procedure|function` position. `AnonMethod` is reachable only
 from expression (`Primary`) context, so it never collides with a type
-declaration.
+declaration. `ArrowLambda` uses `->` (token added alongside `:=`/`<=`/`>=` in
+`uLexer.pas`); a single-`Expression` body implies `Result :=` of that
+expression, and bare `Ident` params take their types from the target
+`reference to` type (target-typed inference). The parser rewrites an
+`ArrowLambda` into a `TAnonMethodExpr` so all downstream passes are unchanged.
 
 == AST node sketches
 
@@ -850,6 +991,43 @@ and at `string`; cross-unit generic body with a closure.
 Phase 7 — Concurrency hookup::
 Add the `reference to`-typed `TTaskGroup.Spawn` overload in the async stdlib
 (unblocks `docs/async-networking-design.adoc`). Tests: E2E spawn-with-closure.
+
+The CEO-accepted functional layer (<<ceo-scope-expansion>>) builds on the
+primitive above and is sequenced after Phase 7:
+
+Phase 8 — Functional type vocabulary (E1)::
+A `Functional` stdlib unit with `TFunc<T,R>`/`TPredicate<T>`/`TAction<T>`/
+`TComparison<T>` aliases; `TComparison<T>`→`IComparer<T>` adapter into
+`Generics.Defaults`. Tests: alias resolution, comparer-adapter round-trip.
+
+Phase 9a — `->` syntax + cheap inference::
+Add the `->` token (`uLexer.pas`); parse `ArrowLambda`; desugar to
+`TAnonMethodExpr`; implicit `Result :=` for an expression body; target-typed
+inference *only where the expected type is already known without overload
+resolution* (assignment/return/typed-field, single non-overloaded param). Tests:
+`->` lexes distinctly from `-`/`>=`; expression and block bodies; desugared node
+matches the equivalent `function … begin … end`.
+
+Phase 9b — Two-phase deferred inference (the risky core)::
+Re-architect argument analysis so a lambda arg is gathered by arity/shape, the
+chosen candidate's parameter types are pushed in as expected context, then the
+body is analysed. Touches `ResolveStandaloneOverload`/`ResolveMethodOverload`/
+`ArgMatchScore`. *Write the overload-resolution regression net FIRST* (those
+paths are untested today) so this change is bisectable. Tests: inference in
+argument position (`List.Where((P) -> …)`); overloaded-target disambiguation;
+no regression in existing non-lambda overload resolution; fixpoint.
+
+Phase 10 — Eager LINQ-lite + lambda Sort (E2, E3)::
+*Gate first:* a probe test proving a generic method with its own type param on a
+generic class (`TList<T>.Map<R>`, `T=TPerson R=string`) monomorphises and runs
+end-to-end. Then add fluent `Map`/`Where`/`Reduce`/`ForEach`/`Any`/`All`/`Find`
+*as methods on* `TList<T>`, and `Sort`/`BinarySearch` taking `TComparison<T>`.
+Tests: each operator's behaviour + edge cases (empty collection, all-match,
+none-match), sort stability/comparator correctness, leak checks on produced
+collections, and the double-monomorphisation probe.
+
+Phase 11 (DEFERRED) — Lazy enumerable pipelines (E4)::
+Tracked in `TODOS.md`; needs an iterator/enumerator protocol. Not committed.
 
 [#testing]
 == TDD testing strategy
