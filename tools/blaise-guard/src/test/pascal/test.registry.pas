@@ -20,7 +20,8 @@ uses
   Guard.Rule.MaxLineLength.Tests,
   Guard.Rule.MaxFunctionLines.Tests,
   Guard.Rule.DeepNesting.Tests,
-  Guard.Rule.AvoidManualFree.Tests;
+  Guard.Rule.AvoidManualFree.Tests,
+  Guard.Rule.StringIndexing.Tests;
 
 implementation
 

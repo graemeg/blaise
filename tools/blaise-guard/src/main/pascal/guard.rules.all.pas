@@ -21,7 +21,8 @@ uses
   Guard.Rule.MaxLineLength,     { BL-1001 }
   Guard.Rule.MaxFunctionLines,  { BL-1002 }
   Guard.Rule.DeepNesting,       { BL-1003 }
-  Guard.Rule.AvoidManualFree;   { BL-2001 }
+  Guard.Rule.AvoidManualFree,   { BL-2001 }
+  Guard.Rule.StringIndexing;    { BL-2003 }
 
 implementation
 

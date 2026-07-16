@@ -123,13 +123,26 @@ threshold and severity).
 | BL-1002 | MaxFunctionLines | ✅ implemented
 | BL-1003 | DeepNesting   | ✅ implemented
 | BL-2001 | AvoidManualFree   | ✅ implemented
-| BL-1004 | UnusedIdentifiers | ⏳ planned
-| BL-2002 | ReferenceCycles   | ⏳ planned
-| BL-2003 | StringIndexing    | ⏳ planned
-| BL-3001 | DuplicateCodeBlock | ⏳ planned
+| BL-2003 | StringIndexing    | ✅ implemented (heuristic, token-based, INFO)
+| BL-1004 | UnusedIdentifiers | ⏳ planned (needs the AST expression walker)
+| BL-2002 | ReferenceCycles   | ⏳ planned (needs a cross-file type-graph pass)
+| BL-3001 | DuplicateCodeBlock | ⏳ planned (needs a cross-file / end-of-run hook)
 |===
 
 All four report formats are implemented: `console`, `json`, `xml`, `html`.
+
+=== Remaining rules: design notes
+
+* *BL-1004 UnusedIdentifiers* -- extend `Guard.Ast.Walker` with expression
+  descent + a `VisitExpr` hook, then diff declared names (locals/params, and
+  private fields) against `TIdentExpr` uses per scope at `VisitMethodExit`.
+  Ship disabled-by-default first (false-positive risk).
+* *BL-2002 ReferenceCycles* and *BL-3001 DuplicateCodeBlock* both need results
+  aggregated across files: add an optional `IRule.Finalize(report)` hook the
+  engine calls once after the per-file pass. BL-3001 accumulates rolling
+  (Rabin-Karp) token-window hashes across files and emits collisions in
+  Finalize; BL-2002 collects every class's field-type edges into a graph and
+  reports strong (non-`[Weak]`) cycles.
 
 == Adding a rule
 
