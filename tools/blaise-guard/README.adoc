@@ -1,0 +1,145 @@
+= BlaiseGuard
+:toc: macro
+:toclevels: 3
+
+A modern, extensible static code analyzer for the Blaise language, written in
+pure Blaise Object Pascal. It links the compiler's *live* frontend
+(`uLexer`/`uParser`/`uAST`), so it always analyses exactly the grammar the
+compiler currently accepts -- no vendored, drifting copy.
+
+toc::[]
+
+== Why it lives in the compiler repo
+
+BlaiseGuard consumes the compiler's own lexer, parser and AST. Keeping it here
+(as a module of the root aggregator, alongside `tools/migration-analyser` and
+`tools/bif-coverage`) means the frontend it depends on is resolved at HEAD and
+built by the same aggregator. When the grammar evolves, BlaiseGuard breaks at
+build time in the same commit -- coupling that is a feature: it can never
+silently lint against a stale dialect.
+
+== Architecture (hexagonal / ports & adapters)
+
+The analysis *core* is pure and depends only on abstractions; all I/O lives in
+adapters at the edges.
+
+[cols="1,3",options="header"]
+|===
+| Layer | Units
+
+| Domain (centre)
+| `Guard.Domain` (severity, location, diagnostic, quick-fix), `Guard.Report`
+
+| Application core
+| `Guard.Engine` (orchestrator), `Guard.Rules` (rule port + Template-Method
+  bases + registry), `Guard.Config`
+
+| Driven adapters
+| `Guard.Frontend` (anti-corruption layer over the compiler frontend),
+  `Guard.Sources` (file discovery), `Guard.Format.*` (renderers)
+
+| Driving adapter
+| `Guard.Cli`, `BlaiseGuard` (composition root)
+|===
+
+Design patterns in play:
+
+* *Strategy / plugin port* -- `IRule` and `IReportFormatter` are GUID-less
+  interfaces (a Blaise idiom); the engine depends only on the abstraction.
+* *Template Method* -- `TLineRuleBase` / `TTokenRuleBase` / `TAstRuleBase`
+  fix the traversal (lines, tokens, AST) and leave the check to one hook.
+* *Visitor* -- `Guard.Ast.Walker` externalises AST traversal (the compiler's
+  nodes have no `Accept`), driving visitor hooks with control-flow depth.
+* *Registry + self-registration* -- each rule unit calls `RegisterRule` in its
+  `initialization` section (mirrors `blaise.testing`'s `RegisterTest`), so
+  adding a rule is a one-line, decoupled act.
+* *Anti-corruption layer* -- `Guard.Frontend` is the only unit that knows the
+  compiler frontend types exist.
+
+Everything is ARC-managed (no manual `Free`); non-owning back-references use
+`[Unretained]`.
+
+== Build & run
+
+Built by the root aggregator as module `tools/blaise-guard` (produces the
+`blaise-guard` executable). Then:
+
+[source,sh]
+----
+# Analyse a whole tree
+blaise-guard --scan path/to/src
+
+# One file
+blaise-guard path/to/unit.pas
+
+# A PasBuild project (MVP: scans the project file's directory)
+blaise-guard --project path/to/project.xml
+
+# CI gate: non-zero exit when warnings or worse are found
+blaise-guard --scan src --fail-on warning
+----
+
+=== Options
+
+[cols="1,3",options="header"]
+|===
+| Option | Meaning
+| `--config <file>` | Rules configuration (JSON); default = built-in
+| `--output <file>` | Write the report to a file instead of stdout
+| `--format <fmt>`  | `console` (default), `json`, `xml`, `html`
+| `--fail-on <sev>` | Exit non-zero when `warning` or `error` findings exist
+| `--no-color`      | Disable ANSI colour in console output
+| `-h`, `--help`    | Usage
+|===
+
+Exit codes: `0` clean / below threshold, `1` at/above `--fail-on`, `2` usage
+or config error.
+
+== Configuration
+
+`blaise-guard.json` (see the sample in this directory):
+
+[source,json]
+----
+{
+  "rules": {
+    "BL-1001": { "enabled": true, "severity": "warning",
+                 "params": { "maxLength": 120 } },
+    "BL-1003": { "enabled": true, "params": { "maxDepth": 3 } }
+  }
+}
+----
+
+A rule absent from the file keeps its built-in default (enabled, default
+threshold and severity).
+
+== Rules
+
+[cols="1,2,4",options="header"]
+|===
+| ID | Name | Status
+| BL-0000 | ParseError    | ✅ built-in (syntax errors surfaced as diagnostics)
+| BL-1001 | MaxLineLength | ✅ implemented
+| BL-1003 | DeepNesting   | ✅ implemented
+| BL-1002 | MaxFunctionLines | ⏳ planned
+| BL-1004 | UnusedIdentifiers | ⏳ planned
+| BL-2001 | AvoidManualFree   | ⏳ planned
+| BL-2002 | ReferenceCycles   | ⏳ planned
+| BL-2003 | StringIndexing    | ⏳ planned
+| BL-3001 | DuplicateCodeBlock | ⏳ planned
+|===
+
+== Adding a rule
+
+. Create `Guard.Rule.<Name>` extending `TLineRuleBase`, `TTokenRuleBase` or
+  `TAstRuleBase`; set `FId`/`FName`/`FSeverity` in the constructor and
+  implement the single check hook.
+. Add `initialization RegisterRule(T<Name>Rule.Create());` at the unit foot.
+. Add the unit to `Guard.Rules.All`.
+. Add a test suite under `src/test/pascal` and register it in `Test.Registry`.
+
+== Tests
+
+TDD via `blaise.testing`. `TestRunner` (test source) runs every suite;
+`Guard.Test.Support` runs a single rule in allowlist isolation over in-memory
+source through the real engine.

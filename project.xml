@@ -18,6 +18,7 @@
     <module>tools/kanban</module>
     <module>tools/bif-coverage</module>
     <module>tools/flag-coverage</module>
+    <module>tools/blaise-guard</module>
     <module>tools/bindgen</module>
   </modules>
 

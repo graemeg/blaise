@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <name>blaise-guard</name>
+  <!-- version inherited from root aggregator -->
+
+  <build>
+    <packaging>application</packaging>
+    <mainSource>BlaiseGuard.pas</mainSource>
+    <executableName>blaise-guard</executableName>
+
+    <manualUnitPaths>true</manualUnitPaths>
+    <unitPaths>
+      <path>src/main/pascal</path>
+      <path>src/test/pascal</path>
+      <!-- The compiler's own lexer/parser/AST units.  BlaiseGuard consumes
+           the live frontend so it always analyses the grammar the compiler
+           currently accepts (no vendored, drifting copy). -->
+      <path>../../compiler/src/main/pascal</path>
+      <!-- stdlib: generic collections, JSON/XML writers, Streams, etc. -->
+      <path>../../stdlib/src/main/pascal</path>
+      <path>../../runtime/src/main/pascal</path>
+    </unitPaths>
+  </build>
+
+  <test>
+    <framework>blaise</framework>
+    <testSource>TestRunner.pas</testSource>
+  </test>
+
+</project>

@@ -1,0 +1,7 @@
+{
+  "rules": {
+    "BL-0000": { "enabled": true, "severity": "warning" },
+    "BL-1001": { "enabled": true, "severity": "warning", "params": { "maxLength": 120 } },
+    "BL-1003": { "enabled": true, "severity": "warning", "params": { "maxDepth": 3 } }
+  }
+}
