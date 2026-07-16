@@ -126,10 +126,12 @@ threshold and severity).
 | BL-2002 | ReferenceCycles   | ✅ implemented (cross-file strong-ref graph)
 | BL-2003 | StringIndexing    | ✅ implemented (heuristic, token-based, INFO)
 | BL-3001 | DuplicateCodeBlock | ✅ implemented (Rabin-Karp, cross-file)
-| BL-1004 | UnusedIdentifiers | ⏳ planned (needs the AST expression walker)
+| BL-1004 | UnusedIdentifiers | ✅ implemented (AST expr walker; off by default)
 |===
 
-All four report formats are implemented: `console`, `json`, `xml`, `html`.
+The full MVP ruleset and all four report formats (`console`, `json`, `xml`,
+`html`) are implemented.  BL-1004 ships disabled by default: closures and
+shadowing keep it heuristic, so enable it deliberately.
 
 === Rule lifecycle (cross-file rules)
 
@@ -143,13 +145,11 @@ Per-file rules inherit empty `Reset`/`Finalize`. A cross-file rule (BL-3001)
 accumulates state during `Analyse` and emits in `Finalize`; `Reset` keeps
 repeated runs in one process independent.
 
-=== Remaining rules: design notes
+=== Possible future rules
 
-* *BL-1004 UnusedIdentifiers* -- extend `Guard.Ast.Walker` with expression
-  descent + a `VisitExpr` hook, then diff declared names (locals/params, and
-  private fields) against `TIdentExpr` uses per scope at `VisitMethodExit`.
-  Ship disabled-by-default first (false-positive risk).  This is the last
-  planned MVP rule; it is the only one that needs new walker infrastructure.
+The MVP set is complete.  Natural extensions, all buildable on the existing
+walker/lifecycle: unused private class fields (extend BL-1004's scope tracking
+to class members), empty except-handlers, and shadowed declarations.
 
 == Adding a rule
 

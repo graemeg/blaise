@@ -20,6 +20,7 @@ uses
   Guard.Rule.MaxLineLength.Tests,
   Guard.Rule.MaxFunctionLines.Tests,
   Guard.Rule.DeepNesting.Tests,
+  Guard.Rule.UnusedIdentifiers.Tests,
   Guard.Rule.AvoidManualFree.Tests,
   Guard.Rule.ReferenceCycles.Tests,
   Guard.Rule.StringIndexing.Tests,

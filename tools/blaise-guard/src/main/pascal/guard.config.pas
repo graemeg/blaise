@@ -200,6 +200,9 @@ end;
 class function TGuardConfig.Default: TGuardConfig;
 begin
   Result := TGuardConfig.Create();
+  { BL-1004 (UnusedIdentifiers) is heuristic (closures/shadowing), so the
+    built-in default posture leaves it off; a config file can turn it on. }
+  Result.RuleConfig('BL-1004').Enabled := False;
 end;
 
 class function TGuardConfig.LoadFromString(const AJson: string): TGuardConfig;

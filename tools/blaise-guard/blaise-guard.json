@@ -4,6 +4,7 @@
     "BL-1001": { "enabled": true, "severity": "warning", "params": { "maxLength": 120 } },
     "BL-1002": { "enabled": true, "severity": "warning", "params": { "maxLines": 15 } },
     "BL-1003": { "enabled": true, "severity": "warning", "params": { "maxDepth": 3 } },
+    "BL-1004": { "enabled": false, "severity": "warning", "params": { "checkParameters": false } },
     "BL-2001": { "enabled": true, "severity": "warning", "params": { "includeDestroy": true } },
     "BL-2002": { "enabled": true, "severity": "warning", "params": { "includeSelfReference": false } },
     "BL-2003": { "enabled": true, "severity": "info" },
