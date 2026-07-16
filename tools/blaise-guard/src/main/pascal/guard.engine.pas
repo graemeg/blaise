@@ -41,6 +41,8 @@ type
     FFrontend: TFrontend;
     procedure RunRulesOn(AModel: TSourceModel; AReport: TReport);
     procedure AnalyseModel(AModel: TSourceModel; AReport: TReport);
+    procedure ResetRules;                        { start-of-run lifecycle }
+    procedure FinalizeRules(AReport: TReport);   { end-of-run lifecycle }
   public
     constructor Create(AConfig: TGuardConfig);
 
@@ -83,6 +85,40 @@ begin
   end;
 end;
 
+procedure TAnalysisEngine.ResetRules;
+var
+  I:    Integer;
+  Rule: IRule;
+begin
+  for I := 0 to RegisteredRuleCount - 1 do
+  begin
+    Rule := RegisteredRule(I);
+    if FConfig.IsEnabled(Rule.Id) then
+      Rule.Reset();
+  end;
+end;
+
+procedure TAnalysisEngine.FinalizeRules(AReport: TReport);
+var
+  I:    Integer;
+  Rule: IRule;
+  Ctx:  TRuleContext;
+  Sev:  TSeverity;
+begin
+  for I := 0 to RegisteredRuleCount - 1 do
+  begin
+    Rule := RegisteredRule(I);
+    if not FConfig.IsEnabled(Rule.Id) then
+      Continue;
+    Sev := FConfig.EffectiveSeverity(Rule.Id, Rule.DefaultSeverity);
+    { A finalize context has no per-file model - cross-file rules supply their
+      own locations from accumulated state. }
+    Ctx := TRuleContext.Create(Rule.Id, nil, FConfig.RuleConfig(Rule.Id),
+                               AReport, Sev);
+    Rule.Finalize(Ctx);
+  end;
+end;
+
 procedure TAnalysisEngine.AnalyseModel(AModel: TSourceModel; AReport: TReport);
 begin
   if (not AModel.ParseOk) and FConfig.IsEnabled(RULE_PARSE_ERROR) then
@@ -118,8 +154,10 @@ var
   Model: TSourceModel;
 begin
   Result := TReport.Create();
+  ResetRules();
   Model  := FFrontend.LoadSource(AName, ASource);
   AnalyseModel(Model, Result);
+  FinalizeRules(Result);
   Result.SortForOutput();
 end;
 
@@ -129,9 +167,11 @@ var
   I:     Integer;
 begin
   Result := TReport.Create();
+  ResetRules();
   Files  := AProvider.Collect();
   for I := 0 to Files.Count - 1 do
     AnalyseFile(Files[I], Result);
+  FinalizeRules(Result);
   Result.SortForOutput();
 end;
 

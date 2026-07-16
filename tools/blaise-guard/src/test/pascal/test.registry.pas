@@ -21,7 +21,8 @@ uses
   Guard.Rule.MaxFunctionLines.Tests,
   Guard.Rule.DeepNesting.Tests,
   Guard.Rule.AvoidManualFree.Tests,
-  Guard.Rule.StringIndexing.Tests;
+  Guard.Rule.StringIndexing.Tests,
+  Guard.Rule.DuplicateCodeBlock.Tests;
 
 implementation
 

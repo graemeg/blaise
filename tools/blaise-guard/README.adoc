@@ -124,12 +124,24 @@ threshold and severity).
 | BL-1003 | DeepNesting   | ✅ implemented
 | BL-2001 | AvoidManualFree   | ✅ implemented
 | BL-2003 | StringIndexing    | ✅ implemented (heuristic, token-based, INFO)
+| BL-3001 | DuplicateCodeBlock | ✅ implemented (Rabin-Karp, cross-file)
 | BL-1004 | UnusedIdentifiers | ⏳ planned (needs the AST expression walker)
 | BL-2002 | ReferenceCycles   | ⏳ planned (needs a cross-file type-graph pass)
-| BL-3001 | DuplicateCodeBlock | ⏳ planned (needs a cross-file / end-of-run hook)
 |===
 
 All four report formats are implemented: `console`, `json`, `xml`, `html`.
+
+=== Rule lifecycle (cross-file rules)
+
+`IRule` has a three-phase lifecycle the engine drives per run:
+
+  Reset            once, before any file
+  Analyse(ctx)     once per file (ctx carries that file's model)
+  Finalize(ctx)    once, after every file (ctx has a nil Model)
+
+Per-file rules inherit empty `Reset`/`Finalize`. A cross-file rule (BL-3001)
+accumulates state during `Analyse` and emits in `Finalize`; `Reset` keeps
+repeated runs in one process independent.
 
 === Remaining rules: design notes
 
@@ -137,12 +149,9 @@ All four report formats are implemented: `console`, `json`, `xml`, `html`.
   descent + a `VisitExpr` hook, then diff declared names (locals/params, and
   private fields) against `TIdentExpr` uses per scope at `VisitMethodExit`.
   Ship disabled-by-default first (false-positive risk).
-* *BL-2002 ReferenceCycles* and *BL-3001 DuplicateCodeBlock* both need results
-  aggregated across files: add an optional `IRule.Finalize(report)` hook the
-  engine calls once after the per-file pass. BL-3001 accumulates rolling
-  (Rabin-Karp) token-window hashes across files and emits collisions in
-  Finalize; BL-2002 collects every class's field-type edges into a graph and
-  reports strong (non-`[Weak]`) cycles.
+* *BL-2002 ReferenceCycles* -- a cross-file rule (uses the `Finalize` hook,
+  like BL-3001): collect every class's field-type edges into a graph during
+  `Analyse` and report strong (non-`[Weak]`) cycles in `Finalize`.
 
 == Adding a rule
 

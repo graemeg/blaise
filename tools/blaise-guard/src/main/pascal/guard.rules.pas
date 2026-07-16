@@ -61,12 +61,23 @@ type
     property RuleId:  string read FRuleId;
   end;
 
-  { The extensibility port.  GUID-less, as Blaise interfaces need no IID. }
+  { The extensibility port.  GUID-less, as Blaise interfaces need no IID.
+
+    Lifecycle per analysis run:
+      Reset            once, before any file
+      Analyse(ctx)     once per file (ctx carries that file's model)
+      Finalize(ctx)    once, after every file (ctx has a nil Model)
+
+    Reset/Finalize let a cross-file rule (e.g. duplicate detection) accumulate
+    state across files and emit at the end.  Most rules are per-file and
+    inherit the empty defaults. }
   IRule = interface
     function Id: string;                  { stable identifier, e.g. 'BL-1001' }
     function Name: string;                { short human-readable name }
     function DefaultSeverity: TSeverity;  { severity when config gives no override }
+    procedure Reset;
     procedure Analyse(AContext: TRuleContext);
+    procedure Finalize(AContext: TRuleContext);
   end;
 
   { Common storage + IRule plumbing shared by every base flavour. }
@@ -79,7 +90,9 @@ type
     function Id: string;
     function Name: string;
     function DefaultSeverity: TSeverity;
+    procedure Reset; virtual;                            { default: no-op }
     procedure Analyse(AContext: TRuleContext); virtual; abstract;
+    procedure Finalize(AContext: TRuleContext); virtual; { default: no-op }
   end;
 
   { Line-oriented rule: the engine hands each source line to CheckLine.
@@ -117,7 +130,9 @@ type
     function Id: string;
     function Name: string;
     function DefaultSeverity: TSeverity;
+    procedure Reset; virtual;                            { default: no-op }
     procedure Analyse(AContext: TRuleContext);
+    procedure Finalize(AContext: TRuleContext); virtual; { default: no-op }
   end;
 
 { ---- Registry (self-registration) ---- }
@@ -166,6 +181,8 @@ end;
 function TRuleBase.Id: string;                    begin Result := FId; end;
 function TRuleBase.Name: string;                  begin Result := FName; end;
 function TRuleBase.DefaultSeverity: TSeverity;    begin Result := FSeverity; end;
+procedure TRuleBase.Reset;                        begin end;
+procedure TRuleBase.Finalize(AContext: TRuleContext); begin end;
 
 { ---- TLineRuleBase ---- }
 
@@ -189,6 +206,8 @@ end;
 function TAstRuleBase.Id: string;                 begin Result := FId; end;
 function TAstRuleBase.Name: string;               begin Result := FName; end;
 function TAstRuleBase.DefaultSeverity: TSeverity; begin Result := FSeverity; end;
+procedure TAstRuleBase.Reset;                     begin end;
+procedure TAstRuleBase.Finalize(AContext: TRuleContext); begin end;
 
 procedure TAstRuleBase.Emit(const AMessage: string; const ALoc: TSourceLocation);
 begin
