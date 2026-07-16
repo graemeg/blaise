@@ -51,10 +51,10 @@ begin
   while I < N do
   begin
     B := Byte(S[I]);
-    if B = Byte('&') then SB.Append('&amp;')
-    else if B = Byte('<') then SB.Append('&lt;')
-    else if B = Byte('>') then SB.Append('&gt;')
-    else if B = Byte('"') then SB.Append('&quot;')
+    if B = 38 then SB.Append('&amp;')        { & }
+    else if B = 60 then SB.Append('&lt;')    { < }
+    else if B = 62 then SB.Append('&gt;')    { > }
+    else if B = 34 then SB.Append('&quot;')  { " }
     else SB.AppendByte(B);
     I := I + 1;
   end;

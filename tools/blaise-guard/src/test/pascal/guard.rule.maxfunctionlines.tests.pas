@@ -25,6 +25,7 @@ type
 implementation
 
 uses
+  SysUtils,
   Guard.Config,
   Guard.Report,
   Guard.Engine,

@@ -144,7 +144,7 @@ begin
     on E: Exception do
     begin
       AModel.ParseOk    := False;
-      AModel.ParseError := E.ClassName + ': ' + E.Message;
+      AModel.ParseError := E.Message;
     end;
   end;
 end;
