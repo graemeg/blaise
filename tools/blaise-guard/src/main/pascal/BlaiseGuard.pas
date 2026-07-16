@@ -30,6 +30,9 @@ uses
   Guard.Engine,
   Guard.Format,
   Guard.Format.Console,
+  Guard.Format.Json,
+  Guard.Format.Xml,
+  Guard.Format.Html,
   Guard.Cli,
   Guard.Rules.All;   { pulls every rule unit in so they self-register }
 
@@ -57,11 +60,15 @@ end;
 
 function BuildFormatter(AOpt: TCliOptions): IReportFormatter;
 begin
-  { Only the console formatter exists so far; JSON/XML/HTML land next.  Colour
-    is suppressed when writing to a file. }
-  if AOpt.Format <> fmtConsole then
-    WriteLn('note: --format is not yet implemented for that value; using console');
-  Result := TConsoleFormatter.Create(AOpt.UseColor and (AOpt.OutputPath = ''));
+  { Strategy selection.  Colour applies only to the console renderer, and only
+    when writing to a terminal (not a file). }
+  case AOpt.Format of
+    fmtJson: Result := TJsonFormatter.Create();
+    fmtXml:  Result := TXmlFormatter.Create();
+    fmtHtml: Result := THtmlFormatter.Create();
+  else
+    Result := TConsoleFormatter.Create(AOpt.UseColor and (AOpt.OutputPath = ''));
+  end;
 end;
 
 procedure WriteOutput(const AText, APath: string);

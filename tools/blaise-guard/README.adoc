@@ -120,14 +120,16 @@ threshold and severity).
 | ID | Name | Status
 | BL-0000 | ParseError    | ✅ built-in (syntax errors surfaced as diagnostics)
 | BL-1001 | MaxLineLength | ✅ implemented
+| BL-1002 | MaxFunctionLines | ✅ implemented
 | BL-1003 | DeepNesting   | ✅ implemented
-| BL-1002 | MaxFunctionLines | ⏳ planned
+| BL-2001 | AvoidManualFree   | ✅ implemented
 | BL-1004 | UnusedIdentifiers | ⏳ planned
-| BL-2001 | AvoidManualFree   | ⏳ planned
 | BL-2002 | ReferenceCycles   | ⏳ planned
 | BL-2003 | StringIndexing    | ⏳ planned
 | BL-3001 | DuplicateCodeBlock | ⏳ planned
 |===
+
+All four report formats are implemented: `console`, `json`, `xml`, `html`.
 
 == Adding a rule
 

@@ -18,7 +18,9 @@ uses
   Guard.Rules.All,               { registers all rules }
   Guard.Domain.Tests,
   Guard.Rule.MaxLineLength.Tests,
-  Guard.Rule.DeepNesting.Tests;
+  Guard.Rule.MaxFunctionLines.Tests,
+  Guard.Rule.DeepNesting.Tests,
+  Guard.Rule.AvoidManualFree.Tests;
 
 implementation
 
