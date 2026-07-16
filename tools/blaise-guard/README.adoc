@@ -123,10 +123,10 @@ threshold and severity).
 | BL-1002 | MaxFunctionLines | ✅ implemented
 | BL-1003 | DeepNesting   | ✅ implemented
 | BL-2001 | AvoidManualFree   | ✅ implemented
+| BL-2002 | ReferenceCycles   | ✅ implemented (cross-file strong-ref graph)
 | BL-2003 | StringIndexing    | ✅ implemented (heuristic, token-based, INFO)
 | BL-3001 | DuplicateCodeBlock | ✅ implemented (Rabin-Karp, cross-file)
 | BL-1004 | UnusedIdentifiers | ⏳ planned (needs the AST expression walker)
-| BL-2002 | ReferenceCycles   | ⏳ planned (needs a cross-file type-graph pass)
 |===
 
 All four report formats are implemented: `console`, `json`, `xml`, `html`.
@@ -148,10 +148,8 @@ repeated runs in one process independent.
 * *BL-1004 UnusedIdentifiers* -- extend `Guard.Ast.Walker` with expression
   descent + a `VisitExpr` hook, then diff declared names (locals/params, and
   private fields) against `TIdentExpr` uses per scope at `VisitMethodExit`.
-  Ship disabled-by-default first (false-positive risk).
-* *BL-2002 ReferenceCycles* -- a cross-file rule (uses the `Finalize` hook,
-  like BL-3001): collect every class's field-type edges into a graph during
-  `Analyse` and report strong (non-`[Weak]`) cycles in `Finalize`.
+  Ship disabled-by-default first (false-positive risk).  This is the last
+  planned MVP rule; it is the only one that needs new walker infrastructure.
 
 == Adding a rule
 
