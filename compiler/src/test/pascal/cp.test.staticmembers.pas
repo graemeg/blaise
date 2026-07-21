@@ -715,13 +715,20 @@ const
           TFoo = class
           private static var
             FName: string;
+            FData: array of Integer;
           end;
         begin end.
         ''';
+var
+  Prog: TProgram;
 begin
-  { String (and dynamic-array) static vars remain deferred; class and
-    interface are supported (see TestSem_StaticVar_AcceptsClassType). }
-  AnalyseExpectErrorMsg(Src, 'static var');
+  { String and dynamic-array static vars are now SUPPORTED (BUG-20260720-static-
+    var-string-unsupported lifted the restriction — the store/read paths were
+    already type-generic; teardown releases by type).  Drive the full analyse ->
+    Free cycle and assert it completes without a rejection. }
+  Prog := AnalyseSrc(Src);
+  Prog.Free();
+  AssertTrue('string + dynarray static vars analyse and tear down cleanly', True);
 end;
 
 procedure TStaticMembersSemTests.TestSem_StaticVar_AcceptsClassType;

@@ -34,6 +34,10 @@ type
     procedure TestRun_StaticVar_InterfaceStore;
     procedure TestRun_StaticVar_ChainedLValueBase;
     procedure TestRun_StaticVar_LValueUses;
+    { BUG-20260720-static-var-string-unsupported: a string static var round-trips
+      (store retains, exit release), and a dyn-array static var stores + Length +
+      releases at exit — both leak-free on both backends. }
+    procedure TestRun_StaticVar_StringAndDynArray;
     procedure TestRun_StaticProperty_QualifiedRead;
     procedure TestRun_Singleton_LazyGetInstance;
     procedure TestRun_StaticConst_OnClass;
@@ -474,6 +478,36 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'note 1' + LineEnding + 'make 2' + LineEnding, 0);
+end;
+
+procedure TE2EStaticMembersTests.TestRun_StaticVar_StringAndDynArray;
+begin
+  { String static var: write (retain new / release old), read, and program-exit
+    release — all leak-free. }
+  AssertLeakFreeOnAll(
+    '''
+    program P;
+    type THolder = class static var SS: string; end;
+    begin
+      THolder.SS := 'hi';
+      WriteLn(THolder.SS);
+      THolder.SS := 'bye';
+      WriteLn(THolder.SS)
+    end.
+    ''', 'bye');
+  { Dyn-array static var: store from a dyn-array value + Length + exit release. }
+  AssertLeakFreeOnAll(
+    '''
+    program P;
+    type THolder = class static var DA: array of Integer; end;
+    var Local: array of Integer; L: Integer;
+    begin
+      SetLength(Local, 3);
+      THolder.DA := Local;
+      L := Length(THolder.DA);
+      WriteLn(L)
+    end.
+    ''', '3');
 end;
 
 initialization

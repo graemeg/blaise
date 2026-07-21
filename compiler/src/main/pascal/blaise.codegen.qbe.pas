@@ -2857,7 +2857,12 @@ begin
       if not FDecl.IsClassVar then Continue;
       T := FDecl.ResolvedType;
       if T = nil then Continue;
-      if not (T.Kind in [tyClass, tyInterface]) then Continue;
+      { class / interface (obj half) → _ClassRelease; string → _StringRelease;
+        dynamic array → _DynArrayRelease.  BUG-20260720-static-var-string-
+        unsupported added the string/dynarray arms — the storage slot is a nil-
+        init pointer for all of these, and the release fn is selected by kind. }
+      if not (T.IsString() or (T.Kind in [tyClass, tyInterface, tyDynArray])) then
+        Continue;
       for N := 0 to FDecl.Names.Count - 1 do
       begin
         if (FDecl.ClassVarEmitName <> '') and (FDecl.Names.Count = 1) then
@@ -2869,7 +2874,12 @@ begin
           EmitLine(Format('  %s =l loadl $%s_obj', [ValTemp, Nm]))
         else
           EmitLine(Format('  %s =l loadl $%s', [ValTemp, Nm]));
-        EmitLine(Format('  call $_ClassRelease(l %s)', [ValTemp]));
+        if T.IsString() then
+          EmitLine(Format('  call $_StringRelease(l %s)', [ValTemp]))
+        else if T.Kind = tyDynArray then
+          EmitLine(Format('  call $_DynArrayRelease(l %s)', [ValTemp]))
+        else
+          EmitLine(Format('  call $_ClassRelease(l %s)', [ValTemp]));
       end;
     end;
   end;

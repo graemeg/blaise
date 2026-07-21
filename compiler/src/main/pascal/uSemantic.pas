@@ -6829,16 +6829,14 @@ begin
             AddField (that would advance the instance layout).  Register a single
             shared global instead, under a mangled emit label, reachable by both
             the bare name (inside methods) and the qualified 'TFoo.Name' form.
-            Class- and interface-typed static vars ARE supported: they are a
-            single shared pointer slot, zero-initialised to nil, and assignment
-            goes through the normal managed-global store ARC (retain new /
-            release old).  String and dynamic-array static vars remain deferred
-            (their exit-time release story is not yet wired). }
-          if (FldType.Kind = tyString) or (FldType.Kind = tyDynArray) then
-            SemanticError(Format(
-              'static var ''%s'': string and dynamic-array static fields are ' +
-              'not yet supported (class and interface are)', [FldName]),
-              FDecl.Line, FDecl.Col);
+            Class-, interface-, string-, and dynamic-array-typed static vars are
+            supported: a single shared pointer slot, zero-initialised to nil,
+            with assignment through the normal managed-global store ARC (retain
+            new / release old) and a program-exit release dispatched by type
+            (BUG-20260720-static-var-string-unsupported lifted the string/
+            dynarray restriction — the store and read paths were already type-
+            generic; native teardown already dispatched by type, and QBE's
+            EmitStaticVarReleases gained string/dynarray arms). }
           ClassVarEmit := CurrentUnitPrefix() + TD.Name + '_' + FldName;
           { Single source of truth for codegen: stash the mangled label on the
             field decl (used by both backends to emit the data slot, even for a
