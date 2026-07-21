@@ -79,6 +79,9 @@ type
     { arm64 leg 38a: a capture-free closure literal passed by value to a
       function that invokes it — the minimal closure param/arg/call shape. }
     procedure TestRun_CaptureFreeClosure_PassedAndCalled;
+    { arm64 leg 38b(i): a closure call whose argument is an owned-transient
+      string (a function result) — passed borrowed, disposed after the call. }
+    procedure TestRun_Closure_OwnedTransientStringArg;
   end;
 
 implementation
@@ -1212,6 +1215,25 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '10' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Closure_OwnedTransientStringArg;
+const
+  Src = '''
+    program P;
+    type TStrFn = reference to function(s: string): Integer;
+    function MakeStr: string; begin Result := 'hello' end;
+    function Apply(P: TStrFn): Integer;
+    begin
+      Result := P(MakeStr())
+    end;
+    begin
+      WriteLn(Apply(function(s: string): Integer begin Result := Length(s) end))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '5' + LineEnding, 0);
 end;
 
 initialization

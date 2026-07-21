@@ -147,6 +147,10 @@ type
       literal materialises a 16-byte fat value (Code, nil Env), passed by
       address, copied into the callee's slot, and invoked (Env->x0, Code->blr). }
     procedure TestClosure_CaptureFree_ValueParamCall;
+    { self-cross-compile leg 38b(i): a closure call passing an OWNED-TRANSIENT
+      string arg (a function result) — the transient is passed borrowed and
+      disposed after the call (rc=1 owned = bare _StringRelease). }
+    procedure TestClosure_OwnedTransientArg_Disposed;
     { slice 40: assembler/nostackframe routines — verbatim arm64 bodies }
     procedure TestAsmRoutines_NoStackFrame;
     { slice 43: pointers — deref reads, pointer writes, addr-of, casts }
@@ -3355,6 +3359,36 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64BackendTests.TestClosure_OwnedTransientArg_Disposed;
+var
+  AsmT: string;
+  PosCall, PosRel: Integer;
+begin
+  { A closure call whose argument is an owned-transient string (a function
+    result, rc=1) passes it borrowed and disposes it after the call — a bare
+    _StringRelease that must appear AFTER the closure blr. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type TStrFn = reference to function(s: string): Integer;
+    function MakeStr: string; begin Result := 'hello' end;
+    function Apply(P: TStrFn): Integer;
+    begin
+      Result := P(MakeStr())
+    end;
+    begin
+      WriteLn(Apply(function(s: string): Integer begin Result := Length(s) end))
+    end.
+    ''');
+  { the closure is invoked (blr) and the transient released afterwards }
+  PosCall := Pos(#9'blr x9', AsmT);
+  AssertTrue('closure invoked', PosCall >= 0);
+  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
+  AssertTrue('transient released after the closure call', PosRel > PosCall);
+  { transient pointers are held in callee-saved x19 across the call }
+  AssertTrue('transient held callee-saved', Pos(#9'mov x19, x0', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestAsmRoutines_NoStackFrame;

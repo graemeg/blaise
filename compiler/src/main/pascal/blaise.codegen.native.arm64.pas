@@ -1164,18 +1164,31 @@ end;
 procedure TArm64Backend.EmitFatPtrCall(const AAddrReg: string;
   AProcType: TProceduralTypeDesc; AArgs: TObjectList);
 var
-  I: Integer;
+  I, TransN: Integer;
   Arg: TASTExpr;
+  Shapes: string;
 begin
   { AAddrReg holds the address of the 16-byte fat value (Code at +0, Env/Self at
-    +8).  Evaluate and push every visible arg first (arg evaluation clobbers the
-    scratch regs), then load Env into x0 (the hidden first arg) and the visible
-    args into x1.., load Code into x9, and blr.  Only int-class scalar args in
-    this slice — a float/aggregate closure arg is an honest hole. }
+    +8).  Evaluate and push every visible arg, then load Env into x0 (the hidden
+    first arg), the visible args into x1.., Code into x9, and blr.  Only
+    int-class scalar args in this slice — a float/aggregate closure arg is an
+    honest hole.
+
+    An OWNED-TRANSIENT string/class arg is passed BORROWED, so the caller
+    disposes the transient AFTER the call (mirroring EmitCall).  The transient
+    pointers are held in callee-saved x19..x21 across the blr (at most three
+    such args in the self-compile; more stay an honest hole), with a per-slot
+    shape: 'C' = owned class (bare _ClassRelease); '1' = rc=1 owned string (bare
+    _StringRelease); '0' = rc=0 unowned string (AddRef then Release). }
   if AArgs.Count > 7 then
     NotYet('closure call with more than 7 arguments', nil);
-  { AAddrReg must survive the arg evaluation — park it. }
+  { AAddrReg must survive the arg evaluation — park it.  Save x19..x21 (used to
+    hold owned transients across the call). }
   Self.Emit(Format(#9'str %s, [sp, #-16]!', [AAddrReg]));
+  Self.Emit(#9'stp x19, x20, [sp, #-16]!');
+  Self.Emit(#9'str x21, [sp, #-16]!');
+  TransN := 0;
+  Shapes := '';
   for I := 0 to AArgs.Count - 1 do
   begin
     Arg := TASTExpr(AArgs.Items[I]);
@@ -1185,18 +1198,65 @@ begin
              (Arg.ResolvedType.Kind in [tyPChar, tyPointer, tyClass, tyString,
                                         tyDynArray]))) then
       NotYet('closure-call argument of this type', Arg);
-    if ArcExprOwnsRef(Arg) then
-      NotYet('owned transient argument in a closure call', Arg);
     Self.EmitExprToX0(Arg);
+    { capture an owned-transient's disposal shape; hold its pointer in a
+      callee-saved reg (x0 is ALSO pushed as the borrowed arg below). }
+    if ((Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyString) and
+        (ArcExprOwnsRef(Arg) or ArcExprIsUnownedStrTransient(Arg))) or
+       ((Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyClass) and
+        ArcExprOwnsRef(Arg)) then
+    begin
+      if TransN >= 3 then
+        NotYet('more than 3 owned transient args in a closure call', Arg);
+      Self.Emit(Format(#9'mov x%d, x0', [19 + TransN]));
+      if Arg.ResolvedType.Kind = tyClass then
+        Shapes := Shapes + 'C'
+      else if ArcExprIsUnownedStrTransient(Arg) then
+        Shapes := Shapes + '0'
+      else
+        Shapes := Shapes + '1';
+      Inc(TransN);
+    end;
     EmitPushX0();
   end;
   { visible args -> x1.. (last pushed first) }
   for I := AArgs.Count - 1 downto 0 do
     EmitPopTo('x' + IntToStr(I + 1));
-  Self.Emit(#9'ldr x10, [sp], #16');          { x10 = &fat value }
+  { &fat value sits below the three saved-reg slots (x21=16, x19/x20=16). }
+  Self.Emit(#9'ldr x10, [sp, #32]');
   Self.Emit(#9'ldr x0, [x10, #8]');           { Env -> hidden first arg (x0) }
   Self.Emit(#9'ldr x9, [x10]');               { Code }
   Self.Emit(#9'blr x9');
+  { dispose owned transients (the call result in x0/d0 must survive). }
+  if TransN > 0 then
+  begin
+    EmitPushX0();
+    Self.Emit(#9'fmov x9, d0');
+    Self.Emit(#9'str x9, [sp, #-16]!');
+    for I := 0 to TransN - 1 do
+    begin
+      Self.Emit(Format(#9'mov x0, x%d', [19 + I]));
+      if Copy(Shapes, I + 1, 1) = 'C' then
+        Self.Emit(#9'bl _ClassRelease')
+      else
+      begin
+        if Copy(Shapes, I + 1, 1) = '0' then
+        begin
+          EmitPushX0();
+          Self.Emit(#9'bl _StringAddRef');
+          EmitPopTo('x0');
+        end;
+        Self.Emit(#9'bl _StringRelease');
+      end;
+    end;
+    Self.Emit(#9'ldr x9, [sp], #16');
+    Self.Emit(#9'fmov d0, x9');
+    EmitPopTo('x0');
+  end;
+  { restore x19..x21 and drop the parked &fat value. }
+  Self.Emit(#9'ldr x21, [sp], #16');
+  Self.Emit(#9'ldp x19, x20, [sp], #16');
+  Self.Emit(#9'ldr xzr, [sp], #16');
 end;
 
 procedure TArm64Backend.EmitOwnedStrTransientRelease(AValueExpr: TASTExpr);
