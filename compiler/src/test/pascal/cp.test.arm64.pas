@@ -240,6 +240,10 @@ type
       key is a single pointer-sized register value passed BORROWED (no caller
       AddRef); setter is called as SetItem(self=x0, key=x1, value=x2). }
     procedure TestStringIndexedProperty_WriteRead;
+    { self-cross-compile leg 36: an OWNED-TRANSIENT string value (a concat) as a
+      property-write value — the setter borrows it, so the caller disposes the
+      transient after the call (rc=0 concat: AddRef+Release). }
+    procedure TestOwnedTransientStringPropertyValue;
     { self-cross-compile leg 19: a nested proc that captures an enclosing
       routine's CLASS or RECORD variable and uses it as a field-access base or
       method-call receiver.  The base must be materialised through the '_cap_'
@@ -4521,6 +4525,52 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64BackendTests.TestOwnedTransientStringPropertyValue;
+var
+  AsmT: string;
+  PosSet, PosRel: Integer;
+begin
+  { An owned-transient string value (a `+` concat, rc=0) written through a
+    property setter is passed BORROWED — the setter retains its own copy — so
+    the caller must dispose the transient AFTER the setter returns.  For an rc=0
+    concat that means AddRef then Release (a bare release would drive rc to -1 =
+    immortal, leaking).  Covers the indexed and non-indexed setter arms. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TFoo = class
+        FItems: array[0..3] of string;
+        FCur: string;
+        procedure SetItem(I: Integer; const V: string);
+        procedure SetCur(const V: string);
+        property Items[I: Integer]: string write SetItem;
+        property Cur: string write SetCur;
+      end;
+    procedure TFoo.SetItem(I: Integer; const V: string); begin FItems[I] := V end;
+    procedure TFoo.SetCur(const V: string); begin FCur := V end;
+    var f: TFoo; a, b: string;
+    begin
+      f := TFoo.Create();
+      a := 'x'; b := 'y';
+      f.Items[1] := a + b;
+      f.Cur := a + b;
+      f.Free()
+    end.
+    ''');
+  { the concat transient is produced, the setter borrows it, and it is disposed
+    (AddRef+Release for the rc=0 shape) AFTER the setter call returns }
+  AssertTrue('concat produced', Pos(#9'bl _StringConcat', AsmT) >= 0);
+  PosSet := Pos(#9'bl TFoo_SetItem', AsmT);
+  AssertTrue('indexed setter called', PosSet >= 0);
+  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosSet);
+  AssertTrue('transient released after the indexed setter', PosRel > PosSet);
+  { the rc=0 concat is pinned (AddRef) before that release }
+  AssertTrue('rc=0 transient pinned before release',
+    (PosEx(#9'bl _StringAddRef', AsmT, PosSet) > PosSet) and
+    (PosEx(#9'bl _StringAddRef', AsmT, PosSet) < PosRel));
 end;
 
 procedure TArm64BackendTests.TestCapturedClassBase_FieldRead;

@@ -175,6 +175,12 @@ type
     procedure EmitRecAddrToX0(AExpr: TASTExpr);
     procedure EmitRecCallToRret(AExpr: TASTExpr);
     procedure EmitPropRecvToX0(AStmt: TFieldAssignment);
+    { Release an owned-transient STRING value in x0 by shape, mirroring
+      EmitCall's post-call disposal: a concat/rc=0 unowned transient
+      (ArcExprIsUnownedStrTransient) needs AddRef+Release (0->1->0 frees once);
+      an rc=1 owned transient needs a bare Release.  Used after a property
+      setter borrows the value (leg 36). }
+    procedure EmitOwnedStrTransientRelease(AValueExpr: TASTExpr);
     procedure EmitFieldAssign(AStmt: TFieldAssignment);
     { Rec.Field[Index] := value where Field is an array-typed field (leg 12).
       Computes the element address (field data pointer + index*elemsize) and
@@ -1090,8 +1096,25 @@ begin
     Self.Emit(#9'ldr x0, [x0]');
 end;
 
-procedure TArm64Backend.EmitFieldAssign(AStmt: TFieldAssignment);
+procedure TArm64Backend.EmitOwnedStrTransientRelease(AValueExpr: TASTExpr);
 begin
+  { the transient pointer is in x0 }
+  if ArcExprIsUnownedStrTransient(AValueExpr) then
+  begin
+    { rc=0 pin: 0 -> 1 -> 0 frees exactly once (a bare release would drive it
+      to -1 = immortal and leak) }
+    EmitPushX0();
+    Self.Emit(#9'bl _StringAddRef');
+    EmitPopTo('x0');
+  end;
+  Self.Emit(#9'bl _StringRelease');
+end;
+
+procedure TArm64Backend.EmitFieldAssign(AStmt: TFieldAssignment);
+var
+  RelStr: Boolean;
+begin
+  RelStr := False;
   if AStmt.PropWriteInfo <> nil then
   begin
     { method-backed property write: setter(self, value) — or
@@ -1119,22 +1142,35 @@ begin
               ((AStmt.PropIndexExpr.ResolvedType <> nil) and
                (AStmt.PropIndexExpr.ResolvedType.Kind = tyString))) then
         NotYet('indexed property with a non-integer index', AStmt);
-      { An OWNED managed VALUE (string/class transient) on the indexed path
-        would need the +1 handover discipline EmitCall applies; this arm passes
-        the value borrowed, so keep it an honest hole (self-host only needs an
-        Integer value here).  Mirrors the non-indexed guard below. }
-      if (TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.IsString() and
-          ArcBuiltinStrArgOwnsRef(AStmt.Expr)) or
-         ((TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.Kind = tyClass) and
-          ArcExprOwnsRef(AStmt.Expr)) then
+      { An OWNED managed STRING value (a concat / call-result transient) is
+        passed BORROWED to the setter (which retains its own copy), so the
+        caller must dispose the transient AFTER the call — the same +1 handover
+        EmitCall applies to an owned-transient string argument.  A class-typed
+        owned transient here is still an honest hole (untested; no self-host
+        need).  RelStr flags the string-transient case; the parked value in a
+        dedicated top-of-stack slot survives the setter bl/blr (only x0-x18 are
+        clobbered) and is released by shape below. }
+      RelStr := TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.IsString() and
+                ArcBuiltinStrArgOwnsRef(AStmt.Expr);
+      if (TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.Kind = tyClass) and
+         ArcExprOwnsRef(AStmt.Expr) then
         NotYet('owned transient as indexed-property value', AStmt);
+      { The borrowed case emits byte-identical code to before (index pushed,
+        then value; pop x2=value, x1=index).  For an owned string transient the
+        value pointer is captured in x19 (callee-saved, survives the setter
+        bl/blr) so the SAME buffer that was passed can be released afterwards —
+        the setter borrows the value, so the caller disposes the transient. }
+      if RelStr then
+        Self.Emit(#9'str x19, [sp, #-16]!');  { preserve x19 }
       Self.EmitExprToX0(AStmt.PropIndexExpr);
-      EmitPushX0();
+      EmitPushX0();                          { index arg }
       Self.EmitExprToX0(AStmt.Expr);
-      EmitPushX0();
+      if RelStr then
+        Self.Emit(#9'mov x19, x0');          { capture the value transient }
+      EmitPushX0();                          { value arg }
       EmitPropRecvToX0(AStmt);
-      EmitPopTo('x2');
-      EmitPopTo('x1');
+      EmitPopTo('x2');                       { value }
+      EmitPopTo('x1');                       { index }
       if AStmt.PropAccessorVSlot >= 0 then
       begin
         Self.Emit(#9'ldr x9, [x0]');
@@ -1146,6 +1182,12 @@ begin
         Self.Emit(Format(#9'bl %s',
           [PropAccessorSym(AStmt.PropOwnerType,
             TPropertyInfo(AStmt.PropWriteInfo).WriteMethod)]));
+      if RelStr then
+      begin
+        Self.Emit(#9'mov x0, x19');          { the value transient }
+        EmitOwnedStrTransientRelease(AStmt.Expr);
+        Self.Emit(#9'ldr x19, [sp], #16');   { restore x19 }
+      end;
       Exit;
     end;
     if TPropertyInfo(AStmt.PropWriteInfo).IsStatic then
@@ -1167,12 +1209,16 @@ begin
     end
     else
     begin
-      if (TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.IsString() and
-          ArcBuiltinStrArgOwnsRef(AStmt.Expr)) or
-         ((TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.Kind = tyClass) and
-          ArcExprOwnsRef(AStmt.Expr)) then
+      { An owned-transient STRING value is disposed after the setter borrows it
+        (leg 36); a class-typed owned transient stays an honest hole. }
+      RelStr := TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.IsString() and
+                ArcBuiltinStrArgOwnsRef(AStmt.Expr);
+      if (TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.Kind = tyClass) and
+         ArcExprOwnsRef(AStmt.Expr) then
         NotYet('owned transient as property value', AStmt);
       Self.EmitExprToX0(AStmt.Expr);
+      if RelStr then
+        Self.Emit(#9'str x0, [sp, #-16]!');  { park the transient — released after call }
       EmitPushX0();
       EmitPropRecvToX0(AStmt);
       EmitPopTo('x1');
@@ -1188,6 +1234,11 @@ begin
       Self.Emit(Format(#9'bl %s',
         [PropAccessorSym(AStmt.PropOwnerType,
           TPropertyInfo(AStmt.PropWriteInfo).WriteMethod)]));
+    if RelStr then
+    begin
+      Self.Emit(#9'ldr x0, [sp], #16');      { the parked transient }
+      EmitOwnedStrTransientRelease(AStmt.Expr);
+    end;
     Exit;
   end;
   if (AStmt.ObjExpr <> nil) and not AStmt.IsElemWrite then

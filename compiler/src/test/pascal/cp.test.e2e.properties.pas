@@ -35,6 +35,7 @@ type
     procedure TestRun_StringIndexedProperty;
     procedure TestRun_RecordIndexedProperty;
     procedure TestRun_RecordDefaultIndexedProperty;
+    procedure TestRun_OwnedTransientStringPropertyValue;
     { Default array property: Obj[I] sugar (read + write), string element, and
       inheritance of the default property from a base class. }
     procedure TestRun_DefaultProperty_ReadWrite;
@@ -167,6 +168,37 @@ const
     end.
     ''';
 
+  { An OWNED-TRANSIENT string value (a concat) written through an indexed and a
+    non-indexed property setter.  The setter borrows the value; the caller must
+    dispose the transient after the call.  Must round-trip and not crash/leak on
+    both backends (arm64 leg 36 hardened this; QBE/native must stay correct). }
+  SrcOwnedTransientStrProp = '''
+    program Prg;
+    type
+      TC = class
+        FItems: array[0..3] of string;
+        FCur: string;
+        procedure SetItem(K: Integer; const V: string);
+        function GetItem(K: Integer): string;
+        procedure SetCur(const V: string);
+        property Items[K: Integer]: string read GetItem write SetItem;
+        property Cur: string write SetCur;
+      end;
+      procedure TC.SetItem(K: Integer; const V: string); begin FItems[K] := V end;
+      function TC.GetItem(K: Integer): string; begin Result := FItems[K] end;
+      procedure TC.SetCur(const V: string); begin FCur := V end;
+    var c: TC; a, b: string;
+    begin
+      c := TC.Create();
+      a := 'x'; b := 'y';
+      c.Items[1] := a + b;
+      c.Cur := a + b;
+      WriteLn(c.Items[1]);
+      WriteLn(c.FCur);
+      c.Free()
+    end.
+    ''';
+
   { Same defect via a default array property (a distinct write site). }
   SrcRecordDefaultIndexed = '''
     program Prg;
@@ -284,6 +316,12 @@ procedure TE2EPropertyTests.TestRun_RecordDefaultIndexedProperty;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcRecordDefaultIndexed, '42 yo' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_OwnedTransientStringPropertyValue;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(SrcOwnedTransientStrProp, 'xy' + LE + 'xy' + LE, 0);
 end;
 
 procedure TE2EPropertyTests.TestRun_StaticArrayField_ReadInMethod;
