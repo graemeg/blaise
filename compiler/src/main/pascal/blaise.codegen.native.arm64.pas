@@ -4173,9 +4173,9 @@ begin
     NotYet('as-cast of an owned transient', AAsgn);
   Self.EmitExprToX0(AE.Obj);
   EmitPushX0();                     { the obj value }
-  Self.Emit(Format(#9'adrp x1, typeinfo_%s@PAGE', [CodegenMangle(AE.TypeName)]));
-  Self.Emit(Format(#9'add x1, x1, typeinfo_%s@PAGEOFF',
-    [CodegenMangle(AE.TypeName)]));
+  { load the typeinfo address through EmitTypeinfoAddr so the symbol matches the
+    prefixed definition/impllist (LINK-1: a bare name here dangled). }
+  EmitTypeinfoAddr('x1', AE.TypeName);
   Self.Emit(#9'bl _GetItab');       { x0 = itab or nil }
   OkL := NewLabel('asok');
   Self.Emit(Format(#9'cbnz x0, %s', [OkL]));
@@ -8811,20 +8811,14 @@ end;
 
 procedure TArm64Backend.EmitTypeinfoAddr(const AReg, ATypeName: string);
 var
-  D: TTypeDesc;
-  Pfx: string;
+  Sym: string;
 begin
-  Pfx := '';
-  if FSymTable <> nil then
-  begin
-    D := FSymTable.FindType(ATypeName);
-    if D <> nil then
-      Pfx := ClassPrefixOwner(D.OwningUnit);
-  end;
-  Self.Emit(Format(#9'adrp %s, typeinfo_%s@PAGE',
-    [AReg, Pfx + CodegenMangle(ATypeName)]));
-  Self.Emit(Format(#9'add %s, %s, typeinfo_%s@PAGEOFF',
-    [AReg, AReg, Pfx + CodegenMangle(ATypeName)]));
+  { single source of truth for the typeinfo symbol (TypeinfoSymFor): prefixed
+    for a plain class/interface, bare for a generic instance — so this reference
+    always matches the definition and the impllist (LINK-1). }
+  Sym := TypeinfoSymFor(ATypeName);
+  Self.Emit(Format(#9'adrp %s, %s@PAGE', [AReg, Sym]));
+  Self.Emit(Format(#9'add %s, %s, %s@PAGEOFF', [AReg, AReg, Sym]));
 end;
 
 function TArm64Backend.IntfItabSym(const AClassName,
@@ -9072,8 +9066,13 @@ var
   D: TTypeDesc;
   Pfx: string;
 begin
-  { typeinfo symbol for a class NAME, owning-unit prefixed — the string
-    twin of EmitTypeinfoAddr for data-section references }
+  { typeinfo symbol for a class/interface NAME — the SINGLE source of truth for
+    both the definition and every reference (so they always agree; a mismatch
+    dangles at link and breaks Supports/is/as identity at runtime).  Mirrors
+    x86-64 IntfTypeInfoName: a GENERIC INSTANCE (name carries '<') is bare
+    (weak, dedup'd cross-unit), a plain class/interface is owning-unit prefixed. }
+  if Pos('<', ATypeName) >= 0 then
+    Exit('typeinfo_' + CodegenMangle(ATypeName));
   Pfx := '';
   if FSymTable <> nil then
   begin
@@ -9358,6 +9357,7 @@ var
   Sym, ISym: string;
   IsGen: Boolean;
   GII: TGenericInterfaceInstance;
+  IDesc: TTypeDesc;
 begin
   if (FIntfDecls.Count = 0) and (FClassDecls.Count = 0) and
      (FGenericIntfInstances.Count = 0) then Exit;
@@ -9366,9 +9366,22 @@ begin
   for I := 0 to FIntfDecls.Count - 1 do
   begin
     ITD := TTypeDecl(FIntfDecls.Items[I]);
+    { Define the typeinfo under the SAME owning-unit-prefixed symbol that every
+      reference (impllist, Supports/is/as via EmitTypeinfoAddr) computes through
+      TypeinfoSymFor — a bare definition here dangled the prefixed references at
+      link (LINK-1: typeinfo_Streams_IReaderFrom).  A unit-mangled owner keeps
+      it .globl; an unmangled RTL unit's copy binds weak so per-object copies
+      collapse (GH #174 parity). }
+    ISym := TypeinfoSymFor(ITD.Name);
+    IDesc := TTypeDesc(ITD.ResolvedDesc);
+    if (IDesc = nil) and (FSymTable <> nil) then
+      IDesc := FSymTable.FindType(ITD.Name);
     Self.Emit('.balign 8');
-    Self.Emit(Format('.globl typeinfo_%s', [CodegenMangle(ITD.Name)]));
-    Self.Emit(Format('typeinfo_%s:', [CodegenMangle(ITD.Name)]));
+    if (IDesc <> nil) and IsUnmangledUnit(IDesc.OwningUnit) then
+      Self.Emit(Format('.weak %s', [ISym]))
+    else
+      Self.Emit(Format('.globl %s', [ISym]));
+    Self.Emit(Format('%s:', [ISym]));
     Self.Emit(#9'.quad 0');
   end;
   { typeinfo for generic INTERFACE instances (IComparer<Integer> etc): emitted
@@ -9450,7 +9463,9 @@ begin
       for J := 0 to Intfs.Count - 1 do
       begin
         ID := TInterfaceTypeDesc(Intfs.Items[J]);
-        Self.Emit(Format(#9'.quad typeinfo_%s', [CodegenMangle(ID.Name)]));
+        { the SAME symbol the typeinfo is DEFINED under (TypeinfoSymFor) — a bare
+          CodegenMangle here mismatched a prefixed definition/reference (LINK-1). }
+        Self.Emit(Format(#9'.quad %s', [TypeinfoSymFor(ID.Name)]));
         Self.Emit(Format(#9'.quad %s', [IntfItabSym(TD.Name, ID.Name)]));
       end;
       Self.Emit(#9'.quad 0');

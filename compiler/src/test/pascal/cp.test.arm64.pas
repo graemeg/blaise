@@ -112,6 +112,10 @@ type
     procedure TestStackArgs_RecordParamOverflow;
     { slice 22: interfaces — itab dispatch, fat-pointer ARC, metadata }
     procedure TestInterfaces_DispatchAndMetadata;
+    { A unit-declared interface's typeinfo must be DEFINED and REFERENCED
+      (impllist, Supports/is/as) under the SAME owning-unit-prefixed symbol — a
+      bare definition dangled the prefixed references at link (LINK-1). }
+    procedure TestInterface_TypeinfoSymbol_DefAndRefAgree;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2087,6 +2091,55 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64BackendTests.TestInterface_TypeinfoSymbol_DefAndRefAgree;
+var
+  AsmT: string;
+begin
+  { A unit declares IGreeter; the program's class implements it and uses
+    Supports.  The typeinfo must be DEFINED (typeinfo_intfu_IGreeter:) and every
+    reference — the impllist .quad and the Supports adrp — must use that SAME
+    owning-unit-prefixed symbol.  A bare `typeinfo_IGreeter` reference would
+    dangle at link (LINK-1). }
+  AsmT := GenAsmWithUnit(
+    '''
+    unit intfu;
+    interface
+    type
+      IGreeter = interface
+        function Greet: Int64;
+      end;
+    implementation
+    end.
+    ''',
+    '''
+    program P;
+    uses intfu;
+    type
+      THi = class(TObject, IGreeter)
+        function Greet: Int64;
+      end;
+    function THi.Greet: Int64; begin Result := 7 end;
+    var o: TObject; g: IGreeter;
+    begin
+      o := THi.Create();
+      if Supports(o, IGreeter, g) then WriteLn(g.Greet());
+      o.Free()
+    end.
+    ''');
+  { the typeinfo is defined under the unit-prefixed symbol }
+  AssertTrue('prefixed typeinfo defined',
+    Pos('typeinfo_intfu_IGreeter:', AsmT) >= 0);
+  { the impllist references the SAME prefixed symbol }
+  AssertTrue('impllist uses the prefixed typeinfo',
+    Pos(#9'.quad typeinfo_intfu_IGreeter', AsmT) >= 0);
+  { Supports loads the SAME prefixed symbol }
+  AssertTrue('Supports uses the prefixed typeinfo',
+    Pos('typeinfo_intfu_IGreeter@PAGE', AsmT) >= 0);
+  { and NO bare typeinfo_IGreeter reference dangles }
+  AssertTrue('no bare typeinfo reference',
+    Pos('typeinfo_IGreeter@PAGE', AsmT) < 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;
