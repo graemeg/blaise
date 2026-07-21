@@ -33,6 +33,7 @@ type
     procedure TestEmit_Function_PointerReturnSynthesisesAlias;
     procedure TestEmit_Procedure_ForVoidReturn;
     procedure TestEmit_Typedef_MappedType;
+    procedure TestEmit_Typedef_CaseInsensitiveSelfAlias_Skipped;
     procedure TestEmit_EnumAlias_AndMemberConsts;
     procedure TestEmit_Record_WithMappedFields;
     procedure TestEmit_OpaqueRecord_EmptyRecord;
@@ -147,6 +148,36 @@ end;
 procedure TEmitTests.TestEmit_Typedef_MappedType;
 begin
   AssertTrue(ContainsStr(Self.Emit(), 'XID = UInt64;'));
+end;
+
+procedure TEmitTests.TestEmit_Typedef_CaseInsensitiveSelfAlias_Skipped;
+var
+  R: TCRecord;
+  F: TCFunction;
+  Src: string;
+begin
+  { ncurses: 'typedef struct screen SCREEN;' — the struct tag 'screen'
+    and the typedef 'SCREEN' differ only in case.  Pascal folds identifier
+    case, so the opaque record already declares the name; the typedef is a
+    redundant self-alias and must be skipped, not re-emitted as
+    'SCREEN = screen;' (a duplicate type declaration). }
+  R := TCRecord.Create('screen');
+  FModel.AddRecord(R);
+  FModel.AddTypedef(TCTypedef.Create('SCREEN', 'struct screen'));
+  { A function taking 'SCREEN *' (ncurses' delscreen) synthesises the
+    pointer alias — it must still be emitted, referencing the SCREEN name
+    which folds to the opaque 'screen' record. }
+  F := TCFunction.Create('delscreen');
+  F.ReturnCType := 'void';
+  F.Params.Add(TCParam.Create('sp', 'SCREEN *'));
+  FModel.AddFunction(F);
+  Src := Self.Emit();
+  AssertTrue('opaque record for the tag',
+    ContainsStr(Src, 'screen = record end;'));
+  AssertTrue('no case-colliding self-alias',
+    not ContainsStr(Src, 'SCREEN = screen;'));
+  AssertTrue('pointer alias still emitted',
+    ContainsStr(Src, 'PSCREEN = ^SCREEN;'));
 end;
 
 procedure TEmitTests.TestEmit_EnumAlias_AndMemberConsts;

@@ -283,7 +283,12 @@ var
 begin
   Mapped := TypedefRhs(T, AMapper);
   if Mapped = '' then Exit;          { typedef of void — meaningless }
-  if Mapped = T.Name then Exit;      { self-alias — record carries it }
+  { Self-alias — the record/tag already carries the name.  The compare is
+    case-INSENSITIVE because Pascal folds identifier case: ncurses declares
+    'typedef struct screen SCREEN;', so the opaque 'screen' record and the
+    'SCREEN' typedef are the SAME Pascal identifier.  Re-emitting it as
+    'SCREEN = screen;' is a duplicate type declaration (discussion #185). }
+  if UpperCase(Mapped) = UpperCase(T.Name) then Exit;
   if StartsStr('function', Mapped) or StartsStr('procedure', Mapped) then
   begin
     ATypeLines.Add('  ' + T.Name + ' = ' + Mapped + ';');
