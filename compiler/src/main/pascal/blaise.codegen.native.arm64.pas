@@ -1961,10 +1961,18 @@ begin
   if (AExpr is TIdentExpr) and TIdentExpr(AExpr).IsImplicitSelf and
      (TIdentExpr(AExpr).ImplicitFieldInfo <> nil) then
   begin
-    { bare field name inside a method: load through Self }
+    { bare field name inside a method: compute the field ADDRESS (Self + offset)
+      then load width-keyed via EmitElemLoad.  A raw `ldr x0, [x0, #Offset]`
+      (8-byte scaled) was both a WIDTH bug (it read 8 bytes of a 1/2/4-byte
+      field) and an ENCODING bug (a field at a large or non-8-aligned byte
+      offset — e.g. a Boolean/Integer at offset 309 in a class with packed small
+      fields — is not a valid scaled immediate).  EmitAddSubImm materialises any
+      offset (>4095 via x16); EmitElemLoad loads the correct width. }
     EmitLoadSlot('x0', 'Self');
-    Self.Emit(Format(#9'ldr x0, [x0, #%d]',
-      [TFieldInfo(TIdentExpr(AExpr).ImplicitFieldInfo).Offset]));
+    if TFieldInfo(TIdentExpr(AExpr).ImplicitFieldInfo).Offset <> 0 then
+      EmitAddSubImm('add', 'x0', 'x0',
+        TFieldInfo(TIdentExpr(AExpr).ImplicitFieldInfo).Offset);
+    EmitElemLoad(TFieldInfo(TIdentExpr(AExpr).ImplicitFieldInfo).TypeDesc);
     Exit;
   end;
   if (AExpr is TIdentExpr) and TIdentExpr(AExpr).IsConstant then

@@ -92,6 +92,11 @@ type
     procedure TestSingle_LoadsStoresParamsResult;
     { slice 16: classes — create, methods, fields, ARC, metadata }
     procedure TestClass_CreateFieldsMethodsMetadata;
+    { A bare implicit-Self field read of a field at a large or non-8-aligned
+      offset must compute the address (add) and load width-keyed — a raw
+      8-byte scaled `ldr x0, [x0, #Offset]` is both a width bug and an
+      unencodable-immediate bug (offset >255, not multiple of 8). }
+    procedure TestImplicitSelfField_LargeOffset_WidthKeyed;
     procedure TestClass_VirtualDispatchAndDestroy;
     { slice 17: unit classes, statics, class consts, inherited, ToString }
     procedure TestClass_InUnit_PrefixedSymbols;
@@ -982,6 +987,50 @@ begin
   try
     AssertTrue('__text non-empty',
       F.FindSection('__TEXT', '__text').Size > 0);
+  finally
+    F.Free();
+  end;
+end;
+
+procedure TArm64BackendTests.TestImplicitSelfField_LargeOffset_WidthKeyed;
+var
+  AsmT, Obj: string;
+  F: TMachOFile;
+begin
+  { A leading 300-byte pad field pushes the Integer field past offset 255; a
+    bare implicit-Self read of it must compute the address (add x0, x0, #off)
+    and load a 4-byte word (ldrsw), NOT emit an unencodable `ldr x0, [x0, #300]`
+    (a 64-bit scaled load at a non-8-aligned, >255 offset).  This is exactly the
+    shape that blocked the arm64 self-compile's assemble step. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TBig = class
+        Pad: array[0..299] of Byte;
+        N: Integer;
+        function GetN: Integer;
+      end;
+    function TBig.GetN: Integer; begin Result := N end;
+    var t: TBig;
+    begin
+      t := TBig.Create();
+      t.N := 42;
+      WriteLn(t.GetN())
+    end.
+    ''');
+  { the field ADDRESS is computed (add), not folded into a scaled load — the
+    offset is 308 (an 8-byte object header precedes the 300-byte pad). }
+  AssertTrue('field offset via add', Pos(#9'add x0, x0, #308', AsmT) >= 0);
+  { the 4-byte Integer field is loaded width-keyed (ldrsw), not as 8 bytes }
+  AssertTrue('width-keyed load', Pos(#9'ldrsw x0, [x0]', AsmT) >= 0);
+  { and the whole thing assembles — the raw form would raise
+    "unscaled/negative load-store offset" }
+  Obj := AssembleArm64ToBytes(AsmT);
+  F := ParseMachO(Obj, 'arm64bigfield.o');
+  try
+    AssertTrue('assembles to a text section',
+      F.FindSection('__TEXT', '__text') <> nil);
   finally
     F.Free();
   end;
