@@ -6258,11 +6258,13 @@ begin
      (TMethodDecl(TInheritedCallExpr(AExpr).ResolvedMethod).ResolvedReturnType.Kind = tyRecord) then
     Exit(True);
   { Method-backed property read whose getter returns a record — a getter call,
-    routed through EmitRecordCallSretAt (which synthesises the method call). }
+    routed through EmitRecordCallSretAt (which synthesises the method call).
+    An INDEXED property (PropIndexExpr <> nil) is handled too: the index is
+    threaded into the synthesised call as the getter's argument (BUG-20260719-
+    native-indexed-prop-record), mirroring the QBE EmitRecordCallSret path. }
   if (AExpr is TFieldAccessExpr) and
      (TFieldAccessExpr(AExpr).PropRead <> nil) and
      (TFieldAccessExpr(AExpr).PropReadDecl <> nil) and
-     (TFieldAccessExpr(AExpr).PropIndexExpr = nil) and
      (TFieldAccessExpr(AExpr).PropRead.TypeDesc <> nil) and
      (TFieldAccessExpr(AExpr).PropRead.TypeDesc.Kind = tyRecord) then
     Exit(True);
@@ -6347,19 +6349,24 @@ end;
 procedure TX86_64Backend.EmitRecordCallSretAt(AExpr: TASTExpr; const ADest: string;
   AIndirect: Boolean);
 var
-  FAE:   TFieldAccessExpr;
-  Synth: TMethodCallExpr;
+  FAE:      TFieldAccessExpr;
+  Synth:    TMethodCallExpr;
+  SynthArgs: TObjectList;
 begin
   { Record-returning property read (O.Prop): a getter call, so synthesise the
     method call from the resolved getter decl and route it through
-    EmitMethodSretCall exactly as a record-returning method call. }
+    EmitMethodSretCall exactly as a record-returning method call.  An INDEXED
+    property (PropIndexExpr <> nil) threads its index into the synthesised call
+    as the getter's single argument (BUG-20260719-native-indexed-prop-record) —
+    EmitMethodSretCall then marshals it correctly for both the register-return
+    and sret-return record classes, exactly as for a direct O.Get(index) call. }
   if (AExpr is TFieldAccessExpr) and
      (TFieldAccessExpr(AExpr).PropRead <> nil) and
-     (TFieldAccessExpr(AExpr).PropReadDecl <> nil) and
-     (TFieldAccessExpr(AExpr).PropIndexExpr = nil) then
+     (TFieldAccessExpr(AExpr).PropReadDecl <> nil) then
   begin
     FAE := TFieldAccessExpr(AExpr);
     Synth := TMethodCallExpr.Create();
+    SynthArgs := nil;
     try
       Synth.Name           := FAE.PropRead.ReadMethod;
       Synth.ResolvedMethod := FAE.PropReadDecl;
@@ -6370,10 +6377,19 @@ begin
         Synth.ObjectName := FAE.RecordName;
         Synth.IsGlobal   := FAE.IsGlobal;
       end;
+      if FAE.PropIndexExpr <> nil then
+      begin
+        { non-owning list carrying the borrowed index expr — detached below }
+        SynthArgs := TObjectList.Create(False);
+        SynthArgs.Add(FAE.PropIndexExpr);
+        Synth.Args := SynthArgs;
+      end;
       Self.EmitMethodSretCall(Synth, ADest, AIndirect);
     finally
       Synth.ObjExpr := nil;   { do not free the borrowed base expression }
+      Synth.Args    := nil;   { do not free the borrowed index expr }
       Synth.Free();
+      SynthArgs.Free();       { frees the wrapper list only (OwnsObjects=False) }
     end;
     Exit;
   end;
@@ -14095,16 +14111,16 @@ begin
       Self.Emit(#9'popq %rbx');
       Exit;
     end;
-    { sret assignment: record-returning property read (V := Obj.Prop).  A getter
-      call, so route it through EmitRecordCallSretAt (which synthesises the
-      method call) exactly as the record-method-call case above.  No aliasing
-      guard is needed — the receiver is a class, distinct from the record dest. }
+    { sret assignment: record-returning property read (V := Obj.Prop, indexed or
+      not).  A getter call, so route it through EmitRecordCallSretAt (which
+      synthesises the method call, threading an index arg for an indexed
+      property) exactly as the record-method-call case above.  No aliasing guard
+      is needed — the receiver is a class, distinct from the record dest. }
     if (Asgn.ResolvedLhsType <> nil) and
        (Asgn.ResolvedLhsType.Kind = tyRecord) and
        (Asgn.Expr is TFieldAccessExpr) and
        (TFieldAccessExpr(Asgn.Expr).PropRead <> nil) and
-       (TFieldAccessExpr(Asgn.Expr).PropReadDecl <> nil) and
-       (TFieldAccessExpr(Asgn.Expr).PropIndexExpr = nil) then
+       (TFieldAccessExpr(Asgn.Expr).PropReadDecl <> nil) then
     begin
       Self.Emit(#9'pushq %rbx');
       if FSretFunc and SameText(Asgn.Name, 'Result') then

@@ -182,6 +182,11 @@ type
       an assignment (twice), a value argument, and a nested field access.
       Both backends. }
     procedure TestRun_RecordProperty_Read_AllContexts;
+    { BUG-20260719-native-indexed-prop-record: reading an INDEXED property whose
+      getter returns a record segfaulted on native (the index was mis-marshalled
+      against the sret ABI).  Covers a small register-return record, a large
+      sret record, and a managed-field record, plus a nested-field read. }
+    procedure TestRun_IndexedRecordProperty_Read;
     { Regression: a for-in loop whose enumerator's Current returns a record with
       a managed (string) field.  The loop reads Enumerator.Current (a property)
       each pass; the record must sret into the loop variable rather than be
@@ -1545,6 +1550,52 @@ begin
     end.
     ''',
     'qbe' + LE + '5' + LE, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_IndexedRecordProperty_Read;
+const
+  Src =
+    '''
+    program P;
+    type
+      TQ = record Index: Integer; Other: Integer; end;
+      TBig = record A, B, C, D, E: Integer; end;
+      TMan = record Name: string; N: Integer; end;
+      TBox = class
+        FQ: TQ;
+        FBig: TBig;
+        FMan: TMan;
+        function Get(A: Integer): TQ;
+        function GetBig(A: Integer): TBig;
+        function GetMan(A: Integer): TMan;
+        property Items[A: Integer]: TQ read Get;
+        property Bigs[A: Integer]: TBig read GetBig;
+        property Mans[A: Integer]: TMan read GetMan;
+      end;
+    function TBox.Get(A: Integer): TQ; begin Result := FQ end;
+    function TBox.GetBig(A: Integer): TBig; begin Result := FBig end;
+    function TBox.GetMan(A: Integer): TMan; begin Result := FMan end;
+    var B: TBox; T: TQ; Tb: TBig; Tm: TMan;
+    begin
+      B := TBox.Create();
+      B.FQ.Index := 9; B.FQ.Other := 3;
+      B.FBig.A := 100; B.FBig.E := 500;
+      B.FMan.Name := 'hello'; B.FMan.N := 7;
+      T := B.Items[0];
+      WriteLn('small ', T.Index, ' ', T.Other);
+      Tb := B.Bigs[0];
+      WriteLn('big ', Tb.A, ' ', Tb.E);
+      Tm := B.Mans[0];
+      WriteLn('man ', Tm.Name, ' ', Tm.N);
+      WriteLn('nested ', B.Items[0].Index);
+      B.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'small 9 3' + LE + 'big 100 500' + LE + 'man hello 7' + LE +
+    'nested 9' + LE, 0);
 end;
 
 initialization
