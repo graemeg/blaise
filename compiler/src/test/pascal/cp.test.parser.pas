@@ -41,6 +41,7 @@ type
     procedure TestDottedUnitQualifiedProcCall_Collapses;
     procedure TestNonUnitQualifier_StaysMethodCall;
     procedure TestUnitQualifierNoTrailingSymbol_StaysFieldWrite;
+    procedure TestRecordChainArrayIndexAssign_ParsesAsFieldAssign;
 
     { Statements }
     procedure TestEmptyBeginEnd;
@@ -299,6 +300,30 @@ begin
     Fld := TFieldAssignment(Prog.Block.Stmts.Items[0]);
     AssertEquals('record name kept', 'My', Fld.RecordName);
     AssertEquals('field name kept', 'Pkg', Fld.FieldName);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestRecordChainArrayIndexAssign_ParsesAsFieldAssign;
+var
+  Prog: TProgram;
+  Fld:  TFieldAssignment;
+begin
+  { GH #187: a record-in-record chain that ends in an array subscript is a
+    valid l-value.  'O.Ora[x].Arr[c] := V' must parse (it used to raise
+    "Expected ':=' or '(' after chain").  The final subscript is over a
+    field-access (.Arr), so it lowers to a TFieldAssignment carrying the
+    subscript as PropIndexExpr. }
+  Prog := ParseSource(
+    'program P; var O: Integer; x, c, V: Integer;'
+    + ' begin O.Ora[x].Arr[c] := V end.');
+  try
+    AssertTrue('parses as a field element assignment',
+      Prog.Block.Stmts.Items[0] is TFieldAssignment);
+    Fld := TFieldAssignment(Prog.Block.Stmts.Items[0]);
+    AssertEquals('final field name', 'Arr', Fld.FieldName);
+    AssertTrue('carries the subscript index', Fld.PropIndexExpr <> nil);
   finally
     Prog.Free();
   end;

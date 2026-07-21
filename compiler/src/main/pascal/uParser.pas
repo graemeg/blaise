@@ -3964,6 +3964,53 @@ begin
               ChainBase := SubNode;
               SubNode.IndexExpr := ParseExpr();
               Expect(tkRBracket);
+              { A subscript-terminated chain can itself be an assignment target
+                (GH #187): Aouter.ora[x].innerOneArr[c] := V.  Mirror the
+                bare-Name[...] loop above — without this the loop Breaks and the
+                unconditional raise below rejects the '.:=' as "after chain". }
+              if Check(tkAssign) then
+              begin
+                if SubNode.StrExpr is TFieldAccessExpr then
+                begin
+                  { …Field[idx] := value — element write into an array-typed
+                    field; rebuild as a TFieldAssignment with the subscript as
+                    PropIndexExpr. }
+                  Advance();  { consume ':=' }
+                  FldNode := TFieldAccessExpr(SubNode.StrExpr);
+                  FldAssign := TFieldAssignment.Create();
+                  FldAssign.Line := Line;
+                  FldAssign.Col := Col;
+                  FldAssign.FieldName := FldNode.FieldName;
+                  FldAssign.ObjExpr := FldNode.Base;
+                  FldNode.Base := nil;
+                  FldAssign.PropIndexExpr := SubNode.IndexExpr;
+                  SubNode.IndexExpr := nil;
+                  ChainBase := nil;
+                  SubNode.Free();  { frees the now-detached field node too }
+                  FldAssign.Expr := ParseExpr();
+                  Exit(FldAssign);
+                end;
+                { Nested array element write: Base[J] := value where Base is
+                  itself a subscript chain (e.g. A[I][J] := V). }
+                Advance();  { consume ':=' }
+                SubAssign := TStaticSubscriptAssign.Create();
+                SubAssign.Line := Line;
+                SubAssign.Col := Col;
+                SubAssign.ArrayName := Name;
+                try
+                  SubAssign.BaseExpr := SubNode.StrExpr;
+                  SubAssign.IndexExpr := SubNode.IndexExpr;
+                  SubNode.StrExpr := nil;
+                  SubNode.IndexExpr := nil;
+                  ChainBase := nil;
+                  SubNode.Free();
+                  SubAssign.ValueExpr := ParseExpr();
+                  Exit(SubAssign);
+                except
+                  SubAssign.Free();
+                  raise;
+                end;
+              end;
             end
             else
               Break;

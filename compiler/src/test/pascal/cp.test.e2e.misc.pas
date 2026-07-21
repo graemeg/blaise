@@ -31,6 +31,7 @@ type
     procedure TestRun_ForBreak_StopsAtFiveHalt;
     procedure TestRun_ExitFromFunction_ReturnsImmediately;
     procedure TestRun_ChainedRecordField_LoadsInner;
+    procedure TestRun_RecordChainArrayAssign;
 
     { Constants }
     procedure TestRun_Const_IntegerConst;
@@ -286,6 +287,24 @@ const
     begin
       N := O.I.Value;
       WriteLn(N)
+    end.
+    ''';
+
+  { GH #187: a record-in-record chain that ENDS in an array subscript is a
+    valid assignment target — Aouter.ora[x].innerOneArr[c] := V.  The parser
+    used to reject the ':=' with "Expected ':=' or '(' after chain". }
+  SrcRecordChainArrayAssign = '''
+    program Prg;
+    type
+      TInner = record Arr: array[0..3] of Integer; end;
+      TOuter = record Ora: array[0..1] of TInner; end;
+    var O: TOuter; x, c: Integer;
+    begin
+      for x := 0 to 1 do
+        for c := 0 to 3 do
+          O.Ora[x].Arr[c] := (x + 1) * (c + 1);
+      WriteLn(O.Ora[0].Arr[0], ' ', O.Ora[0].Arr[3], ' ',
+              O.Ora[1].Arr[0], ' ', O.Ora[1].Arr[3])
     end.
     ''';
 
@@ -973,6 +992,13 @@ begin
   AssertTrue(CompileAndRun(SrcChainedRecord, Output, RCode));
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('chained read of zero-initialised field', '0' + LE, Output);
+end;
+
+procedure TE2EMiscTests.TestRun_RecordChainArrayAssign;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { (0+1)*(0+1)=1, (0+1)*(3+1)=4, (1+1)*(0+1)=2, (1+1)*(3+1)=8 }
+  AssertRunsOnAll(SrcRecordChainArrayAssign, '1 4 2 8' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_Const_IntegerConst;
