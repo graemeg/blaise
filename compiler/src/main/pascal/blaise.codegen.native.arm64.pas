@@ -91,6 +91,13 @@ type
     FGlobalStrInits: TStringList; { symbols of string-initialised globals }
     FGlobalStrVals:  TStringList; { parallel: the literal values }
     FClassDecls:  TObjectList;   { not owned — program-level class TTypeDecls }
+    FUnitEmittedClasses: TObjectList; { not owned — unit class TTypeDecls whose
+                                   method bodies were ALREADY emitted by EmitUnit
+                                   (in unit context).  EmitProgram's FClassDecls
+                                   walk skips these to avoid a double-emit (a
+                                   second copy would run in program context and
+                                   mis-resolve impl-section unit globals + hit a
+                                   duplicate label). }
     FGenericDecls: TObjectList;  { owned — synthetic TTypeDecl wrappers around
                                    TGenericInstance clones so instances flow
                                    through the ordinary class machinery }
@@ -436,6 +443,7 @@ begin
   FGlobalStrVals  := TStringList.Create();
   FClassDecls  := TObjectList.Create(False);
   FGenericDecls := TObjectList.Create(True);
+  FUnitEmittedClasses := TObjectList.Create(False);
   FObjLocals   := TStringList.Create();
   FObjGlobals  := TStringList.Create();
   FTlvGlobals  := TStringList.Create();
@@ -474,6 +482,7 @@ begin
   FGlobalStrInits.Free();
   FGlobalStrVals.Free();
   FClassDecls.Free();
+  FUnitEmittedClasses.Free();
   FGenericDecls.Free();
   FObjLocals.Free();
   FObjGlobals.Free();
@@ -10060,9 +10069,15 @@ begin
         True);
 
   { Class method bodies (LinkClassMethodImpls placed them on the class
-    defs), then the ARC field-cleanup functions. }
+    defs), then the ARC field-cleanup functions.  Skip any unit class already
+    emitted by EmitUnit in its own context — re-emitting here (program context,
+    FCurrentUnitName='') would mis-resolve impl-section unit globals and emit a
+    duplicate method label (leg 39).  Generic-instance wrappers and the
+    program's own classes are NOT in FUnitEmittedClasses, so they still emit. }
   for I := 0 to FClassDecls.Count - 1 do
   begin
+    if FUnitEmittedClasses.IndexOf(TTypeDecl(FClassDecls.Items[I])) >= 0 then
+      Continue;
     CDef := TClassTypeDef(TTypeDecl(FClassDecls.Items[I]).Def);
     for J := 0 to CDef.Methods.Count - 1 do
     begin
@@ -10259,6 +10274,9 @@ var
       if UDcl.Def is TClassTypeDef then
       begin
         UDef := TClassTypeDef(UDcl.Def);
+        { record that this unit class's method bodies are emitted HERE (in unit
+          context) so EmitProgram's FClassDecls walk skips them (leg 39). }
+        FUnitEmittedClasses.Add(UDcl);
         for M := 0 to UDef.Methods.Count - 1 do
         begin
           MDcl := TMethodDecl(UDef.Methods.Items[M]);

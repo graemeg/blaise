@@ -79,6 +79,11 @@ type
     procedure TestUnit_RoutinesAndCrossUnitCalls;
     procedure TestUnit_VarsAndInitSection;
     procedure TestUnit_FinalizationStillNotYet;
+    { self-cross-compile leg 39: a unit class METHOD reading an
+      implementation-section unit global — the method body must be emitted
+      ONCE (in unit context, so the global resolves), not a second time by the
+      program-context FClassDecls walk. }
+    procedure TestUnit_ImplGlobalFromMethod_SingleEmit;
     { slice 13: initialised globals in .data }
     procedure TestInitialisedGlobals_DataSection;
     { slice 14: var/out parameters (int, Double, string) }
@@ -1329,6 +1334,54 @@ begin
     ''');
   AssertTrue('final routine emitted', Pos('withfinal_final:', AsmT) >= 0);
   AssertTrue('main exit calls it', Pos(#9'bl withfinal_final', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestUnit_ImplGlobalFromMethod_SingleEmit;
+var
+  AsmT: string;
+  PosFirst: Integer;
+begin
+  { A unit class method that reads an implementation-section unit global must be
+    emitted ONCE — in unit context, where the impl-private global resolves to
+    its prefixed symbol.  A second emission from the program-context FClassDecls
+    walk would mis-resolve the global (bare name -> NotYet) and produce a
+    duplicate method label (leg 39). }
+  AsmT := GenAsmWithUnit(
+    '''
+    unit boxu;
+    interface
+    type
+      TBox = class
+        function Get: Integer;
+      end;
+    implementation
+    var GCount: Integer;
+    function TBox.Get: Integer;
+    begin
+      GCount := GCount + 1;
+      Result := GCount
+    end;
+    initialization
+      GCount := 100
+    end.
+    ''',
+    '''
+    program P;
+    uses boxu;
+    var b: TBox;
+    begin
+      b := TBox.Create();
+      WriteLn(b.Get());
+      b.Free()
+    end.
+    ''');
+  { the method reaches the impl global through its owning-unit-prefixed symbol }
+  AssertTrue('impl global prefixed', Pos('_g_boxu_GCount', AsmT) >= 0);
+  { the method body label is emitted exactly ONCE (no double-emit) }
+  PosFirst := Pos('TBox_Get:', AsmT);
+  AssertTrue('method body emitted', PosFirst >= 0);
+  AssertTrue('method body NOT emitted twice',
+    PosEx('TBox_Get:', AsmT, PosFirst + 1) < 0);
 end;
 
 procedure TArm64BackendTests.TestStringParams_ValueRetainsConstBorrows;
