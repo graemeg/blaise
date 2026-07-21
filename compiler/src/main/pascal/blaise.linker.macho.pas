@@ -340,16 +340,16 @@ end;
   routine was silently bound to libSystem as __UpperCase). }
 function IsKnownLibSystemImport(const AName: string): Boolean;
 const
-  KNOWN: array[0..44] of string = (
+  KNOWN: array[0..45] of string = (
     'abort', 'chdir', 'chmod', 'clock_gettime', 'close', 'dup2',
     'execvp', 'exit', '_exit', 'fork', 'fstat', 'getcwd', 'getenv',
     'getpid', 'gmtime_r', 'localtime_r', 'lseek', 'memcmp', 'memcpy',
     'memmove', 'memset', 'mkdir', 'mkstemp', 'mmap', 'munmap',
     'nanosleep', 'open', 'pipe', 'pthread_create', 'pthread_join',
-    'pthread_key_create', 'pthread_mutex_init', 'pthread_mutex_lock',
-    'pthread_mutex_unlock', 'pthread_setspecific', 'read', 'rename',
-    'rmdir', 'stat', 'strlen', 'sysconf', 'system', 'time', 'unlink',
-    'waitpid');
+    'pthread_key_create', 'pthread_mutex_destroy', 'pthread_mutex_init',
+    'pthread_mutex_lock', 'pthread_mutex_unlock', 'pthread_setspecific',
+    'read', 'rename', 'rmdir', 'stat', 'strlen', 'sysconf', 'system',
+    'time', 'unlink', 'waitpid');
 var
   I: Integer;
 begin
@@ -357,7 +357,7 @@ begin
      (AName = '__error') or (AName = 'timegm') or (AName = 'write') or
      (AName = 'getrusage') then
     Exit(True);
-  for I := 0 to 44 do
+  for I := 0 to 45 do
     if AName = KNOWN[I] then
       Exit(True);
   Result := False;

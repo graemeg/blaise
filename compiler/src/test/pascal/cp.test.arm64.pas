@@ -117,6 +117,7 @@ type
       bare definition dangled the prefixed references at link (LINK-1). }
     procedure TestInterface_TypeinfoSymbol_DefAndRefAgree;
     procedure TestInterface_ItabAndImpllist_AreGlobl;
+    procedure TestGenericClassInstance_MethodBodyEmittedInUnit;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2192,6 +2193,61 @@ begin
     Pos('impllist_', AsmT) >= 0);
   AssertTrue('plain-class impllist is .globl',
     Pos('.globl impllist_', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestGenericClassInstance_MethodBodyEmittedInUnit;
+var
+  AsmT: string;
+begin
+  { A UNIT that materialises a generic class instance (TList<Integer>) must emit
+    that instance's method BODIES in its own object — not just the metadata
+    (vtable/itab) that references them.  EmitUnit previously registered the
+    instance for metadata but never emitted its method bodies (only EmitProgram
+    did, and that is not called per-unit), so a real incremental build left
+    TList_Integer_Add etc. undefined and the Mach-O linker bound them from
+    libSystem — a dyld abort at launch (leg 43).  The body must be emitted weak
+    (bare name) for cross-object dedup. }
+  AsmT := GenAsmWithUnit(
+    '''
+    unit genu;
+    interface
+    type
+      TBox<T> = class
+        FVal: T;
+        procedure Put(AVal: T);
+        function Get: T;
+      end;
+      TThing = class
+        FBox: TBox<Integer>;
+        procedure Setup;
+      end;
+    implementation
+    procedure TBox<T>.Put(AVal: T); begin FVal := AVal end;
+    function TBox<T>.Get: T; begin Result := FVal end;
+    procedure TThing.Setup;
+    begin
+      FBox := TBox<Integer>.Create();
+      FBox.Put(7);
+    end;
+    end.
+    ''',
+    '''
+    program P;
+    uses genu;
+    var t: TThing;
+    begin
+      t := TThing.Create();
+      t.Setup();
+      t.Free()
+    end.
+    ''');
+  { the monomorphised TBox<Integer>.Put body is DEFINED (a label), not just
+    referenced }
+  AssertTrue('TBox<Integer>.Put body is defined',
+    Pos('TBox_Integer_Put:', AsmT) >= 0);
+  { and it is weak-bound (bare generic-instance symbol) for cross-object dedup }
+  AssertTrue('the generic-instance method body is weak',
+    Pos('.weak TBox_Integer_Put', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;

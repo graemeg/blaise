@@ -10346,9 +10346,12 @@ end;
 
 procedure TArm64Backend.EmitUnit(AUnit: TUnit);
 var
-  I: Integer;
+  I, J: Integer;
   Decl: TMethodDecl;
   UTD: TTypeDecl;
+  GI: TGenericInstance;
+  GICDef: TClassTypeDef;
+  SavedUnit: string;
 
   procedure CheckTypeSubset(ATypeDecls: TObjectList);
   var
@@ -10451,6 +10454,36 @@ begin
         True);
 
   Self.Emit('.text');
+
+  { Generic CLASS instance method bodies (leg 43).  A unit that materialises
+    TList<TMoSymbol>, TDictionary<string,Integer>, etc. must emit those clones'
+    method bodies in its own object — weak-bound (bare name) so the linker
+    dedups the copies across every object that materialises the same instance
+    (BUG-004).  Without this the vtable/itab .quad references (emitted by
+    FinalizeEmit's metadata pass) point at symbols nothing defines and the
+    link binds them from libSystem → dyld abort at launch (GH #189-class link
+    gap; x86-64 does this in EmitClassMethods).  The clone's Line fields refer
+    to the DECLARING unit, so swap FCurrentUnitName to DefUnitName for correct
+    allocation-site tracking, exactly like x86-64. }
+  SavedUnit := FCurrentUnitName;
+  for I := 0 to AUnit.GenericInstances.Count - 1 do
+  begin
+    GI := TGenericInstance(AUnit.GenericInstances.Items[I]);
+    if GI.DefUnitName <> '' then
+      FCurrentUnitName := GI.DefUnitName
+    else
+      FCurrentUnitName := SavedUnit;
+    GICDef := TClassTypeDef(GI.ClassDef);
+    for J := 0 to GICDef.Methods.Count - 1 do
+    begin
+      Decl := TMethodDecl(GICDef.Methods.Items[J]);
+      if Decl.Body = nil then Continue;
+      if Decl.TypeParams <> nil then Continue;   { generic-method template }
+      EmitFunctionDef(Decl, True);               { weak: bare generic-instance name }
+    end;
+  end;
+  FCurrentUnitName := SavedUnit;
+
   for I := 0 to AUnit.ImplBlock.ProcDecls.Count - 1 do
   begin
     Decl := TMethodDecl(AUnit.ImplBlock.ProcDecls.Items[I]);
