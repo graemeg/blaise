@@ -14057,6 +14057,32 @@ begin
         Self.Emit(#9'popq %r14');
         Exit;
       end;
+      { Non-aliasing: the call does not read the destination, so EmitSretCall's
+        memset-then-write of the dest is safe for the DATA — but the memset would
+        silently orphan the destination's OLD managed fields (leaking one copy of
+        every managed leaf per overwrite; BUG-20260720-sret-assign-old-fields-
+        leak).  Release the dest's old managed fields FIRST (records only; the
+        call at this point cannot alias the dest — the aliasing sub-case Exited
+        above).  Result on first entry is zeroed, but a loop reassigning Result
+        has old fields too, so it is released alongside the others. }
+      if Asgn.ResolvedLhsType.Kind = tyRecord then
+      begin
+        Self.Emit(#9'pushq %rbx');
+        if FSretFunc and SameText(Asgn.Name, 'Result') then
+          Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('Result')]))
+        else if Asgn.IsVarParam then
+          Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(Asgn.Name)]))
+        else if Self.IsLocal(Asgn.Name) then
+          Self.EmitVarAddr(Asgn.Name, '%rbx')
+        else
+        begin
+          Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
+          Self.EmitLeaqGlobal(Asgn.Name, '%rbx');
+        end;
+        Self.EmitRecordFieldReleases(
+          TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
+        Self.Emit(#9'popq %rbx');
+      end;
       { For a local jumbo set the dest is leaq'd; EmitSretCall's caller passes
         the operand and a 'by-ref' flag.  Mirror the record dispatch below. }
       if FSretFunc and SameText(Asgn.Name, 'Result') then
@@ -14195,6 +14221,28 @@ begin
         Self.Emit(#9'popq %r14');
         Exit;
       end;
+      { Non-aliasing: release the dest's OLD managed fields before the sret call
+        memsets and overwrites them, else each overwrite orphans one copy of
+        every managed leaf (BUG-20260720-sret-assign-old-fields-leak).  The
+        aliasing sub-case Exited above, so the call cannot read the dest here. }
+      if Asgn.ResolvedLhsType.Kind = tyRecord then
+      begin
+        Self.Emit(#9'pushq %rbx');
+        if FSretFunc and SameText(Asgn.Name, 'Result') then
+          Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('Result')]))
+        else if Asgn.IsVarParam then
+          Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(Asgn.Name)]))
+        else if Self.IsLocal(Asgn.Name) then
+          Self.EmitVarAddr(Asgn.Name, '%rbx')
+        else
+        begin
+          Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
+          Self.EmitLeaqGlobal(Asgn.Name, '%rbx');
+        end;
+        Self.EmitRecordFieldReleases(
+          TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
+        Self.Emit(#9'popq %rbx');
+      end;
       if FSretFunc and SameText(Asgn.Name, 'Result') then
         Self.EmitMethodSretCall(TMethodCallExpr(Asgn.Expr),
           Self.VarOperand('Result'), True)
@@ -14222,6 +14270,30 @@ begin
        (TMethodDecl(TInheritedCallExpr(Asgn.Expr).ResolvedMethod).ResolvedReturnType.Kind in
           [tyRecord, tyStaticArray]) then
     begin
+      { Release the dest's OLD managed fields before the sret call overwrites
+        them (BUG-20260720-sret-assign-old-fields-leak).  Gate on the dest NOT
+        aliasing an argument — `R := inherited M(R)` would UAF a source the call
+        still reads (this arm has no fresh-temp-buffer aliasing path, unlike the
+        method/func arms, so the guard is checked explicitly here). }
+      if (Asgn.ResolvedLhsType.Kind = tyRecord) and
+         not Self.CallAliasesDestVar(Asgn.Expr, Asgn.Name, Asgn.IsGlobal) then
+      begin
+        Self.Emit(#9'pushq %rbx');
+        if FSretFunc and SameText(Asgn.Name, 'Result') then
+          Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('Result')]))
+        else if Asgn.IsVarParam then
+          Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(Asgn.Name)]))
+        else if Self.IsLocal(Asgn.Name) then
+          Self.EmitVarAddr(Asgn.Name, '%rbx')
+        else
+        begin
+          Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
+          Self.EmitLeaqGlobal(Asgn.Name, '%rbx');
+        end;
+        Self.EmitRecordFieldReleases(
+          TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
+        Self.Emit(#9'popq %rbx');
+      end;
       if FSretFunc and SameText(Asgn.Name, 'Result') then
         Self.EmitInheritedRecordSret(
           TMethodDecl(TInheritedCallExpr(Asgn.Expr).ResolvedMethod),

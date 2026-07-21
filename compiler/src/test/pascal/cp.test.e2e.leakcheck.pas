@@ -221,6 +221,13 @@ type
     { A unit's user `finalization` block must run at exit — before the unit's
       globals are released, so it can still read them. }
     procedure TestDebug_FinalizationSection_RunsBeforeRelease;
+    { BUG-20260720-sret-assign-old-fields-leak: repeatedly assigning a record-
+      returning call into the SAME destination leaked the destination's OLD
+      managed fields (one string per overwrite) on native, because the sret
+      write overwrote them without releasing.  Covers the static-function,
+      free-function, and method-call arms, plus the aliasing forms (dest = arg /
+      dest = receiver) which must stay correct AND leak-free. }
+    procedure TestDebug_SretReassign_NoLeak;
   protected
     { Compile AUnit1Src/AUnit2Src (either may be '') + AProgSrc with the real
       compiler binary on the DEFAULT incremental path (--debug --output),
@@ -2949,6 +2956,58 @@ begin
   AssertEquals('exit 0 (native), got: ' + Output, 0, ExitCode);
   AssertTrue('finalization ran and saw the global (native), got: ' + Output,
     Pos('final sees fin-live', Output) >= 0);
+  AssertTrue('no leak report (native), got: ' + Output, Pos('leak', Output) < 0);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_SretReassign_NoLeak;
+const
+  Src =
+    '''
+    program P;
+    type
+      TTag = record
+        Name: string;
+        static function Cat(const A, C: TTag): TTag;
+        function Grow(const C: TTag): TTag;
+      end;
+    static function TTag.Cat(const A, C: TTag): TTag;
+    begin Result.Name := A.Name + C.Name end;
+    function TTag.Grow(const C: TTag): TTag;
+    begin Result.Name := Self.Name + C.Name end;
+    function MakeTag(const S: string): TTag;
+    begin Result.Name := S end;
+    var X, Y, Z, M: TTag; I: Integer;
+    begin
+      X.Name := 'a'; Y.Name := 'b';
+      for I := 0 to 4 do Z := TTag.Cat(X, Y);   { static func, distinct dest }
+      WriteLn('cat ', Z.Name);
+      for I := 0 to 4 do Z := MakeTag('m');      { free func, distinct dest }
+      WriteLn('make ', Z.Name);
+      for I := 0 to 2 do X := TTag.Cat(X, Y);    { dest aliases ARG }
+      WriteLn('alias-arg ', X.Name);
+      M.Name := 'm';
+      for I := 0 to 2 do M := M.Grow(Y);         { dest aliases RECEIVER }
+      WriteLn('alias-recv ', M.Name)
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run (qbe)',
+    CompileAndRunWithRTLDebugOn(beQBE, Src, Output, ExitCode, True));
+  AssertEquals('exit 0 (qbe)', 0, ExitCode);
+  AssertEquals('stdout (qbe)',
+    'cat ab' + LE + 'make m' + LE + 'alias-arg abbb' + LE +
+    'alias-recv mbbb' + LE, Output);
+  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
+  AssertTrue('compile+run (native)',
+    CompileAndRunWithRTLDebugOn(beNative, Src, Output, ExitCode, True));
+  AssertEquals('exit 0 (native)', 0, ExitCode);
+  AssertEquals('stdout (native)',
+    'cat ab' + LE + 'make m' + LE + 'alias-arg abbb' + LE +
+    'alias-recv mbbb' + LE, Output);
   AssertTrue('no leak report (native), got: ' + Output, Pos('leak', Output) < 0);
 end;
 
