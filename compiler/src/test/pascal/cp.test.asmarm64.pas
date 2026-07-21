@@ -35,6 +35,7 @@ type
     procedure TestMulDiv;
     procedure TestLogicAndShifts;
     procedure TestLoadsStores;
+    procedure TestLoadStore_UnscaledAutoDowngrade;
     procedure TestFloatOps;
     procedure TestLocalBranches_ResolveToDeltas;
     procedure TestBlUndefined_EmitsBranch26;
@@ -153,6 +154,31 @@ begin
   AssertWord('ldr x9, [sp], #16', Integer($F84107E9));
   AssertWord('ldr d0, [x1, #8]', Integer($FD400420));
   AssertWord('str d0, [sp]', Integer($FD0003E0));
+end;
+
+procedure TArm64AsmTests.TestLoadStore_UnscaledAutoDowngrade;
+var
+  F: TMachOFile;
+  T: TMoSection;
+  UrWord: Integer;
+begin
+  { A plain ldr/str whose offset is not a multiple of the access size, or is
+    negative, cannot use the scaled 12-bit form but IS a valid unscaled
+    ldur/stur in [-256..255].  GNU as auto-selects ldur/stur there; the internal
+    assembler now does too — so `ldr x0, [x1, #20]` assembles identically to
+    `ldur x0, [x1, #20]` instead of raising.  (Exposed by the arm64 self-compile
+    of the whole compiler, which emits such loads.) }
+  T := TextWords('ldur x0, [x1, #20]' + LineEnding, F);
+  try UrWord := WordAt(T, 0); finally F.Free(); end;
+  AssertWord('ldr x0, [x1, #20]', UrWord);
+
+  T := TextWords('stur x0, [x1, #-4]' + LineEnding, F);
+  try UrWord := WordAt(T, 0); finally F.Free(); end;
+  AssertWord('str x0, [x1, #-4]', UrWord);
+
+  T := TextWords('ldur w2, [x3, #3]' + LineEnding, F);
+  try UrWord := WordAt(T, 0); finally F.Free(); end;
+  AssertWord('ldr w2, [x3, #3]', UrWord);
 end;
 
 procedure TArm64AsmTests.TestFloatOps;

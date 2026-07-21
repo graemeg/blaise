@@ -1169,6 +1169,20 @@ procedure TArm64Assembler.EncodeInstr;
         EmitW(EncLdStUImm(Sz, False, Opc, FA[0].Reg, FA[1].Base, 0));
         Exit;
       end;
+      { A plain ldr/str with an offset that is negative or not a multiple of the
+        access size cannot use the scaled 12-bit form, but IS a valid unscaled
+        ldur/stur when it fits the signed 9-bit range [-256..255].  GNU `as`
+        auto-selects ldur/stur in exactly this case; do the same so a codegen
+        site that emits e.g. `ldr x0, [x1, #20]` (20 not a multiple of 8)
+        assembles instead of raising. }
+      if ((FA[1].MemImm < 0) or
+          ((FA[1].MemImm mod (Int64(1) shl Sz)) <> 0)) and
+         (FA[1].MemImm >= -256) and (FA[1].MemImm <= 255) then
+      begin
+        EmitW(EncLdStUnscaled(Sz, False, Opc, FA[0].Reg, FA[1].Base,
+          FA[1].MemImm));
+        Exit;
+      end;
       EmitW(EncLdStUImm(Sz, False, Opc, FA[0].Reg, FA[1].Base, FA[1].MemImm));
       Exit;
     end;
