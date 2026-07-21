@@ -71,6 +71,9 @@ type
     procedure TestRun_SetOfSubrange_TypeDecl;
     procedure TestRun_SetOfSubrange_NamedConstBounds;
     procedure TestRun_SetOfBoolean_Membership;
+    { BUG-20260720-set-array-elem-dest: a set literal assigned into a static-
+      array element must type against the element set type and round-trip. }
+    procedure TestRun_Set_LiteralIntoStaticArrayElement;
   end;
 
 implementation
@@ -803,6 +806,26 @@ const Src = '''
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'y' + LE + 'n' + LE + 'y' + LE, 0);
+end;
+
+procedure TE2ESetOpsTests.TestRun_Set_LiteralIntoStaticArrayElement;
+const Src = '''
+    program P;
+    type TE = (eA, eB, eC, eD); TS = set of TE;
+    var A: array[0..2] of TS;
+    begin
+      A[0] := [eA, eC];
+      A[1] := [];
+      A[2] := A[0] + [eB];
+      if eC in A[0] then WriteLn('y') else WriteLn('n');
+      if eB in A[0] then WriteLn('y') else WriteLn('n');
+      if eA in A[1] then WriteLn('y') else WriteLn('n');
+      if eB in A[2] then WriteLn('y') else WriteLn('n')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'y' + LE + 'n' + LE + 'n' + LE + 'y' + LE, 0);
 end;
 
 initialization

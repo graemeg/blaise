@@ -171,6 +171,7 @@ type
       so a valid 'Field := []' inside a method was rejected with "Expression
       has no value type" — on EVERY set type, not just jumbo ones. }
     procedure TestSemantic_ImplicitSelfSetField_EmptyLiteral;
+    procedure TestSemantic_SetArrayElement_LiteralAssign;
     procedure TestCodegen_Set64_VarAllocsEmitsLongZero;
     procedure TestCodegen_Set64_LiteralEmitsLongMask;
     procedure TestCodegen_Set64_InOperatorUsesLong;
@@ -1410,6 +1411,32 @@ begin
     '  Big := Big + [65];'                                  + #10 +
     'end;'                                                  + #10 +
     'begin'                                                 + #10 +
+    'end.');
+end;
+
+procedure TSetTests.TestSemantic_SetArrayElement_LiteralAssign;
+begin
+  { A bracket set literal ([] or [a, b]) assigned into an ARRAY ELEMENT dest —
+    static, dynamic, and multi-dimensional — must take its set type from the
+    element type, exactly as the plain-variable / field / implicit-Self paths do.
+    Before the fix this was rejected ('Expression has no value type' for [], or a
+    type mismatch 'array of TE' for [a, b]).  BUG-20260720-set-array-elem-dest. }
+  SemanticOK(
+    'program P;'                                            + #10 +
+    'type'                                                  + #10 +
+    '  TE = (sA, sB, sC, sD);'                              + #10 +
+    '  TS = set of TE;'                                     + #10 +
+    'var'                                                   + #10 +
+    '  A: array[0..3] of TS;'                               + #10 +
+    '  M: array[0..1, 0..1] of TS;'                         + #10 +
+    '  D: array of TS;'                                     + #10 +
+    'begin'                                                 + #10 +
+    '  A[0] := [];'                                         + #10 +
+    '  A[1] := [sA, sC];'                                   + #10 +
+    '  A[2] := A[1] + [sB];'                                + #10 +
+    '  M[0, 0] := [sD];'                                    + #10 +
+    '  SetLength(D, 2);'                                    + #10 +
+    '  D[0] := [sA];'                                       + #10 +
     'end.');
 end;
 

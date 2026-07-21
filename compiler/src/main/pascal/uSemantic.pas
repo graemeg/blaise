@@ -1074,7 +1074,18 @@ end;
 function TSemanticAnalyser.AnalyseExprHinted(AExpr: TASTExpr;
                                             AExpectedType: TTypeDesc): TTypeDesc;
 begin
-  if TryResolveBareEnumIdent(AExpr, AExpectedType) then
+  { A bracket set literal ([] or [a, b]) has no set type of its own — it must
+    take one from the assignment target.  The plain-variable and qualified-field
+    assignment paths already pass the LHS set type to AnalyseSetLiteralExpr; the
+    array-element / pointer-write paths route through this hinted helper, so
+    supply the same treatment here so `Arr[I] := [a, b]` (and dynamic / multi-
+    dim / implicit-Self / open-array element writes, and PtrToSet^ := [..]) type
+    against the expected set.  BUG-20260720-set-array-elem-dest. }
+  if (AExpectedType <> nil) and (AExpectedType.Kind = tySet) and
+     (AExpr is TArrayLiteralExpr) then
+    Result := AnalyseSetLiteralExpr(TArrayLiteralExpr(AExpr),
+                TSetTypeDesc(AExpectedType))
+  else if TryResolveBareEnumIdent(AExpr, AExpectedType) then
     Result := AExpr.ResolvedType
   else
     Result := AnalyseExpr(AExpr);
