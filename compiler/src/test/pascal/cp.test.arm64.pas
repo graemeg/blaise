@@ -60,6 +60,9 @@ type
     procedure TestString_ScopeExitReleases;
     { slice 5: string comparisons via RTL helpers }
     procedure TestString_Comparisons_UseRtlHelpers;
+    { leg 33: string subscript byte WRITE (S[I] := ch) — copy-on-write via
+      _StringUnique, plain-local and var-param forms }
+    procedure TestString_SubscriptWrite_CopyOnWrite;
     { slice 6: ARC-clean records — fields, whole-record copy, zero-init }
     procedure TestRecord_FieldsAndCopy;
     { slice 7: record RETURNS per AAPCS64 — x8 sret, x0/x0:x1 images,
@@ -838,6 +841,33 @@ begin
   { the routine's exit label releases its string local before Result loads }
   AssertTrue('exit label present', Pos('Lrexit', AsmT) >= 0);
   AssertTrue('scope-exit release', Pos(#9'bl _StringRelease', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestString_SubscriptWrite_CopyOnWrite;
+var
+  AsmT: string;
+begin
+  { Leg 33: S[I] := ch on a string writes a byte in place, but must first make
+    the buffer unique via _StringUnique (else a literal-backed string would hit
+    read-only memory).  The var-param form (Munge) derefs the slot once more to
+    reach the caller's string; the plain-local form (t) writes its own slot. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    procedure Munge(var S: string); begin S[0] := 'X' end;
+    var s, t: string;
+    begin
+      s := 'abc'; Munge(s); WriteLn(s);
+      t := 'hello'; t[1] := 'E'; WriteLn(t)
+    end.
+    ''');
+  { copy-on-write before the byte store }
+  AssertTrue('string made unique before write',
+    Pos(#9'bl _StringUnique', AsmT) >= 0);
+  { the byte is stored into the unique buffer }
+  AssertTrue('byte stored', Pos(#9'strb w0, [x9]', AsmT) >= 0);
+  { the var-param form derefs the slot to reach the caller's string pointer }
+  AssertTrue('var-param slot dereferenced', Pos(#9'ldr x19, [x19]', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestString_Comparisons_UseRtlHelpers;

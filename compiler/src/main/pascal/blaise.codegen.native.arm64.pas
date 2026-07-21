@@ -5006,12 +5006,59 @@ var
 begin
   { Arr[I] := V for a plain local/global static array.  The element
     ADDRESS is computed first and parked on the stack so the value
-    expression (and any ARC release call) cannot invalidate it. }
-  if (AStmt.BaseExpr <> nil) or AStmt.IsVarParam or
+    expression (and any ARC release call) cannot invalidate it.
+    A var-param STRING / PChar subscript write is handled by the tyString /
+    tyPChar branches below (they load the slot and deref once more for a var
+    param), so IsVarParam is only a blocker for the aggregate-array forms. }
+  if (AStmt.BaseExpr <> nil) or
+     (AStmt.IsVarParam and
+      ((AStmt.ResolvedArrayType = nil) or
+       not (AStmt.ResolvedArrayType.Kind in [tyString, tyPChar]))) or
      (AStmt.IsImplicitSelf and ((AStmt.ImplicitFieldInfo = nil) or
        (AStmt.ResolvedArrayType = nil) or
        not (AStmt.ResolvedArrayType.Kind in [tyDynArray, tyStaticArray]))) then
     NotYet('subscript write on this array form', AStmt);
+  if (AStmt.ResolvedArrayType <> nil) and
+     (AStmt.ResolvedArrayType.Kind = tyString) then
+  begin
+    { S[I] := ch with copy-on-write.  x19 holds the ADDRESS of the slot that
+      stores the string's data pointer — a local/global slot directly, or the
+      caller's variable address for a var/out param.  _StringUnique returns a
+      uniquely-owned writable pointer (releasing the old one when it copies);
+      store it back so the slot keeps exactly one owned reference, then storeb
+      into it.  Without the COW, writing a literal-backed string would hit
+      read-only memory.  Mirrors x86-64 (:16340) and QBE (:17676). }
+    { byte value -> parked }
+    if (AStmt.ValueExpr is TStringLiteral) then
+    begin
+      if Length(TStringLiteral(AStmt.ValueExpr).Value) = 0 then
+        Self.Emit(#9'movz x0, #0')
+      else
+        EmitIntLiteral('x0', OrdAt(TStringLiteral(AStmt.ValueExpr).Value, 0));
+    end
+    else
+      Self.EmitExprToX0(AStmt.ValueExpr);
+    EmitPushX0();                                  { [sp] = byte value }
+    Self.EmitExprToX0(AStmt.IndexExpr);
+    EmitPushX0();                                  { [sp] = index }
+    { preserve x19 (callee-saved) across the _StringUnique call }
+    Self.Emit(#9'str x19, [sp, #-16]!');
+    EmitSlotAddr('x19', AStmt.ArrayName);          { x19 = &slot }
+    if AStmt.IsVarParam then
+      { var/out param: the slot holds the caller variable's ADDRESS; the string
+        pointer lives one deref further. }
+      Self.Emit(#9'ldr x19, [x19]');
+    Self.Emit(#9'ldr x0, [x19]');                  { old data pointer }
+    Self.Emit(#9'bl _StringUnique');               { x0 = unique writable ptr }
+    Self.Emit(#9'str x0, [x19]');                  { write back to slot }
+    Self.Emit(#9'mov x9, x0');                     { x9 = unique base }
+    Self.Emit(#9'ldr x19, [sp], #16');             { restore x19 }
+    EmitPopTo('x1');                               { index }
+    Self.Emit(#9'add x9, x9, x1');
+    EmitPopTo('x0');                               { byte value }
+    Self.Emit(#9'strb w0, [x9]');
+    Exit;
+  end;
   if (AStmt.ResolvedArrayType <> nil) and
      (AStmt.ResolvedArrayType.Kind = tyPChar) then
   begin
