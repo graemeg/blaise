@@ -9369,6 +9369,7 @@ var
   IntfWalk: TInterfaceTypeDesc;
   Sym, ISym: string;
   IsGen: Boolean;
+  IsBareVis: Boolean;
   GII: TGenericInterfaceInstance;
   IDesc: TTypeDesc;
 begin
@@ -9446,6 +9447,18 @@ begin
         the linker dedups the copies (BUG-004) — matching how typeinfo/vtable
         are already weak-bound for generics and the x86-64/QBE generic loops. }
       IsGen := Pos('<', TD.Name) >= 0;
+      { Visibility of the itab + impllist definitions (LINK-2):
+        * generic instance — WEAK bare, deduped across the many objects that
+          materialise it (BUG-004);
+        * a class in an UNMANGLED RTL unit (System/rtl.*/runtime.*) — also WEAK,
+          because such a class's symbols are bare and re-emitted by every object
+          that touches it, so a strong .globl would collide (GH #174 parity,
+          matching the typeinfo def above and x86-64's BareClass rule);
+        * an ordinary class — GLOBL, so the definition in the class's own object
+          is visible to an interface assignment / Supports in ANOTHER object
+          (without this the cross-object reference dangles at link — LINK-2). }
+      IsBareVis := IsGen
+        or ((ClassRT <> nil) and IsUnmangledUnit(ClassRT.OwningUnit));
       for J := 0 to Intfs.Count - 1 do
       begin
         ID := TInterfaceTypeDesc(Intfs.Items[J]);
@@ -9454,8 +9467,10 @@ begin
           reference resolves (leg 41) — no longer an honest hole. }
         ISym := IntfItabSym(TD.Name, ID.Name);
         Self.Emit('.balign 8');
-        if IsGen then
-          Self.Emit(Format('.weak %s', [ISym]));
+        if IsBareVis then
+          Self.Emit(Format('.weak %s', [ISym]))
+        else
+          Self.Emit(Format('.globl %s', [ISym]));
         Self.Emit(Format('%s:', [ISym]));
         for K := 0 to ID.MethodCount() - 1 do
         begin
@@ -9470,8 +9485,13 @@ begin
         end;
       end;
       Self.Emit('.balign 8');
-      if IsGen then
-        Self.Emit(Format('.weak impllist_%s', [Sym]));
+      { Same visibility rule as the itab above (IsBareVis): weak for a generic
+        instance or an unmangled-RTL-unit class, globl for an ordinary class so
+        a cross-object Supports / interface-assignment reference resolves. }
+      if IsBareVis then
+        Self.Emit(Format('.weak impllist_%s', [Sym]))
+      else
+        Self.Emit(Format('.globl impllist_%s', [Sym]));
       Self.Emit(Format('impllist_%s:', [Sym]));
       for J := 0 to Intfs.Count - 1 do
       begin

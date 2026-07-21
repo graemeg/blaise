@@ -116,6 +116,7 @@ type
       (impllist, Supports/is/as) under the SAME owning-unit-prefixed symbol — a
       bare definition dangled the prefixed references at link (LINK-1). }
     procedure TestInterface_TypeinfoSymbol_DefAndRefAgree;
+    procedure TestInterface_ItabAndImpllist_AreGlobl;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2140,6 +2141,57 @@ begin
   { and NO bare typeinfo_IGreeter reference dangles }
   AssertTrue('no bare typeinfo reference',
     Pos('typeinfo_IGreeter@PAGE', AsmT) < 0);
+end;
+
+procedure TArm64BackendTests.TestInterface_ItabAndImpllist_AreGlobl;
+var
+  AsmT: string;
+begin
+  { A plain class's itab and impllist are DEFINED in the class's own object but
+    REFERENCED from another object (an interface assignment / Supports in the
+    program that uses the unit).  They must be .globl so the cross-object
+    reference resolves — a file-local (no-directive) definition dangles at link
+    (LINK-2; the arm64 backend previously only emitted .weak for generic
+    instances and nothing for a plain class, unlike x86-64). }
+  AsmT := GenAsmWithUnit(
+    '''
+    unit itabu;
+    interface
+    type
+      IWork = interface
+        function Run: Int64;
+      end;
+    implementation
+    end.
+    ''',
+    '''
+    program P;
+    uses itabu;
+    type
+      TJob = class(TObject, IWork)
+        function Run: Int64;
+      end;
+    function TJob.Run: Int64; begin Result := 9 end;
+    var o: TObject; w: IWork;
+    begin
+      o := TJob.Create();
+      if Supports(o, IWork, w) then WriteLn(w.Run());
+      o.Free()
+    end.
+    ''');
+  { The itab is defined (a label) and made globl.  The exact owning-unit prefix
+    of a program-declared class is an internal detail; what LINK-2 requires is
+    that the definition is globl (not file-local) so it resolves across objects. }
+  AssertTrue('the TJob/IWork itab is defined',
+    Pos('_TJob_IWork:', AsmT) >= 0);
+  AssertTrue('plain-class itab is .globl (cross-object visible)',
+    Pos('.globl itab_', AsmT) >= 0);
+  AssertTrue('the TJob itab definition is globl, not file-local',
+    Pos('.globl itab_', AsmT) >= 0);
+  AssertTrue('the TJob impllist is defined',
+    Pos('impllist_', AsmT) >= 0);
+  AssertTrue('plain-class impllist is .globl',
+    Pos('.globl impllist_', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;
