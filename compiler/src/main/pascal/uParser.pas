@@ -1210,6 +1210,22 @@ begin
         AD.SubrangeHigh := SubHi;
         TD.Def := AD;
       end
+      else if Check(tkIdent) and (PeekKind() = tkDotDot) then
+      begin
+        { Enum-member (or named-const) subrange:  type TSub = zwei..drei;
+          The bounds are identifiers whose ordinals are semantic-time knowledge,
+          so store the NAMES; the semantic pass resolves them to the enum base +
+          ordinal bounds (GH #182).  The TypeName is left empty — the semantic
+          pass supplies the base from the resolved enum. }
+        AD := TTypeAliasDef.Create();
+        AD.IsSubrange := True;
+        AD.SubrangeLowName := FCurrent.Value;
+        Advance();
+        Expect(tkDotDot);
+        AD.SubrangeHighName := FCurrent.Value;
+        Expect(tkIdent);
+        TD.Def := AD;
+      end
       else if Check(tkArray) or Check(tkCaret) or Check(tkIdent) then
       begin
         { Array alias:   type TArr = array[L..H] of T;

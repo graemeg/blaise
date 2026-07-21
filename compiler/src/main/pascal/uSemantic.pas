@@ -3588,8 +3588,12 @@ begin
     ElemName := StrCopyTail(AName, OfPos + 4);
     IdxTD    := FTable.FindType(IdxName);
     BaseType := FindTypeOrInstantiate(ElemName);
-    if (IdxTD <> nil) and (IdxTD.Kind = tyEnum) and (BaseType <> nil) then
+    if (IdxTD <> nil) and (IdxTD.Kind = tyEnum) and (not IdxTD.IsSubrange) and
+       (BaseType <> nil) then
     begin
+      { A full enum index (array[TEnum] of T) spans 0..N-1.  An ENUM-SUBRANGE
+        index (IsSubrange) is NOT full-range — it falls through to the subrange
+        branch below, which uses the subrange's own ordinal bounds (GH #182). }
       EnumDesc := TEnumTypeDesc(IdxTD);
       HVal     := EnumDesc.Members.Count - 1;
       CanonName := Format('array[0..%d] of %s', [HVal, BaseType.Name]);
@@ -6125,6 +6129,9 @@ var
   PropType:   TTypeDesc;
   EnumDesc:   TEnumTypeDesc;
   EnumDef:    TEnumTypeDef;
+  SubEnum:    TEnumTypeDesc;
+  LowRef:     TEnumMemberRef;
+  HighRef:    TEnumMemberRef;
   SetDesc:    TSetTypeDesc;
   SetSubDesc: TSetTypeDesc;
   SetDef:     TSetTypeDef;
@@ -6378,6 +6385,44 @@ begin
             TD.Line, TD.Col);
           Continue;
         end;
+      end
+      else if AliasDef.IsSubrange and (AliasDef.SubrangeLowName <> '') then
+      begin
+        { Enum-member subrange: type TSub = zwei..drei;  Resolve both member
+          names to a common enum and its member ordinals, then build a DISTINCT
+          enum descriptor (with the base enum's members copied, so every
+          tyEnum-cast path stays valid) carrying IsSubrange + the ordinal bounds
+          — the array-index resolver and the High/Low fold read them (GH #182). }
+        LowRef := ResolveEnumMember(AliasDef.SubrangeLowName, nil);
+        HighRef := ResolveEnumMember(AliasDef.SubrangeHighName, nil);
+        if (LowRef = nil) or (HighRef = nil) then
+        begin
+          SemanticError(Format(
+            'Unknown enum member in subrange ''%s..%s''',
+            [AliasDef.SubrangeLowName, AliasDef.SubrangeHighName]), TD.Line, TD.Col);
+          Continue;
+        end;
+        if LowRef.EnumDesc <> HighRef.EnumDesc then
+        begin
+          SemanticError(Format(
+            'Subrange bounds ''%s'' and ''%s'' are from different enum types',
+            [AliasDef.SubrangeLowName, AliasDef.SubrangeHighName]), TD.Line, TD.Col);
+          Continue;
+        end;
+        if HighRef.Ordinal < LowRef.Ordinal then
+        begin
+          SemanticError(Format('Subrange ''%s..%s'' is descending',
+            [AliasDef.SubrangeLowName, AliasDef.SubrangeHighName]), TD.Line, TD.Col);
+          Continue;
+        end;
+        SubEnum := FTable.NewEnumType(TD.Name);
+        for K := 0 to LowRef.EnumDesc.Members.Count - 1 do
+          SubEnum.AddMember(LowRef.EnumDesc.Members.Strings[K],
+            LowRef.EnumDesc.OrdinalAt(K));
+        SubEnum.IsSubrange := True;
+        SubEnum.SubrangeLow := LowRef.Ordinal;
+        SubEnum.SubrangeHigh := HighRef.Ordinal;
+        AliasDesc := SubEnum;
       end
       else if AliasDef.IsSubrange then
       begin

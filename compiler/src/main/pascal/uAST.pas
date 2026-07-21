@@ -819,6 +819,12 @@ type
     IsSubrange: Boolean;
     SubrangeLow: Int64;
     SubrangeHigh: Int64;
+    { An ENUM-member subrange (type TSub = zwei..drei;) can't know its bounds'
+      ordinals at parse time — store the member NAMES here (both empty for the
+      integer form).  The semantic pass resolves them to ordinals + the enum
+      base, then fills IsSubrange/SubrangeLow/SubrangeHigh (GH #182). }
+    SubrangeLowName: string;
+    SubrangeHighName: string;
   end;
 
   { Set type definition: type TOptions = set of TEnum; }
@@ -2929,6 +2935,8 @@ begin
     TA.IsSubrange := TTypeAliasDef(ASrc).IsSubrange;
     TA.SubrangeLow := TTypeAliasDef(ASrc).SubrangeLow;
     TA.SubrangeHigh := TTypeAliasDef(ASrc).SubrangeHigh;
+    TA.SubrangeLowName := TTypeAliasDef(ASrc).SubrangeLowName;
+    TA.SubrangeHighName := TTypeAliasDef(ASrc).SubrangeHighName;
     Result := TA;
   end
   else if ASrc is TSetTypeDef then

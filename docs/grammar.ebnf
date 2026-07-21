@@ -274,6 +274,7 @@ TypeDef
     | SetType
     | ProceduralType
     | IntSubrange    (* named integer subrange, e.g. TByte = 0..255 *)
+    | EnumSubrange   (* named enum-member subrange, e.g. TSub = zwei..drei *)
     | TypeName       (* covers ArrayType, pointer alias ^T, simple alias, metaclass *)
     ;
 
@@ -281,12 +282,22 @@ IntSubrange
     = [ MINUS ] INT_LIT DOTDOT [ MINUS ] INT_LIT
     ;
 
+EnumSubrange
+    = IDENT DOTDOT IDENT
+    ;
+
 (* A named integer subrange is an alias to the narrowest STANDARD integer type
  * that holds both bounds (0..255 -> Byte, -10..10 -> ShortInt, etc.).  Blaise
  * does not range-check, so the subrange carries no run-time bound enforcement;
  * the base-type choice exists only to keep record/array element layout correct.
- * Only integer-literal bounds are accepted as a named type; identifier- or
- * enum-bounded subranges (TLow..THigh, red..blue) are not a named-type form. *)
+ *
+ * A named enum-member subrange (TSub = lo..hi where lo, hi are members of the
+ * same enumerated type) has that enum as its base type; the bounds are the
+ * members' ordinals.  Like the integer form it is unchecked — the bounds are
+ * metadata: High/Low of the subrange yield the bound members, and an array
+ * indexed by the subrange spans the subrange's ordinal range (not the full
+ * enum).  A leading IDENT followed by DOTDOT distinguishes this from a simple
+ * type alias. *)
 
 RecordDef
     = [ PACKED ] RECORD

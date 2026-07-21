@@ -1160,6 +1160,9 @@ Blaise supports fixed-size, stack-allocated arrays declared as
 | `array[TSubrange] of T` — named integer-subrange index
 | Supported. The subrange (`type TIdx = lo..hi;`) supplies the index range, so `array[TIdx] of T` folds to `array[lo..hi] of T`; the subrange's values remain ordinary unchecked integers of its underlying storage type.
 
+| `type TSub = lo..hi;` — named enum-member subrange
+| Supported (GH #182). A subrange whose bounds are members of the same enumerated type has that enum as its base type; the bounds are the members' ordinals. It is unchecked like the integer subrange — the ordinals are metadata: `High`/`Low` yield the bound members, and `array[TSub] of T` folds to the subrange's ordinal range (not the full enum). The parser distinguishes it from a simple type alias by a leading identifier followed by `..`. Both forms of `High`/`Low` on the subrange type itself (not just an array indexed by it) read this metadata (GH #160) — a subrange keeps its base type's `Kind`, so the fold must consult the subrange bounds explicitly rather than the base type's extremes.
+
 | `array[L..H, M..N] of T` — multi-dimensional
 | Supported
 

@@ -342,6 +342,7 @@ TUnitInterface.UsedUnits  serialise
 TUnitInterface.ImplUsedUnits  serialise
 TUnitInterface.LinkLibs  serialise
 TUnitInterface.HasInitialization  serialise
+TUnitInterface.HasFinalization  serialise
 
 # TMethodParam (uAST.pas:945)
 TMethodParam.ParamName  serialise

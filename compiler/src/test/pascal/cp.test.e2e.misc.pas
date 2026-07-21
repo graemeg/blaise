@@ -171,6 +171,7 @@ type
     procedure TestRun_Subrange_NamedType;
     procedure TestRun_Subrange_InRecordAndArray;
     procedure TestRun_Subrange_HighLow;
+    procedure TestRun_Subrange_OfEnum;
 
     { forward; in a program decl section (issue #130 bug2): the forward decl
       used to swallow the following implementation as a nested-proc body. }
@@ -1969,6 +1970,33 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     '10 2' + LE + '10 2' + LE + '10 2' + LE + '3 -3' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_Subrange_OfEnum;
+const
+  { GH #182: a subrange of an ENUMERATED type (TSub = b..c) must parse and work
+    — High/Low yield the member ordinals, a var of it holds enum values, and an
+    array indexed by the enum-subrange uses the subrange's ordinal bounds (not
+    the full enum range). }
+  Src = '''
+    program P;
+    type
+      TE = (a, b, c, d);
+      TSub = b..c;
+      TArr = array[TSub] of Integer;
+    var s: TSub; arr: TArr;
+    begin
+      WriteLn(Ord(High(TSub)), ' ', Ord(Low(TSub)));
+      s := b; WriteLn(Ord(s));
+      arr[b] := 10; arr[c] := 20;
+      WriteLn(arr[b], ' ', arr[c]);
+      WriteLn(High(TArr), ' ', Low(TArr))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '2 1' + LE + '1' + LE + '10 20' + LE + '2 1' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_Ifdef_PredefinedBlaise;
