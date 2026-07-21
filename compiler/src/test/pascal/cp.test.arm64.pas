@@ -99,6 +99,7 @@ type
     procedure TestStackArgs_RecordParamOverflow;
     { slice 22: interfaces — itab dispatch, fat-pointer ARC, metadata }
     procedure TestInterfaces_DispatchAndMetadata;
+    procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
     { slice 24: Supports, InheritsFrom, metaclass values }
@@ -1918,6 +1919,47 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64BackendTests.TestInterfaces_StringArg;
+var
+  AsmT: string;
+begin
+  { Leg 31: an itab dispatch may carry a by-value STRING argument.  The itab
+    dispatcher loads the string buffer pointer into an arg register (x1) and
+    calls through the itab slot.  A plain local passed to a `const S: string`
+    param is BORROWED — no _StringAddRef is emitted at the call site (the
+    negative assertion guards against an over-eager retain). }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IFoo = interface
+        procedure Take(const S: string);
+      end;
+      TFoo = class(TObject, IFoo)
+        procedure Take(const S: string);
+      end;
+    procedure TFoo.Take(const S: string);
+    begin
+      WriteLn(S)
+    end;
+    var
+      F: IFoo;
+      H: TFoo;
+      S: string;
+    begin
+      H := TFoo.Create();
+      F := H;
+      S := 'hello';
+      F.Take(S);
+      F := nil
+    end.
+    ''');
+  AssertTrue('string arg loaded into x1', Pos(#9'ldr x1, [sp], #16', AsmT) >= 0);
+  AssertTrue('dispatch through itab slot 0',
+    Pos(#9'ldr x9, [x9, #0]', AsmT) >= 0);
+  AssertTrue('dispatch call', Pos(#9'blr x9', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_AsCast;

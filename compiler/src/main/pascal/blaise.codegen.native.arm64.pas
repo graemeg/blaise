@@ -8828,9 +8828,18 @@ var
   I: Integer;
   Arg: TASTExpr;
 begin
-  { itab dispatch: obj in x0, args in x1.., fptr = itab[AIdx*8].  Only
-    int-class scalar args in this slice — a dedicated emitter because the
-    interface has no TMethodDecl to drive EmitCall's classification. }
+  { itab dispatch: obj in x0, args in x1.., fptr = itab[AIdx*8].  Scalar
+    int-class, class/pointer, and by-value STRING args in this slice — a
+    dedicated emitter because the interface has no TMethodDecl to drive
+    EmitCall's classification.
+    A string arg is passed by value: EmitExprToX0 loads the buffer pointer,
+    which is exactly what a `const S: string` param borrows.  BORROW ONLY —
+    unlike the direct-call EmitCall path, this emitter does NOT park an owned
+    or unowned-transient string arg for post-call release, so passing a
+    function-result / concat string here would leak it.  Every itab call the
+    self-compile reaches passes a plain named local (borrowed), so that is
+    safe today; a transient-string itab arg must add the EmitCall-style parking
+    (arm64 ~7998-8013) when a later leg first needs it. }
   if AArgs.Count > 7 then
     NotYet('interface call with more than 7 arguments', nil);
   for I := 0 to AArgs.Count - 1 do
@@ -8838,7 +8847,7 @@ begin
     Arg := TASTExpr(AArgs.Items[I]);
     if not (IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) or
             ((Arg.ResolvedType <> nil) and
-             (Arg.ResolvedType.Kind in [tyClass, tyPChar, tyPointer]))) then
+             (Arg.ResolvedType.Kind in [tyClass, tyPChar, tyPointer, tyString]))) then
       NotYet('interface-call argument of this type', Arg);
     Self.EmitExprToX0(Arg);
     EmitPushX0();
