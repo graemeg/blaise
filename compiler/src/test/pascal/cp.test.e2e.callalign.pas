@@ -44,6 +44,13 @@ type
     { Odd pinned count around a >6-arg call (SysV stack arguments) whose
       last argument spawns a thread. }
     procedure TestRun_OverflowArgs_OddPinned_ThreadSpawn;
+    { >8 float args: the 9th+ overflow to the stack.  The x86-64 caller used to
+      drop the overflow float (BUG-20260721-x86-single-overflow-arg). }
+    procedure TestRun_OverflowFloat_9Single;
+    procedure TestRun_OverflowFloat_9Double;
+    procedure TestRun_OverflowFloat_8Double1Single;
+    procedure TestRun_OverflowFloat_11Single;
+    procedure TestRun_OverflowFloat_InterspersedWithInt;
   end;
 
 implementation
@@ -132,6 +139,99 @@ const
       WriteLn(X)
     end.
     ''';
+
+  { >8 floating-point args: the 9th onward overflow the 8 xmm registers and
+    must be passed on the outgoing stack.  The x86-64 caller used to silently
+    DROP the overflow float (never relocating its slot, then reclaiming it),
+    so the callee read an uninitialised stack slot — garbage for BOTH Single
+    and Double (BUG-20260721-x86-single-overflow-arg; not Single-specific).
+    No threads here — a plain compile+run on both backends. }
+  Src9Single =
+    '''
+    program P;
+    function F(a, b, c, d, e, f, g, h, i: Single): Single;
+    begin Result := i + a end;
+    var r: Single;
+    begin r := F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5); WriteLn(Trunc(r*10)) end.
+    ''';
+
+  { Double control — the 9th Double overflow was ALSO garbage before the fix
+    (returned 0 on native), proving the defect was not Single-specific. }
+  Src9Double =
+    '''
+    program P;
+    function F(a, b, c, d, e, f, g, h, i: Double): Double;
+    begin Result := i + a end;
+    var r: Double;
+    begin r := F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5); WriteLn(Trunc(r*10)) end.
+    ''';
+
+  { First 8 Double (fill xmm0..7) + a 9th Single overflow — mixed-class case. }
+  Src8Double1Single =
+    '''
+    program P;
+    function F(a, b, c, d, e, f, g, h: Double; i: Single): Single;
+    begin Result := i + a end;
+    var r: Single;
+    begin r := F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5); WriteLn(Trunc(r*10)) end.
+    ''';
+
+  { Multiple overflow floats (9th, 10th, 11th all read). }
+  Src11Single =
+    '''
+    program P;
+    function F(a, b, c, d, e, f, g, h, i, j, k: Single): Single;
+    begin Result := (i + j + k) + a end;
+    var r: Single;
+    begin r := F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5,10.5,11.5); WriteLn(Trunc(r*10)) end.
+    ''';
+
+  { Interspersed integer AND float overflow — the tightest layout check: the
+    caller must relocate int and float overflow slots in one argument order
+    matching the callee's shared StackOff walk. }
+  SrcInterspersedOverflow =
+    '''
+    program P;
+    function F(s1, s2, s3, s4, s5, s6, s7, s8: Single;
+               n1, n2, n3, n4, n5, n6: Integer;
+               s9: Single; n7: Integer; s10: Single): Integer;
+    begin Result := Trunc((s9 + s10) * 10) + n7 end;
+    var r: Integer;
+    begin
+      r := F(1,2,3,4,5,6,7,8, 10,20,30,40,50,60, 9.5, 100, 10.5);
+      WriteLn(r)
+    end.
+    ''';
+
+procedure TE2ECallAlignTests.TestRun_OverflowFloat_9Single;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src9Single, '110' + LE, 0)
+end;
+
+procedure TE2ECallAlignTests.TestRun_OverflowFloat_9Double;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src9Double, '110' + LE, 0)
+end;
+
+procedure TE2ECallAlignTests.TestRun_OverflowFloat_8Double1Single;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src8Double1Single, '110' + LE, 0)
+end;
+
+procedure TE2ECallAlignTests.TestRun_OverflowFloat_11Single;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src11Single, '330' + LE, 0)
+end;
+
+procedure TE2ECallAlignTests.TestRun_OverflowFloat_InterspersedWithInt;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(SrcInterspersedOverflow, '300' + LE, 0)
+end;
 
 procedure TE2ECallAlignTests.TestRun_OddPinnedArg_ThreadSpawnInSubtree;
 begin

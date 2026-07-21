@@ -18895,7 +18895,23 @@ begin
           else
             Self.Emit(Format(#9'movsd %d(%%rsp), %s', [SlotOff, SysVXmmArgRegs[XmmIdx]]));
           Inc(XmmIdx);
-        end;
+        end
+        else
+          { >8 float args: the 9th onward overflow to the outgoing stack area,
+            exactly like an integer overflow arg.  Without this the slot was
+            silently dropped (never relocated, then reclaimed by the frame
+            addq/subq), so the callee read an uninitialised stack slot — garbage
+            for BOTH Single and Double overflow floats
+            (BUG-20260721-x86-single-overflow-arg; the defect is not
+            Single-specific — the caller dropped every overflow float).  The
+            callee's BuildFrame advances the SAME shared StackOff for int and
+            float overflow params in arg order, so adding SlotOff here in loop
+            (= argument) order reproduces the System V stack layout the callee
+            expects.  Pass 1 wrote a Single as a raw 4-byte movss into the low
+            half of the 8-byte slot; the 8-byte relocation copy carries garbage
+            in the high 4 bytes, but the callee reads a Single with movss (low 4
+            only), so it is harmless. }
+          OverflowOffs.Add(SlotOff);
         Inc(SlotOff, 8);
       end
       else
@@ -18960,10 +18976,13 @@ begin
       Every destination is strictly below every source, so the copy can never
       clobber an unread slot, and AlignFreshBytes sizes the region so the
       call site is 16-byte aligned even when pinned pushes above the slot
-      block have left the frame at an odd slot count.  Float args never
-      overflow (they always take an xmm register, of which there are 8), so
-      only integer slots appear here.  The slot block plus the fresh region
-      is reclaimed after the call via the hoist epilogue's base bytes.
+      block have left the frame at an odd slot count.  Both integer AND float
+      overflow slots appear here (a 9th+ float arg overflows to the stack just
+      like a 7th+ integer arg), collected in argument order — the callee's
+      BuildFrame lays out int and float overflow params against one shared
+      StackOff in the same order, so the relocation matches.  The slot block
+      plus the fresh region is reclaimed after the call via the hoist
+      epilogue's base bytes.
 
       This replaces a former `addq $48` shortcut that assumed exactly the
       first six contiguous slots were register-bound; with floats
