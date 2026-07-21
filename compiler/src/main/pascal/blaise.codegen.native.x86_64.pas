@@ -6338,6 +6338,14 @@ begin
      (TFieldAccessExpr(AExpr).PropRead.TypeDesc <> nil) and
      (TFieldAccessExpr(AExpr).PropRead.TypeDesc.Kind = tyRecord) then
     Exit(True);
+  { A DEFAULT-array-property subscript (Obj[I]) that returns a record is lowered
+    as a TStringSubscriptExpr wrapping that same record-returning PropRead
+    FieldAccess.  Treat it as a record call by unwrapping to the inner StrExpr,
+    so both the record-into-var assignment (V := Obj[I]) and a field-read off it
+    (Obj[I].F) route through the sret path (BUG-002 A-indexed via default
+    subscript). }
+  if (AExpr is TStringSubscriptExpr) then
+    Exit(Self.IsNativeRecordCall(TStringSubscriptExpr(AExpr).StrExpr));
 end;
 
 function TX86_64Backend.RecordCallReceiverIsVar(AExpr: TASTExpr;
@@ -6423,6 +6431,11 @@ var
   Synth:    TMethodCallExpr;
   SynthArgs: TObjectList;
 begin
+  { Unwrap a default-array-property subscript (Obj[I]) to its inner
+    record-returning PropRead FieldAccess so it shares the sret path with the
+    named form (BUG-002 A-indexed via default subscript). }
+  if AExpr is TStringSubscriptExpr then
+    AExpr := TStringSubscriptExpr(AExpr).StrExpr;
   { Record-returning property read (O.Prop): a getter call, so synthesise the
     method call from the resolved getter decl and route it through
     EmitMethodSretCall exactly as a record-returning method call.  An INDEXED
@@ -14280,11 +14293,18 @@ begin
       synthesises the method call, threading an index arg for an indexed
       property) exactly as the record-method-call case above.  No aliasing guard
       is needed — the receiver is a class, distinct from the record dest. }
+    { The RHS is normally a bare FieldAccess (V := Obj.Prop); a
+      DEFAULT-array-property subscript (V := Obj[I]) wraps that same record-
+      returning PropRead FieldAccess inside a TStringSubscriptExpr.
+      IsNativeRecordCall / EmitRecordCallSretAt both unwrap the subscript, so
+      both forms route through the identical sret path
+      (BUG-002 A-indexed via default subscript). }
     if (Asgn.ResolvedLhsType <> nil) and
        (Asgn.ResolvedLhsType.Kind = tyRecord) and
-       (Asgn.Expr is TFieldAccessExpr) and
-       (TFieldAccessExpr(Asgn.Expr).PropRead <> nil) and
-       (TFieldAccessExpr(Asgn.Expr).PropReadDecl <> nil) then
+       Self.IsNativeRecordCall(Asgn.Expr) and
+       (((Asgn.Expr is TFieldAccessExpr) and
+         (TFieldAccessExpr(Asgn.Expr).PropRead <> nil)) or
+        (Asgn.Expr is TStringSubscriptExpr)) then
     begin
       Self.Emit(#9'pushq %rbx');
       if FSretFunc and SameText(Asgn.Name, 'Result') then

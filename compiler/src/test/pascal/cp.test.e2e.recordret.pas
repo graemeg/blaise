@@ -187,6 +187,12 @@ type
       against the sret ABI).  Covers a small register-return record, a large
       sret record, and a managed-field record, plus a nested-field read. }
     procedure TestRun_IndexedRecordProperty_Read;
+    { BUG-002 A-indexed via DEFAULT array property: reading a record-returning
+      getter through subscript syntax (H[0], not H.Items[0]) — the record read
+      lands inside a TStringSubscriptExpr the record-sret gate did not recognise,
+      so QBE emitted invalid IR and native segfaulted.  Covers register-class,
+      large sret, and managed records, plus a field-read off the subscript. }
+    procedure TestRun_DefaultSubscriptRecordProperty_Read;
     { Regression: a for-in loop whose enumerator's Current returns a record with
       a managed (string) field.  The loop reads Enumerator.Current (a property)
       each pass; the record must sret into the loop variable rather than be
@@ -1589,6 +1595,55 @@ const
       WriteLn('man ', Tm.Name, ' ', Tm.N);
       WriteLn('nested ', B.Items[0].Index);
       B.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'small 9 3' + LE + 'big 100 500' + LE + 'man hello 7' + LE +
+    'nested 9' + LE, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_DefaultSubscriptRecordProperty_Read;
+const
+  Src =
+    '''
+    program P;
+    type
+      TQ = record Index: Integer; Other: Integer; end;
+      TBig = record A, B, C, D, E: Integer; end;
+      TMan = record Name: string; N: Integer; end;
+      TBoxQ = class
+        FQ: TQ;
+        function Get(A: Integer): TQ;
+        property Items[A: Integer]: TQ read Get; default;
+      end;
+      TBoxBig = class
+        FBig: TBig;
+        function GetBig(A: Integer): TBig;
+        property Items[A: Integer]: TBig read GetBig; default;
+      end;
+      TBoxMan = class
+        FMan: TMan;
+        function GetMan(A: Integer): TMan;
+        property Items[A: Integer]: TMan read GetMan; default;
+      end;
+    function TBoxQ.Get(A: Integer): TQ; begin Result := FQ end;
+    function TBoxBig.GetBig(A: Integer): TBig; begin Result := FBig end;
+    function TBoxMan.GetMan(A: Integer): TMan; begin Result := FMan end;
+    var Bq: TBoxQ; Bb: TBoxBig; Bm: TBoxMan; T: TQ; Tb: TBig; Tm: TMan;
+    begin
+      Bq := TBoxQ.Create(); Bq.FQ.Index := 9; Bq.FQ.Other := 3;
+      Bb := TBoxBig.Create(); Bb.FBig.A := 100; Bb.FBig.E := 500;
+      Bm := TBoxMan.Create(); Bm.FMan.Name := 'hello'; Bm.FMan.N := 7;
+      T := Bq[0];
+      WriteLn('small ', T.Index, ' ', T.Other);
+      Tb := Bb[0];
+      WriteLn('big ', Tb.A, ' ', Tb.E);
+      Tm := Bm[0];
+      WriteLn('man ', Tm.Name, ' ', Tm.N);
+      WriteLn('nested ', Bq[0].Index);
+      Bq.Free(); Bb.Free(); Bm.Free()
     end.
     ''';
 begin

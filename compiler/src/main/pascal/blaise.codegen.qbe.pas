@@ -6823,9 +6823,20 @@ begin
       managed fields' retain. }
     if FldAccess.PropRead <> nil then
     begin
-      SelfTemp := AllocTemp();
-      EmitLine(Format('  %s =l loadl %s',
-        [SelfTemp, VarRef(FldAccess.RecordName, FldAccess.IsGlobal)]));
+      { Receiver: a named property read (O.Prop) carries it in RecordName, but a
+        DEFAULT-array-property subscript (O[I]) is lowered as a FieldAccess whose
+        receiver lives in Base (RecordName is empty).  Resolve Base when present
+        — mirroring the scalar property-read path — otherwise a bare
+        `loadl %_var_` with an empty name is emitted, which QBE rejects
+        (BUG-002 A-indexed via default subscript). }
+      if FldAccess.Base <> nil then
+        SelfTemp := EmitInstancePtr(FldAccess.Base)
+      else
+      begin
+        SelfTemp := AllocTemp();
+        EmitLine(Format('  %s =l loadl %s',
+          [SelfTemp, VarRef(FldAccess.RecordName, FldAccess.IsGlobal)]));
+      end;
       if FldAccess.FieldInfo <> nil then
       begin
         { Getter on a field of the record (Rec.Field.Prop): step to the field. }
