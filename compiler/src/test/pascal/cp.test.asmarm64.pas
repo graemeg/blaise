@@ -42,6 +42,7 @@ type
     procedure TestAdrpAddPair_EmitsPageRelocs;
     procedure TestGotAndTlvRelocs;
     procedure TestDataDirectives_QuadSymbolReloc;
+    procedure TestAsciiWithSemicolonAndSlashes;
     procedure TestCsetAndConditionals;
     procedure TestLseAtomics;
     procedure TestErrors_HaveLineNumbers;
@@ -319,6 +320,36 @@ begin
     AssertEquals('8-byte width', 3, D.Relocs.Get(0).Length_);
     AssertEquals(7, StrAt(D.Data, 8));
     AssertEquals(Ord('h'), StrAt(D.Data, 14));
+  finally
+    F.Free();
+  end;
+end;
+
+procedure TArm64AsmTests.TestAsciiWithSemicolonAndSlashes;
+var
+  F: TMachOFile;
+  D: TMoSection;
+begin
+  { The line comment-stripper must NOT treat ';' or '//' as a comment when they
+    sit INSIDE a quoted string — else `.ascii ";"` loses its byte and becomes an
+    unterminated `.ascii "`.  (Exposed by the arm64 self-compile, whose emitted
+    string constants include semicolons and '//'.) }
+  TextWords(
+    'nop' + LineEnding +
+    '.data' + LineEnding +
+    'lbl:' + LineEnding +
+    '.ascii ";"' + LineEnding +
+    '.ascii "a//b"' + LineEnding, F);
+  try
+    D := F.FindSection('__DATA', '__data');
+    AssertTrue(D <> nil);
+    { one ';' byte + four bytes 'a//b' }
+    AssertEquals('";" + "a//b"', 1 + 4, Integer(D.Size));
+    AssertEquals('semicolon preserved', Ord(';'), StrAt(D.Data, 0));
+    AssertEquals('a', Ord('a'), StrAt(D.Data, 1));
+    AssertEquals('first slash preserved', Ord('/'), StrAt(D.Data, 2));
+    AssertEquals('second slash preserved', Ord('/'), StrAt(D.Data, 3));
+    AssertEquals('b', Ord('b'), StrAt(D.Data, 4));
   finally
     F.Free();
   end;

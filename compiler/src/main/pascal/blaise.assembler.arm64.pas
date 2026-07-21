@@ -393,17 +393,44 @@ end;
 function ParseLine(const ALine: string; ANum: Integer): TA64Line;
 var
   S: string;
-  P: Integer;
+  P, C: Integer;
+  InStr: Boolean;
 begin
   Result.RawLine := ALine;
   Result.LineNum := ANum;
   Result.Cond := '';
   S := ALine;
-  { strip comments: ';' and '//' }
-  P := Pos(';', S);
-  if P >= 0 then S := Copy(S, 0, P);
-  P := Pos('//', S);
-  if P >= 0 then S := Copy(S, 0, P);
+  { Strip a trailing comment (';' or '//'), but NOT a delimiter that sits
+    INSIDE a quoted string — e.g. `.ascii ";"` must keep its semicolon.  Scan
+    char by char, tracking string state; a backslash escapes the next char so
+    an embedded `\"` does not end the string. }
+  P := 0;
+  InStr := False;
+  while P < Length(S) do
+  begin
+    C := StrAt(S, P);
+    if InStr then
+    begin
+      if C = Ord('\') then
+        P := P + 1                 { skip the escaped char }
+      else if C = Ord('"') then
+        InStr := False;
+    end
+    else if C = Ord('"') then
+      InStr := True
+    else if C = Ord(';') then
+    begin
+      S := Copy(S, 0, P);
+      Break;
+    end
+    else if (C = Ord('/')) and (P + 1 < Length(S)) and
+            (StrAt(S, P + 1) = Ord('/')) then
+    begin
+      S := Copy(S, 0, P);
+      Break;
+    end;
+    P := P + 1;
+  end;
   S := TrimS(S);
   if S = '' then
   begin
