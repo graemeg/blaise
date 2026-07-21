@@ -29,6 +29,9 @@ type
     { BUG-20260720-exception-object-leak: a handler with NO bound variable (bare
       except, on-Type-no-var, else branch) left the raised exception orphaned
       (created rc=0, only borrowed, never released) — leaking Exception (rc=0). }
+    { BUG-20260720-managed-record-self-assign: R := R must be leak-free (the
+      native release-dest step used to zero + orphan the +1-retained field). }
+    procedure TestDebug_ManagedRecordSelfAssign_NoLeak;
     procedure TestDebug_ExceptionNoVarHandler_NoLeak;
     procedure TestDebug_ConstructorWithArgs_NoDoubleAddRef;
     procedure TestDebug_LeakedObject_ReportedOnExit;
@@ -3013,6 +3016,22 @@ begin
     'cat ab' + LE + 'make m' + LE + 'alias-arg abbb' + LE +
     'alias-recv mbbb' + LE, Output);
   AssertTrue('no leak report (native), got: ' + Output, Pos('leak', Output) < 0);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_ManagedRecordSelfAssign_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program P;
+    uses SysUtils;
+    type TRec = record A, B: string; N: Integer; end;
+    var R: TRec;
+    begin
+      R.A := IntToStr(1) + 'x'; R.B := IntToStr(2) + 'y'; R.N := 7;
+      R := R;
+      WriteLn(R.A, R.B)
+    end.
+    ''', '1x2y');
 end;
 
 procedure TE2ELeakCheckTests.TestDebug_ExceptionNoVarHandler_NoLeak;

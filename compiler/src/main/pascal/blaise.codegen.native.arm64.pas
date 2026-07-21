@@ -891,7 +891,9 @@ begin
       if AFld.Offset <> 0 then
         EmitAddSubImm('add', 'x22', 'x22', AFld.Offset);
       Self.EmitRecordFieldRetains(TRecordTypeDesc(AFld.TypeDesc), 'x19');
-      Self.EmitRecordFieldReleases(TRecordTypeDesc(AFld.TypeDesc), 'x22');
+      { copy site: no-zero release keeps a self-copy exact
+        (BUG-20260720-managed-record-self-assign) }
+      Self.EmitRecordFieldReleases(TRecordTypeDesc(AFld.TypeDesc), 'x22', False);
       Self.Emit(#9'mov x0, x22');
       Self.Emit(#9'mov x1, x19');
       EmitIntLiteral('x2', AFld.TypeDesc.RawSize());
@@ -1255,8 +1257,9 @@ begin
         EmitAddSubImm('add', 'x22', 'x22', AStmt.FieldInfo.Offset);  { dest field }
       Self.EmitRecordFieldRetains(
         TRecordTypeDesc(AStmt.FieldInfo.TypeDesc), 'x19');
+      { copy site: no-zero release (BUG-20260720-managed-record-self-assign) }
       Self.EmitRecordFieldReleases(
-        TRecordTypeDesc(AStmt.FieldInfo.TypeDesc), 'x22');
+        TRecordTypeDesc(AStmt.FieldInfo.TypeDesc), 'x22', False);
       Self.Emit(#9'mov x0, x22');
       Self.Emit(#9'mov x1, x19');
       EmitIntLiteral('x2', AStmt.FieldInfo.TypeDesc.RawSize());
@@ -1472,7 +1475,8 @@ begin
     if not RecretManagedClean(TRecordTypeDesc(Elem)) then
     begin
       Self.EmitRecordFieldRetains(TRecordTypeDesc(Elem), 'x19');
-      Self.EmitRecordFieldReleases(TRecordTypeDesc(Elem), 'x22');
+      { copy site: no-zero release (BUG-20260720-managed-record-self-assign) }
+      Self.EmitRecordFieldReleases(TRecordTypeDesc(Elem), 'x22', False);
     end;
     Self.Emit(#9'mov x0, x22');
     Self.Emit(#9'mov x1, x19');
@@ -4165,8 +4169,10 @@ begin
       EmitRecordBaseAddr('x22', AAsgn.Name, AAsgn.IsVarParam);
       Self.EmitRecordFieldRetains(
         TRecordTypeDesc(AAsgn.ResolvedLhsType), 'x19');
+      { copy site: no-zero release keeps R := R exact
+        (BUG-20260720-managed-record-self-assign) }
       Self.EmitRecordFieldReleases(
-        TRecordTypeDesc(AAsgn.ResolvedLhsType), 'x22');
+        TRecordTypeDesc(AAsgn.ResolvedLhsType), 'x22', False);
       Self.Emit(#9'mov x0, x22');
       Self.Emit(#9'mov x1, x19');
       EmitIntLiteral('x2', AAsgn.ResolvedLhsType.RawSize());
@@ -5126,7 +5132,8 @@ begin
       Self.Emit(#9'mov x19, x0');
       Self.Emit(#9'ldr x22, [sp, #16]');   { the parked element address }
       Self.EmitRecordFieldRetains(TRecordTypeDesc(Elem), 'x19');
-      Self.EmitRecordFieldReleases(TRecordTypeDesc(Elem), 'x22');
+      { copy site: no-zero release (BUG-20260720-managed-record-self-assign) }
+      Self.EmitRecordFieldReleases(TRecordTypeDesc(Elem), 'x22', False);
       Self.Emit(#9'mov x0, x22');
       Self.Emit(#9'mov x1, x19');
       EmitIntLiteral('x2', Elem.RawSize());

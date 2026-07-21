@@ -113,6 +113,9 @@ type
     procedure TestRun_ManagedRecordParam_VarAndByValue_LeakFree;
     procedure TestRun_ByValueRecordParam_FieldReadWrite;
     procedure TestRun_RecordParamOverflowToStack;
+    { BUG-20260720-managed-record-self-assign: a managed-record self-assign
+      (R := R, element/field self-assign) must keep the fields, not zero them. }
+    procedure TestRun_ManagedRecordSelfAssign;
   end;
 
 implementation
@@ -1630,6 +1633,43 @@ begin
       WriteLn(F(1, 2, 3, 4, 5, 6, 7, 8, 9, R))
     end.
     ''', '614' + LE, 0);
+end;
+
+procedure TE2ERecordsTests.TestRun_ManagedRecordSelfAssign;
+begin
+  { A managed-record self-assign (R := R) used to zero the fields on native (the
+    release-dest step zeroed the shared slot before the memcpy read it, losing
+    the value + leaking the +1 retain).  Cover whole-record, nested-managed,
+    element, and field self-assign; assert the values SURVIVE and (via a loop of
+    distinct copies) that old-field release still balances.  Heap strings so the
+    native managed path is exercised. }
+  AssertRunsOnAll('''
+    program P;
+    type
+      TInner = record Name: string; end;
+      TRec = record
+        A, B: string;
+        Inner: TInner;                     { nested-managed record field }
+        ArrRec: array[0..1] of TInner;     { static-array-OF-record field }
+        N: Integer;
+      end;
+      TBox = record Arr: array[0..1] of TRec; end;
+    var R: TRec; B: TBox;
+    begin
+      R.A := 'a' + 'aa'; R.B := 'b' + 'bb';
+      R.Inner.Name := 'i' + 'nn';
+      R.ArrRec[0].Name := 'r' + '0'; R.ArrRec[1].Name := 'r' + '1';
+      R.N := 7;
+      R := R;                              { whole-record self-assign }
+      WriteLn(R.A, ' ', R.B, ' ', R.Inner.Name, ' ',
+              R.ArrRec[0].Name, ' ', R.ArrRec[1].Name, ' ', R.N);
+      B.Arr[0].A := 'e' + 'lem'; B.Arr[0].B := 'x'; B.Arr[0].Inner.Name := 'y';
+      B.Arr[0].ArrRec[0].Name := 'z';
+      B.Arr[0] := B.Arr[0];                { element self-assign }
+      WriteLn(B.Arr[0].A, ' ', B.Arr[0].ArrRec[0].Name)
+    end.
+    ''',
+    'aaa bbb inn r0 r1 7' + LE + 'elem z' + LE, 0);
 end;
 
 initialization

@@ -95,7 +95,8 @@ type
       (BUG-017) — kept symmetric with EmitRecordFieldRetains / record copy,
       which retain the same elements. }
     procedure EmitRecordFieldReleases(ART: TRecordTypeDesc;
-                                      const ABaseReg: string);
+                                      const ABaseReg: string;
+                                      AZero: Boolean = True);
     { Release one ARC-managed value of type AType whose storage is at the
       address in ABaseReg.  Scalars (string/class/intf/dynarray) release
       directly; records recurse via EmitRecordFieldReleases; static arrays
@@ -335,7 +336,7 @@ begin
 end;
 
 procedure TNativeBackend.EmitRecordFieldReleases(ART: TRecordTypeDesc;
-  const ABaseReg: string);
+  const ABaseReg: string; AZero: Boolean);
 var
   I: Integer;
   F: TFieldInfo;
@@ -353,7 +354,7 @@ begin
     begin
       Self.ArcPushNestedBase(F.Offset, ABaseReg);
       Self.EmitRecordFieldReleases(TRecordTypeDesc(F.TypeDesc),
-        Self.ArcNestedBaseReg());
+        Self.ArcNestedBaseReg(), AZero);
       Self.ArcPopNestedBase();
       Continue;
     end;
@@ -367,7 +368,7 @@ begin
       begin
         Self.ArcPushNestedBase(F.Offset, ABaseReg);
         Self.EmitStaticArrayReleaseElems(TStaticArrayTypeDesc(F.TypeDesc),
-          Self.ArcNestedBaseReg(), True);
+          Self.ArcNestedBaseReg(), AZero);
         Self.ArcPopNestedBase();
       end;
       Continue;
@@ -381,7 +382,13 @@ begin
       Self.EmitWeakClearAt(F.Offset, ABaseReg);
       Continue;
     end;
-    Self.EmitReleaseSlotAt(F.TypeDesc, F.Offset, ABaseReg, True);
+    { AZero: normally the released slot is zeroed (dtor, teardown, sret pre-
+      release — a live nil is required).  On a record COPY path the dest is
+      immediately memcpy-overwritten, so zeroing is redundant AND breaks a
+      self-copy (R := R): with src==dest the zero clobbers the shared field
+      before memcpy reads it, losing the value and orphaning the +1 retain.
+      Copy sites pass AZero=False (BUG-20260720-managed-record-self-assign). }
+    Self.EmitReleaseSlotAt(F.TypeDesc, F.Offset, ABaseReg, AZero);
   end;
 end;
 
@@ -391,7 +398,10 @@ begin
   if AType = nil then Exit;
   if AType.Kind = tyRecord then
   begin
-    Self.EmitRecordFieldReleases(TRecordTypeDesc(AType), ABaseReg);
+    { thread AZero: a static-array-OF-record element reached on a record-copy
+      path must not zero its managed fields either (BUG-20260720-managed-record-
+      self-assign — the array-of-record field shape). }
+    Self.EmitRecordFieldReleases(TRecordTypeDesc(AType), ABaseReg, AZero);
     Exit;
   end;
   if AType.Kind = tyStaticArray then

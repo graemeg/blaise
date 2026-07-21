@@ -12476,7 +12476,7 @@ begin
   if AElemType.Kind = tyRecord then
   begin
     Self.EmitRecordFieldRetains(TRecordTypeDesc(AElemType), '%rbx');
-    Self.EmitRecordFieldReleases(TRecordTypeDesc(AElemType), '%r15');
+    Self.EmitRecordFieldReleases(TRecordTypeDesc(AElemType), '%r15', False);
   end;
   Self.Emit(#9'movq %r15, %rdi');
   Self.Emit(#9'movq %rbx, %rsi');
@@ -13817,7 +13817,7 @@ begin
         if ISFld.Offset > 0 then
           Self.Emit(Format(#9'addq $%d, %%r15', [ISFld.Offset]));
         Self.EmitRecordFieldRetains(TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(Asgn.ResolvedLhsType), '%r15');
+        Self.EmitRecordFieldReleases(TRecordTypeDesc(Asgn.ResolvedLhsType), '%r15', False);
         Self.Emit(#9'movq %r15, %rdi');
         Self.Emit(#9'movq %rbx, %rsi');
         Self.Emit(Format(#9'movq $%d, %%rdx', [Asgn.ResolvedLhsType.RawSize()]));
@@ -14675,7 +14675,7 @@ begin
         Self.Emit(#9'movq %rdi, %r15');
         if not NativeExprOwnsRef(Asgn.Expr) then
           Self.EmitRecordFieldRetains(TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(Asgn.ResolvedLhsType), '%r15');
+        Self.EmitRecordFieldReleases(TRecordTypeDesc(Asgn.ResolvedLhsType), '%r15', False);
         Self.Emit(#9'movq %r15, %rdi');
         Self.Emit(#9'movq %rbx, %rsi');
         Self.Emit(Format(#9'movq $%d, %%rdx', [Asgn.ResolvedLhsType.RawSize()]));
@@ -15494,7 +15494,7 @@ begin
         if DAElemType.Kind = tyRecord then
         begin
           Self.EmitRecordFieldRetains(TRecordTypeDesc(DAElemType), '%rbx');
-          Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15');
+          Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15', False);
         end;
         Self.Emit(#9'movq %r15, %rdi');
         Self.Emit(#9'movq %rbx, %rsi');
@@ -15931,7 +15931,7 @@ begin
       if FA.FieldInfo.TypeDesc.Kind = tyRecord then
       begin
         Self.EmitRecordFieldRetains(TRecordTypeDesc(FA.FieldInfo.TypeDesc), '%rbx');
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(FA.FieldInfo.TypeDesc), '%r15');
+        Self.EmitRecordFieldReleases(TRecordTypeDesc(FA.FieldInfo.TypeDesc), '%r15', False);
       end;
       Self.Emit(#9'movq %r15, %rdi');
       Self.Emit(#9'movq %rbx, %rsi');
@@ -16497,7 +16497,7 @@ begin
         if DAElemType.Kind = tyRecord then
         begin
           Self.EmitRecordFieldRetains(TRecordTypeDesc(DAElemType), '%rbx');
-          Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15');
+          Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15', False);
         end;
         Self.Emit(#9'movq %r15, %rdi');
         Self.Emit(#9'movq %rbx, %rsi');
@@ -16692,7 +16692,7 @@ begin
       if DAElemType.Kind = tyRecord then
       begin
         Self.EmitRecordFieldRetains(TRecordTypeDesc(DAElemType), '%rbx');
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15');
+        Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15', False);
       end;
       Self.Emit(#9'movq %r15, %rdi');
       Self.Emit(#9'movq %rbx, %rsi');
@@ -16868,8 +16868,10 @@ begin
       begin
         Self.EmitRecordFieldRetains(
           TRecordTypeDesc(TPointerWriteStmt(AStmt).BaseTy), '%rbx');
+        { copy site: no-zero release so P^ := P^ (src==dest) is exact
+          (BUG-20260720-managed-record-self-assign) }
         Self.EmitRecordFieldReleases(
-          TRecordTypeDesc(TPointerWriteStmt(AStmt).BaseTy), '%r15');
+          TRecordTypeDesc(TPointerWriteStmt(AStmt).BaseTy), '%r15', False);
       end;
       Self.Emit(#9'movq %r15, %rdi');
       Self.Emit(#9'movq %rbx, %rsi');
