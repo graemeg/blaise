@@ -108,6 +108,11 @@ type
     FGlobalWeak:  TStringList;   { globals bound weak: RTL-unit-owned copies
                                    collapse across per-unit objects (GH #174) }
     FIntfDecls:   TObjectList;   { not owned — program-level interface TTypeDecls }
+    FGenericIntfInstances: TObjectList; { not owned — TGenericInterfaceInstance
+                                   for each monomorphised interface instance
+                                   (IComparer<Integer> etc); their typeinfo is
+                                   emitted WEAK so the itab/impllist reference
+                                   resolves and cross-unit copies dedup }
     FIntfLocals:  TStringList;   { interface locals (base name) — obj released at exit }
     FIntfGlobals: TStringList;   { interface globals (prefixed base name) }
     FExcDepth:    Integer;       { active exception frames at emission point }
@@ -450,6 +455,7 @@ begin
   FTlvSize     := TDictionary<string, Integer>.Create();
   FGlobalWeak  := TStringList.Create();
   FIntfDecls   := TObjectList.Create(False);
+  FGenericIntfInstances := TObjectList.Create(False);
   FIntfLocals  := TStringList.Create();
   FIntfGlobals := TStringList.Create();
   FFinallyBodies := TObjectList.Create(False);
@@ -490,6 +496,7 @@ begin
   FTlvSize.Free();
   FGlobalWeak.Free();
   FIntfDecls.Free();
+  FGenericIntfInstances.Free();
   FIntfLocals.Free();
   FIntfGlobals.Free();
   FFinallyBodies.Free();
@@ -9342,8 +9349,10 @@ var
   IntfWalk: TInterfaceTypeDesc;
   Sym, ISym: string;
   IsGen: Boolean;
+  GII: TGenericInterfaceInstance;
 begin
-  if (FIntfDecls.Count = 0) and (FClassDecls.Count = 0) then Exit;
+  if (FIntfDecls.Count = 0) and (FClassDecls.Count = 0) and
+     (FGenericIntfInstances.Count = 0) then Exit;
   Self.Emit('.section .data');
   { interface typeinfo: the address IS the identity token }
   for I := 0 to FIntfDecls.Count - 1 do
@@ -9352,6 +9361,18 @@ begin
     Self.Emit('.balign 8');
     Self.Emit(Format('.globl typeinfo_%s', [CodegenMangle(ITD.Name)]));
     Self.Emit(Format('typeinfo_%s:', [CodegenMangle(ITD.Name)]));
+    Self.Emit(#9'.quad 0');
+  end;
+  { typeinfo for generic INTERFACE instances (IComparer<Integer> etc): emitted
+    WEAK (bare-named) so any object materialising the same instance carries a
+    copy the linker dedups (BUG-004), mirroring x86-64/QBE.  Same 1-quad layout
+    as a normal interface — the address is the identity token (leg 41). }
+  for I := 0 to FGenericIntfInstances.Count - 1 do
+  begin
+    GII := TGenericInterfaceInstance(FGenericIntfInstances.Items[I]);
+    Self.Emit('.balign 8');
+    Self.Emit(Format('.weak typeinfo_%s', [GII.InstName]));
+    Self.Emit(Format('typeinfo_%s:', [GII.InstName]));
     Self.Emit(#9'.quad 0');
   end;
   { itab + impllist per implementing class.  DESCRIPTOR-driven (mirrors
@@ -9394,14 +9415,9 @@ begin
       for J := 0 to Intfs.Count - 1 do
       begin
         ID := TInterfaceTypeDesc(Intfs.Items[J]);
-        { a GENERIC INTERFACE instance (name carries '<') has no typeinfo
-          emitted by the FIntfDecls loop (arm64 lacks the x86-64 dedicated
-          generic-interface typeinfo loop), so the impllist's typeinfo_<inst>
-          reference would dangle.  Keep it an honest NotYet rather than emit a
-          dangling symbol — a pre-existing arm64 gap the interface-parent walk
-          can newly reach (BUG-052 F4 residual). }
-        if Pos('<', ID.Name) >= 0 then
-          NotYet('generic interface instance in an itab', nil);
+        { a GENERIC INTERFACE instance's typeinfo is now emitted weak by the
+          FGenericIntfInstances loop above, so the impllist's typeinfo_<inst>
+          reference resolves (leg 41) — no longer an honest hole. }
         ISym := IntfItabSym(TD.Name, ID.Name);
         Self.Emit('.balign 8');
         if IsGen then
@@ -10059,6 +10075,12 @@ begin
     FClassDecls.Add(TDcl);
   end;
 
+  { Generic INTERFACE instances (IComparer<Integer> etc): collect them so
+    EmitIntfMetaSections can emit their weak typeinfo — the itab/impllist of a
+    class implementing them references typeinfo_<inst> (leg 41). }
+  for I := 0 to AProg.GenericIntfInstances.Count - 1 do
+    FGenericIntfInstances.Add(AProg.GenericIntfInstances.Items[I]);
+
   Self.Emit('.text');
 
   { Standalone procedures/functions before $main. }
@@ -10355,6 +10377,11 @@ begin
     FGenericDecls.Add(UTD);
     FClassDecls.Add(UTD);
   end;
+  { generic INTERFACE instances from this unit — weak typeinfo, like the program
+    path (leg 41).  Omitting this leaves a unit-scoped instance's typeinfo
+    dangling at link. }
+  for I := 0 to AUnit.GenericIntfInstances.Count - 1 do
+    FGenericIntfInstances.Add(AUnit.GenericIntfInstances.Items[I]);
   for I := 0 to AUnit.GenericFuncInstances.Count - 1 do
     EmitFunctionDef(
       TGenericFuncInstance(AUnit.GenericFuncInstances.Items[I]).MethodDecl,

@@ -227,6 +227,10 @@ type
       interface — its itab + impllist are emitted WEAK (bare, instance-mangled)
       so cross-unit copies dedup, and the itab binds the clone's own methods. }
     procedure TestGenericInstanceImplementsInterface;
+    { self-cross-compile leg 41: a class implementing a GENERIC INTERFACE
+      instance (ITransform<Integer>) — the instance's typeinfo is emitted weak
+      so the itab/impllist typeinfo reference resolves and dedups cross-unit. }
+    procedure TestGenericInterfaceInstance_WeakTypeinfo;
     { BUG-052 F2: an abstract interface method's itab slot points at the abort
       stub (_AbstractMethodError); the concrete override's itab dispatches. }
     procedure TestAbstractInterfaceMethodItab;
@@ -2914,6 +2918,44 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64BackendTests.TestGenericInterfaceInstance_WeakTypeinfo;
+var
+  AsmT: string;
+begin
+  { A class implementing a GENERIC INTERFACE instance (ITransform<Integer>): the
+    instance's typeinfo must be emitted (weak, so cross-unit copies dedup —
+    BUG-004), and the class's impllist must reference it.  Previously arm64
+    NotYet'd because no generic-interface typeinfo was emitted. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      ITransform<T> = interface
+        function Apply(x: T): T;
+      end;
+      TDoubler = class(TObject, ITransform<Integer>)
+        function Apply(x: Integer): Integer;
+      end;
+    function TDoubler.Apply(x: Integer): Integer; begin Result := x * 2 end;
+    var d: TDoubler; t: ITransform<Integer>;
+    begin
+      d := TDoubler.Create();
+      t := d;
+      WriteLn(t.Apply(21));
+      t := nil;
+      d.Free()
+    end.
+    ''');
+  { the generic-interface instance typeinfo is emitted weak }
+  AssertTrue('weak generic-intf typeinfo',
+    Pos('.weak typeinfo_ITransform_Integer', AsmT) >= 0);
+  AssertTrue('generic-intf typeinfo label',
+    Pos('typeinfo_ITransform_Integer:', AsmT) >= 0);
+  { the class's impllist references that typeinfo }
+  AssertTrue('impllist references the instance typeinfo',
+    Pos(#9'.quad typeinfo_ITransform_Integer', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestAbstractInterfaceMethodItab;
