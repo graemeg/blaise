@@ -170,6 +170,7 @@ type
       standard integer type and carries no range checking. }
     procedure TestRun_Subrange_NamedType;
     procedure TestRun_Subrange_InRecordAndArray;
+    procedure TestRun_Subrange_HighLow;
 
     { forward; in a program decl section (issue #130 bug2): the forward decl
       used to swallow the following implementation as a nested-proc body. }
@@ -1942,6 +1943,32 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '200 -7 250' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_Subrange_HighLow;
+const
+  { GH #160: High/Low of a subrange TYPE (or a variable of it) must return the
+    subrange's own bounds, not the base type's (2..10 gave 255/0 before).  A
+    negative subrange must fold Low signed.  High/Low of an array indexed BY the
+    subrange already worked — kept here as the no-regression check. }
+  Src = '''
+    program P;
+    type
+      Trange = 2..10;
+      Tar = array[Trange] of Integer;
+      TNeg = -3..3;
+    var a: Tar; c: Trange; n: TNeg;
+    begin
+      WriteLn(High(Trange), ' ', Low(Trange));
+      WriteLn(High(c), ' ', Low(c));
+      WriteLn(High(a), ' ', Low(a));
+      WriteLn(High(TNeg), ' ', Low(TNeg))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '10 2' + LE + '10 2' + LE + '10 2' + LE + '3 -3' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_Ifdef_PredefinedBlaise;

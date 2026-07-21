@@ -7582,6 +7582,15 @@ begin
     if SameText(FC.Name, 'High') and (FC.Args.Count = 1) and
        (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) then
     begin
+      { High(subrange) is the subrange's own HIGH bound, not the base type's
+        max — the descriptor's Kind is the narrowest fitting int but SubrangeHigh
+        carries the real bound (GH #160). }
+      if TASTExpr(FC.Args.Items[0]).ResolvedType.IsSubrange then
+      begin
+        Self.EmitImmToReg(TASTExpr(FC.Args.Items[0]).ResolvedType.SubrangeHigh,
+          '%rax', '%eax');
+        Exit;
+      end;
       case TASTExpr(FC.Args.Items[0]).ResolvedType.Kind of
         tyStaticArray:
           Self.Emit(Format(#9'movq $%d, %%rax',
@@ -7642,6 +7651,14 @@ begin
     if SameText(FC.Name, 'Low') and (FC.Args.Count = 1) and
        (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) then
     begin
+      { Low(subrange) is the subrange's own LOW bound (may be negative), not the
+        base type's minimum (GH #160). }
+      if TASTExpr(FC.Args.Items[0]).ResolvedType.IsSubrange then
+      begin
+        Self.EmitImmToReg(TASTExpr(FC.Args.Items[0]).ResolvedType.SubrangeLow,
+          '%rax', '%eax');
+        Exit;
+      end;
       case TASTExpr(FC.Args.Items[0]).ResolvedType.Kind of
         tyStaticArray:
           Self.EmitImmToReg(

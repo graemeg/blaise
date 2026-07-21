@@ -2105,6 +2105,19 @@ begin
      (SameText(TFuncCallExpr(AExpr).Name, 'High') or
       SameText(TFuncCallExpr(AExpr).Name, 'Low')) then
   begin
+    { High/Low(subrange) is the subrange's own bound (Low may be negative), not
+      the base type's — the descriptor's Kind is the narrowest fitting int but
+      SubrangeLow/High carry the real bounds (GH #160). }
+    if TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.IsSubrange then
+    begin
+      if SameText(TFuncCallExpr(AExpr).Name, 'High') then
+        EmitIntLiteral('x0',
+          TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.SubrangeHigh)
+      else
+        EmitIntLiteral('x0',
+          TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.SubrangeLow);
+      Exit;
+    end;
     if SameText(TFuncCallExpr(AExpr).Name, 'High') then
       case TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind of
         tyEnum:     EmitIntLiteral('x0', TEnumTypeDesc(

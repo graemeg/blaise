@@ -11825,6 +11825,15 @@ begin
       if SameText(FC.Name,'High') then
       begin
         T := AllocTemp();
+        { High(subrange) is the subrange's own HIGH bound, not the base type's
+          max — the descriptor keeps its Kind as the narrowest fitting int
+          (tyByte etc.) but carries the real bounds in SubrangeHigh (GH #160). }
+        if TASTExpr(FC.Args.Items[0]).ResolvedType.IsSubrange then
+        begin
+          EmitLine(Format('  %s =w copy %d', [T,
+            TASTExpr(FC.Args.Items[0]).ResolvedType.SubrangeHigh]));
+          Exit(T);
+        end;
         case TASTExpr(FC.Args.Items[0]).ResolvedType.Kind of
           tyStaticArray:
             EmitLine(Format('  %s =w copy %d', [T,
@@ -11877,6 +11886,14 @@ begin
       if SameText(FC.Name,'Low') then
       begin
         T := AllocTemp();
+        { Low(subrange) is the subrange's own LOW bound (may be negative), not
+          the base type's minimum (GH #160). }
+        if TASTExpr(FC.Args.Items[0]).ResolvedType.IsSubrange then
+        begin
+          EmitLine(Format('  %s =w copy %d', [T,
+            TASTExpr(FC.Args.Items[0]).ResolvedType.SubrangeLow]));
+          Exit(T);
+        end;
         case TASTExpr(FC.Args.Items[0]).ResolvedType.Kind of
           tyStaticArray:
             EmitLine(Format('  %s =w copy %d', [T,
