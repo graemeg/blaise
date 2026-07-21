@@ -13399,6 +13399,18 @@ begin
           Self.Emit(Format(#9'movq %%r15, %s(%%rip)', [Self.GlobalSymName(H.VarName)]));
       end;
       Self.EmitStmtList(H.Body.Stmts);
+      { A handler with NO variable owns disposal too: the exception is created
+        rc=0 and only borrowed, so with no handler-var slot to release it at
+        scope exit it would be orphaned (BUG-20260720-exception-object-leak).
+        Balanced AddRef/Release (0->1->0) frees it + deregisters from the tracker
+        (%r15 holds the exception, callee-saved across the body). }
+      if H.VarName = '' then
+      begin
+        Self.Emit(#9'movq %r15, %rdi');
+        Self.Emit(#9'callq _ClassAddRef');
+        Self.Emit(#9'movq %r15, %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+      end;
       Self.Emit(#9'jmp ' + LblEnd);
 
       Self.Emit(LblNext + ':');
@@ -13408,6 +13420,12 @@ begin
     if AStmt.ElseBody <> nil then
     begin
       Self.EmitStmtList(AStmt.ElseBody.Stmts);
+      { The else branch HANDLES without a variable — dispose the exception.
+        (The re-raise path below forwards the borrow — must NOT dispose.) }
+      Self.Emit(#9'movq %r15, %rdi');
+      Self.Emit(#9'callq _ClassAddRef');
+      Self.Emit(#9'movq %r15, %rdi');
+      Self.Emit(#9'callq _ClassRelease');
       Self.Emit(#9'jmp ' + LblEnd);
     end
     else
@@ -13419,9 +13437,19 @@ begin
   end
   else
   begin
-    { Plain catch-all except body. }
+    { Plain catch-all except body.  Capture the borrowed exception into a
+      callee-saved reg BEFORE popping the frame, so it can be disposed after the
+      body (BUG-20260720-exception-object-leak). }
+    Self.Emit(#9'pushq %r15');
+    Self.Emit(#9'callq _CurrentException');
+    Self.Emit(#9'movq %rax, %r15');
     Self.EmitPopExcFrame();
     Self.EmitStmtList(AStmt.ExceptBody.Stmts);
+    Self.Emit(#9'movq %r15, %rdi');
+    Self.Emit(#9'callq _ClassAddRef');
+    Self.Emit(#9'movq %r15, %rdi');
+    Self.Emit(#9'callq _ClassRelease');
+    Self.Emit(#9'popq %r15');
     Self.Emit(#9'jmp ' + LblEnd);
   end;
 

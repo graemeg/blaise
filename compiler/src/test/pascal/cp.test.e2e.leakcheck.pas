@@ -26,6 +26,10 @@ type
   published
     procedure TestDebug_NoLeak_NoReport;
     procedure TestDebug_ExceptionHandlerVar_NoLeakNoOverRelease;
+    { BUG-20260720-exception-object-leak: a handler with NO bound variable (bare
+      except, on-Type-no-var, else branch) left the raised exception orphaned
+      (created rc=0, only borrowed, never released) — leaking Exception (rc=0). }
+    procedure TestDebug_ExceptionNoVarHandler_NoLeak;
     procedure TestDebug_ConstructorWithArgs_NoDoubleAddRef;
     procedure TestDebug_LeakedObject_ReportedOnExit;
     procedure TestDebug_MultipleLeaks_AllReported;
@@ -3009,6 +3013,50 @@ begin
     'cat ab' + LE + 'make m' + LE + 'alias-arg abbb' + LE +
     'alias-recv mbbb' + LE, Output);
   AssertTrue('no leak report (native), got: ' + Output, Pos('leak', Output) < 0);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_ExceptionNoVarHandler_NoLeak;
+begin
+  { Bare catch-all — no handler variable owns the exception. }
+  AssertLeakFreeOnAll(
+    '''
+    program P;
+    uses SysUtils;
+    begin
+      try raise Exception.Create('x') except WriteLn('caught') end
+    end.
+    ''', 'caught');
+  { on Type do — no variable. }
+  AssertLeakFreeOnAll(
+    '''
+    program P;
+    uses SysUtils;
+    begin
+      try raise Exception.Create('x') except on Exception do WriteLn('caught') end
+    end.
+    ''', 'caught');
+  { else branch handles an unmatched exception without a variable. }
+  AssertLeakFreeOnAll(
+    '''
+    program P;
+    uses SysUtils;
+    type EFoo = class(Exception) end;
+    begin
+      try raise Exception.Create('x')
+      except on E: EFoo do WriteLn('foo') else WriteLn('else') end
+    end.
+    ''', 'else');
+  { derived class caught by a no-variable base handler (guards concrete-class
+    registration/deregistration). }
+  AssertLeakFreeOnAll(
+    '''
+    program P;
+    uses SysUtils;
+    type EFoo = class(Exception) end;
+    begin
+      try raise EFoo.Create('x') except on Exception do WriteLn('caught') end
+    end.
+    ''', 'caught');
 end;
 
 initialization

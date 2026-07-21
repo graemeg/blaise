@@ -4920,6 +4920,17 @@ begin
       end;
       for J := 0 to H.Body.Stmts.Count - 1 do
         EmitStmt(TASTStmt(H.Body.Stmts.Items[J]));
+      { A handler with NO variable owns disposal: the exception is created rc=0
+        and only borrowed, so without a handler-var slot it would be orphaned
+        (BUG-20260720-exception-object-leak).  Balanced AddRef/Release
+        (0->1->0) frees it + deregisters (the pointer is still at [sp]). }
+      if H.VarName = '' then
+      begin
+        Self.Emit(#9'ldr x0, [sp]');
+        Self.Emit(#9'bl _ClassAddRef');
+        Self.Emit(#9'ldr x0, [sp]');
+        Self.Emit(#9'bl _ClassRelease');
+      end;
       Self.Emit(#9'add sp, sp, #16');
       Self.Emit(Format(#9'b %s', [EndL]));
       Self.Emit(NextL + ':');
@@ -4928,6 +4939,12 @@ begin
     begin
       for J := 0 to AStmt.ElseBody.Stmts.Count - 1 do
         EmitStmt(TASTStmt(AStmt.ElseBody.Stmts.Items[J]));
+      { else HANDLES without a variable — dispose (re-raise path below forwards
+        the borrow and must NOT dispose). }
+      Self.Emit(#9'ldr x0, [sp]');
+      Self.Emit(#9'bl _ClassAddRef');
+      Self.Emit(#9'ldr x0, [sp]');
+      Self.Emit(#9'bl _ClassRelease');
       Self.Emit(#9'add sp, sp, #16');
       Self.Emit(Format(#9'b %s', [EndL]));
     end
@@ -4939,10 +4956,18 @@ begin
   end
   else
   begin
-    { bare except: catch-all body }
+    { bare except: catch-all body.  Capture the borrowed exception BEFORE the
+      frame pop, dispose it after the body (BUG-20260720-exception-object-leak). }
+    Self.Emit(#9'bl _CurrentException');
+    Self.Emit(#9'str x0, [sp, #-16]!');
     Self.Emit(#9'bl _PopExcFrame');
     for I := 0 to AStmt.ExceptBody.Stmts.Count - 1 do
       EmitStmt(TASTStmt(AStmt.ExceptBody.Stmts.Items[I]));
+    Self.Emit(#9'ldr x0, [sp]');
+    Self.Emit(#9'bl _ClassAddRef');
+    Self.Emit(#9'ldr x0, [sp]');
+    Self.Emit(#9'bl _ClassRelease');
+    Self.Emit(#9'add sp, sp, #16');
   end;
   Self.Emit(EndL + ':');
 end;

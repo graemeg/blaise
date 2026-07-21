@@ -3276,6 +3276,17 @@ begin
       end;
       for J := 0 to H.Body.Stmts.Count - 1 do
         EmitStmt(TASTStmt(H.Body.Stmts.Items[J]));
+      { A handler with NO variable owns the disposal obligation too: the
+        exception is created at rc=0 and only borrowed through raise/catch, so
+        with no handler-var slot to release it at scope exit it would be orphaned
+        (BUG-20260720-exception-object-leak).  Dispose it here with a balanced
+        AddRef/Release (0->1->0), which frees + deregisters from the leak tracker
+        — exactly the net the with-variable path achieves via scope exit. }
+      if H.VarName = '' then
+      begin
+        EmitLine(Format('  call $_ClassAddRef(l %s)', [ExcTemp]));
+        EmitLine(Format('  call $_ClassRelease(l %s)', [ExcTemp]));
+      end;
       EmitLine(Format('  jmp @%s', [LblEnd]));
 
       EmitLine('@' + LblNext);
@@ -3286,23 +3297,38 @@ begin
     begin
       for J := 0 to AStmt.ElseBody.Stmts.Count - 1 do
         EmitStmt(TASTStmt(AStmt.ElseBody.Stmts.Items[J]));
+      { The else branch HANDLES the exception without a variable — dispose it
+        (as above).  The re-raise path below must NOT dispose: it forwards the
+        borrow to the outer frame, which owns it. }
+      EmitLine(Format('  call $_ClassAddRef(l %s)', [ExcTemp]));
+      EmitLine(Format('  call $_ClassRelease(l %s)', [ExcTemp]));
       EmitLine(Format('  jmp @%s', [LblEnd]));
     end
     else
     begin
-      { No else: re-raise the unhandled exception }
+      { No else: re-raise the unhandled exception (ownership forwarded — do NOT
+        dispose here). }
       EmitLine(Format('  call $_Reraise(l %s)', [ExcTemp]));
       EmitLine(Format('  jmp @%s', [LblEnd]));  { unreachable; satisfies QBE SSA }
     end;
   end
   else
   begin
-    { Plain catch-all body }
+    { Plain catch-all body.  Capture the borrowed exception pointer BEFORE
+      popping the frame, so it can be disposed after the body runs. }
+    ExcTemp := AllocTemp();
+    EmitLine(Format('  %s =l call $_CurrentException()', [ExcTemp]));
     EmitLine('  call $_PopExcFrame()');
     Dec(FExcDepth);
     FFinallyStack.Delete(FFinallyStack.Count - 1);
     for I := 0 to AStmt.ExceptBody.Stmts.Count - 1 do
       EmitStmt(TASTStmt(AStmt.ExceptBody.Stmts.Items[I]));
+    { Bare catch-all handles without a variable — dispose the borrowed exception
+      (created rc=0, only borrowed through raise/catch).  A balanced
+      AddRef/Release (0->1->0) frees it + deregisters from the leak tracker
+      (BUG-20260720-exception-object-leak). }
+    EmitLine(Format('  call $_ClassAddRef(l %s)', [ExcTemp]));
+    EmitLine(Format('  call $_ClassRelease(l %s)', [ExcTemp]));
     EmitLine(Format('  jmp @%s', [LblEnd]));
   end;
 
