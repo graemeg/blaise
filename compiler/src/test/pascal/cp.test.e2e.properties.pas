@@ -33,6 +33,8 @@ type
     { leg 18: a STRING-indexed property (key is a string, not an integer).  The
       key is passed borrowed in one register, exactly like an integer index. }
     procedure TestRun_StringIndexedProperty;
+    procedure TestRun_RecordIndexedProperty;
+    procedure TestRun_RecordDefaultIndexedProperty;
     { Default array property: Obj[I] sugar (read + write), string element, and
       inheritance of the default property from a base class. }
     procedure TestRun_DefaultProperty_ReadWrite;
@@ -140,6 +142,50 @@ const
     begin c := TC.Create(); c.Items['k'] := 88; WriteLn(c.Items['k']); c.Free() end.
     ''';
 
+  { A RECORD value written through an indexed property setter must survive the
+    round-trip on BOTH backends.  The QBE backend used to type the value arg
+    with QbeTypeOf (a bare `l` pointer) instead of QbeParamTypeOf (the
+    `:_ffi_<Name>` aggregate ABI), so the setter received the fields
+    scattered from an un-registered struct and read garbage
+    (BUG-20260720-x86-record-indexed-prop-value — filed against x86-64 but the
+    actual defect was a QBE miscompile). }
+  SrcRecordIndexed = '''
+    program Prg;
+    type
+      TRec = record A: Integer; S: string; end;
+      TC = class
+        FA: Integer; FS: string;
+        procedure SetItem(K: Integer; const R: TRec); begin FA := R.A + K; FS := R.S end;
+        property Items[K: Integer]: TRec write SetItem;
+      end;
+    var c: TC; r: TRec;
+    begin
+      c := TC.Create(); r.A := 40; r.S := 'ok';
+      c.Items[2] := r;
+      WriteLn(c.FA, ' ', c.FS);
+      c.Free()
+    end.
+    ''';
+
+  { Same defect via a default array property (a distinct write site). }
+  SrcRecordDefaultIndexed = '''
+    program Prg;
+    type
+      TRec = record A: Integer; S: string; end;
+      TC = class
+        FA: Integer; FS: string;
+        procedure SetItem(K: Integer; const R: TRec); begin FA := R.A + K; FS := R.S end;
+        property Items[K: Integer]: TRec write SetItem; default;
+      end;
+    var c: TC; r: TRec;
+    begin
+      c := TC.Create(); r.A := 40; r.S := 'yo';
+      c[2] := r;
+      WriteLn(c.FA, ' ', c.FS);
+      c.Free()
+    end.
+    ''';
+
   SrcArrFieldRead = '''
     program Prg;
     type TC = class FD: array[0..4] of Integer; function At(i: Integer): Integer; begin Result := FD[i] end; end;
@@ -226,6 +272,18 @@ procedure TE2EPropertyTests.TestRun_StringIndexedProperty;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcStringIndexed, '88' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_RecordIndexedProperty;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(SrcRecordIndexed, '42 ok' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_RecordDefaultIndexedProperty;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(SrcRecordDefaultIndexed, '42 yo' + LE, 0);
 end;
 
 procedure TE2EPropertyTests.TestRun_StaticArrayField_ReadInMethod;

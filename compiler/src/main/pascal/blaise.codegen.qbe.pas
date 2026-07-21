@@ -7382,7 +7382,15 @@ begin
       EmitLine(Format('  %s =l loadl %s',
         [SelfPtr, VarRef(AAssign.RecordName, AAssign.IsGlobal)]));
     end;
-    QType := QbeTypeOf(AAssign.PropWriteInfo.TypeDesc);
+    { QbeParamTypeOf, not QbeTypeOf: a record value must be passed with the
+      `:_ffi_<Name>` aggregate ABI (caller scatters fields into the SysV
+      eightbyte registers the callee gathers), exactly like a normal record
+      method-call arg.  QbeTypeOf returns a bare `l` pointer, which the callee
+      then mis-reads as scattered fields → garbage
+      (BUG-20260720-x86-record-indexed-prop-value).  For scalars both helpers
+      agree, so this is a no-op there.  Covers both the indexed and non-indexed
+      arms below (shared QType). }
+    QType := QbeParamTypeOf(AAssign.PropWriteInfo.TypeDesc);
     if AAssign.PropIndexExpr <> nil then
     begin
       IdxTemp  := EmitExpr(AAssign.PropIndexExpr);
@@ -17630,7 +17638,10 @@ begin
     IdxW     := EmitExpr(AStmt.IndexExpr);
     IdxQType := QbeTypeOf(DefProp.IndexTypeDesc);
     ElemVal  := EmitExpr(AStmt.ValueExpr);
-    ValQType := QbeTypeOf(DefProp.TypeDesc);
+    { QbeParamTypeOf so a record value uses the `:_ffi_<Name>` aggregate ABI
+      rather than a bare `l` pointer — see the field-assign write site above
+      (BUG-20260720-x86-record-indexed-prop-value). }
+    ValQType := QbeParamTypeOf(DefProp.TypeDesc);
     PropTgt  := PropAccessorTarget(AStmt.PropOwnerType, DefProp.WriteMethod,
       AStmt.PropAccessorVSlot, RecvTemp);
     EmitLine(Format('  call %s(l %s, %s %s, %s %s)',
