@@ -981,7 +981,8 @@ end;
 
 { ----- Var registration ----------------------------------------- }
 
-procedure RegisterVars(AIface: TUnitInterface; ATable: TSymbolTable);
+procedure RegisterVars(AIface: TUnitInterface; ATable: TSymbolTable;
+                       ASemantic: TSemanticAnalyser);
 var
   I: Integer;
   Entry: TVarEntry;
@@ -991,7 +992,12 @@ begin
   for I := 0 to AIface.Vars.Count - 1 do
   begin
     Entry := TVarEntry(AIface.Vars.Items[I]);
-    TypeDesc := ResolveTypeName(Entry.TypeRef.TypeName, ATable);
+    { ResolveImportTypeName (not the FindType-only ResolveTypeName) so an
+      ANONYMOUS array type — 'array[0..2] of string' / 'array of string' — is
+      parsed and instantiated via the inline-type path, matching how record
+      fields and routine params round-trip (BUG-20260720-unit-iface-static-
+      array-bif-roundtrip). }
+    TypeDesc := ResolveImportTypeName(Entry.TypeRef.TypeName, ATable, ASemantic);
     if TypeDesc = nil then
       raise EImportError.CreateFmt(
         'Var %s.%s: type %s unresolved',
@@ -1189,7 +1195,7 @@ begin
   try
     RegisterTypes  (AIface, ATable, ASemantic);
     RegisterConsts (AIface, ATable);
-    RegisterVars   (AIface, ATable);
+    RegisterVars   (AIface, ATable, ASemantic);
     RegisterRoutines(AIface, ATable, ASemantic);
     RegisterGenericRoutines(AIface, ATable);
   finally

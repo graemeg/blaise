@@ -1331,15 +1331,32 @@ end;
   uSemanticImport.ResolveRef. }
 procedure DecodeQualRef(const ASrc: string; var AUnit, AType: string);
 var
-  I, LastDot: Integer;
+  I, LastDot, PfxLen: Integer;
+  Pfx: string;
 begin
   { Blaise Pos and Copy are 0-based.  Split at the LAST '.', not the first:
     the unit qualifier may itself be dotted (e.g. 'blaise.testing'), while a
-    type name never contains a dot.  Splitting at the first dot mangled a
+    NAMED type name never contains a dot.  Splitting at the first dot mangled a
     qualified type from a dotted unit — 'blaise.testing.TTestCase' decoded to
     unit='blaise', type='testing.TTestCase', so the bare type name was lost
     and a cached parent class could not be relinked (warm --unit-cache
-    inherited-method resolution failure). }
+    inherited-method resolution failure).
+
+    EXCEPTION — inline/anonymous types (an array display name like
+    'array[0..2] of string', a pointer, etc.) are stored under the synthetic
+    '$builtin' unit and DO contain dots (the '..' range).  The last-dot split
+    would take '2] of string' as the type name.  So when the ref starts with
+    the '$builtin.' prefix, the unit is exactly '$builtin' and the rest —
+    dots and all — is the type name (BUG-20260720-unit-iface-static-array-bif-
+    roundtrip). }
+  Pfx := QUALREF_BUILTIN + '.';
+  PfxLen := Length(Pfx);
+  if (Length(ASrc) >= PfxLen) and (Copy(ASrc, 0, PfxLen) = Pfx) then
+  begin
+    AUnit := QUALREF_BUILTIN;
+    AType := Copy(ASrc, PfxLen, Length(ASrc) - PfxLen);
+    Exit;
+  end;
   LastDot := -1;
   for I := 0 to Length(ASrc) - 1 do
     if StrAt(ASrc, I) = Ord('.') then

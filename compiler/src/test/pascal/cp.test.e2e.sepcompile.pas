@@ -121,6 +121,13 @@ type
       (the compiler rebuilt itself incrementally into a populated cache and
       lost ~880 KB of impl-only-dependency code). }
     procedure TestIncrementalRebuild_ImplOnlyUses_LinksDependency;
+    { Regression (BUG-20260720-unit-iface-static-array-bif-roundtrip): a unit
+      INTERFACE var of an anonymous array type — `array[0..2] of string` or
+      `array of string` — broke the warm rebuild.  The .bif stored the type as
+      `$builtin.array[0..2] of string` and the importer split on the LAST dot
+      (the `..` range), mangling the type to `2] of string`; and RegisterVars
+      resolved with FindType-only, which cannot instantiate an anonymous array. }
+    procedure TestIncrementalRebuild_UnitIfaceAnonArrayVar;
     { Regression: a non-virtual constructor named 'Create' receives an
       implicit vtable slot (metaclass dispatch through a class-of
       reference).  The source-side semantic pass added that slot, but the
@@ -1560,6 +1567,75 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('build2 run exit code (impl-only dep must be linked)', 0, Rc);
   AssertEquals('build2 stdout', '43' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_UnitIfaceAnonArrayVar;
+const
+  StaticLibSrc =
+    '''
+    unit SArrLib;
+    interface
+    var UA: array[0..2] of string;
+    implementation
+    end.
+    ''';
+  DynLibSrc =
+    '''
+    unit DArrLib;
+    interface
+    var DA: array of string;
+    implementation
+    end.
+    ''';
+  StaticProgSrc =
+    '''
+    program UseSArr;
+    uses SArrLib;
+    begin UA[0] := 'hi'; WriteLn(UA[0]) end.
+    ''';
+  DynProgSrc =
+    '''
+    program UseDArr;
+    uses DArrLib;
+    begin SetLength(DA, 2); DA[1] := 'dyn'; WriteLn(DA[1]) end.
+    ''';
+
+  procedure RunWarmRebuild(const AUnitName, AUnitSrc, AProgName, AProgSrc,
+                           AExpected: string);
+  var
+    UnitPas, ProgPas, ProgBin, CacheDir, Captured: string;
+    Rc: Integer;
+  begin
+    UnitPas  := FScratch + '/' + AUnitName + '.pas';
+    ProgPas  := FScratch + '/' + AProgName + '.pas';
+    ProgBin  := FScratch + '/' + AProgName;
+    CacheDir := FScratch + '/cache-' + AUnitName;
+    WriteFile(UnitPas, AUnitSrc);
+    WriteFile(ProgPas, AProgSrc);
+    ForceDirectories(CacheDir);
+    { Build 1 (clean cache): unit parsed from source. }
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch], Captured);
+    AssertEquals(AUnitName + ' build1 exit (out: ' + Captured + ')', 0, Rc);
+    { Build 2 (warm): unit imported from its cached .bif — the round-trip that
+      used to fail with EImportError. }
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch], Captured);
+    AssertEquals(AUnitName + ' build2 (warm) exit (out: ' + Captured + ')', 0, Rc);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(AUnitName + ' warm run exit', 0, Rc);
+    AssertEquals(AUnitName + ' warm stdout', AExpected + #10, Captured);
+  end;
+
+begin
+  if not ToolchainAvailable() then
+  begin Fail('toolchain missing'); Exit end;
+  if not FileExists(BlaisePath()) then
+  begin Fail('blaise binary missing'); Exit end;
+  RunWarmRebuild('SArrLib', StaticLibSrc, 'UseSArr', StaticProgSrc, 'hi');
+  RunWarmRebuild('DArrLib', DynLibSrc, 'UseDArr', DynProgSrc, 'dyn');
 end;
 
 procedure TSepCompileTests.TestIncrementalRebuild_QualifiedGrandparentMethod;
