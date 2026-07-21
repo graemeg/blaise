@@ -92,6 +92,14 @@ type
       the var-param fields).  Previously the nested proc emitted the parameter
       as a global symbol reference and the program failed to link / ran wrong. }
     procedure TestRun_NestedProc_CapturesVarRecordParam;
+    { BUG-20260720-capture-varparam: a nested proc capturing an outer VAR/OUT
+      SCALAR parameter must reach the pointee through TWO derefs (the _cap_
+      pointer, then the var-param slot which holds the caller's address).  The
+      write/read arms dropped the extra deref (QBE stored to the wrong slot;
+      native routed through a bogus global -> SIGSEGV). }
+    procedure TestRun_NestedProc_CapturesVarScalarParam;
+    { Same double-deref path at FLOAT width (Double/Single arms had the same bug). }
+    procedure TestRun_NestedProc_CapturesVarFloatParam;
     { Nested proc captures an outer plain LOCAL record (field read + write). }
     procedure TestRun_NestedProc_CapturesLocalRecord;
     { Nested proc captures an outer VAR ARRAY PARAMETER (element read + write).
@@ -1324,6 +1332,63 @@ const
         ''';
 begin
   AssertRunsOnAll(Src, '7 14' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_NestedProc_CapturesVarScalarParam;
+const
+  Src =
+    '''
+        program Prg;
+        var ReadBack: Integer;
+        procedure L1(var Q: Integer);
+          procedure L2;
+          begin
+            ReadBack := Q + 1;   { read the captured var-param }
+            Q := 88              { write through the captured var-param }
+          end;
+          { two levels deep — the innermost still reaches the caller's Q }
+          procedure Deep;
+            procedure Inner;
+            begin Q := Q + 11 end;
+          begin Inner() end;
+        begin L2(); Deep() end;
+        var X: Integer;
+        begin
+          X := 55;
+          L1(X);
+          WriteLn(IntToStr(X));         { 88 + 11 = 99 (caller sees the writes) }
+          WriteLn(IntToStr(ReadBack))   { 55 + 1 = 56 (read saw the caller value) }
+        end.
+        ''';
+begin
+  AssertRunsOnAll(Src, '99' + LE + '56' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_NestedProc_CapturesVarFloatParam;
+const
+  { Same double-deref path, FLOAT width — the native Double/Single arms had the
+    same ordering+missing-deref bug as the integer arms. }
+  Src =
+    '''
+        program Prg;
+        var Matched: Integer;
+        procedure L1(var Q: Double);
+          procedure L2;
+          begin
+            if Q = 1.25 then Matched := 1 else Matched := 0;   { read }
+            Q := 3.5                                            { write }
+          end;
+        begin L2() end;
+        var X: Double;
+        begin
+          X := 1.25;
+          L1(X);
+          WriteLn(IntToStr(Matched));   { 1 — read saw the caller value }
+          WriteLn(X > 3.0)              { True — write reached the caller }
+        end.
+        ''';
+begin
+  AssertRunsOnAll(Src, '1' + LE + 'True' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_NestedProc_CapturesLocalRecord;

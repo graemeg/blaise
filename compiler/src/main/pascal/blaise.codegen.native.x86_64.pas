@@ -6853,18 +6853,25 @@ begin
       Ty := Self.LocalType(TIdentExpr(AExpr).Name);
     if (Ty = nil) then
       Ty := Self.GlobalType(TIdentExpr(AExpr).Name);
-    if TIdentExpr(AExpr).ParamMode <> pmNone then
+    if Self.IsCaptured(TIdentExpr(AExpr).Name) then
+    begin
+      { CAPTURED first: a captured var-param is BOTH captured and ParamMode<>
+        pmNone; the var-param arm below would wrongly use VarOperand(Name) =
+        Name(%rip).  The _cap_ slot holds the enclosing var's address; a
+        captured VAR/OUT param's enclosing slot in turn holds the caller's
+        address, so deref once more before loading the float value
+        (BUG-20260720-capture-varparam — the float arms mirror the integer ones). }
+      Self.Emit(Format(#9'movq %s, %%rcx',
+        [Self.VarOperand('_cap_' + TIdentExpr(AExpr).Name)]));
+      if TIdentExpr(AExpr).ParamMode <> pmNone then
+        Self.Emit(#9'movq (%rcx), %rcx');
+      Self.EmitLoadFloat('(%rcx)', Ty);
+    end
+    else if TIdentExpr(AExpr).ParamMode <> pmNone then
     begin
       { var/out float param: the slot holds the value's address. }
       Self.Emit(Format(#9'movq %s, %%rcx',
         [Self.VarOperand(TIdentExpr(AExpr).Name)]));
-      Self.EmitLoadFloat('(%rcx)', Ty);
-    end
-    else if Self.IsCaptured(TIdentExpr(AExpr).Name) then
-    begin
-      { Captured outer local: the _cap_ slot holds the var's address. }
-      Self.Emit(Format(#9'movq %s, %%rcx',
-        [Self.VarOperand('_cap_' + TIdentExpr(AExpr).Name)]));
       Self.EmitLoadFloat('(%rcx)', Ty);
     end
     else
@@ -7432,16 +7439,24 @@ begin
       else
         Self.EmitImmToReg(TIdentExpr(AExpr).ConstValue, '%rax', '%eax');
     end
+    else if Self.IsCaptured(TIdentExpr(AExpr).Name) then
+    begin
+      { CAPTURED first: a captured var-param is BOTH captured and ParamMode<>
+        pmNone; the param arm below would wrongly load VarOperand(Name) =
+        Name(%rip).  The capture slot holds the enclosing var's address; a
+        captured VAR/OUT param's enclosing slot in turn holds the caller's
+        address, so deref once more before loading the value
+        (BUG-20260720-capture-varparam). }
+      Self.Emit(Format(#9'movq %s, %%rcx',
+        [Self.VarOperand('_cap_' + TIdentExpr(AExpr).Name)]));
+      if TIdentExpr(AExpr).ParamMode <> pmNone then
+        Self.Emit(#9'movq (%rcx), %rcx');
+      Self.EmitLoadVar('(%rcx)', Self.IntExprType(AExpr));
+    end
     else if TIdentExpr(AExpr).ParamMode <> pmNone then
     begin
       Self.Emit(Format(#9'movq %s, %%rcx',
         [Self.VarOperand(TIdentExpr(AExpr).Name)]));
-      Self.EmitLoadVar('(%rcx)', Self.IntExprType(AExpr));
-    end
-    else if Self.IsCaptured(TIdentExpr(AExpr).Name) then
-    begin
-      Self.Emit(Format(#9'movq %s, %%rcx',
-        [Self.VarOperand('_cap_' + TIdentExpr(AExpr).Name)]));
       Self.EmitLoadVar('(%rcx)', Self.IntExprType(AExpr));
     end
     else if (TIdentExpr(AExpr).ResolvedType <> nil) and
@@ -14442,14 +14457,19 @@ begin
         (cvtss2sd). }
       Self.EmitXmm0WidthAdjust(Asgn.Expr.ResolvedType,
         Asgn.ResolvedLhsType.Kind = tySingle);
-      if Asgn.IsVarParam then
-      begin
-        Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(Asgn.Name)]));
-        Self.EmitStoreFloat('(%rcx)', Asgn.ResolvedLhsType);
-      end
-      else if Self.IsCaptured(Asgn.Name) then
+      { CAPTURED first (see the float read + integer arms): a captured var-param
+        float must go through _cap_ with an extra deref, not the var-param arm's
+        bogus Name(%rip) (BUG-20260720-capture-varparam). }
+      if Self.IsCaptured(Asgn.Name) then
       begin
         Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('_cap_' + Asgn.Name)]));
+        if Asgn.IsVarParam then
+          Self.Emit(#9'movq (%rcx), %rcx');
+        Self.EmitStoreFloat('(%rcx)', Asgn.ResolvedLhsType);
+      end
+      else if Asgn.IsVarParam then
+      begin
+        Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(Asgn.Name)]));
         Self.EmitStoreFloat('(%rcx)', Asgn.ResolvedLhsType);
       end
       else if Self.IsLocal(Asgn.Name) then
@@ -14692,16 +14712,24 @@ begin
     else
     begin
       Self.EmitExprToEax(Asgn.Expr);
-      if Asgn.IsVarParam then
-      begin
-        Self.Emit(Format(#9'movq %s, %%rcx',
-          [Self.VarOperand(Asgn.Name)]));
-        Self.EmitStoreVar('(%rcx)', Asgn.ResolvedLhsType);
-      end
-      else if Self.IsCaptured(Asgn.Name) then
+      { CAPTURED first: a captured var-param is BOTH captured and IsVarParam;
+        the var-param arm below would wrongly use VarOperand(Name) = Name(%rip)
+        (a bogus global) — so a captured name must take the capture path.  The
+        capture slot holds the enclosing var's address; for a captured VAR/OUT
+        param that enclosing slot in turn holds the caller's address, so deref
+        once more to reach the pointee (BUG-20260720-capture-varparam). }
+      if Self.IsCaptured(Asgn.Name) then
       begin
         Self.Emit(Format(#9'movq %s, %%rcx',
           [Self.VarOperand('_cap_' + Asgn.Name)]));
+        if Asgn.IsVarParam then
+          Self.Emit(#9'movq (%rcx), %rcx');
+        Self.EmitStoreVar('(%rcx)', Asgn.ResolvedLhsType);
+      end
+      else if Asgn.IsVarParam then
+      begin
+        Self.Emit(Format(#9'movq %s, %%rcx',
+          [Self.VarOperand(Asgn.Name)]));
         Self.EmitStoreVar('(%rcx)', Asgn.ResolvedLhsType);
       end
       else

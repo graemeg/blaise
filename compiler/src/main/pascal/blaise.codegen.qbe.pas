@@ -4562,12 +4562,29 @@ begin
   end;
 
   { Captured outer-scope variable: %_cap_Name IS the address of the var in
-    the enclosing frame — store directly to that address. }
+    the enclosing frame — store directly to that address.  A captured VAR/OUT
+    PARAMETER needs one more indirection: its enclosing slot holds the CALLER's
+    address, so deref %_cap_Name once to reach the pointee before storing
+    (BUG-20260720-capture-varparam). }
   if (AAssign.ImplicitSelfField = nil) and IsCaptured(AAssign.Name) then
   begin
     ValTemp := EmitExpr(AAssign.Expr);
     QType   := QbeTypeOf(AAssign.ResolvedLhsType);
     ValTemp := CoerceArg(ValTemp, AAssign.Expr, QType);
+    if AAssign.IsVarParam then
+    begin
+      PtrTemp := AllocTemp();
+      EmitLine(Format('  %s =l loadl %%_cap_%s', [PtrTemp, AAssign.Name]));
+      case QType of
+        'w': EmitLine(Format('  storew %s, %s', [ValTemp, PtrTemp]));
+        'l': EmitLine(Format('  storel %s, %s', [ValTemp, PtrTemp]));
+        'd': EmitLine(Format('  stored %s, %s', [ValTemp, PtrTemp]));
+        's': EmitLine(Format('  stores %s, %s', [ValTemp, PtrTemp]));
+      else
+        EmitLine(Format('  storel %s, %s', [ValTemp, PtrTemp]));
+      end;
+      Exit;
+    end;
     case QType of
       'w': EmitLine(Format('  storew %s, %%_cap_%s', [ValTemp, AAssign.Name]));
       'l': EmitLine(Format('  storel %s, %%_cap_%s', [ValTemp, AAssign.Name]));
@@ -14916,6 +14933,23 @@ begin
           EmitLine(Format('  %s =l copy %%_cap_%s', [T, TIdentExpr(AExpr).Name]));
         Exit(T);
       end;
+      { Scalar: %_cap_Name holds the enclosing slot address.  For a captured
+        VAR/OUT param the enclosing slot holds the CALLER's address, so deref
+        %_cap_Name once to reach the pointee before loading the value
+        (BUG-20260720-capture-varparam). }
+      if TIdentExpr(AExpr).ParamMode <> pmNone then
+      begin
+        Ptr := AllocTemp();
+        EmitLine(Format('  %s =l loadl %%_cap_%s', [Ptr, TIdentExpr(AExpr).Name]));
+        case QType of
+          'l': EmitLine(Format('  %s =l loadl %s', [T, Ptr]));
+          'd': EmitLine(Format('  %s =d loadd %s', [T, Ptr]));
+          's': EmitLine(Format('  %s =s loads %s', [T, Ptr]));
+        else
+          EmitLine(Format('  %s =w loadw %s', [T, Ptr]));
+        end;
+      end
+      else
       case QType of
         'l': EmitLine(Format('  %s =l loadl %%_cap_%s', [T, TIdentExpr(AExpr).Name]));
         'd': EmitLine(Format('  %s =d loadd %%_cap_%s', [T, TIdentExpr(AExpr).Name]));
