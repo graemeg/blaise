@@ -95,6 +95,10 @@ type
     procedure TestLibm_NoFloatMath_NoLibm;
     procedure TestPthread_NativeThreads_LinksLibpthread;
     procedure TestPthread_StaticThreads_NoNeeded;
+    { ---- GH #188: internal linker resolves a -l<name> whose lib<name>.so is a
+           GNU ld linker script (INPUT/GROUP) to the real versioned SONAME(s),
+           not the bare (unmappable) linker-script filename. ---- }
+    procedure TestLinkerScriptLib_ResolvesToVersionedSoname_Native;
     { ---- div/mod by zero raises a catchable EDivByZero (needs stdlib) ---- }
     procedure TestDivByZeroCaught_QBE;
     procedure TestDivByZeroCaught_Native;
@@ -749,6 +753,77 @@ begin
   Dyn := ReadelfDynamic(BinPath);
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
   AssertTrue('static binary has no DT_NEEDED', Pos('(NEEDED)', Dyn) < 0);
+end;
+
+procedure TCLIContractTests.TestLinkerScriptLib_ResolvesToVersionedSoname_Native;
+
+  { True if <ADir>/lib<AName>.so exists and is a GNU ld linker script — a text
+    file naming its inputs via INPUT(...) or GROUP(...).  A real ELF .so is
+    binary and contains no leading INPUT/GROUP token, so a substring probe on
+    the loaded text is a safe discriminator (and avoids raw byte I/O). }
+  function IsLinkerScript(const ADir, AName: string): Boolean;
+  var Path, Txt: string; L: TStringList;
+  begin
+    Result := False;
+    Path := ADir + '/lib' + AName + '.so';
+    if not FileExists(Path) then Exit;
+    L := TStringList.Create();
+    try
+      try
+        L.LoadFromFile(Path);
+      except
+        Exit;
+      end;
+      Txt := L.Text;
+    finally
+      L.Free();
+    end;
+    Result := (Pos('INPUT', Txt) >= 0) or (Pos('GROUP', Txt) >= 0);
+  end;
+
+var
+  SrcPath, BinPath, Out_, Dyn, LibName: string;
+  EC: Integer;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  { Find a system library whose lib<name>.so is a linker script.  ncurses is
+    the reported case (Debian/Ubuntu: INPUT(libncurses.so.6 -ltinfo)); libm is
+    the near-universal fallback (GROUP(libm.so.6 ...)).  If neither is a script
+    on this host, the platform does not exhibit the bug — skip. }
+  LibName := '';
+  if IsLinkerScript('/usr/lib/x86_64-linux-gnu', 'ncurses')
+     or IsLinkerScript('/lib/x86_64-linux-gnu', 'ncurses') then
+    LibName := 'ncurses'
+  else if IsLinkerScript('/usr/lib/x86_64-linux-gnu', 'm')
+          or IsLinkerScript('/lib/x86_64-linux-gnu', 'm') then
+    LibName := 'm';
+  if LibName = '' then
+  begin
+    Ignore('no linker-script system lib on this host');
+    Exit;
+  end;
+  { A native program declaring an external symbol from that lib.  We do not run
+    it (ncurses needs a tty); we only inspect the emitted DT_NEEDED. }
+  SrcPath := WriteScratchSource(
+    'program p;' + LineEnding +
+    'function ext_probe(): Integer; external ''' + LibName +
+      ''' name ''' + LibName + ''';' + LineEnding +
+    'begin WriteLn(0); end.');
+  BinPath := FScratch + 'cli_lnkscript_' + IntToStr(FCounter);
+  EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
+    '--output', BinPath], Out_);
+  AssertEquals('native program with linker-script lib links (out: '
+    + Out_ + ')', 0, EC);
+  Dyn := ReadelfDynamic(BinPath);
+  if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
+  { The versioned SONAME must appear, and the bare lib<name>.so linker-script
+    name must NOT be recorded as a DT_NEEDED (that was the "file too short" bug). }
+  AssertTrue('DT_NEEDED carries the versioned SONAME lib' + LibName + '.so.',
+    Pos('lib' + LibName + '.so.', Dyn) >= 0);
+  AssertTrue('bare linker-script name lib' + LibName
+    + '.so is NOT a DT_NEEDED',
+    Pos('[lib' + LibName + '.so]', Dyn) < 0);
 end;
 
 procedure TCLIContractTests.TestDivByZeroCaught_QBE;

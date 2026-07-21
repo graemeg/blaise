@@ -93,6 +93,8 @@ begin
   WriteLn(FormatFlagLine('--output <path>', 'Output binary path'));
   WriteLn(FormatFlagLine('--unit-path <dir>',
     'Add directory to unit search path (repeatable)'));
+  WriteLn(FormatFlagLine('--lib-path <dir>',
+    'Add directory to C-library search path (-Fl; repeatable)'));
   WriteLn(FormatFlagLine('--rtl-src <dir>',
     'RTL source directory (default: beside the binary; or $BLAISE_RTL_SRC).'));
   WriteLn(FormatFlagLine('',
@@ -287,6 +289,15 @@ begin
     begin
       Inc(I);
       AOpts.RTLSrcDir := ParamStr(I);
+    end
+    else if ((Arg = '--lib-path') or (Arg = '-Fl')) and (I < ParamCount()) then
+    begin
+      { Extra directory to search when the internal linker resolves a
+        -l<name> to its SONAME (GH #188).  Searched ahead of the default
+        system lib dirs.  FPC spells this -Fl. }
+      Inc(I);
+      if AOpts.LibPaths = nil then AOpts.LibPaths := TStringList.Create();
+      AOpts.LibPaths.Add(ParamStr(I));
     end
     else if Arg = '--static' then
       AOpts.Static := True

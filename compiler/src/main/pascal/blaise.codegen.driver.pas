@@ -103,6 +103,11 @@ type
                                    units' 'external ''lib''' declarations
                                    (TUnitInterface.LinkLibs).  nil = none.  Owned;
                                    ARC-released with the opts object. }
+    LibPaths: TStringList;       { --lib-path DIR: extra directories to search
+                                   when the internal linker resolves a -l<name>
+                                   to its SONAME (GH #188).  Prepended ahead of
+                                   the default system lib dirs.  nil = none.
+                                   Owned; released with the opts object. }
   end;
 
   TBackendDriver = class
@@ -752,6 +757,10 @@ begin
       Libraries declared via 'external ''lib''' in the program or any used unit
       (plus the backend-demanded libs above) are emitted here as -l<name> — ld
       expands to lib<name>.so/.a. }
+    { --lib-path dirs (GH #188): passed to cc as -L so ld searches them too. }
+    if AOpts.LibPaths <> nil then
+      for I := 0 to AOpts.LibPaths.Count - 1 do
+        Args.Add('-L' + AOpts.LibPaths.Strings[I]);
     if AOpts.LinkLibs <> nil then
       for I := 0 to AOpts.LinkLibs.Count - 1 do
         Args.Add('-l' + AOpts.LinkLibs.Strings[I]);
