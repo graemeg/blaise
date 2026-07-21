@@ -15863,15 +15863,14 @@ begin
   end
   else if (AExpr is TStringSubscriptExpr) and
           (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) and
-          (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyStaticArray) then
+          (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind in
+             [tyStaticArray, tyDynArray, tyOpenArray]) then
   begin
-    { Interface element in a STATIC array: EmitStringSubscriptExpr's
-      static-array branch returns the contiguous element address when
-      the element type is tyInterface (obj at +0, itab at +8).  Same
-      layout as a record field — just a different address source.
-      Dynamic-array subscripts return a loaded VALUE, not an address,
-      so they must keep hitting the fail-loud else below until they
-      get their own handling. }
+    { Interface element in a static / dynamic / open array: for all three,
+      EmitStringSubscriptExpr's array branch returns the contiguous element
+      ADDRESS when the element type is tyInterface (obj at +0, itab at +8) —
+      same layout as a record field, just a different address source
+      (BUG-20260720-qbe-dynarray-intf-elem-read added the dyn/open arms). }
     ObjT := EmitExpr(AExpr);
     AObjTemp  := AllocTemp();
     EmitLine(Format('  %s =l loadl %s', [AObjTemp, ObjT]));
@@ -17189,6 +17188,9 @@ begin
     begin
       Exit(ElemPtr);
     end;
+    { Interface elements: return the fat-pointer address (obj+0, itab+8). }
+    if ElemType.ElementType.Kind = tyInterface then
+      Exit(ElemPtr);
     ByteVal := AllocTemp();
     EmitLine(Format('  %s =%s %s %s', [ByteVal, QType, QLoad, ElemPtr]));
     Exit(ByteVal);
@@ -17213,6 +17215,12 @@ begin
     begin
       Exit(ElemPtr);
     end;
+    { Interface elements: the 16-byte fat pointer (obj at +0, itab at +8) lives
+      contiguously at ElemPtr — return its ADDRESS; EmitInterfaceExprPair loads
+      both halves (BUG-20260720-qbe-dynarray-intf-elem-read).  Mirrors the
+      static-array interface arm. }
+    if TDynArrayTypeDesc(AExpr.StrExpr.ResolvedType).ElementType.Kind = tyInterface then
+      Exit(ElemPtr);
     ByteVal := AllocTemp();
     EmitLine(Format('  %s =%s %s %s', [ByteVal, QType, QLoad, ElemPtr]));
     Exit(ByteVal);
@@ -17700,6 +17708,51 @@ begin
       ElemVal := EmitExpr(AStmt.ValueExpr);
       EmitLine(Format('  call $memcpy(l %s, l %s, l %d)',
         [ElemPtr, ElemVal, TSetTypeDesc(ElemType).RawSize()]));
+      Exit;
+    end;
+    { Interface element: a 16-byte fat pointer (obj at +0 refcounted, itab at +8
+      raw).  Mirror the static-array interface store discipline: addref the new
+      backing object (unless a class RHS already owns +1), release the slot's
+      prior obj, write both halves (BUG-20260720-qbe-dynarray-intf-elem-read /
+      -ownership-divergence). }
+    if ElemType.Kind = tyInterface then
+    begin
+      EmitLine(Format('  %s =l extsw %s', [IdxL, IdxW]));
+      EmitLine(Format('  %s =l mul %s, %d', [Offset, IdxL, ElemSize]));
+      EmitLine(Format('  %s =l add %s, %s', [ElemPtr, PCharBase, Offset]));
+      if AStmt.ValueExpr is TNilLiteral then
+      begin
+        OldVal := AllocTemp();
+        EmitLine(Format('  %s =l loadl %s', [OldVal, ElemPtr]));
+        EmitLine(Format('  call $_ClassRelease(l %s)', [OldVal]));
+        EmitLine(Format('  storel 0, %s', [ElemPtr]));
+        ItabPtr := AllocTemp();
+        EmitLine(Format('  %s =l add %s, 8', [ItabPtr, ElemPtr]));
+        EmitLine(Format('  storel 0, %s', [ItabPtr]));
+        Exit;
+      end;
+      if (AStmt.ValueExpr.ResolvedType <> nil) and
+         (AStmt.ValueExpr.ResolvedType.Kind = tyClass) then
+      begin
+        IntfDesc := TInterfaceTypeDesc(ElemType);
+        ObjTemp  := EmitExpr(AStmt.ValueExpr);
+        ItabTemp := Format('$itab_%s_%s',
+          [QBEMangle(ClassSymName(TRecordTypeDesc(AStmt.ValueExpr.ResolvedType).Name)),
+           QBEMangle(IntfDesc.Name)]);
+      end
+      else
+        EmitInterfaceExprPair(AStmt.ValueExpr, ObjTemp, ItabTemp);
+      OldVal := AllocTemp();
+      EmitLine(Format('  %s =l loadl %s', [OldVal, ElemPtr]));
+      if not (((AStmt.ValueExpr.ResolvedType <> nil) and
+               (AStmt.ValueExpr.ResolvedType.Kind = tyClass)) and
+              ExprOwnsRef(AStmt.ValueExpr)) then
+        EmitLine(Format('  call $_ClassAddRef(l %s)',  [ObjTemp]));
+      EmitLine(Format('  call $_ClassRelease(l %s)', [OldVal]));
+      EmitLine(Format('  storel %s, %s', [ObjTemp, ElemPtr]));
+      ItabPtr := AllocTemp();
+      EmitLine(Format('  %s =l add %s, 8', [ItabPtr, ElemPtr]));
+      EmitLine(Format('  storel %s, %s', [ItabTemp, ItabPtr]));
       Exit;
     end;
     if ElemType.Kind in [tyByte, tyBoolean] then

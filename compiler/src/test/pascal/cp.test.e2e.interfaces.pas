@@ -94,6 +94,9 @@ type
       descendant overrides it.  The abstract class's itab slot points at the
       abort stub; the concrete descendant's itab dispatches to its override. }
     procedure TestRun_AbstractInterfaceMethod_ConcreteOverride;
+    { BUG-20260720-qbe-dynarray-intf-elem-read: read a dyn-array-of-interface
+      element as a method receiver, an assignment source, and a call argument. }
+    procedure TestRun_DynArrayOfInterface_ElementRead;
   end;
 
 implementation
@@ -907,6 +910,34 @@ begin
   { the abstract base's IShape itab slot points at the abort stub; the concrete
     TSquare's dispatches to its override — 4*4=16 }
   AssertRunsOnAll(Src, '16' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_DynArrayOfInterface_ElementRead;
+const
+  Src =
+    '''
+    program Prg;
+    type
+      IGreet = interface function Name: string; end;
+      TGreet = class(IGreet) FName: string; function Name: string; begin Result := FName end; end;
+    procedure Use(G: IGreet);
+    begin WriteLn('arg=', G.Name()) end;
+    var Arr: array of IGreet; X: IGreet; G: TGreet;
+    begin
+      SetLength(Arr, 3);
+      G := TGreet.Create(); G.FName := 'aaa'; Arr[0] := G;
+      G := TGreet.Create(); G.FName := 'bbb'; Arr[1] := G;
+      G := TGreet.Create(); G.FName := 'ccc'; Arr[2] := G;
+      WriteLn('recv=', Arr[1].Name());   { method receiver }
+      X := Arr[2];                        { assignment source }
+      WriteLn('assign=', X.Name());
+      Use(Arr[0])                         { call argument }
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'recv=bbb' + LE + 'assign=ccc' + LE + 'arg=aaa' + LE, 0);
 end;
 
 initialization

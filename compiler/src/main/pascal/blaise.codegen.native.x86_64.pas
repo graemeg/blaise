@@ -574,6 +574,11 @@ type
     { Leave the address of an interface element of a static array in ADstReg. }
     procedure EmitIntfStaticElemAddr(ASub: TStringSubscriptExpr;
                                      const ADstReg: string);
+    { As EmitIntfStaticElemAddr but for a DYNAMIC or OPEN array: the base is the
+      heap data pointer (EmitExprToEax of the array), scaled by index * 16 with
+      NO LowBound.  Leaves the element fat-pointer address in ADstReg. }
+    procedure EmitIntfDynElemAddr(ASub: TStringSubscriptExpr;
+                                  const ADstReg: string);
     { True when AMethName resolves to an abstract slot on ARec (the itab entry
       must then point at _AbstractMethodError). }
     function IsAbstractClassMethod(ARec: TRecordTypeDesc;
@@ -3703,6 +3708,18 @@ begin
     Self.Emit(#9'movq 8(%r10), %rax');   { itab }
     Self.Emit(#9'movq (%r10), %r10');    { obj }
   end
+  else if (AObjExpr <> nil) and (AObjExpr is TStringSubscriptExpr) and
+          (TStringSubscriptExpr(AObjExpr).StrExpr.ResolvedType <> nil) and
+          (TStringSubscriptExpr(AObjExpr).StrExpr.ResolvedType.Kind in
+             [tyDynArray, tyOpenArray]) then
+  begin
+    { Dynamic / open-array interface element receiver (Arr[I].M()): the fat
+      pointer lives at data_ptr + index*16 (BUG-20260720-qbe-dynarray-intf-
+      elem-read, native side). }
+    Self.EmitIntfDynElemAddr(TStringSubscriptExpr(AObjExpr), '%r10');
+    Self.Emit(#9'movq 8(%r10), %rax');   { itab }
+    Self.Emit(#9'movq (%r10), %r10');    { obj }
+  end
   else if AIsVarParam then
   begin
     { var/out interface param receiver: the slot holds the address of the
@@ -4709,6 +4726,32 @@ begin
     Self.Emit(#9'popq %r15');
     Exit;
   end;
+  { Same, for a dynamic / open-array interface element source: fat pointer at
+    data_ptr + index*16 (BUG-20260720-qbe-dynarray-intf-elem-read). }
+  if (AAsgn.Expr.ResolvedType <> nil) and
+     (AAsgn.Expr.ResolvedType.Kind = tyInterface) and
+     (AAsgn.Expr is TStringSubscriptExpr) and
+     (TStringSubscriptExpr(AAsgn.Expr).StrExpr.ResolvedType <> nil) and
+     (TStringSubscriptExpr(AAsgn.Expr).StrExpr.ResolvedType.Kind in
+        [tyDynArray, tyOpenArray]) then
+  begin
+    Self.Emit(#9'pushq %r15');
+    Self.EmitIntfDynElemAddr(TStringSubscriptExpr(AAsgn.Expr), '%r15');
+    Self.Emit(#9'movq 8(%r15), %rax');     { src itab }
+    Self.Emit(#9'pushq %rax');
+    Self.Emit(#9'movq (%r15), %rax');      { src obj }
+    Self.Emit(#9'pushq %rax');
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(#9'callq _ClassAddRef');
+    Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));   { old obj }
+    Self.Emit(#9'callq _ClassRelease');
+    Self.Emit(#9'popq %rax');              { new obj }
+    Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
+    Self.Emit(#9'popq %rax');              { itab }
+    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
+    Self.Emit(#9'popq %r15');
+    Exit;
+  end;
 
   { F := FuncReturningInterface() — sret convention: allocate a 16-byte buffer
     on the stack, pass its address as the hidden first arg (%rdi), call the
@@ -4871,6 +4914,19 @@ begin
       Self.Emit(#9'movq (%rax), %rcx');
       Self.Emit(#9'pushq %rcx');           { obj on top }
     end
+    else if (AExpr is TStringSubscriptExpr) and
+            (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) and
+            (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind in
+               [tyDynArray, tyOpenArray]) then
+    begin
+      { Dynamic / open-array interface element source: fat pointer at
+        data_ptr + index*16 (BUG-20260720-qbe-dynarray-intf-elem-read). }
+      Self.EmitIntfDynElemAddr(TStringSubscriptExpr(AExpr), '%rax');
+      Self.Emit(#9'movq 8(%rax), %rcx');
+      Self.Emit(#9'pushq %rcx');           { itab }
+      Self.Emit(#9'movq (%rax), %rcx');
+      Self.Emit(#9'pushq %rcx');           { obj on top }
+    end
     else if (AExpr is TFuncCallExpr) and
             (TFuncCallExpr(AExpr).ResolvedDecl <> nil) then
     begin
@@ -4987,6 +5043,20 @@ begin
       'native backend: unsupported interface static-array base expression');
   Self.Emit(Format(#9'addq %%rax, %%rcx', []));
   Self.Emit(Format(#9'movq %%rcx, %s', [ADstReg]));
+end;
+
+procedure TX86_64Backend.EmitIntfDynElemAddr(ASub: TStringSubscriptExpr;
+  const ADstReg: string);
+{ Element fat-pointer address of an interface element of a DYNAMIC / OPEN array:
+  data_ptr + index * 16 (an interface fat pointer is 16 bytes; no LowBound). }
+begin
+  Self.EmitExprToEax(ASub.StrExpr);            { data pointer -> %rax }
+  Self.Emit(#9'pushq %rax');
+  Self.EmitExprToEax(ASub.IndexExpr);          { index -> %rax }
+  Self.Emit(#9'imulq $16, %rax');
+  Self.Emit(#9'popq %rcx');                    { data pointer }
+  Self.Emit(#9'addq %rcx, %rax');
+  Self.Emit(Format(#9'movq %%rax, %s', [ADstReg]));
 end;
 
 procedure TX86_64Backend.EmitClassMethods(ATypeDecls: TObjectList;
@@ -10789,6 +10859,22 @@ begin
       Self.Emit(#9'pushq %rax');          { push obj }
       Self.Emit(#9'pushq %rcx');          { push itab }
     end
+    else if (AArg is TStringSubscriptExpr) and
+            (TStringSubscriptExpr(AArg).StrExpr.ResolvedType <> nil) and
+            (TStringSubscriptExpr(AArg).StrExpr.ResolvedType.Kind in
+               [tyStaticArray, tyDynArray, tyOpenArray]) then
+    begin
+      { Interface array element passed as an argument (Use(Arr[I])): fat pointer
+        at the element address (BUG-20260720-qbe-dynarray-intf-elem-read). }
+      if TStringSubscriptExpr(AArg).StrExpr.ResolvedType.Kind = tyStaticArray then
+        Self.EmitIntfStaticElemAddr(TStringSubscriptExpr(AArg), '%rax')
+      else
+        Self.EmitIntfDynElemAddr(TStringSubscriptExpr(AArg), '%rax');
+      Self.Emit(#9'movq (%rax), %rcx');   { obj }
+      Self.Emit(#9'movq 8(%rax), %rdx');  { itab }
+      Self.Emit(#9'pushq %rcx');          { push obj }
+      Self.Emit(#9'pushq %rdx');          { push itab }
+    end
     else
       raise ENativeCodeGenError.Create(
         'native backend: unsupported interface argument expression');
@@ -16274,6 +16360,42 @@ begin
         Self.Emit(#9'popq %rbx');
         if SSA.BaseExpr <> nil then
           Self.Emit(#9'addq $8, %rsp');         { drop stashed base ptr }
+        Exit;
+      end;
+      { Interface element write into a dyn-array (Arr[I] := V): a 16-byte fat
+        pointer (obj at +0, itab at +8).  Compute the element address (data_ptr
+        + idx*16, no LowBound) into callee-saved %r14 and delegate to
+        EmitInterfaceToFieldSlotsAt, which writes obj+itab with ARC — the same
+        discipline as the static-array interface arm below
+        (BUG-20260720-qbe-dynarray-intf-elem-read / -ownership-divergence). }
+      if DAElemType.Kind = tyInterface then
+      begin
+        Self.Emit(#9'pushq %r14');
+        Self.EmitExprToEax(SSA.IndexExpr);
+        Self.Emit(#9'imulq $16, %rax');
+        if SSA.BaseExpr <> nil then
+          Self.Emit(#9'movq 8(%rsp), %r14')     { base ptr pushed before %r14 }
+        else if SSA.IsImplicitSelf then
+        begin
+          Self.Emit(Format(#9'movq %s, %%r14', [Self.VarOperand('Self')]));
+          if SSA.ImplicitFieldInfo.Offset > 0 then
+            Self.Emit(Format(#9'addq $%d, %%r14', [SSA.ImplicitFieldInfo.Offset]));
+          Self.Emit(#9'movq (%r14), %r14');
+        end
+        else if Self.IsLocal(SSA.ArrayName) then
+        begin
+          Self.Emit(Format(#9'movq %s, %%r14', [Self.VarOperand(SSA.ArrayName)]));
+          if SSA.IsVarParam then
+            Self.Emit(#9'movq (%r14), %r14');
+        end
+        else
+          Self.Emit(Format(#9'movq %s(%%rip), %%r14',
+            [Self.GlobalSymName(SSA.ArrayName)]));
+        Self.Emit(#9'addq %rax, %r14');          { %r14 = element address }
+        Self.EmitInterfaceToFieldSlotsAt(SSA.ValueExpr, '%r14', 0, DAElemType);
+        Self.Emit(#9'popq %r14');
+        if SSA.BaseExpr <> nil then
+          Self.Emit(#9'addq $8, %rsp');           { drop stashed base ptr }
         Exit;
       end;
       { Float element: evaluate the RHS into %xmm0, coerce to the element's
