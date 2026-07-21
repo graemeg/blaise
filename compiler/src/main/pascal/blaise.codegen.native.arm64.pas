@@ -4929,9 +4929,21 @@ begin
     end;
     Exit;
   end;
+  if ACall.IsIndirectCall and
+     IsMethodPtrType(TTypeDesc(ACall.ResolvedProcType)) then
+  begin
+    { statement-position call through a closure / method-pointer variable (a
+      16-byte fat value): route to EmitFatPtrCall with the fat value's ADDRESS.
+      The result (if any) is discarded — EmitFatPtrCall leaves it in x0/d0
+      harmlessly.  Mirrors the expression-position fat-callee arm. }
+    EmitSlotAddr('x9', ACall.Name);
+    EmitFatPtrCall('x9',
+      TProceduralTypeDesc(ACall.ResolvedProcType), ACall.Args);
+    Exit;
+  end;
   if ACall.IsIndirectCall and (ACall.Args.Count <= 8) then
   begin
-    { call through a procedural-typed variable: int-class args in
+    { call through a plain proc-pointer variable: int-class args in
       x0..x(n-1), function pointer from the variable's slot, blr }
     for I := 0 to ACall.Args.Count - 1 do
     begin
@@ -4940,8 +4952,12 @@ begin
               (Arg is TNilLiteral) or
               ((Arg.ResolvedType <> nil) and
                (Arg.ResolvedType.Kind in [tyPChar, tyPointer,
-                                          tyClass]))) then
+                                          tyClass, tyString, tyDynArray]))) then
         NotYet('indirect-call argument of this type', Arg);
+      { an owned transient would need a park slot (like EmitFatPtrCall) — keep
+        the hole honest rather than leak it }
+      if ArcExprOwnsRef(Arg) then
+        NotYet('owned transient argument in an indirect call', Arg);
       Self.EmitExprToX0(Arg);
       EmitPushX0();
     end;

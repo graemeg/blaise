@@ -82,6 +82,8 @@ type
     { arm64 leg 38b(i): a closure call whose argument is an owned-transient
       string (a function result) — passed borrowed, disposed after the call. }
     procedure TestRun_Closure_OwnedTransientStringArg;
+    { arm64 leg 38b(ii): a statement-position closure call (result discarded). }
+    procedure TestRun_Closure_StatementPositionCall;
   end;
 
 implementation
@@ -1234,6 +1236,24 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '5' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Closure_StatementPositionCall;
+const
+  Src = '''
+    program P;
+    type TProc = reference to procedure(x: Integer);
+    procedure Run(P: TProc; v: Integer);
+    begin
+      P(v)
+    end;
+    begin
+      Run(procedure(x: Integer) begin WriteLn(x) end, 42)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '42' + LineEnding, 0);
 end;
 
 initialization

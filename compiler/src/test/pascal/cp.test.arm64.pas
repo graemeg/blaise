@@ -151,6 +151,9 @@ type
       string arg (a function result) — the transient is passed borrowed and
       disposed after the call (rc=1 owned = bare _StringRelease). }
     procedure TestClosure_OwnedTransientArg_Disposed;
+    { self-cross-compile leg 38b(ii): a STATEMENT-position closure call (result
+      discarded) — a fat callee routes to the fat-pointer call path. }
+    procedure TestClosure_StatementPositionCall;
     { slice 40: assembler/nostackframe routines — verbatim arm64 bodies }
     procedure TestAsmRoutines_NoStackFrame;
     { slice 43: pointers — deref reads, pointer writes, addr-of, casts }
@@ -3389,6 +3392,31 @@ begin
   AssertTrue('transient released after the closure call', PosRel > PosCall);
   { transient pointers are held in callee-saved x19 across the call }
   AssertTrue('transient held callee-saved', Pos(#9'mov x19, x0', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestClosure_StatementPositionCall;
+var
+  AsmT: string;
+begin
+  { A closure call in statement position (the result is discarded) must route a
+    fat callee through the fat-pointer call path — load Env into x0, Code into
+    x9, blr — not the plain single-pointer indirect-call path. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type TProc = reference to procedure(x: Integer);
+    procedure Run(P: TProc; v: Integer);
+    begin
+      P(v)
+    end;
+    begin
+      Run(procedure(x: Integer) begin WriteLn(x) end, 42)
+    end.
+    ''');
+  { the fat call loads Env (x0) and Code (x9) and blr's }
+  AssertTrue('Env -> x0', Pos(#9'ldr x0, [x10, #8]', AsmT) >= 0);
+  AssertTrue('Code -> x9', Pos(#9'ldr x9, [x10]', AsmT) >= 0);
+  AssertTrue('fat call blr', Pos(#9'blr x9', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestAsmRoutines_NoStackFrame;
