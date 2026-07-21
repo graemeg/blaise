@@ -97,6 +97,9 @@ type
     { BUG-20260720-qbe-dynarray-intf-elem-read: read a dyn-array-of-interface
       element as a method receiver, an assignment source, and a call argument. }
     procedure TestRun_DynArrayOfInterface_ElementRead;
+    { arm64 leg 40: IntfVar := Obj.Method() where a class-receiver method
+      returns an interface — the fat pointer round-trips and dispatches. }
+    procedure TestRun_InterfaceAssign_FromMethodResult;
   end;
 
 implementation
@@ -938,6 +941,34 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     'recv=bbb' + LE + 'assign=ccc' + LE + 'arg=aaa' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_InterfaceAssign_FromMethodResult;
+const
+  Src = '''
+    program P;
+    type
+      IGreeter = interface
+        function Greet: Integer;
+      end;
+      THi = class(TObject, IGreeter)
+        function Greet: Integer;
+        function GetSelf: IGreeter;
+      end;
+    function THi.Greet: Integer; begin Result := 7 end;
+    function THi.GetSelf: IGreeter; begin Result := Self end;
+    var H: THi; G: IGreeter;
+    begin
+      H := THi.Create();
+      G := H.GetSelf();
+      WriteLn(G.Greet());
+      G := nil;
+      H.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '7' + LE, 0);
 end;
 
 initialization

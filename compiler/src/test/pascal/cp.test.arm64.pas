@@ -114,6 +114,10 @@ type
     procedure TestReflection_SupportsInheritsFromMetaclass;
     { slice 25: interface parameters and results }
     procedure TestInterfaceParamsAndResults;
+    { self-cross-compile leg 40: IntfVar := Obj.Method() where the class-receiver
+      method RETURNS an interface — the x8 sret fat pointer lands in __iret and
+      is stored into the var's two slots (release-old, no caller retain). }
+    procedure TestInterfaceAssign_FromMethodCall;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -2245,6 +2249,42 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;
+var
+  AsmT: string;
+begin
+  { IntfVar := Obj.Method() where the class-receiver method returns an
+    interface: the callee writes the 16-byte fat pointer through x8 into __iret;
+    the caller releases the old interface value and stores both halves (obj and
+    itab) with no extra retain (the returned obj is owned +1). }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IGreeter = interface
+        function Greet: Int64;
+      end;
+      THi = class(TObject, IGreeter)
+        function Greet: Int64;
+        function GetSelf: IGreeter;
+      end;
+    function THi.Greet: Int64; begin Result := 7 end;
+    function THi.GetSelf: IGreeter; begin Result := Self end;
+    var H: THi; G: IGreeter;
+    begin
+      H := THi.Create();
+      G := H.GetSelf();
+      WriteLn(G.Greet());
+      G := nil
+    end.
+    ''');
+  { the old interface value is released before the new fat pointer is stored }
+  AssertTrue('release old before store', Pos(#9'bl _ClassRelease', AsmT) >= 0);
+  { both halves of the returned fat pointer are unpacked from __iret }
+  AssertTrue('obj half stored', Pos(#9'ldr x0, [x9]', AsmT) >= 0);
+  AssertTrue('itab half stored', Pos(#9'ldr x0, [x9, #8]', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestFloatPropRead_And_StringGlobalInit;

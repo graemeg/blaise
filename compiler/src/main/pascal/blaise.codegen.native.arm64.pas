@@ -4123,6 +4123,28 @@ begin
     EmitStoreSlot('x0', AAsgn.Name + '_itab');
     Exit;
   end;
+  if (AAsgn.Expr is TMethodCallExpr) and
+     (TMethodCallExpr(AAsgn.Expr).ResolvedMethod <> nil) and
+     not TMethodCallExpr(AAsgn.Expr).IsConstructorCall then
+  begin
+    { class-receiver method returning an interface (IntfVar := Obj.Method()):
+      EmitRecCallDispatch handles the receiver (static / ObjExpr / named-slot /
+      var-param) and virtual dispatch, filling the 16-byte __iret scratch
+      through x8 — the same x8 sret path an interface-returning FUNCTION uses.
+      The returned obj is OWNED (+1), so release the old value and store both
+      halves with no caller retain (as the function-call arm above does).  An
+      INTERFACE-receiver method call (ResolvedMethod = nil, itab dispatch) has
+      no sret support yet and stays an honest hole. }
+    EmitRecCallDispatch(AAsgn.Expr, '__iret');
+    EmitLoadSlot('x0', AAsgn.Name);
+    Self.Emit(#9'bl _ClassRelease');
+    EmitSlotAddr('x9', '__iret');
+    Self.Emit(#9'ldr x0, [x9]');
+    EmitStoreSlot('x0', AAsgn.Name);
+    Self.Emit(#9'ldr x0, [x9, #8]');
+    EmitStoreSlot('x0', AAsgn.Name + '_itab');
+    Exit;
+  end;
   NotYet('interface assignment from this expression', AAsgn);
 end;
 
