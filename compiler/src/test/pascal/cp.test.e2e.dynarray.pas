@@ -61,6 +61,9 @@ type
       C.Arr[I] := V must reach the CALLER's array, for both an int element and
       a managed-record element. }
     procedure TestRun_VarParamRecordArrayFieldElemWrite;
+    { A dyn-array passed BY VALUE (non-const) — the callee co-owns its copy.
+      The value must survive the call and the caller's array stay intact. }
+    procedure TestRun_ByValueDynArrayParam;
   end;
 
 implementation
@@ -441,6 +444,27 @@ begin
       WriteLn(Ctx.Recs[0].N)
     end.
     ''', '42' + LE + '99' + LE + 'hello' + LE + '7' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_ByValueDynArrayParam;
+const
+  Src = '''
+    program P;
+    type TA = array of Integer;
+    function SumV(A: TA): Integer;
+    var i: Integer;
+    begin Result := 0; for i := 0 to Length(A) - 1 do Result := Result + A[i] end;
+    var d: TA;
+    begin
+      SetLength(d, 3); d[0] := 1; d[1] := 2; d[2] := 3;
+      WriteLn(SumV(d));
+      WriteLn(Length(d))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  { SumV owns its copy (retain/release); the caller's d survives intact. }
+  AssertRunsOnAll(Src, '6' + LE + '3' + LE, 0);
 end;
 
 initialization

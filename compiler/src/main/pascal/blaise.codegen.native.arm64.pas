@@ -6740,7 +6740,7 @@ begin
                 ((Par.ResolvedType <> nil) and
                  (Par.ResolvedType.Kind in [tyDouble, tySingle, tyString,
                                             tyClass, tyProcedural,
-                                            tyPointer, tyPChar]))) then
+                                            tyPointer, tyPChar, tyDynArray]))) then
           NotYet('parameter ''' + Par.ParamName + ''' of this type', ADecl);
         AddLocal(Par.ParamName, 8);
         { a BY-VALUE string param is the callee's own copy: retained in the
@@ -6749,6 +6749,15 @@ begin
         if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tyString)
            and not Par.IsConstParam then
           FStrLocals.Add(Par.ParamName);
+        { a BY-VALUE dyn-array param is likewise the callee's own co-owning
+          reference (both are 8-byte ref-counted pointers): retain it in the
+          prologue and release it with the dyn-array locals at scope exit.  A
+          const dyn-array param borrows — no ARC.  (x86-64/QBE currently omit
+          this retain for by-value dyn-array params — a latent under-retain gap
+          logged separately; arm64 does it correctly.) }
+        if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tyDynArray)
+           and not Par.IsConstParam then
+          FDynLocals.Add(Par.ParamName);
       end;
     end;
     if ADecl.ResolvedReturnType <> nil then
@@ -7234,6 +7243,14 @@ begin
     begin
       EmitLoadSlot('x0', Par.ParamName);
       Self.Emit(#9'bl _ClassAddRef');
+    end;
+    { by-value dyn-array param: co-owning copy — retain here, released with the
+      dyn-array locals at scope exit (registered in FDynLocals above). }
+    if (Par.ResolvedType <> nil) and
+       (Par.ResolvedType.Kind = tyDynArray) and not Par.IsConstParam then
+    begin
+      EmitLoadSlot('x0', Par.ParamName);
+      Self.Emit(#9'bl _DynArrayAddRef');
     end;
   end;
   { pass 2: copy the bytes of every pointer-passed record param into its
@@ -8130,8 +8147,15 @@ begin
               (Arg is TNilLiteral) or
               ((Arg.ResolvedType <> nil) and
                (Arg.ResolvedType.Kind in [tyPChar, tyPointer,
-                                          tyClass, tyProcedural])) then
+                                          tyClass, tyProcedural, tyDynArray])) then
       begin
+        { A dyn-array argument is an 8-byte ref-counted data pointer.  The callee
+          owns its copy (a by-value dyn-array param retains in the prologue; a
+          const param borrows), so the caller passes a BORROWED pointer — the
+          same single-register pass as a class/pointer arg.  (An owned-transient
+          dyn-array arg — a function returning a dyn-array passed straight to a
+          call — would need post-call disposal like the string path; not yet
+          exercised, so kept simple.) }
         if (Arg.ResolvedType <> nil) and
            (Arg.ResolvedType.Kind = tyProcedural) and
            (TProceduralTypeDesc(Arg.ResolvedType).IsMethodPtr or

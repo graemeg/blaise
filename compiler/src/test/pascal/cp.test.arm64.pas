@@ -288,6 +288,10 @@ type
       AddRef'd before it lands in the slot (else scope-exit release goes
       immortal); a var-param string derefs the slot to reach the caller's var. }
     procedure TestSetLengthOnString_AddRefsAndVarParam;
+    { self-cross-compile leg 35: a by-value DYNAMIC-ARRAY parameter — const
+      borrows (no ARC), a by-value param retains in the prologue and releases at
+      scope exit; a dyn-array passes as one register at the call site. }
+    procedure TestDynArrayParam_ConstBorrowsByValueRetains;
     procedure TestVarParamRecordArrayFieldElemWrite;
     procedure TestRecordArrayElementRead;
     procedure TestVarParamClassArrayFieldElemWriteStillNotYet;
@@ -5036,6 +5040,45 @@ begin
   AssertTrue('old released', Pos(#9'bl _StringRelease', AsmT) >= 0);
   { the var-param form derefs the slot address to reach the caller's string }
   AssertTrue('var-param slot dereferenced', Pos(#9'ldr x19, [x19]', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestDynArrayParam_ConstBorrowsByValueRetains;
+var
+  AsmT: string;
+begin
+  { A dyn-array parameter is an 8-byte ref-counted pointer.  A const param
+    borrows (the callee touches no ARC); a by-value param is a co-owning copy —
+    retained in the prologue and released at scope exit — mirroring a by-value
+    string param.  The dyn-array passes as one register at the call site.  This
+    program exercises exactly one by-value dyn-array param (SumV), so exactly
+    one _DynArrayAddRef must be emitted (the const SumC borrows). }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type TA = array of Integer;
+    function SumC(const A: TA): Integer;
+    var i: Integer;
+    begin Result := 0; for i := 0 to Length(A) - 1 do Result := Result + A[i] end;
+    function SumV(A: TA): Integer;
+    var i: Integer;
+    begin Result := 0; for i := 0 to Length(A) - 1 do Result := Result + A[i] end;
+    var d: TA;
+    begin
+      SetLength(d, 3); d[0] := 1; d[1] := 2; d[2] := 3;
+      WriteLn(SumC(d));
+      WriteLn(SumV(d))
+    end.
+    ''');
+  { the param is used via Length + subscript in both bodies }
+  AssertTrue('dyn-array length in body', Pos(#9'bl _DynArrayLength', AsmT) >= 0);
+  { the by-value param (SumV) retains — a prologue _DynArrayAddRef appears }
+  AssertTrue('by-value param retains',
+    Pos(#9'bl _DynArrayAddRef', AsmT) >= 0);
+  { there is exactly ONE such retain — the const param (SumC) borrows, so a
+    second _DynArrayAddRef past the first must not exist }
+  AssertTrue('only the by-value param retains (const borrows)',
+    PosEx(#9'bl _DynArrayAddRef', AsmT,
+      Pos(#9'bl _DynArrayAddRef', AsmT) + 1) < 0);
 end;
 
 procedure TArm64BackendTests.TestVarParamRecordArrayFieldElemWrite;
