@@ -9708,11 +9708,11 @@ begin
     end;
   end;
 
-  { record instances need record methods; method-level <T> instances need
-    their own mangling story — both stay honest holes }
-  if (AProg.GenericRecordInstances.Count > 0) or
-     (AProg.GenericMethodInstances.Count > 0) then
-    NotYet('generic record/method instantiations', nil);
+  { record instances need record methods and stay an honest hole.  Method-level
+    <T> instances are emitted below (leg 37) — a monomorphised method decl flows
+    through EmitFunctionDef exactly like a generic FUNCTION instance. }
+  if AProg.GenericRecordInstances.Count > 0 then
+    NotYet('generic record instantiations', nil);
 
   { generic CLASS instances: wrap each monomorphised clone in a synthetic
     TTypeDecl so it flows through the ordinary class machinery (methods,
@@ -9752,6 +9752,17 @@ begin
       TGenericFuncInstance(AProg.GenericFuncInstances.Items[I]).MethodDecl,
       True);
 
+  { Generic METHOD instances (leg 37): a method with its own <T> monomorphised
+    at a call site.  Its MethodDecl is a fully concrete method (mangled name via
+    ResolvedQbeName, OwnerTypeName set), so it emits exactly like a generic
+    function instance — weak-bound for cross-unit dedup. }
+  for I := 0 to AProg.GenericMethodInstances.Count - 1 do
+    if TGenericMethodInstance(
+         AProg.GenericMethodInstances.Items[I]).MethodDecl.Body <> nil then
+      EmitFunctionDef(
+        TGenericMethodInstance(AProg.GenericMethodInstances.Items[I]).MethodDecl,
+        True);
+
   { Class method bodies (LinkClassMethodImpls placed them on the class
     defs), then the ARC field-cleanup functions. }
   for I := 0 to FClassDecls.Count - 1 do
@@ -9761,8 +9772,10 @@ begin
     begin
       Decl := TMethodDecl(CDef.Methods.Items[J]);
       if Decl.Body = nil then Continue;
-      if Decl.TypeParams <> nil then
-        NotYet('generic methods', Decl);
+      { A generic method TEMPLATE (its own <T>) is not concrete code — skip it,
+        like the standalone-func skip above; its monomorphised instances are
+        emitted from GenericMethodInstances (leg 37). }
+      if Decl.TypeParams <> nil then Continue;
       EmitFunctionDef(Decl,
         Pos('<', TTypeDecl(FClassDecls.Items[I]).Name) >= 0);
     end;
@@ -9947,8 +9960,9 @@ var
         begin
           MDcl := TMethodDecl(UDef.Methods.Items[M]);
           if MDcl.Body = nil then Continue;
-          if MDcl.TypeParams <> nil then
-            NotYet('generic methods', MDcl);
+          { generic method template — not concrete code; instances emitted from
+            GenericMethodInstances below (leg 37) }
+          if MDcl.TypeParams <> nil then Continue;
           EmitFunctionDef(MDcl);
         end;
         Continue;
@@ -9981,13 +9995,11 @@ begin
   Self.Emit('.text');
   CheckTypeSubset(AUnit.IntfBlock.TypeDecls);
   CheckTypeSubset(AUnit.ImplBlock.TypeDecls);
-  { generic record/method instances still need their stories; CLASS and
-    FUNCTION instances flow through the same wrapper machinery as the
-    program path — weak symbols collapse duplicates across units }
-  if (AUnit.GenericRecordInstances.Count > 0) or
-     (AUnit.GenericMethodInstances.Count > 0) then
-    NotYet('generic record/method instantiations in unit ' + AUnit.Name,
-      nil);
+  { generic record instances still need their story.  CLASS, FUNCTION and (as
+    of leg 37) METHOD instances flow through the same wrapper machinery as the
+    program path — weak symbols collapse duplicates across units. }
+  if AUnit.GenericRecordInstances.Count > 0 then
+    NotYet('generic record instantiations in unit ' + AUnit.Name, nil);
   for I := 0 to AUnit.GenericInstances.Count - 1 do
   begin
     { interface-implementing instances flow through too — their itab +
@@ -10004,6 +10016,13 @@ begin
     EmitFunctionDef(
       TGenericFuncInstance(AUnit.GenericFuncInstances.Items[I]).MethodDecl,
       True);
+  { generic METHOD instances (leg 37) — weak-bound like the func instances }
+  for I := 0 to AUnit.GenericMethodInstances.Count - 1 do
+    if TGenericMethodInstance(
+         AUnit.GenericMethodInstances.Items[I]).MethodDecl.Body <> nil then
+      EmitFunctionDef(
+        TGenericMethodInstance(AUnit.GenericMethodInstances.Items[I]).MethodDecl,
+        True);
 
   Self.Emit('.text');
   for I := 0 to AUnit.ImplBlock.ProcDecls.Count - 1 do

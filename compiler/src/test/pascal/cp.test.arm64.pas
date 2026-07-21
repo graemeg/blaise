@@ -139,6 +139,10 @@ type
     procedure TestClassAttributes_TablesAndBuiltins;
     { slice 39: generic class/function instances — bare names, weak bind }
     procedure TestGenericInstances_WeakEmission;
+    { self-cross-compile leg 37: a generic METHOD (its own <U>) monomorphised at
+      a call site — the concrete instance body is emitted weak-bound, like a
+      generic function instance, and the call site references the same label. }
+    procedure TestGenericMethodInstance_WeakEmission;
     { slice 40: assembler/nostackframe routines — verbatim arm64 bodies }
     procedure TestAsmRoutines_NoStackFrame;
     { slice 43: pointers — deref reads, pointer writes, addr-of, casts }
@@ -3265,6 +3269,43 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64BackendTests.TestGenericMethodInstance_WeakEmission;
+var
+  AsmT: string;
+begin
+  { A generic METHOD (its own <U>) is monomorphised at the call site.  Its
+    concrete instance body is emitted weak-bound (cross-unit dedup, like a
+    generic function instance), and the call site references the same mangled
+    label.  AddBase<U> also reads FBase (Self access inside a generic method). }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TBox = class
+        FBase: Integer;
+        function Wrap<U>(x: U): U;
+        function AddBase<U>(x: Integer): Integer;
+      end;
+    function TBox.Wrap<U>(x: U): U; begin Result := x end;
+    function TBox.AddBase<U>(x: Integer): Integer; begin Result := x + FBase end;
+    var b: TBox;
+    begin
+      b := TBox.Create();
+      b.FBase := 10;
+      WriteLn(b.Wrap<Integer>(5));
+      WriteLn(b.AddBase<Integer>(7))
+    end.
+    ''');
+  { the monomorphised instance bodies are emitted with weak binding }
+  AssertTrue('Wrap instance body', Pos('TBox_Wrap_Integer:', AsmT) >= 0);
+  AssertTrue('Wrap weak bind', Pos('.weak TBox_Wrap_Integer', AsmT) >= 0);
+  AssertTrue('AddBase instance body', Pos('TBox_AddBase_Integer:', AsmT) >= 0);
+  AssertTrue('AddBase weak bind', Pos('.weak TBox_AddBase_Integer', AsmT) >= 0);
+  { the call sites reference the same mangled labels }
+  AssertTrue('Wrap called', Pos(#9'bl TBox_Wrap_Integer', AsmT) >= 0);
+  AssertTrue('AddBase called', Pos(#9'bl TBox_AddBase_Integer', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestAsmRoutines_NoStackFrame;
