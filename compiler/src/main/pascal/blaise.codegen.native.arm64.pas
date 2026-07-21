@@ -2760,8 +2760,15 @@ begin
        tyStaticArray) then
   begin
     EmitStaticElemAddr(TStringSubscriptExpr(AExpr));
-    EmitElemLoad(TStaticArrayTypeDesc(
-      TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType);
+    { A record / nested static-array element evaluates to its ADDRESS (already
+      in x0) — it is used by reference downstream (whole-record copy, field
+      read/write, by-hidden-pointer arg).  Value-loading it would read the first
+      field/element instead (BUG: leg 32; mirrors x86-64 :9167). }
+    if not (TStaticArrayTypeDesc(
+              TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType.Kind
+              in [tyRecord, tyStaticArray]) then
+      EmitElemLoad(TStaticArrayTypeDesc(
+        TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType);
     Exit;
   end;
   if (AExpr is TStringSubscriptExpr) and
@@ -2770,8 +2777,12 @@ begin
        tyDynArray) then
   begin
     EmitDynElemAddr(TStringSubscriptExpr(AExpr));
-    EmitElemLoad(TDynArrayTypeDesc(
-      TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType);
+    { Record element: leave the element address in x0 (used by reference). }
+    if TDynArrayTypeDesc(
+         TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType.Kind
+         <> tyRecord then
+      EmitElemLoad(TDynArrayTypeDesc(
+        TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType);
     Exit;
   end;
   if (AExpr is TStringSubscriptExpr) and
@@ -2782,8 +2793,12 @@ begin
     { A[I] on an open-array param: element read through the borrowed
       data pointer — a string/class element stays a BORROW (no ARC) }
     EmitDynElemAddr(TStringSubscriptExpr(AExpr));
-    EmitElemLoad(TOpenArrayTypeDesc(
-      TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType);
+    { Record element: leave the element address in x0 (used by reference). }
+    if TOpenArrayTypeDesc(
+         TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType.Kind
+         <> tyRecord then
+      EmitElemLoad(TOpenArrayTypeDesc(
+        TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType);
     Exit;
   end;
   if AExpr is TMethodCallExpr then

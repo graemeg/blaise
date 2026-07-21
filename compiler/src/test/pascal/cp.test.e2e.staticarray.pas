@@ -99,6 +99,10 @@ type
     { GH #181 — Boolean is a valid 2-element ordinal index type. }
     procedure TestRun_BooleanIndex_TypeDecl;
     procedure TestRun_BooleanIndex_VarDecl;
+    { Reading a RECORD element out of a static/dynamic array — the element is a
+      value used by reference (whole-record copy, field read).  arm64 leg 32
+      hardened its element-read path; this guards the behaviour on QBE + native. }
+    procedure TestRun_RecordElement_ReadAndCopy;
   end;
 
 implementation
@@ -1034,6 +1038,31 @@ begin
       T.Free()
     end.
     ''', 'aa');
+end;
+
+procedure TE2EStaticArrayTests.TestRun_RecordElement_ReadAndCopy;
+const
+  Src =
+    '''
+    program P;
+    type TR = record A, B: Integer; S: string; end;
+    var arr: array[0..3] of TR; d: array of TR; r: TR;
+    begin
+      arr[1].A := 5; arr[1].B := 7; arr[1].S := 'hi';
+      r := arr[1];
+      WriteLn(r.A, ' ', arr[1].A, ' ', arr[1].B, ' ', arr[1].S);
+      SetLength(d, 2);
+      d[0].A := 9; d[0].S := 'yo';
+      r := d[0];
+      WriteLn(r.A, ' ', d[0].A, ' ', d[0].S)
+    end.
+    ''';
+var
+  LE: string;
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  LE := LineEnding;
+  AssertRunsOnAll(Src, '5 5 7 hi' + LE + '9 9 yo' + LE, 0);
 end;
 
 initialization

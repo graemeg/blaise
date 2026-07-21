@@ -282,6 +282,7 @@ type
       address) before adding the field offset, not take the slot's own address. }
     procedure TestSetLengthOnVarParamRecordField;
     procedure TestVarParamRecordArrayFieldElemWrite;
+    procedure TestRecordArrayElementRead;
     procedure TestVarParamClassArrayFieldElemWriteStillNotYet;
   end;
 
@@ -5011,6 +5012,39 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64BackendTests.TestRecordArrayElementRead;
+var
+  AsmT: string;
+begin
+  { Leg 32: reading a RECORD element out of an array — a record element
+    evaluates to its ADDRESS (used by reference: whole-record copy, field read),
+    not a value-load.  Previously EmitElemLoad NotYet'd 'array element of this
+    width' because it tried to ldr the whole record into one register.  The
+    element-address helper still computes base + index*stride (mul x1,x1,x2 +
+    add), then the copy/field-read consumes the address.  Covers a static and a
+    dynamic array of record, with a managed (string) field. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type TR = record A, B: Integer; S: string; end;
+    var arr: array[0..3] of TR; d: array of TR; r: TR;
+    begin
+      arr[1].A := 5; arr[1].S := 'hi';
+      r := arr[1];
+      SetLength(d, 2); d[0].A := 9;
+      r := d[0];
+      WriteLn(r.A)
+    end.
+    ''');
+  { the element address is computed (index scaled) — the record is then copied
+    by reference, NOT value-loaded into a single register }
+  AssertTrue('the record element index is scaled to an address',
+    Pos(#9'mul x1, x1, x2', AsmT) >= 0);
+  { a whole-record copy memcpy's from the element address }
+  AssertTrue('the record element is copied by memcpy',
+    Pos(#9'bl memcpy', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestVarParamClassArrayFieldElemWriteStillNotYet;
