@@ -284,6 +284,10 @@ type
       record — the field address must DEREF the var-param slot (caller's record
       address) before adding the field offset, not take the slot's own address. }
     procedure TestSetLengthOnVarParamRecordField;
+    { self-cross-compile leg 34: SetLength on a STRING — the rc=0 result must be
+      AddRef'd before it lands in the slot (else scope-exit release goes
+      immortal); a var-param string derefs the slot to reach the caller's var. }
+    procedure TestSetLengthOnString_AddRefsAndVarParam;
     procedure TestVarParamRecordArrayFieldElemWrite;
     procedure TestRecordArrayElementRead;
     procedure TestVarParamClassArrayFieldElemWriteStillNotYet;
@@ -5003,6 +5007,35 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64BackendTests.TestSetLengthOnString_AddRefsAndVarParam;
+var
+  AsmT: string;
+begin
+  { SetLength(S, N) on a string calls _StringSetLength, whose result is rc=0
+    (a fresh unowned buffer), so it MUST be AddRef'd before it is stored — else
+    the local's scope-exit release would drive the count negative (immortal /
+    leak).  A var-param string works through the slot ADDRESS with one extra
+    deref (slot = caller var-address).  Both forms release the old value. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    procedure Grow(var S: string; N: Integer); begin SetLength(S, N) end;
+    var t: string;
+    begin
+      t := 'xy'; SetLength(t, 4);
+      Grow(t, 6);
+      WriteLn(Length(t))
+    end.
+    ''');
+  AssertTrue('resize helper', Pos(#9'bl _StringSetLength', AsmT) >= 0);
+  { the rc=0 result is retained before it lands in the slot }
+  AssertTrue('result AddRef', Pos(#9'bl _StringAddRef', AsmT) >= 0);
+  { the old value is released }
+  AssertTrue('old released', Pos(#9'bl _StringRelease', AsmT) >= 0);
+  { the var-param form derefs the slot address to reach the caller's string }
+  AssertTrue('var-param slot dereferenced', Pos(#9'ldr x19, [x19]', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestVarParamRecordArrayFieldElemWrite;

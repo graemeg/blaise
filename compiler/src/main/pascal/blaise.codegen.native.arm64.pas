@@ -4287,20 +4287,36 @@ begin
      (TASTExpr(ACall.Args.Items[0]).ResolvedType <> nil) and
      TASTExpr(ACall.Args.Items[0]).ResolvedType.IsString() and
      (TASTExpr(ACall.Args.Items[0]) is TIdentExpr) and
-     (TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode = pmNone) then
+     (not TIdentExpr(TASTExpr(ACall.Args.Items[0])).IsImplicitSelf) and
+     (TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode in
+       [pmNone, pmVar]) then
   begin
-    { SetLength(S, N): S := _StringSetLength(S, N) — the result carries
-      its own +1, so release the old value and store (no extra retain) }
+    { SetLength(S, N): S := _StringSetLength(S, N).  The result comes back
+      rc=0 (StrAlloc allocates a fresh unowned buffer), so it must be AddRef'd
+      before it lands in the slot — otherwise the local's scope-exit release
+      drives 0 -> -1 = immortal/leak.  The old value is released.  Mirrors
+      x86-64 (:14907) and QBE (:11368); works through the slot ADDRESS so a
+      var/out param (slot = caller var-address, one extra deref) is handled by
+      the same path (leg 34). }
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
-    EmitPushX0();
-    EmitLoadSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
-    EmitPopTo('x1');
-    Self.Emit(#9'bl _StringSetLength');
-    EmitPushX0();
-    EmitLoadSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
-    Self.Emit(#9'bl _StringRelease');
-    EmitPopTo('x0');
-    EmitStoreSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
+    EmitPushX0();                                { [N] }
+    { x19 (callee-saved) = the address that holds the string pointer — survives
+      the three RTL calls below. }
+    Self.Emit(#9'str x19, [sp, #-16]!');
+    EmitSlotAddr('x19', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
+    if TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode <> pmNone then
+      { var/out param: the slot holds the caller variable's address. }
+      Self.Emit(#9'ldr x19, [x19]');
+    Self.Emit(#9'ldr x0, [x19]');                { old string pointer }
+    EmitPopTo('x1');                             { N }
+    Self.Emit(#9'bl _StringSetLength');          { x0 = new (rc=0) }
+    EmitPushX0();                                { [new] }
+    Self.Emit(#9'bl _StringAddRef');             { new +1 (x0 already = new) }
+    Self.Emit(#9'ldr x0, [x19]');                { old string pointer }
+    Self.Emit(#9'bl _StringRelease');            { old -1 }
+    EmitPopTo('x0');                             { new }
+    Self.Emit(#9'str x0, [x19]');                { store new through the address }
+    Self.Emit(#9'ldr x19, [sp], #16');           { restore x19 }
     Exit;
   end;
   if SameText(ACall.Name, 'SetLength') and (ACall.Args.Count = 2) and

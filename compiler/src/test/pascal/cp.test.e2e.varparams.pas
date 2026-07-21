@@ -43,6 +43,9 @@ type
       native backend previously rejected this ("var/out argument must be a
       variable or field"). }
     procedure TestRun_PointerDerefVarArg;
+    { SetLength on a var-param string — resizes the caller's string through the
+      slot address (arm64 leg 34; also the AddRef-the-rc0-result ARC fix). }
+    procedure TestRun_SetLengthVarParamString;
   end;
 
 implementation
@@ -267,6 +270,23 @@ procedure TE2EVarParamTests.TestRun_PointerDerefVarArg;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcPtrDeref, '7 11' + LE + '9' + LE, 0);
+end;
+
+procedure TE2EVarParamTests.TestRun_SetLengthVarParamString;
+const
+  Src = '''
+    program Prg;
+    procedure Grow(var S: string; N: Integer); begin SetLength(S, N) end;
+    var s: string;
+    begin
+      s := 'ab';
+      Grow(s, 5);
+      WriteLn(Length(s))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '5' + LE, 0);
 end;
 
 initialization
