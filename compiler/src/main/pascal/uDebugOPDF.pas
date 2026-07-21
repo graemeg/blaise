@@ -523,7 +523,10 @@ begin
   for I := 0 to AType.Members.Count - 1 do
   begin
     L('    # member: ' + AType.Members.Strings[I]);
-    L('    .quad ' + IntToStr(I) + '  # Value');
+    { The real stored ordinal, not the positional index — an explicit-ordinal
+      enum's members carry their own values, and the debugger must show them
+      (BUG-20260720-enum-explicit-ordinal-highlow). }
+    L('    .quad ' + IntToStr(AType.OrdinalAt(I)) + '  # Value');
     EmitStrField(AType.Members.Strings[I]);
   end;
 end;

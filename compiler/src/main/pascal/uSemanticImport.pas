@@ -212,7 +212,10 @@ begin
   for K := 0 to EnumDef.Members.Count - 1 do
   begin
     MName := EnumDef.Members.Strings[K];
-    EnumDesc.Members.Add(MName);
+    { Carry the ordinal across the unit boundary so an imported explicit-ordinal
+      enum's High/Low still fold correctly
+      (BUG-20260720-enum-explicit-ordinal-highlow). }
+    EnumDesc.AddMember(MName, EnumDef.OrdinalAt(K));
     if ASemantic <> nil then
       ASemantic.RegisterEnumMember(MName, EnumDesc, EnumDef.OrdinalAt(K));
   end;

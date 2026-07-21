@@ -39,9 +39,18 @@ type
     procedure TestRun_Enum_PointerWriteByContext;
     procedure TestRun_Enum_ProcTypeArgByContext;
     procedure TestRun_Enum_ReturnByContext;
-    { leg 21: High/Low of an enum type fold to compile-time ordinals
-      (High = last member's ordinal, Low = 0). }
+    { High/Low of an enum type fold to compile-time ordinals — the MAX / MIN
+      stored ordinal, which for a contiguous 0-based enum is member-count-1 / 0
+      but for an explicit-ordinal enum is the real max/min
+      (BUG-20260720-enum-explicit-ordinal-highlow). }
     procedure TestRun_Enum_HighLowBounds;
+    procedure TestRun_Enum_HighLow_ExplicitOrdinals;
+    procedure TestRun_Enum_HighLow_PartialExplicit;
+    procedure TestRun_Enum_HighLow_NonMonotonic;
+    procedure TestRun_Enum_HighLow_NegativeOrdinal;
+    procedure TestRun_Enum_HighLow_SingleExplicit;
+    procedure TestRun_Enum_HighLow_ForRange;
+    procedure TestRun_Enum_ExplicitOrdinal_RecordField;
   end;
 
 implementation
@@ -598,8 +607,8 @@ end;
 procedure TE2ECaseEnumTests.TestRun_Enum_HighLowBounds;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  { High(TColor) = ordinal of the last member (Blue = 2); Low(TColor) = 0.
-    Length of a static array folds to its element count. }
+  { Contiguous enum: High(TColor) = last member (Blue = 2); Low(TColor) = 0.
+    This is the no-regression case for the explicit-ordinal fix. }
   AssertRunsOnAll('''
     program Prg;
     type TColor = (Red, Green, Blue);
@@ -610,6 +619,115 @@ begin
       WriteLn(Length(A))
     end.
     ''', '2' + LineEnding + '0' + LineEnding + '8' + LineEnding, 0);
+end;
+
+procedure TE2ECaseEnumTests.TestRun_Enum_HighLow_ExplicitOrdinals;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { Explicit ordinals: High = max (10), Low = min (5) — NOT count-1 / 0. }
+  AssertRunsOnAll('''
+    program Prg;
+    type TE = (A = 5, B = 10);
+    begin
+      WriteLn(Ord(A));
+      WriteLn(Ord(B));
+      WriteLn(Ord(High(TE)));
+      WriteLn(Ord(Low(TE)))
+    end.
+    ''', '5' + LineEnding + '10' + LineEnding + '10' + LineEnding + '5' + LineEnding, 0);
+end;
+
+procedure TE2ECaseEnumTests.TestRun_Enum_HighLow_PartialExplicit;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { Partial explicit: C auto-continues from B=5 to 6; High = 6, Low = 0. }
+  AssertRunsOnAll('''
+    program Prg;
+    type TE = (A, B = 5, C);
+    begin
+      WriteLn(Ord(C));
+      WriteLn(Ord(High(TE)));
+      WriteLn(Ord(Low(TE)))
+    end.
+    ''', '6' + LineEnding + '6' + LineEnding + '0' + LineEnding, 0);
+end;
+
+procedure TE2ECaseEnumTests.TestRun_Enum_HighLow_NonMonotonic;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { Non-monotonic (legal in Blaise): the last member is NOT the max, so High
+    must fold the MAX over all members (20), not the last (15). }
+  AssertRunsOnAll('''
+    program Prg;
+    type TE = (A = 10, B = 20, C = 15);
+    begin
+      WriteLn(Ord(High(TE)));
+      WriteLn(Ord(Low(TE)))
+    end.
+    ''', '20' + LineEnding + '10' + LineEnding, 0);
+end;
+
+procedure TE2ECaseEnumTests.TestRun_Enum_HighLow_NegativeOrdinal;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { Negative min ordinal: Low must fold to -3 (signed), not 0. }
+  AssertRunsOnAll('''
+    program Prg;
+    type TE = (A = -3, B = 2);
+    begin
+      WriteLn(Ord(High(TE)));
+      WriteLn(Ord(Low(TE)))
+    end.
+    ''', '2' + LineEnding + '-3' + LineEnding, 0);
+end;
+
+procedure TE2ECaseEnumTests.TestRun_Enum_HighLow_SingleExplicit;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { Single explicit member: High = Low = 42. }
+  AssertRunsOnAll('''
+    program Prg;
+    type TE = (Only = 42);
+    begin
+      WriteLn(Ord(High(TE)));
+      WriteLn(Ord(Low(TE)))
+    end.
+    ''', '42' + LineEnding + '42' + LineEnding, 0);
+end;
+
+procedure TE2ECaseEnumTests.TestRun_Enum_HighLow_ForRange;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { for e := Low(TE) to High(TE) must iterate the real ordinal range 5..10
+    (6 values), not 0..1. }
+  AssertRunsOnAll('''
+    program Prg;
+    type TE = (A = 5, B = 10);
+    var e: TE; n: Integer;
+    begin
+      n := 0;
+      for e := Low(TE) to High(TE) do n := n + 1;
+      WriteLn(n)
+    end.
+    ''', '6' + LineEnding, 0);
+end;
+
+procedure TE2ECaseEnumTests.TestRun_Enum_ExplicitOrdinal_RecordField;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { Ord() of an explicit-ordinal enum stored in a record field must read the
+    real ordinal (companion fix to TEnumTypeDesc.OrdinalOf). }
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TE = (A = 5, B = 10);
+      TR = record E: TE; end;
+    var r: TR;
+    begin
+      r.E := B;
+      WriteLn(Ord(r.E))
+    end.
+    ''', '10' + LineEnding, 0);
 end;
 
 initialization

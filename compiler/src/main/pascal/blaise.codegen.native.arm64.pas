@@ -1844,9 +1844,12 @@ begin
     Exit;
   end;
   { Type-level High/Low of an ENUM or scalar-integer argument — a compile-time
-    constant.  Enums are 0-based: Low=0, High=Members.Count-1.  Mirrors x86-64
-    (:7504-7520 / :7528-7542).  EmitIntLiteral materialises every immediate via
-    movz/movk (no sign-extension trap), so the large scalar bounds are exact. }
+    constant.  High(enum) is the MAX stored ordinal and Low(enum) the MIN (which
+    may be negative) — NOT member-count-1 / 0, since an explicit-ordinal enum
+    (TE=(A=5,B=10)) is not contiguous 0-based
+    (BUG-20260720-enum-explicit-ordinal-highlow).  Mirrors x86-64.
+    EmitIntLiteral materialises every immediate via movz/movk (no sign-extension
+    trap), so the large scalar bounds are exact. }
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (TFuncCallExpr(AExpr).Args.Count = 1) and
@@ -1861,7 +1864,7 @@ begin
       case TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind of
         tyEnum:     EmitIntLiteral('x0', TEnumTypeDesc(
           TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType)
-            .Members.Count - 1);
+            .MaxOrdinal());
         tyByte:     EmitIntLiteral('x0', 255);
         tyBoolean:  EmitIntLiteral('x0', 1);
         tySmallInt: EmitIntLiteral('x0', 32767);
@@ -1872,8 +1875,12 @@ begin
         tyUInt64:   EmitIntLiteral('x0', -1);   { all-ones bit pattern }
       end
     else
-      { Low: enum/byte/bool/word/unsigned = 0; signed ints reach their min }
+      { Low: enum = MIN stored ordinal (may be negative); byte/bool/word/unsigned
+        = 0; signed ints reach their min }
       case TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind of
+        tyEnum:     EmitIntLiteral('x0', TEnumTypeDesc(
+          TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType)
+            .MinOrdinal());
         tySmallInt: EmitIntLiteral('x0', -32768);
         tyInteger:  EmitIntLiteral('x0', -2147483648);
         tyInt64:    EmitIntLiteral('x0', Int64($8000000000000000));

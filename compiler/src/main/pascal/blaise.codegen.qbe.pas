@@ -11845,8 +11845,11 @@ begin
           tyUInt32:   EmitLine(Format('  %s =w copy 4294967295', [T]));
           tyInt64:    EmitLine(Format('  %s =l copy 9223372036854775807', [T]));
           tyUInt64:   EmitLine(Format('  %s =l copy 18446744073709551615', [T]));
+          { High(enum) is the MAX stored ordinal, not member-count-1 — an
+            explicit-ordinal enum (TE=(A=5,B=10)) is not contiguous 0-based
+            (BUG-20260720-enum-explicit-ordinal-highlow). }
           tyEnum:     EmitLine(Format('  %s =w copy %d', [T,
-            TEnumTypeDesc(TASTExpr(FC.Args.Items[0]).ResolvedType).Members.Count - 1]));
+            TEnumTypeDesc(TASTExpr(FC.Args.Items[0]).ResolvedType).MaxOrdinal()]));
         else
           begin
             { Open-array: load the high-index slot and truncate to Integer (w).
@@ -11869,7 +11872,12 @@ begin
               TStaticArrayTypeDesc(TASTExpr(FC.Args.Items[0]).ResolvedType).LowBound]));
           tyString:
             EmitLine(Format('  %s =w copy 0', [T]));
-          tyByte, tyBoolean, tyWord, tyUInt32, tyEnum:
+          { Low(enum) is the MIN stored ordinal (may be negative), not 0
+            (BUG-20260720-enum-explicit-ordinal-highlow). }
+          tyEnum:
+            EmitLine(Format('  %s =w copy %d', [T,
+              TEnumTypeDesc(TASTExpr(FC.Args.Items[0]).ResolvedType).MinOrdinal()]));
+          tyByte, tyBoolean, tyWord, tyUInt32:
             EmitLine(Format('  %s =w copy 0', [T]));
           tySmallInt: EmitLine(Format('  %s =w copy -32768', [T]));
           tyInteger:  EmitLine(Format('  %s =w copy -2147483648', [T]));

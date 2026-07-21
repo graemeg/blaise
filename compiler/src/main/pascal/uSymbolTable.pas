@@ -160,10 +160,27 @@ type
     analyser's type-keyed reverse index (see ResolveEnumMember). }
   TEnumTypeDesc = class(TTypeDesc)
   public
-    Members: TStringList;  { owned — ordered member names }
+    { Owned — ordered member names.  Each member's explicit (or auto-continued)
+      ordinal is stored alongside the name in Members.Objects[] as a
+      PtrInt-boxed integer, mirroring the AST-level TEnumTypeDef.  This lets
+      High/Low fold from the real max/min ordinal rather than assuming a
+      contiguous 0-based enum (BUG-20260720-enum-explicit-ordinal-highlow). }
+    Members: TStringList;
     constructor Create(const AName: string);
     destructor  Destroy; override;
+    { Append a member with its ordinal.  Use this in preference to
+      Members.Add (which would box ordinal 0) so explicit ordinals survive. }
+    procedure   AddMember(const AMember: string; AOrdinal: Integer);
+    { Ordinal stored for the member at position AIndex. }
+    function    OrdinalAt(AIndex: Integer): Integer;
+    { Ordinal of a member by name, or -1 if not a member.  Returns the stored
+      ordinal (which may differ from the positional index for an
+      explicit-ordinal enum), NOT the index. }
     function    OrdinalOf(const AMember: string): Integer;
+    { Max / min stored ordinal — what High(TE) / Low(TE) must fold to.  Both
+      return 0 for an empty enum (never occurs — every enum has >= 1 member). }
+    function    MaxOrdinal: Integer;
+    function    MinOrdinal: Integer;
   end;
 
   { Set type descriptor.  BaseType is the element type (enum or ordinal such
@@ -1495,6 +1512,16 @@ begin
   inherited Destroy();
 end;
 
+procedure TEnumTypeDesc.AddMember(const AMember: string; AOrdinal: Integer);
+begin
+  Members.AddObject(AMember, TObject(Pointer(PtrUInt(AOrdinal))));
+end;
+
+function TEnumTypeDesc.OrdinalAt(AIndex: Integer): Integer;
+begin
+  Result := Integer(PtrUInt(Pointer(Members.Objects[AIndex])));
+end;
+
 function TEnumTypeDesc.OrdinalOf(const AMember: string): Integer;
 var
   I: Integer;
@@ -1502,9 +1529,39 @@ begin
   for I := 0 to Members.Count - 1 do
     if SameText(Members.Strings[I], AMember) then
     begin
-      Exit(I);
+      Exit(Self.OrdinalAt(I));
     end;
   Result := -1;
+end;
+
+function TEnumTypeDesc.MaxOrdinal: Integer;
+var
+  I, V: Integer;
+begin
+  if Members.Count = 0 then
+    Exit(0);
+  Result := Self.OrdinalAt(0);
+  for I := 1 to Members.Count - 1 do
+  begin
+    V := Self.OrdinalAt(I);
+    if V > Result then
+      Result := V;
+  end;
+end;
+
+function TEnumTypeDesc.MinOrdinal: Integer;
+var
+  I, V: Integer;
+begin
+  if Members.Count = 0 then
+    Exit(0);
+  Result := Self.OrdinalAt(0);
+  for I := 1 to Members.Count - 1 do
+  begin
+    V := Self.OrdinalAt(I);
+    if V < Result then
+      Result := V;
+  end;
 end;
 
 constructor TProceduralTypeDesc.Create(const AName: string);

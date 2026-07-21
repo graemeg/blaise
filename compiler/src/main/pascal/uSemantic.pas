@@ -3511,7 +3511,9 @@ begin
     Result := FTable.NewEnumType(EnumName);
     for K := 0 to Members.Count - 1 do
     begin
-      Result.Members.Add(Members.Strings[K]);
+      { Inline anon enums carry no explicit-ordinal syntax (the encoded list is
+        just names), so the ordinal is the position K. }
+      Result.AddMember(Members.Strings[K], K);
       RegisterEnumMember(Members.Strings[K], Result, K);
     end;
     FTable.DefineGlobal(TSymbol.Create(EnumName, skType, Result));
@@ -6281,7 +6283,9 @@ begin
       for K := 0 to EnumDef.Members.Count - 1 do
       begin
         MName := EnumDef.Members.Strings[K];
-        EnumDesc.Members.Add(MName);
+        { Carry the explicit ordinal onto the descriptor so High/Low fold
+          from the real max/min (BUG-20260720-enum-explicit-ordinal-highlow). }
+        EnumDesc.AddMember(MName, EnumDef.OrdinalAt(K));
         RegisterEnumMember(MName, EnumDesc, EnumDef.OrdinalAt(K));
       end;
       Sym := TSymbol.Create(TD.Name, skType, EnumDesc);

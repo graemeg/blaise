@@ -7613,8 +7613,11 @@ begin
           { High(UInt64) = 18446744073709551615, i.e. all-ones — the -1
             Int64 bit pattern; movabsq $-1 materialises it exactly. }
           tyUInt64:   Self.Emit(#9'movabsq $-1, %rax');
+          { High(enum) is the MAX stored ordinal, not member-count-1 — an
+            explicit-ordinal enum is not contiguous 0-based
+            (BUG-20260720-enum-explicit-ordinal-highlow). }
           tyEnum:     Self.EmitImmToReg(
-            TEnumTypeDesc(TASTExpr(FC.Args.Items[0]).ResolvedType).Members.Count - 1,
+            TEnumTypeDesc(TASTExpr(FC.Args.Items[0]).ResolvedType).MaxOrdinal(),
             '%rax', '%eax');
         else
           Self.Emit(#9'movq $0, %rax');
@@ -7630,6 +7633,12 @@ begin
         tyStaticArray:
           Self.EmitImmToReg(
             TStaticArrayTypeDesc(TASTExpr(FC.Args.Items[0]).ResolvedType).LowBound,
+            '%rax', '%eax');
+        { Low(enum) is the MIN stored ordinal (may be negative), not 0
+          (BUG-20260720-enum-explicit-ordinal-highlow). }
+        tyEnum:
+          Self.EmitImmToReg(
+            TEnumTypeDesc(TASTExpr(FC.Args.Items[0]).ResolvedType).MinOrdinal(),
             '%rax', '%eax');
         tySmallInt: Self.Emit(#9'movq $-32768, %rax');
         tyInteger:  Self.Emit(#9'movq $-2147483648, %rax');
