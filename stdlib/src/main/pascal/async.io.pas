@@ -67,10 +67,20 @@ implementation
 uses
   SysUtils, async.fibers, async.reactor, Net.Sockets;
 
-{ WouldBlock/Interrupted are the P3 errno abstraction (runtime.errno.*),
-  swapped per build profile at link time. }
+{ WouldBlock/Interrupted/FdExhausted are the P3 errno abstraction
+  (runtime.errno.*), swapped per build profile at link time. }
 function WouldBlock(N: Int64): Boolean; external name 'WouldBlock';
 function Interrupted(N: Int64): Boolean; external name 'Interrupted';
+{ True when the call failed with EMFILE/ENFILE (out of file descriptors).
+  Such a call cannot succeed until an fd is freed, so retrying it in a tight
+  loop just burns a core — the accept path backs off instead (GH #189). }
+function FdExhausted(N: Int64): Boolean; external name 'FdExhausted';
+
+const
+  { Back-off between accept retries when the process is out of file descriptors.
+    Long enough that a spin can't peg a core, short enough that the listener
+    resumes accepting promptly once in-flight connections close and free fds. }
+  FD_EXHAUSTED_BACKOFF_MS = 10;
 
 function c_fcntl3(AFd, ACmd, AArg: Integer): Integer; external name 'fcntl';
 function c_accept4(AFd: Integer; AAddr, AAddrLen: Pointer; AFlags: Integer): Integer;
@@ -279,6 +289,21 @@ begin
       c_fcntl3(AListenFd, F_SETFL,
         c_fcntl3(AListenFd, F_GETFL, 0) and (not O_NONBLOCK()));
       Continue;
+    end;
+    if FdExhausted(Int64(Fd)) then
+    begin
+      { Out of file descriptors (EMFILE/ENFILE).  The pending SYN keeps the
+        listener readable, so retrying immediately spins a core to no end — the
+        accept cannot succeed until an in-flight connection closes and frees an
+        fd.  Back off by parking on the timer heap so other fibers run and
+        release their fds; then retry.  Off-scheduler (no fiber) there is no one
+        to yield to, so surface the error to the blocking caller.  (GH #189) }
+      if CurrentFiberTask() <> nil then
+      begin
+        FiberSleep(FD_EXHAUSTED_BACKOFF_MS);
+        Continue;
+      end;
+      Exit(Fd);
     end;
     Exit(Fd);
   end;

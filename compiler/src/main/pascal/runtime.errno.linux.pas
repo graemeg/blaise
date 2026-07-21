@@ -38,6 +38,12 @@ function WouldBlock(N: Int64): Boolean;
 { True when N is the return value of a call interrupted by a signal (EINTR). }
 function Interrupted(N: Int64): Boolean;
 
+{ True when N is the return value of a call that failed because the process
+  (EMFILE) or the whole system (ENFILE) is out of file descriptors.  The fiber
+  accept/socket paths back off on this instead of busy-retrying a call that
+  cannot succeed until an fd is freed. }
+function FdExhausted(N: Int64): Boolean;
+
 { The current thread's errno value.  Returns 0 in the static profile (raw
   syscalls carry the errno in their negative return instead). }
 function GetOsErrno: Integer;
@@ -47,6 +53,8 @@ implementation
 const
   EINTR = 4;
   EAGAIN = 11;   { EWOULDBLOCK = EAGAIN on Linux }
+  EMFILE = 24;   { per-process fd limit reached }
+  ENFILE = 23;   { system-wide fd limit reached }
 
 type
   PInteger = ^Integer;
@@ -64,6 +72,11 @@ end;
 function WouldBlock(N: Int64): Boolean;
 begin
   Result := (N = -1) and (GetOsErrno() = EAGAIN);
+end;
+
+function FdExhausted(N: Int64): Boolean;
+begin
+  Result := (N = -1) and ((GetOsErrno() = EMFILE) or (GetOsErrno() = ENFILE));
 end;
 
 function Interrupted(N: Int64): Boolean;

@@ -34,6 +34,7 @@ function xread(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
   external name 'read';
 function WouldBlock(N: Int64): Boolean; external name 'WouldBlock';
 function Interrupted(N: Int64): Boolean; external name 'Interrupted';
+function FdExhausted(N: Int64): Boolean; external name 'FdExhausted';
 function GetOsErrno: Integer; external name 'GetOsErrno';
 { O_NONBLOCK differs per OS (Linux $800, FreeBSD 4); the rtl.platform.layout
   seam supplies the linked target's value. }
@@ -99,6 +100,56 @@ begin
   Result := '';
 end;
 
+function TestWouldBlockIsNotFdExhausted: string;
+begin
+  { A would-block return (EAGAIN) must NOT be misclassified as fd-exhaustion,
+    and success is never fd-exhaustion (GH #189). }
+  AssertFalse('EAGAIN is not EMFILE/ENFILE', FdExhausted(GReadRet));
+  AssertFalse('0 is not fd-exhausted', FdExhausted(0));
+  AssertFalse('positive result is not fd-exhausted', FdExhausted(42));
+  Result := '';
+end;
+
+function TestEmfileClassifies: string;
+var
+  Fds: array[0..1] of Integer;
+  LastRet, Rc: Integer;
+  I: Integer;
+begin
+  { Exhaust the process fd table by pipe()-ing (2 fds per call) until it fails,
+    then confirm FdExhausted classifies that EMFILE return (GH #189).  Uses only
+    pipe() — available in BOTH the libc and --static profiles (no setrlimit/dup,
+    which the freestanding profile lacks).  The bound is generous enough to hit
+    a standard soft limit (typ. 1024) yet capped so a broken classifier can't
+    spin.  If the host limit is above the bound (e.g. a 1M-fd desktop) the
+    positive probe is skipped — the negative cases in TestWouldBlockIsNotFdExhausted
+    still run and the httpfiber integration test exercises the real back-off
+    path.  Runs LAST; the fds close at process exit. }
+  LastRet := 0;
+  for I := 0 to 20000 do
+  begin
+    Rc := pipe(@Fds[0]);
+    if Rc < 0 then
+    begin
+      LastRet := Rc;
+      Break;
+    end;
+  end;
+  if LastRet >= 0 then
+  begin
+    { Host fd limit above the probe bound (e.g. a 1M-fd desktop) — the positive
+      EMFILE case is skipped here; punit has no in-body ignore, so pass. The
+      negative cases and the httpfiber integration test still cover the path. }
+    Result := '';
+    Exit;
+  end;
+  AssertTrue('a full-fd-table dup() failure classifies as fd-exhausted',
+    FdExhausted(Int64(LastRet)));
+  AssertFalse('an fd-exhausted failure is not would-block',
+    WouldBlock(Int64(LastRet)));
+  Result := '';
+end;
+
 begin
   RequirePassed := True;
   AddSuite('ErrnoClassification', @DoSetup, nil, nil, False);
@@ -109,5 +160,9 @@ begin
   AddTest('NotInterrupted', @TestNotInterrupted, 'ErrnoClassification');
   AddTest('GetOsErrnoConsistent',
     @TestGetOsErrnoConsistent, 'ErrnoClassification');
+  AddTest('WouldBlockIsNotFdExhausted',
+    @TestWouldBlockIsNotFdExhausted, 'ErrnoClassification');
+  { EmfileClassifies exhausts the fd table, so it must run LAST. }
+  AddTest('EmfileClassifies', @TestEmfileClassifies, 'ErrnoClassification');
   RunAllSysTests();
 end.

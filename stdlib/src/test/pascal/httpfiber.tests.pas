@@ -47,6 +47,46 @@ type
 
 implementation
 
+{ ---- fd-limit (RLIMIT_NOFILE) probe + raise -------------------------------
+  The high-concurrency test opens ~2 fds per client (a client socket + its
+  server-accepted peer) plus the listener, so N concurrent clients need roughly
+  2*N + slack file descriptors.  Under the common default soft limit of 1024
+  that structurally cannot complete: the excess clients sit in SYN-SENT forever
+  and the test deadlocks (GH #189).  Raise the soft limit toward the hard limit
+  first; if it still can't cover the desired N, the caller scales N down so the
+  test stays meaningful without depending on an unstated host limit. }
+type
+  TRLimit = record
+    RlimCur: UInt64;
+    RlimMax: UInt64;
+  end;
+
+function c_setrlimit(AResource: Integer; ARlim: Pointer): Integer;
+  external name 'setrlimit';
+function c_getrlimit(AResource: Integer; ARlim: Pointer): Integer;
+  external name 'getrlimit';
+
+const
+  RLIMIT_NOFILE = 7;   { Linux x86_64 (FreeBSD = 8); this test is Linux CI }
+
+{ Raise the soft NOFILE limit toward the hard limit (or ADesired, whichever is
+  smaller) and return the resulting soft limit (0 on failure). }
+function RaiseFdLimit(ADesired: UInt64): UInt64;
+var
+  Rl: TRLimit;
+begin
+  if c_getrlimit(RLIMIT_NOFILE, @Rl) <> 0 then
+    Exit(0);
+  if ADesired > Rl.RlimMax then
+    Rl.RlimCur := Rl.RlimMax
+  else
+    Rl.RlimCur := ADesired;
+  c_setrlimit(RLIMIT_NOFILE, @Rl);
+  if c_getrlimit(RLIMIT_NOFILE, @Rl) <> 0 then
+    Exit(0);
+  Result := Rl.RlimCur;
+end;
+
 procedure TPathHandler.Handle(ARequest: THttpRequest; AResponse: THttpResponse);
 begin
   AResponse.SetText(200, 'text/plain', 'path=' + ARequest.Path);
@@ -293,25 +333,52 @@ end;
 procedure THttpFiberTests.TestFiberHttpHighConcurrency;
 const
   PORT = 29414;
-  NCLIENTS = 2000;
+  WANT = 2000;        { the C10k-proxy target when the fd budget allows it }
+  FLOOR = 200;        { still a meaningful concurrency test below this }
+  RESERVE = 40;       { listener + stdio + RTL fds held aside }
 var
-  I: Integer;
+  I, NClients: Integer;
+  SoftLimit, Budget: UInt64;
 begin
+  { Each client holds ~2 fds concurrently (its own socket + the server-accepted
+    peer).  Raise the soft NOFILE limit toward what WANT needs, then size the
+    client count to whatever the resulting limit actually permits — never demand
+    more fds than exist, which would deadlock (GH #189). }
+  SoftLimit := RaiseFdLimit(2 * WANT + RESERVE + 100);
+  if SoftLimit = 0 then
+  begin
+    Ignore('getrlimit unavailable — cannot size the fd budget');
+    Exit;
+  end;
+  Budget := 0;
+  if SoftLimit > RESERVE then
+    Budget := (SoftLimit - RESERVE) div 2;   { fds per client ~= 2 }
+  if Budget >= WANT then
+    NClients := WANT
+  else
+    NClients := Integer(Budget);
+  if NClients < FLOOR then
+  begin
+    Ignore('fd limit too low for a meaningful concurrency run (soft='
+      + IntToStr(Int64(SoftLimit)) + ')');
+    Exit;
+  end;
+
   GHttpServer := THttpFiberServer.Create(PORT);
   AssertTrue('http server start', GHttpServer.Start());
   GHandler := TPathHandler.Create();
   GPort := PORT;
   GDone := 0;
   GHcOk := 0;
-  GExpected := NCLIENTS;
+  GExpected := NClients;
 
   SpawnFiber(@HttpServerFiber, nil);
-  for I := 0 to NCLIENTS - 1 do
+  for I := 0 to NClients - 1 do
     SpawnFiber(@HcClientFiber, Pointer(I));
   RunScheduler();
 
   AssertEquals('every one of the concurrent client fibers got a correct 200',
-    NCLIENTS, GHcOk);
+    NClients, GHcOk);
   ResetScheduler();
   GHttpServer.Free();
   GHandler := nil;
