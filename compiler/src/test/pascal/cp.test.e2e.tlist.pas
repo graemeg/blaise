@@ -29,6 +29,10 @@ type
     procedure TestRun_TListInteger_AddGetCount;
     procedure TestRun_TListInteger_IndexOf;
     procedure TestRun_TListString_IndexOf_NotFound;
+    { A generic instantiated over a program-local RECORD type argument must be
+      accepted by the in-process analysis flow the test harness uses, exactly as
+      the CLI driver accepts it (BUG-041 guard). }
+    procedure TestRun_TList_RecordArg_FrontEndAccepts;
 
     { Class elements are RETAINED on store: an object whose only other
       reference was a local in an exited routine must survive in the list
@@ -130,6 +134,23 @@ const
     end.
     ''';
 
+  { BUG-041: TList<TInfo> where TInfo is a program-declared record must
+    instantiate under the in-process TUnitLoader.LoadAll ->
+    AnalyseUnitForExport -> Analyse(Prog) flow, not only via the CLI driver.
+    Kept to Create/Count/Free — the record-value Add/Get lifecycle is a
+    separate concern (BUG-002). }
+  SrcTListRecordArg = '''
+    program P;
+    uses generics.collections;
+    type TInfo = record X: Integer; end;
+    var L: TList<TInfo>;
+    begin
+      L := TList<TInfo>.Create();
+      WriteLn(L.Count);
+      L.Free()
+    end.
+    ''';
+
 procedure TE2ETListTests.SetUp;
 begin
   inherited SetUp();
@@ -186,6 +207,17 @@ begin
   AssertEquals('exit 0', 0, RCode);
   AssertTrue('IndexOf(beta)=1',          Pos('1',  Output) >= 0);
   AssertTrue('IndexOf(gamma)=-1',        Pos('-1', Output) >= 0);
+end;
+
+procedure TE2ETListTests.TestRun_TList_RecordArg_FrontEndAccepts;
+var
+  Output: string;
+  RCode:  Integer;
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  AssertTrue('compile+link+run', CompileAndRunWithRTL(SrcTListRecordArg, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertTrue('Count=0 printed', Pos('0', Output) >= 0);
 end;
 
 const
