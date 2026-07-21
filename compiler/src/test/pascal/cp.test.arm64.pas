@@ -143,6 +143,10 @@ type
       a call site — the concrete instance body is emitted weak-bound, like a
       generic function instance, and the call site references the same label. }
     procedure TestGenericMethodInstance_WeakEmission;
+    { self-cross-compile leg 38a: a capture-free closure ('reference to') — the
+      literal materialises a 16-byte fat value (Code, nil Env), passed by
+      address, copied into the callee's slot, and invoked (Env->x0, Code->blr). }
+    procedure TestClosure_CaptureFree_ValueParamCall;
     { slice 40: assembler/nostackframe routines — verbatim arm64 bodies }
     procedure TestAsmRoutines_NoStackFrame;
     { slice 43: pointers — deref reads, pointer writes, addr-of, casts }
@@ -3306,6 +3310,51 @@ begin
   { the call sites reference the same mangled labels }
   AssertTrue('Wrap called', Pos(#9'bl TBox_Wrap_Integer', AsmT) >= 0);
   AssertTrue('AddBase called', Pos(#9'bl TBox_AddBase_Integer', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestClosure_CaptureFree_ValueParamCall;
+var
+  AsmT: string;
+  Obj: string;
+  F: TMachOFile;
+begin
+  { A 'reference to' closure is a 16-byte fat value (Code at +0, Env at +8).  A
+    capture-free literal materialises it (Code = &thunk, Env = nil); the callee
+    receives a pointer to it and copies the 16 bytes into its own slot; a call
+    through it loads Env into x0 (the hidden first arg) and Code into x9 and
+    blr's. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type TIntFn = reference to function(x: Integer): Integer;
+    function Apply(P: TIntFn; v: Integer): Integer;
+    begin
+      Result := P(v)
+    end;
+    begin
+      WriteLn(Apply(function(x: Integer): Integer begin Result := x * 2 end, 5))
+    end.
+    ''');
+  { the anon thunk body is emitted }
+  AssertTrue('closure thunk emitted', Pos('__closure_1:', AsmT) >= 0);
+  { the literal materialises Code (&thunk) and a nil Env }
+  AssertTrue('Code = &thunk', Pos('__closure_1@PAGE', AsmT) >= 0);
+  AssertTrue('capture-free Env is nil', Pos(#9'str xzr, [x9, #8]', AsmT) >= 0);
+  { the callee copies the 16-byte fat value in via ldp/stp }
+  AssertTrue('param fat-value copy', Pos(#9'ldp x9, x10, [x1]', AsmT) >= 0);
+  { the call loads Env into x0 (hidden first arg) and Code into x9, then blr }
+  AssertTrue('Env -> x0', Pos(#9'ldr x0, [x10, #8]', AsmT) >= 0);
+  AssertTrue('Code -> x9', Pos(#9'ldr x9, [x10]', AsmT) >= 0);
+  AssertTrue('fat call blr', Pos(#9'blr x9', AsmT) >= 0);
+  { the whole thing must assemble into a valid Mach-O object }
+  Obj := AssembleArm64ToBytes(AsmT);
+  F := ParseMachO(Obj, 'arm64clos.o');
+  try
+    AssertTrue('has a text section',
+      F.FindSection('__TEXT', '__text') <> nil);
+  finally
+    F.Free();
+  end;
 end;
 
 procedure TArm64BackendTests.TestAsmRoutines_NoStackFrame;

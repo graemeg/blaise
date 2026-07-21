@@ -76,6 +76,9 @@ type
     procedure TestRun_GenericRefAlias_ClosureAtInteger;
     procedure TestRun_GenericRefAlias_ClosureAtString;
     procedure TestRun_GenericBody_CapturesTTypedLocal;
+    { arm64 leg 38a: a capture-free closure literal passed by value to a
+      function that invokes it — the minimal closure param/arg/call shape. }
+    procedure TestRun_CaptureFreeClosure_PassedAndCalled;
   end;
 
 implementation
@@ -1192,6 +1195,24 @@ begin
   AssertRunsOnAll(Src, '7' + LineEnding + 'seven' + LineEnding, 0)
 end;
 
+
+procedure TE2EAnonMethodTests.TestRun_CaptureFreeClosure_PassedAndCalled;
+const
+  Src = '''
+    program P;
+    type TIntFn = reference to function(x: Integer): Integer;
+    function Apply(P: TIntFn; v: Integer): Integer;
+    begin
+      Result := P(v)
+    end;
+    begin
+      WriteLn(Apply(function(x: Integer): Integer begin Result := x * 2 end, 5))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '10' + LineEnding, 0);
+end;
 
 initialization
   RegisterTest(TE2EAnonMethodTests);

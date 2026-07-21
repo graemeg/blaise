@@ -115,6 +115,9 @@ type
                                    the program exit }
     FRecLocals:   TStringList;   { record locals; Objects = TRecordTypeDesc }
     FRecGlobals:  TStringList;   { record program globals; Objects = desc }
+    FRefLocals:   TStringList;   { 'reference to' closure locals — the Env half
+                                   (+8) is _ClassRelease'd at scope exit (arkRefEnv) }
+    FRefGlobals:  TStringList;   { 'reference to' closure program globals }
     FGlobalSize:  TDictionary<string, Integer>;  { bss size per global }
     FFloatNames:  TStringList;   { program-level float globals (parallel
                                    subset of FGlobalNames' world) }
@@ -175,6 +178,15 @@ type
     procedure EmitRecAddrToX0(AExpr: TASTExpr);
     procedure EmitRecCallToRret(AExpr: TASTExpr);
     procedure EmitPropRecvToX0(AStmt: TFieldAssignment);
+    { Materialise an anonymous-method literal into its hidden 16-byte value slot
+      (Code at +0, Env at +8) and leave the slot ADDRESS in x0 — the fat value
+      is used by reference (leg 38).  For a capture-free literal Env is nil. }
+    procedure EmitAnonValueToSlot(AME: TAnonMethodExpr);
+    { Invoke a closure/method-pointer fat value whose ADDRESS is in AAddrReg:
+      load Code, pass Env as the hidden first arg (x0), the visible args in
+      x1.., blr.  Result in x0/d0 per the callee's return type. }
+    procedure EmitFatPtrCall(const AAddrReg: string; AProcType: TProceduralTypeDesc;
+      AArgs: TObjectList);
     { Release an owned-transient STRING value in x0 by shape, mirroring
       EmitCall's post-call disposal: a concat/rc=0 unowned transient
       (ArcExprIsUnownedStrTransient) needs AddRef+Release (0->1->0 frees once);
@@ -393,6 +405,17 @@ begin
                     tySmallInt, tyWord, tyBoolean, tyEnum]);
 end;
 
+{ A method-pointer ('of object') or closure ('reference to') procedural type —
+  a 16-byte FAT value: Code at +0, Data/Env at +8.  Mirrors the x86-64 unit's
+  IsMethodPtrType.  A plain proc pointer (neither flag) is a single code
+  pointer and is NOT matched here. }
+function IsMethodPtrType(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and (AType.Kind = tyProcedural) and
+    (TProceduralTypeDesc(AType).IsMethodPtr or
+     TProceduralTypeDesc(AType).IsReference);
+end;
+
 constructor TArm64Backend.Create(const ATarget: TTargetDesc);
 begin
   inherited Create(ATarget);
@@ -427,6 +450,8 @@ begin
   FDynGlobals := TStringList.Create();
   FRecLocals   := TStringList.Create();
   FRecGlobals  := TStringList.Create();
+  FRefLocals   := TStringList.Create();
+  FRefGlobals  := TStringList.Create();
   FGlobalSize  := TDictionary<string, Integer>.Create();
   FFrameSize   := 0;
   FLabelN      := 0;
@@ -439,6 +464,8 @@ begin
   FGlobalSize.Free();
   FRecGlobals.Free();
   FRecLocals.Free();
+  FRefLocals.Free();
+  FRefGlobals.Free();
   FStrGlobals.Free();
   FModuleVarNames.Free();
   FUnitInits.Free();
@@ -1094,6 +1121,82 @@ begin
   EmitLoadSlot('x0', AStmt.RecordName);
   if AStmt.IsVarParam then
     Self.Emit(#9'ldr x0, [x0]');
+end;
+
+procedure TArm64Backend.EmitAnonValueToSlot(AME: TAnonMethodExpr);
+var
+  MD: TMethodDecl;
+  Sym: string;
+begin
+  MD := TMethodDecl(AME.LiftedDecl);
+  if MD = nil then
+    NotYet('anonymous method not lifted (semantic pass required)', AME);
+  if AME.ValueSlotName = '' then
+    NotYet('anonymous method has no value slot', AME);
+  { x9 := &slot; release the old Env half (nil-safe), then write Code and Env. }
+  EmitSlotAddr('x9', AME.ValueSlotName);
+  Self.Emit(#9'ldr x0, [x9, #8]');            { old Env }
+  Self.Emit(#9'str x9, [sp, #-16]!');         { park &slot across the call }
+  Self.Emit(#9'bl _ClassRelease');
+  Self.Emit(#9'ldr x9, [sp], #16');
+  Sym := RoutineSym(MD, '');
+  Self.Emit(Format(#9'adrp x0, %s@PAGE', [Sym]));
+  Self.Emit(Format(#9'add x0, x0, %s@PAGEOFF', [Sym]));
+  Self.Emit(#9'str x0, [x9]');                { Code at +0 }
+  if MD.EnvCaptured <> nil then
+  begin
+    { capturing closure: Env is the enclosing frame's env pointer (block env if
+      the thunk names one), and the slot takes its own strong ref. }
+    if MD.EnvSlotName <> '' then
+      EmitLoadSlot('x0', MD.EnvSlotName)
+    else
+      EmitLoadSlot('x0', '__envp');
+    Self.Emit(#9'str x0, [x9, #8]');          { Env at +8 }
+    Self.Emit(#9'str x9, [sp, #-16]!');
+    Self.Emit(#9'bl _ClassAddRef');
+    Self.Emit(#9'ldr x9, [sp], #16');
+  end
+  else
+    Self.Emit(#9'str xzr, [x9, #8]');         { capture-free: Env = nil }
+  Self.Emit(#9'mov x0, x9');                  { yield the slot ADDRESS }
+end;
+
+procedure TArm64Backend.EmitFatPtrCall(const AAddrReg: string;
+  AProcType: TProceduralTypeDesc; AArgs: TObjectList);
+var
+  I: Integer;
+  Arg: TASTExpr;
+begin
+  { AAddrReg holds the address of the 16-byte fat value (Code at +0, Env/Self at
+    +8).  Evaluate and push every visible arg first (arg evaluation clobbers the
+    scratch regs), then load Env into x0 (the hidden first arg) and the visible
+    args into x1.., load Code into x9, and blr.  Only int-class scalar args in
+    this slice — a float/aggregate closure arg is an honest hole. }
+  if AArgs.Count > 7 then
+    NotYet('closure call with more than 7 arguments', nil);
+  { AAddrReg must survive the arg evaluation — park it. }
+  Self.Emit(Format(#9'str %s, [sp, #-16]!', [AAddrReg]));
+  for I := 0 to AArgs.Count - 1 do
+  begin
+    Arg := TASTExpr(AArgs.Items[I]);
+    if not (IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) or
+            (Arg is TNilLiteral) or
+            ((Arg.ResolvedType <> nil) and
+             (Arg.ResolvedType.Kind in [tyPChar, tyPointer, tyClass, tyString,
+                                        tyDynArray]))) then
+      NotYet('closure-call argument of this type', Arg);
+    if ArcExprOwnsRef(Arg) then
+      NotYet('owned transient argument in a closure call', Arg);
+    Self.EmitExprToX0(Arg);
+    EmitPushX0();
+  end;
+  { visible args -> x1.. (last pushed first) }
+  for I := AArgs.Count - 1 downto 0 do
+    EmitPopTo('x' + IntToStr(I + 1));
+  Self.Emit(#9'ldr x10, [sp], #16');          { x10 = &fat value }
+  Self.Emit(#9'ldr x0, [x10, #8]');           { Env -> hidden first arg (x0) }
+  Self.Emit(#9'ldr x9, [x10]');               { Code }
+  Self.Emit(#9'blr x9');
 end;
 
 procedure TArm64Backend.EmitOwnedStrTransientRelease(AValueExpr: TASTExpr);
@@ -1759,6 +1862,13 @@ begin
   if AExpr is TIntLiteral then
   begin
     EmitIntLiteral('x0', TIntLiteral(AExpr).Value);
+    Exit;
+  end;
+  if AExpr is TAnonMethodExpr then
+  begin
+    { closure literal: materialise the fat value into its hidden slot; x0 holds
+      the slot ADDRESS (the value is used by reference — leg 38). }
+    EmitAnonValueToSlot(TAnonMethodExpr(AExpr));
     Exit;
   end;
   if AExpr is TStringLiteral then
@@ -2427,6 +2537,23 @@ begin
       is pointer-preserving, treated as borrowed like the other backends). }
     Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
     EmitNarrowX0(AExpr.ResolvedType);
+    Exit;
+  end;
+  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
+     IsMethodPtrType(TTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType)) then
+  begin
+    { call through a closure / method-pointer variable (a 16-byte fat value):
+      route to EmitFatPtrCall with the ADDRESS of the fat value.  Non-float,
+      non-aggregate return only in this slice. }
+    if IsFloatExpr(AExpr) then
+      NotYet('float-returning closure call in integer context', AExpr);
+    if (AExpr.ResolvedType <> nil) and
+       (AExpr.ResolvedType.Kind in [tyRecord, tyInterface]) then
+      NotYet('aggregate-returning closure call', AExpr);
+    EmitSlotAddr('x9', TFuncCallExpr(AExpr).Name);
+    EmitFatPtrCall('x9',
+      TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType),
+      TFuncCallExpr(AExpr).Args);
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
@@ -6704,6 +6831,7 @@ begin
   FObjLocals.Clear();
   FIntfLocals.Clear();
   FDynLocals.Clear();
+  FRefLocals.Clear();
   if ADecl <> nil then
   begin
     { Captured outer-scope vars (leg 17): each gets a pointer-size '_cap_<Name>'
@@ -6775,18 +6903,22 @@ begin
             prologue memcpy pass copies the bytes into our own slot }
           AddLocal('__pptr_' + Par.ParamName, 8);
       end
+      else if IsMethodPtrType(Par.ResolvedType) then
+      begin
+        { closure / method-pointer param: a 16-byte fat value (Code, Env/Self).
+          It arrives as a POINTER to the caller's fat value in ONE integer
+          register (the jumbo-set / record-by-pointer convention); the prologue
+          memcpy pass copies the 16 bytes into our own slot via the '__pptr_'
+          companion.  BORROW — a by-value closure param does not retain the env
+          (matches x86-64/QBE), so it is NOT registered in FRefLocals. }
+        AddLocal(Par.ParamName, 16);
+        AddLocal('__pptr_' + Par.ParamName, 8);
+      end
       else
       begin
         { a by-value CLASS param is a plain borrowed pointer — the caller
           keeps ownership (only by-value strings retain in the prologue).
-          A PLAIN procedural param is one code pointer; method pointers
-          and closures are 16-byte fat pairs — not in the subset yet. }
-        if (Par.ResolvedType <> nil) and
-           (Par.ResolvedType.Kind = tyProcedural) and
-           (TProceduralTypeDesc(Par.ResolvedType).IsMethodPtr or
-            TProceduralTypeDesc(Par.ResolvedType).IsReference) then
-          NotYet('closure/method-pointer parameter ''' + Par.ParamName
-            + '''', ADecl);
+          A PLAIN procedural param is one code pointer. }
         if not (IsIntFam(Par.ResolvedType) or
                 ((Par.ResolvedType <> nil) and
                  (Par.ResolvedType.Kind in [tyDouble, tySingle, tyString,
@@ -6867,10 +6999,18 @@ begin
         AddLocal(VD.Names.Strings[J], VD.ResolvedType.RawSize());
         FRecLocals.AddObject(VD.Names.Strings[J], VD.ResolvedType);
       end
+      else if IsMethodPtrType(VD.ResolvedType) then
+        { closure / method-pointer local: a 16-byte fat value (Code, Env). }
+        AddLocal(VD.Names.Strings[J], 16)
       else
         AddLocal(VD.Names.Strings[J], 8);
       if VD.ResolvedType.Kind = tyString then
         FStrLocals.Add(VD.Names.Strings[J]);
+      { a 'reference to' closure local co-owns its Env — release it at scope
+        exit (arkRefEnv); a method-pointer's Data half is a borrowed receiver. }
+      if (VD.ResolvedType.Kind = tyProcedural) and
+         TProceduralTypeDesc(VD.ResolvedType).IsReference then
+        FRefLocals.Add(VD.Names.Strings[J]);
       if (VD.ResolvedType.Kind = tyClass) and not VD.IsWeak then
         FObjLocals.Add(VD.Names.Strings[J]);
       if VD.ResolvedType.Kind = tyDynArray then
@@ -7239,6 +7379,24 @@ begin
         FIdx := FIdx + 1;
       end;
     end
+    else if IsMethodPtrType(Par.ResolvedType) then
+    begin
+      { closure / method-pointer param: a POINTER to the caller's 16-byte fat
+        value arrives in one x reg (or on the stack when the int bank is full);
+        park it in '__pptr_' — pass 2 memcpys the 16 bytes into our slot. }
+      if J >= 8 then
+      begin
+        SPOff := AlignTo(SPOff, 8);
+        Self.Emit(Format(#9'ldr x9, [x29, #%d]', [16 + SPOff]));
+        EmitStoreSlot('x9', '__pptr_' + Par.ParamName);
+        SPOff := SPOff + 8;
+      end
+      else
+      begin
+        EmitStoreSlot('x' + IntToStr(J), '__pptr_' + Par.ParamName);
+        J := J + 1;
+      end;
+    end
     else
     begin
       if J >= 8 then
@@ -7324,6 +7482,15 @@ begin
       EmitLoadSlot('x1', '__pptr_' + Par.ParamName);
       EmitIntLiteral('x2', Par.ResolvedType.RawSize());
       Self.Emit(#9'bl memcpy');
+    end
+    else if IsMethodPtrType(Par.ResolvedType) and (not Par.IsVarParam) then
+    begin
+      { closure / method-pointer param: copy the 16-byte fat value from the
+        caller's block (address parked in '__pptr_') into our own slot. }
+      EmitLoadSlot('x1', '__pptr_' + Par.ParamName);
+      Self.Emit(#9'ldp x9, x10, [x1]');
+      EmitSlotAddr('x0', Par.ParamName);
+      Self.Emit(#9'stp x9, x10, [x0]');
     end;
   end;
   { zero-initialise Result and every declared local (language rule: ALL
@@ -7356,6 +7523,16 @@ begin
           TVarDecl(ADecl.Body.Decls.Items[I]).ResolvedType.RawSize());
         Self.Emit(#9'bl memset');
       end
+      else if IsMethodPtrType(
+                TVarDecl(ADecl.Body.Decls.Items[I]).ResolvedType) then
+      begin
+        { closure / method-pointer local: zero BOTH halves of the 16-byte fat
+          value (Code at +0, Env/Data at +8) — a nil Env is a no-op for the
+          scope-exit release. }
+        EmitSlotAddr('x0',
+          TVarDecl(ADecl.Body.Decls.Items[I]).Names.Strings[J]);
+        Self.Emit(#9'stp xzr, xzr, [x0]');
+      end
       else
         EmitStoreSlot('xzr',
           TVarDecl(ADecl.Body.Decls.Items[I]).Names.Strings[J]);
@@ -7386,6 +7563,15 @@ begin
   begin
     EmitLoadSlot('x0', FDynLocals.Strings[I]);
     Self.Emit(#9'bl _DynArrayRelease');
+  end;
+  { release the Env half of 'reference to' closure locals (arkRefEnv): load the
+    slot address, read the Env pointer at +8, _ClassRelease it (nil-safe, so a
+    capture-free closure is a no-op). }
+  for I := 0 to FRefLocals.Count - 1 do
+  begin
+    EmitSlotAddr('x0', FRefLocals.Strings[I]);
+    Self.Emit(#9'ldr x0, [x0, #8]');
+    Self.Emit(#9'bl _ClassRelease');
   end;
   { release the managed fields of record locals — the base-class walk needs
     a callee-saved base register across its release calls }
@@ -8194,6 +8380,35 @@ begin
           Inc(NFloat);
         end;
       end
+      else if IsMethodPtrType(Arg.ResolvedType) then
+      begin
+        { closure / method-pointer arg: pass the ADDRESS of the 16-byte fat
+          value in ONE integer register; the callee copies it (prologue pass 2).
+          A literal materialises into its hidden value slot first
+          (EmitAnonValueToSlot yields the slot address in x0); a plain closure
+          variable yields its own slot address. }
+        IsVariadicArg := ADecl.IsVarArgs and (I >= ADecl.Params.Count);
+        if Arg is TAnonMethodExpr then
+          EmitAnonValueToSlot(TAnonMethodExpr(Arg))
+        else if (Arg is TIdentExpr) and
+                (not TIdentExpr(Arg).IsImplicitSelf) and
+                (not Self.IsCaptured(TIdentExpr(Arg).Name)) then
+          EmitSlotAddr('x0', TIdentExpr(Arg).Name)
+        else
+          Self.EmitExprToX0(Arg);
+        EmitPushX0();
+        if IsVariadicArg or (NInt >= 8) then
+        begin
+          StackOff := AlignTo(StackOff, 8);
+          PopRegs.Add(Format('m%d_%d', [StackOff, 8]));
+          StackOff := StackOff + 8;
+        end
+        else
+        begin
+          PopRegs.Add('x' + IntToStr(NInt));
+          Inc(NInt);
+        end;
+      end
       else if IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) or
               (Arg is TNilLiteral) or
               ((Arg.ResolvedType <> nil) and
@@ -8206,12 +8421,9 @@ begin
           same single-register pass as a class/pointer arg.  (An owned-transient
           dyn-array arg — a function returning a dyn-array passed straight to a
           call — would need post-call disposal like the string path; not yet
-          exercised, so kept simple.) }
-        if (Arg.ResolvedType <> nil) and
-           (Arg.ResolvedType.Kind = tyProcedural) and
-           (TProceduralTypeDesc(Arg.ResolvedType).IsMethodPtr or
-            TProceduralTypeDesc(Arg.ResolvedType).IsReference) then
-          NotYet('closure/method-pointer argument', Arg);
+          exercised, so kept simple.)  A fat proc (method-ptr / closure) is
+          handled by the IsMethodPtrType arm above; only a PLAIN proc pointer
+          reaches here. }
         IsVariadicArg := ADecl.IsVarArgs and (I >= ADecl.Params.Count);
         Self.EmitExprToX0(Arg);
         EmitPushX0();
@@ -9654,7 +9866,7 @@ begin
                                        tyRecord, tyClass, tyInterface,
                                        tyMetaClass, tyStaticArray,
                                        tyDynArray, tySet,
-                                       tyPointer, tyPChar]))) then
+                                       tyPointer, tyPChar, tyProcedural]))) then
       NotYet('program variable of this type', VD);
     if (VD.ResolvedType.Kind = tySet) and
        TSetTypeDesc(VD.ResolvedType).IsJumbo() then
@@ -9662,6 +9874,9 @@ begin
     for J := 0 to VD.Names.Count - 1 do
     begin
       FGlobalNames.Add(VD.Names.Strings[J]);
+      { a closure / method-pointer global is a 16-byte fat value (Code, Env). }
+      if IsMethodPtrType(VD.ResolvedType) then
+        FGlobalSize.Add(VD.Names.Strings[J], 16);
       if VD.InitConst <> nil then
         RegisterGlobalInit(VD.Names.Strings[J], VD);
       if VD.ResolvedType.Kind = tyString then
@@ -9670,6 +9885,11 @@ begin
         FObjGlobals.Add(VD.Names.Strings[J]);
       if VD.ResolvedType.Kind = tyDynArray then
         FDynGlobals.Add(VD.Names.Strings[J]);
+      { a 'reference to' closure global co-owns its Env — release at program
+        exit (arkRefEnv). }
+      if (VD.ResolvedType.Kind = tyProcedural) and
+         TProceduralTypeDesc(VD.ResolvedType).IsReference then
+        FRefGlobals.Add(VD.Names.Strings[J]);
       if VD.ResolvedType.Kind = tyInterface then
       begin
         FGlobalNames.Add(VD.Names.Strings[J] + '_itab');
@@ -9863,6 +10083,13 @@ begin
   begin
     EmitLoadSlot('x0', FDynGlobals.Strings[I]);
     Self.Emit(#9'bl _DynArrayRelease');
+  end;
+  { release the Env half of 'reference to' closure globals (arkRefEnv) }
+  for I := 0 to FRefGlobals.Count - 1 do
+  begin
+    EmitSlotAddr('x0', FRefGlobals.Strings[I]);
+    Self.Emit(#9'ldr x0, [x0, #8]');
+    Self.Emit(#9'bl _ClassRelease');
   end;
   Self.Emit(#9'movz w0, #0');
   Self.Emit(#9'mov sp, x29');
