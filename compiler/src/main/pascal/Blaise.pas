@@ -129,6 +129,10 @@ begin
     'Omit dep unit bodies from emitted IR (separate-compilation path)'));
   WriteLn(FormatFlagLine('--no-incremental',
     'Disable per-unit .o emission; build a single whole-program object'));
+  WriteLn(FormatFlagLine('--static',
+    'Link a static binary (freestanding RTL, no libc). Linux plain/'));
+  WriteLn(FormatFlagLine('',
+    'threaded/async work; TLS/OpenSSL still needs the dynamic default.'));
   WriteLn(FormatFlagLine('--unit-cache <dir>',
     'Where per-unit .o files are written (default: alongside output)'));
   WriteLn(FormatFlagLine('--dump-ast',

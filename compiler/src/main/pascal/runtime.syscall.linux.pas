@@ -64,6 +64,18 @@ function pipe(Fds: Pointer): Integer;
   and the errno-classification tests; docs/async-networking-design.adoc P3). }
 function fcntl(Fd, Cmd, Arg: Integer): Integer;
 
+{ epoll + eventfd: the async reactor's readiness poller and its self-wake fd.
+  Bound in async.reactor.epoll via `external name`; on the dynamic path libc
+  provides them, so these definitions exist only for the --static leaf.  The
+  reactor treats the epoll_event struct as an opaque Pointer, so no record is
+  needed here (see async.reactor.epoll for the packed uint32/uint64 layout). }
+function epoll_create1(Flags: Integer): Integer;
+function epoll_ctl(EpFd, Op, Fd: Integer; Event: Pointer): Integer;
+function epoll_wait(EpFd: Integer; Events: Pointer; MaxEvents, Timeout: Integer): Integer;
+{ eventfd(2) with a flags arg maps to the eventfd2 syscall (the reactor passes
+  EFD_CLOEXEC|EFD_NONBLOCK). }
+function eventfd(InitVal, Flags: Integer): Integer;
+
 { Memory. }
 function mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Integer;
              Offset: Int64): Pointer;
@@ -151,8 +163,14 @@ const
   SYS_arch_prctl    = 158;
   SYS_time          = 201;
   SYS_getrandom     = 318;
+  SYS_epoll_wait    = 232;   { arm64 (aarch64): epoll_pwait = 22 }
+  SYS_epoll_ctl     = 233;   { arm64: 21 }
+  SYS_epoll_create1 = 291;   { arm64: 20 }
+  SYS_eventfd2      = 290;   { arm64: 19 }
 { The asm bodies use literal immediates (the assembler needs a literal, not a
-  symbol); the const block above documents the number-to-name mapping. }
+  symbol); the const block above documents the number-to-name mapping.
+  This leaf is x86-64-only today (every body is `movq $N,%rax; syscall`); the
+  arm64 numbers are recorded for a future aarch64 static leaf. }
 
 function open(Path: PChar; Flags: Integer; Mode: Integer): Integer;
   assembler; nostackframe;
@@ -370,6 +388,44 @@ function wait4(Pid: Integer; Status: Pointer; Options: Integer;
 asm
     movq %rcx, %r10
     movq $61, %rax       { SYS_wait4 }
+    syscall
+    ret
+end;
+
+function epoll_create1(Flags: Integer): Integer;
+  assembler; nostackframe;
+asm
+    movq $291, %rax      { SYS_epoll_create1 }
+    syscall
+    ret
+end;
+
+{ epoll_ctl has 4 args; arg4 (Event) arrives in %rcx -> move to %r10. }
+function epoll_ctl(EpFd, Op, Fd: Integer; Event: Pointer): Integer;
+  assembler; nostackframe;
+asm
+    movq %rcx, %r10
+    movq $233, %rax      { SYS_epoll_ctl }
+    syscall
+    ret
+end;
+
+{ epoll_wait has 4 args; arg4 (Timeout) arrives in %rcx -> move to %r10. }
+function epoll_wait(EpFd: Integer; Events: Pointer; MaxEvents, Timeout: Integer): Integer;
+  assembler; nostackframe;
+asm
+    movq %rcx, %r10
+    movq $232, %rax      { SYS_epoll_wait }
+    syscall
+    ret
+end;
+
+{ eventfd(count, flags) with a flags arg is the eventfd2 syscall (2 args in
+  %rdi/%rsi, no %r10 move needed). }
+function eventfd(InitVal, Flags: Integer): Integer;
+  assembler; nostackframe;
+asm
+    movq $290, %rax      { SYS_eventfd2 }
     syscall
     ret
 end;

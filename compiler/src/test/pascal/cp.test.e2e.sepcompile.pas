@@ -52,6 +52,13 @@ type
       definition — the GH #174 archive-collision guard. }
     procedure AssertNotStrongDef(const ANm, ASym, AWhere: string);
   published
+    { Regression (BUG-042 Gap 1): a Linux program using the async reactor must
+      link and run under --static.  The reactor binds epoll_create1/epoll_ctl/
+      epoll_wait/eventfd via `external name`; on the dynamic path libc provides
+      them, but the freestanding static leaf (runtime.syscall.linux) had no
+      definitions, so --static died with `undefined reference to epoll_ctl`.
+      Linux-only (the static syscall leaf is Linux x86-64). }
+    procedure TestStaticAsyncReactor_LinksAndRuns;
     procedure TestFreeRoutine_RoundTrip_WithoutSource;
     procedure TestGenericClass_RoundTrip_WithoutSource;
     procedure TestUninstantiatedGenericFunc_InUnit_Compiles;
@@ -3112,6 +3119,56 @@ begin
   AssertTrue('error says declared in both, out: ' + Captured,
              Pos('is declared in both', Captured) >= 0)
 end;
+
+procedure TSepCompileTests.TestStaticAsyncReactor_LinksAndRuns;
+{$IFDEF LINUX}
+const
+  ProgSrc =
+    '''
+    program staticepoll;
+    uses async.fibers;
+    procedure Work(AArg: Pointer);
+    begin
+      FiberSleep(1);
+      WriteLn('OK')
+    end;
+    begin
+      SpawnFiber(@Work, nil);
+      RunScheduler();
+      WriteLn('DONE')
+    end.
+    ''';
+var
+  ProgPas, ProgBin, Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  if not FileExists(BlaisePath()) then begin Ignore('blaise binary missing'); Exit; end;
+
+  ProgPas := FScratch + '/staticepoll.pas';
+  ProgBin := FScratch + '/staticepoll';
+  WriteFile(ProgPas, ProgSrc);
+
+  { Compile + link --static.  Before BUG-042 Gap 1 this died with an internal
+    linker error: undefined reference to epoll_ctl / eventfd. }
+  Rc := RunBlaise(['--source', ProgPas, '--backend', 'native', '--static',
+                   '--output', ProgBin,
+                   '--unit-path', ProjectRoot() + 'compiler/src/main/pascal',
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                  Captured);
+  AssertEquals('static compile+link exit code, out: ' + Captured, 0, Rc);
+  AssertTrue('static binary exists', FileExists(ProgBin));
+
+  { It must actually run (drives epoll_wait + eventfd through the reactor). }
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('static binary exit code', 0, Rc);
+  AssertEquals('static binary stdout', 'OK' + #10 + 'DONE' + #10, Captured);
+end;
+{$ELSE}
+begin
+  Ignore('static async reactor is Linux-only');
+end;
+{$ENDIF}
 
 initialization
   RegisterTest(TSepCompileTests);
