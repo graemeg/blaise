@@ -8045,7 +8045,7 @@ procedure TSemanticAnalyser.CollectCaptures(ADecl: TMethodDecl; AOuterDecl: TMet
   var-by-pointer parameter, and the call site passes the variable's address. }
 var
   OuterVars: TStringList;
-  I, J:      Integer;
+  I, J, K:   Integer;
   VDecl:     TVarDecl;
   VName:     string;
   TodoExprs: TObjectList;
@@ -8112,6 +8112,31 @@ begin
         if (TMethodDecl(ADecl.Body.ProcDecls.Items[I]).CapturedVars <> nil) and
            (TMethodDecl(ADecl.Body.ProcDecls.Items[I]).CapturedVars.IndexOf('Self') >= 0) then
           MaybeCaptureName(ADecl, OuterVars, 'Self');
+    end;
+    { A name that ADecl DECLARES as its own local var or parameter SHADOWS the
+      enclosing var of the same name — a reference resolves to ADecl's own slot,
+      NOT a capture.  Remove such names from OuterVars so MaybeCaptureName never
+      adds them to CapturedVars (BUG-20260720-nested-shadow-local).  Case-
+      insensitive (Pascal identifiers are), and Self is never a declared local
+      so it is unaffected. }
+    if ADecl.Body <> nil then
+      for I := 0 to ADecl.Body.Decls.Count - 1 do
+      begin
+        VDecl := TVarDecl(ADecl.Body.Decls.Items[I]);
+        for J := 0 to VDecl.Names.Count - 1 do
+        begin
+          VName := VDecl.Names.Strings[J];
+          for K := OuterVars.Count - 1 downto 0 do
+            if SameText(OuterVars.Strings[K], VName) then
+              OuterVars.Delete(K);
+        end;
+      end;
+    for I := 0 to ADecl.Params.Count - 1 do
+    begin
+      VName := TMethodParam(ADecl.Params.Items[I]).ParamName;
+      for K := OuterVars.Count - 1 downto 0 do
+        if SameText(OuterVars.Strings[K], VName) then
+          OuterVars.Delete(K);
     end;
     if OuterVars.Count = 0 then Exit;
 

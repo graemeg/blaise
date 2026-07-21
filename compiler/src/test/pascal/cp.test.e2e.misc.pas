@@ -100,6 +100,11 @@ type
     procedure TestRun_NestedProc_CapturesVarScalarParam;
     { Same double-deref path at FLOAT width (Double/Single arms had the same bug). }
     procedure TestRun_NestedProc_CapturesVarFloatParam;
+    { BUG-20260720-nested-shadow-local: a nested proc's OWN local (or param) that
+      shadows an enclosing var must NOT be captured — it has its own slot.  The
+      capture collector over-captured shadowed names, so all accesses aliased the
+      enclosing var. }
+    procedure TestRun_NestedProc_ShadowsEnclosingLocal;
     { Nested proc captures an outer plain LOCAL record (field read + write). }
     procedure TestRun_NestedProc_CapturesLocalRecord;
     { Nested proc captures an outer VAR ARRAY PARAMETER (element read + write).
@@ -1389,6 +1394,40 @@ const
         ''';
 begin
   AssertRunsOnAll(Src, '1' + LE + 'True' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_NestedProc_ShadowsEnclosingLocal;
+const
+  { L2 declares its OWN V (shadows L1's V) but genuinely captures W.  L2's V
+    must be a distinct slot; W must still be captured.  Plus a 2-level shadow
+    (L3 sees L2's V, not L1's). }
+  Src =
+    '''
+        program Prg;
+        procedure L1;
+        var V, W: Integer;
+          procedure L2;
+          var V: Integer;                { shadows L1.V }
+            procedure L3;
+            begin WriteLn(IntToStr(V)) end;   { sees L2's V }
+          begin
+            V := 7;                       { L2's own V }
+            W := 9;                       { captured L1.W }
+            L3();
+            WriteLn(IntToStr(V));
+            WriteLn(IntToStr(W))
+          end;
+        begin
+          V := 1; W := 0;
+          L2();
+          WriteLn(IntToStr(V));           { 1 — L1.V untouched by L2's shadow }
+          WriteLn(IntToStr(W))            { 9 — L1.W written through the capture }
+        end;
+        begin L1() end.
+        ''';
+begin
+  AssertRunsOnAll(Src,
+    '7' + LE + '7' + LE + '9' + LE + '1' + LE + '9' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_NestedProc_CapturesLocalRecord;
