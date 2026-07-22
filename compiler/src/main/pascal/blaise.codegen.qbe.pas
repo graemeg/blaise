@@ -5031,7 +5031,30 @@ begin
         field copy.  Storing a single word here (the old default branch) would
         write only 8 bytes and corrupt the record. }
       ClassRT := TRecordTypeDesc(AAssign.ResolvedLhsType);
-      if IsRecordCall(AAssign.Expr) then
+      if IsRecordCall(AAssign.Expr) and
+         CallAliasesDestVar(AAssign.Expr, AAssign.Name, AAssign.IsGlobal) then
+      begin
+        { The call reads the destination — as its receiver (Z := Z.Grow(..))
+          or as an argument (Z := Comp(Z)).  Releasing + zeroing the caller's
+          record before the call would hand the callee an empty value (the
+          receiver and the sret destination are the same caller address,
+          reached through the var-param indirection).  Route through a fresh
+          zeroed temporary, then release-dest + memcpy — mirroring the
+          non-var-param alias arm below
+          (BUG-20260721-qbe-varparam-receiver-self-assign). }
+        SretBuf := AllocTemp();
+        if ClassRT.MaxAlign() >= 8 then
+          EmitLine(Format('  %s =l alloc8 %d', [SretBuf, ClassRT.TotalSize()]))
+        else
+          EmitLine(Format('  %s =l alloc4 %d', [SretBuf, ClassRT.TotalSize()]));
+        EmitLine(Format('  call $memset(l %s, w 0, l %d)',
+          [SretBuf, ClassRT.TotalSize()]));
+        EmitRecordCallSret(AAssign.Expr, SretBuf);
+        EmitRecordReleaseFields(ClassRT, PtrTemp);
+        EmitLine(Format('  call $memcpy(l %s, l %s, l %d)',
+          [PtrTemp, SretBuf, ClassRT.TotalSize()]));
+      end
+      else if IsRecordCall(AAssign.Expr) then
       begin
         EmitRecordReleaseFields(ClassRT, PtrTemp);
         EmitLine(Format('  call $memset(l %s, w 0, l %d)',

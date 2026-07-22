@@ -122,6 +122,11 @@ type
       sret buffer (SIGSEGV; QBE was correct)
       (BUG-20260721-native-recprop-into-recfield). }
     procedure TestRun_RecordPropGetterIntoRecordField;
+    { Var-param record dest aliasing the method receiver: 'Z := Z.Grow(..)'
+      inside 'procedure P(var Z: TRec)' — QBE zeroed the caller's record
+      before the sret call read it as the receiver, losing the prior state
+      (BUG-20260721-qbe-varparam-receiver-self-assign). }
+    procedure TestRun_VarParamRecordReceiverSelfAssign;
     { Record-returning FREE-FUNCTION call assigned into a record field whose
       base record is a VAR PARAM — the native FuncCall arm lacked the
       standalone IsVarParam case (present in the method-call and prop-getter
@@ -1784,6 +1789,49 @@ begin
       WriteLn(B.FRec.S)             { source untouched }
     end.
     ''', 'hello-3 8' + LE + 'hello-9 14' + LE + 'hello' + LE, 0);
+end;
+
+procedure TE2ERecordsTests.TestRun_VarParamRecordReceiverSelfAssign;
+begin
+  AssertRunsOnAll('''
+    program P;
+    type
+      TRec = record
+        S: string;
+        N: Integer;
+        function Grow(const A: string): TRec;
+      end;
+    function TRec.Grow(const A: string): TRec;
+    begin
+      Result.S := S + A;
+      Result.N := N + 1
+    end;
+    procedure Twice(var Z: TRec);
+    begin
+      Z := Z.Grow('!');
+      Z := Z.Grow('?')
+    end;
+    function Comp(const A: TRec): TRec;
+    begin
+      Result.S := A.S + '.';
+      Result.N := A.N
+    end;
+    procedure ViaArg(var Z: TRec);
+    begin
+      { dest is also an ARGUMENT of the call }
+      Z := Comp(Z)
+    end;
+    var R: TRec;
+    begin
+      R.S := 'k';
+      R.N := 1;
+      Twice(R);
+      WriteLn(R.S);
+      WriteLn(R.N);
+      ViaArg(R);
+      WriteLn(R.S)
+    end.
+    ''', 'k!?' + LE + '3' + LE + 'k!?.' + LE, 0);
 end;
 
 initialization
