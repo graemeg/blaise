@@ -9138,9 +9138,11 @@ begin
       [TOpenArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.RawSize()]));
     Self.Emit(#9'popq %rcx');
     Self.Emit(#9'addq %rcx, %rax');
-    { Record elements evaluate to their address — records are by-value via
-      pointer; loading 8 bytes here would read the first field instead. }
-    if TOpenArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.Kind <> tyRecord then
+    { Record and jumbo-set elements evaluate to their address — loading
+      8 bytes here would read the first field / first bitmap bytes instead
+      (BUG-20260721-jumbo-set-in-array-elem). }
+    if (TOpenArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.Kind <> tyRecord) and
+       not IsJumboSet(TOpenArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType) then
       Self.EmitLoadVar('(%rax)',
         TOpenArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType);
     Exit;
@@ -9160,9 +9162,11 @@ begin
       [TDynArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.RawSize()]));
     Self.Emit(#9'popq %rcx');
     Self.Emit(#9'addq %rcx, %rax');
-    { Record elements evaluate to their address — records are by-value via
-      pointer; loading 8 bytes here would read the first field instead. }
-    if TDynArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.Kind <> tyRecord then
+    { Record and jumbo-set elements evaluate to their address — loading
+      8 bytes here would read the first field / first bitmap bytes instead
+      (BUG-20260721-jumbo-set-in-array-elem). }
+    if (TDynArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.Kind <> tyRecord) and
+       not IsJumboSet(TDynArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType) then
       Self.EmitLoadVar('(%rax)',
         TDynArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType);
     Exit;
@@ -9181,12 +9185,15 @@ begin
     Self.EmitStaticElemScale(TStaticArrayTypeDesc(SAE.StrExpr.ResolvedType));
     Self.Emit(#9'popq %rcx');
     Self.Emit(#9'addq %rcx, %rax');
-    { Record and nested static-array elements evaluate to their address —
-      records are by-value via pointer; a nested array is inline storage that
-      a further subscript A[I][J] indexes into.  Loading 8 bytes here would
-      read the first field/element instead of yielding the aggregate address. }
-    if not (TStaticArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.Kind in
-            [tyRecord, tyStaticArray]) then
+    { Record, nested static-array, and jumbo-set elements evaluate to their
+      address — records are by-value via pointer; a nested array is inline
+      storage that a further subscript A[I][J] indexes into; a jumbo set is
+      an inline bitmap.  Loading 8 bytes here would read the first
+      field/element/bitmap bytes instead of yielding the aggregate address
+      (BUG-20260721-jumbo-set-in-array-elem). }
+    if not ((TStaticArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.Kind in
+             [tyRecord, tyStaticArray]) or
+            IsJumboSet(TStaticArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType)) then
       Self.EmitLoadVar('(%rax)',
         TStaticArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType);
     Exit;

@@ -45,6 +45,11 @@ type
     { Same, where the alias is an ARGUMENT of a record-method call whose
       receiver is a different variable. }
     procedure TestRun_SelfAssignedSret_MethodArgument;
+    { Jumbo-set ARRAY ELEMENTS: the element read returned the loaded first
+      8 bitmap bytes instead of the element's bitmap ADDRESS, so `x in B[0]`
+      and element-to-element copies dereferenced garbage — SIGSEGV on both
+      backends (BUG-20260721-jumbo-set-in-array-elem). }
+    procedure TestRun_JumboSet_ArrayElement_MembershipAndCopy;
   end;
 
 implementation
@@ -318,6 +323,38 @@ begin
          '  WriteLn(b70 in s, b02 in s, b05 in s)' + LE +
          'end.';
   AssertRunsOnAll(Src, 'TrueTrueFalse' + LE, 0);
+end;
+
+procedure TE2EJumboSetTests.TestRun_JumboSet_ArrayElement_MembershipAndCopy;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program P;
+    type TBig = set of Byte;
+    var
+      B: array[0..1] of TBig;
+      D: array of TBig;
+      U: TBig;
+    begin
+      B[0] := [5, 40, 200];
+      if 200 in B[0] then WriteLn('y') else WriteLn('n');
+      if 6 in B[0] then WriteLn('y') else WriteLn('n');
+      B[1] := B[0];
+      if 40 in B[1] then WriteLn('y') else WriteLn('n');
+      SetLength(D, 1);
+      D[0] := B[1];
+      if 200 in D[0] then WriteLn('y') else WriteLn('n');
+      { Consumers of the element ADDRESS convention: Include/Exclude on an
+        element, union of two elements, equality of elements. }
+      Include(B[1], 77);
+      Exclude(B[1], 5);
+      if (77 in B[1]) and not (5 in B[1]) then WriteLn('y') else WriteLn('n');
+      U := B[0] + B[1];
+      if (5 in U) and (77 in U) then WriteLn('y') else WriteLn('n');
+      if B[0] = B[1] then WriteLn('y') else WriteLn('n')
+    end.
+    ''', 'y' + LE + 'n' + LE + 'y' + LE + 'y' + LE +
+         'y' + LE + 'y' + LE + 'n' + LE, 0);
 end;
 
 initialization

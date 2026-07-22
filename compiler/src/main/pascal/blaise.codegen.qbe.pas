@@ -17421,6 +17421,14 @@ begin
     begin
       Exit(ElemPtr);
     end;
+    { Jumbo-set elements: an inline bitmap — its ADDRESS is the value
+      (loading would read the first 8 bitmap bytes as a pointer)
+      (BUG-20260721-jumbo-set-in-array-elem). }
+    if (SAT.ElementType.Kind = tySet) and
+       TSetTypeDesc(SAT.ElementType).IsJumbo() then
+    begin
+      Exit(ElemPtr);
+    end;
     QLoad := LoadInstrFor(SAT.ElementType);
     QType := QbeTypeOf(SAT.ElementType);
     ByteVal := AllocTemp();
@@ -17451,6 +17459,11 @@ begin
     { Interface elements: return the fat-pointer address (obj+0, itab+8). }
     if ElemType.ElementType.Kind = tyInterface then
       Exit(ElemPtr);
+    { Jumbo-set elements: the bitmap ADDRESS is the value
+      (BUG-20260721-jumbo-set-in-array-elem). }
+    if (ElemType.ElementType.Kind = tySet) and
+       TSetTypeDesc(ElemType.ElementType).IsJumbo() then
+      Exit(ElemPtr);
     ByteVal := AllocTemp();
     EmitLine(Format('  %s =%s %s %s', [ByteVal, QType, QLoad, ElemPtr]));
     Exit(ByteVal);
@@ -17480,6 +17493,11 @@ begin
       both halves (BUG-20260720-qbe-dynarray-intf-elem-read).  Mirrors the
       static-array interface arm. }
     if TDynArrayTypeDesc(AExpr.StrExpr.ResolvedType).ElementType.Kind = tyInterface then
+      Exit(ElemPtr);
+    { Jumbo-set elements: the bitmap ADDRESS is the value
+      (BUG-20260721-jumbo-set-in-array-elem). }
+    if (TDynArrayTypeDesc(AExpr.StrExpr.ResolvedType).ElementType.Kind = tySet) and
+       TSetTypeDesc(TDynArrayTypeDesc(AExpr.StrExpr.ResolvedType).ElementType).IsJumbo() then
       Exit(ElemPtr);
     ByteVal := AllocTemp();
     EmitLine(Format('  %s =%s %s %s', [ByteVal, QType, QLoad, ElemPtr]));
