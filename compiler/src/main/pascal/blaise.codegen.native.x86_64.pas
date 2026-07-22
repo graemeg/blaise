@@ -7019,6 +7019,34 @@ begin
     FC := TFuncCallExpr(AExpr);
     if Self.EmitFloatBuiltin(FC) then
       Exit;
+    { Float-returning INDIRECT call (procvar / method-ptr / closure): the
+      callee leaves the result in %xmm0 — dispatch like the EmitExprToEax
+      arm and use it directly.  Must run BEFORE the type-cast arm below:
+      an indirect call also has ResolvedDecl=nil, and a one-arg call was
+      mistaken for a cast, returning its ARGUMENT
+      (BUG-20260722-native-procvar-float-args). }
+    if FC.IsIndirectCall then
+    begin
+      if (FC.ResolvedProcType <> nil) and
+         (TProceduralTypeDesc(FC.ResolvedProcType).IsMethodPtr or
+          TProceduralTypeDesc(FC.ResolvedProcType).IsReference) then
+        Self.EmitMethodPtrCall(
+          Self.VarOperand(FC.Name),
+          TProceduralTypeDesc(FC.ResolvedProcType),
+          FC.Args)
+      else
+        Self.EmitCallIndirect(
+          Self.VarOperand(FC.Name),
+          TProceduralTypeDesc(FC.ResolvedProcType),
+          FC.Args);
+      Exit;
+    end;
+    if FC.IsProcFieldCall then
+    begin
+      Self.EmitProcFieldCall(nil, 'Self', False, FC.ProcFieldInfo,
+        TProceduralTypeDesc(FC.ResolvedProcType), FC.Args, FC.ResolvedType);
+      Exit;
+    end;
     { Type cast Double(X) / Single(X): ResolvedDecl is nil.  Emit a real
       numeric conversion, never a bit copy. }
     if (FC.ResolvedDecl = nil) and (FC.Args.Count = 1) then
@@ -19352,92 +19380,133 @@ var
   Arg:      TASTExpr;
   IsVar:    Boolean;
   AllocSz:  Integer;
-  SlotOff:  Integer;
+  FreshSz:  Integer;
   CleanUp:  Integer;
   HD:       TList<Integer>;
   HK:       TList<Integer>;
   HTotal:   Integer;
   PParams:  TObjectList;
+  ParamTy:  TTypeDesc;
+  IsFloatSlot: TList<Integer>;
+  OvSlots:  TList<Integer>;
+  IntIdx, XmmIdx: Integer;
 begin
   PParams := nil;
   if AProcType <> nil then
     PParams := AProcType.Params;
   HD := TList<Integer>.Create();
   HK := TList<Integer>.Create();
+  IsFloatSlot := TList<Integer>.Create();
+  OvSlots := TList<Integer>.Create();
   HTotal := Self.EmitArgHoist(nil, PParams, True, '', AArgs, HD, HK);
   { The function pointer is loaded into %r10 only AFTER all argument
     evaluation: %r10 is caller-saved, so any call emitted while evaluating
     an argument (or the hoist pre-pass above) would clobber it.
-    APtrOperand is %rbp- or %rip-relative, never %rsp-relative. }
+    APtrOperand is %rbp- or %rip-relative, never %rsp-relative.
 
-  if AArgs.Count <= 6 then
-  begin
-    for I := 0 to AArgs.Count - 1 do
-    begin
-      Arg := TASTExpr(AArgs.Items[I]);
-      IsVar := (AProcType <> nil) and (I < AProcType.Params.Count) and
-               TProcParamInfo(AProcType.Params.Items[I]).IsVarParam;
-      if HK.Get(I) >= akRecCall then
-      begin
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-          [HTotal - HD.Get(I) + I * 8]));
-        Self.Emit(#9'pushq %rax');
-      end
-      else if IsVar then
-      begin
-        Self.EmitVarArgAddrToRax(Arg);
-        Self.Emit(#9'pushq %rax');
-      end
-      else
-      begin
-        Self.EmitExprToEax(Arg);
-        Self.Emit(#9'pushq %rax');
-      end;
-    end;
-    for I := AArgs.Count - 1 downto 0 do
-      Self.Emit(#9'popq ' + SysVArg64(I));
-    Self.Emit(Format(#9'movq %s, %%r10', [APtrOperand]));
-    Self.Emit(#9'callq *%r10');
-    Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, 0, True);
-  end
-  else
-  begin
-    { >6 args: pre-allocate strategy with %r10 holding the function ptr. }
-    AllocSz := ((AArgs.Count * 8 + 15) and (-16));
+    Uniform slot-block scheme: evaluate every arg into a pre-allocated
+    8-byte slot (floats via %xmm0 — the old path routed EVERY arg through
+    the integer registers, so a single Double arg read garbage from xmm
+    and following ints were shifted; BUG-20260722-native-procvar-float-args),
+    then assign registers in arg order with independent int/xmm counters,
+    overflow slots (7th+ int, 9th+ float) relocated in ascending arg order
+    exactly as EmitMethodOverflowLoad does.  Slot writes are %rsp-relative
+    and position-fixed, so a call inside an argument expression cannot
+    clobber earlier slots. }
+  AllocSz := ((AArgs.Count * 8 + 15) and (-16));
+  if AllocSz > 0 then
     Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
-    SlotOff := 0;
-    for I := 0 to AArgs.Count - 1 do
+  for I := 0 to AArgs.Count - 1 do
+  begin
+    Arg := TASTExpr(AArgs.Items[I]);
+    IsVar := (AProcType <> nil) and (I < AProcType.Params.Count) and
+             TProcParamInfo(AProcType.Params.Items[I]).IsVarParam;
+    if (AProcType <> nil) and (I < AProcType.Params.Count) then
+      ParamTy := TProcParamInfo(AProcType.Params.Items[I]).TypeDesc
+    else
+      ParamTy := Arg.ResolvedType;
+    if (not IsVar) and IsFloatFamily(ParamTy) then
+      IsFloatSlot.Add(1)
+    else
+      IsFloatSlot.Add(0);
+    if HK.Get(I) >= akRecCall then
     begin
-      Arg := TASTExpr(AArgs.Items[I]);
-      IsVar := (AProcType <> nil) and (I < AProcType.Params.Count) and
-               TProcParamInfo(AProcType.Params.Items[I]).IsVarParam;
-      if HK.Get(I) >= akRecCall then
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-          [AllocSz + HTotal - HD.Get(I)]))
-      else if IsVar then
-        Self.EmitVarArgAddrToRax(Arg)
-      else
-        Self.EmitExprToEax(Arg);
-      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
-      Inc(SlotOff, 8);
-    end;
-    for I := 0 to 5 do
-      Self.Emit(Format(#9'movq %d(%%rsp), %s', [I * 8, SysVArg64(I)]));
-    { Copy the overflow args (slots 6.., offsets 48..) into a FRESH region
-      below the slot block so the call sees them at 0(%rsp).. on a 16-byte-
-      aligned %rsp regardless of pinned pushes above (see AlignFreshBytes). }
-    CleanUp := Self.AlignFreshBytes(AArgs.Count - 6);
-    Self.Emit(Format(#9'subq $%d, %%rsp', [CleanUp]));
-    for I := 0 to AArgs.Count - 7 do
+      Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
+        [AllocSz + HTotal - HD.Get(I)]));
+      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [I * 8]));
+    end
+    else if IsVar then
     begin
-      Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [CleanUp + 48 + I * 8]));
+      Self.EmitVarArgAddrToRax(Arg);
+      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [I * 8]));
+    end
+    else if IsFloatSlot.Get(I) = 1 then
+    begin
+      { Float slot: materialise at the PARAM's width (a Single param wants
+        the single bit pattern in the low 4 bytes; the 8-byte movsd
+        store/reload is harmless). }
+      Self.EmitExprToXmm0(Arg);
+      Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
+        (ParamTy <> nil) and (ParamTy.Kind = tySingle));
+      Self.Emit(Format(#9'movsd %%xmm0, %d(%%rsp)', [I * 8]));
+    end
+    else
+    begin
+      Self.EmitExprToEax(Arg);
       Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [I * 8]));
     end;
-    CleanUp := CleanUp + AllocSz;
-    Self.Emit(Format(#9'movq %s, %%r10', [APtrOperand]));
-    Self.Emit(#9'callq *%r10');
-    Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, CleanUp, True);
   end;
+  { Register assignment in arg order; int and xmm sequences advance
+    independently per SysV. }
+  IntIdx := 0;
+  XmmIdx := 0;
+  for I := 0 to AArgs.Count - 1 do
+  begin
+    if IsFloatSlot.Get(I) = 1 then
+    begin
+      if XmmIdx <= 7 then
+      begin
+        Self.Emit(Format(#9'movsd %d(%%rsp), %s',
+          [I * 8, SysVXmmArgRegs[XmmIdx]]));
+        Inc(XmmIdx);
+      end
+      else
+        OvSlots.Add(I);
+    end
+    else if IntIdx <= 5 then
+    begin
+      Self.Emit(Format(#9'movq %d(%%rsp), %s', [I * 8, SysVArg64(IntIdx)]));
+      Inc(IntIdx);
+    end
+    else
+      OvSlots.Add(I);
+  end;
+  CleanUp := AllocSz;
+  if OvSlots.Count > 0 then
+  begin
+    { Relocate overflow slots into a FRESH region below the slot block so
+      the call sees them at 0(%rsp).. in ascending arg order on a 16-byte-
+      aligned %rsp regardless of pinned pushes above (AlignFreshBytes).
+      The type-agnostic 8-byte copy is harmless for Single (low 4 bytes).
+      FreshSz MUST be computed exactly once, BEFORE the subq: AlignFreshBytes
+      reads FSPDepth, which the subq itself advances — recomputing it after
+      the subq can differ by 8 (e.g. one hoisted string pin above), shifting
+      every reload offset and the cleanup amount. }
+    FreshSz := Self.AlignFreshBytes(OvSlots.Count);
+    Self.Emit(Format(#9'subq $%d, %%rsp', [FreshSz]));
+    for I := 0 to OvSlots.Count - 1 do
+    begin
+      Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
+        [FreshSz + OvSlots.Get(I) * 8]));
+      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [I * 8]));
+    end;
+    CleanUp := CleanUp + FreshSz;
+  end;
+  Self.Emit(Format(#9'movq %s, %%r10', [APtrOperand]));
+  Self.Emit(#9'callq *%r10');
+  Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, CleanUp, True);
+  OvSlots.Free();
+  IsFloatSlot.Free();
   HD.Free();
   HK.Free();
 end;

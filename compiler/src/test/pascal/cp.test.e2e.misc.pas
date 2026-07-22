@@ -42,6 +42,13 @@ type
 
     { Procedural types }
     procedure TestRun_ProcType_CallViaVariable;
+    { Float args through a procedural VARIABLE: native's indirect-call arg
+      staging was integer-only — every arg went through the integer
+      registers, so even ONE Double arg read garbage from xmm and 9 Doubles
+      segfaulted (BUG-20260722-native-procvar-float-args). }
+    procedure TestRun_ProcType_FloatArgs_ViaVariable;
+    procedure TestRun_ProcType_MixedIntFloat_Overflow_ViaVariable;
+    procedure TestRun_ProcType_HoistedStrWithOverflow_ViaVariable;
     procedure TestRun_ProcType_OfObject_Dispatch;
     { Procedural-typed class field called through a receiver (Self.FFn(...)). }
     procedure TestRun_ProcFieldCall_ReturnValue;
@@ -1051,6 +1058,100 @@ begin
   AssertTrue('compile+run', CompileAndRun(SrcProcTypeVar, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
   AssertEquals('14', '14' + LE, Output);
+end;
+
+procedure TE2EMiscTests.TestRun_ProcType_FloatArgs_ViaVariable;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program P;
+    type
+      TF1 = function(A: Double): Double;
+      TF9 = function(a, b, c, d, e, f, g, h, i: Double): Double;
+      TFS = function(A: Single; N: Integer): Integer;
+    function Dbl(A: Double): Double;
+    begin
+      Result := A * 2.0
+    end;
+    function Pick(a, b, c, d, e, f, g, h, i: Double): Double;
+    begin
+      Result := i + a
+    end;
+    function SN(A: Single; N: Integer): Integer;
+    begin
+      Result := Trunc(A * 10) + N
+    end;
+    var
+      P1: TF1;
+      P9: TF9;
+      PS: TFS;
+    begin
+      P1 := @Dbl;
+      WriteLn(Trunc(P1(3.5) * 10));
+      P9 := @Pick;
+      WriteLn(Trunc(P9(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5) * 10));
+      PS := @SN;
+      WriteLn(PS(1.5, 100))
+    end.
+    ''', '70' + LE + '110' + LE + '115' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_ProcType_MixedIntFloat_Overflow_ViaVariable;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { 7 ints (one overflows) interleaved with 2 doubles: the int and xmm
+    register sequences must advance independently and overflow slots stay
+    in ascending arg order. }
+  AssertRunsOnAll('''
+    program P;
+    type
+      TFm = function(n1, n2, n3: Integer; d1: Double; n4, n5, n6: Integer;
+                     d2: Double; n7: Integer): Integer;
+    function M(n1, n2, n3: Integer; d1: Double; n4, n5, n6: Integer;
+               d2: Double; n7: Integer): Integer;
+    begin
+      Result := n1 + n2*2 + n3*3 + n4*4 + n5*5 + n6*6 + n7*7 +
+                Trunc(d1) * 100 + Trunc(d2) * 1000
+    end;
+    var PM: TFm;
+    begin
+      PM := @M;
+      WriteLn(PM(1, 2, 3, 4.5, 4, 5, 6, 7.5, 8))
+    end.
+    ''', IntToStr(1 + 4 + 9 + 16 + 25 + 36 + 56 + 400 + 7000) + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_ProcType_HoistedStrWithOverflow_ViaVariable;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { A hoisted const-string arg (the concat transient is pinned, adding 8
+    bytes to the hoist region) combined with overflow args: the overflow
+    fresh-region size must be computed ONCE — the first subq changes
+    FSPDepth, so recomputing AlignFreshBytes afterwards yields a different
+    pad, shifting the overflow reload offsets and the cleanup amount by 8
+    (BUG-20260722-native-procvar-float-args review follow-up). }
+  AssertRunsOnAll('''
+    program P;
+    type
+      TFh = function(const S: string; a, b, c, d, e: Integer; d1: Double;
+                     f, g: Integer): Integer;
+    function H(const S: string; a, b, c, d, e: Integer; d1: Double;
+               f, g: Integer): Integer;
+    begin
+      Result := Length(S) + a + b*2 + c*3 + d*4 + e*5 +
+                Trunc(d1) * 100 + f*6 + g*7
+    end;
+    var
+      PH: TFh;
+      S: string;
+      R: Integer;
+    begin
+      PH := @H;
+      S := 'ab';
+      R := PH(S + '!', 1, 2, 3, 4, 5, 2.5, 6, 7);
+      WriteLn(R)
+    end.
+    ''', IntToStr(3 + 1 + 4 + 9 + 16 + 25 + 200 + 36 + 49) + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_ProcType_OfObject_Dispatch;
