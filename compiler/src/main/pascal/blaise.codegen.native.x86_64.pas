@@ -9672,9 +9672,13 @@ begin
       { Record and interface elements evaluate to their element ADDRESS
         (an interface element is a contiguous 16-byte fat pointer; an
         8-byte load handed consumers the obj as the pair base
-        (BUG-20260721-fieldaccess-intf-array-elem-read)). }
-      if TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind in
-         [tyRecord, tyInterface] then
+        (BUG-20260721-fieldaccess-intf-array-elem-read)).  A jumbo-set
+        element is an inline bitmap — its address is the value; an 8-byte
+        load handed _SetIn a truncated garbage pointer → SIGSEGV
+        (BUG-20260722-jumbo-field-array-elem). }
+      if (TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind in
+            [tyRecord, tyInterface]) or
+         IsJumboSet(TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType) then
         Exit;
       Self.EmitLoadVar('(%rax)',
         TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType);
@@ -9686,8 +9690,9 @@ begin
       Self.EmitStaticElemScale(TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc));
       Self.Emit(#9'popq %rcx');
       Self.Emit(#9'addq %rcx, %rax');
-      if TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind in
-         [tyRecord, tyInterface] then
+      if (TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind in
+            [tyRecord, tyInterface]) or
+         IsJumboSet(TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType) then
         Exit;
       Self.EmitLoadVar('(%rax)',
         TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType);
@@ -9702,8 +9707,9 @@ begin
         [TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.RawSize()]));
       Self.Emit(#9'popq %rcx');
       Self.Emit(#9'addq %rcx, %rax');
-      if TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind in
-         [tyRecord, tyInterface] then
+      if (TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind in
+            [tyRecord, tyInterface]) or
+         IsJumboSet(TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType) then
         Exit;
       Self.EmitLoadVar('(%rax)',
         TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType);

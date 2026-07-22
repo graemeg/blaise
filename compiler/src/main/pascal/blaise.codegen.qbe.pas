@@ -738,6 +738,17 @@ var
   GMethodPtrRec:  TRecordTypeDesc;
   GMethodPtrLeaf: TTypeDesc;
 
+{ True when AType is a jumbo set (>64-member, inline byte-array bitmap): its
+  element ADDRESS is the value, so a field-array element read must return the
+  address (like a record) rather than an 8-byte load, and an element store
+  must memcpy the bitmap rather than store the RHS pointer
+  (BUG-20260722-jumbo-field-array-elem). }
+function IsJumboFieldElem(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and (AType.Kind = tySet) and
+            TSetTypeDesc(AType).IsJumbo();
+end;
+
 { -----------------------------------------------------------------------
   TIRBuffer
   ----------------------------------------------------------------------- }
@@ -7313,6 +7324,36 @@ begin
     ElemPtr := AllocTemp();
     EmitLine(Format('  %s =l add %s, %s', [ElemPtr, BaseT, Offset]));
     EmitRecordCopy(TRecordTypeDesc(ElemT), ElemPtr, ValTemp);
+    Exit;
+  end;
+  { Jumbo-set element: an inline byte-array bitmap — copy the whole bitmap
+    into the element (never a single 8-byte store of the RHS's address, which
+    is what the generic scalar path below did — only 8 of 32 bytes landed and
+    the element aliased the RHS; BUG-20260722-jumbo-field-array-elem).
+    Value-first ordering (the RHS may reallocate the same dyn-array field). }
+  if (ElemT.Kind = tySet) and TSetTypeDesc(ElemT).IsJumbo() then
+  begin
+    ValTemp := EmitExpr(AAssign.Expr);
+    if ArrT.Kind = tyDynArray then
+    begin
+      BaseT := AllocTemp();
+      EmitLine(Format('  %s =l loadl %s', [BaseT, AFieldPtr]));  { fresh data ptr }
+    end;
+    IdxW := EmitExpr(AAssign.PropIndexExpr);
+    IdxL := AllocTemp();
+    EmitLine(Format('  %s =l extsw %s', [IdxL, IdxW]));
+    if LowBnd <> 0 then
+    begin
+      Adj := AllocTemp();
+      EmitLine(Format('  %s =l sub %s, %d', [Adj, IdxL, LowBnd]));
+      IdxL := Adj;
+    end;
+    Offset := AllocTemp();
+    EmitLine(Format('  %s =l mul %s, %d', [Offset, IdxL, ElemSize]));
+    ElemPtr := AllocTemp();
+    EmitLine(Format('  %s =l add %s, %s', [ElemPtr, BaseT, Offset]));
+    EmitLine(Format('  call $memcpy(l %s, l %s, l %d)',
+      [ElemPtr, ValTemp, TSetTypeDesc(ElemT).RawSize()]));
     Exit;
   end;
   { Interface element: a 16-byte fat pointer (obj at +0 refcounted, itab at
@@ -14424,7 +14465,12 @@ begin
           EmitLine(Format('  %s =l mul %s, %d', [L, T, ElemSize]));
           T := AllocTemp();
           EmitLine(Format('  %s =l add %s, %s', [T, Ptr, L]));
-          if TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind = tyRecord then
+          { Record and jumbo-set elements evaluate to their element ADDRESS
+            (a jumbo set is an inline bitmap; an 8-byte load handed _SetIn a
+            garbage pointer → SIGSEGV — the chained-base arm for a nested
+            field chain A.B.Arr[0], BUG-20260722-jumbo-field-array-elem). }
+          if (TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind = tyRecord) or
+             IsJumboFieldElem(TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType) then
           begin
             if BaseReleaseTemp <> '' then
               EmitLine(Format('  call $_ClassRelease(l %s)', [BaseReleaseTemp]));
@@ -14455,7 +14501,8 @@ begin
           EmitLine(Format('  %s =l mul %s, %d', [Ptr, T, ElemSize]));
           T := AllocTemp();
           EmitLine(Format('  %s =l add %s, %s', [T, L, Ptr]));
-          if SAT.ElementType.Kind = tyRecord then
+          if (SAT.ElementType.Kind = tyRecord) or
+             IsJumboFieldElem(SAT.ElementType) then
           begin
             if BaseReleaseTemp <> '' then
               EmitLine(Format('  call $_ClassRelease(l %s)', [BaseReleaseTemp]));
@@ -14903,9 +14950,12 @@ begin
         { Record and interface elements evaluate to their element ADDRESS
           (an interface element is a contiguous 16-byte fat pointer; loading
           8 bytes here handed consumers the obj as the pair base — SIGSEGV
-          on dispatch; BUG-20260721-fieldaccess-intf-array-elem-read). }
-        if TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind in
-           [tyRecord, tyInterface] then
+          on dispatch; BUG-20260721-fieldaccess-intf-array-elem-read).  A
+          jumbo-set element is an inline bitmap — its ADDRESS is the value
+          (BUG-20260722-jumbo-field-array-elem). }
+        if (TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind in
+              [tyRecord, tyInterface]) or
+           IsJumboFieldElem(TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType) then
           Exit(T);
         QType := QbeTypeOf(TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType);
         LoadInstr := LoadInstrFor(TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType);
@@ -14930,7 +14980,8 @@ begin
         EmitLine(Format('  %s =l mul %s, %d', [Ptr, T, ElemSize]));
         T := AllocTemp();
         EmitLine(Format('  %s =l add %s, %s', [T, L, Ptr]));
-        if SAT.ElementType.Kind in [tyRecord, tyInterface] then
+        if (SAT.ElementType.Kind in [tyRecord, tyInterface]) or
+           IsJumboFieldElem(SAT.ElementType) then
           Exit(T);
         QType := QbeTypeOf(SAT.ElementType);
         LoadInstr := LoadInstrFor(SAT.ElementType);
@@ -14950,8 +15001,9 @@ begin
         EmitLine(Format('  %s =l mul %s, %d', [L, T, ElemSize]));
         T := AllocTemp();
         EmitLine(Format('  %s =l add %s, %s', [T, Ptr, L]));
-        if TOpenArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind in
-           [tyRecord, tyInterface] then
+        if (TOpenArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind in
+              [tyRecord, tyInterface]) or
+           IsJumboFieldElem(TOpenArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType) then
           Exit(T);
         QType := QbeTypeOf(TOpenArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType);
         LoadInstr := LoadInstrFor(TOpenArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType);

@@ -50,6 +50,13 @@ type
       and element-to-element copies dereferenced garbage — SIGSEGV on both
       backends (BUG-20260721-jumbo-set-in-array-elem). }
     procedure TestRun_JumboSet_ArrayElement_MembershipAndCopy;
+    { Jumbo-set elements of a FIELD-typed array (R.Arr[0], H.FArr[0],
+      H.FDyn[0], and in-method FArr[0]): the FieldAccess+ArrayAccess store
+      wrote only the RHS pointer (8 of 32 bytes, aliasing) and the native
+      read SIGSEGV'd; plus the set-literal-into-field-element destination was
+      rejected by semantic (BUG-20260722-jumbo-field-array-elem). }
+    procedure TestRun_JumboSet_FieldArrayElement;
+    procedure TestRun_JumboSet_NestedFieldChainElement;
   end;
 
 implementation
@@ -355,6 +362,72 @@ begin
     end.
     ''', 'y' + LE + 'n' + LE + 'y' + LE + 'y' + LE +
          'y' + LE + 'y' + LE + 'n' + LE, 0);
+end;
+
+procedure TE2EJumboSetTests.TestRun_JumboSet_FieldArrayElement;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program P;
+    type
+      TBig = set of Byte;
+      TRec = record Arr: array[0..1] of TBig; end;
+      THold = class
+      public
+        FArr: array[0..1] of TBig;
+        FDyn: array of TBig;
+        function ProbeSelf(): Boolean;
+      end;
+    function THold.ProbeSelf(): Boolean;
+    begin
+      Result := 200 in FArr[0]
+    end;
+    var
+      R: TRec;
+      H: THold;
+      V: TBig;
+    begin
+      V := [5, 40, 200];
+      R.Arr[0] := V;                { record field-array elem store (memcpy) }
+      R.Arr[1] := [3, 250];         { set-literal into field-array elem }
+      H := THold.Create();
+      H.FArr[0] := V;               { class field-array elem store }
+      SetLength(H.FDyn, 2);
+      H.FDyn[0] := V;               { class dyn-array field elem store }
+      V := V - [200];               { mutate source — element must not alias }
+      if 200 in R.Arr[0]  then WriteLn('R')  else WriteLn('r');
+      if 250 in R.Arr[1]  then WriteLn('L')  else WriteLn('l');
+      if 200 in H.FArr[0] then WriteLn('H')  else WriteLn('h');
+      if 200 in H.FDyn[0] then WriteLn('D')  else WriteLn('d');
+      if H.ProbeSelf()    then WriteLn('S')  else WriteLn('s')
+    end.
+    ''', 'R' + LE + 'L' + LE + 'H' + LE + 'D' + LE + 'S' + LE, 0);
+end;
+
+procedure TE2EJumboSetTests.TestRun_JumboSet_NestedFieldChainElement;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { A jumbo element of an array field reached through a NESTED record chain
+    (O.B.Arr[0]) — the chained-base read arm also had to return the element
+    address (QBE SIGSEGV'd on the 8-byte load; this shape was masked before
+    the set-literal semantic fix that unblocked it). }
+  AssertRunsOnAll('''
+    program P;
+    type
+      TBig = set of Byte;
+      TInner = record Arr: array[0..1] of TBig; end;
+      TOuter = record Tag: Int64; B: TInner; end;
+    var
+      O: TOuter;
+    begin
+      O.Tag := 1;
+      O.B.Arr[0] := [5, 200];
+      O.B.Arr[1] := [40];
+      if 200 in O.B.Arr[0] then WriteLn('a')  else WriteLn('.');
+      if 40  in O.B.Arr[0] then WriteLn('.')  else WriteLn('b');
+      if 40  in O.B.Arr[1] then WriteLn('c')  else WriteLn('.')
+    end.
+    ''', 'a' + LE + 'b' + LE + 'c' + LE, 0);
 end;
 
 initialization

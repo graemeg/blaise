@@ -10379,7 +10379,12 @@ begin
   IdxType := Self.AnalyseExprSlot(AAssign.PropIndexExpr);
   if not IdxType.IsArrayIndex() then
     SemanticError('Array index must be an ordinal type', AAssign.Line, AAssign.Col);
-  ExprType := Self.AnalyseExprSlot(AAssign.Expr);
+  { Hint a bracket set literal against the element set type — a plain-variable
+    array element write already does this (AnalyseExprHinted), but the
+    field-array element destination (R.Arr[0] := [3, 200]) went through the
+    unhinted slot analysis and kept the open-array type, so it failed the
+    match (BUG-20260722-jumbo-field-array-elem symptom 4). }
+  ExprType := Self.AnalyseExprHinted(AAssign.Expr, ElemT);
   CheckTypesMatch(ElemT, ExprType,
     Format('''%s'' element', [AAssign.FieldName]), AAssign.Line, AAssign.Col);
   AAssign.IsElemWrite := True;
