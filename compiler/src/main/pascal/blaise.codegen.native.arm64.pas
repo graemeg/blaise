@@ -203,8 +203,10 @@ type
       EmitCall's post-call disposal: a concat/rc=0 unowned transient
       (ArcExprIsUnownedStrTransient) needs AddRef+Release (0->1->0 frees once);
       an rc=1 owned transient needs a bare Release.  Used after a property
-      setter borrows the value (leg 36). }
+      setter borrows the value (leg 36); the rc=0 pin half moved BEFORE the
+      call (BUG-20260722-arm64-propsetter-pin-after-call). }
     procedure EmitOwnedStrTransientRelease(AValueExpr: TASTExpr);
+    procedure EmitOwnedStrTransientPin(AValueExpr: TASTExpr);
     procedure EmitFieldAssign(AStmt: TFieldAssignment);
     { Rec.Field[Index] := value where Field is an array-typed field (leg 12).
       Computes the element address (field data pointer + index*elemsize) and
@@ -1277,16 +1279,28 @@ end;
 
 procedure TArm64Backend.EmitOwnedStrTransientRelease(AValueExpr: TASTExpr);
 begin
-  { the transient pointer is in x0 }
+  { The transient pointer is in x0.  An rc=0 unowned transient must have
+    been PINNED (_StringAddRef) BEFORE the consuming call: a by-value
+    callee param's own entry-retain/exit-release cycle frees an unpinned
+    rc=0 transient during the call, so pinning here (after the call) was a
+    double-free with a non-storing callee
+    (BUG-20260722-arm64-propsetter-pin-after-call).  This helper now emits
+    only the release half; call sites emit the pre-call pin. }
+  Self.Emit(#9'bl _StringRelease');
+end;
+
+{ Pin an rc=0 unowned string transient (value in x0) BEFORE the call that
+  consumes it: 0 -> 1, so the callee's borrow cycle cannot free it and the
+  post-call release balances (1 -> 0 frees, or higher when the callee
+  stored it).  x0 is preserved.  rc=1 owned transients need no pin. }
+procedure TArm64Backend.EmitOwnedStrTransientPin(AValueExpr: TASTExpr);
+begin
   if ArcExprIsUnownedStrTransient(AValueExpr) then
   begin
-    { rc=0 pin: 0 -> 1 -> 0 frees exactly once (a bare release would drive it
-      to -1 = immortal and leak) }
     EmitPushX0();
     Self.Emit(#9'bl _StringAddRef');
     EmitPopTo('x0');
   end;
-  Self.Emit(#9'bl _StringRelease');
 end;
 
 procedure TArm64Backend.EmitFieldAssign(AStmt: TFieldAssignment);
@@ -1345,7 +1359,13 @@ begin
       EmitPushX0();                          { index arg }
       Self.EmitExprToX0(AStmt.Expr);
       if RelStr then
+      begin
         Self.Emit(#9'mov x19, x0');          { capture the value transient }
+        { rc=0 transients pin BEFORE the call — the setter's by-value param
+          cycle would free an unpinned one mid-call
+          (BUG-20260722-arm64-propsetter-pin-after-call). }
+        Self.EmitOwnedStrTransientPin(AStmt.Expr);
+      end;
       EmitPushX0();                          { value arg }
       EmitPropRecvToX0(AStmt);
       EmitPopTo('x2');                       { value }
@@ -1397,7 +1417,12 @@ begin
         NotYet('owned transient as property value', AStmt);
       Self.EmitExprToX0(AStmt.Expr);
       if RelStr then
+      begin
         Self.Emit(#9'str x0, [sp, #-16]!');  { park the transient — released after call }
+        { rc=0 transients pin BEFORE the call
+          (BUG-20260722-arm64-propsetter-pin-after-call). }
+        Self.EmitOwnedStrTransientPin(AStmt.Expr);
+      end;
       EmitPushX0();
       EmitPropRecvToX0(AStmt);
       EmitPopTo('x1');

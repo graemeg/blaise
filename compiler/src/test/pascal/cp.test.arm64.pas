@@ -5027,7 +5027,7 @@ end;
 procedure TArm64BackendTests.TestOwnedTransientStringPropertyValue;
 var
   AsmT: string;
-  PosSet, PosRel: Integer;
+  PosCat, PosPin, PosSet, PosRel: Integer;
 begin
   { An owned-transient string value (a `+` concat, rc=0) written through a
     property setter is passed BORROWED — the setter retains its own copy — so
@@ -5057,17 +5057,24 @@ begin
       f.Free()
     end.
     ''');
-  { the concat transient is produced, the setter borrows it, and it is disposed
-    (AddRef+Release for the rc=0 shape) AFTER the setter call returns }
-  AssertTrue('concat produced', Pos(#9'bl _StringConcat', AsmT) >= 0);
+  { the concat transient is produced, the rc=0 pin (AddRef) lands BEFORE the
+    setter call — a by-value setter param's own entry/exit cycle would free
+    an unpinned rc=0 transient DURING the call, so a post-call pin was a
+    double-free with a non-storing setter
+    (BUG-20260722-arm64-propsetter-pin-after-call) — and the single release
+    follows the call }
+  PosCat := Pos(#9'bl _StringConcat', AsmT);
+  AssertTrue('concat produced', PosCat >= 0);
   PosSet := Pos(#9'bl TFoo_SetItem', AsmT);
   AssertTrue('indexed setter called', PosSet >= 0);
+  PosPin := PosEx(#9'bl _StringAddRef', AsmT, PosCat);
+  AssertTrue('rc=0 transient pinned BEFORE the indexed setter call',
+    (PosPin > PosCat) and (PosPin < PosSet));
   PosRel := PosEx(#9'bl _StringRelease', AsmT, PosSet);
   AssertTrue('transient released after the indexed setter', PosRel > PosSet);
-  { the rc=0 concat is pinned (AddRef) before that release }
-  AssertTrue('rc=0 transient pinned before release',
-    (PosEx(#9'bl _StringAddRef', AsmT, PosSet) > PosSet) and
-    (PosEx(#9'bl _StringAddRef', AsmT, PosSet) < PosRel));
+  AssertTrue('no post-call AddRef half remains',
+    (PosEx(#9'bl _StringAddRef', AsmT, PosSet) < 0) or
+    (PosEx(#9'bl _StringAddRef', AsmT, PosSet) > PosRel));
 end;
 
 procedure TArm64BackendTests.TestCapturedClassBase_FieldRead;
