@@ -15917,6 +15917,14 @@ begin
           { var-param class: slot -> caller var -> instance }
           Self.Emit(#9'movq (%rbx), %rbx');
       end
+      else if FA.IsVarParam then
+      begin
+        { var-param record base: the slot holds the record's ADDRESS — load it,
+          do not leaq the slot itself (that wrote the sret result over the
+          caller's stack; the method-call and prop-getter arms already had
+          this case). }
+        Self.EmitVarBaseToReg(FA.RecordName, False, '%rbx');
+      end
       else
       begin
         Self.EmitVarBaseToReg(FA.RecordName, True, '%rbx');
@@ -15926,6 +15934,54 @@ begin
       if FA.FieldInfo.TypeDesc.Kind = tyRecord then
         Self.EmitRecordFieldReleases(TRecordTypeDesc(FA.FieldInfo.TypeDesc), '%rbx');
       Self.EmitFuncCallSret(TFuncCallExpr(FA.Expr), '(%rbx)', False);
+      Self.Emit(#9'popq %rbx');
+      Exit;
+    end;
+    { Field := <record-returning property getter> (indexed or not, including
+      the default-subscript form): a getter call, routed through
+      EmitRecordCallSretAt with the field address as the sret destination —
+      the arms above only matched explicit method/function call nodes, so a
+      TFieldAccessExpr PropRead RHS fell through and mishandled the sret
+      buffer (BUG-20260721-native-recprop-into-recfield). }
+    if (FA.FieldInfo.TypeDesc.Kind = tyRecord) and
+       ((FA.Expr is TFieldAccessExpr) or (FA.Expr is TStringSubscriptExpr)) and
+       Self.IsNativeRecordCall(FA.Expr) then
+    begin
+      Self.Emit(#9'pushq %rbx');
+      if FA.ObjExpr <> nil then
+      begin
+        Self.EmitExprToEax(FA.ObjExpr);
+        Self.Emit(#9'movq %rax, %rbx');
+      end
+      else if FSretFunc and (FA.RecordName = 'Result') then
+        Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('Result')]))
+      else if FA.IsImplicitSelf then
+      begin
+        Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('Self')]));
+        if (FA.ImplicitBaseInfo <> nil) and (FA.ImplicitBaseInfo.Offset > 0) then
+          Self.Emit(Format(#9'addq $%d, %%rbx', [FA.ImplicitBaseInfo.Offset]));
+        if FA.IsClassAccess then
+          Self.Emit(#9'movq (%rbx), %rbx');
+      end
+      else if FA.IsClassAccess then
+      begin
+        Self.EmitVarBaseToReg(FA.RecordName, False, '%rbx');
+        if FA.IsVarParam then
+          { var-param class: slot -> caller var -> instance }
+          Self.Emit(#9'movq (%rbx), %rbx');
+      end
+      else if FA.IsVarParam then
+      begin
+        Self.EmitVarBaseToReg(FA.RecordName, False, '%rbx');
+      end
+      else
+      begin
+        Self.EmitVarBaseToReg(FA.RecordName, True, '%rbx');
+      end;
+      if FA.FieldInfo.Offset > 0 then
+        Self.Emit(Format(#9'addq $%d, %%rbx', [FA.FieldInfo.Offset]));
+      Self.EmitRecordFieldReleases(TRecordTypeDesc(FA.FieldInfo.TypeDesc), '%rbx');
+      Self.EmitRecordCallSretAt(FA.Expr, '(%rbx)', False);
       Self.Emit(#9'popq %rbx');
       Exit;
     end;

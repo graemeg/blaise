@@ -116,6 +116,22 @@ type
     { BUG-20260720-managed-record-self-assign: a managed-record self-assign
       (R := R, element/field self-assign) must keep the fields, not zero them. }
     procedure TestRun_ManagedRecordSelfAssign;
+    { Record-property getter assigned into a record FIELD — the native
+      TFieldAssignment record path had arms for method/function calls but
+      none for a property-getter RHS, so it fell through and mishandled the
+      sret buffer (SIGSEGV; QBE was correct)
+      (BUG-20260721-native-recprop-into-recfield). }
+    procedure TestRun_RecordPropGetterIntoRecordField;
+    { Record-returning FREE-FUNCTION call assigned into a record field whose
+      base record is a VAR PARAM — the native FuncCall arm lacked the
+      standalone IsVarParam case (present in the method-call and prop-getter
+      arms), so it leaq'd the 8-byte slot instead of loading the caller
+      record's address and sprayed the sret result over the callee's stack. }
+    procedure TestRun_RecordFuncCallIntoVarParamRecordField;
+    { Managed-record (string field) property getter into a record field:
+      release-then-sret-write must transfer the getter result's +1 and
+      release the old field contents on reassignment. }
+    procedure TestRun_ManagedRecordPropGetterIntoRecordField;
   end;
 
 implementation
@@ -1670,6 +1686,104 @@ begin
     end.
     ''',
     'aaa bbb inn r0 r1 7' + LE + 'elem z' + LE, 0);
+end;
+
+procedure TE2ERecordsTests.TestRun_RecordPropGetterIntoRecordField;
+begin
+  AssertRunsOnAll('''
+    program P;
+    type
+      TBig = record A, B, C, D, E: Integer; end;
+      TWrap = record Tag: Integer; Payload: TBig; end;
+      TBox = class
+      public
+        FBig: TBig;
+        FArr: array[0..1] of TBig;
+        function Cur(): TBig;
+        function Item(I: Integer): TBig;
+        property Cur2: TBig read Cur;
+        property Items[I: Integer]: TBig read Item;
+      end;
+    function TBox.Cur(): TBig;
+    begin
+      Result := FBig
+    end;
+    function TBox.Item(I: Integer): TBig;
+    begin
+      Result := FArr[I]
+    end;
+    var
+      W: TWrap;
+      B: TBox;
+    begin
+      B := TBox.Create();
+      B.FBig.C := 7;
+      B.FArr[1].E := 9;
+      W.Payload := B.Cur2;             { non-indexed getter into a field }
+      WriteLn(W.Payload.C);
+      W.Payload := B.Items[1];         { indexed getter into a field }
+      WriteLn(W.Payload.E)
+    end.
+    ''', '7' + LE + '9' + LE, 0);
+end;
+
+procedure TE2ERecordsTests.TestRun_RecordFuncCallIntoVarParamRecordField;
+begin
+  AssertRunsOnAll('''
+    program P;
+    type
+      TBig = record A, B, C, D, E: Integer; end;
+      TWrap = record Tag: Integer; Payload: TBig; end;
+    function MakeBig(V: Integer): TBig;
+    begin
+      Result.C := V
+    end;
+    procedure Fill(var W: TWrap);
+    begin
+      W.Payload := MakeBig(11)      { FuncCall arm, var-param dest base }
+    end;
+    var
+      W: TWrap;
+    begin
+      Fill(W);
+      WriteLn(W.Payload.C)
+    end.
+    ''', '11' + LE, 0);
+end;
+
+procedure TE2ERecordsTests.TestRun_ManagedRecordPropGetterIntoRecordField;
+begin
+  AssertRunsOnAll('''
+    program P;
+    type
+      TStrRec = record S: String; N: Integer; end;
+      TWrap = record Tag: Integer; Payload: TStrRec; end;
+      TBox = class
+      public
+        FRec: TStrRec;
+        function Item(I: Integer): TStrRec;
+        property Items[I: Integer]: TStrRec read Item;
+      end;
+    function TBox.Item(I: Integer): TStrRec;
+    begin
+      Result := FRec;
+      Result.S := Result.S + '-' + IntToStr(I);
+      Result.N := Result.N + I
+    end;
+    var
+      W: TWrap;
+      B: TBox;
+    begin
+      B := TBox.Create();
+      B.FRec.S := 'hello';
+      B.FRec.N := 5;
+      W.Payload := B.Items[3];
+      WriteLn(W.Payload.S, ' ', W.Payload.N);
+      W.Payload := B.Items[9];      { reassign: old field string released }
+      WriteLn(W.Payload.S, ' ', W.Payload.N);
+      WriteLn(B.FRec.S)             { source untouched }
+    end.
+    ''', 'hello-3 8' + LE + 'hello-9 14' + LE + 'hello' + LE, 0);
 end;
 
 initialization
