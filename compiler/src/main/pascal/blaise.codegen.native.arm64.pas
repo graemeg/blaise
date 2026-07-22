@@ -6725,9 +6725,12 @@ begin
   { Delegates to the shared ARC content walk (records: any managed field
     INCLUDING static-array-of-managed fields since BUG-017; static arrays:
     managed content at any nesting depth).  The previous local version used
-    RecretManagedClean, which ignores static-array fields — that would let
-    the retain-side walks (record copy / param entry) retain elements this
-    gate then never released. }
+    RecretManagedClean, which at the time ignored static-array fields — that
+    would let the retain-side walks (record copy / param entry) retain
+    elements this gate then never released.  (RecretManagedClean has since
+    grown a tyStaticArray arm delegating to this same walk —
+    BUG-20260721-recretclean-static-array-of-managed — so the two now agree;
+    the delegation here is kept for the direct any-type entry point.) }
   Result := ArcTypeHasManagedContent(AType) and
             (AType.Kind in [tyRecord, tyStaticArray]);
 end;

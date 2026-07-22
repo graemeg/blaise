@@ -136,9 +136,9 @@ type
   drift-prone twins.  Only RecretClassify consults the target (the Win64
   aggregate rule); the leaf predicates are target-independent type walks. }
 
-{ True when ARec (and every nested record) contains no managed fields
-  (string / class / interface / dynamic array) — a precondition for any
-  register return. }
+{ True when ARec (and every nested record) contains no managed content
+  (string / class / interface / dynamic array, or a static array of such
+  elements) — a precondition for any register return. }
 function RecretManagedClean(ARec: TRecordTypeDesc): Boolean;
 { True when every leaf field is an integer-class scalar (or a nested record
   thereof). }
@@ -193,10 +193,9 @@ function ArcIsArrayElemSlot(AExpr: TASTExpr): Boolean;
   managed elements (at any nesting depth), or a record with such content.
   Both the QBE and x86-64 backends gate the scope-exit release of
   static-array LOCALS on this (BUG-016 stage 2) so unmanaged arrays emit no
-  dead walk code.  Unlike RecretManagedClean (the register-return ABI
-  predicate, which deliberately ignores static-array fields), this walk
-  descends into static-array fields — it answers the ARC question, not the
-  ABI one. }
+  dead walk code.  RecretManagedClean (the register-return ABI predicate)
+  delegates its static-array-field arm to this walk, so the two agree that
+  a static array of managed elements is managed content. }
 function ArcTypeHasManagedContent(AType: TTypeDesc): Boolean;
 
 { Classify how a scope-exit ARC teardown walk must dispose of a variable of
@@ -306,6 +305,12 @@ begin
         Exit;
       tyRecord:
         if not RecretManagedClean(TRecordTypeDesc(F.TypeDesc)) then Exit;
+      tyStaticArray:
+        { A static array of managed elements (at any nesting depth) is
+          managed content: register-returning or memcpy-copying it would
+          share the element refs without retain/release
+          (BUG-20260721-recretclean-static-array-of-managed). }
+        if ArcTypeHasManagedContent(F.TypeDesc) then Exit;
     end;
   end;
   Result := True;

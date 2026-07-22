@@ -88,6 +88,12 @@ type
       element's old managed refs are released and the callee's +1 refs
       transfer in — must be leak-free and double-free-free. }
     procedure TestRun_ManagedRecordCallIntoElement_NoLeak_Valgrind;
+    { A record whose ONLY managed content is a static-array-of-class field
+      must keep full ARC discipline on return + copy.  RecretManagedClean
+      lacked a tyStaticArray case, so such a record register-returned and
+      copied by bare memcpy — shared refs then double-released at scope exit
+      (BUG-20260721-recretclean-static-array-of-managed). }
+    procedure TestRun_RecordStaticArrayOfClassOnly_ReturnAndCopy_NoLeak;
   end;
 
 implementation
@@ -859,6 +865,43 @@ begin
     if Log = '' then Log := '(valgrind produced no output)';
     Fail('valgrind reported errors or leaks:' + LE + Log);
   end;
+end;
+
+procedure TE2EArcTests.TestRun_RecordStaticArrayOfClassOnly_ReturnAndCopy_NoLeak;
+const
+  Src = '''
+    program P;
+    type
+      TThing = class
+      public
+        V: Integer;
+      end;
+      TR = record
+        Arr: array[0..1] of TThing;
+      end;
+    function Make(): TR;
+    begin
+      Result.Arr[0] := TThing.Create();
+      Result.Arr[0].V := 7;
+      Result.Arr[1] := TThing.Create();
+      Result.Arr[1].V := 8
+    end;
+    var
+      A, B: TR;
+    begin
+      A := Make();
+      B := A;
+      WriteLn(B.Arr[0].V + B.Arr[1].V)
+    end.
+    ''';
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue(CompileAndRun(Src, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('field values survive copy', '15' + LE, Output);
+  { the double-release from a bare-memcpy copy shows up here }
+  AssertLeakFreeOnAll(Src, '');
 end;
 
 procedure TE2EArcTests.TestRun_ClassFieldReadOnTransient_NoLeak_Debug;

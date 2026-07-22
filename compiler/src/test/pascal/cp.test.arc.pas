@@ -146,6 +146,7 @@ type
     procedure TestARC_RecordWithStaticArrayField_ReleaseFields;
     procedure TestARC_RecordWithStaticArrayField_AddRefFields;
     procedure TestARC_RecordCopy_StaticArrayField_RetainsElements;
+    procedure TestARC_RecordReturn_StaticArrayOnly_IsSret;
   end;
 
 implementation
@@ -1530,6 +1531,36 @@ begin
     elements of the source. }
   AssertEquals('record copy retains the static-array elements',
     3, CountSubstring(IR, 'call $_StringAddRef'));
+end;
+
+procedure TARCTests.TestARC_RecordReturn_StaticArrayOnly_IsSret;
+var
+  IR: string;
+begin
+  { A record whose ONLY managed content is a static-array field must be
+    classified as managed and returned via sret.  RecretManagedClean lacked
+    a tyStaticArray case, so a 16-byte record of two strings was "clean" and
+    REGISTER-returned — bypassing the ARC copy discipline entirely
+    (BUG-20260721-recretclean-static-array-of-managed). }
+  IR := GenIR(
+    '''
+      program P;
+      type
+        TR = record
+          Names: array[0..1] of string;
+        end;
+      function Make(): TR;
+      begin
+        Result.Names[0] := 'x';
+      end;
+      var
+        R: TR;
+      begin
+        R := Make();
+      end.
+      ''');
+  AssertTrue('static-array-of-string record returns via sret',
+    IRContains(IR, 'function $Make(l %_par__sret)'));
 end;
 
 initialization

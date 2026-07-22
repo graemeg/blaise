@@ -46,6 +46,13 @@ type
     procedure TestMain_ProgramStaticArrayOfInteger_NoReleases;
     { The pre-existing scalar-global arms must keep working. }
     procedure TestMain_ProgramClassGlobal_EmitsClassRelease;
+    { A record whose ONLY managed content is a static-array-of-managed field
+      must take the ARC copy path on `B := A` (retain source elements before
+      the memcpy).  RecretManagedClean lacked a tyStaticArray case, so such a
+      record was mis-classified as managed-clean and copied by bare memcpy —
+      both sides then shared the refs and the scope-exit walk double-released
+      (BUG-20260721-recretclean-static-array-of-managed). }
+    procedure TestMain_RecordCopy_StaticArrayOfStringOnly_EmitsRetain;
   end;
 
 implementation
@@ -218,6 +225,31 @@ begin
   Region := Self.MainExitRegion(Self.GenAsm(SrcProgClassGlobal));
   AssertTrue('scalar class global still released at main exit',
     Pos('_ClassRelease', Region) >= 0);
+end;
+
+procedure TNativeArcTests.TestMain_RecordCopy_StaticArrayOfStringOnly_EmitsRetain;
+var
+  Asm_: string;
+begin
+  { The copy `B := A` is the only statement, so a retain anywhere in the
+    output can only come from the ARC record-copy path (the scope-exit walk
+    emits releases only). }
+  Asm_ := Self.GenAsm(
+    '''
+    program P;
+    type
+      TR = record
+        Arr: array[0..1] of string;
+      end;
+    var
+      A, B: TR;
+    begin
+      B := A;
+      WriteLn(1);
+    end.
+    ''');
+  AssertTrue('record copy retains static-array-of-string elements',
+    Pos('_StringAddRef', Asm_) >= 0);
 end;
 
 initialization
