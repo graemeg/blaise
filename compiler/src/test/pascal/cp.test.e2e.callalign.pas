@@ -51,6 +51,14 @@ type
     procedure TestRun_OverflowFloat_8Double1Single;
     procedure TestRun_OverflowFloat_11Single;
     procedure TestRun_OverflowFloat_InterspersedWithInt;
+    { >8 float args at METHOD and INTERFACE-dispatch call sites: the plain-
+      function path overflows floats to the stack, but the method/itab arg
+      loaders either raised at compile time or silently dropped the 9th+
+      float (BUG-20260721-x86-method-call-overflow-float). }
+    procedure TestRun_OverflowFloat_9Double_Method;
+    procedure TestRun_OverflowFloat_9Double_IntfDispatch;
+    procedure TestRun_OverflowFloat_InterspersedInt_Method;
+    procedure TestRun_OverflowFloat_InterspersedInt_IntfDispatch;
   end;
 
 implementation
@@ -166,6 +174,117 @@ const
     begin r := F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5); WriteLn(Trunc(r*10)) end.
     ''';
 
+  { 9 Doubles through a class METHOD (Self occupies an integer register;
+    the 9th Double must overflow to the stack, not raise or be dropped). }
+  Src9DoubleMethod =
+    '''
+    program P;
+    type
+      TCalc = class
+      public
+        function F(a, b, c, d, e, f, g, h, i: Double): Double;
+      end;
+    function TCalc.F(a, b, c, d, e, f, g, h, i: Double): Double;
+    begin Result := i + a end;
+    var
+      C: TCalc;
+      r: Double;
+    begin
+      C := TCalc.Create();
+      r := C.F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5);
+      WriteLn(Trunc(r*10))
+    end.
+    ''';
+
+  { 9 Doubles through INTERFACE (itab) dispatch. }
+  Src9DoubleIntf =
+    '''
+    program P;
+    type
+      ICalc = interface
+        function F(a, b, c, d, e, f, g, h, i: Double): Double;
+      end;
+      TCalc = class(TObject, ICalc)
+      public
+        function F(a, b, c, d, e, f, g, h, i: Double): Double;
+      end;
+    function TCalc.F(a, b, c, d, e, f, g, h, i: Double): Double;
+    begin Result := i + a end;
+    var
+      C: ICalc;
+      r: Double;
+    begin
+      C := TCalc.Create();
+      r := C.F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5,9.5);
+      WriteLn(Trunc(r*10))
+    end.
+    ''';
+
+  { Interspersed integer AND float overflow at a METHOD call: Self takes the
+    first integer register, n1..n5 fill the rest, so n6 is the int-overflow
+    slot while s9/s10 are the float-overflow slots.  The relocated region must
+    interleave them in ascending arg order (s9, n6, s10) to match the callee
+    prologue's shared StackOff walk. }
+  SrcInterspersedMethod =
+    '''
+    program P;
+    type
+      TCalc = class
+      public
+        function F(s1, s2, s3, s4, s5, s6, s7, s8: Single;
+                   n1, n2, n3, n4, n5: Integer;
+                   s9: Single; n6: Integer; s10: Single): Integer;
+      end;
+    function TCalc.F(s1, s2, s3, s4, s5, s6, s7, s8: Single;
+                     n1, n2, n3, n4, n5: Integer;
+                     s9: Single; n6: Integer; s10: Single): Integer;
+    begin Result := Trunc((s9 + s10) * 10) + n6 end;
+    var
+      C: TCalc;
+      r: Integer;
+    begin
+      C := TCalc.Create();
+      r := C.F(1,2,3,4,5,6,7,8, 10,20,30,40,50, 9.5, 100, 10.5);
+      WriteLn(r)
+    end.
+    ''';
+
+  { Same interspersed int+float overflow shape through INTERFACE (itab)
+    dispatch — exercises the EmitIntfRegArgs general branch with BOTH kinds
+    of overflow slot in one OvSlots region.  Double params + float literals
+    deliberately: itab call sites do not yet coerce an integer literal to a
+    float param, nor narrow Double->Single, on EITHER backend
+    (BUG-20260722-itab-arg-type-coercion) — that separate defect would mask
+    the overflow-layout behaviour this test pins. }
+  SrcInterspersedIntf =
+    '''
+    program P;
+    type
+      ICalc = interface
+        function F(d1, d2, d3, d4, d5, d6, d7, d8: Double;
+                   n1, n2, n3, n4, n5: Integer;
+                   d9: Double; n6: Integer; d10: Double): Integer;
+      end;
+      TCalc = class(TObject, ICalc)
+      public
+        function F(d1, d2, d3, d4, d5, d6, d7, d8: Double;
+                   n1, n2, n3, n4, n5: Integer;
+                   d9: Double; n6: Integer; d10: Double): Integer;
+      end;
+    function TCalc.F(d1, d2, d3, d4, d5, d6, d7, d8: Double;
+                     n1, n2, n3, n4, n5: Integer;
+                     d9: Double; n6: Integer; d10: Double): Integer;
+    begin Result := Trunc((d9 + d10) * 10) + n6 end;
+    var
+      C: ICalc;
+      r: Integer;
+    begin
+      C := TCalc.Create();
+      r := C.F(1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5, 10,20,30,40,50, 9.5, 100, 10.5);
+      WriteLn(r)
+    end.
+    ''';
+
   { First 8 Double (fill xmm0..7) + a 9th Single overflow — mixed-class case. }
   Src8Double1Single =
     '''
@@ -231,6 +350,30 @@ procedure TE2ECallAlignTests.TestRun_OverflowFloat_InterspersedWithInt;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(SrcInterspersedOverflow, '300' + LE, 0)
+end;
+
+procedure TE2ECallAlignTests.TestRun_OverflowFloat_9Double_Method;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src9DoubleMethod, '110' + LE, 0)
+end;
+
+procedure TE2ECallAlignTests.TestRun_OverflowFloat_9Double_IntfDispatch;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src9DoubleIntf, '110' + LE, 0)
+end;
+
+procedure TE2ECallAlignTests.TestRun_OverflowFloat_InterspersedInt_Method;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(SrcInterspersedMethod, '300' + LE, 0)
+end;
+
+procedure TE2ECallAlignTests.TestRun_OverflowFloat_InterspersedInt_IntfDispatch;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(SrcInterspersedIntf, '300' + LE, 0)
 end;
 
 procedure TE2ECallAlignTests.TestRun_OddPinnedArg_ThreadSpawnInSubtree;

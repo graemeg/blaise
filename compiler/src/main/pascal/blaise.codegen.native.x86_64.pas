@@ -11168,7 +11168,10 @@ begin
   end;
   RegInts := 6 - ABase;
   if RegInts < 0 then RegInts := 0;
-  if IntCount <= RegInts then
+  { A 9th+ float slot must overflow to the stack
+    (BUG-20260721-x86-method-call-overflow-float), so the all-register fast
+    path also requires every float to fit xmm0..7. }
+  if (IntCount <= RegInts) and (Slots - IntCount <= 8) then
   begin
     { Everything register-mapped: assign registers in forward slot order
       (integer and xmm sequences advance independently, per SysV), then
@@ -11181,9 +11184,6 @@ begin
       begin
         if ASlotClasses.Get(I) = 1 then
         begin
-          if XmmIdx > 7 then
-            raise ENativeCodeGenError.Create('native backend: more than 8 ' +
-              'float args at an interface call site — xmm registers exhausted');
           Dest.Add(SysVXmmArgRegs[XmmIdx]);
           Inc(XmmIdx);
         end
@@ -11209,11 +11209,13 @@ begin
     Result := 0;
     Exit;
   end;
-  { Integer overflow with floats present: leave the pushed slots in place,
+  { Register overflow with floats present: leave the pushed slots in place,
     load every register-mapped slot from its %rsp offset, then relocate the
-    overflow INTEGER slots into a fresh region below the pushed block in
-    ascending arg order (System V stack-arg order at 0(%rsp)..).  Same
-    scheme as EmitSretRegArgs; float slots never overflow. }
+    overflow slots (7th+ integer AND 9th+ float, in ascending arg order —
+    System V stack-arg order at 0(%rsp)..) into a fresh region below the
+    pushed block.  Same scheme as EmitSretRegArgs; the type-agnostic 8-byte
+    relocation is harmless for Single (low 4 bytes)
+    (BUG-20260721-x86-method-call-overflow-float). }
   OvSlots := TList<Integer>.Create();
   try
     IntIdx := ABase;
@@ -11223,12 +11225,14 @@ begin
       SrcOff := (Slots - 1 - I) * 8;
       if ASlotClasses.Get(I) = 1 then
       begin
-        if XmmIdx > 7 then
-          raise ENativeCodeGenError.Create('native backend: more than 8 ' +
-            'float args at an interface call site — xmm registers exhausted');
-        Self.Emit(Format(#9'movsd %d(%%rsp), %s',
-          [SrcOff, SysVXmmArgRegs[XmmIdx]]));
-        Inc(XmmIdx);
+        if XmmIdx <= 7 then
+        begin
+          Self.Emit(Format(#9'movsd %d(%%rsp), %s',
+            [SrcOff, SysVXmmArgRegs[XmmIdx]]));
+          Inc(XmmIdx);
+        end
+        else
+          OvSlots.Add(I);
       end
       else if IntIdx <= 5 then
       begin
@@ -11418,7 +11422,8 @@ function TX86_64Backend.EmitMethodOverflowLoad(AParams, AArgs: TObjectList;
 var
   I, IntIdx, XmmIdx, SlotOff: Integer;
   IsFloatSlot: TList<Integer>;   { per flat slot (slot 0 = Self): 1 = xmm }
-  OverflowOffs: TList<Integer>;  { source offsets of integer-overflow slots }
+  OverflowOffs: TList<Integer>;  { source offsets of overflow slots (7th+
+                                   integer and 9th+ float, in arg order) }
   RK, RSrc, OverflowBytes: Integer;
 begin
   IsFloatSlot := TList<Integer>.Create();
@@ -11437,9 +11442,15 @@ begin
     begin
       if IsFloatSlot.Get(I) = 1 then
       begin
+        { A 9th+ float overflows to the stack like an integer slot — it was
+          silently DROPPED before (the callee then read garbage)
+          (BUG-20260721-x86-method-call-overflow-float).  The type-agnostic
+          8-byte relocation below is harmless for Single (low 4 bytes). }
         if XmmIdx < 8 then
           Self.Emit(Format(#9'movsd %d(%%rsp), %s',
-            [SlotOff, SysVXmmArgRegs[XmmIdx]]));
+            [SlotOff, SysVXmmArgRegs[XmmIdx]]))
+        else
+          OverflowOffs.Add(SlotOff);
         Inc(XmmIdx);
       end
       else
