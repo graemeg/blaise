@@ -3579,8 +3579,15 @@ begin
     end;
     Exit;
   end;
-  { Ordinal-indexed static array: 'array[@TEnum] of TypeName'. }
-  if (Length(AName) > 8) and (StrHead(AName, 7) = 'array[@') then
+  { Ordinal-indexed static array: 'array[@TEnum] of TypeName'.  A single bare
+    ordinal marker only — an enum-typed multi-dim dimension is encoded as a
+    range 'array[@L:TEnum..@H:TEnum]' (GH #182) and must fall through to the
+    range-indexed 'array[L..H]' branch below.  The '..'-absence test is scoped
+    to the INDEX brackets (StrHead up to the first ']'), because the ELEMENT
+    type may legitimately contain '..' — e.g. 'array[@TEnum] of array[0..1]',
+    the nested form, must still take THIS single-dim ordinal branch. }
+  if (Length(AName) > 8) and (StrHead(AName, 7) = 'array[@') and
+     (StrPos('..', StrHead(AName, StrPos(']', AName))) < 0) then
   begin
     RBrPos   := StrPos(']', AName);
     OfPos    := StrPos(' of ', AName);
@@ -5412,15 +5419,48 @@ var
 begin
   if IsPlainInt(ABoundText) then
     Exit(Integer(StrToInt(ABoundText)));
-  { Enum-type dimension marker '@TEnum' (see ReadConstArrayDim): the high bound
-    of an enum-indexed dimension is the enum's last ordinal (member count - 1).
-    The low bound is always 0, stored as plain '0'. }
+  { Enum-type dimension markers (see ReadConstArrayDim): '@L:TEnum' / '@H:TEnum'
+    are the low / high bounds of an enum-typed array dimension.  A FULL enum
+    spans 0..Members.Count-1; an ENUM-SUBRANGE type (TSub = a..b) spans its own
+    ordinal bounds SubrangeLow..SubrangeHigh — so the low is NOT always 0
+    (GH #182).  The bare '@TEnum' form (legacy high-only encoding) is still
+    accepted for backward compatibility. }
+  if (Length(ABoundText) >= 3) and (Copy(ABoundText, 0, 3) = '@L:') then
+  begin
+    Sym := FTable.Lookup(Copy(ABoundText, 3, Length(ABoundText) - 3));
+    if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) and
+       (Sym.TypeDesc.Kind = tyEnum) then
+    begin
+      if TEnumTypeDesc(Sym.TypeDesc).IsSubrange then
+        Exit(Integer(TEnumTypeDesc(Sym.TypeDesc).SubrangeLow));
+      Exit(0);
+    end;
+    SemanticError(Format('Unknown enum type ''%s'' in array dimension',
+      [Copy(ABoundText, 3, Length(ABoundText) - 3)]), 0, 0);
+  end;
+  if (Length(ABoundText) >= 3) and (Copy(ABoundText, 0, 3) = '@H:') then
+  begin
+    Sym := FTable.Lookup(Copy(ABoundText, 3, Length(ABoundText) - 3));
+    if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) and
+       (Sym.TypeDesc.Kind = tyEnum) then
+    begin
+      if TEnumTypeDesc(Sym.TypeDesc).IsSubrange then
+        Exit(Integer(TEnumTypeDesc(Sym.TypeDesc).SubrangeHigh));
+      Exit(TEnumTypeDesc(Sym.TypeDesc).Members.Count - 1);
+    end;
+    SemanticError(Format('Unknown enum type ''%s'' in array dimension',
+      [Copy(ABoundText, 3, Length(ABoundText) - 3)]), 0, 0);
+  end;
   if (Length(ABoundText) > 0) and (ABoundText[0] = '@') then
   begin
     Sym := FTable.Lookup(Copy(ABoundText, 1, Length(ABoundText) - 1));
     if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) and
        (Sym.TypeDesc.Kind = tyEnum) then
+    begin
+      if TEnumTypeDesc(Sym.TypeDesc).IsSubrange then
+        Exit(Integer(TEnumTypeDesc(Sym.TypeDesc).SubrangeHigh));
       Exit(TEnumTypeDesc(Sym.TypeDesc).Members.Count - 1);
+    end;
     SemanticError(Format('Unknown enum type ''%s'' in array dimension',
       [Copy(ABoundText, 1, Length(ABoundText) - 1)]), 0, 0);
   end;

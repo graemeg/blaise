@@ -517,14 +517,15 @@ begin
       try
         repeat
           { An enum-type dimension is a bare identifier NOT followed by '..'
-            (e.g. the TEnum dimensions in 'array[TEnum, 0..1]').  Encode it as
-            0 .. @TEnum so the range-indexed type resolver folds the high bound
-            to the enum's last ordinal — the same '@TEnum' convention used for
-            the single-dimension 'array[TEnum]' form above. }
+            (e.g. the TEnum dimensions in 'array[TEnum, 0..1]').  Encode BOTH
+            bounds as self-describing markers '@L:TEnum' / '@H:TEnum' so the
+            resolver derives low and high from the type — a full enum spans
+            0..N-1, an enum-subrange type spans its own ordinal bounds
+            (GH #182; hardcoding low=0 mis-sized a subrange dimension). }
           if Check(tkIdent) and (PeekKind() <> tkDotDot) then
           begin
-            Lows.Add('0');
-            Highs.Add('@' + FCurrent.Value);
+            Lows.Add('@L:' + FCurrent.Value);
+            Highs.Add('@H:' + FCurrent.Value);
             Advance();
           end
           else
@@ -1524,13 +1525,15 @@ var
   LoText, HiText: string;
 begin
   { An enum-type dimension is a bare identifier NOT followed by '..' (e.g. the
-    TEnum in 'array[TEnum, 0..1]').  Encode it as the range 0 .. @TEnum so the
-    semantic pass resolves the high bound to the enum's last ordinal — the same
-    convention used for single-dimension 'array[@TEnum]'. }
+    TEnum in 'array[TEnum, 0..1]').  Encode BOTH bounds as self-describing
+    markers '@L:TEnum' / '@H:TEnum' so the semantic pass derives the low and
+    high from the type: a full enum spans 0..N-1, but an ENUM-SUBRANGE type
+    (TSub = a..b) spans its own ordinal bounds SubrangeLow..SubrangeHigh —
+    hardcoding the low to 0 mis-sized a subrange dimension (GH #182). }
   if Check(tkIdent) and (PeekKind() <> tkDotDot) then
   begin
-    CD.ArrayDimLows.Add('0');
-    CD.ArrayDimHighs.Add('@' + FCurrent.Value);
+    CD.ArrayDimLows.Add('@L:' + FCurrent.Value);
+    CD.ArrayDimHighs.Add('@H:' + FCurrent.Value);
     Advance();
     CD.ArrayIsRangeIndexed := True;
     Exit;

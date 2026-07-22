@@ -194,6 +194,14 @@ type
       inline 'set of <enumLo>..<enumHi>' resolves its bounds through the same
       helper. }
     procedure TestRun_InlineEnumSubrange_SetType;
+    { GH #182 (third follow-up): a MULTI-DIMENSIONAL array whose FIRST
+      dimension is an enum-subrange TYPE — array[TPTStrict, 0..1] — counted the
+      subrange dimension as the FULL base enum's span (the '@TEnum' dimension
+      marker hardcoded low=0 and used Members.Count-1 for the high), so a
+      const rejected 'has 14 element(s) but its dimensions need 16' and a var
+      silently got an oversized first dimension. Covers const + var, named
+      subrange type. }
+    procedure TestRun_MultiDimEnumSubrange_Array;
 
     { forward; in a program decl section (issue #130 bug2): the forward decl
       used to swallow the following implementation as a nested-proc body. }
@@ -2212,6 +2220,51 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'rook' + LE + 'no-pawn' + LE + 'pawn2' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_MultiDimEnumSubrange_Array;
+const
+  { The reporter's shape: a 2D const/var whose first dimension is the
+    enum-subrange TYPE TPTStrict (ptWhitePawn..ptKing, 7 members).  The const
+    has exactly 7 rows of 2 (14 elements); the earlier bug counted the
+    subrange dimension as the full base enum (8) and rejected 14 vs 16.  The
+    var confirms the first dimension really is [ptWhitePawn..ptKing], not an
+    oversized [0..7]: writing at ptWhitePawn (ordinal 1) and ptKing (7) and
+    reading back exercises the LowBound=1 rebase. }
+  Src = '''
+    program MD;
+    type
+      TPT = (ptNil, ptWhitePawn, ptBlackPawn, ptRook,
+             ptKnight, ptBishop, ptQueen, ptKing);
+      TPTStrict = ptWhitePawn..ptKing;
+    const
+      C: array[TPTStrict, 0..1] of Int64 = (
+        (11, 12), (21, 22), (31, 32), (41, 42),
+        (51, 52), (61, 62), (71, 72));
+    var
+      A: array[TPTStrict, 0..1] of Int64;
+      { Full-enum first dim + enum-subrange second dim, and a NESTED
+        'array[TEnum] of array[0..1]' — the latter guards the '..'-in-element
+        scoping (the index-only '..' test must not see the element's range). }
+      G: array[TPT, 0..1] of Int64;
+      N: array[TPTStrict] of array[0..1] of Int64;
+    begin
+      WriteLn(C[ptWhitePawn, 0], ' ', C[ptRook, 1], ' ', C[ptKing, 0]);
+      A[ptWhitePawn, 0] := 5;
+      A[ptKing, 1] := 9;
+      WriteLn(A[ptWhitePawn, 0], ' ', A[ptKing, 1]);
+      G[ptNil, 0] := 100;
+      G[ptKing, 1] := 200;
+      WriteLn(G[ptNil, 0], ' ', G[ptKing, 1]);
+      N[ptWhitePawn][0] := 3;
+      N[ptKing][1] := 4;
+      WriteLn(N[ptWhitePawn][0], ' ', N[ptKing][1])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '11 32 71' + LE + '5 9' + LE + '100 200' + LE +
+    '3 4' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_Ifdef_PredefinedBlaise;
