@@ -100,6 +100,20 @@ type
     { arm64 leg 40: IntfVar := Obj.Method() where a class-receiver method
       returns an interface — the fat pointer round-trips and dispatches. }
     procedure TestRun_InterfaceAssign_FromMethodResult;
+    { Class downcast of an interface ARRAY ELEMENT used as a field-write
+      receiver: QBE treated the element's fat-pointer ADDRESS as the object
+      base, silently storing into the wrong memory
+      (BUG-20260721-qbe-downcast-intf-elem-field-write). }
+    procedure TestRun_ClassDowncastOfIntfElement_FieldWrite;
+    { Class downcast of the remaining interface operand shapes: implicit-Self
+      interface field, var-param interface, and interface-returning call
+      result.  The old QBE ident special case emitted a load from a
+      nonexistent %_var_X_obj slot for the first two (invalid IR) — fixed by
+      routing every interface operand through EmitInterfaceExprPair.
+      QBE-only for now: native crashes on all three shapes
+      (BUG-20260722-native-downcast-intf-nonslot-shapes); widen to
+      AssertRunsOnAll when that is fixed. }
+    procedure TestRun_ClassDowncastOfIntf_IdentShapes;
   end;
 
 implementation
@@ -969,6 +983,98 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '7' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_ClassDowncastOfIntfElement_FieldWrite;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program P;
+    type
+      IGreet = interface
+        function Name(): string;
+      end;
+      TGreet = class(TObject, IGreet)
+      public
+        FName: string;
+        function Name(): string;
+      end;
+    function TGreet.Name(): string;
+    begin
+      Result := FName
+    end;
+    var
+      Arr: array of IGreet;
+      SA: array[0..0] of IGreet;
+    begin
+      SetLength(Arr, 1);
+      Arr[0] := TGreet.Create();
+      TGreet(Arr[0]).FName := 'zzz';
+      WriteLn(Arr[0].Name());
+      SA[0] := TGreet.Create();
+      TGreet(SA[0]).FName := 'yyy';
+      WriteLn(SA[0].Name());
+      WriteLn(TGreet(Arr[0]).FName)
+    end.
+    ''', 'zzz' + LE + 'yyy' + LE + 'zzz' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_ClassDowncastOfIntf_IdentShapes;
+var
+  QbeOnly: TBackends;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { Local variable rather than an inline [beQBE] argument: a set-constructor
+    literal in an argument position is not yet lowered by the native backend
+    (BUG-20260722-native-set-literal-arg). }
+  QbeOnly := [beQBE];
+  AssertRunsOn(QbeOnly, '''
+    program P;
+    type
+      IGreet = interface
+        function Name(): string;
+      end;
+      TGreet = class(TObject, IGreet)
+      public
+        FName: string;
+        function Name(): string;
+      end;
+      THolder = class(TObject)
+      public
+        FI: IGreet;
+        procedure Poke();
+      end;
+    function TGreet.Name(): string;
+    begin
+      Result := FName
+    end;
+    procedure THolder.Poke();
+    begin
+      TGreet(FI).FName := 'self'
+    end;
+    var
+      G: IGreet;
+      H: THolder;
+    function MakeI(): IGreet;
+    begin
+      Result := G
+    end;
+    procedure PokeVar(var I: IGreet);
+    begin
+      TGreet(I).FName := 'varparam'
+    end;
+    begin
+      H := THolder.Create();
+      H.FI := TGreet.Create();
+      H.Poke();
+      WriteLn(H.FI.Name());
+      G := TGreet.Create();
+      PokeVar(G);
+      WriteLn(G.Name());
+      TGreet(MakeI()).FName := 'call';
+      WriteLn(TGreet(MakeI()).FName)
+    end.
+    ''', 'self' + LE + 'varparam' + LE + 'call' + LE, 0);
 end;
 
 initialization

@@ -13213,13 +13213,18 @@ begin
       if FC.ResolvedDecl = nil then
       begin
         if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-           (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tyInterface) and
-           (TASTExpr(FC.Args.Items[0]) is TIdentExpr) then
+           (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tyInterface) then
         begin
-          ArgTemp := AllocTemp();
-          EmitLine(Format('  %s =l loadl %s_obj',
-            [ArgTemp, VarRef(TIdentExpr(TASTExpr(FC.Args.Items[0])).Name,
-                             TIdentExpr(TASTExpr(FC.Args.Items[0])).IsGlobal)]));
+          { Interface operand of a class hard-cast: EmitExpr would yield the
+            fat-pointer ADDRESS for non-ident shapes (array element, field,
+            call result), and treating that as the object base silently
+            corrupted memory on a downcast field write
+            (BUG-20260721-qbe-downcast-intf-elem-field-write).  Resolve the
+            pair and take the obj half.  EmitInterfaceExprPair also covers
+            the ident modes a bare split-slot load got wrong: an implicit-
+            Self interface field and a var/out interface param have no
+            _obj/_itab split slots, so 'loadl %_var_X_obj' was invalid IR. }
+          EmitInterfaceExprPair(TASTExpr(FC.Args.Items[0]), ArgTemp, ArgTemp2);
         end
         else
           ArgTemp := EmitExpr(TASTExpr(FC.Args.Items[0]));
