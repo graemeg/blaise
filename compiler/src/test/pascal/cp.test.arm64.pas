@@ -171,6 +171,12 @@ type
       string arg (a function result) — the transient is passed borrowed and
       disposed after the call (rc=1 owned = bare _StringRelease). }
     procedure TestClosure_OwnedTransientArg_Disposed;
+    { An rc=0 UNOWNED string transient (a concat) passed to a closure must be
+      pinned (_StringAddRef) BEFORE the blr — the closure's by-value param
+      entry/exit cycle frees an unpinned rc=0 transient DURING the call, so a
+      post-call pin double-frees (same shape as
+      BUG-20260722-arm64-propsetter-pin-after-call). }
+    procedure TestClosure_UnownedTransientArg_PinnedBeforeCall;
     { self-cross-compile leg 38b(ii): a STATEMENT-position closure call (result
       discarded) — a fat callee routes to the fat-pointer call path. }
     procedure TestClosure_StatementPositionCall;
@@ -3737,6 +3743,45 @@ begin
   AssertTrue('transient released after the closure call', PosRel > PosCall);
   { transient pointers are held in callee-saved x19 across the call }
   AssertTrue('transient held callee-saved', Pos(#9'mov x19, x0', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestClosure_UnownedTransientArg_PinnedBeforeCall;
+var
+  AsmT: string;
+  PosCat, PosPin, PosCall, PosRel: Integer;
+begin
+  { A closure call whose argument is an rc=0 UNOWNED string transient (a `+`
+    concat) must pin it (_StringAddRef) BEFORE the blr: the closure's by-value
+    param entry-retain/exit-release cycle frees an unpinned rc=0 transient
+    during the call, so the old post-call AddRef+Release double-freed whenever
+    the closure did not store the value.  After the call a single bare
+    _StringRelease disposes it (1 -> 0). }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type TStrFn = reference to function(s: string): Integer;
+    function Apply(P: TStrFn; a: string): Integer;
+    begin
+      Result := P(a + '!')
+    end;
+    begin
+      WriteLn(Apply(function(s: string): Integer begin Result := Length(s) end, 'hi'))
+    end.
+    ''');
+  PosCat := Pos(#9'bl _StringConcat', AsmT);
+  AssertTrue('concat produced', PosCat >= 0);
+  PosCall := PosEx(#9'blr x9', AsmT, PosCat);
+  AssertTrue('closure invoked after the concat', PosCall > PosCat);
+  { the rc=0 pin lands strictly between the concat and the blr }
+  PosPin := PosEx(#9'bl _StringAddRef', AsmT, PosCat);
+  AssertTrue('rc=0 transient pinned BEFORE the closure call',
+    (PosPin > PosCat) and (PosPin < PosCall));
+  { one release after the call, with no post-call AddRef half before it }
+  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
+  AssertTrue('transient released after the closure call', PosRel > PosCall);
+  AssertTrue('no post-call AddRef half remains',
+    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) < 0) or
+    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) > PosRel));
 end;
 
 procedure TArm64BackendTests.TestClosure_StatementPositionCall;

@@ -1197,7 +1197,8 @@ begin
     pointers are held in callee-saved x19..x21 across the blr (at most three
     such args in the self-compile; more stay an honest hole), with a per-slot
     shape: 'C' = owned class (bare _ClassRelease); '1' = rc=1 owned string (bare
-    _StringRelease); '0' = rc=0 unowned string (AddRef then Release). }
+    _StringRelease); '0' = rc=0 unowned string (pinned with _StringAddRef BEFORE
+    the blr — see EmitOwnedStrTransientPin — then one bare release after). }
   if AArgs.Count > 7 then
     NotYet('closure call with more than 7 arguments', nil);
   { AAddrReg must survive the arg evaluation — park it.  Save x19..x21 (used to
@@ -1230,7 +1231,14 @@ begin
       if Arg.ResolvedType.Kind = tyClass then
         Shapes := Shapes + 'C'
       else if ArcExprIsUnownedStrTransient(Arg) then
-        Shapes := Shapes + '0'
+      begin
+        Shapes := Shapes + '0';
+        { rc=0 transients pin BEFORE the call — the closure's by-value param
+          entry/exit cycle would free an unpinned one mid-call, making a
+          post-call AddRef+Release a double-free (same shape as
+          BUG-20260722-arm64-propsetter-pin-after-call). }
+        Self.EmitOwnedStrTransientPin(Arg);
+      end
       else
         Shapes := Shapes + '1';
       Inc(TransN);
@@ -1254,18 +1262,13 @@ begin
     for I := 0 to TransN - 1 do
     begin
       Self.Emit(Format(#9'mov x0, x%d', [19 + I]));
-      if Copy(Shapes, I + 1, 1) = 'C' then
+      { Blaise Copy is 0-BASED — Copy(Shapes, I + 1, 1) here was an off-by-one
+        that read the wrong (or an empty) shape slot.  Both string shapes now
+        take a bare release: rc=0 transients were pinned BEFORE the blr. }
+      if Copy(Shapes, I, 1) = 'C' then
         Self.Emit(#9'bl _ClassRelease')
       else
-      begin
-        if Copy(Shapes, I + 1, 1) = '0' then
-        begin
-          EmitPushX0();
-          Self.Emit(#9'bl _StringAddRef');
-          EmitPopTo('x0');
-        end;
         Self.Emit(#9'bl _StringRelease');
-      end;
     end;
     Self.Emit(#9'ldr x9, [sp], #16');
     Self.Emit(#9'fmov d0, x9');
