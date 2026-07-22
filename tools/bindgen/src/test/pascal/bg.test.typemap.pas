@@ -54,6 +54,7 @@ type
     procedure TestMap_NamedPtr_IsPName_AliasRegistered;
     procedure TestMap_CharPtrPtr_IsPPChar;
     procedure TestMap_PtrAlias_RegisteredOnlyOnce;
+    procedure TestMap_PtrAlias_CaseInsensitiveDedup;
     procedure TestMap_TypedefName_PassesThrough;
     procedure TestMap_FixedArray_IsStaticArray;
     procedure TestMap_FunctionPtr_IsPointer;
@@ -64,6 +65,7 @@ type
     procedure TestMapCallback_RegistersNamedType;
     procedure TestMapCallback_SameSignature_Deduped;
     procedure TestMapCallback_NonFnPtr_FallsBackToMap;
+    procedure TestMapCallback_CaseCollidingHint_GetsSuffix;
     procedure TestMap_SizeT_IsUInt64;
     procedure TestMap_SSizeT_IsInt64;
     procedure TestMap_StdintTypes;
@@ -205,6 +207,15 @@ begin
   AssertEquals(1, FMapper.PtrAliases.Count);
 end;
 
+procedure TTypeMapTests.TestMap_PtrAlias_CaseInsensitiveDedup;
+begin
+  { SCREEN * and struct screen * fold to the same Pascal identifier —
+    only one alias may be registered (Pascal is case-insensitive). }
+  FMapper.Map('SCREEN *');
+  FMapper.Map('screen *');
+  AssertEquals(1, FMapper.PtrAliases.Count);
+end;
+
 procedure TTypeMapTests.TestMap_TypedefName_PassesThrough;
 begin
   AssertEquals('XID', FMapper.Map('XID'));
@@ -269,6 +280,17 @@ procedure TTypeMapTests.TestMapCallback_NonFnPtr_FallsBackToMap;
 begin
   AssertEquals('Integer', FMapper.MapCallback('int', 'ignored'));
   AssertEquals('Pointer', FMapper.MapCallback('int (*)(int, ...)', 'vararg_cb'));
+end;
+
+procedure TTypeMapTests.TestMapCallback_CaseCollidingHint_GetsSuffix;
+begin
+  { Hints differing only in case would synthesise Tfoo_cb and TFOO_CB —
+    the same Pascal identifier.  The second must get a numeric suffix. }
+  AssertEquals('Tfoo_cb',
+    FMapper.MapCallback('int (*)(int)', 'foo_cb'));
+  AssertEquals('TFOO_CB2',
+    FMapper.MapCallback('void (*)(void *)', 'FOO_CB'));
+  AssertEquals(2, FMapper.ProcTypes.Count);
 end;
 
 procedure TTypeMapTests.TestMap_SizeT_IsUInt64;

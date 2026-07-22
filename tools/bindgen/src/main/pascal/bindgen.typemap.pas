@@ -280,14 +280,16 @@ begin
     Exit;
   end;
   Name := 'T' + AHint;
-  { A hint collision with a different signature gets a numeric suffix. }
+  { A hint collision with a different signature gets a numeric suffix.
+    Pascal folds identifier case, so the collision check is
+    case-insensitive (same rule as RegisterAlias). }
   N := 1;
-  while FProcNames.Contains(Name) do
+  while FProcNames.Contains(UpperCase(Name)) do
   begin
     N := N + 1;
     Name := 'T' + AHint + IntToStr(N);
   end;
-  FProcNames.Include(Name);
+  FProcNames.Include(UpperCase(Name));
   FProcBySig.Add(Decl, Name);
   FProcTypes.Add(TProcTypeDecl.Create(Name, Decl));
   Result := Name;
@@ -295,8 +297,10 @@ end;
 
 procedure TTypeMapper.RegisterAlias(const AName, ATarget: string);
 begin
-  if FPtrSeen.Contains(AName) then Exit;
-  FPtrSeen.Include(AName);
+  { Pascal folds identifier case: PSCREEN and Pscreen are the same
+    declaration, so the dedup key must be case-insensitive. }
+  if FPtrSeen.Contains(UpperCase(AName)) then Exit;
+  FPtrSeen.Include(UpperCase(AName));
   FPtrAliases.Add(TPtrAlias.Create(AName, ATarget));
 end;
 
