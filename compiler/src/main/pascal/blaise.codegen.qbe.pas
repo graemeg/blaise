@@ -188,6 +188,7 @@ type
     function  AllocTemp(): string;
     function  AllocLabel(const APrefix: string): string;
     function  CoerceArg(const AArgTemp: string; AArgExpr: TASTExpr; const AParamQType: string): string;
+    function  CoerceSetToWidth(const AValTemp: string; ASrcType, ADstType: TTypeDesc): string;
     function  EmitByteRhs(AExpr: TASTExpr): string;
     function  IntfObjAddr(const AName: string; AIsGlobal, AIsVarParam: Boolean): string;
     function  IntfItabAddr(const AName: string; AIsGlobal, AIsVarParam: Boolean): string;
@@ -932,7 +933,7 @@ begin
   if (AParamQType = 'l') and (ArgQ = 'w') then
   begin
     ExtTemp := AllocTemp();
-    if ArgT.Kind = tyUInt32 then
+    if ArgT.Kind in [tyUInt32, tySet] then
       EmitLine(Format('  %s =l extuw %s', [ExtTemp, AArgTemp]))
     else
       EmitLine(Format('  %s =l extsw %s', [ExtTemp, AArgTemp]));
@@ -969,6 +970,27 @@ begin
       EmitLine(Format('  %s =s truncd %s', [ExtTemp, AArgTemp]))
     else
       Exit;
+    Result := ExtTemp;
+  end;
+end;
+
+{ Zero-extend a small-set value temp when it flows into a WIDER small-set
+  destination (w-width source set into an l-width destination set).  A set
+  value is a bitmask, so widening is always unsigned — extsw would smear
+  bits 32..63 whenever bit 31 is set.  Returns the (possibly new) temp;
+  a no-op when either type is not a set or the widths already match. }
+function TCodeGenQBE.CoerceSetToWidth(const AValTemp: string;
+  ASrcType, ADstType: TTypeDesc): string;
+var
+  ExtTemp: string;
+begin
+  Result := AValTemp;
+  if (ASrcType = nil) or (ADstType = nil) then Exit;
+  if (ASrcType.Kind <> tySet) or (ADstType.Kind <> tySet) then Exit;
+  if (QbeTypeOf(ADstType) = 'l') and (QbeTypeOf(ASrcType) = 'w') then
+  begin
+    ExtTemp := AllocTemp();
+    EmitLine(Format('  %s =l extuw %s', [ExtTemp, AValTemp]));
     Result := ExtTemp;
   end;
 end;
@@ -5036,8 +5058,20 @@ begin
     end
     else
     begin
-      ValTemp    := EmitExpr(AAssign.Expr);
-      StoreInstr := StoreInstrFor(AAssign.Expr.ResolvedType);
+      ValTemp := EmitExpr(AAssign.Expr);
+      if (AAssign.ResolvedLhsType <> nil) and
+         (AAssign.ResolvedLhsType.Kind = tySet) then
+      begin
+        { Small set through a var/out param: store at the LHS set's width,
+          zero-extending a narrower RHS set first.  StoreInstrFor(RHS) alone
+          wrote only the low 4 bytes of an l-width destination, leaving its
+          upper half stale (BUG-20260721-qbe-set-into-dynarray-elem review). }
+        ValTemp := CoerceSetToWidth(ValTemp, AAssign.Expr.ResolvedType,
+          AAssign.ResolvedLhsType);
+        StoreInstr := StoreInstrFor(AAssign.ResolvedLhsType);
+      end
+      else
+        StoreInstr := StoreInstrFor(AAssign.Expr.ResolvedType);
       EmitLine(Format('  %s %s, %s', [StoreInstr, ValTemp, PtrTemp]));
     end;
   end
@@ -5392,9 +5426,11 @@ begin
       if QbeTypeOf(AAssign.Expr.ResolvedType) = 'w' then
       begin
         { Widen by SOURCE signedness: unsigned 32-bit zero-extends (extuw)
-          so a Cardinal >= 2^31 keeps its value; signed sign-extends. }
+          so a Cardinal >= 2^31 keeps its value; signed sign-extends.
+          A set is a bitmask — always zero-extend (extsw would smear bits
+          32..63 of an l-width LHS when the RHS set has bit 31 set). }
         ExtTemp := AllocTemp();
-        if AAssign.Expr.ResolvedType.Kind = tyUInt32 then
+        if AAssign.Expr.ResolvedType.Kind in [tyUInt32, tySet] then
           EmitLine(Format('  %s =l extuw %s', [ExtTemp, ValTemp]))
         else
           EmitLine(Format('  %s =l extsw %s', [ExtTemp, ValTemp]));
@@ -7737,11 +7773,12 @@ begin
     begin
       { Integer/pointer field wider than word: widen a word RHS to l by the
         SOURCE type's signedness — unsigned 32-bit zero-extends (extuw) so a
-        Cardinal >= 2^31 keeps its value; signed sign-extends (extsw). }
+        Cardinal >= 2^31 keeps its value; signed sign-extends (extsw).
+        A set is a bitmask — always zero-extend. }
       if QbeTypeOf(AAssign.Expr.ResolvedType) = 'w' then
       begin
         ExtTemp := AllocTemp();
-        if AAssign.Expr.ResolvedType.Kind = tyUInt32 then
+        if AAssign.Expr.ResolvedType.Kind in [tyUInt32, tySet] then
           EmitLine(Format('  %s =l extuw %s', [ExtTemp, ValTemp]))
         else
           EmitLine(Format('  %s =l extsw %s', [ExtTemp, ValTemp]));
@@ -18014,6 +18051,19 @@ begin
       tyInteger, tyUInt32, tyEnum: StoreInstr := 'storew';
       tyDouble:                    StoreInstr := 'stored';
       tySingle:                    StoreInstr := 'stores';
+      { Small set (jumbo sets exited above): store at the set's value width —
+        the storel fallback was invalid IR for a w-width set
+        (BUG-20260721-qbe-set-into-dynarray-elem).  An l-width element also
+        zero-extends a narrower RHS set (a w temp in storel is invalid IR). }
+      tySet:
+        if TSetTypeDesc(ElemType).BitCount <= 32 then
+          StoreInstr := 'storew'
+        else
+        begin
+          StoreInstr := 'storel';
+          ElemVal := CoerceSetToWidth(ElemVal,
+            AStmt.ValueExpr.ResolvedType, ElemType);
+        end;
     else
       begin
         StoreInstr := 'storel';
@@ -18209,6 +18259,19 @@ begin
     tySingle: StoreInstr := 'stores';
     tyInt64, tyUInt64, tyString, tyClass, tyPointer, tyPChar, tyMetaClass,
     tyProcedural: StoreInstr := 'storel';
+    { Small set (jumbo sets exited above): store at the set's value width —
+      the storew fallback truncated the upper half of a 33..64-member set
+      (BUG-20260721-qbe-set-into-dynarray-elem sibling).  An l-width element
+      also zero-extends a narrower RHS set (a w temp in storel is invalid IR). }
+    tySet:
+      if TSetTypeDesc(ElemType).BitCount <= 32 then
+        StoreInstr := 'storew'
+      else
+      begin
+        StoreInstr := 'storel';
+        ElemVal := CoerceSetToWidth(ElemVal,
+          AStmt.ValueExpr.ResolvedType, ElemType);
+      end;
   else
     StoreInstr := 'storew';
   end;

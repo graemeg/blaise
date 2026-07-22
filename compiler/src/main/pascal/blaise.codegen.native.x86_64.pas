@@ -1322,14 +1322,18 @@ const
 
 { True for unsigned integer-family types. Byte/Word/UInt32/UInt64 are
   unsigned; Boolean and Enum hold non-negative ordinals and so are read
-  zero-extended. SmallInt/Integer/Int64 are signed. }
+  zero-extended. SmallInt/Integer/Int64 are signed. A small set is a
+  bitmask and must load/widen zero-extended — a movslq of a 4-byte set
+  with bit 31 set would smear bits 32..63 when it flows into a 64-bit
+  set destination (BUG-20260721-qbe-set-into-dynarray-elem review). }
 function IsUnsignedInt(AType: TTypeDesc): Boolean;
 begin
   if AType = nil then
   begin
     Exit(False);
   end;
-  Result := AType.Kind in [tyByte, tyBoolean, tyWord, tyUInt32, tyUInt64, tyEnum];
+  Result := AType.Kind in [tyByte, tyBoolean, tyWord, tyUInt32, tyUInt64,
+    tyEnum, tySet];
 end;
 
 

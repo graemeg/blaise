@@ -74,6 +74,18 @@ type
     { BUG-20260720-set-array-elem-dest: a set literal assigned into a static-
       array element must type against the element set type and round-trip. }
     procedure TestRun_Set_LiteralIntoStaticArrayElement;
+    { Set store into a DYNAMIC-array element: QBE emitted `storel` for a
+      w-width small set — invalid IR rejected by qbe
+      (BUG-20260721-qbe-set-into-dynarray-elem). }
+    procedure TestRun_Set_LiteralIntoDynArrayElement;
+    { 33..64-member set (l-width) elements: the static-array arm's fallback
+      was storew, truncating the upper 32 bits. }
+    procedure TestRun_WideSet_IntoArrayElements;
+    { Cross-width set stores: a w-width set value flowing into an l-width
+      set destination must zero-extend (extsw smeared bits 32..63 when
+      bit 31 was set; the array-element arm emitted no ext at all — invalid
+      storel of a w temp; the var-param arm stored only the low 4 bytes). }
+    procedure TestRun_NarrowSet_IntoWideSetDest;
   end;
 
 implementation
@@ -826,6 +838,97 @@ const Src = '''
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'y' + LE + 'n' + LE + 'n' + LE + 'y' + LE, 0);
+end;
+
+procedure TE2ESetOpsTests.TestRun_Set_LiteralIntoDynArrayElement;
+const Src = '''
+    program P;
+    type TE = (eA, eB, eC, eD); TS = set of TE;
+    var S: array of TS;
+    begin
+      SetLength(S, 2);
+      S[0] := [eA, eC];
+      S[1] := S[0] + [eB];
+      if eA in S[0] then WriteLn('y') else WriteLn('n');
+      if eB in S[0] then WriteLn('y') else WriteLn('n');
+      if eB in S[1] then WriteLn('y') else WriteLn('n')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'y' + LE + 'n' + LE + 'y' + LE, 0);
+end;
+
+procedure TE2ESetOpsTests.TestRun_WideSet_IntoArrayElements;
+const Src = '''
+    program P;
+    type TS = set of 0..63;
+    var
+      A: array[0..1] of TS;
+      D: array of TS;
+    begin
+      A[0] := [1, 40, 63];
+      if 63 in A[0] then WriteLn('y') else WriteLn('n');
+      if 40 in A[0] then WriteLn('y') else WriteLn('n');
+      if 2 in A[0] then WriteLn('y') else WriteLn('n');
+      SetLength(D, 1);
+      D[0] := [5, 62];
+      if 62 in D[0] then WriteLn('y') else WriteLn('n');
+      if 5 in D[0] then WriteLn('y') else WriteLn('n')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'y' + LE + 'y' + LE + 'n' + LE + 'y' + LE + 'y' + LE, 0);
+end;
+
+procedure TE2ESetOpsTests.TestRun_NarrowSet_IntoWideSetDest;
+const Src = '''
+    program P;
+    type
+      TS31 = set of 0..31; TWide = set of 0..63;
+      TR = record F: TWide; end;
+    var
+      V: TWide;
+      S: TS31;
+      A: array[0..1] of TWide;
+      D: array of TWide;
+      R: TR;
+
+    procedure P1(var W: TWide);
+    begin
+      W := S;
+    end;
+
+    begin
+      S := [2, 31];
+      { plain assign: extsw of bit 31 smeared bits 32..63 }
+      V := S;
+      if 40 in V then WriteLn('BAD') else WriteLn('ok');
+      if 31 in V then WriteLn('y') else WriteLn('n');
+      { static + dynamic array element: no ext at all -> invalid storel }
+      A[0] := S;
+      if 31 in A[0] then WriteLn('y') else WriteLn('n');
+      if 50 in A[0] then WriteLn('BAD') else WriteLn('ok');
+      SetLength(D, 1);
+      D[0] := S;
+      if 31 in D[0] then WriteLn('y') else WriteLn('n');
+      if 50 in D[0] then WriteLn('BAD') else WriteLn('ok');
+      { var param: storew wrote only the low half, upper bits stale }
+      V := [40, 63];
+      P1(V);
+      if 40 in V then WriteLn('BAD') else WriteLn('ok');
+      if 2 in V then WriteLn('y') else WriteLn('n');
+      { record field: same extsw smear as the plain assign }
+      R.F := S;
+      if 31 in R.F then WriteLn('y') else WriteLn('n');
+      if 40 in R.F then WriteLn('BAD') else WriteLn('ok')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'ok' + LE + 'y' + LE + 'y' + LE + 'ok' + LE +
+    'y' + LE + 'ok' + LE + 'ok' + LE + 'y' + LE + 'y' + LE + 'ok' + LE, 0);
 end;
 
 initialization
