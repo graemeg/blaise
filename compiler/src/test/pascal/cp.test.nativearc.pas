@@ -53,6 +53,13 @@ type
       both sides then shared the refs and the scope-exit walk double-released
       (BUG-20260721-recretclean-static-array-of-managed). }
     procedure TestMain_RecordCopy_StaticArrayOfStringOnly_EmitsRetain;
+    { Discarded calls to sret-returning functions must pass a hidden result
+      buffer and release the discarded result's managed content — the bug
+      emitted a bare `callq F` with no %rdi buffer, so the callee wrote its
+      result through a garbage register
+      (BUG-20260722-discarded-sret-call-no-buffer). }
+    procedure TestMain_DiscardedRecordCall_ReleasesElements;
+    procedure TestMain_DiscardedInterfaceCall_ReleasesObj;
   end;
 
 implementation
@@ -250,6 +257,76 @@ begin
     ''');
   AssertTrue('record copy retains static-array-of-string elements',
     Pos('_StringAddRef', Asm_) >= 0);
+end;
+
+procedure TNativeArcTests.TestMain_DiscardedRecordCall_ReleasesElements;
+var
+  Asm_, MainR: string;
+  P, E: Integer;
+begin
+  Asm_ := Self.GenAsm(
+    '''
+    program P;
+    type
+      TR = record
+        Names: array[0..1] of string;
+      end;
+    function Make(): TR;
+    begin
+      Result.Names[0] := 'x';
+    end;
+    begin
+      Make();
+    end.
+    ''');
+  { Slice main only: Make's own body also emits _StringRelease (element-store
+    old-value release), so a whole-asm assertion would pass vacuously. }
+  P := Pos('main:', Asm_);
+  AssertTrue('main present', P >= 0);
+  MainR := StrCopyTail(Asm_, P);
+  E := StrPos('.type main', MainR);
+  AssertTrue('main closed', E >= 0);
+  MainR := Copy(MainR, 0, E);
+  AssertTrue('discarded record result''s elements are released in main',
+    Pos('_StringRelease', MainR) >= 0);
+end;
+
+procedure TNativeArcTests.TestMain_DiscardedInterfaceCall_ReleasesObj;
+var
+  Asm_, MainR: string;
+  P, E: Integer;
+begin
+  Asm_ := Self.GenAsm(
+    '''
+    program P;
+    type
+      IGreet = interface
+        function Hi(): Integer;
+      end;
+      TG = class(TObject, IGreet)
+      public
+        function Hi(): Integer;
+      end;
+    function TG.Hi(): Integer;
+    begin
+      Result := 1;
+    end;
+    function MakeI(): IGreet;
+    begin
+      Result := TG.Create();
+    end;
+    begin
+      MakeI();
+    end.
+    ''');
+  P := Pos('main:', Asm_);
+  AssertTrue('main present', P >= 0);
+  MainR := StrCopyTail(Asm_, P);
+  E := StrPos('.type main', MainR);
+  AssertTrue('main closed', E >= 0);
+  MainR := Copy(MainR, 0, E);
+  AssertTrue('discarded interface result''s obj half is released in main',
+    Pos('_ClassRelease', MainR) >= 0);
 end;
 
 initialization

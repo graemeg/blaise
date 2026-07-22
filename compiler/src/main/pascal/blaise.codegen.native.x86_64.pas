@@ -13618,6 +13618,8 @@ var
   PCHTotal: Integer;
   AliasBuf: Integer;
   AliasSz:  Integer;
+  DiscBufSz: Integer;
+  DiscShim: TFuncCallExpr;
 begin
   { An empty statement (e.g. the body of `for x := 0 to N do;`) parses to a nil
     statement — the parser's convention for "no statement here".  It is a valid,
@@ -15245,6 +15247,65 @@ begin
     { User procedure call (result, if any, ignored in statement position). }
     if Self.TryEmitInlineCall(PC.ResolvedDecl, PC.Args, False) then
       Exit;
+    MD := TMethodDecl(PC.ResolvedDecl);
+    { An sret-shaped return (record / interface / static array / jumbo set)
+      discarded in statement position still needs the hidden result buffer:
+      the callee writes through %rdi, so a bare `callq F` makes it write its
+      result over caller memory.  Allocate a throwaway buffer, route the call
+      through the sret machinery, then release the discarded result's managed
+      content (BUG-20260722-discarded-sret-call-no-buffer).  Mirrors the itab
+      record-discard branch. }
+    if (MD.ResolvedReturnType <> nil) and
+       ((MD.ResolvedReturnType.Kind in [tyRecord, tyStaticArray]) or
+        IsJumboSet(MD.ResolvedReturnType)) then
+    begin
+      DiscBufSz := (MD.ResolvedReturnType.RawSize() + 15) and (-16);
+      Self.Emit(#9'pushq %rbx');
+      Self.Emit(Format(#9'subq $%d, %%rsp', [DiscBufSz]));
+      Self.Emit(#9'movq %rsp, %rbx');
+      { EmitSretCall zeroes the buffer itself and also handles the
+        register-class record shapes (capture into the buffer). }
+      Self.EmitSretCall(FuncSymbolFromDecl(MD), MD, PC.Args, '(%rbx)', False);
+      { Arg evaluation may clobber %rbx; %rsp is balanced and still points
+        at the buffer, so re-derive its address. }
+      Self.Emit(#9'movq %rsp, %rbx');
+      if MD.ResolvedReturnType.Kind = tyRecord then
+      begin
+        if not RecretManagedClean(TRecordTypeDesc(MD.ResolvedReturnType)) then
+          Self.EmitRecordFieldReleases(
+            TRecordTypeDesc(MD.ResolvedReturnType), '%rbx');
+      end
+      else if (MD.ResolvedReturnType.Kind = tyStaticArray) and
+              ArcTypeHasManagedContent(MD.ResolvedReturnType) then
+        Self.EmitStaticArrayReleaseElems(
+          TStaticArrayTypeDesc(MD.ResolvedReturnType), '%rbx', False);
+      Self.Emit(Format(#9'addq $%d, %%rsp', [DiscBufSz]));
+      Self.Emit(#9'popq %rbx');
+      Exit;
+    end;
+    if (MD.ResolvedReturnType <> nil) and
+       (MD.ResolvedReturnType.Kind = tyInterface) then
+    begin
+      { EmitIntfSretCall takes the expression form; build a transient
+        TFuncCallExpr view of this statement node (args are borrowed and
+        detached before Free).  The helper leaves the 16-byte fat pair at
+        (%rsp); release the transferred obj reference and pop the buffer. }
+      DiscShim := TFuncCallExpr.Create();
+      try
+        DiscShim.Name := PC.Name;
+        DiscShim.Args := PC.Args;
+        DiscShim.ResolvedDecl := PC.ResolvedDecl;
+        Self.EmitIntfSretCall(DiscShim);
+      finally
+        DiscShim.Args := nil;          { borrowed — do not free }
+        DiscShim.ResolvedDecl := nil;  { borrowed — do not free }
+        DiscShim.Free();
+      end;
+      Self.Emit(#9'movq (%rsp), %rdi');
+      Self.Emit(#9'callq _ClassRelease');
+      Self.Emit(#9'addq $16, %rsp');
+      Exit;
+    end;
     Self.EmitCall(FuncSymbolFromDecl(TMethodDecl(PC.ResolvedDecl)),
       TMethodDecl(PC.ResolvedDecl), PC.Args);
     { A function called in statement position discards its result.  When the

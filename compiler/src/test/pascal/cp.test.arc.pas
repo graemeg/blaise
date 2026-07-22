@@ -147,6 +147,11 @@ type
     procedure TestARC_RecordWithStaticArrayField_AddRefFields;
     procedure TestARC_RecordCopy_StaticArrayField_RetainsElements;
     procedure TestARC_RecordReturn_StaticArrayOnly_IsSret;
+    { Discarded calls to sret-returning functions must pass a hidden result
+      buffer and release the discarded result's managed content
+      (BUG-20260722-discarded-sret-call-no-buffer). }
+    procedure TestARC_DiscardedRecordCall_PassesSretAndReleases;
+    procedure TestARC_DiscardedInterfaceCall_PassesSretAndReleases;
   end;
 
 implementation
@@ -1561,6 +1566,77 @@ begin
       ''');
   AssertTrue('static-array-of-string record returns via sret',
     IRContains(IR, 'function $Make(l %_par__sret)'));
+end;
+
+procedure TARCTests.TestARC_DiscardedRecordCall_PassesSretAndReleases;
+var
+  IR, MainIR: string;
+  P: Integer;
+begin
+  { `Make();` in statement position: the callee is sret
+    ($Make(l %_par__sret)), so the call site MUST pass a buffer — the bug
+    emitted `call $Make()`, making the callee write its result through a
+    garbage register — and must release the discarded result's managed
+    content (BUG-20260722-discarded-sret-call-no-buffer). }
+  IR := GenIR(
+    '''
+      program P;
+      type
+        TR = record
+          Names: array[0..1] of string;
+        end;
+      function Make(): TR;
+      begin
+        Result.Names[0] := 'x';
+      end;
+      begin
+        Make();
+      end.
+      ''');
+  P := Pos('function w $main', IR);
+  AssertTrue('main present', P >= 0);
+  MainIR := Copy(IR, P, Length(IR) - P);
+  AssertTrue('discarded call passes an sret buffer',
+    Pos('call $Make(l %', MainIR) >= 0);
+  AssertEquals('discarded result''s two elements are released',
+    2, CountSubstring(MainIR, 'call $_StringRelease'));
+end;
+
+procedure TARCTests.TestARC_DiscardedInterfaceCall_PassesSretAndReleases;
+var
+  IR, MainIR: string;
+  P: Integer;
+begin
+  IR := GenIR(
+    '''
+      program P;
+      type
+        IGreet = interface
+          function Hi(): Integer;
+        end;
+        TG = class(TObject, IGreet)
+        public
+          function Hi(): Integer;
+        end;
+      function TG.Hi(): Integer;
+      begin
+        Result := 1;
+      end;
+      function MakeI(): IGreet;
+      begin
+        Result := TG.Create();
+      end;
+      begin
+        MakeI();
+      end.
+      ''');
+  P := Pos('function w $main', IR);
+  AssertTrue('main present', P >= 0);
+  MainIR := Copy(IR, P, Length(IR) - P);
+  AssertTrue('discarded interface call passes an sret buffer',
+    Pos('call $MakeI(l %', MainIR) >= 0);
+  AssertTrue('discarded interface result''s obj half is released',
+    Pos('call $_ClassRelease', MainIR) >= 0);
 end;
 
 initialization

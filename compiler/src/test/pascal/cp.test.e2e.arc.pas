@@ -94,6 +94,11 @@ type
       copied by bare memcpy — shared refs then double-released at scope exit
       (BUG-20260721-recretclean-static-array-of-managed). }
     procedure TestRun_RecordStaticArrayOfClassOnly_ReturnAndCopy_NoLeak;
+    { Discarded calls to sret-returning functions: the call site must pass a
+      hidden buffer (the bug had the callee writing through a garbage
+      register) and release the discarded result's managed content
+      (BUG-20260722-discarded-sret-call-no-buffer). }
+    procedure TestRun_DiscardedSretCalls_NoLeak;
   end;
 
 implementation
@@ -901,6 +906,54 @@ begin
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('field values survive copy', '15' + LE, Output);
   { the double-release from a bare-memcpy copy shows up here }
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EArcTests.TestRun_DiscardedSretCalls_NoLeak;
+const
+  Src = '''
+    program P;
+    type
+      TThing = class
+      public
+        V: Integer;
+      end;
+      TR = record
+        Arr: array[0..1] of TThing;
+      end;
+      IGreet = interface
+        function Hi(): Integer;
+      end;
+      TG = class(TObject, IGreet)
+      public
+        function Hi(): Integer;
+      end;
+    function TG.Hi(): Integer;
+    begin
+      Result := 1;
+    end;
+    function Make(): TR;
+    begin
+      Result.Arr[0] := TThing.Create();
+      Result.Arr[1] := TThing.Create()
+    end;
+    function MakeI(): IGreet;
+    begin
+      Result := TG.Create();
+    end;
+    begin
+      Make();
+      MakeI();
+      WriteLn('ok')
+    end.
+    ''';
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue(CompileAndRun(Src, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('runs to completion', 'ok' + LE, Output);
+  { the discarded results' objects must be released, not leaked }
   AssertLeakFreeOnAll(Src, '');
 end;
 

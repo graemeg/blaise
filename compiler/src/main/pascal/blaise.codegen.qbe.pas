@@ -10808,6 +10808,7 @@ var
   CallTgt:   string;
   DiscardRel:  Boolean;
   DiscardTemp: string;
+  DiscardSz:   Integer;
 begin
   PMark := PendingReleaseMark();
   { Unqualified call to a procedural-typed field of the current class
@@ -11028,29 +11029,84 @@ begin
         AddRef'd on `Result := x` and did not release Result at scope exit) that
         the discard would otherwise leak — the same transient-release rule the
         assignment/arg paths apply via ExprOwnsRef, here for the discarded call.
-        Capture the return into a temp and release it once.  Only tyClass needs
-        this: a discarded String/dynarray return is handled by the callee's own
-        scope-exit release convention, and non-managed returns own nothing.  A
-        bare TProcCall is never a constructor (those dispatch through the
-        method/field-access paths), so every tyClass return here is owned. }
+        Capture the return into a temp and release it once.  NOTE: a discarded
+        String/dynarray return transfers +1 exactly the same way (see
+        ArcExprOwnsRef) and is NOT released here — a known residual leak of
+        BUG-20260722-discarded-sret-call-no-buffer.  Non-managed returns own
+        nothing.  A bare TProcCall is never a constructor (those dispatch
+        through the method/field-access paths), so every tyClass return here
+        is owned. }
       DiscardRel := (MDecl.ResolvedReturnType <> nil) and
                     (MDecl.ResolvedReturnType.Kind = tyClass);
-      if DiscardRel then
+      if MDecl.IsExternal and (MDecl.ExternalName <> '') then
+        CallTgt := '$' + MDecl.ExternalName
+      else if MDecl.ResolvedQbeName <> '' then
+        CallTgt := '$' + QBEMangle(MDecl.ResolvedQbeName)
+      else
+        CallTgt := '$' + QBEMangle(ACall.Name);
+      { An sret-shaped return (record / interface / static array / jumbo set)
+        discarded in statement position still needs the hidden result buffer:
+        the callee is `$F(l %_par__sret, ...)`, so a bare `call $F(...)` makes
+        it write its result through a garbage register (silent memory
+        corruption).  Allocate a zeroed throwaway buffer, route the call
+        through the record-return call-site helper (which also handles the
+        register-class record shapes), then release the discarded result's
+        managed content (BUG-20260722-discarded-sret-call-no-buffer). }
+      if (MDecl.ResolvedReturnType <> nil) and
+         (MDecl.ResolvedReturnType.Kind in
+          [tyRecord, tyStaticArray, tyInterface]) or
+         ((MDecl.ResolvedReturnType <> nil) and
+          (MDecl.ResolvedReturnType.Kind = tySet) and
+          TSetTypeDesc(MDecl.ResolvedReturnType).IsJumbo()) then
       begin
         DiscardTemp := AllocTemp();
-        if MDecl.IsExternal and (MDecl.ExternalName <> '') then
-          EmitLine(Format('  %s =l call $%s(%s)', [DiscardTemp, MDecl.ExternalName, ArgLine]))
-        else if MDecl.ResolvedQbeName <> '' then
-          EmitLine(Format('  %s =l call $%s(%s)', [DiscardTemp, QBEMangle(MDecl.ResolvedQbeName), ArgLine]))
+        if MDecl.ResolvedReturnType.Kind = tyRecord then
+          DiscardSz := TRecordTypeDesc(MDecl.ResolvedReturnType).TotalSize()
+        else if MDecl.ResolvedReturnType.Kind = tyInterface then
+          DiscardSz := 16
         else
-          EmitLine(Format('  %s =l call $%s(%s)', [DiscardTemp, QBEMangle(ACall.Name), ArgLine]));
+          DiscardSz := MDecl.ResolvedReturnType.RawSize();
+        EmitLine(Format('  %s =l alloc8 %d', [DiscardTemp, DiscardSz]));
+        EmitLine(Format('  call $memset(l %s, w 0, l %d)',
+          [DiscardTemp, DiscardSz]));
+        if MDecl.ResolvedReturnType.Kind = tyInterface then
+        begin
+          if ArgLine <> '' then
+            EmitLine(Format('  call %s(l %s, %s)',
+              [CallTgt, DiscardTemp, ArgLine]))
+          else
+            EmitLine(Format('  call %s(l %s)', [CallTgt, DiscardTemp]));
+          { The callee transferred a +1 obj reference through the fat
+            pointer's obj half; release it. }
+          ArgTemp2 := AllocTemp();
+          EmitLine(Format('  %s =l loadl %s', [ArgTemp2, DiscardTemp]));
+          EmitLine(Format('  call $_ClassRelease(l %s)', [ArgTemp2]));
+        end
+        else
+        begin
+          Self.EmitRecordReturnCallSite(CallTgt, ArgLine,
+            TRecordTypeDesc(MDecl.ResolvedReturnType), DiscardTemp);
+          if MDecl.ResolvedReturnType.Kind = tyRecord then
+          begin
+            if not Self.IsRecordManagedClean(
+                TRecordTypeDesc(MDecl.ResolvedReturnType)) then
+              Self.EmitRecordReleaseFields(
+                TRecordTypeDesc(MDecl.ResolvedReturnType), DiscardTemp);
+          end
+          else if (MDecl.ResolvedReturnType.Kind = tyStaticArray) and
+                  ArcTypeHasManagedContent(MDecl.ResolvedReturnType) then
+            EmitStaticArrayReleaseElems(
+              TStaticArrayTypeDesc(MDecl.ResolvedReturnType),
+              DiscardTemp, False);
+        end;
       end
-      else if MDecl.IsExternal and (MDecl.ExternalName <> '') then
-        EmitLine(Format('  call $%s(%s)', [MDecl.ExternalName, ArgLine]))
-      else if MDecl.ResolvedQbeName <> '' then
-        EmitLine(Format('  call $%s(%s)', [QBEMangle(MDecl.ResolvedQbeName), ArgLine]))
+      else if DiscardRel then
+      begin
+        DiscardTemp := AllocTemp();
+        EmitLine(Format('  %s =l call %s(%s)', [DiscardTemp, CallTgt, ArgLine]));
+      end
       else
-        EmitLine(Format('  call $%s(%s)', [QBEMangle(ACall.Name), ArgLine]));
+        EmitLine(Format('  call %s(%s)', [CallTgt, ArgLine]));
       FlushPendingReleases(PMark);
       EmitOwnedArgReleases(ACall.Args, ArgTemps, MDecl.Params);
       ReleaseConstStringArgs(ACall.Args, ArgTemps, MDecl.Params);
