@@ -119,6 +119,13 @@ type
       and the element STORE wrote only the obj half (garbage itab)
       (BUG-20260721-fieldaccess-intf-array-elem-read). }
     procedure TestRun_InterfaceElem_OfArrayField;
+    { Interface element of an array field reached through a NESTED record chain
+      (O.B.Arr[0].Hi()): the QBE chained-base read arm (FldAccess.Base <> nil)
+      had drifted from the leaf arm and only returned the element address for
+      tyRecord — so an interface element was loaded as an 8-byte scalar and
+      dispatch/read crashed (QBE only; native uniform base handling was correct)
+      (BUG-20260723-qbe-intf-nested-chain-array-elem). }
+    procedure TestRun_InterfaceElem_OfNestedFieldChainArray;
   end;
 
 implementation
@@ -1181,6 +1188,58 @@ begin
     ''', '3' + LE + '9' + LE + '3' + LE + '4' + LE + '3' + LE +
          '3' + LE + '4' + LE + '3' + LE + 'nn' + LE + 'nil' + LE +
          '7' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_InterfaceElem_OfNestedFieldChainArray;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program P;
+    type
+      IGreet = interface
+        function Hi(): Integer;
+      end;
+      TG = class(TObject, IGreet)
+      public
+        FN: Integer;
+        function Hi(): Integer;
+      end;
+      TInner = record
+        Arr: array[0..1] of IGreet;
+        DArr: array of IGreet;
+      end;
+      TOuter = record Tag: Int64; B: TInner; end;
+    function TG.Hi(): Integer;
+    begin
+      Result := FN
+    end;
+    function Mk(N: Integer): IGreet;
+    var G: TG;
+    begin
+      G := TG.Create();
+      G.FN := N;
+      Result := G
+    end;
+    var
+      O: TOuter;
+      G2: IGreet;
+    begin
+      O.Tag := 1;
+      O.B.Arr[0] := Mk(42);          { nested-chain store }
+      O.B.Arr[1] := Mk(7);
+      WriteLn(O.B.Arr[0].Hi());      { nested-chain method receiver }
+      G2 := O.B.Arr[1];              { nested-chain assignment RHS }
+      WriteLn(G2.Hi());
+      SetLength(O.B.DArr, 2);        { same shapes over a DYN array field —
+                                       the chained-base arm's dyn and static
+                                       exit conditions drifted independently }
+      O.B.DArr[0] := Mk(11);
+      O.B.DArr[1] := Mk(13);
+      WriteLn(O.B.DArr[0].Hi());
+      G2 := O.B.DArr[1];
+      WriteLn(G2.Hi())
+    end.
+    ''', '42' + LE + '7' + LE + '11' + LE + '13' + LE, 0);
 end;
 
 initialization

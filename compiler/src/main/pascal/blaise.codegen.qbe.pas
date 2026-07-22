@@ -14465,11 +14465,15 @@ begin
           EmitLine(Format('  %s =l mul %s, %d', [L, T, ElemSize]));
           T := AllocTemp();
           EmitLine(Format('  %s =l add %s, %s', [T, Ptr, L]));
-          { Record and jumbo-set elements evaluate to their element ADDRESS
-            (a jumbo set is an inline bitmap; an 8-byte load handed _SetIn a
-            garbage pointer → SIGSEGV — the chained-base arm for a nested
-            field chain A.B.Arr[0], BUG-20260722-jumbo-field-array-elem). }
-          if (TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind = tyRecord) or
+          { Record, interface, and jumbo-set elements evaluate to their element
+            ADDRESS (an interface element is a contiguous 16-byte fat pointer;
+            a jumbo set is an inline bitmap — an 8-byte load hands the consumer
+            garbage → SIGSEGV).  The chained-base arm for a nested field chain
+            (A.B.Arr[0]) had drifted from the leaf arm, missing tyInterface
+            (BUG-20260723-qbe-intf-nested-chain-array-elem) and jumbo
+            (BUG-20260722-jumbo-field-array-elem). }
+          if (TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind in
+                [tyRecord, tyInterface]) or
              IsJumboFieldElem(TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType) then
           begin
             if BaseReleaseTemp <> '' then
@@ -14501,7 +14505,7 @@ begin
           EmitLine(Format('  %s =l mul %s, %d', [Ptr, T, ElemSize]));
           T := AllocTemp();
           EmitLine(Format('  %s =l add %s, %s', [T, L, Ptr]));
-          if (SAT.ElementType.Kind = tyRecord) or
+          if (SAT.ElementType.Kind in [tyRecord, tyInterface]) or
              IsJumboFieldElem(SAT.ElementType) then
           begin
             if BaseReleaseTemp <> '' then
