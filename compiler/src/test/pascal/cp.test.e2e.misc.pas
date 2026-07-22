@@ -184,6 +184,16 @@ type
       type must expect the SUBRANGE's member count (the validator counted the
       full base enum) and index with the subrange's ordinal bounds. }
     procedure TestRun_Subrange_OfEnum_ConstArray;
+    { GH #182 (second follow-up): an INLINE enum-subrange array bound —
+      array[ptWhitePawn..ptKing] — with bare enum-member names, not a named
+      subrange type.  ResolveArrayBound looked members up only in the main
+      symbol table (skConstant), but enum members live in the reverse
+      enum-member index, so 'Cannot resolve array bound' was raised. }
+    procedure TestRun_InlineEnumSubrange_ArrayBound;
+    { Sibling incidentally fixed by the same ResolveArrayBound change: an
+      inline 'set of <enumLo>..<enumHi>' resolves its bounds through the same
+      helper. }
+    procedure TestRun_InlineEnumSubrange_SetType;
 
     { forward; in a program decl section (issue #130 bug2): the forward decl
       used to swallow the following implementation as a nested-proc body. }
@@ -2153,6 +2163,55 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '10 13' + LE + '21 22' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_InlineEnumSubrange_ArrayBound;
+const
+  { The reporter's exact second-follow-up shape (CTargets2): an inline
+    'array[ptWhitePawn..ptKing]' bound written with bare enum-member names.
+    Covers const AND var forms, and element read/write at the subrange's
+    ordinal offsets (ptWhitePawn = 1 maps to the first slot). }
+  Src = '''
+    program Array12;
+    type
+      TPieceType = (ptNil, ptWhitePawn, ptBlackPawn, ptRook,
+                    ptKnight, ptBishop, ptQueen, ptKing);
+    const
+      CTargets: array[ptWhitePawn..ptKing] of Int64 = (1, 2, 3, 4, 5, 6, 7);
+    var
+      Live: array[ptWhitePawn..ptKing] of Int64;
+      P: TPieceType;
+    begin
+      WriteLn(CTargets[ptWhitePawn], ' ', CTargets[ptRook], ' ', CTargets[ptKing]);
+      for P := ptWhitePawn to ptKing do
+        Live[P] := Ord(P) * 10;
+      WriteLn(Live[ptWhitePawn], ' ', Live[ptKnight], ' ', Live[ptKing])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '1 3 7' + LE + '10 40 70' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_InlineEnumSubrange_SetType;
+const
+  Src = '''
+    program SetSub;
+    type
+      TPiece = (pNil, pPawn, pRook, pKnight, pBishop, pQueen, pKing);
+    var
+      S: set of pPawn..pKing;
+    begin
+      S := [pRook, pQueen];
+      if pRook  in S then WriteLn('rook')  else WriteLn('no-rook');
+      if pPawn  in S then WriteLn('pawn')  else WriteLn('no-pawn');
+      Include(S, pPawn);
+      if pPawn  in S then WriteLn('pawn2') else WriteLn('no-pawn2')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'rook' + LE + 'no-pawn' + LE + 'pawn2' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_Ifdef_PredefinedBlaise;

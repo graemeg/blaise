@@ -5408,6 +5408,7 @@ var
   CD: TConstDecl;
   Expr: TASTExpr;
   Sym: TSymbol;
+  EnumRef: TEnumMemberRef;
 begin
   if IsPlainInt(ABoundText) then
     Exit(Integer(StrToInt(ABoundText)));
@@ -5426,6 +5427,29 @@ begin
   Sym := FTable.Lookup(ABoundText);
   if (Sym <> nil) and (Sym.Kind = skConstant) then
     Exit(Integer(Sym.ConstValue));
+  { Enum-member bound: an INLINE enum-subrange array index —
+    array[ptWhitePawn..ptKing] — supplies its bounds as bare enum-member
+    names, which live in the reverse enum-member index, NOT the main symbol
+    table (so the skConstant probe above misses them).  Resolve the member's
+    ordinal.  A NAMED enum-subrange type (TSub = a..b) already works because
+    it is built via the subrange-type path; this closes the inline form
+    (GH #182 follow-up). }
+  EnumRef := ResolveEnumMember(ABoundText, nil);
+  if EnumRef <> nil then
+  begin
+    { An AMBIGUOUS member name (declared by more than one enum) has no type
+      context here to disambiguate, and last-declared-wins would silently
+      pick a wrong ordinal → a wrong array extent.  Reject it, mirroring the
+      EvalConstIntExpr precedent — but suggest a NAMED subrange type, since
+      a qualified 'TEnum.Member' does not parse in bound position. }
+    if EnumMemberCandidateCount(ABoundText) > 1 then
+      SemanticError(Format(
+        'cannot determine which enum ''%s'' refers to as an array bound: it ' +
+        'is declared by %s, and there is no type context here to choose. ' +
+        'Declare a named subrange type (type TSub = Lo..Hi) and index by that',
+        [ABoundText, EnumMemberOwners(ABoundText)]), 0, 0);
+    Exit(Integer(EnumRef.Ordinal));
+  end;
   Src := 'program _ab; const _ab_val = ' + ABoundText + '; begin end.';
   Lx := TLexer.Create(Src);
   Px := TParser.Create(Lx);
