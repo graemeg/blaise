@@ -21743,6 +21743,15 @@ begin
         [Self.IntfObjOperand(P.ParamName, False)]));
       Self.Emit(#9'callq _ClassAddRef');
     end
+    else if P.ResolvedType.Kind = tyDynArray then
+    begin
+      { A dyn-array is a ref-counted buffer pointer: the callee's by-value
+        copy is co-owning and must be counted, or the caller dropping its
+        reference mid-call frees the buffer under the callee
+        (BUG-20260721-byval-dynarray-param-no-arc). }
+      Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(P.ParamName)]));
+      Self.Emit(#9'callq _DynArrayAddRef');
+    end
     else if P.ResolvedType.Kind = tyRecord then
     begin
       Self.Emit(#9'pushq %rbx');
@@ -21921,6 +21930,13 @@ begin
       Self.Emit(Format(#9'movq %s, %%rdi',
         [Self.IntfObjOperand(P.ParamName, False)]));
       Self.Emit(#9'callq _ClassRelease');
+    end
+    else if P.ResolvedType.Kind = tyDynArray then
+    begin
+      { Balances the entry retain
+        (BUG-20260721-byval-dynarray-param-no-arc). }
+      Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(P.ParamName)]));
+      Self.Emit(#9'callq _DynArrayRelease');
     end
     else if P.ResolvedType.Kind = tyRecord then
     begin

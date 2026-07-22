@@ -20,6 +20,7 @@ type
     function GenIR(const ASrc: string): string;
     function IRContains(const AIR, AFragment: string): Boolean;
     function CountSubstring(const AHaystack, ANeedle: string): Integer;
+    function FuncRegion(const AIR, AHeader: string): string;
   published
     { String variable assignment inserts retain before release }
     procedure TestARC_StringAssign_CallsRetain;
@@ -43,6 +44,13 @@ type
     { String value parameter: addref on entry, release on exit }
     procedure TestARC_StringValueParam_AddRefOnEntry;
     procedure TestARC_StringValueParam_ReleaseOnExit;
+
+    { Dyn-array value parameter: addref on entry, release on exit — a
+      dyn-array is a ref-counted pointer, so the callee's co-owning copy
+      must be counted (BUG-20260721-byval-dynarray-param-no-arc). }
+    procedure TestARC_DynArrayValueParam_AddRefOnEntry;
+    procedure TestARC_DynArrayValueParam_ReleaseOnExit;
+    procedure TestARC_DynArrayConstParam_NoAddRef;
 
     { String var parameter: no addref, no release }
     procedure TestARC_StringVarParam_NoAddRef;
@@ -375,6 +383,40 @@ const
         begin end.
         ''';
 
+  SrcDynValParam =
+    '''
+        program P;
+        type
+          TA = array of Integer;
+        function SumV(A: TA): Integer;
+        begin
+          Result := Length(A);
+        end;
+        var
+          X: TA;
+        begin
+          SetLength(X, 2);
+          WriteLn(SumV(X));
+        end.
+        ''';
+
+  SrcDynConstParam =
+    '''
+        program P;
+        type
+          TA = array of Integer;
+        function SumC(const A: TA): Integer;
+        begin
+          Result := Length(A);
+        end;
+        var
+          X: TA;
+        begin
+          SetLength(X, 2);
+          WriteLn(SumC(X));
+        end.
+        ''';
+
   SrcConstParam =
     '''
         program P;
@@ -497,6 +539,48 @@ var
 begin
   IR := GenIR(SrcValParam);
   AssertTrue('release for string value param', IRContains(IR, 'call $_StringRelease'));
+end;
+
+function TARCTests.FuncRegion(const AIR, AHeader: string): string;
+var
+  P, E: Integer;
+  Tail: string;
+begin
+  { Slice one emitted function: from its header line to the closing brace.
+    Whole-IR assertions would pass vacuously off the caller's own ARC. }
+  P := Pos(AHeader, AIR);
+  AssertTrue(AHeader + ' present', P >= 0);
+  Tail := Copy(AIR, P, Length(AIR) - P);
+  E := Pos(#10 + '}', Tail);
+  AssertTrue(AHeader + ' closed', E >= 0);
+  Result := Copy(Tail, 0, E);
+end;
+
+procedure TARCTests.TestARC_DynArrayValueParam_AddRefOnEntry;
+var
+  FnIR: string;
+begin
+  FnIR := FuncRegion(GenIR(SrcDynValParam), 'function w $SumV');
+  AssertTrue('addref for dyn-array value param',
+    Pos('call $_DynArrayAddRef', FnIR) >= 0);
+end;
+
+procedure TARCTests.TestARC_DynArrayValueParam_ReleaseOnExit;
+var
+  FnIR: string;
+begin
+  FnIR := FuncRegion(GenIR(SrcDynValParam), 'function w $SumV');
+  AssertTrue('release for dyn-array value param',
+    Pos('call $_DynArrayRelease', FnIR) >= 0);
+end;
+
+procedure TARCTests.TestARC_DynArrayConstParam_NoAddRef;
+var
+  FnIR: string;
+begin
+  FnIR := FuncRegion(GenIR(SrcDynConstParam), 'function w $SumC');
+  AssertFalse('no addref for const dyn-array param',
+    Pos('call $_DynArrayAddRef', FnIR) >= 0);
 end;
 
 procedure TARCTests.TestARC_StringVarParam_NoAddRef;

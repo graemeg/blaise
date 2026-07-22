@@ -60,6 +60,10 @@ type
       (BUG-20260722-discarded-sret-call-no-buffer). }
     procedure TestMain_DiscardedRecordCall_ReleasesElements;
     procedure TestMain_DiscardedInterfaceCall_ReleasesObj;
+    { A by-value dyn-array parameter is a co-owning ref-counted pointer:
+      the callee must retain it on entry and release it at exit
+      (BUG-20260721-byval-dynarray-param-no-arc). }
+    procedure TestFunc_DynArrayValueParam_RetainedAndReleased;
   end;
 
 implementation
@@ -327,6 +331,40 @@ begin
   MainR := Copy(MainR, 0, E);
   AssertTrue('discarded interface result''s obj half is released in main',
     Pos('_ClassRelease', MainR) >= 0);
+end;
+
+procedure TNativeArcTests.TestFunc_DynArrayValueParam_RetainedAndReleased;
+var
+  Asm_, FnR: string;
+  P, E: Integer;
+begin
+  Asm_ := Self.GenAsm(
+    '''
+    program P;
+    type
+      TA = array of Integer;
+    function SumV(A: TA): Integer;
+    begin
+      Result := Length(A);
+    end;
+    var
+      X: TA;
+    begin
+      SetLength(X, 2);
+      WriteLn(SumV(X));
+    end.
+    ''');
+  { Slice SumV only — main has its own scope-exit _DynArrayRelease for X. }
+  P := Pos('SumV:', Asm_);
+  AssertTrue('SumV present', P >= 0);
+  FnR := StrCopyTail(Asm_, P);
+  E := StrPos('.type SumV', FnR);
+  AssertTrue('SumV closed', E >= 0);
+  FnR := Copy(FnR, 0, E);
+  AssertTrue('by-value dyn-array param retained on entry',
+    Pos('_DynArrayAddRef', FnR) >= 0);
+  AssertTrue('by-value dyn-array param released at exit',
+    Pos('_DynArrayRelease', FnR) >= 0);
 end;
 
 initialization

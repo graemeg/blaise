@@ -99,6 +99,10 @@ type
       register) and release the discarded result's managed content
       (BUG-20260722-discarded-sret-call-no-buffer). }
     procedure TestRun_DiscardedSretCalls_NoLeak;
+    { A by-value dyn-array param must keep the buffer alive even when the
+      caller's own reference is dropped mid-call
+      (BUG-20260721-byval-dynarray-param-no-arc). }
+    procedure TestRun_ByValDynArrayParam_SurvivesCallerDrop;
   end;
 
 implementation
@@ -954,6 +958,40 @@ begin
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('runs to completion', 'ok' + LE, Output);
   { the discarded results' objects must be released, not leaked }
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EArcTests.TestRun_ByValDynArrayParam_SurvivesCallerDrop;
+const
+  Src = '''
+    program P;
+    type
+      TA = array of Integer;
+    var
+      X: TA;
+    procedure Drop();
+    begin
+      SetLength(X, 0)
+    end;
+    function Take(A: TA): Integer;
+    begin
+      { Drop the caller's only other reference: without the callee's
+        entry retain, A now dangles. }
+      Drop();
+      Result := A[1]
+    end;
+    begin
+      SetLength(X, 3);
+      X[1] := 42;
+      WriteLn(Take(X))
+    end.
+    ''';
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue(CompileAndRun(Src, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('param buffer survives caller drop', '42' + LE, Output);
   AssertLeakFreeOnAll(Src, '');
 end;
 

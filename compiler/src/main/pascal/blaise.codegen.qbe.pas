@@ -8973,6 +8973,16 @@ begin
         [ValTemp, Par.ParamName]));
       EmitLine(Format('  call $_ClassAddRef(l %s)', [ValTemp]));
     end
+    else if Par.ResolvedType.Kind = tyDynArray then
+    begin
+      { A dyn-array is a ref-counted buffer pointer: the callee's by-value
+        copy is co-owning and must be counted, or the caller dropping its
+        reference mid-call frees the buffer under the callee
+        (BUG-20260721-byval-dynarray-param-no-arc). }
+      ValTemp := AllocTemp();
+      EmitLine(Format('  %s =l loadl %%_var_%s', [ValTemp, Par.ParamName]));
+      EmitLine(Format('  call $_DynArrayAddRef(l %s)', [ValTemp]));
+    end
     else if Par.ResolvedType.Kind = tyRecord then
     begin
       { By-value record: QBE materialises the aggregate and %_var_X holds
@@ -9108,6 +9118,15 @@ begin
       ValTemp := AllocTemp();
       EmitLine(Format('  %s =l loadl %%_var_%s_obj', [ValTemp, Par.ParamName]));
       EmitLine(Format('  call $_ClassRelease(l %s)', [ValTemp]));
+    end
+    else if Par.ResolvedType.Kind = tyDynArray then
+    begin
+      { Balances the entry retain
+        (BUG-20260721-byval-dynarray-param-no-arc).  Releases the CURRENT
+        value — a reassignment inside the body released the original. }
+      ValTemp := AllocTemp();
+      EmitLine(Format('  %s =l loadl %%_var_%s', [ValTemp, Par.ParamName]));
+      EmitLine(Format('  call $_DynArrayRelease(l %s)', [ValTemp]));
     end
     else if Par.ResolvedType.Kind = tyRecord then
     begin
@@ -10509,6 +10528,14 @@ begin
         [ValTemp, Par.ParamName]));
       EmitLine(Format('  call $_ClassAddRef(l %s)', [ValTemp]));
     end
+    else if Par.ResolvedType.Kind = tyDynArray then
+    begin
+      { Co-owning ref-counted buffer pointer — see the method-entry twin
+        (BUG-20260721-byval-dynarray-param-no-arc). }
+      ValTemp := AllocTemp();
+      EmitLine(Format('  %s =l loadl %%_var_%s', [ValTemp, Par.ParamName]));
+      EmitLine(Format('  call $_DynArrayAddRef(l %s)', [ValTemp]));
+    end
     else if Par.ResolvedType.Kind = tyRecord then
     begin
       { By-value record: QBE materialises the aggregate; %_var_X holds its
@@ -10652,6 +10679,15 @@ begin
       ValTemp := AllocTemp();
       EmitLine(Format('  %s =l loadl %%_var_%s_obj', [ValTemp, Par.ParamName]));
       EmitLine(Format('  call $_ClassRelease(l %s)', [ValTemp]));
+    end
+    else if Par.ResolvedType.Kind = tyDynArray then
+    begin
+      { Balances the entry retain
+        (BUG-20260721-byval-dynarray-param-no-arc).  Releases the CURRENT
+        value — a reassignment inside the body released the original. }
+      ValTemp := AllocTemp();
+      EmitLine(Format('  %s =l loadl %%_var_%s', [ValTemp, Par.ParamName]));
+      EmitLine(Format('  call $_DynArrayRelease(l %s)', [ValTemp]));
     end
     else if Par.ResolvedType.Kind = tyRecord then
     begin
