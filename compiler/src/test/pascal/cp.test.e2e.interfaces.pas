@@ -106,13 +106,12 @@ type
       (BUG-20260721-qbe-downcast-intf-elem-field-write). }
     procedure TestRun_ClassDowncastOfIntfElement_FieldWrite;
     { Class downcast of the remaining interface operand shapes: implicit-Self
-      interface field, var-param interface, and interface-returning call
-      result.  The old QBE ident special case emitted a load from a
-      nonexistent %_var_X_obj slot for the first two (invalid IR) — fixed by
-      routing every interface operand through EmitInterfaceExprPair.
-      QBE-only for now: native crashes on all three shapes
-      (BUG-20260722-native-downcast-intf-nonslot-shapes); widen to
-      AssertRunsOnAll when that is fixed. }
+      interface field, var-param interface, interface-returning call result,
+      interface-returning METHOD-call result, sret interface Result, and a
+      captured interface local inside a nested routine.  QBE's old ident
+      special case emitted loads from nonexistent %_var_X_obj slots (fixed via
+      EmitInterfaceExprPair); native's ident-only special case crashed on all
+      of these shapes (BUG-20260722-native-downcast-intf-nonslot-shapes). }
     procedure TestRun_ClassDowncastOfIntf_IdentShapes;
   end;
 
@@ -1020,15 +1019,9 @@ begin
 end;
 
 procedure TE2EInterfaceTests.TestRun_ClassDowncastOfIntf_IdentShapes;
-var
-  QbeOnly: TBackends;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  { Local variable rather than an inline [beQBE] argument: a set-constructor
-    literal in an argument position is not yet lowered by the native backend
-    (BUG-20260722-native-set-literal-arg). }
-  QbeOnly := [beQBE];
-  AssertRunsOn(QbeOnly, '''
+  AssertRunsOnAll('''
     program P;
     type
       IGreet = interface
@@ -1043,6 +1036,7 @@ begin
       public
         FI: IGreet;
         procedure Poke();
+        function GetI(): IGreet;
       end;
     function TGreet.Name(): string;
     begin
@@ -1051,6 +1045,10 @@ begin
     procedure THolder.Poke();
     begin
       TGreet(FI).FName := 'self'
+    end;
+    function THolder.GetI(): IGreet;
+    begin
+      Result := FI
     end;
     var
       G: IGreet;
@@ -1063,6 +1061,23 @@ begin
     begin
       TGreet(I).FName := 'varparam'
     end;
+    function MakeAndPoke(): IGreet;
+    begin
+      Result := TGreet.Create();
+      TGreet(Result).FName := 'sretresult'
+    end;
+    procedure PokeCaptured();
+    var
+      I: IGreet;
+      procedure Inner();
+      begin
+        TGreet(I).FName := 'captured'
+      end;
+    begin
+      I := TGreet.Create();
+      Inner();
+      WriteLn(I.Name())
+    end;
     begin
       H := THolder.Create();
       H.FI := TGreet.Create();
@@ -1072,9 +1087,14 @@ begin
       PokeVar(G);
       WriteLn(G.Name());
       TGreet(MakeI()).FName := 'call';
-      WriteLn(TGreet(MakeI()).FName)
+      WriteLn(TGreet(MakeI()).FName);
+      TGreet(H.GetI()).FName := 'mcall';
+      WriteLn(H.FI.Name());
+      WriteLn(MakeAndPoke().Name());
+      PokeCaptured()
     end.
-    ''', 'self' + LE + 'varparam' + LE + 'call' + LE, 0);
+    ''', 'self' + LE + 'varparam' + LE + 'call' + LE + 'mcall' + LE +
+         'sretresult' + LE + 'captured' + LE, 0);
 end;
 
 initialization

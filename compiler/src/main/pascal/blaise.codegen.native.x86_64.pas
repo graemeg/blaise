@@ -7340,6 +7340,7 @@ var
   SetI: Integer;
   I:   Integer;
   SetElem: TASTExpr;
+  CastArg: TASTExpr;
   ScEndLbl: string;
   IsS: Boolean;
   DivOkLbl: string;
@@ -8552,14 +8553,84 @@ begin
       backend's cast lowering. }
     if FC.ResolvedDecl = nil then
     begin
-      if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
-         (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tyInterface) and
-         (TASTExpr(FC.Args.Items[0]) is TIdentExpr) then
-        Self.Emit(Format(#9'movq %s, %%rax',
-          [Self.IntfObjOperand(TIdentExpr(TASTExpr(FC.Args.Items[0])).Name,
-                               TIdentExpr(TASTExpr(FC.Args.Items[0])).IsGlobal)]))
+      CastArg := TASTExpr(FC.Args.Items[0]);
+      if (CastArg.ResolvedType <> nil) and
+         (CastArg.ResolvedType.Kind = tyInterface) and
+         (CastArg is TIdentExpr) then
+      begin
+        { Interface ident operand — five slot layouts, mirroring
+          PushIntfIdentPair (BUG-20260722-native-downcast-intf-nonslot-shapes):
+          sret Result (slot holds the caller-buffer ADDRESS), captured local
+          (the _cap_ slot holds the fat pair's address), implicit-Self FIELD
+          (contiguous fat pair at Self+offset — the plain-ident load would
+          reference a nonexistent <name>_obj global), var/out param (the slot
+          holds the ADDRESS of the caller's fat pair), and the plain
+          local/global split _obj/_itab slots. }
+        if FSretFunc and SameText(TIdentExpr(CastArg).Name, 'Result') then
+        begin
+          Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Result')]));
+          Self.Emit(#9'movq (%rax), %rax');
+        end
+        else if Self.IsCaptured(TIdentExpr(CastArg).Name) then
+        begin
+          Self.Emit(Format(#9'movq %s, %%rax',
+            [Self.VarOperand('_cap_' + TIdentExpr(CastArg).Name)]));
+          Self.Emit(#9'movq (%rax), %rax');
+        end
+        else if TIdentExpr(CastArg).IsImplicitSelf and
+           (TIdentExpr(CastArg).ImplicitFieldInfo <> nil) then
+        begin
+          Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
+          Self.Emit(Format(#9'movq %d(%%rax), %%rax',
+            [TFieldInfo(TIdentExpr(CastArg).ImplicitFieldInfo).Offset]));
+        end
+        else if TIdentExpr(CastArg).ParamMode = pmVar then
+        begin
+          Self.Emit(Format(#9'movq %s, %%rax',
+            [Self.VarOperand(TIdentExpr(CastArg).Name)]));
+          Self.Emit(#9'movq (%rax), %rax');
+        end
+        else
+          Self.Emit(Format(#9'movq %s, %%rax',
+            [Self.IntfObjOperand(TIdentExpr(CastArg).Name,
+                                 TIdentExpr(CastArg).IsGlobal)]));
+      end
+      else if (CastArg.ResolvedType <> nil) and
+              (CastArg.ResolvedType.Kind = tyInterface) and
+              (CastArg is TFuncCallExpr) and
+              (TFuncCallExpr(CastArg).ResolvedDecl <> nil) then
+      begin
+        { Interface-returning CALL operand: EmitIntfSretCall leaves the
+          16-byte fat pair at (%rsp).  The callee transferred a +1 obj
+          reference; defer its release to the statement boundary so the
+          cast result stays alive for the consuming expression (falls back
+          to a leak, never a use-after-free, if all pendrel slots are
+          taken). }
+        Self.EmitIntfSretCall(TFuncCallExpr(CastArg));
+        Self.Emit(#9'movq (%rsp), %rax');
+        Self.Emit(#9'addq $16, %rsp');
+        Self.DeferNativeClassRelease();
+      end
+      else if (CastArg.ResolvedType <> nil) and
+              (CastArg.ResolvedType.Kind = tyInterface) and
+              (CastArg is TMethodCallExpr) and
+              (TMethodCallExpr(CastArg).ResolvedClassType <> nil) then
+      begin
+        { Interface-returning METHOD-call operand (TG(Obj.GetI())): same sret
+          contract and same deferred obj release as the plain-call arm above.
+          Which sret helper applies depends on the RECEIVER: an interface
+          receiver dispatches through the itab, a class receiver is a direct
+          or vtable call. }
+        if TMethodCallExpr(CastArg).ResolvedClassType.Kind = tyInterface then
+          Self.EmitIntfSretMethodCall(TMethodCallExpr(CastArg))
+        else
+          Self.EmitClassIntfSretMethodCall(TMethodCallExpr(CastArg));
+        Self.Emit(#9'movq (%rsp), %rax');
+        Self.Emit(#9'addq $16, %rsp');
+        Self.DeferNativeClassRelease();
+      end
       else
-        Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
+        Self.EmitExprToEax(CastArg);
       Self.EmitNarrowToType(FC.ResolvedType);
       Exit;
     end;
