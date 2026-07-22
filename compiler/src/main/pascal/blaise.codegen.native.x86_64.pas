@@ -5009,6 +5009,29 @@ begin
   { Add the field offset to reach the fat pointer's obj slot. }
   if AFA.FieldInfo.Offset > 0 then
     Self.Emit(Format(#9'addq $%d, %s', [AFA.FieldInfo.Offset, ADstReg]));
+  { ARRAY-FIELD ELEMENT (H.FArr[0], IsArrayAccess): ADstReg holds the array
+    FIELD address — index into it so the fat pair is the ELEMENT's.  Without
+    this every consumer read the field slot as the pair base
+    (BUG-20260721-fieldaccess-intf-array-elem-read). }
+  if AFA.IsArrayAccess then
+  begin
+    if AFA.FieldInfo.TypeDesc.Kind in [tyDynArray, tyOpenArray] then
+      { heap data pointer lives in the field slot }
+      Self.Emit(Format(#9'movq (%s), %s', [ADstReg, ADstReg]));
+    Self.Emit(Format(#9'pushq %s', [ADstReg]));
+    Self.EmitExprToEax(AFA.PropIndexExpr);
+    if AFA.FieldInfo.TypeDesc.Kind = tyStaticArray then
+      Self.EmitStaticElemScale(TStaticArrayTypeDesc(AFA.FieldInfo.TypeDesc))
+    else
+      Self.Emit(#9'imulq $16, %rax');
+    { Pop the base through %rcx, not ADstReg: several callers pass %rax as
+      ADstReg, and popping the base into %rax would destroy the scaled index
+      just computed there ("addq %rax, %rax" then doubled the base). }
+    Self.Emit(#9'popq %rcx');
+    Self.Emit(#9'addq %rcx, %rax');
+    if ADstReg <> '%rax' then
+      Self.Emit(Format(#9'movq %%rax, %s', [ADstReg]));
+  end;
 end;
 
 procedure TX86_64Backend.EmitIntfStaticElemAddr(ASub: TStringSubscriptExpr;
@@ -8657,6 +8680,19 @@ begin
         Self.Emit(#9'addq $16, %rsp');
         Self.DeferNativeClassRelease();
       end
+      else if (CastArg.ResolvedType <> nil) and
+              (CastArg.ResolvedType.Kind = tyInterface) and
+              (CastArg is TFieldAccessExpr) then
+      begin
+        { Interface FIELD operand (TG(H.FIntf)) or array-field ELEMENT
+          (TG(H.FArr[0]), IsArrayAccess): resolve the fat pair's address and
+          load the obj half.  The generic EmitExprToEax below returns the
+          element ADDRESS for an IsArrayAccess interface element
+          (BUG-20260721-fieldaccess-intf-array-elem-read), which the cast
+          would then treat as the obj pointer. }
+        Self.EmitInterfaceFieldAddr(TFieldAccessExpr(CastArg), '%rax');
+        Self.Emit(#9'movq (%rax), %rax');
+      end
       else
         Self.EmitExprToEax(CastArg);
       Self.EmitNarrowToType(FC.ResolvedType);
@@ -9051,6 +9087,15 @@ begin
       loads straight into %rcx.  Only a complex RHS — one whose evaluation
       may clobber %rax — needs the push/pop save bracket. }
     Self.EmitExprToEax(BE.Left);
+    { An interface element of an ARRAY FIELD (H.FArr[0], IsArrayAccess)
+      evaluates to its element ADDRESS, like records
+      (BUG-20260721-fieldaccess-intf-array-elem-read).  A comparison operand
+      needs the obj half — load it. }
+    if (BE.Left is TFieldAccessExpr) and
+       TFieldAccessExpr(BE.Left).IsArrayAccess and
+       (BE.Left.ResolvedType <> nil) and
+       (BE.Left.ResolvedType.Kind = tyInterface) then
+      Self.Emit(#9'movq (%rax), %rax');
     HasImm := Self.TryGetImmValue(BE.Right, ImmV) and
               (ImmV >= -2147483648) and (ImmV <= 2147483647) and
               (BE.Op in [boAdd, boSub, boMul, boAnd, boOr, boXor,
@@ -9067,6 +9112,11 @@ begin
         FPinDepth := FPinDepth + 1;
         Self.Emit(#9'movq %rax, %r13');
         Self.EmitExprToEax(BE.Right);
+        if (BE.Right is TFieldAccessExpr) and
+           TFieldAccessExpr(BE.Right).IsArrayAccess and
+           (BE.Right.ResolvedType <> nil) and
+           (BE.Right.ResolvedType.Kind = tyInterface) then
+          Self.Emit(#9'movq (%rax), %rax'); { element addr -> obj half }
         Self.Emit(#9'movq %rax, %rcx');   { right in %rcx }
         Self.Emit(#9'movq %r13, %rax');   { left in %rax }
         FPinDepth := FPinDepth - 1;
@@ -9075,6 +9125,11 @@ begin
       begin
         Self.Emit(#9'pushq %rax');
         Self.EmitExprToEax(BE.Right);
+        if (BE.Right is TFieldAccessExpr) and
+           TFieldAccessExpr(BE.Right).IsArrayAccess and
+           (BE.Right.ResolvedType <> nil) and
+           (BE.Right.ResolvedType.Kind = tyInterface) then
+          Self.Emit(#9'movq (%rax), %rax'); { element addr -> obj half }
         Self.Emit(#9'movq %rax, %rcx');   { right in %rcx }
         Self.Emit(#9'popq %rax');          { left in %rax }
       end;
@@ -9614,7 +9669,12 @@ begin
         [TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.RawSize()]));
       Self.Emit(#9'popq %rcx');
       Self.Emit(#9'addq %rcx, %rax');
-      if TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind = tyRecord then
+      { Record and interface elements evaluate to their element ADDRESS
+        (an interface element is a contiguous 16-byte fat pointer; an
+        8-byte load handed consumers the obj as the pair base
+        (BUG-20260721-fieldaccess-intf-array-elem-read)). }
+      if TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind in
+         [tyRecord, tyInterface] then
         Exit;
       Self.EmitLoadVar('(%rax)',
         TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType);
@@ -9626,7 +9686,8 @@ begin
       Self.EmitStaticElemScale(TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc));
       Self.Emit(#9'popq %rcx');
       Self.Emit(#9'addq %rcx, %rax');
-      if TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind = tyRecord then
+      if TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind in
+         [tyRecord, tyInterface] then
         Exit;
       Self.EmitLoadVar('(%rax)',
         TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType);
@@ -9641,7 +9702,8 @@ begin
         [TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.RawSize()]));
       Self.Emit(#9'popq %rcx');
       Self.Emit(#9'addq %rcx, %rax');
-      if TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind = tyRecord then
+      if TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind in
+         [tyRecord, tyInterface] then
         Exit;
       Self.EmitLoadVar('(%rax)',
         TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType);
@@ -12238,6 +12300,15 @@ begin
         not (BE.Right.ResolvedType.Kind in [tyString, tySet])) then
     begin
       Self.EmitExprToEax(BE.Left);
+      { An interface element of an ARRAY FIELD evaluates to its element
+        ADDRESS — a comparison operand needs the obj half, or `= nil`
+        compares the never-nil address (same deref as EmitExprToEax's
+        materialised compare; BUG-20260721-fieldaccess-intf-array-elem-read). }
+      if (BE.Left is TFieldAccessExpr) and
+         TFieldAccessExpr(BE.Left).IsArrayAccess and
+         (BE.Left.ResolvedType <> nil) and
+         (BE.Left.ResolvedType.Kind = tyInterface) then
+        Self.Emit(#9'movq (%rax), %rax');
       HasImm := Self.TryGetImmValue(BE.Right, ImmV) and
                 (ImmV >= -2147483648) and (ImmV <= 2147483647);
       if (not HasImm) and (not Self.TryEmitOperandToRcx(BE.Right)) then
@@ -12247,6 +12318,11 @@ begin
           FPinDepth := FPinDepth + 1;
           Self.Emit(#9'movq %rax, %r13');
           Self.EmitExprToEax(BE.Right);
+          if (BE.Right is TFieldAccessExpr) and
+             TFieldAccessExpr(BE.Right).IsArrayAccess and
+             (BE.Right.ResolvedType <> nil) and
+             (BE.Right.ResolvedType.Kind = tyInterface) then
+            Self.Emit(#9'movq (%rax), %rax'); { element addr -> obj half }
           Self.Emit(#9'movq %rax, %rcx');
           Self.Emit(#9'movq %r13, %rax');
           FPinDepth := FPinDepth - 1;
@@ -12255,6 +12331,11 @@ begin
         begin
           Self.Emit(#9'pushq %rax');
           Self.EmitExprToEax(BE.Right);
+          if (BE.Right is TFieldAccessExpr) and
+             TFieldAccessExpr(BE.Right).IsArrayAccess and
+             (BE.Right.ResolvedType <> nil) and
+             (BE.Right.ResolvedType.Kind = tyInterface) then
+            Self.Emit(#9'movq (%rax), %rax'); { element addr -> obj half }
           Self.Emit(#9'movq %rax, %rcx');
           Self.Emit(#9'popq %rax');
         end;
@@ -15724,6 +15805,77 @@ begin
         DAElemType := TDynArrayTypeDesc(FA.FieldInfo.TypeDesc).ElementType
       else
         DAElemType := TStaticArrayTypeDesc(FA.FieldInfo.TypeDesc).ElementType;
+      { Interface element: a two-slot fat pointer — the generic path below
+        stored only 8 bytes (the obj), leaving the element's itab garbage
+        (BUG-20260721-fieldaccess-intf-array-elem-read).  VALUE-FIRST: the
+        RHS is evaluated into a zeroed 16-byte stack temp via
+        EmitInterfaceToFieldSlotsAt (retain-new against a nil old — the
+        RHS may reallocate the very dyn-array field being stored into, so
+        the element address must be computed AFTER it runs), then the
+        element address is derived fresh, the old obj released, and the
+        owned pair moved in with a raw 16-byte copy. }
+      if DAElemType.Kind = tyInterface then
+      begin
+        Self.Emit(#9'pushq %rbx');
+        Self.Emit(#9'subq $16, %rsp');
+        Self.Emit(#9'movq $0, (%rsp)');
+        Self.Emit(#9'movq $0, 8(%rsp)');
+        Self.Emit(#9'movq %rsp, %rbx');    { temp pair address }
+        Self.EmitInterfaceToFieldSlotsAt(FA.Expr, '%rbx', 0, DAElemType);
+        { Element address → %rcx, fresh (post-RHS), per receiver shape. }
+        Self.EmitExprToEax(FA.PropIndexExpr);
+        if (FA.FieldInfo.TypeDesc.Kind = tyStaticArray) and
+           (TStaticArrayTypeDesc(FA.FieldInfo.TypeDesc).LowBound <> 0) then
+          Self.Emit(Format(#9'subq $%d, %%rax',
+            [TStaticArrayTypeDesc(FA.FieldInfo.TypeDesc).LowBound]));
+        Self.Emit(#9'imulq $16, %rax');
+        Self.Emit(#9'pushq %rax');         { scaled element offset }
+        if FA.ObjExpr <> nil then
+        begin
+          Self.EmitExprToEax(FA.ObjExpr);
+          Self.Emit(#9'movq %rax, %rcx');
+        end
+        else if FSretFunc and (FA.RecordName = 'Result') then
+          Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('Result')]))
+        else if FA.IsImplicitSelf then
+        begin
+          Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('Self')]));
+          if (FA.ImplicitBaseInfo <> nil) and (FA.ImplicitBaseInfo.Offset > 0) then
+            Self.Emit(Format(#9'addq $%d, %%rcx', [FA.ImplicitBaseInfo.Offset]));
+          if FA.IsClassAccess then
+            Self.Emit(#9'movq (%rcx), %rcx');
+        end
+        else if FA.IsClassAccess then
+        begin
+          Self.EmitVarBaseToReg(FA.RecordName, False, '%rcx');
+          if FA.IsVarParam then
+            Self.Emit(#9'movq (%rcx), %rcx');
+        end
+        else if FA.IsVarParam then
+        begin
+          Self.EmitVarBaseToReg(FA.RecordName, False, '%rcx');
+        end
+        else Self.EmitVarBaseToReg(FA.RecordName, True, '%rcx');
+        if FA.FieldInfo.Offset > 0 then
+          Self.Emit(Format(#9'addq $%d, %%rcx', [FA.FieldInfo.Offset]));
+        if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
+          Self.Emit(#9'movq (%rcx), %rcx'); { heap data pointer (fresh) }
+        Self.Emit(#9'popq %rax');
+        Self.Emit(#9'addq %rax, %rcx');     { element address }
+        { Release the element's old obj, then move the owned pair in. }
+        Self.Emit(#9'pushq %rcx');
+        Self.Emit(#9'movq (%rcx), %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+        Self.Emit(#9'popq %rcx');
+        Self.Emit(#9'movq %rsp, %rbx');     { re-derive temp (rsp unmoved) }
+        Self.Emit(#9'movq (%rbx), %rax');
+        Self.Emit(#9'movq %rax, (%rcx)');
+        Self.Emit(#9'movq 8(%rbx), %rax');
+        Self.Emit(#9'movq %rax, 8(%rcx)');
+        Self.Emit(#9'addq $16, %rsp');
+        Self.Emit(#9'popq %rbx');
+        Exit;
+      end;
       if DAElemType.Kind in [tyByte, tyBoolean] then
         Self.EmitByteRhsToEax(FA.Expr)
       else

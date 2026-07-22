@@ -579,6 +579,11 @@ type
     { Returns True if AExpr is a function or method call that returns an
       interface.  Used in EmitAssignment to choose the sret path. }
     function  IsInterfaceCall(AExpr: TASTExpr): Boolean;
+    { True when AExpr is an interface ARRAY ELEMENT whose EmitExpr value is
+      the fat-pair ADDRESS (subscript over an array, or a field access with
+      IsArrayAccess) — consumers that need the obj half must load it
+      (BUG-20260721-fieldaccess-intf-array-elem-read). }
+    function  IsIntfElemAddrExpr(AExpr: TASTExpr): Boolean;
     { Release every ARC-managed field of a record at AAddr in-line (no copy).
       Used before overwriting a record slot to prevent reference leaks. }
     procedure EmitRecordReleaseFields(ARec: TRecordTypeDesc; const AAddr: string);
@@ -6083,6 +6088,21 @@ begin
   end;
 end;
 
+function TCodeGenQBE.IsIntfElemAddrExpr(AExpr: TASTExpr): Boolean;
+begin
+  Result := False;
+  if (AExpr.ResolvedType = nil) or
+     (AExpr.ResolvedType.Kind <> tyInterface) then Exit;
+  if (AExpr is TStringSubscriptExpr) and
+     (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) and
+     (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind in
+        [tyStaticArray, tyDynArray, tyOpenArray]) then
+    Exit(True);
+  if (AExpr is TFieldAccessExpr) and
+     TFieldAccessExpr(AExpr).IsArrayAccess then
+    Exit(True);
+end;
+
 function TCodeGenQBE.IsInterfaceCall(AExpr: TASTExpr): Boolean;
 var
   MDecl: TMethodDecl;
@@ -7247,6 +7267,8 @@ var
   ElemPtr:  string;
   ValTemp:  string;
   OldTemp:  string;
+  ObjT:     string;
+  ItabT:    string;
 begin
   ArrT := AAssign.FieldInfo.TypeDesc;
   if ArrT.Kind = tyDynArray then
@@ -7291,6 +7313,70 @@ begin
     ElemPtr := AllocTemp();
     EmitLine(Format('  %s =l add %s, %s', [ElemPtr, BaseT, Offset]));
     EmitRecordCopy(TRecordTypeDesc(ElemT), ElemPtr, ValTemp);
+    Exit;
+  end;
+  { Interface element: a 16-byte fat pointer (obj at +0 refcounted, itab at
+    +8 raw).  Evaluate the RHS pair FIRST (value-first like the record arm —
+    the RHS may reallocate the same dyn-array field), then compute the
+    element address and store both halves with ARC on the obj slot.  Falling
+    through to the scalar store wrote the sret buffer ADDRESS into the
+    element for a call RHS (BUG-20260721-fieldaccess-intf-array-elem-read).
+    Mirrors EmitStaticSubscriptAssign's interface arm. }
+  if ElemT.Kind = tyInterface then
+  begin
+    ObjT := '';
+    ItabT := '';
+    if AAssign.Expr is TNilLiteral then
+      { no pair to evaluate }
+    else if (AAssign.Expr.ResolvedType <> nil) and
+            (AAssign.Expr.ResolvedType.Kind = tyClass) then
+    begin
+      ObjT := EmitExpr(AAssign.Expr);
+      ItabT := Format('$itab_%s_%s',
+        [QBEMangle(ClassSymName(TRecordTypeDesc(AAssign.Expr.ResolvedType).Name)),
+         QBEMangle(TInterfaceTypeDesc(ElemT).Name)]);
+    end
+    else
+      EmitInterfaceExprPair(AAssign.Expr, ObjT, ItabT,
+        TInterfaceTypeDesc(ElemT));
+    if ArrT.Kind = tyDynArray then
+    begin
+      BaseT := AllocTemp();
+      EmitLine(Format('  %s =l loadl %s', [BaseT, AFieldPtr]));  { fresh data ptr }
+    end;
+    IdxW := EmitExpr(AAssign.PropIndexExpr);
+    IdxL := AllocTemp();
+    EmitLine(Format('  %s =l extsw %s', [IdxL, IdxW]));
+    if LowBnd <> 0 then
+    begin
+      Adj := AllocTemp();
+      EmitLine(Format('  %s =l sub %s, %d', [Adj, IdxL, LowBnd]));
+      IdxL := Adj;
+    end;
+    Offset := AllocTemp();
+    EmitLine(Format('  %s =l mul %s, %d', [Offset, IdxL, ElemSize]));
+    ElemPtr := AllocTemp();
+    EmitLine(Format('  %s =l add %s, %s', [ElemPtr, BaseT, Offset]));
+    OldTemp := AllocTemp();
+    EmitLine(Format('  %s =l loadl %s', [OldTemp, ElemPtr]));
+    if AAssign.Expr is TNilLiteral then
+    begin
+      EmitLine(Format('  call $_ClassRelease(l %s)', [OldTemp]));
+      EmitLine(Format('  storel 0, %s', [ElemPtr]));
+      Adj := AllocTemp();
+      EmitLine(Format('  %s =l add %s, 8', [Adj, ElemPtr]));
+      EmitLine(Format('  storel 0, %s', [Adj]));
+      Exit;
+    end;
+    if not (((AAssign.Expr.ResolvedType <> nil) and
+             (AAssign.Expr.ResolvedType.Kind = tyClass)) and
+            ExprOwnsRef(AAssign.Expr)) then
+      EmitLine(Format('  call $_ClassAddRef(l %s)', [ObjT]));
+    EmitLine(Format('  call $_ClassRelease(l %s)', [OldTemp]));
+    EmitLine(Format('  storel %s, %s', [ObjT, ElemPtr]));
+    Adj := AllocTemp();
+    EmitLine(Format('  %s =l add %s, 8', [Adj, ElemPtr]));
+    EmitLine(Format('  storel %s, %s', [ItabT, Adj]));
     Exit;
   end;
   IdxW := EmitExpr(AAssign.PropIndexExpr);
@@ -14814,7 +14900,12 @@ begin
         EmitLine(Format('  %s =l mul %s, %d', [L, T, ElemSize]));
         T := AllocTemp();
         EmitLine(Format('  %s =l add %s, %s', [T, Ptr, L]));
-        if TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind = tyRecord then
+        { Record and interface elements evaluate to their element ADDRESS
+          (an interface element is a contiguous 16-byte fat pointer; loading
+          8 bytes here handed consumers the obj as the pair base — SIGSEGV
+          on dispatch; BUG-20260721-fieldaccess-intf-array-elem-read). }
+        if TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind in
+           [tyRecord, tyInterface] then
           Exit(T);
         QType := QbeTypeOf(TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType);
         LoadInstr := LoadInstrFor(TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType);
@@ -14839,7 +14930,7 @@ begin
         EmitLine(Format('  %s =l mul %s, %d', [Ptr, T, ElemSize]));
         T := AllocTemp();
         EmitLine(Format('  %s =l add %s, %s', [T, L, Ptr]));
-        if SAT.ElementType.Kind = tyRecord then
+        if SAT.ElementType.Kind in [tyRecord, tyInterface] then
           Exit(T);
         QType := QbeTypeOf(SAT.ElementType);
         LoadInstr := LoadInstrFor(SAT.ElementType);
@@ -14859,7 +14950,8 @@ begin
         EmitLine(Format('  %s =l mul %s, %d', [L, T, ElemSize]));
         T := AllocTemp();
         EmitLine(Format('  %s =l add %s, %s', [T, Ptr, L]));
-        if TOpenArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind = tyRecord then
+        if TOpenArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind in
+           [tyRecord, tyInterface] then
           Exit(T);
         QType := QbeTypeOf(TOpenArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType);
         LoadInstr := LoadInstrFor(TOpenArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType);
@@ -15567,6 +15659,23 @@ begin
        ((BinExpr.Right.ResolvedType <> nil) and
         (BinExpr.Right.ResolvedType.Kind in [tyClass, tyNil, tyPointer, tyMetaClass, tyInterface])) then
     begin
+      { An interface ARRAY-ELEMENT operand evaluates to its fat-pair
+        ADDRESS (a subscript node over an array, or a field access with
+        IsArrayAccess) — load the obj half for the identity compare, or
+        `Elem = nil` would compare the never-nil element address
+        (BUG-20260721-fieldaccess-intf-array-elem-read). }
+      if IsIntfElemAddrExpr(BinExpr.Left) then
+      begin
+        ArgTemp := AllocTemp();
+        EmitLine(Format('  %s =l loadl %s', [ArgTemp, L]));
+        L := ArgTemp;
+      end;
+      if IsIntfElemAddrExpr(BinExpr.Right) then
+      begin
+        ArgTemp := AllocTemp();
+        EmitLine(Format('  %s =l loadl %s', [ArgTemp, R]));
+        R := ArgTemp;
+      end;
       case BinExpr.Op of
         boEQ: Op := 'ceql';
         boNE: Op := 'cnel';
@@ -16124,8 +16233,15 @@ begin
     { Interface stored in a record/class field: the fat pointer is contiguous
       in the field's memory — obj at the field address, itab at +8.  (Plain
       interface locals/globals use split _obj/_itab slots, handled above; a
-      record field never does.)  EmitLValueAddr resolves the field address. }
-    ObjT := EmitLValueAddr(AExpr);
+      record field never does.)  EmitLValueAddr resolves the field address.
+      An ARRAY-FIELD ELEMENT (H.FArr[0], IsArrayAccess) needs the element
+      address instead — EmitExpr's IsArrayAccess arm computes data_ptr +
+      idx*16 and returns it for interface elements
+      (BUG-20260721-fieldaccess-intf-array-elem-read). }
+    if TFieldAccessExpr(AExpr).IsArrayAccess then
+      ObjT := EmitExpr(AExpr)
+    else
+      ObjT := EmitLValueAddr(AExpr);
     AObjTemp  := AllocTemp();
     EmitLine(Format('  %s =l loadl %s', [AObjTemp, ObjT]));
     ItabT := AllocTemp();

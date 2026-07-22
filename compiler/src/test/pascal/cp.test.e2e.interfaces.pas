@@ -113,6 +113,12 @@ type
       EmitInterfaceExprPair); native's ident-only special case crashed on all
       of these shapes (BUG-20260722-native-downcast-intf-nonslot-shapes). }
     procedure TestRun_ClassDowncastOfIntf_IdentShapes;
+    { Interface elements of ARRAY FIELDS (H.FArr[0] — a TFieldAccessExpr with
+      IsArrayAccess, not a subscript node): the read arms treated the field
+      slot as the pair base with no index scaling (SIGSEGV both backends),
+      and the element STORE wrote only the obj half (garbage itab)
+      (BUG-20260721-fieldaccess-intf-array-elem-read). }
+    procedure TestRun_InterfaceElem_OfArrayField;
   end;
 
 implementation
@@ -1095,6 +1101,86 @@ begin
     end.
     ''', 'self' + LE + 'varparam' + LE + 'call' + LE + 'mcall' + LE +
          'sretresult' + LE + 'captured' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_InterfaceElem_OfArrayField;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program P;
+    type
+      IGreet = interface
+        function Hi(): Integer;
+      end;
+      TG = class(TObject, IGreet)
+      public
+        FN: Integer;
+        function Hi(): Integer;
+      end;
+      THold = class
+      public
+        FArr: array of IGreet;
+        FSt: array[0..1] of IGreet;
+        function ProbeSelf(): Integer;
+      end;
+    function TG.Hi(): Integer;
+    begin
+      Result := FN
+    end;
+    function THold.ProbeSelf(): Integer;
+    begin
+      Result := FArr[0].Hi()         { implicit-Self field element read }
+    end;
+    function Mk(N: Integer): IGreet;
+    var G: TG;
+    begin
+      G := TG.Create();
+      G.FN := N;
+      Result := G
+    end;
+    procedure TakeIntf(AG: IGreet);
+    begin
+      WriteLn(AG.Hi())
+    end;
+    var
+      H: THold;
+      G2: IGreet;
+      GC: TG;
+    function MkGrow(N: Integer): IGreet;
+    begin
+      { reallocates the SAME dyn-array field the caller stores into }
+      SetLength(H.FArr, 4);
+      Result := Mk(N)
+    end;
+    begin
+      H := THold.Create();
+      SetLength(H.FArr, 2);
+      H.FArr[0] := Mk(3);            { interface-call RHS store }
+      GC := TG.Create();
+      GC.FN := 9;
+      H.FArr[1] := GC;               { class RHS store (obj + static itab) }
+      H.FSt[0] := Mk(4);             { static-array field element store }
+      WriteLn(H.FArr[0].Hi());       { method receiver }
+      WriteLn(H.FArr[1].Hi());
+      G2 := H.FArr[0];               { assignment RHS }
+      WriteLn(G2.Hi());
+      WriteLn(H.FSt[0].Hi());
+      WriteLn(H.ProbeSelf());
+      TakeIntf(H.FArr[0]);           { interface-param arg pass, dyn }
+      TakeIntf(H.FSt[0]);            { interface-param arg pass, static }
+      WriteLn(TG(H.FArr[0]).FN);     { class downcast of the element }
+      if H.FArr[0] <> nil then       { nil compare reads the obj half }
+        WriteLn('nn');
+      H.FArr[0] := nil;
+      if H.FArr[0] = nil then
+        WriteLn('nil');
+      H.FArr[1] := MkGrow(7);        { RHS reallocs the field mid-store —
+                                       value-first ordering required }
+      WriteLn(H.FArr[1].Hi())
+    end.
+    ''', '3' + LE + '9' + LE + '3' + LE + '4' + LE + '3' + LE +
+         '3' + LE + '4' + LE + '3' + LE + 'nn' + LE + 'nil' + LE +
+         '7' + LE, 0);
 end;
 
 initialization
