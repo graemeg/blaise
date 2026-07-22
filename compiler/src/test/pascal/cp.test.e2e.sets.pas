@@ -86,6 +86,12 @@ type
       bit 31 was set; the array-element arm emitted no ext at all — invalid
       storel of a w temp; the var-param arm stored only the low 4 bytes). }
     procedure TestRun_NarrowSet_IntoWideSetDest;
+    { A set-constructor literal as a METHOD-call argument: the method-call
+      arg analysis never retyped the bracket literal against the param's set
+      type (RetypeSetLiteralArgs), so it stayed an open-array literal and
+      native codegen rejected it (QBE happened to tolerate it)
+      (BUG-20260722-native-set-literal-arg). }
+    procedure TestRun_SetLiteralArg_MethodCalls;
   end;
 
 implementation
@@ -929,6 +935,64 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'ok' + LE + 'y' + LE + 'y' + LE + 'ok' + LE +
     'y' + LE + 'ok' + LE + 'ok' + LE + 'y' + LE + 'y' + LE + 'ok' + LE, 0);
+end;
+
+procedure TE2ESetOpsTests.TestRun_SetLiteralArg_MethodCalls;
+const Src = '''
+    program P;
+    type
+      TC = (cRed, cGreen, cBlue);
+      TCs = set of TC;
+      TBox = class
+      public
+        procedure Chk(S: TCs; C: TC);
+        procedure ChkC(const S: TCs; C: TC);
+        function Card(S: TCs): Integer;
+        procedure Drv();
+        static function SCard(S: TCs): Integer;
+      end;
+    procedure TBox.Chk(S: TCs; C: TC);
+    begin
+      WriteLn(C in S)
+    end;
+    procedure TBox.ChkC(const S: TCs; C: TC);
+    begin
+      WriteLn(C in S)
+    end;
+    function TBox.Card(S: TCs): Integer;
+    var C: TC;
+    begin
+      Result := 0;
+      for C in S do Result := Result + 1
+    end;
+    procedure TBox.Drv();
+    begin
+      Chk([cRed], cRed);               { implicit-Self, stmt position }
+      WriteLn(Card([cGreen, cBlue]))   { implicit-Self, expr position }
+    end;
+    static function TBox.SCard(S: TCs): Integer;
+    var C: TC;
+    begin
+      Result := 0;
+      for C in S do Result := Result + 1
+    end;
+    var B: TBox;
+    begin
+      B := TBox.Create();
+      B.Chk([cRed, cBlue], cBlue);       { value param, stmt position }
+      B.Chk([cRed, cBlue], cGreen);
+      B.ChkC([cRed], cRed);              { const param }
+      B.Chk([], cRed);                   { empty literal }
+      WriteLn(B.Card([cRed, cGreen]));   { expr position }
+      B.Drv();
+      WriteLn(TBox.SCard([cRed, cBlue])) { static call, expr position }
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'True' + LE + 'False' + LE + 'True' + LE + 'False' + LE + '2' + LE +
+    'True' + LE + '2' + LE + '2' + LE, 0);
 end;
 
 initialization

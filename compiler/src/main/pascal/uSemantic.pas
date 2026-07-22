@@ -9637,6 +9637,8 @@ begin
         Format('Class ''%s'' has no method ''%s''', [RT.Name, ACall.Name]),
         ACall.Line, ACall.Col);
     end;
+    { Set-literal args: see BUG-20260722-native-set-literal-arg. }
+    RetypeSetLiteralArgs(ACall.Args, MDecl);
     AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
     ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
     ACall.ResolvedClassType := RT;
@@ -9671,6 +9673,8 @@ begin
         Format('''%s.%s'' is not a static method — call it on an instance',
           [RT.Name, ACall.Name]),
         ACall.Line, ACall.Col);
+    { Set-literal args: see BUG-20260722-native-set-literal-arg. }
+    RetypeSetLiteralArgs(ACall.Args, MDecl);
     AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
     ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
     EnforceMethodVisible(MDecl, ACall.Line, ACall.Col);
@@ -9732,6 +9736,10 @@ begin
         SemanticError(
           Format('Class ''%s'' has no method ''%s''', [RT.Name, ACall.Name]),
           ACall.Line, ACall.Col);
+      { Type bracket set literals against the resolved params — the args were
+        analysed unhinted for overload resolution, leaving open-array types
+        native codegen rejects (BUG-20260722-native-set-literal-arg). }
+      RetypeSetLiteralArgs(ACall.Args, MDecl);
       AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
       ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
       ACall.ResolvedClassType := RT;
@@ -9853,6 +9861,10 @@ begin
       ACall.Line, ACall.Col);
   ResolveDeferredArrowArgs(ACall.Args, MDecl);
 
+  { Type bracket set literals against the resolved params — the args were
+    analysed unhinted for overload resolution, leaving open-array types
+    native codegen rejects (BUG-20260722-native-set-literal-arg). }
+  RetypeSetLiteralArgs(ACall.Args, MDecl);
   AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
   ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
   EnforceMethodVisible(MDecl, ACall.Line, ACall.Col);
@@ -10106,8 +10118,16 @@ begin
 
   for I := 0 to ACall.Args.Count - 1 do
   begin
-    ArgType := Self.AnalyseListSlot(ACall.Args, I);
-    Par     := TMethodParam(MDecl.Params.Items[I]);
+    Par := TMethodParam(MDecl.Params.Items[I]);
+    { Bracket set literal: type against the param's set type — see the
+      method-call arms (BUG-20260722-native-set-literal-arg). }
+    if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tySet) and
+       (TASTExpr(ACall.Args.Items[I]) is TArrayLiteralExpr) then
+      ArgType := AnalyseSetLiteralExpr(
+        TArrayLiteralExpr(ACall.Args.Items[I]),
+        TSetTypeDesc(Par.ResolvedType))
+    else
+      ArgType := Self.AnalyseListSlot(ACall.Args, I);
     CheckTypesMatch(Par.ResolvedType, ArgType,
       Format('argument %d of inherited ''%s''', [I + 1, ACall.Name]),
       ACall.Line, ACall.Col);
@@ -10255,8 +10275,16 @@ begin
 
   for I := 0 to ACall.Args.Count - 1 do
   begin
-    ArgType := Self.AnalyseListSlot(ACall.Args, I);
-    Par     := TMethodParam(MDecl.Params.Items[I]);
+    Par := TMethodParam(MDecl.Params.Items[I]);
+    { Bracket set literal: type against the param's set type — see the
+      method-call arms (BUG-20260722-native-set-literal-arg). }
+    if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tySet) and
+       (TASTExpr(ACall.Args.Items[I]) is TArrayLiteralExpr) then
+      ArgType := AnalyseSetLiteralExpr(
+        TArrayLiteralExpr(ACall.Args.Items[I]),
+        TSetTypeDesc(Par.ResolvedType))
+    else
+      ArgType := Self.AnalyseListSlot(ACall.Args, I);
     CheckTypesMatch(Par.ResolvedType, ArgType,
       Format('argument %d of inherited ''%s''', [I + 1, ACall.Name]),
       ACall.Line, ACall.Col);
@@ -11419,6 +11447,8 @@ begin
           WarnIfVarArgIsForInLoopVar(TASTExpr(ACall.Args.Items[I]));
         end;
       end;
+      { Set-literal args: see BUG-20260722-native-set-literal-arg. }
+      RetypeSetLiteralArgs(ACall.Args, MDecl);
       AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
       ACall.ResolvedDecl         := MDecl;
       ACall.IsImplicitSelfMethod := True;
@@ -12060,6 +12090,8 @@ begin
           WarnIfVarArgIsForInLoopVar(TASTExpr(AExpr.Args.Items[I]));
         end;
       end;
+      { Set-literal args: see BUG-20260722-native-set-literal-arg. }
+      RetypeSetLiteralArgs(AExpr.Args, MDecl);
       AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
       AExpr.ResolvedDecl         := MDecl;
       AExpr.IsImplicitSelfMethod := True;
@@ -13166,6 +13198,8 @@ begin
         Format('''%s.%s'' is not a static method — call it on an instance',
           [ObjSym.Name, AExpr.Name]),
         AExpr.Line, AExpr.Col);
+    { Set-literal args: see BUG-20260722-native-set-literal-arg. }
+    RetypeSetLiteralArgs(AExpr.Args, MDecl);
     AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
     ValidateMethodVarArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
     EnforceMethodVisible(MDecl, AExpr.Line, AExpr.Col);
@@ -13369,6 +13403,8 @@ begin
           [RT.Name, AExpr.Name, MDecl.Params.Count, AExpr.Args.Count]),
         AExpr.Line, AExpr.Col);
     ResolveDeferredArrowArgs(AExpr.Args, MDecl);
+    { Set-literal args: see BUG-20260722-native-set-literal-arg. }
+    RetypeSetLiteralArgs(AExpr.Args, MDecl);
     for I := 0 to AExpr.Args.Count - 1 do
       CheckTypesMatch(TMethodParam(MDecl.Params.Items[I]).ResolvedType,
         TASTExpr(AExpr.Args.Items[I]).ResolvedType,
@@ -13448,8 +13484,19 @@ begin
 
   for I := 0 to AExpr.Args.Count - 1 do
   begin
-    ArgType := Self.AnalyseListSlot(AExpr.Args, I);
-    Par     := TMethodParam(MDecl.Params.Items[I]);
+    Par := TMethodParam(MDecl.Params.Items[I]);
+    { A bracket set literal has no set type of its own — type it against the
+      param's set type, exactly as the free-proc / function-call paths do
+      (RetypeSetLiteralArgs).  Analysing it unhinted leaves an open-array
+      type that fails the match here and is rejected by native codegen
+      (BUG-20260722-native-set-literal-arg). }
+    if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tySet) and
+       (TASTExpr(AExpr.Args.Items[I]) is TArrayLiteralExpr) then
+      ArgType := AnalyseSetLiteralExpr(
+        TArrayLiteralExpr(AExpr.Args.Items[I]),
+        TSetTypeDesc(Par.ResolvedType))
+    else
+      ArgType := Self.AnalyseListSlot(AExpr.Args, I);
     CheckTypesMatch(Par.ResolvedType, ArgType,
       Format('argument %d of ''%s''', [I + 1, AExpr.Name]),
       AExpr.Line, AExpr.Col);
