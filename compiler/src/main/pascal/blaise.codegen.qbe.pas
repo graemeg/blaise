@@ -7302,6 +7302,7 @@ var
   IntfDesc: TInterfaceTypeDesc;
   SlotOff: Integer;
   ObjReleaseTemp: string;
+  PropRelStr: Boolean;
 var
   CVStore: TAssignment;
 begin
@@ -7365,6 +7366,19 @@ begin
   if AAssign.PropWriteInfo <> nil then
   begin
     ValTemp := EmitExpr(AAssign.Expr);
+    { Owned-transient string value
+      (BUG-20260721-propsetter-owned-transient-str-leak): the setter borrows
+      the value, so the caller must dispose it.  An rc=0 unowned transient
+      (concat / builtin result) is pinned BEFORE the call — a by-value
+      setter param's own entry-retain/exit-release cycle would otherwise
+      free it during the call, making any post-call disposal a double-free
+      (a non-storing setter like TStringList.SetText exposes this).  The
+      matching release follows the call.  An rc=1 owned transient (function
+      result) needs only the post-call release. }
+    PropRelStr := AAssign.PropWriteInfo.TypeDesc.IsString() and
+                  ArcBuiltinStrArgOwnsRef(AAssign.Expr);
+    if PropRelStr and ArcExprIsUnownedStrTransient(AAssign.Expr) then
+      EmitLine(Format('  call $_StringAddRef(l %s)', [ValTemp]));
     if AAssign.ObjExpr <> nil then
       { Receiver is an arbitrary expression (e.g. a default-property write
         through a property/field result) — its value is the object pointer. }
@@ -7418,6 +7432,9 @@ begin
       EmitLine(Format('  call %s(l %s, %s %s)',
         [PropTgt, SelfPtr, QType, ValTemp]));
     end;
+    { Release the transient pinned (rc=0) or owned (rc=1) above. }
+    if PropRelStr then
+      EmitLine(Format('  call $_StringRelease(l %s)', [ValTemp]));
     Exit;
   end;
 
@@ -17726,6 +17743,7 @@ var
   IdxQType:   string;
   ValQType:   string;
   PropTgt:    string;
+  PropRelStr: Boolean;
 begin
   { Default array property write: Obj[I] := V lowered to a setter call.
     Semantic set PropWriteInfo; ArrayName is the receiver, IndexExpr/ValueExpr
@@ -17766,6 +17784,17 @@ begin
     IdxW     := EmitExpr(AStmt.IndexExpr);
     IdxQType := QbeTypeOf(DefProp.IndexTypeDesc);
     ElemVal  := EmitExpr(AStmt.ValueExpr);
+    { Owned-transient string value: the setter borrows it, so this caller
+      must dispose it — rc=0 shapes (concat / builtin result) pinned with an
+      AddRef BEFORE the call (a by-value setter param's entry/exit cycle
+      would otherwise free them during the call), released after; rc=1
+      owned transients (function results) get only the post-call release.
+      Mirrors the named-property arm in EmitFieldAssignment
+      (BUG-20260721-propsetter-owned-transient-str-leak). }
+    PropRelStr := DefProp.TypeDesc.IsString() and
+                  ArcBuiltinStrArgOwnsRef(AStmt.ValueExpr);
+    if PropRelStr and ArcExprIsUnownedStrTransient(AStmt.ValueExpr) then
+      EmitLine(Format('  call $_StringAddRef(l %s)', [ElemVal]));
     { QbeParamTypeOf so a record value uses the `:_ffi_<Name>` aggregate ABI
       rather than a bare `l` pointer — see the field-assign write site above
       (BUG-20260720-x86-record-indexed-prop-value). }
@@ -17774,6 +17803,9 @@ begin
       AStmt.PropAccessorVSlot, RecvTemp);
     EmitLine(Format('  call %s(l %s, %s %s, %s %s)',
       [PropTgt, RecvTemp, IdxQType, IdxW, ValQType, ElemVal]));
+    { Release the transient pinned (rc=0) or owned (rc=1) above. }
+    if PropRelStr then
+      EmitLine(Format('  call $_StringRelease(l %s)', [ElemVal]));
     Exit;
   end;
   { PChar / string subscript write: P[I] := Integer — storeb at ptr + I.

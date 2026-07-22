@@ -13620,6 +13620,7 @@ var
   AliasSz:  Integer;
   DiscBufSz: Integer;
   DiscShim: TFuncCallExpr;
+  PropRelStr: Boolean;
 begin
   { An empty statement (e.g. the body of `for x := 0 to N do;`) parses to a nil
     statement — the parser's convention for "no statement here".  It is a valid,
@@ -15521,7 +15522,30 @@ begin
     end;
     if FA.PropWriteInfo <> nil then
     begin
+      { Owned-transient string value
+        (BUG-20260721-propsetter-owned-transient-str-leak): the setter
+        borrows the value, so the caller must dispose it.  An rc=0 unowned
+        transient (concat / builtin result) is pinned BEFORE the call — a
+        by-value setter param's own entry-retain/exit-release cycle would
+        otherwise free it during the call, making any post-call disposal a
+        double-free (a non-storing setter like TStringList.SetText exposes
+        this).  The matching release follows the call; an rc=1 owned
+        transient needs only that release.  Parked in callee-saved %rbx. }
+      PropRelStr := TPropertyInfo(FA.PropWriteInfo).TypeDesc.IsString() and
+                    ArcBuiltinStrArgOwnsRef(FA.Expr);
+      if PropRelStr then
+        Self.Emit(#9'pushq %rbx');
       Self.EmitExprToEax(FA.Expr);
+      if PropRelStr then
+      begin
+        Self.Emit(#9'movq %rax, %rbx');
+        if ArcExprIsUnownedStrTransient(FA.Expr) then
+        begin
+          Self.Emit(#9'movq %rbx, %rdi');
+          Self.Emit(#9'callq _StringAddRef');
+          Self.Emit(#9'movq %rbx, %rax');
+        end;
+      end;
       Self.Emit(#9'pushq %rax');
       if FA.ObjExpr <> nil then
       begin
@@ -15557,6 +15581,13 @@ begin
         Self.Emit(#9'popq %rsi');
       Self.EmitPropAccessorCallNative(FA.PropOwnerType,
         FA.PropWriteInfo.WriteMethod, FA.PropAccessorVSlot);
+      if PropRelStr then
+      begin
+        { Release the transient pinned (rc=0) or owned (rc=1) above. }
+        Self.Emit(#9'movq %rbx, %rdi');
+        Self.Emit(#9'callq _StringRelease');
+        Self.Emit(#9'popq %rbx');
+      end;
       Exit;
     end;
     if FA.FieldInfo = nil then
@@ -16389,7 +16420,25 @@ begin
       the receiver and reload the args. }
     if SSA.PropWriteInfo <> nil then
     begin
+      { Owned-transient string value: rc=0 shapes pinned BEFORE the call,
+        released after; parked in %rbx — see the TFieldAssignment
+        property-write arm
+        (BUG-20260721-propsetter-owned-transient-str-leak). }
+      PropRelStr := TPropertyInfo(SSA.PropWriteInfo).TypeDesc.IsString() and
+                    ArcBuiltinStrArgOwnsRef(SSA.ValueExpr);
+      if PropRelStr then
+        Self.Emit(#9'pushq %rbx');
       Self.EmitExprToEax(SSA.ValueExpr);       { value }
+      if PropRelStr then
+      begin
+        Self.Emit(#9'movq %rax, %rbx');
+        if ArcExprIsUnownedStrTransient(SSA.ValueExpr) then
+        begin
+          Self.Emit(#9'movq %rbx, %rdi');
+          Self.Emit(#9'callq _StringAddRef');
+          Self.Emit(#9'movq %rbx, %rax');
+        end;
+      end;
       Self.Emit(#9'pushq %rax');
       Self.EmitExprToEax(SSA.IndexExpr);       { index }
       Self.Emit(#9'pushq %rax');
@@ -16412,6 +16461,13 @@ begin
       Self.Emit(#9'popq %rdx');                { value }
       Self.EmitPropAccessorCallNative(SSA.PropOwnerType,
         TPropertyInfo(SSA.PropWriteInfo).WriteMethod, SSA.PropAccessorVSlot);
+      if PropRelStr then
+      begin
+        { Release the transient pinned (rc=0) or owned (rc=1) above. }
+        Self.Emit(#9'movq %rbx, %rdi');
+        Self.Emit(#9'callq _StringRelease');
+        Self.Emit(#9'popq %rbx');
+      end;
       Exit;
     end;
     if (SSA.ResolvedArrayType <> nil) and

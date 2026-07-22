@@ -64,6 +64,10 @@ type
       the callee must retain it on entry and release it at exit
       (BUG-20260721-byval-dynarray-param-no-arc). }
     procedure TestFunc_DynArrayValueParam_RetainedAndReleased;
+    { A method-backed property setter borrows its value: an owned-transient
+      string value must be disposed after the setter call
+      (BUG-20260721-propsetter-owned-transient-str-leak). }
+    procedure TestMain_PropSetterConcatValue_DisposedAfterCall;
   end;
 
 implementation
@@ -365,6 +369,57 @@ begin
     Pos('_DynArrayAddRef', FnR) >= 0);
   AssertTrue('by-value dyn-array param released at exit',
     Pos('_DynArrayRelease', FnR) >= 0);
+end;
+
+procedure TNativeArcTests.TestMain_PropSetterConcatValue_DisposedAfterCall;
+var
+  Asm_, Tail: string;
+  P, E: Integer;
+begin
+  Asm_ := Self.GenAsm(
+    '''
+    program P;
+    type
+      TBox = class
+      private
+        FCur: string;
+        procedure SetCur(AValue: string);
+      public
+        property Cur: string read FCur write SetCur;
+      end;
+    procedure TBox.SetCur(AValue: string);
+    begin
+      FCur := AValue;
+    end;
+    var
+      B: TBox;
+      A1, A2: string;
+    begin
+      B := TBox.Create();
+      A1 := 'x';
+      A2 := 'y';
+      B.Cur := A1 + A2;
+    end.
+    ''');
+  { The rc=0 concat transient must be pinned (AddRef) BEFORE the setter
+    call — a by-value setter param's entry/exit cycle would otherwise free
+    it during the call — and released after it. }
+  P := Pos('main:', Asm_);
+  AssertTrue('main present', P >= 0);
+  Tail := StrCopyTail(Asm_, P);
+  E := StrPos('.type main', Tail);
+  AssertTrue('main closed', E >= 0);
+  Tail := Copy(Tail, 0, E);
+  P := Pos('_StringConcat', Tail);
+  AssertTrue('concat present in main', P >= 0);
+  Tail := StrCopyTail(Tail, P);
+  E := Pos('callq TBox_SetCur', Tail);
+  AssertTrue('setter call present in main', E >= 0);
+  AssertTrue('rc=0 pin AddRef BEFORE the setter call',
+    (Pos('_StringAddRef', Tail) >= 0) and (Pos('_StringAddRef', Tail) < E));
+  Tail := StrCopyTail(Tail, E);
+  AssertTrue('release after setter call',
+    Pos('_StringRelease', Tail) >= 0);
 end;
 
 initialization

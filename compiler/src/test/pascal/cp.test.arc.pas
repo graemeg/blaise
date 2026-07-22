@@ -160,6 +160,16 @@ type
       (BUG-20260722-discarded-sret-call-no-buffer). }
     procedure TestARC_DiscardedRecordCall_PassesSretAndReleases;
     procedure TestARC_DiscardedInterfaceCall_PassesSretAndReleases;
+    { A method-backed property setter BORROWS its value: an owned-transient
+      string value (concat / function result) must be disposed by the
+      caller after the setter call
+      (BUG-20260721-propsetter-owned-transient-str-leak). }
+    procedure TestARC_PropSetter_ConcatValue_DisposedAfterCall;
+    procedure TestARC_PropSetter_FuncResultValue_ReleasedAfterCall;
+    { Same contract through the DEFAULT array property write (Obj[I] := V),
+      which lowers through EmitStaticSubscriptAssign, not
+      EmitFieldAssignment (BUG-20260721-propsetter-owned-transient-str-leak). }
+    procedure TestARC_DefaultPropSetter_ConcatValue_DisposedAfterCall;
   end;
 
 implementation
@@ -397,6 +407,85 @@ const
         begin
           SetLength(X, 2);
           WriteLn(SumV(X));
+        end.
+        ''';
+
+  SrcPropSetterConcat =
+    '''
+        program P;
+        type
+          TBox = class
+          private
+            FCur: string;
+            procedure SetCur(AValue: string);
+          public
+            property Cur: string read FCur write SetCur;
+          end;
+        procedure TBox.SetCur(AValue: string);
+        begin
+          FCur := AValue;
+        end;
+        var
+          B: TBox;
+          A1, A2: string;
+        begin
+          B := TBox.Create();
+          A1 := 'x';
+          A2 := 'y';
+          B.Cur := A1 + A2;
+        end.
+        ''';
+
+  SrcPropSetterFuncResult =
+    '''
+        program P;
+        type
+          TBox = class
+          private
+            FCur: string;
+            procedure SetCur(AValue: string);
+          public
+            property Cur: string read FCur write SetCur;
+          end;
+        procedure TBox.SetCur(AValue: string);
+        begin
+          FCur := AValue;
+        end;
+        function MakeS(): string;
+        begin
+          Result := 'ab';
+        end;
+        var
+          B: TBox;
+        begin
+          B := TBox.Create();
+          B.Cur := MakeS();
+        end.
+        ''';
+
+  SrcDefaultPropSetterConcat =
+    '''
+        program P;
+        type
+          TBox = class
+          private
+            FItems: array[0..3] of string;
+            procedure SetItem(I: Integer; AValue: string);
+          public
+            property Items[I: Integer]: string write SetItem; default;
+          end;
+        procedure TBox.SetItem(I: Integer; AValue: string);
+        begin
+          FItems[I] := AValue;
+        end;
+        var
+          B: TBox;
+          A1, A2: string;
+        begin
+          B := TBox.Create();
+          A1 := 'x';
+          A2 := 'y';
+          B[1] := A1 + A2;
         end.
         ''';
 
@@ -1684,6 +1773,64 @@ begin
     Pos('call $Make(l %', MainIR) >= 0);
   AssertEquals('discarded result''s two elements are released',
     2, CountSubstring(MainIR, 'call $_StringRelease'));
+end;
+
+procedure TARCTests.TestARC_PropSetter_ConcatValue_DisposedAfterCall;
+var
+  IR, Head, Tail: string;
+  PCat, PCall: Integer;
+begin
+  { rc=0 concat transient: pinned (AddRef) BEFORE the setter call — a
+    by-value setter param's entry/exit cycle would otherwise free it during
+    the call — and released after it. }
+  IR := FuncRegion(GenIR(SrcPropSetterConcat), 'function w $main');
+  PCat := Pos('call $_StringConcat', IR);
+  AssertTrue('concat present', PCat >= 0);
+  PCall := Pos('call $TBox_SetCur', IR);
+  AssertTrue('setter call present', PCall >= 0);
+  Head := Copy(IR, PCat, PCall - PCat);
+  Tail := Copy(IR, PCall, Length(IR) - PCall);
+  AssertTrue('rc=0 pin AddRef BEFORE the setter call',
+    Pos('call $_StringAddRef', Head) >= 0);
+  AssertTrue('release after setter call',
+    Pos('call $_StringRelease', Tail) >= 0);
+end;
+
+procedure TARCTests.TestARC_DefaultPropSetter_ConcatValue_DisposedAfterCall;
+var
+  IR, Head, Tail: string;
+  PCat, PCall: Integer;
+begin
+  { Default array property write (Obj[I] := V) lowers through
+    EmitStaticSubscriptAssign — the rc=0 concat transient must be pinned
+    BEFORE the setter call and released after it, exactly like the
+    named-property arm. }
+  IR := FuncRegion(GenIR(SrcDefaultPropSetterConcat), 'function w $main');
+  PCat := Pos('call $_StringConcat', IR);
+  AssertTrue('concat present', PCat >= 0);
+  PCall := Pos('call $TBox_SetItem', IR);
+  AssertTrue('setter call present', PCall >= 0);
+  AssertTrue('concat before setter call', PCat < PCall);
+  Head := Copy(IR, PCat, PCall - PCat);
+  Tail := Copy(IR, PCall, Length(IR) - PCall);
+  AssertTrue('rc=0 pin AddRef BEFORE the setter call',
+    Pos('call $_StringAddRef', Head) >= 0);
+  AssertTrue('release after setter call',
+    Pos('call $_StringRelease', Tail) >= 0);
+end;
+
+procedure TARCTests.TestARC_PropSetter_FuncResultValue_ReleasedAfterCall;
+var
+  IR, Tail: string;
+  P: Integer;
+begin
+  { rc=1 owned transient (function result): one bare release after the call. }
+  IR := FuncRegion(GenIR(SrcPropSetterFuncResult), 'function w $main');
+  P := Pos('call $TBox_SetCur', IR);
+  AssertTrue('setter call present', P >= 0);
+  Tail := Copy(IR, P, Length(IR) - P);
+  AssertTrue('owned transient released after setter call',
+    Pos('call $_StringRelease', Tail) >= 0);
 end;
 
 procedure TARCTests.TestARC_DiscardedInterfaceCall_PassesSretAndReleases;

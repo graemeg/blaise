@@ -103,6 +103,16 @@ type
       caller's own reference is dropped mid-call
       (BUG-20260721-byval-dynarray-param-no-arc). }
     procedure TestRun_ByValDynArrayParam_SurvivesCallerDrop;
+    { Property-setter transient disposal must not over-release: the setter's
+      stored copy stays valid after the caller disposes its transient
+      (BUG-20260721-propsetter-owned-transient-str-leak). }
+    procedure TestRun_PropSetterTransientValue_StoredCopySurvives;
+    { A NON-storing by-value setter (the TStringList.SetText shape): the
+      callee's param entry/exit cycle frees an unpinned rc=0 transient
+      during the call — the disposal must pin BEFORE the call, or the
+      post-call release double-frees
+      (BUG-20260721-propsetter-owned-transient-str-leak). }
+    procedure TestRun_PropSetterTransient_NonStoringSetter_NoDoubleFree;
   end;
 
 implementation
@@ -992,6 +1002,107 @@ begin
   AssertTrue(CompileAndRun(Src, Output, RCode));
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('param buffer survives caller drop', '42' + LE, Output);
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EArcTests.TestRun_PropSetterTransientValue_StoredCopySurvives;
+const
+  Src = '''
+    program P;
+    type
+      TBox = class
+      private
+        FCur: string;
+        FItems: array[0..3] of string;
+        procedure SetCur(AValue: string);
+        procedure SetItem(I: Integer; AValue: string);
+      public
+        property Cur: string read FCur write SetCur;
+        property Items[I: Integer]: string write SetItem; default;
+        function Item(I: Integer): string;
+      end;
+    procedure TBox.SetCur(AValue: string);
+    begin
+      FCur := AValue
+    end;
+    procedure TBox.SetItem(I: Integer; AValue: string);
+    begin
+      FItems[I] := AValue
+    end;
+    function TBox.Item(I: Integer): string;
+    begin
+      Result := FItems[I]
+    end;
+    function MakeS(): string;
+    begin
+      Result := 'a' + 'b' + IntToStr(7)
+    end;
+    var
+      B: TBox;
+      X, Y: string;
+    begin
+      B := TBox.Create();
+      X := 'he';
+      Y := 'llo';
+      B.Cur := X + Y;          { rc=0 concat transient }
+      B.Items[1] := MakeS();   { rc=1 owned transient, indexed setter }
+      B[2] := Y + X;           { rc=0 concat, DEFAULT property (SSA arm) }
+      WriteLn(B.Cur);
+      WriteLn(B.Item(1));
+      WriteLn(B.Item(2))
+    end.
+    ''';
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue(CompileAndRun(Src, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('stored copies survive the caller-side disposal',
+    'hello' + LE + 'ab7' + LE + 'llohe' + LE, Output);
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EArcTests.TestRun_PropSetterTransient_NonStoringSetter_NoDoubleFree;
+const
+  Src = '''
+    program P;
+    type
+      TSink = class
+      private
+        FLen: Integer;
+        procedure SetText(AValue: string);
+      public
+        property Text: string write SetText;
+        function Len(): Integer;
+      end;
+    procedure TSink.SetText(AValue: string);
+    begin
+      { does NOT store AValue — only derives from it }
+      FLen := Length(AValue)
+    end;
+    function TSink.Len(): Integer;
+    begin
+      Result := FLen
+    end;
+    var
+      S: TSink;
+      A, B: string;
+    begin
+      S := TSink.Create();
+      A := 'ab';
+      B := 'cde';
+      S.Text := A + B;           { rc=0 concat into a non-storing setter }
+      WriteLn(S.Len());
+      S.Text := Copy(A + B, 0, 4);
+      WriteLn(S.Len())
+    end.
+    ''';
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue(CompileAndRun(Src, Output, RCode));
+  AssertEquals('exit 0 (no double-free abort)', 0, RCode);
+  AssertEquals('derived lengths', '5' + LE + '4' + LE, Output);
   AssertLeakFreeOnAll(Src, '');
 end;
 
