@@ -6033,13 +6033,25 @@ begin
           SemanticError(Format('Array const index type must be an enum, got ''%s''',
             [IdxTD.Name]), CD.Line, CD.Col);
         EnumDesc := TEnumTypeDesc(IdxTD);
-        Expected := EnumDesc.Members.Count;
+        { An enum-SUBRANGE index (TTurn = East..South) spans only its own
+          ordinal bounds — the descriptor copies the base enum's members, so
+          Members.Count is the FULL enum width (GH #182 follow-up).  The
+          array's bounds are the subrange ordinals, so element reads index
+          relative to SubrangeLow. }
+        if EnumDesc.IsSubrange then
+          Expected := EnumDesc.SubrangeHigh - EnumDesc.SubrangeLow + 1
+        else
+          Expected := EnumDesc.Members.Count;
         if CD.ArrayElements.Count <> Expected then
           SemanticError(Format(
             'Array const ''%s'' has %d element(s) but index type ''%s'' has %d member(s)',
             [CD.Name, CD.ArrayElements.Count, CD.ArrayIndexType, Expected]),
             CD.Line, CD.Col);
-        ArrTD := FTable.NewStaticArrayType(ElemTD, 0, Expected - 1);
+        if EnumDesc.IsSubrange then
+          ArrTD := FTable.NewStaticArrayType(ElemTD,
+            EnumDesc.SubrangeLow, EnumDesc.SubrangeHigh)
+        else
+          ArrTD := FTable.NewStaticArrayType(ElemTD, 0, Expected - 1);
       end;
     end;
     { Fold any deferred bit-op expressions into their final integer
@@ -7091,13 +7103,23 @@ begin
               SemanticError(Format('Class array const index must be an enum, got ''%s''',
                 [IdxTD.Name]), CD.Line, CD.Col);
             EnumDesc := TEnumTypeDesc(IdxTD);
-            Expected := EnumDesc.Members.Count;
+            { Enum-subrange index: span + bounds come from the subrange
+              ordinals, not the full base enum (GH #182 follow-up) — same
+              rule as the unit-level array-const arm. }
+            if EnumDesc.IsSubrange then
+              Expected := EnumDesc.SubrangeHigh - EnumDesc.SubrangeLow + 1
+            else
+              Expected := EnumDesc.Members.Count;
             if CD.ArrayElements.Count <> Expected then
               SemanticError(Format(
                 'Class array const ''%s'' has %d element(s) but index type ''%s'' has %d member(s)',
                 [CD.Name, CD.ArrayElements.Count, CD.ArrayIndexType, Expected]),
                 CD.Line, CD.Col);
-            ArrTD := FTable.NewStaticArrayType(ElemTD, 0, Expected - 1);
+            if EnumDesc.IsSubrange then
+              ArrTD := FTable.NewStaticArrayType(ElemTD,
+                EnumDesc.SubrangeLow, EnumDesc.SubrangeHigh)
+            else
+              ArrTD := FTable.NewStaticArrayType(ElemTD, 0, Expected - 1);
           end;
           Sym := TSymbol.Create(CD.Name, skConstant, ArrTD);
           Sym.IsGlobal := True;

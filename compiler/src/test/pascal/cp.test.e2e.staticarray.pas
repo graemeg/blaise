@@ -51,6 +51,10 @@ type
     { Class-level array constants }
     procedure TestRun_ClassConstArray_RangeIndexed;
     procedure TestRun_ClassConstArray_EnumIndexed;
+    { GH #182 follow-up: a class array const indexed by an enum-SUBRANGE type
+      expects the subrange's member count and indexes with the subrange's
+      ordinal bounds (twin of the unit-level TestRun_Subrange_OfEnum_ConstArray). }
+    procedure TestRun_ClassConstArray_EnumSubrangeIndexed;
 
     { Dynamic array High/Low }
     procedure TestRun_DynArray_High_ReturnsLengthMinusOne;
@@ -557,6 +561,37 @@ const
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertRunsOnAll(Src, 'Red' + Chr(10) + 'Blue' + Chr(10), 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_ClassConstArray_EnumSubrangeIndexed;
+const
+  { Distinct values pin the ordinal-bounds indexing (East = ordinal 1 maps to
+    the first element).  Reads via an enum-literal index and via a variable
+    index cover both the folded and runtime rebase paths. }
+  Src =
+    '''
+    program P;
+    type
+      TDirection = (North, East, South, West);
+      TTurn = East..South;
+      THolder = class
+      public
+        const Names: array[TTurn] of string = ('east', 'south');
+      end;
+    var
+      H: THolder;
+      T: TTurn;
+    begin
+      H := THolder.Create();
+      WriteLn(H.Names[East]);
+      T := South;
+      WriteLn(H.Names[T]);
+      H.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  AssertRunsOnAll(Src, 'east' + Chr(10) + 'south' + Chr(10), 0);
 end;
 
 procedure TE2EStaticArrayTests.TestRun_DynArray_High_ReturnsLengthMinusOne;

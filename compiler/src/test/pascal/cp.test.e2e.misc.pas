@@ -173,6 +173,10 @@ type
     procedure TestRun_Subrange_InRecordAndArray;
     procedure TestRun_Subrange_HighLow;
     procedure TestRun_Subrange_OfEnum;
+    { GH #182 (follow-up report): a CONST array indexed by an enum-subrange
+      type must expect the SUBRANGE's member count (the validator counted the
+      full base enum) and index with the subrange's ordinal bounds. }
+    procedure TestRun_Subrange_OfEnum_ConstArray;
 
     { forward; in a program decl section (issue #130 bug2): the forward decl
       used to swallow the following implementation as a nested-proc body. }
@@ -2023,6 +2027,31 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     '2 1' + LE + '1' + LE + '10 20' + LE + '2 1' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_Subrange_OfEnum_ConstArray;
+const
+  { The reporter's follow-up shape: C2 has exactly the subrange's 2 members.
+    Element reads pin the ordinal-bounds indexing (East = ordinal 1 maps to
+    the first element) alongside the full-enum control C1. }
+  Src = '''
+    program Array11;
+    type
+      TDirection = (North, East, South, West);
+    const
+      C1: array[TDirection] of Int64 = (10, 11, 12, 13);
+    type
+      TTurn = East..South;
+    const
+      C2: array[TTurn] of Int64 = (21, 22);
+    begin
+      WriteLn(C1[North], ' ', C1[West]);
+      WriteLn(C2[East], ' ', C2[South])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '10 13' + LE + '21 22' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_Ifdef_PredefinedBlaise;
