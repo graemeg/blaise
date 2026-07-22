@@ -17403,6 +17403,15 @@ begin
         if FSymTable <> nil then
           FSymTable.DefineOwningUnit := AUnit.Name;
         FUnitFiniNames.Add(AUnit.Name);
+        { An RTL (unmangled) unit's <Unit>_fini must be WEAK: whole-program-
+          per-unit RTL builds inline a dependency RTL unit's fini into every
+          importing object (rtl.platform's fini lands in both
+          rtl.platform.posix.o and rtl.platform.layout.linux.o), so a strong
+          symbol multiply-defines across archive members and an end-user link
+          fails (GH #191).  Mirrors the RTL-function weak treatment of GH #180
+          — the driver's WEAKSYM post-step turns the marker into .weak. }
+        if IsUnmangledUnit(AUnit.Name) then
+          MarkWeak(AUnit.Name + '_fini');
         EmitLine('');
         EmitLine('export function w $' + AUnit.Name + '_fini() {');
         EmitLine('@start');

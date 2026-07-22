@@ -22770,7 +22770,17 @@ begin
     FFinallyStack.Free();
     FFinallyStack := TList<TCompoundStmt>.Create();
     Self.Emit('.text');
-    Self.Emit('.globl ' + NativeMangle(AUnit.Name) + '_fini');
+    { An RTL (unmangled) unit's <Unit>_fini must be WEAK: the RTL Makefile
+      builds each RTL object whole-program-per-unit, so a dependency RTL
+      unit (e.g. rtl.platform, imported by both rtl.platform.posix and
+      rtl.platform.layout.linux) has its fini inlined into every importing
+      object.  A strong .globl then multiply-defines <Unit>_fini across
+      archive members and an end-user link fails (GH #191) — exactly the
+      RTL-function weak treatment of GH #180, which this site missed. }
+    if IsUnmangledUnit(AUnit.Name) then
+      Self.Emit('.weak ' + NativeMangle(AUnit.Name) + '_fini')
+    else
+      Self.Emit('.globl ' + NativeMangle(AUnit.Name) + '_fini');
     Self.Emit(NativeMangle(AUnit.Name) + '_fini:');
     Self.Emit(#9'pushq %rbp');
     Self.Emit(#9'movq %rsp, %rbp');
