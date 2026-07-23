@@ -107,6 +107,13 @@ type
       value used by reference (whole-record copy, field read).  arm64 leg 32
       hardened its element-read path; this guards the behaviour on QBE + native. }
     procedure TestRun_RecordElement_ReadAndCopy;
+    { Reading an element of a 2-D (or deeper) array FIELD — H.FGrid[1][1] where
+      FGrid: array[..] of array[..] of T.  The inner element type of the first
+      subscript is tyStaticArray; the field-array element-read arms did not
+      return its ADDRESS, so 8 bytes of the inner array were loaded as a
+      pointer and the outer subscript dereferenced garbage — SIGSEGV on both
+      backends (BUG-20260723-2d-field-array-elem-read). }
+    procedure TestRun_MultiDimFieldArray_ElementRead;
   end;
 
 implementation
@@ -1098,6 +1105,52 @@ begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   LE := LineEnding;
   AssertRunsOnAll(Src, '5 5 7 hi' + LE + '9 9 yo' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_MultiDimFieldArray_ElementRead;
+const Src =
+  '''
+  program P;
+  type
+    TBig = set of Byte;
+    THold = class
+    public
+      FGrid: array[0..1] of array[0..1] of Integer;
+      FDeep: array[0..1] of array[0..1] of array[0..1] of Integer;
+      FSets: array[0..1] of array[0..1] of TBig;
+    end;
+    TOuter = class
+    public
+      FH: THold;
+    end;
+  procedure Bump(var I: Integer); begin I := I + 100 end;
+  var H: THold; O: TOuter;
+  begin
+    H := THold.Create();
+    H.FGrid[0][0] := 1; H.FGrid[0][1] := 2;
+    H.FGrid[1][0] := 3; H.FGrid[1][1] := 4;
+    WriteLn(H.FGrid[0][0], ' ', H.FGrid[1][1]);        { 1 4 }
+    Bump(H.FGrid[1][1]);                               { 2-D elem by var }
+    WriteLn(H.FGrid[1][0], ' ', H.FGrid[1][1]);        { 3 104 }
+    H.FDeep[1][0][1] := 42;
+    WriteLn(H.FDeep[1][0][1]);                         { 42 (3-D) }
+    H.FSets[0][0] := [5]; H.FSets[1][1] := [200];      { 2-D jumbo }
+    if 200 in H.FSets[1][1] then WriteLn('j') else WriteLn('.');
+    if 200 in H.FSets[0][0] then WriteLn('.') else WriteLn('k');
+    { Chained-base arm (O.FH.FGrid — FldAccess.Base <> nil) is a separate
+      code path in the QBE backend and has drifted from the leaf arm before
+      (BUG-20260723-qbe-intf-nested-chain-array-elem). }
+    O := TOuter.Create();
+    O.FH := H;
+    WriteLn(O.FH.FGrid[1][0], ' ', O.FH.FGrid[1][1])   { 3 104 (chained) }
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '1 4' + LE + '3 104' + LE + '42' + LE +
+    'j' + LE + 'k' + LE + '3 104' + LE, 0);
 end;
 
 initialization

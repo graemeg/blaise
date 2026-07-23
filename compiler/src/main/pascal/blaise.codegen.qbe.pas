@@ -14544,7 +14544,7 @@ begin
             (BUG-20260723-qbe-intf-nested-chain-array-elem) and jumbo
             (BUG-20260722-jumbo-field-array-elem). }
           if (TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind in
-                [tyRecord, tyInterface]) or
+                [tyRecord, tyInterface, tyStaticArray]) or
              IsJumboFieldElem(TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType) then
           begin
             if BaseReleaseTemp <> '' then
@@ -14576,7 +14576,7 @@ begin
           EmitLine(Format('  %s =l mul %s, %d', [Ptr, T, ElemSize]));
           T := AllocTemp();
           EmitLine(Format('  %s =l add %s, %s', [T, L, Ptr]));
-          if (SAT.ElementType.Kind in [tyRecord, tyInterface]) or
+          if (SAT.ElementType.Kind in [tyRecord, tyInterface, tyStaticArray]) or
              IsJumboFieldElem(SAT.ElementType) then
           begin
             if BaseReleaseTemp <> '' then
@@ -15029,7 +15029,7 @@ begin
           jumbo-set element is an inline bitmap — its ADDRESS is the value
           (BUG-20260722-jumbo-field-array-elem). }
         if (TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind in
-              [tyRecord, tyInterface]) or
+              [tyRecord, tyInterface, tyStaticArray]) or
            IsJumboFieldElem(TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType) then
           Exit(T);
         QType := QbeTypeOf(TDynArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType);
@@ -15055,7 +15055,7 @@ begin
         EmitLine(Format('  %s =l mul %s, %d', [Ptr, T, ElemSize]));
         T := AllocTemp();
         EmitLine(Format('  %s =l add %s, %s', [T, L, Ptr]));
-        if (SAT.ElementType.Kind in [tyRecord, tyInterface]) or
+        if (SAT.ElementType.Kind in [tyRecord, tyInterface, tyStaticArray]) or
            IsJumboFieldElem(SAT.ElementType) then
           Exit(T);
         QType := QbeTypeOf(SAT.ElementType);
@@ -15077,7 +15077,7 @@ begin
         T := AllocTemp();
         EmitLine(Format('  %s =l add %s, %s', [T, Ptr, L]));
         if (TOpenArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType.Kind in
-              [tyRecord, tyInterface]) or
+              [tyRecord, tyInterface, tyStaticArray]) or
            IsJumboFieldElem(TOpenArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType) then
           Exit(T);
         QType := QbeTypeOf(TOpenArrayTypeDesc(FldAccess.FieldInfo.TypeDesc).ElementType);

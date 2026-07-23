@@ -9684,7 +9684,7 @@ begin
         load handed _SetIn a truncated garbage pointer → SIGSEGV
         (BUG-20260722-jumbo-field-array-elem). }
       if (TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind in
-            [tyRecord, tyInterface]) or
+            [tyRecord, tyInterface, tyStaticArray]) or
          IsJumboSet(TDynArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType) then
         Exit;
       Self.EmitLoadVar('(%rax)',
@@ -9698,7 +9698,7 @@ begin
       Self.Emit(#9'popq %rcx');
       Self.Emit(#9'addq %rcx, %rax');
       if (TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind in
-            [tyRecord, tyInterface]) or
+            [tyRecord, tyInterface, tyStaticArray]) or
          IsJumboSet(TStaticArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType) then
         Exit;
       Self.EmitLoadVar('(%rax)',
@@ -9715,7 +9715,7 @@ begin
       Self.Emit(#9'popq %rcx');
       Self.Emit(#9'addq %rcx, %rax');
       if (TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType.Kind in
-            [tyRecord, tyInterface]) or
+            [tyRecord, tyInterface, tyStaticArray]) or
          IsJumboSet(TOpenArrayTypeDesc(FAE.FieldInfo.TypeDesc).ElementType) then
         Exit;
       Self.EmitLoadVar('(%rax)',
