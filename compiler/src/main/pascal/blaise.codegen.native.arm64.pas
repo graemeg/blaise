@@ -4659,11 +4659,18 @@ begin
       x86-64 (:14907) and QBE (:11368); works through the slot ADDRESS so a
       var/out param (slot = caller var-address, one extra deref) is handled by
       the same path (leg 34). }
+    { Save x19 BEFORE pushing N.  It used to be saved after, so the save sat
+      on top of N and `EmitPopTo('x1')` below popped the SAVED X19 as the
+      length — a pointer-sized garbage length.  _StringSetLength then asked
+      StrAlloc for an absurd size, the allocator's mmap failed, and SetLength
+      returned nil: the macOS arm64 crash writing byte 0 of a nil buffer in
+      TStringBuilder.ToString (2026-07-23).  It looked like an allocator fault
+      but the allocator was simply handed a preposterous request. }
+    Self.Emit(#9'str x19, [sp, #-16]!');
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
     EmitPushX0();                                { [N] }
     { x19 (callee-saved) = the address that holds the string pointer — survives
       the three RTL calls below. }
-    Self.Emit(#9'str x19, [sp, #-16]!');
     EmitSlotAddr('x19', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
     if TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode <> pmNone then
       { var/out param: the slot holds the caller variable's address. }

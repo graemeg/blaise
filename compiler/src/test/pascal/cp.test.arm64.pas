@@ -123,6 +123,7 @@ type
     procedure TestSeparateCompile_DepUnitInitIsCalledFromMain;
     procedure TestReceiverCall_NestedArcArg_ReceiverNotClobbered;
     procedure TestLargeManagedArray_ElemOffsetBeyondImm12;
+    procedure TestSetLengthString_LengthArgNotClobberedByX19Save;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2539,6 +2540,52 @@ begin
   { and it must survive the real encoder }
   Obj := AssembleArm64ToBytes(AsmT);
   AssertTrue('large managed array program assembles', Length(Obj) > 0);
+end;
+
+procedure TArm64BackendTests.TestSetLengthString_LengthArgNotClobberedByX19Save;
+var
+  AsmT: string;
+  P, Q: Integer;
+  Body: string;
+begin
+  { SetLength(S, N) on a string lowers to S := _StringSetLength(S, N), with the
+    slot address anchored in callee-saved x19 across the RTL calls.  The x19
+    SAVE used to be pushed AFTER N, so it sat on top of N on the stack and the
+    pop that loaded the length argument retrieved the SAVED X19 instead — a
+    pointer-sized garbage length.  _StringSetLength then asked StrAlloc for an
+    absurd size, its mmap failed, and SetLength returned nil; the caller then
+    wrote byte 0 of a nil buffer.  That is the macOS arm64 crash in
+    TStringBuilder.ToString found on 2026-07-23, which looked like an allocator
+    fault but was a clobbered argument.
+
+    Guard the ordering: the x19 save must come BEFORE the length is pushed. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var S: string; N: Integer;
+    begin
+      N := 71;
+      S := 'x';
+      SetLength(S, N);
+      WriteLn(Length(S))
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  P := Pos(#9'bl _StringSetLength', Body);
+  AssertTrue('_StringSetLength is called', P >= 0);
+  { The x19 save must NOT sit between the length push and the pop that feeds
+    x1 — that ordering makes the pop retrieve the saved x19 as the length.
+    The bug signature is a value push IMMEDIATELY followed by the x19 save. }
+  AssertTrue('x19 save does not sit on top of the pushed length',
+    Pos(#9'str x0, [sp, #-16]!'#10#9'str x19, [sp, #-16]!', Body) < 0);
+  { and x19 must be saved before the length is pushed }
+  Q := Pos(#9'str x19, [sp, #-16]!', Body);
+  AssertTrue('x19 is saved for the SetLength sequence', Q >= 0);
+  AssertTrue('x19 is saved before the call', Q < P);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;
