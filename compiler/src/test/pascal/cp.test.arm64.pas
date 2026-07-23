@@ -125,6 +125,7 @@ type
     procedure TestLargeManagedArray_ElemOffsetBeyondImm12;
     procedure TestSetLengthString_LengthArgNotClobberedByX19Save;
     procedure TestNestedRecordFieldOfSelf_StoreAddsContainingOffset;
+    procedure TestClassFieldOfSelf_DerefsNotAdds;
     procedure TestChr_ValueAllocatesButByteStoreKeepsOrdinal;
     procedure TestVarParam_NotRetainedInPrologue;
     procedure TestInterfaces_StringArg;
@@ -2647,14 +2648,19 @@ begin
   AssertTrue('TOuter.Init is emitted', P >= 0);
   Body := Copy(AsmT, P, Length(AsmT) - P);
 
-  { the containing field's offset is included }
-  AssertTrue('FTok.Kind stores at the containing offset (20)',
-    Pos(#9'str w0, [x9, #20]', Body) >= 0);
-  AssertTrue('FTok.Line stores at the containing offset (24)',
-    Pos(#9'str w0, [x9, #24]', Body) >= 0);
-  { and nothing writes over the vtable pointer at +0 }
-  AssertTrue('no sub-field store lands on the vtable pointer',
-    Pos(#9'str w0, [x9, #0]', Body) < 0);
+  { the containing field's offset (20) is applied to the base — either folded
+    into the store offset or added to the base register first.  What must NOT
+    happen is a store at Self+0 (the vtable pointer) or Self+4 with the base
+    still pointing at Self. }
+  AssertTrue('the containing offset 20 is applied for FTok stores',
+    (Pos(#9'str w0, [x9, #20]', Body) >= 0) or
+    (Pos(#9'add x9, x9, #20', Body) >= 0));
+  { the sub-field stores must not land on Self+0 with an un-advanced base:
+    the only str at [x9, #0] permitted is one whose base was first advanced by
+    the containing offset (add x9, x9, #20 immediately before it). }
+  AssertTrue('FTok.Kind is written through the advanced base, not Self+0',
+    Pos(#9'add x9, x9, #20'#10#9'ldr x0, [sp], #16'#10#9'str w0, [x9, #0]',
+        Body) >= 0);
 
   { READ side — the same offset must be added when LOADING a nested sub-field.
     The store fix alone left reads at Self + SubField.Offset, so the tokeniser
@@ -2667,6 +2673,68 @@ begin
   Body := Copy(AsmT, P, Length(AsmT) - P);
   AssertTrue('FTok.Kind reads at the containing offset (20)',
     Pos(#9'add x0, x0, #20', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestClassFieldOfSelf_DerefsNotAdds;
+var
+  AsmT: string;
+  P: Integer;
+  Body: string;
+begin
+  { Self.FClassField.Member: when the intermediate field is a CLASS reference
+    (a pointer), its offset must be DEREFERENCED, not added.  The nested-field
+    fix (rounds 6-8) added ImplicitBaseInfo.Offset unconditionally, which is
+    right for an embedded record but treated a class field as embedded — so
+    Self.FInner.FCount read Self+off(FInner)+off(FCount) instead of
+    [Self+off(FInner)]+off(FCount).  On device that miscompiled
+    Self.FScopeStack.Count in the symbol table and crashed (macOS arm64,
+    round 12, 2026-07-23).
+
+    FInner is a class field at offset 16; FCount is at offset 8 in TInner.
+    So the read must be: ldr [Self+16] (deref FInner) then + 8. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TInner = class
+        FCount: Integer;
+      end;
+      TOuter = class
+        FSource: string;
+        FInner: TInner;
+        function ReadCount: Integer;
+        procedure SetCount;
+      end;
+    function TOuter.ReadCount: Integer;
+    begin
+      Result := FInner.FCount
+    end;
+    procedure TOuter.SetCount;
+    begin
+      FInner.FCount := 99
+    end;
+    var O: TOuter;
+    begin
+      O := TOuter.Create();
+      O.SetCount();
+      WriteLn(O.ReadCount())
+    end.
+    ''');
+  { READ: deref FInner (a class ptr at +16), then reach FCount at +8 }
+  P := Pos('TOuter_ReadCount:', AsmT);
+  AssertTrue('ReadCount is emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+  AssertTrue('the class-field intermediate is dereferenced on read',
+    Pos(#9'ldr x0, [x0, #16]', Body) >= 0);
+  AssertTrue('the class field offset is not merely ADDED on read',
+    Pos(#9'add x0, x0, #16', Body) < 0);
+
+  { STORE: deref FInner, then write FCount at +8 through the loaded pointer }
+  P := Pos('TOuter_SetCount:', AsmT);
+  AssertTrue('SetCount is emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+  AssertTrue('the class-field intermediate is dereferenced on store',
+    Pos(#9'ldr x9, [x9, #16]', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestChr_ValueAllocatesButByteStoreKeepsOrdinal;

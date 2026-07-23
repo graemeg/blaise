@@ -261,6 +261,15 @@ type
       literal's data ADDRESS.  Both fold to the ordinal directly; anything else
       evaluates normally. }
     procedure EmitByteRhsToX0(AValueExpr: TASTExpr);
+    { Advance the base pointer in AReg from Self across an implicit-Self
+      intermediate field (Self.FIntermediate.Member).  If FIntermediate is an
+      embedded RECORD, its bytes live inside the instance, so add its offset.
+      If it is a CLASS reference (a pointer), LOAD the pointer at that offset
+      and continue from the pointee.  Passing the record's kind unconditionally
+      as "add" miscompiled every Self.<classfield>.<member> access — the class
+      field was treated as embedded and its offset added instead of derefed
+      (macOS arm64, 2026-07-23). }
+    procedure EmitImplicitBaseStep(const AReg: string; ABaseInfo: TFieldInfo);
     function  AsmEscape(const AValue: string): string;
     { Box one 'array of const' element as a 16-byte TVarRec (VType byte at +0,
       VValue at +8) at [sp, #AOffset].  AOffset is sp-relative and stable
@@ -372,19 +381,22 @@ type
       AArgs: TObjectList; AObjExpr: TASTExpr);
     procedure EmitMethodCallStmt(AStmt: TMethodCallStmt);
     procedure EmitMethodCallExpr(AExpr: TMethodCallExpr);
-    { ABaseOffset is the offset of the CONTAINING field within the instance,
-      for a nested path like Self.FRec.SubField — AFld then describes only
-      SubField, whose Offset is relative to FRec, not to Self.  Omitting it
-      stored every sub-field at Self + SubField.Offset, dropping FRec's own
-      offset entirely (macOS arm64: SetSource's FToken.* writes landed on the
-      vtable pointer and FSource, 2026-07-23). }
+    { ABaseInfo describes the CONTAINING field for a nested Self path
+      (Self.FIntermediate.SubField) — AFld then describes only SubField, whose
+      Offset is relative to the intermediate.  If the intermediate is an
+      embedded RECORD its offset is added to the base; if it is a CLASS
+      reference the base pointer is LOADED (dereferenced) from that offset.
+      Omitting the step stored every sub-field at Self + SubField.Offset
+      (record case: SetSource's FToken.* landed on the vtable/FSource); adding
+      it unconditionally miscompiled a class intermediate (both 2026-07-23).
+      nil = no intermediate (a direct Self.Field). }
     procedure EmitInstanceFieldStore(AFld: TFieldInfo;
       AValueExpr: TASTExpr; const AInstSlot: string; AInstVarParam: Boolean;
-      ABaseOffset: Integer = 0);
+      ABaseInfo: TFieldInfo = nil);
     { Load the instance-pointer base for a field store into AReg — captured
       (via '_cap_') or a plain slot ('Self' / a class var).  leg 19. }
     procedure EmitInstBase(const AReg, AInstSlot: string;
-      AInstVarParam: Boolean);
+      AInstVarParam: Boolean; ABaseInfo: TFieldInfo = nil);
     procedure EmitImplicitSelfStore(AAsgn: TAssignment);
     procedure EmitInterfaceAssign(AAsgn: TAssignment);
     procedure EmitPropReadCall(AFld: TFieldAccessExpr);
@@ -888,14 +900,11 @@ begin
       lives in the ParamName slot — the '__pptr_' discriminator in
       EmitRecordBaseAddr keeps the two apart (was a double-deref). }
     EmitRecordBaseAddr('x0', AFA.RecordName, AFA.IsVarParam);
-  { Same containing-field rule as the load and store paths: for a nested
-    Self.FRec.SubField the FieldInfo offset is relative to FRec, so FRec's own
-    offset within the instance must be added first.  Kept in step with the
-    load arm deliberately — the store side was fixed first and the load side
-    then bit on device, so all three now apply it. }
-  if AFA.IsImplicitSelf and (AFA.ImplicitBaseInfo <> nil) and
-     (AFA.ImplicitBaseInfo.Offset <> 0) then
-    EmitAddSubImm('add', 'x0', 'x0', AFA.ImplicitBaseInfo.Offset);
+  { Step across the intermediate field for a nested Self.FIntermediate.SubField
+    path — add for an embedded record, deref for a class reference (kept in
+    step with the load and store paths via EmitImplicitBaseStep). }
+  if AFA.IsImplicitSelf then
+    EmitImplicitBaseStep('x0', AFA.ImplicitBaseInfo);
   if AFA.FieldInfo.Offset <> 0 then
     EmitAddSubImm('add', 'x0', 'x0', AFA.FieldInfo.Offset);
 end;
@@ -912,19 +921,21 @@ begin
     already holds the instance pointer for the forms that reach here). }
   if not EmitCapturedBase(AReg, AInstSlot, True, AInstVarParam) then
     EmitLoadSlot(AReg, AInstSlot);
+  { Nested Self.FIntermediate.SubField: fold the intermediate into the base —
+    add its offset for an embedded record, deref for a class reference. }
+  EmitImplicitBaseStep(AReg, ABaseInfo);
 end;
 
 procedure TArm64Backend.EmitInstanceFieldStore(AFld: TFieldInfo;
   AValueExpr: TASTExpr; const AInstSlot: string; AInstVarParam: Boolean;
-  ABaseOffset: Integer);
+  ABaseInfo: TFieldInfo);
 var
   I, Shape: Integer;
   Off: Integer;
 begin
-  { The effective offset from the instance pointer.  AFld.Offset is relative
-    to its CONTAINING aggregate, so a nested path (Self.FRec.SubField) must add
-    the containing field's own offset — see the declaration comment. }
-  Off := AFld.Offset + ABaseOffset;
+  { The base register already includes the intermediate (EmitInstBase applied
+    EmitImplicitBaseStep), so only the sub-field's own offset remains. }
+  Off := AFld.Offset;
   { store AValueExpr into AFld of the instance whose POINTER lives in the
     frame slot AInstSlot ('Self' or a class-typed variable).  Managed
     fields run the retain/release discipline; the instance pointer is
@@ -944,13 +955,13 @@ begin
       EmitPopTo('x0');
     end;
     EmitPushX0();
-    EmitInstBase('x9', AInstSlot, AInstVarParam);
+    EmitInstBase('x9', AInstSlot, AInstVarParam, ABaseInfo);
     Self.Emit(Format(#9'ldr x0, [x9, #%d]', [Off]));
     if AFld.TypeDesc.IsString() then
       Self.Emit(#9'bl _StringRelease')
     else
       Self.Emit(#9'bl _ClassRelease');
-    EmitInstBase('x9', AInstSlot, AInstVarParam);
+    EmitInstBase('x9', AInstSlot, AInstVarParam, ABaseInfo);
     EmitPopTo('x0');
     Self.Emit(Format(#9'str x0, [x9, #%d]', [Off]));
     Exit;
@@ -986,7 +997,7 @@ begin
         end;
       end;
       Self.Emit(#9'stp x19, x22, [sp, #-16]!');
-      EmitInstBase('x22', AInstSlot, AInstVarParam);
+      EmitInstBase('x22', AInstSlot, AInstVarParam, ABaseInfo);
       if Off <> 0 then
         EmitAddSubImm('add', 'x22', 'x22', Off);
       if not RecretManagedClean(TRecordTypeDesc(AFld.TypeDesc)) then
@@ -1005,7 +1016,7 @@ begin
       Self.Emit(#9'stp x19, x22, [sp, #-16]!');
       EmitRecAddrToX0(AValueExpr);
       Self.Emit(#9'mov x19, x0');
-      EmitInstBase('x22', AInstSlot, AInstVarParam);
+      EmitInstBase('x22', AInstSlot, AInstVarParam, ABaseInfo);
       if Off <> 0 then
         EmitAddSubImm('add', 'x22', 'x22', Off);
       Self.EmitRecordFieldRetains(TRecordTypeDesc(AFld.TypeDesc), 'x19');
@@ -1021,7 +1032,7 @@ begin
     end;
     EmitRecAddrToX0(AValueExpr);
     EmitPushX0();
-    EmitInstBase('x0', AInstSlot, AInstVarParam);
+    EmitInstBase('x0', AInstSlot, AInstVarParam, ABaseInfo);
     if Off <> 0 then
       EmitAddSubImm('add', 'x0', 'x0', Off);
     EmitPopTo('x1');
@@ -1033,7 +1044,7 @@ begin
   begin
     Self.EmitExprToD0OrConvert(AValueExpr);
     Self.Emit(#9'fcvt s0, d0');
-    EmitInstBase('x9', AInstSlot, AInstVarParam);
+    EmitInstBase('x9', AInstSlot, AInstVarParam, ABaseInfo);
     Self.Emit(Format(#9'str s0, [x9, #%d]', [Off]));
     Exit;
   end;
@@ -1048,7 +1059,7 @@ begin
   else
     NotYet('store to a field of this type', AValueExpr);
   EmitPushX0();
-  EmitInstBase('x9', AInstSlot, AInstVarParam);
+  EmitInstBase('x9', AInstSlot, AInstVarParam, ABaseInfo);
   EmitPopTo('x0');
   { width-keyed store: a 4-byte field at a 4-aligned offset would fault
     the scaled 8-byte form, and an 8-byte store would trash the neighbour }
@@ -1550,15 +1561,12 @@ begin
     NotYet('unresolved field assignment', AStmt);
   if AStmt.IsImplicitSelf then
   begin
-    { A nested path (Self.FRec.SubField := V) resolves FieldInfo to SubField,
-      whose Offset is relative to FRec — ImplicitBaseInfo carries FRec's own
-      offset within the instance and MUST be added, or every sub-field store
-      lands at Self + SubField.Offset (x86-64 adds it at every such site). }
-    if AStmt.ImplicitBaseInfo <> nil then
-      EmitInstanceFieldStore(AStmt.FieldInfo, AStmt.Expr, 'Self', False,
-        AStmt.ImplicitBaseInfo.Offset)
-    else
-      EmitInstanceFieldStore(AStmt.FieldInfo, AStmt.Expr, 'Self', False, 0);
+    { A nested path (Self.FIntermediate.SubField := V) resolves FieldInfo to
+      SubField, whose Offset is relative to the intermediate — pass
+      ImplicitBaseInfo so EmitInstBase folds it into the base (add for an
+      embedded record, deref for a class reference). }
+    EmitInstanceFieldStore(AStmt.FieldInfo, AStmt.Expr, 'Self', False,
+      AStmt.ImplicitBaseInfo);
     Exit;
   end;
   if AStmt.IsClassAccess then
@@ -1946,6 +1954,19 @@ begin
     else if C = Ord('"') then Result := Result + '\"'
     else Result := Result + Chr(C);
   end;
+end;
+
+procedure TArm64Backend.EmitImplicitBaseStep(const AReg: string;
+  ABaseInfo: TFieldInfo);
+begin
+  if ABaseInfo = nil then Exit;
+  if (ABaseInfo.TypeDesc <> nil) and (ABaseInfo.TypeDesc.Kind = tyClass) then
+    { class reference: the field holds a POINTER — load it and continue from
+      the pointee (ldr even at offset 0, so the base becomes the instance). }
+    Self.Emit(Format(#9'ldr %s, [%s, #%d]', [AReg, AReg, ABaseInfo.Offset]))
+  else if ABaseInfo.Offset <> 0 then
+    { embedded record: its bytes are inline, so just advance the base. }
+    EmitAddSubImm('add', AReg, AReg, ABaseInfo.Offset);
 end;
 
 procedure TArm64Backend.EmitByteRhsToX0(AValueExpr: TASTExpr);
@@ -3595,18 +3616,11 @@ begin
     else if not EmitCapturedBase('x0', TFieldAccessExpr(AExpr).RecordName,
                  True, TFieldAccessExpr(AExpr).IsVarParam) then
       EmitLoadSlot('x0', TFieldAccessExpr(AExpr).RecordName);
-    { LOAD-side twin of the store fix: for a nested path (Self.FRec.SubField)
-      FieldInfo describes SubField, whose Offset is relative to FRec, so FRec's
-      own offset within the instance (ImplicitBaseInfo) must be added too.
-      Omitting it read at Self + SubField.Offset — the tokeniser's
-      FToken.TextStart came back as FPos and FToken.Len as the high half of the
-      FSource pointer, so TokenText() extracted the wrong character and the
-      lexer raised a spurious "Unexpected symbol" (macOS arm64, 2026-07-23).
-      x86-64 adds it here too. }
-    if (TFieldAccessExpr(AExpr).ImplicitBaseInfo <> nil) and
-       (TFieldAccessExpr(AExpr).ImplicitBaseInfo.Offset <> 0) then
-      EmitAddSubImm('add', 'x0', 'x0',
-        TFieldAccessExpr(AExpr).ImplicitBaseInfo.Offset);
+    { Step across the intermediate field (Self.FIntermediate.Member): add its
+      offset for an embedded record, or deref it for a class reference.  A
+      record intermediate was the tokeniser's FToken.SubField (2026-07-23);
+      a class intermediate is Self.FScopeStack.Count and needs the load. }
+    EmitImplicitBaseStep('x0', TFieldAccessExpr(AExpr).ImplicitBaseInfo);
     if TFieldAccessExpr(AExpr).FieldInfo.Offset <> 0 then
       EmitAddSubImm('add', 'x0', 'x0',
         TFieldAccessExpr(AExpr).FieldInfo.Offset);
@@ -6804,9 +6818,7 @@ begin
   else if AFAE.IsImplicitSelf then
   begin
     EmitLoadSlot('x0', 'Self');
-    if (AFAE.ImplicitBaseInfo <> nil) and
-       (TFieldInfo(AFAE.ImplicitBaseInfo).Offset > 0) then
-      EmitAddSubImm('add', 'x0', 'x0', TFieldInfo(AFAE.ImplicitBaseInfo).Offset);
+    EmitImplicitBaseStep('x0', TFieldInfo(AFAE.ImplicitBaseInfo));
     if AFAE.IsClassAccess then
       Self.Emit(#9'ldr x0, [x0]');
   end
