@@ -57,6 +57,12 @@ type
       rejected by semantic (BUG-20260722-jumbo-field-array-elem). }
     procedure TestRun_JumboSet_FieldArrayElement;
     procedure TestRun_JumboSet_NestedFieldChainElement;
+    { Include/Exclude on a jumbo-set element of an array FIELD: the QBE
+      lowering took the element l-value via a subscript-blind path, mutating
+      element 0 (static) or corrupting the dyn-array data pointer
+      (BUG-20260723-qbe-incexc-field-array-elem, fixed with the var/out
+      subscript-drop by the shared field-array element-address computation). }
+    procedure TestRun_JumboSet_IncludeExcludeFieldArrayElem;
   end;
 
 implementation
@@ -428,6 +434,39 @@ begin
       if 40  in O.B.Arr[1] then WriteLn('c')  else WriteLn('.')
     end.
     ''', 'a' + LE + 'b' + LE + 'c' + LE, 0);
+end;
+
+procedure TE2EJumboSetTests.TestRun_JumboSet_IncludeExcludeFieldArrayElem;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program P;
+    type
+      TBig = set of Byte;
+      THold = class
+      public
+        FArr: array[0..1] of TBig;
+        FDyn: array of TBig;
+      end;
+    var H: THold;
+    begin
+      H := THold.Create();
+      H.FArr[0] := [5];
+      H.FArr[1] := [6];
+      Include(H.FArr[1], 200);      { must target element 1, not 0 }
+      Exclude(H.FArr[1], 6);
+      if 200 in H.FArr[1] then WriteLn('i')   else WriteLn('.');
+      if 6   in H.FArr[1] then WriteLn('.')   else WriteLn('x');
+      if 5   in H.FArr[0] then WriteLn('k')   else WriteLn('.');
+      if 200 in H.FArr[0] then WriteLn('.')   else WriteLn('c');
+      SetLength(H.FDyn, 2);
+      H.FDyn[0] := [10];
+      H.FDyn[1] := [20];
+      Include(H.FDyn[1], 250);      { dyn field: must not corrupt the data ptr }
+      if 250 in H.FDyn[1] then WriteLn('d')   else WriteLn('.');
+      if 10  in H.FDyn[0] then WriteLn('e')   else WriteLn('.')
+    end.
+    ''', 'i' + LE + 'x' + LE + 'k' + LE + 'c' + LE + 'd' + LE + 'e' + LE, 0);
 end;
 
 initialization

@@ -92,6 +92,11 @@ type
       native codegen rejected it (QBE happened to tolerate it)
       (BUG-20260722-native-set-literal-arg). }
     procedure TestRun_SetLiteralArg_MethodCalls;
+    { Include/Exclude on a SMALL-set element of an array FIELD: the QBE
+      lowering took the element l-value via a subscript-blind path and
+      mutated element 0 (BUG-20260723-qbe-incexc-field-array-elem, fixed by
+      the field-array element-address computation shared with var/out). }
+    procedure TestRun_IncludeExclude_FieldArrayElem;
   end;
 
 implementation
@@ -993,6 +998,42 @@ begin
   AssertRunsOnAll(Src,
     'True' + LE + 'False' + LE + 'True' + LE + 'False' + LE + '2' + LE +
     'True' + LE + '2' + LE + '2' + LE, 0);
+end;
+
+procedure TE2ESetOpsTests.TestRun_IncludeExclude_FieldArrayElem;
+const Src = '''
+    program P;
+    type
+      TC = (cA, cB, cC, cD, cE);
+      TCs = set of TC;
+      THold = class
+      public
+        FArr: array[0..1] of TCs;
+        FDyn: array of TCs;
+      end;
+    var H: THold;
+    begin
+      H := THold.Create();
+      H.FArr[0] := [cA];
+      H.FArr[1] := [cB];
+      Include(H.FArr[1], cD);       { must target element 1 }
+      Exclude(H.FArr[1], cB);
+      if cD in H.FArr[1] then WriteLn('i')  else WriteLn('.');
+      if cB in H.FArr[1] then WriteLn('.')  else WriteLn('x');
+      if cA in H.FArr[0] then WriteLn('k')  else WriteLn('.');
+      if cD in H.FArr[0] then WriteLn('.')  else WriteLn('c');
+      SetLength(H.FDyn, 2);
+      H.FDyn[0] := [cA];
+      H.FDyn[1] := [cB];
+      Include(H.FDyn[1], cE);
+      if cE in H.FDyn[1] then WriteLn('d')  else WriteLn('.');
+      if cA in H.FDyn[0] then WriteLn('e')  else WriteLn('.')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'i' + LE + 'x' + LE + 'k' + LE + 'c' + LE + 'd' + LE + 'e' + LE, 0);
 end;
 
 initialization

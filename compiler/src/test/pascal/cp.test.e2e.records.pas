@@ -137,6 +137,14 @@ type
       release-then-sret-write must transfer the getter result's +1 and
       release the old field contents on reassignment. }
     procedure TestRun_ManagedRecordPropGetterIntoRecordField;
+    { Passing a FIELD-array ELEMENT (R.Arr[I]) by var/out: the l-value
+      address computation dropped the subscript and yielded the field base
+      (element 0), or for a dyn-array field the data-POINTER slot, so the
+      callee mutated the wrong element / corrupted memory on both backends
+      (BUG-20260723-vararg-field-array-elem-subscript-drop).  Covers static
+      and dyn field arrays, int / string / record element types, a non-zero
+      LowBound field array, and an implicit-Self field-array element. }
+    procedure TestRun_FieldArrayElem_ByVarParam;
   end;
 
 implementation
@@ -1832,6 +1840,55 @@ begin
       WriteLn(R.S)
     end.
     ''', 'k!?' + LE + '3' + LE + 'k!?.' + LE, 0);
+end;
+
+procedure TE2ERecordsTests.TestRun_FieldArrayElem_ByVarParam;
+begin
+  AssertRunsOnAll('''
+    program P;
+    type
+      TR = record N: Integer; end;
+      THold = class
+      public
+        FInts: array[0..2] of Integer;
+        FLow: array[2..4] of Integer;
+        FDyn: array of Integer;
+        FStr: array[0..2] of string;
+        FRec: array[0..1] of TR;
+        procedure Go();
+      end;
+    procedure Bump(var I: Integer); begin I := I + 100 end;
+    procedure AppendX(var S: string); begin S := S + 'X' end;
+    procedure SetN(out R: TR); begin R.N := 99 end;
+    procedure THold.Go();
+    begin
+      FInts[0] := 1; FInts[1] := 2; FInts[2] := 3;
+      Bump(FInts[1]);                 { implicit-Self static field-array elem }
+      WriteLn(FInts[0], ' ', FInts[1], ' ', FInts[2])
+    end;
+    var H: THold;
+    begin
+      H := THold.Create();
+      H.FInts[0] := 10; H.FInts[1] := 20; H.FInts[2] := 30;
+      Bump(H.FInts[1]);               { static field-array elem }
+      WriteLn(H.FInts[0], ' ', H.FInts[1], ' ', H.FInts[2]);
+      SetLength(H.FDyn, 3);
+      H.FDyn[0] := 4; H.FDyn[1] := 5; H.FDyn[2] := 6;
+      Bump(H.FDyn[1]);                { dyn field-array elem }
+      WriteLn(H.FDyn[0], ' ', H.FDyn[1], ' ', H.FDyn[2]);
+      H.FStr[0] := 'a'; H.FStr[1] := 'b'; H.FStr[2] := 'c';
+      AppendX(H.FStr[1]);             { string (managed) field-array elem }
+      WriteLn(H.FStr[0], ' ', H.FStr[1], ' ', H.FStr[2]);
+      H.FRec[0].N := 1; H.FRec[1].N := 2;
+      SetN(H.FRec[1]);                { record field-array elem, out param }
+      WriteLn(H.FRec[0].N, ' ', H.FRec[1].N);
+      H.FLow[2] := 1; H.FLow[3] := 2; H.FLow[4] := 3;
+      Bump(H.FLow[3]);                { non-zero LowBound field-array elem }
+      WriteLn(H.FLow[2], ' ', H.FLow[3], ' ', H.FLow[4]);
+      H.Go()
+    end.
+    ''', '10 120 30' + LE + '4 105 6' + LE + 'a bX c' + LE + '1 99' + LE +
+         '1 102 3' + LE + '1 102 3' + LE, 0);
 end;
 
 initialization

@@ -921,6 +921,13 @@ type
       obj — reversed so the pop loop restores them in the correct register order). }
     procedure EmitMethodArgPush(APar: TMethodParam; AArg: TASTExpr);
     procedure EmitVarArgAddrToRax(AArg: TASTExpr);
+    { %rax holds the address of an array FIELD (static: inline storage;
+      dyn/open: the data-pointer slot).  Apply AFAE.PropIndexExpr — loading
+      the data pointer for a dyn/open array and adding (idx - LowBound) *
+      ElemSize — leaving the ELEMENT address in %rax.  The index expression
+      may clobber %rax, so the base is parked on the stack across it.  Shared
+      by the var/out l-value path (BUG-20260723-vararg-field-array-elem-subscript-drop). }
+    procedure EmitFieldArrayElemAddrToRax(AFAE: TFieldAccessExpr);
     { Pre-pass for call arguments (phase A of the call protocol).  Hoists
       three argument kinds into a stack region BELOW the argument slots,
       recording one (depth, kind) pair per argument (-1/akNone when not
@@ -10889,6 +10896,31 @@ end;
   call-emission path that passes a var param — loading the variable's
   VALUE here (the old EmitSretCall behaviour) hands the callee a garbage
   pointer. }
+procedure TX86_64Backend.EmitFieldArrayElemAddrToRax(AFAE: TFieldAccessExpr);
+var
+  ElemT: TTypeDesc;
+begin
+  { For a dyn/open array field the %rax slot holds the data POINTER — load it.
+    A static array's inline storage starts at %rax directly. }
+  if AFAE.FieldInfo.TypeDesc.Kind = tyDynArray then
+    ElemT := TDynArrayTypeDesc(AFAE.FieldInfo.TypeDesc).ElementType
+  else if AFAE.FieldInfo.TypeDesc.Kind = tyOpenArray then
+    ElemT := TOpenArrayTypeDesc(AFAE.FieldInfo.TypeDesc).ElementType
+  else
+    ElemT := TStaticArrayTypeDesc(AFAE.FieldInfo.TypeDesc).ElementType;
+  if AFAE.FieldInfo.TypeDesc.Kind in [tyDynArray, tyOpenArray] then
+    Self.Emit(#9'movq (%rax), %rax');        { data pointer }
+  Self.Emit(#9'pushq %rax');                 { park base across index eval }
+  Self.EmitExprToEax(AFAE.PropIndexExpr);
+  if (AFAE.FieldInfo.TypeDesc.Kind = tyStaticArray) and
+     (TStaticArrayTypeDesc(AFAE.FieldInfo.TypeDesc).LowBound <> 0) then
+    Self.Emit(Format(#9'subq $%d, %%rax',
+      [TStaticArrayTypeDesc(AFAE.FieldInfo.TypeDesc).LowBound]));
+  Self.Emit(Format(#9'imulq $%d, %%rax', [ElemT.RawSize()]));
+  Self.Emit(#9'popq %rcx');                  { base }
+  Self.Emit(#9'addq %rcx, %rax');            { element address }
+end;
+
 procedure TX86_64Backend.EmitVarArgAddrToRax(AArg: TASTExpr);
 var
   FAE: TFieldAccessExpr;
@@ -10959,6 +10991,14 @@ begin
     else Self.EmitVarBaseToReg(FAE.RecordName, True, '%rax');
     if FAE.FieldInfo.Offset > 0 then
       Self.Emit(Format(#9'addq $%d, %%rax', [FAE.FieldInfo.Offset]));
+    { An array-FIELD ELEMENT l-value (R.Arr[I] as a var/out actual): the
+      code above reaches the array FIELD; apply the subscript so the address
+      is the ELEMENT's.  Without this the subscript was silently dropped and
+      the l-value was the field base (element 0) — or, for a dyn-array field,
+      the data-POINTER slot (BUG-20260723-vararg-field-array-elem-subscript-drop).
+      %rax = array field address; leave the element address in %rax. }
+    if FAE.IsArrayAccess then
+      Self.EmitFieldArrayElemAddrToRax(FAE);
   end
   else if AArg is TStringSubscriptExpr then
   begin

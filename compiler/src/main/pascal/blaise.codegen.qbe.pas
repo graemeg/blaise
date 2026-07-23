@@ -584,6 +584,15 @@ type
       IsArrayAccess) — consumers that need the obj half must load it
       (BUG-20260721-fieldaccess-intf-array-elem-read). }
     function  IsIntfElemAddrExpr(AExpr: TASTExpr): Boolean;
+    { Given AFieldSlot = the address of an array FIELD (static: the inline
+      storage; dyn/open: the slot holding the data pointer), return the
+      address of element AFldAcc.PropIndexExpr — loading the data pointer for
+      a dyn/open array and applying (idx - LowBound) * ElemSize.  Shared by
+      the l-value path (var/out actuals, Include/Exclude targets) so a
+      field-array element address is computed once, not dropped
+      (BUG-20260723-vararg-field-array-elem-subscript-drop). }
+    function  EmitFieldArrayElemAddr(AFldAcc: TFieldAccessExpr;
+                                     const AFieldSlot: string): string;
     { Release every ARC-managed field of a record at AAddr in-line (no copy).
       Used before overwriting a record slot to prevent reference leaks. }
     procedure EmitRecordReleaseFields(ARec: TRecordTypeDesc; const AAddr: string);
@@ -5874,6 +5883,56 @@ begin
     Result := VarRef(AIdent.Name, AIdent.IsGlobal, IdentVarOwner(AIdent));
 end;
 
+function TCodeGenQBE.EmitFieldArrayElemAddr(AFldAcc: TFieldAccessExpr;
+  const AFieldSlot: string): string;
+var
+  ElemT:    TTypeDesc;
+  ElemSize: Integer;
+  LowBnd:   Integer;
+  BaseT:    string;
+  IdxW:     string;
+  IdxL:     string;
+  Adj:      string;
+  Offset:   string;
+  ElemPtr:  string;
+begin
+  if AFldAcc.FieldInfo.TypeDesc.Kind = tyDynArray then
+  begin
+    ElemT  := TDynArrayTypeDesc(AFldAcc.FieldInfo.TypeDesc).ElementType;
+    LowBnd := 0;
+    BaseT  := AllocTemp();
+    EmitLine(Format('  %s =l loadl %s', [BaseT, AFieldSlot]));  { data pointer }
+  end
+  else if AFldAcc.FieldInfo.TypeDesc.Kind = tyOpenArray then
+  begin
+    ElemT  := TOpenArrayTypeDesc(AFldAcc.FieldInfo.TypeDesc).ElementType;
+    LowBnd := 0;
+    BaseT  := AllocTemp();
+    EmitLine(Format('  %s =l loadl %s', [BaseT, AFieldSlot]));  { data pointer }
+  end
+  else
+  begin
+    ElemT  := TStaticArrayTypeDesc(AFldAcc.FieldInfo.TypeDesc).ElementType;
+    LowBnd := TStaticArrayTypeDesc(AFldAcc.FieldInfo.TypeDesc).LowBound;
+    BaseT  := AFieldSlot;   { inline storage starts at the field slot }
+  end;
+  ElemSize := ElemT.RawSize();
+  IdxW := EmitExpr(AFldAcc.PropIndexExpr);
+  IdxL := AllocTemp();
+  EmitLine(Format('  %s =l extsw %s', [IdxL, IdxW]));
+  if LowBnd <> 0 then
+  begin
+    Adj := AllocTemp();
+    EmitLine(Format('  %s =l sub %s, %d', [Adj, IdxL, LowBnd]));
+    IdxL := Adj;
+  end;
+  Offset := AllocTemp();
+  EmitLine(Format('  %s =l mul %s, %d', [Offset, IdxL, ElemSize]));
+  ElemPtr := AllocTemp();
+  EmitLine(Format('  %s =l add %s, %s', [ElemPtr, BaseT, Offset]));
+  Result := ElemPtr;
+end;
+
 function TCodeGenQBE.EmitLValueAddr(AExpr: TASTExpr): string;
 var
   Deref:    TDerefExpr;
@@ -5963,6 +6022,18 @@ begin
     end
     else
       Result := BaseAddr;
+    { An array-FIELD ELEMENT l-value (R.Arr[I] as a var/out actual, or the
+      target of Include/Exclude on a set element): the code above reaches the
+      array FIELD; apply the subscript so the address is the ELEMENT's.
+      Without this the subscript was silently dropped and the l-value was the
+      field base (element 0), and for a dyn-array field the data-POINTER slot
+      (BUG-20260723-vararg-field-array-elem-subscript-drop /
+      BUG-20260723-qbe-incexc-field-array-elem).  Mirrors the read/store
+      element-address computation. }
+    if FldAcc.IsArrayAccess and (FldAcc.FieldInfo <> nil) then
+    begin
+      Result := EmitFieldArrayElemAddr(FldAcc, Result);
+    end;
     Exit;
   end;
   { Array element a[i] as a var/out actual — its address is what @a[i] would
