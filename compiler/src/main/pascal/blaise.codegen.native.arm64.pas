@@ -9324,7 +9324,13 @@ begin
       Self.Emit(#9'.quad 0');
     Self.Emit(Format(#9'.quad __cn_%s', [Sym]));
     Self.Emit(#9'.quad 0');
-    Self.Emit(Format(#9'.quad %d', [RT.RawSize()]));
+    { INSTANCE size — the number of bytes ClassCreate allocates and zero-fills
+      for one object, i.e. vptr + every field (TotalSize, unpadded for a class
+      to match FPC/Delphi InstanceSize).  NOT RawSize(): for a tyClass that
+      returns 8, the width of a REFERENCE to the object, so every class was
+      allocated at 8 bytes and every field past the vptr read/wrote unmapped
+      heap.  x86-64 has always emitted TotalSize() here. }
+    Self.Emit(Format(#9'.quad %d', [RT.TotalSize()]));
     Self.Emit(Format(#9'.quad _FieldCleanup_%s', [Sym]));
     Self.Emit(Format(#9'.quad vtable_%s', [Sym]));
     Self.Emit(Format(#9'.quad %s', [AttrsRef]));

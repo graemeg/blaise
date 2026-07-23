@@ -118,6 +118,7 @@ type
     procedure TestInterface_TypeinfoSymbol_DefAndRefAgree;
     procedure TestInterface_ItabAndImpllist_AreGlobl;
     procedure TestGenericClassInstance_MethodBodyEmittedInUnit;
+    procedure TestClassTypeinfo_InstanceSizeCoversAllFields;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2254,6 +2255,55 @@ begin
   { and it is weak-bound (bare generic-instance symbol) for cross-object dedup }
   AssertTrue('the generic-instance method body is weak',
     Pos('.weak TBox_Integer_Put', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestClassTypeinfo_InstanceSizeCoversAllFields;
+var
+  AsmT: string;
+  P, Q, K: Integer;
+  SizeSlot: string;
+begin
+  { The 5th quad of a class typeinfo block is the INSTANCE size — the byte
+    count ClassCreate allocates and zero-fills for one object.  It must be
+    TotalSize (vptr + every field), NOT RawSize: for a tyClass RawSize returns
+    8, the width of a REFERENCE to the object.  Emitting RawSize made EVERY
+    class allocate 8 bytes, so any field past the vptr read and wrote unmapped
+    heap — the first constructed object with a class-typed field crashed in
+    ClassRelease on a garbage "old value" (macOS arm64 on-device SIGSEGV,
+    2026-07-23 bring-up report).
+
+    TSized below is vptr(8) + Int64(8) + Int64(8) + class ref(8) = 32. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TSized = class
+        A: Int64;
+        B: Int64;
+        C: TObject;
+      end;
+    var s: TSized;
+    begin
+      s := TSized.Create();
+      s.A := 1;
+      s.Free()
+    end.
+    ''');
+  P := Pos('typeinfo_P_TSized:', AsmT);
+  if P < 0 then
+    P := Pos('typeinfo_TSized:', AsmT);
+  AssertTrue('TSized typeinfo is emitted', P >= 0);
+  { walk to the 5th .quad after the label — the instance-size slot }
+  Q := P;
+  for K := 1 to 5 do
+    Q := PosEx(#9'.quad ', AsmT, Q + 1);
+  AssertTrue('found the instance-size slot', Q >= 0);
+  { the slot text runs to the end of that line }
+  K := PosEx(#10, AsmT, Q + 7);
+  if K < 0 then K := Length(AsmT);
+  SizeSlot := Trim(Copy(AsmT, Q + 7, K - (Q + 7)));
+  { the full 32-byte instance, never the 8-byte reference width }
+  AssertEquals('instance size covers vptr + all fields', '32', SizeSlot);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;
