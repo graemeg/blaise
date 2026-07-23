@@ -2620,6 +2620,7 @@ begin
         FPos: Integer;
         FTok: TInner;
         procedure Init;
+        function GetKind: Integer;
       end;
     procedure TOuter.Init;
     begin
@@ -2628,11 +2629,15 @@ begin
       FTok.Kind := 5;
       FTok.Line := 9;
     end;
+    function TOuter.GetKind: Integer;
+    begin
+      Result := FTok.Kind
+    end;
     var O: TOuter;
     begin
       O := TOuter.Create();
       O.Init();
-      WriteLn(O.FTok.Kind);
+      WriteLn(O.GetKind());
       O.Free()
     end.
     ''');
@@ -2648,6 +2653,18 @@ begin
   { and nothing writes over the vtable pointer at +0 }
   AssertTrue('no sub-field store lands on the vtable pointer',
     Pos(#9'str w0, [x9, #0]', Body) < 0);
+
+  { READ side — the same offset must be added when LOADING a nested sub-field.
+    The store fix alone left reads at Self + SubField.Offset, so the tokeniser
+    read FToken.TextStart as FPos and FToken.Len as half the FSource pointer,
+    and the lexer raised a spurious "Unexpected symbol" on valid source
+    (macOS arm64 round 7, 2026-07-23).  Guard both directions together so they
+    cannot drift apart again. }
+  P := Pos('TOuter_GetKind:', AsmT);
+  AssertTrue('TOuter.GetKind is emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+  AssertTrue('FTok.Kind reads at the containing offset (20)',
+    Pos(#9'add x0, x0, #20', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;

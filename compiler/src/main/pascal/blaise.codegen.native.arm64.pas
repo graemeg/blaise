@@ -3532,9 +3532,21 @@ begin
     else if not EmitCapturedBase('x0', TFieldAccessExpr(AExpr).RecordName,
                  True, TFieldAccessExpr(AExpr).IsVarParam) then
       EmitLoadSlot('x0', TFieldAccessExpr(AExpr).RecordName);
+    { LOAD-side twin of the store fix: for a nested path (Self.FRec.SubField)
+      FieldInfo describes SubField, whose Offset is relative to FRec, so FRec's
+      own offset within the instance (ImplicitBaseInfo) must be added too.
+      Omitting it read at Self + SubField.Offset — the tokeniser's
+      FToken.TextStart came back as FPos and FToken.Len as the high half of the
+      FSource pointer, so TokenText() extracted the wrong character and the
+      lexer raised a spurious "Unexpected symbol" (macOS arm64, 2026-07-23).
+      x86-64 adds it here too. }
+    if (TFieldAccessExpr(AExpr).ImplicitBaseInfo <> nil) and
+       (TFieldAccessExpr(AExpr).ImplicitBaseInfo.Offset <> 0) then
+      EmitAddSubImm('add', 'x0', 'x0',
+        TFieldAccessExpr(AExpr).ImplicitBaseInfo.Offset);
     if TFieldAccessExpr(AExpr).FieldInfo.Offset <> 0 then
-      Self.Emit(Format(#9'add x0, x0, #%d',
-        [TFieldAccessExpr(AExpr).FieldInfo.Offset]));
+      EmitAddSubImm('add', 'x0', 'x0',
+        TFieldAccessExpr(AExpr).FieldInfo.Offset);
     EmitElemLoad(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc);
     Exit;
   end;
