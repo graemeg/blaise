@@ -362,8 +362,15 @@ type
       AArgs: TObjectList; AObjExpr: TASTExpr);
     procedure EmitMethodCallStmt(AStmt: TMethodCallStmt);
     procedure EmitMethodCallExpr(AExpr: TMethodCallExpr);
+    { ABaseOffset is the offset of the CONTAINING field within the instance,
+      for a nested path like Self.FRec.SubField — AFld then describes only
+      SubField, whose Offset is relative to FRec, not to Self.  Omitting it
+      stored every sub-field at Self + SubField.Offset, dropping FRec's own
+      offset entirely (macOS arm64: SetSource's FToken.* writes landed on the
+      vtable pointer and FSource, 2026-07-23). }
     procedure EmitInstanceFieldStore(AFld: TFieldInfo;
-      AValueExpr: TASTExpr; const AInstSlot: string; AInstVarParam: Boolean);
+      AValueExpr: TASTExpr; const AInstSlot: string; AInstVarParam: Boolean;
+      ABaseOffset: Integer = 0);
     { Load the instance-pointer base for a field store into AReg — captured
       (via '_cap_') or a plain slot ('Self' / a class var).  leg 19. }
     procedure EmitInstBase(const AReg, AInstSlot: string;
@@ -890,10 +897,16 @@ begin
 end;
 
 procedure TArm64Backend.EmitInstanceFieldStore(AFld: TFieldInfo;
-  AValueExpr: TASTExpr; const AInstSlot: string; AInstVarParam: Boolean);
+  AValueExpr: TASTExpr; const AInstSlot: string; AInstVarParam: Boolean;
+  ABaseOffset: Integer);
 var
   I, Shape: Integer;
+  Off: Integer;
 begin
+  { The effective offset from the instance pointer.  AFld.Offset is relative
+    to its CONTAINING aggregate, so a nested path (Self.FRec.SubField) must add
+    the containing field's own offset — see the declaration comment. }
+  Off := AFld.Offset + ABaseOffset;
   { store AValueExpr into AFld of the instance whose POINTER lives in the
     frame slot AInstSlot ('Self' or a class-typed variable).  Managed
     fields run the retain/release discipline; the instance pointer is
@@ -914,14 +927,14 @@ begin
     end;
     EmitPushX0();
     EmitInstBase('x9', AInstSlot, AInstVarParam);
-    Self.Emit(Format(#9'ldr x0, [x9, #%d]', [AFld.Offset]));
+    Self.Emit(Format(#9'ldr x0, [x9, #%d]', [Off]));
     if AFld.TypeDesc.IsString() then
       Self.Emit(#9'bl _StringRelease')
     else
       Self.Emit(#9'bl _ClassRelease');
     EmitInstBase('x9', AInstSlot, AInstVarParam);
     EmitPopTo('x0');
-    Self.Emit(Format(#9'str x0, [x9, #%d]', [AFld.Offset]));
+    Self.Emit(Format(#9'str x0, [x9, #%d]', [Off]));
     Exit;
   end;
   if AFld.TypeDesc.Kind = tyRecord then
@@ -956,8 +969,8 @@ begin
       end;
       Self.Emit(#9'stp x19, x22, [sp, #-16]!');
       EmitInstBase('x22', AInstSlot, AInstVarParam);
-      if AFld.Offset <> 0 then
-        EmitAddSubImm('add', 'x22', 'x22', AFld.Offset);
+      if Off <> 0 then
+        EmitAddSubImm('add', 'x22', 'x22', Off);
       if not RecretManagedClean(TRecordTypeDesc(AFld.TypeDesc)) then
         Self.EmitRecordFieldReleases(TRecordTypeDesc(AFld.TypeDesc), 'x22');
       Self.Emit(#9'mov x0, x22');
@@ -975,8 +988,8 @@ begin
       EmitRecAddrToX0(AValueExpr);
       Self.Emit(#9'mov x19, x0');
       EmitInstBase('x22', AInstSlot, AInstVarParam);
-      if AFld.Offset <> 0 then
-        EmitAddSubImm('add', 'x22', 'x22', AFld.Offset);
+      if Off <> 0 then
+        EmitAddSubImm('add', 'x22', 'x22', Off);
       Self.EmitRecordFieldRetains(TRecordTypeDesc(AFld.TypeDesc), 'x19');
       { copy site: no-zero release keeps a self-copy exact
         (BUG-20260720-managed-record-self-assign) }
@@ -991,8 +1004,8 @@ begin
     EmitRecAddrToX0(AValueExpr);
     EmitPushX0();
     EmitInstBase('x0', AInstSlot, AInstVarParam);
-    if AFld.Offset <> 0 then
-      EmitAddSubImm('add', 'x0', 'x0', AFld.Offset);
+    if Off <> 0 then
+      EmitAddSubImm('add', 'x0', 'x0', Off);
     EmitPopTo('x1');
     EmitIntLiteral('x2', AFld.TypeDesc.RawSize());
     Self.Emit(#9'bl memcpy');
@@ -1003,7 +1016,7 @@ begin
     Self.EmitExprToD0OrConvert(AValueExpr);
     Self.Emit(#9'fcvt s0, d0');
     EmitInstBase('x9', AInstSlot, AInstVarParam);
-    Self.Emit(Format(#9'str s0, [x9, #%d]', [AFld.Offset]));
+    Self.Emit(Format(#9'str s0, [x9, #%d]', [Off]));
     Exit;
   end;
   if AFld.TypeDesc.Kind = tyDouble then
@@ -1022,11 +1035,11 @@ begin
   { width-keyed store: a 4-byte field at a 4-aligned offset would fault
     the scaled 8-byte form, and an 8-byte store would trash the neighbour }
   case AFld.TypeDesc.RawSize() of
-    1: Self.Emit(Format(#9'strb w0, [x9, #%d]', [AFld.Offset]));
-    2: Self.Emit(Format(#9'strh w0, [x9, #%d]', [AFld.Offset]));
-    4: Self.Emit(Format(#9'str w0, [x9, #%d]', [AFld.Offset]));
+    1: Self.Emit(Format(#9'strb w0, [x9, #%d]', [Off]));
+    2: Self.Emit(Format(#9'strh w0, [x9, #%d]', [Off]));
+    4: Self.Emit(Format(#9'str w0, [x9, #%d]', [Off]));
   else
-    Self.Emit(Format(#9'str x0, [x9, #%d]', [AFld.Offset]));
+    Self.Emit(Format(#9'str x0, [x9, #%d]', [Off]));
   end;
 end;
 
@@ -1519,7 +1532,15 @@ begin
     NotYet('unresolved field assignment', AStmt);
   if AStmt.IsImplicitSelf then
   begin
-    EmitInstanceFieldStore(AStmt.FieldInfo, AStmt.Expr, 'Self', False);
+    { A nested path (Self.FRec.SubField := V) resolves FieldInfo to SubField,
+      whose Offset is relative to FRec — ImplicitBaseInfo carries FRec's own
+      offset within the instance and MUST be added, or every sub-field store
+      lands at Self + SubField.Offset (x86-64 adds it at every such site). }
+    if AStmt.ImplicitBaseInfo <> nil then
+      EmitInstanceFieldStore(AStmt.FieldInfo, AStmt.Expr, 'Self', False,
+        AStmt.ImplicitBaseInfo.Offset)
+    else
+      EmitInstanceFieldStore(AStmt.FieldInfo, AStmt.Expr, 'Self', False, 0);
     Exit;
   end;
   if AStmt.IsClassAccess then

@@ -124,6 +124,7 @@ type
     procedure TestReceiverCall_NestedArcArg_ReceiverNotClobbered;
     procedure TestLargeManagedArray_ElemOffsetBeyondImm12;
     procedure TestSetLengthString_LengthArgNotClobberedByX19Save;
+    procedure TestNestedRecordFieldOfSelf_StoreAddsContainingOffset;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2586,6 +2587,67 @@ begin
   Q := Pos(#9'str x19, [sp, #-16]!', Body);
   AssertTrue('x19 is saved for the SetLength sequence', Q >= 0);
   AssertTrue('x19 is saved before the call', Q < P);
+end;
+
+procedure TArm64BackendTests.TestNestedRecordFieldOfSelf_StoreAddsContainingOffset;
+var
+  AsmT: string;
+  P: Integer;
+  Body: string;
+begin
+  { `Self.FRec.SubField := V` resolves FieldInfo to SubField, whose Offset is
+    relative to FRec — not to Self.  The store must ALSO add FRec's own offset
+    within the instance (carried on ImplicitBaseInfo), which the arm64 field
+    store omitted: every sub-field landed at Self + SubField.Offset.
+
+    In the tokeniser that meant FToken.Kind overwrote the VTABLE POINTER at
+    Self+0 and FToken.Column overwrote FSource at Self+8 with the integer 1,
+    so the very next NextToken() dereferenced 1 as a string pointer — the
+    macOS arm64 crash of 2026-07-23.
+
+    Layout below: FSource@8, FPos@16, FTok@20 (Kind@0, Line@4 within FTok),
+    so the two sub-field stores must be at 20 and 24. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TInner = record
+        Kind: Integer;
+        Line: Integer;
+      end;
+      TOuter = class
+        FSource: string;
+        FPos: Integer;
+        FTok: TInner;
+        procedure Init;
+      end;
+    procedure TOuter.Init;
+    begin
+      FSource := 'hello';
+      FPos := 7;
+      FTok.Kind := 5;
+      FTok.Line := 9;
+    end;
+    var O: TOuter;
+    begin
+      O := TOuter.Create();
+      O.Init();
+      WriteLn(O.FTok.Kind);
+      O.Free()
+    end.
+    ''');
+  P := Pos('TOuter_Init:', AsmT);
+  AssertTrue('TOuter.Init is emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  { the containing field's offset is included }
+  AssertTrue('FTok.Kind stores at the containing offset (20)',
+    Pos(#9'str w0, [x9, #20]', Body) >= 0);
+  AssertTrue('FTok.Line stores at the containing offset (24)',
+    Pos(#9'str w0, [x9, #24]', Body) >= 0);
+  { and nothing writes over the vtable pointer at +0 }
+  AssertTrue('no sub-field store lands on the vtable pointer',
+    Pos(#9'str w0, [x9, #0]', Body) < 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;
