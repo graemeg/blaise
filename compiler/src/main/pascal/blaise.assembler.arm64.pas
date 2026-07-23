@@ -510,6 +510,30 @@ begin
   Result := W or (ARm shl 16) or (ARn shl 5) or ARd;
 end;
 
+{ add/sub EXTENDED register.  The only add/sub register form in which
+  register 31 means SP rather than XZR, so it is mandatory whenever the
+  destination or first source operand is sp.  Encoding: base $0B200000 (bit
+  30 set for sub), option in bits 15..13 and imm3 (shift amount) in 12..10 —
+  UXTX (option 3, imm3 0) is the plain 64-bit "no extension" case.
+
+  Using the shifted-register encoder here instead assembles `sub sp, sp, x16`
+  as `sub xzr, xzr, x16`: the result is discarded and sp never moves.  That
+  silently broke the prologue of every function whose frame exceeds 4095
+  bytes (the only ones that reserve via a register rather than an immediate),
+  leaving their locals below sp to be overwritten by the next callee's
+  prologue push — the macOS arm64 failure of 2026-07-23. }
+function EncAddSubExtReg(AIs64: Boolean; ASub, ASetFlags: Boolean;
+  ARd, ARn, ARm: Integer): Integer;
+var
+  W: Integer;
+begin
+  W := (SfBit(AIs64) shl 31) or ($0B200000);
+  if ASub then W := W or (1 shl 30);
+  if ASetFlags then W := W or (1 shl 29);
+  { option = UXTX (3), imm3 = 0 }
+  Result := W or (ARm shl 16) or (3 shl 13) or (ARn shl 5) or ARd;
+end;
+
 { logical shifted register: and=00, orr=01, eor=10, ands=11 (opc<<29). }
 function EncLogicReg(AIs64: Boolean; AOpc: Integer;
   ARd, ARn, ARm: Integer): Integer;
@@ -1031,6 +1055,12 @@ procedure TArm64Assembler.EncodeInstr;
       if FA[2].Kind = okImm then
         EmitW(EncAddSubImm(FA[0].Is64, StrAt(FL.Mnemonic, 0) = Ord('s'),
           Length(FL.Mnemonic) = 4, FA[0].Reg, FA[1].Reg, FA[2].Imm))
+      else if FA[0].IsSP or FA[1].IsSP then
+        { sp with a register operand: ONLY the extended-register form treats
+          register 31 as sp — the shifted form would make it xzr and the
+          instruction a no-op.  Same IsSP rule the `mov` case above applies. }
+        EmitW(EncAddSubExtReg(FA[0].Is64, StrAt(FL.Mnemonic, 0) = Ord('s'),
+          Length(FL.Mnemonic) = 4, FA[0].Reg, FA[1].Reg, FA[2].Reg))
       else
         EmitW(EncAddSubReg(FA[0].Is64, StrAt(FL.Mnemonic, 0) = Ord('s'),
           Length(FL.Mnemonic) = 4, FA[0].Reg, FA[1].Reg, FA[2].Reg));

@@ -28,6 +28,7 @@ type
     procedure AssertWord(const AAsm: string; AExpected: Integer);
   published
     procedure TestNopRet;
+    procedure TestAddSubSpRegisterUsesExtendedForm;
     procedure TestPrologueEpilogue_StpLdp;
     procedure TestAddSubImm;
     procedure TestAddSubCmpReg;
@@ -77,6 +78,29 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64AsmTests.TestAddSubSpRegisterUsesExtendedForm;
+begin
+  { add/sub with a REGISTER third operand has two forms.  The shifted-register
+    form (base $0B000000) decodes register 31 as XZR; only the EXTENDED form
+    (base $0B200000, option UXTX) decodes it as SP.
+
+    The assembler used the shifted form unconditionally, so the prologue's
+    `sub sp, sp, x16` — the way a frame LARGER than the 4095-byte immediate
+    limit is reserved — assembled as `sub xzr, xzr, x16`: a no-op.  Every
+    function with a frame over 4095 bytes therefore never reserved its stack,
+    leaving its locals below sp to be overwritten by the next callee's
+    prologue push (macOS arm64, 2026-07-23).  Small frames use the immediate
+    form, which encodes 31 as sp correctly, which is why only large-frame
+    functions were affected.
+
+    0xCB3063FF = sub sp, sp, x16, uxtx #0   (correct)
+    0xCB1003FF = sub xzr, xzr, x16          (the no-op it used to emit) }
+  AssertWord('sub sp, sp, x16', Integer($CB3063FF));
+  AssertWord('add sp, sp, x16', Integer($8B3063FF));
+  { a non-sp register operand keeps the shifted form }
+  AssertWord('sub x0, x1, x2', Integer($CB020020));
 end;
 
 procedure TArm64AsmTests.TestNopRet;
