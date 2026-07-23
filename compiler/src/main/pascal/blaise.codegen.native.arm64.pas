@@ -418,6 +418,19 @@ type
   public
     constructor Create(const ATarget: TTargetDesc); override;
     destructor Destroy; override;
+    { Separate compilation: a dependency unit's body — and its <Unit>_init /
+      <Unit>_final — live in the dep's OWN object, so EmitUnit never runs for
+      it here and never fills FUnitInits/FUnitFinals.  These record the names
+      anyway so _main still calls them.  Without the overrides arm64 inherited
+      TNativeBackend's no-op and an incrementally built program called NO unit
+      initialization at all: every initialization-populated global stayed empty
+      (e.g. GDrivers, leaving 'no driver registered for backend kind') — the
+      macOS arm64 on-device failure of 2026-07-23.  The whole-program path was
+      unaffected, which is why --emit-asm looked correct. }
+    procedure NoteDepInitUnit(const AUnitName: string;
+      AHasInit: Boolean); override;
+    procedure NoteDepFiniUnit(const AUnitName: string;
+      AHasFini: Boolean); override;
   end;
 
 implementation
@@ -10579,6 +10592,38 @@ procedure TArm64Backend.EmitUnitInit(AUnit: TUnit);
 begin
   EmitUnitSection(AUnit, AUnit.InitStmts,
     CodegenMangle(AUnit.Name) + '_init', FUnitInits);
+end;
+
+procedure TArm64Backend.NoteDepInitUnit(const AUnitName: string;
+  AHasInit: Boolean);
+begin
+  { Separate compilation: the dep's <Unit>_init lives in the dep's own object,
+    so EmitUnit never ran here to register it.  Record the mangled name so
+    EmitProgram's _main still calls it — the mangling must match EmitUnitInit's
+    CodegenMangle(AUnit.Name) + '_init' exactly. }
+  if AHasInit then
+    FUnitInits.Add(CodegenMangle(AUnitName) + '_init');
+end;
+
+procedure TArm64Backend.NoteDepFiniUnit(const AUnitName: string;
+  AHasFini: Boolean);
+begin
+  { Teardown twin: _main calls the finals in reverse registration order.
+
+    DELIBERATELY NOT WIRED UP YET.  AHasFini comes from the shared
+    UnitNeedsFini predicate, which is True for a unit with a finalization
+    section OR with managed (ARC) module globals.  arm64's EmitUnit currently
+    emits <Unit>_final ONLY for a real finalization section — it has no
+    managed-global release walk (x86-64 emits one inside its <Unit>_fini).
+    Registering the name here regardless would make _main call a symbol the
+    arm64 backend never defines, and the link fails on exactly the units whose
+    only teardown need is managed globals.
+
+    The missing managed-global teardown is a pre-existing arm64 LEAK, tracked
+    separately (BUG-20260723-arm64-unit-managed-global-teardown) — not a
+    correctness regression, and out of scope for the init-call fix above.
+    When that walk lands, register the name here on the same predicate
+    EmitUnit uses so the two cannot drift. }
 end;
 
 procedure TArm64Backend.EmitUnitSection(AUnit: TUnit; AStmts: TObjectList;

@@ -120,6 +120,7 @@ type
     procedure TestGenericClassInstance_MethodBodyEmittedInUnit;
     procedure TestClassTypeinfo_InstanceSizeCoversAllFields;
     procedure TestSmallRecordParam_FieldReadUsesInlineSlot;
+    procedure TestSeparateCompile_DepUnitInitIsCalledFromMain;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2362,6 +2363,65 @@ begin
     shape: a slot LOAD feeding the field read is the bug. }
   AssertTrue('by-value record param field read does not deref the slot value',
     Pos(#9'ldur x9, [x29, #-8]'#10#9'mov x0, x9'#10#9'ldrsw x0, [x0]', Body) < 0);
+end;
+
+procedure TArm64BackendTests.TestSeparateCompile_DepUnitInitIsCalledFromMain;
+var
+  L:    TLexer;
+  P:    TParser;
+  Prog: TProgram;
+  A:    TSemanticAnalyser;
+  CG:   TArm64Backend;
+  T:    TTargetDesc;
+  AsmT: string;
+begin
+  { SEPARATE COMPILATION: a dependency unit's body — and its <Unit>_init — are
+    compiled into the dep's OWN object, so EmitUnit never runs for it in the
+    program's translation unit and never registers the init symbol.  The driver
+    instead announces each such dep via NoteDepInitUnit, and _main must still
+    call it.
+
+    arm64 had no NoteDepInitUnit override, so it silently inherited
+    TNativeBackend's no-op: an incrementally built arm64 program called NO unit
+    initialization at all.  Every initialization-populated global stayed empty —
+    including GDrivers, so the compiler aborted with "no driver registered for
+    backend kind" before doing anything (macOS arm64 on-device, 2026-07-23).
+    The whole-program path was fine, which is why --emit-asm never showed it. }
+  L := TLexer.Create('program P; begin end.');
+  P := TParser.Create(L);
+  try
+    Prog := P.Parse();
+  finally
+    P.Free();
+    L.Free();
+  end;
+  try
+    A := TSemanticAnalyser.Create();
+    try
+      A.Analyse(Prog);
+      MakeTarget(osMacOS, cpuArm64, T);
+      CG := TArm64Backend.Create(T);
+      try
+        CG.SetSymbolTable(Prog.SymbolTable);
+        { exactly what the incremental driver does for a cached/prebuilt dep }
+        CG.NoteDepInitUnit('some.dep.unit', True);
+        CG.NoteDepInitUnit('quiet.unit', False);   { no init section }
+        AsmT := CG.GenerateProgram(Prog);
+      finally
+        CG.Free();
+      end;
+    finally
+      A.Free();
+    end;
+  finally
+    Prog.Free();
+  end;
+  { the dep WITH an initialization section is called from _main ... }
+  AssertTrue('separately-compiled dep unit init is called from _main',
+    Pos(#9'bl some.dep.unit_init', AsmT) >= 0);
+  { ... and one without an initialization section is not }
+  AssertTrue('a dep with no initialization section is not called',
+    Pos('quiet.unit_init', AsmT) < 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;
