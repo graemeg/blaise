@@ -84,6 +84,10 @@ type
       packed, so the native direct-ident path's 32-bit RMW carried into the
       neighbouring global (BUG-20260723-incdec-narrow-global-rmw). }
     procedure TestRun_IncDec_NarrowGlobal;
+    { Inc/Dec on a PROMOTED narrow LOCAL — QBE kept the local as a bare w SSA
+      temp and never masked, so Inc of a Byte 255 read back 256 instead of 0
+      (BUG-20260723-incdec-promoted-narrow-local). }
+    procedure TestRun_IncDec_PromotedNarrowLocal;
   end;
 
 implementation
@@ -605,6 +609,49 @@ const
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertRunsOnAll(Src, '1 0 2' + LE + '10 1 20' + LE + '-2' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_IncDec_PromotedNarrowLocal;
+const
+  Src = '''
+    program Prg;
+    procedure P;
+    var
+      LB: Byte;
+      LW: Word;
+      LS: SmallInt;
+      LI: Integer;
+      L6: Int64;
+    begin
+      LB := 255; Inc(LB);        { wraps to 0 }
+      WriteLn(LB);
+      LB := 200; Inc(LB, 100);   { 300 mod 256 = 44 }
+      WriteLn(LB);
+      LB := 0; Dec(LB);          { underflows to 255 }
+      WriteLn(LB);
+      LW := 65535; Inc(LW);      { wraps to 0 }
+      WriteLn(LW);
+      LS := 32767; Inc(LS);      { overflow to -32768 }
+      WriteLn(LS);
+      LS := -32768; Dec(LS);     { underflow to 32767 }
+      WriteLn(LS);
+      LI := 2147483647; Inc(LI); { regression: Integer must NOT be narrowed }
+      WriteLn(LI);
+      L6 := 4294967295; Inc(L6); { regression: Int64 takes the wide arm }
+      WriteLn(L6)
+    end;
+    begin
+      P()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  { The locals are promotable (no address taken, no try), so QBE keeps them in
+    SSA temps — the Inc result must still be truncated to the type's range.
+    The Integer/Int64 cases guard the other direction: TruncateNarrowW must
+    leave non-narrow types untouched. }
+  AssertRunsOnAll(Src, '0' + LE + '44' + LE + '255' + LE + '0' + LE +
+    '-32768' + LE + '32767' + LE + '-2147483648' + LE + '4294967296' + LE, 0);
 end;
 
 initialization

@@ -646,6 +646,10 @@ type
       garbage in those bits — `if Foo() <> 0 then` mis-fires silently. }
     function  MaybeNormalizeExtReturn(const ASrcTemp: string;
       AMDecl: TMethodDecl): string;
+    { Truncate a w temp to a sub-word type's range (extub/extuh/extsh); returns
+      the truncated temp, or ASrcTemp unchanged for non-narrow types. }
+    function  TruncateNarrowW(const ASrcTemp: string;
+      AType: TTypeDesc): string;
     { Returns the QBE primitive letter ('b','h','w','l','s','d') for a
       scalar record-field type, or '' for non-scalar fields (nested
       records, static arrays, etc.).  An '' result tells the type-decl
@@ -1471,6 +1475,40 @@ begin
         NewT := AllocTemp();
         EmitLine(Format('  %s =w shl %s, 16', [NewT, ASrcTemp]));
         EmitLine(Format('  %s =w sar %s, 16', [NewT, NewT]));
+        Result := NewT;
+      end;
+  end;
+end;
+
+function TCodeGenQBE.TruncateNarrowW(const ASrcTemp: string;
+  AType: TTypeDesc): string;
+var NewT: string;
+begin
+  { Truncate a 32-bit (w) result to a sub-word type's value range, mirroring
+    the narrow-store masking the assignment path uses (extub/extsh/extuh).
+    Needed when a w value is kept in an SSA temp (a promoted narrow local) and
+    never round-trips through a width-aware memory reload — without this an
+    Inc of a promoted Byte 255 reads back 256
+    (BUG-20260723-incdec-promoted-narrow-local). }
+  Result := ASrcTemp;
+  if AType = nil then Exit;
+  case AType.Kind of
+    tyByte, tyBoolean:
+      begin
+        NewT := AllocTemp();
+        EmitLine(Format('  %s =w extub %s', [NewT, ASrcTemp]));
+        Result := NewT;
+      end;
+    tyWord:
+      begin
+        NewT := AllocTemp();
+        EmitLine(Format('  %s =w extuh %s', [NewT, ASrcTemp]));
+        Result := NewT;
+      end;
+    tySmallInt:
+      begin
+        NewT := AllocTemp();
+        EmitLine(Format('  %s =w extsh %s', [NewT, ASrcTemp]));
         Result := NewT;
       end;
   end;
@@ -11621,6 +11659,13 @@ begin
           EmitLine(Format('  %s =w add %s, %s', [ArgLine, ArgTemp2, SizeTemp]))
         else
           EmitLine(Format('  %s =w sub %s, %s', [ArgLine, ArgTemp2, SizeTemp]));
+        { A promoted narrow local stays a bare w SSA temp and never reloads
+          through a width-aware memory read, so the add's 9th/17th bit would
+          survive into the next use (Inc of a promoted Byte 255 read back 256).
+          Truncate to the type's range, mirroring the assignment store path
+          (BUG-20260723-incdec-promoted-narrow-local). }
+        ArgLine := TruncateNarrowW(ArgLine,
+          TASTExpr(ACall.Args.Items[0]).ResolvedType);
         EmitLine(Format('  %%_var_%s =w copy %s', [ArgTemp, ArgLine]));
       end;
     end
