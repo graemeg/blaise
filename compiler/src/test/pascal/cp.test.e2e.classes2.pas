@@ -188,6 +188,13 @@ type
       IsClassAccess handling (wrote beside the receiver's pointer slot) and the
       IsArrayAccess subscript (BUG-20260723-native-incdec-field-receiver). }
     procedure TestRun_IncDec_FieldReceiver;
+    { In-place l-value ops AND reads on an implicit-Self CLASS-typed field
+      (FInner.Count, FInner.Dyn[0]) inside a method.  QBE's EmitLValueAddr and
+      field-read arms tested IsClassAccess/whole-field before IsImplicitSelf,
+      so it either emitted a load of a nonexistent %_var_<field> (l-value) or
+      dropped the array subscript and returned the data pointer (read)
+      (BUG-20260723-qbe-lvalue-implicitself-classfield). }
+    procedure TestRun_ImplicitSelf_ClassField_LValueAndRead;
   end;
 
 implementation
@@ -2557,6 +2564,53 @@ begin
     and RI[0] must be UNTOUCHED, the [1] elements incremented, and FCount must
     reach 45 without corrupting the receiver's own slot. }
   AssertRunsOnAll(Src, '45 7 41 107' + LE + '3 41 205' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_ImplicitSelf_ClassField_LValueAndRead;
+const
+  Src = '''
+    program P;
+    type
+      TInner = class
+      public
+        Count: Integer;
+        S: string;
+        Arr: array[0..2] of Integer;
+        Dyn: array of Integer;
+      end;
+      TOuter = class
+      public
+        FInner: TInner;
+        procedure Go;
+      end;
+    procedure AddOne(var X: Integer);
+    begin X := X + 1 end;
+    procedure TOuter.Go;
+    begin
+      FInner := TInner.Create();
+      FInner.Count := 10;
+      Inc(FInner.Count);            { implicit-Self class field as Inc l-value }
+      AddOne(FInner.Count);         { same shape as a var argument }
+      FInner.S := 'hi';
+      FInner.Arr[1] := 42;
+      SetLength(FInner.Dyn, 2);     { SetLength on implicit-Self class field }
+      FInner.Dyn[0] := 7;
+      FInner.Dyn[1] := 9;
+      WriteLn(FInner.Count, ' ', FInner.S[1], ' ', FInner.Arr[1]);
+      WriteLn(FInner.Dyn[0], ' ', FInner.Dyn[1])
+    end;
+    var O: TOuter;
+    begin
+      O := TOuter.Create();
+      O.Go()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { Count=12 (Inc+AddOne), S[1]='i'=105, Arr[1]=42, Dyn[0]=7 Dyn[1]=9.
+    Both the l-value side (Inc/AddOne/SetLength) and the read side (subscripted
+    Dyn/Arr, char S[1]) must be correct on both backends. }
+  AssertRunsOnAll(Src, '12 105 42' + LE + '7 9' + LE, 0);
 end;
 
 initialization

@@ -5964,25 +5964,15 @@ begin
       Exit('$' + FldAcc.ClassVarEmitName);
     if FldAcc.Base <> nil then
       BaseAddr := EmitInstancePtr(FldAcc.Base)
-    else if FldAcc.IsClassAccess then
-    begin
-      { Class field leaf: the variable's slot holds a pointer to the heap
-        object — load it so the offset addition reaches the field, not a
-        location adjacent to the slot itself.  A var-param class slot holds
-        the ADDRESS of the caller's variable: load twice. }
-      T := AllocTemp();
-      EmitLine(Format('  %s =l loadl %s',
-        [T, VarRef(FldAcc.RecordName, FldAcc.IsGlobal)]));
-      if FldAcc.IsVarParam then
-      begin
-        BaseAddr := AllocTemp();
-        EmitLine(Format('  %s =l loadl %s', [BaseAddr, T]));
-      end
-      else
-        BaseAddr := T;
-    end
     else if FldAcc.IsImplicitSelf then
     begin
+      { Implicit-Self base MUST be tested before IsClassAccess: a bare
+        FInner.Count inside a method where FInner is a class-typed field of
+        Self has BOTH flags set.  Routing it through the IsClassAccess arm
+        below loads %_var_<FieldName> — but the field is not a variable, so
+        qbe rejects the IR.  The internal IsClassAccess deref here is the
+        correct handling for a class-typed implicit-Self field
+        (BUG-20260723-qbe-lvalue-implicitself-classfield). }
       T := AllocTemp();
       EmitLine(Format('  %s =l loadl %%_var_Self', [T]));
       if (FldAcc.ImplicitBaseInfo <> nil) and (FldAcc.ImplicitBaseInfo.Offset > 0) then
@@ -5999,6 +5989,23 @@ begin
         EmitLine(Format('  %s =l loadl %s', [T, BaseAddr]));
         BaseAddr := T;
       end;
+    end
+    else if FldAcc.IsClassAccess then
+    begin
+      { Class field leaf: the variable's slot holds a pointer to the heap
+        object — load it so the offset addition reaches the field, not a
+        location adjacent to the slot itself.  A var-param class slot holds
+        the ADDRESS of the caller's variable: load twice. }
+      T := AllocTemp();
+      EmitLine(Format('  %s =l loadl %s',
+        [T, VarRef(FldAcc.RecordName, FldAcc.IsGlobal)]));
+      if FldAcc.IsVarParam then
+      begin
+        BaseAddr := AllocTemp();
+        EmitLine(Format('  %s =l loadl %s', [BaseAddr, T]));
+      end
+      else
+        BaseAddr := T;
     end
     else if FldAcc.IsVarParam then
     begin
@@ -14645,7 +14652,14 @@ begin
            TRecordTypeDesc(FldAccess.ResolvedClassType).Name, MDecl.Name)]));
       Exit(T);
     end;
-    if FldAccess.IsImplicitSelf then
+    { NOTE: a subscripted implicit-Self field (FArr[I] / FStr[I], IsArrayAccess
+      or IsCharAccess) must fall through to the dedicated array/char arms below,
+      which apply the subscript.  This arm handles only the WHOLE-field implicit
+      Self read; without the exclusion it returned the field's data pointer and
+      dropped the subscript (BUG-20260723-qbe-lvalue-implicitself-classfield —
+      the read-side counterpart to the l-value arm reorder). }
+    if FldAccess.IsImplicitSelf and
+       not FldAccess.IsArrayAccess and not FldAccess.IsCharAccess then
     begin
       { Implicit Self.Base.Field — Base is a field of Self }
       L := AllocTemp();
