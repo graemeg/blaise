@@ -201,17 +201,31 @@ end;
 procedure TLexer.SeedPredefines;
 begin
   Self.DefineSymbol('BLAISE');
+  { CPU seed must track the host this binary was BUILT for, exactly like the
+    OS seed below — a macOS build is arm64, everything else we target is
+    x86-64.  Hardcoding CPUX86_64 made a macos-arm64-built compiler seed
+    itself as x86-64 (2026-07-23 on-device bring-up). }
+{$IFDEF DARWIN}
+  Self.DefineSymbol('CPUARM64');
+  Self.DefineSymbol('CPUAARCH64');  { FPC's alias for the same CPU }
+{$ELSE}
   Self.DefineSymbol('CPUX86_64');
   Self.DefineSymbol('CPUAMD64');   { FPC's alias for the same target }
+{$ENDIF}
 {$IFDEF FREEBSD}
   Self.DefineSymbol('FREEBSD');
   Self.DefineSymbol('UNIX');
 {$ELSE}
+  {$IFDEF DARWIN}
+  Self.DefineSymbol('DARWIN');
+  Self.DefineSymbol('UNIX');
+  {$ELSE}
   {$IFDEF WINDOWS}
   Self.DefineSymbol('WINDOWS');
   {$ELSE}
   Self.DefineSymbol('LINUX');
   Self.DefineSymbol('UNIX');
+  {$ENDIF}
   {$ENDIF}
 {$ENDIF}
 end;

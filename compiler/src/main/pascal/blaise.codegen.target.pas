@@ -122,10 +122,19 @@ begin
 {$IFDEF FREEBSD}
   MakeTarget(osFreeBSD, cpuX86_64, Result);
 {$ELSE}
+  {$IFDEF DARWIN}
+  { macOS is arm64 for our purposes: the only Darwin target the backend
+    supports is macos-arm64.  Without this branch a macOS-built compiler fell
+    through to the Linux default and misreported its own host as
+    linux-x86_64 — so it defaulted to emitting ELF/x86-64 when run with no
+    --target (found during the 2026-07-23 on-device bring-up). }
+  MakeTarget(osMacOS, cpuArm64, Result);
+  {$ELSE}
   {$IFDEF WINDOWS}
   MakeTarget(osWindows, cpuX86_64, Result);
   {$ELSE}
   MakeTarget(osLinux, cpuX86_64, Result);
+  {$ENDIF}
   {$ENDIF}
 {$ENDIF}
 end;
