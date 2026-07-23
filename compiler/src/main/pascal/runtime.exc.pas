@@ -13,15 +13,19 @@
   platform-specific assembly stub (blaise_setjmp_x86_64.s for x86_64)
   so the exception subsystem has zero C dependencies.
 
-  Exception frame layout (BlaiseExcFrame):
-    offset  0: jmp_buf  (64 bytes on x86_64 — 8 callee-saved registers)
-    offset 64: exception  (Pointer — live exception object, nil on normal path)
-    offset 72: prev       (Pointer — previous frame in thread-local chain)
+  Exception frame layout (BlaiseExcFrame): a jmp_buf followed by two
+  pointers.  The two pointers MUST sit past the end of the jmp_buf, whose
+  size is CPU-dependent — see OFS_EXCEPTION / OFS_PREV below:
 
-  Frame size contract: the compiler allocates 512 bytes via QBE alloc16 for
-  each try block.  This must be >= 80 bytes (64 jmp_buf + 2 pointers) on
-  all supported targets.  The generous allocation leaves room for future
-  ARM64 jmp_buf growth without a compiler change.
+    x86_64  jmp_buf = 64 bytes  (rbx/rbp/r12..r15, rsp@48, retaddr@56)
+            offset  64: exception, offset  72: prev
+    aarch64 jmp_buf = 168 bytes (x19..x28@0..72, x29@80, x30@88, sp@96,
+                                 d8..d15@104..160)
+            offset 168: exception, offset 176: prev
+
+  Frame size contract: the compiler allocates 512 bytes for each try block.
+  That must exceed the largest jmp_buf plus the two pointers — 184 bytes on
+  aarch64 — which it comfortably does.
 
   Thread safety: g_exc_top and g_current_exception are declared as
   threadvar, giving each thread its own exception chain.
@@ -58,8 +62,23 @@ procedure _CheckNil(Obj: Pointer);
 implementation
 
 const
+  { These MUST clear the end of the target's jmp_buf (runtime.setjmp).  They
+    were sized for the 64-byte x86-64 buffer and never revisited when the
+    aarch64 body landed with a 168-byte one, so on arm64 offsets 64/72 fell
+    inside it — precisely on the `stp x27, x28, [x0, #64]` that setjmp
+    executes.  _PushExcFrame wrote the prev link and setjmp then overwrote it
+    with x28 one instruction later, so the exception chain was corrupt after
+    the first completed try block; the next raise longjmp'd through a stale
+    frame and restored a foreign x29/x30/sp, which surfaced on device as a
+    frame pointer that changed mid-function inside a routine that never
+    writes x29 (macOS arm64, 2026-07-23). }
+{$IFDEF CPUARM64}
+  OFS_EXCEPTION = 168;
+  OFS_PREV      = 176;
+{$ELSE}
   OFS_EXCEPTION = 64;
-  OFS_PREV = 72;
+  OFS_PREV      = 72;
+{$ENDIF}
 
 type
   PPointer = ^Pointer;

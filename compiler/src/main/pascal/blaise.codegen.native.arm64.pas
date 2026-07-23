@@ -9132,6 +9132,13 @@ begin
     end;
     Self.EmitRecordFieldReleases(RT, 'x19');
     Self.Emit(#9'ldr x19, [sp], #16');
+    { Re-anchor sp from the frame pointer before restoring the pair, like
+      every other epilogue the backend emits.  The pushes here are balanced
+      today, so this is not a live bug — but it was the one epilogue shape
+      that would load GARBAGE INTO x29 if the release walk above ever left sp
+      displaced, and a corrupted x29 is exactly the failure that cost a
+      round to find (2026-07-23).  Cheap insurance. }
+    Self.Emit(#9'mov sp, x29');
     Self.Emit(#9'ldp x29, x30, [sp], #16');
     Self.Emit(#9'ret');
   end;
