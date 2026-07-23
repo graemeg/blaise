@@ -6689,6 +6689,24 @@ begin
     Self.Emit(#9'popq %rdx');
     Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep);
   end
+  else if Arg0 is TStringSubscriptExpr then
+  begin
+    { Inc/Dec on a plain array-variable ELEMENT (A[i]): EmitLValueSlotAddr's
+      TStringSubscriptExpr arm computes the element address into %rdx via a
+      transient TAddrOfExpr.  Without this branch the subscript fell through
+      to the raise while QBE (which routes Inc/Dec through EmitLValueAddr)
+      accepted it (BUG-20260723-native-incdec-plain-array-elem). }
+    Self.EmitLValueSlotAddr(Arg0);
+    Self.Emit(#9'pushq %rdx');
+    if HasStep then
+    begin
+      Self.EmitExprToEax(TASTExpr(ACall.Args.Items[1]));
+      if IsWide then Self.Emit(#9'movq %rax, %rcx')
+      else           Self.Emit(#9'movl %eax, %ecx');
+    end;
+    Self.Emit(#9'popq %rdx');
+    Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep);
+  end
   else
     raise ENativeCodeGenError.Create(
       'native backend: Inc/Dec on unsupported expression form');

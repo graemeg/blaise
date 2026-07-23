@@ -69,6 +69,11 @@ type
       the [I] subscript and resized the wrong slot -> SIGSEGV; QBE already routed
       through the subscript-aware EmitLValueAddr (BUG-20260723-native-setlength-field-array-elem). }
     procedure TestRun_SetLengthOnArrayFieldElem;
+    { Inc/Dec on a plain array-VARIABLE element (A[I], D[I]) — the native
+      EmitIncDec dispatch had no TStringSubscriptExpr branch and rejected it
+      with "unsupported expression form" while QBE accepted it
+      (BUG-20260723-native-incdec-plain-array-elem). }
+    procedure TestRun_IncDec_PlainArrayElem;
   end;
 
 implementation
@@ -516,6 +521,29 @@ begin
     the field base). }
   AssertRunsOnAll(Src, '2 3' + LE + '11 22' + LE + '3 5' + LE +
     '0 4 33' + LE + 'True' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_IncDec_PlainArrayElem;
+const
+  Src = '''
+    program P;
+    var
+      A: array[0..3] of Integer;
+      D: array of Integer;
+    begin
+      A[0] := 5; A[1] := 40;
+      Inc(A[1], 2);
+      SetLength(D, 3);
+      D[0] := 8; D[1] := 100;
+      Inc(D[1]);
+      Dec(D[1], 3);
+      WriteLn(A[0], ' ', A[1], ' ', D[0], ' ', D[1])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  { A[0]/D[0] must stay untouched; only the [1] elements change. }
+  AssertRunsOnAll(Src, '5 42 8 98' + LE, 0);
 end;
 
 initialization
