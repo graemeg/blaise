@@ -878,6 +878,14 @@ begin
       lives in the ParamName slot — the '__pptr_' discriminator in
       EmitRecordBaseAddr keeps the two apart (was a double-deref). }
     EmitRecordBaseAddr('x0', AFA.RecordName, AFA.IsVarParam);
+  { Same containing-field rule as the load and store paths: for a nested
+    Self.FRec.SubField the FieldInfo offset is relative to FRec, so FRec's own
+    offset within the instance must be added first.  Kept in step with the
+    load arm deliberately — the store side was fixed first and the load side
+    then bit on device, so all three now apply it. }
+  if AFA.IsImplicitSelf and (AFA.ImplicitBaseInfo <> nil) and
+     (AFA.ImplicitBaseInfo.Offset <> 0) then
+    EmitAddSubImm('add', 'x0', 'x0', AFA.ImplicitBaseInfo.Offset);
   if AFA.FieldInfo.Offset <> 0 then
     EmitAddSubImm('add', 'x0', 'x0', AFA.FieldInfo.Offset);
 end;
