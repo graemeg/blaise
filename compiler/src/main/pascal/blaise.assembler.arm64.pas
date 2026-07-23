@@ -474,13 +474,27 @@ function EncAddSubImm(AIs64: Boolean; ASub, ASetFlags: Boolean;
   ARd, ARn: Integer; AImm: Int64): Integer;
 var
   W: Integer;
+  Shifted: Boolean;
 begin
+  { AArch64 add/sub (immediate) carries a 12-bit immediate plus an `sh` bit
+    (bit 22): sh=0 means imm12, sh=1 means imm12 << 12.  Only supporting the
+    unshifted form capped every add/sub at 4095, so a routine whose frame
+    exceeded 4095 bytes failed to assemble outright ("add/sub immediate out of
+    range: 4096") — hit by any function with a large local array (2026-07-23).
+    Use the shifted form for a larger value that is a multiple of 4096. }
+  Shifted := False;
+  if (AImm > 4095) and ((AImm and $FFF) = 0) and (AImm <= 4095 * 4096) then
+  begin
+    Shifted := True;
+    AImm := AImm shr 12;
+  end;
   if (AImm < 0) or (AImm > 4095) then
-    raise EArm64Assembler.Create('add/sub immediate out of range [0..4095]: '
-      + IntToStr(AImm));
+    raise EArm64Assembler.Create('add/sub immediate out of range [0..4095]'
+      + ' (or a multiple of 4096 up to 16773120): ' + IntToStr(AImm));
   W := (SfBit(AIs64) shl 31) or ($11000000);
   if ASub then W := W or (1 shl 30);
   if ASetFlags then W := W or (1 shl 29);
+  if Shifted then W := W or (1 shl 22);
   Result := W or (Integer(AImm) shl 10) or (ARn shl 5) or ARd;
 end;
 

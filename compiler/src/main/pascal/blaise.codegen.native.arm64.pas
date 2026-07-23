@@ -10878,8 +10878,13 @@ end;
 
 procedure TArm64Backend.ArcArrayElemAddr(AByteOffset: Integer);
 begin
+  { The element offset is unbounded — an array of 6000 managed elements walks
+    past 48000 bytes — but an add-immediate encodes only 12 bits.  Go through
+    EmitAddSubImm, which materialises anything over 4095 via x16, instead of
+    emitting a raw `add #imm` that the assembler then rejects outright
+    ("add/sub immediate out of range: 4096", 2026-07-23). }
   if AByteOffset > 0 then
-    Self.Emit(Format(#9'add x20, x21, #%d', [AByteOffset]))
+    EmitAddSubImm('add', 'x20', 'x21', AByteOffset)
   else
     Self.Emit(#9'mov x20, x21');
 end;

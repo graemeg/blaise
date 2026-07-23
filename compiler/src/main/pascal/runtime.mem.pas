@@ -119,7 +119,9 @@ procedure _libc_memcpy(Dst, Src: Pointer; N: Int64); external name 'memcpy';
   is out of scope; concurrent-allocator-design.adoc §Scope). }
 function _pthread_key_create(Key: Pointer; Dtor: Pointer): Integer;
   external name 'pthread_key_create';
-function _pthread_setspecific(Key: Integer; Value: Pointer): Integer;
+{ Key is pthread_key_t — 64-bit on Darwin.  Declaring the parameter Integer
+  truncated it (harmless while keys are small, but wrong by type). }
+function _pthread_setspecific(Key: Int64; Value: Pointer): Integer;
   external name 'pthread_setspecific';
 function _libc_cxa_atexit(Fn, Arg, DsoHandle: Pointer): Integer;
   external name '__cxa_atexit';
@@ -255,8 +257,14 @@ var
   GArenaRegistry: PArena;      { all live arenas, linked via RemoteList }
   GAbandonedCount: Int64;      { registered arenas with OwnerTid = 0 }
   GHooksReady: Integer;        { pthread key + atexit registered once }
-  GExitKey: Integer;           { pthread_key_t of the exit destructor }
-  GExitKeyValue: Integer;      { its per-thread value: any non-nil ptr }
+  { pthread_key_t of the exit destructor.  MUST be 64-bit: pthread_key_create
+    writes a full pthread_key_t through this pointer, and on Darwin (arm64 and
+    x86-64 alike) that type is 64 bits.  Declaring it Integer made the call
+    write 4 bytes past the variable, silently clobbering GExitKeyValue — a real
+    out-of-bounds global write (found auditing the 2026-07-23 macOS arm64
+    allocator failure). }
+  GExitKey: Int64;
+  GExitKeyValue: Int64;        { its per-thread value: any non-nil ptr }
 
 { Registry spinlock — CAS built on the allocator's own atomic leaves,
   deliberately NOT a pthread_mutex, so runtime.mem stays free of libc

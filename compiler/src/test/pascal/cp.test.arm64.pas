@@ -122,6 +122,7 @@ type
     procedure TestSmallRecordParam_FieldReadUsesInlineSlot;
     procedure TestSeparateCompile_DepUnitInitIsCalledFromMain;
     procedure TestReceiverCall_NestedArcArg_ReceiverNotClobbered;
+    procedure TestLargeManagedArray_ElemOffsetBeyondImm12;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2484,6 +2485,60 @@ begin
     Pos(#9'ldr x9, [sp], #16'#10#9'sub sp, sp, #', Body) >= 0);
   AssertTrue('receiver is re-pushed after the reservation',
     Pos(#9'str x9, [sp, #-16]!', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestLargeManagedArray_ElemOffsetBeyondImm12;
+var
+  AsmT, Obj: string;
+  I, Bad: Integer;
+  Line, ImmS: string;
+  L: TStringList;
+  P: Integer;
+begin
+  { An ARC walk over a large array of managed elements derives each element as
+    base + byteOffset.  That offset is unbounded (600 strings = 4800 bytes),
+    but an AArch64 add-immediate encodes only 12 bits, so the walk emitted
+    `add x20, x21, #4096` and the internal assembler rejected the whole
+    program with "add/sub immediate out of range: 4096".  Any routine with a
+    large managed local array failed to build at all (2026-07-23).
+
+    Two guards: no raw add/sub immediate above 4095 may be emitted, and the
+    program must actually assemble. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var
+      A: array[0..599] of string;
+      I: Integer;
+    begin
+      for I := 0 to 599 do
+        A[I] := 'x';
+      WriteLn(A[0])
+    end.
+    ''');
+  { no emitted add/sub may carry an immediate the encoder cannot represent }
+  Bad := -1;
+  L := TStringList.Create();
+  try
+    L.Text := AsmT;
+    for I := 0 to L.Count - 1 do
+    begin
+      Line := L.Strings[I];
+      if (Pos(#9'add ', Line) < 0) and (Pos(#9'sub ', Line) < 0) then Continue;
+      P := Pos(', #', Line);
+      if P < 0 then Continue;
+      ImmS := Trim(Copy(Line, P + 3, Length(Line) - (P + 3)));
+      if (ImmS = '') or (StrToIntDef(ImmS, 0) <= 4095) then Continue;
+      Bad := I;
+      Break;
+    end;
+  finally
+    L.Free();
+  end;
+  AssertEquals('no add/sub immediate above 4095 is emitted', -1, Bad);
+  { and it must survive the real encoder }
+  Obj := AssembleArm64ToBytes(AsmT);
+  AssertTrue('large managed array program assembles', Length(Obj) > 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;
