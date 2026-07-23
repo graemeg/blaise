@@ -47,6 +47,12 @@ type
     procedure TestRun_StringConcat_TwoStrings;
     procedure TestRun_StringConcat_WithInt;
     procedure TestRun_StringDelete_Modifies;
+    { Delete() on a non-local string receiver — class field, field-array
+      element, implicit-Self field, var-param.  The native store-back was
+      guarded by a bare `is TIdentExpr`, so every field receiver dropped the
+      result: the field was left unchanged and the new string leaked
+      (BUG-20260723-native-delete-string-field-noop). }
+    procedure TestRun_StringDelete_FieldReceivers;
     procedure TestRun_StringSetLength_Truncates;
     { Relational order operators on strings (< > <= >=): QBE used to abort
       (selcmp k != Kw) and native silently compared pointers; both now route
@@ -614,6 +620,46 @@ begin
   AssertTrue('compile+run', CompileAndRun(SrcStringDelete, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
   AssertEquals('Hello', 'Hello' + LE, Output);
+end;
+
+procedure TE2EStringOpsTests.TestRun_StringDelete_FieldReceivers;
+const Src =
+  '''
+  program P;
+  type
+    TBox = class
+    public
+      FS: string;
+      FStrs: array[0..1] of string;
+      procedure TrimTwo;
+    end;
+  procedure TBox.TrimTwo;
+  begin
+    Delete(FS, 0, 2);        { implicit-Self field }
+  end;
+  procedure DelVar(var S: string);
+  begin
+    Delete(S, 0, 1);         { var-param }
+  end;
+  var
+    B: TBox;
+    V: string;
+  begin
+    B := TBox.Create();
+    B.FS := 'hello';
+    Delete(B.FS, 0, 2);      { class field: 'llo' }
+    B.FStrs[0] := 'world';
+    B.FStrs[1] := 'abcdef';
+    Delete(B.FStrs[1], 0, 3);{ field-array element: 'def' }
+    B.TrimTwo();             { implicit-Self on B.FS: 'o' }
+    V := 'xyz';
+    DelVar(V);               { var-param: 'yz' }
+    WriteLn(B.FS, ' ', B.FStrs[0], ' ', B.FStrs[1], ' ', V)
+  end.
+  ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'o world def yz' + LE, 0);
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringSetLength_Truncates;

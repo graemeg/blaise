@@ -15104,8 +15104,17 @@ begin
       Self.Emit(#9'movl %eax, %esi');
       Self.Emit(#9'popq %rdi');
       Self.Emit(#9'callq _StringDelete');
-      { Assign result back: addref new, release old, store. }
-      if TASTExpr(PC.Args.Items[0]) is TIdentExpr then
+      { Assign result back: addref new, release old, store.  Mirrors the string
+        SetLength store-back: the bare local/global ident arm writes the named
+        slot directly; every other receiver (class field, implicit-Self field,
+        var-param, field-array element) stores through the slot address from
+        EmitLValueSlotAddr.  Before, the store-back was guarded by a bare
+        `is TIdentExpr`, so a field receiver dropped the result on the floor —
+        no store, and the old field value and the _StringDelete result both
+        leaked (BUG-20260723-native-delete-string-field-noop). }
+      if (TASTExpr(PC.Args.Items[0]) is TIdentExpr) and
+         not TIdentExpr(TASTExpr(PC.Args.Items[0])).IsImplicitSelf and
+         (TIdentExpr(TASTExpr(PC.Args.Items[0])).ParamMode = pmNone) then
       begin
         Self.Emit(#9'pushq %rax');
         Self.Emit(#9'movq %rax, %rdi');
@@ -15124,6 +15133,22 @@ begin
         else
           Self.Emit(Format(#9'movq %%rax, %s(%%rip)',
             [Self.GlobalSymName(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]));
+      end
+      else
+      begin
+        { Field / element / implicit-Self / var-param receiver: new string is
+          in %rax — retain it, release the old slot value, store through the
+          slot address. }
+        Self.Emit(#9'pushq %rax');
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _StringAddRef');
+        Self.EmitLValueSlotAddr(TASTExpr(PC.Args.Items[0]));
+        Self.Emit(#9'pushq %rdx');
+        Self.Emit(#9'movq (%rdx), %rdi');
+        Self.Emit(#9'callq _StringRelease');
+        Self.Emit(#9'popq %rdx');
+        Self.Emit(#9'popq %rax');
+        Self.Emit(#9'movq %rax, (%rdx)');
       end;
       Exit;
     end;
