@@ -6657,36 +6657,15 @@ begin
   else if Arg0 is TFieldAccessExpr then
   begin
     FAE := TFieldAccessExpr(Arg0);
-    { A static (class-level) var: its storage IS the mangled global slot —
-      address it directly and skip the base+FieldInfo.Offset arithmetic (a
-      static var has no FieldInfo, so touching it would dereference nil). }
-    if FAE.IsClassVarRead then
-      Self.Emit(Format(#9'leaq %s(%%rip), %%rdx',
-        [NativeMangle(FAE.ClassVarEmitName)]))
-    else
-    begin
-      if FAE.Base <> nil then
-      begin
-        Self.EmitExprToEax(FAE.Base);
-        Self.Emit(#9'movq %rax, %rdx');
-      end
-      else if FAE.IsImplicitSelf then
-      begin
-        Self.Emit(Format(#9'movq %s, %%rdx', [Self.VarOperand('Self')]));
-        if (FAE.ImplicitBaseInfo <> nil) and (FAE.ImplicitBaseInfo.Offset > 0) then
-          Self.Emit(Format(#9'addq $%d, %%rdx', [FAE.ImplicitBaseInfo.Offset]));
-      end
-      else if FAE.IsVarParam then
-      begin
-        Self.Emit(Format(#9'movq %s, %%rdx', [Self.VarOperand(FAE.RecordName)]));
-      end
-      else
-      begin
-        Self.EmitVarBaseToReg(FAE.RecordName, True, '%rdx');
-      end;
-      if FAE.FieldInfo.Offset > 0 then
-        Self.Emit(Format(#9'addq $%d, %%rdx', [FAE.FieldInfo.Offset]));
-    end;
+    { Compute the l-value SLOT address into %rdx via the shared path.  The
+      hand-rolled version this replaced was missing IsClassAccess handling
+      (an explicit class-instance receiver landed on the receiver's pointer
+      slot instead of the instance) and the IsArrayAccess subscript tail
+      (Inc(R.RI[1]) dropped the subscript) — both silently wrong on the
+      native backend (BUG-20260723-native-incdec-field-receiver).
+      EmitLValueSlotAddr covers static vars, class receivers, var-params,
+      implicit Self, plain records, and field-array elements. }
+    Self.EmitLValueSlotAddr(FAE);
     Self.Emit(#9'pushq %rdx');
     if HasStep then
     begin

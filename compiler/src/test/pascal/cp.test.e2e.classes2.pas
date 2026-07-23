@@ -182,6 +182,12 @@ type
       method Log).  Locals/params still shadow methods. }
     procedure TestRun_UnqualifiedMethodCall_GlobalVarSameName;
     procedure TestRun_UnqualifiedFuncCall_GlobalVarSameName;
+    { Inc/Dec on an explicit field RECEIVER: Inc(H.FCount) on a class instance,
+      Inc(R.RI[1]) / Inc(R.RD[1],5) on static/dyn array fields.  The native
+      EmitIncDec branch hand-rolled the slot address and dropped both
+      IsClassAccess handling (wrote beside the receiver's pointer slot) and the
+      IsArrayAccess subscript (BUG-20260723-native-incdec-field-receiver). }
+    procedure TestRun_IncDec_FieldReceiver;
   end;
 
 implementation
@@ -2509,6 +2515,48 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '12' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_IncDec_FieldReceiver;
+const
+  Src = '''
+    program P;
+    type
+      THold = class
+      public
+        FCount: Integer;
+        FArr: array[0..2] of Integer;
+        FDyn: array of Integer;
+      end;
+      TRec = record
+        RI: array[0..2] of Integer;
+        RD: array of Integer;
+      end;
+    var
+      H: THold;
+      R: TRec;
+    begin
+      H := THold.Create();
+      H.FCount := 40;
+      Inc(H.FCount);
+      Dec(H.FCount, 1);
+      Inc(H.FCount, 5);
+      H.FArr[0] := 7; H.FArr[1] := 40; Inc(H.FArr[1]);
+      SetLength(H.FDyn, 3);
+      H.FDyn[1] := 100; Inc(H.FDyn[1], 7);
+      R.RI[0] := 3; R.RI[1] := 40; Inc(R.RI[1]);
+      SetLength(R.RD, 3);
+      R.RD[1] := 200; Inc(R.RD[1], 5);
+      WriteLn(H.FCount, ' ', H.FArr[0], ' ', H.FArr[1], ' ', H.FDyn[1]);
+      WriteLn(R.RI[0], ' ', R.RI[1], ' ', R.RD[1])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { A dropped subscript / missing IsClassAccess wrote the wrong slot: FArr[0]
+    and RI[0] must be UNTOUCHED, the [1] elements incremented, and FCount must
+    reach 45 without corrupting the receiver's own slot. }
+  AssertRunsOnAll(Src, '45 7 41 107' + LE + '3 41 205' + LE, 0);
 end;
 
 initialization
