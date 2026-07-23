@@ -126,6 +126,7 @@ type
     procedure TestSetLengthString_LengthArgNotClobberedByX19Save;
     procedure TestNestedRecordFieldOfSelf_StoreAddsContainingOffset;
     procedure TestClassFieldOfSelf_DerefsNotAdds;
+    procedure TestIndexedPropGetterThroughClassField_DerefsReceiver;
     procedure TestChr_ValueAllocatesButByteStoreKeepsOrdinal;
     procedure TestVarParam_NotRetainedInPrologue;
     procedure TestInterfaces_StringArg;
@@ -2735,6 +2736,68 @@ begin
   Body := Copy(AsmT, P, Length(AsmT) - P);
   AssertTrue('the class-field intermediate is dereferenced on store',
     Pos(#9'ldr x9, [x9, #16]', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestIndexedPropGetterThroughClassField_DerefsReceiver;
+var
+  AsmT: string;
+  P: Integer;
+  Body: string;
+begin
+  { Self.FClassField.Prop[I] lowers to a getter call FClassField.Getter(I).
+    The getter's RECEIVER is the intermediate field, not Self — a class-typed
+    intermediate must be dereferenced.  The round-12 fix covered field
+    load/store/address but this receiver path still passed Self, so on device
+    FUsedUnits.Strings[I] ran TStringList.Get on the TParser and crashed
+    freeing a garbage string (macOS arm64, round 13, 2026-07-23).
+
+    FList is a class field at offset 16, so the getter receiver must be
+    [Self+16], not Self. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TInner = class
+        FData: array[0..3] of Integer;
+        function GetItem(I: Integer): Integer;
+        property Items[I: Integer]: Integer read GetItem;
+      end;
+      TOuter = class
+        FDecoy: Pointer;
+        FList: TInner;
+        function First: Integer;
+      end;
+    function TInner.GetItem(I: Integer): Integer;
+    begin
+      Result := FData[I]
+    end;
+    function TOuter.First: Integer;
+    begin
+      Result := FList.Items[0]
+    end;
+    var O: TOuter;
+    begin
+      O := TOuter.Create();
+      O.FList := TInner.Create();
+      WriteLn(O.First());
+      O.FList.Free(); O.Free()
+    end.
+    ''');
+  P := Pos('TOuter_First:', AsmT);
+  AssertTrue('First is emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+  { the getter receiver derefs FList at [Self+16] before the Get call }
+  AssertTrue('the getter receiver dereferences the class field',
+    Pos(#9'ldr x0, [x0, #16]', Body) >= 0);
+  { and never calls the getter with Self (an un-derefed base) as receiver:
+    an ldur x0,[x29,#-8] (Self) immediately before the Get would be the bug }
+  { the getter call is on the derefed field, and Self is not passed
+    un-derefed as the receiver (an ldr [x0,#16] must precede the getter) }
+  AssertTrue('the getter is invoked',
+    Pos(#9'bl TInner_GetItem', Body) >= 0);
+  AssertTrue('the receiver is not Self un-derefed',
+    Pos(#9'ldur x0, [x29, #-8]'#10#9'ldr x1, [sp], #16'#10#9'bl TInner_GetItem',
+        Body) < 0);
 end;
 
 procedure TArm64BackendTests.TestChr_ValueAllocatesButByteStoreKeepsOrdinal;

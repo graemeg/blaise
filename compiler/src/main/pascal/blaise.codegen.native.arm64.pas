@@ -1206,12 +1206,13 @@ end;
 procedure TArm64Backend.EmitPropRecvToX0(AStmt: TFieldAssignment);
 begin
   { property-write receiver: a plain slot, a var param's pointee, or a
-    class-typed FIELD of Self (FDefines.CaseSensitive := ...) }
+    FIELD of Self (FDefines.CaseSensitive := ...).  Step across the
+    intermediate the same way every other implicit-Self path does — deref a
+    class reference, add an embedded record's offset. }
   if AStmt.IsImplicitSelf and (AStmt.ImplicitBaseInfo <> nil) then
   begin
     EmitLoadSlot('x0', 'Self');
-    Self.Emit(Format(#9'ldr x0, [x0, #%d]',
-      [AStmt.ImplicitBaseInfo.Offset]));
+    EmitImplicitBaseStep('x0', AStmt.ImplicitBaseInfo);
     Exit;
   end;
   EmitLoadSlot('x0', AStmt.RecordName);
@@ -4199,7 +4200,15 @@ begin
       instance pointer }
     Self.EmitExprToX0(AFld.Base)
   else if AFld.IsImplicitSelf then
-    EmitLoadSlot('x0', 'Self')
+  begin
+    EmitLoadSlot('x0', 'Self');
+    { Self.FClassField.Prop[I] — the getter's receiver is the intermediate
+      field, not Self.  A class-typed intermediate must be dereferenced (a
+      record one gets its offset added).  Passing Self here called the getter
+      on the wrong object (macOS arm64, 2026-07-23: FUsedUnits.Strings[I] ran
+      TStringList.Get on the TParser). }
+    EmitImplicitBaseStep('x0', AFld.ImplicitBaseInfo);
+  end
   else
     EmitLoadSlot('x0', AFld.RecordName);
   if AFld.IsVarParam and (AFld.Base = nil) then
