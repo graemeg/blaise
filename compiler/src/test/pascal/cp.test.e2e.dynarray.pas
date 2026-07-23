@@ -74,6 +74,12 @@ type
       with "unsupported expression form" while QBE accepted it
       (BUG-20260723-native-incdec-plain-array-elem). }
     procedure TestRun_IncDec_PlainArrayElem;
+    { Inc/Dec on a Byte/Word/SmallInt array element — both backends did a
+      32-bit read-modify-write, so the carry out of a 255-valued Byte
+      incremented the NEXT element and the store over-wrote up to 3 bytes past
+      the element (BUG-20260723-incdec-narrow-elem-rmw).  Load/store must use
+      the element's natural width. }
+    procedure TestRun_IncDec_NarrowArrayElem;
   end;
 
 implementation
@@ -544,6 +550,33 @@ begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   { A[0]/D[0] must stay untouched; only the [1] elements change. }
   AssertRunsOnAll(Src, '5 42 8 98' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_IncDec_NarrowArrayElem;
+const
+  Src = '''
+    program Prg;
+    var
+      B: array[0..3] of Byte;
+      W: array[0..3] of Word;
+      SI: array[0..3] of SmallInt;
+    begin
+      B[0] := 10; B[1] := 255; B[2] := 20; B[3] := 30;
+      Inc(B[1]);                { wraps to 0; B[2] must stay 20 }
+      W[0] := 100; W[1] := 65535; W[2] := 200; W[3] := 300;
+      Inc(W[1], 2);             { wraps to 1; W[2] must stay 200 }
+      SI[0] := 100; SI[1] := -5; SI[2] := 40; SI[3] := 50;
+      Inc(SI[1], 3);            { -2; neighbours untouched }
+      Dec(SI[2], 50);           { -10; signed }
+      WriteLn(B[0], ' ', B[1], ' ', B[2], ' ', B[3]);
+      WriteLn(W[0], ' ', W[1], ' ', W[2], ' ', W[3]);
+      WriteLn(SI[0], ' ', SI[1], ' ', SI[2], ' ', SI[3])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  AssertRunsOnAll(Src, '10 0 20 30' + LE + '100 1 200 300' + LE +
+    '100 -2 -10 50' + LE, 0);
 end;
 
 initialization

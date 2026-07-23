@@ -875,7 +875,8 @@ type
     procedure DbgStmtLabel(AStmt: TASTStmt);
     procedure DbgEndFunc;
     procedure EmitIncDec(ACall: TProcCall);
-    procedure EmitIncDecAddrOp(IsInc, IsWide, HasStep: Boolean);
+    procedure EmitIncDecAddrOp(IsInc, IsWide, HasStep: Boolean;
+      AElemType: TTypeDesc);
     { BUG-003 native half: statement-scoped deferred class-release.
       DeferNativeClassRelease spills the pointer currently in %rax to the next
       free _pendrel slot and returns True; returns False (caller keeps its own
@@ -6601,19 +6602,19 @@ begin
       Self.Emit(Format(#9'movq %s, %%rdx', [Self.VarOperand('Self')]));
       if FI.Offset > 0 then
         Self.Emit(Format(#9'addq $%d, %%rdx', [FI.Offset]));
-      Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep);
+      Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep, Arg0.ResolvedType);
     end
     else if IE.ParamMode <> pmNone then
     begin
       Self.Emit(Format(#9'movq %s, %%rdx', [Self.VarOperand(IE.Name)]));
-      Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep);
+      Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep, Arg0.ResolvedType);
     end
     else if Self.IsCaptured(IE.Name) then
     begin
       { Captured outer local: the _cap_ slot holds the var's ADDRESS — load it
         into %rdx and do the in-place add/sub through it. }
       Self.Emit(Format(#9'movq %s, %%rdx', [Self.VarOperand('_cap_' + IE.Name)]));
-      Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep);
+      Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep, Arg0.ResolvedType);
     end
     else
     begin
@@ -6674,7 +6675,7 @@ begin
       else           Self.Emit(#9'movl %eax, %ecx');
     end;
     Self.Emit(#9'popq %rdx');
-    Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep);
+    Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep, Arg0.ResolvedType);
   end
   else if Arg0 is TDerefExpr then
   begin
@@ -6687,7 +6688,7 @@ begin
       else           Self.Emit(#9'movl %eax, %ecx');
     end;
     Self.Emit(#9'popq %rdx');
-    Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep);
+    Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep, Arg0.ResolvedType);
   end
   else if Arg0 is TStringSubscriptExpr then
   begin
@@ -6705,16 +6706,31 @@ begin
       else           Self.Emit(#9'movl %eax, %ecx');
     end;
     Self.Emit(#9'popq %rdx');
-    Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep);
+    Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep, Arg0.ResolvedType);
   end
   else
     raise ENativeCodeGenError.Create(
       'native backend: Inc/Dec on unsupported expression form');
 end;
 
-procedure TX86_64Backend.EmitIncDecAddrOp(IsInc, IsWide, HasStep: Boolean);
+procedure TX86_64Backend.EmitIncDecAddrOp(IsInc, IsWide, HasStep: Boolean;
+  AElemType: TTypeDesc);
+var
+  Narrow: Boolean;
 begin
-  if IsWide then
+  { Load / store at the ELEMENT's natural width, not a fixed 32 bits.  A Byte
+    or Word element loaded+stored as a 32-bit word carried out of the element
+    into its neighbour (Inc of a 255-valued Byte incremented the next byte) and
+    over-read up to 3 bytes past the element (BUG-20260723-incdec-narrow-elem-rmw).
+    EmitLoadVarToReg zero/sign-extends the narrow value into %eax so the 32-bit
+    add/sub is correct; EmitStoreVar writes back only the element's bytes, so
+    Byte/Word wraparound stays modular and neighbours are untouched.  The
+    arithmetic width is unchanged (32-bit for narrow, matching the step the
+    caller placed in %ecx); only the memory access narrows. }
+  Narrow := (AElemType <> nil) and (IntByteSize(AElemType) < 4);
+  if Narrow then
+    Self.EmitLoadVarToReg('(%rdx)', AElemType, '%rax', '%eax')
+  else if IsWide then
     Self.Emit(#9'movq (%rdx), %rax')
   else
     Self.Emit(#9'movl (%rdx), %eax');
@@ -6744,7 +6760,9 @@ begin
       else          Self.Emit(#9'subl $1, %eax');
     end;
   end;
-  if IsWide then
+  if Narrow then
+    Self.EmitStoreVar('(%rdx)', AElemType)
+  else if IsWide then
     Self.Emit(#9'movq %rax, (%rdx)')
   else
     Self.Emit(#9'movl %eax, (%rdx)');

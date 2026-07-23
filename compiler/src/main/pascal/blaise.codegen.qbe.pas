@@ -11552,7 +11552,23 @@ begin
       end
       else
       begin
-        EmitLine(Format('  %s =w loadw %s', [ArgTemp2, ArgTemp]));
+        { Load / store at the ELEMENT's natural width: a Byte/Word element
+          read+written as a 32-bit word carried out of the element into its
+          neighbour and over-read past the element end
+          (BUG-20260723-incdec-narrow-elem-rmw).  A narrow load produces a w
+          temp (zero/sign-extended), the w add/sub is modular-correct, and the
+          narrow store writes back only the element's bytes.  Only the four
+          sub-word kinds take the narrow path — everything else keeps the old
+          loadw/storew, mirroring the native backend's IntByteSize < 4 guard.
+          (An unconditional LoadInstrFor here emitted '=w loadl' for kinds
+          like tyPChar that fall in this non-wide branch — invalid QBE.) }
+        if (TASTExpr(ACall.Args.Items[0]).ResolvedType <> nil) and
+           (TASTExpr(ACall.Args.Items[0]).ResolvedType.Kind in
+             [tyByte, tyBoolean, tySmallInt, tyWord]) then
+          EmitLine(Format('  %s =w %s %s',
+            [ArgTemp2, LoadInstrFor(TASTExpr(ACall.Args.Items[0]).ResolvedType), ArgTemp]))
+        else
+          EmitLine(Format('  %s =w loadw %s', [ArgTemp2, ArgTemp]));
         if ACall.Args.Count >= 2 then
           SizeTemp := EmitExpr(TASTExpr(ACall.Args.Items[1]))
         else
@@ -11562,7 +11578,13 @@ begin
           EmitLine(Format('  %s =w add %s, %s', [ArgLine, ArgTemp2, SizeTemp]))
         else
           EmitLine(Format('  %s =w sub %s, %s', [ArgLine, ArgTemp2, SizeTemp]));
-        EmitLine(Format('  storew %s, %s', [ArgLine, ArgTemp]));
+        if (TASTExpr(ACall.Args.Items[0]).ResolvedType <> nil) and
+           (TASTExpr(ACall.Args.Items[0]).ResolvedType.Kind in
+             [tyByte, tyBoolean, tySmallInt, tyWord]) then
+          EmitLine(Format('  %s %s, %s',
+            [StoreInstrFor(TASTExpr(ACall.Args.Items[0]).ResolvedType), ArgLine, ArgTemp]))
+        else
+          EmitLine(Format('  storew %s, %s', [ArgLine, ArgTemp]));
       end;
     end
     else if (TASTExpr(ACall.Args.Items[0]) is TIdentExpr) and
@@ -11624,7 +11646,23 @@ begin
       end
       else
       begin
-        EmitLine(Format('  %s =w loadw %s', [ArgTemp2, ArgTemp]));
+        { Load / store at the ELEMENT's natural width: a Byte/Word element
+          read+written as a 32-bit word carried out of the element into its
+          neighbour and over-read past the element end
+          (BUG-20260723-incdec-narrow-elem-rmw).  A narrow load produces a w
+          temp (zero/sign-extended), the w add/sub is modular-correct, and the
+          narrow store writes back only the element's bytes.  Only the four
+          sub-word kinds take the narrow path — everything else keeps the old
+          loadw/storew, mirroring the native backend's IntByteSize < 4 guard.
+          (An unconditional LoadInstrFor here emitted '=w loadl' for kinds
+          like tyPChar that fall in this non-wide branch — invalid QBE.) }
+        if (TASTExpr(ACall.Args.Items[0]).ResolvedType <> nil) and
+           (TASTExpr(ACall.Args.Items[0]).ResolvedType.Kind in
+             [tyByte, tyBoolean, tySmallInt, tyWord]) then
+          EmitLine(Format('  %s =w %s %s',
+            [ArgTemp2, LoadInstrFor(TASTExpr(ACall.Args.Items[0]).ResolvedType), ArgTemp]))
+        else
+          EmitLine(Format('  %s =w loadw %s', [ArgTemp2, ArgTemp]));
         if ACall.Args.Count >= 2 then
           SizeTemp := EmitExpr(TASTExpr(ACall.Args.Items[1]))
         else
@@ -11634,7 +11672,13 @@ begin
           EmitLine(Format('  %s =w add %s, %s', [ArgLine, ArgTemp2, SizeTemp]))
         else
           EmitLine(Format('  %s =w sub %s, %s', [ArgLine, ArgTemp2, SizeTemp]));
-        EmitLine(Format('  storew %s, %s', [ArgLine, ArgTemp]));
+        if (TASTExpr(ACall.Args.Items[0]).ResolvedType <> nil) and
+           (TASTExpr(ACall.Args.Items[0]).ResolvedType.Kind in
+             [tyByte, tyBoolean, tySmallInt, tyWord]) then
+          EmitLine(Format('  %s %s, %s',
+            [StoreInstrFor(TASTExpr(ACall.Args.Items[0]).ResolvedType), ArgLine, ArgTemp]))
+        else
+          EmitLine(Format('  storew %s, %s', [ArgLine, ArgTemp]));
       end;
     end;
   end
