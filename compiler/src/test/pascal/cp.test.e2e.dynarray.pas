@@ -80,6 +80,10 @@ type
       the element (BUG-20260723-incdec-narrow-elem-rmw).  Load/store must use
       the element's natural width. }
     procedure TestRun_IncDec_NarrowArrayElem;
+    { Inc/Dec on a narrow (Byte/Word/SmallInt) GLOBAL — globals are emitted
+      packed, so the native direct-ident path's 32-bit RMW carried into the
+      neighbouring global (BUG-20260723-incdec-narrow-global-rmw). }
+    procedure TestRun_IncDec_NarrowGlobal;
   end;
 
 implementation
@@ -577,6 +581,30 @@ begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertRunsOnAll(Src, '10 0 20 30' + LE + '100 1 200 300' + LE +
     '100 -2 -10 50' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_IncDec_NarrowGlobal;
+const
+  Src = '''
+    program Prg;
+    var
+      GA: Byte; GB: Byte; GC: Byte;
+      WA: Word; WB: Word; WC: Word;
+      GS: SmallInt;
+    begin
+      GA := 1; GB := 255; GC := 2;
+      Inc(GB);              { wraps to 0; GC must stay 2, not carry to 3 }
+      WA := 10; WB := 65535; WC := 20;
+      Inc(WB, 2);           { wraps to 1; WC must stay 20 }
+      GS := -5; Inc(GS, 3); { -2 (signed) }
+      WriteLn(GA, ' ', GB, ' ', GC);
+      WriteLn(WA, ' ', WB, ' ', WC);
+      WriteLn(GS)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  AssertRunsOnAll(Src, '1 0 2' + LE + '10 1 20' + LE + '-2' + LE, 0);
 end;
 
 initialization

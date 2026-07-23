@@ -6578,7 +6578,7 @@ var
   Arg0: TASTExpr;
   IE: TIdentExpr;
   FAE: TFieldAccessExpr;
-  IsInc, IsWide, HasStep: Boolean;
+  IsInc, IsWide, HasStep, NarrowIdent: Boolean;
   FI: TFieldInfo;
 begin
   IsInc := SameText(ACall.Name, 'Inc');
@@ -6618,7 +6618,19 @@ begin
     end
     else
     begin
-      if IsWide then
+      { A narrow (Byte/Word/SmallInt) GLOBAL is emitted PACKED (.balign 1/2),
+        so a 32-bit load/store carries across byte boundaries and over-writes
+        the neighbouring global (BUG-20260723-incdec-narrow-global-rmw).  Load
+        and store at the variable's natural width via the same helpers
+        EmitIncDecAddrOp uses; the 32-bit arithmetic is unchanged.  Narrow
+        LOCALS are safe (8-byte frame slots), but this arm serves both, so key
+        off the element width, not local-vs-global. }
+      NarrowIdent := (Arg0.ResolvedType <> nil) and
+                     (IntByteSize(Arg0.ResolvedType) < 4);
+      if NarrowIdent then
+        Self.EmitLoadVarToReg(Self.VarOperand(IE.Name), Arg0.ResolvedType,
+          '%rax', '%eax')
+      else if IsWide then
         Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(IE.Name)]))
       else
         Self.Emit(Format(#9'movl %s, %%eax', [Self.VarOperand(IE.Name)]));
@@ -6648,7 +6660,9 @@ begin
           else          Self.Emit(#9'subl $1, %eax');
         end;
       end;
-      if IsWide then
+      if NarrowIdent then
+        Self.EmitStoreVar(Self.VarOperand(IE.Name), Arg0.ResolvedType)
+      else if IsWide then
         Self.Emit(Format(#9'movq %%rax, %s', [Self.VarOperand(IE.Name)]))
       else
         Self.Emit(Format(#9'movl %%eax, %s', [Self.VarOperand(IE.Name)]));
