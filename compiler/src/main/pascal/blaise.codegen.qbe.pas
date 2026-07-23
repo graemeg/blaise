@@ -622,6 +622,10 @@ type
       EmitRecordReleaseFields call on exit. }
     procedure EmitRecordAddRefFields(ARec: TRecordTypeDesc; const AAddr: string);
     function  QbeTypeOf(AType: TTypeDesc): string;
+    { Emit an Inc/Dec step expression and, if it is 32-bit-typed while the
+      target is 64-bit (l), sign-extend it to an l temp so QBE does not reject
+      an `add l, w` mix (BUG-20260723-qbe-incdec-wide-narrow-step). }
+    function  WidenIncStep(AStep: TASTExpr): string;
     function  QbeParamTypeOf(AType: TTypeDesc): string;
     function  LoadInstrFor(AType: TTypeDesc): string;
     function  StoreInstrFor(AType: TTypeDesc): string;
@@ -1376,6 +1380,31 @@ begin
     tyDynArray:                             Result := 'l';  { heap data pointer }
   else
     Result := 'w';
+  end;
+end;
+
+function TCodeGenQBE.WidenIncStep(AStep: TASTExpr): string;
+var
+  W: string;
+begin
+  Result := EmitExpr(AStep);
+  { A wide (l) Inc/Dec target with a 32-bit-typed step: QBE rejects `add l, w`,
+    so widen the w temp to a fresh l temp.  Widen by the STEP type's
+    signedness: an unsigned 32-bit step zero-extends (extuw) so a UInt32
+    >= 2^31 keeps its value; a signed step sign-extends (extsw) so a
+    negative Integer step still subtracts.  Matches the native backend
+    (EmitLoadVar: movl for UInt32, movslq for Integer).  Narrower types
+    (Byte/Word/Boolean/Enum) arrive already zero-extended within the w
+    temp, so extsw is equivalent to extuw for them.  A step whose type is
+    already l (Int64/UInt64 expression) is used as-is. }
+  if (AStep.ResolvedType <> nil) and (QbeTypeOf(AStep.ResolvedType) = 'w') then
+  begin
+    W := AllocTemp();
+    if AStep.ResolvedType.Kind = tyUInt32 then
+      EmitLine(Format('  %s =l extuw %s', [W, Result]))
+    else
+      EmitLine(Format('  %s =l extsw %s', [W, Result]));
+    Result := W;
   end;
 end;
 
@@ -11511,7 +11540,7 @@ begin
       begin
         EmitLine(Format('  %s =l loadl %s', [ArgTemp2, ArgTemp]));
         if ACall.Args.Count >= 2 then
-          SizeTemp := EmitExpr(TASTExpr(ACall.Args.Items[1]))
+          SizeTemp := WidenIncStep(TASTExpr(ACall.Args.Items[1]))
         else
           SizeTemp := '1';
         ArgLine := AllocTemp();
@@ -11548,7 +11577,7 @@ begin
       begin
         EmitLine(Format('  %s =l copy %%_var_%s', [ArgTemp2, ArgTemp]));
         if ACall.Args.Count >= 2 then
-          SizeTemp := EmitExpr(TASTExpr(ACall.Args.Items[1]))
+          SizeTemp := WidenIncStep(TASTExpr(ACall.Args.Items[1]))
         else
           SizeTemp := '1';
         ArgLine := AllocTemp();
@@ -11583,7 +11612,7 @@ begin
       begin
         EmitLine(Format('  %s =l loadl %s', [ArgTemp2, ArgTemp]));
         if ACall.Args.Count >= 2 then
-          SizeTemp := EmitExpr(TASTExpr(ACall.Args.Items[1]))
+          SizeTemp := WidenIncStep(TASTExpr(ACall.Args.Items[1]))
         else
           SizeTemp := '1';
         ArgLine := AllocTemp();

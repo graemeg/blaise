@@ -226,6 +226,10 @@ type
       outer variables' addresses. }
     procedure TestRun_SiblingNestedCall_ForwardsCaptures;
     procedure TestRun_SiblingNestedCall_ForwardsSelfCapture;
+    { Inc/Dec on an Int64 target with an Integer-typed step: QBE emitted
+      `add l, w` (mixing a w step temp into an l add) and rejected the IR.
+      The step must be sign-extended to l first (BUG-20260723-qbe-incdec-wide-narrow-step). }
+    procedure TestRun_IncDec_WideTarget_NarrowStep;
   end;
 
 implementation
@@ -2465,6 +2469,49 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '7' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_IncDec_WideTarget_NarrowStep;
+const
+  Src = '''
+    program Prg;
+    type TProc = reference to procedure;
+    function StepL(): Int64; begin Result := 3000000000 end;
+    var
+      V: Int64;
+      S: Integer;
+      A: array[0..1] of Int64;
+      N: Integer;
+      U: UInt32;
+      Pr: TProc;
+    begin
+      V := 5000000000; S := 1000000000;
+      Inc(V, S);              { stack-slot local, Int64 target + Integer step }
+      WriteLn(V);             { 6000000000 }
+      S := -2000000000;
+      Dec(V, S);              { Dec with negative Integer step -> +2e9 = 8e9 }
+      WriteLn(V);             { 8000000000 }
+      V := 1000000000;
+      Inc(V, StepL());        { Int64 step still works }
+      WriteLn(V);             { 4000000000 }
+      A[1] := 5000000000; S := 1000000000;
+      Inc(A[1], S);           { address-based arm, Int64 element + Integer step }
+      WriteLn(A[1]);          { 6000000000 }
+      V := 5000000000; N := 7;
+      Pr := procedure begin Inc(V, N) end;  { captured Int64 V + Integer step }
+      Pr();
+      WriteLn(V);             { 5000000007 }
+      V := 1000000000; U := 3000000000;
+      Inc(V, U);              { UInt32 step with high bit set: must ZERO-extend }
+      WriteLn(V);             { 4000000000 (extsw would give -294967296) }
+      Dec(V, U);
+      WriteLn(V)              { 1000000000 }
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '6000000000' + LE + '8000000000' + LE + '4000000000' + LE +
+    '6000000000' + LE + '5000000007' + LE + '4000000000' + LE + '1000000000' + LE, 0);
 end;
 
 initialization
