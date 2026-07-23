@@ -121,6 +121,7 @@ type
     procedure TestClassTypeinfo_InstanceSizeCoversAllFields;
     procedure TestSmallRecordParam_FieldReadUsesInlineSlot;
     procedure TestSeparateCompile_DepUnitInitIsCalledFromMain;
+    procedure TestReceiverCall_NestedArcArg_ReceiverNotClobbered;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2422,6 +2423,67 @@ begin
   { ... and one without an initialization section is not }
   AssertTrue('a dep with no initialization section is not called',
     Pos('quiet.unit_init', AsmT) < 0);
+end;
+
+procedure TArm64BackendTests.TestReceiverCall_NestedArcArg_ReceiverNotClobbered;
+var
+  AsmT: string;
+  P, Q: Integer;
+  Body: string;
+begin
+  { A method call on a RECEIVER whose argument is itself a call returning an
+    ARC'd (string) value — Obj.Take(Maker.Make()) — must not lose the receiver.
+
+    EmitCall reserves an outgoing area (sp -= StackArea) before pushing the
+    arguments, so the memory-class and ARC-transient offsets stay fixed while
+    the eval slots are pushed.  But a method RECEIVER is pushed by EmitCall's
+    caller, BEFORE EmitCall runs, so the reservation used to land BETWEEN the
+    receiver and the argument pushes.  Two things then broke: the pop walk
+    (a contiguous LIFO run) read the reserved gap instead of the receiver, and
+    the transient keep-alive stash wrote over the receiver's slot.  Self
+    arrived as raw stack content — the macOS arm64 crash in
+    Result.Add(GDrivers[I].Name()) on 2026-07-23.
+
+    A nested call returning a string is what makes StackArea non-zero here, so
+    this shape is the minimal reproduction.  EmitCall now re-seats the receiver
+    (pop, reserve, re-push) to keep the run contiguous. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TMaker = class
+        function Make: string;
+      end;
+      TSink = class
+        Got: string;
+        procedure Take(const S: string);
+      end;
+    function TMaker.Make: string; begin Result := 'x' end;
+    procedure TSink.Take(const S: string); begin Got := S end;
+    var M: TMaker; K: TSink;
+    begin
+      M := TMaker.Create();
+      K := TSink.Create();
+      K.Take(M.Make());
+      WriteLn(K.Got);
+      K.Free(); M.Free()
+    end.
+    ''');
+  { isolate the program body so other routines cannot satisfy the assert }
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body is emitted', P >= 0);
+  Q := PosEx('bl Classes_', AsmT, P);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  { The receiver must be RE-SEATED around the outgoing-area reservation: a
+    bare `sub sp, sp, #N` sitting directly between two pushes is the bug
+    signature.  After the fix the reservation is bracketed by a pop and a
+    re-push. }
+  AssertTrue('receiver is popped before the outgoing area is reserved',
+    Pos(#9'ldr x9, [sp], #16'#10#9'sub sp, sp, #', Body) >= 0);
+  AssertTrue('receiver is re-pushed after the reservation',
+    Pos(#9'str x9, [sp, #-16]!', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;

@@ -8103,7 +8103,28 @@ begin
   LitOff := 0;
   RecOff := 0;
   if StackArea > 0 then
+  begin
+    { The outgoing area must sit BELOW every pushed eval slot, because the pop
+      walk pops a contiguous LIFO run and the memory-class / transient offsets
+      are all measured from sp with those slots still pushed.
+
+      A method receiver, though, was already pushed by our CALLER (ASelfPushed)
+      — before we got here.  Reserving underneath it would leave the area
+      wedged BETWEEN Self and the argument pushes, so the final pop would read
+      the reserved gap instead of Self, and the transient stash offset would
+      land on Self's slot and clobber it.  That is exactly what happened for
+      `Result.Add(GDrivers[I].Name())`: Add got raw stack content as Self
+      (macOS arm64 on-device crash, 2026-07-23) — a nested call returning an
+      ARC'd string is what makes the area non-zero in the first place.
+
+      Re-seat the receiver: pop it, reserve, push it back.  The run is then
+      contiguous again and every existing offset stays correct. }
+    if ASelfPushed then
+      EmitPopTo('x9');
     EmitAddSubImm('sub', 'sp', 'sp', StackArea);
+    if ASelfPushed then
+      Self.Emit(#9'str x9, [sp, #-16]!');
+  end;
   { Evaluate args left-to-right onto the stack (calls inside an argument
     cannot clobber earlier args), floats as their 8-byte bit pattern.
     Integer and float args consume INDEPENDENT register sequences
