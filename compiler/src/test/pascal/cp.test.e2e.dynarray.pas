@@ -64,6 +64,11 @@ type
     { A dyn-array passed BY VALUE (non-const) — the callee co-owns its copy.
       The value must survive the call and the caller's array stay intact. }
     procedure TestRun_ByValueDynArrayParam;
+    { SetLength on a dyn-array ELEMENT of an ARRAY FIELD — SetLength(H.FNest[I], N)
+      where FNest: array[..] of array of T.  The native slot-address path dropped
+      the [I] subscript and resized the wrong slot -> SIGSEGV; QBE already routed
+      through the subscript-aware EmitLValueAddr (BUG-20260723-native-setlength-field-array-elem). }
+    procedure TestRun_SetLengthOnArrayFieldElem;
   end;
 
 implementation
@@ -465,6 +470,52 @@ begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   { SumV owns its copy (retain/release); the caller's d survives intact. }
   AssertRunsOnAll(Src, '6' + LE + '3' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_SetLengthOnArrayFieldElem;
+const
+  Src = '''
+    program P;
+    type
+      THold = class
+      public
+        FNest: array[0..1] of array of Integer;
+        FStrs: array[0..1] of string;
+        FObjs: array[0..1] of TObject;
+        FDD: array of array of Integer;
+      end;
+    var H: THold;
+    begin
+      H := THold.Create();
+      SetLength(H.FNest[0], 2);
+      SetLength(H.FNest[1], 3);
+      H.FNest[0][0] := 10; H.FNest[0][1] := 11;
+      H.FNest[1][0] := 20; H.FNest[1][2] := 22;
+      SetLength(H.FStrs[0], 3);
+      SetLength(H.FStrs[1], 5);
+      WriteLn(Length(H.FNest[0]), ' ', Length(H.FNest[1]));
+      WriteLn(H.FNest[0][1], ' ', H.FNest[1][2]);
+      WriteLn(Length(H.FStrs[0]), ' ', Length(H.FStrs[1]));
+      SetLength(H.FDD, 2);
+      SetLength(H.FDD[1], 4);
+      H.FDD[1][3] := 33;
+      WriteLn(Length(H.FDD[0]), ' ', Length(H.FDD[1]), ' ', H.FDD[1][3]);
+      H.FObjs[1] := TObject.Create();
+      H.FObjs[1].Free();
+      WriteLn(H.FObjs[1] = nil)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  { SetLength must resize the element the [I] subscript selects, not the field
+    base — dropping the subscript segfaulted the native backend.  Also covers
+    the two sibling shapes the same slot-address tail serves: a DYN-array
+    outer field (FDD — the helper's deref-then-index branch, vs FNest's
+    static-array branch) and Free() on a field-array element (the third
+    EmitLValueSlotAddr caller — must release AND nil the ELEMENT slot, not
+    the field base). }
+  AssertRunsOnAll(Src, '2 3' + LE + '11 22' + LE + '3 5' + LE +
+    '0 4 33' + LE + 'True' + LE, 0);
 end;
 
 initialization

@@ -6097,6 +6097,18 @@ begin
       Self.EmitVarBaseToReg(FAE.RecordName, True, '%rdx');
     if FAE.FieldInfo.Offset > 0 then
       Self.Emit(Format(#9'addq $%d, %%rdx', [FAE.FieldInfo.Offset]));
+    { An array-FIELD ELEMENT slot (SetLength(H.FNest[0], N) where FNest is an
+      array field): %rdx now holds the address of the FIELD; apply the
+      subscript so the slot address points at the indexed element, mirroring
+      the QBE EmitLValueAddr IsArrayAccess tail.  Without this the subscript
+      was dropped and SetLength wrote through the wrong slot -> SIGSEGV
+      (BUG-20260723-native-setlength-field-array-elem). }
+    if FAE.IsArrayAccess then
+    begin
+      Self.Emit(#9'movq %rdx, %rax');
+      Self.EmitFieldArrayElemAddrToRax(FAE);
+      Self.Emit(#9'movq %rax, %rdx');
+    end;
     Exit;
   end;
   { Array element a[i] as an l-value slot (e.g. SetLength(m[i], n) for a 2-D
