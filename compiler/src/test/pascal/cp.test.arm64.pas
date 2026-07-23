@@ -119,6 +119,7 @@ type
     procedure TestInterface_ItabAndImpllist_AreGlobl;
     procedure TestGenericClassInstance_MethodBodyEmittedInUnit;
     procedure TestClassTypeinfo_InstanceSizeCoversAllFields;
+    procedure TestSmallRecordParam_FieldReadUsesInlineSlot;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2304,6 +2305,63 @@ begin
   SizeSlot := Trim(Copy(AsmT, Q + 7, K - (Q + 7)));
   { the full 32-byte instance, never the 8-byte reference width }
   AssertEquals('instance size covers vptr + all fields', '32', SizeSlot);
+end;
+
+procedure TArm64BackendTests.TestSmallRecordParam_FieldReadUsesInlineSlot;
+var
+  AsmT: string;
+  P, Q: Integer;
+  Body: string;
+begin
+  { Reading a field of a BY-VALUE small (<=16B) record param must take the
+    ADDRESS of the param's inline slot (sub xN, x29, #off) and read through
+    that — NOT load the slot's contents and dereference them.
+
+    The semantic pass marks every record param IsVarParam=True ("records pass
+    by reference at the ABI level"), and the by-value discriminator used to
+    infer by-value-ness from the presence of a '__pptr_' companion slot — which
+    only a >16B (shape 0) param ever gets.  So every small record param was
+    misread as a true var/out param: codegen emitted `ldur xN,[x29,#-off]`
+    (the record VALUE) and then dereferenced it as a pointer.  With two 4-byte
+    enum fields the value is literally 0x0, so the callee faulted on a null
+    dereference — the macOS arm64 TargetName(const ATarget: TTargetDesc) crash
+    found during the 2026-07-23 on-device bring-up.
+
+    Shaped exactly like that crash: an 8-byte two-enum record passed const. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TOS  = (osA, osB);
+      TCPU = (cpuA, cpuB);
+      TDesc = record
+        OS:  TOS;
+        CPU: TCPU;
+      end;
+    var D: TDesc;
+    function Name(const ADesc: TDesc): Int64;
+    begin
+      Result := Ord(ADesc.OS)
+    end;
+    begin
+      D.OS := osB;
+      WriteLn(Name(D))
+    end.
+    ''');
+  { isolate the callee body so caller-side patterns cannot satisfy the asserts }
+  P := Pos(#10'Name:', AsmT);
+  AssertTrue('the Name routine is emitted', P >= 0);
+  Q := PosEx(#10'.globl ', AsmT, P + 1);
+  if Q < 0 then Q := Length(AsmT);
+  Body := Copy(AsmT, P, Q - P);
+
+  { the field read must address the inline slot ... }
+  AssertTrue('field read takes the address of the inline param slot',
+    Pos(#9'sub x', Body) >= 0);
+  { ... and must NOT dereference a loaded slot value.  Guard the precise
+    shape: a slot LOAD feeding the field read is the bug. }
+  AssertTrue('by-value record param field read does not deref the slot value',
+    Pos(#9'ldur x9, [x29, #-8]'#10#9'mov x0, x9'#10#9'ldrsw x0, [x0]', Body) < 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;

@@ -126,6 +126,16 @@ type
     FStrGlobals:  TStringList;   { string program globals — released at
                                    the program exit }
     FRecLocals:   TStringList;   { record locals; Objects = TRecordTypeDesc }
+    { BY-VALUE record parameters of the routine being emitted.  The semantic
+      pass marks EVERY record param IsVarParam=True ("records pass by reference
+      at the ABI level"), so codegen needs its own record of which of those are
+      really by-value in THIS backend's frame.  A >16B (shape 0) param is by
+      pointer and gets a '__pptr_' slot; a shape 1/2/HFA param arrives in
+      registers and is spilled INLINE with no '__pptr_' — inferring by-value
+      from '__pptr_' presence therefore misclassified every small record param
+      as var/out and dereferenced its value (macOS arm64 on-device crash,
+      2026-07-23).  Membership here is the explicit answer. }
+    FByValRecParams: TStringList;
     FRecGlobals:  TStringList;   { record program globals; Objects = desc }
     FRefLocals:   TStringList;   { 'reference to' closure locals — the Env half
                                    (+8) is _ClassRelease'd at scope exit (arkRefEnv) }
@@ -151,12 +161,14 @@ type
     function  IsCaptured(const AName: string): Boolean;
     { True when RecordName is a BY-VALUE record param (its inline copy lives in
       the ParamName slot, so its address is EmitSlotAddr, NOT EmitLoadSlot).
-      The semantic pass flags such a param IsVarParam=True (records pass by
-      reference in the ABI), but arm64 lays the copy INLINE in the frame and
-      parks the caller's address in a companion '__pptr_<Name>' slot.  So the
-      presence of that '__pptr_' slot is the discriminator between a by-value
-      record param (inline value here → EmitSlotAddr) and a true var/out param
-      (slot holds the caller's address → EmitLoadSlot). }
+      The semantic pass flags EVERY record param IsVarParam=True (records pass
+      by reference at the ABI level), so codegen keeps its own explicit record
+      of which ones are really by-value — FByValRecParams, filled by the frame
+      setup.  A >16B (shape 0) param arrives by pointer and the prologue
+      memcpies it into the inline slot; a shape 1/2/HFA param is spilled inline
+      straight from its argument registers.  Either way the slot ends up
+      holding the value, which is what distinguishes it from a true var/out
+      param whose slot holds the caller's address. }
     function  IsByValueRecordParam(const AName: string): Boolean;
     { Load into AReg the ADDRESS of a plain (Base=nil) record lvalue named
       AName, given its resolved IsVarParam flag.  A TRUE var/out record param's
@@ -465,6 +477,7 @@ begin
   FDynLocals := TStringList.Create();
   FDynGlobals := TStringList.Create();
   FRecLocals   := TStringList.Create();
+  FByValRecParams := TStringList.Create();
   FRecGlobals  := TStringList.Create();
   FRefLocals   := TStringList.Create();
   FRefGlobals  := TStringList.Create();
@@ -480,6 +493,7 @@ begin
   FGlobalSize.Free();
   FRecGlobals.Free();
   FRecLocals.Free();
+  FByValRecParams.Free();
   FRefLocals.Free();
   FRefGlobals.Free();
   FStrGlobals.Free();
@@ -562,10 +576,19 @@ end;
 
 function TArm64Backend.IsByValueRecordParam(const AName: string): Boolean;
 begin
-  { see the interface-section comment: a by-value record param has a companion
-    '__pptr_<Name>' slot holding the caller's address, and the inline copy in
-    its own ParamName slot; a true var/out param has NO '__pptr_' slot. }
-  Result := Self.IsLocal('__pptr_' + AName);
+  { A by-value record param's ParamName slot holds the record INLINE, so its
+    address is EmitSlotAddr; a true var/out param's slot holds the caller's
+    address (EmitLoadSlot).  Every shape ends up inline: a shape-0 param
+    arrives by pointer (parked in '__pptr_') and the prologue's pass-2 memcpy
+    copies the bytes INTO the ParamName slot, while a shape 1/2/HFA param is
+    spilled inline straight from its registers.
+
+    This used to test IsLocal('__pptr_' + AName), but that slot only ever
+    exists for shape 0 — so every small (<=16B) record param was misread as a
+    true var/out and its VALUE was dereferenced as a pointer (the macOS arm64
+    TargetName(const ATarget: TTargetDesc) crash, 2026-07-23).  The frame setup
+    now records by-value record params explicitly. }
+  Result := FByValRecParams.IndexOf(AName) >= 0;
 end;
 
 procedure TArm64Backend.EmitRecordBaseAddr(const AReg, AName: string;
@@ -6994,6 +7017,7 @@ begin
   FFrameSize := 0;
   FStrLocals.Clear();
   FRecLocals.Clear();
+  FByValRecParams.Clear();
   FObjLocals.Clear();
   FIntfLocals.Clear();
   FDynLocals.Clear();
@@ -7064,6 +7088,12 @@ begin
       begin
         AddLocal(Par.ParamName, Par.ResolvedType.RawSize());
         FRecLocals.AddObject(Par.ParamName, Par.ResolvedType);
+        { A true var/out param already Continue'd above, so every record param
+          reaching here is BY VALUE — record that explicitly.  The semantic pass
+          marks them all IsVarParam=True, and only a shape-0 param gets the
+          '__pptr_' slot, so this list is what tells a field read/write that the
+          slot holds the value inline rather than the caller's address. }
+        FByValRecParams.Add(Par.ParamName);
         if RecReturnShape(TRecordTypeDesc(Par.ResolvedType)) = 0 then
           { >16B records arrive as a pointer; park it until the
             prologue memcpy pass copies the bytes into our own slot }
@@ -10567,6 +10597,7 @@ begin
   FFrameSize := 0;
   FStrLocals.Clear();
   FRecLocals.Clear();
+  FByValRecParams.Clear();
   FObjLocals.Clear();
   FIntfLocals.Clear();
   FForN := 0;
