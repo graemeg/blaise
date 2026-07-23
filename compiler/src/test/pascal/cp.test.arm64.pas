@@ -129,6 +129,7 @@ type
     procedure TestIndexedPropGetterThroughClassField_DerefsReceiver;
     procedure TestChr_ValueAllocatesButByteStoreKeepsOrdinal;
     procedure TestVarParam_NotRetainedInPrologue;
+    procedure TestInterfaceReturnToGlobal_ItabHalfFromSourceNotDest;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2898,6 +2899,72 @@ begin
     Pos(#9'ldur x0, [x29, #-8]'#10#9'bl _StringAddRef', Body) < 0);
 end;
 
+procedure TArm64BackendTests.TestInterfaceReturnToGlobal_ItabHalfFromSourceNotDest;
+var
+  AsmT: string;
+  P, Q, StoreP, LdrP: Integer;
+  Body: string;
+begin
+  { Storing an interface value returned by a call into a GLOBAL writes the
+    16-byte object+itab pair from the __iret scratch to two globals
+    (g_X and g_X_itab).  The source address lands in x9 (EmitSlotAddr), but
+    EmitStoreSlot reuses x9 for the destination adrp — so if the itab half is
+    loaded AFTER the object half is stored, its `ldr ...,[x9,#8]` reads from
+    the destination's globals page, not the source temp.  On device g_CG_itab
+    ended up holding a neighbouring global's constant address and the next
+    interface dispatch through it jumped into the code segment (macOS arm64,
+    2026-07-23, bus error via a wild blr).
+
+    The fix loads BOTH source words before either store.  Pin the invariant:
+    the second source load must read into x1 (a distinct register), and there
+    must be NO `ldr x0, [x9, #8]` sitting after an interface-store adrp. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IThing = interface
+        function Val: Integer;
+      end;
+      TThing = class(TObject, IThing)
+        function Val: Integer;
+      end;
+    function TThing.Val: Integer; begin Result := 7 end;
+    function MakeThing: IThing;
+    begin
+      Result := TThing.Create()
+    end;
+    var G: IThing;
+    begin
+      G := MakeThing();
+      WriteLn(G.Val())
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  { the source temp address is taken into x9 }
+  Q := Pos(#9'adrp x9, _g_G@PAGE', Body);
+  AssertTrue('destination global store present', Q >= 0);
+
+  { both halves must be loaded from the SOURCE before either store: the itab
+    half reads into x1, not x0-after-a-store }
+  AssertTrue('itab half loaded into a distinct register from the source',
+    Pos(#9'ldr x1, [x9, #8]', Body) >= 0);
+
+  { the broken shape — a source load of the second word AFTER a global-store
+    adrp clobbered x9 — must be gone: no `ldr x0, [x9, #8]` following the
+    object-half store sequence into g_G }
+  StoreP := Pos(#9'str x0, [x9, _g_G@PAGEOFF]', Body);
+  if StoreP >= 0 then
+  begin
+    LdrP := PosEx(#9'ldr x0, [x9, #8]', Body, StoreP);
+    AssertTrue('no source itab load reuses x9 after the object store',
+      LdrP < 0);
+  end;
+end;
+
 procedure TArm64BackendTests.TestInterfaces_StringArg;
 var
   AsmT: string;
@@ -3144,9 +3211,13 @@ begin
     ''');
   { the old interface value is released before the new fat pointer is stored }
   AssertTrue('release old before store', Pos(#9'bl _ClassRelease', AsmT) >= 0);
-  { both halves of the returned fat pointer are unpacked from __iret }
-  AssertTrue('obj half stored', Pos(#9'ldr x0, [x9]', AsmT) >= 0);
-  AssertTrue('itab half stored', Pos(#9'ldr x0, [x9, #8]', AsmT) >= 0);
+  { both halves of the returned fat pointer are unpacked from __iret BEFORE
+    either store — EmitStoreSlot clobbers x9 for the destination adrp, so the
+    itab half must load into x1 (a distinct register), not x0 after a store.
+    See TestInterfaceReturnToGlobal_ItabHalfFromSourceNotDest. }
+  AssertTrue('obj half loaded from source', Pos(#9'ldr x0, [x9]', AsmT) >= 0);
+  AssertTrue('itab half loaded into a distinct register',
+    Pos(#9'ldr x1, [x9, #8]', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestFloatPropRead_And_StringGlobalInit;

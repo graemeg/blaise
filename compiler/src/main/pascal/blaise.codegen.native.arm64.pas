@@ -4327,11 +4327,14 @@ begin
       '__iret');
     EmitLoadSlot('x0', AAsgn.Name);
     Self.Emit(#9'bl _ClassRelease');
+    { load BOTH words from the source before storing either — EmitStoreSlot
+      clobbers x9 for the destination adrp, so the second half must not depend
+      on x9 still pointing at the source temp. }
     EmitSlotAddr('x9', '__iret');
     Self.Emit(#9'ldr x0, [x9]');
+    Self.Emit(#9'ldr x1, [x9, #8]');
     EmitStoreSlot('x0', AAsgn.Name);
-    Self.Emit(#9'ldr x0, [x9, #8]');
-    EmitStoreSlot('x0', AAsgn.Name + '_itab');
+    EmitStoreSlot('x1', AAsgn.Name + '_itab');
     Exit;
   end;
   if (AAsgn.Expr is TMethodCallExpr) and
@@ -4349,11 +4352,12 @@ begin
     EmitRecCallDispatch(AAsgn.Expr, '__iret');
     EmitLoadSlot('x0', AAsgn.Name);
     Self.Emit(#9'bl _ClassRelease');
+    { load BOTH words from the source before storing either (see above) }
     EmitSlotAddr('x9', '__iret');
     Self.Emit(#9'ldr x0, [x9]');
+    Self.Emit(#9'ldr x1, [x9, #8]');
     EmitStoreSlot('x0', AAsgn.Name);
-    Self.Emit(#9'ldr x0, [x9, #8]');
-    EmitStoreSlot('x0', AAsgn.Name + '_itab');
+    EmitStoreSlot('x1', AAsgn.Name + '_itab');
     Exit;
   end;
   NotYet('interface assignment from this expression', AAsgn);
