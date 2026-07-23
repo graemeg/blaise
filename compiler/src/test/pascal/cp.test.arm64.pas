@@ -125,6 +125,7 @@ type
     procedure TestLargeManagedArray_ElemOffsetBeyondImm12;
     procedure TestSetLengthString_LengthArgNotClobberedByX19Save;
     procedure TestNestedRecordFieldOfSelf_StoreAddsContainingOffset;
+    procedure TestChr_ValueAllocatesButByteStoreKeepsOrdinal;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2665,6 +2666,52 @@ begin
   Body := Copy(AsmT, P, Length(AsmT) - P);
   AssertTrue('FTok.Kind reads at the containing offset (20)',
     Pos(#9'add x0, x0, #20', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestChr_ValueAllocatesButByteStoreKeepsOrdinal;
+var
+  AsmT: string;
+  P: Integer;
+  Body: string;
+begin
+  { Chr(N) is typed tyString by the semantic pass, so in a VALUE context it
+    must allocate a one-character heap string via the _Chr RTL helper.  arm64
+    folded Chr into the Ord identity case and returned the raw ordinal, so
+    `S := S + Chr(C)` handed StringConcat a small integer as its string operand
+    and faulted dereferencing it (macOS arm64, 2026-07-23 — x86-64 carried the
+    same bug once and its fix comment records the identical symptom).
+
+    But a BYTE STORE (S[I] := Chr(N)) must NOT allocate: a strb of a _Chr
+    result would store the low byte of the returned POINTER.  Both QBE and
+    x86-64 keep that short-circuit, so arm64 needs BOTH behaviours — this test
+    pins them together so a future fix to one cannot silently break the other. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var S: string; T: string; I: Integer;
+    begin
+      S := '';
+      for I := 72 to 74 do
+        S := S + Chr(I);
+      WriteLn(S);
+      T := 'xxx';
+      T[0] := Chr(65);
+      WriteLn(T)
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  { VALUE context allocates }
+  AssertTrue('Chr in a value context calls _Chr',
+    Pos(#9'bl _Chr', Body) >= 0);
+  { BYTE-STORE context keeps the raw ordinal: 65 is materialised directly and
+    the byte store is present }
+  AssertTrue('the byte store keeps the raw ordinal',
+    Pos(#9'movz x0, #65', Body) >= 0);
+  AssertTrue('a byte store is emitted', Pos(#9'strb w0, [x9]', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;

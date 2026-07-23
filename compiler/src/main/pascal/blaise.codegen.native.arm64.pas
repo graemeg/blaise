@@ -251,6 +251,16 @@ type
     procedure EmitStrDisposeX0(AExpr: TASTExpr);
     procedure EmitFloatLitSection;
     procedure EmitStrLitAddr(AValue: string);
+    { Emit the RHS of a BYTE store (strb) into x0 as a raw ordinal.
+
+      Chr(N) must NOT be lowered through the normal _Chr call here: Chr returns
+      a heap string POINTER, and a following strb would store the low byte of
+      that pointer instead of N — the classic "P[I] := Chr(N)" garbage bug that
+      QBE and x86-64 both short-circuit.  The same trap applies to a
+      single-character string literal, whose normal lowering yields the
+      literal's data ADDRESS.  Both fold to the ordinal directly; anything else
+      evaluates normally. }
+    procedure EmitByteRhsToX0(AValueExpr: TASTExpr);
     function  AsmEscape(const AValue: string): string;
     { Box one 'array of const' element as a 16-byte TVarRec (VType byte at +0,
       VValue at +8) at [sp, #AOffset].  AOffset is sp-relative and stable
@@ -1938,6 +1948,34 @@ begin
   end;
 end;
 
+procedure TArm64Backend.EmitByteRhsToX0(AValueExpr: TASTExpr);
+var
+  FC: TFuncCallExpr;
+begin
+  { single-char literal -> its ordinal (not the literal's data address) }
+  if AValueExpr is TStringLiteral then
+  begin
+    if Length(TStringLiteral(AValueExpr).Value) = 0 then
+      Self.Emit(#9'movz x0, #0')
+    else
+      EmitIntLiteral('x0', OrdAt(TStringLiteral(AValueExpr).Value, 0));
+    Exit;
+  end;
+  { Chr(N) -> N directly, WITHOUT the _Chr allocation: a strb of a _Chr result
+    would store the low byte of the returned heap pointer. }
+  if (AValueExpr is TFuncCallExpr) then
+  begin
+    FC := TFuncCallExpr(AValueExpr);
+    if (FC.ResolvedDecl = nil) and (FC.Args.Count = 1) and
+       SameText(FC.Name, 'Chr') then
+    begin
+      Self.EmitExprToX0(TASTExpr(FC.Args.Items[0]));
+      Exit;
+    end;
+  end;
+  Self.EmitExprToX0(AValueExpr);
+end;
+
 procedure TArm64Backend.EmitStrLitAddr(AValue: string);
 var
   Idx: Integer;
@@ -2656,11 +2694,10 @@ begin
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (TFuncCallExpr(AExpr).Args.Count = 1) and
-     (SameText(TFuncCallExpr(AExpr).Name, 'Ord') or
-      SameText(TFuncCallExpr(AExpr).Name, 'Chr')) then
+     SameText(TFuncCallExpr(AExpr).Name, 'Ord') then
   begin
-    { Ord(x)/Chr(x): a char literal folds to its byte; any other ordinal
-      is already its own value (Char IS its byte in this backend) }
+    { Ord(x): a char literal folds to its byte; any other ordinal is already
+      its own value (Char IS its byte in this backend). }
     if TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]) is TStringLiteral then
     begin
       if Length(TStringLiteral(
@@ -2672,6 +2709,24 @@ begin
       Exit;
     end;
     Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+    Exit;
+  end;
+  if (AExpr is TFuncCallExpr) and
+     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+     (TFuncCallExpr(AExpr).Args.Count = 1) and
+     SameText(TFuncCallExpr(AExpr).Name, 'Chr') then
+  begin
+    { Chr(N) is the INVERSE of Ord: the semantic pass types it tyString, so it
+      must return a freshly-allocated one-character heap string — lower it to
+      the _Chr RTL helper, matching x86-64 and QBE.  It was previously folded
+      into the Ord identity case above, which returned the raw ordinal: a
+      `S := S + Chr(C)` then handed StringConcat a small integer as its string
+      operand and faulted dereferencing it (macOS arm64, 2026-07-23; x86-64
+      carried the identical bug once and its fix comment records the same
+      symptom).  Byte-store contexts (S[I] := Chr(N)) must NOT allocate — they
+      go through EmitByteRhsToX0 below, which keeps the raw-ordinal form. }
+    Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+    Self.Emit(#9'bl _Chr');
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
@@ -5470,15 +5525,7 @@ begin
       into it.  Without the COW, writing a literal-backed string would hit
       read-only memory.  Mirrors x86-64 (:16340) and QBE (:17676). }
     { byte value -> parked }
-    if (AStmt.ValueExpr is TStringLiteral) then
-    begin
-      if Length(TStringLiteral(AStmt.ValueExpr).Value) = 0 then
-        Self.Emit(#9'movz x0, #0')
-      else
-        EmitIntLiteral('x0', OrdAt(TStringLiteral(AStmt.ValueExpr).Value, 0));
-    end
-    else
-      Self.EmitExprToX0(AStmt.ValueExpr);
+    EmitByteRhsToX0(AStmt.ValueExpr);
     EmitPushX0();                                  { [sp] = byte value }
     Self.EmitExprToX0(AStmt.IndexExpr);
     EmitPushX0();                                  { [sp] = index }
@@ -5520,9 +5567,11 @@ begin
     end
     else
     begin
-      { park the address — the value eval clobbers x9 }
+      { park the address — the value eval clobbers x9.  EmitByteRhsToX0 keeps
+        Chr(N) as the raw ordinal; a _Chr allocation here would strb the low
+        byte of the returned pointer. }
       Self.Emit(#9'str x9, [sp, #-16]!');
-      Self.EmitExprToX0(AStmt.ValueExpr);
+      EmitByteRhsToX0(AStmt.ValueExpr);
       Self.Emit(#9'ldr x9, [sp], #16');
     end;
     Self.Emit(#9'strb w0, [x9]');
@@ -5661,7 +5710,13 @@ begin
   end
   else if IsIntFam(Elem) or
           (Elem.Kind in [tyBoolean, tyPointer, tyPChar]) then
-    Self.EmitExprToX0(AStmt.ValueExpr)
+  begin
+    { a 1-byte element is a byte store: Chr(N) must stay a raw ordinal }
+    if Elem.RawSize() = 1 then
+      EmitByteRhsToX0(AStmt.ValueExpr)
+    else
+      Self.EmitExprToX0(AStmt.ValueExpr);
+  end
   else
     NotYet('array element of this type', AStmt);
   Self.Emit(#9'ldr x9, [sp], #16');
