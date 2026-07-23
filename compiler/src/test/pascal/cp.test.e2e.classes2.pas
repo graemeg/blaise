@@ -195,6 +195,11 @@ type
       dropped the array subscript and returned the data pointer (read)
       (BUG-20260723-qbe-lvalue-implicitself-classfield). }
     procedure TestRun_ImplicitSelf_ClassField_LValueAndRead;
+    { Address-of a subscripted array field of an implicit-Self class field:
+      P := @FInner.Arr[1] / @FInner.Dyn[1] inside a method.  QBE's
+      EmitAddrOfExpr tested IsClassAccess before IsImplicitSelf, loading a
+      nonexistent %_var_<field> (BUG-20260723-qbe-addrof-implicitself-classfield-elem). }
+    procedure TestRun_AddrOf_ImplicitSelf_ClassFieldElem;
   end;
 
 implementation
@@ -2611,6 +2616,47 @@ begin
     Both the l-value side (Inc/AddOne/SetLength) and the read side (subscripted
     Dyn/Arr, char S[1]) must be correct on both backends. }
   AssertRunsOnAll(Src, '12 105 42' + LE + '7 9' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_AddrOf_ImplicitSelf_ClassFieldElem;
+const
+  Src = '''
+    program P;
+    type
+      PInt = ^Integer;
+      TInner = class
+      public
+        Arr: array[0..3] of Integer;
+        Dyn: array of Integer;
+      end;
+      TOuter = class
+      public
+        FInner: TInner;
+        procedure Go;
+      end;
+    procedure TOuter.Go;
+    var P: PInt;
+    begin
+      FInner := TInner.Create();
+      FInner.Arr[1] := 42;
+      SetLength(FInner.Dyn, 2);
+      FInner.Dyn[1] := 77;
+      P := @FInner.Arr[1];
+      WriteLn(P^);
+      P := @FInner.Dyn[1];
+      WriteLn(P^)
+    end;
+    var O: TOuter;
+    begin
+      O := TOuter.Create();
+      O.Go()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { @FInner.Arr[1] and @FInner.Dyn[1] must resolve through Self, not a
+    nonexistent %_var_FInner. }
+  AssertRunsOnAll(Src, '42' + LE + '77' + LE, 0);
 end;
 
 initialization

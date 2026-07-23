@@ -17933,6 +17933,32 @@ begin
     FldExpr := TFieldAccessExpr(AExpr.Expr);
     if FldExpr.Base <> nil then
       StrPtr := EmitInstancePtr(FldExpr.Base)
+    else if FldExpr.IsImplicitSelf then
+    begin
+      { Implicit-Self base MUST be tested before IsClassAccess: a bare
+        FInner.Arr[I] inside a method where FInner is a class-typed field of
+        Self has BOTH flags set.  Routing it through the IsClassAccess arm
+        below loads %_var_<FieldName> — not a variable, so qbe rejects the IR.
+        The internal IsClassAccess deref here is the correct handling
+        (BUG-20260723-qbe-addrof-implicitself-classfield-elem — the same
+        reorder as the EmitLValueAddr fix). }
+      StrPtr := AllocTemp();
+      EmitLine(Format('  %s =l loadl %%_var_Self', [StrPtr]));
+      if (FldExpr.ImplicitBaseInfo <> nil) and
+         (FldExpr.ImplicitBaseInfo.Offset > 0) then
+      begin
+        ObjPtr := AllocTemp();
+        EmitLine(Format('  %s =l add %s, %d',
+          [ObjPtr, StrPtr, FldExpr.ImplicitBaseInfo.Offset]));
+        StrPtr := ObjPtr;
+      end;
+      if FldExpr.IsClassAccess then
+      begin
+        ObjPtr := AllocTemp();
+        EmitLine(Format('  %s =l loadl %s', [ObjPtr, StrPtr]));
+        StrPtr := ObjPtr;
+      end;
+    end
     else if FldExpr.IsClassAccess then
     begin
       { Class field leaf: the variable's slot holds a POINTER to the heap
@@ -17945,25 +17971,6 @@ begin
       EmitLine(Format('  %s =l loadl %s',
         [StrPtr, VarRef(FldExpr.RecordName, FldExpr.IsGlobal)]));
       if FldExpr.IsVarParam then
-      begin
-        ObjPtr := AllocTemp();
-        EmitLine(Format('  %s =l loadl %s', [ObjPtr, StrPtr]));
-        StrPtr := ObjPtr;
-      end;
-    end
-    else if FldExpr.IsImplicitSelf then
-    begin
-      StrPtr := AllocTemp();
-      EmitLine(Format('  %s =l loadl %%_var_Self', [StrPtr]));
-      if (FldExpr.ImplicitBaseInfo <> nil) and
-         (FldExpr.ImplicitBaseInfo.Offset > 0) then
-      begin
-        ObjPtr := AllocTemp();
-        EmitLine(Format('  %s =l add %s, %d',
-          [ObjPtr, StrPtr, FldExpr.ImplicitBaseInfo.Offset]));
-        StrPtr := ObjPtr;
-      end;
-      if FldExpr.IsClassAccess then
       begin
         ObjPtr := AllocTemp();
         EmitLine(Format('  %s =l loadl %s', [ObjPtr, StrPtr]));
