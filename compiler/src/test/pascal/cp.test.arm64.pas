@@ -126,6 +126,7 @@ type
     procedure TestSetLengthString_LengthArgNotClobberedByX19Save;
     procedure TestNestedRecordFieldOfSelf_StoreAddsContainingOffset;
     procedure TestChr_ValueAllocatesButByteStoreKeepsOrdinal;
+    procedure TestVarParam_NotRetainedInPrologue;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2712,6 +2713,58 @@ begin
   AssertTrue('the byte store keeps the raw ordinal',
     Pos(#9'movz x0, #65', Body) >= 0);
   AssertTrue('a byte store is emitted', Pos(#9'strb w0, [x9]', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestVarParam_NotRetainedInPrologue;
+var
+  AsmT: string;
+  P, Q: Integer;
+  Body: string;
+  N: Integer;
+begin
+  { A var/out parameter is a BORROWED reference and its slot holds the ADDRESS
+    of the caller's variable, not a value.  The prologue must not retain it:
+    _StringAddRef would treat that address as a string data pointer and its
+    atomic refcount increment would land on unrelated memory.  On device that
+    increment corrupted a global holding a TStringList pointer, which crashed
+    on the next use (macOS arm64, 2026-07-23).
+
+    The retain loop excluded const params but not var/out.  Only the by-value
+    parameter below may be retained — exactly one _StringAddRef in the
+    prologue. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    procedure Take(var S: string; const C: string; V: string);
+    begin
+      S := S + 'x'
+    end;
+    var A, B, D: string;
+    begin
+      A := 'a'; B := 'b'; D := 'd';
+      Take(A, B, D);
+      WriteLn(A)
+    end.
+    ''');
+  P := Pos(#10'Take:', AsmT);
+  AssertTrue('Take is emitted', P >= 0);
+  { the prologue runs up to the first body instruction — bound the window by
+    the first string-literal materialisation in the body }
+  Q := PosEx('@PAGE', AsmT, P);
+  if Q < 0 then Q := P + 400;
+  Body := Copy(AsmT, P, Q - P);
+
+  { exactly one retain, and it must NOT be the var param's slot ([x29,#-8]) }
+  N := 0;
+  Q := Pos(#9'bl _StringAddRef', Body);
+  while Q >= 0 do
+  begin
+    N := N + 1;
+    Q := PosEx(#9'bl _StringAddRef', Body, Q + 1);
+  end;
+  AssertEquals('only the by-value string param is retained', 1, N);
+  AssertTrue('the var param slot is not the one retained',
+    Pos(#9'ldur x0, [x29, #-8]'#10#9'bl _StringAddRef', Body) < 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;

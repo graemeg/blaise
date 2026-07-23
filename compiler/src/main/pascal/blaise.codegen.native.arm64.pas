@@ -7747,28 +7747,38 @@ begin
       Self.Emit(#9'ldr x19, [sp], #16');
     end;
   end;
-  { by-value string params: retain the callee's copy (the caller keeps its
+  { BY-VALUE string params: retain the callee's copy (the caller keeps its
     own reference).  Runs after every register is parked — _StringAddRef
-    clobbers the caller-saved argument registers. }
+    clobbers the caller-saved argument registers.
+
+    A var/out param must be excluded as firmly as a const one.  Its slot holds
+    the ADDRESS of the caller's variable, not a value, so retaining it does not
+    merely over-retain — it hands _StringAddRef a pointer-to-a-pointer and the
+    atomic refcount increment lands on unrelated memory.  On device that
+    increment corrupted a global holding a TStringList pointer, which then
+    crashed on the next use (macOS arm64, 2026-07-23).  The record-param retain
+    loop just above already excludes var/out; these three never did.  The
+    scope-exit RELEASE side is already safe: the frame-setup loop returns early
+    for a var param, so it is never registered in FStrLocals/FIntfLocals/
+    FDynLocals. }
   for I := 0 to ADecl.Params.Count - 1 do
   begin
     Par := TMethodParam(ADecl.Params.Items[I]);
-    if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tyString) and
-       not Par.IsConstParam then
+    if (Par.ResolvedType = nil) or Par.IsConstParam or Par.IsVarParam then
+      Continue;
+    if Par.ResolvedType.Kind = tyString then
     begin
       EmitLoadSlot('x0', Par.ParamName);
       Self.Emit(#9'bl _StringAddRef');
     end;
-    if (Par.ResolvedType <> nil) and
-       (Par.ResolvedType.Kind = tyInterface) and not Par.IsConstParam then
+    if Par.ResolvedType.Kind = tyInterface then
     begin
       EmitLoadSlot('x0', Par.ParamName);
       Self.Emit(#9'bl _ClassAddRef');
     end;
     { by-value dyn-array param: co-owning copy — retain here, released with the
       dyn-array locals at scope exit (registered in FDynLocals above). }
-    if (Par.ResolvedType <> nil) and
-       (Par.ResolvedType.Kind = tyDynArray) and not Par.IsConstParam then
+    if Par.ResolvedType.Kind = tyDynArray then
     begin
       EmitLoadSlot('x0', Par.ParamName);
       Self.Emit(#9'bl _DynArrayAddRef');
