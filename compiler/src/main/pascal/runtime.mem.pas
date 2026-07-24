@@ -109,6 +109,18 @@ function  _libc_munmap(Addr: Pointer; Length: Int64): Integer;
             external name 'munmap';
 procedure _libc_memcpy(Dst, Src: Pointer; N: Int64); external name 'memcpy';
 
+{$IFDEF BLAISE_MEMDEBUG}
+{ Diagnostic-only: a double-free detector (BUG-20260724-arm64-classes-emit-
+  string-corruption).  Marks each small block freed; a second free of an
+  already-freed block writes a marker line to stderr and aborts, so the
+  abort's backtrace names the OVER-RELEASING caller (the emit site whose ARC
+  over-releases a string).  Compiled only under -dBLAISE_MEMDEBUG; never ships. }
+function  _libc_write(Fd: Integer; Buf: Pointer; N: Int64): Int64; external name 'write';
+procedure _libc_abort; external name 'abort';
+const
+  FREED_MARK = Integer($F2EEF2EE);   { in the freed block's Flags; != FLAG_SMALL/LARGE }
+{$ENDIF}
+
 { Thread-exit hook bindings (phase 5).  pthread_key_create registers a
   TSD destructor that pthreads runs on worker-thread exit; __cxa_atexit
   covers the main thread (key destructors do not run for it).  The
@@ -686,6 +698,9 @@ begin
     FreeLists[Idx] := Node^.Next;
     Hdr := PBlockHeader(Pointer(PtrUInt(Node) - HEADER_SIZE));
     Hdr^.AllocSize := Size;
+{$IFDEF BLAISE_MEMDEBUG}
+    Hdr^.Flags := FLAG_SMALL;   { block is live again — clear the freed marker }
+{$ENDIF}
     A := Hdr^.Arena;
     _AtomicAddInt64(@A^.LiveCount, 1);
     Exit(Pointer(Node));
@@ -730,6 +745,9 @@ begin
     FreeLists[Idx] := Node^.Next;
     Hdr := PBlockHeader(Pointer(PtrUInt(Node) - HEADER_SIZE));
     Hdr^.AllocSize := Size;
+{$IFDEF BLAISE_MEMDEBUG}
+    Hdr^.Flags := FLAG_SMALL;   { block is live again — clear the freed marker }
+{$ENDIF}
     A := Hdr^.Arena;
     _AtomicAddInt64(@A^.LiveCount, 1);
     Exit(Pointer(Node));
@@ -746,6 +764,14 @@ var
   Arena: PArena;
 begin
   Hdr := PBlockHeader(Pointer(PtrUInt(Ptr) - HEADER_SIZE));
+{$IFDEF BLAISE_MEMDEBUG}
+  if Hdr^.Flags = FREED_MARK then
+  begin
+    _libc_write(2, PChar('blaise memdebug: DOUBLE FREE of small block'#10), 43);
+    _libc_abort();
+  end;
+  Hdr^.Flags := FREED_MARK;
+{$ENDIF}
   Idx := SizeClassIndex(Hdr^.AllocSize);
   Arena := Hdr^.Arena;
 
