@@ -135,6 +135,8 @@ type
     procedure TestLengthOfEmptyString_NilGuarded;
     procedure TestUpCaseString_ConvertsToCharCodeFirst;
     procedure TestDefaultPropReadOnClassField_LoadsFieldReceiver;
+    procedure TestNarrowIntCompareUsesWReg_HighBitConst;
+    procedure TestInt64CompareStays64Bit;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -3238,6 +3240,70 @@ begin
     RecvP := Pos(#9'ldr x0, [x0]', Body);
   AssertTrue('the class field is dereferenced as the getter receiver',
     (RecvP >= 0) and (RecvP < GetP));
+end;
+
+procedure TArm64BackendTests.TestNarrowIntCompareUsesWReg_HighBitConst;
+var
+  AsmT: string;
+  P: Integer;
+  Body: string;
+begin
+  { A 32-bit Integer occupies only the low half of its 64-bit register, and the
+    upper half is NON-CANONICAL: a bit-31-set literal (Integer($FEEDFACF)) is
+    materialised SIGN-extended (0xFFFFFFFF_FEEDFACF), but a value COMPUTED via
+    shifts/or is left ZERO-extended (0x00000000_FEEDFACF).  A 64-bit `cmp x0,x1`
+    of the two says "not equal" though the low 32 bits match.  This rejected a
+    valid Mach-O object on-device: the reader's RdU32(o,0) <> MH_MAGIC_64 check
+    (MH_MAGIC_64 = Integer($FEEDFACF)) failed (macOS arm64, 2026-07-24).  A
+    32-bit-ordinal comparison must use `w` registers so the non-canonical upper
+    halves are ignored — mirroring the x86-64 backend's 32-bit cmpl. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    const K = Integer($FEEDFACF);
+    var B: Integer;
+    begin
+      B := $CF or ($FA shl 8) or ($ED shl 16) or ($FE shl 24);
+      if B = K then WriteLn('eq') else WriteLn('ne')
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  { the Integer compare uses 32-bit w registers, NOT 64-bit x }
+  AssertTrue('narrow-int compare uses w registers',
+    Pos(#9'cmp w0, w1', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestInt64CompareStays64Bit;
+var
+  AsmT: string;
+  P: Integer;
+  Body: string;
+begin
+  { The 32-bit `w` comparison must NOT be applied to Int64 operands — a 64-bit
+    value compared as `w` would ignore its high half and mis-compare.  An Int64
+    comparison must stay `cmp x0, x1`. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var a, b: Int64;
+    begin
+      a := 5000000000; b := 5000000000;
+      if a = b then WriteLn('eq') else WriteLn('ne')
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  AssertTrue('Int64 compare stays 64-bit (cmp x0, x1)',
+    Pos(#9'cmp x0, x1', Body) >= 0);
+  AssertTrue('Int64 compare does not downgrade to w',
+    Pos(#9'cmp w0, w1', Body) < 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;

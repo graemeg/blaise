@@ -474,6 +474,22 @@ begin
                     tySmallInt, tyWord, tyBoolean, tyEnum]);
 end;
 
+{ True when AType is a 32-bit-or-narrower integer/ordinal (NOT Int64/UInt64,
+  pointer, string, class or float).  Such a value occupies only the low 32 bits
+  of its 64-bit register, and the upper 32 bits are NON-CANONICAL: an Integer
+  LITERAL with bit 31 set is materialised sign-extended, but a value COMPUTED
+  via shifts/or (e.g. RdU32's byte assembly) is left zero-extended.  A 64-bit
+  compare of two such differently-extended values is wrong (the Mach-O reader's
+  MH_MAGIC_64 check rejected a valid object on-device, macOS arm64 2026-07-24).
+  Comparing these operands with 32-bit `w` registers ignores the non-canonical
+  upper halves, exactly as the x86-64 backend's 32-bit `cmpl` does. }
+function IsNarrow32Ord(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and
+    (AType.Kind in [tyInteger, tyUInt32, tyByte, tySmallInt, tyWord,
+                    tyBoolean, tyEnum]);
+end;
+
 { A method-pointer ('of object') or closure ('reference to') procedural type —
   a 16-byte FAT value: Code at +0, Data/Env at +8.  Mirrors the x86-64 unit's
   IsMethodPtrType.  A plain proc pointer (neither flag) is a single code
@@ -3223,7 +3239,15 @@ begin
         else
           CondName := 'ge';
         end;
-        Self.Emit(#9'cmp x0, x1');
+        { Compare 32-bit-ordinal operands as `w` — their upper 32 bits are
+          non-canonical (a bit-31-set literal is sign-extended, a computed value
+          zero-extended), so a 64-bit cmp of two such values can be wrong.
+          Int64/UInt64/pointer operands stay 64-bit (`x`). }
+        if IsNarrow32Ord(BE.Left.ResolvedType) and
+           IsNarrow32Ord(BE.Right.ResolvedType) then
+          Self.Emit(#9'cmp w0, w1')
+        else
+          Self.Emit(#9'cmp x0, x1');
         Self.Emit(Format(#9'cset x0, %s', [CondName]));
       end;
     else
