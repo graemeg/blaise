@@ -5397,7 +5397,12 @@ begin
     else if IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) then
     begin
       Self.EmitExprToX0(Arg);
-      Self.Emit(#9'mov w1, w0');
+      { Pass the full 64-bit value: EmitExprToX0 leaves a 32-bit Integer
+        SIGN-extended in x0, so a negative reads correctly as N.  `mov w1, w0`
+        would zero-extend the low 32 bits into x1, printing -1 as its unsigned
+        value 4294967295 (macOS arm64, 2026-07-24).  Mirrors the tyInt64 arm and
+        the IntToStr path, both of which pass x0 whole. }
+      Self.Emit(#9'mov x1, x0');
       Self.Emit(#9'movz w0, #1');
       Self.Emit(#9'bl _SysWriteInt');
     end

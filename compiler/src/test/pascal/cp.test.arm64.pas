@@ -139,6 +139,7 @@ type
     procedure TestInt64CompareStays64Bit;
     procedure TestImplicitSelfRecordReturnCall_LoadsSelf;
     procedure TestDefaultPropReadOnPlainVar_DelegatesToGetter;
+    procedure TestWriteLnInteger_PassesSignExtended;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -3409,6 +3410,42 @@ begin
   { the default-property getter is dispatched for the plain-var subscript }
   AssertTrue('the default-property getter is called for a plain-var subscript',
     Pos(#9'bl DPV_TBag_GetItem', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestWriteLnInteger_PassesSignExtended;
+var
+  AsmT: string;
+  P, WrP: Integer;
+  Body: string;
+begin
+  { WriteLn(Integer) passes the value to _SysWriteInt in x1.  EmitExprToX0
+    leaves a 32-bit Integer SIGN-extended in x0, so the argument move must keep
+    all 64 bits (mov x1, x0) — a `mov w1, w0` zero-extends the low 32 bits and
+    prints a negative as its unsigned value (WriteLn(-1) -> 4294967295;
+    macOS arm64, 2026-07-24).  IntToStr and the tyInt64 arm both pass x0 whole;
+    this pins the narrow-Integer WriteLn arm to do the same. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var I: Integer;
+    begin
+      I := -1;
+      WriteLn(I)
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  WrP := Pos(#9'bl _SysWriteInt', Body);
+  AssertTrue('_SysWriteInt is called', WrP >= 0);
+  { the arg move before the call must be the full 64-bit mov x1, x0, NOT the
+    zero-extending mov w1, w0 }
+  AssertTrue('the WriteLn Integer arg is passed sign-extended (mov x1, x0)',
+    Pos(#9'mov x1, x0'#10#9'movz w0, #1'#10#9'bl _SysWriteInt', Body) >= 0);
+  AssertTrue('the zero-extending mov w1, w0 is not used for WriteInt',
+    Pos(#9'mov w1, w0'#10#9'movz w0, #1'#10#9'bl _SysWriteInt', Body) < 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;
