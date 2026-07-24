@@ -2529,6 +2529,20 @@ begin
     if SameText(TFuncCallExpr(AExpr).Name, 'UpCase') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      { _UpCase takes an INTEGER char code.  A STRING argument (UpCase(Chr(C)),
+        UpCase(S[i]), etc.) must first be reduced to its first char's code via
+        _OrdAt(S, 0) — passing the string POINTER straight through makes _UpCase
+        run _Chr on the pointer, yielding a char whose code is the pointer's low
+        byte (garbage).  This broke DirectiveName/DirectiveArg (UpCase(Chr(C))),
+        which silently disabled ALL $IFDEF/$ELSE conditional compilation on the
+        arm64 build (macOS arm64, 2026-07-24).  Mirror the x86-64 backend. }
+      if (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
+         TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.IsString()
+      then
+      begin
+        Self.Emit(#9'mov x1, #0');
+        Self.Emit(#9'bl _OrdAt');
+      end;
       Self.Emit(#9'bl _UpCase');
       Exit;
     end;

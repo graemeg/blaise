@@ -133,6 +133,7 @@ type
     procedure TestRecordElemOfDynArrayField_ReadDerefsAndIndexes;
     procedure TestByteVsCharLiteralCompare_FoldsToOrdinal;
     procedure TestLengthOfEmptyString_NilGuarded;
+    procedure TestUpCaseString_ConvertsToCharCodeFirst;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -3132,6 +3133,46 @@ begin
   CbzP := Pos(#9'cbz x0, ', Body);
   AssertTrue('a nil guard precedes the length read',
     (CbzP >= 0) and (CbzP < LdurP));
+end;
+
+procedure TArm64BackendTests.TestUpCaseString_ConvertsToCharCodeFirst;
+var
+  AsmT: string;
+  P, OrdP, UpP: Integer;
+  Body: string;
+begin
+  { _UpCase takes an INTEGER char code.  A STRING argument — UpCase(Chr(C)),
+    UpCase(S[i]), UpCase(someStringVar) — must first be reduced to its first
+    char's code via _OrdAt(S, 0); passing the string POINTER straight into
+    _UpCase makes it run _Chr on the pointer and return a char whose code is the
+    pointer's low byte (garbage).  arm64 omitted the conversion, which corrupted
+    the compiler's own DirectiveName/DirectiveArg (both build uppercased names
+    via UpCase(Chr(C))) and thereby silently disabled ALL $IFDEF/$ELSE
+    conditional compilation — runtime.atomic then emitted both its arm64 and
+    x86-64 asm branches and produced a duplicate _AtomicAddInt32 label
+    (macOS arm64, 2026-07-24).  The x86-64 backend does the _OrdAt conversion;
+    this pins it for arm64. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var S: string;
+    begin
+      S := 'a';
+      WriteLn(UpCase(S))
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  { the string arg is converted to its first char's code (_OrdAt) BEFORE _UpCase }
+  OrdP := Pos(#9'bl _OrdAt', Body);
+  UpP := Pos(#9'bl _UpCase', Body);
+  AssertTrue('a string UpCase arg is reduced via _OrdAt', OrdP >= 0);
+  AssertTrue('_UpCase is called', UpP >= 0);
+  AssertTrue('the _OrdAt conversion precedes the _UpCase call',
+    (OrdP >= 0) and (OrdP < UpP));
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;
