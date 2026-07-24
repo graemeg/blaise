@@ -131,6 +131,7 @@ type
     procedure TestVarParam_NotRetainedInPrologue;
     procedure TestInterfaceReturnToGlobal_ItabHalfFromSourceNotDest;
     procedure TestRecordElemOfDynArrayField_ReadDerefsAndIndexes;
+    procedure TestByteVsCharLiteralCompare_FoldsToOrdinal;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -3040,6 +3041,56 @@ begin
   AssertTrue('the index is scaled by the element size', MulP >= 0);
   AssertTrue('element size 16 is materialised for the scale',
     Pos(#9'movz x2, #16', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestByteVsCharLiteralCompare_FoldsToOrdinal;
+var
+  AsmT: string;
+  P: Integer;
+  Body: string;
+begin
+  { Blaise has no Char type, so a single-character literal like '/' is a
+    one-character STRING.  When it is compared against a byte/ordinal value
+    (BufP[I] = '/'), the semantic pass marks the literal IsCharCoerce so the
+    codegen folds it to its ordinal (47).  arm64's EmitExprToX0 ignored that
+    flag and always emitted the string's DATA POINTER, so `BufP[I] = '/'`
+    compared a byte against a ~0x1003e408c address — never equal.  This broke
+    the RTL's ForceDirectories slash-scan (it matched no '/' and created no
+    directory), which stalled the whole on-device RTL/link build (macOS arm64,
+    2026-07-24).  The x86-64 backend folds via the same flag; this test pins
+    the arm64 fold for both operand orders and for `<>`. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var S: string; Pp: PChar; N: Integer;
+    begin
+      S := 'a/b';
+      Pp := PChar(S);
+      N := 0;
+      if Pp[1] = '/' then N := N + 1;
+      if '/' = Pp[1] then N := N + 10;
+      if Pp[0] <> '/' then N := N + 100;
+      WriteLn(N)
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  { the byte read is present ... }
+  AssertTrue('the byte element is read', Pos(#9'ldrb w0, [x0]', Body) >= 0);
+  { ... and the char literal '/' is materialised as its ordinal 47, NOT as a
+    string-constant address }
+  AssertTrue('the char literal is folded to its ordinal 47',
+    Pos(#9'movz x0, #47', Body) >= 0);
+  { there must be at least three ordinal folds (one per compare, both operand
+    orders and the <>) — the count guards against only one arm being fixed }
+  AssertTrue('all three char compares fold to the ordinal',
+    (Pos(#9'movz x0, #47', Body) > 0) and
+    (PosEx(#9'movz x0, #47', Body,
+       PosEx(#9'movz x0, #47', Body,
+         Pos(#9'movz x0, #47', Body) + 1) + 1) > 0));
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;

@@ -2115,7 +2115,15 @@ begin
   end;
   if AExpr is TStringLiteral then
   begin
-    EmitStrLitAddr(TStringLiteral(AExpr).Value);
+    if TStringLiteral(AExpr).IsCharCoerce then
+      { char/ordinal context (e.g. BufP[I] = '/'): the semantic pass marked
+        this single-char literal for ordinal coercion.  Emitting the data
+        pointer here would compare a byte against the string's ADDRESS — always
+        false — which broke the RTL's ForceDirectories slash-scan on arm64
+        (macOS arm64, 2026-07-24).  Mirror the x86-64 backend's fold. }
+      EmitIntLiteral('x0', TStringLiteral(AExpr).CharOrdValue)
+    else
+      EmitStrLitAddr(TStringLiteral(AExpr).Value);
     Exit;
   end;
   if (AExpr is TIdentExpr) and TIdentExpr(AExpr).IsMetaclassRef then
