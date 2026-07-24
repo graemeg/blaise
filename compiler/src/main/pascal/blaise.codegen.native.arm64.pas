@@ -60,6 +60,11 @@ const
     ordinary AddLocal slots in every frame — no .bss dual path. }
   PENDREL_SLOTS = 8;
 
+  { Fixed x29-relative pool for parking owned-string-transient call args across
+    a call (see ReservePendRelSlots).  A single call rarely passes more than a
+    few owned string transients; overflow is a NotYet, not silent corruption. }
+  STRTRANS_SLOTS = 8;
+
 type
   TArm64Backend = class(TNativeBackend)
   private
@@ -669,6 +674,16 @@ begin
   for I := 0 to PENDREL_SLOTS - 1 do
     AddLocal(Format('_pendrel_%d', [I]), 8);
   FPendingRelCount := 0;
+  { Owned-string-transient CALL-ARG park slots (x29-relative, STABLE across the
+    call's own arg pushes/pops and the post-call result spills).  A call parks
+    each owned-string-transient arg here pre-call and reloads it post-call for
+    its single dispose.  Previously these were kept in sp-relative outgoing-area
+    slots, whose offset the arg pushes AND the result/d0 spills perturbed — the
+    reload read a NEIGHBOURING (borrowed) string and freed it, poisoning the
+    allocator (BUG-20260724-arm64-transient-arg-reload-off / classes-emit UAF).
+    A fixed x29-relative pool sidesteps all sp arithmetic. }
+  for I := 0 to STRTRANS_SLOTS - 1 do
+    AddLocal(Format('__strtrans_%d', [I]), 8);
 end;
 
 function TArm64Backend.DeferNativeClassRelease: Boolean;
@@ -8844,8 +8859,9 @@ begin
         EmitPushX0();
         if ArcExprOwnsRef(Arg) then
         begin
-          Self.Emit(Format(#9'str x0, [sp, #%d]',
-            [(PopRegs.Count + 1) * 16 + TransBase + TransN * 8]));
+          if TransN >= STRTRANS_SLOTS then
+            NotYet('more than 8 owned string transient args in one call', Arg);
+          EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
           TransShapes := TransShapes + '1';
           Inc(TransN);
         end
@@ -8853,8 +8869,9 @@ begin
                 (I < ADecl.Params.Count) and
                 TMethodParam(ADecl.Params.Items[I]).IsConstParam then
         begin
-          Self.Emit(Format(#9'str x0, [sp, #%d]',
-            [(PopRegs.Count + 1) * 16 + TransBase + TransN * 8]));
+          if TransN >= STRTRANS_SLOTS then
+            NotYet('more than 8 owned string transient args in one call', Arg);
+          EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
           TransShapes := TransShapes + '0';
           Inc(TransN);
         end;
@@ -8947,8 +8964,9 @@ begin
         begin
           { owned class transient: the callee borrows it — park the +1
             for one post-call release (shape 'C') }
-          Self.Emit(Format(#9'str x0, [sp, #%d]',
-            [(PopRegs.Count + 1) * 16 + TransBase + TransN * 8]));
+          if TransN >= STRTRANS_SLOTS then
+            NotYet('more than 8 owned transient args in one call', Arg);
+          EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
           TransShapes := TransShapes + 'C';
           Inc(TransN);
         end;
@@ -9040,7 +9058,10 @@ begin
     Self.Emit(#9'str x9, [sp, #-16]!');
     for I := 0 to TransN - 1 do
     begin
-      Self.Emit(Format(#9'ldr x0, [sp, #%d]', [32 + TransBase + I * 8]));
+      { reload from the x29-relative park slot — stable across the arg pushes,
+        the pop-walk, and the two result-preserving pushes above (the old
+        sp-relative offset drifted with all three and freed the wrong string). }
+      EmitLoadSlot('x0', Format('__strtrans_%d', [I]));
       if Copy(TransShapes, I, 1) = 'C' then
       begin
         { owned class transient: one release drops the borrowed +1 }

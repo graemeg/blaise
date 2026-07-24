@@ -140,6 +140,7 @@ type
     procedure TestImplicitSelfRecordReturnCall_LoadsSelf;
     procedure TestDefaultPropReadOnPlainVar_DelegatesToGetter;
     procedure TestWriteLnInteger_PassesSignExtended;
+    procedure TestOwnedStrTransientArgs_ParkedInStableSlots;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -3448,6 +3449,89 @@ begin
     Pos(#9'mov w1, w0'#10#9'movz w0, #1'#10#9'bl _SysWriteInt', Body) < 0);
 end;
 
+procedure TArm64BackendTests.TestOwnedStrTransientArgs_ParkedInStableSlots;
+var
+  AsmT: string;
+  P, C1, C2, R1, R2, L1, L2, NL: Integer;
+  Body, Store1, Store2, Load1, Load2: string;
+begin
+  { Owned string transients passed as call args are parked before the call and
+    reloaded afterwards for a single dispose.  When a call has TWO of them
+    (Store('x'+IntToStr(J), N.Name + '_high') — both args are concats), the old
+    sp-relative park/reload offsets DID NOT AGREE across the arg pushes, the
+    pop-walk and the two post-call result spills: the reload read a NEIGHBOURING
+    (borrowed) string and freed it, poisoning the allocator — the round-27/28
+    Classes-emit use-after-free cascade (macOS arm64, 2026-07-24).  The fix parks
+    each transient in a FIXED x29-relative slot (__strtrans_N, stur/ldur [x29,#..]),
+    stable across all that sp churn.  Pin: each transient's park (stur x0,[x29,#N])
+    and its disposal reload (ldur x0,[x29,#N]) name the SAME x29 slot, and the two
+    transients use DIFFERENT slots. }
+  AsmT := GenAsmWithUnit(
+    '''
+    unit STU;
+    interface
+    type
+      TNode = class
+        Name: string;
+      end;
+    procedure Store(const AReg, AName: string);
+    implementation
+    procedure Store(const AReg, AName: string);
+    begin
+      WriteLn(AReg, AName)
+    end;
+    end.
+    ''',
+    '''
+    program P;
+    uses SysUtils, STU;
+    var N: TNode; J: Integer;
+    begin
+      N := TNode.Create();
+      N.Name := 'items';
+      J := 3;
+      Store('x' + IntToStr(J), N.Name + '_high')
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  { the two concat results are each parked with `stur x0, [x29, #N]` after their
+    _StringConcat }
+  C1 := Pos(#9'bl _StringConcat', Body);
+  AssertTrue('first concat built', C1 >= 0);
+  R1 := PosEx(#9'stur x0, [x29, #', Body, C1);
+  AssertTrue('first transient parked at an x29 slot', R1 >= 0);
+  NL := PosEx(#10, Body, R1);  Store1 := Copy(Body, R1, NL - R1);
+
+  C2 := PosEx(#9'bl _StringConcat', Body, C1 + 1);
+  AssertTrue('second concat built', C2 >= 0);
+  R2 := PosEx(#9'stur x0, [x29, #', Body, C2);
+  AssertTrue('second transient parked at an x29 slot', R2 >= 0);
+  NL := PosEx(#10, Body, R2);  Store2 := Copy(Body, R2, NL - R2);
+
+  { the two disposal reloads (after the call) name the SAME two slots }
+  P := Pos(#9'bl STU_Store', Body);
+  AssertTrue('the Store call is emitted', P >= 0);
+  L1 := PosEx(#9'ldur x0, [x29, #', Body, P);
+  AssertTrue('first transient reloaded', L1 >= 0);
+  NL := PosEx(#10, Body, L1);  Load1 := Copy(Body, L1, NL - L1);
+  L2 := PosEx(#9'ldur x0, [x29, #', Body, L1 + 1);
+  AssertTrue('second transient reloaded', L2 >= 0);
+  NL := PosEx(#10, Body, L2);  Load2 := Copy(Body, L2, NL - L2);
+
+  { park slot i == reload slot i (compare the [x29, #N] operand) }
+  AssertEquals('transient 0 parked and reloaded from the same x29 slot',
+    Copy(Store1, 6, Length(Store1)), Copy(Load1, 6, Length(Load1)));
+  AssertEquals('transient 1 parked and reloaded from the same x29 slot',
+    Copy(Store2, 6, Length(Store2)), Copy(Load2, 6, Length(Load2)));
+  { and the two transients use DIFFERENT slots }
+  AssertTrue('the two transients occupy distinct x29 slots',
+    Store1 <> Store2);
+end;
+
 procedure TArm64BackendTests.TestInterfaces_StringArg;
 var
   AsmT: string;
@@ -3557,8 +3641,12 @@ begin
     const rc=0 concat arg: caller pins (AddRef+Release) after the call }
   PosCall := Pos(#9'bl Show', AsmT);
   AssertTrue('calls emitted', PosCall >= 0);
-  AssertTrue('rc=1 arg parked in the outgoing area',
-    Pos('ldr x0, [sp, #32]', AsmT) >= 0);
+  { the rc=1 transient is parked in a STABLE x29-relative slot (__strtrans_N),
+    not the sp-relative outgoing area whose offset the arg/result spills perturbed
+    (BUG-20260724-arm64-transient-arg-reload-off) — so its disposal reload is a
+    ldur from [x29, #..]. }
+  AssertTrue('rc=1 arg parked in an x29-relative slot',
+    Pos(#9'ldur x0, [x29, #', AsmT) >= 0);
   PosCall := Pos(#9'bl ShowC', AsmT);
   AssertTrue('const call emitted', PosCall >= 0);
   PosRel := PosEx(#9'bl _StringAddRef', AsmT, PosCall);
