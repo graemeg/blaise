@@ -6378,6 +6378,23 @@ begin
     EmitCall(MD, ME.Name, ME.Args, ADest, True, MD.VTableSlot);
     Exit;
   end;
+  { A bare method call on implicit Self that returns a record (P := Make;) is a
+    TFuncCallExpr with IsImplicitSelfMethod — it needs the SAME receiver setup a
+    method call does (x0 := Self, pushed for EmitCall's method convention).  The
+    scalar implicit-Self path (EmitExprToX0) rejects aggregate returns and sends
+    them here, so without this the record-return free-function fallthrough below
+    called the method with NO Self — ComputeLayout()/Make() ran with Self=nil and
+    faulted on the first field read (macOS arm64, 2026-07-24, Mach-O exe layout). }
+  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsImplicitSelfMethod and
+     (TFuncCallExpr(AExpr).ResolvedDecl <> nil) then
+  begin
+    MD := TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl);
+    EmitLoadSlot('x0', 'Self');
+    EmitPushX0();
+    EmitCall(MD, TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args,
+      ADest, True, MD.VTableSlot);
+    Exit;
+  end;
   EmitCall(TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl),
     TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args, ADest);
 end;

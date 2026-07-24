@@ -137,6 +137,7 @@ type
     procedure TestDefaultPropReadOnClassField_LoadsFieldReceiver;
     procedure TestNarrowIntCompareUsesWReg_HighBitConst;
     procedure TestInt64CompareStays64Bit;
+    procedure TestImplicitSelfRecordReturnCall_LoadsSelf;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -3304,6 +3305,59 @@ begin
     Pos(#9'cmp x0, x1', Body) >= 0);
   AssertTrue('Int64 compare does not downgrade to w',
     Pos(#9'cmp w0, w1', Body) < 0);
+end;
+
+procedure TArm64BackendTests.TestImplicitSelfRecordReturnCall_LoadsSelf;
+var
+  AsmT: string;
+  P, SelfP, CallP: Integer;
+  Body: string;
+begin
+  { A bare method call on implicit Self that returns a RECORD by value
+    (P := Make;) is a TFuncCallExpr with IsImplicitSelfMethod.  The scalar
+    implicit-Self path rejects aggregate returns and routes it to
+    EmitRecCallDispatch, whose free-function fallthrough called the method with
+    NO receiver — so the callee ran with Self = nil and faulted on its first
+    field read.  On device this crashed the Mach-O writer: Finish's
+    `L := ComputeLayout` (a 7xInt64-returning method on Self) got Self = nil
+    (macOS arm64, 2026-07-24).  The receiver load (x0 := Self) must be emitted
+    for the record-return call exactly as for the scalar/method path. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TPair = record A, B: Int64; end;
+      TC = class
+        F: Int64;
+        function Make: TPair;
+        function Use: Int64;
+      end;
+    function TC.Make: TPair;
+    begin
+      Result.A := Self.F;
+      Result.B := 2
+    end;
+    function TC.Use: Int64;
+    var Q: TPair;
+    begin
+      Q := Make();
+      Result := Q.A
+    end;
+    var C: TC;
+    begin
+      C := TC.Create();
+      C.F := 7;
+      WriteLn(C.Use())
+    end.
+    ''');
+  P := Pos(#10'TC_Use:', AsmT);
+  AssertTrue('TC_Use emitted', P >= 0);
+  { the getter is called; Self ([x29,#-8]) must be loaded before the call }
+  CallP := PosEx(#9'bl TC_Make', AsmT, P);
+  AssertTrue('the record-returning method is called', CallP >= 0);
+  SelfP := PosEx(#9'ldur x0, [x29, #-8]', AsmT, P);
+  AssertTrue('Self is loaded as the receiver before the record-return call',
+    (SelfP >= 0) and (SelfP < CallP));
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;
