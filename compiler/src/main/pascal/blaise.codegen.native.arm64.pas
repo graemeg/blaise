@@ -3268,6 +3268,19 @@ begin
       '', True, VIRT_NONE);
     Exit;
   end;
+  { Default/indexed property read Obj[I] (e.g. L[0] on a TStringList): the
+    semantic pass folds the index into StrExpr — a TFieldAccessExpr with PropRead
+    and PropIndexExpr set — and leaves the SUBSCRIPT'S own IndexExpr nil.  This
+    must be caught BEFORE the string-subscript case below, which would take the
+    nil IndexExpr as a byte index and EmitExprToX0(nil) → compiler segfault
+    (macOS arm64, 2026-07-24).  Delegate to the StrExpr, mirroring x86-64. }
+  if (AExpr is TStringSubscriptExpr) and
+     (TStringSubscriptExpr(AExpr).StrExpr is TFieldAccessExpr) and
+     (TFieldAccessExpr(TStringSubscriptExpr(AExpr).StrExpr).PropRead <> nil) then
+  begin
+    Self.EmitExprToX0(TStringSubscriptExpr(AExpr).StrExpr);
+    Exit;
+  end;
   if (AExpr is TStringSubscriptExpr) and
      (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) and
      ((TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyPChar) or

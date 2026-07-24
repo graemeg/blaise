@@ -138,6 +138,7 @@ type
     procedure TestNarrowIntCompareUsesWReg_HighBitConst;
     procedure TestInt64CompareStays64Bit;
     procedure TestImplicitSelfRecordReturnCall_LoadsSelf;
+    procedure TestDefaultPropReadOnPlainVar_DelegatesToGetter;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -3358,6 +3359,56 @@ begin
   SelfP := PosEx(#9'ldur x0, [x29, #-8]', AsmT, P);
   AssertTrue('Self is loaded as the receiver before the record-return call',
     (SelfP >= 0) and (SelfP < CallP));
+end;
+
+procedure TArm64BackendTests.TestDefaultPropReadOnPlainVar_DelegatesToGetter;
+var
+  AsmT: string;
+  P: Integer;
+  Body: string;
+begin
+  { Reading the DEFAULT indexed property of a PLAIN variable as a value (L[0] on
+    a bare list variable, not a field) is parsed as a TStringSubscriptExpr whose
+    StrExpr is a TFieldAccessExpr (the default property, PropRead set) with the
+    index folded into StrExpr.PropIndexExpr — the SUBSCRIPT's own IndexExpr is
+    nil.  arm64 had no case for this shape, so it fell into the string-subscript
+    (S[i]) arm and did EmitExprToX0(nil) on the missing index → the COMPILER
+    segfaulted during codegen (macOS arm64, 2026-07-24,
+    BUG-20260724-arm64-default-prop-subscript-plainvar-crash).  The fix delegates
+    to StrExpr, mirroring x86-64.  This test both proves the compiler does NOT
+    crash on this shape and that the getter is dispatched. }
+  AsmT := GenAsmWithUnit(
+    '''
+    unit DPV;
+    interface
+    type
+      TBag = class
+      private
+        function GetItem(I: Integer): Integer;
+      public
+        property Items[I: Integer]: Integer read GetItem; default;
+      end;
+    implementation
+    function TBag.GetItem(I: Integer): Integer; begin Result := I end;
+    end.
+    ''',
+    '''
+    program P;
+    uses DPV;
+    var B: TBag; N: Integer;
+    begin
+      B := TBag.Create();
+      N := B[3];
+      WriteLn(N)
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted (compiler did not crash on B[3])', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+  { the default-property getter is dispatched for the plain-var subscript }
+  AssertTrue('the default-property getter is called for a plain-var subscript',
+    Pos(#9'bl DPV_TBag_GetItem', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;
