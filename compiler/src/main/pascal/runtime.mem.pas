@@ -121,6 +121,24 @@ const
   FREED_MARK = Integer($F2EEF2EE);   { in the freed block's Flags; != FLAG_SMALL/LARGE }
 {$ENDIF}
 
+{$IFDEF BLAISE_MEMPOISON}
+{ Diagnostic-only: poison + quarantine (BUG-20260724-arm64-classes-emit-string-
+  corruption).  A plain double-free detector aborts at the SECOND free (the
+  victim of an aliasing cascade), not the over-releaser.  This variant instead
+  makes the FIRST stale USE of an over-released block fault:
+    * on free, the block's payload is memset to 0xAA and the block is held in a
+      per-thread QUARANTINE ring (its reuse deferred by QUARANTINE_N frees);
+    * only when evicted from the ring does the block go back on the freelist.
+  So an over-released string that is still referenced keeps its 0xAA poison —
+  a later read of it sees a huge/garbage length (0xAAAAAAAA) and faults AT the
+  reference that outlived the free, whose backtrace names the true over-release.
+  Compiled only under -dBLAISE_MEMPOISON; never ships. }
+procedure _libc_memset(Dst: Pointer; Val: Integer; N: Int64); external name 'memset';
+const
+  QUARANTINE_N = 256;   { blocks held before reuse — deep enough to outlast a
+                          stale reference, small enough to bound memory. }
+{$ENDIF}
+
 { Thread-exit hook bindings (phase 5).  pthread_key_create registers a
   TSD destructor that pthreads runs on worker-thread exit; __cxa_atexit
   covers the main thread (key destructors do not run for it).  The
@@ -255,6 +273,13 @@ threadvar
   TidAnchor: Int64;
   FreeDrainCounter: Integer;
   DrainCursor: PArena;
+{$IFDEF BLAISE_MEMPOISON}
+  { poison+quarantine ring (diagnostic) — QRing[QIdx] is the next slot to fill;
+    filling an occupied slot first evicts its (older) block to the real free
+    path.  Sized QUARANTINE_N. }
+  QRing: array[0..255] of Pointer;
+  QIdx:  Integer;
+{$ENDIF}
   { True once this thread's exit hook is armed (pthread_setspecific with a
     non-nil value, so the TSD destructor fires at thread exit). }
   ExitHookArmed: Boolean;
@@ -762,6 +787,9 @@ var
   Idx: Integer;
   Node: PFreeNode;
   Arena: PArena;
+{$IFDEF BLAISE_MEMPOISON}
+  QPtr: Pointer;
+{$ENDIF}
 begin
   Hdr := PBlockHeader(Pointer(PtrUInt(Ptr) - HEADER_SIZE));
 {$IFDEF BLAISE_MEMDEBUG}
@@ -771,6 +799,21 @@ begin
     _libc_abort();
   end;
   Hdr^.Flags := FREED_MARK;
+{$ENDIF}
+{$IFDEF BLAISE_MEMPOISON}
+  { Poison this block's payload with 0xAA and quarantine it: swap it into the
+    ring's current slot, and continue the real free with whatever OLDER block
+    that slot held (nil on a cold slot → nothing more to free this call).  The
+    poisoned block is thus NOT reusable for QUARANTINE_N frees, so a stale read
+    of an over-released string sees 0xAAAAAAAA and faults near the culprit. }
+  _libc_memset(Ptr, $AA, Hdr^.AllocSize);
+  QPtr := QRing[QIdx];
+  QRing[QIdx] := Ptr;
+  QIdx := QIdx + 1;
+  if QIdx >= QUARANTINE_N then QIdx := 0;
+  if QPtr = nil then Exit;            { ring not yet full — defer this free }
+  Ptr := QPtr;                        { free the evicted (oldest) block instead }
+  Hdr := PBlockHeader(Pointer(PtrUInt(Ptr) - HEADER_SIZE));
 {$ENDIF}
   Idx := SizeClassIndex(Hdr^.AllocSize);
   Arena := Hdr^.Arena;
