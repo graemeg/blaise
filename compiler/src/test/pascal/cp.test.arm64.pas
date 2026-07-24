@@ -130,6 +130,7 @@ type
     procedure TestChr_ValueAllocatesButByteStoreKeepsOrdinal;
     procedure TestVarParam_NotRetainedInPrologue;
     procedure TestInterfaceReturnToGlobal_ItabHalfFromSourceNotDest;
+    procedure TestRecordElemOfDynArrayField_ReadDerefsAndIndexes;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -2963,6 +2964,82 @@ begin
     AssertTrue('no source itab load reuses x9 after the object store',
       LdrP < 0);
   end;
+end;
+
+procedure TArm64BackendTests.TestRecordElemOfDynArrayField_ReadDerefsAndIndexes;
+var
+  AsmT: string;
+  P, DerefP, MulP, MemcpyP: Integer;
+  Body: string;
+begin
+  { Reading a record-typed ELEMENT of a DYNAMIC-ARRAY FIELD of a class object
+    as an rvalue (R := Obj.ArrField[I], e.g. TMachOObjectWriter.Finish's
+    `R := Sec.Relocs[J]`).  The semantic pass folds this into ONE
+    TFieldAccessExpr with IsArrayAccess=True whose ResolvedType is the ELEMENT
+    record.  EmitRecFieldAddrToX0 must route that through the array-element
+    addressing (deref the dynarray data pointer, then add index*elemsize), NOT
+    treat it as a plain record-typed field and hand back &field-slot.
+
+    The buggy arm64 path computed `add x0, x0, #<fieldoff>` and stopped —
+    reading the dynarray HEADER (its data pointer + count) as the record.  The
+    STORE side (Obj.ArrField[i] := R) already dereferenced+indexed, so the value
+    round-tripped on x86-64 but not on the arm64-built compiler: this is exactly
+    the corruption behind the Mach-O writer reading a bogus relocation
+    (macOS arm64, 2026-07-24). }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TItem = record
+        A: Integer;
+        B: Integer;
+        C: Int64;
+      end;
+      TBag = class
+        Pad1: Integer;
+        Pad2: Integer;
+        Items: array of TItem;
+        Count: Integer;
+        procedure Fill;
+        function Read0: Integer;
+      end;
+    procedure TBag.Fill;
+    var R: TItem; L: TBag;
+    begin
+      L := Self;
+      R.A := 111; R.B := 222; R.C := 333;
+      L.Items[0] := R
+    end;
+    function TBag.Read0: Integer;
+    var R: TItem; L: TBag;
+    begin
+      L := Self;
+      R := L.Items[0];
+      Result := R.A
+    end;
+    var Bag: TBag;
+    begin
+      Bag := TBag.Create();
+      WriteLn(Bag.Read0())
+    end.
+    ''');
+  P := Pos(#10'TBag_Read0:', AsmT);
+  AssertTrue('Read0 emitted', P >= 0);
+  { bound the window to the Read0 body up to the first memcpy (the element copy) }
+  MemcpyP := PosEx(#9'bl memcpy', AsmT, P);
+  AssertTrue('element copy present', MemcpyP >= 0);
+  Body := Copy(AsmT, P, MemcpyP - P);
+
+  { the dynarray field must be DEREFERENCED (ldr x0,[x0]) — reading the data
+    pointer — not left as the bare field-slot address }
+  DerefP := Pos(#9'ldr x0, [x0]', Body);
+  AssertTrue('dynarray field data pointer is dereferenced', DerefP >= 0);
+
+  { the subscript must be scaled by the 16-byte element size and added in }
+  MulP := Pos(#9'mul ', Body);
+  AssertTrue('the index is scaled by the element size', MulP >= 0);
+  AssertTrue('element size 16 is materialised for the scale',
+    Pos(#9'movz x2, #16', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;

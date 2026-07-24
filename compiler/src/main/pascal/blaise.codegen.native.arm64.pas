@@ -871,6 +871,19 @@ begin
     record-typed field and the outer access needs its address }
   if AFA.FieldInfo = nil then
     NotYet('address of an unresolved field', AFA);
+  { record-typed ELEMENT of an array field (Obj.ArrField[I] as an rvalue, e.g.
+    Sec.Relocs[J]): the field itself is an array, not the record — its element
+    address needs the subscript scaled in AND, for a dynarray field, the data
+    pointer DEREFERENCED.  EmitFieldElemAddr does exactly that.  Falling through
+    to the plain-field path below yields &field-slot (missing both the deref and
+    the index), which reads the dynarray header/neighbouring fields as the
+    record — the arm64-only store/read asymmetry behind the Mach-O writer's
+    corrupt-reloc crash (macOS arm64, 2026-07-24). }
+  if AFA.IsArrayAccess then
+  begin
+    EmitFieldElemAddr(AFA);
+    Exit;
+  end;
   if AFA.Base <> nil then
   begin
     if AFA.IsClassAccess then
