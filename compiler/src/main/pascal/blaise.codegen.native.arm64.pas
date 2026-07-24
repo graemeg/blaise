@@ -260,6 +260,7 @@ type
       single-character string literal, whose normal lowering yields the
       literal's data ADDRESS.  Both fold to the ordinal directly; anything else
       evaluates normally. }
+    procedure EmitStrLen(const AReg: string);
     procedure EmitByteRhsToX0(AValueExpr: TASTExpr);
     { Advance the base pointer in AReg from Self across an implicit-Self
       intermediate field (Self.FIntermediate.Member).  If FIntermediate is an
@@ -1983,6 +1984,25 @@ begin
     EmitAddSubImm('add', AReg, AReg, ABaseInfo.Offset);
 end;
 
+procedure TArm64Backend.EmitStrLen(const AReg: string);
+var
+  NilL: string;
+begin
+  { AReg holds a string DATA pointer; replace it with the string's length.
+    In Blaise a nil pointer IS the empty string, so the header read at
+    [ptr-8] must be nil-guarded (a bare read of [nil-8] faults) — mirrors
+    _StringLength / StrLen, which return 0 for nil. }
+  NilL := NewLabel('slen0');
+  Self.Emit(Format(#9'cbz %s, %s', [AReg, NilL]));
+  Self.Emit(Format(#9'ldur w0, [%s, #-8]', [AReg]));
+  if AReg <> 'x0' then
+    Self.Emit(Format(#9'mov %s, x0', [AReg]));
+  Self.Emit(Format(#9'b %s_done', [NilL]));
+  Self.Emit(NilL + ':');
+  Self.Emit(Format(#9'movz %s, #0', [AReg]));
+  Self.Emit(NilL + '_done:');
+end;
+
 procedure TArm64Backend.EmitByteRhsToX0(AValueExpr: TASTExpr);
 var
   FC: TFuncCallExpr;
@@ -2353,14 +2373,19 @@ begin
      TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.IsString()
      and SameText(TFuncCallExpr(AExpr).Name, 'Length') then
   begin
-    { Length(S): 4-byte length 8 bytes below the data pointer.  A
-      transient argument is disposed by shape with the length parked. }
+    { Length(S): 4-byte length 8 bytes below the data pointer.  In Blaise a
+      nil pointer IS the empty string, so the read must be nil-guarded — a bare
+      `ldur w0,[x0,#-8]` on a nil string reads [nil-8] and faults (this crashed
+      the .bif writer's EncodeLpstr on an empty routine field, macOS arm64,
+      2026-07-24).  _StringLength / StrLen already returns 0 for nil; EmitStrLen
+      mirrors that with an inline cbz guard.  A transient argument is disposed
+      by shape with the length parked. }
     Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
     if ArcBuiltinStrArgOwnsRef(
          TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])) then
     begin
       EmitPushX0();
-      Self.Emit(#9'ldur w0, [x0, #-8]');
+      EmitStrLen('x0');
       EmitPushX0();
       Self.Emit(#9'ldr x0, [sp, #16]');
       EmitStrDisposeX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
@@ -2368,7 +2393,7 @@ begin
       Self.Emit(#9'add sp, sp, #16');
       Exit;
     end;
-    Self.Emit(#9'ldur w0, [x0, #-8]');
+    EmitStrLen('x0');
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
@@ -6008,7 +6033,7 @@ end;
 
 procedure TArm64Backend.EmitForIn(AStmt: TForInStmt);
 var
-  CondL, NextL, EndL: string;
+  CondL, NextL, EndL, NilLenL: string;
   Elem: TTypeDesc;
   ESz: Integer;
   GetE, MN, Cur: TMethodDecl;
@@ -6103,7 +6128,15 @@ begin
     EmitStoreSlot('x0', AStmt.IdxVarName);
     Self.Emit(CondL + ':');
     Self.EmitExprToX0(AStmt.CollExpr);
+    { length lives at [ptr-8]; a nil (empty) string must read as length 0,
+      not fault on [nil-8] — see EmitStrLen. }
+    NilLenL := NewLabel('flen0');
+    Self.Emit(Format(#9'cbz x0, %s', [NilLenL]));
     Self.Emit(#9'ldur w1, [x0, #-8]');
+    Self.Emit(Format(#9'b %s_done', [NilLenL]));
+    Self.Emit(NilLenL + ':');
+    Self.Emit(#9'movz x1, #0');
+    Self.Emit(NilLenL + '_done:');
     EmitLoadSlot('x0', AStmt.IdxVarName);
     Self.Emit(#9'cmp x0, x1');
     Self.Emit(Format(#9'b.ge %s', [EndL]));

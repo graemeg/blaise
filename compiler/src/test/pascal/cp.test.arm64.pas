@@ -132,6 +132,7 @@ type
     procedure TestInterfaceReturnToGlobal_ItabHalfFromSourceNotDest;
     procedure TestRecordElemOfDynArrayField_ReadDerefsAndIndexes;
     procedure TestByteVsCharLiteralCompare_FoldsToOrdinal;
+    procedure TestLengthOfEmptyString_NilGuarded;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -3091,6 +3092,46 @@ begin
     (PosEx(#9'movz x0, #47', Body,
        PosEx(#9'movz x0, #47', Body,
          Pos(#9'movz x0, #47', Body) + 1) + 1) > 0));
+end;
+
+procedure TArm64BackendTests.TestLengthOfEmptyString_NilGuarded;
+var
+  AsmT: string;
+  P, LdurP, CbzP: Integer;
+  Body: string;
+begin
+  { In Blaise a nil pointer IS the empty string, so Length(S) — lowered as a
+    header read at [ptr-8] — must nil-guard the read: a bare `ldur w0,[x0,#-8]`
+    on a nil string reads [nil-8] and faults.  arm64 inlined Length without the
+    guard (x86-64 lowers to _StringLength, which returns 0 for nil), so the
+    first Length() of an empty string crashed the .bif writer's EncodeLpstr on
+    an empty routine field of runtime.atomic (macOS arm64, 2026-07-24 — every
+    prior Length() had been on a non-nil string).  Every inlined length read
+    must be cbz-guarded to fall through to 0. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var S: string; N: Integer;
+    begin
+      S := '';
+      N := Length(S);
+      WriteLn(N)
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  { the length header read is present ... }
+  LdurP := Pos(#9'ldur w0, [x0, #-8]', Body);
+  AssertTrue('the length header read is emitted', LdurP >= 0);
+
+  { ... and it is preceded by a cbz nil guard (the guard branches around the
+    read to a zero fallback).  The guard must sit BEFORE the header read. }
+  CbzP := Pos(#9'cbz x0, ', Body);
+  AssertTrue('a nil guard precedes the length read',
+    (CbzP >= 0) and (CbzP < LdurP));
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;
