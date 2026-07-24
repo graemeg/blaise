@@ -134,6 +134,7 @@ type
     procedure TestByteVsCharLiteralCompare_FoldsToOrdinal;
     procedure TestLengthOfEmptyString_NilGuarded;
     procedure TestUpCaseString_ConvertsToCharCodeFirst;
+    procedure TestDefaultPropReadOnClassField_LoadsFieldReceiver;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -3173,6 +3174,70 @@ begin
   AssertTrue('_UpCase is called', UpP >= 0);
   AssertTrue('the _OrdAt conversion precedes the _UpCase call',
     (OrdP >= 0) and (OrdP < UpP));
+end;
+
+procedure TArm64BackendTests.TestDefaultPropReadOnClassField_LoadsFieldReceiver;
+var
+  AsmT: string;
+  P, RecvP, GetP: Integer;
+  Body: string;
+begin
+  { Reading a default indexed property of a CLASS-typed FIELD as a value —
+    Rec.Field[I], the shape uSemantic.AnalyseArrayConstDecls uses as
+    CD.ArrayElements[J] — must load the FIELD (add its offset, deref the class
+    pointer) as the getter's receiver, not pass the containing record.  arm64's
+    EmitPropReadCall loaded only the record (EmitLoadSlot RecordName) and called
+    the getter on it, so the list getter read the containing record's fields as
+    its own — a wild receiver that crashed during semantic analysis of a local
+    array const (macOS arm64, 2026-07-24, rtl.platform.posix Days).  The
+    explicit-method path (CD.ArrayElements.Put) already loaded the field; this
+    aligns the value-read getter with it and with the QBE backend. }
+  AsmT := GenAsmWithUnit(
+    '''
+    unit DPU;
+    interface
+    type
+      TBox = class
+      private
+        function GetItem(I: Integer): Integer;
+      public
+        property Items[I: Integer]: Integer read GetItem; default;
+      end;
+      TOuter = class
+        Box: TBox;
+      end;
+    implementation
+    function TBox.GetItem(I: Integer): Integer; begin Result := I end;
+    end.
+    ''',
+    '''
+    program P;
+    uses DPU;
+    var O: TOuter; N: Integer;
+    begin
+      O := TOuter.Create();
+      O.Box := TBox.Create();
+      N := O.Box[3];
+      WriteLn(N)
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+
+  { the getter is called (unit-prefixed symbol) ... }
+  GetP := Pos(#9'bl DPU_TBox_GetItem', Body);
+  AssertTrue('the default-property getter is called', GetP >= 0);
+
+  { ... and the Box FIELD is loaded as the receiver before it: the sequence
+    that loads O, steps to the Box field and derefs it (ldr x0, [x0]) must
+    appear before the getter call, not a bare load of O. }
+  RecvP := Pos(#9'ldr x0, [x0]'#10#9'ldr x1', Body);
+  if RecvP < 0 then
+    RecvP := Pos(#9'ldr x0, [x0]', Body);
+  AssertTrue('the class field is dereferenced as the getter receiver',
+    (RecvP >= 0) and (RecvP < GetP));
 end;
 
 procedure TArm64BackendTests.TestInterfaces_StringArg;

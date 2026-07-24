@@ -4270,9 +4270,29 @@ begin
     EmitImplicitBaseStep('x0', AFld.ImplicitBaseInfo);
   end
   else
+  begin
     EmitLoadSlot('x0', AFld.RecordName);
-  if AFld.IsVarParam and (AFld.Base = nil) then
-    Self.Emit(#9'ldr x0, [x0]');
+    { a TRUE var/out record slot holds the caller's ADDRESS — deref to the
+      record before stepping into its field. }
+    if AFld.IsVarParam then
+      Self.Emit(#9'ldr x0, [x0]');
+    { R.Field[I] as a value (R a plain record/class variable, not Self): the
+      getter's receiver is the FIELD holding the list, not the containing
+      record.  When FieldInfo names that containing field, step to it — add its
+      offset, then deref the (class-typed) field pointer — exactly as the QBE
+      backend does (blaise.codegen.qbe.pas ~7075).  A bare default-property read
+      on the variable itself (L[I]) has FieldInfo = nil and needs no step.
+      Omitting the step passed the containing record R as the list Self, so
+      TStringList.Get read R's (Line,Col) pair as FList and crashed
+      (macOS arm64, 2026-07-24: rtl.platform.posix Days const via
+      AnalyseArrayConstDecls' CD.ArrayElements[J]). }
+    if AFld.FieldInfo <> nil then
+    begin
+      if AFld.FieldInfo.Offset > 0 then
+        EmitAddSubImm('add', 'x0', 'x0', AFld.FieldInfo.Offset);
+      Self.Emit(#9'ldr x0, [x0]');
+    end;
+  end;
   if AFld.PropIndexExpr <> nil then
     EmitPopTo('x1');
   if AFld.PropAccessorVSlot >= 0 then
