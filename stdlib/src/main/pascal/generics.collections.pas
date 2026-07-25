@@ -40,7 +40,7 @@ type
     procedure Add(Value: T);
     function  Get(AIndex: Integer): T;
     procedure SetItem(AIndex: Integer; Value: T);
-    function  IndexOf(Value: T): Integer;
+    function  IndexOf(const Value: T): Integer;
     procedure Delete(AIndex: Integer);
     procedure Clear;
     procedure Destroy;
@@ -114,10 +114,10 @@ type
     procedure HashInvalidate;
     procedure HashInsertIdx(AIdx: Integer);
     procedure HashRebuild;
-    function  IndexOf(Value: T): Integer;
+    function  IndexOf(const Value: T): Integer;
     procedure Include(Value: T);
     procedure Exclude(Value: T);
-    function  Contains(Value: T): Boolean;
+    function  Contains(const Value: T): Boolean;
     procedure Clear;
     procedure Destroy;
     property Count: Integer read FCount;
@@ -156,7 +156,7 @@ type
     function  FindKey(const Key: K): Integer;
     procedure ReleaseEntries;
     procedure Add(Key: K; Value: V);
-    function  GetItem(Key: K): V;
+    function  GetItem(const Key: K): V;
     procedure SetItem(Key: K; Value: V);
     function  TryGetValue(const Key: K; var Value: V): Boolean;
     function  ContainsKey(const Key: K): Boolean;
@@ -188,7 +188,7 @@ type
     function  FindKey(const Key: K): Integer;
     procedure ReleaseEntries;
     procedure Add(Key: K; Value: V);
-    function  GetItem(Key: K): V;
+    function  GetItem(const Key: K): V;
     procedure SetItem(Key: K; Value: V);
     function  TryGetValue(const Key: K; var Value: V): Boolean;
     function  ContainsKey(const Key: K): Boolean;
@@ -209,7 +209,12 @@ type
   content semantics of '=' on strings), integers and pointers mix their
   value.  Instantiating a keyed container with a type that has no matching
   overload is a compile-time error — add an overload here for new key types. }
-function GCHashOf(AValue: string): Integer; overload;
+{ `const`: a hash only READS its key.  By value, the callee retains on entry
+  and releases at exit — on a refcount-0 transient key (a fresh concat handed
+  straight to a lookup) that pair is AddRef(0->1)/Release(1->0) = FREE, and
+  the caller's still-owned string dies under it.  The value-typed overloads
+  carry no ARC and need no `const`. }
+function GCHashOf(const AValue: string): Integer; overload;
 function GCHashOf(AValue: Integer): Integer; overload;
 function GCHashOf(AValue: Int64): Integer; overload;
 function GCHashOf(AValue: Pointer): Integer; overload;
@@ -227,7 +232,7 @@ implementation
 { GCHashOf — key hashing overloads                                     }
 { ------------------------------------------------------------------ }
 
-function GCHashOf(AValue: string): Integer; overload;
+function GCHashOf(const AValue: string): Integer; overload;
 var
   I: Integer;
 begin
@@ -423,7 +428,7 @@ begin
   Dest^ := Value
 end;
 
-function TList<T>.IndexOf(Value: T): Integer;
+function TList<T>.IndexOf(const Value: T): Integer;
 var
   I:   Integer;
   Ptr: ^T;
@@ -804,7 +809,7 @@ begin
     Self.HashInsertIdx(I);
 end;
 
-function TSet<T>.IndexOf(Value: T): Integer;
+function TSet<T>.IndexOf(const Value: T): Integer;
 var
   I:     Integer;
   Ptr:   ^T;
@@ -889,7 +894,7 @@ begin
   Self.HashInvalidate()
 end;
 
-function TSet<T>.Contains(Value: T): Boolean;
+function TSet<T>.Contains(const Value: T): Boolean;
 begin
   Result := Self.IndexOf(Value) >= 0
 end;
@@ -1144,7 +1149,7 @@ begin
   Self.HashInvalidate();
 end;
 
-function TDictionary<K, V>.GetItem(Key: K): V;
+function TDictionary<K, V>.GetItem(const Key: K): V;
 var
   Idx:  Integer;
   VPtr: ^V;
@@ -1417,7 +1422,7 @@ begin
   Result := Ptr^
 end;
 
-function TOrderedDictionary<K, V>.GetItem(Key: K): V;
+function TOrderedDictionary<K, V>.GetItem(const Key: K): V;
 var
   Idx:  Integer;
   VPtr: ^V;

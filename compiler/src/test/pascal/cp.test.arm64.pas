@@ -119,6 +119,7 @@ type
       bare definition dangled the prefixed references at link (LINK-1). }
     procedure TestInterface_TypeinfoSymbol_DefAndRefAgree;
     procedure TestUnitGenericInstance_BodyEmittedOnce;
+    procedure TestConstStringParam_NoCalleeARC;
     procedure TestInterface_ItabAndImpllist_AreGlobl;
     procedure TestGenericClassInstance_MethodBodyEmittedInUnit;
     procedure TestClassTypeinfo_InstanceSizeCoversAllFields;
@@ -2209,6 +2210,57 @@ end;
   Weak linkage does not save this: it collapses duplicates across OBJECTS, not
   within one object.  This mirrors the leg-39 guard already applied to a unit's
   ORDINARY classes. }
+{ A `const` string parameter is BORROWED: the callee must emit no
+  AddRef(entry)/Release(exit) pair for it.  A by-value string param is the
+  callee's own copy and DOES retain — that contrast is what this pins.
+
+  Why it matters beyond tidiness: on a refcount-0 transient argument (a fresh
+  concat handed straight to the call) the by-value pair is AddRef(0->1) then
+  Release(1->0) = FREE, destroying a string the caller still owns.  On x86-64
+  the caller often does not release such a transient, so the callee's free is
+  the only one and the bug merely leaks; on arm64 it is a genuine
+  use-after-free.  That asymmetry is why this class of bug reproduces only on
+  arm64 (GCHashOf, round 36). }
+procedure TArm64BackendTests.TestConstStringParam_NoCalleeARC;
+var
+  AsmT: string;
+  P, E: Integer;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    function HashIt(const AValue: string): Integer;
+    begin
+      Result := Length(AValue)
+    end;
+    function CopyIt(AValue: string): Integer;
+    begin
+      Result := Length(AValue)
+    end;
+    var N: Integer;
+    begin
+      N := HashIt('a' + 'b');
+      N := N + CopyIt('c' + 'd');
+      WriteLn(N)
+    end.
+    ''');
+  { the const-param body borrows: no ARC on its parameter }
+  P := Pos('HashIt:', AsmT);
+  AssertTrue('const-param function emitted', P >= 0);
+  E := PosEx('ret', AsmT, P);
+  AssertTrue('no _StringAddRef in a const-string-param body',
+    PosEx('_StringAddRef', AsmT, P) > E);
+
+  { control: the BY-VALUE variant still retains, so the assertion above is
+    pinning `const` and not merely the absence of string-param ARC }
+  P := Pos('CopyIt:', AsmT);
+  AssertTrue('by-value-param function emitted', P >= 0);
+  E := PosEx('ret', AsmT, P);
+  AssertTrue('by-value string param still retains',
+    (PosEx('_StringAddRef', AsmT, P) >= 0) and
+    (PosEx('_StringAddRef', AsmT, P) < E));
+end;
+
 procedure TArm64BackendTests.TestUnitGenericInstance_BodyEmittedOnce;
 var
   AsmT: string;
