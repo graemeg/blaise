@@ -315,6 +315,16 @@ begin
     AssertEquals(ARM64_RELOC_GOT_LOAD_PAGEOFF12, T.Relocs.Get(1).RType);
     AssertEquals(ARM64_RELOC_TLVP_LOAD_PAGE21, T.Relocs.Get(2).RType);
     AssertEquals(ARM64_RELOC_TLVP_LOAD_PAGEOFF12, T.Relocs.Get(3).RType);
+    { Both _LOAD_PAGEOFF12 kinds must sit on a real LDR word, scaled-immediate
+      form with imm12 = 0 — Apple's ld rejects either relocation on anything
+      else ("relocation on non-LDR instruction"), which is what made every
+      object we emitted unlinkable by cc
+      (BUG-20260726-arm64-tlv-nonldr-reloc).  ldr x0, [x0, #0] = 0xF9400000;
+      ldr x1, [x1, #0] adds Rn=1 (bits 9:5) and Rd=1 (bits 4:0). }
+    AssertEquals('got pageoff is an LDR word',
+      Integer($F9400000), WordAt(T, 1));
+    AssertEquals('tlv pageoff is an LDR word',
+      Integer($F9400021), WordAt(T, 3));
   finally
     F.Free();
   end;

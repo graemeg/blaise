@@ -2026,15 +2026,24 @@ begin
       WriteLn(Counter)
     end.
     ''');
-  { access: FORM the descriptor address (adrp + ADD — the relaxed form;
-    the adrp+LDR shape needs a linker-made indirection slot we never
-    create and crashed on real hardware: ARM64_TLS_SEGFAULT_FEEDBACK.md),
-    then call its thunk with x0 = &descriptor }
+  { access: Apple's CANONICAL adrp + LDR sequence, then call the descriptor's
+    thunk with x0 = &descriptor.
+
+    This test used to assert the opposite — adrp + ADD, forming the address
+    directly — because the LDR reads a __thread_ptrs indirection slot we never
+    create, and emitting it without the matching linker relaxation crashed on
+    real hardware (ARM64_TLS_SEGFAULT_FEEDBACK.md).  That fix was the wrong half
+    of the pair: ARM64_RELOC_TLVP_LOAD_PAGEOFF12 is defined to sit on a LOAD and
+    Apple's ld refuses it on an add, so every object we emitted was unlinkable
+    by cc and the whole e2e layer was dead on macOS
+    (BUG-20260726-arm64-tlv-nonldr-reloc).  The right pair is canonical LDR here
+    plus the ldr->add relaxation in blaise.linker.macho.pas, which is what
+    Apple's ld itself does for a same-image descriptor. }
   AssertTrue('TLVP page ref', Pos('_tv_Counter@TLVPPAGE', AsmT) >= 0);
-  AssertTrue('descriptor address FORMED, not loaded',
-    Pos(#9'add x0, x0, _tv_Counter@TLVPPAGEOFF', AsmT) >= 0);
-  AssertTrue('no ldr-through-slot TLV access',
-    Pos(#9'ldr x0, [x0, _tv_Counter@TLVPPAGEOFF]', AsmT) < 0);
+  AssertTrue('descriptor address LOADED — the reloc requires an LDR',
+    Pos(#9'ldr x0, [x0, _tv_Counter@TLVPPAGEOFF]', AsmT) >= 0);
+  AssertTrue('never the add form, which ld rejects',
+    Pos('add x0, x0, _tv_Counter@TLVPPAGEOFF', AsmT) < 0);
   AssertTrue('thunk call', Pos(#9'blr x9', AsmT) >= 0);
   { descriptor: three quads with the bootstrap thunk }
   AssertTrue('descriptor label', Pos('_tv_Counter:', AsmT) >= 0);

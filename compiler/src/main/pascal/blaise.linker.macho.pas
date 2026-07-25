@@ -662,14 +662,37 @@ begin
               raise EMachOLinker.Create('macho linker: pageoff reference '
                 + 'to undefined symbol ' + Sym.Name);
             W := Integer(ReadStream(Strm, SiteOff, 4));
-            { scaled load/store class shifts the immediate by its size;
-              add-immediate takes the raw low 12 bits }
-            if (W and Integer($3B000000)) = Integer($39000000) then
-              Scale := (W shr 30) and 3
+            if (R.RType = ARM64_RELOC_TLVP_LOAD_PAGEOFF12)
+               and ((W and Integer($3B000000)) = Integer($39000000)) then
+            begin
+              { TLV RELAXATION, exactly as Apple's ld performs it.  The
+                canonical access sequence LOADS the descriptor's address out of
+                a __thread_ptrs slot, because the descriptor may live in another
+                image.  For one defined in THIS image no slot is needed — the
+                address can be formed directly — so the linker rewrites the LDR
+                into an ADD.  We never materialise a slot, so this relaxation is
+                mandatory, not an optimisation: without it the LDR would deref
+                one level too many and we would call through the thunk's
+                CONTENTS (BUG-20260726-arm64-tlv-nonldr-reloc).
+
+                Keep Rn (bits 9:5) and Rd (bits 4:0), swap the LDR opcode for
+                ADD-immediate (0xF9400000 -> 0x91000000) and write the RAW
+                12-bit offset: an add-immediate is unscaled, whereas the LDR it
+                replaces had its immediate scaled by the access size. }
+              W := Integer($91000000) or (W and $3FF);
+              W := W or (Integer((Target + Addend) and $FFF) shl 10);
+            end
             else
-              Scale := 0;
-            W := W or (Integer(((Target + Addend) and $FFF) shr Scale)
-              shl 10);
+            begin
+              { scaled load/store class shifts the immediate by its size;
+                add-immediate takes the raw low 12 bits }
+              if (W and Integer($3B000000)) = Integer($39000000) then
+                Scale := (W shr 30) and 3
+              else
+                Scale := 0;
+              W := W or (Integer(((Target + Addend) and $FFF) shr Scale)
+                shl 10);
+            end;
             PatchStream(Strm, SiteOff, 4, W);
           end;
         else
