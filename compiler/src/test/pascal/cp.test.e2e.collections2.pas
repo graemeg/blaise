@@ -25,6 +25,13 @@ type
     procedure TestRun_TObjectList_Delete;
     procedure TestRun_Collections_Valgrind;
     procedure TestRun_TwoDictInstancesInUnit_BothLink;
+    { BUG-20260724 pass-borrowed-string-by-value over-release: a routine
+      receives a string as a BORROWED const param and passes it by value into
+      TDictionary lookups (ContainsKey / TryGetValue).  The lookup key params
+      are now const (pure borrow — no callee retain/release pair), so the
+      borrowed transient key survives the calls and is not double-freed.
+      Runs clean under valgrind. }
+    procedure TestRun_DictLookup_BorrowedConstKey_NoDoubleFree;
     procedure TestRun_IntfFreeFunc_GenericReturn_Compiles;
     procedure TestRun_DefaultProp_StringList_And_ObjectList;
 
@@ -360,6 +367,77 @@ begin
     CompileAndRunWithUnit('twodicts', UnitSrc, DrvSrc, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
   AssertEquals('Ints(2) + Bools(1) = 3', '3' + #10, Output);
+end;
+
+{ Regression (BUG-20260724 pass-borrowed-string-by-value over-release):
+  Look receives Key as a BORROWED const string param, then passes it BY VALUE
+  into TDictionary.ContainsKey / TryGetValue.  The key is an owned concat
+  transient the caller still owns; before the fix, arm64 passed the borrowed
+  Key without a caller-side pin AND the lookup key params were by-value (a
+  callee retain/release pair), so the transient was released one too many and
+  double-freed on scope exit — the FFrame.TryGetValue(const AName) cascade
+  found on macOS arm64.  Making the lookup key params const removes the callee
+  pair entirely (a lookup never owns its key), and the arm64 caller now pins a
+  borrowed aliasable source anyway.  Must run clean and leak-free on BOTH
+  backends. }
+const
+  DictKeyUnitSrc = '''
+    unit dictkey;
+    interface
+    uses Generics.Collections;
+    type
+      THolder = class
+      public
+        D: TDictionary<string, Integer>;
+        procedure Init;
+        // Look receives Key as a BORROWED const param and passes it BY VALUE
+        // into the dictionary lookups — the exact FFrame.TryGetValue(const
+        // AName) shape that over-released on arm64.
+        function Look(const Key: string): Integer;
+      end;
+    implementation
+    procedure THolder.Init;
+    begin
+      Self.D := TDictionary<string, Integer>.Create()
+    end;
+    function THolder.Look(const Key: string): Integer;
+    var V: Integer;
+    begin
+      Result := -1;
+      if Self.D.ContainsKey(Key) then
+        if Self.D.TryGetValue(Key, V) then
+          Result := V
+    end;
+    end.
+    ''';
+  DictKeyDrvSrc = '''
+    program P;
+    uses dictkey;
+    var
+      H: THolder;
+      S: string;
+    begin
+      H := THolder.Create();
+      H.Init();
+      S := 'alpha' + 'beta';   // owned concat transient key
+      H.D.Add(S, 42);
+      WriteLn(H.Look(S));
+      WriteLn(S);               // the borrowed key must still be intact
+      H.D.Destroy();
+      H.Free()
+    end.
+    ''';
+
+procedure TE2ECollections2Tests.TestRun_DictLookup_BorrowedConstKey_NoDoubleFree;
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+link+run',
+    CompileAndRunWithUnit('dictkey', DictKeyUnitSrc, DictKeyDrvSrc,
+      Output, RCode));
+  AssertEquals('exit code 0', 0, RCode);
+  AssertEquals('lookup value + intact key', '42' + #10 + 'alphabeta' + #10,
+    Output);
 end;
 
 { Regression: a unit's INTERFACE-section free function (not a class method)

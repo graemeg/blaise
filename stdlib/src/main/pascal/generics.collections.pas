@@ -126,9 +126,13 @@ type
   { Generic map interface: common contract for dictionary-like types. }
   IMap<K, V> = interface
     procedure Add(Key: K; Value: V);
-    function  TryGetValue(Key: K; var Value: V): Boolean;
-    function  ContainsKey(Key: K): Boolean;
-    procedure Remove(Key: K);
+    { Lookups borrow the key (const): they never store it, so a borrowed key
+      needs no by-value copy/release.  This also removes the arm64
+      pass-borrowed-string-by-value over-release hazard on the hot FindKey
+      path (FFrame.TryGetValue over-release, macOS arm64 2026-07-24). }
+    function  TryGetValue(const Key: K; var Value: V): Boolean;
+    function  ContainsKey(const Key: K): Boolean;
+    procedure Remove(const Key: K);
     function  GetCount: Integer;
   end;
 
@@ -149,14 +153,14 @@ type
     procedure HashInvalidate;
     procedure HashInsertIdx(AIdx: Integer);
     procedure HashRebuild;
-    function  FindKey(Key: K): Integer;
+    function  FindKey(const Key: K): Integer;
     procedure ReleaseEntries;
     procedure Add(Key: K; Value: V);
     function  GetItem(Key: K): V;
     procedure SetItem(Key: K; Value: V);
-    function  TryGetValue(Key: K; var Value: V): Boolean;
-    function  ContainsKey(Key: K): Boolean;
-    procedure Remove(Key: K);
+    function  TryGetValue(const Key: K; var Value: V): Boolean;
+    function  ContainsKey(const Key: K): Boolean;
+    procedure Remove(const Key: K);
     { Drop all entries; keeps the allocated capacity for reuse. }
     procedure Clear;
     function  GetCount: Integer;
@@ -181,14 +185,14 @@ type
     procedure HashInvalidate;
     procedure HashInsertIdx(AIdx: Integer);
     procedure HashRebuild;
-    function  FindKey(Key: K): Integer;
+    function  FindKey(const Key: K): Integer;
     procedure ReleaseEntries;
     procedure Add(Key: K; Value: V);
     function  GetItem(Key: K): V;
     procedure SetItem(Key: K; Value: V);
-    function  TryGetValue(Key: K; var Value: V): Boolean;
-    function  ContainsKey(Key: K): Boolean;
-    procedure Remove(Key: K);
+    function  TryGetValue(const Key: K; var Value: V): Boolean;
+    function  ContainsKey(const Key: K): Boolean;
+    procedure Remove(const Key: K);
     function  GetKey(AIndex: Integer): K;
     function  GetValue(AIndex: Integer): V;
     function  GetCount: Integer;
@@ -1002,7 +1006,7 @@ begin
     Self.HashInsertIdx(I);
 end;
 
-function TDictionary<K, V>.FindKey(Key: K): Integer;
+function TDictionary<K, V>.FindKey(const Key: K): Integer;
 var
   I:     Integer;
   Ptr:   ^K;
@@ -1074,7 +1078,7 @@ begin
   end
 end;
 
-function TDictionary<K, V>.TryGetValue(Key: K; var Value: V): Boolean;
+function TDictionary<K, V>.TryGetValue(const Key: K; var Value: V): Boolean;
 var
   Idx:  Integer;
   VPtr: ^V;
@@ -1090,12 +1094,12 @@ begin
     Result := False
 end;
 
-function TDictionary<K, V>.ContainsKey(Key: K): Boolean;
+function TDictionary<K, V>.ContainsKey(const Key: K): Boolean;
 begin
   Result := Self.FindKey(Key) >= 0
 end;
 
-procedure TDictionary<K, V>.Remove(Key: K);
+procedure TDictionary<K, V>.Remove(const Key: K);
 var
   Idx:      Integer;
   I:        Integer;
@@ -1271,7 +1275,7 @@ begin
     Self.HashInsertIdx(I);
 end;
 
-function TOrderedDictionary<K, V>.FindKey(Key: K): Integer;
+function TOrderedDictionary<K, V>.FindKey(const Key: K): Integer;
 var
   I:     Integer;
   Ptr:   ^K;
@@ -1339,7 +1343,7 @@ begin
   end
 end;
 
-function TOrderedDictionary<K, V>.TryGetValue(Key: K; var Value: V): Boolean;
+function TOrderedDictionary<K, V>.TryGetValue(const Key: K; var Value: V): Boolean;
 var
   Idx:  Integer;
   VPtr: ^V;
@@ -1355,12 +1359,12 @@ begin
     Result := False
 end;
 
-function TOrderedDictionary<K, V>.ContainsKey(Key: K): Boolean;
+function TOrderedDictionary<K, V>.ContainsKey(const Key: K): Boolean;
 begin
   Result := Self.FindKey(Key) >= 0
 end;
 
-procedure TOrderedDictionary<K, V>.Remove(Key: K);
+procedure TOrderedDictionary<K, V>.Remove(const Key: K);
 var
   Idx:      Integer;
   I:        Integer;

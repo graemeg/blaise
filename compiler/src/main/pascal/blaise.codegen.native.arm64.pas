@@ -182,6 +182,20 @@ type
       EmitSlotAddr).  Centralises the '__pptr_' discriminator so every
       field-store/read arm agrees. }
     procedure EmitRecordBaseAddr(const AReg, AName: string; AIsVarParam: Boolean);
+    { True when a string ARG expression is a BORROWED aliasable source — a
+      param read (const or by-value), a global, an implicit-Self field, or a
+      captured local — that must be PINNED (_StringAddRef before / _StringRelease
+      after) when handed to a by-value or const string param.  The callee's
+      by-value param does entry-retain/exit-release, so if the borrowed source's
+      liveness across the call is not guaranteed by a stable owning slot, the
+      callee's exit-release can drop it one too many and free it mid-flight.
+      Mirrors the x86-64 ConstStrShape / QBE ConstArgMode camPin classification.
+      A plain owned local also pins when the callee signature carries a var/out
+      string param (the F(L, L) alias hazard), via APinPlain. }
+    function  IsPinnedBorrowedStrArg(AArg: TASTExpr; APinPlain: Boolean): Boolean;
+    { True when AParams has any var/out string param (the F(const A; var B)
+      alias hazard that forces a plain-local source to pin). }
+    function  ParamsHaveVarString(AParams: TObjectList): Boolean;
     procedure NotYet(const AWhat: string; ANode: TASTNode);
 
     { ---- frame + operands ---- }
@@ -653,6 +667,48 @@ begin
     TargetName(const ATarget: TTargetDesc) crash, 2026-07-23).  The frame setup
     now records by-value record params explicitly. }
   Result := FByValRecParams.IndexOf(AName) >= 0;
+end;
+
+function TArm64Backend.ParamsHaveVarString(AParams: TObjectList): Boolean;
+var
+  I: Integer;
+  P: TMethodParam;
+begin
+  Result := False;
+  if AParams = nil then Exit;
+  for I := 0 to AParams.Count - 1 do
+  begin
+    P := TMethodParam(AParams.Items[I]);
+    if P.IsVarParam and (P.ResolvedType <> nil) and
+       P.ResolvedType.IsString() then
+      Exit(True);
+  end;
+end;
+
+function TArm64Backend.IsPinnedBorrowedStrArg(AArg: TASTExpr;
+  APinPlain: Boolean): Boolean;
+var
+  IE: TIdentExpr;
+begin
+  { Mirrors x86-64 ConstStrShape / QBE ConstArgMode camPin classification.
+    A string literal or named string constant is immortal (camBorrowed, no
+    pin).  A bare zero-arg implicit-Self method call is an owned +1 return —
+    disposed by the owned-transient path (ArcExprOwnsRef), not here. }
+  Result := False;
+  if AArg = nil then Exit;
+  if AArg is TStringLiteral then Exit;
+  if not (AArg is TIdentExpr) then Exit;
+  IE := TIdentExpr(AArg);
+  if IE.IsImplicitSelfMethod then Exit;   { owned return — not a borrow }
+  if IE.IsConstant then Exit;             { immortal literal data }
+  if (not IE.IsGlobal) and (IE.ParamMode = pmNone) and
+     (IE.ImplicitFieldInfo = nil) and not Self.IsCaptured(IE.Name) then
+    { Plain non-captured local: the frame's own reference outlives the call,
+      UNLESS a var/out string sibling param can free it mid-call (F(L, L)). }
+    Exit(APinPlain);
+  { global, const/by-value/var param read, implicit-Self field, captured
+    local — aliasable; the frame does not guarantee liveness across the call. }
+  Result := True;
 end;
 
 procedure TArm64Backend.EmitRecordBaseAddr(const AReg, AName: string;
@@ -8277,7 +8333,9 @@ begin
       must dispose them: rc=1 always (the callee pair nets to zero); rc=0
       only for const params (no callee pair — the caller pins).  A by-value
       rc=0 arg is freed by the callee's entry-retain/exit-release pair; a
-      caller-side dispose would double-free. }
+      caller-side dispose would double-free.  A BORROWED aliasable source to a
+      formal string param also parks (shape 'P': pin AddRef before / release
+      after).  MUST stay in lockstep with the string-arg block in EmitCall. }
     if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyString) then
     begin
       if ArcExprOwnsRef(Arg) then
@@ -8285,6 +8343,10 @@ begin
       else if ArcExprIsUnownedStrTransient(Arg) and
               (I < ADecl.Params.Count) and
               TMethodParam(ADecl.Params.Items[I]).IsConstParam then
+        Inc(Trans)
+      else if (I < ADecl.Params.Count) and
+              Self.IsPinnedBorrowedStrArg(Arg,
+                Self.ParamsHaveVarString(ADecl.Params)) then
         Inc(Trans);
     end;
     { an owned CLASS transient (call-result argument) parks for one
@@ -8867,7 +8929,18 @@ begin
           pointer.  Caller-side disposal by shape: rc=1 parks for ONE
           post-call release (also for const params); rc=0 parks only for
           const params (pin: AddRef+Release) — a by-value rc=0 arg is
-          freed by the callee pair and must NOT be touched again. }
+          freed by the callee pair and must NOT be touched again.
+
+          A BORROWED aliasable source (a const/by-value/var param read, a
+          global, an implicit-Self field, or a captured local) handed to a
+          formal string param must be PINNED: _StringAddRef BEFORE the call,
+          _StringRelease AFTER (shape 'P').  Without the pin the callee's
+          by-value entry-retain/exit-release pair could drop the borrowed
+          source one too many and free it mid-call — the macOS arm64
+          FFrame.TryGetValue(const AName) over-release cascade, 2026-07-24.
+          x86-64 (ConstStrShape) and QBE (ConstArgMode) both pin this case;
+          arm64 previously did not.  A variadic string arg (no formal param)
+          has no callee retain/release pair, so it is never pinned. }
         Self.EmitExprToX0(Arg);
         EmitPushX0();
         if ArcExprOwnsRef(Arg) then
@@ -8886,6 +8959,18 @@ begin
             NotYet('more than 8 owned string transient args in one call', Arg);
           EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
           TransShapes := TransShapes + '0';
+          Inc(TransN);
+        end
+        else if (I < ADecl.Params.Count) and
+                Self.IsPinnedBorrowedStrArg(Arg,
+                  Self.ParamsHaveVarString(ADecl.Params)) then
+        begin
+          if TransN >= STRTRANS_SLOTS then
+            NotYet('more than 8 owned string transient args in one call', Arg);
+          EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
+          { pin NOW (value still in x0), before the call consumes it }
+          Self.Emit(#9'bl _StringAddRef');
+          TransShapes := TransShapes + 'P';
           Inc(TransN);
         end;
         if (ADecl.IsVarArgs and (I >= ADecl.Params.Count)) or (NInt >= 8) then
@@ -9088,6 +9173,9 @@ begin
         Self.Emit(#9'bl _StringAddRef');
         EmitPopTo('x0');
       end;
+      { shape 'P' (borrowed aliasable source): the _StringAddRef was emitted
+        BEFORE the call, so this bare release just balances it.  Shape '1'
+        (rc=1 owned transient) also lands here for its single release. }
       Self.Emit(#9'bl _StringRelease');
     end;
     Self.Emit(#9'ldr x9, [sp], #16');

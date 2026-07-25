@@ -33,6 +33,8 @@ type
   private
     function GenAsm(const ASrc: string): string;
     function GenAsmWithUnit(const AUnitSrc, ASrc: string): string;
+    { last (rightmost) 0-based index of ASub in AStr, or -1 if absent }
+    function RPos(const ASub, AStr: string): Integer;
   published
     procedure TestHello_PrologueAndFrameChain;
     procedure TestHello_StringLiteral_AdrpAddPair;
@@ -367,6 +369,13 @@ type
     procedure TestVarParamRecordArrayFieldElemWrite;
     procedure TestRecordArrayElementRead;
     procedure TestVarParamClassArrayFieldElemWriteStillNotYet;
+    { BUG-20260724 arm64 pass-borrowed-string-by-value over-release:
+      a borrowed aliasable string source (global / plain local) handed to a
+      by-value string param.  A GLOBAL must be pinned (AddRef before the call,
+      Release after) to match x86-64 ConstStrShape / QBE ConstArgMode; a plain
+      LOCAL must NOT be pinned (its frame reference outlives the call). }
+    procedure TestStrArg_GlobalByValue_Pinned;
+    procedure TestStrArg_PlainLocalByValue_NotPinned;
   end;
 
 implementation
@@ -499,6 +508,21 @@ begin
     end;
   finally
     Prog.Free();
+  end;
+end;
+
+function TArm64BackendTests.RPos(const ASub, AStr: string): Integer;
+var
+  P, Next: Integer;
+begin
+  Result := -1;
+  P := PosEx(ASub, AStr, 0);
+  while P >= 0 do
+  begin
+    Result := P;
+    Next := P + 1;
+    if Next > Length(AStr) then break;
+    P := PosEx(ASub, AStr, Next);
   end;
 end;
 
@@ -7068,6 +7092,89 @@ begin
   AssertTrue('var-param class array-field element write stays NotYet', Raised);
   AssertTrue('message names the array-field element write hole',
     Pos('array-field element write on this base form', Msg) >= 0);
+end;
+
+procedure TArm64BackendTests.TestStrArg_GlobalByValue_Pinned;
+var
+  AsmT, Body: string;
+  CallPos, AddRefBefore: Integer;
+begin
+  { A global string handed to Look's BY-VALUE string param is aliasable: the
+    caller must pin it (AddRef before / Release after) so the callee's own
+    entry-retain/exit-release pair cannot free the global mid-call.  This is
+    the general fix behind the FFrame.TryGetValue(const AName) over-release
+    cascade (macOS arm64, 2026-07-24); x86-64 and QBE already pin this case. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var
+      G: string;
+    function Look(Key: string): Integer;
+    begin
+      Result := Length(Key)
+    end;
+    begin
+      G := 'a' + 'b';
+      WriteLn(Look(G))
+    end.
+    ''');
+  { scope the assertion to the MAIN program body (after Look's own def) so a
+    stray AddRef inside Look cannot satisfy it.  Pos is 0-based and returns -1
+    when absent. }
+  CallPos := Pos(#9'bl Look', AsmT);
+  AssertTrue('Look is called', CallPos >= 0);
+  Body := Copy(AsmT, 0, CallPos);
+  { the pin is the LAST AddRef emitted before the call — the global is loaded,
+    parked, and AddRef'd immediately before bl Look }
+  AddRefBefore := RPos(#9'bl _StringAddRef', Body);
+  AssertTrue('global by-value string arg is pinned before the call',
+    AddRefBefore >= 0);
+  { and a matching release follows the call }
+  AssertTrue('pinned arg released after the call',
+    PosEx(#9'bl _StringRelease', AsmT, CallPos) >= 0);
+end;
+
+procedure TArm64BackendTests.TestStrArg_PlainLocalByValue_NotPinned;
+var
+  AsmT, Between: string;
+  LoadPos, CallPos: Integer;
+begin
+  { A PLAIN LOCAL string handed to a by-value string param needs NO pin: the
+    caller frame owns a live reference across the call, and the callee's
+    entry-retain/exit-release pair nets to zero.  Over-pinning here would be a
+    harmless-but-wasteful churn; assert arm64 stays lean and matches x86-64
+    (camBorrowed for a plain non-captured local). }
+  AsmT := GenAsm(
+    '''
+    program P;
+    function Look(Key: string): Integer;
+    begin
+      Result := Length(Key)
+    end;
+    procedure Use;
+    var
+      L: string;
+    begin
+      L := 'x' + 'y';
+      WriteLn(Look(L))
+    end;
+    begin
+      Use()
+    end.
+    ''');
+  { L is a plain local of Use; find Use's Look call and confirm no AddRef sits
+    between L's load and the call.  L's slot load is 'ldur x0, [x29,' followed
+    by the push; there must be no _StringAddRef in the arg-marshal window. }
+  CallPos := Pos(#9'bl Look', AsmT);
+  AssertTrue('Look is called', CallPos >= 0);
+  { window: the only AddRef in Use before the call is L's assignment retain;
+    the arg marshal itself must add none.  Isolate the marshal window as the
+    text after the LAST 'str x0, [sp, #-16]!' push before the call. }
+  LoadPos := RPos(#9'str x0, [sp, #-16]!', Copy(AsmT, 0, CallPos));
+  AssertTrue('arg pushed before the call', LoadPos >= 0);
+  Between := Copy(AsmT, LoadPos, CallPos - LoadPos);
+  AssertTrue('plain-local by-value string arg is NOT pinned',
+    Pos(#9'bl _StringAddRef', Between) < 0);
 end;
 
 initialization
