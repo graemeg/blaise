@@ -379,6 +379,16 @@ type
       LOCAL must NOT be pinned (its frame reference outlives the call). }
     procedure TestStrArg_GlobalByValue_Pinned;
     procedure TestStrArg_PlainLocalByValue_NotPinned;
+    { BUG-20260725 arm64 const-string-param alias over-release: an rc=0 UNOWNED
+      transient (a `+` concat) handed to a DIRECT call or to a one-string-arg
+      RTL builtin must be pinned (_StringAddRef) BEFORE the call, exactly as
+      TestClosure_UnownedTransientArg_PinnedBeforeCall already requires for a
+      closure call.  A callee that stores the parameter into a local runs a
+      legitimate retain/exit-release cycle on it; at rc=0 that cycle reaches
+      zero and frees the caller's buffer mid-call, so the post-call
+      AddRef+Release then operated on freed memory. }
+    procedure TestStrArg_UnownedTransient_PinnedBeforeDirectCall;
+    procedure TestBuiltinStrArg_UnownedTransient_PinnedBeforeCall;
   end;
 
 implementation
@@ -3824,7 +3834,11 @@ begin
   { by-value rc=0 concat arg: the callee's entry-retain/exit-release pair
     frees it — the CALLER must not touch it (a release would double-free);
     by-value rc=1 call result: one caller release after the call;
-    const rc=0 concat arg: caller pins (AddRef+Release) after the call }
+    const rc=0 concat arg: caller pins (AddRef) BEFORE the call and releases
+    after it — pinning afterwards was too late, because a callee that stores
+    the const param into a local runs a legitimate retain/exit-release cycle
+    that reaches zero and frees the caller's buffer mid-call
+    (BUG-20260725-arm64-const-str-param-alias). }
   PosCall := Pos(#9'bl Show', AsmT);
   AssertTrue('calls emitted', PosCall >= 0);
   { the rc=1 transient is parked in a STABLE x29-relative slot (__strtrans_N),
@@ -3835,8 +3849,11 @@ begin
     Pos(#9'ldur x0, [x29, #', AsmT) >= 0);
   PosCall := Pos(#9'bl ShowC', AsmT);
   AssertTrue('const call emitted', PosCall >= 0);
-  PosRel := PosEx(#9'bl _StringAddRef', AsmT, PosCall);
-  AssertTrue('const rc=0 arg pinned after the call', PosRel > PosCall);
+  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
+  AssertTrue('const rc=0 arg released after the call', PosRel > PosCall);
+  AssertTrue('and NOT re-pinned after the call',
+    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) < 0) or
+    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) > PosRel));
 end;
 
 procedure TArm64BackendTests.TestReflection_SupportsInheritsFromMetaclass;
@@ -5215,6 +5232,77 @@ begin
   AssertTrue('transient released after the closure call', PosRel > PosCall);
   { transient pointers are held in callee-saved x19 across the call }
   AssertTrue('transient held callee-saved', Pos(#9'mov x19, x0', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestStrArg_UnownedTransient_PinnedBeforeDirectCall;
+var
+  AsmT: string;
+  PosCat, PosPin, PosCall, PosRel: Integer;
+begin
+  { Direct call with an rc=0 concat argument.  Sink stores the parameter into a
+    local, which retains on entry to the local and releases at scope exit — at
+    rc=0 that frees the caller's transient during the call. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    function Sink(const S: string): Integer;
+    var B: string;
+    begin
+      B := S;
+      Result := Length(B)
+    end;
+    var A: string;
+    begin
+      A := 'ab';
+      WriteLn(Sink(A + 'cd'))
+    end.
+    ''');
+  PosCat := Pos(#9'bl _StringConcat', AsmT);
+  AssertTrue('concat produced', PosCat >= 0);
+  PosCall := PosEx(#9'bl Sink', AsmT, PosCat);
+  AssertTrue('callee invoked after the concat', PosCall > PosCat);
+  PosPin := PosEx(#9'bl _StringAddRef', AsmT, PosCat);
+  AssertTrue('rc=0 transient pinned BEFORE the direct call',
+    (PosPin > PosCat) and (PosPin < PosCall));
+  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
+  AssertTrue('transient released after the call', PosRel > PosCall);
+  AssertTrue('no post-call AddRef half remains',
+    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) < 0) or
+    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) > PosRel));
+end;
+
+procedure TArm64BackendTests.TestBuiltinStrArg_UnownedTransient_PinnedBeforeCall;
+var
+  AsmT: string;
+  PosCat, PosPin, PosCall, PosRel: Integer;
+begin
+  { Same rule for a one-string-arg RTL builtin.  Any such builtin may store its
+    const parameter into a local (ExpandFileName does, on its absolute-path
+    branch), so an unpinned rc=0 argument was freed inside the RTL and the
+    caller's dispose then hit a reused block ("_StringRelease corrupted
+    header").  Trim stands in for the family here because it needs no `uses`. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var A, R: string;
+    begin
+      A := ' ab ';
+      R := Trim(A + ' cd ');
+      WriteLn(R)
+    end.
+    ''');
+  PosCat := Pos(#9'bl _StringConcat', AsmT);
+  AssertTrue('concat produced', PosCat >= 0);
+  PosCall := PosEx(#9'bl _StringTrim', AsmT, PosCat);
+  AssertTrue('builtin invoked after the concat', PosCall > PosCat);
+  PosPin := PosEx(#9'bl _StringAddRef', AsmT, PosCat);
+  AssertTrue('rc=0 transient pinned BEFORE the builtin call',
+    (PosPin > PosCat) and (PosPin < PosCall));
+  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
+  AssertTrue('transient released after the builtin call', PosRel > PosCall);
+  AssertTrue('no post-call AddRef half remains',
+    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) < 0) or
+    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) > PosRel));
 end;
 
 procedure TArm64BackendTests.TestClosure_UnownedTransientArg_PinnedBeforeCall;

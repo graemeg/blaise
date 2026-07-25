@@ -6585,11 +6585,24 @@ begin
   Self.EmitExprToX0(AArg);
   if ArcBuiltinStrArgOwnsRef(AArg) then
   begin
+    { An rc=0 UNOWNED transient must be PINNED before the call
+      (BUG-20260725-arm64-const-str-param-alias): a builtin that stores its
+      const parameter into a local runs a legitimate retain-then-exit-release
+      cycle on it, and at rc=0 that cycle reaches zero and frees OUR buffer
+      mid-call — the post-call dispose then hit a reused block.  With the pin
+      the callee's cycle is 1->2->1 and the single bare Release below disposes
+      it exactly once.  Same rule as the closure-call and property-setter
+      paths. }
+    EmitOwnedStrTransientPin(AArg);
     EmitPushX0();                         { [arg] }
     Self.Emit(Format(#9'bl %s', [ASym]));
     EmitPushX0();                         { [arg][result] }
     Self.Emit(#9'ldr x0, [sp, #16]');
-    EmitStrDisposeX0(AArg);
+    if ArcExprIsUnownedStrTransient(AArg) then
+      { pinned above: one bare release takes it 1 -> 0 }
+      Self.Emit(#9'bl _StringRelease')
+    else
+      EmitStrDisposeX0(AArg);
     EmitPopTo('x0');
     Self.Emit(#9'add sp, sp, #16');
     Exit;
@@ -9148,6 +9161,16 @@ begin
           if TransN >= STRTRANS_SLOTS then
             NotYet('more than 8 owned string transient args in one call', Arg);
           EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
+          { PIN NOW, before the call (BUG-20260725-arm64-const-str-param-alias).
+            A callee that stores its const parameter into a local retains it and
+            releases that local at scope exit; at rc=0 the cycle reaches zero
+            and frees OUR transient mid-call, so the old post-call AddRef+Release
+            operated on a freed, reused block ("_StringRelease corrupted header"
+            from sysutils.ExpandFileName's `Base := APath`).  Pinned, the callee
+            cycles 1 -> 2 -> 1 and the bare release after the call disposes it
+            exactly once — the same rule shapes 'P', the closure call and the
+            property setter already follow. }
+          Self.Emit(#9'bl _StringAddRef');
           TransShapes := TransShapes + '0';
           Inc(TransN);
         end
@@ -9372,16 +9395,9 @@ begin
         Self.Emit(#9'bl _ClassRelease');
         Continue;
       end;
-      if Copy(TransShapes, I, 1) = '0' then
-      begin
-        { rc=0 pin: 0 -> 1 -> 0 frees exactly once }
-        EmitPushX0();
-        Self.Emit(#9'bl _StringAddRef');
-        EmitPopTo('x0');
-      end;
-      { shape 'P' (borrowed aliasable source): the _StringAddRef was emitted
-        BEFORE the call, so this bare release just balances it.  Shape '1'
-        (rc=1 owned transient) also lands here for its single release. }
+      { shapes '0' and 'P' both had their _StringAddRef emitted BEFORE the
+        call, so this bare release just balances it.  Shape '1' (rc=1 owned
+        transient) also lands here for its single release. }
       Self.Emit(#9'bl _StringRelease');
     end;
     Self.Emit(#9'ldr x9, [sp], #16');
