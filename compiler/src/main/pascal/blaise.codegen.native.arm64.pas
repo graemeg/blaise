@@ -2677,6 +2677,22 @@ begin
       Self.Emit(#9'bl _Int64ToStr');
       Exit;
     end;
+    if SameText(TFuncCallExpr(AExpr).Name, 'Int64ToStr') then
+    begin
+      { Int64 -> decimal string; same lowering as IntToStr, which already
+        routes through _Int64ToStr.  Integer argument, no transient to
+        dispose.  Mirrors x86-64's Int64ToStr case. }
+      Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      Self.Emit(#9'bl _Int64ToStr');
+      Exit;
+    end;
+    if SameText(TFuncCallExpr(AExpr).Name, 'UInt64ToStr') then
+    begin
+      { unsigned 64-bit -> decimal string.  Mirrors x86-64's UInt64ToStr case. }
+      Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      Self.Emit(#9'bl _UInt64ToStr');
+      Exit;
+    end;
     { process-control family (expression context): each takes the process
       handle (a pointer) and returns an int/pointer — pointer arg, no
       transient to dispose }
