@@ -32,6 +32,16 @@ type
       borrowed transient key survives the calls and is not double-freed.
       Runs clean under valgrind. }
     procedure TestRun_DictLookup_BorrowedConstKey_NoDoubleFree;
+
+    { The stronger form of the above, and the one that actually reproduced.
+      The test above binds the concat to a local first, so the key arrives at
+      the lookup with refcount 1 and a spurious retain/release pair merely
+      returns it to 1 — survivable.  Here the transient is passed DIRECTLY,
+      so it reaches the callee at refcount 0: an AddRef(0->1)/Release(1->0)
+      pair FREES it while the caller still owns it.  That pair was emitted
+      because the generic-instantiation paths dropped IsConstParam, making
+      `const Key: K` a by-value param after monomorphisation. }
+    procedure TestRun_DictLookup_Rc0TransientKey_NotFreed;
     procedure TestRun_IntfFreeFunc_GenericReturn_Compiles;
     procedure TestRun_DefaultProp_StringList_And_ObjectList;
 
@@ -438,6 +448,38 @@ begin
   AssertEquals('exit code 0', 0, RCode);
   AssertEquals('lookup value + intact key', '42' + #10 + 'alphabeta' + #10,
     Output);
+end;
+
+procedure TE2ECollections2Tests.TestRun_DictLookup_Rc0TransientKey_NotFreed;
+const
+  Src = '''
+    program P;
+    uses Generics.Collections;
+    var
+      D: TDictionary<string, Integer>;
+      V, I: Integer;
+      Acc: string;
+    begin
+      D := TDictionary<string, Integer>.Create();
+      D.Add('key_7', 99);
+      Acc := '';
+      for I := 0 to 3 do
+      begin
+        // Each key is a fresh refcount-0 concat transient handed STRAIGHT to
+        // the lookup — never bound to a local first.  A callee retain/release
+        // pair on a const key frees it here, corrupting the heap.
+        if D.ContainsKey('key_' + IntToStr(I * 7)) then
+          if D.TryGetValue('key_' + IntToStr(I * 7), V) then
+            Acc := Acc + IntToStr(V) + ';'
+      end;
+      WriteLn(Acc);
+      WriteLn(D.ContainsKey('key_' + '7'));
+      D.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRTLRunsOnAll(Src, '99;' + #10 + 'True' + #10, 0);
 end;
 
 { Regression: a unit's INTERFACE-section free function (not a class method)

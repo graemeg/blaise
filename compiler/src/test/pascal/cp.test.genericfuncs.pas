@@ -56,6 +56,13 @@ type
     { Generic METHOD (method-level <T>) — monomorphised body + call site. }
     procedure TestCodegen_GenericMethod_BodyEmitted;
     procedure TestCodegen_GenericMethod_CallEmitted;
+
+    { ------------------------------------------------------------------ }
+    { 'const' on a type-parameter param survives monomorphisation         }
+    { ------------------------------------------------------------------ }
+    procedure TestSemantic_GenericMethod_ConstParamFlagPreserved;
+    procedure TestCodegen_GenericClass_ConstStringParam_NoKeyARC;
+    procedure TestCodegen_GenericClass_ByValStringParam_HasARC;
   end;
 
 implementation
@@ -413,6 +420,148 @@ begin
   IR := GenIR(SrcGenericMethodUsage);
   AssertTrue('generic-method call emitted with mangled name',
     Pos('call $TUtil_Echo_Integer', IR) > 0);
+end;
+
+{ ------------------------------------------------------------------------ }
+{ 'const' on a type-parameter param must survive monomorphisation.          }
+{                                                                            }
+{ The generic-instantiation paths hand-build each TMethodParam and copied    }
+{ only ParamName/IsVarParam/TypeName, silently dropping IsConstParam.  So    }
+{ `const AKey: K` monomorphised to string was treated as a BY-VALUE string   }
+{ param and got the callee AddRef(entry)/Release(exit) pair, while a         }
+{ concrete `const AKey: string` correctly borrowed.                          }
+{                                                                            }
+{ For a refcount-0 transient argument (a fresh concat/Format result) that    }
+{ pair is AddRef(0->1) then Release(1->0) = FREE, freeing the string out     }
+{ from under a caller that still owns it — the macOS/arm64 round-34          }
+{ TDictionary key over-release, though the defect is backend-agnostic.       }
+{ ------------------------------------------------------------------------ }
+
+const
+  SrcGenericConstParam =
+    'program P;'#10 +
+    'type'#10 +
+    '  TBox<K> = record'#10 +
+    '    function Probe(const AKey: K): Boolean;'#10 +
+    '  end;'#10 +
+    'function TBox<K>.Probe(const AKey: K): Boolean;'#10 +
+    'begin'#10 +
+    '  Result := True;'#10 +
+    'end;'#10 +
+    'var b: TBox<string>; r: Boolean; s: string;'#10 +
+    'begin'#10 +
+    '  s := ''x'';'#10 +
+    '  r := b.Probe(s);'#10 +
+    'end.';
+
+  { Class form of the same shape — generic CLASS instances are recorded in
+    TProgram.GenericInstances, which is what the semantic assertion walks. }
+  SrcGenericConstParamClass =
+    'program P;'#10 +
+    'type'#10 +
+    '  TBox<K> = class'#10 +
+    '    function Probe(const AKey: K): Boolean;'#10 +
+    '  end;'#10 +
+    'function TBox<K>.Probe(const AKey: K): Boolean;'#10 +
+    'begin'#10 +
+    '  Result := True;'#10 +
+    'end;'#10 +
+    'var b: TBox<string>; r: Boolean; s: string;'#10 +
+    'begin'#10 +
+    '  s := ''x'';'#10 +
+    '  b := TBox<string>.Create();'#10 +
+    '  r := b.Probe(s);'#10 +
+    'end.';
+
+  SrcGenericByValParam =
+    'program P;'#10 +
+    'type'#10 +
+    '  TBox<K> = record'#10 +
+    '    function Probe(AKey: K): Boolean;'#10 +
+    '  end;'#10 +
+    'function TBox<K>.Probe(AKey: K): Boolean;'#10 +
+    'begin'#10 +
+    '  Result := True;'#10 +
+    'end;'#10 +
+    'var b: TBox<string>; r: Boolean; s: string;'#10 +
+    'begin'#10 +
+    '  s := ''x'';'#10 +
+    '  r := b.Probe(s);'#10 +
+    'end.';
+
+{ The flag itself must reach the instantiated decl — asserted at the AST
+  level so a failure points at the semantic pass, not at any one backend. }
+procedure TGenericFuncTests.TestSemantic_GenericMethod_ConstParamFlagPreserved;
+var
+  Prog: TProgram;
+  I, J: Integer;
+  GI: TGenericInstance;
+  MD: TMethodDecl;
+  Found: Boolean;
+begin
+  Prog := AnalyseSrc(SrcGenericConstParamClass);
+  try
+    Found := False;
+    for I := 0 to Prog.GenericInstances.Count - 1 do
+    begin
+      GI := TGenericInstance(Prog.GenericInstances.Items[I]);
+      if GI.ClassDef = nil then
+        Continue;
+      for J := 0 to GI.ClassDef.Methods.Count - 1 do
+      begin
+        MD := TMethodDecl(GI.ClassDef.Methods.Items[J]);
+        if not SameText(MD.Name, 'Probe') then
+          Continue;
+        if MD.Params.Count < 1 then
+          Continue;
+        Found := True;
+        AssertTrue('const survives monomorphisation of ''const AKey: K''',
+          TMethodParam(MD.Params.Items[0]).IsConstParam);
+      end;
+    end;
+    AssertTrue('instantiated TBox<string>.Probe was found', Found);
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ A `const` type-param string borrows: no callee-side ARC on the key. }
+procedure TGenericFuncTests.TestCodegen_GenericClass_ConstStringParam_NoKeyARC;
+var
+  IR: string;
+  Body: string;
+  P, Q: Integer;
+begin
+  IR := GenIR(SrcGenericConstParam);
+  P := Pos('function w $TBox_string_Probe', IR);
+  AssertTrue('instantiated Probe body emitted', P > 0);
+  Body := Copy(IR, P, Length(IR) - P);
+  Q := Pos('}', Body);
+  if Q > 0 then
+    Body := Copy(Body, 0, Q);
+  AssertTrue('const type-param string key is borrowed — no _StringAddRef',
+    Pos('_StringAddRef', Body) < 0);
+  AssertTrue('const type-param string key is borrowed — no _StringRelease',
+    Pos('_StringRelease', Body) < 0);
+end;
+
+{ Control: WITHOUT const the by-value copy still retains/releases, so the
+  test above is pinning `const`, not the absence of string-param ARC. }
+procedure TGenericFuncTests.TestCodegen_GenericClass_ByValStringParam_HasARC;
+var
+  IR: string;
+  Body: string;
+  P, Q: Integer;
+begin
+  IR := GenIR(SrcGenericByValParam);
+  P := Pos('function w $TBox_string_Probe', IR);
+  AssertTrue('instantiated Probe body emitted', P > 0);
+  Body := Copy(IR, P, Length(IR) - P);
+  Q := Pos('}', Body);
+  if Q > 0 then
+    Body := Copy(Body, 0, Q);
+  AssertTrue('by-value type-param string key still retains',
+    Pos('_StringAddRef', Body) > 0);
 end;
 
 initialization

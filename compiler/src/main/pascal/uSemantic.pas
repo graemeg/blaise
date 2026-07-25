@@ -4085,7 +4085,16 @@ begin
         Par    := TMethodParam(MDecl.Params.Items[J]);
         NewPar := TMethodParam.Create();
         NewPar.ParamName  := Par.ParamName;
-        NewPar.IsVarParam := Par.IsVarParam;
+        { Every passing-mode flag must survive monomorphisation — dropping
+          IsConstParam made `const AKey: K` a BY-VALUE param, so the callee
+          retained/released a key it only borrows.  For a refcount-0
+          transient argument that pair frees the caller's string. }
+        NewPar.IsVarParam   := Par.IsVarParam;
+        NewPar.IsConstParam := Par.IsConstParam;
+        NewPar.IsOutParam   := Par.IsOutParam;
+        NewPar.IsOpenArray  := Par.IsOpenArray;
+        NewPar.HasDefault   := Par.HasDefault;
+        NewPar.DefaultValue := CloneExpr(Par.DefaultValue);
         NewPar.TypeName   := SubstTypeParam(Par.TypeName, Templ.ParamNames, Args);
         NewMDecl.Params.Add(NewPar);
       end;
@@ -4463,7 +4472,13 @@ begin
         Par    := TMethodParam(MDecl.Params.Items[J]);
         NewPar := TMethodParam.Create();
         NewPar.ParamName  := Par.ParamName;
-        NewPar.IsVarParam := Par.IsVarParam;
+        { See the class path above — all passing-mode flags must be carried. }
+        NewPar.IsVarParam   := Par.IsVarParam;
+        NewPar.IsConstParam := Par.IsConstParam;
+        NewPar.IsOutParam   := Par.IsOutParam;
+        NewPar.IsOpenArray  := Par.IsOpenArray;
+        NewPar.HasDefault   := Par.HasDefault;
+        NewPar.DefaultValue := CloneExpr(Par.DefaultValue);
         NewPar.TypeName   := SubstTypeParam(Par.TypeName, Templ.ParamNames, Args);
         NewMDecl.Params.Add(NewPar);
       end;
@@ -4878,7 +4893,14 @@ begin
       OldPar           := TMethodParam(Templ.Params.Items[I]);
       NewPar           := TMethodParam.Create();
       NewPar.ParamName  := OldPar.ParamName;
-      NewPar.IsVarParam := OldPar.IsVarParam;
+      { All passing-mode flags must survive monomorphisation — see the
+        generic-class path in InstantiateGeneric. }
+      NewPar.IsVarParam   := OldPar.IsVarParam;
+      NewPar.IsConstParam := OldPar.IsConstParam;
+      NewPar.IsOutParam   := OldPar.IsOutParam;
+      NewPar.IsOpenArray  := OldPar.IsOpenArray;
+      NewPar.HasDefault   := OldPar.HasDefault;
+      NewPar.DefaultValue := CloneExpr(OldPar.DefaultValue);
       ParTypeName := Self.SubstTypeParam(OldPar.TypeName,
         Templ.TypeParams, Args);
       NewPar.TypeName := ParTypeName;
@@ -5046,7 +5068,14 @@ begin
       OldPar            := TMethodParam(Templ.Params.Items[I]);
       NewPar            := TMethodParam.Create();
       NewPar.ParamName  := OldPar.ParamName;
-      NewPar.IsVarParam := OldPar.IsVarParam;
+      { All passing-mode flags must survive monomorphisation — see the
+        generic-class path in InstantiateGeneric. }
+      NewPar.IsVarParam   := OldPar.IsVarParam;
+      NewPar.IsConstParam := OldPar.IsConstParam;
+      NewPar.IsOutParam   := OldPar.IsOutParam;
+      NewPar.IsOpenArray  := OldPar.IsOpenArray;
+      NewPar.HasDefault   := OldPar.HasDefault;
+      NewPar.DefaultValue := CloneExpr(OldPar.DefaultValue);
       ParTypeName := Self.SubstTypeParam(OldPar.TypeName,
         Templ.TypeParams, Args);
       NewPar.TypeName := ParTypeName;
