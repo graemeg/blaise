@@ -16208,8 +16208,22 @@ begin
         boAdd: Op := 'add';
         boSub: Op := 'sub';
         boMul: Op := 'mul';
-        boDiv: Op := 'div';
-        boMod: Op := 'rem';
+        { Signedness of a 32-bit divide follows the EXPRESSION's result type,
+          exactly as the tyInt64/tyUInt64 arm above does.  Emitting signed
+          div/rem for a tyUInt32 result read a Cardinal >= 2^31 as negative
+          (sibling of GH #196, which was the native backend's 64-bit arm). }
+        boDiv:
+          if (BinExpr.ResolvedType <> nil) and
+             (BinExpr.ResolvedType.Kind in [tyUInt32, tyByte, tyWord]) then
+            Op := 'udiv'
+          else
+            Op := 'div';
+        boMod:
+          if (BinExpr.ResolvedType <> nil) and
+             (BinExpr.ResolvedType.Kind in [tyUInt32, tyByte, tyWord]) then
+            Op := 'urem'
+          else
+            Op := 'rem';
         boEQ:  Op := 'ceqw';
         boNE:  Op := 'cnew';
         boLT:  Op := 'csltw';

@@ -41,6 +41,8 @@ type
     procedure TestRun_UInt64_LargeLiteral;
     procedure TestRun_UInt64_UnsignedCompare;
     procedure TestRun_UInt64_Arithmetic;
+    procedure TestRun_UInt64_DivMod_HighBitSet_SignedLiteral;
+    procedure TestRun_UInt32_DivMod_HighBitSet;
 
     { [Unretained] attribute }
     procedure TestRun_Unretained_BackRef_NoLeak;
@@ -293,6 +295,45 @@ const Src = '''
     ''';
 begin
   AssertRunsOnAll(Src, '30' + Chr(10) + '3' + Chr(10) + '1' + Chr(10), 0);
+end;
+
+{ GH #196: a UInt64 value with bit 63 set, divided by a *signed* integer
+  literal.  The native backend chose signed idivq whenever either operand
+  was not itself unsigned, so `U div 16` on a high-bit-set value treated
+  the operand as negative and produced garbage.  Signedness must follow the
+  expression's result type (as the QBE backend already does), not the
+  conjunction of both operand types. }
+procedure TE2EGapTests.TestRun_UInt64_DivMod_HighBitSet_SignedLiteral;
+const Src = '''
+    program T;
+    var U: UInt64;
+    begin
+      U := 9259542123273814144;
+      WriteLn(U div 16);
+      WriteLn(U mod 16);
+      WriteLn((U div 16) mod 16)
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src, '578721382704613384' + Chr(10) + '0' + Chr(10) +
+    '8' + Chr(10), 0);
+end;
+
+{ Sibling of the above in the QBE backend's 32-bit arm: a UInt32 result with
+  bit 31 set divided as signed produced a negative quotient.  Signedness must
+  follow the result type on the w-typed path too. }
+procedure TE2EGapTests.TestRun_UInt32_DivMod_HighBitSet;
+const Src = '''
+    program T;
+    var C: UInt32;
+    begin
+      C := 4000000000;
+      WriteLn(C div 7);
+      WriteLn(C mod 7)
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src, '571428571' + Chr(10) + '3' + Chr(10), 0);
 end;
 
 { ---- [Unretained] attribute ---- }
