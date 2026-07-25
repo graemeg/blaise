@@ -2703,6 +2703,41 @@ begin
       Self.Emit(#9'bl _UInt64ToStr');
       Exit;
     end;
+    { float -> integer.  Mirrors x86-64 exactly: round/floor/ceil go through
+      the C99 helper first and the integral result is then truncated, so the
+      rounding semantics (notably Round's half-AWAY-from-zero, which the FPU
+      rounding mode would get wrong) match the x86-64 and QBE backends.
+      AArch64's one-instruction fcvtas/fcvtms/fcvtps would also work, but the
+      internal assembler implements only fcvtzs of that family today.
+      EmitExprToD0OrConvert promotes a Single operand to double, and AAPCS
+      passes/returns the double in d0, so no shuffling is needed. }
+    if SameText(TFuncCallExpr(AExpr).Name, 'Trunc') then
+    begin
+      Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      Self.Emit(#9'fcvtzs x0, d0');
+      Exit;
+    end;
+    if SameText(TFuncCallExpr(AExpr).Name, 'Round') then
+    begin
+      Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      Self.Emit(#9'bl round');
+      Self.Emit(#9'fcvtzs x0, d0');
+      Exit;
+    end;
+    if SameText(TFuncCallExpr(AExpr).Name, 'Floor') then
+    begin
+      Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      Self.Emit(#9'bl floor');
+      Self.Emit(#9'fcvtzs x0, d0');
+      Exit;
+    end;
+    if SameText(TFuncCallExpr(AExpr).Name, 'Ceil') then
+    begin
+      Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      Self.Emit(#9'bl ceil');
+      Self.Emit(#9'fcvtzs x0, d0');
+      Exit;
+    end;
     { process-control family (expression context): each takes the process
       handle (a pointer) and returns an int/pointer — pointer arg, no
       transient to dispose }
