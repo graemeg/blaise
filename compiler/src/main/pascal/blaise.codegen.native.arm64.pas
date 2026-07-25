@@ -8180,21 +8180,6 @@ begin
   { sret: park the incoming x8 destination pointer in its hidden slot }
   if RecShape = 0 then
     EmitStoreSlot('x8', '__sret');
-  { by-value record params with managed fields: the callee owns its copy,
-    so retain every managed field (walk anchored on callee-saved x19). }
-  for I := 0 to ADecl.Params.Count - 1 do
-  begin
-    Par := TMethodParam(ADecl.Params.Items[I]);
-    if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tyRecord) and
-       not Par.IsVarParam and
-       not RecretManagedClean(TRecordTypeDesc(Par.ResolvedType)) then
-    begin
-      Self.Emit(#9'str x19, [sp, #-16]!');
-      EmitSlotAddr('x19', Par.ParamName);
-      Self.EmitRecordFieldRetains(TRecordTypeDesc(Par.ResolvedType), 'x19');
-      Self.Emit(#9'ldr x19, [sp], #16');
-    end;
-  end;
   { BY-VALUE string params: retain the callee's copy (the caller keeps its
     own reference).  Runs after every register is parked — _StringAddRef
     clobbers the caller-saved argument registers.
@@ -8261,6 +8246,31 @@ begin
       Self.Emit(#9'ldp x9, x10, [x1]');
       EmitSlotAddr('x0', Par.ParamName);
       Self.Emit(#9'stp x9, x10, [x0]');
+    end;
+  end;
+  { pass 3: by-value record params with managed fields — the callee owns its
+    copy, so retain every managed field (walk anchored on callee-saved x19).
+
+    This MUST run AFTER pass 2's memcpy, not before it.  It used to be emitted
+    up with the sret parking, which meant the retains read the callee's slot
+    while it still held uninitialised stack bytes: _StringAddRef was handed
+    whatever garbage lay at each managed field offset, and the atomic increment
+    landed on unrelated memory.  With a record big enough to reach into live
+    frame data the garbage was a .text address and the increment faulted
+    outright (BUG-20260725-arm64-record-param-retain-before-copy — every one of
+    the 8 remaining on-device crash suites bottomed out here, via the x86_64
+    assembler's `const AParsed: TParsedLine`). }
+  for I := 0 to ADecl.Params.Count - 1 do
+  begin
+    Par := TMethodParam(ADecl.Params.Items[I]);
+    if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tyRecord) and
+       not Par.IsVarParam and
+       not RecretManagedClean(TRecordTypeDesc(Par.ResolvedType)) then
+    begin
+      Self.Emit(#9'str x19, [sp, #-16]!');
+      EmitSlotAddr('x19', Par.ParamName);
+      Self.EmitRecordFieldRetains(TRecordTypeDesc(Par.ResolvedType), 'x19');
+      Self.Emit(#9'ldr x19, [sp], #16');
     end;
   end;
   { zero-initialise Result and every declared local (language rule: ALL

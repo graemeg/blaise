@@ -394,6 +394,10 @@ type
       intermediate field that holds the list, not call the getter on whatever
       the base yielded. }
     procedure TestChainedIndexedPropBase_StepsIntoTheField;
+    { BUG-20260725-arm64-record-param-retain-before-copy — the managed-field
+      retains for a by-value record param must follow the memcpy that fills the
+      callee's copy, never precede it. }
+    procedure TestRecordParam_FieldRetainsFollowTheCopy;
   end;
 
 implementation
@@ -5367,6 +5371,59 @@ begin
   end;
   AssertEquals('two field steps between the base and the getter call',
     2, Derefs);
+end;
+
+procedure TArm64BackendTests.TestRecordParam_FieldRetainsFollowTheCopy;
+var
+  AsmT, Body: string;
+  PosFn, PosCopy, PosRetain: Integer;
+begin
+  { A by-value record param owns its copy, so its managed fields are retained
+    on entry — but the copy is a memcpy from the caller's record into the
+    callee's slot, and the retains have to come after it.  Emitted first, they
+    handed _StringAddRef whatever garbage the uninitialised slot held. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TOp = record
+        K: Integer;
+        S: string;
+      end;
+      TLine = record
+        Kind: Integer;
+        Mnem: string;
+        O1, O2, O3: TOp;
+        N: Integer;
+        Raw: string;
+      end;
+    function Enc(const L: TLine): string;
+    var
+      M: string;
+    begin
+      M := L.Mnem;
+      Result := M + '/' + L.O1.S
+    end;
+    var
+      L: TLine;
+    begin
+      L.Mnem := 'mov';
+      L.O1.S := 'rax';
+      WriteLn(Enc(L))
+    end.
+    ''');
+  PosFn := Pos('Enc:' + #10, AsmT);
+  AssertTrue('Enc emitted', PosFn >= 0);
+  { both the param copy and the entry retains live in Enc's prologue, so the
+    FIRST memcpy and the FIRST _StringAddRef after its label are the two
+    instructions whose order is under test }
+  Body := Copy(AsmT, PosFn, Length(AsmT) - PosFn);
+  PosCopy := Pos(#9'bl memcpy', Body);
+  AssertTrue('the record param is copied in the prologue', PosCopy >= 0);
+  PosRetain := Pos(#9'bl _StringAddRef', Body);
+  AssertTrue('its managed fields are retained', PosRetain >= 0);
+  AssertTrue('field retains come AFTER the copy, not before',
+    PosRetain > PosCopy);
 end;
 
 procedure TArm64BackendTests.TestClosure_UnownedTransientArg_PinnedBeforeCall;
