@@ -1411,7 +1411,7 @@ begin
             (Arg is TNilLiteral) or
             ((Arg.ResolvedType <> nil) and
              (Arg.ResolvedType.Kind in [tyPChar, tyPointer, tyClass, tyString,
-                                        tyDynArray]))) then
+                                        tyDynArray, tyMetaClass]))) then
       NotYet('closure-call argument of this type', Arg);
     Self.EmitExprToX0(Arg);
     { capture an owned-transient's disposal shape; hold its pointer in a
@@ -3049,7 +3049,8 @@ begin
                   .ResolvedType <> nil) and
                (TASTExpr(TFuncCallExpr(AExpr).Args.Items[I])
                   .ResolvedType.Kind in [tyPChar, tyPointer,
-                                         tyClass, tyString]))) then
+                                         tyClass, tyString,
+                                         tyMetaClass]))) then
         NotYet('indirect-call argument of this type',
           TASTExpr(TFuncCallExpr(AExpr).Args.Items[I]));
       { a string arg passes as a BORROWED pointer; an owned transient
@@ -5473,7 +5474,8 @@ begin
               (Arg is TNilLiteral) or
               ((Arg.ResolvedType <> nil) and
                (Arg.ResolvedType.Kind in [tyPChar, tyPointer,
-                                          tyClass, tyString, tyDynArray]))) then
+                                          tyClass, tyString, tyDynArray,
+                                          tyMetaClass]))) then
         NotYet('indirect-call argument of this type', Arg);
       { an owned transient would need a park slot (like EmitFatPtrCall) — keep
         the hole honest rather than leak it }
@@ -7519,7 +7521,8 @@ begin
                 ((Par.ResolvedType <> nil) and
                  (Par.ResolvedType.Kind in [tyDouble, tyString, tyRecord,
                                             tyClass,
-                                            tyPointer, tyPChar]))) then
+                                            tyPointer, tyPChar,
+                                            tyMetaClass]))) then
           NotYet('var parameter ''' + Par.ParamName + ''' of this type', ADecl);
         AddLocal(Par.ParamName, 8);
         Continue;
@@ -7571,7 +7574,8 @@ begin
                 ((Par.ResolvedType <> nil) and
                  (Par.ResolvedType.Kind in [tyDouble, tySingle, tyString,
                                             tyClass, tyProcedural,
-                                            tyPointer, tyPChar, tyDynArray]))) then
+                                            tyPointer, tyPChar, tyDynArray,
+                                            tyMetaClass]))) then
           NotYet('parameter ''' + Par.ParamName + ''' of this type', ADecl);
         AddLocal(Par.ParamName, 8);
         { a BY-VALUE string param is the callee's own copy: retained in the
@@ -7613,7 +7617,8 @@ begin
                    (ADecl.ResolvedReturnType.Kind in [tyDouble, tySingle]) or
                    (ADecl.ResolvedReturnType.Kind in [tyString, tyClass,
                                                       tyPointer, tyPChar,
-                                                      tyDynArray])) then
+                                                      tyDynArray,
+                                                      tyMetaClass])) then
         NotYet('function result of this type', ADecl)
       else
         { a string/class/dyn-array Result is a plain 8-byte pointer slot.
@@ -9123,7 +9128,8 @@ begin
               (Arg is TNilLiteral) or
               ((Arg.ResolvedType <> nil) and
                (Arg.ResolvedType.Kind in [tyPChar, tyPointer,
-                                          tyClass, tyProcedural, tyDynArray])) then
+                                          tyClass, tyProcedural, tyDynArray,
+                                          tyMetaClass])) then
       begin
         { A dyn-array argument is an 8-byte ref-counted data pointer.  The callee
           owns its copy (a by-value dyn-array param retains in the prologue; a
@@ -10047,7 +10053,8 @@ begin
     Arg := TASTExpr(AArgs.Items[I]);
     if not (IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) or
             ((Arg.ResolvedType <> nil) and
-             (Arg.ResolvedType.Kind in [tyClass, tyPChar, tyPointer, tyString]))) then
+             (Arg.ResolvedType.Kind in [tyClass, tyPChar, tyPointer, tyString,
+                                        tyMetaClass]))) then
       NotYet('interface-call argument of this type', Arg);
     Self.EmitExprToX0(Arg);
     EmitPushX0();
