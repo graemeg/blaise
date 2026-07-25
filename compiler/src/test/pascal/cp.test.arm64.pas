@@ -389,6 +389,11 @@ type
       AddRef+Release then operated on freed memory. }
     procedure TestStrArg_UnownedTransient_PinnedBeforeDirectCall;
     procedure TestBuiltinStrArg_UnownedTransient_PinnedBeforeCall;
+    { BUG-20260725-arm64-chained-indexed-prop-base — an indexed default-property
+      read whose receiver is a CHAINED base (A.B.Field[I]) must step into the
+      intermediate field that holds the list, not call the getter on whatever
+      the base yielded. }
+    procedure TestChainedIndexedPropBase_StepsIntoTheField;
   end;
 
 implementation
@@ -5303,6 +5308,65 @@ begin
   AssertTrue('no post-call AddRef half remains',
     (PosEx(#9'bl _StringAddRef', AsmT, PosCall) < 0) or
     (PosEx(#9'bl _StringAddRef', AsmT, PosCall) > PosRel));
+end;
+
+procedure TArm64BackendTests.TestChainedIndexedPropBase_StepsIntoTheField;
+var
+  AsmT:   string;
+  Region: string;
+  PosCall, PosBase, K, Derefs: Integer;
+begin
+  { T.Mid.Bag[3] — the getter's receiver is Bag, reached by TWO field steps
+    from T (T.Mid, then .Bag).  arm64 applied the FieldInfo step only to the
+    RecordName and implicit-Self receiver forms, so a chained base stopped one
+    field short and ran the getter on T.Mid.  With two same-offset fields (as
+    TProgram.Block / TBlock.Decls both at 0x20) that is a silent wrong-object
+    call — it crashed 46 suites. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TBag = class
+        function GetIt(I: Integer): Integer;
+        property Items[I: Integer]: Integer read GetIt; default;
+      end;
+      TMid = class
+        M1: Integer;
+        Bag: TBag;
+      end;
+      TTop = class
+        T1: Integer;
+        Mid: TMid;
+      end;
+    function TBag.GetIt(I: Integer): Integer;
+    begin
+      Result := I
+    end;
+    procedure Use(T: TTop);
+    var N: Integer;
+    begin
+      N := T.Mid.Bag[3];
+      WriteLn(N)
+    end;
+    begin
+      Use(nil)
+    end.
+    ''');
+  PosCall := Pos(#9'bl TBag_GetIt', AsmT);
+  AssertTrue('getter call emitted', PosCall >= 0);
+  { the receiver chain starts where the T parameter slot is loaded }
+  PosBase := RPos(#9'ldur x0, [x29, #', Copy(AsmT, 0, PosCall));
+  AssertTrue('base parameter loaded', PosBase >= 0);
+  Region := Copy(AsmT, PosBase, PosCall - PosBase);
+  Derefs := 0;
+  K := PosEx(#9'ldr x0, [x0]', Region, 0);
+  while K >= 0 do
+  begin
+    Inc(Derefs);
+    K := PosEx(#9'ldr x0, [x0]', Region, K + 1);
+  end;
+  AssertEquals('two field steps between the base and the getter call',
+    2, Derefs);
 end;
 
 procedure TArm64BackendTests.TestClosure_UnownedTransientArg_PinnedBeforeCall;

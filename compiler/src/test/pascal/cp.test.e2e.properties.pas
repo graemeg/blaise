@@ -52,6 +52,9 @@ type
     { Implicit-Self write/read: Field[I] := V / Field[I] inside a method, where
       Field is a class with a default array property. }
     procedure TestRun_DefaultProperty_WriteThroughImplicitSelf;
+    { A.B.Field[I] — the getter's receiver is the intermediate field, two field
+      steps from the base (BUG-20260725-arm64-chained-indexed-prop-base). }
+    procedure TestRun_DefaultProperty_ReadThroughChainedBase;
     { Static-array field accessed from inside a method (implicit Self). }
     procedure TestRun_StaticArrayField_ReadInMethod;
     procedure TestRun_StaticArrayField_WriteInMethod;
@@ -592,6 +595,53 @@ procedure TE2EPropertyTests.TestRun_DefaultProperty_WriteThroughImplicitSelf;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcDefaultWriteImplicitSelf, '7' + LE, 0);
+end;
+
+const
+  { t.Mid.Vec[I] — the getter's receiver is Vec, reached by TWO field steps
+    from t.  M1/T1 make Mid and Vec share an offset, which is what turned the
+    missing second step into a silent wrong-object call rather than a nil deref
+    (arm64 ran the getter on t.Mid).  The getter is computed and the property
+    read-only, so this isolates the READ path: a chained-base indexed write and
+    an implicit-Self indexed array-field write are both still NotYet on arm64.
+    Base is FBase so a wrong receiver cannot accidentally produce 14. }
+  SrcDefaultReadChainedBase = '''
+    program P;
+    type
+      TVec = class
+        FBase: Integer;
+        constructor Create;
+        function Get(i: Integer): Integer;
+        property Items[i: Integer]: Integer read Get; default;
+      end;
+      TMid = class
+        M1: Integer;
+        Vec: TVec;
+        constructor Create;
+      end;
+      TTop = class
+        T1: Integer;
+        Mid: TMid;
+        constructor Create;
+      end;
+    constructor TVec.Create; begin inherited Create(); FBase := 5 end;
+    function TVec.Get(i: Integer): Integer; begin Result := FBase + i * 4 end;
+    constructor TMid.Create;
+    begin inherited Create(); M1 := 111; Vec := TVec.Create() end;
+    constructor TTop.Create;
+    begin inherited Create(); T1 := 222; Mid := TMid.Create() end;
+    var t: TTop;
+    begin
+      t := TTop.Create();
+      WriteLn(t.Mid.Vec[0] + t.Mid.Vec[1]);
+      t := nil
+    end.
+    ''';
+
+procedure TE2EPropertyTests.TestRun_DefaultProperty_ReadThroughChainedBase;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(SrcDefaultReadChainedBase, '14' + LE, 0);
 end;
 
 initialization

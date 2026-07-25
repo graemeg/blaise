@@ -4501,6 +4501,22 @@ begin
       if not DeferNativeClassRelease() then
         NotYet('property read on an owned transient base with all _pendrel '
           + 'slots busy', AFld);
+    { A.B.Field[I] — FieldInfo names the intermediate FIELD that holds the
+      receiver, not the object the base yielded, so step to it exactly as the
+      RecordName branch below does.  QBE (blaise.codegen.qbe.pas ~7075) applies
+      this step for BOTH receiver forms; arm64 applied it only to RecordName and
+      to implicit Self, so a chained base called the getter on the WRONG object
+      (BUG-20260725-arm64-chained-indexed-prop-base).  With TProgram.Block and
+      TBlock.Decls both at offset 0x20 this made Prog.Block.Decls[0] run
+      TObjectList.Get on the TBlock, which is what crashed 46 of the parser and
+      semantic test suites.  A bare default-property read on the base itself
+      (L[I]) has FieldInfo = nil and needs no step. }
+    if AFld.FieldInfo <> nil then
+    begin
+      if AFld.FieldInfo.Offset > 0 then
+        EmitAddSubImm('add', 'x0', 'x0', AFld.FieldInfo.Offset);
+      Self.Emit(#9'ldr x0, [x0]');
+    end;
   end
   else if AFld.IsImplicitSelf then
   begin
