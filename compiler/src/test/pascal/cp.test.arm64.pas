@@ -3450,10 +3450,13 @@ begin
   GetP := Pos(#9'bl DPU_TBox_GetItem', Body);
   AssertTrue('the default-property getter is called', GetP >= 0);
 
-  { ... and the Box FIELD is loaded as the receiver before it: the sequence
-    that loads O, steps to the Box field and derefs it (ldr x0, [x0]) must
-    appear before the getter call, not a bare load of O. }
-  RecvP := Pos(#9'ldr x0, [x0]'#10#9'ldr x1', Body);
+  { ... and the Box FIELD is loaded as the receiver before it, not a bare load
+    of O.  The step is one instruction: EmitImplicitBaseStep folds the field
+    offset into the load (`ldr x0, [x0, #8]`), where the old open-coded step in
+    this branch emitted `add x0, x0, #8` followed by a bare `ldr x0, [x0]`.
+    Accept either offset form so the test pins the DEREFERENCE, not the field
+    layout. }
+  RecvP := Pos(#9'ldr x0, [x0, #', Body);
   if RecvP < 0 then
     RecvP := Pos(#9'ldr x0, [x0]', Body);
   AssertTrue('the class field is dereferenced as the getter receiver',
@@ -5371,12 +5374,16 @@ begin
   PosBase := RPos(#9'ldur x0, [x29, #', Copy(AsmT, 0, PosCall));
   AssertTrue('base parameter loaded', PosBase >= 0);
   Region := Copy(AsmT, PosBase, PosCall - PosBase);
+  { Count the class-pointer dereferences between the base load and the getter
+    call: one for T.Mid, one for .Bag.  Each is a single `ldr x0, [x0...]` —
+    with or without a folded offset, since EmitImplicitBaseStep folds it and the
+    field may sit at offset 0. }
   Derefs := 0;
-  K := PosEx(#9'ldr x0, [x0]', Region, 0);
+  K := PosEx(#9'ldr x0, [x0', Region, 0);
   while K >= 0 do
   begin
     Inc(Derefs);
-    K := PosEx(#9'ldr x0, [x0]', Region, K + 1);
+    K := PosEx(#9'ldr x0, [x0', Region, K + 1);
   end;
   AssertEquals('two field steps between the base and the getter call',
     2, Derefs);

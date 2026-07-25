@@ -4494,6 +4494,23 @@ begin
     Self.EmitExprToX0(AFld.PropIndexExpr);
     EmitPushX0();
   end;
+  { ---- receiver, in two stages ------------------------------------------
+    STAGE 1 loads the object that HOLDS the receiver into x0; the three
+    receiver forms differ only in how that object is reached.
+    STAGE 2 steps from that object to the receiver itself, ONCE, for every
+    form.
+
+    Keeping stage 2 out of the branches is deliberate.  Each branch used to
+    carry its own copy of the step, and each independently forgot it:
+      2026-07-23  implicit Self  FUsedUnits.Strings[I] ran TStringList.Get on
+                                the TParser
+      2026-07-24  RecordName     Days via CD.ArrayElements[J]
+      2026-07-25  chained base   Prog.Block.Decls[0] ran TObjectList.Get on the
+                                TBlock — 46 crashing suites
+                                (BUG-20260725-arm64-chained-indexed-prop-base)
+    QBE has had none of the three because it applies the step once for all
+    receiver forms (blaise.codegen.qbe.pas ~7075).  With the step hoisted here, a
+    receiver form added later inherits it instead of becoming the fourth. }
   if AFld.Base <> nil then
   begin
     { chained receiver (A.B.Prop): the base expression yields the
@@ -4510,33 +4527,9 @@ begin
       if not DeferNativeClassRelease() then
         NotYet('property read on an owned transient base with all _pendrel '
           + 'slots busy', AFld);
-    { A.B.Field[I] — FieldInfo names the intermediate FIELD that holds the
-      receiver, not the object the base yielded, so step to it exactly as the
-      RecordName branch below does.  QBE (blaise.codegen.qbe.pas ~7075) applies
-      this step for BOTH receiver forms; arm64 applied it only to RecordName and
-      to implicit Self, so a chained base called the getter on the WRONG object
-      (BUG-20260725-arm64-chained-indexed-prop-base).  With TProgram.Block and
-      TBlock.Decls both at offset 0x20 this made Prog.Block.Decls[0] run
-      TObjectList.Get on the TBlock, which is what crashed 46 of the parser and
-      semantic test suites.  A bare default-property read on the base itself
-      (L[I]) has FieldInfo = nil and needs no step. }
-    if AFld.FieldInfo <> nil then
-    begin
-      if AFld.FieldInfo.Offset > 0 then
-        EmitAddSubImm('add', 'x0', 'x0', AFld.FieldInfo.Offset);
-      Self.Emit(#9'ldr x0, [x0]');
-    end;
   end
   else if AFld.IsImplicitSelf then
-  begin
-    EmitLoadSlot('x0', 'Self');
-    { Self.FClassField.Prop[I] — the getter's receiver is the intermediate
-      field, not Self.  A class-typed intermediate must be dereferenced (a
-      record one gets its offset added).  Passing Self here called the getter
-      on the wrong object (macOS arm64, 2026-07-23: FUsedUnits.Strings[I] ran
-      TStringList.Get on the TParser). }
-    EmitImplicitBaseStep('x0', AFld.ImplicitBaseInfo);
-  end
+    EmitLoadSlot('x0', 'Self')
   else
   begin
     EmitLoadSlot('x0', AFld.RecordName);
@@ -4544,23 +4537,19 @@ begin
       record before stepping into its field. }
     if AFld.IsVarParam then
       Self.Emit(#9'ldr x0, [x0]');
-    { R.Field[I] as a value (R a plain record/class variable, not Self): the
-      getter's receiver is the FIELD holding the list, not the containing
-      record.  When FieldInfo names that containing field, step to it — add its
-      offset, then deref the (class-typed) field pointer — exactly as the QBE
-      backend does (blaise.codegen.qbe.pas ~7075).  A bare default-property read
-      on the variable itself (L[I]) has FieldInfo = nil and needs no step.
-      Omitting the step passed the containing record R as the list Self, so
-      TStringList.Get read R's (Line,Col) pair as FList and crashed
-      (macOS arm64, 2026-07-24: rtl.platform.posix Days const via
-      AnalyseArrayConstDecls' CD.ArrayElements[J]). }
-    if AFld.FieldInfo <> nil then
-    begin
-      if AFld.FieldInfo.Offset > 0 then
-        EmitAddSubImm('add', 'x0', 'x0', AFld.FieldInfo.Offset);
-      Self.Emit(#9'ldr x0, [x0]');
-    end;
   end;
+  { STAGE 2 — the getter's receiver is the intermediate FIELD that holds it
+    (the list in R.Field[I] / A.B.Field[I] / Self.FField[I]), not the object
+    stage 1 produced.  EmitImplicitBaseStep is the one correct step: it
+    dereferences a class-typed field and merely advances past an EMBEDDED
+    record one, where the open-coded `add offset` + unconditional `ldr` the
+    other two branches used would have wrongly dereferenced record bytes.
+    A bare default-property read on the object itself (L[I]) carries no field
+    info and needs no step. }
+  if AFld.IsImplicitSelf and (AFld.Base = nil) then
+    EmitImplicitBaseStep('x0', AFld.ImplicitBaseInfo)
+  else
+    EmitImplicitBaseStep('x0', AFld.FieldInfo);
   if AFld.PropIndexExpr <> nil then
     EmitPopTo('x1');
   if AFld.PropAccessorVSlot >= 0 then
