@@ -221,6 +221,24 @@ jobs:
           BLAISE_QBE_COMPILER="$BLAISE" compiler/target/TestRunner
 
       # --------------------------------------------------------------------
+      # 8b. Linked-BINARY fixpoint.  Every other guard stops at IR/asm text or
+      #     behaviour, so a nondeterminism in the internal assembler, internal
+      #     linker or ELF/Mach-O container writer (timestamp, uninitialised
+      #     padding, unstable build-id, hash-order-dependent symbol emission)
+      #     passes them all.  This builds stage-2, has stage-2 rebuild itself
+      #     into stage-3, and asserts the two executables are byte-identical.
+      #     Also checks the macos-arm64 container writer via cross-compile —
+      #     there is no macOS runner, and that writer is the one an on-device
+      #     self-host exercises.
+      # --------------------------------------------------------------------
+      - name: Linked-binary fixpoint
+        run: |
+          set -euo pipefail
+          ./scripts/fixpoint-binary.sh --compiler "${{ steps.pre.outputs.bin }}"
+          ./scripts/fixpoint-binary.sh --compiler "${{ steps.pre.outputs.bin }}" \
+            --target macos-arm64
+
+      # --------------------------------------------------------------------
       # 9. Save the carry-forward cache for the next run: the -pre binary, its
       #    rtl, and a marker recording the HEAD SHA it was built at.
       #    MASTER ONLY: the carry-forward cache is the resume anchor for master
