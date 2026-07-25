@@ -118,6 +118,7 @@ type
       (impllist, Supports/is/as) under the SAME owning-unit-prefixed symbol — a
       bare definition dangled the prefixed references at link (LINK-1). }
     procedure TestInterface_TypeinfoSymbol_DefAndRefAgree;
+    procedure TestUnitGenericInstance_BodyEmittedOnce;
     procedure TestInterface_ItabAndImpllist_AreGlobl;
     procedure TestGenericClassInstance_MethodBodyEmittedInUnit;
     procedure TestClassTypeinfo_InstanceSizeCoversAllFields;
@@ -2195,6 +2196,69 @@ begin
   { and NO bare typeinfo_IGreeter reference dangles }
   AssertTrue('no bare typeinfo reference',
     Pos('typeinfo_IGreeter@PAGE', AsmT) < 0);
+end;
+
+{ A generic instance declared in a UNIT has its method bodies emitted by
+  EmitUnit, in that unit's own context.  EmitProgram then walks FClassDecls to
+  emit class bodies — and the unit's generic-instance wrapper was added to that
+  list without being registered in FUnitEmittedClasses, so the body was emitted
+  a SECOND time into the same assembly unit.  The internal assembler rejects
+  that ("duplicate label: TBox_Integer_Create"), which blocked every arm64
+  whole-program build of a program that uses Classes.
+
+  Weak linkage does not save this: it collapses duplicates across OBJECTS, not
+  within one object.  This mirrors the leg-39 guard already applied to a unit's
+  ORDINARY classes. }
+procedure TArm64BackendTests.TestUnitGenericInstance_BodyEmittedOnce;
+var
+  AsmT: string;
+  P, N: Integer;
+begin
+  AsmT := GenAsmWithUnit(
+    '''
+    unit genu;
+    interface
+    type
+      TBox<T> = class(TObject)
+        V: T;
+        procedure Put(A: T);
+      end;
+      TBag = class(TObject)
+        B: TBox<Integer>;
+        procedure Fill;
+      end;
+    implementation
+    procedure TBox<T>.Put(A: T);
+    begin
+      Self.V := A
+    end;
+    procedure TBag.Fill;
+    begin
+      Self.B := TBox<Integer>.Create();
+      Self.B.Put(1)
+    end;
+    end.
+    ''',
+    '''
+    program P;
+    uses genu;
+    var B: TBag;
+    begin
+      B := TBag.Create();
+      B.Fill();
+      B.Free()
+    end.
+    ''');
+  { the monomorphised constructor body must be defined EXACTLY once }
+  N := 0;
+  P := PosEx('TBox_Integer_Put:', AsmT, 0);
+  while P >= 0 do
+  begin
+    N := N + 1;
+    if P + 1 > Length(AsmT) then break;
+    P := PosEx('TBox_Integer_Put:', AsmT, P + 1);
+  end;
+  AssertEquals('unit generic-instance body emitted exactly once', 1, N);
 end;
 
 procedure TArm64BackendTests.TestInterface_ItabAndImpllist_AreGlobl;

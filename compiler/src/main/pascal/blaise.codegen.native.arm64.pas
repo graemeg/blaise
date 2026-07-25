@@ -10980,6 +10980,15 @@ begin
       TGenericInstance(AUnit.GenericInstances.Items[I]).TypeDesc;
     FGenericDecls.Add(UTD);
     FClassDecls.Add(UTD);
+    { This unit emits these instance bodies itself, further down (the
+      AUnit.GenericInstances EmitFunctionDef walk).  Register the wrapper so
+      EmitProgram's FClassDecls walk skips it — exactly the leg-39 guard used
+      for a unit's ordinary classes.  Without this, a whole-program build emits
+      the body TWICE into ONE assembly unit and the internal assembler rejects
+      the duplicate label (e.g. TListEnumerator_String_Create for any program
+      that `uses Classes`).  Weak linkage does not help here: it collapses
+      duplicates across OBJECTS, not within a single object. }
+    FUnitEmittedClasses.Add(UTD);
   end;
   { generic INTERFACE instances from this unit — weak typeinfo, like the program
     path (leg 41).  Omitting this leaves a unit-scoped instance's typeinfo
