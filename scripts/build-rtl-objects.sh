@@ -79,6 +79,8 @@ mkdir -p "$OUTDIR"
 case "$(uname -s)" in
   FreeBSD) LAYOUT_UNIT=rtl.platform.layout.freebsd
            ERRNO_UNIT=runtime.errno.freebsd ;;
+  Darwin)  LAYOUT_UNIT=rtl.platform.layout.darwin
+           ERRNO_UNIT=runtime.errno.darwin ;;
   *)       LAYOUT_UNIT=rtl.platform.layout.linux
            ERRNO_UNIT=runtime.errno.linux ;;
 esac
@@ -104,6 +106,14 @@ OBJS=""
 for u in $RTL_UNITS; do
   obj="$OUTDIR/$u.o"
   src="$SRC/$u.pas"
+  # Skip BEFORE building: the object was discarded further down anyway, and
+  # runtime.start is an x86_64/glibc _start stub whose inline asm no other
+  # target can even assemble (macOS arm64 rejects `endbr64`, so every e2e test
+  # died with "failed to build runtime.start").  Mach-O needs no startup object
+  # at all — LC_MAIN names `main` directly.
+  if [ "$u" = "runtime.start" ] && [ "$WITH_STARTUP" -eq 0 ]; then
+    continue
+  fi
   # Rebuild only when the cached object is missing or older than its source, so
   # a persistent $OUTDIR (e.g. reused across a test suite) builds the RTL once.
   if [ ! -f "$obj" ] || [ "$src" -nt "$obj" ]; then
@@ -119,9 +129,6 @@ for u in $RTL_UNITS; do
     # (e.g. one per test in a suite) don't re-run nm on the stable RTL objects.
     nm "$obj" 2>/dev/null | grep -E ' [TDBR] ' | awk '{print $3}' | sort -u \
       > "$obj.syms"
-  fi
-  if [ "$u" = "runtime.start" ] && [ "$WITH_STARTUP" -eq 0 ]; then
-    continue
   fi
   # Drop this object if it re-defines any symbol the main program already owns
   # (it was inlined into the program) — otherwise the loose .o collides.
