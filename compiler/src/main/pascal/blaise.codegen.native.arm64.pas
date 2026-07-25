@@ -1750,9 +1750,14 @@ begin
     Self.Emit(#9'bl memcpy');
     Exit;
   end;
+  { tyPointer/tyPChar are unmanaged 8-byte words, so the plain store path
+    below handles them exactly like an Int64 (RawSize picks `str x0`).
+    tyProcedural is deliberately NOT here: a method-pointer/closure is a
+    16-byte fat value and would need a two-word store. }
   if not (IsIntFam(AStmt.FieldInfo.TypeDesc) or
           (AStmt.FieldInfo.TypeDesc.Kind in [tyDouble, tySingle,
-                                             tyClass]) or
+                                             tyClass, tyPointer,
+                                             tyPChar]) or
           AStmt.FieldInfo.TypeDesc.IsString()) then
     NotYet('field of this type', AStmt);
   if AStmt.FieldInfo.TypeDesc.Kind = tySingle then
