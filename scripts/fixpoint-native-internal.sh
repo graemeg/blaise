@@ -19,11 +19,13 @@
 #   the only fixpoint-level guard that drives both internal tools end to end.
 #
 # WHY IT IS A DIFFERENTIAL CHECK, NOT A SELF-HOSTING FIXPOINT:
-#   The internal assembler currently buffers the whole assembly + ELF
-#   object in memory, so assembling the compiler's own ~631k-line .s needs
-#   ~53 GB and OOM-kills.  A true "compile the compiler with itself via the
-#   internal toolchain" fixpoint is therefore not feasible until the internal
-#   assembler streams its output.  Instead we compile a representative program
+#   This script's job is to compare the INTERNAL toolchain against the
+#   EXTERNAL one, which needs a program small enough to build both ways.
+#   (A self-hosting internal-toolchain fixpoint IS now feasible and lives in
+#   scripts/fixpoint-binary.sh — measured 2026-07-25 at ~7 s / ~830 MB peak
+#   RSS.  The historical note here claimed ~53 GB and an OOM-kill; that has
+#   not been true since the assembler stopped buffering the whole object.)
+#   Here we compile a representative program
 #   that exercises the bug-prone paths (record-return sret-Result field reads,
 #   immutable string literals) BOTH ways and assert the internal-toolchain
 #   binary BEHAVES identically (stdout + exit code) to the all-external
