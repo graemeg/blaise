@@ -38,10 +38,12 @@ permissions:
 env:
   # Cold-start anchor: the newest *real* release whose binary is published as a
   # GitHub Release asset. Used only when no cached -pre binary is available.
-  # v0.12.0 is the clean rolling-bootstrap anchor: the broken v0.11.0->v0.12.0
-  # commit range is BEFORE it, so the replay range (v0.12.0..HEAD) is all
-  # native-default + internal-toolchain and needs neither QBE nor gcc.
-  STAGE1_TAG: v0.12.0
+  # v0.13.0 is the rolling-bootstrap anchor: the broken v0.11.0->v0.12.0 commit
+  # range is BEFORE it, so the replay range is all native-default +
+  # internal-toolchain and needs neither QBE nor gcc.  It is also the first
+  # release whose binary SOURCE-BUILDS the RTL, so no blaise_rtl.a is involved
+  # anywhere in the chain (v0.12.0 still required the archive).
+  STAGE1_TAG: v0.13.0
 
 jobs:
   bootstrap:
@@ -114,7 +116,6 @@ jobs:
           FROM=""
 
           CACHE_BIN=".bootstrap-cache/blaise"
-          CACHE_RTL=".bootstrap-cache/blaise_rtl.a"
           CACHE_MARK=".bootstrap-cache/commit.sha"
 
           if [ -x "$CACHE_BIN" ] && [ -f "$CACHE_MARK" ]; then
@@ -124,7 +125,6 @@ jobs:
               echo "Cached -pre binary found at commit $SHA — resuming from there."
               mkdir -p "releases/$SHA"
               cp "$CACHE_BIN" "releases/$SHA/blaise"
-              cp "$CACHE_RTL" "releases/$SHA/blaise_rtl.a"
               chmod +x "releases/$SHA/blaise"
               FROM="$SHA"
             else
@@ -146,14 +146,12 @@ jobs:
             # Normalise to the names rolling-bootstrap.sh expects, wherever the
             # files landed inside the archive.
             BIN="$(find /tmp/stage1 -type f -name blaise | head -1)"
-            RTL="$(find /tmp/stage1 -type f -name blaise_rtl.a | head -1)"
-            if [ -z "$BIN" ] || [ -z "$RTL" ]; then
-              echo "::error::blaise / blaise_rtl.a not found inside the stage-1 tarball."
+            if [ -z "$BIN" ]; then
+              echo "::error::blaise not found inside the stage-1 tarball."
               find /tmp/stage1 -maxdepth 2 -type f | sed 's/^/  /'
               exit 1
             fi
             cp "$BIN" "$DEST/blaise"
-            cp "$RTL" "$DEST/blaise_rtl.a"
             chmod +x "$DEST/blaise"
             FROM="$STAGE1_TAG"
           fi
@@ -187,19 +185,10 @@ jobs:
           echo "bin=$PWD/$PRE_DIR/blaise" >> "$GITHUB_OUTPUT"
 
       # --------------------------------------------------------------------
-      # 8. Install RTL + build the test runner with the -pre binary, then run
-      #    the full test suite. PasBuild is NOT on the runner, so we mirror the
-      #    documented manual build path: make install for the RTL, then
-      #    pasbuild only if available — otherwise we fall back to the binary's
-      #    own test-compile. (Adjust here if PasBuild gets installed below.)
+      # 8. Build the test runner with the -pre binary, then run the full test
+      #    suite. The compiler source-builds the RTL on demand, so there is no
+      #    separate RTL install step.
       # --------------------------------------------------------------------
-      - name: Build RTL with -pre binary
-        run: |
-          set -euo pipefail
-          BLAISE="${{ steps.pre.outputs.bin }}"
-          # Native default backend builds the RTL with no external tools.
-          ( cd runtime && make BLAISE="$BLAISE" && make BLAISE="$BLAISE" install )
-
       - name: Install PasBuild
         run: |
           set -euo pipefail
@@ -246,7 +235,6 @@ jobs:
           rm -rf .bootstrap-cache
           mkdir -p .bootstrap-cache
           cp "${{ steps.pre.outputs.dir }}/blaise"        .bootstrap-cache/blaise
-          cp "${{ steps.pre.outputs.dir }}/blaise_rtl.a"  .bootstrap-cache/blaise_rtl.a
           git rev-parse HEAD > .bootstrap-cache/commit.sha
           echo "Marked cache at $(cat .bootstrap-cache/commit.sha)"
 
@@ -271,7 +259,6 @@ jobs:
           name: blaise-pre-${{ github.sha }}
           path: |
             ${{ steps.pre.outputs.dir }}/blaise
-            ${{ steps.pre.outputs.dir }}/blaise_rtl.a
           retention-days: 30
           if-no-files-found: error
 

@@ -152,7 +152,6 @@ project.xml                       Root aggregator (packaging=pom)
 │
 ├── runtime/                      RTL build module (packaging=library)
 │   ├── project.xml
-│   ├── Makefile                  Builds blaise_rtl.a from the RTL units in compiler/src/main/pascal
 │   └── src/
 │       └── test/pascal/          Runtime tests (punit, compiled by Blaise)
 │
@@ -183,10 +182,8 @@ never committed to the repository.
 * A previously released Blaise binary (see `releases/`)
 * https://github.com/graemeg/pasbuild[PasBuild]
 * A C compiler (`gcc` or `clang`) for building the vendored QBE backend and linking
-* GNU `make` — developer workflow only: it builds the transitional
-  `blaise_rtl.a` archive consumed by the fixpoint scripts and the runtime test
-  module. The compiler itself builds and links its RTL from source, so plain
-  compiler use needs no `make` at all.
+* GNU `make` — only for building the vendored QBE backend. The compiler builds
+  and links its RTL from source, so plain compiler use needs no `make` at all.
 
 NOTE: FPC is *not* required. Blaise is fully self-hosting — each release binary
 compiles the next version. The bootstrap chain starts from the binary in
@@ -194,61 +191,34 @@ compiles the next version. The bootstrap chain starts from the binary in
 
 === Bootstrap from a release
 
-The runtime build compiles the RTL units (`runtime.str.pas`, `runtime.arc.pas`,
-`runtime.mem.pas`, ... under `compiler/src/main/pascal`) into `blaise_rtl.a`
-using the Blaise binary at `compiler/target/blaise`. On a clean checkout that
-binary does not exist yet, so the release binary must be passed explicitly via
-the `BLAISE` make variable.
+Bootstrapping is a single step — the compiler compiles the RTL from source on
+demand, so there is no separate runtime build to do first:
 
 [source,shell]
 ----
 # Resolve the newest release binary (substitute the path below for $RELEASE).
 RELEASE=$(ls -d releases/v*/ | sort -V | tail -1)blaise   # e.g. releases/v0.12.0/blaise
 
-# 1. Build the runtime using the release binary (BLAISE= avoids chicken-and-egg)
-cd runtime && make BLAISE=../$RELEASE && make install && cd ..
-
-# 2. Compile the compiler using the release binary (native backend — the
-#    default since v0.12.0 — needs no external assembler or QBE)
+# Compile the compiler using the release binary (native backend — the default
+# since v0.12.0 — needs no external assembler or QBE)
 $RELEASE \
   --source compiler/src/main/pascal/Blaise.pas \
   --unit-path compiler/src/main/pascal \
-  --unit-path runtime/src/main/pascal \
   --unit-path stdlib/src/main/pascal \
   --output compiler/target/blaise
 ----
 
-Once `compiler/target/blaise` exists, subsequent RTL rebuilds (`make && make install`)
-work without the override.
-
-The native backend (default) emits and links a binary directly — no external
-tools.  To bootstrap via the opt-in QBE backend instead, build the vendored QBE
-once (`cd vendor/qbe && make`) and replace step 2 with an emit-assemble-link
-sequence:
+To bootstrap via the opt-in QBE backend instead, build the vendored QBE once
+(`cd vendor/qbe && make`) and add `--backend qbe` — the compiler still drives
+the assemble + link itself:
 
 [source,shell]
 ----
-# 2a. Emit whole-program QBE IR and assemble it to an object.
 $RELEASE \
   --source compiler/src/main/pascal/Blaise.pas \
   --unit-path compiler/src/main/pascal \
-  --unit-path runtime/src/main/pascal \
   --unit-path stdlib/src/main/pascal \
-  --backend qbe --emit-ir > /tmp/blaise.ssa
-vendor/qbe/qbe -o /tmp/blaise.s /tmp/blaise.ssa
-gcc -c -o /tmp/blaise.o /tmp/blaise.s
-
-# 2b. Build the RTL objects from source and link.  The whole-program IR INLINES
-#     the RTL units it uses, so --exclude-defined-by drops the RTL objects whose
-#     symbols /tmp/blaise.o already defines — otherwise they double-define at the
-#     link.  (This mirrors what the compiler's own driver and scripts/fixpoint.sh
-#     do; do NOT link against blaise_rtl.a directly — that archive is built for
-#     the fixpoint scripts and the runtime test module, and its members redefine
-#     the same inlined RTL symbols, so a whole-program QBE link against it fails
-#     with multiple-definition errors.)
-RTL=$(scripts/build-rtl-objects.sh "$RELEASE" /tmp/rtlobj \
-        --exclude-defined-by /tmp/blaise.o)
-gcc -o compiler/target/blaise /tmp/blaise.o $RTL -lm -lpthread
+  --backend qbe --output compiler/target/blaise
 ----
 
 === Bootstrap a development checkout
@@ -300,19 +270,34 @@ Once built, the compiler binary is at `compiler/target/blaise`.
 # Compile a single-file program (native backend — default, no external tools)
 compiler/target/blaise --source Hello.pas --output Hello
 
-# Compile via the opt-in QBE backend (emits QBE IR, assembled + linked separately)
-compiler/target/blaise --source Hello.pas --backend qbe --emit-ir > Hello.ssa
-vendor/qbe/qbe -o Hello.s Hello.ssa
-gcc -o Hello Hello.s compiler/target/blaise_rtl.a
+# Compile via the opt-in QBE backend — the compiler drives qbe + the linker
+# for you.  No separate assemble/link step, and no archive to pass.
+compiler/target/blaise --source Hello.pas --backend qbe --output Hello
 
 # Compile with unit search paths
 compiler/target/blaise --source MyApp.pas \
   --unit-path src/units \
-  --emit-ir > MyApp.ssa
+  --output MyApp
 
-# Emit QBE IR only (useful for debugging the compiler itself)
+# Emit QBE IR only (a debugging aid — prints IR instead of building)
 compiler/target/blaise --source Hello.pas --emit-ir
 ----
+
+[NOTE]
+====
+`--emit-ir` / `--emit-asm` are *debugging aids*, not build steps: they print
+the generated IR/assembly and produce no binary.  Always build with
+`--output`, which lets the compiler own the whole pipeline.
+
+In particular, do **not** hand-link IR with `qbe` + `gcc`.  The compiler
+compiles the RTL from source on demand into a target-keyed object cache beside
+its own binary, so a manual link is both unnecessary and easy to get wrong (it
+was the cause of https://github.com/graemeg/blaise/issues/180[issue #180]).
+
+What the compiler *does* need is the RTL source to be reachable — via
+`--rtl-src DIR`, `$BLAISE_RTL_SRC`, or a `blaise.cfg` beside the binary (the
+release tarballs ship one, so an extracted release works with zero flags).
+====
 
 == Examples
 

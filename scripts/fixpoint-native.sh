@@ -14,8 +14,9 @@
 #   6. stage-3: stage-2 native binary emits native assembly.
 #   7. diff stage-2.s stage-3.s  => empty = clean fixpoint.
 #
-# Requires: compiler/target/blaise and compiler/target/blaise_rtl.a
-# must already be built (run the QBE fixpoint or pasbuild compile first).
+# Requires: compiler/target/blaise must already be built (run the QBE fixpoint
+# or pasbuild compile first).  The RTL is source-built via
+# scripts/build-rtl-objects.sh — no blaise_rtl.a archive is involved.
 
 set -e
 

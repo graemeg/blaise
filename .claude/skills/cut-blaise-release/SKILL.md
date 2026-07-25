@@ -119,7 +119,6 @@ still be the old `-SNAPSHOT` build. Rebuild it from the fixpoint binary so the
 native fixpoints and the test runner use the released version:
 
 ```bash
-cp compiler/target/blaise_rtl.a /tmp/blaise_rtl.a   # FindRTL looks beside --compiler
 pasbuild compile -m blaise-compiler --compiler /tmp/fp_blaise2
 compiler/target/blaise --help | head -1             # must print: Blaise Compiler v<X.Y.Z>
 ```
@@ -158,7 +157,6 @@ Build the TestRunner with the verified stage-2 binary, then run the whole suite
 the real total):
 
 ```bash
-cp compiler/target/blaise_rtl.a /tmp/blaise_rtl.a
 pasbuild test-compile -m blaise-compiler --compiler /tmp/fp_blaise2
 compiler/target/TestRunner          # must print: OK (N tests, ...)
 ```
@@ -212,13 +210,13 @@ QBE `/tmp/fp_blaise2`:
 mkdir -p releases/v<X.Y.Z>
 cp /tmp/fpn_blaise2 releases/v<X.Y.Z>/blaise       # NATIVE binary from fixpoint-native.sh
 chmod +x releases/v<X.Y.Z>/blaise
-cp compiler/target/blaise_rtl.a releases/v<X.Y.Z>/blaise_rtl.a
 releases/v<X.Y.Z>/blaise --help | head -1          # sanity: Blaise Compiler v<X.Y.Z>
 ```
 
-Every release directory must contain both `blaise` and `blaise_rtl.a` — the
-bootstrap (`FindRTL`) looks for the archive beside the binary, so a release
-missing `blaise_rtl.a` cannot serve as a stage-1 bootstrap.
+The binary alone is enough. The compiler source-builds the RTL into a
+target-keyed cache beside itself, so no `blaise_rtl.a` accompanies a release
+directory. What a stage-1 bootstrap *does* need is resolvable RTL source —
+which the repo checkout provides.
 
 Now **rename the rolling `-pre` directory to the next cycle** and refresh its
 binary to this verified build, so cold-bootstrap of `master` stays current for
@@ -230,7 +228,6 @@ filesystem `mv` (no `git mv`):
 # NEXT minor so the newest releases/v*-pre/ tracks the cycle we are opening.
 mv releases/v<X.Y.Z>-pre releases/v<next-minor>.0-pre   # e.g. v0.12.0-pre -> v0.13.0-pre
 cp /tmp/fpn_blaise2 releases/v<next-minor>.0-pre/blaise
-cp compiler/target/blaise_rtl.a releases/v<next-minor>.0-pre/blaise_rtl.a
 rm -f releases/v<next-minor>.0-pre/*.bak             # drop any stale backup cruft
 releases/v<next-minor>.0-pre/blaise --help | head -1 # sanity check
 ```
@@ -397,11 +394,30 @@ git diff --cached --stat   # Blaise.pas, uCompilerId.pas, project.xml — versio
 git commit -m "chore: begin v<next-minor>.0-dev cycle"
 ```
 
-NOTE on CI / rolling-bootstrap anchor: when this release becomes the new
-cold-bootstrap baseline, bump `STAGE1_TAG` in `.github/workflows/bootstrap.yml`
-and the rolling-bootstrap default-`--from` anchor to `v<X.Y.Z>`. This is a
-CI-only change and typically lands in its own commit alongside the release
-(it does not block the release itself).
+### Step 7b — advance the CI bootstrap anchor (REQUIRED, do not skip)
+
+**The anchor must always be the release just cut.** Bump `STAGE1_TAG` in
+`.github/workflows/bootstrap.yml` to `v<X.Y.Z>`:
+
+```bash
+grep -n "STAGE1_TAG:" .github/workflows/bootstrap.yml   # must read v<X.Y.Z>
+```
+
+This was previously worded as a conditional ("when this release becomes the
+baseline"), which is how the anchor silently drifted: v0.13.0 shipped while CI
+still cold-started from v0.12.0, so every rolling bootstrap replayed a far
+longer commit range than necessary. Treat it as mandatory.
+
+Two reasons it matters beyond replay length:
+
+* The anchor's **published tarball** is what CI downloads. It must exist on the
+  GitHub Releases page (`gh release view v<X.Y.Z>`) before CI can cold-start
+  from it — so this bump lands *after* the release is published, not before.
+* Anchors older than v0.13.0 required a `blaise_rtl.a` beside the binary; from
+  v0.13.0 the binary source-builds the RTL and the tarball ships no archive.
+  Never move the anchor *backwards* across that boundary.
+
+This is a CI-only change and lands in its own commit alongside the release.
 
 ## Step 8 — write community post and changelog
 
@@ -489,7 +505,7 @@ the remote — never push automatically.
   QBE fixpoint is still required as a reproducibility guard — it just isn't the
   artefact.
 - **Shipping a binary-only tarball.** The native backend source-builds the RTL,
-  so a tarball with just `blaise` (+ the legacy `blaise_rtl.a`) CANNOT compile
+  so a tarball with just `blaise` CANNOT compile
   anything once extracted — it dies with `RTL source directory not found`. Every
   release tarball must bundle `rtl-src/` (compiler/src/main/pascal) + `stdlib-src/`
   (stdlib/src/main/pascal) + a `blaise.cfg` beside the binary (Step 6). Verify by
@@ -527,10 +543,10 @@ the remote — never push automatically.
 - **Forgetting `--compiler`.** Every `pasbuild` command must pass
   `--compiler <blaise-binary>`; without it PasBuild falls back to FPC, which is
   not part of this toolchain.
-- **Missing `blaise_rtl.a` beside `--compiler`.** When pointing `--compiler` at
-  `/tmp/fp_blaise2`, copy `compiler/target/blaise_rtl.a` to `/tmp/blaise_rtl.a`
-  first — `FindRTL` looks beside the binary, and a stale archive causes
-  undefined-reference link errors.
+- **Assuming `blaise_rtl.a` must sit beside `--compiler`.** It must not and
+  need not — the compiler source-builds the RTL into `rtl/<target>/` beside
+  itself. There is no `FindRTL`. A relocated binary needs resolvable RTL
+  *source* instead (`--rtl-src DIR` / `$BLAISE_RTL_SRC`), not an archive.
 - **Wrong working directory.** All `pasbuild` commands fail outside the project
   root with a confusing version error. Stay at `/data/devel/new-pascal-compiler`.
 - **Backgrounded fixpoint output drops.** Run the fixpoint scripts in the

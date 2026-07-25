@@ -101,7 +101,6 @@ if [ -z "$START_REF" ]; then
 fi
 
 START_BIN="$ROOT/releases/$START_REF/blaise"
-START_RTL="$ROOT/releases/$START_REF/blaise_rtl.a"
 if [ ! -x "$START_BIN" ]; then
   echo "Start binary not found: $START_BIN" >&2
   exit 1
@@ -149,44 +148,36 @@ git worktree add --detach "$WT" "$START_SHA" >/dev/null 2>&1 || {
 # needed to replay the bootstrap chain.  Only the distro's CRT objects (read by
 # the internal linker) are required, which the runtime depends on anyway.
 
-# CUR_BIN / CUR_RTL hold the most recently built (or starting) artifacts.
+# CUR_BIN holds the most recently built (or starting) compiler binary.
 CUR_BIN="$START_BIN"
-CUR_RTL="$START_RTL"
 # If the start release shipped no RTL, we will build one at the first step.
 
 # ---------------------------------------------------------------------------
 # build_step <worktree-dir> <compiler-binary> <rtl-archive-or-empty>
 #   Builds RTL (with the given compiler) then the compiler itself, in WT.
-#   Writes WT/_boot/blaise and WT/_boot/blaise_rtl.a on success.
+#   Writes WT/_boot/blaise on success.
 # ---------------------------------------------------------------------------
 build_step() {
   local wt="$1" cc="$2"
   local out="$wt/_boot"
   mkdir -p "$out"
 
-  # 1. Build + install the RTL using the previous-step compiler.
-  #    runtime/Makefile honours BLAISE=<compiler> and COMPILER_BIN for install.
-  #    The native default backend builds the RTL units with no external tools.
-  if ! ( cd "$wt/runtime" && make clean >/dev/null 2>&1 && \
-         make BLAISE="$cc" >"$out/rtl.log" 2>&1 && \
-         make BLAISE="$cc" install >>"$out/rtl.log" 2>&1 ); then
-    echo "    RTL build failed:"; tail -8 "$out/rtl.log" | sed 's/^/      /'
-    return 1
-  fi
-  # FindRTL looks beside the compiler binary; the Makefile install target
-  # places blaise_rtl.a under compiler/target/. Use that as the link archive.
-  local rtl="$wt/compiler/target/blaise_rtl.a"
-  if [ ! -s "$rtl" ]; then
-    echo "    RTL archive missing after build"; return 1
-  fi
-
+  # 1. (No RTL pre-build step: the compiler source-builds the RTL on demand
+  #    into a target-keyed object cache beside its own binary.)
+  #
   # 2. Compile the compiler with the previous-step binary straight to an
   #    executable.  Native default backend + internal assembler + internal
-  #    linker: source in, binary out, no --emit-ir, no QBE, no gcc.  Valid for
-  #    the whole v0.12.0..HEAD range (every commit is native-default).
-  if ! "$cc" --source "$wt/compiler/src/main/pascal/Blaise.pas" \
+  #    linker: source in, binary out, no --emit-ir, no QBE, no gcc.
+  #
+  #    $BLAISE_RTL_SRC is MANDATORY here: the carried binary lives in _carry/,
+  #    not beside its own compiler/ tree, so the binary-relative RTLSourceDir
+  #    default would resolve to whatever tree the binary was copied from — the
+  #    MAIN repo — and compile THIS step against HEAD's RTL source instead of
+  #    the step's own worktree.  That surfaces as a spurious BOOTSTRAP_BROKEN
+  #    (an old binary parsing a newer RTL unit).
+  if ! BLAISE_RTL_SRC="$wt/compiler/src/main/pascal" \
+       "$cc" --source "$wt/compiler/src/main/pascal/Blaise.pas" \
         --unit-path "$wt/compiler/src/main/pascal" \
-        --unit-path "$wt/runtime/src/main/pascal" \
         --unit-path "$wt/stdlib/src/main/pascal" \
         --output "$out/blaise" 2>"$out/compile.err"; then
     echo "    compiler build failed:"; head -5 "$out/compile.err" | sed 's/^/      /'
@@ -197,7 +188,6 @@ build_step() {
     return 1
   fi
 
-  cp "$rtl" "$out/blaise_rtl.a"
   return 0
 }
 
@@ -210,7 +200,7 @@ build_step() {
 #   not any specific later feature.
 # ---------------------------------------------------------------------------
 smoke_test() {
-  local cc="$1" rtl="$2" wt="$3"
+  local cc="$1" wt="$2"
   local d; d="$(mktemp -d)"
   cat > "$d/s.pas" <<'PAS'
 program P;
@@ -220,13 +210,9 @@ begin
   WriteLn(X)
 end.
 PAS
-  # Pre-source-build commits link the RTL archive (FindRTL beside the binary);
-  # later commits source-build the RTL.  Provide BOTH so this probe works across
-  # the whole range: copy the archive beside the binary AND point the source
-  # build at the RTL source in the worktree ($BLAISE_RTL_SRC short-circuits
-  # RTLSourceDir, which is binary-relative and would otherwise miss because the
-  # carried binary is not beside its compiler/ tree).
-  cp "$rtl" "$(dirname "$cc")/blaise_rtl.a" 2>/dev/null || true
+  # $BLAISE_RTL_SRC short-circuits RTLSourceDir, which is binary-relative and
+  # would otherwise miss: the carried binary does not sit beside its compiler/
+  # tree.  Every commit in the replay range source-builds the RTL.
   local ok=1
   if BLAISE_RTL_SRC="$wt/compiler/src/main/pascal" \
      "$cc" --source "$d/s.pas" \
@@ -263,7 +249,7 @@ for sha in "${COMMITS[@]}"; do
     exit 2
   fi
 
-  if ! smoke_test "$WT/_boot/blaise" "$WT/_boot/blaise_rtl.a" "$WT"; then
+  if ! smoke_test "$WT/_boot/blaise" "$WT"; then
     echo
     echo "SMOKE_FAILED at $short ($subj)"
     echo "  The binary built but produced wrong output for the local-const-array"
@@ -271,17 +257,12 @@ for sha in "${COMMITS[@]}"; do
     exit 2
   fi
 
-  # Carry this step's artifacts forward as the compiler for the next commit.
-  # FindRTLArchive (uToolchain.pas) looks for `blaise_rtl.a` BESIDE the compiler
-  # binary, so the carried RTL must sit next to the carried binary under that
-  # exact name — keep both in a dedicated _carry/ dir.  (A mismatched name left
-  # RTLPath empty, so the next step linked the compiler with NO runtime archive
-  # and silently produced a binary missing _SetArgs et al. — SMOKE_FAILED.)
+  # Carry this step's binary forward as the compiler for the next commit.
+  # It travels alone — the RTL is source-built per step from that step's own
+  # worktree, so there is no archive to keep beside it.
   mkdir -p "$WT/_carry"
-  cp "$WT/_boot/blaise"        "$WT/_carry/blaise"
-  cp "$WT/_boot/blaise_rtl.a"  "$WT/_carry/blaise_rtl.a"
+  cp "$WT/_boot/blaise" "$WT/_carry/blaise"
   CUR_BIN="$WT/_carry/blaise"
-  CUR_RTL="$WT/_carry/blaise_rtl.a"
 done
 
 echo
@@ -300,9 +281,8 @@ if [ "$DO_INSTALL" -eq 1 ]; then
   DEST="$ROOT/releases/$PRE"
   mkdir -p "$DEST"
   cp "$CUR_BIN" "$DEST/blaise"
-  cp "$CUR_RTL" "$DEST/blaise_rtl.a"
   chmod +x "$DEST/blaise"
-  echo "Installed: $DEST/blaise (+ blaise_rtl.a)  [version $VER]"
+  echo "Installed: $DEST/blaise  [version $VER]"
 else
   echo "Final binary: $CUR_BIN  [version $VER, would install to releases/$PRE]"
 fi

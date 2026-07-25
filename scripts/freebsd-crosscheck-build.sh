@@ -33,7 +33,7 @@ fi
 
 mkdir -p "$OUTDIR"
 
-# The compiler resolves blaise_rtl.a / the RTL source relative to its own binary;
+# The compiler resolves the RTL source relative to its own binary;
 # the RTL source lives in the compiler tree.  Both unit paths mirror the normal
 # native build.
 UNIT_ARGS=(
