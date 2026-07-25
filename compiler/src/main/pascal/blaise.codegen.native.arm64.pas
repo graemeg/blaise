@@ -51,6 +51,8 @@ uses
 
 const
   VIRT_NONE = -1;   { EmitCall: no virtual dispatch — direct bl }
+  { EmitCall: no caller-provided x8 sret buffer for this call. }
+  SRET_NO_BUF = -1;
   { Statement-scoped deferred class-release frame slots (BUG-048 arm64 half —
     mirrors x86-64's PENDREL_SLOTS).  A retained class field read on an owned
     transient base defers the base release to the end of the enclosing leaf
@@ -329,7 +331,8 @@ type
     procedure EmitNarrowX0(AType: TTypeDesc);
     procedure EmitBuiltinStrCall1(AArg: TASTExpr; const ASym: string);
     procedure EmitFormatCall(AArgs: TObjectList);
-    procedure EmitRecCallDispatch(AExpr: TASTExpr; const ADest: string);
+    procedure EmitRecCallDispatch(AExpr: TASTExpr; const ADest: string;
+      ASretSpOff: Integer = SRET_NO_BUF);
     procedure EmitBuiltinStrCall2(AArg0, AArg1: TASTExpr;
       const ASym: string);
     procedure EmitExit(AStmt: TExitStmt);
@@ -347,7 +350,12 @@ type
     procedure DecodeMemArg(const AEntry: string; out AOff, ASize: Integer);
     procedure EmitCall(ADecl: TMethodDecl; const AName: string;
       AArgs: TObjectList; const ASretDest: string = '';
-      ASelfPushed: Boolean = False; AVirtSlot: Integer = VIRT_NONE);
+      ASelfPushed: Boolean = False; AVirtSlot: Integer = VIRT_NONE;
+      { >=0: the callee's x8 indirect-result buffer lives at sp+this,
+        measured at OUR entry (before our own outgoing-area sub sp).  Used
+        for a >16B record-returning call whose destination is a caller
+        scratch buffer with no slot name, so ASretDest cannot name it. }
+      ASretSpOff: Integer = SRET_NO_BUF);
     { Pre-pass: register every local/param/hidden slot a routine body needs
       so the frame size is final before the prologue's sub sp. }
     function  MaxManagedRecRet(AStmt: TASTStmt): Integer;
@@ -6562,7 +6570,7 @@ begin
 end;
 
 procedure TArm64Backend.EmitRecCallDispatch(AExpr: TASTExpr;
-  const ADest: string);
+  const ADest: string; ASretSpOff: Integer);
 var
   ME: TMethodCallExpr;
   MD: TMethodDecl;
@@ -6576,7 +6584,7 @@ begin
     MD := TMethodDecl(ME.ResolvedMethod);
     if ME.IsStaticCall or MD.IsStatic then
     begin
-      EmitCall(MD, ME.Name, ME.Args, ADest);
+      EmitCall(MD, ME.Name, ME.Args, ADest, False, VIRT_NONE, ASretSpOff);
       Exit;
     end;
     if ME.ObjExpr <> nil then
@@ -6592,7 +6600,9 @@ begin
         Self.Emit(#9'ldr x0, [x0]');
     end;
     EmitPushX0();
-    EmitCall(MD, ME.Name, ME.Args, ADest, True, MD.VTableSlot);
+    { No adjustment for the receiver push: EmitCall's pop walk consumes it
+      (ASelfPushed), so by the time x8 is set sp is back to this level. }
+    EmitCall(MD, ME.Name, ME.Args, ADest, True, MD.VTableSlot, ASretSpOff);
     Exit;
   end;
   { A bare method call on implicit Self that returns a record (P := Make;) is a
@@ -6609,11 +6619,12 @@ begin
     EmitLoadSlot('x0', 'Self');
     EmitPushX0();
     EmitCall(MD, TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args,
-      ADest, True, MD.VTableSlot);
+      ADest, True, MD.VTableSlot, ASretSpOff);
     Exit;
   end;
   EmitCall(TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl),
-    TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args, ADest);
+    TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args, ADest,
+    False, VIRT_NONE, ASretSpOff);
 end;
 
 procedure TArm64Backend.EmitFormatCall(AArgs: TObjectList);
@@ -8565,7 +8576,7 @@ end;
 
 procedure TArm64Backend.EmitCall(ADecl: TMethodDecl; const AName: string;
   AArgs: TObjectList; const ASretDest: string;
-  ASelfPushed: Boolean; AVirtSlot: Integer);
+  ASelfPushed: Boolean; AVirtSlot: Integer; ASretSpOff: Integer);
 var
   I, K, Shape: Integer;
   Arg: TASTExpr;
@@ -8821,7 +8832,34 @@ begin
             result into the buffer; shape 0 (>16B, x8/memory return) needs
             an x8 destination address and stays an honest hole for now. }
           if Shape = 0 then
-            NotYet('large (>16B) record-returning call argument', Arg);
+          begin
+            { >16B return: the callee writes through x8, so hand it THIS
+              buffer as its indirect-result destination, then pass the
+              buffer's ADDRESS as the argument — the same >16B argument
+              convention the lvalue case below uses.  Offsets are measured
+              before this argument's own push, exactly like the register-
+              returned shapes further down.  Mirrors x86-64's akRecCall
+              hoist, which likewise materialises the sret buffer in the
+              region below the argument slots. }
+            EmitRecCallDispatch(Arg, '',
+              PopRegs.Count * 16 + RecBase + RecOff);
+            EmitAddSubImm('add', 'x0', 'sp',
+              PopRegs.Count * 16 + RecBase + RecOff);
+            EmitPushX0();
+            if NInt >= 8 then
+            begin
+              StackOff := AlignTo(StackOff, 8);
+              PopRegs.Add(Format('m%d_%d', [StackOff, 8]));
+              StackOff := StackOff + 8;
+            end
+            else
+            begin
+              PopRegs.Add('x' + IntToStr(NInt));
+              Inc(NInt);
+            end;
+            RecOff := RecOff + AlignTo(Arg.ResolvedType.RawSize(), 16);
+            Continue;
+          end;
           EmitRecCallDispatch(Arg, '');   { result in x0 / x0:x1 / d0.. }
           { buffer address: sp + (still-pushed eval slots) + RecBase + off }
           EmitAddSubImm('add', 'x9', 'sp',
@@ -9260,7 +9298,12 @@ begin
   if ASretDest <> '' then
     { record sret: the callee writes through x8 (set AFTER the arg pops —
       nothing below clobbers it before the call) }
-    EmitSlotAddr('x8', ASretDest);
+    EmitSlotAddr('x8', ASretDest)
+  else if ASretSpOff >= 0 then
+    { same, for a caller scratch buffer that has no slot name: the offset was
+      measured at OUR entry, and our outgoing-arg area is still subtracted
+      here (the pop walk above restored only the eval slots), so add it back. }
+    EmitAddSubImm('add', 'x8', 'sp', ASretSpOff + StackArea);
   if AVirtSlot >= 0 then
   begin
     { virtual dispatch: vtable at instance[0]; slot 0 is the typeinfo
