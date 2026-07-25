@@ -9212,12 +9212,20 @@ begin
             Self.Emit(#9'callq SysUtils__RaiseDivByZero');
             Self.Emit(DivOkLbl + ':');
           end;
-          { 64-bit divide.  Choose signed vs unsigned by the operand types:
-            if either side is an unsigned 64-bit type, use unsigned division
-            so the top bit is a magnitude bit, not a sign.  cqto sign-extends
+          { 64-bit divide.  Choose signed vs unsigned by the EXPRESSION's
+            result type, matching the QBE backend (which keys udiv/urem off
+            BinExpr.ResolvedType).  Requiring both operands to be unsigned
+            was wrong: in `U div 16` with U: UInt64 the literal types as a
+            signed integer, so the conjunction failed and idivq read a
+            high-bit-set U as negative (GH #196).  The semantic pass already
+            resolves such an expression to UInt64.  Fall back to the operand
+            types only when the result type is unavailable.  cqto sign-extends
             %rax into %rdx:%rax; for unsigned we zero %rdx instead. }
-          Unsigned := IsUnsignedInt(BE.Left.ResolvedType) and
-                      IsUnsignedInt(BE.Right.ResolvedType);
+          if BE.ResolvedType <> nil then
+            Unsigned := IsUnsignedInt(BE.ResolvedType)
+          else
+            Unsigned := IsUnsignedInt(BE.Left.ResolvedType) and
+                        IsUnsignedInt(BE.Right.ResolvedType);
           if Unsigned then
           begin
             Self.Emit(#9'xorl %edx, %edx');

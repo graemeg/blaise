@@ -493,6 +493,17 @@ begin
                     tySmallInt, tyWord, tyBoolean, tyEnum]);
 end;
 
+{ True for unsigned integer-family types (local twin of the x86-64 unit's
+  IsUnsignedInt).  Byte/Word/UInt32/UInt64 are unsigned; Boolean and Enum
+  hold non-negative ordinals; a small set is a bitmask.  Used to pick
+  udiv over sdiv — see the boDiv/boMod arm. }
+function IsUnsignedIntA64(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and
+    (AType.Kind in [tyByte, tyBoolean, tyWord, tyUInt32, tyUInt64,
+                    tyEnum, tySet]);
+end;
+
 { True when AType is a 32-bit-or-narrower integer/ordinal (NOT Int64/UInt64,
   pointer, string, class or float).  Such a value occupies only the low 32 bits
   of its 64-bit register, and the upper 32 bits are NON-CANONICAL: an Integer
@@ -2203,6 +2214,7 @@ procedure TArm64Backend.EmitExprToX0(AExpr: TASTExpr);
 var
   BE: TBinaryExpr;
   DivGuardOk: string;
+  DivUnsigned: Boolean;
   CondName: string;
   Lit: string;
   Idx, I: Integer;
@@ -3285,11 +3297,29 @@ begin
         Self.Emit(Format(#9'cbnz x1, %s', [DivGuardOk]));
         Self.Emit(#9'brk #1');                { deliberate trap: div by zero }
         Self.Emit(DivGuardOk + ':');
+        { Signed vs unsigned follows the EXPRESSION's result type, matching
+          the QBE backend (which keys udiv/urem off BinExpr.ResolvedType).
+          This leaf previously always emitted sdiv, so any UInt64 division
+          with bit 63 set read its operand as negative (GH #196).  Fall back
+          to the operand types only when the result type is unavailable. }
+        if BE.ResolvedType <> nil then
+          DivUnsigned := IsUnsignedIntA64(BE.ResolvedType)
+        else
+          DivUnsigned := IsUnsignedIntA64(BE.Left.ResolvedType) and
+                         IsUnsignedIntA64(BE.Right.ResolvedType);
         if BE.Op = boDiv then
-          Self.Emit(#9'sdiv x0, x0, x1')
+        begin
+          if DivUnsigned then
+            Self.Emit(#9'udiv x0, x0, x1')
+          else
+            Self.Emit(#9'sdiv x0, x0, x1');
+        end
         else
         begin
-          Self.Emit(#9'sdiv x9, x0, x1');
+          if DivUnsigned then
+            Self.Emit(#9'udiv x9, x0, x1')
+          else
+            Self.Emit(#9'sdiv x9, x0, x1');
           Self.Emit(#9'msub x0, x9, x1, x0'); { x0 - (x0 div x1)*x1 }
         end;
       end;
