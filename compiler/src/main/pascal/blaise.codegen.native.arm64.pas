@@ -4719,6 +4719,34 @@ var
   I, Shape: Integer;
   RD: TMethodDecl;
 begin
+  { Run := TRunMethod(M) — a RECORD cast to a method-pointer type.  Both sides
+    are 16-byte fat values (Code at +0, Data/Env at +8), but the generic value
+    cast lowers to a single x0 word, so only Code was stored and Data was left
+    as whatever the slot already held.  EmitFatPtrCall then read Data from that
+    stale half and called the method with a junk Self — the shape
+    blaise.testing's RunTest uses to dispatch every published test, so every
+    test crashed on its first field access.  Copy BOTH words. }
+  if (AAsgn.ResolvedLhsType <> nil) and
+     IsMethodPtrType(AAsgn.ResolvedLhsType) and
+     (AAsgn.Expr is TFuncCallExpr) and
+     (TFuncCallExpr(AAsgn.Expr).ResolvedDecl = nil) and
+     (not TFuncCallExpr(AAsgn.Expr).IsIndirectCall) and
+     (TFuncCallExpr(AAsgn.Expr).Args.Count = 1) and
+     (TASTExpr(TFuncCallExpr(AAsgn.Expr).Args.Items[0]).ResolvedType <> nil) and
+     (TASTExpr(TFuncCallExpr(AAsgn.Expr).Args.Items[0]).ResolvedType.Kind
+        = tyRecord) then
+  begin
+    if IsCaptured(AAsgn.Name) or AAsgn.IsVarParam then
+      NotYet('method-pointer cast into a captured or var-param target', AAsgn);
+    { x0 = &source record; x9 = &destination fat slot (local or global) }
+    EmitRecAddrToX0(TASTExpr(TFuncCallExpr(AAsgn.Expr).Args.Items[0]));
+    Self.Emit(#9'ldr x1, [x0]');          { Code }
+    Self.Emit(#9'ldr x2, [x0, #8]');      { Data / Env }
+    EmitSlotAddr('x9', AAsgn.Name);
+    Self.Emit(#9'str x1, [x9]');
+    Self.Emit(#9'str x2, [x9, #8]');
+    Exit;
+  end;
   { Captured managed writes (leg 17).  '_cap_<Name>' holds &<Name>, so the ARC
     store runs retain-new / release-old THROUGH that address — the same
     discipline as a var-param managed target, but the address is the capture
