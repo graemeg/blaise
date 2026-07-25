@@ -10658,9 +10658,29 @@ begin
     end;
     if Sym = '' then
       NotYet('constructor for class ''' + AExpr.ObjectName + '''', AExpr);
-    Self.Emit(Format(#9'adrp x0, typeinfo_%s@PAGE', [Sym]));
-    Self.Emit(Format(#9'add x0, x0, typeinfo_%s@PAGEOFF', [Sym]));
-    Self.Emit(#9'bl _ClassCreate');
+    { Allocate at refcount ZERO, mirroring x86-64 (:10604): _ClassAlloc does
+      NOT take a reference, and the vtable is installed here.  _ClassCreate
+      must NOT be used on this path — it ends with _ClassAddRef, and the
+      SHARED ArcExprOwnsRef deliberately reports a constructor call as NOT
+      owning, so the assignment site adds the one reference itself.  Calling
+      _ClassCreate here left every instance one reference above zero: nothing
+      was ever freed and no destructor ever ran (arm64 leaked every object it
+      constructed). }
+    if AExpr.ResolvedClassType is TRecordTypeDesc then
+      EmitIntLiteral('x0',
+        TRecordTypeDesc(AExpr.ResolvedClassType).TotalSize())
+    else
+      NotYet('constructor for class ''' + AExpr.ObjectName +
+        ''' with no resolved class type', AExpr);
+    Self.Emit(Format(#9'adrp x1, _FieldCleanup_%s@PAGE', [Sym]));
+    Self.Emit(Format(#9'add x1, x1, _FieldCleanup_%s@PAGEOFF', [Sym]));
+    Self.Emit(#9'bl _ClassAlloc');
+    if TRecordTypeDesc(AExpr.ResolvedClassType).HasVTable() then
+    begin
+      Self.Emit(Format(#9'adrp x9, vtable_%s@PAGE', [Sym]));
+      Self.Emit(Format(#9'add x9, x9, vtable_%s@PAGEOFF', [Sym]));
+      Self.Emit(#9'str x9, [x0]');
+    end;
     MD := TMethodDecl(AExpr.ResolvedMethod);
     { called even when Body = nil — imported unit interfaces carry
       declaration stubs; the body lives in the owning unit's object }
