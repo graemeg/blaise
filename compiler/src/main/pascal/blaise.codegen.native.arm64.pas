@@ -4457,8 +4457,6 @@ begin
     An indexed read calls getter(self, index). }
   if (AFld.PropRead.IndexParamName <> '') and (AFld.PropIndexExpr = nil) then
     NotYet('indexed property read without an index', AFld);
-  if (AFld.Base <> nil) and ArcExprOwnsRef(AFld.Base) then
-    NotYet('property read on an owned transient base', AFld);
   if AFld.PropRead.IsStatic then
   begin
     { static property: the getter is a class-level routine — no receiver }
@@ -4480,9 +4478,22 @@ begin
     EmitPushX0();
   end;
   if AFld.Base <> nil then
+  begin
     { chained receiver (A.B.Prop): the base expression yields the
       instance pointer }
-    Self.EmitExprToX0(AFld.Base)
+    Self.EmitExprToX0(AFld.Base);
+    { An OWNED transient base (Factory().Prop) carries a +1 nobody else will
+      drop.  Hand that reference to a _pendrel slot: the release then happens
+      at the enclosing statement's flush (every statement is flush-bracketed,
+      BUG-049), which keeps the instance — and therefore any value the getter
+      borrows from it — alive for the rest of the statement.  x0 is untouched
+      by the frame store, so it stays the receiver.  This mirrors x86-64,
+      which spills such a base to a _pendrel slot for field reads. }
+    if ArcExprOwnsRef(AFld.Base) then
+      if not DeferNativeClassRelease() then
+        NotYet('property read on an owned transient base with all _pendrel '
+          + 'slots busy', AFld);
+  end
   else if AFld.IsImplicitSelf then
   begin
     EmitLoadSlot('x0', 'Self');
