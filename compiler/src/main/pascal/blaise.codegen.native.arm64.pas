@@ -6728,7 +6728,20 @@ begin
     private one is invisible to Lookup and only ever referenced from its
     own unit, so the emitting unit is the owner.  The program name (and
     unmangled RTL units, via MangleUnitPrefix) map to a bare name. }
-  Result := AName;
+  { PROVISIONAL FIX — BUG-20260724-arm64-classes-emit-string-corruption.
+    Return an OWNED fresh copy, never the borrowed const AName, so a caller that
+    move-assigns the result (Sym := GlobalSym(AName); ... release Sym) is
+    balanced.  The on-device poison build named EmitStoreSlot/EmitLoadSlot (both
+    call GlobalSym) as the over-release site while compiling the Classes unit,
+    and GlobalSym's `Result := AName` returns the caller's BORROWED string in the
+    two Exit paths below — a move-assigning caller then over-releases it.  I
+    could NOT reproduce the over-release off-device (x86-64 balances the same
+    source), so this is the reporter's suggested fix applied on faith; REVISIT
+    with a working on-device M1 debug session to confirm it is the true root and
+    whether the general "Result := <const string param>" pattern under-retains on
+    arm64.  (Copy is 0-based whole-string here; the MangleUnitPrefix path already
+    returns a fresh string.) }
+  Result := Copy(AName, 0, Length(AName));
   Owner := '';
   if FSymTable <> nil then
   begin
