@@ -364,6 +364,11 @@ type
     procedure EmitArrayConstData(ABlock: TBlock);
     procedure EmitAttrTables(ACD: TClassTypeDef; const ACSym: string;
       out AAttrsRef, AMethAttrsRef: string);
+    { methods_<C>: the PUBLISHED-method table referenced by typeinfo[3] —
+      count then (name, code, param-sig-or-0) triples, the layout
+      runtime.arc's _MethodAddress walks. }
+    procedure EmitMethodsTable(ACD: TClassTypeDef; const ACSym: string;
+      out AMethodsRef: string);
     procedure EmitSmallSetLiteral(AExpr: TArrayLiteralExpr);
     procedure EmitJumboSetLiteral(AExpr: TArrayLiteralExpr);
     function  JumboSetLiteralBytes(AExpr: TASTExpr): Integer;
@@ -2714,6 +2719,30 @@ begin
       Self.Emit(#9'bl _ProcessExitCode');
       Exit;
     end;
+  end;
+  if (AExpr is TFuncCallExpr) and
+     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+     (not TFuncCallExpr(AExpr).IsIndirectCall) and
+     (TFuncCallExpr(AExpr).Args.Count = 2) and
+     SameText(TFuncCallExpr(AExpr).Name, 'MethodAddress') then
+  begin
+    { MethodAddress(Instance, 'Name') — published-method lookup through
+      typeinfo[3] (see EmitMethodsTable).  x0 = instance, x1 = the name's
+      string DATA pointer: a literal is addressed straight at its blob, any
+      other expression already evaluates to a data pointer.  Mirrors
+      x86-64's MethodAddress case.  Two args, so this sits OUTSIDE the
+      one-arg builtin block above. }
+    Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+    EmitPushX0();
+    if TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]) is TStringLiteral then
+      EmitStrLitAddr(
+        TStringLiteral(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1])).Value)
+    else
+      Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
+    Self.Emit(#9'mov x1, x0');
+    EmitPopTo('x0');
+    Self.Emit(#9'bl _MethodAddress');
+    Exit;
   end;
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
@@ -9743,13 +9772,118 @@ begin
   AMethAttrsRef := 'methattrs_' + ACSym;
 end;
 
+{ Param-signature string for a published method: one character per parameter,
+  matching the encoding the testing framework's typed [TestCase] dispatch
+  expects.  Mirrors the x86-64 and QBE backends' MethodParamSig (each backend
+  keeps its own copy today). }
+function Arm64MethodParamSig(AMD: TMethodDecl): string;
+var
+  I:   Integer;
+  Par: TMethodParam;
+begin
+  Result := '';
+  for I := 0 to AMD.Params.Count - 1 do
+  begin
+    Par := TMethodParam(AMD.Params.Items[I]);
+    if Par.IsVarParam or Par.IsOutParam or Par.IsOpenArray or
+       (Par.ResolvedType = nil) then
+      Result := Result + 'x'
+    else
+      case Par.ResolvedType.Kind of
+        tyInteger, tyUInt32, tySmallInt, tyWord, tyByte, tyEnum:
+          Result := Result + 'i';
+        tyInt64, tyUInt64:
+          Result := Result + 'I';
+        tyBoolean:
+          Result := Result + 'b';
+        tyString:
+          Result := Result + 's';
+        tyDouble, tySingle:
+          Result := Result + 'd';
+      else
+        Result := Result + 'x';
+      end;
+  end;
+end;
+
+procedure TArm64Backend.EmitMethodsTable(ACD: TClassTypeDef;
+  const ACSym: string; out AMethodsRef: string);
+var
+  J, N, Count: Integer;
+  MD:  TMethodDecl;
+  Sig: string;
+begin
+  { The published-method table _MethodAddress walks (typeinfo[3]):
+      methods[0]  = count (Int64)
+      methods[1+] = (name-data-ptr, code-ptr, param-sig-data-ptr or 0)
+    The name/sig blobs go to .rodata FIRST so the table's .quad run is not
+    interleaved, and each label sits AT the data (bare-symbol .quad) — the
+    same scheme as the attribute tables' __ma_ blobs above.  Without this
+    table arm64 emitted 0 here, so MethodAddress could never resolve a
+    published method and the testing framework's dispatch was dead. }
+  AMethodsRef := '0';
+  Count := 0;
+  for J := 0 to ACD.Methods.Count - 1 do
+    if TMethodDecl(ACD.Methods.Items[J]).IsPublished then
+      Count := Count + 1;
+  if Count = 0 then Exit;
+
+  Self.Emit('.section .rodata');
+  N := 0;
+  for J := 0 to ACD.Methods.Count - 1 do
+  begin
+    MD := TMethodDecl(ACD.Methods.Items[J]);
+    if not MD.IsPublished then Continue;
+    Self.Emit('.balign 4');
+    Self.Emit(Format('__pm_%s_%d_h:', [ACSym, N]));
+    Self.Emit(#9'.word -1');
+    Self.Emit(Format(#9'.word %d', [Length(MD.Name)]));
+    Self.Emit(Format(#9'.word %d', [Length(MD.Name)]));
+    Self.Emit(Format('__pm_%s_%d:', [ACSym, N]));
+    Self.Emit(Format(#9'.ascii "%s"', [MD.Name]));
+    Self.Emit(#9'.byte 0');
+    Sig := Arm64MethodParamSig(MD);
+    if Sig <> '' then
+    begin
+      Self.Emit('.balign 4');
+      Self.Emit(Format('__ps_%s_%d_h:', [ACSym, N]));
+      Self.Emit(#9'.word -1');
+      Self.Emit(Format(#9'.word %d', [Length(Sig)]));
+      Self.Emit(Format(#9'.word %d', [Length(Sig)]));
+      Self.Emit(Format('__ps_%s_%d:', [ACSym, N]));
+      Self.Emit(Format(#9'.ascii "%s"', [Sig]));
+      Self.Emit(#9'.byte 0');
+    end;
+    N := N + 1;
+  end;
+
+  Self.Emit('.section .data');
+  Self.Emit('.balign 8');
+  Self.Emit(Format('methods_%s:', [ACSym]));
+  Self.Emit(Format(#9'.quad %d', [Count]));
+  N := 0;
+  for J := 0 to ACD.Methods.Count - 1 do
+  begin
+    MD := TMethodDecl(ACD.Methods.Items[J]);
+    if not MD.IsPublished then Continue;
+    Self.Emit(Format(#9'.quad __pm_%s_%d', [ACSym, N]));
+    Self.Emit(Format(#9'.quad %s', [RoutineSym(MD, '')]));
+    if Arm64MethodParamSig(MD) <> '' then
+      Self.Emit(Format(#9'.quad __ps_%s_%d', [ACSym, N]))
+    else
+      Self.Emit(#9'.quad 0');
+    N := N + 1;
+  end;
+  AMethodsRef := 'methods_' + ACSym;
+end;
+
 procedure TArm64Backend.EmitClassMetaSections;
 var
   I, S: Integer;
   TD: TTypeDecl;
   RT: TRecordTypeDesc;
   E: TVTableEntry;
-  Sym, ParentRef, AttrsRef, MethAttrsRef: string;
+  Sym, ParentRef, AttrsRef, MethAttrsRef, MethodsRef: string;
 begin
   { TObject stubs once per program: root typeinfo, a vtable carrying the
     built-in virtuals, and the class-name blob.  TObject_Destroy /
@@ -9833,6 +9967,7 @@ begin
     else
       ParentRef := 'typeinfo_TObject';
     EmitAttrTables(TClassTypeDef(TD.Def), Sym, AttrsRef, MethAttrsRef);
+    EmitMethodsTable(TClassTypeDef(TD.Def), Sym, MethodsRef);
     Self.Emit('.section .data');
     Self.Emit('.balign 8');
     if (Pos('<', TD.Name) >= 0) or
@@ -9847,7 +9982,7 @@ begin
     else
       Self.Emit(#9'.quad 0');
     Self.Emit(Format(#9'.quad __cn_%s', [Sym]));
-    Self.Emit(#9'.quad 0');
+    Self.Emit(Format(#9'.quad %s', [MethodsRef]));   { published methods }
     { INSTANCE size — the number of bytes ClassCreate allocates and zero-fills
       for one object, i.e. vptr + every field (TotalSize, unpadded for a class
       to match FPC/Delphi InstanceSize).  NOT RawSize(): for a tyClass that
