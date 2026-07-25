@@ -1711,10 +1711,21 @@ begin
       WriteLn(C.FName)
     end.
     ''');
-  { creation goes through the RTL with the class typeinfo }
-  AssertTrue('typeinfo passed to _ClassCreate',
-    Pos('add x0, x0, typeinfo_TCounter@PAGEOFF', AsmT) >= 0);
-  AssertTrue('creates via the RTL', Pos(#9'bl _ClassCreate', AsmT) >= 0);
+  { Creation allocates at refcount ZERO via _ClassAlloc(size, cleanup) and
+    installs the vtable here — mirroring x86-64.  _ClassCreate must NOT appear
+    on a statically-known-class path: it ends with _ClassAddRef, and the shared
+    ArcExprOwnsRef reports a constructor call as NOT owning, so the assignment
+    site adds the one reference.  Using _ClassCreate here left every instance
+    one reference above zero — nothing was ever freed and no destructor ran
+    (eddb5c18).  _ClassCreate stays only for metaclass dispatch, which must
+    read size/cleanup/vtable from a runtime typeinfo value. }
+  AssertTrue('field-cleanup passed to _ClassAlloc',
+    Pos('add x1, x1, _FieldCleanup_TCounter@PAGEOFF', AsmT) >= 0);
+  AssertTrue('allocates at refcount zero', Pos(#9'bl _ClassAlloc', AsmT) >= 0);
+  AssertTrue('no _ClassCreate on the static ctor path',
+    Pos(#9'bl _ClassCreate', AsmT) < 0);
+  AssertTrue('vtable installed at the allocation site',
+    Pos('add x9, x9, vtable_TCounter@PAGEOFF', AsmT) >= 0);
   { non-virtual methods dispatch directly to the mangled symbol }
   AssertTrue('direct method call', Pos(#9'bl TCounter_Bump', AsmT) >= 0);
   { metadata: typeinfo slots + vtable with the typeinfo back-pointer }
@@ -1815,8 +1826,10 @@ begin
     the Create site targets the same typeinfo }
   AssertTrue('prefixed typeinfo', Pos('typeinfo_zoo_TCat:', AsmT) >= 0);
   AssertTrue('prefixed vtable', Pos('vtable_zoo_TCat:', AsmT) >= 0);
-  AssertTrue('create targets prefixed typeinfo',
-    Pos('typeinfo_zoo_TCat@PAGEOFF', AsmT) >= 0);
+  { The ctor path allocates via _ClassAlloc (eddb5c18), so the unit-prefixed
+    symbol to look for is the field-cleanup fn, not typeinfo. }
+  AssertTrue('create targets prefixed field-cleanup',
+    Pos('_FieldCleanup_zoo_TCat@PAGEOFF', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestClass_StaticsConstsInheritedToString;
@@ -5043,8 +5056,10 @@ begin
   AssertTrue('instance method body', Pos('TBox_Int64_Put:', AsmT) >= 0);
   AssertTrue('weak method bind', Pos('.weak TBox_Int64_Put', AsmT) >= 0);
   { instance is constructed through its own typeinfo }
-  AssertTrue('ctor typeinfo ref',
-    Pos('adrp x0, typeinfo_TBox_Int64@PAGE', AsmT) >= 0);
+  { ctor allocates via _ClassAlloc (eddb5c18): the instance-specific symbol on
+    that path is the field-cleanup fn }
+  AssertTrue('ctor field-cleanup ref',
+    Pos('adrp x1, _FieldCleanup_TBox_Int64@PAGE', AsmT) >= 0);
   { the generic FUNCTION instance is emitted weak too }
   AssertTrue('weak func instance', Pos('.weak Pick_Int64', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
