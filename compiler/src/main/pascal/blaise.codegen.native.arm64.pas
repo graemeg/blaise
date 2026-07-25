@@ -9765,6 +9765,7 @@ function TArm64Backend.TypeinfoSymFor(const ATypeName: string): string;
 var
   D: TTypeDesc;
   Pfx: string;
+  I: Integer;
 begin
   { typeinfo symbol for a class/interface NAME — the SINGLE source of truth for
     both the definition and every reference (so they always agree; a mismatch
@@ -9780,6 +9781,18 @@ begin
     if D <> nil then
       Pfx := ClassPrefixOwner(D.OwningUnit);
   end;
+  if Pfx = '' then
+    { FindType cannot see a class declared in a unit's IMPLEMENTATION
+      section, so its owning-unit prefix came back empty and the reference
+      was emitted BARE while EmitClassMetaSections defined the symbol through
+      ClassSym — i.e. prefixed.  The two disagreed and the reference dangled
+      (page reference to undefined symbol typeinfo_<Class>, e.g. every
+      RegisterTest of an implementation-section test class).  FClassDecls is
+      the authoritative list of the classes being emitted, so resolve through
+      the SAME ClassSym the definition uses. }
+    for I := 0 to FClassDecls.Count - 1 do
+      if SameText(TTypeDecl(FClassDecls.Items[I]).Name, ATypeName) then
+        Exit('typeinfo_' + ClassSym(TTypeDecl(FClassDecls.Items[I])));
   Result := 'typeinfo_' + Pfx + CodegenMangle(ATypeName);
 end;
 
