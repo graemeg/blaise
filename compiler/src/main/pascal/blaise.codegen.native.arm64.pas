@@ -7616,12 +7616,18 @@ begin
         { a by-value CLASS param is a plain borrowed pointer — the caller
           keeps ownership (only by-value strings retain in the prologue).
           A PLAIN procedural param is one code pointer. }
+        { A small set is a one-register bitmask and arrives like an integer;
+          a JUMBO set has its own byte-array ABI and stays a hole — the same
+          split the local-var and call-argument gates make. }
         if not (IsIntFam(Par.ResolvedType) or
                 ((Par.ResolvedType <> nil) and
                  (Par.ResolvedType.Kind in [tyDouble, tySingle, tyString,
                                             tyClass, tyProcedural,
                                             tyPointer, tyPChar, tyDynArray,
-                                            tyMetaClass]))) then
+                                            tyMetaClass]))
+                or ((Par.ResolvedType <> nil) and
+                    (Par.ResolvedType.Kind = tySet) and
+                    not TSetTypeDesc(Par.ResolvedType).IsJumbo())) then
           NotYet('parameter ''' + Par.ParamName + ''' of this type', ADecl);
         AddLocal(Par.ParamName, 8);
         { a BY-VALUE string param is the callee's own copy: retained in the
@@ -9175,7 +9181,17 @@ begin
               ((Arg.ResolvedType <> nil) and
                (Arg.ResolvedType.Kind in [tyPChar, tyPointer,
                                           tyClass, tyProcedural, tyDynArray,
-                                          tyMetaClass])) then
+                                          tyMetaClass])) or
+              { A small set is a bitmask that lives in ONE integer register,
+                so it passes exactly like an integer (IsUnsignedIntA64 already
+                classes it unsigned).  A JUMBO set is a byte-array bitmap with
+                its own ABI and is still a hole — the same split the local-var
+                gate makes.  Without this, any call taking a set argument was
+                unreachable on arm64 (e.g. AssertRunsOn(AllBackends, ...) in
+                cp.test.e2e.base, which blocked the whole e2e test runner). }
+              ((Arg.ResolvedType <> nil) and
+               (Arg.ResolvedType.Kind = tySet) and
+               not TSetTypeDesc(Arg.ResolvedType).IsJumbo()) then
       begin
         { A dyn-array argument is an 8-byte ref-counted data pointer.  The callee
           owns its copy (a by-value dyn-array param retains in the prologue; a

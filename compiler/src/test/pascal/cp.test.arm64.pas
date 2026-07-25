@@ -120,6 +120,7 @@ type
     procedure TestInterface_TypeinfoSymbol_DefAndRefAgree;
     procedure TestUnitGenericInstance_BodyEmittedOnce;
     procedure TestConstStringParam_NoCalleeARC;
+    procedure TestSetArgAndParam_Lowered;
     procedure TestInterface_ItabAndImpllist_AreGlobl;
     procedure TestGenericClassInstance_MethodBodyEmittedInUnit;
     procedure TestClassTypeinfo_InstanceSizeCoversAllFields;
@@ -2234,6 +2235,38 @@ end;
   the only one and the bug merely leaks; on arm64 it is a genuine
   use-after-free.  That asymmetry is why this class of bug reproduces only on
   arm64 (GCHashOf, round 36). }
+{ A small set is a bitmask that lives in ONE integer register, so it passes
+  and arrives exactly like an integer.  Both the call-ARGUMENT gate and the
+  by-value PARAMETER gate omitted tySet, so any routine taking a set was
+  unreachable on arm64 — which is what blocked the e2e test runner
+  (AssertRunsOn(AllBackends, ...) in cp.test.e2e.base).  Jumbo sets (>64
+  members) have their own byte-array ABI and remain a deliberate hole. }
+procedure TArm64BackendTests.TestSetArgAndParam_Lowered;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TColour  = (cRed, cGreen, cBlue);
+      TColours = set of TColour;
+    function Count(ASet: TColours): Integer;
+    begin
+      Result := 0;
+      if cRed in ASet then Result := Result + 1;
+      if cBlue in ASet then Result := Result + 1
+    end;
+    var N: Integer;
+    begin
+      N := Count([cRed, cBlue]);
+      WriteLn(N)
+    end.
+    ''');
+  AssertTrue('set-taking routine emitted', Pos('Count:', AsmT) >= 0);
+  AssertTrue('set argument reaches the call', Pos(#9'bl Count', AsmT) >= 0);
+end;
+
 procedure TArm64BackendTests.TestConstStringParam_NoCalleeARC;
 var
   AsmT: string;
