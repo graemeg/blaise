@@ -222,15 +222,26 @@ end;
 procedure TCodeGenTests.TestMain_Native_CallsBlaiseInit;
 var
   Asm_: string;
+  Call: string;
 begin
   Asm_ := GenerateNativeAsm('program P; begin end.');
+  { GenerateNativeAsm targets the HOST, so the call mnemonic is the host's:
+    x86-64 emits `callq _Sym`, arm64 `bl _Sym`.  Asserting one host's syntax
+    made this fail on macOS arm64 for no reason — the invariant under test is
+    that main calls both, in that order, and that holds on either.  Select the
+    mnemonic from the host target rather than gating the test away, so arm64
+    keeps the coverage. }
+  if HostTarget().CPU = cpuArm64 then
+    Call := 'bl _'
+  else
+    Call := 'callq _';
   AssertTrue('native main calls _BlaiseInit',
-    IRContains(Asm_, 'callq _BlaiseInit'));
+    IRContains(Asm_, Call + 'BlaiseInit'));
   AssertTrue('native main calls _SetArgs',
-    IRContains(Asm_, 'callq _SetArgs'));
+    IRContains(Asm_, Call + 'SetArgs'));
   { _SetArgs must precede _BlaiseInit. }
   AssertTrue('_SetArgs precedes _BlaiseInit',
-    Pos('callq _SetArgs', Asm_) < Pos('callq _BlaiseInit', Asm_));
+    Pos(Call + 'SetArgs', Asm_) < Pos(Call + 'BlaiseInit', Asm_));
 end;
 
 { WriteLn }
