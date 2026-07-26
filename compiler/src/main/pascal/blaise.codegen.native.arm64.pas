@@ -216,6 +216,12 @@ type
     { Load/store x-register <-> local slot / global (int-family only). }
     procedure EmitLoadSlot(const AReg, AName: string);
     procedure EmitStoreSlot(const AReg, AName: string);
+    { Store AValReg through the ADDRESS in AAddrReg using the exact width of
+      AType — for storage that is only as wide as its declared type (a var/out
+      param's target, a field, an array element), where a full 64-bit store
+      would clobber the bytes that follow. }
+    procedure EmitStoreByWidth(const AValReg, AAddrReg: string;
+      AType: TTypeDesc);
     { Address of a variable's storage (record base / slot address). }
     procedure EmitSlotAddr(const AReg, AName: string);
     procedure EmitRecIdentAddr(const AReg: string; AE: TIdentExpr);
@@ -887,6 +893,34 @@ begin
     Exit;
   end;
   NotYet('load of variable ''' + AName + '''', nil);
+end;
+
+procedure TArm64Backend.EmitStoreByWidth(const AValReg, AAddrReg: string;
+  AType: TTypeDesc);
+var
+  W: Integer;
+begin
+  { A frame SLOT is always 8 bytes, so a store into one can be full width.
+    Storage that is only as wide as its declared type cannot: writing 8 bytes
+    into a 4-byte Integer overwrites the 4 bytes after it.  AType = nil means
+    the caller could not resolve a width — keep the full-width store rather
+    than guess narrow, which would leave the upper bytes stale. }
+  if AType = nil then
+  begin
+    Self.Emit(Format(#9'str %s, [%s]', [AValReg, AAddrReg]));
+    Exit;
+  end;
+  W := AType.RawSize();
+  case W of
+    1: Self.Emit(Format(#9'strb w%s, [%s]',
+         [Copy(AValReg, 1, Length(AValReg) - 1), AAddrReg]));
+    2: Self.Emit(Format(#9'strh w%s, [%s]',
+         [Copy(AValReg, 1, Length(AValReg) - 1), AAddrReg]));
+    4: Self.Emit(Format(#9'str w%s, [%s]',
+         [Copy(AValReg, 1, Length(AValReg) - 1), AAddrReg]));
+  else
+    Self.Emit(Format(#9'str %s, [%s]', [AValReg, AAddrReg]));
+  end;
 end;
 
 procedure TArm64Backend.EmitStoreSlot(const AReg, AName: string);
@@ -5133,12 +5167,28 @@ begin
     if AAsgn.IsVarParam then
       Self.Emit(#9'ldr x9, [x9]');
     EmitPopTo('x0');
-    Self.Emit(#9'str x0, [x9]');
+    if AAsgn.IsVarParam then
+      { through to the CALLER's storage — store its exact width }
+      EmitStoreByWidth('x0', 'x9', AAsgn.ResolvedLhsType)
+    else
+      { '_cap_' points at our own 8-byte frame slot, which is read back
+        64-bit wide, so the full-width store is the correct one here. }
+      Self.Emit(#9'str x0, [x9]');
   end
   else if AAsgn.IsVarParam then
   begin
     EmitLoadSlot('x9', AAsgn.Name);
-    Self.Emit(#9'str x0, [x9]');
+    { A var/out param's slot holds the CALLER's ADDRESS, and the caller's
+      storage is exactly as wide as the declared type — NOT the 8-byte frame
+      slot a local gets.  The unconditional `str x0` here wrote 8 bytes for a
+      4-byte Integer and silently clobbered the next 4 bytes of whatever the
+      caller had bound: for `LookupReg(RegName, Result.Base, ...)` in the x86
+      assembler that zeroed the ADJACENT Result.Index field, turning its -1
+      ("no index register") sentinel into 0 (= rax).  Every bare memory operand
+      then assembled as a SIB form indexed by rax — `movq %rcx, (%rax)` came out
+      48 89 0C 00 = [rax+rax] instead of 48 89 08
+      (BUG-20260726-arm64-varparam-store-width). }
+    EmitStoreByWidth('x0', 'x9', AAsgn.ResolvedLhsType);
   end
   else
     EmitStoreSlot('x0', AAsgn.Name);

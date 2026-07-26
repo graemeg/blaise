@@ -401,6 +401,9 @@ type
     { BUG-20260726-arm64-field-characcess-dropped — a subscript on a STRING
       FIELD (Obj.Field[N]) must load the byte, not yield the data pointer. }
     procedure TestStringFieldSubscript_LoadsTheByte;
+    { BUG-20260726-arm64-varparam-store-width — a store through a var/out param
+      must be the width of the declared type, not a full 64-bit store. }
+    procedure TestVarParamStore_UsesDeclaredWidth;
   end;
 
 implementation
@@ -5479,6 +5482,59 @@ begin
   Body := Copy(AsmT, P, Length(AsmT) - P);
   AssertTrue('the string field subscript loads a BYTE',
     Pos(#9'ldrb w0, [x0]', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestVarParamStore_UsesDeclaredWidth;
+var
+  AsmT, Body: string;
+  P: Integer;
+begin
+  { A var/out param's slot holds the CALLER's address, and the caller's storage
+    is exactly as wide as the declared type — not the 8-byte frame slot a local
+    gets.  A full-width `str x0` therefore wrote 4 bytes past a var Integer and
+    clobbered whatever followed: for the x86 assembler's
+    LookupReg(RegName, Result.Base, ...) that zeroed the adjacent Result.Index,
+    turning its -1 "no index register" sentinel into 0 = rax, so every bare
+    memory operand assembled as a SIB form indexed by rax. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    procedure SetI(var X: Integer);
+    begin
+      X := 5
+    end;
+    procedure SetB(var B: Byte);
+    begin
+      B := 6
+    end;
+    procedure SetL(var L: Int64);
+    begin
+      L := 7
+    end;
+    var
+      I: Integer;
+      Y: Byte;
+      Q: Int64;
+    begin
+      SetI(I); SetB(Y); SetL(Q);
+      WriteLn(I, Y, Q)
+    end.
+    ''');
+  P := Pos('SetI:', AsmT);
+  AssertTrue('SetI emitted', P >= 0);
+  Body := Copy(AsmT, P, Pos('SetB:', AsmT) - P);
+  AssertTrue('var Integer stores 32 bits', Pos(#9'str w0, [x9]', Body) >= 0);
+  AssertTrue('and NOT 64 bits', Pos(#9'str x0, [x9]', Body) < 0);
+
+  P := Pos('SetB:', AsmT);
+  Body := Copy(AsmT, P, Pos('SetL:', AsmT) - P);
+  AssertTrue('var Byte stores 8 bits', Pos(#9'strb w0, [x9]', Body) >= 0);
+
+  { a genuinely 64-bit var param keeps the full-width store }
+  P := Pos('SetL:', AsmT);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+  AssertTrue('var Int64 still stores 64 bits',
+    Pos(#9'str x0, [x9]', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestClosure_UnownedTransientArg_PinnedBeforeCall;
