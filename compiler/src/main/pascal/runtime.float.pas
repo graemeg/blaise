@@ -780,7 +780,12 @@ begin
   Result := Pos;
 end;
 
-function FormatFloatSpec(V: Double; Spec: Integer; Prec: Integer): Pointer;
+{ Renamed from FormatFloatSpec: on Darwin the backend prefixes a Pascal
+  routine label with '_' and leaves an already-underscored one alone, so a
+  private 'X' beside a public '_X' in the SAME unit collapsed onto one symbol
+  (internal assembler: duplicate label _FormatFloatSpec).  The two names must
+  differ by more than the leading underscore. }
+function FormatFloatSpecCore(V: Double; Spec: Integer; Prec: Integer): Pointer;
 var
   Bits: Int64;
   BExp: Integer;
@@ -1022,7 +1027,7 @@ end;
 
 function _FormatFloatSpec(V: Double; Spec: Integer; Prec: Integer): Pointer;
 begin
-  Result := FormatFloatSpec(V, Spec, Prec);
+  Result := FormatFloatSpecCore(V, Spec, Prec);
 end;
 
 function _DoubleToStr(V: Double): Pointer;

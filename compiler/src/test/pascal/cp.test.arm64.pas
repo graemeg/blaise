@@ -778,10 +778,10 @@ var
 begin
   AsmT := GenAsm(SrcFuncs);
   { args are pushed left-to-right and popped last-first, so x1 fills before
-    x0; the call is a bl to the mangled routine symbol }
+    x0; the call is a bl _to the mangled routine symbol }
   AssertTrue('second arg popped first', Pos(#9'ldr x1, [sp], #16', AsmT) >= 0);
   AssertTrue('first arg popped last', Pos(#9'ldr x0, [sp], #16', AsmT) >= 0);
-  AssertTrue('direct call', Pos(#9'bl Add2', AsmT) >= 0);
+  AssertTrue('direct call', Pos(#9'bl _Add2', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestRecursion_Compiles;
@@ -790,7 +790,7 @@ var
 begin
   AsmT := GenAsm(SrcFib);
   AssertTrue('fib defined', Pos('Fib:', AsmT) >= 0);
-  AssertTrue('recursive call', Pos(#9'bl Fib', AsmT) >= 0);
+  AssertTrue('recursive call', Pos(#9'bl _Fib', AsmT) >= 0);
   AssertTrue('exit lands on the epilogue label', Pos(#9'b Lrexit', AsmT) >= 0);
 end;
 
@@ -819,7 +819,7 @@ begin
   Obj  := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64fib.o');
   try
-    S := F.FindSymbol('Fib');
+    S := F.FindSymbol('_Fib');
     AssertTrue('Fib defined in the object', (S <> nil) and (not S.IsUndef()));
     S := F.FindSymbol('_main');
     AssertTrue('_main defined', (S <> nil) and (not S.IsUndef()));
@@ -859,7 +859,7 @@ var
 begin
   { leg 30: a numeric type-cast Single(X)/Double(X) in a float context is a
     TFuncCallExpr with ResolvedDecl=nil (the name resolves to a TYPE).  It must
-    lower to a REAL conversion (fcvt / scvtf), never a bl to a routine named
+    lower to a REAL conversion (fcvt / scvtf), never a bl _to a routine named
     'Single'/'Double' and never a bit copy.  Was NotYet'd as 'this call form in
     float context' (the compiler's own blaise.assembler.x86_64.pas:3088
     'FVal := Single(DVal)'). }
@@ -881,9 +881,9 @@ begin
   AssertTrue('single widen (fcvt d0, s0)', Pos(#9'fcvt d0, s0', AsmT) >= 0);
   AssertTrue('int to float (scvtf d0, x0)', Pos(#9'scvtf d0, x0', AsmT) >= 0);
   AssertTrue('cast is not a call to Single',
-    Pos(#9'bl Single', AsmT) < 0);
+    Pos(#9'bl _Single', AsmT) < 0);
   AssertTrue('cast is not a call to Double',
-    Pos(#9'bl Double', AsmT) < 0);
+    Pos(#9'bl _Double', AsmT) < 0);
 end;
 
 procedure TArm64BackendTests.TestFloat_CallAbi_IndependentSequences;
@@ -906,7 +906,7 @@ begin
   AssertTrue('float arg lands in d0', Pos(#9'fmov d0, x9', AsmT) >= 0);
   AssertTrue('callee spills the d0 param', Pos(#9'fmov x9, d0', AsmT) >= 0);
   AssertTrue('int args pop into x0/x1', Pos(#9'ldr x1, [sp], #16', AsmT) >= 0);
-  AssertTrue('call emitted', Pos(#9'bl Mix', AsmT) >= 0);
+  AssertTrue('call emitted', Pos(#9'bl _Mix', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestString_AssignRetainsAndReleasesOld;
@@ -1399,7 +1399,7 @@ begin
   { the unit routine is defined under its unit-mangled symbol and the
     program's call site targets the same symbol }
   AssertTrue('unit routine defined', Pos('mathu_AddTwo:', AsmT) >= 0);
-  AssertTrue('cross-unit call mangled', Pos(#9'bl mathu_AddTwo', AsmT) >= 0);
+  AssertTrue('cross-unit call mangled', Pos(#9'bl _mathu_AddTwo', AsmT) >= 0);
   AssertTrue('string-returning unit routine defined',
     Pos('mathu_Banner:', AsmT) >= 0);
   { the unit's string literal lands in the shared rodata dump }
@@ -1452,7 +1452,7 @@ begin
   { the init section becomes <unit>_init, and _main calls it }
   AssertTrue('init routine emitted', Pos('counters_init:', AsmT) >= 0);
   AssertTrue('main calls the init routine',
-    Pos(#9'bl counters_init', AsmT) >= 0);
+    Pos(#9'bl _counters_init', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestUnit_FinalizationStillNotYet;
@@ -1483,7 +1483,7 @@ begin
     end.
     ''');
   AssertTrue('final routine emitted', Pos('withfinal_final:', AsmT) >= 0);
-  AssertTrue('main exit calls it', Pos(#9'bl withfinal_final', AsmT) >= 0);
+  AssertTrue('main exit calls it', Pos(#9'bl _withfinal_final', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestUnit_ImplGlobalFromMethod_SingleEmit;
@@ -1757,14 +1757,14 @@ begin
   AssertTrue('no _ClassCreate on the static ctor path',
     Pos(#9'bl _ClassCreate', AsmT) < 0);
   AssertTrue('vtable installed at the allocation site',
-    Pos('add x9, x9, vtable_TCounter@PAGEOFF', AsmT) >= 0);
+    Pos('add x9, x9, _vtable_TCounter@PAGEOFF', AsmT) >= 0);
   { non-virtual methods dispatch directly to the mangled symbol }
-  AssertTrue('direct method call', Pos(#9'bl TCounter_Bump', AsmT) >= 0);
+  AssertTrue('direct method call', Pos(#9'bl _TCounter_Bump', AsmT) >= 0);
   { metadata: typeinfo slots + vtable with the typeinfo back-pointer }
-  AssertTrue('typeinfo emitted', Pos('typeinfo_TCounter:', AsmT) >= 0);
-  AssertTrue('vtable emitted', Pos('vtable_TCounter:', AsmT) >= 0);
+  AssertTrue('typeinfo emitted', Pos('_typeinfo_TCounter:', AsmT) >= 0);
+  AssertTrue('vtable emitted', Pos('_vtable_TCounter:', AsmT) >= 0);
   AssertTrue('vtable slot 0 is the typeinfo',
-    Pos(#9'.quad typeinfo_TCounter', AsmT) >= 0);
+    Pos(#9'.quad _typeinfo_TCounter', AsmT) >= 0);
   AssertTrue('cleanup emitted', Pos('_FieldCleanup_TCounter:', AsmT) >= 0);
   { the class-typed global is released at program exit }
   AssertTrue('program-exit release', Pos(#9'bl _ClassRelease', AsmT) >= 0);
@@ -1814,13 +1814,13 @@ begin
   { virtual dispatch: vtable load + slot load + blr }
   AssertTrue('vtable indirection', Pos(#9'blr x9', AsmT) >= 0);
   { the derived vtable carries the override }
-  AssertTrue('override in TDog vtable', Pos(#9'.quad TDog_Speak', AsmT) >= 0);
+  AssertTrue('override in TDog vtable', Pos(#9'.quad _TDog_Speak', AsmT) >= 0);
   { the cleanup chain calls the user destructor }
   AssertTrue('cleanup calls Destroy',
     Pos('_Destroy', AsmT) >= 0);
   { parent typeinfo chains to the base class }
   AssertTrue('parent typeinfo link',
-    Pos(#9'.quad typeinfo_TAnimal', AsmT) >= 0);
+    Pos(#9'.quad _typeinfo_TAnimal', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestClass_InUnit_PrefixedSymbols;
@@ -1856,8 +1856,8 @@ begin
     ''');
   { the unit class's metadata symbols carry the owning-unit prefix, and
     the Create site targets the same typeinfo }
-  AssertTrue('prefixed typeinfo', Pos('typeinfo_zoo_TCat:', AsmT) >= 0);
-  AssertTrue('prefixed vtable', Pos('vtable_zoo_TCat:', AsmT) >= 0);
+  AssertTrue('prefixed typeinfo', Pos('_typeinfo_zoo_TCat:', AsmT) >= 0);
+  AssertTrue('prefixed vtable', Pos('_vtable_zoo_TCat:', AsmT) >= 0);
   { The ctor path allocates via _ClassAlloc (eddb5c18), so the unit-prefixed
     symbol to look for is the field-cleanup fn, not typeinfo. }
   AssertTrue('create targets prefixed field-cleanup',
@@ -1905,9 +1905,9 @@ begin
     end.
     ''');
   { inherited: static dispatch straight to the parent implementation }
-  AssertTrue('inherited call is direct', Pos(#9'bl TBase_Tag', AsmT) >= 0);
+  AssertTrue('inherited call is direct', Pos(#9'bl _TBase_Tag', AsmT) >= 0);
   { static method: plain call, no receiver }
-  AssertTrue('static method direct call', Pos(#9'bl TKid_Twice', AsmT) >= 0);
+  AssertTrue('static method direct call', Pos(#9'bl _TKid_Twice', AsmT) >= 0);
   { class const folded to its literal }
   AssertTrue('class const folded', Pos(#9'movz x0, #42', AsmT) >= 0);
   { ToString: virtual through vtable slot 1 (offset 16) }
@@ -1961,8 +1961,8 @@ begin
     ''');
   { field-backed accessors are rewritten to plain field access by the
     semantic pass; method-backed ones call the accessors directly }
-  AssertTrue('getter called', Pos(#9'bl TGauge_GetPercent', AsmT) >= 0);
-  AssertTrue('setter called', Pos(#9'bl TGauge_SetPercent', AsmT) >= 0);
+  AssertTrue('getter called', Pos(#9'bl _TGauge_GetPercent', AsmT) >= 0);
+  AssertTrue('setter called', Pos(#9'bl _TGauge_SetPercent', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64props.o');
   try
@@ -2010,13 +2010,13 @@ begin
     ''');
   { chained field read (O.FInner.FVal) derefs through the base expr, and
     a method on a chained field (O.FInner.Get) receives the loaded ptr }
-  AssertTrue('chained method call', Pos(#9'bl TInner_Get', AsmT) >= 0);
+  AssertTrue('chained method call', Pos(#9'bl _TInner_Get', AsmT) >= 0);
   { O.FInner.Get(): the receiver O.FInner is a BORROWED field read — an
     owned method result gets released; make sure the owned-receiver
     release plumbing appears for owned receivers only when used.  Here
     Inner() is unused, so no blr-owned pattern is required — assert the
     borrow shape: field load feeding the call. }
-  PosCall := Pos(#9'bl TInner_Get', AsmT);
+  PosCall := Pos(#9'bl _TInner_Get', AsmT);
   PosRel := Pos('ldr x0, [sp, #16]', AsmT);
   AssertTrue('no owned-receiver bracket for borrowed chains', PosRel < 0);
   AssertTrue('call present', PosCall >= 0);
@@ -2101,7 +2101,7 @@ begin
   AssertTrue('outgoing area allocated', Pos(#9'sub sp, sp, #16', AsmT) >= 0);
   AssertTrue('variadic call to printf', Pos(#9'bl printf', AsmT) >= 0);
   { the 9th/10th args of Sum10 overflow the register file to the stack }
-  AssertTrue('call to Sum10', Pos(#9'bl Sum10', AsmT) >= 0);
+  AssertTrue('call to Sum10', Pos(#9'bl _Sum10', AsmT) >= 0);
   AssertTrue('area released', Pos(#9'add sp, sp, #16', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64stackargs.o');
@@ -2144,7 +2144,7 @@ begin
   AssertTrue('overflow record pointer read from the outgoing area',
     Pos(#9'ldr x9, [x29, #24]', AsmT) >= 0);
   { caller: an outgoing area is reserved and the call is emitted }
-  AssertTrue('call to F', Pos(#9'bl F', AsmT) >= 0);
+  AssertTrue('call to F', Pos(#9'bl _F', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   MF := ParseMachO(Obj, 'arm64recovf.o');
   try
@@ -2186,11 +2186,11 @@ begin
     end.
     ''');
   { narrowing stores the static itab; dispatch loads fptr from itab[0] }
-  AssertTrue('itab emitted', Pos('itab_THi_IGreeter:', AsmT) >= 0);
-  AssertTrue('itab slot names the impl', Pos(#9'.quad THi_Greet', AsmT) >= 0);
-  AssertTrue('impllist emitted', Pos('impllist_THi:', AsmT) >= 0);
-  AssertTrue('interface typeinfo', Pos('typeinfo_IGreeter:', AsmT) >= 0);
-  AssertTrue('narrow stores itab', Pos('itab_THi_IGreeter@PAGEOFF', AsmT) >= 0);
+  AssertTrue('itab emitted', Pos('_itab_THi_IGreeter:', AsmT) >= 0);
+  AssertTrue('itab slot names the impl', Pos(#9'.quad _THi_Greet', AsmT) >= 0);
+  AssertTrue('impllist emitted', Pos('_impllist_THi:', AsmT) >= 0);
+  AssertTrue('interface typeinfo', Pos('_typeinfo_IGreeter:', AsmT) >= 0);
+  AssertTrue('narrow stores itab', Pos('_itab_THi_IGreeter@PAGEOFF', AsmT) >= 0);
   AssertTrue('dispatch through itab slot 0',
     Pos(#9'ldr x9, [x9, #0]', AsmT) >= 0);
   AssertTrue('dispatch call', Pos(#9'blr x9', AsmT) >= 0);
@@ -2209,9 +2209,9 @@ var
   AsmT: string;
 begin
   { A unit declares IGreeter; the program's class implements it and uses
-    Supports.  The typeinfo must be DEFINED (typeinfo_intfu_IGreeter:) and every
-    reference — the impllist .quad and the Supports adrp — must use that SAME
-    owning-unit-prefixed symbol.  A bare `typeinfo_IGreeter` reference would
+    Supports.  The typeinfo must be DEFINED (_typeinfo_intfu_IGreeter:) and every
+    reference — the impllist .quad _and the Supports adrp — must use that SAME
+    owning-unit-prefixed symbol.  A bare `_typeinfo_IGreeter` reference would
     dangle at link (LINK-1). }
   AsmT := GenAsmWithUnit(
     '''
@@ -2241,16 +2241,16 @@ begin
     ''');
   { the typeinfo is defined under the unit-prefixed symbol }
   AssertTrue('prefixed typeinfo defined',
-    Pos('typeinfo_intfu_IGreeter:', AsmT) >= 0);
+    Pos('_typeinfo_intfu_IGreeter:', AsmT) >= 0);
   { the impllist references the SAME prefixed symbol }
   AssertTrue('impllist uses the prefixed typeinfo',
-    Pos(#9'.quad typeinfo_intfu_IGreeter', AsmT) >= 0);
+    Pos(#9'.quad _typeinfo_intfu_IGreeter', AsmT) >= 0);
   { Supports loads the SAME prefixed symbol }
   AssertTrue('Supports uses the prefixed typeinfo',
-    Pos('typeinfo_intfu_IGreeter@PAGE', AsmT) >= 0);
-  { and NO bare typeinfo_IGreeter reference dangles }
+    Pos('_typeinfo_intfu_IGreeter@PAGE', AsmT) >= 0);
+  { and NO bare _typeinfo_IGreeter reference dangles }
   AssertTrue('no bare typeinfo reference',
-    Pos('typeinfo_IGreeter@PAGE', AsmT) < 0);
+    Pos('_typeinfo_IGreeter@PAGE', AsmT) < 0);
 end;
 
 { A generic instance declared in a UNIT has its method bodies emitted by
@@ -2304,7 +2304,7 @@ begin
     end.
     ''');
   AssertTrue('set-taking routine emitted', Pos('Count:', AsmT) >= 0);
-  AssertTrue('set argument reaches the call', Pos(#9'bl Count', AsmT) >= 0);
+  AssertTrue('set argument reaches the call', Pos(#9'bl _Count', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestConstStringParam_NoCalleeARC;
@@ -2405,9 +2405,9 @@ var
 begin
   { A plain class's itab and impllist are DEFINED in the class's own object but
     REFERENCED from another object (an interface assignment / Supports in the
-    program that uses the unit).  They must be .globl so the cross-object
+    program that uses the unit).  They must be .globl _so the cross-object
     reference resolves — a file-local (no-directive) definition dangles at link
-    (LINK-2; the arm64 backend previously only emitted .weak for generic
+    (LINK-2; the arm64 backend previously only emitted .weak _for generic
     instances and nothing for a plain class, unlike x86-64). }
   AsmT := GenAsmWithUnit(
     '''
@@ -2441,13 +2441,13 @@ begin
   AssertTrue('the TJob/IWork itab is defined',
     Pos('_TJob_IWork:', AsmT) >= 0);
   AssertTrue('plain-class itab is .globl (cross-object visible)',
-    Pos('.globl itab_', AsmT) >= 0);
+    Pos('.globl _itab_', AsmT) >= 0);
   AssertTrue('the TJob itab definition is globl, not file-local',
-    Pos('.globl itab_', AsmT) >= 0);
+    Pos('.globl _itab_', AsmT) >= 0);
   AssertTrue('the TJob impllist is defined',
-    Pos('impllist_', AsmT) >= 0);
+    Pos('_impllist_', AsmT) >= 0);
   AssertTrue('plain-class impllist is .globl',
-    Pos('.globl impllist_', AsmT) >= 0);
+    Pos('.globl _impllist_', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestGenericClassInstance_MethodBodyEmittedInUnit;
@@ -2502,7 +2502,7 @@ begin
     Pos('TBox_Integer_Put:', AsmT) >= 0);
   { and it is weak-bound (bare generic-instance symbol) for cross-object dedup }
   AssertTrue('the generic-instance method body is weak',
-    Pos('.weak TBox_Integer_Put', AsmT) >= 0);
+    Pos('.weak _TBox_Integer_Put', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestClassTypeinfo_InstanceSizeCoversAllFields;
@@ -2537,11 +2537,11 @@ begin
       s.Free()
     end.
     ''');
-  P := Pos('typeinfo_P_TSized:', AsmT);
+  P := Pos('_typeinfo_P_TSized:', AsmT);
   if P < 0 then
-    P := Pos('typeinfo_TSized:', AsmT);
+    P := Pos('_typeinfo_TSized:', AsmT);
   AssertTrue('TSized typeinfo is emitted', P >= 0);
-  { walk to the 5th .quad after the label — the instance-size slot }
+  { walk to the 5th .quad _after the label — the instance-size slot }
   Q := P;
   for K := 1 to 5 do
     Q := PosEx(#9'.quad ', AsmT, Q + 1);
@@ -2596,7 +2596,7 @@ begin
     end.
     ''');
   { isolate the callee body so caller-side patterns cannot satisfy the asserts }
-  P := Pos(#10'Name:', AsmT);
+  P := Pos(#10'_Name:', AsmT);
   AssertTrue('the Name routine is emitted', P >= 0);
   Q := PosEx(#10'.globl ', AsmT, P + 1);
   if Q < 0 then Q := Length(AsmT);
@@ -2664,7 +2664,7 @@ begin
   end;
   { the dep WITH an initialization section is called from _main ... }
   AssertTrue('separately-compiled dep unit init is called from _main',
-    Pos(#9'bl some.dep.unit_init', AsmT) >= 0);
+    Pos(#9'bl _some.dep.unit_init', AsmT) >= 0);
   { ... and one without an initialization section is not }
   AssertTrue('a dep with no initialization section is not called',
     Pos('quiet.unit_init', AsmT) < 0);
@@ -2718,7 +2718,7 @@ begin
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body is emitted', P >= 0);
-  Q := PosEx('bl Classes_', AsmT, P);
+  Q := PosEx('bl _Classes_', AsmT, P);
   Body := Copy(AsmT, P, Length(AsmT) - P);
 
   { The receiver must be RE-SEATED around the outgoing-area reservation: a
@@ -3032,9 +3032,9 @@ begin
   { the getter call is on the derefed field, and Self is not passed
     un-derefed as the receiver (an ldr [x0,#16] must precede the getter) }
   AssertTrue('the getter is invoked',
-    Pos(#9'bl TInner_GetItem', Body) >= 0);
+    Pos(#9'bl _TInner_GetItem', Body) >= 0);
   AssertTrue('the receiver is not Self un-derefed',
-    Pos(#9'ldur x0, [x29, #-8]'#10#9'ldr x1, [sp], #16'#10#9'bl TInner_GetItem',
+    Pos(#9'ldur x0, [x29, #-8]'#10#9'ldr x1, [sp], #16'#10#9'bl _TInner_GetItem',
         Body) < 0);
 end;
 
@@ -3115,7 +3115,7 @@ begin
       WriteLn(A)
     end.
     ''');
-  P := Pos(#10'Take:', AsmT);
+  P := Pos(#10'_Take:', AsmT);
   AssertTrue('Take is emitted', P >= 0);
   { the prologue runs up to the first body instruction — bound the window by
     the first string-literal materialisation in the body }
@@ -3259,7 +3259,7 @@ begin
       WriteLn(Bag.Read0())
     end.
     ''');
-  P := Pos(#10'TBag_Read0:', AsmT);
+  P := Pos(#10'_TBag_Read0:', AsmT);
   AssertTrue('Read0 emitted', P >= 0);
   { bound the window to the Read0 body up to the first memcpy (the element copy) }
   MemcpyP := PosEx(#9'bl memcpy', AsmT, P);
@@ -3459,7 +3459,7 @@ begin
   Body := Copy(AsmT, P, Length(AsmT) - P);
 
   { the getter is called (unit-prefixed symbol) ... }
-  GetP := Pos(#9'bl DPU_TBox_GetItem', Body);
+  GetP := Pos(#9'bl _DPU_TBox_GetItem', Body);
   AssertTrue('the default-property getter is called', GetP >= 0);
 
   { ... and the Box FIELD is loaded as the receiver before it, not a bare load
@@ -3582,10 +3582,10 @@ begin
       WriteLn(C.Use())
     end.
     ''');
-  P := Pos(#10'TC_Use:', AsmT);
+  P := Pos(#10'_TC_Use:', AsmT);
   AssertTrue('TC_Use emitted', P >= 0);
   { the getter is called; Self ([x29,#-8]) must be loaded before the call }
-  CallP := PosEx(#9'bl TC_Make', AsmT, P);
+  CallP := PosEx(#9'bl _TC_Make', AsmT, P);
   AssertTrue('the record-returning method is called', CallP >= 0);
   SelfP := PosEx(#9'ldur x0, [x29, #-8]', AsmT, P);
   AssertTrue('Self is loaded as the receiver before the record-return call',
@@ -3639,7 +3639,7 @@ begin
   Body := Copy(AsmT, P, Length(AsmT) - P);
   { the default-property getter is dispatched for the plain-var subscript }
   AssertTrue('the default-property getter is called for a plain-var subscript',
-    Pos(#9'bl DPV_TBag_GetItem', Body) >= 0);
+    Pos(#9'bl _DPV_TBag_GetItem', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestWriteLnInteger_PassesSignExtended;
@@ -3742,7 +3742,7 @@ begin
   NL := PosEx(#10, Body, R2);  Store2 := Copy(Body, R2, NL - R2);
 
   { the two disposal reloads (after the call) name the SAME two slots }
-  P := Pos(#9'bl STU_Store', Body);
+  P := Pos(#9'bl _STU_Store', Body);
   AssertTrue('the Store call is emitted', P >= 0);
   L1 := PosEx(#9'ldur x0, [x29, #', Body, P);
   AssertTrue('first transient reloaded', L1 >= 0);
@@ -3831,7 +3831,7 @@ begin
   { runtime lookup + invalid-cast guard }
   AssertTrue('runtime itab lookup', Pos(#9'bl _GetItab', AsmT) >= 0);
   AssertTrue('nil-itab guard', Pos(#9'bl _Raise_InvalidCast', AsmT) >= 0);
-  AssertTrue('typeinfo operand', Pos('typeinfo_IThing@PAGEOFF', AsmT) >= 0);
+  AssertTrue('typeinfo operand', Pos('_typeinfo_IThing@PAGEOFF', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestOwnedStringTransientArg_Released;
@@ -3872,7 +3872,7 @@ begin
     the const param into a local runs a legitimate retain/exit-release cycle
     that reaches zero and frees the caller's buffer mid-call
     (BUG-20260725-arm64-const-str-param-alias). }
-  PosCall := Pos(#9'bl Show', AsmT);
+  PosCall := Pos(#9'bl _Show', AsmT);
   AssertTrue('calls emitted', PosCall >= 0);
   { the rc=1 transient is parked in a STABLE x29-relative slot (__strtrans_N),
     not the sp-relative outgoing area whose offset the arg/result spills perturbed
@@ -3880,7 +3880,7 @@ begin
     ldur from [x29, #..]. }
   AssertTrue('rc=1 arg parked in an x29-relative slot',
     Pos(#9'ldur x0, [x29, #', AsmT) >= 0);
-  PosCall := Pos(#9'bl ShowC', AsmT);
+  PosCall := Pos(#9'bl _ShowC', AsmT);
   AssertTrue('const call emitted', PosCall >= 0);
   PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
   AssertTrue('const rc=0 arg released after the call', PosRel > PosCall);
@@ -3929,7 +3929,7 @@ begin
     metaclass receiver passes its value directly }
   AssertTrue('inheritsfrom call', Pos(#9'bl _InheritsFrom', AsmT) >= 0);
   { bare class name as a value = typeinfo address }
-  AssertTrue('metaclass value', Pos('typeinfo_TKid@PAGEOFF', AsmT) >= 0);
+  AssertTrue('metaclass value', Pos('_typeinfo_TKid@PAGEOFF', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceParamsAndResults;
@@ -3973,9 +3973,9 @@ begin
   { result: callee writes the fat pointer through the parked x8 buffer }
   AssertTrue('sret buffer store', Pos(#9'str x0, [x9, #8]', AsmT) >= 0);
   { caller receives through the __iret scratch }
-  AssertTrue('call with sret dest', Pos(#9'bl MakeGreeter', AsmT) >= 0);
+  AssertTrue('call with sret dest', Pos(#9'bl _MakeGreeter', AsmT) >= 0);
   { param: two-register fat pointer, by-value retain in the callee }
-  AssertTrue('param call', Pos(#9'bl UseGreeter', AsmT) >= 0);
+  AssertTrue('param call', Pos(#9'bl _UseGreeter', AsmT) >= 0);
   AssertTrue('callee retains its copy', Pos(#9'bl _ClassAddRef', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64intfpr.o');
@@ -4056,7 +4056,7 @@ begin
     end.
     ''');
   { float property read: getter call, value already in d0 }
-  AssertTrue('getter called', Pos(#9'bl TTank_GetVol', AsmT) >= 0);
+  AssertTrue('getter called', Pos(#9'bl _TTank_GetVol', AsmT) >= 0);
   { string-initialised global: .data pointer to an immortal blob }
   AssertTrue('data pointer', Pos(#9'.quad __gi_Banner_d', AsmT) >= 0);
   AssertTrue('immortal header', Pos('__gi_Banner_h:', AsmT) >= 0);
@@ -4097,7 +4097,7 @@ begin
   AssertTrue('param field retain', Pos(#9'bl _StringAddRef', AsmT) >= 0);
   { managed result: sret into the __rret scratch, old LHS fields released
     AFTER the call, then the fresh value moves in }
-  PosCall := Pos(#9'bl Make', AsmT);
+  PosCall := Pos(#9'bl _Make', AsmT);
   AssertTrue('call present', PosCall >= 0);
   PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
   AssertTrue('LHS released after the call', PosRel > PosCall);
@@ -4199,8 +4199,8 @@ begin
   { metaclass ctor: _ClassCreate on the metaclass VALUE }
   AssertTrue('metaclass create', Pos(#9'bl _ClassCreate', AsmT) >= 0);
   { indexed property accessors }
-  AssertTrue('indexed getter', Pos(#9'bl TNode_GetItem', AsmT) >= 0);
-  AssertTrue('indexed setter', Pos(#9'bl TNode_SetItem', AsmT) >= 0);
+  AssertTrue('indexed getter', Pos(#9'bl _TNode_GetItem', AsmT) >= 0);
+  AssertTrue('indexed setter', Pos(#9'bl _TNode_SetItem', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestCaseAndRepeat;
@@ -4589,7 +4589,7 @@ begin
     EmitSlotAddr on the field name would have hit NotYet, so successful
     compilation to a call already proves the field-address path. }
   AssertTrue('calls AppendTo with the field lvalue',
-    Pos(#9'bl AppendTo', AsmT) >= 0);
+    Pos(#9'bl _AppendTo', AsmT) >= 0);
   AssertTrue('adds the FTab field offset (#8) to form the field address',
     Pos(#9'add x0, x0, #8', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
@@ -4639,12 +4639,12 @@ begin
     ''');
   { the itab and impllist are weak-bound for the generic instance }
   AssertTrue('itab weak-bound',
-    Pos('.weak itab_TBox_Integer_IHolder', AsmStr) >= 0);
+    Pos('.weak _itab_TBox_Integer_IHolder', AsmStr) >= 0);
   AssertTrue('impllist weak-bound',
-    Pos('.weak impllist_TBox_Integer', AsmStr) >= 0);
+    Pos('.weak _impllist_TBox_Integer', AsmStr) >= 0);
   { the itab entry points at the clone's own instance-mangled method }
   AssertTrue('itab binds the clone method',
-    Pos('itab_TBox_Integer_IHolder:' + LF + #9'.quad TBox_Integer_Get',
+    Pos('_itab_TBox_Integer_IHolder:' + LF + #9'.quad _TBox_Integer_Get',
         AsmStr) >= 0);
   Obj := AssembleArm64ToBytes(AsmStr);
   F := ParseMachO(Obj, 'arm64gii.o');
@@ -4686,12 +4686,12 @@ begin
     ''');
   { the generic-interface instance typeinfo is emitted weak }
   AssertTrue('weak generic-intf typeinfo',
-    Pos('.weak typeinfo_ITransform_Integer', AsmT) >= 0);
+    Pos('.weak _typeinfo_ITransform_Integer', AsmT) >= 0);
   AssertTrue('generic-intf typeinfo label',
-    Pos('typeinfo_ITransform_Integer:', AsmT) >= 0);
+    Pos('_typeinfo_ITransform_Integer:', AsmT) >= 0);
   { the class's impllist references that typeinfo }
   AssertTrue('impllist references the instance typeinfo',
-    Pos(#9'.quad typeinfo_ITransform_Integer', AsmT) >= 0);
+    Pos(#9'.quad _typeinfo_ITransform_Integer', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestAbstractInterfaceMethodItab;
@@ -4728,10 +4728,10 @@ begin
     end.
     ''');
   AssertTrue('abstract base itab slot is the abort stub',
-    Pos('itab_TBase_IShape:' + LF + #9'.quad _AbstractMethodError',
+    Pos('_itab_TBase_IShape:' + LF + #9'.quad _AbstractMethodError',
         AsmStr) >= 0);
   AssertTrue('concrete override itab binds the override',
-    Pos('itab_TSquare_IShape:' + LF + #9'.quad TSquare_Area', AsmStr) >= 0);
+    Pos('_itab_TSquare_IShape:' + LF + #9'.quad _TSquare_Area', AsmStr) >= 0);
   Obj := AssembleArm64ToBytes(AsmStr);
   F := ParseMachO(Obj, 'arm64abs.o');
   try
@@ -4749,8 +4749,8 @@ var
   F: TMachOFile;
 begin
   { TImpl implements IDerived (= interface(IBase)).  The impllist must carry a
-    (typeinfo, itab) pair for BOTH IDerived and IBase, and itab_TImpl_IBase is
-    the leading prefix of itab_TImpl_IDerived (BUG-052 F4). }
+    (typeinfo, itab) pair for BOTH IDerived and IBase, and _itab_TImpl_IBase is
+    the leading prefix of _itab_TImpl_IDerived (BUG-052 F4). }
   AsmStr := GenAsm(
     '''
     program P;
@@ -4779,11 +4779,11 @@ begin
     ''');
   { the impllist includes the BASE interface as its own pair }
   AssertTrue('impllist includes the base interface',
-    Pos(#9'.quad typeinfo_IBase' + LF + #9'.quad itab_TImpl_IBase',
+    Pos(#9'.quad _typeinfo_IBase' + LF + #9'.quad _itab_TImpl_IBase',
         AsmStr) >= 0);
   { the base itab is the leading prefix (BaseVal) of the derived itab }
   AssertTrue('base itab binds the base method',
-    Pos('itab_TImpl_IBase:' + LF + #9'.quad TImpl_BaseVal', AsmStr) >= 0);
+    Pos('_itab_TImpl_IBase:' + LF + #9'.quad _TImpl_BaseVal', AsmStr) >= 0);
   Obj := AssembleArm64ToBytes(AsmStr);
   F := ParseMachO(Obj, 'arm64ipc.o');
   try
@@ -4932,9 +4932,9 @@ begin
     end.
     ''');
   { the three protocol methods are all called }
-  AssertTrue('GetEnumerator call', Pos(#9'bl TColl_GetEnumerator', AsmT) >= 0);
-  AssertTrue('MoveNext call', Pos(#9'bl TEnum_MoveNext', AsmT) >= 0);
-  AssertTrue('Current getter call', Pos(#9'bl TEnum_GetCurrent', AsmT) >= 0);
+  AssertTrue('GetEnumerator call', Pos(#9'bl _TColl_GetEnumerator', AsmT) >= 0);
+  AssertTrue('MoveNext call', Pos(#9'bl _TEnum_MoveNext', AsmT) >= 0);
+  AssertTrue('Current getter call', Pos(#9'bl _TEnum_GetCurrent', AsmT) >= 0);
   { the enumerator is transferred into its slot (release old, no AddRef) }
   AssertTrue('enumerator slot release', Pos(#9'bl _ClassRelease', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
@@ -5077,7 +5077,7 @@ begin
   AssertTrue('typeinfo slot 7 wired', Pos(#9'.quad attrs_TJob', AsmT) >= 0);
   { TCustomAttribute base stubs exist for the parent chain }
   AssertTrue('TCustomAttribute typeinfo',
-    Pos('typeinfo_TCustomAttribute:', AsmT) >= 0);
+    Pos('_typeinfo_TCustomAttribute:', AsmT) >= 0);
   { RTTI builtins lower to the runtime helpers }
   AssertTrue('has-class-attr call', Pos(#9'bl _HasClassAttribute', AsmT) >= 0);
   AssertTrue('has-method-attr call',
@@ -5132,19 +5132,19 @@ begin
   { instance symbols are BARE (no unit prefix) and WEAK — every object
     that materialises the same instance carries an identical copy and
     the linker keeps one (BUG-004) }
-  AssertTrue('weak typeinfo', Pos('.weak typeinfo_TBox_Int64', AsmT) >= 0);
-  AssertTrue('weak vtable', Pos('.weak vtable_TBox_Int64', AsmT) >= 0);
+  AssertTrue('weak typeinfo', Pos('.weak _typeinfo_TBox_Int64', AsmT) >= 0);
+  AssertTrue('weak vtable', Pos('.weak _vtable_TBox_Int64', AsmT) >= 0);
   AssertTrue('weak cleanup',
     Pos('.weak _FieldCleanup_TBox_Int64', AsmT) >= 0);
   AssertTrue('instance method body', Pos('TBox_Int64_Put:', AsmT) >= 0);
-  AssertTrue('weak method bind', Pos('.weak TBox_Int64_Put', AsmT) >= 0);
+  AssertTrue('weak method bind', Pos('.weak _TBox_Int64_Put', AsmT) >= 0);
   { instance is constructed through its own typeinfo }
   { ctor allocates via _ClassAlloc (eddb5c18): the instance-specific symbol on
     that path is the field-cleanup fn }
   AssertTrue('ctor field-cleanup ref',
     Pos('adrp x1, _FieldCleanup_TBox_Int64@PAGE', AsmT) >= 0);
   { the generic FUNCTION instance is emitted weak too }
-  AssertTrue('weak func instance', Pos('.weak Pick_Int64', AsmT) >= 0);
+  AssertTrue('weak func instance', Pos('.weak _Pick_Int64', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64gen.o');
   try
@@ -5184,12 +5184,12 @@ begin
     ''');
   { the monomorphised instance bodies are emitted with weak binding }
   AssertTrue('Wrap instance body', Pos('TBox_Wrap_Integer:', AsmT) >= 0);
-  AssertTrue('Wrap weak bind', Pos('.weak TBox_Wrap_Integer', AsmT) >= 0);
+  AssertTrue('Wrap weak bind', Pos('.weak _TBox_Wrap_Integer', AsmT) >= 0);
   AssertTrue('AddBase instance body', Pos('TBox_AddBase_Integer:', AsmT) >= 0);
-  AssertTrue('AddBase weak bind', Pos('.weak TBox_AddBase_Integer', AsmT) >= 0);
+  AssertTrue('AddBase weak bind', Pos('.weak _TBox_AddBase_Integer', AsmT) >= 0);
   { the call sites reference the same mangled labels }
-  AssertTrue('Wrap called', Pos(#9'bl TBox_Wrap_Integer', AsmT) >= 0);
-  AssertTrue('AddBase called', Pos(#9'bl TBox_AddBase_Integer', AsmT) >= 0);
+  AssertTrue('Wrap called', Pos(#9'bl _TBox_Wrap_Integer', AsmT) >= 0);
+  AssertTrue('AddBase called', Pos(#9'bl _TBox_AddBase_Integer', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestClosure_CaptureFree_ValueParamCall;
@@ -5292,7 +5292,7 @@ begin
     ''');
   PosCat := Pos(#9'bl _StringConcat', AsmT);
   AssertTrue('concat produced', PosCat >= 0);
-  PosCall := PosEx(#9'bl Sink', AsmT, PosCat);
+  PosCall := PosEx(#9'bl _Sink', AsmT, PosCat);
   AssertTrue('callee invoked after the concat', PosCall > PosCat);
   PosPin := PosEx(#9'bl _StringAddRef', AsmT, PosCat);
   AssertTrue('rc=0 transient pinned BEFORE the direct call',
@@ -5380,7 +5380,7 @@ begin
       Use(nil)
     end.
     ''');
-  PosCall := Pos(#9'bl TBag_GetIt', AsmT);
+  PosCall := Pos(#9'bl _TBag_GetIt', AsmT);
   AssertTrue('getter call emitted', PosCall >= 0);
   { the receiver chain starts where the T parameter slot is loaded }
   PosBase := RPos(#9'ldur x0, [x29, #', Copy(AsmT, 0, PosCall));
@@ -5573,7 +5573,7 @@ begin
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
   Body := Copy(AsmT, P, Length(AsmT) - P);
-  PosCall := Pos(#9'bl SetI', Body);
+  PosCall := Pos(#9'bl _SetI', Body);
   AssertTrue('the call is emitted', PosCall >= 0);
   PosFix := PosEx(#9'ldrsw x0, [x9]', Body, PosCall);
   AssertTrue('the slot is re-widened AFTER the call, sign-extending',
@@ -6200,11 +6200,11 @@ begin
       WriteLn(SumPair(MakePair(5)))
     end.
     ''');
-  AssertTrue('MakePair evaluated', Pos(#9'bl MakePair', AsmT) >= 0);
+  AssertTrue('MakePair evaluated', Pos(#9'bl _MakePair', AsmT) >= 0);
   AssertTrue('result stored into a scratch buffer',
     Pos(#9'str x0, [x9]', AsmT) >= 0);
   AssertTrue('SumPair receives the materialised record',
-    Pos(#9'bl SumPair', AsmT) >= 0);
+    Pos(#9'bl _SumPair', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64rca.o');
   try
@@ -6240,7 +6240,7 @@ begin
       WriteLn(MakePair(7).B)
     end.
     ''');
-  AssertTrue('MakePair evaluated', Pos(#9'bl MakePair', AsmT) >= 0);
+  AssertTrue('MakePair evaluated', Pos(#9'bl _MakePair', AsmT) >= 0);
   { the field is read from the __rret scratch (an x29-relative address then a
     load) — the store-into-scratch then load-field shape }
   AssertTrue('field loaded after materialisation',
@@ -6337,9 +6337,9 @@ begin
       B.Free()
     end.
     ''');
-  { the Grab result is released immediately after the call — bl Grab then
+  { the Grab result is released immediately after the call — bl _Grab then
     bl _ClassRelease adjacently, with no str-to-slot between them }
-  GrabPos := Pos(#9'bl TBox_Grab' + LF + #9'bl _ClassRelease', AsmT);
+  GrabPos := Pos(#9'bl _TBox_Grab' + LF + #9'bl _ClassRelease', AsmT);
   AssertTrue('call result released with no slot nil', GrabPos >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64frc.o');
@@ -6381,11 +6381,11 @@ begin
       WriteLn(S)
     end.
     ''');
-  { the field-read region is after 'bl MakeThing' in $main: the base is
+  { the field-read region is after 'bl _MakeThing' in $main: the base is
     loaded, field read, base released inline — NO AddRef between the call
     and the release (contrast the class arm, which pins) }
   AssertTrue('string field: base released inline after the call',
-    Pos(#9'bl MakeThing' + LF + #9'str x0, [sp, #-16]!' + LF +
+    Pos(#9'bl _MakeThing' + LF + #9'str x0, [sp, #-16]!' + LF +
         #9'add x0, x0, #8' + LF + #9'ldr x0, [x0]' + LF +
         #9'str x0, [sp, #-16]!' + LF + #9'ldr x0, [sp, #16]' + LF +
         #9'bl _ClassRelease', AsmStr) >= 0);
@@ -6480,7 +6480,7 @@ begin
     ''');
   { the Result +1 transfers — MakeArr's body must NOT _DynArrayRelease its
     Result before returning it (that would drop the transferred ref) }
-  MakeEnd := Pos(#9'bl MakeArr', AsmT);
+  MakeEnd := Pos(#9'bl _MakeArr', AsmT);
   AssertTrue('MakeArr called', MakeEnd >= 0);
   RelInMake := Pos('MakeArr:', AsmT);
   AssertTrue('MakeArr emitted', RelInMake >= 0);
@@ -6571,7 +6571,7 @@ begin
       WriteLn(SumPair(Arr[0]))
     end.
     ''');
-  AssertTrue('SumPair called with the element', Pos(#9'bl SumPair', AsmT) >= 0);
+  AssertTrue('SumPair called with the element', Pos(#9'bl _SumPair', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64sra.o');
   try
@@ -6647,7 +6647,7 @@ var
   F: TMachOFile;
 begin
   { A capture-free nested proc is emitted as a sibling top-level symbol named
-    Outer_Inner, and the outer calls it with 'bl Outer_Inner'. }
+    Outer_Inner, and the outer calls it with 'bl _Outer_Inner'. }
   AsmT := GenAsm(
     '''
     program P;
@@ -6666,7 +6666,7 @@ begin
   AssertTrue('nested body emitted as sibling Outer_Inner symbol',
     Pos('Outer_Inner:', AsmT) >= 0);
   AssertTrue('outer calls the mangled nested symbol',
-    Pos(#9'bl Outer_Inner', AsmT) >= 0);
+    Pos(#9'bl _Outer_Inner', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64nc.o');
   try
@@ -6719,7 +6719,7 @@ begin
   { the call site passes the address of the outer local as the leading arg }
   AssertTrue('call site materialises the captured var address',
     Pos(#9'sub x0, x29, #', AsmT) >= 0);
-  AssertTrue('outer calls the nested symbol', Pos(#9'bl Outer_Inner', AsmT) >= 0);
+  AssertTrue('outer calls the nested symbol', Pos(#9'bl _Outer_Inner', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64cs.o');
   try
@@ -6810,7 +6810,7 @@ begin
   AssertTrue('overflow args spill to the outgoing stack area',
     Pos(#9'str w9, [sp, #', AsmT) >= 0);
   { the nested body still links correctly }
-  AssertTrue('outer calls the nested symbol', Pos(#9'bl Outer_Inner', AsmT) >= 0);
+  AssertTrue('outer calls the nested symbol', Pos(#9'bl _Outer_Inner', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64csp.o');
   try
@@ -6888,7 +6888,7 @@ begin
   AssertTrue('innermost mangles as the full chain L1_L2_L3',
     Pos('L1_L2_L3:', AsmT) >= 0);
   AssertTrue('the call targets the full-chain symbol',
-    Pos(#9'bl L1_L2_L3', AsmT) >= 0);
+    Pos(#9'bl _L1_L2_L3', AsmT) >= 0);
   AssertTrue('the parent-only L2_L3 symbol is gone',
     Pos(LF + 'L2_L3:', AsmT) < 0);
 end;
@@ -6902,7 +6902,7 @@ begin
   { A class with a string-indexed property (Items[Key: string]: Integer).  The
     write B.Items['k'] := 7 must lower (previously NotYet'd as a non-integer
     index): the key string pointer goes to x1, the value to x2, receiver x0,
-    then bl SetItem.  The key is BORROWED — no _StringAddRef before the setter
+    then bl _SetItem.  The key is BORROWED — no _StringAddRef before the setter
     (matching x86-64/QBE).  A read then dispatches the getter. }
   AsmT := GenAsm(
     '''
@@ -6927,13 +6927,13 @@ begin
     end.
     ''');
   AssertTrue('the string-indexed setter is called',
-    Pos(#9'bl TBox_SetItem', AsmT) >= 0);
+    Pos(#9'bl _TBox_SetItem', AsmT) >= 0);
   AssertTrue('the string-indexed getter is called',
-    Pos(#9'bl TBox_GetItem', AsmT) >= 0);
+    Pos(#9'bl _TBox_GetItem', AsmT) >= 0);
   { the setter receives value in x2 and key in x1 (popped in that order) }
   AssertTrue('value -> x2, key -> x1 before the setter call',
     Pos(#9'ldr x2, [sp], #16' + LF + #9'ldr x1, [sp], #16' + LF +
-        #9'bl TBox_SetItem', AsmT) >= 0);
+        #9'bl _TBox_SetItem', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64sip.o');
   try
@@ -6985,7 +6985,7 @@ begin
     follows the call }
   PosCat := Pos(#9'bl _StringConcat', AsmT);
   AssertTrue('concat produced', PosCat >= 0);
-  PosSet := Pos(#9'bl TFoo_SetItem', AsmT);
+  PosSet := Pos(#9'bl _TFoo_SetItem', AsmT);
   AssertTrue('indexed setter called', PosSet >= 0);
   PosPin := PosEx(#9'bl _StringAddRef', AsmT, PosCat);
   AssertTrue('rc=0 transient pinned BEFORE the indexed setter call',
@@ -7060,7 +7060,7 @@ begin
   AssertTrue('the receiver is loaded through the capture pointer',
     Pos('ldr x0, [x0]', AsmT) >= 0);
   AssertTrue('the method is dispatched',
-    Pos(#9'bl TThing_Show', AsmT) >= 0);
+    Pos(#9'bl _TThing_Show', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64ccm.o');
   try
@@ -7688,11 +7688,11 @@ begin
   { scope the assertion to the MAIN program body (after Look's own def) so a
     stray AddRef inside Look cannot satisfy it.  Pos is 0-based and returns -1
     when absent. }
-  CallPos := Pos(#9'bl Look', AsmT);
+  CallPos := Pos(#9'bl _Look', AsmT);
   AssertTrue('Look is called', CallPos >= 0);
   Body := Copy(AsmT, 0, CallPos);
   { the pin is the LAST AddRef emitted before the call — the global is loaded,
-    parked, and AddRef'd immediately before bl Look }
+    parked, and AddRef'd immediately before bl _Look }
   AddRefBefore := RPos(#9'bl _StringAddRef', Body);
   AssertTrue('global by-value string arg is pinned before the call',
     AddRefBefore >= 0);
@@ -7732,7 +7732,7 @@ begin
   { L is a plain local of Use; find Use's Look call and confirm no AddRef sits
     between L's load and the call.  L's slot load is 'ldur x0, [x29,' followed
     by the push; there must be no _StringAddRef in the arg-marshal window. }
-  CallPos := Pos(#9'bl Look', AsmT);
+  CallPos := Pos(#9'bl _Look', AsmT);
   AssertTrue('Look is called', CallPos >= 0);
   { window: the only AddRef in Use before the call is L's assignment retain;
     the arg marshal itself must add none.  Isolate the marshal window as the

@@ -370,6 +370,35 @@ type
     function  MaxManagedRecRet(AStmt: TASTStmt): Integer;
     procedure RegisterFrameSlots(ADecl: TMethodDecl; ABody: TBlock);
     procedure RegisterForSlots(AStmt: TASTStmt);
+    { THE DARWIN UNDERSCORE RULE — the single seam that applies the Mach-O C
+      symbol-prefix convention.  On Darwin every emitted symbol begins with
+      exactly one '_'; a name that ALREADY does is returned untouched, because
+      the leading underscore in an RTL identifier (_StringAddRef, runtime.arc)
+      and in the family tags this backend composes (_g_, _ts_, _tv_,
+      _FieldCleanup_) IS that prefix.  Prefixing them again would rename the
+      DEFINITION while the ~70 hard-coded 'bl _StringAddRef'-style references
+      in this unit kept the old spelling — an undefined symbol at link.
+      Gated on the target OS, not the host: linux-arm64/freebsd-arm64 are real
+      targets whose ELF output must stay byte-identical.
+      THE ONE SHARP EDGE: the mapping is not injective — a routine 'X' and a
+      routine '_X' in the same unit both land on '_X'.  That is a real
+      constraint on RTL naming, not a theoretical one (it collapsed
+      FormatFloatSpec onto _FormatFloatSpec; the private half is now
+      FormatFloatSpecCore).  It fails LOUDLY and immediately — the internal
+      assembler rejects the second definition with 'duplicate label' — so the
+      rule is safe to keep, but two RTL routines must never differ only by a
+      leading underscore.
+      NOT applied to a C external name (ADecl.ExternalName): those still reach
+      the linker bare and are prefixed by TMachOLinker.BindNameOf. }
+    function  DarwinSym(const AName: string): string;
+    { The metadata symbol families.  Each is the SINGLE source of truth for its
+      spelling so a definition and every reference cannot drift — the lesson
+      TypeinfoSymFor already records, applied to the other three. ABase is a
+      ClassSym result (already unit-prefixed and mangled). }
+    function  TypeinfoSym(const ABase: string): string;
+    function  VtableSym(const ABase: string): string;
+    function  ImpllistSym(const ABase: string): string;
+    function  FieldCleanupSym(const ABase: string): string;
     function  RoutineSym(ADecl: TMethodDecl; const AName: string): string;
     function  GlobalSym(const AName: string): string;
     procedure RegisterGlobalInit(const ASym: string; AVD: TVarDecl);
@@ -7134,17 +7163,54 @@ end;
 
 { ---- routines ------------------------------------------------------------ }
 
+function TArm64Backend.DarwinSym(const AName: string): string;
+begin
+  { see the declaration for the rule and why 'already underscored' is a
+    no-op rather than a second prefix.  StrAt, not AName[0]: the bare
+    subscript idiom is the one CLAUDE.md flags as having miscompiled under
+    the self-hosted native stage. }
+  if (FTarget.OS = osMacOS) and (AName <> '') and
+     (StrAt(AName, 0) <> 95) then   { 95 = '_' }
+    Result := '_' + AName
+  else
+    Result := AName;
+end;
+
+function TArm64Backend.TypeinfoSym(const ABase: string): string;
+begin
+  Result := DarwinSym('typeinfo_' + ABase);
+end;
+
+function TArm64Backend.VtableSym(const ABase: string): string;
+begin
+  Result := DarwinSym('vtable_' + ABase);
+end;
+
+function TArm64Backend.ImpllistSym(const ABase: string): string;
+begin
+  Result := DarwinSym('impllist_' + ABase);
+end;
+
+function TArm64Backend.FieldCleanupSym(const ABase: string): string;
+begin
+  { already carries the leading '_' that IS the Darwin prefix — DarwinSym is
+    a no-op here, and is kept so the invariant is stated in one place }
+  Result := DarwinSym('_FieldCleanup_' + ABase);
+end;
+
 function TArm64Backend.RoutineSym(ADecl: TMethodDecl;
   const AName: string): string;
 begin
   if (ADecl <> nil) and ADecl.IsExternal and (ADecl.ExternalName <> '') then
+    { a C external name is class 3: left bare here, prefixed by the linker's
+      BindNameOf when it turns out to be a libSystem import }
     Result := ADecl.ExternalName
   else if (ADecl <> nil) and (ADecl.ResolvedQbeName <> '') then
-    Result := CodegenMangle(ADecl.ResolvedQbeName)
+    Result := DarwinSym(CodegenMangle(ADecl.ResolvedQbeName))
   else if ADecl <> nil then
-    Result := CodegenMangle(ADecl.Name)
+    Result := DarwinSym(CodegenMangle(ADecl.Name))
   else
-    Result := CodegenMangle(AName);
+    Result := DarwinSym(CodegenMangle(AName));
 end;
 
 function TArm64Backend.GlobalSym(const AName: string): string;
@@ -9778,7 +9844,8 @@ begin
     if D <> nil then
       Pfx := ClassPrefixOwner(D.OwningUnit);
   end;
-  Result := Pfx + CodegenMangle(AOwnerType) + '_' + CodegenMangle(AMethod);
+  Result := DarwinSym(Pfx + CodegenMangle(AOwnerType) + '_' +
+    CodegenMangle(AMethod));
 end;
 
 procedure TArm64Backend.EmitTypeinfoAddr(const AReg, ATypeName: string);
@@ -9805,7 +9872,8 @@ begin
     names and defeat the weak cross-unit dedup (BUG-004).  Keep it bare so the
     weak itab matches the bare impllist and the H:=B assignment reference. }
   if Pos('<', AClassName) >= 0 then
-    Exit('itab_' + CodegenMangle(AClassName) + '_' + CodegenMangle(AIntfName));
+    Exit(DarwinSym('itab_' + CodegenMangle(AClassName) + '_' +
+      CodegenMangle(AIntfName)));
   Pfx := '';
   if FSymTable <> nil then
   begin
@@ -9813,8 +9881,8 @@ begin
     if D <> nil then
       Pfx := ClassPrefixOwner(D.OwningUnit);
   end;
-  Result := 'itab_' + Pfx + CodegenMangle(AClassName) + '_' +
-    CodegenMangle(AIntfName);
+  Result := DarwinSym('itab_' + Pfx + CodegenMangle(AClassName) + '_' +
+    CodegenMangle(AIntfName));
 end;
 
 function TArm64Backend.ClassSym(ATD: TTypeDecl): string;
@@ -9854,18 +9922,18 @@ begin
     managed fields (inherited fields are merged into this class's list
     by the semantic pass, so one walk covers everything). }
   Self.Emit('');
-  Self.Emit('.weak _FieldCleanup_TObject');
-  Self.Emit('_FieldCleanup_TObject:');
+  Self.Emit(Format('.weak %s', [FieldCleanupSym('TObject')]));
+  Self.Emit(FieldCleanupSym('TObject') + ':');
   Self.Emit(#9'ret');
   Self.Emit('');
-  Self.Emit('.weak _FieldCleanup_TCustomAttribute');
-  Self.Emit('_FieldCleanup_TCustomAttribute:');
+  Self.Emit(Format('.weak %s', [FieldCleanupSym('TCustomAttribute')]));
+  Self.Emit(FieldCleanupSym('TCustomAttribute') + ':');
   Self.Emit(#9'ret');
   for I := 0 to FClassDecls.Count - 1 do
   begin
     TD := TTypeDecl(FClassDecls.Items[I]);
     RT := ClassDescOf(TD);
-    Sym := '_FieldCleanup_' + ClassSym(TD);
+    Sym := FieldCleanupSym(ClassSym(TD));
     Self.Emit('');
     if (Pos('<', TD.Name) >= 0) or
        IsUnmangledUnit(ClassDescOf(TD).OwningUnit) then
@@ -9884,9 +9952,10 @@ begin
       begin
         if Walk.DestroyResolvedQbeName <> '' then
           Self.Emit(Format(#9'bl %s',
-            [CodegenMangle(Walk.DestroyResolvedQbeName)]))
+            [DarwinSym(CodegenMangle(Walk.DestroyResolvedQbeName))]))
         else
-          Self.Emit(Format(#9'bl %s_Destroy', [CodegenMangle(Walk.Name)]));
+          Self.Emit(Format(#9'bl %s',
+            [DarwinSym(CodegenMangle(Walk.Name) + '_Destroy')]));
         Break;
       end;
       Walk := Walk.Parent;
@@ -10059,7 +10128,7 @@ begin
     x86-64 IntfTypeInfoName: a GENERIC INSTANCE (name carries '<') is bare
     (weak, dedup'd cross-unit), a plain class/interface is owning-unit prefixed. }
   if Pos('<', ATypeName) >= 0 then
-    Exit('typeinfo_' + CodegenMangle(ATypeName));
+    Exit(TypeinfoSym(CodegenMangle(ATypeName)));
   Pfx := '';
   if FSymTable <> nil then
   begin
@@ -10078,8 +10147,8 @@ begin
       the SAME ClassSym the definition uses. }
     for I := 0 to FClassDecls.Count - 1 do
       if SameText(TTypeDecl(FClassDecls.Items[I]).Name, ATypeName) then
-        Exit('typeinfo_' + ClassSym(TTypeDecl(FClassDecls.Items[I])));
-  Result := 'typeinfo_' + Pfx + CodegenMangle(ATypeName);
+        Exit(TypeinfoSym(ClassSym(TTypeDecl(FClassDecls.Items[I]))));
+  Result := TypeinfoSym(Pfx + CodegenMangle(ATypeName));
 end;
 
 procedure TArm64Backend.EmitAttrTables(ACD: TClassTypeDef;
@@ -10302,22 +10371,24 @@ begin
   Self.Emit(#9'.byte 0');
   Self.Emit('.section .data');
   Self.Emit('.balign 8');
-  Self.Emit('.weak typeinfo_TObject');
-  Self.Emit('typeinfo_TObject:');
+  Self.Emit(Format('.weak %s', [TypeinfoSym('TObject')]));
+  Self.Emit(TypeinfoSym('TObject') + ':');
   Self.Emit(#9'.quad 0');                       { parent }
   Self.Emit(#9'.quad 0');                       { impllist }
   Self.Emit(#9'.quad __cn_TObject');            { class name }
   Self.Emit(#9'.quad 0');                       { published methods }
   Self.Emit(#9'.quad 8');                       { instance size: vptr }
-  Self.Emit(#9'.quad _FieldCleanup_TObject');
-  Self.Emit(#9'.quad vtable_TObject');
+  Self.Emit(Format(#9'.quad %s', [FieldCleanupSym('TObject')]));
+  Self.Emit(Format(#9'.quad %s', [VtableSym('TObject')]));
   Self.Emit(#9'.quad 0');                       { class attrs }
   Self.Emit(#9'.quad 0');                       { method attrs }
-  Self.Emit('.weak vtable_TObject');
-  Self.Emit('vtable_TObject:');
-  Self.Emit(#9'.quad typeinfo_TObject');
-  Self.Emit(#9'.quad TObject_Destroy');
-  Self.Emit(#9'.quad TObject_ToString');
+  Self.Emit(Format('.weak %s', [VtableSym('TObject')]));
+  Self.Emit(VtableSym('TObject') + ':');
+  Self.Emit(Format(#9'.quad %s', [TypeinfoSym('TObject')]));
+  { RTL method labels: RoutineSym prefixes the DEFINITION on Darwin, so these
+    references must go through DarwinSym too or the vtable slot dangles }
+  Self.Emit(Format(#9'.quad %s', [DarwinSym('TObject_Destroy')]));
+  Self.Emit(Format(#9'.quad %s', [DarwinSym('TObject_ToString')]));
 
   { TCustomAttribute base stubs: attribute classes declare it as their
     parent, so the typeinfo chain needs a real symbol here }
@@ -10332,22 +10403,22 @@ begin
   Self.Emit(#9'.byte 0');
   Self.Emit('.section .data');
   Self.Emit('.balign 8');
-  Self.Emit('.weak typeinfo_TCustomAttribute');
-  Self.Emit('typeinfo_TCustomAttribute:');
-  Self.Emit(#9'.quad typeinfo_TObject');
+  Self.Emit(Format('.weak %s', [TypeinfoSym('TCustomAttribute')]));
+  Self.Emit(TypeinfoSym('TCustomAttribute') + ':');
+  Self.Emit(Format(#9'.quad %s', [TypeinfoSym('TObject')]));
   Self.Emit(#9'.quad 0');
   Self.Emit(#9'.quad __cn_TCustomAttribute');
   Self.Emit(#9'.quad 0');
   Self.Emit(#9'.quad 8');
-  Self.Emit(#9'.quad _FieldCleanup_TCustomAttribute');
-  Self.Emit(#9'.quad vtable_TCustomAttribute');
+  Self.Emit(Format(#9'.quad %s', [FieldCleanupSym('TCustomAttribute')]));
+  Self.Emit(Format(#9'.quad %s', [VtableSym('TCustomAttribute')]));
   Self.Emit(#9'.quad 0');
   Self.Emit(#9'.quad 0');
-  Self.Emit('.weak vtable_TCustomAttribute');
-  Self.Emit('vtable_TCustomAttribute:');
-  Self.Emit(#9'.quad typeinfo_TCustomAttribute');
-  Self.Emit(#9'.quad TObject_Destroy');
-  Self.Emit(#9'.quad TObject_ToString');
+  Self.Emit(Format('.weak %s', [VtableSym('TCustomAttribute')]));
+  Self.Emit(VtableSym('TCustomAttribute') + ':');
+  Self.Emit(Format(#9'.quad %s', [TypeinfoSym('TCustomAttribute')]));
+  Self.Emit(Format(#9'.quad %s', [DarwinSym('TObject_Destroy')]));
+  Self.Emit(Format(#9'.quad %s', [DarwinSym('TObject_ToString')]));
 
   for I := 0 to FClassDecls.Count - 1 do
   begin
@@ -10364,23 +10435,23 @@ begin
     Self.Emit(Format(#9'.ascii "%s"', [TD.Name]));
     Self.Emit(#9'.byte 0');
     if (RT.Parent <> nil) and (RT.Parent.Name <> 'TObject') then
-      ParentRef := 'typeinfo_' + ClassPrefixOwner(RT.Parent.OwningUnit) +
-        CodegenMangle(RT.Parent.Name)
+      ParentRef := TypeinfoSym(ClassPrefixOwner(RT.Parent.OwningUnit) +
+        CodegenMangle(RT.Parent.Name))
     else
-      ParentRef := 'typeinfo_TObject';
+      ParentRef := TypeinfoSym('TObject');
     EmitAttrTables(TClassTypeDef(TD.Def), Sym, AttrsRef, MethAttrsRef);
     EmitMethodsTable(TClassTypeDef(TD.Def), Sym, MethodsRef);
     Self.Emit('.section .data');
     Self.Emit('.balign 8');
     if (Pos('<', TD.Name) >= 0) or
        IsUnmangledUnit(ClassDescOf(TD).OwningUnit) then
-      Self.Emit(Format('.weak typeinfo_%s', [Sym]))
+      Self.Emit(Format('.weak %s', [TypeinfoSym(Sym)]))
     else
-      Self.Emit(Format('.globl typeinfo_%s', [Sym]));
-    Self.Emit(Format('typeinfo_%s:', [Sym]));
+      Self.Emit(Format('.globl %s', [TypeinfoSym(Sym)]));
+    Self.Emit(TypeinfoSym(Sym) + ':');
     Self.Emit(Format(#9'.quad %s', [ParentRef]));
     if ClassImplementsAny(TD) then
-      Self.Emit(Format(#9'.quad impllist_%s', [Sym]))
+      Self.Emit(Format(#9'.quad %s', [ImpllistSym(Sym)]))
     else
       Self.Emit(#9'.quad 0');
     Self.Emit(Format(#9'.quad __cn_%s', [Sym]));
@@ -10392,17 +10463,17 @@ begin
       allocated at 8 bytes and every field past the vptr read/wrote unmapped
       heap.  x86-64 has always emitted TotalSize() here. }
     Self.Emit(Format(#9'.quad %d', [RT.TotalSize()]));
-    Self.Emit(Format(#9'.quad _FieldCleanup_%s', [Sym]));
-    Self.Emit(Format(#9'.quad vtable_%s', [Sym]));
+    Self.Emit(Format(#9'.quad %s', [FieldCleanupSym(Sym)]));
+    Self.Emit(Format(#9'.quad %s', [VtableSym(Sym)]));
     Self.Emit(Format(#9'.quad %s', [AttrsRef]));
     Self.Emit(Format(#9'.quad %s', [MethAttrsRef]));
     if (Pos('<', TD.Name) >= 0) or
        IsUnmangledUnit(ClassDescOf(TD).OwningUnit) then
-      Self.Emit(Format('.weak vtable_%s', [Sym]))
+      Self.Emit(Format('.weak %s', [VtableSym(Sym)]))
     else
-      Self.Emit(Format('.globl vtable_%s', [Sym]));
-    Self.Emit(Format('vtable_%s:', [Sym]));
-    Self.Emit(Format(#9'.quad typeinfo_%s', [Sym]));
+      Self.Emit(Format('.globl %s', [VtableSym(Sym)]));
+    Self.Emit(VtableSym(Sym) + ':');
+    Self.Emit(Format(#9'.quad %s', [TypeinfoSym(Sym)]));
     for S := 0 to RT.VTableCount() - 1 do
     begin
       E := RT.VTableEntryAt(S);
@@ -10412,9 +10483,9 @@ begin
               (StrAt(E.ImplName, 0) = Ord('$')) then
         { ImplName is a QBE label and may carry the $ sigil }
         Self.Emit(Format(#9'.quad %s',
-          [CodegenMangle(StrCopyTail(E.ImplName, 1))]))
+          [DarwinSym(CodegenMangle(StrCopyTail(E.ImplName, 1)))]))
       else
-        Self.Emit(Format(#9'.quad %s', [CodegenMangle(E.ImplName)]));
+        Self.Emit(Format(#9'.quad %s', [DarwinSym(CodegenMangle(E.ImplName))]));
     end;
   end;
 end;
@@ -10505,8 +10576,8 @@ begin
   begin
     GII := TGenericInterfaceInstance(FGenericIntfInstances.Items[I]);
     Self.Emit('.balign 8');
-    Self.Emit(Format('.weak typeinfo_%s', [GII.InstName]));
-    Self.Emit(Format('typeinfo_%s:', [GII.InstName]));
+    Self.Emit(Format('.weak %s', [TypeinfoSym(GII.InstName)]));
+    Self.Emit(TypeinfoSym(GII.InstName) + ':');
     Self.Emit(#9'.quad 0');
   end;
   { itab + impllist per implementing class.  DESCRIPTOR-driven (mirrors
@@ -10588,10 +10659,10 @@ begin
         instance or an unmangled-RTL-unit class, globl for an ordinary class so
         a cross-object Supports / interface-assignment reference resolves. }
       if IsBareVis then
-        Self.Emit(Format('.weak impllist_%s', [Sym]))
+        Self.Emit(Format('.weak %s', [ImpllistSym(Sym)]))
       else
-        Self.Emit(Format('.globl impllist_%s', [Sym]));
-      Self.Emit(Format('impllist_%s:', [Sym]));
+        Self.Emit(Format('.globl %s', [ImpllistSym(Sym)]));
+      Self.Emit(ImpllistSym(Sym) + ':');
       for J := 0 to Intfs.Count - 1 do
       begin
         ID := TInterfaceTypeDesc(Intfs.Items[J]);
@@ -10701,9 +10772,9 @@ begin
       if (E <> nil) and (E.ImplName <> '') then
       begin
         if StrAt(E.ImplName, 0) = 36 then   { 36 = '$' }
-          Exit(CodegenMangle(StrCopyTail(E.ImplName, 1)))
+          Exit(DarwinSym(CodegenMangle(StrCopyTail(E.ImplName, 1))))
         else
-          Exit(CodegenMangle(E.ImplName));
+          Exit(DarwinSym(CodegenMangle(E.ImplName)));
       end;
     end;
   end;
@@ -11017,13 +11088,13 @@ begin
     else
       NotYet('constructor for class ''' + AExpr.ObjectName +
         ''' with no resolved class type', AExpr);
-    Self.Emit(Format(#9'adrp x1, _FieldCleanup_%s@PAGE', [Sym]));
-    Self.Emit(Format(#9'add x1, x1, _FieldCleanup_%s@PAGEOFF', [Sym]));
+    Self.Emit(Format(#9'adrp x1, %s@PAGE', [FieldCleanupSym(Sym)]));
+    Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF', [FieldCleanupSym(Sym)]));
     Self.Emit(#9'bl _ClassAlloc');
     if TRecordTypeDesc(AExpr.ResolvedClassType).HasVTable() then
     begin
-      Self.Emit(Format(#9'adrp x9, vtable_%s@PAGE', [Sym]));
-      Self.Emit(Format(#9'add x9, x9, vtable_%s@PAGEOFF', [Sym]));
+      Self.Emit(Format(#9'adrp x9, %s@PAGE', [VtableSym(Sym)]));
+      Self.Emit(Format(#9'add x9, x9, %s@PAGEOFF', [VtableSym(Sym)]));
       Self.Emit(#9'str x9, [x0]');
     end;
     MD := TMethodDecl(AExpr.ResolvedMethod);
@@ -11630,7 +11701,7 @@ begin
     EmitUnitInit(AUnit);
   if (AUnit.FinalStmts <> nil) and (AUnit.FinalStmts.Count > 0) then
     EmitUnitSection(AUnit, AUnit.FinalStmts,
-      CodegenMangle(AUnit.Name) + '_final', FUnitFinals);
+      DarwinSym(CodegenMangle(AUnit.Name) + '_final'), FUnitFinals);
   EmitArrayConstData(AUnit.IntfBlock);
   EmitArrayConstData(AUnit.ImplBlock);
   FCurrentUnitName := '';
@@ -11639,7 +11710,7 @@ end;
 procedure TArm64Backend.EmitUnitInit(AUnit: TUnit);
 begin
   EmitUnitSection(AUnit, AUnit.InitStmts,
-    CodegenMangle(AUnit.Name) + '_init', FUnitInits);
+    DarwinSym(CodegenMangle(AUnit.Name) + '_init'), FUnitInits);
 end;
 
 procedure TArm64Backend.NoteDepInitUnit(const AUnitName: string;
@@ -11648,9 +11719,9 @@ begin
   { Separate compilation: the dep's <Unit>_init lives in the dep's own object,
     so EmitUnit never ran here to register it.  Record the mangled name so
     EmitProgram's _main still calls it — the mangling must match EmitUnitInit's
-    CodegenMangle(AUnit.Name) + '_init' exactly. }
+    DarwinSym(CodegenMangle(AUnit.Name) + '_init') exactly. }
   if AHasInit then
-    FUnitInits.Add(CodegenMangle(AUnitName) + '_init');
+    FUnitInits.Add(DarwinSym(CodegenMangle(AUnitName) + '_init'));
 end;
 
 procedure TArm64Backend.NoteDepFiniUnit(const AUnitName: string;

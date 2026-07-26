@@ -169,11 +169,18 @@ end;
 {$IFDEF DARWIN}
 { Weak bootstrap-fallback trampoline — see the twin in
   rtl.platform.layout.linux for the full rationale.  Target-guarded like
-  the flat functions above. }
+  the flat functions above.
+
+  The branch target is spelled '_AssignLayoutDarwin' by hand: an asm block is
+  emitted VERBATIM, so the backend's Darwin underscore rule cannot reach it,
+  and AssignLayoutDarwin is a plain Pascal routine whose label therefore
+  carries the '_'.  Hard-coding it is safe because this block is already
+  guarded by the DARWIN conditional.  _BlaisePlatformInit needs no change: its
+  Pascal identifier already begins with '_', which IS the Darwin prefix. }
 procedure _BlaisePlatformInit; assembler; nostackframe;
 asm
     .weak _BlaisePlatformInit
-    b AssignLayoutDarwin
+    b _AssignLayoutDarwin
 end;
 
 function _MapAnonFlag: Integer;
