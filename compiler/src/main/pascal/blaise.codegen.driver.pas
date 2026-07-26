@@ -283,6 +283,19 @@ function RunProcess(const AExe: string; AArgs: TStringList;
 function BuildRTLUnitList(AStatic: Boolean;
   AOS: TTargetOS; ACPU: TTargetCPU = cpuX86_64): TStringList;
 
+{ The RTL object-cache directory for a target: <bindir>/rtl/<target>-<key>.
+
+  Keyed on BOTH the target and the identity of the compiler that produced the
+  objects.  The target part is obvious (different bytes, different container
+  per target).  The compiler part fixes BUG-20260726: cached objects were
+  invalidated on source mtime alone, which cannot see that the COMPILER
+  changed, so a rebuilt compiler linked the previous one's RTL objects and the
+  failure surfaced far from its cause.  See the RTLCacheKey note in the
+  implementation for why the identity goes in the directory NAME rather than a
+  stamp file.  No trailing delimiter.  Exposed for unit testing;
+  EnsureRTLObjects is the only production caller. }
+function RTLObjectCacheDir(const ATarget: TTargetDesc): string;
+
 { Format one --help flag line with the shared 2-space indent and flag
   column.  Single source of truth for the column width so the common
   usage block (Blaise.pas PrintUsage) and each driver's DescribeOptions
@@ -321,7 +334,8 @@ uses
   SysUtils,
   Process,
   blaise.elfreader,
-  uToolchain;
+  uToolchain,
+  uUnitInterfaceIO;   { EffectiveCompilerId / ContentHashFnv1a64 — RTL cache key }
 
 { Process id + directory removal, for the per-process private RTL build
   directory.  Declared directly rather than via GRtlPlatform to avoid a
@@ -329,6 +343,48 @@ uses
   layer assigns GRtlPlatform). }
 function _driver_getpid: Integer; external name 'getpid';
 function _driver_rmdir(APath: PChar): Integer; external name 'rmdir';
+
+{ Short key identifying the COMPILER that produced a cached RTL object.
+
+  BUG-20260726: the RTL object cache used to be keyed on --target alone and
+  invalidated a unit only when its .o was missing or OLDER THAN ITS SOURCE.  A
+  compiler change does not touch RTL source mtimes, so every cached object
+  looked current and a new compiler happily linked the PREVIOUS compiler's
+  objects.  The symptom lands far from the cause — e.g. a Darwin symbol-naming
+  change produced new-style references against old-style definitions and dyld
+  aborted on a missing symbol that "should" exist.  The dependency-unit path
+  already guards this (a .bif carries EffectiveCompilerId and is rejected on
+  mismatch); the RTL .o cache had no equivalent.
+
+  Folding the identity into the DIRECTORY NAME rather than validating a stamp
+  file inside a shared directory is deliberate:
+    * race-free by construction — the existing concurrency design (private
+      build dir + atomic rename, "two builders publish identical results")
+      relies on never removing a published object, and an invalidate-by-delete
+      would have to remove files a concurrent linker is reading;
+    * it closes the partial-unit-set hole a per-directory stamp leaves open: a
+      build whose link mode needs FEWER units (BuildRTLUnitList varies with
+      --static and target) would refresh only its own subset while marking the
+      whole directory current, leaving the untouched objects stale-by-compiler;
+    * switching compilers back and forth (a bisect) reuses each one's cache
+      instead of forcing a full rebuild every time.
+  The cost is that directories accumulate under <bindir>/rtl/; they are build
+  artefacts under target/ and go away with a clean.
+
+  EffectiveCompilerId is COMPILER_ID plus a content hash of the running binary,
+  and is fixpoint-stable: stage-2 and stage-3 are byte-identical, so they hash
+  equal and warm-cache reuse still works.  Hashed again here only to keep the
+  directory name short and free of '+'/'.' characters. }
+function RTLCacheKey: string;
+begin
+  Result := Copy(ContentHashFnv1a64(EffectiveCompilerId()), 0, 12);
+end;
+
+function RTLObjectCacheDir(const ATarget: TTargetDesc): string;
+begin
+  Result := IncludeTrailingPathDelimiter(CompilerBinDir()) + 'rtl'
+    + '/' + TargetName(ATarget) + '-' + RTLCacheKey();
+end;
 
 { Collect the names of all symbols an ELF object DEFINES with global or weak
   binding (STB_GLOBAL/STB_WEAK and Shndx not SHN_UNDEF) into ADest.
@@ -604,9 +660,11 @@ begin
   { the cache is TARGET-KEYED: the same unit compiles to different bytes
     (and a different container) per --target — a shared directory would
     hand a macos-arm64 link Linux ELF objects (or a FreeBSD link objects
-    baked with Linux defines) }
-  CacheDir := IncludeTrailingPathDelimiter(CompilerBinDir()) + 'rtl'
-    + '/' + TargetName(AOpts.Target);
+    baked with Linux defines).
+    It is also COMPILER-KEYED (RTLCacheKey): mtime alone cannot see that the
+    COMPILER changed, so a shared-per-target directory handed a new compiler
+    the previous one's objects — see the BUG-20260726 note on RTLCacheKey. }
+  CacheDir := RTLObjectCacheDir(AOpts.Target);
   ForceDirectories(CacheDir);
   BuildDir := IncludeTrailingPathDelimiter(CacheDir) + 'build-' +
               IntToStr(_driver_getpid());

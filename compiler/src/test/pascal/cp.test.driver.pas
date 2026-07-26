@@ -21,6 +21,7 @@ interface
 
 uses
   SysUtils, Classes, blaise.testing,
+  uStrCompat,                     { StrAt — byte reads, house style }
   blaise.codegen.driver,
   blaise.codegen.target,          { TTargetOS: osLinux / osFreeBSD }
   blaise.codegen.qbe.driver,      { registers the QBE driver }
@@ -47,6 +48,14 @@ type
     procedure TestRTLUnits_Errno_LinuxStatic_StaticVariant;
     procedure TestRTLUnits_Errno_FreeBSD_FollowsTarget;
     procedure TestRTLUnits_MacOSArm64_DarwinProfile;
+
+    { BUG-20260726: the RTL object cache must be keyed on the COMPILER as well
+      as the target.  Cached objects are invalidated on source mtime, which
+      cannot see that the compiler changed, so a target-only key handed a
+      rebuilt compiler the previous one's RTL objects. }
+    procedure TestRTLCacheDir_IsCompilerKeyed_NotTargetOnly;
+    procedure TestRTLCacheDir_DiffersPerTarget;
+    procedure TestRTLCacheDir_StableAcrossCalls;
 
     { ClaimsEmitIR selection policy. }
     procedure TestQBE_ClaimsEmitIR_True;
@@ -453,6 +462,73 @@ begin
   AssertTrue('must contain the description', Pos('a description', Line) >= 0);
   AssertTrue('description must come after the flag',
     Pos('a description', Line) > Pos('--x <v>', Line));
+end;
+
+{ ---- RTL object-cache keying (BUG-20260726) ---- }
+
+procedure TBackendDriverContractTests.TestRTLCacheDir_IsCompilerKeyed_NotTargetOnly;
+var
+  T: TTargetDesc;
+  Dir, Leaf, Key: string;
+  I, Dash, Slash: Integer;
+  C: Integer;
+begin
+  { The regression this pins: the directory used to end at the bare target name
+    ('.../rtl/macos-arm64'), so two different compilers shared one cache and
+    mtime could not tell them apart.  It must now carry a compiler-identity
+    suffix. }
+  MakeTarget(osMacOS, cpuArm64, T);
+  Dir := RTLObjectCacheDir(T);
+  Slash := -1;
+  for I := 0 to Length(Dir) - 1 do
+    if StrAt(Dir, I) = 47 then   { 47 = '/' }
+      Slash := I;
+  AssertTrue('cache dir must be a path', Slash >= 0);
+  Leaf := Copy(Dir, Slash + 1, Length(Dir) - Slash - 1);
+  AssertTrue('cache leaf must not be the bare target name (got ''' + Leaf +
+    ''') — a target-only key is exactly BUG-20260726',
+    Leaf <> 'macos-arm64');
+  AssertTrue('cache leaf must still name the target for legibility, got ''' +
+    Leaf + '''', Pos('macos-arm64-', Leaf) = 0);
+
+  { ...and the suffix must be the hex key, not some other decoration. }
+  Dash := -1;
+  for I := 0 to Length(Leaf) - 1 do
+    if StrAt(Leaf, I) = 45 then   { 45 = '-' }
+      Dash := I;
+  AssertTrue('leaf must have a ''-''-separated suffix', Dash > 0);
+  Key := Copy(Leaf, Dash + 1, Length(Leaf) - Dash - 1);
+  AssertEquals('compiler key length', 12, Length(Key));
+  for I := 0 to Length(Key) - 1 do
+  begin
+    C := StrAt(Key, I);
+    AssertTrue('compiler key must be lowercase hex, got ''' + Key + '''',
+      ((C >= 48) and (C <= 57)) or ((C >= 97) and (C <= 102)));
+  end;
+end;
+
+procedure TBackendDriverContractTests.TestRTLCacheDir_DiffersPerTarget;
+var
+  TMac, TLinux: TTargetDesc;
+begin
+  { The original target-keying invariant still holds: one compiler must not
+    hand a macos-arm64 link the Linux objects. }
+  MakeTarget(osMacOS, cpuArm64, TMac);
+  MakeTarget(osLinux, cpuX86_64, TLinux);
+  AssertTrue('per-target caches must stay distinct',
+    RTLObjectCacheDir(TMac) <> RTLObjectCacheDir(TLinux));
+end;
+
+procedure TBackendDriverContractTests.TestRTLCacheDir_StableAcrossCalls;
+var
+  T: TTargetDesc;
+begin
+  { Warm-cache reuse depends on this: the key is derived from the running
+    binary, so it must be identical for every call within one process (and,
+    because stage-2 and stage-3 are byte-identical, across a fixpoint too). }
+  MakeTarget(osMacOS, cpuArm64, T);
+  AssertEquals('cache dir must be stable within a process',
+    RTLObjectCacheDir(T), RTLObjectCacheDir(T));
 end;
 
 { ---- Registration ---- }
