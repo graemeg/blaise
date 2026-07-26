@@ -14,6 +14,29 @@
 # header comment in FlagCoverage.pas.
 #
 # Regenerate with: flag-coverage --reset
+#
+# ---- arm64 zeros, triaged on-device 2026-07-26 (M1, macOS 15.7.7) ----
+# All four arm64 zeros below were probed by writing the shape and compiling
+# it.  NONE of them is a silent-wrong-code bug: one works through another
+# route, and three are unimplemented features that fail LOUDLY with a
+# NotYet at compile time, which is the honest failure mode.  Recorded here
+# so the next person does not re-investigate them.
+#
+#   IsMethodCall      works.  O.Inner.Hi() lowers correctly on arm64 via
+#                     another route (also confirmed on the Linux side).
+#   IsInterfaceCall   shape is not CONSTRUCTIBLE on arm64 yet: storing an
+#                     interface into a class field is itself
+#                     'not yet lowered: store to a field of this type'.
+#                     Interface calls through a LOCAL work (verified, 42).
+#   IsClassVarRead    `static var` is unimplemented on arm64 — both the read
+#                     ('not yet lowered: expression TFieldAccessExpr') and
+#                     the write ('unresolved field assignment').
+#   IsStaticPropGet   `static property` read likewise NotYet on arm64.
+#
+# These three stay at 0 until arm64 grows static members and interface
+# fields; when it does, the count RISES, which the tool allows.  They are
+# NOT marked `unused`, because they are gaps to be filled rather than
+# deliberate non-use.
 
 TFieldAccessExpr.FieldInfo                127  232  136
 TFieldAccessExpr.IsConstant               4  7  15
