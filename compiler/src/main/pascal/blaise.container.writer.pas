@@ -58,6 +58,11 @@ type
     cskTdata,    { thread-local initialised data (Mach-O __thread_data) }
     cskTvars,    { Mach-O TLV descriptors (__thread_vars) }
     cskOpdf,     { OPDF debug info (alloc+write, progbits) }
+    cskIface,    { embedded unit-interface (.bif) metadata.  Mach-O only —
+                   (__BLAISE,__blaise_iface), dropped by the linker.  ELF keeps
+                   its post-hoc uElfObject embedding, so this kind is never
+                   populated there and never reaches the ELF writer's section
+                   order, exactly like cskTvars. }
     cskInitArray { load-time constructor pointers the dynamic loader runs.
                    ELF .init_array (DT_INIT_ARRAY); the Mach-O analogue is
                    __DATA,__mod_init_func (S_MOD_INIT_FUNC_POINTERS), not yet

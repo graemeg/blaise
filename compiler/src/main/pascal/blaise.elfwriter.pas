@@ -378,6 +378,9 @@ begin
     cskTdata:  Result := '.tdata';
     cskTvars:  Result := '.tvars';   { never emitted for ELF — Mach-O only }
     cskOpdf:   Result := '.opdf';
+    cskIface:  Result := '.blaise.iface';  { never emitted for ELF — the
+                 post-hoc uElfObject embedding owns this section on ELF, so
+                 cskIface is absent from SecOrder below, like cskTvars }
     cskInitArray: Result := '.init_array';
   else
     Result := '.text';

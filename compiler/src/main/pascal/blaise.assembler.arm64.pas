@@ -41,7 +41,7 @@ type
 function AssembleArm64ToBytes(const AAsmText: string): string;
 { Assemble and write to a file. }
 procedure AssembleArm64ToObject(const AAsmText: string;
-  const AOutputPath: string);
+  const AOutputPath: string; const AIfaceBytes: string);
 
 implementation
 
@@ -117,6 +117,10 @@ type
     procedure HandleDirective;
     procedure EncodeInstr;
   public
+    { When non-empty, the object gains a (__BLAISE,__blaise_iface) section
+      holding these bytes — the unit's .bif, so an .o carries its own interface
+      and a consumer can import it with the source gone.  Set before Assemble. }
+    IfacePayload: string;
     function Assemble(const AAsmText: string): string;
   end;
 
@@ -1480,6 +1484,11 @@ begin
       end;
     end;
 
+    { the .bif payload is data, not assembled text, so it is appended straight
+      into its own section just before the object is serialised }
+    if IfacePayload <> '' then
+      FW.Append(cskIface, IfacePayload);
+
     Result := FW.Finish();
   finally
     SetLength(Parsed, 0);
@@ -1506,12 +1515,21 @@ begin
 end;
 
 procedure AssembleArm64ToObject(const AAsmText: string;
-  const AOutputPath: string);
+  const AOutputPath: string; const AIfaceBytes: string);
 var
   Buf: string;
   FOut: TFileOutputStream;
+  Asmblr: TArm64Assembler;
 begin
-  Buf := AssembleArm64ToBytes(AAsmText);
+  Asmblr := TArm64Assembler.Create();
+  try
+    { the .bif payload rides into the object as a (__BLAISE,__blaise_iface)
+      section — see TArm64Assembler.IfacePayload }
+    Asmblr.IfacePayload := AIfaceBytes;
+    Buf := Asmblr.Assemble(AAsmText);
+  finally
+    Asmblr.Free();
+  end;
   FOut := TFileOutputStream.Create(AOutputPath);
   try
     FOut.Write(PChar(Buf), Length(Buf));

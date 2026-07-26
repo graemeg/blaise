@@ -400,14 +400,20 @@ function CompileUnitToObjectSafe(ADriver: TBackendDriver;
   const AIRFile, AOutputFile, ABifFile: string;
   AOpts: TBackendOpts): string;
 begin
-  Result := ADriver.LowerToObject(AIRFile, AOutputFile, AOpts);
-  if Result <> '' then Exit;
+  { Mach-O has no post-hoc embedder: inserting a section into a finished Mach-O
+    means shifting every file offset in the load commands.  It does not need one
+    — we own the writer, so the bytes are handed to it BEFORE the object is
+    serialised and the correct layout falls out by construction.  ELF keeps the
+    post-hoc rewrite below, which is already proven there. }
+  if AOpts.Target.CPU = cpuArm64 then
+  begin
+    Result := ADriver.LowerToObject(AIRFile, AOutputFile, AOpts,
+      ReadBifBytes(ABifFile));
+    Exit;
+  end;
 
-  { Mach-O objects (macos-arm64) have no iface-embed support yet — the
-    embedder rewrites ELF only.  The unit-cache sidecar .bif still serves
-    same-build imports; a loader probing the bare .o just recompiles from
-    source.  Mach-O embedding is tracked for the macOS warm-cache story. }
-  if AOpts.Target.CPU = cpuArm64 then Exit;
+  Result := ADriver.LowerToObject(AIRFile, AOutputFile, AOpts, '');
+  if Result <> '' then Exit;
 
   if (ABifFile <> '') and FileExists(ABifFile) then
     if not EmbedBifInObject(AOutputFile, ABifFile, ofELF) then

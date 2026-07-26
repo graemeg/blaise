@@ -168,8 +168,15 @@ type
       worker path and unit-as-top-level mode).  Returns '' on success,
       an error message otherwise.  Default fails loudly: a driver that
       claims SupportsIncremental must override this. }
+    { AIfaceBytes: the unit's .bif payload to embed in the emitted object, or
+      '' for none.  A PARAMETER rather than a TBackendOpts field on purpose —
+      units are lowered on PARALLEL WORKER THREADS that share one opts object,
+      so per-unit data on opts is a data race (it crashed the warm-cache build
+      with a torn string pointer in StringAddRef).  Honoured by the native
+      driver on Mach-O targets; ELF embeds post-hoc via uElfObject, and the QBE
+      driver ignores it. }
     function LowerToObject(const AIRFile, AObjFile: string;
-      AOpts: TBackendOpts): string; virtual;
+      AOpts: TBackendOpts; const AIfaceBytes: string): string; virtual;
 
     { Lower the top program's IR file and link the final binary —
       including the OPDF sidecar, prebuilt dep objects, the RTL archive,
@@ -448,7 +455,7 @@ begin
 end;
 
 function TBackendDriver.LowerToObject(const AIRFile, AObjFile: string;
-  AOpts: TBackendOpts): string;
+  AOpts: TBackendOpts; const AIfaceBytes: string): string;
 begin
   Result := Self.Name() +
     ' backend does not support per-unit object lowering';

@@ -244,7 +244,9 @@ var
   Bytes: string;
 begin
   Result := nil;
-  Bytes := LoadEmbeddedBifString(APath, ofELF);
+  { the object may be ELF or Mach-O depending on the target that produced it —
+    sniff rather than assume, so a macOS .o is probed the same way }
+  Bytes := LoadEmbeddedBifString(APath, DetectObjectFormat(APath));
   if Bytes = '' then Exit;
   try
     Result := ReadUnitInterface(Bytes);

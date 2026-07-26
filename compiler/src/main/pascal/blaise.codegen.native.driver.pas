@@ -51,7 +51,7 @@ type
     function LinkProgram(const AIRFile, AOutputFile: string;
       AOpts: TBackendOpts; AExtraObjects: TStringList): string; override;
     function LowerToObject(const AIRFile, AObjFile: string;
-      AOpts: TBackendOpts): string; override;
+      AOpts: TBackendOpts; const AIfaceBytes: string): string; override;
 
     { Per-unit parallel compilation + warm cache: native emits a self-contained
       object per unit (.s assembled to .o, plus an embedded .bif), the same as
@@ -94,10 +94,12 @@ uses
   ELF-emitting assembler, arm64 text to the Mach-O-emitting one.  Each
   raises its own exception class; callers catch plain Exception. }
 procedure AssembleForTarget(const AAsmText, AObjFile: string;
-  const ATarget: TTargetDesc);
+  const ATarget: TTargetDesc; const AIfaceBytes: string);
 begin
+  { AIfaceBytes is Mach-O only — see TBackendOpts.IfaceBytes.  The x86-64/ELF
+    path embeds the .bif post-hoc through uElfObject and is handed '' here. }
   if ATarget.CPU = cpuArm64 then
-    AssembleArm64ToObject(AAsmText, AObjFile)
+    AssembleArm64ToObject(AAsmText, AObjFile, AIfaceBytes)
   else
     AssembleToObject(AAsmText, AObjFile);
 end;
@@ -163,7 +165,7 @@ begin
 end;
 
 function TNativeBackendDriver.LowerToObject(const AIRFile, AObjFile: string;
-  AOpts: TBackendOpts): string;
+  AOpts: TBackendOpts; const AIfaceBytes: string): string;
 var
   Args:     TStringList;
   AsmText:  TStringList;
@@ -181,7 +183,8 @@ begin
     try
       try
         AsmText.LoadFromFile(AIRFile);
-        AssembleForTarget(AsmText.Text, AObjFile, AOpts.Target);
+        AssembleForTarget(AsmText.Text, AObjFile, AOpts.Target,
+          AIfaceBytes);
       except
         on E: EAssembler do
           Exit('Internal assembler error: ' + Exception(E).Message);
@@ -723,7 +726,7 @@ begin
     try
       try
         AsmText.LoadFromFile(AIRFile);
-        AssembleForTarget(AsmText.Text, ObjFile, AOpts.Target);
+        AssembleForTarget(AsmText.Text, ObjFile, AOpts.Target, '');
       except
         on E: EAssembler do
           Exit('Internal assembler error: ' + Exception(E).Message);
@@ -747,7 +750,7 @@ begin
     { External assembler + internal linker: assemble to .o via cc -c,
       then link with the internal linker. }
     ObjFile := ChangeFileExt(AOutputFile, '.o');
-    Result := Self.LowerToObject(AIRFile, ObjFile, AOpts);
+    Result := Self.LowerToObject(AIRFile, ObjFile, AOpts, '');
     if Result <> '' then Exit;
     Result := Self.LinkViaInternalLinker(ObjFile, AOutputFile, AOpts,
       AExtraObjects);

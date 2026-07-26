@@ -38,7 +38,7 @@ type
     function CreateCodeGen(AOpts: TBackendOpts): ICodeGen; override;
     function CreateUnitCodeGen(AOpts: TBackendOpts): ICodeGen; override;
     function LowerToObject(const AIRFile, AObjFile: string;
-      AOpts: TBackendOpts): string; override;
+      AOpts: TBackendOpts; const AIfaceBytes: string): string; override;
     function LinkProgram(const AIRFile, AOutputFile: string;
       AOpts: TBackendOpts; AExtraObjects: TStringList): string; override;
     function ClaimsEmitIR: Boolean; override;
@@ -194,7 +194,7 @@ begin
 end;
 
 function TQBEBackendDriver.LowerToObject(const AIRFile, AObjFile: string;
-  AOpts: TBackendOpts): string;
+  AOpts: TBackendOpts; const AIfaceBytes: string): string;
 var
   AsmFile: string;
   Args: TStringList;

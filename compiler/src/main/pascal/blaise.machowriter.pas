@@ -300,8 +300,10 @@ const
     Mach-O analogue is __DATA,__mod_init_func (S_MOD_INIT_FUNC_POINTERS), which
     is not emitted yet — shared-object output is ELF-only, gated by
     TBackendDriver.SupportsLibrary.  Add it here when Darwin libraries land. }
-  SectionEmitOrder: array[0..7] of TContainerSectionKind = (
-    cskText, cskRodata, cskData, cskTdata, cskTvars, cskOpdf,
+  { cskIface sits with the other non-loaded metadata, ahead of the zerofill
+    sections which must stay last. }
+  SectionEmitOrder: array[0..8] of TContainerSectionKind = (
+    cskText, cskRodata, cskData, cskTdata, cskTvars, cskOpdf, cskIface,
     cskBss, cskTbss);
 
 procedure MachOSectionNames(AKind: TContainerSectionKind;
@@ -339,6 +341,14 @@ begin
     cskOpdf:
     begin
       ASegName := '__OPDF'; ASectName := '__opdf';
+    end;
+    cskIface:
+    begin
+      { Embedded unit interface (.bif).  Metadata an executable never carries,
+        so the linker drops it by name — blaise.linker.macho.pas already lists
+        '__blaise_iface' / segment '__BLAISE' among the dropped sections, which
+        is where these names come from. }
+      ASegName := '__BLAISE'; ASectName := '__blaise_iface';
     end;
   else
     begin
