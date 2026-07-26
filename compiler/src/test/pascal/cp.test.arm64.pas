@@ -398,6 +398,9 @@ type
       retains for a by-value record param must follow the memcpy that fills the
       callee's copy, never precede it. }
     procedure TestRecordParam_FieldRetainsFollowTheCopy;
+    { BUG-20260726-arm64-field-characcess-dropped — a subscript on a STRING
+      FIELD (Obj.Field[N]) must load the byte, not yield the data pointer. }
+    procedure TestStringFieldSubscript_LoadsTheByte;
   end;
 
 implementation
@@ -5440,6 +5443,42 @@ begin
   AssertTrue('its managed fields are retained', PosRetain >= 0);
   AssertTrue('field retains come AFTER the copy, not before',
     PosRetain > PosCopy);
+end;
+
+procedure TArm64BackendTests.TestStringFieldSubscript_LoadsTheByte;
+var
+  AsmT, Body: string;
+  P: Integer;
+begin
+  { uSemantic folds a subscript on a STRING FIELD into the field access itself
+    (IsCharAccess + PropIndexExpr) rather than building a TStringSubscriptExpr,
+    and arm64 had no arm for that flag at all — so the read produced the field's
+    DATA POINTER and dropped the subscript.  Ord(M.Data[0]) returned a heap
+    address instead of 65.  The byte load is `ldrb`. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TBox = class
+        Tag: Integer;
+        Data: string;
+      end;
+    var
+      M: TBox;
+      N: Integer;
+    begin
+      M := TBox.Create();
+      M.Data := 'ABC';
+      N := Ord(M.Data[0]);
+      WriteLn(N)
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+  AssertTrue('the string field subscript loads a BYTE',
+    Pos(#9'ldrb w0, [x0]', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestClosure_UnownedTransientArg_PinnedBeforeCall;

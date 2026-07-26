@@ -3485,6 +3485,33 @@ begin
     Self.EmitExprToX0(TStringSubscriptExpr(AExpr).StrExpr);
     Exit;
   end;
+  { Subscript of a STRING-typed FIELD — Rec.Field[N] / Obj.Field[N] /
+    Self.FField[N].  The semantic pass does NOT build a TStringSubscriptExpr for
+    this: it folds the index into the field access itself (IsCharAccess with the
+    index in PropIndexExpr, uSemantic ~14106).  arm64 had NO arm for that flag
+    anywhere — `grep IsCharAccess` found nothing in this unit — so every such
+    read fell through to a plain whole-field read and silently produced the
+    field's DATA POINTER instead of the byte, dropping the subscript entirely
+    (BUG-20260726-arm64-field-characcess-dropped).  That is why
+    Ord(M.Data[0]) returned 4332157884: a heap address, not 'A'.
+    QBE has handled it since BUG-20260723 (qbe.pas ~15043).
+
+    Blaise strings are 0-based and the value IS the data pointer, so this is the
+    same byte load the plain S[I] arm below does — only the base is reached
+    through the field. }
+  if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsCharAccess then
+  begin
+    if TFieldAccessExpr(AExpr).PropIndexExpr = nil then
+      NotYet('string-field subscript without an index', AExpr);
+    Self.EmitExprToX0(TFieldAccessExpr(AExpr).PropIndexExpr);
+    EmitPushX0();
+    EmitRecFieldAddrToX0(TFieldAccessExpr(AExpr));
+    Self.Emit(#9'ldr x0, [x0]');
+    EmitPopTo('x1');
+    Self.Emit(#9'add x0, x0, x1');
+    Self.Emit(#9'ldrb w0, [x0]');
+    Exit;
+  end;
   if (AExpr is TStringSubscriptExpr) and
      (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) and
      ((TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyPChar) or

@@ -44,6 +44,11 @@ type
     procedure TestRun_StringSubscript_Write;
     procedure TestRun_StringSubscript_WriteCOW;
     procedure TestRun_StringSubscript_WriteVarParam;
+    { BUG-20260726-arm64-field-characcess-dropped — a subscript on a STRING
+      FIELD is folded into the field access (IsCharAccess), not a
+      TStringSubscriptExpr, and arm64 had no arm for it: the read yielded the
+      data pointer and dropped the subscript. }
+    procedure TestRun_StringFieldSubscript_Read;
     procedure TestRun_StringConcat_TwoStrings;
     procedure TestRun_StringConcat_WithInt;
     procedure TestRun_StringDelete_Modifies;
@@ -591,6 +596,62 @@ procedure TE2EStringOpsTests.TestRun_StringSubscript_WriteVarParam;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcStringSubscriptVarParam, 'ABAA' + LE, 0);
+end;
+
+const
+  { Every base form the IsCharAccess arm has to reach: a class field via a
+    variable, via a two-level chain, through implicit Self, and a record field
+    of a var parameter.  Tag/N sit before the string so a dropped subscript
+    cannot coincidentally land on it. }
+  SrcStringFieldSubscript = '''
+    program P;
+    type
+      TRec = record
+        N: Integer;
+        S: string;
+      end;
+      TBox = class
+        Tag: Integer;
+        Data: string;
+        constructor Create;
+        function First: Integer;
+      end;
+      TOuter = class
+        Pad: Integer;
+        Box: TBox;
+        constructor Create;
+      end;
+    constructor TBox.Create;
+    begin inherited Create(); Tag := 7; Data := 'ABC' end;
+    function TBox.First: Integer;
+    begin Result := Ord(Data[0]) end;
+    constructor TOuter.Create;
+    begin inherited Create(); Pad := 9; Box := TBox.Create() end;
+    procedure ShowVar(var R: TRec);
+    begin WriteLn(Ord(R.S[1])) end;
+    var
+      O: TOuter;
+      R: TRec;
+      I: Integer;
+    begin
+      O := TOuter.Create();
+      WriteLn(Ord(O.Box.Data[0]));
+      I := 2;
+      WriteLn(Ord(O.Box.Data[I]));
+      WriteLn(O.Box.First());
+      R.N := 1;
+      R.S := 'XYZ';
+      ShowVar(R);
+      O := nil
+    end.
+    ''';
+
+procedure TE2EStringOpsTests.TestRun_StringFieldSubscript_Read;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { 'A', 'C', 'A', 'Y' }
+  AssertRunsOnAll(SrcStringFieldSubscript,
+    '65' + LE + '67' + LE + '65' + LE + '89' + LE, 0);
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringConcat_TwoStrings;
