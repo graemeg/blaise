@@ -441,6 +441,19 @@ begin
     Result.Kind := alBlank;
     Exit;
   end;
+  { A '#' that OPENS a line is a comment — GNU as accepts it, and it is also how
+    cpp line markers (`# 12 "file.pas"`) look.  It can only be recognised THERE:
+    on AArch64 '#' introduces an immediate (`mov x0, #5`), so treating it as a
+    comment character anywhere else would eat every immediate operand.  The
+    x86-64 assembler has the same rule (blaise.assembler.x86_64.pas :678); arm64
+    lacked it, so any '#' line was reported as an unknown instruction and every
+    --debug-opdf build failed — the OPDF companion file opens with
+    '# OPDF debug companion file ...' (BUG-20260726-arm64-asm-hash-comment). }
+  if StrAt(S, 0) = Ord('#') then
+  begin
+    Result.Kind := alBlank;
+    Exit;
+  end;
   if StrAt(S, Length(S) - 1) = Ord(':') then
   begin
     Result.Kind := alLabel;
