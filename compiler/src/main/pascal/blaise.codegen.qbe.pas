@@ -5185,6 +5185,26 @@ begin
           AAssign.ResolvedLhsType);
         StoreInstr := StoreInstrFor(AAssign.ResolvedLhsType);
       end
+      else if AAssign.ResolvedLhsType <> nil then
+      begin
+        { Store at the DESTINATION's declared width, not the RHS's.  A var/out
+          param's slot holds the CALLER's address, and the caller's storage is
+          only as wide as the declared type — so `X := 9` with `var X: Byte`
+          must storeb.  Keying off the RHS gave `storew` for an Integer literal,
+          writing 4 bytes through a 1-byte destination and silently destroying
+          the three adjacent Byte fields that followed it.  A LOCAL is different
+          (it owns a full 8-byte frame slot, so a wide store is harmless), but a
+          var/out param has no such slack.  Mirrors the width dispatch x86-64
+          already does (movb/movw/movl) and the arm64 fix d5b94c86.
+
+          The value must be coerced to the DESTINATION's QBE type first: a
+          `var V: Int64` assigned an Integer literal yields a w-typed temp, and
+          `storel` on a w operand is rejected by qbe outright ("invalid type
+          for first operand"). }
+        ValTemp := CoerceArg(ValTemp, AAssign.Expr,
+                             QbeTypeOf(AAssign.ResolvedLhsType));
+        StoreInstr := StoreInstrFor(AAssign.ResolvedLhsType);
+      end
       else
         StoreInstr := StoreInstrFor(AAssign.Expr.ResolvedType);
       EmitLine(Format('  %s %s, %s', [StoreInstr, ValTemp, PtrTemp]));
@@ -14641,6 +14661,38 @@ begin
       if FldAccess.FieldInfo = nil then
         raise ECodeGenError.Create(Format(
           'Chained field ''%s'' has no resolved field info', [FldAccess.FieldName]));
+      if FldAccess.IsCharAccess then
+      begin
+        { Subscript on a string field reached through a CHAINED base —
+          A.B.Str[N].  This arm was missing entirely, so the node fell through
+          to the whole-field load below and returned the string's DATA POINTER
+          with the subscript silently dropped
+          (BUG-20260726-qbe-chained-field-string-subscript).  The leaf arm
+          (:15055) has always handled the same flag; this is the same drift the
+          array arm's own comment records for tyInterface and jumbo sets — a
+          third instance of the chained arm falling behind the leaf.
+          0-based, like every other Blaise subscript. }
+        if FldAccess.FieldInfo.Offset > 0 then
+        begin
+          Ptr := AllocTemp();
+          EmitLine(Format('  %s =l add %s, %d',
+            [Ptr, L, FldAccess.FieldInfo.Offset]));
+          L := Ptr;
+        end;
+        { L -> the field slot; load the string pointer, then read byte N. }
+        Ptr := AllocTemp();
+        EmitLine(Format('  %s =l loadl %s', [Ptr, L]));
+        IdxTemp := EmitExpr(FldAccess.PropIndexExpr);
+        T := AllocTemp();
+        EmitLine(Format('  %s =l extsw %s', [T, IdxTemp]));
+        L := AllocTemp();
+        EmitLine(Format('  %s =l add %s, %s', [L, Ptr, T]));
+        T := AllocTemp();
+        EmitLine(Format('  %s =w loadub %s', [T, L]));
+        if BaseReleaseTemp <> '' then
+          EmitLine(Format('  call $_ClassRelease(l %s)', [BaseReleaseTemp]));
+        Exit(T);
+      end;
       if FldAccess.IsArrayAccess then
       begin
         if FldAccess.FieldInfo.Offset > 0 then

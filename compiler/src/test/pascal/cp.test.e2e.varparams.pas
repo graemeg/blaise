@@ -22,6 +22,12 @@ type
   protected
     procedure SetUp; override;
   published
+    { A var/out param must be stored at the DESTINATION's declared width.
+      QBE keyed the store off the RHS type, so `X := 9` with `var X: Byte`
+      emitted storew and wrote 4 bytes through a 1-byte destination —
+      destroying the adjacent fields.  Native/x86-64 already dispatched
+      correctly (movb/movw/movl); arm64 was fixed in d5b94c86. }
+    procedure TestRun_VarParam_NarrowWidths_NoAdjacentClobber;
     procedure TestRun_VarInt;
     procedure TestRun_VarSwap;
     procedure TestRun_VarString;
@@ -191,6 +197,37 @@ const
       WriteLn(V)
     end.
     ''';
+
+procedure TE2EVarParamTests.TestRun_VarParam_NarrowWidths_NoAdjacentClobber;
+const
+  Src = '''
+    program P;
+    type
+      TR = record A, B, C, D: Byte; end;
+      TW = record P: Word; Q: Word; end;
+    procedure SB(var X: Byte); begin X := 9 end;
+    procedure SW(var X: Word); begin X := 999 end;
+    procedure SL(var X: Int64); begin X := 4096 end;
+    var R: TR; W: TW; L: Int64; M: Int64;
+    begin
+      R.A := 1; R.B := 200; R.C := 201; R.D := 202;
+      SB(R.A);
+      WriteLn(R.A, ' ', R.B, ' ', R.C, ' ', R.D);
+      W.P := 111; W.Q := 60000;
+      SW(W.P);
+      WriteLn(W.P, ' ', W.Q);
+      { an Integer literal into a var Int64 must widen, not emit storel on a
+        w-typed value (qbe rejects that outright) }
+      L := 0; M := 77;
+      SL(L);
+      WriteLn(L, ' ', M)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '9 200 201 202' + LE + '999 60000' + LE + '4096 77' + LE, 0);
+end;
 
 procedure TE2EVarParamTests.TestRun_VarInt;
 begin
