@@ -222,6 +222,9 @@ type
       would clobber the bytes that follow. }
     procedure EmitStoreByWidth(const AValReg, AAddrReg: string;
       AType: TTypeDesc);
+    { Re-widen a NARROW variable's slot after a callee wrote only the declared
+      width into it through a var/out parameter.  See the call site in EmitCall. }
+    procedure EmitNormaliseNarrowSlot(const AName: string; AType: TTypeDesc);
     { Address of a variable's storage (record base / slot address). }
     procedure EmitSlotAddr(const AReg, AName: string);
     procedure EmitRecIdentAddr(const AReg: string; AE: TIdentExpr);
@@ -921,6 +924,80 @@ begin
   else
     Self.Emit(Format(#9'str %s, [%s]', [AValReg, AAddrReg]));
   end;
+end;
+
+{ True when AExpr is a var/out argument whose storage is a plain 8-byte
+  variable SLOT holding a sub-64-bit integer — the only shape that needs
+  re-widening after the callee's narrow store.  The three excluded forms are the
+  ones EmitRecIdentAddr routes away from EmitSlotAddr: a var-param forward (the
+  slot holds the caller's ADDRESS), a captured variable (reached via '_cap_'),
+  and an implicit-Self field (no slot exists for it).  The captured case is
+  screened in EmitNormaliseNarrowSlot, which can reach IsCaptured. }
+function IsRewidenableVarSlot(AExpr: TASTExpr): Boolean;
+begin
+  Result := False;
+  if not (AExpr is TIdentExpr) then Exit;
+  if AExpr.ResolvedType = nil then Exit;
+  if not IsIntFam(AExpr.ResolvedType) then Exit;
+  if AExpr.ResolvedType.RawSize() >= 8 then Exit;
+  if TIdentExpr(AExpr).ParamMode = pmVar then Exit;
+  if TIdentExpr(AExpr).IsImplicitSelf and
+     (TIdentExpr(AExpr).ImplicitFieldInfo <> nil) then Exit;
+  Result := True;
+end;
+
+procedure TArm64Backend.EmitNormaliseNarrowSlot(const AName: string;
+  AType: TTypeDesc);
+var
+  W: Integer;
+  Sh: Integer;
+begin
+  { A frame slot (and a scalar global — both are 8 bytes, .balign 8/.zero 8) is
+    READ 64-bit wide by EmitLoadSlot, but a callee writing through a var/out
+    parameter stores only the declared width, as the ABI requires: the target may
+    be a 4-byte record field, and writing 8 bytes there corrupts the next field
+    (BUG-20260726-arm64-varparam-store-width).  When the target IS a full slot,
+    that leaves the slot's upper bytes stale, so the next 64-bit read of the
+    variable yields a value that is right in 32 bits and wrong in 64 —
+    comparisons still worked while WriteLn/Format/Int64() printed a zero-extended
+    number (BUG-20260726-arm64-varparam-slot-not-rewidened).
+    So after such a call the slot is re-widened here, from the width and
+    signedness the variable actually has. }
+  if AType = nil then Exit;
+  W := AType.RawSize();
+  if W >= 8 then Exit;
+  { a captured variable has no bare frame slot — it is reached through '_cap_',
+    and EmitSlotAddr would mistake the name for a global }
+  if IsCaptured(AName) then Exit;
+  EmitSlotAddr('x9', AName);
+  if W = 4 then
+  begin
+    if IsUnsignedIntA64(AType) then
+      Self.Emit(#9'ldr w0, [x9]')      { zero-extends into x0 }
+    else
+      Self.Emit(#9'ldrsw x0, [x9]');
+    Self.Emit(#9'str x0, [x9]');
+    Exit;
+  end;
+  { 1- and 2-byte: only the zero-extending loads exist (there is no ldrsb/ldrsh
+    in the internal assembler), so a signed narrow type is sign-extended with the
+    shift pair — lsl to put its sign bit at bit 63, asr to smear it back. }
+  if W = 2 then
+  begin
+    Self.Emit(#9'ldrh w0, [x9]');
+    Sh := 48;
+  end
+  else
+  begin
+    Self.Emit(#9'ldrb w0, [x9]');
+    Sh := 56;
+  end;
+  if not IsUnsignedIntA64(AType) then
+  begin
+    Self.Emit(Format(#9'lsl x0, x0, #%d', [Sh]));
+    Self.Emit(Format(#9'asr x0, x0, #%d', [Sh]));
+  end;
+  Self.Emit(#9'str x0, [x9]');
 end;
 
 procedure TArm64Backend.EmitStoreSlot(const AReg, AName: string);
@@ -8756,6 +8833,7 @@ var
   IsVariadicArg: Boolean;
   LitBase, LitOff, ESz, N: Integer;
   RecBase, RecOff: Integer;
+  NarrowFix: Boolean;
 begin
   NInt := 0;
   NFloat := 0;
@@ -9503,6 +9581,37 @@ begin
      (ADecl.ResolvedReturnType <> nil) and
      (ADecl.ResolvedReturnType.RawSize() < 8) then
     EmitNarrowX0(ADecl.ResolvedReturnType);
+  { Re-widen the slot of every NARROW variable we passed by var/out.  The callee
+    stored only the declared width — it must, since the target could be a 4-byte
+    record field — but a variable's SLOT is 8 bytes and is read 64-bit, so its
+    upper bytes are now stale.  Same family as the external-result narrowing just
+    above: a value that is correct at its own width but wrong when widened.
+    Only a plain slot needs it: a var-param forward holds an ADDRESS, a captured
+    var lives behind '_cap_', and an implicit-Self field is not a slot at all —
+    those three are exactly the cases EmitRecIdentAddr routes away from
+    EmitSlotAddr (BUG-20260726-arm64-varparam-slot-not-rewidened). }
+  NarrowFix := False;
+  for I := 0 to AArgs.Count - 1 do
+    if (I < ADecl.Params.Count) and
+       TMethodParam(ADecl.Params.Items[I]).IsVarParam then
+    begin
+      Arg := TASTExpr(AArgs.Items[I]);
+      if IsRewidenableVarSlot(Arg) then
+        NarrowFix := True;
+    end;
+  if NarrowFix then
+  begin
+    EmitPushX0();                     { the call result must survive this }
+    for I := 0 to AArgs.Count - 1 do
+      if (I < ADecl.Params.Count) and
+         TMethodParam(ADecl.Params.Items[I]).IsVarParam then
+      begin
+        Arg := TASTExpr(AArgs.Items[I]);
+        if IsRewidenableVarSlot(Arg) then
+          EmitNormaliseNarrowSlot(TIdentExpr(Arg).Name, Arg.ResolvedType);
+      end;
+    EmitPopTo('x0');
+  end;
   if TransN > 0 then
   begin
     { the call result (x0/d0) must survive the releases }

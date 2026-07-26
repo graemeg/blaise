@@ -407,6 +407,9 @@ type
     { BUG-20260726-arm64-field-arrayaccess-read-dropped — reading an element of
       an array-typed FIELD must load the element, not the data pointer. }
     procedure TestFieldArrayElementRead_LoadsTheElement;
+    { BUG-20260726-arm64-varparam-slot-not-rewidened — after a callee's narrow
+      store through a var/out param, the caller's 8-byte slot must be re-widened. }
+    procedure TestNarrowVarArg_SlotRewidenedAfterCall;
   end;
 
 implementation
@@ -5538,6 +5541,46 @@ begin
   Body := Copy(AsmT, P, Length(AsmT) - P);
   AssertTrue('var Int64 still stores 64 bits',
     Pos(#9'str x0, [x9]', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestNarrowVarArg_SlotRewidenedAfterCall;
+var
+  AsmT, Body: string;
+  P, PosCall, PosFix: Integer;
+begin
+  { A callee writing through `var X: Integer` stores only 32 bits — it must,
+    because the target could be a 4-byte record field.  But a VARIABLE's slot is
+    8 bytes and is read 64-bit, so after such a call the slot's upper half is
+    stale and the value reads back zero-extended: right in 32 bits, wrong in 64.
+    Comparisons still worked; WriteLn/Format/Int64() printed 4294967288 for -8.
+    The caller therefore re-widens the slot after the call, with a sign-extending
+    load for a signed type. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    procedure SetI(var X: Integer);
+    begin
+      X := -8
+    end;
+    var
+      V: Integer;
+    begin
+      SetI(V);
+      WriteLn(V)
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+  PosCall := Pos(#9'bl SetI', Body);
+  AssertTrue('the call is emitted', PosCall >= 0);
+  PosFix := PosEx(#9'ldrsw x0, [x9]', Body, PosCall);
+  AssertTrue('the slot is re-widened AFTER the call, sign-extending',
+    PosFix > PosCall);
+  { and the re-widened value is written back full width }
+  AssertTrue('re-widened value stored back 64-bit',
+    PosEx(#9'str x0, [x9]', Body, PosFix) > PosFix);
 end;
 
 procedure TArm64BackendTests.TestFieldArrayElementRead_LoadsTheElement;
