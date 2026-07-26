@@ -404,6 +404,9 @@ type
     { BUG-20260726-arm64-varparam-store-width — a store through a var/out param
       must be the width of the declared type, not a full 64-bit store. }
     procedure TestVarParamStore_UsesDeclaredWidth;
+    { BUG-20260726-arm64-field-arrayaccess-read-dropped — reading an element of
+      an array-typed FIELD must load the element, not the data pointer. }
+    procedure TestFieldArrayElementRead_LoadsTheElement;
   end;
 
 implementation
@@ -5535,6 +5538,43 @@ begin
   Body := Copy(AsmT, P, Length(AsmT) - P);
   AssertTrue('var Int64 still stores 64 bits',
     Pos(#9'str x0, [x9]', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestFieldArrayElementRead_LoadsTheElement;
+var
+  AsmT, Body: string;
+  P: Integer;
+begin
+  { uSemantic folds a subscript on an array-typed FIELD into the field access
+    (IsArrayAccess + PropIndexExpr).  The read path had no arm for it, so
+    S.BB[1] evaluated to the array's DATA POINTER with the index dropped
+    entirely — for every element width.  The element load narrows by width, so
+    a Byte element must come back through ldrb. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TS = class
+        Pad: Integer;
+        BB: array of Byte;
+      end;
+    var
+      S: TS;
+      N: Integer;
+    begin
+      S := TS.Create();
+      SetLength(S.BB, 4);
+      S.BB[1] := 11;
+      N := S.BB[1];
+      WriteLn(N)
+    end.
+    ''');
+  P := Pos('_main:', AsmT);
+  if P < 0 then P := Pos(#10'$main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+  AssertTrue('the field array element read narrows to a BYTE load',
+    Pos(#9'ldrb w0, [x0]', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestClosure_UnownedTransientArg_PinnedBeforeCall;

@@ -3546,6 +3546,31 @@ begin
     Self.Emit(#9'ldrb w0, [x0]');
     Exit;
   end;
+  { Reading an ELEMENT of an array-typed FIELD as a scalar — Obj.Arr[I] /
+    Rec.Arr[I] / Self.Arr[I].  Like IsCharAccess above, the semantic pass folds
+    the subscript into the field access (IsArrayAccess + PropIndexExpr) and the
+    read path had no arm for it, so it produced the ARRAY'S DATA POINTER and
+    dropped the index: S.BB[1] returned 4336386304 instead of 11, for every
+    element width (BUG-20260726-arm64-field-arrayaccess-read-dropped).  The
+    implicit-Self form already worked through another route, which is why the
+    compiler's own `Bytes[I]` uses went unnoticed while the Mach-O writer's
+    Sec.Bytes[...] fold read garbage.
+
+    Both halves already existed and were only reachable from the ADDRESS path:
+    EmitFieldElemAddr scales the subscript (and derefs a dyn-array's data
+    pointer), EmitElemLoad narrows the load to the element width.  RECORD and
+    static-array elements are excluded — those evaluate to their ADDRESS by
+    design (leg 32) and keep their existing paths. }
+  if (AExpr is TFieldAccessExpr) and
+     TFieldAccessExpr(AExpr).IsArrayAccess and
+     (TFieldAccessExpr(AExpr).ResolvedType <> nil) and
+     not (TFieldAccessExpr(AExpr).ResolvedType.Kind in
+            [tyRecord, tyStaticArray]) then
+  begin
+    EmitFieldElemAddr(TFieldAccessExpr(AExpr));
+    EmitElemLoad(TFieldAccessExpr(AExpr).ResolvedType);
+    Exit;
+  end;
   if (AExpr is TStringSubscriptExpr) and
      (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) and
      ((TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyPChar) or
