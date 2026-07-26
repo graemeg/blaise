@@ -17,6 +17,7 @@
     <module>tools/migration-analyser</module>
     <module>tools/kanban</module>
     <module>tools/bif-coverage</module>
+    <module>tools/flag-coverage</module>
     <module>tools/bindgen</module>
   </modules>
 

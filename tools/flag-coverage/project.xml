@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <name>blaise-flag-coverage</name>
+
+  <build>
+    <packaging>application</packaging>
+    <mainSource>FlagCoverage.pas</mainSource>
+    <executableName>flag-coverage</executableName>
+
+    <manualUnitPaths>true</manualUnitPaths>
+    <unitPaths>
+      <path>src/main/pascal</path>
+      <path>../../compiler/src/main/pascal</path>
+      <!-- SysUtils and other stdlib units the analyser uses. -->
+      <path>../../stdlib/src/main/pascal</path>
+    </unitPaths>
+  </build>
+</project>

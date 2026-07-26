@@ -1,0 +1,42 @@
+# flag-coverage status - one line per codegen annotation flag.
+# Format: <TClass>.<Field>  <qbe> <x86_64> <arm64>
+#   a number = how many times that backend reads the flag
+#   unused   = that backend deliberately never reads it
+#
+# A DROP below the recorded count fails the check: an arm was
+# deleted, or a rename orphaned the flag.  A RISE is fine -
+# refresh with --reset and commit alongside the change.
+#
+# A count is a SIGNAL, not a verdict.  Zero can be legitimate
+# (the shape is handled through another route), and non-zero
+# does not prove every path is covered - IsArrayAccess read 2
+# in arm64 while its READ path was still missing.  See the
+# header comment in FlagCoverage.pas.
+#
+# Regenerate with: flag-coverage --reset
+
+TFieldAccessExpr.FieldInfo                127  232  136
+TFieldAccessExpr.IsConstant               4  7  15
+TFieldAccessExpr.IsConstructorCall        4  6  9
+TFieldAccessExpr.IsClassAccess            17  50  14
+TFieldAccessExpr.IsImplicitSelf           19  57  31
+TFieldAccessExpr.IsMethodCall             5  3  0
+TFieldAccessExpr.IsInterfaceCall          5  1  0
+TFieldAccessExpr.IsGlobal                 162  48  1
+TFieldAccessExpr.IsClassNameAccess        1  1  2
+TFieldAccessExpr.IsClassTypeAccess        1  1  1
+TFieldAccessExpr.IsBuiltinToString        2  1  1
+TFieldAccessExpr.IsVarParam               83  146  62
+TFieldAccessExpr.PropIndexExpr            25  21  20
+TFieldAccessExpr.IsCharAccess             3  1  1
+TFieldAccessExpr.IsArrayAccess            8  11  3
+TFieldAccessExpr.IsClassVarRead           4  4  0
+TFieldAccessExpr.IsStaticPropGet          2  1  0
+TMethodCallExpr.IsConstructorCall         4  6  9
+TMethodCallExpr.IsMetaclassDispatch       3  4  2
+TMethodCallExpr.IsStaticCall              3  4  5
+TMethodCallExpr.IsGlobal                  162  48  1
+TMethodCallExpr.IsVarParam                83  146  62
+TMethodCallExpr.IsBuiltinToString         2  1  1
+TMethodCallExpr.IsBuiltinInheritsFrom     1  1  1
+TMethodCallExpr.IsProcFieldCall           5  5  1
