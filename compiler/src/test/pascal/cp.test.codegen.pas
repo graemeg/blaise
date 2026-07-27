@@ -232,9 +232,17 @@ begin
     mnemonic from the host target rather than gating the test away, so arm64
     keeps the coverage. }
   if HostTarget().CPU = cpuArm64 then
-    Call := 'bl _'
+    Call := 'bl '
   else
-    Call := 'callq _';
+    Call := 'callq ';
+  { The PREFIX follows the target OS, not the CPU.  These RTL routines are named
+    _BlaiseInit / _SetArgs in Pascal, and on Darwin every symbol takes one more
+    '_' (Apple's C prefix, uniform with QBE), so the label is __BlaiseInit
+    there and _BlaiseInit on ELF. }
+  if HostTarget().OS = osMacOS then
+    Call := Call + '__'
+  else
+    Call := Call + '_';
   AssertTrue('native main calls _BlaiseInit',
     IRContains(Asm_, Call + 'BlaiseInit'));
   AssertTrue('native main calls _SetArgs',

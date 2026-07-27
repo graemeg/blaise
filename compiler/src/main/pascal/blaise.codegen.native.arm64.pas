@@ -371,26 +371,39 @@ type
     procedure RegisterFrameSlots(ADecl: TMethodDecl; ABody: TBlock);
     procedure RegisterForSlots(AStmt: TASTStmt);
     { THE DARWIN UNDERSCORE RULE — the single seam that applies the Mach-O C
-      symbol-prefix convention.  On Darwin every emitted symbol begins with
-      exactly one '_'; a name that ALREADY does is returned untouched, because
-      the leading underscore in an RTL identifier (_StringAddRef, runtime.arc)
-      and in the family tags this backend composes (_g_, _ts_, _tv_,
-      _FieldCleanup_) IS that prefix.  Prefixing them again would rename the
-      DEFINITION while the ~70 hard-coded 'bl _StringAddRef'-style references
-      in this unit kept the old spelling — an undefined symbol at link.
-      Gated on the target OS, not the host: linux-arm64/freebsd-arm64 are real
-      targets whose ELF output must stay byte-identical.
-      THE ONE SHARP EDGE: the mapping is not injective — a routine 'X' and a
-      routine '_X' in the same unit both land on '_X'.  That is a real
-      constraint on RTL naming, not a theoretical one (it collapsed
-      FormatFloatSpec onto _FormatFloatSpec; the private half is now
-      FormatFloatSpecCore).  It fails LOUDLY and immediately — the internal
-      assembler rejects the second definition with 'duplicate label' — so the
-      rule is safe to keep, but two RTL routines must never differ only by a
-      leading underscore.
-      NOT applied to a C external name (ADecl.ExternalName): those still reach
-      the linker bare and are prefixed by TMachOLinker.BindNameOf. }
+      symbol-prefix convention.  On Darwin EVERY name gets exactly one leading
+      '_', with no exceptions and no attempt to classify the name first.
+
+      That uniformity is not a simplification we chose; it is what the platform
+      and QBE already do, and it is verifiable:
+
+        Pascal Helper          -> _Helper
+        Pascal _StringAddRef   -> __StringAddRef
+        external 'getpid'      -> _getpid          (libSystem's real symbol)
+        external '__cxa_atexit'-> ___cxa_atexit    (libSystem's real symbol)
+
+      QBE, whose Apple target has always done this, emits exactly these names,
+      so a QBE-compiled program and a natively-built RTL object agree and link.
+      An earlier version of this rule skipped a name that already began with
+      '_', which kept the RTL's own _StringAddRef spelled _StringAddRef; that
+      disagreed with QBE's __StringAddRef and made the two object worlds
+      unlinkable on macOS.  It was also non-injective (a routine 'X' beside a
+      routine '_X' collapsed onto one symbol).  Both problems are artefacts of
+      the skip, not of the convention.
+
+      Because the rule needs no C-versus-Pascal discrimination, it applies to
+      ADecl.ExternalName too, and TMachOLinker.BindNameOf is consequently the
+      identity — names reach the linker already correctly spelled.
+
+      Gated on the TARGET OS, not the host: linux-arm64 and freebsd-arm64 are
+      real targets whose ELF output must stay byte-identical. }
     function  DarwinSym(const AName: string): string;
+    { Emit a call to a fixed, hand-named symbol — an RTL routine (_StringAddRef)
+      or a libc function (memcpy).  Routing every such site through here keeps
+      the ~240 hard-coded call targets in this unit target-independent: the
+      platform prefix is applied once, here, instead of being baked into each
+      literal. }
+    procedure EmitCallSym(const AName: string);
     { The metadata symbol families.  Each is the SINGLE source of truth for its
       spelling so a definition and every reference cannot drift — the lesson
       TypeinfoSymFor already records, applied to the other three. ABase is a
@@ -827,7 +840,7 @@ begin
   begin
     FPendingRelCount := FPendingRelCount - 1;
     EmitLoadSlot('x0', Format('_pendrel_%d', [FPendingRelCount]));
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
   end;
 end;
 
@@ -1223,18 +1236,18 @@ begin
     begin
       EmitPushX0();
       if AFld.TypeDesc.IsString() then
-        Self.Emit(#9'bl _StringAddRef')
+        EmitCallSym('_StringAddRef')
       else
-        Self.Emit(#9'bl _ClassAddRef');
+        EmitCallSym('_ClassAddRef');
       EmitPopTo('x0');
     end;
     EmitPushX0();
     EmitInstBase('x9', AInstSlot, AInstVarParam, ABaseInfo);
     Self.Emit(Format(#9'ldr x0, [x9, #%d]', [Off]));
     if AFld.TypeDesc.IsString() then
-      Self.Emit(#9'bl _StringRelease')
+      EmitCallSym('_StringRelease')
     else
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
     EmitInstBase('x9', AInstSlot, AInstVarParam, ABaseInfo);
     EmitPopTo('x0');
     Self.Emit(Format(#9'str x0, [x9, #%d]', [Off]));
@@ -1279,7 +1292,7 @@ begin
       Self.Emit(#9'mov x0, x22');
       EmitSlotAddr('x1', '__rret');
       EmitIntLiteral('x2', AFld.TypeDesc.RawSize());
-      Self.Emit(#9'bl memcpy');
+      EmitCallSym('memcpy');
       Self.Emit(#9'ldp x19, x22, [sp], #16');
       Exit;
     end;
@@ -1300,7 +1313,7 @@ begin
       Self.Emit(#9'mov x0, x22');
       Self.Emit(#9'mov x1, x19');
       EmitIntLiteral('x2', AFld.TypeDesc.RawSize());
-      Self.Emit(#9'bl memcpy');
+      EmitCallSym('memcpy');
       Self.Emit(#9'ldp x19, x22, [sp], #16');
       Exit;
     end;
@@ -1311,7 +1324,7 @@ begin
       EmitAddSubImm('add', 'x0', 'x0', Off);
     EmitPopTo('x1');
     EmitIntLiteral('x2', AFld.TypeDesc.RawSize());
-    Self.Emit(#9'bl memcpy');
+    EmitCallSym('memcpy');
     Exit;
   end;
   if AFld.TypeDesc.Kind = tySingle then
@@ -1361,18 +1374,18 @@ begin
     begin
       EmitPushX0();
       if AFld.TypeDesc.IsString() then
-        Self.Emit(#9'bl _StringAddRef')
+        EmitCallSym('_StringAddRef')
       else
-        Self.Emit(#9'bl _ClassAddRef');
+        EmitCallSym('_ClassAddRef');
       EmitPopTo('x0');
     end;
     EmitPushX0();                       { [base][value] }
     Self.Emit(#9'ldr x9, [sp, #16]');
     Self.Emit(Format(#9'ldr x0, [x9, #%d]', [AFld.Offset]));
     if AFld.TypeDesc.IsString() then
-      Self.Emit(#9'bl _StringRelease')
+      EmitCallSym('_StringRelease')
     else
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
     Self.Emit(#9'ldr x9, [sp, #16]');
     EmitPopTo('x0');
     Self.Emit(Format(#9'str x0, [x9, #%d]', [AFld.Offset]));
@@ -1508,7 +1521,7 @@ begin
   EmitSlotAddr('x9', AME.ValueSlotName);
   Self.Emit(#9'ldr x0, [x9, #8]');            { old Env }
   Self.Emit(#9'str x9, [sp, #-16]!');         { park &slot across the call }
-  Self.Emit(#9'bl _ClassRelease');
+  EmitCallSym('_ClassRelease');
   Self.Emit(#9'ldr x9, [sp], #16');
   Sym := RoutineSym(MD, '');
   Self.Emit(Format(#9'adrp x0, %s@PAGE', [Sym]));
@@ -1524,7 +1537,7 @@ begin
       EmitLoadSlot('x0', '__envp');
     Self.Emit(#9'str x0, [x9, #8]');          { Env at +8 }
     Self.Emit(#9'str x9, [sp, #-16]!');
-    Self.Emit(#9'bl _ClassAddRef');
+    EmitCallSym('_ClassAddRef');
     Self.Emit(#9'ldr x9, [sp], #16');
   end
   else
@@ -1619,9 +1632,9 @@ begin
         that read the wrong (or an empty) shape slot.  Both string shapes now
         take a bare release: rc=0 transients were pinned BEFORE the blr. }
       if Copy(Shapes, I, 1) = 'C' then
-        Self.Emit(#9'bl _ClassRelease')
+        EmitCallSym('_ClassRelease')
       else
-        Self.Emit(#9'bl _StringRelease');
+        EmitCallSym('_StringRelease');
     end;
     Self.Emit(#9'ldr x9, [sp], #16');
     Self.Emit(#9'fmov d0, x9');
@@ -1642,7 +1655,7 @@ begin
     double-free with a non-storing callee
     (BUG-20260722-arm64-propsetter-pin-after-call).  This helper now emits
     only the release half; call sites emit the pre-call pin. }
-  Self.Emit(#9'bl _StringRelease');
+  EmitCallSym('_StringRelease');
 end;
 
 { Pin an rc=0 unowned string transient (value in x0) BEFORE the call that
@@ -1654,7 +1667,7 @@ begin
   if ArcExprIsUnownedStrTransient(AValueExpr) then
   begin
     EmitPushX0();
-    Self.Emit(#9'bl _StringAddRef');
+    EmitCallSym('_StringAddRef');
     EmitPopTo('x0');
   end;
 end;
@@ -1818,7 +1831,7 @@ begin
       EmitPushX0();                 { [obj][obj] — consumed by the store }
       EmitInstanceFieldStoreStacked(AStmt.FieldInfo, AStmt.Expr);
       EmitPopTo('x0');              { the retained copy }
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
       Exit;
     end;
     EmitPushX0();
@@ -1879,7 +1892,7 @@ begin
       Self.Emit(#9'mov x0, x22');
       Self.Emit(#9'mov x1, x19');
       EmitIntLiteral('x2', AStmt.FieldInfo.TypeDesc.RawSize());
-      Self.Emit(#9'bl memcpy');
+      EmitCallSym('memcpy');
       Self.Emit(#9'ldp x19, x22, [sp], #16');
       Exit;
     end;
@@ -1904,7 +1917,7 @@ begin
       EmitAddSubImm('add', 'x0', 'x0', AStmt.FieldInfo.Offset);
     EmitPopTo('x1');                  { source address }
     EmitIntLiteral('x2', AStmt.FieldInfo.TypeDesc.RawSize());
-    Self.Emit(#9'bl memcpy');
+    EmitCallSym('memcpy');
     Exit;
   end;
   { tyPointer/tyPChar are unmanaged 8-byte words, so the plain store path
@@ -1939,18 +1952,18 @@ begin
     begin
       EmitPushX0();
       if AStmt.FieldInfo.TypeDesc.IsString() then
-        Self.Emit(#9'bl _StringAddRef')
+        EmitCallSym('_StringAddRef')
       else
-        Self.Emit(#9'bl _ClassAddRef');
+        EmitCallSym('_ClassAddRef');
       EmitPopTo('x0');
     end;
     EmitPushX0();
     EmitRecordBaseAddr('x9', AStmt.RecordName, AStmt.IsVarParam);
     Self.Emit(Format(#9'ldr x0, [x9, #%d]', [AStmt.FieldInfo.Offset]));
     if AStmt.FieldInfo.TypeDesc.IsString() then
-      Self.Emit(#9'bl _StringRelease')
+      EmitCallSym('_StringRelease')
     else
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
     EmitRecordBaseAddr('x9', AStmt.RecordName, AStmt.IsVarParam);
     EmitPopTo('x0');
     Self.Emit(Format(#9'str x0, [x9, #%d]', [AStmt.FieldInfo.Offset]));
@@ -2024,9 +2037,9 @@ begin
     begin
       EmitPushX0();
       if Elem.IsString() then
-        Self.Emit(#9'bl _StringAddRef')
+        EmitCallSym('_StringAddRef')
       else
-        Self.Emit(#9'bl _ClassAddRef');
+        EmitCallSym('_ClassAddRef');
       EmitPopTo('x0');
     end;
     EmitPushX0();                              { [val] }
@@ -2034,9 +2047,9 @@ begin
     EmitPushX0();                              { [val][elemaddr] }
     Self.Emit(#9'ldr x0, [x0]');               { old element value }
     if Elem.IsString() then
-      Self.Emit(#9'bl _StringRelease')
+      EmitCallSym('_StringRelease')
     else
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
     Self.Emit(#9'ldr x9, [sp]');               { elem address }
     Self.Emit(#9'ldr x0, [sp, #16]');          { new value }
     Self.Emit(#9'str x0, [x9]');
@@ -2083,7 +2096,7 @@ begin
       Self.Emit(#9'mov x0, x22');
       EmitSlotAddr('x1', '__rret');
       EmitIntLiteral('x2', Elem.RawSize());
-      Self.Emit(#9'bl memcpy');
+      EmitCallSym('memcpy');
       Self.Emit(#9'ldp x19, x22, [sp], #16');
       Exit;
     end;
@@ -2102,7 +2115,7 @@ begin
     Self.Emit(#9'mov x0, x22');
     Self.Emit(#9'mov x1, x19');
     EmitIntLiteral('x2', Elem.RawSize());
-    Self.Emit(#9'bl memcpy');
+    EmitCallSym('memcpy');
     Self.Emit(#9'ldp x19, x22, [sp], #16');
     Self.Emit(#9'add sp, sp, #16');                    { drop srcaddr }
     Exit;
@@ -2325,7 +2338,7 @@ begin
     Self.EmitExprToD0OrConvert(AElem);      { widens tySingle -> double in d0 }
     Self.Emit(#9'str d0, [sp, #-16]!');     { park the double across the call }
     EmitIntLiteral('x0', 8);
-    Self.Emit(#9'bl _BlaiseGetMem');        { x0 = box ptr }
+    EmitCallSym('_BlaiseGetMem');        { x0 = box ptr }
     Self.Emit(#9'ldr d0, [sp], #16');       { restore double (sp back to base) }
     Self.Emit(#9'str d0, [x0]');            { *box = double }
     { x0 = box ptr; store as VValue, tag 3 as VType }
@@ -2617,7 +2630,7 @@ begin
   begin
     { High(D) = Length(D) - 1 }
     Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-    Self.Emit(#9'bl _DynArrayLength');
+    EmitCallSym('_DynArrayLength');
     Self.Emit(#9'sub x0, x0, #1');
     Exit;
   end;
@@ -2629,7 +2642,7 @@ begin
        tyDynArray) then
   begin
     Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-    Self.Emit(#9'bl _DynArrayLength');
+    EmitCallSym('_DynArrayLength');
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
@@ -2789,7 +2802,7 @@ begin
     if SameText(TFuncCallExpr(AExpr).Name, 'ParamStr') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'bl _ParamStr');
+      EmitCallSym('_ParamStr');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'UpCase') then
@@ -2807,9 +2820,9 @@ begin
       then
       begin
         Self.Emit(#9'mov x1, #0');
-        Self.Emit(#9'bl _OrdAt');
+        EmitCallSym('_OrdAt');
       end;
-      Self.Emit(#9'bl _UpCase');
+      EmitCallSym('_UpCase');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'Assigned') then
@@ -2834,14 +2847,14 @@ begin
     if SameText(TFuncCallExpr(AExpr).Name, 'GetMem') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'bl _BlaiseGetMem');
+      EmitCallSym('_BlaiseGetMem');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'IntToStr') then
     begin
       { integer argument — no transient to dispose }
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'bl _Int64ToStr');
+      EmitCallSym('_Int64ToStr');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'Int64ToStr') then
@@ -2850,14 +2863,14 @@ begin
         routes through _Int64ToStr.  Integer argument, no transient to
         dispose.  Mirrors x86-64's Int64ToStr case. }
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'bl _Int64ToStr');
+      EmitCallSym('_Int64ToStr');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'UInt64ToStr') then
     begin
       { unsigned 64-bit -> decimal string.  Mirrors x86-64's UInt64ToStr case. }
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'bl _UInt64ToStr');
+      EmitCallSym('_UInt64ToStr');
       Exit;
     end;
     { float -> integer.  Mirrors x86-64 exactly: round/floor/ceil go through
@@ -2877,21 +2890,21 @@ begin
     if SameText(TFuncCallExpr(AExpr).Name, 'Round') then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'bl round');
+      EmitCallSym('round');
       Self.Emit(#9'fcvtzs x0, d0');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'Floor') then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'bl floor');
+      EmitCallSym('floor');
       Self.Emit(#9'fcvtzs x0, d0');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'Ceil') then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'bl ceil');
+      EmitCallSym('ceil');
       Self.Emit(#9'fcvtzs x0, d0');
       Exit;
     end;
@@ -2901,19 +2914,19 @@ begin
     if SameText(TFuncCallExpr(AExpr).Name, 'ProcessRunning') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'bl _ProcessRunning');
+      EmitCallSym('_ProcessRunning');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'ProcessReadOutput') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'bl _ProcessReadOutput');
+      EmitCallSym('_ProcessReadOutput');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'ProcessExitCode') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      Self.Emit(#9'bl _ProcessExitCode');
+      EmitCallSym('_ProcessExitCode');
       Exit;
     end;
   end;
@@ -2938,7 +2951,7 @@ begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
     Self.Emit(#9'mov x1, x0');
     EmitPopTo('x0');
-    Self.Emit(#9'bl _MethodAddress');
+    EmitCallSym('_MethodAddress');
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
@@ -2948,33 +2961,33 @@ begin
   begin
     if SameText(TFuncCallExpr(AExpr).Name, 'ParamCount') then
     begin
-      Self.Emit(#9'bl _ParamCount');
+      EmitCallSym('_ParamCount');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'GetCurrentDir') then
     begin
-      Self.Emit(#9'bl _GetCurrentDir');
+      EmitCallSym('_GetCurrentDir');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'GetTempDir') then
     begin
-      Self.Emit(#9'bl _GetTempDir');
+      EmitCallSym('_GetTempDir');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'CurrentExceptionMessage') then
     begin
-      Self.Emit(#9'bl _CurrentExceptionMessage');
+      EmitCallSym('_CurrentExceptionMessage');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'GetProcessID') then
     begin
-      Self.Emit(#9'bl _GetProcessID');
+      EmitCallSym('_GetProcessID');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'ProcessCreate') then
     begin
       { allocate a process handle — returns a pointer in x0 }
-      Self.Emit(#9'bl _ProcessCreate');
+      EmitCallSym('_ProcessCreate');
       Exit;
     end;
   end;
@@ -3022,7 +3035,7 @@ begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
       Self.Emit(#9'mov x1, x0');
       EmitPopTo('x0');
-      Self.Emit(#9'bl _OrdAt');
+      EmitCallSym('_OrdAt');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'ChangeFileExt') then
@@ -3050,7 +3063,7 @@ begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
       Self.Emit(#9'mov x1, x0');
       EmitPopTo('x0');
-      Self.Emit(#9'bl _BlaiseReallocMem');
+      EmitCallSym('_BlaiseReallocMem');
       Exit;
     end;
   end;
@@ -3072,9 +3085,9 @@ begin
     Self.Emit(#9'ldr x1, [sp]');
     Self.Emit(#9'ldr x0, [sp, #16]');
     if SameText(TFuncCallExpr(AExpr).Name, 'Copy') then
-      Self.Emit(#9'bl _StringCopy')
+      EmitCallSym('_StringCopy')
     else
-      Self.Emit(#9'bl _StringPosEx');
+      EmitCallSym('_StringPosEx');
     EmitPushX0();
     if ArcBuiltinStrArgOwnsRef(
          TASTExpr(TFuncCallExpr(AExpr).Args.Items[1])) then
@@ -3149,7 +3162,7 @@ begin
       symptom).  Byte-store contexts (S[I] := Chr(N)) must NOT allocate — they
       go through EmitByteRhsToX0 below, which keeps the raw-ordinal form. }
     Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-    Self.Emit(#9'bl _Chr');
+    EmitCallSym('_Chr');
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
@@ -3163,7 +3176,7 @@ begin
     Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
     Self.Emit(#9'mov x1, x0');
     EmitPopTo('x0');
-    Self.Emit(#9'bl _HasClassAttribute');
+    EmitCallSym('_HasClassAttribute');
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
@@ -3185,7 +3198,7 @@ begin
     end;
     EmitPopTo('x1');
     EmitPopTo('x0');
-    Self.Emit(#9'bl _' + TFuncCallExpr(AExpr).AttrRTTIBuiltin);
+    EmitCallSym('_' + TFuncCallExpr(AExpr).AttrRTTIBuiltin);
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
@@ -3322,7 +3335,7 @@ begin
         EmitJumboSetLiteral(TArrayLiteralExpr(BE.Right));  { x0 = bitmap, sp lowered }
         Self.Emit(Format(#9'ldr x1, [sp, #%d]',
           [JumboSetLiteralBytes(BE.Right)]));              { the parked ord }
-        Self.Emit(#9'bl _SetIn');
+        EmitCallSym('_SetIn');
         EmitAddSubImm('add', 'sp', 'sp', JumboSetLiteralBytes(BE.Right));
         Self.Emit(#9'add sp, sp, #16');   { drop the parked ord }
       end
@@ -3330,7 +3343,7 @@ begin
       begin
         Self.EmitExprToX0(BE.Right);      { bitmap address }
         EmitPopTo('x1');                  { the parked ord }
-        Self.Emit(#9'bl _SetIn');
+        EmitCallSym('_SetIn');
       end;
       Exit;
     end;
@@ -3399,7 +3412,7 @@ begin
       EmitPushX0();
       Self.Emit(#9'ldur x1, [sp]');        { right }
       Self.Emit(#9'ldur x0, [sp, #16]');   { left  }
-      Self.Emit(#9'bl _StringConcat');
+      EmitCallSym('_StringConcat');
       { dispose operand transients by shape — nested concats produce rc=0
         intermediates that would otherwise leak permanently }
       if ArcBuiltinStrArgOwnsRef(BE.Left) or
@@ -3436,9 +3449,9 @@ begin
       Self.Emit(#9'ldur x0, [sp, #16]');   { left  (peek) }
       Self.Emit(#9'ldur x1, [sp]');        { right (peek) }
       if BE.Op in [boEQ, boNE] then
-        Self.Emit(#9'bl _StringEquals')
+        EmitCallSym('_StringEquals')
       else
-        Self.Emit(#9'bl _StringCompare');
+        EmitCallSym('_StringCompare');
       EmitPushX0();                        { result bracket }
       if ArcBuiltinStrArgOwnsRef(BE.Right) then
       begin
@@ -3792,9 +3805,9 @@ begin
     EmitTypeinfoAddr('x1', TIsExpr(AExpr).TypeName);
     if (TIsExpr(AExpr).ResolvedTargetType <> nil) and
        (TIsExpr(AExpr).ResolvedTargetType.Kind = tyInterface) then
-      Self.Emit(#9'bl _ImplementsInterface')
+      EmitCallSym('_ImplementsInterface')
     else
-      Self.Emit(#9'bl _IsInstance');
+      EmitCallSym('_IsInstance');
     Exit;
   end;
   if (AExpr is TAsExpr) and (AExpr.ResolvedType <> nil) and
@@ -3806,9 +3819,9 @@ begin
     Self.EmitExprToX0(TAsExpr(AExpr).Obj);
     EmitPushX0();
     EmitTypeinfoAddr('x1', TAsExpr(AExpr).TypeName);
-    Self.Emit(#9'bl _IsInstance');
+    EmitCallSym('_IsInstance');
     Self.Emit(Format(#9'cbnz x0, %s', [CondName]));
-    Self.Emit(#9'bl _Raise_InvalidCast');
+    EmitCallSym('_Raise_InvalidCast');
     Self.Emit(CondName + ':');
     EmitPopTo('x0');
     Exit;
@@ -3942,7 +3955,7 @@ begin
     begin
       Self.EmitExprToX0(TSupportsExpr(AExpr).Obj);
       EmitTypeinfoAddr('x1', TSupportsExpr(AExpr).IntfTypeName);
-      Self.Emit(#9'bl _GetItab');
+      EmitCallSym('_GetItab');
       Self.Emit(#9'cmp x0, #0');
       Self.Emit(#9'cset x0, ne');
       Exit;
@@ -3950,7 +3963,7 @@ begin
     Self.EmitExprToX0(TSupportsExpr(AExpr).Obj);
     EmitPushX0();                                    { [obj] }
     EmitTypeinfoAddr('x1', TSupportsExpr(AExpr).IntfTypeName);
-    Self.Emit(#9'bl _GetItab');
+    EmitCallSym('_GetItab');
     EmitPushX0();                                    { [obj][itab] }
     CondName := NewLabel('supno');
     Lit := NewLabel('supend');
@@ -3958,9 +3971,9 @@ begin
     EmitPopTo('x0');
     EmitStoreSlot('x0', TSupportsExpr(AExpr).OutVarName + '_itab');
     Self.Emit(#9'ldr x0, [sp]');
-    Self.Emit(#9'bl _ClassAddRef');
+    EmitCallSym('_ClassAddRef');
     EmitLoadSlot('x0', TSupportsExpr(AExpr).OutVarName);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     EmitPopTo('x0');
     EmitStoreSlot('x0', TSupportsExpr(AExpr).OutVarName);
     Self.Emit(#9'movz x0, #1');
@@ -4062,9 +4075,9 @@ begin
         else
         begin
           Self.Emit(#9'ldr x0, [sp]');     { fieldval }
-          Self.Emit(#9'bl _ClassAddRef');  { pin it across the base release }
+          EmitCallSym('_ClassAddRef');  { pin it across the base release }
           Self.Emit(#9'ldr x0, [sp, #16]'); { base }
-          Self.Emit(#9'bl _ClassRelease'); { release base — field pinned }
+          EmitCallSym('_ClassRelease'); { release base — field pinned }
           EmitPopTo('x0');                 { fieldval }
           Self.Emit(#9'add sp, sp, #16');  { drop base }
         end;
@@ -4078,7 +4091,7 @@ begin
       EmitElemLoad(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc);
       EmitPushX0();                    { [base][fieldval] }
       Self.Emit(#9'ldr x0, [sp, #16]');
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
       EmitPopTo('x0');                 { fieldval }
       Self.Emit(#9'add sp, sp, #16');  { drop base }
       Exit;
@@ -4274,13 +4287,13 @@ begin
     A bare release on an rc = 0 buffer drives it to -1 = IMMORTAL — a
     permanent leak the --debug tracker cannot see. }
   if ArcExprOwnsRef(AExpr) then
-    Self.Emit(#9'bl _StringRelease')
+    EmitCallSym('_StringRelease')
   else if ArcExprIsUnownedStrTransient(AExpr) then
   begin
     EmitPushX0();
-    Self.Emit(#9'bl _StringAddRef');
+    EmitCallSym('_StringAddRef');
     EmitPopTo('x0');
-    Self.Emit(#9'bl _StringRelease');
+    EmitCallSym('_StringRelease');
   end;
 end;
 
@@ -4777,7 +4790,7 @@ begin
       Self.EmitExprToX0(AAsgn.Expr);
       Self.Emit(#9'mov x1, x0');
       EmitSlotAddr('x0', AAsgn.Name);
-      Self.Emit(#9'bl _WeakAssign');
+      EmitCallSym('_WeakAssign');
       ItabSym := IntfItabSym(TRecordTypeDesc(AAsgn.Expr.ResolvedType).Name,
         AAsgn.ResolvedLhsType.Name);
       Self.Emit(Format(#9'adrp x0, %s@PAGE', [ItabSym]));
@@ -4797,12 +4810,12 @@ begin
     if not ArcExprOwnsRef(AAsgn.Expr) then
     begin
       EmitPushX0();
-      Self.Emit(#9'bl _ClassAddRef');
+      EmitCallSym('_ClassAddRef');
       EmitPopTo('x0');
     end;
     EmitPushX0();
     EmitLoadSlot('x0', AAsgn.Name);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     EmitPopTo('x0');
     EmitStoreSlot('x0', AAsgn.Name);
     Self.Emit(Format(#9'adrp x0, %s@PAGE', [ItabSym]));
@@ -4818,9 +4831,9 @@ begin
       NotYet('var interface parameter', AAsgn);
     EmitLoadSlot('x0', TIdentExpr(AAsgn.Expr).Name);
     EmitPushX0();
-    Self.Emit(#9'bl _ClassAddRef');
+    EmitCallSym('_ClassAddRef');
     EmitLoadSlot('x0', AAsgn.Name);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     EmitPopTo('x0');
     EmitStoreSlot('x0', AAsgn.Name);
     EmitLoadSlot('x0', TIdentExpr(AAsgn.Expr).Name + '_itab');
@@ -4830,7 +4843,7 @@ begin
   if AAsgn.Expr is TNilLiteral then
   begin
     EmitLoadSlot('x0', AAsgn.Name);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     EmitStoreSlot('xzr', AAsgn.Name);
     EmitStoreSlot('xzr', AAsgn.Name + '_itab');
     Exit;
@@ -4855,7 +4868,7 @@ begin
       TFuncCallExpr(AAsgn.Expr).Name, TFuncCallExpr(AAsgn.Expr).Args,
       '__iret');
     EmitLoadSlot('x0', AAsgn.Name);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     { load BOTH words from the source before storing either — EmitStoreSlot
       clobbers x9 for the destination adrp, so the second half must not depend
       on x9 still pointing at the source temp. }
@@ -4880,7 +4893,7 @@ begin
       no sret support yet and stays an honest hole. }
     EmitRecCallDispatch(AAsgn.Expr, '__iret');
     EmitLoadSlot('x0', AAsgn.Name);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     { load BOTH words from the source before storing either (see above) }
     EmitSlotAddr('x9', '__iret');
     Self.Emit(#9'ldr x0, [x9]');
@@ -4905,17 +4918,17 @@ begin
   { load the typeinfo address through EmitTypeinfoAddr so the symbol matches the
     prefixed definition/impllist (LINK-1: a bare name here dangled). }
   EmitTypeinfoAddr('x1', AE.TypeName);
-  Self.Emit(#9'bl _GetItab');       { x0 = itab or nil }
+  EmitCallSym('_GetItab');       { x0 = itab or nil }
   OkL := NewLabel('asok');
   Self.Emit(Format(#9'cbnz x0, %s', [OkL]));
-  Self.Emit(#9'bl _Raise_InvalidCast');
+  EmitCallSym('_Raise_InvalidCast');
   Self.Emit(OkL + ':');
   EmitStoreSlot('x0', AAsgn.Name + '_itab');
   { obj half with the usual ARC: retain new (borrowed source), release old }
   Self.Emit(#9'ldr x0, [sp]');      { peek the obj }
-  Self.Emit(#9'bl _ClassAddRef');
+  EmitCallSym('_ClassAddRef');
   EmitLoadSlot('x0', AAsgn.Name);
-  Self.Emit(#9'bl _ClassRelease');
+  EmitCallSym('_ClassRelease');
   EmitPopTo('x0');
   EmitStoreSlot('x0', AAsgn.Name);
 end;
@@ -4966,7 +4979,7 @@ begin
     if not ArcExprOwnsRef(AAsgn.Expr) then
     begin
       EmitPushX0();
-      Self.Emit(#9'bl _StringAddRef');
+      EmitCallSym('_StringAddRef');
       EmitPopTo('x0');
     end;
     EmitPushX0();                       { [newval] }
@@ -4974,7 +4987,7 @@ begin
     if AAsgn.IsVarParam then
       Self.Emit(#9'ldr x9, [x9]');      { captured var-param: extra deref }
     Self.Emit(#9'ldr x0, [x9]');        { old string }
-    Self.Emit(#9'bl _StringRelease');
+    EmitCallSym('_StringRelease');
     EmitLoadSlot('x9', '_cap_' + AAsgn.Name);
     if AAsgn.IsVarParam then
       Self.Emit(#9'ldr x9, [x9]');
@@ -4989,7 +5002,7 @@ begin
     if not ArcExprOwnsRef(AAsgn.Expr) then
     begin
       EmitPushX0();
-      Self.Emit(#9'bl _ClassAddRef');
+      EmitCallSym('_ClassAddRef');
       EmitPopTo('x0');
     end;
     EmitPushX0();
@@ -4997,7 +5010,7 @@ begin
     if AAsgn.IsVarParam then
       Self.Emit(#9'ldr x9, [x9]');
     Self.Emit(#9'ldr x0, [x9]');
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     EmitLoadSlot('x9', '_cap_' + AAsgn.Name);
     if AAsgn.IsVarParam then
       Self.Emit(#9'ldr x9, [x9]');
@@ -5030,7 +5043,7 @@ begin
     if not ArcExprOwnsRef(AAsgn.Expr) then
     begin
       EmitPushX0();
-      Self.Emit(#9'bl _StringAddRef');
+      EmitCallSym('_StringAddRef');
       EmitPopTo('x0');
     end;
     EmitPushX0();
@@ -5038,14 +5051,14 @@ begin
     begin
       EmitLoadSlot('x9', AAsgn.Name);
       Self.Emit(#9'ldr x0, [x9]');
-      Self.Emit(#9'bl _StringRelease');
+      EmitCallSym('_StringRelease');
       EmitLoadSlot('x9', AAsgn.Name);
       EmitPopTo('x0');
       Self.Emit(#9'str x0, [x9]');
       Exit;
     end;
     EmitLoadSlot('x0', AAsgn.Name);
-    Self.Emit(#9'bl _StringRelease');
+    EmitCallSym('_StringRelease');
     EmitPopTo('x0');
     EmitStoreSlot('x0', AAsgn.Name);
     Exit;
@@ -5067,12 +5080,12 @@ begin
     if not ArcExprOwnsRef(AAsgn.Expr) then
     begin
       EmitPushX0();
-      Self.Emit(#9'bl _DynArrayAddRef');
+      EmitCallSym('_DynArrayAddRef');
       EmitPopTo('x0');
     end;
     EmitPushX0();
     EmitLoadSlot('x0', AAsgn.Name);
-    Self.Emit(#9'bl _DynArrayRelease');
+    EmitCallSym('_DynArrayRelease');
     EmitPopTo('x0');
     EmitStoreSlot('x0', AAsgn.Name);
     Exit;
@@ -5091,7 +5104,7 @@ begin
       Self.EmitExprToX0(AAsgn.Expr);
       Self.Emit(#9'mov x1, x0');
       EmitSlotAddr('x0', AAsgn.Name);
-      Self.Emit(#9'bl _WeakAssign');
+      EmitCallSym('_WeakAssign');
       Exit;
     end;
     { same ARC discipline as strings, through _Class* }
@@ -5099,7 +5112,7 @@ begin
     if not ArcExprOwnsRef(AAsgn.Expr) then
     begin
       EmitPushX0();
-      Self.Emit(#9'bl _ClassAddRef');
+      EmitCallSym('_ClassAddRef');
       EmitPopTo('x0');
     end;
     EmitPushX0();                       { [newval] — survives the release }
@@ -5109,14 +5122,14 @@ begin
         old value THROUGH the address, then store the new value there. }
       EmitLoadSlot('x9', AAsgn.Name);   { caller var address }
       Self.Emit(#9'ldr x0, [x9]');      { old value }
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
       EmitLoadSlot('x9', AAsgn.Name);   { re-load addr (release clobbers x9) }
       EmitPopTo('x0');                  { newval }
       Self.Emit(#9'str x0, [x9]');
       Exit;
     end;
     EmitLoadSlot('x0', AAsgn.Name);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     EmitPopTo('x0');
     EmitStoreSlot('x0', AAsgn.Name);
     Exit;
@@ -5192,7 +5205,7 @@ begin
         EmitSlotAddr('x0', AAsgn.Name);
         EmitSlotAddr('x1', '__rret');
         EmitIntLiteral('x2', AAsgn.ResolvedLhsType.RawSize());
-        Self.Emit(#9'bl memcpy');
+        EmitCallSym('memcpy');
         Exit;
       end;
       if Shape = 0 then
@@ -5239,7 +5252,7 @@ begin
       Self.Emit(#9'mov x0, x22');
       Self.Emit(#9'mov x1, x19');
       EmitIntLiteral('x2', AAsgn.ResolvedLhsType.RawSize());
-      Self.Emit(#9'bl memcpy');
+      EmitCallSym('memcpy');
       Self.Emit(#9'ldp x19, x22, [sp], #16');
       Exit;
     end;
@@ -5249,7 +5262,7 @@ begin
     Self.Emit(#9'mov x1, x0');
     EmitPopTo('x0');
     EmitIntLiteral('x2', AAsgn.ResolvedLhsType.RawSize());
-    Self.Emit(#9'bl memcpy');
+    EmitCallSym('memcpy');
     Exit;
   end;
   if (AAsgn.ResolvedLhsType <> nil) and AAsgn.ResolvedLhsType.IsFloat() then
@@ -5373,11 +5386,11 @@ begin
       Self.Emit(#9'ldr x19, [x19]');
     Self.Emit(#9'ldr x0, [x19]');                { old string pointer }
     EmitPopTo('x1');                             { N }
-    Self.Emit(#9'bl _StringSetLength');          { x0 = new (rc=0) }
+    EmitCallSym('_StringSetLength');          { x0 = new (rc=0) }
     EmitPushX0();                                { [new] }
-    Self.Emit(#9'bl _StringAddRef');             { new +1 (x0 already = new) }
+    EmitCallSym('_StringAddRef');             { new +1 (x0 already = new) }
     Self.Emit(#9'ldr x0, [x19]');                { old string pointer }
-    Self.Emit(#9'bl _StringRelease');            { old -1 }
+    EmitCallSym('_StringRelease');            { old -1 }
     EmitPopTo('x0');                             { new }
     Self.Emit(#9'str x0, [x19]');                { store new through the address }
     Self.Emit(#9'ldr x19, [sp], #16');           { restore x19 }
@@ -5418,7 +5431,7 @@ begin
       Self.Emit(#9'ldr x1, [sp, #16]');                   { N }
       EmitIntLiteral('x2', TDynArrayTypeDesc(
         TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType.RawSize());
-      Self.Emit(#9'bl _DynArraySetLength');
+      EmitCallSym('_DynArraySetLength');
       Self.Emit(#9'ldr x9, [sp]');                        { addr }
       Self.Emit(#9'str x0, [x9]');
       Self.Emit(#9'add sp, sp, #32');
@@ -5447,7 +5460,7 @@ begin
       Self.Emit(#9'ldr x1, [sp, #16]');                   { N }
       EmitIntLiteral('x2', TDynArrayTypeDesc(
         TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType.RawSize());
-      Self.Emit(#9'bl _DynArraySetLength');
+      EmitCallSym('_DynArraySetLength');
       Self.Emit(#9'ldr x9, [sp]');                        { addr }
       Self.Emit(#9'str x0, [x9]');
       Self.Emit(#9'add sp, sp, #32');
@@ -5459,7 +5472,7 @@ begin
     EmitPopTo('x1');
     EmitIntLiteral('x2', TDynArrayTypeDesc(
       TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType.RawSize());
-    Self.Emit(#9'bl _DynArraySetLength');
+    EmitCallSym('_DynArraySetLength');
     EmitStoreSlot('x0',
       TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
     Exit;
@@ -5468,7 +5481,7 @@ begin
      (ACall.Args.Count = 1) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
-    Self.Emit(#9'bl _BlaiseFreeMem');
+    EmitCallSym('_BlaiseFreeMem');
     Exit;
   end;
   if SameText(ACall.Name, 'Halt') and (ACall.ResolvedDecl = nil) then
@@ -5477,14 +5490,14 @@ begin
       Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]))
     else
       Self.Emit(#9'movz x0, #0');
-    Self.Emit(#9'bl exit');
+    EmitCallSym('exit');
     Exit;
   end;
   if SameText(ACall.Name, 'Sleep') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 1) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
-    Self.Emit(#9'bl _Sleep');
+    EmitCallSym('_Sleep');
     Exit;
   end;
   if SameText(ACall.Name, 'ZeroMem') and (ACall.ResolvedDecl = nil) and
@@ -5496,7 +5509,7 @@ begin
     Self.Emit(#9'mov x2, x0');
     Self.Emit(#9'movz x1, #0');
     EmitPopTo('x0');
-    Self.Emit(#9'bl memset');
+    EmitCallSym('memset');
     Exit;
   end;
   if SameText(ACall.Name, 'RemoveDir') and (ACall.ResolvedDecl = nil) and
@@ -5534,11 +5547,11 @@ begin
     Self.Emit(#9'mov x2, x0');
     EmitPopTo('x1');
     EmitPopTo('x0');
-    Self.Emit(#9'bl _StringDelete');
+    EmitCallSym('_StringDelete');
     EmitPushX0();
-    Self.Emit(#9'bl _StringAddRef');
+    EmitCallSym('_StringAddRef');
     EmitLoadSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
-    Self.Emit(#9'bl _StringRelease');
+    EmitCallSym('_StringRelease');
     EmitPopTo('x0');
     EmitStoreSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
     Exit;
@@ -5578,21 +5591,21 @@ begin
      (ACall.Args.Count = 1) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
-    Self.Emit(#9'bl _ProcessExecute');
+    EmitCallSym('_ProcessExecute');
     Exit;
   end;
   if SameText(ACall.Name, 'ProcessWaitOnExit') and
      (ACall.ResolvedDecl = nil) and (ACall.Args.Count = 1) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
-    Self.Emit(#9'bl _ProcessWaitOnExit');
+    EmitCallSym('_ProcessWaitOnExit');
     Exit;
   end;
   if SameText(ACall.Name, 'ProcessFree') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 1) then
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
-    Self.Emit(#9'bl _ProcessFree');
+    EmitCallSym('_ProcessFree');
     Exit;
   end;
   if (SameText(ACall.Name, 'Inc') or SameText(ACall.Name, 'Dec')) and
@@ -5720,13 +5733,13 @@ begin
     if TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType <> nil then
     begin
       if TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType.IsString() then
-        Self.Emit(#9'bl _StringRelease')
+        EmitCallSym('_StringRelease')
       else if TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType.Kind =
               tyClass then
-        Self.Emit(#9'bl _ClassRelease')
+        EmitCallSym('_ClassRelease')
       else if TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType.Kind =
               tyDynArray then
-        Self.Emit(#9'bl _DynArrayRelease');
+        EmitCallSym('_DynArrayRelease');
     end;
     Exit;
   end;
@@ -5745,13 +5758,13 @@ begin
     begin
       if TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType.Kind =
            tyString then
-        Self.Emit(#9'bl _StringRelease')
+        EmitCallSym('_StringRelease')
       else if TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType.Kind =
               tyClass then
-        Self.Emit(#9'bl _ClassRelease')
+        EmitCallSym('_ClassRelease')
       else if TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType.Kind =
               tyDynArray then
-        Self.Emit(#9'bl _DynArrayRelease');
+        EmitCallSym('_DynArrayRelease');
     end;
     Exit;
   end;
@@ -5820,7 +5833,7 @@ begin
         EmitPushX0();
         Self.Emit(#9'mov x1, x0');
         Self.Emit(#9'movz w0, #1');
-        Self.Emit(#9'bl _SysWriteStr');
+        EmitCallSym('_SysWriteStr');
         EmitPopTo('x0');
         EmitStrDisposeX0(Arg);
       end
@@ -5828,28 +5841,28 @@ begin
       begin
         Self.Emit(#9'mov x1, x0');
         Self.Emit(#9'movz w0, #1');           { fd = stdout }
-        Self.Emit(#9'bl _SysWriteStr');
+        EmitCallSym('_SysWriteStr');
       end;
     end
     else if K in [tyDouble, tySingle] then
     begin
       Self.EmitExprToD0OrConvert(Arg);
       Self.Emit(#9'movz w0, #1');
-      Self.Emit(#9'bl _SysWriteDouble');
+      EmitCallSym('_SysWriteDouble');
     end
     else if K = tyBoolean then
     begin
       Self.EmitExprToX0(Arg);
       Self.Emit(#9'mov w1, w0');
       Self.Emit(#9'movz w0, #1');
-      Self.Emit(#9'bl _SysWriteBool');
+      EmitCallSym('_SysWriteBool');
     end
     else if K = tyInt64 then
     begin
       Self.EmitExprToX0(Arg);
       Self.Emit(#9'mov x1, x0');
       Self.Emit(#9'movz w0, #1');
-      Self.Emit(#9'bl _SysWriteInt64');
+      EmitCallSym('_SysWriteInt64');
     end
     else if IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) then
     begin
@@ -5861,7 +5874,7 @@ begin
         the IntToStr path, both of which pass x0 whole. }
       Self.Emit(#9'mov x1, x0');
       Self.Emit(#9'movz w0, #1');
-      Self.Emit(#9'bl _SysWriteInt');
+      EmitCallSym('_SysWriteInt');
     end
     else
       NotYet('Write/WriteLn argument of this type', Arg);
@@ -5869,7 +5882,7 @@ begin
   if ANewline then
   begin
     Self.Emit(#9'movz w0, #1');
-    Self.Emit(#9'bl _SysWriteNewline');
+    EmitCallSym('_SysWriteNewline');
   end;
 end;
 
@@ -5927,9 +5940,9 @@ procedure TArm64Backend.EmitExcPrologue(const AFrameSlot, AExcLbl,
   ATryLbl: string);
 begin
   EmitSlotAddr('x0', AFrameSlot);
-  Self.Emit(#9'bl _PushExcFrame');
+  EmitCallSym('_PushExcFrame');
   EmitSlotAddr('x0', AFrameSlot);
-  Self.Emit(#9'bl _blaise_setjmp');
+  EmitCallSym('_blaise_setjmp');
   Self.Emit(Format(#9'cbnz w0, %s', [AExcLbl]));
   Self.Emit(ATryLbl + ':');
 end;
@@ -5943,7 +5956,7 @@ begin
     frame and run try/finally bodies inline on the way out }
   for I := FExcDepth downto ATargetDepth + 1 do
   begin
-    Self.Emit(#9'bl _PopExcFrame');
+    EmitCallSym('_PopExcFrame');
     if I - 1 < FFinallyBodies.Count then
     begin
       FinBody := TCompoundStmt(FFinallyBodies.Items[I - 1]);
@@ -5968,7 +5981,7 @@ begin
   FFinallyBodies.Add(AStmt.FinallyBody);
   for I := 0 to AStmt.TryBody.Stmts.Count - 1 do
     EmitStmt(TASTStmt(AStmt.TryBody.Stmts.Items[I]));
-  Self.Emit(#9'bl _PopExcFrame');
+  EmitCallSym('_PopExcFrame');
   FExcDepth := FExcDepth - 1;
   FFinallyBodies.Delete(FFinallyBodies.Count - 1);
   { the finally body is emitted TWICE — normal path here, exception path
@@ -5988,16 +6001,16 @@ begin
   FExcDepth := FExcDepth + 1;
   FFinallyBodies.Add(AStmt.FinallyBody);
   Self.Emit(ExcL + ':');
-  Self.Emit(#9'bl _CurrentException');
+  EmitCallSym('_CurrentException');
   Self.Emit(#9'str x0, [sp, #-16]!');
-  Self.Emit(#9'bl _PopExcFrame');
+  EmitCallSym('_PopExcFrame');
   FExcDepth := FExcDepth - 1;
   FFinallyBodies.Delete(FFinallyBodies.Count - 1);
   FForN := FinForN;   { reuse the normal-path finally's for-slot numbers }
   for I := 0 to AStmt.FinallyBody.Stmts.Count - 1 do
     EmitStmt(TASTStmt(AStmt.FinallyBody.Stmts.Items[I]));
   Self.Emit(#9'ldr x0, [sp], #16');
-  Self.Emit(#9'bl _Reraise');
+  EmitCallSym('_Reraise');
   Self.Emit(EndL + ':');
 end;
 
@@ -6016,7 +6029,7 @@ begin
   FFinallyBodies.Add(nil);
   for I := 0 to AStmt.TryBody.Stmts.Count - 1 do
     EmitStmt(TASTStmt(AStmt.TryBody.Stmts.Items[I]));
-  Self.Emit(#9'bl _PopExcFrame');
+  EmitCallSym('_PopExcFrame');
   FExcDepth := FExcDepth - 1;
   FFinallyBodies.Delete(FFinallyBodies.Count - 1);
   Self.Emit(Format(#9'b %s', [EndL]));
@@ -6024,9 +6037,9 @@ begin
   if AStmt.Handlers.Count > 0 then
   begin
     { capture while our frame is still the top, then pop }
-    Self.Emit(#9'bl _CurrentException');
+    EmitCallSym('_CurrentException');
     Self.Emit(#9'str x0, [sp, #-16]!');
-    Self.Emit(#9'bl _PopExcFrame');
+    EmitCallSym('_PopExcFrame');
     for I := 0 to AStmt.Handlers.Count - 1 do
     begin
       H := TExceptHandlerClause(AStmt.Handlers.Items[I]);
@@ -6034,7 +6047,7 @@ begin
       NextL := NewLabel('hnext');
       Self.Emit(#9'ldr x0, [sp]');
       EmitTypeinfoAddr('x1', H.TypeName);
-      Self.Emit(#9'bl _IsInstance');
+      EmitCallSym('_IsInstance');
       Self.Emit(Format(#9'cbz w0, %s', [NextL]));
       Self.Emit(BodyL + ':');
       if H.VarName <> '' then
@@ -6042,9 +6055,9 @@ begin
         { bind: retain the exception (balances the scope-exit release of
           the handler var), release any prior binding, store }
         Self.Emit(#9'ldr x0, [sp]');
-        Self.Emit(#9'bl _ClassAddRef');
+        EmitCallSym('_ClassAddRef');
         EmitLoadSlot('x0', H.VarName);
-        Self.Emit(#9'bl _ClassRelease');
+        EmitCallSym('_ClassRelease');
         Self.Emit(#9'ldr x0, [sp]');
         EmitStoreSlot('x0', H.VarName);
       end;
@@ -6057,9 +6070,9 @@ begin
       if H.VarName = '' then
       begin
         Self.Emit(#9'ldr x0, [sp]');
-        Self.Emit(#9'bl _ClassAddRef');
+        EmitCallSym('_ClassAddRef');
         Self.Emit(#9'ldr x0, [sp]');
-        Self.Emit(#9'bl _ClassRelease');
+        EmitCallSym('_ClassRelease');
       end;
       Self.Emit(#9'add sp, sp, #16');
       Self.Emit(Format(#9'b %s', [EndL]));
@@ -6072,31 +6085,31 @@ begin
       { else HANDLES without a variable — dispose (re-raise path below forwards
         the borrow and must NOT dispose). }
       Self.Emit(#9'ldr x0, [sp]');
-      Self.Emit(#9'bl _ClassAddRef');
+      EmitCallSym('_ClassAddRef');
       Self.Emit(#9'ldr x0, [sp]');
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
       Self.Emit(#9'add sp, sp, #16');
       Self.Emit(Format(#9'b %s', [EndL]));
     end
     else
     begin
       Self.Emit(#9'ldr x0, [sp], #16');
-      Self.Emit(#9'bl _Reraise');
+      EmitCallSym('_Reraise');
     end;
   end
   else
   begin
     { bare except: catch-all body.  Capture the borrowed exception BEFORE the
       frame pop, dispose it after the body (BUG-20260720-exception-object-leak). }
-    Self.Emit(#9'bl _CurrentException');
+    EmitCallSym('_CurrentException');
     Self.Emit(#9'str x0, [sp, #-16]!');
-    Self.Emit(#9'bl _PopExcFrame');
+    EmitCallSym('_PopExcFrame');
     for I := 0 to AStmt.ExceptBody.Stmts.Count - 1 do
       EmitStmt(TASTStmt(AStmt.ExceptBody.Stmts.Items[I]));
     Self.Emit(#9'ldr x0, [sp]');
-    Self.Emit(#9'bl _ClassAddRef');
+    EmitCallSym('_ClassAddRef');
     Self.Emit(#9'ldr x0, [sp]');
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     Self.Emit(#9'add sp, sp, #16');
   end;
   Self.Emit(EndL + ':');
@@ -6143,7 +6156,7 @@ begin
         pointer lives one deref further. }
       Self.Emit(#9'ldr x19, [x19]');
     Self.Emit(#9'ldr x0, [x19]');                  { old data pointer }
-    Self.Emit(#9'bl _StringUnique');               { x0 = unique writable ptr }
+    EmitCallSym('_StringUnique');               { x0 = unique writable ptr }
     Self.Emit(#9'str x0, [x19]');                  { write back to slot }
     Self.Emit(#9'mov x9, x0');                     { x9 = unique base }
     Self.Emit(#9'ldr x19, [sp], #16');             { restore x19 }
@@ -6236,18 +6249,18 @@ begin
     begin
       EmitPushX0();
       if Elem.IsString() then
-        Self.Emit(#9'bl _StringAddRef')
+        EmitCallSym('_StringAddRef')
       else
-        Self.Emit(#9'bl _ClassAddRef');
+        EmitCallSym('_ClassAddRef');
       EmitPopTo('x0');
     end;
     EmitPushX0();                              { [addr][val] }
     Self.Emit(#9'ldr x9, [sp, #16]');
     Self.Emit(#9'ldr x0, [x9]');
     if Elem.IsString() then
-      Self.Emit(#9'bl _StringRelease')
+      EmitCallSym('_StringRelease')
     else
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
     Self.Emit(#9'ldr x9, [sp, #16]');
     EmitPopTo('x0');
     Self.Emit(#9'str x0, [x9]');
@@ -6285,7 +6298,7 @@ begin
       Self.Emit(#9'mov x0, x22');
       EmitSlotAddr('x1', '__rret');
       EmitIntLiteral('x2', Elem.RawSize());
-      Self.Emit(#9'bl memcpy');
+      EmitCallSym('memcpy');
       Self.Emit(#9'ldp x19, x22, [sp], #16');
       Self.Emit(#9'add sp, sp, #16');        { drop the element address }
       Exit;
@@ -6302,7 +6315,7 @@ begin
       Self.Emit(#9'mov x0, x22');
       Self.Emit(#9'mov x1, x19');
       EmitIntLiteral('x2', Elem.RawSize());
-      Self.Emit(#9'bl memcpy');
+      EmitCallSym('memcpy');
       Self.Emit(#9'ldp x19, x22, [sp], #16');
       Self.Emit(#9'add sp, sp, #16');      { drop the element address }
       Exit;
@@ -6311,7 +6324,7 @@ begin
     Self.Emit(#9'mov x1, x0');
     Self.Emit(#9'ldr x0, [sp], #16');      { the parked element address }
     EmitIntLiteral('x2', Elem.RawSize());
-    Self.Emit(#9'bl memcpy');
+    EmitCallSym('memcpy');
     Exit;
   end
   else if IsIntFam(Elem) or
@@ -6340,8 +6353,8 @@ begin
   if AStmt.Expr = nil then
   begin
     { bare re-raise: the in-flight exception }
-    Self.Emit(#9'bl _CurrentException');
-    Self.Emit(#9'bl _Reraise');
+    EmitCallSym('_CurrentException');
+    EmitCallSym('_Reraise');
     Exit;
   end;
   { NOTE (BUG-049): a raise operand that reads a class field off an owned
@@ -6353,7 +6366,7 @@ begin
     residual of BUG-049; the common contexts are all flushed and leak-free.
     Mirrors the x86-64 backend. }
   Self.EmitExprToX0(AStmt.Expr);
-  Self.Emit(#9'bl _Raise');
+  EmitCallSym('_Raise');
 end;
 
 procedure TArm64Backend.EmitRepeat(AStmt: TRepeatStmt);
@@ -6409,7 +6422,7 @@ begin
         Self.EmitExprToX0(TASTExpr(Br.Values.Items[J]));
         Self.Emit(#9'mov x1, x0');
         Self.Emit(#9'ldr x0, [sp]');
-        Self.Emit(#9'bl _StringEquals');
+        EmitCallSym('_StringEquals');
         Self.Emit(Format(#9'cbnz x0, %s', [BodyL]));
       end
       else
@@ -6548,15 +6561,15 @@ begin
     if not AOwned then
     begin
       if AStmt.ResolvedVarType.IsString() then
-        Self.Emit(#9'bl _StringAddRef')
+        EmitCallSym('_StringAddRef')
       else
-        Self.Emit(#9'bl _ClassAddRef');
+        EmitCallSym('_ClassAddRef');
     end;
     EmitLoadSlot('x0', AStmt.VarName);
     if AStmt.ResolvedVarType.IsString() then
-      Self.Emit(#9'bl _StringRelease')
+      EmitCallSym('_StringRelease')
     else
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
     EmitPopTo('x0');
     EmitStoreSlot('x0', AStmt.VarName);
     Exit;
@@ -6612,7 +6625,7 @@ begin
     begin
       { length re-read every pass — the body may SetLength }
       EmitLoadSlot('x0', TIdentExpr(AStmt.CollExpr).Name);
-      Self.Emit(#9'bl _DynArrayLength');
+      EmitCallSym('_DynArrayLength');
       Self.Emit(#9'mov x1, x0');
       EmitLoadSlot('x0', AStmt.IdxVarName);
       Self.Emit(#9'cmp x0, x1');
@@ -6677,7 +6690,7 @@ begin
     if AStmt.IsCodePointIter then
     begin
       EmitLoadSlot('x1', AStmt.IdxVarName);
-      Self.Emit(#9'bl _Utf8DecodeAt');
+      EmitCallSym('_Utf8DecodeAt');
       EmitPushX0();
       Self.Emit(#9'lsr x0, x0, #32');
       EmitStoreSlot('x0', AStmt.AdvVarName);
@@ -6773,7 +6786,7 @@ begin
     EmitMethodCallCommon(GetE, 'GetEnumerator', EmptyArgs);
     EmitPushX0();
     EmitLoadSlot('x0', AStmt.EnumVarName);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     EmitPopTo('x0');
     EmitStoreSlot('x0', AStmt.EnumVarName);
     Self.Emit(CondL + ':');
@@ -6817,19 +6830,19 @@ begin
       paths. }
     EmitOwnedStrTransientPin(AArg);
     EmitPushX0();                         { [arg] }
-    Self.Emit(Format(#9'bl %s', [ASym]));
+    EmitCallSym(ASym);
     EmitPushX0();                         { [arg][result] }
     Self.Emit(#9'ldr x0, [sp, #16]');
     if ArcExprIsUnownedStrTransient(AArg) then
       { pinned above: one bare release takes it 1 -> 0 }
-      Self.Emit(#9'bl _StringRelease')
+      EmitCallSym('_StringRelease')
     else
       EmitStrDisposeX0(AArg);
     EmitPopTo('x0');
     Self.Emit(#9'add sp, sp, #16');
     Exit;
   end;
-  Self.Emit(Format(#9'bl %s', [ASym]));
+  EmitCallSym(ASym);
 end;
 
 procedure TArm64Backend.EmitRecCallDispatch(AExpr: TASTExpr;
@@ -6926,7 +6939,7 @@ begin
     EmitLoadSlot('x2', TIdentExpr(AArgs.Items[1]).Name + '_high');
     Self.Emit(#9'add x2, x2, #1');                  { count = high + 1 }
     EmitPopTo('x0');                                { fmt }
-    Self.Emit(#9'bl _StringFormatVarRecs');
+    EmitCallSym('_StringFormatVarRecs');
     Exit;
   end;
   if not (TASTExpr(AArgs.Items[1]) is TArrayLiteralExpr) then
@@ -6940,7 +6953,7 @@ begin
     Self.Emit(#9'ldr x0, [sp]');
     Self.Emit(#9'movz x1, #0');
     Self.Emit(#9'movz x2, #0');
-    Self.Emit(#9'bl _StringFormatN');
+    EmitCallSym('_StringFormatN');
     if ArcBuiltinStrArgOwnsRef(TASTExpr(AArgs.Items[0])) then
     begin
       EmitPushX0();                          { [fmt][result] }
@@ -6982,7 +6995,7 @@ begin
   Self.Emit(Format(#9'ldr x0, [sp, #%d]', [TotalSize]));  { parked fmt }
   Self.Emit(#9'mov x1, sp');
   EmitIntLiteral('x2', FmtCount);
-  Self.Emit(#9'bl _StringFormatN');
+  EmitCallSym('_StringFormatN');
   { transient disposal by shape: the block still holds every element
     pointer and the fmt sits above it — park the result, sweep, restore }
   EmitPushX0();                              { [fmt][block][result] }
@@ -7018,7 +7031,7 @@ begin
   EmitPushX0();                           { [a0][a1] }
   Self.Emit(#9'ldr x1, [sp]');
   Self.Emit(#9'ldr x0, [sp, #16]');
-  Self.Emit(Format(#9'bl %s', [ASym]));
+  EmitCallSym(ASym);
   if ArcBuiltinStrArgOwnsRef(AArg0) or ArcBuiltinStrArgOwnsRef(AArg1) then
   begin
     EmitPushX0();                         { [a0][a1][result] }
@@ -7088,11 +7101,11 @@ begin
     begin
       EmitPushX0();
       if AStmt.BaseTy.IsString() then
-        Self.Emit(#9'bl _StringAddRef')
+        EmitCallSym('_StringAddRef')
       else if AStmt.BaseTy.Kind = tyDynArray then
-        Self.Emit(#9'bl _DynArrayAddRef')
+        EmitCallSym('_DynArrayAddRef')
       else
-        Self.Emit(#9'bl _ClassAddRef');
+        EmitCallSym('_ClassAddRef');
       EmitPopTo('x0');
     end;
     EmitPushX0();                          { [val] }
@@ -7100,11 +7113,11 @@ begin
     EmitPushX0();                          { [val][ptr] }
     Self.Emit(#9'ldr x0, [x0]');
     if AStmt.BaseTy.IsString() then
-      Self.Emit(#9'bl _StringRelease')
+      EmitCallSym('_StringRelease')
     else if AStmt.BaseTy.Kind = tyDynArray then
-      Self.Emit(#9'bl _DynArrayRelease')
+      EmitCallSym('_DynArrayRelease')
     else
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
     Self.Emit(#9'ldr x9, [sp]');
     Self.Emit(#9'ldr x0, [sp, #16]');
     Self.Emit(#9'str x0, [x9]');
@@ -7165,15 +7178,16 @@ end;
 
 function TArm64Backend.DarwinSym(const AName: string): string;
 begin
-  { see the declaration for the rule and why 'already underscored' is a
-    no-op rather than a second prefix.  StrAt, not AName[0]: the bare
-    subscript idiom is the one CLAUDE.md flags as having miscompiled under
-    the self-hosted native stage. }
-  if (FTarget.OS = osMacOS) and (AName <> '') and
-     (StrAt(AName, 0) <> 95) then   { 95 = '_' }
+  { see the declaration — unconditional on Darwin, no classification }
+  if FTarget.OS = osMacOS then
     Result := '_' + AName
   else
     Result := AName;
+end;
+
+procedure TArm64Backend.EmitCallSym(const AName: string);
+begin
+  Self.Emit(#9'bl ' + DarwinSym(AName));
 end;
 
 function TArm64Backend.TypeinfoSym(const ABase: string): string;
@@ -7193,8 +7207,8 @@ end;
 
 function TArm64Backend.FieldCleanupSym(const ABase: string): string;
 begin
-  { already carries the leading '_' that IS the Darwin prefix — DarwinSym is
-    a no-op here, and is kept so the invariant is stated in one place }
+  { '_FieldCleanup_X' is the base name; on Darwin it becomes
+    __FieldCleanup_X, which is what QBE emits for the same table }
   Result := DarwinSym('_FieldCleanup_' + ABase);
 end;
 
@@ -7202,9 +7216,10 @@ function TArm64Backend.RoutineSym(ADecl: TMethodDecl;
   const AName: string): string;
 begin
   if (ADecl <> nil) and ADecl.IsExternal and (ADecl.ExternalName <> '') then
-    { a C external name is class 3: left bare here, prefixed by the linker's
-      BindNameOf when it turns out to be a libSystem import }
-    Result := ADecl.ExternalName
+    { an external name takes the prefix like any other: 'getpid' -> _getpid is
+      libSystem's real symbol, and '_StringAddRef' -> __StringAddRef matches the
+      definition another RTL unit emits for it }
+    Result := DarwinSym(ADecl.ExternalName)
   else if (ADecl <> nil) and (ADecl.ResolvedQbeName <> '') then
     Result := DarwinSym(CodegenMangle(ADecl.ResolvedQbeName))
   else if ADecl <> nil then
@@ -7369,14 +7384,14 @@ begin
   Self.Emit(#9'mov x0, sp');
   Self.Emit(#9'movz x1, #0');
   EmitIntLiteral('x2', NBytes);
-  Self.Emit(#9'bl memset');
+  EmitCallSym('memset');
   for I := 0 to AExpr.Elements.Count - 1 do
   begin
     Elem := TASTExpr(AExpr.Elements.Items[I]);
     Self.EmitExprToX0(Elem);       { ordinal in x0 }
     Self.Emit(#9'mov x1, x0');
     Self.Emit(#9'mov x0, sp');     { bitmap address (sp unmoved by eval) }
-    Self.Emit(#9'bl _SetInclude');
+    EmitCallSym('_SetInclude');
   end;
   Self.Emit(#9'mov x0, sp');       { return the bitmap address }
 end;
@@ -8068,7 +8083,7 @@ begin
     objects may define the same bare RTL symbol — weak copies collapse
     at link.  _main stays strong: it is the LC_MAIN entry. }
   if (ADecl.OwningUnit <> '') and IsUnmangledUnit(ADecl.OwningUnit) and
-     (Sym <> '_main') then
+     (Sym <> DarwinSym('main')) then
     AWeakBind := True;
   if ADecl.NoStackFrame then
   begin
@@ -8445,19 +8460,19 @@ begin
     if Par.ResolvedType.Kind = tyString then
     begin
       EmitLoadSlot('x0', Par.ParamName);
-      Self.Emit(#9'bl _StringAddRef');
+      EmitCallSym('_StringAddRef');
     end;
     if Par.ResolvedType.Kind = tyInterface then
     begin
       EmitLoadSlot('x0', Par.ParamName);
-      Self.Emit(#9'bl _ClassAddRef');
+      EmitCallSym('_ClassAddRef');
     end;
     { by-value dyn-array param: co-owning copy — retain here, released with the
       dyn-array locals at scope exit (registered in FDynLocals above). }
     if Par.ResolvedType.Kind = tyDynArray then
     begin
       EmitLoadSlot('x0', Par.ParamName);
-      Self.Emit(#9'bl _DynArrayAddRef');
+      EmitCallSym('_DynArrayAddRef');
     end;
   end;
   { pass 2: copy the bytes of every pointer-passed record param into its
@@ -8479,7 +8494,7 @@ begin
       EmitSlotAddr('x0', Par.ParamName);
       EmitLoadSlot('x1', '__pptr_' + Par.ParamName);
       EmitIntLiteral('x2', Par.ResolvedType.RawSize());
-      Self.Emit(#9'bl memcpy');
+      EmitCallSym('memcpy');
     end
     else if IsMethodPtrType(Par.ResolvedType) and (not Par.IsVarParam) then
     begin
@@ -8528,7 +8543,7 @@ begin
     EmitSlotAddr('x0', 'Result');
     Self.Emit(#9'movz w1, #0');
     EmitIntLiteral('x2', ADecl.ResolvedReturnType.RawSize());
-    Self.Emit(#9'bl memset');
+    EmitCallSym('memset');
   end
   else if FIsFunction then
     EmitStoreSlot('xzr', 'Result');
@@ -8544,7 +8559,7 @@ begin
         Self.Emit(#9'movz w1, #0');
         EmitIntLiteral('x2',
           TVarDecl(ADecl.Body.Decls.Items[I]).ResolvedType.RawSize());
-        Self.Emit(#9'bl memset');
+        EmitCallSym('memset');
       end
       else if IsMethodPtrType(
                 TVarDecl(ADecl.Body.Decls.Items[I]).ResolvedType) then
@@ -8568,24 +8583,24 @@ begin
   for I := 0 to FStrLocals.Count - 1 do
   begin
     EmitLoadSlot('x0', FStrLocals.Strings[I]);
-    Self.Emit(#9'bl _StringRelease');
+    EmitCallSym('_StringRelease');
   end;
   { release class-typed locals (borrowed Self is NOT in FObjLocals) }
   for I := 0 to FObjLocals.Count - 1 do
   begin
     EmitLoadSlot('x0', FObjLocals.Strings[I]);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
   end;
   { release the obj half of interface locals }
   for I := 0 to FIntfLocals.Count - 1 do
   begin
     EmitLoadSlot('x0', FIntfLocals.Strings[I]);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
   end;
   for I := 0 to FDynLocals.Count - 1 do
   begin
     EmitLoadSlot('x0', FDynLocals.Strings[I]);
-    Self.Emit(#9'bl _DynArrayRelease');
+    EmitCallSym('_DynArrayRelease');
   end;
   { release the Env half of 'reference to' closure locals (arkRefEnv): load the
     slot address, read the Env pointer at +8, _ClassRelease it (nil-safe, so a
@@ -8594,7 +8609,7 @@ begin
   begin
     EmitSlotAddr('x0', FRefLocals.Strings[I]);
     Self.Emit(#9'ldr x0, [x0, #8]');
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
   end;
   { release the managed fields of record locals — the base-class walk needs
     a callee-saved base register across its release calls }
@@ -8620,7 +8635,7 @@ begin
         Self.Emit(#9'mov x1, x0');
         EmitPopTo('x0');
         EmitIntLiteral('x2', ADecl.ResolvedReturnType.RawSize());
-        Self.Emit(#9'bl memcpy');
+        EmitCallSym('memcpy');
       end;
       1:
       begin
@@ -9068,7 +9083,7 @@ begin
           EmitPushX0();
           PopRegs.Add('x' + IntToStr(NInt));
           Self.Emit(#9'ldr x0, [sp]');
-          Self.Emit(#9'bl _DynArrayLength');
+          EmitCallSym('_DynArrayLength');
           Self.Emit(#9'sub x0, x0, #1');
           EmitPushX0();
           PopRegs.Add('x' + IntToStr(NInt + 1));
@@ -9440,7 +9455,7 @@ begin
             cycles 1 -> 2 -> 1 and the bare release after the call disposes it
             exactly once — the same rule shapes 'P', the closure call and the
             property setter already follow. }
-          Self.Emit(#9'bl _StringAddRef');
+          EmitCallSym('_StringAddRef');
           TransShapes := TransShapes + '0';
           Inc(TransN);
         end
@@ -9452,7 +9467,7 @@ begin
             NotYet('more than 8 owned string transient args in one call', Arg);
           EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
           { pin NOW (value still in x0), before the call consumes it }
-          Self.Emit(#9'bl _StringAddRef');
+          EmitCallSym('_StringAddRef');
           TransShapes := TransShapes + 'P';
           Inc(TransN);
         end;
@@ -9693,13 +9708,13 @@ begin
       if Copy(TransShapes, I, 1) = 'C' then
       begin
         { owned class transient: one release drops the borrowed +1 }
-        Self.Emit(#9'bl _ClassRelease');
+        EmitCallSym('_ClassRelease');
         Continue;
       end;
       { shapes '0' and 'P' both had their _StringAddRef emitted BEFORE the
         call, so this bare release just balances it.  Shape '1' (rc=1 owned
         transient) also lands here for its single release. }
-      Self.Emit(#9'bl _StringRelease');
+      EmitCallSym('_StringRelease');
     end;
     Self.Emit(#9'ldr x9, [sp], #16');
     Self.Emit(#9'fmov d0, x9');
@@ -10478,7 +10493,7 @@ begin
     begin
       E := RT.VTableEntryAt(S);
       if E.IsAbstract then
-        Self.Emit(#9'.quad _AbstractMethodError')
+        Self.Emit(#9'.quad ' + DarwinSym('_AbstractMethodError'))
       else if (Length(E.ImplName) > 0) and
               (StrAt(E.ImplName, 0) = Ord('$')) then
         { ImplName is a QBE label and may carry the $ sigil }
@@ -10648,7 +10663,7 @@ begin
             abort stub; otherwise the vtable-slot ImplName (correct across
             units and for generic-instance clones). }
           if IsAbstractClassMethod(ClassRT, ID.MethodName(K)) then
-            Self.Emit(#9'.quad _AbstractMethodError')
+            Self.Emit(#9'.quad ' + DarwinSym('_AbstractMethodError'))
           else
             Self.Emit(Format(#9'.quad %s',
               [ItabMethodRefArm64(ClassRT, TD, ID.MethodName(K))]));
@@ -10817,7 +10832,7 @@ begin
   begin
     EmitPushX0();               { park the result }
     Self.Emit(#9'ldr x0, [sp, #16]');
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     EmitPopTo('x0');
     Self.Emit(#9'add sp, sp, #16');   { drop the receiver copy }
   end;
@@ -10838,7 +10853,7 @@ begin
       EmitAddSubImm('add', 'x0', 'x0', AStmt.ImplicitBaseInfo.Offset);
     EmitPushX0();
     Self.Emit(#9'ldr x0, [x0]');
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     EmitPopTo('x9');
     Self.Emit(#9'str xzr, [x9]');
     Exit;
@@ -10861,11 +10876,11 @@ begin
     if AStmt.ResolvedReturnTypeDesc <> nil then
     begin
       if AStmt.ResolvedReturnTypeDesc.Kind = tyString then
-        Self.Emit(#9'bl _StringRelease')
+        EmitCallSym('_StringRelease')
       else if AStmt.ResolvedReturnTypeDesc.Kind = tyClass then
-        Self.Emit(#9'bl _ClassRelease')
+        EmitCallSym('_ClassRelease')
       else if AStmt.ResolvedReturnTypeDesc.Kind = tyDynArray then
-        Self.Emit(#9'bl _DynArrayRelease');
+        EmitCallSym('_DynArrayRelease');
     end;
     Exit;
   end;
@@ -10887,10 +10902,10 @@ begin
       AStmt.Args);
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
        (AStmt.ResolvedReturnTypeDesc.Kind = tyClass) then
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
        (AStmt.ResolvedReturnTypeDesc.Kind = tyString) then
-      Self.Emit(#9'bl _StringRelease');
+      EmitCallSym('_StringRelease');
     Exit;
   end;
   if (TMethodDecl(AStmt.ResolvedMethod) = nil) and
@@ -10929,7 +10944,7 @@ begin
       Self.Emit(#9'mov x0, x9');
       EmitPushX0();
       Self.Emit(#9'ldr x0, [x0]');
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
       EmitPopTo('x9');
       Self.Emit(#9'str xzr, [x9]');
       Exit;
@@ -10948,7 +10963,7 @@ begin
       end;
       EmitPushX0();
       Self.Emit(#9'ldr x0, [x0]');
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
       EmitPopTo('x9');
       Self.Emit(#9'str xzr, [x9]');
       Exit;
@@ -10960,7 +10975,7 @@ begin
         non-constructor method-call result — so Free is a single balanced
         release with no slot to nil (mirrors the x86-64 general branch). }
       Self.EmitExprToX0(AStmt.ObjExpr);
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
       Exit;
     end;
     if AStmt.IsImplicitSelf then
@@ -10971,13 +10986,13 @@ begin
       EmitLoadSlot('x0', AStmt.ObjectName);
       EmitPushX0();
       Self.Emit(#9'ldr x0, [x0]');
-      Self.Emit(#9'bl _ClassRelease');
+      EmitCallSym('_ClassRelease');
       EmitPopTo('x9');
       Self.Emit(#9'str xzr, [x9]');
       Exit;
     end;
     EmitLoadSlot('x0', AStmt.ObjectName);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
     Self.Emit(#9'movz x0, #0');
     EmitStoreSlot('x0', AStmt.ObjectName);
     Exit;
@@ -11008,10 +11023,10 @@ begin
   { a discarded owned result (class-typed) must be released }
   if (AStmt.ResolvedReturnTypeDesc <> nil) and
      (AStmt.ResolvedReturnTypeDesc.Kind = tyClass) then
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
   if (AStmt.ResolvedReturnTypeDesc <> nil) and
      (AStmt.ResolvedReturnTypeDesc.Kind = tyString) then
-    Self.Emit(#9'bl _StringRelease');
+    EmitCallSym('_StringRelease');
 end;
 
 procedure TArm64Backend.EmitMethodCallExpr(AExpr: TMethodCallExpr);
@@ -11033,7 +11048,7 @@ begin
     if AExpr.IsMetaclassDispatch then
     begin
       EmitLoadSlot('x0', AExpr.ObjectName);
-      Self.Emit(#9'bl _ClassCreate');
+      EmitCallSym('_ClassCreate');
       MD := TMethodDecl(AExpr.ResolvedMethod);
       { a resolved ctor is CALLED even when Body = nil — imported unit
         interfaces carry declaration stubs; the body lives in the
@@ -11090,7 +11105,7 @@ begin
         ''' with no resolved class type', AExpr);
     Self.Emit(Format(#9'adrp x1, %s@PAGE', [FieldCleanupSym(Sym)]));
     Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF', [FieldCleanupSym(Sym)]));
-    Self.Emit(#9'bl _ClassAlloc');
+    EmitCallSym('_ClassAlloc');
     if TRecordTypeDesc(AExpr.ResolvedClassType).HasVTable() then
     begin
       Self.Emit(Format(#9'adrp x9, %s@PAGE', [VtableSym(Sym)]));
@@ -11144,7 +11159,7 @@ begin
       Self.Emit(#9'ldr x0, [x0]');    { slot 0 = typeinfo }
     end;
     EmitPopTo('x1');
-    Self.Emit(#9'bl _InheritsFrom');
+    EmitCallSym('_InheritsFrom');
     Exit;
   end;
   if AExpr.IsMetaclassDispatch or AExpr.IsProcFieldCall or
@@ -11421,8 +11436,8 @@ begin
   FExcSlotN := 0;
   FFinallyBodies.Clear();
   FLoopExcDepth.Clear();
-  Self.Emit(#9'bl _SetArgs');
-  Self.Emit(#9'bl _BlaiseInit');
+  EmitCallSym('_SetArgs');
+  EmitCallSym('_BlaiseInit');
   { unit initialization sections, in dependency (append) order }
   for I := 0 to FUnitInits.Count - 1 do
     Self.Emit(Format(#9'bl %s', [FUnitInits.Strings[I]]));
@@ -11439,7 +11454,7 @@ begin
   for I := 0 to FStrGlobals.Count - 1 do
   begin
     EmitLoadSlot('x0', FStrGlobals.Strings[I]);
-    Self.Emit(#9'bl _StringRelease');
+    EmitCallSym('_StringRelease');
   end;
   for I := 0 to FRecGlobals.Count - 1 do
     if AggHasManaged(TTypeDesc(FRecGlobals.Objects[I])) then
@@ -11453,24 +11468,24 @@ begin
   for I := 0 to FObjGlobals.Count - 1 do
   begin
     EmitLoadSlot('x0', FObjGlobals.Strings[I]);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
   end;
   for I := 0 to FIntfGlobals.Count - 1 do
   begin
     EmitLoadSlot('x0', FIntfGlobals.Strings[I]);
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
   end;
   for I := 0 to FDynGlobals.Count - 1 do
   begin
     EmitLoadSlot('x0', FDynGlobals.Strings[I]);
-    Self.Emit(#9'bl _DynArrayRelease');
+    EmitCallSym('_DynArrayRelease');
   end;
   { release the Env half of 'reference to' closure globals (arkRefEnv) }
   for I := 0 to FRefGlobals.Count - 1 do
   begin
     EmitSlotAddr('x0', FRefGlobals.Strings[I]);
     Self.Emit(#9'ldr x0, [x0, #8]');
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
   end;
   Self.Emit(#9'movz w0, #0');
   Self.Emit(#9'mov sp, x29');
@@ -11515,10 +11530,10 @@ begin
     Self.Emit(Format('_ts_%s:', [FTlvGlobals.Strings[I]]));
     Self.Emit(Format(#9'.zero %d', [Sz]));
   end;
-  { TLV descriptors: three quads — thunk, key, storage.  The thunk
-    references _tlv_bootstrap by its C name; the Mach-O linker's
-    underscore rule binds it to dyld's __tlv_bootstrap, which rewrites
-    the descriptor at load.  The access sequence calls through it. }
+  { TLV descriptors: three quads — thunk, key, storage.  The thunk names dyld's
+    bootstrap whose C name is _tlv_bootstrap, so the emitted symbol is
+    __tlv_bootstrap (DarwinSym) — the same spelling dyld exports.  dyld rewrites
+    the descriptor at load; the access sequence calls through it. }
   Self.Emit('.section __DATA,__thread_vars');
   for I := 0 to FTlvGlobals.Count - 1 do
   begin
@@ -11528,7 +11543,7 @@ begin
     else
       Self.Emit(Format('.globl _tv_%s', [FTlvGlobals.Strings[I]]));
     Self.Emit(Format('_tv_%s:', [FTlvGlobals.Strings[I]]));
-    Self.Emit(#9'.quad _tlv_bootstrap');
+    Self.Emit(#9'.quad ' + DarwinSym('_tlv_bootstrap'));
     Self.Emit(#9'.quad 0');
     Self.Emit(Format(#9'.quad _ts_%s', [FTlvGlobals.Strings[I]]));
   end;
@@ -11936,7 +11951,7 @@ begin
     Self.Emit(Format(#9'add x0, %s, #%d', [ABaseReg, AOffset]))
   else
     Self.Emit(Format(#9'mov x0, %s', [ABaseReg]));
-  Self.Emit(#9'bl _WeakClear');
+  EmitCallSym('_WeakClear');
 end;
 
 procedure TArm64Backend.EmitReleaseSlotAt(AType: TTypeDesc; AOffset: Integer;
@@ -11944,12 +11959,12 @@ procedure TArm64Backend.EmitReleaseSlotAt(AType: TTypeDesc; AOffset: Integer;
 begin
   Self.Emit(Format(#9'ldr x0, [%s, #%d]', [ABaseReg, AOffset]));
   if AType.IsString() then
-    Self.Emit(#9'bl _StringRelease')
+    EmitCallSym('_StringRelease')
   else if AType.Kind = tyDynArray then
-    Self.Emit(#9'bl _DynArrayRelease')
+    EmitCallSym('_DynArrayRelease')
   else
     { tyClass and tyInterface release the obj slot via _ClassRelease }
-    Self.Emit(#9'bl _ClassRelease');
+    EmitCallSym('_ClassRelease');
   if AZero then
     Self.Emit(Format(#9'str xzr, [%s, #%d]', [ABaseReg, AOffset]));
 end;
@@ -11959,11 +11974,11 @@ procedure TArm64Backend.EmitRetainSlotAt(AType: TTypeDesc; AOffset: Integer;
 begin
   Self.Emit(Format(#9'ldr x0, [%s, #%d]', [ABaseReg, AOffset]));
   if AType.IsString() then
-    Self.Emit(#9'bl _StringAddRef')
+    EmitCallSym('_StringAddRef')
   else if AType.Kind = tyDynArray then
-    Self.Emit(#9'bl _DynArrayAddRef')
+    EmitCallSym('_DynArrayAddRef')
   else
-    Self.Emit(#9'bl _ClassAddRef');
+    EmitCallSym('_ClassAddRef');
 end;
 
 procedure TArm64Backend.ArcEnterArrayWalk(const ABaseReg: string);

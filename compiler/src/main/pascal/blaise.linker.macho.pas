@@ -14,13 +14,22 @@ unit blaise.linker.macho;
 // the rebase/bind facts to TMachOExecWriter, which serialises the
 // MH_EXECUTE image (LC_MAIN entry, /usr/lib/dyld, libSystem.B.dylib).
 //
-// The UNDERSCORE RULE: an external symbol still undefined after all
-// objects merge is a libSystem import, bound under '_' + name — the C
-// symbol-prefix convention on Mach-O.  Pascal `external name 'open'`
-// therefore reaches libSystem's _open with no per-symbol import table
-// anywhere in the RTL; the same rule covers stdlib and user `external`
-// declarations (this replaces the runtime.libsystem.darwin trampoline
-// leaf the original plan called for).
+// The UNDERSCORE RULE lives in the BACKEND, not here: TArm64Backend.DarwinSym
+// gives every emitted name exactly one leading '_' on a Darwin target —
+// Pascal routines, the metadata families, AND `external name` literals alike.
+// So `external name 'open'` is emitted as _open, which is precisely libSystem's
+// export, with no per-symbol import table anywhere in the RTL.  An external
+// symbol still undefined after all objects merge is a libSystem import and is
+// bound under the name AS EMITTED; BindNameOf is the identity.
+//
+// It used to be applied here instead, with the backend leaving external names
+// bare.  That could not be made correct: the linker sees only a string and
+// cannot tell libSystem's 'open' from the RTL's own Pascal '_StringAddRef', so
+// the rule had to skip already-underscored names, which left the RTL spelled
+// _StringAddRef while QBE — whose Apple target always prefixed — emitted
+// __StringAddRef.  The two object worlds then could not link on macOS.  The
+// backend knows the target and needs no such classification, so the prefix
+// belongs there and is now uniform with QBE.
 //
 //   * a BRANCH26 to an import gets a synthesised STUB (adrp/ldr/br
 //     through a GOT slot appended to __data; the slot is dyld-BOUND) —
@@ -364,15 +373,27 @@ begin
 end;
 
 function TMachOLinker.BindNameOf(const AName: string): string;
+var
+  CName: string;
 begin
-  { the underscore rule — see the unit comment }
-  if not IsKnownLibSystemImport(AName) then
+  { IDENTITY — see the unit comment.  The backend applies the Darwin '_' prefix
+    itself (DarwinSym), to external names as well as Pascal ones, so an import
+    already arrives spelled the way dyld exports it: _getpid, ___cxa_atexit,
+    __tlv_bootstrap.  Adding another '_' here would double every one of them.
+    The diagnostic is still worth keeping: strip the prefix to recover the C
+    name and warn when it is not a libSystem export we recognise, because a
+    mis-spelled RTL or external symbol reaches dyld looking exactly like a
+    genuine import and aborts only at launch. }
+  Result := AName;
+  CName := AName;
+  if (CName <> '') and (Copy(CName, 0, 1) = '_') then
+    CName := Copy(CName, 1, Length(CName) - 1);
+  if not IsKnownLibSystemImport(CName) then
     WriteLn(StdErr, 'macho linker: note: binding ''', AName,
-      ''' from libSystem as ''_', AName,
-      ''' — if that is not a real libSystem export, dyld will abort ' +
+      ''' from libSystem (C name ''', CName,
+      ''') — if that is not a real libSystem export, dyld will abort ' +
       'at launch (a mis-spelled RTL/external symbol looks exactly ' +
       'like this)');
-  Result := '_' + AName;
 end;
 
 function TMachOLinker.ImportOf(const AName: string): Integer;

@@ -171,15 +171,18 @@ end;
   rtl.platform.layout.linux for the full rationale.  Target-guarded like
   the flat functions above.
 
-  The branch target is spelled '_AssignLayoutDarwin' by hand: an asm block is
-  emitted VERBATIM, so the backend's Darwin underscore rule cannot reach it,
-  and AssignLayoutDarwin is a plain Pascal routine whose label therefore
-  carries the '_'.  Hard-coding it is safe because this block is already
-  guarded by the DARWIN conditional.  _BlaisePlatformInit needs no change: its
-  Pascal identifier already begins with '_', which IS the Darwin prefix. }
+  BOTH symbols are spelled with their Darwin prefix by hand: an asm block is
+  emitted VERBATIM, so the backend's underscore rule (DarwinSym) cannot reach
+  inside it.  Every name gets exactly one '_' on Darwin, so the Pascal routine
+  AssignLayoutDarwin is _AssignLayoutDarwin, and this routine — whose Pascal
+  identifier already starts with an underscore — is __BlaisePlatformInit.  Its
+  own .weak must therefore name the DOUBLE-underscored label, or the weak
+  binding applies to a symbol nothing defines and the strong RTL copy no longer
+  collapses at link.  Hard-coding is safe because the block is already guarded
+  by the DARWIN conditional; the linux/freebsd twins keep the bare spellings. }
 procedure _BlaisePlatformInit; assembler; nostackframe;
 asm
-    .weak _BlaisePlatformInit
+    .weak __BlaisePlatformInit
     b _AssignLayoutDarwin
 end;
 

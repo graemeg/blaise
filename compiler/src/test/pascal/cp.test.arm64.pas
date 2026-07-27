@@ -63,7 +63,7 @@ type
     { slice 5: string comparisons via RTL helpers }
     procedure TestString_Comparisons_UseRtlHelpers;
     { leg 33: string subscript byte WRITE (S[I] := ch) — copy-on-write via
-      _StringUnique, plain-local and var-param forms }
+      __StringUnique, plain-local and var-param forms }
     procedure TestString_SubscriptWrite_CopyOnWrite;
     { slice 6: ARC-clean records — fields, whole-record copy, zero-init }
     procedure TestRecord_FieldsAndCopy;
@@ -179,7 +179,7 @@ type
     procedure TestForIn_ArraysStringsSets;
     { slice 36: for-in via the class enumerator protocol }
     procedure TestForIn_ClassEnumerator;
-    { slice 36: case over strings — _StringEquals chains }
+    { slice 36: case over strings — __StringEquals chains }
     procedure TestCase_StringSelectors;
     { slice 37: aggregate global initialisers — array element lists }
     procedure TestGlobalArrayInitialisers;
@@ -197,10 +197,10 @@ type
     procedure TestClosure_CaptureFree_ValueParamCall;
     { self-cross-compile leg 38b(i): a closure call passing an OWNED-TRANSIENT
       string arg (a function result) — the transient is passed borrowed and
-      disposed after the call (rc=1 owned = bare _StringRelease). }
+      disposed after the call (rc=1 owned = bare __StringRelease). }
     procedure TestClosure_OwnedTransientArg_Disposed;
     { An rc=0 UNOWNED string transient (a concat) passed to a closure must be
-      pinned (_StringAddRef) BEFORE the blr — the closure's by-value param
+      pinned (__StringAddRef) BEFORE the blr — the closure's by-value param
       entry/exit cycle frees an unpinned rc=0 transient DURING the call, so a
       post-call pin double-frees (same shape as
       BUG-20260722-arm64-propsetter-pin-after-call). }
@@ -229,7 +229,7 @@ type
     procedure TestFree_ReleasesAndNilsSlot;
     { self-cross-compile: Obj.ClassName / Obj.ClassType via typeinfo }
     procedure TestClassNameAccess_ViaTypeinfo;
-    { self-cross-compile: jumbo (>64-member) set membership via _SetIn }
+    { self-cross-compile: jumbo (>64-member) set membership via __SetIn }
     procedure TestJumboSetMembership_ViaSetIn;
     { self-cross-compile: Inc/Dec on an implicit-Self field }
     procedure TestIncDecImplicitSelfField;
@@ -277,7 +277,7 @@ type
       so the itab/impllist typeinfo reference resolves and dedups cross-unit. }
     procedure TestGenericInterfaceInstance_WeakTypeinfo;
     { BUG-052 F2: an abstract interface method's itab slot points at the abort
-      stub (_AbstractMethodError); the concrete override's itab dispatches. }
+      stub (__AbstractMethodError); the concrete override's itab dispatches. }
     procedure TestAbstractInterfaceMethodItab;
     { BUG-052 F4: a class implementing a DERIVED interface must emit a separate
       itab + impllist entry for each BASE interface (so narrowing works). }
@@ -293,7 +293,7 @@ type
     procedure TestStaticArrayFieldElementReadWrite;
     { self-cross-compile leg 17: nested routines + captured outer vars.  A
       nested proc is emitted as a sibling Outer_Inner symbol; each captured
-      outer var arrives as a leading '_cap_' pointer arg, spilled in the
+      outer var arrives as a leading '__cap_' pointer arg, spilled in the
       prologue, and reads/writes redirect through that pointer. }
     procedure TestNestedRoutine_NoCapture_SiblingSymbol;
     procedure TestNestedRoutine_CaptureScalar_ReadWrite;
@@ -319,8 +319,8 @@ type
     procedure TestOwnedTransientStringPropertyValue;
     { self-cross-compile leg 19: a nested proc that captures an enclosing
       routine's CLASS or RECORD variable and uses it as a field-access base or
-      method-call receiver.  The base must be materialised through the '_cap_'
-      pointer (load _cap_, deref to the instance), not a bare frame slot. }
+      method-call receiver.  The base must be materialised through the '__cap_'
+      pointer (load __cap_, deref to the instance), not a bare frame slot. }
     procedure TestCapturedClassBase_FieldRead;
     procedure TestCapturedClassBase_MethodCall;
     procedure TestCapturedClassBase_FieldWrite;
@@ -381,7 +381,7 @@ type
     procedure TestStrArg_PlainLocalByValue_NotPinned;
     { BUG-20260725 arm64 const-string-param alias over-release: an rc=0 UNOWNED
       transient (a `+` concat) handed to a DIRECT call or to a one-string-arg
-      RTL builtin must be pinned (_StringAddRef) BEFORE the call, exactly as
+      RTL builtin must be pinned (__StringAddRef) BEFORE the call, exactly as
       TestClosure_UnownedTransientArg_PinnedBeforeCall already requires for a
       closure call.  A callee that stores the parameter into a local runs a
       legitimate retain/exit-release cycle on it; at rc=0 that cycle reaches
@@ -642,10 +642,10 @@ var
   AsmT: string;
 begin
   AsmT := GenAsm(SrcHello);
-  AssertTrue('args forwarded before init', Pos(#9'bl _SetArgs', AsmT) >= 0);
-  AssertTrue('rtl init', Pos(#9'bl _BlaiseInit', AsmT) >= 0);
-  AssertTrue('string write', Pos(#9'bl _SysWriteStr', AsmT) >= 0);
-  AssertTrue('newline', Pos(#9'bl _SysWriteNewline', AsmT) >= 0);
+  AssertTrue('args forwarded before init', Pos(#9'bl __SetArgs', AsmT) >= 0);
+  AssertTrue('rtl init', Pos(#9'bl __BlaiseInit', AsmT) >= 0);
+  AssertTrue('string write', Pos(#9'bl __SysWriteStr', AsmT) >= 0);
+  AssertTrue('newline', Pos(#9'bl __SysWriteNewline', AsmT) >= 0);
   AssertTrue('epilogue restores fp/lr',
     Pos(#9'ldp x29, x30, [sp], #16', AsmT) >= 0);
   AssertTrue('returns', Pos(#9'ret', AsmT) >= 0);
@@ -659,7 +659,7 @@ begin
   AssertTrue('multiply', Pos(#9'mul x0, x0, x1', AsmT) >= 0);
   AssertTrue('subtract', Pos(#9'sub x0, x0, x1', AsmT) >= 0);
   AssertTrue('divide', Pos(#9'sdiv x0, x0, x1', AsmT) >= 0);
-  AssertTrue('int write', Pos(#9'bl _SysWriteInt', AsmT) >= 0);
+  AssertTrue('int write', Pos(#9'bl __SysWriteInt', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestDivision_AlwaysEmitsZeroGuard;
@@ -751,8 +751,8 @@ begin
     AssertTrue('_main exported', S.IsExt());
     { the RTL calls stay undefined externs with BRANCH26 relocations }
     AssertTrue('rtl call relocations recorded', T.Relocs.Count > 0);
-    AssertTrue('_SysWriteStr referenced',
-      F.FindSymbol('_SysWriteStr') <> nil);
+    AssertTrue('__SysWriteStr referenced',
+      F.FindSymbol('__SysWriteStr') <> nil);
   finally
     F.Free();
   end;
@@ -925,8 +925,8 @@ begin
     end.
     ''');
   { plain (non-owning) RHS retains; the slot's old value releases }
-  AssertTrue('incoming retained', Pos(#9'bl _StringAddRef', AsmT) >= 0);
-  AssertTrue('old value released', Pos(#9'bl _StringRelease', AsmT) >= 0);
+  AssertTrue('incoming retained', Pos(#9'bl __StringAddRef', AsmT) >= 0);
+  AssertTrue('old value released', Pos(#9'bl __StringRelease', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestString_ConcatOwnedTransientReleased;
@@ -944,18 +944,18 @@ begin
       WriteLn('x' + 'y')
     end.
     ''');
-  AssertTrue('concat lowered', Pos(#9'bl _StringConcat', AsmT) >= 0);
-  { _StringConcat returns rc=0 (arc-string-transient-handover.adoc): the
+  AssertTrue('concat lowered', Pos(#9'bl __StringConcat', AsmT) >= 0);
+  { __StringConcat returns rc=0 (arc-string-transient-handover.adoc): the
     assignment must RETAIN it (0 -> 1) before releasing the old value —
     consuming it as if it were +1 stores an rc=0 string whose later
     release underflows to IMMORTAL (a permanent, tracker-invisible leak) }
-  ConcatPos := Pos(#9'bl _StringConcat', AsmT);
-  AddRefAfter := Pos(#9'bl _StringAddRef',
+  ConcatPos := Pos(#9'bl __StringConcat', AsmT);
+  AddRefAfter := Pos(#9'bl __StringAddRef',
     Copy(AsmT, ConcatPos, Length(AsmT) - ConcatPos));
   AssertTrue('rc=0 concat result retained on assignment', AddRefAfter >= 0);
   { the WriteLn transient is disposed by shape after the write:
     rc=0 needs AddRef THEN Release }
-  AssertTrue('transient written', Pos(#9'bl _SysWriteStr', AsmT) >= 0);
+  AssertTrue('transient written', Pos(#9'bl __SysWriteStr', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestString_ScopeExitReleases;
@@ -978,7 +978,7 @@ begin
     ''');
   { the routine's exit label releases its string local before Result loads }
   AssertTrue('exit label present', Pos('Lrexit', AsmT) >= 0);
-  AssertTrue('scope-exit release', Pos(#9'bl _StringRelease', AsmT) >= 0);
+  AssertTrue('scope-exit release', Pos(#9'bl __StringRelease', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestString_SubscriptWrite_CopyOnWrite;
@@ -986,7 +986,7 @@ var
   AsmT: string;
 begin
   { Leg 33: S[I] := ch on a string writes a byte in place, but must first make
-    the buffer unique via _StringUnique (else a literal-backed string would hit
+    the buffer unique via __StringUnique (else a literal-backed string would hit
     read-only memory).  The var-param form (Munge) derefs the slot once more to
     reach the caller's string; the plain-local form (t) writes its own slot. }
   AsmT := GenAsm(
@@ -1001,7 +1001,7 @@ begin
     ''');
   { copy-on-write before the byte store }
   AssertTrue('string made unique before write',
-    Pos(#9'bl _StringUnique', AsmT) >= 0);
+    Pos(#9'bl __StringUnique', AsmT) >= 0);
   { the byte is stored into the unique buffer }
   AssertTrue('byte stored', Pos(#9'strb w0, [x9]', AsmT) >= 0);
   { the var-param form derefs the slot to reach the caller's string pointer }
@@ -1026,8 +1026,8 @@ begin
     end.
     ''');
   { content comparison, never a pointer cmp }
-  AssertTrue('equality helper', Pos(#9'bl _StringEquals', AsmT) >= 0);
-  AssertTrue('ordering helper', Pos(#9'bl _StringCompare', AsmT) >= 0);
+  AssertTrue('equality helper', Pos(#9'bl __StringEquals', AsmT) >= 0);
+  AssertTrue('ordering helper', Pos(#9'bl __StringCompare', AsmT) >= 0);
   AssertTrue('NE inverts via cset eq', Pos(#9'cset x0, eq', AsmT) >= 0);
   AssertTrue('relational sign-extends the strcmp result',
     Pos(#9'sxtw x0, w0', AsmT) >= 0);
@@ -1065,12 +1065,12 @@ begin
     end.
     ''');
   { record locals zero-init their WHOLE storage, not just 8 bytes }
-  AssertTrue('record zeroed via memset', Pos(#9'bl memset', AsmT) >= 0);
+  AssertTrue('record zeroed via memset', Pos(#9'bl _memset', AsmT) >= 0);
   { field writes go through the record base + offset }
   AssertTrue('field write at offset 8', Pos(', [x9, #8]', AsmT) >= 0);
   AssertTrue('field write at offset 16', Pos(', [x9, #16]', AsmT) >= 0);
   { whole-record copy is a memcpy of RawSize }
-  AssertTrue('record copy via memcpy', Pos(#9'bl memcpy', AsmT) >= 0);
+  AssertTrue('record copy via memcpy', Pos(#9'bl _memcpy', AsmT) >= 0);
   AssertTrue('copy length 24', Pos(#9'movz x2, #24', AsmT) >= 0);
   { record global gets a full-size bss slot }
   AssertTrue('global record slot', Pos(#9'.zero 24', AsmT) >= 0);
@@ -1155,7 +1155,7 @@ begin
     caller loads the destination address into x8 before the bl }
   AssertTrue('callee parks x8', Pos(#9'stur x8, ', AsmT) >= 0);
   AssertTrue('callee copies Result to the x8 buffer',
-    Pos(#9'bl memcpy', AsmT) >= 0);
+    Pos(#9'bl _memcpy', AsmT) >= 0);
   AssertTrue('caller sets x8 to the destination',
     Pos('add x8, x8, _g_G@PAGEOFF', AsmT) >= 0);
 end;
@@ -1272,7 +1272,7 @@ begin
     bytes into its own slot before any user code }
   AssertTrue('caller passes the global address',
     Pos('add x0, x0, _g_G@PAGEOFF', AsmT) >= 0);
-  AssertTrue('callee copies the bytes in', Pos(#9'bl memcpy', AsmT) >= 0);
+  AssertTrue('callee copies the bytes in', Pos(#9'bl _memcpy', AsmT) >= 0);
   { and the whole module still assembles to a valid Mach-O object }
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64recpar.o');
@@ -1306,12 +1306,12 @@ begin
     end.
     ''');
   { field store: retain the incoming value, release the old field }
-  AssertTrue('field store retains', Pos(#9'bl _StringAddRef', AsmT) >= 0);
+  AssertTrue('field store retains', Pos(#9'bl __StringAddRef', AsmT) >= 0);
   { whole-copy discipline: retain source fields BEFORE releasing the
     destination's (self-assignment safety), memcpy after both }
-  PosRetain := Pos('_StringAddRef', AsmT);
-  PosRelease := Pos('_StringRelease', AsmT);
-  PosCpy := Pos('bl memcpy', AsmT);
+  PosRetain := Pos('__StringAddRef', AsmT);
+  PosRelease := Pos('__StringRelease', AsmT);
+  PosCpy := Pos('bl _memcpy', AsmT);
   AssertTrue('retain present', PosRetain >= 0);
   AssertTrue('release present', PosRelease >= 0);
   AssertTrue('memcpy present', PosCpy >= 0);
@@ -1449,7 +1449,7 @@ begin
   AssertTrue('unit var symbol prefixed', Pos('_g_counters_Total:', AsmT) >= 0);
   AssertTrue('references target the prefixed symbol',
     Pos('_g_counters_Total@PAGE', AsmT) >= 0);
-  { the init section becomes <unit>_init, and _main calls it }
+  { the init section becomes <unit>__init, and _main calls it }
   AssertTrue('init routine emitted', Pos('counters_init:', AsmT) >= 0);
   AssertTrue('main calls the init routine',
     Pos(#9'bl _counters_init', AsmT) >= 0);
@@ -1459,7 +1459,7 @@ procedure TArm64BackendTests.TestUnit_FinalizationStillNotYet;
 var
   AsmT: string;
 begin
-  { historical name — finalization now LOWERS: <unit>_final is emitted
+  { historical name — finalization now LOWERS: <unit>__final is emitted
     and called at program exit (reverse dependency order) }
   AsmT := GenAsmWithUnit(
     '''
@@ -1563,15 +1563,15 @@ begin
   PosGreet := Pos('Greet:', AsmT);
   PosShow := Pos('Show:', AsmT);
   AssertTrue('both routines emitted', (PosGreet >= 0) and (PosShow >= 0));
-  PosNext := PosEx(#9'bl _StringAddRef', AsmT, PosGreet);
+  PosNext := PosEx(#9'bl __StringAddRef', AsmT, PosGreet);
   AssertTrue('by-value param retained in Greet',
     (PosNext > PosGreet) and ((PosShow < PosGreet) or (PosNext < PosShow)));
   AssertTrue('by-value param released at Greet exit',
-    PosEx(#9'bl _StringRelease', AsmT, PosGreet) > PosGreet);
+    PosEx(#9'bl __StringRelease', AsmT, PosGreet) > PosGreet);
   { const param: no retain between Show's label and its ret }
   PosNext := PosEx(#9'ret', AsmT, PosShow);
   AssertTrue('Show has a ret', PosNext > PosShow);
-  PosGreet := PosEx(#9'bl _StringAddRef', AsmT, PosShow);
+  PosGreet := PosEx(#9'bl __StringAddRef', AsmT, PosShow);
   AssertTrue('const param not retained in Show',
     (PosGreet < 0) or (PosGreet > PosNext));
 end;
@@ -1743,19 +1743,19 @@ begin
       WriteLn(C.FName)
     end.
     ''');
-  { Creation allocates at refcount ZERO via _ClassAlloc(size, cleanup) and
-    installs the vtable here — mirroring x86-64.  _ClassCreate must NOT appear
-    on a statically-known-class path: it ends with _ClassAddRef, and the shared
+  { Creation allocates at refcount ZERO via __ClassAlloc(size, cleanup) and
+    installs the vtable here — mirroring x86-64.  __ClassCreate must NOT appear
+    on a statically-known-class path: it ends with __ClassAddRef, and the shared
     ArcExprOwnsRef reports a constructor call as NOT owning, so the assignment
-    site adds the one reference.  Using _ClassCreate here left every instance
+    site adds the one reference.  Using __ClassCreate here left every instance
     one reference above zero — nothing was ever freed and no destructor ran
-    (eddb5c18).  _ClassCreate stays only for metaclass dispatch, which must
+    (eddb5c18).  __ClassCreate stays only for metaclass dispatch, which must
     read size/cleanup/vtable from a runtime typeinfo value. }
-  AssertTrue('field-cleanup passed to _ClassAlloc',
-    Pos('add x1, x1, _FieldCleanup_TCounter@PAGEOFF', AsmT) >= 0);
-  AssertTrue('allocates at refcount zero', Pos(#9'bl _ClassAlloc', AsmT) >= 0);
-  AssertTrue('no _ClassCreate on the static ctor path',
-    Pos(#9'bl _ClassCreate', AsmT) < 0);
+  AssertTrue('field-cleanup passed to __ClassAlloc',
+    Pos('add x1, x1, __FieldCleanup_TCounter@PAGEOFF', AsmT) >= 0);
+  AssertTrue('allocates at refcount zero', Pos(#9'bl __ClassAlloc', AsmT) >= 0);
+  AssertTrue('no __ClassCreate on the static ctor path',
+    Pos(#9'bl __ClassCreate', AsmT) < 0);
   AssertTrue('vtable installed at the allocation site',
     Pos('add x9, x9, _vtable_TCounter@PAGEOFF', AsmT) >= 0);
   { non-virtual methods dispatch directly to the mangled symbol }
@@ -1765,9 +1765,9 @@ begin
   AssertTrue('vtable emitted', Pos('_vtable_TCounter:', AsmT) >= 0);
   AssertTrue('vtable slot 0 is the typeinfo',
     Pos(#9'.quad _typeinfo_TCounter', AsmT) >= 0);
-  AssertTrue('cleanup emitted', Pos('_FieldCleanup_TCounter:', AsmT) >= 0);
+  AssertTrue('cleanup emitted', Pos('__FieldCleanup_TCounter:', AsmT) >= 0);
   { the class-typed global is released at program exit }
-  AssertTrue('program-exit release', Pos(#9'bl _ClassRelease', AsmT) >= 0);
+  AssertTrue('program-exit release', Pos(#9'bl __ClassRelease', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64class.o');
   try
@@ -1858,10 +1858,10 @@ begin
     the Create site targets the same typeinfo }
   AssertTrue('prefixed typeinfo', Pos('_typeinfo_zoo_TCat:', AsmT) >= 0);
   AssertTrue('prefixed vtable', Pos('_vtable_zoo_TCat:', AsmT) >= 0);
-  { The ctor path allocates via _ClassAlloc (eddb5c18), so the unit-prefixed
+  { The ctor path allocates via __ClassAlloc (eddb5c18), so the unit-prefixed
     symbol to look for is the field-cleanup fn, not typeinfo. }
   AssertTrue('create targets prefixed field-cleanup',
-    Pos('_FieldCleanup_zoo_TCat@PAGEOFF', AsmT) >= 0);
+    Pos('__FieldCleanup_zoo_TCat@PAGEOFF', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestClass_StaticsConstsInheritedToString;
@@ -2059,7 +2059,7 @@ begin
   AssertTrue('thunk call', Pos(#9'blr x9', AsmT) >= 0);
   { descriptor: three quads with the bootstrap thunk }
   AssertTrue('descriptor label', Pos('_tv_Counter:', AsmT) >= 0);
-  AssertTrue('bootstrap slot', Pos(#9'.quad _tlv_bootstrap', AsmT) >= 0);
+  AssertTrue('bootstrap slot', Pos(#9'.quad __tlv_bootstrap', AsmT) >= 0);
   AssertTrue('storage slot ref', Pos(#9'.quad _ts_Counter', AsmT) >= 0);
   AssertTrue('thread_vars section',
     Pos('.section __DATA,__thread_vars', AsmT) >= 0);
@@ -2099,7 +2099,7 @@ begin
   { variadic anonymous args go to the outgoing stack area (Apple
     divergence), stored through w/x into [sp, #..] }
   AssertTrue('outgoing area allocated', Pos(#9'sub sp, sp, #16', AsmT) >= 0);
-  AssertTrue('variadic call to printf', Pos(#9'bl printf', AsmT) >= 0);
+  AssertTrue('variadic call to printf', Pos(#9'bl _printf', AsmT) >= 0);
   { the 9th/10th args of Sum10 overflow the register file to the stack }
   AssertTrue('call to Sum10', Pos(#9'bl _Sum10', AsmT) >= 0);
   AssertTrue('area released', Pos(#9'add sp, sp, #16', AsmT) >= 0);
@@ -2334,8 +2334,8 @@ begin
   P := Pos('HashIt:', AsmT);
   AssertTrue('const-param function emitted', P >= 0);
   E := PosEx('ret', AsmT, P);
-  AssertTrue('no _StringAddRef in a const-string-param body',
-    PosEx('_StringAddRef', AsmT, P) > E);
+  AssertTrue('no __StringAddRef in a const-string-param body',
+    PosEx('__StringAddRef', AsmT, P) > E);
 
   { control: the BY-VALUE variant still retains, so the assertion above is
     pinning `const` and not merely the absence of string-param ARC }
@@ -2343,8 +2343,8 @@ begin
   AssertTrue('by-value-param function emitted', P >= 0);
   E := PosEx('ret', AsmT, P);
   AssertTrue('by-value string param still retains',
-    (PosEx('_StringAddRef', AsmT, P) >= 0) and
-    (PosEx('_StringAddRef', AsmT, P) < E));
+    (PosEx('__StringAddRef', AsmT, P) >= 0) and
+    (PosEx('__StringAddRef', AsmT, P) < E));
 end;
 
 procedure TArm64BackendTests.TestUnitGenericInstance_BodyEmittedOnce;
@@ -2621,7 +2621,7 @@ var
   T:    TTargetDesc;
   AsmT: string;
 begin
-  { SEPARATE COMPILATION: a dependency unit's body — and its <Unit>_init — are
+  { SEPARATE COMPILATION: a dependency unit's body — and its <Unit>__init — are
     compiled into the dep's OWN object, so EmitUnit never runs for it in the
     program's translation unit and never registers the init symbol.  The driver
     instead announces each such dep via NoteDepInitUnit, and _main must still
@@ -2791,11 +2791,11 @@ var
   P, Q: Integer;
   Body: string;
 begin
-  { SetLength(S, N) on a string lowers to S := _StringSetLength(S, N), with the
+  { SetLength(S, N) on a string lowers to S := __StringSetLength(S, N), with the
     slot address anchored in callee-saved x19 across the RTL calls.  The x19
     SAVE used to be pushed AFTER N, so it sat on top of N on the stack and the
     pop that loaded the length argument retrieved the SAVED X19 instead — a
-    pointer-sized garbage length.  _StringSetLength then asked StrAlloc for an
+    pointer-sized garbage length.  __StringSetLength then asked StrAlloc for an
     absurd size, its mmap failed, and SetLength returned nil; the caller then
     wrote byte 0 of a nil buffer.  That is the macOS arm64 crash in
     TStringBuilder.ToString found on 2026-07-23, which looked like an allocator
@@ -2818,8 +2818,8 @@ begin
   AssertTrue('program body emitted', P >= 0);
   Body := Copy(AsmT, P, Length(AsmT) - P);
 
-  P := Pos(#9'bl _StringSetLength', Body);
-  AssertTrue('_StringSetLength is called', P >= 0);
+  P := Pos(#9'bl __StringSetLength', Body);
+  AssertTrue('__StringSetLength is called', P >= 0);
   { The x19 save must NOT sit between the length push and the pop that feeds
     x1 — that ordering makes the pop retrieve the saved x19 as the length.
     The bug signature is a value push IMMEDIATELY followed by the x19 save. }
@@ -3045,13 +3045,13 @@ var
   Body: string;
 begin
   { Chr(N) is typed tyString by the semantic pass, so in a VALUE context it
-    must allocate a one-character heap string via the _Chr RTL helper.  arm64
+    must allocate a one-character heap string via the __Chr RTL helper.  arm64
     folded Chr into the Ord identity case and returned the raw ordinal, so
     `S := S + Chr(C)` handed StringConcat a small integer as its string operand
     and faulted dereferencing it (macOS arm64, 2026-07-23 — x86-64 carried the
     same bug once and its fix comment records the identical symptom).
 
-    But a BYTE STORE (S[I] := Chr(N)) must NOT allocate: a strb of a _Chr
+    But a BYTE STORE (S[I] := Chr(N)) must NOT allocate: a strb of a __Chr
     result would store the low byte of the returned POINTER.  Both QBE and
     x86-64 keep that short-circuit, so arm64 needs BOTH behaviours — this test
     pins them together so a future fix to one cannot silently break the other. }
@@ -3075,8 +3075,8 @@ begin
   Body := Copy(AsmT, P, Length(AsmT) - P);
 
   { VALUE context allocates }
-  AssertTrue('Chr in a value context calls _Chr',
-    Pos(#9'bl _Chr', Body) >= 0);
+  AssertTrue('Chr in a value context calls __Chr',
+    Pos(#9'bl __Chr', Body) >= 0);
   { BYTE-STORE context keeps the raw ordinal: 65 is materialised directly and
     the byte store is present }
   AssertTrue('the byte store keeps the raw ordinal',
@@ -3093,13 +3093,13 @@ var
 begin
   { A var/out parameter is a BORROWED reference and its slot holds the ADDRESS
     of the caller's variable, not a value.  The prologue must not retain it:
-    _StringAddRef would treat that address as a string data pointer and its
+    __StringAddRef would treat that address as a string data pointer and its
     atomic refcount increment would land on unrelated memory.  On device that
     increment corrupted a global holding a TStringList pointer, which crashed
     on the next use (macOS arm64, 2026-07-23).
 
     The retain loop excluded const params but not var/out.  Only the by-value
-    parameter below may be retained — exactly one _StringAddRef in the
+    parameter below may be retained — exactly one __StringAddRef in the
     prologue. }
   AsmT := GenAsm(
     '''
@@ -3125,15 +3125,15 @@ begin
 
   { exactly one retain, and it must NOT be the var param's slot ([x29,#-8]) }
   N := 0;
-  Q := Pos(#9'bl _StringAddRef', Body);
+  Q := Pos(#9'bl __StringAddRef', Body);
   while Q >= 0 do
   begin
     N := N + 1;
-    Q := PosEx(#9'bl _StringAddRef', Body, Q + 1);
+    Q := PosEx(#9'bl __StringAddRef', Body, Q + 1);
   end;
   AssertEquals('only the by-value string param is retained', 1, N);
   AssertTrue('the var param slot is not the one retained',
-    Pos(#9'ldur x0, [x29, #-8]'#10#9'bl _StringAddRef', Body) < 0);
+    Pos(#9'ldur x0, [x29, #-8]'#10#9'bl __StringAddRef', Body) < 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceReturnToGlobal_ItabHalfFromSourceNotDest;
@@ -3262,7 +3262,7 @@ begin
   P := Pos(#10'_TBag_Read0:', AsmT);
   AssertTrue('Read0 emitted', P >= 0);
   { bound the window to the Read0 body up to the first memcpy (the element copy) }
-  MemcpyP := PosEx(#9'bl memcpy', AsmT, P);
+  MemcpyP := PosEx(#9'bl _memcpy', AsmT, P);
   AssertTrue('element copy present', MemcpyP >= 0);
   Body := Copy(AsmT, P, MemcpyP - P);
 
@@ -3374,16 +3374,16 @@ var
   P, OrdP, UpP: Integer;
   Body: string;
 begin
-  { _UpCase takes an INTEGER char code.  A STRING argument — UpCase(Chr(C)),
+  { __UpCase takes an INTEGER char code.  A STRING argument — UpCase(Chr(C)),
     UpCase(S[i]), UpCase(someStringVar) — must first be reduced to its first
-    char's code via _OrdAt(S, 0); passing the string POINTER straight into
-    _UpCase makes it run _Chr on the pointer and return a char whose code is the
+    char's code via __OrdAt(S, 0); passing the string POINTER straight into
+    __UpCase makes it run __Chr on the pointer and return a char whose code is the
     pointer's low byte (garbage).  arm64 omitted the conversion, which corrupted
     the compiler's own DirectiveName/DirectiveArg (both build uppercased names
     via UpCase(Chr(C))) and thereby silently disabled ALL $IFDEF/$ELSE
     conditional compilation — runtime.atomic then emitted both its arm64 and
     x86-64 asm branches and produced a duplicate _AtomicAddInt32 label
-    (macOS arm64, 2026-07-24).  The x86-64 backend does the _OrdAt conversion;
+    (macOS arm64, 2026-07-24).  The x86-64 backend does the __OrdAt conversion;
     this pins it for arm64. }
   AsmT := GenAsm(
     '''
@@ -3399,12 +3399,12 @@ begin
   AssertTrue('program body emitted', P >= 0);
   Body := Copy(AsmT, P, Length(AsmT) - P);
 
-  { the string arg is converted to its first char's code (_OrdAt) BEFORE _UpCase }
-  OrdP := Pos(#9'bl _OrdAt', Body);
-  UpP := Pos(#9'bl _UpCase', Body);
-  AssertTrue('a string UpCase arg is reduced via _OrdAt', OrdP >= 0);
-  AssertTrue('_UpCase is called', UpP >= 0);
-  AssertTrue('the _OrdAt conversion precedes the _UpCase call',
+  { the string arg is converted to its first char's code (__OrdAt) BEFORE __UpCase }
+  OrdP := Pos(#9'bl __OrdAt', Body);
+  UpP := Pos(#9'bl __UpCase', Body);
+  AssertTrue('a string UpCase arg is reduced via __OrdAt', OrdP >= 0);
+  AssertTrue('__UpCase is called', UpP >= 0);
+  AssertTrue('the __OrdAt conversion precedes the __UpCase call',
     (OrdP >= 0) and (OrdP < UpP));
 end;
 
@@ -3648,7 +3648,7 @@ var
   P, WrP: Integer;
   Body: string;
 begin
-  { WriteLn(Integer) passes the value to _SysWriteInt in x1.  EmitExprToX0
+  { WriteLn(Integer) passes the value to __SysWriteInt in x1.  EmitExprToX0
     leaves a 32-bit Integer SIGN-extended in x0, so the argument move must keep
     all 64 bits (mov x1, x0) — a `mov w1, w0` zero-extends the low 32 bits and
     prints a negative as its unsigned value (WriteLn(-1) -> 4294967295;
@@ -3668,14 +3668,14 @@ begin
   AssertTrue('program body emitted', P >= 0);
   Body := Copy(AsmT, P, Length(AsmT) - P);
 
-  WrP := Pos(#9'bl _SysWriteInt', Body);
-  AssertTrue('_SysWriteInt is called', WrP >= 0);
+  WrP := Pos(#9'bl __SysWriteInt', Body);
+  AssertTrue('__SysWriteInt is called', WrP >= 0);
   { the arg move before the call must be the full 64-bit mov x1, x0, NOT the
     zero-extending mov w1, w0 }
   AssertTrue('the WriteLn Integer arg is passed sign-extended (mov x1, x0)',
-    Pos(#9'mov x1, x0'#10#9'movz w0, #1'#10#9'bl _SysWriteInt', Body) >= 0);
+    Pos(#9'mov x1, x0'#10#9'movz w0, #1'#10#9'bl __SysWriteInt', Body) >= 0);
   AssertTrue('the zero-extending mov w1, w0 is not used for WriteInt',
-    Pos(#9'mov w1, w0'#10#9'movz w0, #1'#10#9'bl _SysWriteInt', Body) < 0);
+    Pos(#9'mov w1, w0'#10#9'movz w0, #1'#10#9'bl __SysWriteInt', Body) < 0);
 end;
 
 procedure TArm64BackendTests.TestOwnedStrTransientArgs_ParkedInStableSlots;
@@ -3686,7 +3686,7 @@ var
 begin
   { Owned string transients passed as call args are parked before the call and
     reloaded afterwards for a single dispose.  When a call has TWO of them
-    (Store('x'+IntToStr(J), N.Name + '_high') — both args are concats), the old
+    (Store('x'+IntToStr(J), N.Name + '__high') — both args are concats), the old
     sp-relative park/reload offsets DID NOT AGREE across the arg pushes, the
     pop-walk and the two post-call result spills: the reload read a NEIGHBOURING
     (borrowed) string and freed it, poisoning the allocator — the round-27/28
@@ -3719,7 +3719,7 @@ begin
       N := TNode.Create();
       N.Name := 'items';
       J := 3;
-      Store('x' + IntToStr(J), N.Name + '_high')
+      Store('x' + IntToStr(J), N.Name + '__high')
     end.
     ''');
   P := Pos('_main:', AsmT);
@@ -3728,14 +3728,14 @@ begin
   Body := Copy(AsmT, P, Length(AsmT) - P);
 
   { the two concat results are each parked with `stur x0, [x29, #N]` after their
-    _StringConcat }
-  C1 := Pos(#9'bl _StringConcat', Body);
+    __StringConcat }
+  C1 := Pos(#9'bl __StringConcat', Body);
   AssertTrue('first concat built', C1 >= 0);
   R1 := PosEx(#9'stur x0, [x29, #', Body, C1);
   AssertTrue('first transient parked at an x29 slot', R1 >= 0);
   NL := PosEx(#10, Body, R1);  Store1 := Copy(Body, R1, NL - R1);
 
-  C2 := PosEx(#9'bl _StringConcat', Body, C1 + 1);
+  C2 := PosEx(#9'bl __StringConcat', Body, C1 + 1);
   AssertTrue('second concat built', C2 >= 0);
   R2 := PosEx(#9'stur x0, [x29, #', Body, C2);
   AssertTrue('second transient parked at an x29 slot', R2 >= 0);
@@ -3768,7 +3768,7 @@ begin
   { Leg 31: an itab dispatch may carry a by-value STRING argument.  The itab
     dispatcher loads the string buffer pointer into an arg register (x1) and
     calls through the itab slot.  A plain local passed to a `const S: string`
-    param is BORROWED — no _StringAddRef is emitted at the call site (the
+    param is BORROWED — no __StringAddRef is emitted at the call site (the
     negative assertion guards against an over-eager retain). }
   AsmT := GenAsm(
     '''
@@ -3829,8 +3829,8 @@ begin
     end.
     ''');
   { runtime lookup + invalid-cast guard }
-  AssertTrue('runtime itab lookup', Pos(#9'bl _GetItab', AsmT) >= 0);
-  AssertTrue('nil-itab guard', Pos(#9'bl _Raise_InvalidCast', AsmT) >= 0);
+  AssertTrue('runtime itab lookup', Pos(#9'bl __GetItab', AsmT) >= 0);
+  AssertTrue('nil-itab guard', Pos(#9'bl __Raise_InvalidCast', AsmT) >= 0);
   AssertTrue('typeinfo operand', Pos('_typeinfo_IThing@PAGEOFF', AsmT) >= 0);
 end;
 
@@ -3882,11 +3882,11 @@ begin
     Pos(#9'ldur x0, [x29, #', AsmT) >= 0);
   PosCall := Pos(#9'bl _ShowC', AsmT);
   AssertTrue('const call emitted', PosCall >= 0);
-  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
+  PosRel := PosEx(#9'bl __StringRelease', AsmT, PosCall);
   AssertTrue('const rc=0 arg released after the call', PosRel > PosCall);
   AssertTrue('and NOT re-pinned after the call',
-    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) < 0) or
-    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) > PosRel));
+    (PosEx(#9'bl __StringAddRef', AsmT, PosCall) < 0) or
+    (PosEx(#9'bl __StringAddRef', AsmT, PosCall) > PosRel));
 end;
 
 procedure TArm64BackendTests.TestReflection_SupportsInheritsFromMetaclass;
@@ -3923,11 +3923,11 @@ begin
     end.
     ''');
   { Supports: runtime itab probe folded to a boolean }
-  AssertTrue('supports via _GetItab', Pos(#9'bl _GetItab', AsmT) >= 0);
+  AssertTrue('supports via __GetItab', Pos(#9'bl __GetItab', AsmT) >= 0);
   AssertTrue('boolean fold', Pos(#9'cset x0, ne', AsmT) >= 0);
   { InheritsFrom: instance receiver reads typeinfo via vtable[0];
     metaclass receiver passes its value directly }
-  AssertTrue('inheritsfrom call', Pos(#9'bl _InheritsFrom', AsmT) >= 0);
+  AssertTrue('inheritsfrom call', Pos(#9'bl __InheritsFrom', AsmT) >= 0);
   { bare class name as a value = typeinfo address }
   AssertTrue('metaclass value', Pos('_typeinfo_TKid@PAGEOFF', AsmT) >= 0);
 end;
@@ -3976,7 +3976,7 @@ begin
   AssertTrue('call with sret dest', Pos(#9'bl _MakeGreeter', AsmT) >= 0);
   { param: two-register fat pointer, by-value retain in the callee }
   AssertTrue('param call', Pos(#9'bl _UseGreeter', AsmT) >= 0);
-  AssertTrue('callee retains its copy', Pos(#9'bl _ClassAddRef', AsmT) >= 0);
+  AssertTrue('callee retains its copy', Pos(#9'bl __ClassAddRef', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64intfpr.o');
   try
@@ -4017,7 +4017,7 @@ begin
     end.
     ''');
   { the old interface value is released before the new fat pointer is stored }
-  AssertTrue('release old before store', Pos(#9'bl _ClassRelease', AsmT) >= 0);
+  AssertTrue('release old before store', Pos(#9'bl __ClassRelease', AsmT) >= 0);
   { both halves of the returned fat pointer are unpacked from __iret BEFORE
     either store — EmitStoreSlot clobbers x9 for the destination adrp, so the
     itab half must load into x1 (a distinct register), not x0 after a store.
@@ -4094,14 +4094,14 @@ begin
     end.
     ''');
   { callee retains its by-value copy's managed fields }
-  AssertTrue('param field retain', Pos(#9'bl _StringAddRef', AsmT) >= 0);
+  AssertTrue('param field retain', Pos(#9'bl __StringAddRef', AsmT) >= 0);
   { managed result: sret into the __rret scratch, old LHS fields released
     AFTER the call, then the fresh value moves in }
   PosCall := Pos(#9'bl _Make', AsmT);
   AssertTrue('call present', PosCall >= 0);
-  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
+  PosRel := PosEx(#9'bl __StringRelease', AsmT, PosCall);
   AssertTrue('LHS released after the call', PosRel > PosCall);
-  AssertTrue('scratch move-in', PosEx(#9'bl memcpy', AsmT, PosRel) > PosRel);
+  AssertTrue('scratch move-in', PosEx(#9'bl _memcpy', AsmT, PosRel) > PosRel);
 end;
 
 procedure TArm64BackendTests.TestSingleFields_Supports3_StaticProps;
@@ -4149,7 +4149,7 @@ begin
     address is formed first, then a w-width load through it }
   AssertTrue('single field read', Pos(#9'ldr w0, [x0]', AsmT) >= 0);
   { 3-arg Supports: success path stores both halves of the out-var }
-  AssertTrue('supports lookup', Pos(#9'bl _GetItab', AsmT) >= 0);
+  AssertTrue('supports lookup', Pos(#9'bl __GetItab', AsmT) >= 0);
   AssertTrue('failure path leaves out-var untouched (skip branch)',
     Pos(#9'add sp, sp, #32', AsmT) >= 0);
 end;
@@ -4195,9 +4195,9 @@ begin
     end.
     ''');
   { weak var + weak field go through the weak table }
-  AssertTrue('weak assign', Pos(#9'bl _WeakAssign', AsmT) >= 0);
-  { metaclass ctor: _ClassCreate on the metaclass VALUE }
-  AssertTrue('metaclass create', Pos(#9'bl _ClassCreate', AsmT) >= 0);
+  AssertTrue('weak assign', Pos(#9'bl __WeakAssign', AsmT) >= 0);
+  { metaclass ctor: __ClassCreate on the metaclass VALUE }
+  AssertTrue('metaclass create', Pos(#9'bl __ClassCreate', AsmT) >= 0);
   { indexed property accessors }
   AssertTrue('indexed getter', Pos(#9'bl _TNode_GetItem', AsmT) >= 0);
   AssertTrue('indexed setter', Pos(#9'bl _TNode_SetItem', AsmT) >= 0);
@@ -4289,16 +4289,16 @@ begin
     end.
     ''');
   { frames: push + setjmp guard, 512-byte static slot in the frame }
-  AssertTrue('frame push', Pos(#9'bl _PushExcFrame', AsmT) >= 0);
-  AssertTrue('setjmp guard', Pos(#9'bl _blaise_setjmp', AsmT) >= 0);
+  AssertTrue('frame push', Pos(#9'bl __PushExcFrame', AsmT) >= 0);
+  AssertTrue('setjmp guard', Pos(#9'bl __blaise_setjmp', AsmT) >= 0);
   AssertTrue('exception branch', Pos(#9'cbnz w0, Lfinexc', AsmT) >= 0);
   { raise + handler matching + rebind }
-  AssertTrue('raise', Pos(#9'bl _Raise', AsmT) >= 0);
-  AssertTrue('handler match', Pos(#9'bl _IsInstance', AsmT) >= 0);
-  AssertTrue('finally re-raise', Pos(#9'bl _Reraise', AsmT) >= 0);
+  AssertTrue('raise', Pos(#9'bl __Raise', AsmT) >= 0);
+  AssertTrue('handler match', Pos(#9'bl __IsInstance', AsmT) >= 0);
+  AssertTrue('finally re-raise', Pos(#9'bl __Reraise', AsmT) >= 0);
   { Exit inside try runs the finally on the way out (unwind emits an
     extra PopExcFrame before the exit branch) }
-  AssertTrue('unwind pops', Pos(#9'bl _PopExcFrame', AsmT) >= 0);
+  AssertTrue('unwind pops', Pos(#9'bl __PopExcFrame', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64exc.o');
   try
@@ -4336,8 +4336,8 @@ begin
   AssertTrue('4-byte store', Pos(#9'str w0, [x9]', AsmT) >= 0);
   AssertTrue('signed 4-byte load', Pos(#9'ldrsw x0, [x0]', AsmT) >= 0);
   { managed elements: retain/release through the parked element address }
-  AssertTrue('string elem retain', Pos(#9'bl _StringAddRef', AsmT) >= 0);
-  AssertTrue('string elem release', Pos(#9'bl _StringRelease', AsmT) >= 0);
+  AssertTrue('string elem retain', Pos(#9'bl __StringAddRef', AsmT) >= 0);
+  AssertTrue('string elem release', Pos(#9'bl __StringRelease', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64sarr.o');
   try
@@ -4370,11 +4370,11 @@ begin
     end.
     ''');
   { lifecycle through the RTL }
-  AssertTrue('setlength', Pos(#9'bl _DynArraySetLength', AsmT) >= 0);
-  AssertTrue('length', Pos(#9'bl _DynArrayLength', AsmT) >= 0);
+  AssertTrue('setlength', Pos(#9'bl __DynArraySetLength', AsmT) >= 0);
+  AssertTrue('length', Pos(#9'bl __DynArrayLength', AsmT) >= 0);
   { whole-value assignment: retain new, release old }
-  AssertTrue('retain', Pos(#9'bl _DynArrayAddRef', AsmT) >= 0);
-  AssertTrue('release', Pos(#9'bl _DynArrayRelease', AsmT) >= 0);
+  AssertTrue('retain', Pos(#9'bl __DynArrayAddRef', AsmT) >= 0);
+  AssertTrue('release', Pos(#9'bl __DynArrayRelease', AsmT) >= 0);
   { element access scales off the data pointer }
   AssertTrue('scaled elem', Pos(#9'mul x1, x1, x2', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
@@ -4395,7 +4395,7 @@ var
 begin
   { SetLength on a dyn-array FIELD of an explicit record (Result.Cands): the
     field's ADDRESS is computed (base slot + field offset), the old data
-    pointer is loaded THROUGH it, _DynArraySetLength is called, and the new
+    pointer is loaded THROUGH it, __DynArraySetLength is called, and the new
     pointer is stored back through the address — no ARC (the RTL frees the
     old block and returns a fresh rc=1 block). }
   AsmT := GenAsm(
@@ -4418,14 +4418,14 @@ begin
       WriteLn(Length(S.Cands))
     end.
     ''');
-  { the SetLength routes through _DynArraySetLength via the field address:
+  { the SetLength routes through __DynArraySetLength via the field address:
     compute &field, load old ptr, call, store new ptr back — NO plain-ident
-    slot store and NO extra _DynArrayRelease (the RTL moved ownership). }
+    slot store and NO extra __DynArrayRelease (the RTL moved ownership). }
   AssertTrue('field-lvalue setlength',
     Pos(#9'add x0, x0, #8' + LF + #9'str x0, [sp, #-16]!' + LF +
         #9'ldr x0, [x0]' + LF + #9'ldr x1, [sp, #16]', AsmT) >= 0);
-  AssertTrue('calls _DynArraySetLength',
-    Pos(#9'bl _DynArraySetLength', AsmT) >= 0);
+  AssertTrue('calls __DynArraySetLength',
+    Pos(#9'bl __DynArraySetLength', AsmT) >= 0);
   { the new pointer is stored back through the saved field address }
   AssertTrue('stores new ptr through field addr',
     Pos(#9'ldr x9, [sp]' + LF + #9'str x0, [x9]', AsmT) >= 0);
@@ -4476,9 +4476,9 @@ begin
   { string element ARC store: retain new, then release the OLD element (read
     through the freshly-computed element address), then store the new }
   AssertTrue('retains the new element value',
-    Pos(#9'bl _StringAddRef', AsmT) >= 0);
+    Pos(#9'bl __StringAddRef', AsmT) >= 0);
   AssertTrue('releases the old element string via the element address',
-    Pos(#9'ldr x0, [x0]' + LF + #9'bl _StringRelease', AsmT) >= 0);
+    Pos(#9'ldr x0, [x0]' + LF + #9'bl __StringRelease', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64fea.o');
   try
@@ -4529,7 +4529,7 @@ var
 begin
   { ForceDirectories('...') as a bare statement — the return value is
     discarded, so it lowers via EmitProcCallStmt (statement context), which
-    was missing the case on arm64.  Emits a call to the RTL _ForceDirectories. }
+    was missing the case on arm64.  Emits a call to the RTL __ForceDirectories. }
   AsmT := GenAsm(
     '''
     program P;
@@ -4539,7 +4539,7 @@ begin
     end.
     ''');
   AssertTrue('statement-context ForceDirectories calls the RTL',
-    Pos(#9'bl _ForceDirectories', AsmT) >= 0);
+    Pos(#9'bl __ForceDirectories', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64fd.o');
   try
@@ -4701,7 +4701,7 @@ var
   F: TMachOFile;
 begin
   { TBase declares IShape.Area virtual;abstract; TSquare overrides it.  The
-    abstract base's itab slot points at _AbstractMethodError; the concrete
+    abstract base's itab slot points at __AbstractMethodError; the concrete
     class's itab points at its own override (BUG-052 F2). }
   AsmStr := GenAsm(
     '''
@@ -4728,7 +4728,7 @@ begin
     end.
     ''');
   AssertTrue('abstract base itab slot is the abort stub',
-    Pos('_itab_TBase_IShape:' + LF + #9'.quad _AbstractMethodError',
+    Pos('_itab_TBase_IShape:' + LF + #9'.quad __AbstractMethodError',
         AsmStr) >= 0);
   AssertTrue('concrete override itab binds the override',
     Pos('_itab_TSquare_IShape:' + LF + #9'.quad _TSquare_Area', AsmStr) >= 0);
@@ -4874,7 +4874,7 @@ begin
     end.
     ''');
   { dyn-array iteration re-reads the length each pass }
-  AssertTrue('dyn length', Pos(#9'bl _DynArrayLength', AsmT) >= 0);
+  AssertTrue('dyn length', Pos(#9'bl __DynArrayLength', AsmT) >= 0);
   { string byte-iteration: length at dataptr-8, byte loads }
   AssertTrue('string length read', Pos(#9'ldur w1, [x0, #-8]', AsmT) >= 0);
   AssertTrue('string byte load', Pos(#9'ldrb w0, [x0]', AsmT) >= 0);
@@ -4936,7 +4936,7 @@ begin
   AssertTrue('MoveNext call', Pos(#9'bl _TEnum_MoveNext', AsmT) >= 0);
   AssertTrue('Current getter call', Pos(#9'bl _TEnum_GetCurrent', AsmT) >= 0);
   { the enumerator is transferred into its slot (release old, no AddRef) }
-  AssertTrue('enumerator slot release', Pos(#9'bl _ClassRelease', AsmT) >= 0);
+  AssertTrue('enumerator slot release', Pos(#9'bl __ClassRelease', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64forinenum.o');
   try
@@ -4974,11 +4974,11 @@ begin
     end.
     ''');
   { each label compares via the RTL — pointer cmp would be silently wrong }
-  AssertTrue('string equals chain', Pos(#9'bl _StringEquals', AsmT) >= 0);
+  AssertTrue('string equals chain', Pos(#9'bl __StringEquals', AsmT) >= 0);
   AssertTrue('match branches to body', Pos(#9'cbnz x0, Lcbody', AsmT) >= 0);
   { the concat selector is an rc=0 transient: pinned (AddRef then Release)
     after the dispatch — a bare release would make it immortal }
-  AssertTrue('rc0 selector pinned', Pos(#9'bl _StringAddRef', AsmT) >= 0);
+  AssertTrue('rc0 selector pinned', Pos(#9'bl __StringAddRef', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64strcase.o');
   try
@@ -5072,17 +5072,17 @@ begin
     (name, typeinfo, thunk) triples behind slot 8 }
   AssertTrue('class attrs table', Pos('attrs_TJob:', AsmT) >= 0);
   AssertTrue('factory thunk referenced',
-    Pos(#9'.quad __attr_TJob_c0', AsmT) >= 0);
+    Pos(#9'.quad ___attr_TJob_c0', AsmT) >= 0);
   AssertTrue('method attrs table', Pos('methattrs_TJob:', AsmT) >= 0);
   AssertTrue('typeinfo slot 7 wired', Pos(#9'.quad attrs_TJob', AsmT) >= 0);
   { TCustomAttribute base stubs exist for the parent chain }
   AssertTrue('TCustomAttribute typeinfo',
     Pos('_typeinfo_TCustomAttribute:', AsmT) >= 0);
   { RTTI builtins lower to the runtime helpers }
-  AssertTrue('has-class-attr call', Pos(#9'bl _HasClassAttribute', AsmT) >= 0);
+  AssertTrue('has-class-attr call', Pos(#9'bl __HasClassAttribute', AsmT) >= 0);
   AssertTrue('has-method-attr call',
-    Pos(#9'bl _HasMethodAttribute', AsmT) >= 0);
-  AssertTrue('count call', Pos(#9'bl _MethodAttributeCount', AsmT) >= 0);
+    Pos(#9'bl __HasMethodAttribute', AsmT) >= 0);
+  AssertTrue('count call', Pos(#9'bl __MethodAttributeCount', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64attrs.o');
   try
@@ -5135,14 +5135,14 @@ begin
   AssertTrue('weak typeinfo', Pos('.weak _typeinfo_TBox_Int64', AsmT) >= 0);
   AssertTrue('weak vtable', Pos('.weak _vtable_TBox_Int64', AsmT) >= 0);
   AssertTrue('weak cleanup',
-    Pos('.weak _FieldCleanup_TBox_Int64', AsmT) >= 0);
+    Pos('.weak __FieldCleanup_TBox_Int64', AsmT) >= 0);
   AssertTrue('instance method body', Pos('TBox_Int64_Put:', AsmT) >= 0);
   AssertTrue('weak method bind', Pos('.weak _TBox_Int64_Put', AsmT) >= 0);
   { instance is constructed through its own typeinfo }
-  { ctor allocates via _ClassAlloc (eddb5c18): the instance-specific symbol on
+  { ctor allocates via __ClassAlloc (eddb5c18): the instance-specific symbol on
     that path is the field-cleanup fn }
   AssertTrue('ctor field-cleanup ref',
-    Pos('adrp x1, _FieldCleanup_TBox_Int64@PAGE', AsmT) >= 0);
+    Pos('adrp x1, __FieldCleanup_TBox_Int64@PAGE', AsmT) >= 0);
   { the generic FUNCTION instance is emitted weak too }
   AssertTrue('weak func instance', Pos('.weak _Pick_Int64', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
@@ -5244,7 +5244,7 @@ var
 begin
   { A closure call whose argument is an owned-transient string (a function
     result, rc=1) passes it borrowed and disposes it after the call — a bare
-    _StringRelease that must appear AFTER the closure blr. }
+    __StringRelease that must appear AFTER the closure blr. }
   AsmT := GenAsm(
     '''
     program P;
@@ -5261,7 +5261,7 @@ begin
   { the closure is invoked (blr) and the transient released afterwards }
   PosCall := Pos(#9'blr x9', AsmT);
   AssertTrue('closure invoked', PosCall >= 0);
-  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
+  PosRel := PosEx(#9'bl __StringRelease', AsmT, PosCall);
   AssertTrue('transient released after the closure call', PosRel > PosCall);
   { transient pointers are held in callee-saved x19 across the call }
   AssertTrue('transient held callee-saved', Pos(#9'mov x19, x0', AsmT) >= 0);
@@ -5290,18 +5290,18 @@ begin
       WriteLn(Sink(A + 'cd'))
     end.
     ''');
-  PosCat := Pos(#9'bl _StringConcat', AsmT);
+  PosCat := Pos(#9'bl __StringConcat', AsmT);
   AssertTrue('concat produced', PosCat >= 0);
   PosCall := PosEx(#9'bl _Sink', AsmT, PosCat);
   AssertTrue('callee invoked after the concat', PosCall > PosCat);
-  PosPin := PosEx(#9'bl _StringAddRef', AsmT, PosCat);
+  PosPin := PosEx(#9'bl __StringAddRef', AsmT, PosCat);
   AssertTrue('rc=0 transient pinned BEFORE the direct call',
     (PosPin > PosCat) and (PosPin < PosCall));
-  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
+  PosRel := PosEx(#9'bl __StringRelease', AsmT, PosCall);
   AssertTrue('transient released after the call', PosRel > PosCall);
   AssertTrue('no post-call AddRef half remains',
-    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) < 0) or
-    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) > PosRel));
+    (PosEx(#9'bl __StringAddRef', AsmT, PosCall) < 0) or
+    (PosEx(#9'bl __StringAddRef', AsmT, PosCall) > PosRel));
 end;
 
 procedure TArm64BackendTests.TestBuiltinStrArg_UnownedTransient_PinnedBeforeCall;
@@ -5312,7 +5312,7 @@ begin
   { Same rule for a one-string-arg RTL builtin.  Any such builtin may store its
     const parameter into a local (ExpandFileName does, on its absolute-path
     branch), so an unpinned rc=0 argument was freed inside the RTL and the
-    caller's dispose then hit a reused block ("_StringRelease corrupted
+    caller's dispose then hit a reused block ("__StringRelease corrupted
     header").  Trim stands in for the family here because it needs no `uses`. }
   AsmT := GenAsm(
     '''
@@ -5324,18 +5324,18 @@ begin
       WriteLn(R)
     end.
     ''');
-  PosCat := Pos(#9'bl _StringConcat', AsmT);
+  PosCat := Pos(#9'bl __StringConcat', AsmT);
   AssertTrue('concat produced', PosCat >= 0);
-  PosCall := PosEx(#9'bl _StringTrim', AsmT, PosCat);
+  PosCall := PosEx(#9'bl __StringTrim', AsmT, PosCat);
   AssertTrue('builtin invoked after the concat', PosCall > PosCat);
-  PosPin := PosEx(#9'bl _StringAddRef', AsmT, PosCat);
+  PosPin := PosEx(#9'bl __StringAddRef', AsmT, PosCat);
   AssertTrue('rc=0 transient pinned BEFORE the builtin call',
     (PosPin > PosCat) and (PosPin < PosCall));
-  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
+  PosRel := PosEx(#9'bl __StringRelease', AsmT, PosCall);
   AssertTrue('transient released after the builtin call', PosRel > PosCall);
   AssertTrue('no post-call AddRef half remains',
-    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) < 0) or
-    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) > PosRel));
+    (PosEx(#9'bl __StringAddRef', AsmT, PosCall) < 0) or
+    (PosEx(#9'bl __StringAddRef', AsmT, PosCall) > PosRel));
 end;
 
 procedure TArm64BackendTests.TestChainedIndexedPropBase_StepsIntoTheField;
@@ -5409,7 +5409,7 @@ begin
   { A by-value record param owns its copy, so its managed fields are retained
     on entry — but the copy is a memcpy from the caller's record into the
     callee's slot, and the retains have to come after it.  Emitted first, they
-    handed _StringAddRef whatever garbage the uninitialised slot held. }
+    handed __StringAddRef whatever garbage the uninitialised slot held. }
   AsmT := GenAsm(
     '''
     program P;
@@ -5443,12 +5443,12 @@ begin
   PosFn := Pos('Enc:' + #10, AsmT);
   AssertTrue('Enc emitted', PosFn >= 0);
   { both the param copy and the entry retains live in Enc's prologue, so the
-    FIRST memcpy and the FIRST _StringAddRef after its label are the two
+    FIRST memcpy and the FIRST __StringAddRef after its label are the two
     instructions whose order is under test }
   Body := Copy(AsmT, PosFn, Length(AsmT) - PosFn);
-  PosCopy := Pos(#9'bl memcpy', Body);
+  PosCopy := Pos(#9'bl _memcpy', Body);
   AssertTrue('the record param is copied in the prologue', PosCopy >= 0);
-  PosRetain := Pos(#9'bl _StringAddRef', Body);
+  PosRetain := Pos(#9'bl __StringAddRef', Body);
   AssertTrue('its managed fields are retained', PosRetain >= 0);
   AssertTrue('field retains come AFTER the copy, not before',
     PosRetain > PosCopy);
@@ -5626,11 +5626,11 @@ var
   PosCat, PosPin, PosCall, PosRel: Integer;
 begin
   { A closure call whose argument is an rc=0 UNOWNED string transient (a `+`
-    concat) must pin it (_StringAddRef) BEFORE the blr: the closure's by-value
+    concat) must pin it (__StringAddRef) BEFORE the blr: the closure's by-value
     param entry-retain/exit-release cycle frees an unpinned rc=0 transient
     during the call, so the old post-call AddRef+Release double-freed whenever
     the closure did not store the value.  After the call a single bare
-    _StringRelease disposes it (1 -> 0). }
+    __StringRelease disposes it (1 -> 0). }
   AsmT := GenAsm(
     '''
     program P;
@@ -5643,20 +5643,20 @@ begin
       WriteLn(Apply(function(s: string): Integer begin Result := Length(s) end, 'hi'))
     end.
     ''');
-  PosCat := Pos(#9'bl _StringConcat', AsmT);
+  PosCat := Pos(#9'bl __StringConcat', AsmT);
   AssertTrue('concat produced', PosCat >= 0);
   PosCall := PosEx(#9'blr x9', AsmT, PosCat);
   AssertTrue('closure invoked after the concat', PosCall > PosCat);
   { the rc=0 pin lands strictly between the concat and the blr }
-  PosPin := PosEx(#9'bl _StringAddRef', AsmT, PosCat);
+  PosPin := PosEx(#9'bl __StringAddRef', AsmT, PosCat);
   AssertTrue('rc=0 transient pinned BEFORE the closure call',
     (PosPin > PosCat) and (PosPin < PosCall));
   { one release after the call, with no post-call AddRef half before it }
-  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosCall);
+  PosRel := PosEx(#9'bl __StringRelease', AsmT, PosCall);
   AssertTrue('transient released after the closure call', PosRel > PosCall);
   AssertTrue('no post-call AddRef half remains',
-    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) < 0) or
-    (PosEx(#9'bl _StringAddRef', AsmT, PosCall) > PosRel));
+    (PosEx(#9'bl __StringAddRef', AsmT, PosCall) < 0) or
+    (PosEx(#9'bl __StringAddRef', AsmT, PosCall) > PosRel));
 end;
 
 procedure TArm64BackendTests.TestClosure_StatementPositionCall;
@@ -5820,7 +5820,7 @@ begin
     ''');
   { the int-returning external's result must be sign-extended before any
     64-bit use — bits 32-63 of x0 are undefined at the C ABI boundary }
-  CallPos := Pos(#9'bl open', AsmT);
+  CallPos := Pos(#9'bl _open', AsmT);
   AssertTrue('external call emitted', CallPos >= 0);
   SxtwPos := Pos(#9'sxtw x0, w0', Copy(AsmT, CallPos, 64));
   AssertTrue('return narrowed right after the call', SxtwPos >= 0);
@@ -5874,8 +5874,8 @@ begin
     end.
     ''');
   { a dyn array coerced to an open array computes high = length - 1 }
-  AssertTrue('dyn arg high via _DynArrayLength',
-    Pos(#9'bl _DynArrayLength', AsmT) >= 0);
+  AssertTrue('dyn arg high via __DynArrayLength',
+    Pos(#9'bl __DynArrayLength', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64oa.o');
   try
@@ -5914,10 +5914,10 @@ begin
     end.
     ''');
   AssertTrue('string compare emitted',
-    Pos(#9'bl _StringEquals', AsmT) >= 0);
+    Pos(#9'bl __StringEquals', AsmT) >= 0);
   { the const element read must not retain what it merely borrows }
   AssertTrue('no retain on borrowed element',
-    Pos('_StringAddRef', AsmT) <= 0);
+    Pos('__StringAddRef', AsmT) <= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64oas.o');
   try
@@ -5954,7 +5954,7 @@ begin
     ''');
   { Free = release, then NIL the slot — a stale pointer here aliases the
     next same-size allocation and a later ARC store double-releases it }
-  RelPos := Pos(#9'bl _ClassRelease' + LF + #9'movz x0, #0', AsmT);
+  RelPos := Pos(#9'bl __ClassRelease' + LF + #9'movz x0, #0', AsmT);
   AssertTrue('Free releases then nils the slot', RelPos >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64free.o');
@@ -6012,7 +6012,7 @@ var
   F: TMachOFile;
 begin
   { an 80-member enum makes 'set of' jumbo; membership against a literal
-    lowers to a stack bitmap (memset + _SetInclude) tested via _SetIn }
+    lowers to a stack bitmap (memset + __SetInclude) tested via __SetIn }
   AsmT := GenAsm(
     '''
     program P;
@@ -6034,9 +6034,9 @@ begin
       WriteLn(r)
     end.
     ''');
-  AssertTrue('membership via _SetIn', Pos(#9'bl _SetIn', AsmT) >= 0);
-  AssertTrue('bitmap built via _SetInclude',
-    Pos(#9'bl _SetInclude', AsmT) >= 0);
+  AssertTrue('membership via __SetIn', Pos(#9'bl __SetIn', AsmT) >= 0);
+  AssertTrue('bitmap built via __SetInclude',
+    Pos(#9'bl __SetInclude', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64js.o');
   try
@@ -6119,8 +6119,8 @@ begin
     end.
     ''');
   { the var-class store releases the OLD value through the address and
-    stores the new one back — a str-through-address after _ClassRelease }
-  AssertTrue('releases old value', Pos(#9'bl _ClassRelease', AsmT) >= 0);
+    stores the new one back — a str-through-address after __ClassRelease }
+  AssertTrue('releases old value', Pos(#9'bl __ClassRelease', AsmT) >= 0);
   AssertTrue('stores new value through address',
     Pos(#9'str x0, [x9]', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
@@ -6160,7 +6160,7 @@ begin
     ''');
   { the transient base (+1) is released AFTER its scalar field is loaded }
   AssertTrue('base released after field load',
-    Pos(#9'bl _ClassRelease', AsmT) >= 0);
+    Pos(#9'bl __ClassRelease', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64ft.o');
   try
@@ -6284,14 +6284,14 @@ begin
       WriteLn(E)
     end.
     ''');
-  AssertTrue('ProcessCreate', Pos(#9'bl _ProcessCreate', AsmT) >= 0);
-  AssertTrue('ProcessSetExe', Pos(#9'bl _ProcessSetExe', AsmT) >= 0);
-  AssertTrue('ProcessAddArg', Pos(#9'bl _ProcessAddArg', AsmT) >= 0);
-  AssertTrue('ProcessExecute', Pos(#9'bl _ProcessExecute', AsmT) >= 0);
-  AssertTrue('ProcessWaitOnExit', Pos(#9'bl _ProcessWaitOnExit', AsmT) >= 0);
-  AssertTrue('ProcessRunning', Pos(#9'bl _ProcessRunning', AsmT) >= 0);
-  AssertTrue('ProcessExitCode', Pos(#9'bl _ProcessExitCode', AsmT) >= 0);
-  AssertTrue('ProcessFree', Pos(#9'bl _ProcessFree', AsmT) >= 0);
+  AssertTrue('ProcessCreate', Pos(#9'bl __ProcessCreate', AsmT) >= 0);
+  AssertTrue('ProcessSetExe', Pos(#9'bl __ProcessSetExe', AsmT) >= 0);
+  AssertTrue('ProcessAddArg', Pos(#9'bl __ProcessAddArg', AsmT) >= 0);
+  AssertTrue('ProcessExecute', Pos(#9'bl __ProcessExecute', AsmT) >= 0);
+  AssertTrue('ProcessWaitOnExit', Pos(#9'bl __ProcessWaitOnExit', AsmT) >= 0);
+  AssertTrue('ProcessRunning', Pos(#9'bl __ProcessRunning', AsmT) >= 0);
+  AssertTrue('ProcessExitCode', Pos(#9'bl __ProcessExitCode', AsmT) >= 0);
+  AssertTrue('ProcessFree', Pos(#9'bl __ProcessFree', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64proc.o');
   try
@@ -6310,7 +6310,7 @@ var
   GrabPos: Integer;
 begin
   { B.Grab().Free() — the getter result is an owned +1 temporary, so Free
-    is a single _ClassRelease right after the call with NO slot nil (there
+    is a single __ClassRelease right after the call with NO slot nil (there
     is no lvalue) }
   AsmT := GenAsm(
     '''
@@ -6338,8 +6338,8 @@ begin
     end.
     ''');
   { the Grab result is released immediately after the call — bl _Grab then
-    bl _ClassRelease adjacently, with no str-to-slot between them }
-  GrabPos := Pos(#9'bl _TBox_Grab' + LF + #9'bl _ClassRelease', AsmT);
+    bl __ClassRelease adjacently, with no str-to-slot between them }
+  GrabPos := Pos(#9'bl _TBox_Grab' + LF + #9'bl __ClassRelease', AsmT);
   AssertTrue('call result released with no slot nil', GrabPos >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64frc.o');
@@ -6360,7 +6360,7 @@ begin
   { STRING field on an owned transient base (MakeThing().Name): the base is
     released INLINE after the load — the string data pointer survives (the
     common case is an immortal literal); mirrors x86-64's string discipline.
-    No _StringAddRef pin. }
+    No __StringAddRef pin. }
   AsmStr := GenAsm(
     '''
     program P;
@@ -6388,14 +6388,14 @@ begin
     Pos(#9'bl _MakeThing' + LF + #9'str x0, [sp, #-16]!' + LF +
         #9'add x0, x0, #8' + LF + #9'ldr x0, [x0]' + LF +
         #9'str x0, [sp, #-16]!' + LF + #9'ldr x0, [sp, #16]' + LF +
-        #9'bl _ClassRelease', AsmStr) >= 0);
+        #9'bl __ClassRelease', AsmStr) >= 0);
 
   { CLASS field on an owned transient base (MakeThing().Obj): the field value
     aliases into the base's graph, so the base release is DEFERRED to the end
     of the enclosing statement (BUG-048 fix — the borrowed field value stays
     live and the deferred release balances the transient's +1 with no leak).
     The defer spills the base pointer to a _pendrel frame slot; there is NO
-    _ClassAddRef pin on the field value between the call and the store. }
+    __ClassAddRef pin on the field value between the call and the store. }
   AsmCls := GenAsm(
     '''
     program P;
@@ -6423,19 +6423,19 @@ begin
   { the field-read region: base + field value are both parked on the stack,
     the base is loaded (ldr x0, [sp, #16]) and SPILLED to a _pendrel frame
     slot (stur to a negative x29 offset — the defer), then the field value
-    is popped back into x0 — NO _ClassAddRef pin on the field value.  Both
+    is popped back into x0 — NO __ClassAddRef pin on the field value.  Both
     stay on the stack across the spill so no volatile register (x9 is the
     slot-address scratch) has to survive it. }
   AssertTrue('class field: base deferred (parked + spilled), field on stack',
     Pos(#9'str x0, [sp, #-16]!' + LF + #9'ldr x0, [sp, #16]' + LF +
         #9'stur x0, [x29, ', AsmCls) >= 0);
-  { the deferred base _ClassRelease is flushed at statement end — it reloads
+  { the deferred base __ClassRelease is flushed at statement end — it reloads
     the spilled base from its _pendrel slot and releases it. }
   AssertTrue('class field: deferred base release flushed at statement end',
-    Pos(#9'bl _ClassRelease', AsmCls) >= 0);
+    Pos(#9'bl __ClassRelease', AsmCls) >= 0);
   { and crucially: the field value is NEVER AddRef-pinned before the base
     release (the old leaky path AddRef'd the borrowed field value).  The
-    field-read region between the call and the store contains no _ClassAddRef
+    field-read region between the call and the store contains no __ClassAddRef
     — a pin would have appeared here.  We check the exact defer shape has no
     intervening AddRef by matching the contiguous spill sequence above. }
   AssertTrue('class field: no AddRef pin in the deferred read sequence',
@@ -6478,7 +6478,7 @@ begin
       WriteLn(A[0] + A[1])
     end.
     ''');
-  { the Result +1 transfers — MakeArr's body must NOT _DynArrayRelease its
+  { the Result +1 transfers — MakeArr's body must NOT __DynArrayRelease its
     Result before returning it (that would drop the transferred ref) }
   MakeEnd := Pos(#9'bl _MakeArr', AsmT);
   AssertTrue('MakeArr called', MakeEnd >= 0);
@@ -6486,7 +6486,7 @@ begin
   AssertTrue('MakeArr emitted', RelInMake >= 0);
   { caller consumes the owned result: releases the OLD A then stores }
   AssertTrue('caller releases old A on assign',
-    Pos(#9'bl _DynArrayRelease', AsmT) >= 0);
+    Pos(#9'bl __DynArrayRelease', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64dar.o');
   try
@@ -6528,9 +6528,9 @@ begin
     end.
     ''');
   { the element store releases the dest's old string field before the memcpy
-    transfer — a _StringRelease then a memcpy from the __rret scratch }
-  AssertTrue('dest old ref released', Pos(#9'bl _StringRelease', AsmT) >= 0);
-  AssertTrue('transfer via memcpy', Pos(#9'bl memcpy', AsmT) >= 0);
+    transfer — a __StringRelease then a memcpy from the __rret scratch }
+  AssertTrue('dest old ref released', Pos(#9'bl __StringRelease', AsmT) >= 0);
+  AssertTrue('transfer via memcpy', Pos(#9'bl _memcpy', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64rce.o');
   try
@@ -6624,9 +6624,9 @@ begin
     Pos('add x0, x0, #' , AsmT) >= 0);
   { element ARC store on the write side: retain new literal, release old }
   AssertTrue('string element store retains the new value',
-    Pos(#9'bl _StringAddRef', AsmT) >= 0);
+    Pos(#9'bl __StringAddRef', AsmT) >= 0);
   AssertTrue('string element store releases the old element',
-    Pos(#9'bl _StringRelease', AsmT) >= 0);
+    Pos(#9'bl __StringRelease', AsmT) >= 0);
   { the read loads the element string through the element address }
   AssertTrue('read loads the element via the element address',
     Pos(#9'ldr x0, [x0]', AsmT) >= 0);
@@ -6708,8 +6708,8 @@ begin
     ''');
   { Inner spills the leading capture pointer arg into _cap_n (first store of
     x0 to a frame slot) and reads the captured var by derefing that pointer:
-    load the _cap_ slot into x0, then ldr x0, [x0]. }
-  AssertTrue('Inner spills the leading capture pointer to its _cap_ slot',
+    load the __cap_ slot into x0, then ldr x0, [x0]. }
+  AssertTrue('Inner spills the leading capture pointer to its __cap_ slot',
     Pos(#9'stur x0, [x29, #-8]', AsmT) >= 0);
   AssertTrue('Inner reads the captured var by derefing the capture pointer',
     Pos(#9'ldur x0, [x29, #-8]' + LF + #9'ldr x0, [x0]', AsmT) >= 0);
@@ -6759,11 +6759,11 @@ begin
     end.
     ''');
   AssertTrue('captured string store retains the new value',
-    Pos(#9'bl _StringAddRef', AsmT) >= 0);
+    Pos(#9'bl __StringAddRef', AsmT) >= 0);
   AssertTrue('captured string store releases the old value',
-    Pos(#9'bl _StringRelease', AsmT) >= 0);
+    Pos(#9'bl __StringRelease', AsmT) >= 0);
   AssertTrue('the old string is read through the capture pointer',
-    Pos(#9'ldr x0, [x9]' + LF + #9'bl _StringRelease', AsmT) >= 0);
+    Pos(#9'ldr x0, [x9]' + LF + #9'bl __StringRelease', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64cstr.o');
   try
@@ -6902,7 +6902,7 @@ begin
   { A class with a string-indexed property (Items[Key: string]: Integer).  The
     write B.Items['k'] := 7 must lower (previously NotYet'd as a non-integer
     index): the key string pointer goes to x1, the value to x2, receiver x0,
-    then bl _SetItem.  The key is BORROWED — no _StringAddRef before the setter
+    then bl _SetItem.  The key is BORROWED — no __StringAddRef before the setter
     (matching x86-64/QBE).  A read then dispatches the getter. }
   AsmT := GenAsm(
     '''
@@ -6983,18 +6983,18 @@ begin
     double-free with a non-storing setter
     (BUG-20260722-arm64-propsetter-pin-after-call) — and the single release
     follows the call }
-  PosCat := Pos(#9'bl _StringConcat', AsmT);
+  PosCat := Pos(#9'bl __StringConcat', AsmT);
   AssertTrue('concat produced', PosCat >= 0);
   PosSet := Pos(#9'bl _TFoo_SetItem', AsmT);
   AssertTrue('indexed setter called', PosSet >= 0);
-  PosPin := PosEx(#9'bl _StringAddRef', AsmT, PosCat);
+  PosPin := PosEx(#9'bl __StringAddRef', AsmT, PosCat);
   AssertTrue('rc=0 transient pinned BEFORE the indexed setter call',
     (PosPin > PosCat) and (PosPin < PosSet));
-  PosRel := PosEx(#9'bl _StringRelease', AsmT, PosSet);
+  PosRel := PosEx(#9'bl __StringRelease', AsmT, PosSet);
   AssertTrue('transient released after the indexed setter', PosRel > PosSet);
   AssertTrue('no post-call AddRef half remains',
-    (PosEx(#9'bl _StringAddRef', AsmT, PosSet) < 0) or
-    (PosEx(#9'bl _StringAddRef', AsmT, PosSet) > PosRel));
+    (PosEx(#9'bl __StringAddRef', AsmT, PosSet) < 0) or
+    (PosEx(#9'bl __StringAddRef', AsmT, PosSet) > PosRel));
 end;
 
 procedure TArm64BackendTests.TestCapturedClassBase_FieldRead;
@@ -7005,7 +7005,7 @@ var
 begin
   { A method takes a class parameter; a nested proc reads a FIELD of it
     (AThing.FName).  AThing is captured — its instance pointer must be loaded
-    through _cap_AThing (load the _cap_ slot, deref to the instance) before the
+    through _cap_AThing (load the __cap_ slot, deref to the instance) before the
     field offset is applied.  Previously NotYet'd as 'load of variable AThing'. }
   AsmT := GenAsm(
     '''
@@ -7021,7 +7021,7 @@ begin
     ''');
   AssertTrue('Inner is emitted as a sibling symbol',
     Pos('TProc_Run_Inner:', AsmT) >= 0);
-  { the captured base is loaded through _cap_ then derefed to the instance:
+  { the captured base is loaded through __cap_ then derefed to the instance:
     two consecutive ldr forms materialise the pointer before the field access }
   AssertTrue('captured class base derefs the capture pointer to the instance',
     Pos('ldr x0, [x0]', AsmT) >= 0);
@@ -7092,7 +7092,7 @@ begin
     begin end.
     ''');
   AssertTrue('Inner is emitted', Pos('TProc_Run_Inner:', AsmT) >= 0);
-  { the store base is materialised from _cap_ (deref to instance), then the
+  { the store base is materialised from __cap_ (deref to instance), then the
     value is stored at the field offset }
   AssertTrue('captured store base derefs the capture pointer',
     Pos('ldr x9, [x9]', AsmT) >= 0);
@@ -7113,7 +7113,7 @@ var
   F: TMachOFile;
 begin
   { A nested proc writes a field of a captured VAR-PARAM class base.  The base
-    must deref the capture pointer TWICE (load _cap_, deref to the var-param
+    must deref the capture pointer TWICE (load __cap_, deref to the var-param
     slot, deref again to the instance) before the field store — a single deref
     corrupts memory (the review-found bug). }
   AsmT := GenAsm(
@@ -7310,7 +7310,7 @@ begin
     end.
     ''');
   AssertTrue('the record element store memcpys the record',
-    Pos(#9'bl memcpy', AsmT) >= 0);
+    Pos(#9'bl _memcpy', AsmT) >= 0);
   AssertTrue('the memcpy length is the record size (16)',
     Pos(#9'movz x2, #16', AsmT) >= 0);
   { the source and dest addresses are parked in callee-saved x19/x22 across the
@@ -7353,7 +7353,7 @@ begin
     ''');
   { the record is memcpy'd (16 bytes) — the store is a whole-record copy }
   AssertTrue('the var-param record store memcpys the record',
-    Pos(#9'bl memcpy', AsmT) >= 0);
+    Pos(#9'bl _memcpy', AsmT) >= 0);
   AssertTrue('the memcpy length is the record size (16)',
     Pos(#9'movz x2, #16', AsmT) >= 0);
   { the dest address is the slot VALUE (a load), proving the deref — the
@@ -7434,14 +7434,14 @@ begin
     end.
     ''');
   AssertTrue('the managed record field store memcpys the record',
-    Pos(#9'bl memcpy', AsmT) >= 0);
+    Pos(#9'bl _memcpy', AsmT) >= 0);
   AssertTrue('source/dest parked in callee-saved x19/x22',
     Pos(#9'stp x19, x22, [sp, #-16]!', AsmT) >= 0);
   { the retain-source / release-dest ARC discipline runs on the string field }
   AssertTrue('retains the source managed field',
-    Pos(#9'bl _StringAddRef', AsmT) >= 0);
+    Pos(#9'bl __StringAddRef', AsmT) >= 0);
   AssertTrue('releases the destination''s old managed field',
-    Pos(#9'bl _StringRelease', AsmT) >= 0);
+    Pos(#9'bl __StringRelease', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64mrf.o');
   try
@@ -7461,7 +7461,7 @@ begin
   { SetLength(C.Arr, N) where C is a var-param record and Arr a dyn-array field.
     The var-param slot holds the CALLER's record address, so the field address
     must LOAD the slot (deref) then add the Arr offset — NOT take the slot's own
-    address.  Then _DynArraySetLength resizes and the fresh pointer is stored
+    address.  Then __DynArraySetLength resizes and the fresh pointer is stored
     back.  Previously NotYet'd as 'SetLength on this field-lvalue form'. }
   AsmT := GenAsm(
     '''
@@ -7473,7 +7473,7 @@ begin
     begin Grow(Ctx, 3); WriteLn(Length(Ctx.Arr)) end.
     ''');
   AssertTrue('the dyn-array field is resized',
-    Pos(#9'bl _DynArraySetLength', AsmT) >= 0);
+    Pos(#9'bl __DynArraySetLength', AsmT) >= 0);
   { the var-param base is derefed (ldur the slot value), not slot-addressed }
   AssertTrue('the var-param record slot is dereferenced for the field address',
     Pos(#9'ldur x0, [x29,', AsmT) >= 0);
@@ -7491,7 +7491,7 @@ procedure TArm64BackendTests.TestSetLengthOnString_AddRefsAndVarParam;
 var
   AsmT: string;
 begin
-  { SetLength(S, N) on a string calls _StringSetLength, whose result is rc=0
+  { SetLength(S, N) on a string calls __StringSetLength, whose result is rc=0
     (a fresh unowned buffer), so it MUST be AddRef'd before it is stored — else
     the local's scope-exit release would drive the count negative (immortal /
     leak).  A var-param string works through the slot ADDRESS with one extra
@@ -7507,11 +7507,11 @@ begin
       WriteLn(Length(t))
     end.
     ''');
-  AssertTrue('resize helper', Pos(#9'bl _StringSetLength', AsmT) >= 0);
+  AssertTrue('resize helper', Pos(#9'bl __StringSetLength', AsmT) >= 0);
   { the rc=0 result is retained before it lands in the slot }
-  AssertTrue('result AddRef', Pos(#9'bl _StringAddRef', AsmT) >= 0);
+  AssertTrue('result AddRef', Pos(#9'bl __StringAddRef', AsmT) >= 0);
   { the old value is released }
-  AssertTrue('old released', Pos(#9'bl _StringRelease', AsmT) >= 0);
+  AssertTrue('old released', Pos(#9'bl __StringRelease', AsmT) >= 0);
   { the var-param form derefs the slot address to reach the caller's string }
   AssertTrue('var-param slot dereferenced', Pos(#9'ldr x19, [x19]', AsmT) >= 0);
 end;
@@ -7525,7 +7525,7 @@ begin
     retained in the prologue and released at scope exit — mirroring a by-value
     string param.  The dyn-array passes as one register at the call site.  This
     program exercises exactly one by-value dyn-array param (SumV), so exactly
-    one _DynArrayAddRef must be emitted (the const SumC borrows). }
+    one __DynArrayAddRef must be emitted (the const SumC borrows). }
   AsmT := GenAsm(
     '''
     program P;
@@ -7544,15 +7544,15 @@ begin
     end.
     ''');
   { the param is used via Length + subscript in both bodies }
-  AssertTrue('dyn-array length in body', Pos(#9'bl _DynArrayLength', AsmT) >= 0);
-  { the by-value param (SumV) retains — a prologue _DynArrayAddRef appears }
+  AssertTrue('dyn-array length in body', Pos(#9'bl __DynArrayLength', AsmT) >= 0);
+  { the by-value param (SumV) retains — a prologue __DynArrayAddRef appears }
   AssertTrue('by-value param retains',
-    Pos(#9'bl _DynArrayAddRef', AsmT) >= 0);
+    Pos(#9'bl __DynArrayAddRef', AsmT) >= 0);
   { there is exactly ONE such retain — the const param (SumC) borrows, so a
-    second _DynArrayAddRef past the first must not exist }
+    second __DynArrayAddRef past the first must not exist }
   AssertTrue('only the by-value param retains (const borrows)',
-    PosEx(#9'bl _DynArrayAddRef', AsmT,
-      Pos(#9'bl _DynArrayAddRef', AsmT) + 1) < 0);
+    PosEx(#9'bl __DynArrayAddRef', AsmT,
+      Pos(#9'bl __DynArrayAddRef', AsmT) + 1) < 0);
 end;
 
 procedure TArm64BackendTests.TestVarParamRecordArrayFieldElemWrite;
@@ -7624,7 +7624,7 @@ begin
     Pos(#9'mul x1, x1, x2', AsmT) >= 0);
   { a whole-record copy memcpy's from the element address }
   AssertTrue('the record element is copied by memcpy',
-    Pos(#9'bl memcpy', AsmT) >= 0);
+    Pos(#9'bl _memcpy', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestVarParamClassArrayFieldElemWriteStillNotYet;
@@ -7693,12 +7693,12 @@ begin
   Body := Copy(AsmT, 0, CallPos);
   { the pin is the LAST AddRef emitted before the call — the global is loaded,
     parked, and AddRef'd immediately before bl _Look }
-  AddRefBefore := RPos(#9'bl _StringAddRef', Body);
+  AddRefBefore := RPos(#9'bl __StringAddRef', Body);
   AssertTrue('global by-value string arg is pinned before the call',
     AddRefBefore >= 0);
   { and a matching release follows the call }
   AssertTrue('pinned arg released after the call',
-    PosEx(#9'bl _StringRelease', AsmT, CallPos) >= 0);
+    PosEx(#9'bl __StringRelease', AsmT, CallPos) >= 0);
 end;
 
 procedure TArm64BackendTests.TestStrArg_PlainLocalByValue_NotPinned;
@@ -7731,7 +7731,7 @@ begin
     ''');
   { L is a plain local of Use; find Use's Look call and confirm no AddRef sits
     between L's load and the call.  L's slot load is 'ldur x0, [x29,' followed
-    by the push; there must be no _StringAddRef in the arg-marshal window. }
+    by the push; there must be no __StringAddRef in the arg-marshal window. }
   CallPos := Pos(#9'bl _Look', AsmT);
   AssertTrue('Look is called', CallPos >= 0);
   { window: the only AddRef in Use before the call is L's assignment retain;
@@ -7741,7 +7741,7 @@ begin
   AssertTrue('arg pushed before the call', LoadPos >= 0);
   Between := Copy(AsmT, LoadPos, CallPos - LoadPos);
   AssertTrue('plain-local by-value string arg is NOT pinned',
-    Pos(#9'bl _StringAddRef', Between) < 0);
+    Pos(#9'bl __StringAddRef', Between) < 0);
 end;
 
 initialization

@@ -780,11 +780,14 @@ begin
   Result := Pos;
 end;
 
-{ Renamed from FormatFloatSpec: on Darwin the backend prefixes a Pascal
-  routine label with '_' and leaves an already-underscored one alone, so a
-  private 'X' beside a public '_X' in the SAME unit collapsed onto one symbol
-  (internal assembler: duplicate label _FormatFloatSpec).  The two names must
-  differ by more than the leading underscore. }
+{ Named ...Core rather than FormatFloatSpec so it does not differ from the
+  public _FormatFloatSpec by only a leading underscore.  The current Darwin rule
+  gives every name exactly one '_' and so keeps the two apart, but a compiler
+  PREDATING that rule prefixed only names that were not already underscored, and
+  under it both collapsed onto _FormatFloatSpec — the internal assembler
+  rejecting the second with 'duplicate label'.  Keeping the names distinct is
+  what lets any older binary, including the bootstrap seed, still build this
+  unit; the rolling-bootstrap chain depends on it. }
 function FormatFloatSpecCore(V: Double; Spec: Integer; Prec: Integer): Pointer;
 var
   Bits: Int64;
