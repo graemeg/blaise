@@ -102,6 +102,38 @@ if [ -n "$EXCLUDE_OBJ" ]; then
     > "$EXCL_FILE"
 fi
 
+# Invalidate the whole cache when the COMPILER changes.
+#
+# BUG-20260726 (twin of the one fixed in blaise.codegen.driver's RTLCacheKey):
+# the per-unit staleness check below compares the object against its SOURCE
+# mtime, which cannot see that the compiler that produced it changed.  A
+# persistent $OUTDIR therefore handed a rebuilt compiler the PREVIOUS one's
+# objects, and the failure landed far from its cause — on macOS the whole e2e
+# layer failed with `ARM64_RELOC_TLVP_LOAD_PAGEOFF12 relocation on non-LDR
+# instruction in runtime.mem.o`, an ABI bug that had ALREADY been fixed in the
+# backend; the objects simply predated the fix.  204 test failures, none of them
+# real.
+#
+# Keyed on the compiler binary's content hash, so it survives a rebuild that
+# does not change the bytes (fixpoint-stable: stage-2 and stage-3 are identical,
+# so a warm $OUTDIR is still reused).  Wiping is safe here where the driver's
+# equivalent could not: $OUTDIR is a per-suite scratch directory, not a shared
+# cache other processes link out of.
+CACHE_STAMP="$OUTDIR/.compiler-id"
+COMPILER_ID=$(shasum -a 256 "$BLAISE" 2>/dev/null | awk '{print $1}')
+if [ -z "$COMPILER_ID" ]; then
+  COMPILER_ID=$(sha256sum "$BLAISE" 2>/dev/null | awk '{print $1}')
+fi
+# An unreadable compiler degrades to "always rebuild" rather than to silent
+# reuse — the failure mode that caused this bug.
+if [ -z "$COMPILER_ID" ]; then
+  COMPILER_ID="unknown-$$"
+fi
+if [ ! -f "$CACHE_STAMP" ] || [ "$(cat "$CACHE_STAMP")" != "$COMPILER_ID" ]; then
+  rm -f "$OUTDIR"/*.o "$OUTDIR"/*.o.syms "$OUTDIR"/*.bif "$OUTDIR"/*.build.err
+  printf '%s\n' "$COMPILER_ID" > "$CACHE_STAMP"
+fi
+
 OBJS=""
 for u in $RTL_UNITS; do
   obj="$OUTDIR/$u.o"
