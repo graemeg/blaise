@@ -724,7 +724,23 @@ procedure TArm64Assembler.LineError(const AMsg: string);
       + AMsg + ' [' + TrimS(FL.RawLine) + ']');
   end;
 
-{ Branch target: local label -> byte delta; else reloc (pass 2 only). }
+{ Branch target: FUNCTION-INTERNAL label -> byte delta; anything else -> reloc
+  (pass 2 only).
+
+  A branch may be baked into the instruction ONLY when its target is a private
+  label — control flow inside one routine.  A branch to an EXPORTED symbol needs
+  a relocation even when the target sits in THIS SAME object and we already know
+  the exact offset, because Apple's ld splits __text into atoms at symbol
+  boundaries and relays them out; a hard-coded intra-object displacement then
+  silently retargets to whatever now sits at that distance.
+
+  That is not hypothetical.  Every 'bl _WriteAllToFd' in rtl.platform.posix was
+  self-resolved to +0x4808, correct in the object; after ld's relayout the same
+  word landed 0x11c past _WriteAllToFd, in the MIDDLE of _ArgvGet.  Twelve call
+  sites, and every cc-linked binary — native and qbe — died on a garbage pointer
+  before reaching main.  Our own linker keeps each input section atomic, so the
+  baked offsets stayed valid there and the bug was invisible to every internally
+  linked build, which is all the fixpoints and the whole self-hosting path. }
 function TArm64Assembler.BranchDelta(const ASym: string;
   AKind: TContainerRelocKind; out AIsLocal: Boolean): Integer;
   var
@@ -732,7 +748,12 @@ function TArm64Assembler.BranchDelta(const ASym: string;
     SymIdx: Integer;
   begin
     Result := 0;
-    if FLabelSec.TryGetValue(ASym, LSec) then
+    { FGlobals/FWeaks are filled in pass 1 and persist, so by pass 2 this test
+      sees every export.  Pass 1 may misclassify a forward-declared export, but
+      both arms emit one 4-byte word, so no offset can shift. }
+    if FLabelSec.TryGetValue(ASym, LSec)
+       and (not FGlobals.ContainsKey(ASym))
+       and (not FWeaks.ContainsKey(ASym)) then
     begin
       AIsLocal := True;
       if TContainerSectionKind(LSec) <> FSection then
