@@ -2593,7 +2593,7 @@ begin
       if J > 0 then Parts := Parts + ', ';
       Parts := Parts + Format('b %s', [CD.ConstSetBytes[J]]);
     end;
-    if APrefix <> '' then
+    if (APrefix <> '') or CD.IsExportedConst then
       EmitLine(Format('export data $%s = { %s }', [Label_, Parts]))
     else
       EmitLine(Format('data $%s = { %s }', [Label_, Parts]));
@@ -2633,12 +2633,16 @@ begin
                                         ElemVal]);
   end;
   { Class/record consts keep an exported, type-qualified label (referenced as
-    TFoo.Const across the compilation).  Block-local and program/unit array
-    consts use a mangled, file-local label: the mangled name is only unique
-    within one compilation, so it must NOT be exported — otherwise two
-    separately-compiled objects (e.g. the RTL and a user program) that each
-    mint '__bac_1_X' would collide at link time. }
-  if APrefix <> '' then
+    TFoo.Const across the compilation).  A unit's INTERFACE-section const
+    (CD.IsExportedConst) is likewise referenced from other separately-
+    compiled .o files under incremental compilation, so its label — unit-
+    prefixed by NewArrayConstLabel for cross-compile uniqueness — is exported
+    too.  Block-local and implementation/program-level array consts keep a
+    mangled, file-local label: the mangled name is only unique within one
+    compilation, so it must NOT be exported — otherwise two separately-
+    compiled objects (e.g. the RTL and a user program) that each mint
+    '__bac_1_X' would collide at link time. }
+  if (APrefix <> '') or CD.IsExportedConst then
     EmitLine(Format('export data $%s = { %s }', [Label_, Parts]))
   else
     EmitLine(Format('data $%s = { %s }', [Label_, Parts]));

@@ -210,6 +210,21 @@ type
       the two slots are genuinely independent. }
     procedure TestSameNamedModuleVar_AcrossUnits_ExternalLink_Native;
     procedure TestSameNamedModuleVar_AcrossUnits_QBE;
+    { Regression (GH #182 follow-up): a unit's INTERFACE-section array/jumbo-set
+      const is compiled to its own .o under the (default) incremental model, and
+      a consuming program in a SEPARATE .o references its backing data label
+      (__bac_N_Name).  Both backends emitted that label WITHOUT .globl/export —
+      it only ever worked when whole-program compilation happened to inline both
+      sides into one object.  Under real separate compilation the reference was
+      always dangling: "undefined reference to `__bac_1_CTargets'" (arm64: same
+      gap, no export directive at all).  The fix exports interface-section
+      labels and unit-prefixes them (NewArrayConstLabel) so the mangled name
+      also stays unique across separate compiler invocations (e.g. the RTL's
+      own object cache), while implementation/program-scope array consts keep
+      their existing non-exported, bare-mangled form. }
+    procedure TestInterfaceArrayConst_AcrossUnits_Native;
+    procedure TestInterfaceArrayConst_AcrossUnits_QBE;
+    procedure TestInterfaceJumboSetConst_AcrossUnits_Native;
     { Regression (BUGS.md BUG-004): generic-instance symbols were mangled from
       FOUR inconsistent sources — the instantiating unit's prefix (source
       instantiation), bare (instantiated during .bif import), Sym.OwningUnit
@@ -3245,6 +3260,186 @@ begin
   Ignore('static async reactor is Linux-only');
 end;
 {$ENDIF}
+
+procedure TSepCompileTests.TestInterfaceArrayConst_AcrossUnits_Native;
+{ GH #182 follow-up: PieceU declares a multi-dimensional array const, indexed
+  by an enum-subrange type, in its INTERFACE section.  Under the default
+  incremental model PieceU compiles to its own .o; the program is a SEPARATE
+  .o that reads CTargets — exactly the reporter's array13a shape.  Before the
+  fix, native's EmitArrayConstData never emitted .globl for a unit-level array
+  const, so the backing data label was local to PieceU.o and the link failed
+  with "undefined reference to `__bac_..._CTargets'". }
+const
+  UnitSrc =
+    '''
+    unit PieceU;
+    interface
+    type
+      TPieceType = (ptNil, ptWhitePawn, ptBlackPawn, ptRook,
+                    ptKnight, ptBishop, ptQueen, ptKing);
+      TPieceTypeStrict = ptWhitePawn..ptKing;
+    const
+      CTargets: array[TPieceTypeStrict, 0..1] of Int64 = (
+        (11, 12), (21, 22), (31, 32), (41, 42),
+        (51, 52), (61, 62), (71, 72));
+    implementation
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UsePiece;
+    uses PieceU;
+    begin
+      WriteLn(CTargets[ptWhitePawn, 0], ' ', CTargets[ptRook, 1], ' ',
+              CTargets[ptKing, 0])
+    end.
+    ''';
+var
+  UnitPas, ProgPas, ProgBin, UnitObj: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  if not FileExists(BlaisePath()) then begin Ignore('blaise binary missing'); Exit; end;
+
+  UnitPas := FScratch + '/PieceU.pas';
+  ProgPas := FScratch + '/use_piece_native.pas';
+  ProgBin := FScratch + '/use_piece_native';
+  UnitObj := FScratch + '/pieceu.o';
+
+  WriteFile(UnitPas, UnitSrc);
+  WriteFile(ProgPas, ProgSrc);
+  DeleteFile(UnitObj);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--backend', 'native',
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('blaise(use_piece_native) exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('use_piece_native exists', FileExists(ProgBin));
+  AssertTrue('per-unit PieceU.o cached', FileExists(UnitObj));
+
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('use_piece_native exit code', 0, Rc);
+  AssertEquals('use_piece_native stdout', '11 32 71' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestInterfaceArrayConst_AcrossUnits_QBE;
+{ Same shape as TestInterfaceArrayConst_AcrossUnits_Native, on the QBE
+  backend — the QBE emitter had the identical unexported-label gap (a
+  deliberate design choice for RTL/collision-safety that predates the
+  incremental default becoming universal; see EmitArrayConstData's export
+  condition in blaise.codegen.qbe.pas). }
+const
+  UnitSrc =
+    '''
+    unit PieceU2;
+    interface
+    type
+      TPieceType = (ptNil, ptWhitePawn, ptBlackPawn, ptRook,
+                    ptKnight, ptBishop, ptQueen, ptKing);
+      TPieceTypeStrict = ptWhitePawn..ptKing;
+    const
+      CTargets: array[TPieceTypeStrict, 0..1] of Int64 = (
+        (11, 12), (21, 22), (31, 32), (41, 42),
+        (51, 52), (61, 62), (71, 72));
+    implementation
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UsePiece2;
+    uses PieceU2;
+    begin
+      WriteLn(CTargets[ptWhitePawn, 0], ' ', CTargets[ptRook, 1], ' ',
+              CTargets[ptKing, 0])
+    end.
+    ''';
+var
+  UnitPas, ProgPas, ProgBin, UnitObj: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  if not FileExists(BlaisePath()) then begin Ignore('blaise binary missing'); Exit; end;
+
+  UnitPas := FScratch + '/PieceU2.pas';
+  ProgPas := FScratch + '/use_piece_qbe.pas';
+  ProgBin := FScratch + '/use_piece_qbe';
+  UnitObj := FScratch + '/pieceu2.o';
+
+  WriteFile(UnitPas, UnitSrc);
+  WriteFile(ProgPas, ProgSrc);
+  DeleteFile(UnitObj);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--backend', 'qbe',
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('blaise(use_piece_qbe) exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('use_piece_qbe exists', FileExists(ProgBin));
+  AssertTrue('per-unit PieceU2.o cached', FileExists(UnitObj));
+
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('use_piece_qbe exit code', 0, Rc);
+  AssertEquals('use_piece_qbe stdout', '11 32 71' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestInterfaceJumboSetConst_AcrossUnits_Native;
+{ Same label-visibility gap, but for a JUMBO (>64-member enum) set constant
+  declared in a unit's interface section — jumbo sets share EmitArrayConstData
+  with array consts (a byte-blob bitmap under the same mangled label scheme). }
+const
+  UnitSrc =
+    '''
+    unit BigSetU;
+    interface
+    type
+      TBig = (b00,b01,b02,b03,b04,b05,b06,b07,b08,b09,b10,b11,b12,b13,b14,b15,
+              b16,b17,b18,b19,b20,b21,b22,b23,b24,b25,b26,b27,b28,b29,b30,b31,
+              b32,b33,b34,b35,b36,b37,b38,b39,b40,b41,b42,b43,b44,b45,b46,b47,
+              b48,b49,b50,b51,b52,b53,b54,b55,b56,b57,b58,b59,b60,b61,b62,b63,
+              b64,b65,b66,b67,b68,b69,b70,b71,b72,b73,b74,b75,b76,b77,b78,b79);
+      TBigSet = set of TBig;
+    const
+      HIGHS: TBigSet = [b65, b70, b79];
+    implementation
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseBigSet;
+    uses BigSetU;
+    begin
+      WriteLn(b65 in HIGHS, b70 in HIGHS, b79 in HIGHS, b00 in HIGHS)
+    end.
+    ''';
+var
+  UnitPas, ProgPas, ProgBin, UnitObj: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  if not FileExists(BlaisePath()) then begin Ignore('blaise binary missing'); Exit; end;
+
+  UnitPas := FScratch + '/BigSetU.pas';
+  ProgPas := FScratch + '/use_bigset_native.pas';
+  ProgBin := FScratch + '/use_bigset_native';
+  UnitObj := FScratch + '/bigsetu.o';
+
+  WriteFile(UnitPas, UnitSrc);
+  WriteFile(ProgPas, ProgSrc);
+  DeleteFile(UnitObj);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--backend', 'native',
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('blaise(use_bigset_native) exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('use_bigset_native exists', FileExists(ProgBin));
+  AssertTrue('per-unit BigSetU.o cached', FileExists(UnitObj));
+
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('use_bigset_native exit code', 0, Rc);
+  AssertEquals('use_bigset_native stdout', 'TrueTrueTrueFalse' + #10, Captured)
+end;
 
 initialization
   RegisterTest(TSepCompileTests);

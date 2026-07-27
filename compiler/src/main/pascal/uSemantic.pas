@@ -270,10 +270,10 @@ type
     procedure AnalyseConstDecls(ABlock: TBlock);
     { Resolve a set-valued const decl (IsSet): fold the member bitmask into
       CD.IntVal and register the const symbol with its tySet type. }
-    procedure AnalyseSetConstDecl(ACD: TConstDecl);
+    procedure AnalyseSetConstDecl(ACD: TConstDecl; AIsInterface: Boolean = False);
     function  ResolveSetMemberOrd(const AMember: string; ACD: TConstDecl;
                                   var AEnumDesc: TEnumTypeDesc): Integer;
-    procedure AnalyseArrayConstDecls(ABlock: TBlock);
+    procedure AnalyseArrayConstDecls(ABlock: TBlock; AIsInterface: Boolean = False);
     { Build the (possibly nested) static-array type for a range-indexed array
       const and validate that the flat row-major element count matches the
       product of the dimension sizes.  Single-dimension constants build one
@@ -281,11 +281,17 @@ type
       array[d0] of array[d1] of ... of Elem chain. }
     function BuildConstArrayType(ACD: TConstDecl;
       AElemTD: TTypeDesc): TStaticArrayTypeDesc;
-    { Mint a unique, link-safe QBE data-label for an array const.  The source
-      name is kept for lookups; this mangled label is what codegen emits and
-      references so identically-named consts in different scopes (and consts
-      inside the RTL) never collide at link time. }
-    function  NewArrayConstLabel(const AName: string): string;
+    { Mint a unique, link-safe data-label for an array/jumbo-set const.  The
+      source name is kept for lookups; this mangled label is what codegen
+      emits and references.  A per-compile counter keeps same-name consts in
+      different scopes from colliding within one compile; when AIsInterface
+      is set (the const is visible to other separately-compiled units) the
+      label is additionally prefixed with the owning unit name, since the
+      counter restarts at 1 in every separate compiler invocation (e.g. the
+      RTL's own object cache) and an interface-section label crosses .o
+      boundaries where that restart would otherwise collide. }
+    function  NewArrayConstLabel(const AName: string;
+      AIsInterface: Boolean = False): string;
     function  FoldConstBitOpExpr(ATokens: TStringList;
                                  ALine, ACol: Integer): Int64;
     { Fold a compile-time integer constant expression AST (literals, named
@@ -333,7 +339,7 @@ type
     function  AssignmentTargetsParameter(const AName: string;
                                           const ADecl: TMethodDecl): Boolean;
     procedure AnalyseVarDecls(ABlock: TBlock);
-    procedure AnalyseVarInitializer(ADecl: TVarDecl);
+    procedure AnalyseVarInitializer(ADecl: TVarDecl; AIsInterface: Boolean = False);
     function  SynthAnonEnum(const AMemberList: string): TEnumTypeDesc;
     procedure AnalyseStmts(ABlock: TBlock);
     procedure AnalyseStmt(AStmt: TASTStmt);
@@ -1913,7 +1919,7 @@ begin
     { Resolve interface type and constant declarations. }
     AnalyseConstDecls(AUnit.IntfBlock);
     AnalyseTypeDecls(AUnit.IntfBlock);
-    AnalyseArrayConstDecls(AUnit.IntfBlock);
+    AnalyseArrayConstDecls(AUnit.IntfBlock, True);
 
     { Generic class templates must receive their impl-section method bodies
       *before* any FindTypeOrInstantiate call can clone an instance, or the
@@ -1951,7 +1957,7 @@ begin
         end;
       end;
       if TVarDecl(AUnit.IntfBlock.Decls.Items[I]).InitConst <> nil then
-        Self.AnalyseVarInitializer(TVarDecl(AUnit.IntfBlock.Decls.Items[I]));
+        Self.AnalyseVarInitializer(TVarDecl(AUnit.IntfBlock.Decls.Items[I]), True);
     end;
 
     { Register interface forward declaration signatures }
@@ -2251,7 +2257,7 @@ begin
 
   AnalyseConstDecls(AUnit.IntfBlock);
   AnalyseTypeDecls(AUnit.IntfBlock);
-  AnalyseArrayConstDecls(AUnit.IntfBlock);
+  AnalyseArrayConstDecls(AUnit.IntfBlock, True);
 
   { Transfer impl-section bodies to generic class templates *before* any
     instantiation can happen.  Generic instances clone the template's
@@ -5671,7 +5677,7 @@ begin
   Result := Integer(Ref.Ordinal);
 end;
 
-procedure TSemanticAnalyser.AnalyseSetConstDecl(ACD: TConstDecl);
+procedure TSemanticAnalyser.AnalyseSetConstDecl(ACD: TConstDecl; AIsInterface: Boolean);
 var
   I:         Integer;
   Mask:      Int64;
@@ -5787,10 +5793,13 @@ begin
     Sym.ConstSetBytes := TStringList.Create();
     for I := 0 to ACD.ConstSetBytes.Count - 1 do
       Sym.ConstSetBytes.Add(ACD.ConstSetBytes.Strings[I]);
-    { Mangled, file-local data label for the bitmap blob (mirrors array
-      consts), shared by the decl and the symbol so reads resolve to it. }
+    { Mangled data label for the bitmap blob (mirrors array consts), shared
+      by the decl and the symbol so reads resolve to it.  Interface-section
+      consts are visible to other separately-compiled units, so their label
+      must be exported (see NewArrayConstLabel / IsExportedConst). }
+    ACD.IsExportedConst := AIsInterface;
     if ACD.ResolvedSetQbeName = '' then
-      ACD.ResolvedSetQbeName := Self.NewArrayConstLabel(ACD.Name);
+      ACD.ResolvedSetQbeName := Self.NewArrayConstLabel(ACD.Name, AIsInterface);
     Sym.ConstSetQbe := ACD.ResolvedSetQbeName;
     ACD.IntVal     := 0;
     Sym.ConstValue := 0;
@@ -6010,10 +6019,15 @@ begin
     RegisterUnitSymbol(ASym.OwningUnit, ASym);
 end;
 
-function TSemanticAnalyser.NewArrayConstLabel(const AName: string): string;
+function TSemanticAnalyser.NewArrayConstLabel(const AName: string;
+  AIsInterface: Boolean): string;
 begin
   Inc(FArrayConstCounter);
-  Result := Format('__bac_%d_%s', [FArrayConstCounter, AName]);
+  if AIsInterface then
+    Result := Format('__bac_%s_%d_%s',
+      [MangleUnitPrefix(FCurrentUnitName), FArrayConstCounter, AName])
+  else
+    Result := Format('__bac_%d_%s', [FArrayConstCounter, AName]);
 end;
 
 function TSemanticAnalyser.BuildConstArrayType(ACD: TConstDecl;
@@ -6066,7 +6080,8 @@ begin
     ACD.ArrayHighBound);
 end;
 
-procedure TSemanticAnalyser.AnalyseArrayConstDecls(ABlock: TBlock);
+procedure TSemanticAnalyser.AnalyseArrayConstDecls(ABlock: TBlock;
+  AIsInterface: Boolean);
 { Second-pass constant analysis for array-typed constants.
   Called after AnalyseTypeDecls so that enum index types are in scope. }
 var
@@ -6087,7 +6102,7 @@ begin
       scope (AnalyseTypeDecls ran before this pass). }
     if CD.IsSet then
     begin
-      AnalyseSetConstDecl(CD);
+      AnalyseSetConstDecl(CD, AIsInterface);
       Continue;
     end;
     if not CD.IsArrayConst then Continue;
@@ -6167,8 +6182,9 @@ begin
         CD.ArrayElements.Put(J,
           Self.ResolveConstArrayElem(CD.ArrayElements[J], ElemTD,
                                      CD.Line, CD.Col));
+    CD.IsExportedConst := AIsInterface;
     if CD.ResolvedQbeName = '' then
-      CD.ResolvedQbeName := Self.NewArrayConstLabel(CD.Name);
+      CD.ResolvedQbeName := Self.NewArrayConstLabel(CD.Name, AIsInterface);
     Sym := TSymbol.Create(CD.Name, skConstant, ArrTD);
     Sym.IsGlobal := True;
     Sym.ConstArrayQbe := CD.ResolvedQbeName;
@@ -8928,7 +8944,8 @@ end;
   array values derive their element type and bounds from the declared static
   array type, fold their elements, and mint a data label.  Record initialisers
   are not yet supported (no record-const machinery). }
-procedure TSemanticAnalyser.AnalyseVarInitializer(ADecl: TVarDecl);
+procedure TSemanticAnalyser.AnalyseVarInitializer(ADecl: TVarDecl;
+  AIsInterface: Boolean);
 var
   CD:     TConstDecl;
   Typ:    TTypeDesc;
@@ -8977,8 +8994,9 @@ begin
            (J < CD.ArrayElements.Count) then
           CD.ArrayElements.Put(J, IntToStr(FoldConstBitOpExpr(
             TStringList(CD.ArrayElementParts.Items[J]), CD.Line, CD.Col)));
+    CD.IsExportedConst := AIsInterface;
     if CD.ResolvedQbeName = '' then
-      CD.ResolvedQbeName := Self.NewArrayConstLabel(CD.Name);
+      CD.ResolvedQbeName := Self.NewArrayConstLabel(CD.Name, AIsInterface);
     Exit;
   end;
 

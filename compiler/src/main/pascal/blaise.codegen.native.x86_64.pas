@@ -2255,7 +2255,13 @@ begin
         Lbl := CD.Name;
       Self.Emit('.data');
       Self.Emit('.balign 8');
-      if Copy(Lbl, 0, 2) <> '.L' then
+      { A unit's INTERFACE-section const (or a class/record const, APrefix <>
+        '') is referenced from other separately-compiled .o files under
+        incremental compilation and must be exported; an implementation- or
+        program-level const is never referenced across a .o boundary and
+        stays local, avoiding a cross-compile label collision (see
+        NewArrayConstLabel). }
+      if (Copy(Lbl, 0, 2) <> '.L') and ((APrefix <> '') or CD.IsExportedConst) then
         Self.Emit('.globl ' + Lbl);
       Self.Emit(Lbl + ':');
       for J := 0 to CD.ConstSetBytes.Count - 1 do
@@ -2278,6 +2284,8 @@ begin
           FStrLits.Add(CD.ArrayElements[J]);
       Self.Emit('.data');
       Self.Emit('.balign 8');
+      if (Copy(Lbl, 0, 2) <> '.L') and ((APrefix <> '') or CD.IsExportedConst) then
+        Self.Emit('.globl ' + Lbl);
       Self.Emit(Lbl + ':');
       for J := 0 to CD.ArrayElements.Count - 1 do
       begin
@@ -2289,6 +2297,8 @@ begin
     begin
       Self.Emit('.data');
       Self.Emit('.balign 4');
+      if (Copy(Lbl, 0, 2) <> '.L') and ((APrefix <> '') or CD.IsExportedConst) then
+        Self.Emit('.globl ' + Lbl);
       Self.Emit(Lbl + ':');
       for J := 0 to CD.ArrayElements.Count - 1 do
         Self.Emit(Format('%s %s',

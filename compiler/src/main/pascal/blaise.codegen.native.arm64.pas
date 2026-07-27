@@ -9807,6 +9807,13 @@ var
   var
     E: Integer;
   begin
+    { A unit's INTERFACE-section const is referenced from other separately-
+      compiled .o files under incremental compilation and must be exported;
+      an implementation- or program-level const is never referenced across
+      a .o boundary and stays local (its mangled label is only unique within
+      one compile — see NewArrayConstLabel). }
+    if ACD.IsExportedConst then
+      Self.Emit(Format('.globl %s', [ALbl]));
     { jumbo-set byte blobs share this pass }
     if (ACD.ConstSetBytes <> nil) and (ACD.ConstSetBytes.Count > 0) then
     begin

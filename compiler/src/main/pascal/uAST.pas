@@ -765,6 +765,12 @@ type
     { Canonical, mangled QBE data-label for a JUMBO set const's byte blob
       (mirrors ResolvedQbeName for array consts). Empty otherwise. }
     ResolvedSetQbeName: string;
+    { True when this const is declared in a unit's INTERFACE section (or is a
+      class/record const, which is always cross-unit visible).  Its backing
+      data label (ResolvedQbeName/ResolvedSetQbeName) is then referenced from
+      other separately-compiled .o files and must be emitted with .globl/
+      export — set by uSemantic. }
+    IsExportedConst: Boolean;
     destructor Destroy; override;
   end;
 
@@ -2825,6 +2831,7 @@ begin
       Result.ConstSetBytes.Add(ASrc.ConstSetBytes.Strings[I]);
   end;
   Result.ResolvedSetQbeName := ASrc.ResolvedSetQbeName;
+  Result.IsExportedConst := ASrc.IsExportedConst;
 end;
 
 function CloneMethodParam(ASrc: TMethodParam): TMethodParam;
