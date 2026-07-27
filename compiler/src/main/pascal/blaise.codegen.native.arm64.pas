@@ -871,25 +871,32 @@ begin
     &descriptor; the thunk returns the per-thread address in x0.  Clobbers
     caller-saved registers, like any call.
 
-    This is Apple's CANONICAL sequence — adrp + LDR, not adrp + ADD.  The
-    ARM64_RELOC_TLVP_LOAD_PAGEOFF12 relocation is defined to sit on a LOAD
-    (the name says so), and Apple's ld REJECTS the add form outright:
-    "ARM64_RELOC_TLVP_LOAD_PAGEOFF12 relocation on non-LDR instruction".
-    Emitting the add made every object we produced unlinkable by anything but
-    our own linker, which killed the whole e2e layer on macOS
-    (BUG-20260726-arm64-tlv-nonldr-reloc).
+    ADDRESS-OF, not load-through-a-slot: adrp + ADD with PLAIN @PAGE/@PAGEOFF.
+    The descriptor is always defined in THIS image (we emit every TLV we use), so
+    its address can be formed directly and no indirection slot is needed.
 
-    The LDR reads a __thread_ptrs slot that only exists after the linker either
-    materialises one or RELAXES the load into an add-of-the-descriptor-address
-    (the same-image case).  We create no slot, so our own linker must perform
-    that relaxation — blaise.linker.macho.pas does, in the
-    ARM64_RELOC_TLVP_LOAD_PAGEOFF12 case.  An earlier round emitted the LDR
-    without that relaxation, dereferenced one level too many and called through
-    descriptor->thunk's CONTENTS; the fix for that was the add, which traded an
-    internal bug for an ABI violation.  See ARM64_TLS_SEGFAULT_FEEDBACK.md for
-    the original on-hardware evidence chain. }
-  Self.Emit(Format(#9'adrp x0, _tv_%s@TLVPPAGE', [ASym]));
-  Self.Emit(Format(#9'ldr x0, [x0, _tv_%s@TLVPPAGEOFF]', [ASym]));
+    Two earlier rounds each got half of this right, and the pairing is the whole
+    point — the ADD and the PLAIN relocation must change together:
+
+      * adrp+ADD with @TLVPPAGEOFF: ld rejects it outright, because
+        ARM64_RELOC_TLVP_LOAD_PAGEOFF12 is defined to sit on a LOAD ("relocation
+        on non-LDR instruction").  That is BUG-20260726-arm64-tlv-nonldr-reloc.
+      * adrp+LDR with @TLVPPAGEOFF (Apple's canonical form): correct ONLY if the
+        linker either materialises a __thread_ptrs slot or RELAXES the load into
+        an add.  Ours relaxes; Apple's ld did NEITHER for our objects — it
+        resolved the TLVP reloc directly, leaving `ldr x0,[x0,#off]` reading the
+        descriptor's FIRST WORD instead of its address.  One dereference too
+        many, so `blr x9` jumped through the thunk pointer's contents.  Verified
+        by disassembling both binaries: the internal link shows
+        `add x0, x0, #0x9d8`, the cc link `ldr x0, [x0, #0x278]`.  That is why
+        cc-linked binaries — native AND qbe — segfaulted before reaching main.
+
+    Plain @PAGE/@PAGEOFF needs no relaxation and no slot, so BOTH linkers agree.
+    Confirmed on hardware: assembling this sequence with clang, linking with cc
+    and running it returns cleanly.  See ARM64_TLS_SEGFAULT_FEEDBACK.md for the
+    original evidence chain. }
+  Self.Emit(Format(#9'adrp x0, _tv_%s@PAGE', [ASym]));
+  Self.Emit(Format(#9'add x0, x0, _tv_%s@PAGEOFF', [ASym]));
   Self.Emit(#9'ldr x9, [x0]');
   Self.Emit(#9'blr x9');
 end;

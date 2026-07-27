@@ -2038,24 +2038,33 @@ begin
       WriteLn(Counter)
     end.
     ''');
-  { access: Apple's CANONICAL adrp + LDR sequence, then call the descriptor's
-    thunk with x0 = &descriptor.
+  { access: adrp + ADD forming the descriptor's address directly, with PLAIN
+    @PAGE/@PAGEOFF, then call its thunk with x0 = &descriptor.
 
-    This test used to assert the opposite — adrp + ADD, forming the address
-    directly — because the LDR reads a __thread_ptrs indirection slot we never
-    create, and emitting it without the matching linker relaxation crashed on
-    real hardware (ARM64_TLS_SEGFAULT_FEEDBACK.md).  That fix was the wrong half
-    of the pair: ARM64_RELOC_TLVP_LOAD_PAGEOFF12 is defined to sit on a LOAD and
-    Apple's ld refuses it on an add, so every object we emitted was unlinkable
-    by cc and the whole e2e layer was dead on macOS
-    (BUG-20260726-arm64-tlv-nonldr-reloc).  The right pair is canonical LDR here
-    plus the ldr->add relaxation in blaise.linker.macho.pas, which is what
-    Apple's ld itself does for a same-image descriptor. }
-  AssertTrue('TLVP page ref', Pos('_tv_Counter@TLVPPAGE', AsmT) >= 0);
-  AssertTrue('descriptor address LOADED — the reloc requires an LDR',
-    Pos(#9'ldr x0, [x0, _tv_Counter@TLVPPAGEOFF]', AsmT) >= 0);
-  AssertTrue('never the add form, which ld rejects',
-    Pos('add x0, x0, _tv_Counter@TLVPPAGEOFF', AsmT) < 0);
+    The ADD and the PLAIN relocation are a PAIR, and each earlier round changed
+    only one of them:
+
+      * adrp+ADD with @TLVPPAGEOFF — ld refuses it, because
+        ARM64_RELOC_TLVP_LOAD_PAGEOFF12 must sit on a LOAD
+        (BUG-20260726-arm64-tlv-nonldr-reloc).
+      * adrp+LDR with @TLVPPAGEOFF (Apple's canonical form) — correct only if the
+        linker relaxes the load or materialises a __thread_ptrs slot.  This test
+        previously asserted that form, on the belief that Apple's ld performs
+        that relaxation for a same-image descriptor.  IT DOES NOT: disassembling
+        a cc-linked binary shows the LDR left intact ('ldr x0,[x0,#0x278]'),
+        reading the descriptor's first word instead of its address, so the thunk
+        call jumped through the thunk POINTER's contents.  Our own linker did
+        relax it, which is why only cc-linked binaries crashed.
+
+    Plain @PAGE/@PAGEOFF needs neither a slot nor a relaxation, so both linkers
+    agree.  Do not "restore" the TLVP spelling here without also re-checking a
+    cc-linked binary on hardware. }
+  AssertTrue('plain page ref, not TLVP',
+    Pos('_tv_Counter@PAGE', AsmT) >= 0);
+  AssertTrue('descriptor address FORMED, not loaded',
+    Pos(#9'add x0, x0, _tv_Counter@PAGEOFF', AsmT) >= 0);
+  AssertTrue('no TLVP relocation — ld resolves it wrongly for our objects',
+    Pos('TLVP', AsmT) < 0);
   AssertTrue('thunk call', Pos(#9'blr x9', AsmT) >= 0);
   { descriptor: three quads with the bootstrap thunk }
   AssertTrue('descriptor label', Pos('_tv_Counter:', AsmT) >= 0);
