@@ -30,6 +30,12 @@ const
 
 function BackendName(ABackend: TBackend): string;
 
+{ True when ABackend can produce a program that actually RUNS on the host.
+  False for QBE on macOS — see TargetHasQBEBackend in blaise.codegen.target.
+  The e2e harness always compiles for the host, so the host target is the only
+  one that matters here. }
+function BackendRunnableOnHost(ABackend: TBackend): Boolean;
+
 type
   TE2ETestCase = class(TTestCase)
   private
@@ -360,6 +366,13 @@ end;
 function TE2ETestCase.CompileAndRunOn(ABackend: TBackend; const ASrc: string;
                                      out AStdout: string;
                                      out AExitCode: Integer): Boolean;
+{ Single choke point for every compile+run in the harness, so the
+  unsupported-backend skip cannot be forgotten by a caller.  A QBE-ONLY test
+  (CompileAndRunWithRTLDebug and friends hard-code beQBE) has no other arm to
+  fall back on, so Ignore is the honest outcome: EIgnoredTest aborts the test and
+  it is REPORTED as skipped with this reason rather than passing vacuously.
+  Dual-backend callers never reach this — AssertRunsOn filters QBE out of the
+  set first, keeping their native arm. }
 var
   Lexer:    TLexer;
   Parser:   TParser;
@@ -376,6 +389,14 @@ var
   Rc:       Integer;
 begin
   Result := False;
+  { Gate EVERY backend-taking entry point, so a caller cannot bypass the
+    unsupported-backend skip.  Ignore raises EIgnoredTest: the test is REPORTED
+    as skipped with a reason, not silently passed.  Dual-backend callers never
+    arrive here for an unsupported backend — AssertRunsOn drops it from the set
+    first so their native arm still runs. }
+  if not BackendRunnableOnHost(ABackend) then
+    Ignore(BackendName(ABackend) +
+      ' backend is not supported on this host target');
   Inc(FCounter);
   IRFile  := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
   AsmFile := FScratch + '/t' + IntToStr(FCounter) + '.s';
@@ -470,6 +491,14 @@ begin
   AssertEquals('[' + AName + '] stdout', AExpectedOut, Output)
 end;
 
+function BackendRunnableOnHost(ABackend: TBackend): Boolean;
+begin
+  if ABackend = beQBE then
+    Result := TargetHasQBEBackend(HostTarget())
+  else
+    Result := True;
+end;
+
 function BackendName(ABackend: TBackend): string;
 begin
   case ABackend of
@@ -491,6 +520,26 @@ procedure TE2ETestCase.AssertRunsOn(ABackends: TBackends; const ASrc, AExpectedO
 var
   BE: TBackend;
 begin
+  { Skip a backend the HOST target cannot actually run — QBE on macOS, which was
+    never ported to Mach-O (TargetHasQBEBackend).
+
+    FILTERED, not Ignore()d, and that distinction is the whole point: Ignore
+    raises EIgnoredTest and would mark the ENTIRE test skipped, silently
+    discarding the native arm of ~283 dual-backend tests that pass today.  By
+    dropping only the unsupported backend from the set, each test still runs and
+    still asserts on native — the coverage that matters on this platform — and
+    goes genuinely green rather than green-by-omission.
+
+    A test whose set becomes EMPTY is a different case: it had nothing but the
+    unsupported backend, so there is no coverage left to report and it is
+    honestly skipped. }
+  if not BackendRunnableOnHost(beQBE) then
+    ABackends := ABackends - [beQBE];
+  if ABackends = [] then
+  begin
+    Ignore('no backend supported on this host for this test');
+    Exit;
+  end;
   for BE := Low(TBackend) to High(TBackend) do
     if BE in ABackends then
       Self.AssertRunsOnOne(BE, BackendName(BE), ASrc, AExpectedOut, AExpectedCode)
@@ -514,6 +563,14 @@ var
   Rc:       Integer;
 begin
   Result := False;
+  { Gate EVERY backend-taking entry point, so a caller cannot bypass the
+    unsupported-backend skip.  Ignore raises EIgnoredTest: the test is REPORTED
+    as skipped with a reason, not silently passed.  Dual-backend callers never
+    arrive here for an unsupported backend — AssertRunsOn drops it from the set
+    first so their native arm still runs. }
+  if not BackendRunnableOnHost(beQBE) then
+    Ignore(BackendName(beQBE) +
+      ' backend is not supported on this host target');
   Inc(FCounter);
   IRFile  := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
   AsmFile := FScratch + '/t' + IntToStr(FCounter) + '.s';
@@ -786,6 +843,14 @@ var
   I:           Integer;
 begin
   Result := False;
+  { Gate EVERY backend-taking entry point, so a caller cannot bypass the
+    unsupported-backend skip.  Ignore raises EIgnoredTest: the test is REPORTED
+    as skipped with a reason, not silently passed.  Dual-backend callers never
+    arrive here for an unsupported backend — AssertRunsOn drops it from the set
+    first so their native arm still runs. }
+  if not BackendRunnableOnHost(ABackend) then
+    Ignore(BackendName(ABackend) +
+      ' backend is not supported on this host target');
   Inc(FCounter);
   IRFile  := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
   AsmFile := FScratch + '/t' + IntToStr(FCounter) + '.s';
@@ -886,6 +951,14 @@ var
   Rc, I:       Integer;
 begin
   Result := False;
+  { Gate EVERY backend-taking entry point, so a caller cannot bypass the
+    unsupported-backend skip.  Ignore raises EIgnoredTest: the test is REPORTED
+    as skipped with a reason, not silently passed.  Dual-backend callers never
+    arrive here for an unsupported backend — AssertRunsOn drops it from the set
+    first so their native arm still runs. }
+  if not BackendRunnableOnHost(ABackend) then
+    Ignore(BackendName(ABackend) +
+      ' backend is not supported on this host target');
   Inc(FCounter);
   IRFile   := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
   AsmFile  := FScratch + '/t' + IntToStr(FCounter) + '.s';
@@ -987,6 +1060,14 @@ var
   Rc, I:       Integer;
 begin
   Result := False;
+  { Gate EVERY backend-taking entry point, so a caller cannot bypass the
+    unsupported-backend skip.  Ignore raises EIgnoredTest: the test is REPORTED
+    as skipped with a reason, not silently passed.  Dual-backend callers never
+    arrive here for an unsupported backend — AssertRunsOn drops it from the set
+    first so their native arm still runs. }
+  if not BackendRunnableOnHost(beQBE) then
+    Ignore(BackendName(beQBE) +
+      ' backend is not supported on this host target');
   Inc(FCounter);
   IRFile   := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
   AsmFile  := FScratch + '/t' + IntToStr(FCounter) + '.s';

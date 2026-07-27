@@ -61,6 +61,21 @@ function TargetName(const ATarget: TTargetDesc): string;
 { True when the native backend can actually generate code for this target. }
 function TargetHasNativeBackend(const ATarget: TTargetDesc): Boolean;
 
+{ True when the QBE backend can produce a WORKING program for ATarget.
+
+  False for Darwin.  QBE is the legacy backend — native has been the default
+  since v0.12.0 — and it was never ported to Mach-O: a QBE-compiled program
+  links against the natively-built RTL but crashes before reaching main (control
+  reaches a routine nothing calls, via neither a vtable slot nor fall-through,
+  which points at symbol resolution in the QBE->native-RTL link).  Rather than
+  emit a binary that cannot run, the QBE driver refuses the target outright, and
+  the e2e harness drops QBE from its backend set on macOS so the NATIVE arm of
+  every dual-backend test still runs and still counts.
+
+  Linux and FreeBSD are unaffected and keep full QBE coverage; this is not a
+  step toward removing QBE, only an honest statement of where it works. }
+function TargetHasQBEBackend(const ATarget: TTargetDesc): Boolean;
+
 { True when the target's object/executable container is ELF.  macOS uses
   Mach-O; everything else we target is ELF.  Gate ELF-specific output on this
   rather than on an OS blocklist, so a new ELF OS needs no edit here. }
@@ -207,6 +222,12 @@ function TargetHasNativeBackend(const ATarget: TTargetDesc): Boolean;
 begin
   { Only x86_64-linux is implemented so far. }
   Result := (ATarget.OS = osLinux) and (ATarget.CPU = cpuX86_64);
+end;
+
+function TargetHasQBEBackend(const ATarget: TTargetDesc): Boolean;
+begin
+  { see the declaration — Darwin was never ported }
+  Result := ATarget.OS <> osMacOS;
 end;
 
 function TargetUsesElf(const ATarget: TTargetDesc): Boolean;

@@ -25,6 +25,7 @@ uses
   Classes,
   blaise.codegen,
   blaise.codegen.qbe,
+  blaise.codegen.target,   { TargetHasQBEBackend / TargetName }
   blaise.codegen.driver;
 
 type
@@ -80,6 +81,7 @@ begin
     depend on byte-identical QBE IR. }
   Result := True;
 end;
+
 
 function TQBEBackendDriver.SupportsIncremental: Boolean;
 begin
@@ -226,6 +228,17 @@ function TQBEBackendDriver.LinkProgram(const AIRFile, AOutputFile: string;
 var
   AsmFile: string;
 begin
+  { Refuse a target QBE was never ported to, by name, instead of producing an
+    executable that links and then crashes before main.  Gated HERE rather than
+    in ValidateOptions because that runs unconditionally, for flag-combination
+    rules: blocking it there also blocked --emit-ir, which is harmless (it prints
+    IR text, produces no artefact) and is what scripts/fixpoint.sh compares.
+    Emitting IR stays allowed; producing an unrunnable BINARY does not.
+    See TargetHasQBEBackend. }
+  if not TargetHasQBEBackend(AOpts.Target) then
+    Exit('the qbe backend does not support target ' +
+      TargetName(AOpts.Target) + ' — use the native backend (the default; ' +
+      'omit --backend qbe)');
   AsmFile := ChangeFileExt(AIRFile, '.s');
   Result := Self.LowerToAsm(AIRFile, AsmFile, AOpts);
   if Result <> '' then Exit;
