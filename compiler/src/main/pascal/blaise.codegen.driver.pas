@@ -535,17 +535,8 @@ const
 
 { Lower-case OS suffix used in the OS-specific RTL unit names
   (rtl.platform.layout.<os>, runtime.syscall.<os>, …). }
-function RTLOSSuffix(AOS: TTargetOS): string;
-begin
-  case AOS of
-    osFreeBSD: Result := 'freebsd';
-    osMacOS:   Result := 'darwin';
-  else
-    { Linux is the default host leaf; other OSes gain their own suffix as
-      their adapter set lands. }
-    Result := 'linux';
-  end;
-end;
+{ RTLOSSuffix now lives in blaise.codegen.target, so PlatformLayoutInitSym and
+  this unit's list-building cannot drift apart (they did, on macOS only). }
 
 function BuildRTLUnitList(AStatic: Boolean; AOS: TTargetOS;
   ACPU: TTargetCPU): TStringList;

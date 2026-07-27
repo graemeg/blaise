@@ -84,6 +84,16 @@ function TargetOSName(const ATarget: TTargetDesc): string;
   (rtl.platform.layout.<os>_init).  The compiler emits a direct call to this
   from main so the compile-time --target's layout assigns GPlatformLayout first,
   regardless of the program's import graph. }
+{ The OS suffix used by RTL UNIT FILENAMES (rtl.platform.layout.<suffix>,
+  runtime.errno.<suffix>, ...).  This is NOT always TargetOSName: macOS's
+  adapter leaves are named '.darwin', the platform name, while the target is
+  spelled 'macos'.  Everything that names an RTL unit — the driver's
+  BuildRTLUnitList and PlatformLayoutInitSym — must derive it from here, because
+  the two spellings coincide for linux and freebsd and diverge ONLY for macOS: a
+  second, independent mapping stayed invisible on the other targets and then
+  emitted a call to rtl.platform.layout.macos_init that nothing defines. }
+function RTLOSSuffix(AOS: TTargetOS): string;
+
 function PlatformLayoutInitSym(const ATarget: TTargetDesc): string;
 
 { Platform constants derived from the target OS. }
@@ -224,11 +234,24 @@ begin
   end;
 end;
 
+function RTLOSSuffix(AOS: TTargetOS): string;
+begin
+  case AOS of
+    osFreeBSD: Result := 'freebsd';
+    osMacOS:   Result := 'darwin';
+  else
+    { Linux is the default host leaf; other OSes gain their own suffix as
+      their adapter set lands. }
+    Result := 'linux';
+  end;
+end;
+
 function PlatformLayoutInitSym(const ATarget: TTargetDesc): string;
 begin
   { NativeMangle/QBE mangling of an rtl.* unit keeps the dotted name verbatim
-    and appends '_init'; the layout unit is rtl.platform.layout.<os>. }
-  Result := 'rtl.platform.layout.' + TargetOSName(ATarget) + '_init';
+    and appends '_init'; the layout unit is rtl.platform.layout.<suffix>.
+    RTLOSSuffix, not TargetOSName — see the note on RTLOSSuffix. }
+  Result := 'rtl.platform.layout.' + RTLOSSuffix(ATarget.OS) + '_init';
 end;
 
 function TargetLineEnding(const ATarget: TTargetDesc): string;
