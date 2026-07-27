@@ -784,9 +784,17 @@ procedure TArm64Assembler.HandleDirective;
     if FL.Mnemonic = '.data' then begin FSection := cskData; Exit; end;
     if FL.Mnemonic = '.section' then
     begin
+      { Both spellings are accepted for every section: ELF's dotted names and
+        Mach-O's (segment,section) pairs.  The backend emits whichever the TARGET
+        assembler understands, and this assembler consumes either — so an
+        --emit-asm dump stays assemblable by BOTH us and the platform tool.
+        The __thread_* arms below are unreachable from these tests:
+        '__thread_bss' contains neither '.bss' nor '__bss' (the underscore run
+        before 'bss' is single), and likewise '__thread_data'. }
       if Pos('.rodata', FL.Args) >= 0 then FSection := cskRodata
       else if Pos('__const', FL.Args) >= 0 then FSection := cskRodata
-      else if Pos('.bss', FL.Args) >= 0 then FSection := cskBss
+      else if (Pos('.bss', FL.Args) >= 0) or
+              (Pos('__bss', FL.Args) >= 0) then FSection := cskBss
       else if Pos('.tbss', FL.Args) >= 0 then FSection := cskTbss
       else if Pos('__thread_bss', FL.Args) >= 0 then FSection := cskTbss
       else if Pos('__thread_data', FL.Args) >= 0 then FSection := cskTdata
@@ -794,7 +802,8 @@ procedure TArm64Assembler.HandleDirective;
       else if Pos('.tdata', FL.Args) >= 0 then FSection := cskTdata
       else if Pos('.thread_vars', FL.Args) >= 0 then FSection := cskTvars
       else if Pos('.opdf', FL.Args) >= 0 then FSection := cskOpdf
-      else if Pos('.data', FL.Args) >= 0 then FSection := cskData
+      else if (Pos('.data', FL.Args) >= 0) or
+              (Pos('__data', FL.Args) >= 0) then FSection := cskData
       else LineError('unsupported section: ' + FL.Args);
       Exit;
     end;
@@ -804,7 +813,10 @@ procedure TArm64Assembler.HandleDirective;
         FGlobals.Add(TrimS(FL.Args), True);
       Exit;
     end;
-    if FL.Mnemonic = '.weak' then
+    { '.weak' is the ELF spelling, '.weak_definition' the Mach-O one (which the
+      platform assembler requires ALONGSIDE .globl).  Accept both so an
+      --emit-asm dump for either target assembles here. }
+    if (FL.Mnemonic = '.weak') or (FL.Mnemonic = '.weak_definition') then
     begin
       if not FWeaks.ContainsKey(TrimS(FL.Args)) then
         FWeaks.Add(TrimS(FL.Args), True);
@@ -1445,8 +1457,16 @@ begin
           if FL.Kind <> alLabel then Continue;
           if not FLabelSec.TryGetValue(FL.Mnemonic, LSec) then Continue;
           FLabelOff.TryGetValue(FL.Mnemonic, LOff);
-          if FGlobals.ContainsKey(FL.Mnemonic) then Bind := csbGlobal
-          else if FWeaks.ContainsKey(FL.Mnemonic) then Bind := csbWeak
+          { WEAK WINS over global, and the order is load-bearing on Mach-O.
+            ELF marks a weak definition with '.weak' ALONE, so a symbol landed
+            in exactly one set and the precedence never mattered.  Mach-O needs
+            BOTH '.globl' and '.weak_definition' for the same symbol, so with
+            global checked first every weak RTL definition would have been
+            emitted STRONG — silently destroying the weak-collapse the
+            whole-program-per-unit build depends on (two objects defining the
+            same RTL symbol would become a duplicate-symbol error). }
+          if FWeaks.ContainsKey(FL.Mnemonic) then Bind := csbWeak
+          else if FGlobals.ContainsKey(FL.Mnemonic) then Bind := csbGlobal
           else Bind := csbLocal;
           FW.DefineSymbol(FL.Mnemonic, TContainerSectionKind(LSec), LOff,
             0, Bind, cstNone);

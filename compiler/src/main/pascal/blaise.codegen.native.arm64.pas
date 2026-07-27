@@ -398,6 +398,26 @@ type
       Gated on the TARGET OS, not the host: linux-arm64 and freebsd-arm64 are
       real targets whose ELF output must stay byte-identical. }
     function  DarwinSym(const AName: string): string;
+    { The '.section' directive for each logical section, spelled for the
+      TARGET's container.  ELF names them .rodata/.data/.bss; Mach-O names them
+      (segment,section) pairs, and Darwin's assembler REJECTS the ELF spelling
+      outright — 'error: unknown directive'.  Our own internal assembler accepts
+      either, which is exactly why this stayed hidden: every path that mattered
+      went through the internal assembler, so the emitted text was only wrong for
+      the EXTERNAL one.  It cost 135 e2e tests, which link native output with cc,
+      and it is why fixpoint-native-internal.sh cannot run on macOS.
+      Three accessors rather than one string-keyed helper so a call site cannot
+      typo a section name into a silent fallthrough. }
+    function  SecRodata: string;
+    function  SecData: string;
+    function  SecBss: string;
+    { Binding directives for a DEFINITION, spelled for the target.  A weak
+      definition is '.weak' alone on ELF, but Mach-O needs '.globl' AND
+      '.weak_definition' for the same symbol — '.weak' is not a directive the
+      Darwin assembler knows at all.  Routed through here so no site has to
+      remember that, and so the ELF output stays byte-identical. }
+    procedure EmitWeakDef(const ASym: string);
+    procedure EmitGloblDef(const ASym: string);
     { Emit a call to a fixed, hand-named symbol — an RTL routine (_StringAddRef)
       or a libc function (memcpy).  Routing every such site through here keeps
       the ~240 hard-coded call targets in this unit target-independent: the
@@ -7190,6 +7210,50 @@ begin
   Self.Emit(#9'bl ' + DarwinSym(AName));
 end;
 
+function TArm64Backend.SecRodata: string;
+begin
+  if FTarget.OS = osMacOS then
+    Result := '.section __TEXT,__const'
+  else
+    Result := '.section .rodata';
+end;
+
+function TArm64Backend.SecData: string;
+begin
+  if FTarget.OS = osMacOS then
+    Result := '.section __DATA,__data'
+  else
+    Result := '.section .data';
+end;
+
+procedure TArm64Backend.EmitWeakDef(const ASym: string);
+begin
+  if FTarget.OS = osMacOS then
+  begin
+    { both, and in this order — see the declaration }
+    Self.Emit('.globl ' + ASym);
+    Self.Emit('.weak_definition ' + ASym);
+  end
+  else
+    Self.Emit('.weak ' + ASym);
+end;
+
+procedure TArm64Backend.EmitGloblDef(const ASym: string);
+begin
+  { '.globl' is spelled the same on ELF and Mach-O }
+  Self.Emit('.globl ' + ASym);
+end;
+
+function TArm64Backend.SecBss: string;
+begin
+  { __DATA,__bss takes plain labels + .zero under clang — verified; it does not
+    need Mach-O's .zerofill form. }
+  if FTarget.OS = osMacOS then
+    Result := '.section __DATA,__bss'
+  else
+    Result := '.section .bss';
+end;
+
 function TArm64Backend.TypeinfoSym(const ABase: string): string;
 begin
   Result := DarwinSym('typeinfo_' + ABase);
@@ -8089,9 +8153,9 @@ begin
   begin
     Self.Emit('');
     if AWeakBind then
-      Self.Emit(Format('.weak %s', [Sym]))
+      EmitWeakDef(Sym)
     else
-      Self.Emit(Format('.globl %s', [Sym]));
+      EmitGloblDef(Sym);
     Self.Emit(Sym + ':');
     EmitStmtList(ADecl.Body.Stmts);
     Exit;
@@ -8147,9 +8211,9 @@ begin
 
   Self.Emit('');
   if AWeakBind then
-    Self.Emit(Format('.weak %s', [Sym]))
+    EmitWeakDef(Sym)
   else
-    Self.Emit(Format('.globl %s', [Sym]));
+    EmitGloblDef(Sym);
   Self.Emit(Sym + ':');
   Self.Emit(#9'stp x29, x30, [sp, #-16]!');
   Self.Emit(#9'mov x29, sp');
@@ -9731,7 +9795,7 @@ var
   I, Len: Integer;
 begin
   if FStrLits.Count = 0 then Exit;
-  Self.Emit('.section .rodata');
+  Self.Emit(SecRodata());
   for I := 0 to FStrLits.Count - 1 do
   begin
     Len := Length(FStrLits.Strings[I]);
@@ -9751,7 +9815,7 @@ var
   I: Integer;
 begin
   if FFloatLits.Count = 0 then Exit;
-  Self.Emit('.section .rodata');
+  Self.Emit(SecRodata());
   for I := 0 to FFloatLits.Count - 1 do
   begin
     Self.Emit('.balign 8');
@@ -9776,15 +9840,15 @@ begin
       AnyBss := True;
   if AnyBss then
   begin
-    Self.Emit('.section .bss');
+    Self.Emit(SecBss());
     for I := 0 to FGlobalNames.Count - 1 do
     begin
       if FGlobalInits.ContainsKey(FGlobalNames.Strings[I]) then Continue;
       Self.Emit('.balign 8');
       if FGlobalWeak.IndexOf(FGlobalNames.Strings[I]) >= 0 then
-        Self.Emit(Format('.weak _g_%s', [FGlobalNames.Strings[I]]))
+        EmitWeakDef('_g_' + FGlobalNames.Strings[I])
       else
-        Self.Emit(Format('.globl _g_%s', [FGlobalNames.Strings[I]]));
+        EmitGloblDef('_g_' + FGlobalNames.Strings[I]);
       Self.Emit(Format('_g_%s:', [FGlobalNames.Strings[I]]));
       if FGlobalSize.TryGetValue(FGlobalNames.Strings[I], J) then
         Self.Emit(Format(#9'.zero %d', [J]))
@@ -9794,16 +9858,16 @@ begin
   end;
   if AnyData then
   begin
-    Self.Emit('.section .data');
+    Self.Emit(SecData());
     for I := 0 to FGlobalNames.Count - 1 do
     begin
       if not FGlobalInits.TryGetValue(FGlobalNames.Strings[I], Directive) then
         Continue;
       Self.Emit('.balign 8');
       if FGlobalWeak.IndexOf(FGlobalNames.Strings[I]) >= 0 then
-        Self.Emit(Format('.weak _g_%s', [FGlobalNames.Strings[I]]))
+        EmitWeakDef('_g_' + FGlobalNames.Strings[I])
       else
-        Self.Emit(Format('.globl _g_%s', [FGlobalNames.Strings[I]]));
+        EmitGloblDef('_g_' + FGlobalNames.Strings[I]);
       Self.Emit(Format('_g_%s:', [FGlobalNames.Strings[I]]));
       Self.Emit(Directive);
     end;
@@ -9813,7 +9877,7 @@ begin
     { immortal blobs for string-initialised globals: refcnt -1, length,
       capacity, bytes, NUL — the __gi_<sym>_d label sits AT the data so
       the .data pointer needs no symbol arithmetic }
-    Self.Emit('.section .rodata');
+    Self.Emit(SecRodata());
     for I := 0 to FGlobalStrInits.Count - 1 do
     begin
       Self.Emit('.balign 4');
@@ -9937,11 +10001,11 @@ begin
     managed fields (inherited fields are merged into this class's list
     by the semantic pass, so one walk covers everything). }
   Self.Emit('');
-  Self.Emit(Format('.weak %s', [FieldCleanupSym('TObject')]));
+  EmitWeakDef(FieldCleanupSym('TObject'));
   Self.Emit(FieldCleanupSym('TObject') + ':');
   Self.Emit(#9'ret');
   Self.Emit('');
-  Self.Emit(Format('.weak %s', [FieldCleanupSym('TCustomAttribute')]));
+  EmitWeakDef(FieldCleanupSym('TCustomAttribute'));
   Self.Emit(FieldCleanupSym('TCustomAttribute') + ':');
   Self.Emit(#9'ret');
   for I := 0 to FClassDecls.Count - 1 do
@@ -9952,9 +10016,9 @@ begin
     Self.Emit('');
     if (Pos('<', TD.Name) >= 0) or
        IsUnmangledUnit(ClassDescOf(TD).OwningUnit) then
-      Self.Emit(Format('.weak %s', [Sym]))
+      EmitWeakDef(Sym)
     else
-      Self.Emit(Format('.globl %s', [Sym]));
+      EmitGloblDef(Sym);
     Self.Emit(Sym + ':');
     Self.Emit(#9'stp x29, x30, [sp, #-16]!');
     Self.Emit(#9'mov x29, sp');
@@ -10010,7 +10074,7 @@ var
     { jumbo-set byte blobs share this pass }
     if (ACD.ConstSetBytes <> nil) and (ACD.ConstSetBytes.Count > 0) then
     begin
-      Self.Emit('.section .rodata');
+      Self.Emit(SecRodata());
       Self.Emit('.balign 8');
       Self.Emit(ALbl + ':');
       for E := 0 to ACD.ConstSetBytes.Count - 1 do
@@ -10027,12 +10091,12 @@ var
         (PIE), and rebases in a read-only segment are impossible —
         the Mach-O linker rejects them.  The character blobs are
         pointer-free and stay in .rodata. }
-      Self.Emit('.section .data');
+      Self.Emit(SecData());
       Self.Emit('.balign 8');
       Self.Emit(ALbl + ':');
       for E := 0 to ACD.ArrayElements.Count - 1 do
         Self.Emit(Format(#9'.quad __bce_%s_%d', [ALbl, E]));
-      Self.Emit('.section .rodata');
+      Self.Emit(SecRodata());
       for E := 0 to ACD.ArrayElements.Count - 1 do
       begin
         Self.Emit('.balign 4');
@@ -10050,7 +10114,7 @@ var
       end;
       Exit;
     end;
-    Self.Emit('.section .rodata');
+    Self.Emit(SecRodata());
     Self.Emit('.balign 8');
     Self.Emit(ALbl + ':');
     if SameText(ACD.ArrayElemType, 'Byte') or
@@ -10187,7 +10251,7 @@ begin
       Count := Count + 1;
   if Count > 0 then
   begin
-    Self.Emit('.section .data');
+    Self.Emit(SecData());
     Self.Emit('.balign 8');
     Self.Emit(Format('attrs_%s:', [ACSym]));
     Self.Emit(Format(#9'.quad %d', [Count]));
@@ -10215,7 +10279,7 @@ begin
   { per-entry method-name blobs — the label sits AT the data (bare-symbol
     .quad, same scheme as string globals), prefixed by the class symbol
     so repeated method names across classes cannot collide }
-  Self.Emit('.section .rodata');
+  Self.Emit(SecRodata());
   N := 0;
   for J := 0 to ACD.Methods.Count - 1 do
   begin
@@ -10235,7 +10299,7 @@ begin
       N := N + 1;
     end;
   end;
-  Self.Emit('.section .data');
+  Self.Emit(SecData());
   Self.Emit('.balign 8');
   Self.Emit(Format('methattrs_%s:', [ACSym]));
   Self.Emit(Format(#9'.quad %d', [Count]));
@@ -10314,7 +10378,7 @@ begin
       Count := Count + 1;
   if Count = 0 then Exit;
 
-  Self.Emit('.section .rodata');
+  Self.Emit(SecRodata());
   N := 0;
   for J := 0 to ACD.Methods.Count - 1 do
   begin
@@ -10343,7 +10407,7 @@ begin
     N := N + 1;
   end;
 
-  Self.Emit('.section .data');
+  Self.Emit(SecData());
   Self.Emit('.balign 8');
   Self.Emit(Format('methods_%s:', [ACSym]));
   Self.Emit(Format(#9'.quad %d', [Count]));
@@ -10375,7 +10439,7 @@ begin
     built-in virtuals, and the class-name blob.  TObject_Destroy /
     TObject_ToString resolve from the RTL at link time. }
   Self.Emit('');
-  Self.Emit('.section .rodata');
+  Self.Emit(SecRodata());
   Self.Emit('.balign 4');
   Self.Emit('__cn_TObject_h:');
   Self.Emit(#9'.word -1');
@@ -10384,9 +10448,9 @@ begin
   Self.Emit('__cn_TObject:');
   Self.Emit(#9'.ascii "TObject"');
   Self.Emit(#9'.byte 0');
-  Self.Emit('.section .data');
+  Self.Emit(SecData());
   Self.Emit('.balign 8');
-  Self.Emit(Format('.weak %s', [TypeinfoSym('TObject')]));
+  EmitWeakDef(TypeinfoSym('TObject'));
   Self.Emit(TypeinfoSym('TObject') + ':');
   Self.Emit(#9'.quad 0');                       { parent }
   Self.Emit(#9'.quad 0');                       { impllist }
@@ -10397,7 +10461,7 @@ begin
   Self.Emit(Format(#9'.quad %s', [VtableSym('TObject')]));
   Self.Emit(#9'.quad 0');                       { class attrs }
   Self.Emit(#9'.quad 0');                       { method attrs }
-  Self.Emit(Format('.weak %s', [VtableSym('TObject')]));
+  EmitWeakDef(VtableSym('TObject'));
   Self.Emit(VtableSym('TObject') + ':');
   Self.Emit(Format(#9'.quad %s', [TypeinfoSym('TObject')]));
   { RTL method labels: RoutineSym prefixes the DEFINITION on Darwin, so these
@@ -10407,7 +10471,7 @@ begin
 
   { TCustomAttribute base stubs: attribute classes declare it as their
     parent, so the typeinfo chain needs a real symbol here }
-  Self.Emit('.section .rodata');
+  Self.Emit(SecRodata());
   Self.Emit('.balign 4');
   Self.Emit('__cn_TCustomAttribute_h:');
   Self.Emit(#9'.word -1');
@@ -10416,9 +10480,9 @@ begin
   Self.Emit('__cn_TCustomAttribute:');
   Self.Emit(#9'.ascii "TCustomAttribute"');
   Self.Emit(#9'.byte 0');
-  Self.Emit('.section .data');
+  Self.Emit(SecData());
   Self.Emit('.balign 8');
-  Self.Emit(Format('.weak %s', [TypeinfoSym('TCustomAttribute')]));
+  EmitWeakDef(TypeinfoSym('TCustomAttribute'));
   Self.Emit(TypeinfoSym('TCustomAttribute') + ':');
   Self.Emit(Format(#9'.quad %s', [TypeinfoSym('TObject')]));
   Self.Emit(#9'.quad 0');
@@ -10429,7 +10493,7 @@ begin
   Self.Emit(Format(#9'.quad %s', [VtableSym('TCustomAttribute')]));
   Self.Emit(#9'.quad 0');
   Self.Emit(#9'.quad 0');
-  Self.Emit(Format('.weak %s', [VtableSym('TCustomAttribute')]));
+  EmitWeakDef(VtableSym('TCustomAttribute'));
   Self.Emit(VtableSym('TCustomAttribute') + ':');
   Self.Emit(Format(#9'.quad %s', [TypeinfoSym('TCustomAttribute')]));
   Self.Emit(Format(#9'.quad %s', [DarwinSym('TObject_Destroy')]));
@@ -10440,7 +10504,7 @@ begin
     TD := TTypeDecl(FClassDecls.Items[I]);
     RT := ClassDescOf(TD);
     Sym := ClassSym(TD);
-    Self.Emit('.section .rodata');
+    Self.Emit(SecRodata());
     Self.Emit('.balign 4');
     Self.Emit(Format('__cn_%s_h:', [Sym]));
     Self.Emit(#9'.word -1');
@@ -10456,13 +10520,13 @@ begin
       ParentRef := TypeinfoSym('TObject');
     EmitAttrTables(TClassTypeDef(TD.Def), Sym, AttrsRef, MethAttrsRef);
     EmitMethodsTable(TClassTypeDef(TD.Def), Sym, MethodsRef);
-    Self.Emit('.section .data');
+    Self.Emit(SecData());
     Self.Emit('.balign 8');
     if (Pos('<', TD.Name) >= 0) or
        IsUnmangledUnit(ClassDescOf(TD).OwningUnit) then
-      Self.Emit(Format('.weak %s', [TypeinfoSym(Sym)]))
+      EmitWeakDef(TypeinfoSym(Sym))
     else
-      Self.Emit(Format('.globl %s', [TypeinfoSym(Sym)]));
+      EmitGloblDef(TypeinfoSym(Sym));
     Self.Emit(TypeinfoSym(Sym) + ':');
     Self.Emit(Format(#9'.quad %s', [ParentRef]));
     if ClassImplementsAny(TD) then
@@ -10484,9 +10548,9 @@ begin
     Self.Emit(Format(#9'.quad %s', [MethAttrsRef]));
     if (Pos('<', TD.Name) >= 0) or
        IsUnmangledUnit(ClassDescOf(TD).OwningUnit) then
-      Self.Emit(Format('.weak %s', [VtableSym(Sym)]))
+      EmitWeakDef(VtableSym(Sym))
     else
-      Self.Emit(Format('.globl %s', [VtableSym(Sym)]));
+      EmitGloblDef(VtableSym(Sym));
     Self.Emit(VtableSym(Sym) + ':');
     Self.Emit(Format(#9'.quad %s', [TypeinfoSym(Sym)]));
     for S := 0 to RT.VTableCount() - 1 do
@@ -10560,7 +10624,7 @@ var
 begin
   if (FIntfDecls.Count = 0) and (FClassDecls.Count = 0) and
      (FGenericIntfInstances.Count = 0) then Exit;
-  Self.Emit('.section .data');
+  Self.Emit(SecData());
   { interface typeinfo: the address IS the identity token }
   for I := 0 to FIntfDecls.Count - 1 do
   begin
@@ -10577,9 +10641,9 @@ begin
       IDesc := FSymTable.FindType(ITD.Name);
     Self.Emit('.balign 8');
     if (IDesc <> nil) and IsUnmangledUnit(IDesc.OwningUnit) then
-      Self.Emit(Format('.weak %s', [ISym]))
+      EmitWeakDef(ISym)
     else
-      Self.Emit(Format('.globl %s', [ISym]));
+      EmitGloblDef(ISym);
     Self.Emit(Format('%s:', [ISym]));
     Self.Emit(#9'.quad 0');
   end;
@@ -10591,7 +10655,7 @@ begin
   begin
     GII := TGenericInterfaceInstance(FGenericIntfInstances.Items[I]);
     Self.Emit('.balign 8');
-    Self.Emit(Format('.weak %s', [TypeinfoSym(GII.InstName)]));
+    EmitWeakDef(TypeinfoSym(GII.InstName));
     Self.Emit(TypeinfoSym(GII.InstName) + ':');
     Self.Emit(#9'.quad 0');
   end;
@@ -10653,9 +10717,9 @@ begin
         ISym := IntfItabSym(TD.Name, ID.Name);
         Self.Emit('.balign 8');
         if IsBareVis then
-          Self.Emit(Format('.weak %s', [ISym]))
+          EmitWeakDef(ISym)
         else
-          Self.Emit(Format('.globl %s', [ISym]));
+          EmitGloblDef(ISym);
         Self.Emit(Format('%s:', [ISym]));
         for K := 0 to ID.MethodCount() - 1 do
         begin
@@ -10674,9 +10738,9 @@ begin
         instance or an unmangled-RTL-unit class, globl for an ordinary class so
         a cross-object Supports / interface-assignment reference resolves. }
       if IsBareVis then
-        Self.Emit(Format('.weak %s', [ImpllistSym(Sym)]))
+        EmitWeakDef(ImpllistSym(Sym))
       else
-        Self.Emit(Format('.globl %s', [ImpllistSym(Sym)]));
+        EmitGloblDef(ImpllistSym(Sym));
       Self.Emit(ImpllistSym(Sym) + ':');
       for J := 0 to Intfs.Count - 1 do
       begin
@@ -11420,7 +11484,7 @@ begin
   FrameAligned := (FFrameSize + 15) and (not 15);
 
   Self.Emit('');
-  Self.Emit('.globl _main');
+  EmitGloblDef(DarwinSym('main'));
   Self.Emit('_main:');
   { Prologue: fp/lr pair + frame chain — ALWAYS (Darwin unwind).  argc/argv
     arrive in x0/x1 and pass straight through to _SetArgs, which must run
@@ -11524,9 +11588,9 @@ begin
       per-unit objects may each carry a copy of an RTL threadvar, and the
       copies MUST collapse to one (separate TLS slots would be wrong) }
     if FGlobalWeak.IndexOf('__tlv_' + FTlvGlobals.Strings[I]) >= 0 then
-      Self.Emit(Format('.weak _ts_%s', [FTlvGlobals.Strings[I]]))
+      EmitWeakDef('_ts_' + FTlvGlobals.Strings[I])
     else
-      Self.Emit(Format('.globl _ts_%s', [FTlvGlobals.Strings[I]]));
+      EmitGloblDef('_ts_' + FTlvGlobals.Strings[I]);
     Self.Emit(Format('_ts_%s:', [FTlvGlobals.Strings[I]]));
     Self.Emit(Format(#9'.zero %d', [Sz]));
   end;
@@ -11539,9 +11603,9 @@ begin
   begin
     Self.Emit('.balign 8');
     if FGlobalWeak.IndexOf('__tlv_' + FTlvGlobals.Strings[I]) >= 0 then
-      Self.Emit(Format('.weak _tv_%s', [FTlvGlobals.Strings[I]]))
+      EmitWeakDef('_tv_' + FTlvGlobals.Strings[I])
     else
-      Self.Emit(Format('.globl _tv_%s', [FTlvGlobals.Strings[I]]));
+      EmitGloblDef('_tv_' + FTlvGlobals.Strings[I]);
     Self.Emit(Format('_tv_%s:', [FTlvGlobals.Strings[I]]));
     Self.Emit(#9'.quad ' + DarwinSym('_tlv_bootstrap'));
     Self.Emit(#9'.quad 0');
@@ -11793,7 +11857,7 @@ begin
   FForN := 0;
   FrameAligned := (FFrameSize + 15) and (not 15);
   Self.Emit('');
-  Self.Emit(Format('.globl %s', [ASym]));
+  EmitGloblDef(ASym);
   Self.Emit(ASym + ':');
   Self.Emit(#9'stp x29, x30, [sp, #-16]!');
   Self.Emit(#9'mov x29, sp');

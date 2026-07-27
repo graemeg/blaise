@@ -1597,10 +1597,10 @@ begin
     ''');
   { initialised globals live in .data with their values; uninitialised
     ones stay zerofill }
-  AssertTrue('data section present', Pos('.section .data', AsmT) >= 0);
+  AssertTrue('data section present', Pos('.section __DATA,__data', AsmT) >= 0);
   AssertTrue('int initialiser', Pos(#9'.quad 42', AsmT) >= 0);
   AssertTrue('float initialiser', Pos(#9'.double 2.5', AsmT) >= 0);
-  AssertTrue('plain global stays bss', Pos('.section .bss', AsmT) >= 0);
+  AssertTrue('plain global stays bss', Pos('.section __DATA,__bss', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64initg.o');
   try
@@ -2502,7 +2502,7 @@ begin
     Pos('TBox_Integer_Put:', AsmT) >= 0);
   { and it is weak-bound (bare generic-instance symbol) for cross-object dedup }
   AssertTrue('the generic-instance method body is weak',
-    Pos('.weak _TBox_Integer_Put', AsmT) >= 0);
+    Pos('.weak_definition _TBox_Integer_Put', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestClassTypeinfo_InstanceSizeCoversAllFields;
@@ -4639,9 +4639,9 @@ begin
     ''');
   { the itab and impllist are weak-bound for the generic instance }
   AssertTrue('itab weak-bound',
-    Pos('.weak _itab_TBox_Integer_IHolder', AsmStr) >= 0);
+    Pos('.weak_definition _itab_TBox_Integer_IHolder', AsmStr) >= 0);
   AssertTrue('impllist weak-bound',
-    Pos('.weak _impllist_TBox_Integer', AsmStr) >= 0);
+    Pos('.weak_definition _impllist_TBox_Integer', AsmStr) >= 0);
   { the itab entry points at the clone's own instance-mangled method }
   AssertTrue('itab binds the clone method',
     Pos('_itab_TBox_Integer_IHolder:' + LF + #9'.quad _TBox_Integer_Get',
@@ -4686,7 +4686,7 @@ begin
     ''');
   { the generic-interface instance typeinfo is emitted weak }
   AssertTrue('weak generic-intf typeinfo',
-    Pos('.weak _typeinfo_ITransform_Integer', AsmT) >= 0);
+    Pos('.weak_definition _typeinfo_ITransform_Integer', AsmT) >= 0);
   AssertTrue('generic-intf typeinfo label',
     Pos('_typeinfo_ITransform_Integer:', AsmT) >= 0);
   { the class's impllist references that typeinfo }
@@ -5132,19 +5132,19 @@ begin
   { instance symbols are BARE (no unit prefix) and WEAK — every object
     that materialises the same instance carries an identical copy and
     the linker keeps one (BUG-004) }
-  AssertTrue('weak typeinfo', Pos('.weak _typeinfo_TBox_Int64', AsmT) >= 0);
-  AssertTrue('weak vtable', Pos('.weak _vtable_TBox_Int64', AsmT) >= 0);
+  AssertTrue('weak typeinfo', Pos('.weak_definition _typeinfo_TBox_Int64', AsmT) >= 0);
+  AssertTrue('weak vtable', Pos('.weak_definition _vtable_TBox_Int64', AsmT) >= 0);
   AssertTrue('weak cleanup',
-    Pos('.weak __FieldCleanup_TBox_Int64', AsmT) >= 0);
+    Pos('.weak_definition __FieldCleanup_TBox_Int64', AsmT) >= 0);
   AssertTrue('instance method body', Pos('TBox_Int64_Put:', AsmT) >= 0);
-  AssertTrue('weak method bind', Pos('.weak _TBox_Int64_Put', AsmT) >= 0);
+  AssertTrue('weak method bind', Pos('.weak_definition _TBox_Int64_Put', AsmT) >= 0);
   { instance is constructed through its own typeinfo }
   { ctor allocates via __ClassAlloc (eddb5c18): the instance-specific symbol on
     that path is the field-cleanup fn }
   AssertTrue('ctor field-cleanup ref',
     Pos('adrp x1, __FieldCleanup_TBox_Int64@PAGE', AsmT) >= 0);
   { the generic FUNCTION instance is emitted weak too }
-  AssertTrue('weak func instance', Pos('.weak _Pick_Int64', AsmT) >= 0);
+  AssertTrue('weak func instance', Pos('.weak_definition _Pick_Int64', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64gen.o');
   try
@@ -5184,9 +5184,9 @@ begin
     ''');
   { the monomorphised instance bodies are emitted with weak binding }
   AssertTrue('Wrap instance body', Pos('TBox_Wrap_Integer:', AsmT) >= 0);
-  AssertTrue('Wrap weak bind', Pos('.weak _TBox_Wrap_Integer', AsmT) >= 0);
+  AssertTrue('Wrap weak bind', Pos('.weak_definition _TBox_Wrap_Integer', AsmT) >= 0);
   AssertTrue('AddBase instance body', Pos('TBox_AddBase_Integer:', AsmT) >= 0);
-  AssertTrue('AddBase weak bind', Pos('.weak _TBox_AddBase_Integer', AsmT) >= 0);
+  AssertTrue('AddBase weak bind', Pos('.weak_definition _TBox_AddBase_Integer', AsmT) >= 0);
   { the call sites reference the same mangled labels }
   AssertTrue('Wrap called', Pos(#9'bl _TBox_Wrap_Integer', AsmT) >= 0);
   AssertTrue('AddBase called', Pos(#9'bl _TBox_AddBase_Integer', AsmT) >= 0);
