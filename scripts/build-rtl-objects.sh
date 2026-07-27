@@ -162,11 +162,31 @@ for u in $RTL_UNITS; do
     nm "$obj" 2>/dev/null | grep -E ' [TDBR] ' | awk '{print $3}' | sort -u \
       > "$obj.syms"
   fi
-  # Drop this object if it re-defines any symbol the main program already owns
-  # (it was inlined into the program) — otherwise the loose .o collides.
+  # Drop this object only when EVERY symbol it defines is already owned by the
+  # main program.  `comm -23` lists the symbols defined HERE but not there, so
+  # an empty result means the object is fully redundant.
+  #
+  # It used to drop on ANY overlap (comm -12 non-empty), which threw away the
+  # object's UNIQUE symbols too.  In practice every object that emits class
+  # metadata defines the same handful of base-class stubs — _typeinfo_TObject,
+  # _vtable_TObject, __FieldCleanup_TObject and the TCustomAttribute twins — so
+  # a single shared stub discarded rtl.platform.posix.o entirely and with it the
+  # 119 symbols nothing else provides (__SetArgs, __SysWriteInt, ...).  That was
+  # ~228 e2e failures: `Undefined symbols for architecture arm64`.
+  #
+  # Supplying a partially-overlapping object is safe because the backend binds
+  # RTL-owned definitions WEAK (the IsUnmangledUnit rule in the native
+  # backends), so ld resolves each shared symbol to the program's strong
+  # definition and ignores the RTL's weak copy.  Verified on macos-arm64: the
+  # program object defines _typeinfo_TObject `external`, the RTL object
+  # `weak external`.  The only non-weak RTL definitions are the per-unit
+  # <unit>_init routines, which are unique per unit and cannot clash.
+  #
+  # This matches EnsureRTLObjects in blaise.codegen.driver, which has always
+  # used the every-symbol rule for the compiler-driven link.
   if [ -n "$EXCL_FILE" ] && [ -s "$EXCL_FILE" ] && \
      [ -f "$obj.syms" ] && [ -s "$obj.syms" ]; then
-    if [ -n "$(comm -12 "$obj.syms" "$EXCL_FILE")" ]; then
+    if [ -z "$(comm -23 "$obj.syms" "$EXCL_FILE")" ]; then
       continue
     fi
   fi
