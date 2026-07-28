@@ -85,7 +85,13 @@ if [ ! -s "$STAGE2A" ]; then
   echo "BUILD1_FAIL (clean-cache build produced no binary)"
   exit 1
 fi
-SIZE1=$(stat -c %s "$STAGE2A")
+# `wc -c <` rather than `stat -c %s`: -c is GNU-only, and BSD/macOS stat spells
+# it `-f %z`, so the GNU form made this script unrunnable on macOS.  Redirecting
+# INTO wc (not passing the path) keeps the output a bare number with no filename
+# column.  Same idiom as fixpoint-binary.sh.
+# tr -d ' ' because BSD wc pads its output; the value feeds $(( )) and -lt,
+# which tolerate that, but stripping keeps the echoed size clean too.
+SIZE1=$(wc -c < "$STAGE2A" | tr -d ' ')
 echo "      build1 ok — stage-2a size = $SIZE1 bytes"
 
 # EDIT a DEPENDENCY unit between the two builds.  This is what a real
@@ -128,7 +134,7 @@ if [ ! -s "$STAGE2B" ]; then
   echo "BUILD2_FAIL (warm-cache rebuild produced no binary)"
   exit 1
 fi
-SIZE2=$(stat -c %s "$STAGE2B")
+SIZE2=$(wc -c < "$STAGE2B" | tr -d ' ')   # portable — see the note on SIZE1
 echo "      build2 ok — stage-2b size = $SIZE2 bytes"
 
 echo "[3/4] size sanity — warm-cache binary must not be drastically smaller"

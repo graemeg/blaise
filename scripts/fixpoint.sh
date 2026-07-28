@@ -42,7 +42,9 @@ echo "stage-1: $STAGE1_BIN"
 # uses (runtime.arc via `uses classes`, etc.), the per-stage link below builds
 # the RTL objects with --exclude-defined-by <program object> so the inlined
 # units are not supplied twice.  Helper: link_stage <prog.s> <out-binary>.
-ABS_STAGE1=$(readlink -f "$STAGE1_BIN")
+# Absolute path WITHOUT `readlink -f` — see the matching note in
+# fixpoint-native.sh; -f is GNU-only, so BSD/macOS needs the POSIX cd+pwd form.
+ABS_STAGE1="$(cd "$(dirname "$STAGE1_BIN")" && pwd)/$(basename "$STAGE1_BIN")"
 RTL_OBJDIR=/tmp/fp_rtl_obj
 
 link_stage() {

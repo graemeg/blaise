@@ -36,7 +36,10 @@ fi
 # units the compiler uses, so link with --exclude-defined-by to skip supplying
 # those a second time.
 RTL_OBJDIR=/tmp/fpn_rtl_obj
-ABS_COMPILER=$(readlink -f "$COMPILER")
+# Absolute path WITHOUT `readlink -f`: -f is GNU-only and BSD/macOS readlink
+# does not have it, which made this script fail there before it did anything.
+# cd+pwd is POSIX and needs no coreutils.
+ABS_COMPILER="$(cd "$(dirname "$COMPILER")" && pwd)/$(basename "$COMPILER")"
 
 link_stage() {
   # $1 = program .s, $2 = output binary
