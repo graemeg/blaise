@@ -628,6 +628,10 @@ type
     function  WidenIncStep(AStep: TASTExpr): string;
     function  QbeParamTypeOf(AType: TTypeDesc): string;
     function  LoadInstrFor(AType: TTypeDesc): string;
+    { LoadInstrFor restricted to the 'w' family — always returns a w-typed
+      instruction, so a '%t =w <instr>' site stays well-formed.  See the
+      implementation for why LoadInstrFor itself is unsafe there. }
+    function  NarrowLoadInstr(AType: TTypeDesc): string;
     function  StoreInstrFor(AType: TTypeDesc): string;
     function  QbeEscapeString(const AStr: string): string;
     { Mangle a type name for use in QBE symbols: '<' → '_', '>' → '', ',' → '_' }
@@ -1428,6 +1432,32 @@ begin
     tySingle:                                Result := 'loads';
   else
     Result := 'loadl';
+  end;
+end;
+
+{ The w-typed load for a value whose QbeTypeOf is 'w'.
+
+  Same intent as LoadInstrFor, but total over the 'w' family and guaranteed to
+  return a w-typed instruction, so a caller emitting '%t =w <instr>' cannot
+  produce malformed IR.  LoadInstrFor cannot be used directly there: its
+  else-branch yields 'loadl' while QbeTypeOf's yields 'w', so any kind reaching
+  both (today only tyVoid/tyNil, neither loadable as a value) would emit
+  '=w loadl'.  Defaulting to loadw keeps the arm well-formed for a future kind.
+
+  The narrow cases are the point: storage 1 or 2 bytes wide must be read at its
+  own width with the extension its signedness requires, or a var/out callee's
+  storeb/storeh leaves the upper bytes stale
+  (BUG-20260728-qbe-narrow-var-load). }
+function TCodeGenQBE.NarrowLoadInstr(AType: TTypeDesc): string;
+begin
+  if AType = nil then Exit('loadw');
+  case AType.Kind of
+    tyByte, tyBoolean: Result := 'loadub';
+    tySmallInt:        Result := 'loadsh';
+    tyWord:            Result := 'loaduh';
+  else
+    { tyInteger, tyUInt32, tyEnum, and a set of <= 32 bits — all full 'w'. }
+    Result := 'loadw';
   end;
 end;
 
@@ -15656,8 +15686,26 @@ begin
     begin
       QType := QbeTypeOf(AExpr.ResolvedType);
       case QType of
-        'w': EmitLine(Format('  %s =w loadw %s',
-               [T, VarRef(TIdentExpr(AExpr).Name, TIdentExpr(AExpr).IsGlobal, IdentVarOwner(TIdentExpr(AExpr)))]));
+        { LoadInstrFor, not a blanket loadw: QbeTypeOf collapses tyByte,
+          tyBoolean, tySmallInt and tyWord all onto 'w', but their STORAGE is
+          1 or 2 bytes.  Reading 4 is only observable once something wrote
+          fewer — which is exactly what a var/out callee does, storing through
+          the caller's address at the declared width (storeh/storeb).  A direct
+          assignment stores full width, so the plain case masked it and it
+          surfaced only across a var/out call: SmallInt -300 read back as
+          65236, and `S < 0` went False with it, so it changed control flow.
+          The record-FIELD paths already used this helper; the plain-variable
+          arm did not (BUG-20260728-qbe-narrow-var-load).
+
+          Guarded by NarrowLoadInstr rather than calling LoadInstrFor raw: the
+          two helpers' else-branches disagree (QbeTypeOf yields 'w', but
+          LoadInstrFor yields 'loadl'), so a kind reaching both — today only
+          tyVoid/tyNil, neither loadable as a value — would emit the malformed
+          '=w loadl'.  NarrowLoadInstr keeps this arm w-typed by construction,
+          so a future kind cannot silently produce invalid IR here. }
+        'w': EmitLine(Format('  %s =w %s %s',
+               [T, NarrowLoadInstr(AExpr.ResolvedType),
+                VarRef(TIdentExpr(AExpr).Name, TIdentExpr(AExpr).IsGlobal, IdentVarOwner(TIdentExpr(AExpr)))]));
         'd': EmitLine(Format('  %s =d loadd %s',
                [T, VarRef(TIdentExpr(AExpr).Name, TIdentExpr(AExpr).IsGlobal, IdentVarOwner(TIdentExpr(AExpr)))]));
         's': EmitLine(Format('  %s =s loads %s',

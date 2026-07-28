@@ -42,6 +42,13 @@ type
     procedure TestCodegen_SmallIntField_UsesLoadsh;
     procedure TestCodegen_WordField_UsesLoaduh;
     procedure TestCodegen_SmallIntField_UsesStoreh;
+    { BUG-20260728-qbe-narrow-var-load: a plain VARIABLE of a narrow type must
+      be read with the load matching its STORAGE width, not a blanket loadw.
+      A var/out callee writes it with storeh/storeb, so a 32-bit read returns
+      the untouched upper bytes. }
+    procedure TestCodegen_SmallIntVar_UsesLoadsh_NotLoadw;
+    procedure TestCodegen_WordVar_UsesLoaduh_NotLoadw;
+    procedure TestCodegen_ByteVar_UsesLoadub_NotLoadw;
   end;
 
   [Threaded]
@@ -56,6 +63,13 @@ type
     procedure TestRun_MixedRecord_RoundTrip;
     procedure TestRun_ImplicitSelf_ByteFields_NoBleed;
     procedure TestRun_ImplicitSelf_SmallIntWord_Fields;
+    { BUG-20260728-qbe-narrow-var-load — the behaviour the IR tests above pin.
+      A var/out param of a narrow SIGNED type read back as its unsigned
+      bit-pattern (-300 -> 65236), and the sign test flipped with it, so the
+      corruption changed control flow rather than merely printing oddly. }
+    procedure TestRun_VarParam_SmallInt_SignPreserved;
+    procedure TestRun_OutParam_SmallInt_SignPreserved;
+    procedure TestRun_VarParam_NarrowWidths_RoundTrip;
   end;
 
 implementation
@@ -316,6 +330,78 @@ begin
   AssertTrue('SmallInt field store uses storeh', Pos('storeh', IR) > 0);
 end;
 
+{ BUG-20260728-qbe-narrow-var-load.
+
+  A record FIELD of a narrow type was already read at its own width (the three
+  tests above), but a plain VARIABLE was not: the scalar-identifier arm of
+  EmitExpr switched on QbeTypeOf, which collapses tyByte/tySmallInt/tyWord/
+  tyBoolean all onto 'w', and then emitted a blanket loadw.
+
+  Reading 4 bytes from 2-byte storage is only observable once something has
+  written FEWER than 4 bytes to it, which is exactly what a var/out callee
+  does — it stores through the caller's address at the declared width
+  (storeh/storeb).  A direct local assignment stores full width, so the plain
+  case masked the bug, and it surfaced only across a var/out call.
+
+  These three assert the load instruction directly, so a regression is pinned
+  at the IR rather than only as wrong output. }
+procedure TSmallIntWordTests.TestCodegen_SmallIntVar_UsesLoadsh_NotLoadw;
+var
+  IR: string;
+begin
+  IR := GenIR(
+    '''
+        program P;
+        procedure SetIt(var X: SmallInt);
+        begin X := -300 end;
+        var S: SmallInt;
+        var L: Int64;
+        begin SetIt(S); L := S; WriteLn(L) end.
+        ''');
+  AssertTrue('SmallInt variable load uses loadsh (sign-extending)',
+    Pos('loadsh', IR) > 0);
+  AssertTrue('SmallInt variable is never read with a 32-bit loadw — '
+    + 'the callee wrote only 2 bytes, so the upper half is stale',
+    Pos('loadw $S', IR) < 0);
+end;
+
+procedure TSmallIntWordTests.TestCodegen_WordVar_UsesLoaduh_NotLoadw;
+var
+  IR: string;
+begin
+  IR := GenIR(
+    '''
+        program P;
+        procedure SetIt(var X: Word);
+        begin X := 60000 end;
+        var W: Word;
+        var L: Int64;
+        begin SetIt(W); L := W; WriteLn(L) end.
+        ''');
+  AssertTrue('Word variable load uses loaduh (zero-extending)',
+    Pos('loaduh', IR) > 0);
+  AssertTrue('Word variable is never read with a 32-bit loadw',
+    Pos('loadw $W', IR) < 0);
+end;
+
+procedure TSmallIntWordTests.TestCodegen_ByteVar_UsesLoadub_NotLoadw;
+var
+  IR: string;
+begin
+  IR := GenIR(
+    '''
+        program P;
+        procedure SetIt(var X: Byte);
+        begin X := 200 end;
+        var B: Byte;
+        var L: Int64;
+        begin SetIt(B); L := B; WriteLn(L) end.
+        ''');
+  AssertTrue('Byte variable load uses loadub', Pos('loadub', IR) > 0);
+  AssertTrue('Byte variable is never read with a 32-bit loadw',
+    Pos('loadw $B', IR) < 0);
+end;
+
 { ---------- e2e ---------- }
 
 procedure TSmallIntWordE2ETests.SetUp;
@@ -419,6 +505,69 @@ const
     end.
     ''';
 
+  { BUG-20260728-qbe-narrow-var-load — see the IR tests for the mechanism.
+    The sign test is included deliberately: the corruption did not merely
+    print oddly, it made `S < 0` evaluate False for a negative value, so it
+    changed control flow. }
+  SrcVarParamSmallInt = '''
+    program P;
+    procedure SetIt(var X: SmallInt);
+    begin
+      X := -300
+    end;
+    var S: SmallInt;
+    var L: Int64;
+    begin
+      SetIt(S);
+      WriteLn(S);
+      WriteLn(S < 0);
+      L := S;
+      WriteLn(L)
+    end.
+    ''';
+
+  SrcOutParamSmallInt = '''
+    program P;
+    procedure SetIt(out X: SmallInt);
+    begin
+      X := -300
+    end;
+    var S: SmallInt;
+    var L: Int64;
+    begin
+      SetIt(S);
+      WriteLn(S);
+      WriteLn(S < 0);
+      L := S;
+      WriteLn(L)
+    end.
+    ''';
+
+  { All four narrow widths across a var call, signed and unsigned, each also
+    widened to Int64 — widening is what exposed the stale upper bytes. }
+  SrcVarParamNarrowWidths = '''
+    program P;
+    procedure SetB(var X: Byte);
+    begin X := 200 end;
+    procedure SetW(var X: Word);
+    begin X := 60000 end;
+    procedure SetS(var X: SmallInt);
+    begin X := -300 end;
+    procedure SetI(var X: Integer);
+    begin X := -8 end;
+    var B: Byte;
+    var W: Word;
+    var S: SmallInt;
+    var I: Integer;
+    var L: Int64;
+    begin
+      SetB(B); L := B; WriteLn(L);
+      SetW(W); L := W; WriteLn(L);
+      SetS(S); L := S; WriteLn(L);
+      SetI(I); L := I; WriteLn(L)
+    end.
+    ''';
+
   SrcMixedRecord = '''
     program P;
     type
@@ -503,6 +652,39 @@ begin
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('SmallInt sign-extend + Word zero-extend',
     '-1000' + LE + '60000' + LE, Output);
+end;
+
+procedure TSmallIntWordE2ETests.TestRun_VarParam_SmallInt_SignPreserved;
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run', CompileAndRun(SrcVarParamSmallInt, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  { pre-fix (qbe): 65236 / False / 65236 — the callee stored 2 bytes with
+    storeh and the read took a 32-bit loadw, so the sign was lost with the
+    stale upper half }
+  AssertEquals('negative SmallInt survives a var call, sign test included',
+    '-300' + LE + 'True' + LE + '-300' + LE, Output);
+end;
+
+procedure TSmallIntWordE2ETests.TestRun_OutParam_SmallInt_SignPreserved;
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run', CompileAndRun(SrcOutParamSmallInt, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('out behaves exactly as var here',
+    '-300' + LE + 'True' + LE + '-300' + LE, Output);
+end;
+
+procedure TSmallIntWordE2ETests.TestRun_VarParam_NarrowWidths_RoundTrip;
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run', CompileAndRun(SrcVarParamNarrowWidths, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('every narrow width round-trips through a var param',
+    '200' + LE + '60000' + LE + '-300' + LE + '-8' + LE, Output);
 end;
 
 initialization
