@@ -858,11 +858,31 @@ end;
 procedure TInternalAsmE2ETests.SetUp;
 begin
   inherited SetUp();
+  { Compiler resolution, in order: explicit override, then the two transient
+    fixpoint artefacts, then the BUILT compiler.
+
+    That last fallback is what makes this suite run at all off Linux.
+    /tmp/fp_blaise2|3 are produced by scripts/fixpoint.sh, which is a
+    Linux/FreeBSD path — on macOS they have never existed, so every test here
+    skipped and the suite guarded NOTHING while appearing green.  CLAUDE.md
+    names it a REQUIRED internal-assembler guard, so "absent but looks
+    present" is the one outcome it must not have
+    (BUG-20260728-internalasm-guard-skips-on-macos).
+
+    Any working compiler is sufficient: the probe below, and every test in
+    this suite, compiles with '--backend native --assembler internal', so what
+    is under test is the INTERNAL ASSEMBLER, not the backend that produced the
+    compiler binary.  BLAISE_QBE_COMPILER keeps its name for compatibility
+    with existing invocations; it no longer implies a QBE-built binary.
+    Staleness is still handled — the validity probe rejects a broken binary
+    whichever slot it came from. }
   FCompiler := GetEnvironmentVariable('BLAISE_QBE_COMPILER');
   if FCompiler = '' then
     FCompiler := '/tmp/fp_blaise2';
   if not FileExists(FCompiler) then
     FCompiler := '/tmp/fp_blaise3';
+  if not FileExists(FCompiler) then
+    FCompiler := ProjectRoot() + 'compiler/target/blaise';
   FRTLPath := ProjectRoot() + 'compiler/src/main/pascal';
   FStdlibPath := ProjectRoot() + 'stdlib/src/main/pascal';
   FScratch := ProjectRoot() + 'compiler/target/asm_scratch/';
@@ -883,8 +903,10 @@ begin
   begin
     GInternalAsmSkipNoted := True;
     WriteLn(StdErr, 'note: TInternalAsmE2ETests skipped — compiler binary "',
-            FCompiler, '" or RTL source not found ',
-            '(set BLAISE_QBE_COMPILER to a QBE-backend blaise binary to run them)');
+            FCompiler, '" or RTL source not found.  This suite is a REQUIRED ',
+            'internal-assembler guard, so a skip here means it is guarding ',
+            'nothing: build the compiler (compiler/target/blaise) or set ',
+            'BLAISE_QBE_COMPILER to any working blaise binary.');
     Exit;
   end;
   if not Result then Exit;
