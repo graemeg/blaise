@@ -63,6 +63,10 @@ function pipe(Fds: Pointer): Integer;
 { fcntl(fd, cmd, arg) — needed to flip O_NONBLOCK on fds (the fiber I/O layer
   and the errno-classification tests; docs/async-networking-design.adoc P3). }
 function fcntl(Fd, Cmd, Arg: Integer): Integer;
+{ ioctl(fd, request, arg) — the universal device-control syscall.  Terminal
+  control (tcgetattr/tcsetattr are ioctl wrappers), network interfaces, and
+  many other subsystems use it.  SYS_ioctl = 16. }
+function ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
 
 { epoll + eventfd: the async reactor's readiness poller and its self-wake fd.
   Bound in async.reactor.epoll via `external name`; on the dynamic path libc
@@ -306,6 +310,14 @@ function fcntl(Fd, Cmd, Arg: Integer): Integer;
   assembler; nostackframe;
 asm
     movq $72, %rax       { SYS_fcntl }
+    syscall
+    ret
+end;
+
+function ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
+  assembler; nostackframe;
+asm
+    movq $16, %rax       { SYS_ioctl }
     syscall
     ret
 end;

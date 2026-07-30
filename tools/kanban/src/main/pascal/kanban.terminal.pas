@@ -36,23 +36,46 @@ const
   STDIN_FD  = 0;
   STDOUT_FD = 1;
 
-  TCSAFLUSH = 2;
+  { ---- Platform-specific terminal constants ---- }
+{$IFDEF FREEBSD}
+  { FreeBSD ioctl commands for termios (from sys/ttycom.h). }
+  TIOCGETA   = $402C7413;   { _IOR('t', 19, struct termios) — get termios }
+  TIOCSETA   = $802C7414;   { _IOW('t', 20, struct termios) — set (TCSANOW) }
+  TIOCSETAW  = $802C7415;   { _IOW('t', 21, struct termios) — set (TCSADRAIN) }
+  TIOCSETAF  = $802C7416;   { _IOW('t', 22, struct termios) — set (TCSAFLUSH) }
+  TIOCGWINSZ = $40087468;   { _IOR('t', 104, struct winsize) }
 
-  ICANON = 2;
   ECHO_  = 8;
+  ICANON = 256;
+  ISIG   = 128;
+  IEXTEN = 1024;
+  ICRNL  = 256;
+  IXON   = 512;
+
+  VMIN_IDX  = 16;
+  VTIME_IDX = 17;
+  NCCS_SIZE = 20;
+{$ENDIF}
+{$IFDEF LINUX}
+  { Linux ioctl commands for termios (from asm-generic/ioctls.h). }
+  TCGETS     = $5401;
+  TCSETSF    = $5404;       { set + flush (TCSAFLUSH) }
+  TIOCGWINSZ = $5413;
+
+  ECHO_  = 8;
+  ICANON = 2;
   ISIG   = 1;
   IEXTEN = 32768;
-
-  ICRNL = 256;
-  IXON  = 1024;
-
-  IFLAG_MASK = ICRNL or IXON;
-  LFLAG_MASK = ECHO_ or ICANON or ISIG or IEXTEN;
+  ICRNL  = 256;
+  IXON   = 1024;
 
   VMIN_IDX  = 6;
   VTIME_IDX = 5;
+  NCCS_SIZE = 32;
+{$ENDIF}
 
-  TIOCGWINSZ = 21523;
+  IFLAG_MASK = ICRNL or IXON;
+  LFLAG_MASK = ECHO_ or ICANON or ISIG or IEXTEN;
 
 type
   TTermios = record
@@ -60,8 +83,10 @@ type
     OFlag:  Integer;
     CFlag:  Integer;
     LFlag:  Integer;
+{$IFDEF LINUX}
     Line:   Byte;
-    CC:     array[0..31] of Byte;
+{$ENDIF}
+    CC:     array[0..NCCS_SIZE - 1] of Byte;
     ISpeed: Integer;
     OSpeed: Integer;
   end;
@@ -75,14 +100,16 @@ type
   end;
   PWinSize = ^TWinSize;
 
-function tcgetattr(Fd: Integer; T: PTermios): Integer;
-  external name 'tcgetattr';
-function tcsetattr(Fd: Integer; Action: Integer; T: PTermios): Integer;
-  external name 'tcsetattr';
-function ioctl(Fd: Integer; Request: Integer; Arg: Pointer): Integer;
+{ ioctl is a direct syscall provided by the runtime. }
+function sys_ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
   external name 'ioctl';
 function libc_read(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
   external name 'read';
+
+{ tcgetattr / tcsetattr implemented as ioctl wrappers (see implementation). }
+function tcgetattr(Fd: Integer; T: PTermios): Integer;
+function tcsetattr(Fd: Integer; Action: Integer; T: PTermios): Integer;
+function term_ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
 
 type
   TTerminal = class
@@ -116,6 +143,37 @@ implementation
 
 uses StrUtils;
 
+{ tcgetattr: get terminal attributes via ioctl. }
+function tcgetattr(Fd: Integer; T: PTermios): Integer;
+begin
+{$IFDEF FREEBSD}
+  Result := sys_ioctl(Fd, TIOCGETA, T);
+{$ENDIF}
+{$IFDEF LINUX}
+  Result := sys_ioctl(Fd, TCGETS, T);
+{$ENDIF}
+end;
+
+{ tcsetattr: set terminal attributes via ioctl.
+  Action is ignored — we always use TCSAFLUSH (the only mode the kanban app
+  needs).  If other modes are needed later, map Action 0/1/2 to the
+  corresponding platform ioctl. }
+function tcsetattr(Fd: Integer; Action: Integer; T: PTermios): Integer;
+begin
+{$IFDEF FREEBSD}
+  Result := sys_ioctl(Fd, TIOCSETAF, T);
+{$ENDIF}
+{$IFDEF LINUX}
+  Result := sys_ioctl(Fd, TCSETSF, T);
+{$ENDIF}
+end;
+
+{ Thin wrapper so the TTerminal class can call ioctl for TIOCGWINSZ. }
+function term_ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
+begin
+  Result := sys_ioctl(Fd, Request, Arg);
+end;
+
 var
   GOrigTermios: TTermios;
 
@@ -135,20 +193,20 @@ begin
   P := PChar(@Raw.CC);
   P[VMIN_IDX] := #0;
   P[VTIME_IDX] := #1;
-  tcsetattr(STDIN_FD, TCSAFLUSH, @Raw)
+  tcsetattr(STDIN_FD, 0, @Raw)
 end;
 
 procedure TTerminal.DisableRawMode;
 begin
   if FSaved then
-    tcsetattr(STDIN_FD, TCSAFLUSH, @GOrigTermios)
+    tcsetattr(STDIN_FD, 0, @GOrigTermios)
 end;
 
 procedure TTerminal.QuerySize;
 var
   WS: TWinSize;
 begin
-  if ioctl(STDOUT_FD, TIOCGWINSZ, @WS) = 0 then
+  if term_ioctl(STDOUT_FD, TIOCGWINSZ, @WS) = 0 then
   begin
     FRows := WS.Row;
     FCols := WS.Col

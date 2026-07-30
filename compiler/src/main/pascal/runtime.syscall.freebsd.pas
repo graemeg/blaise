@@ -80,6 +80,10 @@ function pipe(Fds: Pointer): Integer;
 { fcntl(fd, cmd, arg) — raw; note FreeBSD's O_NONBLOCK is 0x4 (not Linux's
   0x800): callers must pass FreeBSD flag values, this leaf does not translate. }
 function fcntl(Fd, Cmd, Arg: Integer): Integer;
+{ ioctl(fd, request, arg) — the universal device-control syscall.  Terminal
+  control (tcgetattr/tcsetattr are ioctl wrappers), network interfaces, and
+  many other subsystems use it.  SYS_ioctl = 54. }
+function ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
 
 { Event notification — the readiness reactor's kernel surface.  The libc
   profile binds the same names in libc; these leaves give the --static
@@ -236,6 +240,7 @@ const
   SYS_lseek         = 478;   { ino64 (legacy lseek = 199) }
   SYS_fstat         = 551;   { ino64 (legacy freebsd11_fstat = 189) }
   SYS_fstatat       = 552;   { ino64 (legacy freebsd11_fstatat = 493) }
+  SYS_ioctl         = 54;
   SYS_pipe2         = 542;   { pipe(2) legacy 42 deprecated }
   SYS_execve        = 59;
   SYS_sysarch       = 165;   { %fs-base setup for TLS (AMD64_SET_FSBASE) }
@@ -508,6 +513,17 @@ asm
     jae  .Lok_fcntl
     negq %rax
 .Lok_fcntl:
+    ret
+end;
+
+function ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
+  assembler; nostackframe;
+asm
+    movq $54, %rax           { SYS_ioctl }
+    syscall
+    jae  .Lok_ioctl
+    negq %rax
+.Lok_ioctl:
     ret
 end;
 
