@@ -370,6 +370,8 @@ type
     procedure EmitFieldAssignment(AAssign: TFieldAssignment);
     function  EmitFloatArg(AExpr: TASTExpr; out AQType: string): string;
     function  EmitFloatArgAsDouble(AExpr: TASTExpr): string;
+    function  EmitFloatUnaryRTL(AArg: TASTExpr; const AFn: string): string;
+    function  EmitFloatRoundRTL(AArg: TASTExpr; const AFn: string): string;
     procedure EmitFieldElemStore(AAssign: TFieldAssignment;
       const AFieldPtr: string);
     procedure EmitMethodCall(ACall: TMethodCallStmt);
@@ -2576,18 +2578,30 @@ begin
     Exit('b');
   if SameText(AElemType, 'SmallInt') or SameText(AElemType, 'Word') then
     Exit('h');
+  { Float elements need the FLOAT data type ('d'/'s') so the value can be
+    written as a d_/s_ constant: 'l 0.25' is invalid QBE (the parser reads
+    'l 0' and chokes on '.25'). }
+  if SameText(AElemType, 'Double') then
+    Exit('d');
+  if SameText(AElemType, 'Single') then
+    Exit('s');
   if SameText(AElemType, 'Int64') or SameText(AElemType, 'UInt64') or
-     SameText(AElemType, 'Pointer') or SameText(AElemType, 'Double') then
+     SameText(AElemType, 'Pointer') then
     Exit('l');
   if SameText(AElemType, 'Integer') or SameText(AElemType, 'UInt32') or
-     SameText(AElemType, 'LongInt') or SameText(AElemType, 'Cardinal') or
-     SameText(AElemType, 'Single') then
+     SameText(AElemType, 'LongInt') or SameText(AElemType, 'Cardinal') then
     Exit('w');
   Sz := 4;
   if FSymTable <> nil then
   begin
     TD := FSymTable.FindType(AElemType);
-    if TD <> nil then Sz := TD.RawSize();
+    if TD <> nil then
+    begin
+      { A named alias of a float type keeps the float data type too. }
+      if TD.Kind = tyDouble then Exit('d');
+      if TD.Kind = tySingle then Exit('s');
+      Sz := TD.RawSize();
+    end;
   end;
   case Sz of
     1: Result := 'b';
@@ -2602,6 +2616,7 @@ procedure TCodeGenQBE.EmitArrayConstData(CD: TConstDecl; const APrefix: string);
 var
   J:          Integer;
   ElemVal:    string;
+  ElemQT:     string;
   Parts:      string;
   StrIdx:     Integer;
   IsStrArray: Boolean;
@@ -2656,11 +2671,18 @@ begin
       Parts := Parts + Format('l $__s%d + 12', [StrIdx]);
     end
     else
+    begin
       { Honour the element width: Boolean/Byte are 1-byte (b), Int64/pointer
         8-byte (l), etc.  A fixed 'w' (4-byte) emitted a stride the 1-byte
-        subscript read could not follow (every Boolean element read 0). }
-      Parts := Parts + Format('%s %s', [ConstElemQbeDataType(CD.ArrayElemType),
-                                        ElemVal]);
+        subscript read could not follow (every Boolean element read 0).
+        Float elements ('d'/'s') additionally need the d_/s_ constant
+        prefix — a bare float literal is not a valid QBE data item. }
+      ElemQT := ConstElemQbeDataType(CD.ArrayElemType);
+      if (ElemQT = 'd') or (ElemQT = 's') then
+        Parts := Parts + Format('%s %s_%s', [ElemQT, ElemQT, ElemVal])
+      else
+        Parts := Parts + Format('%s %s', [ElemQT, ElemVal]);
+    end;
   end;
   { Class/record consts keep an exported, type-qualified label (referenced as
     TFoo.Const across the compilation).  A unit's INTERFACE-section const
@@ -11292,14 +11314,29 @@ begin
     for I := 0 to ACall.Args.Count - 1 do
     begin
       if ArgLine <> '' then ArgLine := ArgLine + ', ';
-      ArgTemp := EmitExpr(TASTExpr(ACall.Args.Items[I]));
-      ArgTemp := CoerceArg(ArgTemp, TASTExpr(ACall.Args.Items[I]),
-        QbeTypeOf(TProcParamInfo(
-          TProceduralTypeDesc(ACall.ResolvedProcType).Params.Items[I]).TypeDesc));
-      ArgLine := ArgLine + Format('%s %s',
-        [QbeTypeOf(TProcParamInfo(
-          TProceduralTypeDesc(ACall.ResolvedProcType).Params.Items[I]).TypeDesc),
-         ArgTemp]);
+      { var/out parameters pass the argument's l-value address; value
+        parameters use QbeParamTypeOf so a record travels with the
+        :_ffi_<Name> aggregate ABI the callee declares -- the old
+        QbeTypeOf handed the callee a bare `l` POINTER, which it then
+        mis-read as scattered SysV field registers (garbage; this is
+        how punit's TRunSummary totals printed noise under QBE). }
+      if TProcParamInfo(
+           TProceduralTypeDesc(ACall.ResolvedProcType).Params.Items[I]).IsVarParam then
+      begin
+        ArgTemp := EmitLValueAddr(TASTExpr(ACall.Args.Items[I]));
+        ArgLine := ArgLine + Format('l %s', [ArgTemp]);
+      end
+      else
+      begin
+        ArgTemp := EmitExpr(TASTExpr(ACall.Args.Items[I]));
+        ArgTemp := CoerceArg(ArgTemp, TASTExpr(ACall.Args.Items[I]),
+          QbeTypeOf(TProcParamInfo(
+            TProceduralTypeDesc(ACall.ResolvedProcType).Params.Items[I]).TypeDesc));
+        ArgLine := ArgLine + Format('%s %s',
+          [QbeParamTypeOf(TProcParamInfo(
+            TProceduralTypeDesc(ACall.ResolvedProcType).Params.Items[I]).TypeDesc),
+           ArgTemp]);
+      end;
     end;
     EmitLine(Format('  call %s(%s)', [FPtrTemp, ArgLine]));
     Exit;
@@ -12248,6 +12285,45 @@ begin
   end;
 end;
 
+{ Lower a single-argument float builtin to its runtime.math function.
+  All float math is double precision internally (runtime.math has no
+  float kernels): a Single argument is widened for the call and the
+  result narrowed back, so the result type follows the argument type.
+  Double rounding is harmless at 29 extra mantissa bits. }
+function TCodeGenQBE.EmitFloatUnaryRTL(AArg: TASTExpr; const AFn: string): string;
+var
+  L, T, W1, W2, QType: string;
+begin
+  L := EmitFloatArg(AArg, QType);
+  T := AllocTemp();
+  if QType = 's' then
+  begin
+    W1 := AllocTemp();
+    W2 := AllocTemp();
+    EmitLine(Format('  %s =d exts %s', [W1, L]));
+    EmitLine(Format('  %s =d call $%s(d %s)', [W2, AFn, W1]));
+    EmitLine(Format('  %s =s truncd %s', [T, W2]));
+  end
+  else
+    EmitLine(Format('  %s =d call $%s(d %s)', [T, AFn, L]));
+  Result := T;
+end;
+
+{ Ceil/Floor/Round: call the runtime.math rounding function on the
+  (widened) double and convert the integral result with dtosi -- the
+  builtin's result type is Integer. }
+function TCodeGenQBE.EmitFloatRoundRTL(AArg: TASTExpr; const AFn: string): string;
+var
+  L, T, R: string;
+begin
+  L := EmitFloatArgAsDouble(AArg);
+  T := AllocTemp();
+  R := AllocTemp();
+  EmitLine(Format('  %s =d call $%s(d %s)', [T, AFn, L]));
+  EmitLine(Format('  %s =w dtosi %s', [R, T]));
+  Result := R;
+end;
+
 function TCodeGenQBE.EmitExpr(AExpr: TASTExpr): string;
 var
   T, L, R, T2: string;
@@ -12686,24 +12762,10 @@ begin
         Exit(T);
       end;
 
-      { Float-math builtins below lower to libm calls ($sqrt, $sin, $fabs, …),
-        so the emitted object depends on libm.  Register it here (once per
-        builtin that actually emits a libm call) instead of hardcoding -lm on
-        every link — the native backend never emits these, and a program that
-        uses no float math links without libm.  Abs is special: only its
-        float arms hit libm ($fabs/$fabsf); the integer arms use $_AbsInt. }
-      if SameText(FC.Name, 'Sqrt') or SameText(FC.Name, 'Ceil')
-        or SameText(FC.Name, 'Floor') or SameText(FC.Name, 'Trunc')
-        or SameText(FC.Name, 'Round') or SameText(FC.Name, 'Ln')
-        or SameText(FC.Name, 'Log2') or SameText(FC.Name, 'Log10')
-        or SameText(FC.Name, 'Power') or SameText(FC.Name, 'Sin')
-        or SameText(FC.Name, 'Cos') or SameText(FC.Name, 'Tan')
-        or SameText(FC.Name, 'ArcTan') or SameText(FC.Name, 'ArcTan2')
-        or SameText(FC.Name, 'ArcSin') or SameText(FC.Name, 'ArcCos')
-        or SameText(FC.Name, 'Sinh') or SameText(FC.Name, 'Cosh')
-        or SameText(FC.Name, 'Tanh') then
-        RequireLib('m');
-
+      { Float-math builtins lower to the pure-Pascal runtime.math RTL
+        functions ($_BlaiseSin, $_BlaisePow, ...), so no libm is needed
+        anywhere: Blaise binaries carry their own transcendental math.
+        RequireLib remains available for user `external '<lib>'` decls. }
       if SameText(FC.Name,'Abs') then
       begin
         L   := EmitExpr(TASTExpr(FC.Args.Items[0]));
@@ -12712,8 +12774,15 @@ begin
         case QType of
           'w': EmitLine(Format('  %s =w call $_AbsInt(w %s)',   [T, L]));
           'l': EmitLine(Format('  %s =l call $_AbsInt64(l %s)', [T, L]));
-          'd': begin RequireLib('m'); EmitLine(Format('  %s =d call $fabs(d %s)',  [T, L])); end;
-          's': begin RequireLib('m'); EmitLine(Format('  %s =s call $fabsf(s %s)', [T, L])); end;
+          'd': EmitLine(Format('  %s =d call $_BlaiseFabs(d %s)', [T, L]));
+          's': begin
+                 { widen, take |x| in double, narrow back -- fabs is exact }
+                 R := AllocTemp();
+                 T2 := AllocTemp();
+                 EmitLine(Format('  %s =d exts %s', [R, L]));
+                 EmitLine(Format('  %s =d call $_BlaiseFabs(d %s)', [T2, R]));
+                 EmitLine(Format('  %s =s truncd %s', [T, T2]));
+               end;
         else   EmitLine(Format('  %s =w call $_AbsInt(w %s)',   [T, L]));
         end;
         Exit(T);
@@ -12727,51 +12796,13 @@ begin
         Min/Max/Sign/DivMod/InRange/EnsureRange live in math.pas RTL. }
 
       if SameText(FC.Name, 'Sqrt') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $sqrtf(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $sqrt(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseSqrtD'));
 
       if SameText(FC.Name, 'Ceil') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        R := AllocTemp();
-        if QType = 's' then
-        begin
-          EmitLine(Format('  %s =s call $ceilf(s %s)', [T, L]));
-          EmitLine(Format('  %s =w stosi %s', [R, T]));
-        end
-        else
-        begin
-          EmitLine(Format('  %s =d call $ceil(d %s)', [T, L]));
-          EmitLine(Format('  %s =w dtosi %s', [R, T]));
-        end;
-        Exit(R);
-      end;
+        Exit(EmitFloatRoundRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseCeilD'));
 
       if SameText(FC.Name, 'Floor') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        R := AllocTemp();
-        if QType = 's' then
-        begin
-          EmitLine(Format('  %s =s call $floorf(s %s)', [T, L]));
-          EmitLine(Format('  %s =w stosi %s', [R, T]));
-        end
-        else
-        begin
-          EmitLine(Format('  %s =d call $floor(d %s)', [T, L]));
-          EmitLine(Format('  %s =w dtosi %s', [R, T]));
-        end;
-        Exit(R);
-      end;
+        Exit(EmitFloatRoundRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseFloorD'));
 
       if SameText(FC.Name, 'Trunc') then
       begin
@@ -12785,197 +12816,107 @@ begin
       end;
 
       if SameText(FC.Name, 'Round') then
-      begin
-        { Round half-away from zero: C99 round() rounds .5 away from zero,
-          matching the behaviour of Delphi/FPC Round(). }
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        R := AllocTemp();
-        if QType = 's' then
-        begin
-          EmitLine(Format('  %s =s call $roundf(s %s)', [T, L]));
-          EmitLine(Format('  %s =w stosi %s', [R, T]));
-        end
-        else
-        begin
-          EmitLine(Format('  %s =d call $round(d %s)', [T, L]));
-          EmitLine(Format('  %s =w dtosi %s', [R, T]));
-        end;
-        Exit(R);
-      end;
+        { Round half-away from zero (the documented Blaise Round rule);
+          _BlaiseRoundD is the exact musl round() port. }
+        Exit(EmitFloatRoundRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseRoundD'));
 
       if SameText(FC.Name, 'Ln') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $logf(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $log(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseLn'));
 
       if SameText(FC.Name, 'Log2') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $log2f(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $log2(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseLog2'));
 
       if SameText(FC.Name, 'Log10') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $log10f(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $log10(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseLog10'));
 
       if SameText(FC.Name, 'Power') then
       begin
         L := EmitFloatArgAsDouble(TASTExpr(FC.Args.Items[0]));
         R := EmitFloatArgAsDouble(TASTExpr(FC.Args.Items[1]));
         T := AllocTemp();
-        EmitLine(Format('  %s =d call $pow(d %s, d %s)', [T, L, R]));
+        EmitLine(Format('  %s =d call $_BlaisePow(d %s, d %s)', [T, L, R]));
         Exit(T);
       end;
 
       if SameText(FC.Name, 'Sin') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $sinf(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $sin(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseSin'));
 
       if SameText(FC.Name, 'Cos') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $cosf(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $cos(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseCos'));
 
       if SameText(FC.Name, 'Tan') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $tanf(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $tan(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseTan'));
 
       if SameText(FC.Name, 'ArcTan') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $atanf(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $atan(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseArcTan'));
 
       if SameText(FC.Name, 'ArcTan2') then
       begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        R := EmitFloatArg(TASTExpr(FC.Args.Items[1]), T2);
+        { both args widened to double; result narrowed back when the
+          first argument (which fixes the result type) is Single }
+        L := EmitFloatArgAsDouble(TASTExpr(FC.Args.Items[0]));
+        R := EmitFloatArgAsDouble(TASTExpr(FC.Args.Items[1]));
         T := AllocTemp();
+        QType := QbeTypeOf(TASTExpr(FC.Args.Items[0]).ResolvedType);
         if QType = 's' then
-          EmitLine(Format('  %s =s call $atan2f(s %s, s %s)', [T, L, R]))
+        begin
+          T2 := AllocTemp();
+          EmitLine(Format('  %s =d call $_BlaiseArcTan2(d %s, d %s)', [T2, L, R]));
+          EmitLine(Format('  %s =s truncd %s', [T, T2]));
+        end
         else
-          EmitLine(Format('  %s =d call $atan2(d %s, d %s)', [T, L, R]));
+          EmitLine(Format('  %s =d call $_BlaiseArcTan2(d %s, d %s)', [T, L, R]));
         Exit(T);
       end;
 
       if SameText(FC.Name, 'ArcSin') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $asinf(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $asin(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseArcSin'));
 
       if SameText(FC.Name, 'ArcCos') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $acosf(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $acos(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseArcCos'));
 
       if SameText(FC.Name, 'Sinh') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $sinhf(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $sinh(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseSinh'));
 
       if SameText(FC.Name, 'Cosh') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $coshf(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $cosh(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseCosh'));
 
       if SameText(FC.Name, 'Tanh') then
-      begin
-        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
-        T := AllocTemp();
-        if QType = 's' then
-          EmitLine(Format('  %s =s call $tanhf(s %s)', [T, L]))
-        else
-          EmitLine(Format('  %s =d call $tanh(d %s)', [T, L]));
-        Exit(T);
-      end;
+        Exit(EmitFloatUnaryRTL(TASTExpr(FC.Args.Items[0]), '_BlaiseTanh'));
 
       if SameText(FC.Name, 'IsNaN') then
       begin
+        { NaN is the only value unordered with itself: cuo yields 1 when
+          either operand is NaN.  Pure IR -- no libc __isnan needed. }
         L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
         T := AllocTemp();
         if QType = 's' then
-          EmitLine(Format('  %s =w call $__isnanf(s %s)', [T, L]))
+          EmitLine(Format('  %s =w cuos %s, %s', [T, L, L]))
         else
-          EmitLine(Format('  %s =w call $__isnan(d %s)', [T, L]));
+          EmitLine(Format('  %s =w cuod %s, %s', [T, L, L]));
         Exit(T);
       end;
 
       if SameText(FC.Name, 'IsInfinite') then
       begin
+        { |x| has the all-ones exponent and a zero mantissa exactly for
+          +-inf: compare the sign-cleared bit pattern.  Pure IR. }
         L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
         T := AllocTemp();
+        R := AllocTemp();
+        T2 := AllocTemp();
         if QType = 's' then
-          EmitLine(Format('  %s =w call $__isinff(s %s)', [T, L]))
+        begin
+          EmitLine(Format('  %s =w cast %s', [R, L]));
+          EmitLine(Format('  %s =w and %s, 2147483647', [T2, R]));
+          EmitLine(Format('  %s =w ceqw %s, 2139095040', [T, T2]));
+        end
         else
-          EmitLine(Format('  %s =w call $__isinf(d %s)', [T, L]));
+        begin
+          EmitLine(Format('  %s =l cast %s', [R, L]));
+          EmitLine(Format('  %s =l and %s, 9223372036854775807', [T2, R]));
+          EmitLine(Format('  %s =w ceql %s, 9218868437227405312', [T, T2]));
+        end;
         Exit(T);
       end;
 
@@ -15643,14 +15584,21 @@ begin
     end
     else if TIdentExpr(AExpr).ParamMode <> pmNone then
     begin
-      { Var param of scalar type: load pointer, then dereference to get value }
+      { Var param of scalar type: load pointer, then dereference to get
+        value.  The dereference must honour the value's own class and
+        width: a bare loadw handed a var Double to QBE as a 32-bit int
+        (invalid IR), and over-read a var Byte/SmallInt pointee. }
       Ptr := AllocTemp();
       EmitLine(Format('  %s =l loadl %%_var_%s', [Ptr, TIdentExpr(AExpr).Name]));
       QType := QbeTypeOf(AExpr.ResolvedType);
-      if QType = 'l' then
-        EmitLine(Format('  %s =l loadl %s', [T, Ptr]))
+      case QType of
+        'l': EmitLine(Format('  %s =l loadl %s', [T, Ptr]));
+        'd': EmitLine(Format('  %s =d loadd %s', [T, Ptr]));
+        's': EmitLine(Format('  %s =s loads %s', [T, Ptr]));
       else
-        EmitLine(Format('  %s =w loadw %s', [T, Ptr]));
+        EmitLine(Format('  %s =w %s %s',
+          [T, NarrowLoadInstr(AExpr.ResolvedType), Ptr]));
+      end;
     end
     else if TIdentExpr(AExpr).ConstArraySymbol <> '' then
     begin

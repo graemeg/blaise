@@ -123,6 +123,10 @@ type
     procedure TestCodegen_ArcSin_Single_EmitsAsinf;
     procedure TestCodegen_IsNaN_EmitsIsnan;
     procedure TestCodegen_IsInfinite_EmitsIsinf;
+    { QBE codegen regression guards found during the libm removal }
+    procedure TestCodegen_ConstDoubleArray_EmitsFloatDataItems;
+    procedure TestCodegen_VarParamDouble_LoadsWithLoadd;
+    procedure TestCodegen_IndirectCall_RecordArg_UsesAggregateABI;
 
     { --- RTL unit: Math.pas --- }
 
@@ -534,7 +538,7 @@ begin
   IR := GenIRBuiltin(
     'program P; var I: Integer; D: Double; begin I := 3; D := Sin(I) end.');
   AssertTrue('int argument converted with swtof', IRContains(IR, 'swtof'));
-  AssertTrue('double sin called', IRContains(IR, 'call $sin('));
+  AssertTrue('double sin called', IRContains(IR, 'call $_BlaiseSin('));
 end;
 
 procedure TMathTests.TestCodegen_Power_IntegerArgs_CoerceToDouble;
@@ -543,7 +547,7 @@ begin
   IR := GenIRBuiltin(
     'program P; var D: Double; begin D := Power(2, 10) end.');
   AssertTrue('int arguments converted with swtof', IRContains(IR, 'swtof'));
-  AssertTrue('pow called', IRContains(IR, 'call $pow('));
+  AssertTrue('pow called', IRContains(IR, 'call $_BlaisePow('));
 end;
 
 procedure TMathTests.TestCodegen_CastDoubleFromInt_EmitsConversion;
@@ -845,7 +849,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := Sqrt(X) end.');
-  AssertTrue('sqrt in IR', IRContains(IR, '$sqrt'));
+  AssertTrue('sqrt in IR', IRContains(IR, '$_BlaiseSqrtD'));
 end;
 
 procedure TMathTests.TestCodegen_Trunc_EmitsDtosi;
@@ -861,7 +865,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X: Double; R: Integer; begin R := Ceil(X) end.');
-  AssertTrue('ceil in IR', IRContains(IR, '$ceil'));
+  AssertTrue('ceil in IR', IRContains(IR, '$_BlaiseCeilD'));
   AssertTrue('dtosi in IR', IRContains(IR, 'dtosi'));
 end;
 
@@ -870,7 +874,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X: Double; R: Integer; begin R := Floor(X) end.');
-  AssertTrue('floor in IR', IRContains(IR, '$floor'));
+  AssertTrue('floor in IR', IRContains(IR, '$_BlaiseFloorD'));
   AssertTrue('dtosi in IR', IRContains(IR, 'dtosi'));
 end;
 
@@ -879,7 +883,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X: Double; R: Integer; begin R := Round(X) end.');
-  AssertTrue('round in IR', IRContains(IR, '$round'));
+  AssertTrue('round in IR', IRContains(IR, '$_BlaiseRoundD'));
   AssertTrue('dtosi in IR', IRContains(IR, 'dtosi'));
 end;
 
@@ -888,7 +892,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := Ln(X) end.');
-  AssertTrue('log in IR', IRContains(IR, '$log'));
+  AssertTrue('log in IR', IRContains(IR, '$_BlaiseLn'));
 end;
 
 procedure TMathTests.TestCodegen_Log2_EmitsLog2;
@@ -896,7 +900,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := Log2(X) end.');
-  AssertTrue('log2 in IR', IRContains(IR, '$log2'));
+  AssertTrue('log2 in IR', IRContains(IR, '$_BlaiseLog2'));
 end;
 
 procedure TMathTests.TestCodegen_Log10_EmitsLog10;
@@ -904,7 +908,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := Log10(X) end.');
-  AssertTrue('log10 in IR', IRContains(IR, '$log10'));
+  AssertTrue('log10 in IR', IRContains(IR, '$_BlaiseLog10'));
 end;
 
 procedure TMathTests.TestCodegen_Power_EmitsPow;
@@ -912,7 +916,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var B, E, R: Double; begin R := Power(B, E) end.');
-  AssertTrue('pow in IR', IRContains(IR, '$pow'));
+  AssertTrue('pow in IR', IRContains(IR, '$_BlaisePow'));
 end;
 
 procedure TMathTests.TestCodegen_Sin_EmitsSin;
@@ -920,7 +924,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := Sin(X) end.');
-  AssertTrue('sin in IR', IRContains(IR, '$sin'));
+  AssertTrue('sin in IR', IRContains(IR, '$_BlaiseSin'));
 end;
 
 procedure TMathTests.TestCodegen_Cos_EmitsCos;
@@ -928,7 +932,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := Cos(X) end.');
-  AssertTrue('cos in IR', IRContains(IR, '$cos'));
+  AssertTrue('cos in IR', IRContains(IR, '$_BlaiseCos'));
 end;
 
 procedure TMathTests.TestCodegen_Tan_EmitsTan;
@@ -936,7 +940,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := Tan(X) end.');
-  AssertTrue('tan in IR', IRContains(IR, '$tan'));
+  AssertTrue('tan in IR', IRContains(IR, '$_BlaiseTan'));
 end;
 
 procedure TMathTests.TestCodegen_ArcTan_EmitsAtan;
@@ -944,7 +948,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := ArcTan(X) end.');
-  AssertTrue('atan in IR', IRContains(IR, '$atan'));
+  AssertTrue('atan in IR', IRContains(IR, '$_BlaiseArcTan'));
 end;
 
 procedure TMathTests.TestCodegen_ArcTan2_EmitsAtan2;
@@ -952,7 +956,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var Y, X, R: Double; begin R := ArcTan2(Y, X) end.');
-  AssertTrue('atan2 in IR', IRContains(IR, '$atan2'));
+  AssertTrue('atan2 in IR', IRContains(IR, '$_BlaiseArcTan2'));
 end;
 
 procedure TMathTests.TestCodegen_ArcSin_EmitsAsin;
@@ -960,7 +964,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := ArcSin(X) end.');
-  AssertTrue('asin in IR', IRContains(IR, '$asin'));
+  AssertTrue('asin in IR', IRContains(IR, '$_BlaiseArcSin'));
 end;
 
 procedure TMathTests.TestCodegen_ArcCos_EmitsAcos;
@@ -968,7 +972,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := ArcCos(X) end.');
-  AssertTrue('acos in IR', IRContains(IR, '$acos'));
+  AssertTrue('acos in IR', IRContains(IR, '$_BlaiseArcCos'));
 end;
 
 procedure TMathTests.TestCodegen_Sinh_EmitsSinh;
@@ -976,7 +980,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := Sinh(X) end.');
-  AssertTrue('sinh in IR', IRContains(IR, '$sinh'));
+  AssertTrue('sinh in IR', IRContains(IR, '$_BlaiseSinh'));
 end;
 
 procedure TMathTests.TestCodegen_Cosh_EmitsCosh;
@@ -984,7 +988,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := Cosh(X) end.');
-  AssertTrue('cosh in IR', IRContains(IR, '$cosh'));
+  AssertTrue('cosh in IR', IRContains(IR, '$_BlaiseCosh'));
 end;
 
 procedure TMathTests.TestCodegen_Tanh_EmitsTanh;
@@ -992,7 +996,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Double; begin R := Tanh(X) end.');
-  AssertTrue('tanh in IR', IRContains(IR, '$tanh'));
+  AssertTrue('tanh in IR', IRContains(IR, '$_BlaiseTanh'));
 end;
 
 procedure TMathTests.TestCodegen_Sin_Single_EmitsSinf;
@@ -1000,7 +1004,8 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Single; begin R := Sin(X) end.');
-  AssertTrue('sinf in IR', IRContains(IR, '$sinf'));
+  AssertTrue('widened sin call in IR', IRContains(IR, '$_BlaiseSin'));
+  AssertTrue('result narrowed to single', IRContains(IR, 'truncd'));
 end;
 
 procedure TMathTests.TestCodegen_Sinh_Single_EmitsSinhf;
@@ -1008,7 +1013,8 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Single; begin R := Sinh(X) end.');
-  AssertTrue('sinhf in IR', IRContains(IR, '$sinhf'));
+  AssertTrue('widened sinh call in IR', IRContains(IR, '$_BlaiseSinh'));
+  AssertTrue('result narrowed to single', IRContains(IR, 'truncd'));
 end;
 
 procedure TMathTests.TestCodegen_ArcSin_Single_EmitsAsinf;
@@ -1016,7 +1022,8 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X, R: Single; begin R := ArcSin(X) end.');
-  AssertTrue('asinf in IR', IRContains(IR, '$asinf'));
+  AssertTrue('widened asin call in IR', IRContains(IR, '$_BlaiseArcSin'));
+  AssertTrue('result narrowed to single', IRContains(IR, 'truncd'));
 end;
 
 procedure TMathTests.TestCodegen_IsNaN_EmitsIsnan;
@@ -1024,7 +1031,7 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X: Double; B: Boolean; begin B := IsNaN(X) end.');
-  AssertTrue('__isnan in IR', IRContains(IR, '$__isnan'));
+  AssertTrue('inline unordered self-compare in IR', IRContains(IR, 'cuod'));
 end;
 
 procedure TMathTests.TestCodegen_IsInfinite_EmitsIsinf;
@@ -1032,7 +1039,48 @@ var IR: string;
 begin
   IR := GenIRBuiltin(
     'program P; var X: Double; B: Boolean; begin B := IsInfinite(X) end.');
-  AssertTrue('__isinf in IR', IRContains(IR, '$__isinf'));
+  AssertTrue('inline |x| bit compare in IR', IRContains(IR, 'ceql'));
+  AssertTrue('exponent mask in IR', IRContains(IR, '9218868437227405312'));
+end;
+
+
+procedure TMathTests.TestCodegen_ConstDoubleArray_EmitsFloatDataItems;
+var IR: string;
+begin
+  { 'l 0.25' is invalid QBE (parser reads 'l 0' and chokes); Double
+    elements must be 'd d_...' data items }
+  IR := GenIRBuiltin(
+    'program P; const C: array[0..1] of Double = (0.25, 0.5); ' +
+    'var X: Double; begin X := C[0] end.');
+  AssertTrue('float data item in IR', IRContains(IR, 'd d_0.25'));
+end;
+
+procedure TMathTests.TestCodegen_VarParamDouble_LoadsWithLoadd;
+var IR: string;
+begin
+  { reading a var Double param used to emit '=w loadw' -- a 32-bit
+    integer load of half the double, and invalid as a d call arg }
+  IR := GenIRBuiltin(
+    'program P; ' +
+    'procedure Q(var V: Double); var X: Double; begin X := V end; ' +
+    'var D: Double; begin Q(D) end.');
+  AssertTrue('loadd for var double deref', IRContains(IR, 'loadd'));
+end;
+
+procedure TMathTests.TestCodegen_IndirectCall_RecordArg_UsesAggregateABI;
+var IR: string;
+begin
+  { a record passed through a procedural VARIABLE must use the same
+    :_ffi_<Name> aggregate ABI as a direct call -- the old bare 'l'
+    pointer arg made the callee read its param registers as garbage
+    (this is how punit's TRunSummary totals printed noise) }
+  IR := GenIRBuiltin(
+    'program P; ' +
+    'type TR = record A, B: Integer; end; TH = procedure(const R: TR); ' +
+    'procedure W(const R: TR); begin WriteLn(IntToStr(R.A)) end; ' +
+    'var H: TH; V: TR; begin H := @W; H(V) end.');
+  AssertTrue('aggregate arg on indirect call',
+    IRContains(IR, '(:_ffi_TR '));
 end;
 
 { ------------------------------------------------------------------ }

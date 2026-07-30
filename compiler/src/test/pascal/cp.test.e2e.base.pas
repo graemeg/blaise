@@ -86,10 +86,23 @@ type
     function  CompileAndRunOn(ABackend: TBackend; const ASrc: string;
                             out AStdout: string;
                             out AExitCode: Integer): Boolean;
+    { As CompileAndRunOn but links with extra -l libraries (see
+      AssertRunsOnAllLibs). }
+    function  CompileAndRunOnLibs(ABackend: TBackend; const ASrc: string;
+                            const AExtraLibs: array of string;
+                            out AStdout: string;
+                            out AExitCode: Integer): Boolean;
     { Run ASrc on every backend in AllBackends and assert each produces
       AExpectedOut / AExpectedCode.  When a new backend is added to AllBackends,
       all callers pick it up automatically. }
     procedure AssertRunsOnAll(const ASrc, AExpectedOut: string;
+                            AExpectedCode: Integer);
+    { As AssertRunsOnAll but links with extra -l libraries.  For FFI tests
+      whose external symbols live in a real system library (e.g. libm's
+      sinf) -- the plain harness link deliberately carries no -lm. }
+    procedure AssertRunsOnAllLibs(const ASrc: string;
+                            const ALibs: array of string;
+                            const AExpectedOut: string;
                             AExpectedCode: Integer);
     { Run ASrc on a specific set of backends only.  Use when a test should
       exercise fewer than AllBackends (e.g. a feature not yet ported). }
@@ -274,7 +287,7 @@ function TE2ETestCase.LinkWithRTL(const AAsmFile, ABinFile: string;
 var
   NoLibs: array[0..0] of string;
 begin
-  { No extra libraries beyond the RTL's own -lm/-lpthread. }
+  { No extra libraries beyond the RTL's own -lpthread. }
   NoLibs[0] := '';
   Result := Self.LinkWithRTLLibs(AAsmFile, ABinFile, NoLibs, AStdout);
 end;
@@ -307,9 +320,13 @@ begin
     Exit;
   end;
 
-  { 3. Link: cc -o Bin ProgObj <rtl objects> -lm -lpthread [extra -l...].  Build
+  { 3. Link: cc -o Bin ProgObj <rtl objects> -lpthread [extra -l...].  Build
        the TProcess directly so the object list (variable length) can be
-       appended. }
+       appended.  Deliberately NO -lm: the RTL's runtime.math replaces libm,
+       and a hardcoded -lm here would mask any regression that reintroduces
+       a libm symbol (exactly how the GH #199 undefined-pow escape stayed
+       invisible to the e2e suite).  A test that really wants libm (the FFI
+       marshalling tests targeting sinf/sqrtf) passes 'm' as an extra lib. }
   Objs := TStringList.Create();
   Proc := TProcess.Create(nil);
   try
@@ -321,7 +338,6 @@ begin
     for I := 0 to Objs.Count - 1 do
       if Trim(Objs.Strings[I]) <> '' then
         Proc.Parameters.Add(Trim(Objs.Strings[I]));
-    Proc.Parameters.Add('-lm');
     Proc.Parameters.Add('-lpthread');
     for I := 0 to High(AExtraLibs) do
       if Trim(AExtraLibs[I]) <> '' then
@@ -364,6 +380,17 @@ begin
 end;
 
 function TE2ETestCase.CompileAndRunOn(ABackend: TBackend; const ASrc: string;
+                                     out AStdout: string;
+                                     out AExitCode: Integer): Boolean;
+var
+  NoLibs: array[0..0] of string;
+begin
+  NoLibs[0] := '';
+  Result := Self.CompileAndRunOnLibs(ABackend, ASrc, NoLibs, AStdout, AExitCode);
+end;
+
+function TE2ETestCase.CompileAndRunOnLibs(ABackend: TBackend; const ASrc: string;
+                                     const AExtraLibs: array of string;
                                      out AStdout: string;
                                      out AExitCode: Integer): Boolean;
 { Single choke point for every compile+run in the harness, so the
@@ -444,7 +471,7 @@ begin
     Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
     if Rc <> 0 then begin AStdout := 'qbe failed: ' + ToolOut; AExitCode := Rc; Exit end
   end;
-  Rc := LinkWithRTL(AsmFile, BinFile, ToolOut);
+  Rc := LinkWithRTLLibs(AsmFile, BinFile, AExtraLibs, ToolOut);
   if Rc <> 0 then begin AStdout := 'cc failed: ' + ToolOut; AExitCode := Rc; Exit end;
   AExitCode := RunProcNoArgs(BinFile, AStdout);
   Result := True
@@ -513,6 +540,35 @@ procedure TE2ETestCase.AssertRunsOnAll(const ASrc, AExpectedOut: string;
                                        AExpectedCode: Integer);
 begin
   Self.AssertRunsOn(AllBackends, ASrc, AExpectedOut, AExpectedCode)
+end;
+
+procedure TE2ETestCase.AssertRunsOnAllLibs(const ASrc: string;
+                                       const ALibs: array of string;
+                                       const AExpectedOut: string;
+                                       AExpectedCode: Integer);
+var
+  BE: TBackend;
+  Backends: TBackends;
+  Output: string;
+  RCode:  Integer;
+  OK:     Boolean;
+begin
+  Backends := AllBackends;
+  if not BackendRunnableOnHost(beQBE) then
+    Backends := Backends - [beQBE];
+  if Backends = [] then
+  begin
+    Ignore('no backend supported on this host for this test');
+    Exit;
+  end;
+  for BE := Low(TBackend) to High(TBackend) do
+    if BE in Backends then
+    begin
+      OK := Self.CompileAndRunOnLibs(BE, ASrc, ALibs, Output, RCode);
+      AssertTrue('[' + BackendName(BE) + '] compile+run: ' + Output, OK);
+      AssertEquals('[' + BackendName(BE) + '] exit code', AExpectedCode, RCode);
+      AssertEquals('[' + BackendName(BE) + '] stdout', AExpectedOut, Output);
+    end;
 end;
 
 procedure TE2ETestCase.AssertRunsOn(ABackends: TBackends; const ASrc, AExpectedOut: string;

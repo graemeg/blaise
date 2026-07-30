@@ -2901,9 +2901,10 @@ begin
       Exit;
     end;
     { float -> integer.  Mirrors x86-64 exactly: round/floor/ceil go through
-      the C99 helper first and the integral result is then truncated, so the
-      rounding semantics (notably Round's half-AWAY-from-zero, which the FPU
-      rounding mode would get wrong) match the x86-64 and QBE backends.
+      the pure-Pascal runtime.math helper first (_BlaiseRoundD is the musl
+      round() port -- half-AWAY-from-zero, which the FPU rounding mode would
+      get wrong) and the integral result is then truncated, so the semantics
+      match the x86-64 and QBE backends with no libm/libSystem dependency.
       AArch64's one-instruction fcvtas/fcvtms/fcvtps would also work, but the
       internal assembler implements only fcvtzs of that family today.
       EmitExprToD0OrConvert promotes a Single operand to double, and AAPCS
@@ -2917,21 +2918,21 @@ begin
     if SameText(TFuncCallExpr(AExpr).Name, 'Round') then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      EmitCallSym('round');
+      EmitCallSym('_BlaiseRoundD');
       Self.Emit(#9'fcvtzs x0, d0');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'Floor') then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      EmitCallSym('floor');
+      EmitCallSym('_BlaiseFloorD');
       Self.Emit(#9'fcvtzs x0, d0');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'Ceil') then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      EmitCallSym('ceil');
+      EmitCallSym('_BlaiseCeilD');
       Self.Emit(#9'fcvtzs x0, d0');
       Exit;
     end;
@@ -4336,6 +4337,7 @@ var
   Idx: Integer;
   Lit: string;
   CondName: string;
+  RtlMathSym: string;
 begin
   if AExpr is TFloatLiteral then
   begin
@@ -4347,6 +4349,29 @@ begin
       Idx := FFloatLits.Add(Lit);
     Self.Emit(Format(#9'adrp x9, __d%d@PAGE', [Idx]));
     Self.Emit(Format(#9'ldr d0, [x9, __d%d@PAGEOFF]', [Idx]));
+    Exit;
+  end;
+  if (AExpr is TIdentExpr) and TIdentExpr(AExpr).IsConstant and
+     (AExpr.ResolvedType <> nil) and AExpr.ResolvedType.IsFloat() then
+  begin
+    { Float-typed named constant (const X = 6.28; ...): inline its literal
+      value.  The const has no storage — ConstString holds the source
+      text — so loading from a symbol named after it would reference an
+      undefined label.  Same .rodata pool as a TFloatLiteral (mirrors the
+      x86-64 arm of this rule). }
+    Lit := TIdentExpr(AExpr).ConstString;
+    Idx := FFloatLits.IndexOf(Lit);
+    if Idx < 0 then
+      Idx := FFloatLits.Add(Lit);
+    Self.Emit(Format(#9'adrp x9, __d%d@PAGE', [Idx]));
+    Self.Emit(Format(#9'ldr d0, [x9, __d%d@PAGEOFF]', [Idx]));
+    if AExpr.ResolvedType.Kind = tySingle then
+    begin
+      { the pool slot holds a double image of the literal; round to the
+        declared Single precision so the value matches a Single load }
+      Self.Emit(#9'fcvt s0, d0');
+      Self.Emit(#9'fcvt d0, s0');
+    end;
     Exit;
   end;
   if (AExpr is TIdentExpr) and TIdentExpr(AExpr).IsImplicitSelf and
@@ -4458,6 +4483,75 @@ begin
       Self.Emit(#9'fcvt s0, d0');   { round to single precision }
       Self.Emit(#9'fcvt d0, s0');   { re-widen — the D0 contract is a double }
     end;
+    Exit;
+  end;
+  { Float-math builtins lower to the pure-Pascal runtime.math RTL, the
+    same functions the x86-64 and QBE backends call -- no libm/libSystem
+    math anywhere.  All are double-only; the D0 contract is "d0 holds a
+    double", so no Single narrowing happens here (the caller narrows when
+    the expression type is Single).  EmitExprToD0OrConvert widens any
+    Single/integer argument, and AAPCS64 passes/returns doubles in d0. }
+  if (AExpr is TFuncCallExpr) and
+     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+     (not TFuncCallExpr(AExpr).IsIndirectCall) and
+     (TFuncCallExpr(AExpr).Args.Count = 1) then
+  begin
+    RtlMathSym := '';
+    if SameText(TFuncCallExpr(AExpr).Name, 'Sqrt') then
+      RtlMathSym := '_BlaiseSqrtD'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'Sin') then
+      RtlMathSym := '_BlaiseSin'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'Cos') then
+      RtlMathSym := '_BlaiseCos'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'Tan') then
+      RtlMathSym := '_BlaiseTan'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'ArcSin') then
+      RtlMathSym := '_BlaiseArcSin'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'ArcCos') then
+      RtlMathSym := '_BlaiseArcCos'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'ArcTan') then
+      RtlMathSym := '_BlaiseArcTan'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'Ln') then
+      RtlMathSym := '_BlaiseLn'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'Log2') then
+      RtlMathSym := '_BlaiseLog2'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'Log10') then
+      RtlMathSym := '_BlaiseLog10'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'Sinh') then
+      RtlMathSym := '_BlaiseSinh'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'Cosh') then
+      RtlMathSym := '_BlaiseCosh'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'Tanh') then
+      RtlMathSym := '_BlaiseTanh'
+    else if SameText(TFuncCallExpr(AExpr).Name, 'Abs') and
+            (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
+            TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.IsFloat() then
+      RtlMathSym := '_BlaiseFabs';
+    if RtlMathSym <> '' then
+    begin
+      Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      EmitCallSym(RtlMathSym);
+      Exit;
+    end;
+  end;
+  if (AExpr is TFuncCallExpr) and
+     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+     (not TFuncCallExpr(AExpr).IsIndirectCall) and
+     (TFuncCallExpr(AExpr).Args.Count = 2) and
+     (SameText(TFuncCallExpr(AExpr).Name, 'Power') or
+      SameText(TFuncCallExpr(AExpr).Name, 'ArcTan2')) then
+  begin
+    { two-argument RTL math call: first arg in d0, second in d1, each
+      widened to double by its own type via EmitExprToD0OrConvert }
+    Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+    Self.Emit(#9'str d0, [sp, #-16]!');
+    Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
+    Self.Emit(#9'fmov d1, d0');
+    Self.Emit(#9'ldr d0, [sp], #16');
+    if SameText(TFuncCallExpr(AExpr).Name, 'Power') then
+      EmitCallSym('_BlaisePow')
+    else
+      EmitCallSym('_BlaiseArcTan2');
     Exit;
   end;
   if AExpr is TFuncCallExpr then

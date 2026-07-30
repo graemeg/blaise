@@ -164,6 +164,12 @@ type
     procedure TestRun_FloatConstExpr_TypedDoubleIntExpr;
     procedure TestRun_FloatVarInit_TypedDoubleIntExpr;
     procedure TestRun_SingleCast_RoundTripPrecision;
+    { runtime.math / no-libm regression guards (GH #199) }
+    procedure TestRun_Power_IntArg_Issue199;
+    procedure TestRun_Abs_Double;
+    procedure TestRun_Sin_Single_WidensAndNarrows;
+    procedure TestRun_Sin_HugeArg_PayneHanek;
+    procedure TestRun_ConstDoubleArray_Elements;
   end;
 
 implementation
@@ -1622,6 +1628,106 @@ begin
   AssertEquals('exit code', 0, RCode);
   AssertEquals('single round-trip loses precision to 32-bit',
     '3.14159274101257', Trim(Output));
+end;
+
+{ ------------------------------------------------------------------ }
+{ runtime.math / no-libm regression guards                             }
+{ ------------------------------------------------------------------ }
+
+procedure TE2EMathTests.TestRun_Power_IntArg_Issue199;
+begin
+  { GH #199: Power() compiled but the binary died at run time with
+    "undefined symbol: pow" -- the native backend emitted a libm call
+    that nothing linked.  Power now lowers to the pure-Pascal
+    $_BlaisePow in runtime.math, so this program must compile, LINK and
+    RUN on both backends with no libm anywhere.  The integer argument
+    also pins the int->double widening of builtin args. }
+  AssertRunsOnAll(
+    '''
+    program P;
+    var
+      X: Integer;
+      R: Double;
+    begin
+      X := 5;
+      R := Power(3, X);
+      WriteLn(DoubleToStr(R))
+    end.
+    ''', '243' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_Abs_Double;
+begin
+  { float Abs must lower through the float path (QBE $_BlaiseFabs /
+    native bit ops), never the integer cltd/xor arm }
+  AssertRunsOnAll(
+    '''
+    program P;
+    var X: Double;
+    begin
+      X := -2.5;
+      WriteLn(DoubleToStr(Abs(X)));
+      X := 2.5;
+      WriteLn(DoubleToStr(Abs(X)))
+    end.
+    ''', '2.5' + Chr(10) + '2.5' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_Sin_Single_WidensAndNarrows;
+begin
+  { Single trig: the backends widen to double, call the runtime.math
+    kernel, and narrow the result back to Single.  sin(0.5) = 0.479426;
+    the value printed is the SINGLE-rounded result. }
+  AssertRunsOnAll(
+    '''
+    program P;
+    var X, R: Single;
+    begin
+      X := 0.5;
+      R := Sin(X);
+      WriteLn(IntToStr(Trunc(R * 1000000.0)))
+    end.
+    ''', '479425' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_Sin_HugeArg_PayneHanek;
+begin
+  { sin(1e300) requires full Payne-Hanek argument reduction (the 2/pi
+    bit table): a naive fmod-style reduction returns garbage.  Value
+    check to 6 digits keeps a 2-ulp implementation margin. }
+  AssertRunsOnAll(
+    '''
+    program P;
+    var X: Double;
+    begin
+      X := 1.0e300;
+      WriteLn(IntToStr(Trunc(Sin(X) * 1000000.0)))
+    end.
+    ''', '-817881' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_ConstDoubleArray_Elements;
+begin
+  { const array of Double: the x86-64 backend used to emit the elements
+    as '.quad 0.25' (gas silently mis-assembles float text under an
+    integer directive -> every element read garbage) and the QBE backend
+    emitted 'l 0.25' (invalid IR).  Both must carry float data items. }
+  AssertRunsOnAll(
+    '''
+    program P;
+    const
+      C: array[0..2] of Double = (0.25, 0.5, 1.66666666666666019037e-01);
+    var
+      X: Double;
+      K: Integer;
+    begin
+      K := 1;
+      X := C[0] + C[K] * 2.0;
+      WriteLn(DoubleToStr(X));
+      if (C[2] > 0.16) and (C[2] < 0.17) then
+        WriteLn('sci-ok')
+    end.
+    ''', '1.25' + Chr(10) + 'sci-ok' + Chr(10), 0);
 end;
 
 initialization

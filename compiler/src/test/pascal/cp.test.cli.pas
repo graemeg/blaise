@@ -667,8 +667,12 @@ procedure TCLIContractTests.TestLibm_QBEFloatMath_LinksLibm;
 var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
-  { The QBE backend lowers Sqrt to a $sqrt libm call, so RequireLib('m') fires
-    and the binary must carry a libm DT_NEEDED (demand-driven, not hardcoded). }
+  { Sqrt (and all float math) now lowers to the pure-Pascal runtime.math
+    RTL ($_BlaiseSqrtD), so a float-math binary must NOT link libm --
+    the exact inverse of the pre-runtime.math contract this test used to
+    pin.  GH #199 was the visible failure of the old scheme: the lib
+    requirement was lost for cached/separately-compiled units and the
+    binary died at run time with "undefined symbol: pow". }
   SrcPath := WriteScratchSource(
     'program p; var d: Double; begin d := Sqrt(2.0); WriteLn(d > 1.0); end.');
   BinPath := FScratch + 'cli_libm_qbe_' + IntToStr(FCounter);
@@ -678,12 +682,8 @@ begin
   AssertEquals('QBE Sqrt program links (out: ' + Out_ + ')', 0, EC);
   Dyn := ReadelfDynamic(BinPath);
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
-  { Assert only on a dynamic binary (the libc-host / Linux case): libm must be a
-    DT_NEEDED.  A freestanding host that links the QBE output statically has no
-    .dynamic section and needs no libm entry — don't demand one there. }
-  if Pos('(NEEDED)', Dyn) >= 0 then
-    AssertTrue('QBE float-math binary links libm (DT_NEEDED libm.so)',
-      Pos('libm.so', Dyn) >= 0);
+  AssertTrue('float-math binary does NOT link libm (runtime.math replaces it)',
+    Pos('libm.so', Dyn) < 0);
 end;
 
 procedure TCLIContractTests.TestLibm_NoFloatMath_NoLibm;

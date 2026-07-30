@@ -87,7 +87,7 @@ esac
 RTL_UNITS="rtl.platform
 runtime.start runtime.atomic runtime.setjmp runtime.utf8
 runtime.mem runtime.str runtime.set runtime.arc
-runtime.weak runtime.float runtime.thread runtime.exc
+runtime.weak runtime.float runtime.math runtime.thread runtime.exc
 $ERRNO_UNIT
 $LAYOUT_UNIT rtl.platform.posix"
 

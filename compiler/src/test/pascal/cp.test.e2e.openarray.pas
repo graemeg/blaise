@@ -63,6 +63,7 @@ type
     procedure TestRun_VarOpenArray_ElementRead;
     procedure TestRun_VarOpenArray_ElementWrite;
     procedure TestRun_VarOpenArray_ReadModifyWrite;
+    procedure TestRun_MethodCall_SevenSlots_OpenArrayMidList;
   end;
 
 implementation
@@ -603,6 +604,48 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     '10' + #10 + '20' + #10 + '30' + #10 + '40' + #10 + 'sum=100' + #10, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_MethodCall_SevenSlots_OpenArrayMidList;
+begin
+  { 7 flat arg slots (Self + enum + string + open array ptr/high + two out
+    params): the >6-slot store path used one slot per LOGICAL argument, so
+    the open array's high collapsed into the next slot -- the callee read a
+    garbage high and wrote its out params through wild addresses (segfault).
+    Found when the e2e harness itself grew this exact signature. }
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TBk = (bkOne, bkTwo);
+      TC = class
+      public
+        function RunOnLibs(ABk: TBk; const ASrc: string;
+                           const ALibs: array of string;
+                           out AOut: string; out ACode: Integer): Boolean;
+      end;
+    function TC.RunOnLibs(ABk: TBk; const ASrc: string;
+                          const ALibs: array of string;
+                          out AOut: string; out ACode: Integer): Boolean;
+    begin
+      WriteLn('high=', IntToStr(High(ALibs)));
+      AOut := 'out:' + ASrc;
+      ACode := 42;
+      Result := True;
+    end;
+    var
+      C: TC;
+      A: array[0..1] of string;
+      O: string;
+      Code: Integer;
+    begin
+      C := TC.Create();
+      A[0] := 'x';
+      A[1] := 'y';
+      if C.RunOnLibs(bkOne, 'prog', A, O, Code) then
+        WriteLn(O, ' code=', IntToStr(Code));
+    end.
+    ''', 'high=1' + Chr(10) + 'out:prog code=42' + Chr(10), 0);
 end;
 
 initialization

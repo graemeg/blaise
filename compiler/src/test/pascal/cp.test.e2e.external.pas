@@ -176,7 +176,9 @@ const Src = '''
     end.
     ''';
 begin
-  AssertRunsOnAll(Src, 'ok' + Chr(10), 0);
+  { sinf lives in libm -- the harness link carries no -lm by default
+    (the RTL needs none), so this FFI test asks for it explicitly }
+  AssertRunsOnAllLibs(Src, ['m'], 'ok' + Chr(10), 0);
 end;
 
 procedure TE2EExternalTests.TestRun_ExternalSingleReturn_RoundTrip;
@@ -193,7 +195,7 @@ const Src = '''
     end.
     ''';
 begin
-  AssertRunsOnAll(Src, 'ok' + Chr(10), 0);
+  AssertRunsOnAllLibs(Src, ['m'], 'ok' + Chr(10), 0);
 end;
 
 procedure TE2EExternalTests.TestRun_ExternalNameAlias_CallsCorrectSymbol;
