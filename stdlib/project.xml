@@ -13,10 +13,13 @@
       <unit>Net.Tls.Provider</unit>
       <unit>Net.Tls</unit>
       <unit>Net.Http.Client.Tls</unit>
-      <!-- FreeBSD-only reactor: defines the same link-time CreateOsReactor
-           symbol as async.reactor.epoll, so a bootstrap program holding BOTH
-           fails with a duplicate identifier.  The per-OS reactor is selected
-           by the driver's unit list, not by this all-units program. -->
+      <!-- Per-OS reactors: both define the same CreateOsReactor factory, so
+           an all-units bootstrap program holding both fails with a duplicate
+           identifier.  BOTH are excluded here: each OS's reactor reaches the
+           program transitively through async.fibers' target-driven seam, so
+           excluding only kqueue still broke FreeBSD hosts (the bootstrap
+           force-included epoll while the seam pulled kqueue — GH #197). -->
+      <unit>async.reactor.epoll</unit>
       <unit>async.reactor.kqueue</unit>
     </bootstrapExclude>
   </build>
