@@ -4369,6 +4369,29 @@ parameterless calls slipped through and built a paren-less `TProcCall` /
 `TMethodCallStmt`.  Both now raise the same "requires () for a call"
 diagnostic the `inherited` and expression-position paths use.
 
+=== Statement keywords take no parentheses
+
+The rule cuts the other way for `Exit`, `Break`, and `Continue` (issue
+#203 asked for `Exit()` to be accepted).  These are *statements*, not
+procedures: `Exit` returns from the enclosing routine through any
+`finally` blocks it sits inside, `Break`/`Continue` transfer control
+within the enclosing loop, and `Exit(Value)` assigns the enclosing
+function's `Result` — all context a real procedure could never have.
+Because every genuine call carries mandatory `()`, a construct that never
+takes `()` is *visibly not a call*; the two syntax classes stay disjoint:
+
+* `Exit;`, `Break;`, `Continue;` — statement keywords, bare.
+* `Exit(Value);` — the one special form, and the parentheses there
+  delimit the value expression, not a call.
+
+Accepting an *optional* empty `()` on these three would have created the
+only place in the language where parentheses are optional, reintroducing
+in miniature the two-spellings ambiguity this whole section exists to
+eliminate.  Instead the parser rejects `Exit()`, `Break()` and
+`Continue()` with a diagnostic that names the rule ("'Exit' is a
+statement, not a procedure call — write 'Exit;' or 'Exit(Value);'")
+rather than the generic "Expected expression" that prompted the issue.
+
 === Alternatives considered
 
 * *Deprecation warning period* — rejected.  Blaise is in alpha; there is no

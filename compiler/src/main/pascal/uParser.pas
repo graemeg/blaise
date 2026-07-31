@@ -3454,6 +3454,18 @@ begin
     if Check(tkLParen) then
     begin
       Advance();
+      { Exit() is a deliberate parse error, not an omission: Exit is a
+        STATEMENT the compiler must know about (it returns through enclosing
+        finally blocks), not a procedure, so the mandatory-parentheses rule
+        for calls does not apply to it — and the bare 'Expected expression'
+        the general path produced sent users hunting for a missing argument
+        (issue #203).  Name the rule instead. }
+      if Check(tkRParen) then
+        raise EParseError.Create(Format(
+          '''Exit'' is a statement, not a procedure call — write ''Exit;'' ' +
+          '(or ''Exit(Value);'' inside a function); parentheses are only ' +
+          'for calls at line %d col %d in %s',
+          [ExitS.Line, ExitS.Col, FLexer.Filename]));
       ExitS.Value := Self.ParseExpr();
       Expect(tkRParen);
     end;
@@ -3466,6 +3478,11 @@ begin
     Result.Line := FCurrent.Line;
     Result.Col  := FCurrent.Col;
     Advance();
+    if Check(tkLParen) then
+      raise EParseError.Create(Format(
+        '''Break'' is a statement, not a procedure call — write ''Break;'' ' +
+        'without parentheses at line %d col %d in %s',
+        [Result.Line, Result.Col, FLexer.Filename]));
     Exit;
   end;
 
@@ -3475,6 +3492,11 @@ begin
     Result.Line := FCurrent.Line;
     Result.Col  := FCurrent.Col;
     Advance();
+    if Check(tkLParen) then
+      raise EParseError.Create(Format(
+        '''Continue'' is a statement, not a procedure call — write ' +
+        '''Continue;'' without parentheses at line %d col %d in %s',
+        [Result.Line, Result.Col, FLexer.Filename]));
     Exit;
   end;
 

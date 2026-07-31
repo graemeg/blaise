@@ -49,6 +49,10 @@ type
     procedure TestAssignment_StringLit;
     procedure TestProcCall_NoArgs;
     procedure TestProcCall_BareNoParens_RequiresParens;
+    procedure TestExit_EmptyParens_NamesTheRule;
+    procedure TestExit_WithValue_StillParses;
+    procedure TestBreak_Parens_NamesTheRule;
+    procedure TestContinue_Parens_NamesTheRule;
     procedure TestMethodCall_BareNoParens_RequiresParens;
     procedure TestProcCall_OneStringArg;
     procedure TestProcCall_OneIntArg;
@@ -429,6 +433,60 @@ begin
     AssertEquals('0 args', 0, Call.Args.Count);
   finally
     Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestExit_EmptyParens_NamesTheRule;
+begin
+  { Issue #203: Exit() looked like a legal zero-arg call, and the generic
+    'Expected expression' error sent the user hunting for a missing
+    argument.  Exit is a STATEMENT (it returns through enclosing finally
+    blocks), so empty parens are rejected with a diagnostic that names
+    the rule and both valid spellings. }
+  try
+    ParseSource('program P; procedure F(); begin Exit(); end; begin end.').Free();
+    Fail('Expected EParseError for Exit()');
+  except
+    on E: EParseError do
+    begin
+      AssertTrue('names the statement rule',
+        Pos('statement, not a procedure call', E.Message) >= 0);
+      AssertTrue('shows both valid spellings',
+        Pos('Exit(Value);', E.Message) >= 0);
+    end;
+  end;
+end;
+
+procedure TParserTests.TestExit_WithValue_StillParses;
+begin
+  { the Exit(Value) shorthand must keep working }
+  ParseSource(
+    'program P; function F(): Integer; begin Exit(7); end; begin end.').Free();
+end;
+
+procedure TParserTests.TestBreak_Parens_NamesTheRule;
+begin
+  try
+    ParseSource(
+      'program P; var I: Integer; begin for I := 0 to 9 do Break(); end.').Free();
+    Fail('Expected EParseError for Break()');
+  except
+    on E: EParseError do
+      AssertTrue('names the statement rule',
+        Pos('statement, not a procedure call', E.Message) >= 0);
+  end;
+end;
+
+procedure TParserTests.TestContinue_Parens_NamesTheRule;
+begin
+  try
+    ParseSource(
+      'program P; var I: Integer; begin for I := 0 to 9 do Continue(); end.').Free();
+    Fail('Expected EParseError for Continue()');
+  except
+    on E: EParseError do
+      AssertTrue('names the statement rule',
+        Pos('statement, not a procedure call', E.Message) >= 0);
   end;
 end;
 
