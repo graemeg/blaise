@@ -13341,18 +13341,23 @@ begin
       SemanticError(
         Format('Cannot instantiate abstract class ''%s''', [ObjSym.Name]),
         AExpr.Line, AExpr.Col);
-    HintBareEnumMethodArgs(ObjSym.Name, AExpr.Name, AExpr.Args);
+    HintBareEnumMethodArgs(TRecordTypeDesc(ObjSym.TypeDesc).Name,
+      AExpr.Name, AExpr.Args);
     for I := 0 to AExpr.Args.Count - 1 do
       Self.AnalyseListSlot(AExpr.Args, I);
     { Try to find a user-defined constructor method for type checking.
       Use overload resolution so the correct variant is chosen when multiple
       constructors with the same name (e.g. Create) are declared.  Look up
-      on the resolved class name (ObjSym.Name) so generic instances pick
-      the right concrete method set. }
-    MDecl := ResolveMethodOverload(ObjSym.Name, AExpr.Name,
-      AExpr.Args, AExpr.Line, AExpr.Col);
+      on the type descriptor's CANONICAL class name, not ObjSym.Name: for a
+      type alias (type TAlias = TThing) the symbol is named 'TAlias', which
+      has no method table, so the lookup silently missed the user ctor and
+      TAlias.Create() allocated WITHOUT running the constructor body.
+      Generic instances are unaffected (their symbol and descriptor names
+      agree). }
+    MDecl := ResolveMethodOverload(TRecordTypeDesc(ObjSym.TypeDesc).Name,
+      AExpr.Name, AExpr.Args, AExpr.Line, AExpr.Col);
     if MDecl = nil then
-      MDecl := FindMethodDecl(ObjSym.Name, AExpr.Name);
+      MDecl := FindMethodDecl(TRecordTypeDesc(ObjSym.TypeDesc).Name, AExpr.Name);
     { CreateFmt(fmt, [args]) with no declared CreateFmt method desugars to
       Create(Format(fmt, [args])): move the two args into a synthesized
       Format call and re-resolve as a plain Create.  Without this the args
@@ -13375,10 +13380,10 @@ begin
         Format node is new — analyse it so its string ResolvedType is set
         before overload resolution matches it against Create(string) }
       AnalyseExpr(FmtCall);
-      MDecl := ResolveMethodOverload(ObjSym.Name, 'Create',
-        AExpr.Args, AExpr.Line, AExpr.Col);
+      MDecl := ResolveMethodOverload(TRecordTypeDesc(ObjSym.TypeDesc).Name,
+        'Create', AExpr.Args, AExpr.Line, AExpr.Col);
       if MDecl = nil then
-        MDecl := FindMethodDecl(ObjSym.Name, 'Create');
+        MDecl := FindMethodDecl(TRecordTypeDesc(ObjSym.TypeDesc).Name, 'Create');
     end;
     { Any remaining undeclared Create* variant WITH args is an error — a
       silent arg-drop (as CreateFmt did before the desugar above) is never

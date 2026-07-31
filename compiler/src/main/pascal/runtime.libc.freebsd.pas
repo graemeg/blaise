@@ -70,6 +70,11 @@ function setenv(Name, Value: PChar; Overwrite: Integer): Integer;
   is writable either way). }
 function unsetenv(Name: PChar): Integer;
 
+{ pthread_self: the calling thread's opaque id.  Freestanding FreeBSD has no
+  pthread library; the kernel thread id from thr_self(2) serves the same
+  purpose (tests use it only to tell threads apart). }
+function pthread_self: Int64;
+
 implementation
 
 type
@@ -415,6 +420,16 @@ begin
   end
   else
     Result := -1;
+end;
+
+
+function pthread_self: Int64;
+var
+  Id: Int64;
+begin
+  Id := 0;
+  thr_self(@Id);
+  Result := Id;
 end;
 
 end.

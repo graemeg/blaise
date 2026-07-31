@@ -67,6 +67,17 @@ function fcntl(Fd, Cmd, Arg: Integer): Integer;
   control (tcgetattr/tcsetattr are ioctl wrappers), network interfaces, and
   many other subsystems use it.  SYS_ioctl = 16. }
 function ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
+{ getrlimit/setrlimit(resource, rlim) — process resource limits.  The fiber
+  tests size their fd budget with these (RLIMIT_NOFILE = 7 on Linux, 8 on
+  FreeBSD — callers translate).  struct rlimit is two 64-bit words.
+  SYS 97/160.  On the dynamic path libc binds the same names; these leaves
+  give --static and freestanding builds the same surface. }
+function getrlimit(Resource: Integer; Rlim: Pointer): Integer;
+function setrlimit(Resource: Integer; Rlim: Pointer): Integer;
+{ socketpair(domain, type, protocol, sv) — connected fd pair; the reactor and
+  fiber I/O tests build their AF_UNIX plumbing with it.  SYS 53.  On the
+  dynamic path libc binds the same name. }
+function socketpair(Domain, Typ, Protocol: Integer; Sv: Pointer): Integer;
 
 { epoll + eventfd: the async reactor's readiness poller and its self-wake fd.
   Bound in async.reactor.epoll via `external name`; on the dynamic path libc
@@ -318,6 +329,32 @@ function ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
   assembler; nostackframe;
 asm
     movq $16, %rax       { SYS_ioctl }
+    syscall
+    ret
+end;
+
+function getrlimit(Resource: Integer; Rlim: Pointer): Integer;
+  assembler; nostackframe;
+asm
+    movq $97, %rax       { SYS_getrlimit }
+    syscall
+    ret
+end;
+
+function setrlimit(Resource: Integer; Rlim: Pointer): Integer;
+  assembler; nostackframe;
+asm
+    movq $160, %rax      { SYS_setrlimit }
+    syscall
+    ret
+end;
+
+{ 4-arg syscall: arg4 arrives in %rcx (C ABI) but the kernel wants %r10. }
+function socketpair(Domain, Typ, Protocol: Integer; Sv: Pointer): Integer;
+  assembler; nostackframe;
+asm
+    movq %rcx, %r10
+    movq $53, %rax       { SYS_socketpair }
     syscall
     ret
 end;

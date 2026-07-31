@@ -7,7 +7,8 @@
 }
 
 { Tests for the L2 readiness reactor (docs/async-networking-design.adoc,
-  [#reactor]): a real epoll round-trip over a socketpair — Add read interest,
+  [#reactor]): a real reactor round-trip (epoll on Linux, kqueue on FreeBSD)
+  over a socketpair — Add read interest,
   write to the peer, assert Wait delivers the token with ioRead; Modify to
   write interest; Remove; Wake interrupts a blocked Wait; the eventfd drain
   never spuriously delivers.
@@ -20,9 +21,28 @@ unit Reactor.Tests;
 interface
 
 uses
-  blaise.testing, SysUtils, async.reactor, async.reactor.epoll, async.fibers;
+  blaise.testing, SysUtils, async.reactor,
+  { the per-OS readiness reactor: kqueue on FreeBSD, epoll on Linux.  Both
+    expose the same surface, so the tests are written against a TOsReactor
+    alias and exercise whichever adapter the target actually uses (GH #204
+    fallout: the hard epoll dependency could not compile on FreeBSD).
+    NOTE: TAlias.Create() through such an alias used to silently SKIP the
+    constructor body -- fixed alongside this port; see the alias-constructor
+    tests in cp.test.classes. }
+  {$IFDEF FREEBSD}
+  async.reactor.kqueue,
+  {$ELSE}
+  async.reactor.epoll,
+  {$ENDIF}
+  async.fibers;
 
 type
+  {$IFDEF FREEBSD}
+  TOsReactor = TKqueueReactor;
+  {$ELSE}
+  TOsReactor = TEpollReactor;
+  {$ENDIF}
+
   TReactorTests = class(TTestCase)
   published
     procedure TestPoll_EmptyBeforeWrite;
@@ -73,14 +93,14 @@ end;
 
 { A fresh reactor per test keeps them independent (the global GReactor is a
   process-wide singleton; the tests here exercise a private instance). }
-function NewReactor: TEpollReactor;
+function NewReactor: TOsReactor;
 begin
-  Result := TEpollReactor.Create();
+  Result := TOsReactor.Create();
 end;
 
 procedure TReactorTests.TestPoll_EmptyBeforeWrite;
 var
-  R: TEpollReactor;
+  R: TOsReactor;
   A, B: Integer;
   Ready: TReadyList;
   RdOnly: TIoInterests;
@@ -100,7 +120,7 @@ end;
 
 procedure TReactorTests.TestWait_DeliversTokenWithRead;
 var
-  R: TEpollReactor;
+  R: TOsReactor;
   A, B: Integer;
   Ready: TReadyList;
   RdOnly, Evs: TIoInterests;
@@ -127,7 +147,7 @@ end;
 
 procedure TReactorTests.TestModify_ToWritable;
 var
-  R: TEpollReactor;
+  R: TOsReactor;
   A, B: Integer;
   Ready: TReadyList;
   RdOnly, WrOnly, Evs: TIoInterests;
@@ -153,7 +173,7 @@ end;
 
 procedure TReactorTests.TestRemove_DropsInterest;
 var
-  R: TEpollReactor;
+  R: TOsReactor;
   A, B: Integer;
   Ready: TReadyList;
   RdOnly: TIoInterests;
@@ -177,7 +197,7 @@ end;
 
 procedure TReactorTests.TestWake_InterruptsBlockedWait;
 var
-  R: TEpollReactor;
+  R: TOsReactor;
   Ready: TReadyList;
   N: Integer;
 begin
@@ -196,7 +216,7 @@ end;
 
 procedure TReactorTests.TestWake_DrainNoSpuriousDelivery;
 var
-  R: TEpollReactor;
+  R: TOsReactor;
   A, B: Integer;
   Ready: TReadyList;
   RdOnly, Evs: TIoInterests;

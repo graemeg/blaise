@@ -67,7 +67,14 @@ function c_getrlimit(AResource: Integer; ARlim: Pointer): Integer;
   external name 'getrlimit';
 
 const
-  RLIMIT_NOFILE = 7;   { Linux x86_64 (FreeBSD = 8); this test is Linux CI }
+  { The RESOURCE number differs per OS: Linux x86_64 = 7, FreeBSD = 8.  The
+    getrlimit/setrlimit externals bind libc on the dynamic Linux path and the
+    runtime.syscall leaves on freestanding builds (FreeBSD, --static). }
+  {$IFDEF FREEBSD}
+  RLIMIT_NOFILE = 8;
+  {$ELSE}
+  RLIMIT_NOFILE = 7;
+  {$ENDIF}
 
 { Raise the soft NOFILE limit toward the hard limit (or ADesired, whichever is
   smaller) and return the resulting soft limit (0 on failure). }

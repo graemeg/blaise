@@ -22,6 +22,7 @@ type
     function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    procedure TestCodegen_AliasConstructor_RunsUserCtor;
     { ------------------------------------------------------------------ }
     { Lexer                                                                }
     { ------------------------------------------------------------------ }
@@ -1389,6 +1390,37 @@ begin
     Pos('$_FieldCleanup_Tstate', IR) > 0);
   AssertTrue('no dangling forward-spelling $_FieldCleanup_TState reference',
     Pos('$_FieldCleanup_TState', IR) < 0);
+end;
+
+procedure TClassTests.TestCodegen_AliasConstructor_RunsUserCtor;
+var
+  IR: string;
+begin
+  { type TAlias = TThing; TAlias.Create() must resolve THING's user
+    constructor.  The lookup used to go through the SYMBOL name ('TAlias',
+    no method table), silently fell back to the implicit default ctor, and
+    the object came back allocated but unconstructed (found when
+    reactor.tests aliased the per-OS reactor class for GH #204). }
+  IR := GenIR(
+    '''
+        program P;
+        type
+          TThing = class
+            X: Integer;
+            constructor Create();
+          end;
+          TAlias = TThing;
+        constructor TThing.Create();
+        begin
+          X := 7;
+        end;
+        var A: TThing;
+        begin
+          A := TAlias.Create()
+        end.
+        ''');
+  AssertTrue('user ctor body called through the alias',
+    Pos('call $TThing_Create', IR) > 0);
 end;
 
 initialization

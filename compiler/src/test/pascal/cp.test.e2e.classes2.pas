@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_AliasConstructor_RunsUserCtor;
     procedure TestRun_Phase2Milestone_Stdout;
     procedure TestRun_Phase2Milestone_Valgrind;
     procedure TestRun_Phase3Milestone_Stdout;
@@ -2657,6 +2658,38 @@ begin
   { @FInner.Arr[1] and @FInner.Dyn[1] must resolve through Self, not a
     nonexistent %_var_FInner. }
   AssertRunsOnAll(Src, '42' + LE + '77' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_AliasConstructor_RunsUserCtor;
+begin
+  { constructing through a type alias must run the aliased class's user
+    constructor (it used to silently skip the body -- fields stayed zero) }
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TThing = class
+      private
+        FMagic: Integer;
+      public
+        constructor Create();
+        function Magic(): Integer;
+      end;
+      TAlias = TThing;
+    constructor TThing.Create();
+    begin
+      FMagic := 12345;
+    end;
+    function TThing.Magic(): Integer;
+    begin
+      Result := FMagic;
+    end;
+    var A: TAlias;
+    begin
+      A := TAlias.Create();
+      WriteLn(IntToStr(A.Magic()))
+    end.
+    ''', '12345' + Chr(10), 0);
 end;
 
 initialization

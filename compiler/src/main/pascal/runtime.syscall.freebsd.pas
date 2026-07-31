@@ -84,6 +84,18 @@ function fcntl(Fd, Cmd, Arg: Integer): Integer;
   control (tcgetattr/tcsetattr are ioctl wrappers), network interfaces, and
   many other subsystems use it.  SYS_ioctl = 54. }
 function ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
+{ getrlimit/setrlimit(resource, rlim) — process resource limits.  The fiber
+  tests size their fd budget with these (RLIMIT_NOFILE; note the FreeBSD
+  resource NUMBER is 8 where Linux uses 7 — callers translate).  struct
+  rlimit is two 64-bit words on both OSes.  SYS 194/195. }
+function getrlimit(Resource: Integer; Rlim: Pointer): Integer;
+function setrlimit(Resource: Integer; Rlim: Pointer): Integer;
+{ socketpair(domain, type, protocol, sv) — connected fd pair; the reactor and
+  fiber I/O tests build their AF_UNIX plumbing with it.  SYS 135. }
+function socketpair(Domain, Typ, Protocol: Integer; Sv: Pointer): Integer;
+{ thr_self(&id) — the kernel thread id, written through the pointer.  The
+  pthread_self shim in runtime.libc.freebsd builds on it.  SYS 432. }
+function thr_self(Id: Pointer): Integer;
 
 { Event notification — the readiness reactor's kernel surface.  The libc
   profile binds the same names in libc; these leaves give the --static
@@ -241,6 +253,10 @@ const
   SYS_fstat         = 551;   { ino64 (legacy freebsd11_fstat = 189) }
   SYS_fstatat       = 552;   { ino64 (legacy freebsd11_fstatat = 493) }
   SYS_ioctl         = 54;
+  SYS_getrlimit     = 194;
+  SYS_setrlimit     = 195;
+  SYS_socketpair    = 135;
+  SYS_thr_self      = 432;
   SYS_pipe2         = 542;   { pipe(2) legacy 42 deprecated }
   SYS_execve        = 59;
   SYS_sysarch       = 165;   { %fs-base setup for TLS (AMD64_SET_FSBASE) }
@@ -524,6 +540,52 @@ asm
     jae  .Lok_ioctl
     negq %rax
 .Lok_ioctl:
+    ret
+end;
+
+function getrlimit(Resource: Integer; Rlim: Pointer): Integer;
+  assembler; nostackframe;
+asm
+    movq $194, %rax          { SYS_getrlimit }
+    syscall
+    jae  .Lok_getrlimit
+    negq %rax
+.Lok_getrlimit:
+    ret
+end;
+
+function setrlimit(Resource: Integer; Rlim: Pointer): Integer;
+  assembler; nostackframe;
+asm
+    movq $195, %rax          { SYS_setrlimit }
+    syscall
+    jae  .Lok_setrlimit
+    negq %rax
+.Lok_setrlimit:
+    ret
+end;
+
+{ 4-arg syscall: arg4 arrives in %rcx (C ABI) but the kernel wants %r10. }
+function socketpair(Domain, Typ, Protocol: Integer; Sv: Pointer): Integer;
+  assembler; nostackframe;
+asm
+    movq %rcx, %r10
+    movq $135, %rax          { SYS_socketpair }
+    syscall
+    jae  .Lok_socketpair
+    negq %rax
+.Lok_socketpair:
+    ret
+end;
+
+function thr_self(Id: Pointer): Integer;
+  assembler; nostackframe;
+asm
+    movq $432, %rax          { SYS_thr_self }
+    syscall
+    jae  .Lok_thr_self
+    negq %rax
+.Lok_thr_self:
     ret
 end;
 

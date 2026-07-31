@@ -76,7 +76,12 @@ function c_getrlimit(AResource: Integer; ARlim: Pointer): Integer;
   external name 'getrlimit';
 
 const
+  { Linux x86_64 = 7, FreeBSD = 8 (the resource NUMBER differs per OS). }
+  {$IFDEF FREEBSD}
+  RLIMIT_NOFILE = 8;
+  {$ELSE}
   RLIMIT_NOFILE = 7;
+  {$ENDIF}
   SO_RCVTIMEO   = 20;   { Linux x86_64 }
 
 type
