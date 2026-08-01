@@ -235,16 +235,20 @@ jobs:
       - name: Run stdlib tests
         run: |
           set -euo pipefail
-          # On failure, surface the compiler log pasbuild points at — without
-          # this the step ends with "see target/pasbuild-status/... for
-          # details" and the details are unreachable on a dead runner.
-          if ! pasbuild test -m blaise-stdlib --compiler "${{ steps.pre.outputs.bin }}"; then
+          # Compile via pasbuild, then invoke the runner DIRECTLY: pasbuild's
+          # `test` goal cannot forward runner arguments, and --verbose is what
+          # tells a red CI run which test failed (or, on a crash, the last
+          # test that ran).  On compile failure, surface the compiler log
+          # pasbuild points at — without this the step ends with "see
+          # target/pasbuild-status/... for details" on a dead runner.
+          if ! pasbuild test-compile -m blaise-stdlib --compiler "${{ steps.pre.outputs.bin }}"; then
             echo "===== stdlib compile log ====="
             cat stdlib/target/pasbuild-status/compile/compiler.log 2>/dev/null || true
             echo "===== stdlib test-compile log ====="
             cat stdlib/target/pasbuild-status/test-compile/compiler.log 2>/dev/null || true
             exit 1
           fi
+          stdlib/target/TestRunner --verbose
 
       # --------------------------------------------------------------------
       # 8b. Linked-BINARY fixpoint.  Every other guard stops at IR/asm text or
@@ -340,11 +344,17 @@ jobs:
     runs-on: ubuntu-latest
     # Fixture smoke fits in 30 min; the full in-VM suite (self-host x2 + 4262
     # tests under emulation) gets a bigger budget.
-    timeout-minutes: ${{ (github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch') && 120 || 30 }}
+    timeout-minutes: 120
     env:
       # Full tier gate: master pushes and manual dispatches run the in-VM
       # fixpoint + full suite; branch pre-flights keep the quick smoke only.
-      FREEBSD_FULL: ${{ (github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch') && '1' || '' }}
+      # Full tier on EVERY run.  It used to be master/dispatch-only with a
+      # quick fixture smoke on branches, but every FreeBSD divergence to date
+      # slipped through the smoke and landed on a green master (the stdlib
+      # kqueue failures, the link-mode host-arm break).  The in-VM fixpoint +
+      # full suite + stdlib suite is the coverage that actually catches them,
+      # so ci/** validation branches run it BEFORE promotion.
+      FREEBSD_FULL: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
