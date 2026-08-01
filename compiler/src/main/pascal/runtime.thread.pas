@@ -14,6 +14,9 @@ unit runtime.thread;
 
 interface
 
+uses
+  rtl.platform;   { GPlatformLayout — the per-OS sysconf name numbering }
+
 { Thread creation / join }
 function pthread_create(Thread: Pointer; Attr: Pointer;
   StartRoutine: Pointer; Arg: Pointer): Integer;
@@ -36,9 +39,6 @@ function pthread_mutex_destroy(Mutex: Pointer): Integer;
 { sysconf(_SC_NPROCESSORS_ONLN) — returns number of online CPUs. }
 function sysconf(Name: Integer): Int64; external name 'sysconf';
 
-const
-  _SC_NPROCESSORS_ONLN = 84;
-
 function GetCPUCount: Integer;
 
 implementation
@@ -46,7 +46,12 @@ implementation
 function GetCPUCount: Integer;
 var N: Int64;
 begin
-  N := sysconf(_SC_NPROCESSORS_ONLN);
+  { The name is numbered per OS (Linux 84, FreeBSD/Darwin 58), so it comes from
+    the layout rather than a constant here.  There is no safe default: FreeBSD's
+    84 is _SC_THREAD_CPUTIME and answers 200112 instead of -1, so guessing wrong
+    produces a large positive "CPU count" that passes every sanity check the
+    callers apply. }
+  N := sysconf(GPlatformLayout.SC_NPROCESSORS_ONLN());
   if N > 0 then
     Result := Integer(N)
   else

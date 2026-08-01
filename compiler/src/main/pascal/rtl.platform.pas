@@ -146,6 +146,15 @@ type
     function CLOCK_REALTIME: Integer; virtual; abstract;
     function WNOHANG:        Integer; virtual; abstract;
 
+    { ---- sysconf(3) names ---- }
+    { The online-processor count.  Linux numbers it 84, FreeBSD and Darwin 58 —
+      and neither rejects the other's number: FreeBSD's 84 is
+      _SC_THREAD_CPUTIME, which answers 200112 (the POSIX option version).  So
+      passing the wrong name yields a plausible-looking Int64 rather than -1,
+      and GetCPUCount silently reports 200112 CPUs to whoever sizes a thread
+      pool from it. }
+    function SC_NPROCESSORS_ONLN: Integer; virtual; abstract;
+
     { ---- struct stat: opaque buffer sized for the target, fields pulled at
       the target's offsets ---- }
     function StatBufSize: Integer; virtual; abstract;

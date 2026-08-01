@@ -78,14 +78,24 @@ type
     EMachine:  Integer;       { e_machine: EM_X86_64 / EM_386 }
     BaseAddr:  Int64;         { fixed load base for non-PIE ET_EXEC }
     PageSize:  Int64;         { segment alignment }
+    InterpPath: string;       { PT_INTERP: the run-time loader this OS uses }
+    LibcSoname: string;       { first DT_NEEDED soname (the OS's C library) }
+    { Symbols this OS's libc imports FROM the executable because its crt1.o
+      normally defines them.  Blaise supplies its own entry object instead of
+      crt1, so the linker must publish these as defined .dynsym entries or the
+      loader aborts on an undefined symbol.  Empty on targets whose libc is
+      self-contained (glibc). }
+    CrtExports: TList<string>;
     constructor Create;
+    destructor Destroy; override;
   end;
 
   { Linux x86-64 ELF, non-PIE ET_EXEC.  Caller frees. }
 function LinuxX86_64Target: TLinkTarget;
 
-  { FreeBSD x86-64 ELF.  Same System V AMD64 machine/arch as Linux; differs
-    only in EI_OSABI (9 = FreeBSD).  Caller frees. }
+  { FreeBSD x86-64 ELF.  Same System V AMD64 machine/arch as Linux; differs in
+    EI_OSABI (9 = FreeBSD) and, on the dynamic path, in the loader path and
+    libc soname.  Caller frees. }
 function FreeBSDX86_64Target: TLinkTarget;
 
 type
@@ -211,6 +221,10 @@ type
                                           extra sonames; spliced into BOTH
                                           .dynamic builders after the libc entry }
     FInterpData:  string;               { .interp contents }
+    FExported:    TList<string>;        { FTarget.CrtExports that an input object
+                                          really defines, in .dynsym order —
+                                          BuildDynamic emits placeholder entries,
+                                          PatchExportedDynSyms fills them in }
     FTlsSize:     Int64;                { total TLS block size }
     FTlsAlign:    Int64;                { TLS block alignment }
     FTlsFileSize: Int64;                { .tdata file size }
@@ -254,6 +268,8 @@ type
     function FindOrCreateGotSlot(const AName: string): TGotSlot;
     procedure BuildDynamic;
     procedure LayoutDynamic;
+    function ObjectsDefine(const AName: string): Boolean;
+    procedure PatchExportedDynSyms;
     function EmitDynExecutable(AEntry: Int64): string;
   public
     constructor Create; overload;
@@ -318,7 +334,37 @@ type
   make the linked output runnable. }
 procedure MakeFileExecutable(const APath: string);
 
+{ The SysV ELF hash (gABI figure 5-13) that indexes a .hash bucket.  Public
+  because it is a CONTRACT, not an implementation detail: the run-time loader
+  recomputes it from the symbol name and looks only in the bucket it lands on,
+  so a linker that deviates by a single bit hides the symbol from the loader
+  entirely — and the failure surfaces far away, at exec time, as an "Undefined
+  symbol" for a symbol that is plainly present in .dynsym. }
+function LkElfHash(const AName: string): Integer;
+
 implementation
+
+function LkElfHash(const AName: string): Integer;
+var
+  H, G: Int64;
+  J: Integer;
+begin
+  { gABI figure 5-13.  The top nibble is XORed back into bits 4..7 before
+    being cleared — NOT simply masked away.  Int64 with an explicit 32-bit
+    mask because the published algorithm is defined on an unsigned 32-bit
+    word and shifting the top nibble right on a signed 32-bit type would
+    sign-extend. }
+  H := 0;
+  for J := 0 to Length(AName) - 1 do
+  begin
+    H := ((H shl 4) + OrdAt(AName, J)) and $FFFFFFFF;
+    G := H and $F0000000;
+    if G <> 0 then
+      H := H xor (G shr 24);
+    H := H and (not G);
+  end;
+  Result := Integer(H);
+end;
 
 function LkAlignUp(AVal: Int64; AAlign: Int64): Int64;
 var
@@ -501,6 +547,14 @@ const
   ELFOSABI_SYSV    = 0;
   ELFOSABI_FREEBSD = 9;
 
+  { Section types the dynamic image needs beyond blaise.elfreader's set. }
+  SHT_HASH    = 5;
+  SHT_DYNAMIC = 6;
+  SHT_DYNSYM  = 11;
+
+  { sh_info of this section holds a section index, not a symbol count. }
+  SHF_INFO_LINK = $40;
+
   PT_LOAD    = 1;
   PT_DYNAMIC = 2;
   PT_INTERP  = 3;
@@ -632,19 +686,39 @@ begin
   EMachine := EM_X86_64;
   BaseAddr := $400000;
   PageSize := $1000;
+  InterpPath := '/lib64/ld-linux-x86-64.so.2';
+  LibcSoname := 'libc.so.6';
+  CrtExports := TList<string>.Create();
+end;
+
+destructor TLinkTarget.Destroy;
+begin
+  CrtExports.Free();
+  inherited Destroy();
 end;
 
 function LinuxX86_64Target: TLinkTarget;
 begin
   Result := TLinkTarget.Create();
-  { defaults already describe Linux x86-64 }
+  { defaults already describe Linux x86-64; glibc defines environ/__progname
+    itself, so a Linux executable exports nothing }
 end;
 
 function FreeBSDX86_64Target: TLinkTarget;
 begin
   Result := TLinkTarget.Create();
-  { Identical to Linux x86-64 except the OS/ABI byte in the ELF header. }
+  { Same System V AMD64 machine/arch as Linux.  The OS/ABI byte brands the
+    ELF; the loader path and libc soname are what the FreeBSD rtld actually
+    resolves against — libthr/libm sonames are mapped by the driver. }
   Result.OSABI := ELFOSABI_FREEBSD;
+  Result.InterpPath := '/libexec/ld-elf.so.1';
+  Result.LibcSoname := 'libc.so.7';
+  { libc.so.7 lists `environ` and `__progname` as UND GLOBAL and resolves them
+    with GLOB_DAT relocations against the executable — on a stock toolchain
+    crt1.o provides them.  runtime.start.freebsd provides them here, and the
+    executable must EXPORT them for the rtld to find. }
+  Result.CrtExports.Add('environ');
+  Result.CrtExports.Add('__progname');
 end;
 
 { ---- TLinker ----------------------------------------------------------- }
@@ -683,6 +757,7 @@ begin
   FExtraNeeded := TList<string>.Create();
   FExtraNeededDyn := '';
   FInterpData := '';
+  FExported := TList<string>.Create();
   FTlsSize := 0;
   FTlsAlign := 0;
   FTlsFileSize := 0;
@@ -703,6 +778,7 @@ begin
   FRelaDyn.Free();
   FDynSymNames.Free();
   FExtraNeeded.Free();
+  FExported.Free();
   for I := 0 to FSymbols.Count - 1 do
     FSymbols.Get(I).Free();
   FSymbols.Free();
@@ -1328,14 +1404,14 @@ var
   NumBuckets, Bkt: Integer;
   HashChain: TList<Integer>;
   HashBuckets: TList<Integer>;
-  H, J: Integer;
+  H: Integer;
   RInfo: Int64;
 begin
-  FInterpData := '/lib64/ld-linux-x86-64.so.2' + Chr(0);
+  FInterpData := FTarget.InterpPath + Chr(0);
 
-  { .dynstr: NUL byte at [0], then 'libc.so.6' at [1]. }
+  { .dynstr: NUL byte at [0], then the target's libc soname at [1]. }
   FDynStrTab := Chr(0);
-  LkAddStr(FDynStrTab, 'libc.so.6');
+  LkAddStr(FDynStrTab, FTarget.LibcSoname);
 
   { Extra DT_NEEDED sonames (demand-driven via AddNeededLib, e.g. libpthread /
     libm).  Add each to .dynstr and pre-build the DT_NEEDED,<off> pairs spliced
@@ -1366,9 +1442,29 @@ begin
     FDynSymTab := FDynSymTab + LkLE(0, 8);
   end;
 
+  { The target's crt-owned exports, for the ones an input object really
+    defines (a target with no CrtExports adds nothing, so a Linux image is
+    byte-identical to before).  st_shndx / st_value are placeholders — layout
+    has not run yet, so PatchExportedDynSyms fills them in afterwards. }
+  FExported.Clear();
+  for I := 0 to FTarget.CrtExports.Count - 1 do
+  begin
+    if not Self.ObjectsDefine(FTarget.CrtExports.Get(I)) then Continue;
+    FExported.Add(FTarget.CrtExports.Get(I));
+    NameOff := LkAddStr(FDynStrTab, FTarget.CrtExports.Get(I));
+    FDynSymNames.Add(FTarget.CrtExports.Get(I));
+    SymInfo := (Int64(STB_GLOBAL) shl 4) or Int64(STT_OBJECT);
+    FDynSymTab := FDynSymTab + LkLE(NameOff, 4);
+    FDynSymTab := FDynSymTab + Chr(Integer(SymInfo) and $FF);
+    FDynSymTab := FDynSymTab + Chr(0);
+    FDynSymTab := FDynSymTab + LkLE(SHN_UNDEF, 2);
+    FDynSymTab := FDynSymTab + LkLE(0, 8);
+    FDynSymTab := FDynSymTab + LkLE(8, 8);        { st_size: one pointer }
+  end;
+
   { SysV .hash: nbucket, nchain, buckets[], chains[].
     Simple hash: sum of bytes mod nbucket. }
-  NumBuckets := FPltEntries.Count;
+  NumBuckets := FPltEntries.Count + FExported.Count;
   if NumBuckets < 1 then NumBuckets := 1;
 
   HashBuckets := TList<Integer>.Create();
@@ -1381,9 +1477,7 @@ begin
 
     for I := 1 to FDynSymNames.Count - 1 do
     begin
-      H := 0;
-      for J := 0 to Length(FDynSymNames.Get(I)) - 1 do
-        H := ((H shl 4) + Ord(FDynSymNames.Get(I)[J])) and $0FFFFFFF;
+      H := LkElfHash(FDynSymNames.Get(I));
       Bkt := H mod NumBuckets;
       HashChain.SetItem(I, HashBuckets.Get(Bkt));
       HashBuckets.SetItem(Bkt, I);
@@ -1634,6 +1728,17 @@ begin
   { _GLOBAL_OFFSET_TABLE_ → .got base }
   Self.AddSynthSymbol('_GLOBAL_OFFSET_TABLE_', FGotAddr);
 
+  { Writable data starts on a fresh page, so the RELRO PT_LOAD and the data
+    PT_LOAD never share one.  FreeBSD's image activator maps each PT_LOAD with
+    vm_map_fixed(..., MAP_CHECK_EXCL) and a straddling page makes the second
+    mapping fail — after exec_new_vmspace has already thrown the old address
+    space away, so kern_execve kills the process with SIGABRT and prints
+    nothing.  Linux's elf_map uses plain MAP_FIXED and silently absorbs the
+    overlap, which is why this survived unnoticed on the Linux target.
+    It is also what -z relro wants: the RELRO run must end on a page boundary
+    for rtld's mprotect to cover it without catching real data. }
+  Addr := LkAlignUp(Addr, FTarget.PageSize);
+
   { Writable data sections. }
   for I := 0 to FMerger.Merged.Count - 1 do
   begin
@@ -1690,8 +1795,9 @@ begin
     TPOFF32 (sym - FTlsAddr - FTlsSize) matches the aligned thread pointer. }
   FTlsSize := LkAlignUp(FTlsSize, FTlsAlign);
 
-  { Build .dynamic section.  'libc.so.6' is at offset 1 in .dynstr.  Any extra
-    DT_NEEDED libs (libpthread/libm) follow immediately — empty string when none. }
+  { Build .dynamic section.  The target's libc soname is at offset 1 in .dynstr
+    (BuildDynamic writes it first).  Any extra DT_NEEDED libs (libthr/libm)
+    follow immediately — empty string when none. }
   FDynamicData := '';
   FDynamicData := FDynamicData + LkLE(DT_NEEDED, 8) + LkLE(1, 8);
   FDynamicData := FDynamicData + FExtraNeededDyn;
@@ -1727,6 +1833,71 @@ begin
   { Pad to the reserved size. }
   if Length(FDynamicData) < DYN_MAX_ENTRIES * 16 then
     FDynamicData := FDynamicData + LkZeros(DYN_MAX_ENTRIES * 16 - Length(FDynamicData));
+end;
+
+{ True when some input object carries a real definition of ANAME.  Mirrors
+  BuildSymbols' acceptance rule, but works BEFORE layout — BuildDynamic must
+  decide the .dynsym shape (and therefore .hash and .dynstr) before any
+  address is known, so it cannot consult FSymbols. }
+function TLinker.ObjectsDefine(const AName: string): Boolean;
+var
+  Oi, Si: Integer;
+  Obj: TElfObjectFile;
+  Sym: TRdSymbol;
+begin
+  Result := False;
+  for Oi := 0 to FObjects.Count - 1 do
+  begin
+    Obj := FObjects.Get(Oi);
+    for Si := 0 to Obj.Symbols.Count - 1 do
+    begin
+      Sym := Obj.Symbols.Get(Si);
+      if Sym.Name <> AName then Continue;
+      if (Sym.Bind <> STB_GLOBAL) and (Sym.Bind <> STB_WEAK) then Continue;
+      if Sym.Shndx = SHN_UNDEF then Continue;
+      if (Sym.Shndx = SHN_ABS) or (Sym.Shndx = SHN_COMMON) then Continue;
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+{ Turn the placeholder .dynsym entries BuildDynamic reserved for the target's
+  crt-owned exports into real definitions, now that layout has assigned
+  addresses.  st_shndx must name the section the symbol lands in: the emitted
+  section header table is [0] = NULL followed by FSecAddr in order, so the
+  index is the FSecAddr position plus one.  A zero (SHN_UNDEF) would leave the
+  entry looking like an import and the loader would keep searching. }
+procedure TLinker.PatchExportedDynSyms;
+var
+  I, J, Shndx, Off: Integer;
+  Sym: TLinkSymbol;
+  A: Int64;
+begin
+  for I := 0 to FExported.Count - 1 do
+  begin
+    Sym := Self.FindSymbol(FExported.Get(I));
+    if (Sym = nil) or (not Sym.Defined) then
+      raise ELinker.Create('exported symbol has no definition: ' +
+        FExported.Get(I));
+    Shndx := 0;
+    for J := 0 to FSecAddr.Count - 1 do
+    begin
+      A := FAddrOf.Get(J);
+      if (Sym.Addr >= A) and (Sym.Addr < A + FSecAddr.Get(J).Size) then
+      begin
+        Shndx := J + 1;
+        Break;
+      end;
+    end;
+    if Shndx = 0 then
+      raise ELinker.Create('exported symbol is outside every placed section: ' +
+        FExported.Get(I));
+    { .dynsym order: the NULL entry, the PLT imports, then these exports. }
+    Off := (1 + FPltEntries.Count + I) * ELF64_SYM_SIZE;
+    LkCopyInto(FDynSymTab, Off + 6, LkLE(Shndx, 2));
+    LkCopyInto(FDynSymTab, Off + 8, LkLE(Sym.Addr, 8));
+  end;
 end;
 
 { Resolve a relocation's symbol to its final virtual address.  A
@@ -2147,6 +2318,11 @@ var
   NamePos: Integer;
   PhIdx: Integer;
   HasTls: Boolean;
+  { Section headers for the linker-generated sections, built as parallel
+    lists because sh_link / sh_info reference each other by index. }
+  LkName: TList<string>;
+  LkType, LkFlags, LkAddr, LkSize, LkLink, LkInfo, LkAlign, LkEnt: TList<Int64>;
+  LkBase, LkIdxDynSym, LkIdxDynStr, LkIdxGot: Integer;
 begin
   { Compute extents for each loadable segment.
     RO: headers + linker metadata + .rodata + .eh_frame etc.
@@ -2415,14 +2591,118 @@ begin
       LkCopyInto(Buf, Integer(A), M.Data);
   end;
 
-  { ---- Section header table (for readelf / objdump) ---- }
+  { ---- Section header table (for readelf / objdump) ----
+    The linker-generated sections get real section headers too, not just
+    program headers.  A loader only ever reads PT_DYNAMIC, but the TOOLS do
+    not: elftoolchain readelf — FreeBSD's base-system readelf — looks for a
+    SHT_DYNAMIC *section* and otherwise reports "There is no dynamic section
+    in this file" for an image that is plainly dynamic.  GNU readelf falls
+    back to PT_DYNAMIC, which is why an image with no .dynamic section header
+    looked fine for as long as Linux was the only dynamic target.
+
+    They are appended after the merged sections so a merged section keeps the
+    index PatchExportedDynSyms assigns it (FSecAddr position + 1). }
   ShStr := Chr(0);
   ShStrOff := TList<Integer>.Create();
+  LkName := TList<string>.Create();
+  LkType := TList<Int64>.Create();
+  LkFlags := TList<Int64>.Create();
+  LkAddr := TList<Int64>.Create();
+  LkSize := TList<Int64>.Create();
+  LkLink := TList<Int64>.Create();
+  LkInfo := TList<Int64>.Create();
+  LkAlign := TList<Int64>.Create();
+  LkEnt := TList<Int64>.Create();
   try
+    { Describe each linker-generated section; sh_link / sh_info reference
+      sections by index, so they are filled in once every index is known. }
+    LkBase := 1 + FSecAddr.Count;
+
+    LkName.Add('.interp');   LkType.Add(SHT_PROGBITS);
+    LkFlags.Add(SHF_ALLOC);  LkAddr.Add(FInterpAddr);
+    LkSize.Add(Length(FInterpData));
+    LkLink.Add(0); LkInfo.Add(0); LkAlign.Add(1); LkEnt.Add(0);
+
+    LkName.Add('.hash');     LkType.Add(SHT_HASH);
+    LkFlags.Add(SHF_ALLOC);  LkAddr.Add(FHashAddr);
+    LkSize.Add(Length(FHashTab));
+    LkLink.Add(0); LkInfo.Add(0); LkAlign.Add(8); LkEnt.Add(4);
+
+    LkIdxDynSym := LkBase + LkName.Count;
+    LkName.Add('.dynsym');   LkType.Add(SHT_DYNSYM);
+    LkFlags.Add(SHF_ALLOC);  LkAddr.Add(FDynSymAddr);
+    LkSize.Add(Length(FDynSymTab));
+    { sh_info = index of the first non-local symbol; entry 0 is the only
+      local one we emit. }
+    LkLink.Add(0); LkInfo.Add(1); LkAlign.Add(8); LkEnt.Add(ELF64_SYM_SIZE);
+
+    LkIdxDynStr := LkBase + LkName.Count;
+    LkName.Add('.dynstr');   LkType.Add(SHT_STRTAB);
+    LkFlags.Add(SHF_ALLOC);  LkAddr.Add(FDynStrAddr);
+    LkSize.Add(Length(FDynStrTab));
+    LkLink.Add(0); LkInfo.Add(0); LkAlign.Add(1); LkEnt.Add(0);
+
+    if Length(FRelaDynData) > 0 then
+    begin
+      LkName.Add('.rela.dyn'); LkType.Add(SHT_RELA);
+      LkFlags.Add(SHF_ALLOC);  LkAddr.Add(FRelaDynAddr);
+      LkSize.Add(Length(FRelaDynData));
+      LkLink.Add(0); LkInfo.Add(0); LkAlign.Add(8);
+      LkEnt.Add(ELF64_RELA_SIZE);
+    end;
+
+    if Length(FRelaPlt) > 0 then
+    begin
+      LkName.Add('.rela.plt'); LkType.Add(SHT_RELA);
+      LkFlags.Add(SHF_ALLOC);  LkAddr.Add(FRelaPltAddr);
+      LkSize.Add(Length(FRelaPlt));
+      LkLink.Add(0); LkInfo.Add(0); LkAlign.Add(8);
+      LkEnt.Add(ELF64_RELA_SIZE);
+    end;
+
+    if Length(FPltCode) > 0 then
+    begin
+      LkName.Add('.plt');      LkType.Add(SHT_PROGBITS);
+      LkFlags.Add(SHF_ALLOC or SHF_EXECINSTR); LkAddr.Add(FPltAddr);
+      LkSize.Add(Length(FPltCode));
+      LkLink.Add(0); LkInfo.Add(0); LkAlign.Add(16); LkEnt.Add(16);
+    end;
+
+    LkName.Add('.dynamic');  LkType.Add(SHT_DYNAMIC);
+    LkFlags.Add(SHF_ALLOC or SHF_WRITE); LkAddr.Add(FDynamicAddr);
+    LkSize.Add(Length(FDynamicData));
+    LkLink.Add(0); LkInfo.Add(0); LkAlign.Add(8); LkEnt.Add(16);
+
+    LkIdxGot := LkBase + LkName.Count;
+    LkName.Add('.got');      LkType.Add(SHT_PROGBITS);
+    LkFlags.Add(SHF_ALLOC or SHF_WRITE); LkAddr.Add(FGotAddr);
+    LkSize.Add(Length(FGotData));
+    LkLink.Add(0); LkInfo.Add(0); LkAlign.Add(8); LkEnt.Add(8);
+
+    { Cross-references, now that every index is settled. }
+    for I := 0 to LkName.Count - 1 do
+    begin
+      if LkName.Get(I) = '.hash' then LkLink.SetItem(I, LkIdxDynSym);
+      if LkName.Get(I) = '.dynsym' then LkLink.SetItem(I, LkIdxDynStr);
+      if LkName.Get(I) = '.dynamic' then LkLink.SetItem(I, LkIdxDynStr);
+      if LkName.Get(I) = '.rela.dyn' then LkLink.SetItem(I, LkIdxDynSym);
+      if LkName.Get(I) = '.rela.plt' then
+      begin
+        LkLink.SetItem(I, LkIdxDynSym);
+        LkFlags.SetItem(I, SHF_ALLOC or SHF_INFO_LINK);
+        LkInfo.SetItem(I, LkIdxGot);
+      end;
+    end;
+
     for I := 0 to FSecAddr.Count - 1 do
     begin
       ShStrOff.Add(Length(ShStr));
       ShStr := ShStr + FSecAddr.Get(I).Name + Chr(0);
+    end;
+    for I := 0 to LkName.Count - 1 do
+    begin
+      ShStrOff.Add(Length(ShStr));
+      ShStr := ShStr + LkName.Get(I) + Chr(0);
     end;
     NamePos := Length(ShStr);
     ShStr := ShStr + '.shstrtab' + Chr(0);
@@ -2430,7 +2710,7 @@ begin
     ShTabOff := Length(Buf);
     Buf := Buf + ShStr;
 
-    SecCount := FSecAddr.Count + 2;
+    SecCount := FSecAddr.Count + LkName.Count + 2;
     while (Length(Buf) and 7) <> 0 do Buf := Buf + Chr(0);
 
     LkCopyInto(Buf, 40, LkLE(Length(Buf), 8));
@@ -2458,6 +2738,22 @@ begin
       Buf := Buf + LkLE(0, 8);
     end;
 
+    { File offset equals virtual address for a PIE laid out at base 0, so
+      every one of these is file-backed at its own address. }
+    for I := 0 to LkName.Count - 1 do
+    begin
+      Buf := Buf + LkLE(ShStrOff.Get(FSecAddr.Count + I), 4);
+      Buf := Buf + LkLE(LkType.Get(I), 4);
+      Buf := Buf + LkLE(LkFlags.Get(I), 8);
+      Buf := Buf + LkLE(LkAddr.Get(I), 8);
+      Buf := Buf + LkLE(LkAddr.Get(I), 8);
+      Buf := Buf + LkLE(LkSize.Get(I), 8);
+      Buf := Buf + LkLE(LkLink.Get(I), 4);
+      Buf := Buf + LkLE(LkInfo.Get(I), 4);
+      Buf := Buf + LkLE(LkAlign.Get(I), 8);
+      Buf := Buf + LkLE(LkEnt.Get(I), 8);
+    end;
+
     Buf := Buf + LkLE(NamePos, 4);
     Buf := Buf + LkLE(SHT_STRTAB, 4);
     Buf := Buf + LkLE(0, 8);
@@ -2469,6 +2765,15 @@ begin
     Buf := Buf + LkLE(1, 8);
     Buf := Buf + LkLE(0, 8);
   finally
+    LkEnt.Free();
+    LkAlign.Free();
+    LkInfo.Free();
+    LkLink.Free();
+    LkSize.Free();
+    LkAddr.Free();
+    LkFlags.Free();
+    LkType.Free();
+    LkName.Free();
     ShStrOff.Free();
   end;
 
@@ -2510,6 +2815,10 @@ begin
 
     { Step 6: synthesise remaining symbols. }
     Self.DefineSynthSymbols();
+
+    { Step 6a: turn the reserved export slots into real .dynsym definitions
+      (the loader resolves libc's UND references against them). }
+    Self.PatchExportedDynSyms();
 
     { Step 6b: fill non-PLT GOT slots with resolved symbol addresses.
       These need RELATIVE entries so ld.so fixes them up at load time. }

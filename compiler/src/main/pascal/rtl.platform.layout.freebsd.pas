@@ -61,6 +61,8 @@ type
     function CLOCK_REALTIME: Integer; override;
     function WNOHANG:        Integer; override;
 
+    function SC_NPROCESSORS_ONLN: Integer; override;
+
     function StatBufSize: Integer; override;
     function StatSize(Buf: Pointer):  Int64; override;
     function StatMtime(Buf: Pointer): Int64; override;
@@ -135,6 +137,11 @@ function TPlatformLayoutFreeBSDX86_64.SEEK_END: Integer; begin Result := 2; end;
 
 function TPlatformLayoutFreeBSDX86_64.CLOCK_REALTIME: Integer; begin Result := 0; end;
 function TPlatformLayoutFreeBSDX86_64.WNOHANG:        Integer; begin Result := 1; end;
+
+{ FreeBSD sys/unistd.h.  Not glibc's 84 — that number is _SC_THREAD_CPUTIME
+  here and answers 200112 rather than failing, so the mistake reads as a CPU
+  count instead of an error. }
+function TPlatformLayoutFreeBSDX86_64.SC_NPROCESSORS_ONLN: Integer; begin Result := 58; end;
 
 function TPlatformLayoutFreeBSDX86_64.StatBufSize: Integer;
 begin

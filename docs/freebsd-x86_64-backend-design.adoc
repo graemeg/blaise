@@ -453,12 +453,15 @@ runs; all four fixpoints + QBE & native TestRunner green).
 
 === Step 6 — Drive target selection through the linker
 
-NOTE: Done. `TargetIsFreestanding(target)` (`blaise.codegen.target`) marks
-FreeBSD as Strategy-B: `LinkViaInternalLinker` sets dynamic mode to `not
-(AOpts.Static or freestanding)` and `EnsureRTLObjects` selects the freestanding
-kernel-leaf unit list the same way, so a `freebsd-x86_64` target links static
-`ET_EXEC` / freestanding `_start` / no `PT_INTERP` / no libc regardless of
-`--static`. The per-target `TPlatformLayout` is injected by the compiler as a
+NOTE: Done, then superseded. FreeBSD was originally pinned to Strategy B by a
+`TargetIsFreestanding(target)` predicate, so a `freebsd-x86_64` target linked
+static `ET_EXEC` / freestanding `_start` / no `PT_INTERP` / no libc regardless
+of `--static`. That predicate has since been deleted: FreeBSD now follows the
+same auto link policy as Linux (freestanding by default, dynamic + libc when
+the program binds an external C library, forced either way by `--static` /
+`--dynamic`) — see the "Link modes" section of
+`docs/toolchain-independence.adoc`. The per-target `TPlatformLayout` is
+injected by the compiler as a
 direct `main` call to `rtl.platform.layout.<os>_init`
 (`PlatformLayoutInitSym`), selected from the compile-time `--target`;
 `rtl.platform.posix` no longer `uses` a concrete layout (a weak

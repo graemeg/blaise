@@ -44,6 +44,12 @@ type
     procedure TestS_IFDIR;
     procedure TestSEEK_END;
     procedure TestWNOHANG;
+    { sysconf(3) name for the online CPU count.  FreeBSD numbers it 58; Linux
+      numbers it 84, and FreeBSD's 84 is _SC_THREAD_CPUTIME, which answers with
+      the POSIX option version (200112) rather than an error.  GetCPUCount would
+      therefore report 200112 CPUs on a libc-hosted FreeBSD binary and the fiber
+      pool would try to start that many worker threads. }
+    procedure TestSC_NPROCESSORS_ONLN;
     { struct stat — the FreeBSD-specific size and field offsets. }
     procedure TestStatBufSize;
     procedure TestStatSizeOffset;
@@ -96,6 +102,12 @@ end;
 procedure TFreeBSDLayoutTests.TestWNOHANG;
 begin
   AssertEquals('WNOHANG', 1, FLayout.WNOHANG());
+end;
+
+procedure TFreeBSDLayoutTests.TestSC_NPROCESSORS_ONLN;
+begin
+  AssertEquals('FreeBSD _SC_NPROCESSORS_ONLN', 58,
+    FLayout.SC_NPROCESSORS_ONLN());
 end;
 
 procedure TFreeBSDLayoutTests.TestStatBufSize;

@@ -102,7 +102,22 @@ type
     procedure TestLinkStatic_ExternalLib_Errors;
     procedure TestLinkStatic_UnresolvedSymbol_Errors;
     procedure TestLinkDynamic_Flag_ForcesDynamic;
+    { The auto-dynamic binary must RUN, not merely link.  Everything the
+      dynamic profile changes — the PIE container, PT_INTERP, the per-OS entry
+      unit's hand-off into libc, the crt-owned exports the loader resolves
+      against us — only fails at exec time, so shape assertions on their own
+      let a non-starting binary pass.  Both bugs found bringing FreeBSD up
+      (PT_LOADs sharing a page; a .hash built with a truncated ELF hash)
+      produced a perfectly well-formed image that died before main. }
+    procedure TestLinkAuto_ExternalLib_BinaryRuns;
     procedure TestPthread_StaticThreads_NoNeeded;
+    { GetCPUCount must answer with a CPU COUNT, on both link profiles.  It asks
+      sysconf for the online-processor name, and that name is numbered per OS —
+      84 on Linux, 58 on FreeBSD, where 84 is _SC_THREAD_CPUTIME and answers
+      200112 instead of failing.  A `GetCPUCount() > 0` assertion cannot tell
+      the two apart, so this one bounds the answer; the fiber pool sizes its
+      worker set from it, so a wrong answer means 200112 threads. }
+    procedure TestGetCPUCount_IsAPlausibleCount;
     { ---- GH #188: internal linker resolves a -l<name> whose lib<name>.so is a
            GNU ld linker script (INPUT/GROUP) to the real versioned SONAME(s),
            not the bare (unmappable) linker-script filename. ---- }
@@ -747,23 +762,16 @@ begin
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
     '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
     '--output', BinPath], Out_);
-  {$IFDEF FREEBSD}
-  { FreeBSD host: dynamic linking is not implemented yet, so binding a C
-    library is (by design) a clear error rather than a link.  This arm
-    inverts when the FreeBSD dynamic mode lands. }
-  AssertTrue('freebsd: binding a C library must fail', EC <> 0);
-  AssertTrue('freebsd: error names the libraries and the missing feature',
-    Pos('binds external C libraries (m)', Out_) >= 0);
-  {$ELSE}
   AssertEquals('external-lib program links (out: ' + Out_ + ')', 0, EC);
   AssertTrue('note names the binding libraries',
     Pos('linking dynamically against libc: the program binds external C ' +
         'libraries (m)', Out_) >= 0);
   Dyn := ReadelfDynamic(BinPath);
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
+  { Soname substrings, not whole names: libm is libm.so.6 on Linux and
+    libm.so.5 on FreeBSD; libc is libc.so.6 / libc.so.7. }
   AssertTrue('libm is a DT_NEEDED', Pos('libm.so', Dyn) >= 0);
   AssertTrue('libc is a DT_NEEDED', Pos('libc.so', Dyn) >= 0);
-  {$ENDIF}
 end;
 
 procedure TCLIContractTests.TestLinkAuto_BareLibcSymbol_FallsBackWithNote;
@@ -782,20 +790,12 @@ begin
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
     '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
     '--output', BinPath], Out_);
-  {$IFDEF FREEBSD}
-  { FreeBSD host: no dynamic fallback exists yet — the probe's miss is a
-    clear error naming the symbols.  Inverts when dynamic FreeBSD lands. }
-  AssertTrue('freebsd: unresolved C symbol must fail', EC <> 0);
-  AssertTrue('freebsd: error names the symbols',
-    Pos('unresolved C symbols (isatty)', Out_) >= 0);
-  {$ELSE}
   AssertEquals('bare-libc program links (out: ' + Out_ + ')', 0, EC);
   AssertTrue('note names the unresolved symbols',
     Pos('unresolved C symbols (isatty)', Out_) >= 0);
   Dyn := ReadelfDynamic(BinPath);
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
   AssertTrue('libc is a DT_NEEDED', Pos('libc.so', Dyn) >= 0);
-  {$ENDIF}
 end;
 
 procedure TCLIContractTests.TestLinkStatic_ExternalLib_Errors;
@@ -848,20 +848,34 @@ begin
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native', '--dynamic',
     '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
     '--output', BinPath], Out_);
-  {$IFDEF FREEBSD}
-  { FreeBSD host: --dynamic is (by design) rejected until the dynamic
-    FreeBSD mode lands. }
-  AssertTrue('freebsd: --dynamic must fail', EC <> 0);
-  AssertTrue('freebsd: error says dynamic FreeBSD is not implemented',
-    Pos('dynamic FreeBSD linking is not implemented', Out_) >= 0);
-  {$ELSE}
   AssertEquals('pure program links dynamically (out: ' + Out_ + ')', 0, EC);
   AssertTrue('no note for an explicit mode',
     Pos('linking dynamically', Out_) < 0);
   Dyn := ReadelfDynamic(BinPath);
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
   AssertTrue('libc is a DT_NEEDED', Pos('libc.so', Dyn) >= 0);
-  {$ENDIF}
+end;
+
+procedure TCLIContractTests.TestLinkAuto_ExternalLib_BinaryRuns;
+var SrcPath, BinPath, Out_, RunOut: string; EC: Integer;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  { sinf(0) is 0, so the program prints TRUE — a value that could only come
+    from a real call through the PLT into libm. }
+  SrcPath := WriteScratchSource(
+    'program p; ' +
+    'function sf(x: Single): Single; cdecl; external ''m'' name ''sinf''; ' +
+    'begin WriteLn(sf(0.0) = 0.0); end.');
+  BinPath := FScratch + 'cli_lmauto_run_' + IntToStr(FCounter);
+  EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
+    '--output', BinPath], Out_);
+  AssertEquals('external-lib program links (out: ' + Out_ + ')', 0, EC);
+
+  EC := RunBinary(BinPath, RunOut);
+  AssertEquals('the dynamic binary runs (out: ' + RunOut + ')', 0, EC);
+  AssertTrue('sinf(0) = 0 came back through libm (out: ' + RunOut + ')',
+    Pos('TRUE', UpperCase(RunOut)) >= 0);
 end;
 
 procedure TCLIContractTests.TestPthread_NativeThreads_LinksLibpthread;
@@ -913,6 +927,40 @@ begin
   Dyn := ReadelfDynamic(BinPath);
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
   AssertTrue('static binary has no DT_NEEDED', Pos('(NEEDED)', Dyn) < 0);
+end;
+
+procedure TCLIContractTests.TestGetCPUCount_IsAPlausibleCount;
+var SrcPath, BinPath, Out_, RunOut: string; EC: Integer;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  { The program prints the count and then the verdict, so a failure message
+    carries the bogus number rather than just 'FALSE'. }
+  SrcPath := WriteScratchSource(
+    'program p; uses runtime.thread; var N: Integer; ' +
+    'begin N := GetCPUCount(); WriteLn(N); ' +
+    'WriteLn((N >= 1) and (N <= 4096)); end.');
+
+  BinPath := FScratch + 'cli_ncpu_auto_' + IntToStr(FCounter);
+  EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
+    '--output', BinPath], Out_);
+  AssertEquals('threaded program links (out: ' + Out_ + ')', 0, EC);
+  EC := RunBinary(BinPath, RunOut);
+  AssertEquals('threaded binary runs (out: ' + RunOut + ')', 0, EC);
+  AssertTrue('auto-profile GetCPUCount is a CPU count (out: ' + RunOut + ')',
+    Pos('TRUE', UpperCase(RunOut)) >= 0);
+
+  { --static takes the freestanding sysconf shim instead of the host libc; it
+    must agree on the name it is being asked about. }
+  BinPath := FScratch + 'cli_ncpu_static_' + IntToStr(FCounter);
+  EC := RunCompiler(['--source', SrcPath, '--backend', 'native', '--static',
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
+    '--output', BinPath], Out_);
+  AssertEquals('static threaded program links (out: ' + Out_ + ')', 0, EC);
+  EC := RunBinary(BinPath, RunOut);
+  AssertEquals('static threaded binary runs (out: ' + RunOut + ')', 0, EC);
+  AssertTrue('static-profile GetCPUCount is a CPU count (out: ' + RunOut + ')',
+    Pos('TRUE', UpperCase(RunOut)) >= 0);
 end;
 
 procedure TCLIContractTests.TestLinkerScriptLib_ResolvesToVersionedSoname_Native;

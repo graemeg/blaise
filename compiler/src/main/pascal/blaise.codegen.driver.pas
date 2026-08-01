@@ -314,6 +314,26 @@ function BuildRTLUnitList(AStatic: Boolean;
   EnsureRTLObjects is the only production caller. }
 function RTLObjectCacheDir(const ATarget: TTargetDesc): string;
 
+{ Newest mtime across the sources of the RTL unit set — the staleness threshold
+  every cached RTL object is measured against.
+
+  BUG-20260801, the same family as BUG-20260726 on RTLCacheKey.  The cache used
+  to invalidate a unit when its object was older than ITS OWN source, which
+  cannot see that a unit it DEPENDS ON changed.  Adding a virtual method to
+  TPlatformLayout in rtl.platform.pas rebuilt rtl.platform.o and the layout
+  adapters, but left rtl.platform.posix.o cached with the OLD vtable slot
+  numbers; the resulting compiler called StatSize through the slot that now
+  holds SC_NPROCESSORS_ONLN, so every file it read came back truncated and it
+  reported "Expected 'program' but got <eof>" on a perfectly good source file.
+  A silently mis-linked compiler is the worst possible outcome of a cache, and
+  the fix costs nothing: the RTL is a closed set of ~17 units built together, so
+  ANY source in the set moving invalidates the lot.
+
+  Comparing against the newest source rather than tracking real per-unit
+  dependencies is deliberate — an RTL edit is a developer action, not a hot
+  path, and a whole-RTL rebuild takes seconds.  Exposed for unit testing. }
+function NewestRTLSourceAge(const ASrcDir: string; AUnits: TStringList): Int64;
+
 { Format one --help flag line with the shared 2-space indent and flag
   column.  Single source of truth for the column width so the common
   usage block (Blaise.pas PrintUsage) and each driver's DescribeOptions
@@ -402,6 +422,24 @@ function RTLObjectCacheDir(const ATarget: TTargetDesc): string;
 begin
   Result := IncludeTrailingPathDelimiter(CompilerBinDir()) + 'rtl'
     + '/' + TargetName(ATarget) + '-' + RTLCacheKey();
+end;
+
+function NewestRTLSourceAge(const ASrcDir: string; AUnits: TStringList): Int64;
+var
+  I: Integer;
+  Age: Int64;
+begin
+  { A missing source yields FileAge = -1 and is simply skipped; EnsureRTLObjects
+    reports it by name a moment later. }
+  Result := -1;
+  if AUnits = nil then Exit;
+  for I := 0 to AUnits.Count - 1 do
+  begin
+    Age := FileAge(IncludeTrailingPathDelimiter(ASrcDir) +
+                   AUnits.Strings[I] + '.pas');
+    if Age > Result then
+      Result := Age;
+  end;
 end;
 
 { Collect the names of all symbols an ELF object DEFINES with global or weak
@@ -568,11 +606,12 @@ begin
   { The base list, in leaf-first order.  Substitutions: the platform-layout
     and errno adapters always follow the target OS; the CPU-keyed asm leaves
     (atomics, setjmp) follow the target CPU; and the entry point is
-    per-profile — a --static link replaces runtime.start with the
-    freestanding per-OS start, a dynamic link keeps runtime.start, and
-    macOS has NO start unit at all (LC_MAIN + dyld's libSystem glue call
-    main directly and exit() its return; the backend's _main follows that
-    contract). }
+    per-profile AND per-OS — 'runtime.start' is a sentinel, never a real
+    unit: a --static link selects runtime.start.static.<os>, a dynamic link
+    selects runtime.start.<os> (the hand-off to libc differs per OS — glibc
+    exports __libc_start_main, FreeBSD libc does not), and macOS has NO
+    start unit at all (LC_MAIN + dyld's libSystem glue call main directly
+    and exit() its return; the backend's _main follows that contract). }
   for I := 0 to High(RTL_UNITS) do
     if SameText(RTL_UNITS[I], 'rtl.platform.layout.linux') then
       Result.Add('rtl.platform.layout.' + OS)
@@ -583,7 +622,7 @@ begin
       else if AStatic then
         Result.Add('runtime.start.static.' + OS)
       else
-        Result.Add(RTL_UNITS[I]);
+        Result.Add('runtime.start.' + OS);
     end
     else if SameText(RTL_UNITS[I], 'runtime.errno.linux') then
     begin
@@ -622,6 +661,7 @@ var
   SrcDir, CacheDir, BuildDir, BlaiseBin: string;
   SrcFile, ObjFile, TmpObj: string;
   I, J, ExitCode: Integer;
+  NewestSrc: Int64;
   Args: TStringList;
   Msg: string;
   ProvidedSyms, MySyms, Units: TStringList;
@@ -695,6 +735,10 @@ begin
   Units := BuildRTLUnitList(AStaticLink and AIncludeStartup,
     AOpts.Target.OS, AOpts.Target.CPU);
 
+  { One threshold for the whole set, not each unit's own source — see
+    NewestRTLSourceAge for the mis-linked-compiler this closes. }
+  NewestSrc := NewestRTLSourceAge(SrcDir, Units);
+
   for I := 0 to Units.Count - 1 do
   begin
     SrcFile := IncludeTrailingPathDelimiter(SrcDir) + Units.Strings[I] + '.pas';
@@ -707,7 +751,7 @@ begin
       are referenced externally and intermediate deps are built leaf-first),
       then atomically rename the result into the shared CacheDir.  RTL units
       carry inline asm, so the native backend + internal assembler is mandatory. }
-    if (not FileExists(ObjFile)) or (FileAge(ObjFile) < FileAge(SrcFile)) then
+    if (not FileExists(ObjFile)) or (FileAge(ObjFile) < NewestSrc) then
     begin
       TmpObj := IncludeTrailingPathDelimiter(BuildDir) + Units.Strings[I] + '.o';
       Args := TStringList.Create();
@@ -738,10 +782,11 @@ begin
         Exit('failed to publish RTL object ' + ObjFile);
     end;
 
-    { runtime.start defines the bare _start entry — include it only for the
-      native internal linker (Blaise owns the entry); the cc link line gets
-      _start from libc and must omit it to avoid a multiple-definition. }
-    if SameText(Units.Strings[I], 'runtime.start') and (not AIncludeStartup) then
+    { runtime.start.<os> defines the bare _start entry — include it only for
+      the native internal linker (Blaise owns the entry); the cc link line
+      gets _start from crt1 and must omit it to avoid a multiple-definition. }
+    if SameText(Units.Strings[I], 'runtime.start.' + RTLOSSuffix(AOpts.Target.OS))
+      and (not AIncludeStartup) then
       Continue;
     { Skip this RTL object if EVERY symbol it defines is already defined by the
       caller's objects — i.e. the program compiled this RTL unit itself.  A
@@ -801,7 +846,7 @@ begin
   Args := TStringList.Create();
   RTLObjs := TStringList.Create();
   try
-    { cc link line: libc supplies _start, so omit runtime.start.  Pass the
+    { cc link line: crt1 supplies _start, so omit runtime.start.<os>.  Pass the
       program's prebuilt deps so an RTL unit it compiled itself (e.g. via
       `uses classes`) is not supplied twice. }
     { AStaticLink=False: a cc link line always links libc (crt1 supplies

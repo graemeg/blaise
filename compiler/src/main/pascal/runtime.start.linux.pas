@@ -6,9 +6,16 @@
   See LICENSE file in the project root for full license terms.
 }
 
-unit runtime.start;
+unit runtime.start.linux;
 
-// Program entry point (x86_64, System V ABI, glibc-compatible).
+// Program entry point for a DYNAMIC (libc-linked) Linux binary
+// (x86_64, System V ABI, glibc-compatible).
+//
+// Per-OS because the hand-off differs: glibc exports __libc_start_main and
+// expects the entry to marshal argc/argv/envp into it, whereas FreeBSD libc
+// exports no such symbol and its start (runtime.start.freebsd) walks the
+// initial process stack itself.  Selected at link time by BuildRTLUnitList;
+// the static profile uses runtime.start.static.<os> instead.
 //
 // Inline-assembler port of runtime/src/main/asm/blaise_start_x86_64.s — _start
 // is now an `asm … end` routine so the RTL needs no hand-written .s

@@ -46,6 +46,8 @@ type
     function CLOCK_REALTIME: Integer; override;
     function WNOHANG:        Integer; override;
 
+    function SC_NPROCESSORS_ONLN: Integer; override;
+
     function StatBufSize: Integer; override;
     function StatSize(Buf: Pointer):  Int64; override;
     function StatMtime(Buf: Pointer): Int64; override;
@@ -121,6 +123,9 @@ function TPlatformLayoutLinuxX86_64.SEEK_END: Integer; begin Result := 2; end;
 
 function TPlatformLayoutLinuxX86_64.CLOCK_REALTIME: Integer; begin Result := 0; end;
 function TPlatformLayoutLinuxX86_64.WNOHANG:        Integer; begin Result := 1; end;
+
+{ glibc bits/confname.h. }
+function TPlatformLayoutLinuxX86_64.SC_NPROCESSORS_ONLN: Integer; begin Result := 84; end;
 
 function TPlatformLayoutLinuxX86_64.StatBufSize: Integer;
 begin

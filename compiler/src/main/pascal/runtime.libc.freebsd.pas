@@ -52,8 +52,7 @@ function waitpid(Pid: Integer; Status: Pointer; Options: Integer): Integer;
 function execvp(File_: PChar; Argv: Pointer): Integer;
 
 { sysconf for the few names the RTL queries - currently only the online CPU
-  count (_SC_NPROCESSORS_ONLN, passed as 84 by runtime.thread on every target),
-  via sysctl(hw.ncpu). }
+  count (_SC_NPROCESSORS_ONLN = 58 on FreeBSD), via sysctl(hw.ncpu). }
 function sysconf(Name: Integer): Int64;
 
 { setenv: insert or replace "Name=Value" in `environ`.  When the key exists a
@@ -92,10 +91,10 @@ const
   MAP_ANON_OS  = $1000;
   PAGE_SIZE    = 4096;
 
-  { The token runtime.thread passes for the CPU-count query.  It is an internal
-    RTL contract value (runtime.thread hardcodes 84 on every target), NOT
-    FreeBSD's libc _SC_NPROCESSORS_ONLN (58) — we never reach FreeBSD's libc. }
-  _SC_NPROCESSORS_ONLN = 84;
+  { FreeBSD's own _SC_NPROCESSORS_ONLN (sys/unistd.h).  runtime.thread reads the
+    number from GPlatformLayout, so this shim and FreeBSD's real libc answer to
+    the same name and a program behaves identically on either link profile. }
+  _SC_NPROCESSORS_ONLN = 58;
   CLOCK_REALTIME       = 0;
   { sysctl MIB for hw.ncpu (FreeBSD sys/sysctl.h): CTL_HW=6, HW_NCPU=3. }
   CTL_HW   = 6;

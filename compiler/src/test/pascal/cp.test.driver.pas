@@ -30,6 +30,7 @@ uses
 type
   TBackendDriverContractTests = class(TTestCase)
   private
+    FAgeCounter: Integer;   { unique scratch dir per NewestRTLSourceAge test }
     function ListContains(AList: TStringList; const AName: string): Boolean;
   published
     { Per-target RTL unit-list selection (FreeBSD Step 5).  BuildRTLUnitList is
@@ -56,6 +57,15 @@ type
     procedure TestRTLCacheDir_IsCompilerKeyed_NotTargetOnly;
     procedure TestRTLCacheDir_DiffersPerTarget;
     procedure TestRTLCacheDir_StableAcrossCalls;
+
+    { BUG-20260801: mtime staleness must be measured against the NEWEST source
+      in the RTL set, not each unit's own source.  Per-unit comparison cannot
+      see a unit changing under another one, and the RTL's classes are shared
+      across units: a virtual method added to TPlatformLayout renumbered the
+      vtable, rtl.platform.posix.o stayed cached against the old numbering, and
+      the compiler built from it read every source file truncated. }
+    procedure TestNewestRTLSourceAge_IsTheMaximumOverTheSet;
+    procedure TestNewestRTLSourceAge_MissingSourceDoesNotWin;
 
     { ClaimsEmitIR selection policy. }
     procedure TestQBE_ClaimsEmitIR_True;
@@ -87,6 +97,24 @@ type
 
     { FormatFlagLine column helper. }
     procedure TestFormatFlagLine_Indents_And_Pads;
+
+    { DT_NEEDED soname mapping is per-TARGET, not per-host.  The internal
+      linker writes DT_NEEDED itself, so it must name the soname the TARGET's
+      loader will resolve.  These differ on every entry that matters: FreeBSD
+      threads live in libthr (not libpthread), and the libc/libm versions are
+      unrelated to glibc's.  A cross-link from Linux cannot probe the target's
+      filesystem, so this table is the authority in that direction. }
+    procedure TestLinkLibSoname_Linux_GlibcSonames;
+    procedure TestLinkLibSoname_FreeBSD_UsesLibthrAndSo7;
+    procedure TestLinkLibSoname_UnknownLib_FallsBackToDevSymlink;
+
+    { The DYNAMIC entry point is per-OS too, not just the static one.  The old
+      shared runtime.start called glibc's __libc_start_main, a symbol FreeBSD
+      libc does not export — so the dynamic profile follows the target OS the
+      same way runtime.start.static.<os> already does. }
+    procedure TestRTLUnits_LinuxDynamic_UsesLinuxStart;
+    procedure TestRTLUnits_FreeBSDDynamic_UsesFreeBSDStart;
+    procedure TestRTLUnits_Dynamic_NeverUsesSharedStart;
   end;
 
 implementation
@@ -529,6 +557,171 @@ begin
   MakeTarget(osMacOS, cpuArm64, T);
   AssertEquals('cache dir must be stable within a process',
     RTLObjectCacheDir(T), RTLObjectCacheDir(T));
+end;
+
+procedure TBackendDriverContractTests.TestNewestRTLSourceAge_IsTheMaximumOverTheSet;
+var
+  Dir: string;
+  Units: TStringList;
+begin
+  Dir := IncludeTrailingPathDelimiter(GetTempDir()) + 'blz_rtlage_' +
+         IntToStr(FAgeCounter) + '/';
+  FAgeCounter := FAgeCounter + 1;
+  ForceDirectories(Dir);
+  WriteFile(Dir + 'older_a.pas', 'unit older_a; end.');
+  WriteFile(Dir + 'older_b.pas', 'unit older_b; end.');
+  { mtime granularity is a whole second on some filesystems, so the two
+    generations have to be more than a second apart to be distinguishable. }
+  Sleep(1100);
+  WriteFile(Dir + 'newer_c.pas', 'unit newer_c; end.');
+  WriteFile(Dir + 'outside_z.pas', 'unit outside_z; end.');
+
+  Units := TStringList.Create();
+  try
+    Units.Add('older_a');
+    Units.Add('older_b');
+    Units.Add('newer_c');
+    AssertEquals('the newest member of the set wins',
+      FileAge(Dir + 'newer_c.pas'), NewestRTLSourceAge(Dir, Units));
+
+    { Drop the newest member: the answer must fall back to the older pair, which
+      also proves outside_z.pas — newer still, but not listed — is not counted. }
+    Units.Delete(2);
+    AssertEquals('only listed units count',
+      FileAge(Dir + 'older_b.pas'), NewestRTLSourceAge(Dir, Units));
+    AssertTrue('an unlisted newer file must not raise the threshold',
+      NewestRTLSourceAge(Dir, Units) < FileAge(Dir + 'outside_z.pas'));
+  finally
+    Units.Free();
+  end;
+end;
+
+procedure TBackendDriverContractTests.TestNewestRTLSourceAge_MissingSourceDoesNotWin;
+var
+  Dir: string;
+  Units: TStringList;
+begin
+  { A missing source ages -1.  It must not become the threshold, or every
+    cached object would look current and nothing would ever rebuild — the
+    exact failure this guard exists to prevent. }
+  Dir := IncludeTrailingPathDelimiter(GetTempDir()) + 'blz_rtlage_' +
+         IntToStr(FAgeCounter) + '/';
+  FAgeCounter := FAgeCounter + 1;
+  ForceDirectories(Dir);
+  WriteFile(Dir + 'present.pas', 'unit present; end.');
+
+  Units := TStringList.Create();
+  try
+    Units.Add('no_such_unit');
+    Units.Add('present');
+    AssertEquals('a missing source is skipped, not taken as the newest',
+      FileAge(Dir + 'present.pas'), NewestRTLSourceAge(Dir, Units));
+  finally
+    Units.Free();
+  end;
+end;
+
+procedure TBackendDriverContractTests.TestLinkLibSoname_Linux_GlibcSonames;
+var
+  T: TTargetDesc;
+begin
+  MakeTarget(osLinux, cpuX86_64, T);
+  AssertEquals('linux libc',    'libc.so.6',       LinkLibSoname('c', T));
+  AssertEquals('linux libm',    'libm.so.6',       LinkLibSoname('m', T));
+  AssertEquals('linux pthread', 'libpthread.so.0', LinkLibSoname('pthread', T));
+  AssertEquals('linux libdl',   'libdl.so.2',      LinkLibSoname('dl', T));
+  AssertEquals('linux librt',   'librt.so.1',      LinkLibSoname('rt', T));
+end;
+
+procedure TBackendDriverContractTests.TestLinkLibSoname_FreeBSD_UsesLibthrAndSo7;
+var
+  T: TTargetDesc;
+begin
+  MakeTarget(osFreeBSD, cpuX86_64, T);
+  AssertEquals('freebsd libc', 'libc.so.7', LinkLibSoname('c', T));
+  AssertEquals('freebsd libm', 'libm.so.5', LinkLibSoname('m', T));
+  { FreeBSD's threads live in libthr; there is no libpthread.so.N to load.
+    Naming libpthread here is an unresolvable DT_NEEDED at exec time. }
+  AssertEquals('freebsd pthread maps to libthr', 'libthr.so.3',
+    LinkLibSoname('pthread', T));
+  { dlopen/dlsym are in libc on FreeBSD — there is no separate libdl. }
+  AssertEquals('freebsd dl folds into libc', 'libc.so.7',
+    LinkLibSoname('dl', T));
+  { The POSIX realtime routines are likewise in libc on FreeBSD. }
+  AssertEquals('freebsd rt folds into libc', 'libc.so.7',
+    LinkLibSoname('rt', T));
+end;
+
+procedure TBackendDriverContractTests.TestLinkLibSoname_UnknownLib_FallsBackToDevSymlink;
+var
+  TL, TF: TTargetDesc;
+begin
+  { A third-party lib (X11, ncurses, ssl) has no entry in the table; both
+    targets fall back to the unversioned dev-symlink name, matching -l<name>.
+    On a native link ResolveLibNeeded reads the real DT_SONAME instead. }
+  MakeTarget(osLinux, cpuX86_64, TL);
+  MakeTarget(osFreeBSD, cpuX86_64, TF);
+  AssertEquals('linux X11 fallback',   'libX11.so', LinkLibSoname('X11', TL));
+  AssertEquals('freebsd X11 fallback', 'libX11.so', LinkLibSoname('X11', TF));
+end;
+
+procedure TBackendDriverContractTests.TestRTLUnits_LinuxDynamic_UsesLinuxStart;
+var
+  U: TStringList;
+begin
+  U := BuildRTLUnitList(False, osLinux);
+  try
+    AssertTrue('dynamic linux start leaf',
+      ListContains(U, 'runtime.start.linux'));
+    AssertTrue('freebsd start must not appear',
+      not ListContains(U, 'runtime.start.freebsd'));
+  finally
+    U.Free();
+  end;
+end;
+
+procedure TBackendDriverContractTests.TestRTLUnits_FreeBSDDynamic_UsesFreeBSDStart;
+var
+  U: TStringList;
+begin
+  U := BuildRTLUnitList(False, osFreeBSD);
+  try
+    AssertTrue('dynamic freebsd start leaf',
+      ListContains(U, 'runtime.start.freebsd'));
+    { Linking the Linux start into a FreeBSD binary leaves an unresolvable
+      __libc_start_main in .dynsym — the loader fails at exec time. }
+    AssertTrue('linux start must not appear',
+      not ListContains(U, 'runtime.start.linux'));
+    { rtld and libthr own TLS on a dynamic binary, so the static profile's
+      sysarch-based start (and its kernel leaf) must stay out. }
+    AssertTrue('static start must not appear',
+      not ListContains(U, 'runtime.start.static.freebsd'));
+    AssertTrue('kernel syscall leaf must not appear',
+      not ListContains(U, 'runtime.syscall.freebsd'));
+  finally
+    U.Free();
+  end;
+end;
+
+procedure TBackendDriverContractTests.TestRTLUnits_Dynamic_NeverUsesSharedStart;
+var
+  U: TStringList;
+begin
+  { The OS-agnostic 'runtime.start' is gone; nothing may still select it. }
+  U := BuildRTLUnitList(False, osLinux);
+  try
+    AssertTrue('no OS-agnostic start on linux',
+      not ListContains(U, 'runtime.start'));
+  finally
+    U.Free();
+  end;
+  U := BuildRTLUnitList(False, osFreeBSD);
+  try
+    AssertTrue('no OS-agnostic start on freebsd',
+      not ListContains(U, 'runtime.start'));
+  finally
+    U.Free();
+  end;
 end;
 
 { ---- Registration ---- }

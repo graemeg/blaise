@@ -160,10 +160,12 @@ symbol-accurate rather than unit-marker driven.
 |full FFI available in dynamic mode
 
 |freebsd-x86_64
-|always freestanding
-|C bindings are a clear error until dynamic FreeBSD linking lands
- (planned: PT_INTERP `/libexec/ld-elf.so.1`, `DT_NEEDED libc.so.7`,
- no symbol versioning); required for the eventual fpGUI/Xlib port
+|freestanding, or dynamic+libc on C bindings
+|full FFI available in dynamic mode: PT_INTERP `/libexec/ld-elf.so.1`,
+ `DT_NEEDED libc.so.7`, no symbol versioning.  The RTL replaces crt1, so the
+ image also has to DEFINE the crt-owned exports `environ` and `__progname` in
+ its `.dynsym` — FreeBSD's `libc.so.7` lists them undefined and resolves them
+ against the executable
 
 |macos-arm64
 |always dynamic against libSystem
@@ -193,6 +195,29 @@ in the target's libraries — a typo surfaces at load time on the target.
   static self-host all pass; the RTL object cache is mode-safe (shared
   units compile identically, the modes differ only in which units join
   the link).
+* Three latent internal-linker defects surfaced only once FreeBSD started
+  producing dynamic images, because all three are tolerated on Linux:
++
+--
+. Two `PT_LOAD` segments sharing a page.  FreeBSD's image activator maps each
+  one with `vm_map_fixed(..., MAP_CHECK_EXCL)`, so the overlap fails the second
+  mapping after the old address space is already gone and `kern_execve` kills
+  the process with `SIGABRT` — no output, no core.  Linux's `elf_map` uses plain
+  `MAP_FIXED` and absorbs it silently.
+. A truncated SysV ELF hash in `.hash` (masking the top nibble away instead of
+  folding it back in per gABI figure 5-13).  Invisible while `.dynsym` held only
+  imports — the loader hashes those against the *library's* table — and fatal
+  the moment the image exports a symbol of its own.
+. No section headers for the linker-generated sections.  A loader only reads
+  `PT_DYNAMIC`, and GNU `readelf` falls back to it, but elftoolchain `readelf`
+  (FreeBSD base) wants an `SHT_DYNAMIC` *section* and otherwise reports "There
+  is no dynamic section in this file" for a plainly dynamic image.
+--
+* The sysconf name for the online CPU count is numbered per OS (Linux 84,
+  FreeBSD/Darwin 58) and now comes from `TPlatformLayout`.  FreeBSD's 84 is
+  `_SC_THREAD_CPUTIME` and answers `200112` rather than failing, so the
+  hard-coded Linux number did not surface as an error — it surfaced as a fiber
+  pool sized at 200112 workers.
 
 === Linux — glibc by default, with one caveat
 

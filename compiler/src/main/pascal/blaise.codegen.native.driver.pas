@@ -38,7 +38,19 @@ uses
   Classes,
   blaise.codegen,
   blaise.codegen.native,
+  blaise.codegen.target,
   blaise.codegen.driver;
+
+{ Map a link-library name (as it appears in `external 'lib'` or the codegen's
+  required-libs list) to the SONAME the TARGET's loader records in DT_NEEDED.
+
+  Exposed for testing: on a native link ResolveLibNeeded prefers the real
+  DT_SONAME read off the library file, so this table is only reached on a miss
+  — but for a CROSS link it is the sole authority, and probing the host's
+  libraries would name the host's sonames (a Linux-hosted freebsd-x86_64 link
+  must emit libc.so.7, never the host's libc.so.6). }
+function LinkLibSoname(const ALibName: string;
+  const ATarget: TTargetDesc): string;
 
 type
   TNativeBackendDriver = class(TBackendDriver)
@@ -215,15 +227,29 @@ begin
     Result := 'cc -c error (exit ' + IntToStr(ExitCode) + '): ' + Msg;
 end;
 
-{ Map a link-library name (as it appears in `external 'lib'` or the codegen's
-  required-libs list) to the SONAME the dynamic loader records in DT_NEEDED.
-  The external cc linker resolves `-l<name>` to lib<name>.so at link time and
+{ The external cc linker resolves `-l<name>` to lib<name>.so at link time and
   the resulting binary carries the library's real SONAME; the internal linker
   writes DT_NEEDED itself, so it must name the versioned SONAME directly.  Known
   system libs get their canonical SONAME; anything else falls back to the
-  conventional unversioned 'lib<name>.so' (a dev symlink, matching -l<name>). }
-function LinkLibSoname(const ALibName: string): string;
+  conventional unversioned 'lib<name>.so' (a dev symlink, matching -l<name>).
+
+  FreeBSD is not a re-versioned Linux: threads live in libthr (libpthread.so.N
+  does not exist), and dlopen/dlsym plus the POSIX realtime routines are part
+  of libc rather than separate libdl/librt objects — so 'dl' and 'rt' fold into
+  libc.so.7 instead of naming a library the loader would fail to find. }
+function LinkLibSoname(const ALibName: string;
+  const ATarget: TTargetDesc): string;
 begin
+  if ATarget.OS = osFreeBSD then
+  begin
+    if SameText(ALibName, 'pthread') then Result := 'libthr.so.3'
+    else if SameText(ALibName, 'm')  then Result := 'libm.so.5'
+    else if SameText(ALibName, 'dl') then Result := 'libc.so.7'
+    else if SameText(ALibName, 'rt') then Result := 'libc.so.7'
+    else if SameText(ALibName, 'c')  then Result := 'libc.so.7'
+    else Result := 'lib' + ALibName + '.so';
+    Exit;
+  end;
   if SameText(ALibName, 'pthread') then Result := 'libpthread.so.0'
   else if SameText(ALibName, 'm')  then Result := 'libm.so.6'
   else if SameText(ALibName, 'dl') then Result := 'libdl.so.2'
@@ -292,9 +318,12 @@ begin
 end;
 
 { Default ELF shared-library search directories, plus any from LibPaths /
-  LD_LIBRARY_PATH / LIBRARY_PATH.  Matches the common Linux multiarch layout;
-  a --lib-path entry (AExtra) takes precedence. }
-procedure BuildLibSearchDirs(AExtra: TStringList; AOut: TStringList);
+  LD_LIBRARY_PATH / LIBRARY_PATH.  A --lib-path entry (AExtra) takes
+  precedence.  The defaults are per-target: Linux uses the Debian/Ubuntu
+  multiarch layout, while FreeBSD has no multiarch split and puts third-party
+  packages under /usr/local/lib. }
+procedure BuildLibSearchDirs(AExtra: TStringList; AOut: TStringList;
+  const ATarget: TTargetDesc);
   procedure AddColonList(const AList: string);
   var Seg: string; K, N, B: Integer;
   begin
@@ -325,8 +354,15 @@ begin
         AOut.Add(AExtra.Strings[I]);
   AddColonList(GetEnvironmentVariable('LD_LIBRARY_PATH'));
   AddColonList(GetEnvironmentVariable('LIBRARY_PATH'));
-  if AOut.IndexOf('/lib/x86_64-linux-gnu') < 0 then AOut.Add('/lib/x86_64-linux-gnu');
-  if AOut.IndexOf('/usr/lib/x86_64-linux-gnu') < 0 then AOut.Add('/usr/lib/x86_64-linux-gnu');
+  { The multiarch split is Linux's own convention — name it positively so a
+    new target gets the plain POSIX set rather than inheriting Linux's paths. }
+  if ATarget.OS = osLinux then
+  begin
+    if AOut.IndexOf('/lib/x86_64-linux-gnu') < 0 then AOut.Add('/lib/x86_64-linux-gnu');
+    if AOut.IndexOf('/usr/lib/x86_64-linux-gnu') < 0 then AOut.Add('/usr/lib/x86_64-linux-gnu');
+  end;
+  { Common to every POSIX target; on FreeBSD /usr/local/lib is where pkg(8)
+    installs third-party libraries such as X11 and ncurses. }
   if AOut.IndexOf('/usr/local/lib') < 0 then AOut.Add('/usr/local/lib');
   if AOut.IndexOf('/lib') < 0 then AOut.Add('/lib');
   if AOut.IndexOf('/usr/lib') < 0 then AOut.Add('/usr/lib');
@@ -453,7 +489,8 @@ end;
 
 { Find lib<AName>.so on the search path; also probe the versioned dev names.
   Returns the resolved path or '' if not found. }
-function FindLibFile(const AName: string; ADirs: TStringList): string;
+function FindLibFile(const AName: string; ADirs: TStringList;
+  const ATarget: TTargetDesc): string;
 var
   I: Integer;
   Cand: string;
@@ -464,19 +501,27 @@ begin
     Cand := ADirs.Strings[I] + '/lib' + AName + '.so';
     if FileExists(Cand) then Exit(Cand);
   end;
-  { Fallbacks: a bare .so may be absent but .so.N present (no dev package). }
+  { Fallback: a bare .so may be absent but .so.N present (no dev package).  The
+    version digit is per-OS (glibc's libc.so.6 vs FreeBSD's libc.so.7), so ask
+    the target's soname table rather than assuming glibc's. }
   for I := 0 to ADirs.Count - 1 do
   begin
-    Cand := ADirs.Strings[I] + '/lib' + AName + '.so.6';
+    Cand := ADirs.Strings[I] + '/' + LinkLibSoname(AName, ATarget);
     if FileExists(Cand) then Exit(Cand);
   end;
 end;
 
 { Resolve one -l<name> library into DT_NEEDED soname(s), appending to ANeeded
   (deduped).  Follows linker scripts recursively.  AVisited guards against
-  cyclic INPUT() references.  Falls back to the string guess on any miss. }
+  cyclic INPUT() references.  Falls back to the string guess on any miss.
+
+  Probing the filesystem is only meaningful when the libraries on this host ARE
+  the target's libraries.  On a CROSS link they are not — reading the host's
+  /usr/lib/libm.so during a Linux-hosted freebsd-x86_64 link would stamp glibc's
+  libm.so.6 into a FreeBSD binary — so the per-target soname table is used
+  directly and the host's files are left alone. }
 procedure ResolveLibNeeded(const AName: string; ADirs, ANeeded,
-  AVisited: TStringList);
+  AVisited: TStringList; const ATarget: TTargetDesc);
 var
   Path, Bytes, Soname, Tok, InnerName: string;
   Scr: TStringList;
@@ -484,12 +529,18 @@ var
 begin
   if AVisited.IndexOf(AName) >= 0 then Exit;
   AVisited.Add(AName);
-  Path := FindLibFile(AName, ADirs);
+  if ATarget.OS <> HostTarget().OS then
+  begin
+    Soname := LinkLibSoname(AName, ATarget);
+    if ANeeded.IndexOf(Soname) < 0 then ANeeded.Add(Soname);
+    Exit;
+  end;
+  Path := FindLibFile(AName, ADirs, ATarget);
   if Path = '' then
   begin
     { Not found on the path — keep the historical guess so previously-working
       links (e.g. a lib present only at runtime) are unaffected. }
-    Soname := LinkLibSoname(AName);
+    Soname := LinkLibSoname(AName, ATarget);
     if ANeeded.IndexOf(Soname) < 0 then ANeeded.Add(Soname);
     Exit;
   end;
@@ -513,7 +564,8 @@ begin
         if (Length(Tok) >= 2) and (StrAt(Tok, 0) = Ord('-'))
            and (StrAt(Tok, 1) = Ord('l')) then
           { A bare -lNAME reference — resolve it as its own library. }
-          ResolveLibNeeded(StrCopyTail(Tok, 2), ADirs, ANeeded, AVisited)
+          ResolveLibNeeded(StrCopyTail(Tok, 2), ADirs, ANeeded, AVisited,
+            ATarget)
         else
         begin
           { A file token — possibly an absolute path (a GROUP() script names
@@ -531,7 +583,7 @@ begin
               { An unversioned libX.so (another dev symlink / script) — recurse
                 on its base name so its own SONAME / script is resolved. }
               ResolveLibNeeded(StrCopyFrom(Tok, 3, StrPos('.so', Tok) - 3),
-                ADirs, ANeeded, AVisited);
+                ADirs, ANeeded, AVisited, ATarget);
           end;
         end;
       end;
@@ -539,7 +591,7 @@ begin
     else
     begin
       { Neither ELF nor a recognisable script — fall back. }
-      Soname := LinkLibSoname(AName);
+      Soname := LinkLibSoname(AName, ATarget);
       if ANeeded.IndexOf(Soname) < 0 then ANeeded.Add(Soname);
     end;
   finally
@@ -669,30 +721,10 @@ begin
         EffDynamic := False;
       end;
     lmDynamic:
-      begin
-        if AOpts.Target.OS = osFreeBSD then
-        begin
-          LinkTarget.Free();
-          Exit('--dynamic: FreeBSD binaries are freestanding (dynamic '
-            + 'FreeBSD linking is not implemented yet)');
-        end;
-        EffDynamic := True;
-      end;
+      EffDynamic := True;
   else
     { lmAuto }
-    if AOpts.Target.OS = osFreeBSD then
-    begin
-      if HasUserLibs then
-      begin
-        LinkTarget.Free();
-        Exit('freebsd target: the program binds external C libraries ('
-          + JoinNames(AOpts.UserLinkLibs)
-          + '), but dynamic FreeBSD linking is not implemented yet - a '
-          + 'freestanding binary cannot load shared libraries');
-      end;
-      EffDynamic := False;
-    end
-    else if HasUserLibs then
+    if HasUserLibs then
     begin
       EffDynamic := True;
       WriteLn(StdErr, 'note: linking dynamically against libc: the program '
@@ -737,10 +769,10 @@ begin
             Needed := TStringList.Create();
             Visited := TStringList.Create();
             try
-              BuildLibSearchDirs(AOpts.LibPaths, LibDirs);
+              BuildLibSearchDirs(AOpts.LibPaths, LibDirs, AOpts.Target);
               for I := 0 to AOpts.LinkLibs.Count - 1 do
                 ResolveLibNeeded(AOpts.LinkLibs.Strings[I], LibDirs, Needed,
-                  Visited);
+                  Visited, AOpts.Target);
               for I := 0 to Needed.Count - 1 do
                 Lk.AddNeededLib(Needed.Strings[I]);
             finally
@@ -783,12 +815,6 @@ begin
                   Exit('--static: unresolved C symbols ('
                     + JoinNames(Unresolved)
                     + ') - a freestanding binary must resolve every '
-                    + 'external from the RTL');
-                if AOpts.Target.OS = osFreeBSD then
-                  Exit('freebsd target: unresolved C symbols ('
-                    + JoinNames(Unresolved)
-                    + '), but dynamic FreeBSD linking is not implemented '
-                    + 'yet - a freestanding binary must resolve every '
                     + 'external from the RTL');
                 WriteLn(StdErr, 'note: linking dynamically against libc: '
                   + 'unresolved C symbols (' + JoinNames(Unresolved) + ')');

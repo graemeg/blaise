@@ -45,11 +45,6 @@ type
     procedure TestResolve_FreeBSDX86_64_ReturnsToolkit;
     { FreeBSD toolkit produces a FreeBSD-OSABI link target (OSABI 9). }
     procedure TestFreeBSDToolkit_MakeLinkTarget_IsFreeBSDOSABI;
-    { Strategy-B: FreeBSD is freestanding (no libc, always static ET_EXEC);
-      Linux is not (dynamic libc by default). }
-    procedure TestTargetIsFreestanding_FreeBSD_True;
-    procedure TestTargetIsFreestanding_Linux_False;
-
     procedure TestResolve_MacOSArm64_ReturnsToolkit;
     procedure TestMacOSToolkit_MakeBackend_NotNil;
     procedure TestMacOSToolkit_MakeLinkTarget_NilUntilMachOLinker;
@@ -141,18 +136,6 @@ begin
   finally
     Lt.Free();
   end;
-end;
-
-procedure TTargetToolkitTests.TestTargetIsFreestanding_FreeBSD_True;
-begin
-  AssertTrue('FreeBSD is a freestanding (Strategy-B, static, no-libc) target',
-    TargetIsFreestanding(Self.FreeBSDTarget()));
-end;
-
-procedure TTargetToolkitTests.TestTargetIsFreestanding_Linux_False;
-begin
-  AssertFalse('Linux links dynamic libc by default, not freestanding',
-    TargetIsFreestanding(Self.LinuxTarget()));
 end;
 
 procedure TTargetToolkitTests.TestResolve_MacOSArm64_ReturnsToolkit;

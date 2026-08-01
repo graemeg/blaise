@@ -81,14 +81,6 @@ function TargetHasQBEBackend(const ATarget: TTargetDesc): Boolean;
   rather than on an OS blocklist, so a new ELF OS needs no edit here. }
 function TargetUsesElf(const ATarget: TTargetDesc): Boolean;
 
-{ True when the target is FREESTANDING — reached via direct syscalls with no
-  libc, so it is always linked as a static ET_EXEC with a self-supplied _start
-  and no PT_INTERP / libc NEEDED (Strategy B, see
-  docs/freebsd-x86_64-backend-design.adoc).  FreeBSD is freestanding; Linux
-  links dynamic libc by default.  Drives both the RTL unit-list selection
-  (the kernel leaf is always pulled in) and the internal linker's static mode. }
-function TargetIsFreestanding(const ATarget: TTargetDesc): Boolean;
-
 { Lower-case OS token used in the OS-specific RTL unit names, e.g.
   'linux' / 'freebsd' in rtl.platform.layout.<os>, runtime.syscall.<os>.
   The single source of truth for the OS suffix, shared by the driver's RTL
@@ -235,13 +227,6 @@ begin
   { macOS is Mach-O; Linux/FreeBSD are ELF.  Windows would be PE, and is not a
     native-backend target yet — it is excluded here rather than assumed ELF. }
   Result := (ATarget.OS = osLinux) or (ATarget.OS = osFreeBSD);
-end;
-
-function TargetIsFreestanding(const ATarget: TTargetDesc): Boolean;
-begin
-  { FreeBSD uses Strategy B — direct syscalls, no libc — so it is always a
-    static, freestanding ET_EXEC.  Other OSes link dynamic libc by default. }
-  Result := (ATarget.OS = osFreeBSD);
 end;
 
 function TargetOSName(const ATarget: TTargetDesc): string;

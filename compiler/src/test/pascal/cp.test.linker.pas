@@ -114,9 +114,49 @@ type
   TDynLinkerTests = class(TTestCase)
   private
     function ProjectRoot: string;
+    { Look ANAME up in a linked image's .dynsym, reached the way the run-time
+      loader does: PT_DYNAMIC -> DT_SYMTAB / DT_STRTAB / DT_HASH, then the
+      .hash bucket/chain walk.  Returns False when the name is absent.  Our PIE
+      output is laid out at base 0, so a virtual address doubles as a file
+      offset. }
+    function FindDynSym(const ABytes, AName: string;
+      out AShndx: Integer; out AValue: Int64): Boolean;
   published
     procedure TestDyn_CollectsExternals;
     procedure TestDyn_PieHeaderEmitted;
+    { A dynamic link under the FreeBSD target must carry the FreeBSD loader
+      contract, not Linux's: PT_INTERP names /libexec/ld-elf.so.1, EI_OSABI is
+      9 (ELFOSABI_FREEBSD) and the first DT_NEEDED soname is libc.so.7.  The
+      interpreter path and the libc soname are per-target knobs on
+      TLinkTarget; a Linux-branded loader path in a FreeBSD ELF is an
+      immediate exec failure. }
+    procedure TestDyn_FreeBSDTarget_InterpAndLibcSoname;
+    { FreeBSD's libc.so.7 imports `environ` and `__progname` as UND GLOBAL and
+      resolves them with GLOB_DAT relocations against the EXECUTABLE — on a
+      stock toolchain crt1.o defines them.  Blaise supplies its own entry
+      object instead, so the linker has to publish those definitions in the
+      executable's .dynsym or rtld aborts with "Undefined symbol".  The set is
+      a per-target property (TLinkTarget.CrtExports); Linux needs none. }
+    procedure TestDyn_FreeBSDTarget_ExportsCrtOwnedSymbols;
+    { The export list is opt-in per target: a Linux dynamic link must not grow
+      .dynsym entries (and so must stay byte-identical to before). }
+    procedure TestDyn_LinuxTarget_ExportsNothing;
+    { No two PT_LOAD segments may share a page.  FreeBSD's image activator maps
+      every PT_LOAD with vm_map_fixed(..., MAP_CHECK_EXCL), so an overlapping
+      page range fails the mapping AFTER the old address space is gone and
+      kern_execve kills the process with SIGABRT — silently, with no output and
+      no core.  Linux's elf_map uses MAP_FIXED and quietly tolerates the
+      overlap, which is why the RELRO/data page sharing went unnoticed. }
+    procedure TestDyn_LoadSegments_DoNotSharePages;
+    { LkElfHash must be the gABI hash, carry for carry.  The published
+      algorithm folds the top nibble back in (h ^= g shr 24; h := h and not g)
+      rather than simply discarding it, and the two agree for every name short
+      enough that the top nibble never fills — which is every name in a
+      .dynsym of imports, because the loader hashes those against the
+      LIBRARY's table, not ours.  The moment we export a symbol of our own the
+      difference becomes visible: 'environ' lands in bucket $C5D095E under the
+      truncating variant and $C5D093E under the real one. }
+    procedure TestDyn_ElfHash_MatchesGabi;
   end;
 
   TDynLinkerE2ETests = class(TTestCase)
@@ -1453,6 +1493,112 @@ begin
   Result := IncludeTrailingPathDelimiter(GetCurrentDir());
 end;
 
+{ Read an ACount-byte little-endian field at AOff (0-based, as ELF counts). }
+{ The SysV ELF hash, transcribed from the gABI (Figure 5-13) — the function
+  every run-time loader uses to index a .hash bucket.  Written out here rather
+  than reused from the linker so the tests check the linker's hash against the
+  specification instead of against itself. }
+function SysVElfHash(const AName: string): Integer;
+var
+  H, G: Int64;
+  K: Integer;
+begin
+  { Int64 throughout with an explicit 32-bit mask: the gABI hash is defined on
+    an unsigned 32-bit word, and shifting its top nibble right on a signed
+    32-bit type would sign-extend. }
+  H := 0;
+  for K := 0 to Length(AName) - 1 do
+  begin
+    H := ((H shl 4) + OrdAt(AName, K)) and $FFFFFFFF;
+    G := H and $F0000000;
+    if G <> 0 then
+      H := H xor (G shr 24);
+    H := H and (not G);
+  end;
+  Result := Integer(H);
+end;
+
+function LeAt(const ABytes: string; AOff, ACount: Integer): Int64;
+var
+  K: Integer;
+begin
+  Result := 0;
+  for K := ACount - 1 downto 0 do
+    Result := (Result shl 8) or OrdAt(ABytes, AOff + K);
+end;
+
+function TDynLinkerTests.FindDynSym(const ABytes, AName: string;
+  out AShndx: Integer; out AValue: Int64): Boolean;
+var
+  PhOff, PhEntSz, PhCount, J, Base: Integer;
+  DynOff, Tag, Val, SymTab, StrTab, HashTab, Ent: Int64;
+  NBucket, NChain, I, NameOff, K: Integer;
+  N: string;
+begin
+  Result := False;
+  AShndx := 0;
+  AValue := 0;
+
+  PhOff   := Integer(LeAt(ABytes, 32, 8));
+  PhEntSz := Integer(LeAt(ABytes, 54, 2));
+  PhCount := Integer(LeAt(ABytes, 56, 2));
+
+  DynOff := -1;
+  for J := 0 to PhCount - 1 do
+  begin
+    Base := PhOff + J * PhEntSz;
+    if LeAt(ABytes, Base, 4) = 2 then            { PT_DYNAMIC }
+      DynOff := LeAt(ABytes, Base + 8, 8);       { p_offset }
+  end;
+  if DynOff < 0 then Exit;
+
+  SymTab := -1; StrTab := -1; HashTab := -1;
+  J := 0;
+  while J < 256 do
+  begin
+    Tag := LeAt(ABytes, Integer(DynOff) + J * 16, 8);
+    Val := LeAt(ABytes, Integer(DynOff) + J * 16 + 8, 8);
+    if Tag = 0 then Break;                       { DT_NULL }
+    if Tag = 4 then HashTab := Val;              { DT_HASH }
+    if Tag = 5 then StrTab := Val;               { DT_STRTAB }
+    if Tag = 6 then SymTab := Val;               { DT_SYMTAB }
+    J := J + 1;
+  end;
+  if (SymTab < 0) or (StrTab < 0) or (HashTab < 0) then Exit;
+
+  { Follow the bucket/chain exactly as the loader does — a symbol that is in
+    .dynsym but unreachable through .hash does not exist as far as rtld is
+    concerned, so a linear scan here would pass over a broken hash table. }
+  NBucket := Integer(LeAt(ABytes, Integer(HashTab), 4));
+  NChain  := Integer(LeAt(ABytes, Integer(HashTab) + 4, 4));
+  if (NBucket < 1) or (NChain < 1) then Exit;
+
+  I := Integer(LeAt(ABytes,
+    Integer(HashTab) + 8 + (SysVElfHash(AName) mod NBucket) * 4, 4));
+  while (I <> 0) and (I < NChain) do
+  begin
+    Ent := SymTab + Int64(I) * 24;               { ELF64_SYM_SIZE }
+    NameOff := Integer(LeAt(ABytes, Integer(Ent), 4));
+    N := '';
+    K := Integer(StrTab) + NameOff;
+    while OrdAt(ABytes, K) <> 0 do
+    begin
+      N := N + Chr(OrdAt(ABytes, K));
+      K := K + 1;
+    end;
+    if N = AName then
+    begin
+      AShndx := Integer(LeAt(ABytes, Integer(Ent) + 6, 2));   { st_shndx }
+      AValue := LeAt(ABytes, Integer(Ent) + 8, 8);            { st_value }
+      Result := True;
+      Exit;
+    end;
+    { chains[] follows buckets[] in the same table }
+    I := Integer(LeAt(ABytes,
+      Integer(HashTab) + 8 + (NBucket + I) * 4, 4));
+  end;
+end;
+
 procedure TDynLinkerTests.TestDyn_CollectsExternals;
 const
   MainAsm =
@@ -1530,6 +1676,223 @@ begin
   finally
     Lk.Free();
   end;
+end;
+
+procedure TDynLinkerTests.TestDyn_FreeBSDTarget_InterpAndLibcSoname;
+const
+  MainAsm =
+    '.text' + LineEnding +
+    '.globl main' + LineEnding +
+    'main:' + LineEnding +
+    '  xorl %eax, %eax' + LineEnding +
+    '  ret' + LineEnding;
+var
+  Lk: TLinker;
+  Obj: TElfObjectFile;
+  Bytes, Interp: string;
+  PhOff, PhCount, PhEntSz: Integer;
+  J, K, PType, Base: Integer;
+  SegOff, SegFileSz: Int64;
+begin
+  Lk := TLinker.Create(FreeBSDX86_64Target());
+  try
+    Lk.SetDynamic(True);
+    Obj := ParseElfObject(AssembleToBytes(MainAsm), 'main.o');
+    Lk.AddOwnedObject(Obj);
+    Bytes := Lk.LinkToBytes('main');
+
+    { The OS/ABI brand must survive the dynamic path, not just the static one. }
+    AssertEquals('EI_OSABI FreeBSD', 9, OrdAt(Bytes, 7));
+
+    PhOff := OrdAt(Bytes, 32) or (OrdAt(Bytes, 33) shl 8) or
+             (OrdAt(Bytes, 34) shl 16) or (OrdAt(Bytes, 35) shl 24);
+    PhEntSz := OrdAt(Bytes, 54) or (OrdAt(Bytes, 55) shl 8);
+    PhCount := OrdAt(Bytes, 56) or (OrdAt(Bytes, 57) shl 8);
+
+    { Locate PT_INTERP and read the interpreter string it points at. }
+    Interp := '';
+    for J := 0 to PhCount - 1 do
+    begin
+      Base := PhOff + J * PhEntSz;
+      PType := OrdAt(Bytes, Base) or (OrdAt(Bytes, Base + 1) shl 8) or
+               (OrdAt(Bytes, Base + 2) shl 16) or (OrdAt(Bytes, Base + 3) shl 24);
+      if PType = 3 then                       { PT_INTERP }
+      begin
+        SegOff := 0;
+        for K := 7 downto 0 do
+          SegOff := (SegOff shl 8) or OrdAt(Bytes, Base + 8 + K);
+        SegFileSz := 0;
+        for K := 7 downto 0 do
+          SegFileSz := (SegFileSz shl 8) or OrdAt(Bytes, Base + 32 + K);
+        { p_filesz counts the trailing NUL; drop it for the comparison. }
+        for K := 0 to Integer(SegFileSz) - 2 do
+          Interp := Interp + Chr(OrdAt(Bytes, Integer(SegOff) + K));
+      end;
+    end;
+
+    AssertEquals('PT_INTERP is the FreeBSD loader',
+      '/libexec/ld-elf.so.1', Interp);
+
+    { The first DT_NEEDED soname lives at .dynstr offset 1.  FreeBSD libc is
+      libc.so.7; Linux's libc.so.6 must not appear anywhere in the image. }
+    AssertTrue('libc.so.7 recorded as DT_NEEDED soname',
+      Pos('libc.so.7', Bytes) >= 0);
+    AssertTrue('Linux libc.so.6 NOT present', Pos('libc.so.6', Bytes) < 0);
+    AssertTrue('Linux loader path NOT present',
+      Pos('ld-linux-x86-64', Bytes) < 0);
+  finally
+    Lk.Free();
+  end;
+end;
+
+procedure TDynLinkerTests.TestDyn_FreeBSDTarget_ExportsCrtOwnedSymbols;
+const
+  MainAsm =
+    '.text' + LineEnding +
+    '.globl main' + LineEnding +
+    'main:' + LineEnding +
+    '  xorl %eax, %eax' + LineEnding +
+    '  ret' + LineEnding +
+    '.data' + LineEnding +
+    '.globl environ' + LineEnding +
+    'environ:' + LineEnding +
+    '  .quad 0' + LineEnding +
+    '.globl __progname' + LineEnding +
+    '__progname:' + LineEnding +
+    '  .quad 0' + LineEnding;
+var
+  Lk: TLinker;
+  Obj: TElfObjectFile;
+  Bytes: string;
+  Shndx: Integer;
+  Value: Int64;
+begin
+  Lk := TLinker.Create(FreeBSDX86_64Target());
+  try
+    Lk.SetDynamic(True);
+    Obj := ParseElfObject(AssembleToBytes(MainAsm), 'main.o');
+    Lk.AddOwnedObject(Obj);
+    Bytes := Lk.LinkToBytes('main');
+
+    AssertTrue('environ exported to .dynsym',
+      Self.FindDynSym(Bytes, 'environ', Shndx, Value));
+    { rtld treats st_shndx = SHN_UNDEF as "still an import" and keeps looking;
+      a DEFINED entry needs a real section index and the symbol's address. }
+    AssertTrue('environ is a definition, not an import', Shndx <> 0);
+    AssertTrue('environ carries its address', Value > 0);
+
+    AssertTrue('__progname exported to .dynsym',
+      Self.FindDynSym(Bytes, '__progname', Shndx, Value));
+    AssertTrue('__progname is a definition, not an import', Shndx <> 0);
+    AssertTrue('__progname carries its address', Value > 0);
+  finally
+    Lk.Free();
+  end;
+end;
+
+procedure TDynLinkerTests.TestDyn_LinuxTarget_ExportsNothing;
+const
+  MainAsm =
+    '.text' + LineEnding +
+    '.globl main' + LineEnding +
+    'main:' + LineEnding +
+    '  xorl %eax, %eax' + LineEnding +
+    '  ret' + LineEnding +
+    '.data' + LineEnding +
+    '.globl environ' + LineEnding +
+    'environ:' + LineEnding +
+    '  .quad 0' + LineEnding;
+var
+  Lk: TLinker;
+  Obj: TElfObjectFile;
+  Bytes: string;
+  Shndx: Integer;
+  Value: Int64;
+begin
+  { glibc defines environ itself, so a Linux image must not publish it — an
+    unnecessary export would perturb .dynsym/.hash for every existing binary. }
+  Lk := TLinker.Create();
+  try
+    Lk.SetDynamic(True);
+    Obj := ParseElfObject(AssembleToBytes(MainAsm), 'main.o');
+    Lk.AddOwnedObject(Obj);
+    Bytes := Lk.LinkToBytes('main');
+    AssertTrue('Linux exports no crt-owned symbols',
+      not Self.FindDynSym(Bytes, 'environ', Shndx, Value));
+  finally
+    Lk.Free();
+  end;
+end;
+
+procedure TDynLinkerTests.TestDyn_LoadSegments_DoNotSharePages;
+const
+  PageSize = $1000;
+  MainAsm =
+    '.text' + LineEnding +
+    '.globl main' + LineEnding +
+    'main:' + LineEnding +
+    '  xorl %eax, %eax' + LineEnding +
+    '  ret' + LineEnding +
+    '.data' + LineEnding +
+    '.globl gvalue' + LineEnding +
+    'gvalue:' + LineEnding +
+    '  .quad 42' + LineEnding;
+var
+  Lk: TLinker;
+  Obj: TElfObjectFile;
+  Bytes: string;
+  PhOff, PhCount, PhEntSz: Integer;
+  I, J, Off, Count: Integer;
+  Lo, Hi: array of Int64;
+begin
+  Lk := TLinker.Create(FreeBSDX86_64Target());
+  try
+    Lk.SetDynamic(True);
+    Obj := ParseElfObject(AssembleToBytes(MainAsm), 'main.o');
+    Lk.AddOwnedObject(Obj);
+    Bytes := Lk.LinkToBytes('main');
+
+    PhOff   := Integer(LeAt(Bytes, 32, 8));
+    PhEntSz := Integer(LeAt(Bytes, 54, 2));
+    PhCount := Integer(LeAt(Bytes, 56, 2));
+
+    { Collect the page-rounded extent of every non-empty PT_LOAD — the kernel
+      maps whole pages, so page-rounded is the granularity that matters. }
+    SetLength(Lo, PhCount);
+    SetLength(Hi, PhCount);
+    Count := 0;
+    for I := 0 to PhCount - 1 do
+    begin
+      Off := PhOff + I * PhEntSz;
+      if LeAt(Bytes, Off, 4) <> 1 then Continue;         { PT_LOAD }
+      if LeAt(Bytes, Off + 40, 8) = 0 then Continue;     { p_memsz }
+      Lo[Count] := LeAt(Bytes, Off + 16, 8);             { p_vaddr }
+      Hi[Count] := Lo[Count] + LeAt(Bytes, Off + 40, 8);
+      Lo[Count] := (Lo[Count] div PageSize) * PageSize;
+      Hi[Count] := ((Hi[Count] + PageSize - 1) div PageSize) * PageSize;
+      Count := Count + 1;
+    end;
+    AssertTrue('a dynamic image has several PT_LOADs', Count >= 3);
+
+    for I := 0 to Count - 1 do
+      for J := I + 1 to Count - 1 do
+        AssertTrue('PT_LOAD ' + IntToStr(I) + ' and ' + IntToStr(J) +
+          ' share a page', (Lo[J] >= Hi[I]) or (Lo[I] >= Hi[J]));
+  finally
+    Lk.Free();
+  end;
+end;
+
+procedure TDynLinkerTests.TestDyn_ElfHash_MatchesGabi;
+begin
+  { Short names: both variants agree, so these pin the common path. }
+  AssertEquals('hash of printf', SysVElfHash('printf'), LkElfHash('printf'));
+  AssertEquals('hash of main', SysVElfHash('main'), LkElfHash('main'));
+  { Long enough to fill the top nibble — where the fold matters. }
+  AssertEquals('hash of environ', $0C5D093E, LkElfHash('environ'));
+  AssertEquals('hash of __progname', $095C1245, LkElfHash('__progname'));
+  AssertEquals('hash of __libc_start1',
+    SysVElfHash('__libc_start1'), LkElfHash('__libc_start1'));
 end;
 
 { ---- TDynLinkerE2ETests ---- }

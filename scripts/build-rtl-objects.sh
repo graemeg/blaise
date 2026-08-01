@@ -10,15 +10,15 @@
 # Usage:
 #   scripts/build-rtl-objects.sh <blaise-binary> <out-dir> [options]
 # Options:
-#   --with-startup            include runtime.start (its bare _start)
+#   --with-startup            include runtime.start.<os> (its bare _start)
 #   --exclude-defined-by FILE omit any RTL object that defines a symbol FILE
 #                             already defines (FILE is the main program object)
 #
 # Builds each RTL unit into <out-dir>/<unit>.o and prints, one per line on
-# stdout, the object paths to put on the link line.  By default runtime.start
-# (the bare _start entry) is OMITTED — a gcc/cc link line gets _start from libc
-# and calls main.  Pass --with-startup to include it (a -nostartfiles / native
-# internal link that owns the entry point).
+# stdout, the object paths to put on the link line.  By default the per-OS
+# runtime.start.<os> (the bare _start entry) is OMITTED — a gcc/cc link line
+# gets _start from crt1 and calls main.  Pass --with-startup to include it (a
+# -nostartfiles / native internal link that owns the entry point).
 #
 # --exclude-defined-by handles the self-host link: a whole-program --emit-ir
 # dump INLINES the RTL units the compiler transitively uses (runtime.arc via
@@ -75,17 +75,23 @@ mkdir -p "$OUTDIR"
 # Leaf-first link order.  rtl.platform owns the shared globals (GPlatformLayout,
 # GRtlPlatform) that layout.linux + posix reference externally, so it is built
 # first and linked once.
-# Select the platform layout + errno units for the host OS.
+# Select the platform layout + errno + entry units for the host OS.  The entry
+# unit is per-OS because the hand-off into libc is: glibc's __libc_start_main
+# takes the raw stack pointer, FreeBSD's __libc_start1 takes argc/argv/envp
+# unpacked.  macOS has no entry unit at all (LC_MAIN names `main` directly).
 case "$(uname -s)" in
   FreeBSD) LAYOUT_UNIT=rtl.platform.layout.freebsd
-           ERRNO_UNIT=runtime.errno.freebsd ;;
+           ERRNO_UNIT=runtime.errno.freebsd
+           START_UNIT=runtime.start.freebsd ;;
   Darwin)  LAYOUT_UNIT=rtl.platform.layout.darwin
-           ERRNO_UNIT=runtime.errno.darwin ;;
+           ERRNO_UNIT=runtime.errno.darwin
+           START_UNIT= ;;
   *)       LAYOUT_UNIT=rtl.platform.layout.linux
-           ERRNO_UNIT=runtime.errno.linux ;;
+           ERRNO_UNIT=runtime.errno.linux
+           START_UNIT=runtime.start.linux ;;
 esac
 RTL_UNITS="rtl.platform
-runtime.start runtime.atomic runtime.setjmp runtime.utf8
+$START_UNIT runtime.atomic runtime.setjmp runtime.utf8
 runtime.mem runtime.str runtime.set runtime.arc
 runtime.weak runtime.float runtime.math runtime.thread runtime.exc
 $ERRNO_UNIT
@@ -134,21 +140,38 @@ if [ ! -f "$CACHE_STAMP" ] || [ "$(cat "$CACHE_STAMP")" != "$COMPILER_ID" ]; the
   printf '%s\n' "$COMPILER_ID" > "$CACHE_STAMP"
 fi
 
+# Newest source in the whole RTL set, kept as a reference FILE so the loop below
+# can use -nt.  Per-unit "object older than ITS OWN source" is blind to a unit
+# changing UNDER another one: adding a virtual method to TPlatformLayout in
+# rtl.platform.pas rebuilt that unit and the layout adapters but left
+# rtl.platform.posix.o cached against the previous vtable slot numbering, and
+# the resulting binary read every file truncated.  The RTL is a closed ~17-unit
+# set that builds in seconds, so any source moving rebuilds the lot.
+NEWEST_SRC=""
+for u in $RTL_UNITS; do
+  [ -f "$SRC/$u.pas" ] || continue
+  if [ -z "$NEWEST_SRC" ] || [ "$SRC/$u.pas" -nt "$NEWEST_SRC" ]; then
+    NEWEST_SRC="$SRC/$u.pas"
+  fi
+done
+
 OBJS=""
 for u in $RTL_UNITS; do
   obj="$OUTDIR/$u.o"
   src="$SRC/$u.pas"
   # Skip BEFORE building: the object was discarded further down anyway, and
-  # runtime.start is an x86_64/glibc _start stub whose inline asm no other
+  # runtime.start.<os> is an x86_64 _start stub whose inline asm no other
   # target can even assemble (macOS arm64 rejects `endbr64`, so every e2e test
   # died with "failed to build runtime.start").  Mach-O needs no startup object
   # at all — LC_MAIN names `main` directly.
-  if [ "$u" = "runtime.start" ] && [ "$WITH_STARTUP" -eq 0 ]; then
+  if [ -n "$START_UNIT" ] && [ "$u" = "$START_UNIT" ] && \
+     [ "$WITH_STARTUP" -eq 0 ]; then
     continue
   fi
-  # Rebuild only when the cached object is missing or older than its source, so
-  # a persistent $OUTDIR (e.g. reused across a test suite) builds the RTL once.
-  if [ ! -f "$obj" ] || [ "$src" -nt "$obj" ]; then
+  # Rebuild only when the cached object is missing or predates the newest RTL
+  # source, so a persistent $OUTDIR (e.g. reused across a test suite) builds the
+  # RTL once but an edit anywhere in the set rebuilds all of it.
+  if [ ! -f "$obj" ] || [ "$NEWEST_SRC" -nt "$obj" ]; then
     "$BLAISE" --backend native --assembler internal \
       --source "$src" \
       --unit-path "$SRC" --unit-cache "$OUTDIR" \
