@@ -51,6 +51,19 @@ type
     procedure TestSemanticAnalyser_DuplicateExternalBindingTolerated;
     procedure TestSemanticAnalyser_ExternalBindingToRealFuncTolerated;
     procedure TestSemanticAnalyser_PrivateImplProcsPerUnitNotAmbiguous;
+    { A used unit privately binds an external C symbol in its IMPLEMENTATION
+      section; the program then declares its OWN binding of the same name.
+      The program's declaration must define a callable symbol.  It used to be
+      swallowed: the program's forward/impl pairing searched FProcIndex — which
+      is global across every compiled unit — without restricting the match to
+      the current compilation, so the unit's private, body-less external entry
+      looked like a forward declaration the program was implementing.  The
+      program's own declaration was then skipped rather than defined, and the
+      call reported "Undeclared function".  The unit-to-unit half of this was
+      already fixed in AnalyseUnit; this is the program half.  Real-world bite:
+      any program that binds a libc symbol async.io also binds privately (e.g.
+      getsockopt) failed to compile. }
+    procedure TestSemanticAnalyser_ProgramExternalShadowsUnitPrivateExternal;
     { ------------------------------------------------------------------ }
     { Combined code generation                                             }
     { ------------------------------------------------------------------ }
@@ -634,6 +647,53 @@ begin
     Prog.Free();
     UB.Free();
     UA.Free();
+  end;
+end;
+
+procedure TMultifileTests.TestSemanticAnalyser_ProgramExternalShadowsUnitPrivateExternal;
+const
+  { The unit's ext_probe is implementation-private and body-less.  The program
+    declares its own ext_probe and calls it — that call must resolve. }
+  UnitSrc =
+    '''
+        unit ExtPriv;
+        interface
+        function GoX: Integer;
+        implementation
+        function ext_probe(X: Integer): Integer; external name 'abs';
+        function GoX: Integer;
+        begin
+          Result := ext_probe(-7)
+        end;
+        end.
+        ''';
+  ProgSrc =
+    '''
+        program TestP;
+        uses ExtPriv;
+        function ext_probe(X: Integer): Integer; external name 'abs';
+        var r: Integer;
+        begin
+          r := ext_probe(-5) + GoX()
+        end.
+        ''';
+var
+  U:    TUnit;
+  Prog: TProgram;
+  SA:   TSemanticAnalyser;
+begin
+  U    := ParseUnitSrc(UnitSrc);
+  Prog := ParseProg(ProgSrc);
+  SA   := TSemanticAnalyser.Create();
+  try
+    SA.AnalyseUnitForExport(U);
+    SA.Analyse(Prog);
+    AssertNotNull('prog analysed: own external binding not swallowed by the '
+      + 'used unit''s private one', Prog.SymbolTable);
+  finally
+    SA.Free();
+    Prog.Free();
+    U.Free();
   end;
 end;
 

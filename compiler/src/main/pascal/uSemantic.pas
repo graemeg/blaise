@@ -8016,10 +8016,21 @@ begin
 
     { If an earlier forward declaration exists, update the index to point to
       this implementation and skip re-registering the symbol.  Overloaded
-      decls bypass this — each overload is independent. }
+      decls bypass this — each overload is independent.
+
+      The candidate must come from THIS compilation.  FProcIndex is global
+      across every unit compiled so far, so an unqualified IndexOf also sees a
+      used unit's implementation-private routines.  Those are body-less when
+      they are `external name '...'` C bindings, which is exactly the shape of
+      a forward declaration — so a program declaring its own binding of a name
+      some used unit already binds privately was treated as merely implementing
+      that unit's decl.  It then took the Continue below and was never defined
+      into the program's scope, and the call reported "Undeclared function".
+      AnalyseUnit restricts the same lookup for the unit-to-unit case; this is
+      the program case. }
     if not ADecl.IsOverload then
     begin
-      J := FProcIndex.IndexOf(ADecl.Name);
+      J := IndexOfProcInUnit(ADecl.Name, FCurrentUnitName);
       if (J >= 0) and (TMethodDecl(FProcIndex.Objects[J]).Body = nil) and
          (not TMethodDecl(FProcIndex.Objects[J]).IsOverload) then
       begin
