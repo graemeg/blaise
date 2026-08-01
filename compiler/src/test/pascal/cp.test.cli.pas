@@ -747,6 +747,14 @@ begin
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
     '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
     '--output', BinPath], Out_);
+  {$IFDEF FREEBSD}
+  { FreeBSD host: dynamic linking is not implemented yet, so binding a C
+    library is (by design) a clear error rather than a link.  This arm
+    inverts when the FreeBSD dynamic mode lands. }
+  AssertTrue('freebsd: binding a C library must fail', EC <> 0);
+  AssertTrue('freebsd: error names the libraries and the missing feature',
+    Pos('binds external C libraries (m)', Out_) >= 0);
+  {$ELSE}
   AssertEquals('external-lib program links (out: ' + Out_ + ')', 0, EC);
   AssertTrue('note names the binding libraries',
     Pos('linking dynamically against libc: the program binds external C ' +
@@ -755,6 +763,7 @@ begin
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
   AssertTrue('libm is a DT_NEEDED', Pos('libm.so', Dyn) >= 0);
   AssertTrue('libc is a DT_NEEDED', Pos('libc.so', Dyn) >= 0);
+  {$ENDIF}
 end;
 
 procedure TCLIContractTests.TestLinkAuto_BareLibcSymbol_FallsBackWithNote;
@@ -773,12 +782,20 @@ begin
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
     '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
     '--output', BinPath], Out_);
+  {$IFDEF FREEBSD}
+  { FreeBSD host: no dynamic fallback exists yet — the probe's miss is a
+    clear error naming the symbols.  Inverts when dynamic FreeBSD lands. }
+  AssertTrue('freebsd: unresolved C symbol must fail', EC <> 0);
+  AssertTrue('freebsd: error names the symbols',
+    Pos('unresolved C symbols (isatty)', Out_) >= 0);
+  {$ELSE}
   AssertEquals('bare-libc program links (out: ' + Out_ + ')', 0, EC);
   AssertTrue('note names the unresolved symbols',
     Pos('unresolved C symbols (isatty)', Out_) >= 0);
   Dyn := ReadelfDynamic(BinPath);
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
   AssertTrue('libc is a DT_NEEDED', Pos('libc.so', Dyn) >= 0);
+  {$ENDIF}
 end;
 
 procedure TCLIContractTests.TestLinkStatic_ExternalLib_Errors;
@@ -831,12 +848,20 @@ begin
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native', '--dynamic',
     '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
     '--output', BinPath], Out_);
+  {$IFDEF FREEBSD}
+  { FreeBSD host: --dynamic is (by design) rejected until the dynamic
+    FreeBSD mode lands. }
+  AssertTrue('freebsd: --dynamic must fail', EC <> 0);
+  AssertTrue('freebsd: error says dynamic FreeBSD is not implemented',
+    Pos('dynamic FreeBSD linking is not implemented', Out_) >= 0);
+  {$ELSE}
   AssertEquals('pure program links dynamically (out: ' + Out_ + ')', 0, EC);
   AssertTrue('no note for an explicit mode',
     Pos('linking dynamically', Out_) < 0);
   Dyn := ReadelfDynamic(BinPath);
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
   AssertTrue('libc is a DT_NEEDED', Pos('libc.so', Dyn) >= 0);
+  {$ENDIF}
 end;
 
 procedure TCLIContractTests.TestPthread_NativeThreads_LinksLibpthread;
