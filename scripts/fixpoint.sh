@@ -7,7 +7,7 @@
 #   1. Find stage-1 binary (latest release or explicit $STAGE1).
 #   2. Rebuild + install RTL (cheap when nothing changed).
 #   3. stage-1 -> stage-2 IR.
-#   4. Assemble + link stage-2 binary via QBE + gcc.
+#   4. Assemble + link stage-2 binary via QBE + the system C driver ($CC, cc).
 #   5. stage-2 -> stage-3 IR (5-minute timeout).
 #   6. diff stage-2.ssa stage-3.ssa  => empty = clean fixpoint.
 #
@@ -47,15 +47,21 @@ echo "stage-1: $STAGE1_BIN"
 ABS_STAGE1="$(cd "$(dirname "$STAGE1_BIN")" && pwd)/$(basename "$STAGE1_BIN")"
 RTL_OBJDIR=/tmp/fp_rtl_obj
 
+# Assembler/linker driver.  `cc` is the portable spelling: FreeBSD base has
+# /usr/bin/cc (clang) and no gcc at all, and the CI VM deliberately installs no
+# packages, so hardcoding gcc made this script unrunnable there.  $CC still wins
+# when the caller wants a specific driver.
+CC="${CC:-cc}"
+
 link_stage() {
   # $1 = assembled program .s, $2 = output binary
   local prog_s="$1" out_bin="$2" prog_o rtl_objs
   prog_o="${prog_s%.s}.o"
-  gcc -c -o "$prog_o" "$prog_s" 2>/tmp/fp_cc.err || return 3
+  "$CC" -c -o "$prog_o" "$prog_s" 2>/tmp/fp_cc.err || return 3
   rm -rf "$RTL_OBJDIR"
   rtl_objs=$(scripts/build-rtl-objects.sh "$ABS_STAGE1" "$RTL_OBJDIR" \
                --exclude-defined-by "$prog_o") || return 11
-  gcc -o "$out_bin" "$prog_o" $rtl_objs -lm -lpthread 2>/tmp/fp_gcc.err || return 3
+  "$CC" -o "$out_bin" "$prog_o" $rtl_objs -lm -lpthread 2>/tmp/fp_gcc.err || return 3
   return 0
 }
 
