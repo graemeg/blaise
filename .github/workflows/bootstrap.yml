@@ -233,7 +233,16 @@ jobs:
       - name: Run stdlib tests
         run: |
           set -euo pipefail
-          pasbuild test -m blaise-stdlib --compiler "${{ steps.pre.outputs.bin }}"
+          # On failure, surface the compiler log pasbuild points at — without
+          # this the step ends with "see target/pasbuild-status/... for
+          # details" and the details are unreachable on a dead runner.
+          if ! pasbuild test -m blaise-stdlib --compiler "${{ steps.pre.outputs.bin }}"; then
+            echo "===== stdlib compile log ====="
+            cat stdlib/target/pasbuild-status/compile/compiler.log 2>/dev/null || true
+            echo "===== stdlib test-compile log ====="
+            cat stdlib/target/pasbuild-status/test-compile/compiler.log 2>/dev/null || true
+            exit 1
+          fi
 
       # --------------------------------------------------------------------
       # 8b. Linked-BINARY fixpoint.  Every other guard stops at IR/asm text or
