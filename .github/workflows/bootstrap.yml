@@ -218,7 +218,9 @@ jobs:
           # BLAISE_QBE points the E2E suite at the vendored QBE built above
           # (its fallback is vendor/qbe/qbe, but set it explicitly).
           BLAISE_QBE="$PWD/vendor/qbe/qbe" \
-          BLAISE_QBE_COMPILER="$BLAISE" compiler/target/TestRunner
+          # --verbose: one line per test, so a crash or hang in CI still
+          # tells us the last test that ran.
+          BLAISE_QBE_COMPILER="$BLAISE" compiler/target/TestRunner --verbose
 
       # --------------------------------------------------------------------
       # 8a. Stdlib suite.  The TestRunner above covers the COMPILER module
@@ -492,7 +494,7 @@ jobs:
               echo "=== run full test suite (FreeBSD) ==="
               BLAISE_QBE="$WS/vendor/qbe/qbe" \
               BLAISE_QBE_COMPILER="$WS/compiler/target/blaise" \
-              compiler/target/TestRunner
+              compiler/target/TestRunner --verbose
               echo "FREEBSD_FULL_SUITE_OK"
 
               # The suite above is the COMPILER module only.  stdlib is a
@@ -513,7 +515,7 @@ jobs:
                 --output stdlib/target/TestRunner
 
               echo "=== run stdlib suite (FreeBSD) ==="
-              stdlib/target/TestRunner
+              stdlib/target/TestRunner --verbose
               echo "FREEBSD_STDLIB_SUITE_OK"
             fi
 

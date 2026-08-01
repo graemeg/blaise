@@ -339,27 +339,58 @@ end;
 
 function RTLSourceDir: string;
 var
-  Cand: string;
+  Cand, Up: string;
+  I: Integer;
 begin
   { The RTL units (runtime.*, rtl.platform.*) live in the compiler's own source
     tree.  Resolve the directory robustly across the ways the compiler is run:
 
       1. binary-relative: <bindir>/../src/main/pascal — the in-tree
          compiler/target/blaise.
-      2. CWD-relative: compiler/src/main/pascal then src/main/pascal — the
+      2. binary-ANCESTOR-relative: <bindir>/..^N/compiler/src/main/pascal —
+         a binary living elsewhere in the repo, e.g. releases/v0.14.0-pre/
+         (two levels up from the binary is the repo root).
+      3. CWD-relative: compiler/src/main/pascal then src/main/pascal — the
          binary may be copied elsewhere (e.g. /tmp during a fixpoint) but
          invoked from the project root by the build.
+      4. CWD-ANCESTOR-relative: ..^N/compiler/src/main/pascal — the build
+         tool runs module compiles from the MODULE directory (PasBuild's
+         stdlib compile has CWD stdlib/), so walk up a few levels looking
+         for the compiler tree.  This is what made
+         `pasbuild test -m blaise-stdlib --compiler releases/v*-pre/blaise`
+         fail while the same command with compiler/target/blaise worked:
+         neither the releases/ binary nor the stdlib/ CWD resolved under
+         rules 1 and 3 alone.
 
-    The driver consults $BLAISE_RTL_SRC before calling this, for a fully
-    relocated binary (release) that ships its RTL source elsewhere. }
+    Every candidate is validated by content (runtime.arc.pas present), so a
+    wrong guess can never be returned.  The driver consults $BLAISE_RTL_SRC
+    before calling this, for a fully relocated binary (release) that ships
+    its RTL source elsewhere. }
   Cand := IncludeTrailingPathDelimiter(CompilerBinDir()) + '../src/main/pascal';
   if RTLDirHasUnits(ExpandFileName(Cand)) then Exit(ExpandFileName(Cand));
+
+  Up := '';
+  for I := 1 to 4 do
+  begin
+    Up := Up + '../';
+    Cand := IncludeTrailingPathDelimiter(CompilerBinDir()) + Up
+      + 'compiler/src/main/pascal';
+    if RTLDirHasUnits(ExpandFileName(Cand)) then Exit(ExpandFileName(Cand));
+  end;
 
   Cand := 'compiler/src/main/pascal';
   if RTLDirHasUnits(ExpandFileName(Cand)) then Exit(ExpandFileName(Cand));
 
   Cand := 'src/main/pascal';
   if RTLDirHasUnits(ExpandFileName(Cand)) then Exit(ExpandFileName(Cand));
+
+  Up := '';
+  for I := 1 to 4 do
+  begin
+    Up := Up + '../';
+    Cand := Up + 'compiler/src/main/pascal';
+    if RTLDirHasUnits(ExpandFileName(Cand)) then Exit(ExpandFileName(Cand));
+  end;
 
   { Fall back to the binary-relative path so callers get a meaningful "not
     found" message naming a concrete location. }
