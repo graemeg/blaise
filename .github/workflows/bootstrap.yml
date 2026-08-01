@@ -221,6 +221,21 @@ jobs:
           BLAISE_QBE_COMPILER="$BLAISE" compiler/target/TestRunner
 
       # --------------------------------------------------------------------
+      # 8a. Stdlib suite.  The TestRunner above covers the COMPILER module
+      #     only; the stdlib module is activeByDefault="false" in project.xml,
+      #     so until this step existed its ~290 tests never ran in CI on any
+      #     platform.  That is the wrong suite to leave uncovered: stdlib owns
+      #     the async fiber/reactor/socket layer, the most OS-sensitive code in
+      #     the tree, and it has one reactor implementation per kernel
+      #     (epoll/kqueue).  Two FreeBSD failures sat on green master because
+      #     of this hole.
+      # --------------------------------------------------------------------
+      - name: Run stdlib tests
+        run: |
+          set -euo pipefail
+          pasbuild test -m blaise-stdlib --compiler "${{ steps.pre.outputs.bin }}"
+
+      # --------------------------------------------------------------------
       # 8b. Linked-BINARY fixpoint.  Every other guard stops at IR/asm text or
       #     behaviour, so a nondeterminism in the internal assembler, internal
       #     linker or ELF/Mach-O container writer (timestamp, uninitialised
@@ -470,6 +485,27 @@ jobs:
               BLAISE_QBE_COMPILER="$WS/compiler/target/blaise" \
               compiler/target/TestRunner
               echo "FREEBSD_FULL_SUITE_OK"
+
+              # The suite above is the COMPILER module only.  stdlib is a
+              # separate module (activeByDefault="false" in project.xml) and
+              # owns the async fiber/reactor/socket layer — the most
+              # OS-sensitive code in the tree, with one reactor per kernel
+              # (kqueue here, epoll on Linux).  Leaving it out is exactly how
+              # two FreeBSD failures sat on a green master.  Built directly
+              # rather than via pasbuild: the VM deliberately installs no
+              # packages, so there is no pasbuild in it.
+              echo "=== build stdlib test runner ==="
+              mkdir -p stdlib/target
+              compiler/target/blaise \
+                --source stdlib/src/test/pascal/testrunner.pas \
+                --unit-path "$WS/stdlib/src/test/pascal" \
+                --unit-path "$WS/stdlib/src/main/pascal" \
+                --unit-path "$WS/compiler/src/main/pascal" \
+                --output stdlib/target/TestRunner
+
+              echo "=== run stdlib suite (FreeBSD) ==="
+              stdlib/target/TestRunner
+              echo "FREEBSD_STDLIB_SUITE_OK"
             fi
 
             echo "FREEBSD_EMULATION_OK"
