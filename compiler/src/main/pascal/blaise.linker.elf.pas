@@ -272,6 +272,14 @@ type
       mode (no .dynamic section at all — a --static/freestanding binary needs no
       shared libraries).  Pass the SONAME the dynamic loader expects. }
     procedure AddNeededLib(const ASoname: string);
+    { Pre-link query for the driver's AUTO link-mode decision: appends to
+      ADest every STRONG undefined symbol that no loaded object defines and
+      that the linker will not synthesise.  Returns the count appended.  An
+      empty result means the loaded objects form a complete freestanding
+      image; a non-empty result names the C symbols that would need libc /
+      shared libraries.  Weak undefineds are excluded (they legally resolve
+      to 0). }
+    function CollectUnresolvedExternals(ADest: TStringList): Integer;
 
     { Add a parsed object the caller owns (not freed by the linker). }
     procedure AddObject(AObj: TElfObjectFile);
@@ -1142,6 +1150,67 @@ begin
         PE.GotOffset := 0;
         PE.PltOffset := 0;
         FPltEntries.Add(PE);
+      end;
+    end;
+  finally
+    Seen.Free();
+  end;
+end;
+
+function TLinker.CollectUnresolvedExternals(ADest: TStringList): Integer;
+var
+  Oi, Si, Di, Dsi: Integer;
+  Obj, DefObj: TElfObjectFile;
+  Sym, DefSym: TRdSymbol;
+  Seen: TDictionary<string, Boolean>;
+  Dummy: Boolean;
+  Found: Boolean;
+begin
+  Result := 0;
+  Seen := TDictionary<string, Boolean>.Create();
+  try
+    for Oi := 0 to FObjects.Count - 1 do
+    begin
+      Obj := FObjects.Get(Oi);
+      for Si := 0 to Obj.Symbols.Count - 1 do
+      begin
+        Sym := Obj.Symbols.Get(Si);
+        if Sym.Shndx <> SHN_UNDEF then Continue;
+        if Sym.Name = '' then Continue;
+        if Sym.Bind = STB_LOCAL then Continue;
+        if Sym.Bind = STB_WEAK then Continue;   { weak undefined -> 0, legal }
+        if Seen.TryGetValue(Sym.Name, Dummy) then Continue;
+        Seen.Add(Sym.Name, True);
+
+        { Skip linker-synthesised symbols (same set CollectExternals skips). }
+        if (Sym.Name = '_GLOBAL_OFFSET_TABLE_') or
+           (Sym.Name = '__bss_start') or
+           (Sym.Name = '_edata') or
+           (Sym.Name = '_end') or
+           (Sym.Name = '__TMC_END__') then
+          Continue;
+
+        Found := False;
+        for Di := 0 to FObjects.Count - 1 do
+        begin
+          DefObj := FObjects.Get(Di);
+          for Dsi := 0 to DefObj.Symbols.Count - 1 do
+          begin
+            DefSym := DefObj.Symbols.Get(Dsi);
+            if (DefSym.Name = Sym.Name) and (DefSym.Shndx <> SHN_UNDEF) and
+               (DefSym.Bind <> STB_LOCAL) then
+            begin
+              Found := True;
+              Break;
+            end;
+          end;
+          if Found then Break;
+        end;
+        if not Found then
+        begin
+          ADest.Add(Sym.Name);
+          Result := Result + 1;
+        end;
       end;
     end;
   finally

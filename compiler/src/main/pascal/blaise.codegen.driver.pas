@@ -74,6 +74,13 @@ type
     the compile workers.  Adding a new backend knob is a field here plus
     the driver that reads it; Blaise.pas does not branch on backend to
     apply it. }
+  { How the final executable binds to the C world.  lmAuto is the default:
+    freestanding when the program binds no C libraries and every external
+    symbol resolves from the RTL, dynamic+libc otherwise (with a note naming
+    what forced it).  --static / --dynamic force a mode explicitly.  See the
+    link-mode section in docs/toolchain-independence.adoc. }
+  TLinkMode = (lmAuto, lmStatic, lmDynamic);
+
   TBackendOpts = class
   public
     Target: TTargetDesc;
@@ -92,12 +99,14 @@ type
                                    Overrides the binary/CWD-relative lookup, for
                                    a relocated/release binary whose RTL source
                                    lives elsewhere (empty = use default lookup) }
-    Static: Boolean;             { --static: link a freestanding, libc-free ELF
-                                   (native internal linker only).  The kernel
-                                   leaf (runtime.syscall.<os> + runtime.cstub +
-                                   runtime.start.static.<os>) replaces libc; the
-                                   linker emits a non-PIE ET_EXEC with no
-                                   PT_INTERP.  docs/linux-syscall-migration.adoc }
+    LinkMode: TLinkMode;         { requested link mode: lmAuto (default) decides
+                                   at link time; lmStatic = --static forces the
+                                   freestanding, libc-free ELF (the kernel leaf
+                                   runtime.syscall.<os> + runtime.cstub +
+                                   runtime.start.static.<os> replaces libc; a
+                                   non-PIE ET_EXEC with no PT_INTERP); lmDynamic
+                                   = --dynamic forces the dynamic PIE + libc.
+                                   docs/linux-syscall-migration.adoc }
     LinkLibs: TStringList;       { extra libraries to link (-l<name>), unioned by
                                    the frontend from the program's and its used
                                    units' 'external ''lib''' declarations
@@ -108,6 +117,14 @@ type
                                    to its SONAME (GH #188).  Prepended ahead of
                                    the default system lib dirs.  nil = none.
                                    Owned; released with the opts object. }
+    UserLinkLibs: TStringList;   { the subset of LinkLibs that USER code bound
+                                   (external 'lib' in the program / non-RTL
+                                   units, plus backend-demanded libs).  Libs
+                                   bound by runtime.*/rtl.* units are excluded:
+                                   the freestanding kernel leaf replaces those,
+                                   so they must not force a dynamic link under
+                                   lmAuto.  nil = none.  Owned; ARC-released
+                                   with the opts object. }
   end;
 
   TBackendDriver = class
@@ -258,6 +275,7 @@ type
 
       Returns '' on success, else an error message. }
     function EnsureRTLObjects(AOpts: TBackendOpts; AIncludeStartup: Boolean;
+                              AStaticLink: Boolean;
       AAlreadyProvided, AObjPaths: TStringList): string;
   end;
 
@@ -598,7 +616,8 @@ begin
 end;
 
 function TBackendDriver.EnsureRTLObjects(AOpts: TBackendOpts;
-  AIncludeStartup: Boolean; AAlreadyProvided, AObjPaths: TStringList): string;
+  AIncludeStartup: Boolean; AStaticLink: Boolean;
+  AAlreadyProvided, AObjPaths: TStringList): string;
 var
   SrcDir, CacheDir, BuildDir, BlaiseBin: string;
   SrcFile, ObjFile, TmpObj: string;
@@ -673,8 +692,7 @@ begin
     links libc: crt1 supplies _start and environ, so the freestanding kernel
     leaf must stay off that line or both are doubly defined.
     See BuildRTLUnitList. }
-  Units := BuildRTLUnitList(
-    (AOpts.Static or TargetIsFreestanding(AOpts.Target)) and AIncludeStartup,
+  Units := BuildRTLUnitList(AStaticLink and AIncludeStartup,
     AOpts.Target.OS, AOpts.Target.CPU);
 
   for I := 0 to Units.Count - 1 do
@@ -786,7 +804,11 @@ begin
     { cc link line: libc supplies _start, so omit runtime.start.  Pass the
       program's prebuilt deps so an RTL unit it compiled itself (e.g. via
       `uses classes`) is not supplied twice. }
-    RTLErr := Self.EnsureRTLObjects(AOpts, False, AExtraObjects, RTLObjs);
+    { AStaticLink=False: a cc link line always links libc (crt1 supplies
+      _start), so the freestanding kernel leaf never joins it — this was
+      already true before link modes existed (AIncludeStartup=False made
+      BuildRTLUnitList's static arm unreachable). }
+    RTLErr := Self.EnsureRTLObjects(AOpts, False, False, AExtraObjects, RTLObjs);
     if RTLErr <> '' then
       Exit(RTLErr);
     Args.Add('-o');

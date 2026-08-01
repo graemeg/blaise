@@ -132,9 +132,13 @@ begin
   WriteLn(FormatFlagLine('--no-incremental',
     'Disable per-unit .o emission; build a single whole-program object'));
   WriteLn(FormatFlagLine('--static',
-    'Link a static binary (freestanding RTL, no libc). Linux plain/'));
+    'Force the freestanding, libc-free static binary (error when the'));
   WriteLn(FormatFlagLine('',
-    'threaded/async work; TLS/OpenSSL still needs the dynamic default.'));
+    'program binds external C libraries). Default is AUTO: freestanding'));
+  WriteLn(FormatFlagLine('',
+    'unless C libraries/symbols are bound, then dynamic+libc with a note.'));
+  WriteLn(FormatFlagLine('--dynamic',
+    'Force the dynamic libc-linked binary (suppresses the auto decision)'));
   WriteLn(FormatFlagLine('--unit-cache <dir>',
     'Where per-unit .o files are written (default: alongside output)'));
   WriteLn(FormatFlagLine('--dump-ast',
@@ -300,7 +304,9 @@ begin
       AOpts.LibPaths.Add(ParamStr(I));
     end
     else if Arg = '--static' then
-      AOpts.Static := True
+      AOpts.LinkMode := lmStatic
+    else if Arg = '--dynamic' then
+      AOpts.LinkMode := lmDynamic
     else if Arg = '--emit-ir' then
       AFront.EmitIR := True
     else if Arg = '--emit-asm' then
@@ -462,6 +468,16 @@ type
   protected
     procedure Execute; override;
   end;
+
+{ True for RTL-owned units (runtime.* / rtl.*): a lib they bind (e.g.
+  runtime.thread's 'pthread') has a freestanding kernel-leaf replacement, so
+  it must not force a dynamic link under the AUTO link mode.  The namespace
+  is reserved for the RTL, so prefix matching is sufficient. }
+function IsRTLOwnedUnit(const AName: string): Boolean;
+begin
+  Result := (StrPos('runtime.', LowerCase(AName)) = 0) or
+            (StrPos('rtl.', LowerCase(AName)) = 0);
+end;
 
 procedure TCompileWorker.Execute;
 var
@@ -1240,6 +1256,7 @@ begin
       additionally reports codegen-demanded libs (e.g. 'm' for libm math calls)
       via GetRequiredLibs, unioned in below. }
     if Opts.LinkLibs = nil then Opts.LinkLibs := TStringList.Create();
+    if Opts.UserLinkLibs = nil then Opts.UserLinkLibs := TStringList.Create();
     { Backend-demanded libraries: the QBE backend lowers Sqrt/Sin/Abs(double)/…
       to libm calls and reports 'm' here, so libm is linked only when the
       program actually uses float math (never on the native backend, which
@@ -1249,20 +1266,36 @@ begin
       ReqLibs := CG.GetRequiredLibs();
       if ReqLibs <> nil then
         for I := 0 to ReqLibs.Count - 1 do
+        begin
           if Opts.LinkLibs.IndexOf(ReqLibs.Strings[I]) < 0 then
             Opts.LinkLibs.Add(ReqLibs.Strings[I]);
+          { backend-demanded code has no freestanding alternative }
+          if Opts.UserLinkLibs.IndexOf(ReqLibs.Strings[I]) < 0 then
+            Opts.UserLinkLibs.Add(ReqLibs.Strings[I]);
+        end;
     end;
     if (Prog <> nil) and (Prog.LinkLibs <> nil) then
       for I := 0 to Prog.LinkLibs.Count - 1 do
+      begin
         if Opts.LinkLibs.IndexOf(TLinkLibDecl(Prog.LinkLibs.Items[I]).LibName) < 0 then
           Opts.LinkLibs.Add(TLinkLibDecl(Prog.LinkLibs.Items[I]).LibName);
+        if Opts.UserLinkLibs.IndexOf(TLinkLibDecl(Prog.LinkLibs.Items[I]).LibName) < 0 then
+          Opts.UserLinkLibs.Add(TLinkLibDecl(Prog.LinkLibs.Items[I]).LibName);
+      end;
     if Loader <> nil then
       for I := 0 to Loader.PrebuiltIfaces.Count - 1 do
         for J := 0 to TUnitInterface(Loader.PrebuiltIfaces.Items[I]).LinkLibs.Count - 1 do
+        begin
           if Opts.LinkLibs.IndexOf(
                TUnitInterface(Loader.PrebuiltIfaces.Items[I]).LinkLibs.Strings[J]) < 0 then
             Opts.LinkLibs.Add(
               TUnitInterface(Loader.PrebuiltIfaces.Items[I]).LinkLibs.Strings[J]);
+          if (not IsRTLOwnedUnit(TUnitInterface(Loader.PrebuiltIfaces.Items[I]).Name)) and
+             (Opts.UserLinkLibs.IndexOf(
+               TUnitInterface(Loader.PrebuiltIfaces.Items[I]).LinkLibs.Strings[J]) < 0) then
+            Opts.UserLinkLibs.Add(
+              TUnitInterface(Loader.PrebuiltIfaces.Items[I]).LinkLibs.Strings[J]);
+        end;
     { Units compiled FROM SOURCE in this same invocation never land in
       PrebuiltIfaces (that list holds only cached-.bif ifaces), so their
       external 'lib' declarations must be unioned straight off the source
@@ -1272,10 +1305,17 @@ begin
       for I := 0 to Units.Count - 1 do
         if TUnit(Units.Items[I]).LinkLibs <> nil then
           for J := 0 to TUnit(Units.Items[I]).LinkLibs.Count - 1 do
+          begin
             if Opts.LinkLibs.IndexOf(
                  TLinkLibDecl(TUnit(Units.Items[I]).LinkLibs.Items[J]).LibName) < 0 then
               Opts.LinkLibs.Add(
                 TLinkLibDecl(TUnit(Units.Items[I]).LinkLibs.Items[J]).LibName);
+            if (not IsRTLOwnedUnit(TUnit(Units.Items[I]).Name)) and
+               (Opts.UserLinkLibs.IndexOf(
+                 TLinkLibDecl(TUnit(Units.Items[I]).LinkLibs.Items[J]).LibName) < 0) then
+              Opts.UserLinkLibs.Add(
+                TLinkLibDecl(TUnit(Units.Items[I]).LinkLibs.Items[J]).LibName);
+          end;
     Units.Free();
     Loader.Free();
     SearchPaths.Free();

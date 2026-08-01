@@ -239,6 +239,14 @@ begin
     Exit('the qbe backend does not support target ' +
       TargetName(AOpts.Target) + ' — use the native backend (the default; ' +
       'omit --backend qbe)');
+  { The qbe backend links through the system cc, which always produces a
+    dynamic libc-linked binary.  --static used to be silently IGNORED on
+    this path; reject it loudly instead — freestanding binaries are a
+    native-backend (internal linker) feature. }
+  if AOpts.LinkMode = lmStatic then
+    Exit('--static: the qbe backend links via the system toolchain and ' +
+      'cannot produce freestanding binaries — use the native backend ' +
+      '(the default; omit --backend qbe)');
   AsmFile := ChangeFileExt(AIRFile, '.s');
   Result := Self.LowerToAsm(AIRFile, AsmFile, AOpts);
   if Result <> '' then Exit;

@@ -547,6 +547,20 @@ begin
   end;
 end;
 
+{ Comma-join a string list for diagnostics ('ssl, crypto'). }
+function JoinNames(AList: TStringList): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  if AList = nil then Exit;
+  for I := 0 to AList.Count - 1 do
+  begin
+    if Result <> '' then Result := Result + ', ';
+    Result := Result + AList.Strings[I];
+  end;
+end;
+
 function TNativeBackendDriver.LinkViaMachOLinker(
   const AObjFile, AOutputFile: string;
   AOpts: TBackendOpts; AExtraObjects: TStringList): string;
@@ -559,8 +573,11 @@ begin
   RTLObjs := TStringList.Create();
   try
     { same implicit-RTL machinery as the ELF path: the darwin unit list
-      (BuildRTLUnitList) has no start unit — LC_MAIN enters _main }
-    Result := Self.EnsureRTLObjects(AOpts, True, AExtraObjects, RTLObjs);
+      (BuildRTLUnitList) has no start unit — LC_MAIN enters _main.  macOS
+      binaries are ALWAYS dynamic against libSystem (the only stable kernel
+      ABI Apple offers), so the static RTL profile never applies here; a
+      --static request is rejected before we get this far. }
+    Result := Self.EnsureRTLObjects(AOpts, True, False, AExtraObjects, RTLObjs);
     if Result <> '' then Exit;
     Lk := TMachOLinker.Create();
     try
@@ -596,7 +613,12 @@ var
   LinkTarget: TLinkTarget;
   RTLObjs: TStringList;
   LibDirs, Needed, Visited: TStringList;
+  Unresolved: TStringList;
   I: Integer;
+  EffDynamic: Boolean;
+  HasUserLibs: Boolean;
+  Attempt: Integer;
+  Done: Boolean;
 begin
   Result := '';
 
@@ -611,98 +633,186 @@ begin
       TargetName(AOpts.Target));
   { A toolkit without ELF link facts is a Mach-O target — hand the whole
     link to the Mach-O linker (same RTL-object machinery, different
-    container). }
+    container).  macOS has no freestanding mode: libSystem is the only
+    stable kernel ABI Apple offers, so lmAuto silently resolves to dynamic
+    and an explicit --static is an error rather than a silent lie. }
   LinkTarget := Toolkit.MakeLinkTarget();
   if LinkTarget = nil then
+  begin
+    if AOpts.LinkMode = lmStatic then
+      Exit('--static: macOS binaries are always dynamic against libSystem '
+        + '(Apple offers no stable freestanding syscall ABI)');
     Exit(Self.LinkViaMachOLinker(AObjFile, AOutputFile, AOpts,
       AExtraObjects));
+  end;
 
-  { Build the implicit RTL objects from source (cached beside the compiler).
-    Every Blaise program emits calls to RTL symbols (_SetArgs, _BlaiseGetMem,
-    _start, ARC/string/exception helpers, …) as undefined externals; these
-    objects supply them.  Replaces the pre-built blaise_rtl.a — the RTL is now
-    compiled by the compiler itself. }
+  { ---------------- resolve the link mode (lmAuto policy) ----------------
+    Freestanding when the program binds no C libraries and every external
+    symbol resolves from the static RTL; dynamic+libc otherwise, with a
+    note naming what forced it.  --static / --dynamic force the mode.  RTL-
+    origin lib demands (runtime.* binding 'pthread') never force dynamic:
+    the freestanding kernel leaf replaces them.  Full rationale and the
+    per-target matrix: docs/toolchain-independence.adoc. }
+  HasUserLibs := (AOpts.UserLinkLibs <> nil) and (AOpts.UserLinkLibs.Count > 0);
+  EffDynamic := False;
+  case AOpts.LinkMode of
+    lmStatic:
+      begin
+        if HasUserLibs then
+        begin
+          LinkTarget.Free();
+          Exit('--static: the program binds external C libraries ('
+            + JoinNames(AOpts.UserLinkLibs)
+            + '), which need the dynamic loader; drop --static or the '
+            + 'external ''<lib>'' bindings');
+        end;
+        EffDynamic := False;
+      end;
+    lmDynamic:
+      begin
+        if AOpts.Target.OS = osFreeBSD then
+        begin
+          LinkTarget.Free();
+          Exit('--dynamic: FreeBSD binaries are freestanding (dynamic '
+            + 'FreeBSD linking is not implemented yet)');
+        end;
+        EffDynamic := True;
+      end;
+  else
+    { lmAuto }
+    if AOpts.Target.OS = osFreeBSD then
+    begin
+      if HasUserLibs then
+      begin
+        LinkTarget.Free();
+        Exit('freebsd target: the program binds external C libraries ('
+          + JoinNames(AOpts.UserLinkLibs)
+          + '), but dynamic FreeBSD linking is not implemented yet - a '
+          + 'freestanding binary cannot load shared libraries');
+      end;
+      EffDynamic := False;
+    end
+    else if HasUserLibs then
+    begin
+      EffDynamic := True;
+      WriteLn(StdErr, 'note: linking dynamically against libc: the program '
+        + 'binds external C libraries (' + JoinNames(AOpts.UserLinkLibs) + ')');
+    end
+    else
+      { candidate freestanding; the probe below may fall back to dynamic }
+      EffDynamic := False;
+  end;
+
+  { Build the implicit RTL objects from source (cached beside the compiler)
+    and drive the link.  The attempt loop exists for ONE case: an lmAuto
+    freestanding candidate whose objects still reference C symbols the
+    static RTL does not define (a bare `external name 'getenv'`-style libc
+    binding).  The pre-link probe detects that, notes the symbols, and the
+    second attempt relinks dynamically against libc.  Every other mode runs
+    exactly one attempt. }
   RTLObjs := TStringList.Create();
   try
-    { Native internal linker: Blaise owns the entry point, so include
-      runtime.start (its bare _start).  In --static mode EnsureRTLObjects swaps
-      runtime.start for the freestanding runtime.start.static.<os> and adds the
-      syscall + cstub leaves, so AIncludeStartup is irrelevant there.  Pass the
-      program's prebuilt deps so an RTL unit it compiled itself is not supplied
-      twice. }
-    Result := Self.EnsureRTLObjects(AOpts, True, AExtraObjects, RTLObjs);
-    if Result <> '' then Exit;
+    Attempt := 0;
+    Done := False;
+    while (not Done) and (Attempt < 2) do
+    begin
+      Attempt := Attempt + 1;
+      RTLObjs.Clear();
+      Result := Self.EnsureRTLObjects(AOpts, True, not EffDynamic,
+        AExtraObjects, RTLObjs);
+      if Result <> '' then Exit;
 
-    { TLinker.Create(ATarget) borrows the target — created at the nil gate
-      above; freed in the finally below. }
-    Lk := TLinker.Create(LinkTarget);
-    try
+      Lk := TLinker.Create(LinkTarget);
       try
-        { --static: freestanding non-PIE ET_EXEC, no libc/PT_INTERP (the kernel
-          leaf supplies open/read/write/... + _start).  Default: dynamic PIE
-          linked against libc.  A freestanding target (FreeBSD, Strategy B) has
-          no libc to link against, so it is ALWAYS static regardless of the
-          --static flag — the kernel leaf is the only libc it gets. }
-        Lk.SetDynamic(not (AOpts.Static or TargetIsFreestanding(AOpts.Target)));
+        try
+          Lk.SetDynamic(EffDynamic);
 
-        { Demand-driven shared-library dependencies (from `external 'lib'`
-          declarations and codegen-required libs like 'm').  A DYNAMIC binary
-          gets one DT_NEEDED per lib, mapped to its SONAME; the loader resolves
-          the symbols at run time.  A STATIC / freestanding binary has NO
-          .dynamic section and no libc to link against, so these are ignored —
-          on those paths threads come from the freestanding kernel leaf, not
-          libpthread, and float math is emitted inline.  This replaces the old
-          hard rejection of any LinkLibs: the internal linker now handles the
-          same -l<name> deps the external cc linker does.
-
-          Each -l<name> is resolved on the lib search path to its real SONAME
-          (or the SONAMEs a GNU ld linker script names) rather than the bare
-          string-guessed lib<name>.so — see ResolveLibNeeded (GH #188). }
-        if Lk.IsDynamic() and (AOpts.LinkLibs <> nil) then
-        begin
-          LibDirs := TStringList.Create();
-          Needed := TStringList.Create();
-          Visited := TStringList.Create();
-          try
-            BuildLibSearchDirs(AOpts.LibPaths, LibDirs);
-            for I := 0 to AOpts.LinkLibs.Count - 1 do
-              ResolveLibNeeded(AOpts.LinkLibs.Strings[I], LibDirs, Needed,
-                Visited);
-            for I := 0 to Needed.Count - 1 do
-              Lk.AddNeededLib(Needed.Strings[I]);
-          finally
-            Visited.Free();
-            Needed.Free();
-            LibDirs.Free();
-          end;
-        end;
-
-        Obj := ReadElfObjectFile(AObjFile);
-        Lk.AddOwnedObject(Obj);
-
-        if AExtraObjects <> nil then
-          for I := 0 to AExtraObjects.Count - 1 do
+          { Demand-driven shared-library dependencies: one DT_NEEDED per
+            bound lib, mapped to its real SONAME (GH #188).  Only a dynamic
+            binary has them; the freestanding image defines everything
+            in-process via the kernel leaf. }
+          if Lk.IsDynamic() and (AOpts.LinkLibs <> nil) then
           begin
-            Obj := ReadElfObjectFile(AExtraObjects.Strings[I]);
+            LibDirs := TStringList.Create();
+            Needed := TStringList.Create();
+            Visited := TStringList.Create();
+            try
+              BuildLibSearchDirs(AOpts.LibPaths, LibDirs);
+              for I := 0 to AOpts.LinkLibs.Count - 1 do
+                ResolveLibNeeded(AOpts.LinkLibs.Strings[I], LibDirs, Needed,
+                  Visited);
+              for I := 0 to Needed.Count - 1 do
+                Lk.AddNeededLib(Needed.Strings[I]);
+            finally
+              Visited.Free();
+              Needed.Free();
+              LibDirs.Free();
+            end;
+          end;
+
+          Obj := ReadElfObjectFile(AObjFile);
+          Lk.AddOwnedObject(Obj);
+
+          if AExtraObjects <> nil then
+            for I := 0 to AExtraObjects.Count - 1 do
+            begin
+              Obj := ReadElfObjectFile(AExtraObjects.Strings[I]);
+              Lk.AddOwnedObject(Obj);
+            end;
+
+          { The RTL objects - including the entry point (_start) and the
+            implicit runtime symbols - built from source above. }
+          for I := 0 to RTLObjs.Count - 1 do
+          begin
+            Obj := ReadElfObjectFile(RTLObjs.Strings[I]);
             Lk.AddOwnedObject(Obj);
           end;
 
-        { The RTL objects — including _start (runtime.start) and the implicit
-          runtime symbols — built from source above. }
-        for I := 0 to RTLObjs.Count - 1 do
-        begin
-          Obj := ReadElfObjectFile(RTLObjs.Strings[I]);
-          Lk.AddOwnedObject(Obj);
-        end;
+          { Freestanding pre-link probe: every strong undefined symbol must
+            resolve in-process.  Under lmAuto a miss falls back to a
+            dynamic+libc relink (second attempt); under lmStatic it is a
+            hard error - either way the diagnostic names the symbols
+            instead of surfacing as a bare `undefined reference` mid-link. }
+          if not EffDynamic then
+          begin
+            Unresolved := TStringList.Create();
+            try
+              if Lk.CollectUnresolvedExternals(Unresolved) > 0 then
+              begin
+                if AOpts.LinkMode = lmStatic then
+                  Exit('--static: unresolved C symbols ('
+                    + JoinNames(Unresolved)
+                    + ') - a freestanding binary must resolve every '
+                    + 'external from the RTL');
+                if AOpts.Target.OS = osFreeBSD then
+                  Exit('freebsd target: unresolved C symbols ('
+                    + JoinNames(Unresolved)
+                    + '), but dynamic FreeBSD linking is not implemented '
+                    + 'yet - a freestanding binary must resolve every '
+                    + 'external from the RTL');
+                WriteLn(StdErr, 'note: linking dynamically against libc: '
+                  + 'unresolved C symbols (' + JoinNames(Unresolved) + ')');
+                EffDynamic := True;
+                Continue;   { second attempt: dynamic RTL + dynamic link }
+              end;
+            finally
+              Unresolved.Free();
+            end;
+          end;
 
-        Lk.Link('_start', AOutputFile);
-      except
-        on E: Exception do
-          Result := 'internal linker error [' + Exception(E).ClassName + ']: ' +
-            Exception(E).Message;
+          Lk.Link('_start', AOutputFile);
+          Done := True;
+        except
+          on E: Exception do
+          begin
+            Result := 'internal linker error [' + Exception(E).ClassName
+              + ']: ' + Exception(E).Message;
+            Done := True;
+          end;
+        end;
+      finally
+        Lk.Free();
       end;
-    finally
-      Lk.Free();
     end;
   finally
     RTLObjs.Free();

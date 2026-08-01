@@ -1,0 +1,703 @@
+= Blaise — Toolchain Independence Strategy
+:doctype: article
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:source-highlighter: rouge
+:revdate: 2026-06-12
+:revnumber: 1.1
+:status: ADOPTED
+
+== Problem Statement
+
+The Blaise compiler currently depends on two external tools to produce a native
+binary from source:
+
+* *QBE* — converts Blaise-emitted SSA intermediate representation to target
+  assembly (`.s` files).
+* *GCC / `cc`* — serves as an assembler (`gcc -c`) when building the runtime
+  library, and as a linker driver (`cc`) when linking the final binary.
+
+Although Blaise has no C source files remaining in the runtime, GCC is still
+required at every compilation. This creates a hard external dependency that:
+
+* prevents Blaise from being distributed as a single self-contained binary,
+* requires users to have a C toolchain installed even when they have no C code,
+* complicates cross-compilation (each host needs GCC configured for the target),
+* is inconsistent with the project's self-hosting goal.
+
+This document analyses the two roles GCC currently plays, evaluates strategies
+for eliminating them, defines a phased plan, and assesses how a future move
+away from QBE to direct machine-code generation would interact with that plan.
+
+*Status update (2026-06-12)*: the strategy below has been adopted, with the
+end goal extended beyond the assembler and linker to the linked libraries
+themselves (libc, libm, pthreads) on the platforms where that is supported —
+see _C Library Strategy_ and the revised _Recommended Plan_.  Since the
+original draft, a native x86-64 backend (`--backend native`,
+`blaise.codegen.native.x86_64.pas`) has shipped: it performs its own
+instruction selection, register allocation, and System V ABI lowering, reaches
+self-hosting fixpoint, and records exact OPDF debug facts.  It still emits
+*textual* assembly, so the assembler and linker dependencies remain — but the
+hard parts of the Phase 5 risk profile below are already done, and an ELF
+object writer (`uElfObject.pas`) already exists for the incremental
+unit→`.o` path.
+
+== Current Pipeline
+
+For each compilation the following external processes are spawned:
+
+[source]
+----
+Source files
+  │
+  ▼
+Blaise compiler          (in-process)
+  │ emits
+  ▼
+<output>.ssa             (QBE SSA IR)
+  │
+  ▼  qbe -o <output>.s <output>.ssa
+<output>.s               (target assembly, AT&T syntax)
+  │
+  ▼  cc -o <binary> <output>.s blaise_rtl.a -lm -lpthread
+<binary>                 (native ELF / PE / Mach-O)
+----
+
+Building the runtime library adds an additional assembler invocation per unit:
+
+[source]
+----
+blaise_mem.pas → Blaise → blaise_mem.ssa → qbe → blaise_mem.s → gcc -c → blaise_mem.o
+----
+
+The single hand-written assembly file (`blaise_setjmp_x86_64.s`) is also
+assembled with `gcc -c`.
+
+== Roles of GCC in the Current Pipeline
+
+=== Role 1 — Assembler (`gcc -c`)
+
+Used in `runtime/Makefile` to assemble each QBE-produced `.s` file into a
+relocatable object file (`.o`).  GCC adds no value here; it is a front-end to
+the GNU assembler (`as`).  This role is trivially substitutable.
+
+=== Role 2 — Linker Driver (`cc`)
+
+Used in `Blaise.pas:CompileToNative` to link the final binary from:
+
+* the QBE-assembled `.s` file for the user's program,
+* `blaise_rtl.a` (the runtime static archive),
+* `-lm` (libm, for maths functions),
+* `-lpthread` (POSIX threads).
+
+GCC is used here as a *driver* that abstracts away platform-specific knowledge:
+the path to `ld`, the dynamic linker path (e.g.
+`/lib64/ld-linux-x86-64.so.2`), the CRT startup objects (`crt1.o`, `crti.o`,
+`crtn.o`), and the system library search paths.  This is the substantive
+dependency.
+
+== C Library Strategy
+
+Blaise binaries depend on the host's C library only through a small set of
+`external name` bindings in the runtime (`write`, `malloc`, `fabs` via
+`-lm`, pthreads via `-lpthread`).  The compiler does not choose a libc;
+it invokes the system `cc` as the link driver, which links against
+whatever libc the platform provides.  This section records the per-platform
+facts and the two actionable consequences.
+
+=== Link modes — freestanding by default, dynamic on demand (adopted 2026-08-01)
+
+The paragraphs below this subsection predate the link-mode work and describe
+the older always-dynamic default; they are kept for the per-platform libc
+facts.  The adopted policy is:
+
+*Decision.*  The compiler chooses the link mode per program, at link time,
+under three modes selected on the command line:
+
+* `--static` — force the freestanding, libc-free binary.  Binding an
+  external C library, or any external symbol the RTL cannot resolve, is a
+  hard error naming the libraries/symbols.
+* `--dynamic` — force the dynamic, libc-linked PIE.
+* _default (auto)_ — freestanding unless the program needs the C world:
+. If the program (or any non-RTL unit it uses) binds a shared C library
+  via `external '<lib>' name '...'`, the link is dynamic+libc and a note is
+  printed: `note: linking dynamically against libc: the program binds
+  external C libraries (ssl, crypto)`.
+. Otherwise the linker performs a pre-link probe over the freestanding
+  candidate (program + RTL objects).  If every strong undefined symbol
+  resolves in-process, the binary is freestanding — no note, no `.dynamic`
+  section, runs on any kernel regardless of libc version.
+. If undefined C symbols remain (a bare `external name 'isatty'`-style
+  libc binding), the link falls back to dynamic+libc and the note names
+  the symbols instead: `note: linking dynamically against libc: unresolved
+  C symbols (isatty)`.
+
+The note fires exactly when *detection* decided the mode; explicit flags
+are silent.  Libraries bound by RTL-owned units (`runtime.*`/`rtl.*`, e.g.
+`runtime.thread`'s `external 'pthread'`) never force a dynamic link: the
+freestanding kernel leaf (`runtime.syscall.<os>` + shims) replaces them, so
+a purely-Pascal threaded program still links freestanding.  A bare external
+the static RTL itself provides (`getenv`, `getrlimit`, ...) resolves
+in-process and stays freestanding.
+
+*Precedent.*  This is FPC's Linux model, proven for two decades: a plain
+FPC Linux binary is a libc-free static executable, and pulling in any
+`{$linklib}`-carrying unit (X11, cthreads) silently upgrades the link to
+dynamic+libc.  Blaise adopts the same policy with two refinements: the
+mode flip is announced (the note), and the freestanding probe is
+symbol-accurate rather than unit-marker driven.
+
+*Per-target matrix (current).*
+
+[cols="1,2,2"]
+|===
+|Target |auto resolves to |notes
+
+|linux-x86_64
+|freestanding, or dynamic+libc on C bindings
+|full FFI available in dynamic mode
+
+|freebsd-x86_64
+|always freestanding
+|C bindings are a clear error until dynamic FreeBSD linking lands
+ (planned: PT_INTERP `/libexec/ld-elf.so.1`, `DT_NEEDED libc.so.7`,
+ no symbol versioning); required for the eventual fpGUI/Xlib port
+
+|macos-arm64
+|always dynamic against libSystem
+|Apple offers no stable freestanding syscall ABI; `--static` is an error
+|===
+
+*Cross-compilation.*  Dynamic cross-links need no target sysroot: a
+`DT_NEEDED` entry is a SONAME string, the RTL supplies `_start` (no CRT
+objects), and symbols resolve on the target at load time.  Known system
+libraries map through a per-target SONAME table; arbitrary libraries use
+the conventional `lib<name>.so` guess or `--lib-path` at a sysroot copy.
+The trade-off: without a sysroot the linker cannot verify a symbol exists
+in the target's libraries — a typo surfaces at load time on the target.
+
+*Scope and caveats.*
+
+* The policy is implemented in the native backend's internal linker (the
+  default toolchain).  The qbe backend and `--linker external` link through
+  the system `cc` and remain dynamic; `--static --backend qbe` is a loud
+  error (it used to be silently ignored).
+* In dynamic mode the internal linker still emits unresolved symbols as
+  dynamic imports without verifying any DT_NEEDED library provides them
+  (the GH #199 failure shape); the auto-mode note at least names them.
+  Load-time verification against the local libraries is future work.
+* Verified prerequisites for the freestanding default (2026-08-01):
+  threads (`runtime.thread.static.linux`), `TProcess`/fork-exec, and a full
+  static self-host all pass; the RTL object cache is mode-safe (shared
+  units compile identically, the modes differ only in which units join
+  the link).
+
+=== Linux — glibc by default, with one caveat
+
+glibc is the system libc on every mainstream distribution (Debian/Ubuntu,
+Fedora/RHEL, Arch, openSUSE), so the current behaviour — link dynamically
+against the host libc via `cc` — is correct and requires no change.  The
+caveat: *Alpine Linux* ships musl as its system libc and has no glibc at
+all, and Alpine is a very common container base image.  The accurate
+invariant is therefore "the host's system libc is always present and the
+system `cc` links against it", not "glibc is always present".  Locally
+compiled programs are unaffected either way; the distinction only matters
+for *pre-built* binaries.
+
+=== Release binary portability — musl-static flavour (future work)
+
+Pre-built release binaries (`releases/vX.Y.Z/blaise`) inherit two
+portability limits from glibc dynamic linking:
+
+* glibc uses versioned symbols, so a binary built on a newer glibc may
+  refuse to start on an older one (`GLIBC_2.38 not found`).  Release
+  binaries are only as portable as the build machine's glibc is old.
+* The binaries do not run on musl-based systems (Alpine) at all.
+
+Statically linking glibc is not a fix — it is officially discouraged and
+subtly broken (NSS, `getaddrinfo`, `dlopen` paths).  musl, by contrast, is
+designed for static linking: a `-static` musl build produces a single
+self-contained binary with no runtime dependencies that runs on any Linux
+kernel, glibc- or musl-based, old or new.  This is the same approach as
+Rust's `x86_64-unknown-linux-musl` release target.  The Blaise runtime's
+small libc surface (pure Pascal, a handful of `external name` symbols)
+makes it a good candidate.
+
+Planned shape: a `--static` (or build-script) release flavour that links
+the bootstrap binaries against musl (`musl-gcc` wrapper or a musl `cc`),
+used only for the published release artefacts.  The default developer
+build stays glibc-dynamic.  Not scheduled; record here so the option is
+not forgotten when release distribution becomes a priority.
+
+=== FreeBSD — base-system libc
+
+FreeBSD has no glibc/musl split: the kernel and libc are developed
+together in one source tree, and `libc.so.7` is part of the base system —
+it cannot be absent.  The symbols the runtime binds (`write`, `malloc`,
+libm functions) exist there under the same names, so the `external name`
+binding approach carries over unchanged.  Static linking the base libc is
+fully supported (the `.a` archives ship with the base system).  Two
+FreeBSD-specific facts to honour in the port:
+
+* The base-system compiler is *clang, invoked as `cc`* — GCC is not in
+  the base system.  Anything that hard-codes `gcc` will fail on a stock
+  FreeBSD install.  The compiler driver already invokes `cc`
+  (`Blaise.pas:RunProcess('cc', ...)`); the remaining `gcc` hard-coding
+  lives in `runtime/Makefile` (`CC = gcc`) and the developer scripts
+  (`fixpoint.sh`, `fixpoint-native.sh`, `rolling-bootstrap.sh`,
+  `leakcount.sh`).
+* The supported stable interface is libc, not raw syscalls — the same
+  position Blaise already takes on Linux, so no design change is needed.
+
+=== Full independence — per-OS end state
+
+The adopted long-term goal is to remove the linked libraries themselves
+where the platform supports it, in the spirit of Go's Linux port and Zig's
+hermetic toolchain.  Blaise is well positioned: the runtime is pure Pascal
+(the libc dependency is a handful of `external name` symbol bindings, not C
+code), allocation is already owned by `blaise_mem`, and the only hand-written
+assembly is the setjmp stub.  Whether libc can be dropped is a *per-OS*
+decision, not a global one:
+
+[cols="1,2,3"]
+|===
+| Platform | End state | Reason
+
+| Linux
+| libc-free: raw `syscall` instructions
+| The one OS that guarantees a stable syscall ABI; proven at scale by Go.
+
+| Windows
+| naturally libc-free: import `kernel32.dll` etc.
+| The DLL interface *is* the OS API; raw syscalls are undocumented and
+  unstable, but nothing needs them.
+
+| FreeBSD
+| keep base-system libc bindings
+| Syscalls are fairly stable, but libc is the blessed interface and is
+  guaranteed present in the base system — removing it buys nothing.
+
+| macOS
+| keep libSystem bindings
+| Apple supports neither static linking nor raw syscalls; libSystem is
+  mandatory.
+|===
+
+Replacement tiers on the libc-free platforms, in dependency order:
+
+. *Syscall layer* (Linux) — replace the `external name 'write'`-style
+  bindings with inline `syscall` sequences.  Small surface; `blaise_mem`
+  already sits behind `_BlaiseGetMem`, so allocation needs only `mmap`/
+  `munmap`/`brk` syscalls underneath.
+. *Own `_start`* — once the internal linker controls the entry point, a
+  short stub sets up argc/argv/envp and calls the program main; the CRT
+  objects (`crt1.o`, `crti.o`, `crtn.o`) disappear.
+. *libm subset in Pascal* — only the functions the runtime and stdlib
+  actually reference, not all of libm.  Also removes the punit constraint
+  that `Double` assertions need `-lm`.
+. *Threads last* — replacing pthreads means `clone()`, futex-based
+  synchronisation, TLS setup, and stack lifecycle management.  This is the
+  single hardest tier; it is deliberately sequenced after everything else
+  (and after the debugger learns to trace clones).
+
+*Known long-tail trap*: the expensive part of libc is not `write`/`malloc`
+but services like DNS resolution — `getaddrinfo`/NSS is precisely why
+statically linked glibc is broken.  When the stdlib grows networking, the
+choice is to reimplement a resolver (as musl and Go did) or accept a libc
+binding on that path.  Budget for this when networking is designed; it does
+not affect the tiers above.
+
+Once Linux is libc-free, release binaries there become fully static with no
+musl involvement — the musl-static flavour described above is the *interim*
+packaging measure until that point.
+
+== Option Analysis
+
+=== Option A — Replace `gcc -c` with `as`
+
+Replaces `$(CC) -c` with `$(AS)` throughout `runtime/Makefile`.  GNU `as` is
+part of binutils, not GCC; it is a smaller, simpler package.
+
+[cols="1,3"]
+|===
+| Effort | Trivial (one-line change per Makefile rule)
+| Eliminates | GCC dependency from the RTL build
+| Retains | Binutils dependency for assembly; GCC/cc for linking
+| Platform coverage | Linux, FreeBSD (binutils); macOS and Windows use different assemblers
+|===
+
+This is a useful hygiene fix but does not achieve independence.
+
+=== Option B — Use `clang` as a drop-in `cc`
+
+Substitutes `clang` for `gcc`/`cc` with no other changes.  Clang accepts the
+same command-line interface and resolves CRT paths on all four target platforms.
+
+[cols="1,3"]
+|===
+| Effort | Zero (a configure-time flag or symlink)
+| Eliminates | Hard dependency on GCC specifically
+| Retains | Dependency on some C compiler being present
+| Platform coverage | Linux, Windows, macOS, FreeBSD — all ship Clang or have it available
+|===
+
+This is a useful portability improvement but still requires an external C
+toolchain.
+
+=== Option C — Internal Assembler (emit ELF/COFF/Mach-O object files directly)
+
+The compiler emits relocatable object files (`.o`) directly from its own code
+generation, bypassing the `as` step.  This is what FPC does for Mach-O targets
+by default, and what FPC's `TInternalAssembler` supports in general.
+
+For Blaise the assembler step currently lives in QBE (QBE → `.s` → `as`).  If
+Blaise retained QBE, an internal assembler would parse QBE's `.s` output.  If
+Blaise moved to direct machine-code generation (see Section 5), the assembler
+step disappears entirely — the compiler emits `.o` directly.
+
+=== Option D — Internal Linker (in-process ELF/PE/Mach-O linking)
+
+The compiler reads `.o` files and the `blaise_rtl.a` archive, resolves symbols,
+applies relocations, and writes the final binary entirely in-process.  No `ld`,
+`lld`, or `cc` subprocess is required.
+
+This is the key dependency to eliminate.  It is also the approach taken by Zig
+(custom in-process linker, ~50 kloc) and available as a production-quality
+reference in FPC (see Section 4).
+
+=== Option E — Bundle a pre-built `lld` binary
+
+Vendors a statically-linked `lld` binary alongside the Blaise release.  The
+compiler calls `lld` instead of `cc`.
+
+[cols="1,3"]
+|===
+| Effort | Low for the integration; moderate to build and redistribute lld
+| Eliminates | GCC and binutils runtime dependencies
+| Retains | Large (~15 MB) vendored binary that must be maintained per platform/version
+| Platform coverage | lld supports ELF, PE/COFF, Mach-O — all four targets
+|===
+
+This trades a system dependency for a vendored one.  It is not truly
+self-contained and imposes a maintenance burden.
+
+== FPC's Internal Linker as a Porting Base
+
+FPC contains a complete, production-quality internal linker written in Object
+Pascal.  It has been used in production since FPC 2.x for embedded and unusual
+targets, and is available as an optional path on Linux.
+
+=== Architecture
+
+The implementation is split across several units in `compiler/`:
+
+[cols="2,1,3"]
+|===
+| Unit | Lines | Role
+| `ogbase.pas` | 4,188 | Abstract object model: sections, symbols, relocations, archive reader
+| `ogelf.pas` | 3,318 | ELF reader/writer; handles x86_64, ARM, RISC-V, and others
+| `ogcoff.pas` | 4,104 | PE/COFF writer (Windows x86/x86_64)
+| `ogmacho.pas` | 1,249 | Mach-O writer (macOS x86_64/AArch64)
+| `elfbase.pas` | 705 | ELF constant definitions
+| `macho.pas` | 2,106 | Mach-O structure definitions
+| `link.pas` | 2,346 | `TLinker` / `TExternalLinker` / `TInternalLinker` base classes
+| `systems/t_linux.pas` | 1,487 | `TInternalLinkerLinux` — section layout, CRT discovery, link script
+| `systems/t_win.pas` | 1,907 | Windows-specific linker driver and internal linker
+| `systems/t_bsd.pas` | 801 | FreeBSD/OpenBSD/macOS linker paths
+|===
+
+Total relevant code: approximately 22,000 lines.  The abstraction is clean:
+`TObjData`/`TObjSection`/`TObjSymbol` provide a format-neutral object model;
+`TExeOutput` is the abstract link-and-emit interface; platform backends
+(`TElfExeOutput`, `TCoffExeOutput`, `TMachoExeOutput`) implement it.
+
+=== Quality Assessment
+
+The code is well-structured FPC-dialect Object Pascal.  It uses `TObject`-based
+class hierarchies with virtual methods, familiar list abstractions, and
+reasonable naming.  The main porting challenges are:
+
+* FPC-specific utility units (`cclasses`, `cutils`, `globtype`) used throughout;
+  these define `TFPList`, `THashSet`, `TCmdStr`, and similar types that Blaise
+  equivalents already cover.
+* Deep coupling to FPC's compiler state globals (`current_settings`,
+  `current_module`, `target_info`); these must be replaced with explicit
+  parameters or a lightweight context object.
+* Conditional compilation (`{$ifdef x86_64}` blocks inside type definitions)
+  to define per-CPU relocation types; this must be replaced with runtime
+  dispatch or per-target subclasses.
+
+The estimate to decouple and port the ELF backend alone (sufficient for
+Linux + FreeBSD) is four to six weeks of focused work.  Adding PE/COFF and
+Mach-O to cover Windows and macOS adds a further four to eight weeks.
+
+=== What Blaise Does Not Need
+
+FPC's internal linker handles many features Blaise can defer:
+
+* Shared library (`.so` / `.dll`) output
+* DWARF debug info section handling (Blaise uses OPDF)
+* LTO plugin support
+* Weak symbol semantics
+* Versioned symbols (ELF symbol versioning)
+* Import library generation (Windows DLL import stubs)
+* 15+ CPU architectures
+
+The minimal viable subset for Blaise is: read `.o` + `.a`, resolve symbols,
+apply x86_64 relocations (ELF `R_X86_64_*` types), write ELF executable with
+correct `PT_LOAD` segments and interpreter entry.  This is achievable in
+approximately 1,500–2,000 lines of new Blaise code.
+
+== Interaction with Direct Machine-Code Generation
+
+QBE is an external process that sits between the Blaise IR and the object file.
+Removing QBE means Blaise would emit object files (`.o`) directly rather than
+assembly text.  This section analyses how that choice affects the toolchain
+independence plan.
+
+=== Pipeline Comparison
+
+[cols="1,1"]
+|===
+| With QBE (current) | Without QBE (direct codegen)
+
+| Source → Blaise IR → QBE → `.s` → assembler → `.o` → linker → binary
+| Source → Blaise IR → native codegen → `.o` → linker → binary
+|===
+
+With direct codegen the *assembler step disappears entirely*.  The compiler
+emits `.o` files directly; there is no `.s` intermediate.  This has the
+following consequences for the toolchain independence plan:
+
+=== Consequences for Each Dependency
+
+*GCC as assembler (`gcc -c`)* — eliminated automatically.  Direct codegen
+produces `.o` files; no assembler is invoked.  The trivial Option A fix
+(replace `gcc -c` with `as`) becomes unnecessary.
+
+*GCC as linker driver (`cc`)* — unaffected.  Whether object files come from
+QBE+assembler or from direct codegen, they still need to be linked.  The
+internal linker work (see _Recommended Plan_) is required regardless of the
+codegen backend.
+
+*QBE itself* — eliminated.  Replacing QBE is the motivation for direct codegen.
+The compiler gains full control over instruction selection, register allocation,
+and output format, at the cost of implementing those passes in Blaise.
+
+*`blaise_setjmp_x86_64.s`* — the one hand-written assembly file.  Direct codegen
+does not eliminate this; it can be kept as-is (assembled by `as`) or its content
+can be emitted programmatically by the codegen as a special RTL stub.  Either
+approach is low-risk.
+
+=== Strategic Fit
+
+Ditching QBE and building an internal linker are *independent* efforts that
+*compose cleanly*:
+
+* The internal linker can be developed against QBE-produced `.o` files today
+  and will work identically with direct-codegen-produced `.o` files later.
+* Direct codegen can be developed and tested using the current `cc`-based linker
+  and adopted incrementally — one function or module at a time — before the
+  internal linker is ready.
+* Both efforts improve Blaise's independence; neither blocks the other.
+
+The internal linker should be developed first (or in parallel) because:
+
+. It can be validated against the existing, known-correct QBE pipeline.
+. It removes the external dependency that affects every user today.
+. The ELF format knowledge built while writing the internal linker directly
+  informs the object-file emission layer of any future native codegen.
+
+Moving to direct codegen without a working internal linker still requires `cc`
+for linking, leaving the core dependency unresolved.
+
+=== Risk Profile of Direct Machine-Code Generation
+
+For reference, the scope of replacing QBE with a native codegen backend —
+annotated with what the shipped native backend has since delivered:
+
+* *x86_64 instruction encoding* — the encoding table is large (~300 instructions
+  with prefix/REX/ModRM/SIB/displacement variants); an encoder for the subset
+  the backend emits is approximately 2,000–4,000 lines.  *Still open*: the
+  native backend emits textual assembly; binary encoding into `uElfObject`
+  sections is the remaining work (Phase 2 of the revised plan).
+* *Register allocator* — *done*: the native backend performs its own register
+  allocation at self-hosting quality.
+* *ABI lowering* — *done*: System V parameter passing (integer, floating-point,
+  records, interfaces, varargs-style RTL calls) is implemented and verified by
+  `NATIVE_FIXPOINT_OK` plus the full test suite running natively.
+* *Each new platform* — Windows x64 ABI, AArch64 ABI, etc., each requires a
+  new arch subclass.  QBE currently gives aarch64 and riscv64 for free, which
+  is why the QBE backend remains the shipped default until native backends
+  cover the supported platforms.
+
+== Recommended Plan
+
+The plan below supersedes the original five-phase draft.  The ordering
+principle: each phase is independently shippable, validated against the
+known-good external-tool pipeline it replaces, and sequenced so that the
+hardest, least-urgent work (threads) comes last.  Phases 2 and 3 compose —
+either can land first — but both are prerequisites for Phase 5.
+
+=== Phase 1 — Reduce GCC footprint (immediate, low effort)
+
+. Replace `$(CC) -c` with `$(AS)` in `runtime/Makefile`.
+. Replace the remaining hard-coded `gcc` invocations with `cc`:
+  `runtime/Makefile` (`CC = gcc` default) and the developer scripts
+  (`fixpoint.sh`, `fixpoint-native.sh`, `rolling-bootstrap.sh`,
+  `leakcount.sh`).  The compiler driver already invokes `cc`.  Required
+  for FreeBSD, where clang-as-`cc` is the base compiler and GCC is not
+  installed (see _C Library Strategy_).
+. Document `as` (binutils) and any `cc` (GCC or Clang) as the two remaining
+  external tool requirements.
+. No code changes to the compiler driver.
+
+A separate, unscheduled packaging item from _C Library Strategy_: a
+musl-static flavour for published release binaries, decoupling them from
+the build machine's glibc version and making them run on musl-based
+distributions (Alpine).  Orthogonal to the phases below; becomes moot once
+Phase 5 makes Linux binaries libc-free.
+
+=== Phase 2 — Internal assembler (medium term)
+
+Assemble the native backend's output in-process, eliminating `as` from the
+`--backend native` pipeline.
+
+*This is not a rewrite of the native codegen unit.*  The backend's
+instruction selection, register allocation, and ABI lowering are unchanged;
+only the output sink is affected.  Two routes, adopted in order:
+
+. *Route A — self-assembler over the backend's own dialect (first).*  A new
+  unit (`blaise.assembler.x86_64.pas`) that parses the *restricted* AT&T
+  subset the native backend actually emits — a closed set of mnemonics,
+  operand shapes, directives, and label forms — and encodes it into
+  `uElfObject` sections.  The codegen unit is untouched; the textual `.s`
+  remains the canonical artefact, so the native fixpoint procedure
+  (textual diff of stage-2 vs stage-3 assembly) keeps working unchanged.
+  Because the input dialect is closed and machine-generated, this is far
+  smaller than a general-purpose assembler.
+. *Route B — structured emission (later, optional).*  Replace the
+  `Emit(<text line>)` calls with structured instruction records consumed by
+  two sinks: the existing textual printer (kept for `--emit-asm`, fixpoint
+  diffing, and debugging) and the binary encoder from Route A.  Only
+  worthwhile if profiling shows the text round-trip matters; the encoder
+  built in Route A carries over.
+
+Validation: assemble the same `.s` with `as` and with Route A, compare the
+relocated sections, then run the full test suite and native fixpoint on
+internally assembled binaries.
+
+=== Phase 3 — Internal ELF linker for Linux and FreeBSD (medium term)
+
+. Implement `blaise.linker.elf.pas` — a self-contained ELF linker unit in
+  Blaise, covering:
+.. `.a` archive reader (simple AR format).
+.. ELF `.o` reader (sections, symbols, relocations).
+.. Symbol resolution (strong/weak, undefined detection).
+.. x86_64 relocation application
+   (`R_X86_64_64`, `R_X86_64_PC32`, `R_X86_64_PLT32`, `R_X86_64_GOTPCREL`).
+.. ELF executable writer (`ET_EXEC` or `ET_DYN` with `PT_LOAD` segments,
+   `PT_INTERP`, `PT_DYNAMIC` for `-lpthread`/`-lm` shared lib references).
+.. CRT discovery for Linux (`crt1.o`, `crti.o`, `crtn.o`) and FreeBSD.
+. Static-only first: a static linker is a fraction of a general linker and
+  covers the primary use case (self-contained Blaise binaries).
+. Once the linker controls the entry point, emit an internal `_start` stub
+  (argc/argv/envp setup, call program main) and drop the CRT objects — the
+  first step of the libc-removal tiers in _C Library Strategy_.
+. Wire it into `Blaise.pas:CompileToNative` as a fallback when `cc` is absent,
+  then make it the default once validated.
+. Use FPC's `ogbase.pas` and `ogelf.pas` as the primary reference and porting
+  base; port the minimal subset (strip FPC-specific globals, replace `cclasses`
+  types with Blaise equivalents from `generics.collections`).
+. Validate output binary against the current `cc`-linked output using the
+  existing E2E test suite.
+
+=== Phase 4 — PE/COFF linker for Windows (medium–long term)
+
+. Implement `blaise.linker.coff.pas` using FPC's `ogcoff.pas` as reference.
+. Handle the Windows-specific concerns: import library resolution, `.idata`
+  section for DLL imports (`msvcrt.dll`, `kernel32.dll`), PE optional header
+  fields, base relocation table.
+. Port FPC's `systems/t_win.pas` link script logic.
+
+=== Phase 5 — Mach-O linker for macOS (medium–long term)
+
+. Implement `blaise.linker.macho.pas` using FPC's `ogmacho.pas` as reference.
+. Handle macOS-specific concerns: `LC_LOAD_DYLINKER`, `LC_LOAD_DYLIB` for
+  `libSystem.B.dylib`, two-level namespace, code signing requirements on
+  Apple Silicon.
+
+=== Phase 6 — Linux libc independence (long term)
+
+The first two libc-removal tiers from _C Library Strategy_, Linux only
+(Windows is naturally libc-free; FreeBSD and macOS keep their libc
+bindings by design):
+
+. Replace the runtime's `external name` libc bindings with raw `syscall`
+  sequences (`write`, `mmap`/`munmap` under `blaise_mem`, `exit_group`,
+  signal plumbing for the exception machinery).
+. Port the libm subset the runtime and stdlib actually reference to pure
+  Pascal; drop `-lm`.
+. Result: fully static, dependency-free Linux binaries from an internal
+  pipeline — no `cc`, `as`, `ld`, CRT, libc, or libm.
+
+=== Phase 7 — Threads without pthreads (long term, last)
+
+. Replace the pthread bindings with `clone()`, futex-based synchronisation
+  primitives, TLS setup, and stack lifecycle management.
+. Deliberately last: it is the hardest single tier, `-lpthread` costs
+  nothing meanwhile, and the OPDF debugger must learn to trace clones
+  (PTRACE_O_TRACECLONE) before self-managed threads are debuggable.
+
+=== QBE retirement (orthogonal, ongoing)
+
+The original draft treated direct machine-code generation as a future
+Phase 5; the native x86-64 backend has since shipped (see the status note
+in _Problem Statement_).  QBE is retired per platform once the
+corresponding native arch subclass reaches fixpoint quality; until then the
+QBE backend remains the shipped default and QBE-produced objects remain a
+validation reference for the internal assembler and linker.  AArch64 is
+the next architecture candidate.
+
+== Dependency State by Phase
+
+Native-backend pipeline on Linux (the QBE pipeline keeps its external
+assembler until QBE itself is retired):
+
+[cols="2,1,1,1,1,1"]
+|===
+| Dependency | Current | After Ph.1 | After Ph.2 | After Ph.3 | After Ph.6–7
+
+| GCC / `cc` (assembler) | Required | Not required | Not required | Not required | Not required
+| Binutils `as` | Implicit via GCC | Explicit | Not required | Not required | Not required
+| GCC / `cc` (linker driver) | Required | Required | Required | Not required | Not required
+| System `ld` / `lld` | Implicit via GCC | Implicit via GCC | Implicit via GCC | Not required | Not required
+| CRT objects (`crt1.o` …) | Required | Required | Required | Not required | Not required
+| glibc (`-lc`) | Required | Required | Required | Required | Not required
+| libm (`-lm`) | Required | Required | Required | Required | Not required
+| pthreads (`-lpthread`) | Required | Required | Required | Required | Not required
+| QBE | Default backend | Default backend | Default backend | Default backend | Retired per platform
+|===
+
+== Conclusion
+
+The adopted direction is full toolchain independence in the spirit of Go and
+Zig: an internal assembler (Phase 2) and internal linkers (Phases 3–5)
+eliminate the external build tools on every platform, and the libc-removal
+tiers (Phases 6–7) then eliminate the linked libraries on the platforms that
+support it — libc-free on Linux and Windows, thin libc bindings retained on
+FreeBSD and macOS where libc is the blessed or mandatory interface.
+
+The sequencing maximises validation confidence: each phase replaces one
+external component while the rest of the known-good pipeline still surrounds
+it, and the native fixpoint plus full test suite gate every step, exactly as
+they do today.  The hardest tier (threads without pthreads) is deliberately
+last and blocked on debugger support for tracing clones.
+
+The end state on Linux is a single self-contained `blaise` binary that takes
+Pascal source to a fully static, dependency-free executable with no `cc`,
+`as`, `ld`, CRT, libc, libm, or pthreads involved at any stage — and a
+toolchain that cross-compiles to its other targets without any host-installed
+toolchain for them.

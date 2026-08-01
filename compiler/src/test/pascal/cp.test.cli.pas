@@ -94,6 +94,14 @@ type
     procedure TestLibm_QBEFloatMath_LinksLibm;
     procedure TestLibm_NoFloatMath_NoLibm;
     procedure TestPthread_NativeThreads_LinksLibpthread;
+    { AUTO link mode (docs/toolchain-independence.adoc): freestanding when no
+      C libraries/symbols are bound, dynamic+libc with a note otherwise. }
+    procedure TestLinkAuto_PureProgram_Freestanding;
+    procedure TestLinkAuto_ExternalLib_DynamicWithNote;
+    procedure TestLinkAuto_BareLibcSymbol_FallsBackWithNote;
+    procedure TestLinkStatic_ExternalLib_Errors;
+    procedure TestLinkStatic_UnresolvedSymbol_Errors;
+    procedure TestLinkDynamic_Flag_ForcesDynamic;
     procedure TestPthread_StaticThreads_NoNeeded;
     { ---- GH #188: internal linker resolves a -l<name> whose lib<name>.so is a
            GNU ld linker script (INPUT/GROUP) to the real versioned SONAME(s),
@@ -702,6 +710,133 @@ begin
   Dyn := ReadelfDynamic(BinPath);
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
   AssertTrue('non-math binary does NOT link libm', Pos('libm.so', Dyn) < 0);
+end;
+
+procedure TCLIContractTests.TestLinkAuto_PureProgram_Freestanding;
+var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  { A program binding no C libraries links FREESTANDING by default: no
+    .dynamic section, no DT_NEEDED, no note on stderr. }
+  SrcPath := WriteScratchSource(
+    'program p; begin WriteLn(6 * 7); end.');
+  BinPath := FScratch + 'cli_lmauto_pure_' + IntToStr(FCounter);
+  EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
+    '--output', BinPath], Out_);
+  AssertEquals('pure program links (out: ' + Out_ + ')', 0, EC);
+  AssertTrue('no dynamic-link note for a freestanding link',
+    Pos('linking dynamically', Out_) < 0);
+  Dyn := ReadelfDynamic(BinPath);
+  if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
+  AssertTrue('freestanding binary has no DT_NEEDED',
+    Pos('(NEEDED)', Dyn) < 0);
+end;
+
+procedure TCLIContractTests.TestLinkAuto_ExternalLib_DynamicWithNote;
+var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  { Binding an external C library flips the link to dynamic+libc and says
+    so, naming the library. }
+  SrcPath := WriteScratchSource(
+    'program p; ' +
+    'function sf(x: Single): Single; cdecl; external ''m'' name ''sinf''; ' +
+    'begin WriteLn(sf(0.0) = 0.0); end.');
+  BinPath := FScratch + 'cli_lmauto_lib_' + IntToStr(FCounter);
+  EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
+    '--output', BinPath], Out_);
+  AssertEquals('external-lib program links (out: ' + Out_ + ')', 0, EC);
+  AssertTrue('note names the binding libraries',
+    Pos('linking dynamically against libc: the program binds external C ' +
+        'libraries (m)', Out_) >= 0);
+  Dyn := ReadelfDynamic(BinPath);
+  if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
+  AssertTrue('libm is a DT_NEEDED', Pos('libm.so', Dyn) >= 0);
+  AssertTrue('libc is a DT_NEEDED', Pos('libc.so', Dyn) >= 0);
+end;
+
+procedure TCLIContractTests.TestLinkAuto_BareLibcSymbol_FallsBackWithNote;
+var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  { A bare `external name` binding a libc-only symbol: the freestanding
+    probe finds it unresolved and falls back to dynamic+libc, naming the
+    SYMBOL in the note.  (A bare symbol the static RTL provides — getenv,
+    getrlimit — stays freestanding and produces no note.) }
+  SrcPath := WriteScratchSource(
+    'program p; ' +
+    'function tty(fd: Integer): Integer; cdecl; external name ''isatty''; ' +
+    'begin tty(0); WriteLn(1); end.');
+  BinPath := FScratch + 'cli_lmauto_bare_' + IntToStr(FCounter);
+  EC := RunCompiler(['--source', SrcPath, '--backend', 'native',
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
+    '--output', BinPath], Out_);
+  AssertEquals('bare-libc program links (out: ' + Out_ + ')', 0, EC);
+  AssertTrue('note names the unresolved symbols',
+    Pos('unresolved C symbols (isatty)', Out_) >= 0);
+  Dyn := ReadelfDynamic(BinPath);
+  if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
+  AssertTrue('libc is a DT_NEEDED', Pos('libc.so', Dyn) >= 0);
+end;
+
+procedure TCLIContractTests.TestLinkStatic_ExternalLib_Errors;
+var SrcPath, BinPath, Out_: string; EC: Integer;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  { --static + external 'lib' is a contradiction: a freestanding binary
+    cannot load shared libraries.  Hard error naming the libs. }
+  SrcPath := WriteScratchSource(
+    'program p; ' +
+    'function sf(x: Single): Single; cdecl; external ''m'' name ''sinf''; ' +
+    'begin WriteLn(sf(0.0) = 0.0); end.');
+  BinPath := FScratch + 'cli_lmstatic_lib_' + IntToStr(FCounter);
+  EC := RunCompiler(['--source', SrcPath, '--backend', 'native', '--static',
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
+    '--output', BinPath], Out_);
+  AssertTrue('link must fail', EC <> 0);
+  AssertTrue('error names the libraries',
+    Pos('binds external C libraries (m)', Out_) >= 0);
+end;
+
+procedure TCLIContractTests.TestLinkStatic_UnresolvedSymbol_Errors;
+var SrcPath, BinPath, Out_: string; EC: Integer;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  { --static + a bare libc-only symbol: the pre-link probe names the
+    symbols instead of dying mid-link with a bare undefined reference. }
+  SrcPath := WriteScratchSource(
+    'program p; ' +
+    'function tty(fd: Integer): Integer; cdecl; external name ''isatty''; ' +
+    'begin tty(0); WriteLn(1); end.');
+  BinPath := FScratch + 'cli_lmstatic_sym_' + IntToStr(FCounter);
+  EC := RunCompiler(['--source', SrcPath, '--backend', 'native', '--static',
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
+    '--output', BinPath], Out_);
+  AssertTrue('link must fail', EC <> 0);
+  AssertTrue('error names the symbols',
+    Pos('unresolved C symbols (isatty)', Out_) >= 0);
+end;
+
+procedure TCLIContractTests.TestLinkDynamic_Flag_ForcesDynamic;
+var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  { --dynamic forces the libc-linked PIE for a program that would
+    otherwise go freestanding; explicit choice, so no note. }
+  SrcPath := WriteScratchSource(
+    'program p; begin WriteLn(6 * 7); end.');
+  BinPath := FScratch + 'cli_lmdyn_' + IntToStr(FCounter);
+  EC := RunCompiler(['--source', SrcPath, '--backend', 'native', '--dynamic',
+    '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
+    '--output', BinPath], Out_);
+  AssertEquals('pure program links dynamically (out: ' + Out_ + ')', 0, EC);
+  AssertTrue('no note for an explicit mode',
+    Pos('linking dynamically', Out_) < 0);
+  Dyn := ReadelfDynamic(BinPath);
+  if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
+  AssertTrue('libc is a DT_NEEDED', Pos('libc.so', Dyn) >= 0);
 end;
 
 procedure TCLIContractTests.TestPthread_NativeThreads_LinksLibpthread;
