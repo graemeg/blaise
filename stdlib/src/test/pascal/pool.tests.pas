@@ -177,18 +177,29 @@ begin
 
   AssertEquals('all fibers across all batches completed',
     BATCHES * PER, GPoolCounter);
-  { Peer-thread REUSE, bounded by the worker count.  The earlier assertion
-    demanded batch 1 and the full run see the EXACT same distinct-thread count
-    (DistinctTids() = AfterBatch1), but that is a claim about OS scheduling, not
-    the pool's contract: if a worker is still draining batch 1's tail when batch
-    2 is submitted, an idle peer legitimately picks it up and the distinct count
-    rises by one — the pool working correctly, not churning (a new
-    pthread_create). The real invariant is that the pool never spins up more
-    than its fixed worker count and DOES reuse threads across batches
-    (BUG-20260719-flaky-pool-thread-reuse). AfterBatch1 is read to prove batch 1
-    alone already established a reused set of >= 2 threads. }
-  AssertTrue('batch 1 already used at least two distinct threads (reuse begins)',
-    AfterBatch1 >= 2);
+  { Peer-thread REUSE, bounded by the worker count.  Two earlier spellings of
+    this assertion were both really claims about OS scheduling rather than
+    about the pool's contract:
+
+      DistinctTids() = AfterBatch1  demanded batch 1 and the full run see the
+        EXACT same distinct-thread count.  But if a worker is still draining
+        batch 1's tail when batch 2 is submitted, an idle peer legitimately
+        picks it up and the count rises by one — the pool working correctly,
+        not churning (a new pthread_create).
+      AfterBatch1 >= 2  demanded that batch 1 ALONE had already spread across
+        two threads.  Nothing guarantees that: the workers are started but the
+        kernel need not have scheduled any peer before one fast worker drains
+        all 300 of batch 1's fibres.  Observed flaking once in ~15 runs.
+
+    The pool's actual contract is that it never spins up more than its fixed
+    worker count and reuses those threads across batches instead of creating
+    new ones (BUG-20260719-flaky-pool-thread-reuse).  Reuse is proven by scale,
+    not by a subset headcount: 900 fibres retiring on at most 4 threads can
+    only happen through reuse.  AfterBatch1 is therefore asserted only against
+    the bound it must always respect — batch 1 on its own may not exceed the
+    worker count either. }
+  AssertTrue('batch 1 alone never exceeded the worker count',
+    (AfterBatch1 >= 1) and (AfterBatch1 <= 4));
   AssertTrue('threads reused across all batches (>= 2 distinct total)',
     DistinctTids() >= 2);
   AssertTrue('never more distinct threads than workers (no churn beyond pool)',

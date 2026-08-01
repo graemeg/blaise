@@ -169,8 +169,19 @@ begin
   SpawnFiber(@LoopbackClient, nil);
   RunScheduler();
   c_close_fd(GListenFd);
-  AssertEquals('full accept/connect/send/recv round-trip',
-    'accepted connected srv:ping cli:pong ', GIoLog);
+  { The accept/connect pair may log in either order, and both orders are
+    correct.  Both ends park: a non-blocking loopback connect(2) reports
+    EINPROGRESS on FreeBSD exactly as it does on Linux — measured with a probe,
+    not assumed.  Which of the two the reactor then reports ready first is
+    simply the order the kernel hands readiness back, and the two kernels do
+    not agree: kqueue surfaces the client's writable event ahead of the
+    listener's readable one, epoll the reverse.  Neither ordering is something
+    the reactor promises.  What IS contractual is that both ends complete and
+    the payloads cross intact, so the two handshake tokens are matched as a set
+    and the send/recv half stays exact. }
+  AssertTrue('both ends handshake, then ping/pong crosses intact',
+    (GIoLog = 'accepted connected srv:ping cli:pong ') or
+    (GIoLog = 'connected accepted srv:ping cli:pong '));
   ResetScheduler();
 end;
 

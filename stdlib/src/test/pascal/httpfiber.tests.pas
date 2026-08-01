@@ -312,6 +312,40 @@ end;
 { High-concurrency client: connect, GET, verify a 200 body, tally; stop the
   server when the last of GExpected finishes.  Uses a shared success counter so
   a single mismatch fails the test. }
+const
+  { Thousands of simultaneous connects overrun the listener's pending-connection
+    queue.  Its depth is not ours to choose: listen(2)'s backlog is clamped to
+    kern.ipc.soacceptqueue (FreeBSD) / net.core.somaxconn (Linux), 128 by
+    default, and the server fiber cannot drain any of it until the scheduler
+    resumes it — by which time the whole burst has already landed.
+
+    What the kernel does with the overflow differs, and FreeBSD's variant does
+    NOT show up as a failed connect:
+
+      Linux   drops the SYN.  The client retransmits until a slot frees, so
+              connect(2) merely takes longer and the retry is invisible.
+      FreeBSD completes the handshake in the syncache FIRST and only then finds
+              the queue full, so sonewconn drops an already-established socket.
+              The client's connect(2) has already SUCCEEDED; its GET then goes
+              to a destroyed PCB, comes back RST, and reads as an EMPTY reply.
+              Confirmed in the kernel log during a failing run:
+                sonewconn: ... 127.0.0.1:29414 ... Listen queue overflow:
+                193 already in queue awaiting acceptance
+              193 being the ceiling FreeBSD applies to a 128-deep backlog.
+
+    So the retry has to span the whole exchange, not just the connect: on
+    FreeBSD an overflowed connection is indistinguishable from a healthy one
+    until the response comes back empty.  Retrying is the portable spelling of
+    the retransmit Linux performs in-kernel, and is what any real load
+    generator does against a saturated listener.
+
+    It lives in this test client rather than in TTcpClient/HttpGetOnConn
+    because a library must not silently paper over a refused or reset
+    connection — for ordinary callers a closed port has to stay an error. }
+  ATTEMPT_LIMIT    = 200;
+  RETRY_BACKOFF_MS = 5;
+  WANT_BODY        = 'path=/x';
+
 var
   GHcOk: Integer;
 
@@ -320,18 +354,27 @@ var
   Cli: TTcpClient;
   Conn: TTcpConn;
   Body: string;
+  Attempt: Integer;
 begin
   FiberSleep(2);
-  Cli := TTcpClient.Create();
-  Conn := Cli.Connect('127.0.0.1', GPort);
-  Cli.Free();
-  if Conn <> nil then
+  Body := '';
+  Attempt := 0;
+  while (Body <> WANT_BODY) and (Attempt < ATTEMPT_LIMIT) do
   begin
-    Body := HttpGetOnConn(Conn, '/x', False);
-    if Body = 'path=/x' then
-      GHcOk := GHcOk + 1;
-    Conn.Free();
+    Cli := TTcpClient.Create();
+    Conn := Cli.Connect('127.0.0.1', GPort);
+    Cli.Free();
+    if Conn <> nil then
+    begin
+      Body := HttpGetOnConn(Conn, '/x', False);
+      Conn.Free();
+    end;
+    if Body <> WANT_BODY then
+      FiberSleep(RETRY_BACKOFF_MS);
+    Attempt := Attempt + 1;
   end;
+  if Body = WANT_BODY then
+    GHcOk := GHcOk + 1;
   GDone := GDone + 1;
   if GDone >= GExpected then
     GHttpServer.Stop();
