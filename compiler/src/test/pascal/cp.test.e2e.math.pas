@@ -167,6 +167,11 @@ type
     { runtime.math / no-libm regression guards (GH #199) }
     procedure TestRun_Power_IntArg_Issue199;
     procedure TestRun_Abs_Double;
+    procedure TestRun_Abs_Single;
+    procedure TestRun_DoubleToStr_BareSingleArg;
+    procedure TestRun_DoubleToStr_AbsOfSingleArg;
+    procedure TestRun_SingleToStr_BareDoubleArg;
+    procedure TestRun_SingleToStr_AbsOfDoubleArg;
     procedure TestRun_Sin_Single_WidensAndNarrows;
     procedure TestRun_Sin_HugeArg_PayneHanek;
     procedure TestRun_ConstDoubleArray_Elements;
@@ -1671,6 +1676,109 @@ begin
       WriteLn(DoubleToStr(Abs(X)))
     end.
     ''', '2.5' + Chr(10) + '2.5' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_Abs_Single;
+begin
+  { GH #200: Abs(Single) returned the argument unchanged on the native
+    backend (float Abs had no Single arm; only Double was fixed for
+    #199).  Same negative-literal shape as the issue repro.  SingleToStr
+    (not DoubleToStr) keeps the result at Single precision -- widening
+    for DoubleToStr would print extra mantissa digits that differ by
+    backend depending on how each parses the Single literal. }
+  AssertRunsOnAll(
+    '''
+    program P;
+    var X: Single;
+    begin
+      X := -34.45;
+      WriteLn(SingleToStr(Abs(X)));
+      X := 34.45;
+      WriteLn(SingleToStr(Abs(X)))
+    end.
+    ''', '34.45' + Chr(10) + '34.45' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_DoubleToStr_BareSingleArg;
+begin
+  { DoubleToStr(X) where X: Single, no Abs involved -- the simplest shape
+    that exposes the bug: a Single value fed to a builtin whose RTL callee
+    (_DoubleToStr) expects a Double-width operand.  QBE emitted invalid IR
+    ("invalid type for first operand ... in arg"); native skipped the
+    Single->Double widen entirely and _DoubleToStr read the 32-bit Single
+    bit pattern as if it were a Double (movsd on a movss-sized value),
+    printing values like 5.2e-315 for X = 0.5.  Trunc(... * 1e6) keeps the
+    comparison stable across backends despite differing widened mantissas. }
+  AssertRunsOnAll(
+    '''
+    program P;
+    var X: Single;
+    begin
+      X := 34.45;
+      WriteLn(IntToStr(Trunc(StrToDouble(DoubleToStr(X)) * 1000000.0)))
+    end.
+    ''', '34450000' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_DoubleToStr_AbsOfSingleArg;
+begin
+  { DoubleToStr(Abs(X)) where X: Single -- the argument expression resolves
+    to Single, not Double.  QBE's DoubleToStr call site assumed its operand
+    was always 'd' and passed the 's' value straight through, producing
+    invalid IR ("invalid type for first operand ... in arg"); native had
+    the identical gap (see TestRun_DoubleToStr_BareSingleArg).  Found while
+    adding Single Abs coverage for GH #200; DoubleToStr must widen.
+    Trunc(... * 1e6) is a stable comparison across backends -- the raw
+    DoubleToStr string differs by mantissa noise once a Single is widened
+    (34.4500007629395 on QBE vs 34.4499895618297 on native), both correct
+    roundings of the same Single bit pattern through different widening
+    paths, so asserting the literal string would be backend-fragile. }
+  AssertRunsOnAll(
+    '''
+    program P;
+    var X: Single;
+    begin
+      X := -34.45;
+      WriteLn(IntToStr(Trunc(StrToDouble(DoubleToStr(Abs(X))) * 1000000.0)))
+    end.
+    ''', '34450000' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_SingleToStr_BareDoubleArg;
+begin
+  { Mirror of TestRun_DoubleToStr_BareSingleArg: SingleToStr(D) where
+    D: Double, no Abs involved -- implicit Double->Single narrowing is
+    legal at an argument position (matches a plain `S := D;` assignment),
+    so this is a reachable call shape, not an ill-typed program. }
+  AssertRunsOnAll(
+    '''
+    program P;
+    var D: Double;
+    begin
+      D := 34.45;
+      WriteLn(SingleToStr(D))
+    end.
+    ''', '34.45' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_SingleToStr_AbsOfDoubleArg;
+begin
+  { Mirror of TestRun_DoubleToStr_AbsOfSingleArg: SingleToStr(Abs(D)) where
+    D: Double.  Implicit Double->Single narrowing is legal at an argument
+    position, so this is a reachable call shape, not an ill-typed program.
+    Both backends assumed the operand was already Single-width: QBE emitted
+    invalid IR (passed 'd' where 's' was declared), native passed a Double
+    bit pattern straight to _SingleToStr's movss-based ABI and printed
+    garbage.  Both must narrow before the call. }
+  AssertRunsOnAll(
+    '''
+    program P;
+    var D: Double;
+    begin
+      D := -34.45;
+      WriteLn(SingleToStr(Abs(D)))
+    end.
+    ''', '34.45' + Chr(10), 0);
 end;
 
 procedure TE2EMathTests.TestRun_Sin_Single_WidensAndNarrows;

@@ -8141,13 +8141,26 @@ begin
     end;
     if SameText(FC.Name, 'DoubleToStr') and (FC.Args.Count = 1) then
     begin
+      { The argument expression may resolve to Single (e.g. a bare Single
+        variable, or Sqrt(X)/Abs(X) where X: Single -- every float-unary
+        builtin narrows its result back to the argument's own width).
+        EmitExprToXmm0 then leaves a genuine 32-bit Single bit pattern in
+        %xmm0; _DoubleToStr(V: Double) reads it via a movsd ABI, so it
+        must be widened here. }
       Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
+      Self.EmitXmm0WidthAdjust(TASTExpr(FC.Args.Items[0]).ResolvedType, False);
       Self.Emit(#9'callq _DoubleToStr');
       Exit;
     end;
     if SameText(FC.Name, 'SingleToStr') and (FC.Args.Count = 1) then
     begin
+      { Mirror of the DoubleToStr arm above: the argument expression may
+        resolve to Double (e.g. Abs(D) where D: Double, or any other
+        Double-typed sub-expression implicitly narrowed) -- narrow to
+        Single here so _SingleToStr (movss ABI) always sees a genuine
+        32-bit value, not a Double bit pattern. }
       Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
+      Self.EmitXmm0WidthAdjust(TASTExpr(FC.Args.Items[0]).ResolvedType, True);
       Self.Emit(#9'callq _SingleToStr');
       Exit;
     end;

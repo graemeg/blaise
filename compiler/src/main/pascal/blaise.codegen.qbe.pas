@@ -12739,7 +12739,9 @@ begin
 
       if SameText(FC.Name,'DoubleToStr') then
       begin
-        L := EmitExpr(TASTExpr(FC.Args.Items[0]));
+        { The argument expression may resolve to Single (e.g. Abs(X) where
+          X: Single) -- widen so the call always sees a 'd' operand. }
+        L := EmitFloatArgAsDouble(TASTExpr(FC.Args.Items[0]));
         T := AllocTemp();
         EmitLine(Format('  %s =l call $_DoubleToStr(d %s)', [T, L]));
         Exit(T);
@@ -12747,7 +12749,16 @@ begin
 
       if SameText(FC.Name,'SingleToStr') then
       begin
-        L := EmitExpr(TASTExpr(FC.Args.Items[0]));
+        { The argument expression may resolve to Double (e.g. Abs(D) where
+          D: Double, or any other Double-typed sub-expression implicitly
+          narrowed) -- narrow so the call always sees an 's' operand. }
+        L := EmitFloatArg(TASTExpr(FC.Args.Items[0]), QType);
+        if QType = 'd' then
+        begin
+          T2 := AllocTemp();
+          EmitLine(Format('  %s =s truncd %s', [T2, L]));
+          L := T2;
+        end;
         T := AllocTemp();
         EmitLine(Format('  %s =l call $_SingleToStr(s %s)', [T, L]));
         Exit(T);
