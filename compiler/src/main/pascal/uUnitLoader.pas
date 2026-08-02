@@ -103,21 +103,6 @@ type
 
 implementation
 
-{ True if ASym is one of the OS conditional-compilation symbols (the target's
-  OS define, injected by the driver, replaces the lexer's host-seeded ones). }
-function DefineIsOS(const ASym: string): Boolean;
-begin
-  Result := SameText(ASym, 'LINUX')   or SameText(ASym, 'FREEBSD') or
-            SameText(ASym, 'WINDOWS') or SameText(ASym, 'DARWIN')  or
-            SameText(ASym, 'UNIX');
-end;
-
-function DefineIsCPU(const ASym: string): Boolean;
-begin
-  Result := SameText(ASym, 'CPUX86_64') or SameText(ASym, 'CPUAMD64') or
-            SameText(ASym, 'CPUARM64')  or SameText(ASym, 'CPUAARCH64');
-end;
-
 function TUnitLoader.IsBuiltin(const AName: string): Boolean;
 begin
   Result :=
@@ -273,9 +258,6 @@ var
   SL: TStringList;
   L:  TLexer;
   P:  TParser;
-  DI: Integer;
-  HasOS: Boolean;
-  HasCPU: Boolean;
 begin
   SL := TStringList.Create();
   try

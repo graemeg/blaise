@@ -168,29 +168,13 @@ end;
   DebugMode, UseInternalAsm).  Returns False (and writes a diagnostic) on a
   bad flag; the caller owns and frees both objects regardless. }
 { Apply each -d/--define symbol in ADefines to ALexer's conditional-compilation
-  table.  No-op when ADefines is nil/empty. }
-{ True if ASym is one of the OS conditional-compilation symbols. }
-function IsOSDefine(const ASym: string): Boolean;
-var U: string;
-begin
-  U := UpperCase(ASym);
-  Result := (U = 'LINUX') or (U = 'FREEBSD') or (U = 'WINDOWS')
-         or (U = 'DARWIN') or (U = 'UNIX');
-end;
+  table.  No-op when ADefines is nil/empty.
 
-{ True if ASym is one of the CPU conditional-compilation symbols. }
-function IsCPUDefine(const ASym: string): Boolean;
-var U: string;
-begin
-  U := UpperCase(ASym);
-  Result := (U = 'CPUX86_64') or (U = 'CPUAMD64')
-         or (U = 'CPUARM64') or (U = 'CPUAARCH64');
-end;
-
-{ Thin wrapper over TLexer.ApplyDefines, which owns the OS/CPU-replacement
-  rule.  Every site that lexes a unit must apply the SAME set — the unit-cache
-  staleness hash discovers EMBED directives by lexing, so a divergent define
-  set there silently drops a define-gated asset from the cache key. }
+  Thin wrapper over TLexer.ApplyDefines, which owns the OS/CPU-replacement rule
+  (a cross --target's symbol must displace the host-seeded one).  Every site
+  that lexes a unit must apply the SAME set — the unit-cache staleness hash
+  discovers EMBED directives by lexing, so a divergent define set there
+  silently drops a define-gated asset from the cache key. }
 procedure AddDefinesTo(ALexer: TLexer; ADefines: TStringList);
 begin
   ALexer.ApplyDefines(ADefines);
