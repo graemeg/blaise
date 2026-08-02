@@ -635,7 +635,11 @@ type
       implementation for why LoadInstrFor itself is unsafe there. }
     function  NarrowLoadInstr(AType: TTypeDesc): string;
     function  StoreInstrFor(AType: TTypeDesc): string;
-    function  QbeEscapeString(const AStr: string): string;
+    { The data items carrying AStr's bytes, e.g. 'b "ab", b 233, b "cd"'.
+      QBE's string syntax has no numeric escape, so any byte outside the
+      printable-ASCII run must leave the quotes and become its own numeric
+      item.  See the implementation for why '\xNN' is not an option. }
+    function  QbeStrDataItems(const AStr: string): string;
     { Mangle a type name for use in QBE symbols: '<' → '_', '>' → '', ',' → '_' }
     function  QBEMangle(const AName: string): string;
     { Builds the QBE symbol name for a class method call.  Uses the
@@ -1326,8 +1330,11 @@ begin
     for I := FStrLitsEmitted to FStrLits.Count - 1 do
     begin
       StrLen := Length(FStrLits.Strings[I]);
-      EmitLine(Format('data $__s%d = { w -1, w %d, w %d, b "%s", b 0 }',
-        [I, StrLen, StrLen, QbeEscapeString(FStrLits.Strings[I])]));
+      { QbeStrDataItems, not a single quoted item: a byte outside printable
+        ASCII has no string escape in QBE and must become a numeric item, or
+        the emitted bytes and the length in the header disagree. }
+      EmitLine(Format('data $__s%d = { w -1, w %d, w %d, %s, b 0 }',
+        [I, StrLen, StrLen, QbeStrDataItems(FStrLits.Strings[I])]));
     end;
     FStrLitsEmitted := FStrLits.Count;
   end;
@@ -16913,35 +16920,58 @@ begin
       [ClassUnitPrefix(AOwnerType), QBEMangle(AOwnerType), AMethod]);
 end;
 
-function TCodeGenQBE.QbeEscapeString(const AStr: string): string;
+{ Render AStr as QBE data items, keeping printable ASCII in quoted runs and
+  breaking out every other byte as a numeric item.
+
+  QBE's data strings support only the escapes its lexer knows; there is NO
+  numeric escape.  Emitting '\xNN' therefore does not produce one byte -- QBE
+  copies the four characters through literally, so the data is corrupted AND
+  the length recorded in the ARC header no longer matches the bytes that
+  follow.  Splitting into numeric items is the only encoding that round-trips
+  an arbitrary byte.  A NUL is included: the header carries the length, so an
+  interior NUL is legitimate (and reachable via EMBEDSTR).
+
+  Backslash and double-quote stay inside the quoted run via their supported
+  escapes; a run is closed and reopened around each numeric item. }
+function TCodeGenQBE.QbeStrDataItems(const AStr: string): string;
 var
-  I:    Integer;
-  C:    Integer;
-  Hi:   Integer;
-  Lo:   Integer;
+  I:      Integer;
+  C:      Integer;
+  InRun:  Boolean;
 begin
   Result := '';
+  InRun  := False;
   for I := 0 to Length(AStr) - 1 do
   begin
     C := StrAt(AStr, I);
-    case C of
-      34:  Result := Result + '\"';   { '"' }
-      92:  Result := Result + '\\';   { '\' }
-      10:  Result := Result + '\n';
-      13:  Result := Result + '\r';
-      9:   Result := Result + '\t';
-      else if (C < 32) or (C > 126) then
+    if (C >= 32) and (C <= 126) then
+    begin
+      if not InRun then
       begin
-        Hi := C shr 4;
-        Lo := C and 15;
-        if Hi < 10 then Hi := 48 + Hi else Hi := 55 + Hi;
-        if Lo < 10 then Lo := 48 + Lo else Lo := 55 + Lo;
-        Result := Result + '\x' + Chr(Hi) + Chr(Lo)
-      end
-      else
-        Result := Result + Chr(C);
+        if Result <> '' then Result := Result + ', ';
+        Result := Result + 'b "';
+        InRun := True;
+      end;
+      if C = 34 then       Result := Result + '\"'    { '"'  }
+      else if C = 92 then  Result := Result + '\\'    { '\'  }
+      else                 Result := Result + Chr(C);
+    end
+    else
+    begin
+      if InRun then
+      begin
+        Result := Result + '"';
+        InRun := False;
+      end;
+      if Result <> '' then Result := Result + ', ';
+      Result := Result + 'b ' + IntToStr(C);
     end;
   end;
+  if InRun then
+    Result := Result + '"';
+  { An empty string still needs a well-formed item list. }
+  if Result = '' then
+    Result := 'b ""';
 end;
 
 procedure TCodeGenQBE.Generate(AProg: TProgram);

@@ -66,6 +66,7 @@ type
     procedure TestRun_Int64_ArithmeticOverInt32;
     procedure TestRun_Int64_Comparison;
     procedure TestRun_Int64_ForLoop;
+    procedure TestRun_StringLiteral_HighByteSurvives;
   end;
 
 implementation
@@ -781,6 +782,34 @@ begin
   AssertRunsOnAll(SrcStringRelational,
     'lt:T' + LE + 'lt2:F' + LE + 'gt:T' + LE + 'gt2:F' + LE +
     'le:T' + LE + 'ge:T' + LE + 'empty:T' + LE, 0);
+end;
+
+procedure TE2EStringOpsTests.TestRun_StringLiteral_HighByteSurvives;
+var
+  Src: string;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { A string literal carrying a byte outside printable ASCII must reach the
+    data section intact.  The QBE backend used to render such bytes as the
+    four characters '\xNN' -- QBE's data strings have no numeric escape, so
+    the literal text was copied through and BOTH the bytes and the length in
+    the ARC header were wrong (byte 233 read back as 205).  The native
+    backend was always correct, so only the QBE arm regressed; this is an
+    AssertRunsOnAll so the two stay pinned together.
+
+    The byte is spliced into the LITERAL with Chr(233) here, at test-build
+    time -- writing 'ab' + Chr(233) + 'cd' as program text instead would
+    emit two plain ASCII literals and a run-time concat, exercising nothing.
+    It has to be inside the quotes to reach the data section. }
+  Src :=
+    'program P;' + LE +
+    'var S: string;' + LE +
+    'begin' + LE +
+    '  S := ''ab' + Chr(233) + 'cd'';' + LE +
+    '  WriteLn(Length(S));' + LE +
+    '  WriteLn(Ord(S[2]))' + LE +
+    'end.';
+  AssertRunsOnAll(Src, '5' + LE + '233' + LE, 0);
 end;
 
 initialization

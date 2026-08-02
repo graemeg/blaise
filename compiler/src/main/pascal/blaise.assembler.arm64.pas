@@ -800,6 +800,8 @@ procedure TArm64Assembler.HandleDirective;
     Ref: TSymRef;
     SymIdx: Integer;
     Txt: string;
+    OctV: Integer;   { accumulated value of an octal .ascii escape }
+    OctN: Integer;   { digits consumed so far (gas caps octal at three) }
   begin
     if FL.Mnemonic = '.text' then begin FSection := cskText; Exit; end;
     if FL.Mnemonic = '.data' then begin FSection := cskData; Exit; end;
@@ -911,10 +913,31 @@ procedure TArm64Assembler.HandleDirective;
         if (StrAt(Txt, K) = Ord('\')) and (K + 1 < Length(Txt) - 1) then
         begin
           K := K + 1;
+          { Octal escape, up to three digits (gas caps it there).  Handled
+            BEFORE the named escapes so a zero-padded '\000' consumes all
+            three digits: a bare '\0' rule would take only the first and
+            leave "00" to be copied through as literal characters, silently
+            corrupting the data and desynchronising it from the length in
+            the string header. }
+          if (StrAt(Txt, K) >= Ord('0')) and (StrAt(Txt, K) <= Ord('7')) then
+          begin
+            OctV := StrAt(Txt, K) - Ord('0');
+            OctN := 1;
+            while (OctN < 3) and (K + 1 < Length(Txt) - 1)
+                  and (StrAt(Txt, K + 1) >= Ord('0'))
+                  and (StrAt(Txt, K + 1) <= Ord('7')) do
+            begin
+              K := K + 1;
+              OctV := OctV * 8 + (StrAt(Txt, K) - Ord('0'));
+              OctN := OctN + 1;
+            end;
+            FW.AppendByte(FSection, OctV and 255);
+          end
+          else
           case StrAt(Txt, K) of
             Ord('n'): FW.AppendByte(FSection, 10);
             Ord('t'): FW.AppendByte(FSection, 9);
-            Ord('0'): FW.AppendByte(FSection, 0);
+            Ord('r'): FW.AppendByte(FSection, 13);
             Ord('\'): FW.AppendByte(FSection, Ord('\'));
             Ord('"'): FW.AppendByte(FSection, Ord('"'));
           else

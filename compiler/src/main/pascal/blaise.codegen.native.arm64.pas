@@ -2259,6 +2259,15 @@ begin
     Self.Emit(Format(#9'movz %s, #0', [AReg]));
 end;
 
+{ Escape a string for a .ascii directive.  Mirrors the x86-64 backend's
+  AsmEscapeString: every non-printable byte becomes a THREE-DIGIT OCTAL
+  escape.
+
+  A bare '\0' is not usable -- it is ambiguous with the digits that may
+  follow ('\0' then "0b" is not the same as '\000' then "b"), and a raw
+  high byte passed through unescaped is not portable in a quoted .ascii
+  operand.  Zero-padded octal is self-terminating at three digits, so each
+  byte round-trips regardless of what follows it. }
 function TArm64Backend.AsmEscape(const AValue: string): string;
 var
   I, C: Integer;
@@ -2267,11 +2276,13 @@ begin
   for I := 0 to Length(AValue) - 1 do
   begin
     C := StrAt(AValue, I);
-    if C = 10 then Result := Result + '\n'
-    else if C = 9 then Result := Result + '\t'
-    else if C = 0 then Result := Result + '\0'
-    else if C = Ord('\') then Result := Result + '\\'
+    if C = Ord('\') then Result := Result + '\\'
     else if C = Ord('"') then Result := Result + '\"'
+    else if (C < 32) or (C > 126) then
+      Result := Result + '\'
+                + Chr(48 + ((C shr 6) and 7))
+                + Chr(48 + ((C shr 3) and 7))
+                + Chr(48 + (C and 7))
     else Result := Result + Chr(C);
   end;
 end;

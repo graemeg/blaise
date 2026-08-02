@@ -2011,9 +2011,18 @@ end;
 
 { Escape a string for use in an AT&T .ascii directive.
   GNU as accepts the same escapes as C string literals. }
+{ Escape a string for a gas .ascii directive.
+
+  Non-printable bytes are emitted as THREE-DIGIT OCTAL, not '\xNN'.  gas's
+  hex escape is greedy -- it consumes every hex digit that follows, so a NUL
+  before the letter 'b' becomes '\x00b', which gas reads as the single byte
+  0x0B.  That silently corrupts the data AND desynchronises it from the
+  length already written into the ARC header.  Octal escapes in gas are
+  capped at three digits, so zero-padding makes each one self-terminating
+  regardless of the next character. }
 function TX86_64Backend.AsmEscapeString(const AStr: string): string;
 var
-  I, C, Hi, Lo: Integer;
+  I, C: Integer;
 begin
   Result := '';
   for I := 0 to Length(AStr) - 1 do
@@ -2022,18 +2031,13 @@ begin
     case C of
       34:  Result := Result + '\"';
       92:  Result := Result + '\\';
-      10:  Result := Result + '\n';
-      13:  Result := Result + '\r';
-      9:   Result := Result + '\t';
     else
       if (C < 32) or (C > 126) then
-      begin
-        Hi := C shr 4;
-        Lo := C and 15;
-        if Hi < 10 then Hi := 48 + Hi else Hi := 55 + Hi;
-        if Lo < 10 then Lo := 48 + Lo else Lo := 55 + Lo;
-        Result := Result + '\x' + Chr(Hi) + Chr(Lo)
-      end
+        { Three octal digits, zero-padded: '\000'..'\377'. }
+        Result := Result + '\'
+                  + Chr(48 + ((C shr 6) and 7))
+                  + Chr(48 + ((C shr 3) and 7))
+                  + Chr(48 + (C and 7))
       else
         Result := Result + Chr(C);
     end;

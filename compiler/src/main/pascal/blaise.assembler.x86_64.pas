@@ -3112,7 +3112,12 @@ begin
             if C = Ord('n') then Buf := Buf + #10
             else if C = Ord('t') then Buf := Buf + #9
             else if C = Ord('r') then Buf := Buf + #13
-            else if C = Ord('0') then Buf := Buf + #0
+            { NOTE: no '\0' shortcut here.  It must fall through to the octal
+              branch below, or a zero-padded escape like '\000' followed by a
+              digit-or-letter is mis-parsed: '\0' would consume just the first
+              zero and the remaining "00b" would be copied through as literal
+              characters.  gas caps an octal escape at three digits, and the
+              octal branch below matches that, so '\000' is exactly one NUL. }
             else if C = '\' then Buf := Buf + '\'
             else if C = Ord('"') then Buf := Buf + '"'
             else if (C = Ord('x')) or (C = Ord('X')) then
