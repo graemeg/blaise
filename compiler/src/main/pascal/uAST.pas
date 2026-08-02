@@ -712,6 +712,12 @@ type
     ArrayIsRangeIndexed: Boolean; { True when index is Low..High integer range }
     ArrayLowBound:  Integer;
     ArrayHighBound: Integer;
+    { True when the declaration was written 'array of T' with no explicit
+      bounds, so the parser derived 0..Count-1 from the value list.  Set by
+      the EMBED path, where the length is the embedded file's size.  Recorded
+      rather than inferred because the bounds themselves are indistinguishable
+      from a hand-written 0..N-1 once filled in. }
+    ArrayBoundsFromValue: Boolean;
     { Multi-dimensional range-indexed const arrays.  When the declaration is
       array[L0..H0, L1..H1, ...] of T (comma form) or the equivalent nested
       array[L0..H0] of array[L1..H1] of T, each dimension's bounds are pushed

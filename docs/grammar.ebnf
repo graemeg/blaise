@@ -167,6 +167,33 @@ DIRECTIVE     = "{$" { char } "}" ;   (* compiler directive *)
  * is deliberately no expression form ({$IF ...}) yet — only symbol presence.
  * All other directives (e.g. {$H+}, {$mode ...}) are accepted and ignored. *)
 
+(* File-embedding directives, also handled in the lexer.  Unlike every other
+ * directive these PRODUCE tokens rather than gating them, so they are only
+ * valid in the value position of a constant declaration:
+ *
+ *   {$EMBED 'path'}      expands to the parenthesised byte list of the file,
+ *                        i.e. ( b0, b1, ... ) — an array-of-Byte initialiser
+ *   {$EMBEDSTR 'path'}   expands to a single string literal holding the
+ *                        file's bytes verbatim
+ *
+ * The path is single-quoted and resolved RELATIVE TO THE SOURCE FILE holding
+ * the directive (not the CWD), matching Rust's include_bytes! and Go's
+ * //go:embed; an absolute path is taken as written.  A missing or unreadable
+ * file is a compile-time error.
+ *
+ * EMBEDSTR performs no encoding conversion, newline translation or BOM
+ * stripping, and an interior NUL is preserved (Blaise strings are
+ * length-counted).  EMBED yields unsigned byte values 0..255.
+ *
+ * Because the length is the file's size, an EMBED-initialised constant is
+ * written with the UNBOUNDED array form and the bounds are derived from the
+ * value list:
+ *
+ *   const Icon: array of Byte = {$EMBED 'assets/icon.png'};
+ *   const Page: string        = {$EMBEDSTR 'assets/page.html'};
+ *
+ * See docs/embedded-resources-design.adoc. *)
+
 
 (* ═══════════════════════════════════════════════════════════════════════════
  * COMPILATION UNITS
@@ -647,6 +674,15 @@ ConstTypeAnnotation
     = TypeName                                            (* scalar typed const *)
     | ARRAY LBRACKET TypeName RBRACKET OF TypeName        (* array-of-enum const *)
     | ConstArrayType                                      (* range-indexed array const *)
+    | ConstUnboundedArrayType                             (* bounds from the value *)
+    ;
+
+(* Unbounded array const: 'array of T' with no index range.  The bounds are
+ * derived from the value list as 0..Count-1.  Written when stating the length
+ * by hand would be redundant and error-prone — the EMBED case, where the
+ * length is the embedded file's size. *)
+ConstUnboundedArrayType
+    = ARRAY OF TypeName
     ;
 
 (* Range-indexed array const types, single- or multi-dimensional.  The comma

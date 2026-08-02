@@ -1557,6 +1557,23 @@ begin
   while True do
   begin
     Expect(tkArray);
+    { Unbounded form: 'array of T' with no '[...]'.  Written by a constant
+      whose value comes from an EMBED directive, where the element count is
+      the embedded file's size and stating it by hand would be redundant and
+      error-prone.  Bounds are filled in from the element count once the
+      value list has been parsed (see ParseConstValue). }
+    if Check(tkOf) then
+    begin
+      Advance();
+      if not Check(tkIdent) then
+        raise EParseError.Create(Format(
+          'Expected element type name in array const at line %d col %d in %s',
+          [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
+      CD.ArrayElemType := FCurrent.Value;
+      CD.ArrayBoundsFromValue := True;
+      Advance();
+      Break;
+    end;
     Expect(tkLBracket);
     if Check(tkIdent) and (PeekKind() = tkRBracket) then
     begin
@@ -1697,6 +1714,15 @@ end;
 procedure TParser.ParseConstArrayGroup(CD: TConstDecl);
 begin
   Expect(tkLParen);
+  { Empty list '()' — reachable when an EMBED directive names a zero-length
+    file.  A hand-written '()' is equally accepted; the resulting constant
+    has no elements, and the unbounded form gives it bounds 0..-1 (length 0).
+    Returning early avoids ParseConstArrayScalar rejecting the ')'. }
+  if Check(tkRParen) then
+  begin
+    Advance();
+    Exit;
+  end;
   while True do
   begin
     if Check(tkLParen) then
@@ -1722,6 +1748,21 @@ begin
     begin
       CD.ArrayElements := TStringList.Create();
       Self.ParseConstArrayGroup(CD);
+      { 'array of T' — the element count IS the length, so fill in the
+        bounds the explicit-range form would have carried.  Done here, after
+        the value list, because that is the first point the count is known. }
+      if CD.ArrayBoundsFromValue then
+      begin
+        CD.ArrayIsRangeIndexed := True;
+        CD.ArrayLowBound  := 0;
+        CD.ArrayHighBound := CD.ArrayElements.Count - 1;
+        if CD.ArrayDimLows = nil then
+          CD.ArrayDimLows := TStringList.Create();
+        if CD.ArrayDimHighs = nil then
+          CD.ArrayDimHighs := TStringList.Create();
+        CD.ArrayDimLows.Add('0');
+        CD.ArrayDimHighs.Add(IntToStr(CD.ArrayElements.Count - 1));
+      end;
       Exit;
     end;
     { Named-type array const: const A: TArr = (10, 20, 30).  The type is

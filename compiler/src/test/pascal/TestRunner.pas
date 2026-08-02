@@ -137,6 +137,8 @@ uses
   cp.test.e2e.constarg,
   cp.test.multifile,
   cp.test.constants,
+  cp.test.embed,
+  cp.test.e2e.embed,
   cp.test.external,
   cp.test.opdf,
   cp.test.forin,

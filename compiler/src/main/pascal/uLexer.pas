@@ -15,7 +15,7 @@ unit uLexer;
 interface
 
 uses
-  SysUtils, Classes, uPasTokeniser, uStrCompat;
+  SysUtils, Classes, streams, uPasTokeniser, uStrCompat;
 
 type
   TTokenKind = (
@@ -127,17 +127,46 @@ type
     Col:   Integer;
   end;
 
+  { One synthetic token queued by an EMBED/EMBEDSTR expansion.  A class
+    rather than the TToken record so the queue can be a TObjectList that
+    owns and frees its entries. }
+  TPendingToken = class
+  public
+    Kind:  TTokenKind;
+    Value: string;
+    Line:  Integer;
+    Col:   Integer;
+  end;
+
   TLexer = class
   private
     FTok:  TFpgPascalTokeniser;
     FFilename: string;
     FDefines:  TStringList;   { conditional-compilation symbols, case-insensitive }
+    { Pending synthetic tokens produced by an EMBED/EMBEDSTR expansion.
+      Next() drains this queue before pulling from the tokeniser, so an
+      embedded file reaches the parser as the tokens a hand-written
+      initialiser would have produced. }
+    FPending:      TObjectList;
+    FPendingIdx:   Integer;
+    { Files embedded while lexing this unit, in encounter order.  Folded
+      into the unit's source hash so editing an asset invalidates the
+      cached .o exactly as editing the source does. }
+    FEmbedded:     TStringList;
     function MapKeyword(const AUpper: string): TTokenKind;
     function CodepointToUtf8(ACodepoint: Integer): string;
     function UnescapeString(const ARaw: string): string;
     function ProcessTextBlock(const ARaw: string): string;
     function DirectiveName(const AText: string): string;
     function DirectiveArg(const AText: string): string;
+    function DirectiveRawArg(const AText: string): string;
+    function ResolveEmbedPath(const APath: string): string;
+    function ReadEmbedFile(const APath: string; ALine, ACol: Integer;
+                           const ADirective: string): string;
+    procedure QueueToken(AKind: TTokenKind; const AValue: string;
+                         ALine, ACol: Integer);
+    procedure ExpandEmbed(const AText: string; ALine, ACol: Integer);
+    procedure ExpandEmbedStr(const AText: string; ALine, ACol: Integer);
     function IsDefined(const ASym: string): Boolean;
     procedure DefineSymbol(const ASym: string);
     procedure UndefSymbol(const ASym: string);
@@ -149,9 +178,22 @@ type
     constructor Create(const ASource: string; const AFilename: string = '');
     destructor Destroy; override;
     property Filename: string read FFilename;
+    { Absolute paths of files pulled in by EMBED/EMBEDSTR while lexing.
+      Read after a full lex to extend the unit-cache staleness key. }
+    property EmbeddedFiles: TStringList read FEmbedded;
     { Define a conditional-compilation symbol before lexing (e.g. from the
       -d command-line flag).  Case-insensitive. }
     procedure AddDefine(const ASym: string);
+    { Apply a whole -d/--define set, dropping the host-seeded OS/CPU symbols
+      first when the set carries its own (so a cross-target's OS wins).
+
+      This is THE way to hand a define set to a lexer: every caller that lexes
+      a unit must apply the same symbols, or the branches taken here diverge
+      from the branches taken by the real compile.  That matters beyond IFDEF
+      itself -- the unit-cache staleness hash discovers EMBED directives by
+      lexing, so a define-blind lex silently misses a define-gated asset and
+      the cached .o never invalidates when that asset changes. }
+    procedure ApplyDefines(ADefines: TStringList);
     { Drop the host OS predefines so a cross-target's OS symbol replaces them. }
     procedure ClearOSDefines;
     procedure ClearCPUDefines;
@@ -179,11 +221,16 @@ begin
   FFilename := AFilename;
   FDefines := TStringList.Create();
   FDefines.CaseSensitive := False;   { conditional symbols are case-insensitive }
+  FPending := TObjectList.Create(True);   { owns the queued tokens }
+  FPendingIdx := 0;
+  FEmbedded := TStringList.Create();
   Self.SeedPredefines();
 end;
 
 destructor TLexer.Destroy;
 begin
+  FEmbedded.Free();
+  FPending.Free();
   FDefines.Free();
   FTok.Free();
   inherited Destroy();
@@ -274,6 +321,44 @@ end;
 procedure TLexer.AddDefine(const ASym: string);
 begin
   Self.DefineSymbol(UpperCase(ASym));
+end;
+
+{ True if ASym names one of the OS / CPU conditional symbols.  A target's own
+  symbol (injected by the driver) must replace the host-seeded ones rather
+  than sit alongside them, or a cross-compile would satisfy both. }
+function DefineNamesOS(const ASym: string): Boolean;
+begin
+  Result := SameText(ASym, 'LINUX')   or SameText(ASym, 'FREEBSD') or
+            SameText(ASym, 'WINDOWS') or SameText(ASym, 'DARWIN')  or
+            SameText(ASym, 'UNIX');
+end;
+
+function DefineNamesCPU(const ASym: string): Boolean;
+begin
+  Result := SameText(ASym, 'CPUX86_64') or SameText(ASym, 'CPUAMD64') or
+            SameText(ASym, 'CPUARM64')  or SameText(ASym, 'CPUAARCH64');
+end;
+
+procedure TLexer.ApplyDefines(ADefines: TStringList);
+var
+  I:      Integer;
+  HasOS:  Boolean;
+  HasCPU: Boolean;
+begin
+  if ADefines = nil then Exit;
+  HasOS  := False;
+  HasCPU := False;
+  for I := 0 to ADefines.Count - 1 do
+  begin
+    if DefineNamesOS(ADefines.Strings[I])  then HasOS  := True;
+    if DefineNamesCPU(ADefines.Strings[I]) then HasCPU := True;
+  end;
+  if HasOS then
+    Self.ClearOSDefines();
+  if HasCPU then
+    Self.ClearCPUDefines();
+  for I := 0 to ADefines.Count - 1 do
+    Self.AddDefine(ADefines.Strings[I]);
 end;
 
 function TLexer.MapKeyword(const AUpper: string): TTokenKind;
@@ -579,6 +664,177 @@ begin
   end;
 end;
 
+{ The directive argument with case PRESERVED and surrounding single quotes
+  stripped.  DirectiveArg upper-cases (right for IFDEF FOO, fatal for a path
+  on a case-sensitive filesystem) and stops at the first space, so it cannot
+  carry a quoted path containing spaces.  This reads the raw text after the
+  directive name up to the closing brace, trims it, and removes one layer of
+  single quotes if present. }
+function TLexer.DirectiveRawArg(const AText: string): string;
+var
+  I, C, Last: Integer;
+begin
+  Result := '';
+  I := 2;  { skip the opening brace and the dollar }
+  { skip the directive name }
+  while I < Length(AText) do
+  begin
+    C := OrdAt(AText, I);
+    if (C = Ord('}')) or (C = Ord(' ')) then Break;
+    I := I + 1;
+  end;
+  { skip spaces between name and argument }
+  while (I < Length(AText)) and (OrdAt(AText, I) = Ord(' ')) do
+    I := I + 1;
+  { read to the closing brace, preserving case and interior spaces }
+  while I < Length(AText) do
+  begin
+    C := OrdAt(AText, I);
+    if C = Ord('}') then Break;
+    Result := Result + Chr(C);
+    I := I + 1;
+  end;
+  Result := Trim(Result);
+  { strip one layer of single quotes }
+  Last := Length(Result) - 1;
+  if (Length(Result) >= 2) and (OrdAt(Result, 0) = Ord(''''))
+     and (OrdAt(Result, Last) = Ord('''')) then
+    Result := Copy(Result, 1, Length(Result) - 2);
+end;
+
+{ Resolve an embed path against the directory of the source file being lexed,
+  mirroring Rust's include_bytes! and Go's //go:embed.  Resolving against the
+  process CWD instead would break the moment a unit is compiled from anywhere
+  but its own directory, and would make a unit non-relocatable.  An absolute
+  path is taken as written.  The unit loader may hand us a search-path-relative
+  filename, so the anchor is expanded first. }
+function TLexer.ResolveEmbedPath(const APath: string): string;
+var
+  Dir: string;
+begin
+  if (Length(APath) > 0) and (OrdAt(APath, 0) = Ord('/')) then
+  begin
+    Result := APath;
+    Exit;
+  end;
+  if FFilename = '' then
+  begin
+    { No source anchor (in-memory lex, e.g. a unit test) -- fall back to CWD. }
+    Result := APath;
+    Exit;
+  end;
+  Dir := ExtractFilePath(ExpandFileName(FFilename));
+  Result := Dir + APath;
+end;
+
+{ Read an embedded file whole, as raw bytes.  Deliberately NOT via
+  TStringList, which would normalise line endings and drop a trailing
+  newline -- an embedded asset must arrive byte-for-byte. }
+function TLexer.ReadEmbedFile(const APath: string; ALine, ACol: Integer;
+                              const ADirective: string): string;
+var
+  Full:  string;
+  FIn:   TFileInputStream;
+  N:     Integer;
+  Got:   Integer;
+  Chunk: Integer;
+begin
+  Result := '';
+  Full := Self.ResolveEmbedPath(APath);
+  if not FileExists(Full) then
+    raise Exception.Create(Format(
+      '%s: file not found ''%s'' (resolved to ''%s'') at line %d col %d in %s',
+      [ADirective, APath, Full, ALine, ACol, FFilename]));
+  try
+    FIn := TFileInputStream.Create(Full);
+    try
+      N := Integer(FIn.Size());
+      SetLength(Result, N);
+      { Read until N: a single read(2) may legally return fewer bytes than
+        asked for, and ignoring that would silently zero-fill the tail of the
+        embedded asset. }
+      Got := 0;
+      while Got < N do
+      begin
+        Chunk := FIn.Read(PChar(Result) + Got, N - Got);
+        if Chunk <= 0 then Break;
+        Got := Got + Chunk;
+      end;
+      if Got < N then
+        raise Exception.Create(Format(
+          '%s: short read on ''%s'' (%d of %d bytes) at line %d col %d in %s',
+          [ADirective, Full, Got, N, ALine, ACol, FFilename]));
+    finally
+      FIn.Free();
+    end;
+  except
+    on E: Exception do
+      { Keep the underlying reason -- an EACCES and an EIO read very
+        differently to whoever has to fix the build. }
+      raise Exception.Create(Format(
+        '%s: cannot read ''%s'' at line %d col %d in %s: %s',
+        [ADirective, Full, ALine, ACol, FFilename, E.Message]));
+  end;
+  { Record the resolved path so the unit's cache key can cover it. }
+  if FEmbedded.IndexOf(Full) < 0 then
+    FEmbedded.Add(Full);
+end;
+
+{ Append one synthetic token to the pending queue. }
+procedure TLexer.QueueToken(AKind: TTokenKind; const AValue: string;
+                            ALine, ACol: Integer);
+var
+  PT: TPendingToken;
+begin
+  PT := TPendingToken.Create();
+  PT.Kind  := AKind;
+  PT.Value := AValue;
+  PT.Line  := ALine;
+  PT.Col   := ACol;
+  FPending.Add(PT);
+end;
+
+{ Expand EMBED into the parenthesised element list a hand-written array
+  initialiser would have produced:
+
+      ( b0 , b1 , ... )
+
+  which is exactly what ParseConstArrayGroup consumes, so the parser needs
+  no new value-position rule.  The declaration is written `array of Byte`
+  without bounds; the parser derives them from the element count (see
+  ParseConstArrayType's unbounded form).
+
+  Bytes are emitted unsigned (0..255).  Masking matters: a high byte that
+  round-trips through a signed path is the classic way this expansion turns
+  200 into -56. }
+procedure TLexer.ExpandEmbed(const AText: string; ALine, ACol: Integer);
+var
+  Data: string;
+  I, N: Integer;
+begin
+  Data := Self.ReadEmbedFile(DirectiveRawArg(AText), ALine, ACol, 'EMBED');
+  N := Length(Data);
+  Self.QueueToken(tkLParen, '(', ALine, ACol);
+  for I := 0 to N - 1 do
+  begin
+    if I > 0 then
+      Self.QueueToken(tkComma, ',', ALine, ACol);
+    Self.QueueToken(tkIntLit, IntToStr(OrdAt(Data, I) and 255), ALine, ACol);
+  end;
+  Self.QueueToken(tkRParen, ')', ALine, ACol);
+end;
+
+{ Expand EMBEDSTR into a single string literal carrying the file's bytes
+  verbatim -- no encoding conversion, no newline translation, no BOM
+  stripping.  Blaise strings are length-counted, so a NUL byte survives. }
+procedure TLexer.ExpandEmbedStr(const AText: string; ALine, ACol: Integer);
+var
+  Data: string;
+begin
+  Data := Self.ReadEmbedFile(DirectiveRawArg(AText), ALine, ACol, 'EMBEDSTR');
+  Self.QueueToken(tkStringLit, Data, ALine, ACol);
+end;
+
 // Skip tokens from inside a FALSE conditional block until the matching
 // ELSE or ENDIF at depth 1 (handles nesting). Stops after consuming the token.
 procedure TLexer.SkipToElseOrEndif;
@@ -672,7 +928,25 @@ var
   raw:  TFpgPasToken;
   text: string;
   dname: string;
+  PT:   TPendingToken;
 begin
+  { Drain any tokens queued by an EMBED/EMBEDSTR expansion first.  The queue
+    is emptied and reset once exhausted so a later directive starts clean. }
+  if FPendingIdx < FPending.Count then
+  begin
+    PT := TPendingToken(FPending.Items[FPendingIdx]);
+    FPendingIdx := FPendingIdx + 1;
+    Result.Kind  := PT.Kind;
+    Result.Value := PT.Value;
+    Result.Line  := PT.Line;
+    Result.Col   := PT.Col;
+    if FPendingIdx >= FPending.Count then
+    begin
+      FPending.Clear();
+      FPendingIdx := 0;
+    end;
+    Exit;
+  end;
   while True do
   begin
     raw := FTok.NextToken();
@@ -682,7 +956,19 @@ begin
     begin
       text  := FTok.TokenText();
       dname := DirectiveName(text);
-      if dname = 'DEFINE' then
+      if (dname = 'EMBED') or (dname = 'EMBEDSTR') then
+      begin
+        { These directives PRODUCE tokens rather than gating them, so they
+          cannot be silently consumed like the rest.  Expand, then re-enter
+          Next() to serve the first queued token. }
+        if dname = 'EMBED' then
+          Self.ExpandEmbed(text, raw.Line, raw.Column)
+        else
+          Self.ExpandEmbedStr(text, raw.Line, raw.Column);
+        Result := Self.Next();
+        Exit;
+      end
+      else if dname = 'DEFINE' then
         Self.DefineSymbol(DirectiveArg(text))
       else if dname = 'UNDEF' then
         Self.UndefSymbol(DirectiveArg(text))

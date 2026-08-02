@@ -187,30 +187,13 @@ begin
          or (U = 'CPUARM64') or (U = 'CPUAARCH64');
 end;
 
+{ Thin wrapper over TLexer.ApplyDefines, which owns the OS/CPU-replacement
+  rule.  Every site that lexes a unit must apply the SAME set — the unit-cache
+  staleness hash discovers EMBED directives by lexing, so a divergent define
+  set there silently drops a define-gated asset from the cache key. }
 procedure AddDefinesTo(ALexer: TLexer; ADefines: TStringList);
-var
-  I: Integer;
-  HasOS, HasCPU: Boolean;
 begin
-  if ADefines = nil then Exit;
-  { If the caller supplies an OS symbol (a cross --target injects the target's),
-    it REPLACES the host OS symbols the lexer seeded in SeedPredefines: drop
-    those first so an IFDEF LINUX etc. reflects the target, not the host.
-    The CPU symbols work the same way — an IFDEF CPUX86_64 guarding an
-    inline-asm body must reflect the TARGET CPU, not this compiler's host. }
-  HasOS := False;
-  HasCPU := False;
-  for I := 0 to ADefines.Count - 1 do
-  begin
-    if IsOSDefine(ADefines.Strings[I]) then HasOS := True;
-    if IsCPUDefine(ADefines.Strings[I]) then HasCPU := True;
-  end;
-  if HasOS then
-    ALexer.ClearOSDefines();
-  if HasCPU then
-    ALexer.ClearCPUDefines();
-  for I := 0 to ADefines.Count - 1 do
-    ALexer.AddDefine(ADefines.Strings[I]);
+  ALexer.ApplyDefines(ADefines);
 end;
 
 function ParseArgs(AFront: TFrontEndOpts; AOpts: TBackendOpts;
@@ -696,6 +679,14 @@ begin
     Front.Defines.Add('CPUX86_64');
     Front.Defines.Add('CPUAMD64');
   end;
+
+  { Publish the finished define set for the .bif writer.  A unit's source
+    hash covers the files it embeds, and those are discovered by lexing — so
+    the writer must resolve the same IFDEF branches the validator will, or a
+    define-gated embed is silently left out of the cache key and editing that
+    asset never invalidates the cached .o.  Set once, after the target's
+    OS/CPU symbols are in, and before any unit is compiled. }
+  SetActiveDefines(Front.Defines);
 
   { Seed the working locals from the opts objects.  Keeping the locals lets
     the (large) main body read them unchanged; the parser owns the objects.

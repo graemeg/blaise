@@ -50,7 +50,7 @@ interface
 
 uses
   Classes, SysUtils, streams, strutils, uAST, uUnitInterface, uStrCompat,
-  uCompilerId;
+  uLexer, uCompilerId;
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
@@ -159,6 +159,42 @@ function  ReadUnitInterfaceFromFile(const APath: string): TUnitInterface;
   change-detection grade — sufficient for iface-vs-source freshness
   checks but NOT suitable for adversarial integrity. }
 function ContentHashFnv1a64(const AContent: string): string;
+
+{ The staleness hash for a unit: its source text PLUS the content of every
+  file the source pulls in with an EMBED/EMBEDSTR directive.
+
+  Hashing the .pas alone is not sufficient once a unit can embed assets — an
+  icon could change with no effect on the source text, the cached .o would be
+  judged fresh, and the rebuilt binary would silently carry the previous
+  bytes.  That is precisely the failure mode the embed feature exists to
+  remove, so the cache key has to cover the assets too.
+
+  ASourcePath anchors relative embed paths (they resolve against the source
+  file's directory, not the CWD).  An embedded file that cannot be read is
+  folded in as a marker rather than ignored, so a deleted asset invalidates
+  the entry and the following source compile reports it properly.
+
+  ADefines MUST be the same -d/--define set the real compile uses (nil when
+  there is none).  Discovery works by lexing, so a define-blind lex takes
+  different IFDEF branches than the compile did and silently misses a
+  define-gated or cross-target embed -- the cached .o would then never
+  invalidate when that asset changed, which is exactly the stale-asset
+  failure this hash exists to prevent.
+
+  Both the writer (stamping the .bif) and the validator (checking it) call
+  this, so the two sides stay symmetric by construction. }
+function SourceHashWithEmbeds(const ASourceText, ASourcePath: string;
+                              ADefines: TStringList): string;
+
+{ The -d/--define set in force for this compilation.
+
+  WriteUnitInterfaceToFile stamps a unit's source hash, and that hash must be
+  computed with the same defines the validator will use, or the two disagree
+  about which IFDEF branches (and therefore which EMBED directives) are live.
+  The writer is called from several places that have no define set in scope,
+  so the driver publishes it here once instead of threading a parameter
+  through every one.  Not owned; the caller keeps ownership. }
+procedure SetActiveDefines(ADefines: TStringList);
 
 { The compiler-identity string stamped into every .bif and checked when a
   cached .o is validated.  It is COMPILER_ID (the human-readable base) PLUS a
@@ -2703,8 +2739,84 @@ begin
   end;
 end;
 
+function SourceHashWithEmbeds(const ASourceText, ASourcePath: string;
+                              ADefines: TStringList): string;
+var
+  Lx:      TLexer;
+  Tok:     TToken;
+  Acc:     string;
+  I:       Integer;
+  Path:    string;
+  FIn:     TFileInputStream;
+  Blob:    string;
+  N:       Integer;
+  Got:     Integer;
+  I2:      Integer;
+begin
+  Acc := ASourceText;
+  { Discover the embedded files by lexing.  The lexer records each file it
+    reads, and resolves relative paths against ASourcePath exactly as the
+    real compile will, so the set found here matches the set compiled in.
+    A lex failure (bad syntax, missing embed target) leaves the source hash
+    alone — the subsequent real compile reports the error with diagnostics. }
+  Lx := TLexer.Create(ASourceText, ASourcePath);
+  Lx.ApplyDefines(ADefines);   { same branches the real compile takes }
+  try
+    try
+      repeat
+        Tok := Lx.Next();
+      until Tok.Kind = tkEOF;
+    except
+      { Ignore — hash the source text alone and let the compile report. }
+    end;
+    for I := 0 to Lx.EmbeddedFiles.Count - 1 do
+    begin
+      Path := Lx.EmbeddedFiles.Strings[I];
+      { Include the path itself, so swapping which file is embedded changes
+        the hash even when two assets happen to have identical content. }
+      Acc := Acc + Chr(0) + Path + Chr(0);
+      Blob := '';
+      try
+        FIn := TFileInputStream.Create(Path);
+        try
+          N := Integer(FIn.Size());
+          SetLength(Blob, N);
+          { Read until N: a single read(2) may legally return fewer bytes,
+            which would leave the tail as zeros and hash a file that never
+            existed on disk. }
+          Got := 0;
+          while Got < N do
+          begin
+            I2 := FIn.Read(PChar(Blob) + Got, N - Got);
+            if I2 <= 0 then Break;
+            Got := Got + I2;
+          end;
+          if Got < N then
+            SetLength(Blob, Got);
+        finally
+          FIn.Free();
+        end;
+      except
+        { Unreadable now (deleted since the cached build): fold in a marker
+          so the entry invalidates rather than silently matching. }
+        Blob := '<unreadable>';
+      end;
+      Acc := Acc + Blob;
+    end;
+  finally
+    Lx.Free();
+  end;
+  Result := ContentHashFnv1a64(Acc);
+end;
+
 var
   GEffectiveCompilerId: string = '';   { memoised — see EffectiveCompilerId }
+  GActiveDefines: TStringList;         { not owned — see SetActiveDefines }
+
+procedure SetActiveDefines(ADefines: TStringList);
+begin
+  GActiveDefines := ADefines;
+end;
 
 function EffectiveCompilerId: string;
 var
@@ -2764,7 +2876,12 @@ begin
       finally
         FIn.Free();
       end;
-      AIface.SourceHash := ContentHashFnv1a64(Src);
+      { Hash covers the source AND anything it embeds, so an asset edit
+        invalidates the cached .o just as a source edit does.  The active
+        defines must match the validator's, or the two disagree on which
+        IFDEF branches (and so which embeds) are live. }
+      AIface.SourceHash := SourceHashWithEmbeds(Src, AIface.SourceFile,
+                                                GActiveDefines);
     except
       { Swallow IO failure — best-effort population. }
       AIface.SourceHash := '';

@@ -6248,3 +6248,98 @@ implicit `Self` and takes its operands as explicit parameters.
   into `0 - A`, so a `Negative` operator must be recognised from that shape.
   The name is reserved and the arity enforced; wiring the recognition is
   deferred with the rest of the unary work.
+
+== Embedded Resources — `{$EMBED}` / `{$EMBEDSTR}`, Not FPC's `{$R}`
+
+Blaise embeds a file's bytes into the binary at compile time with two lexer
+directives, valid only in the value position of a constant declaration:
+
+[source,pascal]
+----
+const
+  Icon: array of Byte = {$EMBED 'assets/icon.png'};
+  Page: string        = {$EMBEDSTR 'assets/page.html'};
+----
+
+The path is single-quoted and resolves relative to the *source file*, not the
+process working directory.  A missing file is a compile-time error.
+
+=== Why not FPC's `{$R}`
+
+`{$R}` conflates two separable jobs: linking a pre-compiled `.res` blob, and
+(for `{$R foo.rc}`) invoking a resource compiler to build that blob first.  The
+second job is Win32-shaped — `.rc` is a language with its own preprocessor,
+`DIALOG`/`MENU`/`STRINGTABLE` statements and a binary layout that only the
+Windows loader interprets.  Blaise does not target Windows, so an `.rc` front
+end would be a large amount of parser surface serving no current target, and it
+would have to stay bootstrappable in a self-hosting compiler.
+
+The 90% use — get an icon, template or fixture into the binary — needs none of
+it.  The workaround it replaces is well known: an external tool converts each
+file into a Pascal `array of Byte` in an `.inc` that the unit includes.  That
+costs a build-order dependency (skip the tool and stale bytes compile
+silently, because the old `.inc` is still valid Pascal), generated source in
+the tree (a 200 KB image becomes roughly 1 MB of `$xx` literals), no dependency
+tracking, and real parse time on every build.  Reading the file in the compiler
+removes all four; the bytes never become source text.
+
+=== Why directives rather than an intrinsic
+
+`EmbedFile('path')` as an intrinsic would compose better in expressions, and was
+the initial preference.  It was rejected because it must be folded during
+semantic analysis, which forces the payload through the AST as a literal array
+node or synthetic constant — re-introducing the parse cost the feature exists to
+remove, and requiring the `.bif` serialiser to round-trip megabyte-scale
+literals.
+
+Expanding at lex time keeps the payload out of the AST entirely: the parser sees
+exactly the tokens a hand-written initialiser would have produced, so there is no
+new AST node, no `.bif` change and no codegen work.  The cost is that the
+directives are not general expressions.  Zig's `@embedFile` and Rust's
+`include_bytes!` carry the same restriction in practice.
+
+=== Why the path is source-relative
+
+Resolving against the working directory would break as soon as a unit is
+compiled from anywhere but its own directory, and would make a unit
+non-relocatable — the unit and its assets could no longer move together.  Rust
+and Go both anchor to the source file for the same reason.
+
+=== The unbounded `array of T` const form
+
+An `{$EMBED}` constant's length is the file's size, so restating it as an
+explicit `array[0..N-1]` would be redundant and would silently rot when the
+asset changed.  The unbounded form `array of Byte` derives its bounds from the
+value list.  It is a general const form, not an embed-only special case: a
+hand-written `const A: array of Integer = (1, 2, 3)` is equally valid.
+
+=== Cache invalidation is part of the feature
+
+A cached unit was considered fresh when the hash of its `.pas` matched.  Once a
+unit can embed assets that is not sufficient — an icon could change with no
+effect on the source text, the stale `.o` would be reused, and the rebuilt
+binary would silently carry the previous bytes.  That is exactly the failure
+mode the feature exists to remove, so the staleness hash covers the source text
+*and* the content of every embedded file.  Writer and validator derive it
+through one shared function so the two sides cannot drift apart.
+
+=== Deliberate boundaries
+
+* *No OS resource sections.*  Nothing is written to a PE `.rsrc`, a Mach-O
+  section, or an ELF note; loader-visible icons, version info and manifests are
+  out of scope.  If Windows becomes a target, the pragmatic path is a focused
+  writer for icon + version-info + manifest, or shelling out to `windres` — what
+  Go and Rust both chose.
+* *No named lookup or enumeration.*  One directive binds one file to one
+  constant; there is no `FindResource('name')`.  With a handful of assets, N
+  named constants are clearer than any lookup API.  Recorded in
+  `docs/future-improvements.adoc` as a stdlib layer needing no compiler work.
+* *No globbing or directory embedding.*  Go's `//go:embed assets/*.png`
+  presupposes the lookup layer — a tree is only useful if something can
+  enumerate it.
+* *No compression or transformation.*  Bytes land as they are on disk;
+  compression is a library concern operating on the embedded bytes.
+
+Full design, including the prior-art survey (Go, Rust, Zig, Swift, C#) and why
+Swift's runtime-bundle model does not fit a freestanding single-file binary:
+`docs/embedded-resources-design.adoc`.

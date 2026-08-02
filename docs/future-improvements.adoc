@@ -1,6 +1,6 @@
 = Blaise Compiler — Future Improvements
-:toc:
-:toc-placement: preamble
+:toc: left
+:toclevels: 3
 :sectnums:
 
 This document records optimisation opportunities, quality-of-life improvements,
@@ -37,6 +37,50 @@ prioritise them.
 === Method level attributes
 
 Blaise only has class-level attribute RTTI today — there's no per-method attribute reflection, and adding it is a layout-changing compiler change (new method-table slot, stage-2 rebuild).
+
+=== Named resource lookup over embedded files
+
+The `{$EMBED}` / `{$EMBEDSTR}` directives (see
+`docs/embedded-resources-design.adoc`) bind one file to one named constant at
+compile time.  That covers the common case, but it offers no way to ask for a
+resource *by name at runtime*, and no way to enumerate a set of embedded
+assets.  A follow-on layer would provide that:
+
+[source,pascal]
+----
+Data := FindResource('templates/report.html');
+for Name in EnumResources('templates/') do
+  ...
+----
+
+*Design sketch.*  This is a stdlib layer over the existing directive, not new
+codegen.  A unit declares its assets with `{$EMBED}` as today, plus a registry
+table mapping logical names to those constants; `FindResource` is then a lookup
+over the table.  The table can be hand-written initially.  A later refinement
+is to have PasBuild generate it from a `src/main/resources` tree, which would
+give the Java/Maven ergonomic — `src/main/resources/report.html` addressable as
+`'report.html'` with no per-file declaration — while keeping single-binary
+output.
+
+*How this differs from Java and Swift.*  Both of those resolve resources at
+*runtime* through a search path (the JVM classpath; the `.app` bundle
+directory), so the bytes live in a container beside the executable and can be
+swapped without recompiling.  Blaise embeds at compile time instead: a missing
+resource is a compile error rather than a runtime nil, and the binary stays a
+single self-contained file — which matters given the freestanding-by-default
+link mode.  The API surface can look similar; the semantics deliberately do
+not.
+
+*Why deferred.*  With a handful of assets, N named constants are clearer than
+any lookup API, and the directive alone is sufficient.  The lookup layer only
+earns its keep once a program carries many assets, or genuinely needs to
+resolve a name computed at runtime.  Deferring also keeps the compiler out of
+it — nothing here needs new codegen, so it can be added later without
+revisiting the directive.
+
+*Effort.*  Small-to-moderate for a hand-written registry; moderate if PasBuild
+grows resource-tree generation (that also needs the resource tree folded into
+the unit-cache key, in the same way `{$EMBED}` dependencies already are).
 
 === If Conditional Operator (Ternary Conditional Operator)
 

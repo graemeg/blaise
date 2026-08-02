@@ -1,0 +1,251 @@
+= Embedded Resources — Compile-Time File Embedding
+:toc: left
+:toclevels: 3
+:sectnums:
+
+Blaise embeds file contents into a binary at compile time through two lexer
+directives, `{$EMBED}` and `{$EMBEDSTR}`.  A file named in the directive is read
+during lexing and expanded into a constant initialiser, so the bytes reach the
+data section through the existing typed-constant path.  No external converter
+tool, no generated source file, and no resource-compiler infrastructure is
+involved.
+
+This document records the design, the rejected alternatives, and the boundary
+of what the feature deliberately does not do.
+
+== Motivation
+
+The established Pascal answer is FPC's `{$R}`, which does two separable jobs:
+link a pre-compiled `.res` blob into the binary, and (for `{$R foo.rc}`) invoke
+a resource compiler to produce that blob first.  The second job is Win32-shaped:
+`.rc` is a language with its own preprocessor, `DIALOG`/`MENU`/`STRINGTABLE`
+statements, and a binary layout that only the Windows loader interprets.  Blaise
+does not target Windows yet, so a `.rc` front end would be substantial parser
+surface serving no current target.
+
+The practical need — get the bytes of an icon, template, or fixture into the
+binary — is met without any of that.  The workaround it replaces is well known:
+an external tool converts each file into a Pascal `array of Byte` in an `.inc`,
+which the unit then includes.  That workflow has real costs:
+
+* A build-order dependency.  The converter must run before compilation; skipping
+  it silently compiles stale bytes, because the previous `.inc` is still valid
+  Pascal.
+* Generated source in the tree.  Committed, it bloats the repository (a 200 KB
+  image becomes roughly 1 MB of `$xx` literals) and produces noisy diffs; not
+  committed, a fresh clone cannot build until the tool is built and run.
+* No dependency tracking.  Touching the source image does not mark the `.inc`
+  stale — the build tool only sees the `.inc` timestamp.
+* Parse cost on every build.  A byte array written as source text is lexed and
+  parsed element by element.
+
+Reading the file in the compiler removes all four.  The bytes never become
+source text, so the parse cost disappears; staleness becomes the unit cache's
+responsibility, which it is already built to handle.
+
+== Prior art
+
+No modern language built a resource compiler.  Each grew the hand-rolled
+converter first and then absorbed it into the language:
+
+[cols="1,3,2"]
+|===
+| Language | Mechanism | Resource sections
+
+| Go
+| `//go:embed` directive above a var; `embed.FS` for a tree
+| Not covered — third-party `.syso` generators
+
+| Rust
+| `include_bytes!` / `include_str!` macros
+| Not covered — `winres` crate shells out to `windres`
+
+| Zig
+| `@embedFile` builtin, returns `[]const u8`
+| Not covered
+
+| Swift
+| SwiftPM `resources:`; copied into a `.bundle` beside the binary
+| Bundle is the platform convention
+
+| C#/.NET
+| `.resx` compiled into assembly metadata
+| CLR metadata has first-class resources
+|===
+
+The consistent split is: *embedding bytes is a small, universal language
+feature; OS resource sections are an external, platform-specific concern.*
+Blaise follows that split.
+
+Swift is the instructive outlier — it does not embed at all, because an Apple
+`.app` is a directory and `Bundle.module` reads from it at runtime.  That model
+is unavailable to a compiler whose default Linux link mode is freestanding and
+whose output is meant to be a single self-contained file.
+
+== Syntax
+
+Two directives, both valid only in the value position of a constant
+declaration:
+
+[source,pascal]
+----
+const
+  IconPng:  array of Byte = {$EMBED 'assets/icon.png'};
+  Template: string        = {$EMBEDSTR 'assets/report.html'};
+----
+
+`{$EMBED}` yields a byte array; `{$EMBEDSTR}` yields a string.  They are
+distinct directives rather than one directive whose meaning depends on the
+declared type, because the lexer expands them before any type information
+exists — see <<Implementation>>.
+
+The path is written in single quotes and is resolved *relative to the source
+file containing the directive*, not the current working directory.  This
+matches Rust's `include_bytes!` and Go's `//go:embed`, and it is the only
+choice that keeps a unit relocatable: a unit and its assets move together.
+
+An absolute path is accepted as written.  Path separators are normalised, so
+`assets/icon.png` resolves on every supported host.
+
+=== Why a directive rather than an intrinsic
+
+An intrinsic function — `EmbedFile('assets/icon.png')` — would compose more
+naturally in expressions, and was the initial preference.  It was rejected
+because it would have to be folded during semantic analysis, which forces the
+byte payload through the AST as either a literal array node or a synthetic
+constant.  Both re-introduce the parse-cost problem the feature exists to
+remove, and the AST/`.bif` serialiser would then have to round-trip a
+megabyte-scale literal.
+
+Expanding at lex time keeps the payload out of the AST entirely.  The cost is
+that the directive is not a general expression — it may only appear where a
+constant initialiser is expected — which is the same restriction Zig's
+`@embedFile` and Rust's `include_bytes!` carry in practice.
+
+== Semantics
+
+`{$EMBED}` produces a constant of type `array of Byte` with bounds `0..N-1`
+where `N` is the file size.  A zero-length file yields a zero-length array,
+which is legal and occasionally useful as a placeholder.
+
+`{$EMBEDSTR}` produces a `string` constant holding the file's bytes verbatim.
+No encoding conversion, newline translation, or BOM stripping is performed —
+the constant is exactly the bytes on disk.  A file containing a NUL byte is
+therefore representable, since Blaise strings are length-counted rather than
+NUL-terminated.
+
+Both forms are ordinary typed constants once expanded.  They are immutable,
+they participate in constant folding where applicable, and they are emitted
+through the same data-section paths as any hand-written constant — const arrays
+via the array-constant emitters, strings via the immutable-string-literal
+layout with its refcount sentinel.
+
+A missing or unreadable file is a compile-time error naming the directive's
+line, column, and containing file.  This is the intended trade against the
+runtime-lookup model: a resource that is not there fails the build rather than
+returning nil at run time.
+
+== Implementation
+
+=== Lexer expansion
+
+Directives are consumed entirely inside `TLexer.Next` and never reach the
+parser.  `{$EMBED}` and `{$EMBEDSTR}` therefore cannot be handled the way
+`{$IFDEF}` is (which merely gates token flow) — they must *produce* tokens.
+
+The expansion reads the file and pushes a synthetic token sequence into the
+lexer's output:
+
+* `{$EMBED}` emits `( intlit , intlit , ... )` — the parenthesised element list
+  that `ParseConstArrayGroup` already consumes.
+* `{$EMBEDSTR}` emits a single `tkStringLit` whose value is the file content.
+
+The parser is unchanged.  It sees exactly what a hand-written initialiser would
+have produced, which is why no new AST node, no `.bif` format change, and no
+codegen work is required.
+
+`{$EMBED}` also fills in the declaration's array bounds, since a directive-fed
+constant is written as `array of Byte` without explicit bounds.
+
+=== Path argument parsing
+
+The existing `DirectiveArg` helper upper-cases its result, which is correct for
+`IFDEF FOO` and wrong for a path on a case-sensitive filesystem.  A separate
+case-preserving accessor reads the quoted path, so `{$EMBED 'Assets/Icon.png'}`
+resolves as written.
+
+=== Unit-cache invalidation
+
+This is the one place the feature genuinely extends existing machinery.
+
+A cached unit is currently considered fresh when the FNV-1a hash of its `.pas`
+source text matches the hash recorded in the `.bif`, and the recorded compiler
+id matches the running binary.  Both sides read only the `.pas` file, so an
+embedded asset could change with no effect on either — the stale `.o` would be
+reused and the binary would silently carry the previous bytes.  That is exactly
+the failure mode the external-converter workflow suffers from, and reproducing
+it would defeat the feature's main advantage.
+
+The fix keeps the existing single-hash shape.  The lexer records every file it
+embedded while lexing a unit; the unit's source hash is then computed over the
+source text *and* the content of each embedded file, in a deterministic order.
+Both the writer (when stamping the `.bif`) and the validator (when checking it)
+derive the hash the same way, so an asset edit invalidates the cache exactly as
+a source edit does.  The resolved path is folded in alongside the content, so
+re-pointing a directive at a different file with identical bytes still
+invalidates.
+
+An embedded file that has become unreadable since the cached build invalidates
+the entry rather than erroring, so the subsequent source compile reports the
+missing file with proper diagnostics.
+
+*The discovery lex must use the compilation's define set.*  Embedded files are
+found by lexing the source, so the hash resolves `{$IFDEF}` branches just as
+the real compile does — and it only agrees with the compile if it is given the
+same `-d`/`--define` symbols, including the OS/CPU symbols a cross `--target`
+injects.  A define-blind discovery lex takes the other branch and silently
+omits a define-gated asset from the key, restoring the exact stale-asset bug
+this section exists to prevent (and doing so invisibly, since writer and
+validator would still agree with each other).  `TLexer.ApplyDefines` is
+therefore the single place that applies a define set, used by the driver, the
+unit loader and the hash alike; the driver publishes the finished set via
+`SetActiveDefines` once the target's symbols are in.
+
+== Boundaries
+
+The feature deliberately stops here.
+
+*No OS resource sections.*  Nothing is written to a PE `.rsrc` section, a
+Mach-O section, or an ELF note.  Icons shown by a file manager, Windows
+version-info, and loader-read manifests are all outside scope.  If Windows
+becomes a target, the pragmatic path is a focused writer for icon, version-info
+and manifest — roughly five per cent of `.rc`'s surface covering most real use —
+or shelling out to `windres`, as Go and Rust both chose.
+
+*No named lookup or enumeration.*  A directive binds one file to one constant.
+There is no `FindResource('name')` and no way to enumerate an embedded set.
+That layer is recorded in `docs/future-improvements.adoc` ("Named resource
+lookup over embedded files"); it is a stdlib concern that needs no further
+compiler work, and with a handful of assets, N named constants are clearer than
+any lookup API.
+
+*No globbing or directory embedding.*  Go's `//go:embed assets/*.png` and
+`embed.FS` are attractive but presuppose the lookup layer above — a directory
+tree is only useful if something can enumerate it.  One file, one constant, per
+directive.
+
+*No compression or transformation.*  Bytes land in the binary exactly as they
+are on disk.  Compression is a library concern operating on the embedded bytes.
+
+== Testing
+
+Per the project rule that every language feature carries both layers:
+
+* IR unit tests assert the expanded constant reaches codegen correctly — array
+  bounds, element values, and the string form's exact bytes.
+* E2E tests compile and run a program that embeds a fixture and verifies the
+  bytes at runtime on both backends, since only an executed binary proves the
+  data-section layout and the string header are right.
+* A cache test proves that editing an embedded file invalidates the cached unit
+  — the regression this design is most exposed to, and the one no other test
+  layer would catch.

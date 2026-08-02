@@ -195,7 +195,12 @@ begin
     try
       try
         Src.LoadFromFile(SrcPath);
-        Cur := ContentHashFnv1a64(Src.Text);
+        { Must mirror the writer exactly (WriteUnitInterfaceToFile): the hash
+          covers the source text AND every file it embeds, so editing an
+          embedded asset invalidates this entry.  FDefines is passed because
+          discovery lexes the source -- without the same -d set, a
+          define-gated embed is missed and never invalidates. }
+        Cur := SourceHashWithEmbeds(Src.Text, SrcPath, FDefines);
       except
         Cur := '';
       end;
@@ -278,25 +283,10 @@ begin
     L := TLexer.Create(SL.Text, APath);
     { Apply the same -d/--define symbols the main program got, so IFDEF
       directives resolve consistently across the program and all its units.
-      If the set carries an OS symbol (the target's, injected by the driver),
-      drop the lexer's host-seeded OS symbols first so the target wins here too
-      — mirrors AddDefinesTo in Blaise.pas. }
-    if FDefines <> nil then
-    begin
-      HasOS := False;
-      HasCPU := False;
-      for DI := 0 to FDefines.Count - 1 do
-      begin
-        if DefineIsOS(FDefines.Strings[DI]) then HasOS := True;
-        if DefineIsCPU(FDefines.Strings[DI]) then HasCPU := True;
-      end;
-      if HasOS then
-        L.ClearOSDefines();
-      if HasCPU then
-        L.ClearCPUDefines();
-      for DI := 0 to FDefines.Count - 1 do
-        L.AddDefine(FDefines.Strings[DI]);
-    end;
+      TLexer.ApplyDefines owns the OS/CPU-replacement rule (a cross --target's
+      symbol must displace the host-seeded one), so the loader, the driver and
+      the cache-staleness hash all go through it and cannot drift. }
+    L.ApplyDefines(FDefines);
     try
       P := TParser.Create(L);
       try
