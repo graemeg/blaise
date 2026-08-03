@@ -15,7 +15,8 @@ unit uLexer;
 interface
 
 uses
-  SysUtils, Classes, streams, uPasTokeniser, uStrCompat;
+  SysUtils, Classes, Contnrs,   { Contnrs — TObjectList (the FPending queue) }
+  streams, uPasTokeniser, uStrCompat;
 
 type
   TTokenKind = (
