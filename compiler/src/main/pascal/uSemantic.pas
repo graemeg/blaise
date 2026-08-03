@@ -2861,8 +2861,14 @@ begin
   { A constructor is always reachable (you must be able to instantiate the
     type); enforcing visibility on Create would block legitimate construction. }
   if SameText(M.Name, 'Create') then Exit;
-  AssertMemberVisibleV(M.Visibility, M.OwningUnit, M.OwnerTypeName,
-                       M.Name, ALine, ACol);
+  { VisibilityUnit when set (a generic instance, whose OwningUnit names the
+    analysing compilation rather than the declaring one); OwningUnit otherwise. }
+  if M.VisibilityUnit <> '' then
+    AssertMemberVisibleV(M.Visibility, M.VisibilityUnit, M.OwnerTypeName,
+                         M.Name, ALine, ACol)
+  else
+    AssertMemberVisibleV(M.Visibility, M.OwningUnit, M.OwnerTypeName,
+                         M.Name, ALine, ACol);
 end;
 
 procedure TSemanticAnalyser.AssertMemberVisibleV(AVisibility: TMemberVisibility;
@@ -4241,6 +4247,12 @@ begin
         process that touches it, and all of them must agree on one symbol
         (per-unit codegen emits it WEAK so the linker dedups; BUG-004). }
       NewMDecl.OwningUnit     := Sym.OwningUnit;
+      { Visibility is judged against the unit that DECLARED the template, not
+        the one instantiating it -- OwningUnit above is deliberately the
+        analysing compilation (see the note on the bare emit name), so using
+        it here would make every private member of an imported generic look
+        same-unit and therefore visible. }
+      NewMDecl.VisibilityUnit := Templ.DefUnitName;
       NewMDecl.ResolvedQbeName := ATypeName + '_' + NewMDecl.Name;
       if SameText(NewMDecl.Name, 'Destroy') then
       begin

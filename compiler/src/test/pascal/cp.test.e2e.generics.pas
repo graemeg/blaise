@@ -63,6 +63,10 @@ type
     procedure TestRun_GenericOpenArray_PassesElementToTMethod;
     procedure TestRun_GenericOpenArray_StaticFactory;
     procedure TestRun_GenericOpenArray_TwoInstantiations;
+
+    { Member visibility survives import of a generic }
+    procedure TestRun_GenericImport_PrivateMethodIsRejected;
+    procedure TestRun_GenericImport_PublicMethodStillReachable;
   end;
 
 implementation
@@ -596,6 +600,91 @@ begin
       N.First([42])
     end.
     ''', 'str' + LE + '42' + LE, 0);
+end;
+
+{ ------------------------------------------------------------------ }
+{ Member visibility across a generic import                            }
+{ ------------------------------------------------------------------ }
+
+procedure TE2EGenericsTests.TestRun_GenericImport_PrivateMethodIsRejected;
+var
+  Output: string;
+  RCode:  Integer;
+  Failed: Boolean;
+begin
+  { A `private` method on a generic was callable from any importing unit,
+    while the same method on a NON-generic class was correctly rejected.
+    Two causes, both needed: ReadGenericClassPayload rebuilt the method decl
+    without Visibility, and the instantiated decl's OwningUnit names the
+    ANALYSING compilation (deliberately — every unit that touches TFoo<Bar>
+    materialises it and they must agree on one bare symbol), which
+    MemberVisibleTo then read as same-unit.  VisibilityUnit carries the
+    TEMPLATE's declaring unit for the check.
+
+    Must reach the compiler, not just the harness: this test asserts the
+    compile FAILS. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  Failed := False;
+  try
+    CompileAndRunWithUnit('gvis',
+      '''
+      unit gvis;
+      interface
+      type
+        TGuard<T> = class
+        private
+          procedure Hidden;
+        public
+          procedure Shown;
+        end;
+      implementation
+      procedure TGuard<T>.Hidden;
+      begin WriteLn('hidden') end;
+      procedure TGuard<T>.Shown;
+      begin WriteLn('shown') end;
+      end.
+      ''',
+      '''
+      program P;
+      uses gvis;
+      var G: TGuard<string>;
+      begin
+        G := TGuard<string>.Create();
+        G.Hidden()
+      end.
+      ''', Output, RCode);
+  except
+    on E: Exception do
+      Failed := True;
+  end;
+  AssertTrue('calling a private method on an imported generic must not compile',
+             Failed);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericImport_PublicMethodStillReachable;
+begin
+  { The other half — the fix must not lock out legitimate public access. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TGuard<T> = class
+      private
+        procedure Hidden;
+      public
+        procedure Shown;
+      end;
+    procedure TGuard<T>.Hidden;
+    begin WriteLn('hidden') end;
+    procedure TGuard<T>.Shown;
+    begin WriteLn('shown') end;
+    var G: TGuard<string>;
+    begin
+      G := TGuard<string>.Create();
+      G.Shown()
+    end.
+    ''', 'shown' + LE, 0);
 end;
 
 initialization

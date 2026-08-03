@@ -2404,8 +2404,13 @@ begin
   end;
 end;
 
+{ AUnitName is the interface being imported.  It is stamped onto each
+  rebuilt method decl because the visibility check treats an EMPTY declaring
+  unit as "same unit" (uSemantic.MemberVisibleTo) — so without it a private
+  method on an imported generic is visible everywhere. }
 procedure ReadGenericClassPayload(const AText: string; var APos: Integer;
-                                  AEntry: TTypeEntry);
+                                  AEntry: TTypeEntry;
+                                  const AUnitName: string);
 var
   Def:      TGenericTypeDef;
   ClassDef: TClassTypeDef;
@@ -2455,6 +2460,15 @@ begin
       code worked, because there the template AST is used directly. }
     MD.IsStatic       := Sig.IsStatic;
     MD.IsOverload     := Sig.IsOverload;
+    { Visibility likewise — the sig has carried it since v5, but dropping it
+      here left the rebuilt decl at its zero value (mvPublic), so a `private`
+      method on an imported GENERIC was callable from any unit while the same
+      method on a non-generic class was correctly rejected. }
+    MD.Visibility     := Sig.Visibility;
+    { OwningUnit must travel with Visibility: MemberVisibleTo treats an empty
+      declaring unit as same-unit (so program-scope types and pre-visibility
+      imports are not locked out), which would silently defeat the check. }
+    MD.OwningUnit     := AUnitName;
     MD.ReturnTypeName := Sig.ReturnType.TypeName;
     if Sig.TypeParams <> nil then
     begin
@@ -2635,7 +2649,7 @@ begin
     else if Kind = 'proc' then
       ReadProcPayload(AText, APos, Entry)
     else if Kind = 'generic-class' then
-      ReadGenericClassPayload(AText, APos, Entry)
+      ReadGenericClassPayload(AText, APos, Entry, AIface.Name)
     else if Kind = 'generic-interface' then
       ReadGenericInterfacePayload(AText, APos, Entry)
     else if Kind = 'generic-proc' then

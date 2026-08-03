@@ -1003,6 +1003,16 @@ type
     OwningUnit:         string;      { name of the unit that exported this routine;
                                        empty for program-scope.  Set by uSemantic;
                                        consumed by codegen for cross-unit references. }
+    VisibilityUnit:     string;      { unit that DECLARED this method, for the
+                                       member-visibility check.  Normally the same
+                                       as OwningUnit, but they diverge for a
+                                       generic instance: OwningUnit there is the
+                                       ANALYSING compilation (every unit that
+                                       touches TFoo<Bar> materialises it, and they
+                                       must agree on one bare symbol — BUG-004),
+                                       whereas visibility must be judged against
+                                       the unit that wrote the template.  Empty =
+                                       fall back to OwningUnit. }
     IsExternal:         Boolean;     { declared with 'external' directive — no body }
     IsVarArgs:          Boolean;     { declared 'varargs' — a C variadic external:
                                        call sites may pass extra arguments after the
