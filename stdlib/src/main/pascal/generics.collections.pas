@@ -52,7 +52,7 @@ type
     function  IndexOf(const Value: T): Integer;
     procedure Delete(AIndex: Integer);
     procedure Clear;
-    procedure Destroy;
+    destructor Destroy; override;
     function  GetEnumerator: TListEnumerator<T>;
     { Eager LINQ-lite operators (docs/anonymous-methods-design.adoc,
       Phase 10).  Map/Where allocate and return NEW lists the caller owns;
@@ -86,7 +86,7 @@ type
     function  Pop: T;
     function  Peek: T;
     procedure Clear;
-    procedure Destroy;
+    destructor Destroy; override;
     property Count: Integer read FCount;
   end;
 
@@ -105,7 +105,7 @@ type
     function  Dequeue: T;
     function  Peek: T;
     procedure Clear;
-    procedure Destroy;
+    destructor Destroy; override;
     property Count: Integer read FCount;
   end;
 
@@ -128,7 +128,7 @@ type
     procedure Exclude(Value: T);
     function  Contains(const Value: T): Boolean;
     procedure Clear;
-    procedure Destroy;
+    destructor Destroy; override;
     { Build a set from a literal list, so a fixed membership test reads as
       one expression instead of a Create plus a run of Include calls:
 
@@ -204,7 +204,7 @@ type
     { Drop all entries; keeps the allocated capacity for reuse. }
     procedure Clear;
     function  GetCount: Integer;
-    procedure Destroy;
+    destructor Destroy; override;
     property Count: Integer read FCount;
     property Items[Key: K]: V read GetItem write SetItem; default;
   end;
@@ -255,7 +255,7 @@ type
     function  GetKey(AIndex: Integer): K;
     function  GetValue(AIndex: Integer): V;
     function  GetCount: Integer;
-    procedure Destroy;
+    destructor Destroy; override;
     property Count: Integer read FCount;
     property Items[Key: K]: V read GetItem write SetItem; default;
     property Keys[Index: Integer]: K read GetKey;
@@ -554,7 +554,7 @@ begin
   Self.FCount := 0
 end;
 
-procedure TList<T>.Destroy;
+destructor TList<T>.Destroy;
 var
   I:     Integer;
   Slot:  ^T;
@@ -676,7 +676,7 @@ begin
   Self.FCount := 0
 end;
 
-procedure TStack<T>.Destroy;
+destructor TStack<T>.Destroy;
 var
   I:     Integer;
   Slot:  ^T;
@@ -795,7 +795,7 @@ begin
   Self.FTail  := 0
 end;
 
-procedure TQueue<T>.Destroy;
+destructor TQueue<T>.Destroy;
 begin
   Self.ReleaseElements();
   FreeMem(Self.FData);
@@ -996,7 +996,7 @@ begin
   Self.HashInvalidate()
 end;
 
-procedure TSet<T>.Destroy;
+destructor TSet<T>.Destroy;
 var
   I:     Integer;
   Slot:  ^T;
@@ -1293,7 +1293,7 @@ begin
   end
 end;
 
-procedure TDictionary<K, V>.Destroy;
+destructor TDictionary<K, V>.Destroy;
 begin
   Self.ReleaseEntries();
   Self.HashInvalidate();
@@ -1578,7 +1578,7 @@ begin
   end
 end;
 
-procedure TOrderedDictionary<K, V>.Destroy;
+destructor TOrderedDictionary<K, V>.Destroy;
 begin
   Self.ReleaseEntries();
   Self.HashInvalidate();

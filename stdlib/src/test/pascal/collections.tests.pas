@@ -66,6 +66,44 @@ type
     procedure TestDict_From_LaterKeyWins;
     procedure TestDict_From_LengthMismatchPairsUpToShorter;
     procedure TestDict_From_ResultIsMutable;
+
+    { --- TList<T>: core operations --- }
+    procedure TestList_AddAndIndexRead;
+    procedure TestList_SetItemOverwrites;
+    procedure TestList_IndexOf_HitAndMiss;
+    procedure TestList_Delete_ShiftsTail;
+    procedure TestList_Delete_LastElement;
+    procedure TestList_Clear_EmptiesTheList;
+    procedure TestList_GrowsPastInitialCapacity;
+    procedure TestList_ForIn_VisitsAllInOrder;
+
+    { --- TStack<T> --- }
+    procedure TestStack_PushPop_IsLifo;
+    procedure TestStack_Peek_DoesNotRemove;
+    procedure TestStack_Clear_EmptiesTheStack;
+    procedure TestStack_GrowsPastInitialCapacity;
+
+    { --- TQueue<T> --- }
+    procedure TestQueue_EnqueueDequeue_IsFifo;
+    procedure TestQueue_Peek_DoesNotRemove;
+    procedure TestQueue_Clear_EmptiesTheQueue;
+    procedure TestQueue_WrapsAroundCircularBuffer;
+
+    { --- TDictionary<K,V>: core operations --- }
+    procedure TestDict_AddAndLookup;
+    procedure TestDict_SetItemOverwrites;
+    procedure TestDict_TryGetValue_HitAndMiss;
+    procedure TestDict_Remove_DropsTheKey;
+    procedure TestDict_Clear_EmptiesTheDict;
+    procedure TestDict_GrowsPastHashThreshold;
+    procedure TestDict_IntegerKeys;
+
+    { --- TOrderedDictionary<K,V> --- }
+    procedure TestOrdDict_PreservesInsertionOrder;
+    procedure TestOrdDict_AddAndLookup;
+    procedure TestOrdDict_SetItemOverwritesInPlace;
+    procedure TestOrdDict_Remove_DropsTheKey;
+    procedure TestOrdDict_From_BuildsFromParallelArrays;
   end;
 
 implementation
@@ -378,6 +416,382 @@ begin
   D.Add('b', 2);
   AssertEquals('grew', 2, D.Count);
   AssertEquals('added', 2, D['b']);
+end;
+
+{ ------------------------------------------------------------------ }
+{ TList<T> — core operations                                           }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestList_AddAndIndexRead;
+var L: TList<string>;
+begin
+  L := TList<string>.Create();
+  L.Add('a');
+  L.Add('b');
+  AssertEquals('count', 2, L.Count);
+  AssertEquals('idx 0', 'a', L[0]);
+  AssertEquals('idx 1', 'b', L[1]);
+end;
+
+procedure TCollectionsTests.TestList_SetItemOverwrites;
+var L: TList<string>;
+begin
+  L := TList<string>.From(['a', 'b']);
+  L[0] := 'z';
+  AssertEquals('count unchanged', 2, L.Count);
+  AssertEquals('overwritten', 'z', L[0]);
+  AssertEquals('neighbour intact', 'b', L[1]);
+end;
+
+procedure TCollectionsTests.TestList_IndexOf_HitAndMiss;
+var L: TList<string>;
+begin
+  L := TList<string>.From(['a', 'b', 'c']);
+  AssertEquals('first', 0, L.IndexOf('a'));
+  AssertEquals('middle', 1, L.IndexOf('b'));
+  AssertTrue('miss is negative', L.IndexOf('zzz') < 0);
+end;
+
+procedure TCollectionsTests.TestList_Delete_ShiftsTail;
+var L: TList<string>;
+begin
+  { Deleting from the middle must close the gap, not leave a hole. }
+  L := TList<string>.From(['a', 'b', 'c']);
+  L.Delete(1);
+  AssertEquals('count dropped', 2, L.Count);
+  AssertEquals('head kept', 'a', L[0]);
+  AssertEquals('tail shifted down', 'c', L[1]);
+end;
+
+procedure TCollectionsTests.TestList_Delete_LastElement;
+var L: TList<string>;
+begin
+  { The boundary case — nothing to shift. }
+  L := TList<string>.From(['a', 'b']);
+  L.Delete(1);
+  AssertEquals('count', 1, L.Count);
+  AssertEquals('remaining', 'a', L[0]);
+end;
+
+procedure TCollectionsTests.TestList_Clear_EmptiesTheList;
+var L: TList<string>;
+begin
+  L := TList<string>.From(['a', 'b']);
+  L.Clear();
+  AssertEquals('empty', 0, L.Count);
+  L.Add('fresh');
+  AssertEquals('reusable after clear', 1, L.Count);
+  AssertEquals('value', 'fresh', L[0]);
+end;
+
+procedure TCollectionsTests.TestList_GrowsPastInitialCapacity;
+var
+  L: TList<Integer>;
+  I: Integer;
+begin
+  { Exercises Grow's realloc-and-copy repeatedly; a broken grow shows up as
+    a wrong count or a corrupted early element. }
+  L := TList<Integer>.Create();
+  for I := 0 to 199 do
+    L.Add(I);
+  AssertEquals('all stored', 200, L.Count);
+  AssertEquals('first intact', 0, L[0]);
+  AssertEquals('middle intact', 100, L[100]);
+  AssertEquals('last intact', 199, L[199]);
+end;
+
+procedure TCollectionsTests.TestList_ForIn_VisitsAllInOrder;
+var
+  L:   TList<string>;
+  Acc: string;
+  S:   string;
+begin
+  { GetEnumerator via for-in — untested until now. }
+  L := TList<string>.From(['a', 'b', 'c']);
+  Acc := '';
+  for S in L do
+    Acc := Acc + S;
+  AssertEquals('visited in order', 'abc', Acc);
+end;
+
+{ ------------------------------------------------------------------ }
+{ TStack<T>                                                            }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestStack_PushPop_IsLifo;
+var S: TStack<string>;
+begin
+  S := TStack<string>.Create();
+  S.Push('a');
+  S.Push('b');
+  S.Push('c');
+  AssertEquals('count', 3, S.Count);
+  AssertEquals('last in, first out', 'c', S.Pop());
+  AssertEquals('then b', 'b', S.Pop());
+  AssertEquals('then a', 'a', S.Pop());
+  AssertEquals('drained', 0, S.Count);
+end;
+
+procedure TCollectionsTests.TestStack_Peek_DoesNotRemove;
+var S: TStack<string>;
+begin
+  S := TStack<string>.Create();
+  S.Push('a');
+  S.Push('b');
+  AssertEquals('peek sees the top', 'b', S.Peek());
+  AssertEquals('count unchanged by peek', 2, S.Count);
+  AssertEquals('pop still returns it', 'b', S.Pop());
+end;
+
+procedure TCollectionsTests.TestStack_Clear_EmptiesTheStack;
+var S: TStack<string>;
+begin
+  S := TStack<string>.Create();
+  S.Push('a');
+  S.Push('b');
+  S.Clear();
+  AssertEquals('empty', 0, S.Count);
+  S.Push('fresh');
+  AssertEquals('reusable', 1, S.Count);
+  AssertEquals('value', 'fresh', S.Peek());
+end;
+
+procedure TCollectionsTests.TestStack_GrowsPastInitialCapacity;
+var
+  S: TStack<Integer>;
+  I: Integer;
+begin
+  S := TStack<Integer>.Create();
+  for I := 0 to 199 do
+    S.Push(I);
+  AssertEquals('all pushed', 200, S.Count);
+  AssertEquals('top is the last pushed', 199, S.Pop());
+  AssertEquals('and the one below it', 198, S.Pop());
+end;
+
+{ ------------------------------------------------------------------ }
+{ TQueue<T>                                                            }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestQueue_EnqueueDequeue_IsFifo;
+var Q: TQueue<string>;
+begin
+  Q := TQueue<string>.Create();
+  Q.Enqueue('a');
+  Q.Enqueue('b');
+  Q.Enqueue('c');
+  AssertEquals('count', 3, Q.Count);
+  AssertEquals('first in, first out', 'a', Q.Dequeue());
+  AssertEquals('then b', 'b', Q.Dequeue());
+  AssertEquals('then c', 'c', Q.Dequeue());
+  AssertEquals('drained', 0, Q.Count);
+end;
+
+procedure TCollectionsTests.TestQueue_Peek_DoesNotRemove;
+var Q: TQueue<string>;
+begin
+  Q := TQueue<string>.Create();
+  Q.Enqueue('a');
+  Q.Enqueue('b');
+  AssertEquals('peek sees the head', 'a', Q.Peek());
+  AssertEquals('count unchanged by peek', 2, Q.Count);
+  AssertEquals('dequeue still returns it', 'a', Q.Dequeue());
+end;
+
+procedure TCollectionsTests.TestQueue_Clear_EmptiesTheQueue;
+var Q: TQueue<string>;
+begin
+  Q := TQueue<string>.Create();
+  Q.Enqueue('a');
+  Q.Enqueue('b');
+  Q.Clear();
+  AssertEquals('empty', 0, Q.Count);
+  Q.Enqueue('fresh');
+  AssertEquals('reusable', 1, Q.Count);
+  AssertEquals('value', 'fresh', Q.Peek());
+end;
+
+procedure TCollectionsTests.TestQueue_WrapsAroundCircularBuffer;
+var
+  Q: TQueue<Integer>;
+  I: Integer;
+begin
+  { The queue is a circular buffer: interleaving enqueue and dequeue walks
+    the head past the tail and forces a wrap.  A wrap bug shows as values
+    coming back out of order, which a simple fill-then-drain never catches. }
+  Q := TQueue<Integer>.Create();
+  for I := 0 to 9 do
+    Q.Enqueue(I);
+  for I := 0 to 4 do
+    AssertEquals('drained in order', I, Q.Dequeue());
+  for I := 10 to 19 do
+    Q.Enqueue(I);
+  AssertEquals('count after wrap', 15, Q.Count);
+  for I := 5 to 19 do
+    AssertEquals('order preserved across the wrap', I, Q.Dequeue());
+  AssertEquals('drained', 0, Q.Count);
+end;
+
+{ ------------------------------------------------------------------ }
+{ TDictionary<K,V> — core operations                                   }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestDict_AddAndLookup;
+var D: TDictionary<string, Integer>;
+begin
+  D := TDictionary<string, Integer>.Create();
+  D.Add('a', 1);
+  D.Add('b', 2);
+  AssertEquals('count', 2, D.Count);
+  AssertEquals('a', 1, D['a']);
+  AssertEquals('b', 2, D['b']);
+end;
+
+procedure TCollectionsTests.TestDict_SetItemOverwrites;
+var D: TDictionary<string, Integer>;
+begin
+  D := TDictionary<string, Integer>.Create();
+  D.Add('k', 1);
+  D['k'] := 99;
+  AssertEquals('still one entry', 1, D.Count);
+  AssertEquals('overwritten', 99, D['k']);
+end;
+
+procedure TCollectionsTests.TestDict_TryGetValue_HitAndMiss;
+var
+  D: TDictionary<string, Integer>;
+  V: Integer;
+begin
+  D := TDictionary<string, Integer>.From(['a'], [1]);
+  V := -1;
+  AssertTrue('hit returns True', D.TryGetValue('a', V));
+  AssertEquals('and yields the value', 1, V);
+  V := -1;
+  AssertFalse('miss returns False', D.TryGetValue('nope', V));
+  AssertEquals('and leaves the out param alone', -1, V);
+end;
+
+procedure TCollectionsTests.TestDict_Remove_DropsTheKey;
+var D: TDictionary<string, Integer>;
+begin
+  D := TDictionary<string, Integer>.From(['a', 'b'], [1, 2]);
+  D.Remove('a');
+  AssertEquals('count dropped', 1, D.Count);
+  AssertFalse('key gone', D.ContainsKey('a'));
+  AssertTrue('other key kept', D.ContainsKey('b'));
+  AssertEquals('and its value', 2, D['b']);
+end;
+
+procedure TCollectionsTests.TestDict_Clear_EmptiesTheDict;
+var D: TDictionary<string, Integer>;
+begin
+  D := TDictionary<string, Integer>.From(['a'], [1]);
+  D.Clear();
+  AssertEquals('empty', 0, D.Count);
+  AssertFalse('key gone', D.ContainsKey('a'));
+  D.Add('fresh', 7);
+  AssertEquals('reusable', 1, D.Count);
+  AssertEquals('value', 7, D['fresh']);
+end;
+
+procedure TCollectionsTests.TestDict_GrowsPastHashThreshold;
+var
+  D: TDictionary<string, Integer>;
+  I: Integer;
+begin
+  { As with TSet, the hash index only engages at 16+ entries, so crossing
+    the boundary is where a rebuild bug surfaces. }
+  D := TDictionary<string, Integer>.Create();
+  for I := 0 to 49 do
+    D.Add('key-' + IntToStr(I), I);
+  AssertEquals('all stored', 50, D.Count);
+  AssertEquals('first', 0, D['key-0']);
+  AssertEquals('middle', 25, D['key-25']);
+  AssertEquals('last', 49, D['key-49']);
+  AssertFalse('absent stays absent', D.ContainsKey('key-50'));
+end;
+
+procedure TCollectionsTests.TestDict_IntegerKeys;
+var D: TDictionary<Integer, string>;
+begin
+  { Key type other than string — hashing dispatches through GCHashOf. }
+  D := TDictionary<Integer, string>.Create();
+  D.Add(1, 'one');
+  D.Add(2, 'two');
+  AssertEquals('count', 2, D.Count);
+  AssertEquals('lookup', 'two', D[2]);
+  AssertFalse('miss', D.ContainsKey(3));
+end;
+
+{ ------------------------------------------------------------------ }
+{ TOrderedDictionary<K,V>                                              }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestOrdDict_PreservesInsertionOrder;
+var
+  D: TOrderedDictionary<string, Integer>;
+begin
+  { The whole point of this type: iteration follows insertion order, which
+    a plain TDictionary does not promise.  Inserted deliberately out of
+    alphabetical order so a sorted implementation would fail. }
+  D := TOrderedDictionary<string, Integer>.Create();
+  D.Add('zulu', 1);
+  D.Add('alpha', 2);
+  D.Add('mike', 3);
+  AssertEquals('count', 3, D.Count);
+  AssertEquals('slot 0', 'zulu',  D.Keys[0]);
+  AssertEquals('slot 1', 'alpha', D.Keys[1]);
+  AssertEquals('slot 2', 'mike',  D.Keys[2]);
+  AssertEquals('value 0', 1, D.Values[0]);
+  AssertEquals('value 2', 3, D.Values[2]);
+end;
+
+procedure TCollectionsTests.TestOrdDict_AddAndLookup;
+var D: TOrderedDictionary<string, Integer>;
+begin
+  D := TOrderedDictionary<string, Integer>.Create();
+  D.Add('a', 1);
+  AssertEquals('lookup by key', 1, D['a']);
+  AssertTrue('contains', D.ContainsKey('a'));
+  AssertFalse('miss', D.ContainsKey('b'));
+end;
+
+procedure TCollectionsTests.TestOrdDict_SetItemOverwritesInPlace;
+var D: TOrderedDictionary<string, Integer>;
+begin
+  { Overwriting an existing key must update in place, NOT append a second
+    slot — otherwise the ordering view grows a duplicate. }
+  D := TOrderedDictionary<string, Integer>.Create();
+  D.Add('a', 1);
+  D.Add('b', 2);
+  D['a'] := 99;
+  AssertEquals('no new slot', 2, D.Count);
+  AssertEquals('updated', 99, D['a']);
+  AssertEquals('position kept', 'a', D.Keys[0]);
+end;
+
+procedure TCollectionsTests.TestOrdDict_Remove_DropsTheKey;
+var D: TOrderedDictionary<string, Integer>;
+begin
+  D := TOrderedDictionary<string, Integer>.Create();
+  D.Add('a', 1);
+  D.Add('b', 2);
+  D.Add('c', 3);
+  D.Remove('b');
+  AssertEquals('count dropped', 2, D.Count);
+  AssertFalse('key gone', D.ContainsKey('b'));
+  AssertEquals('order closes the gap', 'a', D.Keys[0]);
+  AssertEquals('and shifts the tail down', 'c', D.Keys[1]);
+end;
+
+procedure TCollectionsTests.TestOrdDict_From_BuildsFromParallelArrays;
+var D: TOrderedDictionary<string, Integer>;
+begin
+  D := TOrderedDictionary<string, Integer>.From(['x', 'y'], [10, 20]);
+  AssertEquals('count', 2, D.Count);
+  AssertEquals('x', 10, D['x']);
+  AssertEquals('y', 20, D['y']);
+  AssertEquals('literal order kept', 'x', D.Keys[0]);
 end;
 
 initialization

@@ -42,7 +42,7 @@ type
     function GetRunning: Boolean;
     function GetExitCode: Integer;
     constructor Create(AOwner: TObject);
-    procedure Destroy;
+    destructor Destroy; override;
     procedure Execute;
     function ReadOutput: string;
     procedure WaitOnExit;
@@ -60,7 +60,7 @@ begin
   Self.FParameters := TList<string>.Create()
 end;
 
-procedure TProcess.Destroy;
+destructor TProcess.Destroy;
 begin
   ProcessFree(Self.FHandle);
   Self.FParameters.Destroy()

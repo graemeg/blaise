@@ -126,7 +126,7 @@ type
     FFd:     Integer;     // file descriptor; -1 once closed
     FClosed: Boolean;
     constructor Create(const APath: string);
-    procedure Destroy;
+    destructor Destroy; override;
     function Read(Buf: Pointer; Count: Integer): Integer; override;
     procedure Close; override;
     function Seek(Offset: Int64; Origin: TSeekOrigin): Int64;
@@ -140,7 +140,7 @@ type
     FClosed: Boolean;
     constructor Create(const APath: string); overload;
     constructor Create(const APath: string; AMode: TFileMode); overload;
-    procedure Destroy;
+    destructor Destroy; override;
     function Write(Buf: Pointer; Count: Integer): Integer; override;
     procedure Flush; override;
     procedure Close; override;
@@ -170,7 +170,7 @@ type
     FSize:     Integer;
     FPos:      Integer;
     constructor Create;
-    procedure Destroy;
+    destructor Destroy; override;
     function Write(Buf: Pointer; Count: Integer): Integer; override;
     procedure Flush; override;
     procedure Close; override;
@@ -199,7 +199,7 @@ type
     constructor Create(AInner: TInputStream; ABufSize: Integer); overload;
     constructor Create(AInner: TInputStream; ABufSize: Integer;
                        AOwnsInner: Boolean); overload;
-    procedure Destroy;
+    destructor Destroy; override;
     function Read(Buf: Pointer; Count: Integer): Integer; override;
     procedure Close; override;
   end;
@@ -229,7 +229,7 @@ type
     FHasPending: Boolean;
     constructor Create(AInner: TInputStream); overload;
     constructor Create(AInner: TInputStream; AOwnsInner: Boolean); overload;
-    procedure Destroy;
+    destructor Destroy; override;
     function Read(Buf: Pointer; Count: Integer): Integer; override;
     procedure Close; override;
     function ReadLine: string;
@@ -250,7 +250,7 @@ type
     FClosed:    Boolean;
     constructor Create(AInner: TOutputStream); overload;
     constructor Create(AInner: TOutputStream; AOwnsInner: Boolean); overload;
-    procedure Destroy;
+    destructor Destroy; override;
     function Write(Buf: Pointer; Count: Integer): Integer; override;
     procedure Flush; override;
     procedure Close; override;
@@ -315,7 +315,7 @@ type
     FSize:   Int64;           { sum of (Limit - Pos) across all segments }
     FClosed: Boolean;
     constructor Create;
-    procedure Destroy;
+    destructor Destroy; override;
     function Read(Buf: Pointer; Count: Integer): Integer;
     function Write(Buf: Pointer; Count: Integer): Integer;
     procedure Flush;
@@ -350,7 +350,7 @@ type
     constructor Create(AInner: TOutputStream; ABufSize: Integer); overload;
     constructor Create(AInner: TOutputStream; ABufSize: Integer;
                        AOwnsInner: Boolean); overload;
-    procedure Destroy;
+    destructor Destroy; override;
     function Write(Buf: Pointer; Count: Integer): Integer; override;
     procedure Flush; override;
     procedure Close; override;
@@ -420,7 +420,7 @@ begin
   end
 end;
 
-procedure TFileInputStream.Destroy;
+destructor TFileInputStream.Destroy;
 begin
   if not Self.FClosed then
   begin
@@ -491,7 +491,7 @@ begin
   end
 end;
 
-procedure TFileOutputStream.Destroy;
+destructor TFileOutputStream.Destroy;
 begin
   if not Self.FClosed then
   begin
@@ -623,7 +623,7 @@ begin
   Self.FPos := 0
 end;
 
-procedure TMemoryOutputStream.Destroy;
+destructor TMemoryOutputStream.Destroy;
 begin
   if Self.FBuf <> nil then
   begin
@@ -744,7 +744,7 @@ begin
   Self.FClosed := False
 end;
 
-procedure TBufferedInputStream.Destroy;
+destructor TBufferedInputStream.Destroy;
 begin
   if not Self.FClosed then
     Self.Close();
@@ -829,7 +829,7 @@ begin
   Self.FClosed := False
 end;
 
-procedure TBufferedOutputStream.Destroy;
+destructor TBufferedOutputStream.Destroy;
 begin
   { ARC finaliser — best-effort flush.  If the inner write fails here
     the error is intentionally swallowed because a finaliser cannot
@@ -927,7 +927,7 @@ begin
   Self.FPending := 0
 end;
 
-procedure TStreamReader.Destroy;
+destructor TStreamReader.Destroy;
 begin
   if not Self.FClosed then
     Self.Close()
@@ -1090,7 +1090,7 @@ begin
   Self.FClosed := False
 end;
 
-procedure TStreamWriter.Destroy;
+destructor TStreamWriter.Destroy;
 begin
   if not Self.FClosed then
   begin
@@ -1203,7 +1203,7 @@ begin
   Self.FClosed := False
 end;
 
-procedure TBuffer.Destroy;
+destructor TBuffer.Destroy;
 var
   S, N: TBufferSegment;
 begin

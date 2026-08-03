@@ -62,7 +62,7 @@ type
     function  GetComponent(AIndex: Integer): TComponent;
   public
     constructor Create(AOwner: TComponent);
-    procedure   Destroy;
+    destructor Destroy; override;
     property Name:           string     read FName     write FName;
     property Owner:          TComponent read FOwner;
     property ComponentCount: Integer    read FChildCnt;
@@ -78,7 +78,7 @@ type
     FMutexBuf: array[0..5] of Int64;
   public
     constructor Create;
-    procedure Destroy;
+    destructor Destroy; override;
     procedure Enter;
     procedure Leave;
   end;
@@ -124,7 +124,7 @@ type
     constructor Create(ACreateSuspended: Boolean);
     { Joins the OS thread (if still running) then frees the object.
       Called automatically by ARC when the last reference is released. }
-    procedure Destroy;
+    destructor Destroy; override;
     { Spawns the OS thread. Called automatically by Create(False).
       Has no effect if the thread is already running. }
     procedure Start;
@@ -185,7 +185,7 @@ type
     procedure SetSorted(AValue: Boolean);
     procedure SetCaseSensitive(AValue: Boolean);
     constructor Create;
-    procedure   Destroy;
+    destructor Destroy; override;
     function    Add(S: string): Integer;
     { Objects[] is NON-OWNING by design: slots hold raw, untyped pointers
       with no ARC retain/release.  Callers commonly store integer payloads
@@ -313,7 +313,7 @@ begin
   end
 end;
 
-procedure TComponent.Destroy;
+destructor TComponent.Destroy;
 var
   Slot:  ^Pointer;
   Child: TComponent;
@@ -555,7 +555,7 @@ begin
   Self.FDuplicates    := dupAccept
 end;
 
-procedure TStringList.Destroy;
+destructor TStringList.Destroy;
 var
   I:   Integer;
   Ptr: ^string;
@@ -1125,7 +1125,7 @@ begin
   pthread_mutex_init(P, nil)
 end;
 
-procedure TCriticalSection.Destroy;
+destructor TCriticalSection.Destroy;
 var P: Pointer;
 begin
   P := Pointer(Self) + 8;
@@ -1171,7 +1171,7 @@ begin
     Self.Start()
 end;
 
-procedure TThread.Destroy;
+destructor TThread.Destroy;
 begin
   if (Self.FHandle <> 0) and (not Self.FFinished) then
     Self.WaitFor()

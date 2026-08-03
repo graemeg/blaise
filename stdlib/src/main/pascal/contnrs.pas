@@ -43,7 +43,7 @@ type
     FOwnsObjects: Boolean;
     procedure Grow;
     constructor Create(AOwnsObjects: Boolean);
-    procedure   Destroy;
+    destructor Destroy; override;
     function    Add(AObject: Pointer): Integer;
     function    Get(AIndex: Integer): Pointer;
     procedure   Put(AIndex: Integer; AObject: Pointer);
@@ -80,7 +80,7 @@ begin
   Self.FOwnsObjects := AOwnsObjects
 end;
 
-procedure TObjectList.Destroy;
+destructor TObjectList.Destroy;
 var
   I:   Integer;
   Src: ^Pointer;
