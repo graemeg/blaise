@@ -10646,6 +10646,33 @@ begin
         AAssign.FieldName := PropInfo.WriteField;
         FldInfo           := RT.FindField(PropInfo.WriteField);
       end
+      else if (PropInfo <> nil) and (PropInfo.WriteMethod <> '') then
+      begin
+        { Method-backed write through a CHAINED base (A.B.Prop := V).  The
+          implicit-Self branch below has always handled this; this branch only
+          knew about field-backed properties, so `Model.Lines.Text := S` — a
+          property whose setter is a method — was rejected as "has no field",
+          while the matching READ compiled.  Same parallel-branch drift the
+          flag-coverage tool exists to catch. }
+        if PropInfo.IndexParamName <> '' then
+        begin
+          if AAssign.PropIndexExpr = nil then
+            SemanticError(
+              Format('Indexed property ''%s'' requires an index expression',
+                [AAssign.FieldName]),
+              AAssign.Line, AAssign.Col);
+          Self.AnalyseExprSlot(AAssign.PropIndexExpr);
+        end;
+        AAssign.PropWriteInfo := PropInfo;
+        AAssign.PropOwnerType :=
+          PropAccessorOwner(RT.Name, PropInfo.WriteMethod);
+        AAssign.PropAccessorVSlot :=
+          PropAccessorVSlot(RT.Name, PropInfo.WriteMethod);
+        ExprType := Self.AnalyseExprSlot(AAssign.Expr);
+        CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
+          AAssign.Line, AAssign.Col);
+        Exit;
+      end
       else
         SemanticError(
           Format('Type ''%s'' has no field ''%s''', [ObjType.Name, AAssign.FieldName]),

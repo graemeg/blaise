@@ -60,6 +60,10 @@ type
     procedure TestRun_StaticArrayField_WriteInMethod;
     procedure TestRun_StaticArrayField_SumInMethod;
     procedure TestRun_StaticArrayOfRecordField;
+
+    { Setter-backed property written through a CHAINED base (A.B.Prop := V) }
+    procedure TestRun_ChainedSetterPropertyWrite;
+    procedure TestRun_ChainedSetterPropertyWrite_IndexedProp;
   end;
 
 implementation
@@ -642,6 +646,79 @@ procedure TE2EPropertyTests.TestRun_DefaultProperty_ReadThroughChainedBase;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcDefaultReadChainedBase, '14' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_ChainedSetterPropertyWrite;
+begin
+  { A.B.Prop := V where Prop's setter is a METHOD.  The chained-base branch
+    of the field-assignment path only handled FIELD-backed properties, so
+    this was rejected with "has no field 'Value'" while the matching READ
+    compiled — the implicit-Self branch had handled it all along.  Found
+    porting tools/blaise-guard, where `Model.Lines.Text := S` hit it. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TInner = class
+        FValue: string;
+        procedure SetValue(const V: string);
+        property Value: string read FValue write SetValue;
+      end;
+      TOuter = class
+        Inner: TInner;
+      end;
+    procedure TInner.SetValue(const V: string);
+    begin
+      FValue := '[' + V + ']'
+    end;
+    var O: TOuter;
+    begin
+      O := TOuter.Create();
+      O.Inner := TInner.Create();
+      O.Inner.Value := 'hi';
+      WriteLn(O.Inner.Value)
+    end.
+    ''', '[hi]' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_ChainedSetterPropertyWrite_IndexedProp;
+begin
+  { The indexed variant of the same shape — the ported branch carries the
+    index-expression handling, so an indexed setter through a chained base
+    must work too rather than silently dropping the index. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TInner = class
+        FA: Integer;
+        FB: Integer;
+        procedure SetSlot(AIndex: Integer; AValue: Integer);
+        function GetSlot(AIndex: Integer): Integer;
+        property Slot[AIndex: Integer]: Integer read GetSlot write SetSlot;
+      end;
+      TOuter = class
+        Inner: TInner;
+      end;
+    procedure TInner.SetSlot(AIndex: Integer; AValue: Integer);
+    begin
+      if AIndex = 0 then FA := AValue else FB := AValue
+    end;
+    function TInner.GetSlot(AIndex: Integer): Integer;
+    begin
+      if AIndex = 0 then Result := FA else Result := FB
+    end;
+    var O: TOuter;
+    begin
+      O := TOuter.Create();
+      O.Inner := TInner.Create();
+      O.Inner.Slot[0] := 11;
+      O.Inner.Slot[1] := 22;
+      WriteLn(O.Inner.Slot[0] + O.Inner.Slot[1])
+    end.
+    ''', '33' + LE, 0);
 end;
 
 initialization
