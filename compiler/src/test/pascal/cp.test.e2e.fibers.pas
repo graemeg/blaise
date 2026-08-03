@@ -154,7 +154,12 @@ const
       Status := 0;
       waitpid(Pid, @Status, 0);
       Sig := Status and 127;
-      if Sig = 11 then
+      { The guard page is proven by the child dying on the write, not by WHICH
+        fault signal the kernel picks.  Linux reports SIGSEGV (11) for a
+        PROT_NONE page; FreeBSD reports SIGBUS (10) for the same access, so
+        pinning 11 failed there with status=138 (128 core-dumped bit + 10)
+        even though the guard worked exactly as intended.  Accept either. }
+      if (Sig = 11) or (Sig = 10) then
         WriteLn('GUARD_OK')
       else
         WriteLn('GUARD_FAIL status=', Status);
