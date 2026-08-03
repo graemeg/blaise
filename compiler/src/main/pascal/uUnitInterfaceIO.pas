@@ -54,10 +54,19 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 15; { v15: META block gains HasFinalization after
+  IFACE_VERSION = 16; { v16: TMethodDecl.IsStatic added to EncodeMethodDecl/
+                          ReadMethodDecl (one extra byte after IsOverload).
+                          A `static` method on a GENERIC template travels as a
+                          method DECL, not a method SIG, so the sig path's
+                          IsStatic (v4) did not cover it: TSet<string>.From(...)
+                          resolved inside the declaring unit but was rejected
+                          cross-unit as "not a static method".  The method-decl
+                          layout grew, so v15 readers must reject these .bif
+                          and recompile. }
+                      { v15: META block gains HasFinalization after
                           HasInitialization — the per-unit ARC teardown
-                          (<Unit>_fini) call flag for cached deps. }
-                      { v14: ROUT entries gain an IsVarArgs bool after
+                          (<Unit>_fini) call flag for cached deps.
+                        v14: ROUT entries gain an IsVarArgs bool after
                           ExternalName (C-variadic externals).
                         v13: record payload gains a method list (record
                           methods incl. statics — TUuid.RandomUuid — used to
@@ -555,6 +564,15 @@ begin
     EncodeBool (AM.IsOverload) +      { `overload` directive — generic-template
                                          and interface methods share this path
                                          and may be overloaded }
+    EncodeBool (AM.IsStatic) +        { `static` — a static method on a GENERIC
+                                         template reaches an importing unit only
+                                         through this path (the method-SIG path
+                                         carries IsStatic separately, but a
+                                         generic's methods travel as decls).
+                                         Without it TSet<string>.From(...) was
+                                         rejected cross-unit as "not a static
+                                         method" while the same code compiled
+                                         inside the declaring unit. }
     EncodeCount(AM.Params.Count);
   for J := 0 to AM.Params.Count - 1 do
   begin
@@ -2249,6 +2267,8 @@ begin
   Result.IsVirtual      := DecodeBool(AText, APos);
   Result.IsOverride     := DecodeBool(AText, APos);
   Result.IsOverload     := DecodeBool(AText, APos);
+  { Order must mirror EncodeMethodDecl: IsStatic follows IsOverload. }
+  Result.IsStatic       := DecodeBool(AText, APos);
   Pc := DecodeCount(AText, APos);
   for J := 1 to Pc do
   begin
@@ -2428,6 +2448,13 @@ begin
     MD.OwnerTypeName  := AEntry.Name;
     MD.IsVirtual      := Sig.IsVirtual;
     MD.IsOverride     := Sig.IsOverride;
+    { IsStatic must be carried across too: the sig has recorded it since v4,
+      but this rebuild dropped it, so a `static` method on an imported GENERIC
+      became non-static in the consumer and TSet<string>.From(...) was
+      rejected as "not a static method".  Inside the declaring unit the same
+      code worked, because there the template AST is used directly. }
+    MD.IsStatic       := Sig.IsStatic;
+    MD.IsOverload     := Sig.IsOverload;
     MD.ReturnTypeName := Sig.ReturnType.TypeName;
     if Sig.TypeParams <> nil then
     begin
@@ -2447,7 +2474,15 @@ begin
       NewPar.TypeName     := SrcPar.TypeName;
       NewPar.IsVarParam   := SrcPar.IsVarParam;
       NewPar.IsConstParam := SrcPar.IsConstParam;
+      { IsOutParam and the default-value facts were dropped here as well.
+        Losing IsOutParam turns an `out` param into a plain `var` for an
+        imported generic, and losing HasDefault makes the consumer demand
+        arguments the declaring unit treats as optional.  Same failure family
+        as the const/out/default loss in the monomorphisation paths. }
+      NewPar.IsOutParam   := SrcPar.IsOutParam;
       NewPar.IsOpenArray  := SrcPar.IsOpenArray;
+      NewPar.HasDefault   := SrcPar.HasDefault;
+      NewPar.DefaultValue := CloneExpr(SrcPar.DefaultValue);
       MD.Params.Add(NewPar);
     end;
     MD.Body := ReadBlock(AText, APos);
