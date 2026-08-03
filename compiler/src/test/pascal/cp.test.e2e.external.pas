@@ -165,7 +165,7 @@ end;
 procedure TE2EExternalTests.TestRun_ExternalSingleParam_SinfReturnsCorrectValue;
 const Src = '''
     program T;
-    function c_sinf(X: Single): Single; cdecl; external name 'sinf';
+    function c_sinf(X: Single): Single; cdecl; external 'm' name 'sinf';
     var R: Single;
     begin
       R := c_sinf(0.0);
@@ -176,15 +176,21 @@ const Src = '''
     end.
     ''';
 begin
-  { sinf lives in libm -- the harness link carries no -lm by default
-    (the RTL needs none), so this FFI test asks for it explicitly }
+  { sinf lives in libm, and BOTH arms have to be told so, by different
+    routes.  The SOURCE names the library (external 'm') because the native
+    arm goes through the compiler's own CLI, which links what the source
+    declares and has no way to receive a harness flag.  The ['m'] argument
+    is still needed because the QBE arm links via an external cc that the
+    harness drives directly.  Previously the source used the bare
+    `external name` form and leaned on the harness alone, which stopped
+    working the moment native switched to the CLI. }
   AssertRunsOnAllLibs(Src, ['m'], 'ok' + Chr(10), 0);
 end;
 
 procedure TE2EExternalTests.TestRun_ExternalSingleReturn_RoundTrip;
 const Src = '''
     program T;
-    function c_sqrtf(X: Single): Single; cdecl; external name 'sqrtf';
+    function c_sqrtf(X: Single): Single; cdecl; external 'm' name 'sqrtf';
     var R: Single;
     begin
       R := c_sqrtf(4.0);
@@ -195,6 +201,8 @@ const Src = '''
     end.
     ''';
 begin
+  { see the note on the sinf test — the source names libm for the native
+    CLI arm, the ['m'] argument covers the QBE arm's external cc link }
   AssertRunsOnAllLibs(Src, ['m'], 'ok' + Chr(10), 0);
 end;
 

@@ -1832,8 +1832,9 @@ begin
     Exit;
   end;
 
-  { ---- shll/shlq/shrl/shrq ---- }
-  if (Mnem = 'shll') or (Mnem = 'shlq') or (Mnem = 'shrl') or (Mnem = 'shrq') then
+  { ---- shll/shlq/shrl/shrq/sarl/sarq ---- }
+  if (Mnem = 'shll') or (Mnem = 'shlq') or (Mnem = 'shrl') or (Mnem = 'shrq')
+     or (Mnem = 'sarl') or (Mnem = 'sarq') then
   begin
     Result := EncodeShift(CB, ACtx, Mnem, Op1, Op2);
     Exit;
@@ -2282,8 +2283,13 @@ var
   W64: Boolean;
   ShiftOp: Integer;
 begin
-  W64 := (AMnem = 'shlq') or (AMnem = 'shrq');
+  W64 := (AMnem = 'shlq') or (AMnem = 'shrq') or (AMnem = 'sarq');
+  { ModRM /digit selects the shift: /4 = shl, /5 = shr (logical, zero-fill),
+    /7 = sar (arithmetic, sign-preserving).  sar is NOT interchangeable with
+    shr — it replicates the sign bit, which is what an Int64 `sar` needs to
+    keep a negative value negative. }
   if (AMnem = 'shll') or (AMnem = 'shlq') then ShiftOp := 4
+  else if (AMnem = 'sarl') or (AMnem = 'sarq') then ShiftOp := 7
   else ShiftOp := 5;
 
   { $imm, %reg }

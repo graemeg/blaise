@@ -724,7 +724,19 @@ begin
       EffDynamic := True;
   else
     { lmAuto }
-    if HasUserLibs then
+    if AOpts.DebugMode then
+    begin
+      { --debug registers the leak reporter through __cxa_atexit
+        (runtime.arc._LeakTrackerInit), which only exists in libc.  A
+        freestanding link therefore produced a binary that tracked leaks and
+        then silently never printed the report -- the feature looked broken
+        rather than unavailable.  Treat --debug as a libc demand, exactly as
+        binding an external C library is. }
+      EffDynamic := True;
+      WriteLn(StdErr, 'note: linking dynamically against libc: --debug needs '
+        + '__cxa_atexit to run the leak report at exit');
+    end
+    else if HasUserLibs then
     begin
       EffDynamic := True;
       WriteLn(StdErr, 'note: linking dynamically against libc: the program '
