@@ -6,7 +6,7 @@
   See LICENSE file in the project root for full license terms.
 }
 
-{ BlaiseGuard - rule configuration.
+(* BlaiseGuard - rule configuration.
 
   Holds the per-rule settings a run is driven by: whether a rule is enabled, an
   optional severity override, and a bag of named thresholds (e.g. maxLength).
@@ -27,7 +27,7 @@
     }
 
   A rule absent from the file gets a default-enabled TRuleConfig (Null Object),
-  so rules never have to nil-check. }
+  so rules never have to nil-check. *)
 
 unit Guard.Config;
 
@@ -89,12 +89,12 @@ type
 
     { Build the default (empty) configuration: every rule enabled at its own
       built-in threshold and severity. }
-    class function Default: TGuardConfig;
+    static function Default: TGuardConfig;
 
     { Parse a blaise-guard.json document.  Raises EGuardConfigError on
       malformed JSON or an unexpected shape. }
-    class function LoadFromString(const AJson: string): TGuardConfig;
-    class function LoadFromFile(const APath: string): TGuardConfig;
+    static function LoadFromString(const AJson: string): TGuardConfig;
+    static function LoadFromFile(const APath: string): TGuardConfig;
   end;
 
   EGuardConfigError = class(Exception);
@@ -197,7 +197,7 @@ begin
     Result := FDefaultEnabled;   { unlisted follows the default policy }
 end;
 
-class function TGuardConfig.Default: TGuardConfig;
+static function TGuardConfig.Default: TGuardConfig;
 begin
   Result := TGuardConfig.Create();
   { BL-1004 (UnusedIdentifiers) is heuristic (closures/shadowing), so the
@@ -205,7 +205,7 @@ begin
   Result.RuleConfig('BL-1004').Enabled := False;
 end;
 
-class function TGuardConfig.LoadFromString(const AJson: string): TGuardConfig;
+static function TGuardConfig.LoadFromString(const AJson: string): TGuardConfig;
 var
   Cfg:      TGuardConfig;
   Root:     TJSONData;
@@ -226,20 +226,20 @@ begin
       raise EGuardConfigError.Create('Invalid JSON config: ' + E.Message);
   end;
 
-  if Root.GetJSONType <> jtObject then
+  if Root.JSONType <> jtObject then
     raise EGuardConfigError.Create('Config root must be a JSON object');
 
   RuleNode := TJSONObject(Root).Find('rules');
   if RuleNode = nil then
     Exit(Cfg);   { a config with no "rules" block leaves all defaults in place }
-  if RuleNode.GetJSONType <> jtObject then
+  if RuleNode.JSONType <> jtObject then
     raise EGuardConfigError.Create('"rules" must be a JSON object');
 
   RulesObj := TJSONObject(RuleNode);
-  for I := 0 to RulesObj.GetCount - 1 do
+  for I := 0 to RulesObj.Count - 1 do
   begin
     RuleId := RulesObj.GetName(I);
-    if RulesObj.ItemsByIndex[I].GetJSONType <> jtObject then
+    if RulesObj.ItemsByIndex[I].JSONType <> jtObject then
       Continue;
     RuleObj := TJSONObject(RulesObj.ItemsByIndex[I]);
     RC := Cfg.RuleConfig(RuleId);
@@ -255,25 +255,27 @@ begin
       end;
 
     if RuleObj.Contains('params') and
-       (RuleObj.Find('params').GetJSONType = jtObject) then
+       (RuleObj.Find('params').JSONType = jtObject) then
     begin
       ParamsObj := TJSONObject(RuleObj.Find('params'));
-      for P := 0 to ParamsObj.GetCount - 1 do
+      for P := 0 to ParamsObj.Count - 1 do
         RC.SetParam(ParamsObj.GetName(P),
-                    ParamsObj.ItemsByIndex[P].GetAsString);
+                    ParamsObj.ItemsByIndex[P].AsString);
     end;
   end;
 
   Result := Cfg;
 end;
 
-class function TGuardConfig.LoadFromFile(const APath: string): TGuardConfig;
+static function TGuardConfig.LoadFromFile(const APath: string): TGuardConfig;
 var
   SL: TStringList;
 begin
   SL := TStringList.Create();
   SL.LoadFromFile(APath);
-  Result := LoadFromString(SL.Text);
+  { Type-qualified: a static method has no implicit Self, so a bare sibling
+    call does not resolve. }
+  Result := TGuardConfig.LoadFromString(SL.Text);
 end;
 
 end.

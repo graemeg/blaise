@@ -18,7 +18,6 @@
       <path>../../compiler/src/main/pascal</path>
       <!-- stdlib: generic collections, JSON/XML writers, Streams, etc. -->
       <path>../../stdlib/src/main/pascal</path>
-      <path>../../runtime/src/main/pascal</path>
     </unitPaths>
   </build>
 

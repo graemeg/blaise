@@ -6,7 +6,7 @@
   See LICENSE file in the project root for full license terms.
 }
 
-{ BlaiseGuard - JSON report formatter (machine-readable output).
+(* BlaiseGuard - JSON report formatter (machine-readable output).
 
   Emits a stable document via the stdlib streaming JSON writer:
 
@@ -19,7 +19,7 @@
           "quickFix": { "title": "...", "replacement": "..." } }
       ] } }
 
-  quickFix is omitted when a diagnostic has no suggestion. }
+  quickFix is omitted when a diagnostic has no suggestion. *)
 
 unit Guard.Format.Json;
 
