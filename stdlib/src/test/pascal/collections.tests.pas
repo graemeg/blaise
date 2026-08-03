@@ -104,6 +104,11 @@ type
     procedure TestOrdDict_SetItemOverwritesInPlace;
     procedure TestOrdDict_Remove_DropsTheKey;
     procedure TestOrdDict_From_BuildsFromParallelArrays;
+
+    { --- managed (string) elements across a Grow --- }
+    procedure TestList_GrowWithManagedElements;
+    procedure TestQueue_GrowWithManagedElements;
+    procedure TestStack_GrowWithManagedElements;
   end;
 
 implementation
@@ -782,6 +787,11 @@ begin
   AssertFalse('key gone', D.ContainsKey('b'));
   AssertEquals('order closes the gap', 'a', D.Keys[0]);
   AssertEquals('and shifts the tail down', 'c', D.Keys[1]);
+  { Values must shift WITH their keys -- checking Keys alone would pass for a
+    Remove that compacted the key array and left the values behind. }
+  AssertEquals('value 0 still pairs', 1, D.Values[0]);
+  AssertEquals('value 1 still pairs', 3, D.Values[1]);
+  AssertEquals('and by key lookup', 3, D['c']);
 end;
 
 procedure TCollectionsTests.TestOrdDict_From_BuildsFromParallelArrays;
@@ -792,6 +802,74 @@ begin
   AssertEquals('x', 10, D['x']);
   AssertEquals('y', 20, D['y']);
   AssertEquals('literal order kept', 'x', D.Keys[0]);
+end;
+
+{ ------------------------------------------------------------------ }
+{ Managed (string) elements across a Grow                              }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestList_GrowWithManagedElements;
+var
+  L: TList<string>;
+  I: Integer;
+begin
+  { The growth tests above use Integer, so Grow's realloc-and-copy never runs
+    with a REFERENCE-COUNTED element.  That is exactly where a bug is silent:
+    a missing retain leaks, a double release frees a live string, and neither
+    shows up until something else reads freed memory.  Capacity starts at 0
+    and doubles 4,8,...  so 100 strings cross several reallocs.
+
+    Each string is built at run time rather than being a literal, so it is a
+    genuine heap allocation with a refcount, not an immortal constant. }
+  L := TList<string>.Create();
+  for I := 0 to 99 do
+    L.Add('item-' + IntToStr(I));
+  AssertEquals('all stored', 100, L.Count);
+  AssertEquals('first survived the reallocs', 'item-0', L[0]);
+  AssertEquals('middle survived', 'item-50', L[50]);
+  AssertEquals('last survived', 'item-99', L[99]);
+  { Overwrite and delete exercise the release paths on managed slots. }
+  L[0] := 'replaced';
+  AssertEquals('overwrite released the old value cleanly', 'replaced', L[0]);
+  L.Delete(0);
+  AssertEquals('delete shifted managed elements', 'item-1', L[0]);
+  AssertEquals('count', 99, L.Count);
+end;
+
+procedure TCollectionsTests.TestQueue_GrowWithManagedElements;
+var
+  Q: TQueue<string>;
+  I: Integer;
+begin
+  { TQueue.Grow linearises a wrapped circular buffer AND clears the vacated
+    source slots -- the most intricate managed-element path in the unit. }
+  Q := TQueue<string>.Create();
+  for I := 0 to 9 do
+    Q.Enqueue('q-' + IntToStr(I));
+  for I := 0 to 4 do
+    AssertEquals('drained in order', 'q-' + IntToStr(I), Q.Dequeue());
+  for I := 10 to 49 do
+    Q.Enqueue('q-' + IntToStr(I));
+  AssertEquals('count after wrap + grow', 45, Q.Count);
+  for I := 5 to 49 do
+    AssertEquals('order kept across wrap and grow',
+                 'q-' + IntToStr(I), Q.Dequeue());
+  AssertEquals('drained', 0, Q.Count);
+end;
+
+procedure TCollectionsTests.TestStack_GrowWithManagedElements;
+var
+  S: TStack<string>;
+  I: Integer;
+begin
+  S := TStack<string>.Create();
+  for I := 0 to 99 do
+    S.Push('s-' + IntToStr(I));
+  AssertEquals('all pushed', 100, S.Count);
+  for I := 99 downto 0 do
+    AssertEquals('LIFO order intact after reallocs',
+                 's-' + IntToStr(I), S.Pop());
+  AssertEquals('drained', 0, S.Count);
 end;
 
 initialization
