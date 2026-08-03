@@ -109,6 +109,35 @@ type
     procedure TestList_GrowWithManagedElements;
     procedure TestQueue_GrowWithManagedElements;
     procedure TestStack_GrowWithManagedElements;
+
+    { --- IsEmpty --- }
+    procedure TestIsEmpty_TrueWhenFresh;
+    procedure TestIsEmpty_FalseOncePopulated;
+    procedure TestIsEmpty_TrueAgainAfterDrain;
+
+    { --- empty-container access raises EListError --- }
+    procedure TestStack_Pop_OnEmptyRaises;
+    procedure TestStack_Peek_OnEmptyRaises;
+    procedure TestQueue_Dequeue_OnEmptyRaises;
+    procedure TestQueue_Peek_OnEmptyRaises;
+    procedure TestStack_StaysUsableAfterEmptyPopRaised;
+
+    { --- missing key raises instead of halting the process --- }
+    procedure TestDict_GetItem_MissingKeyRaises;
+    procedure TestOrdDict_GetItem_MissingKeyRaises;
+    procedure TestDict_GetItem_PresentKeyStillWorks;
+
+    { --- TList index bounds --- }
+    procedure TestList_Get_OutOfRangeRaises;
+    procedure TestList_SetItem_OutOfRangeRaises;
+    procedure TestList_Delete_OutOfRangeRaises;
+    procedure TestList_StaysUsableAfterOutOfRangeRaised;
+    procedure TestList_InRangeAccessStillWorks;
+
+    { --- TOrderedDictionary positional bounds --- }
+    procedure TestOrdDict_GetKey_OutOfRangeRaises;
+    procedure TestOrdDict_GetValue_OutOfRangeRaises;
+    procedure TestOrdDict_InRangePositionalAccessStillWorks;
   end;
 
 implementation
@@ -870,6 +899,370 @@ begin
     AssertEquals('LIFO order intact after reallocs',
                  's-' + IntToStr(I), S.Pop());
   AssertEquals('drained', 0, S.Count);
+end;
+
+{ ------------------------------------------------------------------ }
+{ IsEmpty                                                              }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestIsEmpty_TrueWhenFresh;
+var
+  L: TList<string>;
+  S: TStack<string>;
+  Q: TQueue<string>;
+  E: TSet<string>;
+  D: TDictionary<string, Integer>;
+  O: TOrderedDictionary<string, Integer>;
+begin
+  L := TList<string>.Create();
+  S := TStack<string>.Create();
+  Q := TQueue<string>.Create();
+  E := TSet<string>.Create();
+  D := TDictionary<string, Integer>.Create();
+  O := TOrderedDictionary<string, Integer>.Create();
+  AssertTrue('list',  L.IsEmpty());
+  AssertTrue('stack', S.IsEmpty());
+  AssertTrue('queue', Q.IsEmpty());
+  AssertTrue('set',   E.IsEmpty());
+  AssertTrue('dict',  D.IsEmpty());
+  AssertTrue('ordered dict', O.IsEmpty());
+end;
+
+procedure TCollectionsTests.TestIsEmpty_FalseOncePopulated;
+var
+  L: TList<string>;
+  S: TStack<string>;
+  Q: TQueue<string>;
+  E: TSet<string>;
+  D: TDictionary<string, Integer>;
+begin
+  L := TList<string>.From(['a']);
+  S := TStack<string>.Create();  S.Push('a');
+  Q := TQueue<string>.Create();  Q.Enqueue('a');
+  E := TSet<string>.From(['a']);
+  D := TDictionary<string, Integer>.From(['a'], [1]);
+  AssertFalse('list',  L.IsEmpty());
+  AssertFalse('stack', S.IsEmpty());
+  AssertFalse('queue', Q.IsEmpty());
+  AssertFalse('set',   E.IsEmpty());
+  AssertFalse('dict',  D.IsEmpty());
+end;
+
+procedure TCollectionsTests.TestIsEmpty_TrueAgainAfterDrain;
+var
+  S: TStack<string>;
+  Q: TQueue<string>;
+  L: TList<string>;
+begin
+  { IsEmpty must track removals, not just report "never populated". }
+  S := TStack<string>.Create();
+  S.Push('a');
+  S.Pop();
+  AssertTrue('stack empty after pop', S.IsEmpty());
+  Q := TQueue<string>.Create();
+  Q.Enqueue('a');
+  Q.Dequeue();
+  AssertTrue('queue empty after dequeue', Q.IsEmpty());
+  L := TList<string>.From(['a']);
+  L.Clear();
+  AssertTrue('list empty after clear', L.IsEmpty());
+end;
+
+{ ------------------------------------------------------------------ }
+{ Empty-container access raises EListError                             }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestStack_Pop_OnEmptyRaises;
+var
+  S:      TStack<Integer>;
+  Raised: Boolean;
+begin
+  { Was a SIGSEGV: Pop drove FCount to -1 and read FData[-1].  Removal from
+    an empty container is a caller bug, so it raises rather than inventing a
+    value (BUG-20260803-empty-container-pop-segfaults). }
+  S := TStack<Integer>.Create();
+  Raised := False;
+  try
+    S.Pop();
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('Pop on empty raises EListError', Raised);
+end;
+
+procedure TCollectionsTests.TestStack_Peek_OnEmptyRaises;
+var
+  S:      TStack<Integer>;
+  Raised: Boolean;
+begin
+  { Peek raises too rather than returning Default(T): unlike Java's null,
+    Default(T) is a legitimate element value here (0 / '') and would be
+    indistinguishable from a real stored one. }
+  S := TStack<Integer>.Create();
+  Raised := False;
+  try
+    S.Peek();
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('Peek on empty raises EListError', Raised);
+end;
+
+procedure TCollectionsTests.TestQueue_Dequeue_OnEmptyRaises;
+var
+  Q:      TQueue<Integer>;
+  Raised: Boolean;
+begin
+  { Was a SIGSEGV twice over on a never-used queue: nil FData deref, plus
+    `mod FCapacity` with FCapacity still 0. }
+  Q := TQueue<Integer>.Create();
+  Raised := False;
+  try
+    Q.Dequeue();
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('Dequeue on empty raises EListError', Raised);
+end;
+
+procedure TCollectionsTests.TestQueue_Peek_OnEmptyRaises;
+var
+  Q:      TQueue<Integer>;
+  Raised: Boolean;
+begin
+  Q := TQueue<Integer>.Create();
+  Raised := False;
+  try
+    Q.Peek();
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('Peek on empty raises EListError', Raised);
+end;
+
+procedure TCollectionsTests.TestStack_StaysUsableAfterEmptyPopRaised;
+var
+  S:      TStack<Integer>;
+  Raised: Boolean;
+begin
+  { The guard must return BEFORE mutating FCount.  The old code decremented
+    first, so even a caught failure left the stack permanently corrupt —
+    this asserts the container is still sound afterwards. }
+  S := TStack<Integer>.Create();
+  Raised := False;
+  try
+    S.Pop();
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('raised', Raised);
+  AssertEquals('count not driven negative', 0, S.Count);
+  AssertTrue('still reports empty', S.IsEmpty());
+  S.Push(42);
+  AssertEquals('usable again', 1, S.Count);
+  AssertEquals('and returns the value', 42, S.Pop());
+end;
+
+{ ------------------------------------------------------------------ }
+{ Missing key raises instead of halting the process                    }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestDict_GetItem_MissingKeyRaises;
+var
+  D:      TDictionary<string, Integer>;
+  Raised: Boolean;
+  V:      Integer;
+begin
+  { Was Halt(1) — a missing key terminated the whole PROCESS with no message
+    and no chance to catch it.  A test could not even observe the old
+    behaviour without taking the runner down with it. }
+  D := TDictionary<string, Integer>.From(['a'], [1]);
+  Raised := False;
+  try
+    V := D['nope'];
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('missing key raises EListError', Raised);
+end;
+
+procedure TCollectionsTests.TestOrdDict_GetItem_MissingKeyRaises;
+var
+  D:      TOrderedDictionary<string, Integer>;
+  Raised: Boolean;
+  V:      Integer;
+begin
+  D := TOrderedDictionary<string, Integer>.From(['a'], [1]);
+  Raised := False;
+  try
+    V := D['nope'];
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('missing key raises EListError', Raised);
+end;
+
+procedure TCollectionsTests.TestDict_GetItem_PresentKeyStillWorks;
+var D: TDictionary<string, Integer>;
+begin
+  { The guard must not cost the happy path — a fix that raised on everything
+    would pass the two tests above. }
+  D := TDictionary<string, Integer>.From(['a', 'b'], [1, 2]);
+  AssertEquals('a', 1, D['a']);
+  AssertEquals('b', 2, D['b']);
+  AssertTrue('and TryGetValue still branches instead of raising',
+             D.ContainsKey('a'));
+  AssertFalse('miss via ContainsKey does not raise', D.ContainsKey('zzz'));
+end;
+
+{ ------------------------------------------------------------------ }
+{ TList index bounds                                                   }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestList_Get_OutOfRangeRaises;
+var
+  L:      TList<string>;
+  Raised: Boolean;
+  V:      string;
+begin
+  { Same family as the empty-container crashes: reading L[0] on an EMPTY
+    list dereferenced a nil FData, and any out-of-range index read wild
+    memory rather than failing. }
+  L := TList<string>.Create();
+  Raised := False;
+  try
+    V := L[0];
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('Get on empty raises', Raised);
+end;
+
+procedure TCollectionsTests.TestList_SetItem_OutOfRangeRaises;
+var
+  L:      TList<string>;
+  Raised: Boolean;
+begin
+  L := TList<string>.From(['a']);
+  Raised := False;
+  try
+    L[5] := 'x';
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('SetItem past the end raises', Raised);
+end;
+
+procedure TCollectionsTests.TestList_Delete_OutOfRangeRaises;
+var
+  L:      TList<string>;
+  Raised: Boolean;
+begin
+  L := TList<string>.From(['a']);
+  Raised := False;
+  try
+    L.Delete(5);
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('Delete past the end raises', Raised);
+end;
+
+procedure TCollectionsTests.TestList_StaysUsableAfterOutOfRangeRaised;
+var
+  L:      TList<string>;
+  Raised: Boolean;
+begin
+  { Delete guarded BEFORE the shift: the old code decremented FCount and
+    wrote through Dst even for a bad index, so a caught failure still left
+    the list corrupt. }
+  L := TList<string>.From(['a', 'b']);
+  Raised := False;
+  try
+    L.Delete(99);
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('raised', Raised);
+  AssertEquals('count untouched', 2, L.Count);
+  AssertEquals('contents intact', 'a', L[0]);
+  AssertEquals('and the tail', 'b', L[1]);
+end;
+
+procedure TCollectionsTests.TestList_InRangeAccessStillWorks;
+var L: TList<string>;
+begin
+  { A guard that raised on everything would pass the four tests above. }
+  L := TList<string>.From(['a', 'b', 'c']);
+  AssertEquals('first', 'a', L[0]);
+  AssertEquals('last', 'c', L[2]);
+  L[1] := 'z';
+  AssertEquals('write in range', 'z', L[1]);
+  L.Delete(0);
+  AssertEquals('delete in range', 2, L.Count);
+  AssertEquals('shifted', 'z', L[0]);
+end;
+
+{ ------------------------------------------------------------------ }
+{ TOrderedDictionary positional bounds                                 }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestOrdDict_GetKey_OutOfRangeRaises;
+var
+  D:      TOrderedDictionary<string, Integer>;
+  Raised: Boolean;
+  Key:    string;
+begin
+  { Keys[0] on an empty ordered dictionary dereferenced a nil FKeys -- the
+    positional accessors were the last unguarded siblings of the same bug. }
+  D := TOrderedDictionary<string, Integer>.Create();
+  Raised := False;
+  try
+    Key := D.Keys[0];
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('Keys[0] on empty raises', Raised);
+end;
+
+procedure TCollectionsTests.TestOrdDict_GetValue_OutOfRangeRaises;
+var
+  D:      TOrderedDictionary<string, Integer>;
+  Raised: Boolean;
+  V:      Integer;
+begin
+  D := TOrderedDictionary<string, Integer>.From(['a'], [1]);
+  Raised := False;
+  try
+    V := D.Values[5];
+  except
+    on E: EListError do
+      Raised := True;
+  end;
+  AssertTrue('Values past the end raises', Raised);
+end;
+
+procedure TCollectionsTests.TestOrdDict_InRangePositionalAccessStillWorks;
+var D: TOrderedDictionary<string, Integer>;
+begin
+  { A guard that raised on everything would pass the two tests above. }
+  D := TOrderedDictionary<string, Integer>.From(['a', 'b'], [1, 2]);
+  AssertEquals('key 0', 'a', D.Keys[0]);
+  AssertEquals('key 1', 'b', D.Keys[1]);
+  AssertEquals('value 0', 1, D.Values[0]);
+  AssertEquals('value 1', 2, D.Values[1]);
 end;
 
 initialization

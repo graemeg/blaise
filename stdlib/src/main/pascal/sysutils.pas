@@ -38,6 +38,19 @@ type
   EConvertError = class(Exception)
   end;
 
+  { Raised by the collection types for a programming error the container
+    cannot paper over: removing or inspecting an element that is not there
+    (TStack.Pop/Peek and TQueue.Dequeue/Peek on an empty container,
+    TDictionary.GetItem for a key that is absent).  Matches Delphi, where
+    EListError lives in System.Classes and covers the same ground.
+
+    Pascal has no checked/unchecked split, so this is "unchecked" in Java's
+    sense automatically — nothing is declared and no caller is forced to
+    handle it.  Guard with IsEmpty / ContainsKey, or use the Try* variants,
+    if you would rather branch than catch. }
+  EListError = class(Exception)
+  end;
+
   { Raised by integer `div`/`mod` when the divisor is zero.  The compiler
     emits a divisor==0 guard before each integer division that calls
     _RaiseDivByZero (below) when SysUtils is in scope; without SysUtils the

@@ -16,6 +16,7 @@ unit Generics.Collections;
 interface
 
 uses
+  SysUtils,   { EListError — raised for empty-container and missing-key access }
   Functional;
 
 type
@@ -70,6 +71,9 @@ type
     procedure Sort(C: TComparison<T>);
     function  BinarySearch(AItem: T; C: TComparison<T>;
                            out AIndex: Integer): Boolean;
+    { True when the container holds nothing.  Clearer at a call site than
+      `Count = 0`, and the guard the raising accessors expect you to use. }
+    function  IsEmpty: Boolean;
     property Count: Integer read FCount;
     { Default array property — enables List[i] for read and write. }
     property Items[AIndex: Integer]: T read Get write SetItem; default;
@@ -87,6 +91,9 @@ type
     function  Peek: T;
     procedure Clear;
     destructor Destroy; override;
+    { True when the container holds nothing.  Clearer at a call site than
+      `Count = 0`, and the guard the raising accessors expect you to use. }
+    function  IsEmpty: Boolean;
     property Count: Integer read FCount;
   end;
 
@@ -106,6 +113,9 @@ type
     function  Peek: T;
     procedure Clear;
     destructor Destroy; override;
+    { True when the container holds nothing.  Clearer at a call site than
+      `Count = 0`, and the guard the raising accessors expect you to use. }
+    function  IsEmpty: Boolean;
     property Count: Integer read FCount;
   end;
 
@@ -143,6 +153,9 @@ type
       set costs one pass over the literal, so hoist it into a constant-like
       variable if the same membership test runs in a loop. }
     static function From(const AItems: array of T): TSet<T>;
+    { True when the container holds nothing.  Clearer at a call site than
+      `Count = 0`, and the guard the raising accessors expect you to use. }
+    function  IsEmpty: Boolean;
     property Count: Integer read FCount;
   end;
 
@@ -189,9 +202,9 @@ type
 
       A repeated key is an overwrite, so the LAST value wins -- SetItem
       semantics, not two entries under one key.  If the arrays differ in
-      length, pairing stops at the shorter one: this unit is deliberately
-      exception-free (an out-of-range TList.Get simply reads past the end),
-      so From does not raise.
+      length, pairing stops at the shorter one rather than raising: a ragged
+      literal is a plausible thing to write deliberately, unlike indexing off
+      the end of a container, so it is treated as "pair what lines up".
       Named From rather than Of because `of` is a reserved word. }
     static function From(const AKeys: array of K;
                          const AValues: array of V): TDictionary<K, V>;
@@ -205,6 +218,9 @@ type
     procedure Clear;
     function  GetCount: Integer;
     destructor Destroy; override;
+    { True when the container holds nothing.  Clearer at a call site than
+      `Count = 0`, and the guard the raising accessors expect you to use. }
+    function  IsEmpty: Boolean;
     property Count: Integer read FCount;
     property Items[Key: K]: V read GetItem write SetItem; default;
   end;
@@ -238,9 +254,9 @@ type
 
       A repeated key is an overwrite, so the LAST value wins -- SetItem
       semantics, not two entries under one key.  If the arrays differ in
-      length, pairing stops at the shorter one: this unit is deliberately
-      exception-free (an out-of-range TList.Get simply reads past the end),
-      so From does not raise.
+      length, pairing stops at the shorter one rather than raising: a ragged
+      literal is a plausible thing to write deliberately, unlike indexing off
+      the end of a container, so it is treated as "pair what lines up".
       Insertion order is preserved (that is this type's whole point), so
       the resulting iteration order is the literal's order.
       Named From rather than Of because `of` is a reserved word. }
@@ -256,6 +272,9 @@ type
     function  GetValue(AIndex: Integer): V;
     function  GetCount: Integer;
     destructor Destroy; override;
+    { True when the container holds nothing.  Clearer at a call site than
+      `Count = 0`, and the guard the raising accessors expect you to use. }
+    function  IsEmpty: Boolean;
     property Count: Integer read FCount;
     property Items[Key: K]: V read GetItem write SetItem; default;
     property Keys[Index: Integer]: K read GetKey;
@@ -482,6 +501,10 @@ function TList<T>.Get(AIndex: Integer): T;
 var
   Src: ^T;
 begin
+  { Same family as TStack.Pop on empty: without this, an out-of-range index
+    read wild memory (and on an EMPTY list FData is nil, so L[0] segfaulted). }
+  if (AIndex < 0) or (AIndex >= Self.FCount) then
+    raise EListError.Create('TList index out of range: ' + IntToStr(AIndex));
   Src    := Self.FData + AIndex * SizeOf(T);
   Result := Src^
 end;
@@ -490,6 +513,8 @@ procedure TList<T>.SetItem(AIndex: Integer; Value: T);
 var
   Dest: ^T;
 begin
+  if (AIndex < 0) or (AIndex >= Self.FCount) then
+    raise EListError.Create('TList index out of range: ' + IntToStr(AIndex));
   { The ^T := Value store carries the compiler's ARC discipline for a managed
     T — the previous element is released and the new one retained. }
   Dest  := Self.FData + AIndex * SizeOf(T);
@@ -522,6 +547,11 @@ var
   I:     Integer;
   Empty: T;
 begin
+  { Guard BEFORE the shift: an out-of-range Delete still decremented FCount
+    and wrote through Dst, so it corrupted the list rather than merely
+    failing. }
+  if (AIndex < 0) or (AIndex >= Self.FCount) then
+    raise EListError.Create('TList index out of range: ' + IntToStr(AIndex));
   I := AIndex;
   while I < Self.FCount - 1 do
   begin
@@ -552,6 +582,11 @@ begin
     I     := I + 1
   end;
   Self.FCount := 0
+end;
+
+function TList<T>.IsEmpty: Boolean;
+begin
+  Result := Self.FCount = 0
 end;
 
 destructor TList<T>.Destroy;
@@ -642,6 +677,11 @@ var
   Src:   ^T;
   Empty: T;
 begin
+  { Removing from an empty stack is a caller bug, not a value to invent:
+    without this guard FCount went to -1 and FData[-1] was read, so the
+    stack stayed corrupt for every later call.  Guard with IsEmpty. }
+  if Self.FCount = 0 then
+    raise EListError.Create('TStack.Pop: stack is empty');
   Self.FCount := Self.FCount - 1;
   Src         := Self.FData + Self.FCount * SizeOf(T);
   Result      := Src^;
@@ -654,6 +694,12 @@ function TStack<T>.Peek: T;
 var
   Src: ^T;
 begin
+  { Raises rather than returning Default(T): unlike Java, where peek() can
+    return null because null sits outside every reference type's value
+    domain, Default(T) here is a LEGITIMATE element value -- '' or 0 would
+    be indistinguishable from a stored '' or 0. }
+  if Self.FCount = 0 then
+    raise EListError.Create('TStack.Peek: stack is empty');
   Src    := Self.FData + (Self.FCount - 1) * SizeOf(T);
   Result := Src^
 end;
@@ -674,6 +720,11 @@ begin
     I     := I + 1
   end;
   Self.FCount := 0
+end;
+
+function TStack<T>.IsEmpty: Boolean;
+begin
+  Result := Self.FCount = 0
 end;
 
 destructor TStack<T>.Destroy;
@@ -751,6 +802,11 @@ var
   Src:   ^T;
   Empty: T;
 begin
+  { Two faults without this guard on a never-used queue: FData is nil, and
+    the FHead advance below computes `mod FCapacity` with FCapacity still 0
+    -- a divide fault on top of the null deref.  Guard with IsEmpty. }
+  if Self.FCount = 0 then
+    raise EListError.Create('TQueue.Dequeue: queue is empty');
   Src         := Self.FData + Self.FHead * SizeOf(T);
   Result      := Src^;
   { Ownership moves to the caller; clear the vacated slot (see
@@ -764,6 +820,10 @@ function TQueue<T>.Peek: T;
 var
   Src: ^T;
 begin
+  { Raises rather than returning Default(T) -- see TStack.Peek for why a
+    sentinel cannot work here the way Java's null does. }
+  if Self.FCount = 0 then
+    raise EListError.Create('TQueue.Peek: queue is empty');
   Src    := Self.FData + Self.FHead * SizeOf(T);
   Result := Src^
 end;
@@ -793,6 +853,11 @@ begin
   Self.FCount := 0;
   Self.FHead  := 0;
   Self.FTail  := 0
+end;
+
+function TQueue<T>.IsEmpty: Boolean;
+begin
+  Result := Self.FCount = 0
 end;
 
 destructor TQueue<T>.Destroy;
@@ -996,6 +1061,11 @@ begin
   Self.HashInvalidate()
 end;
 
+function TSet<T>.IsEmpty: Boolean;
+begin
+  Result := Self.FCount = 0
+end;
+
 destructor TSet<T>.Destroy;
 var
   I:     Integer;
@@ -1134,9 +1204,10 @@ var
   I, N: Integer;
 begin
   Result := TDictionary<K, V>.Create();
-  { Pair up to the SHORTER array -- this unit raises no exceptions, so a
-    mismatched literal drops the unpaired tail rather than reading past the
-    end of the shorter one. }
+  { Pair up to the SHORTER array: a mismatched literal drops the unpaired
+    tail rather than raising.  Deliberate -- a ragged literal is a plausible
+    thing to write on purpose, whereas the accessors that DO raise
+    (Get/Pop/Dequeue/Peek/GetItem) are reporting a genuine caller bug. }
   N := High(AKeys) - Low(AKeys) + 1;
   if High(AValues) - Low(AValues) + 1 < N then
     N := High(AValues) - Low(AValues) + 1;
@@ -1259,7 +1330,11 @@ begin
     Result := VPtr^
   end
   else
-    Halt(1)
+    { Was Halt(1): a missing key terminated the whole PROCESS, with no
+      message and no chance to catch it.  Raising names the failure and
+      lets a caller recover.  Use ContainsKey or TryGetValue to branch
+      instead of catching. }
+    raise EListError.Create('Dictionary: key not found')
 end;
 
 procedure TDictionary<K, V>.SetItem(Key: K; Value: V);
@@ -1291,6 +1366,11 @@ begin
     VSlot^ := EmptyVal;
     I      := I + 1
   end
+end;
+
+function TDictionary<K, V>.IsEmpty: Boolean;
+begin
+  Result := Self.FCount = 0
 end;
 
 destructor TDictionary<K, V>.Destroy;
@@ -1521,6 +1601,11 @@ function TOrderedDictionary<K, V>.GetKey(AIndex: Integer): K;
 var
   Ptr: ^K;
 begin
+  { Positional access is bounds-checked like TList's: Keys[0] on an empty
+    dictionary dereferenced a nil FKeys. }
+  if (AIndex < 0) or (AIndex >= Self.FCount) then
+    raise EListError.Create(
+      'TOrderedDictionary index out of range: ' + IntToStr(AIndex));
   Ptr    := Self.FKeys + AIndex * SizeOf(K);
   Result := Ptr^
 end;
@@ -1529,6 +1614,9 @@ function TOrderedDictionary<K, V>.GetValue(AIndex: Integer): V;
 var
   Ptr: ^V;
 begin
+  if (AIndex < 0) or (AIndex >= Self.FCount) then
+    raise EListError.Create(
+      'TOrderedDictionary index out of range: ' + IntToStr(AIndex));
   Ptr    := Self.FValues + AIndex * SizeOf(V);
   Result := Ptr^
 end;
@@ -1545,7 +1633,11 @@ begin
     Result := VPtr^
   end
   else
-    Halt(1)
+    { Was Halt(1): a missing key terminated the whole PROCESS, with no
+      message and no chance to catch it.  Raising names the failure and
+      lets a caller recover.  Use ContainsKey or TryGetValue to branch
+      instead of catching. }
+    raise EListError.Create('Dictionary: key not found')
 end;
 
 procedure TOrderedDictionary<K, V>.SetItem(Key: K; Value: V);
@@ -1576,6 +1668,11 @@ begin
     VSlot^ := EmptyVal;
     I      := I + 1
   end
+end;
+
+function TOrderedDictionary<K, V>.IsEmpty: Boolean;
+begin
+  Result := Self.FCount = 0
 end;
 
 destructor TOrderedDictionary<K, V>.Destroy;
