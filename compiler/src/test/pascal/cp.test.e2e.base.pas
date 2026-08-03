@@ -47,6 +47,23 @@ type
     function  RunProc(const AExe: string; const AArgs: array of string;
                       out AStdout: string): Integer;
     function  RunProcNoArgs(const AExe: string; out AStdout: string): Integer;
+    { Compile ASrc for the NATIVE backend by invoking the blaise compiler
+      binary's own CLI, instead of driving TCodeGenNative + external cc in
+      process.  The native driver defaults BOTH --assembler and --linker to
+      internal, so this ONE subprocess does front-end + codegen + assemble +
+      RTL + link entirely in-process — no qbe, no cc -c, no
+      build-rtl-objects.sh, no external cc link.  Only two subprocesses run
+      per test: this compile, and executing the produced binary.  Self-
+      contained: does not go through LinkWithRTL, so it cannot support the
+      -l extra-library case (LinkWithRTLLibs) — none of the native e2e
+      callers need one today.  AExtraUnitPath, when non-empty, is added as a
+      further --unit-path entry (e.g. FScratch, for CompileAndRunWithUnitOn's
+      user-authored unit files); pass '' when the program has no such
+      dependency. }
+    function  CompileAndRunNativeCLI(const ASrc: string; ADebugMode: Boolean;
+                          const AExtraUnitPath: string;
+                          out AStdout: string;
+                          out AExitCode: Integer): Boolean;
     { Link an assembled program (AAsmFile) into ABinFile against the RTL.  The
       RTL is built from source by scripts/build-rtl-objects.sh (no blaise_rtl.a
       archive); --exclude-defined-by drops the RTL objects the whole-program
@@ -193,6 +210,20 @@ type
 
 implementation
 
+var
+  { Process-lifetime-unique counter for CompileAndRunNativeCLI's output paths.
+    FCounter resets to 0 in every test's SetUp, so two DIFFERENT test methods
+    can end up compiling to the exact same "t2" path moments apart.  Even with
+    the Mach-O linker's delete-before-write fix (blaise.linker.macho.pas), that
+    rapid delete+recreate-same-path+immediately-execute sequence still raced
+    against macOS's asynchronous code-integrity bookkeeping for the old inode,
+    producing flaky SIGKILLs across a full-suite run (not reproducible when a
+    single test ran in isolation).  A counter that never resets guarantees
+    every compile in the process gets a path no earlier compile ever used,
+    which sidesteps the race entirely rather than depending on exactly how
+    fast the kernel retires the previous inode. }
+  GNativeCLICounter: Integer = 0;
+
 { ------------------------------------------------------------------ }
 { TE2ETestCase                                                         }
 { ------------------------------------------------------------------ }
@@ -280,6 +311,58 @@ begin
   finally
     Proc.Free()
   end
+end;
+
+function TE2ETestCase.CompileAndRunNativeCLI(const ASrc: string;
+                                             ADebugMode: Boolean;
+                                             const AExtraUnitPath: string;
+                                             out AStdout: string;
+                                             out AExitCode: Integer): Boolean;
+var
+  SrcFile, BinFile, ToolOut, Chunk: string;
+  Proc: TProcess;
+  Rc: Integer;
+begin
+  Result := False;
+  Inc(GNativeCLICounter);
+  SrcFile := FScratch + '/n' + IntToStr(GNativeCLICounter) + '.pas';
+  BinFile := FScratch + '/n' + IntToStr(GNativeCLICounter);
+  WriteFile(SrcFile, ASrc);
+
+  Proc := TProcess.Create(nil);
+  try
+    Proc.Executable := ProjectRoot() + 'compiler/target/blaise';
+    Proc.Parameters.Add('--source');
+    Proc.Parameters.Add(SrcFile);
+    Proc.Parameters.Add('--backend');
+    Proc.Parameters.Add('native');
+    Proc.Parameters.Add('--unit-path');
+    Proc.Parameters.Add(FRTLUnitPath);
+    Proc.Parameters.Add('--unit-path');
+    Proc.Parameters.Add(FStdlibUnitPath);
+    if AExtraUnitPath <> '' then
+    begin
+      Proc.Parameters.Add('--unit-path');
+      Proc.Parameters.Add(AExtraUnitPath)
+    end;
+    if ADebugMode then
+      Proc.Parameters.Add('--debug');
+    Proc.Parameters.Add('--output');
+    Proc.Parameters.Add(BinFile);
+    Proc.Execute();
+    ToolOut := '';
+    repeat
+      Chunk := Proc.ReadOutput();
+      ToolOut := ToolOut + Chunk
+    until (Chunk = '') and not Proc.Running;
+    Proc.WaitOnExit();
+    Rc := Proc.ExitCode
+  finally
+    Proc.Free()
+  end;
+  if Rc <> 0 then begin AStdout := 'compile failed: ' + ToolOut; AExitCode := Rc; Exit end;
+  AExitCode := RunProcNoArgs(BinFile, AStdout);
+  Result := True
 end;
 
 function TE2ETestCase.LinkWithRTL(const AAsmFile, ABinFile: string;
@@ -406,9 +489,7 @@ var
   Prog:     TProgram;
   Semantic: TSemanticAnalyser;
   QCG:      TCodeGenQBE;
-  NCG:      TCodeGenNative;
-  CG:       ICodeGen;
-  Emitted:  string;       { QBE IR text, or native assembly text }
+  Emitted:  string;       { QBE IR text }
   IRFile:   string;
   AsmFile:  string;
   BinFile:  string;
@@ -424,53 +505,41 @@ begin
   if not BackendRunnableOnHost(ABackend) then
     Ignore(BackendName(ABackend) +
       ' backend is not supported on this host target');
+  { Native goes through the compiler's own CLI (front-end + codegen + internal
+    assemble + internal link all inside that one subprocess) — see
+    CompileAndRunNativeCLI.  Only QBE needs the manual IR/asm/link pipeline
+    below, because qbe itself is an external tool this compiler does not (and
+    is not meant to) absorb. }
+  if ABackend = beNative then
+  begin
+    Result := Self.CompileAndRunNativeCLI(ASrc, False, '', AStdout, AExitCode);
+    Exit
+  end;
   Inc(FCounter);
   IRFile  := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
   AsmFile := FScratch + '/t' + IntToStr(FCounter) + '.s';
   BinFile := FScratch + '/t' + IntToStr(FCounter);
 
-  { Shared front-end; the codegen object differs per backend.  QBE and native
-    both implement ICodeGen, but TCodeGenQBE is freed manually (not ARC-held
-    via the interface here) while the native object is ARC-managed. }
-  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
-  QCG := nil; CG := nil;
+  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil; QCG := nil;
   try
     Lexer    := TLexer.Create(ASrc);
     Parser   := TParser.Create(Lexer);
     Prog     := Parser.Parse();
     Semantic := TSemanticAnalyser.Create();
     Semantic.Analyse(Prog);
-    if ABackend = beNative then
-    begin
-      NCG := TCodeGenNative.Create();
-      NCG.SetTarget(HostTarget());
-      CG  := NCG;            { ARC-managed; released at scope exit }
-      CG.Generate(Prog);
-      Emitted := CG.GetOutput()
-    end
-    else
-    begin
-      QCG := TCodeGenQBE.Create();
-      QCG.Generate(Prog);
-      Emitted := QCG.GetOutput()
-    end
+    QCG := TCodeGenQBE.Create();
+    QCG.Generate(Prog);
+    Emitted := QCG.GetOutput()
   finally
-    QCG.Free();               { nil for the native path — Free(nil) is a no-op }
-    { CG (ICodeGen) freed by ARC; do not Free. }
+    QCG.Free();
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free()
   end;
 
-  if ABackend = beNative then
-  begin
-    { Native backend emits assembly directly — no QBE step. }
-    WriteFile(AsmFile, Emitted)
-  end
-  else
-  begin
-    WriteFile(IRFile, Emitted);
-    Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
-    if Rc <> 0 then begin AStdout := 'qbe failed: ' + ToolOut; AExitCode := Rc; Exit end
-  end;
+  { beNative already returned above via CompileAndRunNativeCLI; from here on
+    only the QBE path remains. }
+  WriteFile(IRFile, Emitted);
+  Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
+  if Rc <> 0 then begin AStdout := 'qbe failed: ' + ToolOut; AExitCode := Rc; Exit end;
   Rc := LinkWithRTLLibs(AsmFile, BinFile, AExtraLibs, ToolOut);
   if Rc <> 0 then begin AStdout := 'cc failed: ' + ToolOut; AExitCode := Rc; Exit end;
   AExitCode := RunProcNoArgs(BinFile, AStdout);
@@ -885,8 +954,6 @@ var
   Prog:        TProgram;
   Semantic:    TSemanticAnalyser;
   QCG:         TCodeGenQBE;
-  NCG:         TCodeGenNative;
-  CG:          ICodeGen;
   Loader:      TUnitLoader;
   Units:       TObjectList;
   SearchPaths: TStringList;
@@ -907,13 +974,23 @@ begin
   if not BackendRunnableOnHost(ABackend) then
     Ignore(BackendName(ABackend) +
       ' backend is not supported on this host target');
+  { Native goes through the compiler's own CLI — see CompileAndRunNativeCLI.
+    Its --unit-path RTL/stdlib pair already gives the compiler's own unit
+    loader exactly the search paths this method builds manually below for
+    QBE, so no separate whole-program AppendUnit dance is needed here. }
+  if ABackend = beNative then
+  begin
+    Result := Self.CompileAndRunNativeCLI(ASrc, ADebugMode, '', AStdout,
+                                          AExitCode);
+    Exit
+  end;
   Inc(FCounter);
   IRFile  := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
   AsmFile := FScratch + '/t' + IntToStr(FCounter) + '.s';
   BinFile := FScratch + '/t' + IntToStr(FCounter);
 
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
-  QCG := nil; CG := nil; Loader := nil; Units := nil; SearchPaths := nil;
+  QCG := nil; Loader := nil; Units := nil; SearchPaths := nil;
   try
     Lexer    := TLexer.Create(ASrc);
     Parser   := TParser.Create(Lexer);
@@ -927,44 +1004,22 @@ begin
     for I := 0 to Units.Count - 1 do
       Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
     Semantic.Analyse(Prog);
-    if ABackend = beNative then
-    begin
-      NCG := TCodeGenNative.Create();
-      NCG.SetTarget(HostTarget());
-      CG  := NCG;
-      CG.SetDebugMode(ADebugMode);
-      CG.SetSymbolTable(Prog.SymbolTable);
-      for I := 0 to Units.Count - 1 do
-        CG.AppendUnit(TUnit(Units.Items[I]));
-      CG.AppendProgram(Prog);
-      Emitted := CG.GetOutput()
-    end
-    else
-    begin
-      QCG := TCodeGenQBE.Create();
-      QCG.SetDebugMode(ADebugMode);
-      QCG.SetSymbolTable(Prog.SymbolTable);
-      for I := 0 to Units.Count - 1 do
-        QCG.AppendUnit(TUnit(Units.Items[I]));
-      QCG.AppendProgram(Prog);
-      Emitted := QCG.GetOutput()
-    end
+    QCG := TCodeGenQBE.Create();
+    QCG.SetDebugMode(ADebugMode);
+    QCG.SetSymbolTable(Prog.SymbolTable);
+    for I := 0 to Units.Count - 1 do
+      QCG.AppendUnit(TUnit(Units.Items[I]));
+    QCG.AppendProgram(Prog);
+    Emitted := QCG.GetOutput()
   finally
     QCG.Free(); Semantic.Free();
     Units.Free(); Loader.Free(); SearchPaths.Free();
     Prog.Free(); Parser.Free(); Lexer.Free()
   end;
 
-  if ABackend = beNative then
-  begin
-    WriteFile(AsmFile, Emitted)
-  end
-  else
-  begin
-    WriteFile(IRFile, Emitted);
-    Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
-    if Rc <> 0 then begin AStdout := 'qbe failed: ' + ToolOut; AExitCode := Rc; Exit end
-  end;
+  WriteFile(IRFile, Emitted);
+  Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
+  if Rc <> 0 then begin AStdout := 'qbe failed: ' + ToolOut; AExitCode := Rc; Exit end;
   Rc := LinkWithRTL(AsmFile, BinFile, ToolOut);
   if Rc <> 0 then begin AStdout := 'cc failed: ' + ToolOut; AExitCode := Rc; Exit end;
   AExitCode := RunProcNoArgs(BinFile, AStdout);
@@ -997,12 +1052,10 @@ var
   Prog:        TProgram;
   Semantic:    TSemanticAnalyser;
   QCG:         TCodeGenQBE;
-  NCG:         TCodeGenNative;
-  CG:          ICodeGen;
   Loader:      TUnitLoader;
   Units:       TObjectList;
   SearchPaths: TStringList;
-  Emitted:     string;       { QBE IR text, or native assembly text }
+  Emitted:     string;       { QBE IR text }
   IRFile, AsmFile, BinFile, ToolOut, UnitFile: string;
   Rc, I:       Integer;
 begin
@@ -1015,17 +1068,26 @@ begin
   if not BackendRunnableOnHost(ABackend) then
     Ignore(BackendName(ABackend) +
       ' backend is not supported on this host target');
+  UnitFile := FScratch + '/' + AUnitName + '.pas';
+  { Write the user unit to the scratch dir so the unit loader resolves it. }
+  WriteFile(UnitFile, AUnitSrc);
+
+  { Native goes through the compiler's own CLI, with FScratch as an extra
+    --unit-path so the just-written user unit resolves exactly as it does for
+    QBE's manual TUnitLoader below. }
+  if ABackend = beNative then
+  begin
+    Result := Self.CompileAndRunNativeCLI(ASrc, False, FScratch, AStdout,
+                                          AExitCode);
+    Exit
+  end;
   Inc(FCounter);
   IRFile   := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
   AsmFile  := FScratch + '/t' + IntToStr(FCounter) + '.s';
   BinFile  := FScratch + '/t' + IntToStr(FCounter);
-  UnitFile := FScratch + '/' + AUnitName + '.pas';
-
-  { Write the user unit to the scratch dir so the unit loader resolves it. }
-  WriteFile(UnitFile, AUnitSrc);
 
   Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
-  QCG := nil; CG := nil;
+  QCG := nil;
   Loader := nil; Units := nil; SearchPaths := nil;
   try
     Lexer    := TLexer.Create(ASrc);
@@ -1041,38 +1103,22 @@ begin
     for I := 0 to Units.Count - 1 do
       Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
     Semantic.Analyse(Prog);
-    if ABackend = beNative then
-    begin
-      NCG := TCodeGenNative.Create();
-      NCG.SetTarget(HostTarget());
-      CG  := NCG;            { ARC-managed; released at scope exit }
-    end
-    else
-    begin
-      QCG := TCodeGenQBE.Create();
-      CG  := QCG
-    end;
-    CG.SetSymbolTable(Prog.SymbolTable);
+    QCG := TCodeGenQBE.Create();
+    QCG.SetSymbolTable(Prog.SymbolTable);
     for I := 0 to Units.Count - 1 do
-      CG.AppendUnit(TUnit(Units.Items[I]));
-    CG.AppendProgram(Prog);
-    Emitted := CG.GetOutput()
+      QCG.AppendUnit(TUnit(Units.Items[I]));
+    QCG.AppendProgram(Prog);
+    Emitted := QCG.GetOutput()
   finally
-    if ABackend <> beNative then QCG.Free();
-    { CG (ICodeGen) for native is freed by ARC; do not Free. }
+    QCG.Free();
     Semantic.Free();
     Units.Free(); Loader.Free(); SearchPaths.Free();
     Prog.Free(); Parser.Free(); Lexer.Free()
   end;
 
-  if ABackend = beNative then
-    WriteFile(AsmFile, Emitted)
-  else
-  begin
-    WriteFile(IRFile, Emitted);
-    Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
-    if Rc <> 0 then begin AStdout := 'qbe failed: ' + ToolOut; AExitCode := Rc; Exit end
-  end;
+  WriteFile(IRFile, Emitted);
+  Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
+  if Rc <> 0 then begin AStdout := 'qbe failed: ' + ToolOut; AExitCode := Rc; Exit end;
   Rc := LinkWithRTL(AsmFile, BinFile, ToolOut);
   if Rc <> 0 then begin AStdout := 'cc failed: ' + ToolOut; AExitCode := Rc; Exit end;
   AExitCode := RunProcNoArgs(BinFile, AStdout);

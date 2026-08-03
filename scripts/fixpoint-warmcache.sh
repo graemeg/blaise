@@ -58,6 +58,12 @@ fi
 
 UNIT_PATHS="--unit-path compiler/src/main/pascal --unit-path stdlib/src/main/pascal"
 
+# Portable file size: GNU stat (Linux CI) takes -c %s, BSD stat (macOS) takes
+# -f %z and rejects -c outright ("illegal option -- c").
+file_size() {
+  stat -c %s "$1" 2>/dev/null || stat -f %z "$1"
+}
+
 # All temp state in one mktemp dir so cleanup is a single rm.
 WORK="$(mktemp -d)"
 UC="$WORK/cache"
@@ -85,13 +91,7 @@ if [ ! -s "$STAGE2A" ]; then
   echo "BUILD1_FAIL (clean-cache build produced no binary)"
   exit 1
 fi
-# `wc -c <` rather than `stat -c %s`: -c is GNU-only, and BSD/macOS stat spells
-# it `-f %z`, so the GNU form made this script unrunnable on macOS.  Redirecting
-# INTO wc (not passing the path) keeps the output a bare number with no filename
-# column.  Same idiom as fixpoint-binary.sh.
-# tr -d ' ' because BSD wc pads its output; the value feeds $(( )) and -lt,
-# which tolerate that, but stripping keeps the echoed size clean too.
-SIZE1=$(wc -c < "$STAGE2A" | tr -d ' ')
+SIZE1=$(file_size "$STAGE2A")
 echo "      build1 ok — stage-2a size = $SIZE1 bytes"
 
 # EDIT a DEPENDENCY unit between the two builds.  This is what a real
@@ -134,7 +134,7 @@ if [ ! -s "$STAGE2B" ]; then
   echo "BUILD2_FAIL (warm-cache rebuild produced no binary)"
   exit 1
 fi
-SIZE2=$(wc -c < "$STAGE2B" | tr -d ' ')   # portable — see the note on SIZE1
+SIZE2=$(file_size "$STAGE2B")
 echo "      build2 ok — stage-2b size = $SIZE2 bytes"
 
 echo "[3/4] size sanity — warm-cache binary must not be drastically smaller"

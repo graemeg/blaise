@@ -774,6 +774,17 @@ var
 begin
   FWriter.SetIdentifier(ExtractFileName(AOutPath));
   Bytes := Link(AEntrySym);
+  { Unlink any existing file at AOutPath before writing, matching
+    TLinker.Link's ELF counterpart.  Overwriting an executable IN PLACE
+    (same inode) at a path the kernel recently validated/executed makes
+    macOS's code-integrity checks kill the NEXT execution outright
+    (SIGKILL, exit 137) even though the new file's own signature is valid —
+    the kernel is guarding against a binary's bytes changing after being
+    mapped for execution.  Deleting first forces a fresh inode, sidestepping
+    the check entirely.  Reproduced by: compile -> run -> recompile to the
+    SAME --output path -> run again. }
+  if FileExists(AOutPath) then
+    DeleteFile(AOutPath);
   FOut := TFileOutputStream.Create(AOutPath);
   try
     FOut.Write(PChar(Bytes), Length(Bytes));
