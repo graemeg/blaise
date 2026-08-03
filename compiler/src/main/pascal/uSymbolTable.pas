@@ -11,7 +11,7 @@ unit uSymbolTable;
 interface
 
 uses
-  Classes, SysUtils, contnrs;
+  Classes, SysUtils, contnrs, Generics.Collections;
 
 type
   { Member visibility — class/record field, method, and property access scope.
@@ -339,6 +339,18 @@ type
                                        Codegen reads this for ARC field cleanup so the
                                        call target matches the emitted method symbol when
                                        Destroy is overloaded (e.g. 'TFoo_Destroy$'). }
+    FMethodSyms:            TDictionary<string, string>; { method name -> emitted symbol.
+                                       Generalises FDestroyResolvedQbeName to EVERY
+                                       method, because a NON-VIRTUAL method has no
+                                       vtable slot and therefore no other place on the
+                                       descriptor that records the symbol its body was
+                                       emitted under.  Codegen needs exactly that when
+                                       naming an itab entry for an interface method a
+                                       class inherits from an ancestor -- especially a
+                                       cross-unit ancestor, whose AST it cannot see.
+                                       Carries the full mangled form (unit prefix,
+                                       declaring-class casing, overload '$sig' suffix),
+                                       so no call site has to reconstruct it. }
     FHasAbstractMethods:    Boolean; { True when any vtable slot is abstract (no impl) }
     FClassAttributes:       TStringList; { resolved attribute type names e.g. 'ThreadedAttribute' }
     FIsPacked:              Boolean; { True for `packed record` — skip per-field
@@ -358,6 +370,10 @@ type
     function  HasVTable: Boolean;
     function  VTableCount: Integer;
     function  VTableEntryAt(ASlot: Integer): TVTableEntry;
+    { Record / look up the symbol a method's body is emitted under.  Empty
+      result means this class does not declare AName (walk to Parent). }
+    procedure AddMethodSym(const AName, AQbeName: string);
+    function  FindMethodSym(const AName: string): string;
     function  FindVTableSlot(const AMethodName: string): Integer;
     function  AddVTableSlot(const AMethodName, AImplName: string): Integer;
     procedure OverrideVTableSlot(ASlot: Integer; const AImplName: string);
@@ -944,10 +960,12 @@ begin
   FImplements := TObjectList.Create(False);  { not owned }
   FProperties := TObjectList.Create(True);   { owned TPropertyInfo }
   FClassAttributes := TStringList.Create();
+  FMethodSyms := TDictionary<string, string>.Create();
 end;
 
 destructor TRecordTypeDesc.Destroy;
 begin
+  FMethodSyms.Free();
   FClassAttributes.Free();
   FProperties.Free();
   FImplements.Free();
@@ -1156,6 +1174,26 @@ begin
   E := TVTableEntry(FVTable.Items[ASlot]);
   E.MethName := AMethodName;
   E.ImplName := AImplName;
+end;
+
+procedure TRecordTypeDesc.AddMethodSym(const AName, AQbeName: string);
+begin
+  if (AName = '') or (AQbeName = '') then Exit;
+  { SetItem, not Add: the semantic pass may revisit a method, and the later
+    value is the resolved one.  Keys are LOWER-CASED on the way in and out --
+    Pascal identifiers are case-insensitive, but TDictionary hashes the exact
+    bytes, so an interface declaring `Id` must still find a class that spells
+    it `ID`. }
+  FMethodSyms.SetItem(LowerCase(AName), AQbeName);
+end;
+
+{ Empty means "not declared here" -- the caller walks to Parent.  Deliberately
+  NOT recursive: the caller needs to know WHICH class in the chain declared the
+  method, and a recursive lookup would hide that. }
+function TRecordTypeDesc.FindMethodSym(const AName: string): string;
+begin
+  if not FMethodSyms.TryGetValue(LowerCase(AName), Result) then
+    Result := '';
 end;
 
 procedure TRecordTypeDesc.CopyVTableFrom(AParent: TRecordTypeDesc);

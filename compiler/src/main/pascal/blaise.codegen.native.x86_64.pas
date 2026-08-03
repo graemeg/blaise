@@ -4077,6 +4077,8 @@ var
   MD:      TMethodDecl;
   I:       Integer;
   CurName: string;
+  AncRT:   TRecordTypeDesc;
+  Sym:     string;
 begin
   if AClassRT <> nil then
   begin
@@ -4115,9 +4117,26 @@ begin
           break;
         end;
   end;
-  Result := MethodEmitNameNative(
-              FindMethodInClassDef(TClassTypeDef(ATD.Def), AMethName),
-              ATD.Name, AMethName);
+  { The AST walk above only sees THIS unit's declarations, so it runs out when
+    the declaring ancestor lives in another unit.  Climb the descriptor chain
+    instead -- Parent is populated across units, and AddMethodSym records every
+    method's emitted symbol (including non-virtual ones, which have no vtable
+    slot).  The first hit is the NEAREST declarer, which is exactly Pascal's
+    resolution order. }
+  AncRT := AClassRT;
+  while AncRT <> nil do
+  begin
+    Sym := AncRT.FindMethodSym(AMethName);
+    if Sym <> '' then
+      Exit(NativeMangle(Sym));
+    AncRT := AncRT.Parent;
+  end;
+  { Nothing in the chain declares it.  Naming <thisclass>_<method> here is what
+    turned this into a load-time "undefined symbol" instead of a compile error,
+    so fail loudly (matching the arm64 backend's posture). }
+  raise ENativeCodeGenError.Create(
+    'native backend: no implementation found for interface method ''' +
+    AMethName + ''' on class ''' + ATD.Name + '''');
 end;
 
 { Emit typeinfo / itab / impllist blocks for interfaces and implementing

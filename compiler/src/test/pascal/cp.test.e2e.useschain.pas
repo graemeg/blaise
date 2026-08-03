@@ -73,6 +73,12 @@ type
       reaches members the bare/last-wins enum type does not — independent of
       `uses` order. }
     procedure TestRun_CrossUnitEnum_QualifiedMember;
+
+    { Interface satisfied by a NON-VIRTUAL method inherited across units }
+    procedure TestRun_CrossUnitIntf_InheritedNonVirtual;
+    procedure TestRun_CrossUnitIntf_InheritedCasingMismatch;
+    procedure TestRun_CrossUnitIntf_InheritedVirtualStillUsesVTable;
+    procedure TestRun_CrossUnitIntf_OverrideWins;
   end;
 
 implementation
@@ -608,6 +614,252 @@ begin
     CompileAndRunWithUnits(EA_Enum, EB_Enum, DrvSrc, Output, RCode));
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('ea.paThree=2, eb.paZero=0', '2' + LE + '0' + LE, Output);
+end;
+
+{ ------------------------------------------------------------------ }
+{ Interface method inherited across a unit boundary                     }
+{ ------------------------------------------------------------------ }
+
+procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_InheritedNonVirtual;
+var
+  Output: string; RCode: Integer; Dir: string;
+begin
+  { ub.TDer satisfies IThing purely by inheriting ua.TBase.Id, which is
+    NON-VIRTUAL and therefore has no vtable slot.  The itab emitted for TDer
+    used to name TDer_Id -- a symbol nothing defines, because the body was
+    emitted as ua_TBase_Id -- so the program linked and then died at load
+    with "undefined symbol: TDer_Id".  The backends now climb the type
+    DESCRIPTOR chain (populated across units) to the declaring ancestor. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  Dir := '/tmp/blaise-useschain-intf-inheritednonvirtual';
+  if not DirectoryExists(Dir) then ForceDirectories(Dir);
+  WriteFile(Dir + '/ua.pas',
+    '''
+unit ua;
+    interface
+    type
+      IThing = interface
+        function Id: string;
+      end;
+      TBase = class(IThing)
+        FId: string;
+        function Id: string;
+      end;
+    implementation
+    function TBase.Id: string; begin Result := FId end;
+    end.
+    ''');
+  WriteFile(Dir + '/ub.pas',
+    '''
+unit ub;
+    interface
+    uses ua;
+    type
+      TDer = class(TBase)
+        constructor Create;
+      end;
+    implementation
+    constructor TDer.Create;
+    begin
+      inherited Create();
+      FId := 'inherited-ok';
+    end;
+    end.
+    ''');
+  AssertTrue('compile+link+run',
+    CompileAndRunNativeCLI(
+    '''
+program P;
+    uses ua, ub;
+    var T: TDer; I: IThing;
+    begin
+      T := TDer.Create();
+      I := T;
+      WriteLn(I.Id())
+    end.
+    ''', False, Dir, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('output', 'inherited-ok', Trim(Output));
+end;
+
+procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_InheritedCasingMismatch;
+var
+  Output: string; RCode: Integer; Dir: string;
+begin
+  { The interface declares Id; the class spells it ID.  Pascal identifiers are
+    case-insensitive but LINK symbols are not, so the descriptor lookup has to
+    fold case -- otherwise it misses and falls through to the error. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  Dir := '/tmp/blaise-useschain-intf-inheritedcasingmismatch';
+  if not DirectoryExists(Dir) then ForceDirectories(Dir);
+  WriteFile(Dir + '/ua.pas',
+    '''
+unit ua;
+    interface
+    type
+      IThing = interface
+        function Id: string;
+      end;
+      TBase = class(IThing)
+        FId: string;
+        function ID: string;
+      end;
+    implementation
+    function TBase.ID: string; begin Result := FId end;
+    end.
+    ''');
+  WriteFile(Dir + '/ub.pas',
+    '''
+unit ub;
+    interface
+    uses ua;
+    type
+      TDer = class(TBase)
+        constructor Create;
+      end;
+    implementation
+    constructor TDer.Create;
+    begin
+      inherited Create();
+      FId := 'casing-ok';
+    end;
+    end.
+    ''');
+  AssertTrue('compile+link+run',
+    CompileAndRunNativeCLI(
+    '''
+program P;
+    uses ua, ub;
+    var T: TDer; I: IThing;
+    begin
+      T := TDer.Create();
+      I := T;
+      WriteLn(I.Id())
+    end.
+    ''', False, Dir, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('output', 'casing-ok', Trim(Output));
+end;
+
+procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_InheritedVirtualStillUsesVTable;
+var
+  Output: string; RCode: Integer; Dir: string;
+begin
+  { Regression guard: a VIRTUAL inherited method must still resolve through the
+    vtable's ImplName, not the new descriptor climb.  Both routes happen to
+    name the same symbol here, so what this really pins is that the vtable arm
+    still fires first and the change did not reorder resolution. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  Dir := '/tmp/blaise-useschain-intf-inheritedvirtualstillusesvtable';
+  if not DirectoryExists(Dir) then ForceDirectories(Dir);
+  WriteFile(Dir + '/ua.pas',
+    '''
+unit ua;
+    interface
+    type
+      IThing = interface
+        function Id: string;
+      end;
+      TBase = class(IThing)
+        FId: string;
+        function Id: string; virtual;
+      end;
+    implementation
+    function TBase.Id: string; begin Result := FId end;
+    end.
+    ''');
+  WriteFile(Dir + '/ub.pas',
+    '''
+unit ub;
+    interface
+    uses ua;
+    type
+      TDer = class(TBase)
+        constructor Create;
+      end;
+    implementation
+    constructor TDer.Create;
+    begin
+      inherited Create();
+      FId := 'virtual-ok';
+    end;
+    end.
+    ''');
+  AssertTrue('compile+link+run',
+    CompileAndRunNativeCLI(
+    '''
+program P;
+    uses ua, ub;
+    var T: TDer; I: IThing;
+    begin
+      T := TDer.Create();
+      I := T;
+      WriteLn(I.Id())
+    end.
+    ''', False, Dir, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('output', 'virtual-ok', Trim(Output));
+end;
+
+procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_OverrideWins;
+var
+  Output: string; RCode: Integer; Dir: string;
+begin
+  { An OVERRIDE in the descendant must win over the ancestor's body.  A climb
+    that searched the chain before consulting the vtable would wrongly pick the
+    ancestor, so this pins the ordering from the other side. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  Dir := '/tmp/blaise-useschain-intf-overridewins';
+  if not DirectoryExists(Dir) then ForceDirectories(Dir);
+  WriteFile(Dir + '/ua.pas',
+    '''
+unit ua;
+    interface
+    type
+      IThing = interface
+        function Id: string;
+      end;
+      TBase = class(IThing)
+        FId: string;
+        function Id: string; virtual;
+      end;
+    implementation
+    function TBase.Id: string; begin Result := 'BASE' end;
+    end.
+    ''');
+  WriteFile(Dir + '/ub.pas',
+    '''
+unit ub;
+    interface
+    uses ua;
+    type
+      TDer = class(TBase)
+        constructor Create;
+        function Id: string; override;
+      end;
+    implementation
+    constructor TDer.Create;
+    begin
+      inherited Create();
+      FId := 'x';
+    end;
+    function TDer.Id: string; begin Result := 'DERIVED' end;
+    end.
+    ''');
+  AssertTrue('compile+link+run',
+    CompileAndRunNativeCLI(
+    '''
+program P;
+    uses ua, ub;
+    var T: TDer; I: IThing;
+    begin
+      T := TDer.Create();
+      I := T;
+      WriteLn(I.Id())
+    end.
+    ''', False, Dir, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('output', 'DERIVED', Trim(Output));
 end;
 
 initialization

@@ -10948,6 +10948,8 @@ var
   Slot: Integer;
   E: TVTableEntry;
   Impl: TMethodDecl;
+  AncRT: TRecordTypeDesc;
+  Sym: string;
 begin
   { Prefer the vtable slot's ImplName — it is the fully-qualified label of the
     nearest implementation, correct for a method INHERITED from a (possibly
@@ -10976,9 +10978,24 @@ begin
     body) — bind it to a bare name would dangle or mis-bind to an unrelated
     global, so keep it an honest error (matching the pre-rewrite behaviour). }
   Impl := FindClassMethodImpl(ATD, AMethName);
-  if Impl = nil then
-    NotYet('implementation of interface method ''' + AMethName + '''', nil);
-  Result := RoutineSym(Impl, AMethName);
+  if Impl <> nil then
+    Exit(RoutineSym(Impl, AMethName));
+  { Not in this compilation's AST -- the declaring ancestor is in another unit.
+    Climb the descriptor chain: Parent is populated across units and
+    AddMethodSym records every method's emitted symbol, including non-virtual
+    ones that have no vtable slot.  First hit is the nearest declarer.  This
+    replaces the blanket NotYet below for the case it explicitly called out
+    ("a non-virtual method inherited from a cross-unit ancestor"). }
+  AncRT := AClassRT;
+  while AncRT <> nil do
+  begin
+    Sym := AncRT.FindMethodSym(AMethName);
+    if Sym <> '' then
+      Exit(DarwinSym(CodegenMangle(Sym)));
+    AncRT := AncRT.Parent;
+  end;
+  NotYet('implementation of interface method ''' + AMethName + '''', nil);
+  Result := '';
 end;
 
 procedure TArm64Backend.EmitMethodCallCommon(AMethod: TMethodDecl;

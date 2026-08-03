@@ -9846,8 +9846,10 @@ end;
 function TCodeGenQBE.ItabMethodRef(AClassRT: TRecordTypeDesc;
   const AClassName, AMethName: string): string;
 var
-  Slot: Integer;
-  E:    TVTableEntry;
+  Slot:  Integer;
+  E:     TVTableEntry;
+  AncRT: TRecordTypeDesc;
+  Sym:   string;
 begin
   { The QBE label for AClassRT's implementation of interface method AMethName.
     The vtable already records the resolved impl per slot (an override points at
@@ -9864,8 +9866,25 @@ begin
       if (E <> nil) and (E.ImplName <> '') then
         Exit(E.ImplName);
     end;
+    { No slot: a NON-VIRTUAL interface method.  Climb the descriptor chain --
+      Parent is populated across units and AddMethodSym records every method's
+      emitted symbol, so this resolves a declaring ancestor the caller's AST
+      walk cannot see.  First hit is the nearest declarer (Pascal order). }
+    AncRT := AClassRT;
+    while AncRT <> nil do
+    begin
+      Sym := AncRT.FindMethodSym(AMethName);
+      if Sym <> '' then
+        Exit('$' + Sym);
+      AncRT := AncRT.Parent;
+    end;
   end;
-  Result := '$' + ClassSymName(AClassName) + '_' + AMethName;
+  { Naming $<thisclass>_<method> when nothing in the chain declares it is what
+    turned this into a load-time "undefined symbol" rather than a compile
+    error.  Fail loudly instead (matching the arm64 backend's posture). }
+  raise ECodeGenError.Create(
+    'no implementation found for interface method ''' + AMethName +
+    ''' on class ''' + AClassName + '''');
 end;
 
 function TCodeGenQBE.ItabImplClassName(AProg: TProgram;

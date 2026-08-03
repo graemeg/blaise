@@ -7109,6 +7109,12 @@ begin
         if MDecl.IsOverload then
           MangledKey := MangledKey + '$' + MangleParamSig(MDecl);
         MDecl.ResolvedQbeName := CurrentUnitPrefix() + TD.Name + '_' + MangledKey;
+        { Record it on the descriptor too.  A NON-VIRTUAL method has no vtable
+          slot, so this is the only place the emitted symbol survives for a
+          backend that later has to name it from a DESCENDANT's itab (the
+          descendant may be in another unit and never see this AST). }
+        if RT <> nil then
+          RT.AddMethodSym(MDecl.Name, MDecl.ResolvedQbeName);
 
         { Resolve method-level custom attributes and reify them.  The name
           must resolve to a TCustomAttribute descendant (the [Weak] field

@@ -301,6 +301,14 @@ begin
 
     VTableSlot < 0 means the method does not occupy a vtable slot (static /
     non-dispatch), so there is nothing to place. }
+  { Record the emitted symbol on the descriptor FIRST, before the vtable-slot
+    early-out below.  A non-virtual method (VTableSlot < 0) has no slot to
+    place, but the .bif still carries its exact symbol -- and that is the only
+    record of it a backend can reach when a DESCENDANT in another unit has to
+    name this method in its itab.  Discarding it here is what produced
+    "undefined symbol: TDerived_Id" at load. }
+  if ASig.ResolvedQbeName <> '' then
+    ART.AddMethodSym(ASig.Name, ASig.ResolvedQbeName);
   if ASig.VTableSlot < 0 then Exit;
   if ASig.ResolvedQbeName = '' then Exit;
   ImplName := '$' + ASig.ResolvedQbeName;
