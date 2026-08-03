@@ -4062,6 +4062,16 @@ begin
       NewMDecl.OwnerTypeName := ATypeName;
       NewMDecl.IsVirtual     := MDecl.IsVirtual;
       NewMDecl.IsOverride    := MDecl.IsOverride;
+      { Every parser-set dispatch flag must survive monomorphisation, exactly
+        as the parameter passing-mode flags must.  Dropping IsStatic made a
+        `static` method on a generic non-static in the instance, so
+        TBox<string>.From(...) was rejected with "is not a static method —
+        call it on an instance".  IsOperator implies IsStatic, so it has to
+        travel with it or a `class operator` on a generic loses its operator
+        identity in the instance. }
+      NewMDecl.IsStatic      := MDecl.IsStatic;
+      NewMDecl.IsOperator    := MDecl.IsOperator;
+      NewMDecl.OperatorKind  := MDecl.OperatorKind;
       NewMDecl.Visibility    := MDecl.Visibility;
       { A generic METHOD on a generic class (TBox<T>.MapTo<R>) keeps its own
         type-parameter list through class instantiation — the class's T is
@@ -4251,7 +4261,13 @@ begin
       for K := 0 to NewMDecl.Params.Count - 1 do
       begin
         Par     := TMethodParam(NewMDecl.Params.Items[K]);
-        ParType := FindTypeOrInstantiate(Par.TypeName);
+        { Route through ResolveParamType so an OPEN-ARRAY param is wrapped in
+          a TOpenArrayTypeDesc.  Calling FindTypeOrInstantiate(Par.TypeName)
+          directly resolved `array of T` to the ELEMENT type alone (TypeName
+          holds the element for an open array), so the param typed as bare T:
+          passing a bracket literal mismatched, and indexing the array fell
+          back to Integer. }
+        ParType := ResolveParamType(Par, 0, 0);
         if ParType = nil then
           SemanticError(
             Format('Unknown type ''%s'' for param ''%s'' in ''%s''',
@@ -4527,7 +4543,13 @@ begin
       for K := 0 to NewMDecl.Params.Count - 1 do
       begin
         Par     := TMethodParam(NewMDecl.Params.Items[K]);
-        ParType := FindTypeOrInstantiate(Par.TypeName);
+        { Route through ResolveParamType so an OPEN-ARRAY param is wrapped in
+          a TOpenArrayTypeDesc.  Calling FindTypeOrInstantiate(Par.TypeName)
+          directly resolved `array of T` to the ELEMENT type alone (TypeName
+          holds the element for an open array), so the param typed as bare T:
+          passing a bracket literal mismatched, and indexing the array fell
+          back to Integer. }
+        ParType := ResolveParamType(Par, 0, 0);
         if ParType = nil then
           SemanticError(
             Format('Unknown type ''%s'' for param ''%s'' in ''%s''',
@@ -4910,7 +4932,10 @@ begin
       ParTypeName := Self.SubstTypeParam(OldPar.TypeName,
         Templ.TypeParams, Args);
       NewPar.TypeName := ParTypeName;
-      SubstType := FindTypeOrInstantiate(ParTypeName);
+      { ResolveParamType, not FindTypeOrInstantiate: for an OPEN-ARRAY param
+        TypeName is the ELEMENT type, so resolving it directly leaves the
+        param typed as the bare element rather than an open array of it. }
+      SubstType := ResolveParamType(NewPar, 0, 0);
       if SubstType = nil then
         SemanticError(Format('Unknown type ''%s'' for parameter ''%s'' in ''%s''',
           [ParTypeName, NewPar.ParamName, AInstName]), 0, 0);
@@ -5085,7 +5110,10 @@ begin
       ParTypeName := Self.SubstTypeParam(OldPar.TypeName,
         Templ.TypeParams, Args);
       NewPar.TypeName := ParTypeName;
-      SubstType := FindTypeOrInstantiate(ParTypeName);
+      { ResolveParamType, not FindTypeOrInstantiate: see the sibling generic
+        instantiation paths -- an open-array param's TypeName is its ELEMENT
+        type and must be wrapped, not used as the parameter type directly. }
+      SubstType := ResolveParamType(NewPar, 0, 0);
       if SubstType = nil then
         SemanticError(Format('Unknown type ''%s'' for parameter ''%s'' in ''%s.%s''',
           [ParTypeName, NewPar.ParamName, AOwnerType, AInstName]), 0, 0);

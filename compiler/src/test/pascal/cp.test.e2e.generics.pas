@@ -56,6 +56,13 @@ type
     procedure TestRun_GenericMethod_UsesSelfField;
     procedure TestRun_GenericMethod_TwoTypeParams;
     procedure TestRun_GenericMethod_OutOfLineImpl;
+
+    { Open-array parameters whose ELEMENT type is the class's type parameter
+      (BUG-20260803-generic-open-array-elem-type) }
+    procedure TestRun_GenericOpenArray_ElementTypeIsT;
+    procedure TestRun_GenericOpenArray_PassesElementToTMethod;
+    procedure TestRun_GenericOpenArray_StaticFactory;
+    procedure TestRun_GenericOpenArray_TwoInstantiations;
   end;
 
 implementation
@@ -460,6 +467,135 @@ procedure TE2EGenericsTests.TestRun_GenericMethod_OutOfLineImpl;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcGenMethodOutOfLine, 'aa' + LE + '2' + LE, 0);
+end;
+
+{ ------------------------------------------------------------------ }
+{ Open-array parameters with a generic element type                    }
+{ ------------------------------------------------------------------ }
+
+procedure TE2EGenericsTests.TestRun_GenericOpenArray_ElementTypeIsT;
+begin
+  { `array of T` must substitute T at instantiation.  It used to leave the
+    ELEMENT type unresolved -- it fell back to Integer -- so indexing the
+    array in a TBox<string> reported 'expected string but got Integer'.
+    Plain T parameters were always substituted correctly; only the nested
+    element type was missed. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TBox<T> = class
+        procedure Probe(const AItems: array of T);
+      end;
+    procedure TBox<T>.Probe(const AItems: array of T);
+    var V: T;
+    begin
+      V := AItems[0];
+      WriteLn(V)
+    end;
+    var B: TBox<string>;
+    begin
+      B := TBox<string>.Create();
+      B.Probe(['hello', 'world'])
+    end.
+    ''', 'hello' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericOpenArray_PassesElementToTMethod;
+begin
+  { The indirect shape: an element read from `array of T` is handed to a
+    method taking T.  This is what AddAll/AddRange on a generic collection
+    needs, and it failed with 'No matching overload ... with 1 argument(s)'
+    because the element typed as Integer. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TBox<T> = class
+        FAcc: string;
+        procedure Add(const V: T);
+        procedure AddAll(const AItems: array of T);
+      end;
+    procedure TBox<T>.Add(const V: T);
+    begin
+      FAcc := FAcc + V
+    end;
+    procedure TBox<T>.AddAll(const AItems: array of T);
+    var I: Integer;
+    begin
+      for I := Low(AItems) to High(AItems) do
+        Self.Add(AItems[I])
+    end;
+    var B: TBox<string>;
+    begin
+      B := TBox<string>.Create();
+      B.AddAll(['a', 'b', 'c']);
+      WriteLn(B.FAcc)
+    end.
+    ''', 'abc' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericOpenArray_StaticFactory;
+begin
+  { The motivating case: a static factory on the generic itself, taking a
+    bracket literal.  This is the shape TSet<T>.From uses. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TBox<T> = class
+        FN: Integer;
+        FFirst: T;
+        static function From(const AItems: array of T): TBox<T>;
+      end;
+    static function TBox<T>.From(const AItems: array of T): TBox<T>;
+    begin
+      Result := TBox<T>.Create();
+      Result.FN := High(AItems) - Low(AItems) + 1;
+      if Result.FN > 0 then
+        Result.FFirst := AItems[0]
+    end;
+    var B: TBox<string>;
+    begin
+      B := TBox<string>.From(['x', 'y', 'z']);
+      WriteLn(B.FN);
+      WriteLn(B.FFirst)
+    end.
+    ''', '3' + LE + 'x' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericOpenArray_TwoInstantiations;
+begin
+  { Two instantiations of the same generic must each get their OWN element
+    type -- a fix that substituted once and cached would pass the single-
+    instantiation tests above and fail here. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TBox<T> = class
+        procedure First(const AItems: array of T);
+      end;
+    procedure TBox<T>.First(const AItems: array of T);
+    var V: T;
+    begin
+      V := AItems[0];
+      WriteLn(V)
+    end;
+    var
+      S: TBox<string>;
+      N: TBox<Integer>;
+    begin
+      S := TBox<string>.Create();
+      N := TBox<Integer>.Create();
+      S.First(['str']);
+      N.First([42])
+    end.
+    ''', 'str' + LE + '42' + LE, 0);
 end;
 
 initialization
