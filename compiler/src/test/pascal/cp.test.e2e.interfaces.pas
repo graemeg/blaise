@@ -126,6 +126,10 @@ type
       dispatch/read crashed (QBE only; native uniform base handling was correct)
       (BUG-20260723-qbe-intf-nested-chain-array-elem). }
     procedure TestRun_InterfaceElem_OfNestedFieldChainArray;
+
+    { Interface element read through an INDEXED PROPERTY (TList<IFoo>[i]) }
+    procedure TestRun_InterfaceElem_ViaIndexedProperty_ToLocal;
+    procedure TestRun_InterfaceElem_ViaIndexedProperty_ToResult;
   end;
 
 implementation
@@ -1240,6 +1244,74 @@ begin
       WriteLn(G2.Hi())
     end.
     ''', '42' + LE + '7' + LE + '11' + LE + '13' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_InterfaceElem_ViaIndexedProperty_ToLocal;
+begin
+  { `V := List[I]` where the element type is an INTERFACE.  The existing
+    interface-element arms all assume an element ADDRESS (static/dyn/open
+    arrays, record fields), but an indexed property's getter returns the fat
+    pair BY VALUE through sret, so this fell to the fail-loud else on both
+    backends: QBE "Unsupported interface expression form ... TStringSubscript
+    Expr", native "unsupported interface-field assignment RHS".  Reached by
+    any TList<IFoo> — found porting tools/blaise-guard. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRTLRunsOnAll(
+    '''
+    program P;
+    uses SysUtils, Generics.Collections;
+    type
+      IThing = interface
+        function Name: string;
+      end;
+      TThing = class(IThing)
+        FN: string;
+        function Name: string;
+      end;
+    function TThing.Name: string; begin Result := FN end;
+    var L: TList<IThing>; V: IThing; T: TThing;
+    begin
+      L := TList<IThing>.Create();
+      T := TThing.Create(); T.FN := 'alpha';
+      L.Add(T);
+      V := L[0];
+      WriteLn(V.Name())
+    end.
+    ''', 'alpha' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_InterfaceElem_ViaIndexedProperty_ToResult;
+begin
+  { The same read as a function RESULT — a separate codegen path from the
+    local-variable case (sret Result assignment vs interface field slot), so
+    both need pinning. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRTLRunsOnAll(
+    '''
+    program P;
+    uses SysUtils, Generics.Collections;
+    type
+      IThing = interface
+        function Name: string;
+      end;
+      TThing = class(IThing)
+        FN: string;
+        function Name: string;
+      end;
+    function TThing.Name: string; begin Result := FN end;
+    var GL: TList<IThing>;
+    function Pick(I: Integer): IThing;
+    begin
+      Result := GL[I]
+    end;
+    var T: TThing;
+    begin
+      GL := TList<IThing>.Create();
+      T := TThing.Create(); T.FN := 'beta';
+      GL.Add(T);
+      WriteLn(Pick(0).Name())
+    end.
+    ''', 'beta' + LE, 0);
 end;
 
 initialization

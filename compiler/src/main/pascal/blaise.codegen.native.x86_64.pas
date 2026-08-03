@@ -4559,6 +4559,27 @@ begin
       Self.Emit(#9'movq %rax, 8(%r15)');
       Self.Emit(#9'addq $16, %rsp');
     end
+    else if (AAsgn.Expr is TStringSubscriptExpr) and
+            (TStringSubscriptExpr(AAsgn.Expr).StrExpr is TFieldAccessExpr) and
+            (TFieldAccessExpr(TStringSubscriptExpr(AAsgn.Expr).StrExpr).PropRead <> nil) then
+    begin
+    { Interface element read through an INDEXED PROPERTY: List[I] where the
+      default property's getter returns an interface.  There is no element
+      address to take -- the getter hands back the fat pair BY VALUE through
+      the sret convention -- so this is the class-receiver-call shape.
+      EmitRecordCallSretAt already unwraps the subscript to its PropRead
+      FieldAccess and synthesises the getter call, so it does the marshalling;
+      it just was never reached from the interface paths. }
+      Self.Emit(#9'subq $16, %rsp');
+      Self.EmitRecordCallSretAt(AAsgn.Expr, '(%rsp)', False);
+      Self.Emit(#9'movq (%r15), %rdi');
+      Self.Emit(#9'callq _ClassRelease');
+      Self.Emit(#9'movq (%rsp), %rax');
+      Self.Emit(#9'movq %rax, (%r15)');
+      Self.Emit(#9'movq 8(%rsp), %rax');
+      Self.Emit(#9'movq %rax, 8(%r15)');
+      Self.Emit(#9'addq $16, %rsp');
+    end
     else
       raise ENativeCodeGenError.Create(
         'native backend: unsupported sret interface Result assignment RHS');
@@ -4839,6 +4860,29 @@ begin
      (TMethodCallExpr(AAsgn.Expr).ResolvedClassType.Kind = tyClass) then
   begin
     Self.EmitClassIntfSretMethodCall(TMethodCallExpr(AAsgn.Expr));
+    Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));  { old obj }
+    Self.Emit(#9'callq _ClassRelease');
+    Self.Emit(#9'movq (%rsp), %rax');
+    Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
+    Self.Emit(#9'movq 8(%rsp), %rax');
+    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
+    Self.Emit(#9'addq $16, %rsp');
+    Exit;
+  end;
+
+  if (AAsgn.Expr is TStringSubscriptExpr) and
+     (TStringSubscriptExpr(AAsgn.Expr).StrExpr is TFieldAccessExpr) and
+     (TFieldAccessExpr(TStringSubscriptExpr(AAsgn.Expr).StrExpr).PropRead <> nil) then
+  begin
+  { Interface element read through an INDEXED PROPERTY: List[I] where the
+    default property's getter returns an interface.  There is no element
+    address to take -- the getter hands back the fat pair BY VALUE through
+    the sret convention -- so this is the class-receiver-call shape.
+    EmitRecordCallSretAt already unwraps the subscript to its PropRead
+    FieldAccess and synthesises the getter call, so it does the marshalling;
+    it just was never reached from the interface paths. }
+    Self.Emit(#9'subq $16, %rsp');
+    Self.EmitRecordCallSretAt(AAsgn.Expr, '(%rsp)', False);
     Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));  { old obj }
     Self.Emit(#9'callq _ClassRelease');
     Self.Emit(#9'movq (%rsp), %rax');

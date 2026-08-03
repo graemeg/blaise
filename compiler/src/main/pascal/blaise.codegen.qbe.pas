@@ -16626,6 +16626,31 @@ begin
     AItabTemp := AllocTemp();
     EmitLine(Format('  %s =l loadl %s', [AItabTemp, ItabT]));
   end
+  else if (AExpr is TStringSubscriptExpr) and
+          (TStringSubscriptExpr(AExpr).StrExpr is TFieldAccessExpr) and
+          (TFieldAccessExpr(TStringSubscriptExpr(AExpr).StrExpr).PropRead <> nil) then
+  begin
+    { Interface element read through an INDEXED PROPERTY: List[I] where the
+      default property's getter returns an interface (TList<IFoo>, and any
+      class exposing `property Items[...]: IFoo read GetItem`).  Unlike the
+      array arms above there is no element address to take — the getter
+      returns the fat pair BY VALUE through the sret convention — so this is
+      the interface-CALL shape, not the element-address shape.  Emit into a
+      fresh 16-byte buffer and load the pair, exactly as the IsInterfaceCall
+      arm does; the callee AddRef'd into the buffer, so the pair is owned and
+      its release is deferred to the consuming site. }
+    ObjT := AllocTemp();
+    EmitLine(Format('  %s =l alloc8 16', [ObjT]));
+    EmitLine(Format('  call $memset(l %s, w 0, l 16)', [ObjT]));
+    EmitRecordCallSret(TStringSubscriptExpr(AExpr).StrExpr, ObjT);
+    AObjTemp := AllocTemp();
+    EmitLine(Format('  %s =l loadl %s', [AObjTemp, ObjT]));
+    ItabT := AllocTemp();
+    EmitLine(Format('  %s =l add %s, 8', [ItabT, ObjT]));
+    AItabTemp := AllocTemp();
+    EmitLine(Format('  %s =l loadl %s', [AItabTemp, ItabT]));
+    FPendingObjReleases.Add(AObjTemp);
+  end
   else
     raise ECodeGenError.Create(
       'Unsupported interface expression form for argument passing: ' +
