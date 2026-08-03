@@ -51,6 +51,21 @@ type
     procedure TestSet_From_SingleElement;
     procedure TestSet_From_IntegerElements;
     procedure TestSet_From_ResultIsMutable;
+
+    { --- TList<T>: From([...]) factory --- }
+    procedure TestList_From_BuildsListFromLiteral;
+    procedure TestList_From_PreservesOrder;
+    procedure TestList_From_KeepsDuplicates;
+    procedure TestList_From_EmptyLiteralYieldsEmptyList;
+    procedure TestList_From_IntegerElements;
+    procedure TestList_From_ResultIsMutable;
+
+    { --- TDictionary<K,V>: From([...], [...]) factory --- }
+    procedure TestDict_From_BuildsFromParallelArrays;
+    procedure TestDict_From_EmptyLiteralsYieldEmptyDict;
+    procedure TestDict_From_LaterKeyWins;
+    procedure TestDict_From_LengthMismatchPairsUpToShorter;
+    procedure TestDict_From_ResultIsMutable;
   end;
 
 implementation
@@ -247,6 +262,122 @@ begin
   AssertEquals('mutated', 1, S.Count);
   AssertTrue('B added', S.Contains('B'));
   AssertFalse('A removed', S.Contains('A'));
+end;
+
+{ ------------------------------------------------------------------ }
+{ TList<T>.From([...])                                                 }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestList_From_BuildsListFromLiteral;
+var L: TList<string>;
+begin
+  L := TList<string>.From(['a', 'b', 'c']);
+  AssertEquals('three items', 3, L.Count);
+  AssertEquals('first',  'a', L[0]);
+  AssertEquals('second', 'b', L[1]);
+  AssertEquals('third',  'c', L[2]);
+end;
+
+procedure TCollectionsTests.TestList_From_PreservesOrder;
+var
+  L: TList<Integer>;
+  I: Integer;
+begin
+  { A list is ordered — unlike TSet, the literal's order is the contract. }
+  L := TList<Integer>.From([5, 3, 9, 1]);
+  AssertEquals('count', 4, L.Count);
+  AssertEquals('idx 0', 5, L[0]);
+  AssertEquals('idx 1', 3, L[1]);
+  AssertEquals('idx 2', 9, L[2]);
+  AssertEquals('idx 3', 1, L[3]);
+end;
+
+procedure TCollectionsTests.TestList_From_KeepsDuplicates;
+var L: TList<string>;
+begin
+  { The opposite of TSet.From: a list keeps every occurrence. }
+  L := TList<string>.From(['x', 'x', 'x']);
+  AssertEquals('all three kept', 3, L.Count);
+end;
+
+procedure TCollectionsTests.TestList_From_EmptyLiteralYieldsEmptyList;
+var L: TList<string>;
+begin
+  L := TList<string>.From([]);
+  AssertEquals('empty', 0, L.Count);
+end;
+
+procedure TCollectionsTests.TestList_From_IntegerElements;
+var L: TList<Integer>;
+begin
+  L := TList<Integer>.From([10, 20]);
+  AssertEquals('count', 2, L.Count);
+  AssertEquals('sum', 30, L[0] + L[1]);
+end;
+
+procedure TCollectionsTests.TestList_From_ResultIsMutable;
+var L: TList<string>;
+begin
+  L := TList<string>.From(['a']);
+  L.Add('b');
+  AssertEquals('grew', 2, L.Count);
+  AssertEquals('appended', 'b', L[1]);
+end;
+
+{ ------------------------------------------------------------------ }
+{ TDictionary<K,V>.From([...], [...])                                  }
+{ ------------------------------------------------------------------ }
+
+procedure TCollectionsTests.TestDict_From_BuildsFromParallelArrays;
+var D: TDictionary<string, Integer>;
+begin
+  D := TDictionary<string, Integer>.From(['one', 'two'], [1, 2]);
+  AssertEquals('two entries', 2, D.Count);
+  AssertEquals('one', 1, D['one']);
+  AssertEquals('two', 2, D['two']);
+  AssertTrue('has key',  D.ContainsKey('one'));
+  AssertFalse('no such key', D.ContainsKey('three'));
+end;
+
+procedure TCollectionsTests.TestDict_From_EmptyLiteralsYieldEmptyDict;
+var D: TDictionary<string, Integer>;
+begin
+  D := TDictionary<string, Integer>.From([], []);
+  AssertEquals('empty', 0, D.Count);
+  AssertFalse('no keys', D.ContainsKey('anything'));
+end;
+
+procedure TCollectionsTests.TestDict_From_LaterKeyWins;
+var D: TDictionary<string, Integer>;
+begin
+  { A repeated key is an overwrite, matching SetItem semantics rather than
+    silently keeping two entries under one key. }
+  D := TDictionary<string, Integer>.From(['k', 'k'], [1, 2]);
+  AssertEquals('one entry', 1, D.Count);
+  AssertEquals('last value wins', 2, D['k']);
+end;
+
+procedure TCollectionsTests.TestDict_From_LengthMismatchPairsUpToShorter;
+var D: TDictionary<string, Integer>;
+begin
+  { generics.collections is deliberately exception-free (an out-of-range
+    TList.Get simply reads past the end), so From does not raise on a
+    mismatch — it pairs up to the shorter array and ignores the tail.
+    Pinned here so the behaviour is a decision rather than an accident. }
+  D := TDictionary<string, Integer>.From(['a', 'b', 'c'], [1, 2]);
+  AssertEquals('paired up to the shorter', 2, D.Count);
+  AssertTrue('a paired',  D.ContainsKey('a'));
+  AssertTrue('b paired',  D.ContainsKey('b'));
+  AssertFalse('c dropped', D.ContainsKey('c'));
+end;
+
+procedure TCollectionsTests.TestDict_From_ResultIsMutable;
+var D: TDictionary<string, Integer>;
+begin
+  D := TDictionary<string, Integer>.From(['a'], [1]);
+  D.Add('b', 2);
+  AssertEquals('grew', 2, D.Count);
+  AssertEquals('added', 2, D['b']);
 end;
 
 initialization

@@ -37,6 +37,15 @@ type
     FCount:    Integer;
     FCapacity: Integer;
     procedure Grow;
+    { Build a list from a literal, so a fixed sequence reads as one
+      expression instead of a Create plus a run of Add calls:
+
+        L := TList<string>.From(['alpha', 'beta', 'gamma']);
+
+      Named From rather than Of because `of` is a reserved word.  Order is
+      preserved and duplicates are kept — a list, unlike TSet.From, holds
+      every occurrence.  The result is an ordinary mutable list. }
+    static function From(const AItems: array of T): TList<T>;
     procedure Add(Value: T);
     function  Get(AIndex: Integer): T;
     procedure SetItem(AIndex: Integer; Value: T);
@@ -169,6 +178,23 @@ type
     procedure HashRebuild;
     function  FindKey(const Key: K): Integer;
     procedure ReleaseEntries;
+    { Build a map from two PARALLEL literals -- keys and values positionally
+      paired:
+
+        D := TDictionary<string, Integer>.From(['one', 'two'], [1, 2]);
+
+      Two arrays rather than one list of pairs because Blaise has no tuple
+      literal; this keeps both sides fully typed (K and V checked
+      independently) with no boxing.
+
+      A repeated key is an overwrite, so the LAST value wins -- SetItem
+      semantics, not two entries under one key.  If the arrays differ in
+      length, pairing stops at the shorter one: this unit is deliberately
+      exception-free (an out-of-range TList.Get simply reads past the end),
+      so From does not raise.
+      Named From rather than Of because `of` is a reserved word. }
+    static function From(const AKeys: array of K;
+                         const AValues: array of V): TDictionary<K, V>;
     procedure Add(Key: K; Value: V);
     function  GetItem(const Key: K): V;
     procedure SetItem(Key: K; Value: V);
@@ -201,6 +227,25 @@ type
     procedure HashRebuild;
     function  FindKey(const Key: K): Integer;
     procedure ReleaseEntries;
+    { Build a map from two PARALLEL literals -- keys and values positionally
+      paired:
+
+        D := TOrderedDictionary<string, Integer>.From(['one', 'two'], [1, 2]);
+
+      Two arrays rather than one list of pairs because Blaise has no tuple
+      literal; this keeps both sides fully typed (K and V checked
+      independently) with no boxing.
+
+      A repeated key is an overwrite, so the LAST value wins -- SetItem
+      semantics, not two entries under one key.  If the arrays differ in
+      length, pairing stops at the shorter one: this unit is deliberately
+      exception-free (an out-of-range TList.Get simply reads past the end),
+      so From does not raise.
+      Insertion order is preserved (that is this type's whole point), so
+      the resulting iteration order is the literal's order.
+      Named From rather than Of because `of` is a reserved word. }
+    static function From(const AKeys: array of K;
+                         const AValues: array of V): TOrderedDictionary<K, V>;
     procedure Add(Key: K; Value: V);
     function  GetItem(const Key: K): V;
     procedure SetItem(Key: K; Value: V);
@@ -411,6 +456,15 @@ begin
       Hi := Mid - 1;
   end;
   AIndex := Lo;   { insertion point }
+end;
+
+static function TList<T>.From(const AItems: array of T): TList<T>;
+var
+  I: Integer;
+begin
+  Result := TList<T>.Create();
+  for I := Low(AItems) to High(AItems) do
+    Result.Add(AItems[I])
 end;
 
 procedure TList<T>.Add(Value: T);
@@ -1074,6 +1128,24 @@ begin
   end
 end;
 
+static function TDictionary<K, V>.From(const AKeys: array of K;
+                                       const AValues: array of V): TDictionary<K, V>;
+var
+  I, N: Integer;
+begin
+  Result := TDictionary<K, V>.Create();
+  { Pair up to the SHORTER array -- this unit raises no exceptions, so a
+    mismatched literal drops the unpaired tail rather than reading past the
+    end of the shorter one. }
+  N := High(AKeys) - Low(AKeys) + 1;
+  if High(AValues) - Low(AValues) + 1 < N then
+    N := High(AValues) - Low(AValues) + 1;
+  for I := 0 to N - 1 do
+    { SetItem, not Add: a repeated key must overwrite so the LAST value
+      wins, rather than leaving two entries under one key. }
+    Result.SetItem(AKeys[Low(AKeys) + I], AValues[Low(AValues) + I])
+end;
+
 procedure TDictionary<K, V>.Add(Key: K; Value: V);
 var
   Idx:  Integer;
@@ -1341,6 +1413,19 @@ begin
     end;
     I := I + 1
   end
+end;
+
+static function TOrderedDictionary<K, V>.From(const AKeys: array of K;
+                                              const AValues: array of V): TOrderedDictionary<K, V>;
+var
+  I, N: Integer;
+begin
+  Result := TOrderedDictionary<K, V>.Create();
+  N := High(AKeys) - Low(AKeys) + 1;
+  if High(AValues) - Low(AValues) + 1 < N then
+    N := High(AValues) - Low(AValues) + 1;
+  for I := 0 to N - 1 do
+    Result.SetItem(AKeys[Low(AKeys) + I], AValues[Low(AValues) + I])
 end;
 
 procedure TOrderedDictionary<K, V>.Add(Key: K; Value: V);

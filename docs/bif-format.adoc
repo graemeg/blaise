@@ -95,10 +95,14 @@ they raise `EIfaceFormatError`.
 
 === Magic + Version
 
-`BLAISE-IFACE 2` is the current header. The version field is the
-constant `IFACE_VERSION` in `uUnitInterfaceIO.pas`. The version was
-bumped from `1` → `2` when the `META` block grew `CompilerId` and
-`SourceModTime` fields (see <<versioning>>).
+The header is `BLAISE-IFACE <version>`, where the version field is the
+constant `IFACE_VERSION` in `uUnitInterfaceIO.pas`.
+
+That constant is the authority and is bumped whenever a payload layout
+grows, so this document deliberately does not restate its current value —
+read it from `uUnitInterfaceIO.pas`, where the declaration carries the
+per-version changelog. (The first bump, `1` → `2`, added `CompilerId` and
+`SourceModTime` to the `META` block; see <<versioning>> for the rule.)
 
 A wrong magic or version raises `EIfaceFormatError` immediately from
 `ReadHeader`.
@@ -247,7 +251,11 @@ not identical:
   the **codegen** needs: `IsVirtual`, `IsOverride`, `ResolvedQbeName`,
   `VTableSlot`. Used by classes.
 * `method-decl-list` (from `EncodeMethodDecl`) lacks the resolved
-  names — interfaces don't carry codegen state. Used by interfaces.
+  names — interfaces don't carry codegen state. Used by interfaces
+  *and* by generic-routine templates (`GENROUT`), which is why it must
+  still carry the declaration-level directives (`IsVirtual`,
+  `IsOverride`, `IsOverload`, `IsStatic`): a `static` method on a
+  generic reaches an importing unit only through this path.
 
 A `type-param-list` is a count lpstr followed by
 `<param-name><constraint>` pairs.
@@ -483,9 +491,15 @@ gates compatibility on three checks, in order:
   stale relative to its source. The loader (`uUnitLoader.ValidateIface`)
   decides:
 
-  ** **Source available on path** → recompute FNV-1a hash of the
-     source bytes; if it matches `SourceHash`, accept; otherwise
-     recompile from source.
+  ** **Source available on path** → recompute the FNV-1a hash and, if it
+     matches `SourceHash`, accept; otherwise recompile from source. The
+     hash covers the source bytes *and* the content of every file the
+     source pulls in with `{$EMBED}` / `{$EMBEDSTR}`
+     (`SourceHashWithEmbeds`), so editing an embedded asset invalidates
+     the entry exactly as editing the source does. Discovery lexes the
+     source, so it is given the same `-d`/`--define` set the compile uses
+     — otherwise a define-gated embed resolves to the other branch and
+     silently escapes the key.
   ** **Source not available** → compare the embedded `CompilerId` to
      this compiler's `COMPILER_ID`. Match → accept (the binary `.o`
      and its `.bif` were produced together by an identical compiler
