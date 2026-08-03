@@ -25,6 +25,7 @@ uses
   Json.Tests,
   Functional.Tests,
   ListOps.Tests,
+  Collections.Tests,
   Xml.Tests,
   Contnrs.Tests,
   Base64.Tests,

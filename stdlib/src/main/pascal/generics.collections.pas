@@ -120,6 +120,20 @@ type
     function  Contains(const Value: T): Boolean;
     procedure Clear;
     procedure Destroy;
+    { Build a set from a literal list, so a fixed membership test reads as
+      one expression instead of a Create plus a run of Include calls:
+
+        if TSet<string>.From(['LINUX', 'FREEBSD']).Contains(U) then ...
+
+      Named From rather than Of because `of` is a reserved word.  Unlike
+      Java's Set.of() the result is an ordinary mutable set, not a frozen
+      view; it is ARC-managed like any other object, so a temporary in an
+      expression is released at scope exit.
+
+      Repeats in the literal are folded, per set semantics.  Building the
+      set costs one pass over the literal, so hoist it into a constant-like
+      variable if the same membership test runs in a loop. }
+    static function From(const AItems: array of T): TSet<T>;
     property Count: Integer read FCount;
   end;
 
@@ -897,6 +911,18 @@ end;
 function TSet<T>.Contains(const Value: T): Boolean;
 begin
   Result := Self.IndexOf(Value) >= 0
+end;
+
+static function TSet<T>.From(const AItems: array of T): TSet<T>;
+var
+  I: Integer;
+begin
+  Result := TSet<T>.Create();
+  { Include, not a raw append: the literal may repeat a value and a set
+    holds each one once.  It also keeps the hash index consistent as the
+    set crosses GCHashThreshold. }
+  for I := Low(AItems) to High(AItems) do
+    Result.Include(AItems[I])
 end;
 
 procedure TSet<T>.Clear;
