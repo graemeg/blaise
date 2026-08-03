@@ -73,7 +73,7 @@ var
   Ctx:  TRuleContext;
   Sev:  TSeverity;
 begin
-  for I := 0 to RegisteredRuleCount - 1 do
+  for I := 0 to RegisteredRuleCount() - 1 do
   begin
     Rule := RegisteredRule(I);
     if not FConfig.IsEnabled(Rule.Id) then
@@ -90,7 +90,7 @@ var
   I:    Integer;
   Rule: IRule;
 begin
-  for I := 0 to RegisteredRuleCount - 1 do
+  for I := 0 to RegisteredRuleCount() - 1 do
   begin
     Rule := RegisteredRule(I);
     if FConfig.IsEnabled(Rule.Id) then
@@ -105,7 +105,7 @@ var
   Ctx:  TRuleContext;
   Sev:  TSeverity;
 begin
-  for I := 0 to RegisteredRuleCount - 1 do
+  for I := 0 to RegisteredRuleCount() - 1 do
   begin
     Rule := RegisteredRule(I);
     if not FConfig.IsEnabled(Rule.Id) then

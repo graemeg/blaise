@@ -62,7 +62,7 @@ function BuildFormatter(AOpt: TCliOptions): IReportFormatter;
 begin
   { Strategy selection.  Colour applies only to the console renderer, and only
     when writing to a terminal (not a file). }
-  case AOpt.Format of
+  case AOpt.OutputFormat of
     fmtJson: Result := TJsonFormatter.Create();
     fmtXml:  Result := TXmlFormatter.Create();
     fmtHtml: Result := THtmlFormatter.Create();

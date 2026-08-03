@@ -33,7 +33,7 @@ type
 
     ConfigPath:  string;   { '' = built-in defaults }
     OutputPath:  string;   { '' = stdout }
-    Format:      TFormatKind;
+    OutputFormat: TFormatKind;
     FailOn:      TFailOn;
     UseColor:    Boolean;
 
@@ -64,7 +64,7 @@ begin
   HasFile     := False;
   ConfigPath  := '';
   OutputPath  := '';
-  Format      := fmtConsole;
+  OutputFormat := fmtConsole;
   FailOn      := foNever;
   UseColor    := True;
   ShowHelp    := False;
@@ -167,7 +167,7 @@ begin
         Opt.ErrorText := 'Unknown --format value: ' + Val;
         Exit(Opt);
       end;
-      Opt.Format := Fmt;
+      Opt.OutputFormat := Fmt;
     end
 
     else if Arg = '--fail-on' then
