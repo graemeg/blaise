@@ -34,7 +34,7 @@ const
   NL      = #10;
   RULE_ID = 'BL-2001';
 
-function Run(const ASource: string): TReport;
+function RunAF(const ASource: string): TReport;
 var
   Cfg: TGuardConfig;
   Eng: TAnalysisEngine;
@@ -56,7 +56,7 @@ begin
     'begin'           + NL +
     '  o.Free;'       + NL +
     'end.'            + NL;
-  R := Run(Src);
+  R := RunAF(Src);
   AssertEquals('one manual free', 1, CountForRule(R, RULE_ID));
 end;
 
@@ -72,7 +72,7 @@ begin
     'begin'           + NL +
     '  a := 1;'       + NL +
     'end.'            + NL;
-  R := Run(Src);
+  R := RunAF(Src);
   AssertEquals('nothing to flag', 0, CountForRule(R, RULE_ID));
 end;
 

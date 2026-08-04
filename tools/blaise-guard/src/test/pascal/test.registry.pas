@@ -24,7 +24,12 @@ uses
   Guard.Rule.AvoidManualFree.Tests,
   Guard.Rule.ReferenceCycles.Tests,
   Guard.Rule.StringIndexing.Tests,
-  Guard.Rule.DuplicateCodeBlock.Tests;
+  Guard.Rule.DuplicateCodeBlock.Tests,
+  Guard.Rule.RedundantComparison.Tests,
+  Guard.Rule.UnassignedResult.Tests,
+  Guard.Rule.OrdSubscript.Tests,
+  Guard.Rule.EmptyHandler.Tests,
+  Guard.Rule.ExhaustiveCase.Tests;
 
 implementation
 

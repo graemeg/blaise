@@ -35,7 +35,7 @@ const
   NL      = #10;
   RULE_ID = 'BL-1002';
 
-function Run(const ASource: string; AMaxLines: Integer): TReport;
+function RunML(const ASource: string; AMaxLines: Integer): TReport;
 var
   Cfg: TGuardConfig;
   Eng: TAnalysisEngine;
@@ -66,7 +66,7 @@ var
   R: TReport;
 begin
   { Foo spans ~6 lines; a limit of 3 must flag it exactly once. }
-  R := Run(LongProc(), 3);
+  R := RunML(LongProc(), 3);
   AssertEquals('one long routine', 1, CountForRule(R, RULE_ID));
 end;
 
@@ -75,7 +75,7 @@ var
   R: TReport;
 begin
   { Same routine, generous limit -> nothing flagged. }
-  R := Run(LongProc(), 15);
+  R := RunML(LongProc(), 15);
   AssertEquals('within limit', 0, CountForRule(R, RULE_ID));
 end;
 

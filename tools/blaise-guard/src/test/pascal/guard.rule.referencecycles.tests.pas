@@ -37,7 +37,7 @@ const
   NL      = #10;
   RULE_ID = 'BL-2002';
 
-function Run(const ASource: string): TReport;
+function RunRF(const ASource: string): TReport;
 var
   Cfg: TGuardConfig;
   Eng: TAnalysisEngine;
@@ -64,7 +64,7 @@ begin
     '  end;'          + NL +
     'begin'           + NL +
     'end.'            + NL;
-  R := Run(Src);
+  R := RunRF(Src);
   AssertEquals('one strong cycle', 1, CountForRule(R, RULE_ID));
 end;
 
@@ -85,7 +85,7 @@ begin
     '  end;'             + NL +
     'begin'              + NL +
     'end.'               + NL;
-  R := Run(Src);
+  R := RunRF(Src);
   AssertEquals('weak edge breaks it', 0, CountForRule(R, RULE_ID));
 end;
 
@@ -106,7 +106,7 @@ begin
     '  end;'          + NL +
     'begin'           + NL +
     'end.'            + NL;
-  R := Run(Src);
+  R := RunRF(Src);
   AssertEquals('acyclic graph', 0, CountForRule(R, RULE_ID));
 end;
 

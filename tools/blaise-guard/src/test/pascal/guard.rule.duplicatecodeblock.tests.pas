@@ -39,7 +39,7 @@ const
   NL      = #10;
   RULE_ID = 'BL-3001';
 
-function Run(const ASource: string; AMinTokens: Integer): TReport;
+function RunDC(const ASource: string; AMinTokens: Integer): TReport;
 var
   Cfg: TGuardConfig;
   Eng: TAnalysisEngine;
@@ -65,7 +65,7 @@ procedure TDuplicateCodeBlockTests.TestFlagsRepeatedBlock;
 var
   R: TReport;
 begin
-  R := Run(DuplicatedSource(), 5);
+  R := RunDC(DuplicatedSource(), 5);
   AssertTrue('repeated block flagged', CountForRule(R, RULE_ID) >= 1);
 end;
 
@@ -80,7 +80,7 @@ begin
     '  a := 1;'    + NL +
     '  b := 2;'    + NL +
     'end.'         + NL;
-  R := Run(Src, 5);
+  R := RunDC(Src, 5);
   AssertEquals('no duplication', 0, CountForRule(R, RULE_ID));
 end;
 
@@ -90,8 +90,8 @@ var
 begin
   { Two independent runs of the same engine setup must not accumulate state:
     the second run should see exactly what the first did, not double. }
-  R1 := Run(DuplicatedSource(), 5);
-  R2 := Run(DuplicatedSource(), 5);
+  R1 := RunDC(DuplicatedSource(), 5);
+  R2 := RunDC(DuplicatedSource(), 5);
   AssertEquals('run is reproducible',
     CountForRule(R1, RULE_ID), CountForRule(R2, RULE_ID));
 end;

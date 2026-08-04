@@ -34,7 +34,7 @@ const
   NL      = #10;
   RULE_ID = 'BL-2003';
 
-function Run(const ASource: string): TReport;
+function RunSI(const ASource: string): TReport;
 var
   Cfg: TGuardConfig;
   Eng: TAnalysisEngine;
@@ -58,7 +58,7 @@ begin
     '  if s[1] = 65 then' + NL +
     '    s := ''y'';' + NL +
     'end.'            + NL;
-  R := Run(Src);
+  R := RunSI(Src);
   AssertEquals('one 1-based subscript', 1, CountForRule(R, RULE_ID));
 end;
 
@@ -76,7 +76,7 @@ begin
     '  if s[0] = 65 then' + NL +
     '    s := ''y'';' + NL +
     'end.'            + NL;
-  R := Run(Src);
+  R := RunSI(Src);
   AssertEquals('0-based is fine', 0, CountForRule(R, RULE_ID));
 end;
 

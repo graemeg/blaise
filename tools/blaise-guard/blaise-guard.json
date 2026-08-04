@@ -2,12 +2,17 @@
   "rules": {
     "BL-0000": { "enabled": true, "severity": "warning" },
     "BL-1001": { "enabled": true, "severity": "warning", "params": { "maxLength": 120 } },
-    "BL-1002": { "enabled": true, "severity": "warning", "params": { "maxLines": 15 } },
+    "BL-1002": { "enabled": true, "severity": "warning", "params": { "maxLines": 30 } },
     "BL-1003": { "enabled": true, "severity": "warning", "params": { "maxDepth": 3 } },
     "BL-1004": { "enabled": false, "severity": "warning", "params": { "checkParameters": false } },
+    "BL-1005": { "enabled": true, "severity": "warning" },
+    "BL-1006": { "enabled": true, "severity": "warning" },
     "BL-2001": { "enabled": true, "severity": "warning", "params": { "includeDestroy": true } },
     "BL-2002": { "enabled": true, "severity": "warning", "params": { "includeSelfReference": false } },
     "BL-2003": { "enabled": true, "severity": "info" },
-    "BL-3001": { "enabled": true, "severity": "warning", "params": { "minTokens": 30, "ignoreIdentifierNames": false } }
+    "BL-2004": { "enabled": true, "severity": "info" },
+    "BL-2005": { "enabled": true, "severity": "warning" },
+    "BL-3001": { "enabled": true, "severity": "warning", "params": { "minTokens": 30, "ignoreIdentifierNames": false } },
+    "BL-3002": { "enabled": true, "severity": "warning" }
   }
 }

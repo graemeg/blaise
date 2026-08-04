@@ -22,10 +22,15 @@ uses
   Guard.Rule.MaxFunctionLines,  { BL-1002 }
   Guard.Rule.DeepNesting,       { BL-1003 }
   Guard.Rule.UnusedIdentifiers, { BL-1004 }
+  Guard.Rule.RedundantComparison, { BL-1005 }
+  Guard.Rule.UnassignedResult,  { BL-1006 }
   Guard.Rule.AvoidManualFree,   { BL-2001 }
   Guard.Rule.ReferenceCycles,   { BL-2002 }
   Guard.Rule.StringIndexing,    { BL-2003 }
-  Guard.Rule.DuplicateCodeBlock; { BL-3001 }
+  Guard.Rule.OrdSubscript,      { BL-2004 }
+  Guard.Rule.EmptyHandler,      { BL-2005 }
+  Guard.Rule.DuplicateCodeBlock, { BL-3001 }
+  Guard.Rule.ExhaustiveCase;    { BL-3002 }
 
 implementation
 

@@ -38,7 +38,7 @@ const
   NL      = #10;
   RULE_ID = 'BL-1004';
 
-function Run(const ASource: string; ACheckParams: Boolean): TReport;
+function RunUI(const ASource: string; ACheckParams: Boolean): TReport;
 var
   Cfg: TGuardConfig;
   Eng: TAnalysisEngine;
@@ -69,7 +69,7 @@ begin
     'end;'             + NL +
     'begin'            + NL +
     'end.'             + NL;
-  R := Run(Src, False);
+  R := RunUI(Src, False);
   AssertEquals('one unused local', 1, CountForRule(R, RULE_ID));
   D := FirstForRule(R, RULE_ID);
   AssertNotNull('has diagnostic', D);
@@ -92,7 +92,7 @@ begin
     'end;'             + NL +
     'begin'            + NL +
     'end.'             + NL;
-  R := Run(Src, False);
+  R := RunUI(Src, False);
   AssertEquals('nothing unused', 0, CountForRule(R, RULE_ID));
 end;
 
@@ -108,7 +108,7 @@ begin
     'end;'                       + NL +
     'begin'                      + NL +
     'end.'                       + NL;
-  R := Run(Src, False);
+  R := RunUI(Src, False);
   AssertEquals('params not checked by default', 0, CountForRule(R, RULE_ID));
 end;
 
@@ -124,7 +124,7 @@ begin
     'end;'                       + NL +
     'begin'                      + NL +
     'end.'                       + NL;
-  R := Run(Src, True);
+  R := RunUI(Src, True);
   AssertEquals('unused param flagged', 1, CountForRule(R, RULE_ID));
 end;
 

@@ -36,7 +36,7 @@ const
   NL      = #10;
   RULE_ID = 'BL-1003';
 
-function Run(const ASource: string; AMaxDepth: Integer): TReport;
+function RunDN(const ASource: string; AMaxDepth: Integer): TReport;
 var
   Cfg: TGuardConfig;
   Eng: TAnalysisEngine;
@@ -65,7 +65,7 @@ begin
     '        if a = 0 then' + NL +
     '          a := 1;'   + NL +
     'end.'                + NL;
-  R := Run(Src, 3);
+  R := RunDN(Src, 3);
   AssertEquals('one over-nested construct', 1, CountForRule(R, RULE_ID));
 end;
 
@@ -85,7 +85,7 @@ begin
     '    if a = 0 then' + NL +
     '      a := 1;'     + NL +
     'end.'              + NL;
-  R := Run(Src, 3);
+  R := RunDN(Src, 3);
   AssertEquals('nothing flagged', 0, CountForRule(R, RULE_ID));
 end;
 
