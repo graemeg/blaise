@@ -475,6 +475,72 @@ note" for the full reconciliation.
   semantic, codegen transforms) that warrants its own design document and
   phased implementation.  Estimated 4–6 weeks post-v0.6.0.
 
+== Compiler — Backend Architecture
+
+=== Route generic class instances through the ordinary class emitters
+
+The three backends disagree on how a monomorphised generic class instance
+reaches the metadata emitters, and the divergence has produced the same
+class of bug twice.
+
+*Current state.*  `blaise.codegen.native.arm64.pas` wraps each instance in a
+synthetic `TTypeDecl` and appends it to both `FGenericDecls` (owning) and
+`FClassDecls` — the list every emitter iterates — so instances flow through
+the ordinary class machinery.  `blaise.codegen.native.x86_64.pas` and
+`blaise.codegen.qbe.pas` instead thread the instance list as a separate
+parameter and pair each class loop with a second, generic-only loop: six such
+loops in the x86-64 backend and nine in the QBE backend.
+
+*Why it matters.*  A fix applied to a class loop does not reach its generic
+twin unless the author notices the pairing.  Two consecutive commits in
+2026-08 fixed the identical defect — an itab omitted for a class that
+*inherits* rather than declares its interface — first for plain classes, then
+for generic instances, the second only after the first was reviewed.  The
+arm64 backend was unaffected both times, by construction.
+
+*What the unification costs.*  The paired loops are not duplicates.  Generic
+instances must emit *weak*, *bare*, unit-independent symbols so that
+duplicate monomorphisations across objects collapse at link time (see
+BUG-004 in the commit history); plain classes emit strong, unit-prefixed
+ones.  Today that distinction lives at the call site, which is precisely why
+there are two loops.  arm64 does not remove the distinction — it relocates it
+into the symbol namer, where `ClassSym` tests the type name for `<`:
+
+[source,pascal]
+----
+{ generic instances are ALWAYS bare — the same instance is materialised
+  by every compilation that touches it, so its symbols must be
+  unit-independent (emitted weak; the linker dedups — BUG-004) }
+if Pos('<', ATD.Name) >= 0 then
+  Exit(CodegenMangle(ATD.Name));
+----
+
+So the refactor is not a mechanical merge.  The generic loops emit a
+*sparser* set of records than the class loops — in `EmitClassSection` the
+class loop emits full method metadata where the generic loop emits only a
+class-name string — so unifying them means having generic instances emit what
+classes emit and then re-suppressing the differences inside the naming
+helpers.  That changes emitted symbols for every generic instance in the
+tree.
+
+*Assessment.*  Worth doing: it makes this bug class impossible by
+construction rather than by vigilance.  Not urgent: the known instances are
+fixed and covered by tests, so there is no correctness pressure.  The risk is
+that a symbol-emission refactor with no intended behavioural change can pass
+all five fixpoints and still ship a subtly different symbol, and the `-pre`
+bootstrap binary plus every downstream clone depend on those symbols.
+
+*Sequencing.*  Do the x86-64 backend first and alone, on its own branch — it
+is the smaller half, and it establishes whether the name-sniffing approach
+survives contact with a second backend before the QBE backend's 42
+`ClassSymNameForDecl` sites are committed to it.
+
+*Cheaper interim guard.*  Rather than the full refactor, a static check in
+the spirit of `tools/flag-coverage` could assert that each backend's
+generic-instance path emits the same symbol *kinds* as its class path.  That
+is the invariant which actually broke, and it is a check rather than a
+rewrite.
+
 == Migration Analyser
 
 === Flag `TObjectList` usage and recommend `TList<TObject>`
