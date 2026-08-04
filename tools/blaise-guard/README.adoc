@@ -115,6 +115,57 @@ threshold and severity).
 
 == Rules
 
+=== Rule ID numbering
+
+An ID is `BL-<family><ordinal>`: one leading digit for the family, three for
+the position within it. IDs are stable and never reused — a retired rule's
+number stays retired, so a number in an old report or a checked-in config
+always means the same thing.
+
+[cols="1,2,4",options="header"]
+|===
+| Family | Theme | What belongs here
+
+| `BL-0xxx`
+| Engine
+| Not rules at all — diagnostics the engine itself raises. `BL-0000`
+  (ParseError) is the only one: it reports a file that failed to parse.
+  It is configurable like a rule so a tree of known-unparseable fixtures can
+  suppress it, but no rule unit implements it.
+
+| `BL-1xxx`
+| Style and complexity
+| Size and shape limits, and constructs that are simply redundant. Applies to
+  Pascal generally, not to Blaise specifically: line length, routine length,
+  nesting depth, unused identifiers, `= True`, a function that never assigns
+  `Result`.
+
+| `BL-2xxx`
+| Blaise semantics
+| Rules that encode a decision THIS language or project has made, and that
+  would be wrong advice for another Pascal dialect. ARC means no manual
+  `Free` (BL-2001, BL-2002); strings are 0-based (BL-2003); `Ord(S[i])`
+  miscompiled under the self-hosted native stage so `StrAt`/`OrdAt` is the
+  house form (BL-2004); a swallowed exception hides a real failure (BL-2005).
+
+| `BL-3xxx`
+| Structural / cross-cutting
+| Checks over a whole file or the whole run rather than one construct in
+  isolation: duplicated token windows across files (BL-3001), and enum `case`
+  coverage, which needs the enum's declaration as well as the statement
+  (BL-3002).
+|===
+
+The family says nothing about how a rule is implemented — each one mixes
+`TLineRuleBase`, `TTokenRuleBase` and `TAstRuleBase` freely. Pick the family
+by what the rule is *about*; pick the base class by what it needs to *read*.
+
+The practical use is configuration: a project can turn a whole theme up or
+down by ID prefix. Enabling only `BL-2xxx` gives the Blaise-specific
+correctness checks with none of the style opinions.
+
+=== Implemented rules
+
 [cols="1,2,4",options="header"]
 |===
 | ID | Name | Status
@@ -122,12 +173,37 @@ threshold and severity).
 | BL-1001 | MaxLineLength | ✅ implemented
 | BL-1002 | MaxFunctionLines | ✅ implemented
 | BL-1003 | DeepNesting   | ✅ implemented
+| BL-1004 | UnusedIdentifiers | ✅ implemented (AST expr walker; off by default)
+| BL-1005 | RedundantComparison | ✅ implemented (`= True`, self-assignment)
+| BL-1006 | UnassignedResult | ✅ implemented (function never assigns Result)
 | BL-2001 | AvoidManualFree   | ✅ implemented
 | BL-2002 | ReferenceCycles   | ✅ implemented (cross-file strong-ref graph)
 | BL-2003 | StringIndexing    | ✅ implemented (heuristic, token-based, INFO)
+| BL-2004 | OrdSubscript      | ✅ implemented (`Ord(S[i])` → StrAt/OrdAt, INFO)
+| BL-2005 | EmptyHandler      | ✅ implemented (swallowed exception / empty finally)
 | BL-3001 | DuplicateCodeBlock | ✅ implemented (Rabin-Karp, cross-file)
-| BL-1004 | UnusedIdentifiers | ✅ implemented (AST expr walker; off by default)
+| BL-3002 | ExhaustiveCase    | ✅ implemented (enum `case` with no `else`)
 |===
+
+=== Rules deliberately NOT implemented
+
+Measured against this codebase rather than assumed, so the reasoning is
+recorded here to stop them being proposed again:
+
+`= nil` → `Assigned()`::
+Fires 3242 times in `compiler/src/main/pascal` alone. `= nil` *is* the house
+idiom; a rule that indicts the prevailing style is noise, not signal. The two
+shapes BL-1005 does keep found ZERO existing sites, so a hit there is a
+genuine new slip.
+
+Flag every `asm` block::
+Inline assembly is deliberate infrastructure here — 133 asm-bodied routines
+across 9 RTL units (atomics, syscalls, thread bring-up). Reporting them would
+be pure noise.
+
+`goto` / `with` / legacy `object` / function-name return::
+Not expressible in Blaise. The first three are parse errors; `F := x` inside
+`F` is already a semantic error. Rules for them would be dead code.
 
 The full MVP ruleset and all four report formats (`console`, `json`, `xml`,
 `html`) are implemented.  BL-1004 ships disabled by default: closures and
