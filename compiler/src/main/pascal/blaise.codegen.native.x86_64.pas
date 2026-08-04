@@ -6605,9 +6605,11 @@ procedure TX86_64Backend.EmitRecordCallSretAt(AExpr: TASTExpr; const ADest: stri
   AIndirect: Boolean);
 var
   FAE:      TFieldAccessExpr;
+  RecvFAE:  TFieldAccessExpr;
   Synth:    TMethodCallExpr;
   SynthArgs: TObjectList;
 begin
+  RecvFAE := nil;
   { Unwrap a default-array-property subscript (Obj[I]) to its inner
     record-returning PropRead FieldAccess so it shares the sret path with the
     named form (BUG-002 A-indexed via default subscript). }
@@ -6631,11 +6633,47 @@ begin
       Synth.Name           := FAE.PropRead.ReadMethod;
       Synth.ResolvedMethod := FAE.PropReadDecl;
       Synth.ResolvedType   := FAE.ResolvedType;
-      Synth.ObjExpr        := FAE.Base;          { borrowed — detached before Free }
-      if FAE.Base = nil then
+      if FAE.FieldInfo <> nil then
       begin
-        Synth.ObjectName := FAE.RecordName;
-        Synth.IsGlobal   := FAE.IsGlobal;
+        { Obj.ListField[I]: FAE names a FIELD that is itself the receiver, and
+          the subscript indexes the field's VALUE.  (In the property shape
+          below, FAE names the property and FAE.Base is the receiver.)  Passing
+          FAE.Base here would send the OUTER object as Self -- the callee would
+          read TList fields off the wrong instance.  FieldInfo is set only for
+          a real field access, so it is the discriminator.
+
+          The receiver is a COPY of the field access with the subscript
+          stripped: aliasing FAE itself would re-enter this same node (its
+          PropIndexExpr still set) when the receiver is evaluated. }
+        RecvFAE := TFieldAccessExpr.Create();
+        RecvFAE.Line         := FAE.Line;
+        RecvFAE.Col          := FAE.Col;
+        RecvFAE.Base         := FAE.Base;      { borrowed — detached below }
+        RecvFAE.RecordName   := FAE.RecordName;
+        RecvFAE.FieldName    := FAE.FieldName;
+        RecvFAE.FieldInfo    := FAE.FieldInfo;
+        RecvFAE.IsGlobal     := FAE.IsGlobal;
+        RecvFAE.IsClassAccess := FAE.IsClassAccess;
+        { These three say HOW to reach the receiver, not what it is, so they
+          must travel with the copy: the leaf receiver ladders branch on
+          IsImplicitSelf (bare FField[I] inside a method) and IsVarParam (a
+          var/out or by-value record param) before any field-offset load.
+          Dropping either emits the wrong base — silently wrong data, not a
+          crash. }
+        RecvFAE.IsImplicitSelf   := FAE.IsImplicitSelf;
+        RecvFAE.ImplicitBaseInfo := FAE.ImplicitBaseInfo;
+        RecvFAE.IsVarParam       := FAE.IsVarParam;
+        RecvFAE.ResolvedType := FAE.FieldInfo.TypeDesc;
+        Synth.ObjExpr := RecvFAE;
+      end
+      else
+      begin
+        Synth.ObjExpr := FAE.Base;        { borrowed — detached before Free }
+        if FAE.Base = nil then
+        begin
+          Synth.ObjectName := FAE.RecordName;
+          Synth.IsGlobal   := FAE.IsGlobal;
+        end;
       end;
       if FAE.PropIndexExpr <> nil then
       begin
@@ -6650,6 +6688,11 @@ begin
       Synth.Args    := nil;   { do not free the borrowed index expr }
       Synth.Free();
       SynthArgs.Free();       { frees the wrapper list only (OwnsObjects=False) }
+      if RecvFAE <> nil then
+      begin
+        RecvFAE.Base := nil;  { borrowed from FAE — must not be freed here }
+        RecvFAE.Free();
+      end;
     end;
     Exit;
   end;

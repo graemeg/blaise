@@ -204,6 +204,9 @@ type
       uToolchain 'Result.QBE := ResolveQBE()' shape that blocked the arm64
       self-cross-compile.  Both backends. }
     procedure TestRun_ManagedRecordFieldStore_FromCall;
+    { Reading a record-returning indexed getter on a list held in a CLASS FIELD
+      (Obj.ListField[I]) — the receiver is the field, not the outer object. }
+    procedure TestRun_IndexedRecordGetter_OnClassField;
   end;
 
 implementation
@@ -1651,6 +1654,119 @@ begin
   AssertRunsOnAll(Src,
     'small 9 3' + LE + 'big 100 500' + LE + 'man hello 7' + LE +
     'nested 9' + LE, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_IndexedRecordGetter_OnClassField;
+const
+  UnitSrc = '''
+    unit tokholder;
+    interface
+    uses Generics.Collections;
+    type
+      TTok = record
+        Kind: Integer;
+        Value: string;      { managed field forces the sret class }
+        Line: Integer;
+        Col: Integer;
+      end;
+      THolder = class
+        Toks: TList<TTok>;
+        constructor Create;
+        procedure Add(AKind: Integer; const AValue: string; ALine, ACol: Integer);
+        function Bare: Integer;
+      end;
+      TWrap = class
+        H: THolder;
+        constructor Create;
+      end;
+    implementation
+    constructor THolder.Create;
+    begin
+      Self.Toks := TList<TTok>.Create();
+    end;
+    procedure THolder.Add(AKind: Integer; const AValue: string; ALine, ACol: Integer);
+    var T: TTok;
+    begin
+      T.Kind := AKind; T.Value := AValue; T.Line := ALine; T.Col := ACol;
+      Self.Toks.Add(T);
+    end;
+    { bare FField[I] — the IMPLICIT-Self arm }
+    function THolder.Bare: Integer;
+    begin
+      Result := Toks[0].Line;
+    end;
+    constructor TWrap.Create;
+    begin
+      Self.H := THolder.Create();
+    end;
+    end.
+    ''';
+  DrvSrc = '''
+    program P;
+    uses Generics.Collections, tokholder;
+    var H: THolder; W: TWrap; L: TList<TTok>; Tmp: TTok;
+    begin
+      H := THolder.Create();
+      H.Add(1, 'hello', 42, 7);
+      H.Add(2, 'world', 99, 3);
+      { LEAF: receiver is a class FIELD (H.Toks) }
+      WriteLn(H.Toks[0].Line);
+      WriteLn(H.Toks[1].Value);
+      { chained straight into an expression }
+      WriteLn(H.Toks[0].Line + H.Toks[1].Line);
+      { via a temp record }
+      Tmp := H.Toks[1];
+      WriteLn(Tmp.Col);
+      { CHAINED base (W.H.Toks[I]) — a separate semantic arm }
+      W := TWrap.Create();
+      W.H.Add(3, 'deep', 77, 1);
+      WriteLn(W.H.Toks[0].Line);
+      WriteLn(W.H.Toks[0].Value);
+      { IMPLICIT Self (bare Toks[0] inside a method) — a third arm }
+      WriteLn(H.Bare());
+      { the form that always worked — must still work }
+      L := H.Toks;
+      WriteLn(L[0].Value);
+    end.
+    ''';
+var
+  Output: string;
+  RCode:  Integer;
+  B:      TBackend;
+begin
+  { Obj.ListField[I] where the element is a RECORD: semantic resolved the
+    field-with-subscript shape by setting PropRead but never PropReadDecl,
+    and the native record-sret gate keys on PropReadDecl.  The call was
+    therefore emitted with NO hidden sret buffer, so every argument shifted
+    one register: the receiver landed in %rdi (where the callee expects the
+    buffer), the index in %rsi (read as Self) and %rdx was uninitialised.
+    The callee dereferenced the index as an object -> segfault.
+
+    Reading the SAME list through a local (L := Obj.ListField; L[I]) took the
+    property path, which does set PropReadDecl, and always worked -- that
+    asymmetry is what made this look like a heap bug rather than a codegen
+    one.  Both forms are asserted here so they cannot diverge again.
+
+    Fixing the gate then exposed a second defect: the synthesised getter call
+    passed FAE.Base as the receiver, which for a field access is the OUTER
+    object, so the callee read TList fields off the wrong instance and
+    returned garbage instead of crashing.  The receiver must be the field.
+
+    Found via BlaiseGuard segfaulting on any source containing a duplicated
+    token window (its BL-3001 rule reads RefFile.Tokens[Ref.Start].Line). }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { Both backends: the defect was native-only, so a QBE-only helper would
+    have passed throughout and pinned nothing. }
+  for B in AllBackends do
+  begin
+    if not BackendRunnableOnHost(B) then Continue;
+    AssertTrue(BackendName(B) + ': compile+link+run',
+      CompileAndRunWithUnitOn(B, 'tokholder', UnitSrc, DrvSrc, Output, RCode));
+    AssertEquals(BackendName(B) + ': exit code', 0, RCode);
+    AssertEquals(BackendName(B) + ': output',
+      '42' + LE + 'world' + LE + '141' + LE + '3' + LE +
+      '77' + LE + 'deep' + LE + '42' + LE + 'hello' + LE, Output);
+  end;
 end;
 
 initialization

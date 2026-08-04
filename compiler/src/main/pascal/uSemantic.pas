@@ -14234,6 +14234,11 @@ begin
             TRecordTypeDesc(FldInfo.TypeDesc).Name, PropInfo.ReadMethod);
           AAccess.PropAccessorVSlot := PropAccessorVSlot(
             TRecordTypeDesc(FldInfo.TypeDesc).Name, PropInfo.ReadMethod);
+          { CHAINED base (W.H.Toks[I]) — same reason as the leaf arm below:
+            without PropReadDecl the native record-sret gate is skipped and a
+            record-returning getter is called with no hidden buffer. }
+          AAccess.PropReadDecl := FindMethodDecl(
+            TRecordTypeDesc(FldInfo.TypeDesc).Name, PropInfo.ReadMethod);
           Result := PropInfo.TypeDesc;
           AAccess.ResolvedType := Result;
         end;
@@ -14369,6 +14374,12 @@ begin
                 TRecordTypeDesc(AAccess.FieldInfo.TypeDesc).Name,
                 PropInfo.ReadMethod);
               AAccess.PropAccessorVSlot := PropAccessorVSlot(
+                TRecordTypeDesc(AAccess.FieldInfo.TypeDesc).Name,
+                PropInfo.ReadMethod);
+              { IMPLICIT-Self base (FHolder.Toks[I] inside a method) — same
+                reason as the leaf arm; without PropReadDecl the native
+                record-sret gate is skipped. }
+              AAccess.PropReadDecl := FindMethodDecl(
                 TRecordTypeDesc(AAccess.FieldInfo.TypeDesc).Name,
                 PropInfo.ReadMethod);
               Result := PropInfo.TypeDesc;
@@ -14718,6 +14729,17 @@ begin
         AAccess.PropOwnerType := PropAccessorOwner(
           TRecordTypeDesc(FldInfo.TypeDesc).Name, PropInfo.ReadMethod);
         AAccess.PropAccessorVSlot := PropAccessorVSlot(
+          TRecordTypeDesc(FldInfo.TypeDesc).Name, PropInfo.ReadMethod);
+        { Resolve the getter DECL too, not just the property.  The native
+          record-return path keys on PropReadDecl (PropRead alone is not
+          enough): without it a getter returning a RECORD is emitted with no
+          hidden sret buffer, so the receiver lands in %rdi where the callee
+          expects the buffer and every argument shifts one register -- Self
+          becomes the index and the callee dereferences it.  Reading
+          Obj.ListField[I] where the element is a record segfaulted; the same
+          read through a local (L := Obj.ListField; L[I]) took the property
+          path above, which does set this, and worked. }
+        AAccess.PropReadDecl := FindMethodDecl(
           TRecordTypeDesc(FldInfo.TypeDesc).Name, PropInfo.ReadMethod);
         Result := PropInfo.TypeDesc;
         AAccess.ResolvedType := Result;
