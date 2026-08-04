@@ -57,6 +57,13 @@ type
       not semantically imported (and thus are absent from PrebuiltObjectPaths
       and the source-compiled unit set).  Caller links these too. }
     property LinkOnlyObjects:     TStringList read FLinkOnlyObjects;
+    { Names of impl-only dependencies that HAVE an initialization section, in
+      dependency order (deepest first).  These units are linked but never
+      semantically imported, so nothing else registers them — without this the
+      caller emits their object yet never calls <Unit>_init, and the unit's
+      globals stay nil.  Objects[I] is non-nil when the unit also has a
+      finalization section. }
+    property LinkOnlyInitUnits:   TStringList read FLinkOnlyInitUnits;
   private
     FSearchPaths:          TStringList;  { not owned }
     FDefines:              TStringList;  { not owned — conditional symbols for each unit's lexer }
@@ -76,6 +83,14 @@ type
                                            imported (see CollectLinkOnlyObject) }
     FLinkOnlySeen:         TStringList;  { unit names already visited by the
                                            link-only collector — cycle guard }
+    FLinkOnlyInitUnits:    TStringList;  { impl-only deps with an initialization
+                                           section; Objects[I] non-nil when the
+                                           unit also has a finalization one }
+    { Sort FPrebuiltIfaces / FPrebuiltObjectPaths so a unit follows every unit
+      it uses from EITHER section, so $main calls the inits in an order where
+      a unit's dependencies are already initialised.  See the implementation
+      for why this is a post-pass and not a change to the load recursion. }
+    procedure OrderPrebuiltForInit;
     function IsBuiltin(const AName: string): Boolean;
     function Locate(const AName: string): string;
     { Look for '<AName>.o' on the search paths (lowercase or as-cased).
@@ -306,11 +321,30 @@ begin
     if not ValidateIface(Iface, AName) then Exit;
     if FLinkOnlyObjects.IndexOf(ObjPath) < 0 then
       FLinkOnlyObjects.Add(ObjPath);
-    { Recurse so this dep's own dependencies are linked too. }
+    { Recurse FIRST so this dep's own dependencies are linked — and recorded
+      for init — ahead of it.  The recursion is what makes FLinkOnlyInitUnits
+      dependency-ordered: a unit is appended only after everything it uses. }
     for I := 0 to Iface.UsedUnits.Count - 1 do
       CollectLinkOnlyObject(Iface.UsedUnits.Strings[I]);
     for I := 0 to Iface.ImplUsedUnits.Count - 1 do
       CollectLinkOnlyObject(Iface.ImplUsedUnits.Strings[I]);
+    { An impl-only dep is LINKED but never semantically imported, so no other
+      path registers its <Unit>_init.  Record it here or the object ships with
+      an initialization section that is never called — the unit's globals stay
+      nil and the first use segfaults with no compile- or link-time
+      diagnostic.  (This is what broke BlaiseGuard: every rule unit impl-uses
+      Guard.Rules, whose initialization creates the GRules list.) }
+    if Iface.HasInitialization then
+      if FLinkOnlyInitUnits.IndexOf(AName) < 0 then
+      begin
+        { Objects[] carries the fini flag: non-nil = also has a finalization
+          section.  Any non-nil pointer works as the marker; the list itself
+          is non-owning (raw untyped slots, see TStringList.Objects). }
+        if Iface.HasFinalization then
+          FLinkOnlyInitUnits.AddObject(AName, Pointer(Self))
+        else
+          FLinkOnlyInitUnits.AddObject(AName, nil);
+      end;
   finally
     Iface.Free();
   end;
@@ -495,12 +529,14 @@ begin
   FLinkOnlyObjects     := TStringList.Create();
   FLinkOnlyObjects.CaseSensitive := False;
   FLinkOnlySeen        := TStringList.Create();
+  FLinkOnlyInitUnits   := TStringList.Create();
   FLinkOnlySeen.CaseSensitive := False;
 end;
 
 destructor TUnitLoader.Destroy;
 begin
   FLinkOnlySeen.Free();
+  FLinkOnlyInitUnits.Free();
   FLinkOnlyObjects.Free();
   FPrebuiltObjectPaths.Free();
   FPrebuiltIfaces.Free();
@@ -526,6 +562,141 @@ begin
     raise;
   end;
   FResult := nil;
+  Self.OrderPrebuiltForInit();
+end;
+
+{ Reorder FPrebuiltIfaces (and its parallel FPrebuiltObjectPaths) so that a
+  unit always follows every unit it USES, counting implementation-section uses
+  as well as interface ones.
+
+  Why this is a separate pass rather than a change to LoadTransitive's
+  recursion: the load order doubles as the SEMANTIC IMPORT order, and that
+  order deliberately follows interface uses only — an impl-use may point back
+  into the chain (Pascal allows it), so recursing through impl uses during
+  loading would turn a legal impl/interface cycle into an unresolvable import
+  (see CollectLinkOnlyObject's note).  Initialization order is a different
+  constraint: a unit's `initialization` may touch anything it uses from EITHER
+  section, so it must run last.  Sorting afterwards satisfies both.
+
+  The bug this fixes: every BlaiseGuard rule unit has an empty interface uses
+  clause and pulls Guard.Rules in its implementation section.  Ordered by
+  interface uses alone, Guard.Rules sorted AFTER the rule units, so
+  Guard.Rules_init — which creates the GRules list — ran after thirteen
+  RegisterRule calls had already tried to Add to a nil list.  The result was a
+  segfault at startup with no diagnostic at compile or link time.
+
+  A genuine cycle (mutually impl-using units) cannot be ordered; those units
+  are emitted in their existing relative order rather than dropped, which
+  reproduces today's behaviour for a case that has no correct answer. }
+procedure TUnitLoader.OrderPrebuiltForInit;
+var
+  Sorted:      TObjectList;
+  SortedPaths: TStringList;
+  Placed:      TStringList;
+  Progress:    Boolean;
+  I, J:        Integer;
+  Iface:       TUnitInterface;
+  Ready:       Boolean;
+  DepName:     string;
+
+  { True when ADep is one of the units still awaiting placement — i.e. a
+    dependency that must be emitted before the unit naming it.  Units outside
+    FPrebuiltIfaces (builtins, source-compiled deps) never block. }
+  function StillPending(const ADep: string): Boolean;
+  var
+    K: Integer;
+  begin
+    Result := False;
+    for K := 0 to FPrebuiltIfaces.Count - 1 do
+      if SameText(TUnitInterface(FPrebuiltIfaces.Items[K]).Name, ADep) and
+         (Placed.IndexOf(LowerCase(ADep)) < 0) then
+        Exit(True);
+  end;
+
+begin
+  if FPrebuiltIfaces.Count < 2 then Exit;
+
+  { Create(False) is nominal only — this TObjectList is ARC-based and addrefs
+    on Add regardless (FOwnsObjects is not consulted).  That is what we want:
+    Sorted holding a reference is exactly what makes the in-place permutation
+    below safe, and its Free() balances it. }
+  Sorted      := TObjectList.Create(False);
+  SortedPaths := TStringList.Create();
+  Placed      := TStringList.Create();
+  try
+    repeat
+      Progress := False;
+      for I := 0 to FPrebuiltIfaces.Count - 1 do
+      begin
+        Iface := TUnitInterface(FPrebuiltIfaces.Items[I]);
+        if Placed.IndexOf(LowerCase(Iface.Name)) >= 0 then Continue;
+
+        { Ready when no dependency of EITHER section is still pending. }
+        Ready := True;
+        for J := 0 to Iface.UsedUnits.Count - 1 do
+        begin
+          DepName := Iface.UsedUnits.Strings[J];
+          if not SameText(DepName, Iface.Name) then
+            if StillPending(DepName) then
+            begin
+              Ready := False;
+              break;
+            end;
+        end;
+        if Ready then
+          for J := 0 to Iface.ImplUsedUnits.Count - 1 do
+          begin
+            DepName := Iface.ImplUsedUnits.Strings[J];
+            if not SameText(DepName, Iface.Name) then
+              if StillPending(DepName) then
+              begin
+                Ready := False;
+                break;
+              end;
+          end;
+
+        if Ready then
+        begin
+          Sorted.Add(Iface);
+          SortedPaths.Add(FPrebuiltObjectPaths.Strings[I]);
+          Placed.Add(LowerCase(Iface.Name));
+          Progress := True;
+        end;
+      end;
+    until (not Progress) or (Sorted.Count = FPrebuiltIfaces.Count);
+
+    { Cycle (or self-reference): append whatever is left in its original
+      relative order.  No ordering is correct for a true cycle, so preserve
+      today's behaviour rather than dropping units from the link. }
+    if Sorted.Count < FPrebuiltIfaces.Count then
+      for I := 0 to FPrebuiltIfaces.Count - 1 do
+      begin
+        Iface := TUnitInterface(FPrebuiltIfaces.Items[I]);
+        if Placed.IndexOf(LowerCase(Iface.Name)) < 0 then
+        begin
+          Sorted.Add(Iface);
+          SortedPaths.Add(FPrebuiltObjectPaths.Strings[I]);
+          Placed.Add(LowerCase(Iface.Name));
+        end;
+      end;
+
+    { Rewrite both lists in the new order.  This is an in-place PERMUTATION,
+      not empty-and-refill: TObjectList is ARC-based (contnrs.pas), so
+      Extract() removes WITHOUT releasing while Add() addrefs — extracting
+      then re-Adding would net +1 refcount per iface and leak every one of
+      them.  Put() (the Items setter) addrefs the new entry before releasing
+      the old, and `Sorted` holds a reference to every item throughout, so
+      each slot can be overwritten safely in any order. }
+    for I := 0 to Sorted.Count - 1 do
+      FPrebuiltIfaces.Items[I] := TUnitInterface(Sorted.Items[I]);
+    FPrebuiltObjectPaths.Clear();
+    for I := 0 to SortedPaths.Count - 1 do
+      FPrebuiltObjectPaths.Add(SortedPaths.Strings[I]);
+  finally
+    Sorted.Free();
+    SortedPaths.Free();
+    Placed.Free();
+  end;
 end;
 
 end.

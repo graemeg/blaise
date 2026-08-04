@@ -446,6 +446,143 @@ begin
             (StrPos('rtl.', LowerCase(AName)) = 0);
 end;
 
+{ Register every dependency whose body lives in its OWN object so $main calls
+  its <Unit>_init (and main_exit its <Unit>_fini), in an order where a unit's
+  dependencies are always initialised first.
+
+  Three sets feed in, and they must be MERGED rather than concatenated:
+
+    * Loader.LinkOnlyInitUnits — impl-only deps.  Nothing imports these, so no
+      other path registers them; without this their <Unit>_init ships in the
+      linked object and is never called.
+    * Loader.PrebuiltIfaces    — cached (.bif/.o) deps.
+    * AUnits                   — source-recompiled deps, when their codegen was
+      skipped (incremental); each is compiled to its own object.
+
+  Emitting them as three blocks is what broke: on an incremental rebuild a
+  SOURCE unit can be a dependency of a CACHED one (edit a registry unit while
+  its dependents stay cached), so "all cached, then all source" runs a
+  dependent before its dependency.  Instead this walks the dependency graph:
+  a unit is emitted only once every unit it uses — from EITHER the interface or
+  the implementation section — has been emitted.  Anything left over (a true
+  cycle, which has no correct order) keeps its original relative position. }
+procedure RegisterDepInits(ACG: ICodeGen; ALoader: TUnitLoader;
+                           AUnits: TObjectList; ASkipDepCodegen: Boolean);
+var
+  Names:   TStringList;   { every dep, in emission order — LOWERCASE keys, used
+                            for dedup and dependency matching only }
+  Emit:    TStringList;   { parallel: the name with its ORIGINAL casing, which
+                            is what the <Unit>_init symbol actually uses }
+  Deps:    TObjectList;   { parallel: TStringList of that dep's used units }
+  HasInit: TStringList;   { parallel flags, '1'/'0' }
+  HasFini: TStringList;
+  Emitted: TStringList;
+  I, J:    Integer;
+  Progress: Boolean;
+  Ready:   Boolean;
+  DepList: TStringList;
+  U:       TUnit;
+  Iface:   TUnitInterface;
+
+  procedure AddEntry(const AName: string; AInit, AFini: Boolean;
+                     AIfaceUses, AImplUses: TStringList);
+  var
+    K: Integer;
+    L: TStringList;
+  begin
+    if Names.IndexOf(LowerCase(AName)) >= 0 then Exit;
+    Names.Add(LowerCase(AName));
+    Emit.Add(AName);
+    if AInit then HasInit.Add('1') else HasInit.Add('0');
+    if AFini then HasFini.Add('1') else HasFini.Add('0');
+    L := TStringList.Create();
+    if AIfaceUses <> nil then
+      for K := 0 to AIfaceUses.Count - 1 do
+        L.Add(LowerCase(AIfaceUses.Strings[K]));
+    if AImplUses <> nil then
+      for K := 0 to AImplUses.Count - 1 do
+        L.Add(LowerCase(AImplUses.Strings[K]));
+    Deps.Add(L);
+  end;
+
+begin
+  if ALoader = nil then Exit;
+  Names   := TStringList.Create();
+  Emit    := TStringList.Create();
+  Deps    := TObjectList.Create(True);
+  HasInit := TStringList.Create();
+  HasFini := TStringList.Create();
+  Emitted := TStringList.Create();
+  try
+    { Impl-only deps: the loader knows only the name + flags, not the uses
+      lists (their ifaces are not retained), so they carry no dependencies
+      here.  They are appended in loader order, which the collector already
+      made dependency-ordered (it recurses before recording). }
+    for I := 0 to ALoader.LinkOnlyInitUnits.Count - 1 do
+      AddEntry(ALoader.LinkOnlyInitUnits.Strings[I], True,
+               ALoader.LinkOnlyInitUnits.Objects[I] <> nil, nil, nil);
+
+    for I := 0 to ALoader.PrebuiltIfaces.Count - 1 do
+    begin
+      Iface := TUnitInterface(ALoader.PrebuiltIfaces.Items[I]);
+      AddEntry(Iface.Name, Iface.HasInitialization, Iface.HasFinalization,
+               Iface.UsedUnits, Iface.ImplUsedUnits);
+    end;
+
+    if ASkipDepCodegen and (AUnits <> nil) then
+      for I := 0 to AUnits.Count - 1 do
+      begin
+        U := TUnit(AUnits.Items[I]);
+        AddEntry(U.Name,
+                 (U.InitStmts <> nil) and (U.InitStmts.Count > 0),
+                 UnitNeedsFini(U), U.UsedUnits, U.ImplUsedUnits);
+      end;
+
+    { Dependency-ordered sweep. }
+    repeat
+      Progress := False;
+      for I := 0 to Names.Count - 1 do
+      begin
+        if Emitted.IndexOf(Names.Strings[I]) >= 0 then Continue;
+        DepList := TStringList(Deps.Items[I]);
+        Ready := True;
+        for J := 0 to DepList.Count - 1 do
+          { Block only on a dep that is itself in this set and not yet out. }
+          if (Names.IndexOf(DepList.Strings[J]) >= 0) and
+             (Emitted.IndexOf(DepList.Strings[J]) < 0) and
+             (DepList.Strings[J] <> Names.Strings[I]) then
+          begin
+            Ready := False;
+            break;
+          end;
+        if Ready then
+        begin
+          ACG.NoteDepInitUnit(Emit.Strings[I], HasInit.Strings[I] = '1');
+          ACG.NoteDepFiniUnit(Emit.Strings[I], HasFini.Strings[I] = '1');
+          Emitted.Add(Names.Strings[I]);
+          Progress := True;
+        end;
+      end;
+    until (not Progress) or (Emitted.Count = Names.Count);
+
+    { Cycle: no ordering is correct, so keep the original relative order
+      rather than dropping the units (which would lose their inits entirely). }
+    for I := 0 to Names.Count - 1 do
+      if Emitted.IndexOf(Names.Strings[I]) < 0 then
+      begin
+        ACG.NoteDepInitUnit(Emit.Strings[I], HasInit.Strings[I] = '1');
+        ACG.NoteDepFiniUnit(Emit.Strings[I], HasFini.Strings[I] = '1');
+      end;
+  finally
+    Names.Free();
+    Emit.Free();
+    Deps.Free();
+    HasInit.Free();
+    HasFini.Free();
+    Emitted.Free();
+  end;
+end;
+
 procedure TCompileWorker.Execute;
 var
   WCG: ICodeGen;
@@ -1091,19 +1228,11 @@ begin
           globals (e.g. GPlatformLayout), and linking the per-unit objects
           directly — rather than via an archive whose member selection hides the
           clash — fails with multiple-definition errors. }
-        if Loader <> nil then
-          for I := 0 to Loader.PrebuiltIfaces.Count - 1 do
-            CG.NoteDepInitUnit(
-              TUnitInterface(Loader.PrebuiltIfaces.Items[I]).Name,
-              TUnitInterface(Loader.PrebuiltIfaces.Items[I]).HasInitialization);
+        { Merged, dependency-ordered — see RegisterDepInits. }
+        RegisterDepInits(CG, Loader, Units, SkipDepCodegen);
         if (Units <> nil) and not SkipDepCodegen then
           for I := 0 to Units.Count - 1 do
-            CG.AppendUnit(TUnit(Units.Items[I]))
-        else if Units <> nil then
-          for I := 0 to Units.Count - 1 do
-            CG.NoteDepInitUnit(TUnit(Units.Items[I]).Name,
-              (TUnit(Units.Items[I]).InitStmts <> nil) and
-              (TUnit(Units.Items[I]).InitStmts.Count > 0));
+            CG.AppendUnit(TUnit(Units.Items[I]));
         CG.AppendUnit(TopUnit);
       end
       else if ((Units <> nil) and (Units.Count > 0)) or
@@ -1118,22 +1247,16 @@ begin
           external references rather than re-defining them (otherwise the link
           step reports a multiple definition — the cached .o owns the symbol).
 
-          They are loaded leaf-first and any source units depend on them, so
-          their inits must run before the source deps' inits.  On a full rebuild
-          every dep is cached, so this is the only loop that fires. }
+          Ordering: cached and source deps must be interleaved by DEPENDENCY,
+          not emitted as two blocks.  An older comment here claimed "any source
+          units depend on them, so their inits must run before the source deps'
+          inits" — that is false in the incremental case where a SOURCE unit is
+          a dependency of a CACHED one (edit reg.pas while its dependents stay
+          cached: reg goes to source, they stay prebuilt).  Emitting all
+          prebuilt inits first then ran a dependent before its dependency.
+          RegisterDepInits merges both sets in dependency order instead. }
         if Loader <> nil then
-          for I := 0 to Loader.PrebuiltIfaces.Count - 1 do
-          begin
-            CG.NoteDepInitUnit(
-              TUnitInterface(Loader.PrebuiltIfaces.Items[I]).Name,
-              TUnitInterface(Loader.PrebuiltIfaces.Items[I]).HasInitialization);
-            { Teardown twin: the cached object exports <Unit>_fini iff the
-              .bif flag is set (same UnitNeedsFini predicate the emitter
-              used) — register so main_exit calls it in reverse init order. }
-            CG.NoteDepFiniUnit(
-              TUnitInterface(Loader.PrebuiltIfaces.Items[I]).Name,
-              TUnitInterface(Loader.PrebuiltIfaces.Items[I]).HasFinalization);
-          end;
+          RegisterDepInits(CG, Loader, Units, SkipDepCodegen);
         if not SkipDepCodegen then
         begin
           { Source-loaded deps are compiled inline into this object — append
@@ -1141,25 +1264,10 @@ begin
           if Units <> nil then
             for I := 0 to Units.Count - 1 do
               CG.AppendUnit(TUnit(Units.Items[I]));
-        end
-        else
-        begin
-          { Incremental / separate-compilation: source dep bodies are compiled
-            into their own objects (skipped here).  Note each so $main calls its
-            <Unit>_init / <Unit>_fini and the backend references its globals
-            externally.  The fini predicate is the shared UnitNeedsFini — the
-            same one the worker's AppendUnit used when it emitted (or did not
-            emit) the <Unit>_fini symbol into the dep's own object. }
-          if Units <> nil then
-            for I := 0 to Units.Count - 1 do
-            begin
-              CG.NoteDepInitUnit(TUnit(Units.Items[I]).Name,
-                (TUnit(Units.Items[I]).InitStmts <> nil) and
-                (TUnit(Units.Items[I]).InitStmts.Count > 0));
-              CG.NoteDepFiniUnit(TUnit(Units.Items[I]).Name,
-                UnitNeedsFini(TUnit(Units.Items[I])));
-            end;
         end;
+        { The source-dep init/fini noting that used to live here is now done by
+          RegisterDepInits above, merged in dependency order with the cached
+          deps — see the comment there. }
         CG.AppendProgram(Prog);
       end
       else
