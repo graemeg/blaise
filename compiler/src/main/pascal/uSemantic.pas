@@ -4254,6 +4254,11 @@ begin
         same-unit and therefore visible. }
       NewMDecl.VisibilityUnit := Templ.DefUnitName;
       NewMDecl.ResolvedQbeName := ATypeName + '_' + NewMDecl.Name;
+      { Record the emitted symbol on the descriptor so a DESCENDANT instance
+        that inherits a non-virtual interface method can resolve it: such a
+        method has no vtable slot, and the descendant's own class def does not
+        declare it, so the itab emitters climb Parent querying FindMethodSym. }
+      RT.AddMethodSym(NewMDecl.Name, NewMDecl.ResolvedQbeName);
       if SameText(NewMDecl.Name, 'Destroy') then
       begin
         RT.HasDestroyMethod := True;

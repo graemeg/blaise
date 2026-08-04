@@ -236,6 +236,14 @@ type
       resolved via the vtable so inherited/overridden methods both work. }
     function  ItabMethodRef(AClassRT: TRecordTypeDesc;
       const AClassName, AMethName: string): string;
+    { Every interface AClassRT needs an itab for: the ones it declares, the
+      ones its ANCESTOR classes declare (a descendant inherits them and still
+      needs its own itab), and each of those interfaces' own parent chain (so
+      an instance can be narrowed straight to a base interface).  Deduped;
+      insertion order fixes itab emission and impllist slot order, so every
+      caller must use this one list for BOTH.  Returns nil when neither the
+      class nor any ancestor implements anything.  Caller frees. }
+    function  CollectItabIntfs(AClassRT: TRecordTypeDesc): TObjectList;
     { Walk AClassName's AST class chain (self, then ParentName ancestors) and
       return the name of the nearest class that DECLARES AMethName.  Used to
       resolve the itab symbol for a non-virtual interface method inherited from
@@ -9843,6 +9851,38 @@ begin
   EmitLine('');
 end;
 
+function TCodeGenQBE.CollectItabIntfs(AClassRT: TRecordTypeDesc): TObjectList;
+var
+  ClassWalk: TRecordTypeDesc;
+  IntfWalk:  TInterfaceTypeDesc;
+  J:         Integer;
+begin
+  Result := nil;
+  if AClassRT = nil then Exit;
+  { Nothing to emit only when neither this class NOR any ancestor implements
+    an interface (issue #130 bug3). }
+  ClassWalk := AClassRT;
+  while (ClassWalk <> nil) and (ClassWalk.ImplementsCount() = 0) do
+    ClassWalk := ClassWalk.Parent;
+  if ClassWalk = nil then Exit;
+
+  Result := TObjectList.Create(False);   { non-owning: shared descriptors }
+  ClassWalk := AClassRT;
+  while ClassWalk <> nil do
+  begin
+    for J := 0 to ClassWalk.ImplementsCount() - 1 do
+    begin
+      IntfWalk := ClassWalk.ImplementsIntfAt(J);
+      while IntfWalk <> nil do
+      begin
+        if Result.IndexOf(IntfWalk) < 0 then Result.Add(IntfWalk);
+        IntfWalk := IntfWalk.Parent;
+      end;
+    end;
+    ClassWalk := ClassWalk.Parent;
+  end;
+end;
+
 function TCodeGenQBE.ItabMethodRef(AClassRT: TRecordTypeDesc;
   const AClassName, AMethName: string): string;
 var
@@ -9875,7 +9915,10 @@ begin
     begin
       Sym := AncRT.FindMethodSym(AMethName);
       if Sym <> '' then
-        Exit('$' + Sym);
+        { Mangle: a GENERIC instance's recorded symbol still carries the
+          'TBase<Integer>_Show' spelling, and QBE rejects '<'.  CodegenMangle
+          is idempotent, so an already-clean name passes through unchanged. }
+        Exit('$' + QBEMangle(Sym));
       AncRT := AncRT.Parent;
     end;
   end;
@@ -9970,41 +10013,13 @@ begin
     if TDesc = nil then TDesc := AProg.SymbolTable.FindType(TD.Name);
     if (TDesc = nil) or not (TDesc is TRecordTypeDesc) then Continue;
     ClassRT := TRecordTypeDesc(TDesc);
-    { Skip only when neither this class NOR any ancestor implements an
-      interface — a descendant inherits its parent's interfaces and still needs
-      its own itab (issue #130 bug3). }
-    ClassWalk := ClassRT;
-    while (ClassWalk <> nil) and (ClassWalk.ImplementsCount() = 0) do
-      ClassWalk := ClassWalk.Parent;
-    if ClassWalk = nil then Continue;
-
-    { Collect each implemented interface PLUS every ancestor on its parent
-      chain (IDog = interface(IAnimal) -> also emit an IAnimal itab), so a
-      class instance can be narrowed directly to a base interface.  An
-      ancestor's methods are a prefix of the descendant's itab, so the same
-      impl pointers apply; the dedup keeps one itab per (class, interface).
-
-      Also walk the CLASS parent chain: a descendant inherits the interfaces
-      its ancestors implement (TLoud < TPerson(IGreeter) -> TLoud also
-      implements IGreeter), so it needs its own itab whose method refs resolve
-      to TLoud's (possibly overridden) implementations (issue #130 bug3). }
-    EmitIntfs := TObjectList.Create(False);
+    { Declared + inherited + interface-ancestor interfaces (issue #130 bug3):
+      a descendant inherits its parent's interfaces and still needs its own
+      itab, and IDog = interface(IAnimal) also needs an IAnimal itab so an
+      instance can be narrowed straight to the base interface. }
+    EmitIntfs := CollectItabIntfs(ClassRT);
+    if EmitIntfs = nil then Continue;
     try
-      ClassWalk := ClassRT;
-      while ClassWalk <> nil do
-      begin
-        for J := 0 to ClassWalk.ImplementsCount() - 1 do
-        begin
-          IntfWalk := ClassWalk.ImplementsIntfAt(J);
-          while IntfWalk <> nil do
-          begin
-            if EmitIntfs.IndexOf(IntfWalk) < 0 then EmitIntfs.Add(IntfWalk);
-            IntfWalk := IntfWalk.Parent;
-          end;
-        end;
-        ClassWalk := ClassWalk.Parent;
-      end;
-
       { One itab per interface — when a class's vtable slot for a given
         interface method is abstract (e.g. the class is an abstract base that
         declares the interface but defers implementation to subclasses), the
@@ -10066,13 +10081,17 @@ begin
   begin
     GI      := TGenericInstance(AProg.GenericInstances.Items[I]);
     ClassRT := TRecordTypeDesc(GI.TypeDesc);
-    if ClassRT.ImplementsCount() = 0 then Continue;
+    { Declared + inherited + interface-ancestor interfaces — a generic instance
+      whose ancestor declares the interface needs its own itab too. }
+    EmitIntfs := CollectItabIntfs(ClassRT);
+    if EmitIntfs = nil then Continue;
+    try
     MName := QBEMangle(GI.TypeName);
 
     { One itab per interface }
-    for J := 0 to ClassRT.ImplementsCount() - 1 do
+    for J := 0 to EmitIntfs.Count - 1 do
     begin
-      IntfDesc   := ClassRT.ImplementsIntfAt(J);
+      IntfDesc   := TInterfaceTypeDesc(EmitIntfs.Items[J]);
       IntfMangle := QBEMangle(IntfDesc.Name);
       MarkWeak('itab_' + MName + '_' + IntfMangle);
       ItabLine   := 'data $itab_' + MName + '_' + IntfMangle + ' = {';
@@ -10090,7 +10109,9 @@ begin
           if (MDecl <> nil) and (MDecl.ResolvedQbeName <> '') then
             MethRef := '$' + QBEMangle(MDecl.ResolvedQbeName)
           else
-            MethRef := '$' + MName + '_' + MethName;
+            { Not declared by THIS instance — the body lives on an ancestor,
+              so resolve through the vtable / descriptor chain. }
+            MethRef := ItabMethodRef(ClassRT, GI.TypeName, MethName);
         end;
         if K = 0 then
           ItabLine := ItabLine + ' l ' + MethRef
@@ -10104,9 +10125,9 @@ begin
     { One impllist per generic class instance }
     MarkWeak('impllist_' + MName);
     ImplLine := 'data $impllist_' + MName + ' = {';
-    for J := 0 to ClassRT.ImplementsCount() - 1 do
+    for J := 0 to EmitIntfs.Count - 1 do
     begin
-      IntfDesc   := ClassRT.ImplementsIntfAt(J);
+      IntfDesc   := TInterfaceTypeDesc(EmitIntfs.Items[J]);
       IntfMangle := QBEMangle(IntfDesc.Name);
       if J = 0 then
         ImplLine := ImplLine + ' l $typeinfo_' + IntfTypeInfoName(IntfDesc.Name) +
@@ -10117,6 +10138,9 @@ begin
     end;
     ImplLine := ImplLine + ', l 0 }';
     EmitLine(ImplLine);
+    finally
+      EmitIntfs.Free();
+    end;
   end;
 
   EmitLine('');
@@ -17660,11 +17684,15 @@ begin
             EmitLine(VLine);
           end;
 
-          if RT.ImplementsCount() > 0 then
-          begin
-            for J := 0 to RT.ImplementsCount() - 1 do
+          { Declared + inherited + interface-ancestor interfaces — a generic
+            instance whose ancestor declares the interface (TDer<T> = class(
+            TBase<T>) where TBase<T> implements it) needs its own itab too. }
+          EmitIntfs := CollectItabIntfs(RT);
+          if EmitIntfs <> nil then
+          try
+            for J := 0 to EmitIntfs.Count - 1 do
             begin
-              IntfDesc   := RT.ImplementsIntfAt(J);
+              IntfDesc   := TInterfaceTypeDesc(EmitIntfs.Items[J]);
               IntfMangle := QBEMangle(IntfDesc.Name);
               MarkWeak('itab_' + MName + '_' + IntfMangle);
               ItabLine   := ExportPrefix() + 'data $itab_' + MName + '_' + IntfMangle + ' = {';
@@ -17679,7 +17707,10 @@ begin
                   if (MDecl <> nil) and (MDecl.ResolvedQbeName <> '') then
                     MethRef := '$' + QBEMangle(MDecl.ResolvedQbeName)
                   else
-                    MethRef := '$' + MName + '_' + MethName;
+                    { Not declared by THIS instance — the body lives on an
+                      ancestor, so resolve through the vtable / descriptor
+                      chain instead of naming a symbol nothing defines. }
+                    MethRef := ItabMethodRef(RT, GI.TypeName, MethName);
                 end;
                 if K = 0 then
                   ItabLine := ItabLine + ' l ' + MethRef
@@ -17691,9 +17722,9 @@ begin
             end;
             MarkWeak('impllist_' + MName);
             ImplLine := ExportPrefix() + 'data $impllist_' + MName + ' = {';
-            for J := 0 to RT.ImplementsCount() - 1 do
+            for J := 0 to EmitIntfs.Count - 1 do
             begin
-              IntfDesc   := RT.ImplementsIntfAt(J);
+              IntfDesc   := TInterfaceTypeDesc(EmitIntfs.Items[J]);
               IntfMangle := QBEMangle(IntfDesc.Name);
               if J = 0 then
                 ImplLine := ImplLine + ' l $typeinfo_' + IntfTypeInfoName(IntfDesc.Name) +
@@ -17704,6 +17735,8 @@ begin
             end;
             ImplLine := ImplLine + ', l 0 }';
             EmitLine(ImplLine);
+          finally
+            EmitIntfs.Free();
           end;
         end;
 
@@ -17716,36 +17749,12 @@ begin
           if TDesc = nil then TDesc := FSymTable.FindType(TD.Name);
           if (TDesc = nil) or not (TDesc is TRecordTypeDesc) then Continue;
           ClassRT := TRecordTypeDesc(TDesc);
-          { Skip only when neither this class NOR any ancestor implements an
-            interface — a descendant inherits its parent's interfaces and still
-            needs its own itab (issue #130 bug3). }
-          ClassWalk := ClassRT;
-          while (ClassWalk <> nil) and (ClassWalk.ImplementsCount() = 0) do
-            ClassWalk := ClassWalk.Parent;
-          if ClassWalk = nil then Continue;
-
-          { Collect each implemented interface PLUS every ancestor on its
-            parent chain, and walk the CLASS parent chain for interfaces an
-            ancestor implements.  Mirrors EmitInterfaceDefs (the whole-program
-            path) — without this, a derived class in a separately-compiled unit
+          { Declared + inherited + interface-ancestor interfaces.  Without the
+            ancestor walk, a derived class in a separately-compiled unit
             emitted no itab at all and the reference dangled at link time. }
-          EmitIntfs := TObjectList.Create(False);
+          EmitIntfs := CollectItabIntfs(ClassRT);
+          if EmitIntfs = nil then Continue;
           try
-          ClassWalk := ClassRT;
-          while ClassWalk <> nil do
-          begin
-            for J := 0 to ClassWalk.ImplementsCount() - 1 do
-            begin
-              IntfWalk := ClassWalk.ImplementsIntfAt(J);
-              while IntfWalk <> nil do
-              begin
-                if EmitIntfs.IndexOf(IntfWalk) < 0 then EmitIntfs.Add(IntfWalk);
-                IntfWalk := IntfWalk.Parent;
-              end;
-            end;
-            ClassWalk := ClassWalk.Parent;
-          end;
-
           for J := 0 to EmitIntfs.Count - 1 do
           begin
             IntfDesc   := TInterfaceTypeDesc(EmitIntfs.Items[J]);

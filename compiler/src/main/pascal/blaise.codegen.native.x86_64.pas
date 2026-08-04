@@ -585,6 +585,7 @@ type
                                    const AMethName: string): Boolean;
     { True when the class or any ancestor implements an interface. }
     function ClassOrAncestorImplements(AClassRT: TRecordTypeDesc): Boolean;
+    function CollectItabIntfs(AClassRT: TRecordTypeDesc): TObjectList;
     { Native label for a class's implementation of an interface method,
       resolved via the vtable (inherited + overridden both work). }
     function ItabMethodRefNative(AClassRT: TRecordTypeDesc;
@@ -4061,6 +4062,37 @@ begin
   Result := False;
 end;
 
+{ Every interface AClassRT needs an itab for: the ones it declares, the ones
+  its ANCESTOR classes declare, and each of those interfaces' own parent chain.
+  Deduped; insertion order fixes itab emission and impllist slot order, so a
+  caller must use this one list for BOTH.  nil when nothing implements.
+  Caller frees. }
+function TX86_64Backend.CollectItabIntfs(AClassRT: TRecordTypeDesc): TObjectList;
+var
+  ClassWalk: TRecordTypeDesc;
+  IntfWalk:  TInterfaceTypeDesc;
+  J:         Integer;
+begin
+  Result := nil;
+  if AClassRT = nil then Exit;
+  if not Self.ClassOrAncestorImplements(AClassRT) then Exit;
+  Result := TObjectList.Create(False);   { non-owning: shared descriptors }
+  ClassWalk := AClassRT;
+  while ClassWalk <> nil do
+  begin
+    for J := 0 to ClassWalk.ImplementsCount() - 1 do
+    begin
+      IntfWalk := ClassWalk.ImplementsIntfAt(J);
+      while IntfWalk <> nil do
+      begin
+        if Result.IndexOf(IntfWalk) < 0 then Result.Add(IntfWalk);
+        IntfWalk := IntfWalk.Parent;
+      end;
+    end;
+    ClassWalk := ClassWalk.Parent;
+  end;
+end;
+
 { Native label for AClassRT's implementation of interface method AMethName.
   Prefers the vtable slot's resolved ImplName (so an inherited method points at
   the ancestor's body and an override at the descendant's — issue #130 bug3);
@@ -4290,12 +4322,16 @@ begin
   begin
     GI := TGenericInstance(AGenericInstances.Items[I]);
     ClassRT := TRecordTypeDesc(GI.TypeDesc);
-    if ClassRT.ImplementsCount() = 0 then Continue;
+    { Declared + inherited + interface-ancestor interfaces — a generic instance
+      whose ancestor declares the interface needs its own itab too. }
+    EmitIntfs := Self.CollectItabIntfs(ClassRT);
+    if EmitIntfs = nil then Continue;
+    try
     MName := Self.ClassSymName(GI.TypeName);
 
-    for J := 0 to ClassRT.ImplementsCount() - 1 do
+    for J := 0 to EmitIntfs.Count - 1 do
     begin
-      IntfDesc := ClassRT.ImplementsIntfAt(J);
+      IntfDesc := TInterfaceTypeDesc(EmitIntfs.Items[J]);
       CSym := Self.IntfTypeInfoName(IntfDesc.Name);
       Self.Emit('.balign 8');
       Self.Emit('.weak itab_' + MName + '_' + CSym);
@@ -4311,7 +4347,9 @@ begin
           if (MDecl <> nil) and (MDecl.ResolvedQbeName <> '') then
             MethRef := NativeMangle(MDecl.ResolvedQbeName)
           else
-            MethRef := MName + '_' + MethName;
+            { Not declared by THIS instance — the body lives on an ancestor,
+              so resolve through the vtable / descriptor chain. }
+            MethRef := Self.ItabMethodRefNative(ClassRT, nil, MethName, nil);
         end;
         Self.Emit(#9'.quad ' + MethRef);
       end;
@@ -4320,13 +4358,16 @@ begin
     Self.Emit('.balign 8');
     Self.Emit('.weak impllist_' + MName);
     Self.Emit('impllist_' + MName + ':');
-    for J := 0 to ClassRT.ImplementsCount() - 1 do
+    for J := 0 to EmitIntfs.Count - 1 do
     begin
-      IntfDesc := ClassRT.ImplementsIntfAt(J);
+      IntfDesc := TInterfaceTypeDesc(EmitIntfs.Items[J]);
       Self.Emit(#9'.quad typeinfo_' + Self.IntfTypeInfoName(IntfDesc.Name));
       Self.Emit(#9'.quad itab_' + MName + '_' + Self.IntfTypeInfoName(IntfDesc.Name));
     end;
     Self.Emit(#9'.quad 0');
+    finally
+      EmitIntfs.Free();
+    end;
   end;
 end;
 

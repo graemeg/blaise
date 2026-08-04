@@ -82,6 +82,8 @@ type
     { Same shapes on the QBE backend, whose unit path emitted no itab at all }
     procedure TestRun_CrossUnitIntf_QBE_DerivedGetsOwnItab;
     procedure TestRun_CrossUnitIntf_QBE_MultiHopAndIntfAncestor;
+    { Generic INSTANCE inheriting its interface from a generic ancestor }
+    procedure TestRun_GenericInstance_InheritedIntfGetsItab;
   end;
 
 implementation
@@ -985,6 +987,42 @@ program P;
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
   AssertEquals('output', 'base-name|woof|base-name|leaf-virt', Trim(Output));
+end;
+
+procedure TE2EUsesChainTests.TestRun_GenericInstance_InheritedIntfGetsItab;
+begin
+  { Same defect as the two tests above, but on the GENERIC-INSTANCE emitters:
+    they skipped an instance whose own ImplementsCount was 0, so TDer<Integer>
+    -- which satisfies IBox only by inheriting from TBase<T> -- got no itab.
+    QBE failed to link; native linked but the itab reference was unresolved
+    and the program produced nothing.  Both backends are covered here because
+    both were broken (unlike the plain-class case, which was QBE-only).
+
+    Fixing the skip then exposed two follow-on gaps, both fixed with it:
+    the instantiation path never recorded its methods via AddMethodSym, so
+    the descriptor climb found nothing; and QBE returned the recorded symbol
+    unmangled, emitting $TBase<Integer>_Show, which QBE rejects ('<'). }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+program P;
+    type
+      IBox = interface
+        function Show: string;
+      end;
+      TBase<T> = class(IBox)
+        function Show: string;
+      end;
+      TDer<T> = class(TBase<T>)
+      end;
+    var D: TDer<Integer>; I: IBox;
+    function TBase<T>.Show: string; begin Result := 'boxed' end;
+    begin
+      D := TDer<Integer>.Create();
+      I := D;
+      WriteLn(I.Show())
+    end.
+    ''', 'boxed' + LE, 0);
 end;
 
 initialization
