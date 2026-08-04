@@ -79,6 +79,9 @@ type
     procedure TestRun_CrossUnitIntf_InheritedCasingMismatch;
     procedure TestRun_CrossUnitIntf_InheritedVirtualStillUsesVTable;
     procedure TestRun_CrossUnitIntf_OverrideWins;
+    { Same shapes on the QBE backend, whose unit path emitted no itab at all }
+    procedure TestRun_CrossUnitIntf_QBE_DerivedGetsOwnItab;
+    procedure TestRun_CrossUnitIntf_QBE_MultiHopAndIntfAncestor;
   end;
 
 implementation
@@ -860,6 +863,128 @@ program P;
     ''', False, Dir, Output, RCode));
   AssertEquals('exit code', 0, RCode);
   AssertEquals('output', 'DERIVED', Trim(Output));
+end;
+
+procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_QBE_DerivedGetsOwnItab;
+var
+  Output: string; RCode: Integer;
+begin
+  { QBE's UNIT path (AppendUnit) skipped any class whose own ImplementsCount
+    was 0, so a derived class that INHERITS its interface emitted no itab and
+    no impllist at all -- the reference from the narrowing site then dangled:
+      undefined reference to `itab_qb_TDer_IThing'
+    The whole-program path (EmitInterfaceDefs) had always walked the ancestor
+    chain; only the unit path lacked it, so single-unit tests never saw this.
+    Native was unaffected -- which is why the native tests above passed. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+link+run',
+    CompileAndRunWithUnits(
+    '''
+unit qa;
+    interface
+    type
+      IThing = interface
+        function Id: string;
+      end;
+      TBase = class(IThing)
+        FId: string;
+        function Id: string;
+      end;
+    implementation
+    function TBase.Id: string; begin Result := FId end;
+    end.
+    ''',
+    '''
+unit qb;
+    interface
+    uses qa;
+    type
+      TDer = class(TBase)
+        constructor Create;
+      end;
+    implementation
+    constructor TDer.Create;
+    begin
+      inherited Create();
+      FId := 'derived-qbe-ok';
+    end;
+    end.
+    ''',
+    '''
+program P;
+    uses qa, qb;
+    var T: TDer; I: IThing;
+    begin
+      T := TDer.Create();
+      I := T;
+      WriteLn(I.Id())
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('output', 'derived-qbe-ok', Trim(Output));
+end;
+
+procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_QBE_MultiHopAndIntfAncestor;
+var
+  Output: string; RCode: Integer;
+begin
+  { Harder shape for the same QBE unit path, all in one program:
+      * TLeaf reaches its interface through a PASS-THROUGH ancestor (TMid
+        declares nothing), so a one-hop-only walk would miss it;
+      * IDog descends from IAnimal, so narrowing to the ANCESTOR interface
+        needs its own itab too (the interface parent chain);
+      * Virt is overridden in TLeaf, so the vtable must still win over the
+        descriptor-chain fallback. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+link+run',
+    CompileAndRunWithUnits(
+    '''
+unit ra;
+    interface
+    type
+      IAnimal = interface
+        function Name: string;
+      end;
+      IDog = interface(IAnimal)
+        function Bark: string;
+      end;
+      TBase = class(IDog)
+        function Name: string;
+        function Bark: string;
+        function Virt: string; virtual;
+      end;
+    implementation
+    function TBase.Name: string; begin Result := 'base-name' end;
+    function TBase.Bark: string; begin Result := 'woof' end;
+    function TBase.Virt: string; begin Result := 'base-virt' end;
+    end.
+    ''',
+    '''
+unit rb;
+    interface
+    uses ra;
+    type
+      TMid = class(TBase)
+      end;
+      TLeaf = class(TMid)
+        function Virt: string; override;
+      end;
+    implementation
+    function TLeaf.Virt: string; begin Result := 'leaf-virt' end;
+    end.
+    ''',
+    '''
+program P;
+    uses ra, rb;
+    var L: TLeaf; D: IDog; A: IAnimal;
+    begin
+      L := TLeaf.Create();
+      D := L;  A := L;
+      WriteLn(D.Name(), '|', D.Bark(), '|', A.Name(), '|', L.Virt())
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('output', 'base-name|woof|base-name|leaf-virt', Trim(Output));
 end;
 
 initialization

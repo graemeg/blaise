@@ -17267,6 +17267,10 @@ var
                                 gets its method bodies / typeinfo / vtable /
                                 _FieldCleanup / interface defs emitted too. }
   SavedDOU:     string;        { prior FSymTable.DefineOwningUnit, restored at end }
+  EmitIntfs:    TObjectList;   { interfaces needing an itab for one class:
+                                declared + inherited + interface ancestors }
+  ClassWalk:    TRecordTypeDesc;
+  IntfWalk:     TInterfaceTypeDesc;
 begin
   { No clears — output and string literal table accumulate across calls.
     Counter resets are safe: QBE temps and block labels are function-scoped. }
@@ -17712,10 +17716,39 @@ begin
           if TDesc = nil then TDesc := FSymTable.FindType(TD.Name);
           if (TDesc = nil) or not (TDesc is TRecordTypeDesc) then Continue;
           ClassRT := TRecordTypeDesc(TDesc);
-          if ClassRT.ImplementsCount() = 0 then Continue;
-          for J := 0 to ClassRT.ImplementsCount() - 1 do
+          { Skip only when neither this class NOR any ancestor implements an
+            interface — a descendant inherits its parent's interfaces and still
+            needs its own itab (issue #130 bug3). }
+          ClassWalk := ClassRT;
+          while (ClassWalk <> nil) and (ClassWalk.ImplementsCount() = 0) do
+            ClassWalk := ClassWalk.Parent;
+          if ClassWalk = nil then Continue;
+
+          { Collect each implemented interface PLUS every ancestor on its
+            parent chain, and walk the CLASS parent chain for interfaces an
+            ancestor implements.  Mirrors EmitInterfaceDefs (the whole-program
+            path) — without this, a derived class in a separately-compiled unit
+            emitted no itab at all and the reference dangled at link time. }
+          EmitIntfs := TObjectList.Create(False);
+          try
+          ClassWalk := ClassRT;
+          while ClassWalk <> nil do
           begin
-            IntfDesc   := ClassRT.ImplementsIntfAt(J);
+            for J := 0 to ClassWalk.ImplementsCount() - 1 do
+            begin
+              IntfWalk := ClassWalk.ImplementsIntfAt(J);
+              while IntfWalk <> nil do
+              begin
+                if EmitIntfs.IndexOf(IntfWalk) < 0 then EmitIntfs.Add(IntfWalk);
+                IntfWalk := IntfWalk.Parent;
+              end;
+            end;
+            ClassWalk := ClassWalk.Parent;
+          end;
+
+          for J := 0 to EmitIntfs.Count - 1 do
+          begin
+            IntfDesc   := TInterfaceTypeDesc(EmitIntfs.Items[J]);
             IntfMangle := QBEMangle(IntfDesc.Name);
             { Bare (unmangled-unit) itab is re-defined by every referencing
               object — mark it WEAK (GH #174). }
@@ -17729,7 +17762,11 @@ begin
                  ClassRT.VTableEntryAt(ClassRT.FindVTableSlot(MethName)).IsAbstract then
                 ItabRef := '$_AbstractMethodError'
               else
-                ItabRef := '$' + ClassSymNameForDecl(TD) + '_' + MethName;
+                { Resolve through the vtable / ancestor descriptor chain rather
+                  than assuming THIS class emits the body — a derived class
+                  inheriting a non-virtual interface method emits none, and the
+                  naive $<thisclass>_<method> dangled at link time. }
+                ItabRef := ItabMethodRef(ClassRT, TD.Name, MethName);
               if K = 0 then
                 ItabLine := ItabLine + ' l ' + ItabRef
               else
@@ -17743,9 +17780,9 @@ begin
           if IsUnmangledUnit(AUnit.Name) then
             MarkWeak('impllist_' + ClassSymNameForDecl(TD));
           ImplLine := ExportPrefix() + 'data $impllist_' + ClassSymNameForDecl(TD) + ' = {';
-          for J := 0 to ClassRT.ImplementsCount() - 1 do
+          for J := 0 to EmitIntfs.Count - 1 do
           begin
-            IntfDesc   := ClassRT.ImplementsIntfAt(J);
+            IntfDesc   := TInterfaceTypeDesc(EmitIntfs.Items[J]);
             IntfMangle := QBEMangle(IntfDesc.Name);
             if J = 0 then
               ImplLine := ImplLine + ' l $typeinfo_' + IntfTypeInfoName(IntfDesc.Name) +
@@ -17756,6 +17793,9 @@ begin
           end;
           ImplLine := ImplLine + ', l 0 }';
           EmitLine(ImplLine);
+          finally
+            EmitIntfs.Free();
+          end;
         end;
       end;
 
