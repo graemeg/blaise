@@ -50,11 +50,15 @@ var
   R:   TReport;
 begin
   Src :=
+    { Parens are REQUIRED: Blaise rejects a bare parameterless call, so the
+      old `o.Free;` spelling stopped parsing and this test was asserting
+      against a source the frontend never got past — the finding it counted
+      had become BL-0000 (ParseError), not BL-2001. }
     'program T;'      + NL +
     'var'             + NL +
     '  o: TObject;'   + NL +
     'begin'           + NL +
-    '  o.Free;'       + NL +
+    '  o.Free();'     + NL +
     'end.'            + NL;
   R := RunAF(Src);
   AssertEquals('one manual free', 1, CountForRule(R, RULE_ID));
