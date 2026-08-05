@@ -292,6 +292,8 @@ type
       boundaries where that restart would otherwise collide. }
     function  NewArrayConstLabel(const AName: string;
       AIsInterface: Boolean = False): string;
+    { Truncate a folded constant to an ordinal type's width (GH #195). }
+    function  TruncConstToOrdinal(AValue: Int64; ATypeDesc: TTypeDesc): Int64;
     function  FoldConstBitOpExpr(ATokens: TStringList;
                                  ALine, ACol: Integer): Int64;
     { Fold a compile-time integer constant expression AST (literals, named
@@ -5284,12 +5286,44 @@ begin
   end;
 end;
 
+{ Truncate a folded constant to ATypeDesc's ordinal width, sign-extending a
+  signed target.  Mirrors uParser.TryParseConstIntTypecast's mask/sign-extend
+  so a cast folds to the same value whichever path evaluates it (GH #195). }
+function TSemanticAnalyser.TruncConstToOrdinal(AValue: Int64;
+                                               ATypeDesc: TTypeDesc): Int64;
+var
+  Width, SignBit, Mask: Int64;
+  IsSigned: Boolean;
+begin
+  Result := AValue;
+  if ATypeDesc = nil then Exit;
+  IsSigned := True;
+  case ATypeDesc.Kind of
+    tyByte:     begin Width := 8;  IsSigned := False; end;
+    tySmallInt: begin Width := 16; end;
+    tyWord:     begin Width := 16; IsSigned := False; end;
+    tyInteger:  begin Width := 32; end;
+    tyUInt32:   begin Width := 32; IsSigned := False; end;
+  else
+    { Int64/UInt64/Boolean/enum: 64-bit or already-narrow — nothing to mask.
+      (FPC likewise folds Boolean(5) to 5 rather than clamping to 0/1.) }
+    Exit;
+  end;
+  Mask    := (Int64(1) shl Width) - 1;
+  SignBit := Int64(1) shl (Width - 1);
+  Result  := AValue and Mask;
+  if IsSigned and ((Result and SignBit) <> 0) then
+    Result := Result - (SignBit shl 1);
+end;
+
 function TSemanticAnalyser.EvalConstIntExpr(AExpr: TASTExpr;
                                             ALine, ACol: Integer): Int64;
 var
   Bin:     TBinaryExpr;
   IdSym:   TSymbol;
   EnumRef: TEnumMemberRef;
+  FC:      TFuncCallExpr;
+  CastSym: TSymbol;
   L, R:    Int64;
 begin
   Result := 0;
@@ -5333,6 +5367,31 @@ begin
 
   if AExpr is TNotExpr then
     Exit(not EvalConstIntExpr(TNotExpr(AExpr).Expr, ALine, ACol));
+
+  { An ordinal TYPECAST — `UInt64(1)`, `Byte(300)` — parses as a one-argument
+    call whose name is a type, not as a distinct cast node.  Without this arm,
+    `1.0 / (UInt64(1) shl 53)` failed while the identical expression without
+    the cast folded fine (GH #195).
+
+    The cast TRUNCATES to the target width and sign-extends, matching FPC:
+    `Byte(300)` is 44, not 300.  The parser already does this for the literal
+    form it handles (uParser.pas TryParseConstIntTypecast), but a parenthesised
+    or float-embedded cast routes here instead — so without the same masking,
+    `Byte(300) shl 1` and `(Byte(300)) shl 1` would disagree (88 vs 600). }
+  if AExpr is TFuncCallExpr then
+  begin
+    FC := TFuncCallExpr(AExpr);
+    if (FC.Args <> nil) and (FC.Args.Count = 1) then
+    begin
+      CastSym := FTable.Lookup(FC.Name);
+      if (CastSym <> nil) and (CastSym.Kind = skType) and
+         (CastSym.TypeDesc <> nil) and CastSym.TypeDesc.IsOrdinal() then
+      begin
+        L := EvalConstIntExpr(TASTExpr(FC.Args.Items[0]), ALine, ACol);
+        Exit(TruncConstToOrdinal(L, CastSym.TypeDesc));
+      end;
+    end;
+  end;
 
   if AExpr is TBinaryExpr then
   begin
@@ -5438,9 +5497,26 @@ begin
       Exit(IntToStr(IdSym.ConstValue));
   end;
 
+  { `not` is the unary member of the same family (`1.0 / (not 0 and 255)`),
+    and is a separate node kind — TNotExpr, not TBinaryExpr.  Same reasoning:
+    fold it as Int64. }
+  if AExpr is TNotExpr then
+    Exit(IntToStr(EvalConstIntExpr(AExpr, ALine, ACol)));
+
   if AExpr is TBinaryExpr then
   begin
-    Bin  := TBinaryExpr(AExpr);
+    Bin := TBinaryExpr(AExpr);
+
+    { Bit operators are INTEGER operations, even when they appear inside a
+      float constant expression (`1.0 / (UInt64(1) shl 53)` — GH #195).  Fold
+      the whole sub-expression with the integer evaluator, which already
+      handles and/or/xor/shl/shr/not and — crucially — works in Int64.
+      Folding it as a Double instead would lose precision: 1 shl 53 is the
+      point where a Double can no longer represent consecutive integers, and
+      that shift is exactly what the reported epsilon computation uses. }
+    if Bin.Op in [boAnd, boOr, boXor, boShl, boShr, boSar] then
+      Exit(IntToStr(EvalConstIntExpr(AExpr, ALine, ACol)));
+
     LStr := EvalConstFloatExpr(Bin.Left,  ALine, ACol);
     RStr := EvalConstFloatExpr(Bin.Right, ALine, ACol);
     L    := RawStrToDouble(LStr);

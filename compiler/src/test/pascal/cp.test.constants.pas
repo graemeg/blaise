@@ -145,6 +145,12 @@ type
     procedure TestConstExpr_IntSlash_ProducesFloat;
     procedure TestConstExpr_TypedDoubleIntExpr_Folds;
     procedure TestVarInit_TypedDoubleIntExpr_Folds;
+    { GH #195 — bit operators inside a FLOAT constant expression.  They fold
+      as Int64 (not Double), which the 1 shl 53 case depends on. }
+    procedure TestConstExpr_ShlInFloatExpr_FoldsAsInteger;
+    procedure TestConstExpr_ShlInFloatExpr_TypecastOperand;
+    procedure TestConstExpr_BitOpsInFloatExpr_AllOperators;
+    procedure TestConstExpr_OrdinalCastTruncates;
   end;
 
 implementation
@@ -1695,6 +1701,90 @@ begin
     ''');
   AssertTrue('IR non-empty', IR <> '');
   AssertTrue('folded to 2.5', IRContains(IR, 'd_2.5'));
+end;
+
+procedure TConstTests.TestConstExpr_ShlInFloatExpr_FoldsAsInteger;
+var IR: string;
+begin
+  { GH #195: `1.0 / (z shl 53)` reported "Unsupported operator in
+    floating-point constant expression".  Bit ops are INTEGER operations even
+    inside a float expression; folding the shift as a Double would lose
+    precision at exactly 2^53, which is the value this idiom uses. }
+  IR := GenIR(
+    '''
+    program P;
+    const
+      Z = 1;
+      X = 1.0 / (Z shl 53);
+    var V: Double;
+    begin V := X end.
+    ''');
+  AssertTrue('IR non-empty', IR <> '');
+  { 1 / 2^53 = 1.1102230246251565e-16 }
+  AssertTrue('folded to the 2^-53 epsilon', IRContains(IR, 'd_1.11022302462516e-16'));
+end;
+
+procedure TConstTests.TestConstExpr_ShlInFloatExpr_TypecastOperand;
+var IR: string;
+begin
+  { The form in the report: an ordinal TYPECAST as the shift operand.
+    `UInt64(1)` parses as a one-argument call whose name is a type, not a
+    distinct cast node, and failed with a different message than the plain
+    form ("not a compile-time float"). }
+  IR := GenIR(
+    '''
+    program P;
+    const X = 1.0 / (UInt64(1) shl 53);
+    var V: Double;
+    begin V := X end.
+    ''');
+  AssertTrue('IR non-empty', IR <> '');
+  AssertTrue('folded to the 2^-53 epsilon', IRContains(IR, 'd_1.11022302462516e-16'));
+end;
+
+procedure TConstTests.TestConstExpr_BitOpsInFloatExpr_AllOperators;
+var IR: string;
+begin
+  { and/or/xor/shr alongside shl — all six fold in FPC, so all six must here. }
+  IR := GenIR(
+    '''
+    program P;
+    const
+      A = 1.0 / (255 and 15);
+      B = 1.0 / (8 or 1);
+      C = 1.0 / (12 xor 6);   { 10 — distinct from the or/and results }
+      D = 1.0 / (1024 shr 2);
+    var V: Double;
+    begin V := A; V := B; V := C; V := D end.
+    ''');
+  AssertTrue('IR non-empty', IR <> '');
+  AssertTrue('and folded (1/15)',  IRContains(IR, 'd_0.0666666666666667'));
+  AssertTrue('or folded (1/9)',    IRContains(IR, 'd_0.111111111111111'));
+  AssertTrue('xor folded (1/10)',  IRContains(IR, 'd_0.1'));
+  AssertTrue('shr folded (1/256)', IRContains(IR, 'd_0.00390625'));
+end;
+
+procedure TConstTests.TestConstExpr_OrdinalCastTruncates;
+var IR: string;
+begin
+  { An ordinal cast TRUNCATES: Byte(300) is 44, so Byte(300) shl 1 is 88.
+    The parser folds the bare literal form itself, but a PARENTHESISED or
+    float-embedded cast routes through the semantic evaluator instead — and
+    without the same masking the two disagreed (88 vs 600), i.e. the same
+    expression changed value with parentheses.  Both spellings are asserted,
+    and the signed case pins sign-extension (SmallInt(40000) = -25536). }
+  IR := GenIR(
+    '''
+    program P;
+    const
+      A = 1.0 * (Byte(300) shl 1);
+      B = 1.0 * (SmallInt(40000) shl 1);
+    var V: Double;
+    begin V := A; V := B end.
+    ''');
+  AssertTrue('IR non-empty', IR <> '');
+  AssertTrue('Byte(300) truncated to 44, shl 1 = 88', IRContains(IR, 'd_88'));
+  AssertTrue('SmallInt(40000) sign-extended', IRContains(IR, 'd_-51072'));
 end;
 
 procedure TConstTests.TestConstExpr_TypedDoubleIntExpr_Folds;

@@ -230,6 +230,8 @@ type
       `add l, w` (mixing a w step temp into an l add) and rejected the IR.
       The step must be sign-extended to l first (BUG-20260723-qbe-incdec-wide-narrow-step). }
     procedure TestRun_IncDec_WideTarget_NarrowStep;
+    { GH #195 — bit operators inside a float const expression, end to end. }
+    procedure TestRun_BitOpsInFloatConstExpr;
   end;
 
 implementation
@@ -2512,6 +2514,28 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '6000000000' + LE + '8000000000' + LE + '4000000000' + LE +
     '6000000000' + LE + '5000000007' + LE + '4000000000' + LE + '1000000000' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_BitOpsInFloatConstExpr;
+var LE: string;
+begin
+  { GH #195: `1.0 / (UInt64(1) shl 53)` was rejected outright.  The value is
+    the classic 2^-53 machine epsilon, and it is the reason the shift MUST
+    fold in Int64: a Double cannot represent 2^53 + 1, so folding the shift in
+    floating point would silently give the wrong constant.  Asserting the
+    printed value end to end is what pins that. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  LE := LineEnding;
+  AssertRunsOnAll('''
+    program P;
+    const
+      Eps  = 1.0 / (UInt64(1) shl 53);
+      Frac = 1.0 / (1024 shr 2);
+    begin
+      WriteLn(Eps);
+      WriteLn(Frac)
+    end.
+    ''', '1.11022302462516e-16' + LE + '0.00390625' + LE, 0);
 end;
 
 initialization

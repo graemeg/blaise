@@ -5269,10 +5269,30 @@ exactly as bare float literals are stored.
   time; emitting runtime arithmetic for `const X = 3.14 * 2.0` would violate
   the constant contract and prevent their use in contexts requiring true constants
   (e.g. array bounds, case labels).
-* *Support only the four arithmetic operators.*  Adopted.  Bitwise operators
-  (`and`, `or`, `xor`, `shl`, `shr`) have no meaningful float semantics.  The
-  `mod` operator could theoretically map to `fmod`, but there is no demonstrated
-  need.  Integer-only operators remain available in integer constant expressions.
+* *Support only the four arithmetic operators.*  Adopted for the FLOAT
+  operators themselves, and revised for bitwise ones (GH #195).  The original
+  reasoning — "bitwise operators have no meaningful float semantics" — is true
+  but answers the wrong question: nobody writes `1.5 shl 2`.  What real code
+  writes is a bit operation on INTEGER operands that happens to sit inside a
+  float expression:
++
+[source,pascal]
+----
+const Epsilon = 1.0 / (UInt64(1) shl 53);   { 2^-53, the classic machine eps }
+----
++
+The shift is an integer operation whose result is then converted; rejecting it
+made a standard idiom unwritable, and both FPC and Delphi accept it.  The
+float constant evaluator now delegates `and`, `or`, `xor`, `shl`, `shr` and
+`not` to the INTEGER evaluator and converts the folded result.
++
+Folding in Int64 rather than Double is the load-bearing detail: 2^53 is
+precisely where a Double stops representing consecutive integers, so folding
+that shift in floating point would silently produce a wrong constant — and
+2^53 is exactly the shift this idiom uses.
++
+`mod` could theoretically map to `fmod`, but there is still no demonstrated
+need.
 
 == Named Constants as Static-Array Bounds
 
