@@ -29,7 +29,8 @@ uses
   Guard.Rule.UnassignedResult.Tests,
   Guard.Rule.OrdSubscript.Tests,
   Guard.Rule.EmptyHandler.Tests,
-  Guard.Rule.ExhaustiveCase.Tests;
+  Guard.Rule.ExhaustiveCase.Tests,
+  Guard.Suppression.Tests;
 
 implementation
 

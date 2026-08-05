@@ -51,10 +51,36 @@ type
                        ASeverity: TSeverity);
 
     { Emit a finding at this rule's effective severity, optionally with a
-      structured quick-fix. }
+      structured quick-fix.  Both overloads honour inline suppression — see
+      IsSuppressed. }
     procedure Emit(const AMessage: string; const ALoc: TSourceLocation); overload;
     procedure Emit(const AMessage: string; const ALoc: TSourceLocation;
                    AFix: TQuickFix); overload;
+
+    { True when the source asks for this finding to be ignored, via a comment
+      on the offending line or on the line immediately above it:
+
+        X := Y;   // blaise-guard: ignore              — all rules, this line
+        X := Y;   // blaise-guard: ignore BL-2003      — that rule only
+        // blaise-guard: ignore BL-2003 BL-1003        — next line, two rules
+
+      Rationale for the shape: SonarQube's bare `// NOSONAR` suppresses
+      EVERYTHING on the line, which silently hides later, unrelated findings.
+      Naming the rule is the common case here, so an unqualified `ignore` is
+      allowed but deliberately blunt.  A reason may follow a `-` and is
+      ignored by the parser but is the point of writing one:
+
+        // blaise-guard: ignore BL-2003 - FA[1] is the second OPERAND }
+    function IsSuppressed(const ALoc: TSourceLocation): Boolean;
+  private
+    { Shared matcher: does ALine carry AMarker with a rule list covering
+      FRuleId (or no list at all, meaning every rule)? }
+    function MarkerCovers(const ALine, AMarker: string): Boolean;
+    { True when one source line carries a line-scoped directive. }
+    function LineSuppresses(const ALine: string): Boolean;
+    { True when one header line carries a FILE-scoped directive. }
+    function FileSuppresses(const ALine: string): Boolean;
+  public
 
     property Model:   TSourceModel read FModel;
     property RuleCfg: TRuleConfig read FRuleCfg;
@@ -145,6 +171,16 @@ function  RegisteredRule(AIndex: Integer): IRule;
 
 implementation
 
+const
+  { Inline suppression marker.  Lowercase — the line is folded before matching,
+    so the directive may be written in any case.  Deliberately namespaced
+    rather than a bare word like NOSONAR: it says which tool it addresses, and
+    it cannot collide with prose. }
+  SUPPRESS_MARKER      = 'blaise-guard: ignore';
+  { Distinct marker, deliberately NOT a prefix-match of the line form, so a
+    line directive in the header keeps its line-only meaning. }
+  SUPPRESS_FILE_MARKER = 'blaise-guard: ignore-file';
+
 var
   GRules: TList<IRule>;
 
@@ -161,8 +197,111 @@ begin
   FSeverity := ASeverity;
 end;
 
+{ Does ALine carry a suppression directive covering FRuleId?  The marker is
+  matched case-insensitively anywhere in the line, so it works after code, in
+  a // comment, or inside a brace comment. }
+function TRuleContext.MarkerCovers(const ALine, AMarker: string): Boolean;
+var
+  Low, Rest: string;
+  P, IdP:    Integer;
+begin
+  Result := False;
+  Low := LowerCase(ALine);
+  P := Pos(AMarker, Low);
+  if P < 0 then Exit;
+
+  Rest := Copy(Low, P + Length(AMarker), Length(Low) - P - Length(AMarker) + 1);
+
+  { A reason after the separator is prose, not rule ids — cut it off first so
+    a stray id-looking word in the reason cannot widen the suppression.  Rule
+    ids themselves contain '-' (bl-2003), so the separator is a SPACED ' - '. }
+  IdP := Pos(' - ', Rest);
+  if IdP >= 0 then
+    Rest := Copy(Rest, 0, IdP);
+
+  { No id listed => suppress every rule on this line. }
+  if Trim(Rest) = '' then
+    Exit(True);
+
+  Result := Pos(LowerCase(FRuleId), Rest) >= 0;
+end;
+
+function TRuleContext.LineSuppresses(const ALine: string): Boolean;
+begin
+  { 'ignore' is a PREFIX of 'ignore-file', so a bare MarkerCovers check would
+    make a file-scoped directive also read as a line-scoped one.  A file
+    directive is not a line directive: defer to FileSuppresses for those. }
+  if Self.FileSuppresses(ALine) then Exit(False);
+  Result := Self.MarkerCovers(ALine, SUPPRESS_MARKER);
+end;
+
+function TRuleContext.FileSuppresses(const ALine: string): Boolean;
+begin
+  Result := Self.MarkerCovers(ALine, SUPPRESS_FILE_MARKER);
+end;
+
+function TRuleContext.IsSuppressed(const ALoc: TSourceLocation): Boolean;
+var
+  Idx, K, Scan: Integer;
+  Low:          string;
+begin
+  Result := False;
+  if FModel = nil then Exit;          { cross-file Finalize phase: no line }
+  if FModel.Lines = nil then Exit;
+
+  { FILE-level directive: `blaise-guard: ignore-file BL-XXXX` anywhere in the
+    header comment covers every finding in the file.  It uses a DISTINCT
+    marker rather than reusing the line form, because a line-form directive
+    inside the header must keep meaning "this line only" — 26 findings in this
+    tree legitimately land on lines 1-15.
+
+    This exists because one mis-inferred declaration can produce dozens of
+    findings: `FA: array of TA64Op` accounts for 85 BL-2003 hits in a single
+    unit, and the token-level rule cannot see that FA is not a string. }
+  { Scan the file's PREAMBLE only — everything before the first line that
+    starts a declaration section.  A file directive belongs in a header
+    comment; bounding the scan (rather than using a fixed line count) means a
+    directive further down cannot silently acquire file scope, and early CODE
+    lines stay eligible for ordinary line-scoped suppression.
+
+    The boundary is `interface` / `implementation` / the first declaration
+    keyword, NOT the `unit` line: house style in this codebase puts the
+    descriptive comment AFTER `unit <name>;`, so stopping at `unit` would miss
+    the natural place to write the directive. }
+  Scan := FModel.Lines.Count;
+  for K := 0 to FModel.Lines.Count - 1 do
+  begin
+    Low := LowerCase(Trim(FModel.Lines.Strings[K]));
+    if (Low = 'interface') or (Low = 'implementation') or (Low = 'begin') or
+       (Pos('uses ', Low) = 0) or (Low = 'uses') or
+       (Pos('var ', Low) = 0) or (Low = 'var') or
+       (Pos('type ', Low) = 0) or (Low = 'type') or
+       (Pos('const ', Low) = 0) or (Low = 'const') then
+    begin
+      Scan := K;
+      break;
+    end;
+  end;
+  for K := 0 to Scan - 1 do
+    if Self.FileSuppresses(FModel.Lines.Strings[K]) then
+      Exit(True);
+  { TSourceLocation.Line is 1-based; Lines is 0-based. }
+  Idx := ALoc.Line - 1;
+  if (Idx < 0) or (Idx >= FModel.Lines.Count) then Exit;
+
+  { The offending line itself... }
+  if Self.LineSuppresses(FModel.Lines.Strings[Idx]) then
+    Exit(True);
+  { ...or the line above it, for findings that point at a construct's first
+    line where a trailing comment would be awkward (a case statement, a
+    routine header). }
+  if Idx > 0 then
+    Result := Self.LineSuppresses(FModel.Lines.Strings[Idx - 1]);
+end;
+
 procedure TRuleContext.Emit(const AMessage: string; const ALoc: TSourceLocation);
 begin
+  if Self.IsSuppressed(ALoc) then Exit;
   FReport.Add(TDiagnostic.Create(FRuleId, AMessage, FSeverity, ALoc));
 end;
 
@@ -171,6 +310,11 @@ procedure TRuleContext.Emit(const AMessage: string; const ALoc: TSourceLocation;
 var
   D: TDiagnostic;
 begin
+  if Self.IsSuppressed(ALoc) then
+  begin
+    AFix.Free();          { the caller handed us ownership }
+    Exit;
+  end;
   D := TDiagnostic.Create(FRuleId, AMessage, FSeverity, ALoc);
   D.Fix := AFix;
   FReport.Add(D);

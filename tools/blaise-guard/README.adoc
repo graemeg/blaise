@@ -95,6 +95,47 @@ blaise-guard --scan src --fail-on warning
 Exit codes: `0` clean / below threshold, `1` at/above `--fail-on`, `2` usage
 or config error.
 
+== Suppressing a finding
+
+Some findings are wrong for reasons the tool cannot see — a token-level rule
+cannot tell an operand array from a string, for instance. Two inline
+directives handle that, and both take an optional rule list and an optional
+reason.
+
+*Line scope* — the offending line, or the line immediately above it:
+
+[source,pascal]
+----
+if FA[1].SymRef <> srPage then   // blaise-guard: ignore BL-2003
+
+// blaise-guard: ignore BL-2003 - FA[N] is the second OPERAND, not a char
+if FA[1].SymRef <> srPage then
+----
+
+*File scope* — one directive in the file's preamble (before `interface`,
+`uses`, `type`, `var`, `const` or `begin`) covers every finding in that file:
+
+[source,pascal]
+----
+unit blaise.assembler.arm64;
+
+{ blaise-guard: ignore-file BL-2003 - FA[N] indexes the OPERAND array
+  (FA: array of TA64Op), not a string. }
+----
+
+Notes on the design, each of which has a test pinning it:
+
+* *Naming the rule is the norm.* A bare `// blaise-guard: ignore` suppresses
+  every rule on that line. That is allowed but deliberately blunt — SonarQube's
+  `// NOSONAR` behaves this way and routinely hides later, unrelated findings.
+* *A wrong rule id suppresses nothing.* `ignore BL-9999` on a BL-1005 finding
+  leaves it reported, rather than silently swallowing it.
+* *The reason is prose.* Text after a spaced `` - `` is not parsed, so an
+  id-looking word in the reason cannot widen the suppression.
+* *`ignore-file` only works in the preamble.* Written against a code line it
+  does nothing, so a stray directive halfway down a unit cannot silence
+  everything above and below it.
+
 == Configuration
 
 `blaise-guard.json` (see the sample in this directory):

@@ -51,6 +51,20 @@ begin
   FSeverity := sevInfo;
 end;
 
+{ A name that plainly denotes a COLLECTION, where [1] means "the second
+  element" and is perfectly correct.  Without resolved types the rule cannot
+  tell a string from a list, so this is the discriminator: measured against
+  compiler/src/main/pascal, 427 of 543 hits were plural names (Items, Stmts,
+  TypeDecls, Methods, Strings...) and every one inspected was a legitimate
+  element access.  Anything ending in 's' is therefore assumed a collection. }
+function LooksLikeCollection(const AName: string): Boolean;
+var
+  N: string;
+begin
+  N := LowerCase(AName);
+  Result := (Length(N) > 1) and (N[Length(N) - 1] = StrAt('s', 0));
+end;
+
 procedure TStringIndexingRule.CheckTokens(AContext: TRuleContext;
   ATokens: TList<TToken>);
 var
@@ -61,7 +75,8 @@ begin
     if (ATokens[I].Kind = tkIdent) and
        (ATokens[I + 1].Kind = tkLBracket) and
        (ATokens[I + 2].Kind = tkIntLit) and (ATokens[I + 2].Value = '1') and
-       (ATokens[I + 3].Kind = tkRBracket) then
+       (ATokens[I + 3].Kind = tkRBracket) and
+       (not LooksLikeCollection(ATokens[I].Value)) then
       AContext.Emit(
         'Subscript literal 1 on ''' + ATokens[I].Value +
         ''': Blaise indexing is 0-based (first element is [0]) - verify this ' +

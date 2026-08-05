@@ -8,6 +8,9 @@
 
 unit blaise.assembler.arm64;
 
+{ blaise-guard: ignore-file BL-2003 - FA[N] indexes the OPERAND array
+  (FA: array of TA64Op), not a string; 0-based indexing is not in question. }
+
 { Self-assembler for the AArch64 backend's GNU-syntax assembly dialect —
   the arm64 sibling of blaise.assembler.x86_64 (macos-arm64 Phase 1b,
   docs/macos-arm64-backend-design.adoc).
