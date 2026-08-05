@@ -6618,6 +6618,8 @@ end;
 procedure TCodeGenQBE.EmitRecordReturnSignature(var ASig: string;
   AClass: TRecReturnClass);
 begin
+  { blaise-guard: ignore BL-3002 - the else arm below covers every non-sret
+    class; an else with no statement has no AST node for the rule to see. }
   case AClass of
     rcSret:
       begin
@@ -6626,6 +6628,11 @@ begin
         else
           ASig := 'l %_par__sret';
       end;
+  else
+    { Every OTHER class returns in registers, so the signature is unchanged —
+      only sret prepends a hidden buffer parameter.  Stated explicitly so a new
+      TRecReturnClass member has to be considered here rather than silently
+      inheriting "no hidden parameter". }
   end;
 end;
 
@@ -6731,6 +6738,12 @@ begin
     rcSSE1:
       if ARetRec.TotalSize() = 4 then Result := 's' else Result := 'd';
     rcWin64Agg:                            Result := FFIRecordTypeRef(ARetRec);
+  else
+    { rcSret: the record is returned through a hidden buffer pointer, so the
+      declaration carries NO return type — '' is the answer, not a gap.  Stated
+      explicitly so adding a TRecReturnClass member fails loudly here instead
+      of silently falling through to ''. }
+    Result := '';
   end;
 end;
 

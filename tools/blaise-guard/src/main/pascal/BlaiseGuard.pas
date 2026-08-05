@@ -36,10 +36,62 @@ uses
   Guard.Cli,
   Guard.Rules.All;   { pulls every rule unit in so they self-register }
 
-function BuildConfig(AOpt: TCliOptions): TGuardConfig;
+const
+  { Discovered by walking up from the analysis root; --config overrides. }
+  CONFIG_NAME = 'blaise-guard.json';
+
+{ The directory the analysis starts from — the scan root, the project file's
+  directory, or the single file's directory.  Discovery walks up from here. }
+function AnalysisRoot(AOpt: TCliOptions): string;
 begin
+  if AOpt.HasScan then
+    Result := AOpt.ScanPath
+  else if AOpt.HasProject then
+    Result := ExtractFileDir(AOpt.ProjectPath)
+  else if AOpt.FilePath <> '' then
+    Result := ExtractFileDir(AOpt.FilePath)
+  else
+    Result := '';
+  if Result = '' then
+    Result := GetCurrentDir();
+end;
+
+{ Look for CONFIG_NAME in ADir and each ancestor, nearest first.  Returns ''
+  when none is found.
+
+  Why walk UP: the natural invocation is from the project root
+  (`blaise-guard --scan compiler/src/main/pascal`), but it is equally natural
+  to run it against a subdirectory from inside that subdirectory.  Both should
+  find the project's one config.  Nearest-wins lets a subtree override. }
+function DiscoverConfig(const ADir: string): string;
+var
+  Dir, Prev, Candidate: string;
+begin
+  Result := '';
+  Dir := ExpandFileName(ADir);
+  Prev := '';
+  while (Dir <> '') and (Dir <> Prev) do
+  begin
+    Candidate := IncludeTrailingPathDelimiter(Dir) + CONFIG_NAME;
+    if FileExists(Candidate) then
+      Exit(Candidate);
+    Prev := Dir;
+    Dir  := ExtractFileDir(Dir);
+  end;
+end;
+
+function BuildConfig(AOpt: TCliOptions): TGuardConfig;
+var
+  Found: string;
+begin
+  { An explicit --config always wins — discovery must never override what the
+    caller named. }
   if AOpt.ConfigPath <> '' then
-    Result := TGuardConfig.LoadFromFile(AOpt.ConfigPath)
+    Exit(TGuardConfig.LoadFromFile(AOpt.ConfigPath));
+
+  Found := DiscoverConfig(AnalysisRoot(AOpt));
+  if Found <> '' then
+    Result := TGuardConfig.LoadFromFile(Found)
   else
     Result := TGuardConfig.Default();
 end;

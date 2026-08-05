@@ -138,7 +138,35 @@ Notes on the design, each of which has a test pinning it:
 
 == Configuration
 
-`blaise-guard.json` (see the sample in this directory):
+=== Where the config comes from
+
+Resolution order, first match wins:
+
+. `--config <file>`, if given — an explicit path always wins.
+. `blaise-guard.json` found by walking UP from the analysed path (the `--scan`
+  root, the `--project` file's directory, or the file's own directory) to the
+  filesystem root. Nearest wins, so a subtree may override the project root.
+. The built-in defaults.
+
+Walking up means `blaise-guard --scan compiler/src/main/pascal` from the
+project root and `blaise-guard --scan .` from inside that directory both find
+the same project config.
+
+Two configs live in this repository and they are NOT interchangeable:
+
+`tools/blaise-guard/blaise-guard.json`::
+The *sample*. It mirrors the built-in defaults exactly and is what a new user
+copies. Do not tune it for this codebase — if it drifts from the defaults, a
+user reading it gets different behaviour from a user who passes no `--config`.
+
+`/blaise-guard.json` (project root)::
+This project's own thresholds, discovered automatically. Every relaxed value
+carries a `_`-prefixed note recording the measurement behind it, so a later
+reader can tell a deliberate trade-off from an unexamined default.
+
+=== Format
+
+`blaise-guard.json` (see the sample in `tools/blaise-guard/`):
 
 [source,json]
 ----

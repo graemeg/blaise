@@ -1293,6 +1293,13 @@ begin
         Dummy := EmitModRMMem(ACB, AReg, AOp.Base, AOp.Index, AOp.Scale,
                               AOp.Disp, DispOff);
     end;
+  else
+    { The remaining TOperandKind values (opNone/opReg/opImm/opImm64/opLabel/
+      opIndirect) are not MEMORY operands and never reach this encoder — the
+      caller dispatches them elsewhere.  Stated explicitly so a new operand
+      kind fails loudly here instead of silently encoding nothing. }
+    raise EAssembler.Create('EncodeMemOperand: non-memory operand kind '
+      + IntToStr(Ord(AOp.Kind)));
   end;
 end;
 
@@ -3285,6 +3292,7 @@ begin
     for I := 0 to ParsedCount - 1 do
     begin
       PL := Parsed[I];
+      { blaise-guard: ignore BL-3002 - lkEmpty (blank/comment line) is handled by the else arm below; an empty else has no AST statement to detect. }
       case PL.Kind of
         lkLabel:
         begin
@@ -3319,6 +3327,10 @@ begin
           end;
           Writer.AppendZeros(Section, Length(Encoded));
         end;
+      else
+        { lkEmpty: a blank or comment-only line — nothing to assemble.  Named
+          explicitly so a new TLineKind has to be considered here rather than
+          silently doing nothing. }
       end;
     end;
 
@@ -3336,6 +3348,7 @@ begin
     for I := 0 to ParsedCount - 1 do
     begin
       PL := Parsed[I];
+      { blaise-guard: ignore BL-3002 - lkEmpty (blank/comment line) is handled by the else arm below; an empty else has no AST statement to detect. }
       case PL.Kind of
         lkLabel:
         begin
@@ -3367,6 +3380,10 @@ begin
           end;
           Writer.Append(Section, Encoded);
         end;
+      else
+        { lkEmpty: a blank or comment-only line — nothing to assemble.  Named
+          explicitly so a new TLineKind has to be considered here rather than
+          silently doing nothing. }
       end;
     end;
 

@@ -2811,12 +2811,14 @@ begin
   Lx := TLexer.Create(ASourceText, ASourcePath);
   Lx.ApplyDefines(ADefines);   { same branches the real compile takes }
   try
+    { blaise-guard: ignore BL-2005 - deliberate; see the except note below }
     try
       repeat
         Tok := Lx.Next();
       until Tok.Kind = tkEOF;
     except
-      { Ignore — hash the source text alone and let the compile report. }
+      { Ignore — a lex failure must NOT abort hash discovery; the subsequent
+        real compile reports it with proper diagnostics (note above). }
     end;
     for I := 0 to Lx.EmbeddedFiles.Count - 1 do
     begin

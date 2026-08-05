@@ -1,0 +1,73 @@
+{
+  "_comment": [
+    "BlaiseGuard configuration for the Blaise compiler project itself.",
+    "Discovered automatically by walking up from the analysed path; an",
+    "explicit --config overrides it.  The SAMPLE config in",
+    "tools/blaise-guard/ deliberately mirrors the built-in defaults and is",
+    "what a new user copies -- do not tune that one for this codebase.",
+    "",
+    "Thresholds below are measured against compiler/ and stdlib/, not",
+    "guessed.  Where a rule is relaxed the reason is recorded, so a future",
+    "reader can tell a deliberate trade-off from an unexamined default."
+  ],
+
+  "rules": {
+    "BL-0000": { "enabled": true, "severity": "warning" },
+
+    "_BL-1001": "120 is the house limit and the code already respects it (41 hits).",
+    "BL-1001": { "enabled": true, "severity": "warning", "params": { "maxLength": 120 } },
+
+    "_BL-1002": [
+      "Raised 15 -> 60.  At 15 the compiler reports 1114 findings, which is a",
+      "description of the codebase rather than a defect list: the backends and",
+      "the semantic pass are built from long, flat dispatch routines that are",
+      "clearer whole than split.  60 keeps the genuinely oversized ones visible."
+    ],
+    "BL-1002": { "enabled": true, "severity": "warning", "params": { "maxLines": 60 } },
+
+    "_BL-1003": [
+      "Raised 3 -> 6.  1211 findings at depth 3, concentrated in codegen",
+      "dispatch (native.x86_64 328, uSemantic 215, qbe 203).  Nested case/if",
+      "over an instruction or node kind is the natural shape there."
+    ],
+    "BL-1003": { "enabled": true, "severity": "warning", "params": { "maxDepth": 6 } },
+
+    "_BL-1004": "Off by default upstream: closures and shadowing keep it heuristic.",
+    "BL-1004": { "enabled": false, "severity": "warning", "params": { "checkParameters": false } },
+
+    "BL-1005": { "enabled": true, "severity": "warning" },
+    "BL-1006": { "enabled": true, "severity": "warning" },
+
+    "_BL-2001": [
+      "Demoted to info.  3261 findings, and the top files are TESTS, where an",
+      "explicit Free is often deliberate (exercising teardown, or a non-ARC",
+      "fixture).  Worth reading, not worth failing a build over yet."
+    ],
+    "BL-2001": { "enabled": true, "severity": "info", "params": { "includeDestroy": true } },
+
+    "BL-2002": { "enabled": true, "severity": "warning", "params": { "includeSelfReference": false } },
+    "BL-2003": { "enabled": true, "severity": "info" },
+
+    "_BL-2004": [
+      "Kept ON at info.  86 findings and they are GENUINE -- Ord(S[i]) has been",
+      "observed to miscompile under the self-hosted native stage (CLAUDE.md).",
+      "The bulk conversion to OrdAt currently segfaults the built compiler",
+      "(BUG-20260805-ordat-bulk-conversion-segfault), so these stay visible",
+      "rather than suppressed: the rule is right, the migration is blocked."
+    ],
+    "BL-2004": { "enabled": true, "severity": "info" },
+
+    "BL-2005": { "enabled": true, "severity": "warning" },
+
+    "_BL-3001": [
+      "minTokens raised 30 -> 120.  At 30 the compiler reports 6855 findings.",
+      "That is real duplication -- the known codegen-duplication problem tracked",
+      "in docs/future-improvements.adoc -- but at that threshold it drowns every",
+      "other rule. 120 surfaces only substantial clones."
+    ],
+    "BL-3001": { "enabled": true, "severity": "warning",
+                 "params": { "minTokens": 120, "ignoreIdentifierNames": false } },
+
+    "BL-3002": { "enabled": true, "severity": "warning" }
+  }
+}

@@ -1085,6 +1085,13 @@ begin
           ShFlags := SHF_ALLOC or SHF_WRITE;
           ShType  := SHT_INIT_ARRAY;
         end;
+      else
+        { cskTdata / cskTvars / cskIface are Mach-O-only section kinds and
+          never reach the ELF writer.  Without this arm they would inherit the
+          PREVIOUS iteration's ShFlags/ShType (neither is reset per loop) and
+          silently emit a malformed section header.  Fail loudly instead. }
+        raise Exception.Create(
+          'ELF writer: unsupported section kind ' + IntToStr(Ord(SecOrder[I])));
       end;
       ElfEmitShdr(Buf, SecNameIdx[I], ShType, ShFlags, 0,
                SecFileOff[I], Int64(Sec.Size), 0, 0,

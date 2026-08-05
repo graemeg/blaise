@@ -2,7 +2,7 @@
   "rules": {
     "BL-0000": { "enabled": true, "severity": "warning" },
     "BL-1001": { "enabled": true, "severity": "warning", "params": { "maxLength": 120 } },
-    "BL-1002": { "enabled": true, "severity": "warning", "params": { "maxLines": 30 } },
+    "BL-1002": { "enabled": true, "severity": "warning", "params": { "maxLines": 15 } },
     "BL-1003": { "enabled": true, "severity": "warning", "params": { "maxDepth": 3 } },
     "BL-1004": { "enabled": false, "severity": "warning", "params": { "checkParameters": false } },
     "BL-1005": { "enabled": true, "severity": "warning" },
