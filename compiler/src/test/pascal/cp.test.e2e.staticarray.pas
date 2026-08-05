@@ -103,6 +103,8 @@ type
     { GH #181 — Boolean is a valid 2-element ordinal index type. }
     procedure TestRun_BooleanIndex_TypeDecl;
     procedure TestRun_BooleanIndex_VarDecl;
+    { GH #208 — the same index type in a typed CONSTANT, inline and named. }
+    procedure TestRun_BooleanIndex_ConstDecl;
     { Reading a RECORD element out of a static/dynamic array — the element is a
       value used by reference (whole-record copy, field read).  arm64 leg 32
       hardened its element-read path; this guards the behaviour on QBE + native. }
@@ -1027,6 +1029,31 @@ begin
       WriteLn(A[False]); WriteLn(A[True])
     end.
     ''', 'no' + LE + 'yes' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_BooleanIndex_ConstDecl;
+var LE: string;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  LE := LineEnding;
+  { GH #208: `array[Boolean] of T` was accepted in a type decl and a var decl
+    but REJECTED in an inline typed constant ("index type must be an enum"),
+    while the same constant through a NAMED type was accepted.  Both forms are
+    asserted here so the asymmetry cannot come back.  A string element type is
+    included because the element resolver treats managed elements separately. }
+  AssertRunsOnAll('''
+    program P;
+    type TF = array[Boolean] of Integer;
+    const
+      C1: TF = (10, 20);
+      C2: array[Boolean] of Integer = (30, 40);
+      C3: array[Boolean] of string = ('no', 'yes');
+    begin
+      WriteLn(C1[False]); WriteLn(C1[True]);
+      WriteLn(C2[False]); WriteLn(C2[True]);
+      WriteLn(C3[False]); WriteLn(C3[True])
+    end.
+    ''', '10' + LE + '20' + LE + '30' + LE + '40' + LE + 'no' + LE + 'yes' + LE, 0);
 end;
 
 procedure TE2EStaticArrayTests.TestRun_BooleanIndex_VarDecl;

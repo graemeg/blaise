@@ -127,6 +127,9 @@ type
     { GH #181 — Boolean is a valid 2-element ordinal index type. }
     procedure TestSemantic_BooleanIndex_TypeDecl;
     procedure TestSemantic_BooleanIndex_Bounds;
+    { GH #208 — the same index type in an inline typed CONSTANT. }
+    procedure TestSemantic_BooleanIndex_ConstBounds;
+    procedure TestSemantic_BooleanIndex_ConstWrongCount;
     procedure TestSemantic_StringIndex_RaisesTargetedError;
   end;
 
@@ -1158,6 +1161,51 @@ begin
   finally
     P.Free();
   end;
+end;
+
+procedure TStaticArrayTests.TestSemantic_BooleanIndex_ConstBounds;
+var P: TProgram; Sym: TSymbol; SAT: TStaticArrayTypeDesc;
+begin
+  { GH #208: the INLINE form was rejected ("index type must be an enum") while
+    the same constant via a named type was accepted.  Assert the folded bounds
+    match the type-declaration path: array[Boolean] === array[0..1].
+    TConstDecl carries no ResolvedType, so the check goes through the symbol
+    the analyser publishes for the constant. }
+  P := AnalyseSrc('''
+    program P;
+    const C: array[Boolean] of Integer = (10, 20);
+    begin end.
+    ''');
+  try
+    Sym := P.SymbolTable.Lookup('C');
+    AssertTrue('constant is defined', Sym <> nil);
+    AssertTrue('is a static array', Sym.TypeDesc.Kind = tyStaticArray);
+    SAT := TStaticArrayTypeDesc(Sym.TypeDesc);
+    AssertEquals('low', 0, SAT.LowBound);
+    AssertEquals('high (False..True)', 1, SAT.HighBound);
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticArrayTests.TestSemantic_BooleanIndex_ConstWrongCount;
+var Threw: Boolean; Msg: string;
+begin
+  { The count check must still fire for a Boolean index — accepting the type
+    must not accept any arity. }
+  Threw := False; Msg := '';
+  try
+    AnalyseSrc('''
+      program P;
+      const C: array[Boolean] of Integer = (1, 2, 3);
+      begin end.
+      ''');
+  except
+    on E: Exception do begin Threw := True; Msg := E.Message; end;
+  end;
+  AssertTrue('expected semantic error', Threw);
+  AssertTrue('reports the arity mismatch, got: ' + Msg,
+    Pos('has 3 element(s)', Msg) >= 0);
 end;
 
 procedure TStaticArrayTests.TestSemantic_StringIndex_RaisesTargetedError;

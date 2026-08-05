@@ -672,7 +672,7 @@ ConstDecl
 
 ConstTypeAnnotation
     = TypeName                                            (* scalar typed const *)
-    | ARRAY LBRACKET TypeName RBRACKET OF TypeName        (* array-of-enum const *)
+    | ARRAY LBRACKET TypeName RBRACKET OF TypeName        (* enum- or Boolean-indexed const *)
     | ConstArrayType                                      (* range-indexed array const *)
     | ConstUnboundedArrayType                             (* bounds from the value *)
     ;

@@ -3576,7 +3576,20 @@ const
 
 The element count in the value list must exactly match the number of enum
 members; a mismatch is a semantic error.  The index type must be an enum
-declared in the same or an enclosing scope.
+declared in the same or an enclosing scope, or `Boolean` — which is a
+two-member ordinal and folds to `array[0..1]`, exactly as it does in a type
+or var declaration (GH #181, GH #208):
+
+[source,pascal]
+----
+const
+  Answer: array[Boolean] of string = ('no', 'yes');
+----
+
+Both spellings are accepted and produce the same type: the inline form above,
+and the named form `type TA = array[Boolean] of string;` followed by
+`const Answer: TA = (...)`.  The inline form was rejected until GH #208 — an
+asymmetry with no justification, since the two declare the same thing.
 
 Supported element types: the same scalar types supported by scalar typed
 constants (Integer, Int64, Double, Single, Boolean, string).

@@ -6182,8 +6182,27 @@ begin
         if IdxTD = nil then
           SemanticError(Format('Unknown index type ''%s'' in array const ''%s''',
             [CD.ArrayIndexType, CD.Name]), CD.Line, CD.Col);
+        if IdxTD.Kind = tyBoolean then
+        begin
+          { Boolean index (const C: array[Boolean] of T = (...)): a 2-element
+            ordinal indexed by False (0) and True (1), folded to array[0..1]
+            exactly as the TYPE-declaration path does (GH #181, ~:3628).
+            Without this arm the inline const form was rejected while the
+            named-type form `const C: T = (...)` was accepted — the asymmetry
+            reported as GH #208. }
+          Expected := 2;
+          if CD.ArrayElements.Count <> Expected then
+            SemanticError(Format(
+              'Array const ''%s'' has %d element(s) but index type ''%s'' has %d member(s)',
+              [CD.Name, CD.ArrayElements.Count, CD.ArrayIndexType, Expected]),
+              CD.Line, CD.Col);
+          ArrTD := FTable.NewStaticArrayType(ElemTD, 0, Expected - 1);
+        end
+        else
+        begin
         if IdxTD.Kind <> tyEnum then
-          SemanticError(Format('Array const index type must be an enum, got ''%s''',
+          SemanticError(Format(
+            'Array const index type must be an enum or Boolean, got ''%s''',
             [IdxTD.Name]), CD.Line, CD.Col);
         EnumDesc := TEnumTypeDesc(IdxTD);
         { An enum-SUBRANGE index (TTurn = East..South) spans only its own
@@ -6205,6 +6224,7 @@ begin
             EnumDesc.SubrangeLow, EnumDesc.SubrangeHigh)
         else
           ArrTD := FTable.NewStaticArrayType(ElemTD, 0, Expected - 1);
+        end;
       end;
     end;
     { Fold any deferred bit-op expressions into their final integer
