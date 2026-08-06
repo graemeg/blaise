@@ -43,7 +43,7 @@ full source-level debugging of incrementally-compiled multi-unit programs.
 == 🚀 Project Status
 
 * **Self-Hosting:** Yes. Blaise bootstraps and recompiles itself with byte-for-byte fixpoint. FPC is no longer required — the entire toolchain runs on Blaise alone.
-* **Testing:** 4275+ tests and growing (Test-Driven Development from day one). The test suite itself compiles under Blaise, and runs in CI on both Linux and FreeBSD.
+* **Testing:** 4977+ tests and growing (Test-Driven Development from day one). The test suite itself compiles under Blaise, and runs in CI on both Linux and FreeBSD.
 * **Backends:** Two code-generation backends — a direct native x86-64 backend (the default since v0.12.0) and QBE (opt-in via `--backend qbe`). Both pass the full fixpoint and test suite.
 * **Targets:** Two targets — Linux x86_64 and FreeBSD x86_64 — with cross-compilation between them in either direction using no external tools or packages: the internal assembler and linker produce the foreign binary directly, and the self-hosting fixpoint is verified on both operating systems.
 * **Standard library:** A growing opt-in stdlib — generics collections, JSON (DOM + parser + writer), SHA-1 and Base64, RFC 4122 UUIDs, TCP sockets, WebSockets, a minimal HTTP/1.1 server, and a `blaise.testing` unit-test framework.
