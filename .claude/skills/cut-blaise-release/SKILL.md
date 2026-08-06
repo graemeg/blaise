@@ -8,7 +8,7 @@ description: |
   (NOT committed — releases/ is gitignored), renames + refreshes the -pre
   bootstrap dir to the next cycle, cross-compiles a FreeBSD x86_64 binary, builds
   self-contained Linux + FreeBSD release tarballs (binary + blaise.cfg + RTL +
-  stdlib source), writes the community post + changelog, then
+  stdlib source), writes the community post + changelog into releases/, then
   bumps Blaise.pas + project.xml + uCompilerId.pas to the next -SNAPSHOT version.
   Use when asked to "cut a release", "release v0.X.Y", "tag a release", or after
   the user confirms a fixpoint is achieved.
@@ -421,8 +421,12 @@ This is a CI-only change and lands in its own commit alongside the release.
 
 ## Step 8 — write community post and changelog
 
-Write two documents at the project root. Both are untracked (do not `git add`
-them) — they are working files the user edits and publishes manually.
+Write two documents into `releases/` (e.g. `releases/community-post-v<X.Y.Z>.md`,
+`releases/changelog-v<X.Y.Z>.md`) — NOT the project root. `releases/` is
+gitignored, so these are naturally untracked; do not `git add` them regardless
+— they are working files the user edits and publishes manually. This is also
+where every past release's post/changelog already lives (e.g.
+`releases/community-post-v0.13.0.md`), so put the new ones alongside them.
 
 Both documents cover **only the commits between the previous release tag and
 the tag being cut now** — the range `<prev-tag>..v<X.Y.Z>`, where `<prev-tag>`
@@ -436,7 +440,7 @@ Survey the commits first (the `v<X.Y.Z>` tag already exists from Step 5):
 `git log <prev-tag>..v<X.Y.Z> --oneline | grep ' feat'` (features),
 `... | grep ' fix'` (fixes), `... | grep ' perf'` (performance).
 
-### community-post-v<X.Y.Z>.md
+### releases/community-post-v<X.Y.Z>.md
 
 A warm, readable announcement for the Blaise community (forums, mailing lists,
 social media). Style:
@@ -457,7 +461,7 @@ social media). Style:
 - End with a forward-looking line ("Onwards to v<next>! 🙌").
 - Reference `changelog-v<X.Y.Z>.md` for full details.
 
-### changelog-v<X.Y.Z>.md
+### releases/changelog-v<X.Y.Z>.md
 
 A technical changelog for the GitHub Releases page. Style:
 
@@ -481,8 +485,8 @@ Summarise:
 - `-pre` bootstrap binary refreshed
 - New dev version on master
 - Last 3–4 commit oneliners
-- Community post: `community-post-v<X.Y.Z>.md` (untracked)
-- Changelog: `changelog-v<X.Y.Z>.md` (untracked)
+- Community post: `releases/community-post-v<X.Y.Z>.md` (untracked)
+- Changelog: `releases/changelog-v<X.Y.Z>.md` (untracked)
 - Release tarballs (upload both to GitHub Releases):
   - `releases/blaise-v<X.Y.Z>-linux-x86_64.tar.gz`
   - `releases/blaise-v<X.Y.Z>-freebsd-x86_64.tar.gz` (cross-compiled; user
