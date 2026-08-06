@@ -38,12 +38,13 @@ permissions:
 env:
   # Cold-start anchor: the newest *real* release whose binary is published as a
   # GitHub Release asset. Used only when no cached -pre binary is available.
-  # v0.13.0 is the rolling-bootstrap anchor: the broken v0.11.0->v0.12.0 commit
+  # v0.14.0 is the rolling-bootstrap anchor: the broken v0.11.0->v0.12.0 commit
   # range is BEFORE it, so the replay range is all native-default +
-  # internal-toolchain and needs neither QBE nor gcc.  It is also the first
-  # release whose binary SOURCE-BUILDS the RTL, so no blaise_rtl.a is involved
-  # anywhere in the chain (v0.12.0 still required the archive).
-  STAGE1_TAG: v0.13.0
+  # internal-toolchain and needs neither QBE nor gcc.  Like v0.13.0 before it,
+  # the binary SOURCE-BUILDS the RTL, so no blaise_rtl.a is involved anywhere
+  # in the chain. Always keep this anchor pinned to the latest published
+  # release — see the "Cutting a Blaise release" skill, Step 7b.
+  STAGE1_TAG: v0.14.0
 
 jobs:
   bootstrap:
