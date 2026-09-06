@@ -59,6 +59,9 @@ type
     function StatSize(Buf: Pointer):  Int64; override;
     function StatMtime(Buf: Pointer): Int64; override;
     function StatMode(Buf: Pointer):  Integer; override;
+
+    function DirentRecLen(Ent: Pointer): Integer; override;
+    function DirentName(Ent: Pointer): Pointer; override;
   end;
 
 {$IFDEF DARWIN}
@@ -111,6 +114,13 @@ const
   STAT_OFF_SIZE  = 96;   { st_size  (off_t, Int64) }
   STAT_SIZE      = 144;  { sizeof(struct stat) }
 
+  { Darwin struct dirent (64-bit-inode layout, as returned by getdirentries64):
+      d_ino (8) d_seekoff (8) d_reclen (u16 @16) d_namlen (u16 @18)
+      d_type (u8 @20) d_name (@21).
+    Note d_namlen precedes d_type here, unlike Linux and FreeBSD. }
+  DIRENT_OFF_RECLEN = 16;
+  DIRENT_OFF_NAME   = 21;
+
 function TPlatformLayoutDarwinArm64.O_RDONLY: Integer; begin Result := 0;     end;
 function TPlatformLayoutDarwinArm64.O_WRONLY: Integer; begin Result := 1;     end;
 function TPlatformLayoutDarwinArm64.O_RDWR:   Integer; begin Result := 2;     end;
@@ -160,6 +170,19 @@ begin
     32-bit read here would fold the link count into the mode }
   P := Pointer(PChar(Buf) + STAT_OFF_MODE);
   Result := Integer(P^);
+end;
+
+function TPlatformLayoutDarwinArm64.DirentRecLen(Ent: Pointer): Integer;
+var
+  P: ^Word;
+begin
+  P := Pointer(PChar(Ent) + DIRENT_OFF_RECLEN);
+  Result := P^;
+end;
+
+function TPlatformLayoutDarwinArm64.DirentName(Ent: Pointer): Pointer;
+begin
+  Result := Pointer(PChar(Ent) + DIRENT_OFF_NAME);
 end;
 
 { Assign GPlatformLayout to the Darwin layout, once.  Called from this

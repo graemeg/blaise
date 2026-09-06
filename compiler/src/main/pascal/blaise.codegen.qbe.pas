@@ -13394,6 +13394,15 @@ begin
         Exit(T);
       end;
 
+      if SameText(FC.Name,'ListDir') then
+      begin
+        L := EmitExpr(TASTExpr(FC.Args.Items[0]));
+        T := AllocTemp();
+        EmitLine(Format('  %s =l call $_ListDir(l %s)', [T, L]));
+        ReleaseOwnedBuiltinStrArg(TASTExpr(FC.Args.Items[0]), L);
+        Exit(T);
+      end;
+
       { Environment and process }
       if SameText(FC.Name,'GetEnvVar') or SameText(FC.Name,'GetEnvironmentVariable') then
       begin

@@ -54,6 +54,7 @@ type
     function RemoveDir(const APath: string): Boolean; override;
     function GetCurrentDir: string; override;
     function SetCurrentDir(const APath: string): Boolean; override;
+    function ListDir(const APath: string): string; override;
 
     { OS utilities }
     function GetTempDir: string; override;
@@ -186,6 +187,13 @@ function  libc_rmdir(Path: PChar): Integer;                                  ext
 function  libc_unlink(Path: PChar): Integer;                                 external name 'unlink';
 function  libc_rename(OldPath, NewPath: PChar): Integer;                     external name 'rename';
 function  libc_getcwd(Buf: PChar; Size: Int64): PChar;                       external name 'getcwd';
+{ getdirentries(3) is the one directory-reading spelling libc provides on all
+  three POSIX targets (glibc >= 2.2.5, FreeBSD, macOS); the freestanding
+  syscall leaves define the same symbol, so this single binding serves the
+  libc and --static paths alike.  Returns bytes written into Buf, 0 at end of
+  directory, negative on error. }
+function  libc_getdirentries(Fd: Integer; Buf: Pointer; NBytes: Int64;
+                             Basep: Pointer): Int64;                          external name 'getdirentries';
 function  libc_chdir(Path: PChar): Integer;                                  external name 'chdir';
 function  libc_getenv(Name: PChar): PChar;                                   external name 'getenv';
 function  libc_mkstemp(Template: PChar): Integer;                            external name 'mkstemp';
@@ -235,6 +243,7 @@ function  _ForceDirectories(Path: Pointer): Integer;
 procedure _RemoveDir(Path: Pointer);
 function  _GetCurrentDir: Pointer;
 function  _SetCurrentDir(Path: Pointer): Integer;
+function  _ListDir(Path: Pointer): Pointer;
 
 { OS utilities }
 function  _GetTempDir: Pointer;
@@ -583,6 +592,108 @@ end;
 function TRtlPlatformPosix.SetCurrentDir(const APath: string): Boolean;
 begin
   Result := libc_chdir(StrData(Pointer(APath))) = 0;
+end;
+
+function TRtlPlatformPosix.ListDir(const APath: string): string;
+const
+  BufSize = 32768;
+var
+  Buf:      array[0..BufSize - 1] of Byte;
+  Fd:       Integer;
+  Got:      Int64;
+  Pos:      Int64;
+  Ent:      Pointer;
+  RecLen:   Integer;
+  Nm:       PChar;
+  NmLen:    Integer;
+  Total:    Integer;
+  Count:    Integer;
+  R:        PChar;
+  W:        Integer;
+  I:        Integer;
+  Pass:     Integer;
+  Skip:     Boolean;
+  { glibc's getdirentries(3) writes through basep unconditionally, so it must
+    point at real storage — passing nil segfaults inside libc.  (The
+    freestanding syscall leaf ignores it, which is why only the libc-linked
+    build crashed.)  The value itself is never read. }
+  Basep:    Int64;
+begin
+  Result := '';
+  Basep  := 0;
+  Fd := libc_open2(StrData(Pointer(APath)), GPlatformLayout.O_RDONLY());
+  if Fd < 0 then Exit;
+
+  { Two passes over the directory: the first measures, the second fills the
+    exact-sized buffer.  The directory is re-read (lseek back to 0) rather
+    than buffered in a growable list because the RTL has no list type — and
+    a short second read is harmless, the writer is bounded by Total. }
+  Total := 0;
+  Count := 0;
+  R     := nil;
+  W     := 0;
+
+  for Pass := 0 to 1 do
+  begin
+    if Pass = 1 then
+    begin
+      if Count = 0 then begin libc_close(Fd); Exit end;
+      { Total name bytes + (Count - 1) separators. }
+      R := StrAlloc(Total + Count - 1);
+      if R = nil then begin libc_close(Fd); Exit end;
+      libc_lseek(Fd, 0, GPlatformLayout.SEEK_SET());
+    end;
+
+    repeat
+      Got := libc_getdirentries(Fd, @Buf[0], BufSize, @Basep);
+      if Got <= 0 then Break;
+      Pos := 0;
+      while Pos < Got do
+      begin
+        Ent    := Pointer(PChar(@Buf[0]) + Pos);
+        RecLen := GPlatformLayout.DirentRecLen(Ent);
+        { A zero/negative reclen would not advance Pos — bail out rather
+          than spin forever on a malformed buffer. }
+        if RecLen <= 0 then Break;
+        Nm    := PChar(GPlatformLayout.DirentName(Ent));
+        NmLen := Integer(libc_strlen(Nm));
+        { Skip '.' and '..'. }
+        Skip := ((NmLen = 1) and (Nm[0] = '.'))
+             or ((NmLen = 2) and (Nm[0] = '.') and (Nm[1] = '.'));
+        { A deleted-but-still-listed entry has an empty name on some
+          filesystems; nothing useful to return for it. }
+        if NmLen = 0 then Skip := True;
+        if not Skip then
+        begin
+          if Pass = 0 then
+          begin
+            Total := Total + NmLen;
+            Count := Count + 1
+          end
+          else
+          begin
+            if W > 0 then
+            begin
+              if W >= Total + Count - 1 then Break;
+              R[W] := #10;
+              W    := W + 1
+            end;
+            for I := 0 to NmLen - 1 do
+            begin
+              if W >= Total + Count - 1 then Break;
+              R[W] := Nm[I];
+              W    := W + 1
+            end
+          end
+        end;
+        Pos := Pos + RecLen
+      end
+    until False
+  end;
+
+  libc_close(Fd);
+  if R <> nil then
+    Result := string(R)
 end;
 
 { ================================================================== }
@@ -1243,6 +1354,11 @@ end;
 function _SetCurrentDir(Path: Pointer): Integer;
 begin
   if GRtlPlatform.SetCurrentDir(string(PChar(Path))) then Result := 1 else Result := 0;
+end;
+
+function _ListDir(Path: Pointer): Pointer;
+begin
+  Result := Pointer(GRtlPlatform.ListDir(string(PChar(Path))));
 end;
 
 function _GetTempDir: Pointer;

@@ -13019,6 +13019,19 @@ begin
     Exit;
   end;
 
+  { ListDir(path): the directory's entry names, separated by #10, with '.'
+    and '..' omitted.  '' for an empty or unreadable directory. }
+  if SameText(AExpr.Name, 'ListDir') then
+  begin
+    if AExpr.Args.Count <> 1 then
+      SemanticError('''ListDir'' requires exactly 1 argument',
+                    AExpr.Line, AExpr.Col);
+    Self.AnalyseListSlot(AExpr.Args, 0);
+    Result := FTable.TypeString;
+    AExpr.ResolvedType := Result;
+    Exit;
+  end;
+
   { Environment and process functions }
   if SameText(AExpr.Name, 'GetEnvVar') or
      SameText(AExpr.Name, 'GetEnvironmentVariable') then

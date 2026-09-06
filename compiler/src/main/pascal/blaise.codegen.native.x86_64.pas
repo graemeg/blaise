@@ -8592,6 +8592,11 @@ begin
       Self.Emit(#9'callq _ParamCount');
       Exit;
     end;
+    if SameText(FC.Name, 'ListDir') and (FC.Args.Count = 1) then
+    begin
+      Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_ListDir');
+      Exit;
+    end;
     if (SameText(FC.Name, 'GetEnvVar') or SameText(FC.Name, 'GetEnvironmentVariable'))
        and (FC.Args.Count = 1) then
     begin

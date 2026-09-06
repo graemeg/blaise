@@ -61,6 +61,13 @@ type
     procedure TestStaticAsyncReactor_LinksAndRuns;
     procedure TestFreeRoutine_RoundTrip_WithoutSource;
     procedure TestGenericClass_RoundTrip_WithoutSource;
+    { Regression (BUG-20260906-openarray-param-bif-roundtrip): a routine taking
+      an OPEN ARRAY parameter (`array of T`) became uncallable once its unit
+      was loaded from a cached .o instead of source — the importer resolved the
+      param's TypeName, which for an open array names the ELEMENT type, and
+      stored that as the param type, so the call site's array argument matched
+      no overload. }
+    procedure TestOpenArrayParam_RoundTrip_WithoutSource;
     procedure TestUninstantiatedGenericFunc_InUnit_Compiles;
     procedure TestDuplicateExternalAcrossUnits_Compiles;
     procedure TestNativeIncremental_MultiUnitClass_Compiles;
@@ -496,6 +503,83 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_box exit code', 0, Rc);
   AssertEquals('use_box stdout', 'Box = 42' + #10, Captured)
+end;
+
+{ Regression for BUG-20260906-openarray-param-bif-roundtrip.  Mirrors the
+  free-routine round-trip test above, but the routine takes an OPEN ARRAY.
+  The unit is compiled to an .o, its source hidden, and the consumer compiled
+  against the cached iface alone — which is the only path that exercises the
+  importer's reconstruction of the parameter type. }
+procedure TSepCompileTests.TestOpenArrayParam_RoundTrip_WithoutSource;
+const
+  DepSrc =
+    '''
+    unit OpenArrDep;
+    interface
+    function JoinIt(const Sep: string; const Parts: array of string): string;
+    implementation
+    function JoinIt(const Sep: string; const Parts: array of string): string;
+    var I: Integer;
+    begin
+      Result := '';
+      for I := 0 to High(Parts) do
+      begin
+        if I > 0 then Result := Result + Sep;
+        Result := Result + Parts[I]
+      end
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseOpenArrDep;
+    uses OpenArrDep;
+    var P: array[0..2] of string;
+    begin
+      P[0] := 'a'; P[1] := 'b'; P[2] := 'c';
+      WriteLn(JoinIt('-', P))
+    end.
+    ''';
+var
+  DepPas, DepObj, ProgPas, ProgBin: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  DepPas  := FScratch + '/openarrdep.pas';
+  DepObj  := FScratch + '/openarrdep.o';
+  ProgPas := FScratch + '/use_openarrdep.pas';
+  ProgBin := FScratch + '/use_openarrdep';
+
+  WriteFile(DepPas, DepSrc);
+  Rc := RunBlaise(['--source', DepPas, '--output', DepObj], Captured);
+  AssertEquals('blaise(OpenArrDep) exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('openarrdep.o exists', FileExists(DepObj));
+
+  { Hide the source so the cached iface is the ONLY way to see JoinIt. }
+  DeleteFile(DepPas);
+  AssertFalse('openarrdep.pas hidden', FileExists(DepPas));
+
+  WriteFile(ProgPas, ProgSrc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('blaise(use_openarrdep) exit code (out: ' + Captured + ')',
+               0, Rc);
+  AssertTrue('use_openarrdep exists', FileExists(ProgBin));
+
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('use_openarrdep exit code', 0, Rc);
+  AssertEquals('use_openarrdep stdout', 'a-b-c' + #10, Captured)
 end;
 
 { Regression for issue #107: a generic FUNCTION declared in a unit but never

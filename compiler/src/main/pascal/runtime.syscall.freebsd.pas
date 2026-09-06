@@ -71,6 +71,13 @@ function unlink(Path: PChar): Integer;
 function rename(OldPath, NewPath: PChar): Integer;
 function chdir(Path: PChar): Integer;
 function chmod(Path: PChar; Mode: Integer): Integer;
+{ getdirentries(fd, buf, nbytes, basep) — read directory entries from a fd
+  opened on a directory.  Here it is the native SYS_getdirentries (554, the
+  ino64 variant matching SYS_fstatat above).  Returns bytes written (0 at end
+  of directory), -errno on error.  FreeBSD's `struct dirent` differs from
+  Linux's — TPlatformLayout supplies the offsets. }
+function getdirentries(Fd: Integer; Buf: Pointer; Count: Int64;
+                       Basep: Pointer): Int64;
 
 { Process. }
 function getpid: Integer;
@@ -391,6 +398,19 @@ asm
     jae  .Lok_chmod
     negq %rax
 .Lok_chmod:
+    ret
+end;
+
+function getdirentries(Fd: Integer; Buf: Pointer; Count: Int64;
+                       Basep: Pointer): Int64;
+  assembler; nostackframe;
+asm
+    movq %rcx, %r10          { basep: C arg4 (%rcx) -> kernel arg4 (%r10) }
+    movq $554, %rax          { SYS_getdirentries (ino64) }
+    syscall
+    jae  .Lok_getdents
+    negq %rax
+.Lok_getdents:
     ret
 end;
 

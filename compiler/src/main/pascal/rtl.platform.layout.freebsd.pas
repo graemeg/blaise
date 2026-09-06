@@ -67,6 +67,9 @@ type
     function StatSize(Buf: Pointer):  Int64; override;
     function StatMtime(Buf: Pointer): Int64; override;
     function StatMode(Buf: Pointer):  Integer; override;
+
+    function DirentRecLen(Ent: Pointer): Integer; override;
+    function DirentName(Ent: Pointer): Pointer; override;
   end;
 
 { Flat function for runtime.mem (imported there via `external name`): returns
@@ -121,6 +124,14 @@ const
   STAT_OFF_SIZE  = 112;  { st_size  (off_t, Int64) }
   STAT_SIZE      = 224;  { sizeof(struct stat) }
 
+  { FreeBSD 14.x amd64 struct dirent (the ino64 layout that SYS 554 returns):
+      d_fileno (8) d_off (8) d_reclen (u16 @16) d_type (u8 @18) d_pad0 (u8)
+      d_namlen (u16 @20) d_pad1 (u16) d_name (@24).
+    Note this differs from Linux in BOTH fields we read — the name sits at 24
+    rather than 19 — which is why these offsets live behind the layout port. }
+  DIRENT_OFF_RECLEN = 16;
+  DIRENT_OFF_NAME   = 24;
+
 function TPlatformLayoutFreeBSDX86_64.O_RDONLY: Integer; begin Result := 0;      end;
 function TPlatformLayoutFreeBSDX86_64.O_WRONLY: Integer; begin Result := 1;      end;
 function TPlatformLayoutFreeBSDX86_64.O_RDWR:   Integer; begin Result := 2;      end;
@@ -170,6 +181,19 @@ var
 begin
   P := Pointer(PChar(Buf) + STAT_OFF_MODE);
   Result := P^;
+end;
+
+function TPlatformLayoutFreeBSDX86_64.DirentRecLen(Ent: Pointer): Integer;
+var
+  P: ^Word;
+begin
+  P := Pointer(PChar(Ent) + DIRENT_OFF_RECLEN);
+  Result := P^;
+end;
+
+function TPlatformLayoutFreeBSDX86_64.DirentName(Ent: Pointer): Pointer;
+begin
+  Result := Pointer(PChar(Ent) + DIRENT_OFF_NAME);
 end;
 
 { Assign GPlatformLayout to the FreeBSD layout, once.  Called from this unit's

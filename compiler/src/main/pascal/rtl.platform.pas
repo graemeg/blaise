@@ -46,6 +46,15 @@ type
     function RemoveDir(const APath: string): Boolean; virtual; abstract;
     function GetCurrentDir: string; virtual; abstract;
     function SetCurrentDir(const APath: string): Boolean; virtual; abstract;
+    { The names of the entries in APath, separated by #10 (no trailing
+      separator).  '.' and '..' are omitted.  Returns '' for an empty or
+      unreadable directory — callers that must distinguish the two should
+      check DirectoryExists first.  Names are returned in whatever order the
+      filesystem yields; the caller sorts if it needs a stable order.
+
+      A flat delimited string rather than a list type because the RTL sits
+      below the collection units. }
+    function ListDir(const APath: string): string; virtual; abstract;
 
     { OS utilities }
     function GetTempDir: string; virtual; abstract;
@@ -161,6 +170,19 @@ type
     function StatSize(Buf: Pointer):  Int64; virtual; abstract;
     function StatMtime(Buf: Pointer): Int64; virtual; abstract;
     function StatMode(Buf: Pointer):  Integer; virtual; abstract;
+
+    { ---- struct dirent: variable-length records packed back-to-back in the
+      getdents64 buffer.  Ent points at one record; the walker advances by
+      DirentRecLen and stops when it has consumed the byte count the syscall
+      returned.  Linux's linux_dirent64 and FreeBSD's dirent put d_reclen and
+      the NUL-terminated d_name at different offsets, which is exactly the
+      kind of per-OS layout this port exists to absorb. ---- }
+    { Byte length of the whole record — the stride to the next entry.  A zero
+      or negative value means a malformed record; callers must stop rather
+      than loop forever. }
+    function DirentRecLen(Ent: Pointer): Integer; virtual; abstract;
+    { Pointer to the entry's NUL-terminated name. }
+    function DirentName(Ent: Pointer): Pointer; virtual; abstract;
   end;
 
 var

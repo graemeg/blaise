@@ -2138,6 +2138,7 @@ begin
   Sym := TSymbol.Create('DirectoryExists',   skFunction,  FTypeBoolean); Define(Sym);
   Sym := TSymbol.Create('ForceDirectories',  skFunction,  FTypeBoolean); Define(Sym);
   Sym := TSymbol.Create('GetCurrentDir',     skFunction,  FTypeString);  Define(Sym);
+  Sym := TSymbol.Create('ListDir',           skFunction,  FTypeString);  Define(Sym);
   Sym := TSymbol.Create('GetTempFileName',   skFunction,  FTypeString);  Define(Sym);
   Sym := TSymbol.Create('Sleep',             skProcedure, nil);          Define(Sym);
   { File path manipulation }

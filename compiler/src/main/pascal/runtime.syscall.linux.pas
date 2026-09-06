@@ -55,6 +55,19 @@ function unlink(Path: PChar): Integer;
 function rename(OldPath, NewPath: PChar): Integer;
 function chdir(Path: PChar): Integer;
 function chmod(Path: PChar; Mode: Integer): Integer;
+{ getdirentries(fd, buf, nbytes, basep) — read directory entries from a fd
+  opened on a directory.  Packs variable-length dirent records into Buf and
+  returns the number of BYTES written (0 at end of directory, -errno on
+  error); the caller walks them using the per-OS offsets from TPlatformLayout.
+
+  The BSD name is used rather than Linux's own `getdents64` because it is the
+  one spelling libc provides on all three POSIX targets (glibc, FreeBSD and
+  macOS), so rtl.platform.posix can bind a single `external name` that works
+  on both the libc and the freestanding-static paths.  Linux has no
+  getdirentries SYSCALL, so this leaf implements it over SYS_getdents64 (217)
+  and simply ignores basep — the walker never seeks. }
+function getdirentries(Fd: Integer; Buf: Pointer; Count: Int64;
+                       Basep: Pointer): Int64;
 
 { Process. }
 function getpid: Integer;
@@ -257,6 +270,17 @@ function chmod(Path: PChar; Mode: Integer): Integer;
   assembler; nostackframe;
 asm
     movq $90, %rax       { SYS_chmod }
+    syscall
+    ret
+end;
+
+{ Basep (arg4, %rcx) is deliberately unused: SYS_getdents64 takes only three
+  arguments, and the directory walker never needs the seek offset. }
+function getdirentries(Fd: Integer; Buf: Pointer; Count: Int64;
+                       Basep: Pointer): Int64;
+  assembler; nostackframe;
+asm
+    movq $217, %rax      { SYS_getdents64 }
     syscall
     ret
 end;

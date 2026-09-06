@@ -2792,6 +2792,12 @@ begin
         '_ExtractFileExt');
       Exit;
     end;
+    if SameText(TFuncCallExpr(AExpr).Name, 'ListDir') then
+    begin
+      EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
+        '_ListDir');
+      Exit;
+    end;
     if SameText(TFuncCallExpr(AExpr).Name, 'GetEnvVar') or
        SameText(TFuncCallExpr(AExpr).Name, 'GetEnvironmentVariable') then
     begin

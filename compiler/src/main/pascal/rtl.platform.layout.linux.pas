@@ -52,6 +52,9 @@ type
     function StatSize(Buf: Pointer):  Int64; override;
     function StatMtime(Buf: Pointer): Int64; override;
     function StatMode(Buf: Pointer):  Integer; override;
+
+    function DirentRecLen(Ent: Pointer): Integer; override;
+    function DirentName(Ent: Pointer): Pointer; override;
   end;
 
 { Flat function for runtime.mem (imported there via `external name`): returns
@@ -107,6 +110,11 @@ const
   STAT_OFF_MTIME = 88;   { st_mtim.tv_sec (Int64) }
   STAT_SIZE      = 144;  { sizeof(struct stat) }
 
+  { Linux x86_64 struct linux_dirent64 (getdents64):
+      d_ino (8) d_off (8) d_reclen (u16 @16) d_type (u8 @18) d_name (@19). }
+  DIRENT_OFF_RECLEN = 16;
+  DIRENT_OFF_NAME   = 19;
+
 function TPlatformLayoutLinuxX86_64.O_RDONLY: Integer; begin Result := 0;     end;
 function TPlatformLayoutLinuxX86_64.O_WRONLY: Integer; begin Result := 1;     end;
 function TPlatformLayoutLinuxX86_64.O_RDWR:   Integer; begin Result := 2;     end;
@@ -154,6 +162,22 @@ var
 begin
   P := Pointer(PChar(Buf) + STAT_OFF_MODE);
   Result := P^;
+end;
+
+function TPlatformLayoutLinuxX86_64.DirentRecLen(Ent: Pointer): Integer;
+var
+  P: ^Word;
+begin
+  { d_reclen is an unsigned 16-bit field — read it as a Word so a record
+    longer than 32767 bytes (not reachable in practice, but free to be
+    correct about) cannot come back negative. }
+  P := Pointer(PChar(Ent) + DIRENT_OFF_RECLEN);
+  Result := P^;
+end;
+
+function TPlatformLayoutLinuxX86_64.DirentName(Ent: Pointer): Pointer;
+begin
+  Result := Pointer(PChar(Ent) + DIRENT_OFF_NAME);
 end;
 
 { Assign GPlatformLayout to this target's layout, once.  Called both from this

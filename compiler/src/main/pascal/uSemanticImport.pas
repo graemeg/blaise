@@ -1034,6 +1034,25 @@ end;
 { Build a TParamDesc for the symbol table from a cloned TMethodParam.
   Param types must already be registered in ATable (caller imported
   the dep, or it's a builtin). }
+{ Resolve an imported parameter's type, honouring the open-array shape.
+
+  For an OPEN ARRAY parameter (`const Parts: array of string`) TypeName names
+  the ELEMENT type, not the parameter's own type — so resolving TypeName alone
+  yields `string` and the parameter looks scalar.  A call site passing an array
+  then matches no overload, and the routine is uncallable from a cached iface
+  even though the .bif round-tripped the flag correctly
+  (BUG-20260906-openarray-param-bif-roundtrip).  Mirror the source path
+  (TSemanticAnalyser.ResolveParamType) and wrap the element type. }
+function ResolveImportParamType(AParam: TMethodParam; ATable: TSymbolTable;
+                                ASemantic: TSemanticAnalyser): TTypeDesc;
+begin
+  { Generic-aware resolution so an instance param type (e.g.
+    'TList<TArchiveMember>') resolves rather than leaving TypeDesc nil. }
+  Result := ResolveImportTypeName(AParam.TypeName, ATable, ASemantic);
+  if AParam.IsOpenArray and (Result <> nil) then
+    Result := ATable.NewOpenArrayType(Result);
+end;
+
 function BuildParamDesc(AParam: TMethodParam; ATable: TSymbolTable;
                         ASemantic: TSemanticAnalyser = nil): TParamDesc;
 begin
@@ -1041,9 +1060,7 @@ begin
   Result.Name     := AParam.ParamName;
   Result.IsConst  := AParam.IsConstParam;
   Result.IsVar    := AParam.IsVarParam;
-  { Generic-aware resolution so an instance param type (e.g.
-    'TList<TArchiveMember>') resolves rather than leaving TypeDesc nil. }
-  Result.TypeDesc := ResolveImportTypeName(AParam.TypeName, ATable, ASemantic);
+  Result.TypeDesc := ResolveImportParamType(AParam, ATable, ASemantic);
 end;
 
 { Synthesise a TMethodDecl from a TRoutineSig + its return-type
@@ -1117,8 +1134,9 @@ begin
     { Resolve the param type, including generic instances such as
       'TList<TArchiveMember>' — a plain symbol Lookup cannot, so without the
       generic-aware resolver the param's ResolvedType stays nil and the
-      call-site overload scorer rejects every candidate. }
-    PSyn.ResolvedType := ResolveImportTypeName(Param.TypeName, ATable, ASemantic);
+      call-site overload scorer rejects every candidate.  Open-array params
+      are wrapped, not resolved bare — see ResolveImportParamType. }
+    PSyn.ResolvedType := ResolveImportParamType(Param, ATable, ASemantic);
     Result.Params.Add(PSyn);
   end;
 end;
