@@ -61,6 +61,17 @@ type
     procedure TestStaticAsyncReactor_LinksAndRuns;
     procedure TestFreeRoutine_RoundTrip_WithoutSource;
     procedure TestGenericClass_RoundTrip_WithoutSource;
+    { Regression (GH #194): Pascal identifiers are case-insensitive, so the
+      spelling of a unit name in a `uses` clause must not decide whether its
+      file is found.  The loader only tried two spellings — all-lowercase and
+      the `uses` text verbatim — so a mixed-case file such as `UTest2.pas`
+      resolved only when the clause matched it character-for-character, and
+      `uTest2.pas` never resolved at all. }
+    procedure TestMixedCaseUnitFile_FoundFromAnyUsesSpelling;
+    { Regression (GH #194): the directory holding the program named by
+      --source was not a search path, so a unit sitting beside the program
+      was not found without an explicit --unit-path. }
+    procedure TestUnitBesideProgram_FoundWithoutUnitPath;
     { Regression (BUG-20260906-openarray-param-bif-roundtrip): a routine taking
       an OPEN ARRAY parameter (`array of T`) became uncallable once its unit
       was loaded from a cached .o instead of source — the importer resolved the
@@ -503,6 +514,138 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_box exit code', 0, Rc);
   AssertEquals('use_box stdout', 'Box = 42' + #10, Captured)
+end;
+
+{ Regression for GH #194.  Pascal identifiers are case-insensitive, so
+  `uses uTeSt2` is a legal reference to `unit UTest2` and must resolve to
+  UTest2.pas.  The loader used to try only LowerCase(name) and the name as
+  written, which made resolution depend on the spelling in the uses clause:
+  a lowercase FILE was reachable from any spelling, while a mixed-case file
+  was reachable only from an exactly-matching one.
+
+  Each iteration writes the unit under a mixed-case file name and varies only
+  the spelling used in the uses clause. }
+procedure TSepCompileTests.TestMixedCaseUnitFile_FoundFromAnyUsesSpelling;
+const
+  Spellings: array[0..3] of string = ('UTest2', 'utest2', 'uTeSt2', 'UTEST2');
+  UnitSrc =
+    '''
+    unit UTest2;
+    interface
+    function Answer(): Integer;
+    implementation
+    function Answer(): Integer;
+    begin
+      Result := 42
+    end;
+    end.
+    ''';
+var
+  UnitPas, ProgPas, ProgBin: string;
+  Captured: string;
+  Rc, I: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  for I := 0 to High(Spellings) do
+  begin
+    { A fresh subdirectory per spelling: the unit file must be the only
+      candidate, with no .o cached by an earlier iteration to mask a
+      resolution failure. }
+    UnitPas := FScratch + '/case194_' + IntToStr(I);
+    ForceDirectories(UnitPas);
+    ProgPas := UnitPas + '/use_case.pas';
+    ProgBin := UnitPas + '/use_case';
+    UnitPas := UnitPas + '/UTest2.pas';
+
+    WriteFile(UnitPas, UnitSrc);
+    WriteFile(ProgPas,
+              'program UseCase;'#10 +
+              'uses ' + Spellings[I] + ';'#10 +
+              'begin'#10 +
+              '  WriteLn(Answer())'#10 +
+              'end.'#10);
+
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-path', ExtractFilePath(UnitPas)], Captured);
+    AssertEquals('blaise(uses ' + Spellings[I] + ') exit code (out: ' +
+                 Captured + ')', 0, Rc);
+    AssertTrue('binary built for uses ' + Spellings[I], FileExists(ProgBin));
+
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals('exit code for uses ' + Spellings[I], 0, Rc);
+    AssertEquals('stdout for uses ' + Spellings[I], '42'#10, Captured)
+  end
+end;
+
+{ Regression for GH #194 (the reporter's literal command line).  A unit
+  sitting in the same directory as the program named by --source must be
+  found without an explicit --unit-path: the source file's own directory is
+  an implicit search path, as it is in every other Pascal compiler. }
+procedure TSepCompileTests.TestUnitBesideProgram_FoundWithoutUnitPath;
+const
+  UnitSrc =
+    '''
+    unit BesideDep;
+    interface
+    function Beside(): Integer;
+    implementation
+    function Beside(): Integer;
+    begin
+      Result := 7
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseBeside;
+    uses BesideDep;
+    begin
+      WriteLn(Beside())
+    end.
+    ''';
+var
+  Dir, UnitPas, ProgPas, ProgBin: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  Dir := FScratch + '/case194_beside';
+  ForceDirectories(Dir);
+  UnitPas := Dir + '/besidedep.pas';
+  ProgPas := Dir + '/use_beside.pas';
+  ProgBin := Dir + '/use_beside';
+
+  WriteFile(UnitPas, UnitSrc);
+  WriteFile(ProgPas, ProgSrc);
+
+  { No --unit-path: the program's own directory must supply BesideDep. }
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin], Captured);
+  AssertEquals('blaise(use_beside) exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('use_beside exists', FileExists(ProgBin));
+
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('use_beside exit code', 0, Rc);
+  AssertEquals('use_beside stdout', '7'#10, Captured)
 end;
 
 { Regression for BUG-20260906-openarray-param-bif-roundtrip.  Mirrors the

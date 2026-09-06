@@ -20,8 +20,31 @@ interface
 
 uses
   SysUtils, Classes, contnrs,
+  uStrCompat,
   uLexer, uParser, uAST,
   uUnitInterface, uUnitInterfaceIO, uIfaceObject, uCompilerId;
+
+var
+  { Marker for a search path that may supply unit SOURCE but must never supply
+    a pre-built '<unit>.o'.  Store it in the search-path TStringList's
+    Objects[] slot: `Paths.Objects[I] := SOURCE_ONLY_PATH`.
+
+    A single shared sentinel INSTANCE, compared by identity — never
+    dereferenced, so it carries no state and is created once in this unit's
+    initialization.
+
+    The --source file's own directory is added this way (see Blaise.pas).  It
+    has to be searched for .pas files, or a unit sitting beside the program is
+    not found (GH #194) — but it is ALSO where the compiler drops its own
+    incremental per-unit .o output, so allowing .o discovery there makes a
+    program's SECOND compile pick up the objects its FIRST compile wrote.  A
+    cached iface reached that way loses `external name` routines that the unit
+    reaches through an implementation-only dependency, and the rebuild fails
+    with e.g. "Undeclared procedure 'pthread_mutex_init'"
+    (BUG-20260906-implonly-extern-lost-on-cached-iface).  Explicit
+    --unit-path / --unit-cache directories are unaffected: they stay eligible
+    for both source and objects. }
+  SOURCE_ONLY_PATH: TObject;
 
 type
   EUnitNotFound       = class(Exception);
@@ -92,9 +115,19 @@ type
       for why this is a post-pass and not a change to the load recursion. }
     procedure OrderPrebuiltForInit;
     function IsBuiltin(const AName: string): Boolean;
+    { Find '<AName><AExt>' on the search paths, matching the file name
+      case-INSENSITIVELY (Pascal identifiers are case-insensitive, so the
+      spelling in a `uses` clause must not decide whether the file is found
+      — GH #194).  An earlier search path wins over a later one; within a
+      single directory an exact-case match wins over a differently-cased
+      one.  Returns the path, or '' if no entry matches.
+
+      A search path whose Objects[] entry is SOURCE_ONLY_PATH is skipped when
+      AExt is '.o' — see the note on that constant. }
+    function LocateWithExt(const AName, AExt: string): string;
     function Locate(const AName: string): string;
-    { Look for '<AName>.o' on the search paths (lowercase or as-cased).
-      Returns the path or '' if none found. }
+    { Look for '<AName>.o' on the search paths, with the same case-insensitive
+      matching as Locate.  Returns the path or '' if none found. }
     function LocateObject(const AName: string): string;
     { Read the embedded iface section out of an object file and
       reconstitute a TUnitInterface.  Returns nil on failure. }
@@ -127,46 +160,70 @@ begin
     SameText(AName, 'Types');
 end;
 
-function TUnitLoader.Locate(const AName: string): string;
+function TUnitLoader.LocateWithExt(const AName, AExt: string): string;
 var
-  I:    Integer;
-  Base: string;
-  Path: string;
+  I:            Integer;
+  Base, Path:   string;
+  Target, Ents: string;
+  Ent:          string;
+  NL, Start:    Integer;
 begin
+  Result := '';
+  if AName = '' then Exit;
+  Target := LowerCase(AName + AExt);
+
   for I := 0 to FSearchPaths.Count - 1 do
   begin
+    { A source-only path never supplies a pre-built object — see
+      SOURCE_ONLY_PATH. }
+    if (AExt = '.o') and (FSearchPaths.Objects[I] = SOURCE_ONLY_PATH) then
+      Continue;
+
     Base := IncludeTrailingPathDelimiter(FSearchPaths.Strings[I]);
-    { Try lowercase first — Blaise convention for unit file names }
-    Path := Base + LowerCase(AName) + '.pas';
-    if FileExists(Path) then
+
+    { Fast path: the two spellings that cover almost every real lookup — the
+      all-lowercase Blaise convention and the name exactly as written.  These
+      cost one stat each and skip reading the directory entirely. }
+    Path := Base + LowerCase(AName) + AExt;
+    if FileExists(Path) then Exit(Path);
+    Path := Base + AName + AExt;
+    if FileExists(Path) then Exit(Path);
+
+    { Slow path: Pascal identifiers are case-insensitive, so a file whose name
+      differs from the uses-clause spelling only in case is still the unit we
+      want (GH #194) — e.g. `uses uTeSt2` must find UTest2.pas.  There are
+      2^N such spellings, so guessing cannot work: read the directory and
+      compare case-insensitively.  Only reached when the two cheap probes
+      miss, which on a conventional tree is the not-found case. }
+    Ents  := ListDir(ExcludeTrailingPathDelimiter(Base));
+    Start := 0;
+    while Start <= Length(Ents) - 1 do
     begin
-      Exit(Path);
-    end;
-    { Fallback: exact case as written in the uses clause }
-    Path := Base + AName + '.pas';
-    if FileExists(Path) then
-    begin
-      Exit(Path);
-    end;
-  end;
-  Result := '';
+      NL := StrPos(#10, StrCopyTail(Ents, Start));
+      if NL < 0 then
+      begin
+        Ent   := StrCopyTail(Ents, Start);
+        Start := Length(Ents)
+      end
+      else
+      begin
+        Ent   := StrCopyFrom(Ents, Start, NL);
+        Start := Start + NL + 1
+      end;
+      if (Ent <> '') and (LowerCase(Ent) = Target) then
+        Exit(Base + Ent)
+    end
+  end
+end;
+
+function TUnitLoader.Locate(const AName: string): string;
+begin
+  Result := LocateWithExt(AName, '.pas');
 end;
 
 function TUnitLoader.LocateObject(const AName: string): string;
-var
-  I:    Integer;
-  Base: string;
-  Path: string;
 begin
-  for I := 0 to FSearchPaths.Count - 1 do
-  begin
-    Base := IncludeTrailingPathDelimiter(FSearchPaths.Strings[I]);
-    Path := Base + LowerCase(AName) + '.o';
-    if FileExists(Path) then begin Result := Path; Exit; end;
-    Path := Base + AName + '.o';
-    if FileExists(Path) then begin Result := Path; Exit; end;
-  end;
-  Result := '';
+  Result := LocateWithExt(AName, '.o');
 end;
 
 function TUnitLoader.ValidateIface(AIface: TUnitInterface;
@@ -698,5 +755,10 @@ begin
     Placed.Free();
   end;
 end;
+
+initialization
+  { Identity-only sentinel — never dereferenced, never freed (it lives for the
+    process's lifetime, like any other unit-level singleton). }
+  SOURCE_ONLY_PATH := TObject.Create();
 
 end.

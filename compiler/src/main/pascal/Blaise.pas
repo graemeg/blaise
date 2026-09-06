@@ -681,6 +681,7 @@ var
   SearchPaths: TStringList;
   ConfigPaths: TStringList;
   CfgRtlSrc:   string;
+  SrcDir:      string;
   EmitIR:      Boolean;
   EmitAsm:     Boolean;
   DumpAST:     Boolean;
@@ -847,6 +848,29 @@ begin
   finally
     ConfigPaths.Free();
   end;
+
+  { The directory holding the --source file is an implicit search path, so
+    `blaise --source test2.pas` finds `mydep.pas` sitting beside it without
+    the user also passing `--unit-path .` — which surprised the reporter of
+    GH #194, and matches no other Pascal compiler.
+
+    It is added LAST, as a fallback.  Appending rather than inserting is
+    load-bearing: an EXPLICIT --unit-path must outrank an implicit default,
+    or a stray same-named unit next to the program silently shadows the one
+    the user pointed at.  (Putting it first broke 11 tests that compile a
+    program in a scratch directory holding an unrelated `ua.pas` while
+    passing the real one via --unit-path.)  Only added when it names a real
+    directory, and never duplicated if the user already passed it.
+
+    It is tagged SOURCE_ONLY_PATH so it supplies .pas files but never a
+    pre-built .o.  This directory is also where the compiler drops its own
+    incremental per-unit objects, so without the tag a program's SECOND
+    compile discovers the objects its FIRST compile wrote and fails — see
+    the SOURCE_ONLY_PATH note in uUnitLoader.pas. }
+  SrcDir := ExtractFilePath(ExpandFileName(SourceFile));
+  if (SrcDir <> '') and DirectoryExists(SrcDir)
+     and (SearchPaths.IndexOf(SrcDir) < 0) then
+    SearchPaths.Objects[SearchPaths.Add(SrcDir)] := SOURCE_ONLY_PATH;
 
   if (UnitCacheDir <> '') and (SearchPaths.IndexOf(UnitCacheDir) < 0) then
     SearchPaths.Add(UnitCacheDir);
