@@ -79,6 +79,13 @@ type
       stored that as the param type, so the call site's array argument matched
       no overload. }
     procedure TestOpenArrayParam_RoundTrip_WithoutSource;
+    { Regression (BUG-20260906-implonly-extern-lost-on-cached-iface): a GENERIC
+      whose body calls a routine reached through the declaring unit's
+      IMPLEMENTATION-section uses.  The instance's body is re-analysed in the
+      CONSUMER's scope, so when the declaring unit loads from its cached .bif
+      its impl-only dependency must still be semantically imported — as a
+      link-only dep its symbols are absent and the body fails to resolve. }
+    procedure TestGenericBodyImplOnlyDep_RoundTrip_WithoutSource;
     procedure TestUninstantiatedGenericFunc_InUnit_Compiles;
     procedure TestDuplicateExternalAcrossUnits_Compiles;
     procedure TestNativeIncremental_MultiUnitClass_Compiles;
@@ -723,6 +730,116 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_openarrdep exit code', 0, Rc);
   AssertEquals('use_openarrdep stdout', 'a-b-c' + #10, Captured)
+end;
+
+{ Regression for BUG-20260906-implonly-extern-lost-on-cached-iface.
+
+  Three units.  ExtLeaf declares an `external name` routine in its INTERFACE.
+  GenDep declares a GENERIC class whose constructor calls that routine, and
+  reaches ExtLeaf through its IMPLEMENTATION-section uses.  The consumer
+  instantiates the generic.
+
+  A generic instance's method bodies are cloned and RE-ANALYSED in the
+  consumer's symbol table, so every symbol the template body names has to be
+  resolvable there.  When GenDep is loaded from its cached .bif, its impl-only
+  dep was collected for LINKING only and never semantically imported, so
+  ext_strlen was absent and analysis failed with
+
+      Semantic error: Undeclared function 'ext_strlen' at line 0 col 0
+
+  The `line 0 col 0` is the signature of a symbol reached from an iface rather
+  than parsed source.  Both compiles below must succeed: the first populates
+  the .o cache, the second is the one that reads it back.
+
+  (Inline bodies do NOT have this exposure — they are re-emitted, not
+  re-analysed — which is why the fix is scoped to generic bodies.) }
+procedure TSepCompileTests.TestGenericBodyImplOnlyDep_RoundTrip_WithoutSource;
+const
+  LeafSrc =
+    '''
+    unit ExtLeaf;
+    interface
+    function ext_strlen(S: PChar): Int64; external name 'strlen';
+    implementation
+    end.
+    ''';
+  DepSrc =
+    '''
+    unit GenDep;
+    interface
+    type
+      TBox<T> = class
+        FLen: Integer;
+        constructor Create(const AName: string);
+      end;
+    implementation
+    uses ExtLeaf;
+    constructor TBox<T>.Create(const AName: string);
+    begin
+      Self.FLen := Integer(ext_strlen(PChar(AName)))
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseGenDep;
+    uses GenDep;
+    var B: TBox<Integer>;
+    begin
+      B := TBox<Integer>.Create('hello');
+      WriteLn(B.FLen)
+    end.
+    ''';
+var
+  Dir, LeafPas, DepPas, ProgPas, Bin1, Bin2: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  { A directory of its own: the second compile must read back exactly the .o
+    files the first one wrote, with nothing else in scope. }
+  Dir := FScratch + '/implonly_generic';
+  ForceDirectories(Dir);
+  LeafPas := Dir + '/extleaf.pas';
+  DepPas  := Dir + '/gendep.pas';
+  ProgPas := Dir + '/use_gendep.pas';
+  Bin1    := Dir + '/use_gendep1';
+  Bin2    := Dir + '/use_gendep2';
+
+  WriteFile(LeafPas, LeafSrc);
+  WriteFile(DepPas, DepSrc);
+  WriteFile(ProgPas, ProgSrc);
+
+  { First compile: no cache yet, everything comes from source. }
+  Rc := RunBlaise(['--source', ProgPas, '--output', Bin1,
+                   '--unit-path', Dir], Captured);
+  AssertEquals('cold compile exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('gendep.o cached', FileExists(Dir + '/gendep.o'));
+
+  Rc := RunBinary(Bin1, Captured);
+  AssertEquals('cold exit code', 0, Rc);
+  AssertEquals('cold stdout', '5' + #10, Captured);
+
+  { Second compile: GenDep now loads from its cached .bif, and the generic
+    body must still resolve ext_strlen through the impl-only dep. }
+  Rc := RunBlaise(['--source', ProgPas, '--output', Bin2,
+                   '--unit-path', Dir], Captured);
+  AssertEquals('warm compile exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('use_gendep2 exists', FileExists(Bin2));
+
+  Rc := RunBinary(Bin2, Captured);
+  AssertEquals('warm exit code', 0, Rc);
+  AssertEquals('warm stdout', '5' + #10, Captured)
 end;
 
 { Regression for issue #107: a generic FUNCTION declared in a unit but never

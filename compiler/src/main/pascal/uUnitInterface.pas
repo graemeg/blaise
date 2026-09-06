@@ -283,6 +283,21 @@ type
       uSemanticImport.RegisterEnum publishes).  Used by task #44
       uses-chain lookup. }
     function HasSymbol(const AName: string): Boolean;
+    { True when this interface carries a generic TEMPLATE BODY that the
+      consumer will clone and RE-ANALYSE in its own symbol table — a generic
+      type (class/record/interface/proc) or a generic free routine.
+
+      The loader uses this to decide whether the declaring unit's
+      implementation-section dependencies must be semantically imported rather
+      than merely linked: a template body can name symbols the declaring unit
+      reached through its own impl-section uses, and those have to resolve in
+      the consumer too (BUG-20260906-implonly-extern-lost-on-cached-iface).
+
+      Generic TYPES are the case that matters in practice.  They travel in the
+      TYPE block with TTypeEntry.IsGeneric set, NOT in GenericBodies — the
+      GENROUT block deliberately writes only `not G.IsType` entries — so a
+      GenericBodies-only test reads False for them on the cached path. }
+    function HasGenericBodies: Boolean;
   end;
 
 { Helpers for TQualTypeRef. }
@@ -583,6 +598,27 @@ begin
     end;
   end;
 
+  Result := False;
+end;
+
+function TUnitInterface.HasGenericBodies: Boolean;
+var
+  I: Integer;
+  T: TTypeEntry;
+begin
+  Result := True;
+  { Generic free routines: carried in GenericBodies (the GENROUT block). }
+  for I := 0 to GenericBodies.Count - 1 do
+    if not TGenericBody(GenericBodies.Items[I]).IsType then
+      Exit;
+  { Generic types: carried in the TYPE block with IsGeneric set. }
+  for I := 0 to Types.Count - 1 do
+  begin
+    T := TTypeEntry(Types.Items[I]);
+    if T.IsGeneric or (T.Def is TGenericTypeDef)
+       or (T.Def is TGenericInterfaceDef) or (T.Def is TGenericProcDef) then
+      Exit;
+  end;
   Result := False;
 end;
 

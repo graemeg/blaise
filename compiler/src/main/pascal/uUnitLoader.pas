@@ -499,14 +499,57 @@ begin
           { Impl-only dependencies are not reachable via the interface uses,
             but their objects must still be linked or the program loses their
             code (an incremental rebuild that loads this unit from its cached
-            .bif would otherwise drop them).  They are collected for LINK ONLY
-            — not semantically imported — because the consuming unit never
-            references their symbols, and importing their ifaces early would
-            break the dependency-ordered import (impl/interface-use cycles, e.g.
-            a backend unit whose interface a peer impl-uses, cannot be resolved
-            by the leaf-first iface import). }
-          for I := 0 to Iface.ImplUsedUnits.Count - 1 do
-            CollectLinkOnlyObject(Iface.ImplUsedUnits.Strings[I]);
+            .bif would otherwise drop them).  They are normally collected for
+            LINK ONLY — not semantically imported — because the consuming unit
+            never references their symbols, and importing their ifaces early
+            would break the dependency-ordered import (impl/interface-use
+            cycles, e.g. a backend unit whose interface a peer impl-uses,
+            cannot be resolved by the leaf-first iface import).
+
+            EXCEPT when this iface carries GENERIC BODIES.  A generic
+            instance's method bodies are cloned and RE-ANALYSED in the
+            CONSUMER's symbol table, so every symbol the template body names
+            must resolve there — including ones it reaches through the
+            declaring unit's own implementation-section uses.  "The consuming
+            unit never references their symbols" is exactly the assumption a
+            generic body breaks, and as link-only deps those symbols are
+            absent: the consumer fails with "Undeclared function 'x' at line 0
+            col 0" (BUG-20260906-implonly-extern-lost-on-cached-iface).  Load
+            them the normal way so their ifaces are imported too.
+
+            Scoped deliberately to generics: INLINE bodies travel in the .bif
+            as well but are re-EMITTED rather than re-analysed, so they need no
+            symbol resolution in the consumer and are unaffected (verified).
+            Restricting the change to ifaces that actually carry generic bodies
+            keeps the leaf-first import order intact for every other unit — the
+            impl/interface-cycle hazard above is real, and this must not widen
+            into loading every impl-only dep normally.
+
+            NB HasGenericBodies, not GenericBodies.Count: a generic TYPE (the
+            case that matters) travels in the TYPE block with IsGeneric set,
+            not in GenericBodies, so a count test reads 0 for it. }
+          if Iface.HasGenericBodies() then
+          begin
+            { A FRESH interface chain, exactly as the source path does for its
+              own impl-section uses (see LoadOne below): Pascal permits a
+              unit's implementation to use a unit whose interface transitively
+              uses it back, and that is not a real cycle.  Without the reset,
+              AName is still on FIfaceChain here and such a back-edge would be
+              misreported as ECircularDependency. }
+            SavedChain  := FIfaceChain;
+            FIfaceChain := TStringList.Create();
+            FIfaceChain.CaseSensitive := False;
+            try
+              for I := 0 to Iface.ImplUsedUnits.Count - 1 do
+                LoadTransitive(Iface.ImplUsedUnits.Strings[I]);
+            finally
+              FIfaceChain.Free();
+              FIfaceChain := SavedChain;
+            end;
+          end
+          else
+            for I := 0 to Iface.ImplUsedUnits.Count - 1 do
+              CollectLinkOnlyObject(Iface.ImplUsedUnits.Strings[I]);
         end;
       finally
         FLoading.Delete(FLoading.IndexOf(AName));
