@@ -1690,7 +1690,14 @@ begin
   FScopeStack := TObjectList.Create(True);
   FAllTypes   := TObjectList.Create(True);
   FGenerics   := TStringList.Create();
-  FGenerics.CaseSensitive := True;
+  { Case-INsensitive, like every other name lookup in the language: Pascal
+    identifiers are case-insensitive, so `tbox<Integer>` names the same generic
+    as `TBox<Integer>` (GH #212).  This list was the one registry created
+    case-sensitive, which made a generic reference resolve or not depending on
+    how it happened to be spelled at the use site — while the non-generic types
+    beside it resolved from any spelling.  FGenericRoutines below is already
+    case-insensitive; this matches it. }
+  FGenerics.CaseSensitive := False;
   { Owns (retains) registered generic templates so FGenerics' references stay
     valid even after the originating AST is torn down. }
   FGenericTemplates := TObjectList.Create(True);

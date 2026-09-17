@@ -37,6 +37,8 @@ type
     procedure TestRun_GenericClass_DistinctInstantiations;
     { Nesting }
     procedure TestRun_NestedGeneric_TBoxOfTBox;
+    { Generic base names are case-insensitive (GH #212) }
+    procedure TestRun_GenericRef_MixedCaseSpellings_OneType;
     { Local variable named after the type parameter (var t: T) — must not be
       rejected as shadowing a visible type. }
     procedure TestRun_GenericClass_LocalNamedLikeTypeParam;
@@ -172,6 +174,59 @@ const
       outer.Free(); inner.Free()
     end.
     ''';
+
+{ GH #212.  A generic referenced under a differently-cased spelling must
+  resolve to the SAME instantiation, not fail and not mint a second one.
+
+  The IR-level tests assert that the template resolves and that the instances
+  are identical descriptors; this one proves the program actually links and
+  runs — one monomorphisation means one set of emitted methods, and the
+  assignment `c := a` below only compiles if all three spellings really are the
+  same type.
+
+  The odd spelling comes FIRST deliberately: the defect was order-dependent,
+  and a leading exact-case reference masked it. }
+const
+  SrcMixedCaseGeneric =
+    '''
+    program p;
+    type
+      TBox<T> = class
+        FValue: T;
+        procedure SetV(AV: T);
+        function GetV(): T;
+      end;
+      TIntBox = tbox<Integer>;
+    procedure TBox<T>.SetV(AV: T);
+    begin
+      Self.FValue := AV
+    end;
+    function TBox<T>.GetV(): T;
+    begin
+      Result := Self.FValue
+    end;
+    var
+      a: tbox<Integer>;
+      b: TBOX<Integer>;
+      c: TIntBox;
+    begin
+      a := tbox<Integer>.Create();
+      a.SetV(11);
+      WriteLn(a.GetV());
+      b := TBOX<Integer>.Create();
+      b.SetV(22);
+      WriteLn(b.GetV());
+      c := a;
+      WriteLn(c.GetV());
+      a.Free(); b.Free()
+    end.
+    ''';
+
+procedure TE2EGenericsTests.TestRun_GenericRef_MixedCaseSpellings_OneType;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(SrcMixedCaseGeneric, '11' + LE + '22' + LE + '11' + LE, 0);
+end;
 
 procedure TE2EGenericsTests.TestRun_GenericFunc_IntAndString;
 begin

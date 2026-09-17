@@ -57,6 +57,14 @@ type
     procedure TestSemantic_Generic_TwoParams_BothFieldsResolved;
 
     { ------------------------------------------------------------------ }
+    { Semantic — generic base names are case-insensitive (GH #212)          }
+    { ------------------------------------------------------------------ }
+    procedure TestSemantic_GenericRef_LowercaseSpelling_Resolves;
+    procedure TestSemantic_GenericRef_UppercaseSpelling_Resolves;
+    procedure TestSemantic_GenericAlias_LowercaseSpelling_Resolves;
+    procedure TestSemantic_GenericRef_AnySpelling_SharesOneInstance;
+
+    { ------------------------------------------------------------------ }
     { Semantic — unit-scope generic var declarations                        }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_UnitIntf_GenericVar_Resolves;
@@ -703,6 +711,143 @@ begin
   IR := GenIR(SrcGenericUsage);
   { SetValue stores into FValue; verify a store instruction is emitted }
   AssertTrue('method bodies emitted with stores', Pos('storew', IR) > 0);
+end;
+
+{ ------------------------------------------------------------------ }
+{ Semantic — generic base names are case-insensitive (GH #212)          }
+{ ------------------------------------------------------------------ }
+
+{ Pascal identifiers are case-insensitive, so `TBox<Integer>` and
+  `tbox<Integer>` name the same generic.  The generic-template registry was the
+  one lookup table in the symbol table created CaseSensitive, so a spelling
+  that differed from the declaration by a single letter failed to resolve —
+  reported as GH #212 against `Tdictionary<string,string>`.
+
+  Every other name in the language already resolves case-insensitively, the
+  non-generic types in the same `type` block included, which is what made the
+  failure look arbitrary to the reporter. }
+procedure TGenericsTests.TestSemantic_GenericRef_LowercaseSpelling_Resolves;
+const
+  Src =
+    '''
+    program Prg;
+    type
+      TBox<T> = class
+        FValue: T;
+      end;
+    var B: tbox<Integer>;
+    begin
+    end.
+    ''';
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    AssertNotNull('tbox<Integer> resolves to the TBox template',
+      Prog.SymbolTable.FindType('TBox<Integer>'));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericsTests.TestSemantic_GenericRef_UppercaseSpelling_Resolves;
+const
+  Src =
+    '''
+    program Prg;
+    type
+      TBox<T> = class
+        FValue: T;
+      end;
+    var B: TBOX<Integer>;
+    begin
+    end.
+    ''';
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    AssertNotNull('TBOX<Integer> resolves to the TBox template',
+      Prog.SymbolTable.FindType('TBox<Integer>'));
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ The reporter's own shape: the differing spelling sits in a TYPE ALIAS rather
+  than a var declaration.  That is the form that produced
+  "Unknown type 'Tdictionary<string,string>' in type alias". }
+procedure TGenericsTests.TestSemantic_GenericAlias_LowercaseSpelling_Resolves;
+const
+  Src =
+    '''
+    program Prg;
+    type
+      TBox<T> = class
+        FValue: T;
+      end;
+      TIntBox = tbox<Integer>;
+    var B: TIntBox;
+    begin
+    end.
+    ''';
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    AssertNotNull('alias to tbox<Integer> resolves',
+      Prog.SymbolTable.FindType('TIntBox'));
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ Case-insensitive resolution must converge on ONE instantiation, not mint a
+  second monomorphisation per spelling.  Two instances would mean two distinct
+  types that Pascal considers the same type — assignment between them would
+  fail, and each would emit its own copy of every method.
+
+  The odd spelling deliberately comes FIRST here.  The original defect was
+  ORDER-DEPENDENT: once any declaration had instantiated the generic under the
+  template's own spelling, later differently-cased references resolved fine,
+  because FindType (unlike the template registry) is case-insensitive and found
+  the existing instance.  Only the FIRST reference had to match the template's
+  case.  With `A` declared first this test passes even against the broken
+  compiler; leading with the lowercase spelling is what gives it teeth. }
+procedure TGenericsTests.TestSemantic_GenericRef_AnySpelling_SharesOneInstance;
+const
+  Src =
+    '''
+    program Prg;
+    type
+      TBox<T> = class
+        FValue: T;
+      end;
+    var
+      A: tbox<Integer>;
+      B: TBOX<Integer>;
+      C: TBox<Integer>;
+    begin
+    end.
+    ''';
+var
+  Prog: TProgram;
+  TA, TB, TC: TTypeDesc;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    TA := Prog.SymbolTable.FindType('TBox<Integer>');
+    AssertNotNull('TBox<Integer> instantiated', TA);
+    TB := Prog.SymbolTable.FindType('tbox<Integer>');
+    TC := Prog.SymbolTable.FindType('TBOX<Integer>');
+    AssertSame('tbox<Integer> is the same instance', TA, TB);
+    AssertSame('TBOX<Integer> is the same instance', TA, TC);
+  finally
+    Prog.Free();
+  end;
 end;
 
 { ------------------------------------------------------------------ }
