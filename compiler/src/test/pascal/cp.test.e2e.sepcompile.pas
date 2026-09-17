@@ -72,6 +72,7 @@ type
       --source was not a search path, so a unit sitting beside the program
       was not found without an explicit --unit-path. }
     procedure TestUnitBesideProgram_FoundWithoutUnitPath;
+    procedure TestObjectBesideProgram_UsableWithoutSource;
     { Regression (BUG-20260906-openarray-param-bif-roundtrip): a routine taking
       an OPEN ARRAY parameter (`array of T`) became uncallable once its unit
       was loaded from a cached .o instead of source — the importer resolved the
@@ -621,7 +622,7 @@ const
     end.
     ''';
 var
-  Dir, UnitPas, ProgPas, ProgBin: string;
+  Dir, UnitPas, ProgPas, ProgBin, ProgBin2: string;
   Captured: string;
   Rc: Integer;
 begin
@@ -652,7 +653,113 @@ begin
 
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_beside exit code', 0, Rc);
-  AssertEquals('use_beside stdout', '7'#10, Captured)
+  AssertEquals('use_beside stdout', '7'#10, Captured);
+
+  { Compile a SECOND time into the same directory.  The first compile dropped
+    besidedep.o beside the source, so this run reads that object back off the
+    implicit search path rather than recompiling from source — the incremental
+    cache working as intended.  Covering only the cold compile would leave the
+    warm path untested: the implicit directory is the one search path that is
+    always populated with the compiler's own output, so a regression that
+    breaks reading it back shows up here and nowhere else. }
+  AssertTrue('besidedep.o cached beside the source',
+             FileExists(Dir + '/besidedep.o'));
+
+  ProgBin2 := Dir + '/use_beside2';
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin2], Captured);
+  AssertEquals('second blaise(use_beside) exit code (out: ' + Captured + ')',
+               0, Rc);
+  AssertTrue('use_beside2 exists', FileExists(ProgBin2));
+
+  Rc := RunBinary(ProgBin2, Captured);
+  AssertEquals('use_beside2 exit code', 0, Rc);
+  AssertEquals('use_beside2 stdout', '7'#10, Captured)
+end;
+
+{ The --source file's own directory supplies pre-built objects, not just
+  source.  It is an ordinary search path in every respect — the same as an
+  explicit --unit-path.
+
+  This pins the removal of the SOURCE_ONLY_PATH tag.  That tag made the
+  implicit directory supply .pas files but never .o files, to sidestep
+  BUG-20260906-implonly-extern-lost-on-cached-iface before it was fixed at
+  root; with the root fix in place the tag was redundant, and it left the
+  implicit directory behaving differently from every other search path.
+
+  Hiding the source after the cold compile is what makes the assertion
+  meaningful: with the object ineligible the unit is simply not found, so this
+  fails with "Unit 'AsideDep' not found in search paths" if the tag returns. }
+procedure TSepCompileTests.TestObjectBesideProgram_UsableWithoutSource;
+const
+  UnitSrc =
+    '''
+    unit AsideDep;
+    interface
+    function Aside(): Integer;
+    implementation
+    function Aside(): Integer;
+    begin
+      Result := 9
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseAside;
+    uses AsideDep;
+    begin
+      WriteLn(Aside())
+    end.
+    ''';
+var
+  Dir, UnitPas, ProgPas, Bin1, Bin2: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  Dir := FScratch + '/case194_obj_beside';
+  ForceDirectories(Dir);
+  UnitPas := Dir + '/asidedep.pas';
+  ProgPas := Dir + '/use_aside.pas';
+  Bin1    := Dir + '/use_aside1';
+  Bin2    := Dir + '/use_aside2';
+
+  WriteFile(UnitPas, UnitSrc);
+  WriteFile(ProgPas, ProgSrc);
+
+  { Cold: no --unit-path.  AsideDep is found beside the program and compiled
+    from source, which also drops asidedep.o into that same directory. }
+  Rc := RunBlaise(['--source', ProgPas, '--output', Bin1], Captured);
+  AssertEquals('cold compile exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('asidedep.o cached beside the source',
+             FileExists(Dir + '/asidedep.o'));
+
+  Rc := RunBinary(Bin1, Captured);
+  AssertEquals('cold exit code', 0, Rc);
+  AssertEquals('cold stdout', '9'#10, Captured);
+
+  { Hide the source: the object beside the program is now the only way to
+    resolve AsideDep. }
+  DeleteFile(UnitPas);
+  AssertTrue('source hidden', not FileExists(UnitPas));
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', Bin2], Captured);
+  AssertEquals('warm compile exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('use_aside2 exists', FileExists(Bin2));
+
+  Rc := RunBinary(Bin2, Captured);
+  AssertEquals('warm exit code', 0, Rc);
+  AssertEquals('warm stdout', '9'#10, Captured)
 end;
 
 { Regression for BUG-20260906-openarray-param-bif-roundtrip.  Mirrors the

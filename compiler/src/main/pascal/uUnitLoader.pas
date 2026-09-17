@@ -24,28 +24,6 @@ uses
   uLexer, uParser, uAST,
   uUnitInterface, uUnitInterfaceIO, uIfaceObject, uCompilerId;
 
-var
-  { Marker for a search path that may supply unit SOURCE but must never supply
-    a pre-built '<unit>.o'.  Store it in the search-path TStringList's
-    Objects[] slot: `Paths.Objects[I] := SOURCE_ONLY_PATH`.
-
-    A single shared sentinel INSTANCE, compared by identity — never
-    dereferenced, so it carries no state and is created once in this unit's
-    initialization.
-
-    The --source file's own directory is added this way (see Blaise.pas).  It
-    has to be searched for .pas files, or a unit sitting beside the program is
-    not found (GH #194) — but it is ALSO where the compiler drops its own
-    incremental per-unit .o output, so allowing .o discovery there makes a
-    program's SECOND compile pick up the objects its FIRST compile wrote.  A
-    cached iface reached that way loses `external name` routines that the unit
-    reaches through an implementation-only dependency, and the rebuild fails
-    with e.g. "Undeclared procedure 'pthread_mutex_init'"
-    (BUG-20260906-implonly-extern-lost-on-cached-iface).  Explicit
-    --unit-path / --unit-cache directories are unaffected: they stay eligible
-    for both source and objects. }
-  SOURCE_ONLY_PATH: TObject;
-
 type
   EUnitNotFound       = class(Exception);
   ECircularDependency = class(Exception);
@@ -120,10 +98,7 @@ type
       spelling in a `uses` clause must not decide whether the file is found
       — GH #194).  An earlier search path wins over a later one; within a
       single directory an exact-case match wins over a differently-cased
-      one.  Returns the path, or '' if no entry matches.
-
-      A search path whose Objects[] entry is SOURCE_ONLY_PATH is skipped when
-      AExt is '.o' — see the note on that constant. }
+      one.  Returns the path, or '' if no entry matches. }
     function LocateWithExt(const AName, AExt: string): string;
     function Locate(const AName: string): string;
     { Look for '<AName>.o' on the search paths, with the same case-insensitive
@@ -174,11 +149,6 @@ begin
 
   for I := 0 to FSearchPaths.Count - 1 do
   begin
-    { A source-only path never supplies a pre-built object — see
-      SOURCE_ONLY_PATH. }
-    if (AExt = '.o') and (FSearchPaths.Objects[I] = SOURCE_ONLY_PATH) then
-      Continue;
-
     Base := IncludeTrailingPathDelimiter(FSearchPaths.Strings[I]);
 
     { Fast path: the two spellings that cover almost every real lookup — the
@@ -798,10 +768,5 @@ begin
     Placed.Free();
   end;
 end;
-
-initialization
-  { Identity-only sentinel — never dereferenced, never freed (it lives for the
-    process's lifetime, like any other unit-level singleton). }
-  SOURCE_ONLY_PATH := TObject.Create();
 
 end.

@@ -862,15 +862,16 @@ begin
     passing the real one via --unit-path.)  Only added when it names a real
     directory, and never duplicated if the user already passed it.
 
-    It is tagged SOURCE_ONLY_PATH so it supplies .pas files but never a
-    pre-built .o.  This directory is also where the compiler drops its own
-    incremental per-unit objects, so without the tag a program's SECOND
-    compile discovers the objects its FIRST compile wrote and fails — see
-    the SOURCE_ONLY_PATH note in uUnitLoader.pas. }
+    It supplies pre-built .o files as well as source, exactly like an explicit
+    --unit-path.  This directory is also where the compiler drops its own
+    incremental per-unit objects, so a program's SECOND compile reads back the
+    objects its FIRST compile wrote — which is the point of the incremental
+    cache, and is guarded by
+    TSepCompileTests.TestObjectBesideProgram_UsableWithoutSource. }
   SrcDir := ExtractFilePath(ExpandFileName(SourceFile));
   if (SrcDir <> '') and DirectoryExists(SrcDir)
      and (SearchPaths.IndexOf(SrcDir) < 0) then
-    SearchPaths.Objects[SearchPaths.Add(SrcDir)] := SOURCE_ONLY_PATH;
+    SearchPaths.Add(SrcDir);
 
   if (UnitCacheDir <> '') and (SearchPaths.IndexOf(UnitCacheDir) < 0) then
     SearchPaths.Add(UnitCacheDir);
