@@ -165,7 +165,12 @@ type
     { Lookups borrow the key (const): they never store it, so a borrowed key
       needs no by-value copy/release.  This also removes the arm64
       pass-borrowed-string-by-value over-release hazard on the hot FindKey
-      path (FFrame.TryGetValue over-release, macOS arm64 2026-07-24). }
+      path (FFrame.TryGetValue over-release, macOS arm64 2026-07-24).
+
+      On a HIT, Value receives the stored value and the result is True.  On a
+      MISS, Value is set to its zero value and the result is False — it is not
+      left holding whatever the caller put there, which would let a stale value
+      from an earlier hit pass for a successful lookup. }
     function  TryGetValue(const Key: K; var Value: V): Boolean;
     function  ContainsKey(const Key: K): Boolean;
     procedure Remove(const Key: K);
@@ -1256,6 +1261,7 @@ function TDictionary<K, V>.TryGetValue(const Key: K; var Value: V): Boolean;
 var
   Idx:  Integer;
   VPtr: ^V;
+  Zero: V;
 begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
@@ -1265,7 +1271,21 @@ begin
     Result := True
   end
   else
+  begin
+    { A miss CLEARS the caller's variable, as Delphi and FPC do.  Leaving it
+      untouched lets a stale value from an earlier hit masquerade as a
+      successful lookup whenever the caller forgets to test the result.
+
+      `Zero` is an ordinary local, which the language guarantees is
+      zero-initialised for every type kind — scalars, strings, records with
+      managed fields, the lot (docs/language-rationale.adoc,
+      "Zero-Initialisation of Variables").  That is why Blaise needs no
+      Default(V) intrinsic here: declaring the variable IS the zero value, and
+      the assignment below carries the normal ARC semantics, releasing whatever
+      Value held. }
+    Value  := Zero;
     Result := False
+  end
 end;
 
 function TDictionary<K, V>.ContainsKey(const Key: K): Boolean;
@@ -1543,6 +1563,7 @@ function TOrderedDictionary<K, V>.TryGetValue(const Key: K; var Value: V): Boole
 var
   Idx:  Integer;
   VPtr: ^V;
+  Zero: V;
 begin
   Idx := Self.FindKey(Key);
   if Idx >= 0 then
@@ -1552,7 +1573,11 @@ begin
     Result := True
   end
   else
+  begin
+    { Clears on a miss — see TDictionary.TryGetValue for why. }
+    Value  := Zero;
     Result := False
+  end
 end;
 
 function TOrderedDictionary<K, V>.ContainsKey(const Key: K): Boolean;

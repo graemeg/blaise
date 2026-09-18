@@ -93,6 +93,8 @@ type
     procedure TestDict_AddAndLookup;
     procedure TestDict_SetItemOverwrites;
     procedure TestDict_TryGetValue_HitAndMiss;
+    procedure TestDict_TryGetValue_Miss_ClearsManagedValue;
+    procedure TestOrderedDict_TryGetValue_Miss_ClearsValue;
     procedure TestDict_Remove_DropsTheKey;
     procedure TestDict_Clear_EmptiesTheDict;
     procedure TestDict_GrowsPastHashThreshold;
@@ -702,7 +704,43 @@ begin
   AssertEquals('and yields the value', 1, V);
   V := -1;
   AssertFalse('miss returns False', D.TryGetValue('nope', V));
-  AssertEquals('and leaves the out param alone', -1, V);
+  { A miss CLEARS the value to V's zero, as Delphi and FPC do.  Leaving the
+    caller's variable untouched (which this asserted until 2026-09-18) makes a
+    stale value from an earlier hit look like a successful lookup whenever the
+    caller forgets to check the Boolean. }
+  AssertEquals('and clears the out param to zero', 0, V);
+end;
+
+{ The miss path must clear a MANAGED value type too, not just a scalar: the
+  old string has to be released and the slot left empty, or the caller sees a
+  live string it never fetched. }
+procedure TCollectionsTests.TestDict_TryGetValue_Miss_ClearsManagedValue;
+var
+  D: TDictionary<string, string>;
+  V: string;
+begin
+  D := TDictionary<string, string>.From(['a'], ['hit']);
+  V := 'STALE';
+  AssertFalse('miss returns False', D.TryGetValue('nope', V));
+  AssertEquals('managed value cleared to empty', '', V);
+  { The hit path is unaffected by the clearing. }
+  AssertTrue('hit still returns True', D.TryGetValue('a', V));
+  AssertEquals('and still yields the value', 'hit', V);
+end;
+
+procedure TCollectionsTests.TestOrderedDict_TryGetValue_Miss_ClearsValue;
+var
+  D: TOrderedDictionary<string, string>;
+  V: string;
+begin
+  D := TOrderedDictionary<string, string>.Create();
+  D.Add('a', 'hit');
+  V := 'STALE';
+  AssertFalse('miss returns False', D.TryGetValue('nope', V));
+  AssertEquals('value cleared to empty', '', V);
+  AssertTrue('hit still returns True', D.TryGetValue('a', V));
+  AssertEquals('and still yields the value', 'hit', V);
+  D.Free();
 end;
 
 procedure TCollectionsTests.TestDict_Remove_DropsTheKey;

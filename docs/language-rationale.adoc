@@ -4687,6 +4687,55 @@ does not cover all cases (pointers, out-params, aliasing).
 * Class instances are zeroed by `_ClassAlloc` via `memset` before the
   constructor runs.
 
+=== Consequence: no `Default(T)` intrinsic
+
+Delphi and FPC provide `Default(T)`, an intrinsic yielding the zero value of a
+type.  Blaise deliberately omits it, because zero-initialisation already
+provides the same thing through an ordinary declaration:
+
+[source,pascal]
+----
+function TBox<T>.Empty(): T;
+var
+  Zero: T;        // guaranteed zero for every type kind
+begin
+  Result := Zero
+end;
+----
+
+`Default(T)` exists in Delphi and FPC *because* those languages leave locals
+and `Result` holding garbage.  Without it there is no way to spell "the zero
+value of T" inside a generic body, where `0` is wrong for `string` and `''` is
+wrong for `Integer`.  Blaise removes the premise: declaring a variable of type
+`T` yields that zero value, for scalars, strings, classes, interfaces,
+pointers, dynamic arrays, static arrays and records with managed fields alike,
+per the table above.
+
+A function that never assigns `Result` therefore already returns the zero
+value, which covers the most common use directly:
+
+[source,pascal]
+----
+function TBox<T>.Empty(): T;
+begin
+  // no assignment — Result is already T's zero value
+end;
+----
+
+Adding `Default(T)` would introduce a second spelling of a guarantee the
+language already makes, at the cost of an arm in all three backends plus
+aggregate-return handling, and with no new capability in exchange.  The
+`var Zero: T` idiom is the idiomatic form in Blaise.
+
+This is a deliberate divergence from Delphi/FPC and a porting consideration:
+code using `Default(T)` must be rewritten to the idiom above.  The compiler
+rejects it as an undeclared function rather than silently accepting it.
+
+Note this reasoning is specific to producing a zero VALUE.  It says nothing
+about whether an API should *return* a zero value — `TStack.Peek` deliberately
+raises on an empty stack rather than returning a zero, because a zero is a
+legitimate element value and would be indistinguishable from a stored one.
+
 === Future Roadmap (not implemented)
 
 * `{$noinit}` attribute — opt-out for a specific variable when the profiler
