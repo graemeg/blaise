@@ -71,6 +71,13 @@ type
     FLoading:              TStringList;  { units currently on the load stack (any edge) — guards re-entry / infinite recursion }
     FIfaceChain:           TStringList;  { units reached along an unbroken chain of interface-section uses — a back-edge into this set is a true circular dependency.  Implementation-section uses do NOT extend this chain (Pascal allows them to point back), so following one starts a fresh chain. }
     FLoadedNames:          TStringList;  { units already fully loaded }
+    { Memo of unit-name -> source hash for this run.  SourceHashWithEmbeds
+      LEXES the file, so it is far too costly to recompute per query: the
+      generic-dependency check below asks for the same unit's hash once per
+      dependent.  Every unit's hash is already computed once by ValidateIface
+      on the cached path, so memoising makes that work shared rather than
+      repeated — this is a net saving even before the new check is counted. }
+    FHashMemo:             TStringList;  { Name=Hash, filled on demand }
     FSourceLoadedNames:    TStringList;  { units taken via the SOURCE-recompile
                                            path (stale cache or no cache).  A
                                            cached unit whose dependency is in
@@ -111,6 +118,16 @@ type
     { True if any interface-use dependency of AIface was taken via the
       source-recompile path (is in FSourceLoadedNames). }
     function DependsOnSourceLoaded(AIface: TUnitInterface): Boolean;
+    { True if loading AName would take the source-recompile path rather than
+      its cached object.  Answers a dependency's staleness WITHOUT loading it,
+      for deciding whether a dependent may keep its own cache. }
+    function WouldRecompileFromSource(const AName: string): Boolean;
+    { Source hash of AName's .pas on the search path, memoised for this run.
+      '' when the unit has no locatable source or cannot be read. }
+    function SourceHashOf(const AName: string): string;
+    { True when AIface recorded monomorphising a generic from a unit whose
+      source has changed since.  See TUnitInterface.GenericDepHashes. }
+    function GenericDepChanged(AIface: TUnitInterface): Boolean;
     procedure LoadTransitive(const AName: string);
     { Collect the .o for an impl-only dependency (and its transitive
       dependencies) for linking, without parsing source or importing its
@@ -240,6 +257,16 @@ begin
       WriteLn(StdErr,
               'note: ', AName,
               '.o iface stale vs source on path; recompiling from source');
+      Exit;
+    end;
+    { This unit's own source is unchanged, but it may hold a monomorphisation
+      of a generic whose BODY was edited — invisible to every hash above,
+      because that edit does not touch the declaring unit's interface. }
+    if GenericDepChanged(AIface) then
+    begin
+      WriteLn(StdErr,
+              'note: ', AName,
+              '.o instantiates a generic whose source changed; recompiling from source');
       Exit;
     end;
     { Source unchanged — but the cached .o must also have been emitted by THIS
@@ -385,7 +412,137 @@ begin
   for I := 0 to AIface.UsedUnits.Count - 1 do
     if FSourceLoadedNames.IndexOf(AIface.UsedUnits.Strings[I]) >= 0 then
       Exit;
+  { IMPLEMENTATION-section uses count too
+    (BUG-20260918-generic-body-edit-skips-consumer-rebuild).  A unit's object
+    can physically contain code generated from a dependency's BODY — a generic
+    instantiated here is cloned and re-analysed in THIS unit, so the
+    monomorphisation lands in this unit's object.  That makes an impl-only
+    dependency a real code dependency, not merely a link-time one.
+
+    Scanning only interface uses missed it: editing a generic's body leaves
+    the declaring unit's INTERFACE unchanged, so no interface hash can see the
+    change, and the consumer silently kept a monomorphisation of the old body.
+    The declaring unit was correctly recompiled; only the dependent was not.
+
+    Deliberately unconditional — not narrowed to ifaces that carry generic
+    bodies.  Inlining and any future construct that bakes a dependency's code
+    into a dependent has the same exposure, and getting that list wrong
+    reintroduces silent staleness.  The cost of being conservative here is an
+    occasional redundant recompile; the cost of being wrong is a binary that
+    runs code the source no longer says.
+
+    Impl-only deps are loaded AFTER this decision (see LoadTransitive), so
+    FSourceLoadedNames cannot be consulted for them — the name is not in there
+    yet.  WouldRecompileFromSource answers the same question directly, by
+    asking whether that dependency's own cached object would survive
+    validation. }
+  for I := 0 to AIface.ImplUsedUnits.Count - 1 do
+    if (FSourceLoadedNames.IndexOf(AIface.ImplUsedUnits.Strings[I]) >= 0) or
+       WouldRecompileFromSource(AIface.ImplUsedUnits.Strings[I]) then
+      Exit;
   Result := False;
+end;
+
+function TUnitLoader.SourceHashOf(const AName: string): string;
+var
+  Idx:     Integer;
+  SrcPath: string;
+  Src:     TStringList;
+begin
+  for Idx := 0 to FHashMemo.Count - 1 do
+    if SameText(DepPairName(FHashMemo.Strings[Idx]), AName) then
+      Exit(DepPairHash(FHashMemo.Strings[Idx]));
+
+  Result  := '';
+  SrcPath := Locate(AName);
+  if SrcPath <> '' then
+  begin
+    Src := TStringList.Create();
+    try
+      try
+        Src.LoadFromFile(SrcPath);
+        { Must match the writer (WriteUnitInterfaceToFile) exactly — same
+          helper, same defines — or the two disagree about which IFDEF
+          branches, and so which embedded files, are live. }
+        Result := SourceHashWithEmbeds(Src.Text, SrcPath, FDefines);
+      except
+        Result := '';
+      end;
+    finally
+      Src.Free();
+    end;
+  end;
+  FHashMemo.Add(AName + '=' + Result);
+end;
+
+function TUnitLoader.GenericDepChanged(AIface: TUnitInterface): Boolean;
+var
+  I:       Integer;
+  DepName: string;
+  WasHash: string;
+  NowHash: string;
+begin
+  { A generic's method bodies are cloned and RE-ANALYSED in the consumer, so
+    the monomorphisation is emitted into the CONSUMER's object (a weak
+    definition there, not an undefined reference).  Editing only the generic's
+    BODY leaves the declaring unit's INTERFACE — and hence its iface hash —
+    identical, so every other staleness signal reads "unchanged" while this
+    unit's object still holds code the source no longer says
+    (BUG-20260918-generic-body-edit-skips-consumer-rebuild).
+
+    GenericDepHashes records what each such unit hashed to when this iface was
+    written; comparing against the current hash catches the body edit.  A
+    dependency with no locatable source cannot be diffed — treat it as
+    unchanged, matching ValidateIface, which also falls back to trusting the
+    cache when source is unavailable. }
+  Result := True;
+  for I := 0 to AIface.GenericDepHashes.Count - 1 do
+  begin
+    DepName := DepPairName(AIface.GenericDepHashes.Strings[I]);
+    if DepName = '' then Continue;
+    WasHash := DepPairHash(AIface.GenericDepHashes.Strings[I]);
+    if WasHash = '' then Continue;
+    NowHash := SourceHashOf(DepName);
+    if NowHash = '' then Continue;
+    if not SameText(NowHash, WasHash) then
+      Exit;
+  end;
+  Result := False;
+end;
+
+function TUnitLoader.WouldRecompileFromSource(const AName: string): Boolean;
+var
+  ObjPath: string;
+  Iface:   TUnitInterface;
+begin
+  { True when loading AName now would take the SOURCE path rather than its
+    cached object — i.e. it has no usable cache, or the cache is stale against
+    the source on the path.  Used to decide a DEPENDENT's staleness before the
+    dependency itself has been loaded.
+
+    Deliberately cheap and side-effect free: it reads the candidate object's
+    embedded iface and runs the same ValidateIface the real load would, but
+    registers nothing and recurses nowhere.  A unit already loaded this run is
+    settled, so its recorded outcome is used instead of re-probing. }
+  Result := False;
+  if IsBuiltin(AName) then Exit;
+  if FSourceLoadedNames.IndexOf(AName) >= 0 then Exit(True);
+  if FLoadedNames.IndexOf(AName) >= 0 then Exit(False);
+
+  { No source to recompile from — whatever cache exists is the only option,
+    exactly as the cached-iface path concludes. }
+  if Locate(AName) = '' then Exit(False);
+
+  ObjPath := LocateObject(AName);
+  if ObjPath = '' then Exit(True);   { source but no object — must compile it }
+
+  Iface := LoadIfaceFromObject(ObjPath);
+  if Iface = nil then Exit(True);    { unreadable — the source path takes over }
+  try
+    Result := not ValidateIface(Iface, AName);
+  finally
+    Iface.Free();
+  end;
 end;
 
 procedure TUnitLoader.LoadTransitive(const AName: string);
@@ -593,6 +750,8 @@ begin
   FLoadedNames.CaseSensitive := False;
   FSourceLoadedNames := TStringList.Create();
   FSourceLoadedNames.CaseSensitive := False;
+  FHashMemo := TStringList.Create();
+  FHashMemo.CaseSensitive := False;
   FPrebuiltIfaces      := TObjectList.Create(True);
   FPrebuiltObjectPaths := TStringList.Create();
   FPrebuiltObjectPaths.CaseSensitive := False;
@@ -610,6 +769,7 @@ begin
   FLinkOnlyObjects.Free();
   FPrebuiltObjectPaths.Free();
   FPrebuiltIfaces.Free();
+  FHashMemo.Free();
   FSourceLoadedNames.Free();
   FLoadedNames.Free();
   FIfaceChain.Free();

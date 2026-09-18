@@ -54,7 +54,20 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 16; { v16: TMethodDecl.IsStatic added to EncodeMethodDecl/
+  IFACE_VERSION = 17; { v17: TUnitInterface.GenericDepHashes is serialised in
+                          the META block (one EncodeStringList after LinkLibs,
+                          before HasInitialization).  It records, as Name=Hash
+                          pairs, the source hash of every unit this one
+                          MONOMORPHISED a generic from, so an incremental
+                          rebuild can tell that a generic's BODY changed —
+                          which leaves the declaring unit's interface, and
+                          therefore its iface hash, untouched.  Without it the
+                          consumer keeps a monomorphisation of the old body and
+                          the program silently runs stale code
+                          (BUG-20260918-generic-body-edit-skips-consumer-rebuild).
+                          The META layout grew, so v16 readers must reject
+                          these .bif and recompile.
+                        v16: TMethodDecl.IsStatic added to EncodeMethodDecl/
                           ReadMethodDecl (one extra byte after IsOverload).
                           A `static` method on a GENERIC template travels as a
                           method DECL, not a method SIG, so the sig path's
@@ -160,6 +173,17 @@ function WriteUnitInterface(AIface: TUnitInterface): string;
   input or version mismatch. }
 function ReadUnitInterface(const AText: string): TUnitInterface;
 
+{ Split a 'Name=Hash' GenericDepHashes entry.  The TStringList available here
+  has no Names/Values API, so the pair is stored as one string. }
+function DepPairName(const AEntry: string): string;
+function DepPairHash(const AEntry: string): string;
+
+{ Record, on AIface, the names of the units it monomorphised a generic from.
+  Values are left empty here; WriteUnitInterfaceToFile fills each one in with
+  that unit's source hash, since it already hashes sources and knows the active
+  defines.  See TUnitInterface.GenericDepHashes. }
+procedure RecordGenericDepNames(AIface: TUnitInterface; ANames: TStringList);
+
 { File wrappers.  Caller owns the returned interface. }
 procedure WriteUnitInterfaceToFile(AIface: TUnitInterface; const APath: string);
 function  ReadUnitInterfaceFromFile(const APath: string): TUnitInterface;
@@ -204,6 +228,12 @@ function SourceHashWithEmbeds(const ASourceText, ASourcePath: string;
   so the driver publishes it here once instead of threading a parameter
   through every one.  Not owned; the caller keeps ownership. }
 procedure SetActiveDefines(ADefines: TStringList);
+{ Unit search paths, so the writer can locate a generic dependency's source to
+  hash it.  That dependency need NOT sit beside the unit being written — in a
+  typical layout the library is in src/main/pascal and its consumer in
+  src/test/pascal — so the source directory alone is not enough.  Mirrors
+  SetActiveDefines: caller-owned, set once per run. }
+procedure SetUnitSearchPaths(APaths: TStringList);
 
 { The compiler-identity string stamped into every .bif and checked when a
   cached .o is validated.  It is COMPILER_ID (the human-readable base) PLUS a
@@ -898,6 +928,7 @@ begin
            EncodeStringList(AIface.UsedUnits) +
            EncodeStringList(AIface.ImplUsedUnits) +
            EncodeStringList(AIface.LinkLibs) +
+           EncodeStringList(AIface.GenericDepHashes) +
            EncodeBool(AIface.HasInitialization) +
            EncodeBool(AIface.HasFinalization));
     SB.AppendLine('END');
@@ -2385,6 +2416,9 @@ begin
   C := DecodeCount(AText, APos);
   for I := 1 to C do
     AIface.LinkLibs.Add(ReadLpstrAt(AText, APos));
+  C := DecodeCount(AText, APos);
+  for I := 1 to C do
+    AIface.GenericDepHashes.Add(ReadLpstrAt(AText, APos));
   AIface.HasInitialization := ReadLpstrAt(AText, APos) = '1';
   AIface.HasFinalization := ReadLpstrAt(AText, APos) = '1';
   if ReadTag(AText, APos) <> 'END' then
@@ -2863,10 +2897,16 @@ end;
 var
   GEffectiveCompilerId: string = '';   { memoised — see EffectiveCompilerId }
   GActiveDefines: TStringList;         { not owned — see SetActiveDefines }
+  GUnitSearchPaths: TStringList;       { not owned — see SetUnitSearchPaths }
 
 procedure SetActiveDefines(ADefines: TStringList);
 begin
   GActiveDefines := ADefines;
+end;
+
+procedure SetUnitSearchPaths(APaths: TStringList);
+begin
+  GUnitSearchPaths := APaths;
 end;
 
 function EffectiveCompilerId: string;
@@ -2905,6 +2945,114 @@ begin
   Result := GEffectiveCompilerId;
 end;
 
+function DepPairName(const AEntry: string): string;
+var
+  P: Integer;
+begin
+  P := StrPos('=', AEntry);
+  if P < 0 then
+    Result := AEntry
+  else
+    Result := StrHead(AEntry, P);
+end;
+
+function DepPairHash(const AEntry: string): string;
+var
+  P: Integer;
+begin
+  P := StrPos('=', AEntry);
+  if P < 0 then
+    Result := ''
+  else
+    Result := StrCopyTail(AEntry, P + 1);
+end;
+
+procedure RecordGenericDepNames(AIface: TUnitInterface; ANames: TStringList);
+var
+  I: Integer;
+begin
+  if (AIface = nil) or (ANames = nil) then Exit;
+  AIface.GenericDepHashes.Clear();
+  for I := 0 to ANames.Count - 1 do
+    if ANames.Strings[I] <> '' then
+      AIface.GenericDepHashes.Add(ANames.Strings[I] + '=');
+end;
+
+{ Fill in the hash half of each GenericDepHashes entry.  Called from the
+  writer, which is the one place that both knows the active defines and is
+  already paying for source hashing.  A dependency whose source cannot be
+  located or read keeps an empty hash, which the reader treats as "cannot
+  diff — assume unchanged", matching ValidateIface's behaviour when source is
+  unavailable. }
+procedure FillGenericDepHashes(AIface: TUnitInterface; const ASourceDir: string);
+var
+  I, J:    Integer;
+  Base:    string;
+  Entries: TStringList;
+  DepName: string;
+  Cand:    string;
+  Src:     TStringList;
+  Hash:    string;
+begin
+  for I := 0 to AIface.GenericDepHashes.Count - 1 do
+  begin
+    DepName := DepPairName(AIface.GenericDepHashes.Strings[I]);
+    if DepName = '' then Continue;
+    if DepPairHash(AIface.GenericDepHashes.Strings[I]) <> '' then Continue;
+    { Search the unit paths, then the writing unit's own directory.  The
+      dependency is usually NOT beside this unit — a library in
+      src/main/pascal is consumed from src/test/pascal — so the source dir is
+      only the last resort.  Lowercase is the Blaise file convention, with the
+      as-written spelling as fallback. }
+    Cand := '';
+    if GUnitSearchPaths <> nil then
+      for J := 0 to GUnitSearchPaths.Count - 1 do
+      begin
+        Base := IncludeTrailingPathDelimiter(GUnitSearchPaths.Strings[J]);
+        if FileExists(Base + LowerCase(DepName) + '.pas') then
+        begin
+          Cand := Base + LowerCase(DepName) + '.pas';
+          Break
+        end;
+        if FileExists(Base + DepName + '.pas') then
+        begin
+          Cand := Base + DepName + '.pas';
+          Break
+        end;
+      end;
+    if Cand = '' then
+    begin
+      if FileExists(ASourceDir + LowerCase(DepName) + '.pas') then
+        Cand := ASourceDir + LowerCase(DepName) + '.pas'
+      else if FileExists(ASourceDir + DepName + '.pas') then
+        Cand := ASourceDir + DepName + '.pas';
+    end;
+    if Cand = '' then Continue;
+    Hash := '';
+    Src := TStringList.Create();
+    try
+      try
+        Src.LoadFromFile(Cand);
+        Hash := SourceHashWithEmbeds(Src.Text, Cand, GActiveDefines);
+      except
+        Hash := '';
+      end;
+    finally
+      Src.Free();
+    end;
+    { Rewrite through a local, not
+      `AIface.GenericDepHashes.Strings[I] := ...`.  An indexed-property WRITE
+      through a chained receiver is not yet lowered by the arm64 backend
+      ("not yet lowered: property write on this receiver form"), and it only
+      surfaces on a macos-arm64 cross-build — the host fixpoints pass. }
+    if Hash <> '' then
+    begin
+      Entries := AIface.GenericDepHashes;
+      Entries.Strings[I] := DepName + '=' + Hash;
+    end;
+  end;
+end;
+
 procedure WriteUnitInterfaceToFile(AIface: TUnitInterface; const APath: string);
 var
   Bytes: string;
@@ -2938,6 +3086,11 @@ begin
       AIface.SourceHash := '';
     end;
   end;
+
+  { Resolve the generic-dependency hashes against the sources beside this
+    unit's own, using the same helper and defines as the validator. }
+  if AIface.GenericDepHashes.Count > 0 then
+    FillGenericDepHashes(AIface, ExtractFilePath(AIface.SourceFile));
 
   Bytes := WriteUnitInterface(AIface);
   FOut := TFileOutputStream.Create(APath);

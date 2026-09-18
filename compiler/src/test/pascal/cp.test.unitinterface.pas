@@ -2741,17 +2741,18 @@ begin
   Iface := TUnitInterface.Create('U');
   try
     Buf := WriteUnitInterface(Iface);
-    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 16 since
-      TMethodDecl.IsStatic joined EncodeMethodDecl — a `static` method on a
-      GENERIC template travels as a method DECL, so the v4 sig-level IsStatic
-      did not reach it (v15 added META HasFinalization, v14 the ROUT
-      IsVarArgs flag, v13 the record method list, v12 the '->' lambda facts,
-      v11 the 'generic-proc' TYPE-block kind, on top of v10's 'reference to'
-      form, v9's free-routine external-name linkage, v8's named integer
-      subranges, v7's LinkLibs, v6's `overload` directive, v5's member
-      Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
+    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 17 since
+      META gained GenericDepHashes — the source hashes of the units this one
+      monomorphised a generic from, without which a warm rebuild cannot see
+      that a generic's BODY changed (v16 added TMethodDecl.IsStatic to
+      EncodeMethodDecl, v15 META HasFinalization, v14 the ROUT IsVarArgs flag,
+      v13 the record method list, v12 the '->' lambda facts, v11 the
+      'generic-proc' TYPE-block kind, on top of v10's 'reference to' form,
+      v9's free-routine external-name linkage, v8's named integer subranges,
+      v7's LinkLibs, v6's `overload` directive, v5's member Visibility, v4's
+      TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 16', Buf) = 0);
+      Pos('BLAISE-IFACE 17', Buf) = 0);
   finally
     Iface.Free();
   end;

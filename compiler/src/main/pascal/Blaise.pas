@@ -894,6 +894,13 @@ begin
      and (SearchPaths.IndexOf(RTLSrc) < 0) then
     SearchPaths.Add(RTLSrc);
 
+  { The .bif writer needs these to locate a generic dependency's source and
+    hash it — that dependency is usually NOT beside the unit being written
+    (a library in src/main/pascal consumed from src/test/pascal), so the
+    source directory alone does not find it.  Set once, after the search
+    paths are complete. }
+  SetUnitSearchPaths(SearchPaths);
+
   { Emit-mode / backend compatibility.  --emit-ir prints QBE IR and
     --emit-asm prints native assembly; PickTopDriver routes each to the
     backend that produces it, ignoring --backend.  That silent override is
@@ -1073,6 +1080,15 @@ begin
             UnitIfaces.Add(ExportUnitInterface(TUnit(Units.Items[I]),
                                                UnitIfaces,
                                                Semantic.GetSymbolTable()));
+            { Record which units this one monomorphised a generic from, so an
+              incremental rebuild can spot a generic BODY edit — which leaves
+              the declaring unit's interface, and so its hash, unchanged
+              (BUG-20260918-generic-body-edit-skips-consumer-rebuild).  The
+              hashes are filled in by the .bif writer, which already computes
+              each unit's source hash. }
+            RecordGenericDepNames(
+              TUnitInterface(UnitIfaces.Items[UnitIfaces.Count - 1]),
+              Semantic.GenericSourceUnits());
             Semantic.RegisterUnitIface(
               TUnitInterface(UnitIfaces.Items[UnitIfaces.Count - 1]));
             { Emit on-disk artifact when --emit-iface DIR was passed.

@@ -341,6 +341,7 @@ TUnitInterface.CompilerId  serialise
 TUnitInterface.UsedUnits  serialise
 TUnitInterface.ImplUsedUnits  serialise
 TUnitInterface.LinkLibs  serialise
+TUnitInterface.GenericDepHashes  serialise
 TUnitInterface.HasInitialization  serialise
 TUnitInterface.HasFinalization  serialise
 

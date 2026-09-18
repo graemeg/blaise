@@ -75,7 +75,7 @@ trap 'rm -rf "$WORK"' EXIT
 echo "compiler (stage-1): $STAGE1"
 echo "unit-cache:         $UC"
 
-echo "[1/4] BUILD 1 — compile whole compiler into a FRESH (empty) unit-cache"
+echo "[1/5] BUILD 1 — compile whole compiler into a FRESH (empty) unit-cache"
 set +e
 "$STAGE1" --source compiler/src/main/pascal/Blaise.pas \
   --output "$STAGE2A" --unit-cache "$UC" $UNIT_PATHS \
@@ -109,7 +109,7 @@ restore_edit() { cp "$WORK/edit_unit.bak" "$EDIT_UNIT" 2>/dev/null || true; rm -
 trap restore_edit EXIT
 printf '\n{ warmcache-fixpoint content-edit probe }\n' >> "$EDIT_UNIT"
 
-echo "[2/4] BUILD 2 — edit a dependency unit, then recompile into the SAME cache"
+echo "[2/5] BUILD 2 — edit a dependency unit, then recompile into the SAME cache"
 # Path under test: the edited unit is stale (recompiled from source); its
 # cached dependents must propagate that and recompile too, and unedited
 # dependency units still load from cached .bif/.o.
@@ -137,7 +137,7 @@ fi
 SIZE2=$(file_size "$STAGE2B")
 echo "      build2 ok — stage-2b size = $SIZE2 bytes"
 
-echo "[3/4] size sanity — warm-cache binary must not be drastically smaller"
+echo "[3/5] size sanity — warm-cache binary must not be drastically smaller"
 # A truncated/broken warm-cache rebuild was ~1.9 MB vs a ~2.8 MB clean build.
 # Require stage-2b to be at least 90% of stage-2a's size.
 MIN_SIZE=$(( SIZE1 * 90 / 100 ))
@@ -148,7 +148,7 @@ if [ "$SIZE2" -lt "$MIN_SIZE" ]; then
 fi
 echo "      ok — stage-2b is within 10% of stage-2a"
 
-echo "[4/4] behavioural check — both stage-2 binaries compile + run hello-world"
+echo "[4/5] behavioural check — both stage-2 binaries compile + run hello-world"
 HELLO="$WORK/hello.pas"
 printf 'program hello;\nbegin\n  WriteLn(%s);\nend.\n' "'Hello'" > "$HELLO"
 
@@ -189,6 +189,109 @@ check_binary() {
 
 check_binary "stage2a" "$STAGE2A"
 check_binary "stage2b" "$STAGE2B"
+
+echo "[5/5] generic-body edit — a warm rebuild must pick up the NEW body"
+# Every leg above edits a unit and checks the rebuilt binary is CORRECT.  None
+# of them can see this failure mode: a generic's method bodies are cloned and
+# RE-ANALYSED in the CONSUMER, so the monomorphisation is emitted into the
+# consumer's object.  Editing only the generic's BODY leaves the declaring
+# unit's INTERFACE — and so its iface hash — byte-identical, so every other
+# staleness signal reads "unchanged" while the consumer still holds code the
+# source no longer says.  The rebuilt binary is well-formed and runs; it just
+# silently runs the OLD body, which is why a size or hello-world check misses
+# it entirely (BUG-20260918-generic-body-edit-skips-consumer-rebuild).
+GWORK="$WORK/genbody"
+mkdir -p "$GWORK/src" "$GWORK/cache"
+
+cat > "$GWORK/src/gbfdep.pas" <<'EOF'
+unit GBFDep;
+interface
+type
+  TGBFBox<T> = class
+    function Tag(): Integer;
+  end;
+implementation
+function TGBFBox<T>.Tag(): Integer;
+begin
+  Result := 111
+end;
+end.
+EOF
+
+# The consumer instantiates the generic, so ITS object carries the
+# monomorphisation.  Interface-section uses deliberately: that is the shape
+# the existing interface-hash propagation already covers for everything else,
+# which is what made this gap easy to miss.
+cat > "$GWORK/src/gbfuser.pas" <<'EOF'
+unit GBFUser;
+interface
+function Run(): Integer;
+implementation
+uses GBFDep;
+function Run(): Integer;
+var B: TGBFBox<Integer>;
+begin
+  B := TGBFBox<Integer>.Create();
+  Result := B.Tag();
+  B.Free()
+end;
+end.
+EOF
+
+cat > "$GWORK/src/gbfmain.pas" <<'EOF'
+program gbfmain;
+uses GBFUser;
+begin
+  WriteLn(Run())
+end.
+EOF
+
+# Shape copied from the proven regression test
+# (TSepCompileTests.TestIncrementalRebuild_ImplOnlyGenericBodyEdit_Rebuilds):
+# ONE cache, the program and its units in ONE directory, and the consumer
+# reaching the generic through its IMPLEMENTATION section.  That last detail is
+# load-bearing — with the uses clause in the interface, the existing
+# interface-hash propagation already rebuilds the consumer and the staleness
+# never surfaces.  Verified: this form fails against a compiler carrying the
+# bug and passes once it is fixed.
+gb_build() {
+  local out="$1"
+  set +e
+  "$STAGE2A" --source "$GWORK/src/gbfmain.pas" --output "$out" \
+    --unit-cache "$GWORK/cache" --unit-path "$GWORK/src" \
+    $RT_UNIT_PATHS > "$GWORK/build.log" 2>&1
+  local rc=$?
+  set -e
+  if [ "$rc" -ne 0 ] || [ ! -x "$out" ]; then
+    echo "GENBODY_COMPILE_FAIL (exit=$rc)"
+    tail -10 "$GWORK/build.log"
+    exit 1
+  fi
+}
+
+# Cold: populates the cache; the consumer monomorphises the 111 body.
+gb_build "$GWORK/g1"
+GB_OUT1="$("$GWORK/g1")"
+if [ "$GB_OUT1" != "111" ]; then
+  echo "GENBODY_SETUP_FAIL — expected 111 from the cold build, got '$GB_OUT1'"
+  exit 1
+fi
+
+# Edit ONLY the generic's body.  The declaring unit's interface is untouched,
+# so no interface hash changes and nothing else signals staleness.
+sed -i 's/Result := 111/Result := 222/' "$GWORK/src/gbfdep.pas"
+
+# Warm: same cache.  The consumer must be recompiled, not served from cache.
+gb_build "$GWORK/g2"
+GB_OUT2="$("$GWORK/g2")"
+if [ "$GB_OUT2" != "222" ]; then
+  echo "STALE_GENERIC_BODY — warm rebuild ran the OLD generic body"
+  echo "  expected 222 after the edit, got '$GB_OUT2'"
+  echo "  the consumer kept a monomorphisation of the pre-edit body:"
+  echo "  its cached object was not invalidated when the generic's body changed"
+  exit 1
+fi
+echo "      ok — warm rebuild picked up the edited generic body (111 -> 222)"
 
 echo "WARMCACHE_FIXPOINT_OK"
 exit 0

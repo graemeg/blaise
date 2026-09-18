@@ -212,6 +212,27 @@ type
                                     that loads this unit from its cached .bif
                                     still pulls in (and links) impl-only
                                     dependencies. }
+    { Source hashes of the units this one MONOMORPHISED a generic from, as
+      Name=Hash pairs (the hash being that unit's SourceHash when this unit was
+      compiled).  Empty when this unit instantiated no generic.
+
+      This is the only cross-unit dependency whose CODE is copied into this
+      unit's object: a generic's method bodies are cloned and re-analysed in
+      the CONSUMER, so the monomorphisation is emitted here (it shows up as a
+      weak definition in this unit's .o, not an undefined reference).  Editing
+      only the generic's BODY leaves the declaring unit's INTERFACE — and hence
+      its iface hash — unchanged, so nothing else detects that this unit's
+      cached object is stale, and the program silently runs the old body
+      (BUG-20260918-generic-body-edit-skips-consumer-rebuild).
+
+      Inline routines and constants do NOT need this.  An inline body travels
+      in the .bif but lowers to a real CALL (an undefined reference resolved at
+      link time), so a rebuilt dependency supplies the new body automatically;
+      changing a constant alters the declaring unit's interface, which the
+      existing hash check already catches.  Verified by experiment for both.
+      If cross-unit inlining ever starts EMITTING the body into the caller,
+      inline deps must be recorded here too. }
+    GenericDepHashes: TStringList; { owned — Name=Hash of generic sources }
     LinkLibs:        TStringList; { owned — bare library names this unit must be
                                     linked against (deduped), hoisted from every
                                     'external ''lib''' decl, interface OR
@@ -441,6 +462,8 @@ begin
   Name      := AName;
   UsedUnits := TStringList.Create();
   ImplUsedUnits := TStringList.Create();
+  GenericDepHashes := TStringList.Create();
+  GenericDepHashes.CaseSensitive := False;
   LinkLibs  := TStringList.Create();
 
   Types         := TObjectList.Create(True);
@@ -473,6 +496,7 @@ begin
   Types.Free();
 
   LinkLibs.Free();
+  GenericDepHashes.Free();
   ImplUsedUnits.Free();
   UsedUnits.Free();
   inherited Destroy();

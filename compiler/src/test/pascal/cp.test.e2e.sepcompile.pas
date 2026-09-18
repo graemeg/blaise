@@ -147,6 +147,12 @@ type
       (the compiler rebuilt itself incrementally into a populated cache and
       lost ~880 KB of impl-only-dependency code). }
     procedure TestIncrementalRebuild_ImplOnlyUses_LinksDependency;
+    { Regression (BUG-20260918-generic-body-edit-skips-consumer-rebuild):
+      editing the BODY of a generic reached through a consumer's
+      IMPLEMENTATION-section uses must rebuild that consumer, or it keeps a
+      monomorphisation of the OLD body and the program silently runs stale
+      code. }
+    procedure TestIncrementalRebuild_ImplOnlyGenericBodyEdit_Rebuilds;
     { Regression (BUG-20260720-unit-iface-static-array-bif-roundtrip): a unit
       INTERFACE var of an anonymous array type — `array[0..2] of string` or
       `array of string` — broke the warm rebuild.  The .bif stored the type as
@@ -2033,6 +2039,136 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('build2 run exit code (impl-only dep must be linked)', 0, Rc);
   AssertEquals('build2 stdout', '43' + #10, Captured)
+end;
+
+{ BUG-20260918-generic-body-edit-skips-consumer-rebuild.
+
+  A generic's method bodies are cloned and RE-ANALYSED in the CONSUMER, so the
+  consumer's object physically contains code generated from the template's
+  body.  Its cache validity therefore depends on the declaring unit's BODY —
+  which no interface hash can see, because editing a method body leaves the
+  interface unchanged.
+
+  The loader already propagates staleness for that reason (a dependency taken
+  via the source path forces the dependent to recompile), but it only scanned
+  INTERFACE uses.  A generic instantiated from a unit's IMPLEMENTATION section
+  is just as real a code dependency, so the consumer kept its stale
+  monomorphisation and the program silently ran the OLD body.
+
+  The uses clause below is deliberately in ConsumerU's IMPLEMENTATION section:
+  with it in the interface this passes even against the broken compiler. }
+procedure TSepCompileTests.TestIncrementalRebuild_ImplOnlyGenericBodyEdit_Rebuilds;
+const
+  GenSrcV1 =
+    '''
+    unit GBodyDep;
+    interface
+    type
+      TGBox<T> = class
+        function Tag(): Integer;
+      end;
+    implementation
+    function TGBox<T>.Tag(): Integer;
+    begin
+      Result := 111
+    end;
+    end.
+    ''';
+  { Identical but for the body's constant — the INTERFACE is byte-for-byte the
+    same, which is the whole point. }
+  GenSrcV2 =
+    '''
+    unit GBodyDep;
+    interface
+    type
+      TGBox<T> = class
+        function Tag(): Integer;
+      end;
+    implementation
+    function TGBox<T>.Tag(): Integer;
+    begin
+      Result := 222
+    end;
+    end.
+    ''';
+  ConsumerSrc =
+    '''
+    unit ConsumerU;
+    interface
+    function Run(): Integer;
+    implementation
+    uses GBodyDep;
+    function Run(): Integer;
+    var B: TGBox<Integer>;
+    begin
+      B := TGBox<Integer>.Create();
+      Result := B.Tag();
+      B.Free()
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseGBody;
+    uses ConsumerU;
+    begin
+      WriteLn(Run())
+    end.
+    ''';
+var
+  GenPas, ConsPas, ProgPas, Bin1, Bin2, CacheDir, Dir: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  Dir      := FScratch + '/gbody_implonly';
+  ForceDirectories(Dir);
+  GenPas   := Dir + '/gbodydep.pas';
+  ConsPas  := Dir + '/consumeru.pas';
+  ProgPas  := Dir + '/use_gbody.pas';
+  Bin1     := Dir + '/use_gbody1';
+  Bin2     := Dir + '/use_gbody2';
+  CacheDir := Dir + '/units';
+  ForceDirectories(CacheDir);
+
+  WriteFile(GenPas, GenSrcV1);
+  WriteFile(ConsPas, ConsumerSrc);
+  WriteFile(ProgPas, ProgSrc);
+
+  { Build 1 (cold cache): everything from source; ConsumerU's object is
+    written carrying a monomorphisation of the v1 body. }
+  Rc := RunBlaise(['--source', ProgPas, '--output', Bin1,
+                   '--unit-cache', CacheDir,
+                   '--unit-path', Dir], Captured);
+  AssertEquals('build1 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Bin1, Captured);
+  AssertEquals('build1 run exit code', 0, Rc);
+  AssertEquals('build1 stdout', '111' + #10, Captured);
+
+  { Edit ONLY the generic's body.  ConsumerU's own source is untouched and
+    GBodyDep's interface is unchanged, so nothing but the body differs. }
+  WriteFile(GenPas, GenSrcV2);
+
+  { Build 2 (warm cache): GBodyDep is correctly detected stale and recompiled.
+    ConsumerU must follow it — it instantiated the generic, so its cached
+    object holds the old body.  Before the fix this printed 111. }
+  Rc := RunBlaise(['--source', ProgPas, '--output', Bin2,
+                   '--unit-cache', CacheDir,
+                   '--unit-path', Dir], Captured);
+  AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Bin2, Captured);
+  AssertEquals('build2 run exit code', 0, Rc);
+  AssertEquals('build2 must run the NEW generic body', '222' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestIncrementalRebuild_UnitIfaceAnonArrayVar;

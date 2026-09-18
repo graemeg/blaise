@@ -751,6 +751,11 @@ type
     function  RegisterGeneric(const AName: string; ATempl: TObject;
                               const ADeclUnit: string): string;
     function  FindGeneric(const AName: string): TObject;
+    { Unit that declared the generic base name AName, or '' if unknown.
+      Used to record which units a consumer monomorphised from, so an
+      incremental rebuild can detect a generic BODY edit
+      (BUG-20260918-generic-body-edit-skips-consumer-rebuild). }
+    function  GenericDeclUnit(const AName: string): string;
     function  RegisterGenericRoutine(const AName: string; ATempl: TObject;
                                      const ADeclUnit: string): string;
     function  FindGenericRoutine(const AName: string): TObject;
@@ -1855,6 +1860,16 @@ begin
     Result := TObject(FGenerics.Objects[Idx])
   else
     Result := nil;
+end;
+
+function TSymbolTable.GenericDeclUnit(const AName: string): string;
+var
+  Idx: Integer;
+begin
+  Result := '';
+  Idx := FGenerics.IndexOf(AName);
+  if (Idx >= 0) and (Idx < FGenericDeclUnits.Count) then
+    Result := FGenericDeclUnits.Strings[Idx];
 end;
 
 function TSymbolTable.RegisterGenericRoutine(const AName: string; ATempl: TObject;

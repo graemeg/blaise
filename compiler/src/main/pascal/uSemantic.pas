@@ -113,6 +113,12 @@ type
       variable may legitimately share a name with one (var t: T).  The
       shadow-a-type-name check skips names found here. }
     FActiveTypeParams:     TStringList;
+    { Units this compilation monomorphised a generic FROM.  Recorded so the
+      exported iface can carry their source hashes and an incremental rebuild
+      can see a generic BODY edit, which leaves the declaring unit's interface
+      unchanged (BUG-20260918-generic-body-edit-skips-consumer-rebuild).
+      Names only; the hashes are attached at export time. }
+    FGenericSourceUnits:   TStringList;
     FForInLoopVars:        TStringList;  { stack of active for-in loop-variable names (nested loops
                                            push/pop); a write to one of these is diagnosed — the
                                            mutation goes to a per-iteration copy and is discarded }
@@ -610,6 +616,12 @@ type
       Also used by uSemanticExport.ExportUnitInterface to look up resolved
       types (e.g. for InstanceSize).  Non-owning — do not free. }
     function  GetSymbolTable: TSymbolTable;
+    { Units this compilation monomorphised a generic from (names only, no
+      duplicates).  ExportUnitInterface pairs each with that unit's source
+      hash — see TUnitInterface.GenericDepHashes. }
+    function  GenericSourceUnits: TStringList;
+    { Record that a generic declared in another unit was monomorphised here. }
+    procedure NoteGenericSourceUnit(const ABaseName: string);
     { Non-fatal diagnostics accumulated during analysis (see SemanticWarning).
       Each entry is also written to StdErr as it is raised.  Non-owning handle —
       do not free.  Used by tests to assert a warning was produced. }
@@ -896,6 +908,31 @@ begin
   Result := FTable;
 end;
 
+function TSemanticAnalyser.GenericSourceUnits: TStringList;
+begin
+  Result := FGenericSourceUnits;
+end;
+
+procedure TSemanticAnalyser.NoteGenericSourceUnit(const ABaseName: string);
+var
+  DeclUnit: string;
+begin
+  { Record the unit that DECLARED this generic, so the exported iface can
+    carry that unit's source hash.  A generic's bodies are cloned and
+    re-analysed here, so its code lands in THIS unit's object; editing only
+    that body leaves the declaring unit's interface untouched, and nothing
+    else would tell this unit's cached object to be rebuilt
+    (BUG-20260918-generic-body-edit-skips-consumer-rebuild).
+
+    A template declared in this same unit needs no entry — this unit's own
+    source hash already covers it.  '<program>' likewise: a program is not
+    cached as a unit. }
+  DeclUnit := FTable.GenericDeclUnit(ABaseName);
+  if (DeclUnit = '') or (DeclUnit = '<program>') then Exit;
+  if (FCurrentUnit <> nil) and SameText(DeclUnit, FCurrentUnit.Name) then Exit;
+  FGenericSourceUnits.Add(DeclUnit);
+end;
+
 constructor TSemanticAnalyser.Create;
 begin
   inherited Create();
@@ -926,6 +963,10 @@ begin
   FUnitSymbols.CaseSensitive := False;
   FActiveTypeParams     := TStringList.Create();
   FActiveTypeParams.CaseSensitive := False;
+  FGenericSourceUnits   := TStringList.Create();
+  FGenericSourceUnits.CaseSensitive := False;
+  FGenericSourceUnits.Duplicates := dupIgnore;
+  FGenericSourceUnits.Sorted := True;
   FForInLoopVars        := TStringList.Create();
   FForInLoopVars.CaseSensitive := False;
   FWarnings             := TStringList.Create();
@@ -943,6 +984,7 @@ begin
   FPendingGenericIntfInstances.Free();
   FPendingGenericRecordInstances.Free();
   FPendingGenericInstances.Free();
+  FGenericSourceUnits.Free();
   FActiveTypeParams.Free();
   FForInLoopVars.Free();
   FWarnings.Free();
@@ -2244,6 +2286,10 @@ var
 begin
   FCurrentUnitName := AUnit.Name;
   FCurrentUnit := AUnit;
+  { Per-unit accumulator: the caller snapshots it immediately after this
+    returns (ExportUnitInterface -> GenericDepHashes), so it must describe
+    THIS unit alone, not everything analysed so far this run. }
+  FGenericSourceUnits.Clear();
   FlushPendingGenericInstances();
   BuildUsesChain(AUnit.UsedUnits);
   FTable.UsesChainProvider := Self;
@@ -4005,6 +4051,7 @@ begin
 
     { Bail if the template exists but is a generic interface, not a class }
     if not (FTable.FindGeneric(BaseName) is TGenericTypeDef) then Exit;
+    Self.NoteGenericSourceUnit(BaseName);
     Templ := TGenericTypeDef(FTable.FindGeneric(BaseName));
     if Templ = nil then Exit;
     if Args.Count <> Templ.ParamNames.Count then Exit;
@@ -4459,6 +4506,7 @@ begin
     end;
 
     if not (FTable.FindGeneric(BaseName) is TGenericRecordDef) then Exit;
+    Self.NoteGenericSourceUnit(BaseName);
     Templ := TGenericRecordDef(FTable.FindGeneric(BaseName));
     if Templ = nil then Exit;
     if Args.Count <> Templ.ParamNames.Count then Exit;
@@ -4673,6 +4721,7 @@ begin
 
     TemplObj := FTable.FindGeneric(BaseName);
     if (TemplObj = nil) or not (TemplObj is TGenericInterfaceDef) then Exit;
+    Self.NoteGenericSourceUnit(BaseName);
     Templ := TGenericInterfaceDef(TemplObj);
     if Args.Count <> Templ.ParamNames.Count then Exit;
 
@@ -4757,6 +4806,7 @@ begin
   ArgsStr  := StrCopyFrom(ATypeName, BracPos + 1, Length(ATypeName) - BracPos - 2);
 
   if not (FTable.FindGeneric(BaseName) is TGenericProcDef) then Exit;
+  Self.NoteGenericSourceUnit(BaseName);
   Templ := TGenericProcDef(FTable.FindGeneric(BaseName));
 
   Args := TStringList.Create();
