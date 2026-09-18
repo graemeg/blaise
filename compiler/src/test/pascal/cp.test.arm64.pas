@@ -74,6 +74,12 @@ type
     { slice 8: record PARAMETERS per AAPCS64 }
     procedure TestRecordParam_SmallImagesAndHfa;
     procedure TestRecordParam_LargeByPointer;
+    { P0-1: record METHODS.  A record method takes Self by ADDRESS (a record is
+      a value), unlike a class method whose Self is already a pointer. }
+    procedure TestRecordMethod_BodyEmitted;
+    procedure TestRecordMethod_SelfPassedByAddress;
+    procedure TestRecordMethod_ProcedureWritesThroughSelf;
+    procedure TestRecordMethod_VarParamReceiverNotReAddressed;
     { slice 9: records with ARC-managed fields via the base walks }
     procedure TestManagedRecord_CopyAndFieldStore;
     procedure TestManagedRecord_ScopeExitRelease;
@@ -1282,6 +1288,140 @@ begin
   finally
     F.Free();
   end;
+end;
+
+{ ---- P0-1: record methods ------------------------------------------------
+  A record is a VALUE, so a record method receives Self as the ADDRESS of the
+  record — unlike a class method, whose Self is already a pointer.  The one
+  exception is a receiver that is itself a var parameter: that slot already
+  holds an address, so it is loaded rather than address-taken again.
+
+  Before this landed the backend refused outright with
+  "arm64: not yet lowered: record methods". }
+
+procedure TArm64BackendTests.TestRecordMethod_BodyEmitted;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TR = record
+        X: Integer;
+        function G(): Integer;
+      end;
+    function TR.G(): Integer;
+    begin
+      Result := Self.X
+    end;
+    var r: TR;
+    begin
+      r.X := 7;
+      WriteLn(r.G())
+    end.
+    ''');
+  { The body must be emitted as an ordinary function, mangled Owner_Method
+    exactly as a class method is. }
+  AssertTrue('record method body emitted', Pos('TR_G:', AsmT) >= 0);
+  AssertTrue('and is called', Pos('bl _TR_G', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestRecordMethod_SelfPassedByAddress;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TR = record
+        X: Integer;
+        function G(): Integer;
+      end;
+    function TR.G(): Integer;
+    begin
+      Result := Self.X
+    end;
+    var r: TR;
+    begin
+      r.X := 7;
+      WriteLn(r.G())
+    end.
+    ''');
+  { Self is the ADDRESS of r.  A global's address is the adrp/add @PAGE pair;
+    the receiver must NOT be `ldr x0, [x9, _g_r@PAGEOFF]`, which would pass the
+    record's first 8 bytes as if they were a pointer — the shape this emitted
+    before the fix. }
+  AssertTrue('receiver address formed via adrp/add, not loaded',
+    Pos('add x0, x0, _g_r@PAGEOFF', AsmT) >= 0);
+  AssertTrue('receiver value is NOT loaded into x0',
+    Pos('ldr x0, [x9, _g_r@PAGEOFF]', AsmT) < 0);
+  { and the callee dereferences that address to read the field }
+  AssertTrue('callee reads the field through Self',
+    Pos(#9'ldrsw x0, [x0]', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestRecordMethod_ProcedureWritesThroughSelf;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TR = record
+        X: Integer;
+        procedure S(V: Integer);
+      end;
+    procedure TR.S(V: Integer);
+    begin
+      Self.X := V
+    end;
+    var r: TR;
+    begin
+      r.S(9);
+      WriteLn(r.X)
+    end.
+    ''');
+  { The WRITE direction, not just the read: a store through Self must reach the
+    caller's record.  Fixing the read path and missing the write path is the
+    exact mistake made on arm64 in July (3f515bde / 44777c3b). }
+  AssertTrue('record procedure body emitted', Pos('TR_S:', AsmT) >= 0);
+  AssertTrue('stores through the Self pointer', Pos(#9'str w', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestRecordMethod_VarParamReceiverNotReAddressed;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TR = record
+        X: Integer;
+        function G(): Integer;
+      end;
+    function TR.G(): Integer;
+    begin
+      Result := Self.X
+    end;
+    procedure Use(var AR: TR);
+    begin
+      WriteLn(AR.G())
+    end;
+    var r: TR;
+    begin
+      r.X := 4;
+      Use(r)
+    end.
+    ''');
+  { A var-param receiver's slot ALREADY holds an address — it must be loaded,
+    not address-taken again (which would pass a pointer to the pointer). }
+  AssertTrue('var-param receiver loaded from its slot',
+    Pos(#9'ldr x', AsmT) >= 0);
+  AssertTrue('callee body still emitted', Pos('TR_G:', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestManagedRecord_CopyAndFieldStore;

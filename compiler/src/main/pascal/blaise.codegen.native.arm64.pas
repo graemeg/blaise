@@ -98,6 +98,12 @@ type
     FGlobalStrInits: TStringList; { symbols of string-initialised globals }
     FGlobalStrVals:  TStringList; { parallel: the literal values }
     FClassDecls:  TObjectList;   { not owned — program-level class TTypeDecls }
+    FRecordDecls: TObjectList;   { not owned — program-level record TTypeDecls
+                                   that declare methods.  Records need no
+                                   typeinfo or vtable, so unlike FClassDecls
+                                   this list exists ONLY to emit method bodies:
+                                   a record method is an ordinary function whose
+                                   Self is the ADDRESS of the record. }
     FUnitEmittedClasses: TObjectList; { not owned — unit class TTypeDecls whose
                                    method bodies were ALREADY emitted by EmitUnit
                                    (in unit context).  EmitProgram's FClassDecls
@@ -634,6 +640,7 @@ begin
   FGlobalStrInits := TStringList.Create();
   FGlobalStrVals  := TStringList.Create();
   FClassDecls  := TObjectList.Create(False);
+  FRecordDecls := TObjectList.Create(False);
   FGenericDecls := TObjectList.Create(True);
   FUnitEmittedClasses := TObjectList.Create(False);
   FObjLocals   := TStringList.Create();
@@ -676,6 +683,7 @@ begin
   FGlobalInits.Free();
   FGlobalStrInits.Free();
   FGlobalStrVals.Free();
+  FRecordDecls.Free();
   FClassDecls.Free();
   FUnitEmittedClasses.Free();
   FGenericDecls.Free();
@@ -11211,7 +11219,10 @@ begin
     EmitMethodCallOnExpr(MD, AStmt.Name, AStmt.Args, AStmt.ObjExpr)
   else
   begin
-    if not EmitCapturedBase('x0', AStmt.ObjectName, True, AStmt.IsVarParam) then
+    if MD.IsRecordMethod then
+      { Self is the record's ADDRESS — see the expression-call twin below. }
+      EmitRecordBaseAddr('x0', AStmt.ObjectName, AStmt.IsVarParam)
+    else if not EmitCapturedBase('x0', AStmt.ObjectName, True, AStmt.IsVarParam) then
     begin
       EmitLoadSlot('x0', AStmt.ObjectName);
       if AStmt.IsVarParam then
@@ -11392,7 +11403,14 @@ begin
     EmitMethodCallOnExpr(MD, AExpr.Name, AExpr.Args, AExpr.ObjExpr);
     Exit;
   end;
-  if not EmitCapturedBase('x0', AExpr.ObjectName, True, AExpr.IsVarParam) then
+  if MD.IsRecordMethod then
+    { A record is a VALUE, so Self is its ADDRESS — never its contents.  Loading
+      the slot here would pass the record's first 8 bytes as if they were a
+      pointer.  EmitRecordBaseAddr also handles the one exception: a true
+      var/out receiver whose slot ALREADY holds the caller's address is loaded
+      rather than address-taken again. }
+    EmitRecordBaseAddr('x0', AExpr.ObjectName, AExpr.IsVarParam)
+  else if not EmitCapturedBase('x0', AExpr.ObjectName, True, AExpr.IsVarParam) then
   begin
     EmitLoadSlot('x0', AExpr.ObjectName);
     if AExpr.IsVarParam then
@@ -11411,6 +11429,7 @@ var
   FrameAligned: Integer;
   TDcl: TTypeDecl;
   CDef: TClassTypeDef;
+  RDef: TRecordTypeDef;
   GI: TGenericInstance;
   SavedAsm, BodyBuf: TStringBuilder;
 begin
@@ -11436,7 +11455,10 @@ begin
     else if not (TDcl.Def is TRecordTypeDef) then
       NotYet('non-record type declarations', nil)
     else if TRecordTypeDef(TDcl.Def).Methods.Count > 0 then
-      NotYet('record methods', nil);
+      { A record with methods: collect it so the bodies emit with the class
+        bodies below.  The record itself needs no metadata — no typeinfo, no
+        vtable — because record methods are statically bound. }
+      FRecordDecls.Add(TDcl);
   end;
 
   { Program-level variables become globals (int-family only for now). }
@@ -11593,6 +11615,23 @@ begin
       if Decl.TypeParams <> nil then Continue;
       EmitFunctionDef(Decl,
         Pos('<', TTypeDecl(FClassDecls.Items[I]).Name) >= 0);
+    end;
+  end;
+
+  { Record method bodies.  Identical to the class walk above — a record method
+    is an ordinary function (statically bound, no vtable slot); only its Self
+    differs, and that is handled at the CALL site, where the receiver's ADDRESS
+    is passed rather than its value. }
+  for I := 0 to FRecordDecls.Count - 1 do
+  begin
+    RDef := TRecordTypeDef(TTypeDecl(FRecordDecls.Items[I]).Def);
+    for J := 0 to RDef.Methods.Count - 1 do
+    begin
+      Decl := TMethodDecl(RDef.Methods.Items[J]);
+      if Decl.Body = nil then Continue;      { forward/interface-only decl }
+      if Decl.TypeParams <> nil then Continue; { generic template, not code }
+      EmitFunctionDef(Decl,
+        Pos('<', TTypeDecl(FRecordDecls.Items[I]).Name) >= 0);
     end;
   end;
   EmitClassCleanupFns();
@@ -11762,6 +11801,7 @@ var
     K, M: Integer;
     UDcl: TTypeDecl;
     UDef: TClassTypeDef;
+    URDef: TRecordTypeDef;
     MDcl: TMethodDecl;
   begin
     { pass 1: REGISTER every class/interface decl before any method body
@@ -11808,7 +11848,21 @@ var
       else if not (UDcl.Def is TRecordTypeDef) then
         NotYet('non-record type declarations in unit ' + AUnit.Name, nil)
       else if TRecordTypeDef(UDcl.Def).Methods.Count > 0 then
-        NotYet('record methods in unit ' + AUnit.Name, nil);
+      begin
+        { Emit the record's method bodies HERE, in this unit's context, exactly
+          as the class branch above does — a record method is an ordinary
+          statically-bound function.  Emitting in unit context matters for the
+          same reason it does for classes: the program-context walk would
+          mis-resolve implementation-section unit globals (leg 39). }
+        URDef := TRecordTypeDef(UDcl.Def);
+        for M := 0 to URDef.Methods.Count - 1 do
+        begin
+          MDcl := TMethodDecl(URDef.Methods.Items[M]);
+          if MDcl.Body = nil then Continue;
+          if MDcl.TypeParams <> nil then Continue;
+          EmitFunctionDef(MDcl);
+        end;
+      end;
     end;
   end;
 
