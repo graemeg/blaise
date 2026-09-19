@@ -80,6 +80,12 @@ type
     procedure TestRecordMethod_SelfPassedByAddress;
     procedure TestRecordMethod_ProcedureWritesThroughSelf;
     procedure TestRecordMethod_VarParamReceiverNotReAddressed;
+    { P0-2: generic RECORD instantiation.  A monomorphised record instance is
+      a record with methods, so it rides the P0-1 machinery; only the instance
+      walk itself was missing. }
+    procedure TestGenericRecord_InstanceMethodEmitted;
+    procedure TestGenericRecord_TwoInstantiationsBothEmitted;
+    procedure TestGenericRecord_InstanceMethodIsWeakBound;
     { slice 9: records with ARC-managed fields via the base walks }
     procedure TestManagedRecord_CopyAndFieldStore;
     procedure TestManagedRecord_ScopeExitRelease;
@@ -709,18 +715,29 @@ begin
   Raised := False;
   Msg := '';
   try
+    { A jumbo set (> 64 members) is the current stand-in for "a construct the
+      arm64 subset has not reached yet".  This used to be a generic RECORD, but
+      those now lower — when jumbo sets land too, repoint this at whatever
+      remains unsupported rather than deleting it: the point of the test is that
+      a gap fails LOUDLY at compile time, never silently miscompiling. }
     GenAsm(
       '''
       program P;
       type
-        TPair<T> = record
-          A, B: T;
-        end;
+        TE = (M00, M01, M02, M03, M04, M05, M06, M07, M08, M09,
+              M10, M11, M12, M13, M14, M15, M16, M17, M18, M19,
+              M20, M21, M22, M23, M24, M25, M26, M27, M28, M29,
+              M30, M31, M32, M33, M34, M35, M36, M37, M38, M39,
+              M40, M41, M42, M43, M44, M45, M46, M47, M48, M49,
+              M50, M51, M52, M53, M54, M55, M56, M57, M58, M59,
+              M60, M61, M62, M63, M64, M65, M66, M67, M68, M69);
+        TS = set of TE;
       var
-        Q: TPair<Int64>;
+        S: TS;
       begin
-        Q.A := 1;
-        WriteLn(Q.A)
+        S := [M00];
+        if M00 in S then
+          WriteLn(1)
       end.
       ''');
   except
@@ -1422,6 +1439,107 @@ begin
   AssertTrue('var-param receiver loaded from its slot',
     Pos(#9'ldr x', AsmT) >= 0);
   AssertTrue('callee body still emitted', Pos('TR_G:', AsmT) >= 0);
+end;
+
+{ ---- P0-2: generic record instantiation ----------------------------------
+  A monomorphised generic record is just a record with methods, so it rides the
+  P0-1 machinery above.  What was missing was the instance WALK: the backend
+  refused with "not yet lowered: generic record instantiations" rather than
+  emitting the bodies the way it already did for generic CLASS and FUNCTION
+  instances.
+
+  Instance methods are weak-bound (like every other instance symbol) so that
+  two units instantiating the same specialisation collapse to one definition at
+  link time instead of colliding. }
+
+procedure TArm64BackendTests.TestGenericRecord_InstanceMethodEmitted;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TB<T> = record
+        V: T;
+        function G(): T;
+      end;
+    function TB<T>.G(): T;
+    begin
+      Result := Self.V
+    end;
+    var b: TB<Integer>;
+    begin
+      b.V := 3;
+      WriteLn(b.G())
+    end.
+    ''');
+  { Monomorphised name: <Template>_<Arg>_<Method>, matching x86-64. }
+  AssertTrue('instance method body emitted', Pos('TB_Integer_G:', AsmT) >= 0);
+  AssertTrue('and is called', Pos('bl _TB_Integer_G', AsmT) >= 0);
+  { Self is the record's ADDRESS, exactly as for a non-generic record method. }
+  AssertTrue('receiver address formed, not loaded',
+    Pos('add x0, x0, _g_b@PAGEOFF', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestGenericRecord_TwoInstantiationsBothEmitted;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TB<T> = record
+        V: T;
+        function G(): T;
+      end;
+    function TB<T>.G(): T;
+    begin
+      Result := Self.V
+    end;
+    var
+      bi: TB<Integer>;
+      bs: TB<string>;
+    begin
+      bi.V := 3;
+      bs.V := 'x';
+      WriteLn(bi.G());
+      WriteLn(bs.G())
+    end.
+    ''');
+  { Two specialisations of one template are two DISTINCT functions — emitting
+    only the first would silently give the string instance the integer body. }
+  AssertTrue('Integer instance emitted', Pos('TB_Integer_G:', AsmT) >= 0);
+  AssertTrue('string instance emitted', Pos('TB_string_G:', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestGenericRecord_InstanceMethodIsWeakBound;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TB<T> = record
+        V: T;
+        function G(): T;
+      end;
+    function TB<T>.G(): T;
+    begin
+      Result := Self.V
+    end;
+    var b: TB<Integer>;
+    begin
+      b.V := 3;
+      WriteLn(b.G())
+    end.
+    ''');
+  { Weak, not global: two units instantiating TB<Integer> must collapse to one
+    definition at link time rather than colliding with a duplicate symbol. }
+  AssertTrue('instance method is weak-bound',
+    Pos('.weak_definition _TB_Integer_G', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestManagedRecord_CopyAndFieldStore;

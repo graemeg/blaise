@@ -11430,6 +11430,7 @@ var
   TDcl: TTypeDecl;
   CDef: TClassTypeDef;
   RDef: TRecordTypeDef;
+  GRDef: TRecordTypeDef;
   GI: TGenericInstance;
   SavedAsm, BodyBuf: TStringBuilder;
 begin
@@ -11533,11 +11534,10 @@ begin
     end;
   end;
 
-  { record instances need record methods and stay an honest hole.  Method-level
-    <T> instances are emitted below (leg 37) — a monomorphised method decl flows
-    through EmitFunctionDef exactly like a generic FUNCTION instance. }
-  if AProg.GenericRecordInstances.Count > 0 then
-    NotYet('generic record instantiations', nil);
+  { Generic RECORD instances need no registration here — a record carries no
+    typeinfo and no vtable, so unlike a generic CLASS instance there is nothing
+    to wrap in a synthetic TTypeDecl.  Their method bodies emit with the other
+    instance walks in the .text pass below. }
 
   { generic CLASS instances: wrap each monomorphised clone in a synthetic
     TTypeDecl so it flows through the ordinary class machinery (methods,
@@ -11582,6 +11582,23 @@ begin
     EmitFunctionDef(
       TGenericFuncInstance(AProg.GenericFuncInstances.Items[I]).MethodDecl,
       True);
+
+  { Generic RECORD instances: each monomorphised clone's method bodies.  A
+    record instance needs no typeinfo or vtable, so unlike a generic CLASS
+    instance there is no wrapper to build — the bodies emit directly, weak-bound
+    so two units instantiating the same specialisation collapse to one
+    definition rather than colliding. }
+  for I := 0 to AProg.GenericRecordInstances.Count - 1 do
+  begin
+    GRDef := TGenericRecordInstance(
+               AProg.GenericRecordInstances.Items[I]).RecordDef;
+    for J := 0 to GRDef.Methods.Count - 1 do
+    begin
+      Decl := TMethodDecl(GRDef.Methods.Items[J]);
+      if Decl.Body = nil then Continue;
+      EmitFunctionDef(Decl, True);
+    end;
+  end;
 
   { Generic METHOD instances (leg 37): a method with its own <T> monomorphised
     at a call site.  Its MethodDecl is a fully concrete method (mangled name via
@@ -11794,6 +11811,7 @@ var
   UTD: TTypeDecl;
   GI: TGenericInstance;
   GICDef: TClassTypeDef;
+  URGDef: TRecordTypeDef;
   SavedUnit: string;
 
   procedure CheckTypeSubset(ATypeDecls: TObjectList);
@@ -11877,11 +11895,21 @@ begin
   Self.Emit('.text');
   CheckTypeSubset(AUnit.IntfBlock.TypeDecls);
   CheckTypeSubset(AUnit.ImplBlock.TypeDecls);
-  { generic record instances still need their story.  CLASS, FUNCTION and (as
-    of leg 37) METHOD instances flow through the same wrapper machinery as the
-    program path — weak symbols collapse duplicates across units. }
-  if AUnit.GenericRecordInstances.Count > 0 then
-    NotYet('generic record instantiations in unit ' + AUnit.Name, nil);
+  { Generic RECORD instances declared in this unit: emit their method bodies
+    here, in unit context, exactly as the program path does.  No wrapper decl
+    is built — a record instance has no typeinfo and no vtable — and the bodies
+    are weak-bound so duplicates across units collapse at link time. }
+  for I := 0 to AUnit.GenericRecordInstances.Count - 1 do
+  begin
+    URGDef := TGenericRecordInstance(
+                AUnit.GenericRecordInstances.Items[I]).RecordDef;
+    for J := 0 to URGDef.Methods.Count - 1 do
+    begin
+      Decl := TMethodDecl(URGDef.Methods.Items[J]);
+      if Decl.Body = nil then Continue;
+      EmitFunctionDef(Decl, True);
+    end;
+  end;
   for I := 0 to AUnit.GenericInstances.Count - 1 do
   begin
     { interface-implementing instances flow through too — their itab +
