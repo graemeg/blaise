@@ -74,8 +74,18 @@ type
   public
     constructor Create(APort: Integer);
     destructor Destroy; override;
-    { Bind and listen on 127.0.0.1:Port.  Returns False on failure. }
+    { Bind + listen on 127.0.0.1:Port.  Returns False on failure. }
     function Start: Boolean;
+    { Bind + listen on all interfaces (INADDR_ANY):Port.
+
+      Separately named rather than a default or an optional argument to Create:
+      binding 0.0.0.0 makes the server reachable from other machines, so a
+      caller has to ask for that exposure by name.  Start stays loopback-only. }
+    function StartAny: Boolean;
+    { Bind + listen on AAddr:Port — the shared path Start and StartAny use.
+      Public so a caller that already has a specific interface address can bind
+      it directly, as TTcpServer.StartOn allows. }
+    function StartOn(AAddr: UInt32): Boolean;
     { Put the listen socket into non-blocking mode so PollOnce never blocks. }
     procedure SetNonBlocking;
     { Accept and service the next connection, dispatching to AHandler.
@@ -391,11 +401,24 @@ begin
   inherited Destroy();
 end;
 
-function THttpServer.Start: Boolean;
+function THttpServer.StartOn(AAddr: UInt32): Boolean;
 begin
-  FListenFd := TcpListenLocal(FPort, 64);
+  { The one bind path; Start and StartAny differ only in the address they pass,
+    so neither can drift from the other (this mirrors how TTcpServer factors
+    Start / StartOn in net.tcp.pas). }
+  FListenFd := TcpListen(AAddr, FPort, 64);
   Result := FListenFd >= 0;
   FRunning := Result;
+end;
+
+function THttpServer.Start: Boolean;
+begin
+  Result := Self.StartOn(INADDR_LOOPBACK);
+end;
+
+function THttpServer.StartAny: Boolean;
+begin
+  Result := Self.StartOn(INADDR_ANY);
 end;
 
 function THttpServer.ReadRequest(AConnFd: Integer): string;

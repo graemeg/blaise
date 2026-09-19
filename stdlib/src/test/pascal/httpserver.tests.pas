@@ -24,6 +24,7 @@ type
     procedure TestParseGetWithQuery;
     procedure TestParseWebSocketKey;
     procedure TestRoundTrip;
+    procedure TestStartAnyRoundTrip;
     procedure TestWebSocketUpgradeAndBroadcast;
   end;
 
@@ -92,6 +93,40 @@ begin
   Resp := RecvString(Cli, 1024);
   AssertTrue('200', ContainsStr(Resp, '200 OK'));
   AssertTrue('body', ContainsStr(Resp, '/hi|net'));
+
+  Close(Cli);
+  Srv.Free();
+end;
+
+{ StartAny binds INADDR_ANY (0.0.0.0) rather than loopback, so a server is
+  reachable from other machines.  Start stays loopback-only: a caller has to ask
+  for external exposure by name.
+
+  What this proves and what it does not: connecting over loopback to a socket
+  bound to INADDR_ANY succeeds, so this confirms StartAny binds and serves
+  correctly.  It does NOT prove external reachability — the suite has no second
+  host — and no assertion here should be read as claiming otherwise. }
+procedure THttpServerTests.TestStartAnyRoundTrip;
+const
+  PORT = 28993;
+var
+  Srv: THttpServer;
+  H: IRequestHandler;
+  Cli: Integer;
+  Resp: string;
+begin
+  Srv := THttpServer.Create(PORT);
+  AssertTrue('start any', Srv.StartAny());
+  H := TEchoHandler.Create();
+
+  Cli := TcpConnectLocal(PORT);
+  AssertTrue('connect', Cli >= 0);
+  AssertTrue('send', SendAll(Cli, 'GET /hi?q=any HTTP/1.1'#13#10'Host: x'#13#10#13#10));
+
+  Srv.ServeOnce(H);
+  Resp := RecvString(Cli, 1024);
+  AssertTrue('200', ContainsStr(Resp, '200 OK'));
+  AssertTrue('body', ContainsStr(Resp, '/hi|any'));
 
   Close(Cli);
   Srv.Free();
