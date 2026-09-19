@@ -9,13 +9,36 @@
 unit runtime.start.freebsd;
 
 // Program entry point for a DYNAMIC (libc-linked) FreeBSD binary
-// (x86_64, System V ABI, FreeBSD 14 libc).
+// (x86_64, System V ABI).
 //
 // The FreeBSD sibling of runtime.start.linux.  Per-OS because the hand-off
 // into libc differs: glibc exports __libc_start_main and takes the raw stack
 // pointer, whereas FreeBSD libc exports __libc_start1 and expects argc/argv/
 // envp already unpacked.  Selected at link time by BuildRTLUnitList; the
 // static profile uses runtime.start.static.freebsd instead.
+//
+// VERSION FLOOR — this unit requires FreeBSD 14 or newer, and it is the ONLY
+// thing in the toolchain that does.  __libc_start1 was introduced in FreeBSD
+// 14's libc; on 13.x the binary dies at exec with
+//     ld-elf.so.1: Undefined symbol "__libc_start1"
+// (13.x crt1 calls __libc_start/_init_tls/main itself).  The struct layouts
+// elsewhere are NOT the constraint — see docs/freebsd-x86_64-backend-design
+// .adoc, which notes the ino_t/dev_t widening landed in 12.
+//
+// This matters far less than it looks, because the FREESTANDING path has no
+// version floor at all: it binds the kernel syscall ABI, which is stable
+// across majors, and runtime.syscall.freebsd already covers sockets, so even
+// a network server links static.  A program only lands here when it truly
+// needs libc (--dynamic, or a real `external '<lib>'` binding).  Verified
+// 2026-09-19: a socket server cross-compiled freestanding from Linux runs on
+// a FreeBSD 13.1 jail.
+//
+// If the dynamic path ever needs to reach 13.x, the fix is to stop calling
+// __libc_start1 and do the work here: capture argc/argv/environ/__progname
+// from the argument block (runtime.start.static.freebsd already does exactly
+// this), call main, exit with its result.  Two facts make that tractable —
+// Blaise binaries emit NO .init_array (unit init is called from main), and on
+// a dynamic image rtld/libthr own the TCB, so this unit must not touch TLS.
 //
 // This replaces the system Scrt1.o so the internal linker needs no
 // FreeBSD-provided startup object.  The linker uses '_start' as the ELF entry
