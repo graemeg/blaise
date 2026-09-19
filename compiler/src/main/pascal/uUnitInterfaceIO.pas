@@ -54,7 +54,16 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 17; { v17: TUnitInterface.GenericDepHashes is serialised in
+  IFACE_VERSION = 18; { v18: 'generic-record' TYPE-block kind — a generic RECORD
+                          template declared in a unit INTERFACE now round-trips.
+                          Previously TGenericRecordDef had no kind tag, no
+                          payload writer and no reader, so such a template was
+                          exported as nothing and a consumer reading the cached
+                          iface failed with "Unknown type 'TPair<Integer>'"
+                          (BUG-20260919-clonetypedef-generic-record-in-unit).
+                          The TYPE block gained a kind, so v17 readers must
+                          reject these .bif and recompile.
+                        v17: TUnitInterface.GenericDepHashes is serialised in
                           the META block (one EncodeStringList after LinkLibs,
                           before HasInitialization).  It records, as Name=Hash
                           pairs, the source hash of every unit this one
@@ -370,6 +379,7 @@ begin
   else if AEntry.Def is TProceduralTypeDef   then Result := 'proc'
   else if AEntry.Def is TGenericTypeDef      then Result := 'generic-class'
   else if AEntry.Def is TGenericInterfaceDef then Result := 'generic-interface'
+  else if AEntry.Def is TGenericRecordDef    then Result := 'generic-record'
   else if AEntry.Def is TGenericProcDef      then Result := 'generic-proc'
   else                                            Result := '';
 end;
@@ -642,6 +652,49 @@ begin
   end;
 end;
 
+function WriteGenericRecordPayload(AEntry: TTypeEntry): string;
+var
+  Def:       TGenericRecordDef;
+  RecordDef: TRecordTypeDef;
+  J:         Integer;
+  M:         TMethodDecl;
+begin
+  { Simpler than the generic-class payload: a record has no parent, no
+    implements list and no attributes, so the payload is the type-parameter
+    list, the field list, the method signatures, and the method BODIES —
+    the bodies being what the consumer clones and re-analyses with T bound to
+    a concrete type argument.
+
+    Without this a generic record declared in a unit INTERFACE round-tripped
+    as nothing at all, and a consumer reading the cached iface reported
+    "Unknown type 'TPair<Integer>'"
+    (BUG-20260919-clonetypedef-generic-record-in-unit). }
+  Def := TGenericRecordDef(AEntry.Def);
+  RecordDef := Def.RecordDef;
+  Result := EncodeTypeParamList(Def.ParamNames, Def.ParamConstraints);
+  if RecordDef <> nil then
+  begin
+    Result := Result +
+              EncodeBool(True) +                    { has body }
+              EncodeBool(RecordDef.IsPacked) +
+              EncodeFieldList(RecordDef.Fields) +
+              EncodeMethodList(AEntry.Methods);
+    for J := 0 to RecordDef.Methods.Count - 1 do
+    begin
+      M := TMethodDecl(RecordDef.Methods.Items[J]);
+      Result := Result + EncodeBlock(M.Body);
+    end;
+  end
+  else
+    { Defensive, mirroring the generic-class writer: a false has-body flag so
+      the reader can detect a template without a body rather than throwing. }
+    Result := Result +
+              EncodeBool(False) +
+              EncodeBool(False) +
+              EncodeCount(0) +
+              EncodeCount(0);
+end;
+
 function WriteGenericClassPayload(AEntry: TTypeEntry): string;
 var
   Def:      TGenericTypeDef;
@@ -823,6 +876,10 @@ begin
         SB.AppendLine(EncodeLpstr('generic-class') +
                EncodeLpstr(E.Name) +
                WriteGenericClassPayload(E))
+      else if Kind = 'generic-record' then
+        SB.AppendLine(EncodeLpstr('generic-record') +
+               EncodeLpstr(E.Name) +
+               WriteGenericRecordPayload(E))
       else if Kind = 'generic-proc' then
         SB.AppendLine(EncodeLpstr('generic-proc') +
                EncodeLpstr(E.Name) +
@@ -2442,43 +2499,22 @@ end;
   rebuilt method decl because the visibility check treats an EMPTY declaring
   unit as "same unit" (uSemantic.MemberVisibleTo) — so without it a private
   method on an imported generic is visible everywhere. }
-procedure ReadGenericClassPayload(const AText: string; var APos: Integer;
-                                  AEntry: TTypeEntry;
+{ Rebuild a template's TMethodDecl list from the signatures already read into
+  AEntry.Methods, consuming one EncodeBlock body per signature and appending the
+  decls to ATarget.  Shared by the generic CLASS and generic RECORD readers —
+  the two used to differ only in which list they appended to, and a second copy
+  of this walk would drift (every field carried here was added because dropping
+  it caused a real bug: IsStatic, Visibility, IsOutParam, HasDefault...). }
+procedure ReadTemplateMethodDecls(const AText: string; var APos: Integer;
+                                  AEntry: TTypeEntry; ATarget: TObjectList;
                                   const AUnitName: string);
 var
-  Def:      TGenericTypeDef;
-  ClassDef: TClassTypeDef;
-  RefStr:   string;
-  RefUnit:  string;
-  RefType:  string;
-  J, K:     Integer;
-  Sig:      TRoutineSig;
-  MD:       TMethodDecl;
-  SrcPar:   TMethodParam;
-  NewPar:   TMethodParam;
+  J, K:   Integer;
+  Sig:    TRoutineSig;
+  MD:     TMethodDecl;
+  SrcPar: TMethodParam;
+  NewPar: TMethodParam;
 begin
-  Def := TGenericTypeDef.Create();
-  ReadTypeParamList(AText, APos, Def.ParamNames, Def.ParamConstraints);
-
-  { Inner ClassDef: the ctor already created an empty one — free
-    it and rebuild from the wire. }
-  Def.ClassDef.Free();
-  ClassDef := TClassTypeDef.Create();
-  Def.ClassDef := ClassDef;
-
-  RefStr := ReadLpstrAt(AText, APos);
-  DecodeQualRef(RefStr, RefUnit, RefType);
-  AEntry.ParentClass  := MakeQualRef(RefUnit, RefType);
-  ClassDef.ParentName := RefType;
-  AEntry.InstanceSize := StrToInt64(ReadLpstrAt(AText, APos));
-  ReadStringListBlock(AText, APos, AEntry.Attributes);
-  ReadStringListBlock(AText, APos, AEntry.Implements);
-  ReadFieldList(AText, APos, ClassDef.Fields);
-  ReadMethodList(AText, APos, AEntry.Methods);
-
-  { Method bodies — parallel to AEntry.Methods, attached to
-    ClassDef.Methods as full TMethodDecl objects so InstantiateGeneric
-    can clone + substitute when the consumer references this template. }
   for J := 0 to AEntry.Methods.Count - 1 do
   begin
     Sig := TRoutineSig(AEntry.Methods.Items[J]);
@@ -2535,11 +2571,88 @@ begin
     end;
     MD.Body := ReadBlock(AText, APos);
     MD.OwnBody := MD.Body <> nil;
-    ClassDef.Methods.Add(MD);
+    ATarget.Add(MD);
   end;
+end;
+
+procedure ReadGenericClassPayload(const AText: string; var APos: Integer;
+                                  AEntry: TTypeEntry;
+                                  const AUnitName: string);
+var
+  Def:      TGenericTypeDef;
+  ClassDef: TClassTypeDef;
+  RefStr:   string;
+  RefUnit:  string;
+  RefType:  string;
+  J, K:     Integer;
+  Sig:      TRoutineSig;
+  MD:       TMethodDecl;
+  SrcPar:   TMethodParam;
+  NewPar:   TMethodParam;
+begin
+  Def := TGenericTypeDef.Create();
+  ReadTypeParamList(AText, APos, Def.ParamNames, Def.ParamConstraints);
+
+  { Inner ClassDef: the ctor already created an empty one — free
+    it and rebuild from the wire. }
+  Def.ClassDef.Free();
+  ClassDef := TClassTypeDef.Create();
+  Def.ClassDef := ClassDef;
+
+  RefStr := ReadLpstrAt(AText, APos);
+  DecodeQualRef(RefStr, RefUnit, RefType);
+  AEntry.ParentClass  := MakeQualRef(RefUnit, RefType);
+  ClassDef.ParentName := RefType;
+  AEntry.InstanceSize := StrToInt64(ReadLpstrAt(AText, APos));
+  ReadStringListBlock(AText, APos, AEntry.Attributes);
+  ReadStringListBlock(AText, APos, AEntry.Implements);
+  ReadFieldList(AText, APos, ClassDef.Fields);
+  ReadMethodList(AText, APos, AEntry.Methods);
+
+  { Method bodies — parallel to AEntry.Methods, attached to
+    ClassDef.Methods as full TMethodDecl objects so InstantiateGeneric
+    can clone + substitute when the consumer references this template. }
+  ReadTemplateMethodDecls(AText, APos, AEntry, ClassDef.Methods, AUnitName);
 
   { Property declarations (parallel to WriteGenericClassPayload). }
   ReadPropertyList(AText, APos, ClassDef.Properties);
+
+  AEntry.IsGeneric := True;
+  AEntry.Def       := Def;
+end;
+
+procedure ReadGenericRecordPayload(const AText: string; var APos: Integer;
+                                   AEntry: TTypeEntry;
+                                   const AUnitName: string);
+var
+  Def:       TGenericRecordDef;
+  RecordDef: TRecordTypeDef;
+  HasBody:   Boolean;
+begin
+  { Inverse of WriteGenericRecordPayload.  Simpler than the class form: no
+    parent, no implements, no attributes — type params, then the record body. }
+  Def := TGenericRecordDef.Create();
+  ReadTypeParamList(AText, APos, Def.ParamNames, Def.ParamConstraints);
+
+  { The ctor already made an empty RecordDef — free it and rebuild from wire. }
+  Def.RecordDef.Free();
+  RecordDef := TRecordTypeDef.Create();
+  Def.RecordDef := RecordDef;
+
+  HasBody := ReadLpstrAt(AText, APos) = '1';
+  RecordDef.IsPacked := ReadLpstrAt(AText, APos) = '1';
+  if HasBody then
+  begin
+    ReadFieldList(AText, APos, RecordDef.Fields);
+    ReadMethodList(AText, APos, AEntry.Methods);
+    ReadTemplateMethodDecls(AText, APos, AEntry, RecordDef.Methods, AUnitName);
+  end
+  else
+  begin
+    { Defensive arm, mirroring the writer: consume the two empty counts. }
+    ReadFieldList(AText, APos, RecordDef.Fields);
+    ReadMethodList(AText, APos, AEntry.Methods);
+  end;
 
   AEntry.IsGeneric := True;
   AEntry.Def       := Def;
@@ -2686,6 +2799,8 @@ begin
       ReadGenericClassPayload(AText, APos, Entry, AIface.Name)
     else if Kind = 'generic-interface' then
       ReadGenericInterfacePayload(AText, APos, Entry)
+    else if Kind = 'generic-record' then
+      ReadGenericRecordPayload(AText, APos, Entry, AIface.Name)
     else if Kind = 'generic-proc' then
       ReadGenericProcPayload(AText, APos, Entry)
     else

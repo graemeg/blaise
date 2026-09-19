@@ -178,12 +178,19 @@ function BuildTypeEntry(ASrc:         TTypeDecl;
                         ASymbolTable: TSymbolTable): TTypeEntry;
 var
   GenDef:   TGenericTypeDef;
+  GenRecDef: TGenericRecordDef;
 begin
   Result := TTypeEntry.Create();
   Result.Name := ASrc.Name;
   Result.Def  := CloneTypeDef(ASrc.Def);
   Result.IsClass   := ASrc.Def is TClassTypeDef;
-  Result.IsGeneric := ASrc.Def is TGenericTypeDef;
+  { A generic RECORD is a generic too.  Flagging only TGenericTypeDef (the
+    generic CLASS form) meant a generic record template declared in a unit
+    interface was exported as an ordinary type, so the consumer never
+    registered it as a template and reported "Unknown type 'TPair<Integer>'"
+    on the cached path (BUG-20260919-clonetypedef-generic-record-in-unit). }
+  Result.IsGeneric := (ASrc.Def is TGenericTypeDef) or
+                      (ASrc.Def is TGenericRecordDef);
 
   if ASrc.Def is TClassTypeDef then
     PopulateClassEntry(Result, TClassTypeDef(ASrc.Def), AIface, ADeps, ASymbolTable)
@@ -198,6 +205,17 @@ begin
     GenDef := TGenericTypeDef(ASrc.Def);
     if GenDef.ClassDef <> nil then
       PopulateClassEntry(Result, GenDef.ClassDef, AIface, ADeps, ASymbolTable);
+  end
+  else if ASrc.Def is TGenericRecordDef then
+  begin
+    { Generic record — the record body lives inside the wrapper, exactly as a
+      generic class's does.  Without this the entry carried NO method
+      signatures, so the .bif writer emitted one body per template method while
+      recording zero sigs; the reader then read zero bodies and ran off the end
+      of the TYPE block ("missing END marker"). }
+    GenRecDef := TGenericRecordDef(ASrc.Def);
+    if GenRecDef.RecordDef <> nil then
+      PopulateRecordMethods(Result, GenRecDef.RecordDef, AIface, ADeps);
   end;
 end;
 

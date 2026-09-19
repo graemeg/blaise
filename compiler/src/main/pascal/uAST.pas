@@ -2287,6 +2287,8 @@ function CloneFieldDecl(ASrc: TFieldDecl): TFieldDecl; forward;
 function ClonePropertyDecl(ASrc: TPropertyDecl): TPropertyDecl; forward;
 { CloneTypeDecl, CloneConstDecl, CloneMethodDecl, CloneMethodParam,
   CloneTypeDef are now declared in the interface section. }
+function CloneRecordTypeDef(ASrc: TRecordTypeDef): TRecordTypeDef; forward;
+function CloneGenericRecordDef(ASrc: TGenericRecordDef): TGenericRecordDef; forward;
 function CloneGenericTypeDef(ASrc: TGenericTypeDef): TGenericTypeDef; forward;
 function CloneInterfaceTypeDef(ASrc: TInterfaceTypeDef): TInterfaceTypeDef; forward;
 function CloneGenericInterfaceDef(ASrc: TGenericInterfaceDef): TGenericInterfaceDef; forward;
@@ -2979,13 +2981,7 @@ begin
   end
   else if ASrc is TRecordTypeDef then
   begin
-    RT := TRecordTypeDef.Create();
-    RT.IsPacked := TRecordTypeDef(ASrc).IsPacked;
-    for I := 0 to TRecordTypeDef(ASrc).Fields.Count - 1 do
-      RT.Fields.Add(CloneFieldDecl(TFieldDecl(TRecordTypeDef(ASrc).Fields.Items[I])));
-    for I := 0 to TRecordTypeDef(ASrc).Methods.Count - 1 do
-      RT.Methods.Add(CloneMethodDecl(TMethodDecl(TRecordTypeDef(ASrc).Methods.Items[I])));
-    Result := RT;
+    Result := CloneRecordTypeDef(TRecordTypeDef(ASrc));
   end
   else if ASrc is TClassTypeDef then
   begin
@@ -2998,6 +2994,10 @@ begin
   else if ASrc is TGenericInterfaceDef then
   begin
     Result := CloneGenericInterfaceDef(TGenericInterfaceDef(ASrc));
+  end
+  else if ASrc is TGenericRecordDef then
+  begin
+    Result := CloneGenericRecordDef(TGenericRecordDef(ASrc));
   end
   else if ASrc is TInterfaceTypeDef then
   begin
@@ -3041,6 +3041,53 @@ begin
     Result.AttrUses.Add(CloneAttributeUse(TAttributeUse(ASrc.AttrUses.Items[I])));
   for I := 0 to ASrc.Properties.Count - 1 do
     Result.Properties.Add(ClonePropertyDecl(TPropertyDecl(ASrc.Properties.Items[I])));
+end;
+
+function CloneRecordTypeDef(ASrc: TRecordTypeDef): TRecordTypeDef;
+var
+  I: Integer;
+begin
+  { Deep-clone a record body.  Factored out of CloneTypeDef because
+    CloneGenericRecordDef needs exactly the same walk for the template body —
+    two copies of it would drift. }
+  if ASrc = nil then begin Result := nil; Exit; end;
+  Result := TRecordTypeDef.Create();
+  Result.IsPacked := ASrc.IsPacked;
+  for I := 0 to ASrc.Fields.Count - 1 do
+    Result.Fields.Add(CloneFieldDecl(TFieldDecl(ASrc.Fields.Items[I])));
+  for I := 0 to ASrc.Methods.Count - 1 do
+    Result.Methods.Add(CloneMethodDecl(TMethodDecl(ASrc.Methods.Items[I])));
+  { ConstDecls were dropped by the older inline version of this walk.  A record
+    const is separately broken today (BUG-20260918-record-const-never-resolves),
+    so nothing depends on this yet — but a clone that silently loses a member is
+    a trap waiting for whoever fixes that. }
+  for I := 0 to ASrc.ConstDecls.Count - 1 do
+    Result.ConstDecls.Add(CloneConstDecl(TConstDecl(ASrc.ConstDecls.Items[I])));
+end;
+
+function CloneGenericRecordDef(ASrc: TGenericRecordDef): TGenericRecordDef;
+var
+  I: Integer;
+begin
+  { Mirrors CloneGenericTypeDef exactly — same parallel ParamNames /
+    ParamConstraints walk, same replace-the-autoctor's-blank-body step — with
+    RecordDef in place of ClassDef.  Its absence is what made a generic RECORD
+    declared in a unit INTERFACE fail to compile at all
+    (BUG-20260919-clonetypedef-generic-record-in-unit): every other generic
+    form had an arm in CloneTypeDef and this one did not. }
+  if ASrc = nil then begin Result := nil; Exit; end;
+  Result := TGenericRecordDef.Create();
+  for I := 0 to ASrc.ParamNames.Count - 1 do
+  begin
+    Result.ParamNames.Add(ASrc.ParamNames.Strings[I]);
+    if I < ASrc.ParamConstraints.Count then
+      Result.ParamConstraints.Add(ASrc.ParamConstraints.Strings[I])
+    else
+      Result.ParamConstraints.Add('');
+  end;
+  { Replace the autoctor's blank RecordDef with a real clone. }
+  Result.RecordDef.Free();
+  Result.RecordDef := CloneRecordTypeDef(ASrc.RecordDef);
 end;
 
 function CloneGenericTypeDef(ASrc: TGenericTypeDef): TGenericTypeDef;

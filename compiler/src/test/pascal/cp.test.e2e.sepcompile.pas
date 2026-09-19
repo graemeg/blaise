@@ -61,6 +61,10 @@ type
     procedure TestStaticAsyncReactor_LinksAndRuns;
     procedure TestFreeRoutine_RoundTrip_WithoutSource;
     procedure TestGenericClass_RoundTrip_WithoutSource;
+    { BUG-20260919-clonetypedef-generic-record-in-unit: a generic RECORD
+      template declared in a unit INTERFACE could not be compiled at all. }
+    procedure TestGenericRecord_InUnitInterface_Compiles;
+    procedure TestGenericRecord_InUnitInterface_RoundTrip_WithoutSource;
     { Regression (GH #194): Pascal identifiers are case-insensitive, so the
       spelling of a unit name in a `uses` clause must not decide whether its
       file is found.  The loader only tried two spellings — all-lowercase and
@@ -442,6 +446,164 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_mydep exit code', 0, Rc);
   AssertEquals('use_mydep stdout', 'Triple(7) = 21' + #10, Captured)
+end;
+
+{ BUG-20260919-clonetypedef-generic-record-in-unit.
+
+  A generic RECORD template declared in a unit INTERFACE could not be compiled
+  at all — not by either backend, and not by any release binary:
+
+      Compiler error [Exception]: CloneTypeDef: unsupported type def
+      TGenericRecordDef
+
+  uAST.CloneTypeDef dispatches per type-def class and had arms for every other
+  generic form (TGenericTypeDef, TGenericInterfaceDef, TGenericProcDef) but not
+  for TGenericRecordDef, so exporting the unit's interface raised.
+
+  A generic record declared in a PROGRAM always worked, which is what made this
+  easy to miss — and it meant the form that library code would naturally use
+  was the one form that did not work. }
+procedure TSepCompileTests.TestGenericRecord_InUnitInterface_Compiles;
+const
+  DepSrc =
+    '''
+    unit GRecUnit;
+    interface
+    type
+      TPair<T> = record
+        A, B: T;
+        function Sum(): T;
+      end;
+    implementation
+    function TPair<T>.Sum(): T;
+    begin
+      Result := Self.A + Self.B
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseGRec;
+    uses GRecUnit;
+    var P: TPair<Integer>;
+    begin
+      P.A := 20;
+      P.B := 2;
+      WriteLn(P.Sum())
+    end.
+    ''';
+var
+  Dir, DepPas, ProgPas, ProgBin: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  Dir := FScratch + '/grec_unit';
+  ForceDirectories(Dir);
+  DepPas  := Dir + '/grecunit.pas';
+  ProgPas := Dir + '/use_grec.pas';
+  ProgBin := Dir + '/use_grec';
+
+  WriteFile(DepPas, DepSrc);
+  WriteFile(ProgPas, ProgSrc);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-path', Dir], Captured);
+  AssertEquals('compile exit code (out: ' + Captured + ')', 0, Rc);
+
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('run exit code', 0, Rc);
+  AssertEquals('stdout', '22' + #10, Captured)
+end;
+
+{ The same template reached through the unit's CACHED interface, with the
+  source hidden — the .bif must carry a generic record template, not just
+  compile one from source. }
+procedure TSepCompileTests.TestGenericRecord_InUnitInterface_RoundTrip_WithoutSource;
+const
+  DepSrc =
+    '''
+    unit GRecCached;
+    interface
+    type
+      TPair<T> = record
+        A, B: T;
+        function Sum(): T;
+      end;
+    implementation
+    function TPair<T>.Sum(): T;
+    begin
+      Result := Self.A + Self.B
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseGRecCached;
+    uses GRecCached;
+    var P: TPair<Integer>;
+    begin
+      P.A := 30;
+      P.B := 3;
+      WriteLn(P.Sum())
+    end.
+    ''';
+var
+  Dir, DepPas, ProgPas, Bin1, Bin2: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  Dir := FScratch + '/grec_cached';
+  ForceDirectories(Dir);
+  DepPas  := Dir + '/greccached.pas';
+  ProgPas := Dir + '/use_greccached.pas';
+  Bin1    := Dir + '/use_greccached1';
+  Bin2    := Dir + '/use_greccached2';
+
+  WriteFile(DepPas, DepSrc);
+  WriteFile(ProgPas, ProgSrc);
+
+  { Cold: compiles the unit from source and leaves greccached.o beside it. }
+  Rc := RunBlaise(['--source', ProgPas, '--output', Bin1,
+                   '--unit-path', Dir], Captured);
+  AssertEquals('cold compile exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('greccached.o written', FileExists(Dir + '/greccached.o'));
+  Rc := RunBinary(Bin1, Captured);
+  AssertEquals('cold run exit code', 0, Rc);
+  AssertEquals('cold stdout', '33' + #10, Captured);
+
+  { Hide the source: the cached iface is now the only way to reach the
+    template, so the .bif must round-trip it. }
+  DeleteFile(DepPas);
+  AssertTrue('source hidden', not FileExists(DepPas));
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', Bin2,
+                   '--unit-path', Dir], Captured);
+  AssertEquals('warm compile exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Bin2, Captured);
+  AssertEquals('warm run exit code', 0, Rc);
+  AssertEquals('warm stdout', '33' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestGenericClass_RoundTrip_WithoutSource;
