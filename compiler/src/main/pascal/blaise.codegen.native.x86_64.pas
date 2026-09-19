@@ -4226,13 +4226,24 @@ begin
   end;
 
   { Typeinfo blocks for generic interface instances (WEAK — bare-named,
-    any object may carry the copy; BUG-004). }
+    any object may carry the copy; BUG-004).
+    InstName is mangled HERE rather than trusted as-is: it is built by the
+    semantic pass as BaseName + '_' + each argument's source spelling, so a
+    NESTED generic argument (IBox<TList<Integer>>) leaves the inner '<'/'>'
+    in place.  Every REFERENCE computes its name through NativeMangle (see
+    IntfTypeInfoName), so an unmangled definition emitted
+    typeinfo_IBox_TList<Integer> while the reference asked for
+    typeinfo_IBox_TList_Integer and dangled at link.  Mangling at the
+    emission site mirrors how generic CLASS instances are handled (the
+    class path passes GI.TypeName through ClassSymName) and keeps name
+    mangling a backend concern. }
   for I := 0 to AGenericIntfInstances.Count - 1 do
   begin
     GII := TGenericInterfaceInstance(AGenericIntfInstances.Items[I]);
+    MName := NativeMangle(GII.InstName);
     Self.Emit('.balign 8');
-    Self.Emit('.weak typeinfo_' + GII.InstName);
-    Self.Emit('typeinfo_' + GII.InstName + ':');
+    Self.Emit('.weak typeinfo_' + MName);
+    Self.Emit('typeinfo_' + MName + ':');
     Self.Emit(#9'.quad 0');
   end;
 

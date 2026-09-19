@@ -10780,9 +10780,13 @@ begin
   for I := 0 to FGenericIntfInstances.Count - 1 do
   begin
     GII := TGenericInterfaceInstance(FGenericIntfInstances.Items[I]);
+    { mangled — a NESTED generic argument leaves inner '<'/'>' in InstName,
+      while references resolve through the mangler; see the x86-64 path for
+      the full rationale. }
+    Sym := TypeinfoSym(CodegenMangle(GII.InstName));
     Self.Emit('.balign 8');
-    EmitWeakDef(TypeinfoSym(GII.InstName));
-    Self.Emit(TypeinfoSym(GII.InstName) + ':');
+    EmitWeakDef(Sym);
+    Self.Emit(Sym + ':');
     Self.Emit(#9'.quad 0');
   end;
   { itab + impllist per implementing class.  DESCRIPTOR-driven (mirrors

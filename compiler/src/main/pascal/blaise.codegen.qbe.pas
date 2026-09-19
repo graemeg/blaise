@@ -10009,12 +10009,17 @@ begin
     EmitLine('data $typeinfo_' + ClassSymNameForDecl(TD) + ' = { l 0 }');
   end;
 
-  { Typeinfo blocks for generic interface instantiations }
+  { Typeinfo blocks for generic interface instantiations.
+    InstName is mangled here — the semantic pass builds it from each
+    argument's source spelling, so a NESTED generic argument leaves inner
+    '<'/'>' in place while every reference goes through QBEMangle (see
+    IntfTypeInfoName).  An unmangled definition dangles the reference at
+    link; mirrors the generic-CLASS path, which mangles at emission too. }
   for I := 0 to AProg.GenericIntfInstances.Count - 1 do
   begin
     GII := TGenericInterfaceInstance(AProg.GenericIntfInstances.Items[I]);
-    MarkWeak('typeinfo_' + GII.InstName);
-    EmitLine('data $typeinfo_' + GII.InstName + ' = { l 0 }');
+    MarkWeak('typeinfo_' + QBEMangle(GII.InstName));
+    EmitLine('data $typeinfo_' + QBEMangle(GII.InstName) + ' = { l 0 }');
   end;
 
   { Itab and impllist blocks for each implementing class }
@@ -17660,8 +17665,10 @@ begin
         for I := 0 to AUnit.GenericIntfInstances.Count - 1 do
         begin
           GII := TGenericInterfaceInstance(AUnit.GenericIntfInstances.Items[I]);
-          MarkWeak('typeinfo_' + GII.InstName);
-          EmitLine(ExportPrefix() + 'data $typeinfo_' + GII.InstName + ' = { l 0 }');
+          { mangled — see the program path in EmitInterfaceDefs }
+          MarkWeak('typeinfo_' + QBEMangle(GII.InstName));
+          EmitLine(ExportPrefix() + 'data $typeinfo_' + QBEMangle(GII.InstName)
+            + ' = { l 0 }');
         end;
 
         { Generic class instance typeinfo + vtable + itab/impllist.  Mirrors

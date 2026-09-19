@@ -45,6 +45,8 @@ type
       a USED UNIT — the itab must be bare (not unit-prefixed), so the unit's
       weak itab and the program's use-site reference resolve to one symbol. }
     procedure TestRun_GenericClass_ImplementsInterface_CrossUnit;
+    { a generic interface instantiated with a NESTED generic argument }
+    procedure TestRun_GenericIntf_NestedTypeArg;
   end;
 
 implementation
@@ -334,6 +336,53 @@ begin
     CompileAndRunWithUnit('boxu', UnitSrc, ProgSrc, Output, RCode));
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('interface dispatch across unit', '42' + Chr(10), Output);
+end;
+
+{ A generic interface whose type argument is itself a generic instance
+  (IBox<TList<Integer>>).  The instance name recorded by the semantic pass
+  keeps the inner '<'/'>', so a definition emitted without mangling did not
+  match the reference's mangled name and the link left
+  typeinfo_IBox_TList_Integer undefined.
+
+  Note on what this can and cannot pin.  Method dispatch goes through the
+  itab and never loads the typeinfo token, so a program like this one RAN
+  correctly even on the broken compiler — only the link-time note betrayed
+  the dangling symbol.  The IR test
+  (TGenericIntfTests.TestCodegen_GenericIntf_NestedArg_TypeinfoNameIsMangled)
+  is what actually pins the symbol name; this test guards the other half the
+  IR harness cannot see — that the nested-argument program links and runs on
+  BOTH backends.  Supports() would make the token observable at runtime, but
+  an interface ALIAS of a generic instance has its own missing-typeinfo bug
+  (BUG-20260919-intf-alias-typeinfo), so it cannot be used here yet. }
+procedure TE2EGenericIntfTests.TestRun_GenericIntf_NestedTypeArg;
+const Src = '''
+    program T;
+    type
+      TList<T> = class
+        Item: T;
+      end;
+      IBox<T> = interface
+        function Get: T;
+      end;
+      TBox = class(IBox<TList<Integer>>)
+        FInner: TList<Integer>;
+        function Get: TList<Integer>;
+        begin Result := FInner end;
+        constructor Create(AValue: Integer);
+        begin
+          FInner := TList<Integer>.Create();
+          FInner.Item := AValue
+        end;
+      end;
+    var
+      B: IBox<TList<Integer>>;
+    begin
+      B := TBox.Create(7);
+      WriteLn(B.Get().Item)
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src, '7' + Chr(10), 0);
 end;
 
 initialization

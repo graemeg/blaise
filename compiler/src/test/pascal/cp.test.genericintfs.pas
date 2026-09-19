@@ -48,6 +48,7 @@ type
     procedure TestCodegen_GenericIntf_ItabEmitted;
     procedure TestCodegen_GenericIntf_ImpllistEmitted;
     procedure TestCodegen_GenericIntf_MethodDispatch_EmitsIndirectCall;
+    procedure TestCodegen_GenericIntf_NestedArg_TypeinfoNameIsMangled;
   end;
 
 implementation
@@ -138,6 +139,36 @@ const
         begin
           C  := TIntegerComparer.Create();
           OK := C.Equals(1, 1)
+        end.
+        ''';
+
+  { A generic interface instantiated with a NESTED generic argument
+    (IBox<TList<Integer>>).  The instance name the semantic pass records must
+    already be mangled — the inner '<'/'>' carried through as-is produced a
+    DEFINITION named typeinfo_IBox_TList<Integer> while every reference went
+    through the backend mangler and asked for typeinfo_IBox_TList_Integer, so
+    the reference dangled at link.  A non-nested argument hides this because
+    the naive concatenation happens to be already-mangled. }
+  SrcGenericIntfNestedArg =
+    '''
+        program P;
+        type
+          TList<T> = class
+            Item: T;
+          end;
+          IBox<T> = interface
+            function Get: T;
+          end;
+          TBox = class(IBox<TList<Integer>>)
+            function Get: TList<Integer>;
+            begin
+              Result := nil
+            end;
+          end;
+        var
+          B: IBox<TList<Integer>>;
+        begin
+          B := TBox.Create()
         end.
         ''';
 
@@ -381,6 +412,22 @@ begin
   IR := GenIR(SrcGenericIntfDispatch);
   { Interface method call goes through itab pointer — must be an indirect call }
   AssertTrue('Interface dispatch emits indirect call', Pos('call %', IR) > 0);
+end;
+
+procedure TGenericIntfTests.TestCodegen_GenericIntf_NestedArg_TypeinfoNameIsMangled;
+var
+  IR: string;
+begin
+  IR := GenIR(SrcGenericIntfNestedArg);
+  { The definition must carry the MANGLED instance name, matching what every
+    reference (impllist, Supports/is/as) computes through the backend mangler.
+    An unmangled definition leaves the reference undefined at link. }
+  AssertTrue('Typeinfo for IBox_TList_Integer emitted',
+    Pos('typeinfo_IBox_TList_Integer', IR) > 0);
+  { And no raw-bracket symbol survives anywhere — that name is not a legal
+    symbol and is what the dangling reference was looking past. }
+  AssertTrue('No unmangled typeinfo_IBox_TList<Integer> symbol',
+    Pos('typeinfo_IBox_TList<', IR) < 0);
 end;
 
 initialization
