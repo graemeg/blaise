@@ -115,6 +115,14 @@ type
     procedure TestRTLUnits_LinuxDynamic_UsesLinuxStart;
     procedure TestRTLUnits_FreeBSDDynamic_UsesFreeBSDStart;
     procedure TestRTLUnits_Dynamic_NeverUsesSharedStart;
+
+    { The pre-link probe's compiler-emitted-symbol classifier.  An unresolved
+      symbol carrying one of the backends' own metadata prefixes is a codegen
+      bug that libc can never satisfy, so it must be told apart from a real
+      C binding and hard-errored rather than silently forcing a dynamic link. }
+    procedure TestCompilerSym_MetadataPrefixes_AreOurs;
+    procedure TestCompilerSym_CBindings_AreNotOurs;
+    procedure TestCompilerSym_BarePrefixWithoutSuffix_IsNotOurs;
   end;
 
 implementation
@@ -722,6 +730,49 @@ begin
   finally
     U.Free();
   end;
+end;
+
+{ ---- Compiler-emitted symbol classifier ---- }
+
+procedure TBackendDriverContractTests.TestCompilerSym_MetadataPrefixes_AreOurs;
+begin
+  { The six prefixes all three backends emit for class/interface metadata.
+    The real case that motivated the guard is the first one: a generic
+    interface instance whose typeinfo definition went out unmangled. }
+  AssertTrue('typeinfo_ is ours',
+    IsCompilerEmittedSymbol('typeinfo_IMap_string_TList_TPosting'));
+  AssertTrue('vtable_ is ours',   IsCompilerEmittedSymbol('vtable_TFoo'));
+  AssertTrue('itab_ is ours',     IsCompilerEmittedSymbol('itab_TFoo_IBar'));
+  AssertTrue('impllist_ is ours', IsCompilerEmittedSymbol('impllist_TFoo'));
+  AssertTrue('__cn_ is ours',     IsCompilerEmittedSymbol('__cn_TFoo'));
+  AssertTrue('__mn_ is ours',     IsCompilerEmittedSymbol('__mn_TFoo_Bar'));
+end;
+
+procedure TBackendDriverContractTests.TestCompilerSym_CBindings_AreNotOurs;
+begin
+  { Genuine C symbols must stay on the ordinary path, where a freestanding
+    link may legitimately fall back to dynamic+libc.  These are exactly the
+    names a socket server / process launcher binds. }
+  AssertFalse('socket is a C binding',  IsCompilerEmittedSymbol('socket'));
+  AssertFalse('write is a C binding',   IsCompilerEmittedSymbol('write'));
+  AssertFalse('getenv is a C binding',  IsCompilerEmittedSymbol('getenv'));
+  AssertFalse('__libc_start1 is libc',
+    IsCompilerEmittedSymbol('__libc_start1'));
+  AssertFalse('__cxa_atexit is libc',
+    IsCompilerEmittedSymbol('__cxa_atexit'));
+  { A name that merely CONTAINS a prefix is not one of ours. }
+  AssertFalse('prefix must be at the start',
+    IsCompilerEmittedSymbol('my_typeinfo_helper'));
+end;
+
+procedure TBackendDriverContractTests.TestCompilerSym_BarePrefixWithoutSuffix_IsNotOurs;
+begin
+  { A bare prefix names nothing — the classifier requires a symbol AFTER it,
+    so a hypothetical C function called exactly 'itab_' is not misread as
+    ours and misreported as an internal error. }
+  AssertFalse('bare typeinfo_ has no subject',
+    IsCompilerEmittedSymbol('typeinfo_'));
+  AssertFalse('bare itab_ has no subject', IsCompilerEmittedSymbol('itab_'));
 end;
 
 { ---- Registration ---- }

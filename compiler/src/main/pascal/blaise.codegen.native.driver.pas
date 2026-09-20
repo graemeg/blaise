@@ -52,6 +52,12 @@ uses
 function LinkLibSoname(const ALibName: string;
   const ATarget: TTargetDesc): string;
 
+{ True when ASymbol is a symbol the COMPILER emits, not one the C world could
+  ever supply (typeinfo_/vtable_/itab_/impllist_/__cn_/__mn_).  Such a name
+  turning up unresolved at link is a codegen defect, never a missing libc
+  binding — see the pre-link probe in LinkViaInternalLinker. }
+function IsCompilerEmittedSymbol(const ASymbol: string): Boolean;
+
 type
   TNativeBackendDriver = class(TBackendDriver)
   public
@@ -613,6 +619,56 @@ begin
   end;
 end;
 
+{ The symbol prefixes the backends emit for class/interface metadata.  Kept in
+  one place because all three backends (x86-64, arm64, QBE) use the same set.
+
+  This guards the INTERNAL linker path only, which is where a dangling symbol
+  of ours could pass silently (the probe's dynamic fallback would swallow it).
+  A QBE build links through external cc, which reports an undefined symbol
+  loudly on its own, so both paths end up diagnosed — just by different means.
+
+    typeinfo_   class/interface identity token
+    vtable_     virtual method table
+    itab_       interface method table
+    impllist_   (typeinfo, itab) pairs per implementing class
+    __cn_       class-name string blob
+    __mn_       method-name string blob }
+const
+  COMPILER_SYM_PREFIXES: array[0..5] of string = (
+    'typeinfo_', 'vtable_', 'itab_', 'impllist_', '__cn_', '__mn_');
+
+function IsCompilerEmittedSymbol(const ASymbol: string): Boolean;
+var
+  I: Integer;
+  P: string;
+begin
+  Result := True;
+  for I := 0 to High(COMPILER_SYM_PREFIXES) do
+  begin
+    P := COMPILER_SYM_PREFIXES[I];
+    if (Length(ASymbol) > Length(P)) and
+       (Copy(ASymbol, 0, Length(P)) = P) then
+      Exit;
+  end;
+  Result := False;
+end;
+
+{ Partition AList into the symbols the compiler itself emits (ADest) and the
+  rest.  Returns True when any compiler-emitted symbol was found. }
+function SplitCompilerSymbols(AList, ADest: TStringList): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  if (AList = nil) or (ADest = nil) then Exit;
+  for I := 0 to AList.Count - 1 do
+    if IsCompilerEmittedSymbol(AList.Strings[I]) then
+    begin
+      ADest.Add(AList.Strings[I]);
+      Result := True;
+    end;
+end;
+
 function TNativeBackendDriver.LinkViaMachOLinker(
   const AObjFile, AOutputFile: string;
   AOpts: TBackendOpts; AExtraObjects: TStringList): string;
@@ -666,6 +722,7 @@ var
   RTLObjs: TStringList;
   LibDirs, Needed, Visited: TStringList;
   Unresolved: TStringList;
+  OurSyms:    TStringList;
   I: Integer;
   EffDynamic: Boolean;
   HasUserLibs: Boolean;
@@ -812,16 +869,38 @@ begin
             Lk.AddOwnedObject(Obj);
           end;
 
-          { Freestanding pre-link probe: every strong undefined symbol must
-            resolve in-process.  Under lmAuto a miss falls back to a
-            dynamic+libc relink (second attempt); under lmStatic it is a
-            hard error - either way the diagnostic names the symbols
-            instead of surfacing as a bare `undefined reference` mid-link. }
-          if not EffDynamic then
-          begin
-            Unresolved := TStringList.Create();
-            try
-              if Lk.CollectUnresolvedExternals(Unresolved) > 0 then
+          { Pre-link probe: every strong undefined symbol must resolve.
+
+            The compiler-emitted check runs in EVERY link mode.  A
+            typeinfo_/vtable_/itab_/... symbol can never be supplied by libc,
+            so going dynamic cannot fix it — it only HIDES it: the reference
+            binds to a garbage address and the defect reappears as wrong
+            behaviour at runtime (a Supports() that answers False for an
+            interface the class implements), while the binary silently
+            acquires a libc dependency it never needed.  That is exactly how
+            a dangling generic-interface typeinfo turned a freestanding
+            FreeBSD binary into a dynamic one requiring FreeBSD 14's
+            __libc_start1 — a link-mode demotion nobody could see, found only
+            because the binary would not start on 13.1 (fixed in 9579f1e3).
+            Checking only the freestanding arm would have missed it in a
+            program that goes dynamic for a legitimate reason.
+
+            The remaining C-symbol handling is freestanding-only: under lmAuto
+            a miss falls back to a dynamic+libc relink (second attempt); under
+            lmStatic it is a hard error — either way the diagnostic names the
+            symbols instead of surfacing as a bare `undefined reference`
+            mid-link. }
+          Unresolved := TStringList.Create();
+          OurSyms := TStringList.Create();
+          try
+            if Lk.CollectUnresolvedExternals(Unresolved) > 0 then
+            begin
+              if SplitCompilerSymbols(Unresolved, OurSyms) then
+                Exit('internal error: the compiler emitted references to '
+                  + 'symbols it never defined (' + JoinNames(OurSyms)
+                  + ') - this is a codegen bug, not a missing C library. '
+                  + 'Please report it with the source that triggered it');
+              if not EffDynamic then
               begin
                 if AOpts.LinkMode = lmStatic then
                   Exit('--static: unresolved C symbols ('
@@ -833,9 +912,10 @@ begin
                 EffDynamic := True;
                 Continue;   { second attempt: dynamic RTL + dynamic link }
               end;
-            finally
-              Unresolved.Free();
             end;
+          finally
+            OurSyms.Free();
+            Unresolved.Free();
           end;
 
           Lk.Link('_start', AOutputFile);
