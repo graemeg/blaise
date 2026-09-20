@@ -4694,6 +4694,8 @@ var
   GII:         TGenericInterfaceInstance;
   MangledName: string;
   VarFlags:    string;
+  ParentName:  string;
+  ParentDesc:  TTypeDesc;
 begin
   Result := nil;
 
@@ -4747,6 +4749,30 @@ begin
     Result := FTable.NewInterfaceType(ATypeName);
     Sym    := TSymbol.Create(ATypeName, skType, Result);
     FTable.DefineGlobal(Sym);
+
+    { Resolve an optional PARENT interface and inherit its methods, mirroring
+      the non-generic path in AnalyseTypeDecls.  The parent name is written in
+      terms of THIS template's parameters (IDeriv<T> = interface(IBase<T>)), so
+      substitute them first — IBase<T> with T:=Integer becomes IBase<Integer>,
+      which FindTypeOrInstantiate then materialises like any other instance.  A
+      concrete parent (interface(IBase<Integer>)) substitutes to itself.
+      Parent methods are added BEFORE the template's own, matching the
+      non-generic ordering so an override keeps the same slot order. }
+    if Templ.IntfDef.ParentName <> '' then
+    begin
+      ParentName := SubstTypeParam(Templ.IntfDef.ParentName,
+        Templ.ParamNames, Args);
+      ParentDesc := Self.FindTypeOrInstantiate(ParentName);
+      if (ParentDesc = nil) or not (ParentDesc is TInterfaceTypeDesc) then
+        SemanticError(
+          Format('Unknown parent interface ''%s'' for ''%s''',
+            [ParentName, ATypeName]), 0, 0);
+      Result.Parent := TInterfaceTypeDesc(ParentDesc);
+      for I := 0 to Result.Parent.MethodCount() - 1 do
+        Result.AddMethod(Result.Parent.MethodName(I),
+          Result.Parent.MethodReturnTypeName(I),
+          Result.Parent.MethodParamVarFlagsStr(I));
+    end;
 
     { Register interface method names with substituted return types + var-param flags }
     for I := 0 to Templ.IntfDef.Methods.Count - 1 do

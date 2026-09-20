@@ -2603,8 +2603,14 @@ begin
       if not Check(tkIdent) then
         raise EParseError.Create(Format('Expected parent interface name at line %d col %d in %s',
           [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
-      Result.ParentName := FCurrent.Value;
-      Advance();
+      { ParseTypeName (not a bare identifier) so the parent may be a
+        unit-qualified name or a GENERIC instantiation — IDeriv<T> =
+        interface(IBase<T>), forwarding the parameter, or a concrete
+        interface(IBase<Integer>).  This is the Delphi spelling, and the
+        same call the CLASS parent list has always used; reading a bare
+        identifier here made the '<' a parse error
+        (BUG-20260920-generic-intf-parent-not-parsed). }
+      Result.ParentName := ParseTypeName();
       Expect(tkRParen);
     end;
     while Check(tkProcedure) or Check(tkFunction) or

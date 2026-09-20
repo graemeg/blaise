@@ -3148,6 +3148,53 @@ inheriting class's typeinfo must reference the parent through `QBEMangle` too,
 not the unmangled name — otherwise the emitted QBE identifier contains the
 illegal `<`/`>` characters.
 
+=== Generic interface inheritance
+
+A generic interface may inherit from another *generic* interface, forwarding
+its own type parameter to the parent:
+
+[source,pascal]
+----
+type
+  IBase<T> = interface
+    function Get: T;
+  end;
+  IDeriv<T> = interface(IBase<T>)     // forwards T to the parent
+    function Extra: Integer;
+  end;
+  IConc<T> = interface(IBase<Integer>) // a concrete parent is also legal
+    function C: T;
+  end;
+----
+
+This is the Delphi spelling, chosen because Blaise already uses it everywhere
+else generics and interfaces meet — `TBox = class(IBox<Integer>)` for an
+implemented interface, and `TIntBox = class(TBox<Integer>)` for a generic
+parent class.  FPC's `{$mode objfpc}` requires explicit
+`generic`/`specialize` keywords (`generic IDeriv<T> = interface(specialize
+IBase<T>)`), which Blaise has no equivalent of; its `{$mode delphi}` accepts
+the form above.  Adopting the Delphi spelling keeps one rule for the whole
+language rather than a keyword that appears in this position only.
+
+The parent is parsed as a full `TypeName`, exactly as a class parent already
+was.  At instantiation the template's parameters are substituted into the
+parent name (`IBase<T>` with `T := Integer` becomes `IBase<Integer>`), that
+instance is materialised like any other, and its methods are inherited *ahead
+of* the template's own — matching the ordering the non-generic path uses, so a
+method's slot position does not depend on whether its interface is generic.
+
+Reading the parent as a bare identifier was the original defect: the `<` was
+then an unexpected token and the declaration would not parse at all
+(`BUG-20260920-generic-intf-parent-not-parsed`).  Only the parse rule was
+Blaise-specific; the semantic machinery (`SubstTypeParam`,
+`FindTypeOrInstantiate`) already handled every other generic position.
+
+NOTE: A *cyclic* interface hierarchy (`IA = interface(IB)` with
+`IB = interface(IA)`) hangs the compiler rather than reporting an error.  That
+is a pre-existing defect of interface parent resolution, not specific to
+generics — it reproduces identically on non-generic interfaces — and is
+tracked separately as `BUG-20260920-cyclic-intf-inheritance-hangs`.
+
 === Alternatives Rejected
 
 * *Structural duck-typing without interfaces* — Blaise already uses

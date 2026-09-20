@@ -49,6 +49,9 @@ type
     procedure TestRun_GenericIntf_NestedTypeArg;
     { Supports() through a type ALIAS of a generic interface instance }
     procedure TestRun_GenericIntf_AliasSupports;
+    { a generic interface inheriting from another GENERIC interface }
+    procedure TestRun_GenericIntf_GenericParent_InheritsMethods;
+    procedure TestRun_GenericIntf_GenericParent_SupportsBase;
   end;
 
 implementation
@@ -421,6 +424,77 @@ const Src = '''
     ''';
 begin
   AssertRunsOnAll(Src, '7' + Chr(10) + 'yes' + Chr(10), 0);
+end;
+
+{ A generic interface inheriting from another GENERIC interface, forwarding its
+  type parameter (Delphi syntax).  Two halves had to work: the parser had to
+  accept a generic parent at all, and InstantiateGenericInterface had to
+  SUBSTITUTE the parameter into the parent name (IBase<T> with T:=Integer ->
+  IBase<Integer>) and inherit its methods.  Calling the INHERITED Get() through
+  the derived interface is what proves the second half — without it the
+  instance only carries Extra() and the call is a semantic error.
+  (BUG-20260920-generic-intf-parent-not-parsed.) }
+procedure TE2EGenericIntfTests.TestRun_GenericIntf_GenericParent_InheritsMethods;
+const Src = '''
+    program T;
+    type
+      IBase<T> = interface
+        function Get: T;
+      end;
+      IDeriv<T> = interface(IBase<T>)
+        function Extra: Integer;
+      end;
+      TImpl = class(IDeriv<Integer>)
+        function Get: Integer;
+        begin Result := 3 end;
+        function Extra: Integer;
+        begin Result := 4 end;
+      end;
+    var
+      D: IDeriv<Integer>;
+    begin
+      D := TImpl.Create();
+      WriteLn(D.Get());
+      WriteLn(D.Extra())
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src, '3' + Chr(10) + '4' + Chr(10), 0);
+end;
+
+{ The inherited generic BASE must get its own impllist entry, so a class
+  implementing the DERIVED interface also satisfies the base.  This is the
+  test that could not be written before the parent list parsed a generic
+  name; it exercises the parent chain and the alias-typeinfo path together. }
+procedure TE2EGenericIntfTests.TestRun_GenericIntf_GenericParent_SupportsBase;
+const Src = '''
+    program T;
+    type
+      IBase<T> = interface
+        function Get: T;
+      end;
+      IDeriv<T> = interface(IBase<T>)
+        function Extra: Integer;
+      end;
+      IIntBase = IBase<Integer>;
+      TImpl = class(IDeriv<Integer>)
+        function Get: Integer;
+        begin Result := 3 end;
+        function Extra: Integer;
+        begin Result := 4 end;
+      end;
+    var
+      O: TImpl;
+    begin
+      O := TImpl.Create();
+      if Supports(O, IIntBase) then
+        WriteLn('base:yes')
+      else
+        WriteLn('base:no')
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src, 'base:yes' + Chr(10), 0);
 end;
 
 initialization

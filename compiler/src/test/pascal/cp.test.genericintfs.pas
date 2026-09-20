@@ -32,6 +32,8 @@ type
     procedure TestParse_GenericIntf_TwoParams;
     procedure TestParse_GenericIntf_MethodUsesTypeParam;
     procedure TestParse_Class_ImplementsGenericIntf_InParenList;
+    procedure TestParse_GenericIntf_GenericParent_KeepsArgs;
+    procedure TestParse_GenericIntf_ConcreteParent_KeepsArgs;
 
     { ------------------------------------------------------------------ }
     { Semantic                                                             }
@@ -202,6 +204,53 @@ const
         end.
         ''';
 
+  { A generic interface inheriting from another GENERIC interface, forwarding
+    its own type parameter to the parent (Delphi syntax; the class parent list
+    has always accepted this shape).  The parent list used to read a bare
+    identifier and then demand ')', so the '<' was a parse error. }
+  SrcGenericIntfGenericParent =
+    '''
+        program P;
+        type
+          IBase<T> = interface
+            function Get: T;
+          end;
+          IDeriv<T> = interface(IBase<T>)
+            function Extra: Integer;
+          end;
+          TImpl = class(IDeriv<Integer>)
+            function Get: Integer;
+            begin
+              Result := 3
+            end;
+            function Extra: Integer;
+            begin
+              Result := 4
+            end;
+          end;
+        var
+          D: IDeriv<Integer>;
+        begin
+          D := TImpl.Create()
+        end.
+        ''';
+
+  { The parent may also be a CONCRETE instance rather than a forwarded
+    parameter — IBase<Integer> here, not IBase<T>. }
+  SrcGenericIntfConcreteParent =
+    '''
+        program P;
+        type
+          IBase<T> = interface
+            function Get: T;
+          end;
+          IDeriv<T> = interface(IBase<Integer>)
+            function Extra: T;
+          end;
+        begin
+        end.
+        ''';
+
 { ------------------------------------------------------------------ }
 { Helpers                                                              }
 { ------------------------------------------------------------------ }
@@ -281,6 +330,39 @@ begin
     GID := TGenericInterfaceDef(TD.Def);
     AssertEquals('One type param', 1, GID.ParamNames.Count);
     AssertEquals('Param name is T', 'T', GID.ParamNames[0]);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericIntfTests.TestParse_GenericIntf_GenericParent_KeepsArgs;
+var
+  Prog: TProgram;
+  GID:  TGenericInterfaceDef;
+begin
+  Prog := ParseSrc(SrcGenericIntfGenericParent);
+  try
+    { second type decl is IDeriv<T> }
+    GID := TGenericInterfaceDef(TTypeDecl(Prog.Block.TypeDecls[1]).Def);
+    { The parent must survive parsing WITH its argument list — a bare 'IBase'
+      would resolve to the uninstantiated template. }
+    AssertEquals('Parent keeps its type argument',
+      'IBase<T>', GID.IntfDef.ParentName);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericIntfTests.TestParse_GenericIntf_ConcreteParent_KeepsArgs;
+var
+  Prog: TProgram;
+  GID:  TGenericInterfaceDef;
+begin
+  Prog := ParseSrc(SrcGenericIntfConcreteParent);
+  try
+    GID := TGenericInterfaceDef(TTypeDecl(Prog.Block.TypeDecls[1]).Def);
+    AssertEquals('Concrete parent argument preserved',
+      'IBase<Integer>', GID.IntfDef.ParentName);
   finally
     Prog.Free();
   end;

@@ -428,17 +428,25 @@ GenericClassDef
  * setter dispatch through the itab. *)
 InterfaceDef
     = INTERFACE
-      [ LPAREN IDENT RPAREN ]             (* optional parent interface *)
+      [ LPAREN TypeName RPAREN ]          (* optional parent interface *)
       { MethodSignature | PropertyDecl }
       END
     ;
 
 GenericInterfaceDef
     = INTERFACE
-      [ LPAREN IDENT RPAREN ]             (* optional parent interface *)
+      [ LPAREN TypeName RPAREN ]          (* optional parent interface *)
       { MethodSignature | PropertyDecl }
       END
     ;
+
+(* The parent is a TypeName, not a bare IDENT, so it may be unit-qualified
+ * (Unit.IBase) or a GENERIC instantiation — IDeriv<T> = interface(IBase<T>)
+ * forwards this template's parameter to the parent, and interface(IBase<Integer>)
+ * names a concrete instance.  This matches the CLASS parent list, which has
+ * always used TypeName.  At instantiation the parameter is substituted into the
+ * parent name (IBase<T> with T := Integer -> IBase<Integer>) and the parent's
+ * methods are inherited ahead of the template's own. *)
 
 (* GenericInterfaceDef is syntactically identical to InterfaceDef; the distinction
  * is that it appears after "IDENT < TypeParamList > =" in a TypeDecl.  The parser
