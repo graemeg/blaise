@@ -61,6 +61,9 @@ const
     (safe leak).  Unlike x86-64, arm64's _main has a real frame, so these are
     ordinary AddLocal slots in every frame — no .bss dual path. }
   PENDREL_SLOTS = 8;
+  { Widest jumbo-set bitmap: a set is capped at 256 members = 32 bytes.  One
+    frame slot of this size serves every jumbo-set operator in the frame. }
+  JUMBO_SCRATCH_BYTES = 32;
 
   { Fixed x29-relative pool for parking owned-string-transient call args across
     a call (see ReservePendRelSlots).  A single call rarely passes more than a
@@ -455,6 +458,7 @@ type
     procedure EmitMethodsTable(ACD: TClassTypeDef; const ACSym: string;
       out AMethodsRef: string);
     procedure EmitSmallSetLiteral(AExpr: TArrayLiteralExpr);
+    procedure EmitJumboSetOp(ABE: TBinaryExpr);
     procedure EmitJumboSetLiteral(AExpr: TArrayLiteralExpr);
     function  JumboSetLiteralBytes(AExpr: TASTExpr): Integer;
     procedure EmitStaticElemAddr(ASub: TStringSubscriptExpr);
@@ -843,6 +847,12 @@ begin
     A fixed x29-relative pool sidesteps all sp arithmetic. }
   for I := 0 to STRTRANS_SLOTS - 1 do
     AddLocal(Format('__strtrans_%d', [I]), 8);
+  { Jumbo-set operator destination.  ONE fixed frame slot, reserved in every
+    frame and reused, so a set operation inside a loop costs nothing — see
+    EmitJumboSetOp for why a per-evaluation sp-lowering leaks the stack there.
+    JUMBO_SCRATCH_BYTES covers the widest jumbo set (a set's bitmap is capped
+    at 32 bytes = 256 members), so one slot fits every instantiation. }
+  AddLocal('_jset_scratch', JUMBO_SCRATCH_BYTES);
 end;
 
 function TArm64Backend.DeferNativeClassRelease: Boolean;
@@ -3424,7 +3434,10 @@ begin
        (BE.Left.ResolvedType.Kind = tySet) then
     begin
       if TSetTypeDesc(BE.Left.ResolvedType).IsJumbo() then
-        NotYet('jumbo set operations', AExpr);
+      begin
+        EmitJumboSetOp(BE);
+        Exit;
+      end;
       Self.EmitExprToX0(BE.Left);
       EmitPushX0();
       Self.EmitExprToX0(BE.Right);
@@ -4041,7 +4054,20 @@ begin
      (AExpr.ResolvedType.Kind = tySet) then
   begin
     if TSetTypeDesc(AExpr.ResolvedType).IsJumbo() then
-      NotYet('jumbo set literals', AExpr);
+    begin
+      { A jumbo literal materialises a stack bitmap and yields its ADDRESS in
+        x0 — the same value shape a jumbo set variable evaluates to, so the
+        consumer needs no special case.
+
+        NOTE the sp contract: EmitJumboSetLiteral LOWERS sp by
+        JumboSetLiteralBytes, and the buffer stays live until the frame is
+        torn down (sp is restored from x29 at function exit).  That is fine
+        for a literal, which is materialised once where it appears.  It is NOT
+        fine for an OPERATOR, which can sit inside a loop — see
+        EmitJumboSetOp, which uses a fixed frame slot for exactly that reason. }
+      EmitJumboSetLiteral(TArrayLiteralExpr(AExpr));
+      Exit;
+    end;
     EmitSmallSetLiteral(TArrayLiteralExpr(AExpr));
     Exit;
   end;
@@ -7555,6 +7581,82 @@ begin
   end;
 end;
 
+procedure TArm64Backend.EmitJumboSetOp(ABE: TBinaryExpr);
+var
+  NBytes: Integer;
+begin
+  { Jumbo set operators.  A jumbo set VALUE is its bitmap ADDRESS (in x0), so
+    both operands evaluate to pointers and every operator is an RTL call.
+
+    The two operand evaluations must not clobber each other, and either may
+    itself lower sp (a jumbo LITERAL operand materialises a stack buffer and
+    leaves sp lowered — see EmitJumboSetLiteral's contract).  So the LEFT
+    address is parked on the stack across the right-hand evaluation rather
+    than held in a register, exactly as the membership path does. }
+  NBytes := TSetTypeDesc(ABE.Left.ResolvedType).RawByteSize();
+
+  if ABE.Op in [boEQ, boNE] then
+  begin
+    Self.EmitExprToX0(ABE.Left);
+    EmitPushX0();                       { park A }
+    Self.EmitExprToX0(ABE.Right);
+    Self.Emit(#9'mov x1, x0');          { B }
+    EmitPopTo('x0');                    { A }
+    EmitIntLiteral('x2', NBytes);
+    EmitCallSym('_SetEqual');
+    if ABE.Op = boNE then
+      Self.Emit(#9'eor x0, x0, #1');
+    Exit;
+  end;
+
+  if ABE.Op in [boLE, boGE] then
+  begin
+    { _SetSubset(A, B) tests "A is a subset of B".  For >= the operands swap. }
+    Self.EmitExprToX0(ABE.Left);
+    EmitPushX0();
+    Self.EmitExprToX0(ABE.Right);
+    if ABE.Op = boLE then
+    begin
+      Self.Emit(#9'mov x1, x0');        { B }
+      EmitPopTo('x0');                  { A }
+    end
+    else
+    begin
+      EmitPopTo('x1');                  { A becomes the B-arg }
+      { x0 already holds the right operand, which becomes the A-arg }
+    end;
+    EmitIntLiteral('x2', NBytes);
+    EmitCallSym('_SetSubset');
+    Exit;
+  end;
+
+  { Union / intersection / difference produce a NEW bitmap, so they need a
+    destination buffer.  That buffer is a FIXED x29-relative FRAME slot
+    (_jset_scratch), NOT a fresh sp-lowering the way a literal does.
+
+    This distinction is the whole design, and getting it wrong is a stack leak:
+    a literal's buffer is created once where the literal appears, but an
+    OPERATOR can sit inside a loop, and `sub sp` per evaluation never gets an
+    `add sp` back — measured at 16 bytes per iteration before this was changed
+    to a frame slot, i.e. 1.6 MB over a 100k-iteration loop, ending in a stack
+    overflow.  A frame slot is allocated once per frame and reused, so a loop
+    costs nothing.  It also sidesteps sp-relative addressing entirely, which is
+    what the __strtrans park-slot comment in ReservePendRelSlots warns about. }
+  Self.EmitExprToX0(ABE.Left);
+  EmitPushX0();                         { park A across the right eval }
+  Self.EmitExprToX0(ABE.Right);
+  Self.Emit(#9'mov x2, x0');            { B }
+  EmitPopTo('x1');                      { A }
+  EmitSlotAddr('x0', '_jset_scratch');  { Dest — stable, x29-relative }
+  EmitIntLiteral('x3', NBytes);
+  case ABE.Op of
+    boAdd: EmitCallSym('_SetUnion');
+    boMul: EmitCallSym('_SetInter');
+    boSub: EmitCallSym('_SetDiff');
+  end;
+  EmitSlotAddr('x0', '_jset_scratch');  { the result bitmap's address }
+end;
+
 procedure TArm64Backend.EmitJumboSetLiteral(AExpr: TArrayLiteralExpr);
 var
   I, NBytes: Integer;
@@ -8195,9 +8297,9 @@ begin
                                        tyDynArray, tySet, tyPointer,
                                        tyPChar, tyProcedural]))) then
       NotYet('local variable of this type', VD);
-    if (VD.ResolvedType.Kind = tySet) and
-       TSetTypeDesc(VD.ResolvedType).IsJumbo() then
-      NotYet('jumbo sets (more than 64 members)', VD);
+    { A JUMBO set (> 64 members) is an inline byte-array bitmap, so its slot is
+      sized from RawSize() like any other aggregate — no special case needed
+      here.  The operations on it go through the _Set* RTL helpers. }
     for J := 0 to VD.Names.Count - 1 do
     begin
       if VD.ResolvedType.Kind in [tyRecord, tyStaticArray] then
@@ -11478,9 +11580,9 @@ begin
                                        tyDynArray, tySet,
                                        tyPointer, tyPChar, tyProcedural]))) then
       NotYet('program variable of this type', VD);
-    if (VD.ResolvedType.Kind = tySet) and
-       TSetTypeDesc(VD.ResolvedType).IsJumbo() then
-      NotYet('jumbo sets (more than 64 members)', VD);
+    { A JUMBO set (> 64 members) is an inline byte-array bitmap, so its slot is
+      sized from RawSize() like any other aggregate — no special case needed
+      here.  The operations on it go through the _Set* RTL helpers. }
     for J := 0 to VD.Names.Count - 1 do
     begin
       FGlobalNames.Add(VD.Names.Strings[J]);
@@ -12121,9 +12223,9 @@ begin
                                        tyDynArray, tySet,
                                        tyPointer, tyPChar]))) then
       NotYet('unit variable of this type', VD);
-    if (VD.ResolvedType.Kind = tySet) and
-       TSetTypeDesc(VD.ResolvedType).IsJumbo() then
-      NotYet('jumbo sets (more than 64 members)', VD);
+    { A JUMBO set (> 64 members) is an inline byte-array bitmap, so its slot is
+      sized from RawSize() like any other aggregate — no special case needed
+      here.  The operations on it go through the _Set* RTL helpers. }
 
     for J := 0 to VD.Names.Count - 1 do
     begin

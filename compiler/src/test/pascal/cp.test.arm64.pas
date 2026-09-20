@@ -187,6 +187,12 @@ type
     procedure TestDynArrays_LifecycleAndElements;
     { slice 35: small sets — literals, membership, union/inter/diff }
     procedure TestSmallSets_LiteralsInOps;
+    { P0-3: JUMBO sets (> 64 members) — an inline byte-array bitmap operated on
+      via the _Set* RTL helpers, rather than a register-sized mask. }
+    procedure TestJumboSet_LocalDeclAndLiteral;
+    procedure TestJumboSet_MembershipCallsRtl;
+    procedure TestJumboSet_UnionCallsRtl;
+    procedure TestJumboSet_OpInLoopDoesNotGrowStack;
     { slice 36: for-in over static/dyn arrays, string bytes, small sets }
     procedure TestForIn_ArraysStringsSets;
     { slice 36: for-in via the class enumerator protocol }
@@ -715,29 +721,24 @@ begin
   Raised := False;
   Msg := '';
   try
-    { A jumbo set (> 64 members) is the current stand-in for "a construct the
-      arm64 subset has not reached yet".  This used to be a generic RECORD, but
-      those now lower — when jumbo sets land too, repoint this at whatever
-      remains unsupported rather than deleting it: the point of the test is that
-      a gap fails LOUDLY at compile time, never silently miscompiling. }
+    { A record-typed THREADVAR is the current stand-in for "a construct the
+      arm64 subset has not reached yet".  This has now been repointed twice —
+      it was a generic RECORD, then a JUMBO SET, and both now lower.  Repoint
+      it again rather than deleting it when this one lands too: the point of
+      the test is that a gap fails LOUDLY at compile time with a clear
+      file/line, never silently miscompiling. }
     GenAsm(
       '''
       program P;
       type
-        TE = (M00, M01, M02, M03, M04, M05, M06, M07, M08, M09,
-              M10, M11, M12, M13, M14, M15, M16, M17, M18, M19,
-              M20, M21, M22, M23, M24, M25, M26, M27, M28, M29,
-              M30, M31, M32, M33, M34, M35, M36, M37, M38, M39,
-              M40, M41, M42, M43, M44, M45, M46, M47, M48, M49,
-              M50, M51, M52, M53, M54, M55, M56, M57, M58, M59,
-              M60, M61, M62, M63, M64, M65, M66, M67, M68, M69);
-        TS = set of TE;
-      var
-        S: TS;
+        TR = record
+          X: Integer;
+        end;
+      threadvar
+        TV: TR;
       begin
-        S := [M00];
-        if M00 in S then
-          WriteLn(1)
+        TV.X := 1;
+        WriteLn(TV.X)
       end.
       ''');
   except
@@ -5059,6 +5060,120 @@ begin
   finally
     F.Free();
   end;
+end;
+
+{ ---- P0-3: jumbo sets (> 64 members) -------------------------------------
+  A set of 64 members or fewer is a register-sized mask (see
+  TestSmallSets_LiteralsInOps above).  Past 64 it becomes a JUMBO set: an
+  inline byte-array bitmap, passed by POINTER and operated on through the
+  _Set* RTL helpers in runtime.set.pas — the same representation x86-64 uses,
+  and the RTL is pure Pascal so it is backend-neutral.
+
+  Before this landed the backend refused outright with
+  "arm64: not yet lowered: jumbo sets (more than 64 members)". }
+
+const
+  { 70 members — comfortably past the 64-bit boundary, so TSetTypeDesc.IsJumbo
+    is True and RawByteSize is 9 (ceil(70/8)), rounded to a 16-byte slot. }
+  SrcJumboSet =
+    '''
+    program P;
+    type
+      TE = (M00, M01, M02, M03, M04, M05, M06, M07, M08, M09,
+            M10, M11, M12, M13, M14, M15, M16, M17, M18, M19,
+            M20, M21, M22, M23, M24, M25, M26, M27, M28, M29,
+            M30, M31, M32, M33, M34, M35, M36, M37, M38, M39,
+            M40, M41, M42, M43, M44, M45, M46, M47, M48, M49,
+            M50, M51, M52, M53, M54, M55, M56, M57, M58, M59,
+            M60, M61, M62, M63, M64, M65, M66, M67, M68, M69);
+      TS = set of TE;
+    var
+      A, B: TS;
+    begin
+      A := [M00, M65];
+      B := A + [M69];
+      WriteLn(M65 in B)
+    end.
+    ''';
+
+procedure TArm64BackendTests.TestJumboSet_LocalDeclAndLiteral;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(SrcJumboSet);
+  { A jumbo set is an aggregate, so building a literal goes through the RTL
+    rather than folding to an immediate mask the way a small set does. }
+  AssertTrue('literal built via _SetInclude',
+    Pos('bl __SetInclude', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestJumboSet_MembershipCallsRtl;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(SrcJumboSet);
+  { `M65 in B` cannot be a shift+test past 64 bits — it must call the helper,
+    which takes the bitmap ADDRESS and the member ordinal. }
+  AssertTrue('membership via _SetIn', Pos('bl __SetIn', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestJumboSet_UnionCallsRtl;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(SrcJumboSet);
+  { `A + [M69]` is a bitmap union: dest, a, b pointers plus a byte count. }
+  AssertTrue('union via _SetUnion', Pos('bl __SetUnion', AsmT) >= 0);
+  { The destination is a FIXED x29-relative FRAME slot, never a fresh sp
+    lowering — see TestJumboSet_OpInLoopDoesNotGrowStack for why. }
+  AssertTrue('destination is frame-relative', Pos(#9'sub x0, x29, #', AsmT) >= 0);
+end;
+
+{ A set OPERATOR can sit inside a loop, so its destination buffer must be
+  allocated ONCE PER FRAME and reused.  An earlier version of this lowered sp
+  per evaluation (the contract EmitJumboSetLiteral uses, which is right for a
+  literal because a literal is materialised where it appears).  Inside a loop
+  that `sub sp` never gets its `add sp` back: measured at 16 bytes per
+  iteration, i.e. 1.6 MB over a 100k-iteration loop, ending in a stack
+  overflow.  This test pins the fix by asserting the loop body contains NO sp
+  arithmetic at all. }
+procedure TArm64BackendTests.TestJumboSet_OpInLoopDoesNotGrowStack;
+var
+  AsmT, Body: string;
+  LoopStart, LoopEnd: Integer;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TE = (M00, M01, M02, M03, M04, M05, M06, M07, M08, M09,
+            M10, M11, M12, M13, M14, M15, M16, M17, M18, M19,
+            M20, M21, M22, M23, M24, M25, M26, M27, M28, M29,
+            M30, M31, M32, M33, M34, M35, M36, M37, M38, M39,
+            M40, M41, M42, M43, M44, M45, M46, M47, M48, M49,
+            M50, M51, M52, M53, M54, M55, M56, M57, M58, M59,
+            M60, M61, M62, M63, M64, M65, M66, M67, M68, M69);
+      TS = set of TE;
+    var
+      A, B, C: TS;
+      I: Integer;
+    begin
+      A := [M00];
+      B := [M65];
+      for I := 0 to 10 do
+        C := A + B;
+      WriteLn(M00 in C)
+    end.
+    ''');
+  { Isolate the loop body: from the loop-top label to the continue label. }
+  LoopStart := Pos('Lfor1:', AsmT);
+  LoopEnd   := Pos('Lfcont3:', AsmT);
+  AssertTrue('loop labels found', (LoopStart >= 0) and (LoopEnd > LoopStart));
+  Body := Copy(AsmT, LoopStart, LoopEnd - LoopStart);
+
+  AssertTrue('the union is inside the loop', Pos('bl __SetUnion', Body) >= 0);
+  AssertTrue('loop body lowers sp nowhere', Pos(#9'sub sp, sp', Body) < 0);
+  AssertTrue('loop body raises sp nowhere', Pos(#9'add sp, sp', Body) < 0);
 end;
 
 procedure TArm64BackendTests.TestSmallSets_LiteralsInOps;
