@@ -49,6 +49,7 @@ type
     procedure TestCodegen_GenericIntf_ImpllistEmitted;
     procedure TestCodegen_GenericIntf_MethodDispatch_EmitsIndirectCall;
     procedure TestCodegen_GenericIntf_NestedArg_TypeinfoNameIsMangled;
+    procedure TestCodegen_GenericIntf_AliasSupports_UsesInstanceTypeinfo;
   end;
 
 implementation
@@ -169,6 +170,35 @@ const
           B: IBox<TList<Integer>>;
         begin
           B := TBox.Create()
+        end.
+        ''';
+
+  { A type ALIAS of a generic interface instance, queried with Supports().
+    An alias IS the aliased type, so it must resolve to that instance's ONE
+    typeinfo token — emitting a reference under the alias's own name leaves
+    it undefined at link, and (before the link guard) silently bound it to a
+    garbage address so Supports() answered False for an interface the class
+    genuinely implements. }
+  SrcGenericIntfAliasSupports =
+    '''
+        program P;
+        type
+          IBox<T> = interface
+            function Get: T;
+          end;
+          IIntBox = IBox<Integer>;
+          TBox = class(IBox<Integer>)
+            function Get: Integer;
+            begin
+              Result := 7
+            end;
+          end;
+        var
+          O: TBox;
+          OK: Boolean;
+        begin
+          O  := TBox.Create();
+          OK := Supports(O, IIntBox)
         end.
         ''';
 
@@ -428,6 +458,20 @@ begin
     symbol and is what the dangling reference was looking past. }
   AssertTrue('No unmangled typeinfo_IBox_TList<Integer> symbol',
     Pos('typeinfo_IBox_TList<', IR) < 0);
+end;
+
+procedure TGenericIntfTests.TestCodegen_GenericIntf_AliasSupports_UsesInstanceTypeinfo;
+var
+  IR: string;
+begin
+  IR := GenIR(SrcGenericIntfAliasSupports);
+  { Supports(O, IIntBox) must reference the ALIASED INSTANCE's token, which
+    is the one actually defined and listed in the class's impllist. }
+  AssertTrue('Supports references typeinfo_IBox_Integer',
+    Pos('typeinfo_IBox_Integer', IR) > 0);
+  { ...and never the alias's own name, which nothing defines. }
+  AssertTrue('No typeinfo_IIntBox reference',
+    Pos('typeinfo_IIntBox', IR) < 0);
 end;
 
 initialization

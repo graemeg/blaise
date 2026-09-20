@@ -16807,7 +16807,7 @@ begin
   ObjTemp := EmitExpr(AExpr.Obj);
   OkTemp  := AllocTemp();
   EmitLine(Format('  %s =w call $_ImplementsInterface(l %s, l $typeinfo_%s)',
-    [OkTemp, ObjTemp, ClassSymName(AExpr.IntfTypeName)]));
+    [OkTemp, ObjTemp, IntfTypeInfoName(IntfRefName(AExpr.ResolvedIntfType, AExpr.IntfTypeName))]));
 
   if AExpr.OutVarName = '' then
   begin
@@ -16828,7 +16828,7 @@ begin
   OutRef   := IntfObjAddr(AExpr.OutVarName, AExpr.OutVarIsGlobal, False);
   ItabTemp := AllocTemp();
   EmitLine(Format('  %s =l call $_GetItab(l %s, l $typeinfo_%s)',
-    [ItabTemp, ObjTemp, ClassSymName(AExpr.IntfTypeName)]));
+    [ItabTemp, ObjTemp, IntfTypeInfoName(IntfRefName(AExpr.ResolvedIntfType, AExpr.IntfTypeName))]));
   { ARC: retain new obj, release old obj slot of out-var }
   OldTemp := AllocTemp();
   EmitLine(Format('  %s =l loadl %s', [OldTemp, OutRef]));

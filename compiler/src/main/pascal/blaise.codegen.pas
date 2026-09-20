@@ -288,6 +288,23 @@ function ArcBuiltinStrArgOwnsRef(AExpr: TASTExpr): Boolean;
   returned unchanged via a fast pre-scan that avoids per-character concat. }
 function CodegenMangle(const AName: string): string;
 
+{ The interface name a typeinfo REFERENCE must be emitted under: the resolved
+  descriptor's own name when the semantic pass supplied one, else the source
+  spelling.
+
+  These differ exactly when the source names the interface through a type
+  ALIAS (`IIntBox = IBox<Integer>`).  An alias IS the aliased type, so it has
+  no typeinfo of its own — only the instance's token is defined, and only that
+  token appears in the implementing class's impllist.  Emitting a reference
+  under the alias spelling left typeinfo_IIntBox undefined, which before the
+  link guard bound it to a garbage address and made Supports() answer False
+  for an interface the class genuinely implements
+  (BUG-20260919-intf-alias-typeinfo).
+
+  Nil-safe on purpose: ResolvedIntfType is filled in by uSemantic, and a
+  codegen-only or partially-analysed path may not have it. }
+function IntfRefName(AResolved: TTypeDesc; const ASourceName: string): string;
+
 implementation
 
 function RecretManagedClean(ARec: TRecordTypeDesc): Boolean;
@@ -719,6 +736,14 @@ begin
       Result := Result + Chr(C);
     end;
   end;
+end;
+
+function IntfRefName(AResolved: TTypeDesc; const ASourceName: string): string;
+begin
+  if (AResolved <> nil) and (AResolved.Name <> '') then
+    Result := AResolved.Name
+  else
+    Result := ASourceName;
 end;
 
 function IsIntfType(AType: TTypeDesc): Boolean;

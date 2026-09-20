@@ -47,6 +47,8 @@ type
     procedure TestRun_GenericClass_ImplementsInterface_CrossUnit;
     { a generic interface instantiated with a NESTED generic argument }
     procedure TestRun_GenericIntf_NestedTypeArg;
+    { Supports() through a type ALIAS of a generic interface instance }
+    procedure TestRun_GenericIntf_AliasSupports;
   end;
 
 implementation
@@ -383,6 +385,42 @@ const Src = '''
     ''';
 begin
   AssertRunsOnAll(Src, '7' + Chr(10), 0);
+end;
+
+{ Supports() through a type ALIAS of a generic interface instance.
+
+  Unlike the nested-argument test above, this one IS observable at runtime:
+  Supports() walks the class's impllist comparing each entry against the
+  interface's typeinfo ADDRESS, so a reference emitted under the alias's own
+  (undefined) name compares against a garbage address and answers False for
+  an interface the class genuinely implements.  On the broken compiler this
+  printed 'no' — a silent wrong answer, exit 0, no diagnostic.
+  (BUG-20260919-intf-alias-typeinfo.) }
+procedure TE2EGenericIntfTests.TestRun_GenericIntf_AliasSupports;
+const Src = '''
+    program T;
+    type
+      IBox<T> = interface
+        function Get: T;
+      end;
+      IIntBox = IBox<Integer>;
+      TBox = class(IBox<Integer>)
+        function Get: Integer;
+        begin Result := 7 end;
+      end;
+    var
+      O: TBox;
+    begin
+      O := TBox.Create();
+      WriteLn(O.Get());
+      if Supports(O, IIntBox) then
+        WriteLn('yes')
+      else
+        WriteLn('no')
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src, '7' + Chr(10) + 'yes' + Chr(10), 0);
 end;
 
 initialization

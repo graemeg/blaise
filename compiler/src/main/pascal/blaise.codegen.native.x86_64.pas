@@ -10833,7 +10833,7 @@ begin
       { 2-arg form: boolean result only. }
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
-        [Self.IntfTypeInfoName(TSupportsExpr(AExpr).IntfTypeName)]));
+        [Self.IntfTypeInfoName(IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName))]));
       Self.Emit(#9'callq _ImplementsInterface');
       Exit;
     end;
@@ -10841,7 +10841,7 @@ begin
     Self.Emit(#9'pushq %rax');               { (obj) }
     Self.Emit(#9'movq %rax, %rdi');
     Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
-      [Self.IntfTypeInfoName(TSupportsExpr(AExpr).IntfTypeName)]));
+      [Self.IntfTypeInfoName(IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName))]));
     Self.Emit(#9'callq _ImplementsInterface');
     LSuppNo  := Self.NewLabel('supports_no');
     LSuppEnd := Self.NewLabel('supports_end');
@@ -10853,7 +10853,7 @@ begin
       Self.AddGlobal(SuppOut, TSupportsExpr(AExpr).ResolvedIntfType);
     Self.Emit(#9'movq (%rsp), %rdi');        { obj }
     Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
-      [Self.IntfTypeInfoName(TSupportsExpr(AExpr).IntfTypeName)]));
+      [Self.IntfTypeInfoName(IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName))]));
     Self.Emit(#9'callq _GetItab');           { itab -> %rax }
     Self.Emit(#9'pushq %rax');               { (itab, obj) }
     { ARC: retain new obj, release the out-var's old obj slot. }

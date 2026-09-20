@@ -4020,7 +4020,7 @@ begin
     if TSupportsExpr(AExpr).OutVarName = '' then
     begin
       Self.EmitExprToX0(TSupportsExpr(AExpr).Obj);
-      EmitTypeinfoAddr('x1', TSupportsExpr(AExpr).IntfTypeName);
+      EmitTypeinfoAddr('x1', IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName));
       EmitCallSym('_GetItab');
       Self.Emit(#9'cmp x0, #0');
       Self.Emit(#9'cset x0, ne');
@@ -4028,7 +4028,7 @@ begin
     end;
     Self.EmitExprToX0(TSupportsExpr(AExpr).Obj);
     EmitPushX0();                                    { [obj] }
-    EmitTypeinfoAddr('x1', TSupportsExpr(AExpr).IntfTypeName);
+    EmitTypeinfoAddr('x1', IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName));
     EmitCallSym('_GetItab');
     EmitPushX0();                                    { [obj][itab] }
     CondName := NewLabel('supno');
