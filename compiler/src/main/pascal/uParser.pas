@@ -101,6 +101,14 @@ type
     procedure ParseTypeSection(ABlock: TBlock);
     procedure ParseTypeDecl(ABlock: TBlock);
     procedure ParseConstBlock(AList: TObjectList);
+    { Stamp AVis onto every TConstDecl appended to AList from AFromIdx onward.
+      ParseConstBlock appends without knowing the enclosing visibility section,
+      so a class/record body records the section's visibility afterwards — the
+      same shape already used for fields (see the FieldIdx loop in
+      ParseRecordDef).  Without this a `private const` loses its visibility at
+      parse time and cannot be enforced downstream (GH #175 Stage 0). }
+    procedure StampConstVisibility(AList: TObjectList; AFromIdx: Integer;
+                                   AVis: TMemberVisibility);
     procedure ParseConstArrayType(CD: TConstDecl);
     procedure ReadConstArrayDim(CD: TConstDecl);
     procedure ParseConstArrayScalar(CD: TConstDecl);
@@ -1457,6 +1465,15 @@ begin
   end;
 end;
 
+procedure TParser.StampConstVisibility(AList: TObjectList; AFromIdx: Integer;
+                                       AVis: TMemberVisibility);
+var
+  I: Integer;
+begin
+  for I := AFromIdx to AList.Count - 1 do
+    TConstDecl(AList.Items[I]).Visibility := AVis;
+end;
+
 procedure TParser.ParseConstBlock(AList: TObjectList);
 var
   CD:          TConstDecl;
@@ -2129,6 +2146,7 @@ end;
 function TParser.ParseRecordDef: TRecordTypeDef;
 var
   MethDecl:         TMethodDecl;
+  ConstIdx:         Integer;   { first const appended by this section's ParseConstBlock }
   CurrStatic:       Boolean;   { current section's static (class-level) association }
   CurrStaticBlock:  Boolean;   { bare `static var`/`static const` block (see
                                  ParseClassDef; BUG-036) }
@@ -2209,7 +2227,11 @@ begin
         end;
       end
       else if Check(tkConst) then
-        ParseConstBlock(Result.ConstDecls)
+      begin
+        ConstIdx := Result.ConstDecls.Count;
+        ParseConstBlock(Result.ConstDecls);
+        Self.StampConstVisibility(Result.ConstDecls, ConstIdx, CurrVisibility);
+      end
       else if Check(tkVar) then
         Advance()  { optional `var` keyword before field declarations }
       { `class operator Add(const A, B: TFoo): TFoo;` — a static method whose
@@ -2302,6 +2324,7 @@ end;
 function TParser.ParseClassDef: TClassTypeDef;
 var
   CurrPublished:    Boolean;
+  ConstIdx:         Integer;   { first const appended by this section's ParseConstBlock }
   CurrVisibility:   TMemberVisibility; { current section's visibility }
   CurrStatic:       Boolean;   { current section's static (class-level) association }
   CurrStaticBlock:  Boolean;   { CurrStatic came from a bare `static var`/
@@ -2464,7 +2487,11 @@ begin
                      part of this static section }
       end
       else if Check(tkConst) then
-        ParseConstBlock(Result.ConstDecls)
+      begin
+        ConstIdx := Result.ConstDecls.Count;
+        ParseConstBlock(Result.ConstDecls);
+        Self.StampConstVisibility(Result.ConstDecls, ConstIdx, CurrVisibility);
+      end
       else if Check(tkVar) then
         Advance()  { optional 'var' keyword before field declarations — consume and continue }
       else if (Check(tkIdent) and SameText(FCurrent.Value, 'property')) or

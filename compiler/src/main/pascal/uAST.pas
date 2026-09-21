@@ -751,6 +751,14 @@ type
       the resolved integer.  Nil indicates the matching ArrayElements[i]
       is already a final scalar (literal, typecast, or ident). }
     ArrayElementParts: TObjectList;
+    { Member visibility, for a const declared inside a class or record body.
+      Set by the parser from the enclosing visibility section; mvPublic for a
+      unit- or block-level const (which has no owning type and is therefore
+      never visibility-checked).  Read by uSemantic when registering the const
+      so that private/strict-private are ENFORCED — before this existed the
+      visibility keyword was discarded at parse time and a `private const` was
+      readable from anywhere (GH #175 Stage 0). }
+    Visibility: TMemberVisibility;
     { Set-valued constant — set when the RHS is a set literal '[a, b, ...]'.
       SetElements holds the member identifier names (empty for '[]').
       Semantic resolves each to its enum ordinal, ORs (1 shl ord) into IntVal
@@ -2795,6 +2803,9 @@ begin
   Result.StrVal   := ASrc.StrVal;
   Result.IsString := ASrc.IsString;
   Result.IsFloat  := ASrc.IsFloat;
+  { Member visibility must survive a clone — dropping it would silently
+    turn a strict-private const public in the cloned type. }
+  Result.Visibility := ASrc.Visibility;
   if ASrc.ConstParts <> nil then
   begin
     Result.ConstParts := TStringList.Create();
@@ -3057,10 +3068,10 @@ begin
     Result.Fields.Add(CloneFieldDecl(TFieldDecl(ASrc.Fields.Items[I])));
   for I := 0 to ASrc.Methods.Count - 1 do
     Result.Methods.Add(CloneMethodDecl(TMethodDecl(ASrc.Methods.Items[I])));
-  { ConstDecls were dropped by the older inline version of this walk.  A record
-    const is separately broken today (BUG-20260918-record-const-never-resolves),
-    so nothing depends on this yet — but a clone that silently loses a member is
-    a trap waiting for whoever fixes that. }
+  { ConstDecls were dropped by the older inline version of this walk.  Record
+    consts now resolve (they were never registered at all until the const
+    registration path was unified), so this is load-bearing rather than
+    merely defensive: a clone that loses them loses real members. }
   for I := 0 to ASrc.ConstDecls.Count - 1 do
     Result.ConstDecls.Add(CloneConstDecl(TConstDecl(ASrc.ConstDecls.Items[I])));
 end;

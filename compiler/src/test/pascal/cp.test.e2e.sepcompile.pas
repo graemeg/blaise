@@ -65,6 +65,16 @@ type
       template declared in a unit INTERFACE could not be compiled at all. }
     procedure TestGenericRecord_InUnitInterface_Compiles;
     procedure TestGenericRecord_InUnitInterface_RoundTrip_WithoutSource;
+    { Regression (GH #175 Stage 0): a class const's member VISIBILITY must
+      survive the .bif round trip.  The const payload carried only
+      name/type/value/flags, and the importer registered the symbol with no
+      visibility metadata at all — so a strict-private const that a COLD
+      build correctly rejected was silently ACCEPTED once the declaring unit
+      came from a cached interface.  Cold-vs-warm disagreement on what
+      compiles is the worst shape of incremental bug, so both directions are
+      asserted here: the private const stays rejected, and the public one
+      still resolves. }
+    procedure TestClassConstVisibility_SurvivesIfaceRoundTrip;
     { Regression (GH #194): Pascal identifiers are case-insensitive, so the
       spelling of a unit name in a `uses` clause must not decide whether its
       file is found.  The loader only tried two spellings — all-lowercase and
@@ -604,6 +614,91 @@ begin
   Rc := RunBinary(Bin2, Captured);
   AssertEquals('warm run exit code', 0, Rc);
   AssertEquals('warm stdout', '33' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestClassConstVisibility_SurvivesIfaceRoundTrip;
+const
+  DepSrc =
+    '''
+    unit VisDep;
+    interface
+    type
+      TLib = class
+      strict private
+        const Hidden = 99;
+      public
+        const Shown = 1;
+      end;
+    implementation
+    end.
+    ''';
+  OkSrc =
+    '''
+    program UseShown;
+    uses VisDep;
+    begin
+      WriteLn(TLib.Shown)
+    end.
+    ''';
+  BadSrc =
+    '''
+    program UseHidden;
+    uses VisDep;
+    begin
+      WriteLn(TLib.Hidden)
+    end.
+    ''';
+var
+  DepPas, DepObj, OkPas, OkBin, BadPas, BadBin: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  DepPas := FScratch + '/VisDep.pas';
+  DepObj := FScratch + '/VisDep.o';
+  OkPas  := FScratch + '/use_shown.pas';
+  OkBin  := FScratch + '/use_shown';
+  BadPas := FScratch + '/use_hidden.pas';
+  BadBin := FScratch + '/use_hidden';
+
+  { Step 1: build the dep into an .o with embedded .blaise.iface. }
+  WriteFile(DepPas, DepSrc);
+  Rc := RunBlaise(['--source', DepPas, '--output', DepObj], Captured);
+  AssertEquals('blaise(VisDep) exit code', 0, Rc);
+  AssertTrue('VisDep.o exists', FileExists(DepObj));
+
+  { Step 2: hide the source, so the consumers MUST read the cached iface. }
+  DeleteFile(DepPas);
+  AssertFalse('VisDep.pas hidden', FileExists(DepPas));
+
+  { Step 3: the public const still resolves through the cached iface. }
+  WriteFile(OkPas, OkSrc);
+  Rc := RunBlaise(['--source', OkPas, '--output', OkBin,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('blaise(use_shown) exit code', 0, Rc);
+  Rc := RunBinary(OkBin, Captured);
+  AssertEquals('use_shown exit code', 0, Rc);
+  AssertEquals('use_shown stdout', '1' + #10, Captured);
+
+  { Step 4: the strict-private const must STILL be rejected.  Before the fix
+    this compiled cleanly and printed 99. }
+  WriteFile(BadPas, BadSrc);
+  Rc := RunBlaise(['--source', BadPas, '--output', BadBin,
+                   '--unit-path', FScratch], Captured);
+  AssertTrue('blaise(use_hidden) must fail (got rc=' + IntToStr(Rc) +
+             ', output: ' + Captured + ')', Rc <> 0);
+  AssertTrue('error names the inaccessible member (got: ' + Captured + ')',
+             Pos('not accessible', Captured) >= 0)
 end;
 
 procedure TSepCompileTests.TestGenericClass_RoundTrip_WithoutSource;

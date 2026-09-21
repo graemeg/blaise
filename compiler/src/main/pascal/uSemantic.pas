@@ -829,6 +829,20 @@ type
                                   const AMemberName: string;
                                   ALine, ACol: Integer);
 
+    { True when '<ATypeName>.<AMemberName>' names a registered const member.
+      Lets a qualified member-const read be told apart from a constructor
+      call on a non-class type, which otherwise share a syntax. }
+    function IsTypeConstMember(const ATypeName, AMemberName: string): Boolean;
+
+    { Resolve a bare const member name against AFromClass and its ancestors,
+      returning the symbol registered under the qualified key, or nil.  Member
+      consts are defined only as '<Type>.<Name>', so this is what makes the
+      unqualified form work inside the declaring type's own methods (and a
+      descendant's).  Does NOT check visibility — the caller asserts it, so
+      the error names the right site. }
+    function LookupMemberConst(AFromClass: TRecordTypeDesc;
+                               const AName: string): TSymbol;
+
     { Core visibility predicate.  Single source of truth applied by both
       the unqualified uses-chain probe and the qualified member-access
       asserts.  ADeclaringUnit / ADeclaringType identify where the member
@@ -2929,6 +2943,37 @@ begin
     SemanticError(
       Format('''%s'' is not accessible from here', [AMemberName]),
       ALine, ACol);
+end;
+
+function TSemanticAnalyser.IsTypeConstMember(const ATypeName,
+                                             AMemberName: string): Boolean;
+var
+  Sym: TSymbol;
+begin
+  Sym := FTable.Lookup(ATypeName + '.' + AMemberName);
+  Result := (Sym <> nil) and (Sym.Kind = skConstant);
+end;
+
+function TSemanticAnalyser.LookupMemberConst(AFromClass: TRecordTypeDesc;
+                                             const AName: string): TSymbol;
+var
+  RT: TRecordTypeDesc;
+begin
+  Result := nil;
+  { Inside a STATIC method FCurrentClass is nil, so fall back to the method's
+    declaring type — the same allowance AssertStaticVarVisible makes, so a
+    const stays reachable from its own type's static methods. }
+  RT := AFromClass;
+  if RT = nil then
+    RT := FCurrentMethodOwner;
+  while RT <> nil do
+  begin
+    Result := FTable.Lookup(RT.Name + '.' + AName);
+    if (Result <> nil) and (Result.Kind = skConstant) then
+      Exit;
+    Result := nil;
+    RT := RT.Parent;
+  end;
 end;
 
 procedure TSemanticAnalyser.AssertStaticVarVisible(AVisibility: TMemberVisibility;
@@ -6442,6 +6487,7 @@ var
   L:          Integer;
   TD:         TTypeDecl;
   FieldList:  TObjectList;
+  ConstList:  TObjectList;   { const members of the class/record being registered }
   MethodList: TObjectList;
   Grp:        TObjectList;
   FDecl:      TFieldDecl;
@@ -7411,12 +7457,27 @@ begin
         RT.AddProperty(PropInfo);
       end;
 
-    { Register class-level constants in the global scope — accessible both
-      unqualified (MaxItems) and qualified (TFoo.MaxItems) }
+    { Register type-level constants under their QUALIFIED name (TFoo.MaxItems)
+      only.  The bare name is deliberately NOT defined globally: a member const
+      is reached unqualified only from inside its own type's methods, which
+      AnalyseIdent resolves through FCurrentClass, and from a descendant's
+      methods via the inherited-const copy performed with the field copy above.
+
+      Before GH #175 Stage 0 this loop defined BOTH the bare and the qualified
+      name in the flat global table with no visibility check, so `private`
+      was unenforced and the bare member name leaked into global scope.  Both
+      container kinds are handled here; the arm used to be gated on
+      TClassTypeDef alone, which left record consts never registered at all
+      (they parsed and round-tripped through .bif but could not be referenced). }
+    ConstList := nil;
     if TD.Def is TClassTypeDef then
-      for J := 0 to TClassTypeDef(TD.Def).ConstDecls.Count - 1 do
+      ConstList := TClassTypeDef(TD.Def).ConstDecls
+    else if TD.Def is TRecordTypeDef then
+      ConstList := TRecordTypeDef(TD.Def).ConstDecls;
+    if ConstList <> nil then
+      for J := 0 to ConstList.Count - 1 do
       begin
-        CD := TConstDecl(TClassTypeDef(TD.Def).ConstDecls.Items[J]);
+        CD := TConstDecl(ConstList.Items[J]);
         if CD.IsArrayConst then
         begin
           ElemTD := FTable.FindType(CD.ArrayElemType);
@@ -7453,15 +7514,11 @@ begin
             else
               ArrTD := FTable.NewStaticArrayType(ElemTD, 0, Expected - 1);
           end;
-          Sym := TSymbol.Create(CD.Name, skConstant, ArrTD);
-          Sym.IsGlobal := True;
-          Sym.ConstArray := TStringList.Create();
-          for K := 0 to CD.ArrayElements.Count - 1 do
-            Sym.ConstArray.Add(CD.ArrayElements[K]);
-          if not FTable.Define(Sym) then
-            Sym.Free();
           Sym := TSymbol.Create(TD.Name + '.' + CD.Name, skConstant, ArrTD);
           Sym.IsGlobal := True;
+          Sym.Visibility := CD.Visibility;
+          Sym.OwnerTypeName := TD.Name;
+          Sym.OwningUnit := FCurrentUnitName;
           Sym.ConstArray := TStringList.Create();
           for K := 0 to CD.ArrayElements.Count - 1 do
             Sym.ConstArray.Add(CD.ArrayElements[K]);
@@ -7474,16 +7531,15 @@ begin
             ParType := FTable.TypeString
           else
             ParType := FTable.TypeInteger;
-          { Unqualified name — usable inside class methods without prefix }
-          Sym := TSymbol.Create(CD.Name, skConstant, ParType);
-          Sym.ConstValue  := CD.IntVal;
-          Sym.ConstString := CD.StrVal;
-          if not FTable.Define(Sym) then
-            Sym.Free();
-          { Qualified name — usable as TFoo.MaxItems from anywhere }
+          { Qualified name only — TFoo.MaxItems.  The unqualified form is
+            resolved through the owning type's scope (see AnalyseIdent), not
+            by defining the bare member name globally. }
           Sym := TSymbol.Create(TD.Name + '.' + CD.Name, skConstant, ParType);
           Sym.ConstValue  := CD.IntVal;
           Sym.ConstString := CD.StrVal;
+          Sym.Visibility := CD.Visibility;
+          Sym.OwnerTypeName := TD.Name;
+          Sym.OwningUnit := FCurrentUnitName;
           if not FTable.Define(Sym) then
             Sym.Free();
         end;
@@ -14019,6 +14075,28 @@ begin
     end;
     if Sym = nil then
     begin
+      { Not a normal symbol — try a member const of the type whose method we
+        are inside, walking the ancestor chain.  A const member is registered
+        only under its qualified key (TFoo.MaxItems), so the bare form is
+        reachable exactly here: from the declaring type's own methods, and
+        from a descendant's methods via the ancestor walk.  This replaces the
+        pre-Stage-0 behaviour of also defining the bare name globally, which
+        made a member const visible to unrelated code (GH #175 Stage 0).
+        Visibility is still asserted, so a strict-private const in an ancestor
+        is not reachable from a descendant. }
+      Sym := Self.LookupMemberConst(FCurrentClass, TIdentExpr(AExpr).Name);
+      if Sym <> nil then
+      begin
+        AssertStaticVarVisible(Sym.Visibility, Sym.OwningUnit,
+                               Sym.OwnerTypeName, TIdentExpr(AExpr).Name,
+                               AExpr.Line, AExpr.Col);
+        TIdentExpr(AExpr).IsConstant  := True;
+        TIdentExpr(AExpr).ConstValue  := Sym.ConstValue;
+        TIdentExpr(AExpr).ConstString := Sym.ConstString;
+        Result := Sym.TypeDesc;
+        AExpr.ResolvedType := Result;
+        Exit;
+      end;
       { Not a normal symbol — try a bare enum member.  No expected-type
         context flows into the generic expression path, so this resolves a
         member declared by a single enum directly; a member shared by several
@@ -14626,7 +14704,13 @@ begin
   { Constructor call: TypeName.Create }
   if RecSym.Kind = skType then
   begin
-    if RecSym.TypeDesc.Kind <> tyClass then
+    { A qualified MEMBER CONST read (TFoo.MaxItems) reaches here too, and is
+      valid on a record as well as a class — so a non-class type is only an
+      error when the member is NOT a const.  Rejecting on tyClass alone made
+      every record const read fail with the misleading 'Cannot call
+      constructor on non-class type' (GH #175 Stage 0). }
+    if (RecSym.TypeDesc.Kind <> tyClass) and
+       not IsTypeConstMember(AAccess.RecordName, AAccess.FieldName) then
       SemanticError(
         Format('Cannot call constructor on non-class type ''%s''',
           [AAccess.RecordName]),
@@ -14637,6 +14721,13 @@ begin
       Sym := FTable.Lookup(AAccess.RecordName + '.' + AAccess.FieldName);
       if (Sym <> nil) and (Sym.Kind = skConstant) then
       begin
+        { Member consts are visibility-checked like any other member: a
+          private const is unreachable outside its declaring unit, a strict
+          private one outside its declaring type (GH #175 Stage 0). }
+        if Sym.OwnerTypeName <> '' then
+          AssertStaticVarVisible(Sym.Visibility, Sym.OwningUnit,
+                                 Sym.OwnerTypeName, AAccess.FieldName,
+                                 AAccess.Line, AAccess.Col);
         AAccess.IsConstant  := True;
         AAccess.ConstValue  := Sym.ConstValue;
         AAccess.ConstString := Sym.ConstString;

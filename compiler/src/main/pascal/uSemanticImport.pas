@@ -349,12 +349,16 @@ end;
 
 { Register class/record-level `static const` declarations imported from a
   .bif.  Mirrors the within-unit registration in uSemantic.AnalyseTypeDecls:
-  each const is reachable both bare and qualified ('TFoo.Tag').  Array consts
-  are out of scope here (the within-unit path supports them, but no cached
-  consumer needs them yet); only scalar int/string consts are imported. }
+  each const is registered under its QUALIFIED name ('TFoo.Tag') carrying the
+  member visibility and declaring unit, so private/strict-private are enforced
+  identically whether the declaring unit was compiled from source or loaded
+  from a cached interface.  Array consts are out of scope here (the
+  within-unit path supports them, but no cached consumer needs them yet);
+  only scalar int/string consts are imported. }
 procedure RegisterImportedTypeConsts(const ATypeName: string;
                                      AConstDecls: TObjectList;
-                                     ATable: TSymbolTable);
+                                     ATable: TSymbolTable;
+                                     const AUnitName: string);
 var
   J:   Integer;
   CD:  TConstDecl;
@@ -370,15 +374,20 @@ begin
       Par := ATable.FindType('string')
     else
       Par := ATable.FindType('Integer');
-    { Unqualified name — usable inside the type's own methods without prefix. }
-    Sym := TSymbol.Create(CD.Name, skConstant, Par);
-    Sym.ConstValue  := CD.IntVal;
-    Sym.ConstString := CD.StrVal;
-    if not ATable.Define(Sym) then Sym.Free();
-    { Qualified name — usable as TFoo.Tag from anywhere. }
+    { Qualified name only — TFoo.Tag.  This mirrors the from-source
+      registration in uSemantic.AnalyseTypeDecls: the bare member name is NOT
+      defined globally (it is resolved through the owning type's scope), and
+      the visibility metadata is carried so that a strict-private const stays
+      unreachable when the declaring unit came from a CACHED interface.
+      Before GH #175 Stage 0 this path defined both names with no visibility,
+      so a warm-cache rebuild silently accepted an access that a cold build
+      correctly rejected. }
     Sym := TSymbol.Create(ATypeName + '.' + CD.Name, skConstant, Par);
     Sym.ConstValue  := CD.IntVal;
     Sym.ConstString := CD.StrVal;
+    Sym.Visibility := CD.Visibility;
+    Sym.OwnerTypeName := ATypeName;
+    Sym.OwningUnit := AUnitName;
     if not ATable.Define(Sym) then Sym.Free();
   end;
 end;
@@ -705,7 +714,7 @@ begin
   end;
 
   { Class-level `static const` declarations — reachable bare and qualified. }
-  RegisterImportedTypeConsts(AEntry.Name, ClassDef.ConstDecls, ATable);
+  RegisterImportedTypeConsts(AEntry.Name, ClassDef.ConstDecls, ATable, AUnitName);
 
   { Class attributes.  uSemanticExport currently copies the raw
     attribute names ('Threaded', not 'ThreadedAttribute') — but
@@ -797,7 +806,7 @@ begin
     end;
 
   { record-level `static const` declarations — reachable bare and qualified. }
-  RegisterImportedTypeConsts(AEntry.Name, RecDef.ConstDecls, ATable);
+  RegisterImportedTypeConsts(AEntry.Name, RecDef.ConstDecls, ATable, AUnitName);
 end;
 
 procedure RegisterProcType(AEntry: TTypeEntry; ATable: TSymbolTable;

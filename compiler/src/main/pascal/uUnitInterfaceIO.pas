@@ -54,7 +54,15 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 18; { v18: 'generic-record' TYPE-block kind — a generic RECORD
+  IFACE_VERSION = 19; { v19: EncodeConstDeclList/ReadConstDeclList carry a
+                          const member's Visibility as a sixth field, so a
+                          strict-private class/record const stays unreachable
+                          through a cached interface.  Before this an
+                          incremental (warm-cache) rebuild silently ACCEPTED
+                          an access a cold build rejected, because the
+                          visibility was simply absent from the .bif (GH #175
+                          Stage 0).
+                        v18: 'generic-record' TYPE-block kind — a generic RECORD
                           template declared in a unit INTERFACE now round-trips.
                           Previously TGenericRecordDef had no kind tag, no
                           payload writer and no reader, so such a template was
@@ -468,7 +476,13 @@ begin
               EncodeLpstr(C.TypeName) +
               EncodeInt64(C.IntVal) +
               EncodeLpstr(C.StrVal) +
-              EncodeFlags(C.IsString, C.IsFloat);
+              EncodeFlags(C.IsString, C.IsFloat) +
+              { Member visibility, so a strict-private const stays unreachable
+                across a .bif round trip.  Without it an incremental (warm
+                cache) rebuild silently ACCEPTED an access that a cold build
+                correctly rejected — the same class of defect as the field
+                Visibility carried since IFACE v5. }
+              EncodeLpstr(IntToStr(Ord(C.Visibility)));
   end;
 end;
 
@@ -2220,7 +2234,8 @@ begin
 end;
 
 { Inverse of EncodeConstDeclList — rebuild record/class `static const`
-  decls.  Mirrors the writer's five-field scalar shape exactly. }
+  decls.  Mirrors the writer's six-field scalar shape exactly (the sixth,
+  Visibility, was added for GH #175 Stage 0). }
 procedure ReadConstDeclList(const AText: string; var APos: Integer;
                             ATarget: TObjectList);
 var
@@ -2240,6 +2255,7 @@ begin
     ReadFlagsAt(AText, APos, IsString, IsFloat);
     CD.IsString := IsString;
     CD.IsFloat  := IsFloat;
+    CD.Visibility := TMemberVisibility(StrToInt(ReadLpstrAt(AText, APos)));
     ATarget.Add(CD);
   end;
 end;

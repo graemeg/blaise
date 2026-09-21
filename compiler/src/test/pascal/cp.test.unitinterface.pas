@@ -2741,20 +2741,22 @@ begin
   Iface := TUnitInterface.Create('U');
   try
     Buf := WriteUnitInterface(Iface);
-    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 18 since
-      the TYPE block gained a 'generic-record' kind — a generic RECORD template
-      declared in a unit INTERFACE now round-trips (v17 added META
-      GenericDepHashes — the source hashes of the units this one
-      monomorphised a generic from, without which a warm rebuild cannot see
-      that a generic's BODY changed (v16 added TMethodDecl.IsStatic to
-      EncodeMethodDecl, v15 META HasFinalization, v14 the ROUT IsVarArgs flag,
-      v13 the record method list, v12 the '->' lambda facts, v11 the
-      'generic-proc' TYPE-block kind, on top of v10's 'reference to' form,
-      v9's free-routine external-name linkage, v8's named integer subranges,
-      v7's LinkLibs, v6's `overload` directive, v5's member Visibility, v4's
-      TRoutineSig.IsStatic, and v3's static-member facts). }
+    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 19 since
+      the const payload gained the member Visibility field, without which a
+      strict-private class const was reachable through a cached interface even
+      though a cold build rejected it (v18 added the 'generic-record' TYPE
+      kind, so a generic RECORD template declared in a unit INTERFACE
+      round-trips; v17 added META GenericDepHashes — the source hashes of the
+      units this one monomorphised a generic from, without which a warm
+      rebuild cannot see that a generic's BODY changed; v16 added
+      TMethodDecl.IsStatic to EncodeMethodDecl, v15 META HasFinalization, v14
+      the ROUT IsVarArgs flag, v13 the record method list, v12 the '->' lambda
+      facts, v11 the 'generic-proc' TYPE-block kind, on top of v10's
+      'reference to' form, v9's free-routine external-name linkage, v8's named
+      integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
+      Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 18', Buf) = 0);
+      Pos('BLAISE-IFACE 19', Buf) = 0);
   finally
     Iface.Free();
   end;

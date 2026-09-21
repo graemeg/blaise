@@ -91,6 +91,32 @@ type
     { property visibility }
     procedure TestSem_PrivateProperty_CrossType_OK;
     procedure TestSem_StrictPrivateProperty_CrossType_Rejected;
+
+    { CONST member visibility — Stage 0 of GH #175.
+      Const was the one member kind the original visibility-enforcement pass
+      never covered (its rationale entry enumerates "instance and static
+      fields, methods, and properties").  A class const was registered into
+      the FLAT GLOBAL table under BOTH its bare and qualified names with no
+      MemberVisibleTo check, and a record const was never registered at all. }
+    procedure TestSem_StrictPrivateConst_CrossType_Rejected;
+    procedure TestSem_StrictPrivateConst_OwnMethod_OK;
+    procedure TestSem_PublicConst_QualifiedCrossType_OK;
+    { The bare member name must NOT leak into global scope. }
+    procedure TestSem_ClassConst_BareFromProgramBody_Rejected;
+    procedure TestSem_ClassConst_BareFromOtherType_Rejected;
+    { REGRESSION GUARD: the legitimate unqualified use.  A const IS reachable
+      bare from inside its own declaring type's methods — do not "fix" the
+      leak by simply dropping the bare registration. }
+    procedure TestSem_ClassConst_BareFromOwnMethod_OK;
+    { Inherited consts follow the field precedent: reachable from a
+      descendant's own methods, bare and qualified. }
+    procedure TestSem_ProtectedConst_BareFromDescendantMethod_OK;
+    procedure TestSem_StrictPrivateConst_FromDescendant_Rejected;
+    { RECORD consts must resolve at all — they never did. }
+    procedure TestSem_RecordConst_QualifiedRead_OK;
+    procedure TestSem_RecordConst_BareFromOwnMethod_OK;
+    procedure TestSem_RecordConst_BareFromProgramBody_Rejected;
+    procedure TestSem_StrictPrivateRecordConst_CrossType_Rejected;
   end;
 
 implementation
@@ -855,6 +881,286 @@ const
         function TUser.Read(g: TG): Integer;
         begin
           Result := g.Val;
+        end;
+        begin end.
+        ''';
+begin
+  AnalyseExpectReject(Src, 'not accessible');
+end;
+
+{ ================================================================== }
+{  Const member visibility — Stage 0 of GH #175                       }
+{ ================================================================== }
+
+procedure TVisibilitySemTests.TestSem_StrictPrivateConst_CrossType_Rejected;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TOwner = class
+          strict private
+            const Secret = 42;
+          end;
+          TOther = class
+          public
+            function Peek: Integer;
+          end;
+        function TOther.Peek: Integer;
+        begin
+          Result := TOwner.Secret;
+        end;
+        begin end.
+        ''';
+begin
+  AnalyseExpectReject(Src, 'not accessible');
+end;
+
+procedure TVisibilitySemTests.TestSem_StrictPrivateConst_OwnMethod_OK;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TOwner = class
+          strict private
+            const Secret = 42;
+          public
+            function Reveal: Integer;
+          end;
+        function TOwner.Reveal: Integer;
+        begin
+          Result := TOwner.Secret;
+        end;
+        begin end.
+        ''';
+begin
+  AnalyseExpectOK(Src);
+end;
+
+procedure TVisibilitySemTests.TestSem_PublicConst_QualifiedCrossType_OK;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TOwner = class
+          public
+            const Limit = 99;
+          end;
+        var x: Integer;
+        begin
+          x := TOwner.Limit
+        end.
+        ''';
+begin
+  AnalyseExpectOK(Src);
+end;
+
+procedure TVisibilitySemTests.TestSem_ClassConst_BareFromProgramBody_Rejected;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TOwner = class
+          public
+            const Limit = 99;
+          end;
+        var x: Integer;
+        begin
+          x := Limit
+        end.
+        ''';
+begin
+  { The bare member name must not be visible at program scope, whatever its
+    declared visibility — FPC and Delphi both require the type qualifier. }
+  AnalyseExpectReject(Src, 'Limit');
+end;
+
+procedure TVisibilitySemTests.TestSem_ClassConst_BareFromOtherType_Rejected;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TOwner = class
+          public
+            const Limit = 99;
+          end;
+          TOther = class
+          public
+            function Peek: Integer;
+          end;
+        function TOther.Peek: Integer;
+        begin
+          Result := Limit;
+        end;
+        begin end.
+        ''';
+begin
+  AnalyseExpectReject(Src, 'Limit');
+end;
+
+procedure TVisibilitySemTests.TestSem_ClassConst_BareFromOwnMethod_OK;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TThing = class
+          private
+            const MaxCount = 10;
+          public
+            function Limit: Integer;
+          end;
+        function TThing.Limit: Integer;
+        begin
+          Result := MaxCount;
+        end;
+        begin end.
+        ''';
+begin
+  { REGRESSION GUARD.  This is the one legitimate unqualified use of a const
+    member and it appears in real code (cp.test.e2e.classes2.pas).  A Stage 0
+    fix that merely deletes the bare global registration passes every
+    rejection test above and breaks THIS one. }
+  AnalyseExpectOK(Src);
+end;
+
+procedure TVisibilitySemTests.TestSem_ProtectedConst_BareFromDescendantMethod_OK;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TBase = class
+          protected
+            const Answer = 42;
+          end;
+          TKid = class(TBase)
+          public
+            function Ask: Integer;
+          end;
+        function TKid.Ask: Integer;
+        begin
+          Result := Answer;
+        end;
+        begin end.
+        ''';
+begin
+  { Inherited consts must follow the inherited-FIELD precedent: a descendant
+    method sees them unqualified.  Fields achieve this by being COPIED into
+    the child's own table at registration time; consts must do the same. }
+  AnalyseExpectOK(Src);
+end;
+
+procedure TVisibilitySemTests.TestSem_StrictPrivateConst_FromDescendant_Rejected;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TBase = class
+          strict private
+            const Answer = 42;
+          end;
+          TKid = class(TBase)
+          public
+            function Ask: Integer;
+          end;
+        function TKid.Ask: Integer;
+        begin
+          Result := TBase.Answer;
+        end;
+        begin end.
+        ''';
+begin
+  { strict private stops at the declaring type — a descendant may not see it. }
+  AnalyseExpectReject(Src, 'not accessible');
+end;
+
+procedure TVisibilitySemTests.TestSem_RecordConst_QualifiedRead_OK;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TRec = record
+          public
+            const MaxItems = 42;
+          end;
+        var x: Integer;
+        begin
+          x := TRec.MaxItems
+        end.
+        ''';
+begin
+  { Record consts parse, clone and .bif round-trip today but are NEVER
+    registered — AnalyseTypeDecls' const arm is gated on TClassTypeDef.
+    Currently fails with the misleading "Cannot call constructor on
+    non-class type". }
+  AnalyseExpectOK(Src);
+end;
+
+procedure TVisibilitySemTests.TestSem_RecordConst_BareFromOwnMethod_OK;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TRec = record
+          private
+            const MaxItems = 42;
+          public
+            function Cap: Integer;
+          end;
+        function TRec.Cap: Integer;
+        begin
+          Result := MaxItems;
+        end;
+        begin end.
+        ''';
+begin
+  AnalyseExpectOK(Src);
+end;
+
+procedure TVisibilitySemTests.TestSem_RecordConst_BareFromProgramBody_Rejected;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TRec = record
+          public
+            const MaxItems = 42;
+          end;
+        var x: Integer;
+        begin
+          x := MaxItems
+        end.
+        ''';
+begin
+  AnalyseExpectReject(Src, 'MaxItems');
+end;
+
+procedure TVisibilitySemTests.TestSem_StrictPrivateRecordConst_CrossType_Rejected;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TRec = record
+          strict private
+            const Secret = 7;
+          end;
+          TOther = class
+          public
+            function Peek: Integer;
+          end;
+        function TOther.Peek: Integer;
+        begin
+          Result := TRec.Secret;
         end;
         begin end.
         ''';
