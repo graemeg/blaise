@@ -720,6 +720,14 @@ type
       Caller must then add fields and register it as a skType symbol. }
     function NewRecordType(const AName: string): TRecordTypeDesc;
 
+    { Creates a named integer-subrange descriptor: a DISTINCT type carrying
+      the base integer's Kind (so layout, assignment and ordinal-ness all
+      behave as that int) plus the lo..hi bounds.  The public counterpart of
+      the internal NewType for the one shape an IMPORTER also has to build —
+      a nested subrange arriving from a .bif (GH #175 Stage 3). }
+    function NewSubrangeType(const AName: string; ABase: TTypeDesc;
+                             ALow, AHigh: Int64): TTypeDesc;
+
     { Creates a new class type descriptor (tyClass, heap-allocated). }
     function NewClassType(const AName: string): TRecordTypeDesc;
 
@@ -1741,6 +1749,15 @@ function TSymbolTable.NewRecordType(const AName: string): TRecordTypeDesc;
 begin
   Result := TRecordTypeDesc.Create(AName, tyRecord);
   FAllTypes.Add(Result);
+end;
+
+function TSymbolTable.NewSubrangeType(const AName: string; ABase: TTypeDesc;
+                                      ALow, AHigh: Int64): TTypeDesc;
+begin
+  Result := NewType(ABase.Kind, AName);
+  Result.IsSubrange   := True;
+  Result.SubrangeLow  := ALow;
+  Result.SubrangeHigh := AHigh;
 end;
 
 function TSymbolTable.NewClassType(const AName: string): TRecordTypeDesc;

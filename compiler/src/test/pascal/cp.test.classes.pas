@@ -46,6 +46,7 @@ type
     procedure TestParse_ClassNestedType_KeepsOuterMembers;
     procedure TestParse_ClassNestedType_Multiple;
     procedure TestParse_ClassNestedType_Enum;
+    procedure TestParse_ClassNestedType_Subrange;
     procedure TestParse_ClassNestedType_TakesSectionVisibility;
     procedure TestParse_ClassNestedType_DefaultVisibilityIsPublic;
 
@@ -65,6 +66,21 @@ type
       `TOuter.TInner` where TOuter declares no TInner silently bound an
       unrelated top-level TInner — across unit boundaries — and ran with it. }
     procedure TestSemantic_QualifiedType_UnknownMember_DoesNotBindTail;
+    { Nested type declarations (GH #175 Stage 3) — semantic.  A nested type is
+      registered under its QUALIFIED name only (TOuter.TInner), so the
+      enclosing type acts as a namespace and the bare name does not leak. }
+    procedure TestSemantic_ClassNestedType_QualifiedVarDecl_OK;
+    procedure TestSemantic_ClassNestedType_AsOwnFieldType_OK;
+    procedure TestSemantic_ClassNestedType_ReferencesEnclosingClass_OK;
+    procedure TestSemantic_ClassNestedType_UnknownFieldType_Rejected;
+    procedure TestSemantic_ClassNestedType_MutualReference_OK;
+    procedure TestSemantic_ClassNestedType_SameNameInTwoClasses_OK;
+    procedure TestSemantic_ClassNestedType_BareFromOwnMethod_OK;
+    procedure TestSemantic_ClassNestedType_BareFromDescendantMethod_OK;
+    procedure TestSemantic_ClassNestedType_BareFromProgramBody_Rejected;
+    procedure TestSemantic_ClassNestedSubrange_AsCtorParam_OK;
+    procedure TestSemantic_NestedInsideNested_Rejected;
+    procedure TestSemantic_NestedTypeInGenericClass_Rejected;
 
     { ------------------------------------------------------------------ }
     { Code generation                                                      }
@@ -418,6 +434,42 @@ begin
     NTD := TTypeDecl(CD.NestedTypeDecls[0]);
     AssertEquals('nested type name', 'TMode', NTD.Name);
     AssertTrue('nested def is an enum', NTD.Def is TEnumTypeDef);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TClassTests.TestParse_ClassNestedType_Subrange;
+var
+  Prog: TProgram;
+  CD:   TClassTypeDef;
+  NTD:  TTypeDecl;
+begin
+  { The shape GH #175's reporter actually wanted: a nested subrange used to
+    constrain a constructor parameter.  A subrange parses as a TTypeAliasDef
+    with IsSubrange set, not a type form of its own. }
+  Prog := ParseSrc(
+    '''
+    program P;
+    type
+      TCl = class
+        type
+          TParm = 1..5;
+        constructor Create(AParam: TParm);
+      end;
+    constructor TCl.Create(AParam: TParm);
+    begin end;
+    begin end.
+    ''');
+  try
+    CD := TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls[0]).Def);
+    AssertEquals('1 nested type', 1, CD.NestedTypeDecls.Count);
+    NTD := TTypeDecl(CD.NestedTypeDecls[0]);
+    AssertEquals('nested type name', 'TParm', NTD.Name);
+    AssertTrue('nested def is an alias', NTD.Def is TTypeAliasDef);
+    AssertTrue('alias is a subrange', TTypeAliasDef(NTD.Def).IsSubrange);
+    AssertEquals('subrange low', 1, TTypeAliasDef(NTD.Def).SubrangeLow);
+    AssertEquals('subrange high', 5, TTypeAliasDef(NTD.Def).SubrangeHigh);
   finally
     Prog.Free();
   end;
@@ -780,6 +832,318 @@ begin
         F: Integer;
       end;
     var v: TOuter.TInner;
+    begin end.
+    ''');
+end;
+
+{ ------------------------------------------------------------------ }
+{  Nested type declarations — GH #175 Stage 3 (semantic)               }
+{ ------------------------------------------------------------------ }
+
+procedure TClassTests.TestSemantic_ClassNestedType_QualifiedVarDecl_OK;
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TInner = record
+            F: Integer;
+          end;
+      end;
+    var v: TOuter.TInner;
+    begin
+      v.F := 1
+    end.
+    ''');
+  Prog.Free();
+end;
+
+procedure TClassTests.TestSemantic_ClassNestedType_AsOwnFieldType_OK;
+var
+  Prog: TProgram;
+begin
+  { Ordering proof: the nested type must be registered BEFORE the enclosing
+    type's own fields are resolved. }
+  Prog := AnalyseSrc(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TInner = record
+            F: Integer;
+          end;
+        Data: TInner;
+      end;
+    begin end.
+    ''');
+  Prog.Free();
+end;
+
+procedure TClassTests.TestSemantic_ClassNestedType_ReferencesEnclosingClass_OK;
+var
+  Prog: TProgram;
+begin
+  { The enclosing class's (empty) descriptor exists from pass 1, so a nested
+    type may hold a reference back to it.
+
+    The back-reference is USED from the program body, not merely declared.
+    Before the nested body was analysed at all, a field naming a type that
+    exists nowhere (Owner: TNoSuchClass) also compiled clean — so a
+    declaration on its own proves nothing. }
+  Prog := AnalyseSrc(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TInner = record
+            Owner: TOuter;
+          end;
+      end;
+    var v: TOuter.TInner;
+    begin
+      v.Owner := nil
+    end.
+    ''');
+  Prog.Free();
+end;
+
+procedure TClassTests.TestSemantic_ClassNestedType_UnknownFieldType_Rejected;
+begin
+  { The negative half of ReferencesEnclosingClass_OK: a nested record's own
+    fields must actually be resolved.  While NestedTypeDecls was write-only
+    this compiled clean, which is what made the positive test vacuous. }
+  AnalyseExpectError(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TInner = record
+            Owner: TNoSuchClass;
+          end;
+      end;
+    begin end.
+    ''');
+end;
+
+procedure TClassTests.TestSemantic_ClassNestedType_MutualReference_OK;
+var
+  Prog: TProgram;
+begin
+  { A nested type naming a SIBLING declared after it — the nested set needs
+    its own two-phase (declare-all-then-resolve) treatment.
+
+    Deliberately a DIRECT field, not `Link: ^TB`.  A pointer field takes the
+    caret branch of FindTypeOrInstantiate, which returns nil with NO error on
+    an unresolvable base — so the pointer form passes even when sibling
+    resolution is entirely broken, and cannot serve as a guard.  A direct
+    field resolves through the checked path and reports
+    "Unknown type ... for field". }
+  Prog := AnalyseSrc(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TA = record
+            Link: TB;
+          end;
+          TB = record
+            Back: Integer;
+          end;
+      end;
+    var v: TOuter.TA;
+    begin
+      v.Link.Back := 7
+    end.
+    ''');
+  Prog.Free();
+end;
+
+procedure TClassTests.TestSemantic_ClassNestedType_SameNameInTwoClasses_OK;
+var
+  Prog: TProgram;
+begin
+  { THE headline test: the enclosing type is a NAMESPACE.  Two classes in one
+    unit may each declare a nested type of the same name; they are distinct
+    types keyed TA.TInner and TB.TInner. }
+  Prog := AnalyseSrc(
+    '''
+    program P;
+    type
+      TA = class
+        type
+          TInner = record
+            X: Integer;
+          end;
+      end;
+      TB = class
+        type
+          TInner = record
+            Y: Integer;
+          end;
+      end;
+    var a: TA.TInner; b: TB.TInner;
+    begin
+      a.X := 1;
+      b.Y := 2
+    end.
+    ''');
+  Prog.Free();
+end;
+
+procedure TClassTests.TestSemantic_ClassNestedType_BareFromOwnMethod_OK;
+var
+  Prog: TProgram;
+begin
+  { Unqualified inside the declaring type's own method — resolved through the
+    owner-scope walk, not a bare global registration. }
+  Prog := AnalyseSrc(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TInner = record
+            F: Integer;
+          end;
+        procedure Go;
+      end;
+    procedure TOuter.Go;
+    var v: TInner;
+    begin
+      v.F := 1
+    end;
+    begin end.
+    ''');
+  Prog.Free();
+end;
+
+procedure TClassTests.TestSemantic_ClassNestedType_BareFromDescendantMethod_OK;
+var
+  Prog: TProgram;
+begin
+  { A descendant's methods see an inherited nested type unqualified — the same
+    reachability rule inherited fields follow (ancestor walk). }
+  Prog := AnalyseSrc(
+    '''
+    program P;
+    type
+      TBase = class
+        type
+          TInner = record
+            F: Integer;
+          end;
+      end;
+      TKid = class(TBase)
+        procedure Go;
+      end;
+    procedure TKid.Go;
+    var v: TInner;
+    begin
+      v.F := 1
+    end;
+    begin end.
+    ''');
+  Prog.Free();
+end;
+
+procedure TClassTests.TestSemantic_ClassNestedType_BareFromProgramBody_Rejected;
+begin
+  { The bare member name must NOT leak into global scope.
+
+    The qualified declaration sits alongside the bare one deliberately: on
+    its own, this test cannot tell "the bare name is correctly hidden" from
+    "nothing was registered at all" — which is exactly why it passed before
+    any of Stage 3 existed.  Requiring TOuter.TInner to resolve in the same
+    program makes it a real namespace assertion. }
+  AnalyseExpectError(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TInner = record
+            F: Integer;
+          end;
+      end;
+    var ok: TOuter.TInner;
+    var bad: TInner;
+    begin end.
+    ''');
+end;
+
+procedure TClassTests.TestSemantic_ClassNestedSubrange_AsCtorParam_OK;
+var
+  Prog: TProgram;
+begin
+  { GH #175's reporter's own program.  The nested type names the constructor's
+    parameter type — so the bare name must resolve while the class's own
+    method signatures are being analysed, not only inside method bodies. }
+  Prog := AnalyseSrc(
+    '''
+    program P;
+    type
+      TCl = class
+        type
+          TParm = 1..5;
+      public
+        constructor Create(AParam: TParm);
+      end;
+    constructor TCl.Create(AParam: TParm);
+    begin end;
+    var C: TCl;
+    begin
+      C := TCl.Create(3)
+    end.
+    ''');
+  Prog.Free();
+end;
+
+procedure TClassTests.TestSemantic_NestedInsideNested_Rejected;
+begin
+  { Deferred in v1: the dotted-name splitter takes the LAST dot, so a
+    three-part name cannot resolve.  Reject explicitly rather than silently
+    dropping the innermost type. }
+  AnalyseExpectError(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TMid = record
+            type
+              TInner = record
+                F: Integer;
+              end;
+          end;
+      end;
+    begin end.
+    ''');
+end;
+
+procedure TClassTests.TestSemantic_NestedTypeInGenericClass_Rejected;
+begin
+  { Deferred in v1: the three InstantiateGeneric* paths hand-roll field
+    cloning and know nothing of NestedTypeDecls, so a nested type inside a
+    generic template would be silently dropped at instantiation. }
+  AnalyseExpectError(
+    '''
+    program P;
+    type
+      TBox<T> = class
+        type
+          TInner = record
+            F: Integer;
+          end;
+        Value: T;
+      end;
     begin end.
     ''');
 end;

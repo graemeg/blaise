@@ -107,6 +107,16 @@ type
                                                visibility checks so a strict-private
                                                member is reachable from its own
                                                type's static methods too. }
+    FNestedTypeOwner:      TRecordTypeDesc;  { type whose BODY AnalyseTypeDecls
+                                               pass 2 is currently walking.
+                                               Neither FCurrentClass nor
+                                               FCurrentMethodOwner is set there
+                                               (no method body is being analysed
+                                               yet), so this is what lets a
+                                               nested type be named bare as an
+                                               own-field type or a method
+                                               signature's type — GH #175
+                                               Stage 3.  Saved/restored per TD. }
     { Type-parameter names in scope while analysing an instantiated generic
       body (T, K, V, ...).  These are registered as skType aliases (T=Integer)
       so the body resolves, but they are NOT user-declared types, so a local
@@ -843,6 +853,25 @@ type
     function LookupMemberConst(AFromClass: TRecordTypeDesc;
                                const AName: string): TSymbol;
 
+    { The skType twin of LookupMemberConst: resolve a bare nested-type name
+      against the enclosing type and its ancestors.  A nested type is
+      registered under its QUALIFIED name only (TOuter.TInner), so the
+      enclosing type is a namespace and the bare name never reaches global
+      scope — this is what makes the unqualified spelling work from inside
+      the declaring type's own methods and a descendant's, and nowhere else.
+      Returns nil when there is no current type, which is what keeps the
+      bare name rejected at program scope (GH #175 Stage 3). }
+    function LookupMemberType(AFromClass: TRecordTypeDesc;
+                              const AName: string): TSymbol;
+
+    { Register a type's nested `type` section under QUALIFIED names
+      (TOuter.TInner), so the enclosing type acts as a namespace.  Runs
+      before the enclosing type's own fields and method signatures resolve,
+      because those may name a nested type.  Two phases, so nested siblings
+      may reference each other in either order.  GH #175 Stage 3. }
+    procedure RegisterNestedTypes(ATypeDecl: TTypeDecl;
+                                  const AOwnerName: string);
+
     { Core visibility predicate.  Single source of truth applied by both
       the unqualified uses-chain probe and the qualified member-access
       asserts.  ADeclaringUnit / ADeclaringType identify where the member
@@ -1031,7 +1060,25 @@ end;
 procedure TSemanticAnalyser.CheckedRegisterGeneric(ATD: TTypeDecl);
 var
   CurUnit, PrevUnit: string;
+  HasNested: Boolean;
 begin
+  { Deferred in v1: the three InstantiateGeneric* paths hand-roll their field
+    and method cloning and know nothing of NestedTypeDecls, so a nested type
+    inside a template would be silently DROPPED at instantiation.  Reject at
+    DECLARATION rather than at instantiation, so a template that is never
+    instantiated is still diagnosed, and the error lands on the declaration
+    (GH #175 Stage 3). }
+  HasNested := False;
+  if (ATD.Def is TGenericTypeDef) and
+     (TGenericTypeDef(ATD.Def).ClassDef <> nil) then
+    HasNested := TGenericTypeDef(ATD.Def).ClassDef.NestedTypeDecls.Count > 0
+  else if (ATD.Def is TGenericRecordDef) and
+          (TGenericRecordDef(ATD.Def).RecordDef <> nil) then
+    HasNested := TGenericRecordDef(ATD.Def).RecordDef.NestedTypeDecls.Count > 0;
+  if HasNested then
+    SemanticError(
+      Format('A generic type may not declare a nested type (''%s'')',
+        [ATD.Name]), ATD.Line, ATD.Col);
   if FCurrentUnitName <> '' then
     CurUnit := FCurrentUnitName
   else
@@ -2999,6 +3046,37 @@ begin
   end;
 end;
 
+function TSemanticAnalyser.LookupMemberType(AFromClass: TRecordTypeDesc;
+                                            const AName: string): TSymbol;
+var
+  RT: TRecordTypeDesc;
+begin
+  Result := nil;
+  { A dotted name is already qualified — it resolves through the ordinary
+    table lookup, and retrying it here would re-introduce the bare-tail
+    binding a2fbcb32 removed. }
+  if StrPos('.', AName) >= 0 then Exit;
+  { Inside a STATIC method FCurrentClass is nil, so fall back to the
+    method's declaring type — the same allowance LookupMemberConst makes. }
+  RT := AFromClass;
+  if RT = nil then
+    RT := FCurrentMethodOwner;
+  { And while the enclosing type's OWN body is being analysed (its fields,
+    its method signatures) neither is set yet — FNestedTypeOwner names the
+    type whose body pass 2 is walking.  That is what lets a nested type be
+    used as an own-field type or a ctor parameter type. }
+  if RT = nil then
+    RT := FNestedTypeOwner;
+  while RT <> nil do
+  begin
+    Result := FTable.Lookup(RT.Name + '.' + AName);
+    if (Result <> nil) and (Result.Kind = skType) then
+      Exit;
+    Result := nil;
+    RT := RT.Parent;
+  end;
+end;
+
 procedure TSemanticAnalyser.AssertStaticVarVisible(AVisibility: TMemberVisibility;
                                                    const ADeclaringUnit, ADeclaringType: string;
                                                    const AMemberName: string;
@@ -3031,6 +3109,7 @@ var
   Grp:      TObjectList;
   ImplSig:  string;
   Par:      TMethodParam;
+  OwnerSym: TSymbol;
 begin
   for I := 0 to ABlock.ProcDecls.Count - 1 do
   begin
@@ -3062,11 +3141,24 @@ begin
       Continue;
     end;
 
-    { Resolve impl param types so we can compute its signature for matching. }
-    for J := 0 to Decl.Params.Count - 1 do
-    begin
-      Par              := TMethodParam(Decl.Params.Items[J]);
-      Par.ResolvedType := ResolveParamType(Par, Decl.Line, Decl.Col);
+    { Resolve impl param types so we can compute its signature for matching.
+      An out-of-line signature may name one of the owner's NESTED types bare
+      (constructor TCl.Create(AParam: TParm)), exactly as the in-class
+      declaration does — so point FNestedTypeOwner at the owner for the
+      duration, the same window AnalyseTypeDecls opens for the in-class form
+      (GH #175 Stage 3). }
+    OwnerSym := FTable.Lookup(Decl.OwnerTypeName);
+    if (OwnerSym <> nil) and (OwnerSym.Kind = skType) and
+       (OwnerSym.TypeDesc is TRecordTypeDesc) then
+      FNestedTypeOwner := TRecordTypeDesc(OwnerSym.TypeDesc);
+    try
+      for J := 0 to Decl.Params.Count - 1 do
+      begin
+        Par              := TMethodParam(Decl.Params.Items[J]);
+        Par.ResolvedType := ResolveParamType(Par, Decl.Line, Decl.Col);
+      end;
+    finally
+      FNestedTypeOwner := nil;
     end;
     ImplSig := MangleParamSig(Decl);
 
@@ -3686,6 +3778,16 @@ begin
   end;
   Result := FTable.FindType(AName);
   if Result <> nil then Exit;
+  { A bare nested-type name, reached from inside the enclosing type (its own
+    body, its methods, or a descendant's).  Registered qualified-only, so the
+    flat lookup above cannot see it; nil when there is no enclosing type,
+    which keeps the bare name rejected at program scope (GH #175 Stage 3).
+    This must live HERE rather than in AnalyseVarDecls, because the same bare
+    spelling has to serve parameter types (ResolveParamType) and return types
+    as well as local var declarations. }
+  Sym := LookupMemberType(FCurrentClass, AName);
+  if (Sym <> nil) and (Sym.TypeDesc <> nil) then
+    Exit(Sym.TypeDesc);
   { Dynamic array: 'array of TypeName' — create on demand.  Key cache by
     the canonical element-type name so 'array of T' under T=String and
     T=TObject do not collide. }
@@ -6515,6 +6617,138 @@ begin
       Exit(TMethodDecl(AMethods.Items[I]).Name);
 end;
 
+procedure TSemanticAnalyser.RegisterNestedTypes(ATypeDecl: TTypeDecl;
+                                                const AOwnerName: string);
+var
+  NestedList: TObjectList;
+  ND:         TTypeDecl;
+  NRec:       TRecordTypeDef;
+  RT:         TRecordTypeDesc;
+  AliasDef:   TTypeAliasDef;
+  AliasDesc:  TTypeDesc;
+  BaseSym:    TSymbol;
+  Sym:        TSymbol;
+  FDecl:      TFieldDecl;
+  FldType:    TTypeDesc;
+  QName:      string;
+  I, J, K:    Integer;
+begin
+  { The two-branch selector is deliberate: gating this on TClassTypeDef alone
+    is the Stage 0 bug, which left record consts never registered at all. }
+  NestedList := nil;
+  if ATypeDecl.Def is TClassTypeDef then
+    NestedList := TClassTypeDef(ATypeDecl.Def).NestedTypeDecls
+  else if ATypeDecl.Def is TRecordTypeDef then
+    NestedList := TRecordTypeDef(ATypeDecl.Def).NestedTypeDecls;
+  if (NestedList = nil) or (NestedList.Count = 0) then Exit;
+
+  { Phase A — define every nested name first, so siblings may reference one
+    another in either declaration order. }
+  for I := 0 to NestedList.Count - 1 do
+  begin
+    ND    := TTypeDecl(NestedList.Items[I]);
+    QName := AOwnerName + '.' + ND.Name;
+
+    { Deferred in v1: the dotted-name splitter takes the LAST dot, so a
+      three-part name (TOuter.TMid.TInner) cannot resolve.  Reject rather
+      than register a type that nothing can name. }
+    if ((ND.Def is TRecordTypeDef) and
+        (TRecordTypeDef(ND.Def).NestedTypeDecls.Count > 0)) or
+       ((ND.Def is TClassTypeDef) and
+        (TClassTypeDef(ND.Def).NestedTypeDecls.Count > 0)) then
+    begin
+      SemanticError(
+        Format('A nested type may not itself declare a nested type ' +
+               '(''%s'' inside ''%s'')', [ND.Name, AOwnerName]),
+        ND.Line, ND.Col);
+      Continue;
+    end;
+
+    AliasDesc := nil;
+    if ND.Def is TRecordTypeDef then
+      AliasDesc := FTable.NewRecordType(QName)
+    else if ND.Def is TTypeAliasDef then
+    begin
+      AliasDef := TTypeAliasDef(ND.Def);
+      if AliasDef.IsSubrange and (AliasDef.SubrangeLowName = '') then
+      begin
+        { Named integer subrange (TParm = 1..5) — a DISTINCT descriptor
+          copying the base int's Kind but carrying the bounds, exactly as
+          the top-level arm builds one.  This is GH #175's reported use
+          case: a nested subrange constraining a ctor parameter. }
+        BaseSym := FTable.Lookup(AliasDef.TypeName);
+        if (BaseSym = nil) or (BaseSym.Kind <> skType) or
+           (BaseSym.TypeDesc = nil) then
+        begin
+          SemanticError(
+            Format('Unknown base type ''%s'' for subrange',
+              [AliasDef.TypeName]), ND.Line, ND.Col);
+          Continue;
+        end;
+        AliasDesc := FTable.NewSubrangeType(QName, BaseSym.TypeDesc,
+                       AliasDef.SubrangeLow, AliasDef.SubrangeHigh);
+      end
+      else
+      begin
+        BaseSym := FTable.Lookup(AliasDef.TypeName);
+        if (BaseSym <> nil) and (BaseSym.Kind = skType) then
+          AliasDesc := BaseSym.TypeDesc
+        else
+          AliasDesc := FindTypeOrInstantiate(AliasDef.TypeName);
+        if AliasDesc = nil then
+        begin
+          SemanticError(
+            Format('Unknown type ''%s'' in nested type alias',
+              [AliasDef.TypeName]), ND.Line, ND.Col);
+          Continue;
+        end;
+      end;
+    end
+    else
+    begin
+      SemanticError(
+        'Only record and type-alias definitions are supported as nested types',
+        ND.Line, ND.Col);
+      Continue;
+    end;
+
+    { Qualified name only — the bare name is deliberately NOT defined, so the
+      enclosing type is a namespace.  LookupMemberType reaches the bare
+      spelling from inside the type's own body, its methods and a
+      descendant's; nothing else can see it. }
+    Sym := TSymbol.Create(QName, skType, AliasDesc);
+    Sym.Visibility := ND.Visibility;
+    Sym.OwnerTypeName := AOwnerName;
+    Sym.OwningUnit := FCurrentUnitName;
+    if not FTable.Define(Sym) then
+      Sym.Free();
+    ND.ResolvedDesc := AliasDesc;
+  end;
+
+  { Phase B — resolve each nested record's own fields, now that every
+    sibling name is defined. }
+  for I := 0 to NestedList.Count - 1 do
+  begin
+    ND := TTypeDecl(NestedList.Items[I]);
+    if not (ND.Def is TRecordTypeDef) then Continue;
+    if ND.ResolvedDesc = nil then Continue;
+    NRec := TRecordTypeDef(ND.Def);
+    RT   := TRecordTypeDesc(ND.ResolvedDesc);
+    for J := 0 to NRec.Fields.Count - 1 do
+    begin
+      FDecl   := TFieldDecl(NRec.Fields.Items[J]);
+      FldType := FindTypeOrInstantiate(FDecl.TypeName);
+      if FldType = nil then
+        SemanticError(
+          Format('Unknown type ''%s'' for field', [FDecl.TypeName]),
+          FDecl.Line, FDecl.Col);
+      FDecl.ResolvedType := FldType;
+      for K := 0 to FDecl.Names.Count - 1 do
+        RT.AddField(FDecl.Names.Strings[K], FldType);
+    end;
+  end;
+end;
+
 procedure TSemanticAnalyser.AnalyseTypeDecls(ABlock: TBlock);
 var
   I, J, K:    Integer;
@@ -6998,6 +7232,14 @@ begin
 
     Sym := FTable.Lookup(TD.Name);
     RT  := TRecordTypeDesc(Sym.TypeDesc);
+
+    { Nested types, before ANYTHING in the enclosing body resolves: its own
+      fields (below) and its method signatures may both name one.  Setting
+      FNestedTypeOwner here is what lets those name it BARE — no method body
+      is being analysed yet, so FCurrentClass/FCurrentMethodOwner are nil.
+      Restored at the end of this type's pass-2 work (GH #175 Stage 3). }
+    FNestedTypeOwner := RT;
+    RegisterNestedTypes(TD, TD.Name);
 
     if TD.Def is TRecordTypeDef then
     begin
@@ -7625,6 +7867,10 @@ begin
           end;
         end;
       end;
+
+    { This type's body is done — a nested name must not stay reachable bare
+      while the NEXT type in the block is analysed (GH #175 Stage 3). }
+    FNestedTypeOwner := nil;
   end;
 
   { Pass 3 — resolve forward-referenced pointer aliases.
