@@ -60,6 +60,11 @@ type
     procedure TestSemantic_ClassFieldAssign_TypeMismatch_RaisesError;
     procedure TestSemantic_ClassFieldAccess_TypeIsFieldType;
     procedure TestSemantic_ClassFieldAccess_UnknownField_RaisesError;
+    { A type-qualified name must be checked against its QUALIFIER, not merely
+      resolved by its tail.  BUG-20260921-qualified-type-binds-unrelated-tail:
+      `TOuter.TInner` where TOuter declares no TInner silently bound an
+      unrelated top-level TInner — across unit boundaries — and ran with it. }
+    procedure TestSemantic_QualifiedType_UnknownMember_DoesNotBindTail;
 
     { ------------------------------------------------------------------ }
     { Code generation                                                      }
@@ -753,6 +758,30 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TClassTests.TestSemantic_QualifiedType_UnknownMember_DoesNotBindTail;
+begin
+  { TOuter declares no TInner, so TOuter.TInner names nothing and must be
+    rejected.  Before the fix this compiled AND RAN, bound to the unrelated
+    top-level TInner, because every tail-stripper on the resolution path
+    (ResolveQualified's flat fallback, TSymbolTable.FindType, and
+    FindTypeOrInstantiate's trailing dotted retry) resolved by the final
+    component alone.  A unit qualifier is informational by design; a TYPE
+    qualifier is authoritative. }
+  AnalyseExpectError(
+    '''
+    program P;
+    type
+      TInner = record
+        Global: Integer;
+      end;
+      TOuter = class
+        F: Integer;
+      end;
+    var v: TOuter.TInner;
+    begin end.
+    ''');
 end;
 
 procedure TClassTests.TestSemantic_ClassFieldAccess_UnknownField_RaisesError;

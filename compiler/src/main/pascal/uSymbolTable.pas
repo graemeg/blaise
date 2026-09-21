@@ -710,6 +710,10 @@ type
     property InCodegen: Boolean read FInCodegen write FInCodegen;
 
     { Type lookup — case-insensitive, returns nil if not found }
+    { True when a dotted name's qualifier names a TYPE, not a unit — see the
+      implementation comment.  Public because uSemantic asks the same question
+      on the other half of the qualified-resolution path. }
+    function QualifierNamesAType(const AName: string): Boolean;
     function FindType(const AName: string): TTypeDesc;
 
     { Creates a new TRecordTypeDesc, registers it in FAllTypes, and returns it.
@@ -2398,6 +2402,26 @@ begin
     Result := Copy(AName, LastDot + 1, MaxInt);
 end;
 
+{ True when the part of AName before its LAST dot names a TYPE rather than a
+  unit — i.e. the qualifier is authoritative and the tail-only fallback in
+  FindType must not run.  Mirrors UnitQualifierTail's split exactly (last dot,
+  identifier bytes only) so the two never disagree about where the name
+  divides. }
+function TSymbolTable.QualifierNamesAType(const AName: string): Boolean;
+var
+  I, LastDot: Integer;
+  Sym: TSymbol;
+begin
+  Result  := False;
+  LastDot := -1;
+  for I := 0 to Length(AName) - 1 do
+    if StrAt(AName, I) = Ord('.') then
+      LastDot := I;
+  if LastDot <= 0 then Exit;
+  Sym := Lookup(Copy(AName, 0, LastDot));
+  Result := (Sym <> nil) and (Sym.Kind = skType);
+end;
+
 function TSymbolTable.FindType(const AName: string): TTypeDesc;
 var
   Sym:  TSymbol;
@@ -2407,9 +2431,16 @@ begin
   if (Sym <> nil) and (Sym.Kind = skType) then
     Exit(Sym.TypeDesc);
   { Qualified type name 'UnitName.TypeName' — resolve by the final dotted
-    component through the same uses chain (the qualifier names a used unit). }
+    component through the same uses chain (the qualifier names a used unit).
+
+    Only when the qualifier really is a UNIT, though.  A qualifier that names
+    a TYPE is authoritative — `TOuter.TInner` means the TInner declared inside
+    TOuter and nothing else — so the tail fallback must not run, or it binds
+    whatever unrelated symbol shares the final component
+    (BUG-20260921-qualified-type-binds-unrelated-tail; the same guard exists
+    in uSemantic.ResolveQualified, which is the other half of this path). }
   Tail := UnitQualifierTail(AName);
-  if Tail <> '' then
+  if (Tail <> '') and not QualifierNamesAType(AName) then
   begin
     Sym := Lookup(Tail);
     if (Sym <> nil) and (Sym.Kind = skType) then

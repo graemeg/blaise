@@ -2741,6 +2741,8 @@ end;
 
 function TSemanticAnalyser.ResolveQualified(const AUnit,
                                             AName: string): TSymbol;
+var
+  Sym: TSymbol;
 begin
   Result := nil;
   if (AUnit = '') or (FTable = nil) then Exit;
@@ -2750,6 +2752,27 @@ begin
        collision winner is evicted from the flat table but kept here). }
   Result := FindUnitSymbol(AUnit, AName);
   if Result <> nil then Exit;
+
+  { 1b. The fallback below resolves by the TAIL name alone, which is only
+        sound when AUnit names a UNIT — the qualifier is informational there
+        by design (see language-rationale.adoc, "Qualified Type Names").  When
+        AUnit names a TYPE the qualifier is AUTHORITATIVE: the member must be
+        found in that type's own scope, and falling back to a bare-tail lookup
+        would bind whatever unrelated symbol happens to share the final
+        component.  That is not hypothetical — before this guard,
+        `TOuter.TInner` where TOuter declares no TInner silently resolved to
+        an unrelated top-level TInner, across unit boundaries, and ran with it
+        (BUG-20260921-qualified-type-binds-unrelated-tail).  With nested types
+        registered under `TOuter.TInner` it would also short-circuit PAST the
+        correct nested type, turning "accepts invalid code" into "miscompiles
+        valid code".
+        FindUnitIface is deliberately NOT used to make this decision: the
+        per-unit iface list is filled only by the driver (Blaise.pas), never
+        by the in-process test harness — see the note in step 2 — so it
+        reports nil for genuine units here and would break real unit-qualified
+        resolution. Asking whether AUnit is a TYPE is the narrow question. }
+  Sym := FTable.Lookup(AUnit);
+  if (Sym <> nil) and (Sym.Kind = skType) then Exit;
 
   { 2. Flat-table fallback: covers paths/harnesses that populate the flat
        global but not the per-unit cache (the cache is only filled by the
@@ -3919,6 +3942,17 @@ begin
                             StrCopyTail(AName, DotPos + 1));
     if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) then
       Exit(Sym.TypeDesc);
+    { Bare-tail fallback — sound only when the qualifier names a UNIT, where
+      it is informational by design.  A qualifier naming a TYPE is
+      authoritative: `TOuter.TInner` means the TInner declared inside TOuter,
+      so falling back to the bare tail would bind an unrelated same-named
+      type (BUG-20260921-qualified-type-binds-unrelated-tail).  This is the
+      LAST of four tail-strippers on this path — the other three are
+      ResolveQualified step 2, TSymbolTable.FindType, and the dotted
+      short-circuit at the head of this function; a guard on any three of
+      them is invisible, because this one still resolves the name. }
+    if FTable.QualifierNamesAType(AName) then
+      Exit(nil);
     Result := FindTypeOrInstantiate(StrCopyTail(AName, DotPos + 1));
     Exit;
   end;
