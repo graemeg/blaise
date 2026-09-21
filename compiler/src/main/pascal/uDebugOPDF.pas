@@ -1239,10 +1239,11 @@ end;
 
 procedure TOPDFEmitter.EmitTypesFromBlock(ABlock: TBlock);
 var
-  I: Integer;
+  I, J: Integer;
   TD: TTypeDecl;
   TDesc: TTypeDesc;
   ST: TSymbolTable;
+  NestedList: TObjectList;
 begin
   ST := Self.ActiveSymTable();
   if ST = nil then Exit;
@@ -1252,6 +1253,24 @@ begin
     TDesc := ST.FindType(TD.Name);
     if TDesc <> nil then
       EmitTypeDesc(TDesc);
+    { A nested `type` section is not in ABlock.TypeDecls — it hangs off the
+      enclosing class/record def.  Without this the debugger has no layout
+      for TOuter.TInner, so a variable of that type is uninspectable
+      (GH #175 Stage 3).  The descriptor is in the table under the QUALIFIED
+      name, which is what the semantic pass registered. }
+    NestedList := nil;
+    if TD.Def is TClassTypeDef then
+      NestedList := TClassTypeDef(TD.Def).NestedTypeDecls
+    else if TD.Def is TRecordTypeDef then
+      NestedList := TRecordTypeDef(TD.Def).NestedTypeDecls;
+    if NestedList <> nil then
+      for J := 0 to NestedList.Count - 1 do
+      begin
+        TDesc := ST.FindType(
+          TD.Name + '.' + TTypeDecl(NestedList.Items[J]).Name);
+        if TDesc <> nil then
+          EmitTypeDesc(TDesc);
+      end;
   end;
 end;
 
