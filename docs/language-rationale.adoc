@@ -6472,3 +6472,85 @@ through one shared function so the two sides cannot drift apart.
 Full design, including the prior-art survey (Go, Rust, Zig, Swift, C#) and why
 Swift's runtime-bundle model does not fit a freestanding single-file binary:
 `docs/embedded-resources-design.adoc`.
+
+== Nested Types — a Type as a Namespace
+
+=== Decision
+
+A `type` section may appear inside a class or record body.  The declarations
+it holds are registered under a *qualified name only* — `TOuter.TInner` — so
+the enclosing type acts as a namespace:
+
+[source,pascal]
+----
+type
+  TCfg = class
+    type
+      TEntry = record Key: Integer; end;
+      TLevel = 1..9;
+  public
+    Data: TEntry;                        // bare, from inside the type
+    constructor Create(ALevel: TLevel);  // bare, in a method signature
+  end;
+
+var
+  e: TCfg.TEntry;   // qualified, from outside
+  bad: TEntry;      // ERROR — the bare name does not leak
+----
+
+The bare spelling resolves from exactly three places: the declaring type's own
+body (its fields and its method signatures), its own method bodies, and a
+descendant's method bodies.  Everywhere else the name is invisible and only
+the qualified form resolves.
+
+Classes and records only.  *Interfaces are deliberately excluded* — neither
+FPC nor Delphi allows a nested type in an interface body, and
+`TInterfaceTypeDef` carries no const or visibility machinery to extend.
+
+A nested type obeys the visibility section it is declared in, exactly as a
+field or a const does.
+
+=== Rationale
+
+FPC semantics were chosen over inventing something cleaner, because the
+feature exists to accept code people already write — GH #175 reported the
+parse failure against a working FPC program.
+
+Qualified-only registration is the whole point of the feature.  A nested type
+is a *scoping* construct: its value is that `TCfg.TEntry` and `TOther.TEntry`
+can coexist, and that an implementation-detail type need not pollute the unit
+namespace.  Registering the bare name globally as well would deliver the
+syntax while discarding the semantics, and would silently break any program
+that already has a top-level type of that name.
+
+This is the first construct in the language where a *type* qualifier selects a
+scope.  Until GH #175 a dotted type name discarded its qualifier and resolved
+the final component alone — see "Qualified Type Names".  That fallback had to
+be removed first (a qualifier naming a type is now authoritative, one naming a
+unit remains informational), otherwise `TOuter.TInner` would bind to an
+unrelated top-level `TInner` whenever the nested lookup missed.
+
+=== Deliberate v1 boundaries
+
+Both are rejected with a diagnostic rather than silently mis-compiled:
+
+* *No nesting inside a nested type.*  `TOuter.TMid.TInner` cannot be resolved,
+  because the dotted-name splitter takes the last dot.  Supporting three-part
+  names needs a genuine scope walk, not a split.
+* *No nested type inside a generic.*  The three `InstantiateGeneric*` paths
+  hand-roll their member cloning and know nothing of the nested list, so a
+  nested type in a template would be dropped at instantiation.  The rejection
+  is raised at *declaration*, so a template that is never instantiated is
+  still diagnosed.
+
+=== Alternatives rejected
+
+* *Register the bare name globally too.*  Would make every test pass while
+  destroying the namespace property, and would collide with existing
+  top-level types.
+* *Reject nesting-in-nested in the parser.*  The grammar genuinely admits the
+  form; it is the resolver that cannot express it.  A semantic rejection keeps
+  the grammar honest and gives a better error site.
+* *Support only records, not subranges.*  The reported use case was a nested
+  subrange constraining a constructor parameter (`TParm = 1..5`), so a
+  record-only implementation would not have closed the issue.
