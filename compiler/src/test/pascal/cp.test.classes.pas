@@ -39,6 +39,15 @@ type
     procedure TestParse_ClassVar;
     procedure TestParse_ClassConstructorCall;
     procedure TestParse_ClassFieldAssignment;
+    { Nested type declarations (GH #175 Stage 1) — a `type` section inside a
+      class body.  The member loop had no tkType arm, so the whole form was a
+      parse error ("Expected 'end' in class definition"). }
+    procedure TestParse_ClassNestedType_Record;
+    procedure TestParse_ClassNestedType_KeepsOuterMembers;
+    procedure TestParse_ClassNestedType_Multiple;
+    procedure TestParse_ClassNestedType_Enum;
+    procedure TestParse_ClassNestedType_TakesSectionVisibility;
+    procedure TestParse_ClassNestedType_DefaultVisibilityIsPublic;
 
     { ------------------------------------------------------------------ }
     { Semantic                                                             }
@@ -267,6 +276,207 @@ begin
     Fld := TFieldDecl(CD.Fields[0]);
     AssertEquals('Field name', 'X', Fld.Names[0]);
     AssertEquals('Field type', 'Integer', Fld.TypeName);
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ ------------------------------------------------------------------ }
+{  Nested type declarations — GH #175 Stage 1 (parser)                 }
+{ ------------------------------------------------------------------ }
+
+procedure TClassTests.TestParse_ClassNestedType_Record;
+var
+  Prog: TProgram;
+  CD:   TClassTypeDef;
+  NTD:  TTypeDecl;
+begin
+  Prog := ParseSrc(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TInner = record
+            F: Integer;
+          end;
+      end;
+    begin end.
+    ''');
+  try
+    CD := TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls[0]).Def);
+    AssertEquals('1 nested type', 1, CD.NestedTypeDecls.Count);
+    NTD := TTypeDecl(CD.NestedTypeDecls[0]);
+    AssertEquals('nested type name', 'TInner', NTD.Name);
+    AssertTrue('nested def is a record', NTD.Def is TRecordTypeDef);
+    AssertEquals('nested record has 1 field', 1,
+      TRecordTypeDef(NTD.Def).Fields.Count);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TClassTests.TestParse_ClassNestedType_KeepsOuterMembers;
+var
+  Prog: TProgram;
+  CD:   TClassTypeDef;
+begin
+  { The nested section must not swallow the members that follow it — the
+    member loop has to resume normally after the nested type's `end;`. }
+  Prog := ParseSrc(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TInner = record
+            F: Integer;
+          end;
+        FCount: Integer;
+        procedure Go;
+      end;
+    begin end.
+    ''');
+  try
+    CD := TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls[0]).Def);
+    AssertEquals('1 nested type', 1, CD.NestedTypeDecls.Count);
+    AssertEquals('outer field survived', 1, CD.Fields.Count);
+    AssertEquals('outer field name', 'FCount',
+      TFieldDecl(CD.Fields[0]).Names[0]);
+    AssertEquals('outer method survived', 1, CD.Methods.Count);
+    AssertEquals('outer method name', 'Go',
+      TMethodDecl(CD.Methods[0]).Name);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TClassTests.TestParse_ClassNestedType_Multiple;
+var
+  Prog: TProgram;
+  CD:   TClassTypeDef;
+begin
+  { One `type` section may declare several types, and a class body may carry
+    more than one such section. }
+  Prog := ParseSrc(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TA = record
+            X: Integer;
+          end;
+          TB = record
+            Y: Integer;
+          end;
+        FMid: Integer;
+        type
+          TC = record
+            Z: Integer;
+          end;
+      end;
+    begin end.
+    ''');
+  try
+    CD := TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls[0]).Def);
+    AssertEquals('3 nested types', 3, CD.NestedTypeDecls.Count);
+    AssertEquals('first', 'TA', TTypeDecl(CD.NestedTypeDecls[0]).Name);
+    AssertEquals('second', 'TB', TTypeDecl(CD.NestedTypeDecls[1]).Name);
+    AssertEquals('third', 'TC', TTypeDecl(CD.NestedTypeDecls[2]).Name);
+    AssertEquals('field between sections survived', 1, CD.Fields.Count);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TClassTests.TestParse_ClassNestedType_Enum;
+var
+  Prog: TProgram;
+  CD:   TClassTypeDef;
+  NTD:  TTypeDecl;
+begin
+  { A nested type is any type form, not only a record. }
+  Prog := ParseSrc(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TMode = (mIdle, mBusy);
+      end;
+    begin end.
+    ''');
+  try
+    CD := TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls[0]).Def);
+    AssertEquals('1 nested type', 1, CD.NestedTypeDecls.Count);
+    NTD := TTypeDecl(CD.NestedTypeDecls[0]);
+    AssertEquals('nested type name', 'TMode', NTD.Name);
+    AssertTrue('nested def is an enum', NTD.Def is TEnumTypeDef);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TClassTests.TestParse_ClassNestedType_TakesSectionVisibility;
+var
+  Prog: TProgram;
+  CD:   TClassTypeDef;
+begin
+  { A nested type obeys the visibility section it sits in, exactly as a field
+    or a const does.  The parser must stamp it, or semantic cannot enforce it
+    (the same gap that left const visibility unenforced until Stage 0). }
+  Prog := ParseSrc(
+    '''
+    program P;
+    type
+      TOuter = class
+      strict private
+        type
+          THidden = record
+            F: Integer;
+          end;
+      public
+        type
+          TShown = record
+            G: Integer;
+          end;
+      end;
+    begin end.
+    ''');
+  try
+    CD := TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls[0]).Def);
+    AssertEquals('2 nested types', 2, CD.NestedTypeDecls.Count);
+    AssertTrue('THidden is strict private',
+      TTypeDecl(CD.NestedTypeDecls[0]).Visibility = mvStrictPrivate);
+    AssertTrue('TShown is public',
+      TTypeDecl(CD.NestedTypeDecls[1]).Visibility = mvPublic);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TClassTests.TestParse_ClassNestedType_DefaultVisibilityIsPublic;
+var
+  Prog: TProgram;
+  CD:   TClassTypeDef;
+begin
+  Prog := ParseSrc(
+    '''
+    program P;
+    type
+      TOuter = class
+        type
+          TInner = record
+            F: Integer;
+          end;
+      end;
+    begin end.
+    ''');
+  try
+    CD := TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls[0]).Def);
+    AssertTrue('default section is public',
+      TTypeDecl(CD.NestedTypeDecls[0]).Visibility = mvPublic);
   finally
     Prog.Free();
   end;

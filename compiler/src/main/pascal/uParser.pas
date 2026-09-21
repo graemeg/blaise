@@ -100,6 +100,20 @@ type
     function  ParseAsmBody: TBlock;
     procedure ParseTypeSection(ABlock: TBlock);
     procedure ParseTypeDecl(ABlock: TBlock);
+    { Parse one type declaration into an arbitrary list.  ParseTypeDecl is the
+      TBlock-shaped wrapper; this is the form a nested `type` section inside a
+      class/record body uses, since it has no TBlock to write into (GH #175). }
+    procedure ParseTypeDeclInto(AList: TObjectList);
+    { Parse a `type` section inside a class or record body: the `type` keyword
+      followed by one or more type declarations, each appended to AList and
+      stamped with AVis.  Stops at the next member-section keyword or `end`. }
+    procedure ParseNestedTypeSection(AList: TObjectList;
+                                     AVis: TMemberVisibility);
+    { True when the CURRENT token begins a member-section qualifier —
+      private/protected/public/published, or `strict`/`static` acting as one.
+      These are contextual identifiers, so a nested `type` section must stop
+      on them rather than read them as the next type's name. }
+    function AtMemberSectionKeyword: Boolean;
     procedure ParseConstBlock(AList: TObjectList);
     { Stamp AVis onto every TConstDecl appended to AList from AFromIdx onward.
       ParseConstBlock appends without knowing the enclosing visibility section,
@@ -954,6 +968,65 @@ begin
 end;
 
 procedure TParser.ParseTypeDecl(ABlock: TBlock);
+begin
+  Self.ParseTypeDeclInto(ABlock.TypeDecls);
+end;
+
+function TParser.AtMemberSectionKeyword: Boolean;
+begin
+  Result := False;
+  if not Check(tkIdent) then Exit;
+  if SameText(FCurrent.Value, 'private') or
+     SameText(FCurrent.Value, 'protected') or
+     SameText(FCurrent.Value, 'public') or
+     SameText(FCurrent.Value, 'published') then
+    Exit(True);
+  { `strict` qualifies private/protected; `static` qualifies a var/const/
+     routine section.  Both are ordinary identifiers elsewhere, so each is a
+     section keyword only in front of the token that makes it one. }
+  if SameText(FCurrent.Value, 'strict') and (PeekKind() = tkIdent) and
+     (SameText(PeekValueAt(1), 'private') or
+      SameText(PeekValueAt(1), 'protected')) then
+    Exit(True);
+  if SameText(FCurrent.Value, 'static') and
+     (PeekKind() in [tkVar, tkConst, tkFunction, tkProcedure]) then
+    Exit(True);
+end;
+
+procedure TParser.ParseNestedTypeSection(AList: TObjectList;
+                                         AVis: TMemberVisibility);
+var
+  FromIdx: Integer;
+  I:       Integer;
+begin
+  Expect(tkType);
+  FromIdx := AList.Count;
+  { A nested section runs until the next member-section keyword, the next
+    non-type member, or the body's `end`.
+
+    Two guards are needed, and each catches a distinct failure:
+
+    * AtMemberSectionKeyword — the visibility keywords are contextual
+      IDENTIFIERS, so a following `public` would otherwise be read as the name
+      of the next type declaration.
+
+    * the `=` lookahead — a type declaration is `Name = ...`, whereas the next
+      member is typically a FIELD, `Name: Type`.  Both start with an
+      identifier, so without this the section swallows the first field and
+      fails with "Expected '=' but got ':'".  A generic nested type
+      (`TInner<T> = ...`) opens with '<' rather than '=', so that is accepted
+      too and the type parser reports anything genuinely malformed. }
+  while Check(tkIdent) and not AtMemberSectionKeyword() and
+        ((PeekKind() = tkEquals) or (PeekKind() = tkLessThan)) do
+    Self.ParseTypeDeclInto(AList);
+  { Stamp the enclosing section's visibility, as ParseRecordDef/ParseClassDef
+    already do for fields and consts.  Without this the keyword is discarded
+    at parse time and semantic cannot enforce it. }
+  for I := FromIdx to AList.Count - 1 do
+    TTypeDecl(AList.Items[I]).Visibility := AVis;
+end;
+
+procedure TParser.ParseTypeDeclInto(AList: TObjectList);
 var
   TD:               TTypeDecl;
   GD:               TGenericTypeDef;
@@ -1250,7 +1323,7 @@ begin
           [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
     end;
     Expect(tkSemicolon);
-    ABlock.TypeDecls.Add(TD);
+    AList.Add(TD);
   except
     TD.Free();
     raise;
@@ -2232,6 +2305,9 @@ begin
         ParseConstBlock(Result.ConstDecls);
         Self.StampConstVisibility(Result.ConstDecls, ConstIdx, CurrVisibility);
       end
+      { Nested `type` section — types declared inside the record body (GH #175). }
+      else if Check(tkType) then
+        Self.ParseNestedTypeSection(Result.NestedTypeDecls, CurrVisibility)
       else if Check(tkVar) then
         Advance()  { optional `var` keyword before field declarations }
       { `class operator Add(const A, B: TFoo): TFoo;` — a static method whose
@@ -2492,6 +2568,9 @@ begin
         ParseConstBlock(Result.ConstDecls);
         Self.StampConstVisibility(Result.ConstDecls, ConstIdx, CurrVisibility);
       end
+      { Nested `type` section — types declared inside the class body (GH #175). }
+      else if Check(tkType) then
+        Self.ParseNestedTypeSection(Result.NestedTypeDecls, CurrVisibility)
       else if Check(tkVar) then
         Advance()  { optional 'var' keyword before field declarations — consume and continue }
       else if (Check(tkIdent) and SameText(FCurrent.Value, 'property')) or

@@ -36,6 +36,11 @@ type
     procedure TestParse_RecordType_SingleField;
     procedure TestParse_RecordType_MultipleFields;
     procedure TestParse_RecordType_MultiNameField;
+    { Nested type declarations (GH #175 Stage 1) — a `type` section inside a
+      record body, mirroring the class form. }
+    procedure TestParse_RecordNestedType_Record;
+    procedure TestParse_RecordNestedType_KeepsOuterMembers;
+    procedure TestParse_RecordNestedType_TakesSectionVisibility;
     procedure TestParse_VarOfRecordType;
     procedure TestParse_FieldAssignment;
     procedure TestParse_FieldAccessInExpr;
@@ -281,6 +286,103 @@ begin
     AssertEquals('2 fields', 2, Rec.Fields.Count);
     AssertEquals('First field', 'X', TFieldDecl(Rec.Fields.Items[0]).Names.Strings[0]);
     AssertEquals('Second field', 'Y', TFieldDecl(Rec.Fields.Items[1]).Names.Strings[0]);
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ ------------------------------------------------------------------ }
+{  Nested type declarations — GH #175 Stage 1 (parser)                 }
+{ ------------------------------------------------------------------ }
+
+procedure TRecordTests.TestParse_RecordNestedType_Record;
+var
+  Prog: TProgram;
+  Rec:  TRecordTypeDef;
+  NTD:  TTypeDecl;
+begin
+  Prog := ParseSrc(
+    '''
+        program P;
+        type
+          TOuter = record
+            type
+              TInner = record
+                F: Integer;
+              end;
+          end;
+        begin end.
+        ''');
+  try
+    Rec := TRecordTypeDef(TTypeDecl(Prog.Block.TypeDecls.Items[0]).Def);
+    AssertEquals('1 nested type', 1, Rec.NestedTypeDecls.Count);
+    NTD := TTypeDecl(Rec.NestedTypeDecls.Items[0]);
+    AssertEquals('nested type name', 'TInner', NTD.Name);
+    AssertTrue('nested def is a record', NTD.Def is TRecordTypeDef);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TRecordTests.TestParse_RecordNestedType_KeepsOuterMembers;
+var
+  Prog: TProgram;
+  Rec:  TRecordTypeDef;
+begin
+  Prog := ParseSrc(
+    '''
+        program P;
+        type
+          TOuter = record
+            type
+              TInner = record
+                F: Integer;
+              end;
+            X: Integer;
+          end;
+        begin end.
+        ''');
+  try
+    Rec := TRecordTypeDef(TTypeDecl(Prog.Block.TypeDecls.Items[0]).Def);
+    AssertEquals('1 nested type', 1, Rec.NestedTypeDecls.Count);
+    AssertEquals('outer field survived', 1, Rec.Fields.Count);
+    AssertEquals('outer field name', 'X',
+      TFieldDecl(Rec.Fields.Items[0]).Names[0]);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TRecordTests.TestParse_RecordNestedType_TakesSectionVisibility;
+var
+  Prog: TProgram;
+  Rec:  TRecordTypeDef;
+begin
+  Prog := ParseSrc(
+    '''
+        program P;
+        type
+          TOuter = record
+          strict private
+            type
+              THidden = record
+                F: Integer;
+              end;
+          public
+            type
+              TShown = record
+                G: Integer;
+              end;
+          end;
+        begin end.
+        ''');
+  try
+    Rec := TRecordTypeDef(TTypeDecl(Prog.Block.TypeDecls.Items[0]).Def);
+    AssertEquals('2 nested types', 2, Rec.NestedTypeDecls.Count);
+    AssertTrue('THidden is strict private',
+      TTypeDecl(Rec.NestedTypeDecls.Items[0]).Visibility = mvStrictPrivate);
+    AssertTrue('TShown is public',
+      TTypeDecl(Rec.NestedTypeDecls.Items[1]).Visibility = mvPublic);
   finally
     Prog.Free();
   end;

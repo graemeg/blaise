@@ -898,6 +898,11 @@ type
     Fields:     TObjectList;  { owned TFieldDecl }
     Methods:    TObjectList;  { owned TMethodDecl }
     ConstDecls: TObjectList;  { owned TConstDecl — record-level constants (static const) }
+    { Types declared inside the record body — `type TInner = ...` (GH #175).
+      Owned TTypeDecl.  The enclosing record is a NAMESPACE for these: each
+      is registered under its qualified name (TOuter.TInner) and obeys the
+      visibility section it was declared in. }
+    NestedTypeDecls: TObjectList;
     IsPacked: Boolean;      { True iff declared `packed record` — disables
                               field alignment padding and tail padding;
                               ARC-managed fields (string/class/intf) still
@@ -1203,6 +1208,9 @@ type
     ParentName:      string;
     ImplementsNames: TStringList;  { owned — names of implemented interfaces }
     ConstDecls:      TObjectList;  { owned TConstDecl — class-level constants }
+    { Types declared inside the class body — `type TInner = ...` (GH #175).
+      Owned TTypeDecl.  See TRecordTypeDef.NestedTypeDecls. }
+    NestedTypeDecls: TObjectList;
     Fields:          TObjectList;  { owned TFieldDecl }
     Methods:         TObjectList;  { owned TMethodDecl }
     Properties:      TObjectList;  { owned TPropertyDecl }
@@ -1343,6 +1351,11 @@ type
                                            a same-named type from another used unit
                                            won the flat-table slot (FindType by name
                                            would return the other unit's desc). }
+    { Member visibility, for a type declared inside a class or record body
+      (GH #175).  Set by the parser from the enclosing visibility section;
+      mvPublic for an ordinary unit- or block-level type declaration, which
+      has no owning type and is never visibility-checked. }
+    Visibility: TMemberVisibility;
     destructor Destroy; override;
   end;
 
@@ -1903,6 +1916,7 @@ begin
   Fields     := TObjectList.Create(True);
   Methods    := TObjectList.Create(True);
   ConstDecls := TObjectList.Create(True);
+  NestedTypeDecls := TObjectList.Create(True);
 end;
 
 destructor TRecordTypeDef.Destroy;
@@ -1987,6 +2001,7 @@ begin
   inherited Create();
   ImplementsNames := TStringList.Create();
   ConstDecls      := TObjectList.Create(True);
+  NestedTypeDecls := TObjectList.Create(True);
   Fields          := TObjectList.Create(True);
   Methods         := TObjectList.Create(True);
   Properties      := TObjectList.Create(True);
@@ -2788,6 +2803,9 @@ begin
   Result.Col  := ASrc.Col;
   Result.Name := ASrc.Name;
   Result.Def  := CloneTypeDef(ASrc.Def);
+  { Member visibility must survive a clone — dropping it would silently turn
+    a strict-private nested type public in the cloned type (GH #175). }
+  Result.Visibility := ASrc.Visibility;
 end;
 
 function CloneConstDecl(ASrc: TConstDecl): TConstDecl;
@@ -3042,6 +3060,11 @@ begin
     Result.ImplementsNames.Add(ASrc.ImplementsNames.Strings[I]);
   for I := 0 to ASrc.ConstDecls.Count - 1 do
     Result.ConstDecls.Add(CloneConstDecl(TConstDecl(ASrc.ConstDecls.Items[I])));
+  { Nested types are members like any other — a clone that loses them loses
+    part of the type (GH #175). }
+  for I := 0 to ASrc.NestedTypeDecls.Count - 1 do
+    Result.NestedTypeDecls.Add(
+      CloneTypeDecl(TTypeDecl(ASrc.NestedTypeDecls.Items[I])));
   for I := 0 to ASrc.Fields.Count - 1 do
     Result.Fields.Add(CloneFieldDecl(TFieldDecl(ASrc.Fields.Items[I])));
   for I := 0 to ASrc.Methods.Count - 1 do
@@ -3074,6 +3097,10 @@ begin
     merely defensive: a clone that loses them loses real members. }
   for I := 0 to ASrc.ConstDecls.Count - 1 do
     Result.ConstDecls.Add(CloneConstDecl(TConstDecl(ASrc.ConstDecls.Items[I])));
+  { Nested types — see CloneClassTypeDef (GH #175). }
+  for I := 0 to ASrc.NestedTypeDecls.Count - 1 do
+    Result.NestedTypeDecls.Add(
+      CloneTypeDecl(TTypeDecl(ASrc.NestedTypeDecls.Items[I])));
 end;
 
 function CloneGenericRecordDef(ASrc: TGenericRecordDef): TGenericRecordDef;

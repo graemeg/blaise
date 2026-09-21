@@ -328,7 +328,8 @@ EnumSubrange
 
 RecordDef
     = [ PACKED ] RECORD
-      { VisibilitySection | FieldDecl | MethodDecl | ClassOperatorDecl | ConstSection }
+      { VisibilitySection | FieldDecl | MethodDecl | ClassOperatorDecl
+      | ConstSection | NestedTypeSection }
       END
     ;
 
@@ -353,9 +354,44 @@ RecordDef
 
 ClassDef
     = CLASS [ LPAREN GenericName { COMMA GenericName } RPAREN ]
-             { VisibilitySection | ConstSection | FieldList | MethodDeclList }
+             { VisibilitySection | ConstSection | NestedTypeSection
+             | FieldList | MethodDeclList }
              END
     ;
+
+NestedTypeSection
+    = TYPE { TypeDecl }
+    ;
+
+(* A `type` section inside a class or record body declares types scoped to the
+ * enclosing type, e.g.
+ *
+ *     TOuter = class
+ *       type TInner = record F: Integer; end;
+ *     end;
+ *
+ * Any type form may be nested (record, class, enum, alias, array, ...).  The
+ * enclosing type acts as a NAMESPACE: the nested type is referred to from
+ * outside as TOuter.TInner, and unqualified as TInner from inside the
+ * enclosing type's own methods and those of its descendants — the same
+ * reachability rule inherited fields follow.
+ *
+ * A nested type takes the visibility of the section it is declared in
+ * (private / strict private / protected / public), enforced exactly as for
+ * fields, methods, properties and consts.
+ *
+ * The section ends at the next member-section keyword, at the first member
+ * that is not a type declaration, or at the body's END.  Because a type decl
+ * (`Name = ...`) and a field (`Name: Type`) both begin with an identifier,
+ * the section is terminated by lookahead for `=` (or `<`, opening a generic
+ * type's parameter list) after the name.
+ *
+ * Nested types are NOT permitted inside an INTERFACE body: neither FPC nor
+ * Delphi allows it, and the interface member grammar has no visibility or
+ * const machinery to extend.  See language-rationale.adoc.
+ *
+ * A nested type may not currently be declared inside a GENERIC template; the
+ * type-argument substitution paths do not yet carry nested declarations. *)
 
 (* A class body is a sequence of members in any order, optionally grouped under
  * visibility / storage sections.  A VisibilitySection keyword sets the current
