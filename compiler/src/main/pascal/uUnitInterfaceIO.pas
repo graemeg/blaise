@@ -54,7 +54,15 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 19; { v19: EncodeConstDeclList/ReadConstDeclList carry a
+  IFACE_VERSION = 20; { v20: EncodeNestedTypeList/ReadNestedTypeList carry a
+                          type's nested `type` section, so a nested record or
+                          subrange survives a .bif round trip.  Without it an
+                          importing unit could not resolve the ENCLOSING
+                          type's own fields when one was declared with a
+                          nested type — a warm-cache build failed outright
+                          ("Class TCfg field type TEntry unresolved") on
+                          source a cold build accepted (GH #175 Stage 3).
+                        v19: EncodeConstDeclList/ReadConstDeclList carry a
                           const member's Visibility as a sixth field, so a
                           strict-private class/record const stays unreachable
                           through a cached interface.  Before this an
@@ -486,6 +494,58 @@ begin
   end;
 end;
 
+{ Encode a type's nested `type` section (GH #175).  Without this a nested
+  type vanishes across a .bif round trip, and an importing unit cannot even
+  resolve the enclosing type's OWN fields when one is declared with a nested
+  type ("Class TCfg field type TEntry unresolved") — so this is required for
+  correctness, not just for consumers naming TOuter.TInner.
+
+  Two forms are carried, matching what the semantic pass registers: a record
+  (kind 'r', its own field list) and a named integer subrange (kind 's',
+  base type name + bounds).  Anything else is skipped rather than written
+  half-encoded; the cold path rejects those forms already. }
+function EncodeNestedTypeList(ANested: TObjectList): string;
+var
+  I, Kept: Integer;
+  ND: TTypeDecl;
+  AD: TTypeAliasDef;
+begin
+  Kept := 0;
+  if ANested <> nil then
+    for I := 0 to ANested.Count - 1 do
+    begin
+      ND := TTypeDecl(ANested.Items[I]);
+      if (ND.Def is TRecordTypeDef) or
+         ((ND.Def is TTypeAliasDef) and TTypeAliasDef(ND.Def).IsSubrange and
+          (TTypeAliasDef(ND.Def).SubrangeLowName = '')) then
+        Inc(Kept);
+    end;
+  Result := EncodeCount(Kept);
+  if ANested = nil then Exit;
+  for I := 0 to ANested.Count - 1 do
+  begin
+    ND := TTypeDecl(ANested.Items[I]);
+    if ND.Def is TRecordTypeDef then
+      Result := Result +
+                EncodeLpstr(ND.Name) +
+                EncodeLpstr('r') +
+                EncodeLpstr(IntToStr(Ord(ND.Visibility))) +
+                EncodeFieldList(TRecordTypeDef(ND.Def).Fields)
+    else if (ND.Def is TTypeAliasDef) and TTypeAliasDef(ND.Def).IsSubrange and
+            (TTypeAliasDef(ND.Def).SubrangeLowName = '') then
+    begin
+      AD := TTypeAliasDef(ND.Def);
+      Result := Result +
+                EncodeLpstr(ND.Name) +
+                EncodeLpstr('s') +
+                EncodeLpstr(IntToStr(Ord(ND.Visibility))) +
+                EncodeLpstr(AD.TypeName) +
+                EncodeInt64(AD.SubrangeLow) +
+                EncodeInt64(AD.SubrangeHigh);
+    end;
+  end;
+end;
+
 { Per-method routine sig including class-method extras
   (VTableSlot, ResolvedQbeName, IsVirtual, IsOverride).  Used by
   class + interface payloads. }
@@ -551,7 +611,9 @@ begin
             { record methods (instance + static), as TRoutineSig — v13. }
             EncodeMethodList(AEntry.Methods) +
             { record-level `static const` declarations. }
-            EncodeConstDeclList(Def.ConstDecls);
+            EncodeConstDeclList(Def.ConstDecls) +
+            { nested `type` section (GH #175) }
+            EncodeNestedTypeList(Def.NestedTypeDecls);
 end;
 
 function EncodePropertyList(AList: TObjectList): string;
@@ -593,7 +655,9 @@ begin
     EncodeMethodList(AEntry.Methods) +
     EncodePropertyList(Def.Properties) +
     { class-level `static const` declarations. }
-    EncodeConstDeclList(Def.ConstDecls);
+    EncodeConstDeclList(Def.ConstDecls) +
+    { nested `type` section (GH #175) }
+    EncodeNestedTypeList(Def.NestedTypeDecls);
 end;
 
 { Encode a TMethodDecl (AST) using the same per-method payload shape
@@ -2233,6 +2297,48 @@ begin
   end;
 end;
 
+{ Inverse of EncodeNestedTypeList — rebuild a type's nested `type` section.
+  Order must mirror the writer exactly: name, kind, visibility, then the
+  per-kind payload (GH #175). }
+procedure ReadNestedTypeList(const AText: string; var APos: Integer;
+                             ATarget: TObjectList);
+var
+  C, I: Integer;
+  Nm:   string;
+  Kind: string;
+  Vis:  Integer;
+  ND:   TTypeDecl;
+  RD:   TRecordTypeDef;
+  AD:   TTypeAliasDef;
+begin
+  C := DecodeCount(AText, APos);
+  for I := 1 to C do
+  begin
+    Nm   := ReadLpstrAt(AText, APos);
+    Kind := ReadLpstrAt(AText, APos);
+    Vis  := StrToInt(ReadLpstrAt(AText, APos));
+    ND := TTypeDecl.Create();
+    ND.Name := Nm;
+    ND.Visibility := TMemberVisibility(Vis);
+    if Kind = 'r' then
+    begin
+      RD := TRecordTypeDef.Create();
+      ReadFieldList(AText, APos, RD.Fields);
+      ND.Def := RD;
+    end
+    else
+    begin
+      AD := TTypeAliasDef.Create();
+      AD.TypeName := ReadLpstrAt(AText, APos);
+      AD.IsSubrange := True;
+      AD.SubrangeLow := ReadInt64At(AText, APos);
+      AD.SubrangeHigh := ReadInt64At(AText, APos);
+      ND.Def := AD;
+    end;
+    ATarget.Add(ND);
+  end;
+end;
+
 { Inverse of EncodeConstDeclList — rebuild record/class `static const`
   decls.  Mirrors the writer's six-field scalar shape exactly (the sixth,
   Visibility, was added for GH #175 Stage 0). }
@@ -2329,6 +2435,7 @@ begin
   ReadFieldList(AText, APos, Def.Fields);
   ReadMethodList(AText, APos, AEntry.Methods);   { v13 }
   ReadConstDeclList(AText, APos, Def.ConstDecls);
+  ReadNestedTypeList(AText, APos, Def.NestedTypeDecls);   { v20 }
   AEntry.Def := Def;
 end;
 
@@ -2352,6 +2459,7 @@ begin
   ReadMethodList(AText, APos, AEntry.Methods);
   ReadPropertyList(AText, APos, Def.Properties);
   ReadConstDeclList(AText, APos, Def.ConstDecls);
+  ReadNestedTypeList(AText, APos, Def.NestedTypeDecls);   { v20 }
   AEntry.IsClass := True;
   AEntry.Def     := Def;
 end;

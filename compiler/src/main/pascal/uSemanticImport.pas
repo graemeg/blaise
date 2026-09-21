@@ -60,6 +60,15 @@ procedure ImportUnitInterface(AIface: TUnitInterface;
 
 implementation
 
+var
+  { Name of the type whose own members are currently being rebuilt from a
+    cached interface, or '' outside that window.  Scopes the bare spelling
+    of a nested type to its declaring type on the import path, exactly as
+    uSemantic.FNestedTypeOwner does on the source path (GH #175 Stage 3).
+    Import runs single-threaded, one entry at a time, and every setter
+    restores the previous value in a finally. }
+  GNestedTypeOwner: string;
+
 { ----- Type-ref resolution -------------------------------------- }
 
 { Return the bare type name from a possibly unit-qualified name.  The
@@ -174,6 +183,24 @@ begin
   begin
     Result := Sym.TypeDesc;
     Exit;
+  end;
+  { A nested type is registered under its QUALIFIED name only, so a member
+    that names one BARE — a field's type, or a method signature's parameter
+    or return type — needs the owner-scoped retry.  GNestedTypeOwner is the
+    import analogue of uSemantic's FNestedTypeOwner: set while a type entry's
+    own members are being rebuilt, nil everywhere else, so the bare spelling
+    never resolves outside the declaring type (GH #175 Stage 3).  Without
+    this a ctor whose parameter is a nested subrange round-tripped as an
+    UNRESOLVED param, and the warm build rejected the call with "No matching
+    overload" on source a cold build accepted. }
+  if GNestedTypeOwner <> '' then
+  begin
+    Sym := ATable.Lookup(GNestedTypeOwner + '.' + ATypeName);
+    if (Sym <> nil) and (Sym.Kind = skType) then
+    begin
+      Result := Sym.TypeDesc;
+      Exit;
+    end;
   end;
   Result := ResolveInlineTypeName(ATypeName, ATable);
   if Result <> nil then Exit;
@@ -392,6 +419,93 @@ begin
   end;
 end;
 
+{ Register a type's nested `type` section imported from a .bif.  The warm
+  TWIN of uSemantic.RegisterNestedTypes — any change to how a nested type is
+  registered must be made in BOTH, or a cold build and a warm (cached) build
+  disagree about what compiles.  That divergence is not hypothetical: the
+  const half of this pair drifted exactly that way before GH #175 Stage 0.
+
+  Registered under the QUALIFIED name only (TCfg.TEntry), carrying the member
+  visibility and declaring unit, so the enclosing type is a namespace on the
+  warm path too.  Runs BEFORE the enclosing type's own fields are resolved,
+  because a field may be declared with a nested type. }
+procedure RegisterImportedNestedTypes(const ATypeName: string;
+                                      ANested: TObjectList;
+                                      ATable: TSymbolTable;
+                                      const AUnitName: string);
+var
+  J, K, L:  Integer;
+  ND:       TTypeDecl;
+  RD:       TRecordTypeDef;
+  AD:       TTypeAliasDef;
+  NRT:      TRecordTypeDesc;
+  Desc:     TTypeDesc;
+  BaseSym:  TSymbol;
+  FldSym:   TSymbol;
+  FDecl:    TFieldDecl;
+  FldType:  TTypeDesc;
+  Sym:      TSymbol;
+  QName:    string;
+begin
+  if ANested = nil then Exit;
+  { Phase A — define every nested name, so siblings resolve in either order. }
+  for J := 0 to ANested.Count - 1 do
+  begin
+    ND    := TTypeDecl(ANested.Items[J]);
+    QName := ATypeName + '.' + ND.Name;
+    Desc  := nil;
+    if ND.Def is TRecordTypeDef then
+      Desc := ATable.NewRecordType(QName)
+    else if ND.Def is TTypeAliasDef then
+    begin
+      AD := TTypeAliasDef(ND.Def);
+      BaseSym := ATable.Lookup(AD.TypeName);
+      if (BaseSym = nil) or (BaseSym.Kind <> skType) or
+         (BaseSym.TypeDesc = nil) then Continue;
+      if AD.IsSubrange then
+        Desc := ATable.NewSubrangeType(QName, BaseSym.TypeDesc,
+                                       AD.SubrangeLow, AD.SubrangeHigh)
+      else
+        Desc := BaseSym.TypeDesc;
+    end;
+    if Desc = nil then Continue;
+    Sym := TSymbol.Create(QName, skType, Desc);
+    Sym.Visibility := ND.Visibility;
+    Sym.OwnerTypeName := ATypeName;
+    Sym.OwningUnit := AUnitName;
+    if not ATable.Define(Sym) then Sym.Free();
+    ND.ResolvedDesc := Desc;
+  end;
+  { Phase B — fill in each nested record's fields. }
+  for J := 0 to ANested.Count - 1 do
+  begin
+    ND := TTypeDecl(ANested.Items[J]);
+    if not (ND.Def is TRecordTypeDef) then Continue;
+    if ND.ResolvedDesc = nil then Continue;
+    RD  := TRecordTypeDef(ND.Def);
+    NRT := TRecordTypeDesc(ND.ResolvedDesc);
+    for K := 0 to RD.Fields.Count - 1 do
+    begin
+      FDecl   := TFieldDecl(RD.Fields.Items[K]);
+      FldType := nil;
+      FldSym  := ATable.Lookup(FDecl.TypeName);
+      if (FldSym <> nil) and (FldSym.Kind = skType) then
+        FldType := FldSym.TypeDesc
+      else
+      begin
+        { A sibling nested type is registered qualified only. }
+        FldSym := ATable.Lookup(ATypeName + '.' + FDecl.TypeName);
+        if (FldSym <> nil) and (FldSym.Kind = skType) then
+          FldType := FldSym.TypeDesc;
+      end;
+      if FldType = nil then Continue;
+      FDecl.ResolvedType := FldType;
+      for L := 0 to FDecl.Names.Count - 1 do
+        NRT.AddField(FDecl.Names.Strings[L], FldType);
+    end;
+  end;
+end;
+
 function ResolveParentClassByName(const AParentName: string;
                                   ATable: TSymbolTable): TRecordTypeDesc;
 var
@@ -548,8 +662,16 @@ var
   PropDecl: TPropertyDecl;
   PropInfo: TPropertyInfo;
   I, J:     Integer;
+  SavedOwner: string;
 begin
   ClassDef := TClassTypeDef(AEntry.Def);
+
+  { Scope this entry's own members so a nested type may be named bare by a
+    field, a parameter or a return type — the import twin of the window
+    uSemantic opens with FNestedTypeOwner. }
+  SavedOwner := GNestedTypeOwner;
+  GNestedTypeOwner := AEntry.Name;
+  try
 
   Sym := ATable.Lookup(AEntry.Name);
   if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc is TRecordTypeDesc) then
@@ -600,11 +722,22 @@ begin
     end;
   end;
 
+  { Nested `type` section, BEFORE own fields — a field may be declared with
+    a nested type, and until GH #175 Stage 3 that raised "field type X
+    unresolved" on the warm path for source a cold build accepted. }
+  RegisterImportedNestedTypes(AEntry.Name, ClassDef.NestedTypeDecls,
+    ATable, AUnitName);
+
   { Own fields. }
   for I := 0 to ClassDef.Fields.Count - 1 do
   begin
     FldDecl := TFieldDecl(ClassDef.Fields.Items[I]);
     FldType := ResolveImportTypeName(FldDecl.TypeName, ATable, ASemantic);
+    if FldType = nil then
+      { A nested type is registered under its QUALIFIED name only, so a
+        field naming one bare needs the owner-scoped retry. }
+      FldType := ResolveImportTypeName(AEntry.Name + '.' + FldDecl.TypeName,
+        ATable, ASemantic);
     if FldType = nil then
       raise EImportError.CreateFmt(
         'Class %s field type %s unresolved',
@@ -733,6 +866,10 @@ begin
       ParentName := ParentName + 'Attribute';
     RT.AddClassAttribute(ParentName);
   end;
+
+  finally
+    GNestedTypeOwner := SavedOwner;
+  end;
 end;
 
 procedure RegisterRecord(AEntry: TTypeEntry; ATable: TSymbolTable;
@@ -746,8 +883,14 @@ var
   FldDecl:  TFieldDecl;
   FldType:  TTypeDesc;
   MDecl:    TMethodDecl;
+  SavedOwner: string;
 begin
   RecDef  := TRecordTypeDef(AEntry.Def);
+
+  { Scope this entry's own members — see RegisterClass. }
+  SavedOwner := GNestedTypeOwner;
+  GNestedTypeOwner := AEntry.Name;
+  try
 
   Sym := ATable.Lookup(AEntry.Name);
   if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc is TRecordTypeDesc) then
@@ -765,10 +908,18 @@ begin
   end;
   RecDesc.IsPacked := RecDef.IsPacked;
 
+  { Nested `type` section, BEFORE own fields — see the class path. }
+  RegisterImportedNestedTypes(AEntry.Name, RecDef.NestedTypeDecls,
+    ATable, AUnitName);
+
   for I := 0 to RecDef.Fields.Count - 1 do
   begin
     FldDecl := TFieldDecl(RecDef.Fields.Items[I]);
     FldType := ResolveImportTypeName(FldDecl.TypeName, ATable, ASemantic);
+    if FldType = nil then
+      { Nested types are registered qualified only. }
+      FldType := ResolveImportTypeName(AEntry.Name + '.' + FldDecl.TypeName,
+        ATable, ASemantic);
     if FldType = nil then
       raise EImportError.CreateFmt(
         'Record %s field type %s unresolved',
@@ -807,6 +958,10 @@ begin
 
   { record-level `static const` declarations — reachable bare and qualified. }
   RegisterImportedTypeConsts(AEntry.Name, RecDef.ConstDecls, ATable, AUnitName);
+
+  finally
+    GNestedTypeOwner := SavedOwner;
+  end;
 end;
 
 procedure RegisterProcType(AEntry: TTypeEntry; ATable: TSymbolTable;

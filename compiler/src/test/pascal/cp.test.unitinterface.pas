@@ -2741,10 +2741,14 @@ begin
   Iface := TUnitInterface.Create('U');
   try
     Buf := WriteUnitInterface(Iface);
-    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 19 since
-      the const payload gained the member Visibility field, without which a
+    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 20 since
+      a type's nested `type` section is now carried, without which an
+      importing unit could not resolve the ENCLOSING type's own fields when
+      one was declared with a nested type — a warm-cache build failed
+      outright on source a cold build accepted (v19 gave the const payload
+      the member Visibility field, without which a
       strict-private class const was reachable through a cached interface even
-      though a cold build rejected it (v18 added the 'generic-record' TYPE
+      though a cold build rejected it; v18 added the 'generic-record' TYPE
       kind, so a generic RECORD template declared in a unit INTERFACE
       round-trips; v17 added META GenericDepHashes — the source hashes of the
       units this one monomorphised a generic from, without which a warm
@@ -2756,7 +2760,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 19', Buf) = 0);
+      Pos('BLAISE-IFACE 20', Buf) = 0);
   finally
     Iface.Free();
   end;

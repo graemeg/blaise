@@ -75,6 +75,13 @@ type
       asserted here: the private const stays rejected, and the public one
       still resolves. }
     procedure TestClassConstVisibility_SurvivesIfaceRoundTrip;
+    { GH #175 Stage 3.  A nested type must survive a .bif round trip, or a
+      warm (cached-iface) build REJECTS source a cold build accepts.  Both
+      halves were real: the enclosing class's own field declared with a
+      nested type failed to resolve at all ("field type TEntry unresolved"),
+      and a constructor whose parameter was a nested subrange round-tripped
+      with an unresolved param, so the call matched no overload. }
+    procedure TestNestedType_SurvivesIfaceRoundTrip;
     { Regression (GH #194): Pascal identifiers are case-insensitive, so the
       spelling of a unit name in a `uses` clause must not decide whether its
       file is found.  The loader only tried two spellings — all-lowercase and
@@ -614,6 +621,111 @@ begin
   Rc := RunBinary(Bin2, Captured);
   AssertEquals('warm run exit code', 0, Rc);
   AssertEquals('warm stdout', '33' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestNestedType_SurvivesIfaceRoundTrip;
+const
+  DepSrc =
+    '''
+    unit NestDep;
+    interface
+    type
+      TCfg = class
+        type
+          TEntry = record
+            Key: Integer;
+            Name: String;
+          end;
+          TLevel = 1..9;
+      public
+        Data: TEntry;
+        constructor Create(ALevel: TLevel);
+      end;
+    implementation
+    constructor TCfg.Create(ALevel: TLevel);
+    begin
+      Data.Key := ALevel;
+      Data.Name := 'warm';
+    end;
+    end.
+    ''';
+  OkSrc =
+    '''
+    program UseNested;
+    uses NestDep;
+    var
+      c: TCfg;
+      e: TCfg.TEntry;
+    begin
+      c := TCfg.Create(7);
+      WriteLn(c.Data.Key);
+      WriteLn(c.Data.Name);
+      e.Key := 11;
+      WriteLn(e.Key)
+    end.
+    ''';
+  BareSrc =
+    '''
+    program UseBare;
+    uses NestDep;
+    var
+      e: TEntry;
+    begin
+      e.Key := 1
+    end.
+    ''';
+var
+  DepPas, DepObj, OkPas, OkBin, BarePas, BareBin: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  DepPas  := FScratch + '/NestDep.pas';
+  DepObj  := FScratch + '/NestDep.o';
+  OkPas   := FScratch + '/use_nested.pas';
+  OkBin   := FScratch + '/use_nested';
+  BarePas := FScratch + '/use_bare.pas';
+  BareBin := FScratch + '/use_bare';
+
+  { Step 1: build the dep into an .o with embedded .blaise.iface. }
+  WriteFile(DepPas, DepSrc);
+  Rc := RunBlaise(['--source', DepPas, '--output', DepObj], Captured);
+  AssertEquals('blaise(NestDep) exit code', 0, Rc);
+  AssertTrue('NestDep.o exists', FileExists(DepObj));
+
+  { Step 2: hide the source, so the consumer MUST read the cached iface. }
+  DeleteFile(DepPas);
+  AssertFalse('NestDep.pas hidden', FileExists(DepPas));
+
+  { Step 3: qualified access and the nested-subrange ctor param both still
+    work through the cached iface. }
+  WriteFile(OkPas, OkSrc);
+  Rc := RunBlaise(['--source', OkPas, '--output', OkBin,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('blaise(use_nested) exit code (output: ' + Captured + ')',
+               0, Rc);
+  Rc := RunBinary(OkBin, Captured);
+  AssertEquals('use_nested exit code', 0, Rc);
+  AssertEquals('use_nested stdout', '7' + #10 + 'warm' + #10 + '11' + #10,
+               Captured);
+
+  { Step 4: the namespace boundary must survive the round trip too — the
+    bare name stays invisible to a consumer. }
+  WriteFile(BarePas, BareSrc);
+  Rc := RunBlaise(['--source', BarePas, '--output', BareBin,
+                   '--unit-path', FScratch], Captured);
+  AssertTrue('blaise(use_bare) must fail (got rc=' + IntToStr(Rc) +
+             ', output: ' + Captured + ')', Rc <> 0)
 end;
 
 procedure TSepCompileTests.TestClassConstVisibility_SurvivesIfaceRoundTrip;
