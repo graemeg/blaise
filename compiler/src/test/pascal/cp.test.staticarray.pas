@@ -183,6 +183,17 @@ type
       case must produce identical bounds, and hence identical layout. }
     procedure TestSemantic_EnumIndex_ZeroBased_Unchanged;
     procedure TestSemantic_EnumIndex_PartiallyExplicit_StillZeroBased;
+
+    { ------------------------------------------------------------------ }
+    { BUG-20260922-class-const-array-index-unchecked — the constant       }
+    { index range check must cover a CLASS-level const array too, not     }
+    { only a unit-level one.                                              }
+    { ------------------------------------------------------------------ }
+    procedure TestSemantic_ClassConstArray_ConstIndex_AboveHigh_Raises;
+    procedure TestSemantic_ClassConstArray_ConstIndex_Negative_Raises;
+    procedure TestSemantic_ClassConstArray_ConstIndex_ViaInstance_Raises;
+    procedure TestSemantic_ClassConstArray_ConstIndex_InRange_Accepted;
+    procedure TestSemantic_ClassConstArray_VarIndex_NotDiagnosed;
   end;
 
 implementation
@@ -1771,6 +1782,98 @@ begin
   finally
     P.Free();
   end;
+end;
+
+{ ------------------------------------------------------------------ }
+{ BUG-20260922-class-const-array-index-unchecked                     }
+{ ------------------------------------------------------------------ }
+
+procedure TStaticArrayTests.TestSemantic_ClassConstArray_ConstIndex_AboveHigh_Raises;
+var Msg: string;
+begin
+  Msg := SemanticErrMsg('''
+    program P;
+    type
+      TE = (eA, eB);
+      TC = class
+      public
+        const Names: array[TE] of Integer = (1, 2);
+      end;
+    begin WriteLn(TC.Names[7]) end.
+    ''');
+  AssertTrue('TC.Names[7] must be rejected, got: ' + Msg,
+    Pos('out of bounds', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ClassConstArray_ConstIndex_Negative_Raises;
+var Msg: string;
+begin
+  Msg := SemanticErrMsg('''
+    program P;
+    type
+      TE = (eA, eB);
+      TC = class
+      public
+        const Names: array[TE] of Integer = (1, 2);
+      end;
+    begin WriteLn(TC.Names[-3]) end.
+    ''');
+  AssertTrue('TC.Names[-3] must be rejected, got: ' + Msg,
+    Pos('out of bounds', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ClassConstArray_ConstIndex_ViaInstance_Raises;
+var Msg: string;
+begin
+  { Reading the class const through an INSTANCE is a separate resolution
+    arm from the bare TypeName.Const form, and had the same omission. }
+  Msg := SemanticErrMsg('''
+    program P;
+    type
+      TE = (eA, eB);
+      TC = class
+      public
+        const Names: array[TE] of Integer = (1, 2);
+      end;
+    var c: TC;
+    begin c := TC.Create(); WriteLn(c.Names[9]) end.
+    ''');
+  AssertTrue('c.Names[9] must be rejected, got: ' + Msg,
+    Pos('out of bounds', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ClassConstArray_ConstIndex_InRange_Accepted;
+var IR: string;
+begin
+  IR := GenIR('''
+    program P;
+    type
+      TE = (eA, eB);
+      TC = class
+      public
+        const Names: array[TE] of Integer = (11, 22);
+      end;
+    begin WriteLn(TC.Names[0], ' ', TC.Names[1]) end.
+    ''');
+  AssertTrue('both in-range indices still compile', Length(IR) > 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ClassConstArray_VarIndex_NotDiagnosed;
+var IR: string;
+begin
+  { A variable index is not a compile-time fact — must not be rejected. }
+  IR := GenIR('''
+    program P;
+    type
+      TE = (eA, eB);
+      TC = class
+      public
+        const Names: array[TE] of Integer = (1, 2);
+      end;
+    var i: Integer;
+    begin i := 9; WriteLn(TC.Names[i]) end.
+    ''');
+  AssertTrue('variable index is not diagnosed', Length(IR) > 0);
 end;
 
 initialization

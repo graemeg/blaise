@@ -139,6 +139,10 @@ type
     procedure TestRun_EnumIndex_ExplicitOrdinals_ForLoopWithGuards;
     procedure TestRun_ConstArray_ExplicitOrdinals_SpanElements;
     procedure TestRun_EnumIndex_ZeroBased_LayoutUnchanged;
+    { BUG-20260922-class-const-array-index-unchecked — a constant
+      out-of-range index into a CLASS const array must be rejected. }
+    procedure TestCompileFails_ClassConstArray_ConstIndex_AboveHigh;
+    procedure TestRun_ClassConstArray_ConstIndex_InRange_StillRuns;
   end;
 
 implementation
@@ -1470,6 +1474,58 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   { The 99% case: a contiguous 0-based enum is completely unaffected. }
   AssertRunsOnAll(Src, '0 3 16 1 4' + LE, 0);
+end;
+
+{ ------------------------------------------------------------------ }
+{ BUG-20260922-class-const-array-index-unchecked                     }
+{ ------------------------------------------------------------------ }
+
+procedure TE2EStaticArrayTests.TestCompileFails_ClassConstArray_ConstIndex_AboveHigh;
+const
+  Src =
+  '''
+  program P;
+  type
+    TE = (eA, eB);
+    TC = class
+    public
+      const Names: array[TE] of Integer = (1, 2);
+    end;
+  begin
+    WriteLn(TC.Names[7])
+  end.
+  ''';
+var Out_: string; Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { Before the fix this compiled and printed garbage read from past the
+    end of the const array — no binary should be produced now. }
+  AssertFalse('TC.Names[7] must not compile',
+    CompileAndRunOn(beNative, Src, Out_, Rc));
+  AssertTrue('diagnostic says out of bounds, got: ' + Out_,
+    Pos('out of bounds', Out_) >= 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_ClassConstArray_ConstIndex_InRange_StillRuns;
+const
+  Src =
+  '''
+  program P;
+  type
+    TE = (eA, eB);
+    TC = class
+    public
+      const Names: array[TE] of Integer = (11, 22);
+    end;
+  begin
+    WriteLn(TC.Names[0], ' ', TC.Names[1])
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '11 22' + LE, 0);
 end;
 
 initialization

@@ -15102,6 +15102,13 @@ begin
         begin
           AAccess.ConstArraySymbol := BaseType.Name + '_' + AAccess.FieldName;
           AAccess.ConstArrayType := Sym.TypeDesc;
+          { Range-check a constant subscript here too, for the arms that
+            reach a member const array through this path. }
+          if (AAccess.PropIndexExpr <> nil) and
+             (Sym.TypeDesc <> nil) and
+             (Sym.TypeDesc.Kind = tyStaticArray) then
+            Self.CheckConstArrayIndexInRange(AAccess.PropIndexExpr,
+              Sym.TypeDesc, AAccess.FieldName, AAccess.Line, AAccess.Col);
         end;
         AAccess.ResolvedType := Sym.TypeDesc;
         Exit(Sym.TypeDesc);
@@ -15387,6 +15394,12 @@ begin
           if AAccess.PropIndexExpr <> nil then
           begin
             Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+            { A member const array is indexed like any other static array, so
+              a constant out-of-range index is the same compile-time error
+              (BUG-20260922-class-const-array-index-unchecked — this arm used
+              to return the element type without ever checking the index). }
+            Self.CheckConstArrayIndexInRange(AAccess.PropIndexExpr,
+              Sym.TypeDesc, AAccess.FieldName, AAccess.Line, AAccess.Col);
             AAccess.ResolvedType := TStaticArrayTypeDesc(Sym.TypeDesc).ElementType;
             Exit(AAccess.ResolvedType);
           end;
@@ -15614,6 +15627,11 @@ begin
         if AAccess.PropIndexExpr <> nil then
         begin
           Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+          { Same check as the TypeName.Const arm above — reading the member
+            const through an INSTANCE is a separate resolution path and had
+            the same omission. }
+          Self.CheckConstArrayIndexInRange(AAccess.PropIndexExpr,
+            Sym.TypeDesc, AAccess.FieldName, AAccess.Line, AAccess.Col);
           AAccess.ResolvedType := TStaticArrayTypeDesc(Sym.TypeDesc).ElementType;
           Exit(AAccess.ResolvedType);
         end;
