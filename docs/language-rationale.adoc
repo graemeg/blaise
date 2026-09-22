@@ -6554,3 +6554,110 @@ Both are rejected with a diagnostic rather than silently mis-compiled:
 * *Support only records, not subranges.*  The reported use case was a nested
   subrange constraining a constructor parameter (`TParm = 1..5`), so a
   record-only implementation would not have closed the issue.
+
+== Constant Array Indices Are Range-Checked at Compile Time
+
+=== Decision
+
+When a static array is subscripted with an index that folds to a compile-time
+integer constant, and that constant falls outside the array's declared bounds,
+the compiler reports a semantic error:
+
+[source,pascal]
+----
+var a: array[0..4] of Integer;
+begin
+  a[99] := 7;   // Array index 99 is out of bounds of 'a' (valid range is 0..4)
+  a[-3] := 5;   // Array index -3 is out of bounds of 'a' (valid range is 0..4)
+end.
+----
+
+The check applies only where both facts are known at compile time:
+
+* the array must be a *static* array (`tyStaticArray`), so its `LowBound` and
+  `HighBound` are declared constants;
+* the index expression must fold to an integer constant — a literal, a named
+  constant, an unambiguous enum member, or an arithmetic expression over those.
+
+A non-constant index is not diagnosed, and a dynamic array is out of scope:
+its length is a runtime value, so there is no compile-time bound to compare
+against. Both inclusive bounds are accepted; only indices strictly outside
+`LowBound..HighBound` are rejected.
+
+=== Rationale
+
+Blaise has no runtime range checking and no `{$R+}` equivalent, so an
+out-of-range index is not caught anywhere. The consequences were silent and
+severe: a positive out-of-range index read or wrote past the array — in the
+reported case `a[99]` on a 5-element array wrote 376 bytes beyond it, leaving
+neighbouring variables intact and the corruption undiscovered — and a negative
+one segfaulted at runtime with no diagnostic pointing at the source line.
+
+Where the index is a constant, the compiler already holds everything needed to
+reject the program: it knows the declared bounds (it allocates from them, and
+folds `Low`/`High` against them) and it can fold the index. Declining to
+compare the two was the whole defect. This is the cheap half of range checking:
+it needs no codegen work, imposes no runtime cost, and turns the crashing case
+into a compile error naming the index, the array, and the valid range.
+
+Restricting the check to constant indices keeps it free of false positives. A
+variable index may be provably out of range to a reader but is not a
+compile-time fact, and rejecting it would break correct programs that bound
+their indices dynamically.
+
+=== Deliberate boundaries
+
+* *Dynamic arrays are not checked.* `SetLength(d, 3); d[50] := 9` still
+  compiles. The length is a runtime property; catching this needs runtime range
+  checking, which is a separate decision.
+* *Variable indices are not checked.* No dataflow or value-range analysis is
+  attempted.
+* *`Low`/`High` are not folded into the index.* `a[High(a) + 1]` is not
+  currently diagnosed, because `EvalConstIntExpr` does not fold `High`/`Low`
+  (codegen folds them later). This is a possible extension, not a gap in the
+  rule.
+* *Ordinal typecasts and `not` are not folded.* `a[Byte(300)]` is not
+  diagnosed although `Byte(300)` truncates to 44, because the fold does not
+  implement the typecast or `not` arms that `EvalConstIntExpr` has. These are
+  conservative omissions — they cause a missed diagnostic, never a wrong one.
+
+The fold deliberately trusts the annotation the expression pass has already
+made (`TIdentExpr.IsConstant` / `ConstValue`) rather than re-resolving the
+name itself. Re-resolution is not merely redundant, it is wrong: a variable,
+parameter or field whose name collides with an enum member
+(`var Red: Integer` alongside `TColor = (Red, ...)`) is not a constant, but a
+fresh lookup can find the enum member and fold the index to its ordinal,
+rejecting a legal program. The expression pass reaches its bare-enum arm only
+after a symbol lookup has failed, so it already resolves the collision
+correctly — and a class field is not in the symbol table at all, so only the
+annotation gets that case right. There is one answer to "is this ident a
+constant", and this is where it is recorded.
+
+=== Alternatives rejected
+
+*Runtime range checking for every index.* This is the complete fix and remains
+desirable, but it is a much larger change — it needs codegen work on every
+backend, a decision on the error-reporting mechanism, and a switch to disable
+it in hot code. Blocking the constant case on that work would leave a
+segfaulting program compiling cleanly in the meantime. The two are
+complementary, not competing.
+
+*Warning rather than error.* A constant out-of-range index has no correct
+interpretation: the program cannot be doing what its author intended. Pascal
+tradition and every comparable compiler treat it as an error, and a warning
+would be routinely ignored in build output.
+
+*Checking only negative indices.* This would catch the crash and miss the
+silent memory corruption, which is the more dangerous of the two because it
+produces a program that appears to work.
+
+=== Interaction with explicitly-numbered enum index types
+
+An enum given explicit ordinals (`TColor = (Red = 5, Green = 10)`) used as an
+array index type exposes a separate, pre-existing defect: the array is sized
+from the member COUNT (`0..1`) while a member used as an index folds to its
+real ordinal (5), so the write lands outside the array. This check does not
+cause that — it surfaces it, previously as a silent out-of-bounds write and
+now as a compile error whose message blames the index rather than the array
+extent. Tracked as `BUG-20260922-explicit-ordinal-enum-array-bounds`; the
+extent is the thing to fix.

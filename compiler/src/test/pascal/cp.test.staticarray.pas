@@ -23,6 +23,9 @@ type
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
     function GenIR(const ASrc: string): string;
+    { Analyses ASrc and returns the semantic error message, or '' if the
+      source analysed cleanly. }
+    function SemanticErrMsg(const ASrc: string): string;
   published
     { ------------------------------------------------------------------ }
     { Parser                                                               }
@@ -131,6 +134,34 @@ type
     procedure TestSemantic_BooleanIndex_ConstBounds;
     procedure TestSemantic_BooleanIndex_ConstWrongCount;
     procedure TestSemantic_StringIndex_RaisesTargetedError;
+
+    { ------------------------------------------------------------------ }
+    { BUG-20260921-const-array-index-out-of-bounds — a CONSTANT index    }
+    { outside the declared bounds is a compile-time error.               }
+    { ------------------------------------------------------------------ }
+    procedure TestSemantic_ConstIndex_Write_AboveHigh_Raises;
+    procedure TestSemantic_ConstIndex_Write_Negative_Raises;
+    procedure TestSemantic_ConstIndex_Read_AboveHigh_Raises;
+    procedure TestSemantic_ConstIndex_Read_BelowLow_Raises;
+    procedure TestSemantic_ConstIndex_NonZeroBase_BelowLow_Raises;
+    procedure TestSemantic_ConstIndex_NamedConst_AboveHigh_Raises;
+    procedure TestSemantic_ConstIndex_FoldedExpr_AboveHigh_Raises;
+    procedure TestSemantic_ConstIndex_ErrorNamesBoundsAndIndex;
+    { Controls — these must keep compiling cleanly. }
+    procedure TestSemantic_ConstIndex_InRange_Accepted;
+    procedure TestSemantic_ConstIndex_BoundaryLowAndHigh_Accepted;
+    procedure TestSemantic_ConstIndex_NonZeroBase_InRange_Accepted;
+    procedure TestSemantic_VarIndex_NotDiagnosed;
+    procedure TestSemantic_ConstIndex_DynArray_NotDiagnosed;
+    procedure TestSemantic_ConstIndex_Nested2D_AboveHigh_Raises;
+    { A variable/parameter/field whose name collides with an enum member must
+      NOT be folded as that member's ordinal — it is not a constant at all.
+      Re-resolving the name inside the fold got this wrong and rejected
+      legal programs; the fold now trusts uSemantic's IsConstant annotation. }
+    procedure TestSemantic_EnumShadowedByGlobalVar_NotFolded;
+    procedure TestSemantic_EnumShadowedByLocalVar_NotFolded;
+    procedure TestSemantic_EnumShadowedByParam_NotFolded;
+    procedure TestSemantic_EnumShadowedByField_NotFolded;
   end;
 
 implementation
@@ -1236,6 +1267,274 @@ begin
     begin A[Red] := 42 end.
     ''');
   AssertTrue('alloc for 3 ints (12 bytes)', Pos('12', IR) >= 0);
+end;
+
+{ ------------------------------------------------------------------ }
+{ BUG-20260921-const-array-index-out-of-bounds                       }
+{                                                                     }
+{ When the index is a compile-time constant and the array is static,  }
+{ both bounds are known, so an out-of-range index is diagnosable at   }
+{ compile time.  Before the fix a positive OOB index silently wrote   }
+{ past the array and a negative one segfaulted at runtime.            }
+{ ------------------------------------------------------------------ }
+
+function TStaticArrayTests.SemanticErrMsg(const ASrc: string): string;
+var P: TProgram;
+begin
+  Result := '';
+  P := nil;
+  try
+    try
+      P := AnalyseSrc(ASrc);
+    except
+      on E: Exception do Result := E.Message;
+    end;
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_Write_AboveHigh_Raises;
+var Msg: string;
+begin
+  Msg := SemanticErrMsg('''
+    program P;
+    var a: array[0..4] of Integer;
+    begin a[99] := 7 end.
+    ''');
+  AssertTrue('a[99] on array[0..4] must be rejected, got: ' + Msg,
+    Pos('out of bounds', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_Write_Negative_Raises;
+var Msg: string;
+begin
+  { The crashing case: -3 parses as BinaryExpr(0 - 3), so the fold must
+    handle it rather than only spotting a negative literal. }
+  Msg := SemanticErrMsg('''
+    program P;
+    var a: array[0..4] of Integer;
+    begin a[-3] := 5 end.
+    ''');
+  AssertTrue('a[-3] must be rejected, got: ' + Msg,
+    Pos('out of bounds', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_Read_AboveHigh_Raises;
+var Msg: string;
+begin
+  Msg := SemanticErrMsg('''
+    program P;
+    var a: array[0..4] of Integer; x: Integer;
+    begin x := a[77] end.
+    ''');
+  AssertTrue('read of a[77] must be rejected, got: ' + Msg,
+    Pos('out of bounds', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_Read_BelowLow_Raises;
+var Msg: string;
+begin
+  Msg := SemanticErrMsg('''
+    program P;
+    var a: array[0..4] of Integer; x: Integer;
+    begin x := a[-1] end.
+    ''');
+  AssertTrue('read of a[-1] must be rejected, got: ' + Msg,
+    Pos('out of bounds', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_NonZeroBase_BelowLow_Raises;
+var Msg: string;
+begin
+  { 0 is a valid index for array[0..4] but NOT for array[1..5] — the check
+    must use the declared LowBound, not assume 0-based. }
+  Msg := SemanticErrMsg('''
+    program P;
+    var a: array[1..5] of Integer;
+    begin a[0] := 1 end.
+    ''');
+  AssertTrue('a[0] on array[1..5] must be rejected, got: ' + Msg,
+    Pos('out of bounds', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_NamedConst_AboveHigh_Raises;
+var Msg: string;
+begin
+  Msg := SemanticErrMsg('''
+    program P;
+    const K = 9;
+    var a: array[0..4] of Integer;
+    begin a[K] := 1 end.
+    ''');
+  AssertTrue('a[K] with K=9 must be rejected, got: ' + Msg,
+    Pos('out of bounds', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_FoldedExpr_AboveHigh_Raises;
+var Msg: string;
+begin
+  Msg := SemanticErrMsg('''
+    program P;
+    var a: array[0..4] of Integer;
+    begin a[2 + 3] := 1 end.
+    ''');
+  AssertTrue('a[2+3] on array[0..4] must be rejected, got: ' + Msg,
+    Pos('out of bounds', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_ErrorNamesBoundsAndIndex;
+var Msg: string;
+begin
+  { The diagnostic must state the offending index and the valid range, so
+    the programmer does not have to go and look the declaration up. }
+  Msg := SemanticErrMsg('''
+    program P;
+    var a: array[1..5] of Integer;
+    begin a[42] := 1 end.
+    ''');
+  AssertTrue('names the index 42, got: ' + Msg, Pos('42', Msg) >= 0);
+  AssertTrue('names the valid range 1..5, got: ' + Msg, Pos('1..5', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_InRange_Accepted;
+var IR: string;
+begin
+  IR := GenIR('''
+    program P;
+    var a: array[0..4] of Integer;
+    begin a[3] := 7 end.
+    ''');
+  AssertTrue('in-range constant index still compiles', Length(IR) > 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_BoundaryLowAndHigh_Accepted;
+var IR: string;
+begin
+  { Off-by-one guard: both bounds are INCLUSIVE and must be accepted. }
+  IR := GenIR('''
+    program P;
+    var a: array[0..4] of Integer;
+    begin a[0] := 1; a[4] := 2 end.
+    ''');
+  AssertTrue('both boundary indices accepted', Length(IR) > 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_NonZeroBase_InRange_Accepted;
+var IR: string;
+begin
+  IR := GenIR('''
+    program P;
+    var a: array[1..5] of Integer;
+    begin a[1] := 1; a[5] := 2 end.
+    ''');
+  AssertTrue('non-zero-based boundary indices accepted', Length(IR) > 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_VarIndex_NotDiagnosed;
+var IR: string;
+begin
+  { A variable index is not a compile-time fact — it must NOT be rejected,
+    even when the value would obviously be out of range at runtime. }
+  IR := GenIR('''
+    program P;
+    var a: array[0..4] of Integer; i: Integer;
+    begin i := 99; a[i] := 7 end.
+    ''');
+  AssertTrue('variable index is not diagnosed', Length(IR) > 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_DynArray_NotDiagnosed;
+var IR: string;
+begin
+  { A dynamic array's length is not a compile-time fact — out of scope
+    of this check (see BUG-20260921-no-compile-time-range-check). }
+  IR := GenIR('''
+    program P;
+    var d: array of Integer;
+    begin SetLength(d, 3); d[50] := 9 end.
+    ''');
+  AssertTrue('dynamic array constant index is not diagnosed', Length(IR) > 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstIndex_Nested2D_AboveHigh_Raises;
+var Msg: string;
+begin
+  { Multi-dimensional access lowers to A[I][J]; the inner subscript's base
+    is a static-array-typed expression rather than a named variable. }
+  Msg := SemanticErrMsg('''
+    program P;
+    var m: array[0..2, 0..2] of Integer;
+    begin m[1, 7] := 3 end.
+    ''');
+  AssertTrue('m[1,7] must be rejected, got: ' + Msg,
+    Pos('out of bounds', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_EnumShadowedByGlobalVar_NotFolded;
+var IR: string;
+begin
+  { 'Red' here is an Integer variable, not TColor.Red — folding it to the
+    ordinal 0 would wrongly report it out of bounds of array[1..5]. }
+  IR := GenIR('''
+    program P;
+    type TColor = (Red, Green, Blue);
+    var A: array[1..5] of Integer; Red: Integer;
+    begin Red := 3; A[Red] := 1 end.
+    ''');
+  AssertTrue('enum-shadowing global var is not folded', Length(IR) > 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_EnumShadowedByLocalVar_NotFolded;
+var IR: string;
+begin
+  IR := GenIR('''
+    program P;
+    type TColor = (Red, Green, Blue);
+    var A: array[1..5] of Integer;
+    procedure Fill();
+    var Blue: Integer;
+    begin Blue := 4; A[Blue] := 1 end;
+    begin Fill() end.
+    ''');
+  AssertTrue('enum-shadowing local var is not folded', Length(IR) > 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_EnumShadowedByParam_NotFolded;
+var IR: string;
+begin
+  IR := GenIR('''
+    program P;
+    type TColor = (Red, Green, Blue);
+    var A: array[5..9] of Integer;
+    procedure Fill(Green: Integer);
+    begin A[Green] := 1 end;
+    begin Fill(7) end.
+    ''');
+  AssertTrue('enum-shadowing parameter is not folded', Length(IR) > 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_EnumShadowedByField_NotFolded;
+var IR: string;
+begin
+  { A class FIELD is not in the symbol table at all, so a lookup-based guard
+    would still mis-fold this one — the IsConstant annotation is what makes
+    it correct. }
+  IR := GenIR('''
+    program P;
+    type
+      TColor = (Red, Green, Blue);
+      TC = class
+        Red: Integer;
+        A: array[1..5] of Integer;
+        procedure Go();
+      end;
+    procedure TC.Go();
+    begin Red := 3; A[Red] := 1 end;
+    var C: TC;
+    begin C := TC.Create(); C.Go() end.
+    ''');
+  AssertTrue('enum-shadowing class field is not folded', Length(IR) > 0);
 end;
 
 initialization

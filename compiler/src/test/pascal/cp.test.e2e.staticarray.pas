@@ -116,6 +116,14 @@ type
       pointer and the outer subscript dereferenced garbage — SIGSEGV on both
       backends (BUG-20260723-2d-field-array-elem-read). }
     procedure TestRun_MultiDimFieldArray_ElementRead;
+    { BUG-20260921-const-array-index-out-of-bounds — a constant index outside
+      the declared bounds must be REJECTED at compile time.  The IR-only
+      harness cannot see this: the point is that no binary is produced at all,
+      where previously one was produced that wrote out of bounds (positive
+      index) or segfaulted (negative index). }
+    procedure TestCompileFails_ConstIndex_AboveHigh;
+    procedure TestCompileFails_ConstIndex_Negative;
+    procedure TestRun_ConstIndex_BoundaryIndices_StillRun;
   end;
 
 implementation
@@ -1178,6 +1186,80 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '1 4' + LE + '3 104' + LE + '42' + LE +
     'j' + LE + 'k' + LE + '3 104' + LE, 0);
+end;
+
+{ ------------------------------------------------------------------ }
+{ BUG-20260921-const-array-index-out-of-bounds                       }
+{ ------------------------------------------------------------------ }
+
+procedure TE2EStaticArrayTests.TestCompileFails_ConstIndex_AboveHigh;
+const
+  Src =
+  '''
+  program P;
+  var
+    a: array[0..4] of Integer;
+    guard: Integer;
+  begin
+    guard := 111;
+    a[99] := 7;
+    WriteLn(guard)
+  end.
+  ''';
+var Out_: string; Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { Native reports a failed compile as Result=False with the diagnostic in
+    AStdout, so no binary is ever linked or run. }
+  AssertFalse('a[99] on array[0..4] must not compile',
+    CompileAndRunOn(beNative, Src, Out_, Rc));
+  AssertTrue('diagnostic names the out-of-bounds index, got: ' + Out_,
+    Pos('out of bounds', Out_) >= 0);
+end;
+
+procedure TE2EStaticArrayTests.TestCompileFails_ConstIndex_Negative;
+const
+  Src =
+  '''
+  program P;
+  var
+    a: array[0..4] of Integer;
+  begin
+    a[-3] := 5;
+    WriteLn('done')
+  end.
+  ''';
+var Out_: string; Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { This is the case that used to link cleanly and then SEGFAULT (exit 139). }
+  AssertFalse('a[-3] must not compile',
+    CompileAndRunOn(beNative, Src, Out_, Rc));
+  AssertTrue('diagnostic names the out-of-bounds index, got: ' + Out_,
+    Pos('out of bounds', Out_) >= 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_ConstIndex_BoundaryIndices_StillRun;
+const
+  Src =
+  '''
+  program P;
+  var
+    a: array[0..4] of Integer;
+    b: array[1..5] of Integer;
+  begin
+    a[0] := 10; a[4] := 20;
+    b[1] := 30; b[5] := 40;
+    WriteLn(a[0], ' ', a[4], ' ', b[1], ' ', b[5])
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { Both inclusive bounds, zero- and non-zero-based, must still compile AND
+    run — the off-by-one guard on the new check. }
+  AssertRunsOnAll(Src, '10 20 30 40' + LE, 0);
 end;
 
 initialization

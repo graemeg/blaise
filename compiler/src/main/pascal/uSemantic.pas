@@ -320,6 +320,23 @@ type
     function  EvalConstIntExpr(AExpr: TASTExpr; ALine, ACol: Integer): Int64;
     function  EvalConstFloatExpr(AExpr: TASTExpr; ALine, ACol: Integer): string;
     function  IsFloatConstExpr(AExpr: TASTExpr): Boolean;
+    { Non-raising counterpart of EvalConstIntExpr: True (and AValue set) only
+      when AExpr is a compile-time integer constant.  EvalConstIntExpr itself
+      raises on a non-constant expression, which is no use where a
+      non-constant operand is legal — an array index, say. }
+    function  TryEvalConstIntExpr(AExpr: TASTExpr; out AValue: Int64): Boolean;
+    { A readable name for the indexed thing, for use in a diagnostic, or ''
+      when the base is not a simple named entity. }
+    function  IndexBaseDescr(AExpr: TASTExpr): string;
+    { Reject a compile-time-constant static-array index that falls outside the
+      declared bounds (BUG-20260921-const-array-index-out-of-bounds).  A
+      non-constant index is left alone: there is no runtime range check, so
+      the bounds are only knowable here when the index folds.  ADescr names
+      the array in the diagnostic (may be empty). }
+    procedure CheckConstArrayIndexInRange(AIndexExpr: TASTExpr;
+                                          AArrType: TTypeDesc;
+                                          const ADescr: string;
+                                          ALine, ACol: Integer);
     function  ResolveArrayBound(const ABoundText: string): Integer;
     function  ResolveSubrangeSetType(const ASubrange: string): TSetTypeDesc;
     function  ResolveConstArrayElem(const AElem: string; AElemType: TTypeDesc;
@@ -5720,6 +5737,111 @@ begin
   end;
 end;
 
+function TSemanticAnalyser.TryEvalConstIntExpr(AExpr: TASTExpr;
+                                               out AValue: Int64): Boolean;
+var
+  Bin: TBinaryExpr;
+  L, R: Int64;
+begin
+  Result := False;
+  AValue := 0;
+  if AExpr = nil then Exit;
+
+  if AExpr is TIntLiteral then
+  begin
+    AValue := TIntLiteral(AExpr).Value;
+    Exit(True);
+  end;
+
+  if AExpr is TIdentExpr then
+  begin
+    if SameText(TIdentExpr(AExpr).Name, 'True') then
+    begin
+      AValue := 1;
+      Exit(True);
+    end;
+    if SameText(TIdentExpr(AExpr).Name, 'False') then
+    begin
+      AValue := 0;
+      Exit(True);
+    end;
+    { Trust the annotation the expression pass already made, rather than
+      re-resolving the name here.  AnalyseExpr sets IsConstant/ConstValue for
+      a named constant, a member constant, and a bare enum member — and it
+      reaches the bare-enum arm only AFTER a symbol lookup has failed, so a
+      variable, parameter or field that happens to share a name with an enum
+      member correctly leaves IsConstant False.  Re-resolving here got that
+      wrong: `var Red: Integer` next to `TColor = (Red, ...)` folded A[Red]
+      to the ordinal 0 and rejected a legal program.  Re-resolution could
+      also drift from whatever the analyser decided; there is one answer and
+      this is where it is recorded. }
+    if TIdentExpr(AExpr).IsConstant then
+    begin
+      AValue := TIdentExpr(AExpr).ConstValue;
+      Exit(True);
+    end;
+    Exit;
+  end;
+
+  if AExpr is TBinaryExpr then
+  begin
+    Bin := TBinaryExpr(AExpr);
+    if not Self.TryEvalConstIntExpr(Bin.Left,  L) then Exit;
+    if not Self.TryEvalConstIntExpr(Bin.Right, R) then Exit;
+    case Bin.Op of
+      boAdd: begin AValue := L + R;   Exit(True); end;
+      boSub: begin AValue := L - R;   Exit(True); end;
+      boMul: begin AValue := L * R;   Exit(True); end;
+      boDiv: if R <> 0 then begin AValue := L div R; Exit(True); end;
+      boMod: if R <> 0 then begin AValue := L mod R; Exit(True); end;
+      boAnd: begin AValue := L and R; Exit(True); end;
+      boOr:  begin AValue := L or R;  Exit(True); end;
+      boXor: begin AValue := L xor R; Exit(True); end;
+      boShl: begin AValue := L shl R; Exit(True); end;
+      boShr, boSar: begin AValue := L shr R; Exit(True); end;
+    end;
+  end;
+end;
+
+function TSemanticAnalyser.IndexBaseDescr(AExpr: TASTExpr): string;
+begin
+  Result := '';
+  if AExpr = nil then Exit;
+  if AExpr is TIdentExpr then
+    Result := TIdentExpr(AExpr).Name
+  else if AExpr is TFieldAccessExpr then
+    Result := TFieldAccessExpr(AExpr).FieldName;
+end;
+
+procedure TSemanticAnalyser.CheckConstArrayIndexInRange(AIndexExpr: TASTExpr;
+                                                        AArrType: TTypeDesc;
+                                                        const ADescr: string;
+                                                        ALine, ACol: Integer);
+var
+  Idx:  Int64;
+  Arr:  TStaticArrayTypeDesc;
+  Who:  string;
+begin
+  if (AIndexExpr = nil) or (AArrType = nil) or
+     (AArrType.Kind <> tyStaticArray) then
+    Exit;
+  { Only a folding index is checkable — a variable index has no
+    compile-time value, and Blaise has no runtime range check. }
+  if not Self.TryEvalConstIntExpr(AIndexExpr, Idx) then
+    Exit;
+  Arr := TStaticArrayTypeDesc(AArrType);
+  if (Idx >= Arr.LowBound) and (Idx <= Arr.HighBound) then
+    Exit;
+  if ADescr <> '' then
+    Who := Format(' of ''%s''', [ADescr])
+  else
+    Who := '';
+  SemanticError(
+    Format('Array index %d is out of bounds%s (valid range is %d..%d)',
+      [Idx, Who, Arr.LowBound, Arr.HighBound]),
+    ALine, ACol);
+end;
+
 function TSemanticAnalyser.EvalConstFloatExpr(AExpr: TASTExpr;
                                                ALine, ACol: Integer): string;
 var
@@ -11036,6 +11158,8 @@ begin
   IdxType := Self.AnalyseExprSlot(AAssign.PropIndexExpr);
   if not IdxType.IsArrayIndex() then
     SemanticError('Array index must be an ordinal type', AAssign.Line, AAssign.Col);
+  Self.CheckConstArrayIndexInRange(AAssign.PropIndexExpr, AFldInfo.TypeDesc,
+    AAssign.FieldName, AAssign.Line, AAssign.Col);
   { Hint a bracket set literal against the element set type — a plain-variable
     array element write already does this (AnalyseExprHinted), but the
     field-array element destination (R.Arr[0] := [3, 200]) went through the
@@ -14796,6 +14920,8 @@ begin
       else if FldInfo.TypeDesc.Kind = tyStaticArray then
       begin
         Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+        Self.CheckConstArrayIndexInRange(AAccess.PropIndexExpr,
+          FldInfo.TypeDesc, AAccess.FieldName, AAccess.Line, AAccess.Col);
         AAccess.IsArrayAccess := True;
         Result := TStaticArrayTypeDesc(FldInfo.TypeDesc).ElementType;
         AAccess.ResolvedType := Result;
@@ -14939,6 +15065,9 @@ begin
           else if AAccess.FieldInfo.TypeDesc.Kind = tyStaticArray then
           begin
             Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+            Self.CheckConstArrayIndexInRange(AAccess.PropIndexExpr,
+              AAccess.FieldInfo.TypeDesc, AAccess.FieldName,
+              AAccess.Line, AAccess.Col);
             AAccess.IsArrayAccess := True;
             Result := TStaticArrayTypeDesc(AAccess.FieldInfo.TypeDesc).ElementType;
             AAccess.ResolvedType := Result;
@@ -15311,6 +15440,8 @@ begin
     else if FldInfo.TypeDesc.Kind = tyStaticArray then
     begin
       Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+      Self.CheckConstArrayIndexInRange(AAccess.PropIndexExpr,
+        FldInfo.TypeDesc, AAccess.FieldName, AAccess.Line, AAccess.Col);
       AAccess.IsArrayAccess := True;
       Result := TStaticArrayTypeDesc(FldInfo.TypeDesc).ElementType;
       AAccess.ResolvedType := Result;
@@ -16715,6 +16846,8 @@ begin
       SemanticError(
         Format('Static array index must be an ordinal type, got ''%s''', [IdxType.Name]),
         AExpr.Line, AExpr.Col);
+    Self.CheckConstArrayIndexInRange(AExpr.IndexExpr, StrType,
+      IndexBaseDescr(AExpr.StrExpr), AExpr.Line, AExpr.Col);
     Result := TStaticArrayTypeDesc(StrType).ElementType;
     AExpr.ResolvedType := Result;
     Exit;
@@ -16932,6 +17065,8 @@ begin
     IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
     if not IdxType.IsArrayIndex() then
       SemanticError('Array index must be an ordinal type', AStmt.Line, AStmt.Col);
+    Self.CheckConstArrayIndexInRange(AStmt.IndexExpr, AStmt.ResolvedArrayType,
+      AStmt.ArrayName, AStmt.Line, AStmt.Col);
     ValType := AnalyseExprHinted(AStmt.ValueExpr, ElemT);
     CheckTypesMatch(ElemT, ValType,
       Format('''%s'' element', [AStmt.ArrayName]), AStmt.Line, AStmt.Col);
@@ -16959,6 +17094,8 @@ begin
         IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
         if not IdxType.IsArrayIndex() then
           SemanticError('Array index must be an ordinal type', AStmt.Line, AStmt.Col);
+        Self.CheckConstArrayIndexInRange(AStmt.IndexExpr, BaseInfo.TypeDesc,
+          AStmt.ArrayName, AStmt.Line, AStmt.Col);
         ValType := AnalyseExprHinted(AStmt.ValueExpr, ElemT);
         CheckTypesMatch(ElemT, ValType,
           Format('''%s'' element', [AStmt.ArrayName]), AStmt.Line, AStmt.Col);
@@ -17107,6 +17244,8 @@ begin
   IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
   if not IdxType.IsArrayIndex() then
     SemanticError('Array index must be an ordinal type', AStmt.Line, AStmt.Col);
+  Self.CheckConstArrayIndexInRange(AStmt.IndexExpr, ArrType,
+    AStmt.ArrayName, AStmt.Line, AStmt.Col);
   ValType := AnalyseExprHinted(AStmt.ValueExpr, ArrType.ElementType);
   CheckTypesMatch(ArrType.ElementType, ValType,
     Format('''%s'' element', [AStmt.ArrayName]), AStmt.Line, AStmt.Col);
