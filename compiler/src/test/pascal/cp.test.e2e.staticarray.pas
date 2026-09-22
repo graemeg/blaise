@@ -124,6 +124,13 @@ type
     procedure TestCompileFails_ConstIndex_AboveHigh;
     procedure TestCompileFails_ConstIndex_Negative;
     procedure TestRun_ConstIndex_BoundaryIndices_StillRun;
+    { BUG-20260921-no-compile-time-range-check — a constant outside a
+      SUBRANGE or ENUM destination's range must be rejected at compile time.
+      Needs the e2e layer: the point is that no binary is produced, where
+      previously one was produced that stored an out-of-range value. }
+    procedure TestCompileFails_SubrangeAssign_AboveHigh;
+    procedure TestCompileFails_SubrangeCtorArg;
+    procedure TestRun_SubrangeAndEnumInRange_StillRun;
   end;
 
 implementation
@@ -1260,6 +1267,86 @@ begin
   { Both inclusive bounds, zero- and non-zero-based, must still compile AND
     run — the off-by-one guard on the new check. }
   AssertRunsOnAll(Src, '10 20 30 40' + LE, 0);
+end;
+
+{ ------------------------------------------------------------------ }
+{ BUG-20260921-no-compile-time-range-check                           }
+{ ------------------------------------------------------------------ }
+
+procedure TE2EStaticArrayTests.TestCompileFails_SubrangeAssign_AboveHigh;
+const
+  Src =
+  '''
+  program P;
+  type TStd = 1..5;
+  var v: TStd;
+  begin
+    v := 6;
+    WriteLn(v)
+  end.
+  ''';
+var Out_: string; Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertFalse('v := 6 on a 1..5 subrange must not compile',
+    CompileAndRunOn(beNative, Src, Out_, Rc));
+  AssertTrue('diagnostic says out of range, got: ' + Out_,
+    Pos('out of range', Out_) >= 0);
+end;
+
+procedure TE2EStaticArrayTests.TestCompileFails_SubrangeCtorArg;
+const
+  Src =
+  '''
+  program P;
+  type
+    TThing = class
+      type Tparm = 1..5;
+      constructor Create(p: Tparm);
+    end;
+  constructor TThing.Create(p: Tparm);
+  begin WriteLn(p) end;
+  var t: TThing;
+  begin
+    t := TThing.Create(6)
+  end.
+  ''';
+var Out_: string; Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { GH #175's reporter declared a nested subrange as a ctor param type
+    precisely to get this complaint. }
+  AssertFalse('TThing.Create(6) with p: 1..5 must not compile',
+    CompileAndRunOn(beNative, Src, Out_, Rc));
+  AssertTrue('diagnostic says out of range, got: ' + Out_,
+    Pos('out of range', Out_) >= 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_SubrangeAndEnumInRange_StillRun;
+const
+  Src =
+  '''
+  program P;
+  type
+    TStd = 1..5;
+    TX = (xA = 5, xB = 10);
+  var
+    v: TStd;
+    x: TX;
+  begin
+    v := 1; WriteLn(v);
+    v := 5; WriteLn(v);
+    x := 7; WriteLn(Ord(x))
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { Both inclusive subrange bounds, plus an INTERIOR HOLE of an
+    explicitly-numbered enum (7 is within 5..10 though no member declares
+    it) — all legal, and must still compile AND run. }
+  AssertRunsOnAll(Src, '1' + LE + '5' + LE + '7' + LE, 0);
 end;
 
 initialization

@@ -1281,10 +1281,12 @@ begin
       else if (Check(tkIntLit) or Check(tkMinus)) and SubrangeAhead() then
       begin
         { Named integer subrange:  type TByte = 0..255;  type TIdx = -10..10;
-          Blaise does not range-check, so a subrange is an alias to the
-          narrowest standard integer type that holds both bounds.  This keeps
-          record/array layout correct (TByte is byte-sized) while the value
-          behaves as an ordinary integer. }
+          A subrange is an alias to the narrowest standard integer type that
+          holds both bounds, which keeps record/array layout correct (TByte is
+          byte-sized) while the value behaves as an ordinary integer at
+          runtime.  The bounds ride along in IsSubrange/SubrangeLow/High so
+          the semantic pass can reject an out-of-range CONSTANT; there is no
+          runtime range check. }
         AD := TTypeAliasDef.Create();
         AD.TypeName := Self.ParseIntegerSubrangeBaseType(SubLo, SubHi);
         AD.IsSubrange := True;

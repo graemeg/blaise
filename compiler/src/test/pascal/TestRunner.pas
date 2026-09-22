@@ -86,6 +86,7 @@ uses
   cp.test.process,
   cp.test.openarray,
   cp.test.staticarray,
+  cp.test.rangecheck,
   cp.test.varinit,
   cp.test.e2e.varinit,
   cp.test.inlineset,

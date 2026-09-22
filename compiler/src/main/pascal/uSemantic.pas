@@ -337,6 +337,21 @@ type
                                           AArrType: TTypeDesc;
                                           const ADescr: string;
                                           ALine, ACol: Integer);
+    { Reject a compile-time-constant value stored into a SUBRANGE or ENUM
+      destination when it falls outside that type's range
+      (BUG-20260921-no-compile-time-range-check).  Covers stores, value
+      arguments and initialisers; an explicit cast, a for-loop bound and a
+      case label are deliberately NOT checked (see
+      docs/language-rationale.adoc).  An enum's range is its MIN..MAX
+      declared ordinal, so an interior hole in an explicitly-numbered enum
+      stays legal.  A non-constant value is left alone. }
+    procedure CheckConstValueInRange(ADestType: TTypeDesc; AExpr: TASTExpr;
+                                     ALine, ACol: Integer);
+    { As CheckConstValueInRange but for a value already folded to an Int64
+      (the global-variable initialiser path folds before any expression
+      survives). }
+    procedure CheckConstIntInRange(ADestType: TTypeDesc; AValue: Int64;
+                                   ALine, ACol: Integer);
     function  ResolveArrayBound(const ABoundText: string): Integer;
     function  ResolveSubrangeSetType(const ASubrange: string): TSetTypeDesc;
     function  ResolveConstArrayElem(const AElem: string; AElemType: TTypeDesc;
@@ -464,6 +479,14 @@ type
     function  SetLiteralBaseEnum(AExpr: TArrayLiteralExpr): TTypeDesc;
     { Re-type set-literal args to their `set of` param type post-overload. }
     procedure RetypeSetLiteralArgs(AArgs: TObjectList; AMDecl: TMethodDecl);
+    { Range-check every constant VALUE argument against its parameter's type,
+      for a call whose overload has already been resolved.  Runs beside
+      RetypeSetLiteralArgs because that is the one hook every call shape
+      passes through after MDecl is known — and it must be after, because
+      overload scoring swallows ESemanticError, so a check inside it would
+      silently steer the choice instead of reporting. }
+    procedure CheckConstArgsInRange(AArgs: TObjectList; AMDecl: TMethodDecl;
+                                    ALine, ACol: Integer);
     procedure AnalyseMethodCall(ACall: TMethodCallStmt);
     { Resolve the return type of an interface method for a statement-position
       itab dispatch; nil for procedures.  Codegen uses this to give discarded
@@ -1190,6 +1213,15 @@ begin
   if TIdentExpr(AExpr).IsConstant then Exit;
   { A real symbol of that name always wins — do not shadow it with an enum. }
   if FTable.Lookup(TIdentExpr(AExpr).Name) <> nil then Exit;
+  { A FIELD of the class whose method we are inside also wins, and fields are
+    NOT in the symbol table — so the Lookup above cannot see them.  Without
+    this arm, `FM := eA` inside a method of a class owning a field `eA`
+    silently stored the ENUM MEMBER's ordinal instead of the field's value
+    (no diagnostic, wrong result).  Same precedence as the implicit-Self
+    field arm in AnalyseIdentExpr, which resolves a bare field name before
+    ever reaching the bare-enum fallback. }
+  if (FCurrentClass <> nil) and
+     (FCurrentClass.FindField(TIdentExpr(AExpr).Name) <> nil) then Exit;
   Ref := ResolveEnumMember(TIdentExpr(AExpr).Name, AExpectedType);
   if Ref = nil then Exit;
   TIdentExpr(AExpr).IsConstant   := True;
@@ -5842,6 +5874,73 @@ begin
     ALine, ACol);
 end;
 
+procedure TSemanticAnalyser.CheckConstIntInRange(ADestType: TTypeDesc;
+                                                 AValue: Int64;
+                                                 ALine, ACol: Integer);
+var
+  Lo, Hi: Int64;
+begin
+  if ADestType = nil then
+    Exit;
+  if ADestType.IsSubrange then
+  begin
+    Lo := ADestType.SubrangeLow;
+    Hi := ADestType.SubrangeHigh;
+  end
+  else if (ADestType.Kind = tyEnum) and (ADestType is TEnumTypeDesc) then
+  begin
+    Lo := TEnumTypeDesc(ADestType).MinOrdinal();
+    Hi := TEnumTypeDesc(ADestType).MaxOrdinal();
+  end
+  else
+    Exit;
+  if (AValue >= Lo) and (AValue <= Hi) then
+    Exit;
+  SemanticError(
+    Format('Constant %d is out of range for ''%s'' (valid range is %d..%d)',
+      [AValue, ADestType.Name, Lo, Hi]),
+    ALine, ACol);
+end;
+
+procedure TSemanticAnalyser.CheckConstValueInRange(ADestType: TTypeDesc;
+                                                   AExpr: TASTExpr;
+                                                   ALine, ACol: Integer);
+var
+  V: Int64;
+  Lo, Hi: Int64;
+begin
+  if (ADestType = nil) or (AExpr = nil) then
+    Exit;
+  { Only a destination whose range is narrower than its storage is checkable:
+    a named subrange, or an enum.  A plain Byte/Word/Integer is NOT checked
+    here — that would be a far broader ruling than this bug covers. }
+  if ADestType.IsSubrange then
+  begin
+    Lo := ADestType.SubrangeLow;
+    Hi := ADestType.SubrangeHigh;
+  end
+  else if (ADestType.Kind = tyEnum) and (ADestType is TEnumTypeDesc) then
+  begin
+    { MIN..MAX declared ordinal, not 0..Count-1: an explicitly-numbered enum
+      (xA = 5, xB = 10) legitimately spans 5..10, and a store to an interior
+      hole is legal in Delphi/FPC. }
+    Lo := TEnumTypeDesc(ADestType).MinOrdinal();
+    Hi := TEnumTypeDesc(ADestType).MaxOrdinal();
+  end
+  else
+    Exit;
+  { A non-constant value has no compile-time value to check, and there is no
+    runtime range check — so it is left alone. }
+  if not Self.TryEvalConstIntExpr(AExpr, V) then
+    Exit;
+  if (V >= Lo) and (V <= Hi) then
+    Exit;
+  SemanticError(
+    Format('Constant %d is out of range for ''%s'' (valid range is %d..%d)',
+      [V, ADestType.Name, Lo, Hi]),
+    ALine, ACol);
+end;
+
 function TSemanticAnalyser.EvalConstFloatExpr(AExpr: TASTExpr;
                                                ALine, ACol: Integer): string;
 var
@@ -9751,6 +9850,13 @@ begin
       SemanticError(Format(
         'Numeric initialiser is incompatible with type ''%s''', [ADecl.TypeName]),
         CD.Line, CD.Col);
+    { Range-check the folded value against a subrange/enum declared type.
+      This path never builds an assignment, so the store-site checks cannot
+      see it — the value is already folded into CD.IntVal. }
+    if CD.IntValueExpr <> nil then
+      Self.CheckConstValueInRange(Typ, CD.IntValueExpr, CD.Line, CD.Col)
+    else
+      Self.CheckConstIntInRange(Typ, CD.IntVal, CD.Line, CD.Col);
   end;
 end;
 
@@ -10442,6 +10548,7 @@ begin
     end;
     { Set-literal args: see BUG-20260722-native-set-literal-arg. }
     RetypeSetLiteralArgs(ACall.Args, MDecl);
+    CheckConstArgsInRange(ACall.Args, MDecl, ACall.Line, ACall.Col);
     AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
     ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
     ACall.ResolvedClassType := RT;
@@ -10478,6 +10585,7 @@ begin
         ACall.Line, ACall.Col);
     { Set-literal args: see BUG-20260722-native-set-literal-arg. }
     RetypeSetLiteralArgs(ACall.Args, MDecl);
+    CheckConstArgsInRange(ACall.Args, MDecl, ACall.Line, ACall.Col);
     AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
     ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
     EnforceMethodVisible(MDecl, ACall.Line, ACall.Col);
@@ -10543,6 +10651,7 @@ begin
         analysed unhinted for overload resolution, leaving open-array types
         native codegen rejects (BUG-20260722-native-set-literal-arg). }
       RetypeSetLiteralArgs(ACall.Args, MDecl);
+      CheckConstArgsInRange(ACall.Args, MDecl, ACall.Line, ACall.Col);
       AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
       ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
       ACall.ResolvedClassType := RT;
@@ -10668,6 +10777,7 @@ begin
     analysed unhinted for overload resolution, leaving open-array types
     native codegen rejects (BUG-20260722-native-set-literal-arg). }
   RetypeSetLiteralArgs(ACall.Args, MDecl);
+  CheckConstArgsInRange(ACall.Args, MDecl, ACall.Line, ACall.Col);
   AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
   ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
   EnforceMethodVisible(MDecl, ACall.Line, ACall.Col);
@@ -10764,6 +10874,8 @@ begin
         ExprType := AAssign.Expr.ResolvedType
       else
         ExprType := Self.AnalyseExprSlot(AAssign.Expr);
+      Self.CheckConstValueInRange(FldInfo.TypeDesc, AAssign.Expr,
+        AAssign.Line, AAssign.Col);
       CheckTypesMatch(FldInfo.TypeDesc, ExprType, 'assignment', AAssign.Line, AAssign.Col);
       Exit;
     end;
@@ -10856,6 +10968,8 @@ begin
      TProceduralTypeDesc(VarSym.TypeDesc).SignatureMatches(
        TProceduralTypeDesc(ExprType)) then
     Exit;
+  Self.CheckConstValueInRange(VarSym.TypeDesc, AAssign.Expr,
+    AAssign.Line, AAssign.Col);
   CheckTypesMatch(VarSym.TypeDesc, ExprType, 'assignment', AAssign.Line, AAssign.Col);
 end;
 
@@ -11166,6 +11280,8 @@ begin
     unhinted slot analysis and kept the open-array type, so it failed the
     match (BUG-20260722-jumbo-field-array-elem symptom 4). }
   ExprType := Self.AnalyseExprHinted(AAssign.Expr, ElemT);
+  Self.CheckConstValueInRange(ElemT, AAssign.Expr,
+    AAssign.Line, AAssign.Col);
   CheckTypesMatch(ElemT, ExprType,
     Format('''%s'' element', [AAssign.FieldName]), AAssign.Line, AAssign.Col);
   AAssign.IsElemWrite := True;
@@ -11340,6 +11456,8 @@ begin
       'reference to' type. }
     InferArrowFromTarget(AAssign.Expr, FldInfo.TypeDesc);
     ExprType := Self.AnalyseExprSlot(AAssign.Expr);
+    Self.CheckConstValueInRange(FldInfo.TypeDesc, AAssign.Expr,
+      AAssign.Line, AAssign.Col);
     CheckTypesMatch(FldInfo.TypeDesc, ExprType, 'field assignment',
       AAssign.Line, AAssign.Col);
     Exit;
@@ -11413,6 +11531,8 @@ begin
         if TryAnalyseFieldElemWrite(AAssign, FldInfo) then
           Exit;
         ExprType := Self.AnalyseExprSlot(AAssign.Expr);
+        Self.CheckConstValueInRange(FldInfo.TypeDesc, AAssign.Expr,
+          AAssign.Line, AAssign.Col);
         CheckTypesMatch(FldInfo.TypeDesc, ExprType, 'field assignment',
           AAssign.Line, AAssign.Col);
         Exit;
@@ -11449,6 +11569,8 @@ begin
       end;
       ResolveDiamond(AAssign.Expr, VarSym.TypeDesc);
       ExprType := Self.AnalyseExprSlot(AAssign.Expr);
+      Self.CheckConstValueInRange(VarSym.TypeDesc, AAssign.Expr,
+        AAssign.Line, AAssign.Col);
       CheckTypesMatch(VarSym.TypeDesc, ExprType, 'static var assignment',
         AAssign.Line, AAssign.Col);
       Exit;
@@ -11574,6 +11696,8 @@ begin
     ExprType := AAssign.Expr.ResolvedType
   else
     ExprType := Self.AnalyseExprSlot(AAssign.Expr);
+  Self.CheckConstValueInRange(FldInfo.TypeDesc, AAssign.Expr,
+    AAssign.Line, AAssign.Col);
   CheckTypesMatch(FldInfo.TypeDesc, ExprType, 'field assignment',
     AAssign.Line, AAssign.Col);
 end;
@@ -11700,6 +11824,8 @@ begin
         ALine, ACol);
   CheckTypesMatch(APar.ResolvedType, T,
     Format('default value of parameter ''%s'' (%s)', [APar.ParamName, AContext]),
+    ALine, ACol);
+  Self.CheckConstValueInRange(APar.ResolvedType, APar.DefaultValue,
     ALine, ACol);
 end;
 
@@ -11836,6 +11962,29 @@ end;
   context (so its ResolvedType is an open-array, not the set).  Re-point each
   such argument's ResolvedType at the parameter's set type so codegen emits a
   bitmask (EmitArrayLiteralExpr dispatches on ResolvedType.Kind = tySet). }
+procedure TSemanticAnalyser.CheckConstArgsInRange(AArgs: TObjectList;
+  AMDecl: TMethodDecl; ALine, ACol: Integer);
+var
+  I:   Integer;
+  N:   Integer;
+  Par: TMethodParam;
+begin
+  if (AArgs = nil) or (AMDecl = nil) or (AMDecl.Params = nil) then
+    Exit;
+  N := AArgs.Count;
+  if AMDecl.Params.Count < N then
+    N := AMDecl.Params.Count;
+  for I := 0 to N - 1 do
+  begin
+    Par := TMethodParam(AMDecl.Params.Items[I]);
+    { A var/out argument is an l-value, never a constant. }
+    if Par.IsVarParam then
+      Continue;
+    Self.CheckConstValueInRange(Par.ResolvedType, TASTExpr(AArgs.Items[I]),
+      ALine, ACol);
+  end;
+end;
+
 procedure TSemanticAnalyser.RetypeSetLiteralArgs(AArgs: TObjectList;
   AMDecl: TMethodDecl);
 var
@@ -12286,6 +12435,7 @@ begin
       end;
       { Set-literal args: see BUG-20260722-native-set-literal-arg. }
       RetypeSetLiteralArgs(ACall.Args, MDecl);
+      CheckConstArgsInRange(ACall.Args, MDecl, ACall.Line, ACall.Col);
       AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
       ACall.ResolvedDecl         := MDecl;
       ACall.IsImplicitSelfMethod := True;
@@ -12439,9 +12589,11 @@ begin
           ACall.Line, ACall.Col);
       end;
       { Non-var argument compatibility was verified by overload scoring;
-        no second CheckTypesMatch needed here. }
+        no second CheckTypesMatch needed here.  The constant RANGE check runs
+        after resolution, via CheckConstArgsInRange below. }
     end;
     RetypeSetLiteralArgs(ACall.Args, MDecl);
+    CheckConstArgsInRange(ACall.Args, MDecl, ACall.Line, ACall.Col);
     if MDecl.IsVarArgs then
       ValidateVarArgsExtras(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
     AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
@@ -12929,6 +13081,7 @@ begin
       end;
       { Set-literal args: see BUG-20260722-native-set-literal-arg. }
       RetypeSetLiteralArgs(AExpr.Args, MDecl);
+      CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
       AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
       AExpr.ResolvedDecl         := MDecl;
       AExpr.IsImplicitSelfMethod := True;
@@ -13717,6 +13870,7 @@ begin
       end;
     end;
     RetypeSetLiteralArgs(AExpr.Args, MDecl);
+    CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
     AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
     AExpr.ResolvedDecl := MDecl;
     Result := MDecl.ResolvedReturnType;
@@ -13768,6 +13922,7 @@ begin
   end;
 
   RetypeSetLiteralArgs(AExpr.Args, MDecl);
+  CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
   if MDecl.IsVarArgs then
     ValidateVarArgsExtras(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
   AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
@@ -14050,6 +14205,7 @@ begin
         AExpr.Line, AExpr.Col);
     { Set-literal args: see BUG-20260722-native-set-literal-arg. }
     RetypeSetLiteralArgs(AExpr.Args, MDecl);
+    CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
     AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
     ValidateMethodVarArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
     EnforceMethodVisible(MDecl, AExpr.Line, AExpr.Col);
@@ -14136,6 +14292,7 @@ begin
         (no set context at analysis time), and codegen rejects it as an
         unsupported array literal in constructor-argument position. }
       RetypeSetLiteralArgs(AExpr.Args, MDecl);
+      CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
       AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
     end;
     ValidateMethodVarArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
@@ -14186,6 +14343,7 @@ begin
     if MDecl <> nil then
     begin
       RetypeSetLiteralArgs(AExpr.Args, MDecl);
+      CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
       AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
     end;
     ValidateMethodVarArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
@@ -14260,6 +14418,7 @@ begin
     ResolveDeferredArrowArgs(AExpr.Args, MDecl);
     { Set-literal args: see BUG-20260722-native-set-literal-arg. }
     RetypeSetLiteralArgs(AExpr.Args, MDecl);
+    CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
     for I := 0 to AExpr.Args.Count - 1 do
       CheckTypesMatch(TMethodParam(MDecl.Params.Items[I]).ResolvedType,
         TASTExpr(AExpr.Args.Items[I]).ResolvedType,
@@ -17033,6 +17192,8 @@ begin
       AStmt.Line, AStmt.Col);
   AStmt.BaseTy := TPointerTypeDesc(PtrType).BaseType;
   ValType := AnalyseExprHinted(AStmt.ValExpr, AStmt.BaseTy);
+  Self.CheckConstValueInRange(AStmt.BaseTy, AStmt.ValExpr,
+    AStmt.Line, AStmt.Col);
   CheckTypesMatch(AStmt.BaseTy, ValType, 'pointer write', AStmt.Line, AStmt.Col);
 end;
 
@@ -17068,6 +17229,8 @@ begin
     Self.CheckConstArrayIndexInRange(AStmt.IndexExpr, AStmt.ResolvedArrayType,
       AStmt.ArrayName, AStmt.Line, AStmt.Col);
     ValType := AnalyseExprHinted(AStmt.ValueExpr, ElemT);
+    Self.CheckConstValueInRange(ElemT, AStmt.ValueExpr,
+      AStmt.Line, AStmt.Col);
     CheckTypesMatch(ElemT, ValType,
       Format('''%s'' element', [AStmt.ArrayName]), AStmt.Line, AStmt.Col);
     Exit;
@@ -17097,6 +17260,8 @@ begin
         Self.CheckConstArrayIndexInRange(AStmt.IndexExpr, BaseInfo.TypeDesc,
           AStmt.ArrayName, AStmt.Line, AStmt.Col);
         ValType := AnalyseExprHinted(AStmt.ValueExpr, ElemT);
+        Self.CheckConstValueInRange(ElemT, AStmt.ValueExpr,
+          AStmt.Line, AStmt.Col);
         CheckTypesMatch(ElemT, ValType,
           Format('''%s'' element', [AStmt.ArrayName]), AStmt.Line, AStmt.Col);
         Exit;
@@ -17206,6 +17371,8 @@ begin
       SemanticError('Dynamic array index must be numeric', AStmt.Line, AStmt.Col);
     ValType := AnalyseExprHinted(AStmt.ValueExpr,
       TDynArrayTypeDesc(Sym.TypeDesc).ElementType);
+    Self.CheckConstValueInRange(TDynArrayTypeDesc(Sym.TypeDesc).ElementType, AStmt.ValueExpr,
+      AStmt.Line, AStmt.Col);
     CheckTypesMatch(TDynArrayTypeDesc(Sym.TypeDesc).ElementType, ValType,
       Format('''%s'' element', [AStmt.ArrayName]), AStmt.Line, AStmt.Col);
     Exit;
@@ -17229,6 +17396,8 @@ begin
       SemanticError('Open array index must be numeric', AStmt.Line, AStmt.Col);
     ValType := AnalyseExprHinted(AStmt.ValueExpr,
       TOpenArrayTypeDesc(Sym.TypeDesc).ElementType);
+    Self.CheckConstValueInRange(TOpenArrayTypeDesc(Sym.TypeDesc).ElementType, AStmt.ValueExpr,
+      AStmt.Line, AStmt.Col);
     CheckTypesMatch(TOpenArrayTypeDesc(Sym.TypeDesc).ElementType, ValType,
       Format('''%s'' element', [AStmt.ArrayName]), AStmt.Line, AStmt.Col);
     Exit;
@@ -17247,6 +17416,8 @@ begin
   Self.CheckConstArrayIndexInRange(AStmt.IndexExpr, ArrType,
     AStmt.ArrayName, AStmt.Line, AStmt.Col);
   ValType := AnalyseExprHinted(AStmt.ValueExpr, ArrType.ElementType);
+  Self.CheckConstValueInRange(ArrType.ElementType, AStmt.ValueExpr,
+    AStmt.Line, AStmt.Col);
   CheckTypesMatch(ArrType.ElementType, ValType,
     Format('''%s'' element', [AStmt.ArrayName]), AStmt.Line, AStmt.Col);
 end;

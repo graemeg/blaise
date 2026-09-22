@@ -6661,3 +6661,86 @@ cause that — it surfaces it, previously as a silent out-of-bounds write and
 now as a compile error whose message blames the index rather than the array
 extent. Tracked as `BUG-20260922-explicit-ordinal-enum-array-bounds`; the
 extent is the thing to fix.
+
+== Constant Values Stored into a Subrange or Enum Are Range-Checked
+
+=== Decision
+
+When a compile-time-constant value is stored into a destination whose type is
+an integer subrange or an enumeration, and that value falls outside the type's
+range, the compiler reports a semantic error:
+
+[source,pascal]
+----
+type TStd = 1..5;
+var v: TStd;
+begin
+  v := 6;    // Constant 6 is out of range for 'TStd' (valid range is 1..5)
+end.
+----
+
+The check applies to every constant-carrying store position:
+
+* assignment to a variable, `Result`, a record field, a class field (bare or
+  qualified), a static class variable, or a pointer target;
+* an array, dynamic-array or open-array element write;
+* a value argument at a call site, including a constructor argument;
+* a parameter's default value;
+* a global variable's initialiser.
+
+An enumeration's valid range is its *minimum to maximum declared ordinal*.
+For `TX = (xA = 5, xB = 10)` that is 5..10, so `x := 7` is accepted even
+though no member declares 7.
+
+=== Rationale
+
+Blaise has no runtime range checking and no `{$R+}` equivalent, so an
+out-of-range value was caught nowhere. The declaration `TStd = 1..5` read as
+documentation rather than a constraint: `v := 6` compiled silently and stored
+6. This was the concrete complaint behind GH #175 — a nested subrange was
+declared as a constructor parameter type specifically to get a diagnostic when
+a caller passed an out-of-range value, and none arrived.
+
+Where the value is constant the compiler already holds both facts it needs:
+the declared bounds and the value. This is the same reasoning, and the same
+machinery, as the constant array-index check described above.
+
+Restricting the check to constants keeps it free of false positives. A
+variable's value is not a compile-time fact, and rejecting it would break
+correct programs that constrain their values at runtime.
+
+=== Deliberate boundaries
+
+Three constant positions are *not* checked, each for a reason:
+
+* *An explicit typecast.* `x := TE(99)` is the programmer deliberately
+  overriding the type system, and `TE(-1)` is an established sentinel idiom.
+  Rejecting a cast would remove the only escape hatch the language offers.
+* *`for`-loop bounds.* `for v := 0 to 6` with `v: TStd` is not diagnosed.
+* *`case` labels.* `case v of 7:` on `v: TStd` is an unreachable branch rather
+  than a bad store, and costs nothing at runtime.
+
+Also unchecked, as conservative misses rather than choices: a value that does
+not fold (`v := High(TStd) + 1`, since `High`/`Low` are not folded), and a
+plain `Byte`/`Word`/`Integer` destination, whose full storage range is its
+type's range — `b := 300` on a `Byte` remains a separate, much broader
+question.
+
+=== Alternatives rejected
+
+*Runtime range checking behind a `{$R+}` switch.* Still desirable and still
+open. It needs codegen work on every backend, a decision on how a violation is
+reported, and a way to disable it in hot code. Blocking the constant case on
+that work would leave `v := 6` compiling silently in the meantime; the two are
+complementary.
+
+*Warning rather than error.* FPC warns for this case. But a constant outside
+its destination's range has no correct interpretation, warnings are routinely
+lost in build output, and the array-index check already treats the analogous
+situation as an error — a split would be arbitrary.
+
+*Treating `0..Count-1` as an enum's range.* This is what the array-sizing code
+wrongly assumed, and is the defect recorded in
+`BUG-20260922-explicit-ordinal-enum-array-bounds`. Using min..max declared
+ordinal matches Delphi/FPC, permits interior holes, and lets both range checks
+share one rule.

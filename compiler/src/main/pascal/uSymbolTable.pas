@@ -83,8 +83,11 @@ type
       (type TIdx = lo..hi;).  Layout/Kind/RawSize remain those of the narrowest
       fitting standard integer type — the value behaves as an ordinary unchecked
       int — but the lo..hi bounds are retained as compile-time metadata so the
-      array-index resolver can fold array[TIdx] -> array[lo..hi].  No other path
-      (codegen, IsNumeric/IsOrdinal, assignment compatibility) consults these. }
+      array-index resolver can fold array[TIdx] -> array[lo..hi] and the
+      semantic pass can range-check a CONSTANT stored into the subrange
+      (CheckConstValueInRange).  A non-constant value is still unchecked:
+      there is no runtime range check.  Codegen and IsNumeric/IsOrdinal do
+      not consult these. }
     IsSubrange: Boolean;
     SubrangeLow: Int64;
     SubrangeHigh: Int64;
