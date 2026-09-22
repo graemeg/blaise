@@ -541,6 +541,44 @@ generic-instance path emits the same symbol *kinds* as its class path.  That
 is the invariant which actually broke, and it is a check rather than a
 rewrite.
 
+=== Give the AST's owned child lists an element type
+
+Every owned child list in `uAST.pas` is an untyped `TObjectList`:
+`ConstDecls`, `TypeDecls`, `ProcDecls`, `Fields`, `Methods`, `ArrayElements`
+and their peers.  Each read therefore costs an unchecked downcast at the use
+site — `TConstDecl(AClassDef.ConstDecls.Items[I])` — and those casts are
+spread across `uAST.pas`, `uParser.pas`, `uSemantic.pas` and all three
+backends.
+
+*Why it matters.*  The cast is unchecked, so a list that is handed the wrong
+node type fails at runtime rather than at compile time, and the compiler
+offers no help when a walk is copied between two lists that hold different
+node classes.  It also propagates: a helper extracted from such a walk must
+take `TObjectList` and repeat the cast internally, because that is what the
+field's declared type is — which is exactly what
+`TX86_64Backend.EmitMemberConstBlobs` had to do when the class and record
+member-const walks were unified (BUG-20260922-record-const-array-unresolved-symbol).
+
+*What it would take.*  The project already mandates `Generics.Collections`
+for new collection use, so the destination type exists.  The obstacle is
+ownership: `TObjectList.Create(True)` frees its items, and the AST's
+destructors rely on that for teardown.  `TList<T>` has no ownership
+semantics, so a direct substitution would require an explicit free loop in
+every AST destructor — replacing one implicit contract with a hand-written
+one.  The clean form is an owning generic list (`TObjectList<T>`, or an
+`OwnsObjects` flag on a generic list type) added to
+`generics.collections.pas` first; the AST change is mechanical after that.
+
+*Risk.*  `uAST.pas` is compiled by every stage of the self-hosting chain, so
+introducing a new generic instantiation there is the shape most likely to
+trip the teach-then-use rule and produce a `BOOTSTRAP_BROKEN` in CI.  The
+generic list type must land, and be in a published release binary, before
+the AST starts using it.
+
+*Assessment.*  Worth doing for type safety and to shrink the cast surface,
+but it is a two-step change gated on a release boundary, and it has no
+correctness pressure behind it — the existing casts are all correct today.
+
 == Migration Analyser
 
 === Flag `TObjectList` usage and recommend `TList<TObject>`

@@ -143,6 +143,9 @@ type
       out-of-range index into a CLASS const array must be rejected. }
     procedure TestCompileFails_ClassConstArray_ConstIndex_AboveHigh;
     procedure TestRun_ClassConstArray_ConstIndex_InRange_StillRuns;
+    procedure TestRun_RecordConstArray_IntIndexed;
+    procedure TestRun_RecordConstArray_EnumIndexed;
+    procedure TestRun_RecordConstArray_StringElements;
   end;
 
 implementation
@@ -1526,6 +1529,77 @@ begin
   LE := LineEnding;
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '11 22' + LE, 0);
+end;
+
+{ ------------------------------------------------------------------ }
+{ BUG-20260922-record-const-array-unresolved-symbol                  }
+{ ------------------------------------------------------------------ }
+
+procedure TE2EStaticArrayTests.TestRun_RecordConstArray_IntIndexed;
+const
+  Src =
+  '''
+  program P;
+  type
+    TR = record
+    public
+      const Vals: array[0..2] of Integer = (11, 22, 33);
+    end;
+  begin
+    WriteLn(TR.Vals[0], ' ', TR.Vals[1], ' ', TR.Vals[2])
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { Before the fix the data blob was never emitted for a RECORD member const,
+    so the reference to $TR_Vals stayed unresolved and the read returned
+    garbage even for an in-range index. }
+  AssertRunsOnAll(Src, '11 22 33' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_RecordConstArray_EnumIndexed;
+const
+  Src =
+  '''
+  program P;
+  type
+    TE = (eA, eB);
+    TR = record
+    public
+      const Vals: array[TE] of Integer = (1, 2);
+    end;
+  begin
+    WriteLn(TR.Vals[0], ' ', TR.Vals[1])
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '1 2' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_RecordConstArray_StringElements;
+const
+  Src =
+  '''
+  program P;
+  type
+    TR = record
+    public
+      const Names: array[0..1] of string = ('ay', 'bee');
+    end;
+  begin
+    WriteLn(TR.Names[0], ' ', TR.Names[1])
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, 'ay bee' + LE, 0);
 end;
 
 initialization

@@ -404,6 +404,8 @@ type
                                AGenericInstances: TObjectList;
                                ASymTable: TSymbolTable);
     function ConstElemAsmDir(const AElemType: string): string;
+    procedure EmitMemberConstBlobs(AConstDecls: TObjectList;
+      const ATypeName: string);
     procedure EmitArrayConstData(ABlock: TBlock; const APrefix: string);
     { Escape a Pascal string for use inside an AS .ascii directive. }
     function AsmEscapeString(const AStr: string): string;
@@ -2245,6 +2247,52 @@ begin
   end;
 end;
 
+{ Emit the .data blobs for a class's or record's member const arrays.  The
+  label is <TypeName>_<ConstName>, matching what uSemantic puts in
+  ConstArraySymbol on the reference side. }
+procedure TX86_64Backend.EmitMemberConstBlobs(AConstDecls: TObjectList;
+  const ATypeName: string);
+var
+  J, K:  Integer;
+  CD:    TConstDecl;
+  Lbl:   string;
+  Idx:   Integer;
+begin
+  if AConstDecls = nil then Exit;
+  for J := 0 to AConstDecls.Count - 1 do
+  begin
+    CD := TConstDecl(AConstDecls.Items[J]);
+    if not CD.IsArrayConst then Continue;
+    if (CD.ArrayElements = nil) or (CD.ArrayElements.Count = 0) then Continue;
+    Lbl := ATypeName + '_' + CD.Name;
+    if SameText(CD.ArrayElemType, 'string') then
+    begin
+      for K := 0 to CD.ArrayElements.Count - 1 do
+        if FStrLits.IndexOf(CD.ArrayElements[K]) < 0 then
+          FStrLits.Add(CD.ArrayElements[K]);
+      Self.Emit('.data');
+      Self.Emit('.balign 8');
+      Self.Emit('.globl ' + Lbl);
+      Self.Emit(Lbl + ':');
+      for K := 0 to CD.ArrayElements.Count - 1 do
+      begin
+        Idx := FStrLits.IndexOf(CD.ArrayElements[K]);
+        Self.Emit(Format(#9'.quad __s%d + 12', [Idx]));
+      end;
+    end
+    else
+    begin
+      Self.Emit('.data');
+      Self.Emit('.balign 8');
+      Self.Emit('.globl ' + Lbl);
+      Self.Emit(Lbl + ':');
+      for K := 0 to CD.ArrayElements.Count - 1 do
+        Self.Emit(Format('%s %s',
+          [Self.ConstElemAsmDir(CD.ArrayElemType), CD.ArrayElements[K]]));
+    end;
+  end;
+end;
+
 procedure TX86_64Backend.EmitArrayConstData(ABlock: TBlock;
   const APrefix: string);
 var
@@ -2377,40 +2425,15 @@ begin
   for I := 0 to ABlock.TypeDecls.Count - 1 do
   begin
     TD := TTypeDecl(ABlock.TypeDecls.Items[I]);
+    { A RECORD member const array needs the same blob as a class one: the
+      semantic pass mints the reference as <TypeName>_<ConstName> either way,
+      so a record that skipped this walk left the label referenced but never
+      defined -- the link reported it as an unresolved C symbol and the read
+      returned garbage even for an in-range index. }
+    if TD.Def is TRecordTypeDef then
+      Self.EmitMemberConstBlobs(TRecordTypeDef(TD.Def).ConstDecls, TD.Name);
     if not (TD.Def is TClassTypeDef) then Continue;
-    for J := 0 to TClassTypeDef(TD.Def).ConstDecls.Count - 1 do
-    begin
-      CD := TConstDecl(TClassTypeDef(TD.Def).ConstDecls.Items[J]);
-      if not CD.IsArrayConst then Continue;
-      if (CD.ArrayElements = nil) or (CD.ArrayElements.Count = 0) then Continue;
-      Lbl := TD.Name + '_' + CD.Name;
-      IsStr := SameText(CD.ArrayElemType, 'string');
-      if IsStr then
-      begin
-        for K := 0 to CD.ArrayElements.Count - 1 do
-          if FStrLits.IndexOf(CD.ArrayElements[K]) < 0 then
-            FStrLits.Add(CD.ArrayElements[K]);
-        Self.Emit('.data');
-        Self.Emit('.balign 8');
-        Self.Emit('.globl ' + Lbl);
-        Self.Emit(Lbl + ':');
-        for K := 0 to CD.ArrayElements.Count - 1 do
-        begin
-          Idx := FStrLits.IndexOf(CD.ArrayElements[K]);
-          Self.Emit(Format(#9'.quad __s%d + 12', [Idx]));
-        end;
-      end
-      else
-      begin
-        Self.Emit('.data');
-        Self.Emit('.balign 8');
-        Self.Emit('.globl ' + Lbl);
-        Self.Emit(Lbl + ':');
-        for K := 0 to CD.ArrayElements.Count - 1 do
-          Self.Emit(Format('%s %s',
-            [Self.ConstElemAsmDir(CD.ArrayElemType), CD.ArrayElements[K]]));
-      end;
-    end;
+    Self.EmitMemberConstBlobs(TClassTypeDef(TD.Def).ConstDecls, TD.Name);
     for J := 0 to TClassTypeDef(TD.Def).Methods.Count - 1 do
     begin
       Decl := TMethodDecl(TClassTypeDef(TD.Def).Methods.Items[J]);

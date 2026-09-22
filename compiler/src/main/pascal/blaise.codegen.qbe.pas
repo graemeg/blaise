@@ -338,6 +338,7 @@ type
     function ConstElemQbeDataType(const AElemType: string): string;
     procedure EmitArrayConstData(CD: TConstDecl; const APrefix: string);
     procedure EmitClassConstData(AClassDef: TClassTypeDef; const AClassName: string);
+    procedure EmitRecordConstData(ARecDef: TRecordTypeDef; const ARecName: string);
     procedure EmitClassVarData(AFields: TObjectList; const AClassName: string);
     procedure EmitGlobalConstData(ABlock: TBlock);
     procedure EmitLocalArrayConstsInBlock(ABlock: TBlock);
@@ -2723,6 +2724,19 @@ begin
     EmitArrayConstData(TConstDecl(AClassDef.ConstDecls.Items[I]), AClassName);
 end;
 
+{ A RECORD member const array needs exactly the same blob as a class one:
+  the semantic pass mints the reference as <RecordName>_<ConstName> either
+  way, so a record that skipped this walk left that label referenced but
+  never defined — the link reported it as an unresolved C symbol and the
+  read returned garbage even for an in-range index. }
+procedure TCodeGenQBE.EmitRecordConstData(ARecDef: TRecordTypeDef; const ARecName: string);
+var
+  I: Integer;
+begin
+  for I := 0 to ARecDef.ConstDecls.Count - 1 do
+    EmitArrayConstData(TConstDecl(ARecDef.ConstDecls.Items[I]), ARecName);
+end;
+
 { Emit one shared global data slot per STATIC (class-level) variable.  The label
   must match the semantic pass's GlobalEmitName: ClassUnitPrefix(Class)+Class+'_'+
   Field.  Static vars are never instance fields, so they appear here, not in the
@@ -2812,7 +2826,10 @@ begin
       EmitClassVarData(TClassTypeDef(TD.Def).Fields, TD.Name);
     end
     else if TD.Def is TRecordTypeDef then
+    begin
+      EmitRecordConstData(TRecordTypeDef(TD.Def), TD.Name);
       EmitClassVarData(TRecordTypeDef(TD.Def).Fields, TD.Name);
+    end;
   end;
 end;
 

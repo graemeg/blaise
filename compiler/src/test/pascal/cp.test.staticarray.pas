@@ -194,6 +194,8 @@ type
     procedure TestSemantic_ClassConstArray_ConstIndex_ViaInstance_Raises;
     procedure TestSemantic_ClassConstArray_ConstIndex_InRange_Accepted;
     procedure TestSemantic_ClassConstArray_VarIndex_NotDiagnosed;
+    procedure TestCodegen_RecordConstArray_DataBlobEmitted;
+    procedure TestCodegen_ClassConstArray_DataBlobEmitted;
   end;
 
 implementation
@@ -1874,6 +1876,47 @@ begin
     begin i := 9; WriteLn(TC.Names[i]) end.
     ''');
   AssertTrue('variable index is not diagnosed', Length(IR) > 0);
+end;
+
+{ ------------------------------------------------------------------ }
+{ BUG-20260922-record-const-array-unresolved-symbol                  }
+{ ------------------------------------------------------------------ }
+
+procedure TStaticArrayTests.TestCodegen_RecordConstArray_DataBlobEmitted;
+var IR: string;
+begin
+  { The reference side mints $TR_Vals; the data blob must be emitted under
+    the same label or the link leaves it unresolved and the read is garbage. }
+  IR := GenIR(
+    'program P;' + LineEnding +
+    'type' + LineEnding +
+    '  TR = record' + LineEnding +
+    '  public' + LineEnding +
+    '    const Vals: array[0..1] of Integer = (11, 22);' + LineEnding +
+    '  end;' + LineEnding +
+    'begin' + LineEnding +
+    '  WriteLn(TR.Vals[0])' + LineEnding +
+    'end.');
+  AssertTrue('data $TR_Vals emitted, got: ' + IR,
+    Pos('data $TR_Vals', IR) > 0);
+end;
+
+procedure TStaticArrayTests.TestCodegen_ClassConstArray_DataBlobEmitted;
+var IR: string;
+begin
+  { The class arm already worked — pin it so the record fix cannot regress it. }
+  IR := GenIR(
+    'program P;' + LineEnding +
+    'type' + LineEnding +
+    '  TC = class' + LineEnding +
+    '  public' + LineEnding +
+    '    const Vals: array[0..1] of Integer = (11, 22);' + LineEnding +
+    '  end;' + LineEnding +
+    'begin' + LineEnding +
+    '  WriteLn(TC.Vals[0])' + LineEnding +
+    'end.');
+  AssertTrue('data $TC_Vals emitted, got: ' + IR,
+    Pos('data $TC_Vals', IR) > 0);
 end;
 
 initialization
