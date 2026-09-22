@@ -729,19 +729,20 @@ procedure TE2ETestCase.AssertLeakFreeOnAll(const ASrc: string;
 var
   Output: string;
   ExitCode: Integer;
+  Ok: Boolean;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { QBE, --debug }
-  AssertTrue('qbe compile+run (--debug)',
-    CompileAndRunWithRTLDebugOn(beQBE, ASrc, Output, ExitCode, True));
+  Ok := CompileAndRunWithRTLDebugOn(beQBE, ASrc, Output, ExitCode, True);
+  AssertTrue('qbe compile+run (--debug): ' + Output, Ok);
   AssertEquals('qbe exit 0', 0, ExitCode);
   if AExpectSubstr <> '' then
     AssertTrue('qbe stdout contains ''' + AExpectSubstr + ''', got: ' + Output,
       Pos(AExpectSubstr, Output) >= 0);
   AssertTrue('qbe no leak report, got: ' + Output, Pos('leak', Output) < 0);
   { native, --debug }
-  AssertTrue('native compile+run (--debug)',
-    CompileAndRunWithRTLDebugOn(beNative, ASrc, Output, ExitCode, True));
+  Ok := CompileAndRunWithRTLDebugOn(beNative, ASrc, Output, ExitCode, True);
+  AssertTrue('native compile+run (--debug): ' + Output, Ok);
   AssertEquals('native exit 0', 0, ExitCode);
   if AExpectSubstr <> '' then
     AssertTrue('native stdout contains ''' + AExpectSubstr + ''', got: ' + Output,
@@ -862,7 +863,7 @@ begin
                                              False);
   if not Result then Exit;
   NOk := Self.CompileAndRunWithRTLDebugOn(beNative, ASrc, NOut, NCode, False);
-  AssertTrue('[native] RTL compile+run', NOk);
+  AssertTrue('[native] RTL compile+run: ' + NOut, NOk);
   if NCode <> AExitCode then
     AssertEquals('[native] exit code parity with qbe (native stdout: ' +
       NOut + ')', AExitCode, NCode)
@@ -932,9 +933,14 @@ procedure TE2ETestCase.AssertRTLRunsOnOne(ABackend: TBackend;
 var
   Output: string;
   RCode:  Integer;
+  Ok:     Boolean;
 begin
-  AssertTrue('[' + AName + '] compile+run (RTL)',
-    Self.CompileAndRunWithRTLOn(ABackend, ASrc, Output, RCode));
+  { Evaluate FIRST, then build the message: Output is an out-param, so it is
+    only populated by the call.  On a compile failure it carries the
+    compiler's own diagnostic, which is the only clue a CI-only failure
+    leaves behind. }
+  Ok := Self.CompileAndRunWithRTLOn(ABackend, ASrc, Output, RCode);
+  AssertTrue('[' + AName + '] compile+run (RTL): ' + Output, Ok);
   if RCode <> AExpectedCode then
     AssertEquals('[' + AName + '] exit code (stdout: ' + Output + ')',
       AExpectedCode, RCode)
