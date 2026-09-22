@@ -1029,6 +1029,19 @@ begin
       raise EImportError.CreateFmt(
         'Type alias %s = %s: base not found', [AEntry.Name, AliasName]);
   end;
+  { A `type TStd = 1..5;` alias targets the narrowest fitting base int, but the
+    declared bounds are compile-time metadata the base type cannot carry.
+    Binding the alias straight to the base descriptor dropped them, so a WARM
+    --unit-cache rebuild of unchanged source disagreed with a cold one:
+    High/Low read the base int's 255/0 instead of 5/1, and array[TStd] was
+    rejected as "not a valid array index type" (IsArrayIndex requires the
+    flag).  Rebuild the subrange descriptor instead — the .bif already carries
+    IsSubrange + both bounds, and the NESTED type importer above already does
+    exactly this. }
+  if AliasDef.IsSubrange and (AliasDesc <> nil) then
+    AliasDesc := ATable.NewSubrangeType(AEntry.Name, AliasDesc,
+                                        AliasDef.SubrangeLow,
+                                        AliasDef.SubrangeHigh);
   Sym := TSymbol.Create(AEntry.Name, skType, AliasDesc);
   Sym.OwningUnit := AUnitName;
   if not ATable.Define(Sym) then Sym.Free();

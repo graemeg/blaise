@@ -82,6 +82,12 @@ type
       and a constructor whose parameter was a nested subrange round-tripped
       with an unresolved param, so the call matched no overload. }
     procedure TestNestedType_SurvivesIfaceRoundTrip;
+    { A TOP-LEVEL integer subrange exported by a unit must keep its bounds
+      across a .bif round trip.  RegisterAlias bound the alias straight to
+      the base int, dropping IsSubrange/bounds, so a warm rebuild saw a
+      plain Byte: High/Low read 255/0 instead of 5/1, and array[TStd] was
+      rejected outright as "not a valid array index type". }
+    procedure TestTopLevelSubrange_SurvivesIfaceRoundTrip;
     { Regression (GH #194): Pascal identifiers are case-insensitive, so the
       spelling of a unit name in a `uses` clause must not decide whether its
       file is found.  The loader only tried two spellings — all-lowercase and
@@ -726,6 +732,71 @@ begin
                    '--unit-path', FScratch], Captured);
   AssertTrue('blaise(use_bare) must fail (got rc=' + IntToStr(Rc) +
              ', output: ' + Captured + ')', Rc <> 0)
+end;
+
+procedure TSepCompileTests.TestTopLevelSubrange_SurvivesIfaceRoundTrip;
+const
+  DepSrc =
+    '''
+    unit SubDep;
+    interface
+    type
+      TStd = 1..5;
+    implementation
+    end.
+    ''';
+  UseSrc =
+    '''
+    program UseSub;
+    uses SubDep;
+    var
+      a: array[TStd] of Integer;
+    begin
+      WriteLn(Low(TStd), ' ', High(TStd), ' ', SizeOf(a))
+    end.
+    ''';
+var
+  DepPas, DepObj, UsePas, UseBin: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  DepPas := FScratch + '/SubDep.pas';
+  DepObj := FScratch + '/SubDep.o';
+  UsePas := FScratch + '/use_sub.pas';
+  UseBin := FScratch + '/use_sub';
+
+  { Step 1: build the dep into an .o carrying the embedded .blaise.iface. }
+  WriteFile(DepPas, DepSrc);
+  Rc := RunBlaise(['--source', DepPas, '--output', DepObj], Captured);
+  AssertEquals('blaise(SubDep) exit code', 0, Rc);
+  AssertTrue('SubDep.o exists', FileExists(DepObj));
+
+  { Step 2: hide the source so the consumer MUST read the cached iface. }
+  DeleteFile(DepPas);
+  AssertFalse('SubDep.pas hidden', FileExists(DepPas));
+
+  { Step 3: the subrange must still BE a subrange — usable as an array
+    index type, with its declared bounds, not the base int's. }
+  WriteFile(UsePas, UseSrc);
+  Rc := RunBlaise(['--source', UsePas, '--output', UseBin,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('blaise(use_sub) exit code (output: ' + Captured + ')',
+               0, Rc);
+  Rc := RunBinary(UseBin, Captured);
+  AssertEquals('use_sub exit code', 0, Rc);
+  { 1 5 20 — bounds 1..5 and a 5-element Integer array (not 0 255 1024). }
+  AssertEquals('use_sub stdout', '1 5 20' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestClassConstVisibility_SurvivesIfaceRoundTrip;
