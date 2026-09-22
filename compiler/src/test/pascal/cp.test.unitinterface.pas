@@ -241,6 +241,12 @@ type
     { Named integer subrange alias round-trips its IsSubrange + lo..hi bounds,
       so array[OtherUnit.TSub] still folds across separate compilation. }
     procedure TestRoundTrip_NamedSubrangeAlias_BoundsPreserved;
+    { An ENUM-MEMBER subrange alias (TMid = eB..eC) round-trips with a
+      RESOLVED base enum name + ordinal bounds.  The parser leaves TypeName
+      empty for this form, so before the fix the .bif carried a blank base
+      and the import died with "Type alias TMid = : base not found"
+      (BUG-20260922-enum-subrange-bif-import-fails). }
+    procedure TestRoundTrip_EnumSubrangeAlias_ResolvedBasePreserved;
     { String const round-trips, even with newlines + colons in the value. }
     procedure TestRoundTrip_StringConstWithAwkwardChars;
     { Empty interface round-trips (zero consts). }
@@ -2741,11 +2747,15 @@ begin
   Iface := TUnitInterface.Create('U');
   try
     Buf := WriteUnitInterface(Iface);
-    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 20 since
-      a type's nested `type` section is now carried, without which an
+    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 21 since
+      an ENUM-MEMBER subrange alias now exports a RESOLVED base enum name +
+      ordinal bounds; the parser leaves TypeName empty for that form, so a
+      v20 .bif carried a blank base and the consumer could not import the
+      type at all (v20 carried
+      a type's nested `type` section, without which an
       importing unit could not resolve the ENCLOSING type's own fields when
       one was declared with a nested type — a warm-cache build failed
-      outright on source a cold build accepted (v19 gave the const payload
+      outright on source a cold build accepted; v19 gave the const payload
       the member Visibility field, without which a
       strict-private class const was reachable through a cached interface even
       though a cold build rejected it; v18 added the 'generic-record' TYPE
@@ -2760,7 +2770,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 20', Buf) = 0);
+      Pos('BLAISE-IFACE 21', Buf) = 0);
   finally
     Iface.Free();
   end;
@@ -2880,6 +2890,44 @@ begin
       AssertEquals('IsSubrange',   True, AD.IsSubrange);
       AssertEquals('SubrangeLow',  Int64(2), AD.SubrangeLow);
       AssertEquals('SubrangeHigh', Int64(4), AD.SubrangeHigh);
+    finally
+      Dst.Free();
+    end;
+  finally
+    SrcIface.Free();
+  end;
+end;
+
+procedure TIfaceIOTests.TestRoundTrip_EnumSubrangeAlias_ResolvedBasePreserved;
+const
+  SRC =
+    'unit TestU;'                            + #10 +
+    'interface'                              + #10 +
+    'type'                                   + #10 +
+    '  TE = (eA, eB, eC, eD);'               + #10 +
+    '  TMid = eB..eC;'                       + #10 +
+    'implementation'                         + #10 +
+    'end.'                                   + #10;
+var
+  SrcIface, Dst: TUnitInterface;
+  E:        TTypeEntry;
+  AD:       TTypeAliasDef;
+  Buf:      string;
+begin
+  SrcIface := ParseAndExport(SRC);
+  try
+    Buf := WriteUnitInterface(SrcIface);
+    Dst := ReadUnitInterface(Buf);
+    try
+      E := Dst.FindType('TMid');
+      AssertTrue('TMid present', E <> nil);
+      AssertTrue('is alias def', E.Def is TTypeAliasDef);
+      AD := TTypeAliasDef(E.Def);
+      AssertEquals('IsSubrange', True, AD.IsSubrange);
+      { The tell for this bug was an EMPTY base name in the .bif. }
+      AssertEquals('resolved base enum name', 'TE', AD.TypeName);
+      AssertEquals('SubrangeLow',  Int64(1), AD.SubrangeLow);
+      AssertEquals('SubrangeHigh', Int64(2), AD.SubrangeHigh);
     finally
       Dst.Free();
     end;

@@ -1016,6 +1016,8 @@ var
   BaseType:   TTypeDesc;
   AliasDesc:  TTypeDesc;
   Sym:        TSymbol;
+  SubEnum:    TEnumTypeDesc;
+  K:          Integer;
 begin
   AliasDef  := TTypeAliasDef(AEntry.Def);
   AliasName := AliasDef.TypeName;
@@ -1039,9 +1041,30 @@ begin
     IsSubrange + both bounds, and the NESTED type importer above already does
     exactly this. }
   if AliasDef.IsSubrange and (AliasDesc <> nil) then
-    AliasDesc := ATable.NewSubrangeType(AEntry.Name, AliasDesc,
-                                        AliasDef.SubrangeLow,
-                                        AliasDef.SubrangeHigh);
+  begin
+    { An ENUM-member subrange (type TMid = eB..eC) must come back as an ENUM
+      descriptor carrying a copy of the base enum's members, exactly as
+      AnalyseTypeDecls builds it on the cold path.  NewSubrangeType would call
+      NewType(ABase.Kind, ...), which for tyEnum yields a bare TTypeDesc with
+      no Members list at all — every tyEnum path (Ord, Low/High, array index,
+      case) would then read an empty enum
+      (BUG-20260922-enum-subrange-bif-import-fails). }
+    if AliasDesc is TEnumTypeDesc then
+    begin
+      SubEnum := ATable.NewEnumType(AEntry.Name);
+      for K := 0 to TEnumTypeDesc(AliasDesc).Members.Count - 1 do
+        SubEnum.AddMember(TEnumTypeDesc(AliasDesc).Members.Strings[K],
+                          TEnumTypeDesc(AliasDesc).OrdinalAt(K));
+      SubEnum.IsSubrange   := True;
+      SubEnum.SubrangeLow  := AliasDef.SubrangeLow;
+      SubEnum.SubrangeHigh := AliasDef.SubrangeHigh;
+      AliasDesc := SubEnum;
+    end
+    else
+      AliasDesc := ATable.NewSubrangeType(AEntry.Name, AliasDesc,
+                                          AliasDef.SubrangeLow,
+                                          AliasDef.SubrangeHigh);
+  end;
   Sym := TSymbol.Create(AEntry.Name, skType, AliasDesc);
   Sym.OwningUnit := AUnitName;
   if not ATable.Define(Sym) then Sym.Free();

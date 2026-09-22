@@ -88,6 +88,12 @@ type
       plain Byte: High/Low read 255/0 instead of 5/1, and array[TStd] was
       rejected outright as "not a valid array index type". }
     procedure TestTopLevelSubrange_SurvivesIfaceRoundTrip;
+    { Regression (BUG-20260922-enum-subrange-bif-import-fails): the ENUM-MEMBER
+      subrange form (TMid = eB..eC) leaves TTypeAliasDef.TypeName EMPTY and
+      carries the member NAMES instead, which the .bif alias encoder never
+      wrote — so the import saw a blank base and failed outright with
+      "Type alias TMid = : base not found". }
+    procedure TestTopLevelEnumSubrange_SurvivesIfaceRoundTrip;
     { Regression (GH #194): Pascal identifiers are case-insensitive, so the
       spelling of a unit name in a `uses` clause must not decide whether its
       file is found.  The loader only tried two spellings — all-lowercase and
@@ -797,6 +803,76 @@ begin
   AssertEquals('use_sub exit code', 0, Rc);
   { 1 5 20 — bounds 1..5 and a 5-element Integer array (not 0 255 1024). }
   AssertEquals('use_sub stdout', '1 5 20' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestTopLevelEnumSubrange_SurvivesIfaceRoundTrip;
+const
+  DepSrc =
+    '''
+    unit ESubDep;
+    interface
+    type
+      TE = (eA, eB, eC, eD);
+      TMid = eB..eC;
+    implementation
+    end.
+    ''';
+  UseSrc =
+    '''
+    program UseESub;
+    uses ESubDep;
+    var
+      m: TMid;
+      a: array[TMid] of Integer;
+    begin
+      m := eC;
+      WriteLn(Ord(m), ' ', Ord(Low(TMid)), ' ', Ord(High(TMid)), ' ', SizeOf(a))
+    end.
+    ''';
+var
+  DepPas, DepObj, UsePas, UseBin: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  DepPas := FScratch + '/ESubDep.pas';
+  DepObj := FScratch + '/ESubDep.o';
+  UsePas := FScratch + '/use_esub.pas';
+  UseBin := FScratch + '/use_esub';
+
+  { Step 1: build the dep into an .o carrying the embedded .blaise.iface. }
+  WriteFile(DepPas, DepSrc);
+  Rc := RunBlaise(['--source', DepPas, '--output', DepObj], Captured);
+  AssertEquals('blaise(ESubDep) exit code', 0, Rc);
+  AssertTrue('ESubDep.o exists', FileExists(DepObj));
+
+  { Step 2: hide the source so the consumer MUST read the cached iface. }
+  DeleteFile(DepPas);
+  AssertFalse('ESubDep.pas hidden', FileExists(DepPas));
+
+  { Step 3: the enum subrange must survive as an enum subrange — assignable
+    from a base member, usable as an array index, with its declared ordinal
+    bounds.  Before the fix this failed at compile with
+    "Type alias TMid = : base not found". }
+  WriteFile(UsePas, UseSrc);
+  Rc := RunBlaise(['--source', UsePas, '--output', UseBin,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('blaise(use_esub) exit code (output: ' + Captured + ')',
+               0, Rc);
+  Rc := RunBinary(UseBin, Captured);
+  AssertEquals('use_esub exit code', 0, Rc);
+  { eC=2, bounds 1..2, and a 2-element Integer array. }
+  AssertEquals('use_esub stdout', '2 1 2 8' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestClassConstVisibility_SurvivesIfaceRoundTrip;

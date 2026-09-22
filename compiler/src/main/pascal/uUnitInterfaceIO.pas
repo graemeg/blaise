@@ -54,7 +54,20 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 20; { v20: EncodeNestedTypeList/ReadNestedTypeList carry a
+  IFACE_VERSION = 21; { v21: an ENUM-MEMBER subrange alias (type TMid = eB..eC)
+                          now writes a RESOLVED base: the exporter fills the
+                          'alias' entry's TypeName with the base ENUM's name
+                          and its bounds with the resolved ordinals.  The
+                          parser leaves TypeName empty for this form (it
+                          records the member NAMES instead), so a v20 .bif
+                          carried a blank base and the consumer failed with
+                          "Type alias TMid = : base not found" — the type was
+                          unusable across units
+                          (BUG-20260922-enum-subrange-bif-import-fails).  The
+                          field layout is unchanged, but a v20 .bif holds an
+                          unresolvable blank for this form, so v20 files must
+                          be rejected and recompiled rather than re-read.
+                        v20: EncodeNestedTypeList/ReadNestedTypeList carry a
                           type's nested `type` section, so a nested record or
                           subrange survives a .bif round trip.  Without it an
                           importing unit could not resolve the ENCLOSING

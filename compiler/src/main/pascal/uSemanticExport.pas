@@ -172,6 +172,77 @@ begin
   end;
 end;
 
+{ Locate the enum declared in this interface that has AMember as a member.
+  Returns its entry name in ATypeName and the member's ordinal in AOrdinal;
+  False when no exported enum declares that member.  The base enum of an
+  enum-member subrange is always declared BEFORE the subrange in the same
+  interface section, so by the time the subrange's entry is built its enum
+  entry is already in AIface. }
+function FindEnumMemberOwner(AIface: TUnitInterface;
+                             const AMember: string;
+                             out ATypeName: string;
+                             out AOrdinal: Int64): Boolean;
+var
+  I, J: Integer;
+  E:    TTypeEntry;
+  ED:   TEnumTypeDef;
+begin
+  Result    := False;
+  ATypeName := '';
+  AOrdinal  := 0;
+  if AIface = nil then Exit;
+  for I := 0 to AIface.Types.Count - 1 do
+  begin
+    E := TTypeEntry(AIface.Types.Items[I]);
+    if not (E.Def is TEnumTypeDef) then Continue;
+    ED := TEnumTypeDef(E.Def);
+    for J := 0 to ED.Members.Count - 1 do
+      if SameText(ED.Members.Strings[J], AMember) then
+      begin
+        ATypeName := E.Name;
+        AOrdinal  := ED.OrdinalAt(J);
+        Exit(True);
+      end;
+  end;
+end;
+
+{ Give an enum-member subrange alias entry a RESOLVED base: the base enum's
+  name in TypeName and the members' ordinals as the bounds.  A no-op for every
+  other alias form, and for a subrange whose base is not an enum exported by
+  this same interface (the cold path diagnoses those).
+
+  Resolution runs off the exported ENUM entries rather than the symbol table,
+  so it does not depend on the analyser having run — which also keeps the
+  .bif writer usable from a parse-only path. }
+procedure ResolveEnumSubrangeAliasForExport(AEntry: TTypeEntry;
+                                            AIface: TUnitInterface);
+var
+  AliasDef: TTypeAliasDef;
+  LoName, HiName: string;
+  LoOrd,  HiOrd:  Int64;
+begin
+  if not (AEntry.Def is TTypeAliasDef) then Exit;
+  AliasDef := TTypeAliasDef(AEntry.Def);
+  if not AliasDef.IsSubrange then Exit;
+  { Only the enum-member form — the integer form already carries a base name
+    and has round-tripped since .bif v8. }
+  if AliasDef.SubrangeLowName = '' then Exit;
+  if AliasDef.TypeName <> '' then Exit;
+
+  if not FindEnumMemberOwner(AIface, AliasDef.SubrangeLowName, LoName, LoOrd) then
+    Exit;
+  if not FindEnumMemberOwner(AIface, AliasDef.SubrangeHighName, HiName, HiOrd) then
+    Exit;
+  { Bounds from two different enums, or descending, are cold-path errors —
+    leave the entry unresolved rather than encode something incoherent. }
+  if not SameText(LoName, HiName) then Exit;
+  if HiOrd < LoOrd then Exit;
+
+  AliasDef.TypeName     := LoName;
+  AliasDef.SubrangeLow  := LoOrd;
+  AliasDef.SubrangeHigh := HiOrd;
+end;
+
 function BuildTypeEntry(ASrc:         TTypeDecl;
                         AIface:       TUnitInterface;
                         ADeps:        TObjectList;
@@ -191,6 +262,21 @@ begin
     on the cached path (BUG-20260919-clonetypedef-generic-record-in-unit). }
   Result.IsGeneric := (ASrc.Def is TGenericTypeDef) or
                       (ASrc.Def is TGenericRecordDef);
+
+  { An ENUM-MEMBER subrange (type TMid = eB..eC) is the one alias form the
+    parser cannot give a base NAME: it leaves TypeName empty and records the
+    two member names instead, which the semantic pass resolves to a base enum
+    plus ordinals.  The .bif alias record has no slot for those names, so the
+    consumer saw a blank base and failed with "Type alias TMid = : base not
+    found" (BUG-20260922-enum-subrange-bif-import-fails).
+
+    Resolve it HERE and write the fully-resolved form the record can already
+    carry: the base ENUM's name in TypeName plus the resolved ordinal bounds.
+    The member names have already done their job by this point (the cold build
+    validated same-enum and ascending), so nothing checkable is lost, and no
+    new .bif field is needed.  Mutating Result.Def is safe — it is a clone,
+    not the AST node. }
+  ResolveEnumSubrangeAliasForExport(Result, AIface);
 
   if ASrc.Def is TClassTypeDef then
     PopulateClassEntry(Result, TClassTypeDef(ASrc.Def), AIface, ADeps, ASymbolTable)
