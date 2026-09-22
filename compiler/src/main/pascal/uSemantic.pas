@@ -10571,9 +10571,15 @@ begin
   if ACall.ObjExpr <> nil then
   begin
     ObjType := Self.AnalyseExprSlot(ACall.ObjExpr);
-    if not (ObjType.Kind in [tyClass, tyInterface]) then
+    { A RECORD receiver is legal when the call is really an invocation of a
+      procedural-typed FIELD (O.Inner.F()) or of a record method.  Records
+      were rejected outright here, so a closure held in a nested record field
+      could not be called at all
+      (BUG-20260722-closure-record-field-direct-call). }
+    if not (ObjType.Kind in [tyClass, tyInterface, tyRecord]) then
       SemanticError(
-        Format('Receiver of ''.%s'' must be a class or interface', [ACall.Name]),
+        Format('Receiver of ''.%s'' must be a class, record or interface',
+          [ACall.Name]),
         ACall.Line, ACall.Col);
     { Interface-typed receiver expression (e.g. a non-Self interface field:
       H.S.Note();) — dispatch through the itab, mirroring the implicit-Self

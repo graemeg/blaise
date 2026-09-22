@@ -51,6 +51,16 @@ type
       expression (Result := Self.FFn(S)) must type to the field's return
       type and dispatch through the loaded pointer, not a direct call. }
     procedure TestCodegen_ProcFieldCallExpr_IndirectNotDirect;
+    { BUG-20260722-closure-record-field-direct-call: a proc-field call on a
+      RECORD variable must use the record's ADDRESS as the base.  Both
+      backends loaded the slot's CONTENTS (the class-receiver convention),
+      so the record's first 8 bytes were dispatched through as if they were
+      an instance pointer.  ResolvedMethod is nil for a proc-field call, so
+      every record arm gated on MDecl.IsRecordMethod was skipped. }
+    procedure TestCodegen_RecordProcFieldCall_Stmt_UsesRecordAddress;
+    procedure TestCodegen_RecordProcFieldCall_Expr_UsesRecordAddress;
+    procedure TestCodegen_RecordProcFieldCall_Local_UsesRecordAddress;
+    procedure TestCodegen_RecordProcFieldCall_PlainProcField_UsesRecordAddress;
     { An unqualified procedural-field call via implicit Self (Result := FFn(S),
       no 'Self.' prefix) must resolve and dispatch through Self's field. }
     procedure TestCodegen_ImplicitSelfProcFieldCall_LoadsSelf;
@@ -587,6 +597,124 @@ begin
     IRContains(IR, 'call %'));
   AssertFalse('Procedural-field call must not be a direct call to $FFn',
     IRContains(IR, 'call $FFn('));
+end;
+
+procedure TProcTypesTests.TestCodegen_RecordProcFieldCall_Stmt_UsesRecordAddress;
+var
+  IR: string;
+begin
+  { The field sits behind a leading member so the slot address is distinct
+    from the record address, making the correct base observable in the IR. }
+  IR := GenIR(
+    '''
+        program Test;
+        type
+          TFn = reference to procedure;
+          TR = record
+            Pad: Int64;
+            F: TFn;
+          end;
+        var
+          R: TR;
+        begin
+          R.F()
+        end.
+        '''
+  );
+  { The slot must be computed from the record's own address ($R), not from a
+    value loaded out of it. }
+  AssertTrue('Record proc-field slot must be addressed off the record',
+    IRContains(IR, 'add $R, 8'));
+  AssertFalse('A record receiver must not take the class nil-check path',
+    IRContains(IR, '_CheckNil'));
+  AssertTrue('Proc-field call must dispatch through a temp',
+    IRContains(IR, 'call %'));
+end;
+
+procedure TProcTypesTests.TestCodegen_RecordProcFieldCall_Expr_UsesRecordAddress;
+var
+  IR: string;
+begin
+  { Expression position goes through a different emitter arm than the
+    statement form, and had the same defect. }
+  IR := GenIR(
+    '''
+        program Test;
+        type
+          TFn = reference to function(A: Integer): Integer;
+          TR = record
+            Pad: Int64;
+            F: TFn;
+          end;
+        var
+          R: TR;
+          X: Integer;
+        begin
+          X := R.F(5)
+        end.
+        '''
+  );
+  AssertTrue('Record proc-field slot must be addressed off the record',
+    IRContains(IR, 'add $R, 8'));
+  AssertFalse('A record receiver must not take the class nil-check path',
+    IRContains(IR, '_CheckNil'));
+end;
+
+procedure TProcTypesTests.TestCodegen_RecordProcFieldCall_Local_UsesRecordAddress;
+var
+  IR: string;
+begin
+  { A record LOCAL: the base is the frame slot's address, spelled %_var_R. }
+  IR := GenIR(
+    '''
+        program Test;
+        type
+          TFn = reference to procedure;
+          TR = record
+            Pad: Int64;
+            F: TFn;
+          end;
+        procedure Run;
+        var
+          R: TR;
+        begin
+          R.F()
+        end;
+        begin
+        end.
+        '''
+  );
+  AssertTrue('Local record proc-field slot must be addressed off the record',
+    IRContains(IR, 'add %_var_R, 8'));
+end;
+
+procedure TProcTypesTests.TestCodegen_RecordProcFieldCall_PlainProcField_UsesRecordAddress;
+var
+  IR: string;
+begin
+  { The defect was never closure-specific: a PLAIN procedural field in a
+    record took the same wrong receiver path.  A plain proc pointer is a bare
+    code pointer, so there is no env argument -- only the base must be right. }
+  IR := GenIR(
+    '''
+        program Test;
+        type
+          TFn = procedure;
+          TR = record
+            Pad: Int64;
+            F: TFn;
+          end;
+        var
+          R: TR;
+        begin
+          R.F()
+        end.
+        '''
+  );
+  AssertTrue('Record proc-field slot must be addressed off the record',
+    IRContains(IR, 'add $R, 8'));
+  AssertFalse('A record receiver must not take the class nil-check path',
+    IRContains(IR, '_CheckNil'));
 end;
 
 procedure TProcTypesTests.TestCodegen_ImplicitSelfProcFieldCall_LoadsSelf;

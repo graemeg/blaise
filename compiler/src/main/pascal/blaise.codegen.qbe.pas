@@ -8281,6 +8281,7 @@ var
   SretTemp: string;
   PMark:    Integer;
   RetTypeRec: TRecordTypeDesc;
+  RecvIsRecord: Boolean;
 begin
   PMark := PendingReleaseMark();
 
@@ -8731,6 +8732,19 @@ begin
   RT    := TRecordTypeDesc(ACall.ResolvedClassType);
   MDecl := TMethodDecl(ACall.ResolvedMethod);
 
+  { Is the receiver a RECORD rather than a class instance?  For a record the
+    variable slot IS the record, so its ADDRESS is the base; for a class the
+    slot holds a pointer that must be loaded.  Keying this off
+    MDecl.IsRecordMethod alone was wrong: a procedural-FIELD call has no
+    method at all (uSemantic sets ResolvedMethod to nil by design), so a
+    record receiver fell through to the class arm, which loaded the record's
+    first 8 bytes and dispatched through them as an instance pointer
+    (BUG-20260722-closure-record-field-direct-call). }
+  RecvIsRecord := ((MDecl <> nil) and MDecl.IsRecordMethod) or
+                  ((MDecl = nil) and ACall.IsProcFieldCall and
+                   (ACall.ResolvedClassType <> nil) and
+                   (ACall.ResolvedClassType.Kind = tyRecord));
+
   { Load the object pointer (Self) from the caller's variable slot }
   SelfTemp := AllocTemp();
   if ACall.IsImplicitSelf then
@@ -8752,12 +8766,12 @@ begin
       SelfTemp := FPtrTemp;
     end;
   end
-  else if (MDecl <> nil) and MDecl.IsRecordMethod and ACall.IsVarParam then
+  else if RecvIsRecord and ACall.IsVarParam then
   begin
     { Record var-param receiver — slot holds the record address; load once. }
     EmitLine(Format('  %s =l loadl %%_var_%s', [SelfTemp, ACall.ObjectName]));
   end
-  else if (MDecl <> nil) and MDecl.IsRecordMethod then
+  else if RecvIsRecord then
     { Regular record variable: VarRef IS the record address — pass directly. }
     SelfTemp := VarRef(ACall.ObjectName, ACall.IsGlobal)
   else if ACall.IsVarParam then
@@ -12413,6 +12427,7 @@ function TCodeGenQBE.EmitExpr(AExpr: TASTExpr): string;
 var
   T, L, R, T2: string;
   EnvT:        string;
+  RecvIsRecord: Boolean;
   Op:          string;
   PropTgt:     string;
   BinExpr:     TBinaryExpr;
@@ -13983,6 +13998,12 @@ begin
     if MCallExpr.IsProcFieldCall then
     begin
       PT := TProceduralTypeDesc(MCallExpr.ResolvedProcType);
+      { A RECORD receiver is a VALUE: its variable slot IS the record, so the
+        base is the slot's ADDRESS.  A CLASS slot holds a pointer that must be
+        loaded.  Loading a record's contents instead dispatched through its
+        first 8 bytes (BUG-20260722-closure-record-field-direct-call). }
+      RecvIsRecord := (MCallExpr.ResolvedClassType <> nil) and
+                      (MCallExpr.ResolvedClassType.Kind = tyRecord);
       if MCallExpr.ObjExpr <> nil then
         SelfTemp := EmitExpr(MCallExpr.ObjExpr)
       else if MCallExpr.IsVarParam then
@@ -13990,8 +14011,15 @@ begin
         FPtrTemp := AllocTemp();
         SelfTemp := AllocTemp();
         EmitLine(Format('  %s =l loadl %%_var_%s', [FPtrTemp, MCallExpr.ObjectName]));
-        EmitLine(Format('  %s =l loadl %s', [SelfTemp, FPtrTemp]));
+        { A var/out RECORD param's slot already holds the caller's record
+          address — one load, not two. }
+        if RecvIsRecord then
+          SelfTemp := FPtrTemp
+        else
+          EmitLine(Format('  %s =l loadl %s', [SelfTemp, FPtrTemp]));
       end
+      else if RecvIsRecord then
+        SelfTemp := VarRef(MCallExpr.ObjectName, MCallExpr.IsGlobal)
       else
       begin
         SelfTemp := AllocTemp();

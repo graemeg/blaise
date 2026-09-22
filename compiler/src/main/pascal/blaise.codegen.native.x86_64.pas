@@ -844,7 +844,8 @@ type
     procedure EmitProcFieldCall(AObjExpr: TASTExpr; const AObjectName: string;
                                 AIsVarParam: Boolean; AFieldInfo: TFieldInfo;
                                 AProcType: TProceduralTypeDesc;
-                                AArgs: TObjectList; AResultType: TTypeDesc);
+                                AArgs: TObjectList; AResultType: TTypeDesc;
+                                AReceiverIsRecord: Boolean);
     { Evaluate an integer expression; result left in %rax (64-bit-extended). }
     procedure EmitExprToEax(AExpr: TASTExpr);
     procedure EmitByteRhsToEax(AExpr: TASTExpr);
@@ -7322,7 +7323,8 @@ begin
     if FC.IsProcFieldCall then
     begin
       Self.EmitProcFieldCall(nil, 'Self', False, FC.ProcFieldInfo,
-        TProceduralTypeDesc(FC.ResolvedProcType), FC.Args, FC.ResolvedType);
+        TProceduralTypeDesc(FC.ResolvedProcType), FC.Args, FC.ResolvedType,
+        False);
       Exit;
     end;
     { Type cast Double(X) / Single(X): ResolvedDecl is nil.  Emit a real
@@ -8982,7 +8984,8 @@ begin
     if FC.IsProcFieldCall then
     begin
       Self.EmitProcFieldCall(nil, 'Self', False, FC.ProcFieldInfo,
-        TProceduralTypeDesc(FC.ResolvedProcType), FC.Args, FC.ResolvedType);
+        TProceduralTypeDesc(FC.ResolvedProcType), FC.Args, FC.ResolvedType,
+        False);
       Exit;
     end;
     if FC.IsIndirectCall then
@@ -11087,7 +11090,9 @@ begin
   begin
     Self.EmitProcFieldCall(ACall.ObjExpr, ACall.ObjectName, ACall.IsVarParam,
       ACall.ProcFieldInfo, TProceduralTypeDesc(ACall.ResolvedProcType),
-      ACall.Args, ACall.ResolvedType);
+      ACall.Args, ACall.ResolvedType,
+      (ACall.ResolvedClassType <> nil) and
+      (ACall.ResolvedClassType.Kind = tyRecord));
     Exit;
   end;
 
@@ -12447,7 +12452,9 @@ begin
   begin
     Self.EmitProcFieldCall(ACall.ObjExpr, ACall.ObjectName, ACall.IsVarParam,
       ACall.ProcFieldInfo, TProceduralTypeDesc(ACall.ResolvedProcType),
-      ACall.Args, nil);
+      ACall.Args, nil,
+      (ACall.ResolvedClassType <> nil) and
+      (ACall.ResolvedClassType.Kind = tyRecord));
     Exit;
   end;
 
@@ -15938,7 +15945,7 @@ begin
     if PC.IsProcFieldCall then
     begin
       Self.EmitProcFieldCall(nil, 'Self', False, PC.ProcFieldInfo,
-        TProceduralTypeDesc(PC.ResolvedProcType), PC.Args, nil);
+        TProceduralTypeDesc(PC.ResolvedProcType), PC.Args, nil, False);
       Exit;
     end;
     if PC.IsIndirectCall then
@@ -20231,7 +20238,8 @@ end;
     popq <arg regs>      ; callq *%r10 }
 procedure TX86_64Backend.EmitProcFieldCall(AObjExpr: TASTExpr;
   const AObjectName: string; AIsVarParam: Boolean; AFieldInfo: TFieldInfo;
-  AProcType: TProceduralTypeDesc; AArgs: TObjectList; AResultType: TTypeDesc);
+  AProcType: TProceduralTypeDesc; AArgs: TObjectList; AResultType: TTypeDesc;
+  AReceiverIsRecord: Boolean);
 var
   I:       Integer;
   Arg:     TASTExpr;
@@ -20295,6 +20303,18 @@ begin
         raise ENativeCodeGenError.Create(
           'native backend: unsupported receiver expression in procedural-field call');
     end
+    else if AReceiverIsRecord then
+      { A record is a VALUE: its variable slot IS the record, so the receiver
+        base is the slot's ADDRESS.  Loading the slot's CONTENTS instead
+        treated the record's first 8 bytes as an instance pointer and
+        dispatched through garbage
+        (BUG-20260722-closure-record-field-direct-call).  A var/out record
+        param's slot already holds the caller's record address, so that case
+        wants the stored value — one load, not two.  EmitVarBaseToReg also
+        covers a CAPTURED record (a closure body calling R.F() on an outer
+        record) and the sret Result buffer, and is call-free so the arguments
+        pushed above survive. }
+      Self.EmitVarBaseToReg(AObjectName, not AIsVarParam, '%rax')
     else if AIsVarParam then
     begin
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(AObjectName)]));

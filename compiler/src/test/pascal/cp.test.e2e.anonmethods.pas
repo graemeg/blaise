@@ -84,6 +84,20 @@ type
     procedure TestRun_Closure_OwnedTransientStringArg;
     { arm64 leg 38b(ii): a statement-position closure call (result discarded). }
     procedure TestRun_Closure_StatementPositionCall;
+    { BUG-20260722-closure-record-field-direct-call: calling a closure
+      stored in a RECORD field directly (R.F()) segfaulted on both
+      backends.  Every record-receiver arm of the proc-field call path was
+      gated on MDecl.IsRecordMethod, but a proc-field call has no method
+      (ResolvedMethod is nil by design), so control fell through to the
+      CLASS arm, which loaded the record's first 8 bytes as an instance
+      POINTER and dispatched through it.  The workaround form
+      (G := R.F; G()) always worked, which is the tell. }
+    procedure TestRun_ClosureInRecordField_DirectCall;
+    procedure TestRun_ClosureInRecordField_NonZeroOffset;
+    procedure TestRun_ClosureInRecordField_WithArgs;
+    procedure TestRun_ClosureInRecordField_VarParamReceiver;
+    procedure TestRun_ClosureInRecordField_LocalRecord;
+    procedure TestRun_ClosureInRecordField_NestedRecord;
   end;
 
 implementation
@@ -1254,6 +1268,163 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '42' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureInRecordField_DirectCall;
+const
+  { The exact bug repro: a capturing closure in a record field, called
+    directly.  The G := R.F; G() form is asserted alongside it so a
+    regression that breaks only the direct form is unambiguous. }
+  Src = '''
+    program P;
+    type
+      TFn = reference to procedure;
+      TR = record F: TFn; end;
+    var
+      S: string;
+      R: TR;
+      G: TFn;
+    begin
+      S := 'hello';
+      R.F := procedure begin WriteLn(S) end;
+      G := R.F;
+      G();
+      R.F()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, 'hello' + LineEnding + 'hello' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureInRecordField_NonZeroOffset;
+const
+  { Offset 0 is the easy case (the slot address IS the record address).
+    A field behind a leading member exercises the 'add Offset' arm too. }
+  Src = '''
+    program P;
+    type
+      TFn = reference to procedure;
+      TR = record
+        Pad: Integer;
+        F: TFn;
+      end;
+    var
+      S: string;
+      R: TR;
+    begin
+      S := 'world';
+      R.Pad := 7;
+      R.F := procedure begin WriteLn(S) end;
+      R.F();
+      WriteLn(R.Pad)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, 'world' + LineEnding + '7' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureInRecordField_WithArgs;
+const
+  { Arguments must still land in the right registers once the env is
+    threaded as the hidden first argument. }
+  Src = '''
+    program P;
+    type
+      TFn = reference to procedure(A: Integer; B: Integer);
+      TR = record F: TFn; end;
+    var
+      Base: Integer;
+      R: TR;
+    begin
+      Base := 100;
+      R.F := procedure(A: Integer; B: Integer)
+             begin WriteLn(Base + A + B) end;
+      R.F(20, 3)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '123' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureInRecordField_VarParamReceiver;
+const
+  { A var-param record receiver: the slot holds the caller's ADDRESS, so
+    the field slot is one dereference further than a plain local. }
+  Src = '''
+    program P;
+    type
+      TFn = reference to procedure;
+      TR = record F: TFn; end;
+    procedure Run(var R: TR);
+    begin
+      R.F()
+    end;
+    var
+      S: string;
+      Rec: TR;
+    begin
+      S := 'viavar';
+      Rec.F := procedure begin WriteLn(S) end;
+      Run(Rec)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, 'viavar' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureInRecordField_LocalRecord;
+const
+  { A record LOCAL rather than a global: VarOperand addresses a frame slot,
+    so the leaq/address form must be right for locals too. }
+  Src = '''
+    program P;
+    type
+      TFn = reference to procedure;
+      TR = record F: TFn; end;
+    procedure Run;
+    var
+      S: string;
+      R: TR;
+    begin
+      S := 'localrec';
+      R.F := procedure begin WriteLn(S) end;
+      R.F()
+    end;
+    begin
+      Run()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, 'localrec' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureInRecordField_NestedRecord;
+const
+  { A chained record base (Outer.Inner.F()) goes through the ObjExpr
+    receiver path rather than the bare-name path. }
+  Src = '''
+    program P;
+    type
+      TFn = reference to procedure;
+      TInner = record F: TFn; end;
+      TOuter = record Inner: TInner; end;
+    var
+      S: string;
+      O: TOuter;
+    begin
+      S := 'nested';
+      O.Inner.F := procedure begin WriteLn(S) end;
+      O.Inner.F()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, 'nested' + LineEnding, 0);
 end;
 
 initialization
