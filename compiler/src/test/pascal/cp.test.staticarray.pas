@@ -162,6 +162,27 @@ type
     procedure TestSemantic_EnumShadowedByLocalVar_NotFolded;
     procedure TestSemantic_EnumShadowedByParam_NotFolded;
     procedure TestSemantic_EnumShadowedByField_NotFolded;
+
+    { ------------------------------------------------------------------ }
+    { BUG-20260922-explicit-ordinal-enum-array-bounds — an enum with     }
+    { EXPLICIT ordinals indexes an array over its MIN..MAX ordinal span, }
+    { not 0..Count-1 (which mis-sized the array while member indices     }
+    { folded to real ordinals, landing outside it).                      }
+    { ------------------------------------------------------------------ }
+    procedure TestSemantic_EnumIndex_ExplicitOrdinals_BoundsSpanMinMax;
+    procedure TestSemantic_EnumIndex_NegativeOrdinal_BoundsSpanMinMax;
+    procedure TestSemantic_EnumIndex_NonMonotonic_BoundsSpanMinMax;
+    procedure TestSemantic_EnumIndex_MultiDim_OuterSpansMinMax;
+    procedure TestSemantic_EnumIndex_MultiDim_InnerSpansMinMax;
+    procedure TestCodegen_EnumIndex_ExplicitOrdinals_AllocSpanSize;
+    procedure TestSemantic_ConstArray_ExplicitOrdinals_NeedsSpanElements;
+    procedure TestSemantic_ConstArray_ExplicitOrdinals_SpanElementsAccepted;
+    procedure TestSemantic_ClassConstArray_ExplicitOrdinals_NeedsSpanElements;
+    procedure TestSemantic_InitGlobal_ExplicitOrdinals_NeedsSpanElements;
+    { A contiguous 0-based enum is unchanged — the overwhelmingly common
+      case must produce identical bounds, and hence identical layout. }
+    procedure TestSemantic_EnumIndex_ZeroBased_Unchanged;
+    procedure TestSemantic_EnumIndex_PartiallyExplicit_StillZeroBased;
   end;
 
 implementation
@@ -1535,6 +1556,221 @@ begin
     begin C := TC.Create(); C.Go() end.
     ''');
   AssertTrue('enum-shadowing class field is not folded', Length(IR) > 0);
+end;
+
+{ ------------------------------------------------------------------ }
+{ BUG-20260922-explicit-ordinal-enum-array-bounds                    }
+{ ------------------------------------------------------------------ }
+
+procedure TStaticArrayTests.TestSemantic_EnumIndex_ExplicitOrdinals_BoundsSpanMinMax;
+var P: TProgram; VD: TVarDecl; SAT: TStaticArrayTypeDesc;
+begin
+  P := AnalyseSrc('''
+    program P;
+    type TColor = (Red = 5, Green = 10);
+    var A: array[TColor] of Integer;
+    begin end.
+    ''');
+  try
+    VD  := TVarDecl(P.Block.Decls.Items[0]);
+    SAT := TStaticArrayTypeDesc(VD.ResolvedType);
+    AssertEquals('low is MinOrdinal', 5, SAT.LowBound);
+    AssertEquals('high is MaxOrdinal', 10, SAT.HighBound);
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticArrayTests.TestSemantic_EnumIndex_NegativeOrdinal_BoundsSpanMinMax;
+var P: TProgram; VD: TVarDecl; SAT: TStaticArrayTypeDesc;
+begin
+  { A negative low bound is already supported for array[-3..2]. }
+  P := AnalyseSrc('''
+    program P;
+    type TS = (sA = -3, sB = 2);
+    var A: array[TS] of Integer;
+    begin end.
+    ''');
+  try
+    VD  := TVarDecl(P.Block.Decls.Items[0]);
+    SAT := TStaticArrayTypeDesc(VD.ResolvedType);
+    AssertEquals('low', -3, SAT.LowBound);
+    AssertEquals('high', 2, SAT.HighBound);
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticArrayTests.TestSemantic_EnumIndex_NonMonotonic_BoundsSpanMinMax;
+var P: TProgram; VD: TVarDecl; SAT: TStaticArrayTypeDesc;
+begin
+  { MaxOrdinal is a max over ALL members, not the last one declared. }
+  P := AnalyseSrc('''
+    program P;
+    type TN = (nA = 10, nB = 20, nC = 15);
+    var A: array[TN] of Integer;
+    begin end.
+    ''');
+  try
+    VD  := TVarDecl(P.Block.Decls.Items[0]);
+    SAT := TStaticArrayTypeDesc(VD.ResolvedType);
+    AssertEquals('low', 10, SAT.LowBound);
+    AssertEquals('high is the MAX, not the last', 20, SAT.HighBound);
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticArrayTests.TestSemantic_EnumIndex_MultiDim_OuterSpansMinMax;
+var P: TProgram; VD: TVarDecl; SAT: TStaticArrayTypeDesc;
+begin
+  P := AnalyseSrc('''
+    program P;
+    type TColor = (Red = 5, Green = 10);
+    var A: array[TColor, 0..1] of Integer;
+    begin end.
+    ''');
+  try
+    VD  := TVarDecl(P.Block.Decls.Items[0]);
+    SAT := TStaticArrayTypeDesc(VD.ResolvedType);
+    AssertEquals('outer low', 5, SAT.LowBound);
+    AssertEquals('outer high', 10, SAT.HighBound);
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticArrayTests.TestSemantic_EnumIndex_MultiDim_InnerSpansMinMax;
+var P: TProgram; VD: TVarDecl; SAT, Inner: TStaticArrayTypeDesc;
+begin
+  P := AnalyseSrc('''
+    program P;
+    type TColor = (Red = 5, Green = 10);
+    var A: array[0..1, TColor] of Integer;
+    begin end.
+    ''');
+  try
+    VD    := TVarDecl(P.Block.Decls.Items[0]);
+    SAT   := TStaticArrayTypeDesc(VD.ResolvedType);
+    Inner := TStaticArrayTypeDesc(SAT.ElementType);
+    AssertEquals('inner low', 5, Inner.LowBound);
+    AssertEquals('inner high', 10, Inner.HighBound);
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticArrayTests.TestCodegen_EnumIndex_ExplicitOrdinals_AllocSpanSize;
+var IR: string;
+begin
+  { 5..10 inclusive = 6 Integers = 24 bytes (not 2 x 4 = 8). }
+  IR := GenIR('''
+    program P;
+    type TColor = (Red = 5, Green = 10);
+    var A: array[TColor] of Integer;
+    begin A[Red] := 1 end.
+    ''');
+  AssertTrue('allocates the 24-byte span', Pos('24', IR) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstArray_ExplicitOrdinals_NeedsSpanElements;
+var Msg: string;
+begin
+  { USER-VISIBLE CHANGE: the initialiser is positional over the SPAN, so a
+    sparse enum needs one value per ordinal slot, holes included. }
+  Msg := SemanticErrMsg('''
+    program P;
+    type TColor = (Red = 5, Green = 10);
+    const A: array[TColor] of Integer = (1, 2);
+    begin end.
+    ''');
+  AssertTrue('2 elements for a 6-slot span must be rejected, got: ' + Msg,
+    Pos('element', Msg) >= 0);
+  AssertTrue('message states the span, got: ' + Msg,
+    Pos('5..10', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ConstArray_ExplicitOrdinals_SpanElementsAccepted;
+var IR: string;
+begin
+  IR := GenIR('''
+    program P;
+    type TColor = (Red = 5, Green = 10);
+    const A: array[TColor] of Integer = (1, 0, 0, 0, 0, 2);
+    begin WriteLn(A[Red]) end.
+    ''');
+  AssertTrue('6 elements for a 6-slot span accepted', Length(IR) > 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_ClassConstArray_ExplicitOrdinals_NeedsSpanElements;
+var Msg: string;
+begin
+  Msg := SemanticErrMsg('''
+    program P;
+    type
+      TColor = (Red = 5, Green = 10);
+      TC = class
+      public
+        const Names: array[TColor] of Integer = (1, 2);
+      end;
+    begin end.
+    ''');
+  AssertTrue('class const needs span elements, got: ' + Msg,
+    Pos('element', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_InitGlobal_ExplicitOrdinals_NeedsSpanElements;
+var Msg: string;
+begin
+  Msg := SemanticErrMsg('''
+    program P;
+    type TColor = (Red = 5, Green = 10);
+    var A: array[TColor] of Integer = (1, 2);
+    begin end.
+    ''');
+  AssertTrue('global initialiser needs span elements, got: ' + Msg,
+    Pos('element', Msg) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_EnumIndex_ZeroBased_Unchanged;
+var P: TProgram; VD: TVarDecl; SAT: TStaticArrayTypeDesc;
+begin
+  { The common case: MinOrdinal=0 and MaxOrdinal=Count-1, so the new rule
+    produces identical bounds — and hence identical layout and IR. }
+  P := AnalyseSrc('''
+    program P;
+    type TDir = (North, South, East, West);
+    var D: array[TDir] of Integer;
+    begin end.
+    ''');
+  try
+    VD  := TVarDecl(P.Block.Decls.Items[0]);
+    SAT := TStaticArrayTypeDesc(VD.ResolvedType);
+    AssertEquals('low unchanged', 0, SAT.LowBound);
+    AssertEquals('high unchanged', 3, SAT.HighBound);
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticArrayTests.TestSemantic_EnumIndex_PartiallyExplicit_StillZeroBased;
+var P: TProgram; VD: TVarDecl; SAT: TStaticArrayTypeDesc;
+begin
+  { (A, B = 1, C) is still exactly 0..2 — also unchanged. }
+  P := AnalyseSrc('''
+    program P;
+    type TP = (pA, pB = 1, pC);
+    var A: array[TP] of Integer;
+    begin end.
+    ''');
+  try
+    VD  := TVarDecl(P.Block.Decls.Items[0]);
+    SAT := TStaticArrayTypeDesc(VD.ResolvedType);
+    AssertEquals('low', 0, SAT.LowBound);
+    AssertEquals('high', 2, SAT.HighBound);
+  finally
+    P.Free();
+  end;
 end;
 
 initialization

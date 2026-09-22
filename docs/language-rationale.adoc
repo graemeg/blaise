@@ -5450,8 +5450,11 @@ var
   Costs: array[TColor] of Integer;         { var declaration }
 ----
 
-The array is sized `0..High(TColor)` (i.e. `0..Members.Count-1`), and
-subscript access uses the enum ordinal value directly.
+The array is sized `Ord(Low(TColor))..Ord(High(TColor))` — the enum's minimum
+to maximum *declared ordinal* — and subscript access uses the enum ordinal
+value directly.  For an enum that does not assign ordinals explicitly, which
+is the common case, that is exactly `0..Members.Count-1`.  For one that does,
+see <<explicit-ordinal-enum-index>>.
 
 === Rationale
 
@@ -6653,14 +6656,10 @@ produces a program that appears to work.
 
 === Interaction with explicitly-numbered enum index types
 
-An enum given explicit ordinals (`TColor = (Red = 5, Green = 10)`) used as an
-array index type exposes a separate, pre-existing defect: the array is sized
-from the member COUNT (`0..1`) while a member used as an index folds to its
-real ordinal (5), so the write lands outside the array. This check does not
-cause that — it surfaces it, previously as a silent out-of-bounds write and
-now as a compile error whose message blames the index rather than the array
-extent. Tracked as `BUG-20260922-explicit-ordinal-enum-array-bounds`; the
-extent is the thing to fix.
+An enum given explicit ordinals used as an array index type exposed a
+separate, pre-existing defect, since resolved — see
+<<explicit-ordinal-enum-index>>. This range check did not cause it; it
+surfaced it.
 
 == Constant Values Stored into a Subrange or Enum Are Range-Checked
 
@@ -6744,3 +6743,110 @@ wrongly assumed, and is the defect recorded in
 `BUG-20260922-explicit-ordinal-enum-array-bounds`. Using min..max declared
 ordinal matches Delphi/FPC, permits interior holes, and lets both range checks
 share one rule.
+
+[#explicit-ordinal-enum-index]
+== An Explicitly-Numbered Enum Indexes an Array Over Its Ordinal Span
+
+=== Decision
+
+When an enumeration whose members carry explicit ordinals is used as an array
+index type, the array spans the enum's *minimum to maximum declared ordinal*,
+and a member subscript addresses the slot at its own ordinal:
+
+[source,pascal]
+----
+type TColor = (Red = 5, Green = 10);
+var A: array[TColor] of Integer;
+----
+
+`A` holds six elements, `Low(A)` is 5, `High(A)` is 10, `SizeOf(A)` is 24, and
+`A[Red]` is the first slot while `A[Green]` is the sixth. Four of the six are
+not reachable through any member name.
+
+The invariant is `Low(A) = Ord(Low(T))` and `High(A) = Ord(High(T))`, which is
+the same min..max rule used for values and casts of that type. An enum that
+does not assign ordinals explicitly spans `0..Members.Count-1` exactly as
+before, so the overwhelmingly common case is unaffected — identical bounds,
+identical layout, identical generated code.
+
+Because a sparse enum can produce a very large array from very few members, a
+warning is issued when the span is both disproportionate and large in absolute
+terms (at least twice the member count, and more than eight unused slots):
+
+----
+Warning: enum 'TCode' spans ordinals 200..404, so array[TCode] allocates
+205 elements for 2 member(s) (203 unused); index by an integer or renumber
+the enum if that is not intended
+----
+
+The warning fires once per enum, not once per declaration, and stays silent
+for a dense enum or a stray hole or two.
+
+=== Rationale
+
+Previously the array was sized from the member *count* (`0..1` for the example
+above) while a member used as a subscript folded to its *real ordinal* (5).
+The two disagreed, so every access landed outside the array: `A[Red] := 1`
+wrote past the end, and `for c := Low(TColor) to High(TColor) do A[c]` walked
+well beyond it — silently, on both backends.
+
+Sizing by the span is the smaller of the two possible corrections, because
+three related rules in the language already follow the ordinal:
+
+* `Ord(Red)` is 5, not 0;
+* `Low(TColor)` and `High(TColor)` already report 5 and 10;
+* a constant stored into or cast to the type is already checked against
+  min..max ordinal, so `TColor(7)` is a legal value (see the preceding
+  section).
+
+Sizing by the member count made the array the only one of the four that used
+position instead of ordinal. Given `TColor(7)` is a legal value, it also needs
+somewhere to live: with the span it does, and a variable-index access
+`A[c]` is in bounds for every legal `c` — which matters because Blaise has no
+runtime range check to catch the alternative.
+
+This also matches Delphi, whose documentation describes such an enum as "in
+effect, a subrange whose lowest and highest values correspond to the lowest and
+highest ordinalities of the constants in the declaration", and FPC's Delphi
+mode, which reports `Low(A)=5 High(A)=10 SizeOf(A)=24 Length(A)=6` for the
+program above — byte for byte what Blaise now reports.
+
+=== Consequence for initialisers
+
+An array constant over such an enum is positional across the *span*, so it
+needs one value per slot, holes included:
+
+[source,pascal]
+----
+const A: array[TColor] of Integer = (1, 0, 0, 0, 0, 2);   { six values }
+----
+
+This is a breaking change: `(1, 2)` was accepted before and is now rejected
+with the span named in the diagnostic. It affects unit-level array constants,
+class-level array constants, and initialised global variables. Blaise has no
+indexed-initialiser form (`(Red: 1; Green: 2)`), so there is no shorter
+spelling; FPC's Delphi mode requires the same six values. No source in this
+repository was affected.
+
+=== Alternatives rejected
+
+*Reject a sparse enum as an array index type*, which is what FPC's own
+`objfpc` mode does (`Error: enums with assignments cannot be used as array
+index`). This avoids the wasted space outright and was a genuine contender.
+Rejected because it is asymmetric with the rest of the language: `TColor(7)`
+is a legal value and `array[Green..Blue]` — an enum *subrange* — already
+spans its ordinals, allocating holes, so refusing only the full-enum form
+would leave two similar constructs behaving differently. It also removes a
+capability rather than repairing one. Notably FPC computes the same span
+internally even while refusing the use: its typed-const diagnostic for the
+example reads "Expected another 4 array elements", i.e. six slots. Its
+rejection is a policy layered over this sizing rule, not a different one. The
+disproportion warning was added to recover most of the ergonomic benefit
+without the asymmetry.
+
+*Keep the positional `0..Members.Count-1` sizing and make `A[Red]` mean the
+member's position rather than its ordinal.* This would be dense and would
+leave initialisers untouched, but it breaks `Ord(Red) = 5` as the meaning of a
+subscript, contradicts the enum-subrange form, and diverges from both Delphi
+and every FPC mode. It would also be the largest change of the three, since it
+needs a position lookup that no other part of the language performs.

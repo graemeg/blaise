@@ -542,7 +542,8 @@ begin
             (e.g. the TEnum dimensions in 'array[TEnum, 0..1]').  Encode BOTH
             bounds as self-describing markers '@L:TEnum' / '@H:TEnum' so the
             resolver derives low and high from the type — a full enum spans
-            0..N-1, an enum-subrange type spans its own ordinal bounds
+            its MIN..MAX declared ordinal, an enum-subrange type spans its
+            own ordinal bounds
             (GH #182; hardcoding low=0 mis-sized a subrange dimension). }
           if Check(tkIdent) and (PeekKind() <> tkDotDot) then
           begin
@@ -1619,7 +1620,8 @@ begin
   { An enum-type dimension is a bare identifier NOT followed by '..' (e.g. the
     TEnum in 'array[TEnum, 0..1]').  Encode BOTH bounds as self-describing
     markers '@L:TEnum' / '@H:TEnum' so the semantic pass derives the low and
-    high from the type: a full enum spans 0..N-1, but an ENUM-SUBRANGE type
+    high from the type: a full enum spans its MIN..MAX declared ordinal (so
+    not always 0-based), and an ENUM-SUBRANGE type
     (TSub = a..b) spans its own ordinal bounds SubrangeLow..SubrangeHigh —
     hardcoding the low to 0 mis-sized a subrange dimension (GH #182). }
   if Check(tkIdent) and (PeekKind() <> tkDotDot) then

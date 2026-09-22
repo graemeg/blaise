@@ -132,6 +132,9 @@ type
     FForInLoopVars:        TStringList;  { stack of active for-in loop-variable names (nested loops
                                            push/pop); a write to one of these is diagnosed — the
                                            mutation goes to a per-iteration copy and is discarded }
+    { Enum names already warned about for a sparse array index, so the same
+      enum does not nag once per declaration. }
+    FSparseEnumWarned:     TStringList;
     FWarnings:             TStringList;  { non-fatal diagnostics collected during analysis; each is
                                            also written to StdErr as it is raised (see SemanticWarning) }
     FCurrentLocalBlock:    TBlock;       { block currently being stmt-analysed; for-in injects synthetic TVarDecl here }
@@ -352,6 +355,19 @@ type
       survives). }
     procedure CheckConstIntInRange(ADestType: TTypeDesc; AValue: Int64;
                                    ALine, ACol: Integer);
+    { The inclusive ordinal bounds an ENUM (or enum-subrange) index type
+      spans when it indexes an array: MIN..MAX declared ordinal, matching
+      Delphi and the min..max rule used for values and casts.  Five sites
+      used to open-code `if IsSubrange then bounds else 0..Count-1`, and
+      that duplication is how BUG-20260922-explicit-ordinal-enum-array-
+      bounds drifted — every caller must use this. }
+    procedure EnumIndexBounds(AIdxType: TTypeDesc; out ALo, AHi: Integer);
+    { Warn when an enum's declared ordinals are so sparse that indexing an
+      array by it allocates far more slots than the enum has members.  The
+      span is correct but easy to reach unintentionally: (HTTP_OK = 200,
+      HTTP_NOTFOUND = 404) would quietly allocate 205 elements. }
+    procedure WarnIfEnumIndexSparse(AIdxType: TTypeDesc; const ADescr: string;
+                                    ALine, ACol: Integer);
     function  ResolveArrayBound(const ABoundText: string): Integer;
     function  ResolveSubrangeSetType(const ASubrange: string): TSetTypeDesc;
     function  ResolveConstArrayElem(const AElem: string; AElemType: TTypeDesc;
@@ -1053,6 +1069,7 @@ begin
   FForInLoopVars        := TStringList.Create();
   FForInLoopVars.CaseSensitive := False;
   FWarnings             := TStringList.Create();
+  FSparseEnumWarned     := TStringList.Create();
   FPendingGenericInstances       := TObjectList.Create(False);
   FPendingGenericRecordInstances := TObjectList.Create(False);
   FPendingGenericIntfInstances   := TObjectList.Create(False);
@@ -1071,6 +1088,7 @@ begin
   FActiveTypeParams.Free();
   FForInLoopVars.Free();
   FWarnings.Free();
+  FSparseEnumWarned.Free();
   FUnitSymbols.Free();
   FUnitIfaces.Free();
   FCurrentUsesChain.Free();
@@ -3877,16 +3895,22 @@ begin
     if (IdxTD <> nil) and (IdxTD.Kind = tyEnum) and (not IdxTD.IsSubrange) and
        (BaseType <> nil) then
     begin
-      { A full enum index (array[TEnum] of T) spans 0..N-1.  An ENUM-SUBRANGE
-        index (IsSubrange) is NOT full-range — it falls through to the subrange
-        branch below, which uses the subrange's own ordinal bounds (GH #182). }
+      { A full enum index (array[TEnum] of T) spans the enum's MIN..MAX
+        declared ordinal — NOT 0..N-1, which mis-sized the array whenever
+        ordinals were assigned explicitly, because a member used as an index
+        folds to its real ordinal (BUG-20260922-explicit-ordinal-enum-array-
+        bounds).  For the common contiguous 0-based enum this is identical to
+        0..Count-1, so layout is unchanged.  An ENUM-SUBRANGE index
+        (IsSubrange) falls through to the subrange branch below (GH #182). }
       EnumDesc := TEnumTypeDesc(IdxTD);
-      HVal     := EnumDesc.Members.Count - 1;
-      CanonName := Format('array[0..%d] of %s', [HVal, BaseType.Name]);
+      Self.EnumIndexBounds(EnumDesc, LVal, HVal);
+      Self.WarnIfEnumIndexSparse(EnumDesc,
+        Format('array[%s]', [EnumDesc.Name]), 0, 0);
+      CanonName := Format('array[%d..%d] of %s', [LVal, HVal, BaseType.Name]);
       Result    := FTable.FindType(CanonName);
       if Result = nil then
       begin
-        SAT := FTable.NewStaticArrayType(BaseType, 0, HVal);
+        SAT := FTable.NewStaticArrayType(BaseType, LVal, HVal);
         Sym := TSymbol.Create(CanonName, skType, SAT);
         FTable.DefineGlobal(Sym);
         Result := SAT;
@@ -5874,6 +5898,62 @@ begin
     ALine, ACol);
 end;
 
+procedure TSemanticAnalyser.EnumIndexBounds(AIdxType: TTypeDesc;
+                                            out ALo, AHi: Integer);
+begin
+  ALo := 0;
+  AHi := 0;
+  if AIdxType = nil then
+    Exit;
+  { An enum SUBRANGE (TMid = eB..eC) already carries resolved ordinals. }
+  if AIdxType.IsSubrange then
+  begin
+    ALo := AIdxType.SubrangeLow;
+    AHi := AIdxType.SubrangeHigh;
+    Exit;
+  end;
+  if (AIdxType.Kind = tyEnum) and (AIdxType is TEnumTypeDesc) then
+  begin
+    { MIN..MAX declared ordinal, NOT 0..Members.Count-1.  A member used as
+      an index folds to its real ordinal, so sizing by the member count
+      produced an array the indices pointed outside of. }
+    ALo := TEnumTypeDesc(AIdxType).MinOrdinal();
+    AHi := TEnumTypeDesc(AIdxType).MaxOrdinal();
+  end;
+end;
+
+procedure TSemanticAnalyser.WarnIfEnumIndexSparse(AIdxType: TTypeDesc;
+  const ADescr: string; ALine, ACol: Integer);
+var
+  Lo, Hi: Integer;
+  Slots:  Integer;
+  Members: Integer;
+begin
+  if (AIdxType = nil) or AIdxType.IsSubrange or
+     (AIdxType.Kind <> tyEnum) or (not (AIdxType is TEnumTypeDesc)) then
+    Exit;
+  Members := TEnumTypeDesc(AIdxType).Members.Count;
+  if Members = 0 then
+    Exit;
+  if FSparseEnumWarned.IndexOf(AIdxType.Name) >= 0 then
+    Exit;
+  Self.EnumIndexBounds(AIdxType, Lo, Hi);
+  Slots := Hi - Lo + 1;
+  { Quiet for a dense or near-dense enum; the threshold only catches a span
+    that is BOTH disproportionate and large in absolute terms, so a stray
+    hole or two never nags. }
+  if (Slots >= Members * 2) and (Slots - Members > 8) then
+  begin
+    FSparseEnumWarned.Add(AIdxType.Name);
+    SemanticWarning(Format(
+      'enum ''%s'' spans ordinals %d..%d, so %s allocates %d elements for ' +
+      '%d member(s) (%d unused); index by an integer or renumber the enum ' +
+      'if that is not intended',
+      [AIdxType.Name, Lo, Hi, ADescr, Slots, Members, Slots - Members]),
+      ALine, ACol);
+  end;
+end;
+
 procedure TSemanticAnalyser.CheckConstIntInRange(ADestType: TTypeDesc;
                                                  AValue: Int64;
                                                  ALine, ACol: Integer);
@@ -6042,6 +6122,7 @@ end;
 
 function TSemanticAnalyser.ResolveArrayBound(const ABoundText: string): Integer;
 var
+  ELo, EHi: Integer;
   Src: string;
   Lx: TLexer;
   Px: TParser;
@@ -6054,10 +6135,11 @@ begin
   if IsPlainInt(ABoundText) then
     Exit(Integer(StrToInt(ABoundText)));
   { Enum-type dimension markers (see ReadConstArrayDim): '@L:TEnum' / '@H:TEnum'
-    are the low / high bounds of an enum-typed array dimension.  A FULL enum
-    spans 0..Members.Count-1; an ENUM-SUBRANGE type (TSub = a..b) spans its own
-    ordinal bounds SubrangeLow..SubrangeHigh — so the low is NOT always 0
-    (GH #182).  The bare '@TEnum' form (legacy high-only encoding) is still
+    are the low / high bounds of an enum-typed array dimension.  BOTH a full
+    enum and an ENUM-SUBRANGE span their MIN..MAX declared ordinal, so the low
+    is NOT always 0 (GH #182, and BUG-20260922-explicit-ordinal-enum-array-
+    bounds for the full-enum case).  EnumIndexBounds is the single source of
+    that rule.  The bare '@TEnum' form (legacy high-only encoding) is still
     accepted for backward compatibility. }
   if (Length(ABoundText) >= 3) and (Copy(ABoundText, 0, 3) = '@L:') then
   begin
@@ -6065,9 +6147,8 @@ begin
     if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) and
        (Sym.TypeDesc.Kind = tyEnum) then
     begin
-      if TEnumTypeDesc(Sym.TypeDesc).IsSubrange then
-        Exit(Integer(TEnumTypeDesc(Sym.TypeDesc).SubrangeLow));
-      Exit(0);
+      Self.EnumIndexBounds(Sym.TypeDesc, ELo, EHi);
+      Exit(ELo);
     end;
     SemanticError(Format('Unknown enum type ''%s'' in array dimension',
       [Copy(ABoundText, 3, Length(ABoundText) - 3)]), 0, 0);
@@ -6078,9 +6159,8 @@ begin
     if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) and
        (Sym.TypeDesc.Kind = tyEnum) then
     begin
-      if TEnumTypeDesc(Sym.TypeDesc).IsSubrange then
-        Exit(Integer(TEnumTypeDesc(Sym.TypeDesc).SubrangeHigh));
-      Exit(TEnumTypeDesc(Sym.TypeDesc).Members.Count - 1);
+      Self.EnumIndexBounds(Sym.TypeDesc, ELo, EHi);
+      Exit(EHi);
     end;
     SemanticError(Format('Unknown enum type ''%s'' in array dimension',
       [Copy(ABoundText, 3, Length(ABoundText) - 3)]), 0, 0);
@@ -6091,9 +6171,8 @@ begin
     if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) and
        (Sym.TypeDesc.Kind = tyEnum) then
     begin
-      if TEnumTypeDesc(Sym.TypeDesc).IsSubrange then
-        Exit(Integer(TEnumTypeDesc(Sym.TypeDesc).SubrangeHigh));
-      Exit(TEnumTypeDesc(Sym.TypeDesc).Members.Count - 1);
+      Self.EnumIndexBounds(Sym.TypeDesc, ELo, EHi);
+      Exit(EHi);
     end;
     SemanticError(Format('Unknown enum type ''%s'' in array dimension',
       [Copy(ABoundText, 1, Length(ABoundText) - 1)]), 0, 0);
@@ -6684,6 +6763,7 @@ procedure TSemanticAnalyser.AnalyseArrayConstDecls(ABlock: TBlock;
 { Second-pass constant analysis for array-typed constants.
   Called after AnalyseTypeDecls so that enum index types are in scope. }
 var
+  ELo, EHi: Integer;
   I, J:     Integer;
   CD:       TConstDecl;
   Sym:      TSymbol;
@@ -6759,25 +6839,25 @@ begin
             'Array const index type must be an enum or Boolean, got ''%s''',
             [IdxTD.Name]), CD.Line, CD.Col);
         EnumDesc := TEnumTypeDesc(IdxTD);
-        { An enum-SUBRANGE index (TTurn = East..South) spans only its own
-          ordinal bounds — the descriptor copies the base enum's members, so
-          Members.Count is the FULL enum width (GH #182 follow-up).  The
-          array's bounds are the subrange ordinals, so element reads index
-          relative to SubrangeLow. }
-        if EnumDesc.IsSubrange then
-          Expected := EnumDesc.SubrangeHigh - EnumDesc.SubrangeLow + 1
-        else
-          Expected := EnumDesc.Members.Count;
+        { The initialiser is POSITIONAL across the index type's ordinal span,
+          which for an enum is MIN..MAX declared ordinal — so a sparse enum
+          needs one element per slot, holes included
+          (BUG-20260922-explicit-ordinal-enum-array-bounds).  An
+          enum-SUBRANGE spans only its own bounds; its descriptor copies the
+          base enum's members, so Members.Count would be the FULL enum width
+          (GH #182 follow-up).  EnumIndexBounds encodes both rules. }
+        Self.EnumIndexBounds(EnumDesc, ELo, EHi);
+        Self.WarnIfEnumIndexSparse(EnumDesc,
+          Format('array const ''%s''', [CD.Name]), CD.Line, CD.Col);
+        Expected := EHi - ELo + 1;
         if CD.ArrayElements.Count <> Expected then
           SemanticError(Format(
-            'Array const ''%s'' has %d element(s) but index type ''%s'' has %d member(s)',
-            [CD.Name, CD.ArrayElements.Count, CD.ArrayIndexType, Expected]),
+            'Array const ''%s'' has %d element(s) but index type ''%s'' spans ' +
+            'ordinals %d..%d and needs %d',
+            [CD.Name, CD.ArrayElements.Count, CD.ArrayIndexType,
+             ELo, EHi, Expected]),
             CD.Line, CD.Col);
-        if EnumDesc.IsSubrange then
-          ArrTD := FTable.NewStaticArrayType(ElemTD,
-            EnumDesc.SubrangeLow, EnumDesc.SubrangeHigh)
-        else
-          ArrTD := FTable.NewStaticArrayType(ElemTD, 0, Expected - 1);
+        ArrTD := FTable.NewStaticArrayType(ElemTD, ELo, EHi);
         end;
       end;
     end;
@@ -6972,6 +7052,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseTypeDecls(ABlock: TBlock);
 var
+  ELo, EHi: Integer;
   I, J, K:    Integer;
   L:          Integer;
   TD:         TTypeDecl;
@@ -7993,23 +8074,23 @@ begin
               SemanticError(Format('Class array const index must be an enum, got ''%s''',
                 [IdxTD.Name]), CD.Line, CD.Col);
             EnumDesc := TEnumTypeDesc(IdxTD);
-            { Enum-subrange index: span + bounds come from the subrange
-              ordinals, not the full base enum (GH #182 follow-up) — same
-              rule as the unit-level array-const arm. }
-            if EnumDesc.IsSubrange then
-              Expected := EnumDesc.SubrangeHigh - EnumDesc.SubrangeLow + 1
-            else
-              Expected := EnumDesc.Members.Count;
+            { Span + bounds come from the index type's ordinal range — the
+              subrange's own bounds, or MIN..MAX declared ordinal for a full
+              enum (GH #182 follow-up, and
+              BUG-20260922-explicit-ordinal-enum-array-bounds) — same rule as
+              the unit-level array-const arm. }
+            Self.EnumIndexBounds(EnumDesc, ELo, EHi);
+            Self.WarnIfEnumIndexSparse(EnumDesc,
+              Format('class array const ''%s''', [CD.Name]), CD.Line, CD.Col);
+            Expected := EHi - ELo + 1;
             if CD.ArrayElements.Count <> Expected then
               SemanticError(Format(
-                'Class array const ''%s'' has %d element(s) but index type ''%s'' has %d member(s)',
-                [CD.Name, CD.ArrayElements.Count, CD.ArrayIndexType, Expected]),
+                'Class array const ''%s'' has %d element(s) but index type ' +
+                '''%s'' spans ordinals %d..%d and needs %d',
+                [CD.Name, CD.ArrayElements.Count, CD.ArrayIndexType,
+                 ELo, EHi, Expected]),
                 CD.Line, CD.Col);
-            if EnumDesc.IsSubrange then
-              ArrTD := FTable.NewStaticArrayType(ElemTD,
-                EnumDesc.SubrangeLow, EnumDesc.SubrangeHigh)
-            else
-              ArrTD := FTable.NewStaticArrayType(ElemTD, 0, Expected - 1);
+            ArrTD := FTable.NewStaticArrayType(ElemTD, ELo, EHi);
           end;
           Sym := TSymbol.Create(TD.Name + '.' + CD.Name, skConstant, ArrTD);
           Sym.IsGlobal := True;

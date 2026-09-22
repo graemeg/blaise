@@ -131,6 +131,14 @@ type
     procedure TestCompileFails_SubrangeAssign_AboveHigh;
     procedure TestCompileFails_SubrangeCtorArg;
     procedure TestRun_SubrangeAndEnumInRange_StillRun;
+    { BUG-20260922-explicit-ordinal-enum-array-bounds — array[TEnum] spans
+      the enum's MIN..MAX ordinal.  The e2e layer is what proves the store
+      lands INSIDE the array: the IR harness cannot see the memory. }
+    procedure TestRun_EnumIndex_ExplicitOrdinals_StoreAndRead;
+    procedure TestRun_EnumIndex_ExplicitOrdinals_LowHighSizeOfLength;
+    procedure TestRun_EnumIndex_ExplicitOrdinals_ForLoopWithGuards;
+    procedure TestRun_ConstArray_ExplicitOrdinals_SpanElements;
+    procedure TestRun_EnumIndex_ZeroBased_LayoutUnchanged;
   end;
 
 implementation
@@ -1347,6 +1355,121 @@ begin
     explicitly-numbered enum (7 is within 5..10 though no member declares
     it) — all legal, and must still compile AND run. }
   AssertRunsOnAll(Src, '1' + LE + '5' + LE + '7' + LE, 0);
+end;
+
+{ ------------------------------------------------------------------ }
+{ BUG-20260922-explicit-ordinal-enum-array-bounds                    }
+{ ------------------------------------------------------------------ }
+
+procedure TE2EStaticArrayTests.TestRun_EnumIndex_ExplicitOrdinals_StoreAndRead;
+const
+  Src =
+  '''
+  program P;
+  type TColor = (Red = 5, Green = 10);
+  var A: array[TColor] of Integer;
+  begin
+    A[Red] := 1;
+    A[Green] := 2;
+    WriteLn(A[Red], ' ', A[Green])
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { The BUGS.md repro.  Before the fix this wrote 376 bytes past a 2-element
+    array (and, after the index check landed, failed to compile at all). }
+  AssertRunsOnAll(Src, '1 2' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_EnumIndex_ExplicitOrdinals_LowHighSizeOfLength;
+const
+  Src =
+  '''
+  program P;
+  type TColor = (Red = 5, Green = 10);
+  var A: array[TColor] of Integer;
+  begin
+    WriteLn(Low(A), ' ', High(A), ' ', SizeOf(A), ' ', Length(A))
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { 5 10 24 6 — the invariant Low(A) = Ord(Low(TColor)) now holds, and this
+    is byte-for-byte what FPC's Delphi mode reports for the same program. }
+  AssertRunsOnAll(Src, '5 10 24 6' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_EnumIndex_ExplicitOrdinals_ForLoopWithGuards;
+const
+  Src =
+  '''
+  program P;
+  type TColor = (Red = 5, Green = 10);
+  var
+    GuardLo: Integer;
+    A: array[TColor] of Integer;
+    GuardHi: Integer;
+    c: TColor;
+  begin
+    GuardLo := 111;
+    GuardHi := 222;
+    for c := Low(TColor) to High(TColor) do
+      A[Ord(c)] := Ord(c);
+    WriteLn(GuardLo, ' ', GuardHi, ' ', A[Red], ' ', A[Green])
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { Guards either side of the array prove the whole 5..10 walk stays in
+    bounds.  Before the fix this loop wrote past a 2-element array and
+    clobbered a neighbour. }
+  AssertRunsOnAll(Src, '111 222 5 10' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_ConstArray_ExplicitOrdinals_SpanElements;
+const
+  Src =
+  '''
+  program P;
+  type TColor = (Red = 5, Green = 10);
+  const A: array[TColor] of Integer = (1, 0, 0, 0, 0, 2);
+  begin
+    WriteLn(A[Red], ' ', A[Green])
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { A typed const over a sparse enum is positional across the SPAN. }
+  AssertRunsOnAll(Src, '1 2' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_EnumIndex_ZeroBased_LayoutUnchanged;
+const
+  Src =
+  '''
+  program P;
+  type TDir = (North, South, East, West);
+  var A: array[TDir] of Integer;
+  begin
+    A[North] := 1;
+    A[West] := 4;
+    WriteLn(Low(A), ' ', High(A), ' ', SizeOf(A), ' ', A[North], ' ', A[West])
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { The 99% case: a contiguous 0-based enum is completely unaffected. }
+  AssertRunsOnAll(Src, '0 3 16 1 4' + LE, 0);
 end;
 
 initialization
