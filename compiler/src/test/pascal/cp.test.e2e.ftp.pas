@@ -97,7 +97,6 @@ const
     var
       Cli: TFtpClient;
     begin
-      FiberSleep(3);
       Cli := TFtpClient.Create();
       if Cli.Connect('127.0.0.1', PORT) then
       begin

@@ -75,7 +75,6 @@ const
       N: Int64;
       S: string;
     begin
-      FiberSleep(3);
       Fd := Socket(AF_INET, SOCK_STREAM, 0);
       SetNonBlocking(Fd);
       FillSockAddr(SA, INADDR_LOOPBACK, PORT);

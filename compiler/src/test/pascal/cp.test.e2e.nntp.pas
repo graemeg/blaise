@@ -104,7 +104,6 @@ const
       Groups: TList<string>;
       C, F, L, I: Integer;
     begin
-      FiberSleep(3);
       Cli := TNntpClient.Create();
       if Cli.Connect('127.0.0.1', PORT) then
       begin

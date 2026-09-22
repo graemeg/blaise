@@ -67,7 +67,6 @@ const
       Cli: THttpClient;
       Resp: THttpClientResponse;
     begin
-      FiberSleep(3);
       Cli := THttpClient.Create();
       Resp := Cli.Get('http://127.0.0.1:29543/hello');
       if Resp = nil then begin WriteLn('REQFAIL'); Cli.Free(); GSrv.Stop(); Exit; end;

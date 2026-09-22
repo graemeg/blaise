@@ -75,7 +75,6 @@ const
       Data: string;
       IsBin: Boolean;
     begin
-      FiberSleep(3);
       Cli := TWebSocketClient.Create();
       if not Cli.Connect('ws://127.0.0.1:29711/') then
         WriteLn('CONNFAIL')

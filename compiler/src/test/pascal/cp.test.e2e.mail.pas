@@ -116,7 +116,6 @@ const
     var
       Cli: TSmtpClient;
     begin
-      FiberSleep(3);
       Cli := TSmtpClient.Create();
       GOk := Cli.SendMail('127.0.0.1', PORT,
         'alice@example.com', 'bob@example.com', 'Hi', 'Hello Bob');

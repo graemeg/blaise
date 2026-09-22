@@ -67,7 +67,6 @@ const
       Acc, Chunk: string;
       Sep, HeadLen: Integer;
     begin
-      FiberSleep(3);
       Cli := TTcpClient.Create();
       Conn := Cli.Connect('127.0.0.1', PORT);
       Cli.Free();
