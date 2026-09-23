@@ -368,6 +368,12 @@ type
       HTTP_NOTFOUND = 404) would quietly allocate 205 elements. }
     procedure WarnIfEnumIndexSparse(AIdxType: TTypeDesc; const ADescr: string;
                                     ALine, ACol: Integer);
+    { Reject an enum that cannot be a set base.  A member's bit is its
+      declared ORDINAL, so every ordinal must lie in 0..255 -- the ceiling
+      'set of lo..hi' already enforces.  The single source of that rule for
+      the named, inline, inferred-const and 'in [...]' set forms. }
+    procedure CheckEnumSetBase(AEnum: TEnumTypeDesc; const AName: string;
+                               ALine, ACol: Integer);
     function  ResolveArrayBound(const ABoundText: string): Integer;
     function  ResolveSubrangeSetType(const ASubrange: string): TSetTypeDesc;
     function  ResolveConstArrayElem(const AElem: string; AElemType: TTypeDesc;
@@ -4084,10 +4090,7 @@ begin
       BaseType := FindTypeOrInstantiate(BaseName);
     if (BaseType <> nil) and (BaseType.Kind = tyEnum) then
     begin
-      if TEnumTypeDesc(BaseType).Members.Count > 256 then
-        SemanticError(Format(
-          'Enumeration ''%s'' has %d members; set types support at most 256',
-          [BaseType.Name, TEnumTypeDesc(BaseType).Members.Count]), 0, 0);
+      Self.CheckEnumSetBase(TEnumTypeDesc(BaseType), BaseType.Name, 0, 0);
       CanonName := 'set of ' + BaseType.Name;
       Result    := FTable.FindType(CanonName);
       if Result = nil then
@@ -5985,6 +5988,25 @@ begin
   end;
 end;
 
+procedure TSemanticAnalyser.CheckEnumSetBase(AEnum: TEnumTypeDesc;
+  const AName: string; ALine, ACol: Integer);
+var
+  Lo, Hi: Integer;
+begin
+  if AEnum.Members.Count > 256 then
+    SemanticError(Format(
+      'Enumeration ''%s'' has %d members; set types support at most 256',
+      [AName, AEnum.Members.Count]), ALine, ACol);
+  if AEnum.Members.Count = 0 then
+    Exit;
+  Lo := AEnum.MinOrdinal();
+  Hi := AEnum.MaxOrdinal();
+  if (Lo < 0) or (Hi > 255) then
+    SemanticError(Format(
+      'Enumeration ''%s'' spans ordinals %d..%d; a set''s element ordinals ' +
+      'must lie in 0..255', [AName, Lo, Hi]), ALine, ACol);
+end;
+
 procedure TSemanticAnalyser.CheckConstIntInRange(ADestType: TTypeDesc;
                                                  AValue: Int64;
                                                  ALine, ACol: Integer);
@@ -6459,11 +6481,7 @@ begin
   end
   else if EnumDesc <> nil then
   begin
-    if EnumDesc.Members.Count > 256 then
-      SemanticError(
-        Format('Enumeration ''%s'' has %d members; set types support at most 256',
-          [EnumDesc.Name, EnumDesc.Members.Count]),
-        ACD.Line, ACD.Col);
+    Self.CheckEnumSetBase(EnumDesc, EnumDesc.Name, ACD.Line, ACD.Col);
     { Inferred set type: find or create the canonical 'set of <Enum>'. }
     CanonName := 'set of ' + EnumDesc.Name;
     ExistTD   := FTable.FindType(CanonName);
@@ -7306,11 +7324,8 @@ begin
           TD.Line, TD.Col);
       if BaseSym.TypeDesc is TEnumTypeDesc then
       begin
-        if TEnumTypeDesc(BaseSym.TypeDesc).Members.Count > 256 then
-          SemanticError(
-            Format('Enumeration ''%s'' has %d members; set types support at most 256',
-              [SetDef.BaseTypeName, TEnumTypeDesc(BaseSym.TypeDesc).Members.Count]),
-            TD.Line, TD.Col);
+        Self.CheckEnumSetBase(TEnumTypeDesc(BaseSym.TypeDesc),
+          SetDef.BaseTypeName, TD.Line, TD.Col);
         SetDesc := FTable.NewSetType(TD.Name, TEnumTypeDesc(BaseSym.TypeDesc));
       end
       else if BaseSym.TypeDesc.Kind = tyByte then
@@ -15768,6 +15783,8 @@ begin
       are not constant fall back to the full enum size (conservative). }
     if (ABin.Right is TArrayLiteralExpr) and (LType.Kind = tyEnum) then
     begin
+      Self.CheckEnumSetBase(TEnumTypeDesc(LType), LType.Name,
+        ABin.Line, ABin.Col);
       TmpSet := FTable.NewSetType('', TEnumTypeDesc(LType));
       RType := AnalyseSetLiteralExpr(TArrayLiteralExpr(ABin.Right), TmpSet);
       TmpSet.BitCount := SetLiteralBitCount(TArrayLiteralExpr(ABin.Right),
@@ -17590,7 +17607,7 @@ begin
         MaxOrd := TIdentExpr(Elem).ConstValue;
     end
     else
-      Exit(ABaseEnum.Members.Count);
+      Exit(ABaseEnum.MaxOrdinal() + 1);
   end;
   { Empty literal -> width 1 (a single zero byte fits any small set). }
   if MaxOrd < 0 then

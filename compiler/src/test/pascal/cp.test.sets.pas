@@ -166,6 +166,19 @@ type
     { ------------------------------------------------------------------ }
     procedure TestSemantic_Set64_TypeRegistered;
     procedure TestSemantic_Set_Over256Members_Fails;
+    { BUG-20260922-set-of-explicit-ordinal-enum -- a member's bit index is
+      its real ORDINAL, so a set of an enum with explicit ordinals must be
+      sized by MaxOrdinal + 1, not by the member count.  Ordinals must lie in
+      0..255, the same ceiling 'set of lo..hi' already enforces. }
+    procedure TestSemantic_SetOfExplicitOrdinalEnum_TypeDecl_BitCountIsMaxOrdPlus1;
+    procedure TestSemantic_SetOfExplicitOrdinalEnum_InlineVar_BitCountIsMaxOrdPlus1;
+    procedure TestSemantic_SetOfExplicitOrdinalEnum_InferredConst_BitCountIsMaxOrdPlus1;
+    procedure TestSemantic_SetOfExplicitOrdinalEnum_InNonConstLiteral_BitCountIsMaxOrdPlus1;
+    procedure TestSemantic_SetOfExplicitOrdinalEnum_Ordinal255_OK;
+    procedure TestSemantic_SetOfExplicitOrdinalEnum_OrdinalOver255_Fails;
+    procedure TestSemantic_SetOfExplicitOrdinalEnum_InlineOrdinalOver255_Fails;
+    procedure TestSemantic_SetOfExplicitOrdinalEnum_NegativeOrdinal_Fails;
+    procedure TestSemantic_SetOfExplicitOrdinalEnum_ConstOrdinalOver255_Fails;
     { An empty '[]' has no element type of its own and must take it from the
       assignment LHS.  The bare (implicit-Self) field form did not supply it,
       so a valid 'Field := []' inside a method was rejected with "Expression
@@ -1386,6 +1399,156 @@ begin
   { 257 members exceeds the 256 ceiling — the largest set Blaise supports
     (a jumbo byte-array bitmap of up to 32 bytes). }
   SemanticFail(SrcSetTooManyMembers);
+end;
+
+procedure TSetTests.TestSemantic_SetOfExplicitOrdinalEnum_TypeDecl_BitCountIsMaxOrdPlus1;
+var
+  Prog: TProgram;
+  TD:   TTypeDesc;
+begin
+  Prog := AnalyseSrc('''
+    program P;
+    type
+      TSm = (sA = 5, sB = 10);
+      TSmSet = set of TSm;
+    begin end.
+    ''');
+  try
+    TD := Prog.SymbolTable.FindType('TSmSet');
+    AssertNotNull('type registered', TD);
+    AssertEquals('bits 0..10', 11, TSetTypeDesc(TD).BitCount);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TSetTests.TestSemantic_SetOfExplicitOrdinalEnum_InlineVar_BitCountIsMaxOrdPlus1;
+var
+  Prog: TProgram;
+  TD:   TTypeDesc;
+begin
+  Prog := AnalyseSrc('''
+    program P;
+    type TSm = (sA = 5, sB = 70);
+    var S: set of TSm;
+    begin end.
+    ''');
+  try
+    TD := Prog.SymbolTable.FindType('set of TSm');
+    AssertNotNull('type registered', TD);
+    AssertEquals('bits 0..70', 71, TSetTypeDesc(TD).BitCount);
+    AssertTrue('ordinal 70 needs a jumbo set', TSetTypeDesc(TD).IsJumbo());
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TSetTests.TestSemantic_SetOfExplicitOrdinalEnum_InferredConst_BitCountIsMaxOrdPlus1;
+var
+  Prog: TProgram;
+  TD:   TTypeDesc;
+begin
+  Prog := AnalyseSrc('''
+    program P;
+    type TSm = (sA = 5, sB = 10);
+    const C = [sB];
+    begin end.
+    ''');
+  try
+    TD := Prog.SymbolTable.FindType('set of TSm');
+    AssertNotNull('type registered', TD);
+    AssertEquals('bits 0..10', 11, TSetTypeDesc(TD).BitCount);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TSetTests.TestSemantic_SetOfExplicitOrdinalEnum_InNonConstLiteral_BitCountIsMaxOrdPlus1;
+var
+  Prog: TProgram;
+  Cond: TBinaryExpr;
+begin
+  { A non-constant element forces the conservative full-enum width, which
+    must cover the highest ORDINAL, not the member count. }
+  Prog := AnalyseSrc('''
+    program P;
+    type TSm = (sA = 5, sB = 40);
+    var E, F: TSm;
+    begin
+      if E in [F] then WriteLn('y');
+    end.
+    ''');
+  try
+    Cond := TBinaryExpr(TIfStmt(Prog.Block.Stmts.Items[0]).Condition);
+    AssertEquals('bits 0..40', 41,
+      TSetTypeDesc(Cond.Right.ResolvedType).BitCount);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TSetTests.TestSemantic_SetOfExplicitOrdinalEnum_Ordinal255_OK;
+var
+  Prog: TProgram;
+  TD:   TTypeDesc;
+begin
+  Prog := AnalyseSrc('''
+    program P;
+    type
+      TSm = (sA = 0, sB = 255);
+      TSmSet = set of TSm;
+    begin end.
+    ''');
+  try
+    TD := Prog.SymbolTable.FindType('TSmSet');
+    AssertEquals('bits 0..255', 256, TSetTypeDesc(TD).BitCount);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TSetTests.TestSemantic_SetOfExplicitOrdinalEnum_OrdinalOver255_Fails;
+begin
+  { Two members, but bit 9999 would need a 1250-byte bitmap. }
+  SemanticFail('''
+    program P;
+    type
+      TSm = (sA = 0, sB = 9999);
+      TSmSet = set of TSm;
+    begin end.
+    ''');
+end;
+
+procedure TSetTests.TestSemantic_SetOfExplicitOrdinalEnum_InlineOrdinalOver255_Fails;
+begin
+  SemanticFail('''
+    program P;
+    type TSm = (sA = 0, sB = 256);
+    var S: set of TSm;
+    begin end.
+    ''');
+end;
+
+procedure TSetTests.TestSemantic_SetOfExplicitOrdinalEnum_NegativeOrdinal_Fails;
+begin
+  { A bitmap has no bit -1. }
+  SemanticFail('''
+    program P;
+    type
+      TSm = (sA = -1, sB = 2);
+      TSmSet = set of TSm;
+    begin end.
+    ''');
+end;
+
+procedure TSetTests.TestSemantic_SetOfExplicitOrdinalEnum_ConstOrdinalOver255_Fails;
+begin
+  SemanticFail('''
+    program P;
+    type TSm = (sA = 0, sB = 300);
+    const C = [sB];
+    begin end.
+    ''');
 end;
 
 procedure TSetTests.TestSemantic_ImplicitSelfSetField_EmptyLiteral;

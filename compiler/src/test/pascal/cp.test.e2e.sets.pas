@@ -97,6 +97,12 @@ type
       mutated element 0 (BUG-20260723-qbe-incexc-field-array-elem, fixed by
       the field-array element-address computation shared with var/out). }
     procedure TestRun_IncludeExclude_FieldArrayElem;
+    { BUG-20260922-set-of-explicit-ordinal-enum: a set of an enum with
+      explicit ordinals was sized by member COUNT while each member's bit
+      is its real ORDINAL, so membership silently read False.  Covers the
+      small (<=64-bit) and the jumbo (ordinal >= 64) representations. }
+    procedure TestRun_SetOfExplicitOrdinalEnum_Membership;
+    procedure TestRun_SetOfExplicitOrdinalEnum_JumboOrdinal;
   end;
 
 implementation
@@ -1034,6 +1040,63 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     'i' + LE + 'x' + LE + 'k' + LE + 'c' + LE + 'd' + LE + 'e' + LE, 0);
+end;
+
+procedure TE2ESetOpsTests.TestRun_SetOfExplicitOrdinalEnum_Membership;
+const Src = '''
+    program P;
+    type
+      TSm = (sA = 5, sB = 10);
+      TSmSet = set of TSm;
+    const
+      CB = [sB];
+    var
+      S: set of TSm;
+      T: TSmSet;
+      E: TSm;
+      N: Integer;
+    begin
+      S := [sB];
+      if sB in S then WriteLn('y') else WriteLn('n');
+      if sA in S then WriteLn('y') else WriteLn('n');
+      Include(S, sA);
+      if sA in S then WriteLn('y') else WriteLn('n');
+      Exclude(S, sB);
+      if sB in S then WriteLn('y') else WriteLn('n');
+      T := CB;
+      if sB in T then WriteLn('y') else WriteLn('n');
+      N := 0;
+      T := [sA, sB];
+      for E in T do N := N + Ord(E);
+      WriteLn(N);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'y' + LE + 'n' + LE + 'y' + LE + 'n' + LE + 'y' + LE + '15' + LE, 0);
+end;
+
+procedure TE2ESetOpsTests.TestRun_SetOfExplicitOrdinalEnum_JumboOrdinal;
+const Src = '''
+    program P;
+    type TSm = (sA = 3, sB = 70, sC = 200);
+    var S: set of TSm;
+    begin
+      S := [sB];
+      Include(S, sC);
+      if sA in S then WriteLn('y') else WriteLn('n');
+      if sB in S then WriteLn('y') else WriteLn('n');
+      if sC in S then WriteLn('y') else WriteLn('n');
+      Exclude(S, sB);
+      if sB in S then WriteLn('y') else WriteLn('n');
+      WriteLn(SizeOf(S));   { bits 0..200 = 26 bytes, rounded to 8 }
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'n' + LE + 'y' + LE + 'y' + LE + 'n' + LE + '32' + LE, 0);
 end;
 
 initialization

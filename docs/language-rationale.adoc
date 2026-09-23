@@ -6850,3 +6850,66 @@ leave initialisers untouched, but it breaks `Ord(Red) = 5` as the meaning of a
 subscript, contradicts the enum-subrange form, and diverges from both Delphi
 and every FPC mode. It would also be the largest change of the three, since it
 needs a position lookup that no other part of the language performs.
+
+[#explicit-ordinal-enum-set]
+== A Set of an Explicitly-Numbered Enum Is Sized by Its Highest Ordinal
+
+=== Decision
+
+A `set of T`, where `T` is an enumeration, holds one bit per ordinal: the bit
+for a member is its *declared ordinal*, and the bitmap spans bits
+`0..Ord(High(T))`. Every ordinal of `T` must lie in `0..255`; an enumeration
+with a negative ordinal, or one above 255, is rejected as a set base:
+
+[source,pascal]
+----
+type
+  TSm  = (sA = 5, sB = 10);
+  TSet = set of TSm;          { bits 0..10: a 32-bit set }
+  TBig = (bA = 0, bB = 9999);
+  TBad = set of TBig;         { Error: spans ordinals 0..9999; a set's
+                                element ordinals must lie in 0..255 }
+----
+
+The rule applies identically to a named set type, an inline `set of T`, a set
+type inferred from a constant (`const C = [sB];`) and the anonymous set built
+for `E in [...]`. An enumeration without explicit ordinals has
+`Ord(High(T)) = Members.Count - 1`, so its sets are unchanged — same width,
+same layout, same generated code.
+
+=== Rationale
+
+Previously the bitmap was sized from the member *count* while membership,
+`Include` and `Exclude` addressed the bit at the member's *ordinal*. For the
+example above the set had two bits and `sB` addressed bit 10, so
+`S := [sB]; sB in S` reported False — silently, on both backends. This is the
+same positional-versus-ordinal disagreement as the array case in the
+preceding section, and it is resolved the same way: the ordinal wins, as it
+already does for `Ord`, `Low`/`High` and casts.
+
+The bitmap starts at bit 0 rather than at `Ord(Low(T))`. That is the
+representation `set of lo..hi` already uses (a low bound above zero leaves the
+lower bits unused), the one the debugger's set record already describes
+(lower bound 0), and the one FPC uses. At most 255 bits are wasted, bounded by
+the ceiling below.
+
+The `0..255` ceiling is the one `set of lo..hi` already enforces, and the
+256-element limit Blaise sets have always had is expressed in ordinals rather
+than members. FPC applies the same rule in both `objfpc` and `delphi` modes:
+`(sA = 5, sB = 10)` is accepted as a set base, while `(sA = 0, sB = 256)` and
+`(sA = -1, sB = 2)` are rejected with "illegal type declaration of set
+elements".
+
+=== Alternatives rejected
+
+*Promote a set with ordinals above 255 to a larger jumbo bitmap.* The jumbo
+representation is an inline byte array, so `(bA = 0, bB = 9999)` would make
+every such set 1250 bytes to hold two members, copied by value on every
+assignment and parameter pass. Nothing else in the language permits a set
+larger than 256 elements, and neither FPC mode does.
+
+*Offset the bitmap by `Ord(Low(T))`* so `(sA = 200, sB = 210)` fits in 11
+bits. This would allow a few more enumerations as set bases, but every set
+operation would need a per-type subtraction, the `set of lo..hi` form would
+become the odd one out, and set layout would no longer match FPC's for the
+enumerations both compilers accept.

@@ -1805,7 +1805,13 @@ begin
   Result.Kind     := tySet;
   Result.Name     := AName;
   Result.BaseType := ABase;
-  Result.BitCount := ABase.Members.Count;
+  { A member's bit is its declared ORDINAL, so the bitmap spans bits
+    0..MaxOrdinal -- not 0..Members.Count-1, which an enum with explicit
+    ordinals such as (sA = 5, sB = 10) would overrun. }
+  if ABase.Members.Count = 0 then
+    Result.BitCount := 0
+  else
+    Result.BitCount := ABase.MaxOrdinal() + 1;
   FAllTypes.Add(Result);
 end;
 
