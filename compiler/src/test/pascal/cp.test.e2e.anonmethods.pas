@@ -98,6 +98,14 @@ type
     procedure TestRun_ClosureInRecordField_VarParamReceiver;
     procedure TestRun_ClosureInRecordField_LocalRecord;
     procedure TestRun_ClosureInRecordField_NestedRecord;
+    { BUG-20260922-record-closure-field-not-managed: a record whose only
+      managed member is a 'reference to' field was reported "managed clean",
+      so a whole-record copy shared the env with NO retain and the scope-exit
+      walk was elided.  On QBE the copy was a use-after-free (segfault on the
+      second invocation); on native the env simply leaked.  The leak tracker
+      cannot see closure envs, so this asserts on observable behaviour: the
+      env must stay alive through both copies to program exit. }
+    procedure TestRun_RecordCopy_ClosureField_EnvSurvivesCopy;
   end;
 
 implementation
@@ -1425,6 +1433,51 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, 'nested' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_RecordCopy_ClosureField_EnvSurvivesCopy;
+const
+  Src = '''
+    program P;
+    type
+      TFn = reference to procedure;
+      TR = record
+        Tag: Integer;
+        F: TFn;
+      end;
+    var
+      S: string;
+      A: TR;
+      B: TR;
+    function Make(const Msg: string): TR;
+    begin
+      Result.Tag := 7;
+      Result.F := procedure begin WriteLn(Msg) end;
+    end;
+    begin
+      S := 'env-alive';
+      A := Make(S);
+      WriteLn(A.Tag);
+      A.F();
+      B := A;
+      B.F();
+      A.F();
+      WriteLn('done')
+    end.
+    ''';
+begin
+  { Make() returns the record (the sret/register-return path), then B := A
+    copies it (the whole-record copy path).  Invoking through BOTH copies
+    after the copy proves the env was retained, and reaching 'done' with exit
+    0 proves it was not over-released.  Before the fix the QBE build printed
+    'env-alive' once and segfaulted here. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    '7' + LineEnding +
+    'env-alive' + LineEnding +
+    'env-alive' + LineEnding +
+    'env-alive' + LineEnding +
+    'done' + LineEnding, 0);
 end;
 
 initialization

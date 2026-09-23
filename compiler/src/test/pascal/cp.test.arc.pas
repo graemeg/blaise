@@ -160,6 +160,16 @@ type
       (BUG-20260722-discarded-sret-call-no-buffer). }
     procedure TestARC_DiscardedRecordCall_PassesSretAndReleases;
     procedure TestARC_DiscardedInterfaceCall_PassesSretAndReleases;
+    { BUG-20260922-record-closure-field-not-managed: a 'reference to' field
+      makes a record "managed clean" — the env half at +8 is never released,
+      the record is register-returned, and a whole-record copy shares the env
+      with no retain.  A plain / 'of object' procedural field stays UNmanaged
+      (its Data half is a bare code pointer / borrowed receiver). }
+    procedure TestARC_RecordWithClosureField_ReleasesEnvAtScopeExit;
+    procedure TestARC_RecordWithClosureField_ReturnsViaSret;
+    procedure TestARC_RecordCopy_ClosureField_RetainsEnv;
+    procedure TestARC_ClassWithClosureField_ReleasesEnvInCleanup;
+    procedure TestARC_RecordWithMethodPtrField_StaysUnmanaged;
     { A method-backed property setter BORROWS its value: an owned-transient
       string value (concat / function result) must be disposed by the
       caller after the setter call
@@ -1868,6 +1878,177 @@ begin
     Pos('call $MakeI(l %', MainIR) >= 0);
   AssertTrue('discarded interface result''s obj half is released',
     Pos('call $_ClassRelease', MainIR) >= 0);
+end;
+
+{ ---------------------------------------------------------------------------
+  BUG-20260922-record-closure-field-not-managed
+
+  A 'reference to' closure is a 16-byte fat value [Code at +0; Env at +8]
+  whose Env half strongly references an ARC environment record.  Both
+  aggregate predicates in blaise.codegen.pas (RecretManagedClean and
+  ArcTypeHasManagedContent) lacked a tyProcedural arm, so a record whose only
+  managed member is a closure field was reported "clean": register-returned,
+  memcpy-copied with no env retain, and given no scope-exit walk at all.
+
+  The --debug leak tracker cannot see this class of leak (closure envs are
+  never _LeakTrackerRegister'ed), so these assert on the emitted IR.
+  --------------------------------------------------------------------------- }
+
+procedure TARCTests.TestARC_RecordWithClosureField_ReleasesEnvAtScopeExit;
+var
+  IR, MainIR: string;
+begin
+  { The scope-exit walk must release the Env half at R+8.  ArcScopeExitReleaseKind
+    answered arkNone for this record, so NO walk was emitted and the env leaked. }
+  IR := GenIR(
+    '''
+      program P;
+      type
+        TFn = reference to procedure;
+        TR = record
+          F: TFn;
+        end;
+      var
+        S: string;
+        R: TR;
+      begin
+        S := 'hello';
+        R.F := procedure begin WriteLn(S) end;
+      end.
+      ''');
+  MainIR := FuncRegion(IR, 'function w $main');
+  AssertTrue('record''s closure env at +8 is released at scope exit',
+    IRContains(MainIR, 'add $R, 8'));
+  AssertTrue('the env release goes through _ClassRelease',
+    IRContains(MainIR, 'call $_ClassRelease'));
+end;
+
+procedure TARCTests.TestARC_RecordWithClosureField_ReturnsViaSret;
+var
+  IR: string;
+begin
+  { A record whose ONLY managed content is a closure field must be classified
+    as managed and returned via sret.  RecretManagedClean called it "clean", so
+    it was REGISTER-returned (:_ffi_TR), bypassing the ARC copy discipline —
+    the same shape as BUG-20260721 for static-array fields. }
+  IR := GenIR(
+    '''
+      program P;
+      type
+        TFn = reference to procedure;
+        TR = record
+          F: TFn;
+        end;
+      var
+        S: string;
+        R: TR;
+      function Make(): TR;
+      begin
+        Result.F := procedure begin WriteLn(S) end;
+      end;
+      begin
+        S := 'hi';
+        R := Make();
+      end.
+      ''');
+  AssertTrue('closure-field record returns via sret',
+    IRContains(IR, 'function $Make(l %_par__sret)'));
+end;
+
+procedure TARCTests.TestARC_RecordCopy_ClosureField_RetainsEnv;
+var
+  FnIR: string;
+begin
+  { A whole-record copy shares the env, so it must retain the source env and
+    release the destination's.  Without the retain the copy is a use-after-free:
+    the QBE build of this shape segfaulted on the second invocation. }
+  FnIR := FuncRegion(GenIR(
+    '''
+      program P;
+      type
+        TFn = reference to procedure;
+        TR = record
+          F: TFn;
+        end;
+      var
+        S: string;
+      procedure Run();
+      var
+        A: TR;
+        B: TR;
+      begin
+        A.F := procedure begin WriteLn(S) end;
+        B := A;
+      end;
+      begin
+        S := 'x';
+        Run();
+      end.
+      '''), 'function $Run(');
+  AssertTrue('record copy retains the source closure env',
+    IRContains(FnIR, 'call $_ClassAddRef'));
+  AssertTrue('record copy releases the destination closure env',
+    IRContains(FnIR, 'call $_ClassRelease'));
+end;
+
+procedure TARCTests.TestARC_ClassWithClosureField_ReleasesEnvInCleanup;
+var
+  FnIR: string;
+begin
+  { The same omission applied to a CLASS field: _FieldCleanup_<Class> walks
+    fields on the same Kind dispatch, so an instance holding a closure leaked
+    its env when the instance died. }
+  FnIR := FuncRegion(GenIR(
+    '''
+      program P;
+      type
+        TFn = reference to procedure;
+        TC = class
+        public
+          F: TFn;
+        end;
+      var
+        S: string;
+        C: TC;
+      begin
+        S := 'x';
+        C := TC.Create();
+        C.F := procedure begin WriteLn(S) end;
+      end.
+      '''), 'function $_FieldCleanup_TC(');
+  AssertTrue('class instance releases its closure field env',
+    IRContains(FnIR, 'call $_ClassRelease'));
+end;
+
+procedure TARCTests.TestARC_RecordWithMethodPtrField_StaysUnmanaged;
+var
+  IR: string;
+begin
+  { The counter-case that pins the discriminator: an 'of object' method
+    pointer is also a 16-byte [Code; Data] value, but its Data half is a
+    BORROWED receiver — retaining it would over-retain.  Only IsReference is
+    managed content, so this record must still be register-returned.
+    IsMethodPtrType (the 16-byte-ABI predicate) covers BOTH shapes and is not
+    a valid substitute for the ARC test. }
+  IR := GenIR(
+    '''
+      program P;
+      type
+        TNotify = procedure() of object;
+        TR = record
+          F: TNotify;
+        end;
+      function Make(): TR;
+      begin
+      end;
+      var
+        R: TR;
+      begin
+        R := Make();
+      end.
+      ''');
+  AssertTrue('method-pointer field record is NOT sret (stays unmanaged)',
+    not IRContains(IR, 'function $Make(l %_par__sret)'));
 end;
 
 initialization

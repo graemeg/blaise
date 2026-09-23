@@ -6425,6 +6425,8 @@ var
   DstField: string;
   ValTemp:  string;
   OldTemp:  string;
+  SrcEnvT:  string;
+  DstEnvT:  string;
 begin
   for I := 0 to ARec.Fields.Count - 1 do
   begin
@@ -6491,6 +6493,29 @@ begin
       ValTemp := AllocTemp();
       EmitLine(Format('  %s =l add %s, 8', [ValTemp, DstField]));
       EmitLine(Format('  storel %s, %s', [OldTemp, ValTemp]));
+    end
+    else if ArcTypeIsRefClosure(F.TypeDesc) then
+    begin
+      { 'reference to' closure field: 16-byte fat value (Code at +0, Env at
+        +8).  Only the Env half is refcounted.  Retain the source env BEFORE
+        releasing the destination's so a self-copy stays balanced, then copy
+        both halves — the scalar arm below would copy only 8 bytes and drop
+        the Env entirely (BUG-20260922-record-closure-field-not-managed). }
+      ValTemp := AllocTemp();                { &src.Env }
+      EmitLine(Format('  %s =l add %s, 8', [ValTemp, SrcField]));
+      SrcEnvT := AllocTemp();
+      EmitLine(Format('  %s =l loadl %s', [SrcEnvT, ValTemp]));
+      OldTemp := AllocTemp();                { &dst.Env }
+      EmitLine(Format('  %s =l add %s, 8', [OldTemp, DstField]));
+      DstEnvT := AllocTemp();
+      EmitLine(Format('  %s =l loadl %s', [DstEnvT, OldTemp]));
+      EmitLine(Format('  call $_ClassAddRef(l %s)',  [SrcEnvT]));
+      EmitLine(Format('  call $_ClassRelease(l %s)', [DstEnvT]));
+      EmitLine(Format('  storel %s, %s', [SrcEnvT, OldTemp]));
+      { Copy the Code half (src+0 -> dst+0). }
+      ValTemp := AllocTemp();
+      EmitLine(Format('  %s =l loadl %s', [ValTemp, SrcField]));
+      EmitLine(Format('  storel %s, %s', [ValTemp, DstField]));
     end
     else if F.TypeDesc.Kind = tyRecord then
       { Nested record field: recurse into sub-fields }
@@ -7308,6 +7333,18 @@ begin
       EmitRecordReleaseFields(TRecordTypeDesc(F.TypeDesc), FldAddr);
       Continue;
     end;
+    { 'reference to' closure field: the Env half at +8 is a strong ARC
+      reference and must be released; the Code half is a bare pointer
+      (BUG-20260922-record-closure-field-not-managed). }
+    if ArcTypeIsRefClosure(F.TypeDesc) then
+    begin
+      FldAddr := AllocTemp();
+      EmitLine(Format('  %s =l add %s, %d', [FldAddr, AAddr, F.Offset + 8]));
+      ValT := AllocTemp();
+      EmitLine(Format('  %s =l loadl %s', [ValT, FldAddr]));
+      EmitLine(Format('  call $_ClassRelease(l %s)', [ValT]));
+      Continue;
+    end;
     { Static-array-of-managed field (BUG-017): release each element via the
       array walk.  Kept symmetric with EmitRecordAddRefFields / EmitRecordCopy,
       which retain the same elements — release-only or retain-only here would
@@ -7356,6 +7393,7 @@ procedure TCodeGenQBE.EmitManagedReleaseAt(AType: TTypeDesc; const AAddr: string
   AZero: Boolean);
 var
   ValT: string;
+  EnvT: string;
 begin
   if AType = nil then Exit;
   if AType.Kind = tyRecord then
@@ -7369,6 +7407,20 @@ begin
   if AType.Kind = tyStaticArray then
   begin
     EmitStaticArrayReleaseElems(TStaticArrayTypeDesc(AType), AAddr, AZero);
+    Exit;
+  end;
+  { A bare 'reference to' closure (e.g. a static-array ELEMENT of closure
+    type): release the Env half at +8
+    (BUG-20260922-record-closure-field-not-managed). }
+  if ArcTypeIsRefClosure(AType) then
+  begin
+    ValT := AllocTemp();
+    EmitLine(Format('  %s =l add %s, 8', [ValT, AAddr]));
+    EnvT := AllocTemp();
+    EmitLine(Format('  %s =l loadl %s', [EnvT, ValT]));
+    EmitLine(Format('  call $_ClassRelease(l %s)', [EnvT]));
+    if AZero then
+      EmitLine(Format('  storel 0, %s', [ValT]));
     Exit;
   end;
   if not (AType.IsString() or (AType.Kind = tyClass)
@@ -7413,6 +7465,7 @@ procedure TCodeGenQBE.EmitManagedAddRefAt(AType: TTypeDesc;
   const AAddr: string);
 var
   ValT: string;
+  EnvT: string;
 begin
   if AType = nil then Exit;
   if AType.Kind = tyRecord then
@@ -7423,6 +7476,17 @@ begin
   if AType.Kind = tyStaticArray then
   begin
     EmitStaticArrayAddRefElems(TStaticArrayTypeDesc(AType), AAddr);
+    Exit;
+  end;
+  { A bare 'reference to' closure: retain the Env half at +8 — the mirror of
+    the release arm above (BUG-20260922-record-closure-field-not-managed). }
+  if ArcTypeIsRefClosure(AType) then
+  begin
+    ValT := AllocTemp();
+    EmitLine(Format('  %s =l add %s, 8', [ValT, AAddr]));
+    EnvT := AllocTemp();
+    EmitLine(Format('  %s =l loadl %s', [EnvT, ValT]));
+    EmitLine(Format('  call $_ClassAddRef(l %s)', [EnvT]));
     Exit;
   end;
   if not (AType.IsString() or (AType.Kind = tyClass)
@@ -7483,6 +7547,18 @@ begin
       else
         FldAddr := AAddr;
       EmitRecordAddRefFields(TRecordTypeDesc(F.TypeDesc), FldAddr);
+      Continue;
+    end;
+    { 'reference to' closure field: retain the Env half at +8 — the
+      retain-side mirror of the release arm in EmitRecordReleaseFields
+      (BUG-20260922-record-closure-field-not-managed). }
+    if ArcTypeIsRefClosure(F.TypeDesc) then
+    begin
+      FldAddr := AllocTemp();
+      EmitLine(Format('  %s =l add %s, %d', [FldAddr, AAddr, F.Offset + 8]));
+      ValT := AllocTemp();
+      EmitLine(Format('  %s =l loadl %s', [ValT, FldAddr]));
+      EmitLine(Format('  call $_ClassAddRef(l %s)', [ValT]));
       Continue;
     end;
     { Static-array-of-managed field (BUG-017): retain each element — the
@@ -10286,6 +10362,17 @@ begin
       else
         PtrT := '%self';
       EmitRecordReleaseFields(TRecordTypeDesc(F.TypeDesc), PtrT);
+      Continue;
+    end;
+    { 'reference to' closure field: release the Env half at +8 when the
+      instance dies (BUG-20260922-record-closure-field-not-managed). }
+    if ArcTypeIsRefClosure(F.TypeDesc) then
+    begin
+      PtrT := AllocTemp();
+      EmitLine(Format('  %s =l add %%self, %d', [PtrT, F.Offset + 8]));
+      Temp := AllocTemp();
+      EmitLine(Format('  %s =l loadl %s', [Temp, PtrT]));
+      EmitLine(Format('  call $_ClassRelease(l %s)', [Temp]));
       Continue;
     end;
     { Static-array-of-managed field (BUG-017): release each element via the

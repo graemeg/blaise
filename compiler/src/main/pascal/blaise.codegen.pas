@@ -188,6 +188,16 @@ function ArcExprOwnsRef(AExpr: TASTExpr): Boolean;
   store) releases it again (BUG-016). }
 function ArcIsArrayElemSlot(AExpr: TASTExpr): Boolean;
 
+{ True for a 'reference to' closure type — a 16-byte [Code; Env] fat value
+  whose Env half at +8 strongly references an ARC environment record.  A
+  plain procedural type is a bare code pointer, and an 'of object' method
+  pointer's Data half is a BORROWED receiver; neither is managed content, so
+  only IsReference answers True here.  This is the single discriminator every
+  ARC walk must use — IsMethodPtrType (the 16-byte-ABI predicate) covers both
+  shapes and is NOT a substitute
+  (BUG-20260922-record-closure-field-not-managed). }
+function ArcTypeIsRefClosure(AType: TTypeDesc): Boolean;
+
 { True when AType transitively contains any ARC-managed leaf: a managed
   scalar (string / class / interface / dynamic array), a static array of
   managed elements (at any nesting depth), or a record with such content.
@@ -307,6 +317,12 @@ function IntfRefName(AResolved: TTypeDesc; const ASourceName: string): string;
 
 implementation
 
+function ArcTypeIsRefClosure(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and (AType.Kind = tyProcedural)
+            and TProceduralTypeDesc(AType).IsReference;
+end;
+
 function RecretManagedClean(ARec: TRecordTypeDesc): Boolean;
 var
   I: Integer;
@@ -317,6 +333,10 @@ begin
   for I := 0 to ARec.Fields.Count - 1 do
   begin
     F := TFieldInfo(ARec.Fields.Items[I]);
+    { A 'reference to' closure field co-owns its Env: register-returning or
+      memcpy-copying the record would share the env with no retain
+      (BUG-20260922-record-closure-field-not-managed). }
+    if ArcTypeIsRefClosure(F.TypeDesc) then Exit;
     case F.TypeDesc.Kind of
       tyString, tyClass, tyInterface, tyDynArray:
         Exit;
@@ -483,6 +503,9 @@ begin
   if AType.IsString() or
      (AType.Kind in [tyClass, tyInterface, tyDynArray]) then
     Exit(True);
+  { 'reference to' closure: the Env half at +8 is a strong ARC reference
+    (BUG-20260922-record-closure-field-not-managed). }
+  if ArcTypeIsRefClosure(AType) then Exit(True);
   if AType.Kind = tyStaticArray then
     Exit(ArcTypeHasManagedContent(TStaticArrayTypeDesc(AType).ElementType));
   if AType.Kind = tyRecord then

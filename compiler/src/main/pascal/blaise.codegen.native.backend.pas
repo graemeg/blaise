@@ -358,6 +358,15 @@ begin
       Self.ArcPopNestedBase();
       Continue;
     end;
+    { 'reference to' closure field: the Env half at +8 is a strong ARC
+      reference; the Code half at +0 is a bare pointer.  EmitReleaseSlotAt
+      selects _ClassRelease for a non-string/non-dynarray type, which is the
+      right helper for the env (BUG-20260922-record-closure-field-not-managed). }
+    if ArcTypeIsRefClosure(F.TypeDesc) then
+    begin
+      Self.EmitReleaseSlotAt(F.TypeDesc, F.Offset + 8, ABaseReg, AZero);
+      Continue;
+    end;
     { Static-array-of-managed field (BUG-017): release each element via the
       array walk.  Kept symmetric with EmitRecordFieldRetains and the copy
       paths, which retain the elements — release-only or retain-only here
@@ -410,6 +419,14 @@ begin
       AZero);
     Exit;
   end;
+  { A bare 'reference to' closure (e.g. a static-array ELEMENT of closure
+    type): release the Env half at +8
+    (BUG-20260922-record-closure-field-not-managed). }
+  if ArcTypeIsRefClosure(AType) then
+  begin
+    Self.EmitReleaseSlotAt(AType, 8, ABaseReg, AZero);
+    Exit;
+  end;
   if not ArcFieldIsManagedScalar(AType) then
     Exit;
   Self.EmitReleaseSlotAt(AType, 0, ABaseReg, AZero);
@@ -451,6 +468,14 @@ begin
       Self.ArcPopNestedBase();
       Continue;
     end;
+    { 'reference to' closure field: retain the Env half at +8 — the
+      retain-side mirror of the release arm in EmitRecordFieldReleases
+      (BUG-20260922-record-closure-field-not-managed). }
+    if ArcTypeIsRefClosure(F.TypeDesc) then
+    begin
+      Self.EmitRetainSlotAt(F.TypeDesc, F.Offset + 8, ABaseReg);
+      Continue;
+    end;
     { Static-array-of-managed field (BUG-017): retain each element — the
       retain-side mirror of the release arm in EmitRecordFieldReleases. }
     if F.TypeDesc.Kind = tyStaticArray then
@@ -485,6 +510,13 @@ begin
   if AType.Kind = tyStaticArray then
   begin
     Self.EmitStaticArrayAddRefElems(TStaticArrayTypeDesc(AType), ABaseReg);
+    Exit;
+  end;
+  { A bare 'reference to' closure: retain the Env half at +8 — the mirror of
+    the release arm above (BUG-20260922-record-closure-field-not-managed). }
+  if ArcTypeIsRefClosure(AType) then
+  begin
+    Self.EmitRetainSlotAt(AType, 8, ABaseReg);
     Exit;
   end;
   if not ArcFieldIsManagedScalar(AType) then
