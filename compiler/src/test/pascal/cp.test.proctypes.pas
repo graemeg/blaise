@@ -51,6 +51,9 @@ type
 
     { Codegen — emission }
     procedure TestCodegen_ProceduralVar_AllocatedAsPointer;
+    { BUG-20260923-qbe-implicit-self-ref-field-call: an unqualified call to a
+      'reference to' field must pass the closure env (Data half) first. }
+    procedure TestCodegen_ImplicitSelfRefFieldCall_PassesEnv;
     procedure TestCodegen_AddrOfFunc_EmitsFunctionLabel;
     procedure TestCodegen_IndirectCall_UsesTempNotName;
     { A procedural-typed class field called through a receiver as an
@@ -566,6 +569,47 @@ begin
 end;
 
 { ── Codegen tests ────────────────────────────────────────────────────────── }
+
+procedure TProcTypesTests.TestCodegen_ImplicitSelfRefFieldCall_PassesEnv;
+var
+  IR: string;
+  Lines: TStringList;
+  I: Integer;
+  CallLine: string;
+begin
+  IR := GenIR(
+    '''
+        program Test;
+        type
+          TRun = reference to procedure(N: Integer);
+          TBox = class
+          public
+            FRun: TRun;
+            procedure Drv();
+          end;
+        procedure TBox.Drv();
+        begin
+          FRun(7)
+        end;
+        begin
+        end.
+        '''
+  );
+  { The indirect call is the only 'call %<temp>(' in TBox.Drv. }
+  CallLine := '';
+  Lines := TStringList.Create();
+  try
+    Lines.Text := FuncRegion(IR, 'function $TBox_Drv');
+    for I := 0 to Lines.Count - 1 do
+      if Pos('call %', Lines[I]) >= 0 then
+        CallLine := Lines[I];
+  finally
+    Lines.Free();
+  end;
+  AssertTrue('indirect call emitted', CallLine <> '');
+  AssertTrue('env passed as hidden first arg, then the Integer: ' + CallLine,
+    (Pos('(l %', CallLine) >= 0) and (Pos(', w %', CallLine) >= 0));
+end;
 
 procedure TProcTypesTests.TestCodegen_ProceduralVar_AllocatedAsPointer;
 var

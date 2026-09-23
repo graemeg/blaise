@@ -115,6 +115,13 @@ type
       garbage with exit code 0. }
     procedure TestRun_ByValRecordParam_ClosureFieldCall;
     procedure TestRun_ByValRecordParam_RecordMethodCall;
+    { BUG-20260923-qbe-implicit-self-ref-field-call: an UNQUALIFIED call to a
+      'reference to' field inside a method (FRun(1)) did not pass the
+      closure's env as the hidden first argument on QBE, so every real
+      argument landed one slot early: an Integer printed garbage (exit 0), a
+      closure argument segfaulted.  Self.FRun(1) and 'of object' fields were
+      fine; native was fine. }
+    procedure TestRun_ImplicitSelfRefField_Call;
   end;
 
 implementation
@@ -1559,6 +1566,55 @@ begin
   AssertRunsOnAll(Src,
     'Show tag=7' + LineEnding +
     'done' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ImplicitSelfRefField_Call;
+const
+  Src = '''
+    program P;
+    type
+      TSel = reference to function(N: Integer): Integer;
+      TRun = reference to procedure(N: Integer);
+      TApply = reference to function(N: Integer; F: TSel): Integer;
+      TBox = class
+      public
+        FBase: Integer;
+        FRun: TRun;
+        FApply: TApply;
+        procedure Drv();
+      end;
+    procedure TBox.Drv();
+    begin
+      FRun(1);                          { stmt, value arg }
+      WriteLn(FApply(2, function(X: Integer): Integer
+        begin
+          Result := X + FBase
+        end))                           { expr, closure arg }
+    end;
+    var
+      B: TBox;
+      K: Integer;
+    begin
+      K := 100;
+      B := TBox.Create();
+      B.FBase := 40;
+      B.FRun := procedure(N: Integer)
+        begin
+          WriteLn(N + K)
+        end;
+      B.FApply := function(N: Integer; F: TSel): Integer
+        begin
+          Result := F(N) + K
+        end;
+      B.Drv();
+      B.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    '101' + LineEnding +
+    '142' + LineEnding, 0);
 end;
 
 initialization

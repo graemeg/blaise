@@ -11392,8 +11392,12 @@ begin
     SlotAddr := SelfTemp;
   FPtrTemp := AllocTemp();
   EmitLine(Format('  %s =l loadl %s', [FPtrTemp, SlotAddr]));
-  { 'of object' field: Data (Self) sits at +8 and becomes the first arg. }
-  if APT.IsMethodPtr then
+  { 'of object' / 'reference to' field: Data sits at +8 and becomes the hidden
+    first arg -- the bound Self for a method pointer, the env (nil when
+    capture-free) for a closure.  Testing IsMethodPtr alone dropped a
+    closure's env, shifting every real arg one slot early
+    (BUG-20260923-qbe-implicit-self-ref-field-call). }
+  if APT.IsMethodPtr or APT.IsReference then
   begin
     ArgTemp := AllocTemp();
     EmitLine(Format('  %s =l add %s, 8', [ArgTemp, SlotAddr]));
