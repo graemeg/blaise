@@ -505,8 +505,8 @@ type
       body of RetypeSetLiteralArgs, shared with procedural-type calls). }
     procedure RetypeBracketLiteralArg(AArg: TASTExpr; AParamType: TTypeDesc);
     { Analyse and check the args of a call through a procedural-typed field
-      against its signature: arity, one hinted analysis per arg, var-arg
-      l-values and per-arg type match. }
+      or variable against its signature: arity, one hinted analysis per arg,
+      var-arg l-values and per-arg type match. }
     procedure AnalyseProcTypeCallArgs(AArgs: TObjectList;
       APT: TProceduralTypeDesc; const AName: string; ALine, ACol: Integer);
     { Range-check every constant VALUE argument against its parameter's type,
@@ -12179,8 +12179,12 @@ end;
   scoring and retyped afterwards -- each arg is analysed ONCE, hinted by its
   formal: a bracket literal becomes a set, a bare enum member resolves against
   the param's enum, and a '->' lambda is inferred from a 'reference to' param.
-  BUG-20260722-procfield-set-literal-arg: the qualified Obj.FP(..) arms used to
-  analyse the args unhinted and skip every check below. }
+  Every call shape with a procedural signature goes through here: the
+  qualified Obj.FP(..) arms, the implicit-Self FP(..) arms and calls through a
+  procedural variable, in statement and expression position.  Keeping one copy
+  is the point -- the qualified arms once skipped every check below
+  (BUG-20260722-procfield-set-literal-arg) while hand-copied loops elsewhere
+  did them. }
 procedure TSemanticAnalyser.AnalyseProcTypeCallArgs(AArgs: TObjectList;
   APT: TProceduralTypeDesc; const AName: string; ALine, ACol: Integer);
 var
@@ -12562,7 +12566,6 @@ var
   Idx:     Integer;
   I:       Integer;
   PT:      TProceduralTypeDesc;
-  PPar:    TProcParamInfo;
   FldInfo: TFieldInfo;
 begin
   { Resolution order matches Delphi/FPC:
@@ -12639,27 +12642,7 @@ begin
        (FldInfo.TypeDesc.Kind = tyProcedural) then
     begin
       PT := TProceduralTypeDesc(FldInfo.TypeDesc);
-      if ACall.Args.Count <> PT.Params.Count then
-        SemanticError(Format(
-          'Indirect call ''%s'' expects %d argument(s), got %d',
-          [ACall.Name, PT.Params.Count, ACall.Args.Count]),
-          ACall.Line, ACall.Col);
-      for I := 0 to ACall.Args.Count - 1 do
-      begin
-        PPar    := TProcParamInfo(PT.Params.Items[I]);
-        ArgType := AnalyseExprHinted(TASTExpr(ACall.Args.Items[I]), PPar.TypeDesc);
-        if PPar.IsVarParam and
-           not IsVarArgLValue(TASTExpr(ACall.Args.Items[I])) then
-          SemanticError(
-            Format('var argument %d of ''%s'' must be a variable',
-              [I + 1, ACall.Name]),
-            ACall.Line, ACall.Col);
-        if PPar.IsVarParam then
-          WarnIfVarArgIsForInLoopVar(TASTExpr(ACall.Args.Items[I]));
-        CheckTypesMatch(PPar.TypeDesc, ArgType,
-          Format('argument %d of ''%s''', [I + 1, ACall.Name]),
-          ACall.Line, ACall.Col);
-      end;
+      AnalyseProcTypeCallArgs(ACall.Args, PT, ACall.Name, ACall.Line, ACall.Col);
       ACall.IsProcFieldCall  := True;
       ACall.ProcFieldInfo    := FldInfo;
       ACall.ResolvedProcType := FldInfo.TypeDesc;
@@ -12686,29 +12669,7 @@ begin
     ACall.IndirectCallIsGlobal := Sym.IsGlobal;
     ACall.ResolvedProcType     := Sym.TypeDesc;
     PT := TProceduralTypeDesc(Sym.TypeDesc);
-    if ACall.Args.Count <> PT.Params.Count then
-      SemanticError(Format(
-        'Indirect call ''%s'' expects %d argument(s), got %d',
-        [ACall.Name, PT.Params.Count, ACall.Args.Count]),
-        ACall.Line, ACall.Col);
-    for I := 0 to ACall.Args.Count - 1 do
-    begin
-      PPar    := TProcParamInfo(PT.Params.Items[I]);
-      ArgType := AnalyseExprHinted(TASTExpr(ACall.Args.Items[I]), PPar.TypeDesc);
-      { Var-param actual must be an L-value; check before the type match
-        so the diagnostic matches the regular-call path. }
-      if PPar.IsVarParam and
-         not IsVarArgLValue(TASTExpr(ACall.Args.Items[I])) then
-        SemanticError(
-          Format('var argument %d of ''%s'' must be a variable',
-            [I + 1, ACall.Name]),
-          ACall.Line, ACall.Col);
-      if PPar.IsVarParam then
-        WarnIfVarArgIsForInLoopVar(TASTExpr(ACall.Args.Items[I]));
-      CheckTypesMatch(PPar.TypeDesc, ArgType,
-        Format('argument %d of ''%s''', [I + 1, ACall.Name]),
-        ACall.Line, ACall.Col);
-    end;
+    AnalyseProcTypeCallArgs(ACall.Args, PT, ACall.Name, ACall.Line, ACall.Col);
     Exit;
   end;
 
@@ -12950,7 +12911,6 @@ var
   Idx:     Integer;
   I:       Integer;
   PT:      TProceduralTypeDesc;
-  PPar:    TProcParamInfo;
   FldInfo: TFieldInfo;
 begin
   { HasClassAttribute(AClass, AAttrClass): Boolean — runtime query of the custom
@@ -13287,27 +13247,7 @@ begin
        (FldInfo.TypeDesc.Kind = tyProcedural) then
     begin
       PT := TProceduralTypeDesc(FldInfo.TypeDesc);
-      if AExpr.Args.Count <> PT.Params.Count then
-        SemanticError(Format(
-          'Indirect call ''%s'' expects %d argument(s), got %d',
-          [AExpr.Name, PT.Params.Count, AExpr.Args.Count]),
-          AExpr.Line, AExpr.Col);
-      for I := 0 to AExpr.Args.Count - 1 do
-      begin
-        PPar    := TProcParamInfo(PT.Params.Items[I]);
-        ArgType := AnalyseExprHinted(TASTExpr(AExpr.Args.Items[I]), PPar.TypeDesc);
-        if PPar.IsVarParam and
-           not IsVarArgLValue(TASTExpr(AExpr.Args.Items[I])) then
-          SemanticError(
-            Format('var argument %d of ''%s'' must be a variable',
-              [I + 1, AExpr.Name]),
-            AExpr.Line, AExpr.Col);
-        if PPar.IsVarParam then
-          WarnIfVarArgIsForInLoopVar(TASTExpr(AExpr.Args.Items[I]));
-        CheckTypesMatch(PPar.TypeDesc, ArgType,
-          Format('argument %d of ''%s''', [I + 1, AExpr.Name]),
-          AExpr.Line, AExpr.Col);
-      end;
+      AnalyseProcTypeCallArgs(AExpr.Args, PT, AExpr.Name, AExpr.Line, AExpr.Col);
       AExpr.IsProcFieldCall  := True;
       AExpr.ProcFieldInfo    := FldInfo;
       AExpr.ResolvedProcType := FldInfo.TypeDesc;
@@ -13360,27 +13300,7 @@ begin
     AExpr.ResolvedProcType     := Sym.TypeDesc;
     { Validate arg count + types against the signature. }
     PT := TProceduralTypeDesc(Sym.TypeDesc);
-    if AExpr.Args.Count <> PT.Params.Count then
-      SemanticError(Format(
-        'Indirect call ''%s'' expects %d argument(s), got %d',
-        [AExpr.Name, PT.Params.Count, AExpr.Args.Count]),
-        AExpr.Line, AExpr.Col);
-    for I := 0 to AExpr.Args.Count - 1 do
-    begin
-      PPar    := TProcParamInfo(PT.Params.Items[I]);
-      ArgType := AnalyseExprHinted(TASTExpr(AExpr.Args.Items[I]), PPar.TypeDesc);
-      if PPar.IsVarParam and
-         not IsVarArgLValue(TASTExpr(AExpr.Args.Items[I])) then
-        SemanticError(
-          Format('var argument %d of ''%s'' must be a variable',
-            [I + 1, AExpr.Name]),
-          AExpr.Line, AExpr.Col);
-      if PPar.IsVarParam then
-        WarnIfVarArgIsForInLoopVar(TASTExpr(AExpr.Args.Items[I]));
-      CheckTypesMatch(PPar.TypeDesc, ArgType,
-        Format('argument %d of ''%s''', [I + 1, AExpr.Name]),
-        AExpr.Line, AExpr.Col);
-    end;
+    AnalyseProcTypeCallArgs(AExpr.Args, PT, AExpr.Name, AExpr.Line, AExpr.Col);
     Result := PT.ReturnType;
     if Result = nil then
       Result := FTable.TypeVoid;

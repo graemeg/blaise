@@ -87,6 +87,10 @@ type
     procedure TestE2E_Arrow_ArgPosition_Standalone;
     procedure TestE2E_Arrow_ArgPosition_MethodWithCapture;
     procedure TestE2E_Arrow_ArgPosition_OverloadByShape;
+    { ... and through a procedural-typed VARIABLE or FIELD (implicit-Self and
+      qualified), whose single signature types the lambda. }
+    procedure TestSemantic_Arrow_ArgPosition_ProcTypeCalls_Inferred;
+    procedure TestE2E_Arrow_ArgPosition_ProcTypeCalls;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
     procedure TestE2E_GenericMethodOnGenericClass_Gate;
@@ -1395,6 +1399,69 @@ begin
   Output := CompileAndRun(Src);
   if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
   AssertEquals('stdout', 'int:7' + #10 + 'fn:42' + #10, Output)
+end;
+
+const
+  SrcArrowProcTypeCalls =
+    '''
+    program P;
+    type
+      TSel = reference to function(N: Integer): Integer;
+      TRun = reference to procedure(N: Integer; F: TSel);
+      TApply = reference to function(N: Integer; F: TSel): Integer;
+      TBox = class
+      public
+        FRun: TRun;
+        FApply: TApply;
+        procedure Drv();
+      end;
+    procedure TBox.Drv();
+    begin
+      FRun(1, X -> X + 10);
+      WriteLn(FApply(2, X -> X * 3))
+    end;
+    var
+      Run: TRun;
+      Apply: TApply;
+      B: TBox;
+    begin
+      Run := procedure(N: Integer; F: TSel)
+        begin
+          WriteLn(F(N))
+        end;
+      Apply := function(N: Integer; F: TSel): Integer
+        begin
+          Result := F(N)
+        end;
+      Run(4, X -> X + 1);
+      WriteLn(Apply(5, X -> X * 2));
+      B := TBox.Create();
+      B.FRun := Run;
+      B.FApply := Apply;
+      B.Drv();
+      B.FRun(6, X -> X - 1);
+      WriteLn(B.FApply(7, X -> X + 100));
+      B.Free()
+    end.
+    ''';
+
+procedure TAnonMethodTests.TestSemantic_Arrow_ArgPosition_ProcTypeCalls_Inferred;
+begin
+  { Proc-variable and implicit-Self proc-field calls (statement + expression)
+    used to reject the arrow with "Cannot infer": their hand-copied arg loops
+    never inferred a pending lambda from the 'reference to' param.  They now
+    share AnalyseProcTypeCallArgs with the qualified arms. }
+  AnalyseSrc(SrcArrowProcTypeCalls).Free()
+end;
+
+procedure TAnonMethodTests.TestE2E_Arrow_ArgPosition_ProcTypeCalls;
+var Output: string;
+begin
+  Output := CompileAndRun(SrcArrowProcTypeCalls);
+  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
+  AssertEquals('stdout',
+    '5' + #10 + '10' + #10 + '11' + #10 + '6' + #10 + '5' + #10 + '107' + #10,
+    Output)
 end;
 
 procedure TAnonMethodTests.TestE2E_GenericMethodOnGenericClass_Gate;
