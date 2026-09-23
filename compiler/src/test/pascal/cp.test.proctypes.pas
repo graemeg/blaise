@@ -20,6 +20,7 @@ type
     function ParseSrc(const ASrc: string): TProgram;
     function GenIR(const ASrc: string): string;
     function IRContains(const AIR, AFragment: string): Boolean;
+    function FuncRegion(const AIR, AHeader: string): string;
     function FindTypeDecl(AProg: TProgram; const AName: string): TTypeDecl;
   published
     { Parser — bare procedural type declarations }
@@ -63,6 +64,15 @@ type
     procedure TestCodegen_RecordProcFieldCall_PlainProcField_UsesRecordAddress;
     { An unqualified procedural-field call via implicit Self (Result := FFn(S),
       no 'Self.' prefix) must resolve and dispatch through Self's field. }
+    { BUG-20260923-closure-call-via-byval-record-param: a BY-VALUE record
+      parameter is passed BY REFERENCE, so its slot holds the caller's record
+      ADDRESS — exactly like a var param.  The five method-call STATEMENT
+      sites in uSemantic used the narrow `Kind = skVarParameter` test, while
+      every expression / field-access site already used the full predicate
+      that also covers a by-value record or static-array parameter.  The
+      call path therefore treated the parameter SLOT as the record base. }
+    procedure TestCodegen_ByValRecordParam_ProcFieldCall_DerefsSlot;
+    procedure TestCodegen_ByValRecordParam_MethodCall_DerefsSlot;
     procedure TestCodegen_ImplicitSelfProcFieldCall_LoadsSelf;
   end;
 
@@ -115,6 +125,21 @@ end;
 function TProcTypesTests.IRContains(const AIR, AFragment: string): Boolean;
 begin
   Result := Pos(AFragment, AIR) > 0;
+end;
+
+function TProcTypesTests.FuncRegion(const AIR, AHeader: string): string;
+var
+  P, E: Integer;
+  Tail: string;
+begin
+  { Slice one emitted function: from its header line to the closing brace.
+    Whole-IR assertions would pass vacuously off the caller's own code. }
+  P := Pos(AHeader, AIR);
+  AssertTrue(AHeader + ' present', P >= 0);
+  Tail := Copy(AIR, P, Length(AIR) - P);
+  E := Pos(#10 + '}', Tail);
+  AssertTrue(AHeader + ' closed', E >= 0);
+  Result := Copy(Tail, 0, E);
 end;
 
 function TProcTypesTests.FindTypeDecl(AProg: TProgram; const AName: string): TTypeDecl;
@@ -715,6 +740,85 @@ begin
     IRContains(IR, 'add $R, 8'));
   AssertFalse('A record receiver must not take the class nil-check path',
     IRContains(IR, '_CheckNil'));
+end;
+
+procedure TProcTypesTests.TestCodegen_ByValRecordParam_ProcFieldCall_DerefsSlot;
+var
+  IR, FnIR: string;
+begin
+  { `V: TR` is passed BY REFERENCE, so %_var_V holds the caller's record
+    ADDRESS and the field slot is (load %_var_V) + offset.  The bug emitted
+    `add %_var_V, 8` — the address OF THE SLOT — and called a garbage
+    address.  The tell is the missing load: the correct shape loads the
+    parameter slot first, exactly as the ARC code in the same function
+    already did. }
+  IR := GenIR(
+    '''
+        program Test;
+        type
+          TFn = reference to procedure;
+          TR = record
+            Pad: Int64;
+            F: TFn;
+          end;
+        procedure Take(V: TR);
+        begin
+          V.F()
+        end;
+        var
+          R: TR;
+        begin
+          Take(R)
+        end.
+        '''
+  );
+  FnIR := FuncRegion(IR, 'function $Take(');
+  AssertTrue('by-value record param slot must be DEREFERENCED for the receiver',
+    IRContains(FnIR, 'loadl %_var_V'));
+  AssertFalse('the parameter SLOT address must not be used as the record base',
+    IRContains(FnIR, 'add %_var_V, 8'));
+end;
+
+procedure TProcTypesTests.TestCodegen_ByValRecordParam_MethodCall_DerefsSlot;
+var
+  IR, FnIR: string;
+begin
+  { The same omission on the general record-METHOD call site is WORSE than a
+    crash: Self became the slot's address, so the method read adjacent stack
+    memory and printed garbage with exit code 0 — silent wrong output. }
+  IR := GenIR(
+    '''
+        program Test;
+        type
+          TR = record
+            Tag: Integer;
+            procedure Show();
+          end;
+        procedure TR.Show();
+        begin
+          WriteLn(Tag)
+        end;
+        procedure Take(V: TR);
+        begin
+          V.Show()
+        end;
+        var
+          R: TR;
+        begin
+          Take(R)
+        end.
+        '''
+  );
+  FnIR := FuncRegion(IR, 'function $Take(');
+  { The precise tell: the broken emitter passed the SLOT itself as Self
+    (`call $TR_Show(l %_var_V)`); the correct one passes a temp holding the
+    loaded record address. }
+  AssertFalse('Self must not be the parameter SLOT address',
+    IRContains(FnIR, 'call $TR_Show(l %_var_V)'));
+  AssertTrue('by-value record param is dereferenced to form Self',
+    IRContains(FnIR, 'loadl %_var_V'));
+  AssertTrue('Self is passed as a loaded temp',
+    IRContains(FnIR, 'call $TR_Show(l %_t'));
 end;
 
 procedure TProcTypesTests.TestCodegen_ImplicitSelfProcFieldCall_LoadsSelf;

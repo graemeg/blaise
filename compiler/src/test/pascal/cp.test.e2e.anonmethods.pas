@@ -106,6 +106,15 @@ type
       cannot see closure envs, so this asserts on observable behaviour: the
       env must stay alive through both copies to program exit. }
     procedure TestRun_RecordCopy_ClosureField_EnvSurvivesCopy;
+    { BUG-20260923-closure-call-via-byval-record-param: a BY-VALUE record
+      parameter is passed BY REFERENCE, so its slot holds the caller's record
+      address.  The method-call STATEMENT sites in uSemantic used the narrow
+      skVarParameter test, so the call path used the SLOT address as the
+      record base: a closure call through such a param segfaulted, and a
+      record METHOD call silently read adjacent stack memory and printed
+      garbage with exit code 0. }
+    procedure TestRun_ByValRecordParam_ClosureFieldCall;
+    procedure TestRun_ByValRecordParam_RecordMethodCall;
   end;
 
 implementation
@@ -1477,6 +1486,78 @@ begin
     'env-alive' + LineEnding +
     'env-alive' + LineEnding +
     'env-alive' + LineEnding +
+    'done' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ByValRecordParam_ClosureFieldCall;
+const
+  Src = '''
+    program P;
+    type
+      TFn = reference to procedure;
+      TR = record
+        Tag: Integer;
+        F: TFn;
+      end;
+    var
+      S: string;
+      A: TR;
+    procedure Take(V: TR);
+    begin
+      WriteLn('tag=', V.Tag);
+      V.F()
+    end;
+    begin
+      S := 'env-alive';
+      A.Tag := 7;
+      A.F := procedure begin WriteLn(S) end;
+      Take(A);
+      WriteLn('done')
+    end.
+    ''';
+begin
+  { V.Tag reads correctly (the field-access path already used the full
+    by-ref predicate) while V.F() segfaulted — the asymmetry inside a single
+    function is the tell. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    'tag=7' + LineEnding +
+    'env-alive' + LineEnding +
+    'done' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ByValRecordParam_RecordMethodCall;
+const
+  Src = '''
+    program P;
+    type
+      TR = record
+        Tag: Integer;
+        procedure Show();
+      end;
+    procedure TR.Show();
+    begin
+      WriteLn('Show tag=', Tag)
+    end;
+    procedure Take(V: TR);
+    begin
+      V.Show()
+    end;
+    var
+      A: TR;
+    begin
+      A.Tag := 7;
+      Take(A);
+      WriteLn('done')
+    end.
+    ''';
+begin
+  { Worse than the closure crash: this exited 0 and printed a garbage Tag,
+    so nothing flagged it.  Self was the parameter SLOT's address, so the
+    method read adjacent stack memory. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    'Show tag=7' + LineEnding +
     'done' + LineEnding, 0);
 end;
 

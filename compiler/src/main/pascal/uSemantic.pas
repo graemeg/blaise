@@ -1002,6 +1002,37 @@ begin
   Result := _StrToDouble(PChar(S));
 end;
 
+{ True when a receiver symbol's variable SLOT holds the ADDRESS of the record
+  rather than the record itself, so codegen must dereference the slot once
+  before applying a field offset.
+
+  Two symbol shapes have that layout:
+
+    * a var/out parameter of any type (skVarParameter), and
+    * a BY-VALUE parameter of an aggregate type — a record or static array is
+      passed BY REFERENCE regardless of the absence of 'var', so its slot is
+      a pointer too.
+
+  The second case is the one that drifted.  Every method-call EXPRESSION site
+  and both field-access sites already spelled this predicate out inline, but
+  the five method-call STATEMENT sites tested only skVarParameter.  A
+  by-value record param therefore reported IsVarParam = False, and the call
+  path used the SLOT's address as the record base: a closure field call
+  dispatched through a garbage address (segfault) and a record METHOD call
+  silently gave Self the wrong base, reading adjacent stack memory and
+  returning garbage with exit code 0
+  (BUG-20260923-closure-call-via-byval-record-param).
+
+  Sharing one helper is what keeps the thirteen call sites from drifting
+  again. }
+function RecvSlotHoldsAddress(ASym: TSymbol): Boolean;
+begin
+  Result := (ASym <> nil) and
+            ((ASym.Kind = skVarParameter) or
+             ((ASym.Kind = skParameter) and (ASym.TypeDesc <> nil) and
+              (ASym.TypeDesc.Kind in [tyRecord, tyStaticArray])));
+end;
+
 function TSemanticAnalyser.GetSymbolTable: TSymbolTable;
 begin
   Result := FTable;
@@ -10779,7 +10810,7 @@ begin
     ACall.IsConstructorCall   := True;
     ACall.IsMetaclassDispatch := True;
     ACall.IsGlobal            := ObjSym.IsGlobal;
-    ACall.IsVarParam          := (ObjSym.Kind = skVarParameter);
+    ACall.IsVarParam          := RecvSlotHoldsAddress(ObjSym);
     Exit;
   end;
 
@@ -10810,7 +10841,7 @@ begin
     ACall.ResolvedClassType := ObjSym.TypeDesc;
     ACall.ResolvedMethod    := nil;  { nil = interface dispatch, not class dispatch }
     ACall.IsGlobal          := ObjSym.IsGlobal;
-    ACall.IsVarParam        := (ObjSym.Kind = skVarParameter);
+    ACall.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
     ACall.ResolvedReturnTypeDesc := ResolveIntfMethodReturn(
       TInterfaceTypeDesc(ObjSym.TypeDesc), ACall.Name);
     Exit;
@@ -10824,7 +10855,7 @@ begin
     ACall.ResolvedClassType := RT;
     ACall.ResolvedMethod    := nil;
     ACall.IsGlobal          := ObjSym.IsGlobal;
-    ACall.IsVarParam        := (ObjSym.Kind = skVarParameter);
+    ACall.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
     Exit;
   end;
 
@@ -10848,7 +10879,7 @@ begin
     ACall.ResolvedClassType := RT;
     ACall.ResolvedMethod    := nil;
     ACall.IsGlobal          := ObjSym.IsGlobal;
-    ACall.IsVarParam        := (ObjSym.Kind = skVarParameter);
+    ACall.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
     Exit;
   end;
 
@@ -10871,7 +10902,7 @@ begin
   ACall.ResolvedClassType := RT;
   ACall.ResolvedMethod    := MDecl;
   ACall.IsGlobal          := ObjSym.IsGlobal;
-  ACall.IsVarParam        := (ObjSym.Kind = skVarParameter);
+  ACall.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
   if (MDecl.ResolvedReturnType <> nil) and
      (MDecl.ResolvedReturnType.Kind = tyRecord) then
     ACall.ResolvedReturnTypeDesc := MDecl.ResolvedReturnType;
@@ -11706,10 +11737,7 @@ begin
   AAssign.IsClassAccess := RecSym.TypeDesc.Kind = tyClass;
   AAssign.IsGlobal      := RecSym.IsGlobal;
   { Treat value record/array params as by-reference at QBE ABI level. }
-  AAssign.IsVarParam    :=
-    (RecSym.Kind = skVarParameter) or
-    ((RecSym.Kind = skParameter) and (RecSym.TypeDesc <> nil) and
-     (RecSym.TypeDesc.Kind in [tyRecord, tyStaticArray]));
+  AAssign.IsVarParam    := RecvSlotHoldsAddress(RecSym);
 
   RT      := TRecordTypeDesc(RecSym.TypeDesc);
   FldInfo := RT.FindField(AAssign.FieldName);
@@ -14404,10 +14432,7 @@ begin
     Self.AnalyseListSlot(AExpr.Args, 0);
     AExpr.IsBuiltinInheritsFrom := True;
     AExpr.IsGlobal  := ObjSym.IsGlobal;
-    AExpr.IsVarParam :=
-      (ObjSym.Kind = skVarParameter) or
-      ((ObjSym.Kind = skParameter) and (ObjSym.TypeDesc <> nil) and
-       (ObjSym.TypeDesc.Kind in [tyRecord, tyStaticArray]));
+    AExpr.IsVarParam := RecvSlotHoldsAddress(ObjSym);
     Result := FTable.TypeBoolean;
     AExpr.ResolvedType := Result;
     Exit;
@@ -14464,10 +14489,7 @@ begin
     AExpr.ResolvedClassType := ObjSym.TypeDesc;
     AExpr.ResolvedMethod    := nil;  { nil = interface dispatch }
     AExpr.IsGlobal          := ObjSym.IsGlobal;
-    AExpr.IsVarParam        :=
-      (ObjSym.Kind = skVarParameter) or
-      ((ObjSym.Kind = skParameter) and (ObjSym.TypeDesc <> nil) and
-       (ObjSym.TypeDesc.Kind in [tyRecord, tyStaticArray]));
+    AExpr.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
     { Look up return type from interface method descriptor }
     Result := FindTypeOrInstantiate(
       IntfDesc.MethodReturnTypeName(IntfDesc.MethodIndex(AExpr.Name)));
@@ -14515,10 +14537,7 @@ begin
     AExpr.ResolvedClassType := RT;
     AExpr.ResolvedMethod    := MDecl;
     AExpr.IsGlobal          := ObjSym.IsGlobal;
-    AExpr.IsVarParam        :=
-      (ObjSym.Kind = skVarParameter) or
-      ((ObjSym.Kind = skParameter) and (ObjSym.TypeDesc <> nil) and
-       (ObjSym.TypeDesc.Kind in [tyRecord, tyStaticArray]));
+    AExpr.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
     Result := MDecl.ResolvedReturnType;
     AExpr.ResolvedType := Result;
     Exit;
@@ -14538,10 +14557,7 @@ begin
     AExpr.ResolvedMethod    := nil;
     AExpr.IsBuiltinToString := True;
     AExpr.IsGlobal          := ObjSym.IsGlobal;
-    AExpr.IsVarParam        :=
-      (ObjSym.Kind = skVarParameter) or
-      ((ObjSym.Kind = skParameter) and (ObjSym.TypeDesc <> nil) and
-       (ObjSym.TypeDesc.Kind in [tyRecord, tyStaticArray]));
+    AExpr.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -14558,10 +14574,7 @@ begin
       AExpr.ResolvedClassType := RT;
       AExpr.ResolvedMethod    := nil;
       AExpr.IsGlobal          := ObjSym.IsGlobal;
-      AExpr.IsVarParam        :=
-        (ObjSym.Kind = skVarParameter) or
-        ((ObjSym.Kind = skParameter) and (ObjSym.TypeDesc <> nil) and
-         (ObjSym.TypeDesc.Kind in [tyRecord, tyStaticArray]));
+      AExpr.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
       { Function-pointer field call yields the signature's return type. }
       AExpr.ResolvedType      := TProceduralTypeDesc(FldInfo.TypeDesc).ReturnType;
       Result                  := AExpr.ResolvedType;
@@ -14608,10 +14621,7 @@ begin
   AExpr.ResolvedClassType := RT;
   AExpr.ResolvedMethod    := MDecl;
   AExpr.IsGlobal          := ObjSym.IsGlobal;
-  AExpr.IsVarParam        :=
-    (ObjSym.Kind = skVarParameter) or
-    ((ObjSym.Kind = skParameter) and (ObjSym.TypeDesc <> nil) and
-     (ObjSym.TypeDesc.Kind in [tyRecord, tyStaticArray]));
+  AExpr.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
   Result := MDecl.ResolvedReturnType;
 end;
 
@@ -15537,10 +15547,7 @@ begin
   { Records and static arrays are always passed by reference at the QBE ABI
     level — the param slot holds a pointer.  Mark both var-params and value
     aggregate params so codegen dereferences the slot. }
-  AAccess.IsVarParam    :=
-    (RecSym.Kind = skVarParameter) or
-    ((RecSym.Kind = skParameter) and (RecSym.TypeDesc <> nil) and
-     (RecSym.TypeDesc.Kind in [tyRecord, tyStaticArray]));
+  AAccess.IsVarParam    := RecvSlotHoldsAddress(RecSym);
 
   { Built-in class intrinsics }
   if SameText(AAccess.FieldName, 'ClassName') and (RecSym.TypeDesc.Kind = tyClass) then
