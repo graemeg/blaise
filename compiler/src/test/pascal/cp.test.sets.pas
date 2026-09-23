@@ -59,6 +59,9 @@ type
     procedure TestSemantic_Set_LiteralElementMustMatchBase;
     procedure TestSemantic_Set_CtorArgLiteralRetypedToSet;
     procedure TestSemantic_Set_MetaclassCtorArgLiteralRetypedToSet;
+    procedure TestSemantic_Set_ProcFieldArgLiteralRetypedToSet;
+    procedure TestCodegen_Set_ProcFieldArgLiteralFoldsToBitmask;
+    procedure TestCodegen_Set_ProcFieldArgLiteral_NativeCompiles;
 
     { ------------------------------------------------------------------ }
     { ranges in set literals — [lo..hi] (issue #105)                       }
@@ -733,6 +736,37 @@ const
     '  F := C.Create([dNorth, dEast])' + #10 +
     'end.';
 
+  { A bracket literal passed to a QUALIFIED procedural-field call must be
+    typed against the field signature's `set of` param -- class-var,
+    record-var and chained receivers, statement and expression position.
+    BUG-20260722-procfield-set-literal-arg. }
+  SrcSetProcFieldArgLiteral =
+    'program P;' + #10 +
+    DirEnum +
+    'type' + #10 +
+    '  TP = procedure(S: TDirSet; D: TDir);' + #10 +
+    '  TF = function(S: TDirSet): Boolean;' + #10 +
+    '  TR = record' + #10 +
+    '    FP: TP;' + #10 +
+    '    FF: TF;' + #10 +
+    '  end;' + #10 +
+    '  TFoo = class' + #10 +
+    '    FP: TP;' + #10 +
+    '    FF: TF;' + #10 +
+    '    R: TR;' + #10 +
+    '  end;' + #10 +
+    'var' + #10 +
+    '  F: TFoo;' + #10 +
+    '  R: TR;' + #10 +
+    '  B: Boolean;' + #10 +
+    'begin' + #10 +
+    '  F.FP([dNorth, dEast], dNorth);' + #10 +
+    '  B := F.FF([dNorth, dEast]);' + #10 +
+    '  R.FP([dNorth, dEast], dNorth);' + #10 +
+    '  F.R.FP([dNorth, dEast], dNorth);' + #10 +
+    '  B := F.R.FF([dNorth, dEast])' + #10 +
+    'end.';
+
 { ------------------------------------------------------------------ }
 { Helpers                                                              }
 { ------------------------------------------------------------------ }
@@ -989,6 +1023,50 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TSetTests.TestSemantic_Set_ProcFieldArgLiteralRetypedToSet;
+var
+  Prog: TProgram;
+  I: Integer;
+  S: TObject;
+  Args: TObjectList;
+begin
+  Prog := AnalyseSrc(SrcSetProcFieldArgLiteral);
+  try
+    { Statements 0, 2, 3 are proc-field call statements; 1 and 4 assign a
+      proc-field call expression. }
+    for I := 0 to 4 do
+    begin
+      S := Prog.Block.Stmts[I];
+      if S is TMethodCallStmt then
+        Args := TMethodCallStmt(S).Args
+      else
+        Args := TMethodCallExpr(TAssignment(S).Expr).Args;
+      AssertEquals(Format('stmt %d: proc-field set-literal arg re-typed to the set type', [I]),
+        Ord(tySet), Ord(TASTExpr(Args[0]).ResolvedType.Kind));
+    end;
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TSetTests.TestCodegen_Set_ProcFieldArgLiteralFoldsToBitmask;
+var
+  IR: string;
+begin
+  { [dNorth, dEast] folds to mask 5, not an open-array literal. }
+  IR := GenIR(SrcSetProcFieldArgLiteral);
+  AssertTrue('proc-field set-literal arg folds to mask 5', Pos('copy 5', IR) > 0);
+end;
+
+procedure TSetTests.TestCodegen_Set_ProcFieldArgLiteral_NativeCompiles;
+var
+  S: string;
+begin
+  { Native raised "unsupported expression form TArrayLiteralExpr". }
+  S := GenAsm(SrcSetProcFieldArgLiteral);
+  AssertTrue('native emits the proc-field calls', Length(S) > 0);
 end;
 
 procedure TSetTests.TestSemantic_Set_Include_OK;

@@ -43,6 +43,11 @@ type
       argument's type against the signature, not just the arg count. }
     procedure TestSemantic_IndirectCallStmt_WrongArgType_Fails;
     procedure TestSemantic_IndirectCallExpr_WrongArgType_Fails;
+    { The same checks for a QUALIFIED procedural-field call (Obj.FP(..)),
+      which used to bind the field and skip argument checking entirely.
+      BUG-20260722-procfield-set-literal-arg. }
+    procedure TestSemantic_QualifiedProcFieldCall_WrongArgCount_Fails;
+    procedure TestSemantic_QualifiedProcFieldCallExpr_WrongArgType_Fails;
 
     { Codegen — emission }
     procedure TestCodegen_ProceduralVar_AllocatedAsPointer;
@@ -443,6 +448,58 @@ begin
     Raised := True;
   end;
   AssertTrue('Should raise on incompatible param count', Raised);
+end;
+
+procedure TProcTypesTests.TestSemantic_QualifiedProcFieldCall_WrongArgCount_Fails;
+var
+  Raised: Boolean;
+begin
+  Raised := False;
+  try
+    GenIR(
+      '''
+          program Test;
+          type
+            TP = procedure(A, B: Integer);
+            TBox = class
+              FP: TP;
+            end;
+          var X: TBox;
+          begin
+            X.FP(1)
+          end.
+          '''
+    );
+  except
+    Raised := True;
+  end;
+  AssertTrue('Qualified proc-field call must reject a wrong arg count', Raised);
+end;
+
+procedure TProcTypesTests.TestSemantic_QualifiedProcFieldCallExpr_WrongArgType_Fails;
+var
+  Raised: Boolean;
+begin
+  Raised := False;
+  try
+    GenIR(
+      '''
+          program Test;
+          type
+            TF = function(N: Integer): Integer;
+            TBox = class
+              FF: TF;
+            end;
+          var X: TBox; R: Integer;
+          begin
+            R := X.FF('oops')
+          end.
+          '''
+    );
+  except
+    Raised := True;
+  end;
+  AssertTrue('Qualified proc-field call expr must reject string where Integer expected', Raised);
 end;
 
 procedure TProcTypesTests.TestSemantic_IndirectCallStmt_WrongArgType_Fails;

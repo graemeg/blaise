@@ -92,6 +92,12 @@ type
       native codegen rejected it (QBE happened to tolerate it)
       (BUG-20260722-native-set-literal-arg). }
     procedure TestRun_SetLiteralArg_MethodCalls;
+    { The same bracket literal passed to a QUALIFIED procedural-field call
+      (B.FP([..]), R.FF([..]), B.Inner.FP([..]), Self.FF([..])): the
+      proc-field arms bound the field and exited without typing the args
+      against the field signature, so native rejected the open-array literal
+      and QBE passed garbage (BUG-20260722-procfield-set-literal-arg). }
+    procedure TestRun_SetLiteralArg_ProcFieldCalls;
     { Include/Exclude on a SMALL-set element of an array FIELD: the QBE
       lowering took the element l-value via a subscript-blind path and
       mutated element 0 (BUG-20260723-qbe-incexc-field-array-elem, fixed by
@@ -1004,6 +1010,107 @@ begin
   AssertRunsOnAll(Src,
     'True' + LE + 'False' + LE + 'True' + LE + 'False' + LE + '2' + LE +
     'True' + LE + '2' + LE + '2' + LE, 0);
+end;
+
+procedure TE2ESetOpsTests.TestRun_SetLiteralArg_ProcFieldCalls;
+const Src = '''
+    program P;
+    type
+      TC = (cRed, cGreen, cBlue);
+      TCs = set of TC;
+      TP = procedure(S: TCs; C: TC);
+      TF = function(S: TCs): Boolean;
+      TM = procedure(S: TCs; C: TC) of object;
+      TRf = reference to procedure(S: TCs; C: TC);
+      TRec = record
+        FP: TP;
+        FF: TF;
+      end;
+      THandler = class
+      public
+        procedure Show(S: TCs; C: TC);
+      end;
+      TInner = class
+      public
+        FP: TP;
+        FF: TF;
+      end;
+      TBox = class
+      public
+        FP: TP;
+        FF: TF;
+        FM: TM;
+        FR: TRf;
+        R: TRec;
+        Inner: TInner;
+        procedure Drv();
+      end;
+    procedure Show(S: TCs; C: TC);
+    begin
+      WriteLn(C in S)
+    end;
+    function HasRed(S: TCs): Boolean;
+    begin
+      Result := cRed in S
+    end;
+    procedure THandler.Show(S: TCs; C: TC);
+    begin
+      WriteLn(C in S)
+    end;
+    procedure TBox.Drv();
+    begin
+      Self.FP([cGreen], cGreen);        { explicit Self, stmt }
+      WriteLn(Self.FF([cBlue]));        { explicit Self, expr }
+      WriteLn(Inner.FF([cRed]));        { implicit-Self field base, expr }
+      FP([cBlue], cBlue)                { implicit Self (already worked) }
+    end;
+    var
+      B: TBox;
+      H: THandler;
+      R: TRec;
+    begin
+      B := TBox.Create();
+      H := THandler.Create();
+      B.Inner := TInner.Create();
+      B.FP := @Show;
+      B.FF := @HasRed;
+      B.FM := @H.Show;
+      B.FR := procedure(S: TCs; C: TC)
+        begin
+          WriteLn(C in S)
+        end;
+      B.R.FP := @Show;
+      B.R.FF := @HasRed;
+      B.Inner.FP := @Show;
+      B.Inner.FF := @HasRed;
+      R.FP := @Show;
+      R.FF := @HasRed;
+      B.FP([cRed], cRed);               { class var, stmt }
+      B.FP([cGreen, cBlue], cRed);
+      WriteLn(B.FF([cRed, cBlue]));     { class var, expr }
+      B.FM([cRed], cRed);               { of object }
+      B.FR([cBlue], cBlue);             { reference to }
+      B.FP([], cRed);                   { empty literal }
+      R.FP([cGreen], cGreen);           { record var, stmt }
+      WriteLn(R.FF([cGreen]));          { record var, expr }
+      B.R.FP([cRed], cRed);             { record field of class, stmt }
+      WriteLn(B.R.FF([cRed]));          { record field of class, expr }
+      B.Inner.FP([cBlue], cBlue);       { chained, stmt }
+      WriteLn(B.Inner.FF([cGreen]));    { chained, expr }
+      B.Drv();
+      B.FR := nil;
+      B.Inner.Free();
+      H.Free();
+      B.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'True' + LE + 'False' + LE + 'True' + LE + 'True' + LE + 'True' + LE +
+    'False' + LE + 'True' + LE + 'False' + LE + 'True' + LE + 'True' + LE +
+    'True' + LE + 'False' + LE +
+    'True' + LE + 'False' + LE + 'True' + LE + 'True' + LE, 0);
 end;
 
 procedure TE2ESetOpsTests.TestRun_IncludeExclude_FieldArrayElem;

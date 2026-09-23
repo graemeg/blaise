@@ -501,6 +501,14 @@ type
     function  SetLiteralBaseEnum(AExpr: TArrayLiteralExpr): TTypeDesc;
     { Re-type set-literal args to their `set of` param type post-overload. }
     procedure RetypeSetLiteralArgs(AArgs: TObjectList; AMDecl: TMethodDecl);
+    { Re-type one bracket-literal arg against its formal's type (the per-arg
+      body of RetypeSetLiteralArgs, shared with procedural-type calls). }
+    procedure RetypeBracketLiteralArg(AArg: TASTExpr; AParamType: TTypeDesc);
+    { Analyse and check the args of a call through a procedural-typed field
+      against its signature: arity, one hinted analysis per arg, var-arg
+      l-values and per-arg type match. }
+    procedure AnalyseProcTypeCallArgs(AArgs: TObjectList;
+      APT: TProceduralTypeDesc; const AName: string; ALine, ACol: Integer);
     { Range-check every constant VALUE argument against its parameter's type,
       for a call whose overload has already been resolved.  Runs beside
       RetypeSetLiteralArgs because that is the one hook every call shape
@@ -10656,6 +10664,23 @@ begin
       ACall.ResolvedMethod    := nil;
       Exit;
     end;
+    { Procedural-typed field (Obj.Inner.Handler(..)): detected BEFORE the
+      args are analysed so they are typed once against the field signature
+      (BUG-20260722-procfield-set-literal-arg). }
+    FldInfo := RT.FindField(ACall.Name);
+    if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
+       (FldInfo.TypeDesc.Kind = tyProcedural) and
+       (FindMethodDecl(RT.Name, ACall.Name) = nil) then
+    begin
+      AnalyseProcTypeCallArgs(ACall.Args, TProceduralTypeDesc(FldInfo.TypeDesc),
+        ACall.Name, ACall.Line, ACall.Col);
+      ACall.IsProcFieldCall   := True;
+      ACall.ProcFieldInfo     := FldInfo;
+      ACall.ResolvedProcType  := FldInfo.TypeDesc;
+      ACall.ResolvedClassType := RT;
+      ACall.ResolvedMethod    := nil;
+      Exit;
+    end;
     HintBareEnumMethodArgs(RT.Name, ACall.Name, ACall.Args);
     for I := 0 to ACall.Args.Count - 1 do
       Self.AnalyseArgSlot(ACall.Args, I);
@@ -10664,17 +10689,6 @@ begin
     ResolveDeferredArrowArgs(ACall.Args, MDecl);
     if MDecl = nil then
     begin
-      FldInfo := RT.FindField(ACall.Name);
-      if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
-         (FldInfo.TypeDesc.Kind = tyProcedural) then
-      begin
-        ACall.IsProcFieldCall   := True;
-        ACall.ProcFieldInfo     := FldInfo;
-        ACall.ResolvedProcType  := FldInfo.TypeDesc;
-        ACall.ResolvedClassType := RT;
-        ACall.ResolvedMethod    := nil;
-        Exit;
-      end;
       SemanticError(
         Format('Class ''%s'' has no method ''%s''', [RT.Name, ACall.Name]),
         ACall.Line, ACall.Col);
@@ -10874,20 +10888,20 @@ begin
     Exit;
   end;
 
-  HintBareEnumMethodArgs(RT.Name, ACall.Name, ACall.Args);
-  for I := 0 to ACall.Args.Count - 1 do
-    Self.AnalyseArgSlot(ACall.Args, I);
-
   { Direct invocation of a procedural-typed field (e.g. an event-handler
     field): F.Handler; or F.Handler();.  Resolve this before reporting a
     missing method so the call dispatches through the (Code, Data) pair
     stored in the field, mirroring the indirect-call path used for a
-    procedural-typed local variable. }
+    procedural-typed local variable.  Detected BEFORE the args are analysed
+    so they are typed once against the field signature
+    (BUG-20260722-procfield-set-literal-arg). }
   FldInfo := RT.FindField(ACall.Name);
   if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
      (FldInfo.TypeDesc.Kind = tyProcedural) and
      (FindMethodDecl(RT.Name, ACall.Name) = nil) then
   begin
+    AnalyseProcTypeCallArgs(ACall.Args, TProceduralTypeDesc(FldInfo.TypeDesc),
+      ACall.Name, ACall.Line, ACall.Col);
     ACall.IsProcFieldCall   := True;
     ACall.ProcFieldInfo     := FldInfo;
     ACall.ResolvedProcType  := FldInfo.TypeDesc;
@@ -10897,6 +10911,10 @@ begin
     ACall.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
     Exit;
   end;
+
+  HintBareEnumMethodArgs(RT.Name, ACall.Name, ACall.Args);
+  for I := 0 to ACall.Args.Count - 1 do
+    Self.AnalyseArgSlot(ACall.Args, I);
 
   MDecl := ResolveMethodOverload(RT.Name, ACall.Name, ACall.Args,
     ACall.Line, ACall.Col);
@@ -12118,41 +12136,83 @@ end;
 procedure TSemanticAnalyser.RetypeSetLiteralArgs(AArgs: TObjectList;
   AMDecl: TMethodDecl);
 var
-  I:   Integer;
-  Par: TMethodParam;
-  Arg: TASTExpr;
-  N:   Integer;
+  I: Integer;
+  N: Integer;
 begin
   N := AArgs.Count;
   if AMDecl.Params.Count < N then
     N := AMDecl.Params.Count;
   for I := 0 to N - 1 do
+    RetypeBracketLiteralArg(TASTExpr(AArgs.Items[I]),
+      TMethodParam(AMDecl.Params.Items[I]).ResolvedType);
+end;
+
+procedure TSemanticAnalyser.RetypeBracketLiteralArg(AArg: TASTExpr;
+  AParamType: TTypeDesc);
+begin
+  if (AParamType = nil) or not (AArg is TArrayLiteralExpr) then
+    Exit;
+  if AParamType.Kind = tySet then
+    AArg.ResolvedType := AParamType;
+  { Bracket literal bound to an 'array of const' formal: mark it so codegen
+    boxes each element into a TVarRec, and pin its type to the formal's
+    array-of-TVarRec (the homogeneous case was typed 'array of <T>'). }
+  if (AParamType.Kind = tyOpenArray) and
+     (TOpenArrayTypeDesc(AParamType).ElementType <> nil) and
+     SameText(TOpenArrayTypeDesc(AParamType).ElementType.Name, 'TVarRec') then
   begin
-    Par := TMethodParam(AMDecl.Params.Items[I]);
-    Arg := TASTExpr(AArgs.Items[I]);
-    if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tySet) and
-       (Arg is TArrayLiteralExpr) then
-      Arg.ResolvedType := Par.ResolvedType;
-    { Bracket literal bound to an 'array of const' formal: mark it so codegen
-      boxes each element into a TVarRec, and pin its type to the formal's
-      array-of-TVarRec (the homogeneous case was typed 'array of <T>'). }
-    if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tyOpenArray) and
-       (TOpenArrayTypeDesc(Par.ResolvedType).ElementType <> nil) and
-       SameText(TOpenArrayTypeDesc(Par.ResolvedType).ElementType.Name, 'TVarRec') and
-       (Arg is TArrayLiteralExpr) then
-    begin
-      TArrayLiteralExpr(Arg).IsConstArray := True;
-      Arg.ResolvedType := Par.ResolvedType;
-    end;
-    { Empty bracket literal [] bound to a plain open-array formal: pin its type
-      to the formal so codegen emits a zero-length open array (data=nil, high=-1)
-      of the right element type.  The untyped [] would otherwise reach codegen
-      with no ResolvedType. }
-    if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tyOpenArray) and
-       (Arg is TArrayLiteralExpr) and
-       (TArrayLiteralExpr(Arg).Elements.Count = 0) and
-       (Arg.ResolvedType = nil) then
-      Arg.ResolvedType := Par.ResolvedType;
+    TArrayLiteralExpr(AArg).IsConstArray := True;
+    AArg.ResolvedType := AParamType;
+  end;
+  { Empty bracket literal [] bound to a plain open-array formal: pin its type
+    to the formal so codegen emits a zero-length open array (data=nil, high=-1)
+    of the right element type.  The untyped [] would otherwise reach codegen
+    with no ResolvedType. }
+  if (AParamType.Kind = tyOpenArray) and
+     (TArrayLiteralExpr(AArg).Elements.Count = 0) and
+     (AArg.ResolvedType = nil) then
+    AArg.ResolvedType := AParamType;
+end;
+
+{ A call through a procedural-typed field has exactly one candidate signature,
+  so -- unlike a method call, whose args are analysed unhinted for overload
+  scoring and retyped afterwards -- each arg is analysed ONCE, hinted by its
+  formal: a bracket literal becomes a set, a bare enum member resolves against
+  the param's enum, and a '->' lambda is inferred from a 'reference to' param.
+  BUG-20260722-procfield-set-literal-arg: the qualified Obj.FP(..) arms used to
+  analyse the args unhinted and skip every check below. }
+procedure TSemanticAnalyser.AnalyseProcTypeCallArgs(AArgs: TObjectList;
+  APT: TProceduralTypeDesc; const AName: string; ALine, ACol: Integer);
+var
+  I: Integer;
+  PPar: TProcParamInfo;
+  Slot: TASTExpr;
+  ArgType: TTypeDesc;
+begin
+  if AArgs.Count <> APT.Params.Count then
+    SemanticError(Format(
+      'Indirect call ''%s'' expects %d argument(s), got %d',
+      [AName, APT.Params.Count, AArgs.Count]),
+      ALine, ACol);
+  for I := 0 to AArgs.Count - 1 do
+  begin
+    PPar := TProcParamInfo(APT.Params.Items[I]);
+    Slot := TASTExpr(AArgs.Items[I]);
+    if IsPendingArrow(Slot) then
+      InferArrowFromTarget(Slot, PPar.TypeDesc);
+    ArgType := AnalyseExprHinted(Slot, PPar.TypeDesc);
+    Self.UnwrapLoweredOperator(Slot);
+    AArgs.Items[I] := Slot;
+    RetypeBracketLiteralArg(Slot, PPar.TypeDesc);
+    if PPar.IsVarParam and not IsVarArgLValue(Slot) then
+      SemanticError(
+        Format('var argument %d of ''%s'' must be a variable', [I + 1, AName]),
+        ALine, ACol);
+    if PPar.IsVarParam then
+      WarnIfVarArgIsForInLoopVar(Slot);
+    CheckTypesMatch(PPar.TypeDesc, ArgType,
+      Format('argument %d of ''%s''', [I + 1, AName]),
+      ALine, ACol);
   end;
 end;
 
@@ -14115,6 +14175,27 @@ begin
       Exit;
     end;
     RT := TRecordTypeDesc(ObjType);
+    { Procedural-typed field (Obj.Inner.Fn(..)): detected BEFORE the args are
+      analysed so they are typed once against the field signature
+      (BUG-20260722-procfield-set-literal-arg). }
+    FldInfo := RT.FindField(AExpr.Name);
+    if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
+       (FldInfo.TypeDesc.Kind = tyProcedural) and
+       (FindMethodDecl(RT.Name, AExpr.Name) = nil) then
+    begin
+      AnalyseProcTypeCallArgs(AExpr.Args, TProceduralTypeDesc(FldInfo.TypeDesc),
+        AExpr.Name, AExpr.Line, AExpr.Col);
+      AExpr.IsProcFieldCall   := True;
+      AExpr.ProcFieldInfo     := FldInfo;
+      AExpr.ResolvedProcType  := FldInfo.TypeDesc;
+      AExpr.ResolvedClassType := RT;
+      AExpr.ResolvedMethod    := nil;
+      { Calling a function-pointer field yields the field signature's return
+        type — not nil — so the call can be used as an expression. }
+      AExpr.ResolvedType      := TProceduralTypeDesc(FldInfo.TypeDesc).ReturnType;
+      Result                  := AExpr.ResolvedType;
+      Exit;
+    end;
     { Analyse args first so overload resolution can score by type
       ('->' lambda args are deferred and scored by shape — Phase 9b). }
     HintBareEnumMethodArgs(RT.Name, AExpr.Name, AExpr.Args);
@@ -14138,21 +14219,6 @@ begin
         AExpr.Line, AExpr.Col);
     if MDecl = nil then
     begin
-      FldInfo := RT.FindField(AExpr.Name);
-      if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
-         (FldInfo.TypeDesc.Kind = tyProcedural) then
-      begin
-        AExpr.IsProcFieldCall   := True;
-        AExpr.ProcFieldInfo     := FldInfo;
-        AExpr.ResolvedProcType  := FldInfo.TypeDesc;
-        AExpr.ResolvedClassType := RT;
-        AExpr.ResolvedMethod    := nil;
-        { Calling a function-pointer field yields the field signature's return
-          type — not nil — so the call can be used as an expression. }
-        AExpr.ResolvedType      := TProceduralTypeDesc(FldInfo.TypeDesc).ReturnType;
-        Result                  := AExpr.ResolvedType;
-        Exit;
-      end;
       SemanticError(
         Format('Class ''%s'' has no method ''%s''', [RT.Name, AExpr.Name]),
         AExpr.Line, AExpr.Col);
@@ -14242,6 +14308,26 @@ begin
         Exit;
       end;
       RT := TRecordTypeDesc(ObjType);
+      { Procedural-typed field: detected BEFORE the args are analysed so they
+        are typed once against the field signature
+        (BUG-20260722-procfield-set-literal-arg). }
+      FldInfo := RT.FindField(AExpr.Name);
+      if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
+         (FldInfo.TypeDesc.Kind = tyProcedural) and
+         (FindMethodDecl(RT.Name, AExpr.Name) = nil) then
+      begin
+        AnalyseProcTypeCallArgs(AExpr.Args, TProceduralTypeDesc(FldInfo.TypeDesc),
+          AExpr.Name, AExpr.Line, AExpr.Col);
+        AExpr.IsProcFieldCall   := True;
+        AExpr.ProcFieldInfo     := FldInfo;
+        AExpr.ResolvedProcType  := FldInfo.TypeDesc;
+        AExpr.ResolvedClassType := RT;
+        AExpr.ResolvedMethod    := nil;
+        { Function-pointer field call yields the signature's return type. }
+        AExpr.ResolvedType      := TProceduralTypeDesc(FldInfo.TypeDesc).ReturnType;
+        Result                  := AExpr.ResolvedType;
+        Exit;
+      end;
       { Analyse args first so overload resolution can score by type. }
       HintBareEnumMethodArgs(RT.Name, AExpr.Name, AExpr.Args);
       for I := 0 to AExpr.Args.Count - 1 do
@@ -14251,20 +14337,6 @@ begin
           AExpr.Line, AExpr.Col);
       if MDecl = nil then
       begin
-        FldInfo := RT.FindField(AExpr.Name);
-        if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
-           (FldInfo.TypeDesc.Kind = tyProcedural) then
-        begin
-          AExpr.IsProcFieldCall   := True;
-          AExpr.ProcFieldInfo     := FldInfo;
-          AExpr.ResolvedProcType  := FldInfo.TypeDesc;
-          AExpr.ResolvedClassType := RT;
-          AExpr.ResolvedMethod    := nil;
-          { Function-pointer field call yields the signature's return type. }
-          AExpr.ResolvedType      := TProceduralTypeDesc(FldInfo.TypeDesc).ReturnType;
-          Result                  := AExpr.ResolvedType;
-          Exit;
-        end;
         SemanticError(
           Format('Class ''%s'' has no method ''%s''', [RT.Name, AExpr.Name]),
           AExpr.Line, AExpr.Col);
@@ -14519,7 +14591,29 @@ begin
     (merging overloads across the inheritance chain).  Args must be analysed
     first so ResolveMethodOverload can score against their resolved types
     ('->' lambda args are deferred and scored by shape — Phase 9b).
-    Fall back to a plain chain lookup for the no-overload / single case. }
+    Fall back to a plain chain lookup for the no-overload / single case.
+    A procedural-typed field (F.Fn(..)) has one signature, so it is detected
+    BEFORE the args are analysed and they are typed once against it
+    (BUG-20260722-procfield-set-literal-arg). }
+  FldInfo := RT.FindField(AExpr.Name);
+  if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
+     (FldInfo.TypeDesc.Kind = tyProcedural) and
+     (FindMethodDecl(RT.Name, AExpr.Name) = nil) then
+  begin
+    AnalyseProcTypeCallArgs(AExpr.Args, TProceduralTypeDesc(FldInfo.TypeDesc),
+      AExpr.Name, AExpr.Line, AExpr.Col);
+    AExpr.IsProcFieldCall   := True;
+    AExpr.ProcFieldInfo     := FldInfo;
+    AExpr.ResolvedProcType  := FldInfo.TypeDesc;
+    AExpr.ResolvedClassType := RT;
+    AExpr.ResolvedMethod    := nil;
+    AExpr.IsGlobal          := ObjSym.IsGlobal;
+    AExpr.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
+    { Function-pointer field call yields the signature's return type. }
+    AExpr.ResolvedType      := TProceduralTypeDesc(FldInfo.TypeDesc).ReturnType;
+    Result                  := AExpr.ResolvedType;
+    Exit;
+  end;
   for I := 0 to AExpr.Args.Count - 1 do
     Self.AnalyseArgSlot(AExpr.Args, I);
   { Generic method call obj.Pick<Integer>(...): the parser folded the explicit
@@ -14579,22 +14673,6 @@ begin
   end;
   if MDecl = nil then
   begin
-    FldInfo := RT.FindField(AExpr.Name);
-    if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
-       (FldInfo.TypeDesc.Kind = tyProcedural) then
-    begin
-      AExpr.IsProcFieldCall   := True;
-      AExpr.ProcFieldInfo     := FldInfo;
-      AExpr.ResolvedProcType  := FldInfo.TypeDesc;
-      AExpr.ResolvedClassType := RT;
-      AExpr.ResolvedMethod    := nil;
-      AExpr.IsGlobal          := ObjSym.IsGlobal;
-      AExpr.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
-      { Function-pointer field call yields the signature's return type. }
-      AExpr.ResolvedType      := TProceduralTypeDesc(FldInfo.TypeDesc).ReturnType;
-      Result                  := AExpr.ResolvedType;
-      Exit;
-    end;
     SemanticError(
       Format('Class ''%s'' has no method ''%s''', [RT.Name, AExpr.Name]),
       AExpr.Line, AExpr.Col);
