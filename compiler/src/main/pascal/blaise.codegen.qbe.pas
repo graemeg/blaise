@@ -459,6 +459,12 @@ type
     function  InterfaceArgFragment(AExpr: TASTExpr;
       AIntfType: TTypeDesc = nil): string;
     function  OpenArrayArgFragment(AArg: TASTExpr): string;
+    { One argument of a call through a procedural signature (variable, field,
+      closure, method pointer): 'l <addr>' for a var/out param, the two-word
+      (data, high) fragment for an open array, else '<abi type> <value>'.  No
+      leading separator.  The single copy every indirect-call loop uses. }
+    function  ProcTypeArgFragment(APT: TProceduralTypeDesc; AIndex: Integer;
+      AArg: TASTExpr): string;
     { Assign the interface value produced by AExpr into the two memory slots
       pointed to by AObjSlotPtr (obj) and AItabSlotPtr (itab).  Handles ARC
       for strong interface fields (addref new obj, release old obj). }
@@ -8334,6 +8340,29 @@ begin
   Result := Format('l %s, l %s', [ArgTemp, HighTemp]);
 end;
 
+{ See the declaration.  The seven indirect-call loops this replaces had
+  drifted: two had no var-param arm and passed a record by QbeTypeOf instead of
+  its aggregate QbeParamTypeOf, and none passed an open array as (data, high)
+  (BUG-20260923-addr-of-openarray-proc). }
+function TCodeGenQBE.ProcTypeArgFragment(APT: TProceduralTypeDesc;
+  AIndex: Integer; AArg: TASTExpr): string;
+var
+  PPar: TProcParamInfo;
+  ArgTemp: string;
+begin
+  PPar := TProcParamInfo(APT.Params.Items[AIndex]);
+  if PPar.IsVarParam then
+    Result := Format('l %s', [EmitLValueAddr(AArg)])
+  else if (PPar.TypeDesc <> nil) and (PPar.TypeDesc.Kind = tyOpenArray) then
+    Result := OpenArrayArgFragment(AArg)
+  else
+  begin
+    ArgTemp := EmitExpr(AArg);
+    ArgTemp := CoerceArg(ArgTemp, AArg, QbeTypeOf(PPar.TypeDesc));
+    Result := Format('%s %s', [QbeParamTypeOf(PPar.TypeDesc), ArgTemp]);
+  end;
+end;
+
 procedure TCodeGenQBE.EmitMethodCall(ACall: TMethodCallStmt);
 var
   RT:       TRecordTypeDesc;
@@ -8671,21 +8700,8 @@ begin
       for I := 0 to ACall.Args.Count - 1 do
       begin
         if ArgLine <> '' then ArgLine := ArgLine + ', ';
-        { var/out parameters are passed by reference — emit the argument's
-          l-value address, not its value. }
-        if TProcParamInfo(PT.Params.Items[I]).IsVarParam then
-        begin
-          ArgTemp := EmitLValueAddr(TASTExpr(ACall.Args.Items[I]));
-          ArgLine := ArgLine + Format('l %s', [ArgTemp]);
-        end
-        else
-        begin
-          ArgTemp := EmitExpr(TASTExpr(ACall.Args.Items[I]));
-          QType   := QbeTypeOf(TProcParamInfo(PT.Params.Items[I]).TypeDesc);
-          ArgTemp := CoerceArg(ArgTemp, TASTExpr(ACall.Args.Items[I]), QType);
-          ArgLine := ArgLine + Format('%s %s',
-            [QbeParamTypeOf(TProcParamInfo(PT.Params.Items[I]).TypeDesc), ArgTemp]);
-        end;
+        ArgLine := ArgLine + ProcTypeArgFragment(PT, I,
+          TASTExpr(ACall.Args.Items[I]));
       end;
       EmitLine(Format('  call %s(%s)', [FPtrTemp, ArgLine]));
       if ExprOwnsRef(ACall.ObjExpr) then
@@ -8896,21 +8912,8 @@ begin
     for I := 0 to ACall.Args.Count - 1 do
     begin
       if ArgLine <> '' then ArgLine := ArgLine + ', ';
-      { var/out parameters are passed by reference — emit the argument's
-        l-value address, not its value. }
-      if TProcParamInfo(PT.Params.Items[I]).IsVarParam then
-      begin
-        ArgTemp := EmitLValueAddr(TASTExpr(ACall.Args.Items[I]));
-        ArgLine := ArgLine + Format('l %s', [ArgTemp]);
-      end
-      else
-      begin
-        ArgTemp := EmitExpr(TASTExpr(ACall.Args.Items[I]));
-        QType   := QbeTypeOf(TProcParamInfo(PT.Params.Items[I]).TypeDesc);
-        ArgTemp := CoerceArg(ArgTemp, TASTExpr(ACall.Args.Items[I]), QType);
-        ArgLine := ArgLine + Format('%s %s',
-          [QbeParamTypeOf(TProcParamInfo(PT.Params.Items[I]).TypeDesc), ArgTemp]);
-      end;
+      ArgLine := ArgLine + ProcTypeArgFragment(PT, I,
+        TASTExpr(ACall.Args.Items[I]));
     end;
     EmitLine(Format('  call %s(%s)', [FPtrTemp, ArgLine]));
     Exit;
@@ -11410,20 +11413,8 @@ begin
   for I := 0 to AArgs.Count - 1 do
   begin
     if ArgLine <> '' then ArgLine := ArgLine + ', ';
-    { var/out parameters pass the argument's l-value address by reference. }
-    if TProcParamInfo(APT.Params.Items[I]).IsVarParam then
-    begin
-      ArgTemp := EmitLValueAddr(TASTExpr(AArgs.Items[I]));
-      ArgLine := ArgLine + Format('l %s', [ArgTemp]);
-    end
-    else
-    begin
-      ArgTemp := EmitExpr(TASTExpr(AArgs.Items[I]));
-      QType   := QbeTypeOf(TProcParamInfo(APT.Params.Items[I]).TypeDesc);
-      ArgTemp := CoerceArg(ArgTemp, TASTExpr(AArgs.Items[I]), QType);
-      ArgLine := ArgLine + Format('%s %s',
-        [QbeParamTypeOf(TProcParamInfo(APT.Params.Items[I]).TypeDesc), ArgTemp]);
-    end;
+    ArgLine := ArgLine + ProcTypeArgFragment(APT, I,
+      TASTExpr(AArgs.Items[I]));
   end;
   if APT.ReturnType <> nil then
   begin
@@ -11504,29 +11495,8 @@ begin
     for I := 0 to ACall.Args.Count - 1 do
     begin
       if ArgLine <> '' then ArgLine := ArgLine + ', ';
-      { var/out parameters pass the argument's l-value address; value
-        parameters use QbeParamTypeOf so a record travels with the
-        :_ffi_<Name> aggregate ABI the callee declares -- the old
-        QbeTypeOf handed the callee a bare `l` POINTER, which it then
-        mis-read as scattered SysV field registers (garbage; this is
-        how punit's TRunSummary totals printed noise under QBE). }
-      if TProcParamInfo(
-           TProceduralTypeDesc(ACall.ResolvedProcType).Params.Items[I]).IsVarParam then
-      begin
-        ArgTemp := EmitLValueAddr(TASTExpr(ACall.Args.Items[I]));
-        ArgLine := ArgLine + Format('l %s', [ArgTemp]);
-      end
-      else
-      begin
-        ArgTemp := EmitExpr(TASTExpr(ACall.Args.Items[I]));
-        ArgTemp := CoerceArg(ArgTemp, TASTExpr(ACall.Args.Items[I]),
-          QbeTypeOf(TProcParamInfo(
-            TProceduralTypeDesc(ACall.ResolvedProcType).Params.Items[I]).TypeDesc));
-        ArgLine := ArgLine + Format('%s %s',
-          [QbeParamTypeOf(TProcParamInfo(
-            TProceduralTypeDesc(ACall.ResolvedProcType).Params.Items[I]).TypeDesc),
-           ArgTemp]);
-      end;
+      ArgLine := ArgLine + ProcTypeArgFragment(TProceduralTypeDesc(ACall.ResolvedProcType), I,
+        TASTExpr(ACall.Args.Items[I]));
     end;
     EmitLine(Format('  call %s(%s)', [FPtrTemp, ArgLine]));
     Exit;
@@ -13713,14 +13683,8 @@ begin
         for I := 0 to FC.Args.Count - 1 do
         begin
           if ArgLine <> '' then ArgLine := ArgLine + ', ';
-          ArgTemp := EmitExpr(TASTExpr(FC.Args.Items[I]));
-          ArgTemp := CoerceArg(ArgTemp, TASTExpr(FC.Args.Items[I]),
-            QbeTypeOf(TProcParamInfo(
-              TProceduralTypeDesc(FC.ResolvedProcType).Params.Items[I]).TypeDesc));
-          ArgLine := ArgLine + Format('%s %s',
-            [QbeTypeOf(TProcParamInfo(
-              TProceduralTypeDesc(FC.ResolvedProcType).Params.Items[I]).TypeDesc),
-             ArgTemp]);
+          ArgLine := ArgLine + ProcTypeArgFragment(TProceduralTypeDesc(FC.ResolvedProcType), I,
+            TASTExpr(FC.Args.Items[I]));
         end;
         if TProceduralTypeDesc(FC.ResolvedProcType).ReturnType = nil then
         begin
@@ -14141,22 +14105,8 @@ begin
       for I := 0 to MCallExpr.Args.Count - 1 do
       begin
         if ArgLine <> '' then ArgLine := ArgLine + ', ';
-        { var/out parameters are passed by reference — emit the argument's
-          l-value address, not its value (otherwise the callee writes through
-          a garbage pointer). }
-        if TProcParamInfo(PT.Params.Items[I]).IsVarParam then
-        begin
-          ArgTemp := EmitLValueAddr(TASTExpr(MCallExpr.Args.Items[I]));
-          ArgLine := ArgLine + Format('l %s', [ArgTemp]);
-        end
-        else
-        begin
-          ArgTemp := EmitExpr(TASTExpr(MCallExpr.Args.Items[I]));
-          QType   := QbeTypeOf(TProcParamInfo(PT.Params.Items[I]).TypeDesc);
-          ArgTemp := CoerceArg(ArgTemp, TASTExpr(MCallExpr.Args.Items[I]), QType);
-          ArgLine := ArgLine + Format('%s %s',
-            [QbeParamTypeOf(TProcParamInfo(PT.Params.Items[I]).TypeDesc), ArgTemp]);
-        end;
+        ArgLine := ArgLine + ProcTypeArgFragment(PT, I,
+          TASTExpr(MCallExpr.Args.Items[I]));
       end;
       { Result width follows the field signature's return type. }
       if PT.ReturnType <> nil then
@@ -14626,11 +14576,8 @@ begin
     for I := 0 to TIndirectFuncCallExpr(AExpr).Args.Count - 1 do
     begin
       if ArgLine <> '' then ArgLine := ArgLine + ', ';
-      ArgTemp := EmitExpr(TASTExpr(TIndirectFuncCallExpr(AExpr).Args.Items[I]));
-      ArgLine := ArgLine + Format('%s %s',
-        [QbeTypeOf(TProcParamInfo(
-           TProceduralTypeDesc(TIndirectFuncCallExpr(AExpr).ResolvedProcType).Params.Items[I]
-         ).TypeDesc), ArgTemp]);
+      ArgLine := ArgLine + ProcTypeArgFragment(TProceduralTypeDesc(TIndirectFuncCallExpr(AExpr).ResolvedProcType), I,
+        TASTExpr(TIndirectFuncCallExpr(AExpr).Args.Items[I]));
     end;
     if TProceduralTypeDesc(TIndirectFuncCallExpr(AExpr).ResolvedProcType).ReturnType <> nil then
       QType := QbeTypeOf(TProceduralTypeDesc(TIndirectFuncCallExpr(AExpr).ResolvedProcType).ReturnType)

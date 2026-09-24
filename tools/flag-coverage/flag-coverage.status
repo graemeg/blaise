@@ -49,7 +49,7 @@ TFieldAccessExpr.IsGlobal                 162  48  1
 TFieldAccessExpr.IsClassNameAccess        1  1  2
 TFieldAccessExpr.IsClassTypeAccess        1  1  1
 TFieldAccessExpr.IsBuiltinToString        2  1  1
-TFieldAccessExpr.IsVarParam               83  146  62
+TFieldAccessExpr.IsVarParam               80  146  62
 TFieldAccessExpr.PropIndexExpr            25  21  20
 TFieldAccessExpr.IsCharAccess             3  1  1
 TFieldAccessExpr.IsArrayAccess            8  11  3
@@ -59,7 +59,7 @@ TMethodCallExpr.IsConstructorCall         4  6  9
 TMethodCallExpr.IsMetaclassDispatch       3  4  2
 TMethodCallExpr.IsStaticCall              3  4  5
 TMethodCallExpr.IsGlobal                  162  48  1
-TMethodCallExpr.IsVarParam                83  146  62
+TMethodCallExpr.IsVarParam                80  146  62
 TMethodCallExpr.IsBuiltinToString         2  1  1
 TMethodCallExpr.IsBuiltinInheritsFrom     1  1  1
 TMethodCallExpr.IsProcFieldCall           5  5  1

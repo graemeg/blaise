@@ -82,6 +82,14 @@ type
     procedure TestCodegen_ByValRecordParam_ProcFieldCall_DerefsSlot;
     procedure TestCodegen_ByValRecordParam_MethodCall_DerefsSlot;
     procedure TestCodegen_ImplicitSelfProcFieldCall_LoadsSelf;
+    { BUG-20260923-addr-of-openarray-proc: an open-array (or array of const)
+      param of a procedural type must stay an open array -- it resolved as
+      its element type -- so @Proc is assignable, a scalar arg is rejected,
+      and an indirect call passes the array as its (data, high) pair. }
+    procedure TestSemantic_AddrOfOpenArrayProc_Assignable;
+    procedure TestSemantic_AddrOfOpenArrayProc_ElementMismatch_Fails;
+    procedure TestSemantic_ProcTypeOpenArrayParam_ScalarArg_Fails;
+    procedure TestCodegen_IndirectCall_OpenArrayArg_PassesDataAndHigh;
   end;
 
 implementation
@@ -920,6 +928,123 @@ begin
     IRContains(FnIR, 'loadl %_var_V'));
   AssertTrue('Self is passed as a loaded temp',
     IRContains(FnIR, 'call $TR_Show(l %_t'));
+end;
+
+procedure TProcTypesTests.TestSemantic_AddrOfOpenArrayProc_Assignable;
+begin
+  GenIR(
+    '''
+        program Test;
+        type
+          TCnt = function(const A: array of Integer): Integer;
+          TFmt = procedure(const S: string; const Args: array of const);
+        function Cnt(const A: array of Integer): Integer;
+        begin
+          Result := Length(A)
+        end;
+        procedure Fmt(const S: string; const Args: array of const);
+        begin
+        end;
+        var
+          C: TCnt;
+          F: TFmt;
+        begin
+          C := @Cnt;
+          F := @Fmt
+        end.
+        '''
+  );
+end;
+
+procedure TProcTypesTests.TestSemantic_AddrOfOpenArrayProc_ElementMismatch_Fails;
+var
+  Raised: Boolean;
+begin
+  Raised := False;
+  try
+    GenIR(
+      '''
+          program Test;
+          type
+            TCnt = function(const A: array of Integer): Integer;
+          function Cnt(const A: array of Byte): Integer;
+          begin
+            Result := Length(A)
+          end;
+          var C: TCnt;
+          begin
+            C := @Cnt
+          end.
+          '''
+    );
+  except
+    Raised := True;
+  end;
+  AssertTrue('array of Byte routine must not match an array of Integer signature',
+    Raised);
+end;
+
+procedure TProcTypesTests.TestSemantic_ProcTypeOpenArrayParam_ScalarArg_Fails;
+var
+  Raised: Boolean;
+begin
+  Raised := False;
+  try
+    GenIR(
+      '''
+          program Test;
+          type
+            TCnt = function(const A: array of Integer): Integer;
+          var
+            C: TCnt;
+            N: Integer;
+          begin
+            N := C(5)
+          end.
+          '''
+    );
+  except
+    Raised := True;
+  end;
+  AssertTrue('an Integer is not an array of Integer', Raised);
+end;
+
+procedure TProcTypesTests.TestCodegen_IndirectCall_OpenArrayArg_PassesDataAndHigh;
+var
+  IR: string;
+  Lines: TStringList;
+  I: Integer;
+  CallLine: string;
+begin
+  IR := GenIR(
+    '''
+        program Test;
+        type
+          TCnt = function(const A: array of Integer): Integer;
+          TInts = array of Integer;
+        procedure Take(F: TCnt; const D: TInts);
+        begin
+          WriteLn(F(D))
+        end;
+        begin
+        end.
+        '''
+  );
+  { The indirect call is the only 'call %<temp>(' in Take. }
+  CallLine := '';
+  Lines := TStringList.Create();
+  try
+    Lines.Text := FuncRegion(IR, 'function $Take(');
+    for I := 0 to Lines.Count - 1 do
+      if Pos('call %', Lines[I]) >= 0 then
+        CallLine := Lines[I];
+  finally
+    Lines.Free();
+  end;
+  AssertTrue('indirect call emitted', CallLine <> '');
+  { The open array travels as two words: data pointer, then high. }
+  AssertTrue('indirect call passes (data, high): ' + CallLine,
+    (Pos('(l %', CallLine) >= 0) and (Pos(', l %', CallLine) >= 0));
 end;
 
 procedure TProcTypesTests.TestCodegen_ImplicitSelfProcFieldCall_LoadsSelf;

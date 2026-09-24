@@ -64,6 +64,12 @@ type
     procedure TestRun_VarOpenArray_ElementWrite;
     procedure TestRun_VarOpenArray_ReadModifyWrite;
     procedure TestRun_MethodCall_SevenSlots_OpenArrayMidList;
+    { BUG-20260923-addr-of-openarray-proc: a procedural type with an open-array
+      (or array of const) param.  The param resolved as its ELEMENT type, @Proc
+      was rejected against it, and no indirect-call path passed an open array
+      as its (data, high) pair. }
+    procedure TestRun_OpenArrayParam_ProcVarCalls;
+    procedure TestRun_OpenArrayParam_FieldClosureMethodPtrCalls;
   end;
 
 implementation
@@ -646,6 +652,133 @@ begin
         WriteLn(O, ' code=', IntToStr(Code));
     end.
     ''', 'high=1' + Chr(10) + 'out:prog code=42' + Chr(10), 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_OpenArrayParam_ProcVarCalls;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll('''
+    program P;
+    type
+      TCnt = function(const A: array of Integer): Integer;
+      TSum = function(A: array of Integer): Integer;
+      TFmt = procedure(const S: string; const Args: array of const);
+      TGCnt<T> = function(const A: array of T): Integer;
+    function Cnt(const A: array of Integer): Integer;
+    begin
+      Result := Length(A)
+    end;
+    function Sum(A: array of Integer): Integer;
+    var
+      I: Integer;
+    begin
+      Result := 0;
+      for I := 0 to High(A) do
+        Result := Result + A[I]
+    end;
+    procedure Fmt(const S: string; const Args: array of const);
+    begin
+      WriteLn(Format(S, Args))
+    end;
+    function Apply(F: TCnt; const A: array of Integer): Integer;
+    begin
+      Result := F(A)                  { proc-type PARAM, open-array passthrough }
+    end;
+    var
+      C: TCnt;
+      S: TSum;
+      F: TFmt;
+      G: TGCnt<Integer>;
+      D: array of Integer;
+      St: array[0..2] of Integer;
+    begin
+      C := @Cnt;
+      S := @Sum;
+      F := @Fmt;
+      G := @Cnt;
+      WriteLn(C([]));                 { empty literal }
+      WriteLn(C([1, 2, 3]));          { literal }
+      WriteLn(S([10, 20, 30]));       { by-value open array }
+      SetLength(D, 4);
+      D[0] := 1; D[1] := 2; D[2] := 3; D[3] := 4;
+      WriteLn(S(D));                  { dynamic array }
+      St[0] := 5; St[1] := 6; St[2] := 7;
+      WriteLn(S(St));                 { static array }
+      F('%d-%s', [42, 'x']);          { array of const, statement }
+      WriteLn(Apply(C, [9, 9]));
+      WriteLn(G([1, 2, 3, 4]))        { generic procedural type }
+    end.
+    ''',
+    '0' + #10 + '3' + #10 + '60' + #10 + '10' + #10 + '18' + #10 +
+    '42-x' + #10 + '2' + #10 + '4' + #10, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_OpenArrayParam_FieldClosureMethodPtrCalls;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll('''
+    program P;
+    type
+      TCnt = function(const A: array of Integer): Integer;
+      TShow = procedure(const A: array of Integer);
+      TRefCnt = reference to function(const A: array of Integer): Integer;
+      TMSum = function(const A: array of Integer): Integer of object;
+      TBox = class
+      public
+        FC: TCnt;
+        FS: TShow;
+        FBase: Integer;
+        function Total(const A: array of Integer): Integer;
+        procedure Drv();
+      end;
+    function Cnt(const A: array of Integer): Integer;
+    begin
+      Result := Length(A)
+    end;
+    procedure ShowLen(const A: array of Integer);
+    begin
+      WriteLn('len=', Length(A))
+    end;
+    function TBox.Total(const A: array of Integer): Integer;
+    var
+      I: Integer;
+    begin
+      Result := FBase;
+      for I := 0 to High(A) do
+        Result := Result + A[I]
+    end;
+    procedure TBox.Drv();
+    begin
+      WriteLn(FC([7, 8]));            { implicit-Self field, expression }
+      FS([6])                         { implicit-Self field, statement }
+    end;
+    var
+      R: TRefCnt;
+      M: TMSum;
+      B: TBox;
+      K: Integer;
+    begin
+      K := 100;
+      R := function(const A: array of Integer): Integer
+        begin
+          Result := Length(A) + K
+        end;
+      WriteLn(R([1, 2]));             { reference to }
+      B := TBox.Create();
+      B.FBase := 1000;
+      M := @B.Total;
+      WriteLn(M([1, 2]));             { of object }
+      B.FC := @Cnt;
+      B.FS := @ShowLen;
+      WriteLn(B.FC([1]));             { qualified field, expression }
+      B.FS([4, 5]);                   { qualified field, statement }
+      B.Drv();
+      R := nil;
+      B.Free()
+    end.
+    ''',
+    '102' + #10 + '1003' + #10 + '1' + #10 + 'len=2' + #10 +
+    '2' + #10 + 'len=1' + #10, 0);
 end;
 
 initialization

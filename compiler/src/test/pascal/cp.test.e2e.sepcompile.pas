@@ -241,6 +241,12 @@ type
       member and silently assigned the wrong ordinal — 1 instead of 3.  Wrong
       code, not a diagnostic, which is why this needs an execution check. }
     procedure TestIncrementalRebuild_SharedEnumMemberName_BareRef_Warm;
+    { A procedural type with an open-array param, exported from a cached unit.
+      The importer (RegisterProcType) resolved each param by its TypeName
+      alone, so the warm build saw 'array of Integer' as 'Integer' and
+      rejected @Cnt -- the same gap the source path had
+      (BUG-20260923-addr-of-openarray-proc). }
+    procedure TestIncrementalRebuild_OpenArrayProcType_Warm;
     procedure TestDebugOpdf_PerUnitSection_InDependencyObject;
     { Regression (F1-followup cross-unit static members): a class with `static`
       members — a static var, a static method, and a static const — declared in
@@ -3127,6 +3133,73 @@ const
     ''';
 begin
   RunWarmSetLibProgram('empty', ProgSrc, '0' + #10 + '0' + #10 + '3' + #10)
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_OpenArrayProcType_Warm;
+const
+  LibSrc =
+    '''
+    unit OAProc;
+    interface
+    type
+      TCnt = function(const A: array of Integer): Integer;
+    function Cnt(const A: array of Integer): Integer;
+    implementation
+    function Cnt(const A: array of Integer): Integer;
+    begin
+      Result := Length(A)
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseOAProc;
+    uses OAProc;
+    var
+      C: TCnt;
+      D: array of Integer;
+    begin
+      C := @Cnt;
+      SetLength(D, 5);
+      WriteLn(C([1, 2, 3]));
+      WriteLn(C(D))
+    end.
+    ''';
+var
+  LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc, Pass: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — qbe or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  LibPas   := FScratch + '/OAProc.pas';
+  ProgPas  := FScratch + '/use_oaproc.pas';
+  ProgBin  := FScratch + '/use_oaproc';
+  CacheDir := FScratch + '/units-oaproc';
+
+  WriteFile(LibPas, LibSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+
+  { Pass 0 fills the cache from source; pass 1 imports OAProc from its .bif. }
+  for Pass := 0 to 1 do
+  begin
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch], Captured);
+    AssertEquals(Format('build%d exit code (out: %s)', [Pass, Captured]), 0, Rc);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
+    AssertEquals(Format('build%d stdout', [Pass]), '3' + #10 + '5' + #10, Captured);
+  end;
 end;
 
 procedure TSepCompileTests.TestIncrementalRebuild_SharedEnumMemberName_Warm;

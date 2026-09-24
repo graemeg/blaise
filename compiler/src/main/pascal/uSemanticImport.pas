@@ -990,7 +990,7 @@ begin
     begin
       ParamInfo := TProcParamInfo.Create();
       ParamInfo.Name         := MParam.ParamName;
-      ParamInfo.TypeDesc     := TSym.TypeDesc;
+      ParamInfo.TypeDesc     := ATable.ParamTypeFor(TSym.TypeDesc, MParam.IsOpenArray);
       ParamInfo.IsVarParam   := MParam.IsVarParam;
       ParamInfo.IsConstParam := MParam.IsConstParam;
       ProcDesc.Params.Add(ParamInfo);

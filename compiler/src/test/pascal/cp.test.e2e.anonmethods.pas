@@ -122,6 +122,12 @@ type
       closure argument segfaulted.  Self.FRun(1) and 'of object' fields were
       fine; native was fine. }
     procedure TestRun_ImplicitSelfRefField_Call;
+    { Native x86-64: a call through a method-pointer or closure VARIABLE had
+      its own integer-only argument loop -- a var param received the value
+      instead of its address (segfault) and a Double went through an integer
+      register (codegen error).  It now shares EmitCallIndirect's marshalling
+      (found with BUG-20260923-addr-of-openarray-proc). }
+    procedure TestRun_MethodPtrClosureVar_VarAndDoubleArgs;
   end;
 
 implementation
@@ -1615,6 +1621,59 @@ begin
   AssertRunsOnAll(Src,
     '101' + LineEnding +
     '142' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_MethodPtrClosureVar_VarAndDoubleArgs;
+const
+  Src = '''
+    program P;
+    type
+      TBump = procedure(var N: Integer) of object;
+      TScale = function(X: Double; K: Integer): Double of object;
+      TRefBump = reference to procedure(var N: Integer);
+      TC = class
+      public
+        procedure Bump(var N: Integer);
+        function Scale(X: Double; K: Integer): Double;
+      end;
+    procedure TC.Bump(var N: Integer);
+    begin
+      N := N + 10
+    end;
+    function TC.Scale(X: Double; K: Integer): Double;
+    begin
+      Result := X * K
+    end;
+    var
+      O: TC;
+      B: TBump;
+      S: TScale;
+      R: TRefBump;
+      N: Integer;
+    begin
+      O := TC.Create();
+      B := @O.Bump;
+      S := @O.Scale;
+      N := 1;
+      B(N);                             { var through 'of object' }
+      WriteLn(N);
+      WriteLn(Trunc(S(1.5, 4) * 100));  { Double through 'of object' }
+      R := procedure(var M: Integer)
+        begin
+          M := M * 3
+        end;
+      R(N);                             { var through 'reference to' }
+      WriteLn(N);
+      R := nil;
+      O.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    '11' + LineEnding +
+    '600' + LineEnding +
+    '33' + LineEnding, 0);
 end;
 
 initialization

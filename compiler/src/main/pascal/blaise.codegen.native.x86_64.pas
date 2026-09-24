@@ -828,10 +828,14 @@ type
     { Indirect call: load a bare function pointer from APtrOperand (an AT&T
       memory operand, e.g. "-8(%rbp)"), set up args as for EmitCall, then
       dispatch via callq *%r10.  AProcType supplies the param list for
-      var-param detection; result (if any) is left in %rax. }
+      var-param detection; result (if any) is left in %rax.
+      AFatPtr: APtrOperand instead addresses a 16-byte (Code, Data) block --
+      a method pointer or closure -- whose Data half is the hidden first
+      argument in %rdi, so the explicit args start at %rsi. }
     procedure EmitCallIndirect(const APtrOperand: string;
                                AProcType: TProceduralTypeDesc;
-                               AArgs: TObjectList);
+                               AArgs: TObjectList;
+                               AFatPtr: Boolean = False);
     { Call a procedural-typed CLASS FIELD through a receiver
       (Self.FFn(args)).  The function pointer lives at [instance + Offset],
       which is not a %rbp/%rip-relative operand, so this cannot reuse
@@ -925,6 +929,12 @@ type
       var/out params push one value; interface params push two (itab first, then
       obj — reversed so the pop loop restores them in the correct register order). }
     procedure EmitMethodArgPush(APar: TMethodParam; AArg: TASTExpr);
+    procedure EmitOpenArrayArgToSlots(AArg: TASTExpr;
+      AHoistedPtrOff, ADataOff, AHighOff: Integer);
+    { Is the AIndex'th param of a procedural signature an open array?  (A
+      TProcParamInfo has no IsOpenArray flag; its resolved type carries it.) }
+    function  ProcParamIsOpenArray(AProcType: TProceduralTypeDesc;
+      AIndex: Integer): Boolean;
     procedure EmitVarArgAddrToRax(AArg: TASTExpr);
     { %rax holds the address of an array FIELD (static: inline storage;
       dyn/open: the data-pointer slot).  Apply AFAE.PropIndexExpr — loading
@@ -10780,17 +10790,21 @@ begin
       Self.Emit(#9'popq %rbx');
       Exit;
     end;
+    { Bare function pointer: evaluate the callee into callee-saved %rbx (it
+      survives the argument evaluation) and share EmitCallIndirect's argument
+      marshalling.  The old inline loop pushed every arg as an integer VALUE:
+      no var-param address, no float register, no open-array (data, high)
+      (BUG-20260923-addr-of-openarray-proc).  The 8-byte pad keeps %rsp
+      16-aligned across the rbx save. }
+    Self.Emit(#9'pushq %rbx');
+    Self.Emit(#9'subq $8, %rsp');
     Self.EmitExprToEax(TIndirectFuncCallExpr(AExpr).CalleeExpr);
-    Self.Emit(#9'pushq %rax');
-    for SetI := 0 to TIndirectFuncCallExpr(AExpr).Args.Count - 1 do
-    begin
-      Self.EmitExprToEax(TASTExpr(TIndirectFuncCallExpr(AExpr).Args.Items[SetI]));
-      Self.Emit(#9'pushq %rax');
-    end;
-    for SetI := TIndirectFuncCallExpr(AExpr).Args.Count - 1 downto 0 do
-      Self.Emit(Format(#9'popq %s', [SysVArg64(SetI)]));
-    Self.Emit(#9'popq %r10');
-    Self.Emit(#9'callq *%r10');
+    Self.Emit(#9'movq %rax, %rbx');
+    Self.EmitCallIndirect('%rbx',
+      TProceduralTypeDesc(TIndirectFuncCallExpr(AExpr).ResolvedProcType),
+      TIndirectFuncCallExpr(AExpr).Args);
+    Self.Emit(#9'addq $8, %rsp');
+    Self.Emit(#9'popq %rbx');
     Exit;
   end;
 
@@ -12014,6 +12028,74 @@ begin
             not P.IsOpenArray;
 end;
 
+{ Store an argument bound to an open-array param as its two words: the data
+  pointer at ADataOff(%rsp) and the high index at AHighOff(%rsp).  A literal
+  must already be hoisted (HoistOALitArgs / EmitArgHoist): AHoistedPtrOff is
+  the %rsp offset of its saved data pointer, or -1 when AArg is not a hoisted
+  literal.  Shared by the direct-call slot writer and the indirect-call paths
+  (BUG-20260923-addr-of-openarray-proc), which previously had no open-array
+  arm at all.  Clobbers %rax, %rdi. }
+procedure TX86_64Backend.EmitOpenArrayArgToSlots(AArg: TASTExpr;
+  AHoistedPtrOff, ADataOff, AHighOff: Integer);
+begin
+  if AHoistedPtrOff >= 0 then
+  begin
+    { hoisted literal: saved data pointer; high from the element count }
+    Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [AHoistedPtrOff]));
+    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [ADataOff]));
+    Self.Emit(Format(#9'movq $%d, %%rax',
+      [TArrayLiteralExpr(AArg).Elements.Count - 1]));
+    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [AHighOff]));
+  end
+  else if AArg is TArrayLiteralExpr then
+    raise ENativeCodeGenError.Create(
+      'native backend: open-array literal argument was not hoisted')
+  else if (AArg is TIdentExpr) and
+          (TIdentExpr(AArg).ResolvedType <> nil) and
+          (TIdentExpr(AArg).ResolvedType.Kind = tyStaticArray) then
+  begin
+    if Self.IsLocal(TIdentExpr(AArg).Name) then
+      Self.Emit(Format(#9'leaq %s, %%rax',
+        [Self.VarOperand(TIdentExpr(AArg).Name)]))
+    else if TIdentExpr(AArg).ConstArraySymbol <> '' then
+      Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
+        [NativeMangle(TIdentExpr(AArg).ConstArraySymbol)]))
+    else
+      Self.EmitLeaqGlobal(TIdentExpr(AArg).Name, '%rax');
+    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [ADataOff]));
+    Self.Emit(Format(#9'movq $%d, %%rax',
+      [TStaticArrayTypeDesc(TIdentExpr(AArg).ResolvedType).HighBound -
+       TStaticArrayTypeDesc(TIdentExpr(AArg).ResolvedType).LowBound]));
+    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [AHighOff]));
+  end
+  else if (AArg.ResolvedType <> nil) and
+          (AArg.ResolvedType.Kind = tyDynArray) then
+  begin
+    { dynamic array coerced to open array: data ptr + (length - 1).
+      The ptr slot is stored before the _DynArrayLength call clobbers
+      %rax; the call itself only touches memory below %rsp, never the
+      positive-offset slot region. }
+    Self.EmitExprToEax(AArg);
+    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [ADataOff]));
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(#9'callq _DynArrayLength');
+    Self.Emit(#9'movslq %eax, %rax');
+    Self.Emit(#9'decq %rax');
+    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [AHighOff]));
+  end
+  else
+  begin
+    { open-array param forwarded onwards: slot holds ptr, sibling
+      <name>_high slot holds high }
+    Self.Emit(Format(#9'movq %s, %%rax',
+      [Self.VarOperand(TIdentExpr(AArg).Name)]));
+    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [ADataOff]));
+    Self.Emit(Format(#9'movq %s, %%rax',
+      [Self.VarOperand(TIdentExpr(AArg).Name + '_high')]));
+    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [AHighOff]));
+  end;
+end;
+
 procedure TX86_64Backend.EmitArgsToSlots(AArgs, AParams: TObjectList;
   AAllocSz, AHoistTotal: Integer;
   AHoistDepths, AHoistKinds: TList<Integer>);
@@ -12039,59 +12121,10 @@ begin
     begin
       { two flat slots: data pointer, then high (mirrors EmitMethodArgPush) }
       if AHoistKinds.Get(I) = akOALit then
-      begin
-        { hoisted literal: saved data pointer; high from the element count }
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-          [AAllocSz + AHoistTotal - AHoistDepths.Get(I)]));
-        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Dest]));
-        Self.Emit(Format(#9'movq $%d, %%rax',
-          [TArrayLiteralExpr(Arg).Elements.Count - 1]));
-        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Dest + 8]));
-      end
-      else if (Arg is TIdentExpr) and
-              (TIdentExpr(Arg).ResolvedType <> nil) and
-              (TIdentExpr(Arg).ResolvedType.Kind = tyStaticArray) then
-      begin
-        if Self.IsLocal(TIdentExpr(Arg).Name) then
-          Self.Emit(Format(#9'leaq %s, %%rax',
-            [Self.VarOperand(TIdentExpr(Arg).Name)]))
-        else if TIdentExpr(Arg).ConstArraySymbol <> '' then
-          Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
-            [NativeMangle(TIdentExpr(Arg).ConstArraySymbol)]))
-        else
-          Self.EmitLeaqGlobal(TIdentExpr(Arg).Name, '%rax');
-        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Dest]));
-        Self.Emit(Format(#9'movq $%d, %%rax',
-          [TStaticArrayTypeDesc(TIdentExpr(Arg).ResolvedType).HighBound -
-           TStaticArrayTypeDesc(TIdentExpr(Arg).ResolvedType).LowBound]));
-        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Dest + 8]));
-      end
-      else if (Arg.ResolvedType <> nil) and
-              (Arg.ResolvedType.Kind = tyDynArray) then
-      begin
-        { dynamic array coerced to open array: data ptr + (length - 1).
-          The ptr slot is stored before the _DynArrayLength call clobbers
-          %rax; the call itself only touches memory below %rsp, never the
-          positive-offset slot region. }
-        Self.EmitExprToEax(Arg);
-        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Dest]));
-        Self.Emit(#9'movq %rax, %rdi');
-        Self.Emit(#9'callq _DynArrayLength');
-        Self.Emit(#9'movslq %eax, %rax');
-        Self.Emit(#9'decq %rax');
-        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Dest + 8]));
-      end
+        Self.EmitOpenArrayArgToSlots(Arg,
+          AAllocSz + AHoistTotal - AHoistDepths.Get(I), Dest, Dest + 8)
       else
-      begin
-        { open-array param forwarded onwards: slot holds ptr, sibling
-          <name>_high slot holds high }
-        Self.Emit(Format(#9'movq %s, %%rax',
-          [Self.VarOperand(TIdentExpr(Arg).Name)]));
-        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Dest]));
-        Self.Emit(Format(#9'movq %s, %%rax',
-          [Self.VarOperand(TIdentExpr(Arg).Name + '_high')]));
-        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Dest + 8]));
-      end;
+        Self.EmitOpenArrayArgToSlots(Arg, -1, Dest, Dest + 8);
       Slot := Slot + 2;
       Continue;
     end;
@@ -19201,8 +19234,12 @@ begin
                 ((PP <> nil) and PP.IsVarParam) or
                 Self.VarFlagAt(AVarFlags, I);
 
-    { Open-array literal: element block + saved data pointer. }
-    if (Par <> nil) and Par.IsOpenArray and (Arg is TArrayLiteralExpr) then
+    { Open-array literal: element block + saved data pointer.  A procedural
+      signature's param has no IsOpenArray flag; its type says so. }
+    if (((Par <> nil) and Par.IsOpenArray) or
+        ((PP <> nil) and (PP.TypeDesc <> nil) and
+         (PP.TypeDesc.Kind = tyOpenArray))) and
+       (Arg is TArrayLiteralExpr) then
     begin
       Result := Result + Self.EmitOpenArrayLiteral(TArrayLiteralExpr(Arg));
       Self.Emit(#9'pushq %rax');
@@ -20091,9 +20128,18 @@ end;
   clobbered by arg evaluation in %rax), sets up args exactly as EmitCall does,
   then dispatches via `callq *%r10`.  AProcType supplies the param signature
   for var/out param detection; nil means all value params. }
+function TX86_64Backend.ProcParamIsOpenArray(AProcType: TProceduralTypeDesc;
+  AIndex: Integer): Boolean;
+begin
+  Result := (AProcType <> nil) and (AIndex < AProcType.Params.Count) and
+    (TProcParamInfo(AProcType.Params.Items[AIndex]).TypeDesc <> nil) and
+    (TProcParamInfo(AProcType.Params.Items[AIndex]).TypeDesc.Kind = tyOpenArray);
+end;
+
 procedure TX86_64Backend.EmitCallIndirect(const APtrOperand: string;
                                           AProcType: TProceduralTypeDesc;
-                                          AArgs: TObjectList);
+                                          AArgs: TObjectList;
+                                          AFatPtr: Boolean);
 var
   I:        Integer;
   Arg:      TASTExpr;
@@ -20109,6 +20155,8 @@ var
   IsFloatSlot: TList<Integer>;
   OvSlots:  TList<Integer>;
   IntIdx, XmmIdx: Integer;
+  NSlots:   Integer;
+  Slot:     Integer;
 begin
   PParams := nil;
   if AProcType <> nil then
@@ -20132,12 +20180,34 @@ begin
     exactly as EmitMethodOverflowLoad does.  Slot writes are %rsp-relative
     and position-fixed, so a call inside an argument expression cannot
     clobber earlier slots. }
-  AllocSz := ((AArgs.Count * 8 + 15) and (-16));
+  { Flat slots: an open-array arg is TWO integer slots (data pointer, high),
+    every other arg one (BUG-20260923-addr-of-openarray-proc -- counting one
+    per arg shifted every slot after an open array). }
+  NSlots := 0;
+  for I := 0 to AArgs.Count - 1 do
+    if Self.ProcParamIsOpenArray(AProcType, I) then
+      NSlots := NSlots + 2
+    else
+      NSlots := NSlots + 1;
+  AllocSz := ((NSlots * 8 + 15) and (-16));
   if AllocSz > 0 then
     Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
+  Slot := 0;
   for I := 0 to AArgs.Count - 1 do
   begin
     Arg := TASTExpr(AArgs.Items[I]);
+    if Self.ProcParamIsOpenArray(AProcType, I) then
+    begin
+      if HK.Get(I) = akOALit then
+        Self.EmitOpenArrayArgToSlots(Arg, AllocSz + HTotal - HD.Get(I),
+          Slot * 8, Slot * 8 + 8)
+      else
+        Self.EmitOpenArrayArgToSlots(Arg, -1, Slot * 8, Slot * 8 + 8);
+      IsFloatSlot.Add(0);
+      IsFloatSlot.Add(0);
+      Slot := Slot + 2;
+      Continue;
+    end;
     IsVar := (AProcType <> nil) and (I < AProcType.Params.Count) and
              TProcParamInfo(AProcType.Params.Items[I]).IsVarParam;
     if (AProcType <> nil) and (I < AProcType.Params.Count) then
@@ -20152,14 +20222,14 @@ begin
     begin
       Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
         [AllocSz + HTotal - HD.Get(I)]));
-      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [I * 8]));
+      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Slot * 8]));
     end
     else if IsVar then
     begin
       Self.EmitVarArgAddrToRax(Arg);
-      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [I * 8]));
+      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Slot * 8]));
     end
-    else if IsFloatSlot.Get(I) = 1 then
+    else if IsFloatSlot.Get(Slot) = 1 then
     begin
       { Float slot: materialise at the PARAM's width (a Single param wants
         the single bit pattern in the low 4 bytes; the 8-byte movsd
@@ -20167,19 +20237,20 @@ begin
       Self.EmitExprToXmm0(Arg);
       Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
         (ParamTy <> nil) and (ParamTy.Kind = tySingle));
-      Self.Emit(Format(#9'movsd %%xmm0, %d(%%rsp)', [I * 8]));
+      Self.Emit(Format(#9'movsd %%xmm0, %d(%%rsp)', [Slot * 8]));
     end
     else
     begin
       Self.EmitExprToEax(Arg);
-      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [I * 8]));
+      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Slot * 8]));
     end;
+    Slot := Slot + 1;
   end;
-  { Register assignment in arg order; int and xmm sequences advance
-    independently per SysV. }
-  IntIdx := 0;
+  { Register assignment in flat-slot order; int and xmm sequences advance
+    independently per SysV.  A fat pointer's Data half owns %rdi. }
+  if AFatPtr then IntIdx := 1 else IntIdx := 0;
   XmmIdx := 0;
-  for I := 0 to AArgs.Count - 1 do
+  for I := 0 to NSlots - 1 do
   begin
     if IsFloatSlot.Get(I) = 1 then
     begin
@@ -20221,7 +20292,14 @@ begin
     end;
     CleanUp := CleanUp + FreshSz;
   end;
-  Self.Emit(Format(#9'movq %s, %%r10', [APtrOperand]));
+  if AFatPtr then
+  begin
+    Self.Emit(Format(#9'leaq %s, %%r11', [APtrOperand]));
+    Self.Emit(#9'movq (%r11), %r10');     { Code }
+    Self.Emit(#9'movq 8(%r11), %rdi');    { Data: Self / closure env }
+  end
+  else
+    Self.Emit(Format(#9'movq %s, %%r10', [APtrOperand]));
   Self.Emit(#9'callq *%r10');
   Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, CleanUp, True);
   OvSlots.Free();
@@ -20246,6 +20324,8 @@ var
   IsVar:   Boolean;
   IsMeth:  Boolean;
   Slots:   Integer;
+  ArgSlots: Integer;
+  Pushed:  Integer;
   HD:      TList<Integer>;
   HK:      TList<Integer>;
   HTotal:  Integer;
@@ -20258,7 +20338,15 @@ begin
     argument registers; a plain function pointer leaves all six.  Anything
     larger would need the stack-overflow argument strategy — fail loudly
     rather than emit a silently wrong call. }
-  if IsMeth then Slots := AArgs.Count + 1 else Slots := AArgs.Count;
+  { Count FLAT slots: an open-array arg is two (data pointer, high). }
+  Slots := 0;
+  for I := 0 to AArgs.Count - 1 do
+    if Self.ProcParamIsOpenArray(AProcType, I) then
+      Slots := Slots + 2
+    else
+      Slots := Slots + 1;
+  ArgSlots := Slots;
+  if IsMeth then Slots := Slots + 1;
   if Slots > 6 then
     raise ENativeCodeGenError.Create(
       'native backend: procedural-field call with >6 argument slots is not supported');
@@ -20270,15 +20358,30 @@ begin
     { Evaluate args left-to-right and push them.  var/out positions push the
       argument's address; record-call/string args are reloaded from the hoist
       region. }
+    Pushed := 0;
     for I := 0 to AArgs.Count - 1 do
     begin
       Arg := TASTExpr(AArgs.Items[I]);
+      if Self.ProcParamIsOpenArray(AProcType, I) then
+      begin
+        { Two pushes' worth: data pointer lands above high, so the popq loop
+          (last slot first) delivers data then high in ascending registers. }
+        Self.Emit(#9'subq $16, %rsp');
+        if HK.Get(I) = akOALit then
+          Self.EmitOpenArrayArgToSlots(Arg,
+            HTotal - HD.Get(I) + Pushed * 8 + 16, 8, 0)
+        else
+          Self.EmitOpenArrayArgToSlots(Arg, -1, 8, 0);
+        Pushed := Pushed + 2;
+        Continue;
+      end;
       IsVar := (I < AProcType.Params.Count) and
                TProcParamInfo(AProcType.Params.Items[I]).IsVarParam;
+      Pushed := Pushed + 1;
       if HK.Get(I) >= akRecCall then
       begin
         Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-          [HTotal - HD.Get(I) + I * 8]));
+          [HTotal - HD.Get(I) + (Pushed - 1) * 8]));
         Self.Emit(#9'pushq %rax');
       end
       else if IsVar then
@@ -20333,13 +20436,13 @@ begin
     begin
       Self.Emit(#9'movq 8(%rax), %rdi');   { Data (Self) -> first argument }
       Self.Emit(#9'movq (%rax), %r10');    { Code pointer }
-      for I := AArgs.Count - 1 downto 0 do
+      for I := ArgSlots - 1 downto 0 do
         Self.Emit(#9'popq ' + SysVArg64(I + 1));
     end
     else
     begin
       Self.Emit(#9'movq (%rax), %r10');    { Code pointer }
-      for I := AArgs.Count - 1 downto 0 do
+      for I := ArgSlots - 1 downto 0 do
         Self.Emit(#9'popq ' + SysVArg64(I));
     end;
     Self.Emit(#9'callq *%r10');
@@ -21958,88 +22061,12 @@ end;
 procedure TX86_64Backend.EmitMethodPtrCall(const APtrOperand: string;
                                            AProcType: TProceduralTypeDesc;
                                            AArgs: TObjectList);
-var
-  I:       Integer;
-  Arg:     TASTExpr;
-  AllocSz: Integer;
-  CleanUp: Integer;
-  HD:      TList<Integer>;
-  HK:      TList<Integer>;
-  HTotal:  Integer;
-  PParams: TObjectList;
 begin
-  PParams := nil;
-  if AProcType <> nil then
-    PParams := AProcType.Params;
-  HD := TList<Integer>.Create();
-  HK := TList<Integer>.Create();
-  HTotal := Self.EmitArgHoist(nil, PParams, True, '', AArgs, HD, HK);
-  { Code/Data are loaded into %r10/%r11 only AFTER all argument evaluation:
-    both are caller-saved, so any call emitted while evaluating an argument
-    (or the hoist pre-pass above) would clobber them.  APtrOperand is %rbp-
-    or %rip-relative, never %rsp-relative. }
-
-  if AArgs.Count <= 5 then
-  begin
-    for I := 0 to AArgs.Count - 1 do
-    begin
-      Arg := TASTExpr(AArgs.Items[I]);
-      if HK.Get(I) >= akRecCall then
-      begin
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-          [HTotal - HD.Get(I) + I * 8]));
-        Self.Emit(#9'pushq %rax');
-      end
-      else
-      begin
-        Self.EmitExprToEax(Arg);
-        Self.Emit(#9'pushq %rax');
-      end;
-    end;
-    for I := AArgs.Count - 1 downto 0 do
-      Self.Emit(#9'popq ' + SysVArg64(I + 1));
-    Self.Emit(Format(#9'leaq %s, %%r11', [APtrOperand]));
-    Self.Emit(#9'movq (%r11), %r10');
-    Self.Emit(#9'movq 8(%r11), %rdi');
-    Self.Emit(#9'callq *%r10');
-    Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, 0, True);
-  end
-  else
-  begin
-    { >5 explicit args: pre-allocate (Count+1) slots (slot 0 unused, args=1..N). }
-    AllocSz := (((AArgs.Count + 1) * 8 + 15) and (-16));
-    Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
-    for I := 0 to AArgs.Count - 1 do
-    begin
-      Arg := TASTExpr(AArgs.Items[I]);
-      if HK.Get(I) >= akRecCall then
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-          [AllocSz + HTotal - HD.Get(I)]))
-      else
-        Self.EmitExprToEax(Arg);
-      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [(I + 1) * 8]));
-    end;
-    Self.Emit(Format(#9'leaq %s, %%rcx', [APtrOperand]));
-    Self.Emit(#9'movq (%rcx), %r10');
-    Self.Emit(#9'movq 8(%rcx), %rdi');
-    for I := 0 to 4 do
-      Self.Emit(Format(#9'movq %d(%%rsp), %s', [(I + 1) * 8, SysVArg64(I + 1)]));
-    { Copy the overflow args (slots 6.., offsets 48..) into a FRESH region
-      below the slot block so the call sees them at 0(%rsp).. on a 16-byte-
-      aligned %rsp regardless of pinned pushes above (see AlignFreshBytes). }
-    CleanUp := Self.AlignFreshBytes(AArgs.Count - 5);
-    Self.Emit(Format(#9'subq $%d, %%rsp', [CleanUp]));
-    for I := 0 to AArgs.Count - 6 do
-    begin
-      Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [CleanUp + 48 + I * 8]));
-      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [I * 8]));
-    end;
-    CleanUp := CleanUp + AllocSz;
-    Self.Emit(#9'callq *%r10');
-    Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, CleanUp, True);
-  end;
-  HD.Free();
-  HK.Free();
+  { One argument marshaller for every call through a procedural signature.
+    This path had its own integer-only loop: a var param got the value, not
+    its address, a Double went through an integer register, and an open
+    array lost its high (BUG-20260923-addr-of-openarray-proc). }
+  Self.EmitCallIndirect(APtrOperand, AProcType, AArgs, True);
 end;
 
 { True when AType is an integer-family type the backend can place in a

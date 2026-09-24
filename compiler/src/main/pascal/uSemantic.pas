@@ -4208,7 +4208,7 @@ begin
         Format('Unknown element type ''%s'' in open-array parameter ''%s''',
           [APar.TypeName, APar.ParamName]),
         ALoc, ACol);
-    Result := FTable.NewOpenArrayType(ElemType);
+    Result := FTable.ParamTypeFor(ElemType, True);
   end
   else
   begin
@@ -5172,7 +5172,7 @@ begin
           [SubstName, ATypeName]), Templ.Line, Templ.Col);
       ProcParam := TProcParamInfo.Create();
       ProcParam.Name         := MParam.ParamName;
-      ProcParam.TypeDesc     := SubstType;
+      ProcParam.TypeDesc     := FTable.ParamTypeFor(SubstType, MParam.IsOpenArray);
       ProcParam.IsVarParam   := MParam.IsVarParam;
       ProcParam.IsConstParam := MParam.IsConstParam;
       ProcDesc.Params.Add(ProcParam);
@@ -12207,7 +12207,11 @@ begin
     ArgType := AnalyseExprHinted(Slot, PPar.TypeDesc);
     Self.UnwrapLoweredOperator(Slot);
     AArgs.Items[I] := Slot;
+    { An untyped [] or an 'array of const' literal takes its type from the
+      formal only here, so check the retyped slot, not the analysed one. }
     RetypeBracketLiteralArg(Slot, PPar.TypeDesc);
+    if Slot is TArrayLiteralExpr then
+      ArgType := Slot.ResolvedType;
     if PPar.IsVarParam and not IsVarArgLValue(Slot) then
       SemanticError(
         Format('var argument %d of ''%s'' must be a variable', [I + 1, AName]),
@@ -17074,10 +17078,10 @@ begin
       SemanticError(Format(
         'Unknown parameter type ''%s'' in procedural type ''%s''',
         [MParam.TypeName, ATD.Name]), ATD.Line, ATD.Col);
-    MParam.ResolvedType := TSym.TypeDesc;
+    MParam.ResolvedType := FTable.ParamTypeFor(TSym.TypeDesc, MParam.IsOpenArray);
     ProcParam := TProcParamInfo.Create();
     ProcParam.Name         := MParam.ParamName;
-    ProcParam.TypeDesc     := TSym.TypeDesc;
+    ProcParam.TypeDesc     := MParam.ResolvedType;
     ProcParam.IsVarParam   := MParam.IsVarParam;
     ProcParam.IsConstParam := MParam.IsConstParam;
     ProcDesc.Params.Add(ProcParam);

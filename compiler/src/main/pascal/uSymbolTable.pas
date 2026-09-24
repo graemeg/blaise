@@ -750,6 +750,14 @@ type
       Registered in FAllTypes so the table owns the lifetime. }
     function NewOpenArrayType(AElementType: TTypeDesc): TOpenArrayTypeDesc;
 
+    { The type of a declared parameter: AType itself, or -- when the parameter
+      is written 'array of AType' -- a fresh open array of it.  The single rule
+      every parameter resolver applies (routine, procedural type, generic
+      procedural type, imported procedural type); a resolver that looked up
+      the element type and stopped there silently turned 'array of Integer'
+      into 'Integer' (BUG-20260923-addr-of-openarray-proc). }
+    function ParamTypeFor(AType: TTypeDesc; AIsOpenArray: Boolean): TTypeDesc;
+
     { Creates a static array type descriptor. Registered in FAllTypes. }
     function NewStaticArrayType(AElementType: TTypeDesc;
       ALow, AHigh: Integer): TStaticArrayTypeDesc;
@@ -1637,6 +1645,26 @@ begin
   inherited Destroy();
 end;
 
+{ Do two procedural-signature params have the same type?  Identity, or one
+  of the STRUCTURAL equivalences that a fresh descriptor per declaration
+  site would otherwise defeat:
+    * pointers -- PSuite and ^TSuite share a BaseType;
+    * open arrays -- every 'array of T' param gets its own TOpenArrayTypeDesc,
+      so two are the same type when their element types are
+      (BUG-20260923-addr-of-openarray-proc; 'array of const' is an open
+      array of TVarRec and follows the same rule). }
+function ProcParamTypesMatch(A, B: TTypeDesc): Boolean;
+begin
+  if A = B then Exit(True);
+  Result := False;
+  if (A = nil) or (B = nil) then Exit;
+  if (A.Kind = tyPointer) and (B.Kind = tyPointer) then
+    Result := TPointerTypeDesc(A).BaseType = TPointerTypeDesc(B).BaseType
+  else if (A.Kind = tyOpenArray) and (B.Kind = tyOpenArray) then
+    Result := ProcParamTypesMatch(TOpenArrayTypeDesc(A).ElementType,
+      TOpenArrayTypeDesc(B).ElementType);
+end;
+
 function TProceduralTypeDesc.IsCompatibleWith(AOther: TProceduralTypeDesc): Boolean;
 var
   I: Integer;
@@ -1653,15 +1681,7 @@ begin
   begin
     PA := TProcParamInfo(Params.Items[I]);
     PB := TProcParamInfo(AOther.Params.Items[I]);
-    if PA.TypeDesc <> PB.TypeDesc then
-    begin
-      { Allow structural pointer equivalence: PSuite and ^TSuite are the same
-        type conceptually — both are TPointerTypeDesc with the same BaseType. }
-      if (PA.TypeDesc = nil) or (PB.TypeDesc = nil) then Exit;
-      if (PA.TypeDesc.Kind <> tyPointer) or (PB.TypeDesc.Kind <> tyPointer) then Exit;
-      if TPointerTypeDesc(PA.TypeDesc).BaseType <>
-         TPointerTypeDesc(PB.TypeDesc).BaseType then Exit;
-    end;
+    if not ProcParamTypesMatch(PA.TypeDesc, PB.TypeDesc) then Exit;
     if PA.IsVarParam <> PB.IsVarParam then Exit;
     if PA.IsConstParam <> PB.IsConstParam then Exit;
   end;
@@ -1687,13 +1707,7 @@ begin
   begin
     PA := TProcParamInfo(Params.Items[I]);
     PB := TProcParamInfo(AOther.Params.Items[I]);
-    if PA.TypeDesc <> PB.TypeDesc then
-    begin
-      if (PA.TypeDesc = nil) or (PB.TypeDesc = nil) then Exit;
-      if (PA.TypeDesc.Kind <> tyPointer) or (PB.TypeDesc.Kind <> tyPointer) then Exit;
-      if TPointerTypeDesc(PA.TypeDesc).BaseType <>
-         TPointerTypeDesc(PB.TypeDesc).BaseType then Exit;
-    end;
+    if not ProcParamTypesMatch(PA.TypeDesc, PB.TypeDesc) then Exit;
     if PA.IsVarParam <> PB.IsVarParam then Exit;
     if PA.IsConstParam <> PB.IsConstParam then Exit;
   end;
@@ -1839,6 +1853,15 @@ begin
   Result.Name        := 'array of ' + AElementType.Name;
   Result.ElementType := AElementType;
   FAllTypes.Add(Result);
+end;
+
+function TSymbolTable.ParamTypeFor(AType: TTypeDesc;
+  AIsOpenArray: Boolean): TTypeDesc;
+begin
+  if AIsOpenArray and (AType <> nil) then
+    Result := NewOpenArrayType(AType)
+  else
+    Result := AType;
 end;
 
 function TSymbolTable.NewStaticArrayType(AElementType: TTypeDesc;

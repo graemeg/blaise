@@ -248,6 +248,11 @@ type
     { Invoke a closure/method-pointer fat value whose ADDRESS is in AAddrReg:
       load Code, pass Env as the hidden first arg (x0), the visible args in
       x1.., blr.  Result in x0/d0 per the callee's return type. }
+    { NotYet when a procedural signature has an open-array param: the
+      indirect-call loops pass one register per arg, so a dynamic array would
+      silently lose its high (BUG-20260923-addr-of-openarray-proc). }
+    procedure GuardNoOpenArrayParam(AProcType: TProceduralTypeDesc;
+      ANode: TASTNode);
     procedure EmitFatPtrCall(const AAddrReg: string; AProcType: TProceduralTypeDesc;
       AArgs: TObjectList);
     { Release an owned-transient STRING value in x0 by shape, mirroring
@@ -1590,6 +1595,18 @@ begin
   Self.Emit(#9'mov x0, x9');                  { yield the slot ADDRESS }
 end;
 
+procedure TArm64Backend.GuardNoOpenArrayParam(AProcType: TProceduralTypeDesc;
+  ANode: TASTNode);
+var
+  I: Integer;
+begin
+  if AProcType = nil then Exit;
+  for I := 0 to AProcType.Params.Count - 1 do
+    if (TProcParamInfo(AProcType.Params.Items[I]).TypeDesc <> nil) and
+       (TProcParamInfo(AProcType.Params.Items[I]).TypeDesc.Kind = tyOpenArray) then
+      NotYet('open-array parameter in a call through a procedural type', ANode);
+end;
+
 procedure TArm64Backend.EmitFatPtrCall(const AAddrReg: string;
   AProcType: TProceduralTypeDesc; AArgs: TObjectList);
 var
@@ -1612,6 +1629,7 @@ begin
     the blr — see EmitOwnedStrTransientPin — then one bare release after). }
   if AArgs.Count > 7 then
     NotYet('closure call with more than 7 arguments', nil);
+  GuardNoOpenArrayParam(AProcType, nil);
   { AAddrReg must survive the arg evaluation — park it.  Save x19..x21 (used to
     hold owned transients across the call). }
   Self.Emit(Format(#9'str %s, [sp, #-16]!', [AAddrReg]));
@@ -3305,6 +3323,8 @@ begin
   begin
     { call through a procedural-typed variable, expression position:
       int-class args in x0.., fptr from the variable's slot, blr }
+    GuardNoOpenArrayParam(
+      TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType), AExpr);
     for I := 0 to TFuncCallExpr(AExpr).Args.Count - 1 do
     begin
       if not (IsIntFam(TASTExpr(TFuncCallExpr(AExpr).Args.Items[I])
@@ -5956,6 +5976,7 @@ begin
   begin
     { call through a plain proc-pointer variable: int-class args in
       x0..x(n-1), function pointer from the variable's slot, blr }
+    GuardNoOpenArrayParam(TProceduralTypeDesc(ACall.ResolvedProcType), ACall);
     for I := 0 to ACall.Args.Count - 1 do
     begin
       Arg := TASTExpr(ACall.Args.Items[I]);
