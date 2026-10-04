@@ -478,6 +478,8 @@ type
     function  FieldCleanupSym(const ABase: string): string;
     function  RoutineSym(ADecl: TMethodDecl; const AName: string): string;
     function  GlobalSym(const AName: string): string;
+    function  ItabBaseName(const AName: string): string;
+    function  IsSymTableVar(const AName: string): Boolean;
     procedure RegisterGlobalInit(const ASym: string; AVD: TVarDecl);
     { AAPCS64 record-return shape for ARec: 0 = sret via x8, 1 = x0,
       2 = x0:x1 memory image, 3/4 = HFA of N Doubles in d0..d(N-1)
@@ -1097,8 +1099,7 @@ begin
     Exit;
   end;
   if (FGlobalNames.IndexOf(Sym) >= 0) or
-     ((FSymTable <> nil) and (FSymTable.Lookup(AName) <> nil) and
-      (FSymTable.Lookup(AName).Kind = skVariable)) then
+     IsSymTableVar(AName) then
   begin
     { registered here, or a cross-unit variable defined in a dependency's
       object — the assembler emits a reloc for the undefined symbol }
@@ -1239,8 +1240,7 @@ begin
     Exit;
   end;
   if (FGlobalNames.IndexOf(Sym) >= 0) or
-     ((FSymTable <> nil) and (FSymTable.Lookup(AName) <> nil) and
-      (FSymTable.Lookup(AName).Kind = skVariable)) then
+     IsSymTableVar(AName) then
   begin
     Self.Emit(Format(#9'adrp x9, _g_%s@PAGE', [Sym]));
     Self.Emit(Format(#9'str %s, [x9, _g_%s@PAGEOFF]', [AReg, Sym]));
@@ -1268,8 +1268,7 @@ begin
     Exit;
   end;
   if (FGlobalNames.IndexOf(Sym) >= 0) or
-     ((FSymTable <> nil) and (FSymTable.Lookup(AName) <> nil) and
-      (FSymTable.Lookup(AName).Kind = skVariable)) then
+     IsSymTableVar(AName) then
   begin
     Self.Emit(Format(#9'adrp %s, _g_%s@PAGE', [AReg, Sym]));
     Self.Emit(Format(#9'add %s, %s, _g_%s@PAGEOFF', [AReg, AReg, Sym]));
@@ -8984,10 +8983,32 @@ begin
     Result := DarwinSym(CodegenMangle(AName));
 end;
 
+function TArm64Backend.ItabBaseName(const AName: string): string;
+begin
+  { an interface variable's itab half ('X_itab') is no symbol of its own:
+    it belongs to -- and resolves through -- the variable X }
+  Result := AName;
+  if (Length(AName) > 5) and
+     (Copy(AName, Length(AName) - 5, 5) = '_itab') then
+    Result := Copy(AName, 0, Length(AName) - 5);
+end;
+
+function TArm64Backend.IsSymTableVar(const AName: string): Boolean;
+var
+  Sym: TSymbol;
+begin
+  { a variable the symbol table knows -- a cross-unit global defined in a
+    dependency's object; an itab half counts as its variable }
+  Result := False;
+  if FSymTable = nil then Exit;
+  Sym := FSymTable.Lookup(ItabBaseName(AName));
+  Result := (Sym <> nil) and (Sym.Kind = skVariable);
+end;
+
 function TArm64Backend.GlobalSym(const AName: string): string;
 var
   Sym: TSymbol;
-  Owner: string;
+  Owner, Base: string;
 begin
   { Owner resolution mirrors TX86_64Backend.GlobalSymName: an exported
     unit var carries its OwningUnit in the symbol table; an implementation-
@@ -8996,13 +9017,14 @@ begin
     unmangled RTL units, via MangleUnitPrefix) map to a bare name. }
   Result := AName;
   Owner := '';
+  Base := ItabBaseName(AName);
   if FSymTable <> nil then
   begin
-    Sym := FSymTable.Lookup(AName);
+    Sym := FSymTable.Lookup(Base);
     if (Sym <> nil) and (Sym.Kind = skVariable) and (Sym.OwningUnit <> '') then
       Owner := Sym.OwningUnit;
   end;
-  if (Owner = '') and (FModuleVarNames.IndexOf(AName) >= 0) then
+  if (Owner = '') and (FModuleVarNames.IndexOf(Base) >= 0) then
     Owner := FCurrentUnitName;
   if Owner = '' then Exit;
   if (FProgramName <> '') and SameText(Owner, FProgramName) then Exit;

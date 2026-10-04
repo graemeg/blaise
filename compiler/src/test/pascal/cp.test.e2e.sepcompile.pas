@@ -297,6 +297,7 @@ type
       own object cache), while implementation/program-scope array consts keep
       their existing non-exported, bare-mangled form. }
     procedure TestInterfaceArrayConst_AcrossUnits_Native;
+    procedure TestUnitInterfaceGlobals_ItabHalf_Native;
     procedure TestInterfaceArrayConst_AcrossUnits_QBE;
     procedure TestInterfaceJumboSetConst_AcrossUnits_Native;
     { Regression (BUGS.md BUG-004): generic-instance symbols were mangled from
@@ -4701,6 +4702,83 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_piece_native exit code', 0, Rc);
   AssertEquals('use_piece_native stdout', '11 32 71' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestUnitInterfaceGlobals_ItabHalf_Native;
+{ A unit-level interface variable is two symbols, <Unit>_X and <Unit>_X_itab.
+  arm64 resolved a global's owning unit by looking the exact name up, and
+  'X_itab' is no symbol -- so the itab half got a bare, unregistered name and
+  stopped with "store to variable 'GHandler_itab'" (an implementation-section
+  global, the stdlib test-suite's shape) or "load of variable 'GPub_itab'"
+  (an interface-section global read from the program). }
+const
+  UnitSrc =
+    '''
+    unit UGlobIntf;
+    interface
+    type
+      IG = interface
+        function Greet(N: Integer): Integer;
+      end;
+      TG = class(IG)
+        function Greet(N: Integer): Integer;
+      end;
+    var
+      GPub: IG;
+    procedure Setup;
+    function UsePriv(N: Integer): Integer;
+    implementation
+    var
+      GPriv: IG;
+    function TG.Greet(N: Integer): Integer;
+    begin
+      Result := N * 2;
+    end;
+    procedure Setup;
+    begin
+      GPriv := TG.Create();
+      GPub := GPriv;
+    end;
+    function UsePriv(N: Integer): Integer;
+    begin
+      Result := GPriv.Greet(N);
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseGlobIntf;
+    uses UGlobIntf;
+    begin
+      Setup();
+      WriteLn(UsePriv(4), ' ', GPub.Greet(5));
+      GPub := nil;
+      WriteLn(GPub = nil)
+    end.
+    ''';
+var
+  UnitPas, ProgPas, ProgBin: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  if not FileExists(BlaisePath()) then begin Ignore('blaise binary missing'); Exit; end;
+
+  UnitPas := FScratch + '/UGlobIntf.pas';
+  ProgPas := FScratch + '/use_globintf_native.pas';
+  ProgBin := FScratch + '/use_globintf_native';
+
+  WriteFile(UnitPas, UnitSrc);
+  WriteFile(ProgPas, ProgSrc);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--backend', 'native',
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('blaise(use_globintf_native) exit code (out: ' + Captured + ')', 0, Rc);
+
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('use_globintf_native exit code', 0, Rc);
+  AssertEquals('use_globintf_native stdout', '8 10' + #10 + 'True' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestInterfaceArrayConst_AcrossUnits_QBE;
