@@ -3835,9 +3835,15 @@ begin
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (not TFuncCallExpr(AExpr).IsIndirectCall) and
      (TFuncCallExpr(AExpr).Args.Count = 1) and
-     (FSymTable <> nil) and
-     (FSymTable.FindType(TFuncCallExpr(AExpr).Name) <> nil) and
      (AExpr.ResolvedType <> nil) and
+     { the name denotes a TYPE: either the table resolves it, or -- for a
+       type declared inside a unit, which the program-level table cannot
+       see (PStackNode in the fiber runtime) -- the call's result type IS
+       that named type.  A builtin's result type never carries the builtin's
+       own name, so an unlowered builtin still reaches the honest NotYet. }
+     (((FSymTable <> nil) and
+       (FSymTable.FindType(TFuncCallExpr(AExpr).Name) <> nil)) or
+      SameText(AExpr.ResolvedType.Name, TFuncCallExpr(AExpr).Name)) and
      (IsIntFam(AExpr.ResolvedType) or
       (AExpr.ResolvedType.Kind in [tyPointer, tyPChar, tyClass,
                                    tyString, tyProcedural])) then
@@ -5160,9 +5166,15 @@ begin
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (not TFuncCallExpr(AExpr).IsIndirectCall) and
      (TFuncCallExpr(AExpr).Args.Count = 1) and
-     (FSymTable <> nil) and
-     (FSymTable.FindType(TFuncCallExpr(AExpr).Name) <> nil) and
-     (AExpr.ResolvedType <> nil) and AExpr.ResolvedType.IsFloat() then
+     (AExpr.ResolvedType <> nil) and
+     { the name denotes a TYPE: either the table resolves it, or -- for a
+       type declared inside a unit, which the program-level table cannot
+       see (PStackNode in the fiber runtime) -- the call's result type IS
+       that named type.  A builtin's result type never carries the builtin's
+       own name, so an unlowered builtin still reaches the honest NotYet. }
+     (((FSymTable <> nil) and
+       (FSymTable.FindType(TFuncCallExpr(AExpr).Name) <> nil)) or
+      SameText(AExpr.ResolvedType.Name, TFuncCallExpr(AExpr).Name)) and AExpr.ResolvedType.IsFloat() then
   begin
     Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
     if AExpr.ResolvedType.Kind = tySingle then

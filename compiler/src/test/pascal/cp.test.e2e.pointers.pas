@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_CastToUnitLocalPointerType;
     procedure TestRun_Pointer_GetMem_WriteRead_FreeMem;
     procedure TestRun_Pointer_TypedPointer_Deref;
     procedure TestRun_Pointer_NilCheck;
@@ -54,6 +55,48 @@ type
   end;
 
 implementation
+
+procedure TE2EPointersTests.TestRun_CastToUnitLocalPointerType;
+const
+  { PNode(P) where PNode is declared in a unit's IMPLEMENTATION: arm64 only
+    recognised a value cast whose name the program-level symbol table could
+    resolve, so this failed with "this call form ('PNode')" -- and that is
+    exactly how the fiber runtime builds its stack-pool nodes. }
+  UnitSrc = '''
+    unit ptcast;
+    interface
+    function Probe(P: Pointer): Integer;
+    implementation
+    type
+      PNode = ^TNode;
+      TNode = record Next: PNode; Total: Int64; end;
+    function Probe(P: Pointer): Integer;
+    var N: PNode;
+    begin
+      N := PNode(P + 8);
+      N^.Total := 5;
+      Result := Integer(N^.Total)
+    end;
+    end.
+    ''';
+  Src = '''
+    program P;
+    uses ptcast;
+    var Buf: array[0..63] of Byte;
+    begin
+      WriteLn(Probe(@Buf[0]))
+    end.
+    ''';
+var
+  Output: string;
+  Code: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run: ' + Output,
+    CompileAndRunWithUnit('ptcast', UnitSrc, Src, Output, Code));
+  AssertEquals('exit code', 0, Code);
+  AssertEquals('stdout', '5' + LineEnding, Output);
+end;
 
 procedure TE2EPointersTests.SetUp;
 begin
