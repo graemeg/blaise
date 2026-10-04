@@ -290,7 +290,7 @@ begin
     '  WriteLn(L.Count, '' '', L[0], '' '', L[1]);' + LineEnding +
     '  L.Free()' + LineEnding +
     'end.';
-  AssertRunsOnAll(Src, '2 alpha.txt Beta.pas' + LineEnding, 0);
+  AssertRTLRunsOnAll(Src, '2 alpha.txt Beta.pas' + LineEnding, 0);
 end;
 
 procedure TE2ESysUtilsTests.TestRun_ParamStr_PrintsArg;

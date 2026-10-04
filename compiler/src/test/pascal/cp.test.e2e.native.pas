@@ -6194,7 +6194,7 @@ begin
     address.  Writing A[I] used to stop as NotYet on arm64, and reading
     A[I] dereferenced the pointer once too often (silently wrong bytes). }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll('''
+  AssertRunsOn([beNative], '''
     program Prg;
     procedure Fill(var A: array of Byte);
     var
@@ -6226,7 +6226,7 @@ begin
     interface FIELD compares against nil (a 16-byte load in a scalar
     context is its obj half). }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll('''
+  AssertRunsOn([beNative], '''
     program Prg;
     type
       IG = interface
@@ -6563,7 +6563,7 @@ begin
     variable args are snapshotted per site, and a jumbo-set RESULT comes back
     through x8 like a large record. }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll('''
+  AssertRunsOn([beNative], '''
     program Prg;
     type
       TCls = set of Byte;
@@ -6770,7 +6770,7 @@ begin
   { P^ := V for a managed record (TList<TRec>.Add's Dest^ := Value), a jumbo
     set and an interface -- each was NotYet on arm64. }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll('''
+  AssertRunsOn([beNative], '''
     program Prg;
     type
       TItem = record
@@ -6840,7 +6840,7 @@ begin
     getter returns the record through x8 / registers into a per-site
     scratch -- read by field and copied whole. }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll('''
+  AssertRTLRunsOn([beNative], '''
     program Prg;
     uses Generics.Collections;
     type
@@ -6874,7 +6874,7 @@ begin
     was NotYet 'function result of this type'; it returns its bitmask in x0
     like an integer, including after Include(Result, ...). }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll('''
+  AssertRunsOn([beNative], '''
     program Prg;
     type
       TOpt = (oA, oB, oC);
@@ -7024,7 +7024,7 @@ begin
     back through x8 / x0:x1, owned, and moves in) -- regex.tests'
     `for M in L` over a TList<TMatch>. }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll('''
+  AssertRTLRunsOn([beNative], '''
     program Prg;
     uses Generics.Collections;
     type

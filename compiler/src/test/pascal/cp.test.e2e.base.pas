@@ -802,7 +802,7 @@ begin
   { QBE, --debug }
   Ok := CompileAndRunWithRTLDebugOn(QBEOrNative(), ASrc, Output, ExitCode, True);
   AssertTrue('qbe compile+run (--debug): ' + Output, Ok);
-  AssertEquals('qbe exit 0', 0, ExitCode);
+  AssertEquals('qbe exit 0 (output: ' + Output + ')', 0, ExitCode);
   if AExpectSubstr <> '' then
     AssertTrue('qbe stdout contains ''' + AExpectSubstr + ''', got: ' + Output,
       Pos(AExpectSubstr, Output) >= 0);
@@ -810,7 +810,7 @@ begin
   { native, --debug }
   Ok := CompileAndRunWithRTLDebugOn(beNative, ASrc, Output, ExitCode, True);
   AssertTrue('native compile+run (--debug): ' + Output, Ok);
-  AssertEquals('native exit 0', 0, ExitCode);
+  AssertEquals('native exit 0 (output: ' + Output + ')', 0, ExitCode);
   if AExpectSubstr <> '' then
     AssertTrue('native stdout contains ''' + AExpectSubstr + ''', got: ' + Output,
       Pos(AExpectSubstr, Output) >= 0);

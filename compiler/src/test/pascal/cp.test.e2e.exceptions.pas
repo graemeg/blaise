@@ -642,7 +642,7 @@ const
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, 'True' + LE + 'True True True' + LE, 0);
+  AssertRTLRunsOnAll(Src, 'True' + LE + 'True True True' + LE, 0);
 end;
 
 procedure TE2EExceptionTests.TestRun_ExitInSecondTry_LaterRaiseStillWorks;
