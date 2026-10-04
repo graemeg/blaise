@@ -8,7 +8,7 @@
 
 { punit tests for the fiber stack allocator + pool (L0 of
   docs/async-networking-design.adoc): mmap'd guard-page stacks served from a
-  per-thread free list (async.fibers.context.x86_64).
+  per-thread free list (async.fibers.context).
 
   NATIVE BACKEND ONLY (the fiber unit contains inline asm).
 
@@ -20,7 +20,7 @@
 
 program test_fiber_stacks;
 
-uses punit, async.fibers.context.x86_64;
+uses punit, async.fibers.context;
 
 function TestAcquire_PageAlignedAndSized: string;
 var

@@ -328,7 +328,8 @@ procedure FiberSwapAsm(AFromSP, AToSP: PPointer); assembler; nostackframe;
 procedure FiberSwitch(AFrom, ATo: PFiber);
 ----
 
-(As implemented in `async.fibers.context.x86_64.pas`, 2026-07-04. Earlier
+(As implemented in `async.fibers.context.pas` -- originally
+`async.fibers.context.x86_64.pas`, 2026-07-04. Earlier
 drafts sketched a single `FiberSwap(ACur, ANext: PFiberCtx)`; the split into a
 public control-block-level `FiberSwitch` and a private register leaf is the
 direct consequence of the IMPORTANT block below — the wrapper owns the
@@ -1051,7 +1052,7 @@ is *not* always-linked RTL — it is opt-in like the rest of stdlib, matching th
 ----
 stdlib/src/main/pascal/
   async.fibers.pas                 L1 scheduler + public API (SpawnFiber, RunScheduler, TTaskGroup, yield, sleep)
-  async.fibers.context.x86_64.pas  L0 FiberSwitch/FiberSwapAsm + trampoline (inline asm; native backend only)
+  async.fibers.context.pas         L0 FiberSwitch/FiberSwapAsm + trampoline (inline asm per CPU; native backend only)
   async.sync.pas                   L1 TFiberMutex/Event/WaitGroup, TChannel<T>
   async.reactor.pas                L2 TReactor port (abstract) + GReactor selection
   async.reactor.epoll.pas          L2 TEpollReactor (Linux)
@@ -1066,7 +1067,10 @@ stdlib/src/main/pascal/
   net.smtp.pas / net.pop3.pas / net.imap.pas / net.ftp.pas         L5
 ----
 
-Adding a CPU: one `async.fibers.context.<cpu>.pas`. Adding an OS reactor: one
+Adding a CPU: one more `{$IFDEF CPU...}` arm of the three CPU-specific parts in
+`async.fibers.context.pas` (the switch leaf, the synthetic first frame, the
+guard-page size); the stack pool, `FiberSwitch` and the trampoline are shared.
+Adding an OS reactor: one
 `async.reactor.<mech>.pas` + one registration. Adding a TLS provider: one
 `net.tls.<impl>.pas` + swap `GTlsProvider`. No existing file is edited to extend
 any axis — Open/Closed, as the native-target architecture requires.
@@ -1346,12 +1350,14 @@ importance. Tackle them one at a time and tick each box when landed and verified
 
 === C. Portability (new targets)
 
-* [ ] *FreeBSD dynamic fiber build.* `async.fibers.context.x86_64.pas` and
+* [ ] *FreeBSD dynamic fiber build.* `async.fibers.context.pas` and
   `async.fibers.pas` use Linux-shaped libc constants (`MAP_ANONYMOUS`,
   `CLOCK_MONOTONIC`, `clock_gettime`/`nanosleep` bindings). Route them through
   the platform seam so the FreeBSD *dynamic* (libc) arm gets correct flag values.
 * [ ] *`TKqueueReactor`* (FreeBSD/macOS) behind the `TReactor` port.
-* [ ] *AArch64 context leaf* — the `async.fibers.context` switch for arm64.
+* [x] *AArch64 context leaf* — the `async.fibers.context` switch for arm64:
+  x19-x28, x29/x30 and d8-d15 in a 160-byte block; 16 KiB guard page (Apple
+  Silicon page size).  Verified on an M1 (2026-10-04).
 * [ ] *Static / libc-free fiber path.* Kernel-leaf raw syscalls **and per-thread
   `%fs`/TLS setup** for each libc-free worker thread — the unresolved blocker for
   the freestanding reactor (P1 risk).

@@ -11,7 +11,7 @@ unit cp.test.e2e.fibers;
 { E2E tests for L0 of the fiber runtime (docs/async-networking-design.adoc):
   the FiberSwitch context-switch leaf, fresh-fiber trampoline bootstrap,
   guard-page stacks, and the stack pool in
-  stdlib/src/main/pascal/async.fibers.context.x86_64.pas.
+  stdlib/src/main/pascal/async.fibers.context.pas.
 
   BACKEND POSTURE (per the design's [#constraints] block): the fiber unit is
   inline-asm and therefore NATIVE-ONLY.  The behavioural tests run on the
@@ -58,7 +58,7 @@ const
   SrcPingPong =
     '''
     program fiberping;
-    uses async.fibers.context.x86_64;
+    uses async.fibers.context;
     var
       MainF, FA, FB: PFiber;
     procedure ProcA(AArg: Pointer);
@@ -99,7 +99,7 @@ const
   SrcExitAndPool =
     '''
     program fiberexit;
-    uses async.fibers.context.x86_64;
+    uses async.fibers.context;
     var
       MainF, F1, F2: PFiber;
       B1, B2: Pointer;
@@ -130,7 +130,7 @@ const
   SrcGuardPage =
     '''
     program fiberguard;
-    uses async.fibers.context.x86_64;
+    uses async.fibers.context;
     function fork: Integer; external name 'fork';
     function waitpid(Pid: Integer; Status: Pointer; Options: Integer): Integer;
       external name 'waitpid';
@@ -171,7 +171,7 @@ const
   SrcFiberExcBase =
     '''
     program fiberexc;
-    uses async.fibers.context.x86_64;
+    uses async.fibers.context;
     type
       Exception = class
         FMessage: string;
@@ -316,7 +316,7 @@ const
   SrcQBEGuard =
     '''
     program fiberqbe;
-    uses async.fibers.context.x86_64;
+    uses async.fibers.context;
     begin
       WriteLn(FiberStackPoolCount());
     end.

@@ -44,7 +44,7 @@ procedure _PopExcFrame;
   outgoing fiber's pair into its control block and reinstate the incoming
   fiber's, or a try across a suspension is unsound (frames chain across fiber
   stacks and a raise longjmps into a suspended/stale frame).  The fiber
-  runtime (async.fibers.context.<cpu>) binds these by bare symbol name. }
+  runtime (async.fibers.context) binds these by bare symbol name. }
 function  _ExcGetTop: Pointer;
 procedure _ExcSetTop(AFrame: Pointer);
 function  _ExcGetCurrent: Pointer;

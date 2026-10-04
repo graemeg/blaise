@@ -25,7 +25,7 @@ unit async.fibers;
 // a binary heap for the same size, and sift-down touches one cache line of
 // children per level.
 //
-// NATIVE BACKEND ONLY: this unit uses async.fibers.context.x86_64, whose
+// NATIVE BACKEND ONLY: this unit uses async.fibers.context, whose
 // context-switch leaf is inline asm; the QBE backend rejects it with a clear
 // diagnostic (the design's compile-time guard).
 //
@@ -37,7 +37,7 @@ unit async.fibers;
 interface
 
 uses
-  SysUtils, generics.collections, async.fibers.context.x86_64,
+  SysUtils, generics.collections, async.fibers.context,
   async.deque;
 
 type
