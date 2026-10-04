@@ -36,6 +36,13 @@ function BackendName(ABackend: TBackend): string;
   one that matters here. }
 function BackendRunnableOnHost(ABackend: TBackend): Boolean;
 
+{ The backend a QBE-only helper (CompileAndRun, CompileAndRunWithRTL, ...)
+  runs on: QBE where the host can run it, otherwise native.  QBE is
+  deprecated and was never ported to Mach-O, so on macOS those ~700 tests
+  used to be skipped outright; falling back to native turns them into real
+  coverage of the backend that ships there.  Linux keeps QBE unchanged. }
+function QBEOrNative(): TBackend;
+
 type
   TE2ETestCase = class(TTestCase)
   private
@@ -64,6 +71,12 @@ type
                           const AExtraUnitPath: string;
                           out AStdout: string;
                           out AExitCode: Integer): Boolean;
+    { Compile-only half of CompileAndRunNativeCLI: returns the compiler's exit
+      code, the binary path in ABinFile and its diagnostics in AToolOut. }
+    function  CompileNativeCLI(const ASrc: string; ADebugMode: Boolean;
+                          const AExtraUnitPath: string;
+                          out ABinFile: string;
+                          out AToolOut: string): Integer;
     { Link an assembled program (AAsmFile) into ABinFile against the RTL.  The
       RTL is built from source by scripts/build-rtl-objects.sh (no blaise_rtl.a
       archive); --exclude-defined-by drops the RTL objects the whole-program
@@ -255,7 +268,11 @@ function TE2ETestCase.ToolchainAvailable(): Boolean;
 begin
   { Need the QBE assembler, the compiler binary (build-rtl-objects.sh drives it
     to source-build the RTL), and the RTL source.  No blaise_rtl.a archive. }
-  Result := FileExists(FQBE)
+  { QBE is required only where the host can run it at all.  On macOS QBE
+    has no Mach-O port, every dual-backend test already drops its QBE arm
+    (AssertRunsOn), and no qbe binary exists -- requiring one there skipped
+    ~1450 native e2e tests as "toolchain unavailable". }
+  Result := (FileExists(FQBE) or not BackendRunnableOnHost(beQBE))
         and FileExists(ProjectRoot() + 'compiler/target/blaise')
         and FileExists(ProjectRoot() + 'compiler/src/main/pascal/runtime.arc.pas')
 end;
@@ -313,17 +330,16 @@ begin
   end
 end;
 
-function TE2ETestCase.CompileAndRunNativeCLI(const ASrc: string;
-                                             ADebugMode: Boolean;
-                                             const AExtraUnitPath: string;
-                                             out AStdout: string;
-                                             out AExitCode: Integer): Boolean;
+function TE2ETestCase.CompileNativeCLI(const ASrc: string;
+                                       ADebugMode: Boolean;
+                                       const AExtraUnitPath: string;
+                                       out ABinFile: string;
+                                       out AToolOut: string): Integer;
 var
   SrcFile, BinFile, ToolOut, Chunk: string;
   Proc: TProcess;
   Rc: Integer;
 begin
-  Result := False;
   Inc(GNativeCLICounter);
   SrcFile := FScratch + '/n' + IntToStr(GNativeCLICounter) + '.pas';
   BinFile := FScratch + '/n' + IntToStr(GNativeCLICounter);
@@ -360,6 +376,22 @@ begin
   finally
     Proc.Free()
   end;
+  ABinFile := BinFile;
+  AToolOut := ToolOut;
+  Result := Rc
+end;
+
+function TE2ETestCase.CompileAndRunNativeCLI(const ASrc: string;
+                                             ADebugMode: Boolean;
+                                             const AExtraUnitPath: string;
+                                             out AStdout: string;
+                                             out AExitCode: Integer): Boolean;
+var
+  BinFile, ToolOut: string;
+  Rc: Integer;
+begin
+  Result := False;
+  Rc := Self.CompileNativeCLI(ASrc, ADebugMode, AExtraUnitPath, BinFile, ToolOut);
   if Rc <> 0 then begin AStdout := 'compile failed: ' + ToolOut; AExitCode := Rc; Exit end;
   AExitCode := RunProcNoArgs(BinFile, AStdout);
   Result := True
@@ -442,13 +474,33 @@ end;
 
 function TE2ETestCase.RunProcNoArgs(const AExe: string;
                                     out AStdout: string): Integer;
+const
+  { Wall-clock budget for one compiled e2e program.  Generous: the slowest
+    legitimate program (the 10k-fiber scheduler smoke test) runs in ~2 s. }
+  RunTimeoutSecs = '60';
+  Watchdog = '/usr/bin/perl';
 var
   Proc:  TProcess;
   Chunk: string;
 begin
   Proc := TProcess.Create(nil);
   try
-    Proc.Executable := AExe;
+    { A miscompiled program can block forever (the errno probe did, on
+      Apple's variadic ABI) and ReadOutput has no timeout, so one hang stalled
+      the whole suite.  Run under a watchdog: perl's alarm survives exec, so
+      the program itself is killed by SIGALRM (exit 142) once the budget is
+      spent, and no helper process is left holding the output pipe.  Hosts
+      without perl in base (FreeBSD) run the program directly, as before. }
+    if FileExists(Watchdog) then
+    begin
+      Proc.Executable := Watchdog;
+      Proc.Parameters.Add('-e');
+      Proc.Parameters.Add('alarm shift; exec @ARGV or exit 127');
+      Proc.Parameters.Add(RunTimeoutSecs);
+      Proc.Parameters.Add(AExe)
+    end
+    else
+      Proc.Executable := AExe;
     Proc.Execute();
     AStdout := '';
     repeat
@@ -558,7 +610,7 @@ begin
     Suites whose programs ARE deterministic and native-clean use AssertRunsOnAll
     instead, which runs both backends.  As the native gaps close, more inline
     suites can migrate to AssertRunsOnAll. }
-  Result := Self.CompileAndRunOn(beQBE, ASrc, AStdout, AExitCode)
+  Result := Self.CompileAndRunOn(QBEOrNative(), ASrc, AStdout, AExitCode)
 end;
 
 function TE2ETestCase.CompileAndRunNative(const ASrc: string;
@@ -593,6 +645,14 @@ begin
     Result := TargetHasQBEBackend(HostTarget())
   else
     Result := True;
+end;
+
+function QBEOrNative(): TBackend;
+begin
+  if BackendRunnableOnHost(beQBE) then
+    Result := beQBE
+  else
+    Result := beNative;
 end;
 
 function BackendName(ABackend: TBackend): string;
@@ -693,9 +753,16 @@ begin
     as skipped with a reason, not silently passed.  Dual-backend callers never
     arrive here for an unsupported backend — AssertRunsOn drops it from the set
     first so their native arm still runs. }
-  if not BackendRunnableOnHost(beQBE) then
-    Ignore(BackendName(beQBE) +
-      ' backend is not supported on this host target');
+  if QBEOrNative() = beNative then
+  begin
+    { No runnable QBE on this host: compile with the native backend and run
+      the binary with the same arguments. }
+    Rc := Self.CompileNativeCLI(ASrc, False, '', BinFile, ToolOut);
+    if Rc <> 0 then begin AStdout := 'compile failed: ' + ToolOut; AExitCode := Rc; Exit end;
+    AExitCode := RunProc(BinFile, AExtraArgs, AStdout);
+    Result := True;
+    Exit
+  end;
   Inc(FCounter);
   IRFile  := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
   AsmFile := FScratch + '/t' + IntToStr(FCounter) + '.s';
@@ -733,7 +800,7 @@ var
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   { QBE, --debug }
-  Ok := CompileAndRunWithRTLDebugOn(beQBE, ASrc, Output, ExitCode, True);
+  Ok := CompileAndRunWithRTLDebugOn(QBEOrNative(), ASrc, Output, ExitCode, True);
   AssertTrue('qbe compile+run (--debug): ' + Output, Ok);
   AssertEquals('qbe exit 0', 0, ExitCode);
   if AExpectSubstr <> '' then
@@ -859,7 +926,7 @@ begin
     codegen or RTL-ABI divergence therefore fails the test with a clear message
     rather than going unnoticed.  Debug-mode and *On variants stay single-backend
     for callers that need a specific backend (e.g. leak checks). }
-  Result := Self.CompileAndRunWithRTLDebugOn(beQBE, ASrc, AStdout, AExitCode,
+  Result := Self.CompileAndRunWithRTLDebugOn(QBEOrNative(), ASrc, AStdout, AExitCode,
                                              False);
   if not Result then Exit;
   NOk := Self.CompileAndRunWithRTLDebugOn(beNative, ASrc, NOut, NCode, False);
@@ -888,7 +955,7 @@ begin
   { QBE-backed convenience; the full dual-backend implementation lives in
     CompileAndRunWithRTLDebugOn.  Kept so existing QBE-only callers behave
     exactly as before. }
-  Result := Self.CompileAndRunWithRTLDebugOn(beQBE, ASrc, AStdout, AExitCode,
+  Result := Self.CompileAndRunWithRTLDebugOn(QBEOrNative(), ASrc, AStdout, AExitCode,
                                              ADebugMode)
 end;
 
@@ -1036,7 +1103,7 @@ function TE2ETestCase.CompileAndRunWithUnit(const AUnitName, AUnitSrc, ASrc: str
                                             out AStdout: string;
                                             out AExitCode: Integer): Boolean;
 begin
-  Result := Self.CompileAndRunWithUnitOn(beQBE, AUnitName, AUnitSrc, ASrc,
+  Result := Self.CompileAndRunWithUnitOn(QBEOrNative(), AUnitName, AUnitSrc, ASrc,
                                          AStdout, AExitCode)
 end;
 
@@ -1173,9 +1240,16 @@ begin
     as skipped with a reason, not silently passed.  Dual-backend callers never
     arrive here for an unsupported backend — AssertRunsOn drops it from the set
     first so their native arm still runs. }
-  if not BackendRunnableOnHost(beQBE) then
-    Ignore(BackendName(beQBE) +
-      ' backend is not supported on this host target');
+  if QBEOrNative() = beNative then
+  begin
+    { No runnable QBE on this host: write both units beside the program and
+      let the native compiler's own loader find them on the scratch path. }
+    WriteFile(FScratch + '/' + UnitNameOf(AUnit1Src) + '.pas', AUnit1Src);
+    WriteFile(FScratch + '/' + UnitNameOf(AUnit2Src) + '.pas', AUnit2Src);
+    Result := Self.CompileAndRunNativeCLI(ASrc, False, FScratch, AStdout,
+      AExitCode);
+    Exit
+  end;
   Inc(FCounter);
   IRFile   := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
   AsmFile  := FScratch + '/t' + IntToStr(FCounter) + '.s';
