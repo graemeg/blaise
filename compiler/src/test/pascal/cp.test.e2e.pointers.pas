@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_AddrOfVarParam_IsCallersVariable;
     procedure TestRun_CastToUnitLocalPointerType;
     procedure TestRun_Pointer_GetMem_WriteRead_FreeMem;
     procedure TestRun_Pointer_TypedPointer_Deref;
@@ -55,6 +56,37 @@ type
   end;
 
 implementation
+
+procedure TE2EPointersTests.TestRun_AddrOfVarParam_IsCallersVariable;
+const
+  { @V for a var parameter V is the CALLER's variable address -- what the
+    slot already holds.  arm64 rejected it ("address-of on this
+    expression"); net.sockets.FillSockAddr(var AAddr) passes @AAddr on. }
+  Src = '''
+    program P;
+    type TPt = record X, Y: Integer; end;
+    procedure Poke(Dst: Pointer);
+    var P: ^Integer;
+    begin
+      P := Dst;
+      P^ := 42
+    end;
+    procedure Fill(var R: TPt; var N: Integer);
+    begin
+      Poke(@N);
+      Poke(@R)
+    end;
+    var Q: TPt; K: Integer;
+    begin
+      Q.Y := 7;
+      Fill(Q, K);
+      WriteLn(K, ' ', Q.X, ' ', Q.Y)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '42 42 7' + LineEnding, 0);
+end;
 
 procedure TE2EPointersTests.TestRun_CastToUnitLocalPointerType;
 const

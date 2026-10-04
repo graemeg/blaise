@@ -4968,6 +4968,21 @@ begin
         end;
       end;
     end;
+    { @V where V is a var / out parameter: its slot already holds the
+      caller's variable address (net.sockets FillSockAddr(var AAddr) passes
+      @AAddr on); a captured var parameter's storage holds that address }
+    if (TAddrOfExpr(AExpr).Expr is TIdentExpr) and
+       (TIdentExpr(TAddrOfExpr(AExpr).Expr).ParamMode = pmVar) then
+    begin
+      if IsCaptured(TIdentExpr(TAddrOfExpr(AExpr).Expr).Name) then
+      begin
+        EmitLoadSlot('x0', '_cap_' + TIdentExpr(TAddrOfExpr(AExpr).Expr).Name);
+        Self.Emit(#9'ldr x0, [x0]');
+      end
+      else
+        EmitLoadSlot('x0', TIdentExpr(TAddrOfExpr(AExpr).Expr).Name);
+      Exit;
+    end;
     { @P^ is just the pointer value P }
     if TAddrOfExpr(AExpr).Expr is TDerefExpr then
     begin
