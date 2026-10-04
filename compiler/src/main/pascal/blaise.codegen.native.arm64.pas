@@ -250,6 +250,9 @@ type
     procedure EmitRecAddrToX0(AExpr: TASTExpr);
     procedure EmitRecCallToRret(AExpr: TASTExpr);
     procedure EmitPropRecvToX0(AStmt: TFieldAssignment);
+    procedure EmitIndexedPropWrite(AProp: TPropertyInfo; const AOwner: string;
+      AVSlot: Integer; AIndex, AValue: TASTExpr; AStmt: TASTStmt);
+    procedure EmitSubscriptPropRecvToX0(AStmt: TStaticSubscriptAssign);
     { Materialise an anonymous-method literal into its hidden 16-byte value slot
       (Code at +0, Env at +8) and leave the slot ADDRESS in x0 — the fat value
       is used by reference (leg 38).  For a capture-free literal Env is nil. }
@@ -2539,6 +2542,161 @@ begin
   end;
 end;
 
+procedure TArm64Backend.EmitIndexedPropWrite(AProp: TPropertyInfo;
+  const AOwner: string; AVSlot: Integer; AIndex, AValue: TASTExpr;
+  AStmt: TASTStmt);
+var
+  RelStr: Boolean;
+  Shape: Integer;
+begin
+  { setter(self, index, value) for an indexed property write, shared by the
+    field form (Obj.Items[I] := V) and the DEFAULT-property form
+    (Obj[I] := V, a TStaticSubscriptAssign carrying PropWriteInfo) }
+  if AProp.IsStatic then
+    NotYet('static indexed property write', AStmt);
+  if AProp.TypeDesc.IsFloat() then
+    NotYet('float indexed property write', AStmt);
+  { The index rides in one integer register — an int OR a string (a
+    pointer) fits identically (leg 18).  A string KEY is passed BORROWED:
+    the by-value setter param retains its own copy only if it stores the
+    key, so the caller adds no ref — matching the x86-64 (:15211) and QBE
+    (:7310) reference backends, which have no index-type guard and no key
+    AddRef.  Other non-integer index kinds (float/record/managed-non-string)
+    stay an honest hole. }
+  if not (IsIntFam(AIndex.ResolvedType) or
+          (AIndex is TIntLiteral) or
+          ((AIndex.ResolvedType <> nil) and
+           (AIndex.ResolvedType.Kind = tyString))) then
+    NotYet('indexed property with a non-integer index', AStmt);
+  if AProp.TypeDesc.Kind = tyRecord then
+  begin
+    { a record VALUE travels by its AAPCS64 shape: a large one by address,
+      a one- or two-eightbyte one in integer registers (the setter's prologue
+      copies it in by the same rule).  The value is read from the source's
+      own storage, so it must be addressable; an HFA rides in float
+      registers and stays an honest hole. }
+    Shape := RecReturnShape(TRecordTypeDesc(AProp.TypeDesc));
+    if (Shape < 0) or (Shape > 2) then
+      NotYet('indexed property of this record shape', AStmt);
+    Self.EmitExprToX0(AIndex);
+    EmitPushX0();                          { index arg }
+    EmitRecAddrToX0(AValue);
+    EmitPushX0();                          { value address }
+    if AStmt is TFieldAssignment then
+      EmitPropRecvToX0(TFieldAssignment(AStmt))
+    else
+      EmitSubscriptPropRecvToX0(TStaticSubscriptAssign(AStmt));
+    EmitPopTo('x9');                       { value address }
+    EmitPopTo('x1');                       { index }
+    case Shape of
+      0: Self.Emit(#9'mov x2, x9');
+      1: Self.Emit(#9'ldr x2, [x9]');
+    else
+      Self.Emit(#9'ldp x2, x3, [x9]');
+    end;
+    if AVSlot >= 0 then
+    begin
+      Self.Emit(#9'ldr x9, [x0]');
+      Self.Emit(Format(#9'ldr x9, [x9, #%d]', [(AVSlot + 1) * 8]));
+      Self.Emit(#9'blr x9');
+    end
+    else
+      Self.Emit(Format(#9'bl %s', [PropAccessorSym(AOwner, AProp.WriteMethod)]));
+    Exit;
+  end;
+  { An OWNED managed STRING value (a concat / call-result transient) is
+    passed BORROWED to the setter (which retains its own copy), so the
+    caller must dispose the transient AFTER the call — the same +1 handover
+    EmitCall applies to an owned-transient string argument.  A class-typed
+    owned transient here is still an honest hole (untested; no self-host
+    need).  RelStr flags the string-transient case; the parked value in a
+    dedicated top-of-stack slot survives the setter bl/blr (only x0-x18 are
+    clobbered) and is released by shape below. }
+  RelStr := AProp.TypeDesc.IsString() and
+            ArcBuiltinStrArgOwnsRef(AValue);
+  if (AProp.TypeDesc.Kind = tyClass) and
+     ArcExprOwnsRef(AValue) then
+    NotYet('owned transient as indexed-property value', AStmt);
+  { The borrowed case emits byte-identical code to before (index pushed,
+    then value; pop x2=value, x1=index).  For an owned string transient the
+    value pointer is captured in x19 (callee-saved, survives the setter
+    bl/blr) so the SAME buffer that was passed can be released afterwards —
+    the setter borrows the value, so the caller disposes the transient. }
+  if RelStr then
+    Self.Emit(#9'str x19, [sp, #-16]!');  { preserve x19 }
+  Self.EmitExprToX0(AIndex);
+  EmitPushX0();                          { index arg }
+  Self.EmitExprToX0(AValue);
+  if RelStr then
+  begin
+    Self.Emit(#9'mov x19, x0');          { capture the value transient }
+    { rc=0 transients pin BEFORE the call — the setter's by-value param
+      cycle would free an unpinned one mid-call
+      (BUG-20260722-arm64-propsetter-pin-after-call). }
+    Self.EmitOwnedStrTransientPin(AValue);
+  end;
+  EmitPushX0();                          { value arg }
+  if AStmt is TFieldAssignment then
+    EmitPropRecvToX0(TFieldAssignment(AStmt))
+  else
+    EmitSubscriptPropRecvToX0(TStaticSubscriptAssign(AStmt));
+  EmitPopTo('x2');                       { value }
+  EmitPopTo('x1');                       { index }
+  if AVSlot >= 0 then
+  begin
+    Self.Emit(#9'ldr x9, [x0]');
+    Self.Emit(Format(#9'ldr x9, [x9, #%d]',
+      [(AVSlot + 1) * 8]));
+    Self.Emit(#9'blr x9');
+  end
+  else
+    Self.Emit(Format(#9'bl %s',
+      [PropAccessorSym(AOwner,
+        AProp.WriteMethod)]));
+  if RelStr then
+  begin
+    Self.Emit(#9'mov x0, x19');          { the value transient }
+    EmitOwnedStrTransientRelease(AValue);
+    Self.Emit(#9'ldr x19, [sp], #16');   { restore x19 }
+  end;
+end;
+
+procedure TArm64Backend.EmitSubscriptPropRecvToX0(AStmt: TStaticSubscriptAssign);
+begin
+  { default-property receiver Obj[I] := V: a class variable holds the
+    instance; a record variable's ADDRESS is its Self.  A Self field or a var
+    parameter adds the usual indirection. }
+  if AStmt.IsImplicitSelf then
+  begin
+    if AStmt.ImplicitFieldInfo = nil then
+      NotYet('default-property write on this receiver form', AStmt);
+    EmitLoadSlot('x0', 'Self');
+    if AStmt.ImplicitFieldInfo.TypeDesc.Kind = tyRecord then
+    begin
+      if AStmt.ImplicitFieldInfo.Offset <> 0 then
+        EmitAddSubImm('add', 'x0', 'x0', AStmt.ImplicitFieldInfo.Offset);
+    end
+    else
+      Self.Emit(Format(#9'ldr x0, [x0, #%d]',
+        [AStmt.ImplicitFieldInfo.Offset]));
+    Exit;
+  end;
+  if IsCaptured(AStmt.ArrayName) then
+    NotYet('default-property write on a captured receiver', AStmt);
+  if (AStmt.ResolvedArrayType <> nil) and
+     (AStmt.ResolvedArrayType.Kind = tyRecord) then
+  begin
+    if AStmt.IsVarParam then
+      EmitLoadSlot('x0', AStmt.ArrayName)
+    else
+      EmitRecordBaseAddr('x0', AStmt.ArrayName, False);
+    Exit;
+  end;
+  EmitLoadSlot('x0', AStmt.ArrayName);
+  if AStmt.IsVarParam then
+    Self.Emit(#9'ldr x0, [x0]');
+end;
+
 procedure TArm64Backend.EmitFieldAssign(AStmt: TFieldAssignment);
 var
   RelStr: Boolean;
@@ -2555,74 +2713,9 @@ begin
     begin
       if AStmt.IsElemWrite then
         NotYet('array-field element write via subscript', AStmt);
-      if TPropertyInfo(AStmt.PropWriteInfo).IsStatic then
-        NotYet('static indexed property write', AStmt);
-      if TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.IsFloat() then
-        NotYet('float indexed property write', AStmt);
-      { The index rides in one integer register — an int OR a string (a
-        pointer) fits identically (leg 18).  A string KEY is passed BORROWED:
-        the by-value setter param retains its own copy only if it stores the
-        key, so the caller adds no ref — matching the x86-64 (:15211) and QBE
-        (:7310) reference backends, which have no index-type guard and no key
-        AddRef.  Other non-integer index kinds (float/record/managed-non-string)
-        stay an honest hole. }
-      if not (IsIntFam(AStmt.PropIndexExpr.ResolvedType) or
-              (AStmt.PropIndexExpr is TIntLiteral) or
-              ((AStmt.PropIndexExpr.ResolvedType <> nil) and
-               (AStmt.PropIndexExpr.ResolvedType.Kind = tyString))) then
-        NotYet('indexed property with a non-integer index', AStmt);
-      { An OWNED managed STRING value (a concat / call-result transient) is
-        passed BORROWED to the setter (which retains its own copy), so the
-        caller must dispose the transient AFTER the call — the same +1 handover
-        EmitCall applies to an owned-transient string argument.  A class-typed
-        owned transient here is still an honest hole (untested; no self-host
-        need).  RelStr flags the string-transient case; the parked value in a
-        dedicated top-of-stack slot survives the setter bl/blr (only x0-x18 are
-        clobbered) and is released by shape below. }
-      RelStr := TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.IsString() and
-                ArcBuiltinStrArgOwnsRef(AStmt.Expr);
-      if (TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.Kind = tyClass) and
-         ArcExprOwnsRef(AStmt.Expr) then
-        NotYet('owned transient as indexed-property value', AStmt);
-      { The borrowed case emits byte-identical code to before (index pushed,
-        then value; pop x2=value, x1=index).  For an owned string transient the
-        value pointer is captured in x19 (callee-saved, survives the setter
-        bl/blr) so the SAME buffer that was passed can be released afterwards —
-        the setter borrows the value, so the caller disposes the transient. }
-      if RelStr then
-        Self.Emit(#9'str x19, [sp, #-16]!');  { preserve x19 }
-      Self.EmitExprToX0(AStmt.PropIndexExpr);
-      EmitPushX0();                          { index arg }
-      Self.EmitExprToX0(AStmt.Expr);
-      if RelStr then
-      begin
-        Self.Emit(#9'mov x19, x0');          { capture the value transient }
-        { rc=0 transients pin BEFORE the call — the setter's by-value param
-          cycle would free an unpinned one mid-call
-          (BUG-20260722-arm64-propsetter-pin-after-call). }
-        Self.EmitOwnedStrTransientPin(AStmt.Expr);
-      end;
-      EmitPushX0();                          { value arg }
-      EmitPropRecvToX0(AStmt);
-      EmitPopTo('x2');                       { value }
-      EmitPopTo('x1');                       { index }
-      if AStmt.PropAccessorVSlot >= 0 then
-      begin
-        Self.Emit(#9'ldr x9, [x0]');
-        Self.Emit(Format(#9'ldr x9, [x9, #%d]',
-          [(AStmt.PropAccessorVSlot + 1) * 8]));
-        Self.Emit(#9'blr x9');
-      end
-      else
-        Self.Emit(Format(#9'bl %s',
-          [PropAccessorSym(AStmt.PropOwnerType,
-            TPropertyInfo(AStmt.PropWriteInfo).WriteMethod)]));
-      if RelStr then
-      begin
-        Self.Emit(#9'mov x0, x19');          { the value transient }
-        EmitOwnedStrTransientRelease(AStmt.Expr);
-        Self.Emit(#9'ldr x19, [sp], #16');   { restore x19 }
-      end;
+      EmitIndexedPropWrite(TPropertyInfo(AStmt.PropWriteInfo),
+        AStmt.PropOwnerType, AStmt.PropAccessorVSlot, AStmt.PropIndexExpr,
+        AStmt.Expr, AStmt);
       Exit;
     end;
     if TPropertyInfo(AStmt.PropWriteInfo).IsStatic then
@@ -7620,6 +7713,16 @@ procedure TArm64Backend.EmitStaticElemAssign(AStmt: TStaticSubscriptAssign);
 var
   Elem: TTypeDesc;
 begin
+  if AStmt.PropWriteInfo <> nil then
+  begin
+    { Obj[I] := V through a `default` indexed property: a setter call }
+    if TPropertyInfo(AStmt.PropWriteInfo).WriteMethod = '' then
+      NotYet('default-property write without a setter', AStmt);
+    EmitIndexedPropWrite(TPropertyInfo(AStmt.PropWriteInfo),
+      AStmt.PropOwnerType, AStmt.PropAccessorVSlot, AStmt.IndexExpr,
+      AStmt.ValueExpr, AStmt);
+    Exit;
+  end;
   { Arr[I] := V for a plain local/global static array.  The element
     ADDRESS is computed first and parked on the stack so the value
     expression (and any ARC release call) cannot invalidate it.

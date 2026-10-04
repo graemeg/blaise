@@ -171,6 +171,7 @@ type
     procedure TestInterfaceAssign_FromMethodCall;
     procedure TestInterfaceAssign_ToVarParamAndField;
     procedure TestVarOpenArray_ElemWrite_NoExtraDeref;
+    procedure TestDefaultIndexedPropWrite_CallsSetter;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4340,6 +4341,48 @@ begin
   AssertTrue('byte element stored', Pos(#9'strb w0, [x9]', AsmT) >= 0);
   AssertTrue('no extra dereference of the open-array base',
     Pos(#9'ldr x0, [x0]', AsmT) < 0);
+end;
+
+procedure TArm64BackendTests.TestDefaultIndexedPropWrite_CallsSetter;
+var
+  AsmT: string;
+begin
+  { Obj[I] := V through a `default` indexed property is a setter call with
+    Self in x0, the index in x1 and the value in x2 (it was NotYet); a
+    two-eightbyte record value rides in x2/x3 straight from its storage. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TRec = record A, B: Int64; end;
+      TC = class
+        FA: Int64;
+        procedure Put(K: Integer; V: Int64);
+        procedure PutRec(K: Integer; const R: TRec);
+        property Items[K: Integer]: Int64 write Put; default;
+        property Recs[K: Integer]: TRec write PutRec;
+      end;
+    procedure TC.Put(K: Integer; V: Int64);
+    begin
+      FA := K + V;
+    end;
+    procedure TC.PutRec(K: Integer; const R: TRec);
+    begin
+      FA := K + R.A + R.B;
+    end;
+    var
+      C: TC;
+      R: TRec;
+    begin
+      C := TC.Create();
+      C[2] := 40;
+      C.Recs[1] := R;
+    end.
+    ''');
+  AssertTrue('default-property write calls the setter',
+    Pos(#9'bl _TC_Put'#10, AsmT) >= 0);
+  AssertTrue('two-eightbyte record value loaded as a pair',
+    Pos(#9'ldp x2, x3, [x9]', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;
