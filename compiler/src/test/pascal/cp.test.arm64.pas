@@ -198,6 +198,8 @@ type
     procedure TestArrayFieldElemWrite_ChainedClassBase;
     procedure TestArrayFieldElemWrite_InterfaceElement;
     procedure TestClassArgToInterfaceParam_PassesItab;
+    procedure TestIntfCall_DoubleArg_ThroughEmitCall;
+    procedure TestIntfCall_OwnedReceiverReleased;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -2490,8 +2492,10 @@ begin
   AssertTrue('impllist emitted', Pos('_impllist_THi:', AsmT) >= 0);
   AssertTrue('interface typeinfo', Pos('_typeinfo_IGreeter:', AsmT) >= 0);
   AssertTrue('narrow stores itab', Pos('_itab_THi_IGreeter@PAGEOFF', AsmT) >= 0);
+  { the itab slot's ADDRESS is parked per call site (slot 0: the itab
+    itself) and the call branches through the word there }
   AssertTrue('dispatch through itab slot 0',
-    Pos(#9'ldr x9, [x9, #0]', AsmT) >= 0);
+    Pos(#9'ldr x9, [x10]'#10#9'blr x9', AsmT) >= 0);
   AssertTrue('dispatch call', Pos(#9'blr x9', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64intf.o');
@@ -4096,8 +4100,10 @@ begin
     end.
     ''');
   AssertTrue('string arg loaded into x1', Pos(#9'ldr x1, [sp], #16', AsmT) >= 0);
+  { the itab slot's ADDRESS is parked per call site (slot 0: the itab
+    itself) and the call branches through the word there }
   AssertTrue('dispatch through itab slot 0',
-    Pos(#9'ldr x9, [x9, #0]', AsmT) >= 0);
+    Pos(#9'ldr x9, [x10]'#10#9'blr x9', AsmT) >= 0);
   AssertTrue('dispatch call', Pos(#9'blr x9', AsmT) >= 0);
 end;
 
@@ -5196,6 +5202,61 @@ begin
   Body := Copy(Body, 0, Pos(#9'bl _Use', Body));
   AssertTrue('itab address materialised for the argument',
     Pos('adrp x1, _itab_TC_IC@PAGE', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestIntfCall_DoubleArg_ThroughEmitCall;
+var
+  AsmT: string;
+begin
+  { M.Scale(2.5, 4): a Double argument rides in d0 and the call branches
+    through the parked itab slot }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IM = interface
+        function Scale(D: Double; N: Int64): Double;
+      end;
+    var
+      M: IM;
+    begin
+      WriteLn(Trunc(M.Scale(2.5, 4)));
+    end.
+    ''');
+  AssertTrue('double argument in d0', Pos(#9'fmov d0, x9', AsmT) >= 0);
+  AssertTrue('branch through the itab slot',
+    Pos(#9'ldr x9, [x10]'#10#9'blr x9', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestIntfCall_OwnedReceiverReleased;
+var
+  AsmT: string;
+  PosCall, PosRel: Integer;
+begin
+  { Make().Get(): the owned receiver is released after the itab call, with
+    the result registers kept }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IC = interface
+        function Get: Int64;
+      end;
+    function Make: IC;
+    begin
+      Result := nil;
+    end;
+    begin
+      WriteLn(Make().Get());
+    end.
+    ''');
+  PosCall := Pos(#9'blr x9', AsmT);
+  AssertTrue('itab call found', PosCall >= 0);
+  PosRel := PosEx(#9'bl __ClassRelease', AsmT, PosCall);
+  AssertTrue('receiver released after the call', PosRel > PosCall);
+  AssertTrue('result registers saved around it',
+    (PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PosCall) > PosCall) and
+    (PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PosCall) < PosRel));
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

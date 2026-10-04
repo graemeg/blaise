@@ -430,6 +430,8 @@ type
     procedure TestRun_Native_ImplicitSelfClassIntermediate_ArrayRead;
     procedure TestRun_Native_VarParamClass_ArrayFieldElemWrite;
     procedure TestRun_Native_ClassArgToInterfaceParam;
+    procedure TestRun_Native_IntfCall_FloatRecordAndManyArgs;
+    procedure TestRun_Native_IntfCall_OwnedTransientReceiver;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -7360,6 +7362,91 @@ begin
     end.
     ''',
     '42' + LE + '0' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_IntfCall_FloatRecordAndManyArgs;
+begin
+  { an itab call goes through the ordinary call lowering: Double and record
+    arguments and a full integer register bank all work as for a direct call
+    (only int-class scalars and strings did).  Stack-passed arguments still
+    need the declared parameter types (BUG-20261004-intf-call-args-unchecked). }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TPt = record
+        X, Y: Int64;
+      end;
+      IM = interface
+        function Scale(D: Double; N: Integer): Double;
+        function Sum(P: TPt; A, B, C, D, E: Int64): Int64;
+      end;
+      TM = class(IM)
+        function Scale(D: Double; N: Integer): Double;
+        function Sum(P: TPt; A, B, C, D, E: Int64): Int64;
+      end;
+    function TM.Scale(D: Double; N: Integer): Double;
+    begin
+      Result := D * N;
+    end;
+    function TM.Sum(P: TPt; A, B, C, D, E: Int64): Int64;
+    begin
+      Result := P.X + P.Y + A + B + C + D + E;
+    end;
+    var
+      M: IM;
+      P: TPt;
+    begin
+      M := TM.Create();
+      P.X := 100;
+      P.Y := 200;
+      WriteLn(Trunc(M.Scale(2.5, 4) * 10));
+      WriteLn(M.Sum(P, 1, 2, 3, 4, 5));
+    end.
+    ''',
+    '100' + LE + '315' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_IntfCall_OwnedTransientReceiver;
+begin
+  { Make().Get() -- an interface call whose receiver is an owned call
+    result: the receiver outlives the call and is released exactly once
+    afterwards (it was NotYet on arm64). }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      IC = interface
+        function Get: Integer;
+      end;
+      TC = class(IC)
+        FV: Integer;
+        destructor Destroy; override;
+        function Get: Integer;
+      end;
+    destructor TC.Destroy;
+    begin
+      WriteLn('destroyed ', FV);
+      inherited Destroy();
+    end;
+    function TC.Get: Integer;
+    begin
+      Result := FV;
+    end;
+    function Make(V: Integer): IC;
+    var
+      T: TC;
+    begin
+      T := TC.Create();
+      T.FV := V;
+      Result := T;
+    end;
+    begin
+      WriteLn(Make(5).Get() + 1);
+      WriteLn('done');
+    end.
+    ''',
+    'destroyed 5' + LE + '6' + LE + 'done' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

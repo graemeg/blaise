@@ -579,8 +579,8 @@ type
     procedure EmitIntfStoreStacked(AOff: Integer; AValueExpr: TASTExpr;
       AIntfType: TTypeDesc);
     { x0/x1 := the (obj, itab) pair of an interface method-call RECEIVER }
-    procedure EmitIntfRecvPair(const AObjName: string; AObjExpr: TASTExpr;
-      AVarParam: Boolean; AImplicitBase: TFieldInfo; ANode: TASTNode);
+    function  EmitIntfRecvPair(const AObjName: string; AObjExpr: TASTExpr;
+      AVarParam: Boolean; AImplicitBase: TFieldInfo; ANode: TASTNode): Boolean;
     function  IntfItabSym(const AClassName, AIntfName: string): string;
     procedure EmitTypeinfoAddr(const AReg, ATypeName: string);
     procedure EmitVarArgAddrToX0(Arg: TASTExpr);
@@ -6559,18 +6559,17 @@ begin
   Self.Emit(#9'add sp, sp, #16');               { drop the base }
 end;
 
-procedure TArm64Backend.EmitIntfRecvPair(const AObjName: string;
+function TArm64Backend.EmitIntfRecvPair(const AObjName: string;
   AObjExpr: TASTExpr; AVarParam: Boolean; AImplicitBase: TFieldInfo;
-  ANode: TASTNode);
+  ANode: TASTNode): Boolean;
 begin
-  { the receiver of an itab call is BORROWED for the call's duration — an
-    owned transient receiver would need a post-call release }
+  { x0/x1 := the receiver pair.  Result = the obj half is an OWNED +1 (a
+    call result: MakeIntf().M()), which the caller releases after the call;
+    every other receiver is a borrow for the call's duration. }
+  Result := False;
   if AObjExpr <> nil then
   begin
-    if ArcExprOwnsRef(AObjExpr) then
-      NotYet('interface call on an owned transient receiver', ANode);
-    if EmitIntfPairToX0X1(AObjExpr, AObjExpr.ResolvedType) then
-      NotYet('interface call on an owned transient receiver', ANode);
+    Result := EmitIntfPairToX0X1(AObjExpr, AObjExpr.ResolvedType);
     Exit;
   end;
   if AImplicitBase <> nil then
@@ -13160,59 +13159,116 @@ begin
 end;
 
 procedure TArm64Backend.EmitIntfDispatch(const AVarName: string;
-  AIntf: TInterfaceTypeDesc; AIdx: Integer; AArgs: TObjectList; AObjExpr: TASTExpr; AVarParam: Boolean;
-  AImplicitBase: TFieldInfo; const ASret: string);
+  AIntf: TInterfaceTypeDesc; AIdx: Integer; AArgs: TObjectList;
+  AObjExpr: TASTExpr; AVarParam: Boolean; AImplicitBase: TFieldInfo;
+  const ASret: string);
 var
   I: Integer;
   Arg: TASTExpr;
+  Decl: TMethodDecl;
+  Par: TMethodParam;
+  Slot, RecvSlot: string;
+  Owned: Boolean;
+  NInt, NFloat: Integer;
 begin
-  { itab dispatch: obj in x0, args in x1.., fptr = itab[AIdx*8].  Scalar
-    int-class, class/pointer, and by-value STRING args in this slice — a
-    dedicated emitter because the interface has no TMethodDecl to drive
-    EmitCall's classification.
-    A string arg is passed by value: EmitExprToX0 loads the buffer pointer,
-    which is exactly what a `const S: string` param borrows.  BORROW ONLY —
-    unlike the direct-call EmitCall path, this emitter does NOT park an owned
-    or unowned-transient string arg for post-call release, so passing a
-    function-result / concat string here would leak it.  Every itab call the
-    self-compile reaches passes a plain named local (borrowed), so that is
-    safe today; a transient-string itab arg must add the EmitCall-style parking
-    (arm64 ~7998-8013) when a later leg first needs it.
-    The receiver pair is evaluated FIRST and parked: a field-chain receiver
-    may itself call (a getter), which would clobber argument registers.
-    ASret names a 16-byte frame scratch the callee fills through x8 (an
-    interface- or closure-returning method). }
-  if AArgs.Count > 7 then
-    NotYet('interface call with more than 7 arguments', nil);
-  EmitIntfRecvPair(AVarName, AObjExpr, AVarParam, AImplicitBase, AObjExpr);
-  Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+  { itab dispatch through the ordinary call path, like a closure call
+    (EmitFatPtrCall): the interface type records each method's var/out flags
+    but not its parameter types, so the synthesised declaration types each
+    parameter by its ARGUMENT (x86-64's itab dispatch classifies the same
+    way -- the semantic pass does not yet check interface-call arguments
+    against the declared parameters; see the BUGS.md entry).  EmitCall then
+    lowers every argument class it knows -- doubles in d registers, records
+    by shape, interfaces as pairs, closures, var/out addresses, owned
+    transients released after the call, stack overflow past 8 registers.
+
+    The receiver pair is evaluated FIRST: the obj half becomes Self (pushed,
+    ASelfPushed) and the ADDRESS of the method's itab slot is parked in a
+    per-site frame slot for VIRT_INDIRECT, which branches through the word
+    there.  ASret names a frame scratch the callee fills through x8. }
+  { Stack-passed arguments need the DECLARED parameter types: Apple's arm64
+    ABI packs stack arguments at their natural size, so an Integer literal
+    classified by its own type would be written as 4 bytes where an Int64
+    parameter reads 8.  The interface type does not carry parameter types
+    yet (BUG-20261004-intf-call-args-unchecked), so a call that would spill
+    stays an honest hole; register-passed arguments are unaffected. }
+  NInt := 1;                                    { Self }
+  NFloat := 0;
   for I := 0 to AArgs.Count - 1 do
   begin
     Arg := TASTExpr(AArgs.Items[I]);
     if AIntf.MethodParamIsVar(AIdx, I) then
+      Inc(NInt)
+    else if (Arg.ResolvedType <> nil) and
+            (Arg.ResolvedType.Kind = tyInterface) then
+      NInt := NInt + 2
+    else if (Arg.ResolvedType <> nil) and
+            (Arg.ResolvedType.Kind = tyRecord) then
     begin
-      { a var/out parameter takes the lvalue's ADDRESS, whatever its type --
-        passing the value instead hands the callee a nil / garbage pointer
-        to write through }
-      EmitVarArgAddrToX0(Arg);
-      EmitPushX0();
-      Continue;
-    end;
-    if not (IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) or
-            ((Arg.ResolvedType <> nil) and
-             (Arg.ResolvedType.Kind in [tyClass, tyPChar, tyPointer, tyString,
-                                        tyMetaClass]))) then
-      NotYet('interface-call argument of this type', Arg);
-    Self.EmitExprToX0(Arg);
-    EmitPushX0();
+      case RecReturnShape(TRecordTypeDesc(Arg.ResolvedType)) of
+        0, 1: Inc(NInt);
+        2: NInt := NInt + 2;
+      else
+        NFloat := NFloat + RecReturnShape(TRecordTypeDesc(Arg.ResolvedType)) - 100;
+      end;
+    end
+    else if IsFloatExpr(Arg) then
+      Inc(NFloat)
+    else
+      Inc(NInt);
   end;
-  for I := AArgs.Count - 1 downto 0 do
-    EmitPopTo('x' + IntToStr(I + 1));
-  Self.Emit(#9'ldp x0, x9, [sp], #16');
-  Self.Emit(Format(#9'ldr x9, [x9, #%d]', [AIdx * 8]));
-  if ASret <> '' then
-    EmitSlotAddr('x8', ASret);
-  Self.Emit(#9'blr x9');
+  if (NInt > 8) or (NFloat > 8) then
+    NotYet('interface call with stack-passed arguments', AObjExpr);
+  Owned := EmitIntfRecvPair(AVarName, AObjExpr, AVarParam, AImplicitBase,
+    AObjExpr);
+  Slot := '__icall_' + IntToStr(FJArgN);
+  FJArgN := FJArgN + 1;
+  if not FFrame.ContainsKey(Slot) then
+    AddLocal(Slot, 8);
+  if AIdx <> 0 then
+    EmitAddSubImm('add', 'x1', 'x1', AIdx * 8);
+  EmitStoreSlot('x1', Slot);                    { &itab[AIdx] }
+  RecvSlot := '';
+  if Owned then
+  begin
+    { an owned receiver (a call result) outlives the call in its own slot
+      and is released once afterwards }
+    RecvSlot := '__irecv_' + IntToStr(FJArgN);
+    FJArgN := FJArgN + 1;
+    if not FFrame.ContainsKey(RecvSlot) then
+      AddLocal(RecvSlot, 8);
+    EmitStoreSlot('x0', RecvSlot);
+  end;
+  EmitPushX0();                                 { the receiver obj = Self }
+  Decl := TMethodDecl.Create();
+  try
+    for I := 0 to AArgs.Count - 1 do
+    begin
+      Arg := TASTExpr(AArgs.Items[I]);
+      Par := TMethodParam.Create();
+      Par.ParamName := 'A' + IntToStr(I);
+      Par.ResolvedType := Arg.ResolvedType;
+      if (Par.ResolvedType = nil) and (Arg is TIntLiteral) then
+        Par.ResolvedType := FSymTable.TypeInt64;
+      Par.IsVarParam := AIntf.MethodParamIsVar(AIdx, I);
+      Decl.Params.Add(Par);
+    end;
+    FIndirectSlot := Slot;
+    EmitCall(Decl, '', AArgs, ASret, True, VIRT_INDIRECT);
+  finally
+    Decl.Free();
+  end;
+  if RecvSlot <> '' then
+  begin
+    { keep every result register across the release }
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+    Self.Emit(#9'stp d0, d1, [sp, #-16]!');
+    Self.Emit(#9'stp d2, d3, [sp, #-16]!');
+    EmitLoadSlot('x0', RecvSlot);
+    EmitCallSym('_ClassRelease');
+    Self.Emit(#9'ldp d2, d3, [sp], #16');
+    Self.Emit(#9'ldp d0, d1, [sp], #16');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+  end;
 end;
 
 procedure TArm64Backend.EmitIntfMetaSections;
