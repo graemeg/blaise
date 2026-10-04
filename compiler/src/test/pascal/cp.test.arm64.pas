@@ -190,6 +190,7 @@ type
     procedure TestSmallSetResult_ReturnedInX0;
     procedure TestInterfaceFromDeref_PairLoad;
     procedure TestInterfaceArg_OwnedCallResultReleased;
+    procedure TestForIn_RecordVar_CopiesElement;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4938,6 +4939,33 @@ begin
   AssertTrue('callee invoked', PosCall >= 0);
   PosRel := PosEx(#9'bl __ClassRelease', AsmT, PosCall);
   AssertTrue('owned obj half released after the call', PosRel > PosCall);
+end;
+
+procedure TArm64BackendTests.TestForIn_RecordVar_CopiesElement;
+var
+  AsmT: string;
+begin
+  { for R in A over an array of records: each element is copied into the
+    loop variable (16-byte memcpy), with the string field retained }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TItem = record
+        Name: string;
+        N: Int64;
+      end;
+    var
+      A: array[0..2] of TItem;
+      R: TItem;
+    begin
+      for R in A do
+        WriteLn(R.N);
+    end.
+    ''');
+  AssertTrue('source field retained', Pos(#9'bl __StringAddRef', AsmT) >= 0);
+  AssertTrue('element copied into the loop variable',
+    Pos(#9'movz x2, #16'#10#9'bl _memcpy', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

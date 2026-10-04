@@ -423,6 +423,7 @@ type
     procedure TestRun_Native_SmallSetFunctionResult;
     procedure TestRun_Native_InterfaceFromPointerDeref;
     procedure TestRun_Native_InterfaceArg_AnyExpression;
+    procedure TestRun_Native_ForIn_RecordAndInterfaceVars;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -7006,6 +7007,108 @@ begin
     ''',
     '1 2 destroyed 3' + LE + '3' + LE + 'end run' + LE + 'destroyed 1' + LE +
     'destroyed 2' + LE + 'done' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_ForIn_RecordAndInterfaceVars;
+begin
+  { for-in with a RECORD or INTERFACE loop variable, over an array (the
+    element is copied, retaining) and over a TList enumerator (Current comes
+    back through x8 / x0:x1, owned, and moves in) -- regex.tests'
+    `for M in L` over a TList<TMatch>. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    uses Generics.Collections;
+    type
+      TItem = record
+        Name: string;
+        N: Integer;
+      end;
+      TBig = record
+        A, B, C: Int64;
+      end;
+      IG = interface
+        function Greet: Integer;
+      end;
+      TG = class(IG)
+        FV: Integer;
+        destructor Destroy; override;
+        function Greet: Integer;
+      end;
+    destructor TG.Destroy;
+    begin
+      WriteLn('destroyed ', FV);
+      inherited Destroy();
+    end;
+    function TG.Greet: Integer;
+    begin
+      Result := FV;
+    end;
+    procedure Run;
+    var
+      L: TList<TItem>;
+      LB: TList<TBig>;
+      LI: TList<IG>;
+      A: array[0..2] of TItem;
+      AI: array of IG;
+      It: TItem;
+      B: TBig;
+      G: IG;
+      T: TG;
+      S: string;
+      Sum: Int64;
+      I: Integer;
+    begin
+      L := TList<TItem>.Create();
+      for I := 1 to 3 do
+      begin
+        It.Name := 'n' + IntToStr(I);
+        It.N := I;
+        L.Add(It);
+        A[I - 1] := It;
+      end;
+      S := '';
+      for It in L do
+        S := S + It.Name + ':' + IntToStr(It.N) + ' ';
+      for It in A do
+        S := S + It.Name + ' ';
+      WriteLn(S);
+      LB := TList<TBig>.Create();
+      for I := 1 to 3 do
+      begin
+        B.A := I; B.B := I * 10; B.C := I * 100;
+        LB.Add(B);
+      end;
+      Sum := 0;
+      for B in LB do
+        Sum := Sum + B.A + B.B + B.C;
+      WriteLn(Sum);
+      SetLength(AI, 2);
+      T := TG.Create(); T.FV := 7; AI[0] := T;
+      T := TG.Create(); T.FV := 8; AI[1] := T;
+      T := nil;
+      LI := TList<IG>.Create();
+      for G in AI do
+      begin
+        WriteLn('greet ', G.Greet());
+        LI.Add(G);
+      end;
+      AI[0] := nil;
+      AI[1] := nil;
+      for G in LI do
+        WriteLn('list ', G.Greet());
+      G := nil;
+      LI.Free();
+      WriteLn('end run');
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''',
+    'n1:1 n2:2 n3:3 n1 n2 n3 ' + LE + '666' + LE + 'greet 7' + LE +
+    'greet 8' + LE + 'list 7' + LE + 'list 8' + LE + 'destroyed 7' + LE +
+    'destroyed 8' + LE + 'end run' + LE + 'done' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

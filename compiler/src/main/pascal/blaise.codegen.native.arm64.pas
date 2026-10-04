@@ -387,6 +387,9 @@ type
     procedure EmitFor(AStmt: TForStmt);
     procedure EmitForIn(AStmt: TForInStmt);
     procedure EmitForInAssignX0(AStmt: TForInStmt; AOwned: Boolean);
+    { assign the record / interface value whose ADDRESS is in x0 to a for-in
+      loop variable; AOwned = the value's references transfer (no retain) }
+    procedure EmitForInAssignAddr(AStmt: TForInStmt; AOwned: Boolean);
     procedure EmitPointerWrite(AStmt: TPointerWriteStmt);
     procedure EmitNarrowX0(AType: TTypeDesc);
     procedure EmitBuiltinStrCall1(AArg: TASTExpr; const ASym: string);
@@ -8450,8 +8453,54 @@ begin
   EmitStoreSlot('x0', AStmt.VarName);
 end;
 
+procedure TArm64Backend.EmitForInAssignAddr(AStmt: TForInStmt;
+  AOwned: Boolean);
+begin
+  { x0 = the ADDRESS of the incoming record / interface value }
+  if AStmt.ResolvedVarType.Kind = tyInterface then
+  begin
+    { the (obj, itab) pair: retain a borrowed obj, release the old binding,
+      store both halves }
+    Self.Emit(#9'ldp x0, x1, [x0]');
+    if not AOwned then
+    begin
+      Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+      EmitCallSym('_ClassAddRef');
+      Self.Emit(#9'ldp x0, x1, [sp], #16');
+    end;
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+    EmitLoadSlot('x0', AStmt.VarName);
+    EmitCallSym('_ClassRelease');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+    EmitStoreSlot('x0', AStmt.VarName);
+    EmitStoreSlot('x1', AStmt.VarName + '_itab');
+    Exit;
+  end;
+  { a record: the record-assignment discipline -- retain a borrowed
+    source's managed fields, release the loop variable's old ones, copy.
+    Callee-saved x19/x22 hold the two addresses across the walk calls. }
+  Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+  Self.Emit(#9'mov x19, x0');
+  EmitSlotAddr('x22', AStmt.VarName);
+  if AggHasManaged(AStmt.ResolvedVarType) then
+  begin
+    if not AOwned then
+      Self.EmitRecordFieldRetains(TRecordTypeDesc(AStmt.ResolvedVarType), 'x19');
+    Self.EmitRecordFieldReleases(TRecordTypeDesc(AStmt.ResolvedVarType),
+      'x22', False);
+  end;
+  Self.Emit(#9'mov x0, x22');
+  Self.Emit(#9'mov x1, x19');
+  EmitIntLiteral('x2', AStmt.ResolvedVarType.RawSize());
+  EmitCallSym('memcpy');
+  Self.Emit(#9'ldp x19, x22, [sp], #16');
+end;
+
 procedure TArm64Backend.EmitForIn(AStmt: TForInStmt);
 var
+  IsAgg: Boolean;
+  Tmp: string;
+  Shape: Integer;
   CondL, NextL, EndL, NilLenL: string;
   Elem: TTypeDesc;
   ESz: Integer;
@@ -8459,8 +8508,11 @@ var
   EmptyArgs: TObjectList;
 begin
   if (AStmt.ResolvedVarType <> nil) and
-     (AStmt.ResolvedVarType.Kind in [tyRecord, tyInterface]) then
-    NotYet('for-in loop variable of this type', AStmt);
+     (AStmt.ResolvedVarType.Kind in [tyRecord, tyInterface]) and
+     IsCaptured(AStmt.VarName) then
+    NotYet('captured for-in loop variable of this type', AStmt);
+  IsAgg := (AStmt.ResolvedVarType <> nil) and
+           (AStmt.ResolvedVarType.Kind in [tyRecord, tyInterface]);
   CondL := NewLabel('ficond');
   NextL := NewLabel('finext');
   EndL := NewLabel('fiend');
@@ -8478,7 +8530,8 @@ begin
       Elem := TStaticArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType
     else
       Elem := TDynArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType;
-    if (Elem = nil) or (Elem.Kind = tyRecord) or (Elem.RawSize() > 8) then
+    if (Elem = nil) or
+       (not (Elem.Kind in [tyRecord, tyInterface]) and (Elem.RawSize() > 8)) then
       NotYet('for-in over aggregate elements', AStmt);
     ESz := Elem.RawSize();
     if AStmt.IsArrayIter then
@@ -8517,8 +8570,15 @@ begin
     EmitIntLiteral('x2', ESz);
     Self.Emit(#9'mul x1, x1, x2');
     Self.Emit(#9'add x0, x0, x1');
-    EmitElemLoad(Elem);
-    EmitForInAssignX0(AStmt, False);
+    if IsAgg then
+      { a record / interface element is copied from its address; the
+        element stays the array's, so the copy retains }
+      EmitForInAssignAddr(AStmt, False)
+    else
+    begin
+      EmitElemLoad(Elem);
+      EmitForInAssignX0(AStmt, False);
+    end;
     FBreakLbls.Add(EndL);
     FLoopExcDepth.Add(IntToStr(FExcDepth));
     FContLbls.Add(NextL);
@@ -8666,9 +8726,41 @@ begin
     EmitLoadSlot('x0', AStmt.EnumVarName);
     EmitMethodCallCommon(MN, 'MoveNext', EmptyArgs);
     Self.Emit(Format(#9'cbz x0, %s', [EndL]));
-    EmitLoadSlot('x0', AStmt.EnumVarName);
-    EmitMethodCallCommon(Cur, Cur.Name, EmptyArgs);
-    EmitForInAssignX0(AStmt, True);
+    if IsAgg then
+    begin
+      { a record / interface Current comes back through x8 (or x0:x1 for a
+        small record) into a per-site scratch, OWNED, and moves into the
+        loop variable without a retain }
+      Tmp := '__ficur_' + IntToStr(FJArgN);
+      FJArgN := FJArgN + 1;
+      if not FFrame.ContainsKey(Tmp) then
+        AddLocal(Tmp, AStmt.ResolvedVarType.RawSize());
+      Shape := 0;
+      if AStmt.ResolvedVarType.Kind = tyRecord then
+        Shape := RecReturnShape(TRecordTypeDesc(AStmt.ResolvedVarType));
+      if (Shape >= 100) then
+        NotYet('for-in over an HFA-record enumerator', AStmt);
+      EmitLoadSlot('x0', AStmt.EnumVarName);
+      EmitPushX0();
+      if Shape = 0 then
+        EmitCall(Cur, Cur.Name, EmptyArgs, Tmp, True, Cur.VTableSlot)
+      else
+      begin
+        EmitCall(Cur, Cur.Name, EmptyArgs, '', True, Cur.VTableSlot);
+        EmitSlotAddr('x9', Tmp);
+        Self.Emit(#9'str x0, [x9]');
+        if Shape = 2 then
+          Self.Emit(#9'str x1, [x9, #8]');
+      end;
+      EmitSlotAddr('x0', Tmp);
+      EmitForInAssignAddr(AStmt, True);
+    end
+    else
+    begin
+      EmitLoadSlot('x0', AStmt.EnumVarName);
+      EmitMethodCallCommon(Cur, Cur.Name, EmptyArgs);
+      EmitForInAssignX0(AStmt, True);
+    end;
     FBreakLbls.Add(EndL);
     FLoopExcDepth.Add(IntToStr(FExcDepth));
     FContLbls.Add(CondL);
