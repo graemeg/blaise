@@ -256,6 +256,7 @@ type
     procedure EmitAnonValueInto(AME: TAnonMethodExpr; const ASlot: string);
     procedure EmitFatPtrAssign(AAsgn: TAssignment);
     procedure EmitParenlessCtor(AFA: TFieldAccessExpr);
+    procedure EmitSetIncludeExclude(ACall: TProcCall; AInclude: Boolean);
     function  EmitClosureResultCall(ACallDecl: TMethodDecl; const AName: string;
       AArgs: TObjectList): string;
     procedure EmitEnvPrologue(ADecl: TMethodDecl);
@@ -656,6 +657,14 @@ function IsAggregateReturn(AType: TTypeDesc): Boolean;
 begin
   Result := (AType <> nil) and
     ((AType.Kind in [tyRecord, tyInterface]) or IsMethodPtrType(AType));
+end;
+
+{ A set held inline as a bitmask (<= 64 members).  A jumbo set is a byte
+  bitmap reached by ADDRESS, so it is not a loadable scalar. }
+function IsSmallSetType(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and (AType is TSetTypeDesc) and
+            not TSetTypeDesc(AType).IsJumbo();
 end;
 
 constructor TArm64Backend.Create(const ATarget: TTargetDesc);
@@ -1896,6 +1905,70 @@ begin
     EmitMethodCallExpr(MC);
   finally
     MC.Free();
+  end;
+end;
+
+procedure TArm64Backend.EmitSetIncludeExclude(ACall: TProcCall;
+  AInclude: Boolean);
+var
+  SetT: TSetTypeDesc;
+  LVal: TAddrOfExpr;
+  W: Integer;
+begin
+  { Include(S, E) / Exclude(S, E), mirroring x86-64: the set lvalue is
+    addressed through a transient @-wrapper, so a plain variable, a field and
+    an element all work.  A jumbo set (> 64 members) goes to _SetInclude /
+    _SetExclude with its address and the ordinal; a small set ORs in (or
+    BICs out) 1 shl ord(E) at the set's own storage width. }
+  SetT := TSetTypeDesc(TASTExpr(ACall.Args.Items[0]).ResolvedType);
+  Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));       { ordinal }
+  if not SetT.IsJumbo() then
+  begin
+    Self.Emit(#9'mov x1, x0');
+    Self.Emit(#9'movz x0, #1');
+    Self.Emit(#9'lsl x0, x0, x1');                         { mask }
+  end;
+  EmitPushX0();
+  LVal := TAddrOfExpr.Create();
+  try
+    LVal.Line := ACall.Line;
+    LVal.Col := ACall.Col;
+    LVal.Expr := TASTExpr(ACall.Args.Items[0]);
+    Self.EmitExprToX0(LVal);                                { &S }
+  finally
+    LVal.Expr := nil;   { Args[0] is owned by the call node }
+    LVal.Free();
+  end;
+  EmitPopTo('x1');
+  if SetT.IsJumbo() then
+  begin
+    if AInclude then
+      EmitCallSym('_SetInclude')
+    else
+      EmitCallSym('_SetExclude');
+    Exit;
+  end;
+  W := SetT.RawSize();
+  case W of
+    1: Self.Emit(#9'ldrb w2, [x0]');
+    2: Self.Emit(#9'ldrh w2, [x0]');
+    4: Self.Emit(#9'ldr w2, [x0]');
+  else
+    Self.Emit(#9'ldr x2, [x0]');
+  end;
+  if AInclude then
+    Self.Emit(#9'orr x2, x2, x1')
+  else
+  begin
+    Self.Emit(#9'mvn x1, x1');                             { no bic encoding }
+    Self.Emit(#9'and x2, x2, x1');
+  end;
+  case W of
+    1: Self.Emit(#9'strb w2, [x0]');
+    2: Self.Emit(#9'strh w2, [x0]');
+    4: Self.Emit(#9'str w2, [x0]');
+  else
+    Self.Emit(#9'str x2, [x0]');
   end;
 end;
 
@@ -4307,6 +4380,22 @@ begin
       if (TAddrOfExpr(AExpr).Expr.ResolvedType <> nil) and
          (TAddrOfExpr(AExpr).Expr.ResolvedType.Kind = tyInterface) then
         NotYet('address-of an interface variable (fat pointer)', AExpr);
+      { a bare FIELD of Self inside a method: Self + the field's offset (there
+        is no slot of that name) }
+      if TIdentExpr(TAddrOfExpr(AExpr).Expr).IsImplicitSelf and
+         (TIdentExpr(TAddrOfExpr(AExpr).Expr).ImplicitFieldInfo <> nil) then
+      begin
+        EmitLoadSlot('x0', 'Self');
+        EmitAddSubImm('add', 'x0', 'x0',
+          TFieldInfo(TIdentExpr(TAddrOfExpr(AExpr).Expr).ImplicitFieldInfo).Offset);
+        Exit;
+      end;
+      { a captured variable: '_cap_<Name>' already holds its address }
+      if IsCaptured(TIdentExpr(TAddrOfExpr(AExpr).Expr).Name) then
+      begin
+        EmitLoadSlot('x0', '_cap_' + TIdentExpr(TAddrOfExpr(AExpr).Expr).Name);
+        Exit;
+      end;
       EmitSlotAddr('x0', TIdentExpr(TAddrOfExpr(AExpr).Expr).Name);
       Exit;
     end;
@@ -4460,7 +4549,8 @@ begin
       pointer.  An OWNED transient base (a call result, +1) is kept across
       the field load and released after — the loaded scalar field value
       survives the release. }
-    if not (IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
                tyDynArray]) or
@@ -4553,7 +4643,8 @@ begin
   begin
     { instance field read: the base is a POINTER — Obj's slot value, or
       Self for a bare field name inside a method }
-    if not (IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
                tyDynArray]) or
@@ -4598,7 +4689,8 @@ begin
      (not TFieldAccessExpr(AExpr).IsConstant) then
   begin
     { plain Rec.Field read of a local/global/var-param record }
-    if not (IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
                tyDynArray]) or
@@ -4635,7 +4727,8 @@ begin
   begin
     { field of a RECORD-VALUED field access (FTok.Token.TextStart):
       compute the inner record's address, then load at the outer offset }
-    if not (IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
                tyDynArray]) or
@@ -4656,7 +4749,8 @@ begin
   begin
     { field of a record-RETURNING CALL (HostTarget().OS): materialise the
       record into the __rret scratch, then load the field at its offset }
-    if not (IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
                tyDynArray]) or
@@ -4678,7 +4772,8 @@ begin
   begin
     { field of a subscripted RECORD element: A[I].Kind — the subscript
       emitters yield the element address, the field loads at its offset }
-    if not (IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
                tyDynArray]) or
@@ -6179,6 +6274,13 @@ begin
   begin
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
     EmitCallSym('_ProcessFree');
+    Exit;
+  end;
+  if (SameText(ACall.Name, 'Include') or SameText(ACall.Name, 'Exclude')) and
+     (ACall.ResolvedDecl = nil) and (ACall.Args.Count = 2) and
+     (TASTExpr(ACall.Args.Items[0]).ResolvedType is TSetTypeDesc) then
+  begin
+    EmitSetIncludeExclude(ACall, SameText(ACall.Name, 'Include'));
     Exit;
   end;
   if (SameText(ACall.Name, 'Inc') or SameText(ACall.Name, 'Dec')) and
@@ -8321,15 +8423,18 @@ begin
     begin
       Self.Emit(#9'ldrh w0, [x0]');
       { no ldrsh in the internal assembler: sign-extend a SmallInt with the
-        shift pair, as EmitNormaliseNarrowSlot does }
-      if AElem.Kind <> tyWord then
+        shift pair, as EmitNormaliseNarrowSlot does (a Word or a 2-byte set
+        bitmask stays zero-extended) }
+      if AElem.Kind = tySmallInt then
       begin
         Self.Emit(#9'lsl x0, x0, #48');
         Self.Emit(#9'asr x0, x0, #48');
       end;
     end;
     4:
-      if AElem.Kind = tyUInt32 then
+      if (AElem.Kind = tyUInt32) or (AElem.Kind = tySet) then
+        { unsigned / bitmask: zero-extend (a sign-extended set with bit 31
+          set would compare unequal to the same set built in a register) }
         Self.Emit(#9'ldr w0, [x0]')
       else if AElem.Kind = tySingle then
         Self.Emit(#9'ldr w0, [x0]')
