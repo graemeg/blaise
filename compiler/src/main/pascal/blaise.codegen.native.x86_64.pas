@@ -18320,7 +18320,11 @@ end;
 
 function TX86_64Backend.RecArgBufBytes(AArg: TASTExpr): Integer;
 begin
-  Result := (TRecordTypeDesc(AArg.ResolvedType).TotalSize() + 15) and (-16);
+  { the hoisted sret buffer: a record's TotalSize, or a jumbo set's bitmap }
+  if IsJumboSet(AArg.ResolvedType) then
+    Result := (AArg.ResolvedType.RawSize() + 15) and (-16)
+  else
+    Result := (TRecordTypeDesc(AArg.ResolvedType).TotalSize() + 15) and (-16);
 end;
 
 function TX86_64Backend.ParamsHaveVarString(AParams: TObjectList): Boolean;
@@ -19274,8 +19278,16 @@ begin
 
     { Record-returning call: materialise the sret buffer here and save the
       buffer pointer.  Evaluated mid-loop it would land between pushed
-      argument slots and corrupt the popq sequence. }
-    if (not IsVarPos) and Self.IsRecCallArg(Arg) then
+      argument slots and corrupt the popq sequence.  A JUMBO-SET-returning
+      function call uses the same hidden-sret buffer and is passed by pointer,
+      so it is hoisted the same way -- evaluated inline, its buffer was left
+      below an already-pushed sret destination, and Count(Fold(Fold(X)))
+      handed the outer Fold the inner result's first bitmap word as its
+      destination. }
+    if (not IsVarPos) and
+       (Self.IsRecCallArg(Arg) or
+        ((Arg is TFuncCallExpr) and (TFuncCallExpr(Arg).ResolvedDecl <> nil) and
+         IsJumboSet(Arg.ResolvedType))) then
     begin
       if Arg is TMethodCallExpr then
       begin
@@ -19438,10 +19450,11 @@ begin
         Self.Emit(Format(#9'movq %d(%%rsp), %%rdi', [Off]));
         Self.Emit(#9'callq _ClassRelease');
       end
-      else
+      else if TASTExpr(AArgs.Items[I]).ResolvedType.Kind = tyRecord then
       begin
         { Hoisted record temp: release its managed fields; the buffer
-          itself is stack memory reclaimed below. }
+          itself is stack memory reclaimed below.  (A hoisted jumbo-set
+          bitmap has no managed fields -- nothing to release.) }
         Self.Emit(Format(#9'movq %d(%%rsp), %%rbx', [Off]));
         Self.EmitRecordFieldReleases(
           TRecordTypeDesc(TASTExpr(AArgs.Items[I]).ResolvedType), '%rbx');

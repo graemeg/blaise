@@ -38,6 +38,7 @@ type
       e2e tests (asm generated in-process for linux-x86_64, so they run on
       any host). }
     procedure TestX86_SmallSetLiteral_RuntimeMemberOrredIn;
+    procedure TestX86_NestedJumboSetCallArg_Hoisted;
     { A PROGRAM-level static array of managed elements is a GLOBAL, so its
       cleanup runs through EmitGlobalReleases, not the procedure-frame walk.
       That kind chain handled string/class/dyn-array/interface/record but not
@@ -98,6 +99,38 @@ begin
   AssertTrue('constant member folded', Pos('movabsq $1099511627776, %rax', AsmT) >= 0);
   AssertTrue('runtime member shifted into place', Pos(#9'shlq %cl, %rdx', AsmT) >= 0);
   AssertTrue('and ORed into the mask', Pos(#9'orq %rdx, %rax', AsmT) >= 0);
+end;
+
+procedure TNativeArcTests.TestX86_NestedJumboSetCallArg_Hoisted;
+var
+  AsmT, Body: string;
+begin
+  { Count(Fold(Fold(X))): the inner jumbo-set call is hoisted like a record
+    call argument, so the outer Fold's sret destination is read from its own
+    saved slot (48 bytes up) rather than from 0(%rsp), which by then is the
+    inner result's bitmap. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TCls = set of Byte;
+    function Count(S: TCls): Integer;
+    begin
+      Result := 0;
+    end;
+    function Fold(const ACls: TCls): TCls;
+    begin
+      Result := ACls;
+    end;
+    var
+      X: TCls;
+    begin
+      WriteLn(Count(Fold(Fold(X))));
+    end.
+    ''');
+  Body := Copy(AsmT, Pos('main:', AsmT), Length(AsmT));
+  AssertTrue('outer destination read past the hoisted inner buffer',
+    Pos(#9'movq 48(%rsp), %rdi'#10#9'subq $8, %rsp'#10#9'callq Fold', Body) >= 0);
 end;
 
 function TNativeArcTests.GenAsm(const ASrc: string): string;
