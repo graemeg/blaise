@@ -4567,6 +4567,33 @@ begin
                      .IsImplicitSelf) then
         EmitSlotAddr('x0',
           TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).RecordName)
+      else if (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base = nil) and
+              TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).IsClassAccess and
+              (not TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).IsImplicitSelf) then
+      begin
+        { @Obj.Field: the instance pointer the class variable holds }
+        if not EmitCapturedBase('x0',
+                 TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).RecordName,
+                 True, False) then
+          EmitLoadSlot('x0', TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).RecordName);
+      end
+      else if (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base <> nil) and
+              (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base.ResolvedType <> nil) and
+              (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base.ResolvedType.Kind
+                 = tyClass) and
+              not ArcExprOwnsRef(TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base) then
+        { @A.B.Field with B a class: B's value is the instance pointer }
+        Self.EmitExprToX0(TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base)
+      else if (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base = nil) and
+              TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).IsImplicitSelf and
+              (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).ImplicitBaseInfo <> nil) then
+      begin
+        { @FRec.Field / @FObj.Field inside a method: step from Self to the
+          base the same way every other implicit-Self access does }
+        EmitLoadSlot('x0', 'Self');
+        EmitImplicitBaseStep('x0',
+          TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).ImplicitBaseInfo);
+      end
       else
         NotYet('address-of on this field form', AExpr);
       if TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).FieldInfo.Offset <> 0 then
@@ -4604,6 +4631,12 @@ begin
           Exit;
         end;
       end;
+    end;
+    { @P^ is just the pointer value P }
+    if TAddrOfExpr(AExpr).Expr is TDerefExpr then
+    begin
+      Self.EmitExprToX0(TDerefExpr(TAddrOfExpr(AExpr).Expr).Expr);
+      Exit;
     end;
     NotYet('address-of on this expression', AExpr);
   end;
@@ -6178,6 +6211,7 @@ var
   I: Integer;
   Arg: TASTExpr;
   Tmp: string;
+  IncLVal: TAddrOfExpr;
 begin
   if SameText(ACall.Name, 'WriteLn') then
   begin
@@ -6706,6 +6740,43 @@ begin
       EmitPopTo('x' + IntToStr(I));
     EmitLoadSlot('x9', ACall.Name);
     Self.Emit(#9'blr x9');
+    Exit;
+  end;
+  if (SameText(ACall.Name, 'Inc') or SameText(ACall.Name, 'Dec')) and
+     (ACall.ResolvedDecl = nil) and
+     ((ACall.Args.Count = 1) or (ACall.Args.Count = 2)) and
+     (TASTExpr(ACall.Args.Items[0]).ResolvedType <> nil) and
+     (IsIntFam(TASTExpr(ACall.Args.Items[0]).ResolvedType) or
+      (TASTExpr(ACall.Args.Items[0]).ResolvedType.Kind = tyPChar)) then
+  begin
+    { Inc/Dec on any other lvalue -- a record field, an array element, a
+      pointer dereference: address it through a transient @-wrapper (as
+      Include does) and load / adjust / store at the target's DECLARED
+      width, so it wraps like the type and leaves its neighbours alone.  A
+      typed pointer (which steps by its element size) is not taken here. }
+    if ACall.Args.Count = 2 then
+      Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]))
+    else
+      Self.Emit(#9'movz x0, #1');
+    EmitPushX0();                                      { [step] }
+    IncLVal := TAddrOfExpr.Create();
+    try
+      IncLVal.Line := ACall.Line;
+      IncLVal.Col := ACall.Col;
+      IncLVal.Expr := TASTExpr(ACall.Args.Items[0]);
+      Self.EmitExprToX0(IncLVal);                      { &target }
+    finally
+      IncLVal.Expr := nil;   { Args[0] is owned by the call node }
+      IncLVal.Free();
+    end;
+    EmitPopTo('x2');                                   { step }
+    Self.Emit(#9'mov x9, x0');
+    EmitElemLoad(TASTExpr(ACall.Args.Items[0]).ResolvedType);
+    if SameText(ACall.Name, 'Inc') then
+      Self.Emit(#9'add x0, x0, x2')
+    else
+      Self.Emit(#9'sub x0, x0, x2');
+    EmitStoreByWidth('x0', 'x9', TASTExpr(ACall.Args.Items[0]).ResolvedType);
     Exit;
   end;
   NotYet('call to ''' + ACall.Name + '''', ACall);
