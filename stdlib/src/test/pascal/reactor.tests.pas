@@ -22,7 +22,7 @@ interface
 
 uses
   blaise.testing, SysUtils, async.reactor,
-  { the per-OS readiness reactor: kqueue on FreeBSD, epoll on Linux.  Both
+  { the per-OS readiness reactor: kqueue on FreeBSD and macOS, epoll on Linux.  Both
     expose the same surface, so the tests are written against a TOsReactor
     alias and exercise whichever adapter the target actually uses (GH #204
     fallout: the hard epoll dependency could not compile on FreeBSD).
@@ -32,7 +32,11 @@ uses
   {$IFDEF FREEBSD}
   async.reactor.kqueue,
   {$ELSE}
+  {$IFDEF DARWIN}
+  async.reactor.kqueue,
+  {$ELSE}
   async.reactor.epoll,
+  {$ENDIF}
   {$ENDIF}
   async.fibers;
 
@@ -40,7 +44,11 @@ type
   {$IFDEF FREEBSD}
   TOsReactor = TKqueueReactor;
   {$ELSE}
+  {$IFDEF DARWIN}
+  TOsReactor = TKqueueReactor;
+  {$ELSE}
   TOsReactor = TEpollReactor;
+  {$ENDIF}
   {$ENDIF}
 
   TReactorTests = class(TTestCase)
