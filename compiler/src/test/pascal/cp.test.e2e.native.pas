@@ -6224,7 +6224,9 @@ begin
     and release the old (each instance dies exactly once, when its last
     reference goes), element reads feed dispatch and locals, and an
     interface FIELD compares against nil (a 16-byte load in a scalar
-    context is its obj half). }
+    context is its obj half).  The holder is released explicitly: the order
+    in which a routine's locals are released at scope exit differs between
+    backends, so the expected output must not depend on it. }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOn([beNative], '''
     program Prg;
@@ -6284,6 +6286,7 @@ begin
       WriteLn(H.Has());
       D[1] := nil;
       D[0] := nil;
+      H := nil;
       WriteLn('end run');
     end;
     begin
@@ -6292,7 +6295,7 @@ begin
     end.
     ''',
     '21 2 13 9' + LE + 'True' + LE + 'False' + LE + 'True' + LE +
-    'destroyed 10' + LE + 'end run' + LE + 'destroyed 5' + LE +
+    'destroyed 10' + LE + 'destroyed 5' + LE + 'end run' + LE +
     'destroyed 0' + LE + 'destroyed 20' + LE + 'done' + LE, 0);
 end;
 
