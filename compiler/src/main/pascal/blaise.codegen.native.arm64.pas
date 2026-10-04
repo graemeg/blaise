@@ -245,6 +245,8 @@ type
       (Code at +0, Env at +8) and leave the slot ADDRESS in x0 — the fat value
       is used by reference (leg 38).  For a capture-free literal Env is nil. }
     procedure EmitAnonValueToSlot(AME: TAnonMethodExpr);
+    procedure EmitAnonValueInto(AME: TAnonMethodExpr; const ASlot: string);
+    procedure EmitFatPtrAssign(AAsgn: TAssignment);
     { Invoke a closure/method-pointer fat value whose ADDRESS is in AAddrReg:
       load Code, pass Env as the hidden first arg (x0), the visible args in
       x1.., blr.  Result in x0/d0 per the callee's return type. }
@@ -1558,6 +1560,14 @@ begin
 end;
 
 procedure TArm64Backend.EmitAnonValueToSlot(AME: TAnonMethodExpr);
+begin
+  if AME.ValueSlotName = '' then
+    NotYet('anonymous method has no value slot', AME);
+  EmitAnonValueInto(AME, AME.ValueSlotName);
+end;
+
+procedure TArm64Backend.EmitAnonValueInto(AME: TAnonMethodExpr;
+  const ASlot: string);
 var
   MD: TMethodDecl;
   Sym: string;
@@ -1565,10 +1575,8 @@ begin
   MD := TMethodDecl(AME.LiftedDecl);
   if MD = nil then
     NotYet('anonymous method not lifted (semantic pass required)', AME);
-  if AME.ValueSlotName = '' then
-    NotYet('anonymous method has no value slot', AME);
   { x9 := &slot; release the old Env half (nil-safe), then write Code and Env. }
-  EmitSlotAddr('x9', AME.ValueSlotName);
+  EmitSlotAddr('x9', ASlot);
   Self.Emit(#9'ldr x0, [x9, #8]');            { old Env }
   Self.Emit(#9'str x9, [sp, #-16]!');         { park &slot across the call }
   EmitCallSym('_ClassRelease');
@@ -1593,6 +1601,68 @@ begin
   else
     Self.Emit(#9'str xzr, [x9, #8]');         { capture-free: Env = nil }
   Self.Emit(#9'mov x0, x9');                  { yield the slot ADDRESS }
+end;
+
+procedure TArm64Backend.EmitFatPtrAssign(AAsgn: TAssignment);
+var
+  IsRef: Boolean;
+  Src: TIdentExpr;
+begin
+  { Closure ('reference to') / method-pointer ('of object') target: a 16-byte
+    fat value, Code at +0 and Env/Data at +8.  The generic scalar path stored
+    only an 8-byte word -- for a closure literal, the ADDRESS of its temp --
+    so the call through the variable branched into data.  Mirrors the x86-64
+    reference-to assignment arms.  A 'reference to' value co-owns its Env, so
+    the old Env is released and a copied one retained; an 'of object' value
+    holds its receiver unretained, as on x86-64. }
+  if IsCaptured(AAsgn.Name) or AAsgn.IsVarParam or
+     (AAsgn.ImplicitSelfField <> nil) then
+    NotYet('closure / method-pointer assignment to this target', AAsgn);
+  IsRef := (AAsgn.ResolvedLhsType.Kind = tyProcedural) and
+           TProceduralTypeDesc(AAsgn.ResolvedLhsType).IsReference;
+  if AAsgn.Expr is TAnonMethodExpr then
+  begin
+    { materialise the literal straight into the target (old Env released,
+      captured Env retained -- EmitAnonValueInto) }
+    EmitAnonValueInto(TAnonMethodExpr(AAsgn.Expr), AAsgn.Name);
+    Exit;
+  end;
+  if AAsgn.Expr is TNilLiteral then
+  begin
+    EmitSlotAddr('x9', AAsgn.Name);
+    if IsRef then
+    begin
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');
+      EmitSlotAddr('x9', AAsgn.Name);
+    end;
+    Self.Emit(#9'stp xzr, xzr, [x9]');
+    Exit;
+  end;
+  if (AAsgn.Expr is TIdentExpr) and IsMethodPtrType(AAsgn.Expr.ResolvedType) and
+     not IsCaptured(TIdentExpr(AAsgn.Expr).Name) and
+     (TIdentExpr(AAsgn.Expr).ParamMode = pmNone) and
+     not TIdentExpr(AAsgn.Expr).IsImplicitSelf then
+  begin
+    { variable-to-variable copy: retain the incoming Env BEFORE releasing the
+      old one, so F := F is safe; then copy both words }
+    Src := TIdentExpr(AAsgn.Expr);
+    if IsRef then
+    begin
+      EmitSlotAddr('x9', Src.Name);
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassAddRef');
+      EmitSlotAddr('x9', AAsgn.Name);
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');
+    end;
+    EmitSlotAddr('x1', Src.Name);
+    Self.Emit(#9'ldp x9, x10, [x1]');
+    EmitSlotAddr('x1', AAsgn.Name);
+    Self.Emit(#9'stp x9, x10, [x1]');
+    Exit;
+  end;
+  NotYet('closure / method-pointer assignment from this expression', AAsgn);
 end;
 
 procedure TArm64Backend.GuardNoOpenArrayParam(AProcType: TProceduralTypeDesc;
@@ -5165,6 +5235,12 @@ begin
     EmitSlotAddr('x9', AAsgn.Name);
     Self.Emit(#9'str x1, [x9]');
     Self.Emit(#9'str x2, [x9, #8]');
+    Exit;
+  end;
+  if (AAsgn.ResolvedLhsType <> nil) and
+     IsMethodPtrType(AAsgn.ResolvedLhsType) then
+  begin
+    EmitFatPtrAssign(AAsgn);
     Exit;
   end;
   { Captured managed writes (leg 17).  '_cap_<Name>' holds &<Name>, so the ARC
@@ -11689,7 +11765,10 @@ begin
         FRecGlobals.AddObject(VD.Names.Strings[J], VD.ResolvedType);
         FGlobalSize.Add(VD.Names.Strings[J], VD.ResolvedType.RawSize());
       end
-      else
+      else if not IsMethodPtrType(VD.ResolvedType) then
+        { a closure / method-pointer global was sized 16 above; this generic
+          8 used to overwrite it, so the Env half spilled into the NEXT
+          global (it zeroed _g_GRtlPlatform and the next WriteLn crashed) }
         FGlobalSize.Add(VD.Names.Strings[J], 8);
     end;
   end;
@@ -12335,6 +12414,8 @@ begin
           FRecGlobals.AddObject(N, VD.ResolvedType);
         FGlobalSize.Add(N, VD.ResolvedType.RawSize());
       end
+      else if IsMethodPtrType(VD.ResolvedType) then
+        FGlobalSize.Add(N, 16)    { closure / method-pointer: Code + Env }
       else
         FGlobalSize.Add(N, 8);
     end;

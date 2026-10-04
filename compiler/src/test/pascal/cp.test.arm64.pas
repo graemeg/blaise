@@ -194,6 +194,7 @@ type
     procedure TestJumboSet_UnionCallsRtl;
     procedure TestJumboSet_OpInLoopDoesNotGrowStack;
     procedure TestUInt64Compare_UsesUnsignedConditions;
+    procedure TestClosureGlobal_Sized16_LiteralStoredInline;
     { slice 36: for-in over static/dyn arrays, string bytes, small sets }
     procedure TestForIn_ArraysStringsSets;
     { slice 36: for-in via the class enumerator protocol }
@@ -5160,6 +5161,32 @@ begin
   AssertTrue('UInt64 > uses hi', Pos('cset x0, hi', AsmT) >= 0);
   AssertTrue('UInt64 <= uses ls', Pos('cset x0, ls', AsmT) >= 0);
   AssertTrue('Int64 < stays signed lt', Pos('cset x0, lt', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestClosureGlobal_Sized16_LiteralStoredInline;
+var
+  AsmT: string;
+  P: Integer;
+begin
+  { A 'reference to' global is a 16-byte fat value (Code, Env).  It was
+    emitted as .zero 8 -- a later generic size overwrote the 16 -- so the Env
+    store spilled into the next global; and the literal's temp ADDRESS was
+    stored into F instead of the pair, so F(5) branched into data. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type TIntFn = reference to function(A: Integer): Integer;
+    var F: TIntFn;
+    begin
+      F := function(A: Integer): Integer begin Result := A + 1; end;
+      WriteLn(F(5))
+    end.
+    ''');
+  P := Pos('_g_F:', AsmT);
+  AssertTrue('F is defined', P >= 0);
+  AssertTrue('F is 16 bytes', Pos(#9'.zero 16', Copy(AsmT, P, 40)) >= 0);
+  AssertTrue('the literal is written into F itself',
+    Pos('_g_F@PAGE', Copy(AsmT, 0, Pos('___closure_1@PAGE', AsmT))) >= 0);
 end;
 
 procedure TArm64BackendTests.TestJumboSet_OpInLoopDoesNotGrowStack;
