@@ -141,7 +141,7 @@ var
   IR: string;
 begin
   IR := GenOPDF('program P; begin end.');
-  AssertTrue('version word present', Contains(IR, '.word 1'));
+  AssertTrue('version word present', Contains(IR, '.2byte 1'));
 end;
 
 procedure TOPDFTests.TestOPDF_TotalRecordsStreamTerminated;
@@ -153,7 +153,7 @@ begin
     further 'OPDF' magic headers).  pdr ignores the count entirely. }
   IR := GenOPDF('program P; var X: Integer; begin end.');
   AssertTrue('TotalRecords is the stream-terminated zero',
-    Contains(IR, '.int  0                        # TotalRecords (0 = stream-terminated)'));
+    Contains(IR, '.4byte 0                        # TotalRecords (0 = stream-terminated)'));
 end;
 
 procedure TOPDFTests.TestOPDF_Primitive_Integer;
@@ -468,7 +468,7 @@ begin
         end;
         begin end.
         ''');
-  AssertTrue('line 5 recorded', Contains(IR, '.int  5  # LineNumber'));
+  AssertTrue('line 5 recorded', Contains(IR, '.4byte 5  # LineNumber'));
 end;
 
 procedure TOPDFTests.TestOPDF_MainScope_RecType;
@@ -513,7 +513,7 @@ begin
           X := 1;
         end.
         ''');
-  AssertTrue('line 4 in main body recorded', Contains(IR, '.int  4  # LineNumber'));
+  AssertTrue('line 4 in main body recorded', Contains(IR, '.4byte 4  # LineNumber'));
 end;
 
 procedure TOPDFTests.TestOPDF_Pointer_RecType;
@@ -631,9 +631,9 @@ begin
     AssertTrue('open-array LocationExpr=5',
       Pos('.byte 5  # LocationExpr (open-array)', O) > 0);
     AssertTrue('open-array data offset -32',
-      Pos('.word -32  # LocationData', O) > 0);
+      Pos('.2byte -32  # LocationData', O) > 0);
     AssertTrue('open-array companion _high offset -40',
-      Pos('.word -40  # CompanionData (_high RBP offset)', O) > 0);
+      Pos('.2byte -40  # CompanionData (_high RBP offset)', O) > 0);
   finally
     Facts.Free();
     A.Free();
@@ -721,15 +721,15 @@ begin
         ''');
   AssertTrue('recProperty comment', Contains(IR, '# recProperty: Val'));
   { RecSize must match the fixed payload (32) + the three string lengths. }
-  AssertTrue('recProperty RecSize is 63', Contains(IR, '.int  63  # RecSize'));
+  AssertTrue('recProperty RecSize is 63', Contains(IR, '.4byte 63  # RecSize'));
   { The getter/setter symbol names and the property name must be present as the
     three trailing strings (the fields the corruption garbled). }
   AssertTrue('getter method symbol string', Contains(IR, '.ascii "TGadget_GetVal"'));
   AssertTrue('setter method symbol string', Contains(IR, '.ascii "TGadget_SetVal"'));
   { The length words must match the actual symbol lengths. }
-  AssertTrue('ReadMethodNameLen = 14', Contains(IR, '.word 14  # ReadMethodNameLen'));
-  AssertTrue('WriteMethodNameLen = 14', Contains(IR, '.word 14  # WriteMethodNameLen'));
-  AssertTrue('NameLen = 3', Contains(IR, '.word 3  # NameLen'));
+  AssertTrue('ReadMethodNameLen = 14', Contains(IR, '.2byte 14  # ReadMethodNameLen'));
+  AssertTrue('WriteMethodNameLen = 14', Contains(IR, '.2byte 14  # WriteMethodNameLen'));
+  AssertTrue('NameLen = 3', Contains(IR, '.2byte 3  # NameLen'));
 end;
 
 procedure TOPDFTests.TestOPDF_Interface_RecType;
@@ -833,7 +833,7 @@ var
   IR: string;
 begin
   IR := GenOPDF('program P; begin end.');
-  AssertTrue('unit count is 1', Contains(IR, '.int  1  # UnitCount'));
+  AssertTrue('unit count is 1', Contains(IR, '.4byte 1  # UnitCount'));
 end;
 
 procedure TOPDFTests.TestOPDF_RuntimeHelper_StringRelease;
@@ -975,8 +975,8 @@ begin
     AssertTrue('scope record present', Pos('recFunctionScope: TThing_Bump', O) > 0);
     AssertTrue('exact HighPC end label', Pos('.quad .Ldbg_end_7  # HighPC', O) > 0);
     AssertTrue('param record for By', Pos('recParameter: By', O) > 0);
-    AssertTrue('local with real offset', Pos('.word -24  # LocationData', O) > 0);
-    AssertTrue('param locatable too (Self at -8)', Pos('.word -8  # LocationData', O) > 0);
+    AssertTrue('local with real offset', Pos('.2byte -24  # LocationData', O) > 0);
+    AssertTrue('param locatable too (Self at -8)', Pos('.2byte -8  # LocationData', O) > 0);
   finally
     Facts.Free();
     A.Free();

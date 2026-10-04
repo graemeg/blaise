@@ -305,13 +305,13 @@ end;
 procedure TOPDFEmitter.EmitRecHdr(ARecType: Byte; ARecSize: Integer);
 begin
   L('    .byte ' + IntToStr(ARecType) + '  # RecType');
-  L('    .int  ' + IntToStr(ARecSize) + '  # RecSize');
+  L('    .4byte ' + IntToStr(ARecSize) + '  # RecSize');
   FRecordCount := FRecordCount + 1;
 end;
 
 procedure TOPDFEmitter.EmitNameLen(const AStr: string);
 begin
-  L('    .word ' + IntToStr(Length(AStr)) + '  # NameLen');
+  L('    .2byte ' + IntToStr(Length(AStr)) + '  # NameLen');
 end;
 
 procedure TOPDFEmitter.EmitNameData(const AStr: string);
@@ -395,8 +395,8 @@ begin
     else
       FTypeName := 'Pointer';
     L('    # field: ' + F.Name);
-    L('    .int  ' + IntToStr(GetOrAllocTypeID(FTypeName)) + '  # FieldTypeID');
-    L('    .int  ' + IntToStr(F.Offset) + '  # Offset');
+    L('    .4byte ' + IntToStr(GetOrAllocTypeID(FTypeName)) + '  # FieldTypeID');
+    L('    .4byte ' + IntToStr(F.Offset) + '  # Offset');
     EmitStrField(F.Name);
   end;
 end;
@@ -463,7 +463,7 @@ begin
   L('');
   L('    # recPrimitive: ' + CName);
   EmitRecHdr(REC_PRIMITIVE, RecSize);
-  L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+  L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
   L('    .byte ' + IntToStr(SzB) + '  # SizeInBytes');
   L('    .byte ' + IntToStr(IsSigned) + '  # IsSigned');
   L('    .byte ' + IntToStr(SubKind) + '  # SubKind');
@@ -491,10 +491,10 @@ begin
   L('');
   L('    # recUtf8Str: Utf8String (data_ptr-12=RC, data_ptr-8=Len, data_ptr-4=Cap, data_ptr+0=chars)');
   EmitRecHdr(REC_UTF8STR, RecSize);
-  L('    .int  ' + IntToStr(GetOrAllocTypeID(CNAME)) + '  # TypeID');
-  L('    .word ' + IntToStr(RC_OFFSET)  + '  # RefCountOffset');
-  L('    .word ' + IntToStr(LEN_OFFSET) + '  # LengthOffset');
-  L('    .word ' + IntToStr(CAP_OFFSET) + '  # CapacityOffset');
+  L('    .4byte ' + IntToStr(GetOrAllocTypeID(CNAME)) + '  # TypeID');
+  L('    .2byte ' + IntToStr(RC_OFFSET)  + '  # RefCountOffset');
+  L('    .2byte ' + IntToStr(LEN_OFFSET) + '  # LengthOffset');
+  L('    .2byte ' + IntToStr(CAP_OFFSET) + '  # CapacityOffset');
   EmitStrField(CNAME);
 end;
 
@@ -516,9 +516,9 @@ begin
   L('');
   L('    # recEnum: ' + CName);
   EmitRecHdr(REC_ENUM, RecSize);
-  L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+  L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
   L('    .byte 4                          # SizeInBytes');
-  L('    .int  ' + IntToStr(AType.Members.Count) + '  # MemberCount');
+  L('    .4byte ' + IntToStr(AType.Members.Count) + '  # MemberCount');
   EmitStrField(CName);
   for I := 0 to AType.Members.Count - 1 do
   begin
@@ -553,9 +553,9 @@ begin
   L('');
   L('    # recRecord: ' + CName);
   EmitRecHdr(REC_RECORD, RecSize);
-  L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
-  L('    .int  ' + IntToStr(AType.Fields.Count) + '  # FieldCount');
-  L('    .int  ' + IntToStr(AType.TotalSize()) + '  # TotalSize');
+  L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+  L('    .4byte ' + IntToStr(AType.Fields.Count) + '  # FieldCount');
+  L('    .4byte ' + IntToStr(AType.TotalSize()) + '  # TotalSize');
   EmitStrField(CName);
   EmitFields(AType);
 end;
@@ -636,14 +636,14 @@ begin
   L('');
   L('    # recClass: ' + CName);
   EmitRecHdr(REC_CLASS, RecSize);
-  L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
-  L('    .int  ' + IntToStr(ParentID) + '  # ParentTypeID');
+  L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+  L('    .4byte ' + IntToStr(ParentID) + '  # ParentTypeID');
   if AType.HasVTable() then
     L('    .quad vtable_' + MangledClassSym(CName) + '  # VMTAddress')
   else
     L('    .quad 0  # VMTAddress (no vtable)');
-  L('    .int  ' + IntToStr(AType.TotalSize()) + '  # InstanceSize');
-  L('    .int  ' + IntToStr(AType.Fields.Count) + '  # FieldCount');
+  L('    .4byte ' + IntToStr(AType.TotalSize()) + '  # InstanceSize');
+  L('    .4byte ' + IntToStr(AType.Fields.Count) + '  # FieldCount');
   EmitStrField(CName);
   EmitFields(AType);
   EmitProperties(AType);
@@ -667,7 +667,7 @@ begin
   L('');
   L('    # recGlobalVar: ' + AVarName);
   EmitRecHdr(REC_GLOBALVAR, RecSize);
-  L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+  L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
   if (AType <> nil) and (AType.Kind = tyInterface) then
     { Interface globals are two labels, Name_obj + Name_itab — there is no
       bare Name symbol.  Point the record at the object-pointer half. }
@@ -693,13 +693,13 @@ begin
   L('');
   L('    # recFunctionScope: ' + FuncName);
   EmitRecHdr(REC_FUNCSCOPE, RecSize);
-  L('    .int  ' + IntToStr(AScopeID) + '  # ScopeID');
+  L('    .4byte ' + IntToStr(AScopeID) + '  # ScopeID');
   L('    .quad ' + Label_ + '  # LowPC');
   if ANextLabel <> '' then
     L('    .quad ' + ANextLabel + '  # HighPC (approx: next function start)')
   else
     L('    .quad 0  # HighPC (last function)');
-  L('    .word ' + IntToStr(ADeclIdx) + '  # DeclIndex');
+  L('    .2byte ' + IntToStr(ADeclIdx) + '  # DeclIndex');
   EmitStrField(FuncName);
 end;
 
@@ -749,7 +749,7 @@ begin
     L('');
     L('    # recParameter: ' + P.ParamName);
     EmitRecHdr(REC_PARAMETER, RecSize);
-    L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+    L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
     L('    .byte ' + IntToStr(Ord(P.IsVarParam)) + '  # IsVar');
     L('    .byte ' + IntToStr(Ord(P.IsConstParam)) + '  # IsConst');
     L('    .byte 0  # IsOut');
@@ -789,12 +789,12 @@ begin
       L('');
       L('    # recLocalVar: ' + VarName);
       EmitRecHdr(REC_LOCALVAR, RecSize);
-      L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
-      L('    .int  ' + IntToStr(AScopeID) + '  # ScopeID');
+      L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+      L('    .4byte ' + IntToStr(AScopeID) + '  # ScopeID');
       L('    .byte ' + IntToStr(LOC_RBP) + '  # LocationExpr (RBP-relative)');
-      L('    .word ' + IntToStr(DeclIdx) + '  # DeclIndex');
+      L('    .2byte ' + IntToStr(DeclIdx) + '  # DeclIndex');
       EmitNameLen(VarName);
-      L('    .word ' + IntToStr(RBPOffset) + '  # LocationData (RBP offset)');
+      L('    .2byte ' + IntToStr(RBPOffset) + '  # LocationData (RBP offset)');
       EmitNameData(VarName);
       DeclIdx := DeclIdx + 1;
     end;
@@ -823,7 +823,7 @@ procedure TOPDFEmitter.EmitHeader;
 begin
   L('    # OPDF header (32 bytes)');
   L('    .byte 79, 80, 68, 70           # Magic: OPDF');
-  L('    .word 1                        # Version');
+  L('    .2byte 1                        # Version');
   L('    .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  # BuildID (zeroed)');
   L('    .byte 2                        # TargetArch: archX86_64');
   L('    .byte 8                        # PointerSize: 8');
@@ -832,8 +832,8 @@ begin
     a count, it reads records until section EOF and skips any further 32-byte
     'OPDF' magic headers (the next unit's block).  This is what makes per-unit
     .opdf sections concatenate cleanly at link time.  pdr ignores this field. }
-  L('    .int  0                        # TotalRecords (0 = stream-terminated)');
-  L('    .int  3                        # Flags: HAS_DIRECTORY or DYNARRAY_LEN32');
+  L('    .4byte 0                        # TotalRecords (0 = stream-terminated)');
+  L('    .4byte 3                        # Flags: HAS_DIRECTORY or DYNARRAY_LEN32');
 end;
 
 procedure TOPDFEmitter.EmitFunctionScope_Main(AScopeID, ADeclIdx: Integer);
@@ -846,10 +846,10 @@ begin
   L('');
   L('    # recFunctionScope: ' + ProgName);
   EmitRecHdr(REC_FUNCSCOPE, RecSize);
-  L('    .int  ' + IntToStr(AScopeID) + '  # ScopeID');
+  L('    .4byte ' + IntToStr(AScopeID) + '  # ScopeID');
   L('    .quad main  # LowPC (program entry point)');
   L('    .quad 0  # HighPC (last scope)');
-  L('    .word ' + IntToStr(ADeclIdx) + '  # DeclIndex');
+  L('    .2byte ' + IntToStr(ADeclIdx) + '  # DeclIndex');
   EmitStrField(ProgName);
   EmitLineInfoForBlock(FProgram.Block, 'main', ProgName);
 end;
@@ -864,10 +864,10 @@ begin
   L('');
   L('    # recUnitDirectory');
   EmitRecHdr(REC_UNITDIR, RecSize);
-  L('    .int  1  # UnitCount');
-  L('    .int  .Lopdf_unit0_start - .Lopdf_start  # RecordOffset');
+  L('    .4byte 1  # UnitCount');
+  L('    .4byte .Lopdf_unit0_start - .Lopdf_start  # RecordOffset');
   FUnitDirRecCountIdx := FOutput.Count;
-  L('    .int  0  # RecordCount (patched)');
+  L('    .4byte 0  # RecordCount (patched)');
   EmitStrField(DirName);
   L('');
   L('.Lopdf_unit0_start:');
@@ -895,8 +895,8 @@ begin
   L('');
   L('    # recPointer: ' + CName);
   EmitRecHdr(REC_POINTER, RecSize);
-  L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
-  L('    .int  ' + IntToStr(TargetID) + '  # TargetTypeID (0 = untyped)');
+  L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+  L('    .4byte ' + IntToStr(TargetID) + '  # TargetTypeID (0 = untyped)');
   EmitStrField(CName);
 end;
 
@@ -916,8 +916,8 @@ begin
   L('');
   L('    # recPointer: ' + CName);
   EmitRecHdr(REC_POINTER, RecSize);
-  L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
-  L('    .int  0  # TargetTypeID (0 = untyped)');
+  L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+  L('    .4byte 0  # TargetTypeID (0 = untyped)');
   EmitStrField(CName);
 end;
 
@@ -943,8 +943,8 @@ begin
     L('');
     L('    # recArray (static): ' + CName);
     EmitRecHdr(REC_ARRAY, RecSize);
-    L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
-    L('    .int  ' + IntToStr(ElemID) + '  # ElementTypeID');
+    L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+    L('    .4byte ' + IntToStr(ElemID) + '  # ElementTypeID');
     L('    .byte 1  # Dimensions');
     L('    .byte ' + IntToStr(IsDyn) + '  # IsDynamic');
     EmitStrField(CName);
@@ -961,8 +961,8 @@ begin
     L('');
     L('    # recArray (dynamic): ' + CName);
     EmitRecHdr(REC_ARRAY, RecSize);
-    L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
-    L('    .int  ' + IntToStr(ElemID) + '  # ElementTypeID');
+    L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+    L('    .4byte ' + IntToStr(ElemID) + '  # ElementTypeID');
     L('    .byte 1  # Dimensions');
     L('    .byte ' + IntToStr(IsDyn) + '  # IsDynamic');
     EmitStrField(CName);
@@ -980,8 +980,8 @@ begin
     L('');
     L('    # recArray (open): ' + CName);
     EmitRecHdr(REC_ARRAY, RecSize);
-    L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
-    L('    .int  ' + IntToStr(ElemID) + '  # ElementTypeID');
+    L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+    L('    .4byte ' + IntToStr(ElemID) + '  # ElementTypeID');
     L('    .byte 1  # Dimensions');
     L('    .byte 2  # ArrayKind');
     EmitStrField(CName);
@@ -1008,10 +1008,10 @@ begin
   L('');
   L('    # recSet: ' + CName);
   EmitRecHdr(REC_SET, RecSize);
-  L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
-  L('    .int  ' + IntToStr(BaseID) + '  # BaseTypeID');
+  L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+  L('    .4byte ' + IntToStr(BaseID) + '  # BaseTypeID');
   L('    .byte ' + IntToStr(SzB) + '  # SizeInBytes');
-  L('    .int  0  # LowerBound');
+  L('    .4byte 0  # LowerBound');
   EmitStrField(CName);
 end;
 
@@ -1044,17 +1044,17 @@ begin
   L('');
   L('    # recInterface: ' + CName);
   EmitRecHdr(REC_INTERFACE, RecSize);
-  L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
-  L('    .int  ' + IntToStr(ParentID) + '  # ParentTypeID');
+  L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+  L('    .4byte ' + IntToStr(ParentID) + '  # ParentTypeID');
   L('    .byte 0  # IntfType: itfCOM');
   L('    .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  # GUID (zeroed)');
-  L('    .int  ' + IntToStr(AType.MethodCount()) + '  # MethodCount');
+  L('    .4byte ' + IntToStr(AType.MethodCount()) + '  # MethodCount');
   EmitStrField(CName);
   for I := 0 to AType.MethodCount() - 1 do
   begin
     MName := AType.MethodName(I);
     L('    # method: ' + MName);
-    L('    .int  0  # ReturnTypeID (0 = procedure)');
+    L('    .4byte 0  # ReturnTypeID (0 = procedure)');
     L('    .byte 0  # ParamCount');
     EmitStrField(MName);
   end;
@@ -1117,8 +1117,8 @@ begin
     L('');
     L('    # recProperty: ' + PI.Name);
     EmitRecHdr(REC_PROPERTY, RecSize);
-    L('    .int  ' + IntToStr(ClassTypeID) + '  # ClassTypeID');
-    L('    .int  ' + IntToStr(PropTypeID) + '  # PropertyTypeID');
+    L('    .4byte ' + IntToStr(ClassTypeID) + '  # ClassTypeID');
+    L('    .4byte ' + IntToStr(PropTypeID) + '  # PropertyTypeID');
     L('    .byte ' + IntToStr(ReadType) + '  # ReadType');
     L('    .byte ' + IntToStr(WriteType) + '  # WriteType');
 
@@ -1152,9 +1152,9 @@ begin
 
     { The reader (TDefProperty) expects all three length words FIRST, then the
       three strings in order: ReadMethodName, WriteMethodName, Name. }
-    L('    .word ' + IntToStr(Length(ReadMethSym)) + '  # ReadMethodNameLen');
-    L('    .word ' + IntToStr(Length(WriteMethSym)) + '  # WriteMethodNameLen');
-    L('    .word ' + IntToStr(Length(PI.Name)) + '  # NameLen');
+    L('    .2byte ' + IntToStr(Length(ReadMethSym)) + '  # ReadMethodNameLen');
+    L('    .2byte ' + IntToStr(Length(WriteMethSym)) + '  # WriteMethodNameLen');
+    L('    .2byte ' + IntToStr(Length(PI.Name)) + '  # NameLen');
     EmitNameData(ReadMethSym);
     EmitNameData(WriteMethSym);
     EmitNameData(PI.Name);
@@ -1181,9 +1181,9 @@ begin
       L('');
       L('    # recConstant: ' + C.Name);
       EmitRecHdr(REC_CONSTANT, RecSize);
-      L('    .int  ' + IntToStr(TypeID) + '  # TypeID');
+      L('    .4byte ' + IntToStr(TypeID) + '  # TypeID');
       L('    .byte ' + IntToStr(CK_REAL) + '  # ConstKind: ckReal');
-      L('    .word 8  # ValueLen');
+      L('    .2byte 8  # ValueLen');
       EmitNameLen(C.Name);
       L('    .double ' + C.StrVal + '  # Value');
       EmitNameData(C.Name);
@@ -1195,9 +1195,9 @@ begin
       L('');
       L('    # recConstant: ' + C.Name);
       EmitRecHdr(REC_CONSTANT, RecSize);
-      L('    .int  ' + IntToStr(TypeID) + '  # TypeID');
+      L('    .4byte ' + IntToStr(TypeID) + '  # TypeID');
       L('    .byte ' + IntToStr(CK_STRING) + '  # ConstKind: ckString');
-      L('    .word ' + IntToStr(Length(C.StrVal)) + '  # ValueLen');
+      L('    .2byte ' + IntToStr(Length(C.StrVal)) + '  # ValueLen');
       EmitNameLen(C.Name);
       if Length(C.StrVal) > 0 then
         L('    .ascii "' + EscapeAsciiStr(C.StrVal) + '"  # Value');
@@ -1216,9 +1216,9 @@ begin
       L('');
       L('    # recConstant: ' + C.Name);
       EmitRecHdr(REC_CONSTANT, RecSize);
-      L('    .int  ' + IntToStr(TypeID) + '  # TypeID');
+      L('    .4byte ' + IntToStr(TypeID) + '  # TypeID');
       L('    .byte ' + IntToStr(CK_ORD) + '  # ConstKind: ckOrd');
-      L('    .word 8  # ValueLen');
+      L('    .2byte 8  # ValueLen');
       EmitNameLen(C.Name);
       L('    .quad ' + IntToStr(C.IntVal) + '  # Value');
       EmitNameData(C.Name);
@@ -1419,7 +1419,7 @@ begin
   L('');
   L('    # recParameter: ' + AVar.Name);
   EmitRecHdr(REC_PARAMETER, RecSize);
-  L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+  L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
   if AVar.IsVarParam then
     L('    .byte 1  # IsVar')
   else
@@ -1453,8 +1453,8 @@ begin
   L('    # recLocalVar: ' + AVar.Name + ' (rbp' +
     IntToStr(AVar.RbpOffset) + ')');
   EmitRecHdr(REC_LOCALVAR, RecSize);
-  L('    .int  ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
-  L('    .int  ' + IntToStr(AScopeID) + '  # ScopeID');
+  L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
+  L('    .4byte ' + IntToStr(AScopeID) + '  # ScopeID');
   if AVar.IsOpenArray then
     L('    .byte ' + IntToStr(LOC_OPENARRAY) + '  # LocationExpr (open-array)')
   else if AVar.Indirect then
@@ -1462,11 +1462,11 @@ begin
       '  # LocationExpr (RBP-relative indirect)')
   else
     L('    .byte ' + IntToStr(LOC_RBP) + '  # LocationExpr (RBP-relative)');
-  L('    .word ' + IntToStr(ADeclIdx) + '  # DeclIndex');
+  L('    .2byte ' + IntToStr(ADeclIdx) + '  # DeclIndex');
   EmitNameLen(AVar.Name);
-  L('    .word ' + IntToStr(AVar.RbpOffset) + '  # LocationData (RBP offset)');
+  L('    .2byte ' + IntToStr(AVar.RbpOffset) + '  # LocationData (RBP offset)');
   if AVar.IsOpenArray then
-    L('    .word ' + IntToStr(AVar.HighRbpOffset) +
+    L('    .2byte ' + IntToStr(AVar.HighRbpOffset) +
       '  # CompanionData (_high RBP offset)');
   EmitNameData(AVar.Name);
   ADeclIdx := ADeclIdx + 1;
@@ -1496,13 +1496,13 @@ begin
     L('');
     L('    # recFunctionScope: ' + F.SymbolName);
     EmitRecHdr(REC_FUNCSCOPE, RecSize);
-    L('    .int  ' + IntToStr(ScopeID) + '  # ScopeID');
+    L('    .4byte ' + IntToStr(ScopeID) + '  # ScopeID');
     L('    .quad ' + F.SymbolName + '  # LowPC');
     if F.EndLabel <> '' then
       L('    .quad ' + F.EndLabel + '  # HighPC (exact end label)')
     else
       L('    .quad 0  # HighPC (no end label recorded)');
-    L('    .word ' + IntToStr(DeclIdx) + '  # DeclIndex');
+    L('    .2byte ' + IntToStr(DeclIdx) + '  # DeclIndex');
     EmitStrField(F.SymbolName);
     DeclIdx := DeclIdx + 1;
 
@@ -1535,8 +1535,8 @@ begin
       L('    # recLineInfo: line ' + IntToStr(LineF.Line) + ' in ' + F.SymbolName);
       EmitRecHdr(REC_LINEINFO, RecSize);
       L('    .quad ' + LineF.LabelName + '  # Address (statement label)');
-      L('    .int  ' + IntToStr(LineF.Line) + '  # LineNumber');
-      L('    .word ' + IntToStr(LineF.Col) + '  # ColumnNumber');
+      L('    .4byte ' + IntToStr(LineF.Line) + '  # LineNumber');
+      L('    .2byte ' + IntToStr(LineF.Col) + '  # ColumnNumber');
       EmitStrField(LineFile);
     end;
   end;
@@ -1710,8 +1710,8 @@ begin
       L('    # recLineInfo: line ' + Lines.Strings[I] + ' in ' + AFuncName);
       EmitRecHdr(REC_LINEINFO, RecSize);
       L('    .quad ' + AFuncLabel + '  # Address (function start; per-stmt addr needs QBE label support)');
-      L('    .int  ' + IntToStr(LineNum) + '  # LineNumber');
-      L('    .word ' + IntToStr(ColNum) + '  # ColumnNumber');
+      L('    .4byte ' + IntToStr(LineNum) + '  # LineNumber');
+      L('    .2byte ' + IntToStr(ColNum) + '  # ColumnNumber');
       EmitStrField(FSourceFile);
     end;
   finally
@@ -1738,7 +1738,7 @@ procedure TOPDFEmitter.PatchUnitDirRecordCount;
 begin
   { RecordCount for the unit = all records except the directory record itself }
   if FUnitDirRecCountIdx >= 0 then
-    FOutput.Strings[FUnitDirRecCountIdx] := '    .int  ' + IntToStr(FRecordCount - 1) +
+    FOutput.Strings[FUnitDirRecCountIdx] := '    .4byte ' + IntToStr(FRecordCount - 1) +
                                            '  # RecordCount';
 end;
 
