@@ -2469,6 +2469,7 @@ var
   BE: TBinaryExpr;
   DivGuardOk: string;
   DivUnsigned: Boolean;
+  CmpUnsigned: Boolean;
   CondName: string;
   Lit: string;
   Idx, I: Integer;
@@ -3673,14 +3674,22 @@ begin
       boSar: Self.Emit(#9'asr x0, x0, x1');
       boEQ, boNE, boLT, boGT, boLE, boGE:
       begin
+        { Unsigned when EITHER operand is an unsigned integer, or the left
+          is pointer-like -- the x86-64 rule (setb/seta), so both backends
+          agree.  Always-signed conditions made MaxUInt64 > 1 false. }
+        CmpUnsigned := IsUnsignedIntA64(BE.Left.ResolvedType) or
+                       IsUnsignedIntA64(BE.Right.ResolvedType) or
+                       ((BE.Left.ResolvedType <> nil) and
+                        (BE.Left.ResolvedType.Kind in [tyPointer, tyClass,
+                           tyInterface, tyString, tyDynArray, tyProcedural]));
         case BE.Op of
           boEQ: CondName := 'eq';
           boNE: CondName := 'ne';
-          boLT: CondName := 'lt';
-          boGT: CondName := 'gt';
-          boLE: CondName := 'le';
+          boLT: if CmpUnsigned then CondName := 'lo' else CondName := 'lt';
+          boGT: if CmpUnsigned then CondName := 'hi' else CondName := 'gt';
+          boLE: if CmpUnsigned then CondName := 'ls' else CondName := 'le';
         else
-          CondName := 'ge';
+          if CmpUnsigned then CondName := 'hs' else CondName := 'ge';
         end;
         { Compare 32-bit-ordinal operands as `w` — their upper 32 bits are
           non-canonical (a bit-31-set literal is sign-extended, a computed value

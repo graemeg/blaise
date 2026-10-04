@@ -193,6 +193,7 @@ type
     procedure TestJumboSet_MembershipCallsRtl;
     procedure TestJumboSet_UnionCallsRtl;
     procedure TestJumboSet_OpInLoopDoesNotGrowStack;
+    procedure TestUInt64Compare_UsesUnsignedConditions;
     { slice 36: for-in over static/dyn arrays, string bytes, small sets }
     procedure TestForIn_ArraysStringsSets;
     { slice 36: for-in via the class enumerator protocol }
@@ -5137,6 +5138,30 @@ end;
   iteration, i.e. 1.6 MB over a 100k-iteration loop, ending in a stack
   overflow.  This test pins the fix by asserting the loop body contains NO sp
   arithmetic at all. }
+procedure TArm64BackendTests.TestUInt64Compare_UsesUnsignedConditions;
+var
+  AsmT: string;
+begin
+  { UInt64 ordering must use the unsigned condition codes (lo/hi/ls/hs):
+    with signed lt/gt, MaxUInt64 > 1 was FALSE on the M1.  The Int64
+    compare in the same program must stay signed, so the fix cannot simply
+    switch every comparison over. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var A, B: UInt64; C, D: Int64;
+    begin
+      A := 18446744073709551615; B := 1; C := -1; D := 1;
+      WriteLn(A > B);
+      WriteLn(A <= B);
+      WriteLn(C < D)
+    end.
+    ''');
+  AssertTrue('UInt64 > uses hi', Pos('cset x0, hi', AsmT) >= 0);
+  AssertTrue('UInt64 <= uses ls', Pos('cset x0, ls', AsmT) >= 0);
+  AssertTrue('Int64 < stays signed lt', Pos('cset x0, lt', AsmT) >= 0);
+end;
+
 procedure TArm64BackendTests.TestJumboSet_OpInLoopDoesNotGrowStack;
 var
   AsmT, Body: string;
