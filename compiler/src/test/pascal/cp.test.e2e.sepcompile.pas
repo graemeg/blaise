@@ -2937,11 +2937,13 @@ begin
     Fail('blaise binary missing at ' + BlaisePath());
     Exit
   end;
-  { cross-build to whichever foreign container this host does NOT use }
-  if HostTarget().OS = osLinux then
-    Other := 'macos-arm64'
+  { cross-build to a target whose CONTAINER this host does not use: Mach-O
+    from an ELF host (Linux, FreeBSD), ELF from macOS.  (FreeBSD -> Linux
+    would be ELF -> ELF, which the container check rightly does not flag.) }
+  if HostTarget().OS = osMacOS then
+    Other := 'linux-x86_64'
   else
-    Other := 'linux-x86_64';
+    Other := 'macos-arm64';
   Dir := FScratch + '/xtgt';
   ForceDirectories(Dir);
   WriteFile(Dir + '/xtgt.u.pas', UnitSrc);
