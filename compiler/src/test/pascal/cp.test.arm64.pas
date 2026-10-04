@@ -184,6 +184,8 @@ type
     procedure TestByValueClassParam_RetainedAndReleased;
     procedure TestRecordCallResult_PerSiteScratch;
     procedure TestClosureCall_DoubleArgInD0;
+    procedure TestPointerWrite_RecordCopiesWithArc;
+    procedure TestAddrOfLocalInterface_IsPairAddress;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4758,6 +4760,63 @@ begin
   AssertTrue('double argument moved into d0', Pos(#9'fmov d0, x9', AsmT) >= 0);
   AssertTrue('indirect branch through the code word',
     Pos(#9'ldr x9, [x10]'#10#9'blr x9', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestPointerWrite_RecordCopiesWithArc;
+var
+  AsmT: string;
+begin
+  { P^ := R for a managed record: retain the source's string field, release
+    the destination's, then copy the bytes (was NotYet). }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TItem = record
+        Name: string;
+        N: Int64;
+      end;
+      PItem = ^TItem;
+    var
+      A, B: TItem;
+      PA: PItem;
+    begin
+      PA := @A;
+      PA^ := B;
+    end.
+    ''');
+  AssertTrue('source field retained', Pos(#9'bl __StringAddRef', AsmT) >= 0);
+  AssertTrue('16-byte record copied', Pos(#9'movz x2, #16'#10#9'bl _memcpy', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestAddrOfLocalInterface_IsPairAddress;
+var
+  AsmT: string;
+begin
+  { @G on a local interface is the address of its 16-byte (obj, itab) block
+    (was NotYet); a pointer write through it stores both halves. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IG = interface
+        function Greet: Int64;
+      end;
+      PIG = ^IG;
+    procedure Run;
+    var
+      G: IG;
+      PG: PIG;
+    begin
+      PG := @G;
+      PG^ := nil;
+    end;
+    begin
+      Run();
+    end.
+    ''');
+  AssertTrue('itab half written through the pointer',
+    Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

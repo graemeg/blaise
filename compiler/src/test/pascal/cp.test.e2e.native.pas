@@ -418,6 +418,7 @@ type
     procedure TestRun_Native_LargeRecordCall_FieldReadAndReceiver;
     procedure TestRun_Native_RecordCallIntoVarRecordParam;
     procedure TestRun_Native_ClosureCall_AggregateArgs;
+    procedure TestRun_Native_PointerWrite_RecordJumboIntf;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6749,6 +6750,75 @@ begin
     end.
     ''',
     '1088' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_PointerWrite_RecordJumboIntf;
+begin
+  { P^ := V for a managed record (TList<TRec>.Add's Dest^ := Value), a jumbo
+    set and an interface -- each was NotYet on arm64. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TItem = record
+        Name: string;
+        N: Integer;
+      end;
+      PItem = ^TItem;
+      TCls = set of Byte;
+      PCls = ^TCls;
+      IG = interface
+        function Greet: Integer;
+      end;
+      TG = class(IG)
+        FV: Integer;
+        destructor Destroy; override;
+        function Greet: Integer;
+      end;
+      PIG = ^IG;
+    destructor TG.Destroy;
+    begin
+      WriteLn('destroyed ', FV);
+      inherited Destroy();
+    end;
+    function TG.Greet: Integer;
+    begin
+      Result := FV;
+    end;
+    procedure Run;
+    var
+      A, B: TItem;
+      PA: PItem;
+      C: TCls;
+      PC: PCls;
+      G: IG;
+      PG: PIG;
+      T: TG;
+    begin
+      B.Name := 'hello' + IntToStr(1);
+      B.N := 7;
+      PA := @A;
+      PA^ := B;
+      B.Name := 'changed';
+      WriteLn(A.Name, ' ', A.N);
+      PC := @C;
+      PC^ := [1, 2, 250];
+      WriteLn(250 in C, ' ', 3 in C);
+      PG := @G;
+      T := TG.Create();
+      T.FV := 42;
+      PG^ := T;
+      WriteLn(G.Greet());
+      PG^ := nil;
+      WriteLn('cleared');
+    end;
+    begin
+      Run();
+      WriteLn('end');
+    end.
+    ''',
+    'hello1 7' + LE + 'True False' + LE + '42' + LE + 'cleared' + LE +
+    'destroyed 42' + LE + 'end' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

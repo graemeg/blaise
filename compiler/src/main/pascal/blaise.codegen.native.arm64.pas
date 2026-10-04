@@ -5001,15 +5001,22 @@ begin
     if (TAddrOfExpr(AExpr).Expr is TIdentExpr) and
        (TIdentExpr(TAddrOfExpr(AExpr).Expr).ParamMode <> pmVar) then
     begin
-      { @IntfVar: an interface variable is a 16-byte fat pointer held in named
-        slots (obj / itab), not a single addressable word.  EmitSlotAddr works
-        off the bare name, which for an interface resolves to no symbol at all —
-        it would yield a garbage address and segfault at the first use.  arm64's
-        interface support is entirely named-slot based and is being built out
-        separately, so refuse rather than emit a wrong address. }
+      { @IntfVar: an interface variable is a 16-byte (obj, itab) pair.  A
+        frame local / parameter is ONE contiguous block (AddIntfLocal) and a
+        Self field sits inline, so the pair's address is the obj slot's
+        address (EmitRecIdentAddr: slot, Self field or capture).  A GLOBAL is
+        still two separate symbols with no single address -- refuse it rather
+        than hand out an address whose +8 is not the itab. }
       if (TAddrOfExpr(AExpr).Expr.ResolvedType <> nil) and
          (TAddrOfExpr(AExpr).Expr.ResolvedType.Kind = tyInterface) then
-        NotYet('address-of an interface variable (fat pointer)', AExpr);
+      begin
+        if not IsLocal(TIdentExpr(TAddrOfExpr(AExpr).Expr).Name) and
+           not TIdentExpr(TAddrOfExpr(AExpr).Expr).IsImplicitSelf and
+           not IsCaptured(TIdentExpr(TAddrOfExpr(AExpr).Expr).Name) then
+          NotYet('address-of a global interface variable', AExpr);
+        EmitRecIdentAddr('x0', TIdentExpr(TAddrOfExpr(AExpr).Expr));
+        Exit;
+      end;
       { a bare FIELD of Self inside a method: Self + the field's offset (there
         is no slot of that name) }
       if TIdentExpr(TAddrOfExpr(AExpr).Expr).IsImplicitSelf and
@@ -8871,6 +8878,9 @@ begin
 end;
 
 procedure TArm64Backend.EmitPointerWrite(AStmt: TPointerWriteStmt);
+var
+  NB: Integer;
+  Owned: Boolean;
 begin
   { P^ := V.  Value first, then pointer — evaluating the value cannot
     invalidate a parked pointer, and an ARC release of the old pointee
@@ -8917,7 +8927,14 @@ begin
     named-slot based), so fail loud rather than emit a half-store that writes
     the obj word and leaves the itab stale. }
   if AStmt.BaseTy.Kind = tyInterface then
-    NotYet('pointer write of an interface (fat pointer)', AStmt);
+  begin
+    { P^ := Intf: the pointee is an (obj, itab) pair -- the shared pair
+      store retains the new obj, releases the old and writes both halves }
+    Self.EmitExprToX0(AStmt.PtrExpr);
+    EmitPushX0();
+    EmitIntfStoreStacked(0, AStmt.ValExpr, AStmt.BaseTy);
+    Exit;
+  end;
   if AStmt.BaseTy.Kind in [tyDouble, tySingle] then
   begin
     Self.EmitExprToD0OrConvert(AStmt.ValExpr);
@@ -8933,8 +8950,58 @@ begin
       Self.Emit(#9'str d0, [x0]');
     Exit;
   end;
-  if AStmt.BaseTy.Kind in [tyRecord, tyStaticArray] then
-    NotYet('pointer write of an aggregate', AStmt);
+  if IsJumboSetType(AStmt.BaseTy) then
+  begin
+    { P^ := <jumbo set>: copy the bitmap.  A literal value lowers sp for its
+      buffer, so the parked pointer is read above it. }
+    Self.EmitExprToX0(AStmt.PtrExpr);
+    EmitPushX0();
+    NB := JumboSetLiteralBytes(AStmt.ValExpr);
+    Self.EmitExprToX0(AStmt.ValExpr);
+    Self.Emit(#9'mov x1, x0');
+    Self.Emit(Format(#9'ldr x0, [sp, #%d]', [NB]));
+    EmitIntLiteral('x2', AStmt.BaseTy.RawSize());
+    EmitCallSym('memcpy');
+    EmitAddSubImm('add', 'sp', 'sp', NB + 16);
+    Exit;
+  end;
+  if (AStmt.BaseTy.Kind = tyRecord) or
+     ((AStmt.BaseTy.Kind = tyStaticArray) and
+      not AggHasManaged(AStmt.BaseTy)) then
+  begin
+    { P^ := R (TList<TRec>.Add's Dest^ := Value): the x86-64 record-copy
+      discipline -- retain the source's managed fields, release the
+      destination's old ones (no-zero, so P^ := P^ stays exact), memcpy.  A
+      record-returning call is materialised first and its +1 references
+      TRANSFER, so it is not retained again.  The two addresses live in
+      callee-saved x19/x22 across the walk calls. }
+    Self.EmitExprToX0(AStmt.PtrExpr);
+    EmitPushX0();                                  { [ptr] }
+    Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+    Owned := IsRecordCallArg(AStmt.ValExpr);
+    if Owned then
+      EmitRecCallToRret(AStmt.ValExpr)            { x0 = __rret }
+    else
+      EmitRecAddrToX0(AStmt.ValExpr);
+    Self.Emit(#9'mov x19, x0');
+    Self.Emit(#9'ldr x22, [sp, #16]');
+    if (AStmt.BaseTy.Kind = tyRecord) and AggHasManaged(AStmt.BaseTy) then
+    begin
+      if not Owned then
+        Self.EmitRecordFieldRetains(TRecordTypeDesc(AStmt.BaseTy), 'x19');
+      Self.EmitRecordFieldReleases(TRecordTypeDesc(AStmt.BaseTy), 'x22',
+        False);
+    end;
+    Self.Emit(#9'mov x0, x22');
+    Self.Emit(#9'mov x1, x19');
+    EmitIntLiteral('x2', AStmt.BaseTy.RawSize());
+    EmitCallSym('memcpy');
+    Self.Emit(#9'ldp x19, x22, [sp], #16');
+    Self.Emit(#9'add sp, sp, #16');                { drop the pointer }
+    Exit;
+  end;
+  if AStmt.BaseTy.Kind = tyStaticArray then
+    NotYet('pointer write of a managed static array', AStmt);
   Self.EmitExprToX0(AStmt.ValExpr);
   EmitPushX0();
   Self.EmitExprToX0(AStmt.PtrExpr);
