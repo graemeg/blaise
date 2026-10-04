@@ -257,6 +257,7 @@ type
     procedure EmitFatPtrAssign(AAsgn: TAssignment);
     procedure EmitParenlessCtor(AFA: TFieldAccessExpr);
     procedure EmitSetIncludeExclude(ACall: TProcCall; AInclude: Boolean);
+    procedure EmitFatFieldStoreStacked(AFld: TFieldInfo; AValueExpr: TASTExpr);
     function  EmitClosureResultCall(ACallDecl: TMethodDecl; const AName: string;
       AArgs: TObjectList): string;
     procedure EmitEnvPrologue(ADecl: TMethodDecl);
@@ -665,6 +666,16 @@ function IsSmallSetType(AType: TTypeDesc): Boolean;
 begin
   Result := (AType <> nil) and (AType is TSetTypeDesc) and
             not TSetTypeDesc(AType).IsJumbo();
+end;
+
+{ A one-word reference value with no ARC: a metaclass, or a PLAIN procedural
+  pointer (a single code address).  The 16-byte closure / method-pointer
+  kinds are excluded -- an 8-byte load of those would drop the Env half. }
+function IsPlainWordRef(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and
+    ((AType.Kind = tyMetaClass) or
+     ((AType.Kind = tyProcedural) and not IsMethodPtrType(AType)));
 end;
 
 constructor TArm64Backend.Create(const ATarget: TTargetDesc);
@@ -1486,16 +1497,35 @@ begin
   { like EmitInstanceFieldStore, but the instance pointer is on TOP of the
     stack (pushed by the caller); consumed on exit.  Needed for chained
     bases (A.B.C := v), which have no frame slot to re-derive from. }
-  if AFld.TypeDesc.IsString() or (AFld.TypeDesc.Kind = tyClass) then
+  if IsMethodPtrType(AFld.TypeDesc) then
+  begin
+    EmitFatFieldStoreStacked(AFld, AValueExpr);
+    Exit;
+  end;
+  if ((AFld.TypeDesc.Kind = tyRecord) or (AFld.TypeDesc.Kind = tyStaticArray)) and
+     not AggHasManaged(AFld.TypeDesc) then
+  begin
+    { a non-managed aggregate field: copy its bytes from the value's address }
+    EmitRecAddrToX0(AValueExpr);
+    Self.Emit(#9'mov x1, x0');
+    Self.Emit(#9'ldr x0, [sp], #16');   { pop the base }
+    if AFld.Offset <> 0 then
+      EmitAddSubImm('add', 'x0', 'x0', AFld.Offset);
+    EmitIntLiteral('x2', AFld.TypeDesc.RawSize());
+    EmitCallSym('memcpy');
+    Exit;
+  end;
+  if AFld.TypeDesc.IsString() or (AFld.TypeDesc.Kind = tyClass) or
+     (AFld.TypeDesc.Kind = tyDynArray) then
   begin
     Self.EmitExprToX0(AValueExpr);
-    if (AFld.TypeDesc.IsString() and not ArcExprOwnsRef(AValueExpr)) or
-       ((AFld.TypeDesc.Kind = tyClass) and
-        not ArcExprOwnsRef(AValueExpr)) then
+    if not ArcExprOwnsRef(AValueExpr) then
     begin
       EmitPushX0();
       if AFld.TypeDesc.IsString() then
         EmitCallSym('_StringAddRef')
+      else if AFld.TypeDesc.Kind = tyDynArray then
+        EmitCallSym('_DynArrayAddRef')
       else
         EmitCallSym('_ClassAddRef');
       EmitPopTo('x0');
@@ -1505,6 +1535,8 @@ begin
     Self.Emit(Format(#9'ldr x0, [x9, #%d]', [AFld.Offset]));
     if AFld.TypeDesc.IsString() then
       EmitCallSym('_StringRelease')
+    else if AFld.TypeDesc.Kind = tyDynArray then
+      EmitCallSym('_DynArrayRelease')
     else
       EmitCallSym('_ClassRelease');
     Self.Emit(#9'ldr x9, [sp, #16]');
@@ -1527,7 +1559,11 @@ begin
     Self.Emit(#9'fmov x0, d0');
   end
   else if IsIntFam(AFld.TypeDesc) or
-          (AFld.TypeDesc.Kind in [tyPointer, tyPChar]) then
+          (AFld.TypeDesc.Kind in [tyPointer, tyPChar, tyMetaClass,
+                                  tyProcedural]) or
+          IsSmallSetType(AFld.TypeDesc) then
+    { (a plain procedural field is one code word; the fat closure /
+      method-pointer kind was routed above) }
     Self.EmitExprToX0(AValueExpr)
   else
     NotYet('store to a field of this type', AValueExpr);
@@ -1694,6 +1730,7 @@ var
   Tmp: string;
   FAE: TFieldAccessExpr;
   MD: TMethodDecl;
+  FldAddr: TAddrOfExpr;
 begin
   { Closure ('reference to') / method-pointer ('of object') target: a 16-byte
     fat value, Code at +0 and Env/Data at +8.  The generic scalar path stored
@@ -1724,6 +1761,40 @@ begin
       EmitSlotAddr('x9', AAsgn.Name);
     end;
     Self.Emit(#9'stp xzr, xzr, [x9]');
+    Exit;
+  end;
+  if (AAsgn.Expr is TFieldAccessExpr) and
+     IsMethodPtrType(AAsgn.Expr.ResolvedType) and
+     (TFieldAccessExpr(AAsgn.Expr).FieldInfo <> nil) and
+     not TFieldAccessExpr(AAsgn.Expr).IsMethodCall and
+     (TFieldAccessExpr(AAsgn.Expr).PropRead = nil) then
+  begin
+    { F := Obj.FieldF / Obj.Rec.FieldF: address the 16-byte field through
+      a transient @-wrapper, then copy it like a variable (Env retained
+      before the old one is released) }
+    FldAddr := TAddrOfExpr.Create();
+    try
+      FldAddr.Line := AAsgn.Line;
+      FldAddr.Col := AAsgn.Col;
+      FldAddr.Expr := AAsgn.Expr;
+      Self.EmitExprToX0(FldAddr);
+    finally
+      FldAddr.Expr := nil;   { owned by the assignment }
+      FldAddr.Free();
+    end;
+    EmitPushX0();                                { [&src] }
+    if IsRef then
+    begin
+      Self.Emit(#9'ldr x0, [x0, #8]');
+      EmitCallSym('_ClassAddRef');
+      EmitSlotAddr('x9', AAsgn.Name);
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');
+    end;
+    EmitPopTo('x1');
+    Self.Emit(#9'ldp x9, x10, [x1]');
+    EmitSlotAddr('x1', AAsgn.Name);
+    Self.Emit(#9'stp x9, x10, [x1]');
     Exit;
   end;
   if (AAsgn.Expr is TIdentExpr) and IsMethodPtrType(AAsgn.Expr.ResolvedType) and
@@ -2081,6 +2152,62 @@ begin
   else
     Self.Emit(#9'str x2, [x0]');
   end;
+end;
+
+procedure TArm64Backend.EmitFatFieldStoreStacked(AFld: TFieldInfo;
+  AValueExpr: TASTExpr);
+var
+  IsRef: Boolean;
+begin
+  { A closure / method-pointer FIELD (16 bytes: Code, Env) at AFld.Offset of
+    the instance whose address is on TOP of the stack (consumed).  The value
+    is materialised at an address first -- a literal into its hidden slot,
+    a variable at its own slot -- then both words are copied.  For
+    'reference to' the incoming Env is retained before the old one is
+    released (so F := F is safe); 'of object' receivers stay unretained. }
+  IsRef := (AFld.TypeDesc.Kind = tyProcedural) and
+           TProceduralTypeDesc(AFld.TypeDesc).IsReference;
+  if AValueExpr is TNilLiteral then
+  begin
+    if IsRef then
+    begin
+      Self.Emit(#9'ldr x9, [sp]');
+      EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');
+    end;
+    Self.Emit(#9'ldr x9, [sp], #16');
+    EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
+    Self.Emit(#9'stp xzr, xzr, [x9]');
+    Exit;
+  end;
+  if AValueExpr is TAnonMethodExpr then
+    EmitAnonValueToSlot(TAnonMethodExpr(AValueExpr))
+  else if (AValueExpr is TIdentExpr) and IsMethodPtrType(AValueExpr.ResolvedType) and
+          not IsCaptured(TIdentExpr(AValueExpr).Name) and
+          (TIdentExpr(AValueExpr).ParamMode = pmNone) and
+          not TIdentExpr(AValueExpr).IsImplicitSelf then
+    EmitSlotAddr('x0', TIdentExpr(AValueExpr).Name)
+  else
+    NotYet('closure / method-pointer field store from this expression',
+      AValueExpr);
+  EmitPushX0();                                  { [base][&value] }
+  if IsRef then
+  begin
+    Self.Emit(#9'ldr x0, [sp]');
+    Self.Emit(#9'ldr x0, [x0, #8]');
+    EmitCallSym('_ClassAddRef');                 { the field's own Env ref }
+    Self.Emit(#9'ldr x9, [sp, #16]');
+    EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
+    Self.Emit(#9'ldr x0, [x9, #8]');
+    EmitCallSym('_ClassRelease');                { the old Env }
+  end;
+  Self.Emit(#9'ldr x1, [sp]');
+  Self.Emit(#9'ldp x10, x11, [x1]');
+  Self.Emit(#9'ldr x9, [sp, #16]');
+  EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
+  Self.Emit(#9'stp x10, x11, [x9]');
+  Self.Emit(#9'add sp, sp, #32');                { drop &value and base }
 end;
 
 procedure TArm64Backend.GuardNoOpenArrayParam(AProcType: TProceduralTypeDesc;
@@ -4608,6 +4735,12 @@ begin
               not ArcExprOwnsRef(TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base) then
         { @A.B.Field with B a class: B's value is the instance pointer }
         Self.EmitExprToX0(TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base)
+      else if (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base <> nil) and
+              (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base.ResolvedType <> nil) and
+              (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base.ResolvedType.Kind
+                 = tyRecord) then
+        { @A.Rec.Field: the record base's own address }
+        EmitRecAddrToX0(TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base)
       else if (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base = nil) and
               TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).IsImplicitSelf and
               (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).ImplicitBaseInfo <> nil) then
@@ -4753,6 +4886,7 @@ begin
       the field load and released after — the loaded scalar field value
       survives the release. }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
@@ -4847,6 +4981,7 @@ begin
     { instance field read: the base is a POINTER — Obj's slot value, or
       Self for a bare field name inside a method }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
@@ -4893,6 +5028,7 @@ begin
   begin
     { plain Rec.Field read of a local/global/var-param record }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
@@ -4931,6 +5067,7 @@ begin
     { field of a RECORD-VALUED field access (FTok.Token.TextStart):
       compute the inner record's address, then load at the outer offset }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
@@ -4953,6 +5090,7 @@ begin
     { field of a record-RETURNING CALL (HostTarget().OS): materialise the
       record into the __rret scratch, then load the field at its offset }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
@@ -4976,6 +5114,7 @@ begin
     { field of a subscripted RECORD element: A[I].Kind — the subscript
       emitters yield the element address, the field loads at its offset }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,

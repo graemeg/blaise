@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_ChainedRecordFieldStore_AllKinds;
     procedure TestRun_Record_FieldReadWrite;
     procedure TestRun_Record_PassByValue;
     procedure TestRun_Record_PassByVar;
@@ -148,6 +149,49 @@ type
   end;
 
 implementation
+
+procedure TE2ERecordsTests.TestRun_ChainedRecordFieldStore_AllKinds;
+const
+  { Stores into fields of a record that is itself a field of an object
+    (O.Inner.X := v) for every field kind arm64's chained-base store used to
+    reject: a closure (literal, nil, and as an assignment source), a dynamic
+    array, a small set, a plain procedural pointer and a nested record.
+    Run under --debug as well: each managed kind must balance its ARC. }
+  Src = '''
+    program fs;
+    type
+      TColor = (cR, cG, cB);
+      TProc0 = reference to procedure;
+      TIntArr = array of Integer;
+      TPlain = procedure;
+      TPt = record X, Y: Integer; end;
+      TInner = record
+        F: TProc0; D: TIntArr; Cs: set of TColor; P: TPlain; Pt: TPt;
+      end;
+      TOuter = class Inner: TInner; end;
+    procedure Hello; begin WriteLn('plain'); end;
+    var O: TOuter; S: string; A: TIntArr; G: TProc0; Q: TPt;
+    begin
+      O := TOuter.Create; S := 'captured';
+      O.Inner.F := procedure begin WriteLn(S) end;
+      G := O.Inner.F; G();
+      SetLength(A, 2); A[1] := 7; O.Inner.D := A;
+      A := O.Inner.D; WriteLn(Length(O.Inner.D), ' ', A[1]);
+      O.Inner.Cs := [cG, cB]; WriteLn(cG in O.Inner.Cs, ' ', cR in O.Inner.Cs);
+      O.Inner.P := @Hello; WriteLn(Assigned(O.Inner.P));
+      Q.X := 3; Q.Y := 4; O.Inner.Pt := Q; WriteLn(O.Inner.Pt.X + O.Inner.Pt.Y);
+      G := O.Inner.F; O.Inner.F := nil; G();
+      O.Free();
+    end.
+    ''';
+  Expected = 'captured' + LineEnding + '2 7' + LineEnding + 'True False' +
+    LineEnding + 'True' + LineEnding + '7' + LineEnding + 'captured' +
+    LineEnding;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, Expected, 0);
+  AssertLeakFreeOnAll(Src, 'captured');
+end;
 
 procedure TE2ERecordsTests.SetUp;
 begin
