@@ -25,6 +25,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_GlobalJumboSet_HoldsItsOwnBitmap;
     procedure TestRun_IncludeMembership_AcrossBoundary;
     procedure TestRun_SetOps_UnionInterDiff;
     procedure TestRun_Equality;
@@ -85,6 +86,50 @@ procedure TE2EJumboSetTests.SetUp;
 begin
   inherited SetUp();
   SetUpScratch('compiler/target/test-e2e-jumboset');
+end;
+
+procedure TE2EJumboSetTests.TestRun_GlobalJumboSet_HoldsItsOwnBitmap;
+const
+  { A jumbo set variable must HOLD its bitmap.  arm64 sized a jumbo global
+    at 8 bytes and stored the ADDRESS of the right-hand side's temporary
+    bitmap into it, so the set dangled once that frame was gone; and a jumbo
+    variable used as an operand LOADED its first 8 bytes as if they were the
+    bitmap's address.  Here Fill builds the set in a local and copies it to
+    the global, Scribble reuses that stack, and the membership test then
+    reads G itself.  After is the neighbouring
+    global the 8-byte sizing let the bitmap overrun. }
+  Src = '''
+    program Prg;
+    type TBig = (B00, B01, B02, B03, B04, B05, B06, B07, B08, B09, B10, B11,
+                 B12, B13, B14, B15, B16, B17, B18, B19, B20, B21, B22, B23,
+                 B24, B25, B26, B27, B28, B29, B30, B31, B32, B33, B34, B35,
+                 B36, B37, B38, B39, B40, B41, B42, B43, B44, B45, B46, B47,
+                 B48, B49, B50, B51, B52, B53, B54, B55, B56, B57, B58, B59,
+                 B60, B61, B62, B63, B64, B65, B66);
+         TBigSet = set of TBig;
+    var G: TBigSet; After: Int64;
+    procedure Fill;
+    var L: TBigSet;
+    begin
+      L := [B01, B66];
+      G := L
+    end;
+    procedure Scribble;
+    var A: array[0..15] of Int64; I: Integer;
+    begin
+      for I := 0 to 15 do A[I] := -1;
+      if A[3] = 0 then WriteLn('never')
+    end;
+    begin
+      After := 7;
+      Fill();
+      Scribble();
+      WriteLn(B01 in G, ' ', B66 in G, ' ', B02 in G, ' ', After)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, 'True True False 7' + LE, 0);
 end;
 
 procedure TE2EJumboSetTests.TestRun_IncludeMembership_AcrossBoundary;

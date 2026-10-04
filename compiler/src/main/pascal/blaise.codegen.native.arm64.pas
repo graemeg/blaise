@@ -2873,6 +2873,25 @@ begin
   end;
   if AExpr is TIdentExpr then
   begin
+    if (AExpr.ResolvedType is TSetTypeDesc) and
+       TSetTypeDesc(AExpr.ResolvedType).IsJumbo() then
+    begin
+      { A JUMBO set is an inline byte bitmap: as an operand it evaluates to
+        its ADDRESS (what _SetIn / _SetInclude / the jumbo operators take).
+        Loading the slot handed the bitmap's first 8 bytes over as if they
+        were a pointer, so `E in J` on a jumbo VARIABLE read garbage. }
+      if IsCaptured(TIdentExpr(AExpr).Name) then
+      begin
+        EmitLoadSlot('x0', '_cap_' + TIdentExpr(AExpr).Name);
+        if TIdentExpr(AExpr).ParamMode = pmVar then
+          Self.Emit(#9'ldr x0, [x0]');
+      end
+      else if TIdentExpr(AExpr).ParamMode = pmVar then
+        EmitLoadSlot('x0', TIdentExpr(AExpr).Name)   { slot holds &set }
+      else
+        EmitSlotAddr('x0', TIdentExpr(AExpr).Name);
+      Exit;
+    end;
     if IsCaptured(TIdentExpr(AExpr).Name) then
     begin
       { captured outer var (leg 17): '_cap_<Name>' holds &<Name>, so deref
@@ -5485,6 +5504,37 @@ begin
      IsMethodPtrType(AAsgn.ResolvedLhsType) then
   begin
     EmitFatPtrAssign(AAsgn);
+    Exit;
+  end;
+  if (AAsgn.ResolvedLhsType is TSetTypeDesc) and
+     TSetTypeDesc(AAsgn.ResolvedLhsType).IsJumbo() then
+  begin
+    { S := <jumbo set>: a jumbo set is an inline byte bitmap and its value
+      evaluates to an ADDRESS, so the assignment COPIES the bitmap into the
+      target.  The generic scalar path stored that address into the target's
+      first 8 bytes instead -- a pointer to the RHS's temporary bitmap, which
+      dangled once its frame or loop iteration moved on. }
+    Self.EmitExprToX0(AAsgn.Expr);                  { source bitmap address }
+    Self.Emit(#9'mov x1, x0');
+    if AAsgn.ImplicitSelfField <> nil then
+    begin
+      EmitLoadSlot('x0', 'Self');
+      EmitAddSubImm('add', 'x0', 'x0', TFieldInfo(AAsgn.ImplicitSelfField).Offset);
+    end
+    else if IsCaptured(AAsgn.Name) then
+    begin
+      EmitLoadSlot('x0', '_cap_' + AAsgn.Name);
+      if AAsgn.IsVarParam then
+        Self.Emit(#9'ldr x0, [x0]');
+    end
+    else if AAsgn.IsVarParam then
+      EmitLoadSlot('x0', AAsgn.Name)                { slot holds &set }
+    else
+      EmitSlotAddr('x0', AAsgn.Name);
+    EmitIntLiteral('x2', AAsgn.ResolvedLhsType.RawSize());
+    { an operator result lands in its own frame slot, so source and target
+      never partially overlap (S := S is an exact self-copy) }
+    EmitCallSym('memcpy');
     Exit;
   end;
   { Captured managed writes (leg 17).  '_cap_<Name>' holds &<Name>, so the ARC
@@ -8738,8 +8788,9 @@ begin
                                        tyPChar, tyProcedural]))) then
       NotYet('local variable of this type', VD);
     { A JUMBO set (> 64 members) is an inline byte-array bitmap, so its slot is
-      sized from RawSize() like any other aggregate — no special case needed
-      here.  The operations on it go through the _Set* RTL helpers. }
+      sized from RawSize() -- see the jumbo arm below; it does NOT fall out of
+      the generic 8-byte default.  The operations on it go through the _Set*
+      RTL helpers. }
     for J := 0 to VD.Names.Count - 1 do
     begin
       if VD.ResolvedType.Kind in [tyRecord, tyStaticArray] then
@@ -8752,6 +8803,12 @@ begin
       else if IsMethodPtrType(VD.ResolvedType) then
         { closure / method-pointer local: a 16-byte fat value (Code, Env). }
         AddLocal(VD.Names.Strings[J], 16)
+      else if (VD.ResolvedType is TSetTypeDesc) and
+              TSetTypeDesc(VD.ResolvedType).IsJumbo() then
+        { a JUMBO set local holds its whole bitmap.  It used to fall to the
+          8-byte default, so a 16-byte bitmap copied into the slot at x29-8
+          overwrote the saved frame pointer }
+        AddLocal(VD.Names.Strings[J], VD.ResolvedType.RawSize())
       else
         AddLocal(VD.Names.Strings[J], 8);
       if VD.ResolvedType.Kind = tyString then
@@ -9301,10 +9358,13 @@ begin
   for I := 0 to ADecl.Body.Decls.Count - 1 do
     for J := 0 to TVarDecl(ADecl.Body.Decls.Items[I]).Names.Count - 1 do
     begin
-      if TVarDecl(ADecl.Body.Decls.Items[I]).ResolvedType.Kind in
-         [tyRecord, tyStaticArray] then
+      if (TVarDecl(ADecl.Body.Decls.Items[I]).ResolvedType.Kind in
+          [tyRecord, tyStaticArray]) or
+         ((TVarDecl(ADecl.Body.Decls.Items[I]).ResolvedType is TSetTypeDesc) and
+          TSetTypeDesc(TVarDecl(ADecl.Body.Decls.Items[I]).ResolvedType).IsJumbo()) then
       begin
-        { aggregates zero-initialise their whole storage }
+        { aggregates (and a jumbo set's bitmap) zero-initialise their whole
+          storage }
         EmitSlotAddr('x0',
           TVarDecl(ADecl.Body.Decls.Items[I]).Names.Strings[J]);
         Self.Emit(#9'movz w1, #0');
@@ -12062,8 +12122,9 @@ begin
                                        tyPointer, tyPChar, tyProcedural]))) then
       NotYet('program variable of this type', VD);
     { A JUMBO set (> 64 members) is an inline byte-array bitmap, so its slot is
-      sized from RawSize() like any other aggregate — no special case needed
-      here.  The operations on it go through the _Set* RTL helpers. }
+      sized from RawSize() -- see the jumbo arm below; it does NOT fall out of
+      the generic 8-byte default.  The operations on it go through the _Set*
+      RTL helpers. }
     for J := 0 to VD.Names.Count - 1 do
     begin
       FGlobalNames.Add(VD.Names.Strings[J]);
@@ -12116,6 +12177,12 @@ begin
         FRecGlobals.AddObject(VD.Names.Strings[J], VD.ResolvedType);
         FGlobalSize.Add(VD.Names.Strings[J], VD.ResolvedType.RawSize());
       end
+      else if (VD.ResolvedType is TSetTypeDesc) and
+              TSetTypeDesc(VD.ResolvedType).IsJumbo() then
+        { a JUMBO set is an inline byte bitmap; RawSize is already rounded
+          to 8.  The generic 8 below let Include/_SetInclude write past the
+          global into the next one. }
+        FGlobalSize.Add(VD.Names.Strings[J], VD.ResolvedType.RawSize())
       else if not IsMethodPtrType(VD.ResolvedType) then
         { a closure / method-pointer global was sized 16 above; this generic
           8 used to overwrite it, so the Env half spilled into the NEXT
@@ -12708,8 +12775,9 @@ begin
                                        tyPointer, tyPChar]))) then
       NotYet('unit variable of this type', VD);
     { A JUMBO set (> 64 members) is an inline byte-array bitmap, so its slot is
-      sized from RawSize() like any other aggregate — no special case needed
-      here.  The operations on it go through the _Set* RTL helpers. }
+      sized from RawSize() -- see the jumbo arm below; it does NOT fall out of
+      the generic 8-byte default.  The operations on it go through the _Set*
+      RTL helpers. }
 
     for J := 0 to VD.Names.Count - 1 do
     begin
@@ -12767,6 +12835,9 @@ begin
       end
       else if IsMethodPtrType(VD.ResolvedType) then
         FGlobalSize.Add(N, 16)    { closure / method-pointer: Code + Env }
+      else if (VD.ResolvedType is TSetTypeDesc) and
+              TSetTypeDesc(VD.ResolvedType).IsJumbo() then
+        FGlobalSize.Add(N, VD.ResolvedType.RawSize())   { inline bitmap }
       else
         FGlobalSize.Add(N, 8);
     end;
