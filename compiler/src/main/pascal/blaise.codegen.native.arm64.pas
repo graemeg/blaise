@@ -13317,7 +13317,8 @@ begin
                                        tyRecord, tyClass, tyInterface,
                                        tyMetaClass, tyStaticArray,
                                        tyDynArray, tySet,
-                                       tyPointer, tyPChar]))) then
+                                       tyPointer, tyPChar,
+                                       tyProcedural]))) then
       NotYet('unit variable of this type', VD);
     { A JUMBO set (> 64 members) is an inline byte-array bitmap, so its slot is
       sized from RawSize() -- see the jumbo arm below; it does NOT fall out of
