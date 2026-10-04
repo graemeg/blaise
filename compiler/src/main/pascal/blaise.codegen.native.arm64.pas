@@ -10223,7 +10223,11 @@ begin
                    (ADecl.ResolvedReturnType.Kind in [tyString, tyClass,
                                                       tyPointer, tyPChar,
                                                       tyDynArray,
-                                                      tyMetaClass])) then
+                                                      tyMetaClass]) or
+                   { a small set is a one-register bitmask, returned in x0
+                     like an integer (the zero-initialised 8-byte Result
+                     slot keeps the bytes above its width clear) }
+                   IsSmallSetType(ADecl.ResolvedReturnType)) then
         NotYet('function result of this type', ADecl)
       else
         { a string/class/dyn-array Result is a plain 8-byte pointer slot.

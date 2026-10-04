@@ -187,6 +187,7 @@ type
     procedure TestPointerWrite_RecordCopiesWithArc;
     procedure TestAddrOfLocalInterface_IsPairAddress;
     procedure TestRecordProperty_ReadThroughSret;
+    procedure TestSmallSetResult_ReturnedInX0;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4852,6 +4853,32 @@ begin
   AssertTrue('getter result buffer in x8',
     Pos(#9'sub x8, x29, #', AsmT) >= 0);
   AssertTrue('getter called', Pos(#9'bl _TC_GetRec', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestSmallSetResult_ReturnedInX0;
+var
+  AsmT, Body: string;
+begin
+  { a small-set function result lives in an 8-byte Result slot and comes
+    back in x0 (was NotYet 'function result of this type') }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TOpt = (oA, oB, oC);
+      TOpts = set of TOpt;
+    function NoOpts: TOpts;
+    begin
+      Result := [oB];
+    end;
+    begin
+      WriteLn(oB in NoOpts());
+    end.
+    ''');
+  Body := Copy(AsmT, Pos('_NoOpts:', AsmT), Length(AsmT));
+  Body := Copy(Body, 0, Pos(#9'ret', Body));
+  AssertTrue('routine emitted', Pos('_NoOpts:', Body) >= 0);
+  AssertTrue('Result loaded into x0 at exit', Pos(#9'ldur x0, [x29, #-', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

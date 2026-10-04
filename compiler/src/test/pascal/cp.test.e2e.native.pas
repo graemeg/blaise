@@ -420,6 +420,7 @@ type
     procedure TestRun_Native_ClosureCall_AggregateArgs;
     procedure TestRun_Native_PointerWrite_RecordJumboIntf;
     procedure TestRun_Native_RecordDefaultProperty_Read;
+    procedure TestRun_Native_SmallSetFunctionResult;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6854,6 +6855,49 @@ begin
     end.
     ''',
     '5 item1 50 item4' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_SmallSetFunctionResult;
+begin
+  { a function returning a small set (text.regex's NoOptions: TRegexOptions)
+    was NotYet 'function result of this type'; it returns its bitmask in x0
+    like an integer, including after Include(Result, ...). }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TOpt = (oA, oB, oC);
+      TOpts = set of TOpt;
+      TWide = set of 0..40;
+    function NoOpts: TOpts;
+    begin
+      Result := [];
+    end;
+    function Some(K: Integer): TOpts;
+    begin
+      Result := [oA];
+      if K > 1 then
+        Include(Result, oC);
+    end;
+    function WideOf(K: Integer): TWide;
+    begin
+      Result := [K, 40];
+    end;
+    var
+      O: TOpts;
+      W: TWide;
+    begin
+      O := NoOpts();
+      WriteLn(oA in O, ' ', O = []);
+      O := Some(2);
+      WriteLn(oA in O, ' ', oB in O, ' ', oC in O);
+      WriteLn(oC in Some(1));
+      W := WideOf(33);
+      WriteLn(33 in W, ' ', 40 in W, ' ', 3 in W);
+    end.
+    ''',
+    'False True' + LE + 'True False True' + LE + 'False' + LE +
+    'True True False' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;
