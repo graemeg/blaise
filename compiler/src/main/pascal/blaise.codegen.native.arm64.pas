@@ -255,6 +255,7 @@ type
     procedure EmitAnonValueToSlot(AME: TAnonMethodExpr);
     procedure EmitAnonValueInto(AME: TAnonMethodExpr; const ASlot: string);
     procedure EmitFatPtrAssign(AAsgn: TAssignment);
+    procedure EmitParenlessCtor(AFA: TFieldAccessExpr);
     function  EmitClosureResultCall(ACallDecl: TMethodDecl; const AName: string;
       AArgs: TObjectList): string;
     procedure EmitEnvPrologue(ADecl: TMethodDecl);
@@ -1876,6 +1877,28 @@ begin
   Self.Emit(#9'ret');
 end;
 
+procedure TArm64Backend.EmitParenlessCtor(AFA: TFieldAccessExpr);
+var
+  MC: TMethodCallExpr;
+begin
+  if AFA.Base <> nil then
+    NotYet('parameterless constructor on this receiver form', AFA);
+  MC := TMethodCallExpr.Create();
+  try
+    MC.Line := AFA.Line;
+    MC.Col := AFA.Col;
+    MC.ObjectName := AFA.RecordName;
+    MC.Name := AFA.FieldName;
+    MC.ResolvedType := AFA.ResolvedType;
+    MC.ResolvedClassType := AFA.ResolvedType;
+    MC.ResolvedMethod := AFA.ResolvedMethod;
+    MC.IsConstructorCall := True;
+    EmitMethodCallExpr(MC);
+  finally
+    MC.Free();
+  end;
+end;
+
 procedure TArm64Backend.GuardNoOpenArrayParam(AProcType: TProceduralTypeDesc;
   ANode: TASTNode);
 var
@@ -2766,6 +2789,15 @@ begin
     { closure literal: materialise the fat value into its hidden slot; x0 holds
       the slot ADDRESS (the value is used by reference — leg 38). }
     EmitAnonValueToSlot(TAnonMethodExpr(AExpr));
+    Exit;
+  end;
+  if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsConstructorCall then
+  begin
+    { `TFoo.Create` WITHOUT parentheses: the parser yields a field access
+      flagged IsConstructorCall rather than a method call.  It means exactly
+      TFoo.Create(), so lower it through the same constructor path
+      (allocate at rc 0, install the vtable, run a declared Create body). }
+    EmitParenlessCtor(TFieldAccessExpr(AExpr));
     Exit;
   end;
   if AExpr is TStringLiteral then
