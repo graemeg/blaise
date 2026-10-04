@@ -194,6 +194,8 @@ type
     procedure TestRecordMethodSelfCall_ReceiverIsAddress;
     procedure TestCallResultRegs_SavedAcrossTransientRelease;
     procedure TestFormat_BareVariadicArgs_BuildBlock;
+    procedure TestImplicitSelfClassIntermediate_SingleDeref;
+    procedure TestVarParamClassArrayFieldElemWriteStillNotYet;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -416,7 +418,6 @@ type
     procedure TestDynArrayParam_ConstBorrowsByValueRetains;
     procedure TestVarParamRecordArrayFieldElemWrite;
     procedure TestRecordArrayElementRead;
-    procedure TestVarParamClassArrayFieldElemWriteStillNotYet;
     { BUG-20260724 arm64 pass-borrowed-string-by-value over-release:
       a borrowed aliasable string source (global / plain local) handed to a
       by-value string param.  A GLOBAL must be pinned (AddRef before the call,
@@ -5064,6 +5065,39 @@ begin
     ''');
   AssertTrue('two-entry block reserved', Pos(#9'sub sp, sp, #32', AsmT) >= 0);
   AssertTrue('entry count passed', Pos(#9'movz x2, #2'#10#9'bl __StringFormatN', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestImplicitSelfClassIntermediate_SingleDeref;
+var
+  AsmT, Body: string;
+begin
+  { FInner.Arr[1] in a method: Self -> FInner is ONE load at FInner's
+    offset, then Arr's offset is added -- no second load of the vtable word }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TInner = class
+      public
+        Arr: array[0..3] of Int64;
+      end;
+      TOuter = class
+      public
+        FInner: TInner;
+        function Get: Int64;
+      end;
+    function TOuter.Get: Int64;
+    begin
+      Result := FInner.Arr[1];
+    end;
+    begin
+    end.
+    ''');
+  Body := Copy(AsmT, Pos('_TOuter_Get:', AsmT), Length(AsmT));
+  AssertTrue('one step through FInner, then the Arr offset',
+    Pos(#9'ldr x0, [x0, #8]'#10#9'add x0, x0, #8', Body) >= 0);
+  AssertTrue('no second dereference of the instance',
+    Pos(#9'ldr x0, [x0, #8]'#10#9'ldr x0, [x0]', Body) < 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

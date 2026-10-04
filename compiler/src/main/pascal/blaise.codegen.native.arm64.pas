@@ -9819,10 +9819,13 @@ begin
     Self.EmitExprToX0(AFAE.Base)                 { chained receiver }
   else if AFAE.IsImplicitSelf then
   begin
+    { Self, stepped across the intermediate field (FInner.Arr[I]):
+      EmitImplicitBaseStep already DEREFERENCES a class-typed intermediate.
+      A further `ldr` for IsClassAccess loaded the instance's vtable word as
+      the base, so @FInner.Arr[1] / FInner.Arr[1] read garbage silently --
+      EmitRecFieldAddrToX0 composes the same shape without it. }
     EmitLoadSlot('x0', 'Self');
     EmitImplicitBaseStep('x0', TFieldInfo(AFAE.ImplicitBaseInfo));
-    if AFAE.IsClassAccess then
-      Self.Emit(#9'ldr x0, [x0]');
   end
   else if AFAE.IsClassAccess then
   begin

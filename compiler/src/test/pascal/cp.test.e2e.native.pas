@@ -427,6 +427,7 @@ type
     procedure TestRun_Native_RecordMethod_RecordReturningSelfCall;
     procedure TestRun_Native_RegisterRecordResult_SurvivesArgRelease;
     procedure TestRun_Native_Format_BareVariadicArgs;
+    procedure TestRun_Native_ImplicitSelfClassIntermediate_ArrayRead;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -7229,6 +7230,51 @@ begin
     end.
     ''',
     'ab=42 ab! 2.5' + LE + 'v=42' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_ImplicitSelfClassIntermediate_ArrayRead;
+begin
+  { FInner.Arr[1] / @FInner.Arr[1] inside a method, FInner a class field of
+    Self: the element address steps Self -> FInner (one dereference) -> Arr.
+    A second dereference for IsClassAccess loaded the instance's vtable word
+    as the base, so the read returned garbage, silently. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      PInt = ^Integer;
+      TInner = class
+      public
+        Arr: array[0..3] of Integer;
+        constructor Create;
+      end;
+      TOuter = class
+      public
+        FInner: TInner;
+        procedure Go;
+      end;
+    constructor TInner.Create;
+    begin
+      Arr[1] := 42;
+      Arr[3] := 9;
+    end;
+    procedure TOuter.Go;
+    var
+      P: PInt;
+    begin
+      FInner := TInner.Create();
+      WriteLn(FInner.Arr[1], ' ', FInner.Arr[3]);
+      P := @FInner.Arr[1];
+      WriteLn(P^);
+    end;
+    var
+      O: TOuter;
+    begin
+      O := TOuter.Create();
+      O.Go();
+    end.
+    ''',
+    '42 9' + LE + '42' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;
