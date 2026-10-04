@@ -406,6 +406,7 @@ type
     procedure TestRun_Native_IntfFieldFromFunc;
     procedure TestRun_Native_IntfVarParamAndChainedReceiver;
     procedure TestRun_Native_VarOpenArray_ElemReadWrite;
+    procedure TestRun_Native_InterfaceArrayElements;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6190,6 +6191,84 @@ begin
     end.
     ''',
     '6' + LE + '0 3 6 9' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_InterfaceArrayElements;
+begin
+  { static and dyn arrays of interfaces: element stores retain the new obj
+    and release the old (each instance dies exactly once, when its last
+    reference goes), element reads feed dispatch and locals, and an
+    interface FIELD compares against nil (a 16-byte load in a scalar
+    context is its obj half). }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      IG = interface
+        function Greet(N: Integer): Integer;
+      end;
+      TG = class(IG)
+      public
+        FB: Integer;
+        constructor Create(B: Integer);
+        destructor Destroy; override;
+        function Greet(N: Integer): Integer;
+      end;
+      THolder = class
+      public
+        FS: IG;
+        function Has: Boolean;
+      end;
+    constructor TG.Create(B: Integer);
+    begin
+      FB := B;
+    end;
+    destructor TG.Destroy;
+    begin
+      WriteLn('destroyed ', FB);
+      inherited Destroy();
+    end;
+    function TG.Greet(N: Integer): Integer;
+    begin
+      Result := FB + N;
+    end;
+    function THolder.Has: Boolean;
+    begin
+      Result := FS <> nil;
+    end;
+    procedure Run;
+    var
+      S: array[0..2] of IG;
+      D: array of IG;
+      L: IG;
+      H: THolder;
+      I: Integer;
+    begin
+      for I := 0 to 2 do
+        S[I] := TG.Create(I * 10);
+      SetLength(D, 2);
+      D[0] := S[1];
+      D[1] := TG.Create(5);
+      L := S[2];
+      WriteLn(L.Greet(1), ' ', S[0].Greet(2), ' ', D[0].Greet(3), ' ', D[1].Greet(4));
+      S[1] := nil;
+      WriteLn(S[1] = nil);
+      H := THolder.Create();
+      WriteLn(H.Has());
+      H.FS := D[1];
+      WriteLn(H.Has());
+      D[1] := nil;
+      D[0] := nil;
+      WriteLn('end run');
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''',
+    '21 2 13 9' + LE + 'True' + LE + 'False' + LE + 'True' + LE +
+    'destroyed 10' + LE + 'end run' + LE + 'destroyed 5' + LE +
+    'destroyed 0' + LE + 'destroyed 20' + LE + 'done' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

@@ -6253,6 +6253,19 @@ begin
     Self.Emit(#9'ldp x0, x1, [x0]');
     Exit;
   end;
+  if (AExpr is TStringSubscriptExpr) and
+     (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) then
+  begin
+    { an interface ELEMENT: both halves sit side by side in the array }
+    case TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind of
+      tyStaticArray: EmitStaticElemAddr(TStringSubscriptExpr(AExpr));
+      tyDynArray, tyOpenArray: EmitDynElemAddr(TStringSubscriptExpr(AExpr));
+    else
+      NotYet('interface value from this subscript', AExpr);
+    end;
+    Self.Emit(#9'ldp x0, x1, [x0]');
+    Exit;
+  end;
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl <> nil) then
   begin
@@ -7897,6 +7910,13 @@ begin
   Self.Emit(#9'mul x1, x1, x2');
   Self.Emit(#9'add x0, x0, x1');
   EmitPushX0();                                { [elemaddr] }
+  if Elem.Kind = tyInterface then
+  begin
+    { the element IS an (obj, itab) pair: the shared pair store retains the
+      new obj, releases the old one and writes both halves }
+    EmitIntfStoreStacked(0, AStmt.ValueExpr, Elem);
+    Exit;
+  end;
   if Elem.IsString() or (Elem.Kind = tyClass) then
   begin
     Self.EmitExprToX0(AStmt.ValueExpr);
@@ -9483,8 +9503,17 @@ begin
       else
         Self.Emit(#9'ldrsw x0, [x0]');
     8: Self.Emit(#9'ldr x0, [x0]');
+    16:
+      if AElem.Kind = tyInterface then
+        { an interface value in a scalar context (I <> nil, Assigned) is its
+          obj half; the itab rides along in x1 for a pair consumer }
+        Self.Emit(#9'ldp x0, x1, [x0]')
+      else
+        NotYet(Format('array element of this width (%d bytes, %s)',
+          [AElem.RawSize(), AElem.Name]), nil);
   else
-    NotYet('array element of this width', nil);
+    NotYet(Format('array element of this width (%d bytes, %s)',
+      [AElem.RawSize(), AElem.Name]), nil);
   end;
 end;
 

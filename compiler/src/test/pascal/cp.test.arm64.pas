@@ -173,6 +173,7 @@ type
     procedure TestVarOpenArray_ElemWrite_NoExtraDeref;
     procedure TestDefaultIndexedPropWrite_CallsSetter;
     procedure TestMultiDimArray_RowThenColumnStride;
+    procedure TestInterfaceArrayElem_StoreAndNilCompare;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4414,6 +4415,42 @@ begin
     Pos(#9'sub x0, x0, #1', AsmT) >= 0);
   AssertTrue('element stored as a word', Pos(#9'str w0, [x9]', AsmT) >= 0);
   AssertTrue('element read back sign-extended', Pos(#9'ldrsw x0, [x0]', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestInterfaceArrayElem_StoreAndNilCompare;
+var
+  AsmT: string;
+begin
+  { A[I] := Intf on an interface array stores BOTH halves at the element
+    address (16-byte stride), and a 16-byte interface load in a scalar
+    context (A[0] <> nil) is a pair load -- it used to stop with "array
+    element of this width". }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IG = interface
+        function Greet: Int64;
+      end;
+      TG = class(IG)
+        function Greet: Int64;
+      end;
+    function TG.Greet: Int64;
+    begin
+      Result := 1;
+    end;
+    var
+      A: array[0..1] of IG;
+    begin
+      A[1] := TG.Create();
+      if A[1] <> nil then
+        WriteLn('set');
+    end.
+    ''');
+  AssertTrue('16-byte element stride', Pos(#9'movz x2, #16', AsmT) >= 0);
+  AssertTrue('itab half stored beside the obj half',
+    Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
+  AssertTrue('element read as a pair', Pos(#9'ldp x0, x1, [x0]', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;
