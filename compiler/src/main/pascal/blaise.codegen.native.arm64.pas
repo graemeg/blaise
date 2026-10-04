@@ -1575,6 +1575,13 @@ begin
     EmitRecFieldAddrToX0(TFieldAccessExpr(AExpr));
     Exit;
   end;
+  { P^ -- the record a pointer designates: its address is the pointer value
+    (P^.Rec.Field, the fiber runtime's F^.Ctx.SP) }
+  if AExpr is TDerefExpr then
+  begin
+    Self.EmitExprToX0(TDerefExpr(AExpr).Expr);
+    Exit;
+  end;
   NotYet('record address of this expression', AExpr);
 end;
 
@@ -2374,6 +2381,17 @@ begin
       here would drop the index and write the value over the array slot. }
     if AStmt.FieldInfo = nil then
       NotYet('unresolved field assignment', AStmt);
+    if (AStmt.ObjExpr.ResolvedType <> nil) and
+       (AStmt.ObjExpr.ResolvedType.Kind = tyRecord) then
+    begin
+      { a RECORD base -- P^.Rec.Field := v, A.Rec.Field := v: the store goes
+        through the record's ADDRESS (EmitRecAddrToX0), not its value; a
+        record cannot be loaded into one register at all }
+      EmitRecAddrToX0(AStmt.ObjExpr);
+      EmitPushX0();
+      EmitInstanceFieldStoreStacked(AStmt.FieldInfo, AStmt.Expr);
+      Exit;
+    end;
     Self.EmitExprToX0(AStmt.ObjExpr);
     if ArcExprOwnsRef(AStmt.ObjExpr) then
     begin
