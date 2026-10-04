@@ -409,6 +409,7 @@ type
     procedure TestRun_Native_InterfaceArrayElements;
     procedure TestRun_Native_IntfCall_OutStringParam;
     procedure TestRun_Native_RecordCallResult_AsMethodReceiver;
+    procedure TestRun_Native_JumboSetOp_RightLiteral;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6371,6 +6372,44 @@ begin
     end.
     ''',
     '37' + LE + '30' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_JumboSetOp_RightLiteral;
+begin
+  { A + [200, 201] on a jumbo set: the right-hand literal lowers sp for its
+    bitmap, so the parked left operand sits ABOVE it.  The operator popped
+    [sp] -- the literal's first word -- as the left address and the union
+    read through it (silent garbage or a segfault).  Inside a loop each
+    evaluation must also give the literal's stack back. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TCls = set of Byte;
+    var
+      A, B: TCls;
+      I, Total, C: Integer;
+    begin
+      A := [1, 2, 3];
+      Total := 0;
+      for I := 1 to 100000 do
+      begin
+        B := A + [200, 201];
+        if B = [1, 2, 3, 200, 201] then Total := Total + 1;
+        if [1, 2] <= A then Total := Total + 1;
+      end;
+      C := 0;
+      for I := 0 to 255 do
+        if I in B then C := C + 1;
+      WriteLn(C, ' ', Total);
+      B := A - [2];
+      C := 0;
+      for I := 0 to 255 do
+        if I in B then C := C + 1;
+      WriteLn(C, ' ', 3 in B);
+    end.
+    ''',
+    '5 200000' + LE + '2 True' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

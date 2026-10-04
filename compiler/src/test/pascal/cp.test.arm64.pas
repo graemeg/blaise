@@ -176,6 +176,7 @@ type
     procedure TestInterfaceArrayElem_StoreAndNilCompare;
     procedure TestIntfCall_VarArgPassesAddress;
     procedure TestRecordCallResult_ReceiverCopiedToStackTemp;
+    procedure TestJumboSetOp_LeftReadAboveRightLiteral;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4525,6 +4526,30 @@ begin
   AssertTrue('temp reserved and filled from __rret',
     Pos(#9'sub sp, sp, #16'#10#9'mov x1, x0'#10#9'mov x0, sp', AsmT) >= 0);
   AssertTrue('temp dropped after the call', Pos(#9'add sp, sp, #16', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestJumboSetOp_LeftReadAboveRightLiteral;
+var
+  AsmT: string;
+begin
+  { A + [200, 201]: the right literal's 32-byte bitmap sits below the parked
+    left operand, which is therefore read at [sp, #32] (not popped from
+    [sp]), and the literal plus the parked slot are released together. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TCls = set of Byte;
+    var
+      A, B: TCls;
+    begin
+      B := A + [200, 201];
+    end.
+    ''');
+  AssertTrue('left operand read above the literal',
+    Pos(#9'ldr x1, [sp, #32]', AsmT) >= 0);
+  AssertTrue('literal and parked slot released',
+    Pos(#9'add sp, sp, #48', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

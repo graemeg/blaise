@@ -9116,7 +9116,8 @@ end;
 
 procedure TArm64Backend.EmitJumboSetOp(ABE: TBinaryExpr);
 var
-  NBytes: Integer;
+  NBytes, NL, NR: Integer;
+  ARef: string;
 begin
   { Jumbo set operators.  A jumbo set VALUE is its bitmap ADDRESS (in x0), so
     both operands evaluate to pointers and every operator is an RTL call.
@@ -9124,70 +9125,80 @@ begin
     The two operand evaluations must not clobber each other, and either may
     itself lower sp (a jumbo LITERAL operand materialises a stack buffer and
     leaves sp lowered — see EmitJumboSetLiteral's contract).  So the LEFT
-    address is parked on the stack across the right-hand evaluation rather
-    than held in a register, exactly as the membership path does. }
+    address is parked on the stack across the right-hand evaluation, exactly
+    as the membership path does -- and, like that path, it is read back from
+    ABOVE a right-hand literal's buffer ([sp, #NR]), not popped from [sp],
+    which would take the literal's first bitmap word as the left address.
+    Both literal buffers stay live until the RTL call returns and are then
+    released together with the parked slot. }
   NBytes := TSetTypeDesc(ABE.Left.ResolvedType).RawByteSize();
+  NL := JumboSetLiteralBytes(ABE.Left);
+  NR := JumboSetLiteralBytes(ABE.Right);
+
+  Self.EmitExprToX0(ABE.Left);
+  EmitPushX0();                         { park A across the right eval }
+  Self.EmitExprToX0(ABE.Right);         { x0 = B }
+  { with no right-hand literal the parked A is on top: pop it (the common
+    shape, no separate sp adjustment); otherwise read it above the literal }
+  if NR = 0 then
+    ARef := '[sp], #16'
+  else
+    ARef := Format('[sp, #%d]', [NR]);
 
   if ABE.Op in [boEQ, boNE] then
   begin
-    Self.EmitExprToX0(ABE.Left);
-    EmitPushX0();                       { park A }
-    Self.EmitExprToX0(ABE.Right);
     Self.Emit(#9'mov x1, x0');          { B }
-    EmitPopTo('x0');                    { A }
+    Self.Emit(#9'ldr x0, ' + ARef);     { A }
     EmitIntLiteral('x2', NBytes);
     EmitCallSym('_SetEqual');
     if ABE.Op = boNE then
       Self.Emit(#9'eor x0, x0, #1');
-    Exit;
-  end;
-
-  if ABE.Op in [boLE, boGE] then
+  end
+  else if ABE.Op in [boLE, boGE] then
   begin
     { _SetSubset(A, B) tests "A is a subset of B".  For >= the operands swap. }
-    Self.EmitExprToX0(ABE.Left);
-    EmitPushX0();
-    Self.EmitExprToX0(ABE.Right);
     if ABE.Op = boLE then
     begin
       Self.Emit(#9'mov x1, x0');        { B }
-      EmitPopTo('x0');                  { A }
+      Self.Emit(#9'ldr x0, ' + ARef);   { A }
     end
     else
-    begin
-      EmitPopTo('x1');                  { A becomes the B-arg }
-      { x0 already holds the right operand, which becomes the A-arg }
-    end;
+      { A becomes the B-arg; x0 (the right operand) is the A-arg }
+      Self.Emit(#9'ldr x1, ' + ARef);
     EmitIntLiteral('x2', NBytes);
     EmitCallSym('_SetSubset');
-    Exit;
-  end;
+  end
+  else
+  begin
+    { Union / intersection / difference produce a NEW bitmap, so they need a
+      destination buffer.  That buffer is a FIXED x29-relative FRAME slot
+      (_jset_scratch), NOT a fresh sp-lowering the way a literal does.
 
-  { Union / intersection / difference produce a NEW bitmap, so they need a
-    destination buffer.  That buffer is a FIXED x29-relative FRAME slot
-    (_jset_scratch), NOT a fresh sp-lowering the way a literal does.
-
-    This distinction is the whole design, and getting it wrong is a stack leak:
-    a literal's buffer is created once where the literal appears, but an
-    OPERATOR can sit inside a loop, and `sub sp` per evaluation never gets an
-    `add sp` back — measured at 16 bytes per iteration before this was changed
-    to a frame slot, i.e. 1.6 MB over a 100k-iteration loop, ending in a stack
-    overflow.  A frame slot is allocated once per frame and reused, so a loop
-    costs nothing.  It also sidesteps sp-relative addressing entirely, which is
-    what the __strtrans park-slot comment in ReservePendRelSlots warns about. }
-  Self.EmitExprToX0(ABE.Left);
-  EmitPushX0();                         { park A across the right eval }
-  Self.EmitExprToX0(ABE.Right);
-  Self.Emit(#9'mov x2, x0');            { B }
-  EmitPopTo('x1');                      { A }
-  EmitSlotAddr('x0', '_jset_scratch');  { Dest — stable, x29-relative }
-  EmitIntLiteral('x3', NBytes);
-  case ABE.Op of
-    boAdd: EmitCallSym('_SetUnion');
-    boMul: EmitCallSym('_SetInter');
-    boSub: EmitCallSym('_SetDiff');
+      This distinction is the whole design, and getting it wrong is a stack
+      leak: an OPERATOR can sit inside a loop, and `sub sp` per evaluation
+      never gets an `add sp` back — measured at 16 bytes per iteration before
+      this was changed to a frame slot, i.e. 1.6 MB over a 100k-iteration
+      loop, ending in a stack overflow.  A frame slot is allocated once per
+      frame and reused, so a loop costs nothing.  It also sidesteps
+      sp-relative addressing entirely, which is what the __strtrans park-slot
+      comment in ReservePendRelSlots warns about. }
+    Self.Emit(#9'mov x2, x0');          { B }
+    Self.Emit(#9'ldr x1, ' + ARef);     { A }
+    EmitSlotAddr('x0', '_jset_scratch');  { Dest — stable, x29-relative }
+    EmitIntLiteral('x3', NBytes);
+    case ABE.Op of
+      boAdd: EmitCallSym('_SetUnion');
+      boMul: EmitCallSym('_SetInter');
+      boSub: EmitCallSym('_SetDiff');
+    end;
+    EmitSlotAddr('x0', '_jset_scratch');  { the result bitmap's address }
   end;
-  EmitSlotAddr('x0', '_jset_scratch');  { the result bitmap's address }
+  { drop the right literal's buffer, the parked A (unless it was popped)
+    and the left literal's buffer (x0 holds the result, untouched) }
+  if NR > 0 then
+    EmitAddSubImm('add', 'sp', 'sp', NR + 16 + NL)
+  else if NL > 0 then
+    EmitAddSubImm('add', 'sp', 'sp', NL);
 end;
 
 procedure TArm64Backend.EmitJumboSetLiteral(AExpr: TArrayLiteralExpr);
