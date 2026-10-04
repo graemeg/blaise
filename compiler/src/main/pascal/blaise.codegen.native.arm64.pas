@@ -5098,6 +5098,28 @@ begin
       EmitCallSym('_BlaiseArcTan2');
     Exit;
   end;
+  if (AExpr is TFuncCallExpr) and
+     SameText(TFuncCallExpr(AExpr).Name, 'StrToDouble') and
+     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+     (TFuncCallExpr(AExpr).Args.Count = 1) then
+  begin
+    { _StrToDouble(S): Double in d0.  An OWNED string argument (a concat or
+      call result) is released after the call, with the result parked. }
+    Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+    if ArcExprOwnsRef(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])) then
+    begin
+      EmitPushX0();                           { [str] }
+      EmitCallSym('_StrToDouble');
+      Self.Emit(#9'str d0, [sp, #-16]!');     { [str][d0] }
+      Self.Emit(#9'ldr x0, [sp, #16]');
+      EmitCallSym('_StringRelease');
+      Self.Emit(#9'ldr d0, [sp], #16');
+      Self.Emit(#9'add sp, sp, #16');
+    end
+    else
+      EmitCallSym('_StrToDouble');
+    Exit;
+  end;
   if AExpr is TFuncCallExpr then
   begin
     if TFuncCallExpr(AExpr).IsIndirectCall or
