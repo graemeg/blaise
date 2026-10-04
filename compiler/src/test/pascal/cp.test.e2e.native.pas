@@ -422,6 +422,7 @@ type
     procedure TestRun_Native_RecordDefaultProperty_Read;
     procedure TestRun_Native_SmallSetFunctionResult;
     procedure TestRun_Native_InterfaceFromPointerDeref;
+    procedure TestRun_Native_InterfaceArg_AnyExpression;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6942,6 +6943,69 @@ begin
     end.
     ''',
     '9' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_InterfaceArg_AnyExpression;
+begin
+  { an interface ARGUMENT from a field, an element and a call result (only a
+    plain variable was accepted).  An owned call result is released right
+    after its call -- WriteLn emits each argument as it goes, so that
+    instance's destructor line lands mid-line -- and each instance dies
+    exactly once. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      IG = interface
+        function Greet: Integer;
+      end;
+      TG = class(IG)
+        FV: Integer;
+        destructor Destroy; override;
+        function Greet: Integer;
+      end;
+      THolder = class
+        FG: IG;
+      end;
+    destructor TG.Destroy;
+    begin
+      WriteLn('destroyed ', FV);
+      inherited Destroy();
+    end;
+    function TG.Greet: Integer;
+    begin
+      Result := FV;
+    end;
+    function Make(V: Integer): IG;
+    var
+      T: TG;
+    begin
+      T := TG.Create();
+      T.FV := V;
+      Result := T;
+    end;
+    function Use(G: IG): Integer;
+    begin
+      Result := G.Greet();
+    end;
+    procedure Run;
+    var
+      H: THolder;
+      A: array[0..1] of IG;
+    begin
+      H := THolder.Create();
+      H.FG := Make(1);
+      A[1] := Make(2);
+      WriteLn(Use(H.FG), ' ', Use(A[1]), ' ', Use(Make(3)));
+      WriteLn('end run');
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''',
+    '1 2 destroyed 3' + LE + '3' + LE + 'end run' + LE + 'destroyed 1' + LE +
+    'destroyed 2' + LE + 'done' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

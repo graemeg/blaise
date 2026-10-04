@@ -11260,6 +11260,7 @@ var
   JTmp: string;
   JNB: Integer;
   IndSlot: string;
+  IntfT: TTypeDesc;
 begin
   { an indirect call's target slot, captured now -- a closure call among the
     arguments re-sets FIndirectSlot for itself }
@@ -11719,28 +11720,39 @@ begin
         { fat pointer: obj + itab in two consecutive int registers.
           The callee makes its own co-owning copy (by-value retains in
           the prologue), so the caller passes a borrow. }
-        if not (Arg is TIdentExpr) then
-          NotYet('interface argument from this expression', Arg);
-        if TIdentExpr(Arg).ParamMode = pmVar then
-          NotYet('var interface parameter', Arg);
-        EmitLoadSlot('x0', TIdentExpr(Arg).Name);
+        { any interface source (variable, field, element, P^, call result,
+          class narrowing) through the shared pair lowering.  An OWNED obj
+          half (a call result) is parked for one post-call release, the
+          class-transient rule (shape 'C'); a borrowed one is passed as is. }
+        if I < ADecl.Params.Count then
+          IntfT := TMethodParam(ADecl.Params.Items[I]).ResolvedType
+        else
+          IntfT := Arg.ResolvedType;
+        if EmitIntfPairToX0X1(Arg, IntfT) then
+        begin
+          if TransN >= STRTRANS_SLOTS then
+            NotYet('more than 8 owned transient args in one call', Arg);
+          Self.Emit(#9'str x1, [sp, #-16]!');
+          EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
+          Self.Emit(#9'ldr x1, [sp], #16');
+          TransShapes := TransShapes + 'C';
+          Inc(TransN);
+        end;
+        { obj then itab, matching the PopRegs order (pops run in reverse) }
         EmitPushX0();
+        Self.Emit(#9'str x1, [sp, #-16]!');
         if NInt >= 7 then
         begin
           { whole fat pointer on the stack — obj then itab, two eightbytes }
           StackOff := AlignTo(StackOff, 8);
           PopRegs.Add(Format('m%d_%d', [StackOff, 8]));
           StackOff := StackOff + 8;
-          EmitLoadSlot('x0', TIdentExpr(Arg).Name + '_itab');
-          EmitPushX0();
           PopRegs.Add(Format('m%d_%d', [StackOff, 8]));
           StackOff := StackOff + 8;
         end
         else
         begin
           PopRegs.Add('x' + IntToStr(NInt));
-          EmitLoadSlot('x0', TIdentExpr(Arg).Name + '_itab');
-          EmitPushX0();
           PopRegs.Add('x' + IntToStr(NInt + 1));
           NInt := NInt + 2;
         end;

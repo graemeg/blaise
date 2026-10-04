@@ -189,6 +189,7 @@ type
     procedure TestRecordProperty_ReadThroughSret;
     procedure TestSmallSetResult_ReturnedInX0;
     procedure TestInterfaceFromDeref_PairLoad;
+    procedure TestInterfaceArg_OwnedCallResultReleased;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4905,6 +4906,38 @@ begin
   Body := Copy(AsmT, Pos('_Load:', AsmT), Length(AsmT));
   AssertTrue('pair loaded through the pointer',
     Pos(#9'ldp x0, x1, [x0]', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestInterfaceArg_OwnedCallResultReleased;
+var
+  AsmT: string;
+  PosCall, PosRel: Integer;
+begin
+  { Use(Make()): an interface argument from a call result is owned -- its
+    obj half is released once after the call }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IG = interface
+        function Greet: Int64;
+      end;
+    function Make: IG;
+    begin
+      Result := nil;
+    end;
+    function Use(G: IG): Int64;
+    begin
+      Result := 1;
+    end;
+    begin
+      WriteLn(Use(Make()));
+    end.
+    ''');
+  PosCall := Pos(#9'bl _Use', AsmT);
+  AssertTrue('callee invoked', PosCall >= 0);
+  PosRel := PosEx(#9'bl __ClassRelease', AsmT, PosCall);
+  AssertTrue('owned obj half released after the call', PosRel > PosCall);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;
