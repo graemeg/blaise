@@ -6169,6 +6169,12 @@ begin
                                          tyProcedural]) then
     NotYet('assignment to non-integer variable', AAsgn);
   Self.EmitExprToX0(AAsgn.Expr);
+  { Wrap the value to the target's own width and signedness before it lands.
+    A frame slot / scalar global is 8 bytes and read back 64-bit wide, so an
+    unnarrowed `B := B + 200` (B: Byte = 100) stored 300 and every later
+    read saw 300, not 44 -- silently.  A width-exact store (var param, env
+    field) truncates in memory anyway; narrowing first is harmless there. }
+  EmitNarrowX0(AAsgn.ResolvedLhsType);
   if IsCaptured(AAsgn.Name) then
   begin
     { captured scalar (leg 17): '_cap_' holds &<Name> — store through it.

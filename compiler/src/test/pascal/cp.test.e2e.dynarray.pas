@@ -85,6 +85,7 @@ type
       neighbouring global (BUG-20260723-incdec-narrow-global-rmw). }
     procedure TestRun_IncDec_NarrowGlobal;
     procedure TestRun_IncDec_NarrowVarParam_StoresDeclaredWidth;
+    procedure TestRun_Assign_NarrowTarget_Wraps;
     { Inc/Dec on a PROMOTED narrow LOCAL — QBE kept the local as a bare w SSA
       temp and never masked, so Inc of a Byte 255 read back 256 instead of 0
       (BUG-20260723-incdec-promoted-narrow-local). }
@@ -639,6 +640,28 @@ const
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertRunsOnAll(Src, '255 7 1 32767 -2147483648 99' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_Assign_NarrowTarget_Wraps;
+const
+  { A plain assignment must wrap the value to the TARGET's width and
+    signedness.  arm64 stored the full 64-bit result into the 8-byte slot,
+    so `G := G + 10` on a Byte holding 250 read back 260, silently. }
+  Src = '''
+    program Prg;
+    var G: Byte; I: Integer; Wd: Word; S: SmallInt; C: Cardinal;
+    begin
+      G := 250; G := G + 10;
+      I := 2147483647; I := I + 1;
+      Wd := 65535; Wd := Wd + 2;
+      S := 32767; S := S + 1;
+      C := 0; C := C - 1;
+      WriteLn(G, ' ', I, ' ', Wd, ' ', S, ' ', C)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  AssertRunsOnAll(Src, '4 -2147483648 1 -32768 4294967295' + LE, 0);
 end;
 
 procedure TE2EDynArrayTests.TestRun_IncDec_PromotedNarrowLocal;
