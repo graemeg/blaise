@@ -988,6 +988,16 @@ procedure TE2ETestCase.AssertRTLRunsOn(ABackends: TBackends;
 var
   BE: TBackend;
 begin
+  { Drop a backend the host cannot run (QBE on macOS), exactly as
+    AssertRunsOn does: otherwise the QBE arm Ignore()s the WHOLE test before
+    the native arm ever runs. }
+  if not BackendRunnableOnHost(beQBE) then
+    ABackends := ABackends - [beQBE];
+  if ABackends = [] then
+  begin
+    Ignore('no backend supported on this host for this test');
+    Exit;
+  end;
   for BE := Low(TBackend) to High(TBackend) do
     if BE in ABackends then
       Self.AssertRTLRunsOnOne(BE, BackendName(BE), ASrc, AExpectedOut,
