@@ -162,6 +162,8 @@ type
     FPendingRelCount: Integer;   { live statement-scoped deferred class
                                    releases (BUG-048/BUG-049) — also the next
                                    free _pendrel_N slot index }
+    FJArgN: Integer;             { counter for '__jarg_<n>' jumbo-set
+                                   argument snapshots }
     FFretN: Integer;             { counter for '__fret_<n>' closure-result
                                    scratch slots (one per call site) }
     FCurEnvCaptured: TStringList; { borrowed: the current routine's
@@ -498,6 +500,7 @@ type
     procedure EmitJumboSetOp(ABE: TBinaryExpr);
     procedure EmitJumboSetLiteral(AExpr: TArrayLiteralExpr);
     function  JumboSetLiteralBytes(AExpr: TASTExpr): Integer;
+    function  IsJumboSetType(AType: TTypeDesc): Boolean;
     procedure EmitStaticElemAddr(ASub: TStringSubscriptExpr);
     { x0 := address of the inline storage of a STATIC-array-valued
       expression (a variable, a field, an element of an outer array, P^) }
@@ -3421,6 +3424,7 @@ end;
 procedure TArm64Backend.EmitExprToX0(AExpr: TASTExpr);
 var
   BE: TBinaryExpr;
+  JTmp: string;
   DivGuardOk: string;
   DivUnsigned: Boolean;
   CmpUnsigned: Boolean;
@@ -3429,6 +3433,29 @@ var
   Idx, I: Integer;
   EmptyArgs: TObjectList;
 begin
+  if IsJumboSetType(AExpr.ResolvedType) and
+     (((AExpr is TFuncCallExpr) and
+       (TFuncCallExpr(AExpr).ResolvedDecl <> nil)) or
+      ((AExpr is TMethodCallExpr) and
+       (TMethodCallExpr(AExpr).ResolvedMethod <> nil) and
+       not TMethodCallExpr(AExpr).IsConstructorCall and
+       not TMethodCallExpr(AExpr).IsProcFieldCall)) then
+  begin
+    { a jumbo-set-returning call: the callee fills a per-site frame scratch
+      through x8, and -- like every jumbo set value -- the call evaluates to
+      that bitmap's ADDRESS.  Per site, so two such calls in one expression
+      (F(A) + F(B)) cannot overwrite each other's result. }
+    if (AExpr is TFuncCallExpr) and
+       TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).IsExternal then
+      NotYet('external jumbo-set-returning call', AExpr);
+    JTmp := '__jret_' + IntToStr(FJArgN);
+    FJArgN := FJArgN + 1;
+    if not FFrame.ContainsKey(JTmp) then
+      AddLocal(JTmp, AExpr.ResolvedType.RawSize());
+    EmitRecCallDispatch(AExpr, JTmp);
+    EmitSlotAddr('x0', JTmp);
+    Exit;
+  end;
   if AExpr is TIntLiteral then
   begin
     EmitIntLiteral('x0', TIntLiteral(AExpr).Value);
@@ -9325,6 +9352,11 @@ begin
   Self.Emit(#9'mov x0, sp');       { return the bitmap address }
 end;
 
+function TArm64Backend.IsJumboSetType(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType is TSetTypeDesc) and TSetTypeDesc(AType).IsJumbo();
+end;
+
 function TArm64Backend.JumboSetLiteralBytes(AExpr: TASTExpr): Integer;
 begin
   { the sp delta EmitJumboSetLiteral consumed, for the caller's restore }
@@ -9979,6 +10011,15 @@ begin
         AddLocal(Par.ParamName, 16);
         AddLocal('__pptr_' + Par.ParamName, 8);
       end
+      else if (Par.ResolvedType is TSetTypeDesc) and
+              TSetTypeDesc(Par.ResolvedType).IsJumbo() then
+      begin
+        { by-value JUMBO set param: an inline bitmap, passed by pointer like a
+          closure (the caller snapshots it) and copied into our own slot by
+          the prologue's pass 2, so writes in the callee stay local }
+        AddLocal(Par.ParamName, Par.ResolvedType.RawSize());
+        AddLocal('__pptr_' + Par.ParamName, 8);
+      end
       else
       begin
         { a by-value CLASS param is a plain borrowed pointer — the caller
@@ -10039,6 +10080,13 @@ begin
         { fat-pointer result: written to the caller's 16-byte x8 buffer
           at return; the +1 on the obj half transfers to the caller }
         AddIntfLocal('Result');
+        AddLocal('__sret', 8);
+      end
+      else if IsJumboSetType(ADecl.ResolvedReturnType) then
+      begin
+        { a jumbo-set result: an inline bitmap Result, copied to the caller's
+          x8 buffer at return (the large-record sret convention) }
+        AddLocal('Result', ADecl.ResolvedReturnType.RawSize());
         AddLocal('__sret', 8);
       end
       else if not (IsIntFam(ADecl.ResolvedReturnType) or
@@ -10222,8 +10270,10 @@ begin
   if FIsFunction and (ADecl.ResolvedReturnType.Kind = tyRecord) then
     RecShape := RecReturnShape(TRecordTypeDesc(ADecl.ResolvedReturnType));
   if FIsFunction and ((ADecl.ResolvedReturnType.Kind = tyInterface) or
-                      IsMethodPtrType(ADecl.ResolvedReturnType)) then
-    RecShape := 0;   { interface and closure results use the x8 sret path }
+                      IsMethodPtrType(ADecl.ResolvedReturnType) or
+                      IsJumboSetType(ADecl.ResolvedReturnType)) then
+    RecShape := 0;   { interface, closure and jumbo-set results use the x8
+                       sret path }
   FExitLabel := NewLabel('rexit');
   FForN := 0;
   RegisterFrameSlots(ADecl, ADecl.Body);
@@ -10482,11 +10532,14 @@ begin
         FIdx := FIdx + 1;
       end;
     end
-    else if IsMethodPtrType(Par.ResolvedType) then
+    else if IsMethodPtrType(Par.ResolvedType) or
+            ((Par.ResolvedType is TSetTypeDesc) and
+             TSetTypeDesc(Par.ResolvedType).IsJumbo()) then
     begin
       { closure / method-pointer param: a POINTER to the caller's 16-byte fat
         value arrives in one x reg (or on the stack when the int bank is full);
-        park it in '__pptr_' — pass 2 memcpys the 16 bytes into our slot. }
+        park it in '__pptr_' — pass 2 memcpys the 16 bytes into our slot.
+        A by-value jumbo set arrives the same way (its whole bitmap). }
       if J >= 8 then
       begin
         SPOff := AlignTo(SPOff, 8);
@@ -10576,6 +10629,16 @@ begin
        (not Par.IsVarParam) and
        (RecReturnShape(TRecordTypeDesc(Par.ResolvedType)) = 0) then
     begin
+      EmitSlotAddr('x0', Par.ParamName);
+      EmitLoadSlot('x1', '__pptr_' + Par.ParamName);
+      EmitIntLiteral('x2', Par.ResolvedType.RawSize());
+      EmitCallSym('memcpy');
+    end
+    else if (Par.ResolvedType is TSetTypeDesc) and
+            TSetTypeDesc(Par.ResolvedType).IsJumbo() and
+            (not Par.IsVarParam) then
+    begin
+      { by-value jumbo set: copy the caller's bitmap into our own slot }
       EmitSlotAddr('x0', Par.ParamName);
       EmitLoadSlot('x1', '__pptr_' + Par.ParamName);
       EmitIntLiteral('x2', Par.ResolvedType.RawSize());
@@ -10760,6 +10823,16 @@ begin
           Self.Emit(Format(#9'ldr d%d, [x9, #%d]', [I, I * 8]));
       end;
     end;
+  end
+  else if FIsFunction and IsJumboSetType(ADecl.ResolvedReturnType) then
+  begin
+    { the whole bitmap to the caller's buffer }
+    EmitLoadSlot('x0', '__sret');
+    EmitPushX0();
+    EmitSlotAddr('x1', 'Result');
+    EmitPopTo('x0');
+    EmitIntLiteral('x2', ADecl.ResolvedReturnType.RawSize());
+    EmitCallSym('memcpy');
   end
   else if FIsFunction and IsMethodPtrType(ADecl.ResolvedReturnType) then
   begin
@@ -11030,6 +11103,8 @@ var
   LitBase, LitOff, ESz, N: Integer;
   RecBase, RecOff: Integer;
   NarrowFix: Boolean;
+  JTmp: string;
+  JNB: Integer;
 begin
   NInt := 0;
   NFloat := 0;
@@ -11607,6 +11682,41 @@ begin
         begin
           PopRegs.Add('d' + IntToStr(NFloat));
           Inc(NFloat);
+        end;
+      end
+      else if (Arg.ResolvedType is TSetTypeDesc) and
+              TSetTypeDesc(Arg.ResolvedType).IsJumbo() then
+      begin
+        { by-value JUMBO set arg: pass the ADDRESS of a bitmap in ONE integer
+          register; the callee copies it (prologue pass 2).  The value is
+          snapshotted into a per-site frame slot first: a literal lowers sp
+          (which would break this push/pop bracket) and an operator result
+          lives in the shared _jset_scratch (which a second jumbo arg in the
+          same call would overwrite). }
+        JTmp := '__jarg_' + IntToStr(FJArgN);
+        FJArgN := FJArgN + 1;
+        if not FFrame.ContainsKey(JTmp) then
+          AddLocal(JTmp, Arg.ResolvedType.RawSize());
+        JNB := JumboSetLiteralBytes(Arg);
+        Self.EmitExprToX0(Arg);                  { source bitmap address }
+        Self.Emit(#9'mov x1, x0');
+        EmitSlotAddr('x0', JTmp);
+        EmitIntLiteral('x2', Arg.ResolvedType.RawSize());
+        EmitCallSym('memcpy');
+        if JNB > 0 then
+          EmitAddSubImm('add', 'sp', 'sp', JNB); { drop the literal buffer }
+        EmitSlotAddr('x0', JTmp);
+        EmitPushX0();
+        if (ADecl.IsVarArgs and (I >= ADecl.Params.Count)) or (NInt >= 8) then
+        begin
+          StackOff := AlignTo(StackOff, 8);
+          PopRegs.Add(Format('m%d_%d', [StackOff, 8]));
+          StackOff := StackOff + 8;
+        end
+        else
+        begin
+          PopRegs.Add('x' + IntToStr(NInt));
+          Inc(NInt);
         end;
       end
       else if IsMethodPtrType(Arg.ResolvedType) then

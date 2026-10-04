@@ -180,6 +180,7 @@ type
     procedure TestClosureField_ImplicitSelfStore_Lowers;
     procedure TestRecordGlobal_ClassFieldReceiver_Lowers;
     procedure TestJumboSetField_StoreCopiesBitmap;
+    procedure TestJumboSetParamAndResult_ByPointerAndSret;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4646,6 +4647,31 @@ begin
   AssertTrue('instance base read above the literal',
     Pos(#9'ldr x0, [sp, #32]', AsmT) >= 0);
   AssertTrue('32-byte bitmap copied', Pos(#9'movz x2, #32'#10#9'bl _memcpy', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestJumboSetParamAndResult_ByPointerAndSret;
+var
+  AsmT: string;
+begin
+  { a by-value jumbo-set param arrives by pointer and is copied into the
+    callee's slot; a jumbo-set result is written through x8. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TCls = set of Byte;
+    function Fold(S: TCls): TCls;
+    begin
+      Result := S;
+    end;
+    var
+      X, Y: TCls;
+    begin
+      Y := Fold(X);
+    end.
+    ''');
+  AssertTrue('incoming x8 parked', Pos(#9'stur x8, [x29, #-', AsmT) >= 0);
+  AssertTrue('caller passes a result buffer in x8', Pos(#9'sub x8, x29, #', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

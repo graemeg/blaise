@@ -413,6 +413,7 @@ type
     procedure TestRun_Native_ClosureField_ImplicitSelfStore;
     procedure TestRun_Native_RecordGlobal_ClassFieldReceiver;
     procedure TestRun_Native_JumboSetField_StoreAndRead;
+    procedure TestRun_Native_JumboSetParamsAndResult;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6535,6 +6536,51 @@ begin
     end.
     ''',
     '261 7' + LE + 'True False' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_JumboSetParamsAndResult;
+begin
+  { by-value jumbo set params arrive by pointer and are copied into the
+    callee's own slot (a callee Include stays local), literal / operator /
+    variable args are snapshotted per site, and a jumbo-set RESULT comes back
+    through x8 like a large record. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TCls = set of Byte;
+    function Count(S: TCls): Integer;
+    var
+      I: Integer;
+    begin
+      Result := 0;
+      for I := 0 to 255 do
+        if I in S then Result := Result + 1;
+      Include(S, 7);
+    end;
+    function Both(A, B: TCls; K: Integer): Integer;
+    begin
+      Result := Count(A) * 100 + Count(B) * 10 + K;
+    end;
+    function Fold(const ACls: TCls): TCls;
+    begin
+      Result := ACls + [200, 201];
+    end;
+    var
+      X, Y: TCls;
+      I: Integer;
+    begin
+      X := [1, 2, 3];
+      Y := [10..19];
+      WriteLn(Count(X), ' ', 7 in X);
+      WriteLn(Both([4, 5], X + Y, 9));
+      for I := 1 to 3 do
+        WriteLn(Count([I, 100, 200]));
+      Y := Fold(X);
+      WriteLn(Count(Y), ' ', Count(Fold(Fold(X))));
+    end.
+    ''',
+    '3 False' + LE + '339' + LE + '3' + LE + '3' + LE + '3' + LE + '5 5' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;
