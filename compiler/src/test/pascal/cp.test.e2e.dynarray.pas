@@ -86,6 +86,7 @@ type
     procedure TestRun_IncDec_NarrowGlobal;
     procedure TestRun_IncDec_NarrowVarParam_StoresDeclaredWidth;
     procedure TestRun_Assign_NarrowTarget_Wraps;
+    procedure TestRun_VarAndCapturedDynArray_ResizeAndWrite;
     { Inc/Dec on a PROMOTED narrow LOCAL — QBE kept the local as a bare w SSA
       temp and never masked, so Inc of a Byte 255 read back 256 instead of 0
       (BUG-20260723-incdec-promoted-narrow-local). }
@@ -662,6 +663,50 @@ const
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertRunsOnAll(Src, '4 -2147483648 1 -32768 4294967295' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_VarAndCapturedDynArray_ResizeAndWrite;
+const
+  { A dyn array reached through a var parameter or a closure capture: the
+    slot holds the variable's ADDRESS (the captured local's own slot is
+    dead), so SetLength, element reads and element / element-field writes
+    must all go through it.  arm64 rejected the var forms, and SetLength on a
+    captured array resized the dead slot.  This is the shape of the fiber
+    reactors' Wait(..., var AReady: TReadyList). }
+  Src = '''
+    program vd;
+    type
+      TEntry = record Token: Int64; Events: Integer; end;
+      TList = array of TEntry;
+      TInts = array of Integer;
+    procedure Fill(var A: TList; N: Integer);
+    var I: Integer;
+    begin
+      if Length(A) < N then SetLength(A, N);
+      for I := 0 to N - 1 do
+      begin
+        A[I].Token := I * 10;
+        A[I].Events := I + 1;
+      end;
+    end;
+    procedure Grow(var B: TInts);
+    begin
+      SetLength(B, Length(B) + 1);
+      B[High(B)] := 99;
+    end;
+    type TProc0 = reference to procedure;
+    var L: TList; X: TInts; P: TProc0; C: TInts;
+    begin
+      Fill(L, 3); WriteLn(Length(L), ' ', L[2].Token, ' ', L[2].Events);
+      Grow(X); Grow(X); WriteLn(Length(X), ' ', X[1]);
+      P := procedure begin SetLength(C, 4); C[3] := 5; end;
+      P(); WriteLn(Length(C), ' ', C[3]);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  AssertRunsOnAll(Src, '3 20 3' + LE + '2 99' + LE + '4 5' + LE, 0);
+  AssertLeakFreeOnAll(Src, '4 5');
 end;
 
 procedure TE2EDynArrayTests.TestRun_IncDec_PromotedNarrowLocal;

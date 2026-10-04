@@ -6485,8 +6485,33 @@ begin
     { plain ident lvalue }
     if not (TASTExpr(ACall.Args.Items[0]) is TIdentExpr) then
       NotYet('SetLength on this lvalue form', ACall);
-    if TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode = pmVar then
-      NotYet('SetLength on a var parameter', ACall);
+    if (TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode = pmVar) or
+       IsCaptured(TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name) then
+    begin
+      { A var parameter's slot holds the caller variable's ADDRESS, and a
+        captured variable's '_cap_' slot holds its storage address (its own
+        promoted slot is dead) -- resize through that address. }
+      Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
+      EmitPushX0();                                       { [N] }
+      if IsCaptured(TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name) then
+      begin
+        EmitLoadSlot('x0', '_cap_' + TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
+        if TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode = pmVar then
+          Self.Emit(#9'ldr x0, [x0]');
+      end
+      else
+        EmitLoadSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
+      EmitPushX0();                                       { [N][addr] }
+      Self.Emit(#9'ldr x0, [x0]');                        { old array }
+      Self.Emit(#9'ldr x1, [sp, #16]');                   { N }
+      EmitIntLiteral('x2', TDynArrayTypeDesc(
+        TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType.RawSize());
+      EmitCallSym('_DynArraySetLength');
+      Self.Emit(#9'ldr x9, [sp]');                        { addr }
+      Self.Emit(#9'str x0, [x9]');
+      Self.Emit(#9'add sp, sp, #32');
+      Exit;
+    end;
     if TIdentExpr(TASTExpr(ACall.Args.Items[0])).IsImplicitSelf and
        (TIdentExpr(TASTExpr(ACall.Args.Items[0])).ImplicitFieldInfo
           <> nil) then
@@ -7275,7 +7300,8 @@ begin
   if (AStmt.BaseExpr <> nil) or
      (AStmt.IsVarParam and
       ((AStmt.ResolvedArrayType = nil) or
-       not (AStmt.ResolvedArrayType.Kind in [tyString, tyPChar]))) or
+       not (AStmt.ResolvedArrayType.Kind in [tyString, tyPChar,
+                                             tyDynArray]))) or
      (AStmt.IsImplicitSelf and ((AStmt.ImplicitFieldInfo = nil) or
        (AStmt.ResolvedArrayType = nil) or
        not (AStmt.ResolvedArrayType.Kind in [tyDynArray, tyStaticArray]))) then
@@ -7379,8 +7405,24 @@ begin
       EmitAddSubImm('add', 'x0', 'x0',
         TFieldInfo(AStmt.ImplicitFieldInfo).Offset);
   end
+  else if IsCaptured(AStmt.ArrayName) then
+  begin
+    { captured: '_cap_' holds the storage address (a var param's storage
+      holds the caller's address, one more deref).  A dyn array's data
+      pointer is the value stored there; a static array IS that storage. }
+    EmitLoadSlot('x0', '_cap_' + AStmt.ArrayName);
+    if AStmt.IsVarParam then
+      Self.Emit(#9'ldr x0, [x0]');
+    if AStmt.ResolvedArrayType.Kind = tyDynArray then
+      Self.Emit(#9'ldr x0, [x0]');
+  end
   else if AStmt.ResolvedArrayType.Kind = tyDynArray then
-    EmitLoadSlot('x0', AStmt.ArrayName)   { data pointer value }
+  begin
+    EmitLoadSlot('x0', AStmt.ArrayName);  { data pointer value }
+    { a var dyn-array parameter's slot holds the caller variable's address }
+    if AStmt.IsVarParam then
+      Self.Emit(#9'ldr x0, [x0]');
+  end
   else
     EmitSlotAddr('x0', AStmt.ArrayName);
   EmitPopTo('x1');
@@ -8752,8 +8794,6 @@ begin
     holds the caller's data pointer directly) }
   if not (ASub.StrExpr is TIdentExpr) then
     NotYet('subscript on this dyn-array expression', ASub);
-  if TIdentExpr(ASub.StrExpr).ParamMode = pmVar then
-    NotYet('subscript on a var dyn-array parameter', ASub);
   if ASub.StrExpr.ResolvedType.Kind = tyOpenArray then
     ESz := TOpenArrayTypeDesc(
       ASub.StrExpr.ResolvedType).ElementType.RawSize()
@@ -8770,8 +8810,23 @@ begin
     Self.Emit(Format(#9'ldr x0, [x0, #%d]',
       [TFieldInfo(TIdentExpr(ASub.StrExpr).ImplicitFieldInfo).Offset]));
   end
+  else if IsCaptured(TIdentExpr(ASub.StrExpr).Name) then
+  begin
+    { captured: '_cap_' holds the storage address (a var param's storage
+      holds the caller's address, one more deref); the data pointer is the
+      value stored there }
+    EmitLoadSlot('x0', '_cap_' + TIdentExpr(ASub.StrExpr).Name);
+    if TIdentExpr(ASub.StrExpr).ParamMode = pmVar then
+      Self.Emit(#9'ldr x0, [x0]');
+    Self.Emit(#9'ldr x0, [x0]');
+  end
   else
+  begin
     EmitLoadSlot('x0', TIdentExpr(ASub.StrExpr).Name);
+    { a var dyn-array parameter's slot holds the caller variable's address }
+    if TIdentExpr(ASub.StrExpr).ParamMode = pmVar then
+      Self.Emit(#9'ldr x0, [x0]');
+  end;
   EmitPopTo('x1');
   EmitIntLiteral('x2', ESz);
   Self.Emit(#9'mul x1, x1, x2');
@@ -9197,7 +9252,7 @@ begin
         if not (IsIntFam(Par.ResolvedType) or
                 ((Par.ResolvedType <> nil) and
                  (Par.ResolvedType.Kind in [tyDouble, tyString, tyRecord,
-                                            tyClass,
+                                            tyClass, tyDynArray,
                                             tyPointer, tyPChar,
                                             tyMetaClass]))) then
           NotYet('var parameter ''' + Par.ParamName + ''' of this type', ADecl);
