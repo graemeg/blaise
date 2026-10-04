@@ -13352,6 +13352,7 @@ var
   SlotOff:   Integer;
   CurRT:     TRecordTypeDesc;
   SynthCur:  TMethodCallExpr;
+  CurStore:  TAssignment;
 begin
   if AStmt.IsArrayIter then
   begin
@@ -13771,6 +13772,36 @@ begin
       Self.EmitMethodSretCall(SynthCur, '(%rbx)', False);
       Self.Emit(#9'popq %rbx');
     finally
+      SynthCur.Free();
+    end;
+  end
+  else if CurDecl.ResolvedReturnType.Kind = tyInterface then
+  begin
+    { Interface-returning Current: the getter returns its (obj, itab) pair
+      through a hidden sret buffer (%rdi = buffer, %rsi = Self).  The scalar
+      call below passed the enumerator in %rdi, so the getter wrote its result
+      THROUGH the enumerator object and the loop variable was never set --
+      a crash on the first use (for G in TList<IG>).  Lower it exactly as
+      `VarName := Enum.Current` does: the interface-assignment path runs the
+      sret call and moves the owned pair in, releasing the previous binding. }
+    SynthCur := TMethodCallExpr.Create();
+    CurStore := TAssignment.Create();
+    try
+      SynthCur.Name              := CurDecl.Name;
+      SynthCur.ResolvedMethod    := CurDecl;
+      SynthCur.ResolvedType      := CurDecl.ResolvedReturnType;
+      SynthCur.ObjectName        := AStmt.EnumVarName;
+      SynthCur.IsGlobal          := False;
+      SynthCur.ResolvedClassType :=
+        TMethodDecl(AStmt.GetEnumDecl).ResolvedReturnType;
+      CurStore.Name            := AStmt.VarName;
+      CurStore.IsGlobal        := AStmt.VarIsGlobal;
+      CurStore.ResolvedLhsType := CurDecl.ResolvedReturnType;
+      CurStore.Expr            := SynthCur;
+      Self.EmitStmt(CurStore);
+    finally
+      CurStore.Expr := nil;
+      CurStore.Free();
       SynthCur.Free();
     end;
   end

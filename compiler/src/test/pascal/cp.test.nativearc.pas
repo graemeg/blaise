@@ -39,6 +39,7 @@ type
       any host). }
     procedure TestX86_SmallSetLiteral_RuntimeMemberOrredIn;
     procedure TestX86_NestedJumboSetCallArg_Hoisted;
+    procedure TestX86_ForIn_InterfaceCurrent_UsesSret;
     { A PROGRAM-level static array of managed elements is a GLOBAL, so its
       cleanup runs through EmitGlobalReleases, not the procedure-frame walk.
       That kind chain handled string/class/dyn-array/interface/record but not
@@ -131,6 +132,58 @@ begin
   Body := Copy(AsmT, Pos('main:', AsmT), Length(AsmT));
   AssertTrue('outer destination read past the hoisted inner buffer',
     Pos(#9'movq 48(%rsp), %rdi'#10#9'subq $8, %rsp'#10#9'callq Fold', Body) >= 0);
+end;
+
+procedure TNativeArcTests.TestX86_ForIn_InterfaceCurrent_UsesSret;
+var
+  AsmT: string;
+begin
+  { for G in E with an interface-returning Current: the getter is called
+    with the sret buffer in %rdi and the enumerator in %rsi, and the owned
+    pair moves into the loop variable.  It was a scalar call with the
+    enumerator in %rdi, so the getter wrote through the enumerator. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IG = interface
+        function Greet: Int64;
+      end;
+      TEnum = class
+        FDone: Boolean;
+        FCur: IG;
+        function MoveNext: Boolean;
+        function GetCurrent: IG;
+        property Current: IG read GetCurrent;
+      end;
+      TColl = class
+        function GetEnumerator: TEnum;
+      end;
+    function TEnum.MoveNext: Boolean;
+    begin
+      Result := not FDone;
+      FDone := True;
+    end;
+    function TEnum.GetCurrent: IG;
+    begin
+      Result := FCur;
+    end;
+    function TColl.GetEnumerator: TEnum;
+    begin
+      Result := TEnum.Create();
+    end;
+    procedure Run(C: TColl);
+    var
+      G: IG;
+    begin
+      for G in C do
+        WriteLn(G.Greet());
+    end;
+    begin
+    end.
+    ''');
+  AssertTrue('getter called with the sret buffer in %rdi and Self in %rsi',
+    Pos(#9'movq %r10, %rsi'#10#9'movq %rsp, %rdi'#10#9'callq TEnum_GetCurrent', AsmT) >= 0);
 end;
 
 function TNativeArcTests.GenAsm(const ASrc: string): string;
