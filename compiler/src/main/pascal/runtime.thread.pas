@@ -24,9 +24,11 @@ function pthread_create(Thread: Pointer; Attr: Pointer;
 function pthread_join(Thread: Int64; RetVal: Pointer): Integer;
   external 'pthread' name 'pthread_join';
 
-{ Mutex — callers allocate a 48-byte buffer (array[0..5] of Int64)
-  and pass its address.  48 bytes covers pthread_mutex_t on all
-  current Linux x86_64 and aarch64 targets (actual size is 40). }
+{ Mutex — callers allocate a 64-byte buffer (array[0..7] of Int64)
+  and pass its address.  pthread_mutex_t is 40 bytes on Linux
+  (x86_64 and aarch64) but 64 on macOS, so the buffer is sized for the
+  largest supported target; the former 48-byte contract let
+  pthread_mutex_init overrun into the next field or global on macOS. }
 function pthread_mutex_init(Mutex: Pointer; Attr: Pointer): Integer;
   external 'pthread' name 'pthread_mutex_init';
 function pthread_mutex_lock(Mutex: Pointer): Integer;

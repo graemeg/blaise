@@ -564,9 +564,9 @@ var
     task is never freed and the arena registry creeps across pool batches. }
   GInjectorHead: Pointer;
   GInjectorTail: Pointer;
-  GInjectorMtx: array[0..5] of Int64;  { guards the injector FIFO }
+  GInjectorMtx: array[0..7] of Int64;  { guards the injector FIFO }
   GAllTasks: TList<TFiberTask>;{ keeps every handle alive; guarded by GTaskMtx }
-  GTaskMtx: array[0..5] of Int64;   { pthread_mutex_t buffer }
+  GTaskMtx: array[0..7] of Int64;   { pthread_mutex_t buffer }
   GCancelGen: Integer;         { atomic: bumped on every FiberCancel }
 
 var

@@ -55,7 +55,7 @@ type
     Unlock resumes the next waiter.  NOT recursive. }
   TFiberMutex = class
   private
-    FMtx: array[0..5] of Int64;   { pthread_mutex_t buffer (state guard) }
+    FMtx: array[0..7] of Int64;   { pthread_mutex_t buffer (state guard) }
     FHeld: Boolean;
     FWaiters: TWaiterQueue;
   public
@@ -71,7 +71,7 @@ type
     Reset). }
   TFiberEvent = class
   private
-    FMtx: array[0..5] of Int64;
+    FMtx: array[0..7] of Int64;
     FSet: Boolean;
     FAutoReset: Boolean;
     FWaiters: TWaiterQueue;
@@ -87,7 +87,7 @@ type
     counter, Done lowers it, Wait parks until it reaches zero. }
   TFiberWaitGroup = class
   private
-    FMtx: array[0..5] of Int64;
+    FMtx: array[0..7] of Int64;
     FCount: Integer;
     FWaiters: TWaiterQueue;
   public
@@ -138,7 +138,7 @@ type
 
   TTaskGroup = class
   private
-    FMtx: array[0..5] of Int64;
+    FMtx: array[0..7] of Int64;
     FChildren: TList<TFiberTask>;
     FBoxes: TList<TSpawnBox>;     { closure children's boxes — retained until Destroy }
     FRemaining: Integer;          { real children not yet finished }
@@ -174,7 +174,7 @@ type
     -1 means unbounded (Send never parks).  Fiber-to-fiber hand-off. }
   TChannel<T> = class
   private
-    FMtx: array[0..5] of Int64;
+    FMtx: array[0..7] of Int64;
     FBuf: TQueue<T>;
     FCap: Integer;                { >= 0 bounded, < 0 unbounded }
     FClosed: Boolean;

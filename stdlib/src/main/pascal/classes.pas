@@ -75,7 +75,7 @@ type
 
   TCriticalSection = class
   private
-    FMutexBuf: array[0..5] of Int64;
+    FMutexBuf: array[0..7] of Int64;
   public
     constructor Create;
     destructor Destroy; override;
@@ -1121,7 +1121,7 @@ constructor TCriticalSection.Create;
 var P: Pointer;
 begin
   P := Pointer(Self) + 8;
-  ZeroMem(P, 48);
+  ZeroMem(P, 64);
   pthread_mutex_init(P, nil)
 end;
 

@@ -86,7 +86,7 @@ function pthread_mutex_unlock(Mutex: Pointer): Integer;
 
 var
   WeakTable: array[0..255] of PWeakEntry;
-  WeakMutex: array[0..5] of Int64;
+  WeakMutex: array[0..7] of Int64;
   WeakMutexReady: Boolean;   { False until WeakMutex has been mutex_init'd }
 
 { Initialise WeakMutex exactly once.  Driven by _BlaiseInit at program
