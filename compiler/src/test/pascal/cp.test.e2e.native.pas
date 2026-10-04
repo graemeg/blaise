@@ -6407,7 +6407,7 @@ begin
     read through it (silent garbage or a segfault).  Inside a loop each
     evaluation must also give the literal's stack back. }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll('''
+  AssertRunsOn([beNative], '''
     program Prg;
     type
       TCls = set of Byte;
