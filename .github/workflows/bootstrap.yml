@@ -12,6 +12,11 @@ name: Rolling bootstrap & tests
 #                            branch under one of these prefixes to prove a
 #                            change before merging it to master.
 #   - workflow_dispatch     : manual run from the Actions UI, against any ref
+#   - schedule (weekly)     : keep the carry-forward cache alive.  GitHub evicts
+#                            a cache entry that has not been read for 7 days;
+#                            without it the next run cold-starts from the
+#                            release tag and replays every commit since (40+
+#                            minutes).  Runs on master, so it re-saves the cache.
 on:
   push:
     branches:
@@ -19,6 +24,8 @@ on:
       - 'ci/**'
       - 'feature/**'
       - 'bootstrap/**'
+  schedule:
+    - cron: '17 3 * * 1'   # Mondays 03:17 UTC
   workflow_dispatch:
     inputs:
       force_full:
