@@ -258,9 +258,9 @@ jobs:
       #     padding, unstable build-id, hash-order-dependent symbol emission)
       #     passes them all.  This builds stage-2, has stage-2 rebuild itself
       #     into stage-3, and asserts the two executables are byte-identical.
-      #     Also checks the macos-arm64 container writer via cross-compile —
-      #     there is no macOS runner, and that writer is the one an on-device
-      #     self-host exercises.
+      #     Also checks the macos-arm64 container writer via cross-compile (a
+      #     stage-1-twice determinism check); the macos-check job then proves
+      #     the on-device self-host fixpoint natively.
       # --------------------------------------------------------------------
       - name: Linked-binary fixpoint
         run: |
@@ -268,6 +268,38 @@ jobs:
           ./scripts/fixpoint-binary.sh --compiler "${{ steps.pre.outputs.bin }}"
           ./scripts/fixpoint-binary.sh --compiler "${{ steps.pre.outputs.bin }}" \
             --target macos-arm64
+
+      # --------------------------------------------------------------------
+      # 8c. Cross-compile the macOS arm64 seed compiler.  A Linux -pre binary
+      #     cannot run on a macOS runner, so the macos-check job starts from a
+      #     macos-arm64 blaise built HERE by the freshly bootstrapped -pre
+      #     binary (HostTarget is a compile-time property: this binary defaults
+      #     to macOS output).  Published as an artifact on every run, branches
+      #     included — like the -pre artifact it is pull-only and never feeds a
+      #     later run.
+      # --------------------------------------------------------------------
+      - name: Cross-compile macOS arm64 seed
+        run: |
+          set -euo pipefail
+          mkdir -p target/macos-seed
+          "${{ steps.pre.outputs.bin }}" \
+            --source compiler/src/main/pascal/Blaise.pas \
+            --backend native \
+            --target macos-arm64 \
+            --rtl-src compiler/src/main/pascal \
+            --unit-path compiler/src/main/pascal \
+            --unit-path stdlib/src/main/pascal \
+            --output target/macos-seed/blaise
+          ls -l target/macos-seed/blaise
+
+      - name: Upload macOS arm64 seed artifact
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: blaise-macos-arm64-${{ github.sha }}
+          path: target/macos-seed/blaise
+          retention-days: 30
+          if-no-files-found: error
 
       # --------------------------------------------------------------------
       # 9. Save the carry-forward cache for the next run: the -pre binary, its
@@ -310,6 +342,47 @@ jobs:
             ${{ steps.pre.outputs.dir }}/blaise
           retention-days: 30
           if-no-files-found: error
+
+  # ======================================================================
+  # macOS arm64 on a native Apple Silicon runner.
+  #
+  # Starts from the macos-arm64 seed the bootstrap job cross-compiled, then
+  # gates on what currently passes on macOS:
+  #   - the self-host fixpoint: seed -> stage-1 -> stage-2 -> stage-3 with
+  #     stage-2 and stage-3 BYTE-IDENTICAL (internal assembler, internal
+  #     linker and Mach-O writer, all on-device);
+  #   - the stdlib suite, built and run by the verified stage-2 compiler.
+  # The compiler suite is not a gate yet: it still has known macOS failures,
+  # tracked locally.  It joins this job once it reaches zero.
+  #
+  # PasBuild has no macOS build (it is an FPC program), so the job drives the
+  # compiler through scripts/macos-dev.sh.
+  # ======================================================================
+  macos-check:
+    needs: bootstrap
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download macOS arm64 seed
+        uses: actions/download-artifact@v7
+        with:
+          name: blaise-macos-arm64-${{ github.sha }}
+          path: .macos-seed
+
+      - name: Self-host fixpoint (macOS arm64)
+        run: |
+          set -euo pipefail
+          chmod +x .macos-seed/blaise
+          uname -a
+          scripts/macos-dev.sh fixpoint --compiler "$PWD/.macos-seed/blaise" --install
+
+      - name: Run stdlib tests (macOS arm64)
+        run: |
+          set -euo pipefail
+          scripts/macos-dev.sh stdlib-test --verbose
 
   # ======================================================================
   # FreeBSD cross-compile verification under emulation
