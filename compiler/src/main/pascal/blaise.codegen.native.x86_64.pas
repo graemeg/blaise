@@ -7723,6 +7723,7 @@ var
   AOE: TAddrOfExpr;
   IE:  TIdentExpr;
   SetMask: Int64;
+  SetHasRuntime: Boolean;
   SetI: Integer;
   I:   Integer;
   SetElem: TASTExpr;
@@ -10652,19 +10653,41 @@ begin
       Self.Emit(Format(#9'leaq %s, %%rax', [Self.VarOperand('_jset_scratch_1')]));
       Exit;
     end;
+    { Compile-time members fold into an immediate mask; a RUNTIME member
+      (a variable, a call, Ord(X)) ORs its bit in afterwards.  The fold used
+      to skip non-constant members silently, so `[K, 40]` produced bit 40
+      alone (mirrors the arm64 EmitSmallSetLiteral). }
     SetMask := 0;
+    SetHasRuntime := False;
     for SetI := 0 to TArrayLiteralExpr(AExpr).Elements.Count - 1 do
     begin
       SetElem := TASTExpr(TArrayLiteralExpr(AExpr).Elements.Items[SetI]);
       if SetElem is TIntLiteral then
         SetMask := SetMask or (Int64(1) shl TIntLiteral(SetElem).Value)
       else if (SetElem is TIdentExpr) and TIdentExpr(SetElem).IsConstant then
-        SetMask := SetMask or (Int64(1) shl TIdentExpr(SetElem).ConstValue);
+        SetMask := SetMask or (Int64(1) shl TIdentExpr(SetElem).ConstValue)
+      else
+        SetHasRuntime := True;
     end;
     if TSetTypeDesc(AExpr.ResolvedType).BitCount > 32 then
       Self.Emit(Format(#9'movabsq $%s, %%rax', [IntToStr(SetMask)]))
     else
       Self.Emit(Format(#9'movl $%s, %%eax', [IntToStr(SetMask)]));
+    if SetHasRuntime then
+      for SetI := 0 to TArrayLiteralExpr(AExpr).Elements.Count - 1 do
+      begin
+        SetElem := TASTExpr(TArrayLiteralExpr(AExpr).Elements.Items[SetI]);
+        if (SetElem is TIntLiteral) or
+           ((SetElem is TIdentExpr) and TIdentExpr(SetElem).IsConstant) then
+          Continue;
+        Self.Emit(#9'pushq %rax');                  { mask so far }
+        Self.EmitExprToEax(SetElem);                { member ordinal }
+        Self.Emit(#9'movl %eax, %ecx');
+        Self.Emit(#9'movl $1, %edx');
+        Self.Emit(#9'shlq %cl, %rdx');              { 1 shl ordinal, 64-bit }
+        Self.Emit(#9'popq %rax');
+        Self.Emit(#9'orq %rdx, %rax');
+      end;
     Exit;
   end;
 

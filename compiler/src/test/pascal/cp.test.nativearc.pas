@@ -34,6 +34,10 @@ type
     function GenAsm(const ASrc: string): string;
     function MainExitRegion(const AAsm: string): string;
   published
+    { x86-64 codegen fixes surfaced by the macOS bring-up's native-only
+      e2e tests (asm generated in-process for linux-x86_64, so they run on
+      any host). }
+    procedure TestX86_SmallSetLiteral_RuntimeMemberOrredIn;
     { A PROGRAM-level static array of managed elements is a GLOBAL, so its
       cleanup runs through EmitGlobalReleases, not the procedure-frame walk.
       That kind chain handled string/class/dyn-array/interface/record but not
@@ -71,6 +75,30 @@ type
   end;
 
 implementation
+
+procedure TNativeArcTests.TestX86_SmallSetLiteral_RuntimeMemberOrredIn;
+var
+  AsmT: string;
+begin
+  { [K, 40]: the constant member folds into the immediate and the runtime
+    member K ORs its bit in afterwards.  The fold used to skip K silently,
+    leaving bit 40 alone. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TWide = set of 0..40;
+    function WideOf(K: Integer): TWide;
+    begin
+      Result := [K, 40];
+    end;
+    begin
+    end.
+    ''');
+  AssertTrue('constant member folded', Pos('movabsq $1099511627776, %rax', AsmT) >= 0);
+  AssertTrue('runtime member shifted into place', Pos(#9'shlq %cl, %rdx', AsmT) >= 0);
+  AssertTrue('and ORed into the mask', Pos(#9'orq %rdx, %rax', AsmT) >= 0);
+end;
 
 function TNativeArcTests.GenAsm(const ASrc: string): string;
 var
