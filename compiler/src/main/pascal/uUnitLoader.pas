@@ -22,7 +22,8 @@ uses
   SysUtils, Classes, contnrs,
   uStrCompat,
   uLexer, uParser, uAST,
-  uUnitInterface, uUnitInterfaceIO, uIfaceObject, uCompilerId;
+  uUnitInterface, uUnitInterfaceIO, uIfaceObject, uCompilerId,
+  blaise.codegen.target;
 
 type
   EUnitNotFound       = class(Exception);
@@ -208,9 +209,53 @@ begin
   Result := LocateWithExt(AName, '.pas');
 end;
 
+{ The object-container kind a file's magic identifies: 0 = ELF, 1 = Mach-O
+  64-bit, 2 = COFF x86-64, -1 = unknown or unreadable. }
+function ObjectContainerKind(const APath: string): Integer;
+var
+  S: string;
+begin
+  Result := -1;
+  try
+    S := ReadFile(APath);
+  except
+    Exit;
+  end;
+  if Length(S) < 4 then Exit;
+  if (StrAt(S, 0) = $7F) and (StrAt(S, 1) = $45) and (StrAt(S, 2) = $4C) and
+     (StrAt(S, 3) = $46) then
+    Result := 0
+  else if (StrAt(S, 0) = $CF) and (StrAt(S, 1) = $FA) and
+          (StrAt(S, 2) = $ED) and (StrAt(S, 3) = $FE) then
+    Result := 1
+  else if (StrAt(S, 0) = $64) and (StrAt(S, 1) = $86) then
+    Result := 2;
+end;
+
 function TUnitLoader.LocateObject(const AName: string): string;
+var
+  Want, Have: Integer;
 begin
   Result := LocateWithExt(AName, '.o');
+  if Result = '' then Exit;
+  { Cached objects are not keyed by --target, so a cross-build into a
+    directory holding another target's objects found e.g. a Mach-O
+    sysutils.o for a linux-x86_64 link ("not an ELF file (bad magic)").  An
+    object whose container positively belongs to a DIFFERENT target is not a
+    usable cache entry: report it and let the source-compile path rebuild. }
+  case GTarget.OS of
+    osMacOS:   Want := 1;
+    osWindows: Want := 2;
+  else
+    Want := 0;
+  end;
+  Have := ObjectContainerKind(Result);
+  if (Have >= 0) and (Have <> Want) then
+  begin
+    WriteLn(StdErr, 'note: ', AName,
+            '.o was built for another target; recompiling from source');
+    Result := '';
+  end;
 end;
 
 function TUnitLoader.ValidateIface(AIface: TUnitInterface;

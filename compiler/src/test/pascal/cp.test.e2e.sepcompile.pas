@@ -31,7 +31,7 @@ interface
 
 uses
   classes, sysutils, process, blaise.testing,
-  cp.test.e2e.base;
+  cp.test.e2e.base, blaise.codegen.target;
 
 type
   TSepCompileTests = class(TE2ETestCase)
@@ -216,6 +216,7 @@ type
     procedure TestIncrementalRebuild_QualifiedGrandparentMethod;
     procedure TestInheritedMethodStmtCall_FromCachedUnit_PassesSelf;
     procedure TestUnitCache_MissingDirectory_IsCreated;
+    procedure TestCachedObject_FromAnotherTarget_IsRebuilt;
     { Regression (warm --unit-cache set-of-enum literal): the cached-.bif
       importer registered an enum's members as symbols but never populated the
       analyser's enum-member reverse index (FEnumMemberIndex).  ArgMatchScore
@@ -2900,6 +2901,60 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('build2 run exit code', 0, Rc);
   AssertEquals('build2 stdout', '8' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestCachedObject_FromAnotherTarget_IsRebuilt;
+const
+  { Per-unit objects are cached beside --output and are not keyed by
+    --target.  Building for the host and then cross-building into the SAME
+    directory used to hand the second link the first build's objects -- on
+    the Mac the Linux link died with "not an ELF file (bad magic)".  A cached
+    object whose container belongs to another target must be rebuilt. }
+  UnitSrc =
+    '''
+    unit xtgt.u;
+    interface
+    function Twice(X: Integer): Integer;
+    implementation
+    function Twice(X: Integer): Integer; begin Result := X * 2 end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseXtgt;
+    uses xtgt.u;
+    begin
+      WriteLn(Twice(21))
+    end.
+    ''';
+var
+  Dir, ProgPas, Captured, Other: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  { cross-build to whichever foreign container this host does NOT use }
+  if HostTarget().OS = osLinux then
+    Other := 'macos-arm64'
+  else
+    Other := 'linux-x86_64';
+  Dir := FScratch + '/xtgt';
+  ForceDirectories(Dir);
+  WriteFile(Dir + '/xtgt.u.pas', UnitSrc);
+  ProgPas := Dir + '/use_xtgt.pas';
+  WriteFile(ProgPas, ProgSrc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/use_xtgt',
+                   '--unit-path', Dir], Captured);
+  AssertEquals('host build exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/use_xtgt_x',
+                   '--target', Other, '--unit-path', Dir], Captured);
+  AssertEquals('cross build into the same directory (out: ' + Captured + ')',
+    0, Rc);
+  AssertTrue('the stale object was reported, not linked',
+    Pos('built for another target', Captured) >= 0);
 end;
 
 procedure TSepCompileTests.TestUnitCache_MissingDirectory_IsCreated;
