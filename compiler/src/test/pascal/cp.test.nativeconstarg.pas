@@ -27,7 +27,7 @@ interface
 uses
   Classes, SysUtils, blaise.testing, uStrCompat,
   uLexer, uParser, uAST, uSymbolTable, uSemantic,
-  blaise.codegen.native, blaise.codegen.target, uDebugFacts;
+  blaise.codegen.native, blaise.codegen.target, cp.test.targets, uDebugFacts;
 
 type
   TNativeConstArgTests = class(TTestCase)
@@ -100,7 +100,7 @@ begin
     end;
     CG := TCodeGenNative.Create();
     try
-      CG.SetTarget(HostTarget());
+      CG.SetTarget(LinuxX64Target());
       CG.Generate(Prog);
       Result := CG.GetOutput();
     finally
@@ -538,7 +538,7 @@ begin
   A.Analyse(Prog);
   A.Free();
   CG := TCodeGenNative.Create();
-  CG.SetTarget(HostTarget());
+  CG.SetTarget(LinuxX64Target());
   CG.SetOpdfMode(True);
   CG.Generate(Prog);
   Asm_ := CG.GetOutput();
@@ -613,7 +613,7 @@ begin
   A := TSemanticAnalyser.Create();
   A.Analyse(Prog);
   CG := TCodeGenNative.Create();
-  CG.SetTarget(HostTarget());
+  CG.SetTarget(LinuxX64Target());
   CG.SetOpdfMode(True);
   CG.SetSymbolTable(Prog.SymbolTable);
   CG.Generate(Prog);

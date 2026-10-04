@@ -33,7 +33,7 @@ interface
 uses
   Classes, SysUtils, blaise.testing, uStrCompat,
   uLexer, uParser, uAST, uSymbolTable, uSemantic,
-  blaise.codegen.native, blaise.codegen.target, uDebugFacts;
+  blaise.codegen.native, blaise.codegen.target, cp.test.targets, uDebugFacts;
 
 type
   TNativeCallAlignTests = class(TTestCase)
@@ -85,7 +85,7 @@ begin
     end;
     CG := TCodeGenNative.Create();
     try
-      CG.SetTarget(HostTarget());
+      CG.SetTarget(LinuxX64Target());
       CG.Generate(Prog);
       Result := CG.GetOutput();
     finally

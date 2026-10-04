@@ -13,7 +13,7 @@ interface
 uses
   SysUtils, Classes, Process, blaise.testing,
   blaise.container.writer, blaise.elfwriter, blaise.elfreader,
-  blaise.assembler.x86_64;
+  blaise.assembler.x86_64, blaise.codegen.target;
 
 type
   { ---- Instruction/directive encoding regression tests ----
@@ -1442,6 +1442,12 @@ var
   Out_: string;
   EC: Integer;
 begin
+  { the asm body is x86-64, so the program only builds on an x86-64 host }
+  if HostTarget().CPU <> cpuX86_64 then
+  begin
+    Ignore('x86-64 inline asm needs an x86-64 host');
+    Exit;
+  end;
   { A nostackframe asm-body function returns 42 in %eax; the internal assembler
     assembles the verbatim block, and Pascal calls it normally. }
   if not CompileAndRun(
@@ -1468,6 +1474,12 @@ var
   Out_: string;
   EC: Integer;
 begin
+  { the asm body is x86-64, so the program only builds on an x86-64 host }
+  if HostTarget().CPU <> cpuX86_64 then
+  begin
+    Ignore('x86-64 inline asm needs an x86-64 host');
+    Exit;
+  end;
   { Two integer args arrive in %edi/%esi (SysV); the asm body sums them.  Proves
     a nostackframe asm function reads its parameters from the arg registers. }
   if not CompileAndRun(

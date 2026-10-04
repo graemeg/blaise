@@ -13,7 +13,7 @@ interface
 uses
   blaise.testing,
   uLexer, uParser, uAST, uSemantic, blaise.codegen.qbe,
-  blaise.codegen.native, blaise.codegen.target;
+  blaise.codegen.native, blaise.codegen.target, cp.test.targets;
 
 type
   TThreadVarTests = class(TTestCase)
@@ -95,7 +95,7 @@ begin
     end;
     CG := TCodeGenNative.Create();
     try
-      CG.SetTarget(HostTarget());
+      CG.SetTarget(LinuxX64Target());
       CG.Generate(Pr);
       Result := CG.GetOutput();
     finally
