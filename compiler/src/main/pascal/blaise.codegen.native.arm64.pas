@@ -1696,21 +1696,28 @@ end;
 procedure TArm64Backend.EmitRecCallToRret(AExpr: TASTExpr);
 var
   Shape, K: Integer;
+  Tmp: string;
 begin
-  { materialise a record-returning call into the __rret scratch and leave
-    the __rret ADDRESS in x0.  Shape 0 (>16B) sret's straight into __rret;
-    the register-returned shapes store x0/x0:x1/d0.. into __rret. }
+  { materialise a record-returning call into a scratch and leave the
+    scratch's ADDRESS in x0.  Shape 0 (>16B) sret's straight into it; the
+    register-returned shapes store x0/x0:x1/d0.. into it.
+    The scratch is a PER-SITE frame slot sized to this record (the frame grows
+    lazily -- the body is buffered).  It used to be the shared __rret, which is
+    only 16 bytes unless a managed-record assignment in the same body widened
+    it: a larger unmanaged result (a 24-byte record's method receiver or field
+    read) overran it into the neighbouring slot.  Per site also means two such
+    calls in one expression keep separate results. }
+  Tmp := '__rtmp_' + IntToStr(FJArgN);
+  FJArgN := FJArgN + 1;
+  if not FFrame.ContainsKey(Tmp) then
+    AddLocal(Tmp, AExpr.ResolvedType.RawSize());
   Shape := RecReturnShape(TRecordTypeDesc(AExpr.ResolvedType));
   if Shape = 0 then
-    { >16B (sret): the callee writes straight into __rret.  __rret is sized
-      by MaxManagedRecRet, which covers record field-assigns and managed
-      record-assigns; a shape-0 field-READ on a bare call in a routine with
-      no such sizing site would under-size __rret — see the min-16 default. }
-    EmitRecCallDispatch(AExpr, '__rret')
+    EmitRecCallDispatch(AExpr, Tmp)
   else
   begin
     EmitRecCallDispatch(AExpr, '');
-    EmitSlotAddr('x9', '__rret');
+    EmitSlotAddr('x9', Tmp);
     case Shape of
       1: Self.Emit(#9'str x0, [x9]');
       2:
@@ -1723,7 +1730,7 @@ begin
         Self.Emit(Format(#9'str d%d, [x9, #%d]', [K, K * 8]));
     end;
   end;
-  EmitSlotAddr('x0', '__rret');
+  EmitSlotAddr('x0', Tmp);
 end;
 
 procedure TArm64Backend.EmitPropRecvToX0(AStmt: TFieldAssignment);
@@ -3107,17 +3114,20 @@ begin
         dyn-array field (Box.Recs[i] := F() where F does SetLength(Box.Recs,…))
         must not leave a stale element pointer into the freed old block.
         Mirrors the x86-64 field path's value-first ordering. }
-      EmitRecCallToRret(AStmt.Expr);   { __rret := call result; +1 transfers }
+      EmitRecCallToRret(AStmt.Expr);   { x0 = the result's scratch; +1 transfers }
+      EmitPushX0();                                    { [result] }
       EmitFieldElemAddrToX0(AStmt, Elem, IsDyn, Low);  { x0 = &element (fresh) }
       Self.Emit(#9'stp x19, x22, [sp, #-16]!');
       Self.Emit(#9'mov x22, x0');                      { x22 = element addr }
+      Self.Emit(#9'ldr x19, [sp, #16]');               { x19 = the result }
       if not RecretManagedClean(TRecordTypeDesc(Elem)) then
         Self.EmitRecordFieldReleases(TRecordTypeDesc(Elem), 'x22');
       Self.Emit(#9'mov x0, x22');
-      EmitSlotAddr('x1', '__rret');
+      Self.Emit(#9'mov x1, x19');
       EmitIntLiteral('x2', Elem.RawSize());
       EmitCallSym('memcpy');
       Self.Emit(#9'ldp x19, x22, [sp], #16');
+      Self.Emit(#9'add sp, sp, #16');                  { drop [result] }
       Exit;
     end;
     EmitRecAddrToX0(AStmt.Expr);       { x0 = source record address }
@@ -6720,7 +6730,30 @@ begin
         ((AAsgn.Expr is TMethodCallExpr) and
          (TMethodCallExpr(AAsgn.Expr).ResolvedMethod <> nil) and
          not TMethodCallExpr(AAsgn.Expr).IsConstructorCall)) then
-      NotYet('record-returning call into a var record parameter', AAsgn);
+    begin
+      { V := F() with V a var/out record (TList<T>.TryGet's AValue :=
+        Get(I)): the call lands in its own scratch first -- the destination
+        may alias an argument -- then the destination's old managed fields are
+        released and the bytes move in, the call's +1 field refs transferring
+        (no retain).  Callee-saved x19/x22 hold the two addresses across the
+        release walk. }
+      if (AAsgn.Expr is TFuncCallExpr) and
+         TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl).IsExternal then
+        NotYet('external record-returning call', AAsgn);
+      Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+      EmitRecCallToRret(AAsgn.Expr);
+      Self.Emit(#9'mov x19, x0');
+      EmitLoadSlot('x22', AAsgn.Name);              { the caller's record }
+      if not RecretManagedClean(TRecordTypeDesc(AAsgn.ResolvedLhsType)) then
+        Self.EmitRecordFieldReleases(
+          TRecordTypeDesc(AAsgn.ResolvedLhsType), 'x22', False);
+      Self.Emit(#9'mov x0, x22');
+      Self.Emit(#9'mov x1, x19');
+      EmitIntLiteral('x2', AAsgn.ResolvedLhsType.RawSize());
+      EmitCallSym('memcpy');
+      Self.Emit(#9'ldp x19, x22, [sp], #16');
+      Exit;
+    end;
     { record-returning call: classify the callee's return shape }
     if ((AAsgn.Expr is TFuncCallExpr) and
         (TFuncCallExpr(AAsgn.Expr).ResolvedDecl <> nil)) or
@@ -8066,13 +8099,14 @@ begin
       retain — the transfer is exact).  Mirrors the field-store leg. }
     if IsRecordCallArg(AStmt.ValueExpr) then
     begin
-      EmitRecCallToRret(AStmt.ValueExpr);   { x0 = __rret addr; +1 transfers }
+      EmitRecCallToRret(AStmt.ValueExpr);   { x0 = result addr; +1 transfers }
       Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+      Self.Emit(#9'mov x19, x0');           { the result, across the walk }
       Self.Emit(#9'ldr x22, [sp, #16]');    { the parked element address }
       if not RecretManagedClean(TRecordTypeDesc(Elem)) then
         Self.EmitRecordFieldReleases(TRecordTypeDesc(Elem), 'x22');
       Self.Emit(#9'mov x0, x22');
-      EmitSlotAddr('x1', '__rret');
+      Self.Emit(#9'mov x1, x19');
       EmitIntLiteral('x2', Elem.RawSize());
       EmitCallSym('memcpy');
       Self.Emit(#9'ldp x19, x22, [sp], #16');

@@ -182,6 +182,7 @@ type
     procedure TestJumboSetField_StoreCopiesBitmap;
     procedure TestJumboSetParamAndResult_ByPointerAndSret;
     procedure TestByValueClassParam_RetainedAndReleased;
+    procedure TestRecordCallResult_PerSiteScratch;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4700,6 +4701,38 @@ begin
   AssertTrue('param retained in the prologue',
     Pos(#9'bl __ClassAddRef', Body) >= 0);
   AssertTrue('param released at exit', Pos(#9'bl __ClassRelease', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestRecordCallResult_PerSiteScratch;
+var
+  AsmT, P1, P2: string;
+  I, J: Integer;
+begin
+  { two 40-byte record-call results in one expression land in two separate
+    frame scratches (x8 points at different slots), each sized to the record
+    rather than the shared 16-byte __rret. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TBig = record
+        A, B, C, D, E: Int64;
+      end;
+    function MakeBig(N: Int64): TBig;
+    begin
+      Result.A := N;
+    end;
+    begin
+      WriteLn(MakeBig(3).C + MakeBig(4).D);
+    end.
+    ''');
+  I := Pos(#9'sub x8, x29, #', AsmT);
+  AssertTrue('first sret scratch', I >= 0);
+  J := PosEx(#9'sub x8, x29, #', AsmT, I + 1);
+  AssertTrue('second sret scratch', J > I);
+  P1 := Copy(AsmT, I, PosEx(#10, AsmT, I) - I);
+  P2 := Copy(AsmT, J, PosEx(#10, AsmT, J) - J);
+  AssertTrue('the two results use different slots', P1 <> P2);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

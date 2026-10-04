@@ -415,6 +415,8 @@ type
     procedure TestRun_Native_JumboSetField_StoreAndRead;
     procedure TestRun_Native_JumboSetParamsAndResult;
     procedure TestRun_Native_ClassParamReassign_KeepsCallerRef;
+    procedure TestRun_Native_LargeRecordCall_FieldReadAndReceiver;
+    procedure TestRun_Native_RecordCallIntoVarRecordParam;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6634,6 +6636,80 @@ begin
     ''',
     'walked 2' + LE + 'walked again 2 1' + LE + 'destroyed 1' + LE +
     'destroyed 2' + LE + 'done' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_LargeRecordCall_FieldReadAndReceiver;
+begin
+  { a 40-byte record returned by a call, read by field (F().C) and used as a
+    method receiver: each call site materialises into its own scratch sized
+    to the record.  The shared 16-byte __rret overflowed into the neighbouring
+    frame slot (here the local K), silently. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TBig = record
+        A, B, C, D, E: Int64;
+        function Total: Int64;
+      end;
+    function TBig.Total: Int64;
+    begin
+      Result := A + B + C + D + E;
+    end;
+    function MakeBig(N: Int64): TBig;
+    begin
+      Result.A := N;
+      Result.B := N * 2;
+      Result.C := N * 3;
+      Result.D := N * 4;
+      Result.E := N * 5;
+    end;
+    procedure Run;
+    var
+      K: Int64;
+    begin
+      K := 77;
+      WriteLn(MakeBig(1).E, ' ', MakeBig(2).Total(), ' ', MakeBig(3).C + MakeBig(4).D);
+      WriteLn(K);
+    end;
+    begin
+      Run();
+    end.
+    ''',
+    '5 30 25' + LE + '77' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_RecordCallIntoVarRecordParam;
+begin
+  { V := F() with V a var/out record parameter (TList<T>.TryGet's shape):
+    the destination's old managed fields are released, the call's fields
+    move in. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TItem = record
+        Name: string;
+        N: Integer;
+      end;
+    function Make(const S: string; N: Integer): TItem;
+    begin
+      Result.Name := S + '!';
+      Result.N := N;
+    end;
+    procedure Fill(out V: TItem; K: Integer);
+    begin
+      V := Make('k' + IntToStr(K), K);
+    end;
+    var
+      It: TItem;
+    begin
+      Fill(It, 1);
+      Fill(It, 2);
+      WriteLn(It.Name, ' ', It.N);
+    end.
+    ''',
+    'k2! 2' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;
