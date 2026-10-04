@@ -7127,7 +7127,7 @@ procedure TArm64Backend.EmitCase(AStmt: TCaseStmt);
 var
   I, J: Integer;
   Br: TCaseBranch;
-  EndL, NextL, BodyL: string;
+  EndL, NextL, BodyL, SkipL: string;
   CaseMark: Integer;
 begin
   { chained compares — selector evaluated ONCE and kept on the stack
@@ -7157,6 +7157,27 @@ begin
         Self.Emit(#9'ldr x0, [sp]');
         EmitCallSym('_StringEquals');
         Self.Emit(Format(#9'cbnz x0, %s', [BodyL]));
+      end
+      else if TASTExpr(Br.Values.Items[J]) is TSetRangeExpr then
+      begin
+        { `lo..hi:` -- an inclusive range test, ordered with the selector's
+          own signedness (unsigned conditions for an unsigned selector, as
+          for any comparison) }
+        SkipL := NewLabel('crng');
+        Self.Emit(#9'ldr x0, [sp]');
+        Self.EmitExprToX0Aux(TSetRangeExpr(Br.Values.Items[J]).LowExpr);
+        Self.Emit(#9'cmp x0, x1');
+        if IsUnsignedIntA64(AStmt.Selector.ResolvedType) then
+          Self.Emit(Format(#9'b.lo %s', [SkipL]))
+        else
+          Self.Emit(Format(#9'b.lt %s', [SkipL]));
+        Self.EmitExprToX0Aux(TSetRangeExpr(Br.Values.Items[J]).HighExpr);
+        Self.Emit(#9'cmp x0, x1');
+        if IsUnsignedIntA64(AStmt.Selector.ResolvedType) then
+          Self.Emit(Format(#9'b.ls %s', [BodyL]))
+        else
+          Self.Emit(Format(#9'b.le %s', [BodyL]));
+        Self.Emit(SkipL + ':');
       end
       else
       begin
@@ -7228,7 +7249,12 @@ begin
       Exit;
     end;
   end;
-  NotYet('case value of this form', AExpr);
+  { any other constant label (e.g. a negative literal, -5, which parses as a
+    unary minus): evaluate it normally into x1, then restore the selector,
+    which the contract above keeps live at [sp] }
+  Self.EmitExprToX0(AExpr);
+  Self.Emit(#9'mov x1, x0');
+  Self.Emit(#9'ldr x0, [sp]');
 end;
 
 procedure TArm64Backend.EmitFor(AStmt: TForStmt);
