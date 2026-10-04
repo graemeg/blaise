@@ -226,7 +226,9 @@ const
   SIGPIPE    = 13;
   SIG_IGN    = 1;      { (void*)1 }
 
-function c_fcntl(AFd, ACmd, AArg: Integer): Integer; external name 'fcntl';
+{ fcntl is C-VARIADIC: on Apple arm64 the third argument must travel the
+  variadic way (on the stack), or F_SETFL never sees O_NONBLOCK. }
+function c_fcntl(AFd, ACmd: Integer): Integer; varargs; external name 'fcntl';
 function c_signal(ASignum: Integer; AHandler: Pointer): Pointer; external name 'signal';
 
 { Per-OS layout seam: O_NONBLOCK (Linux $800, FreeBSD 4) and the sockaddr_in

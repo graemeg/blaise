@@ -82,9 +82,18 @@ const
     resumes accepting promptly once in-flight connections close and free fds. }
   FD_EXHAUSTED_BACKOFF_MS = 10;
 
-function c_fcntl3(AFd, ACmd, AArg: Integer): Integer; external name 'fcntl';
+{ fcntl is C-VARIADIC: on Apple arm64 a variadic argument travels on the
+  stack, so a fixed three-int declaration put the flag in a register fcntl
+  never reads -- F_SETFL silently did not set O_NONBLOCK on macOS.  The
+  third argument is passed through `varargs`. }
+function c_fcntl3(AFd, ACmd: Integer): Integer; varargs; external name 'fcntl';
+{$IFNDEF DARWIN}
 function c_accept4(AFd: Integer; AAddr, AAddrLen: Pointer; AFlags: Integer): Integer;
   external name 'accept4';
+{$ELSE}
+function c_accept(AFd: Integer; AAddr, AAddrLen: Pointer): Integer;
+  external name 'accept';
+{$ENDIF}
 function c_getsockopt(AFd, ALevel, AOptName: Integer; AOptVal, AOptLen: Pointer): Integer;
   external name 'getsockopt';
 
@@ -96,6 +105,20 @@ const
   rtl.platform.layout.<os> seam (Linux/FreeBSD values differ for all four). }
 function O_NONBLOCK: Integer;    external name '_ONonBlock';
 function SOCK_NONBLOCK: Integer; external name '_SockNonBlock';  { accept4 flag }
+
+{$IFDEF DARWIN}
+{ macOS has no accept4(2): accept, then make the new connection non-blocking
+  -- unconditionally, because that is the only thing this unit ever asks
+  accept4 for, and Darwin's SOCK_NONBLOCK seam value is 0 (there is no such
+  flag), so AFlags cannot carry the request.  Not atomic the way accept4 is,
+  but the fd is not yet visible to any other code. }
+function c_accept4(AFd: Integer; AAddr, AAddrLen: Pointer; AFlags: Integer): Integer;
+begin
+  Result := c_accept(AFd, AAddr, AAddrLen);
+  if Result >= 0 then
+    c_fcntl3(Result, F_SETFL, c_fcntl3(Result, F_GETFL, 0) or O_NONBLOCK());
+end;
+{$ENDIF}
 function SOL_SOCKET_: Integer;   external name '_SolSocket';
 function SO_ERROR_: Integer;     external name '_SoError';
 
