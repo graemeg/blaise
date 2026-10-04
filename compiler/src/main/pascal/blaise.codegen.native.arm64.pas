@@ -1623,6 +1623,14 @@ begin
     EmitImplicitBaseStep('x0', AStmt.ImplicitBaseInfo);
     Exit;
   end;
+  { a CHAINED receiver -- o.Inner.V := X: the instance is the value of the
+    receiver expression (EmitFieldAssign rejects an owned-transient one,
+    which would need a post-call release) }
+  if AStmt.ObjExpr <> nil then
+  begin
+    Self.EmitExprToX0(AStmt.ObjExpr);
+    Exit;
+  end;
   EmitLoadSlot('x0', AStmt.RecordName);
   if AStmt.IsVarParam then
     Self.Emit(#9'ldr x0, [x0]');
@@ -2217,7 +2225,7 @@ begin
   begin
     { method-backed property write: setter(self, value) — or
       setter(self, index, value) for the indexed form }
-    if (AStmt.ObjExpr <> nil) or
+    if ((AStmt.ObjExpr <> nil) and ArcExprOwnsRef(AStmt.ObjExpr)) or
        (AStmt.IsImplicitSelf and (AStmt.ImplicitBaseInfo = nil)) then
       NotYet('property write on this receiver form', AStmt);
     if AStmt.PropIndexExpr <> nil then
@@ -2309,7 +2317,13 @@ begin
     if TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.IsFloat() then
     begin
       Self.EmitExprToD0OrConvert(AStmt.Expr);
+      { a chained receiver is a full expression evaluation (it may call a
+        getter), which can clobber d0 -- park the value across it }
+      if AStmt.ObjExpr <> nil then
+        Self.Emit(#9'str d0, [sp, #-16]!');
       EmitPropRecvToX0(AStmt);
+      if AStmt.ObjExpr <> nil then
+        Self.Emit(#9'ldr d0, [sp], #16');
     end
     else
     begin
