@@ -365,7 +365,9 @@ begin
   if (AName = '_tlv_bootstrap') or (AName = '__cxa_atexit') or
      (AName = '__error') or (AName = 'timegm') or (AName = 'write') or
      (AName = 'getrusage') or (AName = '__getdirentries64') or
-     (AName = 'getentropy') then
+     (AName = 'getentropy') or (AName = 'pthread_cond_init') or
+     (AName = 'pthread_cond_wait') or (AName = 'pthread_cond_broadcast') or
+     (AName = 'pthread_cond_timedwait_relative_np') then
     Exit(True);
   for I := 0 to 45 do
     if AName = KNOWN[I] then

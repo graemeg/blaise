@@ -71,14 +71,18 @@ type
   class API must not define colliding flat symbols. }
 function _MapAnonFlag: Integer;
 
-{ Flat park/wake primitives for the fiber scheduler.  Darwin's kernel wait
+{ Flat park/wake primitives for the fiber scheduler: futex semantics (block
+  while the 32-bit word at AAddr equals AExpected, for at most the RELATIVE
+  timeout ATs; wake up to ACount waiters on AAddr).  Darwin's kernel wait
   primitive (__ulock_wait/__ulock_wake) is PRIVATE API — rejected for the
-  same reason raw syscalls are (unstable ABI).  Until a libSystem-based
-  waiter lands (pthread cond or os_sync_wait_on_address once the SDK floor
-  allows it), _ParkWait degrades to nanosleep of the full bounded timeout
-  and _ParkWake is a no-op: park protocols must tolerate spurious wakeups
-  and re-check their word, so this is correct-but-higher-latency.  Tracked
-  as a Phase 6 bring-up item in macos-arm64-tasks.txt. }
+  same reason raw syscalls are (unstable ABI) — and os_sync_wait_on_address
+  needs macOS 14.4.  So the waiter is built from public libSystem pthread
+  objects: 64 hashed buckets, each a mutex + condition variable.  _ParkWait
+  re-checks the word UNDER the bucket lock before waiting, and _ParkWake
+  broadcasts under the same lock, so a wake that lands between the check and
+  the wait cannot be lost.  A broadcast may wake waiters on other words that
+  share the bucket; park protocols already tolerate spurious wakeups and
+  re-check their word. }
 procedure _ParkWait(AAddr: Pointer; AExpected: Integer; ATs: Pointer);
 procedure _ParkWake(AAddr: Pointer; ACount: Integer);
 
@@ -219,19 +223,91 @@ begin
   Result := $1000;
 end;
 
-{ Bounded sleep via libSystem nanosleep — see the interface note on the
-  park/wake degradation. }
-function darwin_nanosleep(Req: Pointer; Rem: Pointer): Integer;
-  external name 'nanosleep';
+function darwin_mutex_init(M: Pointer; Attr: Pointer): Integer;
+  external name 'pthread_mutex_init';
+function darwin_mutex_lock(M: Pointer): Integer;
+  external name 'pthread_mutex_lock';
+function darwin_mutex_unlock(M: Pointer): Integer;
+  external name 'pthread_mutex_unlock';
+function darwin_cond_init(C: Pointer; Attr: Pointer): Integer;
+  external name 'pthread_cond_init';
+function darwin_cond_wait(C: Pointer; M: Pointer): Integer;
+  external name 'pthread_cond_wait';
+function darwin_cond_timedwait_rel(C: Pointer; M: Pointer;
+  RelTs: Pointer): Integer;
+  external name 'pthread_cond_timedwait_relative_np';
+function darwin_cond_broadcast(C: Pointer): Integer;
+  external name 'pthread_cond_broadcast';
+
+const
+  PARK_BUCKETS = 64;
+  { one wait bucket: Darwin's pthread_mutex_t (64 bytes) followed by its
+    pthread_cond_t (48), padded to 128 }
+  PARK_MUTEX_OFF = 0;
+  PARK_COND_OFF = 64;
+  PARK_BUCKET_SIZE = 128;
+
+var
+  GParkBuckets: array[0..PARK_BUCKETS * PARK_BUCKET_SIZE - 1] of Byte;
+
+{ the bucket's base address -- plain arithmetic on the byte block, so the
+  RTL stays buildable by the release bootstrap compiler }
+function ParkBucketBase(AIndex: Integer): Pointer;
+begin
+  Result := Pointer(Int64(@GParkBuckets) + Int64(AIndex) * PARK_BUCKET_SIZE);
+end;
+
+procedure InitParkBuckets;
+var
+  I: Integer;
+  P: Pointer;
+begin
+  for I := 0 to PARK_BUCKETS - 1 do
+  begin
+    P := ParkBucketBase(I);
+    darwin_mutex_init(Pointer(Int64(P) + PARK_MUTEX_OFF), nil);
+    darwin_cond_init(Pointer(Int64(P) + PARK_COND_OFF), nil);
+  end;
+end;
+
+function ParkBucketOf(AAddr: Pointer): Integer;
+begin
+  { words are at least 4-aligned and usually live in distinct records, so
+    drop the low bits before folding }
+  Result := Integer((Int64(AAddr) shr 4) and (PARK_BUCKETS - 1));
+end;
 
 procedure _ParkWait(AAddr: Pointer; AExpected: Integer; ATs: Pointer);
+var
+  P, M, C: Pointer;
+  W: ^Integer;
 begin
-  darwin_nanosleep(ATs, nil);
+  P := ParkBucketBase(ParkBucketOf(AAddr));
+  M := Pointer(Int64(P) + PARK_MUTEX_OFF);
+  C := Pointer(Int64(P) + PARK_COND_OFF);
+  W := AAddr;
+  darwin_mutex_lock(M);
+  if W^ = AExpected then
+  begin
+    if ATs = nil then
+      darwin_cond_wait(C, M)
+    else
+      darwin_cond_timedwait_rel(C, M, ATs);
+  end;
+  darwin_mutex_unlock(M);
 end;
 
 procedure _ParkWake(AAddr: Pointer; ACount: Integer);
+var
+  P, M: Pointer;
 begin
-  { no-op: parked fibers wake at their bounded timeout (see interface) }
+  { ACount is advisory: a broadcast wakes every waiter in the bucket, and
+    each re-checks its own word }
+  P := ParkBucketBase(ParkBucketOf(AAddr));
+  M := Pointer(Int64(P) + PARK_MUTEX_OFF);
+  darwin_mutex_lock(M);
+  darwin_cond_broadcast(Pointer(Int64(P) + PARK_COND_OFF));
+  darwin_mutex_unlock(M);
 end;
 
 function _ClockMonotonicId: Integer;
@@ -276,6 +352,7 @@ initialization
   of the host layout — see the incident note in rtl.platform.layout.freebsd. }
 {$IFDEF DARWIN}
   AssignLayoutDarwin();
+  InitParkBuckets();
 {$ENDIF}
 
 end.
