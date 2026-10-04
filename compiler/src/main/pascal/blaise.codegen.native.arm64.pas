@@ -10022,9 +10022,10 @@ begin
       end
       else
       begin
-        { a by-value CLASS param is a plain borrowed pointer — the caller
-          keeps ownership (only by-value strings retain in the prologue).
-          A PLAIN procedural param is one code pointer. }
+        { a by-value CLASS param is one pointer; the callee holds its own
+          reference to it (retained in the prologue, released at exit -- the
+          caller keeps its own).  A PLAIN procedural param is one code
+          pointer. }
         { A small set is a one-register bitmask and arrives like an integer;
           a JUMBO set has its own byte-array ABI and stays a hole — the same
           split the local-var and call-argument gates make. }
@@ -10054,6 +10055,11 @@ begin
         if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tyDynArray)
            and not Par.IsConstParam then
           FDynLocals.Add(Par.ParamName);
+        { a BY-VALUE class param is the callee's own reference too (retained
+          in the prologue -- see the retain loop for why) }
+        if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tyClass)
+           and not Par.IsConstParam then
+          FObjLocals.Add(Par.ParamName);
       end;
     end;
     if ADecl.ResolvedReturnType <> nil then
@@ -10601,6 +10607,19 @@ begin
       EmitCallSym('_StringAddRef');
     end;
     if Par.ResolvedType.Kind = tyInterface then
+    begin
+      EmitLoadSlot('x0', Par.ParamName);
+      EmitCallSym('_ClassAddRef');
+    end;
+    { by-value CLASS param: the callee's own reference, exactly like a
+      by-value string.  It used to be a pure borrow, but an assignment to the
+      parameter (A := A.Next -- legal Pascal) runs the ordinary
+      release-old / retain-new store, which released the CALLER's reference:
+      the caller's object was freed mid-call and later double-freed, with no
+      diagnostic.  Retained here, released with the class locals at exit, so
+      the convention stays balanced inside the callee and the caller is
+      unchanged. }
+    if Par.ResolvedType.Kind = tyClass then
     begin
       EmitLoadSlot('x0', Par.ParamName);
       EmitCallSym('_ClassAddRef');

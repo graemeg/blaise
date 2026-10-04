@@ -414,6 +414,7 @@ type
     procedure TestRun_Native_RecordGlobal_ClassFieldReceiver;
     procedure TestRun_Native_JumboSetField_StoreAndRead;
     procedure TestRun_Native_JumboSetParamsAndResult;
+    procedure TestRun_Native_ClassParamReassign_KeepsCallerRef;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6581,6 +6582,58 @@ begin
     end.
     ''',
     '3 False' + LE + '339' + LE + '3' + LE + '3' + LE + '3' + LE + '5 5' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_ClassParamReassign_KeepsCallerRef;
+begin
+  { A := A.Next inside a routine whose A is a by-value class parameter: the
+    assignment's release-old must drop the CALLEE's reference, never the
+    caller's.  arm64 held the parameter as a pure borrow, so the caller's
+    object was freed mid-call (silently wrong values, then a double free). }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TNode = class
+        Next: TNode;
+        V: Integer;
+        destructor Destroy; override;
+      end;
+    destructor TNode.Destroy;
+    begin
+      WriteLn('destroyed ', V);
+      inherited Destroy();
+    end;
+    function Walk(A: TNode): TNode;
+    begin
+      Result := nil;
+      if A.Next <> nil then
+        A := A.Next;
+      if A.V > 0 then
+        Result := A;
+    end;
+    procedure Run;
+    var
+      X, Y, R: TNode;
+    begin
+      X := TNode.Create();
+      X.V := 1;
+      Y := TNode.Create();
+      Y.V := 2;
+      X.Next := Y;
+      R := Walk(X);
+      WriteLn('walked ', R.V);
+      R := Walk(X);
+      WriteLn('walked again ', R.V, ' ', X.V);
+      X.Next := nil;
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''',
+    'walked 2' + LE + 'walked again 2 1' + LE + 'destroyed 1' + LE +
+    'destroyed 2' + LE + 'done' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

@@ -181,6 +181,7 @@ type
     procedure TestRecordGlobal_ClassFieldReceiver_Lowers;
     procedure TestJumboSetField_StoreCopiesBitmap;
     procedure TestJumboSetParamAndResult_ByPointerAndSret;
+    procedure TestByValueClassParam_RetainedAndReleased;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4672,6 +4673,33 @@ begin
     ''');
   AssertTrue('incoming x8 parked', Pos(#9'stur x8, [x29, #-', AsmT) >= 0);
   AssertTrue('caller passes a result buffer in x8', Pos(#9'sub x8, x29, #', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestByValueClassParam_RetainedAndReleased;
+var
+  AsmT, Body: string;
+begin
+  { a by-value class param is the callee's own reference: retained in the
+    prologue and released at exit, so `A := A.Next` releases only that. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TNode = class
+        Next: TNode;
+      end;
+    function Walk(A: TNode): TNode;
+    begin
+      A := A.Next;
+      Result := A;
+    end;
+    begin
+    end.
+    ''');
+  Body := Copy(AsmT, Pos('_Walk:', AsmT), Length(AsmT));
+  AssertTrue('param retained in the prologue',
+    Pos(#9'bl __ClassAddRef', Body) >= 0);
+  AssertTrue('param released at exit', Pos(#9'bl __ClassRelease', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;
