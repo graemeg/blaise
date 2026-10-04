@@ -13331,6 +13331,18 @@ begin
   begin
     Self.EmitRecordFieldRetains(TRecordTypeDesc(AElemType), '%rbx');
     Self.EmitRecordFieldReleases(TRecordTypeDesc(AElemType), '%r15', False);
+  end
+  else if AElemType.Kind = tyInterface then
+  begin
+    { an interface element is an (obj, itab) pair: the loop variable co-owns
+      the obj (it is released at scope exit), so retain the element's obj and
+      release the variable's previous one before copying the pair.  Copied
+      without ARC, the loop variable's scope-exit release freed an object the
+      array -- and anything it was handed to -- still held. }
+    Self.Emit(#9'movq (%rbx), %rdi');
+    Self.Emit(#9'callq _ClassAddRef');
+    Self.Emit(#9'movq (%r15), %rdi');
+    Self.Emit(#9'callq _ClassRelease');
   end;
   Self.Emit(#9'movq %r15, %rdi');
   Self.Emit(#9'movq %rbx, %rsi');

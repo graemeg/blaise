@@ -40,6 +40,7 @@ type
     procedure TestX86_SmallSetLiteral_RuntimeMemberOrredIn;
     procedure TestX86_NestedJumboSetCallArg_Hoisted;
     procedure TestX86_ForIn_InterfaceCurrent_UsesSret;
+    procedure TestX86_ForIn_InterfaceArrayElem_Retained;
     { A PROGRAM-level static array of managed elements is a GLOBAL, so its
       cleanup runs through EmitGlobalReleases, not the procedure-frame walk.
       That kind chain handled string/class/dyn-array/interface/record but not
@@ -184,6 +185,37 @@ begin
     ''');
   AssertTrue('getter called with the sret buffer in %rdi and Self in %rsi',
     Pos(#9'movq %r10, %rsi'#10#9'movq %rsp, %rdi'#10#9'callq TEnum_GetCurrent', AsmT) >= 0);
+end;
+
+procedure TNativeArcTests.TestX86_ForIn_InterfaceArrayElem_Retained;
+var
+  AsmT: string;
+begin
+  { for G in A over an array of interfaces: the loop variable co-owns the
+    element's obj, so it is retained (and the old binding released) before
+    the pair is copied.  A plain memcpy left the variable's scope-exit
+    release to free an object the array still held. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IG = interface
+        function Greet: Int64;
+      end;
+    procedure Run;
+    var
+      A: array of IG;
+      G: IG;
+    begin
+      for G in A do
+        WriteLn(G.Greet());
+    end;
+    begin
+    end.
+    ''');
+  AssertTrue('element obj retained, old binding released, then copied',
+    Pos(#9'movq (%rbx), %rdi'#10#9'callq _ClassAddRef'#10#9'movq (%r15), %rdi'#10 +
+        #9'callq _ClassRelease', AsmT) >= 0);
 end;
 
 function TNativeArcTests.GenAsm(const ASrc: string): string;
