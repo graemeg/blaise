@@ -777,6 +777,11 @@ begin
     begin
       MDecl := SynthesiseMethodDecl(
         TRoutineSig(AEntry.Methods.Items[I]), AUnitName, ATable, ASemantic);
+      { A method's decl must name its owner, exactly as the from-source
+        decl does (uSemantic.AnalyseTypeDecls).  An empty OwnerTypeName is
+        how a free routine looks, and arm64's statement-call path dropped
+        Self for an inherited method imported from a cached .bif. }
+      MDecl.OwnerTypeName := AEntry.Name;
       ATable.OwnImportedDecl(MDecl);
       ASemantic.RegisterImportedMethod(AEntry.Name, MDecl);
     end;
@@ -952,6 +957,7 @@ begin
         instance pointer — codegen keys that on IsRecordMethod, which the
         sig does not carry (the import context knows the owner is a record). }
       MDecl.IsRecordMethod := True;
+      MDecl.OwnerTypeName := AEntry.Name;
       ATable.OwnImportedDecl(MDecl);
       ASemantic.RegisterImportedMethod(AEntry.Name, MDecl);
     end;

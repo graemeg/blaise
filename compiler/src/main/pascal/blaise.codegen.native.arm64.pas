@@ -5916,8 +5916,12 @@ begin
     EmitStoreSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
     Exit;
   end;
+  { The semantic pass's IsImplicitSelfMethod is authoritative: an empty
+    OwnerTypeName must never route an implicit-Self call to the plain-routine
+    arm, which passes no Self. }
   if (ACall.ResolvedDecl <> nil) and (ACall.ResolvedDecl is TMethodDecl) and
-     (TMethodDecl(ACall.ResolvedDecl).OwnerTypeName = '') then
+     (TMethodDecl(ACall.ResolvedDecl).OwnerTypeName = '') and
+     not ACall.IsImplicitSelfMethod then
   begin
     EmitCall(TMethodDecl(ACall.ResolvedDecl), ACall.Name, ACall.Args);
     { a DISCARDED owned result must be disposed (user routine results are

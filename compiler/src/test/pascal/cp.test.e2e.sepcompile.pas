@@ -214,6 +214,7 @@ type
       intermediate class's Parent pointer nil — so the leaf's inherited-method
       walk dead-ended and reported "Undeclared procedure". }
     procedure TestIncrementalRebuild_QualifiedGrandparentMethod;
+    procedure TestInheritedMethodStmtCall_FromCachedUnit_PassesSelf;
     { Regression (warm --unit-cache set-of-enum literal): the cached-.bif
       importer registered an enum's members as symbols but never populated the
       analyser's enum-member reverse index (FEnumMemberIndex).  ArgMatchScore
@@ -2898,6 +2899,104 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('build2 run exit code', 0, Rc);
   AssertEquals('build2 stdout', '8' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestInheritedMethodStmtCall_FromCachedUnit_PassesSelf;
+const
+  { An inherited method called as a bare STATEMENT (implicit Self) whose
+    declaring class arrives through a cached interface.  The decl synthesised
+    from the .bif used to carry no OwnerTypeName, and arm64's statement-call
+    path reads an empty owner as "plain routine" -- it dropped Self, so the
+    callee took the string arg as Self and the Boolean as the string, and
+    segfaulted in _StringAddRef.  Same three-level shape as
+    TAssert -> TTestCase -> a test class, where it broke TestRunner. }
+  BaseSrc =
+    '''
+    unit selfstmt.base;
+    interface
+    type
+      TBase = class
+        FTag: string;
+        procedure Note(AMsg: string; AFlag: Boolean); overload;
+        procedure Note(AFlag: Boolean); overload;
+      end;
+    implementation
+    procedure TBase.Note(AMsg: string; AFlag: Boolean);
+    begin
+      WriteLn(FTag, ':', AMsg, ':', AFlag)
+    end;
+    procedure TBase.Note(AFlag: Boolean);
+    begin
+      Self.Note('bare', AFlag)
+    end;
+    end.
+    ''';
+  MidSrc =
+    '''
+    unit selfstmt.mid;
+    interface
+    uses selfstmt.base;
+    type
+      TMid = class(TBase)
+      end;
+    implementation
+    end.
+    ''';
+  LeafSrc =
+    '''
+    unit selfstmt.leaf;
+    interface
+    uses selfstmt.mid;
+    type
+      TLeaf = class(TMid)
+        procedure Go;
+      end;
+    implementation
+    procedure TLeaf.Go;
+    begin
+      Note('grand', True);
+      Note(False)
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseSelfStmt;
+    uses selfstmt.leaf;
+    var L: TLeaf;
+    begin
+      L := TLeaf.Create();
+      L.FTag := 'tag';
+      L.Go();
+      L.Free()
+    end.
+    ''';
+  Expected = 'tag:grand:True' + #10 + 'tag:bare:False' + #10;
+var
+  ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  WriteFile(FScratch + '/selfstmt.base.pas', BaseSrc);
+  WriteFile(FScratch + '/selfstmt.mid.pas', MidSrc);
+  WriteFile(FScratch + '/selfstmt.leaf.pas', LeafSrc);
+  ProgPas := FScratch + '/use_selfstmt.pas';
+  ProgBin := FScratch + '/use_selfstmt';
+  CacheDir := FScratch + '/units-selfstmt';
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('build exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('run exit code (out: ' + Captured + ')', 0, Rc);
+  AssertEquals('stdout', Expected, Captured)
 end;
 
 { Regression for the cached-unit virtual-constructor vtable-slot bug.
