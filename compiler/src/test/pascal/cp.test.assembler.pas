@@ -32,6 +32,7 @@ type
     procedure TestBranchUndefined_EmitsReloc;
     procedure TestNoteGnuStack_Present;
     procedure TestUnknownDirective_Raises;
+    procedure TestExplicitWidthDataDirectives;
     procedure TestDuplicateLabel_Raises;
     procedure TestRexX_ExtendedIndexImmStore;
     procedure TestMovwImm16_TwoByteImmediate;
@@ -455,6 +456,20 @@ begin
   Obj := AssembleToBytes('ret' + LineEnding);
   AssertTrue('.note.GNU-stack section missing',
     ContainsBytes(Obj, '.note.GNU-stack'));
+end;
+
+procedure TAsmEncodingTests.TestExplicitWidthDataDirectives;
+var
+  B: string;
+begin
+  { .2byte/.4byte/.8byte are explicit-width aliases, identical on every GNU
+    target -- unlike .word (2 bytes here, 4 on AArch64) -- so target-neutral
+    emitters can share one spelling with the arm64 assembler. }
+  B := AssembleToBytes('.2byte 513' + LineEnding + '.4byte 7' + LineEnding +
+                       '.8byte 9' + LineEnding);
+  AssertTrue('01 02 | 07 00 00 00 | 09 00*7 laid out contiguously',
+    ContainsBytes(B, Chr(1) + Chr(2) + Chr(7) + Chr(0) + Chr(0) + Chr(0) +
+      Chr(9) + Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0)));
 end;
 
 procedure TAsmEncodingTests.TestUnknownDirective_Raises;

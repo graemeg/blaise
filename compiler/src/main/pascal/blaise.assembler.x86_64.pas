@@ -2895,6 +2895,12 @@ var
   Count, Size, FillVal, J: Integer;
 begin
   Dir := AParsed.Mnemonic;
+  { Explicit-width data directives, identical on every GNU target -- unlike
+    `.word`, which is 2 bytes here and 4 on AArch64 -- so a target-neutral
+    emitter (OPDF) can share one spelling with the arm64 assembler. }
+  if Dir = '.2byte' then Dir := '.word'
+  else if Dir = '.4byte' then Dir := '.long'
+  else if Dir = '.8byte' then Dir := '.quad';
   Args := TrimStr(AParsed.RawLine);
 
   if Dir = '.text' then

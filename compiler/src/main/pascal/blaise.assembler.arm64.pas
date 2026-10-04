@@ -467,6 +467,21 @@ begin
   while (P < Length(S)) and (not IsSpaceC(StrAt(S, P))) do P := P + 1;
   Result.Mnemonic := LowerS(Copy(S, 0, P));
   Result.Args := TrimS(Copy(S, P, Length(S) - P));
+  { Explicit-width data directives.  `.2byte` / `.4byte` / `.8byte` mean the
+    same on every GNU target, unlike `.word` (2 bytes on x86-64, 4 here), so
+    target-neutral emitters such as OPDF can use them; `.int` and `.long` are
+    4 bytes on AArch64, as in GNU as. }
+  if Result.Mnemonic = '.2byte' then Result.Mnemonic := '.hword'
+  else if (Result.Mnemonic = '.4byte') or (Result.Mnemonic = '.int') or
+          (Result.Mnemonic = '.long') then Result.Mnemonic := '.word'
+  else if Result.Mnemonic = '.8byte' then Result.Mnemonic := '.quad';
+  { A data directive's operands are numbers and symbols, never an AArch64
+    '#imm', so a '#' there starts a trailing comment (`.word 12  # RecSize`,
+    as the OPDF companion writes them). }
+  if ((Result.Mnemonic = '.byte') or (Result.Mnemonic = '.hword') or
+      (Result.Mnemonic = '.word') or (Result.Mnemonic = '.quad')) and
+     (Pos('#', Result.Args) >= 0) then
+    Result.Args := TrimS(Copy(Result.Args, 0, Pos('#', Result.Args)));
   if StrAt(S, 0) = Ord('.') then
   begin
     { 'b.cond' is an instruction, not a directive — but it starts 'b.' }

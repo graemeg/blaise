@@ -47,6 +47,7 @@ type
     procedure TestHashLineComment_IgnoredButImmediatesKept;
     procedure TestDataDirectives_QuadSymbolReloc;
     procedure TestAsciiWithSemicolonAndSlashes;
+    procedure TestExplicitWidthDataDirectives;
     procedure TestCsetAndConditionals;
     procedure TestLseAtomics;
     procedure TestErrors_HaveLineNumbers;
@@ -419,6 +420,39 @@ begin
     AssertEquals('first slash preserved', Ord('/'), StrAt(D.Data, 2));
     AssertEquals('second slash preserved', Ord('/'), StrAt(D.Data, 3));
     AssertEquals('b', Ord('b'), StrAt(D.Data, 4));
+  finally
+    F.Free();
+  end;
+end;
+
+procedure TArm64AsmTests.TestExplicitWidthDataDirectives;
+var
+  F: TMachOFile;
+  D: TMoSection;
+begin
+  { .2byte/.4byte/.8byte are explicit-width (target-neutral, unlike .word,
+    which is 4 bytes here and 2 on x86-64); .int/.long are 4 bytes on AArch64;
+    and a '#' in a data directive's operands starts a trailing comment, as
+    the OPDF companion writes it (`.int 12  # RecSize`). }
+  TextWords(
+    'nop' + LineEnding +
+    '.data' + LineEnding +
+    'lbl:' + LineEnding +
+    '.2byte 513' + LineEnding +
+    '.4byte 7  # a comment' + LineEnding +
+    '.8byte 9' + LineEnding +
+    '.int 3' + LineEnding +
+    '.long 4' + LineEnding, F);
+  try
+    D := F.FindSection('__DATA', '__data');
+    AssertTrue(D <> nil);
+    AssertEquals('2 + 4 + 8 + 4 + 4 bytes', 22, Integer(D.Size));
+    AssertEquals('.2byte low', 1, StrAt(D.Data, 0));
+    AssertEquals('.2byte high', 2, StrAt(D.Data, 1));
+    AssertEquals('.4byte value, comment ignored', 7, StrAt(D.Data, 2));
+    AssertEquals('.8byte value', 9, StrAt(D.Data, 6));
+    AssertEquals('.int value', 3, StrAt(D.Data, 14));
+    AssertEquals('.long value', 4, StrAt(D.Data, 18));
   finally
     F.Free();
   end;
