@@ -424,6 +424,7 @@ type
     procedure TestRun_Native_InterfaceFromPointerDeref;
     procedure TestRun_Native_InterfaceArg_AnyExpression;
     procedure TestRun_Native_ForIn_RecordAndInterfaceVars;
+    procedure TestRun_Native_RecordMethod_RecordReturningSelfCall;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -7109,6 +7110,57 @@ begin
     'n1:1 n2:2 n3:3 n1 n2 n3 ' + LE + '666' + LE + 'greet 7' + LE +
     'greet 8' + LE + 'list 7' + LE + 'list 8' + LE + 'destroyed 7' + LE +
     'destroyed 8' + LE + 'end run' + LE + 'done' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_RecordMethod_RecordReturningSelfCall;
+begin
+  { Self.Group(I).Value inside a record method (text.regex's TMatch): a
+    record-returning RECORD method needs Self's ADDRESS as receiver.  The
+    record-call dispatcher loaded the slot and dereferenced it, handing the
+    callee the record's first word (the FGroups data pointer) as Self --
+    wrong values, or a bus error. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TGroup = record
+        Index: Integer;
+        Length: Integer;
+        Value: string;
+      end;
+      TMatch = record
+        FGroups: array of TGroup;
+        Tag: Integer;
+        function Group(AIndex: Integer): TGroup;
+        function GroupValue(AIndex: Integer): string;
+      end;
+    function TMatch.Group(AIndex: Integer): TGroup;
+    begin
+      if (AIndex < 0) or (AIndex >= System.Length(FGroups)) then
+      begin
+        Result.Index := -1;
+        Result.Length := 0;
+        Result.Value := '';
+      end
+      else
+        Result := FGroups[AIndex];
+    end;
+    function TMatch.GroupValue(AIndex: Integer): string;
+    begin
+      Result := Self.Group(AIndex).Value;
+    end;
+    var
+      M: TMatch;
+    begin
+      SetLength(M.FGroups, 2);
+      M.FGroups[0].Value := 'zero' + IntToStr(0);
+      M.FGroups[1].Value := 'one';
+      M.FGroups[1].Index := 4;
+      WriteLn(M.GroupValue(0));
+      WriteLn(M.Group(1).Index, ' ', M.GroupValue(1), ' ', M.Group(7).Index);
+    end.
+    ''',
+    'zero0' + LE + '4 one -1' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

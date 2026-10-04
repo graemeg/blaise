@@ -191,6 +191,7 @@ type
     procedure TestInterfaceFromDeref_PairLoad;
     procedure TestInterfaceArg_OwnedCallResultReleased;
     procedure TestForIn_RecordVar_CopiesElement;
+    procedure TestRecordMethodSelfCall_ReceiverIsAddress;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4966,6 +4967,43 @@ begin
   AssertTrue('source field retained', Pos(#9'bl __StringAddRef', AsmT) >= 0);
   AssertTrue('element copied into the loop variable',
     Pos(#9'movz x2, #16'#10#9'bl _memcpy', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestRecordMethodSelfCall_ReceiverIsAddress;
+var
+  AsmT, Body: string;
+begin
+  { Self.Get() returning a record, inside a record method: the receiver is
+    the Self slot's VALUE (the record's address), with no further
+    dereference before the call }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TBig = record
+        A, B, C: Int64;
+      end;
+      TR = record
+        X: Int64;
+        function Get: TBig;
+        function Sum: Int64;
+      end;
+    function TR.Get: TBig;
+    begin
+      Result.A := X;
+    end;
+    function TR.Sum: Int64;
+    begin
+      Result := Self.Get().A;
+    end;
+    begin
+    end.
+    ''');
+  Body := Copy(AsmT, Pos('_TR_Sum:', AsmT), Length(AsmT));
+  Body := Copy(Body, 0, Pos(#9'bl _TR_Get', Body));
+  AssertTrue('call found', Length(Body) > 0);
+  AssertTrue('Self is not dereferenced before the call',
+    Pos(#9'ldr x0, [x0]', Body) < 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

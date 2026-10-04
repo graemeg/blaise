@@ -8828,7 +8828,24 @@ begin
       EmitCall(MD, ME.Name, ME.Args, ADest, False, VIRT_NONE, ASretSpOff);
       Exit;
     end;
-    if ME.ObjExpr <> nil then
+    if MD.IsRecordMethod then
+    begin
+      { a RECORD method's Self is the record's ADDRESS, never its contents
+        (the EmitMethodCallExpr rule).  Loading the slot passed the record's
+        first 8 bytes as Self -- Self.Group(I).Value inside a record method
+        (text.regex's TMatch) handed Group the FGroups data pointer. }
+      if ME.ObjExpr = nil then
+        EmitRecordBaseAddr('x0', ME.ObjectName, ME.IsVarParam)
+      else if IsRecordCallArg(ME.ObjExpr) then
+      begin
+        if AggHasManaged(ME.ObjExpr.ResolvedType) then
+          NotYet('record method call on a managed record call result', AExpr);
+        EmitRecCallToRret(ME.ObjExpr)
+      end
+      else
+        EmitRecAddrToX0(ME.ObjExpr);
+    end
+    else if ME.ObjExpr <> nil then
     begin
       if ArcExprOwnsRef(ME.ObjExpr) then
         NotYet('record call on an owned transient receiver', AExpr);
