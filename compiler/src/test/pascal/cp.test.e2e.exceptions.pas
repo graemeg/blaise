@@ -24,6 +24,8 @@ type
     { Regression for the alloc16-32 exception-frame bug:
       a bare try/finally with no locals, virtuals, or RTL use. }
     procedure TestRun_BareTryFinally;
+    { A class declared in a UNIT must reach the one TObject. }
+    procedure TestRun_OnTObject_CatchesUnitDeclaredException;
 
     { Locals live in the stack frame around the exception frame.
       If the exception frame is undersized, setjmp clobbers them. }
@@ -603,6 +605,45 @@ const
       writeln('done');
     end.
     ''';
+
+procedure TE2EExceptionTests.TestRun_OnTObject_CatchesUnitDeclaredException;
+const
+  { Exception is declared in SysUtils, so its typeinfo's parent link is a
+    reference from SysUtils' own object.  The macOS internal linker bound
+    that reference to SysUtils' private weak copy of _typeinfo_TObject
+    instead of the one copy every other unit uses, so the parent walk never
+    met the TObject the handler compared against: `on E: TObject` matched
+    nothing and the program aborted.  A program-level class was unaffected,
+    which is why the second check is the one that discriminates. }
+  Src = '''
+    program P;
+    uses SysUtils;
+    type
+      TMine = class end;
+      ESem = class(Exception) end;
+    var
+      Caught: Boolean;
+      M: TMine;
+      E: Exception;
+    begin
+      Caught := False;
+      try
+        raise ESem.Create('x');
+      except
+        on X: TObject do Caught := True;
+      end;
+      WriteLn(Caught);
+      M := TMine.Create();
+      E := ESem.Create('y');
+      WriteLn(M is TObject, ' ', E is TObject, ' ', E is Exception);
+      M.Free();
+      E.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'True' + LE + 'True True True' + LE, 0);
+end;
 
 procedure TE2EExceptionTests.TestRun_ExitInSecondTry_LaterRaiseStillWorks;
 begin

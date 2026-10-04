@@ -603,11 +603,18 @@ begin
         SiteVm := StreamVm(Strm) + SiteOff;
         IsImport := False;
         Target := 0;
-        if Sym.Sect <> 0 then
+        { An EXTERNAL symbol always binds to the one definition CollectSymbols
+          kept, even when this object defines it too: every unit carries its
+          own weak copy of e.g. _typeinfo_TObject, and binding to the local
+          copy left the program with several distinct "TObject"s -- a class
+          declared in a unit then never reached the TObject a handler or `is`
+          compared against, so `on E: TObject` matched nothing.  Only a
+          non-external (file-local) symbol resolves to its own section. }
+        if Sym.IsExt() and FDefIndex.TryGetValue(Sym.Name, DefIdx) then
+          Target := DefinedVm(DefIdx)
+        else if Sym.Sect <> 0 then
           Target := SectionVm(FSecFirst.Get(I) + (Sym.Sect - 1))
             + (Sym.Value - Obj.Sections.Get(Sym.Sect - 1).Addr)
-        else if FDefIndex.TryGetValue(Sym.Name, DefIdx) then
-          Target := DefinedVm(DefIdx)
         else
           IsImport := True;
 
