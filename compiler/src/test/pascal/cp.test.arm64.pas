@@ -188,6 +188,7 @@ type
     procedure TestAddrOfLocalInterface_IsPairAddress;
     procedure TestRecordProperty_ReadThroughSret;
     procedure TestSmallSetResult_ReturnedInX0;
+    procedure TestInterfaceFromDeref_PairLoad;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4879,6 +4880,31 @@ begin
   Body := Copy(Body, 0, Pos(#9'ret', Body));
   AssertTrue('routine emitted', Pos('_NoOpts:', Body) >= 0);
   AssertTrue('Result loaded into x0 at exit', Pos(#9'ldur x0, [x29, #-', Body) >= 0);
+end;
+
+procedure TArm64BackendTests.TestInterfaceFromDeref_PairLoad;
+var
+  AsmT, Body: string;
+begin
+  { Result := P^ with P: ^IG loads the pair through the pointer }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IG = interface
+        function Greet: Int64;
+      end;
+      PIG = ^IG;
+    function Load(P: PIG): IG;
+    begin
+      Result := P^;
+    end;
+    begin
+    end.
+    ''');
+  Body := Copy(AsmT, Pos('_Load:', AsmT), Length(AsmT));
+  AssertTrue('pair loaded through the pointer',
+    Pos(#9'ldp x0, x1, [x0]', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

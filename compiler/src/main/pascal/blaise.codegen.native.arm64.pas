@@ -6391,6 +6391,14 @@ begin
     Self.Emit(#9'ldp x0, x1, [x0]');
     Exit;
   end;
+  if AExpr is TDerefExpr then
+  begin
+    { P^ with P: ^IFoo (TListEnumerator<T>.GetCurrent's Result := Ptr^): the
+      pointer designates an (obj, itab) pair -- a borrow }
+    Self.EmitExprToX0(TDerefExpr(AExpr).Expr);
+    Self.Emit(#9'ldp x0, x1, [x0]');
+    Exit;
+  end;
   if (AExpr is TStringSubscriptExpr) and
      (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) then
   begin

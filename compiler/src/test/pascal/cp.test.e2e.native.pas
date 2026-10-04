@@ -421,6 +421,7 @@ type
     procedure TestRun_Native_PointerWrite_RecordJumboIntf;
     procedure TestRun_Native_RecordDefaultProperty_Read;
     procedure TestRun_Native_SmallSetFunctionResult;
+    procedure TestRun_Native_InterfaceFromPointerDeref;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6898,6 +6899,49 @@ begin
     ''',
     'False True' + LE + 'True False True' + LE + 'False' + LE +
     'True True False' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_InterfaceFromPointerDeref;
+begin
+  { Result := Ptr^ with Ptr: ^IG (TListEnumerator<T>.GetCurrent for an
+    interface T) -- the pointer designates an (obj, itab) pair; the read is a
+    borrow and the store retains it. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      IG = interface
+        function Greet: Integer;
+      end;
+      TG = class(IG)
+        FV: Integer;
+        function Greet: Integer;
+      end;
+      PIG = ^IG;
+    function TG.Greet: Integer;
+    begin
+      Result := FV;
+    end;
+    function Load(P: PIG): IG;
+    begin
+      Result := P^;
+    end;
+    procedure Run;
+    var
+      G, H: IG;
+      T: TG;
+    begin
+      T := TG.Create();
+      T.FV := 9;
+      G := T;
+      H := Load(@G);
+      WriteLn(H.Greet());
+    end;
+    begin
+      Run();
+    end.
+    ''',
+    '9' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;
