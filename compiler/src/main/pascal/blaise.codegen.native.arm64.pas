@@ -51,6 +51,9 @@ uses
 
 const
   VIRT_NONE = -1;   { EmitCall: no virtual dispatch — direct bl }
+  VIRT_INDIRECT = -2;  { EmitCall: call through the code word of the fat /
+                         plain procedural value whose ADDRESS is parked in
+                         the FIndirectSlot frame slot }
   { EmitCall: no caller-provided x8 sret buffer for this call. }
   SRET_NO_BUF = -1;
   { Statement-scoped deferred class-release frame slots (BUG-048 arm64 half —
@@ -162,6 +165,8 @@ type
     FPendingRelCount: Integer;   { live statement-scoped deferred class
                                    releases (BUG-048/BUG-049) — also the next
                                    free _pendrel_N slot index }
+    FIndirectSlot: string;       { VIRT_INDIRECT: frame slot holding the
+                                   address of the procedural value to call }
     FJArgN: Integer;             { counter for '__jarg_<n>' jumbo-set
                                    argument snapshots }
     FFretN: Integer;             { counter for '__fret_<n>' closure-result
@@ -2452,109 +2457,55 @@ end;
 procedure TArm64Backend.EmitFatPtrCall(const AAddrReg: string;
   AProcType: TProceduralTypeDesc; AArgs: TObjectList; AIsFat: Boolean);
 var
-  I, TransN: Integer;
-  Arg: TASTExpr;
-  Shapes: string;
+  I: Integer;
+  Decl: TMethodDecl;
+  Par: TMethodParam;
+  Info: TProcParamInfo;
+  Slot: string;
 begin
-  { AAddrReg holds the address of the 16-byte fat value (Code at +0, Env/Self at
-    +8).  Evaluate and push every visible arg, then load Env into x0 (the hidden
-    first arg), the visible args into x1.., Code into x9, and blr.  Only
-    int-class scalar args in this slice — a float/aggregate closure arg is an
-    honest hole.
+  { AAddrReg holds the address of a procedural value: a 16-byte fat value
+    (Code at +0, Env/Self at +8) when AIsFat, else one plain code word.
 
-    An OWNED-TRANSIENT string/class arg is passed BORROWED, so the caller
-    disposes the transient AFTER the call (mirroring EmitCall).  The transient
-    pointers are held in callee-saved x19..x21 across the blr (at most three
-    such args in the self-compile; more stay an honest hole), with a per-slot
-    shape: 'C' = owned class (bare _ClassRelease); '1' = rc=1 owned string (bare
-    _StringRelease); '0' = rc=0 unowned string (pinned with _StringAddRef BEFORE
-    the blr — see EmitOwnedStrTransientPin — then one bare release after). }
-  { AIsFat = False: AAddrReg addresses a PLAIN procedural pointer (one code
-    word, no Env) -- the visible args then start at x0. }
-  if AArgs.Count > 7 then
-    NotYet('closure call with more than 7 arguments', nil);
+    The call itself is an ordinary EmitCall against a TMethodDecl synthesised
+    from the procedural type's signature, so every argument class EmitCall
+    lowers -- doubles, records by shape, interfaces, closures, jumbo sets,
+    var/out, owned transients released after the call -- works through a
+    closure exactly as through a direct call, and the two cannot drift.  The
+    Env rides as the hidden first argument the way a method's Self does
+    (pushed, ASelfPushed), and VIRT_INDIRECT makes EmitCall branch through the
+    code word instead of a symbol.  The value's address is parked in a
+    per-site frame slot, because the arguments may themselves call. }
   GuardNoOpenArrayParam(AProcType, nil);
-  { AAddrReg must survive the arg evaluation — park it.  Save x19..x21 (used to
-    hold owned transients across the call). }
-  Self.Emit(Format(#9'str %s, [sp, #-16]!', [AAddrReg]));
-  Self.Emit(#9'stp x19, x20, [sp, #-16]!');
-  Self.Emit(#9'str x21, [sp, #-16]!');
-  TransN := 0;
-  Shapes := '';
-  for I := 0 to AArgs.Count - 1 do
-  begin
-    Arg := TASTExpr(AArgs.Items[I]);
-    if not (IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) or
-            (Arg is TNilLiteral) or
-            ((Arg.ResolvedType <> nil) and
-             (Arg.ResolvedType.Kind in [tyPChar, tyPointer, tyClass, tyString,
-                                        tyDynArray, tyMetaClass]))) then
-      NotYet('closure-call argument of this type', Arg);
-    Self.EmitExprToX0(Arg);
-    { capture an owned-transient's disposal shape; hold its pointer in a
-      callee-saved reg (x0 is ALSO pushed as the borrowed arg below). }
-    if ((Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyString) and
-        (ArcExprOwnsRef(Arg) or ArcExprIsUnownedStrTransient(Arg))) or
-       ((Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyClass) and
-        ArcExprOwnsRef(Arg)) then
+  Slot := '__icall_' + IntToStr(FJArgN);
+  FJArgN := FJArgN + 1;
+  if not FFrame.ContainsKey(Slot) then
+    AddLocal(Slot, 8);
+  Self.Emit(Format(#9'mov x10, %s', [AAddrReg]));
+  EmitStoreSlot('x10', Slot);
+  Decl := TMethodDecl.Create();
+  try
+    for I := 0 to AProcType.Params.Count - 1 do
     begin
-      if TransN >= 3 then
-        NotYet('more than 3 owned transient args in a closure call', Arg);
-      Self.Emit(Format(#9'mov x%d, x0', [19 + TransN]));
-      if Arg.ResolvedType.Kind = tyClass then
-        Shapes := Shapes + 'C'
-      else if ArcExprIsUnownedStrTransient(Arg) then
-      begin
-        Shapes := Shapes + '0';
-        { rc=0 transients pin BEFORE the call — the closure's by-value param
-          entry/exit cycle would free an unpinned one mid-call, making a
-          post-call AddRef+Release a double-free (same shape as
-          BUG-20260722-arm64-propsetter-pin-after-call). }
-        Self.EmitOwnedStrTransientPin(Arg);
-      end
-      else
-        Shapes := Shapes + '1';
-      Inc(TransN);
+      Info := TProcParamInfo(AProcType.Params.Items[I]);
+      Par := TMethodParam.Create();
+      Par.ParamName := Info.Name;
+      Par.ResolvedType := Info.TypeDesc;
+      Par.IsVarParam := Info.IsVarParam;
+      Par.IsConstParam := Info.IsConstParam;
+      Decl.Params.Add(Par);
     end;
-    EmitPushX0();
-  end;
-  { visible args -> x1.. (x0.. for a plain pointer), last pushed first }
-  for I := AArgs.Count - 1 downto 0 do
+    Decl.ResolvedReturnType := AProcType.ReturnType;
     if AIsFat then
-      EmitPopTo('x' + IntToStr(I + 1))
-    else
-      EmitPopTo('x' + IntToStr(I));
-  { &fat value sits below the three saved-reg slots (x21=16, x19/x20=16). }
-  Self.Emit(#9'ldr x10, [sp, #32]');
-  if AIsFat then
-    Self.Emit(#9'ldr x0, [x10, #8]');         { Env -> hidden first arg (x0) }
-  Self.Emit(#9'ldr x9, [x10]');               { Code }
-  Self.Emit(#9'blr x9');
-  { dispose owned transients (the call result in x0/d0 must survive). }
-  if TransN > 0 then
-  begin
-    EmitPushX0();
-    Self.Emit(#9'fmov x9, d0');
-    Self.Emit(#9'str x9, [sp, #-16]!');
-    for I := 0 to TransN - 1 do
     begin
-      Self.Emit(Format(#9'mov x0, x%d', [19 + I]));
-      { Blaise Copy is 0-BASED — Copy(Shapes, I + 1, 1) here was an off-by-one
-        that read the wrong (or an empty) shape slot.  Both string shapes now
-        take a bare release: rc=0 transients were pinned BEFORE the blr. }
-      if Copy(Shapes, I, 1) = 'C' then
-        EmitCallSym('_ClassRelease')
-      else
-        EmitCallSym('_StringRelease');
+      EmitLoadSlot('x10', Slot);
+      Self.Emit(#9'ldr x0, [x10, #8]');       { Env / Self -> hidden first arg }
+      EmitPushX0();
     end;
-    Self.Emit(#9'ldr x9, [sp], #16');
-    Self.Emit(#9'fmov d0, x9');
-    EmitPopTo('x0');
+    FIndirectSlot := Slot;
+    EmitCall(Decl, '', AArgs, '', AIsFat, VIRT_INDIRECT);
+  finally
+    Decl.Free();
   end;
-  { restore x19..x21 and drop the parked &fat value. }
-  Self.Emit(#9'ldr x21, [sp], #16');
-  Self.Emit(#9'ldp x19, x20, [sp], #16');
-  Self.Emit(#9'ldr xzr, [sp], #16');
 end;
 
 procedure TArm64Backend.EmitOwnedStrTransientRelease(AValueExpr: TASTExpr);
@@ -11158,7 +11109,13 @@ var
   NarrowFix: Boolean;
   JTmp: string;
   JNB: Integer;
+  IndSlot: string;
 begin
+  { an indirect call's target slot, captured now -- a closure call among the
+    arguments re-sets FIndirectSlot for itself }
+  IndSlot := '';
+  if AVirtSlot = VIRT_INDIRECT then
+    IndSlot := FIndirectSlot;
   NInt := 0;
   NFloat := 0;
   StackOff := 0;
@@ -11904,7 +11861,14 @@ begin
       measured at OUR entry, and our outgoing-arg area is still subtracted
       here (the pop walk above restored only the eval slots), so add it back. }
     EmitAddSubImm('add', 'x8', 'sp', ASretSpOff + StackArea);
-  if AVirtSlot >= 0 then
+  if AVirtSlot = VIRT_INDIRECT then
+  begin
+    { through the procedural value's code word (EmitFatPtrCall) }
+    EmitLoadSlot('x10', IndSlot);
+    Self.Emit(#9'ldr x9, [x10]');
+    Self.Emit(#9'blr x9');
+  end
+  else if AVirtSlot >= 0 then
   begin
     { virtual dispatch: vtable at instance[0]; slot 0 is the typeinfo
       back-pointer, so method slots start at +8 }

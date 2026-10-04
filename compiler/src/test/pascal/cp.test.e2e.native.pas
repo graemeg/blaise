@@ -417,6 +417,7 @@ type
     procedure TestRun_Native_ClassParamReassign_KeepsCallerRef;
     procedure TestRun_Native_LargeRecordCall_FieldReadAndReceiver;
     procedure TestRun_Native_RecordCallIntoVarRecordParam;
+    procedure TestRun_Native_ClosureCall_AggregateArgs;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6710,6 +6711,44 @@ begin
     end.
     ''',
     'k2! 2' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_ClosureCall_AggregateArgs;
+begin
+  { a closure call goes through the ordinary call lowering, so record,
+    double and interface arguments work as for a direct call (only
+    int-class scalars did) -- TList<TRec>.Where / Map instantiate this. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TPt = record
+        X, Y: Int64;
+      end;
+      TBig = record
+        A, B, C: Int64;
+      end;
+      TPtFn = reference to function(P: TPt; B: TBig; D: Double): Int64;
+    var
+      F: TPtFn;
+      P: TPt;
+      B: TBig;
+      Bias: Int64;
+    begin
+      Bias := 1000;
+      F := function(P: TPt; B: TBig; D: Double): Int64
+           begin
+             Result := P.X + P.Y + B.A + B.B + B.C + Trunc(D * 10) + Bias;
+           end;
+      P.X := 1;
+      P.Y := 2;
+      B.A := 10;
+      B.B := 20;
+      B.C := 30;
+      WriteLn(F(P, B, 2.5));
+    end.
+    ''',
+    '1088' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

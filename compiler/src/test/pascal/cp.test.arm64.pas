@@ -183,6 +183,7 @@ type
     procedure TestJumboSetParamAndResult_ByPointerAndSret;
     procedure TestByValueClassParam_RetainedAndReleased;
     procedure TestRecordCallResult_PerSiteScratch;
+    procedure TestClosureCall_DoubleArgInD0;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4735,6 +4736,30 @@ begin
   AssertTrue('the two results use different slots', P1 <> P2);
 end;
 
+procedure TArm64BackendTests.TestClosureCall_DoubleArgInD0;
+var
+  AsmT: string;
+begin
+  { a closure call goes through EmitCall: a Double argument travels in d0
+    (only int-class arguments used to be accepted) and the call branches
+    through the code word of the parked fat value }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TF = reference to function(D: Double): Int64;
+    var
+      F: TF;
+    begin
+      F := function(D: Double): Int64 begin Result := Trunc(D); end;
+      WriteLn(F(2.5));
+    end.
+    ''');
+  AssertTrue('double argument moved into d0', Pos(#9'fmov d0, x9', AsmT) >= 0);
+  AssertTrue('indirect branch through the code word',
+    Pos(#9'ldr x9, [x10]'#10#9'blr x9', AsmT) >= 0);
+end;
+
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;
 var
   AsmT: string;
@@ -6174,8 +6199,8 @@ begin
   AssertTrue('closure invoked', PosCall >= 0);
   PosRel := PosEx(#9'bl __StringRelease', AsmT, PosCall);
   AssertTrue('transient released after the closure call', PosRel > PosCall);
-  { transient pointers are held in callee-saved x19 across the call }
-  AssertTrue('transient held callee-saved', Pos(#9'mov x19, x0', AsmT) >= 0);
+  { (closure calls go through EmitCall, so the transient is parked the way
+    a direct call parks it -- no closure-specific register shape) }
 end;
 
 procedure TArm64BackendTests.TestStrArg_UnownedTransient_PinnedBeforeDirectCall;
@@ -6534,14 +6559,15 @@ end;
 procedure TArm64BackendTests.TestClosure_UnownedTransientArg_PinnedBeforeCall;
 var
   AsmT: string;
-  PosCat, PosPin, PosCall, PosRel: Integer;
+  PosCat, PosCall, PosExit: Integer;
 begin
   { A closure call whose argument is an rc=0 UNOWNED string transient (a `+`
-    concat) must pin it (__StringAddRef) BEFORE the blr: the closure's by-value
-    param entry-retain/exit-release cycle frees an unpinned rc=0 transient
-    during the call, so the old post-call AddRef+Release double-freed whenever
-    the closure did not store the value.  After the call a single bare
-    __StringRelease disposes it (1 -> 0). }
+    concat) passed to a BY-VALUE string parameter.  Closure calls now go
+    through EmitCall, so the transient follows the direct-call rule: the
+    callee's by-value param retains it on entry and releases it at exit
+    (0 -> 1 -> 0), which disposes it, and the caller adds nothing.  The
+    defect this test was written for -- a post-call AddRef + Release pair that
+    double-freed the already-freed transient -- must not come back. }
   AsmT := GenAsm(
     '''
     program P;
@@ -6558,16 +6584,14 @@ begin
   AssertTrue('concat produced', PosCat >= 0);
   PosCall := PosEx(#9'blr x9', AsmT, PosCat);
   AssertTrue('closure invoked after the concat', PosCall > PosCat);
-  { the rc=0 pin lands strictly between the concat and the blr }
-  PosPin := PosEx(#9'bl __StringAddRef', AsmT, PosCat);
-  AssertTrue('rc=0 transient pinned BEFORE the closure call',
-    (PosPin > PosCat) and (PosPin < PosCall));
-  { one release after the call, with no post-call AddRef half before it }
-  PosRel := PosEx(#9'bl __StringRelease', AsmT, PosCall);
-  AssertTrue('transient released after the closure call', PosRel > PosCall);
-  AssertTrue('no post-call AddRef half remains',
+  PosExit := PosEx('Lrexit', AsmT, PosCall);
+  AssertTrue('routine exit follows the call', PosExit > PosCall);
+  AssertTrue('no post-call AddRef of the transient',
     (PosEx(#9'bl __StringAddRef', AsmT, PosCall) < 0) or
-    (PosEx(#9'bl __StringAddRef', AsmT, PosCall) > PosRel));
+    (PosEx(#9'bl __StringAddRef', AsmT, PosCall) > PosExit));
+  AssertTrue('no post-call release of the transient by the caller',
+    (PosEx(#9'bl __StringRelease', AsmT, PosCall) < 0) or
+    (PosEx(#9'bl __StringRelease', AsmT, PosCall) > PosExit));
 end;
 
 procedure TArm64BackendTests.TestClosure_StatementPositionCall;
