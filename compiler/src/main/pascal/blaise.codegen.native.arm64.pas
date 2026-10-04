@@ -4101,6 +4101,16 @@ begin
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (not TFuncCallExpr(AExpr).IsIndirectCall) and
+     (TFuncCallExpr(AExpr).Args.Count > 2) and
+     SameText(TFuncCallExpr(AExpr).Name, 'Format') then
+  begin
+    { Format(F, A, B, ...) -- the bare variadic form with several values }
+    Self.EmitFormatCall(TFuncCallExpr(AExpr).Args);
+    Exit;
+  end;
+  if (AExpr is TFuncCallExpr) and
+     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+     (not TFuncCallExpr(AExpr).IsIndirectCall) and
      (TFuncCallExpr(AExpr).Args.Count = 2) then
   begin
     if SameText(TFuncCallExpr(AExpr).Name, 'Format') then
@@ -8889,7 +8899,7 @@ procedure TArm64Backend.EmitFormatCall(AArgs: TObjectList);
 var
   I, FmtCount, TotalSize: Integer;
   Arg: TASTExpr;
-  ArrLit: TArrayLiteralExpr;
+  Elems: TObjectList;
   IsIntArg: Boolean;
 begin
   { Format(Fmt, [a, b, ...]) → _StringFormatN(fmt, block, count).
@@ -8924,10 +8934,20 @@ begin
     EmitCallSym('_StringFormatVarRecs');
     Exit;
   end;
-  if not (TASTExpr(AArgs.Items[1]) is TArrayLiteralExpr) then
-    NotYet('Format without an array literal', TASTExpr(AArgs.Items[0]));
-  ArrLit := TArrayLiteralExpr(AArgs.Items[1]);
-  FmtCount := ArrLit.Elements.Count;
+  { the elements: a bracket literal's (Format(F, [A, B])), or the bare
+    variadic arguments themselves (Format(F, A, B)) -- the same block either
+    way.  Elems is a non-owning view. }
+  Elems := TObjectList.Create(False);
+  try
+  if (AArgs.Count = 2) and (TASTExpr(AArgs.Items[1]) is TArrayLiteralExpr) then
+  begin
+    for I := 0 to TArrayLiteralExpr(AArgs.Items[1]).Elements.Count - 1 do
+      Elems.Add(TArrayLiteralExpr(AArgs.Items[1]).Elements.Items[I]);
+  end
+  else
+    for I := 1 to AArgs.Count - 1 do
+      Elems.Add(AArgs.Items[I]);
+  FmtCount := Elems.Count;
   Self.EmitExprToX0(TASTExpr(AArgs.Items[0]));
   EmitPushX0();                              { [fmt] — parked to the end }
   if FmtCount = 0 then
@@ -8950,7 +8970,7 @@ begin
   EmitAddSubImm('sub', 'sp', 'sp', TotalSize);
   for I := 0 to FmtCount - 1 do
   begin
-    Arg := TASTExpr(ArrLit.Elements.Items[I]);
+    Arg := TASTExpr(Elems.Items[I]);
     if (Arg.ResolvedType <> nil) and
        (Arg.ResolvedType.Kind in [tyDouble, tySingle]) then
     begin
@@ -8983,7 +9003,7 @@ begin
   EmitPushX0();                              { [fmt][block][result] }
   for I := 0 to FmtCount - 1 do
   begin
-    Arg := TASTExpr(ArrLit.Elements.Items[I]);
+    Arg := TASTExpr(Elems.Items[I]);
     if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyString)
        and ArcBuiltinStrArgOwnsRef(Arg) then
     begin
@@ -8999,6 +9019,9 @@ begin
   EmitPopTo('x0');
   EmitAddSubImm('add', 'sp', 'sp', TotalSize);
   Self.Emit(#9'add sp, sp, #16');            { drop the fmt slot }
+  finally
+    Elems.Free();
+  end;
 end;
 
 procedure TArm64Backend.EmitBuiltinStrCall2(AArg0, AArg1: TASTExpr;

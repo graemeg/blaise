@@ -193,6 +193,7 @@ type
     procedure TestForIn_RecordVar_CopiesElement;
     procedure TestRecordMethodSelfCall_ReceiverIsAddress;
     procedure TestCallResultRegs_SavedAcrossTransientRelease;
+    procedure TestFormat_BareVariadicArgs_BuildBlock;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -5040,6 +5041,29 @@ begin
     (PosSave > PosCall) and (PosSave < PosRel));
   AssertTrue('restored after the release',
     PosEx(#9'ldp x0, x1, [sp], #16', AsmT, PosRel) > PosRel);
+end;
+
+procedure TArm64BackendTests.TestFormat_BareVariadicArgs_BuildBlock;
+var
+  AsmT: string;
+begin
+  { Format('%s=%d', S, N) -- bare variadic arguments, no bracket literal
+    (was NotYet): the same tagged 16-byte block as the literal form, here
+    two entries (a string, tag 1, and an int, tag 0) }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var
+      S, R: string;
+      N: Int64;
+    begin
+      S := 'a';
+      N := 1;
+      R := Format('%s=%d', S, N);
+    end.
+    ''');
+  AssertTrue('two-entry block reserved', Pos(#9'sub sp, sp, #32', AsmT) >= 0);
+  AssertTrue('entry count passed', Pos(#9'movz x2, #2'#10#9'bl __StringFormatN', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

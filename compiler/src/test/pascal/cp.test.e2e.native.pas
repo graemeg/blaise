@@ -426,6 +426,7 @@ type
     procedure TestRun_Native_ForIn_RecordAndInterfaceVars;
     procedure TestRun_Native_RecordMethod_RecordReturningSelfCall;
     procedure TestRun_Native_RegisterRecordResult_SurvivesArgRelease;
+    procedure TestRun_Native_Format_BareVariadicArgs;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -7204,6 +7205,30 @@ begin
     end.
     ''',
     '3 3007' + LE + '4 45' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_Format_BareVariadicArgs;
+begin
+  { Format(F, A, B, ...) with bare variadic values -- no bracket literal --
+    including an owned-transient string and a Double (was NotYet on arm64:
+    'Format without an array literal' / 'this call form'). }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    var
+      S, R: string;
+      N: Int64;
+      D: Double;
+    begin
+      S := 'ab';
+      N := 42;
+      D := 2.5;
+      R := Format('%s=%d %s %.1f', S, N, S + '!', D);
+      WriteLn(R);
+      WriteLn(Format('v=%d', N));
+    end.
+    ''',
+    'ab=42 ab! 2.5' + LE + 'v=42' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;
