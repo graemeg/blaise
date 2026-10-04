@@ -24,6 +24,7 @@ type
     procedure SetUp; override;
   published
     procedure TestRun_ClassThreadVar_PerThreadAndBalanced;
+    procedure TestRun_Thread_FinishesInsideConstructor_ObjectSurvives;
     procedure TestRun_Thread_BasicExecute;
     procedure TestRun_Thread_WaitForBlocksUntilDone;
     procedure TestRun_Thread_Terminate_Flag;
@@ -75,6 +76,45 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRTLRunsOnAll(Src, 'main worker' + LineEnding, 0);
   AssertLeakFreeOnAll(Src, 'main worker');
+end;
+
+procedure TE2EThreadingTests.TestRun_Thread_FinishesInsideConstructor_ObjectSurvives;
+const
+  { Create(False) starts the worker inside the constructor, while the new
+    instance's refcount is still 0.  The worker must not take (and drop) an
+    ARC reference to it: a 0 -> 1 -> 0 round trip destroyed the object under
+    the constructor, and the creator's reference dangled -- releasing it
+    crashed.  WaitFor inside the constructor makes the worker finish first
+    every time, so the old trampoline failed deterministically. }
+  Src = '''
+    program tc;
+    uses SysUtils, Classes;
+    type
+      TW = class(TThread)
+        constructor Create;
+        procedure Execute; override;
+      end;
+    var Seen: string;
+    constructor TW.Create;
+    begin
+      inherited Create(False);
+      WaitFor();
+    end;
+    procedure TW.Execute;
+    begin
+      Seen := 'worker';
+    end;
+    var T: TW;
+    begin
+      T := TW.Create;
+      WriteLn('main ', Seen);
+      T := nil;
+      WriteLn('done');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRTLRunsOnAll(Src, 'main worker' + LineEnding + 'done' + LineEnding, 0);
 end;
 
 procedure TE2EThreadingTests.SetUp;

@@ -1150,15 +1150,18 @@ end;
 { TThread                                                              }
 { ================================================================== }
 
+{ Arg is used through casts, never stored in a TThread local: a local is an
+  ARC reference, and Create(False) starts the thread INSIDE the constructor,
+  while the new instance's refcount is still 0.  The worker's retain/release
+  pair (0 -> 1 -> 0) would destroy the object under the constructor and the
+  creator's reference would dangle (an exit-time crash whenever the worker
+  finished before Create returned). }
 procedure ThreadTrampoline(Arg: Pointer);
-var
-  T: TThread;
 begin
-  T := TThread(Arg);
   try
-    T.Execute()
+    TThread(Arg).Execute()
   finally
-    T.FFinished := True
+    TThread(Arg).FFinished := True
   end
 end;
 
