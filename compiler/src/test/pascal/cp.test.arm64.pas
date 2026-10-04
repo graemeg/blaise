@@ -179,6 +179,7 @@ type
     procedure TestJumboSetOp_LeftReadAboveRightLiteral;
     procedure TestClosureField_ImplicitSelfStore_Lowers;
     procedure TestRecordGlobal_ClassFieldReceiver_Lowers;
+    procedure TestJumboSetField_StoreCopiesBitmap;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4616,6 +4617,35 @@ begin
   AssertTrue('field loaded at its offset from the record address',
     Pos(#9'add x0, x0, #8'#10#9'ldr x0, [x0]', AsmT) >= 0);
   AssertTrue('method called', Pos(#9'bl _TBox_Bump', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestJumboSetField_StoreCopiesBitmap;
+var
+  AsmT: string;
+begin
+  { N.Cls := [1, 2]: a jumbo-set FIELD store copies the 32-byte bitmap from
+    the literal into the field (the base read above the literal's buffer),
+    instead of stopping with "store to a field of this type". }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TCls = set of Byte;
+      TNode = class
+      public
+        Tag: Int64;
+        Cls: TCls;
+      end;
+    var
+      N: TNode;
+    begin
+      N := TNode.Create();
+      N.Cls := [1, 2];
+    end.
+    ''');
+  AssertTrue('instance base read above the literal',
+    Pos(#9'ldr x0, [sp, #32]', AsmT) >= 0);
+  AssertTrue('32-byte bitmap copied', Pos(#9'movz x2, #32'#10#9'bl _memcpy', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

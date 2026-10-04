@@ -412,6 +412,7 @@ type
     procedure TestRun_Native_JumboSetOp_RightLiteral;
     procedure TestRun_Native_ClosureField_ImplicitSelfStore;
     procedure TestRun_Native_RecordGlobal_ClassFieldReceiver;
+    procedure TestRun_Native_JumboSetField_StoreAndRead;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6487,6 +6488,53 @@ begin
     end.
     ''',
     '7' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_JumboSetField_StoreAndRead;
+begin
+  { a `set of Byte` (32-byte bitmap) FIELD: a store copies the bitmap in
+    (literal, record field and Self forms) without touching the neighbouring
+    field, and a read yields the bitmap's address for membership tests. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TCls = set of Byte;
+      TEsc = record
+        Cls: TCls;
+      end;
+      TNode = class
+      public
+        Tag: Integer;
+        Cls: TCls;
+        procedure SetDigits;
+      end;
+    procedure TNode.SetDigits;
+    begin
+      Cls := [48..57];
+    end;
+    var
+      N: TNode;
+      E: TEsc;
+      I, C: Integer;
+    begin
+      E.Cls := [65, 66, 200];
+      N := TNode.Create();
+      N.Tag := 7;
+      for I := 1 to 3 do
+      begin
+        N.Cls := E.Cls;
+        N.Cls := [1, 2, 3, 255];
+      end;
+      C := 0;
+      for I := 0 to 255 do
+        if I in N.Cls then C := C + I;
+      WriteLn(C, ' ', N.Tag);
+      N.SetDigits();
+      WriteLn(50 in N.Cls, ' ', 65 in N.Cls);
+    end.
+    ''',
+    '261 7' + LE + 'True False' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

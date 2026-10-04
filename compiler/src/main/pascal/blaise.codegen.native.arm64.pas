@@ -1537,6 +1537,8 @@ end;
 
 procedure TArm64Backend.EmitInstanceFieldStoreStacked(AFld: TFieldInfo;
   AValueExpr: TASTExpr);
+var
+  NB: Integer;
 begin
   { like EmitInstanceFieldStore, but the instance pointer is on TOP of the
     stack (pushed by the caller); consumed on exit.  Needed for chained
@@ -1600,6 +1602,24 @@ begin
     Self.Emit(#9'fcvt s0, d0');
     Self.Emit(#9'ldr x9, [sp], #16');   { pop the base }
     Self.Emit(Format(#9'str s0, [x9, #%d]', [AFld.Offset]));
+    Exit;
+  end;
+  if (AFld.TypeDesc is TSetTypeDesc) and
+     TSetTypeDesc(AFld.TypeDesc).IsJumbo() then
+  begin
+    { a JUMBO set field is an inline bitmap and its value evaluates to an
+      ADDRESS: copy the bitmap in.  A literal value materialises its bitmap
+      below sp (EmitJumboSetLiteral's contract), so the parked base sits
+      that many bytes further up, and the caller restores sp afterwards. }
+    NB := JumboSetLiteralBytes(AValueExpr);
+    Self.EmitExprToX0(AValueExpr);                 { source bitmap address }
+    Self.Emit(#9'mov x1, x0');
+    Self.Emit(Format(#9'ldr x0, [sp, #%d]', [NB]));
+    if AFld.Offset <> 0 then
+      EmitAddSubImm('add', 'x0', 'x0', AFld.Offset);
+    EmitIntLiteral('x2', AFld.TypeDesc.RawSize());
+    EmitCallSym('memcpy');
+    EmitAddSubImm('add', 'sp', 'sp', NB + 16);    { literal buffer + base }
     Exit;
   end;
   if AFld.TypeDesc.Kind = tyDouble then
@@ -4758,6 +4778,21 @@ begin
     Blaise strings are 0-based and the value IS the data pointer, so this is the
     same byte load the plain S[I] arm below does — only the base is reached
     through the field. }
+  if (AExpr is TFieldAccessExpr) and
+     (TFieldAccessExpr(AExpr).FieldInfo <> nil) and
+     (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc is TSetTypeDesc) and
+     TSetTypeDesc(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc).IsJumbo() and
+     (TFieldAccessExpr(AExpr).PropRead = nil) and
+     (TFieldAccessExpr(AExpr).PropIndexExpr = nil) and
+     (not TFieldAccessExpr(AExpr).IsConstant) then
+  begin
+    { a JUMBO set field evaluates to its bitmap ADDRESS -- the value shape a
+      jumbo set variable has, so membership, copies and the _Set* helpers
+      need no special case.  EmitRecFieldAddrToX0 resolves every base form
+      (record, class, Self, chained). }
+    EmitRecFieldAddrToX0(TFieldAccessExpr(AExpr));
+    Exit;
+  end;
   if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsCharAccess then
   begin
     if TFieldAccessExpr(AExpr).PropIndexExpr = nil then
