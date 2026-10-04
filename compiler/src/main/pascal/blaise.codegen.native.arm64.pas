@@ -218,6 +218,7 @@ type
     procedure NotYet(const AWhat: string; ANode: TASTNode);
 
     { ---- frame + operands ---- }
+    procedure AddIntfLocal(const AName: string);
     procedure AddLocal(const AName: string; ASize: Integer);
     function  IsLocal(const AName: string): Boolean;
     { Deferred class-release (BUG-048): reserve the PENDREL_SLOTS frame slots,
@@ -546,10 +547,21 @@ type
     procedure EmitInterfaceAssign(AAsgn: TAssignment);
     procedure EmitPropReadCall(AFld: TFieldAccessExpr);
     procedure EmitInterfaceAsCast(AAsgn: TAssignment);
+    { Load an interface-typed value into x0 (obj) / x1 (itab); True when the
+      obj half is an OWNED +1 (a call result), False when it is borrowed. }
+    function  EmitIntfPairToX0X1(AExpr: TASTExpr; AIntfType: TTypeDesc): Boolean;
+    { Store an interface value into the 16-byte (obj, itab) pair at
+      [base + AOff], the base on TOP of the stack (consumed). }
+    procedure EmitIntfStoreStacked(AOff: Integer; AValueExpr: TASTExpr;
+      AIntfType: TTypeDesc);
+    { x0/x1 := the (obj, itab) pair of an interface method-call RECEIVER }
+    procedure EmitIntfRecvPair(const AObjName: string; AObjExpr: TASTExpr;
+      AVarParam: Boolean; AImplicitBase: TFieldInfo; ANode: TASTNode);
     function  IntfItabSym(const AClassName, AIntfName: string): string;
     procedure EmitTypeinfoAddr(const AReg, ATypeName: string);
     procedure EmitIntfDispatch(const AVarName: string; AIdx: Integer;
-      AArgs: TObjectList);
+      AArgs: TObjectList; AObjExpr: TASTExpr = nil; AVarParam: Boolean = False;
+      AImplicitBase: TFieldInfo = nil; const ASret: string = '');
     procedure EmitIntfMetaSections;
     function  FindClassMethodImpl(ATD: TTypeDecl;
       const AName: string): TMethodDecl;
@@ -833,6 +845,16 @@ begin
 end;
 
 { ---- frame + operands --------------------------------------------------- }
+
+procedure TArm64Backend.AddIntfLocal(const AName: string);
+begin
+  { an interface variable's (obj, itab) halves are ONE 16-byte block, obj at
+    the lower address, so the pair has an address of its own: a var/out
+    interface parameter receives it, and the callee reads/writes both halves
+    at [addr] / [addr + 8].  The '_itab' name aliases the upper eightbyte. }
+  AddLocal(AName, 16);
+  FFrame.Add(AName + '_itab', FFrameSize - 8);
+end;
 
 procedure TArm64Backend.AddLocal(const AName: string; ASize: Integer);
 var
@@ -1515,6 +1537,11 @@ begin
   if IsMethodPtrType(AFld.TypeDesc) then
   begin
     EmitFatFieldStoreStacked(AFld, AValueExpr);
+    Exit;
+  end;
+  if AFld.TypeDesc.Kind = tyInterface then
+  begin
+    EmitIntfStoreStacked(AFld.Offset, AValueExpr, AFld.TypeDesc);
     Exit;
   end;
   if ((AFld.TypeDesc.Kind = tyRecord) or (AFld.TypeDesc.Kind = tyStaticArray)) and
@@ -5969,12 +5996,12 @@ begin
   { fat-pointer stores: the obj half co-owns the backing instance (retain
     on store unless the source owns a +1, release the old); the itab half
     is static rodata — never refcounted. }
-  if AAsgn.IsVarParam or (AAsgn.ImplicitSelfField <> nil) then
-    NotYet('interface assignment to this target', AAsgn);
   if AAsgn.IsWeakLhs then
   begin
     { weak interface: the obj half goes through the weak table; the itab
       half is plain data }
+    if AAsgn.IsVarParam or (AAsgn.ImplicitSelfField <> nil) then
+      NotYet('[Weak] interface assignment to this target', AAsgn);
     if ArcExprOwnsRef(AAsgn.Expr) then
       NotYet('owned transient into a [Weak] interface', AAsgn);
     if (AAsgn.Expr.ResolvedType <> nil) and
@@ -5993,109 +6020,49 @@ begin
     end;
     NotYet('[Weak] interface assignment from this expression', AAsgn);
   end;
-  if (AAsgn.Expr.ResolvedType <> nil) and
-     (AAsgn.Expr.ResolvedType.Kind = tyClass) then
-  begin
-    { narrowing a class value: the itab is known statically }
-    ItabSym := IntfItabSym(TRecordTypeDesc(AAsgn.Expr.ResolvedType).Name,
-      AAsgn.ResolvedLhsType.Name);
-    Self.EmitExprToX0(AAsgn.Expr);
-    if not ArcExprOwnsRef(AAsgn.Expr) then
-    begin
-      EmitPushX0();
-      EmitCallSym('_ClassAddRef');
-      EmitPopTo('x0');
-    end;
-    EmitPushX0();
-    EmitLoadSlot('x0', AAsgn.Name);
-    EmitCallSym('_ClassRelease');
-    EmitPopTo('x0');
-    EmitStoreSlot('x0', AAsgn.Name);
-    Self.Emit(Format(#9'adrp x0, %s@PAGE', [ItabSym]));
-    Self.Emit(Format(#9'add x0, x0, %s@PAGEOFF', [ItabSym]));
-    EmitStoreSlot('x0', AAsgn.Name + '_itab');
-    Exit;
-  end;
-  if (AAsgn.Expr is TIdentExpr) and (AAsgn.Expr.ResolvedType <> nil) and
-     (AAsgn.Expr.ResolvedType.Kind = tyInterface) then
-  begin
-    { interface-to-interface copy of both halves }
-    if TIdentExpr(AAsgn.Expr).ParamMode = pmVar then
-      NotYet('var interface parameter', AAsgn);
-    EmitLoadSlot('x0', TIdentExpr(AAsgn.Expr).Name);
-    EmitPushX0();
-    EmitCallSym('_ClassAddRef');
-    EmitLoadSlot('x0', AAsgn.Name);
-    EmitCallSym('_ClassRelease');
-    EmitPopTo('x0');
-    EmitStoreSlot('x0', AAsgn.Name);
-    EmitLoadSlot('x0', TIdentExpr(AAsgn.Expr).Name + '_itab');
-    EmitStoreSlot('x0', AAsgn.Name + '_itab');
-    Exit;
-  end;
-  if AAsgn.Expr is TNilLiteral then
-  begin
-    EmitLoadSlot('x0', AAsgn.Name);
-    EmitCallSym('_ClassRelease');
-    EmitStoreSlot('xzr', AAsgn.Name);
-    EmitStoreSlot('xzr', AAsgn.Name + '_itab');
-    Exit;
-  end;
   if (AAsgn.Expr is TAsExpr) and (AAsgn.Expr.ResolvedType <> nil) and
      (AAsgn.Expr.ResolvedType.Kind = tyInterface) then
   begin
     { I := Obj as IFoo — runtime itab lookup through the impllist chain;
       a nil result is an invalid cast }
+    if AAsgn.IsVarParam or (AAsgn.ImplicitSelfField <> nil) then
+      NotYet('as-cast into this interface target', AAsgn);
     EmitInterfaceAsCast(AAsgn);
     Exit;
   end;
-  if (AAsgn.Expr is TFuncCallExpr) and
-     (TFuncCallExpr(AAsgn.Expr).ResolvedDecl <> nil) then
+  if AAsgn.ImplicitSelfField <> nil then
   begin
-    { interface-returning call: the callee fills the 16-byte __iret
-      scratch through x8; the returned obj is OWNED (+1) — release the
-      old value, store both halves, no caller retain }
-    if TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl).IsExternal then
-      NotYet('external interface-returning call', AAsgn);
-    EmitCall(TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl),
-      TFuncCallExpr(AAsgn.Expr).Name, TFuncCallExpr(AAsgn.Expr).Args,
-      '__iret');
-    EmitLoadSlot('x0', AAsgn.Name);
-    EmitCallSym('_ClassRelease');
-    { load BOTH words from the source before storing either — EmitStoreSlot
-      clobbers x9 for the destination adrp, so the second half must not depend
-      on x9 still pointing at the source temp. }
-    EmitSlotAddr('x9', '__iret');
-    Self.Emit(#9'ldr x0, [x9]');
-    Self.Emit(#9'ldr x1, [x9, #8]');
-    EmitStoreSlot('x0', AAsgn.Name);
-    EmitStoreSlot('x1', AAsgn.Name + '_itab');
+    { FIntf := value inside a method: the pair is a field of Self }
+    EmitInstBase('x0', 'Self', False);
+    EmitPushX0();
+    EmitIntfStoreStacked(TFieldInfo(AAsgn.ImplicitSelfField).Offset,
+      AAsgn.Expr, AAsgn.ResolvedLhsType);
     Exit;
   end;
-  if (AAsgn.Expr is TMethodCallExpr) and
-     (TMethodCallExpr(AAsgn.Expr).ResolvedMethod <> nil) and
-     not TMethodCallExpr(AAsgn.Expr).IsConstructorCall then
+  if AAsgn.IsVarParam then
   begin
-    { class-receiver method returning an interface (IntfVar := Obj.Method()):
-      EmitRecCallDispatch handles the receiver (static / ObjExpr / named-slot /
-      var-param) and virtual dispatch, filling the 16-byte __iret scratch
-      through x8 — the same x8 sret path an interface-returning FUNCTION uses.
-      The returned obj is OWNED (+1), so release the old value and store both
-      halves with no caller retain (as the function-call arm above does).  An
-      INTERFACE-receiver method call (ResolvedMethod = nil, itab dispatch) has
-      no sret support yet and stays an honest hole. }
-    EmitRecCallDispatch(AAsgn.Expr, '__iret');
+    { var/out interface parameter: the slot holds the address of the
+      caller's (obj, itab) pair }
     EmitLoadSlot('x0', AAsgn.Name);
-    EmitCallSym('_ClassRelease');
-    { load BOTH words from the source before storing either (see above) }
-    EmitSlotAddr('x9', '__iret');
-    Self.Emit(#9'ldr x0, [x9]');
-    Self.Emit(#9'ldr x1, [x9, #8]');
-    EmitStoreSlot('x0', AAsgn.Name);
-    EmitStoreSlot('x1', AAsgn.Name + '_itab');
+    EmitPushX0();
+    EmitIntfStoreStacked(0, AAsgn.Expr, AAsgn.ResolvedLhsType);
     Exit;
   end;
-  NotYet('interface assignment from this expression', AAsgn);
+  { a named variable: its two halves are separate slots (frame or global) }
+  if not EmitIntfPairToX0X1(AAsgn.Expr, AAsgn.ResolvedLhsType) then
+  begin
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+    EmitCallSym('_ClassAddRef');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+  end;
+  Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+  EmitLoadSlot('x0', AAsgn.Name);
+  EmitCallSym('_ClassRelease');
+  Self.Emit(#9'ldp x0, x1, [sp], #16');
+  { obj first: a threadvar store parks only its own value register and
+    returns through x0 }
+  EmitStoreSlot('x0', AAsgn.Name);
+  EmitStoreSlot('x1', AAsgn.Name + '_itab');
 end;
 
 procedure TArm64Backend.EmitInterfaceAsCast(AAsgn: TAssignment);
@@ -6124,6 +6091,164 @@ begin
   EmitCallSym('_ClassRelease');
   EmitPopTo('x0');
   EmitStoreSlot('x0', AAsgn.Name);
+end;
+
+function TArm64Backend.EmitIntfPairToX0X1(AExpr: TASTExpr;
+  AIntfType: TTypeDesc): Boolean;
+var
+  FA: TFieldAccessExpr;
+  IE: TIdentExpr;
+  ME: TMethodCallExpr;
+  ItabSym: string;
+begin
+  { One source lowering for every interface consumer (assignment, field
+    store, argument, receiver): x0 = obj, x1 = itab.  Result tells the
+    caller whether the obj half is already an owned +1 (call results) or a
+    borrow it must retain before storing. }
+  Result := False;
+  if AExpr is TNilLiteral then
+  begin
+    Self.Emit(#9'mov x0, xzr');
+    Self.Emit(#9'mov x1, xzr');
+    Result := True;                   { nothing to retain }
+    Exit;
+  end;
+  if (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyClass) then
+  begin
+    { narrowing a class value: the itab is known statically }
+    ItabSym := IntfItabSym(TRecordTypeDesc(AExpr.ResolvedType).Name,
+      AIntfType.Name);
+    Self.EmitExprToX0(AExpr);
+    Result := ArcExprOwnsRef(AExpr);
+    Self.Emit(Format(#9'adrp x1, %s@PAGE', [ItabSym]));
+    Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF', [ItabSym]));
+    Exit;
+  end;
+  if (AExpr.ResolvedType = nil) or (AExpr.ResolvedType.Kind <> tyInterface) then
+    NotYet('interface value from this expression', AExpr);
+  if AExpr is TIdentExpr then
+  begin
+    IE := TIdentExpr(AExpr);
+    if IsCaptured(IE.Name) then
+      NotYet('read of a captured interface variable', AExpr);
+    if (IE.IsImplicitSelf and (IE.ImplicitFieldInfo <> nil)) or
+       (IE.ParamMode = pmVar) then
+    begin
+      { the pair lives in memory: a field of Self, or the caller's pair
+        behind a var parameter }
+      EmitRecIdentAddr('x9', IE);
+      Self.Emit(#9'ldp x0, x1, [x9]');
+      Exit;
+    end;
+    { itab first: a threadvar's TLV thunk returns through x0 }
+    EmitLoadSlot('x1', IE.Name + '_itab');
+    EmitLoadSlot('x0', IE.Name);
+    Exit;
+  end;
+  if AExpr is TFieldAccessExpr then
+  begin
+    FA := TFieldAccessExpr(AExpr);
+    if (FA.FieldInfo = nil) or (FA.PropRead <> nil) or FA.IsMethodCall or
+       FA.IsInterfaceCall or (FA.PropIndexExpr <> nil) or
+       FA.IsClassVarRead or FA.IsStaticPropGet then
+      NotYet('interface value from this field form', AExpr);
+    { an interface FIELD: both halves sit side by side in the instance }
+    EmitRecFieldAddrToX0(FA);
+    Self.Emit(#9'ldp x0, x1, [x0]');
+    Exit;
+  end;
+  if (AExpr is TFuncCallExpr) and
+     (TFuncCallExpr(AExpr).ResolvedDecl <> nil) then
+  begin
+    { interface-returning call: the callee fills the 16-byte __iret
+      scratch through x8; the returned obj is OWNED (+1) }
+    if TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).IsExternal then
+      NotYet('external interface-returning call', AExpr);
+    EmitCall(TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl),
+      TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args, '__iret');
+    EmitSlotAddr('x9', '__iret');
+    Self.Emit(#9'ldp x0, x1, [x9]');
+    Result := True;
+    Exit;
+  end;
+  if AExpr is TMethodCallExpr then
+  begin
+    ME := TMethodCallExpr(AExpr);
+    if (ME.ResolvedClassType <> nil) and
+       (ME.ResolvedClassType.Kind = tyInterface) then
+      { itab dispatch returning an interface: the same x8 sret contract }
+      EmitIntfDispatch(ME.ObjectName,
+        TInterfaceTypeDesc(ME.ResolvedClassType).MethodIndex(ME.Name),
+        ME.Args, ME.ObjExpr, ME.IsVarParam, nil, '__iret')
+    else if (ME.ResolvedMethod <> nil) and not ME.IsConstructorCall and
+            not ME.IsProcFieldCall then
+      { class-receiver method returning an interface: EmitRecCallDispatch
+        handles the receiver forms and virtual dispatch }
+      EmitRecCallDispatch(AExpr, '__iret')
+    else
+      NotYet('interface value from this method-call form', AExpr);
+    EmitSlotAddr('x9', '__iret');
+    Self.Emit(#9'ldp x0, x1, [x9]');
+    Result := True;
+    Exit;
+  end;
+  NotYet('interface value from this expression', AExpr);
+end;
+
+procedure TArm64Backend.EmitIntfStoreStacked(AOff: Integer;
+  AValueExpr: TASTExpr; AIntfType: TTypeDesc);
+begin
+  { [base] is on top of the stack.  Retain the new obj unless the source
+    already owns it, release the old obj, then store both halves; the base
+    is re-read after the release call (it clobbers scratch registers). }
+  if not EmitIntfPairToX0X1(AValueExpr, AIntfType) then
+  begin
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+    EmitCallSym('_ClassAddRef');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+  end;
+  Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [base][obj,itab] }
+  Self.Emit(#9'ldr x9, [sp, #16]');
+  Self.Emit(Format(#9'ldr x0, [x9, #%d]', [AOff]));
+  EmitCallSym('_ClassRelease');
+  Self.Emit(#9'ldr x9, [sp, #16]');
+  Self.Emit(#9'ldp x0, x1, [sp], #16');
+  Self.Emit(Format(#9'str x0, [x9, #%d]', [AOff]));
+  Self.Emit(Format(#9'str x1, [x9, #%d]', [AOff + 8]));
+  Self.Emit(#9'add sp, sp, #16');               { drop the base }
+end;
+
+procedure TArm64Backend.EmitIntfRecvPair(const AObjName: string;
+  AObjExpr: TASTExpr; AVarParam: Boolean; AImplicitBase: TFieldInfo;
+  ANode: TASTNode);
+begin
+  { the receiver of an itab call is BORROWED for the call's duration — an
+    owned transient receiver would need a post-call release }
+  if AObjExpr <> nil then
+  begin
+    if ArcExprOwnsRef(AObjExpr) then
+      NotYet('interface call on an owned transient receiver', ANode);
+    if EmitIntfPairToX0X1(AObjExpr, AObjExpr.ResolvedType) then
+      NotYet('interface call on an owned transient receiver', ANode);
+    Exit;
+  end;
+  if AImplicitBase <> nil then
+  begin
+    { FIntf.Method() inside a method: the pair is a field of Self }
+    EmitInstBase('x9', 'Self', False);
+    if AImplicitBase.Offset <> 0 then
+      EmitAddSubImm('add', 'x9', 'x9', AImplicitBase.Offset);
+    Self.Emit(#9'ldp x0, x1, [x9]');
+    Exit;
+  end;
+  if AVarParam then
+  begin
+    EmitLoadSlot('x9', AObjName);
+    Self.Emit(#9'ldp x0, x1, [x9]');
+    Exit;
+  end;
+  EmitLoadSlot('x1', AObjName + '_itab');   { itab first: see above }
+  EmitLoadSlot('x0', AObjName);
 end;
 
 procedure TArm64Backend.EmitAssignment(AAsgn: TAssignment);
@@ -9458,7 +9583,7 @@ begin
                  (Par.ResolvedType.Kind in [tyDouble, tyString, tyRecord,
                                             tyClass, tyDynArray,
                                             tyPointer, tyPChar,
-                                            tyMetaClass]))) then
+                                            tyMetaClass, tyInterface]))) then
           NotYet('var parameter ''' + Par.ParamName + ''' of this type', ADecl);
         AddLocal(Par.ParamName, 8);
         Continue;
@@ -9469,8 +9594,7 @@ begin
         { fat pointer: two int-class registers (obj, itab).  A BY-VALUE
           interface param is the callee's co-owning copy — retained in the
           prologue, obj half released at exit; const params borrow. }
-        AddLocal(Par.ParamName, 8);
-        AddLocal(Par.ParamName + '_itab', 8);
+        AddIntfLocal(Par.ParamName);
         if not Par.IsConstParam then
           FIntfLocals.Add(Par.ParamName);
         Continue;
@@ -9560,8 +9684,7 @@ begin
       begin
         { fat-pointer result: written to the caller's 16-byte x8 buffer
           at return; the +1 on the obj half transfers to the caller }
-        AddLocal('Result', 8);
-        AddLocal('Result_itab', 8);
+        AddIntfLocal('Result');
         AddLocal('__sret', 8);
       end
       else if not (IsIntFam(ADecl.ResolvedReturnType) or
@@ -9607,6 +9730,8 @@ begin
       else if IsMethodPtrType(VD.ResolvedType) then
         { closure / method-pointer local: a 16-byte fat value (Code, Env). }
         AddLocal(VD.Names.Strings[J], 16)
+      else if VD.ResolvedType.Kind = tyInterface then
+        AddIntfLocal(VD.Names.Strings[J])
       else if (VD.ResolvedType is TSetTypeDesc) and
               TSetTypeDesc(VD.ResolvedType).IsJumbo() then
         { a JUMBO set local holds its whole bitmap.  It used to fall to the
@@ -9630,7 +9755,6 @@ begin
       begin
         { fat pointer: split obj/itab slots; the obj half co-owns the
           backing instance (weak slots hold no ref — not released) }
-        AddLocal(VD.Names.Strings[J] + '_itab', 8);
         if not VD.IsWeak then
           FIntfLocals.Add(VD.Names.Strings[J]);
       end;
@@ -10747,7 +10871,15 @@ begin
           straight through to another var param forwards the address it
           already holds; a field lvalue (CD.Field) passes the field's
           address computed from its owning record/instance. }
-        if Arg is TIdentExpr then
+        if (Arg is TIdentExpr) and (Arg.ResolvedType <> nil) and
+           (Arg.ResolvedType.Kind = tyInterface) and
+           not IsLocal(TIdentExpr(Arg).Name) and
+           (TIdentExpr(Arg).ParamMode <> pmVar) and
+           not TIdentExpr(Arg).IsImplicitSelf then
+          { a global interface's halves are two separate symbols, so the
+            pair has no single address to hand over }
+          NotYet('var argument from a global interface variable', Arg)
+        else if Arg is TIdentExpr then
           { EmitRecIdentAddr handles all three: a var-param forward (slot
             holds the caller's address), an implicit-Self FIELD (Self + field
             offset — the leg-14 case, e.g. LkAddStr(var ..., FDynStrTab)), and
@@ -12151,7 +12283,8 @@ begin
 end;
 
 procedure TArm64Backend.EmitIntfDispatch(const AVarName: string;
-  AIdx: Integer; AArgs: TObjectList);
+  AIdx: Integer; AArgs: TObjectList; AObjExpr: TASTExpr; AVarParam: Boolean;
+  AImplicitBase: TFieldInfo; const ASret: string);
 var
   I: Integer;
   Arg: TASTExpr;
@@ -12167,9 +12300,15 @@ begin
     function-result / concat string here would leak it.  Every itab call the
     self-compile reaches passes a plain named local (borrowed), so that is
     safe today; a transient-string itab arg must add the EmitCall-style parking
-    (arm64 ~7998-8013) when a later leg first needs it. }
+    (arm64 ~7998-8013) when a later leg first needs it.
+    The receiver pair is evaluated FIRST and parked: a field-chain receiver
+    may itself call (a getter), which would clobber argument registers.
+    ASret names a 16-byte frame scratch the callee fills through x8 (an
+    interface- or closure-returning method). }
   if AArgs.Count > 7 then
     NotYet('interface call with more than 7 arguments', nil);
+  EmitIntfRecvPair(AVarName, AObjExpr, AVarParam, AImplicitBase, AObjExpr);
+  Self.Emit(#9'stp x0, x1, [sp, #-16]!');
   for I := 0 to AArgs.Count - 1 do
   begin
     Arg := TASTExpr(AArgs.Items[I]);
@@ -12183,9 +12322,10 @@ begin
   end;
   for I := AArgs.Count - 1 downto 0 do
     EmitPopTo('x' + IntToStr(I + 1));
-  EmitLoadSlot('x0', AVarName);
-  EmitLoadSlot('x9', AVarName + '_itab');
+  Self.Emit(#9'ldp x0, x9, [sp], #16');
   Self.Emit(Format(#9'ldr x9, [x9, #%d]', [AIdx * 8]));
+  if ASret <> '' then
+    EmitSlotAddr('x8', ASret);
   Self.Emit(#9'blr x9');
 end;
 
@@ -12576,22 +12716,33 @@ begin
     end;
     Exit;
   end;
-  if AStmt.IsConstructorCall or AStmt.IsImplicitSelf or
-     ((AStmt.ObjectName = '') and (AStmt.ObjExpr = nil)
-      and not AStmt.IsStaticCall) then
-    NotYet('this method-call form', AStmt);
   if (AStmt.ResolvedClassType <> nil) and
-     (AStmt.ResolvedClassType.Kind = tyInterface) then
+     (AStmt.ResolvedClassType.Kind = tyInterface) and
+     not AStmt.IsConstructorCall and
+     ((AStmt.ObjectName <> '') or (AStmt.ObjExpr <> nil)) then
   begin
-    { itab dispatch on an interface-typed receiver }
-    if AStmt.IsVarParam or (AStmt.ObjExpr <> nil) then
+    { itab dispatch on an interface-typed receiver: a named variable, a var
+      parameter, a field of Self (FIntf.M()), or a receiver expression }
+    if AStmt.IsImplicitSelf and (AStmt.ImplicitBaseInfo = nil) then
       NotYet('interface dispatch on this receiver form', AStmt);
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
        IsAggregateReturn(AStmt.ResolvedReturnTypeDesc) then
-      NotYet('discarded aggregate-returning interface call', AStmt);
+    begin
+      { a discarded interface result still uses the x8 sret contract; the
+        owned obj half is dropped straight away }
+      if AStmt.ResolvedReturnTypeDesc.Kind <> tyInterface then
+        NotYet('discarded aggregate-returning interface call', AStmt);
+      EmitIntfDispatch(AStmt.ObjectName,
+        TInterfaceTypeDesc(AStmt.ResolvedClassType).MethodIndex(AStmt.Name),
+        AStmt.Args, AStmt.ObjExpr, AStmt.IsVarParam, AStmt.ImplicitBaseInfo,
+        '__iret');
+      EmitLoadSlot('x0', '__iret');
+      EmitCallSym('_ClassRelease');
+      Exit;
+    end;
     EmitIntfDispatch(AStmt.ObjectName,
       TInterfaceTypeDesc(AStmt.ResolvedClassType).MethodIndex(AStmt.Name),
-      AStmt.Args);
+      AStmt.Args, AStmt.ObjExpr, AStmt.IsVarParam, AStmt.ImplicitBaseInfo);
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
        (AStmt.ResolvedReturnTypeDesc.Kind = tyClass) then
       EmitCallSym('_ClassRelease');
@@ -12600,6 +12751,10 @@ begin
       EmitCallSym('_StringRelease');
     Exit;
   end;
+  if AStmt.IsConstructorCall or AStmt.IsImplicitSelf or
+     ((AStmt.ObjectName = '') and (AStmt.ObjExpr = nil)
+      and not AStmt.IsStaticCall) then
+    NotYet('this method-call form', AStmt);
   if (TMethodDecl(AStmt.ResolvedMethod) = nil) and
      SameText(AStmt.Name, 'Free') and (AStmt.Args.Count = 0) then
   begin
@@ -12872,14 +13027,12 @@ begin
   if (AExpr.ResolvedClassType <> nil) and
      (AExpr.ResolvedClassType.Kind = tyInterface) then
   begin
-    if AExpr.IsVarParam or (AExpr.ObjExpr <> nil) then
-      NotYet('interface dispatch on this receiver form', AExpr);
     if (AExpr.ResolvedType <> nil) and
        IsAggregateReturn(AExpr.ResolvedType) then
       NotYet('aggregate-returning interface call', AExpr);
     EmitIntfDispatch(AExpr.ObjectName,
       TInterfaceTypeDesc(AExpr.ResolvedClassType).MethodIndex(AExpr.Name),
-      AExpr.Args);
+      AExpr.Args, AExpr.ObjExpr, AExpr.IsVarParam);
     Exit;
   end;
   MD := TMethodDecl(AExpr.ResolvedMethod);

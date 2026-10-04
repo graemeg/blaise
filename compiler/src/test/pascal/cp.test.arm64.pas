@@ -169,6 +169,7 @@ type
       method RETURNS an interface — the x8 sret fat pointer lands in __iret and
       is stored into the var's two slots (release-old, no caller retain). }
     procedure TestInterfaceAssign_FromMethodCall;
+    procedure TestInterfaceAssign_ToVarParamAndField;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -3455,10 +3456,10 @@ begin
   Q := Pos(#9'adrp x9, _g_G@PAGE', Body);
   AssertTrue('destination global store present', Q >= 0);
 
-  { both halves must be loaded from the SOURCE before either store: the itab
-    half reads into x1, not x0-after-a-store }
-  AssertTrue('itab half loaded into a distinct register from the source',
-    Pos(#9'ldr x1, [x9, #8]', Body) >= 0);
+  { both halves must be loaded from the SOURCE before either store: one ldp
+    into x0/x1, not a second load after a store }
+  AssertTrue('both halves loaded from the source in one pair load',
+    Pos(#9'ldp x0, x1, [x9]', Body) >= 0);
 
   { the broken shape — a source load of the second word AFTER a global-store
     adrp clobbered x9 — must be gone: no `ldr x0, [x9, #8]` following the
@@ -4257,6 +4258,63 @@ begin
   end;
 end;
 
+procedure TArm64BackendTests.TestInterfaceAssign_ToVarParamAndField;
+var
+  AsmT: string;
+begin
+  { A var interface parameter and an implicit-Self interface field are both
+    (obj, itab) pairs in memory: the store reads the base back off the stack
+    after releasing the old obj, then writes both eightbytes at [base] and
+    [base + 8].  An interface local's pair is one 16-byte block, so the caller
+    hands over a single address. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IGreeter = interface
+        function Greet: Int64;
+      end;
+      THi = class(TObject, IGreeter)
+      public
+        function Greet: Int64;
+      end;
+      THolder = class
+      public
+        FG: IGreeter;
+        procedure SetIt(AG: IGreeter);
+      end;
+    function THi.Greet: Int64;
+    begin
+      Result := 1;
+    end;
+    procedure THolder.SetIt(AG: IGreeter);
+    begin
+      FG := AG;
+    end;
+    procedure Fill(var G: IGreeter);
+    begin
+      G := THi.Create();
+    end;
+    procedure Run;
+    var
+      L: IGreeter;
+    begin
+      Fill(L);
+    end;
+    begin
+      Run();
+    end.
+    ''');
+  AssertTrue('old obj released before the store',
+    Pos(#9'bl __ClassRelease', AsmT) >= 0);
+  AssertTrue('base re-read from the stack after the release',
+    Pos(#9'ldr x9, [sp, #16]', AsmT) >= 0);
+  AssertTrue('itab half stored at base + 8 (var param)',
+    Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
+  AssertTrue('itab half stored at field offset + 8 (FG at 8)',
+    Pos(#9'str x1, [x9, #16]', AsmT) >= 0);
+end;
+
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;
 var
   AsmT: string;
@@ -4289,12 +4347,11 @@ begin
   { the old interface value is released before the new fat pointer is stored }
   AssertTrue('release old before store', Pos(#9'bl __ClassRelease', AsmT) >= 0);
   { both halves of the returned fat pointer are unpacked from __iret BEFORE
-    either store — EmitStoreSlot clobbers x9 for the destination adrp, so the
-    itab half must load into x1 (a distinct register), not x0 after a store.
+    either store — EmitStoreSlot clobbers x9 for the destination adrp, so both
+    halves come out of __iret in one ldp into x0/x1 before any store.
     See TestInterfaceReturnToGlobal_ItabHalfFromSourceNotDest. }
-  AssertTrue('obj half loaded from source', Pos(#9'ldr x0, [x9]', AsmT) >= 0);
-  AssertTrue('itab half loaded into a distinct register',
-    Pos(#9'ldr x1, [x9, #8]', AsmT) >= 0);
+  AssertTrue('both halves loaded from source in one pair load',
+    Pos(#9'ldp x0, x1, [x9]', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestFloatPropRead_And_StringGlobalInit;

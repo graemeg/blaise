@@ -404,6 +404,7 @@ type
     procedure TestRun_Native_RecReturnVirtualOverride;
     { M8b — interface-field := function-returning-interface (sret into field). }
     procedure TestRun_Native_IntfFieldFromFunc;
+    procedure TestRun_Native_IntfVarParamAndChainedReceiver;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6077,6 +6078,86 @@ procedure TE2ENativeTests.TestRun_Native_IntfFieldFromFunc;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcIntfFieldFromFunc, '10' + LE + '20' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_IntfVarParamAndChainedReceiver;
+begin
+  { var/out interface parameter (the callee stores both halves through the
+    caller's pair address, releasing the old obj), a field-chain receiver
+    (O.H.FG.Greet), a discarded interface-returning itab call, and an
+    interface field filled through a var argument.  The destructor lines pin
+    the ARC: each instance dies exactly once, when its last ref goes. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      IGreeter = interface
+        function Greet(N: Integer): Integer;
+        function Again: IGreeter;
+      end;
+      TGreeter = class(IGreeter)
+      public
+        FBase: Integer;
+        constructor Create(ABase: Integer);
+        destructor Destroy; override;
+        function Greet(N: Integer): Integer;
+        function Again: IGreeter;
+      end;
+      THolder = class
+      public
+        FG: IGreeter;
+      end;
+      TOuter = class
+      public
+        H: THolder;
+      end;
+    constructor TGreeter.Create(ABase: Integer);
+    begin
+      FBase := ABase;
+    end;
+    destructor TGreeter.Destroy;
+    begin
+      WriteLn('destroyed ', FBase);
+      inherited Destroy();
+    end;
+    function TGreeter.Greet(N: Integer): Integer;
+    begin
+      Result := FBase + N;
+    end;
+    function TGreeter.Again: IGreeter;
+    begin
+      Result := Self;
+    end;
+    procedure Fill(var G: IGreeter; B: Integer);
+    begin
+      G := TGreeter.Create(B);
+    end;
+    procedure Run;
+    var
+      L: IGreeter;
+      O: TOuter;
+    begin
+      Fill(L, 7);
+      WriteLn(L.Greet(1));
+      Fill(L, 8);
+      WriteLn(L.Greet(1));
+      O := TOuter.Create();
+      O.H := THolder.Create();
+      Fill(O.H.FG, 30);
+      WriteLn(O.H.FG.Greet(3));
+      O.H.FG.Again();
+      O.H.FG := L;
+      WriteLn(O.H.FG.Greet(4));
+      L := nil;
+      WriteLn('end run');
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''',
+    '8' + LE + 'destroyed 7' + LE + '9' + LE + '33' + LE + 'destroyed 30' + LE +
+    '12' + LE + 'end run' + LE + 'destroyed 8' + LE + 'done' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;
