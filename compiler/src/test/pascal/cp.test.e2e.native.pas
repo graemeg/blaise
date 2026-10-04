@@ -428,6 +428,7 @@ type
     procedure TestRun_Native_RegisterRecordResult_SurvivesArgRelease;
     procedure TestRun_Native_Format_BareVariadicArgs;
     procedure TestRun_Native_ImplicitSelfClassIntermediate_ArrayRead;
+    procedure TestRun_Native_VarParamClass_ArrayFieldElemWrite;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -7275,6 +7276,40 @@ begin
     end.
     ''',
     '42 9' + LE + '42' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_VarParamClass_ArrayFieldElemWrite;
+begin
+  { F.Arr[I] := V and F.Box.Arr[I] := V where F is a var CLASS parameter and
+    the base a chained class field -- element writes the arm64 backend used
+    to refuse. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TBox = class
+        Arr: array[0..2] of Integer;
+      end;
+      TFoo = class
+        Arr: array of Integer;
+        Box: TBox;
+      end;
+    procedure Poke(var F: TFoo);
+    begin
+      F.Arr[0] := 5;
+      F.Box.Arr[2] := 7;
+    end;
+    var
+      F: TFoo;
+    begin
+      F := TFoo.Create();
+      F.Box := TBox.Create();
+      SetLength(F.Arr, 1);
+      Poke(F);
+      WriteLn(F.Arr[0], ' ', F.Box.Arr[2]);
+    end.
+    ''',
+    '5 7' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

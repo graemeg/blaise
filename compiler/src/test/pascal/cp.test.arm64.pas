@@ -195,7 +195,8 @@ type
     procedure TestCallResultRegs_SavedAcrossTransientRelease;
     procedure TestFormat_BareVariadicArgs_BuildBlock;
     procedure TestImplicitSelfClassIntermediate_SingleDeref;
-    procedure TestVarParamClassArrayFieldElemWriteStillNotYet;
+    procedure TestArrayFieldElemWrite_ChainedClassBase;
+    procedure TestArrayFieldElemWrite_InterfaceElement;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -418,6 +419,7 @@ type
     procedure TestDynArrayParam_ConstBorrowsByValueRetains;
     procedure TestVarParamRecordArrayFieldElemWrite;
     procedure TestRecordArrayElementRead;
+    procedure TestVarParamClassArrayFieldElemWrite_DerefsSlot;
     { BUG-20260724 arm64 pass-borrowed-string-by-value over-release:
       a borrowed aliasable string source (global / plain local) handed to a
       by-value string param.  A GLOBAL must be pinned (AddRef before the call,
@@ -5100,6 +5102,64 @@ begin
     Pos(#9'ldr x0, [x0, #8]'#10#9'ldr x0, [x0]', Body) < 0);
 end;
 
+procedure TArm64BackendTests.TestArrayFieldElemWrite_ChainedClassBase;
+var
+  AsmT: string;
+begin
+  { O.Inner.Arr[2] := 5 -- an array-field element write through a chained
+    class base (was NotYet): the base expression yields the instance, then
+    the field offset and the scaled index are added }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TInner = class
+      public
+        Arr: array[0..3] of Int64;
+      end;
+      TOuter = class
+      public
+        Inner: TInner;
+      end;
+    var
+      O: TOuter;
+    begin
+      O := TOuter.Create();
+      O.Inner := TInner.Create();
+      O.Inner.Arr[2] := 5;
+    end.
+    ''');
+  AssertTrue('element stored', Pos(#9'str x0, [x9]', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestArrayFieldElemWrite_InterfaceElement;
+var
+  AsmT: string;
+begin
+  { R.Items[I] := Intf for an interface array field (was NotYet 'field array
+    element of this type'): release the old obj, store both halves }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IG = interface
+        function Greet: Int64;
+      end;
+      TBox = class
+      public
+        Items: array[0..1] of IG;
+      end;
+    var
+      B: TBox;
+    begin
+      B := TBox.Create();
+      B.Items[1] := nil;
+    end.
+    ''');
+  AssertTrue('old obj released', Pos(#9'bl __ClassRelease', AsmT) >= 0);
+  AssertTrue('both halves stored', Pos(#9'stp x0, x1, [x9]', AsmT) >= 0);
+end;
+
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;
 var
   AsmT: string;
@@ -8904,38 +8964,26 @@ begin
     Pos(#9'bl _memcpy', AsmT) >= 0);
 end;
 
-procedure TArm64BackendTests.TestVarParamClassArrayFieldElemWriteStillNotYet;
+procedure TArm64BackendTests.TestVarParamClassArrayFieldElemWrite_DerefsSlot;
 var
-  Raised: Boolean;
-  Msg: string;
+  AsmT, Body: string;
 begin
-  { An element write into an array field of a var-param CLASS receiver needs an
-    extra deref (the slot holds &instance) that the record element-write path
-    does not add.  Leg 28 lifts the guard only for a RECORD base — a var-param
-    class base must STAY NotYet, not silently mis-address (one indirection
-    short). }
-  Raised := False;
-  Msg := '';
-  try
-    GenAsm(
-      '''
-      program P;
-      type TFoo = class Arr: array of Integer; end;
-      procedure Poke(var F: TFoo);
-      begin F.Arr[0] := 5 end;
-      var F: TFoo;
-      begin F := TFoo.Create; SetLength(F.Arr, 1); Poke(F); WriteLn(F.Arr[0]) end.
-      ''');
-  except
-    on E: ENativeCodeGenError do
-    begin
-      Raised := True;
-      Msg := E.Message;
-    end;
-  end;
-  AssertTrue('var-param class array-field element write stays NotYet', Raised);
-  AssertTrue('message names the array-field element write hole',
-    Pos('array-field element write on this base form', Msg) >= 0);
+  { An element write into an array field of a var-param CLASS receiver: the
+    slot holds &instance, so the base is the slot value dereferenced ONCE
+    (to the instance), then the field offset, then -- a dyn array -- the data
+    pointer.  This used to stay NotYet rather than mis-address it. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type TFoo = class Arr: array of Integer; end;
+    procedure Poke(var F: TFoo);
+    begin F.Arr[0] := 5 end;
+    var F: TFoo;
+    begin F := TFoo.Create(); SetLength(F.Arr, 1); Poke(F); WriteLn(F.Arr[0]) end.
+    ''');
+  Body := Copy(AsmT, Pos('_Poke:', AsmT), Length(AsmT));
+  AssertTrue('slot -> instance -> field -> data pointer',
+    Pos(#9'ldr x0, [x0]'#10#9'add x0, x0, #8'#10#9'ldr x0, [x0]', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestStrArg_GlobalByValue_Pinned;

@@ -2985,6 +2985,7 @@ var
   Elem: TTypeDesc;
   IsDyn: Boolean;
   Low: Integer;
+  NB: Integer;
 begin
   { Rec.Field[Index] := value.  Handled leaf base shapes: a plain
     local/global record, a by-value record param, and (leg 28) a TRUE var/out
@@ -3002,8 +3003,7 @@ begin
         write needs an extra deref (the slot holds &instance) that the
         IsClassAccess address arm below does not add; keep it honest until a
         var-param class base is wired end-to-end. }
-  if (AStmt.ObjExpr <> nil) or AStmt.IsImplicitSelf or
-     (AStmt.IsVarParam and AStmt.IsClassAccess) then
+  if AStmt.IsImplicitSelf and (AStmt.ObjExpr <> nil) then
     NotYet('array-field element write on this base form', AStmt);
   if AStmt.FieldInfo = nil then
     NotYet('unresolved field element write', AStmt);
@@ -3115,8 +3115,43 @@ begin
     Self.Emit(#9'add sp, sp, #16');                    { drop srcaddr }
     Exit;
   end;
+  if Elem.Kind = tyInterface then
+  begin
+    { an interface element: value first (retained unless owned), then the
+      fresh element address, then release the old obj and store both halves }
+    if not EmitIntfPairToX0X1(AStmt.Expr, Elem) then
+    begin
+      Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+      EmitCallSym('_ClassAddRef');
+      Self.Emit(#9'ldp x0, x1, [sp], #16');
+    end;
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');          { [pair] }
+    EmitFieldElemAddrToX0(AStmt, Elem, IsDyn, Low);
+    EmitPushX0();                                     { [pair][elemaddr] }
+    Self.Emit(#9'ldr x0, [x0]');                      { old obj }
+    EmitCallSym('_ClassRelease');
+    EmitPopTo('x9');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+    Self.Emit(#9'stp x0, x1, [x9]');
+    Exit;
+  end;
+  if IsJumboSetType(Elem) then
+  begin
+    { a jumbo-set element: the value is a bitmap ADDRESS (a literal's lives
+      below sp until we give it back); copy it into the fresh element }
+    NB := JumboSetLiteralBytes(AStmt.Expr);
+    Self.EmitExprToX0(AStmt.Expr);
+    EmitPushX0();                                     { [lit][src] }
+    EmitFieldElemAddrToX0(AStmt, Elem, IsDyn, Low);
+    EmitPopTo('x1');
+    EmitIntLiteral('x2', Elem.RawSize());
+    EmitCallSym('memcpy');
+    if NB > 0 then
+      EmitAddSubImm('add', 'sp', 'sp', NB);
+    Exit;
+  end;
   if not IsIntFam(Elem) and (Elem.Kind <> tyPointer) and
-     (Elem.Kind <> tyPChar) then
+     (Elem.Kind <> tyPChar) and not IsSmallSetType(Elem) then
     NotYet('field array element of this type', AStmt);
   { integer-family element: value first, then address, then store by width }
   Self.EmitExprToX0(AStmt.Expr);
@@ -3146,8 +3181,33 @@ begin
   else if ALow < 0 then
     EmitAddSubImm('add', 'x0', 'x0', -ALow);   { subtracting a negative low }
   EmitPushX0();                                { [index] }
-  if AStmt.IsClassAccess then
-    EmitLoadSlot('x0', AStmt.RecordName)       { class inst: slot holds pointer }
+  if AStmt.ObjExpr <> nil then
+  begin
+    { a chained base (A.B.Arr[I], P^.Arr[I], R.Items[J].Arr[I]): a class-typed
+      base yields the instance pointer, a record-typed one its address }
+    if (AStmt.ObjExpr.ResolvedType <> nil) and
+       (AStmt.ObjExpr.ResolvedType.Kind = tyClass) then
+    begin
+      if ArcExprOwnsRef(AStmt.ObjExpr) then
+        NotYet('array-field element write on an owned transient base', AStmt);
+      Self.EmitExprToX0(AStmt.ObjExpr);
+    end
+    else
+      EmitRecAddrToX0(AStmt.ObjExpr);
+  end
+  else if AStmt.IsImplicitSelf then
+  begin
+    { a field of Self's intermediate (FInner.Arr[I] inside a method): step
+      from Self across it -- deref a class field, advance past a record }
+    EmitLoadSlot('x0', 'Self');
+    EmitImplicitBaseStep('x0', AStmt.ImplicitBaseInfo);
+  end
+  else if AStmt.IsClassAccess then
+  begin
+    EmitLoadSlot('x0', AStmt.RecordName);      { class inst: slot holds pointer }
+    if AStmt.IsVarParam then
+      Self.Emit(#9'ldr x0, [x0]');             { var param: slot holds &inst }
+  end
   else
     { record base: a TRUE var/out param derefs the slot to the caller's record;
       a by-value/local/global record addresses the slot inline (leg 28). }
@@ -4835,12 +4895,15 @@ begin
     design (leg 32) and keep their existing paths. }
   if (AExpr is TFieldAccessExpr) and
      TFieldAccessExpr(AExpr).IsArrayAccess and
-     (TFieldAccessExpr(AExpr).ResolvedType <> nil) and
-     not (TFieldAccessExpr(AExpr).ResolvedType.Kind in
-            [tyRecord, tyStaticArray]) then
+     (TFieldAccessExpr(AExpr).ResolvedType <> nil) then
   begin
     EmitFieldElemAddr(TFieldAccessExpr(AExpr));
-    EmitElemLoad(TFieldAccessExpr(AExpr).ResolvedType);
+    { a record, static-array or jumbo-set element evaluates to its ADDRESS
+      (leg 32; a jumbo set's value IS its bitmap address) }
+    if not ((TFieldAccessExpr(AExpr).ResolvedType.Kind in
+               [tyRecord, tyStaticArray]) or
+            IsJumboSetType(TFieldAccessExpr(AExpr).ResolvedType)) then
+      EmitElemLoad(TFieldAccessExpr(AExpr).ResolvedType);
     Exit;
   end;
   if (AExpr is TStringSubscriptExpr) and
@@ -6395,6 +6458,13 @@ begin
   if AExpr is TFieldAccessExpr then
   begin
     FA := TFieldAccessExpr(AExpr);
+    if FA.IsArrayAccess and (FA.FieldInfo <> nil) then
+    begin
+      { an interface ELEMENT of an array field (Obj.Items[I], A.B.Arr[I]) }
+      EmitFieldElemAddr(FA);
+      Self.Emit(#9'ldp x0, x1, [x0]');
+      Exit;
+    end;
     if (FA.FieldInfo = nil) or (FA.PropRead <> nil) or FA.IsMethodCall or
        FA.IsInterfaceCall or (FA.PropIndexExpr <> nil) or
        FA.IsClassVarRead or FA.IsStaticPropGet then
@@ -7075,19 +7145,14 @@ begin
         field offset).  _DynArraySetLength frees the old block and returns a
         fresh rc=1 block, so the new pointer is just stored back — no ARC.
 
-        A var-param record field is now addressed correctly by
-        EmitRecFieldAddrToX0 (its var-param arm derefs the slot — leg 27).
-        These other lvalue shapes still stay NotYet rather than miscompile:
-        - an implicit-Self record-field base (SetLength(FRec.Arr, N)): the
-          helper adds only FieldInfo.Offset, never ImplicitBaseInfo.Offset,
-          so it would address the wrong field of Self.
-        - a subscripted array field (SetLength(R.Matrix[I], N)): the helper
-          ignores PropIndexExpr and would resize the OUTER array. }
-      if (TFieldAccessExpr(TASTExpr(ACall.Args.Items[0])).IsImplicitSelf and
-          (TFieldAccessExpr(TASTExpr(ACall.Args.Items[0]))
-             .ImplicitBaseInfo <> nil)) or
-         (TFieldAccessExpr(TASTExpr(ACall.Args.Items[0]))
-            .PropIndexExpr <> nil) then
+        EmitRecFieldAddrToX0 resolves every lvalue shape here: a var-param
+        record field (its var-param arm derefs the slot -- leg 27), an
+        implicit-Self intermediate (SetLength(FRec.Arr, N): it steps across
+        ImplicitBaseInfo), and a subscripted array field
+        (SetLength(R.Matrix[I], N): IsArrayAccess routes to EmitFieldElemAddr,
+        so the ELEMENT slot is resized, not the outer array). }
+      if (TFieldAccessExpr(TASTExpr(ACall.Args.Items[0])).PropIndexExpr <> nil)
+         and not TFieldAccessExpr(TASTExpr(ACall.Args.Items[0])).IsArrayAccess then
         NotYet('SetLength on this field-lvalue form', ACall);
       Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
       EmitPushX0();                                       { [N] }
@@ -9815,7 +9880,12 @@ begin
   if AFAE.FieldInfo = nil then
     NotYet('address of an array-field element with no field info', AFAE);
   { --- base into x0 --- }
-  if AFAE.Base <> nil then
+  if (AFAE.Base <> nil) and (AFAE.Base.ResolvedType <> nil) and
+     (AFAE.Base.ResolvedType.Kind = tyRecord) then
+    { a RECORD-valued chained base (c.N.A[I] -- a record field of a class,
+      O.Ora[X].Arr[C] -- a record element): its ADDRESS }
+    EmitRecAddrToX0(AFAE.Base)
+  else if AFAE.Base <> nil then
     Self.EmitExprToX0(AFAE.Base)                 { chained receiver }
   else if AFAE.IsImplicitSelf then
   begin
