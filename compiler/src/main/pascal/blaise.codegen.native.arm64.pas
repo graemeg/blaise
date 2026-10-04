@@ -11478,8 +11478,16 @@ begin
   if FSymTable <> nil then
   begin
     D := FSymTable.FindType(AOwnerType);
-    if D <> nil then
-      Pfx := ClassPrefixOwner(D.OwningUnit);
+    { The prefix must be spelled exactly as the method DEFINITION's name is:
+      that comes from the semantic pass's MangleUnitPrefix, which turns a
+      DOTTED unit's dots into underscores ('async.fibers' -> 'async_fibers_').
+      ClassPrefixOwner keeps the dot (right for typeinfo / class-name
+      symbols, wrong here), so the getter reference dangled -- the Mach-O
+      linker bound it to libSystem and dyld aborted at launch
+      (TTimerHeap.Count in the fiber scheduler).  ClassPrefixOwner still
+      decides WHETHER a prefix applies (program / System / RTL units: none). }
+    if (D <> nil) and (ClassPrefixOwner(D.OwningUnit) <> '') then
+      Pfx := MangleUnitPrefix(D.OwningUnit);
   end;
   Result := DarwinSym(Pfx + CodegenMangle(AOwnerType) + '_' +
     CodegenMangle(AMethod));
