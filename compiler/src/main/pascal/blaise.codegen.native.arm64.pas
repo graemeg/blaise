@@ -7630,7 +7630,7 @@ begin
      (AStmt.IsVarParam and
       ((AStmt.ResolvedArrayType = nil) or
        not (AStmt.ResolvedArrayType.Kind in [tyString, tyPChar,
-                                             tyDynArray]))) or
+                                             tyDynArray, tyOpenArray]))) or
      (AStmt.IsImplicitSelf and ((AStmt.ImplicitFieldInfo = nil) or
        (AStmt.ResolvedArrayType = nil) or
        not (AStmt.ResolvedArrayType.Kind in [tyDynArray, tyStaticArray]))) then
@@ -7699,10 +7699,13 @@ begin
     Exit;
   end;
   if (AStmt.ResolvedArrayType = nil) or
-     not (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyDynArray]) then
+     not (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyDynArray,
+                                           tyOpenArray]) then
     NotYet('subscript write on this base type', AStmt);
   if AStmt.ResolvedArrayType.Kind = tyDynArray then
     Elem := TDynArrayTypeDesc(AStmt.ResolvedArrayType).ElementType
+  else if AStmt.ResolvedArrayType.Kind = tyOpenArray then
+    Elem := TOpenArrayTypeDesc(AStmt.ResolvedArrayType).ElementType
   else
     Elem := TStaticArrayTypeDesc(AStmt.ResolvedArrayType).ElementType;
   Self.EmitExprToX0(AStmt.IndexExpr);
@@ -7733,6 +7736,19 @@ begin
         — the base is that ADDRESS, no deref (leg 16) }
       EmitAddSubImm('add', 'x0', 'x0',
         TFieldInfo(AStmt.ImplicitFieldInfo).Offset);
+  end
+  else if AStmt.ResolvedArrayType.Kind = tyOpenArray then
+  begin
+    { an open-array parameter -- var, const or value alike -- arrives as the
+      caller's element-0 pointer (the (data, high) pair ABI, never an extra
+      level of indirection), so the slot value IS the base }
+    if IsCaptured(AStmt.ArrayName) then
+    begin
+      EmitLoadSlot('x0', '_cap_' + AStmt.ArrayName);
+      Self.Emit(#9'ldr x0, [x0]');
+    end
+    else
+      EmitLoadSlot('x0', AStmt.ArrayName);
   end
   else if IsCaptured(AStmt.ArrayName) then
   begin
@@ -9145,15 +9161,19 @@ begin
       holds the caller's address, one more deref); the data pointer is the
       value stored there }
     EmitLoadSlot('x0', '_cap_' + TIdentExpr(ASub.StrExpr).Name);
-    if TIdentExpr(ASub.StrExpr).ParamMode = pmVar then
+    if (TIdentExpr(ASub.StrExpr).ParamMode = pmVar) and
+       (ASub.StrExpr.ResolvedType.Kind <> tyOpenArray) then
       Self.Emit(#9'ldr x0, [x0]');
     Self.Emit(#9'ldr x0, [x0]');
   end
   else
   begin
     EmitLoadSlot('x0', TIdentExpr(ASub.StrExpr).Name);
-    { a var dyn-array parameter's slot holds the caller variable's address }
-    if TIdentExpr(ASub.StrExpr).ParamMode = pmVar then
+    { a var dyn-array parameter's slot holds the caller variable's address;
+      a var OPEN array is still the plain (data, high) pair -- its slot
+      already holds the element-0 pointer }
+    if (TIdentExpr(ASub.StrExpr).ParamMode = pmVar) and
+       (ASub.StrExpr.ResolvedType.Kind <> tyOpenArray) then
       Self.Emit(#9'ldr x0, [x0]');
   end;
   EmitPopTo('x1');

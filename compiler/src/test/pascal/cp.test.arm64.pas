@@ -170,6 +170,7 @@ type
       is stored into the var's two slots (release-old, no caller retain). }
     procedure TestInterfaceAssign_FromMethodCall;
     procedure TestInterfaceAssign_ToVarParamAndField;
+    procedure TestVarOpenArray_ElemWrite_NoExtraDeref;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4313,6 +4314,32 @@ begin
     Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
   AssertTrue('itab half stored at field offset + 8 (FG at 8)',
     Pos(#9'str x1, [x9, #16]', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestVarOpenArray_ElemWrite_NoExtraDeref;
+var
+  AsmT: string;
+begin
+  { A[I] := V on a var open-array parameter lowers (it was NotYet), and the
+    base is the slot VALUE: no `ldr x0, [x0]` between loading the slot and
+    scaling the index, which would treat the first element bytes as a
+    pointer. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    procedure Fill(var A: array of Byte);
+    begin
+      A[1] := 7;
+    end;
+    var
+      M: array[0..3] of Byte;
+    begin
+      Fill(M);
+    end.
+    ''');
+  AssertTrue('byte element stored', Pos(#9'strb w0, [x9]', AsmT) >= 0);
+  AssertTrue('no extra dereference of the open-array base',
+    Pos(#9'ldr x0, [x0]', AsmT) < 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

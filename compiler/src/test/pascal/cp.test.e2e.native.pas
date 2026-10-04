@@ -405,6 +405,7 @@ type
     { M8b — interface-field := function-returning-interface (sret into field). }
     procedure TestRun_Native_IntfFieldFromFunc;
     procedure TestRun_Native_IntfVarParamAndChainedReceiver;
+    procedure TestRun_Native_VarOpenArray_ElemReadWrite;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6158,6 +6159,37 @@ begin
     ''',
     '8' + LE + 'destroyed 7' + LE + '9' + LE + '33' + LE + 'destroyed 30' + LE +
     '12' + LE + 'end run' + LE + 'destroyed 8' + LE + 'done' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_VarOpenArray_ElemReadWrite;
+begin
+  { a var open-array parameter is the same (data, high) pair as a value one
+    -- the slot holds the element-0 pointer, NOT the caller variable's
+    address.  Writing A[I] used to stop as NotYet on arm64, and reading
+    A[I] dereferenced the pointer once too often (silently wrong bytes). }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    procedure Fill(var A: array of Byte);
+    var
+      I: Integer;
+    begin
+      for I := 0 to High(A) do
+        A[I] := I * 3;
+      WriteLn(A[2]);
+    end;
+    procedure Show(const A: array of Byte);
+    begin
+      WriteLn(A[0], ' ', A[1], ' ', A[2], ' ', A[3]);
+    end;
+    var
+      M: array[0..3] of Byte;
+    begin
+      Fill(M);
+      Show(M);
+    end.
+    ''',
+    '6' + LE + '0 3 6 9' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;
