@@ -3333,6 +3333,42 @@ begin
       EmitCallSym('_BlaiseGetMem');
       Exit;
     end;
+    if SameText(TFuncCallExpr(AExpr).Name, 'DoubleToStr') and
+       (TFuncCallExpr(AExpr).Args.Count = 1) then
+    begin
+      { float -> shortest round-trip decimal string.  EmitExprToD0OrConvert
+        leaves any numeric argument (Single, Double or integer) as a Double
+        in d0, which is _DoubleToStr's ABI.  Mirrors x86-64. }
+      Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      EmitCallSym('_DoubleToStr');
+      Exit;
+    end;
+    if SameText(TFuncCallExpr(AExpr).Name, 'SingleToStr') and
+       (TFuncCallExpr(AExpr).Args.Count = 1) then
+    begin
+      { _SingleToStr takes a genuine 32-bit Single in s0: narrow the Double
+        the argument evaluates to (cf. GH #200 -- reading the wrong width
+        printed garbage digits) }
+      Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      Self.Emit(#9'fcvt s0, d0');
+      EmitCallSym('_SingleToStr');
+      Exit;
+    end;
+    if SameText(TFuncCallExpr(AExpr).Name, 'Abs') and
+       (TFuncCallExpr(AExpr).Args.Count = 1) and
+       not IsFloatExpr(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])) then
+    begin
+      { integer Abs: negate when negative.  An Integer is held sign-extended
+        in x0, so the 64-bit test and negate are exact for every width. }
+      Lit := NewLabel('absok');
+      Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      Self.Emit(#9'cmp x0, #0');
+      Self.Emit(Format(#9'b.ge %s', [Lit]));
+      Self.Emit(#9'mvn x0, x0');
+      Self.Emit(#9'add x0, x0, #1');
+      Self.Emit(Lit + ':');
+      Exit;
+    end;
     if SameText(TFuncCallExpr(AExpr).Name, 'IntToStr') then
     begin
       { integer argument — no transient to dispose }
