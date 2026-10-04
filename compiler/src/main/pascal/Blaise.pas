@@ -672,7 +672,13 @@ begin
     DeleteFile(WBifFile);
   except
     on E: Exception do
-      Self.Error := 'Worker exception: ' + Exception(E).Message;
+      { name the unit: a backend diagnostic carries only line/col, and with
+        units compiled in parallel nothing else says which file it was }
+      if Self.WorkUnit <> nil then
+        Self.Error := 'Worker exception in ' + Self.WorkUnit.SourceFile +
+          ': ' + Exception(E).Message
+      else
+        Self.Error := 'Worker exception: ' + Exception(E).Message;
   end;
 end;
 
