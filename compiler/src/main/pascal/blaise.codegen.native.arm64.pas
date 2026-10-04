@@ -5908,13 +5908,23 @@ begin
       Self.Emit(#9'movz x2, #1');
     if TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode = pmVar then
     begin
+      { The var target may be a 1/2/4-byte field or slot: load and store at
+        the DECLARED width (an 8-byte str clobbered the bytes after a Byte or
+        Integer target), exactly as the field arms above do. }
       EmitLoadSlot('x9', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
-      Self.Emit(#9'ldr x0, [x9]');
+      Self.Emit(#9'mov x0, x9');
+      EmitElemLoad(TASTExpr(ACall.Args.Items[0]).ResolvedType);
       if SameText(ACall.Name, 'Inc') then
         Self.Emit(#9'add x0, x0, x2')
       else
         Self.Emit(#9'sub x0, x0, x2');
-      Self.Emit(#9'str x0, [x9]');
+      case TASTExpr(ACall.Args.Items[0]).ResolvedType.RawSize() of
+        1: Self.Emit(#9'strb w0, [x9]');
+        2: Self.Emit(#9'strh w0, [x9]');
+        4: Self.Emit(#9'str w0, [x9]');
+      else
+        Self.Emit(#9'str x0, [x9]');
+      end;
       Exit;
     end;
     EmitLoadSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
@@ -5922,6 +5932,10 @@ begin
       Self.Emit(#9'add x0, x0, x2')
     else
       Self.Emit(#9'sub x0, x0, x2');
+    { The slot is 8 bytes and read 64-bit wide, so the result must be wrapped
+      to the variable's own width and signedness: Dec on a Byte holding 0
+      left -1 in the slot instead of 255. }
+    EmitNarrowX0(TASTExpr(ACall.Args.Items[0]).ResolvedType);
     EmitStoreSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
     Exit;
   end;
@@ -7893,10 +7907,16 @@ begin
   case AElem.RawSize() of
     1: Self.Emit(#9'ldrb w0, [x0]');
     2:
-      if AElem.Kind = tyWord then
-        Self.Emit(#9'ldrh w0, [x0]')
-      else
-        NotYet('signed 2-byte element load', nil);
+    begin
+      Self.Emit(#9'ldrh w0, [x0]');
+      { no ldrsh in the internal assembler: sign-extend a SmallInt with the
+        shift pair, as EmitNormaliseNarrowSlot does }
+      if AElem.Kind <> tyWord then
+      begin
+        Self.Emit(#9'lsl x0, x0, #48');
+        Self.Emit(#9'asr x0, x0, #48');
+      end;
+    end;
     4:
       if AElem.Kind = tyUInt32 then
         Self.Emit(#9'ldr w0, [x0]')

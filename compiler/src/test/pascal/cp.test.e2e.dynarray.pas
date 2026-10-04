@@ -84,6 +84,7 @@ type
       packed, so the native direct-ident path's 32-bit RMW carried into the
       neighbouring global (BUG-20260723-incdec-narrow-global-rmw). }
     procedure TestRun_IncDec_NarrowGlobal;
+    procedure TestRun_IncDec_NarrowVarParam_StoresDeclaredWidth;
     { Inc/Dec on a PROMOTED narrow LOCAL — QBE kept the local as a bare w SSA
       temp and never masked, so Inc of a Byte 255 read back 256 instead of 0
       (BUG-20260723-incdec-promoted-narrow-local). }
@@ -609,6 +610,35 @@ const
 begin
   if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
   AssertRunsOnAll(Src, '1 0 2' + LE + '10 1 20' + LE + '-2' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_IncDec_NarrowVarParam_StoresDeclaredWidth;
+const
+  { Inc/Dec through a var parameter must load and store at the target's
+    declared width.  arm64 used a 64-bit ldr/str there, so Dec on a Byte
+    record field wrote 8 bytes and wiped its neighbours, and the value never
+    wrapped (0 - 1 left 64-bit -1). }
+  Src = '''
+    program Prg;
+    type
+      TRec = record
+        A: Byte; B: Byte; C: Word; D: SmallInt; E: Integer; F: Integer;
+      end;
+    procedure DecB(var X: Byte); begin Dec(X) end;
+    procedure IncW(var X: Word); begin Inc(X, 3) end;
+    procedure DecS(var X: SmallInt); begin Dec(X, 2) end;
+    procedure IncI(var X: Integer); begin Inc(X) end;
+    var R: TRec;
+    begin
+      R.A := 0; R.B := 7; R.C := 65534; R.D := -32767; R.E := 2147483647;
+      R.F := 99;
+      DecB(R.A); IncW(R.C); DecS(R.D); IncI(R.E);
+      WriteLn(R.A, ' ', R.B, ' ', R.C, ' ', R.D, ' ', R.E, ' ', R.F)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Fail('<toolchain-missing>'); Exit end;
+  AssertRunsOnAll(Src, '255 7 1 32767 -2147483648 99' + LE, 0);
 end;
 
 procedure TE2EDynArrayTests.TestRun_IncDec_PromotedNarrowLocal;
