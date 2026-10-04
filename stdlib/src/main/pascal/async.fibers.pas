@@ -294,7 +294,11 @@ uses
   {$IFDEF FREEBSD}
   async.reactor.kqueue;
   {$ELSE}
+  {$IFDEF DARWIN}
+  async.reactor.kqueue;
+  {$ELSE}
   async.reactor.epoll;
+  {$ENDIF}
   {$ENDIF}
 
 { Portable libc bindings — same names on Linux and FreeBSD. }

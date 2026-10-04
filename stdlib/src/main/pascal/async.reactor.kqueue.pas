@@ -9,7 +9,7 @@
 unit async.reactor.kqueue;
 
 // L2 of the fiber runtime (docs/async-networking-design.adoc, [#reactor]):
-// the FreeBSD readiness adapter.  TKqueueReactor uses kevent(2) with
+// the FreeBSD and macOS readiness adapter.  TKqueueReactor uses kevent(2) with
 // EVFILT_READ/EVFILT_WRITE and EV_CLEAR for edge-triggered semantics — the
 // kqueue analogue of TEpollReactor's EPOLLET posture: the fd stays registered
 // across readiness and L3 drains it to EAGAIN before parking again.  Wake is
@@ -23,10 +23,13 @@ unit async.reactor.kqueue;
 // one is ignored).  An fd ready for both may deliver two entries with the
 // same token — the scheduler's resume path is idempotent.
 //
-// struct kevent is pinned to FreeBSD 12+ amd64 (64 bytes, with ext[4]):
-// ident@0, filter@8 (i16), flags@10 (u16), fflags@12 (u32), data@16 (i64),
-// udata@24 (ptr), ext@32 (4×u64).  Bindings are libc calls (kqueue/kevent),
-// the same posture as Net.Sockets binding socket/recv.
+// struct kevent: ident@0, filter@8 (i16), flags@10 (u16), fflags@12 (u32),
+// data@16 (i64), udata@24 (ptr) on both systems.  FreeBSD 12+ appends ext[4]
+// (64 bytes in all); Darwin's 64-bit struct kevent ends at udata (32 bytes).
+// EVFILT_USER is -11 on FreeBSD but -10 on Darwin; every other constant used
+// here is identical (verified against the macOS SDK <sys/event.h>).
+// Bindings are libc calls (kqueue/kevent), the same posture as Net.Sockets
+// binding socket/recv.
 //
 // This unit is selected by async.reactor's single target-driven seam; its
 // Linux sibling is async.reactor.epoll.  Both export the same CreateOsReactor
@@ -38,11 +41,12 @@ uses
   SysUtils, async.reactor;
 
 type
-  { FreeBSD kqueue adapter (EV_CLEAR edge semantics, EVFILT_USER wake). }
+  { FreeBSD / macOS kqueue adapter (EV_CLEAR edge semantics, EVFILT_USER
+    wake). }
   TKqueueReactor = class(TReactor)
   private
     FKq: Integer;          { the kqueue instance }
-    FEventBuf: Pointer;    { array of struct kevent (64 bytes each) }
+    FEventBuf: Pointer;    { array of struct kevent (KEVENT_SIZE bytes each) }
     FEventCap: Integer;    { capacity of FEventBuf in events }
     FCount: Integer;       { fds registered by callers (excludes the wake event) }
     procedure EnsureBuf(ACap: Integer);
@@ -67,12 +71,16 @@ function CreateOsReactor: TReactor;
 implementation
 
 const
-  { kevent filters (FreeBSD).  Held as their unsigned 16-bit encodings because
+  { kevent filters.  Held as their unsigned 16-bit encodings because
     filter+flags are packed into one 32-bit store/load (filter is a signed
     short at byte 8, flags a u16 at byte 10). }
   FILT_READ_U16  = $FFFF;   { EVFILT_READ  = -1 }
   FILT_WRITE_U16 = $FFFE;   { EVFILT_WRITE = -2 }
-  FILT_USER_U16  = $FFF5;   { EVFILT_USER  = -11 }
+{$IFDEF DARWIN}
+  FILT_USER_U16  = $FFF6;   { EVFILT_USER  = -10 on Darwin }
+{$ELSE}
+  FILT_USER_U16  = $FFF5;   { EVFILT_USER  = -11 on FreeBSD }
+{$ENDIF}
 
   EV_ADD     = $0001;
   EV_DELETE  = $0002;
@@ -82,7 +90,11 @@ const
 
   NOTE_TRIGGER = $01000000;
 
+{$IFDEF DARWIN}
+  KEVENT_SIZE    = 32;      { Darwin 64-bit struct kevent (ends at udata) }
+{$ELSE}
   KEVENT_SIZE    = 64;      { FreeBSD 12+ struct kevent (with ext[4]) }
+{$ENDIF}
   DEFAULT_EVENTS = 64;
 
 type
