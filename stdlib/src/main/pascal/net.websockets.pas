@@ -86,8 +86,24 @@ const
   kernel CSPRNG.  flags=0 reads from the same pool as /dev/urandom.  Used to
   pick a per-frame masking key.  PORTING BOUNDARY: getrandom(2) is Linux/
   FreeBSD; on other targets dispatch a per-platform CSPRNG here. }
+{$IFDEF DARWIN}
+{ macOS has no getrandom(2); getentropy(3) draws from the same kernel CSPRNG
+  for up to 256 bytes per call (every caller here asks for 16 or fewer).
+  Same contract as getrandom: the byte count on success, -1 on failure. }
+function c_getentropy(ABuf: Pointer; ALen: Int64): Integer;
+  external name 'getentropy';
+
+function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Integer): Int64;
+begin
+  if c_getentropy(ABuf, ALen) = 0 then
+    Result := ALen
+  else
+    Result := -1;
+end;
+{$ELSE}
 function c_getrandom(ABuf: Pointer; ALen: Int64; AFlags: Integer): Int64;
   external name 'getrandom';
+{$ENDIF}
 
 { A monotonically-increasing counter mixed into the masking key so that even if
   getrandom ever short-reads (it should not for 4 bytes), successive frames on a
