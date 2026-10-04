@@ -12757,7 +12757,8 @@ begin
           and static arrays of them (per-thread ARC teardown is its own
           problem, so managed kinds stay NotYet) }
         if not (IsIntFam(VD.ResolvedType) or
-                (VD.ResolvedType.Kind in [tyDouble, tyPointer, tyPChar]) or
+                (VD.ResolvedType.Kind in [tyDouble, tyPointer, tyPChar,
+                                          tyClass]) or
                 ((VD.ResolvedType.Kind = tyStaticArray) and
                  not AggHasManaged(VD.ResolvedType))) then
           NotYet('threadvar of this type', VD);
@@ -13398,7 +13399,8 @@ begin
         { unmanaged scalar kinds and static arrays of them — per-thread
           ARC teardown is its own problem, so managed kinds stay NotYet }
         if not (IsIntFam(VD.ResolvedType) or
-                (VD.ResolvedType.Kind in [tyDouble, tyPointer, tyPChar]) or
+                (VD.ResolvedType.Kind in [tyDouble, tyPointer, tyPChar,
+                                          tyClass]) or
                 ((VD.ResolvedType.Kind = tyStaticArray) and
                  not AggHasManaged(VD.ResolvedType))) then
           NotYet('threadvar of this type', VD);

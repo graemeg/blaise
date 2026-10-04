@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_ClassThreadVar_PerThreadAndBalanced;
     procedure TestRun_Thread_BasicExecute;
     procedure TestRun_Thread_WaitForBlocksUntilDone;
     procedure TestRun_Thread_Terminate_Flag;
@@ -40,6 +41,41 @@ type
   end;
 
 implementation
+
+procedure TE2EThreadingTests.TestRun_ClassThreadVar_PerThreadAndBalanced;
+const
+  { A CLASS-typed threadvar (the scheduler's GTLWorker shape): each thread
+    sees its own instance, and the ARC stores into the TLS slot balance --
+    arm64 rejected the declaration ("threadvar of this type"). }
+  Src = '''
+    program tv;
+    uses SysUtils, Classes;
+    type
+      TTag = class Name: string; constructor Create(const N: string); end;
+      TW = class(TThread) procedure Execute; override; end;
+    constructor TTag.Create(const N: string); begin Name := N; end;
+    threadvar
+      GTag: TTag;
+    var Seen: string;
+    procedure TW.Execute;
+    begin
+      GTag := TTag.Create('worker');
+      Seen := GTag.Name;
+      GTag := nil;
+    end;
+    var T: TW;
+    begin
+      GTag := TTag.Create('main');
+      T := TW.Create(False); T.WaitFor();
+      WriteLn(GTag.Name, ' ', Seen);
+      GTag := nil;
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRTLRunsOnAll(Src, 'main worker' + LineEnding, 0);
+  AssertLeakFreeOnAll(Src, 'main worker');
+end;
 
 procedure TE2EThreadingTests.SetUp;
 begin
