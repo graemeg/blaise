@@ -191,9 +191,20 @@ function  libc_getcwd(Buf: PChar; Size: Int64): PChar;                       ext
   three POSIX targets (glibc >= 2.2.5, FreeBSD, macOS); the freestanding
   syscall leaves define the same symbol, so this single binding serves the
   libc and --static paths alike.  Returns bytes written into Buf, 0 at end of
-  directory, negative on error. }
+  directory, negative on error.
+
+  Darwin is the exception: its plain getdirentries is the LEGACY 32-bit-inode
+  call (d_reclen @4, d_name @8), while the Darwin layout unit reads the
+  64-bit-inode dirent (d_reclen @16, d_name @21) -- so every name lost its
+  first character.  __getdirentries64 (libsystem_kernel, same arguments)
+  returns the layout the unit expects. }
+{$IFDEF DARWIN}
+function  libc_getdirentries(Fd: Integer; Buf: Pointer; NBytes: Int64;
+                             Basep: Pointer): Int64;                          external name '__getdirentries64';
+{$ELSE}
 function  libc_getdirentries(Fd: Integer; Buf: Pointer; NBytes: Int64;
                              Basep: Pointer): Int64;                          external name 'getdirentries';
+{$ENDIF}
 function  libc_chdir(Path: PChar): Integer;                                  external name 'chdir';
 function  libc_getenv(Name: PChar): PChar;                                   external name 'getenv';
 function  libc_mkstemp(Template: PChar): Integer;                            external name 'mkstemp';

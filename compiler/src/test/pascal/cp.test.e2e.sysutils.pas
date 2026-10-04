@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_ListDir_ReturnsWholeNames;
     procedure TestRun_ParamStr_PrintsArg;
     procedure TestRun_ParamCount_WithArgs;
     procedure TestRun_ReadWriteFile_RoundTrip;
@@ -262,6 +263,35 @@ const
           WriteLn(IntToStr(Code))
         end.
         ''';
+
+procedure TE2ESysUtilsTests.TestRun_ListDir_ReturnsWholeNames;
+var
+  Dir, Src: string;
+begin
+  { ListDir must return each entry's WHOLE name.  On macOS the RTL bound the
+    legacy getdirentries, whose 32-bit-inode dirent puts the name at offset
+    8, while the Darwin layout reads the 64-bit-inode layout (name at 21):
+    'alpha.txt' came back as 'lpha.txt'.  The entries are sorted (TStringList
+    sorts case-insensitively) so the
+    expectation does not depend on directory order. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  Dir := FScratch + '/listdir_probe';
+  ForceDirectories(Dir);
+  WriteFile(Dir + '/alpha.txt', 'a');
+  WriteFile(Dir + '/Beta.pas', 'b');
+  Src :=
+    'program P;' + LineEnding +
+    'uses SysUtils, Classes;' + LineEnding +
+    'var L: TStringList;' + LineEnding +
+    'begin' + LineEnding +
+    '  L := TStringList.Create();' + LineEnding +
+    '  L.Text := ListDir(''' + Dir + ''');' + LineEnding +
+    '  L.Sorted := True;' + LineEnding +
+    '  WriteLn(L.Count, '' '', L[0], '' '', L[1]);' + LineEnding +
+    '  L.Free()' + LineEnding +
+    'end.';
+  AssertRunsOnAll(Src, '2 alpha.txt Beta.pas' + LineEnding, 0);
+end;
 
 procedure TE2ESysUtilsTests.TestRun_ParamStr_PrintsArg;
 var Output: string; RCode: Integer;
