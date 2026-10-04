@@ -429,6 +429,7 @@ type
     procedure TestRun_Native_Format_BareVariadicArgs;
     procedure TestRun_Native_ImplicitSelfClassIntermediate_ArrayRead;
     procedure TestRun_Native_VarParamClass_ArrayFieldElemWrite;
+    procedure TestRun_Native_ClassArgToInterfaceParam;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -7310,6 +7311,55 @@ begin
     end.
     ''',
     '5 7' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_ClassArgToInterfaceParam;
+begin
+  { a CLASS value passed to an INTERFACE parameter is narrowed at the call:
+    obj + itab in two registers.  arm64 chose the argument arm by the
+    ARGUMENT's type and passed only the instance pointer, so the callee's
+    itab half was whatever the next register held -- a crash at the first
+    call through it, or silently wrong dispatch. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      IC = interface
+        function Get: Integer;
+      end;
+      TC = class(IC)
+        FV: Integer;
+        function Get: Integer;
+      end;
+      THold = class
+        FC: IC;
+        procedure Bind(C: IC);
+      end;
+    function TC.Get: Integer;
+    begin
+      Result := FV;
+    end;
+    procedure THold.Bind(C: IC);
+    begin
+      FC := C;
+    end;
+    function Use(C: IC; K: Integer): Integer;
+    begin
+      Result := C.Get() + K;
+    end;
+    var
+      H: THold;
+      T: TC;
+    begin
+      T := TC.Create();
+      T.FV := 40;
+      WriteLn(Use(T, 2));
+      H := THold.Create();
+      H.Bind(TC.Create());
+      WriteLn(H.FC.Get());
+    end.
+    ''',
+    '42' + LE + '0' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

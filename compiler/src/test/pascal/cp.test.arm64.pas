@@ -197,6 +197,7 @@ type
     procedure TestImplicitSelfClassIntermediate_SingleDeref;
     procedure TestArrayFieldElemWrite_ChainedClassBase;
     procedure TestArrayFieldElemWrite_InterfaceElement;
+    procedure TestClassArgToInterfaceParam_PassesItab;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -5158,6 +5159,43 @@ begin
     ''');
   AssertTrue('old obj released', Pos(#9'bl __ClassRelease', AsmT) >= 0);
   AssertTrue('both halves stored', Pos(#9'stp x0, x1, [x9]', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestClassArgToInterfaceParam_PassesItab;
+var
+  AsmT, Body: string;
+begin
+  { Use(T) with T a class and the parameter an interface: the call passes
+    the instance AND the statically-known itab (two registers) }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IC = interface
+        function Get: Int64;
+      end;
+      TC = class(IC)
+        function Get: Int64;
+      end;
+    function TC.Get: Int64;
+    begin
+      Result := 1;
+    end;
+    function Use(C: IC): Int64;
+    begin
+      Result := C.Get();
+    end;
+    var
+      T: TC;
+    begin
+      T := TC.Create();
+      WriteLn(Use(T));
+    end.
+    ''');
+  Body := Copy(AsmT, Pos('_main:', AsmT), Length(AsmT));
+  Body := Copy(Body, 0, Pos(#9'bl _Use', Body));
+  AssertTrue('itab address materialised for the argument',
+    Pos('adrp x1, _itab_TC_IC@PAGE', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

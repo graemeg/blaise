@@ -584,6 +584,8 @@ type
     function  IntfItabSym(const AClassName, AIntfName: string): string;
     procedure EmitTypeinfoAddr(const AReg, ATypeName: string);
     procedure EmitVarArgAddrToX0(Arg: TASTExpr);
+    function  IsIntfArg(ADecl: TMethodDecl; AIndex: Integer;
+      AArg: TASTExpr): Boolean;
     procedure EmitIntfDispatch(const AVarName: string; AIntf: TInterfaceTypeDesc;
       AIdx: Integer;
       AArgs: TObjectList; AObjExpr: TASTExpr = nil; AVarParam: Boolean = False;
@@ -11400,8 +11402,7 @@ begin
       end;
       Continue;
     end;
-    if (Arg.ResolvedType <> nil) and
-       (Arg.ResolvedType.Kind = tyInterface) then
+    if IsIntfArg(ADecl, I, Arg) then
     begin
       if NInt >= 7 then Off := AlignTo(Off, 8) + 16
       else NInt := NInt + 2;
@@ -11919,8 +11920,7 @@ begin
           end;
         end;
       end
-      else if (Arg.ResolvedType <> nil) and
-              (Arg.ResolvedType.Kind = tyInterface) then
+      else if IsIntfArg(ADecl, I, Arg) then
       begin
         { fat pointer: obj + itab in two consecutive int registers.
           The callee makes its own co-owning copy (by-value retains in
@@ -13110,6 +13110,25 @@ begin
         Self.Emit(Format(#9'.quad %s', [DarwinSym(CodegenMangle(E.ImplName))]));
     end;
   end;
+end;
+
+function TArm64Backend.IsIntfArg(ADecl: TMethodDecl; AIndex: Integer;
+  AArg: TASTExpr): Boolean;
+begin
+  { an argument travels as an (obj, itab) pair when its value is an
+    interface OR the by-value parameter it binds is one: a CLASS value
+    passed to an interface parameter (H.Bind(TC.Create())) is narrowed at
+    the call -- passing just the instance pointer left the callee's itab
+    half as whatever the next register held }
+  Result := (AArg.ResolvedType <> nil) and
+            (AArg.ResolvedType.Kind = tyInterface);
+  if (not Result) and (AIndex < ADecl.Params.Count) and
+     not TMethodParam(ADecl.Params.Items[AIndex]).IsVarParam and
+     (TMethodParam(ADecl.Params.Items[AIndex]).ResolvedType <> nil) and
+     (TMethodParam(ADecl.Params.Items[AIndex]).ResolvedType.Kind = tyInterface) and
+     (AArg.ResolvedType <> nil) and
+     (AArg.ResolvedType.Kind in [tyClass, tyPointer]) then
+    Result := True;
 end;
 
 procedure TArm64Backend.EmitVarArgAddrToX0(Arg: TASTExpr);
