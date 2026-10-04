@@ -7142,11 +7142,13 @@ begin
     ''');
   { Inner spills the leading capture pointer arg into _cap_n (first store of
     x0 to a frame slot) and reads the captured var by derefing that pointer:
-    load the __cap_ slot into x0, then ldr x0, [x0]. }
+    load the __cap_ slot into x0, then load n at its DECLARED width -- an
+    Integer is ldrsw, so the same read also works for a packed 4-byte closure
+    env field (a 64-bit ldr there dragged the next field into the value). }
   AssertTrue('Inner spills the leading capture pointer to its __cap_ slot',
     Pos(#9'stur x0, [x29, #-8]', AsmT) >= 0);
   AssertTrue('Inner reads the captured var by derefing the capture pointer',
-    Pos(#9'ldur x0, [x29, #-8]' + LF + #9'ldr x0, [x0]', AsmT) >= 0);
+    Pos(#9'ldur x0, [x29, #-8]' + LF + #9'ldrsw x0, [x0]', AsmT) >= 0);
   { the write-back stores through the reloaded capture pointer (x9) }
   AssertTrue('Inner writes the captured var back through the capture pointer',
     Pos(#9'str x0, [x9]', AsmT) >= 0);

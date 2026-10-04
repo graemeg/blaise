@@ -162,6 +162,12 @@ type
     FPendingRelCount: Integer;   { live statement-scoped deferred class
                                    releases (BUG-048/BUG-049) — also the next
                                    free _pendrel_N slot index }
+    FCurEnvCaptured: TStringList; { borrowed: the current routine's
+                                   EnvCaptured -- names living in a PACKED env
+                                   field rather than an 8-byte frame slot }
+    FEnvCaps: TStringList;       { owned: CapturedVars + EnvCaptured merged for
+                                   a routine with a closure env (FCapturedVars
+                                   points here while it is emitted) }
     FCapturedVars: TStringList;  { names captured from an enclosing routine
                                    while emitting a nested routine (leg 17).
                                    Each captured var V has a hidden leading
@@ -247,6 +253,10 @@ type
     procedure EmitAnonValueToSlot(AME: TAnonMethodExpr);
     procedure EmitAnonValueInto(AME: TAnonMethodExpr; const ASlot: string);
     procedure EmitFatPtrAssign(AAsgn: TAssignment);
+    procedure EmitEnvPrologue(ADecl: TMethodDecl);
+    function  IsEnvCaptured(const AName: string): Boolean;
+    procedure EmitCapturedLoad(AIdent: TIdentExpr);
+    procedure EmitEnvCleanupFn(AEnv: TRecordTypeDesc);
     { Invoke a closure/method-pointer fat value whose ADDRESS is in AAddrReg:
       load Code, pass Env as the hidden first arg (x0), the visible args in
       x1.., blr.  Result in x0/d0 per the callee's return type. }
@@ -677,10 +687,12 @@ begin
   FLabelN      := 0;
   FForN        := 0;
   FCapturedVars := nil;   { borrowed ref to ADecl.CapturedVars; not owned }
+  FEnvCaps := TStringList.Create();
 end;
 
 destructor TArm64Backend.Destroy;
 begin
+  FEnvCaps.Free();
   FGlobalSize.Free();
   FRecGlobals.Free();
   FRecLocals.Free();
@@ -731,6 +743,38 @@ end;
 function TArm64Backend.IsCaptured(const AName: string): Boolean;
 begin
   Result := (FCapturedVars <> nil) and (FCapturedVars.IndexOf(AName) >= 0);
+end;
+
+{ True when AName is captured into a closure env record.  Unlike a
+  nested-routine capture -- whose '_cap_' points at an 8-byte frame slot --
+  an env field is packed at its declared width, so a store into it must be
+  width-exact (an 8-byte store into a 4-byte Integer field overwrote the
+  next field). }
+function TArm64Backend.IsEnvCaptured(const AName: string): Boolean;
+begin
+  Result := (FCurEnvCaptured <> nil) and
+            (FCurEnvCaptured.IndexOf(AName) >= 0);
+end;
+
+procedure TArm64Backend.EmitCapturedLoad(AIdent: TIdentExpr);
+var
+  T: TTypeDesc;
+begin
+  { '_cap_<Name>' holds &<Name>; a captured var-param's storage holds the
+    caller's address, so it takes one more deref to reach the value.  The
+    value itself is loaded at its DECLARED width: an env field is packed, so
+    a 64-bit load of a 4-byte Integer dragged the neighbouring field into
+    the upper half (A + K returned 10*2^32 + 115).  For an 8-byte frame slot
+    the width-exact load reads the same canonical low bytes. }
+  EmitLoadSlot('x0', '_cap_' + AIdent.Name);
+  if AIdent.ParamMode = pmVar then
+    Self.Emit(#9'ldr x0, [x0]');
+  T := AIdent.ResolvedType;
+  if (T <> nil) and (T.RawSize() < 8) and (T.RawSize() <> 3) and
+     (IsIntFam(T) or (T.Kind in [tyBoolean, tyEnum, tySingle])) then
+    EmitElemLoad(T)
+  else
+    Self.Emit(#9'ldr x0, [x0]');
 end;
 
 procedure TArm64Backend.NotYet(const AWhat: string; ANode: TASTNode);
@@ -1663,6 +1707,117 @@ begin
     Exit;
   end;
   NotYet('closure / method-pointer assignment from this expression', AAsgn);
+end;
+
+procedure TArm64Backend.EmitEnvPrologue(ADecl: TMethodDecl);
+var
+  Env: TRecordTypeDesc;
+  I: Integer;
+  F: TFieldInfo;
+  Name: string;
+  P: TMethodParam;
+begin
+  { Anonymous-method capture: the enclosing frame heap-allocates the env
+    (_ClassAlloc zeroes it, so promoted locals start zero-initialised) and
+    takes its own strong reference; a thunk receives the env through its
+    hidden '__env' first parameter and BORROWS it.  Either way each
+    '_cap_<Name>' slot gets the address of its env field, so every
+    IsCaptured access path redirects unchanged.  Mirrors x86-64
+    EmitEnvPrologue. }
+  Env := TRecordTypeDesc(ADecl.EnvType);
+  if Env = nil then
+    NotYet('closure env without an env record', ADecl);
+  if ADecl.IsAnonThunk then
+    EmitLoadSlot('x0', '__env')
+  else
+  begin
+    EmitIntLiteral('x0', Env.TotalSize());
+    Self.Emit(Format(#9'adrp x1, %s@PAGE',
+      [FieldCleanupSym(CodegenMangle(Env.Name))]));
+    Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF',
+      [FieldCleanupSym(CodegenMangle(Env.Name))]));
+    EmitCallSym('_ClassAlloc');
+    EmitStoreSlot('x0', '__envp');
+    EmitCallSym('_ClassAddRef');
+    EmitLoadSlot('x0', '__envp');
+  end;
+  for I := 0 to ADecl.EnvCaptured.Count - 1 do
+  begin
+    Name := ADecl.EnvCaptured.Strings[I];
+    F := Env.FindField(Name);
+    if F = nil then
+      NotYet('captured name without an env field', ADecl);
+    EmitAddSubImm('add', 'x1', 'x0', F.Offset);
+    EmitStoreSlot('x1', '_cap_' + Name);
+  end;
+  if ADecl.IsAnonThunk then
+  begin
+    { thunk from a method body: materialise the real Self slot from the env
+      field (Self is never reassigned -- snapshot = by-ref) }
+    if ADecl.EnvCaptured.IndexOf('Self') >= 0 then
+    begin
+      EmitLoadSlot('x9', '_cap_Self');
+      Self.Emit(#9'ldr x0, [x9]');
+      EmitStoreSlot('x0', 'Self');
+    end;
+    Exit;
+  end;
+  { enclosing METHOD frame: snapshot Self into its env field, with the env's
+    own retain (the env cleanup releases it) }
+  if ADecl.EnvCaptured.IndexOf('Self') >= 0 then
+  begin
+    if Env.FindField('Self').IsWeak then
+      NotYet('[Weak Self] closure capture', ADecl);
+    EmitLoadSlot('x0', 'Self');
+    EmitLoadSlot('x9', '_cap_Self');
+    Self.Emit(#9'str x0, [x9]');
+    EmitCallSym('_ClassAddRef');
+  end;
+  { captured VALUE parameters: copy the spilled param into its env field;
+    a managed value takes the env's own reference }
+  for I := 0 to ADecl.Params.Count - 1 do
+  begin
+    P := TMethodParam(ADecl.Params.Items[I]);
+    if ADecl.EnvCaptured.IndexOf(P.ParamName) < 0 then Continue;
+    F := Env.FindField(P.ParamName);
+    if P.IsVarParam or P.IsOpenArray or
+       (F.TypeDesc.Kind in [tyRecord, tyStaticArray, tyInterface, tySingle,
+                            tyProcedural]) then
+      NotYet('closure capture of a parameter of this type', ADecl);
+    EmitLoadSlot('x0', P.ParamName);
+    EmitLoadSlot('x9', '_cap_' + P.ParamName);
+    EmitStoreByWidth('x0', 'x9', F.TypeDesc);
+    case F.TypeDesc.Kind of
+      tyString:   EmitCallSym('_StringAddRef');
+      tyClass:    if not F.IsWeak then EmitCallSym('_ClassAddRef');
+      tyDynArray: EmitCallSym('_DynArrayAddRef');
+    end;
+  end;
+end;
+
+procedure TArm64Backend.EmitEnvCleanupFn(AEnv: TRecordTypeDesc);
+var
+  Sym: string;
+begin
+  { The env record's field-cleanup routine, handed to _ClassAlloc: releases
+    the managed captured values when the last closure (or the frame) drops
+    the env.  Same shape as a class's _FieldCleanup.  Weak, because the
+    record name is only unit-unique. }
+  Sym := FieldCleanupSym(CodegenMangle(AEnv.Name));
+  Self.Emit('');
+  Self.Emit('.text');
+  Self.Emit('.balign 4');
+  EmitWeakDef(Sym);
+  Self.Emit(Sym + ':');
+  Self.Emit(#9'stp x29, x30, [sp, #-16]!');
+  Self.Emit(#9'mov x29, sp');
+  Self.Emit(#9'str x19, [sp, #-16]!');
+  Self.Emit(#9'mov x19, x0');
+  Self.EmitRecordFieldReleases(AEnv, 'x19');
+  Self.Emit(#9'ldr x19, [sp], #16');
+  Self.Emit(#9'mov sp, x29');
+  Self.Emit(#9'ldp x29, x30, [sp], #16');
+  Self.Emit(#9'ret');
 end;
 
 procedure TArm64Backend.GuardNoOpenArrayParam(AProcType: TProceduralTypeDesc;
@@ -2636,10 +2791,7 @@ begin
         once for the value.  A captured var-param's outer storage itself
         holds the caller's address, so a var-param capture needs a second
         deref — matching the direct-var path below. }
-      EmitLoadSlot('x0', '_cap_' + TIdentExpr(AExpr).Name);
-      Self.Emit(#9'ldr x0, [x0]');
-      if TIdentExpr(AExpr).ParamMode = pmVar then
-        Self.Emit(#9'ldr x0, [x0]');
+      EmitCapturedLoad(TIdentExpr(AExpr));
       Exit;
     end;
     EmitLoadSlot('x0', TIdentExpr(AExpr).Name);
@@ -5588,8 +5740,9 @@ begin
     if AAsgn.IsVarParam then
       Self.Emit(#9'ldr x9, [x9]');
     EmitPopTo('x0');
-    if AAsgn.IsVarParam then
-      { through to the CALLER's storage — store its exact width }
+    if AAsgn.IsVarParam or IsEnvCaptured(AAsgn.Name) then
+      { through to the CALLER's storage, or into a packed env field —
+        store its exact width }
       EmitStoreByWidth('x0', 'x9', AAsgn.ResolvedLhsType)
     else
       { '_cap_' points at our own 8-byte frame slot, which is read back
@@ -5982,6 +6135,31 @@ begin
     end
     else
       Self.Emit(#9'movz x2, #1');
+    if IsCaptured(TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name) then
+    begin
+      { captured variable: the promoted local's own slot is dead -- adjust
+        the storage '_cap_' points at (env field or outer frame slot) }
+      Self.Emit(#9'str x2, [sp, #-16]!');
+      EmitCapturedLoad(TIdentExpr(TASTExpr(ACall.Args.Items[0])));
+      Self.Emit(#9'ldr x2, [sp], #16');
+      if SameText(ACall.Name, 'Inc') then
+        Self.Emit(#9'add x0, x0, x2')
+      else
+        Self.Emit(#9'sub x0, x0, x2');
+      EmitLoadSlot('x9', '_cap_' + TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
+      if TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode = pmVar then
+        Self.Emit(#9'ldr x9, [x9]');
+      if IsEnvCaptured(TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name) or
+         (TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode = pmVar) then
+        EmitStoreByWidth('x0', 'x9', TASTExpr(ACall.Args.Items[0]).ResolvedType)
+      else
+      begin
+        { an outer 8-byte frame slot is read 64-bit wide: wrap, store full }
+        EmitNarrowX0(TASTExpr(ACall.Args.Items[0]).ResolvedType);
+        Self.Emit(#9'str x0, [x9]');
+      end;
+      Exit;
+    end;
     if TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode = pmVar then
     begin
       { The var target may be a 1/2/4-byte field or slot: load and store at
@@ -8275,6 +8453,22 @@ begin
     end;
     if (ADecl.OwnerTypeName <> '') and not ADecl.IsStatic then
       AddLocal('Self', 8);
+    { Anonymous-method capture (Phase 2/3): the env base slot plus one
+      '_cap_<Name>' pointer slot per name promoted into the env record --
+      EmitEnvPrologue fills them.  The promoted locals keep their ordinary,
+      now dead, slots (zero-init and the scope-exit release see nil there);
+      every real access redirects through IsCaptured.  A thunk lifted from a
+      method gets a REAL Self slot, filled from the env.  Mirrors x86-64. }
+    if ADecl.EnvCaptured <> nil then
+    begin
+      AddLocal('__envp', 8);
+      for I := 0 to ADecl.EnvCaptured.Count - 1 do
+        if not IsLocal('_cap_' + ADecl.EnvCaptured.Strings[I]) then
+          AddLocal('_cap_' + ADecl.EnvCaptured.Strings[I], 8);
+      if ADecl.IsAnonThunk and (ADecl.EnvCaptured.IndexOf('Self') >= 0) and
+         not IsLocal('Self') then
+        AddLocal('Self', 8);
+    end;
     for I := 0 to ADecl.Params.Count - 1 do
     begin
       Par := TMethodParam(ADecl.Params.Items[I]);
@@ -8551,6 +8745,19 @@ begin
     end;
   end;
   FCapturedVars := ADecl.CapturedVars;
+  FCurEnvCaptured := ADecl.EnvCaptured;
+  if (ADecl.BlockEnvTypes <> nil) or (ADecl.BlockEnvCaptured <> nil) then
+    NotYet('closure capture of a block-scoped variable', ADecl);
+  if ADecl.EnvCaptured <> nil then
+  begin
+    { the routine's own nested-routine captures plus its env captures: both
+      redirect through '_cap_<Name>' }
+    FEnvCaps.Clear();
+    if ADecl.CapturedVars <> nil then
+      FEnvCaps.AddStrings(ADecl.CapturedVars);
+    FEnvCaps.AddStrings(ADecl.EnvCaptured);
+    FCapturedVars := FEnvCaps;
+  end;
   FIsFunction := ADecl.ResolvedReturnType <> nil;
   FResultFloat := FIsFunction and
     (ADecl.ResolvedReturnType.Kind = tyDouble);
@@ -8998,9 +9205,20 @@ begin
           TVarDecl(ADecl.Body.Decls.Items[I]).Names.Strings[J]);
     end;
 
+  if ADecl.EnvCaptured <> nil then
+    EmitEnvPrologue(ADecl);
+
   EmitStmtList(ADecl.Body.Stmts);
 
   Self.Emit(FExitLabel + ':');
+  { The enclosing frame drops its strong reference to the closure env; the
+    env lives on iff an escaped closure still holds it.  A thunk BORROWS its
+    env from the fat value it was called through -- no release. }
+  if (ADecl.EnvCaptured <> nil) and not ADecl.IsAnonThunk then
+  begin
+    EmitLoadSlot('x0', '__envp');
+    EmitCallSym('_ClassRelease');
+  end;
   { release string locals at scope exit (Exit statements land here too) }
   for I := 0 to FStrLocals.Count - 1 do
   begin
@@ -9109,9 +9327,12 @@ begin
     EmitAddSubImm('sub', 'sp', 'sp', FrameAligned);
   FAsm.Append(BodyBuf.ToString());
   BodyBuf.Free();
+  if (ADecl.EnvCaptured <> nil) and not ADecl.IsAnonThunk then
+    EmitEnvCleanupFn(TRecordTypeDesc(ADecl.EnvType));
   FFrame.Clear();
   FFrameSize := 0;
   FCapturedVars := nil;   { leg 17: end the capture window for this routine }
+  FCurEnvCaptured := nil;
 end;
 
 function TArm64Backend.StackArgSize(AArg: TASTExpr): Integer;
