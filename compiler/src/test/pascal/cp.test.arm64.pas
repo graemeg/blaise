@@ -172,6 +172,7 @@ type
     procedure TestInterfaceAssign_ToVarParamAndField;
     procedure TestVarOpenArray_ElemWrite_NoExtraDeref;
     procedure TestDefaultIndexedPropWrite_CallsSetter;
+    procedure TestMultiDimArray_RowThenColumnStride;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4383,6 +4384,36 @@ begin
     Pos(#9'bl _TC_Put'#10, AsmT) >= 0);
   AssertTrue('two-eightbyte record value loaded as a pair',
     Pos(#9'ldp x2, x3, [x9]', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestMultiDimArray_RowThenColumnStride;
+var
+  AsmT: string;
+begin
+  { G[I, J] desugars to G[I][J]: the inner row's storage address is the
+    outer element's address (row stride 12 for array[1..3] of Integer), then
+    the column index (rebased by its low bound 1) scales by 4.  Both the
+    write (a BaseExpr chain, was NotYet) and the read (a nested subscript,
+    was NotYet) take that path. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var
+      G: array[0..2, 1..3] of Integer;
+      I: Integer;
+    begin
+      I := 2;
+      G[I, 3] := 7;
+      WriteLn(G[I][3]);
+    end.
+    ''');
+  AssertTrue('row stride then column stride',
+    Pos(#9'movz x2, #12'#10#9'mul x1, x1, x2'#10#9'add x0, x0, x1'#10 +
+        #9'ldr x1, [sp], #16'#10#9'movz x2, #4', AsmT) >= 0);
+  AssertTrue('column index rebased by its low bound',
+    Pos(#9'sub x0, x0, #1', AsmT) >= 0);
+  AssertTrue('element stored as a word', Pos(#9'str w0, [x9]', AsmT) >= 0);
+  AssertTrue('element read back sign-extended', Pos(#9'ldrsw x0, [x0]', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

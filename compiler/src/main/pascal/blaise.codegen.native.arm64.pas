@@ -497,6 +497,9 @@ type
     procedure EmitJumboSetLiteral(AExpr: TArrayLiteralExpr);
     function  JumboSetLiteralBytes(AExpr: TASTExpr): Integer;
     procedure EmitStaticElemAddr(ASub: TStringSubscriptExpr);
+    { x0 := address of the inline storage of a STATIC-array-valued
+      expression (a variable, a field, an element of an outer array, P^) }
+    procedure EmitArrayStorageAddr(AExpr: TASTExpr);
     procedure EmitDynElemAddr(ASub: TStringSubscriptExpr);
     { x0 := address of an ELEMENT of an array-typed FIELD (leg 20):
       @Obj.Arr[I] / @Self.Arr[I] / @Rec.Arr[I].  The field access carries
@@ -7729,7 +7732,9 @@ begin
     A var-param STRING / PChar subscript write is handled by the tyString /
     tyPChar branches below (they load the slot and deref once more for a var
     param), so IsVarParam is only a blocker for the aggregate-array forms. }
-  if (AStmt.BaseExpr <> nil) or
+  if ((AStmt.BaseExpr <> nil) and
+      ((AStmt.ResolvedArrayType = nil) or
+       not (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyDynArray]))) or
      (AStmt.IsVarParam and
       ((AStmt.ResolvedArrayType = nil) or
        not (AStmt.ResolvedArrayType.Kind in [tyString, tyPChar,
@@ -7827,7 +7832,21 @@ begin
         -TStaticArrayTypeDesc(AStmt.ResolvedArrayType).LowBound);
   end;
   EmitPushX0();
-  if AStmt.IsImplicitSelf then
+  if AStmt.BaseExpr <> nil then
+  begin
+    { a chained / multi-dimensional write G[I][J] := V (and the desugared
+      G[I, J]): BaseExpr yields the inner array -- its storage address for a
+      static array, its data pointer (the value) for a dyn array }
+    if AStmt.ResolvedArrayType.Kind = tyStaticArray then
+      EmitArrayStorageAddr(AStmt.BaseExpr)
+    else
+    begin
+      if ArcExprOwnsRef(AStmt.BaseExpr) then
+        NotYet('subscript write through an owned transient base', AStmt);
+      Self.EmitExprToX0(AStmt.BaseExpr);
+    end;
+  end
+  else if AStmt.IsImplicitSelf then
   begin
     EmitLoadSlot('x0', 'Self');
     if AStmt.ResolvedArrayType.Kind = tyDynArray then
@@ -9197,12 +9216,29 @@ begin
   { x0 := &base[index].  The base must be a plain local/global array
     identifier or an array CONST (semantic hands us its data label);
     chained/field bases stay NotYet. }
-  if not (ASub.StrExpr is TIdentExpr) then
-    NotYet('subscript on this array expression', ASub);
-  if TIdentExpr(ASub.StrExpr).ParamMode = pmVar then
-    NotYet('subscript on a var array parameter', ASub);
   ESz := TStaticArrayTypeDesc(
     ASub.StrExpr.ResolvedType).ElementType.RawSize();
+  if not (ASub.StrExpr is TIdentExpr) or
+     (TIdentExpr(ASub.StrExpr).ParamMode = pmVar) then
+  begin
+    { any other base -- an element of an outer array (G[I][J], the
+      desugared G[I, J]), an array field, P^, a var array parameter: the
+      base is the inner array's storage address }
+    Self.EmitExprToX0(ASub.IndexExpr);
+    if TStaticArrayTypeDesc(ASub.StrExpr.ResolvedType).LowBound > 0 then
+      EmitAddSubImm('sub', 'x0', 'x0',
+        TStaticArrayTypeDesc(ASub.StrExpr.ResolvedType).LowBound)
+    else if TStaticArrayTypeDesc(ASub.StrExpr.ResolvedType).LowBound < 0 then
+      EmitAddSubImm('add', 'x0', 'x0',
+        -TStaticArrayTypeDesc(ASub.StrExpr.ResolvedType).LowBound);
+    EmitPushX0();
+    EmitArrayStorageAddr(ASub.StrExpr);
+    EmitPopTo('x1');
+    EmitIntLiteral('x2', ESz);
+    Self.Emit(#9'mul x1, x1, x2');
+    Self.Emit(#9'add x0, x0, x1');
+    Exit;
+  end;
   Self.EmitExprToX0(ASub.IndexExpr);
   { const arrays are 1-low sometimes (array[1..12]) — the semantic pass
     keeps the declared bounds, so subtract the low bound }
@@ -9233,6 +9269,51 @@ begin
   Self.Emit(#9'add x0, x0, x1');
 end;
 
+procedure TArm64Backend.EmitArrayStorageAddr(AExpr: TASTExpr);
+var
+  Sub: TStringSubscriptExpr;
+begin
+  if AExpr is TIdentExpr then
+  begin
+    if TIdentExpr(AExpr).ConstArraySymbol <> '' then
+    begin
+      Self.Emit(Format(#9'adrp x0, %s@PAGE',
+        [CodegenMangle(TIdentExpr(AExpr).ConstArraySymbol)]));
+      Self.Emit(Format(#9'add x0, x0, %s@PAGEOFF',
+        [CodegenMangle(TIdentExpr(AExpr).ConstArraySymbol)]));
+    end
+    else
+      { frame/global slot, Self field, captured or var parameter }
+      EmitRecIdentAddr('x0', TIdentExpr(AExpr));
+    Exit;
+  end;
+  if (AExpr is TStringSubscriptExpr) and
+     (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) then
+  begin
+    { an inner array that is itself an element: its storage IS the
+      element's address }
+    Sub := TStringSubscriptExpr(AExpr);
+    case Sub.StrExpr.ResolvedType.Kind of
+      tyStaticArray: EmitStaticElemAddr(Sub);
+      tyDynArray, tyOpenArray: EmitDynElemAddr(Sub);
+    else
+      NotYet('array storage through this subscript base', AExpr);
+    end;
+    Exit;
+  end;
+  if AExpr is TFieldAccessExpr then
+  begin
+    EmitRecFieldAddrToX0(TFieldAccessExpr(AExpr));
+    Exit;
+  end;
+  if AExpr is TDerefExpr then
+  begin
+    Self.EmitExprToX0(TDerefExpr(AExpr).Expr);
+    Exit;
+  end;
+  NotYet('array storage of this expression', AExpr);
+end;
+
 procedure TArm64Backend.EmitDynElemAddr(ASub: TStringSubscriptExpr);
 var
   ESz: Integer;
@@ -9240,14 +9321,28 @@ begin
   { x0 := dataptr + index*elemsize — the base VALUE is the element-0
     pointer (dyn-array header sits below it; an open-array param slot
     holds the caller's data pointer directly) }
-  if not (ASub.StrExpr is TIdentExpr) then
-    NotYet('subscript on this dyn-array expression', ASub);
   if ASub.StrExpr.ResolvedType.Kind = tyOpenArray then
     ESz := TOpenArrayTypeDesc(
       ASub.StrExpr.ResolvedType).ElementType.RawSize()
   else
     ESz := TDynArrayTypeDesc(
       ASub.StrExpr.ResolvedType).ElementType.RawSize();
+  if not (ASub.StrExpr is TIdentExpr) then
+  begin
+    { a dyn array reached through an expression (an element of an outer
+      array, a field): its VALUE is the data pointer -- a borrow, so an
+      owned transient base would need a release }
+    if ArcExprOwnsRef(ASub.StrExpr) then
+      NotYet('subscript on an owned transient dyn array', ASub);
+    Self.EmitExprToX0(ASub.IndexExpr);
+    EmitPushX0();
+    Self.EmitExprToX0(ASub.StrExpr);
+    EmitPopTo('x1');
+    EmitIntLiteral('x2', ESz);
+    Self.Emit(#9'mul x1, x1, x2');
+    Self.Emit(#9'add x0, x0, x1');
+    Exit;
+  end;
   Self.EmitExprToX0(ASub.IndexExpr);
   EmitPushX0();
   if TIdentExpr(ASub.StrExpr).IsImplicitSelf and
