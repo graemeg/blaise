@@ -5478,6 +5478,35 @@ begin
     EmitRecFieldAddrToX0(TFieldAccessExpr(AExpr));
     Exit;
   end;
+  if (AExpr is TFieldAccessExpr) and
+     (TFieldAccessExpr(AExpr).Base <> nil) and
+     (TFieldAccessExpr(AExpr).Base.ResolvedType <> nil) and
+     (TFieldAccessExpr(AExpr).Base.ResolvedType.Kind = tyRecord) and
+     (TFieldAccessExpr(AExpr).FieldInfo <> nil) and
+     (TFieldAccessExpr(AExpr).PropRead = nil) and
+     (not TFieldAccessExpr(AExpr).IsMethodCall) and
+     (not TFieldAccessExpr(AExpr).IsClassAccess) and
+     (not TFieldAccessExpr(AExpr).IsConstant) then
+  begin
+    { a field of any other record-valued base expression -- a record
+      identifier carried as a Base node (the receiver of GS.Box.Bump(),
+      GS a record global), P^, a var param: EmitRecAddrToX0 yields the
+      record's address, the field loads at its offset }
+    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
+              [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
+               tyDynArray, tyInterface, tyMetaClass]) or
+            TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
+      NotYet('read of a field of this type', AExpr);
+    EmitRecAddrToX0(TFieldAccessExpr(AExpr).Base);
+    if TFieldAccessExpr(AExpr).FieldInfo.Offset <> 0 then
+      EmitAddSubImm('add', 'x0', 'x0',
+        TFieldAccessExpr(AExpr).FieldInfo.Offset);
+    EmitElemLoad(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc);
+    Exit;
+  end;
   NotYet('expression ' + AExpr.ClassName, AExpr);
 end;
 

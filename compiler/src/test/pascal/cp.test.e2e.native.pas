@@ -411,6 +411,7 @@ type
     procedure TestRun_Native_RecordCallResult_AsMethodReceiver;
     procedure TestRun_Native_JumboSetOp_RightLiteral;
     procedure TestRun_Native_ClosureField_ImplicitSelfStore;
+    procedure TestRun_Native_RecordGlobal_ClassFieldReceiver;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6452,6 +6453,40 @@ begin
     end.
     ''',
     '203' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_RecordGlobal_ClassFieldReceiver;
+begin
+  { GS.Box.Bump(3) with GS a record global: the receiver is a class-typed
+    field of a record identifier carried as a Base node, which no field-read
+    arm covered (deque.tests' GCC.Deque.PushBottom shape). }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TBox = class
+      public
+        N: Integer;
+        procedure Bump(K: Integer);
+      end;
+      TState = record
+        Box: TBox;
+        Done: Integer;
+      end;
+    var
+      GS: TState;
+    procedure TBox.Bump(K: Integer);
+    begin
+      N := N + K;
+    end;
+    begin
+      GS.Box := TBox.Create();
+      GS.Box.Bump(3);
+      GS.Box.Bump(4);
+      WriteLn(GS.Box.N);
+    end.
+    ''',
+    '7' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

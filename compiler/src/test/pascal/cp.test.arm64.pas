@@ -178,6 +178,7 @@ type
     procedure TestRecordCallResult_ReceiverCopiedToStackTemp;
     procedure TestJumboSetOp_LeftReadAboveRightLiteral;
     procedure TestClosureField_ImplicitSelfStore_Lowers;
+    procedure TestRecordGlobal_ClassFieldReceiver_Lowers;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4581,6 +4582,40 @@ begin
   AssertTrue('both closure words stored into the field (offset 16)',
     Pos(#9'add x9, x9, #16'#10#9'stp x10, x11, [x9]', AsmT) >= 0);
   AssertTrue('incoming Env retained', Pos(#9'bl __ClassAddRef', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestRecordGlobal_ClassFieldReceiver_Lowers;
+var
+  AsmT: string;
+begin
+  { GS.Box.Bump(): a class-typed field of a record global as a method
+    receiver -- the record's address plus the field offset, then a load. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TBox = class
+      public
+        N: Int64;
+        procedure Bump;
+      end;
+      TState = record
+        Done: Int64;
+        Box: TBox;
+      end;
+    var
+      GS: TState;
+    procedure TBox.Bump;
+    begin
+      N := N + 1;
+    end;
+    begin
+      GS.Box.Bump();
+    end.
+    ''');
+  AssertTrue('field loaded at its offset from the record address',
+    Pos(#9'add x0, x0, #8'#10#9'ldr x0, [x0]', AsmT) >= 0);
+  AssertTrue('method called', Pos(#9'bl _TBox_Bump', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;
