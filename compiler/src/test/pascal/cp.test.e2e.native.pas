@@ -408,6 +408,7 @@ type
     procedure TestRun_Native_VarOpenArray_ElemReadWrite;
     procedure TestRun_Native_InterfaceArrayElements;
     procedure TestRun_Native_IntfCall_OutStringParam;
+    procedure TestRun_Native_RecordCallResult_AsMethodReceiver;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6324,6 +6325,52 @@ begin
     end.
     ''',
     'line 1' + LE + 'line 5 5' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_RecordCallResult_AsMethodReceiver;
+begin
+  { a record returned by a call is the receiver of a record method
+    (TUuid.RandomUuid().ToBytes()): Self is an address, so the result is
+    materialised into a temp that outlives the call -- including when an
+    ARGUMENT is itself a record call that reuses the return scratch, and for
+    a large (sret) record. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TPt = record
+        X, Y: Int64;
+        function Sum(K: Int64): Int64;
+      end;
+      TBig = record
+        A, B, C: Int64;
+        function Total: Int64;
+      end;
+    function TPt.Sum(K: Int64): Int64;
+    begin
+      Result := X + Y + K;
+    end;
+    function TBig.Total: Int64;
+    begin
+      Result := A + B + C;
+    end;
+    function MakePt(A, B: Int64): TPt;
+    begin
+      Result.X := A;
+      Result.Y := B;
+    end;
+    function MakeBig(N: Int64): TBig;
+    begin
+      Result.A := N;
+      Result.B := N * 2;
+      Result.C := N * 3;
+    end;
+    begin
+      WriteLn(MakePt(3, 4).Sum(MakePt(10, 20).Sum(0)));
+      WriteLn(MakeBig(5).Total());
+    end.
+    ''',
+    '37' + LE + '30' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

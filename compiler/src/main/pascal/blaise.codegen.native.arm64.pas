@@ -12888,7 +12888,33 @@ procedure TArm64Backend.EmitMethodCallOnExpr(AMethod: TMethodDecl;
   const AName: string; AArgs: TObjectList; AObjExpr: TASTExpr);
 var
   Owned: Boolean;
+  Sz: Integer;
 begin
+  if AMethod.IsRecordMethod and (AObjExpr.ResolvedType <> nil) and
+     (AObjExpr.ResolvedType.Kind = tyRecord) and
+     ((AObjExpr is TFuncCallExpr) or (AObjExpr is TMethodCallExpr)) then
+  begin
+    { a record VALUE returned by a call is the receiver
+      (TUuid.RandomUuid().ToBytes()).  A record method's Self is an ADDRESS,
+      so the result is materialised and copied into a stack temp that lives
+      across the call -- __rret itself may be reused while the arguments
+      evaluate.  A managed record's temp would also need its fields
+      released afterwards; that stays an honest hole. }
+    if AggHasManaged(AObjExpr.ResolvedType) then
+      NotYet('method call on a managed record call result', AObjExpr);
+    Sz := (AObjExpr.ResolvedType.RawSize() + 15) and (not 15);
+    EmitRecCallToRret(AObjExpr);           { x0 = __rret }
+    EmitAddSubImm('sub', 'sp', 'sp', Sz);
+    Self.Emit(#9'mov x1, x0');
+    Self.Emit(#9'mov x0, sp');
+    EmitIntLiteral('x2', AObjExpr.ResolvedType.RawSize());
+    EmitCallSym('memcpy');
+    Self.Emit(#9'mov x0, sp');
+    EmitPushX0();                          { the receiver EmitCall pops }
+    EmitCall(AMethod, AName, AArgs, '', True, AMethod.VTableSlot);
+    EmitAddSubImm('add', 'sp', 'sp', Sz);  { drop the temp }
+    Exit;
+  end;
   { chained receiver: the object pointer is the value of AObjExpr.  An
     OWNED +1 receiver (Create()/call result) is kept in a stack slot
     across the call and released afterwards — the transient must outlive
