@@ -31,6 +31,7 @@ type
     procedure TestRun_ClosureWrite_VisibleInEnclosing;
     procedure TestRun_TwoClosures_ShareOneEnv;
     procedure TestRun_Escape_GlobalClosure_OutlivesFrame;
+    procedure TestRun_FunctionReturnsClosure_IndependentEnvs;
     procedure TestRun_LoopCapture_SharesEnv_ByReference;
     procedure TestRun_CapturedParam_InitialValueCopied;
     procedure TestRun_FunctionLiteral_CapturesAccumulator;
@@ -259,6 +260,55 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '42' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_FunctionReturnsClosure_IndependentEnvs;
+const
+  { A plain function returning a capturing closure: each call builds its own
+    env, so two adders/counters must not share state.  Also a closure passed
+    in and returned unchanged, and a DISCARDED closure-returning call, which
+    still needs its result buffer and must drop the env it was handed.  On
+    arm64 the result travels through the caller's x8 buffer. }
+  Src =
+  '''
+  program P;
+  type
+    TIntFn = reference to function(A: Integer): Integer;
+    TProc0 = reference to procedure;
+  function MakeAdder(N: Integer): TIntFn;
+  begin
+    Result := function(A: Integer): Integer begin Result := A + N end
+  end;
+  function Counter(Start: Integer; const Tag: string): TProc0;
+  var C: Integer;
+  begin
+    C := Start;
+    Result := procedure begin C := C + 1; WriteLn(Tag, C) end
+  end;
+  function Pass(F: TIntFn): TIntFn;
+  begin
+    Result := F
+  end;
+  var Add3, Add10, G: TIntFn; A, B: TProc0;
+  begin
+    Add3 := MakeAdder(3);
+    Add10 := MakeAdder(10);
+    WriteLn(Add3(4), ' ', Add10(4));
+    A := Counter(5, 'a='); B := Counter(100, 'b=');
+    A(); A(); B();
+    G := Pass(Add3);
+    WriteLn(G(1));
+    MakeAdder(99);
+    Add3 := Add10;
+    WriteLn(Add3(1))
+  end.
+  ''';
+  Expected = '7 14' + LineEnding + 'a=6' + LineEnding + 'a=7' + LineEnding +
+    'b=101' + LineEnding + '4' + LineEnding + '11' + LineEnding;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, Expected, 0);
+  AssertLeakFreeOnAll(Src, 'b=101');
 end;
 
 procedure TE2EAnonMethodTests.TestRun_LoopCapture_SharesEnv_ByReference;

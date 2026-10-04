@@ -162,6 +162,8 @@ type
     FPendingRelCount: Integer;   { live statement-scoped deferred class
                                    releases (BUG-048/BUG-049) — also the next
                                    free _pendrel_N slot index }
+    FFretN: Integer;             { counter for '__fret_<n>' closure-result
+                                   scratch slots (one per call site) }
     FCurEnvCaptured: TStringList; { borrowed: the current routine's
                                    EnvCaptured -- names living in a PACKED env
                                    field rather than an 8-byte frame slot }
@@ -253,6 +255,8 @@ type
     procedure EmitAnonValueToSlot(AME: TAnonMethodExpr);
     procedure EmitAnonValueInto(AME: TAnonMethodExpr; const ASlot: string);
     procedure EmitFatPtrAssign(AAsgn: TAssignment);
+    function  EmitClosureResultCall(ACallDecl: TMethodDecl; const AName: string;
+      AArgs: TObjectList): string;
     procedure EmitEnvPrologue(ADecl: TMethodDecl);
     function  IsEnvCaptured(const AName: string): Boolean;
     procedure EmitCapturedLoad(AIdent: TIdentExpr);
@@ -640,6 +644,17 @@ begin
   Result := (AType <> nil) and (AType.Kind = tyProcedural) and
     (TProceduralTypeDesc(AType).IsMethodPtr or
      TProceduralTypeDesc(AType).IsReference);
+end;
+
+{ True for a result returned through the caller's x8 buffer (an sret
+  aggregate): a record (by RecReturnShape), an interface fat pointer, or a
+  closure / method-pointer fat value.  The "not yet lowered" guards on call
+  positions that pass no x8 buffer test THIS, so a closure-returning call
+  there is rejected instead of letting the callee write through a garbage x8. }
+function IsAggregateReturn(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and
+    ((AType.Kind in [tyRecord, tyInterface]) or IsMethodPtrType(AType));
 end;
 
 constructor TArm64Backend.Create(const ATarget: TTargetDesc);
@@ -1651,6 +1666,7 @@ procedure TArm64Backend.EmitFatPtrAssign(AAsgn: TAssignment);
 var
   IsRef: Boolean;
   Src: TIdentExpr;
+  Tmp: string;
 begin
   { Closure ('reference to') / method-pointer ('of object') target: a 16-byte
     fat value, Code at +0 and Env/Data at +8.  The generic scalar path stored
@@ -1706,7 +1722,47 @@ begin
     Self.Emit(#9'stp x9, x10, [x1]');
     Exit;
   end;
+  if (AAsgn.Expr is TFuncCallExpr) and
+     (TFuncCallExpr(AAsgn.Expr).ResolvedDecl is TMethodDecl) and
+     not TFuncCallExpr(AAsgn.Expr).IsIndirectCall and
+     not TFuncCallExpr(AAsgn.Expr).IsImplicitSelfMethod and
+     (TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl).OwnerTypeName = '') and
+     IsMethodPtrType(TMethodDecl(
+       TFuncCallExpr(AAsgn.Expr).ResolvedDecl).ResolvedReturnType) then
+  begin
+    { F := MakeClosure(...): the callee fills a fresh scratch through x8 and
+      hands over its Env reference, so the old Env is released and the pair
+      moved in WITHOUT a retain }
+    Tmp := EmitClosureResultCall(
+      TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl),
+      TFuncCallExpr(AAsgn.Expr).Name, TFuncCallExpr(AAsgn.Expr).Args);
+    if IsRef then
+    begin
+      EmitSlotAddr('x9', AAsgn.Name);
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');
+    end;
+    EmitSlotAddr('x1', Tmp);
+    Self.Emit(#9'ldp x9, x10, [x1]');
+    EmitSlotAddr('x1', AAsgn.Name);
+    Self.Emit(#9'stp x9, x10, [x1]');
+    Exit;
+  end;
   NotYet('closure / method-pointer assignment from this expression', AAsgn);
+end;
+
+function TArm64Backend.EmitClosureResultCall(ACallDecl: TMethodDecl;
+  const AName: string; AArgs: TObjectList): string;
+begin
+  { Call a closure-returning plain routine with x8 pointing at a fresh
+    16-byte frame scratch (the frame grows lazily -- the body is buffered,
+    as for NewExcFrameSlot) and return the scratch's slot name.  The scratch
+    then holds the callee's +1 on the Env. }
+  Result := '__fret_' + IntToStr(FFretN);
+  FFretN := FFretN + 1;
+  if not FFrame.ContainsKey(Result) then
+    AddLocal(Result, 16);
+  EmitCall(ACallDecl, AName, AArgs, Result);
 end;
 
 procedure TArm64Backend.EmitEnvPrologue(ADecl: TMethodDecl);
@@ -2770,7 +2826,7 @@ begin
   begin
     { bare zero-arg method call on Self written without parens }
     if (AExpr.ResolvedType <> nil) and
-       (AExpr.ResolvedType.Kind in [tyRecord, tyInterface]) then
+       IsAggregateReturn(AExpr.ResolvedType) then
       NotYet('aggregate-returning bare method call', AExpr);
     EmitLoadSlot('x0', 'Self');
     EmptyArgs := TObjectList.Create(False);
@@ -3533,7 +3589,7 @@ begin
     if IsFloatExpr(AExpr) then
       NotYet('float-returning closure call in integer context', AExpr);
     if (AExpr.ResolvedType <> nil) and
-       (AExpr.ResolvedType.Kind in [tyRecord, tyInterface]) then
+       IsAggregateReturn(AExpr.ResolvedType) then
       NotYet('aggregate-returning closure call', AExpr);
     EmitSlotAddr('x9', TFuncCallExpr(AExpr).Name);
     EmitFatPtrCall('x9',
@@ -3586,7 +3642,7 @@ begin
     if IsFloatExpr(AExpr) then
       NotYet('float-returning implicit-Self call in integer context', AExpr);
     if (AExpr.ResolvedType <> nil) and
-       (AExpr.ResolvedType.Kind in [tyRecord, tyInterface]) then
+       IsAggregateReturn(AExpr.ResolvedType) then
       NotYet('aggregate-returning implicit-Self call', AExpr);
     EmitLoadSlot('x0', 'Self');
     EmitMethodCallCommon(
@@ -3605,6 +3661,8 @@ begin
     if (AExpr.ResolvedType <> nil) and
        (AExpr.ResolvedType.Kind = tyRecord) then
       NotYet('record-returning call outside direct assignment', AExpr);
+    if IsMethodPtrType(AExpr.ResolvedType) then
+      NotYet('closure-returning call outside direct assignment', AExpr);
     EmitCall(TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl),
       TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args);
     Exit;
@@ -4076,6 +4134,8 @@ begin
     if (AExpr.ResolvedType <> nil) and
        (AExpr.ResolvedType.Kind = tyRecord) then
       NotYet('record-returning method call', AExpr);
+    if IsMethodPtrType(AExpr.ResolvedType) then
+      NotYet('closure-returning method call', AExpr);
     EmitMethodCallExpr(TMethodCallExpr(AExpr));
     Exit;
   end;
@@ -5772,6 +5832,7 @@ procedure TArm64Backend.EmitProcCallStmt(ACall: TProcCall);
 var
   I: Integer;
   Arg: TASTExpr;
+  Tmp: string;
 begin
   if SameText(ACall.Name, 'WriteLn') then
   begin
@@ -6200,6 +6261,21 @@ begin
      (TMethodDecl(ACall.ResolvedDecl).OwnerTypeName = '') and
      not ACall.IsImplicitSelfMethod then
   begin
+    if IsMethodPtrType(TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType) then
+    begin
+      { a DISCARDED closure result still needs its x8 buffer, and the Env
+        reference the callee handed over must be dropped }
+      Tmp := EmitClosureResultCall(TMethodDecl(ACall.ResolvedDecl),
+        ACall.Name, ACall.Args);
+      if TProceduralTypeDesc(
+           TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType).IsReference then
+      begin
+        EmitSlotAddr('x9', Tmp);
+        Self.Emit(#9'ldr x0, [x9, #8]');
+        EmitCallSym('_ClassRelease');
+      end;
+      Exit;
+    end;
     EmitCall(TMethodDecl(ACall.ResolvedDecl), ACall.Name, ACall.Args);
     { a DISCARDED owned result must be disposed (user routine results are
       rc=1 — one release) }
@@ -6220,8 +6296,7 @@ begin
   begin
     { bare method call on Self as a statement: Advance(); }
     if (TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType <> nil) and
-       (TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType.Kind in
-         [tyRecord, tyInterface]) then
+       IsAggregateReturn(TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType) then
       NotYet('discarded aggregate-returning implicit-Self call', ACall);
     EmitLoadSlot('x0', 'Self');
     EmitMethodCallCommon(TMethodDecl(ACall.ResolvedDecl), ACall.Name,
@@ -8586,6 +8661,15 @@ begin
         if RecReturnShape(TRecordTypeDesc(ADecl.ResolvedReturnType)) = 0 then
           AddLocal('__sret', 8);   { the incoming x8 destination pointer }
       end
+      else if IsMethodPtrType(ADecl.ResolvedReturnType) then
+      begin
+        { closure / method-pointer result: a 16-byte (Code, Env) Result,
+          copied to the caller's x8 buffer at return.  Result stays out of
+          the ref-local release walk: its Env reference TRANSFERS to the
+          caller, exactly as an interface result's obj half does. }
+        AddLocal('Result', 16);
+        AddLocal('__sret', 8);
+      end
       else if ADecl.ResolvedReturnType.Kind = tyInterface then
       begin
         { fat-pointer result: written to the caller's 16-byte x8 buffer
@@ -8766,8 +8850,9 @@ begin
   RecShape := -1;
   if FIsFunction and (ADecl.ResolvedReturnType.Kind = tyRecord) then
     RecShape := RecReturnShape(TRecordTypeDesc(ADecl.ResolvedReturnType));
-  if FIsFunction and (ADecl.ResolvedReturnType.Kind = tyInterface) then
-    RecShape := 0;   { interface results use the x8 sret path }
+  if FIsFunction and ((ADecl.ResolvedReturnType.Kind = tyInterface) or
+                      IsMethodPtrType(ADecl.ResolvedReturnType)) then
+    RecShape := 0;   { interface and closure results use the x8 sret path }
   FExitLabel := NewLabel('rexit');
   FForN := 0;
   RegisterFrameSlots(ADecl, ADecl.Body);
@@ -9167,6 +9252,11 @@ begin
     EmitStoreSlot('xzr', 'Result');
     EmitStoreSlot('xzr', 'Result_itab');
   end
+  else if FIsFunction and IsMethodPtrType(ADecl.ResolvedReturnType) then
+  begin
+    EmitSlotAddr('x0', 'Result');
+    Self.Emit(#9'stp xzr, xzr, [x0]');
+  end
   else if FIsFunction and (RecShape >= 0) then
   begin
     EmitSlotAddr('x0', 'Result');
@@ -9296,6 +9386,14 @@ begin
           Self.Emit(Format(#9'ldr d%d, [x9, #%d]', [I, I * 8]));
       end;
     end;
+  end
+  else if FIsFunction and IsMethodPtrType(ADecl.ResolvedReturnType) then
+  begin
+    { both words to the caller's buffer; the Env reference moves with them }
+    EmitLoadSlot('x9', '__sret');
+    EmitSlotAddr('x1', 'Result');
+    Self.Emit(#9'ldp x10, x11, [x1]');
+    Self.Emit(#9'stp x10, x11, [x9]');
   end
   else if FIsFunction and
           (ADecl.ResolvedReturnType.Kind = tyInterface) then
@@ -11530,7 +11628,7 @@ begin
     { method call on a class-typed FIELD of Self: FLexer.Next() —
       the receiver is loaded through Self at the field's offset }
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
-       (AStmt.ResolvedReturnTypeDesc.Kind in [tyRecord, tyInterface]) then
+       IsAggregateReturn(AStmt.ResolvedReturnTypeDesc) then
       NotYet('discarded aggregate-returning field-method call', AStmt);
     EmitLoadSlot('x0', 'Self');
     Self.Emit(Format(#9'ldr x0, [x0, #%d]',
@@ -11559,7 +11657,7 @@ begin
     if AStmt.IsVarParam or (AStmt.ObjExpr <> nil) then
       NotYet('interface dispatch on this receiver form', AStmt);
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
-       (AStmt.ResolvedReturnTypeDesc.Kind in [tyRecord, tyInterface]) then
+       IsAggregateReturn(AStmt.ResolvedReturnTypeDesc) then
       NotYet('discarded aggregate-returning interface call', AStmt);
     EmitIntfDispatch(AStmt.ObjectName,
       TInterfaceTypeDesc(AStmt.ResolvedClassType).MethodIndex(AStmt.Name),
@@ -11670,7 +11768,7 @@ begin
     Exit;
   end;
   if (AStmt.ResolvedReturnTypeDesc <> nil) and
-     (AStmt.ResolvedReturnTypeDesc.Kind in [tyRecord, tyInterface]) then
+     IsAggregateReturn(AStmt.ResolvedReturnTypeDesc) then
     NotYet('discarded aggregate-returning method call', AStmt);
   if AStmt.ObjExpr <> nil then
     EmitMethodCallOnExpr(MD, AStmt.Name, AStmt.Args, AStmt.ObjExpr)
@@ -11839,7 +11937,7 @@ begin
     if AExpr.IsVarParam or (AExpr.ObjExpr <> nil) then
       NotYet('interface dispatch on this receiver form', AExpr);
     if (AExpr.ResolvedType <> nil) and
-       (AExpr.ResolvedType.Kind in [tyRecord, tyInterface]) then
+       IsAggregateReturn(AExpr.ResolvedType) then
       NotYet('aggregate-returning interface call', AExpr);
     EmitIntfDispatch(AExpr.ObjectName,
       TInterfaceTypeDesc(AExpr.ResolvedClassType).MethodIndex(AExpr.Name),
