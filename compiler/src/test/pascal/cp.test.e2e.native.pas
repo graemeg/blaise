@@ -410,6 +410,7 @@ type
     procedure TestRun_Native_IntfCall_OutStringParam;
     procedure TestRun_Native_RecordCallResult_AsMethodReceiver;
     procedure TestRun_Native_JumboSetOp_RightLiteral;
+    procedure TestRun_Native_ClosureField_ImplicitSelfStore;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6410,6 +6411,47 @@ begin
     end.
     ''',
     '5 200000' + LE + '2 True' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_ClosureField_ImplicitSelfStore;
+begin
+  { FOnTick := AH inside a method stores a 16-byte closure into a field of
+    Self (was NotYet on arm64) -- the Functional unit's TDelegatedComparer
+    shape. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TTick = reference to procedure(N: Integer);
+      TCounter = class
+      public
+        FOnTick: TTick;
+        FBase: Integer;
+        procedure SetHandler(AH: TTick);
+        procedure Tick(N: Integer);
+      end;
+    procedure TCounter.SetHandler(AH: TTick);
+    begin
+      FOnTick := AH;
+    end;
+    procedure TCounter.Tick(N: Integer);
+    begin
+      FOnTick(N + FBase);
+    end;
+    var
+      C: TCounter;
+      Total: Integer;
+    begin
+      Total := 0;
+      C := TCounter.Create();
+      C.FBase := 100;
+      C.SetHandler(procedure(N: Integer) begin Total := Total + N; end);
+      C.Tick(1);
+      C.Tick(2);
+      WriteLn(Total);
+    end.
+    ''',
+    '203' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

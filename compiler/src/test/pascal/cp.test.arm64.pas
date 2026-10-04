@@ -177,6 +177,7 @@ type
     procedure TestIntfCall_VarArgPassesAddress;
     procedure TestRecordCallResult_ReceiverCopiedToStackTemp;
     procedure TestJumboSetOp_LeftReadAboveRightLiteral;
+    procedure TestClosureField_ImplicitSelfStore_Lowers;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4550,6 +4551,36 @@ begin
     Pos(#9'ldr x1, [sp, #32]', AsmT) >= 0);
   AssertTrue('literal and parked slot released',
     Pos(#9'add sp, sp, #48', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestClosureField_ImplicitSelfStore_Lowers;
+var
+  AsmT: string;
+begin
+  { FOnTick := AH inside a method (a 16-byte closure field of Self) was
+    NotYet; it now goes through the field store, which copies both words. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TTick = reference to procedure(N: Integer);
+      TC = class
+      public
+        Tag: Int64;
+        FOnTick: TTick;
+        procedure SetHandler(AH: TTick);
+      end;
+    procedure TC.SetHandler(AH: TTick);
+    begin
+      FOnTick := AH;
+    end;
+    begin
+    end.
+    ''');
+  AssertTrue('setter body emitted', Pos('_TC_SetHandler:', AsmT) >= 0);
+  AssertTrue('both closure words stored into the field (offset 16)',
+    Pos(#9'add x9, x9, #16'#10#9'stp x10, x11, [x9]', AsmT) >= 0);
+  AssertTrue('incoming Env retained', Pos(#9'bl __ClassAddRef', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

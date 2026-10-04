@@ -1789,8 +1789,15 @@ begin
     reference-to assignment arms.  A 'reference to' value co-owns its Env, so
     the old Env is released and a copied one retained; an 'of object' value
     holds its receiver unretained, as on x86-64. }
-  if IsCaptured(AAsgn.Name) or AAsgn.IsVarParam or
-     (AAsgn.ImplicitSelfField <> nil) then
+  if AAsgn.ImplicitSelfField <> nil then
+  begin
+    { FHandler := value inside a method: a 16-byte FIELD of Self -- the
+      field-store machinery (EmitFatFieldStoreStacked) runs the same Env
+      retain/release discipline against the instance }
+    EmitImplicitSelfStore(AAsgn);
+    Exit;
+  end;
+  if IsCaptured(AAsgn.Name) or AAsgn.IsVarParam then
     NotYet('closure / method-pointer assignment to this target', AAsgn);
   IsRef := (AAsgn.ResolvedLhsType.Kind = tyProcedural) and
            TProceduralTypeDesc(AAsgn.ResolvedLhsType).IsReference;
