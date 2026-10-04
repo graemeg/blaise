@@ -215,6 +215,7 @@ type
       walk dead-ended and reported "Undeclared procedure". }
     procedure TestIncrementalRebuild_QualifiedGrandparentMethod;
     procedure TestInheritedMethodStmtCall_FromCachedUnit_PassesSelf;
+    procedure TestUnitCache_MissingDirectory_IsCreated;
     { Regression (warm --unit-cache set-of-enum literal): the cached-.bif
       importer registered an enum's members as symbols but never populated the
       analyser's enum-member reverse index (FEnumMemberIndex).  ArgMatchScore
@@ -2899,6 +2900,55 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('build2 run exit code', 0, Rc);
   AssertEquals('build2 stdout', '8' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestUnitCache_MissingDirectory_IsCreated;
+const
+  { --unit-cache naming a directory that does not exist yet used to fail
+    every build with "Worker exception: Cannot open file for writing:
+    <dir>/<unit>.o.bif.tmp" -- the RTL object cache already created its own
+    directory, the unit cache did not.  The nested path proves the whole
+    chain is created, not just the leaf. }
+  UnitSrc =
+    '''
+    unit ucmiss.u;
+    interface
+    function Twice(X: Integer): Integer;
+    implementation
+    function Twice(X: Integer): Integer; begin Result := X * 2 end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseUcMiss;
+    uses ucmiss.u;
+    begin
+      WriteLn(Twice(21))
+    end.
+    ''';
+var
+  ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  WriteFile(FScratch + '/ucmiss.u.pas', UnitSrc);
+  ProgPas := FScratch + '/use_ucmiss.pas';
+  ProgBin := FScratch + '/use_ucmiss';
+  CacheDir := FScratch + '/ucmiss-' + IntToStr(GetProcessID()) + '/nested/cache';
+  WriteFile(ProgPas, ProgSrc);
+  AssertFalse('cache dir must not pre-exist', DirectoryExists(CacheDir));
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('build exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('cache dir was created', DirectoryExists(CacheDir));
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('run exit code', 0, Rc);
+  AssertEquals('stdout', '42' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestInheritedMethodStmtCall_FromCachedUnit_PassesSelf;

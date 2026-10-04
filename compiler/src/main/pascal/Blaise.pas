@@ -1199,7 +1199,14 @@ begin
           into '/', anchoring the unit objects at root, so only prepend a
           delimiter when the directory is non-empty. }
         if UnitCacheDir <> '' then
+        begin
+          { Create the cache directory (and its parents) on first use, as
+            the RTL object cache already does: a --unit-cache naming a
+            directory that did not exist failed every worker with
+            "Cannot open file for writing: <dir>/<unit>.o.bif.tmp". }
+          ForceDirectories(UnitCacheDir);
           UnitODir := IncludeTrailingPathDelimiter(UnitCacheDir)
+        end
         else if ExtractFilePath(OutputFile) <> '' then
           UnitODir := IncludeTrailingPathDelimiter(ExtractFilePath(OutputFile))
         else
