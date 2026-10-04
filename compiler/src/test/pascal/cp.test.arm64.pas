@@ -186,6 +186,7 @@ type
     procedure TestClosureCall_DoubleArgInD0;
     procedure TestPointerWrite_RecordCopiesWithArc;
     procedure TestAddrOfLocalInterface_IsPairAddress;
+    procedure TestRecordProperty_ReadThroughSret;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4817,6 +4818,40 @@ begin
     ''');
   AssertTrue('itab half written through the pointer',
     Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestRecordProperty_ReadThroughSret;
+var
+  AsmT: string;
+begin
+  { C[I].A on a default property returning a 24-byte record: the getter
+    writes through x8 into a per-site scratch, and the field loads from it
+    (was NotYet 'field read on this subscript base'). }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TRec = record
+        A, B, C: Int64;
+      end;
+      TC = class
+        function GetRec(I: Integer): TRec;
+        property Recs[I: Integer]: TRec read GetRec; default;
+      end;
+    function TC.GetRec(I: Integer): TRec;
+    begin
+      Result.A := I;
+    end;
+    var
+      C: TC;
+    begin
+      C := TC.Create();
+      WriteLn(C[3].A);
+    end.
+    ''');
+  AssertTrue('getter result buffer in x8',
+    Pos(#9'sub x8, x29, #', AsmT) >= 0);
+  AssertTrue('getter called', Pos(#9'bl _TC_GetRec', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

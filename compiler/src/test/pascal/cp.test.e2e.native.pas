@@ -419,6 +419,7 @@ type
     procedure TestRun_Native_RecordCallIntoVarRecordParam;
     procedure TestRun_Native_ClosureCall_AggregateArgs;
     procedure TestRun_Native_PointerWrite_RecordJumboIntf;
+    procedure TestRun_Native_RecordDefaultProperty_Read;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6819,6 +6820,40 @@ begin
     ''',
     'hello1 7' + LE + 'True False' + LE + '42' + LE + 'cleared' + LE +
     'destroyed 42' + LE + 'end' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_RecordDefaultProperty_Read;
+begin
+  { L[I] on a TList<TRec>: a record-typed (default) property read, whose
+    getter returns the record through x8 / registers into a per-site
+    scratch -- read by field and copied whole. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    uses Generics.Collections;
+    type
+      TItem = record
+        Name: string;
+        N: Integer;
+      end;
+    var
+      L: TList<TItem>;
+      It, Copy2: TItem;
+      I: Integer;
+    begin
+      L := TList<TItem>.Create();
+      for I := 1 to 5 do
+      begin
+        It.Name := 'item' + IntToStr(I);
+        It.N := I * 10;
+        L.Add(It);
+      end;
+      It.Name := 'changed';
+      Copy2 := L[3];
+      WriteLn(L.Count, ' ', L[0].Name, ' ', L[4].N, ' ', Copy2.Name);
+    end.
+    ''',
+    '5 item1 50 item4' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

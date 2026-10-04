@@ -561,7 +561,12 @@ type
       AInstVarParam: Boolean; ABaseInfo: TFieldInfo = nil);
     procedure EmitImplicitSelfStore(AAsgn: TAssignment);
     procedure EmitInterfaceAssign(AAsgn: TAssignment);
-    procedure EmitPropReadCall(AFld: TFieldAccessExpr);
+    procedure EmitPropReadCall(AFld: TFieldAccessExpr; const ASret: string = '');
+    { the record-typed property read inside AExpr (Obj.Prop, Obj.Items[I] or
+      the default-property form Obj[I]), or nil }
+    function  RecordPropRead(AExpr: TASTExpr): TFieldAccessExpr;
+    { x0 := address of a per-site scratch holding a record property's value }
+    procedure EmitRecPropToTemp(AFld: TFieldAccessExpr);
     procedure EmitInterfaceAsCast(AAsgn: TAssignment);
     { Load an interface-typed value into x0 (obj) / x1 (itab); True when the
       obj half is an OWNED +1 (a call result), False when it is borrowed. }
@@ -1665,6 +1670,12 @@ begin
   { x0 := address of a record VALUE — every lvalue-ish record shape the
     copy paths accept: plain/var-param/implicit-Self idents, subscripted
     elements, and record-typed field accesses }
+  if RecordPropRead(AExpr) <> nil then
+  begin
+    { a record-typed property (L[I] on a TList<TRec>): its getter's value }
+    EmitRecPropToTemp(RecordPropRead(AExpr));
+    Exit;
+  end;
   if AExpr is TIdentExpr then
   begin
     EmitRecIdentAddr('x0', TIdentExpr(AExpr));
@@ -5476,6 +5487,10 @@ begin
                tyDynArray]) or
             TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
       NotYet('read of a field of this type', AExpr);
+    if RecordPropRead(TFieldAccessExpr(AExpr).Base) <> nil then
+      { L[I].Field on a default record property: the getter's value }
+      EmitRecPropToTemp(RecordPropRead(TFieldAccessExpr(AExpr).Base))
+    else
     case TStringSubscriptExpr(TFieldAccessExpr(AExpr).Base)
            .StrExpr.ResolvedType.Kind of
       tyStaticArray:
@@ -6054,7 +6069,8 @@ begin
   NotYet('statement ' + AStmt.ClassName, AStmt);
 end;
 
-procedure TArm64Backend.EmitPropReadCall(AFld: TFieldAccessExpr);
+procedure TArm64Backend.EmitPropReadCall(AFld: TFieldAccessExpr;
+  const ASret: string);
 begin
   { method-backed property read: a getter call on the receiver.  The value
     lands wherever the getter's return convention puts it (x0 for scalars,
@@ -6140,6 +6156,9 @@ begin
     EmitImplicitBaseStep('x0', AFld.FieldInfo);
   if AFld.PropIndexExpr <> nil then
     EmitPopTo('x1');
+  { a large record getter writes its Result through x8 }
+  if ASret <> '' then
+    EmitSlotAddr('x8', ASret);
   if AFld.PropAccessorVSlot >= 0 then
   begin
     Self.Emit(#9'ldr x9, [x0]');
@@ -6150,6 +6169,58 @@ begin
   else
     Self.Emit(Format(#9'bl %s',
       [PropAccessorSym(AFld.PropOwnerType, AFld.PropRead.ReadMethod)]));
+end;
+
+function TArm64Backend.RecordPropRead(AExpr: TASTExpr): TFieldAccessExpr;
+var
+  E: TASTExpr;
+begin
+  Result := nil;
+  E := AExpr;
+  if (E is TStringSubscriptExpr) and
+     (TStringSubscriptExpr(E).IndexExpr = nil) then
+    { the default-property form Obj[I]: a subscript wrapping the property
+      read, whose PropIndexExpr carries the index }
+    E := TStringSubscriptExpr(E).StrExpr;
+  if (E is TFieldAccessExpr) and
+     (TFieldAccessExpr(E).PropRead <> nil) and
+     (E.ResolvedType <> nil) and
+     (E.ResolvedType.Kind = tyRecord) then
+    Result := TFieldAccessExpr(E);
+end;
+
+procedure TArm64Backend.EmitRecPropToTemp(AFld: TFieldAccessExpr);
+var
+  Shape, K: Integer;
+  Tmp: string;
+begin
+  { a record-typed property getter's value, materialised like a record
+    call (EmitRecCallToRret): a per-site scratch, filled through x8 for the
+    large shape or from x0/x1/d0.. for the register shapes }
+  Tmp := '__rtmp_' + IntToStr(FJArgN);
+  FJArgN := FJArgN + 1;
+  if not FFrame.ContainsKey(Tmp) then
+    AddLocal(Tmp, AFld.ResolvedType.RawSize());
+  Shape := RecReturnShape(TRecordTypeDesc(AFld.ResolvedType));
+  if Shape = 0 then
+    EmitPropReadCall(AFld, Tmp)
+  else
+  begin
+    EmitPropReadCall(AFld);
+    EmitSlotAddr('x9', Tmp);
+    case Shape of
+      1: Self.Emit(#9'str x0, [x9]');
+      2:
+      begin
+        Self.Emit(#9'str x0, [x9]');
+        Self.Emit(#9'str x1, [x9, #8]');
+      end;
+    else
+      for K := 0 to (Shape - 100) - 1 do
+        Self.Emit(Format(#9'str d%d, [x9, #%d]', [K, K * 8]));
+    end;
+  end;
+  EmitSlotAddr('x0', Tmp);
 end;
 
 procedure TArm64Backend.EmitInterfaceAssign(AAsgn: TAssignment);
