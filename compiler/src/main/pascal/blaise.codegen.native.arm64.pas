@@ -565,7 +565,9 @@ type
       AVarParam: Boolean; AImplicitBase: TFieldInfo; ANode: TASTNode);
     function  IntfItabSym(const AClassName, AIntfName: string): string;
     procedure EmitTypeinfoAddr(const AReg, ATypeName: string);
-    procedure EmitIntfDispatch(const AVarName: string; AIdx: Integer;
+    procedure EmitVarArgAddrToX0(Arg: TASTExpr);
+    procedure EmitIntfDispatch(const AVarName: string; AIntf: TInterfaceTypeDesc;
+      AIdx: Integer;
       AArgs: TObjectList; AObjExpr: TASTExpr = nil; AVarParam: Boolean = False;
       AImplicitBase: TFieldInfo = nil; const ASret: string = '');
     procedure EmitIntfMetaSections;
@@ -6287,6 +6289,7 @@ begin
        (ME.ResolvedClassType.Kind = tyInterface) then
       { itab dispatch returning an interface: the same x8 sret contract }
       EmitIntfDispatch(ME.ObjectName,
+        TInterfaceTypeDesc(ME.ResolvedClassType),
         TInterfaceTypeDesc(ME.ResolvedClassType).MethodIndex(ME.Name),
         ME.Args, ME.ObjExpr, ME.IsVarParam, nil, '__iret')
     else if (ME.ResolvedMethod <> nil) and not ME.IsConstructorCall and
@@ -11118,29 +11121,7 @@ begin
           straight through to another var param forwards the address it
           already holds; a field lvalue (CD.Field) passes the field's
           address computed from its owning record/instance. }
-        if (Arg is TIdentExpr) and (Arg.ResolvedType <> nil) and
-           (Arg.ResolvedType.Kind = tyInterface) and
-           not IsLocal(TIdentExpr(Arg).Name) and
-           (TIdentExpr(Arg).ParamMode <> pmVar) and
-           not TIdentExpr(Arg).IsImplicitSelf then
-          { a global interface's halves are two separate symbols, so the
-            pair has no single address to hand over }
-          NotYet('var argument from a global interface variable', Arg)
-        else if Arg is TIdentExpr then
-          { EmitRecIdentAddr handles all three: a var-param forward (slot
-            holds the caller's address), an implicit-Self FIELD (Self + field
-            offset — the leg-14 case, e.g. LkAddStr(var ..., FDynStrTab)), and
-            a plain local/global slot.  Mirrors x86-64 EmitVarArgAddrToRax. }
-          EmitRecIdentAddr('x0', TIdentExpr(Arg))
-        else if (Arg is TFieldAccessExpr) and
-                (TFieldAccessExpr(Arg).FieldInfo <> nil) then
-        begin
-          if ArcExprOwnsRef(TFieldAccessExpr(Arg).Base) then
-            NotYet('var field argument on an owned transient base', Arg);
-          EmitRecFieldAddrToX0(TFieldAccessExpr(Arg));
-        end
-        else
-          NotYet('var argument from this expression', Arg);
+        EmitVarArgAddrToX0(Arg);
         EmitPushX0();
         if NInt >= 8 then
         begin
@@ -12529,8 +12510,36 @@ begin
   end;
 end;
 
+procedure TArm64Backend.EmitVarArgAddrToX0(Arg: TASTExpr);
+begin
+  { x0 := the address a var/out parameter receives for the lvalue Arg }
+  if (Arg is TIdentExpr) and (Arg.ResolvedType <> nil) and
+     (Arg.ResolvedType.Kind = tyInterface) and
+     not IsLocal(TIdentExpr(Arg).Name) and
+     (TIdentExpr(Arg).ParamMode <> pmVar) and
+     not TIdentExpr(Arg).IsImplicitSelf then
+    { a global interface's halves are two separate symbols, so the
+      pair has no single address to hand over }
+    NotYet('var argument from a global interface variable', Arg)
+  else if Arg is TIdentExpr then
+    { EmitRecIdentAddr handles all three: a var-param forward (slot
+      holds the caller's address), an implicit-Self FIELD (Self + field
+      offset — the leg-14 case, e.g. LkAddStr(var ..., FDynStrTab)), and
+      a plain local/global slot.  Mirrors x86-64 EmitVarArgAddrToRax. }
+    EmitRecIdentAddr('x0', TIdentExpr(Arg))
+  else if (Arg is TFieldAccessExpr) and
+          (TFieldAccessExpr(Arg).FieldInfo <> nil) then
+  begin
+    if ArcExprOwnsRef(TFieldAccessExpr(Arg).Base) then
+      NotYet('var field argument on an owned transient base', Arg);
+    EmitRecFieldAddrToX0(TFieldAccessExpr(Arg));
+  end
+  else
+    NotYet('var argument from this expression', Arg);
+end;
+
 procedure TArm64Backend.EmitIntfDispatch(const AVarName: string;
-  AIdx: Integer; AArgs: TObjectList; AObjExpr: TASTExpr; AVarParam: Boolean;
+  AIntf: TInterfaceTypeDesc; AIdx: Integer; AArgs: TObjectList; AObjExpr: TASTExpr; AVarParam: Boolean;
   AImplicitBase: TFieldInfo; const ASret: string);
 var
   I: Integer;
@@ -12559,6 +12568,15 @@ begin
   for I := 0 to AArgs.Count - 1 do
   begin
     Arg := TASTExpr(AArgs.Items[I]);
+    if AIntf.MethodParamIsVar(AIdx, I) then
+    begin
+      { a var/out parameter takes the lvalue's ADDRESS, whatever its type --
+        passing the value instead hands the callee a nil / garbage pointer
+        to write through }
+      EmitVarArgAddrToX0(Arg);
+      EmitPushX0();
+      Continue;
+    end;
     if not (IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) or
             ((Arg.ResolvedType <> nil) and
              (Arg.ResolvedType.Kind in [tyClass, tyPChar, tyPointer, tyString,
@@ -12980,6 +12998,7 @@ begin
       if AStmt.ResolvedReturnTypeDesc.Kind <> tyInterface then
         NotYet('discarded aggregate-returning interface call', AStmt);
       EmitIntfDispatch(AStmt.ObjectName,
+        TInterfaceTypeDesc(AStmt.ResolvedClassType),
         TInterfaceTypeDesc(AStmt.ResolvedClassType).MethodIndex(AStmt.Name),
         AStmt.Args, AStmt.ObjExpr, AStmt.IsVarParam, AStmt.ImplicitBaseInfo,
         '__iret');
@@ -12988,6 +13007,7 @@ begin
       Exit;
     end;
     EmitIntfDispatch(AStmt.ObjectName,
+      TInterfaceTypeDesc(AStmt.ResolvedClassType),
       TInterfaceTypeDesc(AStmt.ResolvedClassType).MethodIndex(AStmt.Name),
       AStmt.Args, AStmt.ObjExpr, AStmt.IsVarParam, AStmt.ImplicitBaseInfo);
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
@@ -13278,6 +13298,7 @@ begin
        IsAggregateReturn(AExpr.ResolvedType) then
       NotYet('aggregate-returning interface call', AExpr);
     EmitIntfDispatch(AExpr.ObjectName,
+      TInterfaceTypeDesc(AExpr.ResolvedClassType),
       TInterfaceTypeDesc(AExpr.ResolvedClassType).MethodIndex(AExpr.Name),
       AExpr.Args, AExpr.ObjExpr, AExpr.IsVarParam);
     Exit;

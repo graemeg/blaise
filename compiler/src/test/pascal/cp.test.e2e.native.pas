@@ -407,6 +407,7 @@ type
     procedure TestRun_Native_IntfVarParamAndChainedReceiver;
     procedure TestRun_Native_VarOpenArray_ElemReadWrite;
     procedure TestRun_Native_InterfaceArrayElements;
+    procedure TestRun_Native_IntfCall_OutStringParam;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -6269,6 +6270,60 @@ begin
     '21 2 13 9' + LE + 'True' + LE + 'False' + LE + 'True' + LE +
     'destroyed 10' + LE + 'end run' + LE + 'destroyed 5' + LE +
     'destroyed 0' + LE + 'destroyed 20' + LE + 'done' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_IntfCall_OutStringParam;
+begin
+  { an itab call to a method with var/out parameters passes the lvalue's
+    ADDRESS.  arm64 passed the string VALUE (nil for an empty local), so the
+    callee's `ALine := ...` wrote through nil and the process segfaulted --
+    the Net.Smtp ReadLine shape. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      IReader = interface
+        function ReadLine(out ALine: string; var ACount: Integer): Boolean;
+      end;
+      TReader = class(IReader)
+        function ReadLine(out ALine: string; var ACount: Integer): Boolean;
+      end;
+      TUser = class
+      public
+        FR: IReader;
+        FLast: string;
+        procedure Pull;
+      end;
+    function TReader.ReadLine(out ALine: string; var ACount: Integer): Boolean;
+    begin
+      ACount := ACount + 1;
+      ALine := 'line ' + IntToStr(ACount);
+      Result := True;
+    end;
+    procedure TUser.Pull;
+    var
+      N: Integer;
+    begin
+      N := 4;
+      if FR.ReadLine(FLast, N) then
+        WriteLn(FLast, ' ', N);
+    end;
+    var
+      R: IReader;
+      L: string;
+      C: Integer;
+      U: TUser;
+    begin
+      R := TReader.Create();
+      C := 0;
+      R.ReadLine(L, C);
+      WriteLn(L);
+      U := TUser.Create();
+      U.FR := R;
+      U.Pull();
+    end.
+    ''',
+    'line 1' + LE + 'line 5 5' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;

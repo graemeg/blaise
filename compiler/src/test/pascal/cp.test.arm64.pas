@@ -174,6 +174,7 @@ type
     procedure TestDefaultIndexedPropWrite_CallsSetter;
     procedure TestMultiDimArray_RowThenColumnStride;
     procedure TestInterfaceArrayElem_StoreAndNilCompare;
+    procedure TestIntfCall_VarArgPassesAddress;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -4451,6 +4452,45 @@ begin
   AssertTrue('itab half stored beside the obj half',
     Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
   AssertTrue('element read as a pair', Pos(#9'ldp x0, x1, [x0]', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestIntfCall_VarArgPassesAddress;
+var
+  AsmT: string;
+begin
+  { An itab call to a method with an out/var parameter must pass the
+    lvalue's ADDRESS (x29 - slot), never the slot's value.  arm64 passed
+    the value, which the callee then wrote through. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IR = interface
+        procedure Fill(out S: string);
+      end;
+      TR = class(IR)
+        procedure Fill(out S: string);
+      end;
+    procedure TR.Fill(out S: string);
+    begin
+      S := 'x';
+    end;
+    procedure Run;
+    var
+      R: IR;
+      L: string;
+    begin
+      R := TR.Create();
+      R.Fill(L);
+      WriteLn(L);
+    end;
+    begin
+      Run();
+    end.
+    ''');
+  AssertTrue('out string arg is the slot address',
+    Pos(#9'sub x0, x29, #', AsmT) >= 0);
+  AssertTrue('itab call made', Pos(#9'blr x9', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;
