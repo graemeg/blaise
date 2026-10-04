@@ -192,6 +192,7 @@ type
     procedure TestInterfaceArg_OwnedCallResultReleased;
     procedure TestForIn_RecordVar_CopiesElement;
     procedure TestRecordMethodSelfCall_ReceiverIsAddress;
+    procedure TestCallResultRegs_SavedAcrossTransientRelease;
     { slice 26: float property reads + string global initialisers }
     procedure TestFloatPropRead_And_StringGlobalInit;
     { slice 27: managed record params/results across call boundaries }
@@ -5004,6 +5005,41 @@ begin
   AssertTrue('call found', Length(Body) > 0);
   AssertTrue('Self is not dereferenced before the call',
     Pos(#9'ldr x0, [x0]', Body) < 0);
+end;
+
+procedure TArm64BackendTests.TestCallResultRegs_SavedAcrossTransientRelease;
+var
+  AsmT: string;
+  PosCall, PosSave, PosRel: Integer;
+begin
+  { after a call with an owned-transient string argument, x0:x1 and d0..d3
+    are saved around the release (a 16-byte record result lives in x0:x1) }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TPair = record
+        A, B: Int64;
+      end;
+    function Mk(const S: string): TPair;
+    begin
+      Result.A := Length(S);
+    end;
+    var
+      R: TPair;
+      N: Int64;
+    begin
+      R := Mk('ab' + IntToStr(N));
+    end.
+    ''');
+  PosCall := Pos(#9'bl _Mk', AsmT);
+  AssertTrue('call found', PosCall >= 0);
+  PosSave := PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PosCall);
+  PosRel := PosEx(#9'bl __StringRelease', AsmT, PosCall);
+  AssertTrue('both integer result registers saved before the release',
+    (PosSave > PosCall) and (PosSave < PosRel));
+  AssertTrue('restored after the release',
+    PosEx(#9'ldp x0, x1, [sp], #16', AsmT, PosRel) > PosRel);
 end;
 
 procedure TArm64BackendTests.TestInterfaceAssign_FromMethodCall;

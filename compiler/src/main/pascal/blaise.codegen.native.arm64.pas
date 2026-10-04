@@ -12194,10 +12194,14 @@ begin
   end;
   if TransN > 0 then
   begin
-    { the call result (x0/d0) must survive the releases }
-    EmitPushX0();
-    Self.Emit(#9'fmov x9, d0');
-    Self.Emit(#9'str x9, [sp, #-16]!');
+    { the call result must survive the releases -- ALL of its registers: a
+      two-eightbyte record comes back in x0:x1 and an HFA in d0..d3.  Saving
+      only x0/d0 let the release call clobber x1, so B := F(S + ...) with a
+      16-byte record result got a garbage second half (TUuid.Parse with an
+      owned-transient string argument). }
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+    Self.Emit(#9'stp d0, d1, [sp, #-16]!');
+    Self.Emit(#9'stp d2, d3, [sp, #-16]!');
     for I := 0 to TransN - 1 do
     begin
       { reload from the x29-relative park slot — stable across the arg pushes,
@@ -12215,9 +12219,9 @@ begin
         transient) also lands here for its single release. }
       EmitCallSym('_StringRelease');
     end;
-    Self.Emit(#9'ldr x9, [sp], #16');
-    Self.Emit(#9'fmov d0, x9');
-    EmitPopTo('x0');
+    Self.Emit(#9'ldp d2, d3, [sp], #16');
+    Self.Emit(#9'ldp d0, d1, [sp], #16');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
   end;
   if StackArea > 0 then
     EmitAddSubImm('add', 'sp', 'sp', StackArea);

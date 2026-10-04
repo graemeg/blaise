@@ -425,6 +425,7 @@ type
     procedure TestRun_Native_InterfaceArg_AnyExpression;
     procedure TestRun_Native_ForIn_RecordAndInterfaceVars;
     procedure TestRun_Native_RecordMethod_RecordReturningSelfCall;
+    procedure TestRun_Native_RegisterRecordResult_SurvivesArgRelease;
     { M8b — weak interface variable: _WeakAssign/_WeakClear instead of ARC. }
     procedure TestRun_Native_WeakInterfaceVar;
     { M8b — sret temp record field release: managed fields of a record
@@ -7161,6 +7162,48 @@ begin
     end.
     ''',
     'zero0' + LE + '4 one -1' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_RegisterRecordResult_SurvivesArgRelease;
+begin
+  { a 16-byte record (x0:x1) or a two-Double HFA (d0:d1) returned by a call
+    whose argument is an owned-transient string: the post-call release of
+    the transient must not clobber the second result register.  It saved
+    only x0/d0, so the second half came back as garbage (the stdlib's
+    TUuid.Parse(A.ToString()) round trip). }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TPair = record
+        A, B: Int64;
+      end;
+      TVec = record
+        X, Y: Double;
+      end;
+    function Mk(const S: string): TPair;
+    begin
+      Result.A := Length(S);
+      Result.B := Length(S) * 1000 + 7;
+    end;
+    function MkV(const S: string): TVec;
+    begin
+      Result.X := Length(S);
+      Result.Y := Length(S) + 0.5;
+    end;
+    var
+      P: TPair;
+      V: TVec;
+      N: Integer;
+    begin
+      N := 3;
+      P := Mk('ab' + IntToStr(N));
+      WriteLn(P.A, ' ', P.B);
+      V := MkV('xyz' + IntToStr(N));
+      WriteLn(Trunc(V.X), ' ', Trunc(V.Y * 10));
+    end.
+    ''',
+    '3 3007' + LE + '4 45' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_WeakInterfaceVar;
