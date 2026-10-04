@@ -1677,6 +1677,8 @@ var
   IsRef: Boolean;
   Src: TIdentExpr;
   Tmp: string;
+  FAE: TFieldAccessExpr;
+  MD: TMethodDecl;
 begin
   { Closure ('reference to') / method-pointer ('of object') target: a 16-byte
     fat value, Code at +0 and Env/Data at +8.  The generic scalar path stored
@@ -1732,6 +1734,53 @@ begin
     Self.Emit(#9'stp x9, x10, [x1]');
     Exit;
   end;
+  if (AAsgn.Expr is TAddrOfExpr) and
+     (TAddrOfExpr(AAsgn.Expr).Expr is TFieldAccessExpr) and
+     (TFieldAccessExpr(TAddrOfExpr(AAsgn.Expr).Expr).ResolvedMethod is TMethodDecl) then
+  begin
+    { F := @Obj.Method: build the (Code, receiver) pair straight into the
+      target -- the same layout as a closure whose Env is the receiver.  A
+      virtual method resolves through the receiver's vtable, so @Obj.M
+      captures the dynamic override exactly as a direct Obj.M() call would.
+      A 'reference to' target takes a strong reference to the receiver and
+      releases the old Env; an 'of object' target holds it unretained, as
+      on x86-64. }
+    FAE := TFieldAccessExpr(TAddrOfExpr(AAsgn.Expr).Expr);
+    MD := TMethodDecl(FAE.ResolvedMethod);
+    if MD.IsRecordMethod or MD.IsStatic or FAE.IsImplicitSelf then
+      NotYet('method pointer to this method form', AAsgn);
+    if IsRef then
+    begin
+      EmitSlotAddr('x9', AAsgn.Name);
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');
+    end;
+    if FAE.Base <> nil then
+    begin
+      if ArcExprOwnsRef(FAE.Base) then
+        NotYet('method pointer on an owned transient receiver', AAsgn);
+      Self.EmitExprToX0(FAE.Base);
+    end
+    else if not EmitCapturedBase('x0', FAE.RecordName, True, False) then
+      EmitLoadSlot('x0', FAE.RecordName);
+    EmitPushX0();                              { [receiver] }
+    if MD.VTableSlot >= 0 then
+    begin
+      Self.Emit(#9'ldr x9, [x0]');             { vtable }
+      Self.Emit(Format(#9'ldr x1, [x9, #%d]', [(MD.VTableSlot + 1) * 8]));
+    end
+    else
+    begin
+      Self.Emit(Format(#9'adrp x1, %s@PAGE', [RoutineSym(MD, '')]));
+      Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF', [RoutineSym(MD, '')]));
+    end;
+    EmitSlotAddr('x9', AAsgn.Name);
+    EmitPopTo('x0');                           { receiver }
+    Self.Emit(#9'stp x1, x0, [x9]');           { Code at +0, receiver at +8 }
+    if IsRef then
+      EmitCallSym('_ClassAddRef');
+    Exit;
+  end;
   if (AAsgn.Expr is TFuncCallExpr) and
      (TFuncCallExpr(AAsgn.Expr).ResolvedDecl is TMethodDecl) and
      not TFuncCallExpr(AAsgn.Expr).IsIndirectCall and
@@ -1746,6 +1795,53 @@ begin
     Tmp := EmitClosureResultCall(
       TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl),
       TFuncCallExpr(AAsgn.Expr).Name, TFuncCallExpr(AAsgn.Expr).Args);
+    if IsRef then
+    begin
+      EmitSlotAddr('x9', AAsgn.Name);
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');
+    end;
+    EmitSlotAddr('x1', Tmp);
+    Self.Emit(#9'ldp x9, x10, [x1]');
+    EmitSlotAddr('x1', AAsgn.Name);
+    Self.Emit(#9'stp x9, x10, [x1]');
+    Exit;
+  end;
+  if (AAsgn.Expr is TMethodCallExpr) and
+     (TMethodCallExpr(AAsgn.Expr).ResolvedMethod is TMethodDecl) and
+     not TMethodCallExpr(AAsgn.Expr).IsConstructorCall and
+     not TMethodCallExpr(AAsgn.Expr).IsStaticCall and
+     not TMethodCallExpr(AAsgn.Expr).IsProcFieldCall and
+     not TMethodCallExpr(AAsgn.Expr).IsMetaclassDispatch and
+     not TMethodDecl(TMethodCallExpr(AAsgn.Expr).ResolvedMethod).IsRecordMethod and
+     IsMethodPtrType(TMethodDecl(
+       TMethodCallExpr(AAsgn.Expr).ResolvedMethod).ResolvedReturnType) then
+  begin
+    { F := Obj.MakeClosure(...): as for a plain factory call, the callee
+      fills a fresh scratch through x8 and hands over its Env reference; the
+      receiver is pushed for EmitCall to pop into x0 (virtual dispatch keys
+      on the method's VTableSlot) }
+    MD := TMethodDecl(TMethodCallExpr(AAsgn.Expr).ResolvedMethod);
+    if TMethodCallExpr(AAsgn.Expr).ObjExpr <> nil then
+    begin
+      if ArcExprOwnsRef(TMethodCallExpr(AAsgn.Expr).ObjExpr) then
+        NotYet('closure-returning call on an owned transient receiver', AAsgn);
+      Self.EmitExprToX0(TMethodCallExpr(AAsgn.Expr).ObjExpr);
+    end
+    else if not EmitCapturedBase('x0', TMethodCallExpr(AAsgn.Expr).ObjectName,
+              True, TMethodCallExpr(AAsgn.Expr).IsVarParam) then
+    begin
+      EmitLoadSlot('x0', TMethodCallExpr(AAsgn.Expr).ObjectName);
+      if TMethodCallExpr(AAsgn.Expr).IsVarParam then
+        Self.Emit(#9'ldr x0, [x0]');
+    end;
+    EmitPushX0();
+    Tmp := '__fret_' + IntToStr(FFretN);
+    FFretN := FFretN + 1;
+    if not FFrame.ContainsKey(Tmp) then
+      AddLocal(Tmp, 16);
+    EmitCall(MD, TMethodCallExpr(AAsgn.Expr).Name,
+      TMethodCallExpr(AAsgn.Expr).Args, Tmp, True, MD.VTableSlot);
     if IsRef then
     begin
       EmitSlotAddr('x9', AAsgn.Name);
