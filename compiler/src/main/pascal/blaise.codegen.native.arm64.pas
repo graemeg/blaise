@@ -273,7 +273,14 @@ type
     procedure GuardNoOpenArrayParam(AProcType: TProceduralTypeDesc;
       ANode: TASTNode);
     procedure EmitFatPtrCall(const AAddrReg: string; AProcType: TProceduralTypeDesc;
-      AArgs: TObjectList);
+      AArgs: TObjectList; AIsFat: Boolean = True);
+    procedure EmitProcFieldAddr(const AObjectName: string; AObjExpr: TASTExpr;
+      AIsVarParam, AImplicitSelf: Boolean; AReceiver: TTypeDesc;
+      AField: TFieldInfo; ANode: TASTNode);
+    procedure EmitDiscardedProcResult(APT: TProceduralTypeDesc);
+    procedure EmitProcFieldCall(const AObjectName: string; AObjExpr: TASTExpr;
+      AIsVarParam, AImplicitSelf: Boolean; AReceiver: TTypeDesc;
+      AField: TFieldInfo; AArgs: TObjectList; ANode: TASTNode);
     { Release an owned-transient STRING value in x0 by shape, mirroring
       EmitCall's post-call disposal: a concat/rc=0 unowned transient
       (ArcExprIsUnownedStrTransient) needs AddRef+Release (0->1->0 frees once);
@@ -1476,7 +1483,15 @@ begin
           (AFld.TypeDesc.Kind in [tyPointer, tyPChar]) then
     Self.EmitExprToX0(AValueExpr)
   else
-    NotYet('store to a field of this type', AValueExpr);
+  begin
+    { every other field kind (closure / method pointer, plain procedural,
+      dyn array, metaclass, small set, non-managed record) is handled by the
+      stacked store: put the instance base on the stack and delegate }
+    EmitInstBase('x0', AInstSlot, AInstVarParam, ABaseInfo);
+    EmitPushX0();
+    EmitInstanceFieldStoreStacked(AFld, AValueExpr);
+    Exit;
+  end;
   EmitPushX0();
   EmitInstBase('x9', AInstSlot, AInstVarParam, ABaseInfo);
   EmitPopTo('x0');
@@ -2158,6 +2173,9 @@ procedure TArm64Backend.EmitFatFieldStoreStacked(AFld: TFieldInfo;
   AValueExpr: TASTExpr);
 var
   IsRef: Boolean;
+  FAE: TFieldAccessExpr;
+  MD: TMethodDecl;
+  SrcAddr: TAddrOfExpr;
 begin
   { A closure / method-pointer FIELD (16 bytes: Code, Env) at AFld.Offset of
     the instance whose address is on TOP of the stack (consumed).  The value
@@ -2181,6 +2199,45 @@ begin
     Self.Emit(#9'stp xzr, xzr, [x9]');
     Exit;
   end;
+  if (AValueExpr is TAddrOfExpr) and
+     (TAddrOfExpr(AValueExpr).Expr is TFieldAccessExpr) and
+     (TFieldAccessExpr(TAddrOfExpr(AValueExpr).Expr).ResolvedMethod is TMethodDecl) then
+  begin
+    { Field := @Obj.Method: (Code, receiver) built straight into the field;
+      a virtual method's code comes from the receiver's own vtable }
+    FAE := TFieldAccessExpr(TAddrOfExpr(AValueExpr).Expr);
+    MD := TMethodDecl(FAE.ResolvedMethod);
+    if MD.IsRecordMethod or MD.IsStatic or FAE.IsImplicitSelf or
+       ((FAE.Base <> nil) and ArcExprOwnsRef(FAE.Base)) then
+      NotYet('method pointer to this method form', AValueExpr);
+    if IsRef then
+    begin
+      Self.Emit(#9'ldr x9, [sp]');
+      EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');              { the old Env }
+    end;
+    if FAE.Base <> nil then
+      Self.EmitExprToX0(FAE.Base)
+    else if not EmitCapturedBase('x0', FAE.RecordName, True, False) then
+      EmitLoadSlot('x0', FAE.RecordName);
+    if MD.VTableSlot >= 0 then
+    begin
+      Self.Emit(#9'ldr x9, [x0]');
+      Self.Emit(Format(#9'ldr x1, [x9, #%d]', [(MD.VTableSlot + 1) * 8]));
+    end
+    else
+    begin
+      Self.Emit(Format(#9'adrp x1, %s@PAGE', [RoutineSym(MD, '')]));
+      Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF', [RoutineSym(MD, '')]));
+    end;
+    Self.Emit(#9'ldr x9, [sp], #16');            { pop the base }
+    EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
+    Self.Emit(#9'stp x1, x0, [x9]');             { Code, receiver }
+    if IsRef then
+      EmitCallSym('_ClassAddRef');               { x0 = receiver }
+    Exit;
+  end;
   if AValueExpr is TAnonMethodExpr then
     EmitAnonValueToSlot(TAnonMethodExpr(AValueExpr))
   else if (AValueExpr is TIdentExpr) and IsMethodPtrType(AValueExpr.ResolvedType) and
@@ -2188,6 +2245,23 @@ begin
           (TIdentExpr(AValueExpr).ParamMode = pmNone) and
           not TIdentExpr(AValueExpr).IsImplicitSelf then
     EmitSlotAddr('x0', TIdentExpr(AValueExpr).Name)
+  else if (AValueExpr is TFieldAccessExpr) and
+          (TFieldAccessExpr(AValueExpr).FieldInfo <> nil) and
+          not TFieldAccessExpr(AValueExpr).IsMethodCall and
+          (TFieldAccessExpr(AValueExpr).PropRead = nil) then
+  begin
+    { another closure FIELD as the source: address it via a transient @ }
+    SrcAddr := TAddrOfExpr.Create();
+    try
+      SrcAddr.Line := AValueExpr.Line;
+      SrcAddr.Col := AValueExpr.Col;
+      SrcAddr.Expr := AValueExpr;
+      Self.EmitExprToX0(SrcAddr);
+    finally
+      SrcAddr.Expr := nil;   { owned by the caller's node }
+      SrcAddr.Free();
+    end;
+  end
   else
     NotYet('closure / method-pointer field store from this expression',
       AValueExpr);
@@ -2210,6 +2284,88 @@ begin
   Self.Emit(#9'add sp, sp, #32');                { drop &value and base }
 end;
 
+procedure TArm64Backend.EmitProcFieldAddr(const AObjectName: string;
+  AObjExpr: TASTExpr; AIsVarParam, AImplicitSelf: Boolean;
+  AReceiver: TTypeDesc; AField: TFieldInfo; ANode: TASTNode);
+var
+  IsRec: Boolean;
+begin
+  { x0 := the address of a procedural-typed FIELD.  The receiver base follows
+    the class-vs-record rule (BUG-20260722-closure-record-field-direct-call):
+    a class reference's VALUE is the instance, a record's ADDRESS is its
+    storage.  Every arm here is call-free except the chained-expression one,
+    which runs before any argument is evaluated. }
+  if AField = nil then
+    NotYet('procedural-field call without field info', ANode);
+  IsRec := (AReceiver <> nil) and (AReceiver.Kind = tyRecord);
+  if AImplicitSelf then
+    EmitLoadSlot('x0', 'Self')        { a record method's Self is an address too }
+  else if AObjExpr <> nil then
+  begin
+    if (AObjExpr.ResolvedType <> nil) and (AObjExpr.ResolvedType.Kind = tyRecord) then
+      EmitRecAddrToX0(AObjExpr)
+    else
+    begin
+      if ArcExprOwnsRef(AObjExpr) then
+        NotYet('procedural-field call on an owned transient receiver', ANode);
+      Self.EmitExprToX0(AObjExpr);
+    end;
+  end
+  else if IsRec then
+  begin
+    if IsCaptured(AObjectName) then
+    begin
+      EmitLoadSlot('x0', '_cap_' + AObjectName);
+      if AIsVarParam then
+        Self.Emit(#9'ldr x0, [x0]');
+    end
+    else if AIsVarParam then
+      EmitLoadSlot('x0', AObjectName)  { slot holds the caller's record address }
+    else
+      EmitSlotAddr('x0', AObjectName);
+  end
+  else if not EmitCapturedBase('x0', AObjectName, True, AIsVarParam) then
+  begin
+    EmitLoadSlot('x0', AObjectName);
+    if AIsVarParam then
+      Self.Emit(#9'ldr x0, [x0]');
+  end;
+  if AField.Offset <> 0 then
+    EmitAddSubImm('add', 'x0', 'x0', AField.Offset);
+end;
+
+procedure TArm64Backend.EmitProcFieldCall(const AObjectName: string;
+  AObjExpr: TASTExpr; AIsVarParam, AImplicitSelf: Boolean;
+  AReceiver: TTypeDesc; AField: TFieldInfo; AArgs: TObjectList;
+  ANode: TASTNode);
+var
+  PT: TProceduralTypeDesc;
+begin
+  { Obj.Handler(args) / Handler(args) where Handler is a procedural-typed
+    FIELD: address the field, then dispatch through it -- a closure / method
+    pointer as a fat value (Env or Self in x0), a plain procedure pointer as
+    one code word. }
+  if (AField = nil) or not (AField.TypeDesc is TProceduralTypeDesc) then
+    NotYet('procedural-field call on this field', ANode);
+  PT := TProceduralTypeDesc(AField.TypeDesc);
+  EmitProcFieldAddr(AObjectName, AObjExpr, AIsVarParam, AImplicitSelf,
+    AReceiver, AField, ANode);
+  EmitFatPtrCall('x0', PT, AArgs, IsMethodPtrType(PT));
+end;
+
+procedure TArm64Backend.EmitDiscardedProcResult(APT: TProceduralTypeDesc);
+begin
+  { a DISCARDED owned result of a call through a procedural value is released,
+    as for a direct call (results come back rc=1) }
+  if (APT = nil) or (APT.ReturnType = nil) then Exit;
+  if APT.ReturnType.IsString() then
+    EmitCallSym('_StringRelease')
+  else if APT.ReturnType.Kind = tyClass then
+    EmitCallSym('_ClassRelease')
+  else if APT.ReturnType.Kind = tyDynArray then
+    EmitCallSym('_DynArrayRelease');
+end;
+
 procedure TArm64Backend.GuardNoOpenArrayParam(AProcType: TProceduralTypeDesc;
   ANode: TASTNode);
 var
@@ -2223,7 +2379,7 @@ begin
 end;
 
 procedure TArm64Backend.EmitFatPtrCall(const AAddrReg: string;
-  AProcType: TProceduralTypeDesc; AArgs: TObjectList);
+  AProcType: TProceduralTypeDesc; AArgs: TObjectList; AIsFat: Boolean);
 var
   I, TransN: Integer;
   Arg: TASTExpr;
@@ -2242,6 +2398,8 @@ begin
     shape: 'C' = owned class (bare _ClassRelease); '1' = rc=1 owned string (bare
     _StringRelease); '0' = rc=0 unowned string (pinned with _StringAddRef BEFORE
     the blr — see EmitOwnedStrTransientPin — then one bare release after). }
+  { AIsFat = False: AAddrReg addresses a PLAIN procedural pointer (one code
+    word, no Env) -- the visible args then start at x0. }
   if AArgs.Count > 7 then
     NotYet('closure call with more than 7 arguments', nil);
   GuardNoOpenArrayParam(AProcType, nil);
@@ -2289,12 +2447,16 @@ begin
     end;
     EmitPushX0();
   end;
-  { visible args -> x1.. (last pushed first) }
+  { visible args -> x1.. (x0.. for a plain pointer), last pushed first }
   for I := AArgs.Count - 1 downto 0 do
-    EmitPopTo('x' + IntToStr(I + 1));
+    if AIsFat then
+      EmitPopTo('x' + IntToStr(I + 1))
+    else
+      EmitPopTo('x' + IntToStr(I));
   { &fat value sits below the three saved-reg slots (x21=16, x19/x20=16). }
   Self.Emit(#9'ldr x10, [sp, #32]');
-  Self.Emit(#9'ldr x0, [x10, #8]');           { Env -> hidden first arg (x0) }
+  if AIsFat then
+    Self.Emit(#9'ldr x0, [x10, #8]');         { Env -> hidden first arg (x0) }
   Self.Emit(#9'ldr x9, [x10]');               { Code }
   Self.Emit(#9'blr x9');
   { dispose owned transients (the call result in x0/d0 must survive). }
@@ -2624,7 +2786,16 @@ begin
                                              tyClass, tyPointer,
                                              tyPChar]) or
           AStmt.FieldInfo.TypeDesc.IsString()) then
-    NotYet('field of this type', AStmt);
+  begin
+    { the remaining kinds -- a closure / method pointer (a two-word store),
+      a plain procedural pointer, a dyn array, a metaclass, a small set -- go
+      through the stacked instance-field store with the record's ADDRESS as
+      the base, which applies each kind's width and ARC discipline }
+    EmitRecordBaseAddr('x0', AStmt.RecordName, AStmt.IsVarParam);
+    EmitPushX0();
+    EmitInstanceFieldStoreStacked(AStmt.FieldInfo, AStmt.Expr);
+    Exit;
+  end;
   if AStmt.FieldInfo.TypeDesc.Kind = tySingle then
   begin
     Self.EmitExprToD0OrConvert(AStmt.Expr);
@@ -3117,6 +3288,14 @@ begin
     { closure literal: materialise the fat value into its hidden slot; x0 holds
       the slot ADDRESS (the value is used by reference — leg 38). }
     EmitAnonValueToSlot(TAnonMethodExpr(AExpr));
+    Exit;
+  end;
+  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsProcFieldCall then
+  begin
+    { Handler(args) as an expression inside a method, Handler a procedural-
+      typed field of Self (BUG-20260922) }
+    EmitProcFieldCall('', nil, False, True, nil,
+      TFuncCallExpr(AExpr).ProcFieldInfo, TFuncCallExpr(AExpr).Args, AExpr);
     Exit;
   end;
   if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsConstructorCall then
@@ -6388,6 +6567,16 @@ var
   Tmp: string;
   IncLVal: TAddrOfExpr;
 begin
+  if ACall.IsProcFieldCall then
+  begin
+    { Handler(args); inside a method, Handler a procedural-typed field of
+      Self (BUG-20260922) }
+    EmitProcFieldCall('', nil, False, True, nil, ACall.ProcFieldInfo,
+      ACall.Args, ACall);
+    if ACall.ProcFieldInfo.TypeDesc is TProceduralTypeDesc then
+      EmitDiscardedProcResult(TProceduralTypeDesc(ACall.ProcFieldInfo.TypeDesc));
+    Exit;
+  end;
   if SameText(ACall.Name, 'WriteLn') then
   begin
     EmitWrite(ACall, True);
@@ -12295,7 +12484,33 @@ end;
 procedure TArm64Backend.EmitMethodCallStmt(AStmt: TMethodCallStmt);
 var
   MD: TMethodDecl;
+  PT: TProceduralTypeDesc;
 begin
+  if AStmt.IsProcFieldCall then
+  begin
+    { Obj.Handler(args); / FInner.Handler(args); -- a call THROUGH a
+      procedural-typed field (BUG-20260922) }
+    if (AStmt.ProcFieldInfo = nil) or
+       not (AStmt.ProcFieldInfo.TypeDesc is TProceduralTypeDesc) then
+      NotYet('procedural-field call on this field', AStmt);
+    PT := TProceduralTypeDesc(AStmt.ProcFieldInfo.TypeDesc);
+    if AStmt.IsImplicitSelf and (AStmt.ImplicitBaseInfo <> nil) then
+    begin
+      { FInner.Handler(args) inside a method: Self -> the FInner base (a
+        class value or a record address), then the field
+        (BUG-20260923-implicit-field-procfield-stmt) }
+      EmitLoadSlot('x0', 'Self');
+      EmitImplicitBaseStep('x0', AStmt.ImplicitBaseInfo);
+      if AStmt.ProcFieldInfo.Offset <> 0 then
+        EmitAddSubImm('add', 'x0', 'x0', AStmt.ProcFieldInfo.Offset);
+      EmitFatPtrCall('x0', PT, AStmt.Args, IsMethodPtrType(PT));
+    end
+    else
+      EmitProcFieldCall(AStmt.ObjectName, AStmt.ObjExpr, AStmt.IsVarParam,
+        False, AStmt.ResolvedClassType, AStmt.ProcFieldInfo, AStmt.Args, AStmt);
+    EmitDiscardedProcResult(PT);
+    Exit;
+  end;
   if AStmt.IsImplicitSelf and (AStmt.ImplicitBaseInfo <> nil) and
      (TMethodDecl(AStmt.ResolvedMethod) = nil) and
      SameText(AStmt.Name, 'Free') and (AStmt.Args.Count = 0) then
@@ -12619,7 +12834,15 @@ begin
     EmitCallSym('_InheritsFrom');
     Exit;
   end;
-  if AExpr.IsMetaclassDispatch or AExpr.IsProcFieldCall or
+  if AExpr.IsProcFieldCall then
+  begin
+    { Obj.Handler(args) in expression position (BUG-20260922); the result
+      is left in x0 / d0 by the indirect call }
+    EmitProcFieldCall(AExpr.ObjectName, AExpr.ObjExpr, AExpr.IsVarParam,
+      False, AExpr.ResolvedClassType, AExpr.ProcFieldInfo, AExpr.Args, AExpr);
+    Exit;
+  end;
+  if AExpr.IsMetaclassDispatch or
      ((AExpr.ObjectName = '') and (AExpr.ObjExpr = nil)
       and not AExpr.IsStaticCall) then
     NotYet('this method-call form', AExpr);
