@@ -8,7 +8,7 @@
 |===
 | Decision | Remove the QBE backend; native code generation (x86-64, arm64) becomes the only backend.
 | Phase 0 | Done: `--help` marks `--backend qbe` and `BLAISE_BACKEND=qbe` as deprecated; the deprecation was announced to the community.
-| Phase 1 | In progress -- decouple the test suite from QBE.  1a and 1b done.
+| Phase 1 | In progress -- decouple the test suite from QBE.  1a and 1b done; 1c in progress.
 | Phase 2 | Not started -- delete the backend.  Target: release v0.15.0, which also
 makes the macOS arm64 port usable.
 | Phase 3 | Not started -- documentation.
@@ -105,27 +105,46 @@ shared harness unit (for example `cp.test.harness`) providing:
 
 === 1c. `GenIR` triage rules
 
-Every `GenIR` assertion is classified into exactly one category.
+Every `GenIR` assertion is classified into exactly one category.  The
+deciding question is whether a wrong lowering would be visible when the
+program runs.  If it would, running a program is the better test: thousands
+of e2e programs and the self-hosting fixpoints already exercise the common
+lowerings, and an assembly substring check adds brittleness (label names,
+register choice) without catching anything they miss.
 
 Front-end assertion::
 The test checks that a program is accepted or rejected, or that the semantic
 pass annotated the AST correctly, and the IR substring is only a proxy for
 that.
 +
-Action: rewrite on `Analyse` -- assert the error message, or the AST
-annotation (`ResolvedType`, `FieldInfo`, flags), directly.
+Action: rewrite on `Analyse` / `SemanticError` -- assert the error message,
+or the AST annotation (`ResolvedType`, `FieldInfo`, flags), directly.
 +
 Example: a test that compiles a program and asserts `call $Foo` appears,
 when what it means is "the overload resolved to `Foo`".
 
-Code-generation assertion::
-The test pins a lowering decision that both native backends must make: a
-call, an ARC retain or release, a frame size, an element stride, a
-narrowing.
+Behaviour assertion::
+The lowering decision changes what the program does: control flow,
+comparisons, arithmetic, conversions, calls that happen or not.
 +
-Action: port to `GenAsm`.  Assert on BOTH x86-64 and arm64 whenever the
-decision is ISA-independent (decided); assert on one ISA only when the shape
-is genuinely ISA-specific.
+Action: delete the assertion when an e2e test already covers the behaviour;
+otherwise add a small e2e test (`AssertRunsOnAll`) that would fail under the
+wrong lowering, then delete it.  Prefer inputs that discriminate -- negative
+operands for signedness, both branches taken, boundary values.
++
+Example: "`<` uses `csltw`" becomes an e2e test that compares negative
+Integers and prints the results.
+
+Code-generation assertion::
+The decision is invisible when the program runs: optimisation shape
+(register promotion, inlining, folding), the exact placement of ARC
+retains and releases where a mistake would not leak or crash in a small
+program, ABI and frame details, or a layout-sensitive bug whose symptom
+cannot be reproduced reliably by running a program.
++
+Action: port to `GenAsm` / `AsmMissing`.  Assert on BOTH x86-64 and arm64
+whenever the decision is ISA-independent (decided); assert on one ISA only
+when the shape is genuinely ISA-specific.
 +
 Example: "the old element is released before the store" -- assert the release
 call precedes the store on both ISAs.
@@ -135,8 +154,8 @@ The test pins something that exists only in the QBE lowering: `alloc16`
 frame sizes, QBE type letters (`w`/`l`), QBE block structure, QBE-specific
 workarounds.
 +
-Action: delete in Phase 2 together with the backend (record the count in the
-progress table now).
+Action: mark it `QBE-only` in a comment and leave it on `GenIR`; it is
+deleted in Phase 2 together with the backend.
 
 When an assertion fits none of the categories, or the right one is unclear,
 leave it in place and add it to the open questions at the end of this plan.
@@ -207,6 +226,10 @@ Review every `beQBE` / `QBEOrNative()` reference:
   inspection tool.
 . The backend is removed in release v0.15.0 -- the same release that makes the
   macOS arm64 port usable.  The deprecation was announced with v0.12.0.
+. A `GenIR` assertion whose behaviour is visible at run time becomes an e2e
+  test (or is deleted when one exists), not an assembly check; `GenAsm` is
+  kept for decisions a running program cannot observe (1c, revised after the
+  first file).
 
 == Open questions
 
@@ -237,7 +260,7 @@ found, for a ruling before they are migrated.
 | `cp.test.records.pas` | 17 | pending
 | `cp.test.openarray.pas` | 17 | pending
 | `cp.test.jumboset.pas` | 17 | pending
-| `cp.test.control.pas` | 17 | pending
+| `cp.test.control.pas` | 17 | done: 13 behaviour (e2e), 2 QBE-only
 | `cp.test.procs.pas` | 16 | pending
 | `cp.test.pointers.pas` | 16 | pending
 | `cp.test.dynarray.pas` | 16 | pending
