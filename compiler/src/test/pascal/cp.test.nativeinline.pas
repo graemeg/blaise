@@ -21,12 +21,11 @@ interface
 uses
   Classes, SysUtils, blaise.testing, uStrCompat,
   uLexer, uParser, uAST, uSymbolTable, uSemantic,
-  blaise.codegen.native, blaise.codegen.target, cp.test.targets, uDebugFacts;
+  blaise.codegen.native, blaise.codegen.target, cp.test.targets, uDebugFacts, cp.test.harness;
 
 type
   TNativeInlineTests = class(TTestCase)
   private
-    function GenAsm(const ASrc: string; ADebug: Boolean): string;
     function FuncRegion(const AAsm, AName: string): string;
   published
     { A small same-unit leaf called from a function body expands inline:
@@ -62,43 +61,6 @@ const
       end.
       ''';
 
-function TNativeInlineTests.GenAsm(const ASrc: string; ADebug: Boolean): string;
-var
-  L:    TLexer;
-  P:    TParser;
-  Prog: TProgram;
-  A:    TSemanticAnalyser;
-  CG:   TCodeGenNative;
-begin
-  L := TLexer.Create(ASrc);
-  P := TParser.Create(L);
-  try
-    Prog := P.Parse();
-  finally
-    P.Free(); L.Free();
-  end;
-  try
-    A := TSemanticAnalyser.Create();
-    try
-      A.Analyse(Prog);
-    finally
-      A.Free();
-    end;
-    CG := TCodeGenNative.Create();
-    try
-      CG.SetTarget(LinuxX64Target());
-      if ADebug then
-        CG.SetOpdfMode(True);
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
-  end;
-end;
-
 function TNativeInlineTests.FuncRegion(const AAsm, AName: string): string;
 var
   StartP, EndP: Integer;
@@ -114,7 +76,7 @@ procedure TNativeInlineTests.TestLeafCall_Inlined_NoCallq;
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(SrcLeaf, False), 'Use');
+  Region := FuncRegion(GenAsm(SrcLeaf, TargetX86_64), 'Use');
   AssertTrue('no callq to the inlined leaf',
     Pos('callq Clamp', Region) < 0);
   AssertTrue('inline end label present',
@@ -139,7 +101,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src, False), 'Fib');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Fib');
   AssertTrue('recursive callee keeps real calls',
     Pos('callq Fib', Region) >= 0);
 end;
@@ -148,7 +110,7 @@ procedure TNativeInlineTests.TestDebugOpdf_DisablesInlining;
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(SrcLeaf, True), 'Use');
+  Region := FuncRegion(GenAsmDebug(SrcLeaf, TargetX86_64), 'Use');
   AssertTrue('debug build keeps the real call',
     Pos('callq Clamp', Region) >= 0);
   AssertTrue('debug build has no inline expansion',

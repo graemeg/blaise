@@ -23,12 +23,11 @@ interface
 uses
   Classes, SysUtils, blaise.testing, uStrCompat,
   uLexer, uParser, uAST, uSymbolTable, uSemantic,
-  blaise.codegen.native, blaise.codegen.target, cp.test.targets, uDebugFacts;
+  blaise.codegen.native, blaise.codegen.target, cp.test.targets, uDebugFacts, cp.test.harness;
 
 type
   TNativeOptTests = class(TTestCase)
   private
-    function GenAsm(const ASrc: string): string;
     function FuncRegion(const AAsm, AName: string): string;
   published
     { Result := N - 1 with a literal RHS: the subtraction must use an
@@ -65,41 +64,6 @@ implementation
 const
   LF = #10;
 
-function TNativeOptTests.GenAsm(const ASrc: string): string;
-var
-  L:    TLexer;
-  P:    TParser;
-  Prog: TProgram;
-  A:    TSemanticAnalyser;
-  CG:   TCodeGenNative;
-begin
-  L := TLexer.Create(ASrc);
-  P := TParser.Create(L);
-  try
-    Prog := P.Parse();
-  finally
-    P.Free(); L.Free();
-  end;
-  try
-    A := TSemanticAnalyser.Create();
-    try
-      A.Analyse(Prog);
-    finally
-      A.Free();
-    end;
-    CG := TCodeGenNative.Create();
-    try
-      CG.SetTarget(LinuxX64Target());
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
-  end;
-end;
-
 function TNativeOptTests.FuncRegion(const AAsm, AName: string): string;
 var
   StartP, EndP: Integer;
@@ -126,7 +90,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src), 'Sub1');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Sub1');
   AssertTrue('literal RHS folds to an immediate subtract',
     Pos(#9'subq $1, %rax', Region) >= 0);
   AssertTrue('no push/pop expression bracket in body',
@@ -150,7 +114,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src), 'Add2');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Add2');
   AssertTrue('plain-local RHS loads straight into %rcx',
     Pos(', %rcx', Region) >= 0);
   AssertTrue('no push/pop expression bracket in body',
@@ -177,7 +141,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src), 'Classify');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Classify');
   AssertTrue('condition compares against an immediate',
     Pos(#9'cmpl $2, %eax', Region) >= 0);
   AssertTrue('condition branches with jl directly',
@@ -203,7 +167,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src), 'Five');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Five');
   AssertTrue('small constant loads via movl (zero-extends to 64-bit)',
     Pos(#9'movl $5, %eax', Region) >= 0);
   AssertTrue('no movabsq for an imm32-range constant',
@@ -227,7 +191,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src), 'main');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'main');
   AssertTrue('argument staged with a direct move',
     Pos(#9'movq %rax, %rdi', Region) >= 0);
   AssertTrue('no adjacent pushq/popq pair survives the peephole',
@@ -262,7 +226,7 @@ begin
   { Red state raised ENativeCodeGenError ("register index 6 out of range")
     from the itab-dispatch pop loop; generating at all is the regression
     guard, the itab call shape pins that the dispatch path was taken. }
-  Asm_ := GenAsm(Src);
+  Asm_ := GenAsm(Src, TargetX86_64);
   AssertTrue('itab dispatch emitted', Pos(#9'callq *%r11', Asm_) >= 0);
 end;
 
@@ -294,7 +258,7 @@ const
       ''';
 begin
   { Generating without ENativeCodeGenError is the regression guard. }
-  AssertTrue('program generates', Length(GenAsm(Src)) > 0);
+  AssertTrue('program generates', Length(GenAsm(Src, TargetX86_64)) > 0);
 end;
 
 procedure TNativeOptTests.TestInterfaceCall_FloatArg_RoutesToXmm;
@@ -322,7 +286,7 @@ const
 var
   Asm_: string;
 begin
-  Asm_ := GenAsm(Src);
+  Asm_ := GenAsm(Src, TargetX86_64);
   AssertTrue('itab dispatch emitted', Pos(#9'callq *%r11', Asm_) >= 0);
   AssertTrue('float slot loads into an xmm register',
     Pos(#9'movsd 0(%rsp), %xmm0', Asm_) >= 0);

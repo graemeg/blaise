@@ -27,12 +27,11 @@ interface
 uses
   Classes, SysUtils, blaise.testing, uStrCompat,
   uLexer, uParser, uAST, uSymbolTable, uSemantic,
-  blaise.codegen.native, blaise.codegen.target, cp.test.targets, uDebugFacts;
+  blaise.codegen.native, blaise.codegen.target, cp.test.targets, uDebugFacts, cp.test.harness;
 
 type
   TNativeConstArgTests = class(TTestCase)
   private
-    function GenAsm(const ASrc: string): string;
     { Extract one emitted function's assembly (from 'Name:' to its
       '.type Name, @function' trailer) so assertions are not polluted by
       other functions' code. }
@@ -76,41 +75,6 @@ type
 
 implementation
 
-function TNativeConstArgTests.GenAsm(const ASrc: string): string;
-var
-  L:    TLexer;
-  P:    TParser;
-  Prog: TProgram;
-  A:    TSemanticAnalyser;
-  CG:   TCodeGenNative;
-begin
-  L := TLexer.Create(ASrc);
-  P := TParser.Create(L);
-  try
-    Prog := P.Parse();
-  finally
-    P.Free(); L.Free();
-  end;
-  try
-    A := TSemanticAnalyser.Create();
-    try
-      A.Analyse(Prog);
-    finally
-      A.Free();
-    end;
-    CG := TCodeGenNative.Create();
-    try
-      CG.SetTarget(LinuxX64Target());
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
-  end;
-end;
-
 function TNativeConstArgTests.FuncRegion(const AAsm, AName: string): string;
 var
   StartP, EndP: Integer;
@@ -152,7 +116,7 @@ var
 begin
   { The callee must not retain/release a const string param — the caller
     protects the argument now (matches the QBE convention since 5a5b5d4). }
-  Region := FuncRegion(GenAsm(Src), 'SinkC');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'SinkC');
   AssertEquals('no entry AddRef in const-param callee', -1,
     Pos('_StringAddRef', Region));
   AssertEquals('no exit Release in const-param callee', -1,
@@ -175,7 +139,7 @@ var
 begin
   { Value string params keep the callee entry/exit pair — only const params
     moved to caller-side protection. }
-  Region := FuncRegion(GenAsm(Src), 'SinkV');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'SinkV');
   AssertTrue('entry AddRef kept for value param',
     Pos('_StringAddRef', Region) >= 0);
   AssertTrue('exit Release kept for value param',
@@ -203,7 +167,7 @@ var
   Region: string;
 begin
   { Forwarding a const param to a const param: borrowed all the way. }
-  Region := FuncRegion(GenAsm(Src), 'Caller');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Caller');
   AssertEquals('no AddRef in Caller', -1, Pos('_StringAddRef', Region));
   AssertEquals('no Release in Caller', -1, Pos('_StringRelease', Region));
 end;
@@ -226,7 +190,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src), 'Caller');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Caller');
   AssertEquals('no AddRef for literal arg', -1, Pos('_StringAddRef', Region));
   AssertEquals('no Release for literal arg', -1, Pos('_StringRelease', Region));
 end;
@@ -259,7 +223,7 @@ begin
   { L := Mk() consumes the owned return; Sink(L) borrows L (no pin pair).
     The only releases allowed are the assignment release-old and L's
     scope-exit release — a pinned call would add a third. }
-  Region := FuncRegion(GenAsm(Src), 'Caller');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Caller');
   AssertEquals('no AddRef in Caller', -1, Pos('_StringAddRef', Region));
   AssertTrue('at most two Releases (assign old + scope exit), no call pin',
     CountOccurrences('_StringRelease', Region) <= 2);
@@ -286,7 +250,7 @@ var
   Region: string;
 begin
   { A global can be reassigned by the callee through its own name — pin. }
-  Region := FuncRegion(GenAsm(Src), 'Caller');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Caller');
   AssertTrue('AddRef pins global arg', Pos('_StringAddRef', Region) >= 0);
   AssertTrue('Release unpins global arg', Pos('_StringRelease', Region) >= 0);
 end;
@@ -315,7 +279,7 @@ var
 begin
   { Mk() hands over a +1 temp; the post-call release consumes it (without
     this the temp leaks — the callee no longer frees it for us). }
-  Region := FuncRegion(GenAsm(Src), 'Caller');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Caller');
   AssertEquals('no AddRef for owned-return arg', -1,
     Pos('_StringAddRef', Region));
   AssertTrue('Release consumes the owned temp',
@@ -344,7 +308,7 @@ var
 begin
   { _StringConcat returns an rc=0 transient: the pin pair both protects it
     during the call and frees it afterwards. }
-  Region := FuncRegion(GenAsm(Src), 'Caller');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Caller');
   AssertTrue('AddRef pins concat temp', Pos('_StringAddRef', Region) >= 0);
   AssertTrue('Release frees concat temp', Pos('_StringRelease', Region) >= 0);
 end;
@@ -373,7 +337,7 @@ var
 begin
   { B aliases L: the callee's write to B releases L's buffer while A still
     borrows it — a var/out string sibling param forces a pin. }
-  Region := FuncRegion(GenAsm(Src), 'Caller');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Caller');
   AssertTrue('AddRef pins despite local shape',
     Pos('_StringAddRef', Region) >= 0);
 end;
@@ -402,7 +366,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src), 'Caller');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Caller');
   AssertTrue('AddRef pins address-taken local',
     Pos('_StringAddRef', Region) >= 0);
 end;
@@ -433,7 +397,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src), 'Caller');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Caller');
   AssertTrue('AddRef pins captured local',
     Pos('_StringAddRef', Region) >= 0);
 end;
@@ -475,7 +439,7 @@ begin
     the caller must protect every string argument by shape: the concat
     transient pins.  Without this, a const-param implementor receives an
     unprotected rc=0 transient. }
-  Region := FuncRegion(GenAsm(Src), 'Caller');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Caller');
   AssertTrue('AddRef pins concat temp at interface call site',
     Pos('_StringAddRef', Region) >= 0);
   AssertTrue('Release frees concat temp at interface call site',
@@ -501,7 +465,7 @@ begin
       end;
       begin
       end.
-      '''), 'Drop');
+      ''', TargetX86_64), 'Drop');
   AssertTrue('releases the field value',
     CountOccurrences('callq _ClassRelease', Region) >= 1);
   AssertTrue('nils the field slot after the release',
@@ -574,7 +538,7 @@ begin
       begin
         WriteLn(Twice(4));
       end.
-      ''');
+      ''', TargetX86_64);
   AssertTrue('no debug labels in a normal build', Pos('.Ldbg_', Asm_) < 0);
 end;
 
@@ -652,7 +616,7 @@ const
 var
   AsmText: string;
 begin
-  AsmText := GenAsm(Src);
+  AsmText := GenAsm(Src, TargetX86_64);
   { The Double argument must reach the SSE arg register, not an integer one. }
   AssertTrue('float method arg loaded into %xmm0',
     Pos('movsd', AsmText) >= 0);
@@ -677,7 +641,7 @@ var
   AsmText: string;
   Region:  string;
 begin
-  AsmText := GenAsm(Src);
+  AsmText := GenAsm(Src, TargetX86_64);
   Region := Self.FuncRegion(AsmText, 'GetFortyTwo');
   { The verbatim asm instructions appear in the function body. }
   AssertTrue('verbatim movl $42', Pos('movl $42, %eax', Region) >= 0);
@@ -714,7 +678,7 @@ begin
     path stores Self into 0(%rsp) and fills all six integer arg registers —
     unlike the <=6 push/pop fast path.  Before the fix this aborted codegen with
     'arg register index 6 out of range'. }
-  Region := FuncRegion(GenAsm(Src), 'TW_D');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'TW_D');
   AssertTrue('overflow call dispatched', Pos('callq TW_C', Region) >= 0);
   AssertTrue('Self stored into slot 0 (overflow slot-block path)',
     Pos('movq %rax, 0(%rsp)', Region) >= 0);

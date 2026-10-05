@@ -29,12 +29,11 @@ interface
 uses
   Classes, SysUtils, blaise.testing, uStrCompat,
   uLexer, uParser, uAST, uSymbolTable, uSemantic,
-  blaise.codegen.native, blaise.codegen.target, cp.test.targets, uDebugFacts;
+  blaise.codegen.native, blaise.codegen.target, cp.test.targets, uDebugFacts, cp.test.harness;
 
 type
   TNativePromoTests = class(TTestCase)
   private
-    function GenAsm(const ASrc: string; ADebug: Boolean): string;
     function FuncRegion(const AAsm, AName: string): string;
   published
     { Fib-shaped function: N and Result promoted — the body performs no
@@ -93,43 +92,6 @@ const
       end.
       ''';
 
-function TNativePromoTests.GenAsm(const ASrc: string; ADebug: Boolean): string;
-var
-  L:    TLexer;
-  P:    TParser;
-  Prog: TProgram;
-  A:    TSemanticAnalyser;
-  CG:   TCodeGenNative;
-begin
-  L := TLexer.Create(ASrc);
-  P := TParser.Create(L);
-  try
-    Prog := P.Parse();
-  finally
-    P.Free(); L.Free();
-  end;
-  try
-    A := TSemanticAnalyser.Create();
-    try
-      A.Analyse(Prog);
-    finally
-      A.Free();
-    end;
-    CG := TCodeGenNative.Create();
-    try
-      CG.SetTarget(LinuxX64Target());
-      if ADebug then
-        CG.SetOpdfMode(True);
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
-  end;
-end;
-
 function TNativePromoTests.FuncRegion(const AAsm, AName: string): string;
 var
   StartP, EndP: Integer;
@@ -145,7 +107,7 @@ procedure TNativePromoTests.TestHotParamAndResult_Promoted;
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(SrcFib, False), 'Fib');
+  Region := FuncRegion(GenAsm(SrcFib, TargetX86_64), 'Fib');
   AssertTrue('promoted registers appear in the body',
     (Pos('%r14', Region) >= 0) and (Pos('%r15', Region) >= 0));
   { The param must live in a register: after the prologue there are no
@@ -159,7 +121,7 @@ procedure TNativePromoTests.TestPromotion_SavesAndRestoresIncumbents;
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(SrcFib, False), 'Fib');
+  Region := FuncRegion(GenAsm(SrcFib, TargetX86_64), 'Fib');
   { Incumbent save: movq %r14, -N(%rbp) in the prologue; restore:
     movq -N(%rbp), %r14 before the frame teardown. }
   AssertTrue('incumbent %r14 saved to a frame slot',
@@ -189,7 +151,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src, False), 'F');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'F');
   { A is the hottest local but its address escapes — it must stay in its
     slot so PA^ observes the stores.  N may still be promoted; assert A's
     leaq source remains a frame slot. }
@@ -218,7 +180,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src, False), 'F');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'F');
   AssertTrue('try-containing function keeps slot-resident locals',
     Pos('%r14', Region) < 0);
 end;
@@ -248,7 +210,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src, False), 'F');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'F');
   { The hot scalar I/N must remain slot-resident: any %r14 occurrences
     are the ARC walker's own save/restore brackets (pushq %r14), never a
     promoted-var access pattern (movq %r14, -save(%rbp)). }
@@ -278,7 +240,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src, False), 'F');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'F');
   AssertTrue('byte param promoted', Pos('%r14', Region) >= 0);
   AssertTrue('byte-width sub-register form used', Pos('%r14b', Region) >= 0);
 end;
@@ -287,7 +249,7 @@ procedure TNativePromoTests.TestDebugOpdf_DisablesPromotion;
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(SrcFib, True), 'Fib');
+  Region := FuncRegion(GenAsmDebug(SrcFib, TargetX86_64), 'Fib');
   AssertTrue('debug build keeps slot-resident locals (no %r14)',
     Pos('%r14', Region) < 0);
   AssertTrue('debug build keeps slot-resident locals (no %r15)',
@@ -330,7 +292,7 @@ var
   Region: string;
 begin
   { The generation itself must not raise; X/Y stay slot-resident. }
-  Region := FuncRegion(GenAsm(Src, False), 'UseIt');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'UseIt');
   AssertTrue('out-param locals keep frame-slot leaq',
     Pos('leaq -', Region) >= 0);
 end;
@@ -359,7 +321,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src, False), 'Run');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'Run');
   AssertTrue('var-param local keeps frame-slot leaq',
     Pos('leaq -', Region) >= 0);
 end;
@@ -368,7 +330,7 @@ procedure TNativePromoTests.TestCrossCallPin_UsesR13_NoPush;
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(SrcFib, False), 'Fib');
+  Region := FuncRegion(GenAsm(SrcFib, TargetX86_64), 'Fib');
   AssertTrue('LHS pinned in %r13 across the second recursive call',
     Pos(#9'movq %rax, %r13', Region) >= 0);
   AssertTrue('no push/pop bracket remains in the promoted body',
@@ -393,7 +355,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src, False), 'SumTo');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'SumTo');
   AssertTrue('no push/pop in the loop condition',
     Pos(#9'pushq %rax', Region) < 0);
 end;

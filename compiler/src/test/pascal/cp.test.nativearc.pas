@@ -26,12 +26,11 @@ interface
 uses
   Classes, SysUtils, blaise.testing, uStrCompat,
   uLexer, uParser, uAST, uSymbolTable, uSemantic,
-  blaise.codegen.native, blaise.codegen.target, cp.test.targets;
+  blaise.codegen.native, blaise.codegen.target, cp.test.targets, cp.test.harness;
 
 type
   TNativeArcTests = class(TTestCase)
   private
-    function GenAsm(const ASrc: string): string;
     function MainExitRegion(const AAsm: string): string;
   published
     { x86-64 codegen fixes surfaced by the macOS bring-up's native-only
@@ -97,7 +96,7 @@ begin
     end;
     begin
     end.
-    ''');
+    ''', TargetX86_64);
   AssertTrue('constant member folded', Pos('movabsq $1099511627776, %rax', AsmT) >= 0);
   AssertTrue('runtime member shifted into place', Pos(#9'shlq %cl, %rdx', AsmT) >= 0);
   AssertTrue('and ORed into the mask', Pos(#9'orq %rdx, %rax', AsmT) >= 0);
@@ -129,7 +128,7 @@ begin
     begin
       WriteLn(Count(Fold(Fold(X))));
     end.
-    ''');
+    ''', TargetX86_64);
   Body := Copy(AsmT, Pos('main:', AsmT), Length(AsmT));
   AssertTrue('outer destination read past the hoisted inner buffer',
     Pos(#9'movq 48(%rsp), %rdi'#10#9'subq $8, %rsp'#10#9'callq Fold', Body) >= 0);
@@ -182,7 +181,7 @@ begin
     end;
     begin
     end.
-    ''');
+    ''', TargetX86_64);
   AssertTrue('getter called with the sret buffer in %rdi and Self in %rsi',
     Pos(#9'movq %r10, %rsi'#10#9'movq %rsp, %rdi'#10#9'callq TEnum_GetCurrent', AsmT) >= 0);
 end;
@@ -212,45 +211,10 @@ begin
     end;
     begin
     end.
-    ''');
+    ''', TargetX86_64);
   AssertTrue('element obj retained, old binding released, then copied',
     Pos(#9'movq (%rbx), %rdi'#10#9'callq _ClassAddRef'#10#9'movq (%r15), %rdi'#10 +
         #9'callq _ClassRelease', AsmT) >= 0);
-end;
-
-function TNativeArcTests.GenAsm(const ASrc: string): string;
-var
-  L:    TLexer;
-  P:    TParser;
-  Prog: TProgram;
-  A:    TSemanticAnalyser;
-  CG:   TCodeGenNative;
-begin
-  L := TLexer.Create(ASrc);
-  P := TParser.Create(L);
-  try
-    Prog := P.Parse();
-  finally
-    P.Free(); L.Free();
-  end;
-  try
-    A := TSemanticAnalyser.Create();
-    try
-      A.Analyse(Prog);
-    finally
-      A.Free();
-    end;
-    CG := TCodeGenNative.Create();
-    try
-      CG.SetTarget(LinuxX64Target());
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
-  end;
 end;
 
 { Slice the main-body EPILOGUE — everything from the .Lmain_exitN label to the
@@ -347,7 +311,7 @@ procedure TNativeArcTests.TestMain_ProgramStaticArrayOfClass_EmitsClassRelease;
 var
   Region: string;
 begin
-  Region := Self.MainExitRegion(Self.GenAsm(SrcProgArrayOfClass));
+  Region := Self.MainExitRegion(GenAsm(SrcProgArrayOfClass, TargetX86_64));
   AssertTrue('main releases the program-level array elements, got: ' + Region,
     Pos('_ClassRelease', Region) >= 0);
 end;
@@ -356,7 +320,7 @@ procedure TNativeArcTests.TestMain_ProgramStaticArrayOfString_EmitsStringRelease
 var
   Region: string;
 begin
-  Region := Self.MainExitRegion(Self.GenAsm(SrcProgArrayOfString));
+  Region := Self.MainExitRegion(GenAsm(SrcProgArrayOfString, TargetX86_64));
   AssertTrue('main releases the program-level string array elements',
     Pos('_StringRelease', Region) >= 0);
 end;
@@ -365,7 +329,7 @@ procedure TNativeArcTests.TestMain_ProgramStaticArrayOfRecord_EmitsStringRelease
 var
   Region: string;
 begin
-  Region := Self.MainExitRegion(Self.GenAsm(SrcProgArrayOfRecord));
+  Region := Self.MainExitRegion(GenAsm(SrcProgArrayOfRecord, TargetX86_64));
   AssertTrue('main recurses into record elements'' managed fields',
     Pos('_StringRelease', Region) >= 0);
 end;
@@ -374,7 +338,7 @@ procedure TNativeArcTests.TestMain_ProgramStaticArrayOfInteger_NoReleases;
 var
   Region: string;
 begin
-  Region := Self.MainExitRegion(Self.GenAsm(SrcProgArrayOfInteger));
+  Region := Self.MainExitRegion(GenAsm(SrcProgArrayOfInteger, TargetX86_64));
   AssertTrue('unmanaged element type emits no release walk',
     (Pos('_ClassRelease', Region) < 0) and (Pos('_StringRelease', Region) < 0));
 end;
@@ -383,7 +347,7 @@ procedure TNativeArcTests.TestMain_ProgramClassGlobal_EmitsClassRelease;
 var
   Region: string;
 begin
-  Region := Self.MainExitRegion(Self.GenAsm(SrcProgClassGlobal));
+  Region := Self.MainExitRegion(GenAsm(SrcProgClassGlobal, TargetX86_64));
   AssertTrue('scalar class global still released at main exit',
     Pos('_ClassRelease', Region) >= 0);
 end;
@@ -395,7 +359,7 @@ begin
   { The copy `B := A` is the only statement, so a retain anywhere in the
     output can only come from the ARC record-copy path (the scope-exit walk
     emits releases only). }
-  Asm_ := Self.GenAsm(
+  Asm_ := GenAsm(
     '''
     program P;
     type
@@ -408,7 +372,7 @@ begin
       B := A;
       WriteLn(1);
     end.
-    ''');
+    ''', TargetX86_64);
   AssertTrue('record copy retains static-array-of-string elements',
     Pos('_StringAddRef', Asm_) >= 0);
 end;
@@ -418,7 +382,7 @@ var
   Asm_, MainR: string;
   P, E: Integer;
 begin
-  Asm_ := Self.GenAsm(
+  Asm_ := GenAsm(
     '''
     program P;
     type
@@ -432,7 +396,7 @@ begin
     begin
       Make();
     end.
-    ''');
+    ''', TargetX86_64);
   { Slice main only: Make's own body also emits _StringRelease (element-store
     old-value release), so a whole-asm assertion would pass vacuously. }
   P := Pos('main:', Asm_);
@@ -450,7 +414,7 @@ var
   Asm_, MainR: string;
   P, E: Integer;
 begin
-  Asm_ := Self.GenAsm(
+  Asm_ := GenAsm(
     '''
     program P;
     type
@@ -472,7 +436,7 @@ begin
     begin
       MakeI();
     end.
-    ''');
+    ''', TargetX86_64);
   P := Pos('main:', Asm_);
   AssertTrue('main present', P >= 0);
   MainR := StrCopyTail(Asm_, P);
@@ -488,7 +452,7 @@ var
   Asm_, FnR: string;
   P, E: Integer;
 begin
-  Asm_ := Self.GenAsm(
+  Asm_ := GenAsm(
     '''
     program P;
     type
@@ -503,7 +467,7 @@ begin
       SetLength(X, 2);
       WriteLn(SumV(X));
     end.
-    ''');
+    ''', TargetX86_64);
   { Slice SumV only — main has its own scope-exit _DynArrayRelease for X. }
   P := Pos('SumV:', Asm_);
   AssertTrue('SumV present', P >= 0);
@@ -522,7 +486,7 @@ var
   Asm_, Tail: string;
   P, E: Integer;
 begin
-  Asm_ := Self.GenAsm(
+  Asm_ := GenAsm(
     '''
     program P;
     type
@@ -546,7 +510,7 @@ begin
       A2 := 'y';
       B.Cur := A1 + A2;
     end.
-    ''');
+    ''', TargetX86_64);
   { The rc=0 concat transient must be pinned (AddRef) BEFORE the setter
     call — a by-value setter param's entry/exit cycle would otherwise free
     it during the call — and released after it. }

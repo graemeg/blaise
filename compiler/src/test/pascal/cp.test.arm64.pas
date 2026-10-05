@@ -26,13 +26,11 @@ uses
   uLexer, uParser, uAST, uSymbolTable, uSemantic,
   blaise.codegen.native.arm64, blaise.codegen.native.backend,
   blaise.codegen.target, blaise.assembler.arm64,
-  blaise.machoreader, blaise.machowriter;
+  blaise.machoreader, blaise.machowriter, cp.test.harness;
 
 type
   TArm64BackendTests = class(TTestCase)
   private
-    function GenAsm(const ASrc: string): string;
-    function GenAsmWithUnit(const AUnitSrc, ASrc: string): string;
     { last (rightmost) 0-based index of ASub in AStr, or -1 if absent }
     function RPos(const ASub, AStr: string): Integer;
   published
@@ -556,46 +554,6 @@ const
     end.
     ''';
 
-function TArm64BackendTests.GenAsm(const ASrc: string): string;
-var
-  L:    TLexer;
-  P:    TParser;
-  Prog: TProgram;
-  A:    TSemanticAnalyser;
-  CG:   TArm64Backend;
-  T:    TTargetDesc;
-begin
-  L := TLexer.Create(ASrc);
-  P := TParser.Create(L);
-  try
-    Prog := P.Parse();
-  finally
-    P.Free();
-    L.Free();
-  end;
-  try
-    { the analyser must OUTLIVE codegen: the backend's GlobalSym calls
-      FSymTable.Lookup, which walks scope state the analyser's destructor
-      tears down (same lifetime rule as the e2e harness) }
-    A := TSemanticAnalyser.Create();
-    try
-      A.Analyse(Prog);
-      MakeTarget(osMacOS, cpuArm64, T);
-      CG := TArm64Backend.Create(T);
-      try
-        CG.SetSymbolTable(Prog.SymbolTable);
-        Result := CG.GenerateProgram(Prog);
-      finally
-        CG.Free();
-      end;
-    finally
-      A.Free();
-    end;
-  finally
-    Prog.Free();
-  end;
-end;
-
 function TArm64BackendTests.RPos(const ASub, AStr: string): Integer;
 var
   P, Next: Integer;
@@ -611,61 +569,11 @@ begin
   end;
 end;
 
-function TArm64BackendTests.GenAsmWithUnit(const AUnitSrc, ASrc: string): string;
-var
-  L:    TLexer;
-  P:    TParser;
-  U:    TUnit;
-  Prog: TProgram;
-  A:    TSemanticAnalyser;
-  CG:   TArm64Backend;
-  T:    TTargetDesc;
-begin
-  L := TLexer.Create(AUnitSrc);
-  P := TParser.Create(L);
-  try
-    U := P.ParseUnit();
-  finally
-    P.Free();
-    L.Free();
-  end;
-  L := TLexer.Create(ASrc);
-  P := TParser.Create(L);
-  try
-    Prog := P.Parse();
-  finally
-    P.Free();
-    L.Free();
-  end;
-  try
-    A := TSemanticAnalyser.Create();
-    try
-      A.AnalyseUnitForExport(U);
-      A.Analyse(Prog);
-      MakeTarget(osMacOS, cpuArm64, T);
-      CG := TArm64Backend.Create(T);
-      try
-        CG.SetSymbolTable(Prog.SymbolTable);
-        CG.AppendUnit(U);
-        CG.AppendProgram(Prog);
-        Result := CG.GetOutput();
-      finally
-        CG.Free();
-      end;
-    finally
-      A.Free();
-    end;
-  finally
-    Prog.Free();
-    U.Free();
-  end;
-end;
-
 procedure TArm64BackendTests.TestHello_PrologueAndFrameChain;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcHello);
+  AsmT := GenAsm(SrcHello, TargetArm64);
   AssertTrue('exports _main', Pos('.globl _main', AsmT) >= 0);
   { Darwin requires the fp chain: fp/lr pair save + mov x29, sp — always. }
   AssertTrue('fp/lr pair saved',
@@ -678,7 +586,7 @@ procedure TArm64BackendTests.TestHello_StringLiteral_AdrpAddPair;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcHello);
+  AsmT := GenAsm(SrcHello, TargetArm64);
   { PIE-safe literal address: adrp + add @PAGE/@PAGEOFF, then +12 past the
     immortal string header (refcnt/len/cap — same layout as x86-64). }
   AssertTrue('adrp page', Pos('adrp x0, __s0@PAGE', AsmT) >= 0);
@@ -692,7 +600,7 @@ procedure TArm64BackendTests.TestHello_RtlCallsAndEpilogue;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcHello);
+  AsmT := GenAsm(SrcHello, TargetArm64);
   AssertTrue('args forwarded before init', Pos(#9'bl __SetArgs', AsmT) >= 0);
   AssertTrue('rtl init', Pos(#9'bl __BlaiseInit', AsmT) >= 0);
   AssertTrue('string write', Pos(#9'bl __SysWriteStr', AsmT) >= 0);
@@ -706,7 +614,7 @@ procedure TArm64BackendTests.TestIntegerArithmetic_Shapes;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcArith);
+  AsmT := GenAsm(SrcArith, TargetArm64);
   AssertTrue('multiply', Pos(#9'mul x0, x0, x1', AsmT) >= 0);
   AssertTrue('subtract', Pos(#9'sub x0, x0, x1', AsmT) >= 0);
   AssertTrue('divide', Pos(#9'sdiv x0, x0, x1', AsmT) >= 0);
@@ -719,7 +627,7 @@ var
 begin
   { AArch64 sdiv yields 0 on a zero divisor instead of trapping, so the
     explicit guard must ALWAYS precede the divide (design-doc risk item). }
-  AsmT := GenAsm(SrcArith);
+  AsmT := GenAsm(SrcArith, TargetArm64);
   AssertTrue('divisor zero-check', Pos(#9'cbnz x1, Ldivok', AsmT) >= 0);
   AssertTrue('deliberate trap', Pos(#9'brk #1', AsmT) >= 0);
 end;
@@ -728,7 +636,7 @@ procedure TArm64BackendTests.TestGlobals_PageAddressed;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcArith);
+  AsmT := GenAsm(SrcArith, TargetArm64);
   { program vars are globals addressed via adrp/@PAGEOFF (PIE-safe) }
   AssertTrue('global page', Pos('adrp x9, _g_A@PAGE', AsmT) >= 0);
   AssertTrue('global store',
@@ -740,7 +648,7 @@ procedure TArm64BackendTests.TestIfWhile_BranchShapes;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcControl);
+  AsmT := GenAsm(SrcControl, TargetArm64);
   AssertTrue('comparison materialised', Pos(#9'cset x0, gt', AsmT) >= 0);
   AssertTrue('condition branch', Pos(#9'cbz x0, L', AsmT) >= 0);
   AssertTrue('equality for if', Pos(#9'cset x0, eq', AsmT) >= 0);
@@ -773,7 +681,7 @@ begin
         TV.X := 1;
         WriteLn(TV.X)
       end.
-      ''');
+      ''', TargetArm64);
   except
     on E: ENativeCodeGenError do
     begin
@@ -795,7 +703,7 @@ var
 begin
   { The full Phase-2 pipeline on Linux CI: backend text -> arm64 internal
     assembler -> MH_OBJECT -> parse back. }
-  AsmT := GenAsm(SrcControl);
+  AsmT := GenAsm(SrcControl, TargetArm64);
   Obj  := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64probe.o');
   try
@@ -819,7 +727,7 @@ procedure TArm64BackendTests.TestFunction_PrologueSpillsAndResult;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcFuncs);
+  AsmT := GenAsm(SrcFuncs, TargetArm64);
   { params spill from x0/x1 into frame slots; Result zero-initialised and
     loaded back into x0 at the routine exit }
   AssertTrue('add2 exported+defined', Pos('Add2:', AsmT) >= 0);
@@ -833,7 +741,7 @@ procedure TArm64BackendTests.TestCall_ArgsPoppedIntoRegisters;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcFuncs);
+  AsmT := GenAsm(SrcFuncs, TargetArm64);
   { args are pushed left-to-right and popped last-first, so x1 fills before
     x0; the call is a bl _to the mangled routine symbol }
   AssertTrue('second arg popped first', Pos(#9'ldr x1, [sp], #16', AsmT) >= 0);
@@ -845,7 +753,7 @@ procedure TArm64BackendTests.TestRecursion_Compiles;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcFib);
+  AsmT := GenAsm(SrcFib, TargetArm64);
   AssertTrue('fib defined', Pos('Fib:', AsmT) >= 0);
   AssertTrue('recursive call', Pos(#9'bl _Fib', AsmT) >= 0);
   AssertTrue('exit lands on the epilogue label', Pos(#9'b Lrexit', AsmT) >= 0);
@@ -855,7 +763,7 @@ procedure TArm64BackendTests.TestForLoop_BoundEvaluatedOnce;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcForLoop);
+  AsmT := GenAsm(SrcForLoop, TargetArm64);
   { the loop bound lives in a hidden frame slot, compared each iteration.
     Offset-agnostic: the __iret/__rret scratch slots shift hidden-slot
     offsets, so match the store shape (stur to an x29-negative slot) not a
@@ -872,7 +780,7 @@ var
   F: TMachOFile;
   S: TMoSymbol;
 begin
-  AsmT := GenAsm(SrcFib);
+  AsmT := GenAsm(SrcFib, TargetArm64);
   Obj  := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64fib.o');
   try
@@ -900,7 +808,7 @@ begin
       if E > 3.0 then
         WriteLn(1)
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('literal from rodata page',
     Pos('adrp x9, __d0@PAGE', AsmT) >= 0);
   AssertTrue('double blob emitted', Pos(#9'.double 1.5', AsmT) >= 0);
@@ -932,7 +840,7 @@ begin
       D := Double(I);         { int -> double: scvtf     }
       if D > 0.0 then WriteLn(1)
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('no notyet', Pos('not yet lowered', AsmT) < 0);
   AssertTrue('single narrow (fcvt s0, d0)', Pos(#9'fcvt s0, d0', AsmT) >= 0);
   AssertTrue('single widen (fcvt d0, s0)', Pos(#9'fcvt d0, s0', AsmT) >= 0);
@@ -957,7 +865,7 @@ begin
     begin
       WriteLn(Mix(1, 2.5, 3))
     end.
-    ''');
+    ''', TargetArm64);
   { AAPCS64: ints take x0/x1, the float takes d0 — independent sequences.
     The callee spills d0 through x9 into the param slot. }
   AssertTrue('float arg lands in d0', Pos(#9'fmov d0, x9', AsmT) >= 0);
@@ -980,7 +888,7 @@ begin
       S := 'two';
       WriteLn(S)
     end.
-    ''');
+    ''', TargetArm64);
   { plain (non-owning) RHS retains; the slot's old value releases }
   AssertTrue('incoming retained', Pos(#9'bl __StringAddRef', AsmT) >= 0);
   AssertTrue('old value released', Pos(#9'bl __StringRelease', AsmT) >= 0);
@@ -1000,7 +908,7 @@ begin
       S := 'a' + 'b';
       WriteLn('x' + 'y')
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('concat lowered', Pos(#9'bl __StringConcat', AsmT) >= 0);
   { __StringConcat returns rc=0 (arc-string-transient-handover.adoc): the
     assignment must RETAIN it (0 -> 1) before releasing the old value —
@@ -1032,7 +940,7 @@ begin
     begin
       WriteLn(Tag(1))
     end.
-    ''');
+    ''', TargetArm64);
   { the routine's exit label releases its string local before Result loads }
   AssertTrue('exit label present', Pos('Lrexit', AsmT) >= 0);
   AssertTrue('scope-exit release', Pos(#9'bl __StringRelease', AsmT) >= 0);
@@ -1055,7 +963,7 @@ begin
       s := 'abc'; Munge(s); WriteLn(s);
       t := 'hello'; t[1] := 'E'; WriteLn(t)
     end.
-    ''');
+    ''', TargetArm64);
   { copy-on-write before the byte store }
   AssertTrue('string made unique before write',
     Pos(#9'bl __StringUnique', AsmT) >= 0);
@@ -1081,7 +989,7 @@ begin
       if A <> B then WriteLn(2);
       if A < B then WriteLn(3)
     end.
-    ''');
+    ''', TargetArm64);
   { content comparison, never a pointer cmp }
   AssertTrue('equality helper', Pos(#9'bl __StringEquals', AsmT) >= 0);
   AssertTrue('ordering helper', Pos(#9'bl __StringCompare', AsmT) >= 0);
@@ -1120,7 +1028,7 @@ begin
       G.X := 1;
       WriteLn(Sum(G.X + 31))
     end.
-    ''');
+    ''', TargetArm64);
   { record locals zero-init their WHOLE storage, not just 8 bytes }
   AssertTrue('record zeroed via memset', Pos(#9'bl _memset', AsmT) >= 0);
   { field writes go through the record base + offset }
@@ -1168,7 +1076,7 @@ begin
       t.N := 42;
       WriteLn(t.GetN())
     end.
-    ''');
+    ''', TargetArm64);
   { the field ADDRESS is computed (add), not folded into a scaled load — the
     offset is 308 (an 8-byte object header precedes the 300-byte pad). }
   AssertTrue('field offset via add', Pos(#9'add x0, x0, #308', AsmT) >= 0);
@@ -1207,7 +1115,7 @@ begin
       G := MakeBig(7);
       WriteLn(G.A)
     end.
-    ''');
+    ''', TargetArm64);
   { 24-byte record: sret — callee parks x8, memcpys Result out; the
     caller loads the destination address into x8 before the bl }
   AssertTrue('callee parks x8', Pos(#9'stur x8, ', AsmT) >= 0);
@@ -1250,7 +1158,7 @@ begin
       GV := MkVec();
       WriteLn(GP.A)
     end.
-    ''');
+    ''', TargetArm64);
   { 16-byte non-HFA: memory image in x0:x1 both sides }
   AssertTrue('callee loads x0:x1 image', Pos(#9'ldr x1, [x9, #8]', AsmT) >= 0);
   AssertTrue('caller stores x1 half', Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
@@ -1292,7 +1200,7 @@ begin
       WriteLn(SumPair(GP));
       WriteLn(VecX(GV))
     end.
-    ''');
+    ''', TargetArm64);
   { 16-byte non-HFA param: x0:x1 image — callee stores the second half
     at slot+8, caller loads it from the lvalue at +8 }
   AssertTrue('callee spills x1 half', Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
@@ -1324,7 +1232,7 @@ begin
       G.C := 7;
       WriteLn(SumBig(G))
     end.
-    ''');
+    ''', TargetArm64);
   { >16B param travels as a pointer: the callee parks it and memcpys the
     bytes into its own slot before any user code }
   AssertTrue('caller passes the global address',
@@ -1371,7 +1279,7 @@ begin
       r.X := 7;
       WriteLn(r.G())
     end.
-    ''');
+    ''', TargetArm64);
   { The body must be emitted as an ordinary function, mangled Owner_Method
     exactly as a class method is. }
   AssertTrue('record method body emitted', Pos('TR_G:', AsmT) >= 0);
@@ -1399,7 +1307,7 @@ begin
       r.X := 7;
       WriteLn(r.G())
     end.
-    ''');
+    ''', TargetArm64);
   { Self is the ADDRESS of r.  A global's address is the adrp/add @PAGE pair;
     the receiver must NOT be `ldr x0, [x9, _g_r@PAGEOFF]`, which would pass the
     record's first 8 bytes as if they were a pointer — the shape this emitted
@@ -1434,7 +1342,7 @@ begin
       r.S(9);
       WriteLn(r.X)
     end.
-    ''');
+    ''', TargetArm64);
   { The WRITE direction, not just the read: a store through Self must reach the
     caller's record.  Fixing the read path and missing the write path is the
     exact mistake made on arm64 in July (3f515bde / 44777c3b). }
@@ -1467,7 +1375,7 @@ begin
       r.X := 4;
       Use(r)
     end.
-    ''');
+    ''', TargetArm64);
   { A var-param receiver's slot ALREADY holds an address — it must be loaded,
     not address-taken again (which would pass a pointer to the pointer). }
   AssertTrue('var-param receiver loaded from its slot',
@@ -1507,7 +1415,7 @@ begin
       b.V := 3;
       WriteLn(b.G())
     end.
-    ''');
+    ''', TargetArm64);
   { Monomorphised name: <Template>_<Arg>_<Method>, matching x86-64. }
   AssertTrue('instance method body emitted', Pos('TB_Integer_G:', AsmT) >= 0);
   AssertTrue('and is called', Pos('bl _TB_Integer_G', AsmT) >= 0);
@@ -1541,7 +1449,7 @@ begin
       WriteLn(bi.G());
       WriteLn(bs.G())
     end.
-    ''');
+    ''', TargetArm64);
   { Two specialisations of one template are two DISTINCT functions — emitting
     only the first would silently give the string instance the integer body. }
   AssertTrue('Integer instance emitted', Pos('TB_Integer_G:', AsmT) >= 0);
@@ -1569,7 +1477,7 @@ begin
       b.V := 3;
       WriteLn(b.G())
     end.
-    ''');
+    ''', TargetArm64);
   { Weak, not global: two units instantiating TB<Integer> must collapse to one
     definition at link time rather than colliding with a duplicate symbol. }
   AssertTrue('instance method is weak-bound',
@@ -1596,7 +1504,7 @@ begin
       B := A;
       WriteLn(B.Name)
     end.
-    ''');
+    ''', TargetArm64);
   { field store: retain the incoming value, release the old field }
   AssertTrue('field store retains', Pos(#9'bl __StringAddRef', AsmT) >= 0);
   { whole-copy discipline: retain source fields BEFORE releasing the
@@ -1640,7 +1548,7 @@ begin
       Use();
       WriteLn(G.Name)
     end.
-    ''');
+    ''', TargetArm64);
   { the local's managed field is released at the routine's exit label and
     the global's at program exit — each walk anchors on saved x19 }
   AssertTrue('scope-exit walk saves x19',
@@ -1687,7 +1595,7 @@ begin
       Write(Banner());
       WriteLn(AddTwo(20, 22))
     end.
-    ''');
+    ''', TargetArm64);
   { the unit routine is defined under its unit-mangled symbol and the
     program's call site targets the same symbol }
   AssertTrue('unit routine defined', Pos('mathu_AddTwo:', AsmT) >= 0);
@@ -1735,7 +1643,7 @@ begin
       Bump();
       WriteLn(Total)
     end.
-    ''');
+    ''', TargetArm64);
   { the unit var gets an owning-unit-prefixed symbol — same-named vars in
     other units or the program cannot collide }
   AssertTrue('unit var symbol prefixed', Pos('_g_counters_Total:', AsmT) >= 0);
@@ -1773,7 +1681,7 @@ begin
     begin
       WriteLn(One())
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('final routine emitted', Pos('withfinal_final:', AsmT) >= 0);
   AssertTrue('main exit calls it', Pos(#9'bl _withfinal_final', AsmT) >= 0);
 end;
@@ -1816,7 +1724,7 @@ begin
       WriteLn(b.Get());
       b.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { the method reaches the impl global through its owning-unit-prefixed symbol }
   AssertTrue('impl global prefixed', Pos('_g_boxu_GCount', AsmT) >= 0);
   { the method body label is emitted exactly ONCE (no double-emit) }
@@ -1849,7 +1757,7 @@ begin
       Show(G);
       Greet('lit')
     end.
-    ''');
+    ''', TargetArm64);
   { the by-value param retains its copy in the prologue and releases it
     with the string locals at exit; the const param does neither }
   PosGreet := Pos('Greet:', AsmT);
@@ -1886,7 +1794,7 @@ begin
       WriteLn(Ratio);
       WriteLn(Plain)
     end.
-    ''');
+    ''', TargetArm64);
   { initialised globals live in .data with their values; uninitialised
     ones stay zerofill }
   AssertTrue('data section present', Pos('.section __DATA,__data', AsmT) >= 0);
@@ -1943,7 +1851,7 @@ begin
       WriteLn(D);
       WriteLn(S)
     end.
-    ''');
+    ''', TargetArm64);
   { the caller passes the global's address; the callee reads and writes
     through the pointer; a var->var pass-through forwards the address }
   AssertTrue('caller passes global address',
@@ -1982,7 +1890,7 @@ begin
       B := Half(A) + 1.5;
       WriteLn(B)
     end.
-    ''');
+    ''', TargetArm64);
   { 4-byte storage: stores narrow through s0, loads widen through fcvt }
   AssertTrue('store narrows', Pos(#9'fcvt s0, d0', AsmT) >= 0);
   AssertTrue('4-byte store', Pos(#9'str s0, [x9]', AsmT) >= 0);
@@ -2034,7 +1942,7 @@ begin
       WriteLn(C.Value());
       WriteLn(C.FName)
     end.
-    ''');
+    ''', TargetArm64);
   { Creation allocates at refcount ZERO via __ClassAlloc(size, cleanup) and
     installs the vtable here — mirroring x86-64.  __ClassCreate must NOT appear
     on a statically-known-class path: it ends with __ClassAddRef, and the shared
@@ -2102,7 +2010,7 @@ begin
       A := TDog.Create();
       WriteLn(A.Speak())
     end.
-    ''');
+    ''', TargetArm64);
   { virtual dispatch: vtable load + slot load + blr }
   AssertTrue('vtable indirection', Pos(#9'blr x9', AsmT) >= 0);
   { the derived vtable carries the override }
@@ -2145,7 +2053,7 @@ begin
       C.Init();
       WriteLn(C.FLives)
     end.
-    ''');
+    ''', TargetArm64);
   { the unit class's metadata symbols carry the owning-unit prefix, and
     the Create site targets the same typeinfo }
   AssertTrue('prefixed typeinfo', Pos('_typeinfo_zoo_TCat:', AsmT) >= 0);
@@ -2195,7 +2103,7 @@ begin
       WriteLn(TKid.Answer);
       WriteLn(K.ToString())
     end.
-    ''');
+    ''', TargetArm64);
   { inherited: static dispatch straight to the parent implementation }
   AssertTrue('inherited call is direct', Pos(#9'bl _TBase_Tag', AsmT) >= 0);
   { static method: plain call, no receiver }
@@ -2250,7 +2158,7 @@ begin
       G.Percent := 70;
       WriteLn(G.Level)
     end.
-    ''');
+    ''', TargetArm64);
   { field-backed accessors are rewritten to plain field access by the
     semantic pass; method-backed ones call the accessors directly }
   AssertTrue('getter called', Pos(#9'bl _TGauge_GetPercent', AsmT) >= 0);
@@ -2299,7 +2207,7 @@ begin
       WriteLn(O.FInner.FVal);
       WriteLn(O.FInner.Get())
     end.
-    ''');
+    ''', TargetArm64);
   { chained field read (O.FInner.FVal) derefs through the base expr, and
     a method on a chained field (O.FInner.Get) receives the loaded ptr }
   AssertTrue('chained method call', Pos(#9'bl _TInner_Get', AsmT) >= 0);
@@ -2329,7 +2237,7 @@ begin
       Counter := 5;
       WriteLn(Counter)
     end.
-    ''');
+    ''', TargetArm64);
   { access: adrp + ADD forming the descriptor's address directly, with PLAIN
     @PAGE/@PAGEOFF, then call its thunk with x0 = &descriptor.
 
@@ -2396,7 +2304,7 @@ begin
       printf(PChar('%lld and %lld'), 40, 2);
       WriteLn(Sum10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
     end.
-    ''');
+    ''', TargetArm64);
   { variadic anonymous args go to the outgoing stack area (Apple
     divergence), stored through w/x into [sp, #..] }
   AssertTrue('outgoing area allocated', Pos(#9'sub sp, sp, #16', AsmT) >= 0);
@@ -2437,7 +2345,7 @@ begin
       R.A := 100; R.B := 200; R.C := 300; R.S := 'abcd';
       WriteLn(F(1, 2, 3, 4, 5, 6, 7, 8, 9, R))
     end.
-    ''');
+    ''', TargetArm64);
   { callee: the 9th int arrives at [x29,#16] and the record pointer at
     [x29,#24], the latter parked in the __pptr_ slot for pass-2 memcpy }
   AssertTrue('9th int read from the overflow area',
@@ -2485,7 +2393,7 @@ begin
       WriteLn(G.Greet(41));
       G := nil
     end.
-    ''');
+    ''', TargetArm64);
   { narrowing stores the static itab; dispatch loads fptr from itab[0] }
   AssertTrue('itab emitted', Pos('_itab_THi_IGreeter:', AsmT) >= 0);
   AssertTrue('itab slot names the impl', Pos(#9'.quad _THi_Greet', AsmT) >= 0);
@@ -2541,7 +2449,7 @@ begin
       if Supports(o, IGreeter, g) then WriteLn(g.Greet());
       o.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { the typeinfo is defined under the unit-prefixed symbol }
   AssertTrue('prefixed typeinfo defined',
     Pos('_typeinfo_intfu_IGreeter:', AsmT) >= 0);
@@ -2605,7 +2513,7 @@ begin
       N := Count([cRed, cBlue]);
       WriteLn(N)
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('set-taking routine emitted', Pos('Count:', AsmT) >= 0);
   AssertTrue('set argument reaches the call', Pos(#9'bl _Count', AsmT) >= 0);
 end;
@@ -2632,7 +2540,7 @@ begin
       N := N + CopyIt('c' + 'd');
       WriteLn(N)
     end.
-    ''');
+    ''', TargetArm64);
   { the const-param body borrows: no ARC on its parameter }
   P := Pos('HashIt:', AsmT);
   AssertTrue('const-param function emitted', P >= 0);
@@ -2689,7 +2597,7 @@ begin
       B.Fill();
       B.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { the monomorphised constructor body must be defined EXACTLY once }
   N := 0;
   P := PosEx('TBox_Integer_Put:', AsmT, 0);
@@ -2737,7 +2645,7 @@ begin
       if Supports(o, IWork, w) then WriteLn(w.Run());
       o.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { The itab is defined (a label) and made globl.  The exact owning-unit prefix
     of a program-declared class is an internal detail; what LINK-2 requires is
     that the definition is globl (not file-local) so it resolves across objects. }
@@ -2798,7 +2706,7 @@ begin
       t.Setup();
       t.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { the monomorphised TBox<Integer>.Put body is DEFINED (a label), not just
     referenced }
   AssertTrue('TBox<Integer>.Put body is defined',
@@ -2839,7 +2747,7 @@ begin
       s.A := 1;
       s.Free()
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_typeinfo_P_TSized:', AsmT);
   if P < 0 then
     P := Pos('_typeinfo_TSized:', AsmT);
@@ -2897,7 +2805,7 @@ begin
       D.OS := osB;
       WriteLn(Name(D))
     end.
-    ''');
+    ''', TargetArm64);
   { isolate the callee body so caller-side patterns cannot satisfy the asserts }
   P := Pos(#10'_Name:', AsmT);
   AssertTrue('the Name routine is emitted', P >= 0);
@@ -3016,7 +2924,7 @@ begin
       WriteLn(K.Got);
       K.Free(); M.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { isolate the program body so other routines cannot satisfy the assert }
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
@@ -3062,7 +2970,7 @@ begin
         A[I] := 'x';
       WriteLn(A[0])
     end.
-    ''');
+    ''', TargetArm64);
   { no emitted add/sub may carry an immediate the encoder cannot represent }
   Bad := -1;
   L := TStringList.Create();
@@ -3115,7 +3023,7 @@ begin
       SetLength(S, N);
       WriteLn(Length(S))
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -3185,7 +3093,7 @@ begin
       WriteLn(O.GetKind());
       O.Free()
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('TOuter_Init:', AsmT);
   AssertTrue('TOuter.Init is emitted', P >= 0);
   Body := Copy(AsmT, P, Length(AsmT) - P);
@@ -3261,7 +3169,7 @@ begin
       O.SetCount();
       WriteLn(O.ReadCount())
     end.
-    ''');
+    ''', TargetArm64);
   { READ: deref FInner (a class ptr at +16), then reach FCount at +8 }
   P := Pos('TOuter_ReadCount:', AsmT);
   AssertTrue('ReadCount is emitted', P >= 0);
@@ -3323,7 +3231,7 @@ begin
       WriteLn(O.First());
       O.FList.Free(); O.Free()
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('TOuter_First:', AsmT);
   AssertTrue('First is emitted', P >= 0);
   Body := Copy(AsmT, P, Length(AsmT) - P);
@@ -3371,7 +3279,7 @@ begin
       T[0] := Chr(65);
       WriteLn(T)
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -3417,7 +3325,7 @@ begin
       Take(A, B, D);
       WriteLn(A)
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos(#10'_Take:', AsmT);
   AssertTrue('Take is emitted', P >= 0);
   { the prologue runs up to the first body instruction — bound the window by
@@ -3478,7 +3386,7 @@ begin
       G := MakeThing();
       WriteLn(G.Val())
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -3561,7 +3469,7 @@ begin
       Bag := TBag.Create();
       WriteLn(Bag.Read0())
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos(#10'_TBag_Read0:', AsmT);
   AssertTrue('Read0 emitted', P >= 0);
   { bound the window to the Read0 body up to the first memcpy (the element copy) }
@@ -3610,7 +3518,7 @@ begin
       if Pp[0] <> '/' then N := N + 100;
       WriteLn(N)
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -3654,7 +3562,7 @@ begin
       N := Length(S);
       WriteLn(N)
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -3696,7 +3604,7 @@ begin
       S := 'a';
       WriteLn(UpCase(S))
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -3755,7 +3663,7 @@ begin
       N := O.Box[3];
       WriteLn(N)
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -3802,7 +3710,7 @@ begin
       B := $CF or ($FA shl 8) or ($ED shl 16) or ($FE shl 24);
       if B = K then WriteLn('eq') else WriteLn('ne')
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -3830,7 +3738,7 @@ begin
       a := 5000000000; b := 5000000000;
       if a = b then WriteLn('eq') else WriteLn('ne')
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -3884,7 +3792,7 @@ begin
       C.F := 7;
       WriteLn(C.Use())
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos(#10'_TC_Use:', AsmT);
   AssertTrue('TC_Use emitted', P >= 0);
   { the getter is called; Self ([x29,#-8]) must be loaded before the call }
@@ -3935,7 +3843,7 @@ begin
       N := B[3];
       WriteLn(N)
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted (compiler did not crash on B[3])', P >= 0);
@@ -3965,7 +3873,7 @@ begin
       I := -1;
       WriteLn(I)
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -4024,7 +3932,7 @@ begin
       J := 3;
       Store('x' + IntToStr(J), N.Name + '__high')
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -4098,7 +4006,7 @@ begin
       F.Take(S);
       F := nil
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('string arg loaded into x1', Pos(#9'ldr x1, [sp], #16', AsmT) >= 0);
   { the itab slot's ADDRESS is parked per call site (slot 0: the itab
     itself) and the call branches through the word there }
@@ -4132,7 +4040,7 @@ begin
       I := T as IThing;
       I.Go()
     end.
-    ''');
+    ''', TargetArm64);
   { runtime lookup + invalid-cast guard }
   AssertTrue('runtime itab lookup', Pos(#9'bl __GetItab', AsmT) >= 0);
   AssertTrue('nil-itab guard', Pos(#9'bl __Raise_InvalidCast', AsmT) >= 0);
@@ -4168,7 +4076,7 @@ begin
       Show(Make());
       ShowC(A + B)
     end.
-    ''');
+    ''', TargetArm64);
   { by-value rc=0 concat arg: the callee's entry-retain/exit-release pair
     frees it — the CALLER must not touch it (a release would double-free);
     by-value rc=1 call result: one caller release after the call;
@@ -4226,7 +4134,7 @@ begin
       MC := TKid;
       WriteLn(MC.InheritsFrom(TBase))
     end.
-    ''');
+    ''', TargetArm64);
   { Supports: runtime itab probe folded to a boolean }
   AssertTrue('supports via __GetItab', Pos(#9'bl __GetItab', AsmT) >= 0);
   AssertTrue('boolean fold', Pos(#9'cset x0, ne', AsmT) >= 0);
@@ -4274,7 +4182,7 @@ begin
       G := MakeGreeter();
       WriteLn(UseGreeter(G))
     end.
-    ''');
+    ''', TargetArm64);
   { result: callee writes the fat pointer through the parked x8 buffer }
   AssertTrue('sret buffer store', Pos(#9'str x0, [x9, #8]', AsmT) >= 0);
   { caller receives through the __iret scratch }
@@ -4338,7 +4246,7 @@ begin
     begin
       Run();
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('old obj released before the store',
     Pos(#9'bl __ClassRelease', AsmT) >= 0);
   AssertTrue('base re-read from the stack after the release',
@@ -4369,7 +4277,7 @@ begin
     begin
       Fill(M);
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('byte element stored', Pos(#9'strb w0, [x9]', AsmT) >= 0);
   AssertTrue('no extra dereference of the open-array base',
     Pos(#9'ldr x0, [x0]', AsmT) < 0);
@@ -4410,7 +4318,7 @@ begin
       C[2] := 40;
       C.Recs[1] := R;
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('default-property write calls the setter',
     Pos(#9'bl _TC_Put'#10, AsmT) >= 0);
   AssertTrue('two-eightbyte record value loaded as a pair',
@@ -4437,7 +4345,7 @@ begin
       G[I, 3] := 7;
       WriteLn(G[I][3]);
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('row stride then column stride',
     Pos(#9'movz x2, #12'#10#9'mul x1, x1, x2'#10#9'add x0, x0, x1'#10 +
         #9'ldr x1, [sp], #16'#10#9'movz x2, #4', AsmT) >= 0);
@@ -4476,7 +4384,7 @@ begin
       if A[1] <> nil then
         WriteLn('set');
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('16-byte element stride', Pos(#9'movz x2, #16', AsmT) >= 0);
   AssertTrue('itab half stored beside the obj half',
     Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
@@ -4516,7 +4424,7 @@ begin
     begin
       Run();
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('out string arg is the slot address',
     Pos(#9'sub x0, x29, #', AsmT) >= 0);
   AssertTrue('itab call made', Pos(#9'blr x9', AsmT) >= 0);
@@ -4549,7 +4457,7 @@ begin
     begin
       WriteLn(MakePt(3, 4).Sum());
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('temp reserved and filled from __rret',
     Pos(#9'sub sp, sp, #16'#10#9'mov x1, x0'#10#9'mov x0, sp', AsmT) >= 0);
   AssertTrue('temp dropped after the call', Pos(#9'add sp, sp, #16', AsmT) >= 0);
@@ -4572,7 +4480,7 @@ begin
     begin
       B := A + [200, 201];
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('left operand read above the literal',
     Pos(#9'ldr x1, [sp, #32]', AsmT) >= 0);
   AssertTrue('literal and parked slot released',
@@ -4602,7 +4510,7 @@ begin
     end;
     begin
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('setter body emitted', Pos('_TC_SetHandler:', AsmT) >= 0);
   AssertTrue('both closure words stored into the field (offset 16)',
     Pos(#9'add x9, x9, #16'#10#9'stp x10, x11, [x9]', AsmT) >= 0);
@@ -4637,7 +4545,7 @@ begin
     begin
       GS.Box.Bump();
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('field loaded at its offset from the record address',
     Pos(#9'add x0, x0, #8'#10#9'ldr x0, [x0]', AsmT) >= 0);
   AssertTrue('method called', Pos(#9'bl _TBox_Bump', AsmT) >= 0);
@@ -4666,7 +4574,7 @@ begin
       N := TNode.Create();
       N.Cls := [1, 2];
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('instance base read above the literal',
     Pos(#9'ldr x0, [sp, #32]', AsmT) >= 0);
   AssertTrue('32-byte bitmap copied', Pos(#9'movz x2, #32'#10#9'bl _memcpy', AsmT) >= 0);
@@ -4692,7 +4600,7 @@ begin
     begin
       Y := Fold(X);
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('incoming x8 parked', Pos(#9'stur x8, [x29, #-', AsmT) >= 0);
   AssertTrue('caller passes a result buffer in x8', Pos(#9'sub x8, x29, #', AsmT) >= 0);
 end;
@@ -4717,7 +4625,7 @@ begin
     end;
     begin
     end.
-    ''');
+    ''', TargetArm64);
   Body := Copy(AsmT, Pos('_Walk:', AsmT), Length(AsmT));
   AssertTrue('param retained in the prologue',
     Pos(#9'bl __ClassAddRef', Body) >= 0);
@@ -4746,7 +4654,7 @@ begin
     begin
       WriteLn(MakeBig(3).C + MakeBig(4).D);
     end.
-    ''');
+    ''', TargetArm64);
   I := Pos(#9'sub x8, x29, #', AsmT);
   AssertTrue('first sret scratch', I >= 0);
   J := PosEx(#9'sub x8, x29, #', AsmT, I + 1);
@@ -4774,7 +4682,7 @@ begin
       F := function(D: Double): Int64 begin Result := Trunc(D); end;
       WriteLn(F(2.5));
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('double argument moved into d0', Pos(#9'fmov d0, x9', AsmT) >= 0);
   AssertTrue('indirect branch through the code word',
     Pos(#9'ldr x9, [x10]'#10#9'blr x9', AsmT) >= 0);
@@ -4802,7 +4710,7 @@ begin
       PA := @A;
       PA^ := B;
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('source field retained', Pos(#9'bl __StringAddRef', AsmT) >= 0);
   AssertTrue('16-byte record copied', Pos(#9'movz x2, #16'#10#9'bl _memcpy', AsmT) >= 0);
 end;
@@ -4832,7 +4740,7 @@ begin
     begin
       Run();
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('itab half written through the pointer',
     Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
 end;
@@ -4865,7 +4773,7 @@ begin
       C := TC.Create();
       WriteLn(C[3].A);
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('getter result buffer in x8',
     Pos(#9'sub x8, x29, #', AsmT) >= 0);
   AssertTrue('getter called', Pos(#9'bl _TC_GetRec', AsmT) >= 0);
@@ -4890,7 +4798,7 @@ begin
     begin
       WriteLn(oB in NoOpts());
     end.
-    ''');
+    ''', TargetArm64);
   Body := Copy(AsmT, Pos('_NoOpts:', AsmT), Length(AsmT));
   Body := Copy(Body, 0, Pos(#9'ret', Body));
   AssertTrue('routine emitted', Pos('_NoOpts:', Body) >= 0);
@@ -4916,7 +4824,7 @@ begin
     end;
     begin
     end.
-    ''');
+    ''', TargetArm64);
   Body := Copy(AsmT, Pos('_Load:', AsmT), Length(AsmT));
   AssertTrue('pair loaded through the pointer',
     Pos(#9'ldp x0, x1, [x0]', Body) >= 0);
@@ -4947,7 +4855,7 @@ begin
     begin
       WriteLn(Use(Make()));
     end.
-    ''');
+    ''', TargetArm64);
   PosCall := Pos(#9'bl _Use', AsmT);
   AssertTrue('callee invoked', PosCall >= 0);
   PosRel := PosEx(#9'bl __ClassRelease', AsmT, PosCall);
@@ -4975,7 +4883,7 @@ begin
       for R in A do
         WriteLn(R.N);
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('source field retained', Pos(#9'bl __StringAddRef', AsmT) >= 0);
   AssertTrue('element copied into the loop variable',
     Pos(#9'movz x2, #16'#10#9'bl _memcpy', AsmT) >= 0);
@@ -5010,7 +4918,7 @@ begin
     end;
     begin
     end.
-    ''');
+    ''', TargetArm64);
   Body := Copy(AsmT, Pos('_TR_Sum:', AsmT), Length(AsmT));
   Body := Copy(Body, 0, Pos(#9'bl _TR_Get', Body));
   AssertTrue('call found', Length(Body) > 0);
@@ -5042,7 +4950,7 @@ begin
     begin
       R := Mk('ab' + IntToStr(N));
     end.
-    ''');
+    ''', TargetArm64);
   PosCall := Pos(#9'bl _Mk', AsmT);
   AssertTrue('call found', PosCall >= 0);
   PosSave := PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PosCall);
@@ -5071,7 +4979,7 @@ begin
       N := 1;
       R := Format('%s=%d', S, N);
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('two-entry block reserved', Pos(#9'sub sp, sp, #32', AsmT) >= 0);
   AssertTrue('entry count passed', Pos(#9'movz x2, #2'#10#9'bl __StringFormatN', AsmT) >= 0);
 end;
@@ -5101,7 +5009,7 @@ begin
     end;
     begin
     end.
-    ''');
+    ''', TargetArm64);
   Body := Copy(AsmT, Pos('_TOuter_Get:', AsmT), Length(AsmT));
   AssertTrue('one step through FInner, then the Arr offset',
     Pos(#9'ldr x0, [x0, #8]'#10#9'add x0, x0, #8', Body) >= 0);
@@ -5135,7 +5043,7 @@ begin
       O.Inner := TInner.Create();
       O.Inner.Arr[2] := 5;
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('element stored', Pos(#9'str x0, [x9]', AsmT) >= 0);
 end;
 
@@ -5162,7 +5070,7 @@ begin
       B := TBox.Create();
       B.Items[1] := nil;
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('old obj released', Pos(#9'bl __ClassRelease', AsmT) >= 0);
   AssertTrue('both halves stored', Pos(#9'stp x0, x1, [x9]', AsmT) >= 0);
 end;
@@ -5197,7 +5105,7 @@ begin
       T := TC.Create();
       WriteLn(Use(T));
     end.
-    ''');
+    ''', TargetArm64);
   Body := Copy(AsmT, Pos('_main:', AsmT), Length(AsmT));
   Body := Copy(Body, 0, Pos(#9'bl _Use', Body));
   AssertTrue('itab address materialised for the argument',
@@ -5222,7 +5130,7 @@ begin
     begin
       WriteLn(Trunc(M.Scale(2.5, 4)));
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('double argument in d0', Pos(#9'fmov d0, x9', AsmT) >= 0);
   AssertTrue('branch through the itab slot',
     Pos(#9'ldr x9, [x10]'#10#9'blr x9', AsmT) >= 0);
@@ -5249,7 +5157,7 @@ begin
     begin
       WriteLn(Make().Get());
     end.
-    ''');
+    ''', TargetArm64);
   PosCall := Pos(#9'blr x9', AsmT);
   AssertTrue('itab call found', PosCall >= 0);
   PosRel := PosEx(#9'bl __ClassRelease', AsmT, PosCall);
@@ -5287,7 +5195,7 @@ begin
       WriteLn(G.Greet());
       G := nil
     end.
-    ''');
+    ''', TargetArm64);
   { the old interface value is released before the new fat pointer is stored }
   AssertTrue('release old before store', Pos(#9'bl __ClassRelease', AsmT) >= 0);
   { both halves of the returned fat pointer are unpacked from __iret BEFORE
@@ -5325,7 +5233,7 @@ begin
       WriteLn(T.Vol);
       WriteLn(Banner)
     end.
-    ''');
+    ''', TargetArm64);
   { float property read: getter call, value already in d0 }
   AssertTrue('getter called', Pos(#9'bl _TTank_GetVol', AsmT) >= 0);
   { string-initialised global: .data pointer to an immortal blob }
@@ -5363,7 +5271,7 @@ begin
       WriteLn(Describe(A));
       A := Make(2)
     end.
-    ''');
+    ''', TargetArm64);
   { callee retains its by-value copy's managed fields }
   AssertTrue('param field retain', Pos(#9'bl __StringAddRef', AsmT) >= 0);
   { managed result: sret into the __rret scratch, old LHS fields released
@@ -5413,7 +5321,7 @@ begin
       WriteLn(Ok);
       I.Go()
     end.
-    ''');
+    ''', TargetArm64);
   { Single fields: 4-byte stores narrow through s0, reads load w-width }
   AssertTrue('single field store', Pos(#9'str s0, [x9, #4]', AsmT) >= 0);
   { field reads are width-keyed through the element loader now: the
@@ -5464,7 +5372,7 @@ begin
       B.Items[2] := 10;
       WriteLn(B.Items[1])
     end.
-    ''');
+    ''', TargetArm64);
   { weak var + weak field go through the weak table }
   AssertTrue('weak assign', Pos(#9'bl __WeakAssign', AsmT) >= 0);
   { metaclass ctor: __ClassCreate on the metaclass VALUE }
@@ -5501,7 +5409,7 @@ begin
         WriteLn(Acc)
       end
     end.
-    ''');
+    ''', TargetArm64);
   { repeat: bottom-tested loop (cbz back to the top) }
   AssertTrue('repeat back-branch', Pos(#9'cbz x0, Lrep', AsmT) >= 0);
   { case: selector parked on the stack, chained equality tests }
@@ -5558,7 +5466,7 @@ begin
         WriteLn('never')
       end
     end.
-    ''');
+    ''', TargetArm64);
   { frames: push + setjmp guard, 512-byte static slot in the frame }
   AssertTrue('frame push', Pos(#9'bl __PushExcFrame', AsmT) >= 0);
   AssertTrue('setjmp guard', Pos(#9'bl __blaise_setjmp', AsmT) >= 0);
@@ -5601,7 +5509,7 @@ begin
       WriteLn(Nums[2]);
       WriteLn(Names[1])
     end.
-    ''');
+    ''', TargetArm64);
   { width-aware element access: 4-byte Integer elements }
   AssertTrue('scaled index', Pos(#9'mul x1, x1, x2', AsmT) >= 0);
   AssertTrue('4-byte store', Pos(#9'str w0, [x9]', AsmT) >= 0);
@@ -5639,7 +5547,7 @@ begin
       WriteLn(Length(B));
       WriteLn(B[3])
     end.
-    ''');
+    ''', TargetArm64);
   { lifecycle through the RTL }
   AssertTrue('setlength', Pos(#9'bl __DynArraySetLength', AsmT) >= 0);
   AssertTrue('length', Pos(#9'bl __DynArrayLength', AsmT) >= 0);
@@ -5688,7 +5596,7 @@ begin
       S := MakeSpec();
       WriteLn(Length(S.Cands))
     end.
-    ''');
+    ''', TargetArm64);
   { the SetLength routes through __DynArraySetLength via the field address:
     compute &field, load old ptr, call, store new ptr back — NO plain-ident
     slot store and NO extra __DynArrayRelease (the RTL moved ownership). }
@@ -5738,7 +5646,7 @@ begin
       S := MakeSpec();
       WriteLn(S.Cands[0])
     end.
-    ''');
+    ''', TargetArm64);
   { the element store scales the index by the element size and computes the
     element address off the field's data pointer — the value is materialised
     FIRST, then the data pointer is derefed (so a reallocating RHS is safe). }
@@ -5778,7 +5686,7 @@ begin
       A[9] := 90;
       WriteLn(A[5], A[9])
     end.
-    ''');
+    ''', TargetArm64);
   { the index is rebased by the low bound before the element scale }
   AssertTrue('write rebases the low bound (sub #5)',
     Pos(#9'sub x0, x0, #5', AsmT) >= 0);
@@ -5808,7 +5716,7 @@ begin
       ForceDirectories('/tmp/blaise_leg13/x');
       WriteLn('done')
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('statement-context ForceDirectories calls the RTL',
     Pos(#9'bl __ForceDirectories', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
@@ -5855,7 +5763,7 @@ begin
       T.Build();
       WriteLn(T.FTab)
     end.
-    ''');
+    ''', TargetArm64);
   { the var-param field address is Self + the field offset (#8): a plain
     EmitSlotAddr on the field name would have hit NotYet, so successful
     compilation to a call already proves the field-address path. }
@@ -5907,7 +5815,7 @@ begin
       H := B;
       WriteLn(H.Get())
     end.
-    ''');
+    ''', TargetArm64);
   { the itab and impllist are weak-bound for the generic instance }
   AssertTrue('itab weak-bound',
     Pos('.weak_definition _itab_TBox_Integer_IHolder', AsmStr) >= 0);
@@ -5954,7 +5862,7 @@ begin
       t := nil;
       d.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { the generic-interface instance typeinfo is emitted weak }
   AssertTrue('weak generic-intf typeinfo',
     Pos('.weak_definition _typeinfo_ITransform_Integer', AsmT) >= 0);
@@ -5997,7 +5905,7 @@ begin
       Sh := S;
       WriteLn(Sh.Area())
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('abstract base itab slot is the abort stub',
     Pos('_itab_TBase_IShape:' + LF + #9'.quad __AbstractMethodError',
         AsmStr) >= 0);
@@ -6047,7 +5955,7 @@ begin
       B := D;
       WriteLn(B.BaseVal())
     end.
-    ''');
+    ''', TargetArm64);
   { the impllist includes the BASE interface as its own pair }
   AssertTrue('impllist includes the base interface',
     Pos(#9'.quad _typeinfo_IBase' + LF + #9'.quad _itab_TImpl_IBase',
@@ -6103,7 +6011,7 @@ procedure TArm64BackendTests.TestJumboSet_LocalDeclAndLiteral;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcJumboSet);
+  AsmT := GenAsm(SrcJumboSet, TargetArm64);
   { A jumbo set is an aggregate, so building a literal goes through the RTL
     rather than folding to an immediate mask the way a small set does. }
   AssertTrue('literal built via _SetInclude',
@@ -6114,7 +6022,7 @@ procedure TArm64BackendTests.TestJumboSet_MembershipCallsRtl;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcJumboSet);
+  AsmT := GenAsm(SrcJumboSet, TargetArm64);
   { `M65 in B` cannot be a shift+test past 64 bits — it must call the helper,
     which takes the bitmap ADDRESS and the member ordinal. }
   AssertTrue('membership via _SetIn', Pos('bl __SetIn', AsmT) >= 0);
@@ -6124,7 +6032,7 @@ procedure TArm64BackendTests.TestJumboSet_UnionCallsRtl;
 var
   AsmT: string;
 begin
-  AsmT := GenAsm(SrcJumboSet);
+  AsmT := GenAsm(SrcJumboSet, TargetArm64);
   { `A + [M69]` is a bitmap union: dest, a, b pointers plus a byte count. }
   AssertTrue('union via _SetUnion', Pos('bl __SetUnion', AsmT) >= 0);
   { The destination is a FIXED x29-relative FRAME slot, never a fresh sp
@@ -6158,7 +6066,7 @@ begin
       WriteLn(A <= B);
       WriteLn(C < D)
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('UInt64 > uses hi', Pos('cset x0, hi', AsmT) >= 0);
   AssertTrue('UInt64 <= uses ls', Pos('cset x0, ls', AsmT) >= 0);
   AssertTrue('Int64 < stays signed lt', Pos('cset x0, lt', AsmT) >= 0);
@@ -6182,7 +6090,7 @@ begin
       F := function(A: Integer): Integer begin Result := A + 1; end;
       WriteLn(F(5))
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_g_F:', AsmT);
   AssertTrue('F is defined', P >= 0);
   AssertTrue('F is 16 bytes', Pos(#9'.zero 16', Copy(AsmT, P, 40)) >= 0);
@@ -6217,7 +6125,7 @@ begin
         C := A + B;
       WriteLn(M00 in C)
     end.
-    ''');
+    ''', TargetArm64);
   { Isolate the loop body: from the loop-top label to the continue label. }
   LoopStart := Pos('Lfor1:', AsmT);
   LoopEnd   := Pos('Lfcont3:', AsmT);
@@ -6251,7 +6159,7 @@ begin
       WriteLn(Wed in D);
       WriteLn(D = E)
     end.
-    ''');
+    ''', TargetArm64);
   { const literal folds to an immediate mask (Mon|Wed = bits 0,2 = 5) }
   AssertTrue('folded mask', Pos(#9'movz x0, #5', AsmT) >= 0);
   { membership: shift + bit test + range guard }
@@ -6307,7 +6215,7 @@ begin
         Total := Total + 1;
       WriteLn(Total)
     end.
-    ''');
+    ''', TargetArm64);
   { dyn-array iteration re-reads the length each pass }
   AssertTrue('dyn length', Pos(#9'bl __DynArrayLength', AsmT) >= 0);
   { string byte-iteration: length at dataptr-8, byte loads }
@@ -6365,7 +6273,7 @@ begin
       for V in C do
         WriteLn(V)
     end.
-    ''');
+    ''', TargetArm64);
   { the three protocol methods are all called }
   AssertTrue('GetEnumerator call', Pos(#9'bl _TColl_GetEnumerator', AsmT) >= 0);
   AssertTrue('MoveNext call', Pos(#9'bl _TEnum_MoveNext', AsmT) >= 0);
@@ -6407,7 +6315,7 @@ begin
       end;
       WriteLn(N)
     end.
-    ''');
+    ''', TargetArm64);
   { each label compares via the RTL — pointer cmp would be silently wrong }
   AssertTrue('string equals chain', Pos(#9'bl __StringEquals', AsmT) >= 0);
   AssertTrue('match branches to body', Pos(#9'cbnz x0, Lcbody', AsmT) >= 0);
@@ -6442,7 +6350,7 @@ begin
       WriteLn(Nums[2]);
       WriteLn(Names[1])
     end.
-    ''');
+    ''', TargetArm64);
   { integer elements laid out inline in .data }
   AssertTrue('int elements', Pos(#9'.word 30', AsmT) >= 0);
   { 8-byte elements }
@@ -6502,7 +6410,7 @@ begin
       WriteLn(HasMethodAttribute(TJob, 'Run', ThreadedAttribute));
       WriteLn(MethodAttributeCount(TJob, 'Run'))
     end.
-    ''');
+    ''', TargetArm64);
   { attribute tables: (typeinfo, thunk) pairs behind typeinfo slot 7,
     (name, typeinfo, thunk) triples behind slot 8 }
   AssertTrue('class attrs table', Pos('attrs_TJob:', AsmT) >= 0);
@@ -6563,7 +6471,7 @@ begin
       WriteLn(B.Get() + 1);
       WriteLn(Pick<Int64>(7, 9))
     end.
-    ''');
+    ''', TargetArm64);
   { instance symbols are BARE (no unit prefix) and WEAK — every object
     that materialises the same instance carries an identical copy and
     the linker keeps one (BUG-004) }
@@ -6616,7 +6524,7 @@ begin
       WriteLn(b.Wrap<Integer>(5));
       WriteLn(b.AddBase<Integer>(7))
     end.
-    ''');
+    ''', TargetArm64);
   { the monomorphised instance bodies are emitted with weak binding }
   AssertTrue('Wrap instance body', Pos('TBox_Wrap_Integer:', AsmT) >= 0);
   AssertTrue('Wrap weak bind', Pos('.weak_definition _TBox_Wrap_Integer', AsmT) >= 0);
@@ -6649,7 +6557,7 @@ begin
     begin
       WriteLn(Apply(function(x: Integer): Integer begin Result := x * 2 end, 5))
     end.
-    ''');
+    ''', TargetArm64);
   { the anon thunk body is emitted }
   AssertTrue('closure thunk emitted', Pos('__closure_1:', AsmT) >= 0);
   { the literal materialises Code (&thunk) and a nil Env }
@@ -6692,7 +6600,7 @@ begin
     begin
       WriteLn(Apply(function(s: string): Integer begin Result := Length(s) end))
     end.
-    ''');
+    ''', TargetArm64);
   { the closure is invoked (blr) and the transient released afterwards }
   PosCall := Pos(#9'blr x9', AsmT);
   AssertTrue('closure invoked', PosCall >= 0);
@@ -6724,7 +6632,7 @@ begin
       A := 'ab';
       WriteLn(Sink(A + 'cd'))
     end.
-    ''');
+    ''', TargetArm64);
   PosCat := Pos(#9'bl __StringConcat', AsmT);
   AssertTrue('concat produced', PosCat >= 0);
   PosCall := PosEx(#9'bl _Sink', AsmT, PosCat);
@@ -6758,7 +6666,7 @@ begin
       R := Trim(A + ' cd ');
       WriteLn(R)
     end.
-    ''');
+    ''', TargetArm64);
   PosCat := Pos(#9'bl __StringConcat', AsmT);
   AssertTrue('concat produced', PosCat >= 0);
   PosCall := PosEx(#9'bl __StringTrim', AsmT, PosCat);
@@ -6814,7 +6722,7 @@ begin
     begin
       Use(nil)
     end.
-    ''');
+    ''', TargetArm64);
   PosCall := Pos(#9'bl _TBag_GetIt', AsmT);
   AssertTrue('getter call emitted', PosCall >= 0);
   { the receiver chain starts where the T parameter slot is loaded }
@@ -6874,7 +6782,7 @@ begin
       L.O1.S := 'rax';
       WriteLn(Enc(L))
     end.
-    ''');
+    ''', TargetArm64);
   PosFn := Pos('Enc:' + #10, AsmT);
   AssertTrue('Enc emitted', PosFn >= 0);
   { both the param copy and the entry retains live in Enc's prologue, so the
@@ -6916,7 +6824,7 @@ begin
       N := Ord(M.Data[0]);
       WriteLn(N)
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -6960,7 +6868,7 @@ begin
       SetI(I); SetB(Y); SetL(Q);
       WriteLn(I, Y, Q)
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('SetI:', AsmT);
   AssertTrue('SetI emitted', P >= 0);
   Body := Copy(AsmT, P, Pos('SetB:', AsmT) - P);
@@ -7003,7 +6911,7 @@ begin
       SetI(V);
       WriteLn(V)
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -7046,7 +6954,7 @@ begin
       N := S.BB[1];
       WriteLn(N)
     end.
-    ''');
+    ''', TargetArm64);
   P := Pos('_main:', AsmT);
   if P < 0 then P := Pos(#10'$main:', AsmT);
   AssertTrue('program body emitted', P >= 0);
@@ -7078,7 +6986,7 @@ begin
     begin
       WriteLn(Apply(function(s: string): Integer begin Result := Length(s) end, 'hi'))
     end.
-    ''');
+    ''', TargetArm64);
   PosCat := Pos(#9'bl __StringConcat', AsmT);
   AssertTrue('concat produced', PosCat >= 0);
   PosCall := PosEx(#9'blr x9', AsmT, PosCat);
@@ -7111,7 +7019,7 @@ begin
     begin
       Run(procedure(x: Integer) begin WriteLn(x) end, 42)
     end.
-    ''');
+    ''', TargetArm64);
   { the fat call loads Env (x0) and Code (x9) and blr's }
   AssertTrue('Env -> x0', Pos(#9'ldr x0, [x10, #8]', AsmT) >= 0);
   AssertTrue('Code -> x9', Pos(#9'ldr x9, [x10]', AsmT) >= 0);
@@ -7135,7 +7043,7 @@ begin
     begin
       WriteLn(AddOne(41))
     end.
-    ''');
+    ''', TargetArm64);
   { the body is emitted verbatim: no compiler prologue/epilogue around it }
   AssertTrue('label emitted', Pos('AddOne:', AsmT) >= 0);
   AssertTrue('verbatim body', Pos('add x0, x0, #1', AsmT) >= 0);
@@ -7179,7 +7087,7 @@ begin
       WriteLn(N);
       WriteLn(B)
     end.
-    ''');
+    ''', TargetArm64);
   { deref read: 4-byte signed load through the pointer }
   AssertTrue('deref int read', Pos(#9'ldrsw x0, [x0]', AsmT) >= 0);
   { pointer write: 4-byte store through the parked pointer }
@@ -7219,7 +7127,7 @@ begin
       B := (Q = nil) or (Q^ = 0);
       WriteLn(B)
     end.
-    ''');
+    ''', TargetArm64);
   { and: LHS = 0 skips the RHS; or: LHS <> 0 skips the RHS }
   AssertTrue('and skips on false LHS', Pos(#9'cbz x0, Lscend', AsmT) >= 0);
   AssertTrue('or skips on true LHS', Pos(#9'cbnz x0, Lscend', AsmT) >= 0);
@@ -7251,7 +7159,7 @@ begin
       Fd := c_open(PChar('x'), 0);
       WriteLn(Fd)
     end.
-    ''');
+    ''', TargetArm64);
   { the int-returning external's result must be sign-extended before any
     64-bit use — bits 32-63 of x0 are undefined at the C ABI boundary }
   CallPos := Pos(#9'bl _open', AsmT);
@@ -7306,7 +7214,7 @@ begin
       WriteLn(Sum(D));
       WriteLn(Fwd(S))
     end.
-    ''');
+    ''', TargetArm64);
   { a dyn array coerced to an open array computes high = length - 1 }
   AssertTrue('dyn arg high via __DynArrayLength',
     Pos(#9'bl __DynArrayLength', AsmT) >= 0);
@@ -7346,7 +7254,7 @@ begin
     begin
       WriteLn(IndexOf('b', ['a', 'b', 'c']))
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('string compare emitted',
     Pos(#9'bl __StringEquals', AsmT) >= 0);
   { the const element read must not retain what it merely borrows }
@@ -7385,7 +7293,7 @@ begin
       B.Free();
       WriteLn(1)
     end.
-    ''');
+    ''', TargetArm64);
   { Free = release, then NIL the slot — a stale pointer here aliases the
     next same-size allocation and a later ARC store double-releases it }
   RelPos := Pos(#9'bl __ClassRelease' + LF + #9'movz x0, #0', AsmT);
@@ -7424,7 +7332,7 @@ begin
       WriteLn(A.ClassName);
       A.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { ClassName walks instance[0]=vtable, vtable[0]=typeinfo, name at +16 —
     the +16 load is the tell }
   DerefPos := Pos(#9'ldr x0, [x0, #16]', AsmT);
@@ -7467,7 +7375,7 @@ begin
       r := x in [b00, b70, b79];
       WriteLn(r)
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('membership via __SetIn', Pos(#9'bl __SetIn', AsmT) >= 0);
   AssertTrue('bitmap built via __SetInclude',
     Pos(#9'bl __SetInclude', AsmT) >= 0);
@@ -7509,7 +7417,7 @@ begin
       C.Step();
       C.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { Inc/Dec(FN) load-adjust-store through Self+offset: the field address is
     parked in x9, then stored back with str w0 — never loaded as a bare
     variable (that path would emit 'load of variable FN') }
@@ -7551,7 +7459,7 @@ begin
       Grab(X);
       X.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { the var-class store releases the OLD value through the address and
     stores the new one back — a str-through-address after __ClassRelease }
   AssertTrue('releases old value', Pos(#9'bl __ClassRelease', AsmT) >= 0);
@@ -7591,7 +7499,7 @@ begin
       K := MakeBox().N;
       WriteLn(K)
     end.
-    ''');
+    ''', TargetArm64);
   { the transient base (+1) is released AFTER its scalar field is loaded }
   AssertTrue('base released after field load',
     Pos(#9'bl __ClassRelease', AsmT) >= 0);
@@ -7633,7 +7541,7 @@ begin
     begin
       WriteLn(SumPair(MakePair(5)))
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('MakePair evaluated', Pos(#9'bl _MakePair', AsmT) >= 0);
   AssertTrue('result stored into a scratch buffer',
     Pos(#9'str x0, [x9]', AsmT) >= 0);
@@ -7673,7 +7581,7 @@ begin
       WriteLn(MakePair(7).A);
       WriteLn(MakePair(7).B)
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('MakePair evaluated', Pos(#9'bl _MakePair', AsmT) >= 0);
   { the field is read from the __rret scratch (an x29-relative address then a
     load) — the store-into-scratch then load-field shape }
@@ -7717,7 +7625,7 @@ begin
       ProcessFree(H);
       WriteLn(E)
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('ProcessCreate', Pos(#9'bl __ProcessCreate', AsmT) >= 0);
   AssertTrue('ProcessSetExe', Pos(#9'bl __ProcessSetExe', AsmT) >= 0);
   AssertTrue('ProcessAddArg', Pos(#9'bl __ProcessAddArg', AsmT) >= 0);
@@ -7770,7 +7678,7 @@ begin
       B.Grab().Free();
       B.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { the Grab result is released immediately after the call — bl _Grab then
     bl __ClassRelease adjacently, with no str-to-slot between them }
   GrabPos := Pos(#9'bl _TBox_Grab' + LF + #9'bl __ClassRelease', AsmT);
@@ -7814,7 +7722,7 @@ begin
       S := MakeThing().Name;
       WriteLn(S)
     end.
-    ''');
+    ''', TargetArm64);
   { the field-read region is after 'bl _MakeThing' in $main: the base is
     loaded, field read, base released inline — NO AddRef between the call
     and the release (contrast the class arm, which pins) }
@@ -7853,7 +7761,7 @@ begin
       X := MakeThing().Obj;
       WriteLn(X.N)
     end.
-    ''');
+    ''', TargetArm64);
   { the field-read region: base + field value are both parked on the stack,
     the base is loaded (ldr x0, [sp, #16]) and SPILLED to a _pendrel frame
     slot (stur to a negative x29 offset — the defer), then the field value
@@ -7911,7 +7819,7 @@ begin
       A := MakeArr();
       WriteLn(A[0] + A[1])
     end.
-    ''');
+    ''', TargetArm64);
   { the Result +1 transfers — MakeArr's body must NOT __DynArrayRelease its
     Result before returning it (that would drop the transferred ref) }
   MakeEnd := Pos(#9'bl _MakeArr', AsmT);
@@ -7960,7 +7868,7 @@ begin
       Arr[0] := MakeSpec(5);
       WriteLn(Arr[0].Kind)
     end.
-    ''');
+    ''', TargetArm64);
   { the element store releases the dest's old string field before the memcpy
     transfer — a __StringRelease then a memcpy from the __rret scratch }
   AssertTrue('dest old ref released', Pos(#9'bl __StringRelease', AsmT) >= 0);
@@ -8004,7 +7912,7 @@ begin
       Arr[0].B := 4;
       WriteLn(SumPair(Arr[0]))
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('SumPair called with the element', Pos(#9'bl _SumPair', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64sra.o');
@@ -8051,7 +7959,7 @@ begin
       WriteLn(T.Get(0));
       T.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { base is Self+offset as an ADDRESS — the load of Self is followed by an
     add of the field offset, NOT a ldr deref, before the index is scaled. }
   AssertTrue('static-array field base is Self+offset address (add, no deref)',
@@ -8096,7 +8004,7 @@ begin
     begin
       Outer()
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('nested body emitted as sibling Outer_Inner symbol',
     Pos('Outer_Inner:', AsmT) >= 0);
   AssertTrue('outer calls the mangled nested symbol',
@@ -8139,7 +8047,7 @@ begin
     begin
       Outer()
     end.
-    ''');
+    ''', TargetArm64);
   { Inner spills the leading capture pointer arg into _cap_n (first store of
     x0 to a frame slot) and reads the captured var by derefing that pointer:
     load the __cap_ slot into x0, then load n at its DECLARED width -- an
@@ -8193,7 +8101,7 @@ begin
     begin
       Outer()
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('captured string store retains the new value',
     Pos(#9'bl __StringAddRef', AsmT) >= 0);
   AssertTrue('captured string store releases the old value',
@@ -8241,7 +8149,7 @@ begin
     begin
       Outer()
     end.
-    ''');
+    ''', TargetArm64);
   { the two overflow args are stored to the reserved outgoing area via w9 }
   AssertTrue('overflow args spill to the outgoing stack area',
     Pos(#9'str w9, [sp, #', AsmT) >= 0);
@@ -8286,7 +8194,7 @@ begin
       f.DoIt(); b.DoIt();
       f.Free(); b.Free()
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('TFoo.DoIt.Inner is class-qualified',
     Pos('TFoo_DoIt_Inner:', AsmT) >= 0);
   AssertTrue('TBar.DoIt.Inner is class-qualified',
@@ -8320,7 +8228,7 @@ begin
       begin L3() end;
     begin L2() end;
     begin L1() end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('innermost mangles as the full chain L1_L2_L3',
     Pos('L1_L2_L3:', AsmT) >= 0);
   AssertTrue('the call targets the full-chain symbol',
@@ -8361,7 +8269,7 @@ begin
       WriteLn(B.Items['k']);
       B.Free()
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('the string-indexed setter is called',
     Pos(#9'bl _TBox_SetItem', AsmT) >= 0);
   AssertTrue('the string-indexed getter is called',
@@ -8412,7 +8320,7 @@ begin
       f.Cur := a + b;
       f.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { the concat transient is produced, the rc=0 pin (AddRef) lands BEFORE the
     setter call — a by-value setter param's own entry/exit cycle would free
     an unpinned rc=0 transient DURING the call, so a post-call pin was a
@@ -8454,7 +8362,7 @@ begin
       begin WriteLn(AThing.FName) end;
     begin Inner() end;
     begin end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('Inner is emitted as a sibling symbol',
     Pos('TProc_Run_Inner:', AsmT) >= 0);
   { the captured base is loaded through __cap_ then derefed to the instance:
@@ -8492,7 +8400,7 @@ begin
       begin AThing.Show() end;
     begin Inner() end;
     begin end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('the receiver is loaded through the capture pointer',
     Pos('ldr x0, [x0]', AsmT) >= 0);
   AssertTrue('the method is dispatched',
@@ -8526,7 +8434,7 @@ begin
       begin AThing.FN := 5 end;
     begin Inner() end;
     begin end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('Inner is emitted', Pos('TProc_Run_Inner:', AsmT) >= 0);
   { the store base is materialised from __cap_ (deref to instance), then the
     value is stored at the field offset }
@@ -8561,7 +8469,7 @@ begin
       begin T.FN := 5 end;
     begin Inner() end;
     begin end.
-    ''');
+    ''', TargetArm64);
   { two consecutive derefs of the base register before the field store }
   AssertTrue('captured var-param class write derefs twice',
     Pos('ldr x9, [x9]' + LF + #9'ldr x9, [x9]', AsmT) >= 0);
@@ -8597,7 +8505,7 @@ begin
       Take(@B.Bytes[3]);
       B.Free()
     end.
-    ''');
+    ''', TargetArm64);
   { the class instance pointer is loaded from the global slot (a ldr of the
     slot VALUE), then the field offset #8 is added to that instance pointer }
   AssertTrue('the field offset is added to the loaded instance pointer',
@@ -8637,7 +8545,7 @@ begin
     begin Take(@FMtx[0]) end;
     var B: TBox;
     begin B := TBox.Create(); B.Fill(); B.Free() end.
-    ''');
+    ''', TargetArm64);
   { Self is loaded, the field offset added, and the index scaled+added.
     (The implicit-Self static-array field element goes through the leg-16
     EmitStaticElemAddr path, which scales via x1; the class-access form goes
@@ -8674,7 +8582,7 @@ begin
       WriteLn(Ord(High(TColor)));
       WriteLn(Ord(Low(TColor)))
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('High(TColor) folds to the max ordinal 2',
     Pos(#9'movz x0, #2', AsmT) >= 0);
   AssertTrue('Low(TColor) folds to 0',
@@ -8705,7 +8613,7 @@ begin
       WriteLn(Length(A));
       WriteLn(High(A))
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('Length(array[0..7]) folds to 8',
     Pos(#9'movz x0, #8', AsmT) >= 0);
   AssertTrue('High(array[0..7]) folds to 7',
@@ -8744,7 +8652,7 @@ begin
       Box.Recs[1] := R;
       Box.Free()
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('the record element store memcpys the record',
     Pos(#9'bl _memcpy', AsmT) >= 0);
   AssertTrue('the memcpy length is the record size (16)',
@@ -8786,7 +8694,7 @@ begin
       Get(R, S);
       WriteLn(R.A)
     end.
-    ''');
+    ''', TargetArm64);
   { the record is memcpy'd (16 bytes) — the store is a whole-record copy }
   AssertTrue('the var-param record store memcpys the record',
     Pos(#9'bl _memcpy', AsmT) >= 0);
@@ -8828,7 +8736,7 @@ begin
       O.I.K := 7;
       if O.I.K <> 0 then WriteLn(O.I.K)
     end.
-    ''');
+    ''', TargetArm64);
   { the intermediate record-field address adds the I field offset (#4) to O's
     base before the scalar store/load at K's offset }
   AssertTrue('intermediate record-field offset is added to the base',
@@ -8868,7 +8776,7 @@ begin
       L.Op := O;
       WriteLn(L.Op.S)
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('the managed record field store memcpys the record',
     Pos(#9'bl _memcpy', AsmT) >= 0);
   AssertTrue('source/dest parked in callee-saved x19/x22',
@@ -8907,7 +8815,7 @@ begin
     begin SetLength(C.Arr, N) end;
     var Ctx: TCtx;
     begin Grow(Ctx, 3); WriteLn(Length(Ctx.Arr)) end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('the dyn-array field is resized',
     Pos(#9'bl __DynArraySetLength', AsmT) >= 0);
   { the var-param base is derefed (ldur the slot value), not slot-addressed }
@@ -8942,7 +8850,7 @@ begin
       Grow(t, 6);
       WriteLn(Length(t))
     end.
-    ''');
+    ''', TargetArm64);
   AssertTrue('resize helper', Pos(#9'bl __StringSetLength', AsmT) >= 0);
   { the rc=0 result is retained before it lands in the slot }
   AssertTrue('result AddRef', Pos(#9'bl __StringAddRef', AsmT) >= 0);
@@ -8978,7 +8886,7 @@ begin
       WriteLn(SumC(d));
       WriteLn(SumV(d))
     end.
-    ''');
+    ''', TargetArm64);
   { the param is used via Length + subscript in both bodies }
   AssertTrue('dyn-array length in body', Pos(#9'bl __DynArrayLength', AsmT) >= 0);
   { the by-value param (SumV) retains — a prologue __DynArrayAddRef appears }
@@ -9011,7 +8919,7 @@ begin
     begin C.Arr[I] := V end;
     var Ctx: TCtx;
     begin SetLength(Ctx.Arr, 3); SetAt(Ctx, 1, 42); WriteLn(Ctx.Arr[1]) end.
-    ''');
+    ''', TargetArm64);
   { the var-param base is derefed (ldur the slot value), not slot-addressed }
   AssertTrue('the var-param record slot is dereferenced for the base address',
     Pos(#9'ldur x0, [x29,', AsmT) >= 0);
@@ -9053,7 +8961,7 @@ begin
       r := d[0];
       WriteLn(r.A)
     end.
-    ''');
+    ''', TargetArm64);
   { the element address is computed (index scaled) — the record is then copied
     by reference, NOT value-loaded into a single register }
   AssertTrue('the record element index is scaled to an address',
@@ -9079,7 +8987,7 @@ begin
     begin F.Arr[0] := 5 end;
     var F: TFoo;
     begin F := TFoo.Create(); SetLength(F.Arr, 1); Poke(F); WriteLn(F.Arr[0]) end.
-    ''');
+    ''', TargetArm64);
   Body := Copy(AsmT, Pos('_Poke:', AsmT), Length(AsmT));
   AssertTrue('slot -> instance -> field -> data pointer',
     Pos(#9'ldr x0, [x0]'#10#9'add x0, x0, #8'#10#9'ldr x0, [x0]', Body) >= 0);
@@ -9108,7 +9016,7 @@ begin
       G := 'a' + 'b';
       WriteLn(Look(G))
     end.
-    ''');
+    ''', TargetArm64);
   { scope the assertion to the MAIN program body (after Look's own def) so a
     stray AddRef inside Look cannot satisfy it.  Pos is 0-based and returns -1
     when absent. }
@@ -9152,7 +9060,7 @@ begin
     begin
       Use()
     end.
-    ''');
+    ''', TargetArm64);
   { L is a plain local of Use; find Use's Look call and confirm no AddRef sits
     between L's load and the call.  L's slot load is 'ldur x0, [x29,' followed
     by the push; there must be no __StringAddRef in the arg-marshal window. }

@@ -33,12 +33,11 @@ interface
 uses
   Classes, SysUtils, blaise.testing, uStrCompat,
   uLexer, uParser, uAST, uSymbolTable, uSemantic,
-  blaise.codegen.native, blaise.codegen.target, cp.test.targets, uDebugFacts;
+  blaise.codegen.native, blaise.codegen.target, cp.test.targets, uDebugFacts, cp.test.harness;
 
 type
   TNativeCallAlignTests = class(TTestCase)
   private
-    function GenAsm(const ASrc: string): string;
     function FuncRegion(const AAsm, AName: string): string;
   published
     { F(1, Inner()) pins one slot: the inner call must be wrapped in a
@@ -60,41 +59,6 @@ implementation
 
 const
   LF = #10;
-
-function TNativeCallAlignTests.GenAsm(const ASrc: string): string;
-var
-  L:    TLexer;
-  P:    TParser;
-  Prog: TProgram;
-  A:    TSemanticAnalyser;
-  CG:   TCodeGenNative;
-begin
-  L := TLexer.Create(ASrc);
-  P := TParser.Create(L);
-  try
-    Prog := P.Parse();
-  finally
-    P.Free(); L.Free();
-  end;
-  try
-    A := TSemanticAnalyser.Create();
-    try
-      A.Analyse(Prog);
-    finally
-      A.Free();
-    end;
-    CG := TCodeGenNative.Create();
-    try
-      CG.SetTarget(LinuxX64Target());
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
-  end;
-end;
 
 function TNativeCallAlignTests.FuncRegion(const AAsm, AName: string): string;
 var
@@ -121,7 +85,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src), 'main');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'main');
   AssertTrue('inner call at odd pinned depth is pad-wrapped',
     Pos(#9'subq $8, %rsp' + LF + #9'callq Inner' + LF +
         #9'addq $8, %rsp', Region) >= 0);
@@ -144,7 +108,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src), 'main');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'main');
   AssertTrue('inner call present', Pos('callq Inner', Region) >= 0);
   AssertTrue('inner call at aligned depth is not pad-wrapped',
     Pos(#9'subq $8, %rsp' + LF + #9'callq Inner', Region) < 0);
@@ -165,7 +129,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src), 'main');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'main');
   { Inner runs under 3 pinned slots (1, 2, 3) — odd, so pad-wrapped. }
   AssertTrue('deepest call at odd pinned depth is pad-wrapped',
     Pos(#9'subq $8, %rsp' + LF + #9'callq Inner' + LF +
@@ -193,7 +157,7 @@ const
 var
   Region: string;
 begin
-  Region := FuncRegion(GenAsm(Src), 'main');
+  Region := FuncRegion(GenAsm(Src, TargetX86_64), 'main');
   AssertTrue('overflow call present', Pos('callq Sum8', Region) >= 0);
   { A call with SysV stack arguments must never get the wrap pad — it would
     shift the stack arguments out from under the callee. }

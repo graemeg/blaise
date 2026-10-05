@@ -16,13 +16,12 @@ interface
 uses
   Classes, SysUtils, blaise.testing,
   uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe,
-  blaise.codegen.native, blaise.codegen.target;
+  blaise.codegen.native, blaise.codegen.target, cp.test.harness;
 
 type
   TSetTests = class(TTestCase)
   private
     function GenIR(const ASrc: string): string;
-    function GenAsm(const ASrc: string): string;
     function AnalyseSrc(const ASrc: string): TProgram;
     procedure SemanticOK(const ASrc: string);
     procedure SemanticFail(const ASrc: string);
@@ -793,29 +792,6 @@ begin
   Prog.Free();
 end;
 
-function TSetTests.GenAsm(const ASrc: string): string;
-var
-  Lex:  TLexer;
-  Par:  TParser;
-  SA:   TSemanticAnalyser;
-  CG:   TCodeGenNative;
-  Prog: TProgram;
-begin
-  Lex  := TLexer.Create(ASrc);
-  Par  := TParser.Create(Lex);
-  Prog := Par.Parse();
-  Par.Free(); Lex.Free();
-  SA   := TSemanticAnalyser.Create();
-  SA.Analyse(Prog);
-  SA.Free();
-  CG   := TCodeGenNative.Create();
-  CG.SetTarget(HostTarget());
-  CG.Generate(Prog);
-  Result := CG.GetOutput();
-  CG.Free();
-  Prog.Free();
-end;
-
 function TSetTests.AnalyseSrc(const ASrc: string): TProgram;
 var
   Lex:  TLexer;
@@ -1065,7 +1041,7 @@ var
   S: string;
 begin
   { Native raised "unsupported expression form TArrayLiteralExpr". }
-  S := GenAsm(SrcSetProcFieldArgLiteral);
+  S := GenAsm(SrcSetProcFieldArgLiteral, TargetX86_64);
   AssertTrue('native emits the proc-field calls', Length(S) > 0);
 end;
 
@@ -2139,7 +2115,7 @@ end;
 procedure TSetTests.TestNative_SelfAssignedJumboSetCall_UsesTemp;
 var Asm_: string;
 begin
-  Asm_ := GenAsm(SrcSelfAssignJumboSetCall);
+  Asm_ := GenAsm(SrcSelfAssignJumboSetCall, TargetX86_64);
   { The aliasing arm parks the temp address in %r14 and memcpy's into the
     destination after the call. }
   AssertTrue('aliased jumbo-set call must stage through %r14',
@@ -2151,7 +2127,7 @@ end;
 procedure TSetTests.TestNative_DistinctDestJumboSetCall_KeepsDirectForm;
 var Asm_: string;
 begin
-  Asm_ := GenAsm(SrcDistinctDestJumboSetCall);
+  Asm_ := GenAsm(SrcDistinctDestJumboSetCall, TargetX86_64);
   { Non-aliasing: no aliasing temp is staged. }
   AssertTrue('non-aliasing jumbo-set call must not stage an aliasing temp',
     Pos('movq %rsp, %r14', Asm_) < 0);
