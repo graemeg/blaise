@@ -836,7 +836,7 @@ const
 implementation
 
 uses
-  blaise.codegen.target;
+  blaise.codegen.target, uStrCompat;
 
 { ------------------------------------------------------------------ }
 { TUsesChainProvider                                                  }
