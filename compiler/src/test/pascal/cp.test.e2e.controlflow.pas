@@ -8,7 +8,8 @@
 
 unit cp.test.e2e.controlflow;
 
-{ E2E tests for control flow: for, while, repeat, break, continue. }
+{ E2E tests for control flow: if/else, for, while, repeat, break, continue,
+  and signed Integer comparisons. }
 
 interface
 
@@ -21,6 +22,8 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_IfElse_TakesEachBranch;
+    procedure TestRun_IntegerCompare_Signed;
     procedure TestRun_For_Upward_PrintsRange;
     procedure TestRun_For_Downto_PrintsRange;
     procedure TestRun_While_PrintsRange;
@@ -216,6 +219,86 @@ begin
   AssertTrue('compile+run', CompileAndRun(SrcForDown, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
   AssertEquals('3 2 1', '3' + LE + '2' + LE + '1' + LE, Output);
+end;
+
+procedure TE2EControlFlowTests.TestRun_IfElse_TakesEachBranch;
+const
+  { Each branch taken at least once: a compound then-branch (every
+    statement runs), a single-statement else, an if without else, and the
+    join point after it.  Replaces the QBE IR checks in cp.test.control. }
+  Src = '''
+    program P;
+    procedure Check(N: Integer);
+    begin
+      if N > 5 then
+      begin
+        WriteLn('big ', N);
+        WriteLn('then')
+      end
+      else
+        WriteLn('small ', N);
+      if N = 7 then
+        WriteLn('seven');
+      WriteLn('end ', N)
+    end;
+    begin
+      Check(10);
+      Check(3);
+      Check(7)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'big 10' + LE + 'then' + LE + 'end 10' + LE +
+    'small 3' + LE + 'end 3' + LE +
+    'big 7' + LE + 'then' + LE + 'seven' + LE + 'end 7' + LE, 0);
+end;
+
+procedure TE2EControlFlowTests.TestRun_IntegerCompare_Signed;
+const
+  { Integer comparisons are SIGNED: an unsigned lowering gets every
+    comparison involving a negative operand wrong.  Variables, not
+    literals, so nothing is folded at compile time; the while loop counts
+    down through zero. }
+  Src = '''
+    program P;
+    var A, B, N: Integer;
+    procedure Show(const S: string; V: Boolean);
+    begin
+      if V then
+        WriteLn(S, ' T')
+      else
+        WriteLn(S, ' F')
+    end;
+    begin
+      A := -1;
+      B := 0;
+      Show('-1<0', A < B);
+      Show('-1>0', A > B);
+      Show('-1<=0', A <= B);
+      Show('-1>=0', A >= B);
+      Show('-1=0', A = B);
+      Show('-1<>0', A <> B);
+      A := -5;
+      B := -10;
+      Show('-5>-10', A > B);
+      Show('-5<-10', A < B);
+      N := 2;
+      while N > -2 do
+      begin
+        Write(N, ' ');
+        N := N - 1
+      end;
+      WriteLn('')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '-1<0 T' + LE + '-1>0 F' + LE + '-1<=0 T' + LE + '-1>=0 F' + LE +
+    '-1=0 F' + LE + '-1<>0 T' + LE + '-5>-10 T' + LE + '-5<-10 F' + LE +
+    '2 1 0 -1 ' + LE, 0);
 end;
 
 procedure TE2EControlFlowTests.TestRun_While_PrintsRange;

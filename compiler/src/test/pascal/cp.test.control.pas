@@ -70,16 +70,7 @@ type
     { ------------------------------------------------------------------ }
     { Code generation                                                      }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_If_EmitsJnz;
     procedure TestCodegen_If_EmitsThenLabel;
-    procedure TestCodegen_If_EmitsEndLabel;
-    procedure TestCodegen_IfElse_EmitsElseLabel;
-    procedure TestCodegen_IfElse_ThenJumpsToEnd;
-    procedure TestCodegen_Comparison_EQ_UsescEqw;
-    procedure TestCodegen_Comparison_LT_UsescLtw;
-    procedure TestCodegen_Comparison_GT_UsescGtw;
-    procedure TestCodegen_Comparison_NE_UsescNew;
-    procedure TestCodegen_Compound_EmitsAllStmts;
 
     { ------------------------------------------------------------------ }
     { While loops                                                          }
@@ -92,11 +83,7 @@ type
     procedure TestParse_While_CompoundBody;
     procedure TestSemantic_While_Resolves;
     procedure TestSemantic_While_NonBooleanCondition_RaisesError;
-    procedure TestCodegen_While_EmitsCondLabel;
     procedure TestCodegen_While_EmitsBodyLabel;
-    procedure TestCodegen_While_EmitsEndLabel;
-    procedure TestCodegen_While_LoopsBack;
-    procedure TestCodegen_While_EmitsJnz;
   end;
 
 implementation
@@ -581,75 +568,16 @@ end;
 { Code generation tests                                               }
 { ------------------------------------------------------------------ }
 
-procedure TControlTests.TestCodegen_If_EmitsJnz;
-begin
-  AssertTrue('jnz emitted', Pos('jnz', GenIR(SrcIfOnly)) > 0);
-end;
+{ How if/else, comparisons and while lower is checked by running programs:
+  TE2EControlFlowTests.TestRun_IfElse_TakesEachBranch,
+  TestRun_IntegerCompare_Signed and TestRun_While_PrintsRange.  An IR or
+  asm substring check adds nothing a wrong lowering could get past those. }
 
+{ QBE-only (delete with the backend, Phase 2): QBE needs an explicit block
+  label for the then block; native code falls through to it. }
 procedure TControlTests.TestCodegen_If_EmitsThenLabel;
 begin
   AssertTrue('@if_then label', Pos('@if_then', GenIR(SrcIfOnly)) > 0);
-end;
-
-procedure TControlTests.TestCodegen_If_EmitsEndLabel;
-begin
-  AssertTrue('@if_end label', Pos('@if_end', GenIR(SrcIfOnly)) > 0);
-end;
-
-procedure TControlTests.TestCodegen_IfElse_EmitsElseLabel;
-begin
-  AssertTrue('@if_else label', Pos('@if_else', GenIR(SrcIfElse)) > 0);
-end;
-
-procedure TControlTests.TestCodegen_IfElse_ThenJumpsToEnd;
-begin
-  AssertTrue('jmp @if_end after then', Pos('jmp @if_end', GenIR(SrcIfElse)) > 0);
-end;
-
-procedure TControlTests.TestCodegen_Comparison_EQ_UsescEqw;
-begin
-  AssertTrue('ceqw for =', Pos('ceqw', GenIR(SrcIfOnly)) > 0);
-end;
-
-procedure TControlTests.TestCodegen_Comparison_LT_UsescLtw;
-begin
-  AssertTrue('csltw for <', Pos('csltw', GenIR(
-    '''
-        program P;
-        var N: Integer;
-        begin
-          N := 1;
-          if N < 5 then N := 0
-        end.
-        '''
-  )) > 0);
-end;
-
-procedure TControlTests.TestCodegen_Comparison_GT_UsescGtw;
-begin
-  AssertTrue('csgtw for >', Pos('csgtw', GenIR(SrcIfElse)) > 0);
-end;
-
-procedure TControlTests.TestCodegen_Comparison_NE_UsescNew;
-begin
-  AssertTrue('cnew for <>', Pos('cnew', GenIR(
-    '''
-        program P;
-        var N: Integer;
-        begin
-          N := 1;
-          if N <> 0 then N := 0
-        end.
-        '''
-  )) > 0);
-end;
-
-procedure TControlTests.TestCodegen_Compound_EmitsAllStmts;
-var IR: string;
-begin
-  IR := GenIR(SrcCompound);
-  { Compound then branch has WriteLn + assignment, so _SysWrite should appear }
-  AssertTrue('_SysWrite in compound branch', Pos('_SysWrite', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -764,30 +692,11 @@ begin
         ''');
 end;
 
-procedure TControlTests.TestCodegen_While_EmitsCondLabel;
-begin
-  AssertTrue('@while_cond label', Pos('@while_cond', GenIR(SrcWhile)) > 0);
-end;
-
+{ QBE-only (delete with the backend, Phase 2): QBE needs an explicit block
+  label for the loop body; native code falls through to it. }
 procedure TControlTests.TestCodegen_While_EmitsBodyLabel;
 begin
   AssertTrue('@while_body label', Pos('@while_body', GenIR(SrcWhile)) > 0);
-end;
-
-procedure TControlTests.TestCodegen_While_EmitsEndLabel;
-begin
-  AssertTrue('@while_end label', Pos('@while_end', GenIR(SrcWhile)) > 0);
-end;
-
-procedure TControlTests.TestCodegen_While_LoopsBack;
-begin
-  { The body block must jump back to @while_cond }
-  AssertTrue('jmp @while_cond', Pos('jmp @while_cond', GenIR(SrcWhile)) > 0);
-end;
-
-procedure TControlTests.TestCodegen_While_EmitsJnz;
-begin
-  AssertTrue('jnz in while', Pos('jnz', GenIR(SrcWhile)) > 0);
 end;
 
 initialization
