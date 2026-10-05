@@ -12,6 +12,7 @@ uses
   blaise.testing,
   blaise.testing.runner.text,
   cp.test.runner_filters,
+  cp.test.harnesstests,
   cp.test.uint64,
   cp.test.sar,
   cp.test.highlow,
