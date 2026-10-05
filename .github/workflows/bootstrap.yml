@@ -55,7 +55,7 @@ env:
 
 jobs:
   bootstrap:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # pinned; ubuntu-latest moves to Ubuntu 26 from 2026-10-19
     timeout-minutes: 120   # full ~190-commit replay is slow; incremental is fast
 
     steps:
@@ -422,7 +422,7 @@ jobs:
   # ======================================================================
   freebsd-crosscheck:
     needs: bootstrap
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # pinned; ubuntu-latest moves to Ubuntu 26 from 2026-10-19
     # Fixture smoke fits in 30 min; the full in-VM suite (self-host x2 + 4262
     # tests under emulation) gets a bigger budget.
     timeout-minutes: 120
