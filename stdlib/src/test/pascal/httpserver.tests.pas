@@ -41,6 +41,22 @@ begin
     ARequest.Path + '|' + ARequest.QueryParam('q'));
 end;
 
+{ Read until the server closes the connection.  One recv is not enough: the
+  server sends the head and the body in separate writes, and on a slow host
+  (FreeBSD under emulation in CI) the body can arrive after the first recv
+  returns.  ServeOnce has already closed a plain HTTP connection, so this
+  always terminates. }
+function RecvUntilClosed(AFd: Integer): string;
+var
+  Chunk: string;
+begin
+  Result := '';
+  repeat
+    Chunk := RecvString(AFd, 1024);
+    Result := Result + Chunk;
+  until Chunk = '';
+end;
+
 procedure THttpServerTests.TestUrlDecode;
 begin
   AssertEquals('percent', 'a b', UrlDecode('a%20b'));
@@ -90,7 +106,7 @@ begin
   AssertTrue('send', SendAll(Cli, 'GET /hi?q=net HTTP/1.1'#13#10'Host: x'#13#10#13#10));
 
   Srv.ServeOnce(H);
-  Resp := RecvString(Cli, 1024);
+  Resp := RecvUntilClosed(Cli);
   AssertTrue('200', ContainsStr(Resp, '200 OK'));
   AssertTrue('body', ContainsStr(Resp, '/hi|net'));
 
@@ -124,7 +140,7 @@ begin
   AssertTrue('send', SendAll(Cli, 'GET /hi?q=any HTTP/1.1'#13#10'Host: x'#13#10#13#10));
 
   Srv.ServeOnce(H);
-  Resp := RecvString(Cli, 1024);
+  Resp := RecvUntilClosed(Cli);
   AssertTrue('200', ContainsStr(Resp, '200 OK'));
   AssertTrue('body', ContainsStr(Resp, '/hi|any'));
 
