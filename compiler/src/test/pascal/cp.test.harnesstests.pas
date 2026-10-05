@@ -27,6 +27,8 @@ type
     procedure TestGenAsm_UnknownTarget_Raises;
     procedure TestGenAsmDebug_KeepsLocalsInSlots;
     procedure TestGenAsmWithUnit_BothTargets;
+    procedure TestAsmMissing_BothPresent_IsEmpty;
+    procedure TestAsmMissing_NamesEachMissingTarget;
   end;
 
 implementation
@@ -167,6 +169,24 @@ begin
   AsmT := GenAsmWithUnit(UnitSrc, ProgSrc, TargetArm64);
   AssertTrue('arm64: unit routine defined', Pos('mathu_AddTwo:', AsmT) >= 0);
   AssertTrue('arm64: cross-unit call', Pos(#9'bl _mathu_AddTwo', AsmT) >= 0);
+end;
+
+procedure THarnessTests.TestAsmMissing_BothPresent_IsEmpty;
+begin
+  AssertEquals('both patterns present', '',
+    AsmMissing(SrcHello, '%rbp', 'x29'));
+end;
+
+procedure THarnessTests.TestAsmMissing_NamesEachMissingTarget;
+var
+  Msg: string;
+begin
+  Msg := AsmMissing(SrcHello, 'no-such-x86', 'x29');
+  AssertEquals('only x86-64 missing',
+    'linux-x86_64 lacks [no-such-x86]', Msg);
+  Msg := AsmMissing(SrcHello, 'no-such-x86', 'no-such-arm');
+  AssertEquals('both missing',
+    'linux-x86_64 lacks [no-such-x86]; macos-arm64 lacks [no-such-arm]', Msg);
 end;
 
 initialization

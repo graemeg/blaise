@@ -25,6 +25,9 @@ unit cp.test.harness;
                           on every host.  Code-generation assertions whose
                           lowering decision is ISA-independent check BOTH
                           TargetX86_64 and TargetArm64.
+    AsmMissing(Src, X86, Arm64)
+                          '' when each target's assembly contains its
+                          pattern; otherwise what is missing where.
 
   The analyser outlives code generation and the backend is given the
   program's symbol table, as in the compiler driver: the arm64 backend's
@@ -48,6 +51,12 @@ function GenAsm(const ASrc, ATarget: string): string;
 function GenAsmDebug(const ASrc, ATarget: string): string;
 { AUnitSrc is analysed for export and emitted ahead of the program. }
 function GenAsmWithUnit(const AUnitSrc, ASrc, ATarget: string): string;
+{ The usual shape of a code-generation assertion: the lowering decision is
+  the same on both ISAs, only the spelling differs.  Returns '' when the
+  x86-64 assembly contains AX86 and the arm64 assembly contains AArm64,
+  otherwise names each target whose pattern is missing.  Use as
+    AssertEquals('what is pinned', '', AsmMissing(Src, 'jl ', 'cset x0, lt')); }
+function AsmMissing(const ASrc, AX86, AArm64: string): string;
 
 implementation
 
@@ -181,6 +190,19 @@ end;
 function GenAsmWithUnit(const AUnitSrc, ASrc, ATarget: string): string;
 begin
   Result := GenerateAsm(AUnitSrc, ASrc, ATarget, False);
+end;
+
+function AsmMissing(const ASrc, AX86, AArm64: string): string;
+begin
+  Result := '';
+  if Pos(AX86, GenAsm(ASrc, TargetX86_64)) < 0 then
+    Result := TargetX86_64 + ' lacks [' + AX86 + ']';
+  if Pos(AArm64, GenAsm(ASrc, TargetArm64)) < 0 then
+  begin
+    if Result <> '' then
+      Result := Result + '; ';
+    Result := Result + TargetArm64 + ' lacks [' + AArm64 + ']';
+  end;
 end;
 
 end.
