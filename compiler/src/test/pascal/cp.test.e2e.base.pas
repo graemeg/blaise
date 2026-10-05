@@ -26,7 +26,12 @@ type
   TBackends = set of TBackend;
 
 const
-  AllBackends: TBackends = [beQBE, beNative];
+  { The default backend set behind AssertRunsOnAll / AssertRTLRunsOnAll.
+    Native only: QBE is deprecated and leaves the default set first
+    (docs/qbe-removal-plan.adoc, Phase 1a).  A test that still needs QBE
+    names it explicitly -- AssertRunsOn([beQBE, ...]) -- until the Phase 1d
+    audit moves it to native or marks it for deletion. }
+  AllBackends: TBackends = [beNative];
 
 function BackendName(ABackend: TBackend): string;
 
@@ -122,9 +127,8 @@ type
                             const AExtraLibs: array of string;
                             out AStdout: string;
                             out AExitCode: Integer): Boolean;
-    { Run ASrc on every backend in AllBackends and assert each produces
-      AExpectedOut / AExpectedCode.  When a new backend is added to AllBackends,
-      all callers pick it up automatically. }
+    { Run ASrc on every backend in AllBackends (native only) and assert each
+      produces AExpectedOut / AExpectedCode. }
     procedure AssertRunsOnAll(const ASrc, AExpectedOut: string;
                             AExpectedCode: Integer);
     { As AssertRunsOnAll but links with extra -l libraries.  For FFI tests
@@ -139,8 +143,7 @@ type
     procedure AssertRunsOn(ABackends: TBackends; const ASrc, AExpectedOut: string;
                             AExpectedCode: Integer);
     { RTL/stdlib equivalents of AssertRunsOn*: compile+run ASrc against the RTL
-      and stdlib (multi-unit, TUnitLoader) on every backend and assert parity.
-      Use these in RTL/stdlib suites so native gets the same coverage as QBE. }
+      and stdlib (multi-unit, TUnitLoader) on every backend in the set. }
     procedure AssertRTLRunsOnAll(const ASrc, AExpectedOut: string;
                             AExpectedCode: Integer);
     procedure AssertRTLRunsOn(ABackends: TBackends; const ASrc, AExpectedOut: string;

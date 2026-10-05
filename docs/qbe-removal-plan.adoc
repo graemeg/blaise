@@ -8,7 +8,7 @@
 |===
 | Decision | Remove the QBE backend; native code generation (x86-64, arm64) becomes the only backend.
 | Phase 0 | Done: `--help` marks `--backend qbe` and `BLAISE_BACKEND=qbe` as deprecated; the deprecation was announced to the community.
-| Phase 1 | Not started -- decouple the test suite from QBE.
+| Phase 1 | In progress -- decouple the test suite from QBE.  1a done.
 | Phase 2 | Not started -- delete the backend.  Target: release v0.15.0, which also
 makes the macOS arm64 port usable.
 | Phase 3 | Not started -- documentation.
