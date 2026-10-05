@@ -7723,6 +7723,15 @@ begin
       Self.Emit(#9'movz w0, #1');
       EmitCallSym('_SysWriteInt64');
     end
+    else if K = tyUInt64 then
+    begin
+      { unsigned writer: the Integer path would print a value with the high
+        bit set as a negative number }
+      Self.EmitExprToX0(Arg);
+      Self.Emit(#9'mov x1, x0');
+      Self.Emit(#9'movz w0, #1');
+      EmitCallSym('_SysWriteUInt64');
+    end
     else if IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) then
     begin
       Self.EmitExprToX0(Arg);

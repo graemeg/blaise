@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_WriteLn_UInt64_HighBit_Unsigned;
     procedure TestRun_FloatArg_ConvertsToParamType;
     { Boolean, WriteLn, break/exit }
     procedure TestRun_BooleanOps_AllExpressions;
@@ -2584,6 +2585,38 @@ begin
     '3.25' + LE +
     '2.5 1.5' + LE +
     '0.75 0.75' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_WriteLn_UInt64_HighBit_Unsigned;
+const
+  {
+    WriteLn of a UInt64 with the high bit set prints it unsigned.  arm64 fell
+    through to the signed Integer writer: 2^63 printed as -9223372036854775808.
+    Includes a sar result, which keeps the UInt64 type (arithmetic shift of the
+    bit pattern, as on x86-64 and QBE). }
+  Src = '''
+    program P;
+    var U, V: UInt64;
+    begin
+      U := 1;
+      U := U shl 63;
+      WriteLn(U);
+      WriteLn(U or 1);
+      V := U sar 1;
+      WriteLn(V);
+      WriteLn(U shr 1);
+      Write(U);
+      WriteLn('')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '9223372036854775808' + LE +
+    '9223372036854775809' + LE +
+    '13835058055282163712' + LE +
+    '4611686018427387904' + LE +
+    '9223372036854775808' + LE, 0);
 end;
 
 initialization
