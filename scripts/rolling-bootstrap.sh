@@ -121,8 +121,35 @@ echo "  to   : $TO_REF ($TO_SHA)"
 echo "  steps: ${#COMMITS[@]} commit(s) to replay"
 echo
 
+# ---------------------------------------------------------------------------
+# install_pre BIN: install BIN as the target's -pre release (unless
+# --no-install).  The version comes from the TARGET commit's Blaise.pas.
+# ---------------------------------------------------------------------------
+install_pre() {
+  local bin=$1 ver pre dest
+  ver="$(git show "$TO_SHA:compiler/src/main/pascal/Blaise.pas" \
+          | grep -m1 -oE "Version = '[^']+'" | sed "s/Version = '//; s/'//")"
+  # 0.11.0-SNAPSHOT -> v0.11.0-pre ; 0.11.0 -> v0.11.0-pre
+  pre="v${ver%-SNAPSHOT}"
+  case "$pre" in *-pre) ;; *) pre="${pre}-pre" ;; esac
+  if [ "$DO_INSTALL" -eq 1 ]; then
+    dest="$ROOT/releases/$pre"
+    mkdir -p "$dest"
+    # Skip the copy when BIN is already that file (start ref = the -pre dir).
+    [ "$bin" -ef "$dest/blaise" ] || cp "$bin" "$dest/blaise"
+    chmod +x "$dest/blaise"
+    echo "Installed: $dest/blaise  [version $ver]"
+  else
+    echo "Final binary: $bin  [version $ver, would install to releases/$pre]"
+  fi
+}
+
 if [ "${#COMMITS[@]}" -eq 0 ]; then
+  # Still install it: callers (CI's "Locate -pre binary") expect the -pre
+  # release to exist on success, and a run with no new commits -- the weekly
+  # cache refresh, a re-run -- lands here.
   echo "Target is the start commit — nothing to replay. Start binary is already current."
+  install_pre "$START_BIN"
   exit 0
 fi
 
@@ -268,21 +295,4 @@ done
 echo
 echo "REACHED $TO_REF — rolling bootstrap succeeded through ${#COMMITS[@]} commit(s)."
 
-# ---------------------------------------------------------------------------
-# Install the final binary as the current -pre release.
-# ---------------------------------------------------------------------------
-VER="$(grep -m1 -oE "Version = '[^']+'" "$WT/compiler/src/main/pascal/Blaise.pas" \
-        | sed "s/Version = '//; s/'//")"
-# 0.11.0-SNAPSHOT -> v0.11.0-pre ; 0.11.0 -> v0.11.0-pre
-PRE="v${VER%-SNAPSHOT}"
-case "$PRE" in *-pre) ;; *) PRE="${PRE}-pre" ;; esac
-
-if [ "$DO_INSTALL" -eq 1 ]; then
-  DEST="$ROOT/releases/$PRE"
-  mkdir -p "$DEST"
-  cp "$CUR_BIN" "$DEST/blaise"
-  chmod +x "$DEST/blaise"
-  echo "Installed: $DEST/blaise  [version $VER]"
-else
-  echo "Final binary: $CUR_BIN  [version $VER, would install to releases/$PRE]"
-fi
+install_pre "$CUR_BIN"
