@@ -11446,6 +11446,23 @@ begin
   ASize := StrToInt(Copy(AEntry, P + 1, Length(AEntry) - P - 1));
 end;
 
+{ True when float argument AIdx travels in an s register.  The PARAMETER's
+  type decides, not the argument's: a double literal passed to a Single
+  parameter must be narrowed, and a Single value passed to a Double parameter
+  must stay widened in a d register.  Arguments beyond the declared
+  parameters (variadic) fall back to their own type. }
+function FloatArgIsSingle(ADecl: TMethodDecl; AIdx: Integer;
+  AArg: TASTExpr): Boolean;
+var
+  PT: TTypeDesc;
+begin
+  if AIdx < ADecl.Params.Count then
+    PT := TMethodParam(ADecl.Params.Items[AIdx]).ResolvedType
+  else
+    PT := AArg.ResolvedType;
+  Result := (PT <> nil) and (PT.Kind = tySingle);
+end;
+
 procedure TArm64Backend.EmitCall(ADecl: TMethodDecl; const AName: string;
   AArgs: TObjectList; const ASretDest: string;
   ASelfPushed: Boolean; AVirtSlot: Integer; ASretSpOff: Integer);
@@ -12048,8 +12065,7 @@ begin
           PopRegs.Add(Format('m%d_%d', [StackOff, 8]));
           StackOff := StackOff + 8;
         end
-        else if (Arg.ResolvedType <> nil) and
-           (Arg.ResolvedType.Kind = tySingle) then
+        else if FloatArgIsSingle(ADecl, I, Arg) then
         begin
           PopRegs.Add('s' + IntToStr(NFloat));
           Inc(NFloat);

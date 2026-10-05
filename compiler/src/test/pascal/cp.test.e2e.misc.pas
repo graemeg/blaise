@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_FloatArg_ConvertsToParamType;
     { Boolean, WriteLn, break/exit }
     procedure TestRun_BooleanOps_AllExpressions;
     procedure TestRun_WriteLn_BoolVar_PrintsTrueOrFalse;
@@ -2536,6 +2537,53 @@ begin
       WriteLn(Frac)
     end.
     ''', '1.11022302462516e-16' + LE + '0.00390625' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_FloatArg_ConvertsToParamType;
+const
+  {
+    A float argument is converted to its PARAMETER's precision, whatever the
+    argument's own type: a double literal to a Single parameter is narrowed, a
+    Single variable to a Double parameter is widened.  arm64 chose the register
+    class from the argument, so the callee read half a double (0) or a
+    single-precision bit pattern as a double (5.3e-315). }
+  Src = '''
+    program P;
+    procedure One(S: Single);
+    begin
+      WriteLn(SingleToStr(S))
+    end;
+    procedure Dbl(D: Double);
+    begin
+      WriteLn(DoubleToStr(D))
+    end;
+    procedure Both(D: Double; S: Single);
+    begin
+      WriteLn(DoubleToStr(D), ' ', SingleToStr(S))
+    end;
+    var X: Single; Y: Double;
+    begin
+      X := 2.5;
+      Y := 0.75;
+      One(1.5);
+      One(X);
+      One(Y);
+      Dbl(X);
+      Dbl(3.25);
+      Both(X, 1.5);
+      Both(Y, Y)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '1.5' + LE +
+    '2.5' + LE +
+    '0.75' + LE +
+    '2.5' + LE +
+    '3.25' + LE +
+    '2.5 1.5' + LE +
+    '0.75 0.75' + LE, 0);
 end;
 
 initialization
