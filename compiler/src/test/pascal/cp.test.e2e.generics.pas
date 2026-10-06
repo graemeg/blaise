@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_IMap_OneCallSiteBothImplementations;
     procedure TestRun_TOrderedDictionary_KeepsInsertionOrder;
     procedure TestRun_TDictionary_AddLookupUpdateRemove;
     procedure TestRun_TSet_IncludeExcludeContains;
@@ -887,6 +888,39 @@ begin
     '30=3 10=1 20=2 ' + LE +
     '30=3 10=11 20=2 ' + LE +
     '2 2 False' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_IMap_OneCallSiteBothImplementations;
+const
+  {
+    One IMap<Integer, Integer> call site drives both TDictionary and
+    TOrderedDictionary through their interface tables: Add, Remove, TryGetValue,
+    ContainsKey, GetCount.  Replaces the QBE IR checks in cp.test.imap (typeinfo,
+    itab, impllist, indirect dispatch). }
+  Src = '''
+    program P;
+    uses Generics.Collections;
+    procedure Fill(M: IMap<Integer, Integer>; const Tag: string);
+    var V: Integer;
+    begin
+      M.Add(1, 10);
+      M.Add(2, 20);
+      M.Add(3, 30);
+      M.Remove(2);
+      V := 0;
+      if M.TryGetValue(3, V) then
+        WriteLn(Tag, ' ', M.GetCount(), ' ', V, ' ', M.ContainsKey(2), ' ', M.ContainsKey(1));
+    end;
+    begin
+      Fill(TDictionary<Integer, Integer>.Create(), 'dict');
+      Fill(TOrderedDictionary<Integer, Integer>.Create(), 'ordered')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'dict 2 30 False True' + LE +
+    'ordered 2 30 False True' + LE, 0);
 end;
 
 initialization

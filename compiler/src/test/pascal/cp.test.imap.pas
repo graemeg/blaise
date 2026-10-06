@@ -19,14 +19,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TIMapTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     { Parser }
     procedure TestParse_IMap_IsGenericInterfaceDef;
@@ -48,13 +47,6 @@ type
     procedure TestSemantic_IMap_Remove_CallableViaInterface;
 
     { Codegen }
-    procedure TestCodegen_IMap_TypeinfoEmitted;
-    procedure TestCodegen_IMap_ItabForTDictionaryEmitted;
-    procedure TestCodegen_IMap_ItabForTOrderedDictionaryEmitted;
-    procedure TestCodegen_IMap_ImpllistForTDictionaryEmitted;
-    procedure TestCodegen_IMap_ImpllistForTOrderedDictionaryEmitted;
-    procedure TestCodegen_IMap_DispatchEmitsIndirectCall;
-    procedure TestCodegen_IMap_BothConcreteTypes_Compile;
   end;
 
 implementation
@@ -417,22 +409,6 @@ begin
   end;
 end;
 
-function TIMapTests.GenIR(const ASrc: string): string;
-var
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
-  end;
-end;
-
 { ------------------------------------------------------------------ }
 { Parser tests                                                         }
 { ------------------------------------------------------------------ }
@@ -625,72 +601,6 @@ end;
 { ------------------------------------------------------------------ }
 { Codegen tests                                                         }
 { ------------------------------------------------------------------ }
-
-procedure TIMapTests.TestCodegen_IMap_TypeinfoEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcDictImplementsIMap);
-  AssertTrue('typeinfo for IMap_Integer_Integer emitted',
-    Pos('typeinfo_IMap_Integer_Integer', IR) >= 0);
-end;
-
-procedure TIMapTests.TestCodegen_IMap_ItabForTDictionaryEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcDictImplementsIMap);
-  AssertTrue('itab for TDictionary/IMap emitted',
-    Pos('itab_TDictionary_Integer_Integer_IMap_Integer_Integer', IR) >= 0);
-end;
-
-procedure TIMapTests.TestCodegen_IMap_ItabForTOrderedDictionaryEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcOrdDictImplementsIMap);
-  AssertTrue('itab for TOrderedDictionary/IMap emitted',
-    Pos('itab_TOrderedDictionary_Integer_Integer_IMap_Integer_Integer', IR) >= 0);
-end;
-
-procedure TIMapTests.TestCodegen_IMap_ImpllistForTDictionaryEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcDictImplementsIMap);
-  AssertTrue('impllist for TDictionary emitted',
-    Pos('impllist_TDictionary_Integer_Integer', IR) >= 0);
-end;
-
-procedure TIMapTests.TestCodegen_IMap_ImpllistForTOrderedDictionaryEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcOrdDictImplementsIMap);
-  AssertTrue('impllist for TOrderedDictionary emitted',
-    Pos('impllist_TOrderedDictionary_Integer_Integer', IR) >= 0);
-end;
-
-procedure TIMapTests.TestCodegen_IMap_DispatchEmitsIndirectCall;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcIMapAddDispatch);
-  { Interface method call goes through the itab — must be an indirect call }
-  AssertTrue('IMap.Add dispatch emits indirect call',
-    Pos('call %', IR) >= 0);
-end;
-
-procedure TIMapTests.TestCodegen_IMap_BothConcreteTypes_Compile;
-var
-  IR: string;
-begin
-  { Both TDictionary and TOrderedDictionary assigned to IMap in one program }
-  IR := GenIR(SrcBothConcreteTypes);
-  AssertTrue('Both itabs emitted',
-    (Pos('itab_TDictionary_Integer_Integer_IMap_Integer_Integer', IR) >= 0) and
-    (Pos('itab_TOrderedDictionary_Integer_Integer_IMap_Integer_Integer', IR) >= 0));
-end;
 
 initialization
   RegisterTest(TIMapTests);
