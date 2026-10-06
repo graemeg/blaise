@@ -14,14 +14,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TForTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -55,16 +54,6 @@ type
     { ------------------------------------------------------------------ }
     { Codegen                                                              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_For_InitStoresStart;
-    procedure TestCodegen_For_CondUsesSlew;
-    procedure TestCodegen_Downto_CondUsesSgew;
-    procedure TestCodegen_For_BodyIncrementsVar;
-    procedure TestCodegen_Downto_BodyDecrementsVar;
-    procedure TestCodegen_For_HasForCondLabel;
-    procedure TestCodegen_For_HasForBodyLabel;
-    procedure TestCodegen_For_HasForEndLabel;
-    procedure TestCodegen_For_JumpsBackToCond;
-    procedure TestCodegen_For_Compound_OK;
   end;
 
 implementation
@@ -94,23 +83,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TForTests.GenIR(const ASrc: string): string;
-var Prog: TProgram; CG: TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -350,83 +322,6 @@ end;
 { ------------------------------------------------------------------ }
 { Codegen tests                                                        }
 { ------------------------------------------------------------------ }
-
-procedure TForTests.TestCodegen_For_InitStoresStart;
-var IR: string;
-begin
-  IR := GenIR(SrcForUpward);
-  { Start value 1 is stored into the loop var slot }
-  AssertTrue('storew for loop init', Pos('storew', IR) > 0);
-end;
-
-procedure TForTests.TestCodegen_For_CondUsesSlew;
-var IR: string;
-begin
-  IR := GenIR(SrcForUpward);
-  { "to" loop: I <= End uses cslew }
-  AssertTrue('cslew for upward condition', Pos('cslew', IR) > 0);
-end;
-
-procedure TForTests.TestCodegen_Downto_CondUsesSgew;
-var IR: string;
-begin
-  IR := GenIR(SrcForDownto);
-  { "downto" loop: I >= End uses csgew }
-  AssertTrue('csgew for downto condition', Pos('csgew', IR) > 0);
-end;
-
-procedure TForTests.TestCodegen_For_BodyIncrementsVar;
-var IR: string;
-begin
-  IR := GenIR(SrcForUpward);
-  { Loop var is incremented by 1 after each iteration }
-  AssertTrue('add 1 for increment', Pos(', 1', IR) > 0);
-end;
-
-procedure TForTests.TestCodegen_Downto_BodyDecrementsVar;
-var IR: string;
-begin
-  IR := GenIR(SrcForDownto);
-  { Loop var is decremented by 1 after each iteration }
-  AssertTrue('sub for decrement', Pos('sub', IR) > 0);
-end;
-
-procedure TForTests.TestCodegen_For_HasForCondLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcForUpward);
-  AssertTrue('for_cond label present', Pos('for_cond', IR) > 0);
-end;
-
-procedure TForTests.TestCodegen_For_HasForBodyLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcForUpward);
-  AssertTrue('for_body label present', Pos('for_body', IR) > 0);
-end;
-
-procedure TForTests.TestCodegen_For_HasForEndLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcForUpward);
-  AssertTrue('for_end label present', Pos('for_end', IR) > 0);
-end;
-
-procedure TForTests.TestCodegen_For_JumpsBackToCond;
-var IR: string;
-begin
-  IR := GenIR(SrcForUpward);
-  { After body, must jump back to condition block }
-  AssertTrue('jmp @for_cond in IR', Pos('jmp @for_cond', IR) > 0);
-end;
-
-procedure TForTests.TestCodegen_For_Compound_OK;
-var IR: string;
-begin
-  IR := GenIR(SrcForCompound);
-  { Just verify it compiles without error and produces a for_cond label }
-  AssertTrue('compound body for loop generates IR', Pos('for_cond', IR) > 0);
-end;
 
 initialization
   RegisterTest(TForTests);

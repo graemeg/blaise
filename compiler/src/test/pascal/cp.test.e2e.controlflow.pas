@@ -22,6 +22,8 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Repeat_BodyRunsBeforeTest;
+    procedure TestRun_For_BoundsAndDirection;
     procedure TestRun_IfElse_TakesEachBranch;
     procedure TestRun_IntegerCompare_Signed;
     procedure TestRun_For_Upward_PrintsRange;
@@ -467,6 +469,79 @@ procedure TE2EControlFlowTests.TestRun_SuccPred_Enum;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcSuccPredEnum, 'E' + LE + 'S' + LE, 0);
+end;
+
+procedure TE2EControlFlowTests.TestRun_For_BoundsAndDirection;
+const
+  {
+    for runs its body once per value from start to end INCLUSIVE, counting up
+    with to and down with downto, over negative bounds (signed loop test); an
+    empty range runs zero times; a compound body runs every statement.
+    Replaces the QBE IR checks in cp.test.forloop. }
+  Src = '''
+    program P;
+    var I, S, Lo, Hi: Integer;
+    begin
+      Lo := -2;
+      Hi := 1;
+      for I := Lo to Hi do
+        Write(I, ' ');
+      WriteLn('|');
+      for I := Hi downto Lo do
+        Write(I, ' ');
+      WriteLn('|');
+      S := 0;
+      for I := 1 to 0 do
+        S := S + 1;
+      for I := 0 downto 1 do
+        S := S + 1;
+      WriteLn('empty ', S);
+      S := 0;
+      for I := 1 to 3 do
+      begin
+        S := S + I;
+        S := S + 10
+      end;
+      WriteLn('compound ', S)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '-2 -1 0 1 |' + LE +
+    '1 0 -1 -2 |' + LE +
+    'empty 0' + LE +
+    'compound 36' + LE, 0);
+end;
+
+procedure TE2EControlFlowTests.TestRun_Repeat_BodyRunsBeforeTest;
+const
+  {
+    repeat runs its body BEFORE the first test, so a condition already true
+    still runs it once, and leaves when the condition becomes true.
+    Replaces the QBE IR checks in cp.test.repeatloop. }
+  Src = '''
+    program P;
+    var I, N: Integer;
+    begin
+      N := 0;
+      repeat
+        N := N + 1
+      until True;
+      WriteLn('once ', N);
+      I := 0;
+      repeat
+        I := I + 1;
+        Write(I, ' ')
+      until I >= 3;
+      WriteLn('|')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'once 1' + LE +
+    '1 2 3 |' + LE, 0);
 end;
 
 initialization
