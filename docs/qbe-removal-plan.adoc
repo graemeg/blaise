@@ -150,9 +150,11 @@ Example: "the old element is released before the store" -- assert the release
 call precedes the store on both ISAs.
 
 QBE-only assertion::
-The test pins something that exists only in the QBE lowering: `alloc16`
-frame sizes, QBE type letters (`w`/`l`), QBE block structure, QBE-specific
-workarounds.
+The test pins QBE syntax with no behaviour behind it: `alloc16` frame sizes,
+QBE type letters (`function w $F`), QBE temporaries such as `%_var_Result`,
+the order QBE functions are emitted in, QBE-specific workarounds.  Labels
+and jumps are not QBE-only: they stand in for control flow, which is a
+behaviour assertion.
 +
 Action: mark it `QBE-only` in a comment and leave it on `GenIR`; it is
 deleted in Phase 2 together with the backend.
@@ -260,19 +262,19 @@ found, for a ruling before they are migrated.
 | `cp.test.records.pas` | 17 | pending
 | `cp.test.openarray.pas` | 17 | pending
 | `cp.test.jumboset.pas` | 17 | pending
-| `cp.test.control.pas` | 17 | done: 13 behaviour (e2e), 2 QBE-only
-| `cp.test.procs.pas` | 16 | pending
+| `cp.test.control.pas` | 17 | done: 15 behaviour (e2e)
+| `cp.test.procs.pas` | 16 | done: 11 behaviour (e2e), 3 QBE-only
 | `cp.test.pointers.pas` | 16 | pending
 | `cp.test.dynarray.pas` | 16 | pending
 | `cp.test.vtable.pas` | 15 | pending
 | `cp.test.uint64.pas` | 14 | pending
 | `cp.test.rangecheck.pas` | 14 | pending
 | `cp.test.inherit.pas` | 14 | pending
-| `cp.test.caseenum.pas` | 14 | pending
+| `cp.test.caseenum.pas` | 14 | done: 12 behaviour (e2e)
 | `cp.test.staticmembers.pas` | 12 | pending
 | `cp.test.proctypes_ofobject.pas` | 12 | pending
 | `cp.test.overload.pas` | 12 | pending
-| `cp.test.forloop.pas` | 12 | pending
+| `cp.test.forloop.pas` | 12 | done: 10 behaviour (e2e)
 | `cp.test.anonmethods.pas` | 12 | pending
 | `cp.test.typetests.pas` | 11 | pending
 | `cp.test.process.pas` | 11 | pending
@@ -290,12 +292,12 @@ found, for a ruling before they are migrated.
 | `cp.test.publishedrtti.pas` | 9 | pending
 | `cp.test.imap.pas` | 9 | pending
 | `cp.test.classof.pas` | 9 | pending
-| `cp.test.repeatloop.pas` | 8 | pending
+| `cp.test.repeatloop.pas` | 8 | done: 6 behaviour (e2e)
 | `cp.test.methods.pas` | 8 | pending
 | `cp.test.genericrecords.pas` | 8 | pending
 | `cp.test.genericintfs.pas` | 8 | pending
 | `cp.test.genericfuncs.pas` | 8 | pending
-| `cp.test.functions.pas` | 8 | pending
+| `cp.test.functions.pas` | 8 | done: 3 behaviour (e2e), 3 QBE-only
 | `cp.test.arrayofconst.pas` | 8 | pending
 | `cp.test.tstack.pas` | 7 | pending
 | `cp.test.tqueue.pas` | 7 | pending
@@ -303,16 +305,16 @@ found, for a ruling before they are migrated.
 | `cp.test.strutils.pas` | 7 | pending
 | `cp.test.sizeof.pas` | 7 | pending
 | `cp.test.pchar.pas` | 7 | pending
-| `cp.test.multiwrite.pas` | 7 | pending
+| `cp.test.multiwrite.pas` | 7 | done: 5 behaviour (e2e)
 | `cp.test.genericdefaults.pas` | 7 | pending
-| `cp.test.flowjumps.pas` | 7 | pending
-| `cp.test.booleanops.pas` | 7 | pending
+| `cp.test.flowjumps.pas` | 7 | done: 5 behaviour (e2e)
+| `cp.test.booleanops.pas` | 7 | done: 5 behaviour (e2e)
 | `cp.test.tset.pas` | 6 | pending
-| `cp.test.sar.pas` | 6 | pending
+| `cp.test.sar.pas` | 6 | done: 4 behaviour (e2e)
 | `cp.test.operators.pas` | 6 | pending
 | `cp.test.genericmethodimpls.pas` | 6 | pending
 | `cp.test.defaultargs.pas` | 6 | pending
-| `cp.test.charcast.pas` | 6 | pending
+| `cp.test.charcast.pas` | 6 | done: 4 behaviour (e2e)
 | `cp.test.streams.pas` | 5 | pending
 | `cp.test.math.pas` | 5 | pending
 | `cp.test.genericforin.pas` | 5 | pending
