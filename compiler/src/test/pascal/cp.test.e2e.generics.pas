@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_StackQueueList_OrderAcrossGrow;
     { Generic free functions }
     procedure TestRun_GenericFunc_IntAndString;
     procedure TestRun_GenericFunc_TypedLocal;
@@ -740,6 +741,46 @@ begin
       G.Shown()
     end.
     ''', 'shown' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_StackQueueList_OrderAcrossGrow;
+const
+  {
+    TStack<Integer> pops LIFO and TQueue<Integer> dequeues FIFO, each across a
+    Grow (10 elements, initial capacity 4); Peek does not remove; TList<Integer>
+    holds 20 elements across its Grow.  Replaces the QBE IR checks in
+    cp.test.tstack, cp.test.tqueue and cp.test.tlist. }
+  Src = '''
+    program P;
+    uses Generics.Collections;
+    var S: TStack<Integer>; Q: TQueue<Integer>; L: TList<Integer>; I: Integer;
+    begin
+      S := TStack<Integer>.Create();
+      for I := 1 to 10 do
+        S.Push(I * 10);
+      Write(S.Count, ' ', S.Peek(), ' ', S.Count, ':');
+      while not S.IsEmpty() do
+        Write(' ', S.Pop());
+      WriteLn('');
+      Q := TQueue<Integer>.Create();
+      for I := 1 to 10 do
+        Q.Enqueue(I);
+      Write(Q.Count, ' ', Q.Peek(), ' ', Q.Count, ':');
+      while not Q.IsEmpty() do
+        Write(' ', Q.Dequeue());
+      WriteLn('');
+      L := TList<Integer>.Create();
+      for I := 0 to 19 do
+        L.Add(I * I);
+      WriteLn(L.Count, ' ', L[0], ' ', L[19], ' ', L[7])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '10 100 10: 100 90 80 70 60 50 40 30 20 10' + LE +
+    '10 1 10: 1 2 3 4 5 6 7 8 9 10' + LE +
+    '20 0 361 49' + LE, 0);
 end;
 
 initialization

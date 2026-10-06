@@ -15,23 +15,17 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TTQueueTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     procedure TestSemantic_TQueue_Instantiates;
     procedure TestSemantic_TQueue_Enqueue_Compiles;
     procedure TestSemantic_TQueue_Dequeue_Compiles;
     procedure TestSemantic_TQueue_Peek_Compiles;
-    procedure TestCodegen_TQueue_TypeInfoEmitted;
-    procedure TestCodegen_TQueue_EnqueueEmitsStore;
-    procedure TestCodegen_TQueue_DequeueEmitsLoad;
-    procedure TestCodegen_TQueue_PeekEmitsLoad;
-    procedure TestCodegen_TQueue_GrowEmitsGetMem;
   end;
 
 implementation
@@ -206,22 +200,6 @@ begin
   end;
 end;
 
-function TTQueueTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
-  end;
-end;
-
 procedure TTQueueTests.TestSemantic_TQueue_Instantiates;
 var
   Prog: TProgram;
@@ -252,59 +230,6 @@ var
 begin
   Prog := AnalyseSrc(SrcPeek);
   Prog.Free();
-end;
-
-procedure TTQueueTests.TestCodegen_TQueue_TypeInfoEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCreate);
-  AssertTrue('TQueue typeinfo emitted',
-    Pos('typeinfo_TQueue_Integer', IR) >= 0);
-end;
-
-procedure TTQueueTests.TestCodegen_TQueue_EnqueueEmitsStore;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcEnqueue);
-  AssertTrue('Enqueue method body emitted',
-    Pos('$TQueue_Integer_Enqueue', IR) >= 0);
-  AssertTrue('Enqueue emits storew for Integer element',
-    Pos('storew', IR) >= 0);
-end;
-
-procedure TTQueueTests.TestCodegen_TQueue_DequeueEmitsLoad;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcDequeue);
-  AssertTrue('Dequeue method body emitted',
-    Pos('$TQueue_Integer_Dequeue', IR) >= 0);
-  AssertTrue('Dequeue emits loadw for Integer element',
-    Pos('loadw', IR) >= 0);
-end;
-
-procedure TTQueueTests.TestCodegen_TQueue_PeekEmitsLoad;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcPeek);
-  AssertTrue('Peek method body emitted',
-    Pos('$TQueue_Integer_Peek', IR) >= 0);
-  AssertTrue('Peek emits loadw for Integer element',
-    Pos('loadw', IR) >= 0);
-end;
-
-procedure TTQueueTests.TestCodegen_TQueue_GrowEmitsGetMem;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcEnqueue);
-  { Grow allocates a fresh buffer via GetMem rather than realloc,
-    because it must copy in insertion order from the circular buffer }
-  AssertTrue('Grow emits _BlaiseGetMem call',
-    Pos('call $_BlaiseGetMem', IR) >= 0);
 end;
 
 initialization

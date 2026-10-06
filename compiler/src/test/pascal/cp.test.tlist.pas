@@ -16,14 +16,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TTListTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     { ------------------------------------------------------------------ }
     { Parser — ^T field, SizeOf                                           }
@@ -43,11 +42,6 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — SizeOf literal, full TList<Integer> add/get              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_SizeOf_Integer_EmitsFour;
-    procedure TestCodegen_SizeOf_Int64_EmitsEight;
-    procedure TestCodegen_TList_Compiles;
-    procedure TestCodegen_TList_AddGet_IR;
-    procedure TestCodegen_TList_Grow_EmitsRealloc;
   end;
 
 implementation
@@ -247,22 +241,6 @@ begin
   end;
 end;
 
-function TTListTests.GenIR(const ASrc: string): string;
-var
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
-  end;
-end;
-
 { ------------------------------------------------------------------ }
 { Parser tests                                                         }
 { ------------------------------------------------------------------ }
@@ -370,58 +348,6 @@ end;
 { ------------------------------------------------------------------ }
 { Codegen tests                                                         }
 { ------------------------------------------------------------------ }
-
-procedure TTListTests.TestCodegen_SizeOf_Integer_EmitsFour;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSizeOfInteger);
-  AssertTrue('SizeOf(Integer) emits copy 4', Pos('copy 4', IR) > 0);
-end;
-
-procedure TTListTests.TestCodegen_SizeOf_Int64_EmitsEight;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSizeOfInt64);
-  AssertTrue('SizeOf(Int64) emits copy 8', Pos('copy 8', IR) > 0);
-end;
-
-procedure TTListTests.TestCodegen_TList_Compiles;
-var
-  IR: string;
-begin
-  { Full TList<T> program should produce valid IR without raising }
-  IR := GenIR(SrcTListType);
-  AssertTrue('IR is non-empty', Length(IR) > 0);
-end;
-
-procedure TTListTests.TestCodegen_TList_AddGet_IR;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTListGetResult);
-  { Add method stores through a typed pointer }
-  AssertTrue('Add emits storew', Pos('storew', IR) > 0);
-  { Get method loads through a typed pointer }
-  AssertTrue('Get emits loadw', Pos('loadw', IR) > 0);
-  { Memory allocation via _ClassAlloc (ARC-aware class allocator) }
-  AssertTrue('Create emits _ClassAlloc', Pos('_ClassAlloc', IR) > 0);
-end;
-
-procedure TTListTests.TestCodegen_TList_Grow_EmitsRealloc;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTListFull);
-  { Grow method calls _BlaiseReallocMem for dynamic resizing }
-  AssertTrue('Grow emits _BlaiseReallocMem',
-    Pos('call $_BlaiseReallocMem', IR) > 0);
-  { Add method stores elements }
-  AssertTrue('Add emits storew for Integer elements', Pos('storew', IR) > 0);
-  { Get method loads elements }
-  AssertTrue('Get emits loadw for Integer elements', Pos('loadw', IR) > 0);
-end;
 
 initialization
   RegisterTest(TTListTests);

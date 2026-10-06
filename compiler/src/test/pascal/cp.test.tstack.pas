@@ -15,23 +15,17 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TTStackTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     procedure TestSemantic_TStack_Instantiates;
     procedure TestSemantic_TStack_Push_Compiles;
     procedure TestSemantic_TStack_Pop_Compiles;
     procedure TestSemantic_TStack_Peek_Compiles;
-    procedure TestCodegen_TStack_TypeInfoEmitted;
-    procedure TestCodegen_TStack_PushEmitsStore;
-    procedure TestCodegen_TStack_PopEmitsLoad;
-    procedure TestCodegen_TStack_PeekEmitsLoad;
-    procedure TestCodegen_TStack_GrowEmitsRealloc;
   end;
 
 implementation
@@ -181,22 +175,6 @@ begin
   end;
 end;
 
-function TTStackTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
-  end;
-end;
-
 procedure TTStackTests.TestSemantic_TStack_Instantiates;
 var
   Prog: TProgram;
@@ -227,57 +205,6 @@ var
 begin
   Prog := AnalyseSrc(SrcPeek);
   Prog.Free();
-end;
-
-procedure TTStackTests.TestCodegen_TStack_TypeInfoEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCreate);
-  AssertTrue('TStack typeinfo emitted',
-    Pos('typeinfo_TStack_Integer', IR) >= 0);
-end;
-
-procedure TTStackTests.TestCodegen_TStack_PushEmitsStore;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcPush);
-  AssertTrue('Push method body emitted',
-    Pos('$TStack_Integer_Push', IR) >= 0);
-  AssertTrue('Push emits storew for Integer element',
-    Pos('storew', IR) >= 0);
-end;
-
-procedure TTStackTests.TestCodegen_TStack_PopEmitsLoad;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcPop);
-  AssertTrue('Pop method body emitted',
-    Pos('$TStack_Integer_Pop', IR) >= 0);
-  AssertTrue('Pop emits loadw for Integer element',
-    Pos('loadw', IR) >= 0);
-end;
-
-procedure TTStackTests.TestCodegen_TStack_PeekEmitsLoad;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcPeek);
-  AssertTrue('Peek method body emitted',
-    Pos('$TStack_Integer_Peek', IR) >= 0);
-  AssertTrue('Peek emits loadw for Integer element',
-    Pos('loadw', IR) >= 0);
-end;
-
-procedure TTStackTests.TestCodegen_TStack_GrowEmitsRealloc;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcPush);
-  AssertTrue('Grow emits _BlaiseReallocMem call',
-    Pos('call $_BlaiseReallocMem', IR) >= 0);
 end;
 
 initialization
