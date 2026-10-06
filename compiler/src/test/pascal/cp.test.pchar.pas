@@ -15,7 +15,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe, cp.test.harness;
 
 type
   TPCharTests = class(TTestCase)
@@ -33,11 +33,8 @@ type
     { ------------------------------------------------------------------ }
     { Codegen                                                              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_PChar_EmitsAddOffset;
     procedure TestCodegen_PChar_AllocEmitted;
-    procedure TestCodegen_String_EmitsRTLCall;
-    procedure TestCodegen_PCharSubscript_ChrByteShortCircuit;
-    procedure TestCodegen_PCharSubscript_HashCharLiteralShortCircuit;
+    procedure TestCodegen_PCharSubscript_StoresByteDirectly;
   end;
 
 implementation
@@ -150,15 +147,8 @@ end;
 { Codegen tests                                                       }
 { ------------------------------------------------------------------ }
 
-procedure TPCharTests.TestCodegen_PChar_EmitsAddOffset;
-var IR: string;
-begin
-  IR := GenIR(SrcPCharCast);
-  { Data-pointer convention: PChar(str) is an identity — str IS the data pointer.
-    No add instruction or offset needed; the string value is passed through directly. }
-  AssertTrue('pchar cast compiles without error', Length(IR) > 0);
-end;
-
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TPCharTests.TestCodegen_PChar_AllocEmitted;
 var IR: string;
 begin
@@ -167,61 +157,32 @@ begin
   AssertTrue('alloc8 1 for PChar var', Pos('alloc8 1', IR) > 0);
 end;
 
-procedure TPCharTests.TestCodegen_String_EmitsRTLCall;
-var IR: string;
-begin
-  IR := GenIR(SrcStringCast);
-  AssertTrue('_StringFromPChar called', Pos('$_StringFromPChar', IR) > 0);
-end;
-
-{ Regression test for: P[I] := Chr(N) used to emit a call to $_Chr (which
-  returns a heap string pointer) and then storeb of the pointer's low byte,
-  yielding garbage.  The fix short-circuits Chr(N) in byte-store context. }
-procedure TPCharTests.TestCodegen_PCharSubscript_ChrByteShortCircuit;
+procedure TPCharTests.TestCodegen_PCharSubscript_StoresByteDirectly;
 const
-  Src =
-    '''
-      program PCC;
-      var p: PChar;
-      begin
-        p := GetMem(4);
-        p[0] := Chr(65);
-        FreeMem(p)
-      end.
-      ''';
-var IR: string;
+  { p[i] := Chr(N) and p[i] := #0 store one byte straight from an immediate:
+    no call to the _Chr RTL helper, and no string literal built for the char.
+    Invisible when the program runs (the byte is right either way), so this
+    is an assembly check, on both ISAs. }
+  Src = '''
+    program PCC;
+    var p: PChar;
+    begin
+      p := GetMem(4);
+      p[0] := Chr(65);
+      p[1] := #0;
+      FreeMem(p)
+    end.
+    ''';
+var
+  AsmT: string;
 begin
-  IR := GenIR(Src);
-  AssertTrue('storeb is emitted for p[0] write', Pos('storeb', IR) >= 0);
-  AssertEquals('Chr(65) byte-store must not call $_Chr',
-    -1, Pos('call $_Chr(', IR));
-end;
-
-{ Regression test for: P[I] := #0 (or any #N or single-char string literal)
-  used to emit a string-literal data item ($__sN) and storeb of the low byte
-  of that pointer, yielding garbage (the address byte) instead of the
-  intended character ord.  The fix folds 1-char string/Char literals to the
-  integer Ord value in byte-store context. }
-procedure TPCharTests.TestCodegen_PCharSubscript_HashCharLiteralShortCircuit;
-const
-  Src =
-    '''
-      program PCH;
-      var p: PChar;
-      begin
-        p := GetMem(4);
-        p[0] := #0;
-        FreeMem(p)
-      end.
-      ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('storeb emitted for p[0] write', Pos('storeb', IR) >= 0);
-  AssertEquals('#0 byte-store must not reference a string-literal data item',
-    -1, Pos('storeb $__s', IR));
-  AssertEquals('#0 byte-store must not load from a string-literal pointer',
-    -1, Pos('add $__s', IR));
+  AssertEquals('byte store', '', AsmMissing(Src, 'movb', 'strb'));
+  AsmT := GenAsm(Src, TargetX86_64);
+  AssertTrue('x86-64: no _Chr call', Pos('_Chr', AsmT) < 0);
+  AssertTrue('x86-64: no string literal', Pos('__s0', AsmT) < 0);
+  AsmT := GenAsm(Src, TargetArm64);
+  AssertTrue('arm64: no _Chr call', Pos('_Chr', AsmT) < 0);
+  AssertTrue('arm64: no string literal', Pos('__s0', AsmT) < 0);
 end;
 
 initialization
