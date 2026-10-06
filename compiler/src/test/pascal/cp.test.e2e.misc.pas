@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_BooleanOps_ShortCircuitAndNot;
     procedure TestRun_WriteLn_UInt64_HighBit_Unsigned;
     procedure TestRun_FloatArg_ConvertsToParamType;
     { Boolean, WriteLn, break/exit }
@@ -2617,6 +2618,50 @@ begin
     '13835058055282163712' + LE +
     '4611686018427387904' + LE +
     '9223372036854775808' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_BooleanOps_ShortCircuitAndNot;
+const
+  {
+    and / or short-circuit: the right operand is not evaluated when the left
+    decides the result (Calls counts evaluations).  not on a Boolean is logical,
+    on an Integer bitwise; xor on Booleans.  Replaces the QBE IR checks in
+    cp.test.booleanops. }
+  Src = '''
+    program P;
+    var Calls: Integer;
+    function T(V: Boolean): Boolean;
+    begin
+      Calls := Calls + 1;
+      Result := V
+    end;
+    var A, B: Boolean; I: Integer;
+    begin
+      Calls := 0;
+      A := T(False) and T(True);
+      WriteLn(A, ' ', Calls);
+      Calls := 0;
+      A := T(True) or T(False);
+      WriteLn(A, ' ', Calls);
+      Calls := 0;
+      A := T(True) and T(False);
+      WriteLn(A, ' ', Calls);
+      B := True;
+      WriteLn(not B, ' ', not A);
+      I := 5;
+      WriteLn(not I);
+      WriteLn(B xor A, ' ', B xor B)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'False 1' + LE +
+    'True 1' + LE +
+    'False 2' + LE +
+    'False True' + LE +
+    '-6' + LE +
+    'True False' + LE, 0);
 end;
 
 initialization

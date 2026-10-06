@@ -14,14 +14,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TBooleanOpsTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     procedure TestLexer_And_Keyword;
@@ -38,11 +37,6 @@ type
     procedure TestSemantic_Not_Int64Operand_TypeIsInt64;
     procedure TestSemantic_Not_ByteOperand_TypeIsInteger;
     procedure TestSemantic_Not_FloatOperand_RaisesError;
-    procedure TestCodegen_And_EmitsAnd;
-    procedure TestCodegen_Or_EmitsOr;
-    procedure TestCodegen_Not_EmitsXor;
-    procedure TestCodegen_Not_IntEmitsXorNeg1;
-    procedure TestCodegen_Xor_EmitsXor;
     procedure TestSemantic_Xor_TypeIsBoolean;
   end;
 
@@ -62,16 +56,6 @@ begin
   Result := ParseSrc(ASrc);
   A := TSemanticAnalyser.Create();
   try A.Analyse(Result); finally A.Free(); end;
-end;
-
-function TBooleanOpsTests.GenIR(const ASrc: string): string;
-var Prog: TProgram; CG: TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try CG.Generate(Prog); Result := CG.GetOutput(); finally CG.Free(); end;
-  finally Prog.Free(); end;
 end;
 
 procedure TBooleanOpsTests.AnalyseExpectError(const ASrc: string);
@@ -277,45 +261,6 @@ begin
         ''');
 end;
 
-procedure TBooleanOpsTests.TestCodegen_And_EmitsAnd;
-var IR: string;
-begin
-  IR := GenIR(SrcAnd);
-  { Short-circuit and: LHS jumps to RHS on non-zero, to end on zero }
-  AssertTrue('emits sc_rhs label', Pos('@sc_rhs', IR) > 0);
-  AssertTrue('emits sc_end label', Pos('@sc_end', IR) > 0);
-end;
-
-procedure TBooleanOpsTests.TestCodegen_Or_EmitsOr;
-var IR: string;
-begin
-  IR := GenIR(SrcOr);
-  AssertTrue('emits sc_rhs label', Pos('@sc_rhs', IR) > 0);
-  AssertTrue('emits sc_end label', Pos('@sc_end', IR) > 0);
-end;
-
-procedure TBooleanOpsTests.TestCodegen_Not_EmitsXor;
-var IR: string;
-begin
-  IR := GenIR(SrcNot);
-  AssertTrue('emits xor', Pos('xor ', IR) > 0);
-end;
-
-procedure TBooleanOpsTests.TestCodegen_Not_IntEmitsXorNeg1;
-var IR: string;
-begin
-  IR := GenIR('''
-      program P;
-      var I, R: Integer;
-      begin
-        I := 5;
-        R := not I
-      end.
-      ''');
-  AssertTrue('emits xor with -1', Pos('xor ', IR) > 0);
-  AssertTrue('mask is -1', Pos(', -1', IR) > 0);
-end;
-
 procedure TBooleanOpsTests.TestSemantic_Xor_TypeIsBoolean;
 var Prog: TProgram;
 begin
@@ -330,22 +275,6 @@ begin
       end.
       ''');
   Prog.Free();
-end;
-
-procedure TBooleanOpsTests.TestCodegen_Xor_EmitsXor;
-var IR: string;
-begin
-  IR := GenIR(
-      '''
-      program P;
-      var A, B, R: Boolean;
-      begin
-        A := True;
-        B := True;
-        R := A xor B
-      end.
-      ''');
-  AssertTrue('emits xor', Pos('xor ', IR) >= 0);
 end;
 
 initialization
