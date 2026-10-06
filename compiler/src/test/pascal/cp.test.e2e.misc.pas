@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_IntToStr_FollowsSignedness;
     procedure TestRun_PChar_StringRoundTrip;
     procedure TestRun_File_BinaryRoundTrip;
     procedure TestRun_NestedRoutines_ScopeAndCapture;
@@ -2897,6 +2898,39 @@ begin
     'round trip' + LE +
     '2 AB' + LE +
     '[AB]' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_IntToStr_FollowsSignedness;
+const
+  {
+    IntToStr formats every integer type by its own signedness: a UInt64 with the
+    high bit set stays positive, a Cardinal above 2^31 keeps its magnitude, a
+    negative Int64 or Integer keeps its sign.  arm64 sent every argument to
+    _Int64ToStr, so 2^63 came back as -9223372036854775808. }
+  Src = '''
+    program P;
+    var U: UInt64; C: Cardinal; N: Int64; I: Integer;
+    begin
+      U := 1;
+      U := U shl 63;
+      WriteLn(IntToStr(U));
+      WriteLn(IntToStr(U + 5));
+      C := 4000000000;
+      WriteLn(IntToStr(C));
+      N := -9000000000;
+      WriteLn(IntToStr(N));
+      I := -7;
+      WriteLn(IntToStr(I))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '9223372036854775808' + LE +
+    '9223372036854775813' + LE +
+    '4000000000' + LE +
+    '-9000000000' + LE +
+    '-7' + LE, 0);
 end;
 
 initialization

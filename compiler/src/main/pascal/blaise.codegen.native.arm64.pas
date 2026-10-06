@@ -4020,9 +4020,16 @@ begin
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'IntToStr') then
     begin
-      { integer argument — no transient to dispose }
+      { integer argument — no transient to dispose.  A UInt64 needs the
+        unsigned formatter: _Int64ToStr would print a value with the high
+        bit set as negative.  Every narrower type arrives in x0 already
+        sign- or zero-extended to its 64-bit value. }
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      EmitCallSym('_Int64ToStr');
+      if (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
+         (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind = tyUInt64) then
+        EmitCallSym('_UInt64ToStr')
+      else
+        EmitCallSym('_Int64ToStr');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'Int64ToStr') then
