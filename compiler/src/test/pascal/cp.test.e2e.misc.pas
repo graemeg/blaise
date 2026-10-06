@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_PChar_StringRoundTrip;
     procedure TestRun_File_BinaryRoundTrip;
     procedure TestRun_NestedRoutines_ScopeAndCapture;
     procedure TestRun_Routines_CallsAndResults;
@@ -2857,6 +2858,45 @@ begin
     '7 122' + LE +
     'True' + LE +
     'False' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_PChar_StringRoundTrip;
+const
+  {
+    string(p) on a PChar copies the NUL-terminated bytes into a new string;
+    PChar(s) hands back the string's own NUL-terminated data.  arm64 treated
+    string(p) as a no-op cast and retained the raw PChar as if it were a string,
+    so the runtime read a header that was not there ("_StringRelease corrupted
+    header").  Bytes stored through p[i] -- a Chr(N) call, a char literal, #0 --
+    land as single bytes. }
+  Src = '''
+    program P;
+    function Echo(s: string): string;
+    var p: PChar;
+    begin
+      p := PChar(s);
+      Result := string(p)
+    end;
+    var Buf: PChar; S: string;
+    begin
+      WriteLn(Echo('round trip'));
+      Buf := GetMem(8);
+      Buf[0] := Chr(65);
+      Buf[1] := 'B';
+      Buf[2] := #0;
+      Buf[3] := 'Z';
+      S := string(Buf);
+      WriteLn(Length(S), ' ', S);
+      WriteLn('[', string(Buf), ']');
+      FreeMem(Buf)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'round trip' + LE +
+    '2 AB' + LE +
+    '[AB]' + LE, 0);
 end;
 
 initialization

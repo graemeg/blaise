@@ -4287,6 +4287,21 @@ begin
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (TFuncCallExpr(AExpr).Args.Count = 1) and
+     SameText(TFuncCallExpr(AExpr).Name, 'string') and
+     (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
+     (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind = tyPChar) then
+  begin
+    { string(pchar): copy the NUL-terminated bytes into a new string (an
+      rc = 0 buffer, like the other RTL string helpers; ArcExprOwnsRef
+      treats the cast as borrowed, so a store retains it).  Treating it as
+      a reinterpret handed the RTL a raw PChar with no string header. }
+    Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+    EmitCallSym('_StringFromPChar');
+    Exit;
+  end;
+  if (AExpr is TFuncCallExpr) and
+     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+     (TFuncCallExpr(AExpr).Args.Count = 1) and
      (SameText(TFuncCallExpr(AExpr).Name, 'PChar') or
       SameText(TFuncCallExpr(AExpr).Name, 'Pointer')) then
   begin
