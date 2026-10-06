@@ -19,14 +19,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TTDictionaryTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     { ------------------------------------------------------------------ }
     { Parser                                                               }
@@ -46,16 +45,8 @@ type
     { ------------------------------------------------------------------ }
     { Codegen                                                              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_TypeInfoEmitted;
-    procedure TestCodegen_FindKeyEmitted;
-    procedure TestCodegen_AddEmitted;
-    procedure TestCodegen_TryGetValueEmitted;
-    procedure TestCodegen_ContainsKeyEmitted;
-    procedure TestCodegen_RemoveEmitted;
 
     { Default property d[key] }
-    procedure TestCodegen_DefaultProperty_Read_EmitsGetItem;
-    procedure TestCodegen_DefaultProperty_Write_EmitsSetItem;
   end;
 
 implementation
@@ -315,22 +306,6 @@ begin
   end;
 end;
 
-function TTDictionaryTests.GenIR(const ASrc: string): string;
-var
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
-  end;
-end;
-
 { ------------------------------------------------------------------ }
 { Parser tests                                                         }
 { ------------------------------------------------------------------ }
@@ -425,81 +400,9 @@ end;
 { Codegen tests                                                         }
 { ------------------------------------------------------------------ }
 
-procedure TTDictionaryTests.TestCodegen_TypeInfoEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCreate);
-  AssertTrue('Typeinfo emitted',
-    Pos('typeinfo_TDictionary_Integer_Integer', IR) > 0);
-end;
-
-procedure TTDictionaryTests.TestCodegen_FindKeyEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcAddGet);
-  AssertTrue('FindKey body emitted',
-    Pos('$TDictionary_Integer_Integer_FindKey', IR) > 0);
-end;
-
-procedure TTDictionaryTests.TestCodegen_AddEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcAddGet);
-  AssertTrue('Add body emitted',
-    Pos('$TDictionary_Integer_Integer_Add', IR) > 0);
-end;
-
-procedure TTDictionaryTests.TestCodegen_TryGetValueEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTryGet);
-  AssertTrue('TryGetValue body emitted',
-    Pos('$TDictionary_Integer_Integer_TryGetValue', IR) > 0);
-end;
-
-procedure TTDictionaryTests.TestCodegen_ContainsKeyEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcAddGet);
-  AssertTrue('ContainsKey body emitted',
-    Pos('$TDictionary_Integer_Integer_ContainsKey', IR) > 0);
-end;
-
-procedure TTDictionaryTests.TestCodegen_RemoveEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcRemove);
-  AssertTrue('Remove body emitted',
-    Pos('$TDictionary_Integer_Integer_Remove', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { Default property tests                                               }
 { ------------------------------------------------------------------ }
-
-procedure TTDictionaryTests.TestCodegen_DefaultProperty_Read_EmitsGetItem;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcDefaultProp);
-  AssertTrue('GetItem getter called',
-    Pos('$TDictionary_Integer_Integer_GetItem', IR) >= 0);
-end;
-
-procedure TTDictionaryTests.TestCodegen_DefaultProperty_Write_EmitsSetItem;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcDefaultProp);
-  AssertTrue('SetItem setter called',
-    Pos('$TDictionary_Integer_Integer_SetItem', IR) >= 0);
-end;
 
 initialization
   RegisterTest(TTDictionaryTests);

@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_TDictionary_AddLookupUpdateRemove;
     procedure TestRun_TSet_IncludeExcludeContains;
     procedure TestRun_StackQueueList_OrderAcrossGrow;
     { Generic free functions }
@@ -815,6 +816,41 @@ begin
   AssertRunsOnAll(Src,
     '20 True False' + LE +
     '19 False 19' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_TDictionary_AddLookupUpdateRemove;
+const
+  {
+    TDictionary<Integer, Integer>: Add across a Grow, the default property read
+    and write, ContainsKey, TryGetValue hit and miss, and Remove.  Replaces the QBE
+    IR checks in cp.test.tdictionary. }
+  Src = '''
+    program P;
+    uses Generics.Collections;
+    var D: TDictionary<Integer, Integer>; I, V: Integer;
+    begin
+      D := TDictionary<Integer, Integer>.Create();
+      for I := 1 to 20 do
+        D.Add(I, I * 100);
+      WriteLn(D.Count, ' ', D[5], ' ', D[20]);
+      D[5] := 7;
+      WriteLn(D[5], ' ', D.ContainsKey(5), ' ', D.ContainsKey(21));
+      if D.TryGetValue(12, V) then
+        WriteLn('got ', V);
+      if not D.TryGetValue(42, V) then
+        WriteLn('no 42');
+      D.Remove(12);
+      WriteLn(D.Count, ' ', D.ContainsKey(12), ' ', D[13])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '20 500 2000' + LE +
+    '7 True False' + LE +
+    'got 1200' + LE +
+    'no 42' + LE +
+    '19 False 1300' + LE, 0);
 end;
 
 initialization
