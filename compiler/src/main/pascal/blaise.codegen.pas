@@ -701,16 +701,24 @@ begin
   if AExpr is TBinaryExpr then
     Exit(True);
   { Built-in call (no resolved decl, not an indirect call through a proc
-    variable): the RTL helpers return rc = 0 StrAlloc buffers.  EXCEPT the
-    'string(x)' conversion: string(pchar) allocates, but string(string) can
-    be a pointer-preserving no-op — disposing that would free the source,
-    so a cast-shaped call is conservatively treated as borrowed (worst case
-    one leaked buffer for a nested string(pchar), never a corruption). }
+    variable): the RTL helpers return rc = 0 StrAlloc buffers.  The
+    'string(x)' conversion is one of them only when x is a PChar:
+    string(pchar) always allocates (_StringFromPChar), so an unstored
+    result must be disposed or it leaks one buffer per evaluation -- a
+    file-system call in a loop grew the arena without bound on arm64.
+    string(string) can be a pointer-preserving no-op, and disposing that
+    would free the source, so every other cast-shaped call stays borrowed. }
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
-     (not TFuncCallExpr(AExpr).IsIndirectCall) and
-     (not SameText(TFuncCallExpr(AExpr).Name, 'string')) then
-    Exit(True);
+     (not TFuncCallExpr(AExpr).IsIndirectCall) then
+  begin
+    if not SameText(TFuncCallExpr(AExpr).Name, 'string') then
+      Exit(True);
+    if (TFuncCallExpr(AExpr).Args.Count = 1) and
+       (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
+       (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind = tyPChar) then
+      Exit(True);
+  end;
 end;
 
 function ArcBuiltinStrArgOwnsRef(AExpr: TASTExpr): Boolean;
