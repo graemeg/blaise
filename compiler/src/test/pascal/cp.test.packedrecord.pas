@@ -28,13 +28,12 @@ interface
 
 uses
   blaise.testing, cp.test.e2e.base,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TPackedRecordTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     procedure TestLexer_Packed_Keyword;
     procedure TestParse_PackedRecord_SetsIsPacked;
@@ -49,7 +48,6 @@ type
     procedure TestParse_PackedArray_ErrorMentionsSetOf;
     procedure TestParse_BitpackedArray_RaisesError;
     procedure TestParse_Bitpacked_ErrorMentionsSetOf;
-    procedure TestCodegen_PackedRecord_TypeSizeMatchesPacked;
   end;
 
   [Threaded]
@@ -57,6 +55,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_PackedRecord_SizeHasNoPadding;
     procedure TestRun_PackedRecord_ByteInt_Offsets;
     procedure TestRun_PackedRecord_SizeOfMatchesPacked;
   end;
@@ -82,25 +81,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TPackedRecordTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -444,28 +424,6 @@ begin
   AssertTrue('error suggests set of', Pos('set of', Msg) >= 0);
 end;
 
-procedure TPackedRecordTests.TestCodegen_PackedRecord_TypeSizeMatchesPacked;
-const
-  Src = '''
-        program P;
-        type TFoo = packed record
-          A: Byte;
-          B: Integer;
-        end;
-        var R: TFoo;
-        begin
-          WriteLn(SizeOf(TFoo))
-        end.
-        ''';
-var
-  IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('IR not empty', IR <> '');
-  { SizeOf folds at codegen — packed Byte+Integer = 5 bytes }
-  AssertTrue('SizeOf folds to 5', Pos('copy 5', IR) > 0);
-end;
-
 procedure TPackedRecordE2ETests.SetUp;
 begin
   inherited SetUp();
@@ -522,6 +480,32 @@ begin
     Packed: A at 0, B at 1, no tail pad → 9. }
   AssertEquals('plain=16, packed=9',
     '16' + LE + '9' + LE, Output);
+end;
+
+procedure TPackedRecordE2ETests.TestRun_PackedRecord_SizeHasNoPadding;
+const
+  {
+    A packed record has no padding: Byte + Integer is 5 bytes, against 8 for
+    the unpacked record.  Replaces the QBE IR check in cp.test.packedrecord. }
+  Src = '''
+    program P;
+    type
+      TPk = packed record
+        A: Byte;
+        B: Integer;
+      end;
+      TUnpk = record
+        A: Byte;
+        B: Integer;
+      end;
+    begin
+      WriteLn(SizeOf(TPk), ' ', SizeOf(TUnpk))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '5 8' + LE, 0);
 end;
 
 initialization
