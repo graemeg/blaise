@@ -267,7 +267,7 @@ found, for a ruling before they are migrated.
 | `cp.test.pointers.pas` | 16 | pending
 | `cp.test.dynarray.pas` | 16 | pending
 | `cp.test.vtable.pas` | 15 | pending
-| `cp.test.uint64.pas` | 14 | pending
+| `cp.test.uint64.pas` | 14 | done: 12 behaviour (e2e)
 | `cp.test.rangecheck.pas` | 14 | pending
 | `cp.test.inherit.pas` | 14 | pending
 | `cp.test.caseenum.pas` | 14 | done: 12 behaviour (e2e)
@@ -286,7 +286,7 @@ found, for a ruling before they are migrated.
 | `cp.test.varparams.pas` | 10 | pending
 | `cp.test.varinit.pas` | 10 | pending
 | `cp.test.tdictionary.pas` | 10 | pending
-| `cp.test.smallint_word.pas` | 10 | pending
+| `cp.test.smallint_word.pas` | 10 | done: 8 behaviour (e2e)
 | `cp.test.properties.pas` | 10 | pending
 | `cp.test.tordereddictionary.pas` | 9 | pending
 | `cp.test.publishedrtti.pas` | 9 | pending
@@ -303,24 +303,30 @@ found, for a ruling before they are migrated.
 | `cp.test.tqueue.pas` | 7 | pending
 | `cp.test.tlist.pas` | 7 | pending
 | `cp.test.strutils.pas` | 7 | pending
-| `cp.test.sizeof.pas` | 7 | pending
-| `cp.test.pchar.pas` | 7 | pending
+| `cp.test.sizeof.pas` | 7 | done: 5 behaviour (e2e)
+| `cp.test.pchar.pas` | 7 | done: 2 behaviour (e2e), 2 code-gen (GenAsm), 1 QBE-only
 | `cp.test.multiwrite.pas` | 7 | done: 5 behaviour (e2e)
 | `cp.test.genericdefaults.pas` | 7 | pending
 | `cp.test.flowjumps.pas` | 7 | done: 5 behaviour (e2e)
 | `cp.test.booleanops.pas` | 7 | done: 5 behaviour (e2e)
 | `cp.test.tset.pas` | 6 | pending
 | `cp.test.sar.pas` | 6 | done: 4 behaviour (e2e)
-| `cp.test.operators.pas` | 6 | pending
+| `cp.test.operators.pas` | 6 | done: 4 behaviour (e2e)
 | `cp.test.genericmethodimpls.pas` | 6 | pending
-| `cp.test.defaultargs.pas` | 6 | pending
+| `cp.test.defaultargs.pas` | 6 | done: 4 behaviour (e2e)
 | `cp.test.charcast.pas` | 6 | done: 4 behaviour (e2e)
 | `cp.test.streams.pas` | 5 | pending
-| `cp.test.math.pas` | 5 | pending
+| `cp.test.math.pas` | 5 | done: 3 behaviour (e2e); see GenIRBuiltin below
 | `cp.test.genericforin.pas` | 5 | pending
-| `cp.test.varargs.pas` | 4 | pending
+| `cp.test.varargs.pas` | 4 | done: 2 behaviour (e2e)
 | `cp.test.numerics.money.pas` | 4 | pending
 | `cp.test.numerics.decimal.pas` | 4 | pending
-| `cp.test.chainedfields.pas` | 4 | pending
-| `cp.test.packedrecord.pas` | 3 | pending
+| `cp.test.chainedfields.pas` | 4 | done: 2 behaviour (e2e)
+| `cp.test.packedrecord.pas` | 3 | done: 1 behaviour (e2e)
 |===
+
+Not in the counts above: two more QBE IR helpers built with `TCodeGenQBE`
+exactly like `GenIR` -- `GenIRBuiltin` (32 calls in `cp.test.math.pas`) and
+`GenIRAt` (2 calls in `cp.test.embed.pas`).  They fall under the same triage
+and the same exit criterion; found while migrating `cp.test.math.pas`.
+
