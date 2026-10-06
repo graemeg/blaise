@@ -240,30 +240,30 @@ function  _ParamCount: Integer;
 function  _ParamStr(Index: Integer): Pointer;
 
 { File operations }
-function  _FileExists(Path: Pointer): Integer;
-procedure _DeleteFile(Path: Pointer);
-function  _RenameFile(OldPath, NewPath: Pointer): Integer;
-function  _ReadFile(Path: Pointer): Pointer;
-procedure _WriteFile(Path, Content: Pointer);
-procedure _AppendFile(Path, Content: Pointer);
-function  _FileAge(Path: Pointer): Int64;
+function  _FileExists(const Path: string): Integer;
+procedure _DeleteFile(const Path: string);
+function  _RenameFile(const OldPath, NewPath: string): Integer;
+function  _ReadFile(const Path: string): Pointer;
+procedure _WriteFile(const Path, Content: string);
+procedure _AppendFile(const Path, Content: string);
+function  _FileAge(const Path: string): Int64;
 
 { Directory operations }
-function  _DirectoryExists(Path: Pointer): Integer;
-function  _ForceDirectories(Path: Pointer): Integer;
-procedure _RemoveDir(Path: Pointer);
+function  _DirectoryExists(const Path: string): Integer;
+function  _ForceDirectories(const Path: string): Integer;
+procedure _RemoveDir(const Path: string);
 function  _GetCurrentDir: Pointer;
-function  _SetCurrentDir(Path: Pointer): Integer;
-function  _ListDir(Path: Pointer): Pointer;
+function  _SetCurrentDir(const Path: string): Integer;
+function  _ListDir(const Path: string): Pointer;
 
 { OS utilities }
 function  _GetTempDir: Pointer;
-function  _GetTempFileName(Dir, Prefix: Pointer): Pointer;
+function  _GetTempFileName(const Dir, Prefix: string): Pointer;
 function  _GetProcessID: Integer;
-function  _GetEnvVar(Name: Pointer): Pointer;
+function  _GetEnvVar(const Name: string): Pointer;
 procedure _Sleep(Ms: Integer);
 procedure _Halt(Code: Integer);
-function  _Exec(Cmd: Pointer): Integer;
+function  _Exec(const Cmd: string): Integer;
 
 { Console I/O }
 procedure _SysWriteStr(Fd: Integer; S: Pointer);
@@ -352,6 +352,23 @@ begin
   if (R <> nil) and (Len > 0) then
     for I := 0 to Len - 1 do R[I] := S[I];
   Result := R;
+end;
+
+{ Make a freshly built rc = 0 string buffer (StrAlloc, StrFromCStr) the
+  function's string result WITHOUT copying it.  string(PChar(P)) is a
+  conversion: it copies up to the first NUL, which truncated binary file
+  content, and it leaked P.  The result is the caller's one reference. }
+function StrAdopt(P: Pointer): string;
+var
+  RC: ^Integer;
+  Slot: ^Pointer;
+begin
+  Result := '';
+  if P = nil then Exit;
+  RC := Pointer(PChar(P) - BLAISE_STR_HDR);
+  RC^ := 1;
+  Slot := Pointer(@Result);
+  Slot^ := P;
 end;
 
 function StrLen(DataPtr: Pointer): Integer;
@@ -474,10 +491,10 @@ var
   LPtr: ^Integer;
 begin
   Fd := libc_open2(StrData(Pointer(APath)), GPlatformLayout.O_RDONLY());
-  if Fd < 0 then begin Result := string(PChar(StrAlloc(0))); Exit end;
-  if libc_fstat(Fd, @St) < 0 then begin libc_close(Fd); Result := string(PChar(StrAlloc(0))); Exit end;
+  if Fd < 0 then begin Result := ''; Exit end;
+  if libc_fstat(Fd, @St) < 0 then begin libc_close(Fd); Result := ''; Exit end;
   Sz := GPlatformLayout.StatSize(@St);
-  if Sz < 0 then begin libc_close(Fd); Result := string(PChar(StrAlloc(0))); Exit end;
+  if Sz < 0 then begin libc_close(Fd); Result := ''; Exit end;
   R := StrAlloc(Integer(Sz));
   if R = nil then begin libc_close(Fd); Result := ''; Exit end;
   Got := libc_read(Fd, R, Sz);
@@ -485,7 +502,7 @@ begin
   LPtr  := Pointer(PChar(R) - 8);  LPtr^ := Integer(Got);
   LPtr  := Pointer(PChar(R) - 4);  LPtr^ := Integer(Got);
   R[Integer(Got)] := #0;
-  Result := string(R);
+  Result := StrAdopt(R);
 end;
 
 procedure TRtlPlatformPosix.WriteFile(const APath, AContent: string);
@@ -590,14 +607,14 @@ var
   I:         Integer;
 begin
   CWD := libc_getcwd(PChar(@Buf[0]), 4096);
-  if CWD = nil then begin Result := string(PChar(StrAlloc(0))); Exit end;
+  if CWD = nil then begin Result := ''; Exit end;
   Len := Integer(libc_strlen(CWD));
   if (Len > 0) and (CWD[Len - 1] <> '/') then NeedSlash := 1 else NeedSlash := 0;
   R := StrAlloc(Len + NeedSlash);
   if R = nil then begin Result := ''; Exit end;
   for I := 0 to Len - 1 do R[I] := CWD[I];
   if NeedSlash = 1 then R[Len] := '/';
-  Result := string(R);
+  Result := StrAdopt(R);
 end;
 
 function TRtlPlatformPosix.SetCurrentDir(const APath: string): Boolean;
@@ -704,7 +721,7 @@ begin
 
   libc_close(Fd);
   if R <> nil then
-    Result := string(R)
+    Result := StrAdopt(R)
 end;
 
 { ================================================================== }
@@ -727,7 +744,7 @@ begin
   if R = nil then begin Result := ''; Exit end;
   for I := 0 to Len - 1 do R[I] := Tmp[I];
   if NeedSlash = 1 then R[Len] := '/';
-  Result := string(R);
+  Result := StrAdopt(R);
 end;
 
 function TRtlPlatformPosix.GetTempFileName(const ADir, APrefix: string): string;
@@ -758,7 +775,7 @@ begin
     if (TmpLen > 0) and (Tmp[TmpLen - 1] <> '/') then NeedSlash := 1;
     TmplLen := TmpLen + NeedSlash + PLen + 6;
     Tmpl := _BlaiseGetMem(TmplLen + 1);
-    if Tmpl = nil then begin Result := string(PChar(StrFromCStr(StrData('/tmp/blaise_XXXXXX')))); Exit end;
+    if Tmpl = nil then begin Result := StrAdopt(StrFromCStr(StrData('/tmp/blaise_XXXXXX'))); Exit end;
     for I := 0 to TmpLen - 1 do Tmpl[I] := Tmp[I];
     if NeedSlash = 1 then Tmpl[TmpLen] := '/';
     for I := 0 to PLen - 1 do Tmpl[TmpLen + NeedSlash + I] := PStr[I];
@@ -770,7 +787,7 @@ begin
     if DStr[DLen - 1] <> '/' then NeedSlash := 1;
     TmplLen := DLen + NeedSlash + PLen + 6;
     Tmpl := _BlaiseGetMem(TmplLen + 1);
-    if Tmpl = nil then begin Result := string(PChar(StrFromCStr(StrData('/tmp/blaise_XXXXXX')))); Exit end;
+    if Tmpl = nil then begin Result := StrAdopt(StrFromCStr(StrData('/tmp/blaise_XXXXXX'))); Exit end;
     for I := 0 to DLen - 1 do Tmpl[I] := DStr[I];
     if NeedSlash = 1 then Tmpl[DLen] := '/';
     for I := 0 to PLen - 1 do Tmpl[DLen + NeedSlash + I] := PStr[I];
@@ -780,7 +797,7 @@ begin
 
   Fd := libc_mkstemp(Tmpl);
   if Fd >= 0 then libc_close(Fd);
-  Result := string(PChar(StrFromCStr(Tmpl)));
+  Result := StrAdopt(StrFromCStr(Tmpl));
   _BlaiseFreeMem(Tmpl);
 end;
 
@@ -794,8 +811,8 @@ var
   Val: PChar;
 begin
   Val := libc_getenv(StrData(Pointer(AName)));
-  if Val = nil then begin Result := string(PChar(StrAlloc(0))); Exit end;
-  Result := string(PChar(StrFromCStr(Val)));
+  if Val = nil then begin Result := ''; Exit end;
+  Result := StrAdopt(StrFromCStr(Val));
 end;
 
 procedure TRtlPlatformPosix.Sleep(AMilliseconds: Integer);
@@ -830,9 +847,9 @@ var
   Slot: TPCharArray;
 begin
   if (GArgV = nil) or (AIndex < 0) or (AIndex >= GArgC) then
-    begin Result := string(PChar(StrAlloc(0))); Exit end;
+    begin Result := ''; Exit end;
   Slot := GArgV + (AIndex * SizeOf(Pointer));
-  Result := string(PChar(StrFromCStr(Slot^)));
+  Result := StrAdopt(StrFromCStr(Slot^));
 end;
 
 { ================================================================== }
@@ -1307,54 +1324,54 @@ begin
   Result := Pointer(GRtlPlatform.ParamStr(Index));
 end;
 
-function _FileExists(Path: Pointer): Integer;
+function _FileExists(const Path: string): Integer;
 begin
-  if GRtlPlatform.FileExists(string(PChar(Path))) then Result := 1 else Result := 0;
+  if GRtlPlatform.FileExists(Path) then Result := 1 else Result := 0;
 end;
 
-procedure _DeleteFile(Path: Pointer);
+procedure _DeleteFile(const Path: string);
 begin
-  GRtlPlatform.DeleteFile(string(PChar(Path)));
+  GRtlPlatform.DeleteFile(Path);
 end;
 
-function _RenameFile(OldPath, NewPath: Pointer): Integer;
+function _RenameFile(const OldPath, NewPath: string): Integer;
 begin
-  if GRtlPlatform.RenameFile(string(PChar(OldPath)), string(PChar(NewPath))) then Result := 1 else Result := 0;
+  if GRtlPlatform.RenameFile(OldPath, NewPath) then Result := 1 else Result := 0;
 end;
 
-function _ReadFile(Path: Pointer): Pointer;
+function _ReadFile(const Path: string): Pointer;
 begin
-  Result := Pointer(GRtlPlatform.ReadFile(string(PChar(Path))));
+  Result := Pointer(GRtlPlatform.ReadFile(Path));
 end;
 
-procedure _WriteFile(Path, Content: Pointer);
+procedure _WriteFile(const Path, Content: string);
 begin
-  GRtlPlatform.WriteFile(string(PChar(Path)), string(PChar(Content)));
+  GRtlPlatform.WriteFile(Path, Content);
 end;
 
-procedure _AppendFile(Path, Content: Pointer);
+procedure _AppendFile(const Path, Content: string);
 begin
-  GRtlPlatform.AppendFile(string(PChar(Path)), string(PChar(Content)));
+  GRtlPlatform.AppendFile(Path, Content);
 end;
 
-function _FileAge(Path: Pointer): Int64;
+function _FileAge(const Path: string): Int64;
 begin
-  Result := GRtlPlatform.FileAge(string(PChar(Path)));
+  Result := GRtlPlatform.FileAge(Path);
 end;
 
-function _DirectoryExists(Path: Pointer): Integer;
+function _DirectoryExists(const Path: string): Integer;
 begin
-  if GRtlPlatform.DirectoryExists(string(PChar(Path))) then Result := 1 else Result := 0;
+  if GRtlPlatform.DirectoryExists(Path) then Result := 1 else Result := 0;
 end;
 
-function _ForceDirectories(Path: Pointer): Integer;
+function _ForceDirectories(const Path: string): Integer;
 begin
-  if GRtlPlatform.ForceDirectories(string(PChar(Path))) then Result := 1 else Result := 0;
+  if GRtlPlatform.ForceDirectories(Path) then Result := 1 else Result := 0;
 end;
 
-procedure _RemoveDir(Path: Pointer);
+procedure _RemoveDir(const Path: string);
 begin
-  GRtlPlatform.RemoveDir(string(PChar(Path)));
+  GRtlPlatform.RemoveDir(Path);
 end;
 
 function _GetCurrentDir: Pointer;
@@ -1362,14 +1379,14 @@ begin
   Result := Pointer(GRtlPlatform.GetCurrentDir());
 end;
 
-function _SetCurrentDir(Path: Pointer): Integer;
+function _SetCurrentDir(const Path: string): Integer;
 begin
-  if GRtlPlatform.SetCurrentDir(string(PChar(Path))) then Result := 1 else Result := 0;
+  if GRtlPlatform.SetCurrentDir(Path) then Result := 1 else Result := 0;
 end;
 
-function _ListDir(Path: Pointer): Pointer;
+function _ListDir(const Path: string): Pointer;
 begin
-  Result := Pointer(GRtlPlatform.ListDir(string(PChar(Path))));
+  Result := Pointer(GRtlPlatform.ListDir(Path));
 end;
 
 function _GetTempDir: Pointer;
@@ -1377,9 +1394,9 @@ begin
   Result := Pointer(GRtlPlatform.GetTempDir());
 end;
 
-function _GetTempFileName(Dir, Prefix: Pointer): Pointer;
+function _GetTempFileName(const Dir, Prefix: string): Pointer;
 begin
-  Result := Pointer(GRtlPlatform.GetTempFileName(string(PChar(Dir)), string(PChar(Prefix))));
+  Result := Pointer(GRtlPlatform.GetTempFileName(Dir, Prefix));
 end;
 
 function _GetProcessID: Integer;
@@ -1387,9 +1404,9 @@ begin
   Result := GRtlPlatform.GetProcessID();
 end;
 
-function _GetEnvVar(Name: Pointer): Pointer;
+function _GetEnvVar(const Name: string): Pointer;
 begin
-  Result := Pointer(GRtlPlatform.GetEnvVar(string(PChar(Name))));
+  Result := Pointer(GRtlPlatform.GetEnvVar(Name));
 end;
 
 procedure _Sleep(Ms: Integer);
@@ -1402,9 +1419,9 @@ begin
   GRtlPlatform.Halt(Code);
 end;
 
-function _Exec(Cmd: Pointer): Integer;
+function _Exec(const Cmd: string): Integer;
 begin
-  Result := GRtlPlatform.Exec(string(PChar(Cmd)));
+  Result := GRtlPlatform.Exec(Cmd);
 end;
 
 procedure _SysWriteStr(Fd: Integer; S: Pointer);

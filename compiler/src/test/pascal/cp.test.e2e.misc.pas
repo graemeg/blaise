@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_File_BinaryRoundTrip;
     procedure TestRun_NestedRoutines_ScopeAndCapture;
     procedure TestRun_Routines_CallsAndResults;
     procedure TestRun_Write_MultiArg_NewlineRules;
@@ -2824,6 +2825,38 @@ begin
     'B 22' + LE +
     'MA 33' + LE +
     'MB 44' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_File_BinaryRoundTrip;
+const
+  {
+    WriteFile, AppendFile and ReadFile keep every byte, NULs included.  The
+    posix RTL passed paths and content through string(PChar(...)), a conversion
+    that copies up to the first NUL: ReadFile of a 7-byte file holding a NUL
+    returned 2 bytes, and WriteFile truncated binary content the same way. }
+  Src = '''
+    program P;
+    var Path, S: string;
+    begin
+      Path := GetTempDir() + 'blaise_binrt.dat';
+      WriteFile(Path, 'ab' + #0 + 'cd');
+      S := ReadFile(Path);
+      WriteLn(Length(S), ' ', Ord(S[2]), ' ', S[4]);
+      AppendFile(Path, #0 + 'z');
+      S := ReadFile(Path);
+      WriteLn(Length(S), ' ', S[6]);
+      WriteLn(FileExists(Path));
+      DeleteFile(Path);
+      WriteLn(FileExists(Path))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '5 0 100' + LE +
+    '7 122' + LE +
+    'True' + LE +
+    'False' + LE, 0);
 end;
 
 initialization
