@@ -480,8 +480,7 @@ const
     UInt64 and QWord are 8 bytes; UInt64 comparison, div and mod are UNSIGNED
     (2^63 is larger than 1); a large Int64 literal keeps all 64 bits; a Cardinal
     above 2^31 zero-extends into an Int64 variable, record field or cast; IntToStr
-    formats a UInt64 unsigned.  Comparisons are parenthesised in WriteLn
-    arguments: see BUG-20261006-generic-lt-comma-parse.  Replaces the QBE IR
+    formats a UInt64 unsigned.  Replaces the QBE IR
     checks in cp.test.uint64. }
   Src = '''
     program P;
@@ -494,7 +493,7 @@ const
       Big := Big shl 63;
       A := Big;
       B := 1;
-      WriteLn((A < B), ' ', (A > B), ' ', (B < A));
+      WriteLn(A < B, ' ', A > B, ' ', B < A);
       A := Big + 10;
       B := 3;
       WriteLn(A div B, ' ', A mod B);
