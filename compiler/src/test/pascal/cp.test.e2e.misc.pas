@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Write_MultiArg_NewlineRules;
     procedure TestRun_BooleanOps_ShortCircuitAndNot;
     procedure TestRun_WriteLn_UInt64_HighBit_Unsigned;
     procedure TestRun_FloatArg_ConvertsToParamType;
@@ -2662,6 +2663,38 @@ begin
     'False True' + LE +
     '-6' + LE +
     'True False' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_Write_MultiArg_NewlineRules;
+const
+  {
+    WriteLn writes every argument with no separator and one trailing newline;
+    Write writes no newline; strings and Integers mix; an empty WriteLn writes
+    just the newline.  Replaces the QBE IR checks in cp.test.multiwrite. }
+  Src = '''
+    program P;
+    var I, J: Integer; S: string;
+    begin
+      I := 1;
+      J := 2;
+      S := 'hi';
+      WriteLn(I, J);
+      WriteLn(I, J, 3);
+      Write(I, J);
+      Write('|');
+      WriteLn();
+      WriteLn(S, I);
+      WriteLn()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '12' + LE +
+    '123' + LE +
+    '12|' + LE +
+    'hi1' + LE +
+    '' + LE, 0);
 end;
 
 initialization
