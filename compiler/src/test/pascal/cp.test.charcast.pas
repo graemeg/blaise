@@ -26,19 +26,14 @@ interface
 
 uses
   blaise.testing, cp.test.e2e.base,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TCharCastTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
-    procedure TestCodegen_ByteCastCharLiteral_FoldsToOrd;
-    procedure TestCodegen_WordCastCharLiteral_FoldsToOrd;
-    procedure TestCodegen_Int64CastCharLiteral_FoldsToOrd;
-    procedure TestCodegen_CardinalCastCharLiteral_FoldsToOrd;
     procedure TestSemantic_ByteCastMultiCharLiteral_RaisesError;
     procedure TestSemantic_ByteCastEmptyLiteral_RaisesError;
   end;
@@ -78,25 +73,6 @@ begin
   end;
 end;
 
-function TCharCastTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := Self.AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
-  end;
-end;
-
 procedure TCharCastTests.AnalyseExpectError(const ASrc: string);
 var
   Prog: TProgram;
@@ -108,66 +84,6 @@ begin
   except
     on E: ESemanticError do ; { expected }
   end;
-end;
-
-procedure TCharCastTests.TestCodegen_ByteCastCharLiteral_FoldsToOrd;
-var
-  IR: string;
-begin
-  IR := Self.GenIR(
-    '''
-        program P;
-        var B: Byte;
-        begin
-          B := Byte(',')
-        end.
-        ''');
-  AssertTrue('folds to 44', Pos('copy 44', IR) >= 0);
-end;
-
-procedure TCharCastTests.TestCodegen_WordCastCharLiteral_FoldsToOrd;
-var
-  IR: string;
-begin
-  IR := Self.GenIR(
-    '''
-        program P;
-        var W: Word;
-        begin
-          W := Word('A')
-        end.
-        ''');
-  AssertTrue('folds to 65', Pos('copy 65', IR) >= 0);
-end;
-
-procedure TCharCastTests.TestCodegen_Int64CastCharLiteral_FoldsToOrd;
-var
-  IR: string;
-begin
-  IR := Self.GenIR(
-    '''
-        program P;
-        var N: Int64;
-        begin
-          N := Int64(':')
-        end.
-        ''');
-  AssertTrue('folds to 58', Pos('copy 58', IR) >= 0);
-end;
-
-procedure TCharCastTests.TestCodegen_CardinalCastCharLiteral_FoldsToOrd;
-var
-  IR: string;
-begin
-  IR := Self.GenIR(
-    '''
-        program P;
-        var C: Cardinal;
-        begin
-          C := Cardinal('/')
-        end.
-        ''');
-  AssertTrue('folds to 47', Pos('copy 47', IR) >= 0);
 end;
 
 procedure TCharCastTests.TestSemantic_ByteCastMultiCharLiteral_RaisesError;
@@ -207,19 +123,21 @@ const
   Src =
     '''
         program P;
-        var B: Byte; W: Word; N: Int64;
+        var B: Byte; W: Word; N: Int64; C: Cardinal;
         begin
           B := Byte(',');
           W := Word('A');
           N := Int64(':');
+          C := Cardinal('/');
           WriteLn(B);
           WriteLn(W);
-          WriteLn(N)
+          WriteLn(N);
+          WriteLn(C)
         end.
         ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertRunsOnAll(Src, '44' + LE + '65' + LE + '58' + LE, 0);
+  AssertRunsOnAll(Src, '44' + LE + '65' + LE + '58' + LE + '47' + LE, 0);
 end;
 
 initialization
