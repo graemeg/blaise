@@ -19,6 +19,11 @@ type
   private
     function ParseSource(const ASrc: string): TProgram;
   published
+    procedure TestParse_LessThanThenComma_IsComparison;
+    procedure TestParse_LessThanThenCommaString_IsComparison;
+    procedure TestParse_ComparisonPairInArgs_NotGeneric;
+    procedure TestParse_GenericTypeArgsBeforeDot_StillGeneric;
+    procedure TestParse_GenericFuncCall_StillGeneric;
     { Program structure }
     procedure TestMinimalProgram;
     procedure TestProgramName;
@@ -810,6 +815,92 @@ begin
       TMethodDecl(Prog.Block.ProcDecls.Items[0]).Body = nil);
     AssertTrue('impl decl has a body',
       TMethodDecl(Prog.Block.ProcDecls.Items[1]).Body <> nil);
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ '<' after an identifier is a comparison unless a complete type-argument
+  list follows, closed by '>' and then '.' or '(' (BUG-20261006-generic-lt-
+  comma-parse: 'A < B,' was taken for the start of A<B, ...>). }
+
+procedure TParserTests.TestParse_LessThanThenComma_IsComparison;
+var
+  Prog: TProgram;
+  C: TProcCall;
+begin
+  Prog := ParseSource('program P; var A, B, C: Integer; begin WriteLn(A < B, C) end.');
+  try
+    AssertTrue('a procedure call', Prog.Block.Stmts[0] is TProcCall);
+    C := TProcCall(Prog.Block.Stmts[0]);
+    AssertEquals('two arguments', 2, C.Args.Count);
+    AssertTrue('first is a comparison', C.Args.Items[0] is TBinaryExpr);
+    AssertTrue('operator <', TBinaryExpr(C.Args.Items[0]).Op = boLT);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestParse_LessThanThenCommaString_IsComparison;
+var
+  Prog: TProgram;
+  C: TProcCall;
+begin
+  Prog := ParseSource('program P; var A, B: Integer; begin WriteLn(A < B, '' x'') end.');
+  try
+    C := TProcCall(Prog.Block.Stmts[0]);
+    AssertEquals('two arguments', 2, C.Args.Count);
+    AssertTrue('first is a comparison', C.Args.Items[0] is TBinaryExpr);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestParse_ComparisonPairInArgs_NotGeneric;
+var
+  Prog: TProgram;
+  C: TProcCall;
+begin
+  { A < B, C > D: '>' closes a would-be argument list, but D follows, not
+    '.' or '(' -- so both are comparisons. }
+  Prog := ParseSource('program P; var A, B, C, D: Integer; begin WriteLn(A < B, C > D) end.');
+  try
+    C := TProcCall(Prog.Block.Stmts[0]);
+    AssertEquals('two arguments', 2, C.Args.Count);
+    AssertTrue('first is <', TBinaryExpr(C.Args.Items[0]).Op = boLT);
+    AssertTrue('second is >', TBinaryExpr(C.Args.Items[1]).Op = boGT);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestParse_GenericTypeArgsBeforeDot_StillGeneric;
+var
+  Prog: TProgram;
+  A: TAssignment;
+begin
+  Prog := ParseSource('program P; var L: Integer; begin L := TList<TPair<Integer, string>>.Create() end.');
+  try
+    A := TAssignment(Prog.Block.Stmts[0]);
+    AssertTrue('a method call on the generic type', A.Expr is TMethodCallExpr);
+    AssertEquals('generic owner', 'TList<TPair<Integer,string>>',
+      TMethodCallExpr(A.Expr).ObjectName);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestParse_GenericFuncCall_StillGeneric;
+var
+  Prog: TProgram;
+  A: TAssignment;
+begin
+  Prog := ParseSource('program P; var X: Integer; begin X := Identity<Integer>(5) end.');
+  try
+    A := TAssignment(Prog.Block.Stmts[0]);
+    AssertTrue('a call', A.Expr is TFuncCallExpr);
+    AssertEquals('generic function name', 'Identity<Integer>',
+      TFuncCallExpr(A.Expr).Name);
   finally
     Prog.Free();
   end;

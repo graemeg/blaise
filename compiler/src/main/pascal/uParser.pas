@@ -78,6 +78,10 @@ type
     function  PeekValueAt(N: Integer): string;
     function  PeekLineAt(N: Integer): Integer;
     function  PeekColAt(N: Integer): Integer;
+    { True when the '<' at lookahead position APos opens a generic
+      type-argument list: well formed, closed by '>', and followed by '.' or
+      '('.  Scans ahead without consuming anything. }
+    function  GenericArgsAhead(APos: Integer): Boolean;
     function  TryCollapseUnitQualifier(var AName: string;
                                        var ALine, ACol: Integer;
                                        out AUnit: string): Boolean;
@@ -310,6 +314,55 @@ begin
   end;
   EnsureAhead(N);
   Result := FAhead[N - 3].Col;
+end;
+
+{ In an expression, IDENT '<' is either the start of generic type arguments
+  (TList<Integer>.Create, Identity<Integer>(5)) or a comparison (A < B).
+  Decide by scanning the whole would-be argument list before consuming any of
+  it: each argument is IDENT ('.' IDENT)* with an optional nested list, the
+  list closes with '>', and generic arguments are always followed by '.' or
+  '('.  Anything else -- "A < B, C" or "A < B, 'x'" -- is a comparison.
+  Peeking at a fixed two tokens (the previous rule) committed on "A < B,"
+  and then failed (BUG-20261006-generic-lt-comma-parse). }
+function TParser.GenericArgsAhead(APos: Integer): Boolean;
+var
+  P: Integer;
+  Depth: Integer;
+begin
+  Result := False;
+  if PeekKindAt(APos) <> tkLessThan then Exit;
+  P := APos + 1;
+  Depth := 1;
+  while True do
+  begin
+    { one type argument: IDENT ('.' IDENT)* }
+    if PeekKindAt(P) <> tkIdent then Exit;
+    P := P + 1;
+    while (PeekKindAt(P) = tkDot) and (PeekKindAt(P + 1) = tkIdent) do
+      P := P + 2;
+    if PeekKindAt(P) = tkLessThan then
+    begin
+      { a nested argument list opens; its first argument follows }
+      Depth := Depth + 1;
+      P := P + 1;
+    end
+    else
+    begin
+      { close every list that ends here }
+      while PeekKindAt(P) = tkGreaterThan do
+      begin
+        Depth := Depth - 1;
+        P := P + 1;
+        if Depth = 0 then
+        begin
+          Result := PeekKindAt(P) in [tkDot, tkLParen];
+          Exit;
+        end;
+      end;
+      if PeekKindAt(P) <> tkComma then Exit;
+      P := P + 1;
+    end;
+  end;
 end;
 
 { Case-insensitive membership test against the parsed 'uses' names. }
@@ -5838,11 +5891,11 @@ begin
           exports (see IdNode.QualifierUnit below). }
         TryCollapseUnitQualifier(Name, Line, Col, QualUnit);
         { Generic constructor: TypeName<Args>.Method  or diamond TypeName<>.Method
-          Heuristic: '<' followed by IDENT followed by '>' or ',' is treated as
-          generic type args.  '<>' (empty) is the diamond operator — type args
-          inferred by the semantic pass from the LHS type.
-          If the token two ahead is neither '>' nor ',', the '<' is a comparison
-          operator (e.g. "if A < B then"). }
+          '<' opens generic type args only when GenericArgsAhead finds a
+          complete argument list followed by '.' or '('; otherwise it is a
+          comparison ("if A < B then", "WriteLn(A < B, C)").  '<>' (empty)
+          is the diamond operator — type args inferred by the semantic pass
+          from the LHS type. }
         if Check(tkNotEquals) and (PeekKind() = tkDot) then
         begin
           { Diamond: TFoo<> — the lexer folds '<>' into a single tkNotEquals token }
@@ -5854,8 +5907,7 @@ begin
               'Expected ''.'' after ''<>'' at line %d col %d in %s',
               [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
         end
-        else if Check(tkLessThan) and (PeekKind() = tkIdent) and
-           (PeekKind2() in [tkGreaterThan, tkComma, tkLessThan]) then
+        else if GenericArgsAhead(0) then
         begin
           { Generic type args.  PeekKind2 = '<' means the first arg is itself
             generic (TList<TList<Integer>>) — recurse via ParseTypeName so
@@ -5908,8 +5960,7 @@ begin
             Fold the explicit type arguments into the method name
             (Pick<Integer>), mirroring the generic free-function call site; the
             semantic pass instantiates on the '<' in the name. }
-          if Check(tkLessThan) and (PeekKind() = tkIdent) and
-             (PeekKind2() in [tkGreaterThan, tkComma, tkLessThan]) then
+          if GenericArgsAhead(0) then
           begin
             Advance();  { consume '<' }
             SecondName := SecondName + '<' + ParseTypeName();
