@@ -22,14 +22,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TGenericForInTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -50,9 +49,6 @@ type
     { End-to-end: for..in on TList<Integer>                                }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_ForIn_GenericList_OK;
-    procedure TestCodegen_ForIn_GenericList_CallsGetEnumerator;
-    procedure TestCodegen_ForIn_GenericList_CallsMoveNext;
-    procedure TestCodegen_ForIn_GenericList_CallsGetCurrent;
   end;
 
 implementation
@@ -221,22 +217,6 @@ begin
   end;
 end;
 
-function TGenericForInTests.GenIR(const ASrc: string): string;
-var
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
-  end;
-end;
-
 procedure TGenericForInTests.AnalyseExpectError(const ASrc: string);
 var
   Prog: TProgram;
@@ -386,33 +366,6 @@ var
 begin
   Prog := AnalyseSrc(SrcForInGenericList);
   Prog.Free();  { no exception = semantic check passed }
-end;
-
-procedure TGenericForInTests.TestCodegen_ForIn_GenericList_CallsGetEnumerator;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcForInGenericList);
-  AssertTrue('IR calls GetEnumerator',
-    Pos('TMyList_Integer_GetEnumerator', IR) > 0);
-end;
-
-procedure TGenericForInTests.TestCodegen_ForIn_GenericList_CallsMoveNext;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcForInGenericList);
-  AssertTrue('IR calls MoveNext',
-    Pos('TListEnumerator_Integer_MoveNext', IR) > 0);
-end;
-
-procedure TGenericForInTests.TestCodegen_ForIn_GenericList_CallsGetCurrent;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcForInGenericList);
-  AssertTrue('IR calls GetCurrent (Current getter)',
-    Pos('TListEnumerator_Integer_GetCurrent', IR) > 0);
 end;
 
 initialization

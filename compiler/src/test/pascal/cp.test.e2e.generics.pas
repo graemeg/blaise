@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_GenericForIn_UserEnumerator;
     procedure TestRun_IMap_OneCallSiteBothImplementations;
     procedure TestRun_TOrderedDictionary_KeepsInsertionOrder;
     procedure TestRun_TDictionary_AddLookupUpdateRemove;
@@ -921,6 +922,68 @@ begin
   AssertRunsOnAll(Src,
     'dict 2 30 False True' + LE +
     'ordered 2 30 False True' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericForIn_UserEnumerator;
+const
+  {
+    for X in L over a user generic list calls its generic enumerator's
+    GetEnumerator, MoveNext and Current.  Replaces the QBE IR checks in
+    cp.test.genericforin. }
+  Src = '''
+    program P;
+    type
+      TListEnumerator<T> = class
+        FList:  ^T;
+        FIndex: Integer;
+        FCount: Integer;
+        function MoveNext: Boolean;
+        begin
+          Self.FIndex := Self.FIndex + 1;
+          Result := Self.FIndex < Self.FCount
+        end;
+        function GetCurrent: T;
+        begin
+          Result := (Self.FList + Self.FIndex * SizeOf(T))^
+        end;
+        property Current: T read GetCurrent;
+      end;
+      TMyList<T> = class
+        FData:  ^T;
+        FCount: Integer;
+        procedure Add(V: T);
+        var Slot: ^T;
+        begin
+          Self.FData := ReallocMem(Self.FData, (Self.FCount + 1) * SizeOf(T));
+          Slot := Self.FData + Self.FCount * SizeOf(T);
+          Slot^ := V;
+          Self.FCount := Self.FCount + 1
+        end;
+        function GetEnumerator: TListEnumerator<T>;
+        begin
+          Result := TListEnumerator<T>.Create();
+          Result.FList := Self.FData;
+          Result.FIndex := -1;
+          Result.FCount := Self.FCount
+        end;
+      end;
+    var
+      L: TMyList<Integer>;
+      X: Integer;
+    begin
+      L := TMyList<Integer>.Create();
+      L.Add(4);
+      L.Add(8);
+      L.Add(15);
+      for X in L do
+        Write(X, ' ');
+      WriteLn('|')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '4 8 15 |' + LE, 0);
 end;
 
 initialization
