@@ -23,33 +23,20 @@ interface
 
 uses
   blaise.testing, cp.test.e2e.base,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TUInt64Tests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     procedure TestSemantic_UInt64_TypeRegistered;
     procedure TestSemantic_QWord_TypeRegistered;
     procedure TestSemantic_QWordIsAliasOfUInt64;
-    procedure TestSemantic_SizeOf_UInt64_Is8;
-    procedure TestSemantic_SizeOf_QWord_Is8;
     procedure TestSemantic_PtrUInt_IsUInt64;
     procedure TestSemantic_UInt64_Plus_Int64_IsError;
     procedure TestSemantic_LargeLiteralResolvesAsUInt64;
-    procedure TestCodegen_UInt64_Less_UsesUnsignedCmp;
-    procedure TestCodegen_UInt64_Greater_UsesUnsignedCmp;
-    procedure TestCodegen_UInt64_Div_UsesUdiv;
-    procedure TestCodegen_UInt64_Mod_UsesUrem;
-    procedure TestCodegen_WriteLn_UInt64_CallsSysWriteUInt64;
-    procedure TestCodegen_IntToStr_UInt64_CallsUInt64ToStr;
-    procedure TestCodegen_Int64LargeLiteralCast_UsesLType;
-    procedure TestCodegen_CardinalToInt64Var_EmitsExtuw;
-    procedure TestCodegen_CardinalToInt64Field_EmitsExtuw;
-    procedure TestCodegen_Int64CastOfCardinal_EmitsExtuw;
   end;
 
   [Threaded]
@@ -57,6 +44,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_UInt64_UnsignedSemantics;
     procedure TestRun_UInt64_RoundTrip;
     procedure TestRun_QWord_Alias;
     procedure TestRun_UInt64_LargeLiteral;
@@ -105,25 +93,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TUInt64Tests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -208,36 +177,6 @@ begin
   end;
 end;
 
-procedure TUInt64Tests.TestSemantic_SizeOf_UInt64_Is8;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var N: Integer;
-        begin
-          N := SizeOf(UInt64)
-        end.
-        ''');
-  AssertTrue('SizeOf(UInt64) is 8', Pos('copy 8', IR) > 0);
-end;
-
-procedure TUInt64Tests.TestSemantic_SizeOf_QWord_Is8;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var N: Integer;
-        begin
-          N := SizeOf(QWord)
-        end.
-        ''');
-  AssertTrue('SizeOf(QWord) is 8', Pos('copy 8', IR) > 0);
-end;
-
 procedure TUInt64Tests.TestSemantic_PtrUInt_IsUInt64;
 const
   Src =
@@ -288,185 +227,6 @@ var
 begin
   Prog := AnalyseSrc(Src);
   Prog.Free();
-end;
-
-{ -------------- codegen -------------- }
-
-procedure TUInt64Tests.TestCodegen_UInt64_Less_UsesUnsignedCmp;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var A, B: UInt64;
-        var R: Boolean;
-        begin
-          R := A < B
-        end.
-        ''');
-  AssertTrue('UInt64 < uses cultl', Pos('cultl', IR) > 0);
-  AssertFalse('no signed csltl',     Pos('csltl', IR) > 0);
-end;
-
-procedure TUInt64Tests.TestCodegen_UInt64_Greater_UsesUnsignedCmp;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var A, B: UInt64;
-        var R: Boolean;
-        begin
-          R := A > B
-        end.
-        ''');
-  AssertTrue('UInt64 > uses cugtl', Pos('cugtl', IR) > 0);
-end;
-
-procedure TUInt64Tests.TestCodegen_UInt64_Div_UsesUdiv;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var A, B, C: UInt64;
-        begin
-          C := A div B
-        end.
-        ''');
-  AssertTrue('UInt64 div uses udiv', Pos('udiv', IR) > 0);
-end;
-
-procedure TUInt64Tests.TestCodegen_UInt64_Mod_UsesUrem;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var A, B, C: UInt64;
-        begin
-          C := A mod B
-        end.
-        ''');
-  AssertTrue('UInt64 mod uses urem', Pos('urem', IR) > 0);
-end;
-
-procedure TUInt64Tests.TestCodegen_Int64LargeLiteralCast_UsesLType;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var N: Int64;
-        begin
-          N := Int64(922337203685477580)
-        end.
-        ''');
-  { The large literal must carry the 'l' (64-bit) type.  A 'w copy' of a
-    >32-bit literal is the bug QBE rejected with "invalid type ... in arg". }
-  AssertTrue('large Int64 literal lowered as l',
-    Pos('=l copy 922337203685477580', IR) > 0);
-  AssertFalse('large Int64 literal not lowered as w',
-    Pos('=w copy 922337203685477580', IR) <> -1);
-end;
-
-procedure TUInt64Tests.TestCodegen_CardinalToInt64Var_EmitsExtuw;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var
-          V: Int64;
-          C: Cardinal;
-        begin
-          C := 4000000000;
-          V := C
-        end.
-        ''');
-  { An unsigned 32-bit source must zero-extend (extuw), never sign-extend. }
-  AssertTrue('Cardinal -> Int64 var store must zero-extend (extuw)',
-    Pos('extuw', IR) > 0);
-end;
-
-procedure TUInt64Tests.TestCodegen_CardinalToInt64Field_EmitsExtuw;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TRec = record V: Int64; end;
-        var
-          R: TRec;
-          C: Cardinal;
-        begin
-          C := 4000000000;
-          R.V := C
-        end.
-        ''');
-  AssertTrue('Cardinal -> Int64 field store must zero-extend (extuw)',
-    Pos('extuw', IR) > 0);
-end;
-
-procedure TUInt64Tests.TestCodegen_Int64CastOfCardinal_EmitsExtuw;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var
-          V: Int64;
-          C: Cardinal;
-        begin
-          C := 4000000000;
-          V := Int64(C)
-        end.
-        ''');
-  { The explicit cast Int64(aCardinal) must zero-extend the unsigned
-    source, never sign-extend it. }
-  AssertTrue('Int64(Cardinal) cast must zero-extend (extuw)',
-    Pos('extuw', IR) > 0);
-end;
-
-procedure TUInt64Tests.TestCodegen_WriteLn_UInt64_CallsSysWriteUInt64;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var U: UInt64;
-        begin
-          WriteLn(U)
-        end.
-        ''');
-  AssertTrue('WriteLn(UInt64) calls _SysWriteUInt64',
-    Pos('$_SysWriteUInt64', IR) > 0);
-end;
-
-procedure TUInt64Tests.TestCodegen_IntToStr_UInt64_CallsUInt64ToStr;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var U: UInt64;
-        var S: string;
-        begin
-          S := IntToStr(U)
-        end.
-        ''');
-  AssertTrue('IntToStr(UInt64) routes to _UInt64ToStr',
-    Pos('$_UInt64ToStr', IR) > 0);
 end;
 
 { -------------- e2e -------------- }
@@ -712,6 +472,56 @@ begin
     '4000000000' + LE +
     '4000000000' + LE +
     '4000000000' + LE, 0);
+end;
+
+procedure TUInt64E2ETests.TestRun_UInt64_UnsignedSemantics;
+const
+  {
+    UInt64 and QWord are 8 bytes; UInt64 comparison, div and mod are UNSIGNED
+    (2^63 is larger than 1); a large Int64 literal keeps all 64 bits; a Cardinal
+    above 2^31 zero-extends into an Int64 variable, record field or cast; IntToStr
+    formats a UInt64 unsigned.  Comparisons are parenthesised in WriteLn
+    arguments: see BUG-20261006-generic-lt-comma-parse.  Replaces the QBE IR
+    checks in cp.test.uint64. }
+  Src = '''
+    program P;
+    var A, B, Big: UInt64; Q: QWord; C: Cardinal; V, N: Int64; S: string;
+    type TRec = record V: Int64; end;
+    var R: TRec;
+    begin
+      WriteLn(SizeOf(UInt64), ' ', SizeOf(QWord), ' ', SizeOf(Q));
+      Big := 1;
+      Big := Big shl 63;
+      A := Big;
+      B := 1;
+      WriteLn((A < B), ' ', (A > B), ' ', (B < A));
+      A := Big + 10;
+      B := 3;
+      WriteLn(A div B, ' ', A mod B);
+      N := Int64(922337203685477580);
+      WriteLn(N);
+      C := 4000000000;
+      V := C;
+      WriteLn(V);
+      R.V := C;
+      WriteLn(R.V);
+      V := Int64(C);
+      WriteLn(V);
+      S := IntToStr(Big);
+      WriteLn(S)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '8 8 8' + LE +
+    'False True True' + LE +
+    '3074457345618258606 0' + LE +
+    '922337203685477580' + LE +
+    '4000000000' + LE +
+    '4000000000' + LE +
+    '4000000000' + LE +
+    '9223372036854775808' + LE, 0);
 end;
 
 initialization
