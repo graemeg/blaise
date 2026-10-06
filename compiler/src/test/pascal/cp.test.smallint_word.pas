@@ -23,32 +23,23 @@ interface
 
 uses
   blaise.testing, cp.test.e2e.base,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TSmallIntWordTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     procedure TestSemantic_SmallInt_TypeRegistered;
     procedure TestSemantic_Word_TypeRegistered;
     procedure TestSemantic_Int16_AliasOfSmallInt;
     procedure TestSemantic_UInt16_AliasOfWord;
-    procedure TestSemantic_SizeOf_SmallInt_Is2;
-    procedure TestSemantic_SizeOf_Word_Is2;
     procedure TestSemantic_SmallIntField_RecordPacks;
     procedure TestSemantic_MixedRecord_AlignsTo16;
-    procedure TestCodegen_SmallIntField_UsesLoadsh;
-    procedure TestCodegen_WordField_UsesLoaduh;
-    procedure TestCodegen_SmallIntField_UsesStoreh;
     { BUG-20260728-qbe-narrow-var-load: a plain VARIABLE of a narrow type must
       be read with the load matching its STORAGE width, not a blanket loadw.
       A var/out callee writes it with storeh/storeb, so a 32-bit read returns
       the untouched upper bytes. }
-    procedure TestCodegen_SmallIntVar_UsesLoadsh_NotLoadw;
-    procedure TestCodegen_WordVar_UsesLoaduh_NotLoadw;
-    procedure TestCodegen_ByteVar_UsesLoadub_NotLoadw;
   end;
 
   [Threaded]
@@ -56,6 +47,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_NarrowInts_ExtendBySignedness;
     procedure TestRun_SmallInt_RoundTrip;
     procedure TestRun_Word_RoundTrip;
     procedure TestRun_SmallInt_Negative;
@@ -93,25 +85,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TSmallIntWordTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -199,32 +172,6 @@ begin
   end;
 end;
 
-procedure TSmallIntWordTests.TestSemantic_SizeOf_SmallInt_Is2;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var N: Integer;
-        begin N := SizeOf(SmallInt) end.
-        ''');
-  AssertTrue('SizeOf(SmallInt) is 2', Pos('copy 2', IR) > 0);
-end;
-
-procedure TSmallIntWordTests.TestSemantic_SizeOf_Word_Is2;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var N: Integer;
-        begin N := SizeOf(Word) end.
-        ''');
-  AssertTrue('SizeOf(Word) is 2', Pos('copy 2', IR) > 0);
-end;
-
 procedure TSmallIntWordTests.TestSemantic_SmallIntField_RecordPacks;
 const
   Src = '''
@@ -284,122 +231,6 @@ begin
   finally
     Prog.Free();
   end;
-end;
-
-procedure TSmallIntWordTests.TestCodegen_SmallIntField_UsesLoadsh;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TR = record V: SmallInt; end;
-        var R: TR;
-        var X: Integer;
-        begin X := R.V end.
-        ''');
-  AssertTrue('SmallInt field load uses loadsh', Pos('loadsh', IR) > 0);
-end;
-
-procedure TSmallIntWordTests.TestCodegen_WordField_UsesLoaduh;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TR = record V: Word; end;
-        var R: TR;
-        var X: Integer;
-        begin X := R.V end.
-        ''');
-  AssertTrue('Word field load uses loaduh', Pos('loaduh', IR) > 0);
-end;
-
-procedure TSmallIntWordTests.TestCodegen_SmallIntField_UsesStoreh;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TR = record V: SmallInt; end;
-        var R: TR;
-        begin R.V := 42 end.
-        ''');
-  AssertTrue('SmallInt field store uses storeh', Pos('storeh', IR) > 0);
-end;
-
-{ BUG-20260728-qbe-narrow-var-load.
-
-  A record FIELD of a narrow type was already read at its own width (the three
-  tests above), but a plain VARIABLE was not: the scalar-identifier arm of
-  EmitExpr switched on QbeTypeOf, which collapses tyByte/tySmallInt/tyWord/
-  tyBoolean all onto 'w', and then emitted a blanket loadw.
-
-  Reading 4 bytes from 2-byte storage is only observable once something has
-  written FEWER than 4 bytes to it, which is exactly what a var/out callee
-  does — it stores through the caller's address at the declared width
-  (storeh/storeb).  A direct local assignment stores full width, so the plain
-  case masked the bug, and it surfaced only across a var/out call.
-
-  These three assert the load instruction directly, so a regression is pinned
-  at the IR rather than only as wrong output. }
-procedure TSmallIntWordTests.TestCodegen_SmallIntVar_UsesLoadsh_NotLoadw;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        procedure SetIt(var X: SmallInt);
-        begin X := -300 end;
-        var S: SmallInt;
-        var L: Int64;
-        begin SetIt(S); L := S; WriteLn(L) end.
-        ''');
-  AssertTrue('SmallInt variable load uses loadsh (sign-extending)',
-    Pos('loadsh', IR) > 0);
-  AssertTrue('SmallInt variable is never read with a 32-bit loadw — '
-    + 'the callee wrote only 2 bytes, so the upper half is stale',
-    Pos('loadw $S', IR) < 0);
-end;
-
-procedure TSmallIntWordTests.TestCodegen_WordVar_UsesLoaduh_NotLoadw;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        procedure SetIt(var X: Word);
-        begin X := 60000 end;
-        var W: Word;
-        var L: Int64;
-        begin SetIt(W); L := W; WriteLn(L) end.
-        ''');
-  AssertTrue('Word variable load uses loaduh (zero-extending)',
-    Pos('loaduh', IR) > 0);
-  AssertTrue('Word variable is never read with a 32-bit loadw',
-    Pos('loadw $W', IR) < 0);
-end;
-
-procedure TSmallIntWordTests.TestCodegen_ByteVar_UsesLoadub_NotLoadw;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        procedure SetIt(var X: Byte);
-        begin X := 200 end;
-        var B: Byte;
-        var L: Int64;
-        begin SetIt(B); L := B; WriteLn(L) end.
-        ''');
-  AssertTrue('Byte variable load uses loadub', Pos('loadub', IR) > 0);
-  AssertTrue('Byte variable is never read with a 32-bit loadw',
-    Pos('loadw $B', IR) < 0);
 end;
 
 { ---------- e2e ---------- }
@@ -685,6 +516,64 @@ begin
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('every narrow width round-trips through a var param',
     '200' + LE + '60000' + LE + '-300' + LE + '-8' + LE, Output);
+end;
+
+procedure TSmallIntWordE2ETests.TestRun_NarrowInts_ExtendBySignedness;
+const
+  {
+    SmallInt and Word are 2 bytes; a SmallInt field or variable sign-extends
+    and a Word or Byte zero-extends, including after a var-parameter callee wrote
+    only its own 2 or 1 bytes over a wider stale value.  Replaces the QBE IR
+    checks in cp.test.smallint_word. }
+  Src = '''
+    program P;
+    type TR = record V: SmallInt; W: Word; end;
+    var R: TR; X: Integer;
+    procedure SetS(var X: SmallInt);
+    begin
+      X := -300
+    end;
+    procedure SetW(var X: Word);
+    begin
+      X := 60000
+    end;
+    procedure SetB(var X: Byte);
+    begin
+      X := 200
+    end;
+    var S: SmallInt; W: Word; B: Byte; L: Int64;
+    begin
+      WriteLn(SizeOf(SmallInt), ' ', SizeOf(Word));
+      R.V := -42;
+      R.W := 65000;
+      X := R.V;
+      WriteLn(X);
+      X := R.W;
+      WriteLn(X);
+      L := -1;
+      S := 0;
+      W := 0;
+      B := 0;
+      SetS(S);
+      L := S;
+      WriteLn(L);
+      SetW(W);
+      L := W;
+      WriteLn(L);
+      SetB(B);
+      L := B;
+      WriteLn(L)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '2 2' + LE +
+    '-42' + LE +
+    '65000' + LE +
+    '-300' + LE +
+    '60000' + LE +
+    '200' + LE, 0);
 end;
 
 initialization
