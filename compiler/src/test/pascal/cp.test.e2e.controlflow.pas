@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_BreakAndExit;
     procedure TestRun_Repeat_BodyRunsBeforeTest;
     procedure TestRun_For_BoundsAndDirection;
     procedure TestRun_IfElse_TakesEachBranch;
@@ -542,6 +543,58 @@ begin
   AssertRunsOnAll(Src,
     'once 1' + LE +
     '1 2 3 |' + LE, 0);
+end;
+
+procedure TE2EControlFlowTests.TestRun_BreakAndExit;
+const
+  {
+    break leaves the innermost for and while loop; exit leaves a function with
+    the Result set so far, or the main program; Exit(value) sets Result and
+    leaves.  Replaces the QBE IR checks in cp.test.flowjumps. }
+  Src = '''
+    program P;
+    function Abs1(X: Integer): Integer;
+    begin
+      if X < 0 then
+      begin
+        Result := 0 - X;
+        exit
+      end;
+      Result := X
+    end;
+    function Classify(N: Integer): Integer;
+    begin
+      if N < 0 then Exit(-1);
+      Result := 1
+    end;
+    var I: Integer;
+    begin
+      for I := 1 to 10 do
+      begin
+        if I > 3 then break;
+        Write(I, ' ')
+      end;
+      WriteLn('|');
+      I := 0;
+      while I < 100 do
+      begin
+        if I = 2 then break;
+        I := I + 1
+      end;
+      WriteLn('while ', I);
+      WriteLn(Abs1(-7), ' ', Abs1(5));
+      WriteLn(Classify(-3), ' ', Classify(4));
+      if I = 2 then exit;
+      WriteLn('not reached')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '1 2 3 |' + LE +
+    'while 2' + LE +
+    '7 5' + LE +
+    '-1 1' + LE, 0);
 end;
 
 initialization

@@ -14,14 +14,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TFlowJumpsTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     procedure TestLexer_Exit_Keyword;
@@ -31,17 +30,12 @@ type
     procedure TestSemantic_Break_OutsideLoop_RaisesError;
     procedure TestSemantic_Break_InsideFor_Resolves;
     procedure TestSemantic_Break_InsideWhile_Resolves;
-    procedure TestCodegen_Exit_EmitsJmpToExitLabel;
-    procedure TestCodegen_Break_InFor_EmitsJmpToLoopEnd;
-    procedure TestCodegen_Break_InWhile_EmitsJmpToLoopEnd;
-    procedure TestCodegen_Exit_FromFunction_JumpsToFuncExit;
 
     { Exit(Value) function-result shorthand }
     procedure TestParse_ExitValue_AttachesValue;
     procedure TestSemantic_ExitValue_InFunction_OK;
     procedure TestSemantic_ExitValue_InProcedure_RaisesError;
     procedure TestSemantic_ExitValue_TypeMismatch_RaisesError;
-    procedure TestCodegen_ExitValue_StoresResultThenJumps;
   end;
 
 implementation
@@ -60,16 +54,6 @@ begin
   Result := ParseSrc(ASrc);
   A := TSemanticAnalyser.Create();
   try A.Analyse(Result); finally A.Free(); end;
-end;
-
-function TFlowJumpsTests.GenIR(const ASrc: string): string;
-var Prog: TProgram; CG: TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try CG.Generate(Prog); Result := CG.GetOutput(); finally CG.Free(); end;
-  finally Prog.Free(); end;
 end;
 
 procedure TFlowJumpsTests.AnalyseExpectError(const ASrc: string);
@@ -248,35 +232,6 @@ begin
   try AssertNotNull(Prog); finally Prog.Free(); end;
 end;
 
-procedure TFlowJumpsTests.TestCodegen_Exit_EmitsJmpToExitLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcExit);
-  AssertTrue('emits jmp @main_exit', Pos('jmp @main_exit', IR) > 0);
-  AssertTrue('has @main_exit label', Pos('@main_exit', IR) > 0);
-end;
-
-procedure TFlowJumpsTests.TestCodegen_Break_InFor_EmitsJmpToLoopEnd;
-var IR: string;
-begin
-  IR := GenIR(SrcBreakInFor);
-  AssertTrue('emits jmp @for_end', Pos('jmp @for_end', IR) > 0);
-end;
-
-procedure TFlowJumpsTests.TestCodegen_Break_InWhile_EmitsJmpToLoopEnd;
-var IR: string;
-begin
-  IR := GenIR(SrcBreakInWhile);
-  AssertTrue('emits jmp @while_end', Pos('jmp @while_end', IR) > 0);
-end;
-
-procedure TFlowJumpsTests.TestCodegen_Exit_FromFunction_JumpsToFuncExit;
-var IR: string;
-begin
-  IR := GenIR(SrcExitFromFunc);
-  AssertTrue('emits func_exit label', Pos('@func_exit', IR) > 0);
-end;
-
 { -------------------------------------------------------------------- }
 { Exit(Value) function-result shorthand                                  }
 { -------------------------------------------------------------------- }
@@ -315,20 +270,6 @@ end;
 procedure TFlowJumpsTests.TestSemantic_ExitValue_TypeMismatch_RaisesError;
 begin
   AnalyseExpectError(SrcExitValueMismatch);
-end;
-
-procedure TFlowJumpsTests.TestCodegen_ExitValue_StoresResultThenJumps;
-var IR: string; StorePos, JmpPos: Integer;
-begin
-  { Exit(-1) lowers to 'Result := -1' (a store into %_var_Result) followed by
-    the exit jump to @func_exit. }
-  IR := GenIR(SrcExitValueFunc);
-  AssertTrue('stores into Result slot', Pos('%_var_Result', IR) > 0);
-  AssertTrue('jumps to func_exit', Pos('@func_exit', IR) > 0);
-  { The Result store must precede the exit jump in the first Exit path. }
-  StorePos := Pos('storew', IR);
-  JmpPos   := Pos('jmp @func_exit', IR);
-  AssertTrue('store precedes exit jump', (StorePos > 0) and (StorePos < JmpPos));
 end;
 
 initialization
