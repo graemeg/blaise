@@ -56,9 +56,6 @@ type
     procedure TestCodegen_Function_EmitsReturnType;
     procedure TestCodegen_Function_ReturnTypeW;
     procedure TestCodegen_Function_HasResultVar;
-    procedure TestCodegen_FunctionCall_EmitsCall;
-    procedure TestCodegen_FunctionCall_ResultLoaded;
-    procedure TestCodegen_Function_ReturnsResult;
   end;
 
 implementation
@@ -435,6 +432,8 @@ end;
 { Code generation                                                     }
 { ------------------------------------------------------------------ }
 
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TFunctionTests.TestCodegen_Function_EmitsReturnType;
 var
   IR: string;
@@ -444,6 +443,8 @@ begin
     Pos('function w $TBox_GetValue', IR) > 0);
 end;
 
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TFunctionTests.TestCodegen_Function_ReturnTypeW;
 var
   IR: string;
@@ -453,6 +454,8 @@ begin
     Pos('function w $TCalc_Add', IR) > 0);
 end;
 
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TFunctionTests.TestCodegen_Function_HasResultVar;
 var
   IR: string;
@@ -460,35 +463,6 @@ begin
   IR := GenIR(SrcGetterClass);
   AssertTrue('_var_Result allocated',
     Pos('%_var_Result', IR) > 0);
-end;
-
-procedure TFunctionTests.TestCodegen_FunctionCall_EmitsCall;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGetterClass);
-  AssertTrue('call to TBox_GetValue',
-    Pos('call $TBox_GetValue', IR) > 0);
-end;
-
-procedure TFunctionTests.TestCodegen_FunctionCall_ResultLoaded;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGetterClass);
-  { N is a program-level global; the call result is stored into $N }
-  AssertTrue('result stored into N',
-    Pos('$N', IR) > 0);
-end;
-
-procedure TFunctionTests.TestCodegen_Function_ReturnsResult;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGetterClass);
-  { Function must emit 'ret %_tN' (not just 'ret') }
-  AssertTrue('function has ret with value',
-    Pos('ret %_t', IR) > 0);
 end;
 
 initialization

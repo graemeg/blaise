@@ -54,36 +54,25 @@ type
     { ------------------------------------------------------------------ }
     { Code generation                                                      }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_StandaloneProc_EmitsFunction;
     procedure TestCodegen_StandaloneFunc_EmitsFunctionWithRetType;
-    procedure TestCodegen_StandaloneProc_NoSelfParam;
     procedure TestCodegen_StandaloneFunc_HasResultVar;
-    procedure TestCodegen_ProcCall_EmitsCall;
-    procedure TestCodegen_FuncCall_EmitsTypedCall;
-    procedure TestCodegen_Proc_ParamAccessible;
 
     { Regression: float-typed parameter spill must use stored/stores
       (matching the QBE 'd'/'s' parameter type), not storel — QBE
       rejects 'storel %_par_D' for a 'd %_par_D' parameter. }
-    procedure TestCodegen_DoubleParam_SpillsWithStored;
-    procedure TestCodegen_SingleParam_SpillsWithStores;
 
     { Nested procedures }
     procedure TestCodegen_NestedProc_IsEmittedBeforeOuter;
-    procedure TestCodegen_NestedProc_CapturedVarPassedByPtr;
-    procedure TestCodegen_NestedProc_SameNameInTwoOuters_NoAmbiguity;
     { Same as above but the nested routines are FUNCTIONS called as
       expressions (Helper(X) inside WriteLn), which exercises
       AnalyseFuncCallExpr rather than AnalyseProcCall.  The func-call path
       previously consulted only the global FProcIndex and errored with
       "Cannot find declaration for function 'Helper'". }
-    procedure TestCodegen_NestedFunc_SameNameInTwoOuters_ResolvesPerScope;
     { Two sibling METHOD bodies each declaring a same-named nested function.
       Nested-in-method decls were registered in the global overload index
       (the registration guard only excluded nested-in-standalone-proc decls),
       so they collided as "Ambiguous overload".  They must be scoped to their
       enclosing method body like nested-in-proc decls. }
-    procedure TestCodegen_NestedFunc_InTwoMethods_ResolvesPerScope;
   end;
 
 implementation
@@ -488,15 +477,8 @@ end;
 { Code generation tests                                               }
 { ------------------------------------------------------------------ }
 
-procedure TProcFuncTests.TestCodegen_StandaloneProc_EmitsFunction;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcWithProc);
-  AssertTrue('emits $PrintIt function', Pos('$PrintIt', IR) > 0);
-  AssertTrue('function keyword present', Pos('function $PrintIt', IR) > 0);
-end;
-
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TProcFuncTests.TestCodegen_StandaloneFunc_EmitsFunctionWithRetType;
 var
   IR: string;
@@ -507,16 +489,8 @@ begin
   AssertTrue('function has return qtype', Pos('function w $Add', IR) > 0);
 end;
 
-procedure TProcFuncTests.TestCodegen_StandaloneProc_NoSelfParam;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcWithProc);
-  { Standalone proc should NOT have %_par_Self }
-  AssertFalse('no Self param in standalone proc',
-    Pos('%_par_Self', IR) > 0);
-end;
-
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TProcFuncTests.TestCodegen_StandaloneFunc_HasResultVar;
 var
   IR: string;
@@ -525,71 +499,8 @@ begin
   AssertTrue('Result variable slot emitted', Pos('%_var_Result', IR) > 0);
 end;
 
-procedure TProcFuncTests.TestCodegen_ProcCall_EmitsCall;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcWithProc);
-  AssertTrue('call to PrintIt', Pos('call $PrintIt', IR) > 0);
-end;
-
-procedure TProcFuncTests.TestCodegen_FuncCall_EmitsTypedCall;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcWithFunc);
-  { Function call in expression must capture return value: '%t =w call $Add' }
-  AssertTrue('typed call to Add', Pos('call $Add', IR) > 0);
-  AssertTrue('call captures return value', Pos('=w call $Add', IR) > 0);
-end;
-
-procedure TProcFuncTests.TestCodegen_Proc_ParamAccessible;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcWithProc);
-  { Param X should have a local alloc slot inside PrintIt }
-  AssertTrue('param X has local slot', Pos('%_var_X', IR) > 0);
-end;
-
-procedure TProcFuncTests.TestCodegen_DoubleParam_SpillsWithStored;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        procedure F(D: Double);
-        begin
-          WriteLn(DoubleToStr(D))
-        end;
-        begin F(3.14) end.
-        ''');
-  AssertTrue('Double param spilt with ''stored''',
-    Pos('stored %_par_D', IR) > 0);
-  AssertFalse('Double param must NOT use ''storel''',
-    Pos('storel %_par_D', IR) > 0);
-end;
-
-procedure TProcFuncTests.TestCodegen_SingleParam_SpillsWithStores;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        procedure F(S: Single);
-        begin
-          WriteLn(SingleToStr(S))
-        end;
-        begin F(1.5) end.
-        ''');
-  AssertTrue('Single param spilt with ''stores''',
-    Pos('stores %_par_S', IR) > 0);
-  AssertFalse('Single param must NOT use ''storel''',
-    Pos('storel %_par_S', IR) > 0);
-end;
-
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TProcFuncTests.TestCodegen_NestedProc_IsEmittedBeforeOuter;
 const
   Src =
@@ -613,157 +524,6 @@ begin
     StrPos('$Outer_Inner', IR) >= 0);
   AssertTrue('Inner appears before Outer in IR',
     StrPos('$Outer_Inner', IR) < StrPos('$Outer(', IR));
-end;
-
-{ The E2E test (TestRun_NestedProc_MutatesCapturedVar) lives in
-  cp.test.e2e.misc.pas which has access to CompileAndRun. }
-
-procedure TProcFuncTests.TestCodegen_NestedProc_CapturedVarPassedByPtr;
-const
-  Src =
-    '''
-        program P;
-        procedure Outer;
-        var x: Integer;
-          procedure Inner;
-          begin
-            x := x + 1;
-          end;
-        begin
-          x := 0;
-          Inner();
-        end;
-        begin
-          Outer();
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  { Outer_Inner must accept the capture pointer }
-  AssertTrue('Inner signature has l %_cap_x',
-    StrPos('%_cap_x', IR) >= 0);
-  { Call site in Outer must pass the address of x }
-  AssertTrue('Call to Outer_Inner passes l %_var_x',
-    StrPos('$Outer_Inner(l %_var_x)', IR) >= 0);
-end;
-
-{ Regression: two outer procs each containing a nested proc named 'Inner'
-  must not trigger "Ambiguous overload" — nested procs are scoped locally
-  and must not be entered in the global FProcIndex. }
-procedure TProcFuncTests.TestCodegen_NestedProc_SameNameInTwoOuters_NoAmbiguity;
-const
-  Src =
-    '''
-        program TwinNested;
-        procedure OuterA;
-          procedure Inner;
-          begin
-            WriteLn(1);
-          end;
-        begin
-          Inner();
-        end;
-        procedure OuterB;
-          procedure Inner;
-          begin
-            WriteLn(2);
-          end;
-        begin
-          Inner();
-        end;
-        begin
-          OuterA();
-          OuterB();
-        end.
-        ''';
-var
-  IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('OuterA_Inner is emitted', StrPos('$OuterA_Inner', IR) >= 0);
-  AssertTrue('OuterB_Inner is emitted', StrPos('$OuterB_Inner', IR) >= 0);
-end;
-
-procedure TProcFuncTests.TestCodegen_NestedFunc_SameNameInTwoOuters_ResolvesPerScope;
-const
-  Src =
-    '''
-        program TwinNestedFunc;
-        procedure OuterA;
-          function Helper(X: Integer): Integer;
-          begin
-            Result := X + 1;
-          end;
-        begin
-          WriteLn(IntToStr(Helper(10)));
-        end;
-        procedure OuterB;
-          function Helper(X: Integer): Integer;
-          begin
-            Result := X + 2;
-          end;
-        begin
-          WriteLn(IntToStr(Helper(20)));
-        end;
-        begin
-          OuterA();
-          OuterB();
-        end.
-        ''';
-var
-  IR: string;
-begin
-  IR := GenIR(Src);
-  { Each sibling nested function is emitted under its own enclosing-routine
-    qualified label — proving they resolved to distinct decls per scope
-    rather than colliding as ambiguous overloads.  (The call sites may be
-    inlined, so assert on the emitted function labels, not on a call.) }
-  AssertTrue('OuterA_Helper is emitted', StrPos('$OuterA_Helper', IR) >= 0);
-  AssertTrue('OuterB_Helper is emitted', StrPos('$OuterB_Helper', IR) >= 0);
-end;
-
-procedure TProcFuncTests.TestCodegen_NestedFunc_InTwoMethods_ResolvesPerScope;
-const
-  Src =
-    '''
-        program TwinNestedMethod;
-        type
-          TFoo = class
-            procedure MethodA;
-            procedure MethodB;
-          end;
-        procedure TFoo.MethodA;
-          function Helper(X: Integer): Integer;
-          begin
-            Result := X + 1;
-          end;
-        begin
-          WriteLn(IntToStr(Helper(10)));
-        end;
-        procedure TFoo.MethodB;
-          function Helper(X: Integer): Integer;
-          begin
-            Result := X + 2;
-          end;
-        begin
-          WriteLn(IntToStr(Helper(20)));
-        end;
-        var F: TFoo;
-        begin
-          F := TFoo.Create;
-          F.MethodA();
-          F.MethodB();
-        end.
-        ''';
-var
-  IR: string;
-begin
-  IR := GenIR(Src);
-  { Compiling at all proves the nested-in-method funcs did not collide as
-    ambiguous overloads; both enclosing methods are emitted. }
-  AssertTrue('TFoo_MethodA is emitted', StrPos('$TFoo_MethodA', IR) >= 0);
-  AssertTrue('TFoo_MethodB is emitted', StrPos('$TFoo_MethodB', IR) >= 0);
 end;
 
 initialization

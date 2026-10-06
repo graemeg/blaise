@@ -23,6 +23,8 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_NestedRoutines_ScopeAndCapture;
+    procedure TestRun_Routines_CallsAndResults;
     procedure TestRun_Write_MultiArg_NewlineRules;
     procedure TestRun_BooleanOps_ShortCircuitAndNot;
     procedure TestRun_WriteLn_UInt64_HighBit_Unsigned;
@@ -2695,6 +2697,133 @@ begin
     '12|' + LE +
     'hi1' + LE +
     '' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_Routines_CallsAndResults;
+const
+  {
+    Standalone procedures and functions and methods are called with their
+    arguments, and a function's Result reaches the caller.  Replaces the QBE IR
+    checks in cp.test.procs and cp.test.functions; float parameters are covered
+    by TestRun_FloatArg_ConvertsToParamType. }
+  Src = '''
+    program P;
+    type
+      TBox = class
+        Value: Integer;
+        procedure SetValue(AVal: Integer);
+        function GetValue: Integer;
+      end;
+    procedure TBox.SetValue(AVal: Integer);
+    begin
+      Self.Value := AVal
+    end;
+    function TBox.GetValue: Integer;
+    begin
+      Result := Self.Value
+    end;
+    procedure PrintIt(X: Integer);
+    begin
+      WriteLn('print ', X)
+    end;
+    function Add(A, B: Integer): Integer;
+    var Tmp: Integer;
+    begin
+      Tmp := A + B;
+      Result := Tmp
+    end;
+    var Bx: TBox;
+    begin
+      Bx := TBox.Create();
+      Bx.SetValue(42);
+      WriteLn('box ', Bx.GetValue());
+      PrintIt(7);
+      WriteLn('add ', Add(3, -4))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'box 42' + LE +
+    'print 7' + LE +
+    'add -1' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_NestedRoutines_ScopeAndCapture;
+const
+  {
+    A nested routine updates its enclosing routine's local through the capture;
+    same-named nested functions in two routines, or in two methods, each resolve
+    to their own scope.  Replaces the QBE IR checks in cp.test.procs. }
+  Src = '''
+    program P;
+    type
+      TFoo = class
+        procedure MethodA;
+        procedure MethodB;
+      end;
+    procedure Outer;
+    var X: Integer;
+      procedure Inner;
+      begin
+        X := X + 1
+      end;
+    begin
+      X := 0;
+      Inner();
+      Inner();
+      WriteLn('captured ', X)
+    end;
+    procedure OuterA;
+      function Helper(X: Integer): Integer;
+      begin
+        Result := X + 1
+      end;
+    begin
+      WriteLn('A ', Helper(10))
+    end;
+    procedure OuterB;
+      function Helper(X: Integer): Integer;
+      begin
+        Result := X + 2
+      end;
+    begin
+      WriteLn('B ', Helper(20))
+    end;
+    procedure TFoo.MethodA;
+      function Helper(X: Integer): Integer;
+      begin
+        Result := X + 3
+      end;
+    begin
+      WriteLn('MA ', Helper(30))
+    end;
+    procedure TFoo.MethodB;
+      function Helper(X: Integer): Integer;
+      begin
+        Result := X + 4
+      end;
+    begin
+      WriteLn('MB ', Helper(40))
+    end;
+    var F: TFoo;
+    begin
+      Outer();
+      OuterA();
+      OuterB();
+      F := TFoo.Create;
+      F.MethodA();
+      F.MethodB()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'captured 2' + LE +
+    'A 11' + LE +
+    'B 22' + LE +
+    'MA 33' + LE +
+    'MB 44' + LE, 0);
 end;
 
 initialization
