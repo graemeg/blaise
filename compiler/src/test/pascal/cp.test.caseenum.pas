@@ -15,12 +15,11 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TCaseEnumTests = class(TTestCase)
   private
-    function GenIR(const ASrc: string): string;
     procedure SemanticOK(const ASrc: string);
     procedure ParseOK(const ASrc: string);
     { Analyse ASrc; return the raised semantic-error message, or '' if none. }
@@ -42,8 +41,6 @@ type
     { ------------------------------------------------------------------ }
     { case — codegen                                                       }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_Case_EmitsComparisons;
-    procedure TestCodegen_Case_ElseBranch;
 
     { ------------------------------------------------------------------ }
     { enum — parse                                                         }
@@ -61,9 +58,6 @@ type
     { ------------------------------------------------------------------ }
     { enum — codegen                                                       }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_Enum_MemberEmitsIntegerCopy;
-    procedure TestCodegen_Enum_AssignEmitsStore;
-    procedure TestCodegen_ScopedEnum_QualifiedMemberEmitsOrdinal;
     procedure TestSemantic_ScopedEnum_UnknownMemberRejected;
     procedure TestSemantic_ScopedEnum_SharedMemberCompiles;
     procedure TestSemantic_ScopedEnum_AssignmentDisambiguates;
@@ -74,15 +68,12 @@ type
     procedure TestSemantic_ScopedEnum_CallArgDisambiguates;
     procedure TestSemantic_ScopedEnum_CallArgResolvesCleanly;
     procedure TestSemantic_ScopedEnum_FieldAssignDisambiguates;
-    procedure TestCodegen_ScopedEnum_FieldAssignEmitsCorrectOrdinal;
     procedure TestSemantic_ScopedEnum_MethodArgDisambiguates;
-    procedure TestCodegen_ScopedEnum_CallArgEmitsCorrectOrdinal;
     procedure TestSemantic_ScopedEnum_ForBoundsDisambiguate;
 
     { ------------------------------------------------------------------ }
     { enum + case integration                                              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_Enum_In_Case_Compiles;
 
     { ------------------------------------------------------------------ }
     { enum — explicit ordinal values                                       }
@@ -91,16 +82,12 @@ type
     procedure TestParse_Enum_PartialExplicitOrdinals;
     procedure TestParse_Enum_ExplicitNegativeOrdinal;
     procedure TestSemantic_Enum_ExplicitOrdinals_CorrectValues;
-    procedure TestCodegen_Enum_ExplicitOrdinal_EmitsCorrectCopy;
-    procedure TestCodegen_Enum_AutoContinueAfterExplicit;
 
     { ------------------------------------------------------------------ }
     { case — string selector (Step 11f prerequisite)                       }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_CaseString_AcceptsStringSelector;
     procedure TestSemantic_CaseString_RejectsIntLabelOnStringSelector;
-    procedure TestCodegen_CaseString_EmitsStringEqualsCalls;
-    procedure TestCodegen_CaseString_OrdinalCaseStillUsesCEQW;
   end;
 
 implementation
@@ -204,28 +191,6 @@ const
 { Helpers                                                              }
 { ------------------------------------------------------------------ }
 
-function TCaseEnumTests.GenIR(const ASrc: string): string;
-var
-  Lex:  TLexer;
-  Par:  TParser;
-  SA:   TSemanticAnalyser;
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Lex  := TLexer.Create(ASrc);
-  Par  := TParser.Create(Lex);
-  Prog := Par.Parse();
-  Par.Free(); Lex.Free();
-  SA   := TSemanticAnalyser.Create();
-  SA.Analyse(Prog);
-  SA.Free();
-  CG   := TCodeGenQBE.Create();
-  CG.Generate(Prog);
-  Result := CG.GetOutput();
-  CG.Free();
-  Prog.Free();
-end;
-
 procedure TCaseEnumTests.SemanticOK(const ASrc: string);
 var
   Lex:  TLexer;
@@ -324,25 +289,6 @@ end;
 { case — codegen                                                       }
 { ------------------------------------------------------------------ }
 
-procedure TCaseEnumTests.TestCodegen_Case_EmitsComparisons;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCaseSimple);
-  { Each branch needs a comparison: ceqw selector, value }
-  AssertTrue('case emits ceqw comparisons', Pos('ceqw', IR) > 0);
-end;
-
-procedure TCaseEnumTests.TestCodegen_Case_ElseBranch;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCaseWithElse);
-  { else branch: jmp to default label }
-  AssertTrue('case+else produces IR', Length(IR) > 0);
-  AssertTrue('case+else emits ceqw', Pos('ceqw', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { enum — parse                                                         }
 { ------------------------------------------------------------------ }
@@ -397,35 +343,9 @@ end;
 { enum — codegen                                                       }
 { ------------------------------------------------------------------ }
 
-procedure TCaseEnumTests.TestCodegen_Enum_MemberEmitsIntegerCopy;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcEnumAssign);
-  { dSouth = ordinal 1 → should emit copy 1 }
-  AssertTrue('dSouth emits copy 1', Pos('copy 1', IR) > 0);
-end;
-
-procedure TCaseEnumTests.TestCodegen_Enum_AssignEmitsStore;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcEnumAssign);
-  AssertTrue('enum assign emits storew', Pos('storew', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { enum + case integration                                              }
 { ------------------------------------------------------------------ }
-
-procedure TCaseEnumTests.TestCodegen_Enum_In_Case_Compiles;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcEnumInCase);
-  AssertTrue('enum-in-case produces IR', Length(IR) > 0);
-  AssertTrue('enum-in-case emits ceqw', Pos('ceqw', IR) > 0);
-end;
 
 { ------------------------------------------------------------------ }
 { enum — explicit ordinal values                                       }
@@ -497,42 +417,6 @@ begin
   Prog.Free();
 end;
 
-procedure TCaseEnumTests.TestCodegen_Enum_ExplicitOrdinal_EmitsCorrectCopy;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TStatus = (Idle=10, Running=20, Done=30);
-        var S: TStatus;
-        begin
-          S := Running
-        end.
-        ''');
-  AssertTrue('Running=20 emits copy 20', Pos('copy 20', IR) > 0);
-  AssertTrue('Running does not emit positional copy 1', Pos('copy 1', IR) < 0);
-end;
-
-procedure TCaseEnumTests.TestCodegen_Enum_AutoContinueAfterExplicit;
-var
-  IR: string;
-begin
-  { A=100 → B auto-continues to 101, C to 102 }
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TCode = (A=100, B, C);
-        var X: TCode;
-        begin
-          X := B
-        end.
-        ''');
-  AssertTrue('B auto-continues to 101', Pos('copy 101', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { case — string selector                                               }
 { ------------------------------------------------------------------ }
@@ -580,62 +464,6 @@ begin
     on E: Exception do Raised := True;
   end;
   AssertTrue('integer literal label on string-typed selector rejected', Raised);
-end;
-
-procedure TCaseEnumTests.TestCodegen_CaseString_EmitsStringEqualsCalls;
-const
-  Src =
-    '''
-        program P;
-        var S: string; R: Integer;
-        begin
-          S := 'foo';
-          case S of
-            'bar': R := 1;
-            'foo': R := 2
-          else
-            R := 99
-          end
-        end.
-        ''';
-var
-  IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('string case emits _StringEquals call',
-    Pos('call $_StringEquals(', IR) > 0);
-end;
-
-procedure TCaseEnumTests.TestCodegen_CaseString_OrdinalCaseStillUsesCEQW;
-{ Regression: the new string-case codegen must not affect the ordinal
-  case path.  Use the existing SrcCaseSimple fixture. }
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCaseSimple);
-  AssertTrue('integer case still emits ceqw', Pos('ceqw', IR) > 0);
-  AssertTrue('integer case does NOT emit _StringEquals',
-    Pos('_StringEquals', IR) < 0);
-end;
-
-procedure TCaseEnumTests.TestCodegen_ScopedEnum_QualifiedMemberEmitsOrdinal;
-const
-  Src =
-    '''
-        program P;
-        type TDir = (dN, dE, dS, dW);
-        var x: Integer;
-        begin
-          x := Ord(TDir.dS)
-        end.
-        ''';
-var
-  IR: string;
-begin
-  IR := GenIR(Src);
-  { TDir.dS is the third member (ordinal 2); the type-qualified reference must
-    resolve to that member and emit copy 2, exactly as the bare dS would. }
-  AssertTrue('TDir.dS emits copy 2', Pos('copy 2', IR) > 0);
 end;
 
 procedure TCaseEnumTests.TestSemantic_ScopedEnum_UnknownMemberRejected;
@@ -835,30 +663,6 @@ begin
     SemanticErrText(Src));
 end;
 
-procedure TCaseEnumTests.TestCodegen_ScopedEnum_CallArgEmitsCorrectOrdinal;
-const
-  { Red is ordinal 0 in TColorA but ordinal 1 in TColorB; the call target's
-    parameter type must select TColorB.Red so the argument lowers to copy 1. }
-  Src =
-    '''
-        program P;
-        type
-          TColorA = (Red, Green);
-          TColorB = (Amber, Red);
-        procedure TakeB(c: TColorB);
-        begin WriteLn(Ord(c)) end;
-        begin
-          TakeB(Red)
-        end.
-        ''';
-var
-  IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('TakeB(Red) selects TColorB.Red and emits copy 1',
-    Pos('copy 1', IR) > 0);
-end;
-
 procedure TCaseEnumTests.TestSemantic_ScopedEnum_FieldAssignDisambiguates;
 const
   { Assigning a bare shared member to a record field is disambiguated by the
@@ -879,30 +683,6 @@ const
         ''';
 begin
   SemanticOK(Src);
-end;
-
-procedure TCaseEnumTests.TestCodegen_ScopedEnum_FieldAssignEmitsCorrectOrdinal;
-const
-  { Red is ordinal 0 in TColorA but ordinal 1 in TColorB; the field's type
-    selects TColorB.Red, so the assignment lowers to copy 1. }
-  Src =
-    '''
-        program P;
-        type
-          TColorA = (Red, Green);
-          TColorB = (Amber, Red);
-          TRec = record c: TColorB; end;
-        var r: TRec;
-        begin
-          r.c := Red
-        end.
-        ''';
-var
-  IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('r.c := Red selects TColorB.Red and emits copy 1',
-    Pos('copy 1', IR) > 0);
 end;
 
 procedure TCaseEnumTests.TestSemantic_ScopedEnum_MethodArgDisambiguates;

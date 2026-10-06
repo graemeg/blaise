@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Case_SelectsBranch;
     procedure TestRun_BreakAndExit;
     procedure TestRun_Repeat_BodyRunsBeforeTest;
     procedure TestRun_For_BoundsAndDirection;
@@ -595,6 +596,81 @@ begin
     'while 2' + LE +
     '7 5' + LE +
     '-1 1' + LE, 0);
+end;
+
+procedure TE2EControlFlowTests.TestRun_Case_SelectsBranch;
+const
+  {
+    case selects the matching branch or else, for Integer, enum and string
+    selectors; enum ordinals honour explicit values and continue after them; a
+    member name shared by two enums resolves by the target type (parameter,
+    record field) or by qualification.  Replaces the QBE IR checks in
+    cp.test.caseenum. }
+  Src = '''
+    program P;
+    type
+      TState = (sIdle, sRunning, sDone);
+      TStatus = (Idle=10, Running=20, Done=30);
+      TCode = (cA=100, cB, cC);
+      TDir = (dN, dE, dS, dW);
+      TColorA = (Red, Green);
+      TColorB = (Amber, Red);
+      TRec = record c: TColorB; end;
+    procedure Pick(N: Integer);
+    begin
+      case N of
+        1: WriteLn('one');
+        2: WriteLn('two')
+      else
+        WriteLn('other ', N)
+      end
+    end;
+    procedure Named(const S: string);
+    begin
+      case S of
+        'bar': WriteLn('B');
+        'foo': WriteLn('F')
+      else
+        WriteLn('?')
+      end
+    end;
+    procedure TakeB(c: TColorB);
+    begin
+      WriteLn('takeB ', Ord(c))
+    end;
+    var St: TState; R: TRec;
+    begin
+      Pick(1);
+      Pick(2);
+      Pick(5);
+      St := sRunning;
+      case St of
+        sIdle: WriteLn('idle');
+        sRunning: WriteLn('running');
+        sDone: WriteLn('done')
+      end;
+      Named('foo');
+      Named('bar');
+      Named('baz');
+      WriteLn(Ord(Running), ' ', Ord(cB), ' ', Ord(cC), ' ', Ord(TDir.dS));
+      TakeB(Red);
+      R.c := Red;
+      WriteLn('field ', Ord(R.c))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'one' + LE +
+    'two' + LE +
+    'other 5' + LE +
+    'running' + LE +
+    'F' + LE +
+    'B' + LE +
+    '?' + LE +
+    '20 101 102 2' + LE +
+    'takeB 1' + LE +
+    'field 1' + LE, 0);
 end;
 
 initialization
