@@ -285,12 +285,12 @@ found, for a ruling before they are migrated.
 | `cp.test.weakref.pas` | 10 | pending
 | `cp.test.varparams.pas` | 10 | pending
 | `cp.test.varinit.pas` | 10 | pending
-| `cp.test.tdictionary.pas` | 10 | pending
+| `cp.test.tdictionary.pas` | 10 | done: 8 behaviour (e2e)
 | `cp.test.smallint_word.pas` | 10 | done: 8 behaviour (e2e)
 | `cp.test.properties.pas` | 10 | pending
-| `cp.test.tordereddictionary.pas` | 9 | pending
+| `cp.test.tordereddictionary.pas` | 9 | done: 7 behaviour (e2e)
 | `cp.test.publishedrtti.pas` | 9 | pending
-| `cp.test.imap.pas` | 9 | pending
+| `cp.test.imap.pas` | 9 | done: 7 behaviour (e2e)
 | `cp.test.classof.pas` | 9 | pending
 | `cp.test.repeatloop.pas` | 8 | done: 6 behaviour (e2e)
 | `cp.test.methods.pas` | 8 | pending
@@ -299,25 +299,25 @@ found, for a ruling before they are migrated.
 | `cp.test.genericfuncs.pas` | 8 | pending
 | `cp.test.functions.pas` | 8 | done: 3 behaviour (e2e), 3 QBE-only
 | `cp.test.arrayofconst.pas` | 8 | pending
-| `cp.test.tstack.pas` | 7 | pending
-| `cp.test.tqueue.pas` | 7 | pending
-| `cp.test.tlist.pas` | 7 | pending
-| `cp.test.strutils.pas` | 7 | pending
+| `cp.test.tstack.pas` | 7 | done: 5 behaviour (e2e)
+| `cp.test.tqueue.pas` | 7 | done: 5 behaviour (e2e)
+| `cp.test.tlist.pas` | 7 | done: 5 behaviour (e2e)
+| `cp.test.strutils.pas` | 7 | done: 5 behaviour (existing e2e)
 | `cp.test.sizeof.pas` | 7 | done: 5 behaviour (e2e)
 | `cp.test.pchar.pas` | 7 | done: 2 behaviour (e2e), 2 code-gen (GenAsm), 1 QBE-only
 | `cp.test.multiwrite.pas` | 7 | done: 5 behaviour (e2e)
 | `cp.test.genericdefaults.pas` | 7 | pending
 | `cp.test.flowjumps.pas` | 7 | done: 5 behaviour (e2e)
 | `cp.test.booleanops.pas` | 7 | done: 5 behaviour (e2e)
-| `cp.test.tset.pas` | 6 | pending
+| `cp.test.tset.pas` | 6 | done: 4 behaviour (e2e)
 | `cp.test.sar.pas` | 6 | done: 4 behaviour (e2e)
 | `cp.test.operators.pas` | 6 | done: 4 behaviour (e2e)
 | `cp.test.genericmethodimpls.pas` | 6 | pending
 | `cp.test.defaultargs.pas` | 6 | done: 4 behaviour (e2e)
 | `cp.test.charcast.pas` | 6 | done: 4 behaviour (e2e)
-| `cp.test.streams.pas` | 5 | pending
+| `cp.test.streams.pas` | 5 | done: 3 behaviour (existing e2e)
 | `cp.test.math.pas` | 5 | done: 3 behaviour (e2e); see GenIRBuiltin below
-| `cp.test.genericforin.pas` | 5 | pending
+| `cp.test.genericforin.pas` | 5 | done: 3 behaviour (e2e)
 | `cp.test.varargs.pas` | 4 | done: 2 behaviour (e2e)
 | `cp.test.numerics.money.pas` | 4 | pending
 | `cp.test.numerics.decimal.pas` | 4 | pending
