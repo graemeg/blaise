@@ -16,26 +16,18 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TTOrderedDictionaryTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     procedure TestSemantic_OrdDict_Instantiates;
     procedure TestSemantic_OrdDict_Add_ContainsKey_Compiles;
     procedure TestSemantic_OrdDict_TryGetValue_Compiles;
     procedure TestSemantic_OrdDict_Remove_Compiles;
     procedure TestSemantic_OrdDict_IndexedAccess_Compiles;
-    procedure TestCodegen_OrdDict_TypeInfoEmitted;
-    procedure TestCodegen_OrdDict_AddEmitted;
-    procedure TestCodegen_OrdDict_TryGetValueEmitted;
-    procedure TestCodegen_OrdDict_ContainsKeyEmitted;
-    procedure TestCodegen_OrdDict_RemoveEmitted;
-    procedure TestCodegen_OrdDict_GetKeyEmitted;
-    procedure TestCodegen_OrdDict_GetValueEmitted;
   end;
 
 implementation
@@ -288,22 +280,6 @@ begin
   end;
 end;
 
-function TTOrderedDictionaryTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
-  end;
-end;
-
 procedure TTOrderedDictionaryTests.TestSemantic_OrdDict_Instantiates;
 var
   Prog: TProgram;
@@ -342,69 +318,6 @@ var
 begin
   Prog := AnalyseSrc(SrcIndexed);
   Prog.Free();
-end;
-
-procedure TTOrderedDictionaryTests.TestCodegen_OrdDict_TypeInfoEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCreate);
-  AssertTrue('TOrderedDictionary typeinfo emitted',
-    Pos('typeinfo_TOrderedDictionary_Integer_Integer', IR) >= 0);
-end;
-
-procedure TTOrderedDictionaryTests.TestCodegen_OrdDict_AddEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcAddGet);
-  AssertTrue('Add body emitted',
-    Pos('$TOrderedDictionary_Integer_Integer_Add', IR) >= 0);
-end;
-
-procedure TTOrderedDictionaryTests.TestCodegen_OrdDict_TryGetValueEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTryGet);
-  AssertTrue('TryGetValue body emitted',
-    Pos('$TOrderedDictionary_Integer_Integer_TryGetValue', IR) >= 0);
-end;
-
-procedure TTOrderedDictionaryTests.TestCodegen_OrdDict_ContainsKeyEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcAddGet);
-  AssertTrue('ContainsKey body emitted',
-    Pos('$TOrderedDictionary_Integer_Integer_ContainsKey', IR) >= 0);
-end;
-
-procedure TTOrderedDictionaryTests.TestCodegen_OrdDict_RemoveEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcRemove);
-  AssertTrue('Remove body emitted',
-    Pos('$TOrderedDictionary_Integer_Integer_Remove', IR) >= 0);
-end;
-
-procedure TTOrderedDictionaryTests.TestCodegen_OrdDict_GetKeyEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcIndexed);
-  AssertTrue('GetKey body emitted',
-    Pos('$TOrderedDictionary_Integer_Integer_GetKey', IR) >= 0);
-end;
-
-procedure TTOrderedDictionaryTests.TestCodegen_OrdDict_GetValueEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcIndexed);
-  AssertTrue('GetValue body emitted',
-    Pos('$TOrderedDictionary_Integer_Integer_GetValue', IR) >= 0);
 end;
 
 initialization

@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_TOrderedDictionary_KeepsInsertionOrder;
     procedure TestRun_TDictionary_AddLookupUpdateRemove;
     procedure TestRun_TSet_IncludeExcludeContains;
     procedure TestRun_StackQueueList_OrderAcrossGrow;
@@ -851,6 +852,41 @@ begin
     'got 1200' + LE +
     'no 42' + LE +
     '19 False 1300' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_TOrderedDictionary_KeepsInsertionOrder;
+const
+  {
+    TOrderedDictionary keeps insertion order through GetKey/GetValue, an update
+    through the default property keeps the key's position, and Remove/TryGetValue
+    work.  Replaces the QBE IR checks in cp.test.tordereddictionary. }
+  Src = '''
+    program P;
+    uses Generics.Collections;
+    var D: TOrderedDictionary<Integer, Integer>; I, V: Integer;
+    begin
+      D := TOrderedDictionary<Integer, Integer>.Create();
+      D.Add(30, 3);
+      D.Add(10, 1);
+      D.Add(20, 2);
+      for I := 0 to D.Count - 1 do
+        Write(D.GetKey(I), '=', D.GetValue(I), ' ');
+      WriteLn('');
+      D[10] := 11;
+      for I := 0 to D.Count - 1 do
+        Write(D.GetKey(I), '=', D.GetValue(I), ' ');
+      WriteLn('');
+      D.Remove(30);
+      if D.TryGetValue(20, V) then
+        WriteLn(D.Count, ' ', V, ' ', D.ContainsKey(30))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '30=3 10=1 20=2 ' + LE +
+    '30=3 10=11 20=2 ' + LE +
+    '2 2 False' + LE, 0);
 end;
 
 initialization
