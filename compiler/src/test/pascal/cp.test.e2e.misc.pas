@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_DefaultArgs_Materialised;
     procedure TestRun_IntToStr_FollowsSignedness;
     procedure TestRun_PChar_StringRoundTrip;
     procedure TestRun_File_BinaryRoundTrip;
@@ -2931,6 +2932,58 @@ begin
     '4000000000' + LE +
     '-9000000000' + LE +
     '-7' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_DefaultArgs_Materialised;
+const
+  {
+    An omitted default argument is passed as its declared value: for a method
+    call, an implicit-Self call, a standalone procedure, and a default in the
+    7th integer slot (passed on the stack on x86-64).  Replaces the QBE IR checks
+    in cp.test.defaultargs. }
+  Src = '''
+    program P;
+    type
+      TFoo = class
+      public
+        procedure M(A: Integer; B: Integer = 4242);
+        procedure M7(A, B, C, D, E: Integer; F: Integer = 7777);
+        procedure Caller;
+      end;
+    procedure TFoo.M(A: Integer; B: Integer = 4242);
+    begin
+      WriteLn(A + B)
+    end;
+    procedure TFoo.M7(A, B, C, D, E: Integer; F: Integer = 7777);
+    begin
+      WriteLn(A + B + C + D + E, ' ', F)
+    end;
+    procedure TFoo.Caller;
+    begin
+      M(2)
+    end;
+    procedure Q(A: Integer; B: Integer = 6363);
+    begin
+      WriteLn(A + B)
+    end;
+    var F: TFoo;
+    begin
+      F := TFoo.Create();
+      F.M(1);
+      F.M(1, 2);
+      F.M7(1, 2, 3, 4, 5);
+      F.Caller();
+      Q(1)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '4243' + LE +
+    '3' + LE +
+    '15 7777' + LE +
+    '4244' + LE +
+    '6364' + LE, 0);
 end;
 
 initialization
