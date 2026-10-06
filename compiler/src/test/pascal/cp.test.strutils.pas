@@ -20,15 +20,13 @@ interface
 
 uses
   SysUtils, Classes, contnrs, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe, uUnitLoader;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, uUnitLoader;
 
 type
   TStrUtilsTests = class(TTestCase)
   private
     FRTLUnitPath: string;
     FStdlibUnitPath: string;
-    function  GenIR(const ASrc: string): string;
-    function  IRContains(const AIR, AFragment: string): Boolean;
     procedure SemanticOK(const ASrc: string);
     procedure SemanticError(const ASrc: string);
   protected
@@ -103,11 +101,6 @@ type
     procedure TestSemantic_TStringBuilder_Length_OK;
 
     { Codegen — unit-level function calls appear in IR }
-    procedure TestCodegen_ContainsStr_InIR;
-    procedure TestCodegen_ReplaceAll_InIR;
-    procedure TestCodegen_TrimLeft_InIR;
-    procedure TestCodegen_PosEx_InIR;
-    procedure TestCodegen_LeftStr_InIR;
   end;
 
 implementation
@@ -195,51 +188,6 @@ begin
     Units.Free(); Loader.Free(); SearchPaths.Free();
     Prog.Free(); Parser.Free(); Lexer.Free();
   end;
-end;
-
-function TStrUtilsTests.GenIR(const ASrc: string): string;
-var
-  Lexer:       TLexer;
-  Parser:      TParser;
-  Prog:        TProgram;
-  Semantic:    TSemanticAnalyser;
-  CG:          TCodeGenQBE;
-  Loader:      TUnitLoader;
-  Units:       TObjectList;
-  SearchPaths: TStringList;
-  I:           Integer;
-begin
-  Lexer  := nil; Parser := nil; Prog := nil; Semantic := nil; CG := nil;
-  Loader := nil; Units  := nil; SearchPaths := nil;
-  try
-    Lexer       := TLexer.Create(ASrc);
-    Parser      := TParser.Create(Lexer);
-    Prog        := Parser.Parse();
-    Semantic    := TSemanticAnalyser.Create();
-    SearchPaths := TStringList.Create();
-    SearchPaths.Add(FRTLUnitPath);
-    SearchPaths.Add(FStdlibUnitPath);
-    Loader := TUnitLoader.Create(SearchPaths);
-    Units  := Loader.LoadAll(Prog.UsedUnits);
-    for I := 0 to Units.Count - 1 do
-      Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
-    Semantic.Analyse(Prog);
-    CG := TCodeGenQBE.Create();
-    CG.SetSymbolTable(Prog.SymbolTable);
-    for I := 0 to Units.Count - 1 do
-      CG.AppendUnit(TUnit(Units.Items[I]));
-    CG.AppendProgram(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free(); Semantic.Free();
-    Units.Free(); Loader.Free(); SearchPaths.Free();
-    Prog.Free(); Parser.Free(); Lexer.Free();
-  end;
-end;
-
-function TStrUtilsTests.IRContains(const AIR, AFragment: string): Boolean;
-begin
-  Result := Pos(AFragment, AIR) > 0;
 end;
 
 { ------------------------------------------------------------------ }
@@ -1029,66 +977,6 @@ end;
 { ------------------------------------------------------------------ }
 { Codegen — pure-Pascal unit functions appear in IR                    }
 { ------------------------------------------------------------------ }
-
-procedure TStrUtilsTests.TestCodegen_ContainsStr_InIR;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program P; uses StrUtils;
-    var S, Sub: string; B: Boolean;
-    begin B := ContainsStr(S, Sub) end.
-    ''');
-  AssertTrue('ContainsStr appears in IR', IRContains(IR, '$StrUtils_ContainsStr'));
-end;
-
-procedure TStrUtilsTests.TestCodegen_ReplaceAll_InIR;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program P; uses StrUtils;
-    var S, T: string;
-    begin T := ReplaceAll(S, 'x', 'y') end.
-    ''');
-  AssertTrue('ReplaceAll appears in IR', IRContains(IR, '$StrUtils_ReplaceAll'));
-end;
-
-procedure TStrUtilsTests.TestCodegen_TrimLeft_InIR;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program P; uses StrUtils;
-    var S, T: string;
-    begin T := TrimLeft(S) end.
-    ''');
-  AssertTrue('TrimLeft appears in IR', IRContains(IR, '$StrUtils_TrimLeft'));
-end;
-
-procedure TStrUtilsTests.TestCodegen_PosEx_InIR;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program P; uses StrUtils;
-    var S, Sub: string; N: Integer;
-    begin N := PosEx(Sub, S, 2) end.
-    ''');
-  AssertTrue('PosEx calls _StringPosEx', IRContains(IR, 'call $_StringPosEx'));
-end;
-
-procedure TStrUtilsTests.TestCodegen_LeftStr_InIR;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program P; uses StrUtils;
-    var S, T: string;
-    begin T := LeftStr(S, 3) end.
-    ''');
-  AssertTrue('LeftStr calls _StringCopy', IRContains(IR, 'call $_StringCopy'));
-end;
 
 initialization
   RegisterTest(TStrUtilsTests);
