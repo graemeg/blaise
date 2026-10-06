@@ -15,22 +15,17 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TTSetTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     procedure TestSemantic_TSet_Instantiates;
     procedure TestSemantic_TSet_Include_Compiles;
     procedure TestSemantic_TSet_Exclude_Compiles;
     procedure TestSemantic_TSet_Contains_Compiles;
-    procedure TestCodegen_TSet_TypeInfoEmitted;
-    procedure TestCodegen_TSet_IncludeEmitsStore;
-    procedure TestCodegen_TSet_ContainsEmitsLoad;
-    procedure TestCodegen_TSet_GrowEmitsRealloc;
   end;
 
 implementation
@@ -209,22 +204,6 @@ begin
   end;
 end;
 
-function TTSetTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
-  end;
-end;
-
 procedure TTSetTests.TestSemantic_TSet_Instantiates;
 var
   Prog: TProgram;
@@ -255,46 +234,6 @@ var
 begin
   Prog := AnalyseSrc(SrcContains);
   Prog.Free();
-end;
-
-procedure TTSetTests.TestCodegen_TSet_TypeInfoEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCreate);
-  AssertTrue('TSet typeinfo emitted',
-    Pos('typeinfo_TSet_Integer', IR) >= 0);
-end;
-
-procedure TTSetTests.TestCodegen_TSet_IncludeEmitsStore;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcInclude);
-  AssertTrue('Include method body emitted',
-    Pos('$TSet_Integer_Include', IR) >= 0);
-  AssertTrue('Include emits storew for Integer element',
-    Pos('storew', IR) >= 0);
-end;
-
-procedure TTSetTests.TestCodegen_TSet_ContainsEmitsLoad;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcContains);
-  AssertTrue('Contains method body emitted',
-    Pos('$TSet_Integer_Contains', IR) >= 0);
-  AssertTrue('Contains/IndexOf emits loadw for Integer element',
-    Pos('loadw', IR) >= 0);
-end;
-
-procedure TTSetTests.TestCodegen_TSet_GrowEmitsRealloc;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcInclude);
-  AssertTrue('Grow emits _BlaiseReallocMem call',
-    Pos('call $_BlaiseReallocMem', IR) >= 0);
 end;
 
 initialization

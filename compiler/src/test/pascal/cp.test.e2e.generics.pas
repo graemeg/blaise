@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_TSet_IncludeExcludeContains;
     procedure TestRun_StackQueueList_OrderAcrossGrow;
     { Generic free functions }
     procedure TestRun_GenericFunc_IntAndString;
@@ -781,6 +782,39 @@ begin
     '10 100 10: 100 90 80 70 60 50 40 30 20 10' + LE +
     '10 1 10: 1 2 3 4 5 6 7 8 9 10' + LE +
     '20 0 361 49' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_TSet_IncludeExcludeContains;
+const
+  {
+    TSet<Integer> ignores duplicate Includes, Excludes a member (and a
+    non-member harmlessly), and answers Contains, across a Grow and hash rebuild
+    (20 elements).  Replaces the QBE IR checks in cp.test.tset. }
+  Src = '''
+    program P;
+    uses Generics.Collections;
+    var S: TSet<Integer>; I, N: Integer;
+    begin
+      S := TSet<Integer>.Create();
+      for I := 1 to 20 do
+        S.Include(I);
+      S.Include(5);
+      S.Include(20);
+      WriteLn(S.Count, ' ', S.Contains(7), ' ', S.Contains(21));
+      S.Exclude(7);
+      S.Exclude(99);
+      N := 0;
+      for I := 1 to 20 do
+        if S.Contains(I) then
+          N := N + 1;
+      WriteLn(S.Count, ' ', S.Contains(7), ' ', N)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '20 True False' + LE +
+    '19 False 19' + LE, 0);
 end;
 
 initialization
