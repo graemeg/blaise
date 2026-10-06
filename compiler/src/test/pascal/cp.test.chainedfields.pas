@@ -14,21 +14,18 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TChainedFieldTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     procedure TestParse_TwoDots_HasBase;
     procedure TestParse_ThreeDots_HasNestedBases;
     procedure TestSemantic_RecordChain_ResolvesToInnerType;
     procedure TestSemantic_ClassFieldThenRecordField_Resolves;
-    procedure TestCodegen_RecordChain_EmitsLoadw;
-    procedure TestCodegen_ImplicitSelfChain_LoadsThroughSelf;
   end;
 
 implementation
@@ -47,16 +44,6 @@ begin
   Result := ParseSrc(ASrc);
   A := TSemanticAnalyser.Create();
   try A.Analyse(Result); finally A.Free(); end;
-end;
-
-function TChainedFieldTests.GenIR(const ASrc: string): string;
-var Prog: TProgram; CG: TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try CG.Generate(Prog); Result := CG.GetOutput(); finally CG.Free(); end;
-  finally Prog.Free(); end;
 end;
 
 const
@@ -157,51 +144,6 @@ var Prog: TProgram;
 begin
   Prog := AnalyseSrc(SrcClassFieldOfRecord);
   try AssertNotNull(Prog); finally Prog.Free(); end;
-end;
-
-procedure TChainedFieldTests.TestCodegen_RecordChain_EmitsLoadw;
-var IR: string;
-begin
-  IR := GenIR(SrcTwoDeep);
-  AssertTrue('emits loadw for inner integer field',
-    Pos('loadw', IR) > 0);
-end;
-
-{ Regression: a chained field access whose leftmost identifier is an implicit
-  Self field (e.g. FField.SubField.Property inside a method) must load the
-  base through %_var_Self, not through a phantom %_var_FField local.        }
-procedure TChainedFieldTests.TestCodegen_ImplicitSelfChain_LoadsThroughSelf;
-const
-  Src =
-    '''
-        program P;
-        type
-          TLeaf = class
-            Value: Integer;
-          end;
-          TInner = class
-            Leaf: TLeaf;
-          end;
-          TOuter = class
-            FInner: TInner;
-            procedure Work;
-          end;
-        procedure TOuter.Work;
-        var I, K: Integer;
-        begin
-          K := 0;
-          for I := 0 to FInner.Leaf.Value - 1 do K := K + 1;
-        end;
-        begin
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('does not emit phantom %_var_FInner',
-    Pos('%_var_FInner', IR) < 0);
-  AssertTrue('loads through %_var_Self',
-    Pos('loadl %_var_Self', IR) > 0);
 end;
 
 initialization

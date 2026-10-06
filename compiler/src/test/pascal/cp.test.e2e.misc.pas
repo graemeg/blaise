@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_ChainedFields_ReadThroughEveryLevel;
     procedure TestRun_DefaultArgs_Materialised;
     procedure TestRun_IntToStr_FollowsSignedness;
     procedure TestRun_PChar_StringRoundTrip;
@@ -2984,6 +2985,49 @@ begin
     '15 7777' + LE +
     '4244' + LE +
     '6364' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_ChainedFields_ReadThroughEveryLevel;
+const
+  {
+    A chained field read goes through every level: record-in-record, and an
+    implicit-Self class chain used as a for-loop bound.  Replaces the QBE IR
+    checks in cp.test.chainedfields. }
+  Src = '''
+    program P;
+    type
+      TInner = record Value: Integer; end;
+      TOuter = record Inner: TInner; end;
+      TLeaf = class Value: Integer; end;
+      TMid = class Leaf: TLeaf; end;
+      TTop = class
+        FInner: TMid;
+        function Work: Integer;
+      end;
+    function TTop.Work: Integer;
+    var I, K: Integer;
+    begin
+      K := 0;
+      for I := 0 to FInner.Leaf.Value - 1 do
+        K := K + 1;
+      Result := K
+    end;
+    var O: TOuter; T: TTop;
+    begin
+      O.Inner.Value := 17;
+      WriteLn(O.Inner.Value);
+      T := TTop.Create();
+      T.FInner := TMid.Create();
+      T.FInner.Leaf := TLeaf.Create();
+      T.FInner.Leaf.Value := 4;
+      WriteLn(T.Work())
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '17' + LE +
+    '4' + LE, 0);
 end;
 
 initialization
