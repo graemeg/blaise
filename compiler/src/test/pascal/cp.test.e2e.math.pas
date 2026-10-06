@@ -29,6 +29,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_MinMaxSign;
     { --- Compiler builtins --- }
 
     { Sqrt }
@@ -1836,6 +1837,31 @@ begin
         WriteLn('sci-ok')
     end.
     ''', '1.25' + Chr(10) + 'sci-ok' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_MinMaxSign;
+const
+  {
+    Math's Min, Max and Sign on Integer and Double values.  Replaces the QBE IR
+    checks in cp.test.math. }
+  Src = '''
+    program P;
+    uses Math;
+    var A, B, Z: Integer; X, Y: Double;
+    begin
+      A := -3; B := 5; Z := 0;
+      WriteLn(Min(A, B), ' ', Max(A, B));
+      X := 1.5; Y := -2.25;
+      WriteLn(DoubleToStr(Max(X, Y)), ' ', DoubleToStr(Min(X, Y)));
+      WriteLn(Sign(A), ' ', Sign(B), ' ', Sign(Z))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '-3 5' + LE +
+    '1.5 -2.25' + LE +
+    '-1 1 0' + LE, 0);
 end;
 
 initialization

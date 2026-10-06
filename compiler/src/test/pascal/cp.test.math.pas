@@ -28,7 +28,6 @@ type
   private
     FRTLUnitPath: string;
     FStdlibUnitPath: string;
-    function  GenIR(const ASrc: string): string;
     function  GenIRBuiltin(const ASrc: string): string;
     function  IRContains(const AIR, AFragment: string): Boolean;
     procedure SemanticOK(const ASrc: string);
@@ -160,9 +159,6 @@ type
     procedure TestSemantic_Pi_UsableInExpr;
 
     { Codegen — RTL functions appear in IR }
-    procedure TestCodegen_Min_InIR;
-    procedure TestCodegen_Max_InIR;
-    procedure TestCodegen_Sign_InIR;
 
     { Float → Integer assignment must be rejected }
     procedure TestSemantic_Assign_DoubleToInteger_Rejected;
@@ -275,47 +271,6 @@ begin
     end;
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
-  end;
-end;
-
-{ Generate IR with RTL unit loader. }
-function TMathTests.GenIR(const ASrc: string): string;
-var
-  Lexer:       TLexer;
-  Parser:      TParser;
-  Prog:        TProgram;
-  Semantic:    TSemanticAnalyser;
-  CG:          TCodeGenQBE;
-  Loader:      TUnitLoader;
-  Units:       TObjectList;
-  SearchPaths: TStringList;
-  I:           Integer;
-begin
-  Lexer  := nil; Parser := nil; Prog := nil; Semantic := nil; CG := nil;
-  Loader := nil; Units  := nil; SearchPaths := nil;
-  try
-    Lexer       := TLexer.Create(ASrc);
-    Parser      := TParser.Create(Lexer);
-    Prog        := Parser.Parse();
-    Semantic    := TSemanticAnalyser.Create();
-    SearchPaths := TStringList.Create();
-    SearchPaths.Add(FRTLUnitPath);
-    SearchPaths.Add(FStdlibUnitPath);
-    Loader := TUnitLoader.Create(SearchPaths);
-    Units  := Loader.LoadAll(Prog.UsedUnits);
-    for I := 0 to Units.Count - 1 do
-      Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
-    Semantic.Analyse(Prog);
-    CG := TCodeGenQBE.Create();
-    CG.SetSymbolTable(Prog.SymbolTable);
-    for I := 0 to Units.Count - 1 do
-      CG.AppendUnit(TUnit(Units.Items[I]));
-    CG.AppendProgram(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free(); Semantic.Free();
-    Units.Free(); Loader.Free(); SearchPaths.Free();
-    Prog.Free(); Parser.Free(); Lexer.Free();
   end;
 end;
 
@@ -1420,42 +1375,6 @@ end;
 { ------------------------------------------------------------------ }
 { Codegen — RTL functions                                              }
 { ------------------------------------------------------------------ }
-
-procedure TMathTests.TestCodegen_Min_InIR;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program P; uses Math;
-    var A, B, R: Integer;
-    begin R := Min(A, B) end.
-    ''');
-  AssertTrue('Math_Min in IR', IRContains(IR, 'Min'));
-end;
-
-procedure TMathTests.TestCodegen_Max_InIR;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program P; uses Math;
-    var A, B, R: Double;
-    begin R := Max(A, B) end.
-    ''');
-  AssertTrue('Math_Max in IR', IRContains(IR, 'Max'));
-end;
-
-procedure TMathTests.TestCodegen_Sign_InIR;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program P; uses Math;
-    var X, R: Integer;
-    begin R := Sign(X) end.
-    ''');
-  AssertTrue('Math_Sign in IR', IRContains(IR, 'Sign'));
-end;
 
 { ------------------------------------------------------------------ }
 { Float ↔ Integer assignment type checking                            }
