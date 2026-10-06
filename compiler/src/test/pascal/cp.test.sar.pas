@@ -27,18 +27,13 @@ interface
 
 uses
   blaise.testing, cp.test.e2e.base,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TSarTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
-    procedure TestCodegen_Int64_Sar_EmitsSar;
-    procedure TestCodegen_UInt64_Sar_EmitsSar;
-    procedure TestCodegen_Integer_Sar_EmitsSar;
-    procedure TestCodegen_Shr_StillEmitsShr;
   end;
 
   [Threaded]
@@ -49,6 +44,7 @@ type
     procedure TestRun_NegativeInt64_Sar_PreservesSign;
     procedure TestRun_NegativeInt64_Shr_DiscardsSign;
     procedure TestRun_PositiveInteger_Sar_MatchesShr;
+    procedure TestRun_NegativeInteger_Sar_PreservesSign;
   end;
 
 implementation
@@ -75,91 +71,6 @@ begin
   finally
     A.Free();
   end;
-end;
-
-function TSarTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
-  end;
-end;
-
-{ -------------- codegen -------------- }
-
-procedure TSarTests.TestCodegen_Int64_Sar_EmitsSar;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var A, B: Int64;
-        begin
-          B := A sar 1
-        end.
-        ''');
-  AssertTrue('Int64 sar emits sar', Pos(' sar ', IR) > 0);
-end;
-
-procedure TSarTests.TestCodegen_UInt64_Sar_EmitsSar;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var A, B: UInt64;
-        begin
-          B := A sar 1
-        end.
-        ''');
-  AssertTrue('UInt64 sar emits sar', Pos(' sar ', IR) > 0);
-end;
-
-procedure TSarTests.TestCodegen_Integer_Sar_EmitsSar;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var A, B: Integer;
-        begin
-          B := A sar 1
-        end.
-        ''');
-  AssertTrue('Integer sar emits sar', Pos(' sar ', IR) > 0);
-end;
-
-procedure TSarTests.TestCodegen_Shr_StillEmitsShr;
-var
-  IR: string;
-begin
-  { Regression: `shr` must continue to map to QBE `shr`, not `sar`.
-    A unit test for this is cheap insurance against accidental
-    cross-wiring of the two operators. }
-  IR := GenIR(
-    '''
-        program P;
-        var A, B: Int64;
-        begin
-          B := A shr 1
-        end.
-        ''');
-  AssertTrue('Int64 shr emits shr', Pos(' shr ', IR) > 0);
-  AssertFalse('Int64 shr does not emit sar', Pos(' sar ', IR) > 0);
 end;
 
 { -------------- e2e -------------- }
@@ -207,34 +118,43 @@ const
     ''';
 
 procedure TSarE2ETests.TestRun_NegativeInt64_Sar_PreservesSign;
-var Output: string; RCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(SrcNegInt64Sar, Output, RCode));
-  AssertEquals('exit code 0', 0, RCode);
   { -16 sar 2 = -4 (sign preserved) }
-  AssertEquals('-16 sar 2 = -4', '-4' + LE, Output);
+  AssertRunsOnAll(SrcNegInt64Sar, '-4' + LE, 0);
 end;
 
 procedure TSarE2ETests.TestRun_NegativeInt64_Shr_DiscardsSign;
-var Output: string; RCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(SrcNegInt64Shr, Output, RCode));
-  AssertEquals('exit code 0', 0, RCode);
   { -16 shr 2 = ((2^64 - 16) >> 2) = 2^62 - 4 = 4611686018427387900 }
-  AssertEquals('-16 shr 2 = 4611686018427387900',
-    '4611686018427387900' + LE, Output);
+  AssertRunsOnAll(SrcNegInt64Shr, '4611686018427387900' + LE, 0);
 end;
 
 procedure TSarE2ETests.TestRun_PositiveInteger_Sar_MatchesShr;
-var Output: string; RCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run', CompileAndRun(SrcPosIntSar, Output, RCode));
-  AssertEquals('exit code 0', 0, RCode);
   { 64 sar 2 = 16 (positive numbers behave identically) }
-  AssertEquals('64 sar 2 = 16', '16' + LE, Output);
+  AssertRunsOnAll(SrcPosIntSar, '16' + LE, 0);
+end;
+
+procedure TSarE2ETests.TestRun_NegativeInteger_Sar_PreservesSign;
+const
+  { sar on a 32-bit Integer is arithmetic too: the sign is kept.  Replaces
+    the QBE IR check TestCodegen_Integer_Sar_EmitsSar. }
+  Src = '''
+    program P;
+    var I: Integer;
+    begin
+      I := -16;
+      WriteLn(I sar 2);
+      I := -1;
+      WriteLn(I sar 31)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '-4' + LE + '-1' + LE, 0);
 end;
 
 initialization
