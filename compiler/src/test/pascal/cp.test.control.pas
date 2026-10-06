@@ -15,14 +15,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TControlTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -70,7 +69,6 @@ type
     { ------------------------------------------------------------------ }
     { Code generation                                                      }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_If_EmitsThenLabel;
 
     { ------------------------------------------------------------------ }
     { While loops                                                          }
@@ -83,7 +81,6 @@ type
     procedure TestParse_While_CompoundBody;
     procedure TestSemantic_While_Resolves;
     procedure TestSemantic_While_NonBooleanCondition_RaisesError;
-    procedure TestCodegen_While_EmitsBodyLabel;
   end;
 
 implementation
@@ -117,25 +114,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TControlTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -573,13 +551,6 @@ end;
   TestRun_IntegerCompare_Signed and TestRun_While_PrintsRange.  An IR or
   asm substring check adds nothing a wrong lowering could get past those. }
 
-{ QBE-only (delete with the backend, Phase 2): QBE needs an explicit block
-  label for the then block; native code falls through to it. }
-procedure TControlTests.TestCodegen_If_EmitsThenLabel;
-begin
-  AssertTrue('@if_then label', Pos('@if_then', GenIR(SrcIfOnly)) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { While loop tests                                                    }
 { ------------------------------------------------------------------ }
@@ -690,13 +661,6 @@ begin
             N := N - 1
         end.
         ''');
-end;
-
-{ QBE-only (delete with the backend, Phase 2): QBE needs an explicit block
-  label for the loop body; native code falls through to it. }
-procedure TControlTests.TestCodegen_While_EmitsBodyLabel;
-begin
-  AssertTrue('@while_body label', Pos('@while_body', GenIR(SrcWhile)) > 0);
 end;
 
 initialization
