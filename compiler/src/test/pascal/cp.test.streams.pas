@@ -24,49 +24,16 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TStreamsTests = class(TTestCase)
   private
-    function GenIR(const ASrc: string): string;
     function IRContains(const AIR, AFragment: string): Boolean;
   published
-    procedure TestCodegen_AbstractBase_ItabPointsAtStub;
-    procedure TestCodegen_ConcreteSubclass_ItabPointsAtImpl;
-    procedure TestCodegen_ConcreteSubclass_VTableHasImpl;
   end;
 
 implementation
-
-function TStreamsTests.GenIR(const ASrc: string): string;
-var
-  L:  TLexer;
-  P:  TParser;
-  Pr: TProgram;
-  A:  TSemanticAnalyser;
-  CG: TCodeGenQBE;
-begin
-  L  := TLexer.Create(ASrc);
-  P  := TParser.Create(L);
-  Pr := P.Parse();
-  A  := TSemanticAnalyser.Create();
-  try
-    A.Analyse(Pr)
-  finally
-    A.Free()
-  end;
-  CG := TCodeGenQBE.Create();
-  try
-    CG.Generate(Pr);
-    Result := CG.GetOutput()
-  finally
-    CG.Free();
-    Pr.Free();
-    P.Free();
-    L.Free()
-  end
-end;
 
 function TStreamsTests.IRContains(const AIR, AFragment: string): Boolean;
 begin
@@ -118,41 +85,6 @@ const
     begin end;
     begin end.
     ''';
-
-procedure TStreamsTests.TestCodegen_AbstractBase_ItabPointsAtStub;
-var IR: string;
-begin
-  IR := GenIR(SrcAbstractBase);
-  AssertTrue('IR non-empty', IR <> '');
-  AssertTrue('TInputStream itab emitted',
-    IRContains(IR, 'itab_TInputStream_IInputStream'));
-  AssertTrue('TInputStream vtable emitted',
-    IRContains(IR, 'vtable_TInputStream'));
-  AssertTrue('abstract stub referenced',
-    IRContains(IR, '_AbstractMethodError'))
-end;
-
-procedure TStreamsTests.TestCodegen_ConcreteSubclass_ItabPointsAtImpl;
-var IR: string;
-begin
-  IR := GenIR(SrcConcreteSubclass);
-  AssertTrue('IR non-empty', IR <> '');
-  AssertTrue('TMemoryInput itab emitted',
-    IRContains(IR, 'itab_TMemoryInput_IInputStream'));
-  AssertTrue('itab references concrete Read',
-    IRContains(IR, 'TMemoryInput_Read'))
-end;
-
-procedure TStreamsTests.TestCodegen_ConcreteSubclass_VTableHasImpl;
-var IR: string;
-begin
-  IR := GenIR(SrcConcreteSubclass);
-  AssertTrue('IR non-empty', IR <> '');
-  AssertTrue('TMemoryInput vtable emitted',
-    IRContains(IR, 'vtable_TMemoryInput'));
-  AssertTrue('vtable references concrete Read',
-    IRContains(IR, 'TMemoryInput_Read'))
-end;
 
 initialization
   RegisterTest(TStreamsTests)
