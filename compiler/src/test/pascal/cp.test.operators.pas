@@ -26,14 +26,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing, uStrCompat,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TOperatorTests = class(TTestCase)
   private
     function  ParseSrc(const ASrc: string): TProgram;
     function  AnalyseSrc(const ASrc: string): TProgram;
-    function  GenIR(const ASrc: string): string;
     procedure ParseExpectError(const ASrc: string);
     procedure AnalyseExpectError(const ASrc: string);
     { Locate the type declaration named AName in the program block and return
@@ -57,13 +56,9 @@ type
     procedure TestSem_RecordAdd_Resolves;
     procedure TestSem_RecordAdd_LoweredCallSet;
     procedure TestSem_NoOperator_StillErrors;
-    procedure TestSem_BuiltinString_Unaffected;
-    procedure TestSem_BuiltinInteger_Unaffected;
     procedure TestSem_BuiltinSet_Unaffected;
     procedure TestSem_ClassIdentityEqual_Preserved;
     { --- Phase 2: IR --- }
-    procedure TestIR_RecordAdd_EmitsOperatorCall;
-    procedure TestIR_ManagedRecordAdd_EmitsOperatorCall;
   end;
 
 implementation
@@ -101,25 +96,6 @@ begin
   except
     Result.Free();
     raise;
-  end;
-end;
-
-function TOperatorTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := Self.AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -612,43 +588,6 @@ begin
   Self.AnalyseExpectError(Src);
 end;
 
-procedure TOperatorTests.TestSem_BuiltinString_Unaffected;
-const
-  Src = '''
-      program P;
-      var A, B, C: string;
-      begin
-        A := 'x'; B := 'y';
-        C := A + B;
-        WriteLn(C)
-      end.
-      ''';
-var
-  IR: string;
-begin
-  IR := Self.GenIR(Src);
-  AssertTrue('string concat still uses the RTL helper',
-    (StrPos('_StringConcat', IR) >= 0) or (StrPos('StringConcat', IR) >= 0));
-end;
-
-procedure TOperatorTests.TestSem_BuiltinInteger_Unaffected;
-const
-  Src = '''
-      program P;
-      var A, B, C: Integer;
-      begin
-        A := 1; B := 2;
-        C := A + B;
-        WriteLn(C)
-      end.
-      ''';
-var
-  IR: string;
-begin
-  IR := Self.GenIR(Src);
-  AssertTrue('integer + lowers to an add instruction', StrPos('add ', IR) >= 0);
-end;
-
 procedure TOperatorTests.TestSem_BuiltinSet_Unaffected;
 const
   Src = '''
@@ -722,45 +661,6 @@ end;
 { ------------------------------------------------------------------ }
 { Phase 2 — IR                                                        }
 { ------------------------------------------------------------------ }
-
-procedure TOperatorTests.TestIR_RecordAdd_EmitsOperatorCall;
-var
-  IR: string;
-begin
-  IR := Self.GenIR(RectSrc);
-  AssertTrue('operator body emitted', StrPos('TRect_Add', IR) >= 0);
-  { the use site must CALL it, not fall through to an integer add }
-  AssertTrue('operator call emitted', StrPos('call $TRect_Add', IR) >= 0);
-end;
-
-procedure TOperatorTests.TestIR_ManagedRecordAdd_EmitsOperatorCall;
-const
-  Src = '''
-      program P;
-      type
-        TTag = record
-          Name: string;
-          N: Integer;
-          class operator Add(const A, C: TTag): TTag;
-        end;
-      class operator TTag.Add(const A, C: TTag): TTag;
-      begin
-        Result.Name := A.Name + C.Name;
-        Result.N := A.N + C.N
-      end;
-      var X, Y, Z: TTag;
-      begin
-        X.Name := 'a'; Y.Name := 'b';
-        Z := X + Y;
-        WriteLn(Z.Name)
-      end.
-      ''';
-var
-  IR: string;
-begin
-  IR := Self.GenIR(Src);
-  AssertTrue('managed-record operator call emitted', StrPos('call $TTag_Add', IR) >= 0);
-end;
 
 initialization
   RegisterTest(TOperatorTests);

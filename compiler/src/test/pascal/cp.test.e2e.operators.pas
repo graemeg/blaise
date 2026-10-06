@@ -31,6 +31,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Operator_RecordAddAndBuiltins;
     { register-return path: small all-Integer record }
     procedure TestRun_Operator_RecordAdd_RegisterReturn;
     { sret path: record carrying a managed (string) field }
@@ -286,6 +287,57 @@ begin
     fields — BUG-052, a pre-existing sret-assignment gap that reproduces
     identically with a plain `static function` call and is NOT introduced by
     operator lowering.  Re-enable the leak assertion when BUG-052 is fixed. }
+end;
+
+procedure TE2EOperatorTests.TestRun_Operator_RecordAddAndBuiltins;
+const
+  {
+    A record class operator Add is called for + on that record type, managed
+    fields included; + on strings and Integers keeps its built-in meaning.
+    Replaces the QBE IR checks in cp.test.operators. }
+  Src = '''
+    program P;
+    type
+      TRect = record
+        W, H: Integer;
+        class operator Add(const A, B: TRect): TRect;
+      end;
+      TTag = record
+        Name: string;
+        N: Integer;
+        class operator Add(const A, C: TTag): TTag;
+      end;
+    class operator TRect.Add(const A, B: TRect): TRect;
+    begin
+      Result.W := A.W + B.W;
+      Result.H := A.H + B.H
+    end;
+    class operator TTag.Add(const A, C: TTag): TTag;
+    begin
+      Result.Name := A.Name + C.Name;
+      Result.N := A.N + C.N
+    end;
+    var R1, R2, R3: TRect; X, Y, Z: TTag; S1, S2: string; I, J: Integer;
+    begin
+      R1.W := 1; R1.H := 2; R2.W := 10; R2.H := 20;
+      R3 := R1 + R2;
+      WriteLn(R3.W, ' ', R3.H);
+      X.Name := 'a'; X.N := 1; Y.Name := 'b'; Y.N := 2;
+      Z := X + Y;
+      WriteLn(Z.Name, ' ', Z.N);
+      S1 := 'x'; S2 := 'y';
+      WriteLn(S1 + S2);
+      I := 1; J := 2;
+      WriteLn(I + J)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '11 22' + LE +
+    'ab 3' + LE +
+    'xy' + LE +
+    '3' + LE, 0);
 end;
 
 initialization
