@@ -8,875 +8,154 @@
 
 unit cp.test.recordret;
 
-{ IR-shape coverage for QBE record-by-value return.
+{ Return-ABI coverage for records returned by value.
 
-  Verifies that ClassifyRecordReturn picks rcInt1 for single-field
-  non-managed-integer-class records, with matching callee/caller shape
-  (typed `function w/l`, typed call with capture-and-store), and that
-  records containing managed fields or more than one field stay on
-  sret (hidden `l %_par__sret` first param, void function, plain ret). }
+  Between two Blaise routines the caller and callee always agree on how a
+  record comes back, so a wrong classification is invisible when the
+  program runs (cp.test.e2e.recordret round-trips every class); it only
+  shows at the C boundary.  These tests pin the platform ABI on both ISAs,
+  which classify differently: SysV x86-64 splits an Integer + Double record
+  across %rax and %xmm0, while AAPCS64 returns a mixed record in x0:x1 and
+  only a homogeneous floating-point aggregate in d registers.  A managed
+  field or a record over 16 bytes goes through the hidden result pointer
+  (%rdi / x8) on both. }
 
 interface
 
 uses
-  blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe,
-  blaise.codegen.target;
+  blaise.testing, cp.test.harness;
 
 type
   TRecordReturnTests = class(TTestCase)
   private
-    function GenIR(const ASrc: string): string;
+    function Callee(const ASrc, AName, ATarget: string): string;
   published
-    { rcInt1: one-field POD records return typed }
-    procedure TestCodegen_OneIntegerField_ReturnsW;
-    procedure TestCodegen_OnePointerField_ReturnsL;
-    procedure TestCodegen_OneByteField_ReturnsW;
-    procedure TestCodegen_OneEnumField_ReturnsW;
-
-    { rcInt1 caller side: capture + store back }
-    procedure TestCodegen_OneIntegerField_CallerStoresW;
-    procedure TestCodegen_OneByteField_CallerStoresB;
-
-    { Managed field → sret stays (string/class/interface/dynarray) }
-    procedure TestCodegen_StringField_StaysOnSret;
-    procedure TestCodegen_ClassField_StaysOnSret;
-    procedure TestCodegen_DynArrayField_StaysOnSret;
-
-    { Property getter returning a managed-field record: the READ must route
-      through sret (regression for the property-read heap-corruption bug). }
-    procedure TestCodegen_RecordProperty_Read_UsesSret;
-
-    { rcInt1 widened: multi-field one-eightbyte records }
-    procedure TestCodegen_TwoIntegerFields_UsesRegReturnL;
-    procedure TestCodegen_TwoSmallIntFields_UsesRegReturnW;
-    procedure TestCodegen_TwoByteFields_UsesStoreH;
-    procedure TestCodegen_IntegerPlusSmallInt_UsesRegReturnL;
-    procedure TestCodegen_OddSizedRecord_StaysOnSret;
-
-    { Nested-record fields: POD nested -> qualifies; managed nested -> sret. }
-    procedure TestCodegen_NestedAllPodRecord_QualifiesRegReturn;
-    procedure TestCodegen_NestedWithStringField_StaysOnSret;
-    procedure TestCodegen_NestedWithClassField_StaysOnSret;
-    procedure TestCodegen_DeeplyNestedPod_QualifiesRegReturn;
-
-    { rcInt2: 9..16-byte integer-class records use rax:rdx via QBE aggregate }
-    procedure TestCodegen_TwoInt64Fields_UsesAggregateReturn;
-    procedure TestCodegen_TwoInt64Fields_CallerMemcpy;
-    procedure TestCodegen_IntegerPlusInt64_UsesAggregate;
-    procedure TestCodegen_TwoInt64WithManagedFieldElsewhere_NotApplicable;
-
-    { rcSSE1: single Double field uses xmm0 (`function d`) }
-    procedure TestCodegen_OneDoubleField_UsesSSE1;
-    { rcSSE2: two-Double record uses xmm0:xmm1 via QBE aggregate }
-    procedure TestCodegen_TwoDoubleFields_UsesSSE2;
-    procedure TestCodegen_TwoDoubleFields_CallerMemcpy;
-    { tySingle reg-return: single Single, 2-Single, Single + Double }
-    procedure TestCodegen_OneSingleField_UsesSSE1S;
-    procedure TestCodegen_TwoSingleFields_UsesSSE1D;
-    procedure TestCodegen_SinglePlusDouble_UsesSSE2;
-    { rcIntSSE / rcSSEInt — mixed Int + Double via QBE aggregate }
-    procedure TestCodegen_IntegerPlusDouble_UsesIntSSE;
-    procedure TestCodegen_DoublePlusInt64_UsesSSEInt;
-    procedure TestCodegen_Int64PlusDouble_UsesIntSSE;
-    { Self-assigned record method (M := M.Method(...)): the sret destination must
-      NOT be the receiver variable — the call writes into a fresh temp buffer
-      that is then memcpy'd into the destination, so the callee sees an intact
-      Self while constructing Result. }
-    procedure TestCodegen_SelfAssignRecordMethod_RoutesThroughTemp;
-    { `Result := inherited M()` returning an sret record threads the sret
-      pointer (the Result slot) + Self and dispatches statically to the parent. }
-    procedure TestCodegen_InheritedRecordReturn_ThreadsSret;
+    procedure TestReturnAbi_TwoInt64_IntegerRegisterPair;
+    procedure TestReturnAbi_OneDouble_FloatRegister;
+    procedure TestReturnAbi_TwoDoubles_FloatRegisterPair;
+    procedure TestReturnAbi_IntegerPlusDouble_PerIsaClassification;
+    procedure TestReturnAbi_ManagedField_HiddenResultPointer;
+    procedure TestReturnAbi_Over16Bytes_HiddenResultPointer;
   end;
 
 implementation
 
-uses
-  SysUtils;
-
-function TRecordReturnTests.GenIR(const ASrc: string): string;
+function TRecordReturnTests.Callee(const ASrc, AName, ATarget: string): string;
 var
-  L:    TLexer;
-  P:    TParser;
-  Prog: TProgram;
-  A:    TSemanticAnalyser;
-  CG:   TCodeGenQBE;
+  AsmText, Lbl: string;
+  P, E: Integer;
 begin
-  L := TLexer.Create(ASrc);
-  P := TParser.Create(L);
-  try
-    Prog := P.Parse();
-  finally
-    P.Free();
-  end;
-  try
-    A := TSemanticAnalyser.Create();
-    try
-      A.Analyse(Prog);
-    finally
-      A.Free();
-    end;
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
-  end;
+  { The callee's body, from its label to its first ret.  The programs below
+    have an empty main, so the patterns cannot come from a caller. }
+  AsmText := GenAsm(ASrc, ATarget);
+  if ATarget = TargetArm64 then
+    Lbl := #10 + '_' + AName + ':'
+  else
+    Lbl := #10 + AName + ':';
+  P := Pos(Lbl, AsmText);
+  AssertTrue(ATarget + ': ' + AName + ' emitted', P >= 0);
+  Result := Copy(AsmText, P, Length(AsmText) - P);
+  E := Pos(#9 + 'ret', Result);
+  AssertTrue(ATarget + ': ' + AName + ' returns', E >= 0);
+  Result := Copy(Result, 0, E);
 end;
 
-{ --- rcInt1 callee shape --- }
-
-procedure TRecordReturnTests.TestCodegen_OneIntegerField_ReturnsW;
-var IR: string;
+procedure TRecordReturnTests.TestReturnAbi_TwoInt64_IntegerRegisterPair;
+const
+  Src = '''
+    program P;
+    type T2L = record A, B: Int64; end;
+    function MakeL: T2L; begin Result.A := 11; Result.B := 22 end;
+    begin end.
+    ''';
 begin
-  IR := GenIR(
-    '''
-        program P;
-        type TI = record X: Integer; end;
-        function MakeIt(): TI;
-        begin
-          Result.X := 42
-        end;
-        begin
-        end.
-        ''');
-  AssertContains('function w', IR);
-  AssertContains('$MakeIt', IR);
+  AssertTrue('x86-64: second eightbyte in %rdx',
+    Pos('movq 8(%rcx), %rdx', Callee(Src, 'MakeL', TargetX86_64)) >= 0);
+  AssertTrue('arm64: second eightbyte in x1',
+    Pos('ldr x1, [x9, #8]', Callee(Src, 'MakeL', TargetArm64)) >= 0);
 end;
 
-procedure TRecordReturnTests.TestCodegen_OnePointerField_ReturnsL;
-var IR: string;
+procedure TRecordReturnTests.TestReturnAbi_OneDouble_FloatRegister;
+const
+  Src = '''
+    program P;
+    type T1D = record X: Double; end;
+    function MakeD: T1D; begin Result.X := 1.5 end;
+    begin end.
+    ''';
 begin
-  IR := GenIR(
-    '''
-        program P;
-        type TP = record Q: Pointer; end;
-        function MakeIt(): TP;
-        begin
-          Result.Q := nil
-        end;
-        begin
-        end.
-        ''');
-  AssertContains('function l $MakeIt', IR);
+  AssertTrue('x86-64: returned in %xmm0',
+    Pos('%xmm0', Callee(Src, 'MakeD', TargetX86_64)) >= 0);
+  AssertTrue('arm64: returned in d0',
+    Pos('ldr d0, ', Callee(Src, 'MakeD', TargetArm64)) >= 0);
 end;
 
-procedure TRecordReturnTests.TestCodegen_OneByteField_ReturnsW;
-var IR: string;
+procedure TRecordReturnTests.TestReturnAbi_TwoDoubles_FloatRegisterPair;
+const
+  Src = '''
+    program P;
+    type T2D = record X, Y: Double; end;
+    function MakeD: T2D; begin Result.X := 1.5; Result.Y := 2.5 end;
+    begin end.
+    ''';
 begin
-  IR := GenIR(
-    '''
-        program P;
-        type TB = record C: Byte; end;
-        function MakeIt(): TB;
-        begin
-          Result.C := 7
-        end;
-        begin
-        end.
-        ''');
-  AssertContains('function w $MakeIt', IR);
-  AssertContains('loadub', IR);
+  AssertTrue('x86-64: second double in %xmm1',
+    Pos('movsd 8(%rcx), %xmm1', Callee(Src, 'MakeD', TargetX86_64)) >= 0);
+  AssertTrue('arm64: homogeneous float aggregate in d0:d1',
+    Pos('ldr d1, [x9, #8]', Callee(Src, 'MakeD', TargetArm64)) >= 0);
 end;
 
-procedure TRecordReturnTests.TestCodegen_OneEnumField_ReturnsW;
-var IR: string;
+procedure TRecordReturnTests.TestReturnAbi_IntegerPlusDouble_PerIsaClassification;
+const
+  Src = '''
+    program P;
+    type TID = record I: Integer; D: Double; end;
+    function MakeID: TID; begin Result.I := 3; Result.D := 4.5 end;
+    begin end.
+    ''';
+var
+  X86, A64: string;
 begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TColor = (cRed, cGreen, cBlue);
-          TE = record K: TColor; end;
-        function MakeIt(): TE;
-        begin
-          Result.K := cGreen
-        end;
-        begin
-        end.
-        ''');
-  AssertContains('function w $MakeIt', IR);
+  X86 := Callee(Src, 'MakeID', TargetX86_64);
+  AssertTrue('x86-64: INTEGER eightbyte in %rax',
+    Pos('movq (%rcx), %rax', X86) >= 0);
+  AssertTrue('x86-64: SSE eightbyte in %xmm0',
+    Pos('movsd 8(%rcx), %xmm0', X86) >= 0);
+  A64 := Callee(Src, 'MakeID', TargetArm64);
+  AssertTrue('arm64: a mixed record is not an HFA -- second half in x1',
+    Pos('ldr x1, [x9, #8]', A64) >= 0);
+  AssertTrue('arm64: no d-register return for a mixed record',
+    (Pos('ldr d0, [x9, #0]', A64) < 0) and (Pos('ldr d1, [x9, #8]', A64) < 0));
 end;
 
-{ --- rcInt1 caller shape --- }
-
-procedure TRecordReturnTests.TestCodegen_OneIntegerField_CallerStoresW;
-var IR: string;
+procedure TRecordReturnTests.TestReturnAbi_ManagedField_HiddenResultPointer;
+const
+  Src = '''
+    program P;
+    type TS = record S: string; end;
+    function MakeS: TS; begin Result.S := 'x' end;
+    begin end.
+    ''';
 begin
-  IR := GenIR(
-    '''
-        program P;
-        type TI = record X: Integer; end;
-        function MakeIt(): TI;
-        begin
-          Result.X := 1
-        end;
-        var R: TI;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  { rcInt1: caller has `%t =w call $MakeIt()` and `storew %t, %_var_R`. }
-  AssertContains('=w call $MakeIt', IR);
-  AssertContains('storew', IR);
-  { No hidden sret param in the call. }
-  AssertFalse('caller passes sret', Pos('call $MakeIt(l', IR) <> -1);
+  AssertTrue('x86-64: the result pointer arrives in %rdi',
+    Pos('movq %rdi, ', Callee(Src, 'MakeS', TargetX86_64)) >= 0);
+  AssertTrue('arm64: the result pointer arrives in x8',
+    Pos('stur x8, ', Callee(Src, 'MakeS', TargetArm64)) >= 0);
 end;
 
-procedure TRecordReturnTests.TestCodegen_OneByteField_CallerStoresB;
-var IR: string;
+procedure TRecordReturnTests.TestReturnAbi_Over16Bytes_HiddenResultPointer;
+const
+  Src = '''
+    program P;
+    type T3 = record A, B, C: Int64; end;
+    function Make3: T3; begin Result.A := 1; Result.C := 3 end;
+    begin end.
+    ''';
 begin
-  IR := GenIR(
-    '''
-        program P;
-        type TB = record C: Byte; end;
-        function MakeIt(): TB;
-        begin
-          Result.C := 9
-        end;
-        var R: TB;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  AssertContains('=w call $MakeIt', IR);
-  AssertContains('storeb', IR);
-end;
-
-{ --- managed-field records stay on sret --- }
-
-procedure TRecordReturnTests.TestCodegen_StringField_StaysOnSret;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TS = record S: string; end;
-        function MakeIt(): TS;
-        begin
-          Result.S := 'x'
-        end;
-        var R: TS;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  { Callee: hidden sret param, void function. }
-  AssertContains('function $MakeIt(l %_par__sret', IR);
-  { No `function w $MakeIt` or `function l $MakeIt` — that would be reg-return. }
-  AssertFalse('would-be reg-return for managed record',
-    (Pos('function w $MakeIt', IR) <> -1) or
-    (Pos('function l $MakeIt', IR) <> -1));
-end;
-
-procedure TRecordReturnTests.TestCodegen_ClassField_StaysOnSret;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TThing = class end;
-          TC = record T: TThing; end;
-        function MakeIt(): TC;
-        begin
-          Result.T := nil
-        end;
-        var R: TC;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  AssertContains('function $MakeIt(l %_par__sret', IR);
-  AssertFalse('class field forced reg-return',
-    Pos('=l call $MakeIt', IR) <> -1);
-end;
-
-procedure TRecordReturnTests.TestCodegen_DynArrayField_StaysOnSret;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TD = record A: array of Integer; end;
-        function MakeIt(): TD;
-        begin
-        end;
-        var R: TD;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  AssertContains('function $MakeIt(l %_par__sret', IR);
-end;
-
-{ --- rcInt1 widened to multi-field one-eightbyte records --- }
-
-procedure TRecordReturnTests.TestCodegen_TwoIntegerFields_UsesRegReturnL;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type T2 = record X, Y: Integer; end;
-        function MakeIt(): T2;
-        begin
-          Result.X := 1;
-          Result.Y := 2
-        end;
-        var R: T2;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  { 8 bytes = one l-eightbyte → return as l. }
-  AssertContains('function l $MakeIt', IR);
-  AssertContains('=l call $MakeIt', IR);
-  AssertContains('storel', IR);
-  AssertContains('loadl %_var_Result', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_TwoSmallIntFields_UsesRegReturnW;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type T2 = record A, B: SmallInt; end;
-        function MakeIt(): T2;
-        begin
-          Result.A := 1;
-          Result.B := 2
-        end;
-        var R: T2;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  { 4 bytes total — fits in w. }
-  AssertContains('function w $MakeIt', IR);
-  AssertContains('storew', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_TwoByteFields_UsesStoreH;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type T2 = record A, B: Byte; end;
-        function MakeIt(): T2;
-        begin
-          Result.A := 1;
-          Result.B := 2
-        end;
-        var R: T2;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  { 2 bytes total — loaduh / storeh pair. }
-  AssertContains('function w $MakeIt', IR);
-  AssertContains('loaduh %_var_Result', IR);
-  AssertContains('storeh', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_IntegerPlusSmallInt_UsesRegReturnL;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TS = record A: Integer; B: SmallInt; end;
-        function MakeIt(): TS;
-        begin
-          Result.A := 1;
-          Result.B := 2
-        end;
-        begin
-        end.
-        ''');
-  { Natural alignment pads to 8 bytes — one l-eightbyte. }
-  AssertContains('function l $MakeIt', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_OddSizedRecord_StaysOnSret;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type T3 = record A, B, C: Byte; end;
-        function MakeIt(): T3;
-        begin
-          Result.A := 1
-        end;
-        begin
-        end.
-        ''');
-  { TotalSize = 3 — not in [1,2,4,8], falls through to sret. }
-  AssertContains('function $MakeIt(l %_par__sret', IR);
-end;
-
-{ --- nested-record qualification via IsRecordManagedClean --- }
-
-procedure TRecordReturnTests.TestCodegen_NestedAllPodRecord_QualifiesRegReturn;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TInner = record A: Integer; end;
-          TOuter = record I: TInner; end;
-        function MakeIt(): TOuter;
-        begin
-          Result.I.A := 42
-        end;
-        begin
-        end.
-        ''');
-  { Outer is 4 bytes, all leaves int -> rcInt1 w. }
-  AssertContains('function w $MakeIt', IR);
-  AssertFalse('outer with POD nested forced sret',
-    Pos('%_par__sret', IR) <> -1);
-end;
-
-procedure TRecordReturnTests.TestCodegen_NestedWithStringField_StaysOnSret;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TInner = record S: string; end;
-          TOuter = record I: TInner; end;
-        function MakeIt(): TOuter;
-        begin
-          Result.I.S := 'x'
-        end;
-        begin
-        end.
-        ''');
-  { IsRecordManagedClean recurses into TInner, finds the string,
-    forces TOuter to sret. }
-  AssertContains('function $MakeIt(l %_par__sret', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_NestedWithClassField_StaysOnSret;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TThing = class end;
-          TInner = record T: TThing; end;
-          TOuter = record I: TInner; end;
-        function MakeIt(): TOuter;
-        begin
-          Result.I.T := nil
-        end;
-        begin
-        end.
-        ''');
-  AssertContains('function $MakeIt(l %_par__sret', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_DeeplyNestedPod_QualifiesRegReturn;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TLeaf  = record A: Integer; end;
-          TMid   = record L: TLeaf; end;
-          TOuter = record M: TMid; end;
-        function MakeIt(): TOuter;
-        begin
-          Result.M.L.A := 7
-        end;
-        begin
-        end.
-        ''');
-  { Three levels deep, all-POD -> recursion still finds rcInt1. }
-  AssertContains('function w $MakeIt', IR);
-end;
-
-{ --- rcInt2: aggregate-return for 9..16-byte integer-class records --- }
-
-procedure TRecordReturnTests.TestCodegen_TwoInt64Fields_UsesAggregateReturn;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type T2 = record A, B: Int64; end;
-        function MakeIt(): T2;
-        begin
-          Result.A := 1;
-          Result.B := 2
-        end;
-        begin
-        end.
-        ''');
-  { Callee declared with QBE aggregate return type and no hidden sret param. }
-  AssertContains('function :_ffi_T2 $MakeIt', IR);
-  { Aggregate type declaration emitted in the data section. }
-  AssertContains('type :_ffi_T2 = align 8', IR);
-  AssertContains('ret %_var_Result', IR);
-  AssertFalse('would-be sret param',
-    Pos('%_par__sret', IR) <> -1);
-end;
-
-procedure TRecordReturnTests.TestCodegen_TwoInt64Fields_CallerMemcpy;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type T2 = record A, B: Int64; end;
-        function MakeIt(): T2;
-        begin
-          Result.A := 1;
-          Result.B := 2
-        end;
-        var R: T2;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  { Caller: aggregate-typed call result, then memcpy 16 bytes to dest. }
-  AssertContains('=:_ffi_T2 call $MakeIt', IR);
-  AssertContains('call $memcpy(', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_IntegerPlusInt64_UsesAggregate;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type T3 = record A: Integer; B: Int64; end;
-        function MakeIt(): T3;
-        begin
-          Result.A := 1;
-          Result.B := 2
-        end;
-        begin
-        end.
-        ''');
-  { TotalSize = 16 (4 + 4 pad + 8), all integer-class → rcInt2. }
-  AssertContains('function :_ffi_T3 $MakeIt', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_TwoInt64WithManagedFieldElsewhere_NotApplicable;
-var IR: string;
-begin
-  { Sanity: a 24-byte record (over 16) stays on sret regardless of field types. }
-  IR := GenIR(
-    '''
-        program P;
-        type T3 = record A, B, C: Int64; end;
-        function MakeIt(): T3;
-        begin
-          Result.A := 1
-        end;
-        begin
-        end.
-        ''');
-  AssertContains('function $MakeIt(l %_par__sret', IR);
-end;
-
-{ --- rcSSE1 / rcSSE2: Double-leaved records --- }
-
-procedure TRecordReturnTests.TestCodegen_OneDoubleField_UsesSSE1;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TF = record V: Double; end;
-        function MakeIt(): TF;
-        begin
-          Result.V := 1.5
-        end;
-        var R: TF;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  AssertContains('function d $MakeIt', IR);
-  AssertContains('loadd %_var_Result', IR);
-  AssertContains('=d call $MakeIt', IR);
-  AssertContains('stored', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_TwoDoubleFields_UsesSSE2;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type T2D = record A, B: Double; end;
-        function MakeIt(): T2D;
-        begin
-          Result.A := 1.0;
-          Result.B := 2.0
-        end;
-        begin
-        end.
-        ''');
-  AssertContains('function :_ffi_T2D $MakeIt', IR);
-  AssertContains('type :_ffi_T2D = align 8 { d, d }', IR);
-  AssertContains('ret %_var_Result', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_TwoDoubleFields_CallerMemcpy;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type T2D = record A, B: Double; end;
-        function MakeIt(): T2D;
-        begin
-          Result.A := 1.0;
-          Result.B := 2.0
-        end;
-        var R: T2D;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  AssertContains('=:_ffi_T2D call $MakeIt', IR);
-  AssertContains('call $memcpy(', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_OneSingleField_UsesSSE1S;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TF = record V: Single; end;
-        function MakeIt(): TF;
-        begin
-          Result.V := 1.5
-        end;
-        var R: TF;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  { 4-byte single-Single record returns in xmm0 as `s`. }
-  AssertContains('function s $MakeIt', IR);
-  AssertContains('loads %_var_Result', IR);
-  AssertContains('=s call $MakeIt', IR);
-  AssertContains('stores', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_TwoSingleFields_UsesSSE1D;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type T2S = record A, B: Single; end;
-        function MakeIt(): T2S;
-        begin
-          Result.A := 1.0;
-          Result.B := 2.0
-        end;
-        var R: T2S;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  { 8-byte all-Single record packs into one SSE eightbyte; the bytes
-    round-trip through xmm0 as opaque `d`. }
-  AssertContains('function d $MakeIt', IR);
-  AssertContains('loadd %_var_Result', IR);
-  AssertContains('stored', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_SinglePlusDouble_UsesSSE2;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TM = record S: Single; D: Double; end;
-        function MakeIt(): TM;
-        begin
-          Result.S := 1.0;
-          Result.D := 2.0
-        end;
-        begin
-        end.
-        ''');
-  { 16 bytes, all-float — rcSSE2 with aggregate [ s, 4B pad, d ]. }
-  AssertContains('function :_ffi_TM $MakeIt', IR);
-  AssertContains('type :_ffi_TM = align 8 { s, b, b, b, b, d }', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_IntegerPlusDouble_UsesIntSSE;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TM = record I: Integer; D: Double; end;
-        function MakeIt(): TM;
-        begin
-          Result.I := 1;
-          Result.D := 2.0
-        end;
-        var R: TM;
-        begin
-          R := MakeIt()
-        end.
-        ''');
-  { Eightbyte 0 = Integer + 4B pad -> INTEGER class.
-    Eightbyte 1 = Double -> SSE class.
-    QBE returns in (rax, xmm0). }
-  AssertContains('function :_ffi_TM $MakeIt', IR);
-  AssertContains('type :_ffi_TM = align 8 { w, b, b, b, b, d }', IR);
-  AssertContains('=:_ffi_TM call $MakeIt', IR);
-  AssertContains('call $memcpy(', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_DoublePlusInt64_UsesSSEInt;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TM = record D: Double; I: Int64; end;
-        function MakeIt(): TM;
-        begin
-          Result.D := 1.0;
-          Result.I := 2
-        end;
-        begin
-        end.
-        ''');
-  { Eightbyte 0 = Double -> SSE; eightbyte 1 = Int64 -> INTEGER.
-    QBE returns in (xmm0, rax). }
-  AssertContains('function :_ffi_TM $MakeIt', IR);
-  AssertContains('type :_ffi_TM = align 8 { d, l }', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_Int64PlusDouble_UsesIntSSE;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TM = record I: Int64; D: Double; end;
-        function MakeIt(): TM;
-        begin
-          Result.I := 1;
-          Result.D := 2.0
-        end;
-        begin
-        end.
-        ''');
-  AssertContains('function :_ffi_TM $MakeIt', IR);
-  AssertContains('type :_ffi_TM = align 8 { l, d }', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_SelfAssignRecordMethod_RoutesThroughTemp;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TR = record
-            S: string;
-            function Up(const X: TR): TR;
-          end;
-        function TR.Up(const X: TR): TR;
-        begin Result.S := Self.S + X.S end;
-        var A, B: TR;
-        begin
-          A.S := 'a'; B.S := 'b';
-          A := A.Up(B)
-        end.
-        ''');
-  { The sret call must target a fresh temp (%_t...), not the destination $A —
-    otherwise the sret buffer aliases Self. }
-  AssertFalse('sret call aliases receiver $A',
-    Pos('call $TR_Up(l $A,', IR) <> -1);
-  { The constructed result is then moved into the destination. }
-  AssertContains('call $memcpy(l $A,', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_InheritedRecordReturn_ThreadsSret;
-var IR: string;
-begin
-  { `Result := inherited Next()` returning an sret record must thread the
-    hidden destination pointer (the override's own Result slot) as the FIRST
-    argument and Self as the second, dispatched STATICALLY to the parent's
-    symbol — never the scalar `=l call` shape that passes Self into the sret
-    slot. }
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TTok = record Kind: Integer; Value: string; end;
-          TBase = class function Next: TTok; virtual; end;
-          TDeriv = class(TBase) function Next: TTok; override; end;
-        function TBase.Next: TTok;
-        begin Result.Kind := 7; Result.Value := 'x' end;
-        function TDeriv.Next: TTok;
-        begin Result := inherited Next() end;
-        begin
-        end.
-        ''');
-  { sret pointer (Result slot) first, Self second, static call to the parent. }
-  AssertContains('call $TBase_Next(l %_var_Result, l', IR);
-end;
-
-procedure TRecordReturnTests.TestCodegen_RecordProperty_Read_UsesSret;
-var IR: string;
-begin
-  { Regression: reading a property whose getter returns a record with a managed
-    (string) field must pass the assignment destination as the getter's hidden
-    sret arg, not emit a scalar-return call — the latter handed the object
-    pointer to the callee where the sret pointer belongs and over-released the
-    string field (`_StringRelease corrupted header`). }
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TS = record S: string; end;
-          TObj = class
-            function GetS: TS;
-            property Cur: TS read GetS;
-          end;
-        function TObj.GetS: TS;
-        begin
-          Result.S := 'x'
-        end;
-        var O: TObj; R: TS;
-        begin
-          O := TObj.Create();
-          R := O.Cur
-        end.
-        ''');
-  { The getter is sret-called with $R (the destination) as its hidden first arg. }
-  AssertContains('call $TObj_GetS(l $R', IR);
-  { Not a scalar/register-return call (self-only) — that was the corrupting form. }
-  AssertFalse('property getter misused as a register-return call',
-    (Pos('=w call $TObj_GetS', IR) <> -1) or
-    (Pos('=l call $TObj_GetS', IR) <> -1));
+  AssertTrue('x86-64: the result pointer arrives in %rdi',
+    Pos('movq %rdi, ', Callee(Src, 'Make3', TargetX86_64)) >= 0);
+  AssertTrue('arm64: the result pointer arrives in x8',
+    Pos('stur x8, ', Callee(Src, 'Make3', TargetArm64)) >= 0);
 end;
 
 initialization

@@ -28,6 +28,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_RecordReturn_RemainingShapes;
     { rcInt1 1B — single Byte field. }
     procedure TestRun_RcInt1_OneByte_RoundTrip;
     { rcInt1 2B — two Byte fields. }
@@ -1767,6 +1768,66 @@ begin
       '42' + LE + 'world' + LE + '141' + LE + '3' + LE +
       '77' + LE + 'deep' + LE + '42' + LE + 'hello' + LE, Output);
   end;
+end;
+
+procedure TE2ERecordReturnTests.TestRun_RecordReturn_RemainingShapes;
+const
+  {
+    Record returns in the shapes the round-trip tests above do not cover: a
+    one-field enum record, a pointer, a class reference (managed, so returned
+    through the hidden result pointer), an odd-sized three-Byte record (the
+    next global must not be overwritten), Single + Double, Integer + Double
+    (split across register classes on x86-64, not on arm64), and a nested
+    all-POD record. }
+  Src = '''
+    program P;
+    type
+      TColor = (Red, Green, Blue);
+      TE = record C: TColor; end;
+      TPt = record P: Pointer; end;
+      TBox = class V: Integer; end;
+      TCR = record B: TBox; end;
+      TOdd = record A, B, C: Byte; end;
+      TSD = record S: Single; D: Double; end;
+      TID = record I: Integer; D: Double; end;
+      TIn = record X, Y: SmallInt; end;
+      TNest = record Inner: TIn; Z: Integer; end;
+    var G: Integer;
+    function MakeE: TE; begin Result.C := Blue end;
+    function MakePt: TPt; begin Result.P := @G end;
+    function MakeCR: TCR; begin Result.B := TBox.Create(); Result.B.V := 42 end;
+    function MakeOdd: TOdd; begin Result.A := 1; Result.B := 2; Result.C := 250 end;
+    function MakeSD: TSD; begin Result.S := 1.25; Result.D := -2.5 end;
+    function MakeID: TID; begin Result.I := -7; Result.D := 3.75 end;
+    function MakeNest: TNest;
+    begin
+      Result.Inner.X := -3; Result.Inner.Y := 4; Result.Z := 100000
+    end;
+    var
+      E: TE; Pt: TPt; CR: TCR; O: TOdd; SD: TSD; ID: TID; N: TNest;
+      Guard: Int64;
+    begin
+      Guard := 99;
+      E := MakeE();
+      Pt := MakePt();
+      CR := MakeCR();
+      O := MakeOdd();
+      SD := MakeSD();
+      ID := MakeID();
+      N := MakeNest();
+      WriteLn(Ord(E.C), ' ', Pt.P = @G, ' ', CR.B.V);
+      WriteLn(O.A, ' ', O.B, ' ', O.C, ' ', Guard);
+      WriteLn(SD.S:0:2, ' ', SD.D:0:1, ' ', ID.I, ' ', ID.D:0:2);
+      WriteLn(N.Inner.X, ' ', N.Inner.Y, ' ', N.Z)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '2 True 42' + LE +
+    '1 2 250 99' + LE +
+    '1.25 -2.5 -7 3.75' + LE +
+    '-3 4 100000' + LE, 0);
 end;
 
 initialization
