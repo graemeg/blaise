@@ -1375,7 +1375,9 @@ begin
   else if AFA.IsImplicitSelf then
     EmitLoadSlot('x0', 'Self')
   else if AFA.IsClassAccess then
-    EmitLoadSlot('x0', AFA.RecordName)
+    { the instance pointer: through a capture, and one deref further for a
+      var-param class base (its slot holds the caller's variable address) }
+    EmitInstBase('x0', AFA.RecordName, AFA.IsVarParam, nil)
   else
     { TRUE var/out record: slot holds the CALLER's record ADDRESS — deref it
       (leg 27), then add the field offset.  A BY-VALUE record param also has
@@ -1400,10 +1402,15 @@ begin
     it has no bare frame slot — go through '_cap_' and deref to the pointer.
     A captured VAR-PARAM class base needs a further deref (its storage holds
     the caller's address), so AInstVarParam is threaded into the capture path.
-    The non-captured fallthrough keeps its original behaviour (the bare slot
-    already holds the instance pointer for the forms that reach here). }
+    A plain var-param class base (procedure P(var T: TThing); T.V := 7) holds
+    the caller's ADDRESS in its slot, so it is dereferenced once more to reach
+    the instance. }
   if not EmitCapturedBase(AReg, AInstSlot, True, AInstVarParam) then
+  begin
     EmitLoadSlot(AReg, AInstSlot);
+    if AInstVarParam then
+      Self.Emit(Format(#9'ldr %s, [%s]', [AReg, AReg]));
+  end;
   { Nested Self.FIntermediate.SubField: fold the intermediate into the base —
     add its offset for an embedded record, deref for a class reference. }
   EmitImplicitBaseStep(AReg, ABaseInfo);
@@ -5189,7 +5196,8 @@ begin
     else if TFieldAccessExpr(AExpr).IsImplicitSelf then
       EmitLoadSlot('x0', 'Self')
     else
-      EmitLoadSlot('x0', TFieldAccessExpr(AExpr).RecordName);
+      EmitInstBase('x0', TFieldAccessExpr(AExpr).RecordName,
+        TFieldAccessExpr(AExpr).IsVarParam, nil);
     Self.Emit(#9'ldr x0, [x0]');    { vtable }
     Self.Emit(#9'ldr x0, [x0]');    { typeinfo }
     if TFieldAccessExpr(AExpr).IsClassNameAccess then
@@ -5632,9 +5640,10 @@ begin
       NotYet('read of a field of this type', AExpr);
     if TFieldAccessExpr(AExpr).IsImplicitSelf then
       EmitLoadSlot('x0', 'Self')
-    else if not EmitCapturedBase('x0', TFieldAccessExpr(AExpr).RecordName,
-                 True, TFieldAccessExpr(AExpr).IsVarParam) then
-      EmitLoadSlot('x0', TFieldAccessExpr(AExpr).RecordName);
+    else
+      { through a capture; a var-param class base derefs once more }
+      EmitInstBase('x0', TFieldAccessExpr(AExpr).RecordName,
+        TFieldAccessExpr(AExpr).IsVarParam, nil);
     { Step across the intermediate field (Self.FIntermediate.Member): add its
       offset for an embedded record, or deref it for a class reference.  A
       record intermediate was the tokeniser's FToken.SubField (2026-07-23);
