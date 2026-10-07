@@ -501,6 +501,8 @@ type
     function  SetLiteralBaseEnum(AExpr: TArrayLiteralExpr): TTypeDesc;
     { Re-type set-literal args to their `set of` param type post-overload. }
     procedure RetypeSetLiteralArgs(AArgs: TObjectList; AMDecl: TMethodDecl);
+    { True when a bracket literal still holds an unexpanded lo..hi element. }
+    function  LiteralHasRange(AExpr: TArrayLiteralExpr): Boolean;
     { Re-type one bracket-literal arg against its formal's type (the per-arg
       body of RetypeSetLiteralArgs, shared with procedural-type calls). }
     procedure RetypeBracketLiteralArg(AArg: TASTExpr; AParamType: TTypeDesc);
@@ -12156,13 +12158,33 @@ begin
       TMethodParam(AMDecl.Params.Items[I]).ResolvedType);
 end;
 
+function TSemanticAnalyser.LiteralHasRange(AExpr: TArrayLiteralExpr): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 0 to AExpr.Elements.Count - 1 do
+    if TASTExpr(AExpr.Elements.Items[I]) is TSetRangeExpr then
+      Exit(True);
+end;
+
 procedure TSemanticAnalyser.RetypeBracketLiteralArg(AArg: TASTExpr;
   AParamType: TTypeDesc);
 begin
   if (AParamType = nil) or not (AArg is TArrayLiteralExpr) then
     Exit;
   if AParamType.Kind = tySet then
+  begin
+    { type the literal against the formal's set: AnalyseSetLiteralExpr also
+      expands lo..hi ranges into members, which the eager untyped analysis
+      left in place }
+    AnalyseSetLiteralExpr(TArrayLiteralExpr(AArg), TSetTypeDesc(AParamType));
     AArg.ResolvedType := AParamType;
+    Exit;
+  end;
+  if (AParamType.Kind = tyOpenArray) and LiteralHasRange(TArrayLiteralExpr(AArg)) then
+    SemanticError('A range lo..hi is only allowed in a set literal, not an ' +
+      'open-array argument', AArg.Line, AArg.Col);
   { Bracket literal bound to an 'array of const' formal: mark it so codegen
     boxes each element into a TVarRec, and pin its type to the formal's
     array-of-TVarRec (the homogeneous case was typed 'array of <T>'). }
@@ -15107,6 +15129,19 @@ begin
     Result := AnalyseStringSubscriptExpr(TStringSubscriptExpr(AExpr))
   else if AExpr is TArrayLiteralExpr then
     Result := AnalyseArrayLiteralExpr(TArrayLiteralExpr(AExpr))
+  else if AExpr is TSetRangeExpr then
+  begin
+    { lo..hi inside a bracket literal analysed before its set context is known
+      (an operand of `in` / + - * = <>, or a call argument, is analysed
+      eagerly).  Type it by its bounds; the contextual set-literal analysis
+      (AnalyseSetLiteralExpr) then expands it into members as usual. }
+    Result := AnalyseExpr(TSetRangeExpr(AExpr).LowExpr);
+    if AnalyseExpr(TSetRangeExpr(AExpr).HighExpr) <> Result then
+      if not (Result.IsNumeric() and
+              TSetRangeExpr(AExpr).HighExpr.ResolvedType.IsNumeric()) then
+        SemanticError('Set range bounds must have the same type',
+          AExpr.Line, AExpr.Col);
+  end
   else if AExpr is TNotExpr then
   begin
     Result := AnalyseExpr(TNotExpr(AExpr).Expr);
