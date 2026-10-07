@@ -24,6 +24,7 @@ type
     procedure SetUp; override;
   published
     procedure TestRun_IndirectFuncCallExpr_Shapes;
+    procedure TestRun_SelfHostingRTLServices;
     procedure TestRun_HighLow_OrdinalBounds;
     procedure TestRun_ChainedFields_ReadThroughEveryLevel;
     procedure TestRun_DefaultArgs_Materialised;
@@ -3076,6 +3077,60 @@ begin
     '18446744073709551615' + LE +
     '2 0' + LE +
     '2147483647 255 9223372036854775807' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_SelfHostingRTLServices;
+const
+  {
+    The RTL services the compiler itself is built on, as one program: command-line
+    access, file read / write / existence / age, the environment, running a shell
+    command, the path helpers, MaxInt as Copy's "rest of the string", classes
+    declared in separate type sections, and Halt's exit code. }
+  Src = '''
+    program P;
+    type
+      TA = class
+        FX: Integer;
+      end;
+    type
+      TB = class
+        FY: Integer;
+      end;
+    var
+      Path, S: string; A: TA; B: TB; Age: Int64;
+    begin
+      WriteLn(ParamCount(), ' ', ParamStr(0) <> '');
+      Path := GetTempDir() + 'blaise_e2e_selfhost.txt';
+      WriteFile(Path, 'hello');
+      WriteLn(FileExists(Path), ' ', ReadFile(Path));
+      Age := FileAge(Path);
+      WriteLn(Age > 0, ' ', FileAge(Path + '.missing'));
+      DeleteFile(Path);
+      WriteLn(FileExists(Path));
+      WriteLn(GetEnvVar('PATH') <> '', ' ', GetEnvironmentVariable('PATH') = GetEnvVar('PATH'));
+      WriteLn(Exec('true'), ' ', Exec('false') <> 0);
+      WriteLn(ChangeFileExt('test.pas', '.bak'), ' ', ExtractFileName('/usr/bin/ls'), ' ',
+        ExtractFilePath('/usr/bin/ls'), ' ', IncludeTrailingPathDelimiter('/usr/bin'));
+      S := 'abcdef';
+      WriteLn(MaxInt, ' ', Copy(S, 2, MaxInt));
+      A := TA.Create();
+      B := TB.Create();
+      WriteLn(A.ClassName, ' ', B.ClassName);
+      Halt(3)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '0 True' + LE +
+    'True hello' + LE +
+    'True -1' + LE +
+    'False' + LE +
+    'True True' + LE +
+    '0 True' + LE +
+    'test.bak ls /usr/bin/ /usr/bin/' + LE +
+    '2147483647 cdef' + LE +
+    'TA TB' + LE, 3);
 end;
 
 procedure TE2EMiscTests.TestRun_IndirectFuncCallExpr_Shapes;

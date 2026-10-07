@@ -17,12 +17,11 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TSelfHostingTests = class(TTestCase)
   private
-    function GenIR(const ASrc: string): string;
     procedure SemanticOK(const ASrc: string);
     procedure ParseOK(const ASrc: string);
   published
@@ -33,15 +32,12 @@ type
     procedure TestParse_MultiTypeSection_TypeVarTypeVar;
     procedure TestParse_MultiTypeSection_VarThenType;
     procedure TestSemantic_MultiTypeSection_TwoClasses_OK;
-    procedure TestCodegen_MultiTypeSection_BothClassesEmitted;
 
     { ------------------------------------------------------------------ }
     { ParamCount / ParamStr (Gap 2 — CLI args)                           }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_ParamCount_ReturnsInteger;
     procedure TestSemantic_ParamStr_ReturnsString;
-    procedure TestCodegen_ParamCount_CallsRTL;
-    procedure TestCodegen_ParamStr_CallsRTL;
 
     { ------------------------------------------------------------------ }
     { ReadFile / WriteFile / FileExists (Gap 2 — file I/O)               }
@@ -49,11 +45,7 @@ type
     procedure TestSemantic_ReadFile_ReturnsString;
     procedure TestSemantic_WriteFile_OK;
     procedure TestSemantic_FileExists_ReturnsBoolean;
-    procedure TestCodegen_ReadFile_CallsRTL;
-    procedure TestCodegen_WriteFile_CallsRTL;
-    procedure TestCodegen_FileExists_CallsRTL;
     procedure TestSemantic_FileAge_ReturnsInt64;
-    procedure TestCodegen_FileAge_CallsRTL;
 
     { ------------------------------------------------------------------ }
     { GetEnvVar / Exec / Halt (Gap 2 — environment and process)          }
@@ -61,11 +53,7 @@ type
     procedure TestSemantic_GetEnvVar_ReturnsString;
     procedure TestSemantic_Exec_ReturnsInteger;
     procedure TestSemantic_Halt_OK;
-    procedure TestCodegen_GetEnvVar_CallsRTL;
     procedure TestSemantic_GetEnvironmentVariable_ReturnsString;
-    procedure TestCodegen_GetEnvironmentVariable_CallsRTL;
-    procedure TestCodegen_Exec_CallsRTL;
-    procedure TestCodegen_Halt_CallsRTL;
 
     { ------------------------------------------------------------------ }
     { File path manipulation (step 11)                                    }
@@ -74,22 +62,11 @@ type
     procedure TestSemantic_ExtractFileName_ReturnsString;
     procedure TestSemantic_ExtractFilePath_ReturnsString;
     procedure TestSemantic_IncludeTrailingPathDelimiter_ReturnsString;
-    procedure TestCodegen_ChangeFileExt_CallsRTL;
-    procedure TestCodegen_ExtractFileName_CallsRTL;
-    procedure TestCodegen_ExtractFilePath_CallsRTL;
-    procedure TestCodegen_IncludeTrailingPathDelimiter_CallsRTL;
 
     { ------------------------------------------------------------------ }
     { MaxInt built-in constant                                            }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_MaxInt_ResolvesToInt64;
-    procedure TestCodegen_MaxInt_EmitsLongLiteral;
-
-    { ------------------------------------------------------------------ }
-    { Main emits argc/argv (required for ParamStr to work at runtime)    }
-    { ------------------------------------------------------------------ }
-    procedure TestCodegen_Main_HasArgcArgv;
-    procedure TestCodegen_Main_CallsSetArgs;
   end;
 
 implementation
@@ -308,29 +285,6 @@ const
 { Helpers                                                              }
 { ------------------------------------------------------------------ }
 
-function TSelfHostingTests.GenIR(const ASrc: string): string;
-var
-  Lex:  TLexer;
-  Par:  TParser;
-  SA:   TSemanticAnalyser;
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Lex  := TLexer.Create(ASrc);
-  Par  := TParser.Create(Lex);
-  Prog := Par.Parse();
-  Par.Free();
-  Lex.Free();
-  SA   := TSemanticAnalyser.Create();
-  SA.Analyse(Prog);
-  SA.Free();
-  CG   := TCodeGenQBE.Create();
-  CG.Generate(Prog);
-  Result := CG.GetOutput();
-  CG.Free();
-  Prog.Free();
-end;
-
 procedure TSelfHostingTests.SemanticOK(const ASrc: string);
 var
   Lex:  TLexer;
@@ -393,16 +347,6 @@ begin
   SemanticOK(SrcTwoClassesBothUsed);
 end;
 
-procedure TSelfHostingTests.TestCodegen_MultiTypeSection_BothClassesEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTwoClassesBothUsed);
-  { Both class type descriptors / cleanup stubs must be emitted }
-  AssertTrue('TA typeinfo emitted', Pos('typeinfo_TA', IR) > 0);
-  AssertTrue('TB typeinfo emitted', Pos('typeinfo_TB', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { Gap 2: CLI args                                                      }
 { ------------------------------------------------------------------ }
@@ -432,24 +376,6 @@ end;
 procedure TSelfHostingTests.TestSemantic_ParamStr_ReturnsString;
 begin
   SemanticOK(SrcParamStr);
-end;
-
-procedure TSelfHostingTests.TestCodegen_ParamCount_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcParamCount);
-  AssertTrue('ParamCount calls _ParamCount',
-    Pos('_ParamCount', IR) > 0);
-end;
-
-procedure TSelfHostingTests.TestCodegen_ParamStr_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcParamStr);
-  AssertTrue('ParamStr calls _ParamStr',
-    Pos('_ParamStr', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -488,30 +414,6 @@ begin
   Prog.Free();
 end;
 
-procedure TSelfHostingTests.TestCodegen_ReadFile_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcReadFile);
-  AssertTrue('ReadFile calls _ReadFile', Pos('_ReadFile', IR) > 0);
-end;
-
-procedure TSelfHostingTests.TestCodegen_WriteFile_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcWriteFile);
-  AssertTrue('WriteFile calls _WriteFile', Pos('_WriteFile', IR) > 0);
-end;
-
-procedure TSelfHostingTests.TestCodegen_FileExists_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcFileExists);
-  AssertTrue('FileExists calls _FileExists', Pos('_FileExists', IR) > 0);
-end;
-
 procedure TSelfHostingTests.TestSemantic_FileAge_ReturnsInt64;
 var
   Lex:  TLexer;
@@ -534,14 +436,6 @@ begin
   Prog.Free();
 end;
 
-procedure TSelfHostingTests.TestCodegen_FileAge_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcFileAge);
-  AssertTrue('FileAge calls _FileAge', Pos('_FileAge', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { Gap 2: environment and process                                        }
 { ------------------------------------------------------------------ }
@@ -561,41 +455,9 @@ begin
   SemanticOK(SrcHalt);
 end;
 
-procedure TSelfHostingTests.TestCodegen_GetEnvVar_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGetEnvVar);
-  AssertTrue('GetEnvVar calls _GetEnvVar', Pos('_GetEnvVar', IR) > 0);
-end;
-
 procedure TSelfHostingTests.TestSemantic_GetEnvironmentVariable_ReturnsString;
 begin
   SemanticOK(SrcGetEnvironmentVariable);
-end;
-
-procedure TSelfHostingTests.TestCodegen_GetEnvironmentVariable_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGetEnvironmentVariable);
-  AssertTrue('GetEnvironmentVariable calls _GetEnvVar', Pos('_GetEnvVar', IR) > 0);
-end;
-
-procedure TSelfHostingTests.TestCodegen_Exec_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcExec);
-  AssertTrue('Exec calls _Exec', Pos('_Exec', IR) > 0);
-end;
-
-procedure TSelfHostingTests.TestCodegen_Halt_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcHalt);
-  AssertTrue('Halt calls $exit or _Halt', Pos('exit', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -622,39 +484,6 @@ begin
   SemanticOK(SrcIncludeTrailingPathDelimiter);
 end;
 
-procedure TSelfHostingTests.TestCodegen_ChangeFileExt_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcChangeFileExt);
-  AssertTrue('ChangeFileExt calls _ChangeFileExt', Pos('_ChangeFileExt', IR) > 0);
-end;
-
-procedure TSelfHostingTests.TestCodegen_ExtractFileName_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcExtractFileName);
-  AssertTrue('ExtractFileName calls _ExtractFileName', Pos('_ExtractFileName', IR) > 0);
-end;
-
-procedure TSelfHostingTests.TestCodegen_ExtractFilePath_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcExtractFilePath);
-  AssertTrue('ExtractFilePath calls _ExtractFilePath', Pos('_ExtractFilePath', IR) > 0);
-end;
-
-procedure TSelfHostingTests.TestCodegen_IncludeTrailingPathDelimiter_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcIncludeTrailingPathDelimiter);
-  AssertTrue('IncludeTrailingPathDelimiter calls _IncludeTrailingPathDelimiter',
-    Pos('_IncludeTrailingPathDelimiter', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { MaxInt built-in constant                                            }
 { ------------------------------------------------------------------ }
@@ -662,36 +491,6 @@ end;
 procedure TSelfHostingTests.TestSemantic_MaxInt_ResolvesToInt64;
 begin
   SemanticOK(SrcMaxInt);
-end;
-
-procedure TSelfHostingTests.TestCodegen_MaxInt_EmitsLongLiteral;
-var
-  IR: string;
-begin
-  { MaxInt is a 32-bit Integer constant (2147483647) in Blaise; Copy(S,N,MaxInt)
-    passes it as w to _StringCopy, which treats any value >= slen as "rest of string". }
-  IR := GenIR(SrcMaxInt);
-  AssertTrue('MaxInt emits 32-bit literal',
-    Pos('2147483647', IR) > 0);
-  AssertTrue('MaxInt emits w-typed copy',
-    Pos('=w copy 2147483647', IR) > 0);
-end;
-
-procedure TSelfHostingTests.TestCodegen_Main_HasArgcArgv;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcHalt);
-  AssertTrue('$main declares argc param', Pos('%argc', IR) > 0);
-  AssertTrue('$main declares argv param', Pos('%argv', IR) > 0);
-end;
-
-procedure TSelfHostingTests.TestCodegen_Main_CallsSetArgs;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcHalt);
-  AssertTrue('$main calls _SetArgs at startup', Pos('_SetArgs', IR) > 0);
 end;
 
 initialization
