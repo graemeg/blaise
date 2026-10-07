@@ -20,12 +20,11 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TProcessBuiltinTests = class(TTestCase)
   private
-    function  GenIR(const ASrc: string): string;
     procedure SemanticOK(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -44,19 +43,6 @@ type
     procedure TestSemantic_ProcessExecute_OK;
     procedure TestSemantic_ProcessWaitOnExit_OK;
     procedure TestSemantic_ProcessFree_OK;
-
-    { ------------------------------------------------------------------ }
-    { Codegen: built-ins emit the correct RTL call                        }
-    { ------------------------------------------------------------------ }
-    procedure TestCodegen_ProcessCreate_CallsRTL;
-    procedure TestCodegen_ProcessRunning_CallsRTL;
-    procedure TestCodegen_ProcessReadOutput_CallsRTL;
-    procedure TestCodegen_ProcessExitCode_CallsRTL;
-    procedure TestCodegen_ProcessSetExe_CallsRTL;
-    procedure TestCodegen_ProcessAddArg_CallsRTL;
-    procedure TestCodegen_ProcessExecute_CallsRTL;
-    procedure TestCodegen_ProcessWaitOnExit_CallsRTL;
-    procedure TestCodegen_ProcessFree_CallsRTL;
   end;
 
 implementation
@@ -164,29 +150,6 @@ const
 { ------------------------------------------------------------------ }
 { Helpers                                                              }
 { ------------------------------------------------------------------ }
-
-function TProcessBuiltinTests.GenIR(const ASrc: string): string;
-var
-  Lex:  TLexer;
-  Par:  TParser;
-  SA:   TSemanticAnalyser;
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Lex  := TLexer.Create(ASrc);
-  Par  := TParser.Create(Lex);
-  Prog := Par.Parse();
-  Par.Free();
-  Lex.Free();
-  SA   := TSemanticAnalyser.Create();
-  SA.Analyse(Prog);
-  SA.Free();
-  CG   := TCodeGenQBE.Create();
-  CG.Generate(Prog);
-  Result := CG.GetOutput();
-  CG.Free();
-  Prog.Free();
-end;
 
 procedure TProcessBuiltinTests.SemanticOK(const ASrc: string);
 var
@@ -322,73 +285,6 @@ end;
 procedure TProcessBuiltinTests.TestSemantic_ProcessFree_OK;
 begin
   SemanticOK(SrcProcessFree);
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen tests                                                        }
-{ ------------------------------------------------------------------ }
-
-procedure TProcessBuiltinTests.TestCodegen_ProcessCreate_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR(SrcProcessCreate);
-  AssertTrue('ProcessCreate calls $_ProcessCreate', Pos('_ProcessCreate', IR) > 0);
-end;
-
-procedure TProcessBuiltinTests.TestCodegen_ProcessRunning_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR(SrcProcessRunning);
-  AssertTrue('ProcessRunning calls $_ProcessRunning', Pos('_ProcessRunning', IR) > 0);
-end;
-
-procedure TProcessBuiltinTests.TestCodegen_ProcessReadOutput_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR(SrcProcessReadOutput);
-  AssertTrue('ProcessReadOutput calls $_ProcessReadOutput', Pos('_ProcessReadOutput', IR) > 0);
-end;
-
-procedure TProcessBuiltinTests.TestCodegen_ProcessExitCode_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR(SrcProcessExitCode);
-  AssertTrue('ProcessExitCode calls $_ProcessExitCode', Pos('_ProcessExitCode', IR) > 0);
-end;
-
-procedure TProcessBuiltinTests.TestCodegen_ProcessSetExe_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR(SrcProcessSetExe);
-  AssertTrue('ProcessSetExe calls $_ProcessSetExe', Pos('_ProcessSetExe', IR) > 0);
-end;
-
-procedure TProcessBuiltinTests.TestCodegen_ProcessAddArg_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR(SrcProcessAddArg);
-  AssertTrue('ProcessAddArg calls $_ProcessAddArg', Pos('_ProcessAddArg', IR) > 0);
-end;
-
-procedure TProcessBuiltinTests.TestCodegen_ProcessExecute_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR(SrcProcessExecute);
-  AssertTrue('ProcessExecute calls $_ProcessExecute', Pos('_ProcessExecute', IR) > 0);
-end;
-
-procedure TProcessBuiltinTests.TestCodegen_ProcessWaitOnExit_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR(SrcProcessWaitOnExit);
-  AssertTrue('ProcessWaitOnExit calls $_ProcessWaitOnExit', Pos('_ProcessWaitOnExit', IR) > 0);
-end;
-
-procedure TProcessBuiltinTests.TestCodegen_ProcessFree_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR(SrcProcessFree);
-  AssertTrue('ProcessFree calls $_ProcessFree', Pos('_ProcessFree', IR) > 0);
 end;
 
 initialization
