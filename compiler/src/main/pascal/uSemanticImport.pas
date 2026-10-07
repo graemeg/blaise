@@ -224,6 +224,33 @@ end;
   context type, uniqueness, or last-wins), so two enums in scope may
   legitimately share a member name.  Defining them here made a warm build
   hard-error on a duplicate member name where a cold build compiled. }
+{ Define an imported type symbol (a pass-1 class / record / interface stub, or
+  an enum, set, alias or procedural type).  A name
+  already taken by a type from a DIFFERENT unit is a cross-unit collision:
+  last-in-uses wins, as DefineTypeLastWins does on the source path and
+  RegisterVars / RegisterConsts do here.  The prior unit's type stays
+  reachable for a qualified Unit.Type through its per-unit cache, filled by
+  RegisterUnitIface when that unit was imported.  Freeing the stub instead
+  left the earlier unit's descriptor in the slot, and pass 2 then filled it
+  with THIS unit's members, merging two classes into one.  A built-in type
+  (no owning unit) is still reused, as before. }
+procedure DefineImportedType(ASym: TSymbol; ATable: TSymbolTable;
+  const AUnitName: string);
+var
+  Existing: TSymbol;
+begin
+  if ATable.Define(ASym) then Exit;
+  Existing := ATable.CurrentScope.LookupLocal(ASym.Name);
+  if (Existing <> nil) and (Existing.Kind = skType) and
+     (Existing.OwningUnit <> '') and
+     not SameText(Existing.OwningUnit, AUnitName) then
+  begin
+    ATable.ExtractLocal(ASym.Name);
+    if ATable.Define(ASym) then Exit;
+  end;
+  ASym.Free();
+end;
+
 procedure RegisterEnum(AEntry: TTypeEntry; ATable: TSymbolTable;
                        const AUnitName: string;
                        ASemantic: TSemanticAnalyser);
@@ -248,7 +275,7 @@ begin
   end;
   Sym := TSymbol.Create(AEntry.Name, skType, EnumDesc);
   Sym.OwningUnit := AUnitName;
-  if not ATable.Define(Sym) then Sym.Free();
+  DefineImportedType(Sym, ATable, AUnitName);
 end;
 
 procedure RegisterSet(AEntry: TTypeEntry; ATable: TSymbolTable;
@@ -278,7 +305,7 @@ begin
     SetDesc := ATable.NewOrdinalSetType(AEntry.Name, ATable.TypeByte, Hi + 1);
     Sym := TSymbol.Create(AEntry.Name, skType, SetDesc);
     Sym.OwningUnit := AUnitName;
-    if not ATable.Define(Sym) then Sym.Free();
+    DefineImportedType(Sym, ATable, AUnitName);
     Exit;
   end;
   BaseSym := ATable.Lookup(SetDef.BaseTypeName);
@@ -300,7 +327,7 @@ begin
       [AEntry.Name, SetDef.BaseTypeName]);
   Sym := TSymbol.Create(AEntry.Name, skType, SetDesc);
   Sym.OwningUnit := AUnitName;
-  if not ATable.Define(Sym) then Sym.Free();
+  DefineImportedType(Sym, ATable, AUnitName);
 end;
 
 { Resolve a class parent reference into the symbol table.  Returns nil
@@ -1010,7 +1037,7 @@ begin
   end;
   Sym := TSymbol.Create(AEntry.Name, skType, ProcDesc);
   Sym.OwningUnit := AUnitName;
-  if not ATable.Define(Sym) then Sym.Free();
+  DefineImportedType(Sym, ATable, AUnitName);
 end;
 
 procedure RegisterAlias(AEntry: TTypeEntry; ATable: TSymbolTable;
@@ -1073,7 +1100,7 @@ begin
   end;
   Sym := TSymbol.Create(AEntry.Name, skType, AliasDesc);
   Sym.OwningUnit := AUnitName;
-  if not ATable.Define(Sym) then Sym.Free();
+  DefineImportedType(Sym, ATable, AUnitName);
 end;
 
 procedure RegisterTypes(AIface: TUnitInterface; ATable: TSymbolTable;
@@ -1097,19 +1124,19 @@ begin
     begin
       Sym := TSymbol.Create(Entry.Name, skType, ATable.NewClassType(Entry.Name));
       Sym.OwningUnit := AIface.Name;
-      if not ATable.Define(Sym) then Sym.Free();
+      DefineImportedType(Sym, ATable, AIface.Name);
     end
     else if Entry.Def is TRecordTypeDef then
     begin
       Sym := TSymbol.Create(Entry.Name, skType, ATable.NewRecordType(Entry.Name));
       Sym.OwningUnit := AIface.Name;
-      if not ATable.Define(Sym) then Sym.Free();
+      DefineImportedType(Sym, ATable, AIface.Name);
     end
     else if Entry.Def is TInterfaceTypeDef then
     begin
       Sym := TSymbol.Create(Entry.Name, skType, ATable.NewInterfaceType(Entry.Name));
       Sym.OwningUnit := AIface.Name;
-      if not ATable.Define(Sym) then Sym.Free();
+      DefineImportedType(Sym, ATable, AIface.Name);
     end;
   end;
 

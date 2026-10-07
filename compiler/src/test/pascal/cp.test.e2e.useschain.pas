@@ -59,6 +59,7 @@ type
       winner, so both values are readable side by side. }
     procedure TestRun_CrossUnitVar_QualifiedDisambig;
     procedure TestRun_CrossUnitVar_SameName_DistinctStorage;
+    procedure TestRun_CrossUnitTypes_WarmCache_LastWinsFollowsUses;
     { Cross-unit TYPE shadowing: two used units export a class of the same name;
       they coexist (no 'Duplicate type name' error, no link collision) and a
       bare reference binds to the unit later in `uses` (last-in-uses wins),
@@ -631,6 +632,65 @@ begin
     CompileAndRunWithUnits(TCA_Type, TCB_Type, DrvSrc, Output, RCode));
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('tca.TShape then tcb.TShape', '3' + LE + '4' + LE, Output);
+end;
+
+procedure TE2EUsesChainTests.TestRun_CrossUnitTypes_WarmCache_LastWinsFollowsUses;
+const
+  { Two units declare a class TShape and an enum TPalette of the same names.
+    The first program caches both units; the second loads them from that
+    cache in the opposite uses order.  A cached unit's type used to be
+    dropped on a name collision and its members merged into the other
+    unit's type, so the warm build bound the wrong class and lost the
+    second unit's enum members. }
+  UnitA = '''
+    unit wca;
+    interface
+    type
+      TShape = class function Sides: Integer; end;
+      TPalette = (paOne, paTwo, paThree);
+    implementation
+    function TShape.Sides: Integer; begin Result := 3 end;
+    end.
+    ''';
+  UnitB = '''
+    unit wcb;
+    interface
+    type
+      TShape = class function Sides: Integer; end;
+      TPalette = (paZero, paOne);
+    implementation
+    function TShape.Sides: Integer; begin Result := 4 end;
+    end.
+    ''';
+  ProgAB = '''
+    program P;
+    uses wca, wcb;
+    var S: TShape;
+    begin
+      S := TShape.Create();
+      WriteLn(S.Sides(), ' ', Ord(wca.TPalette.paThree), ' ', Ord(wcb.TPalette.paZero))
+    end.
+    ''';
+  ProgBA = '''
+    program P;
+    uses wcb, wca;
+    var S: TShape; A: wca.TShape; B: wcb.TShape;
+    begin
+      S := TShape.Create(); A := wca.TShape.Create(); B := wcb.TShape.Create();
+      WriteLn(S.Sides(), ' ', A.Sides(), B.Sides(), ' ',
+        Ord(wca.TPalette.paThree), ' ', Ord(wcb.TPalette.paZero))
+    end.
+    ''';
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('cold compile+link+run: ' + Output,
+    CompileAndRunWithUnits(UnitA, UnitB, ProgAB, Output, RCode));
+  AssertEquals('cold: last-in-uses (wcb) wins', '4 2 0' + LE, Output);
+  AssertTrue('warm compile+link+run: ' + Output,
+    CompileAndRunWithUnits(UnitA, UnitB, ProgBA, Output, RCode));
+  AssertEquals('warm: last-in-uses (wca) wins, qualified names keep their unit',
+    '3 34 2 0' + LE, Output);
 end;
 
 const
