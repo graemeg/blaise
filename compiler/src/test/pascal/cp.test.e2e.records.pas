@@ -22,6 +22,9 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Record_ByValManagedArgs_LeakFree;
+    procedure TestRun_Record_Sizes;
+    procedure TestRun_Record_FloatFieldWidthCoercion;
     procedure TestRun_ChainedRecordFieldStore_AllKinds;
     procedure TestRun_Record_FieldReadWrite;
     procedure TestRun_Record_PassByValue;
@@ -1933,6 +1936,125 @@ begin
     end.
     ''', '10 120 30' + LE + '4 105 6' + LE + 'a bX c' + LE + '1 99' + LE +
          '1 102 3' + LE + '1 102 3' + LE, 0);
+end;
+
+procedure TE2ERecordsTests.TestRun_Record_FloatFieldWidthCoercion;
+const
+  {
+    A real literal stored into a Single record field is narrowed first, and a
+    Single stored into a Double field is widened; storing the wrong width would
+    garble the value or overrun into the neighbouring field. }
+  Src = '''
+    program P;
+    type
+      TS = record V: Single; N: Integer; end;
+      TD = record V: Double; N: Integer; end;
+    var R: TS; D: TD; S: Single;
+    begin
+      R.N := 7;
+      R.V := 1.5;
+      WriteLn(R.V:0:2, ' ', R.N);
+      D.N := 9;
+      S := 0.25;
+      D.V := S;
+      WriteLn(D.V:0:3, ' ', D.N)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '1.50 7' + LE +
+    '0.250 9' + LE, 0);
+end;
+
+procedure TE2ERecordsTests.TestRun_Record_Sizes;
+const
+  {
+    Record and type sizes: two Integers are 8 bytes, a string field is one
+    8-byte reference, SizeOf(Byte) is 1 and four Byte fields pack into 4. }
+  Src = '''
+    program P;
+    type
+      TRect = record L: Integer; T: Integer; end;
+      TPerson = record Name: string; end;
+      TFourBytes = record A, B, C, D: Byte; end;
+    begin
+      WriteLn(SizeOf(TRect), ' ', SizeOf(TPerson), ' ', SizeOf(Byte), ' ',
+        SizeOf(TFourBytes))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '8 8 1 4' + LE, 0);
+end;
+
+procedure TE2ERecordsTests.TestRun_Record_ByValManagedArgs_LeakFree;
+const
+  {
+    By-value managed record arguments, under the --debug leak tracker.  The callee
+    takes its own reference to each string / dyn-array field (mutating its copy
+    must not free the caller's), an inline call result passed by value is cleaned
+    up by the caller including its nested record's field, and passing a named
+    variable adds no extra release.  A missing retain shows up as a corrupted
+    caller field, a missing release as a leak report. }
+  Src = '''
+    program P;
+    type
+      TIA = array of Integer;
+      TR = record S: string; A: TIA; end;
+      TInner = record N: string; end;
+      TOuter = record S: string; Inner: TInner; end;
+    procedure Mut(R: TR);
+    var Tmp: TIA;
+    begin
+      R.S := 'callee-' + 'side';
+      SetLength(Tmp, 1);
+      Tmp[0] := 99;
+      R.A := Tmp
+    end;
+    procedure ReadOnly(const R: TR);
+    begin
+      WriteLn(Length(R.S), ' ', Length(R.A))
+    end;
+    function MakeOuter: TOuter;
+    begin
+      Result.S := 'outer-' + 'heap';
+      Result.Inner.N := 'inner-' + 'heap'
+    end;
+    procedure Consume(R: TOuter);
+    begin
+      WriteLn(R.S, '|', R.Inner.N)
+    end;
+    procedure Driver;
+    var W: TOuter;
+    begin
+      Consume(MakeOuter());
+      W.S := 'named-' + 'arg';
+      W.Inner.N := 'named-' + 'inner';
+      Consume(W);
+      WriteLn(W.S, '|', W.Inner.N)
+    end;
+    var W: TR;
+    begin
+      W.S := 'caller-' + 'side';
+      SetLength(W.A, 2);
+      W.A[1] := 5;
+      Mut(W);
+      ReadOnly(W);
+      WriteLn(W.S, ' ', W.A[1]);
+      Driver()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '11 2' + LE +
+    'caller-side 5' + LE +
+    'outer-heap|inner-heap' + LE +
+    'named-arg|named-inner' + LE +
+    'named-arg|named-inner' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'caller-side 5');
 end;
 
 initialization

@@ -11,15 +11,14 @@ unit cp.test.records;
 interface
 
 uses
-  blaise.testing, strutils,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  blaise.testing,
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TRecordTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -60,17 +59,7 @@ type
     { ------------------------------------------------------------------ }
     { Code generation                                                     }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_RecordVar_HasAlloc;
-    procedure TestCodegen_FieldStore_EmitsOffset;
-    procedure TestCodegen_FieldLoad_EmitsOffset;
-    { Real-typed literals and double sub-expressions land in the SSA
-      at double width; storing them into a Single record field needs
-      an explicit narrowing or the IR is type-mismatched and the
-      assembler refuses to lower it. }
-    procedure TestCodegen_FieldStore_DoubleLiteralToSingleField_Trunced;
-    procedure TestCodegen_FieldStore_SingleSrcToDoubleField_Extended;
-    procedure TestCodegen_TwoIntFields_CorrectSize;
-    procedure TestCodegen_StringField_CorrectSize;
+    procedure TestCodegen_ConstRecordParam_NoAddRef;
 
     { ------------------------------------------------------------------ }
     { Byte sizing and record packing                                      }
@@ -78,21 +67,9 @@ type
     procedure TestSemantic_FourByteRecord_TotalSizeIs4;
     procedure TestSemantic_ByteThenInteger_AlignsInteger;
     procedure TestSemantic_ByteFieldOffsets_Are0123;
-    procedure TestCodegen_SizeOfByte_Is1;
-    procedure TestCodegen_SizeOfFourByteRecord_Is4;
     { Single is a 4-byte IEEE-754 float — alignment 4, not 8.  A record
       of three back-to-back Single fields totals 12 bytes, not 24. }
     procedure TestSemantic_ThreeSingleRecord_TotalSizeIs12;
-
-    { ------------------------------------------------------------------ }
-    { By-value record param ARC — managed fields                          }
-    { ------------------------------------------------------------------ }
-    procedure TestCodegen_RecordByValParam_StringField_AddRefRelease;
-    procedure TestCodegen_RecordByValParam_DynArrayField_AddRefRelease;
-    procedure TestCodegen_RecordByValParam_ConstParam_NoARC;
-    procedure TestCodegen_RecordByValArg_CallResultTemp_CleansFields;
-    procedure TestCodegen_RecordByValArg_VarRef_DoesNotClean;
-    procedure TestCodegen_RecordByValArg_NestedManagedField_Recurses;
   end;
 
 implementation
@@ -126,25 +103,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TRecordTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -666,138 +624,6 @@ end;
 { Code generation                                                     }
 { ------------------------------------------------------------------ }
 
-procedure TRecordTests.TestCodegen_RecordVar_HasAlloc;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TPoint = record
-            X: Integer;
-          end;
-        var Pt: TPoint;
-        begin end.
-        ''');
-  { Program-level record var Pt is a data-section global }
-  AssertTrue('data decl for Pt', Pos('$Pt', IR) > 0);
-end;
-
-procedure TRecordTests.TestCodegen_FieldStore_EmitsOffset;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TPoint = record
-            X: Integer;
-          end;
-        var Pt: TPoint;
-        begin
-          Pt.X := 10
-        end.
-        ''');
-  AssertTrue('storew in IR', Pos('storew', IR) > 0);
-end;
-
-procedure TRecordTests.TestCodegen_FieldLoad_EmitsOffset;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TPoint = record
-            X: Integer;
-          end;
-        var Pt: TPoint; N: Integer;
-        begin
-          N := Pt.X
-        end.
-        ''');
-  AssertTrue('loadw in IR', Pos('loadw', IR) > 0);
-end;
-
-procedure TRecordTests.TestCodegen_FieldStore_DoubleLiteralToSingleField_Trunced;
-var IR: string;
-begin
-  { Assigning a real-typed literal to a Single record field must emit a
-    narrowing before the store; previously the IR contained
-    'stores d_<lit>, ...' which the assembler rejected as a type
-    mismatch on the operand width. }
-  IR := GenIR(
-    '''
-        program P;
-        type TRec = record v: Single; end;
-        var r: TRec;
-        begin r.v := 1.5 end.
-        ''');
-  AssertTrue('field-store narrows double literal to single (truncd)',
-    Pos('truncd', IR) > 0);
-  { The bug shape: a double-typed literal stored straight into the
-    Single field's storage slot. }
-  AssertFalse('field-store MUST NOT directly store a double into a single slot',
-    Pos('stores d_', IR) > 0);
-end;
-
-procedure TRecordTests.TestCodegen_FieldStore_SingleSrcToDoubleField_Extended;
-var IR: string;
-begin
-  { Symmetric direction: a Single value stored into a Double record
-    field must be extended first.  Verifies the coercion is bidirectional
-    and not just a half-fix. }
-  IR := GenIR(
-    '''
-        program P;
-        type TRec = record v: Double; end;
-        var r: TRec; s: Single;
-        begin s := 0.5; r.v := s end.
-        ''');
-  AssertTrue('field-store widens single source to double (exts)',
-    Pos(' =d exts ', IR) > 0);
-end;
-
-procedure TRecordTests.TestCodegen_TwoIntFields_CorrectSize;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TRect = record
-            L: Integer;
-            T: Integer;
-          end;
-        var R: TRect;
-        begin end.
-        ''');
-  { Two Integer fields = 8 bytes total; program-level record uses data section }
-  AssertTrue('8-byte record in data section', Pos('z 8', IR) > 0);
-end;
-
-procedure TRecordTests.TestCodegen_StringField_CorrectSize;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TPerson = record
-            Name: string;
-          end;
-        var Person: TPerson;
-        begin end.
-        ''');
-  { One string field = 8 bytes; program-level record uses data section }
-  AssertTrue('8-byte record in data section', Pos('z 8', IR) > 0);
-end;
-
 procedure TRecordTests.TestSemantic_FourByteRecord_TotalSizeIs4;
 const
   Src =
@@ -887,46 +713,6 @@ begin
   end;
 end;
 
-procedure TRecordTests.TestCodegen_SizeOfByte_Is1;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        var N: Integer;
-        begin
-          N := SizeOf(Byte)
-        end.
-        ''');
-  { SizeOf(Byte) should be a compile-time literal 1, not 4 }
-  AssertTrue('SizeOf(Byte) emits copy 1', Pos('copy 1', IR) > 0);
-  AssertFalse('SizeOf(Byte) does not emit copy 4', Pos('copy 4', IR) > 0);
-end;
-
-procedure TRecordTests.TestCodegen_SizeOfFourByteRecord_Is4;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TFourBytes = record
-            A: Byte;
-            B: Byte;
-            C: Byte;
-            D: Byte;
-          end;
-        var N: Integer;
-        begin
-          N := SizeOf(TFourBytes)
-        end.
-        ''');
-  AssertTrue('SizeOf(TFourBytes) emits copy 4', Pos('copy 4', IR) > 0);
-  AssertFalse('not 16', Pos('copy 16', IR) > 0);
-end;
-
 procedure TRecordTests.TestSemantic_ThreeSingleRecord_TotalSizeIs12;
 const
   Src =
@@ -956,159 +742,40 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
-{ By-value record param ARC                                           }
+{ Code generation                                                     }
 { ------------------------------------------------------------------ }
 
-{ When a record with a managed (string/dynarray/interface/class) field
-  is passed by value, the callee operates on QBE's materialised
-  aggregate.  The callee must AddRef each managed leaf on entry and
-  Release each on exit so that in-callee field reassignment's
-  release-old does not free the caller's shared heap data. }
-procedure TRecordTests.TestCodegen_RecordByValParam_StringField_AddRefRelease;
+procedure TRecordTests.TestCodegen_ConstRecordParam_NoAddRef;
+const
+  Src = '''
+    program P;
+    type TR = record S: string; end;
+    procedure ReadOnly(const R: TR);
+    var L: Integer;
+    begin
+      L := Length(R.S);
+      WriteLn(L)
+    end;
+    begin end.
+    ''';
 var
-  IR: string;
+  I: Integer;
+  Target: string;
 begin
-  IR := GenIR(
-    '''
-        program P;
-        type TR = record S: string; end;
-        procedure Mut(R: TR); begin R.S := 'x'; end;
-        var W: TR;
-        begin W.S := ''; Mut(W) end.
-        ''');
-  AssertTrue('addref on entry to Mut', Pos('_StringAddRef', IR) > 0);
-  AssertTrue('release on exit from Mut', Pos('_StringRelease', IR) > 0);
-end;
-
-procedure TRecordTests.TestCodegen_RecordByValParam_DynArrayField_AddRefRelease;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TIA = array of Integer;
-          TR  = record A: TIA; end;
-        procedure Mut(R: TR);
-        var Tmp: TIA;
-        begin SetLength(Tmp, 1); R.A := Tmp end;
-        var W: TR;
-        begin Mut(W) end.
-        ''');
-  AssertTrue('addref dynarray on entry to Mut',
-    Pos('_DynArrayAddRef', IR) > 0);
-  AssertTrue('release dynarray on exit from Mut',
-    Pos('_DynArrayRelease', IR) > 0);
-end;
-
-{ const params skip the ARC retain/release pair — the caller keeps the
-  object alive for the whole call.  A record by-const-value param with
-  no other managed locals must therefore emit no AddRef/Release at all. }
-procedure TRecordTests.TestCodegen_RecordByValParam_ConstParam_NoARC;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TR = record S: string; end;
-        procedure ReadOnly(const R: TR);
-        var L: Integer;
-        begin L := Length(R.S) end;
-        begin end.
-        ''');
-  { The only managed entity in the routine is R.S, and R is const, so
-    no _StringAddRef should appear anywhere in the emitted IR. }
-  AssertEquals('no AddRef anywhere for const record param',
-    -1, Pos('_StringAddRef', IR));
-end;
-
-{ Caller-side: DoSomething(GetRec()) — the sret temporary from GetRec is
-  consumed by DoSomething and not bound to a named variable.  The call
-  site must release each managed leaf of the temp buffer after the call,
-  otherwise the temp's heap string leaks every time the caller runs. }
-procedure TRecordTests.TestCodegen_RecordByValArg_CallResultTemp_CleansFields;
-var
-  IR, DriverBody: string;
-  StartIdx, EndIdx: Integer;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TR = record S: string; end;
-        function MakeIt: TR; begin Result.S := 'x' end;
-        procedure Consume(R: TR); begin end;
-        procedure Driver; begin Consume(MakeIt()) end;
-        begin Driver() end.
-        ''');
-  StartIdx := Pos('$Driver(', IR);
-  AssertTrue('Driver emitted', StartIdx > 0);
-  EndIdx := StartIdx;
-  while (EndIdx <= Length(IR)) and (IR[EndIdx] <> '}') do Inc(EndIdx);
-  DriverBody := Copy(IR, StartIdx, EndIdx - StartIdx);
-  AssertTrue('Driver releases temp''s string field after Consume() call',
-    Pos('_StringRelease', DriverBody) > 0);
-end;
-
-{ Caller-side, variable arg: DoSomething(W) where W is a named record
-  variable.  The variable's storage belongs to the enclosing scope (and
-  is cleaned up at scope exit), so the call site must NOT emit a
-  per-field Release after the call — doing so would corrupt W. }
-procedure TRecordTests.TestCodegen_RecordByValArg_VarRef_DoesNotClean;
-var
-  IR, DriverBody: string;
-  StartIdx, EndIdx: Integer;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TR = record S: string; end;
-        procedure Consume(R: TR); begin end;
-        procedure Driver;
-        var W: TR;
-        begin W.S := 'x'; Consume(W) end;
-        begin Driver() end.
-        ''');
-  StartIdx := Pos('$Driver(', IR);
-  AssertTrue('Driver emitted', StartIdx > 0);
-  EndIdx := StartIdx;
-  while (EndIdx <= Length(IR)) and (IR[EndIdx] <> '}') do Inc(EndIdx);
-  DriverBody := Copy(IR, StartIdx, EndIdx - StartIdx);
-  { Two pre-existing _StringReleases: (1) release-old in W.S := 'x' and
-    (2) W's scope-exit cleanup.  My call-site cleanup must NOT add a
-    third for the Consume(W) call site — W is a named variable, not a
-    temp.  Three Releases would indicate the call site corrupted W. }
-  AssertEquals('no extra _StringRelease at variable-arg call site',
-    2, CountOccurrences('_StringRelease', DriverBody));
-end;
-
-{ Nested-record-with-managed-leaf temporary: the helper recurses through
-  TInner so both the outer string and the inner string get released. }
-procedure TRecordTests.TestCodegen_RecordByValArg_NestedManagedField_Recurses;
-var
-  IR, DriverBody: string;
-  StartIdx, EndIdx: Integer;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TInner = record N: string; end;
-          TOuter = record S: string; Inner: TInner; end;
-        function MakeIt: TOuter;
-        begin Result.S := 'a'; Result.Inner.N := 'b' end;
-        procedure Consume(R: TOuter); begin end;
-        procedure Driver; begin Consume(MakeIt()) end;
-        begin Driver() end.
-        ''');
-  StartIdx := Pos('$Driver(', IR);
-  AssertTrue('Driver emitted', StartIdx > 0);
-  EndIdx := StartIdx;
-  while (EndIdx <= Length(IR)) and (IR[EndIdx] <> '}') do Inc(EndIdx);
-  DriverBody := Copy(IR, StartIdx, EndIdx - StartIdx);
-  AssertEquals('two _StringRelease — outer.S and inner.N — after Consume call',
-    2, CountOccurrences('_StringRelease', DriverBody));
+  { A const record parameter is borrowed: the callee neither retains nor
+    releases its managed fields.  An extra retain/release pair would be
+    balanced, so a running program cannot see it -- only the code can. }
+  for I := 0 to 1 do
+  begin
+    if I = 0 then
+      Target := TargetX86_64
+    else
+      Target := TargetArm64;
+    AssertTrue(Target + ': no AddRef for a const record param',
+      Pos('_StringAddRef', GenAsm(Src, Target)) < 0);
+    AssertTrue(Target + ': no Release for a const record param',
+      Pos('_StringRelease', GenAsm(Src, Target)) < 0);
+  end;
 end;
 
 initialization
