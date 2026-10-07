@@ -2292,11 +2292,21 @@ begin
   if ADecl.EnvCaptured.IndexOf('Self') >= 0 then
   begin
     if Env.FindField('Self').IsWeak then
-      NotYet('[Weak Self] closure capture', ADecl);
-    EmitLoadSlot('x0', 'Self');
-    EmitLoadSlot('x9', '_cap_Self');
-    Self.Emit(#9'str x0, [x9]');
-    EmitCallSym('_ClassAddRef');
+    begin
+      { [Weak Self]: the env field is registered in the weak table -- no
+        reference held, nil'd when the receiver dies (the env cleanup
+        deregisters it); x86-64 parity }
+      EmitLoadSlot('x0', '_cap_Self');
+      EmitLoadSlot('x1', 'Self');
+      EmitCallSym('_WeakAssign');
+    end
+    else
+    begin
+      EmitLoadSlot('x0', 'Self');
+      EmitLoadSlot('x9', '_cap_Self');
+      Self.Emit(#9'str x0, [x9]');
+      EmitCallSym('_ClassAddRef');
+    end;
   end;
   { captured VALUE parameters: copy the spilled param into its env field;
     a managed value takes the env's own reference }
