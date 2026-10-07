@@ -12165,6 +12165,7 @@ var
   IsVariadicArg: Boolean;
   LitBase, LitOff, ESz, N: Integer;
   RecBase, RecOff: Integer;
+  RecSaved: Boolean;
   NarrowFix: Boolean;
   JTmp: string;
   JNB: Integer;
@@ -13021,6 +13022,49 @@ begin
         transient) also lands here for its single release. }
       EmitCallSym('_StringRelease');
     end;
+    Self.Emit(#9'ldp d2, d3, [sp], #16');
+    Self.Emit(#9'ldp d0, d1, [sp], #16');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+  end;
+  { A record-CALL argument (Consume(MakeRec())) was materialised into a
+    scratch buffer in the RecBase region and holds the producing call's
+    references to its managed fields.  The callee only co-owns (by value) or
+    borrows (const) them, so the caller releases them now -- they leaked
+    before (x86-64's call-result temp cleanup).  The buffers are still in
+    place: sp is back at the outgoing area's base, so buffer I sits at
+    sp + RecBase + its offset, in argument order (lockstep with the sizing
+    walk and the materialisation above). }
+  RecOff := 0;
+  RecSaved := False;
+  for I := 0 to AArgs.Count - 1 do
+  begin
+    Arg := TASTExpr(AArgs.Items[I]);
+    if (I < ADecl.Params.Count) and
+       (TMethodParam(ADecl.Params.Items[I]).IsOpenArray or
+        TMethodParam(ADecl.Params.Items[I]).IsVarParam) then
+      Continue;
+    if not IsRecordCallArg(Arg) then
+      Continue;
+    if not RecretManagedClean(TRecordTypeDesc(Arg.ResolvedType)) then
+    begin
+      if not RecSaved then
+      begin
+        { the call result survives in ALL its registers (see TransN above) }
+        Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+        Self.Emit(#9'stp d0, d1, [sp, #-16]!');
+        Self.Emit(#9'stp d2, d3, [sp, #-16]!');
+        Self.Emit(#9'str x19, [sp, #-16]!');
+        RecSaved := True;
+      end;
+      EmitAddSubImm('add', 'x19', 'sp', 64 + RecBase + RecOff);
+      Self.EmitRecordFieldReleases(TRecordTypeDesc(Arg.ResolvedType), 'x19',
+        False);
+    end;
+    RecOff := RecOff + AlignTo(Arg.ResolvedType.RawSize(), 16);
+  end;
+  if RecSaved then
+  begin
+    Self.Emit(#9'ldr x19, [sp], #16');
     Self.Emit(#9'ldp d2, d3, [sp], #16');
     Self.Emit(#9'ldp d0, d1, [sp], #16');
     Self.Emit(#9'ldp x0, x1, [sp], #16');

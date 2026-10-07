@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Record_CallResultArgs_AllShapes_LeakFree;
     procedure TestRun_Record_ByValManagedArgs_LeakFree;
     procedure TestRun_Record_Sizes;
     procedure TestRun_Record_FloatFieldWidthCoercion;
@@ -2055,6 +2056,74 @@ begin
     'named-arg|named-inner' + LE +
     'named-arg|named-inner' + LE, 0);
   AssertLeakFreeOnAll(Src, 'caller-side 5');
+end;
+
+procedure TE2ERecordsTests.TestRun_Record_CallResultArgs_AllShapes_LeakFree;
+const
+  {
+    Record values produced by a call and passed straight on as arguments
+    (Take(Make()), by value and const) are released by the caller after the
+    call, for every shape: a >16-byte record passed by address, a mixed
+    float / string record, a 16-byte record in registers, through a method
+    call and in a 100-iteration loop.  arm64 leaked every managed field of
+    such a temporary; leak-checked. }
+  Src = '''
+    program P;
+    type
+      TBig = record A, B, C: string; end;
+      TMix = record D: Double; S: string; end;
+      TTwo = record S: string; N: Int64; end;
+      TObj = class
+        function Make(const X: string): TBig;
+        procedure Take(V: TBig; const M: TMix);
+      end;
+    function MakeBig(const X: string): TBig;
+    begin
+      Result.A := X + '1'; Result.B := X + '2'; Result.C := X + '3'
+    end;
+    function MakeMix: TMix;
+    begin
+      Result.D := 2.5; Result.S := 'mix-' + 'heap'
+    end;
+    function MakeTwo: TTwo;
+    begin
+      Result.S := 'two-' + 'heap'; Result.N := 7
+    end;
+    function TObj.Make(const X: string): TBig;
+    begin
+      Result := MakeBig(X)
+    end;
+    procedure TObj.Take(V: TBig; const M: TMix);
+    begin
+      WriteLn(V.A, V.B, V.C, ' ', M.D:0:1, ' ', M.S)
+    end;
+    procedure Show(const B: TBig; const T: TTwo; N: Integer);
+    begin
+      WriteLn(B.C, ' ', T.S, ' ', T.N, ' ', N)
+    end;
+    function Len(V: TBig): Integer;
+    begin
+      Result := Length(V.A) + Length(V.B)
+    end;
+    var O: TObj; I, Sum: Integer;
+    begin
+      O := TObj.Create();
+      O.Take(O.Make('x'), MakeMix());
+      Show(MakeBig('y'), MakeTwo(), 3);
+      Sum := 0;
+      for I := 1 to 100 do
+        Sum := Sum + Len(MakeBig('z'));
+      WriteLn(Sum);
+      O.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'x1x2x3 2.5 mix-heap' + LE +
+    'y3 two-heap 7 3' + LE +
+    '400' + LE, 0);
+  AssertLeakFreeOnAll(Src, '400');
 end;
 
 initialization
