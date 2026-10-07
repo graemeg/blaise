@@ -716,6 +716,9 @@ type
     { Emit a direct call to a user procedure/function; result (if any) in %eax.
       ADecl is the callee's declaration (needed for var/out param handling);
       nil for type-cast calls. }
+    function ExternalRecordArgSlots(ADecl: TMethodDecl; AIdx: Integer;
+      AArg: TASTExpr): Integer;
+    procedure EmitPushRecordBytes(ASize: Integer);
     procedure EmitCall(const AFuncSym: string; ADecl: TMethodDecl;
                        AArgs: TObjectList);
     { Emit a call to a record-returning function using the sret convention:
@@ -19627,6 +19630,70 @@ begin
   F.Free();
 end;
 
+{ A record passed BY VALUE to an external (C) routine follows the System V
+  ABI, not Blaise's by-reference record convention: a record of at most 16
+  bytes whose eightbytes are all INTEGER class travels as its BYTES in one or
+  two integer registers.  Returns that slot count, 0 when argument AIdx is
+  not such an argument.  Shapes with an SSE eightbyte and records passed in
+  memory are not lowered yet -- an error, never a silently passed address
+  (BUG-20261007-x86-extern-record-byval). }
+function TX86_64Backend.ExternalRecordArgSlots(ADecl: TMethodDecl;
+  AIdx: Integer; AArg: TASTExpr): Integer;
+var
+  Par: TMethodParam;
+begin
+  Result := 0;
+  if (ADecl = nil) or not ADecl.IsExternal or (AIdx >= ADecl.Params.Count) then
+    Exit;
+  Par := TMethodParam(ADecl.Params.Items[AIdx]);
+  if Par.IsVarParam or (Par.ResolvedType = nil) or
+     (Par.ResolvedType.Kind <> tyRecord) then
+    Exit;
+  case Self.ClassifyRecordReturn(TRecordTypeDesc(Par.ResolvedType)) of
+    rcInt1: Result := 1;
+    rcInt2: Result := 2;
+  else
+    raise ENativeCodeGenError.Create(Format(
+      'x86-64: not yet lowered: a record argument of this shape (floating-' +
+      'point fields, or larger than 16 bytes) to external routine ''%s'' ' +
+      'at line %d col %d', [ADecl.Name, AArg.Line, AArg.Col]));
+  end;
+end;
+
+{ Push the ASize (1..16) bytes of the record whose address is in %rax as one
+  or two zero-padded 8-byte slots, low eightbyte first. }
+procedure TX86_64Backend.EmitPushRecordBytes(ASize: Integer);
+var
+  Off, N, K: Integer;
+begin
+  Self.Emit(#9'movq %rax, %rcx');
+  Off := 0;
+  while Off < ASize do
+  begin
+    N := ASize - Off;
+    if N > 8 then N := 8;
+    case N of
+      8: Self.Emit(Format(#9'movq %d(%%rcx), %%rax', [Off]));
+      4: Self.Emit(Format(#9'movl %d(%%rcx), %%eax', [Off]));
+      2: Self.Emit(Format(#9'movzwl %d(%%rcx), %%eax', [Off]));
+      1: Self.Emit(Format(#9'movzbl %d(%%rcx), %%eax', [Off]));
+    else
+      begin
+        { odd width: assemble the bytes high to low }
+        Self.Emit(#9'xorl %eax, %eax');
+        for K := N - 1 downto 0 do
+        begin
+          Self.Emit(#9'shlq $8, %rax');
+          Self.Emit(Format(#9'movzbl %d(%%rcx), %%edx', [Off + K]));
+          Self.Emit(#9'orq %rdx, %rax');
+        end;
+      end;
+    end;
+    Self.Emit(#9'pushq %rax');
+    Off := Off + 8;
+  end;
+end;
+
 { Emit a direct call.  SysV AMD64: integer args in rdi/rsi/rdx/rcx/r8/r9;
   float args in xmm0..xmm5 (independent counters).  Stack args (args 7+ in
   total, after registers are exhausted) go right-to-left.  For M6 the common
@@ -19657,7 +19724,9 @@ var
   OverflowOffs:   TList<Integer>;  { source offsets of integer-overflow slots,
                                      in ascending arg order, for relocation }
   RK, RSrc: Integer;
+  HasExtRecord: Boolean;
 begin
+  HasExtRecord := False;
   { Detect whether any arg is float-typed.
     Also compute SlotCount: open-array args expand to 2 register slots each. }
   HasFloat  := False;
@@ -19676,7 +19745,13 @@ begin
       ParamType := Arg.ResolvedType;
     if IsFloatFamily(ParamType) and not IsVar then
       HasFloat := True;
-    if IsOA or ((not IsVar) and (ParamType <> nil) and
+    RK := Self.ExternalRecordArgSlots(ADecl, I, Arg);
+    if RK > 0 then
+    begin
+      Inc(SlotCount, RK);
+      HasExtRecord := True;
+    end
+    else if IsOA or ((not IsVar) and (ParamType <> nil) and
                 (ParamType.Kind = tyInterface)) then
       Inc(SlotCount, 2)
     else
@@ -19700,6 +19775,12 @@ begin
   else
     OALTotal := Self.EmitArgHoist(nil, nil, True, '', AArgs, OALD, OALK);
   OALPushed := 0;
+
+  if HasExtRecord and (HasFloat or (SlotCount > 6)) then
+    raise ENativeCodeGenError.Create(Format(
+      'x86-64: not yet lowered: a by-value record argument to external ' +
+      'routine ''%s'' alongside floating-point or stack arguments',
+      [ADecl.Name]));
 
   if (not HasFloat) and (SlotCount <= 6) then
   begin
@@ -19755,6 +19836,18 @@ begin
           [OALTotal - OALD.Get(I) + OALPushed + 8]));    { itab }
         Self.Emit(#9'pushq %rax');
         Self.Emit(#9'pushq %rcx');
+      end
+      else if Self.ExternalRecordArgSlots(ADecl, I, Arg) > 0 then
+      begin
+        { C by-value record: its bytes, not its address.  A hoisted record
+          call saved its result buffer's address; an lvalue's address is
+          the record expression's value. }
+        if OALK.Get(I) >= akRecCall then
+          Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
+            [OALTotal - OALD.Get(I) + OALPushed]))
+        else
+          Self.EmitExprToEax(Arg);
+        Self.EmitPushRecordBytes(ParamType.RawSize());
       end
       else if (not IsOA) and (OALK.Get(I) >= akRecCall) then
       begin
@@ -19853,7 +19946,9 @@ begin
       end;
       { Track bytes pushed so far — hoisted-literal reloads above are
         %rsp-relative.  Mirrors the slot widths of the branches. }
-      if IsOA or ((not IsVar) and (ParamType <> nil) and
+      if Self.ExternalRecordArgSlots(ADecl, I, Arg) > 0 then
+        OALPushed := OALPushed + 8 * Self.ExternalRecordArgSlots(ADecl, I, Arg)
+      else if IsOA or ((not IsVar) and (ParamType <> nil) and
                   (ParamType.Kind = tyInterface)) then
         OALPushed := OALPushed + 16
       else

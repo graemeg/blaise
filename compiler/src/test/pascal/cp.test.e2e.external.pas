@@ -50,8 +50,12 @@ type
     { external name aliasing — Pascal name differs from C symbol }
     procedure TestRun_ExternalNameAlias_CallsCorrectSymbol;
 
-    { Record passed by value to external cdecl function — uses memcpy as
-      a proxy since we cannot add custom C code to the link. }
+    { Record passed BY VALUE to a C routine: libc's inet_ntoa takes a
+      4-byte struct in_addr by value, so the callee reads the record's
+      bytes from the argument register.  (This test used to pass only
+      pointers to memcpy, and the x86-64 backend silently passed the
+      record's ADDRESS: BUG-20261007-x86-extern-record-byval.)  The second
+      call passes a record-returning call's result straight through. }
     procedure TestRun_ExternalRecordParam_ByValue;
   end;
 
@@ -222,25 +226,25 @@ procedure TE2EExternalTests.TestRun_ExternalRecordParam_ByValue;
 const Src = '''
     program T;
     type
-      TPair = record
-        A: Integer;
-        B: Integer;
+      TInAddr = record
+        S_addr: Cardinal;
       end;
-    procedure c_memcpy(Dst, Src: Pointer; N: Integer); external name 'memcpy';
-    var
-      R: TPair;
-      Buf: array[0..7] of Byte;
-      V: Integer;
+    function inet_ntoa(AIn: TInAddr): PChar; cdecl; external name 'inet_ntoa';
+    function MakeAddr(A, B, C, D: Integer): TInAddr;
     begin
-      R.A := 99;
-      R.B := 77;
-      c_memcpy(@Buf[0], @R, 4);
-      V := Buf[0] + Buf[1] * 256 + Buf[2] * 65536 + Buf[3] * 16777216;
-      WriteLn(V)
+      { network byte order: the first octet is the lowest-addressed byte }
+      Result.S_addr := Cardinal(A or (B shl 8) or (C shl 16) or (D shl 24))
+    end;
+    var
+      Addr: TInAddr;
+    begin
+      Addr.S_addr := Cardinal($0403020A);
+      WriteLn(string(inet_ntoa(Addr)));
+      WriteLn(string(inet_ntoa(MakeAddr(192, 168, 1, 254))))
     end.
     ''';
 begin
-  AssertRunsOnAll(Src, '99' + Chr(10), 0);
+  AssertRunsOnAll(Src, '10.2.3.4' + Chr(10) + '192.168.1.254' + Chr(10), 0);
 end;
 
 initialization

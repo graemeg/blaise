@@ -11606,8 +11606,6 @@ begin
     first int-class value, popped last into x0 }
   if ASelfPushed then
     NInt := 1;
-  if ADecl.IsExternal and (ADecl.ExternalName = '') then
-    NotYet('external routine without a link name', nil);
   { Outgoing stack-arg area: args past the register files, and ALL
     variadic anonymous args (Apple divergence — Linux AAPCS64 would
     continue the register sequence).  Apple packs stack args to natural
@@ -11810,11 +11808,17 @@ begin
       else if (Arg.ResolvedType <> nil) and
          (Arg.ResolvedType.Kind = tyRecord) then
       begin
-        if ADecl.IsExternal then
-          { C-side small-struct marshalling needs hardware validation
-            first — same honest hole as external record returns }
-          NotYet('record argument to an external routine', Arg);
         Shape := RecReturnShape(TRecordTypeDesc(Arg.ResolvedType));
+        { a C callee: the shapes below already follow AAPCS64 for an
+          all-integer record of at most 16 bytes (x registers, memory image)
+          and a flat Double HFA (d registers).  A Single or mixed float
+          record would need s registers, and a larger one a private copy
+          the callee may scribble on -- not lowered yet. }
+        if ADecl.IsExternal and not ((Shape >= 100) or
+           (Self.ClassifyRecordReturn(TRecordTypeDesc(Arg.ResolvedType)) in
+             [rcInt1, rcInt2])) then
+          NotYet('a record argument of this shape (floating-point fields, ' +
+            'or larger than 16 bytes) to an external routine', Arg);
         if IsRecordCallArg(Arg) then
         begin
           { record-CALL argument (Foo(MakeRec(x))): the value has no lvalue

@@ -12,15 +12,14 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSemantic, cp.test.harness;
 
 type
   TExternalTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function ParseUnit(const ASrc: string): TUnit;
-    function GenIR(const ASrc: string): string;
-    function IRContains(const AIR, AFragment: string): Boolean;
+    procedure AssertCodegenRefused(const AWhat, ASrc, ATarget: string);
   published
     { Parser — standalone procedure }
     procedure TestParse_ExternalProc_IsExternal;
@@ -59,13 +58,14 @@ type
       low mantissa half as IEEE-754 single — pure noise. }
     procedure TestCodegen_ExternalSingleParam_DoubleArgNarrowed;
     { A record passed by value to a cdecl external must go through the
-      backend's aggregate-by-value mechanism so the callee sees the
-      struct contents in registers per the platform C ABI.  Passing
+      platform C ABI so the callee sees the struct contents in registers.  Passing
       the record's address in a single integer register would make the
       callee read the low bits of a pointer as struct data — e.g. a
       4-byte RGBA struct given to ClearBackground would clear the
       window to whatever colour fell out of the stack frame address. }
     procedure TestCodegen_ExternalRecordParam_PassedAsAggregateType;
+    procedure TestCodegen_ExternalRecordParam_TwoEightbytes;
+    procedure TestCodegen_ExternalRecordParam_FloatShape_NotSilent;
   end;
 
 implementation
@@ -98,40 +98,6 @@ begin
     P.Free();
     L.Free();
   end;
-end;
-
-function TExternalTests.GenIR(const ASrc: string): string;
-var
-  L:  TLexer;
-  P:  TParser;
-  Pr: TProgram;
-  A:  TSemanticAnalyser;
-  CG: TCodeGenQBE;
-begin
-  L  := TLexer.Create(ASrc);
-  P  := TParser.Create(L);
-  Pr := P.Parse();
-  A  := TSemanticAnalyser.Create();
-  try
-    A.Analyse(Pr);
-  finally
-    A.Free();
-  end;
-  CG := TCodeGenQBE.Create();
-  try
-    CG.Generate(Pr);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Pr.Free();
-    P.Free();
-    L.Free();
-  end;
-end;
-
-function TExternalTests.IRContains(const AIR, AFragment: string): Boolean;
-begin
-  Result := Pos(AFragment, AIR) > 0;
 end;
 
 { ── Parser tests ─────────────────────────────────────────────────────────── }
@@ -355,137 +321,132 @@ end;
 { ── Codegen tests ────────────────────────────────────────────────────────── }
 
 procedure TExternalTests.TestCodegen_ExternalProc_NoBodyEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program Test;
-        procedure Foo; external;
-        begin
-        end.
-        '''
-  );
-  { An external declaration must NOT emit a QBE function body for Foo }
-  AssertFalse('External proc must not emit a function body',
-    IRContains(IR, 'function $Foo'));
-end;
-
-procedure TExternalTests.TestCodegen_ExternalProc_CallEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(
+const
+  Src =
     '''
         program Test;
         procedure Foo; external;
         begin
           Foo()
         end.
-        '''
-  );
-  AssertTrue('Call to external proc should appear in IR',
-    IRContains(IR, 'call $Foo'));
+        ''';
+begin
+  { An external declaration must NOT emit a body (no label) for Foo }
+  AssertTrue('x86-64: no body for an external proc',
+    Pos(#10'Foo:', GenAsm(Src, TargetX86_64)) < 0);
+  AssertTrue('arm64: no body for an external proc',
+    Pos(#10'_Foo:', GenAsm(Src, TargetArm64)) < 0);
+end;
+
+procedure TExternalTests.TestCodegen_ExternalProc_CallEmitted;
+begin
+  { no link name: the routine's own name is the C symbol }
+  AssertEquals('call to the external proc', '', AsmMissing(
+    '''
+        program Test;
+        procedure Foo; external;
+        begin
+          Foo()
+        end.
+        ''', 'callq Foo', 'bl _Foo'));
 end;
 
 procedure TExternalTests.TestCodegen_ExternalProcNamed_UsesExternalName;
-var
-  IR: string;
-begin
-  IR := GenIR(
+const
+  Src =
     '''
         program Test;
         procedure Foo; external name 'c_foo';
         begin
           Foo()
         end.
-        '''
-  );
+        ''';
+begin
   { Call site must use the C symbol name, not the Pascal name }
-  AssertTrue('Call should use C symbol name',
-    IRContains(IR, 'call $c_foo'));
-  AssertFalse('Call must not use Pascal name when external name is given',
-    IRContains(IR, 'call $Foo'));
+  AssertEquals('call uses the C symbol name', '',
+    AsmMissing(Src, 'callq c_foo', 'bl _c_foo'));
+  AssertTrue('x86-64: Pascal name unused',
+    Pos('callq Foo', GenAsm(Src, TargetX86_64)) < 0);
+  AssertTrue('arm64: Pascal name unused',
+    Pos('bl _Foo', GenAsm(Src, TargetArm64)) < 0);
 end;
 
 procedure TExternalTests.TestCodegen_ExternalByteReturn_MaskedToLowByte;
-var IR: string;
 begin
-  IR := GenIR(
+  AssertEquals('Byte FFI return zero-extended from 8 bits', '', AsmMissing(
     '''
         program Test;
         function Foo: Byte; external;
-        var b: Byte;
+        var v: Byte;
         begin
-          b := Foo();
+          v := Foo();
           if Foo() <> 0 then
-            b := 1;
+            v := 1;
         end.
-        '''
-  );
-  AssertTrue('Byte FFI return must be masked to 8 bits',
-    IRContains(IR, 'and ') and IRContains(IR, ', 255'));
+        ''', 'movzbq %al, %rax', 'lsr x0, x0, #56'));
 end;
 
 procedure TExternalTests.TestCodegen_ExternalWordReturn_MaskedToLow16;
-var IR: string;
 begin
-  IR := GenIR(
+  AssertEquals('Word FFI return zero-extended from 16 bits', '', AsmMissing(
     '''
         program Test;
         function Foo: Word; external;
-        var w: Word;
+        var v: Word;
         begin
-          w := Foo();
+          v := Foo();
+          if Foo() <> 0 then
+            v := 1;
         end.
-        '''
-  );
-  AssertTrue('Word FFI return must be masked to 16 bits',
-    IRContains(IR, 'and ') and IRContains(IR, ', 65535'));
+        ''', 'movzwq %ax, %rax', 'lsr x0, x0, #48'));
 end;
 
 procedure TExternalTests.TestCodegen_ExternalSmallIntReturn_SignExtendedFromLow16;
-var IR: string;
 begin
-  IR := GenIR(
+  AssertEquals('SmallInt FFI return sign-extended from 16 bits', '', AsmMissing(
     '''
         program Test;
         function Foo: SmallInt; external;
-        var s: SmallInt;
+        var v: SmallInt;
         begin
-          s := Foo();
+          v := Foo();
+          if Foo() <> 0 then
+            v := 1;
         end.
-        '''
-  );
-  { Sign-extend low 16 bits: shl 16 then sar 16 }
-  AssertTrue('SmallInt FFI return must shl 16 to set up sign-extend',
-    IRContains(IR, 'shl ') and IRContains(IR, ', 16'));
-  AssertTrue('SmallInt FFI return must sar 16 to complete sign-extend',
-    IRContains(IR, 'sar '));
+        ''', 'movswq %ax, %rax', 'asr x0, x0, #48'));
 end;
 
 procedure TExternalTests.TestCodegen_ExternalIntegerReturn_NoNormalisation;
-var IR: string;
-begin
-  IR := GenIR(
+const
+  Src =
     '''
         program Test;
         function Foo: Integer; external;
-        var i: Integer;
+        var v: Integer;
         begin
-          i := Foo();
+          v := Foo();
+          if Foo() <> 0 then
+            v := 1;
         end.
-        '''
-  );
-  { Full-width returns need no fix-up — must not emit a stray mask. }
-  AssertFalse('Integer FFI return must not be masked',
-    IRContains(IR, ', 255') or IRContains(IR, ', 65535'));
+        ''';
+var
+  X86, A64: string;
+begin
+  { Full-width returns need no narrow fix-up. }
+  X86 := GenAsm(Src, TargetX86_64);
+  A64 := GenAsm(Src, TargetArm64);
+  AssertTrue('x86-64: Integer FFI return not narrowed',
+    (Pos('movzbq', X86) < 0) and (Pos('movzwq', X86) < 0) and
+    (Pos('movswq', X86) < 0));
+  AssertTrue('arm64: Integer FFI return not narrowed',
+    (Pos('x0, #56', A64) < 0) and (Pos('x0, #48', A64) < 0));
 end;
 
 procedure TExternalTests.TestCodegen_ExternalSingleParam_DoubleArgNarrowed;
-var IR: string;
 begin
-  IR := GenIR(
+  { Double literal narrowed to single before the call. }
+  AssertEquals('Double-typed arg narrowed to Single before the FFI call', '',
+    AsmMissing(
     '''
         program Test;
         function sinf(x: Single): Single; cdecl; external name 'sinf';
@@ -493,17 +454,12 @@ begin
         begin
           s := sinf(1.5707964);
         end.
-        '''
-  );
-  { Double literal narrowed to single via truncd before the arg slot. }
-  AssertTrue('Double-typed arg narrowed to Single before FFI call',
-    IRContains(IR, '=s truncd'));
+        ''', 'cvtsd2ss %xmm0, %xmm0', 'fcvt s0, d0'));
 end;
 
 procedure TExternalTests.TestCodegen_ExternalRecordParam_PassedAsAggregateType;
-var IR: string;
-begin
-  IR := GenIR(
+const
+  Src =
     '''
         program Test;
         type
@@ -514,17 +470,80 @@ begin
           c.r := 18; c.g := 18; c.b := 24; c.a := 255;
           CheckColor(c);
         end.
-        '''
-  );
-  { Aggregate type decl emitted at module scope with one entry per field. }
-  AssertTrue('Record type decl emitted for FFI call',
-    IRContains(IR, 'type :_ffi_TColor = align 1 { b, b, b, b }'));
-  { Call passes the record through the aggregate type, not as a bare 'l'
-    pointer.  The aggregate type triggers ABI-correct register packing
-    in the backend; 'l <addr>' would pass the *address* in a single
-    integer register, which the C callee would read as struct data. }
-  AssertTrue('Call uses :_ffi_TColor aggregate type, not l pointer',
-    IRContains(IR, 'call $check_color(:_ffi_TColor '));
+        ''';
+begin
+  { the record's 4 BYTES are loaded into the argument register -- not its
+    address (BUG-20261007-x86-extern-record-byval) }
+  AssertEquals('record bytes, not its address, reach the C callee', '',
+    AsmMissing(Src, 'movl 0(%rcx), %eax', 'ldr x0, [x0]'));
+  AssertTrue('x86-64: the address is not passed',
+    Pos('leaq c(%rip), %rax' + #10#9'movq %rax, %rdi',
+      GenAsm(Src, TargetX86_64)) < 0);
+end;
+
+procedure TExternalTests.TestCodegen_ExternalRecordParam_TwoEightbytes;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TBox = record x, y, w: Integer; end;
+        procedure Take(b: TBox; n: Integer); cdecl; external name 'take';
+        var b: TBox;
+        begin
+          b.x := 1; b.y := 2; b.w := 3;
+          Take(b, 4);
+        end.
+        ''';
+var
+  X86: string;
+begin
+  { 12 bytes, both eightbytes INTEGER: two registers (rdi, rsi / x0, x1),
+    the next argument in the third }
+  X86 := GenAsm(Src, TargetX86_64);
+  AssertTrue('x86-64: first eightbyte loaded', Pos('movq 0(%rcx), %rax', X86) >= 0);
+  AssertTrue('x86-64: second eightbyte loaded', Pos('movl 8(%rcx), %eax', X86) >= 0);
+  AssertTrue('x86-64: the eightbytes land in rdi and rsi',
+    (Pos('popq %rdi', X86) >= 0) and (Pos('popq %rsi', X86) >= 0));
+  AssertTrue('x86-64: the Integer follows in rdx', Pos('%rdx', X86) >= 0);
+  AssertTrue('arm64: both halves loaded',
+    Pos('ldr x0, [x9, #8]', GenAsm(Src, TargetArm64)) >= 0);
+end;
+
+procedure TExternalTests.TestCodegen_ExternalRecordParam_FloatShape_NotSilent;
+const
+  Src =
+    '''
+        program Test;
+        type
+          TVec = record x, y: Single; end;
+        procedure Take(v: TVec); cdecl; external name 'take';
+        var v: TVec;
+        begin
+          Take(v);
+        end.
+        ''';
+begin
+  { a float-bearing record needs SSE / s registers: refused, never passed
+    in the wrong registers }
+  AssertCodegenRefused('x86-64', Src, TargetX86_64);
+  AssertCodegenRefused('arm64', Src, TargetArm64);
+end;
+
+procedure TExternalTests.AssertCodegenRefused(const AWhat, ASrc,
+  ATarget: string);
+var
+  Raised: Boolean;
+begin
+  Raised := False;
+  try
+    GenAsm(ASrc, ATarget);
+  except
+    on E: Exception do
+      Raised := Pos('external routine', E.Message) >= 0;
+  end;
+  AssertTrue(AWhat + ': unsupported record shape is a code-generation error',
+    Raised);
 end;
 
 initialization
