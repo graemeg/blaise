@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_CodegenBasics_Combined;
     procedure TestRun_Constants_Arrays;
     procedure TestRun_Constants_Scalar;
     procedure TestRun_IndirectFuncCallExpr_Shapes;
@@ -3527,6 +3528,133 @@ begin
     'Red 13' + LE +
     'Sat Sun' + LE +
     '100 200 300 ' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_CodegenBasics_Combined;
+const
+  {
+    The early code-generation basics end to end: WriteLn of a string, nothing,
+    an Integer and a Boolean; Integer assignment and arithmetic; string = and
+    <>; Boolean literals and functions; identifiers, fields, for-loop counters,
+    routines, records and methods referenced in a different case from their
+    declaration (a mis-cased symbol would not link); lowercase `result`;
+    Integer / Int64 to Double and Single conversions, including into class
+    fields with and without Self (2^53 + 1 rounds to 2^53 only with the full
+    64-bit conversion); and Single arithmetic and comparison. }
+  Src = '''
+    program Basics;
+    type
+      TRec = record
+        Val: Integer;
+      end;
+      TFoo = class
+        FVal: Integer;
+        FD: Double;
+        FS: Single;
+        function GetVal: Integer;
+        procedure DoIt;
+        procedure SetD(AValue: Int64);
+        procedure SetDBare(AValue: Int64);
+        procedure SetS(AValue: Integer);
+      end;
+    function TFoo.GetVal: Integer; begin Result := Self.FVal end;
+    procedure TFoo.DoIt(); begin WriteLn('did it') end;
+    procedure TFoo.SetD(AValue: Int64); begin Self.FD := AValue end;
+    procedure TFoo.SetDBare(AValue: Int64); begin FD := AValue end;
+    procedure TFoo.SetS(AValue: Integer); begin Self.FS := AValue end;
+    function MyAdd(X, Y: Integer): Integer;
+    begin
+      result := X + Y
+    end;
+    function Same(A, B: string): Boolean;
+    begin
+      Result := A = B
+    end;
+    function IsOK: Boolean;
+    begin
+      Result := True
+    end;
+    procedure DoStuff(X: Integer);
+    begin
+      WriteLn('stuff ', X)
+    end;
+    var
+      N, X, Y, Counter, I: Integer; B: Boolean; S1, S2: string;
+      MyObj: TFoo; MyRec: TRec; M: Int64; D: Double; SA, SB, SC: Single;
+    begin
+      WriteLn('Hello');
+      WriteLn();
+      WriteLn(42);
+      B := True;
+      WriteLn(b);
+      B := False;
+      WriteLn(B, ' ', IsOK());
+      x := 1;
+      Y := x;
+      N := 3 + 4;
+      WriteLn(X, ' ', y, ' ', n, ' ', 2 * 5, ' ', MyAdd(2, 3));
+      S1 := 'ab'; S2 := 'a' + 'b';
+      WriteLn(S1 = S2, ' ', S1 <> S2, ' ', Same('hello', 'world'), ' ', Same('x', 'x'));
+      if True then WriteLn('then');
+      for counter := 1 to 3 do Write(COUNTER, ' ');
+      WriteLn();
+      dostuff(3);
+      myrec.Val := 42;
+      WriteLn(MyRec.val);
+      MyObj := TFoo.Create();
+      myobj.FVal := 9;
+      WriteLn(MYOBJ.GetVal());
+      myObj.DoIt();
+      M := 123456789012345;
+      D := M * 1.0;
+      WriteLn(D:0:0);
+      I := 42;
+      D := I * 1.0;
+      WriteLn(D:0:1);
+      D := 4345;
+      WriteLn(D:0:1);
+      M := 100;
+      D := M;
+      SA := 4345;
+      WriteLn(D:0:1, ' ', SA:0:1);
+      MyObj.SetD(9007199254740993);
+      WriteLn(MyObj.FD:0:0);
+      MyObj.SetDBare(-7);
+      MyObj.SetS(12);
+      WriteLn(MyObj.FD:0:1, ' ', MyObj.FS:0:1);
+      SA := 1.5; SB := 2.25;
+      D := SA * 1.0;
+      SC := SA + SB;
+      WriteLn(D:0:2, ' ', SC:0:2);
+      SC := SA * SB;
+      WriteLn(SC:0:3, ' ', (SA + I):0:1, ' ', SA < SB, ' ', SB < SA);
+      MyObj.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'Hello' + LE +
+    '' + LE +
+    '42' + LE +
+    'True' + LE +
+    'False True' + LE +
+    '1 1 7 10 5' + LE +
+    'True False False True' + LE +
+    'then' + LE +
+    '1 2 3 ' + LE +
+    'stuff 3' + LE +
+    '42' + LE +
+    '9' + LE +
+    'did it' + LE +
+    '123456789012345' + LE +
+    '42.0' + LE +
+    '4345.0' + LE +
+    '100.0 4345.0' + LE +
+    '9007199254740992' + LE +
+    '-7.0 12.0' + LE +
+    '1.50 3.75' + LE +
+    '3.375 43.5 True False' + LE, 0);
 end;
 
 initialization
