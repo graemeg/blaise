@@ -27,6 +27,10 @@ type
     procedure SemanticFail(const ASrc: string);
     procedure ParseOK(const ASrc: string);
   published
+    { lo..hi in a set literal outside an assignment: the operand / argument
+      is analysed before its set context is known }
+    procedure TestSemantic_SetRangeLiteral_AcceptedInEveryContext;
+    procedure TestSemantic_RangeInOpenArrayArg_Rejected;
     { ------------------------------------------------------------------ }
     { parse                                                                }
     { ------------------------------------------------------------------ }
@@ -59,7 +63,6 @@ type
     procedure TestSemantic_Set_CtorArgLiteralRetypedToSet;
     procedure TestSemantic_Set_MetaclassCtorArgLiteralRetypedToSet;
     procedure TestSemantic_Set_ProcFieldArgLiteralRetypedToSet;
-    procedure TestCodegen_Set_ProcFieldArgLiteralFoldsToBitmask;
     procedure TestCodegen_Set_ProcFieldArgLiteral_NativeCompiles;
 
     { ------------------------------------------------------------------ }
@@ -72,27 +75,10 @@ type
     procedure TestSemantic_Set_RangeReversed_Fails;
     procedure TestSemantic_Set_RangeNonConstBound_Fails;
     procedure TestSemantic_Set_RangeWrongBaseType_Fails;
-    procedure TestCodegen_Set_RangeExpandsToBitmask;
-    procedure TestCodegen_Set_RangeSingleElement;
-    procedure TestCodegen_Set_RangeMixed;
 
     { ------------------------------------------------------------------ }
     { codegen                                                              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_Set_VarAllocsEmitsZero;
-    procedure TestCodegen_Set_EmptyLiteralEmitsZero;
-    procedure TestCodegen_Set_OneElementBitmask;
-    procedure TestCodegen_Set_TwoElementBitmask;
-    procedure TestCodegen_Set_InOperatorEmitsShrAndAnd;
-    procedure TestCodegen_Set_IncludeEmitsShlAndOr;
-    procedure TestCodegen_Set_ExcludeEmitsShlXorAnd;
-    procedure TestCodegen_Set_UnionEmitsOr;
-    procedure TestCodegen_Set_DifferenceEmitsXorAnd;
-    procedure TestCodegen_Set_IntersectionEmitsAnd;
-    procedure TestCodegen_Set_EqualityEmitsCeqw;
-    procedure TestCodegen_Set_InequalityEmitsCnew;
-    procedure TestCodegen_Set_EqualityEmptyLiteralEmitsCeqw;
-    procedure TestCodegen_Set_EqualityLiteralEmitsCeqw;
 
     { ------------------------------------------------------------------ }
     { set-valued constants  (const X = [a, b])                            }
@@ -104,7 +90,6 @@ type
     procedure TestSemantic_SetConst_EmptyUnannotated_Fails;
     procedure TestSemantic_SetConst_MixedEnums_Fails;
     procedure TestSemantic_SetConst_NonEnumMember_Fails;
-    procedure TestCodegen_SetConst_FoldsToBitmask;
     procedure TestCodegen_SetConst_AssignableToNamedSetType;
 
     { ------------------------------------------------------------------ }
@@ -114,8 +99,6 @@ type
     procedure TestSemantic_SetLiteralArg_Empty_OK;
     procedure TestSemantic_SetLiteralArg_WrongEnum_Fails;
     procedure TestSemantic_EmptyLiteral_NonSetAssign_Fails;
-    procedure TestCodegen_SetLiteralArg_FoldsToBitmask;
-    procedure TestCodegen_SetParam_SpillsAtWordWidth;
 
     { ------------------------------------------------------------------ }
     { set of Byte / ordinal-based sets (issue #105)                        }
@@ -129,11 +112,6 @@ type
     procedure TestSemantic_SetOfByte_Exclude_OK;
     procedure TestSemantic_SetOfByte_InlineType_OK;
     procedure TestSemantic_SetOfBoolean_OK;
-    procedure TestCodegen_SetOfByte_SmallLiteral_Bitmask;
-    procedure TestCodegen_SetOfByte_Range_ExpandsToBitmask;
-    procedure TestCodegen_SetOfByte_InOperator;
-    procedure TestCodegen_SetOfByte_IncludeEmitsShlAndOr;
-    procedure TestCodegen_SetOfByte_Union;
     procedure TestCodegen_SetOfByte_IsJumbo;
 
     { ------------------------------------------------------------------ }
@@ -151,7 +129,6 @@ type
       the destination must NOT be memset before the argument list is
       evaluated.  Instead the call sret's into a fresh temp and the result
       is memcpy'd into the destination afterwards. }
-    procedure TestCodegen_SelfAssignedRecordCall_NoDestMemset;
     { The NON-aliasing control: a distinct destination must keep the direct
       form — memset straight into the destination, no temp, no memcpy.
       Guards against the aliasing predicate over-firing. }
@@ -187,18 +164,6 @@ type
       has no value type" — on EVERY set type, not just jumbo ones. }
     procedure TestSemantic_ImplicitSelfSetField_EmptyLiteral;
     procedure TestSemantic_SetArrayElement_LiteralAssign;
-    procedure TestCodegen_Set64_VarAllocsEmitsLongZero;
-    procedure TestCodegen_Set64_LiteralEmitsLongMask;
-    procedure TestCodegen_Set64_InOperatorUsesLong;
-    procedure TestCodegen_Set64_IncludeUsesLong;
-    procedure TestCodegen_Set64_ExcludeUsesLong;
-    procedure TestCodegen_Set64_UnionUsesLong;
-    procedure TestCodegen_Set64_DifferenceUsesLong;
-    procedure TestCodegen_Set64_IntersectionUsesLong;
-    procedure TestCodegen_Set64_EqualityUsesLong;
-    procedure TestCodegen_Set64_InequalityUsesLong;
-    procedure TestCodegen_Set64_SizeOfReturns8;
-    procedure TestCodegen_Set64_ParamSpillsAtLongWidth;
   end;
 
 implementation
@@ -491,142 +456,6 @@ const
     BigEnum +
     '''
         begin
-        end.
-        ''';
-
-  SrcSet64VarEmpty =
-    'program P;' + #10 +
-    BigEnum +
-    '''
-        var S: TBigSet;
-        begin
-          S := []
-        end.
-        ''';
-
-  SrcSet64Literal =
-    'program P;' + #10 +
-    BigEnum +
-    '''
-        var S: TBigSet;
-        begin
-          S := [X40]
-        end.
-        ''';
-
-  SrcSet64InOperator =
-    'program P;' + #10 +
-    BigEnum +
-    '''
-        var S: TBigSet; B: Boolean;
-        begin
-          S := [X40];
-          B := X40 in S
-        end.
-        ''';
-
-  SrcSet64Include =
-    'program P;' + #10 +
-    BigEnum +
-    '''
-        var S: TBigSet;
-        begin
-          S := [];
-          Include(S, X40)
-        end.
-        ''';
-
-  SrcSet64Exclude =
-    'program P;' + #10 +
-    BigEnum +
-    '''
-        var S: TBigSet;
-        begin
-          S := [X40];
-          Exclude(S, X40)
-        end.
-        ''';
-
-  SrcSet64Union =
-    'program P;' + #10 +
-    BigEnum +
-    '''
-        var S1, S2, S3: TBigSet;
-        begin
-          S1 := [X00];
-          S2 := [X40];
-          S3 := S1 + S2
-        end.
-        ''';
-
-  SrcSet64Difference =
-    'program P;' + #10 +
-    BigEnum +
-    '''
-        var S1, S2, S3: TBigSet;
-        begin
-          S1 := [X00, X40];
-          S2 := [X00];
-          S3 := S1 - S2
-        end.
-        ''';
-
-  SrcSet64Intersection =
-    'program P;' + #10 +
-    BigEnum +
-    '''
-        var S1, S2, S3: TBigSet;
-        begin
-          S1 := [X00, X40];
-          S2 := [X40];
-          S3 := S1 * S2
-        end.
-        ''';
-
-  SrcSet64Equality =
-    'program P;' + #10 +
-    BigEnum +
-    '''
-        var S1, S2: TBigSet; B: Boolean;
-        begin
-          S1 := [X40];
-          S2 := [X40];
-          B := S1 = S2
-        end.
-        ''';
-
-  SrcSet64Inequality =
-    'program P;' + #10 +
-    BigEnum +
-    '''
-        var S1, S2: TBigSet; B: Boolean;
-        begin
-          S1 := [X40];
-          S2 := [X00];
-          B := S1 <> S2
-        end.
-        ''';
-
-  SrcSet64LiteralArg =
-    'program P;' + #10 +
-    BigEnum +
-    '''
-        procedure Take(S: TBigSet);
-        begin
-          if X40 in S then Halt(0)
-        end;
-        begin
-          Take([X40])
-        end.
-        ''';
-
-  SrcSet64SizeOf =
-    'program P;' + #10 +
-    BigEnum +
-    '''
-        var N: Integer;
-        begin
-          N := SizeOf(TBigSet)
         end.
         ''';
 
@@ -1027,15 +856,6 @@ begin
   end;
 end;
 
-procedure TSetTests.TestCodegen_Set_ProcFieldArgLiteralFoldsToBitmask;
-var
-  IR: string;
-begin
-  { [dNorth, dEast] folds to mask 5, not an open-array literal. }
-  IR := GenIR(SrcSetProcFieldArgLiteral);
-  AssertTrue('proc-field set-literal arg folds to mask 5', Pos('copy 5', IR) > 0);
-end;
-
 procedure TSetTests.TestCodegen_Set_ProcFieldArgLiteral_NativeCompiles;
 var
   S: string;
@@ -1166,173 +986,6 @@ begin
   SemanticFail(SrcSetRangeWrongBase);
 end;
 
-procedure TSetTests.TestCodegen_Set_RangeExpandsToBitmask;
-var
-  IR: string;
-begin
-  { [1..3] → bits 1,2,3 → mask = 2 + 4 + 8 = 14 → "copy 14" }
-  IR := GenIR(SrcSetRange);
-  AssertTrue('range [1..3] folds to mask 14', Pos('copy 14', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_RangeSingleElement;
-var
-  IR: string;
-begin
-  { [m3..m3] → just bit 3 → mask 8 }
-  IR := GenIR('program P; ' + SetEnumDecl + 'var e: TCS; ' +
-              'begin e := [m3..m3]; end.');
-  AssertTrue('range [m3..m3] folds to mask 8', Pos('copy 8', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_RangeMixed;
-var
-  IR: string;
-begin
-  { [1, 5..7, 10] → bits 1,5,6,7,10 → 2+32+64+128+1024 = 1250 }
-  IR := GenIR(SrcSetRangeMixed);
-  AssertTrue('mixed range folds to mask 1250', Pos('copy 1250', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
-{ codegen                                                              }
-{ ------------------------------------------------------------------ }
-
-procedure TSetTests.TestCodegen_Set_VarAllocsEmitsZero;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetEmptyLiteral);
-  // global set var emits data $S = { w 0 }; local would emit storew 0
-  AssertTrue('set var zero-initialised in data section or stack alloc',
-    (Pos('{ w 0 }', IR) > 0) or (Pos('storew 0', IR) > 0));
-end;
-
-procedure TSetTests.TestCodegen_Set_EmptyLiteralEmitsZero;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetEmptyLiteral);
-  { S := [] computes bitmask 0 via "copy 0" }
-  AssertTrue('empty set literal emits copy 0', Pos('copy 0', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_OneElementBitmask;
-var
-  IR: string;
-begin
-  { [dNorth] → ordinal 0 → bit 0 → mask 1 → emits "copy 1" }
-  IR := GenIR(
-    'program P;' + #10 +
-    DirEnum +
-    '''
-        var S: TDirSet;
-        begin
-          S := [dNorth]
-        end.
-        ''');
-  AssertTrue('single-element mask is 1', Pos('copy 1', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_TwoElementBitmask;
-var
-  IR: string;
-begin
-  { [dNorth, dEast] → ordinals 0 and 2 → mask = 1 + 4 = 5 → emits "copy 5" }
-  IR := GenIR(SrcSetTwoElementLiteral);
-  AssertTrue('two-element mask is 5', Pos('copy 5', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_InOperatorEmitsShrAndAnd;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetInOperator);
-  { elem in S: (S >> ord(elem)) & 1 — needs shr and and }
-  AssertTrue('in operator emits shr', Pos('shr', IR) > 0);
-  AssertTrue('in operator emits and', Pos(' and ', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_IncludeEmitsShlAndOr;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetInclude);
-  { Include(S, elem): S := S or (1 shl ord(elem)) }
-  AssertTrue('Include emits shl', Pos('shl', IR) > 0);
-  AssertTrue('Include emits or', Pos(' or ', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_ExcludeEmitsShlXorAnd;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetExclude);
-  { Exclude(S, elem): S := S and not (1 shl ord(elem)) }
-  AssertTrue('Exclude emits shl', Pos('shl', IR) > 0);
-  AssertTrue('Exclude emits xor', Pos('xor', IR) > 0);
-  AssertTrue('Exclude emits and', Pos(' and ', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_UnionEmitsOr;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetUnion);
-  AssertTrue('union emits or', Pos(' or ', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_DifferenceEmitsXorAnd;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetDifference);
-  AssertTrue('difference emits xor', Pos('xor', IR) > 0);
-  AssertTrue('difference emits and', Pos(' and ', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_IntersectionEmitsAnd;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetIntersection);
-  AssertTrue('intersection emits and', Pos(' and ', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_EqualityEmitsCeqw;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetEquality);
-  AssertTrue('set equality emits ceqw', Pos('ceqw', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_InequalityEmitsCnew;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetInequality);
-  AssertTrue('set inequality emits cnew', Pos('cnew', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_EqualityEmptyLiteralEmitsCeqw;
-var
-  IR: string;
-begin
-  { S = [] coerces [] to the set type of S; bitmask 0 vs S — still ceqw. }
-  IR := GenIR(SrcSetEqualityEmptyLiteral);
-  AssertTrue('S = [] emits ceqw', Pos('ceqw', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set_EqualityLiteralEmitsCeqw;
-var
-  IR: string;
-begin
-  { S = [dNorth, dEast] coerces the literal to mask 5; comparison is ceqw. }
-  IR := GenIR(SrcSetEqualityLiteral);
-  AssertTrue('S = [dNorth, dEast] emits ceqw', Pos('ceqw', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { set-valued constants                                                 }
 { ------------------------------------------------------------------ }
@@ -1373,15 +1026,6 @@ begin
   SemanticFail(SrcSetConstNonEnumMember);
 end;
 
-procedure TSetTests.TestCodegen_SetConst_FoldsToBitmask;
-var
-  IR: string;
-begin
-  { Both = [dNorth, dEast] folds to mask 5; referencing it emits "copy 5". }
-  IR := GenIR(SrcSetConstInferred);
-  AssertTrue('set const folds to mask 5', Pos('copy 5', IR) > 0);
-end;
-
 procedure TSetTests.TestCodegen_SetConst_AssignableToNamedSetType;
 begin
   { An inferred 'set of TDir' const assigns to a TDirSet variable — the two
@@ -1417,26 +1061,6 @@ begin
   { x := [] where x is Integer: empty literal has no set context — a clean
     error, not a crash. }
   SemanticFail(SrcEmptyLiteralNonSetAssign);
-end;
-
-procedure TSetTests.TestCodegen_SetLiteralArg_FoldsToBitmask;
-var
-  IR: string;
-begin
-  { [dNorth, dEast] at the call site folds to mask 5. }
-  IR := GenIR(SrcSetLiteralArg);
-  AssertTrue('set literal arg folds to mask 5', Pos('copy 5', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_SetParam_SpillsAtWordWidth;
-var
-  IR: string;
-begin
-  { A ≤32-member set parameter is a w; its prologue spill must use storew, not
-    storel (which QBE rejects for a w operand). }
-  IR := GenIR(SrcSetLiteralArg);
-  AssertTrue('set param spilled with storew', Pos('storew %_par_S', IR) > 0);
-  AssertFalse('set param not spilled with storel', Pos('storel %_par_S', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -1657,115 +1281,6 @@ begin
     'end.');
 end;
 
-procedure TSetTests.TestCodegen_Set64_VarAllocsEmitsLongZero;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSet64VarEmpty);
-  AssertTrue('64-bit set var zero-initialised with l 0',
-    (Pos('{ l 0 }', IR) > 0) or (Pos('storel 0', IR) > 0));
-end;
-
-procedure TSetTests.TestCodegen_Set64_LiteralEmitsLongMask;
-var
-  IR: string;
-begin
-  { [X40] -> bit 40 -> mask = 1099511627776 = Int64(1) shl 40 }
-  IR := GenIR(SrcSet64Literal);
-  AssertTrue('64-bit set literal emits =l copy',
-    Pos('=l copy 1099511627776', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set64_InOperatorUsesLong;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSet64InOperator);
-  AssertTrue('in operator on 64-bit set uses =l shr',
-    Pos('=l shr', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set64_IncludeUsesLong;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSet64Include);
-  AssertTrue('Include on 64-bit set uses loadl', Pos('loadl', IR) > 0);
-  AssertTrue('Include on 64-bit set uses =l shl', Pos('=l shl', IR) > 0);
-  AssertTrue('Include on 64-bit set uses =l or', Pos('=l or', IR) > 0);
-  AssertTrue('Include on 64-bit set uses storel', Pos('storel', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set64_ExcludeUsesLong;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSet64Exclude);
-  AssertTrue('Exclude on 64-bit set uses loadl', Pos('loadl', IR) > 0);
-  AssertTrue('Exclude on 64-bit set uses =l shl', Pos('=l shl', IR) > 0);
-  AssertTrue('Exclude on 64-bit set uses =l xor', Pos('=l xor', IR) > 0);
-  AssertTrue('Exclude on 64-bit set uses =l and', Pos('=l and', IR) > 0);
-  AssertTrue('Exclude on 64-bit set uses storel', Pos('storel', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set64_UnionUsesLong;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSet64Union);
-  AssertTrue('union on 64-bit set uses =l or', Pos('=l or', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set64_DifferenceUsesLong;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSet64Difference);
-  AssertTrue('difference on 64-bit set uses =l xor', Pos('=l xor', IR) > 0);
-  AssertTrue('difference on 64-bit set uses =l and', Pos('=l and', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set64_IntersectionUsesLong;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSet64Intersection);
-  AssertTrue('intersection on 64-bit set uses =l and', Pos('=l and', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set64_EqualityUsesLong;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSet64Equality);
-  AssertTrue('64-bit set equality uses ceql', Pos('ceql', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set64_InequalityUsesLong;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSet64Inequality);
-  AssertTrue('64-bit set inequality uses cnel', Pos('cnel', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set64_SizeOfReturns8;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSet64SizeOf);
-  AssertTrue('SizeOf(TBigSet) emits copy 8', Pos('copy 8', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_Set64_ParamSpillsAtLongWidth;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSet64LiteralArg);
-  AssertTrue('64-bit set param spilled with storel', Pos('storel %_par_S', IR) > 0);
-  AssertFalse('64-bit set param not spilled with storew', Pos('storew %_par_S', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { set of Byte / ordinal-based sets (issue #105)                       }
 { ------------------------------------------------------------------ }
@@ -1874,18 +1389,6 @@ const
         end.
         ''';
 
-  SrcSetOfByteUnion =
-    '''
-        program P;
-        type TByteFlags = set of Byte;
-        var A, B, C: TByteFlags;
-        begin
-          A := [1, 2];
-          B := [3, 4];
-          C := A + B
-        end.
-        ''';
-
 procedure TSetTests.TestSemantic_SetOfByte_TypeRegistered;
 var
   Prog: TProgram;
@@ -1943,57 +1446,6 @@ begin
   SemanticOK(SrcSetOfBoolean);
 end;
 
-procedure TSetTests.TestCodegen_SetOfByte_SmallLiteral_Bitmask;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type TSmall = set of Byte;
-        var S: TSmall;
-        begin
-          S := [1, 3]
-        end.
-        ''');
-  AssertTrue('_SetInclude emitted for member 1',
-    Pos('_SetInclude', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_SetOfByte_Range_ExpandsToBitmask;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetOfByteRange);
-  AssertTrue('_SetInclude emitted for range',
-    Pos('_SetInclude', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_SetOfByte_InOperator;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetOfByteIn);
-  AssertTrue('in operator emits code', Length(IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_SetOfByte_IncludeEmitsShlAndOr;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetOfByteInclude);
-  AssertTrue('Include emits _SetInclude',
-    Pos('_SetInclude', IR) > 0);
-end;
-
-procedure TSetTests.TestCodegen_SetOfByte_Union;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSetOfByteUnion);
-  AssertTrue('union emits code', Length(IR) > 0);
-end;
-
 procedure TSetTests.TestCodegen_SetOfByte_IsJumbo;
 var
   Prog: TProgram;
@@ -2037,16 +1489,6 @@ end;
 { ------------------------------------------------------------------ }
 
 const
-  SrcSelfAssignRecordCall =
-    '''
-    program P;
-    type TR = record A, B: Integer; end;
-    function CompR(const S: TR): TR;
-    begin Result.A := S.B; Result.B := S.A end;
-    var R: TR;
-    begin R.A := 1; R := CompR(R) end.
-    ''';
-
   SrcDistinctDestRecordCall =
     '''
     program P;
@@ -2087,19 +1529,8 @@ const
     begin S := [b70]; T := Comp(S) end.
     ''';
 
-procedure TSetTests.TestCodegen_SelfAssignedRecordCall_NoDestMemset;
-var IR: string;
-begin
-  IR := GenIR(SrcSelfAssignRecordCall);
-  { The destination global $R must NOT be zeroed before the call: doing so
-    handed the callee an already-cleared argument. }
-  AssertTrue('destination must not be memset before the aliased call',
-    Pos('call $memset(l $R,', IR) < 0);
-  { It routes through a fresh temp and memcpy's into $R afterwards. }
-  AssertTrue('aliased call must memcpy the temp into the destination',
-    Pos('call $memcpy(l $R,', IR) >= 0);
-end;
-
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TSetTests.TestCodegen_DistinctDestRecordCall_KeepsDirectForm;
 var IR: string;
 begin
@@ -2131,6 +1562,38 @@ begin
   { Non-aliasing: no aliasing temp is staged. }
   AssertTrue('non-aliasing jumbo-set call must not stage an aliasing temp',
     Pos('movq %rsp, %r14', Asm_) < 0);
+end;
+
+procedure TSetTests.TestSemantic_SetRangeLiteral_AcceptedInEveryContext;
+begin
+  AssertEquals('ranges accepted as argument, in-operand and set operand', '',
+    SemanticError('''
+      program P;
+      type TNum = 0..15; TNumSet = set of TNum;
+        TDir = (dN, dS, dE, dW); TDirSet = set of TDir;
+      function M(S: TNumSet): Integer; begin Result := 0 end;
+      var N: TNumSet; D: TDirSet; B: Boolean;
+      begin
+        B := M([1..3]) = 0;
+        B := dE in [dS..dW];
+        N := [1];
+        B := 2 in (N + [2..4]);
+        D := [dN];
+        D := D + [dE..dW]
+      end.
+      '''));
+end;
+
+procedure TSetTests.TestSemantic_RangeInOpenArrayArg_Rejected;
+begin
+  AssertTrue('a range is not an open-array element',
+    Pos('only allowed in a set literal', SemanticError('''
+      program P;
+      procedure OA(const A: array of Integer); begin end;
+      begin
+        OA([1..3])
+      end.
+      ''')) >= 0);
 end;
 
 initialization

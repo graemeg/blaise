@@ -31,6 +31,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Sets_Combined;
     { <= 32-member sets }
     procedure TestRun_Set_Include_Exclude;
     procedure TestRun_Set_IncludeExcludeOnField;
@@ -1204,6 +1205,108 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     'n' + LE + 'y' + LE + 'y' + LE + 'n' + LE + '32' + LE, 0);
+end;
+
+procedure TE2ESetOpsTests.TestRun_Sets_Combined;
+const
+  {
+    Sets end to end, leak-checked: range literals ([1..3], [3..3], mixed
+    [1, 4..6, 10], []) passed straight to a set parameter, in / Include /
+    Exclude / + - * = <> on a small enum set, a typed set constant, set
+    literals through procedural fields and a plain call, a full 64-member set
+    (8 bytes) with every operator, and set of Byte including a member above 63.
+    A range in a set literal outside an assignment used to be rejected by the
+    semantic pass ("Unknown expression node"). }
+  Src = '''
+    program Sets;
+    type
+      TDir = (dNorth, dSouth, dEast, dWest);
+      TDirSet = set of TDir;
+      TNum = 0..15;
+      TNumSet = set of TNum;
+      TBig = (b00,b01,b02,b03,b04,b05,b06,b07,b08,b09,b10,b11,b12,b13,b14,b15,b16,b17,b18,b19,b20,b21,b22,b23,b24,b25,b26,b27,b28,b29,b30,b31,b32,b33,b34,b35,b36,b37,b38,b39,b40,b41,b42,b43,b44,b45,b46,b47,b48,b49,b50,b51,b52,b53,b54,b55,b56,b57,b58,b59,b60,b61,b62,b63);
+      TBigSet = set of TBig;
+      TByteFlags = set of Byte;
+      TP = procedure(S: TDirSet; D: TDir);
+      TF = function(S: TDirSet): Boolean;
+      TFoo = class
+        FP: TP;
+        FF: TF;
+      end;
+    const
+      NE: TDirSet = [dNorth, dEast];
+    procedure ShowSet(S: TDirSet; D: TDir);
+    begin
+      WriteLn('show ', D in S, ' ', dSouth in S)
+    end;
+    function HasEast(S: TDirSet): Boolean;
+    begin
+      Result := dEast in S
+    end;
+    function Mask(S: TNumSet): Int64;
+    var I: TNum;
+    begin
+      Result := 0;
+      for I := 0 to 15 do
+        if I in S then Result := Result + (Int64(1) shl I)
+    end;
+    var
+      S, T, Empty: TDirSet; N: TNumSet; F: TFoo;
+      A, B: TBigSet; Z: TByteFlags; Z2: TByteFlags; I: Integer;
+    begin
+      WriteLn(Mask([1..3]), ' ', Mask([3..3]), ' ', Mask([1, 4..6, 10]), ' ', Mask([]));
+      S := [dNorth];
+      T := [dNorth, dEast];
+      WriteLn(dNorth in S, ' ', dEast in S, ' ', dEast in T);
+      Include(S, dWest);
+      Exclude(T, dNorth);
+      WriteLn(dWest in S, ' ', dNorth in T, ' ', dEast in T);
+      WriteLn(dEast in (S + T), ' ', dWest in (S - [dWest]), ' ', dEast in (S * T));
+      WriteLn(S = [dNorth, dWest], ' ', S <> [dNorth, dWest], ' ', Empty = [], ' ', S = []);
+      WriteLn(NE = [dNorth, dEast], ' ', HasEast(NE), ' ', HasEast([dNorth, dEast]));
+      F := TFoo.Create();
+      F.FP := @ShowSet;
+      F.FF := @HasEast;
+      F.FP([dNorth, dEast], dNorth);
+      WriteLn(F.FF([dEast]));
+      ShowSet([dSouth], dWest);
+      A := [b00, b63];
+      B := [b31, b32, b63];
+      WriteLn(SizeOf(TBigSet), ' ', b63 in A, ' ', b32 in A, ' ', b62 in A);
+      Include(A, b40);
+      Exclude(A, b00);
+      WriteLn(b40 in A, ' ', b00 in A, ' ', b31 in (A + B), ' ', b63 in (A * B), ' ', b63 in (A - B));
+      WriteLn(A = [b40, b63], ' ', A <> B);
+      Z := [1, 2, 3];
+      Z2 := [1..5];
+      WriteLn(2 in Z, ' ', 9 in Z, ' ', 5 in Z2, ' ', 6 in Z2);
+      Include(Z, 200);
+      Z2 := Z + [3, 4];
+      I := 0;
+      for I := 0 to 255 do
+        if I in Z2 then Write(I, ' ');
+      WriteLn();
+      F.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '14 8 1138 0' + LE +
+    'True False True' + LE +
+    'True False True' + LE +
+    'True False False' + LE +
+    'True False True False' + LE +
+    'True True True' + LE +
+    'show True False' + LE +
+    'True' + LE +
+    'show False True' + LE +
+    '8 True False False' + LE +
+    'True False True True False' + LE +
+    'True True' + LE +
+    'True False True False' + LE +
+    '1 2 3 4 200 ' + LE, 0);
+  AssertLeakFreeOnAll(Src, '1 2 3 4 200');
 end;
 
 initialization
