@@ -2515,10 +2515,11 @@ begin
       if AIsVarParam then
         Self.Emit(#9'ldr x0, [x0]');
     end
-    else if AIsVarParam then
-      EmitLoadSlot('x0', AObjectName)  { slot holds the caller's record address }
     else
-      EmitSlotAddr('x0', AObjectName);
+      { a var/out record's slot holds the caller's record address; a BY-VALUE
+        record param (IsVarParam too, records pass by reference) has its
+        copy inline -- EmitRecordBaseAddr tells the two apart }
+      EmitRecordBaseAddr('x0', AObjectName, AIsVarParam);
   end
   else if not EmitCapturedBase('x0', AObjectName, True, AIsVarParam) then
   begin
