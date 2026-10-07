@@ -6168,10 +6168,33 @@ begin
       EmitCallSym('_StrToDouble');
     Exit;
   end;
+  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall then
+  begin
+    { a call through a procedural / method-pointer / closure variable
+      returning a float: the callee leaves its Double (or Single) result in
+      d0 / s0.  A method pointer or closure is a fat value called through
+      EmitFatPtrCall (which places float arguments in d registers); a plain
+      procedural variable goes through the integer path's call. }
+    if IsMethodPtrType(TTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType)) then
+    begin
+      if IsCaptured(TFuncCallExpr(AExpr).Name) then
+        NotYet('float-returning call through a captured closure variable',
+          AExpr);
+      EmitSlotAddr('x9', TFuncCallExpr(AExpr).Name);
+      EmitFatPtrCall('x9',
+        TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType),
+        TFuncCallExpr(AExpr).Args);
+    end
+    else
+      Self.EmitExprToX0(AExpr);
+    if (AExpr.ResolvedType <> nil) and
+       (AExpr.ResolvedType.Kind = tySingle) then
+      Self.Emit(#9'fcvt d0, s0');
+    Exit;
+  end;
   if AExpr is TFuncCallExpr then
   begin
-    if TFuncCallExpr(AExpr).IsIndirectCall or
-       TFuncCallExpr(AExpr).IsImplicitSelfMethod or
+    if TFuncCallExpr(AExpr).IsImplicitSelfMethod or
        (TFuncCallExpr(AExpr).ResolvedDecl = nil) then
       NotYet('this call form in float context', AExpr);
     EmitCall(TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl),
