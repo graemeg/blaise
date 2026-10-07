@@ -5953,6 +5953,23 @@ begin
     Self.Emit(#9'fmov d0, x0');
     Exit;
   end;
+  if (AExpr is TIdentExpr) and IsFloatExpr(AExpr) and
+     IsCaptured(TIdentExpr(AExpr).Name) then
+  begin
+    { a float captured from an enclosing routine: the bit pattern through
+      its _cap_ pointer (one deref further for a captured var param),
+      loaded at the declared width }
+    EmitCapturedLoad(TIdentExpr(AExpr));
+    if (AExpr.ResolvedType <> nil) and
+       (AExpr.ResolvedType.Kind = tySingle) then
+    begin
+      Self.Emit(#9'fmov s0, w0');
+      Self.Emit(#9'fcvt d0, s0');
+    end
+    else
+      Self.Emit(#9'fmov d0, x0');
+    Exit;
+  end;
   if (AExpr is TIdentExpr) and IsFloatExpr(AExpr) then
   begin
     if (AExpr.ResolvedType <> nil) and
