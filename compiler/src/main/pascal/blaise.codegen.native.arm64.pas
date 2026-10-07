@@ -293,12 +293,6 @@ type
     { Invoke a closure/method-pointer fat value whose ADDRESS is in AAddrReg:
       load Code, pass Env as the hidden first arg (x0), the visible args in
       x1.., blr.  Result in x0/d0 per the callee's return type. }
-    { True when a procedural signature has an open-array param.  The narrow
-      plain-pointer indirect-call loops pass one register per arg, so a
-      dynamic array would silently lose its high
-      (BUG-20260923-addr-of-openarray-proc); such a call goes through
-      EmitFatPtrCall, which passes the (data, high) pair as EmitCall does. }
-    function ProcTypeHasOpenArrayParam(AProcType: TProceduralTypeDesc): Boolean;
     { FuncPtrExpr(args): call through the procedure pointer an arbitrary
       expression yields (Fns[I](), GetFn()(X)).  Result in x0 / d0. }
     procedure EmitIndirectFuncCallExpr(AExpr: TIndirectFuncCallExpr);
@@ -2788,19 +2782,6 @@ begin
     EmitCallSym('_DynArrayRelease');
 end;
 
-function TArm64Backend.ProcTypeHasOpenArrayParam(
-  AProcType: TProceduralTypeDesc): Boolean;
-var
-  I: Integer;
-begin
-  Result := False;
-  if AProcType = nil then Exit;
-  for I := 0 to AProcType.Params.Count - 1 do
-    if (TProcParamInfo(AProcType.Params.Items[I]).TypeDesc <> nil) and
-       (TProcParamInfo(AProcType.Params.Items[I]).TypeDesc.Kind = tyOpenArray) then
-      Result := True;
-end;
-
 procedure TArm64Backend.EmitIndirectFuncCallExpr(AExpr: TIndirectFuncCallExpr);
 var
   PT: TProceduralTypeDesc;
@@ -4955,51 +4936,16 @@ begin
       TFuncCallExpr(AExpr).Args);
     Exit;
   end;
-  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
-     ProcTypeHasOpenArrayParam(
-       TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType)) then
+  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall then
   begin
-    { a plain procedure pointer whose signature has an open-array param:
-      the general path passes the (data, high) pair }
+    { call through a plain procedure pointer: EmitFatPtrCall's plain form
+      lowers the arguments exactly as a direct call does (var, float, record,
+      open array, owned transients) -- the narrow int-register loop this
+      replaced rejected anything else }
     EmitSlotAddr('x9', TFuncCallExpr(AExpr).Name);
     EmitFatPtrCall('x9',
       TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType),
       TFuncCallExpr(AExpr).Args, False);
-    Exit;
-  end;
-  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
-     (TFuncCallExpr(AExpr).Args.Count <= 8) then
-  begin
-    { call through a procedural-typed variable, expression position:
-      int-class args in x0.., fptr from the variable's slot, blr }
-    for I := 0 to TFuncCallExpr(AExpr).Args.Count - 1 do
-    begin
-      if not (IsIntFam(TASTExpr(TFuncCallExpr(AExpr).Args.Items[I])
-                .ResolvedType) or
-              (TASTExpr(TFuncCallExpr(AExpr).Args.Items[I])
-                 is TIntLiteral) or
-              (TASTExpr(TFuncCallExpr(AExpr).Args.Items[I])
-                 is TNilLiteral) or
-              ((TASTExpr(TFuncCallExpr(AExpr).Args.Items[I])
-                  .ResolvedType <> nil) and
-               (TASTExpr(TFuncCallExpr(AExpr).Args.Items[I])
-                  .ResolvedType.Kind in [tyPChar, tyPointer,
-                                         tyClass, tyString,
-                                         tyMetaClass]))) then
-        NotYet('indirect-call argument of this type',
-          TASTExpr(TFuncCallExpr(AExpr).Args.Items[I]));
-      { a string arg passes as a BORROWED pointer; an owned transient
-        would need a park slot — keep the hole honest }
-      if ArcExprOwnsRef(TASTExpr(TFuncCallExpr(AExpr).Args.Items[I])) then
-        NotYet('owned transient argument in an indirect call',
-          TASTExpr(TFuncCallExpr(AExpr).Args.Items[I]));
-      Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[I]));
-      EmitPushX0();
-    end;
-    for I := TFuncCallExpr(AExpr).Args.Count - 1 downto 0 do
-      EmitPopTo('x' + IntToStr(I));
-    EmitLoadSlot('x9', TFuncCallExpr(AExpr).Name);
-    Self.Emit(#9'blr x9');
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
@@ -8365,41 +8311,14 @@ begin
       TProceduralTypeDesc(ACall.ResolvedProcType), ACall.Args);
     Exit;
   end;
-  if ACall.IsIndirectCall and
-     ProcTypeHasOpenArrayParam(TProceduralTypeDesc(ACall.ResolvedProcType)) then
+  if ACall.IsIndirectCall then
   begin
-    { a plain procedure pointer whose signature has an open-array param:
-      the general path passes the (data, high) pair }
+    { statement-position call through a plain procedure pointer: the general
+      path, as in expression position; a discarded owned result is released }
     EmitSlotAddr('x9', ACall.Name);
     EmitFatPtrCall('x9', TProceduralTypeDesc(ACall.ResolvedProcType),
       ACall.Args, False);
-    Exit;
-  end;
-  if ACall.IsIndirectCall and (ACall.Args.Count <= 8) then
-  begin
-    { call through a plain proc-pointer variable: int-class args in
-      x0..x(n-1), function pointer from the variable's slot, blr }
-    for I := 0 to ACall.Args.Count - 1 do
-    begin
-      Arg := TASTExpr(ACall.Args.Items[I]);
-      if not (IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) or
-              (Arg is TNilLiteral) or
-              ((Arg.ResolvedType <> nil) and
-               (Arg.ResolvedType.Kind in [tyPChar, tyPointer,
-                                          tyClass, tyString, tyDynArray,
-                                          tyMetaClass]))) then
-        NotYet('indirect-call argument of this type', Arg);
-      { an owned transient would need a park slot (like EmitFatPtrCall) — keep
-        the hole honest rather than leak it }
-      if ArcExprOwnsRef(Arg) then
-        NotYet('owned transient argument in an indirect call', Arg);
-      Self.EmitExprToX0(Arg);
-      EmitPushX0();
-    end;
-    for I := ACall.Args.Count - 1 downto 0 do
-      EmitPopTo('x' + IntToStr(I));
-    EmitLoadSlot('x9', ACall.Name);
-    Self.Emit(#9'blr x9');
+    EmitDiscardedProcResult(TProceduralTypeDesc(ACall.ResolvedProcType));
     Exit;
   end;
   if (SameText(ACall.Name, 'Inc') or SameText(ACall.Name, 'Dec')) and
