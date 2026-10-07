@@ -15146,6 +15146,11 @@ begin
     else if FldAccess.IsInterfaceCall then
     begin
       { Zero-arg method call through interface itab: M.GetCount where M: IFoo }
+      if FldAccess.Base <> nil then
+        raise ECodeGenError.Create(Format(
+          'QBE backend: interface property / method ''%s'' on a chained ' +
+          'receiver is not supported (use the native backend)',
+          [FldAccess.FieldName]));
       IntfDesc := TInterfaceTypeDesc(FldAccess.ResolvedClassType);
       SelfTemp := AllocTemp();
       EmitLine(Format('  %s =l loadl %s',

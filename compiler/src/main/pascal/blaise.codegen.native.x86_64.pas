@@ -9923,8 +9923,11 @@ begin
      TFieldAccessExpr(AExpr).IsInterfaceCall then
   begin
     FAE := TFieldAccessExpr(AExpr);
+    { a chained receiver (R.F.Value) is an expression; EmitInterfaceCall
+      loads obj/itab from it as for H.G.Greet() }
     Self.EmitInterfaceCall(FAE.RecordName, FAE.IsGlobal, FAE.IsVarParam,
-      TInterfaceTypeDesc(FAE.ResolvedClassType), FAE.FieldName, nil);
+      TInterfaceTypeDesc(FAE.ResolvedClassType), FAE.FieldName, nil,
+      FAE.Base);
     if (FAE.ResolvedType <> nil) and
        not (FAE.ResolvedType.Kind in [tyInt64, tyUInt64, tyPointer, tyClass,
                                       tyString, tyPChar, tyInterface]) then

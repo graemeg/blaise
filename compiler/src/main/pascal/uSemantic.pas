@@ -15227,6 +15227,36 @@ begin
           [AAccess.FieldName, RT.Name]),
         AAccess.Line, AAccess.Col);
     end;
+    { Interface-typed base (R.F.Value, Obj.Intf.Count): a property read or a
+      parameterless method, dispatched through the base expression's itab --
+      the chained twin of the interface-VARIABLE arm further down. }
+    if BaseType.Kind = tyInterface then
+    begin
+      IntfDesc := TInterfaceTypeDesc(BaseType);
+      if not IntfDesc.HasMethod(AAccess.FieldName) then
+      begin
+        PropInfo := IntfDesc.FindProperty(AAccess.FieldName);
+        if PropInfo = nil then
+          SemanticError(
+            Format('Interface ''%s'' has no method or property ''%s''',
+              [IntfDesc.Name, AAccess.FieldName]),
+            AAccess.Line, AAccess.Col);
+        if PropInfo.ReadMethod = '' then
+          SemanticError(
+            Format('Interface property ''%s.%s'' is write-only',
+              [IntfDesc.Name, AAccess.FieldName]),
+            AAccess.Line, AAccess.Col);
+        AAccess.FieldName := PropInfo.ReadMethod;
+      end;
+      AAccess.IsInterfaceCall   := True;
+      AAccess.ResolvedClassType := IntfDesc;
+      Result := FindTypeOrInstantiate(
+        IntfDesc.MethodReturnTypeName(IntfDesc.MethodIndex(AAccess.FieldName)));
+      if Result = nil then
+        Result := FTable.TypeInteger;
+      AAccess.ResolvedType := Result;
+      Exit;
+    end;
     if not (BaseType.Kind in [tyRecord, tyClass]) then
       SemanticError(
         Format('Field access ''.%s'' requires a record or class base, got ''%s''',
