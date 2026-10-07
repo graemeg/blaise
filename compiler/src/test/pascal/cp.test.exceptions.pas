@@ -68,49 +68,32 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — try/finally                                                }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_TryFinally_TryBodyInIR;
-    procedure TestCodegen_TryFinally_FinallyBodyInIR;
-    procedure TestCodegen_TryFinally_FinallyAfterTry;
 
     { ------------------------------------------------------------------ }
     { Codegen — try/except                                                 }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_TryExcept_TryBodyInIR;
-    procedure TestCodegen_TryExcept_ExceptLabelPresent;
 
     { ------------------------------------------------------------------ }
     { Codegen — raise                                                      }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_Raise_CallsRTL;
 
     { ------------------------------------------------------------------ }
     { Codegen — setjmp-based real dispatch                                 }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_TryExcept_PushesExcFrame;
-    procedure TestCodegen_TryExcept_CallsSetjmp;
-    procedure TestCodegen_TryExcept_PopsFrame;
-    procedure TestCodegen_TryFinally_PushesExcFrame;
-    procedure TestCodegen_TryFinally_CallsReraise;
-    procedure TestCodegen_TryFinally_FinallyOnBothPaths;
     procedure TestCodegen_TryExcept_FrameAllocSize;
     procedure TestCodegen_TryFinally_FrameAllocSize;
     procedure TestCodegen_TryInsideFinally_AllFramesAllocated;
     { Exit inside try/finally must emit the finally body on the exit path,
       not just pop the frame. }
-    procedure TestCodegen_ExitInTryFinally_RunsFinally;
     { Exit inside the SECOND try block of a function must still pop its
       frame: the emitter's FExcDepth bookkeeping is per-path, and the
       exception path must rebalance it (regression: a double decrement left
       later try blocks at depth 0, so their Exit paths skipped the pop and
       left a stale g_exc_top -> crash on a later raise/pop). }
-    procedure TestCodegen_ExitInSecondTryExcept_PopsFrame;
 
     { ------------------------------------------------------------------ }
     { Codegen — ARC cleanup on exception paths                            }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_TryFinally_NoArcCleanup_BeforeReraise;
-    procedure TestCodegen_TryFinally_NoArcZero_BeforeReraise;
-    procedure TestCodegen_ExceptionSubclass_CtorCallWithMessage;
 
     { ------------------------------------------------------------------ }
     { Parser — typed except handlers (on E: TClass do)                   }
@@ -131,19 +114,6 @@ type
     procedure TestSemantic_TypedExcept_NonClassType_RaisesError;
     procedure TestSemantic_TypedExcept_WithElse_OK;
     procedure TestSemantic_TypedExcept_HandlerVarUsableInBody;
-
-    { ------------------------------------------------------------------ }
-    { Codegen — typed except handlers                                     }
-    { ------------------------------------------------------------------ }
-    procedure TestCodegen_TypedExcept_CallsIsInstance;
-    procedure TestCodegen_TypedExcept_TwoHandlers_TwoIsInstanceCalls;
-    procedure TestCodegen_TypedExcept_ElseBodyPresent;
-    procedure TestCodegen_TypedExcept_UsesCurrentException;
-
-    { ------------------------------------------------------------------ }
-    { Codegen — bare raise in except handler                              }
-    { ------------------------------------------------------------------ }
-    procedure TestCodegen_BareRaise_InTypedHandler_CallsReraise;
   end;
 
 implementation
@@ -237,25 +207,6 @@ const
             X := 0;
             Y := 0
           end
-        end.
-        ''';
-
-  { Exit inside the try body: the finally (X := 7) must be emitted on the
-    exit path too, so 'copy 7' appears three times — normal, exception, exit. }
-  SrcExitInTryFinally =
-    '''
-        program P;
-        var X: Integer;
-        procedure Run;
-        begin
-          try
-            Exit
-          finally
-            X := 7
-          end
-        end;
-        begin
-          Run()
         end.
         ''';
 
@@ -534,203 +485,11 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
-{ Codegen — try/finally                                                }
-{ ------------------------------------------------------------------ }
-
-procedure TExceptionTests.TestCodegen_TryFinally_TryBodyInIR;
-var IR: string;
-begin
-  IR := GenIR(SrcTryFinally);
-  { X := 1 inside try block }
-  AssertTrue('try body copy 1 in IR', Pos('copy 1', IR) > 0);
-end;
-
-procedure TExceptionTests.TestCodegen_TryFinally_FinallyBodyInIR;
-var IR: string;
-begin
-  IR := GenIR(SrcTryFinally);
-  { X := 2 inside finally block }
-  AssertTrue('finally body copy 2 in IR', Pos('copy 2', IR) > 0);
-end;
-
-procedure TExceptionTests.TestCodegen_TryFinally_FinallyAfterTry;
-var IR: string; PosTry, PosFinally: Integer;
-begin
-  IR := GenIR(SrcTryFinally);
-  { finally code (copy 2) must appear after try code (copy 1) }
-  PosTry     := Pos('copy 1', IR);
-  PosFinally := Pos('copy 2', IR);
-  AssertTrue('try body present', PosTry > 0);
-  AssertTrue('finally body present', PosFinally > 0);
-  AssertTrue('finally appears after try in IR', PosFinally > PosTry);
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen — try/except                                                 }
-{ ------------------------------------------------------------------ }
-
-procedure TExceptionTests.TestCodegen_TryExcept_TryBodyInIR;
-var IR: string;
-begin
-  IR := GenIR(SrcTryExcept);
-  { X := 1 inside try block }
-  AssertTrue('try body in IR', Pos('copy 1', IR) > 0);
-end;
-
-procedure TExceptionTests.TestCodegen_TryExcept_ExceptLabelPresent;
-var IR: string;
-begin
-  IR := GenIR(SrcTryExcept);
-  { Except handler block has a label }
-  AssertTrue('except handler label in IR', Pos('except_handler', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen — raise                                                      }
-{ ------------------------------------------------------------------ }
-
-procedure TExceptionTests.TestCodegen_Raise_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR(SrcRaise);
-  { raise emits a call to the RTL raise function }
-  AssertTrue('call $_Raise in IR', Pos('call $_Raise', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
 { Codegen — setjmp-based real dispatch                                 }
 { ------------------------------------------------------------------ }
 
-procedure TExceptionTests.TestCodegen_TryExcept_PushesExcFrame;
-var IR: string;
-begin
-  IR := GenIR(SrcTryExcept);
-  AssertTrue('try/except pushes exc frame', Pos('call $_PushExcFrame', IR) > 0);
-end;
-
-procedure TExceptionTests.TestCodegen_TryExcept_CallsSetjmp;
-var IR: string;
-begin
-  IR := GenIR(SrcTryExcept);
-  AssertTrue('try/except calls _blaise_setjmp', Pos('call $_blaise_setjmp', IR) > 0);
-end;
-
-procedure TExceptionTests.TestCodegen_TryExcept_PopsFrame;
-var IR: string;
-begin
-  IR := GenIR(SrcTryExcept);
-  AssertTrue('try/except pops exc frame', Pos('call $_PopExcFrame', IR) > 0);
-end;
-
-procedure TExceptionTests.TestCodegen_TryFinally_PushesExcFrame;
-var IR: string;
-begin
-  IR := GenIR(SrcTryFinally);
-  AssertTrue('try/finally pushes exc frame', Pos('call $_PushExcFrame', IR) > 0);
-end;
-
-procedure TExceptionTests.TestCodegen_TryFinally_CallsReraise;
-var IR: string;
-begin
-  IR := GenIR(SrcTryFinally);
-  AssertTrue('try/finally re-raises on exception path', Pos('call $_Reraise', IR) > 0);
-end;
-
-procedure TExceptionTests.TestCodegen_TryFinally_FinallyOnBothPaths;
-var
-  IR:   string;
-  N:    Integer;
-  Idx:  Integer;
-begin
-  { finally body (copy 2) must appear on both the normal and exception paths }
-  IR  := GenIR(SrcTryFinally);
-  N   := 0;
-  Idx := 0;    { 0-based start }
-  while True do
-  begin
-    Idx := PosEx('copy 2', IR, Idx);
-    if Idx < 0 then Break;   { Blaise PosEx returns -1 when not found }
-    Inc(N);
-    Inc(Idx);
-  end;
-  AssertTrue('finally body appears on both paths (>= 2 occurrences)', N >= 2);
-end;
-
-procedure TExceptionTests.TestCodegen_ExitInTryFinally_RunsFinally;
-var
-  IR:  string;
-  N:   Integer;
-  Idx: Integer;
-begin
-  { With Exit inside the try body the finally (X := 7 → 'copy 7') must be
-    emitted on three paths: normal fall-through, exception, and the Exit
-    unwind.  Before the fix the Exit path only popped the frame and jumped
-    straight to the function exit, skipping the finally entirely. }
-  IR  := GenIR(SrcExitInTryFinally);
-  N   := 0;
-  Idx := 0;
-  while True do
-  begin
-    Idx := PosEx('copy 7', IR, Idx);
-    if Idx < 0 then Break;
-    Inc(N);
-    Inc(Idx);
-  end;
-  AssertTrue('finally body emitted on exit path too (>= 3 occurrences)', N >= 3);
-end;
-
-{ Exception frame must be >= sizeof(BlaiseExcFrame) on every supported target.
-  The RTL (blaise_exc.c) fixes the contract at 512 bytes — jmp_buf alone is
-  200 B on Linux x86_64 / ~312 B on macOS ARM64, plus two pointer fields.
-  Undersizing silently corrupts the caller's stack when setjmp writes jbuf. }
-procedure TExceptionTests.TestCodegen_ExitInSecondTryExcept_PopsFrame;
-var
-  IR:  string;
-  N:   Integer;
-  Idx: Integer;
-begin
-  IR := GenIR('''
-      program P;
-      function F(n: Integer): Integer;
-      begin
-        Result := 0;
-        try
-          if n = 0 then
-          begin
-            Exit(100);
-          end;
-        except
-        end;
-        try
-          repeat
-            if n > 2 then
-            begin
-              Exit(n * 10);
-            end;
-            n := n + 1;
-          until False;
-        except
-        end;
-      end;
-      begin
-      end.
-      ''');
-  { Each try/except emits three pops: the Exit path inside the try body,
-    the normal fall-through path, and the handler path.  Two try blocks
-    with one Exit each = 6 pops.  The double-decrement bug dropped the
-    Exit-path pop of the second block (5 pops). }
-  N := 0;
-  Idx := 0;
-  while True do
-  begin
-    Idx := PosEx('call $_PopExcFrame()', IR, Idx);
-    if Idx < 0 then Break;
-    Inc(N);
-    Inc(Idx);
-  end;
-  AssertEquals('balanced frame pops across both try blocks', 6, N);
-end;
-
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TExceptionTests.TestCodegen_TryExcept_FrameAllocSize;
 var IR: string;
 begin
@@ -738,6 +497,8 @@ begin
   AssertTrue('try/except allocates 512-byte exc frame', Pos('alloc16 512', IR) > 0);
 end;
 
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TExceptionTests.TestCodegen_TryFinally_FrameAllocSize;
 var IR: string;
 begin
@@ -745,6 +506,8 @@ begin
   AssertTrue('try/finally allocates 512-byte exc frame', Pos('alloc16 512', IR) > 0);
 end;
 
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TExceptionTests.TestCodegen_TryInsideFinally_AllFramesAllocated;
 var
   IR: string;
@@ -788,91 +551,6 @@ end;
 { ------------------------------------------------------------------ }
 
 const
-  { String assignment is ONLY inside the try body — no pre-try assignment.
-    This ensures there is no assignment-site _StringRelease before @fin_exc
-    that could produce a false positive in the position tests below. }
-  SrcTryFinallyWithStr =
-    '''
-        program P;
-        var S: string;
-        begin
-          try
-            S := 'world'
-          finally
-          end
-        end.
-        ''';
-
-procedure TExceptionTests.TestCodegen_TryFinally_NoArcCleanup_BeforeReraise;
-var
-  IR:         string;
-  PosFinExc:  Integer;
-  PosRelease: Integer;
-  PosReraise: Integer;
-begin
-  IR := GenIR(SrcTryFinallyWithStr);
-  PosFinExc  := Pos(#10 + '@fin_exc', IR);
-  PosReraise := Pos('call $_Reraise', IR);
-  AssertTrue('@fin_exc label present', PosFinExc > 0);
-  AssertTrue('_Reraise present', PosReraise > 0);
-  { ARC cleanup must NOT appear in the finally-exception path — variables
-    must survive the re-raise so the outer handler can read them.  The
-    function-exit block handles final release. }
-  PosRelease := PosEx('call $_StringRelease', IR, PosFinExc);
-  if PosRelease > 0 then
-    AssertTrue('no _StringRelease before _Reraise', PosRelease > PosReraise);
-end;
-
-procedure TExceptionTests.TestCodegen_TryFinally_NoArcZero_BeforeReraise;
-var
-  IR:         string;
-  PosFinExc:  Integer;
-  PosReraise: Integer;
-  PosZero:    Integer;
-begin
-  IR := GenIR(SrcTryFinallyWithStr);
-  PosFinExc  := Pos(#10 + '@fin_exc', IR);
-  PosReraise := Pos('call $_Reraise', IR);
-  AssertTrue('@fin_exc label present', PosFinExc > 0);
-  AssertTrue('_Reraise present', PosReraise > 0);
-  { No storel 0 (variable zeroing) between @fin_exc and _Reraise — the
-    outer handler or function exit is responsible for cleanup. }
-  PosZero := PosEx('storel 0,', IR, PosFinExc);
-  if PosZero > 0 then
-    AssertTrue('no storel 0 before _Reraise', PosZero > PosReraise);
-end;
-
-procedure TExceptionTests.TestCodegen_ExceptionSubclass_CtorCallWithMessage;
-var IR: string;
-begin
-  { Verify that constructing an Exception subclass with a message argument
-    emits a constructor call that passes the string argument in the IR. }
-  IR := GenIR(
-    '''
-        program P;
-        type
-          Exception = class
-            FMessage: string;
-            constructor Create(AMessage: string);
-            property Message: string read FMessage;
-          end;
-          ECompileError = class(Exception)
-          end;
-        constructor Exception.Create(AMessage: string);
-        begin
-          FMessage := AMessage;
-        end;
-        var E: ECompileError;
-        begin
-          E := ECompileError.Create('oops');
-          raise E
-        end.
-        ''');
-  AssertTrue('ctor call present',  Pos('$Exception_Create', IR) > 0);
-  AssertTrue('string arg present', Pos('oops', IR) > 0);
-  AssertTrue('raise RTL call',     Pos('$_Raise', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { Shared source — typed except handlers                              }
 { ------------------------------------------------------------------ }
@@ -1087,71 +765,6 @@ begin
           end
         end.
         ''').Free();
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen — typed except handlers                                    }
-{ ------------------------------------------------------------------ }
-
-procedure TExceptionTests.TestCodegen_TypedExcept_CallsIsInstance;
-var IR: string;
-begin
-  IR := GenIR(SrcTypedExceptSingle);
-  AssertTrue('_IsInstance call for EFoo', Pos('$_IsInstance', IR) > 0);
-  AssertTrue('typeinfo_EFoo referenced', Pos('typeinfo_EFoo', IR) > 0);
-end;
-
-procedure TExceptionTests.TestCodegen_TypedExcept_TwoHandlers_TwoIsInstanceCalls;
-var IR: string; N: Integer; Idx: Integer;
-begin
-  IR := GenIR(SrcTypedExceptTwo);
-  N := 0; Idx := 0;    { 0-based start }
-  while True do
-  begin
-    Idx := PosEx('$_IsInstance', IR, Idx);
-    if Idx < 0 then Break;   { Blaise PosEx returns -1 when not found }
-    Inc(N); Inc(Idx);
-  end;
-  AssertTrue('two _IsInstance calls for two handlers', N >= 2);
-end;
-
-procedure TExceptionTests.TestCodegen_TypedExcept_ElseBodyPresent;
-var IR: string;
-begin
-  IR := GenIR(SrcTypedExceptWithElse);
-  { The else body assigns 0 to X }
-  AssertTrue('else body (copy 0) in IR', Pos('copy 0', IR) > 0);
-end;
-
-procedure TExceptionTests.TestCodegen_TypedExcept_UsesCurrentException;
-var IR: string;
-begin
-  IR := GenIR(SrcTypedExceptSingle);
-  { Handler must call _CurrentException to get the live exception object }
-  AssertTrue('_CurrentException called', Pos('$_CurrentException', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen — bare raise in except handler                             }
-{ ------------------------------------------------------------------ }
-
-procedure TExceptionTests.TestCodegen_BareRaise_InTypedHandler_CallsReraise;
-var IR: string;
-begin
-  IR := GenIR(
-    SrcExcBase +
-    '''
-        var X: Integer;
-        begin
-          try
-            X := 1
-          except
-            on E: EFoo do
-              raise
-          end
-        end.
-        ''');
-  AssertTrue('bare raise calls _Reraise', Pos('call $_Reraise', IR) > 0);
 end;
 
 initialization

@@ -21,6 +21,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Exceptions_Combined;
     procedure TestRun_FailedAs_RaisesEInvalidCast;
     { Regression for the alloc16-32 exception-frame bug:
       a bare try/finally with no locals, virtuals, or RTL use. }
@@ -735,6 +736,152 @@ begin
     'hi' + LE +
     'div: Division by zero' + LE +
     'done' + LE, 0);
+end;
+
+procedure TE2EExceptionTests.TestRun_Exceptions_Combined;
+const
+  {
+    Exception handling end to end: finally runs on the normal and the exception
+    path and the exception still reaches the outer handler; Exit leaves through
+    finally; Exit out of the second of two try/except blocks keeps the frame
+    stack balanced (a later raise is still caught); typed handlers pick the
+    matching class, with else for the rest; a bare raise in a typed handler
+    re-raises to the caller; a string assigned before the raise survives the
+    finally re-raise; and a try nested inside a finally body works. }
+  Src = '''
+    program P;
+    type
+      EBase = class
+        Msg: string;
+        constructor Create(const AMsg: string);
+      end;
+      EFoo = class(EBase) end;
+      EBar = class(EBase) end;
+      EOther = class end;
+    constructor EBase.Create(const AMsg: string);
+    begin
+      Msg := AMsg
+    end;
+    var Trace, S: string;
+    procedure FinallyBoth(Fail: Boolean);
+    begin
+      try
+        Trace := Trace + 't';
+        if Fail then raise EFoo.Create('f');
+        Trace := Trace + 'n'
+      finally
+        Trace := Trace + 'F'
+      end
+    end;
+    procedure ExitThroughFinally;
+    begin
+      try
+        Exit
+      finally
+        Trace := Trace + 'X'
+      end
+    end;
+    function TwoTries(N: Integer): Integer;
+    begin
+      Result := 0;
+      try
+        if N = 0 then Exit(100)
+      except
+      end;
+      try
+        repeat
+          if N > 2 then Exit(N * 10);
+          N := N + 1
+        until False
+      except
+      end
+    end;
+    function Classify(K: Integer): string;
+    begin
+      try
+        case K of
+          0: raise EFoo.Create('foo');
+          1: raise EBar.Create('bar');
+          2: raise EOther.Create()
+        end;
+        Result := 'none'
+      except
+        on E: EFoo do Result := 'EFoo:' + E.Msg;
+        on E: EBar do Result := 'EBar:' + E.Msg
+      else
+        Result := 'else'
+      end
+    end;
+    procedure Rethrow;
+    begin
+      try
+        raise EBar.Create('again')
+      except
+        on E: EBar do raise
+      end
+    end;
+    procedure StrSurvives;
+    begin
+      try
+        S := 'wor' + 'ld';
+        raise EFoo.Create('s')
+      finally
+      end
+    end;
+    procedure TryInFinally;
+    begin
+      try
+        Trace := Trace + 'a'
+      finally
+        try
+          raise EFoo.Create('inner')
+        except
+          on E: EFoo do Trace := Trace + 'c'
+        end
+      end
+    end;
+    begin
+      Trace := '';
+      FinallyBoth(False);
+      try
+        FinallyBoth(True)
+      except
+        on E: EFoo do Trace := Trace + 'C'
+      end;
+      ExitThroughFinally();
+      WriteLn(Trace);
+      WriteLn(TwoTries(0), ' ', TwoTries(1));
+      try
+        raise EFoo.Create('after-exits')
+      except
+        on E: EFoo do WriteLn('caught ', E.Msg)
+      end;
+      WriteLn(Classify(0), ' ', Classify(1), ' ', Classify(2), ' ', Classify(3));
+      try
+        Rethrow()
+      except
+        on E: EBar do WriteLn('outer ', E.Msg)
+      end;
+      try
+        StrSurvives()
+      except
+        on E: EFoo do WriteLn('S=', S)
+      end;
+      Trace := '';
+      TryInFinally();
+      WriteLn(Trace)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'tnFtFCX' + LE +
+    '100 30' + LE +
+    'caught after-exits' + LE +
+    'EFoo:foo EBar:bar else none' + LE +
+    'outer again' + LE +
+    'S=world' + LE +
+    'ac' + LE, 0);
 end;
 
 initialization
