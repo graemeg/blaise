@@ -284,11 +284,15 @@ type
     { Invoke a closure/method-pointer fat value whose ADDRESS is in AAddrReg:
       load Code, pass Env as the hidden first arg (x0), the visible args in
       x1.., blr.  Result in x0/d0 per the callee's return type. }
-    { NotYet when a procedural signature has an open-array param: the
-      indirect-call loops pass one register per arg, so a dynamic array would
-      silently lose its high (BUG-20260923-addr-of-openarray-proc). }
-    procedure GuardNoOpenArrayParam(AProcType: TProceduralTypeDesc;
-      ANode: TASTNode);
+    { True when a procedural signature has an open-array param.  The narrow
+      plain-pointer indirect-call loops pass one register per arg, so a
+      dynamic array would silently lose its high
+      (BUG-20260923-addr-of-openarray-proc); such a call goes through
+      EmitFatPtrCall, which passes the (data, high) pair as EmitCall does. }
+    function ProcTypeHasOpenArrayParam(AProcType: TProceduralTypeDesc): Boolean;
+    { FuncPtrExpr(args): call through the procedure pointer an arbitrary
+      expression yields (Fns[I](), GetFn()(X)).  Result in x0 / d0. }
+    procedure EmitIndirectFuncCallExpr(AExpr: TIndirectFuncCallExpr);
     procedure EmitFatPtrCall(const AAddrReg: string; AProcType: TProceduralTypeDesc;
       AArgs: TObjectList; AIsFat: Boolean = True);
     procedure EmitProcFieldAddr(const AObjectName: string; AObjExpr: TASTExpr;
@@ -706,6 +710,14 @@ begin
   Result := (AType <> nil) and (AType.Kind = tyProcedural) and
     (TProceduralTypeDesc(AType).IsMethodPtr or
      TProceduralTypeDesc(AType).IsReference);
+end;
+
+{ True for a PLAIN procedure pointer: one unmanaged code word, stored, passed
+  and returned exactly like a Pointer. }
+function IsPlainProcType(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and (AType.Kind = tyProcedural) and
+    not IsMethodPtrType(AType);
 end;
 
 { True for a result returned through the caller's x8 buffer (an sret
@@ -2650,16 +2662,46 @@ begin
     EmitCallSym('_DynArrayRelease');
 end;
 
-procedure TArm64Backend.GuardNoOpenArrayParam(AProcType: TProceduralTypeDesc;
-  ANode: TASTNode);
+function TArm64Backend.ProcTypeHasOpenArrayParam(
+  AProcType: TProceduralTypeDesc): Boolean;
 var
   I: Integer;
 begin
+  Result := False;
   if AProcType = nil then Exit;
   for I := 0 to AProcType.Params.Count - 1 do
     if (TProcParamInfo(AProcType.Params.Items[I]).TypeDesc <> nil) and
        (TProcParamInfo(AProcType.Params.Items[I]).TypeDesc.Kind = tyOpenArray) then
-      NotYet('open-array parameter in a call through a procedural type', ANode);
+      Result := True;
+end;
+
+procedure TArm64Backend.EmitIndirectFuncCallExpr(AExpr: TIndirectFuncCallExpr);
+var
+  PT: TProceduralTypeDesc;
+  Slot: string;
+begin
+  { The callee value is parked in a per-site frame slot -- the arguments may
+    themselves call -- and the call goes through EmitFatPtrCall's plain-pointer
+    form, so every argument class (var, float, open array) is lowered exactly
+    as for a direct call.  A closure / method-pointer callee yields a 16-byte
+    fat value whose Env ownership a temporary would have to manage; that
+    stays an honest hole. }
+  PT := TProceduralTypeDesc(AExpr.ResolvedProcType);
+  if PT = nil then
+    NotYet('indirect call without a resolved procedural type', AExpr);
+  if IsMethodPtrType(PT) then
+    NotYet('call through a closure / method pointer an expression yields',
+      AExpr);
+  if (AExpr.ResolvedType <> nil) and IsAggregateReturn(AExpr.ResolvedType) then
+    NotYet('aggregate-returning indirect call', AExpr);
+  Slot := '__icv_' + IntToStr(FJArgN);
+  FJArgN := FJArgN + 1;
+  if not FFrame.ContainsKey(Slot) then
+    AddLocal(Slot, 8);
+  Self.EmitExprToX0(AExpr.CalleeExpr);
+  EmitStoreSlot('x0', Slot);
+  EmitSlotAddr('x9', Slot);
+  EmitFatPtrCall('x9', PT, AExpr.Args, False);
 end;
 
 procedure TArm64Backend.EmitFatPtrCall(const AAddrReg: string;
@@ -2683,7 +2725,6 @@ begin
     (pushed, ASelfPushed), and VIRT_INDIRECT makes EmitCall branch through the
     code word instead of a symbol.  The value's address is parked in a
     per-site frame slot, because the arguments may themselves call. }
-  GuardNoOpenArrayParam(AProcType, nil);
   Slot := '__icall_' + IntToStr(FJArgN);
   FJArgN := FJArgN + 1;
   if not FFrame.ContainsKey(Slot) then
@@ -2700,6 +2741,9 @@ begin
       Par.ResolvedType := Info.TypeDesc;
       Par.IsVarParam := Info.IsVarParam;
       Par.IsConstParam := Info.IsConstParam;
+      { an open array travels as its (data, high) pair, as in a direct call }
+      Par.IsOpenArray := (Info.TypeDesc <> nil) and
+        (Info.TypeDesc.Kind = tyOpenArray);
       Decl.Params.Add(Par);
     end;
     Decl.ResolvedReturnType := AProcType.ReturnType;
@@ -4728,6 +4772,13 @@ begin
     EmitNarrowX0(AExpr.ResolvedType);
     Exit;
   end;
+  if AExpr is TIndirectFuncCallExpr then
+  begin
+    if IsFloatExpr(AExpr) then
+      NotYet('float-returning indirect call in integer context', AExpr);
+    EmitIndirectFuncCallExpr(TIndirectFuncCallExpr(AExpr));
+    Exit;
+  end;
   if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
      IsMethodPtrType(TTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType)) then
   begin
@@ -4746,12 +4797,22 @@ begin
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
+     ProcTypeHasOpenArrayParam(
+       TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType)) then
+  begin
+    { a plain procedure pointer whose signature has an open-array param:
+      the general path passes the (data, high) pair }
+    EmitSlotAddr('x9', TFuncCallExpr(AExpr).Name);
+    EmitFatPtrCall('x9',
+      TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType),
+      TFuncCallExpr(AExpr).Args, False);
+    Exit;
+  end;
+  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
      (TFuncCallExpr(AExpr).Args.Count <= 8) then
   begin
     { call through a procedural-typed variable, expression position:
       int-class args in x0.., fptr from the variable's slot, blr }
-    GuardNoOpenArrayParam(
-      TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType), AExpr);
     for I := 0 to TFuncCallExpr(AExpr).Args.Count - 1 do
     begin
       if not (IsIntFam(TASTExpr(TFuncCallExpr(AExpr).Args.Items[I])
@@ -6283,6 +6344,15 @@ begin
     end
     else
       Self.EmitExprToX0(AExpr);
+    if (AExpr.ResolvedType <> nil) and
+       (AExpr.ResolvedType.Kind = tySingle) then
+      Self.Emit(#9'fcvt d0, s0');
+    Exit;
+  end;
+  if AExpr is TIndirectFuncCallExpr then
+  begin
+    { a float result comes back in d0 / s0 }
+    EmitIndirectFuncCallExpr(TIndirectFuncCallExpr(AExpr));
     if (AExpr.ResolvedType <> nil) and
        (AExpr.ResolvedType.Kind = tySingle) then
       Self.Emit(#9'fcvt d0, s0');
@@ -8055,11 +8125,20 @@ begin
       TProceduralTypeDesc(ACall.ResolvedProcType), ACall.Args);
     Exit;
   end;
+  if ACall.IsIndirectCall and
+     ProcTypeHasOpenArrayParam(TProceduralTypeDesc(ACall.ResolvedProcType)) then
+  begin
+    { a plain procedure pointer whose signature has an open-array param:
+      the general path passes the (data, high) pair }
+    EmitSlotAddr('x9', ACall.Name);
+    EmitFatPtrCall('x9', TProceduralTypeDesc(ACall.ResolvedProcType),
+      ACall.Args, False);
+    Exit;
+  end;
   if ACall.IsIndirectCall and (ACall.Args.Count <= 8) then
   begin
     { call through a plain proc-pointer variable: int-class args in
       x0..x(n-1), function pointer from the variable's slot, blr }
-    GuardNoOpenArrayParam(TProceduralTypeDesc(ACall.ResolvedProcType), ACall);
     for I := 0 to ACall.Args.Count - 1 do
     begin
       Arg := TASTExpr(ACall.Args.Items[I]);
@@ -8724,7 +8803,8 @@ begin
     Exit;
   end
   else if IsIntFam(Elem) or
-          (Elem.Kind in [tyBoolean, tyPointer, tyPChar]) then
+          (Elem.Kind in [tyBoolean, tyPointer, tyPChar]) or
+          IsPlainProcType(Elem) then
   begin
     { a 1-byte element is a byte store: Chr(N) must stay a raw ordinal }
     if Elem.RawSize() = 1 then
@@ -10963,7 +11043,9 @@ begin
                    { a small set is a one-register bitmask, returned in x0
                      like an integer (the zero-initialised 8-byte Result
                      slot keeps the bytes above its width clear) }
-                   IsSmallSetType(ADecl.ResolvedReturnType)) then
+                   IsSmallSetType(ADecl.ResolvedReturnType) or
+                   { a plain procedure pointer is one code word }
+                   IsPlainProcType(ADecl.ResolvedReturnType)) then
         NotYet('function result of this type', ADecl)
       else
         { a string/class/dyn-array Result is a plain 8-byte pointer slot.

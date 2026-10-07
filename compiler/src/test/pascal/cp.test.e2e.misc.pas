@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_IndirectFuncCallExpr_Shapes;
     procedure TestRun_ChainedFields_ReadThroughEveryLevel;
     procedure TestRun_DefaultArgs_Materialised;
     procedure TestRun_IntToStr_FollowsSignedness;
@@ -3028,6 +3029,54 @@ begin
   AssertRunsOnAll(Src,
     '17' + LE +
     '4' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_IndirectFuncCallExpr_Shapes;
+const
+  {
+    Calling the procedure pointer an EXPRESSION yields -- an array element, a
+    function result -- for Integer, Double and string results and an open-array
+    argument.  arm64 had no lowering for this node at all. }
+  Src = '''
+    program P;
+    type
+      TIntFn = function: Integer;
+      TDblFn = function(X: Double): Double;
+      TStrFn = function(const S: string): string;
+      TCnt = function(const A: array of Integer): Integer;
+    function One: Integer; begin Result := 1 end;
+    function Two: Integer; begin Result := 2 end;
+    function Half(X: Double): Double; begin Result := X / 2 end;
+    function Shout(const S: string): string; begin Result := S + '!' end;
+    function Cnt(const A: array of Integer): Integer; begin Result := Length(A) end;
+    function PickDbl: TDblFn; begin Result := @Half end;
+    function PickStr: TStrFn; begin Result := @Shout end;
+    var
+      Fns: array[0..1] of TIntFn; Cs: array[0..0] of TCnt; I, Sum: Integer;
+      D: array of Integer; S: string;
+    begin
+      Fns[0] := @One;
+      Fns[1] := @Two;
+      Sum := 0;
+      for I := 0 to 1 do
+        Sum := Sum + Fns[I]() * 10;
+      WriteLn(Sum);
+      WriteLn(PickDbl()(5.0):0:2);
+      S := PickStr()('hi' + 'gh');
+      WriteLn(S);
+      SetLength(D, 4);
+      Cs[0] := @Cnt;
+      WriteLn(Cs[0](D), ' ', Cs[0]([7, 8]))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '30' + LE +
+    '2.50' + LE +
+    'high!' + LE +
+    '4 2' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'high!');
 end;
 
 initialization
