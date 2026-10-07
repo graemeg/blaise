@@ -672,7 +672,7 @@ procedure TE2EGenericsTests.TestRun_GenericImport_PrivateMethodIsRejected;
 var
   Output: string;
   RCode:  Integer;
-  Failed: Boolean;
+  Ok:     Boolean;
 begin
   { A `private` method on a generic was callable from any importing unit,
     while the same method on a NON-generic class was correctly rejected.
@@ -684,11 +684,9 @@ begin
     TEMPLATE's declaring unit for the check.
 
     Must reach the compiler, not just the harness: this test asserts the
-    compile FAILS. }
+    compile FAILS, with the access diagnostic. }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  Failed := False;
-  try
-    CompileAndRunWithUnit('gvis',
+  Ok := CompileAndRunWithUnit('gvis',
       '''
       unit gvis;
       interface
@@ -715,12 +713,10 @@ begin
         G.Hidden()
       end.
       ''', Output, RCode);
-  except
-    on E: Exception do
-      Failed := True;
-  end;
-  AssertTrue('calling a private method on an imported generic must not compile',
-             Failed);
+  AssertFalse('calling a private method on an imported generic must not compile',
+              Ok);
+  AssertTrue('the diagnostic names the access violation, got: ' + Output,
+             Pos('''Hidden'' is not accessible', Output) >= 0);
 end;
 
 procedure TE2EGenericsTests.TestRun_GenericImport_PublicMethodStillReachable;
