@@ -4310,6 +4310,56 @@ return `'True'` / `'False'` as a string value.
   integer rendering was a bug, not a feature.
 
 
+== Write / WriteLn field widths — `X:W` and `X:W:D`
+
+=== Decision
+
+An argument of `Write` / `WriteLn` may carry a field width and, for a real
+value, a number of decimal places, as in standard Pascal, Delphi and FPC:
+
+[source,pascal]
+----
+WriteLn(Price:0:2);        // 3.14 -- two decimals, no padding
+WriteLn(Count:5);          // '   42' -- right-justified in 5 characters
+WriteLn(Name:-10, '|');    // 'abc       |' -- a negative width left-justifies
+WriteLn(Total:W:P);        // width and decimals may be run-time expressions
+----
+
+* *Integers and strings* are right-justified in `W` characters; a `W` shorter
+  than the text is ignored.  `UInt64` prints unsigned.
+* *Booleans* print `True` / `False`, the same spelling as a plain `WriteLn`.
+* *Reals with `D`* print in fixed point with `D` decimals.
+* *Reals without `D`* print the same text as a plain `WriteLn`, right-justified.
+* `D` on a non-real value, or a non-integer `W` / `D`, is a compile-time error.
+
+The colon forms are accepted only inside the argument list of `Write` /
+`WriteLn`.  Formatting is done by lowering each such argument to the
+`Format` builtin (`Format('%5d', [X])`, `Format('%8.3f', [X])`, ...), so all
+backends share one implementation.
+
+=== Rationale
+
+Field widths were the most requested missing piece of standard Pascal
+output: tables, money amounts and aligned columns all reach for `X:W:D`
+first, and code ported from Delphi or FPC uses it everywhere.  Lowering to
+`Format` reuses the runtime's tested width / precision handling instead of
+adding a second formatter to every backend.
+
+=== Alternatives Rejected
+
+* *ISO scientific notation for `X:W` on a real.*  Standard Pascal prints a
+  real without `D` in floating-point notation (`3.142E+00`).  Blaise keeps
+  the plain `WriteLn` rendering and only pads it: the scientific form is
+  rarely what anyone wants from `X:W`, and `X:W:D` covers fixed point.
+* *Uppercase `TRUE` / `FALSE` for a padded Boolean* (Delphi / FPC).  Blaise
+  already prints `True` / `False` for a plain Boolean (see Boolean
+  formatting above); a width must not change the spelling.
+* *Leave it to `Format`.*  Works, but forces every simple aligned print into
+  a format string and an array literal; the colon form is the idiomatic
+  Pascal spelling users expect.
+
+---
+
 == `threadvar` — Thread-Local Storage
 
 *Decision:* Blaise supports the `threadvar` keyword for declaring thread-local

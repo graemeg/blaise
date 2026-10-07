@@ -553,6 +553,9 @@ type
     procedure AnalyseCaseStmt(AStmt: TCaseStmt);
     function  AnalyseMethodCallExpr(AExpr: TMethodCallExpr): TTypeDesc;
     function  AnalyseFuncCallExpr(AExpr: TFuncCallExpr): TTypeDesc;
+    { Write/WriteLn field width: the parser's __WriteFmt(X, W[, D]) for
+      `X:W` / `X:W:D`, rewritten in place into Format(Spec, [X]). }
+    function  AnalyseWriteFmt(AExpr: TFuncCallExpr): TTypeDesc;
     function  AnalyseIndirectFuncCallExpr(AExpr: TIndirectFuncCallExpr): TTypeDesc;
     function  AnalyseExpr(AExpr: TASTExpr): TTypeDesc;
     function  AnalyseBinaryExpr(ABin: TBinaryExpr): TTypeDesc;
@@ -12906,6 +12909,165 @@ begin
   end;
 end;
 
+{ Write / WriteLn field width and decimals (`X:W`, `X:W:D`).  The parser
+  hands the argument over as __WriteFmt(X, W[, D]); it is rewritten IN PLACE
+  into the Format builtin -- Format(Spec, [Value]) -- so every backend lowers
+  it through machinery it already has, and no AST node or serialised form
+  changes.  The value is right-justified in W characters (a negative W
+  left-justifies; a W shorter than the text is ignored, as in Pascal):
+
+    integer    '%Wd'           (UInt64 through IntToStr, so it stays unsigned)
+    string     '%Ws'
+    Boolean    '%Ws' of 'True' / 'False'
+    real, D    '%W.Df'         fixed point with D decimals
+    real       '%Ws' of the value as plain WriteLn renders it
+
+  Spec is a literal when W and D are integer literals, otherwise it is built
+  at run time ('%' + IntToStr(W) + ...).  D on anything but a real is an
+  error, as in Delphi and FPC. }
+function TSemanticAnalyser.AnalyseWriteFmt(AExpr: TFuncCallExpr): TTypeDesc;
+var
+  Value, WExpr, DExpr, Spec: TASTExpr;
+  VT, WT: TTypeDesc;
+  Conv: string;
+  Cvt: TFuncCallExpr;
+  Arr: TArrayLiteralExpr;
+
+  function MkStr(const AText: string): TStringLiteral;
+  begin
+    Result := TStringLiteral.Create();
+    Result.Line := AExpr.Line;
+    Result.Col := AExpr.Col;
+    Result.Value := AText;
+  end;
+
+  function MkInt(AValue: Int64): TIntLiteral;
+  begin
+    Result := TIntLiteral.Create();
+    Result.Line := AExpr.Line;
+    Result.Col := AExpr.Col;
+    Result.Value := AValue;
+  end;
+
+  function MkCall(const AName: string; AArg: TASTExpr): TFuncCallExpr;
+  begin
+    Result := TFuncCallExpr.Create();
+    Result.Line := AExpr.Line;
+    Result.Col := AExpr.Col;
+    Result.Name := AName;
+    Result.Args.Add(AArg);
+  end;
+
+  function MkBin(AOp: TBinaryOp; ALeft, ARight: TASTExpr): TBinaryExpr;
+  begin
+    Result := TBinaryExpr.Create();
+    Result.Line := AExpr.Line;
+    Result.Col := AExpr.Col;
+    Result.Op := AOp;
+    Result.Left := ALeft;
+    Result.Right := ARight;
+  end;
+
+begin
+  if (AExpr.Args.Count < 2) or (AExpr.Args.Count > 3) then
+    SemanticError('Malformed Write field width', AExpr.Line, AExpr.Col);
+  VT := Self.AnalyseListSlot(AExpr.Args, 0);
+  WT := Self.AnalyseListSlot(AExpr.Args, 1);
+  if (WT = nil) or not (WT.Kind in [tyInteger, tyInt64, tyUInt32, tySmallInt,
+                                    tyWord, tyByte]) then
+    SemanticError('A Write field width must be an integer',
+      TASTExpr(AExpr.Args.Items[1]).Line, TASTExpr(AExpr.Args.Items[1]).Col);
+  DExpr := nil;
+  if AExpr.Args.Count = 3 then
+  begin
+    WT := Self.AnalyseListSlot(AExpr.Args, 2);
+    if (WT = nil) or not (WT.Kind in [tyInteger, tyInt64, tyUInt32, tySmallInt,
+                                      tyWord, tyByte]) then
+      SemanticError('A Write decimal count must be an integer',
+        TASTExpr(AExpr.Args.Items[2]).Line, TASTExpr(AExpr.Args.Items[2]).Col);
+    if (VT = nil) or not VT.IsFloat() then
+      SemanticError('Decimal places (X:W:D) are only allowed for a real value',
+        TASTExpr(AExpr.Args.Items[2]).Line, TASTExpr(AExpr.Args.Items[2]).Col);
+  end;
+  if VT = nil then
+    SemanticError('Cannot format this value with a field width',
+      AExpr.Line, AExpr.Col);
+  { take the operands out of the call; the list is rebuilt below }
+  Value := TASTExpr(AExpr.Args.Extract(AExpr.Args.Items[0]));
+  WExpr := TASTExpr(AExpr.Args.Extract(AExpr.Args.Items[0]));
+  if AExpr.Args.Count > 0 then
+    DExpr := TASTExpr(AExpr.Args.Extract(AExpr.Args.Items[0]));
+  { the conversion, and the value as Format receives it }
+  Conv := '';
+  if VT.IsFloat() and (DExpr <> nil) then
+    Conv := 'f'
+  else if VT.IsFloat() then
+  begin
+    if VT.Kind = tySingle then
+      Value := MkCall('SingleToStr', Value)
+    else
+      Value := MkCall('DoubleToStr', Value);
+    Conv := 's';
+  end
+  else if VT.Kind = tyUInt64 then
+  begin
+    Value := MkCall('IntToStr', Value);
+    Conv := 's';
+  end
+  else if VT.Kind in [tyInteger, tyInt64, tyUInt32, tySmallInt, tyWord,
+                      tyByte] then
+    Conv := 'd'
+  else if VT.Kind = tyBoolean then
+  begin
+    { Copy('FalseTrue', Ord(B) * 5, 5) -- 'False' or 'True' (Copy is 0-based
+      and stops at the end of the string) using builtins only }
+    Cvt := TFuncCallExpr.Create();
+    Cvt.Line := AExpr.Line;
+    Cvt.Col := AExpr.Col;
+    Cvt.Name := 'Copy';
+    Cvt.Args.Add(MkStr('FalseTrue'));
+    Cvt.Args.Add(MkBin(boMul, MkCall('Ord', Value), MkInt(5)));
+    Cvt.Args.Add(MkInt(5));
+    Value := Cvt;
+    Conv := 's';
+  end
+  else if VT.Kind in [tyString, tyPChar] then
+    Conv := 's'
+  else
+    SemanticError('A field width is not supported for a value of type ''' +
+      VT.Name + '''', AExpr.Line, AExpr.Col);
+  { the spec: a literal when W (and D) are literals, else built at run time }
+  if (WExpr is TIntLiteral) and ((DExpr = nil) or (DExpr is TIntLiteral)) then
+  begin
+    if DExpr <> nil then
+      Spec := MkStr('%' + IntToStr(TIntLiteral(WExpr).Value) + '.' +
+        IntToStr(TIntLiteral(DExpr).Value) + Conv)
+    else
+      Spec := MkStr('%' + IntToStr(TIntLiteral(WExpr).Value) + Conv);
+    WExpr.Free();
+    if DExpr <> nil then
+      DExpr.Free();
+  end
+  else
+  begin
+    Spec := MkBin(boAdd, MkStr('%'), MkCall('IntToStr', WExpr));
+    if DExpr <> nil then
+    begin
+      Spec := MkBin(boAdd, Spec, MkStr('.'));
+      Spec := MkBin(boAdd, Spec, MkCall('IntToStr', DExpr));
+    end;
+    Spec := MkBin(boAdd, Spec, MkStr(Conv));
+  end;
+  Arr := TArrayLiteralExpr.Create();
+  Arr.Line := AExpr.Line;
+  Arr.Col := AExpr.Col;
+  Arr.Elements.Add(Value);
+  AExpr.Name := 'Format';
+  AExpr.Args.Add(Spec);
+  AExpr.Args.Add(Arr);
+  Result := Self.AnalyseFuncCallExpr(AExpr);
+end;
+
 function TSemanticAnalyser.AnalyseFuncCallExpr(AExpr: TFuncCallExpr): TTypeDesc;
 var
   Sym:     TSymbol;
@@ -12917,6 +13079,8 @@ var
   PT:      TProceduralTypeDesc;
   FldInfo: TFieldInfo;
 begin
+  if SameText(AExpr.Name, '__WriteFmt') then
+    Exit(Self.AnalyseWriteFmt(AExpr));
   { HasClassAttribute(AClass, AAttrClass): Boolean — runtime query of the custom
     attribute RTTI stored in slot 7 of the class's typeinfo.  Both arguments
     must be metaclass expressions (bare class names).  Lowers to a call to

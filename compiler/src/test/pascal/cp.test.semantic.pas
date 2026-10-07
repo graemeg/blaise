@@ -12,7 +12,7 @@ interface
 
 uses
   blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TSemanticTests = class(TTestCase)
@@ -20,6 +20,10 @@ type
     function Analyse(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    procedure TestSemantic_WriteFieldWidth_LowersToFormat;
+    procedure TestSemantic_WriteFieldWidth_DecimalsOnInteger_Rejected;
+    procedure TestSemantic_WriteFieldWidth_NonIntegerWidth_Rejected;
+    procedure TestSemantic_WriteFieldWidth_UnsupportedType_Rejected;
     { Variable declarations are added to the symbol table }
     procedure TestVarDecl_RegistersSymbol;
     procedure TestVarDecl_Type_Integer;
@@ -572,6 +576,46 @@ begin
     'program P; ' +
     'procedure B(const a: array of Integer); begin a[0] := 9 end; ' +
     'var x: array[0..1] of Integer; begin x[0]:=1; x[1]:=2; B(x) end.');
+end;
+
+{ Write / WriteLn field widths (semantic lowering to Format). }
+procedure TSemanticTests.TestSemantic_WriteFieldWidth_LowersToFormat;
+var
+  Prog: TProgram;
+  F: TFuncCallExpr;
+begin
+  Prog := Analyse('program P; var X: Double; begin WriteLn(X:8:2) end.');
+  try
+    F := TFuncCallExpr(TProcCall(Prog.Block.Stmts[0]).Args.Items[0]);
+    AssertEquals('lowered to Format', 'Format', F.Name);
+    AssertTrue('literal spec', TObject(F.Args.Items[0]) is TStringLiteral);
+    AssertEquals('fixed-point spec', '%8.2f',
+      TStringLiteral(F.Args.Items[0]).Value);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TSemanticTests.TestSemantic_WriteFieldWidth_DecimalsOnInteger_Rejected;
+begin
+  AssertTrue('decimals only for a real',
+    Pos('only allowed for a real', SemanticError(
+      'program P; var I: Integer; begin WriteLn(I:5:2) end.')) >= 0);
+end;
+
+procedure TSemanticTests.TestSemantic_WriteFieldWidth_NonIntegerWidth_Rejected;
+begin
+  AssertTrue('width must be an integer',
+    Pos('field width must be an integer', SemanticError(
+      'program P; var D: Double; begin WriteLn(D:''x'') end.')) >= 0);
+end;
+
+procedure TSemanticTests.TestSemantic_WriteFieldWidth_UnsupportedType_Rejected;
+begin
+  AssertTrue('a record has no field-width form',
+    Pos('not supported for a value', SemanticError(
+      'program P; type TR = record A: Integer; end; var R: TR; ' +
+      'begin WriteLn(R:5) end.')) >= 0);
 end;
 
 initialization

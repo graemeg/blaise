@@ -1354,9 +1354,21 @@ ArrayLiteral
 (*
  * Built-in procedures (recognised by the code generator, not the parser):
  *
- *   WriteLn  ( [ Expr ] )   — print with trailing newline; calls libc printf
- *   Write    ( [ Expr ] )   — print without newline
+ *   WriteLn  ( [ WriteArg { "," WriteArg } ] )  — print with trailing newline
+ *   Write    ( WriteArg { "," WriteArg } )      — print without newline
  *   FreeMem  ( Pointer )    — calls libc free()
+ *)
+
+(* An argument of Write / WriteLn may carry a field width and, for a real
+ * value, a number of decimal places.  The value is right-justified in Width
+ * characters (a negative Width left-justifies); Decimals prints a real in
+ * fixed point.  Both are integer expressions.  The parser accepts the colon
+ * forms ONLY inside the argument list of Write / WriteLn. *)
+WriteArg      = Expr [ ":" Width [ ":" Decimals ] ] ;
+Width         = Expr ;
+Decimals      = Expr ;
+
+(*
  *
  * Built-in functions (recognised by the code generator):
  *

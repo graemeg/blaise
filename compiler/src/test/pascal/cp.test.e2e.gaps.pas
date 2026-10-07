@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_WriteFieldWidths;
     { Boolean xor (GitHub #123) }
     procedure TestRun_BoolXor_TrueXorTrue_IsFalse;
     procedure TestRun_BoolXor_AllCombinations;
@@ -1256,6 +1257,64 @@ const
     ''';
 begin
   AssertRunsOnAll(Src, '37' + Chr(10), 0);
+end;
+
+procedure TE2EGapTests.TestRun_WriteFieldWidths;
+const
+  {
+    Write / WriteLn field widths: X:W right-justifies X in W characters for
+    integers, strings and Booleans (a negative W left-justifies, a W shorter
+    than the text is ignored), X:W:D prints a real in fixed point with D
+    decimals (D:0:2 is the common "two decimals, no padding" form), a real
+    without D keeps its plain WriteLn rendering, UInt64 stays unsigned, and W
+    and D may be run-time expressions. }
+  Src = '''
+    program Widths;
+    var
+      I: Integer;
+      D: Double;
+      S: Single;
+      U: UInt64;
+      B: Boolean;
+      W, P: Integer;
+    begin
+      I := 42;
+      D := 3.14159;
+      S := 2.5;
+      U := 18446744073709551615;
+      B := True;
+      WriteLn('[', I:5, ']');
+      WriteLn('[', I:1, ']');
+      WriteLn('[', I:-5, ']');
+      WriteLn('[', -7:4, ']');
+      WriteLn('[', D:0:2, ']');
+      WriteLn('[', D:8:3, ']');
+      WriteLn('[', S:6:1, ']');
+      WriteLn('[', 'abc':6, ']');
+      WriteLn('[', B:6, '|', not B:6, ']');
+      WriteLn('[', U:22, ']');
+      W := 7;
+      P := 1;
+      WriteLn('[', D:W:P, ']', '[', I:W + 1, ']');
+      Write('[', 2.5:5, ']');
+      WriteLn()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '[   42]' + #10 +
+    '[42]' + #10 +
+    '[42   ]' + #10 +
+    '[  -7]' + #10 +
+    '[3.14]' + #10 +
+    '[   3.142]' + #10 +
+    '[   2.5]' + #10 +
+    '[   abc]' + #10 +
+    '[  True| False]' + #10 +
+    '[  18446744073709551615]' + #10 +
+    '[    3.1][      42]' + #10 +
+    '[  2.5]' + #10, 0);
 end;
 
 initialization

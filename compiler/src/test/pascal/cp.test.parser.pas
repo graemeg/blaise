@@ -12,13 +12,16 @@ interface
 
 uses
   blaise.testing,
-  uLexer, uParser, uAST;
+  SysUtils, uLexer, uParser, uAST;
 
 type
   TParserTests = class(TTestCase)
   private
     function ParseSource(const ASrc: string): TProgram;
   published
+    procedure TestParse_WriteFieldWidth_BecomesWriteFmt;
+    procedure TestParse_WriteFieldWidth_InExpressionCallForm;
+    procedure TestParse_ColonOutsideWrite_IsAnError;
     procedure TestParse_LessThanThenComma_IsComparison;
     procedure TestParse_LessThanThenCommaString_IsComparison;
     procedure TestParse_ComparisonPairInArgs_NotGeneric;
@@ -904,6 +907,61 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+{ Write / WriteLn field widths: X:W and X:W:D become the internal call
+  __WriteFmt(X, W[, D]) for the semantic pass to lower. }
+procedure TParserTests.TestParse_WriteFieldWidth_BecomesWriteFmt;
+var
+  Prog: TProgram;
+  C: TProcCall;
+  F: TFuncCallExpr;
+begin
+  Prog := ParseSource('program P; var X: Double; begin WriteLn(X:8:2, X:5, X) end.');
+  try
+    C := TProcCall(Prog.Block.Stmts[0]);
+    AssertEquals('three arguments', 3, C.Args.Count);
+    AssertTrue('X:8:2 is a call', TObject(C.Args.Items[0]) is TFuncCallExpr);
+    F := TFuncCallExpr(C.Args.Items[0]);
+    AssertEquals('X:8:2 lowered name', '__WriteFmt', F.Name);
+    AssertEquals('X:8:2 has value, width, decimals', 3, F.Args.Count);
+    F := TFuncCallExpr(C.Args.Items[1]);
+    AssertEquals('X:5 lowered name', '__WriteFmt', F.Name);
+    AssertEquals('X:5 has value, width', 2, F.Args.Count);
+    AssertTrue('a plain argument is left alone',
+      TObject(C.Args.Items[2]) is TIdentExpr);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestParse_WriteFieldWidth_InExpressionCallForm;
+var
+  Prog: TProgram;
+begin
+  { Write(...) parsed through the call-expression path keeps the widths too }
+  Prog := ParseSource('program P; var I: Integer; begin Write(I:3, I:4) end.');
+  try
+    AssertEquals('one statement', 1, Prog.Block.Stmts.Count);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestParse_ColonOutsideWrite_IsAnError;
+var
+  Raised: Boolean;
+begin
+  { the width forms belong to Write / WriteLn only }
+  Raised := False;
+  try
+    ParseSource('program P; procedure Foo(A: Integer); begin end; ' +
+      'begin Foo(1:2) end.').Free();
+  except
+    on E: Exception do
+      Raised := True;
+  end;
+  AssertTrue('Foo(1:2) does not parse', Raised);
 end;
 
 initialization

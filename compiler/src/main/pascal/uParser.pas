@@ -193,6 +193,11 @@ type
     function  ParseTerm: TASTExpr;
     function  ParseFactor: TASTExpr;
     procedure ParseArgList(ACall: TProcCall);
+    { One call argument.  Inside Write / WriteLn an argument may carry a
+      field width and, for a real, a decimal count -- X:W or X:W:D -- which
+      becomes the internal call __WriteFmt(X, W[, D]) for the semantic pass
+      to lower. }
+    function ParseCallArg(const ACallee: string): TASTExpr;
     procedure ParseMethodCallArgList(ACall: TMethodCallStmt);
   public
     constructor Create(ALexer: TLexer);
@@ -4479,11 +4484,11 @@ begin
       Advance();  { '(' }
       if not Check(tkRParen) then
       begin
-        FCallNode.Args.Add(ParseExpr());
+        FCallNode.Args.Add(ParseCallArg(Name));
         while Check(tkComma) do
         begin
           Advance();
-          FCallNode.Args.Add(ParseExpr());
+          FCallNode.Args.Add(ParseCallArg(Name));
         end;
       end;
       Expect(tkRParen);
@@ -5063,11 +5068,34 @@ end;
 
 procedure TParser.ParseArgList(ACall: TProcCall);
 begin
-  ACall.Args.Add(ParseExpr());
+  ACall.Args.Add(ParseCallArg(ACall.Name));
   while Check(tkComma) do
   begin
     Advance();
-    ACall.Args.Add(ParseExpr());
+    ACall.Args.Add(ParseCallArg(ACall.Name));
+  end;
+end;
+
+function TParser.ParseCallArg(const ACallee: string): TASTExpr;
+var
+  Fmt: TFuncCallExpr;
+begin
+  Result := ParseExpr();
+  if not Check(tkColon) or
+     not (SameText(ACallee, 'Write') or SameText(ACallee, 'WriteLn')) then
+    Exit;
+  Fmt := TFuncCallExpr.Create();
+  Fmt.Line := Result.Line;
+  Fmt.Col := Result.Col;
+  Fmt.Name := '__WriteFmt';
+  Fmt.Args.Add(Result);
+  Result := Fmt;
+  Advance();                        { ':' }
+  Fmt.Args.Add(ParseExpr());        { width }
+  if Check(tkColon) then
+  begin
+    Advance();
+    Fmt.Args.Add(ParseExpr());      { decimals }
   end;
 end;
 
