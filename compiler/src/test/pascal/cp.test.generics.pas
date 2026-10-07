@@ -16,7 +16,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TGenericsTests = class(TTestCase)
@@ -24,8 +24,6 @@ type
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
     function AnalyseUnit(const ASrc: string): TUnit;
-    function GenUnitIR(const ASrc: string): string;
-    function GenCombinedIR(const AUnitSrc, AProgSrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -81,11 +79,7 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — generic class declared in a unit, instantiated by program  }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_UnitGeneric_FieldCleanupFnEmitted;
-    procedure TestCodegen_UnitGeneric_VTableEmitted;
-    procedure TestCodegen_UnitGeneric_TypeInfoEmitted;
-    procedure TestCodegen_UnitGeneric_MethodBodyEmitted;
-    procedure TestCodegen_UnitGeneric_WeakSymMarkersEmitted;
+    procedure TestCodegen_UnitGeneric_InstanceSymbolsBareAndWeak;
 
     { ------------------------------------------------------------------ }
     { Bare (unmangled-unit) class data must be WEAK — an rtl.* / runtime.* }
@@ -94,7 +88,7 @@ type
     { archive members both strong-define them and the link collides        }
     { (GH #174).  Emitting them WEAK lets duplicates collapse.             }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_UnmangledUnitClass_WeakSymMarkersEmitted;
+    procedure TestCodegen_UnmangledUnitClass_WeakSymbols;
 
     { ------------------------------------------------------------------ }
     { Multi-instance: same generic class with two different type args     }
@@ -300,76 +294,6 @@ begin
     SA.AnalyseUnit(Result);
   finally
     SA.Free();
-  end;
-end;
-
-function TGenericsTests.GenUnitIR(const ASrc: string): string;
-var
-  U:  TUnit;
-  CG: TCodeGenQBE;
-begin
-  U := AnalyseUnit(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.GenerateUnit(U);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    U.Free();
-  end;
-end;
-
-function TGenericsTests.GenCombinedIR(const AUnitSrc, AProgSrc: string): string;
-{ Mirrors the real driver path in Blaise.pas: analyse the unit for export,
-  analyse the program against the now-populated global scope, then run the
-  combined codegen via AppendUnit + AppendProgram.  Use this when the bug
-  lives in the AppendUnit path (which GenUnitIR's GenerateUnit does not
-  exercise). }
-var
-  UL:   TLexer;
-  UP:   TParser;
-  PL:   TLexer;
-  PP:   TParser;
-  U:    TUnit;
-  Prog: TProgram;
-  SA:   TSemanticAnalyser;
-  CG:   TCodeGenQBE;
-begin
-  UL := TLexer.Create(AUnitSrc);
-  UP := TParser.Create(UL);
-  try
-    U := UP.ParseUnit();
-  finally
-    UP.Free();
-    UL.Free();
-  end;
-
-  PL := TLexer.Create(AProgSrc);
-  PP := TParser.Create(PL);
-  try
-    Prog := PP.Parse();
-  finally
-    PP.Free();
-    PL.Free();
-  end;
-
-  SA := TSemanticAnalyser.Create();
-  CG := TCodeGenQBE.Create();
-  try
-    SA.AnalyseUnitForExport(U);
-    SA.Analyse(Prog);
-    CG.SetSymbolTable(Prog.SymbolTable);
-    CG.AppendUnit(U);
-    CG.AppendProgram(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    SA.Free();
-    Prog.Free();
-    U.Free();
   end;
 end;
 
@@ -823,14 +747,28 @@ begin
 end;
 
 procedure TGenericsTests.TestCodegen_UnitIntf_GenericVar_GlobalData;
+const
+  Prog = '''
+    program PU;
+    uses U;
+    begin
+      G := TBox<Integer>.Create();
+      G.FValue := 1
+    end.
+    ''';
 var
-  IR: string;
+  X86, A64: string;
 begin
-  IR := GenUnitIR(SrcUnitIntfGenericVar);
-  AssertTrue('global data slot for G emitted (unit-prefix mangled)',
-    Pos('data $U_G', IR) > 0);
-  AssertTrue('typeinfo for TBox_Integer emitted',
-    Pos('$typeinfo_TBox_Integer', IR) > 0);
+  { A unit's interface var of a generic instance type is a unit-mangled
+    global; the instance's typeinfo is bare and weak (BUG-004). }
+  X86 := GenAsmWithUnit(SrcUnitIntfGenericVar, Prog, TargetX86_64);
+  AssertTrue('x86-64: global U_G defined', Pos(#10 + 'U_G:', X86) >= 0);
+  AssertTrue('x86-64: weak instance typeinfo',
+    Pos('.weak typeinfo_TBox_Integer', X86) >= 0);
+  A64 := GenAsmWithUnit(SrcUnitIntfGenericVar, Prog, TargetArm64);
+  AssertTrue('arm64: global g_U_G defined', Pos(#10 + '_g_U_G:', A64) >= 0);
+  AssertTrue('arm64: weak instance typeinfo',
+    Pos('.weak_definition _typeinfo_TBox_Integer', A64) >= 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -888,70 +826,71 @@ const
         end.
         ''';
 
-procedure TGenericsTests.TestCodegen_UnitGeneric_FieldCleanupFnEmitted;
+function AngleBracketSymbol(const AAsm: string): Boolean;
 var
-  IR: string;
+  Lines: TStringList;
+  I: Integer;
 begin
-  IR := GenCombinedIR(SrcUnitWithGenericClass, SrcProgUsesUnitGeneric);
-  AssertTrue('_FieldCleanup_ function body emitted with mangled name',
-    Pos('function $_FieldCleanup_TPair_Integer_Integer', IR) > 0);
-  AssertTrue('no raw angle-bracket form of _FieldCleanup_',
-    Pos('$_FieldCleanup_TPair<', IR) <= 0);
+  { True when 'TPair<' appears in a line of code or a symbol directive.  The
+    class-name string the typeinfo carries keeps its source spelling, so a
+    string-data line is not a symbol. }
+  Result := False;
+  Lines := TStringList.Create();
+  try
+    Lines.Text := AAsm;
+    for I := 0 to Lines.Count - 1 do
+      if (Pos('TPair<', Lines.Strings[I]) >= 0) and
+         (Pos('.ascii', Lines.Strings[I]) < 0) and
+         (Pos('.string', Lines.Strings[I]) < 0) then
+      begin
+        Result := True;
+        Exit;
+      end;
+  finally
+    Lines.Free();
+  end;
 end;
 
-procedure TGenericsTests.TestCodegen_UnitGeneric_VTableEmitted;
+procedure TGenericsTests.TestCodegen_UnitGeneric_InstanceSymbolsBareAndWeak;
+const
+  Syms: array[0..3] of string = ('TPair_Integer_Integer_Create',
+    '_FieldCleanup_TPair_Integer_Integer', 'typeinfo_TPair_Integer_Integer',
+    'vtable_TPair_Integer_Integer');
 var
-  IR: string;
+  X86, A64: string;
+  I: Integer;
 begin
-  IR := GenCombinedIR(SrcUnitWithGenericClass, SrcProgUsesUnitGeneric);
-  AssertTrue('vtable data emitted for TPair_Integer_Integer',
-    Pos('data $vtable_TPair_Integer_Integer', IR) > 0);
+  { A generic class declared in a unit and instantiated by the program: the
+    instance's method bodies, field-cleanup function, typeinfo and vtable
+    are emitted under BARE mangled names (never unit-prefixed, never with
+    the raw '<' form) and WEAK, because any compilation process may
+    materialise the same instance and every copy must agree on one symbol
+    and collapse at link (BUG-004).  A wrong name or a strong definition
+    shows only when two separately compiled objects meet in one link. }
+  X86 := GenAsmWithUnit(SrcUnitWithGenericClass, SrcProgUsesUnitGeneric,
+    TargetX86_64);
+  A64 := GenAsmWithUnit(SrcUnitWithGenericClass, SrcProgUsesUnitGeneric,
+    TargetArm64);
+  for I := 0 to 3 do
+  begin
+    AssertTrue('x86-64: ' + Syms[I] + ' defined',
+      Pos(#10 + Syms[I] + ':', X86) >= 0);
+    AssertTrue('x86-64: ' + Syms[I] + ' weak',
+      Pos('.weak ' + Syms[I], X86) >= 0);
+    AssertTrue('arm64: ' + Syms[I] + ' defined',
+      Pos(#10 + '_' + Syms[I] + ':', A64) >= 0);
+    AssertTrue('arm64: ' + Syms[I] + ' weak',
+      Pos('.weak_definition _' + Syms[I], A64) >= 0);
+  end;
+  AssertTrue('x86-64: no unit-prefixed instance constructor',
+    Pos('UPair_TPair_Integer_Integer_Create', X86) < 0);
+  AssertTrue('arm64: no unit-prefixed instance constructor',
+    Pos('UPair_TPair_Integer_Integer_Create', A64) < 0);
+  AssertTrue('x86-64: no raw angle-bracket symbol', not AngleBracketSymbol(X86));
+  AssertTrue('arm64: no raw angle-bracket symbol', not AngleBracketSymbol(A64));
 end;
 
-procedure TGenericsTests.TestCodegen_UnitGeneric_TypeInfoEmitted;
-var
-  IR: string;
-begin
-  IR := GenCombinedIR(SrcUnitWithGenericClass, SrcProgUsesUnitGeneric);
-  AssertTrue('typeinfo data emitted for TPair_Integer_Integer',
-    Pos('data $typeinfo_TPair_Integer_Integer', IR) > 0);
-end;
-
-procedure TGenericsTests.TestCodegen_UnitGeneric_MethodBodyEmitted;
-var
-  IR: string;
-begin
-  IR := GenCombinedIR(SrcUnitWithGenericClass, SrcProgUsesUnitGeneric);
-  { Generic-instance symbols are BARE — never unit-prefixed (BUG-004): the
-    same instance may be materialised by any compilation process, so every
-    process must agree on one symbol (deduped via weak linkage). }
-  AssertTrue('constructor body emitted with bare instance name',
-    Pos('function $TPair_Integer_Integer_Create', IR) > 0);
-  AssertTrue('no unit-prefixed instance constructor',
-    Pos('$UPair_TPair_Integer_Integer_Create', IR) < 0);
-end;
-
-procedure TGenericsTests.TestCodegen_UnitGeneric_WeakSymMarkersEmitted;
-var
-  IR: string;
-begin
-  { The QBE driver turns '# WEAKSYM <sym>' markers into '.weak <sym>'
-    directives on the qbe-produced .s, giving generic-instance symbols WEAK
-    binding so several objects in one link may carry the identical copy
-    (BUG-004).  Assert the markers cover the method bodies, typeinfo, vtable
-    and the field-cleanup fn. }
-  IR := GenCombinedIR(SrcUnitWithGenericClass, SrcProgUsesUnitGeneric);
-  AssertTrue('WEAKSYM marker for instance constructor',
-    Pos('# WEAKSYM TPair_Integer_Integer_Create', IR) > 0);
-  AssertTrue('WEAKSYM marker for instance typeinfo',
-    Pos('# WEAKSYM typeinfo_TPair_Integer_Integer', IR) > 0);
-  AssertTrue('WEAKSYM marker for instance vtable',
-    Pos('# WEAKSYM vtable_TPair_Integer_Integer', IR) > 0);
-  AssertTrue('WEAKSYM marker for instance field cleanup',
-    Pos('# WEAKSYM _FieldCleanup_TPair_Integer_Integer', IR) > 0);
-end;
-
-procedure TGenericsTests.TestCodegen_UnmangledUnitClass_WeakSymMarkersEmitted;
+procedure TGenericsTests.TestCodegen_UnmangledUnitClass_WeakSymbols;
 { A class declared in an rtl.* unit gets BARE typeinfo/vtable/_FieldCleanup
   symbols (IsUnmangledUnit strips the unit prefix so the whole RTL agrees on
   one name).  Because the symbol is bare, EVERY object that references the
@@ -991,30 +930,36 @@ const
     end.
     ''';
 var
-  IR: string;
+  X86, A64: string;
+  I: Integer;
+  Syms: array[0..6] of string;
 begin
-  IR := GenCombinedIR(BareUnitSrc, ProgUsesBare);
-  { The class data is emitted bare (no rtl_testplat_ prefix) — confirm the
-    bare form is what we key the weak markers on. }
-  AssertTrue('bare typeinfo emitted for TTestPlat',
-    Pos('data $typeinfo_TTestPlat', IR) > 0);
-  { Every bare per-class data symbol a referencing object re-defines must be
-    marked WEAK: typeinfo, vtable, field-cleanup, the published-methods table,
-    and the interface itab / impllist. }
-  AssertTrue('WEAKSYM marker for bare-unit class typeinfo',
-    Pos('# WEAKSYM typeinfo_TTestPlat', IR) > 0);
-  AssertTrue('WEAKSYM marker for bare-unit class vtable',
-    Pos('# WEAKSYM vtable_TTestPlat', IR) > 0);
-  AssertTrue('WEAKSYM marker for bare-unit class field cleanup',
-    Pos('# WEAKSYM _FieldCleanup_TTestPlat', IR) > 0);
-  AssertTrue('WEAKSYM marker for bare-unit class methods table',
-    Pos('# WEAKSYM methods_TTestPlat', IR) > 0);
-  AssertTrue('WEAKSYM marker for bare-unit class itab',
-    Pos('# WEAKSYM itab_TTestPlat_ITestPlat', IR) > 0);
-  AssertTrue('WEAKSYM marker for bare-unit class impllist',
-    Pos('# WEAKSYM impllist_TTestPlat', IR) > 0);
-  AssertTrue('WEAKSYM marker for bare-unit interface typeinfo',
-    Pos('# WEAKSYM typeinfo_ITestPlat', IR) > 0);
+  Syms[0] := 'typeinfo_TTestPlat';
+  Syms[1] := 'vtable_TTestPlat';
+  Syms[2] := '_FieldCleanup_TTestPlat';
+  Syms[3] := 'itab_TTestPlat_ITestPlat';
+  Syms[4] := 'impllist_TTestPlat';
+  Syms[5] := 'typeinfo_ITestPlat';
+  Syms[6] := 'TTestPlat_Kind';
+  X86 := GenAsmWithUnit(BareUnitSrc, ProgUsesBare, TargetX86_64);
+  A64 := GenAsmWithUnit(BareUnitSrc, ProgUsesBare, TargetArm64);
+  { The class data is bare (no rtl_testplat_ prefix) and every per-class
+    symbol a referencing object re-defines is WEAK on both ISAs. }
+  for I := 0 to 6 do
+  begin
+    AssertTrue('x86-64: ' + Syms[I] + ' weak',
+      Pos('.weak ' + Syms[I], X86) >= 0);
+    AssertTrue('arm64: ' + Syms[I] + ' weak',
+      Pos('.weak_definition _' + Syms[I], A64) >= 0);
+  end;
+  { The published-methods table: weak on x86-64; arm64 keeps it local to the
+    object (no .globl), which collapses duplicates just as well. }
+  AssertTrue('x86-64: methods table weak',
+    Pos('.weak methods_TTestPlat', X86) >= 0);
+  AssertTrue('arm64: methods table defined',
+    Pos(#10 + 'methods_TTestPlat:', A64) >= 0);
+  AssertTrue('arm64: methods table not exported',
+    Pos('.globl methods_TTestPlat', A64) < 0);
 end;
 
 { ------------------------------------------------------------------ }
