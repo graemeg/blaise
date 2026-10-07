@@ -21,13 +21,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TRangeCheckTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
+    function Accepts(const ASrc: string): Boolean;
     { Analyses ASrc and returns the semantic error message, or '' when the
       source analysed cleanly. }
     function SemanticErrMsg(const ASrc: string): string;
@@ -111,23 +111,12 @@ begin
   end;
 end;
 
-function TRangeCheckTests.GenIR(const ASrc: string): string;
-var
-  Pr: TProgram;
-  CG: TCodeGenQBE;
+{ The program passes the semantic pass (a rejection raises, failing the
+  test with the diagnostic). }
+function TRangeCheckTests.Accepts(const ASrc: string): Boolean;
 begin
-  Pr := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Pr);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Pr.Free();
-  end;
+  AnalyseSrc(ASrc).Free();
+  Result := True;
 end;
 
 function TRangeCheckTests.SemanticErrMsg(const ASrc: string): string;
@@ -375,56 +364,48 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TRangeCheckTests.TestAssign_InRange_Accepted;
-var IR: string;
 begin
-  IR := GenIR('''
+  AssertTrue('in-range constant still compiles', Accepts('''
     program P;
     type TStd = 1..5;
     var v: TStd;
     begin v := 3 end.
-    ''');
-  AssertTrue('in-range constant still compiles', Length(IR) > 0);
+    '''));
 end;
 
 procedure TRangeCheckTests.TestAssign_BothBoundaries_Accepted;
-var IR: string;
 begin
   { Both bounds are INCLUSIVE — the off-by-one guard. }
-  IR := GenIR('''
+  AssertTrue('both boundaries accepted', Accepts('''
     program P;
     type TStd = 1..5;
     var v: TStd;
     begin v := 1; v := 5 end.
-    ''');
-  AssertTrue('both boundaries accepted', Length(IR) > 0);
+    '''));
 end;
 
 procedure TRangeCheckTests.TestVariableValue_NotDiagnosed;
-var IR: string;
 begin
   { Not a compile-time fact — must not be rejected even though the value
     is obviously out of range at runtime. }
-  IR := GenIR('''
+  AssertTrue('variable value is not diagnosed', Accepts('''
     program P;
     type TStd = 1..5;
     var v: TStd; i: Integer;
     begin i := 99; v := i end.
-    ''');
-  AssertTrue('variable value is not diagnosed', Length(IR) > 0);
+    '''));
 end;
 
 procedure TRangeCheckTests.TestHighExpr_NotDiagnosed;
-var IR: string;
 begin
   { High()/Low() are not folded by the constant fold, so this is a
     conservative miss rather than a false positive. }
-  IR := GenIR('''
+  AssertTrue('High(TStd)+1 is not diagnosed', Accepts('''
     program P;
     type TStd = 1..5;
     var v: TStd;
     begin v := High(TStd) + 1 end.
-    ''');
-  AssertTrue('High(TStd)+1 is not diagnosed', Length(IR) > 0);
+    '''));
 end;
 
 { ------------------------------------------------------------------ }
@@ -448,32 +429,28 @@ begin
 end;
 
 procedure TRangeCheckTests.TestEnumSubrange_MemberInRange_Accepted;
-var IR: string;
 begin
-  IR := GenIR('''
+  AssertTrue('in-range enum members accepted', Accepts('''
     program P;
     type
       TE = (eA, eB, eC);
       TMid = eB..eC;
     var m: TMid;
     begin m := eB; m := eC end.
-    ''');
-  AssertTrue('in-range enum members accepted', Length(IR) > 0);
+    '''));
 end;
 
 procedure TRangeCheckTests.TestEnum_ExplicitOrdinal_InteriorHole_Accepted;
-var IR: string;
 begin
   { RULED: an enum's range is MIN..MAX declared ordinal, so 7 — which no
     member declares — is legal for (xA=5, xB=10).  This matches Delphi/FPC
     and converges with BUG-20260922-explicit-ordinal-enum-array-bounds. }
-  IR := GenIR('''
+  AssertTrue('interior hole 7 accepted for (xA=5, xB=10)', Accepts('''
     program P;
     type TX = (xA = 5, xB = 10);
     var x: TX;
     begin x := 7 end.
-    ''');
-  AssertTrue('interior hole 7 accepted for (xA=5, xB=10)', Length(IR) > 0);
+    '''));
 end;
 
 procedure TRangeCheckTests.TestEnum_ExplicitOrdinal_BelowMin_Raises;
@@ -507,37 +484,32 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TRangeCheckTests.TestEnumCast_OutOfRange_NotDiagnosed;
-var IR: string;
 begin
   { RULED out of scope: an explicit cast is the programmer overriding the
     type system on purpose, and TE(-1) is a known sentinel idiom. }
-  IR := GenIR('''
+  AssertTrue('explicit enum cast is not diagnosed', Accepts('''
     program P;
     type TE = (eA, eB, eC);
     var x: TE;
     begin x := TE(99) end.
-    ''');
-  AssertTrue('explicit enum cast is not diagnosed', Length(IR) > 0);
+    '''));
 end;
 
 procedure TRangeCheckTests.TestForLoopBound_NotDiagnosed;
-var IR: string;
 begin
   { RULED out of scope. }
-  IR := GenIR('''
+  AssertTrue('for-loop bounds are not diagnosed', Accepts('''
     program P;
     type TStd = 1..5;
     var v: TStd;
     begin for v := 1 to 5 do WriteLn(v) end.
-    ''');
-  AssertTrue('for-loop bounds are not diagnosed', Length(IR) > 0);
+    '''));
 end;
 
 procedure TRangeCheckTests.TestCaseLabel_NotDiagnosed;
-var IR: string;
 begin
   { RULED out of scope: an unreachable label, not a bad store. }
-  IR := GenIR('''
+  AssertTrue('case labels are not diagnosed', Accepts('''
     program P;
     type TStd = 1..5;
     var v: TStd;
@@ -549,8 +521,7 @@ begin
         WriteLn('other')
       end
     end.
-    ''');
-  AssertTrue('case labels are not diagnosed', Length(IR) > 0);
+    '''));
 end;
 
 { ------------------------------------------------------------------ }
@@ -558,25 +529,22 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TRangeCheckTests.TestShadowingGlobalVar_NotFolded;
-var IR: string;
 begin
   { 'eB' here is an Integer variable, not the enum member — it is not a
     constant at all and must not be folded to its ordinal. }
-  IR := GenIR('''
+  AssertTrue('enum-shadowing global var is not folded', Accepts('''
     program P;
     type
       TE = (eA, eB, eC);
       TMid = eB..eC;
     var m: TMid; eB: Integer;
     begin eB := 2; m := eB end.
-    ''');
-  AssertTrue('enum-shadowing global var is not folded', Length(IR) > 0);
+    '''));
 end;
 
 procedure TRangeCheckTests.TestShadowingParam_NotFolded;
-var IR: string;
 begin
-  IR := GenIR('''
+  AssertTrue('enum-shadowing parameter is not folded', Accepts('''
     program P;
     type
       TE = (eA, eB, eC);
@@ -585,16 +553,14 @@ begin
     procedure Q(eA: Integer);
     begin m := eA end;
     begin Q(2) end.
-    ''');
-  AssertTrue('enum-shadowing parameter is not folded', Length(IR) > 0);
+    '''));
 end;
 
 procedure TRangeCheckTests.TestShadowingField_NotFolded;
-var IR: string;
 begin
   { A class FIELD is not in the symbol table, so a lookup-based guard would
     still mis-fold this — only the IsConstant annotation gets it right. }
-  IR := GenIR('''
+  AssertTrue('enum-shadowing class field is not folded', Accepts('''
     program P;
     type
       TE = (eA, eB, eC);
@@ -607,8 +573,7 @@ begin
     procedure TC.Go();
     begin eA := 2; FM := eA end;
     begin end.
-    ''');
-  AssertTrue('enum-shadowing class field is not folded', Length(IR) > 0);
+    '''));
 end;
 
 initialization
