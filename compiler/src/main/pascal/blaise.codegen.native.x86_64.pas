@@ -330,6 +330,10 @@ type
       EDivByZero + _RaiseDivByZero, is in scope).  Gates the div/mod zero
       guard; without it a zero divisor traps in hardware as before. }
     function DivGuardAvailable(): Boolean;
+    { A failed `as`: SysUtils' _RaiseInvalidCast (a catchable EInvalidCast)
+      when SysUtils is in scope, else the RTL's fatal _Raise_InvalidCast.
+      Never returns, so the stack is realigned for the Pascal raise path. }
+    procedure EmitRaiseInvalidCast;
     { True when a StrToInt/StrToInt64 call should route to the validating
       SysUtils wrapper (raises EConvertError on invalid input) rather than
       the lenient runtime _StrToInt.  True iff SysUtils is in scope and the
@@ -1516,6 +1520,17 @@ end;
 function TX86_64Backend.DivGuardAvailable(): Boolean;
 begin
   Result := (FSymTable <> nil) and (FSymTable.Lookup('EDivByZero') <> nil);
+end;
+
+procedure TX86_64Backend.EmitRaiseInvalidCast;
+begin
+  if (FSymTable <> nil) and (FSymTable.Lookup('EInvalidCast') <> nil) then
+  begin
+    Self.Emit(#9'andq $-16, %rsp');
+    Self.Emit(#9'callq SysUtils__RaiseInvalidCast');
+  end
+  else
+    Self.Emit(#9'callq _Raise_InvalidCast');
 end;
 
 function TX86_64Backend.StrToIntChecked(): Boolean;
@@ -4750,7 +4765,7 @@ begin
     Self.Emit(#9'jmp ' + LEnd);
     Self.Emit(LFail + ':');
     Self.Emit(#9'addq $16, %rsp');         { discard pushed obj+itab }
-    Self.Emit(#9'callq _Raise_InvalidCast');
+    Self.EmitRaiseInvalidCast();
     Self.Emit(LEnd + ':');
     Exit;
   end;
@@ -10880,7 +10895,7 @@ begin
     Self.Emit(#9'callq _IsInstance');
     Self.Emit(#9'testl %eax, %eax');
     Self.Emit(#9'jnz ' + ScEndLbl);
-    Self.Emit(#9'callq _Raise_InvalidCast');
+    Self.EmitRaiseInvalidCast();
     Self.Emit(ScEndLbl + ':');
     Self.Emit(#9'popq %rax');
     Exit;

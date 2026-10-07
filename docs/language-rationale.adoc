@@ -2130,8 +2130,9 @@ Integer `div` and `mod` by zero raise a catchable `EDivByZero` exception
 hardware.  The code generator emits a divisor-equals-zero check before each
 integer `idiv`; when the divisor is zero it calls the runtime helper
 `_RaiseDivByZero`, which raises `EDivByZero('Division by zero')` through the
-normal exception machinery.  Both backends (QBE and native x86-64) emit the
-guard.
+normal exception machinery.  Every backend (QBE, native x86-64 and native
+arm64) emits the guard; on arm64, whose `sdiv` yields 0 instead of trapping,
+the fallback without `SysUtils` is a deliberate `brk` trap.
 
 The guard is emitted *only when `SysUtils` is in scope* — i.e. when
 `EDivByZero` resolves through the active symbol table.  A program that does
@@ -2159,6 +2160,36 @@ than pre-checking every divisor.
   depend on stdlib, and exception classes (with their vtable + TypeInfo) are
   a stdlib concern.  Gating the guard on `SysUtils` keeps the runtime free of
   class machinery and matches Delphi's unit placement.
+
+=== Failed `as` cast
+
+==== Decision
+
+`Obj as TSomeClass` (and `Obj as ISomeInterface`) on an object that is not
+an instance of the target raises a catchable `EInvalidCast` exception
+(declared in `SysUtils`, a subclass of `Exception`) with the message
+`Invalid class typecast`.  The check behind every `as` calls `SysUtils`'
+`_RaiseInvalidCast` when it fails.  Exactly as for division by zero, this is
+gated on `SysUtils` being in scope -- on `EInvalidCast` resolving through the
+active symbol table.  Without `SysUtils` a failed cast remains a fatal
+runtime error (`Runtime error: invalid typecast`).
+
+==== Rationale
+
+An `as` cast is a checked assertion about a run-time type; Delphi and FPC
+both report a failed one as `EInvalidCast`, and code written for them
+catches it.  Earlier Blaise always aborted the process, which made the check
+unrecoverable and diverged from both dialects without a reason of its own.
+Following the `EDivByZero` design keeps one rule for runtime errors that
+surface as stdlib exception classes.
+
+==== Alternatives Rejected
+
+* *Keep the fatal abort* -- uncatchable, and a silent divergence from Delphi
+  and FPC.
+* *Define `EInvalidCast` in the always-linked runtime* -- rejected for the
+  same reason as `EDivByZero`: exception classes are a stdlib concern and
+  the runtime carries no class machinery.
 
 ---
 

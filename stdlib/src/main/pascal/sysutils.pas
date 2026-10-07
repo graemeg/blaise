@@ -59,11 +59,24 @@ type
   EDivByZero = class(Exception)
   end;
 
+  { Raised by `Obj as TSomeClass` (and `as` to an interface) when the
+    object is not an instance of the target.  The compiler routes a failed
+    cast to _RaiseInvalidCast (below) when SysUtils is in scope; without
+    SysUtils it is a fatal runtime error as before.  Matches Delphi, where
+    EInvalidCast lives in System.SysUtils. }
+  EInvalidCast = class(Exception)
+  end;
+
 { _RaiseDivByZero — raises EDivByZero('Division by zero').  Called by the
   compiler-emitted div/mod guard; not intended for direct use.  Declared in
   the interface so the code generator can reference the $SysUtils_RaiseDivByZero
   symbol. }
 procedure _RaiseDivByZero;
+
+{ _RaiseInvalidCast — raises EInvalidCast('Invalid class typecast').  Called
+  by the compiler-emitted check behind a failed `as`; not intended for direct
+  use.  Declared in the interface so the code generator can reference it. }
+procedure _RaiseInvalidCast;
 
 { StrToIntDef — convert a string to Integer; return ADefault on failure. }
 function StrToIntDef(const S: string; ADefault: Integer): Integer;
@@ -116,6 +129,11 @@ end;
 procedure _RaiseDivByZero;
 begin
   raise EDivByZero.Create('Division by zero')
+end;
+
+procedure _RaiseInvalidCast;
+begin
+  raise EInvalidCast.Create('Invalid class typecast')
 end;
 
 function IsValidIntStr(const S: string): Boolean;

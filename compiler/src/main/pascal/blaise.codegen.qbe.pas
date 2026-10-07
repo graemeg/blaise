@@ -374,6 +374,10 @@ type
     { Emit a divisor==0 check before an integer div/rem.  ADivisor is the QBE
       temp holding the right operand; AIsLong selects l vs w comparison. }
     procedure EmitDivZeroGuard(const ADivisor: string; AIsLong: Boolean);
+    { The routine a failed `as` calls: SysUtils' _RaiseInvalidCast (raises a
+      catchable EInvalidCast) when SysUtils is in scope, otherwise the RTL's
+      fatal _Raise_InvalidCast. }
+    function InvalidCastRaiser(): string;
     procedure EmitCompoundStmt(AStmt: TCompoundStmt);
     procedure EmitAssignment(AAssign: TAssignment);
     procedure EmitFieldAssignment(AAssign: TFieldAssignment);
@@ -3592,6 +3596,14 @@ begin
         and (not SameText(FCurrentUnitName, 'SysUtils'));
 end;
 
+function TCodeGenQBE.InvalidCastRaiser(): string;
+begin
+  if (FSymTable <> nil) and (FSymTable.Lookup('EInvalidCast') <> nil) then
+    Result := '$SysUtils__RaiseInvalidCast'
+  else
+    Result := '$_Raise_InvalidCast';
+end;
+
 procedure TCodeGenQBE.EmitDivZeroGuard(const ADivisor: string; AIsLong: Boolean);
 var
   CmpTemp:  string;
@@ -5034,7 +5046,7 @@ begin
     EmitLine(Format('  %s =w cnel %s, 0', [CheckTemp, ItabTemp]));
     EmitLine(Format('  jnz %s, @%s, @%s', [CheckTemp, LblOk, LblFail]));
     EmitLine('@' + LblFail);
-    EmitLine('  call $_Raise_InvalidCast()');
+    EmitLine('  call ' + Self.InvalidCastRaiser() + '()');
     EmitLine(Format('  jmp @%s', [LblEnd]));
     EmitLine('@' + LblOk);
     ObjAddr  := IntfObjAddr(AAssign.Name, AAssign.IsGlobal, AAssign.IsVarParam);
@@ -16695,7 +16707,7 @@ begin
     EmitLine(Format('  %s =w cnel %s, 0', [OkT, ItabT]));
     EmitLine(Format('  jnz %s, @%s, @%s', [OkT, LblOk, LblFail]));
     EmitLine('@' + LblFail);
-    EmitLine('  call $_Raise_InvalidCast()');
+    EmitLine('  call ' + Self.InvalidCastRaiser() + '()');
     EmitLine(Format('  jmp @%s', [LblEnd]));
     EmitLine('@' + LblOk);
     EmitLine(Format('  jmp @%s', [LblEnd]));
@@ -16860,7 +16872,7 @@ begin
   EmitLine(Format('  jnz %s, @%s, @%s', [OkTemp, LblOk, LblFail]));
 
   EmitLine('@' + LblFail);
-  EmitLine('  call $_Raise_InvalidCast()');
+  EmitLine('  call ' + Self.InvalidCastRaiser() + '()');
   EmitLine(Format('  storel 0, %s', [SlotTemp]));  { unreachable; satisfies SSA }
   EmitLine(Format('  jmp @%s', [LblEnd]));
 

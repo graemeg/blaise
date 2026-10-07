@@ -549,6 +549,9 @@ type
     procedure EmitMethodCallStmt(AStmt: TMethodCallStmt);
     procedure EmitMethodCallExpr(AExpr: TMethodCallExpr);
     procedure EmitClassCreate(AExpr: TFuncCallExpr);
+    { A failed `as`: SysUtils' _RaiseInvalidCast (a catchable EInvalidCast)
+      when SysUtils is in scope, else the RTL's fatal _Raise_InvalidCast. }
+    procedure EmitRaiseInvalidCast;
     procedure EmitNonOwningFieldStore(AFld: TFieldInfo; const ABase: string);
     { ABaseInfo describes the CONTAINING field for a nested Self path
       (Self.FIntermediate.SubField) — AFld then describes only SubField, whose
@@ -4830,7 +4833,12 @@ begin
           trap, this leaf cannot (design doc, Phase 2 risks). }
         DivGuardOk := NewLabel('divok');
         Self.Emit(Format(#9'cbnz x1, %s', [DivGuardOk]));
-        Self.Emit(#9'brk #1');                { deliberate trap: div by zero }
+        if (FSymTable <> nil) and (FSymTable.Lookup('EDivByZero') <> nil) then
+          { SysUtils in scope: a catchable EDivByZero (x86-64 / QBE parity);
+            _RaiseDivByZero never returns }
+          EmitCallSym('SysUtils__RaiseDivByZero')
+        else
+          Self.Emit(#9'brk #1');              { deliberate trap: div by zero }
         Self.Emit(DivGuardOk + ':');
         { Signed vs unsigned follows the EXPRESSION's result type, matching
           the QBE backend (which keys udiv/urem off BinExpr.ResolvedType).
@@ -5128,7 +5136,7 @@ begin
     EmitTypeinfoAddr('x1', TAsExpr(AExpr).TypeName);
     EmitCallSym('_IsInstance');
     Self.Emit(Format(#9'cbnz x0, %s', [CondName]));
-    EmitCallSym('_Raise_InvalidCast');
+    EmitRaiseInvalidCast();
     Self.Emit(CondName + ':');
     EmitPopTo('x0');
     Exit;
@@ -6480,7 +6488,7 @@ begin
   EmitCallSym('_GetItab');       { x0 = itab or nil }
   OkL := NewLabel('asok');
   Self.Emit(Format(#9'cbnz x0, %s', [OkL]));
-  EmitCallSym('_Raise_InvalidCast');
+  EmitRaiseInvalidCast();
   Self.Emit(OkL + ':');
   EmitStoreSlot('x0', AAsgn.Name + '_itab');
   { obj half with the usual ARC: retain new (borrowed source), release old }
@@ -14007,6 +14015,14 @@ begin
   if (AStmt.ResolvedReturnTypeDesc <> nil) and
      (AStmt.ResolvedReturnTypeDesc.Kind = tyString) then
     EmitCallSym('_StringRelease');
+end;
+
+procedure TArm64Backend.EmitRaiseInvalidCast;
+begin
+  if (FSymTable <> nil) and (FSymTable.Lookup('EInvalidCast') <> nil) then
+    EmitCallSym('SysUtils__RaiseInvalidCast')
+  else
+    EmitCallSym('_Raise_InvalidCast');
 end;
 
 { ClassCreate(Cls, args...): construction from a metaclass VALUE.  The

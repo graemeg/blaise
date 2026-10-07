@@ -21,6 +21,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_FailedAs_RaisesEInvalidCast;
     { Regression for the alloc16-32 exception-frame bug:
       a bare try/finally with no locals, virtuals, or RTL use. }
     procedure TestRun_BareTryFinally;
@@ -670,6 +671,70 @@ procedure TE2EExceptionTests.TestRun_CreateFmt_FormatsMessage;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcCreateFmtFormatsMessage, 'code 42 msg boom' + LE, 0);
+end;
+
+procedure TE2EExceptionTests.TestRun_FailedAs_RaisesEInvalidCast;
+const
+  {
+    A failed `as` raises a catchable EInvalidCast when SysUtils is in scope --
+    to a class and to an interface -- while a good cast still works; integer
+    division by zero raises EDivByZero on every native backend (arm64 used to
+    trap with brk even with SysUtils in scope). }
+  Src = '''
+    program InvalidCast;
+    uses SysUtils;
+    type
+      IGreet = interface
+        procedure Hi;
+      end;
+      TAnimal = class end;
+      TDog = class(TAnimal) end;
+      TCat = class(TAnimal) end;
+      TGreeter = class(IGreet)
+        procedure Hi; begin WriteLn('hi') end;
+      end;
+    var
+      A: TAnimal;
+      D: TDog;
+      G: IGreet;
+      O: TObject;
+      N, Z: Integer;
+    begin
+      A := TCat.Create();
+      try
+        D := A as TDog;
+        WriteLn('not reached')
+      except
+        on E: EInvalidCast do WriteLn('class: ', E.Message)
+      end;
+      O := TCat.Create();
+      try
+        G := O as IGreet;
+        WriteLn('not reached')
+      except
+        on E: EInvalidCast do WriteLn('interface: ', E.Message)
+      end;
+      O := TGreeter.Create();
+      G := O as IGreet;
+      G.Hi();
+      Z := 0;
+      try
+        N := 10 div Z;
+        WriteLn('not reached ', N)
+      except
+        on E: EDivByZero do WriteLn('div: ', E.Message)
+      end;
+      WriteLn('done')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRTLRunsOnAll(Src,
+    'class: Invalid class typecast' + LE +
+    'interface: Invalid class typecast' + LE +
+    'hi' + LE +
+    'div: Division by zero' + LE +
+    'done' + LE, 0);
 end;
 
 initialization
