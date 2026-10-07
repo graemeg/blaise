@@ -24,6 +24,7 @@ type
     procedure SetUp; override;
   published
     procedure TestRun_IndirectFuncCallExpr_Shapes;
+    procedure TestRun_ProcTypes_IndirectCallShapes;
     procedure TestRun_SelfHostingRTLServices;
     procedure TestRun_HighLow_OrdinalBounds;
     procedure TestRun_ChainedFields_ReadThroughEveryLevel;
@@ -3131,6 +3132,121 @@ begin
     'test.bak ls /usr/bin/ /usr/bin/' + LE +
     '2147483647 cdef' + LE +
     'TA TB' + LE, 3);
+end;
+
+procedure TE2EMiscTests.TestRun_ProcTypes_IndirectCallShapes;
+const
+  {
+    Indirect calls through every procedural-value shape: a routine address in a
+    procedural variable, a procedural field called qualified and with implicit
+    Self, a closure field called with implicit Self (its environment must travel
+    as the hidden first argument), closure and plain procedural fields in a global
+    and a local record (addressed off the record itself, behind a leading member),
+    in statement and expression form, and an open-array argument through a
+    procedural variable (data pointer plus high bound). }
+  Src = '''
+    program P;
+    type
+      TIntFn = function: Integer;
+      TStrFn = function(const S: string): Integer;
+      TRun = reference to procedure(N: Integer);
+      TCnt = function(const A: array of Integer): Integer;
+      TInts = array of Integer;
+      TBox = class
+      public
+        FFn: TStrFn;
+        FRun: TRun;
+        function RunQualified(const S: string): Integer;
+        function RunImplicit(const S: string): Integer;
+        procedure Drv();
+      end;
+      TClo = reference to procedure;
+      TCloFn = reference to function(A: Integer): Integer;
+      TPlain = procedure;
+      TR = record
+        Pad: Int64;
+        F: TClo;
+        G: TCloFn;
+        H: TPlain;
+      end;
+    function MyFn: Integer;
+    begin
+      Result := 42
+    end;
+    function StrLen(const S: string): Integer;
+    begin
+      Result := Length(S)
+    end;
+    function Cnt(const A: array of Integer): Integer;
+    var I: Integer;
+    begin
+      Result := 0;
+      for I := 0 to High(A) do
+        Result := Result * 10 + A[I]
+    end;
+    procedure Plain;
+    begin
+      WriteLn('plain')
+    end;
+    function TBox.RunQualified(const S: string): Integer;
+    begin
+      Result := Self.FFn(S)
+    end;
+    function TBox.RunImplicit(const S: string): Integer;
+    begin
+      Result := FFn(S)
+    end;
+    procedure TBox.Drv();
+    begin
+      FRun(7)
+    end;
+    procedure Take(F: TCnt; const D: TInts);
+    begin
+      WriteLn(F(D))
+    end;
+    procedure LocalRec;
+    var R: TR;
+    begin
+      R.Pad := 5;
+      R.F := procedure begin WriteLn('local closure') end;
+      R.F()
+    end;
+    var
+      F: TIntFn; B: TBox; R: TR; Base: Integer; D: TInts;
+    begin
+      F := @MyFn;
+      WriteLn(F());
+      B := TBox.Create();
+      B.FFn := @StrLen;
+      WriteLn(B.RunQualified('abc'), ' ', B.RunImplicit('hello'));
+      Base := 100;
+      B.FRun := procedure(N: Integer) begin WriteLn('run ', Base + N) end;
+      B.Drv();
+      R.Pad := 9;
+      R.F := procedure begin WriteLn('global closure') end;
+      R.G := function(A: Integer): Integer begin Result := A * Base end;
+      R.H := @Plain;
+      R.F();
+      WriteLn(R.G(5));
+      R.H();
+      LocalRec();
+      SetLength(D, 3);
+      D[0] := 1; D[1] := 2; D[2] := 3;
+      Take(@Cnt, D);
+      B.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '42' + LE +
+    '3 5' + LE +
+    'run 107' + LE +
+    'global closure' + LE +
+    '500' + LE +
+    'plain' + LE +
+    'local closure' + LE +
+    '123' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_IndirectFuncCallExpr_Shapes;
