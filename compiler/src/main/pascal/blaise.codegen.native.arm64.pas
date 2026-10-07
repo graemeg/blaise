@@ -7375,10 +7375,16 @@ begin
   if SameText(ACall.Name, 'SetLength') and (ACall.Args.Count = 2) and
      (TASTExpr(ACall.Args.Items[0]).ResolvedType <> nil) and
      TASTExpr(ACall.Args.Items[0]).ResolvedType.IsString() and
-     (TASTExpr(ACall.Args.Items[0]) is TIdentExpr) and
-     (not TIdentExpr(TASTExpr(ACall.Args.Items[0])).IsImplicitSelf) and
-     (TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode in
-       [pmNone, pmVar]) then
+     (((TASTExpr(ACall.Args.Items[0]) is TIdentExpr) and
+       (not TIdentExpr(TASTExpr(ACall.Args.Items[0])).IsImplicitSelf) and
+       (TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode in
+         [pmNone, pmVar])) or
+      ((TASTExpr(ACall.Args.Items[0]) is TFieldAccessExpr) and
+       (TFieldAccessExpr(TASTExpr(ACall.Args.Items[0])).FieldInfo <> nil)) or
+      ((TASTExpr(ACall.Args.Items[0]) is TStringSubscriptExpr) and
+       (TStringSubscriptExpr(ACall.Args.Items[0]).StrExpr.ResolvedType <> nil) and
+       (TStringSubscriptExpr(ACall.Args.Items[0]).StrExpr.ResolvedType.Kind in
+         [tyDynArray, tyOpenArray, tyStaticArray]))) then
   begin
     { SetLength(S, N): S := _StringSetLength(S, N).  The result comes back
       rc=0 (StrAlloc allocates a fresh unowned buffer), so it must be AddRef'd
@@ -7399,10 +7405,26 @@ begin
     EmitPushX0();                                { [N] }
     { x19 (callee-saved) = the address that holds the string pointer — survives
       the three RTL calls below. }
-    EmitSlotAddr('x19', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
-    if TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode <> pmNone then
-      { var/out param: the slot holds the caller variable's address. }
-      Self.Emit(#9'ldr x19, [x19]');
+    if TASTExpr(ACall.Args.Items[0]) is TIdentExpr then
+    begin
+      EmitSlotAddr('x19', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
+      if TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode <> pmNone then
+        { var/out param: the slot holds the caller variable's address. }
+        Self.Emit(#9'ldr x19, [x19]');
+    end
+    else
+    begin
+      { a string FIELD (Obj.S, Rec.S) or ELEMENT (A[I], Obj.Strs[I]): the
+        same resize through the slot's address }
+      if TASTExpr(ACall.Args.Items[0]) is TFieldAccessExpr then
+        EmitRecFieldAddrToX0(TFieldAccessExpr(TASTExpr(ACall.Args.Items[0])))
+      else if TStringSubscriptExpr(ACall.Args.Items[0]).StrExpr.ResolvedType.Kind =
+              tyStaticArray then
+        EmitStaticElemAddr(TStringSubscriptExpr(ACall.Args.Items[0]))
+      else
+        EmitDynElemAddr(TStringSubscriptExpr(ACall.Args.Items[0]));
+      Self.Emit(#9'mov x19, x0');
+    end;
     Self.Emit(#9'ldr x0, [x19]');                { old string pointer }
     EmitPopTo('x1');                             { N }
     EmitCallSym('_StringSetLength');          { x0 = new (rc=0) }
@@ -7440,6 +7462,32 @@ begin
       Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
       EmitPushX0();                                       { [N] }
       EmitRecFieldAddrToX0(TFieldAccessExpr(TASTExpr(ACall.Args.Items[0])));
+      EmitPushX0();                                       { [N][addr] }
+      Self.Emit(#9'ldr x0, [x0]');                        { old array }
+      Self.Emit(#9'ldr x1, [sp, #16]');                   { N }
+      EmitIntLiteral('x2', TDynArrayTypeDesc(
+        TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType.RawSize());
+      EmitCallSym('_DynArraySetLength');
+      Self.Emit(#9'ldr x9, [sp]');                        { addr }
+      Self.Emit(#9'str x0, [x9]');
+      Self.Emit(#9'add sp, sp, #32');
+      Exit;
+    end;
+    if (TASTExpr(ACall.Args.Items[0]) is TStringSubscriptExpr) and
+       (TStringSubscriptExpr(ACall.Args.Items[0]).StrExpr.ResolvedType <> nil) and
+       (TStringSubscriptExpr(ACall.Args.Items[0]).StrExpr.ResolvedType.Kind in
+         [tyDynArray, tyOpenArray, tyStaticArray]) then
+    begin
+      { an ELEMENT that is itself a dyn array (SetLength(M[I], N) -- ragged
+        and multi-dimensional arrays): resize through the element's address,
+        exactly as the field arm above }
+      Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
+      EmitPushX0();                                       { [N] }
+      if TStringSubscriptExpr(ACall.Args.Items[0]).StrExpr.ResolvedType.Kind =
+         tyStaticArray then
+        EmitStaticElemAddr(TStringSubscriptExpr(ACall.Args.Items[0]))
+      else
+        EmitDynElemAddr(TStringSubscriptExpr(ACall.Args.Items[0]));
       EmitPushX0();                                       { [N][addr] }
       Self.Emit(#9'ldr x0, [x0]');                        { old array }
       Self.Emit(#9'ldr x1, [sp, #16]');                   { N }
