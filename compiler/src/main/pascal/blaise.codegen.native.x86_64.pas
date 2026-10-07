@@ -15481,6 +15481,36 @@ begin
       Self.EmitInterfaceAssign(Asgn);
     end
     else if (Asgn.ResolvedLhsType <> nil) and
+            (Asgn.ResolvedLhsType.Kind = tyClass) and Asgn.IsWeakLhs then
+    begin
+      { a [Weak] variable holds no reference: _WeakAssign registers the slot
+        in the weak table (nil just deregisters it).  An owned +1 value has
+        no other owner, so it is released after the store, which frees it
+        and nils the slot (BUG-20261007-x86-weak-var-assign). }
+      if Asgn.IsVarParam or Self.IsCaptured(Asgn.Name) then
+        raise ENativeCodeGenError.Create(Format(
+          'x86-64: not yet lowered: [Weak] assignment through a var ' +
+          'parameter or a capture at line %d col %d', [Asgn.Line, Asgn.Col]));
+      if not Self.IsLocal(Asgn.Name) then
+      begin
+        Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
+        Self.MarkWeakGlobal(Asgn.Name);
+      end;
+      Self.EmitExprToEax(Asgn.Expr);
+      Self.Emit(#9'pushq %rax');
+      Self.Emit(#9'subq $8, %rsp');
+      Self.Emit(#9'movq %rax, %rsi');
+      Self.Emit(Format(#9'leaq %s, %%rdi', [Self.VarOperand(Asgn.Name)]));
+      Self.Emit(#9'callq _WeakAssign');
+      Self.Emit(#9'addq $8, %rsp');
+      Self.Emit(#9'popq %rax');
+      if NativeExprOwnsRef(Asgn.Expr) then
+      begin
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+      end;
+    end
+    else if (Asgn.ResolvedLhsType <> nil) and
             (Asgn.ResolvedLhsType.Kind = tyClass) and
             (Asgn.Expr is TNilLiteral) then
     begin
