@@ -248,7 +248,7 @@ found, for a ruling before they are migrated.
 | `cp.test.constants.pas` | 71 | pending
 | `cp.test.arc.pas` | 67 | pending
 | `cp.test.sets.pas` | 42 | pending
-| `cp.test.staticarray.pas` | 41 | pending
+| `cp.test.staticarray.pas` | 41 | done: 26 behaviour (e2e), 12 front-end (Analyse)
 | `cp.test.recordret.pas` | 36 | done: 28 behaviour (existing e2e + e2e), 6 code-gen (GenAsm)
 | `cp.test.forin.pas` | 36 | done: 34 behaviour (e2e)
 | `cp.test.interfaces.pas` | 33 | done: 31 behaviour (e2e)

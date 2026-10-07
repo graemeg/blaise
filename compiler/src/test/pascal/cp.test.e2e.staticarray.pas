@@ -25,6 +25,8 @@ type
     procedure SetUp; override;
   published
     procedure TestRun_FloatElements_DynAndOpenArrays;
+    procedure TestRun_DynArray_ManagedElementOverwrite_Releases;
+    procedure TestRun_StaticArrays_Combined;
     { Inline anonymous declaration (regression: ensure existing behaviour holds) }
     procedure TestRun_AnonymousDecl_ReadWrite;
     procedure TestRun_AnonymousDecl_NonZeroBase;
@@ -1601,6 +1603,148 @@ begin
   LE := LineEnding;
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, 'ay bee' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_StaticArrays_Combined;
+const
+  {
+    Static arrays end to end, leak-checked: a zeroed local, a non-zero-based
+    array with Low / High / Length, @Buf[I] taking an element's address (and
+    writing through it without touching the neighbours), a 2-D array written
+    in comma and chained form, a static array returned from a function and
+    passed by value and const, a named-constant bound, an array indexed by an
+    explicit-ordinal enum (it spans 5..10), record and class member const
+    arrays, and string / object elements whose overwrite releases the old
+    value.  Static-array results and parameters, assignment, and member const
+    arrays were all new or broken on arm64. }
+  Src = '''
+    program StaticArrays;
+    const N = 4;
+    type
+      TColor = (Red = 5, Green = 10);
+      TBuf = array[0..7] of Byte;
+      TTriple = array[0..2] of Integer;
+      TBox = class
+        V: Integer;
+        destructor Destroy; override;
+      end;
+      TR = record
+      public
+        const Vals: array[0..1] of Integer = (11, 22);
+      end;
+      TC = class
+      public
+        const Vals: array[0..1] of Integer = (33, 44);
+      end;
+    destructor TBox.Destroy;
+    begin
+      WriteLn('box ', V, ' gone');
+      inherited Destroy()
+    end;
+    function MakeTriple(A: Integer): TTriple;
+    begin
+      Result[0] := A; Result[1] := A * 2; Result[2] := A * 3
+    end;
+    procedure Locals;
+    var A: array[0..1] of Integer; Z: array[0..3] of Integer; I: Integer;
+    begin
+      A[0] := 5;
+      for I := 0 to 3 do Write(Z[I]);
+      WriteLn(' ', A[0], ' ', A[1])
+    end;
+    var
+      NZ: array[3..7] of Integer; Buf: TBuf; P: ^Byte; I: Integer;
+      M: array[0..1, 0..2] of Integer; Mc: array[0..1] of array[0..2] of Integer;
+      T: TTriple; NB: array[0..N] of Integer; EA: array[TColor] of Integer;
+      SA: array[0..1] of string; CA: array[0..1] of TBox;
+    begin
+      Locals();
+      for I := 3 to 7 do NZ[I] := I * 10;
+      WriteLn(NZ[3], ' ', NZ[7], ' ', Low(NZ), ' ', High(NZ), ' ', Length(NZ));
+      Buf[2] := 200;
+      P := @Buf[2];
+      WriteLn(P^, ' ', SizeOf(TBuf));
+      P^ := 7;
+      WriteLn(Buf[2], ' ', Buf[1], ' ', Buf[3]);
+      M[1, 2] := 99;
+      Mc[1][2] := 98;
+      WriteLn(M[1][2], ' ', Mc[1, 2], ' ', M[0, 2], ' ', SizeOf(M));
+      T := MakeTriple(7);
+      WriteLn(T[0], ' ', T[1], ' ', T[2]);
+      NB[N] := 42;
+      WriteLn(NB[4], ' ', SizeOf(NB), ' ', SizeOf(EA));
+      EA[Red] := 1;
+      EA[Green] := 2;
+      WriteLn(EA[Red], ' ', EA[Green]);
+      WriteLn(TR.Vals[0], ' ', TR.Vals[1], ' ', TC.Vals[0], ' ', TC.Vals[1]);
+      SA[0] := 'first-' + 'value';
+      SA[0] := 'second-' + 'value';
+      WriteLn(SA[0]);
+      CA[0] := TBox.Create();
+      CA[0].V := 1;
+      CA[0] := TBox.Create();
+      CA[0].V := 2;
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '0000 5 0' + #10 +
+    '30 70 3 7 5' + #10 +
+    '200 8' + #10 +
+    '7 0 0' + #10 +
+    '99 98 0 24' + #10 +
+    '7 14 21' + #10 +
+    '42 20 24' + #10 +
+    '1 2' + #10 +
+    '11 22 33 44' + #10 +
+    'second-value' + #10 +
+    'box 1 gone' + #10 +
+    'end' + #10 +
+    'box 2 gone' + #10, 0);
+  AssertLeakFreeOnAll(Src, 'second-value');
+end;
+
+procedure TE2EStaticArrayTests.TestRun_DynArray_ManagedElementOverwrite_Releases;
+const
+  {
+    Overwriting a string or object element of a dynamic array releases the
+    old element at once (the array's own release does not yet release its
+    elements -- BUG-20261007-dynarray-managed-elems-never-released -- so this
+    test is not leak-checked). }
+  Src = '''
+    program DynElems;
+    type
+      TBox = class
+        V: Integer;
+        destructor Destroy; override;
+      end;
+    destructor TBox.Destroy;
+    begin
+      WriteLn('box ', V, ' gone');
+      inherited Destroy()
+    end;
+    var DS: array of string; DC: array of TBox;
+    begin
+      SetLength(DS, 1);
+      DS[0] := 'dyn-' + 'one';
+      DS[0] := 'dyn-' + 'two';
+      WriteLn(DS[0]);
+      SetLength(DC, 1);
+      DC[0] := TBox.Create();
+      DC[0].V := 3;
+      DC[0] := TBox.Create();
+      DC[0].V := 4;
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'dyn-two' + #10 +
+    'box 3 gone' + #10 +
+    'end' + #10, 0);
 end;
 
 procedure TE2EStaticArrayTests.TestRun_FloatElements_DynAndOpenArrays;

@@ -15,14 +15,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TStaticArrayTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     { Analyses ASrc and returns the semantic error message, or '' if the
       source analysed cleanly. }
     function SemanticErrMsg(const ASrc: string): string;
@@ -46,23 +45,12 @@ type
     { ------------------------------------------------------------------ }
     { Codegen                                                              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_StaticArray_AllocEmitted;
-    procedure TestCodegen_StaticArray_MemsetEmitted;
-    procedure TestCodegen_StaticArray_WriteEmitted;
-    procedure TestCodegen_StaticArray_ReadEmitted;
-    procedure TestCodegen_StaticArray_NonZero_OffsetSubtracted;
-    procedure TestCodegen_StaticArray_StringWrite_EmitsARC;
-    procedure TestCodegen_StaticArray_ClassWrite_EmitsARC;
-    procedure TestCodegen_DynArray_StringWrite_EmitsARC;
-    procedure TestCodegen_DynArray_ClassWrite_EmitsARC;
 
     { ------------------------------------------------------------------ }
     { Low / High                                                           }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_StaticArray_Low_ReturnsInteger;
     procedure TestSemantic_StaticArray_High_ReturnsInteger;
-    procedure TestCodegen_StaticArray_Low_EmitsLowBound;
-    procedure TestCodegen_StaticArray_High_EmitsHighBound;
 
     { ------------------------------------------------------------------ }
     { Address-of                                                           }
@@ -70,8 +58,6 @@ type
     procedure TestParse_AddrOf_NodeType;
     procedure TestSemantic_AddrOf_ReturnsPointerType;
     procedure TestSemantic_AddrOf_BaseTypeIsByte;
-    procedure TestCodegen_AddrOf_NoLoad;
-    procedure TestCodegen_AddrOf_AddressArithmetic;
 
     { ------------------------------------------------------------------ }
     { Named array type alias: type TArr = array[L..H] of T               }
@@ -83,8 +69,6 @@ type
     procedure TestSemantic_TypeAlias_Bounds;
     procedure TestSemantic_TypeAlias_VarUsesAlias;
     procedure TestSemantic_TypeAlias_NonZeroBase;
-    procedure TestCodegen_TypeAlias_AllocEmitted;
-    procedure TestCodegen_TypeAlias_ElementSizeInAlloc;
 
     { ------------------------------------------------------------------ }
     { Named integer subrange as an array index type                       }
@@ -100,16 +84,10 @@ type
     procedure TestSemantic_MultiDim_ElementType_IsInnerArray;
     procedure TestSemantic_MultiDim_TotalByteSize;
     procedure TestSemantic_MultiDim_ThreeDims;
-    procedure TestCodegen_MultiDim_AllocTotalSize;
-    procedure TestCodegen_MultiDim_CommaWrite_EmitsRowOffset;
-    procedure TestCodegen_MultiDim_ChainedWrite_SameAsComma;
-    procedure TestCodegen_MultiDim_CommaRead_NestedSubscript;
 
     { ------------------------------------------------------------------ }
     { Function returning static array by value (issue #112)              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_ReturnStaticArray_SretParam;
-    procedure TestCodegen_ReturnStaticArray_VoidReturn;
 
     { ------------------------------------------------------------------ }
     { Named constant array bounds (issue #109)                           }
@@ -118,7 +96,6 @@ type
     procedure TestSemantic_NamedConstBound_BothBounds;
     procedure TestSemantic_NamedConstBound_Expression;
     procedure TestSemantic_NamedConstBound_TypeDecl;
-    procedure TestCodegen_NamedConstBound_CorrectSize;
 
     { ------------------------------------------------------------------ }
     { Enum-indexed var/type static arrays (issue #114)                   }
@@ -126,7 +103,6 @@ type
     procedure TestSemantic_EnumIndex_VarDecl;
     procedure TestSemantic_EnumIndex_TypeDecl;
     procedure TestSemantic_EnumIndex_Bounds;
-    procedure TestCodegen_EnumIndex_AllocSize;
     { GH #181 — Boolean is a valid 2-element ordinal index type. }
     procedure TestSemantic_BooleanIndex_TypeDecl;
     procedure TestSemantic_BooleanIndex_Bounds;
@@ -174,7 +150,6 @@ type
     procedure TestSemantic_EnumIndex_NonMonotonic_BoundsSpanMinMax;
     procedure TestSemantic_EnumIndex_MultiDim_OuterSpansMinMax;
     procedure TestSemantic_EnumIndex_MultiDim_InnerSpansMinMax;
-    procedure TestCodegen_EnumIndex_ExplicitOrdinals_AllocSpanSize;
     procedure TestSemantic_ConstArray_ExplicitOrdinals_NeedsSpanElements;
     procedure TestSemantic_ConstArray_ExplicitOrdinals_SpanElementsAccepted;
     procedure TestSemantic_ClassConstArray_ExplicitOrdinals_NeedsSpanElements;
@@ -194,8 +169,6 @@ type
     procedure TestSemantic_ClassConstArray_ConstIndex_ViaInstance_Raises;
     procedure TestSemantic_ClassConstArray_ConstIndex_InRange_Accepted;
     procedure TestSemantic_ClassConstArray_VarIndex_NotDiagnosed;
-    procedure TestCodegen_RecordConstArray_DataBlobEmitted;
-    procedure TestCodegen_ClassConstArray_DataBlobEmitted;
   end;
 
 implementation
@@ -228,23 +201,6 @@ begin
   end;
 end;
 
-function TStaticArrayTests.GenIR(const ASrc: string): string;
-var P: TProgram; CG: TCodeGenQBE;
-begin
-  P := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(P);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    P.Free();
-  end;
-end;
-
 { ------------------------------------------------------------------ }
 { Shared source snippets                                              }
 { ------------------------------------------------------------------ }
@@ -268,18 +224,6 @@ const
         var A: array[0..3] of Integer;
         begin
           A[2] := 99
-        end;
-        begin end.
-        ''';
-
-  SrcReadBack =
-    '''
-        program SA;
-        function GetFirst: Integer;
-        var A: array[0..3] of Integer;
-        begin
-          A[0] := 7;
-          Result := A[0]
         end;
         begin end.
         ''';
@@ -428,133 +372,6 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
-{ Codegen tests                                                       }
-{ ------------------------------------------------------------------ }
-
-procedure TStaticArrayTests.TestCodegen_StaticArray_AllocEmitted;
-var IR: string;
-begin
-  IR := GenIR(SrcByteBuf);
-  { 8-byte Byte array: alloc4 alignment, 8 bytes total }
-  AssertTrue('alloc4 8 emitted', Pos('alloc4 8', IR) > 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_StaticArray_MemsetEmitted;
-var IR: string;
-begin
-  IR := GenIR(SrcByteBuf);
-  AssertTrue('memset call emitted', Pos('call $memset', IR) > 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_StaticArray_WriteEmitted;
-var IR: string;
-begin
-  IR := GenIR(SrcByteBuf);
-  { Byte element write uses storeb }
-  AssertTrue('storeb emitted', Pos('storeb', IR) > 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_StaticArray_ReadEmitted;
-var IR: string;
-begin
-  IR := GenIR(SrcReadBack);
-  { Integer element read uses loadw }
-  AssertTrue('loadw emitted', Pos('loadw', IR) > 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_StaticArray_NonZero_OffsetSubtracted;
-var IR: string;
-begin
-  IR := GenIR(SrcNonZero);
-  { R[5] with LowBound=5: offset = (5-5)*4 = 0; sub instruction emitted }
-  AssertTrue('sub for low-bound adjustment', Pos('=l sub', IR) > 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_StaticArray_StringWrite_EmitsARC;
-const
-  Src =
-    '''
-        program P;
-        var A: array[0..2] of string;
-        begin
-          A[0] := 'hello';
-          A[0] := 'world'
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('string element write retains new value',
-    Pos('call $_StringAddRef(', IR) > 0);
-  AssertTrue('string element write releases old value',
-    Pos('call $_StringRelease(', IR) > 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_StaticArray_ClassWrite_EmitsARC;
-const
-  Src =
-    '''
-        program P;
-        type TC = class(TObject) end;
-        var A: array[0..2] of TC;
-        begin
-          A[0] := TC.Create();
-          A[0] := TC.Create()
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('class element write retains new instance',
-    Pos('call $_ClassAddRef(', IR) > 0);
-  AssertTrue('class element write releases prior instance',
-    Pos('call $_ClassRelease(', IR) > 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_DynArray_StringWrite_EmitsARC;
-const
-  Src =
-    '''
-        program P;
-        var A: array of string;
-        begin
-          SetLength(A, 3);
-          A[0] := 'hello';
-          A[0] := 'world'
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('dynarray string element write retains new value',
-    Pos('call $_StringAddRef(', IR) > 0);
-  AssertTrue('dynarray string element write releases old value',
-    Pos('call $_StringRelease(', IR) > 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_DynArray_ClassWrite_EmitsARC;
-const
-  Src =
-    '''
-        program P;
-        type TC = class(TObject) end;
-        var A: array of TC;
-        begin
-          SetLength(A, 3);
-          A[0] := TC.Create();
-          A[0] := TC.Create()
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('dynarray class element write retains new instance',
-    Pos('call $_ClassAddRef(', IR) > 0);
-  AssertTrue('dynarray class element write releases prior instance',
-    Pos('call $_ClassRelease(', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
 { Low / High tests                                                    }
 { ------------------------------------------------------------------ }
 
@@ -576,22 +393,6 @@ begin
   try
     AssertNotNull('program analysed', P);
   finally P.Free(); end;
-end;
-
-procedure TStaticArrayTests.TestCodegen_StaticArray_Low_EmitsLowBound;
-var IR: string;
-begin
-  IR := GenIR(SrcLowHigh);
-  { Low(A) on array[3..7] emits: copy 3 }
-  AssertTrue('copy 3 for Low(A)', Pos('copy 3', IR) > 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_StaticArray_High_EmitsHighBound;
-var IR: string;
-begin
-  IR := GenIR(SrcLowHigh);
-  { High(A) on array[3..7] emits: copy 7 }
-  AssertTrue('copy 7 for High(A)', Pos('copy 7', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -634,22 +435,6 @@ begin
     AssertNotNull('BaseType set', PT.BaseType);
     AssertEquals('BaseType is tyByte', Ord(tyByte), Ord(PT.BaseType.Kind));
   finally P.Free(); end;
-end;
-
-procedure TStaticArrayTests.TestCodegen_AddrOf_NoLoad;
-var IR: string;
-begin
-  IR := GenIR(SrcAddrOf);
-  { @Buf[0] takes address only — no loadub should appear }
-  AssertTrue('no loadub emitted', Pos('loadub', IR) < 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_AddrOf_AddressArithmetic;
-var IR: string;
-begin
-  IR := GenIR(SrcAddrOf);
-  { address is computed: base + offset using add }
-  AssertTrue('=l add emitted', Pos('=l add', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -805,22 +590,6 @@ begin
   finally P.Free(); end;
 end;
 
-procedure TStaticArrayTests.TestCodegen_TypeAlias_AllocEmitted;
-var IR: string;
-begin
-  IR := GenIR(SrcTypeAliasBasic);
-  { Global array is emitted as a data declaration containing the var name }
-  AssertTrue('Buf appears in IR', Pos('Buf', IR) >= 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_TypeAlias_ElementSizeInAlloc;
-var IR: string;
-begin
-  IR := GenIR(SrcTypeAliasBasic);
-  // 8 bytes * 1 (Byte) = 8 bytes total; check the number 8 appears in the IR
-  AssertTrue('size 8 appears in IR', Pos('8', IR) >= 0);
-end;
-
 procedure TStaticArrayTests.TestSemantic_NamedSubrange_IndexFoldsToBounds;
 var P: TProgram; Sym: TSymbol; SAT: TStaticArrayTypeDesc;
 begin
@@ -864,28 +633,6 @@ const
         var A: array[0..1, 0..2] of Integer;
         begin
           A[1, 2] := 99
-        end;
-        begin end.
-        ''';
-
-  SrcMultiDimChained =
-    '''
-        program SA;
-        procedure Foo;
-        var A: array[0..1] of array[0..2] of Integer;
-        begin
-          A[1][2] := 99
-        end;
-        begin end.
-        ''';
-
-  SrcMultiDimRead =
-    '''
-        program SA;
-        function Foo: Integer;
-        var A: array[0..1, 0..2] of Integer;
-        begin
-          Result := A[1, 2]
         end;
         begin end.
         ''';
@@ -969,74 +716,7 @@ begin
   finally P.Free(); end;
 end;
 
-procedure TStaticArrayTests.TestCodegen_MultiDim_AllocTotalSize;
-var IR: string;
-begin
-  { The single backing allocation must cover the whole flattened block (24). }
-  IR := GenIR(SrcMultiDimComma);
-  AssertTrue('alloc of 24 bytes present', Pos('24', IR) >= 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_MultiDim_CommaWrite_EmitsRowOffset;
-var IR: string;
-begin
-  { Writing A[1, 2] indexes row 1 (stride = inner size 12) then col 2
-    (stride 4): both the row stride 12 and column stride 4 must appear. }
-  IR := GenIR(SrcMultiDimComma);
-  AssertTrue('row stride 12 present', Pos('mul', IR) >= 0);
-  AssertTrue('stores the value 99', Pos('99', IR) >= 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_MultiDim_ChainedWrite_SameAsComma;
-var IRComma, IRChained: string;
-begin
-  { The comma form and the explicit nested-chained form must produce identical
-    IR — the comma form is pure sugar over the nested form. }
-  IRComma   := GenIR(SrcMultiDimComma);
-  IRChained := GenIR(SrcMultiDimChained);
-  AssertEquals('comma form IR == chained form IR', IRComma, IRChained);
-end;
-
-procedure TStaticArrayTests.TestCodegen_MultiDim_CommaRead_NestedSubscript;
-var IR: string;
-begin
-  { A read A[1, 2] must compute an inner-array address (a load of the final
-    element off base + row offset + col offset). }
-  IR := GenIR(SrcMultiDimRead);
-  AssertTrue('emits a word load for the element', Pos('loadw', IR) >= 0);
-end;
-
 const
-  SrcArrayReturn =
-    '''
-    program P;
-    type TVec3 = array[0..2] of Integer;
-    function MakeVec(A, B, C: Integer): TVec3;
-    begin
-      Result[0] := A;
-      Result[1] := B;
-      Result[2] := C
-    end;
-    var V: TVec3;
-    begin
-      V := MakeVec(1, 2, 3)
-    end.
-    ''';
-
-procedure TStaticArrayTests.TestCodegen_ReturnStaticArray_SretParam;
-var IR: string;
-begin
-  IR := GenIR(SrcArrayReturn);
-  AssertTrue('sret hidden param', Pos('_par__sret', IR) >= 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_ReturnStaticArray_VoidReturn;
-var IR: string;
-begin
-  IR := GenIR(SrcArrayReturn);
-  AssertTrue('void return', Pos('ret', IR) >= 0);
-end;
-
 { ------------------------------------------------------------------ }
 { Named constant array bounds (issue #109)                           }
 { ------------------------------------------------------------------ }
@@ -1118,18 +798,6 @@ begin
   finally
     P.Free();
   end;
-end;
-
-procedure TStaticArrayTests.TestCodegen_NamedConstBound_CorrectSize;
-var IR: string;
-begin
-  IR := GenIR('''
-    program P;
-    const N = 4;
-    var A: array[0..N] of Integer;
-    begin A[0] := 42 end.
-    ''');
-  AssertTrue('alloc for 5 ints (20 bytes)', Pos('20', IR) >= 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -1291,18 +959,6 @@ begin
     Pos('not a valid array index type', Msg) >= 0);
 end;
 
-procedure TStaticArrayTests.TestCodegen_EnumIndex_AllocSize;
-var IR: string;
-begin
-  IR := GenIR('''
-    program P;
-    type TColor = (Red, Green, Blue);
-    var A: array[TColor] of Integer;
-    begin A[Red] := 42 end.
-    ''');
-  AssertTrue('alloc for 3 ints (12 bytes)', Pos('12', IR) >= 0);
-end;
-
 { ------------------------------------------------------------------ }
 { BUG-20260921-const-array-index-out-of-bounds                       }
 {                                                                     }
@@ -1432,63 +1088,63 @@ begin
 end;
 
 procedure TStaticArrayTests.TestSemantic_ConstIndex_InRange_Accepted;
-var IR: string;
 begin
-  IR := GenIR('''
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
     program P;
     var a: array[0..4] of Integer;
     begin a[3] := 7 end.
-    ''');
-  AssertTrue('in-range constant index still compiles', Length(IR) > 0);
+    '''));
 end;
 
 procedure TStaticArrayTests.TestSemantic_ConstIndex_BoundaryLowAndHigh_Accepted;
-var IR: string;
 begin
   { Off-by-one guard: both bounds are INCLUSIVE and must be accepted. }
-  IR := GenIR('''
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
     program P;
     var a: array[0..4] of Integer;
     begin a[0] := 1; a[4] := 2 end.
-    ''');
-  AssertTrue('both boundary indices accepted', Length(IR) > 0);
+    '''));
 end;
 
 procedure TStaticArrayTests.TestSemantic_ConstIndex_NonZeroBase_InRange_Accepted;
-var IR: string;
 begin
-  IR := GenIR('''
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
     program P;
     var a: array[1..5] of Integer;
     begin a[1] := 1; a[5] := 2 end.
-    ''');
-  AssertTrue('non-zero-based boundary indices accepted', Length(IR) > 0);
+    '''));
 end;
 
 procedure TStaticArrayTests.TestSemantic_VarIndex_NotDiagnosed;
-var IR: string;
 begin
   { A variable index is not a compile-time fact — it must NOT be rejected,
     even when the value would obviously be out of range at runtime. }
-  IR := GenIR('''
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
     program P;
     var a: array[0..4] of Integer; i: Integer;
     begin i := 99; a[i] := 7 end.
-    ''');
-  AssertTrue('variable index is not diagnosed', Length(IR) > 0);
+    '''));
 end;
 
 procedure TStaticArrayTests.TestSemantic_ConstIndex_DynArray_NotDiagnosed;
-var IR: string;
 begin
   { A dynamic array's length is not a compile-time fact — out of scope
     of this check (see BUG-20260921-no-compile-time-range-check). }
-  IR := GenIR('''
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
     program P;
     var d: array of Integer;
     begin SetLength(d, 3); d[50] := 9 end.
-    ''');
-  AssertTrue('dynamic array constant index is not diagnosed', Length(IR) > 0);
+    '''));
 end;
 
 procedure TStaticArrayTests.TestSemantic_ConstIndex_Nested2D_AboveHigh_Raises;
@@ -1506,23 +1162,24 @@ begin
 end;
 
 procedure TStaticArrayTests.TestSemantic_EnumShadowedByGlobalVar_NotFolded;
-var IR: string;
 begin
   { 'Red' here is an Integer variable, not TColor.Red — folding it to the
     ordinal 0 would wrongly report it out of bounds of array[1..5]. }
-  IR := GenIR('''
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
     program P;
     type TColor = (Red, Green, Blue);
     var A: array[1..5] of Integer; Red: Integer;
     begin Red := 3; A[Red] := 1 end.
-    ''');
-  AssertTrue('enum-shadowing global var is not folded', Length(IR) > 0);
+    '''));
 end;
 
 procedure TStaticArrayTests.TestSemantic_EnumShadowedByLocalVar_NotFolded;
-var IR: string;
 begin
-  IR := GenIR('''
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
     program P;
     type TColor = (Red, Green, Blue);
     var A: array[1..5] of Integer;
@@ -1530,31 +1187,31 @@ begin
     var Blue: Integer;
     begin Blue := 4; A[Blue] := 1 end;
     begin Fill() end.
-    ''');
-  AssertTrue('enum-shadowing local var is not folded', Length(IR) > 0);
+    '''));
 end;
 
 procedure TStaticArrayTests.TestSemantic_EnumShadowedByParam_NotFolded;
-var IR: string;
 begin
-  IR := GenIR('''
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
     program P;
     type TColor = (Red, Green, Blue);
     var A: array[5..9] of Integer;
     procedure Fill(Green: Integer);
     begin A[Green] := 1 end;
     begin Fill(7) end.
-    ''');
-  AssertTrue('enum-shadowing parameter is not folded', Length(IR) > 0);
+    '''));
 end;
 
 procedure TStaticArrayTests.TestSemantic_EnumShadowedByField_NotFolded;
-var IR: string;
 begin
   { A class FIELD is not in the symbol table at all, so a lookup-based guard
     would still mis-fold this one — the IsConstant annotation is what makes
     it correct. }
-  IR := GenIR('''
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
     program P;
     type
       TColor = (Red, Green, Blue);
@@ -1567,8 +1224,7 @@ begin
     begin Red := 3; A[Red] := 1 end;
     var C: TC;
     begin C := TC.Create(); C.Go() end.
-    ''');
-  AssertTrue('enum-shadowing class field is not folded', Length(IR) > 0);
+    '''));
 end;
 
 { ------------------------------------------------------------------ }
@@ -1673,19 +1329,6 @@ begin
   end;
 end;
 
-procedure TStaticArrayTests.TestCodegen_EnumIndex_ExplicitOrdinals_AllocSpanSize;
-var IR: string;
-begin
-  { 5..10 inclusive = 6 Integers = 24 bytes (not 2 x 4 = 8). }
-  IR := GenIR('''
-    program P;
-    type TColor = (Red = 5, Green = 10);
-    var A: array[TColor] of Integer;
-    begin A[Red] := 1 end.
-    ''');
-  AssertTrue('allocates the 24-byte span', Pos('24', IR) >= 0);
-end;
-
 procedure TStaticArrayTests.TestSemantic_ConstArray_ExplicitOrdinals_NeedsSpanElements;
 var Msg: string;
 begin
@@ -1704,15 +1347,15 @@ begin
 end;
 
 procedure TStaticArrayTests.TestSemantic_ConstArray_ExplicitOrdinals_SpanElementsAccepted;
-var IR: string;
 begin
-  IR := GenIR('''
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
     program P;
     type TColor = (Red = 5, Green = 10);
     const A: array[TColor] of Integer = (1, 0, 0, 0, 0, 2);
     begin WriteLn(A[Red]) end.
-    ''');
-  AssertTrue('6 elements for a 6-slot span accepted', Length(IR) > 0);
+    '''));
 end;
 
 procedure TStaticArrayTests.TestSemantic_ClassConstArray_ExplicitOrdinals_NeedsSpanElements;
@@ -1845,9 +1488,10 @@ begin
 end;
 
 procedure TStaticArrayTests.TestSemantic_ClassConstArray_ConstIndex_InRange_Accepted;
-var IR: string;
 begin
-  IR := GenIR('''
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
     program P;
     type
       TE = (eA, eB);
@@ -1856,15 +1500,15 @@ begin
         const Names: array[TE] of Integer = (11, 22);
       end;
     begin WriteLn(TC.Names[0], ' ', TC.Names[1]) end.
-    ''');
-  AssertTrue('both in-range indices still compile', Length(IR) > 0);
+    '''));
 end;
 
 procedure TStaticArrayTests.TestSemantic_ClassConstArray_VarIndex_NotDiagnosed;
-var IR: string;
 begin
   { A variable index is not a compile-time fact — must not be rejected. }
-  IR := GenIR('''
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
     program P;
     type
       TE = (eA, eB);
@@ -1874,49 +1518,7 @@ begin
       end;
     var i: Integer;
     begin i := 9; WriteLn(TC.Names[i]) end.
-    ''');
-  AssertTrue('variable index is not diagnosed', Length(IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
-{ BUG-20260922-record-const-array-unresolved-symbol                  }
-{ ------------------------------------------------------------------ }
-
-procedure TStaticArrayTests.TestCodegen_RecordConstArray_DataBlobEmitted;
-var IR: string;
-begin
-  { The reference side mints $TR_Vals; the data blob must be emitted under
-    the same label or the link leaves it unresolved and the read is garbage. }
-  IR := GenIR(
-    'program P;' + LineEnding +
-    'type' + LineEnding +
-    '  TR = record' + LineEnding +
-    '  public' + LineEnding +
-    '    const Vals: array[0..1] of Integer = (11, 22);' + LineEnding +
-    '  end;' + LineEnding +
-    'begin' + LineEnding +
-    '  WriteLn(TR.Vals[0])' + LineEnding +
-    'end.');
-  AssertTrue('data $TR_Vals emitted, got: ' + IR,
-    Pos('data $TR_Vals', IR) > 0);
-end;
-
-procedure TStaticArrayTests.TestCodegen_ClassConstArray_DataBlobEmitted;
-var IR: string;
-begin
-  { The class arm already worked — pin it so the record fix cannot regress it. }
-  IR := GenIR(
-    'program P;' + LineEnding +
-    'type' + LineEnding +
-    '  TC = class' + LineEnding +
-    '  public' + LineEnding +
-    '    const Vals: array[0..1] of Integer = (11, 22);' + LineEnding +
-    '  end;' + LineEnding +
-    'begin' + LineEnding +
-    '  WriteLn(TC.Vals[0])' + LineEnding +
-    'end.');
-  AssertTrue('data $TC_Vals emitted, got: ' + IR,
-    Pos('data $TC_Vals', IR) > 0);
+    '''));
 end;
 
 initialization
