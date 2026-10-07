@@ -23,13 +23,6 @@ releases/
 # PasBuild build output (per-module target/ directories)
 target/
 
-# QBE build artefacts (source is vendored; binary is built locally)
-vendor/qbe/*.o
-vendor/qbe/qbe
-vendor/qbe/amd64/*.o
-vendor/qbe/arm64/*.o
-vendor/qbe/rv64/*.o
-
 # FPC unit cache directories
 lib/
 units/

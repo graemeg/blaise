@@ -33,8 +33,8 @@
 #   different-but-valid encodings / section layouts, so a byte-level compare
 #   would false-positive; behavioural equivalence is the sound invariant.
 #
-# Requires: a native compiler at compiler/target/blaise (run the QBE
-# fixpoint or `pasbuild compile` first).  The RTL is source-built by the
+# Requires: a native compiler at compiler/target/blaise (run
+# `pasbuild compile` first).  The RTL is source-built by the
 # driver, so no blaise_rtl.a is needed.
 
 set -e

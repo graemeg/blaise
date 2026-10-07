@@ -1,10 +1,2 @@
 Blaise — An Object Pascal Compiler
 Copyright 2026 Graeme Geldenhuys
-
-This product includes software developed by third parties:
-
-QBE (https://c9x.me/compile/)
-Copyright (c) 2015-2023 Quentin Carbonneaux <quentin@c9x.me>
-Licensed under the MIT License. The QBE source and licence text are
-bundled at vendor/qbe/. The Blaise compiler invokes the QBE binary as
-a subprocess; QBE is not linked into the Blaise compiler itself.

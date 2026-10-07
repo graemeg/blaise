@@ -20,7 +20,7 @@
 # gets _start from crt1 and calls main.  Pass --with-startup to include it (a
 # -nostartfiles / native internal link that owns the entry point).
 #
-# --exclude-defined-by handles the self-host link: a whole-program --emit-ir
+# --exclude-defined-by handles the self-host link: a whole-program --emit-asm
 # dump INLINES the RTL units the compiler transitively uses (runtime.arc via
 # `uses classes`, etc.), so the program object already defines their symbols.
 # Linking our standalone copy too would double-define them; this option drops

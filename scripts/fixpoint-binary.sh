@@ -9,7 +9,6 @@
 #   This is the only fixpoint that compares LINKED BINARIES.  The others all
 #   stop short of the container:
 #
-#     fixpoint.sh                 diffs .ssa IR text
 #     fixpoint-native.sh          diffs .s assembly text (links with EXTERNAL gcc)
 #     fixpoint-native-internal.sh compares stdout + exit code of a small probe
 #     fixpoint-warmcache.sh       compares behaviour + binary size within 10%

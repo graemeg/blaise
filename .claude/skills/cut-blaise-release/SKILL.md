@@ -2,8 +2,8 @@
 name: cut-blaise-release
 description: |
   Cut a new Blaise compiler release. Bumps the version in Blaise.pas + project.xml,
-  rebuilds compiler + RTL + stage-2 binary, verifies all four self-hosting
-  fixpoints (QBE, native, internal-assembler, warm-cache), runs the full test
+  rebuilds compiler + RTL + stage-2 binary, verifies the self-hosting
+  fixpoints (native, internal-assembler, warm-cache, binary, init-order), runs the full test
   suite, commits, tags, archives the NATIVE stage-2 binary under releases/vX.Y.Z/
   (NOT committed — releases/ is gitignored), renames + refreshes the -pre
   bootstrap dir to the next cycle, cross-compiles a FreeBSD x86_64 binary, builds
@@ -46,9 +46,10 @@ a `-SNAPSHOT` suffix (0.11.0 → 0.12.0-SNAPSHOT). Confirm with the user if unsu
    plain non-dev version, ask the user — they may have already cut this release.
 3. All commands run from the project root `/data/devel/new-pascal-compiler`
    (PasBuild requirement — sub-modules lack the `<version>` field).
-4. `vendor/qbe/qbe` must exist (the fixpoint scripts need it). The current
-   release binary lives at the newest `releases/v*-pre/blaise` or
-   `releases/v*/blaise` — the fixpoint scripts auto-pick it via `sort -V`.
+4. The current release binary lives at the newest `releases/v*-pre/blaise` or
+   `releases/v*/blaise`.  Resolve it once:
+   `BLAISE_RELEASE=$(ls -d releases/v*/ | sort -V | tail -1)blaise`.
+   (No QBE binary is needed: the QBE backend was removed in v0.15.0.)
 
 ## Step 1 — bump version to release
 
@@ -88,67 +89,50 @@ of `COMPILER_ID`. So `COMPILER_ID` and project.xml `<version>` must carry the
 **same base version** at all times — here at release, and again at the dev-cycle
 bump in Step 7. A mismatch silently fails that test.
 
-## Step 2 — verify the QBE fixpoint (NOT the binary we ship)
+## Step 2 — build the release compiler and verify the native fixpoint
 
-The project's `scripts/fixpoint.sh` does a whole QBE stage-2 build: it
-rebuilds + installs the runtime, uses the latest release binary as stage-1 to
-emit stage-2 IR, assembles + links the stage-2 binary to **`/tmp/fp_blaise2`**,
-then emits stage-3 IR and diffs it.
-
-NOTE: since v0.12.0 the **native backend is the default**, so the binary we
-actually archive and ship is the NATIVE stage-2 binary from Step 3
-(`/tmp/fpn_blaise2`), NOT `/tmp/fp_blaise2`. This step still runs — the QBE
-fixpoint is a required reproducibility guard and prints the IR line count we
-quote in the commit message and docs — but `/tmp/fp_blaise2` is only used to
-rebuild `compiler/target/blaise` below so the native fixpoints run on the
-released version.
+Build `compiler/target/blaise` (stage-0, now carrying the release version) with
+the latest release binary, then run the native fixpoint on it:
 
 ```bash
-./scripts/fixpoint.sh        # must print FIXPOINT_OK
+pasbuild clean
+pasbuild compile -m blaise-compiler --compiler "$BLAISE_RELEASE"
+./scripts/fixpoint-native.sh           # must print NATIVE_FIXPOINT_OK
 ```
 
-Note the stage-2 IR line count it prints ("stage-2 IR: N lines") — you'll quote
-it in the commit message and the docs.
+Note the stage-2 assembly line count it prints ("stage-2 asm: N lines") — you
+quote it in the commit message and the docs.
 
-The verified stage-2 binary is **`/tmp/fp_blaise2`**. (If the release stage-1
-was too old to reach fixpoint in one round, `fixpoint.sh` extends a round and
-the binary becomes `/tmp/fp_blaise3` — read the script's output to see which.)
-
-`fixpoint.sh` only updated the IR-emitting path; `compiler/target/blaise` may
-still be the old `-SNAPSHOT` build. Rebuild it from the fixpoint binary so the
-native fixpoints and the test runner use the released version:
+`fixpoint-native.sh` writes the **native stage-2 binary to `/tmp/fpn_blaise2`**
+— that is the binary we archive and ship (Step 6).  Confirm it prints the right
+version, then rebuild `compiler/target/blaise` from it so the remaining
+fixpoints and the test runner use a stage-2 compiler:
 
 ```bash
-pasbuild compile -m blaise-compiler --compiler /tmp/fp_blaise2
-compiler/target/blaise --help | head -1             # must print: Blaise Compiler v<X.Y.Z>
+/tmp/fpn_blaise2 --help | head -1      # must print: Blaise Compiler v<X.Y.Z>
+pasbuild compile -m blaise-compiler --compiler /tmp/fpn_blaise2
+compiler/target/blaise --help | head -1
 ```
 
 ALWAYS pass `--compiler` to pasbuild — without it, PasBuild falls back to FPC,
 which this project does not use.
 
-## Step 3 — verify the native, internal-assembler, and warm-cache fixpoints
+## Step 3 — verify the remaining fixpoints
 
-`fixpoint.sh` (Step 2) only exercises the QBE backend. Three more fixpoints
-guard the native backend, the in-process internal assembler, and warm-cache
-(incremental) rebuilds. Run all three:
+Four more fixpoints guard the in-process internal assembler, warm-cache
+(incremental) rebuilds, the linked binary (assembler + linker + container
+writer determinism) and unit initialisation order:
 
 ```bash
-./scripts/fixpoint-native.sh           # must print NATIVE_FIXPOINT_OK
 ./scripts/fixpoint-native-internal.sh  # must print NATIVE_INTERNAL_OK
 ./scripts/fixpoint-warmcache.sh        # must print WARMCACHE_FIXPOINT_OK
+./scripts/fixpoint-binary.sh           # must print BINARY_FIXPOINT_OK
+./scripts/fixpoint-initorder.sh        # must print INITORDER_FIXPOINT_OK
 ```
 
-`fixpoint-native.sh` writes the **native stage-2 binary to `/tmp/fpn_blaise2`**
-— that is the binary we archive and ship (Step 6), because native is the
-default backend. Confirm it prints the right version:
-
-```bash
-/tmp/fpn_blaise2 --help | head -1      # must print: Blaise Compiler v<X.Y.Z>
-```
-
-If any of the four fixpoints does not print its OK line, **stop**. Show the
-user the output and do not proceed. There is no acceptable "almost fixpoint" —
-any divergence means the release is not reproducible.
+If any fixpoint does not print its OK line, **stop**. Show the user the output
+and do not proceed. There is no acceptable "almost fixpoint" — any divergence
+means the release is not reproducible.
 
 ## Step 4 — run the full test suite with the fixpoint binary
 
@@ -157,7 +141,7 @@ Build the TestRunner with the verified stage-2 binary, then run the whole suite
 the real total):
 
 ```bash
-pasbuild test-compile -m blaise-compiler --compiler /tmp/fp_blaise2
+pasbuild test-compile -m blaise-compiler --compiler /tmp/fpn_blaise2
 compiler/target/TestRunner          # must print: OK (N tests, ...)
 ```
 
@@ -186,8 +170,9 @@ Commit with this pattern (HEREDOC for clean formatting):
 ```
 release: v<X.Y.Z>
 
-<one or two sentences: fixpoint verified on N lines of QBE IR (all four
-fixpoints green: QBE, native, internal-asm, warm-cache), the headline themes
+<one or two sentences: native fixpoint verified on N lines of stage-2
+assembly (all fixpoints green: native, internal-asm, warm-cache, binary,
+init-order), the headline themes
 of the cycle, and the test count.>
 ```
 
@@ -202,9 +187,7 @@ The user pushes manually.
 
 ## Step 6 — archive the release binary + refresh the -pre bootstrap binary
 
-Archive the **native** stage-2 binary (`/tmp/fpn_blaise2` from Step 3) — native
-is the default backend, so the shipped/bootstrap binary must be native, NOT the
-QBE `/tmp/fp_blaise2`:
+Archive the **native** stage-2 binary (`/tmp/fpn_blaise2` from Step 2):
 
 ```bash
 mkdir -p releases/v<X.Y.Z>
@@ -453,8 +436,9 @@ social media). Style:
 - Include **tiny code examples** for the headline language features — a 3–6
   line snippet per feature is far more compelling than prose. VERIFY each
   snippet actually compiles before publishing: write it to `/tmp/snip.pas` and
-  run `compiler/target/blaise --source /tmp/snip.pas --output /tmp/snip` (try
-  both `--backend qbe` and `--backend native` for codegen-sensitive features).
+  run `compiler/target/blaise --source /tmp/snip.pas --output /tmp/snip` (for
+  codegen-sensitive features, also cross-compile with `--target macos-arm64`
+  or `--target linux-x86_64` so both ISAs accept it).
 - Cover: headline win(s), language/stdlib additions, bug-fix hardening, notable
   compiler internals, the fixpoint line count and test count, and a closing
   call to action pointing at the GitHub release page.
@@ -503,11 +487,10 @@ the remote — never push automatically.
   `git add -p` and confirm `git diff --cached --stat` shows exactly two
   one-line changes before committing. (This bit the v0.11.0 cut — the commit had
   to be reset and redone.)
-- **Archiving the QBE binary instead of the native one.** Native is the default
-  backend, so the shipped/bootstrap binary must be `/tmp/fpn_blaise2` (from
-  `fixpoint-native.sh`), NOT the QBE `/tmp/fp_blaise2` (from `fixpoint.sh`). The
-  QBE fixpoint is still required as a reproducibility guard — it just isn't the
-  artefact.
+- **Archiving the wrong binary.** The shipped/bootstrap binary is
+  `/tmp/fpn_blaise2` (from `fixpoint-native.sh`).  `/tmp/fp_blaise2|3` are
+  leftovers of the removed QBE fixpoint (`fixpoint.sh`, gone since v0.15.0);
+  never archive them.
 - **Shipping a binary-only tarball.** The native backend source-builds the RTL,
   so a tarball with just `blaise` CANNOT compile
   anything once extracted — it dies with `RTL source directory not found`. Every
@@ -529,8 +512,7 @@ the remote — never push automatically.
   rebuild the tarball, then `git checkout HEAD -- Blaise.pas uCompilerId.pas`.
   (The Linux release binary is immune — it's archived from the fixpoint in Step 6
   before the bump.)
-- **Stale fixpoint binary in /tmp.** A `/tmp/fpn_blaise2` (or `/tmp/fp_blaise3`)
-  left over from an earlier run can be days old. Always confirm the binary you
+- **Stale fixpoint binary in /tmp.** A `/tmp/fpn_blaise2` left over from an earlier run can be days old. Always confirm the binary you
   archive prints the RIGHT version: `<binary> --help | head -1`.
 - **COMPILER_ID out of sync with project.xml → bif-coverage fails.** At release
   `COMPILER_ID` drops `-SNAPSHOT`; at the dev-cycle bump it must re-gain
@@ -541,9 +523,9 @@ the remote — never push automatically.
   the cycle being OPENED, not the one just released. After cutting v<X.Y.Z>,
   `mv releases/v<X.Y.Z>-pre releases/v<next-minor>.0-pre` (filesystem move —
   releases/ is gitignored). CI and rolling-bootstrap pick the newest by name.
-- **`compiler/target/blaise` still on the old version.** `fixpoint.sh` does not
-  rebuild it; do the `pasbuild compile --compiler /tmp/fp_blaise2` step (Step 2)
-  before the native fixpoints, or they run against the previous version.
+- **`compiler/target/blaise` still on the old version.** The fixpoint scripts
+  do not rebuild it; do the `pasbuild compile` steps in Step 2 before the other
+  fixpoints, or they run against the previous version.
 - **Forgetting `--compiler`.** Every `pasbuild` command must pass
   `--compiler <blaise-binary>`; without it PasBuild falls back to FPC, which is
   not part of this toolchain.

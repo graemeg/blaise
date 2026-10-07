@@ -80,14 +80,12 @@ case "$cmd" in
     vm "git fetch -q '$ROOT' HEAD && git reset -q --hard FETCH_HEAD && git log --oneline -1"
     ;;
   build)
-    vm "make -C vendor/qbe >/dev/null \
-        && pasbuild compile -m blaise-compiler --compiler ~/seed/blaise | grep -E 'BUILD|ERROR' \
+    vm "pasbuild compile -m blaise-compiler --compiler ~/seed/blaise | grep -E 'BUILD|ERROR' \
         && cp compiler/target/blaise ~/seed/blaise-s2 \
         && pasbuild test-compile -m blaise-compiler --compiler ~/seed/blaise-s2 | grep -E 'BUILD|ERROR'"
     ;;
   test)
-    vm "BLAISE_QBE=\$PWD/vendor/qbe/qbe BLAISE_QBE_COMPILER=\$HOME/seed/blaise-s2 \
-        compiler/target/TestRunner $*"
+    vm "BLAISE_TEST_COMPILER=\$HOME/seed/blaise-s2 compiler/target/TestRunner $*"
     ;;
   stdlib-test)
     vm "pasbuild test-compile -m blaise-stdlib --compiler ~/seed/blaise-s2 | grep -E 'BUILD|ERROR' \

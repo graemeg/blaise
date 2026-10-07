@@ -16,7 +16,7 @@
 #   .bif/.o rather than recompiled from source — a dropped field, a wrong
 #   vtable slot, a duplicate global, a missing initialiser in the cached
 #   interface round-trip.  None of the existing fixpoints exercise that path:
-#   fixpoint.sh uses --emit-ir (no cache at all), fixpoint-native.sh diffs the
+#   fixpoint-native.sh diffs the
 #   emitted .s (no cache), and fixpoint-native-internal.sh compiles a tiny
 #   probe program (no large warm cache).  So a regression in the cached-
 #   interface import / round-trip passes every current fixpoint and only blows

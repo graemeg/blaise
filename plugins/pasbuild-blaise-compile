@@ -52,35 +52,21 @@ echo "[blaise-compile] Project   : $PROJ"
 
 # ---- Paths -------------------------------------------------------------------
 COMPILER_SRC="$PROJ/compiler/src/main/pascal"
-RTL_SRC="$PROJ/rtl/src/main/pascal"
-RTL_LIB="$PROJ/compiler/target/blaise_rtl.a"
-QBE="$PROJ/vendor/qbe/qbe"
-OUT_IR="$PROJ/compiler/target/blaise.ssa"
-OUT_S="$PROJ/compiler/target/blaise.s"
+STDLIB_SRC="$PROJ/stdlib/src/main/pascal"
 OUT_BIN="$PROJ/compiler/target/blaise"
 
-# ---- Step 1: Build RTL -------------------------------------------------------
-echo "[blaise-compile] Building RTL..."
-cd "$PROJ/rtl"
-make --silent
-make install --silent
-cd "$PROJ"
-
-# ---- Step 2: Emit QBE IR -----------------------------------------------------
-echo "[blaise-compile] Emitting IR..."
+# ---- Compile + link ------------------------------------------------------------
+# The compiler source-builds its RTL from COMPILER_SRC and links with its own
+# assembler and linker, so no external toolchain step is needed.
+mkdir -p "$PROJ/compiler/target"
+echo "[blaise-compile] Compiling..."
 "$BLAISE" \
   --source "$COMPILER_SRC/Blaise.pas" \
   --unit-path "$COMPILER_SRC" \
-  --unit-path "$RTL_SRC" \
-  --emit-ir > "$OUT_IR"
-
-# ---- Step 3: Assemble --------------------------------------------------------
-echo "[blaise-compile] Assembling..."
-"$QBE" -o "$OUT_S" "$OUT_IR"
-
-# ---- Step 4: Link ------------------------------------------------------------
-echo "[blaise-compile] Linking..."
-gcc -o "$OUT_BIN" "$OUT_S" "$RTL_LIB"
+  --unit-path "$STDLIB_SRC" \
+  --rtl-src "$COMPILER_SRC" \
+  --unit-cache "$PROJ/compiler/target/units" \
+  --output "$OUT_BIN"
 
 echo "[blaise-compile] Done: $OUT_BIN"
 "$OUT_BIN" --help 2>&1 | head -1

@@ -80,17 +80,6 @@ jobs:
           sudo apt-get install -y build-essential unzip
 
       # --------------------------------------------------------------------
-      # 3b. Build vendored QBE. The bootstrap chain is native-default and does
-      #     NOT need QBE, but the E2E test suite still shells out to it (the
-      #     QBE backend arm of AssertRunsOnAll, plus the toolchain-gated
-      #     round-trip tests). Without it ~218 tests fail with
-      #     "<toolchain-missing>" / "[qbe] compile+run". It is vendored, so a
-      #     plain `make` builds the binary the tests' BLAISE_QBE fallback finds.
-      # --------------------------------------------------------------------
-      - name: Build vendored QBE
-        run: make -C vendor/qbe
-
-      # --------------------------------------------------------------------
       # 4. Restore the carry-forward cache: the previous successful master run
       #    stashes its -pre binary + a marker file recording the commit SHA it
       #    was built at. We restore them into releases/<sha>/ so the script can
@@ -220,15 +209,10 @@ jobs:
           BLAISE="${{ steps.pre.outputs.bin }}"
           pasbuild test-compile -m blaise-compiler --compiler "$BLAISE"
           # Point the CLI-contract and internal-assembler suites at the
-          # bootstrapped -pre binary.  Without this they fall back to the
-          # /tmp/fp_blaise* fixpoint binaries (which only exist after a local
-          # fixpoint.sh run) and silently Ignore ~24 tests in CI.
-          # BLAISE_QBE points the E2E suite at the vendored QBE built above
-          # (its fallback is vendor/qbe/qbe, but set it explicitly).
+          # bootstrapped -pre binary (their fallback is compiler/target/blaise).
           # --verbose: one line per test, so a crash or hang in CI still
           # tells us the last test that ran.
-          BLAISE_QBE="$PWD/vendor/qbe/qbe" \
-          BLAISE_QBE_COMPILER="$BLAISE" compiler/target/TestRunner --verbose
+          BLAISE_TEST_COMPILER="$BLAISE" compiler/target/TestRunner --verbose
 
       # --------------------------------------------------------------------
       # 8a. Stdlib suite.  The TestRunner above covers the COMPILER module
@@ -416,8 +400,7 @@ jobs:
   #
   # The FreeBSD default output is a static, freestanding raw-syscall ET_EXEC
   # (no libc, no rtld), so the VM needs no packages: the base system already
-  # has cc/lld (e2e cc-link profile), make (vendored QBE builds with bmake —
-  # its Makefile is .POSIX), and openssl.  valgrind is NOT in base; the
+  # has cc/lld (e2e cc-link profile) and openssl.  valgrind is NOT in base; the
   # valgrind tests self-Ignore when the binary is absent (ValgrindAvailable).
   # ======================================================================
   freebsd-crosscheck:
@@ -523,12 +506,6 @@ jobs:
             cd "$WS"
 
             if [ -n "$FREEBSD_FULL" ]; then
-              # QBE is vendored and its Makefile is .POSIX — base-system bmake
-              # builds it.  With it present + BLAISE_QBE set below, the QBE
-              # backend arm of the e2e suite runs instead of Ignoring.
-              echo "=== build vendored QBE (FreeBSD native) ==="
-              make -C vendor/qbe
-
               # ToolchainAvailable() expects the compiler at
               # compiler/target/blaise; the normal source layout around it also
               # gives the binary-relative RTL-source resolution for free.
@@ -579,12 +556,11 @@ jobs:
                 --unit-path "$WS/stdlib/src/main/pascal" \
                 --output compiler/target/TestRunner
 
-              # Same env contract as the Linux job: BLAISE_QBE points the e2e
-              # suite at the vendored QBE, BLAISE_QBE_COMPILER at the compiler
-              # under test.  valgrind tests Ignore (not installed in the VM).
+              # Same env contract as the Linux job: BLAISE_TEST_COMPILER at the
+              # compiler under test.  valgrind tests Ignore (not installed in
+              # the VM).
               echo "=== run full test suite (FreeBSD) ==="
-              BLAISE_QBE="$WS/vendor/qbe/qbe" \
-              BLAISE_QBE_COMPILER="$WS/compiler/target/blaise" \
+              BLAISE_TEST_COMPILER="$WS/compiler/target/blaise" \
               compiler/target/TestRunner --verbose
               echo "FREEBSD_FULL_SUITE_OK"
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# Reproducible codegen benchmark: QBE vs native, on the same programs.
+# Reproducible codegen benchmark for the native backend.
 #
 # Two things are measured:
-#   A. COMPILE TIME  — how fast the compiler self-compiles Blaise.pas with
-#                      each backend (--emit-ir = QBE, --emit-asm = native),
-#                      plus valgrind instruction counts (deterministic).
-#   B. RUNTIME       — how fast the GENERATED CODE runs (bench_fib, bench_loop
-#                      compiled with each backend, then executed).
+#   A. COMPILE TIME  — how fast the compiler self-compiles Blaise.pas
+#                      (--emit-asm), plus valgrind instruction counts
+#                      (deterministic).
+#   B. RUNTIME       — how fast the GENERATED CODE runs (bench_fib, bench_loop,
+#                      bench_calls compiled, then executed).
 #
 # Runtime (B) is the number that reflects codegen QUALITY / optimisation.
 # Compile time (A) is dominated by the shared front end (parse+semantic+ARC).
@@ -26,7 +26,6 @@ cd "$ROOT"
 BLAISE="compiler/target/blaise"
 HERE="tools/performance"
 UP=(--unit-path compiler/src/main/pascal
-    --unit-path runtime/src/main/pascal
     --unit-path stdlib/src/main/pascal)
 FULL=0
 [ "${1:-}" = "--full" ] && FULL=1
@@ -54,12 +53,8 @@ best_of_3() {
 # ---- B. RUNTIME OF GENERATED CODE ------------------------------------------
 echo "=== B. RUNTIME of generated code (best of 3) ==="
 for prog in bench_fib bench_loop bench_calls; do
-  "$BLAISE" --source "$HERE/$prog.pas" --backend qbe    --output "/tmp/${prog}_qbe"    "${UP[@]}" >/dev/null
-  "$BLAISE" --source "$HERE/$prog.pas" --backend native --output "/tmp/${prog}_native" "${UP[@]}" >/dev/null
-  # correctness: both backends must agree, or the comparison is meaningless
-  q="$(/tmp/${prog}_qbe)"; n="$(/tmp/${prog}_native)"
-  [ "$q" = "$n" ] || { echo "  MISMATCH on $prog: qbe=$q native=$n" >&2; exit 1; }
-  best_of_3 "$prog  QBE"    "/tmp/${prog}_qbe"
+  "$BLAISE" --source "$HERE/$prog.pas" --output "/tmp/${prog}_native" "${UP[@]}" >/dev/null
+  echo "  $prog output: $(/tmp/${prog}_native)"
   best_of_3 "$prog  native" "/tmp/${prog}_native"
 done
 echo
@@ -70,13 +65,12 @@ echo
 echo "=== A. COMPILE TIME — self-compile of Blaise.pas (best of 3) ==="
 SRC=(--source compiler/src/main/pascal/Blaise.pas)
 best_of_3 "parse+semantic (--dump-ast)" "$BLAISE" "${SRC[@]}" "${UP[@]}" --dump-ast
-best_of_3 "QBE codegen (--emit-ir)"     "$BLAISE" "${SRC[@]}" "${UP[@]}" --emit-ir
 best_of_3 "native codegen (--emit-asm)" "$BLAISE" "${SRC[@]}" "${UP[@]}" --emit-asm
 echo
 
 if command -v valgrind >/dev/null 2>&1; then
   echo "=== instruction counts (valgrind callgrind — ~3-4 min each) ==="
-  for pair in "qbe:--emit-ir" "native:--emit-asm"; do
+  for pair in "native:--emit-asm"; do
     name="${pair%%:*}"; flag="${pair##*:}"
     valgrind --tool=callgrind --callgrind-out-file="/tmp/cg_${name}.out" \
       "$BLAISE" "${SRC[@]}" "${UP[@]}" "$flag" >/dev/null 2>"/tmp/vg_${name}.log"

@@ -11,7 +11,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 
 # Default to the newest releases/v*/blaise by version sort — the same
-# selection fixpoint.sh uses.  Prefer compiler/target/blaise if it exists,
+# selection rolling-bootstrap.sh uses.  Prefer compiler/target/blaise if it exists,
 # since that is the binary you are usually iterating on.
 default_blaise() {
   if [ -x "$ROOT/compiler/target/blaise" ]; then

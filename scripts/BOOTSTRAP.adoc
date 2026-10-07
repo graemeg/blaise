@@ -49,13 +49,6 @@ must exist in the repository history so the script can resolve it to a commit.
 The script auto-selects the newest `releases/v*/blaise` whose tag is an ancestor
 of the target revision. A specific starting point can be forced with `--from`.
 
-The vendored QBE backend must also be built once:
-
-[source,shell]
-----
-cd vendor/qbe && make && cd ../..
-----
-
 == Usage
 
 Run from the project root.
@@ -131,8 +124,8 @@ as a continuous-integration check that the self-hosting chain remains unbroken.
 
 == Relationship to other scripts
 
-`scripts/fixpoint.sh` verifies that a *single* binary reproduces itself
-(stage-2 IR equals stage-3 IR). `scripts/rolling-bootstrap.sh` produces that
+`scripts/fixpoint-binary.sh` verifies that a *single* binary reproduces itself
+(the stage-2 and stage-3 executables are byte-identical). `scripts/rolling-bootstrap.sh` produces that
 binary in the first place when the latest release is too old to do so directly.
 The two are complementary: run the rolling bootstrap to obtain a current `-pre`
 binary, then run the fixpoint check to confirm it is self-consistent.

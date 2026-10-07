@@ -1,8 +1,8 @@
 = Blaise codegen benchmarks
 :toc: macro
 
-Reproducible micro-benchmarks for comparing code-generation quality between the
-Blaise backends (native vs QBE) and for tracking codegen performance over time.
+Reproducible micro-benchmarks for tracking the native backend's code-generation
+performance over time.
 
 toc::[]
 
@@ -56,7 +56,10 @@ keep for the compiler/codegen; `docs/benchmark.txt` is a SEPARATE log for the
   its own source. Dominated by the shared front end (parse + semantic + ARC
   traffic), so it is largely backend-independent.
 
-== Current standing (2026-07-11, commit 6b15288a, Ryzen 7 5800X)
+== Last QBE comparison (2026-07-11, commit 6b15288a, Ryzen 7 5800X)
+
+The QBE backend was removed in v0.15.0; this table is kept as the baseline the
+native optimiser work set out to close.  The runner now measures native only.
 
 [cols="1,1,1,1",options="header"]
 |===
@@ -67,7 +70,7 @@ keep for the compiler/codegen; `docs/benchmark.txt` is a SEPARATE log for the
 | self-compile (wall)    | 3.48 s | 3.69 s | ~par
 |===
 
-*QBE still generates faster code than native*, decisively for call/recursion-
+At that point *QBE generated faster code than native*, decisively for call/recursion-
 heavy code. Native's strengths are debugging fidelity (OPDF), cross-compilation,
 static/freestanding output, and toolchain independence — not raw speed. Closing
 this gap is a native-optimiser task (register allocation, inlining, mem2reg);
@@ -79,7 +82,8 @@ see `docs/backend-strategy.adoc` and `docs/inlining-design.adoc`.
   dependent — compare within a run, not across machines.
 * Instruction counts (`--full`, valgrind callgrind) are deterministic and
   machine-independent; prefer them for tracking regressions.
-* The runner asserts both backends produce identical output before timing, so a
-  codegen bug can never masquerade as a speed difference.
+* The runner prints each program's output beside its timing; compare it with the
+  expected value listed above, so a codegen bug cannot masquerade as a speed
+  difference.
 * Keep the workload constants stable across sessions (the `Fib(34) x20` and
   50M-iteration counts) so numbers stay comparable.

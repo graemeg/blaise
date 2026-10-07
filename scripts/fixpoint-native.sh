@@ -6,16 +6,16 @@
 # with --backend native and produce identical assembly.
 #
 # Steps:
-#   1. Find the QBE-compiled compiler (compiler/target/blaise).
-#   2. stage-1: QBE-compiled compiler emits native assembly.
+#   1. Find the stage-0 compiler (compiler/target/blaise).
+#   2. stage-1: the stage-0 compiler emits native assembly.
 #   3. Link stage-1 binary.
 #   4. stage-2: stage-1 native binary emits native assembly.
 #   5. Link stage-2 binary.
 #   6. stage-3: stage-2 native binary emits native assembly.
 #   7. diff stage-2.s stage-3.s  => empty = clean fixpoint.
 #
-# Requires: compiler/target/blaise must already be built (run the QBE fixpoint
-# or pasbuild compile first).  The RTL is source-built via
+# Requires: compiler/target/blaise must already be built (pasbuild compile
+# first).  The RTL is source-built via
 # scripts/build-rtl-objects.sh — no blaise_rtl.a archive is involved.
 
 set -e
