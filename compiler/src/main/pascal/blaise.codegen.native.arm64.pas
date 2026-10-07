@@ -7657,6 +7657,7 @@ var
   I: Integer;
   Arg: TASTExpr;
   Tmp: string;
+  RT: TTypeDesc;
   IncLVal: TAddrOfExpr;
 begin
   if ACall.IsProcFieldCall then
@@ -8183,6 +8184,36 @@ begin
         EmitSlotAddr('x9', Tmp);
         Self.Emit(#9'ldr x0, [x9, #8]');
         EmitCallSym('_ClassRelease');
+      end;
+      Exit;
+    end;
+    RT := TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType;
+    if (RT <> nil) and
+       ((RT.Kind = tyInterface) or IsInlineBytesAgg(RT) or
+        ((RT.Kind = tyRecord) and
+         (RecReturnShape(TRecordTypeDesc(RT)) = 0))) then
+    begin
+      { A DISCARDED result returned through x8 still needs a real buffer for
+        the callee to write -- without one x8 held whatever was left in it --
+        and the references the callee handed over (a managed record's fields,
+        an interface's obj half) must be dropped (x86-64 parity). }
+      Tmp := '__dret_' + IntToStr(FJArgN);
+      FJArgN := FJArgN + 1;
+      if not FFrame.ContainsKey(Tmp) then
+        AddLocal(Tmp, RT.RawSize());
+      EmitCall(TMethodDecl(ACall.ResolvedDecl), ACall.Name, ACall.Args, Tmp);
+      if RT.Kind = tyInterface then
+      begin
+        EmitLoadSlot('x0', Tmp);
+        EmitCallSym('_ClassRelease');
+      end
+      else if (RT.Kind = tyRecord) and
+              not RecretManagedClean(TRecordTypeDesc(RT)) then
+      begin
+        Self.Emit(#9'str x19, [sp, #-16]!');
+        EmitSlotAddr('x19', Tmp);
+        Self.EmitRecordFieldReleases(TRecordTypeDesc(RT), 'x19', False);
+        Self.Emit(#9'ldr x19, [sp], #16');
       end;
       Exit;
     end;
