@@ -14,14 +14,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TTypeTestTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -55,18 +54,10 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — typeinfo data sections                                     }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_TypeInfo_Emitted;
-    procedure TestCodegen_TypeInfo_ParentPtr_IsTObject_ForImplicitRoot;
-    procedure TestCodegen_TypeInfo_ParentPtr_ForDerived;
-    procedure TestCodegen_Vtable_StartsWithTypeInfo;
 
     { ------------------------------------------------------------------ }
     { Codegen — is / as expressions                                        }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_IsExpr_CallsIsInstance;
-    procedure TestCodegen_IsExpr_PassesTypeInfoLabel;
-    procedure TestCodegen_AsExpr_CallsIsInstance;
-    procedure TestCodegen_AsExpr_CallsRaiseOnFail;
 
     { ------------------------------------------------------------------ }
     { ClassType / TClass intrinsic                                         }
@@ -74,7 +65,6 @@ type
     procedure TestSemantic_ClassType_OK;
     procedure TestSemantic_ClassType_ResolvesToPointer;
     procedure TestSemantic_TClass_AliasIsPointer;
-    procedure TestCodegen_ClassType_LoadsTypeInfo;
   end;
 
 implementation
@@ -97,26 +87,6 @@ const
         begin
           A := TAnimal.Create();
           R := A is TAnimal
-        end.
-        ''';
-
-  SrcInherit =
-    '''
-        program P;
-        type
-          TAnimal = class
-            procedure Speak; virtual; begin end;
-          end;
-          TDog = class(TAnimal)
-            procedure Speak; override; begin end;
-          end;
-        var A: TAnimal;
-            D: TDog;
-            R: Boolean;
-        begin
-          D := TDog.Create();
-          A := D;
-          R := A is TDog
         end.
         ''';
 
@@ -163,23 +133,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TTypeTestTests.GenIR(const ASrc: string): string;
-var Prog: TProgram; CG: TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -330,82 +283,6 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
-{ Codegen — typeinfo data sections                                     }
-{ ------------------------------------------------------------------ }
-
-procedure TTypeTestTests.TestCodegen_TypeInfo_Emitted;
-var IR: string;
-begin
-  IR := GenIR(SrcBase);
-  AssertTrue('typeinfo data section emitted',
-    Pos('data $typeinfo_TAnimal', IR) > 0);
-end;
-
-procedure TTypeTestTests.TestCodegen_TypeInfo_ParentPtr_IsTObject_ForImplicitRoot;
-var IR: string;
-begin
-  { A class with no explicit parent implicitly inherits from TObject, so its
-    typeinfo parent pointer must reference $typeinfo_TObject, not zero. }
-  IR := GenIR(SrcBase);
-  AssertTrue('implicit-TObject typeinfo has TObject parent ptr',
-    Pos('$typeinfo_TAnimal = { l $typeinfo_TObject, l 0, l $__cn_TAnimal + 12, l 0,', IR) > 0);
-end;
-
-procedure TTypeTestTests.TestCodegen_TypeInfo_ParentPtr_ForDerived;
-var IR: string;
-begin
-  { Derived class typeinfo: parent=$typeinfo_TAnimal, impllist=0,
-    nameptr=&ClassName, methods=0, then size/cleanup/vtable. }
-  IR := GenIR(SrcInherit);
-  AssertTrue('derived typeinfo refs parent',
-    Pos('$typeinfo_TDog = { l $typeinfo_TAnimal, l 0, l $__cn_TDog + 12, l 0,', IR) > 0);
-end;
-
-procedure TTypeTestTests.TestCodegen_Vtable_StartsWithTypeInfo;
-var IR: string;
-begin
-  { Vtable first slot must be the typeinfo pointer }
-  IR := GenIR(SrcBase);
-  AssertTrue('vtable starts with typeinfo',
-    Pos('$vtable_TAnimal = { l $typeinfo_TAnimal', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen — is / as expressions                                        }
-{ ------------------------------------------------------------------ }
-
-procedure TTypeTestTests.TestCodegen_IsExpr_CallsIsInstance;
-var IR: string;
-begin
-  IR := GenIR(SrcBase);
-  AssertTrue('is calls _IsInstance', Pos('call $_IsInstance', IR) > 0);
-end;
-
-procedure TTypeTestTests.TestCodegen_IsExpr_PassesTypeInfoLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcBase);
-  { The call must pass $typeinfo_TAnimal as the target type argument }
-  AssertTrue('is passes typeinfo label',
-    Pos('$typeinfo_TAnimal', IR) > 0);
-end;
-
-procedure TTypeTestTests.TestCodegen_AsExpr_CallsIsInstance;
-var IR: string;
-begin
-  IR := GenIR(SrcAsExpr);
-  AssertTrue('as calls _IsInstance', Pos('call $_IsInstance', IR) > 0);
-end;
-
-procedure TTypeTestTests.TestCodegen_AsExpr_CallsRaiseOnFail;
-var IR: string;
-begin
-  IR := GenIR(SrcAsExpr);
-  AssertTrue('as calls _Raise_InvalidCast on fail',
-    Pos('call $_Raise_InvalidCast', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
 { ClassType / TClass intrinsic                                         }
 { ------------------------------------------------------------------ }
 
@@ -459,17 +336,6 @@ begin
         begin C := nil end.
         ''');
   P.Free();
-end;
-
-procedure TTypeTestTests.TestCodegen_ClassType_LoadsTypeInfo;
-var IR: string;
-begin
-  IR := GenIR(SrcClassType);
-  { Two indirections: instance → vtable → typeinfo.  We don't pin
-    the exact temp numbers but we can assert the access path is
-    actually emitted (loadl appearing in the assignment). }
-  AssertTrue('codegen emits loadl chain for ClassType',
-    Pos('loadl', IR) > 0);
 end;
 
 initialization

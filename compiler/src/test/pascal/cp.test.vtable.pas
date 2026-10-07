@@ -12,14 +12,12 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TVTableTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
-    function IRContains(const AIR, AFragment: string): Boolean;
     procedure AnalyseExpectOK(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -44,23 +42,15 @@ type
     { ------------------------------------------------------------------ }
     { Code generation — vtable data                                        }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_VTableData_Emitted;
-    procedure TestCodegen_VTable_ContainsMethodPtr;
-    procedure TestCodegen_VTable_Subclass_OverridesEntry;
-    procedure TestCodegen_VTable_Subclass_InheritsParentEntry;
 
     { ------------------------------------------------------------------ }
     { Code generation — object layout                                      }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_Constructor_StoresVTablePtr;
     procedure TestCodegen_MallocSize_IncludesVPtr;
-    procedure TestCodegen_FieldOffset_ShiftedByEight;
 
     { ------------------------------------------------------------------ }
     { Code generation — dispatch                                           }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_VirtualCall_IsIndirect;
-    procedure TestCodegen_StaticMethod_IsDirectCall;
 
     { ------------------------------------------------------------------ }
     { Abstract methods                                                     }
@@ -71,15 +61,11 @@ type
     procedure TestSemantic_AbstractMethod_NoBody_OK;
     procedure TestSemantic_ConcreteSubclass_OK;
     procedure TestSemantic_ConcreteSubclass_MissingOverride_Error;
-    procedure TestCodegen_AbstractMethod_StubInVTable;
-    procedure TestCodegen_AbstractClass_VTableHasStub;
-    procedure TestCodegen_ConcreteSubclass_OverridesAbstract;
     { Abstract class that also declares an interface — itab slots for
       the abstract methods must reference $_AbstractMethodError so the
       IR links even though the methods have no body on the abstract
       class.  The class is never instantiated, so the stub is
       statically unreachable. }
-    procedure TestCodegen_AbstractClassWithInterface_ItabHasStub;
   end;
 
 implementation
@@ -123,34 +109,6 @@ const
         end.
         ''';
 
-  SrcStaticMethod =
-    '''
-        program Prg;
-        type
-          TFoo = class
-            procedure Bar; begin end;
-          end;
-        var F: TFoo;
-        begin
-          F := TFoo.Create();
-          F.Bar()
-        end.
-        ''';
-
-  SrcVirtualCall =
-    '''
-        program Prg;
-        type
-          TAnimal = class
-            procedure Speak; virtual; begin end;
-          end;
-        var A: TAnimal;
-        begin
-          A := TAnimal.Create();
-          A.Speak()
-        end.
-        ''';
-
 function TVTableTests.ParseSrc(const ASrc: string): TProgram;
 var
   L: TLexer;
@@ -161,40 +119,6 @@ begin
   Result := P.Parse();
   P.Free();
   L.Free();
-end;
-
-function TVTableTests.GenIR(const ASrc: string): string;
-var
-  L:  TLexer;
-  P:  TParser;
-  Pr: TProgram;
-  A:  TSemanticAnalyser;
-  CG: TCodeGenQBE;
-begin
-  L  := TLexer.Create(ASrc);
-  P  := TParser.Create(L);
-  Pr := P.Parse();
-  A  := TSemanticAnalyser.Create();
-  try
-    A.Analyse(Pr);
-  finally
-    A.Free();
-  end;
-  CG := TCodeGenQBE.Create();
-  try
-    CG.Generate(Pr);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Pr.Free();
-    P.Free();
-    L.Free();
-  end;
-end;
-
-function TVTableTests.IRContains(const AIR, AFragment: string): Boolean;
-begin
-  Result := Pos(AFragment, AIR) > 0;
 end;
 
 procedure TVTableTests.AnalyseExpectOK(const ASrc: string);
@@ -363,120 +287,16 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
-{ Code generation — vtable data                                        }
-{ ------------------------------------------------------------------ }
-
-procedure TVTableTests.TestCodegen_VTableData_Emitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcBase);
-  AssertTrue('vtable data section exists',
-    IRContains(IR, 'data $vtable_TAnimal'));
-end;
-
-procedure TVTableTests.TestCodegen_VTable_ContainsMethodPtr;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcBase);
-  AssertTrue('vtable contains method pointer',
-    IRContains(IR, '$TAnimal_Speak'));
-end;
-
-procedure TVTableTests.TestCodegen_VTable_Subclass_OverridesEntry;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcInherit);
-  AssertTrue('subclass vtable has overriding method',
-    IRContains(IR, '$TDog_Speak'));
-  AssertTrue('subclass vtable data section exists',
-    IRContains(IR, 'data $vtable_TDog'));
-end;
-
-procedure TVTableTests.TestCodegen_VTable_Subclass_InheritsParentEntry;
-var
-  SrcWith2Virtuals: string;
-  IR: string;
-begin
-  SrcWith2Virtuals :=
-    '''
-        program Prg;
-        type
-          TAnimal = class
-            procedure Speak; virtual; begin end;
-            procedure Move; virtual; begin end;
-          end;
-          TDog = class(TAnimal)
-            procedure Speak; override; begin end;
-          end;
-        begin end.
-        ''';
-  IR := GenIR(SrcWith2Virtuals);
-  AssertTrue('subclass vtable inherits parent Move method',
-    IRContains(IR, '$TAnimal_Move'));
-end;
-
-{ ------------------------------------------------------------------ }
 { Code generation — object layout                                      }
 { ------------------------------------------------------------------ }
 
-procedure TVTableTests.TestCodegen_Constructor_StoresVTablePtr;
-var
-  IR: string;
-begin
-  { SrcVirtualCall constructs TAnimal.Create — vtable ptr must be stored }
-  IR := GenIR(SrcVirtualCall);
-  AssertTrue('constructor stores vtable ptr',
-    IRContains(IR, 'storel $vtable_TAnimal'));
-end;
-
 procedure TVTableTests.TestCodegen_MallocSize_IncludesVPtr;
-var
-  IR: string;
 begin
   { TPoint has one Integer field (4 bytes) + vptr (8 bytes) = 12 bytes.
-    _ClassAlloc receives TotalSize and a cleanup-fn pointer; the hidden
-    refcount header is added internally and does not appear in the size. }
-  IR := GenIR(SrcBaseWithField);
-  AssertTrue('_ClassAlloc includes vptr size',
-    IRContains(IR, 'call $_ClassAlloc(l 12, l $_FieldCleanup_'));
-end;
-
-procedure TVTableTests.TestCodegen_FieldOffset_ShiftedByEight;
-var
-  IR: string;
-begin
-  { With vptr at offset 0, first field is at offset 8 not 0 }
-  IR := GenIR(SrcBaseWithField);
-  AssertTrue('field offset is 8 (after vptr)',
-    IRContains(IR, ', 8'));
-end;
-
-{ ------------------------------------------------------------------ }
-{ Code generation — dispatch                                           }
-{ ------------------------------------------------------------------ }
-
-procedure TVTableTests.TestCodegen_VirtualCall_IsIndirect;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcVirtualCall);
-  { Virtual dispatch loads function pointer from vtable and calls via register }
-  AssertTrue('virtual call loads vtable',
-    IRContains(IR, 'loadl'));
-  AssertTrue('virtual call is indirect (call via temp)',
-    IRContains(IR, 'call %'));
-end;
-
-procedure TVTableTests.TestCodegen_StaticMethod_IsDirectCall;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcStaticMethod);
-  AssertTrue('static method call is direct',
-    IRContains(IR, 'call $TFoo_Bar'));
+    _ClassAlloc receives TotalSize; the hidden refcount header is added
+    internally and does not appear in the size. }
+  AssertEquals('_ClassAlloc includes the vptr', '',
+    AsmMissing(SrcBaseWithField, 'movq $12, %rdi', 'movz x0, #12'));
 end;
 
 { ------------------------------------------------------------------ }
@@ -648,85 +468,6 @@ begin
     A.Free(); Pr.Free(); P.Free(); L.Free();
   end;
   AssertTrue('missing override of abstract raises error', GotError);
-end;
-
-procedure TVTableTests.TestCodegen_AbstractMethod_StubInVTable;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program Prg;
-    type
-      TShape = class
-        procedure Draw; virtual; abstract;
-      end;
-    begin end.
-    ''');
-  AssertTrue('IR non-empty', IR <> '');
-  { Abstract method vtable slot must reference the runtime abort stub
-    ($_AbstractMethodError, defined in blaise_arc.pas), not a real body }
-  AssertTrue('abstract stub in IR', IRContains(IR, '_AbstractMethodError'));
-end;
-
-procedure TVTableTests.TestCodegen_AbstractClass_VTableHasStub;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program Prg;
-    type
-      TBase = class
-        procedure Foo; virtual; abstract;
-        procedure Bar; virtual; abstract;
-      end;
-    begin end.
-    ''');
-  AssertTrue('IR non-empty', IR <> '');
-  AssertTrue('vtable emitted', IRContains(IR, 'vtable_TBase'));
-  AssertTrue('abstract stub present', IRContains(IR, '_AbstractMethodError'));
-end;
-
-procedure TVTableTests.TestCodegen_ConcreteSubclass_OverridesAbstract;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program Prg;
-    type
-      TShape = class
-        procedure Draw; virtual; abstract;
-      end;
-      TCircle = class(TShape)
-        procedure Draw; override; begin end;
-      end;
-    begin end.
-    ''');
-  AssertTrue('IR non-empty', IR <> '');
-  { TCircle vtable should point to TCircle_Draw, not the abstract stub }
-  AssertTrue('TCircle_Draw in IR', IRContains(IR, 'TCircle_Draw'));
-  AssertTrue('TCircle vtable in IR', IRContains(IR, 'vtable_TCircle'));
-end;
-
-procedure TVTableTests.TestCodegen_AbstractClassWithInterface_ItabHasStub;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program Prg;
-    type
-      IShape = interface
-        procedure Draw;
-      end;
-      TShape = class(TObject, IShape)
-        procedure Draw; virtual; abstract;
-      end;
-    begin end.
-    ''');
-  AssertTrue('IR non-empty', IR <> '');
-  AssertTrue('TShape itab emitted', IRContains(IR, 'itab_TShape_IShape'));
-  { The itab slot for Draw must reference the runtime stub, not the
-    nonexistent TShape_Draw symbol. }
-  AssertTrue('itab references stub', IRContains(IR, '_AbstractMethodError'));
 end;
 
 initialization

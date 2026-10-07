@@ -25,6 +25,10 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_VTable_OverrideInheritStaticAbstract;
+    procedure TestRun_Inheritance_FieldsInheritedInheritsFromNil;
+    procedure TestRun_Overloads_PickTheRightBody;
+    procedure TestRun_TypeTests_IsAsClassType;
     procedure TestRun_ThreeLevelVirtualOverride;
     procedure TestRun_InheritedInOverride;
     procedure TestRun_CtorChainInherited;
@@ -366,6 +370,321 @@ procedure TE2EInheritTests.TestRun_OverloadMergeAcrossInheritance;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcOverloadMerge, 'str:a' + LE + 'int:5' + LE, 0);
+end;
+
+procedure TE2EInheritTests.TestRun_TypeTests_IsAsClassType;
+const
+  {
+    Run-time type tests walk the typeinfo parent chain, whose root for a class
+    with no declared parent is TObject: `is` against the class, an ancestor,
+    TObject and an unrelated class; `as` succeeding;
+    ClassType returning the instance's own typeinfo. }
+  Src = '''
+    program TypeTests;
+    type
+      TAnimal = class
+        procedure Speak; virtual; begin WriteLn('...') end;
+      end;
+      TDog = class(TAnimal)
+        procedure Speak; override; begin WriteLn('woof') end;
+      end;
+      TCat = class(TAnimal) end;
+    var
+      A: TAnimal;
+      D: TDog;
+    begin
+      A := TDog.Create();
+      WriteLn(A is TDog, ' ', A is TAnimal, ' ', A is TObject, ' ', A is TCat);
+      D := A as TDog;
+      D.Speak();
+      WriteLn(A.ClassType = TDog, ' ', A.ClassType = TAnimal);
+      A := TCat.Create();
+      WriteLn(A is TDog, ' ', A is TAnimal, ' ', A.ClassType = TCat)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'True True True False' + LE +
+    'woof' + LE +
+    'True False' + LE +
+    'False True True' + LE, 0);
+end;
+
+procedure TE2EInheritTests.TestRun_Overloads_PickTheRightBody;
+const
+  {
+    Overload resolution, visible as which body runs: by arity, by parameter
+    type, an exact match beating a widening one, a widening match used when it
+    is the only one, class methods, virtual overloads dispatching to the
+    override with the matching signature (each signature its own vtable slot),
+    an overloaded method called through a field in expression context (it once
+    picked the 4-parameter overload), and overloaded constructors by arity. }
+  Src = '''
+    program Overloads;
+    type
+      TFoo = class
+        FA: Integer;
+        procedure Show(N: Integer); overload;
+        procedure Show(S: string); overload;
+        constructor Create(A: Integer; B: Integer); overload;
+        constructor Create(A: Integer); overload;
+      end;
+      TBase = class
+        procedure Greet(N: Integer); overload; virtual;
+        procedure Greet(S: string); overload; virtual;
+      end;
+      TChild = class(TBase)
+        procedure Greet(N: Integer); overload; override;
+        procedure Greet(S: string); overload; override;
+      end;
+      THelper = class
+        function Run(const S: string; out R: string; out N: Integer;
+                     const Args: array of string): Boolean; overload;
+        function Run(const S: string; out R: string;
+                     out N: Integer): Boolean; overload;
+      end;
+      TOwner = class
+        FHelper: THelper;
+        procedure DoIt;
+      end;
+    procedure Greet; overload;
+    begin WriteLn('hello') end;
+    procedure Greet(N: Integer); overload;
+    begin WriteLn('greet ', N) end;
+    procedure F(N: Integer); overload;
+    begin WriteLn('F int ', N) end;
+    procedure F(D: Double); overload;
+    begin WriteLn('F double') end;
+    procedure G(D: Double); overload;
+    begin WriteLn('G double') end;
+    procedure TFoo.Show(N: Integer);
+    begin WriteLn('show int ', N) end;
+    procedure TFoo.Show(S: string);
+    begin WriteLn('show str ', S) end;
+    constructor TFoo.Create(A: Integer; B: Integer);
+    begin FA := A + B end;
+    constructor TFoo.Create(A: Integer);
+    begin FA := -A end;
+    procedure TBase.Greet(N: Integer);
+    begin WriteLn('base int ', N) end;
+    procedure TBase.Greet(S: string);
+    begin WriteLn('base str ', S) end;
+    procedure TChild.Greet(N: Integer);
+    begin WriteLn('child int ', N) end;
+    procedure TChild.Greet(S: string);
+    begin WriteLn('child str ', S) end;
+    function THelper.Run(const S: string; out R: string; out N: Integer;
+                         const Args: array of string): Boolean;
+    begin R := 'with-args'; N := 1; Result := True end;
+    function THelper.Run(const S: string; out R: string;
+                         out N: Integer): Boolean;
+    begin R := 'no-args'; N := 0; Result := True end;
+    procedure TOwner.DoIt;
+    var S: string; N: Integer; Ok: Boolean;
+    begin
+      Ok := FHelper.Run('x', S, N);
+      WriteLn(S, ' ', N, ' ', Ok)
+    end;
+    var
+      Foo: TFoo;
+      B: TBase;
+      O: TOwner;
+    begin
+      Greet();
+      Greet(42);
+      F(42);
+      G(42);
+      Foo := TFoo.Create(5);
+      WriteLn(Foo.FA);
+      Foo := TFoo.Create(5, 6);
+      WriteLn(Foo.FA);
+      Foo.Show(7);
+      Foo.Show('hi');
+      B := TChild.Create();
+      B.Greet(1);
+      B.Greet('x');
+      B := TBase.Create();
+      B.Greet(2);
+      O := TOwner.Create();
+      O.FHelper := THelper.Create();
+      O.DoIt()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'hello' + LE +
+    'greet 42' + LE +
+    'F int 42' + LE +
+    'G double' + LE +
+    '-5' + LE +
+    '11' + LE +
+    'show int 7' + LE +
+    'show str hi' + LE +
+    'child int 1' + LE +
+    'child str x' + LE +
+    'base int 2' + LE +
+    'no-args 0 True' + LE, 0);
+end;
+
+procedure TE2EInheritTests.TestRun_Inheritance_FieldsInheritedInheritsFromNil;
+const
+  {
+    Inheritance at run time: parent and child fields at their own offsets, an
+    inherited method reached through a child instance, `inherited` with and
+    without arguments, InheritsFrom on an instance (both answers) and on a
+    metaclass value, and nil assignment and comparison of a self-referencing
+    class field. }
+  Src = '''
+    program Inherit;
+    type
+      TAnimal = class
+        Age: Integer;
+      end;
+      TDog = class(TAnimal)
+        Legs: Integer;
+      end;
+      TBase = class
+        X: Integer;
+        procedure SetX(V: Integer);
+        procedure Init; virtual;
+      end;
+      TChild = class(TBase)
+        Y: Integer;
+        procedure SetX(V: Integer);
+        procedure Init; override;
+      end;
+      TNode = class
+        Value: Integer;
+        Next: TNode;
+      end;
+      TBaseClass = class of TBase;
+    procedure TBase.SetX(V: Integer);
+    begin Self.X := V end;
+    procedure TBase.Init;
+    begin Self.X := 100 end;
+    procedure TChild.SetX(V: Integer);
+    begin inherited SetX(V * 2) end;
+    procedure TChild.Init;
+    begin
+      inherited Init();
+      Self.Y := 7
+    end;
+    var
+      D: TDog;
+      C: TChild;
+      B: TBase;
+      N: TNode;
+      MC: TBaseClass;
+    begin
+      D := TDog.Create();
+      D.Age := 3;
+      D.Legs := 4;
+      WriteLn(D.Age, ' ', D.Legs);
+      C := TChild.Create();
+      C.Init();
+      WriteLn(C.X, ' ', C.Y);
+      C.SetX(21);
+      WriteLn(C.X);
+      B := C;
+      B.SetX(5);
+      WriteLn(C.X);
+      MC := TChild;
+      WriteLn(C.InheritsFrom(TBase), ' ', D.InheritsFrom(TBase), ' ',
+        MC.InheritsFrom(TBase), ' ', MC.InheritsFrom(TDog));
+      N := TNode.Create();
+      N.Value := 1;
+      N.Next := TNode.Create();
+      WriteLn(N.Next = nil);
+      N.Next := nil;
+      WriteLn(N.Next = nil, ' ', N.Value)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '3 4' + LE +
+    '100 7' + LE +
+    '42' + LE +
+    '5' + LE +
+    'True False True False' + LE +
+    'False' + LE +
+    'True 1' + LE, 0);
+end;
+
+procedure TE2EInheritTests.TestRun_VTable_OverrideInheritStaticAbstract;
+const
+  {
+    Virtual dispatch through the vtable: an override replaces its slot, an
+    inherited virtual keeps the parent's entry, a static (non-virtual) method
+    binds to the declared type, and fields sit after the vtable pointer.  An
+    abstract class -- its abstract slots (and its interface's itab slot) bound
+    to the runtime stub -- still builds, links and dispatches through a concrete
+    subclass, both via the class and via the interface. }
+  Src = '''
+    program VTables;
+    type
+      TAnimal = class
+        Name: string;
+        procedure Speak; virtual;
+        procedure Move; virtual;
+        procedure Describe;
+      end;
+      TDog = class(TAnimal)
+        procedure Speak; override;
+        procedure Describe;
+      end;
+      IShape = interface
+        procedure Draw;
+      end;
+      TShape = class(TObject, IShape)
+        procedure Draw; virtual; abstract;
+        procedure Area; virtual; abstract;
+      end;
+      TCircle = class(TShape)
+        procedure Draw; override;
+        procedure Area; override;
+      end;
+    procedure TAnimal.Speak; begin WriteLn(Name, ': ...') end;
+    procedure TAnimal.Move; begin WriteLn(Name, ' walks') end;
+    procedure TAnimal.Describe; begin WriteLn('an animal') end;
+    procedure TDog.Speak; begin WriteLn(Name, ': woof') end;
+    procedure TDog.Describe; begin WriteLn('a dog') end;
+    procedure TCircle.Draw; begin WriteLn('circle drawn') end;
+    procedure TCircle.Area; begin WriteLn('pi r squared') end;
+    var
+      A: TAnimal;
+      S: TShape;
+      I: IShape;
+    begin
+      A := TDog.Create();
+      A.Name := 'rex';
+      A.Speak();
+      A.Move();
+      A.Describe();
+      TDog(A).Describe();
+      A := TAnimal.Create();
+      A.Name := 'generic';
+      A.Speak();
+      S := TCircle.Create();
+      S.Draw();
+      S.Area();
+      I := TCircle.Create();
+      I.Draw()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'rex: woof' + LE +
+    'rex walks' + LE +
+    'an animal' + LE +
+    'a dog' + LE +
+    'generic: ...' + LE +
+    'circle drawn' + LE +
+    'pi r squared' + LE +
+    'circle drawn' + LE, 0);
 end;
 
 initialization

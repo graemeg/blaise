@@ -14,7 +14,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe, cp.test.harness;
 
 type
   TInheritTests = class(TTestCase)
@@ -33,8 +33,6 @@ type
     procedure TestSemantic_Nil_AssignToClassVar_OK;
     procedure TestSemantic_Nil_AssignToIntVar_RaisesError;
     procedure TestSemantic_Nil_CompareWithClassVar_OK;
-    procedure TestCodegen_Nil_StoresZero;
-    procedure TestCodegen_Nil_CompareEmitsCeql;
     procedure TestCodegen_MethodCall_NilGuard_EmitsCheckNil;
 
     { ------------------------------------------------------------------ }
@@ -51,15 +49,12 @@ type
     procedure TestSemantic_Inherit_ChildFieldVisible;
     procedure TestSemantic_Inherit_TotalSizeIncludesParent;
     procedure TestCodegen_Inherit_Create_AllocatesTotalSize;
-    procedure TestCodegen_Inherit_ParentFieldOffset;
-    procedure TestCodegen_Inherit_ChildFieldOffset;
 
     { ------------------------------------------------------------------ }
     { Class inheritance — methods                                          }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_Inherit_MethodCallOnChild_Resolves;
     procedure TestSemantic_Inherit_UnknownMethod_RaisesError;
-    procedure TestCodegen_Inherit_MethodCallUsesParentFunctionName;
 
     { ------------------------------------------------------------------ }
     { 'inherited' keyword                                                  }
@@ -68,8 +63,6 @@ type
     procedure TestParse_Inherited_NoArgs_CreatesNode;
     procedure TestSemantic_Inherited_NoArgs_OK;
     procedure TestSemantic_Inherited_WithArgs_OK;
-    procedure TestCodegen_Inherited_NoArgs_CallsParentMethod;
-    procedure TestCodegen_Inherited_WithArgs_ForwardsArgs;
 
     { Mandatory parentheses: a bare 'inherited Method' (no parens) is a
       call and must carry (), in both statement and expression position. }
@@ -82,8 +75,6 @@ type
     procedure TestSemantic_InheritsFrom_OnPointerVar_OK;
     procedure TestSemantic_InheritsFrom_OnClassInstance_OK;
     procedure TestSemantic_InheritsFrom_ReturnsBoolean;
-    procedure TestCodegen_InheritsFrom_CallsRTL;
-    procedure TestCodegen_InheritsFrom_OnClassInstance_LoadsTypeinfo;
   end;
 
 implementation
@@ -164,22 +155,6 @@ end;
 { ------------------------------------------------------------------ }
 
 const
-  SrcNilAssign =
-    'program P;' + #10 +
-    'var C: TNode;'       + #10 +  { forward ref — TNode defined after }
-    '''
-        type
-          TNode = class
-            Value: Integer;
-            Next:  TNode;
-          end;
-        var N: TNode;
-        begin
-          N := TNode.Create();
-          N.Next := nil
-        end.
-        ''';
-
   SrcSelfRef =
     '''
         program P;
@@ -302,36 +277,8 @@ begin
         ''').Free();
 end;
 
-procedure TInheritTests.TestCodegen_Nil_StoresZero;
-var IR: string;
-begin
-  IR := GenIR(SrcSelfRef);
-  { N is a data-section global; N.Next := nil loads 0 and stores via a temp.
-    Verify the nil load and that the global $N is present. }
-  AssertTrue('nil stores 0', Pos('copy 0', IR) > 0);
-end;
-
-procedure TInheritTests.TestCodegen_Nil_CompareEmitsCeql;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TFoo = class
-            X: Integer;
-          end;
-        var F: TFoo;
-        var N: Integer;
-        begin
-          F := TFoo.Create();
-          if F = nil then
-            N := 0
-        end.
-        ''');
-  AssertTrue('ceql for pointer comparison', Pos('ceql', IR) > 0);
-end;
-
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TInheritTests.TestCodegen_MethodCall_NilGuard_EmitsCheckNil;
 var IR: string;
 begin
@@ -381,14 +328,13 @@ begin
 end;
 
 procedure TInheritTests.TestCodegen_SelfRef_Create_AllocatesCorrectSize;
-var IR: string;
 begin
-  IR := GenIR(SrcSelfRef);
   { TNode: vptr (8) + Integer Value @ 8 + 4-byte pad + TNode pointer @ 16
     = 24 bytes.  The Next pointer must be 8-aligned so the alignment pad
-    sits between Value and Next. }
-  AssertTrue('_ClassAlloc 24 bytes for TNode with cleanup fn',
-    Pos('call $_ClassAlloc(l 24, l $_FieldCleanup_TNode)', IR) > 0);
+    sits between Value and Next.  Too small an allocation corrupts the heap
+    without a reliable symptom, so the size is pinned in the assembly. }
+  AssertEquals('_ClassAlloc of 24 bytes for TNode', '',
+    AsmMissing(SrcSelfRef, 'movq $24, %rdi', 'movz x0, #24'));
 end;
 
 { ------------------------------------------------------------------ }
@@ -425,31 +371,10 @@ begin
 end;
 
 procedure TInheritTests.TestCodegen_Inherit_Create_AllocatesTotalSize;
-var IR: string;
 begin
-  IR := GenIR(SrcInherit);
-  { TDog.Create passes TotalSize (16 bytes: vptr + Age + Legs) to _ClassAlloc
-    along with its per-class field-cleanup function. }
-  AssertTrue('_ClassAlloc 16 bytes for TDog with cleanup fn',
-    Pos('call $_ClassAlloc(l 16, l $_FieldCleanup_TDog)', IR) > 0);
-end;
-
-procedure TInheritTests.TestCodegen_Inherit_ParentFieldOffset;
-var IR: string;
-begin
-  IR := GenIR(SrcInherit);
-  { Age is at offset 8 in TDog (after 8-byte vptr); storew appears in the IR. }
-  AssertTrue('Age field storew present',
-    Pos('storew', IR) > 0);
-end;
-
-procedure TInheritTests.TestCodegen_Inherit_ChildFieldOffset;
-var IR: string;
-begin
-  IR := GenIR(SrcInherit);
-  { Legs is at offset 12 in TDog (8 vptr + 4 Age) — codegen emits an add 12 }
-  AssertTrue('Legs field at offset 12 (add 12)',
-    Pos(', 12', IR) > 0);
+  { TDog.Create allocates TotalSize: vptr + Age + Legs = 16 bytes }
+  AssertEquals('_ClassAlloc of 16 bytes for TDog', '',
+    AsmMissing(SrcInherit, 'movq $16, %rdi', 'movz x0, #16'));
 end;
 
 { ------------------------------------------------------------------ }
@@ -480,17 +405,6 @@ begin
           C.NoSuchMethod()
         end.
         ''');
-end;
-
-procedure TInheritTests.TestCodegen_Inherit_MethodCallUsesParentFunctionName;
-var IR: string;
-begin
-  IR := GenIR(SrcInheritMethod);
-  { C.SetX(10) must call $TBase_SetX, not $TChild_SetX }
-  AssertTrue('call $TBase_SetX for inherited method',
-    Pos('call $TBase_SetX', IR) > 0);
-  AssertFalse('no $TChild_SetX emitted',
-    Pos('$TChild_SetX', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -588,20 +502,6 @@ end;
 procedure TInheritTests.TestSemantic_Inherited_WithArgs_OK;
 begin
   AnalyseSrc(SrcInheritedWithArgs).Free();
-end;
-
-procedure TInheritTests.TestCodegen_Inherited_NoArgs_CallsParentMethod;
-var IR: string;
-begin
-  IR := GenIR(SrcInheritedNoArgs);
-  AssertTrue('call $TBase_Init in IR', Pos('call $TBase_Init', IR) > 0);
-end;
-
-procedure TInheritTests.TestCodegen_Inherited_WithArgs_ForwardsArgs;
-var IR: string;
-begin
-  IR := GenIR(SrcInheritedWithArgs);
-  AssertTrue('call $TBase_SetX in IR', Pos('call $TBase_SetX', IR) > 0);
 end;
 
 procedure TInheritTests.TestParse_Inherited_BareStmt_RequiresParens;
@@ -708,21 +608,6 @@ begin
   finally
     Prog.Free();
   end;
-end;
-
-procedure TInheritTests.TestCodegen_InheritsFrom_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR(SrcInheritsFromPointer);
-  AssertTrue('call $_InheritsFrom in IR', Pos('call $_InheritsFrom', IR) > 0);
-end;
-
-procedure TInheritTests.TestCodegen_InheritsFrom_OnClassInstance_LoadsTypeinfo;
-var IR: string;
-begin
-  IR := GenIR(SrcInheritsFromClassInstance);
-  AssertTrue('call $_InheritsFrom in IR', Pos('call $_InheritsFrom', IR) > 0);
-  AssertTrue('$typeinfo_TBase as arg', Pos('$typeinfo_TBase', IR) > 0);
 end;
 
 initialization
