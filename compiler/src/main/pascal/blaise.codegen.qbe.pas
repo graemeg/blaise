@@ -14614,6 +14614,12 @@ begin
       QType := 'w';
     T := AllocTemp();
     EmitLine(Format('  %s =%s call %s(%s)', [T, QType, FPtrTemp, ArgLine]));
+    { a 'reference to' value returned by a CALL carries the callee's +1 on
+      its Env -- drop it now the call is done (MakeAdder(1)(41)) }
+    if TProceduralTypeDesc(TIndirectFuncCallExpr(AExpr).ResolvedProcType).IsReference and
+       ((TIndirectFuncCallExpr(AExpr).CalleeExpr is TFuncCallExpr) or
+        (TIndirectFuncCallExpr(AExpr).CalleeExpr is TMethodCallExpr)) then
+      EmitLine(Format('  call $_ClassRelease(l %s)', [ArgTemp]));
     Result := T;
   end
   else if AExpr is TIntLiteral then

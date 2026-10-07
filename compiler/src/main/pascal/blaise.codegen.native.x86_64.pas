@@ -10956,6 +10956,23 @@ begin
       Self.EmitMethodPtrCall('(%rbx)',
         TProceduralTypeDesc(TIndirectFuncCallExpr(AExpr).ResolvedProcType),
         TIndirectFuncCallExpr(AExpr).Args);
+      { a 'reference to' value returned by a CALL carries the callee's +1 on
+        its Env -- drop it now the call is done, keeping the result in
+        %rax / %xmm0 (MakeAdder(1)(41), Obj.Make(7)(6)) }
+      if TProceduralTypeDesc(
+           TIndirectFuncCallExpr(AExpr).ResolvedProcType).IsReference and
+         ((TIndirectFuncCallExpr(AExpr).CalleeExpr is TFuncCallExpr) or
+          (TIndirectFuncCallExpr(AExpr).CalleeExpr is TMethodCallExpr)) then
+      begin
+        Self.Emit(#9'pushq %rax');
+        Self.Emit(#9'subq $8, %rsp');
+        Self.Emit(#9'movsd %xmm0, (%rsp)');
+        Self.Emit(#9'movq 8(%rbx), %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+        Self.Emit(#9'movsd (%rsp), %xmm0');
+        Self.Emit(#9'addq $8, %rsp');
+        Self.Emit(#9'popq %rax');
+      end;
       Self.Emit(#9'addq $16, %rsp');
       Self.Emit(#9'popq %rbx');
       Exit;
