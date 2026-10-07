@@ -283,6 +283,7 @@ type
     procedure EmitParenlessCtor(AFA: TFieldAccessExpr);
     procedure EmitSetIncludeExclude(ACall: TProcCall; AInclude: Boolean);
     procedure EmitFatFieldStoreStacked(AFld: TFieldInfo; AValueExpr: TASTExpr);
+    function  EmitClosureResultToTemp(AExpr: TASTExpr; out ATmp: string): Boolean;
     function  EmitClosureResultCall(ACallDecl: TMethodDecl; const AName: string;
       AArgs: TObjectList): string;
     procedure EmitEnvPrologue(ADecl: TMethodDecl);
@@ -2119,67 +2120,11 @@ begin
       EmitCallSym('_ClassAddRef');
     Exit;
   end;
-  if (AAsgn.Expr is TFuncCallExpr) and
-     (TFuncCallExpr(AAsgn.Expr).ResolvedDecl is TMethodDecl) and
-     not TFuncCallExpr(AAsgn.Expr).IsIndirectCall and
-     not TFuncCallExpr(AAsgn.Expr).IsImplicitSelfMethod and
-     (TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl).OwnerTypeName = '') and
-     IsMethodPtrType(TMethodDecl(
-       TFuncCallExpr(AAsgn.Expr).ResolvedDecl).ResolvedReturnType) then
+  if EmitClosureResultToTemp(AAsgn.Expr, Tmp) then
   begin
-    { F := MakeClosure(...): the callee fills a fresh scratch through x8 and
-      hands over its Env reference, so the old Env is released and the pair
-      moved in WITHOUT a retain }
-    Tmp := EmitClosureResultCall(
-      TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl),
-      TFuncCallExpr(AAsgn.Expr).Name, TFuncCallExpr(AAsgn.Expr).Args);
-    if IsRef then
-    begin
-      EmitSlotAddr('x9', AAsgn.Name);
-      Self.Emit(#9'ldr x0, [x9, #8]');
-      EmitCallSym('_ClassRelease');
-    end;
-    EmitSlotAddr('x1', Tmp);
-    Self.Emit(#9'ldp x9, x10, [x1]');
-    EmitSlotAddr('x1', AAsgn.Name);
-    Self.Emit(#9'stp x9, x10, [x1]');
-    Exit;
-  end;
-  if (AAsgn.Expr is TMethodCallExpr) and
-     (TMethodCallExpr(AAsgn.Expr).ResolvedMethod is TMethodDecl) and
-     not TMethodCallExpr(AAsgn.Expr).IsConstructorCall and
-     not TMethodCallExpr(AAsgn.Expr).IsStaticCall and
-     not TMethodCallExpr(AAsgn.Expr).IsProcFieldCall and
-     not TMethodCallExpr(AAsgn.Expr).IsMetaclassDispatch and
-     not TMethodDecl(TMethodCallExpr(AAsgn.Expr).ResolvedMethod).IsRecordMethod and
-     IsMethodPtrType(TMethodDecl(
-       TMethodCallExpr(AAsgn.Expr).ResolvedMethod).ResolvedReturnType) then
-  begin
-    { F := Obj.MakeClosure(...): as for a plain factory call, the callee
-      fills a fresh scratch through x8 and hands over its Env reference; the
-      receiver is pushed for EmitCall to pop into x0 (virtual dispatch keys
-      on the method's VTableSlot) }
-    MD := TMethodDecl(TMethodCallExpr(AAsgn.Expr).ResolvedMethod);
-    if TMethodCallExpr(AAsgn.Expr).ObjExpr <> nil then
-    begin
-      if ArcExprOwnsRef(TMethodCallExpr(AAsgn.Expr).ObjExpr) then
-        NotYet('closure-returning call on an owned transient receiver', AAsgn);
-      Self.EmitExprToX0(TMethodCallExpr(AAsgn.Expr).ObjExpr);
-    end
-    else if not EmitCapturedBase('x0', TMethodCallExpr(AAsgn.Expr).ObjectName,
-              True, TMethodCallExpr(AAsgn.Expr).IsVarParam) then
-    begin
-      EmitLoadSlot('x0', TMethodCallExpr(AAsgn.Expr).ObjectName);
-      if TMethodCallExpr(AAsgn.Expr).IsVarParam then
-        Self.Emit(#9'ldr x0, [x0]');
-    end;
-    EmitPushX0();
-    Tmp := '__fret_' + IntToStr(FFretN);
-    FFretN := FFretN + 1;
-    if not FFrame.ContainsKey(Tmp) then
-      AddLocal(Tmp, 16);
-    EmitCall(MD, TMethodCallExpr(AAsgn.Expr).Name,
-      TMethodCallExpr(AAsgn.Expr).Args, Tmp, True, MD.VTableSlot);
+    { F := MakeClosure(...) / F := Obj.MakeClosure(...): the callee filled a
+      fresh scratch through x8 and handed over its Env reference, so the old
+      Env is released and the pair moved in WITHOUT a retain }
     if IsRef then
     begin
       EmitSlotAddr('x9', AAsgn.Name);
@@ -2193,6 +2138,63 @@ begin
     Exit;
   end;
   NotYet('closure / method-pointer assignment from this expression', AAsgn);
+end;
+
+function TArm64Backend.EmitClosureResultToTemp(AExpr: TASTExpr;
+  out ATmp: string): Boolean;
+var
+  MC: TMethodCallExpr;
+  MD: TMethodDecl;
+begin
+  { A call that RETURNS a closure / method pointer, lowered into a fresh
+    16-byte frame scratch (named in ATmp) that holds the callee's +1 on the
+    Env.  The caller moves the pair into its destination without a retain.
+    False when AExpr is not one of the call forms handled here. }
+  Result := False;
+  ATmp := '';
+  if (AExpr is TFuncCallExpr) and
+     (TFuncCallExpr(AExpr).ResolvedDecl is TMethodDecl) and
+     not TFuncCallExpr(AExpr).IsIndirectCall and
+     not TFuncCallExpr(AExpr).IsImplicitSelfMethod and
+     (TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).OwnerTypeName = '') and
+     IsMethodPtrType(TMethodDecl(
+       TFuncCallExpr(AExpr).ResolvedDecl).ResolvedReturnType) then
+  begin
+    ATmp := EmitClosureResultCall(TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl),
+      TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args);
+    Result := True;
+    Exit;
+  end;
+  if not (AExpr is TMethodCallExpr) then
+    Exit;
+  MC := TMethodCallExpr(AExpr);
+  if not (MC.ResolvedMethod is TMethodDecl) or MC.IsConstructorCall or
+     MC.IsStaticCall or MC.IsProcFieldCall or MC.IsMetaclassDispatch or
+     TMethodDecl(MC.ResolvedMethod).IsRecordMethod or
+     not IsMethodPtrType(TMethodDecl(MC.ResolvedMethod).ResolvedReturnType) then
+    Exit;
+  { the receiver is pushed for EmitCall to pop into x0 (virtual dispatch
+    keys on the method's VTableSlot) }
+  MD := TMethodDecl(MC.ResolvedMethod);
+  if MC.ObjExpr <> nil then
+  begin
+    if ArcExprOwnsRef(MC.ObjExpr) then
+      NotYet('closure-returning call on an owned transient receiver', AExpr);
+    Self.EmitExprToX0(MC.ObjExpr);
+  end
+  else if not EmitCapturedBase('x0', MC.ObjectName, True, MC.IsVarParam) then
+  begin
+    EmitLoadSlot('x0', MC.ObjectName);
+    if MC.IsVarParam then
+      Self.Emit(#9'ldr x0, [x0]');
+  end;
+  EmitPushX0();
+  ATmp := '__fret_' + IntToStr(FFretN);
+  FFretN := FFretN + 1;
+  if not FFrame.ContainsKey(ATmp) then
+    AddLocal(ATmp, 16);
+  EmitCall(MD, MC.Name, MC.Args, ATmp, True, MD.VTableSlot);
+  Result := True;
 end;
 
 function TArm64Backend.EmitClosureResultCall(ACallDecl: TMethodDecl;
@@ -2580,6 +2582,7 @@ var
   FAE: TFieldAccessExpr;
   MD: TMethodDecl;
   SrcAddr: TAddrOfExpr;
+  Tmp: string;
 begin
   { A closure / method-pointer FIELD (16 bytes: Code, Env) at AFld.Offset of
     the instance whose address is on TOP of the stack (consumed).  The value
@@ -2640,6 +2643,25 @@ begin
     Self.Emit(#9'stp x1, x0, [x9]');             { Code, receiver }
     if IsRef then
       EmitCallSym('_ClassAddRef');               { x0 = receiver }
+    Exit;
+  end;
+  if EmitClosureResultToTemp(AValueExpr, Tmp) then
+  begin
+    { Field := MakeClosure(...) / Obj.MakeClosure(...): the scratch already
+      owns the callee's Env reference, so the old Env is released and the
+      pair moved in WITHOUT a retain }
+    if IsRef then
+    begin
+      Self.Emit(#9'ldr x9, [sp]');
+      EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');              { the old Env }
+    end;
+    EmitSlotAddr('x1', Tmp);
+    Self.Emit(#9'ldp x10, x11, [x1]');
+    Self.Emit(#9'ldr x9, [sp], #16');            { pop the base }
+    EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
+    Self.Emit(#9'stp x10, x11, [x9]');
     Exit;
   end;
   if AValueExpr is TAnonMethodExpr then
@@ -2797,8 +2819,29 @@ begin
   if PT = nil then
     NotYet('indirect call without a resolved procedural type', AExpr);
   if IsMethodPtrType(PT) then
-    NotYet('call through a closure / method pointer an expression yields',
-      AExpr);
+  begin
+    { MakeClosure()(args) / Obj.GetFn()(args): the callee value lands in a
+      +1 scratch; a 'reference to' Env is dropped after the call, with the
+      result registers (x0 / d0) preserved across the release }
+    if not EmitClosureResultToTemp(AExpr.CalleeExpr, Slot) then
+      NotYet('call through a closure / method pointer an expression yields',
+        AExpr);
+    if (AExpr.ResolvedType <> nil) and IsAggregateReturn(AExpr.ResolvedType) then
+      NotYet('aggregate-returning indirect call', AExpr);
+    EmitSlotAddr('x9', Slot);
+    EmitFatPtrCall('x9', PT, AExpr.Args, True);
+    if PT.IsReference then
+    begin
+      Self.Emit(#9'stp x0, xzr, [sp, #-16]!');
+      Self.Emit(#9'str d0, [sp, #8]');
+      EmitSlotAddr('x9', Slot);
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');
+      Self.Emit(#9'ldr d0, [sp, #8]');
+      Self.Emit(#9'ldr x0, [sp], #16');
+    end;
+    Exit;
+  end;
   if (AExpr.ResolvedType <> nil) and IsAggregateReturn(AExpr.ResolvedType) then
     NotYet('aggregate-returning indirect call', AExpr);
   Slot := '__icv_' + IntToStr(FJArgN);

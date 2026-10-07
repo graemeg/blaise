@@ -27,6 +27,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_ClosureResult_FieldStoreAndImmediateCall;
     procedure TestRun_NestedSelfCapture_AndGenericClosurePerInstance;
     { moved from cp.test.anonmethods, where they ran through a private
       GenIR -> qbe -> link pipeline (QBE only) }
@@ -2139,6 +2140,59 @@ begin
   AssertRunsOnAll(Src,
     '7 70 8' + #10 +
     '43 forty-two' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureResult_FieldStoreAndImmediateCall;
+const
+  {
+    A closure returned by a call is stored straight into a field, and a closure
+    returned by a call is called on the spot -- MakeAdder(1)(41), H.Make(7)(6),
+    including a Double result.  Each call hands over its Env at +1; the field
+    store moves it in without a retain and the immediate call drops it after the
+    call, so the program is leak-free. }
+  Src = '''
+    program RefClo;
+    type
+      TF = reference to function(X: Integer): Integer;
+      TD = reference to function(X: Double): Double;
+      THolder = class
+        FF: TF;
+        function Make(N: Integer): TF;
+      end;
+    function MakeAdder(N: Integer): TF;
+    begin
+      Result := function(X: Integer): Integer begin Result := X + N end;
+    end;
+    function MakeScale(K: Double): TD;
+    begin
+      Result := function(X: Double): Double begin Result := X * K end;
+    end;
+    function THolder.Make(N: Integer): TF;
+    begin
+      Result := function(X: Integer): Integer begin Result := X * N end;
+    end;
+    var H: THolder;
+    begin
+      H := THolder.Create();
+      H.FF := MakeAdder(10);
+      WriteLn(H.FF(5));
+      H.FF := MakeAdder(3);
+      WriteLn(H.FF(5));
+      WriteLn(MakeAdder(1)(41));
+      WriteLn(H.Make(7)(6));
+      WriteLn(MakeScale(2.5)(4.0):0:2);
+      H.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '15' + #10 +
+    '8' + #10 +
+    '42' + #10 +
+    '42' + #10 +
+    '10.00' + #10, 0);
+  AssertLeakFreeOnAll(Src, '10.00');
 end;
 
 initialization
