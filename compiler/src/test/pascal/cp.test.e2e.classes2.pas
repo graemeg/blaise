@@ -22,6 +22,14 @@ type
   protected
     procedure SetUp; override;
   published
+    { method pointers ('of object'); moved from cp.test.proctypes_ofobject,
+      where they ran through a private GenIR -> qbe -> link pipeline }
+    procedure TestRun_MethodPtr_NoArgs;
+    procedure TestRun_MethodPtr_WithArgs;
+    procedure TestRun_MethodPtr_PreservesSelf;
+    procedure TestRun_MethodPtrField_RoundTrip;
+    procedure TestRun_MethodPtrField_DirectCall_StmtForm;
+    procedure TestRun_MethodPtr_BothHalvesEveryShape;
     procedure TestRun_MethodAddress_PublishedTable;
     procedure TestRun_Metaclass_EqualityClassCreateAndFree;
     procedure TestRun_AliasConstructor_RunsUserCtor;
@@ -2836,6 +2844,253 @@ begin
     'Hidden nil' + LE +
     'NoSuch nil' + LE +
     'True' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_MethodPtr_BothHalvesEveryShape;
+const
+  {
+    Method pointers are 16-byte (Code, Data) values and every store and load
+    must move both halves: into a record field from a TMethod cast, into an
+    implicit-Self field from @Self.Method (once only Code was copied and a later
+    call ran on a garbage Self), out of a function result (the return once
+    dropped the Data half), and a virtual method captured as @A.Speak reaches
+    the override through the receiver's vtable. }
+  Src = '''
+    program MethodPtrs;
+    type
+      TM = procedure of object;
+      TBinOp = function(X, Y: Integer): Integer of object;
+      TProc = procedure(const S: string) of object;
+      TRec = record
+        Handler: TM;
+      end;
+      TAnimal = class(TObject)
+        FName: string;
+        procedure Speak; virtual;
+      end;
+      TDog = class(TAnimal)
+        procedure Speak; override;
+      end;
+      TCalc = class(TObject)
+        FBias: Integer;
+        function Add(X, Y: Integer): Integer;
+        function GetOp: TBinOp;
+      end;
+      TA = class(TObject)
+        FTag: string;
+        FFn: TProc;
+        procedure DoIt(const S: string);
+        procedure Fire;
+      end;
+    procedure TAnimal.Speak;
+    begin WriteLn('animal ', FName) end;
+    procedure TDog.Speak;
+    begin WriteLn('dog ', FName) end;
+    function TCalc.Add(X, Y: Integer): Integer;
+    begin Result := X + Y + FBias end;
+    function TCalc.GetOp: TBinOp;
+    begin Result := @Self.Add end;
+    procedure TA.DoIt(const S: string);
+    begin WriteLn(FTag, ': ', S) end;
+    procedure TA.Fire;
+    begin
+      FFn := @Self.DoIt;
+      FFn('fired')
+    end;
+    var
+      R: TRec;
+      M: TMethod;
+      A: TAnimal;
+      S: TM;
+      C: TCalc;
+      Op: TBinOp;
+      X: TA;
+    begin
+      A := TDog.Create();
+      A.FName := 'rex';
+      S := @A.Speak;
+      S();
+      M.Code := TMethod(S).Code;
+      M.Data := TMethod(S).Data;
+      R.Handler := TM(M);
+      R.Handler();
+      C := TCalc.Create();
+      C.FBias := 100;
+      Op := C.GetOp();
+      WriteLn(Op(3, 4));
+      X := TA.Create();
+      X.FTag := 'tag';
+      X.Fire();
+      X.FFn('again')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'dog rex' + LE +
+    'dog rex' + LE +
+    '107' + LE +
+    'tag: fired' + LE +
+    'tag: again' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_MethodPtr_NoArgs;
+const
+  Src =
+    '''
+    program P;
+    type
+      TFoo = class(TObject)
+      published
+        procedure SayHi;
+      end;
+      TGreet = procedure of object;
+    procedure TFoo.SayHi;
+    begin WriteLn('hi') end;
+    var F: TFoo; M: TMethod; G: TGreet;
+    begin
+      F := TFoo.Create();
+      M.Code := MethodAddress(F, 'SayHi');
+      M.Data := F;
+      G := TGreet(M);
+      G();
+      F.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'hi' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_MethodPtr_WithArgs;
+const
+  Src =
+    '''
+    program P;
+    type
+      TFoo = class(TObject)
+      published
+        procedure Show(const S: string; N: Integer);
+      end;
+      TShow = procedure (const S: string; N: Integer) of object;
+    procedure TFoo.Show(const S: string; N: Integer);
+    begin
+      WriteLn(S);
+      WriteLn(IntToStr(N))
+    end;
+    var F: TFoo; M: TMethod; G: TShow;
+    begin
+      F := TFoo.Create();
+      M.Code := MethodAddress(F, 'Show');
+      M.Data := F;
+      G := TShow(M);
+      G('hello', 42);
+      F.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'hello' + LE + '42' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_MethodPtr_PreservesSelf;
+const
+  Src =
+    '''
+    program P;
+    type
+      TCounter = class(TObject)
+        Value: Integer;
+      published
+        procedure Print;
+      end;
+      TPrintMethod = procedure of object;
+    procedure TCounter.Print;
+    begin WriteLn(IntToStr(Value)) end;
+    var C: TCounter; M: TMethod; G: TPrintMethod;
+    begin
+      C := TCounter.Create();
+      C.Value := 99;
+      M.Code := MethodAddress(C, 'Print');
+      M.Data := C;
+      G := TPrintMethod(M);
+      G();
+      C.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '99' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_MethodPtrField_RoundTrip;
+const
+  Src =
+    '''
+    program P;
+    type
+      TFoo = class(TObject)
+      published
+        procedure SayHi;
+      end;
+      TGreet = procedure of object;
+      THolder = class(TObject)
+        Handler: TGreet;
+      end;
+    procedure TFoo.SayHi;
+    begin WriteLn('field-ok') end;
+    var
+      F: TFoo;
+      H: THolder;
+      M: TMethod;
+      G: TGreet;
+    begin
+      F := TFoo.Create();
+      H := THolder.Create();
+      M.Code := MethodAddress(F, 'SayHi');
+      M.Data := F;
+      H.Handler := TGreet(M);
+      { Read the field into a local and invoke — exercises the field-read
+        path (which must return the field address, not a single loadl). }
+      G := H.Handler;
+      G();
+      H.Free();
+      F.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'field-ok' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_MethodPtrField_DirectCall_StmtForm;
+const
+  Src =
+    '''
+    program P;
+    type
+      TGreet = procedure of object;
+      TFoo = class(TObject)
+        Handler: TGreet;
+      published
+        procedure SayHi;
+      end;
+    procedure TFoo.SayHi;
+    begin WriteLn('field-direct') end;
+    var F: TFoo; M: TMethod;
+    begin
+      F := TFoo.Create();
+      M.Code := MethodAddress(F, 'SayHi');
+      M.Data := F;
+      F.Handler := TGreet(M);
+      F.Handler();
+      F.Handler();
+      F.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'field-direct' + LE + 'field-direct' + LE, 0);
 end;
 
 initialization

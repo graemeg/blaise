@@ -1776,6 +1776,27 @@ begin
     Self.EmitExprToX0(TDerefExpr(AExpr).Expr);
     Exit;
   end;
+  { TMethod(MP) / TRec(R): a value cast of a same-sized lvalue reinterprets
+    its storage, so the record lives at the operand's address (TMethod(S).Code
+    reads the Code half of method pointer S) }
+  if (AExpr is TFuncCallExpr) and
+     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+     (not TFuncCallExpr(AExpr).IsIndirectCall) and
+     (TFuncCallExpr(AExpr).Args.Count = 1) and
+     (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
+     (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.RawSize() =
+        AExpr.ResolvedType.RawSize()) and
+     ((TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind = tyRecord) or
+      IsMethodPtrType(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType)) and
+     ((TFuncCallExpr(AExpr).Args.Items[0] is TIdentExpr) or
+      (TFuncCallExpr(AExpr).Args.Items[0] is TFieldAccessExpr)) then
+  begin
+    if TFuncCallExpr(AExpr).Args.Items[0] is TIdentExpr then
+      EmitRecIdentAddr('x0', TIdentExpr(TFuncCallExpr(AExpr).Args.Items[0]))
+    else
+      EmitRecFieldAddrToX0(TFieldAccessExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+    Exit;
+  end;
   NotYet('record address of this expression', AExpr);
 end;
 
@@ -2397,6 +2418,17 @@ begin
   end;
   if AValueExpr is TAnonMethodExpr then
     EmitAnonValueToSlot(TAnonMethodExpr(AValueExpr))
+  else if (AValueExpr is TFuncCallExpr) and
+          (TFuncCallExpr(AValueExpr).ResolvedDecl = nil) and
+          (not TFuncCallExpr(AValueExpr).IsIndirectCall) and
+          (TFuncCallExpr(AValueExpr).Args.Count = 1) and
+          (TASTExpr(TFuncCallExpr(AValueExpr).Args.Items[0]).ResolvedType <> nil) and
+          (TASTExpr(TFuncCallExpr(AValueExpr).Args.Items[0]).ResolvedType.Kind
+             = tyRecord) then
+    { TGreet(M): a TMethod record reinterpreted as the fat value -- its
+      address is the source of the 16-byte copy (the local-slot twin is in
+      EmitAssignment) }
+    EmitRecAddrToX0(TASTExpr(TFuncCallExpr(AValueExpr).Args.Items[0]))
   else if (AValueExpr is TIdentExpr) and IsMethodPtrType(AValueExpr.ResolvedType) and
           not IsCaptured(TIdentExpr(AValueExpr).Name) and
           (TIdentExpr(AValueExpr).ParamMode = pmNone) and
