@@ -261,7 +261,7 @@ found, for a ruling before they are migrated.
 | `cp.test.collections.pas` | 19 | pending
 | `cp.test.records.pas` | 17 | pending
 | `cp.test.openarray.pas` | 17 | pending
-| `cp.test.jumboset.pas` | 17 | pending
+| `cp.test.jumboset.pas` | 17 | done: 14 behaviour (existing e2e), 1 code-gen (GenAsm)
 | `cp.test.control.pas` | 17 | done: 15 behaviour (e2e)
 | `cp.test.procs.pas` | 16 | done: 11 behaviour (e2e), 3 QBE-only
 | `cp.test.pointers.pas` | 16 | done: 12 behaviour (e2e), 1 QBE-only
