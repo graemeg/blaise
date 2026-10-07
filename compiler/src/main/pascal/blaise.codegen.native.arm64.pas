@@ -6272,6 +6272,8 @@ begin
 end;
 
 procedure TArm64Backend.EmitStmtBody(AStmt: TASTStmt);
+var
+  MD: TMethodDecl;
 begin
   { empty statement (bare ';' bodies — `while X do ;`, `if C then ;`):
     nothing to emit.  Without this guard the fallthrough NotYet derefs
@@ -6316,11 +6318,26 @@ begin
       no-op, matching the x86-64 backend. }
     if TInheritedCallStmt(AStmt).ResolvedMethod = nil then
       Exit;
+    MD := TMethodDecl(TInheritedCallStmt(AStmt).ResolvedMethod);
+    if (MD.ResolvedReturnType <> nil) and
+       ((MD.ResolvedReturnType.Kind in [tyRecord, tySingle]) or
+        IsAggregateReturn(MD.ResolvedReturnType)) then
+      NotYet('inherited call statement to a function returning this type',
+        AStmt);
     EmitLoadSlot('x0', 'Self');
     EmitPushX0();
-    EmitCall(TMethodDecl(TInheritedCallStmt(AStmt).ResolvedMethod),
-      TInheritedCallStmt(AStmt).Name, TInheritedCallStmt(AStmt).Args,
-      '', True, VIRT_NONE);
+    EmitCall(MD, TInheritedCallStmt(AStmt).Name,
+      TInheritedCallStmt(AStmt).Args, '', True, VIRT_NONE);
+    { the statement form of `inherited F` sets Result: the parent's return
+      value lands in the current Result slot (x86-64 / QBE parity) }
+    if (MD.ResolvedReturnType <> nil) and
+       (MD.ResolvedReturnType.Kind <> tyVoid) then
+    begin
+      if MD.ResolvedReturnType.Kind = tyDouble then
+        EmitStoreSlot('d0', 'Result')
+      else
+        EmitStoreSlot('x0', 'Result');
+    end;
     Exit;
   end;
   if AStmt is TIfStmt then
