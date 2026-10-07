@@ -10835,7 +10835,11 @@ begin
       if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tyRecord) then
       begin
         AddLocal(Par.ParamName, Par.ResolvedType.RawSize());
-        FRecLocals.AddObject(Par.ParamName, Par.ResolvedType);
+        { the callee's copy co-owns its managed fields (retained in prologue
+          pass 3, released at exit) -- except a const param, which borrows,
+          as for an interface param above }
+        if not Par.IsConstParam then
+          FRecLocals.AddObject(Par.ParamName, Par.ResolvedType);
         { A true var/out param already Continue'd above, so every record param
           reaching here is BY VALUE — record that explicitly.  The semantic pass
           marks them all IsVarParam=True, and only a shape-0 param gets the
@@ -11541,6 +11545,7 @@ begin
   end;
   { pass 3: by-value record params with managed fields — the callee owns its
     copy, so retain every managed field (walk anchored on callee-saved x19).
+    A const param borrows its fields: no retain here, no release at exit.
 
     This MUST run AFTER pass 2's memcpy, not before it.  It used to be emitted
     up with the sret parking, which meant the retains read the callee's slot
@@ -11555,7 +11560,7 @@ begin
   begin
     Par := TMethodParam(ADecl.Params.Items[I]);
     if (Par.ResolvedType <> nil) and (Par.ResolvedType.Kind = tyRecord) and
-       not Par.IsVarParam and
+       not Par.IsVarParam and not Par.IsConstParam and
        not RecretManagedClean(TRecordTypeDesc(Par.ResolvedType)) then
     begin
       Self.Emit(#9'str x19, [sp, #-16]!');
