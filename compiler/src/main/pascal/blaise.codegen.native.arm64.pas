@@ -8613,6 +8613,7 @@ begin
   Self.Emit(#9'ldr x9, [sp], #16');
   case Elem.RawSize() of
     1: Self.Emit(#9'strb w0, [x9]');
+    2: Self.Emit(#9'strh w0, [x9]');   { Word / SmallInt elements }
     4: Self.Emit(#9'str w0, [x9]');
     8: Self.Emit(#9'str x0, [x9]');
   else
