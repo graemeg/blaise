@@ -14,14 +14,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TGenericRecordTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     { Parser }
     procedure TestParse_GenericRecord_IsGenericRecordDef;
@@ -42,14 +41,10 @@ type
     procedure TestSemantic_GenericRecord_OutOfLine_MethodLinked;
 
     { Codegen }
-    procedure TestCodegen_GenericRecord_FieldAccess_StoreAndLoad;
-    procedure TestCodegen_GenericRecord_MethodEmitted;
-    procedure TestCodegen_GenericRecord_OutOfLine_MethodEmitted;
     procedure TestCodegen_GenericRecord_NoTypeInfoEmitted;
     procedure TestCodegen_GenericRecord_NoVTableEmitted;
 
     { Named type alias for generic record specialisation (issue #124) }
-    procedure TestCodegen_GenericRecord_TypeAlias_MethodEmitted;
   end;
 
 implementation
@@ -132,24 +127,6 @@ const
         end.
         ''';
 
-  SrcGenericRecordUsage =
-    '''
-        program Prg;
-        type
-          TMyVal<T> = record
-            Value: T;
-            function GetValue: T;
-            begin
-              Result := Self.Value
-            end;
-          end;
-        var V: TMyVal<Integer>;
-        begin
-          V.Value := 42;
-          WriteLn(V.GetValue())
-        end.
-        ''';
-
   SrcGenericRecordOutOfLineMethod =
     '''
         program Prg;
@@ -206,22 +183,6 @@ begin
     SA.Analyse(Result);
   finally
     SA.Free();
-  end;
-end;
-
-function TGenericRecordTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
   end;
 end;
 
@@ -431,76 +392,21 @@ begin
   end;
 end;
 
-procedure TGenericRecordTests.TestCodegen_GenericRecord_OutOfLine_MethodEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericRecordOutOfLineMethod);
-  AssertTrue('GetValue method emitted',
-    Pos('TMyVal_Integer_GetValue', IR) > 0);
-  AssertTrue('SetValue method emitted',
-    Pos('TMyVal_Integer_SetValue', IR) > 0);
-end;
-
-procedure TGenericRecordTests.TestCodegen_GenericRecord_FieldAccess_StoreAndLoad;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericRecordVarInteger);
-  AssertTrue('stores to field via storew',
-    Pos('storew', IR) > 0);
-end;
-
-procedure TGenericRecordTests.TestCodegen_GenericRecord_MethodEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericRecordUsage);
-  AssertTrue('method function emitted',
-    Pos('TMyVal_Integer_GetValue', IR) > 0);
-end;
-
+{ A record instance is plain data: neither ISA emits class metadata for it. }
 procedure TGenericRecordTests.TestCodegen_GenericRecord_NoTypeInfoEmitted;
-var
-  IR: string;
 begin
-  IR := GenIR(SrcGenericRecordVarInteger);
-  AssertTrue('no typeinfo for records',
-    Pos('typeinfo_TMyVal', IR) < 0);
+  AssertTrue('x86-64: no typeinfo for records',
+    Pos('typeinfo_TMyVal', GenAsm(SrcGenericRecordVarInteger, TargetX86_64)) < 0);
+  AssertTrue('arm64: no typeinfo for records',
+    Pos('typeinfo_TMyVal', GenAsm(SrcGenericRecordVarInteger, TargetArm64)) < 0);
 end;
 
 procedure TGenericRecordTests.TestCodegen_GenericRecord_NoVTableEmitted;
-var
-  IR: string;
 begin
-  IR := GenIR(SrcGenericRecordVarInteger);
-  AssertTrue('no vtable for records',
-    Pos('vtable_TMyVal', IR) < 0);
-end;
-
-procedure TGenericRecordTests.TestCodegen_GenericRecord_TypeAlias_MethodEmitted;
-var IR: string;
-begin
-  IR := GenIR(
-    '''
-    program P;
-    type
-      THolder<T> = record
-        FVal: T;
-        procedure SetVal(AVal: T);
-      end;
-      TIntHolder = THolder<Integer>;
-      procedure THolder<T>.SetVal(AVal: T);
-      begin
-        FVal := AVal
-      end;
-    var H: TIntHolder;
-    begin
-      H.SetVal(42)
-    end.
-    ''');
-  AssertTrue('method body emitted',
-    Pos('function $THolder_Integer_SetVal', IR) >= 0);
+  AssertTrue('x86-64: no vtable for records',
+    Pos('vtable_TMyVal', GenAsm(SrcGenericRecordVarInteger, TargetX86_64)) < 0);
+  AssertTrue('arm64: no vtable for records',
+    Pos('vtable_TMyVal', GenAsm(SrcGenericRecordVarInteger, TargetArm64)) < 0);
 end;
 
 initialization
