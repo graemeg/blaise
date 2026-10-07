@@ -26,6 +26,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_StaticVar_ReleasedAtExit_AndIntfFirstArg;
     procedure TestRun_StaticMethod_NoSelf;
     procedure TestRun_StaticVar_SharedAcrossCalls;
     procedure TestRun_StaticVar_QualifiedRead;
@@ -508,6 +509,55 @@ begin
       WriteLn(L)
     end.
     ''', '3');
+end;
+
+procedure TE2EStaticMembersTests.TestRun_StaticVar_ReleasedAtExit_AndIntfFirstArg;
+const
+  {
+    A class-typed static var is a program-lifetime global and is released at
+    program exit (its destructor runs after the main block); a static method
+    whose FIRST parameter is an interface receives the (obj, itab) pair with no
+    Self ahead of it. }
+  Src = '''
+    program StaticExit;
+    type
+      IThing = interface
+        procedure Speak;
+      end;
+      TThing = class(IThing)
+      public
+        procedure Speak;
+      end;
+      THolder = class
+      public
+        static procedure SetIt(X: IThing);
+      end;
+      TFoo = class
+      static var
+        FInst: TFoo;
+      public
+        destructor Destroy; override;
+      end;
+    procedure TThing.Speak;
+    begin WriteLn('thing speaks') end;
+    static procedure THolder.SetIt(X: IThing);
+    begin X.Speak() end;
+    destructor TFoo.Destroy;
+    begin WriteLn('TFoo freed at exit'); inherited Destroy() end;
+    var T: TThing;
+    begin
+      T := TThing.Create();
+      THolder.SetIt(T);
+      TFoo.FInst := TFoo.Create();
+      WriteLn('main done')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'thing speaks' + #10 +
+    'main done' + #10 +
+    'TFoo freed at exit' + #10, 0);
 end;
 
 initialization

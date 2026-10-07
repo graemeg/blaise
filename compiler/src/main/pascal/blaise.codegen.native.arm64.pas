@@ -615,6 +615,7 @@ type
     procedure EmitInstanceFieldStoreStacked(AFld: TFieldInfo;
       AValueExpr: TASTExpr);
     procedure RegisterUnitVars(ABlock: TBlock);
+    procedure RegisterClassVars(ATypeDecls: TObjectList);
     procedure FinalizeEmit; override;
 
     { ---- ARC walk primitives (TNativeBackend contract) ----
@@ -1758,6 +1759,11 @@ begin
     end;
     Exit;
   end;
+  if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsClassVarRead then
+  begin
+    EmitSlotAddr('x0', TFieldAccessExpr(AExpr).ClassVarEmitName);
+    Exit;
+  end;
   if AExpr is TFieldAccessExpr then
   begin
     EmitRecFieldAddrToX0(TFieldAccessExpr(AExpr));
@@ -2767,8 +2773,29 @@ end;
 procedure TArm64Backend.EmitFieldAssign(AStmt: TFieldAssignment);
 var
   RelStr: Boolean;
+  CVStore: TAssignment;
 begin
   RelStr := False;
+  if AStmt.IsClassVarWrite then
+  begin
+    { TFoo.StaticVar := V: a store to the one shared global (ClassVarEmitName)
+      -- delegated to the global assignment path through a borrowed node, so
+      every type's ARC discipline applies (x86-64 parity) }
+    CVStore := TAssignment.Create();
+    try
+      CVStore.Line := AStmt.Line;
+      CVStore.Col := AStmt.Col;
+      CVStore.Name := AStmt.ClassVarEmitName;
+      CVStore.IsGlobal := True;
+      CVStore.ResolvedLhsType := AStmt.ClassVarLhsType;
+      CVStore.Expr := AStmt.Expr;
+      EmitAssignment(CVStore);
+    finally
+      CVStore.Expr := nil;          { owned by AStmt }
+      CVStore.Free();
+    end;
+    Exit;
+  end;
   if AStmt.PropWriteInfo <> nil then
   begin
     { method-backed property write: setter(self, value) — or
@@ -3536,6 +3563,30 @@ begin
      (TFuncCallExpr(AExpr).Args.Count >= 1) then
   begin
     EmitClassCreate(TFuncCallExpr(AExpr));
+    Exit;
+  end;
+  if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsClassVarRead then
+  begin
+    { TFoo.StaticVar: the shared global's value -- or, for an inline
+      aggregate (record, static array, jumbo set), its address }
+    if (AExpr.ResolvedType <> nil) and
+       ((AExpr.ResolvedType.Kind in [tyRecord, tyStaticArray]) or
+        IsJumboSetType(AExpr.ResolvedType)) then
+      EmitSlotAddr('x0', TFieldAccessExpr(AExpr).ClassVarEmitName)
+    else
+      EmitLoadSlot('x0', TFieldAccessExpr(AExpr).ClassVarEmitName);
+    Exit;
+  end;
+  if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsStaticPropGet then
+  begin
+    { TFoo.StaticProp: a plain call of the static getter -- no Self }
+    EmptyArgs := TObjectList.Create(False);
+    try
+      EmitCall(TMethodDecl(TFieldAccessExpr(AExpr).ResolvedMethod),
+        TMethodDecl(TFieldAccessExpr(AExpr).ResolvedMethod).Name, EmptyArgs);
+    finally
+      EmptyArgs.Free();
+    end;
     Exit;
   end;
   if IsJumboSetType(AExpr.ResolvedType) and
@@ -5167,6 +5218,14 @@ begin
     if not ((AExpr.ResolvedType <> nil) and
             (AExpr.ResolvedType.Kind in [tyRecord, tyStaticArray])) then
       EmitElemLoad(AExpr.ResolvedType);
+    Exit;
+  end;
+  if (AExpr is TAddrOfExpr) and
+     (TAddrOfExpr(AExpr).Expr is TFieldAccessExpr) and
+     TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).IsClassVarRead then
+  begin
+    { @TFoo.StaticVar: its storage IS the shared global slot }
+    EmitSlotAddr('x0', TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).ClassVarEmitName);
     Exit;
   end;
   if AExpr is TAddrOfExpr then
@@ -13283,6 +13342,9 @@ begin
       offset — the leg-14 case, e.g. LkAddStr(var ..., FDynStrTab)), and
       a plain local/global slot.  Mirrors x86-64 EmitVarArgAddrToRax. }
     EmitRecIdentAddr('x0', TIdentExpr(Arg))
+  else if (Arg is TFieldAccessExpr) and TFieldAccessExpr(Arg).IsClassVarRead then
+    { a static var passed by reference: the shared global slot }
+    EmitSlotAddr('x0', TFieldAccessExpr(Arg).ClassVarEmitName)
   else if (Arg is TFieldAccessExpr) and
           (TFieldAccessExpr(Arg).FieldInfo <> nil) then
   begin
@@ -13899,6 +13961,16 @@ begin
     { Obj.Free(): release AND nil the slot — a stale pointer left here
       aliases the next same-size allocation and the following ARC store
       double-releases it (QBE/x86 parity: both nil the slot) }
+    if (AStmt.ObjExpr is TFieldAccessExpr) and
+       TFieldAccessExpr(AStmt.ObjExpr).IsClassVarRead then
+    begin
+      { TFoo.StaticVar.Free(): release AND nil the shared global slot }
+      EmitLoadSlot('x0', TFieldAccessExpr(AStmt.ObjExpr).ClassVarEmitName);
+      EmitCallSym('_ClassRelease');
+      EmitSlotAddr('x9', TFieldAccessExpr(AStmt.ObjExpr).ClassVarEmitName);
+      Self.Emit(#9'str xzr, [x9]');
+      Exit;
+    end;
     if AStmt.ObjExpr is TFieldAccessExpr then
     begin
       { X.Field.Free(): release AND nil through the field's address }
@@ -14283,6 +14355,7 @@ begin
       FRecordDecls.Add(TDcl);
   end;
 
+  RegisterClassVars(AProg.Block.TypeDecls);
   { Program-level variables become globals (int-family only for now). }
   for I := 0 to AProg.Block.Decls.Count - 1 do
   begin
@@ -14724,6 +14797,8 @@ begin
   FCurrentUnitName := AUnit.Name;
   RegisterUnitVars(AUnit.IntfBlock);
   RegisterUnitVars(AUnit.ImplBlock);
+  RegisterClassVars(AUnit.IntfBlock.TypeDecls);
+  RegisterClassVars(AUnit.ImplBlock.TypeDecls);
   Self.Emit('.text');
   CheckTypeSubset(AUnit.IntfBlock.TypeDecls);
   CheckTypeSubset(AUnit.ImplBlock.TypeDecls);
@@ -14931,6 +15006,71 @@ begin
   BodyBuf.Free();
   FFrame.Clear();
   FFrameSize := 0;
+end;
+
+{ Static (class-level) variables -- `static var` in a class or record --
+  are one shared global each, under the mangled ClassVarEmitName the semantic
+  pass stamps (x86-64 parity: RegisterClassVars).  Inside the class's own
+  methods the semantic pass rewrites a bare reference to an identifier of
+  that name, so registering the global is what makes those loads and stores
+  resolve; the qualified TFoo.X forms are lowered against the same slot.
+  Managed kinds join the program-exit release lists like any global. }
+procedure TArm64Backend.RegisterClassVars(ATypeDecls: TObjectList);
+var
+  I, J: Integer;
+  TD: TTypeDecl;
+  Fields: TObjectList;
+  FDecl: TFieldDecl;
+  N: string;
+  T: TTypeDesc;
+begin
+  for I := 0 to ATypeDecls.Count - 1 do
+  begin
+    TD := TTypeDecl(ATypeDecls.Items[I]);
+    if TD.Def is TClassTypeDef then
+      Fields := TClassTypeDef(TD.Def).Fields
+    else if TD.Def is TRecordTypeDef then
+      Fields := TRecordTypeDef(TD.Def).Fields
+    else
+      Continue;
+    if Fields = nil then Continue;
+    for J := 0 to Fields.Count - 1 do
+    begin
+      FDecl := TFieldDecl(Fields.Items[J]);
+      if not FDecl.IsClassVar or (FDecl.ClassVarEmitName = '') or
+         (FDecl.ResolvedType = nil) then
+        Continue;
+      N := FDecl.ClassVarEmitName;
+      T := FDecl.ResolvedType;
+      if FGlobalNames.IndexOf(N) >= 0 then Continue;
+      FGlobalNames.Add(N);
+      if T.Kind = tyString then
+        FStrGlobals.Add(N);
+      if (T.Kind = tyClass) and not FDecl.IsWeak then
+        FObjGlobals.Add(N);
+      if T.Kind = tyDynArray then
+        FDynGlobals.Add(N);
+      if (T.Kind = tyProcedural) and TProceduralTypeDesc(T).IsReference then
+        FRefGlobals.Add(N);
+      if T.Kind = tyInterface then
+      begin
+        FGlobalNames.Add(N + '_itab');
+        FGlobalSize.Items[N + '_itab'] := 8;
+        if not FDecl.IsWeak then
+          FIntfGlobals.Add(N);
+      end;
+      if T.Kind in [tyRecord, tyStaticArray] then
+      begin
+        if T.Kind = tyRecord then
+          FRecGlobals.AddObject(N, T);
+        FGlobalSize.Items[N] := T.RawSize();
+      end
+      else if IsMethodPtrType(T) then
+        FGlobalSize.Items[N] := 16
+      else
+        FGlobalSize.Items[N] := 8;
+    end;
+  end;
 end;
 
 procedure TArm64Backend.RegisterUnitVars(ABlock: TBlock);

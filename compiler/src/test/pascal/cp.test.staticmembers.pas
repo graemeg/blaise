@@ -13,16 +13,17 @@ unit cp.test.staticmembers;
   Feature 1 of the static-members work.  Covers the PARSER layer
   (TStaticMembersParseTests — the forms parse, the IsStatic / IsClassVar AST
   flags are set, and `static constructor` / `static destructor` are rejected)
-  and the SEMANTIC + IR layer (TStaticMembersSemTests — resolution of static
-  vars to shared globals, no-Self static methods, qualified static var/property
-  reads, and the program-exit release of class-typed static vars).  End-to-end
-  compile+run behaviour lives in cp.test.e2e.staticmembers.pas. }
+  and the SEMANTIC layer (TStaticMembersSemTests — resolution of static vars
+  to shared globals, no-Self static methods).  Lowering -- shared global slots,
+  qualified reads and writes, static properties, the program-exit release of
+  class-typed static vars -- is covered end to end by
+  cp.test.e2e.staticmembers.pas. }
 
 interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSemantic, uSymbolTable, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSemantic, uSymbolTable;
 
 type
   TStaticMembersParseTests = class(TTestCase)
@@ -565,14 +566,13 @@ begin
 end;
 
 { ================================================================== }
-{  Semantic + IR (codegen) tests                                      }
+{  Semantic tests                                                     }
 { ================================================================== }
 
 type
   TStaticMembersSemTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectErrorMsg(const ASrc, AExpectedSubstr: string);
   published
     { static var resolves to a shared global, not an instance field }
@@ -582,19 +582,6 @@ type
     procedure TestSem_StaticVar_AcceptsClassType;
     procedure TestSem_StaticMethod_NoSelf_CannotTouchInstanceField;
     procedure TestSem_StaticMethod_CanReadStaticVar;
-
-    { IR: static var lowers to a single global data slot; static method has
-      no Self parameter. }
-    procedure TestIR_StaticVar_EmitsGlobalDataSlot;
-    procedure TestIR_StaticVar_NoInstanceOffset;
-    procedure TestIR_StaticMethod_NoSelfParam;
-    procedure TestIR_Singleton_LazyGetInstance;
-    procedure TestIR_StaticVar_QualifiedRead_LoadsGlobal;
-    procedure TestIR_StaticProperty_QualifiedRead_CallsGetter;
-    procedure TestIR_ClassStaticVar_ReleasedAtExit;
-    procedure TestIR_StaticCall_InterfaceArg_NoLeadingComma;
-    procedure TestIR_StaticVar_ChainedLValueBase_LoadsGlobal;
-    procedure TestIR_StaticVar_LValueUses_AddressGlobal;
   end;
 
 function TStaticMembersSemTests.AnalyseSrc(const ASrc: string): TProgram;
@@ -612,23 +599,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TStaticMembersSemTests.GenIR(const ASrc: string): string;
-var Prog: TProgram; CG: TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -807,327 +777,6 @@ var Prog: TProgram;
 begin
   Prog := AnalyseSrc(Src);
   Prog.Free();
-end;
-
-procedure TStaticMembersSemTests.TestIR_StaticVar_EmitsGlobalDataSlot;
-const
-  Src =
-    '''
-        program P;
-        type
-          TFoo = class
-          private static var
-            FCount: Integer;
-            static procedure Bump;
-          end;
-        static procedure TFoo.Bump;
-        begin
-          FCount := FCount + 1;
-        end;
-        begin end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  { A single shared global data slot named TFoo_FCount must be emitted. }
-  AssertTrue('emits $TFoo_FCount data slot (IR: ' + Copy(IR, 0, 400) + ')',
-    Pos('data $TFoo_FCount', IR) >= 0);
-end;
-
-procedure TStaticMembersSemTests.TestIR_StaticVar_NoInstanceOffset;
-const
-  Src =
-    '''
-        program P;
-        type
-          TFoo = class
-          private static var
-            FCount: Integer;
-            static procedure Bump;
-          end;
-        static procedure TFoo.Bump;
-        begin
-          FCount := FCount + 1;
-        end;
-        begin end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  { The static var read/write must reference the global $TFoo_FCount, not an
-    instance-offset load from a Self pointer. }
-  AssertTrue('references $TFoo_FCount global',
-    Pos('$TFoo_FCount', IR) >= 0);
-end;
-
-procedure TStaticMembersSemTests.TestIR_StaticMethod_NoSelfParam;
-const
-  Src =
-    '''
-        program P;
-        type
-          TFoo = class
-          private static var
-            FCount: Integer;
-            static procedure Bump;
-          end;
-        static procedure TFoo.Bump;
-        begin
-          FCount := FCount + 1;
-        end;
-        begin end.
-        ''';
-var IR: string; FnPos: Integer;
-begin
-  IR := GenIR(Src);
-  FnPos := Pos('function $TFoo_Bump(', IR);
-  if FnPos < 0 then
-    FnPos := Pos('$TFoo_Bump(', IR);
-  AssertTrue('TFoo_Bump function emitted', FnPos >= 0);
-  { The signature must NOT contain %_par_Self. }
-  AssertFalse('static method has no Self parameter',
-    Pos('%_par_Self', Copy(IR, FnPos, 60)) >= 0);
-end;
-
-procedure TStaticMembersSemTests.TestIR_Singleton_LazyGetInstance;
-const
-  Src =
-    '''
-        program P;
-        type
-          TFoo = class
-          private static var
-            FInstanceId: Integer;
-          public
-            static function GetId: Integer;
-          end;
-        static function TFoo.GetId: Integer;
-        begin
-          if FInstanceId = 0 then
-            FInstanceId := 42;
-          Result := FInstanceId;
-        end;
-        begin end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('static var global slot present',
-    Pos('data $TFoo_FInstanceId', IR) >= 0);
-end;
-
-procedure TStaticMembersSemTests.TestIR_StaticVar_QualifiedRead_LoadsGlobal;
-const
-  Src =
-    '''
-        program P;
-        type
-          TFoo = class
-          public static var
-            Total: Integer;
-            static procedure Bump;
-          end;
-        static procedure TFoo.Bump;
-        begin
-          Total := Total + 1;
-        end;
-        var n: Integer;
-        begin
-          n := TFoo.Total;
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  { A qualified read TFoo.Total must load the SAME mangled global slot, not
-    dereference an instance. }
-  AssertTrue('qualified read loads $TFoo_Total (IR: ' + Copy(IR, 0, 600) + ')',
-    Pos('loadw $TFoo_Total', IR) >= 0);
-end;
-
-procedure TStaticMembersSemTests.TestIR_StaticProperty_QualifiedRead_CallsGetter;
-const
-  Src =
-    '''
-        program P;
-        type
-          TFoo = class
-          private static var
-            FCount: Integer;
-          public
-            static function NextId: Integer;
-            static property Counter: Integer read NextId;
-          end;
-        static function TFoo.NextId: Integer;
-        begin
-          FCount := FCount + 1;
-          Result := FCount;
-        end;
-        var n: Integer;
-        begin
-          n := TFoo.Counter;
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('static prop read calls $TFoo_NextId() with no Self (IR: ' +
-      Copy(IR, 0, 800) + ')',
-    Pos('call $TFoo_NextId()', IR) >= 0);
-end;
-
-procedure TStaticMembersSemTests.TestIR_ClassStaticVar_ReleasedAtExit;
-const
-  Src =
-    '''
-        program P;
-        type
-          TFoo = class
-          private static var
-            FInst: TFoo;
-          public
-            static procedure Init;
-          end;
-        static procedure TFoo.Init;
-        begin
-          if FInst = nil then
-            FInst := TFoo.Create();
-        end;
-        begin
-          TFoo.Init();
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  { A class-typed static var holds one retained reference; the program-exit
-    cleanup at @main_exit must release the shared global slot. }
-  AssertTrue('static var class slot present',
-    Pos('data $TFoo_FInst', IR) >= 0);
-  AssertTrue('static var released at @main_exit',
-    (Pos('@main_exit', IR) >= 0) and (Pos('loadl $TFoo_FInst', IR) >= 0));
-end;
-
-procedure TStaticMembersSemTests.TestIR_StaticCall_InterfaceArg_NoLeadingComma;
-{ A static method whose FIRST parameter is interface-typed must be CALLED with
-  a well-formed argument list: 'call $T_M(l obj, l itab)'.  The interface arg
-  fragment carries a leading ', ' (it is normally appended after Self/a prior
-  arg); in a static call it is the first arg, so the codegen must strip that
-  comma — otherwise QBE rejects 'call $T_M(, l obj, l itab)' as an invalid
-  class specifier. }
-const
-  Src =
-    '''
-        program P;
-        type
-          IThing = interface
-            procedure Speak;
-          end;
-          TThing = class(IThing)
-          public
-            procedure Speak;
-          end;
-          THolder = class
-          public
-            static procedure SetIt(X: IThing);
-          end;
-        procedure TThing.Speak;
-        begin
-        end;
-        static procedure THolder.SetIt(X: IThing);
-        begin
-        end;
-        var T: TThing;
-        begin
-          T := TThing.Create();
-          THolder.SetIt(T);
-        end.
-        ''';
-var IR: string; CallPos: Integer;
-begin
-  IR := GenIR(Src);
-  CallPos := Pos('call $THolder_SetIt(', IR);
-  AssertTrue('static interface-arg call emitted', CallPos >= 0);
-  { The call must not begin its argument list with a comma. }
-  AssertFalse('no leading comma in static interface-arg call',
-    Pos('call $THolder_SetIt(,', IR) >= 0);
-  AssertTrue('call passes obj+itab pair',
-    Pos('call $THolder_SetIt(l ', IR) >= 0);
-end;
-
-procedure TStaticMembersSemTests.TestIR_StaticVar_ChainedLValueBase_LoadsGlobal;
-{ A qualified static var of class type used as the base of a further l-value
-  chain (THolder.GObj.V := 5) must resolve and lower: the base instance pointer
-  is loaded from the static var's mangled global slot.  Without the fix the
-  semantic pass rejected the write with "requires a record or class base, got
-  'class of THolder'". }
-const
-  Src =
-    '''
-        program P;
-        type
-          TObj = class
-          public
-            V: Integer;
-          end;
-          THolder = class
-          public static var
-            GObj: TObj;
-          end;
-        begin
-          THolder.GObj := TObj.Create();
-          THolder.GObj.V := 5;
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  { The chained write loads the base instance pointer from the static var slot. }
-  AssertTrue('chained l-value base loads static var global',
-    Pos('loadl $THolder_GObj', IR) >= 0);
-end;
-
-procedure TStaticMembersSemTests.TestIR_StaticVar_LValueUses_AddressGlobal;
-{ A static var used as an l-value — passed by reference (Inc / a var parameter),
-  its address taken (@), or the receiver of Free — must address its mangled
-  global slot, never dereference the bare class-name base as a variable
-  (%_var_THolder). }
-const
-  Src =
-    '''
-        program P;
-        type
-          TObj = class
-          public
-            V: Integer;
-          end;
-          THolder = class
-          public static var
-            Counter: Integer;
-            GObj: TObj;
-          end;
-        procedure Bump(var X: Integer);
-        begin X := X + 1 end;
-        var Ptr: ^Integer;
-        begin
-          Inc(THolder.Counter);
-          Bump(THolder.Counter);
-          Ptr := @THolder.Counter;
-          THolder.GObj := TObj.Create();
-          THolder.GObj.Free();
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('static var l-values address the mangled global slot',
-    Pos('$THolder_Counter', IR) >= 0);
-  AssertTrue('Free releases the instance loaded from the static var slot',
-    Pos('loadl $THolder_GObj', IR) >= 0);
-  AssertTrue('Free zeros the static var slot',
-    Pos('storel 0, $THolder_GObj', IR) >= 0);
-  AssertFalse('no l-value use may dereference the class-name base as a variable',
-    Pos('%_var_THolder', IR) >= 0);
 end;
 
 procedure TStaticMembersParseTests.TestParse_MethodAfterBareStaticVar_NotStatic;
