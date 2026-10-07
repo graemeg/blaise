@@ -28,16 +28,16 @@ type
   {  Primitive integer types                                            }
   { ------------------------------------------------------------------ }
 
-  { 32-bit signed integer. Maps to QBE type 'w'. }
+  { 32-bit signed integer. }
   Integer = Int32;
 
-  { 64-bit signed integer. Maps to QBE type 'l'. }
+  { 64-bit signed integer. }
   Int64   = Int64;
 
-  { 32-bit unsigned integer. Maps to QBE type 'w' (unsigned interpretation). }
+  { 32-bit unsigned integer. }
   UInt32  = UInt32;
 
-  { 8-bit unsigned integer. Maps to QBE type 'b'. }
+  { 8-bit unsigned integer. }
   Byte    = Byte;
 
   { ------------------------------------------------------------------ }
@@ -45,7 +45,7 @@ type
   { ------------------------------------------------------------------ }
 
   { Boolean is an 8-bit type. False = 0, True = 1.
-    Stored in QBE as a byte ('b') type. Logical operators produce
+    Stored as a byte. Logical operators produce
     0 or 1 only — no non-zero truthiness. }
   Boolean = (False = 0, True = 1);
 

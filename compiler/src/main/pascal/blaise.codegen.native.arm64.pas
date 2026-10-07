@@ -10196,8 +10196,8 @@ begin
       libSystem's real symbol, and '_StringAddRef' -> __StringAddRef matches the
       definition another RTL unit emits for it }
     Result := DarwinSym(ADecl.ExternalName)
-  else if (ADecl <> nil) and (ADecl.ResolvedQbeName <> '') then
-    Result := DarwinSym(CodegenMangle(ADecl.ResolvedQbeName))
+  else if (ADecl <> nil) and (ADecl.ResolvedEmitName <> '') then
+    Result := DarwinSym(CodegenMangle(ADecl.ResolvedEmitName))
   else if ADecl <> nil then
     Result := DarwinSym(CodegenMangle(ADecl.Name))
   else
@@ -11439,17 +11439,17 @@ begin
         Continue;
       { Prefix the nested name with the outer routine's RESOLVED symbol, not
         its bare name (BUG-20260720-method-nested-proc-mangle): a method
-        TFoo.DoIt has ResolvedQbeName 'TFoo_DoIt', so its nested Inner becomes
+        TFoo.DoIt has ResolvedEmitName 'TFoo_DoIt', so its nested Inner becomes
         'TFoo_DoIt_Inner' — distinct from TBar.DoIt's Inner — and a multi-level
-        chain composes to 'L1_L2_L3' because the parent's ResolvedQbeName is
+        chain composes to 'L1_L2_L3' because the parent's ResolvedEmitName is
         already set when its children are derived.  Un-mangled name-space; the
         platform prefix is applied downstream at label emission. }
-      if ADecl.ResolvedQbeName <> '' then
-        TMethodDecl(ADecl.Body.ProcDecls.Items[I]).ResolvedQbeName :=
-          ADecl.ResolvedQbeName + '_' +
+      if ADecl.ResolvedEmitName <> '' then
+        TMethodDecl(ADecl.Body.ProcDecls.Items[I]).ResolvedEmitName :=
+          ADecl.ResolvedEmitName + '_' +
           TMethodDecl(ADecl.Body.ProcDecls.Items[I]).Name
       else
-        TMethodDecl(ADecl.Body.ProcDecls.Items[I]).ResolvedQbeName :=
+        TMethodDecl(ADecl.Body.ProcDecls.Items[I]).ResolvedEmitName :=
           ADecl.Name + '_' + TMethodDecl(ADecl.Body.ProcDecls.Items[I]).Name;
       Self.EmitFunctionDef(
         TMethodDecl(ADecl.Body.ProcDecls.Items[I]), AWeakBind);
@@ -13544,9 +13544,9 @@ begin
     begin
       if Walk.HasDestroyMethod then
       begin
-        if Walk.DestroyResolvedQbeName <> '' then
+        if Walk.DestroyResolvedEmitName <> '' then
           Self.Emit(Format(#9'bl %s',
-            [DarwinSym(CodegenMangle(Walk.DestroyResolvedQbeName))]))
+            [DarwinSym(CodegenMangle(Walk.DestroyResolvedEmitName))]))
         else
           Self.Emit(Format(#9'bl %s',
             [DarwinSym(CodegenMangle(Walk.Name) + '_Destroy')]));
@@ -13660,10 +13660,10 @@ begin
   for I := 0 to ABlock.ConstDecls.Count - 1 do
   begin
     CD := TConstDecl(ABlock.ConstDecls.Items[I]);
-    if CD.ResolvedQbeName <> '' then
-      Lbl := CodegenMangle(CD.ResolvedQbeName)
-    else if CD.ResolvedSetQbeName <> '' then
-      Lbl := CodegenMangle(CD.ResolvedSetQbeName)
+    if CD.ResolvedEmitName <> '' then
+      Lbl := CodegenMangle(CD.ResolvedEmitName)
+    else if CD.ResolvedSetEmitName <> '' then
+      Lbl := CodegenMangle(CD.ResolvedSetEmitName)
     else
       Lbl := CodegenMangle(CD.Name);
     EmitOne(CD, Lbl);
@@ -13675,10 +13675,10 @@ begin
     for J := 0 to Decl.Body.ConstDecls.Count - 1 do
     begin
       CD := TConstDecl(Decl.Body.ConstDecls.Items[J]);
-      if CD.ResolvedQbeName <> '' then
-        Lbl := CodegenMangle(CD.ResolvedQbeName)
-      else if CD.ResolvedSetQbeName <> '' then
-        Lbl := CodegenMangle(CD.ResolvedSetQbeName)
+      if CD.ResolvedEmitName <> '' then
+        Lbl := CodegenMangle(CD.ResolvedEmitName)
+      else if CD.ResolvedSetEmitName <> '' then
+        Lbl := CodegenMangle(CD.ResolvedSetEmitName)
       else
         Lbl := CodegenMangle(CD.Name);
       EmitOne(CD, Lbl);
@@ -13724,10 +13724,10 @@ begin
       for K := 0 to Decl.Body.ConstDecls.Count - 1 do
       begin
         CD := TConstDecl(Decl.Body.ConstDecls.Items[K]);
-        if CD.ResolvedQbeName <> '' then
-          Lbl := CodegenMangle(CD.ResolvedQbeName)
-        else if CD.ResolvedSetQbeName <> '' then
-          Lbl := CodegenMangle(CD.ResolvedSetQbeName)
+        if CD.ResolvedEmitName <> '' then
+          Lbl := CodegenMangle(CD.ResolvedEmitName)
+        else if CD.ResolvedSetEmitName <> '' then
+          Lbl := CodegenMangle(CD.ResolvedSetEmitName)
         else
           Lbl := CodegenMangle(CD.Name);
         EmitOne(CD, Lbl);
@@ -15323,7 +15323,7 @@ begin
 
   { Generic METHOD instances (leg 37): a method with its own <T> monomorphised
     at a call site.  Its MethodDecl is a fully concrete method (mangled name via
-    ResolvedQbeName, OwnerTypeName set), so it emits exactly like a generic
+    ResolvedEmitName, OwnerTypeName set), so it emits exactly like a generic
     function instance — weak-bound for cross-unit dedup. }
   for I := 0 to AProg.GenericMethodInstances.Count - 1 do
     if TGenericMethodInstance(
@@ -15631,7 +15631,7 @@ begin
   { Same deliberately-incremental subset as EmitProgram: routines and
     record types lower; everything else stays an honest hole.  Cross-unit
     call sites need nothing here — RoutineSym mangles through the
-    semantic pass's ResolvedQbeName on both the definition and the call. }
+    semantic pass's ResolvedEmitName on both the definition and the call. }
   FCurrentUnitName := AUnit.Name;
   RegisterUnitVars(AUnit.IntfBlock);
   RegisterUnitVars(AUnit.ImplBlock);

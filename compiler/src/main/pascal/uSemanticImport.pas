@@ -361,11 +361,11 @@ begin
     record of it a backend can reach when a DESCENDANT in another unit has to
     name this method in its itab.  Discarding it here is what produced
     "undefined symbol: TDerived_Id" at load. }
-  if ASig.ResolvedQbeName <> '' then
-    ART.AddMethodSym(ASig.Name, ASig.ResolvedQbeName);
+  if ASig.ResolvedEmitName <> '' then
+    ART.AddMethodSym(ASig.Name, ASig.ResolvedEmitName);
   if ASig.VTableSlot < 0 then Exit;
-  if ASig.ResolvedQbeName = '' then Exit;
-  ImplName := '$' + ASig.ResolvedQbeName;
+  if ASig.ResolvedEmitName = '' then Exit;
+  ImplName := '$' + ASig.ResolvedEmitName;
   ART.SetVTableSlotAt(ASig.VTableSlot, ASig.Name, ImplName);
 end;
 
@@ -791,11 +791,11 @@ begin
   end;
 
   { Methods: walk TRoutineSig list; for virtual/override, register
-    vtable slots.  ResolvedQbeName comes pre-mangled from semantic,
-    so ImplName is '$' + ResolvedQbeName.  The MethodName used as
+    vtable slots.  ResolvedEmitName comes pre-mangled from semantic,
+    so ImplName is '$' + ResolvedEmitName.  The MethodName used as
     the vtable lookup key is just the unqualified routine name; for
     overloaded methods the mangled suffix is included in
-    ResolvedQbeName but the lookup-key dance is left to a follow-up
+    ResolvedEmitName but the lookup-key dance is left to a follow-up
     (overloaded class methods are not in the 6c-B happy path). }
   for I := 0 to AEntry.Methods.Count - 1 do
   begin
@@ -1300,10 +1300,10 @@ end;
 
 { Synthesise a TMethodDecl from a TRoutineSig + its return-type
   qual-ref, sufficient for downstream call-site analysis: param
-  list with ResolvedType set, ResolvedReturnType, ResolvedQbeName,
+  list with ResolvedType set, ResolvedReturnType, ResolvedEmitName,
   IsOverload.  Body stays nil.  AOwningUnit is the iface's unit name
   — combined with the routine's bare Name through MangleUnitPrefix
-  to produce ResolvedQbeName, so the call site emits the same global
+  to produce ResolvedEmitName, so the call site emits the same global
   symbol the exporting unit defines. }
 function SynthesiseMethodDecl(ASig: TRoutineSig;
                               const AOwningUnit: string;
@@ -1320,13 +1320,13 @@ begin
   Result.ReturnTypeName := ASig.ReturnType.TypeName;
   Result.ResolvedReturnType :=
     ResolveImportTypeName(ASig.ReturnType.TypeName, ATable, ASemantic);
-  if ASig.ResolvedQbeName <> '' then
-    Result.ResolvedQbeName := ASig.ResolvedQbeName
+  if ASig.ResolvedEmitName <> '' then
+    Result.ResolvedEmitName := ASig.ResolvedEmitName
   else
-    Result.ResolvedQbeName := MangleUnitPrefix(AOwningUnit) + ASig.Name;
+    Result.ResolvedEmitName := MangleUnitPrefix(AOwningUnit) + ASig.Name;
   { Carry external-name linkage: a free routine declared `external name 'x'`
     has no Blaise wrapper symbol, so the call site must link to the C name.
-    Without these the codegen falls back to NativeMangle(ResolvedQbeName) — the
+    Without these the codegen falls back to NativeMangle(ResolvedEmitName) — the
     non-existent 'Unit_Name' — and a caller built against the cached .bif fails
     to link (undefined symbol).  See WriteRoutines (IFACE v9). }
   Result.IsExternal   := ASig.IsExternal;

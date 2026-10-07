@@ -355,7 +355,7 @@ begin
   Result.IsVarArgs    := ASrc.IsVarArgs;
   Result.ExternalName := ASrc.ExternalName;
   Result.CallingConv  := ASrc.CallingConv;
-  Result.ResolvedQbeName := ASrc.ResolvedQbeName;
+  Result.ResolvedEmitName := ASrc.ResolvedEmitName;
   Result.IsVirtual    := ASrc.IsVirtual;
   Result.IsOverride   := ASrc.IsOverride;
   { Carry static-ness so a cross-unit TypeName.StaticMethod() call resolves —

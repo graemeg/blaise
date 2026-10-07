@@ -41,13 +41,13 @@ type
   { ------------------------------------------------------------------ }
 
   TTypeKind = (
-    tyInteger,    { Int32  — QBE 'w' }
-    tyInt64,      { Int64  — QBE 'l' }
-    tyUInt32,     { UInt32 — QBE 'w' unsigned }
-    tyUInt64,     { UInt64 / QWord — QBE 'l' unsigned }
-    tySmallInt,   { SmallInt / Int16 — QBE 'h' (signed half-word) }
-    tyWord,       { Word / UInt16 — QBE 'h' (unsigned half-word) }
-    tyByte,       { Byte   — QBE 'b' }
+    tyInteger,    { Int32  — 32-bit signed }
+    tyInt64,      { Int64  — 64-bit signed }
+    tyUInt32,     { UInt32 — 32-bit unsigned }
+    tyUInt64,     { UInt64 / QWord — 64-bit unsigned }
+    tySmallInt,   { SmallInt / Int16 — 16-bit signed }
+    tyWord,       { Word / UInt16 — 16-bit unsigned }
+    tyByte,       { Byte   — 8-bit unsigned }
     tyBoolean,    { Boolean — stored as byte, 0/1 only }
     tyString,     { ARC-managed UTF-8 string }
     tyRecord,     { Stack-allocated aggregate (Phase 2) }
@@ -55,17 +55,17 @@ type
     tyInterface,  { Zero-GUID interface reference (Phase 3) }
     tyVoid,       { No value — used as procedure return type }
     tyNil,        { Pseudo-type for the nil literal; compatible with tyClass }
-    tyPointer,    { Typed or untyped pointer — QBE 'l'; see TPointerTypeDesc }
-    tyEnum,       { Enumeration type — stored as QBE 'w' (Integer); see TEnumTypeDesc }
+    tyPointer,    { Typed or untyped pointer — 8 bytes; see TPointerTypeDesc }
+    tyEnum,       { Enumeration type — stored as a 32-bit Integer; see TEnumTypeDesc }
     tyOpenArray,   { Open-array parameter — two-register ABI: data ptr + high index }
     tyStaticArray, { Fixed-size array: stack-allocated, compile-time bounds }
     tyDynArray,    { Dynamic array: heap-allocated, ref-counted, runtime length }
     tyPChar, { Opaque C pointer for interop: PChar(str) / string(pchar) }
-    tySet,   { Bit-set over an enum base type — QBE 'w' (≤32 members) or 'l' (≤64) }
-    tyProcedural, { Bare procedural pointer — QBE 'l'; see TProceduralTypeDesc.
+    tySet,   { Bit-set over an enum base type — 32-bit (≤32 members) or 64-bit (≤64) }
+    tyProcedural, { Bare procedural pointer — 8 bytes; see TProceduralTypeDesc.
                    Not 'of object' (method ptr), not 'reference to' (closure). }
-    tyDouble,    { 64-bit IEEE 754 float — QBE 'd' }
-    tySingle,    { 32-bit IEEE 754 float — QBE 's' }
+    tyDouble,    { 64-bit IEEE 754 float }
+    tySingle,    { 32-bit IEEE 754 float }
     tyMetaClass  { 'class of TFoo' — typeinfo pointer, see TMetaClassTypeDesc }
   );
 
@@ -107,7 +107,7 @@ type
     function ByteSize: Integer;
     { Natural alignment requirement: 1 for Byte/Boolean, 4 for Integer, 8 for
       pointer/string/Int64.  Used to pad field offsets inside records and to
-      pick QBE alloc4/alloc8 for stack slots. }
+      align stack slots. }
     function AllocAlign: Integer;
     { Same as ByteSize.  Retained for call sites that semantically want
       "storage footprint of a single value" — e.g. static-array element
@@ -124,7 +124,7 @@ type
 
   { Metaclass descriptor — 'class of TFoo'.  The runtime value of any
     metaclass-typed expression is the typeinfo pointer of a class
-    descended from BaseClass.  Stored as QBE 'l' (8 bytes). }
+    descended from BaseClass.  Stored as a pointer (8 bytes). }
   TMetaClassTypeDesc = class(TTypeDesc)
   public
     [Unretained] BaseClass: TTypeDesc;  { not owned; the class type after 'class of' }
@@ -158,7 +158,7 @@ type
   end;
 
   { Enum type descriptor.  Members are ordered; ordinal values are 0..N-1.
-    Stored as QBE 'w' (same as Integer).  Members are NOT registered as bare
+    Stored as a 32-bit value (same as Integer).  Members are NOT registered as bare
     global skConstants; a bare member name resolves through the semantic
     analyser's type-keyed reverse index (see ResolveEnumMember). }
   TEnumTypeDesc = class(TTypeDesc)
@@ -189,8 +189,8 @@ type
   { Set type descriptor.  BaseType is the element type (enum or ordinal such
     as Byte/Word).  BitCount is the number of bits required.  Each member
     ordinal N maps to bit N of the bitmap.  Representation depends on BitCount:
-      BitCount <= 32  -> QBE 'w' (32-bit register), bit (1 shl N)
-      BitCount <= 64  -> QBE 'l' (64-bit register), bit (1 shl N)
+      BitCount <= 32  -> 32-bit value, bit (1 shl N)
+      BitCount <= 64  -> 64-bit value, bit (1 shl N)
       BitCount  > 64  -> JUMBO: an inline byte-array bitmap of RawByteSize
                           bytes, treated as an aggregate (like a record): bit N
                           lives at byte (N shr 3), mask (1 shl (N and 7)).
@@ -223,7 +223,7 @@ type
     Used for callback values such as `type T = function: Integer`.
 
     Method pointer (IsMethodPtr=True): 16-byte slot, holds (Code, Data).
-    Layout: Code at offset 0, Data at offset 8.  The variable's QBE name
+    Layout: Code at offset 0, Data at offset 8.  The variable's symbol
     refers to the address of the 16-byte block, mirroring how records
     are represented.  A method-pointer call loads both halves and emits
     `call code(l data, args...)`.  Set when the type was declared with
@@ -279,7 +279,7 @@ type
   public
     Slot:       Integer;  { index in vtable }
     MethName:   string;   { unqualified method name }
-    ImplName:   string;   { fully-qualified QBE label, e.g. $TDog_Speak }
+    ImplName:   string;   { fully-qualified label, e.g. TDog_Speak }
     IsAbstract: Boolean;  { True = slot has no implementation; codegen emits abort stub }
   end;
 
@@ -337,13 +337,13 @@ type
     FImplements:      TObjectList;  { not owned — TInterfaceTypeDesc references }
     FProperties:      TObjectList;  { owned TPropertyInfo }
     FHasDestroyMethod:      Boolean; { True when the class declares a 'Destroy' method }
-    FDestroyResolvedQbeName: string; { Mangled symbol of the no-arg Destroy when this
+    FDestroyResolvedEmitName: string; { Mangled symbol of the no-arg Destroy when this
                                        class declares its own destructor; empty otherwise.
                                        Codegen reads this for ARC field cleanup so the
                                        call target matches the emitted method symbol when
                                        Destroy is overloaded (e.g. 'TFoo_Destroy$'). }
     FMethodSyms:            TDictionary<string, string>; { method name -> emitted symbol.
-                                       Generalises FDestroyResolvedQbeName to EVERY
+                                       Generalises FDestroyResolvedEmitName to EVERY
                                        method, because a NON-VIRTUAL method has no
                                        vtable slot and therefore no other place on the
                                        descriptor that records the symbol its body was
@@ -375,7 +375,7 @@ type
     function  VTableEntryAt(ASlot: Integer): TVTableEntry;
     { Record / look up the symbol a method's body is emitted under.  Empty
       result means this class does not declare AName (walk to Parent). }
-    procedure AddMethodSym(const AName, AQbeName: string);
+    procedure AddMethodSym(const AName, AEmitName: string);
     function  FindMethodSym(const AName: string): string;
     function  FindVTableSlot(const AMethodName: string): Integer;
     function  AddVTableSlot(const AMethodName, AImplName: string): Integer;
@@ -409,8 +409,8 @@ type
     property  Parent: TRecordTypeDesc read FParent write FParent;
     property  HasDestroyMethod: Boolean
               read FHasDestroyMethod write FHasDestroyMethod;
-    property  DestroyResolvedQbeName: string
-              read FDestroyResolvedQbeName write FDestroyResolvedQbeName;
+    property  DestroyResolvedEmitName: string
+              read FDestroyResolvedEmitName write FDestroyResolvedEmitName;
     property  HasAbstractMethods: Boolean
               read FHasAbstractMethods write FHasAbstractMethods;
   end;
@@ -451,19 +451,19 @@ type
     ConstValue:  Int64;       { valid when Kind = skConstant; integer/bool/enum value }
     ConstString: string;      { valid when Kind = skConstant and type is tyString }
     ConstArray:  TStringList; { owned; non-nil for array-typed const; raw element values }
-    ConstArrayQbe: string;    { canonical QBE data-label for an array const; mangled
+    ConstArrayLabel: string;    { canonical data label for an array const; mangled
                                 to avoid collisions across scopes and with the RTL }
     ConstSetBytes: TStringList; { owned; non-nil for a JUMBO (>64-member) set
                                   const; one decimal byte value per bitmap byte
                                   (RawByteSize entries).  Small sets keep using
                                   ConstValue (the Int64 mask) instead. }
-    ConstSetQbe: string;      { canonical, mangled QBE data-label for a jumbo set
-                                const's byte blob (mirrors ConstArrayQbe) }
+    ConstSetLabel: string;      { canonical, mangled data label for a jumbo set
+                                const's byte blob (mirrors ConstArrayLabel) }
     IsWeak:     Boolean;      { true for variables declared [Weak]; codegen
                                 keys off this to emit _WeakAssign instead
                                 of the strong addref/release pattern. }
     IsGlobal:   Boolean;      { true for program-level variables; codegen uses
-                                QBE data-section storage instead of stack alloc }
+                                data-section storage instead of stack alloc }
     IsClassVar: Boolean;      { true for a STATIC (class-level) variable.  Stored
                                 as a single shared global (IsGlobal is also True),
                                 under the mangled GlobalEmitName, not as a
@@ -472,7 +472,7 @@ type
                                 emits/loads/stores under (e.g. 'TFoo_FInstance').
                                 Lets a bare lookup key ('FInstance') and a
                                 qualified one ('TFoo.FInstance') resolve to ONE
-                                storage slot.  Mirrors ConstArrayQbe for consts.
+                                storage slot.  Mirrors ConstArrayLabel for consts.
                                 Empty = emit under Name. }
     AliasOwner: string;       { non-empty only on the alias uSemantic defines for a
                                 contested module var's owner-prefixed emit name
@@ -652,7 +652,7 @@ type
                                        mid-emit, which made the suppression wrongly
                                        fire and silently drop the class's typeinfo
                                        — a dangling symbol the linker binds to
-                                       garbage.  Set by the QBE and native
+                                       garbage.  Set by the native
                                        backends around Generate/GenerateUnit. }
 
     FDefineOwningUnit: string;       { auto-applied to Sym.OwningUnit on Define
@@ -822,7 +822,7 @@ function IsUnmangledUnit(const AUnitName: string): Boolean;
   units, '' for unmangled ones.  The same prefix is applied at both
   the symbol-defining site (codegen of the exporting unit) and the
   symbol-using site (call/reference in another unit), so they always
-  agree on the QBE global name. }
+  agree on the global symbol name. }
 function MangleUnitPrefix(const AUnitName: string): string;
 
 { Shared diagnostic text for a cross-unit generic-template collision, so the
@@ -1210,15 +1210,15 @@ begin
   E.ImplName := AImplName;
 end;
 
-procedure TRecordTypeDesc.AddMethodSym(const AName, AQbeName: string);
+procedure TRecordTypeDesc.AddMethodSym(const AName, AEmitName: string);
 begin
-  if (AName = '') or (AQbeName = '') then Exit;
+  if (AName = '') or (AEmitName = '') then Exit;
   { SetItem, not Add: the semantic pass may revisit a method, and the later
     value is the resolved one.  Keys are LOWER-CASED on the way in and out --
     Pascal identifiers are case-insensitive, but TDictionary hashes the exact
     bytes, so an interface declaring `Id` must still find a class that spells
     it `ID`. }
-  FMethodSyms.SetItem(LowerCase(AName), AQbeName);
+  FMethodSyms.SetItem(LowerCase(AName), AEmitName);
 end;
 
 { Empty means "not declared here" -- the caller walks to Parent.  Deliberately
@@ -2035,7 +2035,7 @@ begin
   { TMethod — record carrying a (Code, Data) pair, byte-for-byte
     identical to a 'procedure of object' value's representation.  The
     cast 'TMyMethod(m)' (m: TMethod, TMyMethod a method-pointer type)
-    is a no-op at the QBE level: both share the 16-byte (Code at +0,
+    is a no-op at the machine level: both share the 16-byte (Code at +0,
     Data at +8) layout. }
   TMethodDesc := NewRecordType('TMethod');
   TMethodDesc.AddField('Code', FTypePointer);

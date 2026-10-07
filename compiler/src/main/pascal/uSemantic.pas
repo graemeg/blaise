@@ -205,7 +205,7 @@ type
 
     { The emitted/imported link symbol for a standalone routine: the
       `external name` for an external binding (defaulting to the Pascal name),
-      else ResolvedQbeName (bare name for unmangled RTL units) or the name. }
+      else ResolvedEmitName (bare name for unmangled RTL units) or the name. }
     function EffectiveLinkName(A: TMethodDecl): string;
 
     { True when A and B denote the SAME underlying link symbol with the same
@@ -284,7 +284,7 @@ type
     function  InstantiateGenericFunc(const AInstName: string): TMethodDecl;
     { Generic method instantiation: resolves 'Pick<Integer>' on an owner class
       on demand, preserving the implicit Self.  Returns the monomorphised
-      TMethodDecl (with ResolvedQbeName set), or nil if not a generic method. }
+      TMethodDecl (with ResolvedEmitName set), or nil if not a generic method. }
     function  InstantiateGenericMethod(const AOwnerType, AInstName: string): TMethodDecl;
 
     procedure AnalyseBlock(ABlock: TBlock; AIsProgramTop: Boolean = False);
@@ -718,7 +718,7 @@ type
     function  GetWarnings: TStringList;
     { Returns MangleUnitPrefix(FCurrentUnitName) when analysing a unit
       via AnalyseUnitForExport (FProg=nil), '' otherwise.  Used by
-      ResolvedQbeName generation to prefix cross-unit symbol names. }
+      ResolvedEmitName generation to prefix cross-unit symbol names. }
     function  CurrentUnitPrefix: string;
     { Push an imported free routine into FProcIndex (the call-site
       lookup table used by AnalyseFuncCall et al.).  Used by
@@ -2014,9 +2014,9 @@ begin
   end
   else
   begin
-    { Real routine: emitted symbol is ResolvedQbeName when set (bare name for
+    { Real routine: emitted symbol is ResolvedEmitName when set (bare name for
       unmangled RTL units blaise_*/rtl.*), else the Pascal name. }
-    if A.ResolvedQbeName <> '' then Result := A.ResolvedQbeName
+    if A.ResolvedEmitName <> '' then Result := A.ResolvedEmitName
     else                            Result := A.Name;
   end;
 end;
@@ -2227,11 +2227,11 @@ begin
         MDecl.ResolvedReturnType := ParType;
       end;
 
-      { Compute mangled QBE name for overloaded forward decls. }
+      { Compute mangled symbol name for overloaded forward decls. }
       if MDecl.IsOverload then
-        MDecl.ResolvedQbeName := CurrentUnitPrefix() + MDecl.Name + '$' + MangleParamSig(MDecl)
+        MDecl.ResolvedEmitName := CurrentUnitPrefix() + MDecl.Name + '$' + MangleParamSig(MDecl)
       else
-        MDecl.ResolvedQbeName := CurrentUnitPrefix() + MDecl.Name;
+        MDecl.ResolvedEmitName := CurrentUnitPrefix() + MDecl.Name;
 
       RegisterProcDecl(MDecl.Name, MDecl);
 
@@ -2382,7 +2382,7 @@ begin
         { Carry mangling forward, then update the index entry.  The impl decl
           must inherit the forward decl's OwningUnit so the later
           IndexOfProcInUnit "has no implementation" check still finds it. }
-        ImplDecl.ResolvedQbeName := MDecl.ResolvedQbeName;
+        ImplDecl.ResolvedEmitName := MDecl.ResolvedEmitName;
         ImplDecl.IsOverload      := MDecl.IsOverload;
         ImplDecl.OwningUnit      := MDecl.OwningUnit;
         TransferDefaultValues(MDecl, ImplDecl);
@@ -2393,9 +2393,9 @@ begin
         { Impl-only declaration — register symbol and index it }
         ImplDecl.IsImplOnly := True;
         if ImplDecl.IsOverload then
-          ImplDecl.ResolvedQbeName := CurrentUnitPrefix() + ImplDecl.Name + '$' + MangleParamSig(ImplDecl)
+          ImplDecl.ResolvedEmitName := CurrentUnitPrefix() + ImplDecl.Name + '$' + MangleParamSig(ImplDecl)
         else
-          ImplDecl.ResolvedQbeName := CurrentUnitPrefix() + ImplDecl.Name;
+          ImplDecl.ResolvedEmitName := CurrentUnitPrefix() + ImplDecl.Name;
         RegisterProcDecl(ImplDecl.Name, ImplDecl);
         if ImplDecl.ReturnTypeName <> '' then
           Sym := TSymbol.Create(ImplDecl.Name, skFunction, ImplDecl.ResolvedReturnType)
@@ -2563,9 +2563,9 @@ begin
     end;
 
     if MDecl.IsOverload then
-      MDecl.ResolvedQbeName := CurrentUnitPrefix() + MDecl.Name + '$' + MangleParamSig(MDecl)
+      MDecl.ResolvedEmitName := CurrentUnitPrefix() + MDecl.Name + '$' + MangleParamSig(MDecl)
     else
-      MDecl.ResolvedQbeName := CurrentUnitPrefix() + MDecl.Name;
+      MDecl.ResolvedEmitName := CurrentUnitPrefix() + MDecl.Name;
 
     RegisterProcDecl(MDecl.Name, MDecl);
 
@@ -2735,7 +2735,7 @@ begin
             Format('Signature mismatch for ''%s'': interface has %d params, implementation has %d',
               [ImplDecl.Name, MDecl.Params.Count, ImplDecl.Params.Count]),
             ImplDecl.Line, ImplDecl.Col);
-        ImplDecl.ResolvedQbeName := MDecl.ResolvedQbeName;
+        ImplDecl.ResolvedEmitName := MDecl.ResolvedEmitName;
         ImplDecl.IsOverload      := MDecl.IsOverload;
         ImplDecl.OwningUnit      := MDecl.OwningUnit;
         TransferDefaultValues(MDecl, ImplDecl);
@@ -2746,9 +2746,9 @@ begin
         { Impl-only declaration — register in impl scope (does not persist) }
         ImplDecl.IsImplOnly := True;
         if ImplDecl.IsOverload then
-          ImplDecl.ResolvedQbeName := CurrentUnitPrefix() + ImplDecl.Name + '$' + MangleParamSig(ImplDecl)
+          ImplDecl.ResolvedEmitName := CurrentUnitPrefix() + ImplDecl.Name + '$' + MangleParamSig(ImplDecl)
         else
-          ImplDecl.ResolvedQbeName := CurrentUnitPrefix() + ImplDecl.Name;
+          ImplDecl.ResolvedEmitName := CurrentUnitPrefix() + ImplDecl.Name;
         RegisterProcDecl(ImplDecl.Name, ImplDecl);
         if ImplDecl.ReturnTypeName <> '' then
           Sym := TSymbol.Create(ImplDecl.Name, skFunction, ImplDecl.ResolvedReturnType)
@@ -4606,7 +4606,7 @@ begin
       Key      := ATypeName + '.' + NewMDecl.Name;
       FMethodIndex.AddObject(Key, NewMDecl);
       AddGroupEntry(FMethodGroups, Key, NewMDecl);
-      { Pin the QBE symbol now so the def and call sites agree.  The
+      { Pin the emitted symbol now so the def and call sites agree.  The
         instance's type symbol inherits OwningUnit from the analysing
         compilation (program/unit name) via DefineGlobal's auto-tag;
         the emit name itself is BARE — never unit-prefixed — because the
@@ -4620,22 +4620,22 @@ begin
         it here would make every private member of an imported generic look
         same-unit and therefore visible. }
       NewMDecl.VisibilityUnit := Templ.DefUnitName;
-      NewMDecl.ResolvedQbeName := ATypeName + '_' + NewMDecl.Name;
+      NewMDecl.ResolvedEmitName := ATypeName + '_' + NewMDecl.Name;
       { Record the emitted symbol on the descriptor so a DESCENDANT instance
         that inherits a non-virtual interface method can resolve it: such a
         method has no vtable slot, and the descendant's own class def does not
         declare it, so the itab emitters climb Parent querying FindMethodSym. }
-      RT.AddMethodSym(NewMDecl.Name, NewMDecl.ResolvedQbeName);
+      RT.AddMethodSym(NewMDecl.Name, NewMDecl.ResolvedEmitName);
       if SameText(NewMDecl.Name, 'Destroy') then
       begin
         RT.HasDestroyMethod := True;
         { Pin the destructor's emit name to the same prefix the method def
           uses, so $_FieldCleanup_<T> calls the symbol that actually exists.
           Without this the cleanup falls back to ClassUnitPrefix(), which can
-          disagree with the method's ResolvedQbeName for program-scope
+          disagree with the method's ResolvedEmitName for program-scope
           generics and produce an undefined-reference link error. }
         if NewMDecl.Params.Count = 0 then
-          RT.DestroyResolvedQbeName := NewMDecl.ResolvedQbeName;
+          RT.DestroyResolvedEmitName := NewMDecl.ResolvedEmitName;
       end;
 
       if NewMDecl.IsVirtual or NewMDecl.IsOverride or
@@ -4923,7 +4923,7 @@ begin
       AddGroupEntry(FMethodGroups, Key, NewMDecl);
       NewMDecl.OwningUnit      := Sym.OwningUnit;
       { Bare, like class instances — see InstantiateGeneric (BUG-004). }
-      NewMDecl.ResolvedQbeName := ATypeName + '_' + NewMDecl.Name;
+      NewMDecl.ResolvedEmitName := ATypeName + '_' + NewMDecl.Name;
 
       for K := 0 to NewMDecl.Params.Count - 1 do
       begin
@@ -5471,11 +5471,11 @@ begin
     NewMDecl.Name         := AInstName;
     NewMDecl.OwnerTypeName := AOwnerType;
     NewMDecl.IsRecordMethod := Templ.IsRecordMethod;
-    { Mangled symbol: <Owner>_<Method><args> -> QBEMangle drops the <>
+    { Mangled symbol: <Owner>_<Method><args> -> CodegenMangle drops the <>
       and joins with '_', e.g. TUtil_Pick_Integer.  Bare (no unit prefix):
       monomorphised on demand by any consumer, deduped by weak linkage in
       per-unit mode — same rule as class instances (BUG-004). }
-    NewMDecl.ResolvedQbeName := AOwnerType + '_' + AInstName;
+    NewMDecl.ResolvedEmitName := AOwnerType + '_' + AInstName;
 
     if Templ.Body <> nil then
     begin
@@ -6555,9 +6555,9 @@ begin
       consts are visible to other separately-compiled units, so their label
       must be exported (see NewArrayConstLabel / IsExportedConst). }
     ACD.IsExportedConst := AIsInterface;
-    if ACD.ResolvedSetQbeName = '' then
-      ACD.ResolvedSetQbeName := Self.NewArrayConstLabel(ACD.Name, AIsInterface);
-    Sym.ConstSetQbe := ACD.ResolvedSetQbeName;
+    if ACD.ResolvedSetEmitName = '' then
+      ACD.ResolvedSetEmitName := Self.NewArrayConstLabel(ACD.Name, AIsInterface);
+    Sym.ConstSetLabel := ACD.ResolvedSetEmitName;
     ACD.IntVal     := 0;
     Sym.ConstValue := 0;
   end
@@ -7002,11 +7002,11 @@ begin
           Self.ResolveConstArrayElem(CD.ArrayElements[J], ElemTD,
                                      CD.Line, CD.Col));
     CD.IsExportedConst := AIsInterface;
-    if CD.ResolvedQbeName = '' then
-      CD.ResolvedQbeName := Self.NewArrayConstLabel(CD.Name, AIsInterface);
+    if CD.ResolvedEmitName = '' then
+      CD.ResolvedEmitName := Self.NewArrayConstLabel(CD.Name, AIsInterface);
     Sym := TSymbol.Create(CD.Name, skConstant, ArrTD);
     Sym.IsGlobal := True;
-    Sym.ConstArrayQbe := CD.ResolvedQbeName;
+    Sym.ConstArrayLabel := CD.ResolvedEmitName;
     Sym.ConstArray := TStringList.Create();
     for J := 0 to CD.ArrayElements.Count - 1 do
       Sym.ConstArray.Add(CD.ArrayElements[J]);
@@ -7500,7 +7500,7 @@ begin
         { Named integer subrange: type TIdx = lo..hi;  AliasName is the
           narrowest fitting standard integer type (e.g. 'Byte').  Create a
           DISTINCT descriptor that copies the underlying int's Kind (so layout,
-          QBE type, IsNumeric/IsOrdinal and assignment all treat it as that
+          storage width, IsNumeric/IsOrdinal and assignment all treat it as that
           int), but carries IsSubrange + the lo..hi bounds so the array-index
           resolver can fold array[TIdx] -> array[lo..hi]. }
         BaseSym := FTable.Lookup(AliasName);
@@ -7963,8 +7963,7 @@ begin
             new / release old) and a program-exit release dispatched by type
             (BUG-20260720-static-var-string-unsupported lifted the string/
             dynarray restriction — the store and read paths were already type-
-            generic; native teardown already dispatched by type, and QBE's
-            EmitStaticVarReleases gained string/dynarray arms). }
+            generic; native teardown already dispatched by type). }
           ClassVarEmit := CurrentUnitPrefix() + TD.Name + '_' + FldName;
           { Single source of truth for codegen: stash the mangled label on the
             field decl (used by both backends to emit the data slot, even for a
@@ -8021,18 +8020,18 @@ begin
         if MDecl.OwningUnit = '' then
           MDecl.OwningUnit := FCurrentUnitName;
 
-        { Compute mangled key and ResolvedQbeName for overloaded methods.
+        { Compute mangled key and ResolvedEmitName for overloaded methods.
           Non-overloaded methods keep their plain name throughout. }
         MangledKey := MDecl.Name;
         if MDecl.IsOverload then
           MangledKey := MangledKey + '$' + MangleParamSig(MDecl);
-        MDecl.ResolvedQbeName := CurrentUnitPrefix() + TD.Name + '_' + MangledKey;
+        MDecl.ResolvedEmitName := CurrentUnitPrefix() + TD.Name + '_' + MangledKey;
         { Record it on the descriptor too.  A NON-VIRTUAL method has no vtable
           slot, so this is the only place the emitted symbol survives for a
           backend that later has to name it from a DESCENDANT's itab (the
           descendant may be in another unit and never see this AST). }
         if RT <> nil then
-          RT.AddMethodSym(MDecl.Name, MDecl.ResolvedQbeName);
+          RT.AddMethodSym(MDecl.Name, MDecl.ResolvedEmitName);
 
         { Resolve method-level custom attributes and reify them.  The name
           must resolve to a TCustomAttribute descendant (the [Weak] field
@@ -8072,7 +8071,7 @@ begin
           begin
             { A same-named method on a same-named type owned by a DIFFERENT
               used unit is a distinct method (it carries its own unit-prefixed
-              ResolvedQbeName), not a missing-overload duplicate — the two
+              ResolvedEmitName), not a missing-overload duplicate — the two
               types coexist under cross-unit last-wins. }
             if not SameText(TMethodDecl(Grp.Items[K]).OwningUnit,
                             MDecl.OwningUnit) then
@@ -8093,8 +8092,8 @@ begin
             field cleanup calls the symbol that was actually emitted.
             Critical when Destroy is overloaded — the bare
             '<Class>_Destroy' label is never written in that case. }
-          if (MDecl.Params.Count = 0) and (RT.DestroyResolvedQbeName = '') then
-            RT.DestroyResolvedQbeName := MDecl.ResolvedQbeName;
+          if (MDecl.Params.Count = 0) and (RT.DestroyResolvedEmitName = '') then
+            RT.DestroyResolvedEmitName := MDecl.ResolvedEmitName;
         end;
 
         { Retrieve the vtable slot assigned in the pre-pass above.
@@ -8218,7 +8217,7 @@ begin
             mints it -- a BARE Arr[I] inside a method resolves to this symbol,
             and without the label codegen read through no symbol at all
             (x86-64 segfaulted, arm64 rejected it) }
-          Sym.ConstArrayQbe := TD.Name + '_' + CD.Name;
+          Sym.ConstArrayLabel := TD.Name + '_' + CD.Name;
           Sym.ConstArray := TStringList.Create();
           for K := 0 to CD.ArrayElements.Count - 1 do
             Sym.ConstArray.Add(CD.ArrayElements[K]);
@@ -9022,12 +9021,12 @@ begin
       end;
     end;
 
-    { Compute the QBE-emit name.  Phase B: overloads get a type-code
+    { Compute the emit name.  Phase B: overloads get a type-code
       suffix ('$<codes>'); non-overloaded decls keep their plain name. }
     if ADecl.IsOverload then
-      ADecl.ResolvedQbeName := ADecl.Name + '$' + MangleParamSig(ADecl)
+      ADecl.ResolvedEmitName := ADecl.Name + '$' + MangleParamSig(ADecl)
     else
-      ADecl.ResolvedQbeName := ADecl.Name;
+      ADecl.ResolvedEmitName := ADecl.Name;
 
     { Index for call resolution — overloaded names appear multiple times.
       Nested procs (those inside another routine's body) are resolved via the
@@ -9901,8 +9900,8 @@ begin
           Decl.Line, Decl.Col);
       { A variable may not share a name with a visible ENUM MEMBER (case-
         insensitive).  Shadowing it silently retargets the member in a set
-        literal `[A, c, D]` to the variable — which is not a constant, so QBE
-        errors cryptically and native miscompiles the bitmask.  Reject it, in
+        literal `[A, c, D]` to the variable — which is not a constant, so the backend
+        miscompiles the bitmask.  Reject it, in
         the same spirit as the type-name rule above. }
       EnumShadowSym := FTable.Lookup(VarName);
       if (EnumShadowSym <> nil) and (EnumShadowSym.Kind = skConstant) and
@@ -9989,8 +9988,8 @@ begin
           CD.ArrayElements.Put(J, IntToStr(FoldConstBitOpExpr(
             TStringList(CD.ArrayElementParts.Items[J]), CD.Line, CD.Col)));
     CD.IsExportedConst := AIsInterface;
-    if CD.ResolvedQbeName = '' then
-      CD.ResolvedQbeName := Self.NewArrayConstLabel(CD.Name, AIsInterface);
+    if CD.ResolvedEmitName = '' then
+      CD.ResolvedEmitName := Self.NewArrayConstLabel(CD.Name, AIsInterface);
     Exit;
   end;
 
@@ -11855,7 +11854,7 @@ begin
   AAssign.RecordName    := RecSym.Name;  { normalise to declared casing }
   AAssign.IsClassAccess := RecSym.TypeDesc.Kind = tyClass;
   AAssign.IsGlobal      := RecSym.IsGlobal;
-  { Treat value record/array params as by-reference at QBE ABI level. }
+  { Treat value record/array params as by-reference at the ABI level. }
   AAssign.IsVarParam    := RecvSlotHoldsAddress(RecSym);
 
   RT      := TRecordTypeDesc(RecSym.TypeDesc);
@@ -12866,8 +12865,7 @@ begin
       Delphi/FPC procedure forms — GetMem(P, N), ReallocMem(P, N) — are
       deliberately not supported, and calling either in statement position
       always discards the pointer it returns.  Reject here so neither
-      backend ever sees the call (the QBE backend raised a generic
-      'Unknown procedure'; the native backend dereferenced the nil
+      backend ever sees the call (the native backend dereferenced the nil
       ResolvedDecl and crashed the compiler). }
     if SameText(ACall.Name, 'GetMem') or SameText(ACall.Name, 'ReallocMem') then
       SemanticError(
@@ -15061,8 +15059,8 @@ begin
         TIdentExpr(AExpr).ConstString := Sym.ConstString;
         { a member const ARRAY read bare (Names[I] inside a method): carry the
           blob's data label exactly as a block-level array const does }
-        if Sym.ConstArrayQbe <> '' then
-          TIdentExpr(AExpr).ConstArraySymbol := Sym.ConstArrayQbe;
+        if Sym.ConstArrayLabel <> '' then
+          TIdentExpr(AExpr).ConstArraySymbol := Sym.ConstArrayLabel;
         Result := Sym.TypeDesc;
         AExpr.ResolvedType := Result;
         Exit;
@@ -15096,7 +15094,7 @@ begin
     end;
     end;  { end else: unqualified resolution (qualified set Sym above) }
     { Var-params and value-record/array params are both passed by reference at
-      the QBE ABI level: the local slot holds a pointer, not the aggregate
+      the ABI level: the local slot holds a pointer, not the aggregate
       bytes.  Codegen must dereference the slot before reading fields. }
     TIdentExpr(AExpr).Name      := Sym.Name;  { normalise to declared casing }
     { A static (class-level) variable resolves to a single shared global whose
@@ -15161,12 +15159,12 @@ begin
     end;
     { Array const referenced bare: codegen must use the mangled data-label,
       not $Name, to avoid link collisions. }
-    if (Sym.ConstArray <> nil) and (Sym.ConstArrayQbe <> '') then
-      TIdentExpr(AExpr).ConstArraySymbol := Sym.ConstArrayQbe;
+    if (Sym.ConstArray <> nil) and (Sym.ConstArrayLabel <> '') then
+      TIdentExpr(AExpr).ConstArraySymbol := Sym.ConstArrayLabel;
     { Jumbo set const referenced bare: same mangled-label mechanism — the read
       resolves to the bitmap blob's address via the aggregate-read path. }
-    if (Sym.ConstSetBytes <> nil) and (Sym.ConstSetQbe <> '') then
-      TIdentExpr(AExpr).ConstArraySymbol := Sym.ConstSetQbe;
+    if (Sym.ConstSetBytes <> nil) and (Sym.ConstSetLabel <> '') then
+      TIdentExpr(AExpr).ConstArraySymbol := Sym.ConstSetLabel;
     { Bare class type identifier used as a value: metaclass reference.
       The result type is 'class of TFoo'; codegen emits the typeinfo
       address.  Compatibility with untyped Pointer (so 'Pointer(EError)'
@@ -15906,7 +15904,7 @@ begin
 
   AAccess.IsClassAccess := RecSym.TypeDesc.Kind = tyClass;
   AAccess.IsGlobal      := RecSym.IsGlobal;
-  { Records and static arrays are always passed by reference at the QBE ABI
+  { Records and static arrays are always passed by reference at the ABI
     level — the param slot holds a pointer.  Mark both var-params and value
     aggregate params so codegen dereferences the slot. }
   AAccess.IsVarParam    := RecvSlotHoldsAddress(RecSym);
@@ -17174,7 +17172,7 @@ begin
           [MD.ReturnTypeName]), MD.Line, MD.Col);
       MD.ResolvedReturnType := RetType;
     end;
-    MD.ResolvedQbeName := CurrentUnitPrefix() + MD.Name;
+    MD.ResolvedEmitName := CurrentUnitPrefix() + MD.Name;
     ABlock.ProcDecls.Add(MD);
     AnalyseStandaloneDecl(MD);
   end;
@@ -17321,7 +17319,7 @@ begin
       Result := ProcDesc;
       IdentExpr.ResolvedType := ProcDesc;
       { Stash the resolved decl on the address-of node so codegen can
-        read MD.ResolvedQbeName directly — keeps the mangled label
+        read MD.ResolvedEmitName directly — keeps the mangled label
         out of TIdentExpr and lets a future patch evolve the mangling
         without touching every reference site. }
       AExpr.ResolvedFreeRoutine := MD;

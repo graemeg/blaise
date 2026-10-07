@@ -315,7 +315,7 @@ TRoutineSig.IsVarArgs  serialise
 TRoutineSig.ExternalName  serialise
 TRoutineSig.CallingConv  serialise
 TRoutineSig.VTableSlot  serialise
-TRoutineSig.ResolvedQbeName  serialise
+TRoutineSig.ResolvedEmitName  serialise
 TRoutineSig.IsVirtual  serialise
 TRoutineSig.IsOverride  serialise
 TRoutineSig.IsStatic  serialise

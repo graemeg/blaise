@@ -115,7 +115,7 @@ type
                                       metaclass value (typeinfo ptr); codegen emits
                                       $typeinfo_<Name> instead of loading a variable. }
     ConstArraySymbol:  string;      { set by uSemantic — non-empty when this ident resolves
-                                      to an array const; the mangled QBE data-label codegen
+                                      to an array const; the mangled data label codegen
                                       must reference instead of $Name. }
     QualifierUnit:     string;      { set by the parser — non-empty when written as a
                                       unit-qualified reference 'Unit.Symbol'.  uSemantic
@@ -637,7 +637,7 @@ type
     ResolvedFreeRoutine: TObject;  { TMethodDecl — not owned; populated by
                                     uSemantic when Expr is a bare identifier
                                     naming a standalone routine.  Lets codegen
-                                    emit @<MDecl.ResolvedQbeName> instead of
+                                    emit @<MDecl.ResolvedEmitName> instead of
                                     @<source-name>, which matters once routine
                                     names get unit-prefixed. }
     destructor Destroy; override;
@@ -778,17 +778,17 @@ type
       set type is jumbo, because the bitmask no longer fits in IntVal (Int64).
       Nil for small sets (which keep using IntVal). }
     ConstSetBytes: TStringList;
-    { Canonical QBE data-label for an array const, set by uSemantic.  Mangled
+    { Canonical data label for an array const, set by uSemantic.  Mangled
       to a unique symbol so identically-named consts in different scopes (and
       RTL-internal consts) do not collide at link time.  Empty for non-array
       consts. }
-    ResolvedQbeName: string;
-    { Canonical, mangled QBE data-label for a JUMBO set const's byte blob
-      (mirrors ResolvedQbeName for array consts). Empty otherwise. }
-    ResolvedSetQbeName: string;
+    ResolvedEmitName: string;
+    { Canonical, mangled data label for a JUMBO set const's byte blob
+      (mirrors ResolvedEmitName for array consts). Empty otherwise. }
+    ResolvedSetEmitName: string;
     { True when this const is declared in a unit's INTERFACE section (or is a
       class/record const, which is always cross-unit visible).  Its backing
-      data label (ResolvedQbeName/ResolvedSetQbeName) is then referenced from
+      data label (ResolvedEmitName/ResolvedSetEmitName) is then referenced from
       other separately-compiled .o files and must be emitted with .globl/
       export — set by uSemantic. }
     IsExportedConst: Boolean;
@@ -821,7 +821,7 @@ type
                                   declaration has no initialiser.  Reuses the
                                   const value/fold/data-emit pipeline; semantic
                                   type-checks it against ResolvedType and (for
-                                  aggregates) mints InitConst.ResolvedQbeName. }
+                                  aggregates) mints InitConst.ResolvedEmitName. }
     constructor Create;
     destructor Destroy; override;
   end;
@@ -974,7 +974,7 @@ type
     [Unretained] ThunkDecl: TObject; { TMethodDecl — not owned; the synthesised
                                    factory function appended to the enclosing
                                    block's ProcDecls by uSemantic.  Codegen
-                                   references it by ResolvedQbeName in the
+                                   references it by ResolvedEmitName in the
                                    typeinfo attrs tables. }
     constructor Create;
     destructor Destroy; override;
@@ -1018,7 +1018,7 @@ type
                                        emit an entry in the published-method
                                        table, which TObject.MethodAddress
                                        walks at runtime. }
-    ResolvedQbeName:    string;      { set by uSemantic — mangled QBE symbol name;
+    ResolvedEmitName:    string;      { set by uSemantic — mangled symbol name;
                                        empty string means use Name verbatim }
     OwningUnit:         string;      { name of the unit that exported this routine;
                                        empty for program-scope.  Set by uSemantic;
@@ -1038,7 +1038,8 @@ type
                                        call sites may pass extra arguments after the
                                        declared (fixed) parameters.  Only valid
                                        together with 'external' (enforced by
-                                       uSemantic); QBE emits the '...' marker at the
+                                       uSemantic); the backends apply the platform's
+                                       variadic calling convention past the
                                        fixed/variadic boundary. }
     ExternalName:       string;      { C symbol name from 'external name ''c_foo'''; empty = use Pascal name }
     ExternalLib:        string;      { library from 'external ''c'' name ''malloc'''; bare name, link layer expands per platform. Also recorded unit-level in LinkLibs. }
@@ -1142,7 +1143,7 @@ type
     [Unretained] LiftedDecl: TObject; { TMethodDecl — not owned; the lifted
                                    thunk appended to the module's ProcDecls
                                    by uSemantic; codegen references it via
-                                   ResolvedQbeName }
+                                   ResolvedEmitName }
     IsArrow:      Boolean;       { True for the terse '->' form: params may
                                    be untyped (TypeName = '') and the return
                                    type is unknown until target-typed
@@ -2884,7 +2885,7 @@ begin
     for I := 0 to ASrc.ConstSetBytes.Count - 1 do
       Result.ConstSetBytes.Add(ASrc.ConstSetBytes.Strings[I]);
   end;
-  Result.ResolvedSetQbeName := ASrc.ResolvedSetQbeName;
+  Result.ResolvedSetEmitName := ASrc.ResolvedSetEmitName;
   Result.IsExportedConst := ASrc.IsExportedConst;
 end;
 

@@ -1388,14 +1388,14 @@ end;
 { The assembly symbol for a procedure/function.  An `external name '...'`
   binding names a foreign (C/asm) symbol that must be used verbatim — never
   mangled or unit-prefixed (matching the QBE backend's ExternalName handling).
-  Otherwise the semantic pass sets ResolvedQbeName for overloaded/mangled names;
+  Otherwise the semantic pass sets ResolvedEmitName for overloaded/mangled names;
   failing that use the source name. }
 function FuncSymbolFromDecl(ADecl: TMethodDecl): string;
 begin
   if (ADecl <> nil) and ADecl.IsExternal and (ADecl.ExternalName <> '') then
     Result := ADecl.ExternalName
-  else if (ADecl <> nil) and (ADecl.ResolvedQbeName <> '') then
-    Result := NativeMangle(ADecl.ResolvedQbeName)
+  else if (ADecl <> nil) and (ADecl.ResolvedEmitName <> '') then
+    Result := NativeMangle(ADecl.ResolvedEmitName)
   else if ADecl <> nil then
     Result := NativeMangle(ADecl.Name)
   else
@@ -2481,8 +2481,8 @@ begin
     begin
       if APrefix <> '' then
         Lbl := APrefix + '_' + CD.Name
-      else if CD.ResolvedSetQbeName <> '' then
-        Lbl := NativeMangle(CD.ResolvedSetQbeName)
+      else if CD.ResolvedSetEmitName <> '' then
+        Lbl := NativeMangle(CD.ResolvedSetEmitName)
       else
         Lbl := CD.Name;
       Self.Emit('.data');
@@ -2504,8 +2504,8 @@ begin
     if (CD.ArrayElements = nil) or (CD.ArrayElements.Count = 0) then Continue;
     if APrefix <> '' then
       Lbl := APrefix + '_' + CD.Name
-    else if CD.ResolvedQbeName <> '' then
-      Lbl := NativeMangle(CD.ResolvedQbeName)
+    else if CD.ResolvedEmitName <> '' then
+      Lbl := NativeMangle(CD.ResolvedEmitName)
     else
       Lbl := CD.Name;
     IsStr := SameText(CD.ArrayElemType, 'string');
@@ -2546,8 +2546,8 @@ begin
       CD := TConstDecl(Decl.Body.ConstDecls.Items[J]);
       if not CD.IsArrayConst then Continue;
       if (CD.ArrayElements = nil) or (CD.ArrayElements.Count = 0) then Continue;
-      if CD.ResolvedQbeName <> '' then
-        Lbl := NativeMangle(CD.ResolvedQbeName)
+      if CD.ResolvedEmitName <> '' then
+        Lbl := NativeMangle(CD.ResolvedEmitName)
       else
         Lbl := CD.Name;
       IsStr := SameText(CD.ArrayElemType, 'string');
@@ -2610,8 +2610,8 @@ begin
         CD := TConstDecl(Decl.Body.ConstDecls.Items[K]);
         if not CD.IsArrayConst then Continue;
         if (CD.ArrayElements = nil) or (CD.ArrayElements.Count = 0) then Continue;
-        if CD.ResolvedQbeName <> '' then
-          Lbl := NativeMangle(CD.ResolvedQbeName)
+        if CD.ResolvedEmitName <> '' then
+          Lbl := NativeMangle(CD.ResolvedEmitName)
         else
           Lbl := CD.Name;
         IsStr := SameText(CD.ArrayElemType, 'string');
@@ -2783,12 +2783,12 @@ begin
   end;
 end;
 
-{ Compute the mangled emit name for a class method: ResolvedQbeName if set,
+{ Compute the mangled emit name for a class method: ResolvedEmitName if set,
   else TypeName_MethodName, both passed through NativeMangle. }
 function MethodEmitNameNative(ADecl: TMethodDecl; const ATypeName, AMethodName: string): string;
 begin
-  if (ADecl <> nil) and (ADecl.ResolvedQbeName <> '') then
-    Result := NativeMangle(ADecl.ResolvedQbeName)
+  if (ADecl <> nil) and (ADecl.ResolvedEmitName <> '') then
+    Result := NativeMangle(ADecl.ResolvedEmitName)
   else if ADecl <> nil then
     Result := NativeMangle(ATypeName + '_' + ADecl.Name)
   else
@@ -3244,8 +3244,8 @@ begin
     begin
       if Walk.HasDestroyMethod then
       begin
-        if Walk.DestroyResolvedQbeName <> '' then
-          DestroyName := NativeMangle(Walk.DestroyResolvedQbeName)
+        if Walk.DestroyResolvedEmitName <> '' then
+          DestroyName := NativeMangle(Walk.DestroyResolvedEmitName)
         else
           DestroyName := NativeMangle(Walk.Name) + '_Destroy';
         Self.Emit(#9'movq %rbx, %rdi');
@@ -4545,8 +4545,8 @@ begin
         else
         begin
           MDecl := FindMethodInClassDef(GI.ClassDef, MethName);
-          if (MDecl <> nil) and (MDecl.ResolvedQbeName <> '') then
-            MethRef := NativeMangle(MDecl.ResolvedQbeName)
+          if (MDecl <> nil) and (MDecl.ResolvedEmitName <> '') then
+            MethRef := NativeMangle(MDecl.ResolvedEmitName)
           else
             { Not declared by THIS instance — the body lives on an ancestor,
               so resolve through the vtable / descriptor chain. }
@@ -5500,7 +5500,7 @@ begin
   end;
 
   { Generic METHOD instances (method-level <T>): each monomorphised body.  Its
-    ResolvedQbeName encodes <Owner>_<Method><args> and OwnerTypeName is set, so
+    ResolvedEmitName encodes <Owner>_<Method><args> and OwnerTypeName is set, so
     EmitFunctionDef emits it with the implicit Self like any method. }
   for I := 0 to AGenericMethodInstances.Count - 1 do
   begin
@@ -10629,7 +10629,7 @@ begin
     begin
       if AOE.ResolvedFreeRoutine <> nil then
         Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
-          [NativeMangle(TMethodDecl(AOE.ResolvedFreeRoutine).ResolvedQbeName)]))
+          [NativeMangle(TMethodDecl(AOE.ResolvedFreeRoutine).ResolvedEmitName)]))
       else
         Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
           [Self.GlobalSymName(TIdentExpr(AOE.Expr).Name)]));
@@ -22684,15 +22684,15 @@ begin
       NestedDecl := TMethodDecl(ADecl.Body.ProcDecls.Items[I]);
       if NestedDecl.Body = nil then Continue;
       { Prefix with the outer routine's RESOLVED symbol, not its bare name
-        (BUG-20260720-method-nested-proc-mangle): a method's ResolvedQbeName
+        (BUG-20260720-method-nested-proc-mangle): a method's ResolvedEmitName
         carries the class ('TFoo_DoIt'), so its Inner is 'TFoo_DoIt_Inner' —
         distinct from another class's DoIt.Inner — and a multi-level chain
         composes to 'L1_L2_L3'.  Un-mangled name-space; platform prefix added
         downstream. }
-      if ADecl.ResolvedQbeName <> '' then
-        NestedDecl.ResolvedQbeName := ADecl.ResolvedQbeName + '_' + NestedDecl.Name
+      if ADecl.ResolvedEmitName <> '' then
+        NestedDecl.ResolvedEmitName := ADecl.ResolvedEmitName + '_' + NestedDecl.Name
       else
-        NestedDecl.ResolvedQbeName := ADecl.Name + '_' + NestedDecl.Name;
+        NestedDecl.ResolvedEmitName := ADecl.Name + '_' + NestedDecl.Name;
       FDbgOuterDecl := ADecl;
       Self.EmitFunctionDef(NestedDecl, False);
     end;

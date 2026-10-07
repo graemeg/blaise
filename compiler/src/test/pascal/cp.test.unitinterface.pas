@@ -3147,7 +3147,7 @@ begin
       M := TRoutineSig(E.Methods.Items[0]);
       AssertEquals('method name', 'Speak', M.Name);
       AssertTrue('IsVirtual', M.IsVirtual);
-      AssertEquals('ResolvedQbeName', 'U_TFoo_Speak', M.ResolvedQbeName);
+      AssertEquals('ResolvedEmitName', 'U_TFoo_Speak', M.ResolvedEmitName);
       AssertTrue('VTableSlot assigned', M.VTableSlot >= 0);
     finally
       Round.Free();
@@ -3195,7 +3195,7 @@ begin
       begin
         M := TRoutineSig(E.Methods.Items[I]);
         AssertEquals('overload method name', 'Add', M.Name);
-        AssertTrue('IsOverload preserved for ' + M.ResolvedQbeName, M.IsOverload);
+        AssertTrue('IsOverload preserved for ' + M.ResolvedEmitName, M.IsOverload);
       end;
     finally
       Round.Free();

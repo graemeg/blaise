@@ -19,7 +19,7 @@
   as two haystacks: a field counts as covered when its `.Field`
   identifier appears in both.  Catches the class of bug where a field on
   one of those types is dropped from one side of the META / routine
-  serialiser (e.g. ResolvedQbeName, VTableSlot, ImplUsedUnits,
+  serialiser (e.g. ResolvedEmitName, VTableSlot, ImplUsedUnits,
   HasInitialization, a TMethodParam default-value flag).
 
   Catches the two failure modes from docs/extending-ast.adoc:

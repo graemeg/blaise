@@ -81,9 +81,10 @@ type
     procedure TestRun_CrossUnitIntf_InheritedCasingMismatch;
     procedure TestRun_CrossUnitIntf_InheritedVirtualStillUsesVTable;
     procedure TestRun_CrossUnitIntf_OverrideWins;
-    { Same shapes on the QBE backend, whose unit path emitted no itab at all }
-    procedure TestRun_CrossUnitIntf_QBE_DerivedGetsOwnItab;
-    procedure TestRun_CrossUnitIntf_QBE_MultiHopAndIntfAncestor;
+    { A derived class that inherits its interface gets its own itab across
+      units (the removed QBE backend's unit path once emitted none) }
+    procedure TestRun_CrossUnitIntf_DerivedGetsOwnItab;
+    procedure TestRun_CrossUnitIntf_MultiHopAndIntfAncestor;
     { Generic INSTANCE inheriting its interface from a generic ancestor }
     procedure TestRun_GenericInstance_InheritedIntfGetsItab;
   end;
@@ -978,7 +979,7 @@ program P;
   AssertEquals('output', 'DERIVED', Trim(Output));
 end;
 
-procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_QBE_DerivedGetsOwnItab;
+procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_DerivedGetsOwnItab;
 var
   Output: string; RCode: Integer;
 begin
@@ -1037,7 +1038,7 @@ program P;
   AssertEquals('output', 'derived-qbe-ok', Trim(Output));
 end;
 
-procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_QBE_MultiHopAndIntfAncestor;
+procedure TE2EUsesChainTests.TestRun_CrossUnitIntf_MultiHopAndIntfAncestor;
 var
   Output: string; RCode: Integer;
 begin

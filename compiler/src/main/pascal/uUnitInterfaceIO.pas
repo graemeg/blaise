@@ -141,7 +141,7 @@ const
                         v9: free-routine external-name linkage now
                           round-trips.  Each ROUT entry grew two trailing fields
                           (IsExternal bool + ExternalName lpstr) after
-                          ResolvedQbeName, so a routine declared `external name
+                          ResolvedEmitName, so a routine declared `external name
                           'socket'` links to the C symbol from a cached .bif (not
                           just from source).  v8 readers must reject and recompile.
                         v8: named integer subranges now round-trip.
@@ -199,7 +199,7 @@ const
                               (e.g. 'var Ptr: ^T')
                             - Exit(value) carries its return value
                             - parameter default values are serialised
-                            - free-routine ResolvedQbeName, generic-class template
+                            - free-routine ResolvedEmitName, generic-class template
                               properties, and TRoutineSig vtable facts
                               (VTableSlot/IsVirtual/IsOverride) round-trip.
                           Old (v1) .bif are rejected and recompiled from source. }
@@ -564,7 +564,7 @@ begin
 end;
 
 { Per-method routine sig including class-method extras
-  (VTableSlot, ResolvedQbeName, IsVirtual, IsOverride).  Used by
+  (VTableSlot, ResolvedEmitName, IsVirtual, IsOverride).  Used by
   class + interface payloads. }
 function EncodeMethodSig(AR: TRoutineSig): string;
 var
@@ -577,7 +577,7 @@ begin
     EncodeQualRefParts(AR.ReturnType.UnitName, AR.ReturnType.TypeName) +
     EncodeBool (AR.IsVirtual) +
     EncodeBool (AR.IsOverride) +
-    EncodeLpstr(AR.ResolvedQbeName) +
+    EncodeLpstr(AR.ResolvedEmitName) +
     EncodeLpstr(IntToStr(AR.VTableSlot)) +
     { static-method flag — distinct from VTableSlot (both static and final
       non-virtual instance methods carry slot -1). }
@@ -1040,15 +1040,15 @@ begin
                 EncodeExpr(P.DefaultValue);
       end;
       Line := Line + EncodeLpstr(R.CallingConv);
-      { ResolvedQbeName — the mangled link symbol.  Required for overloaded
+      { ResolvedEmitName — the mangled link symbol.  Required for overloaded
         free routines (e.g. GCHashOf): each overload has a distinct mangled
         name ('..._GCHashOf_D_S' etc.).  Without it the importer falls back
         to the unmangled 'Unit_Name' for every overload, so a call site emits
         a reference to a symbol that does not exist in the cached .o. }
-      Line := Line + EncodeLpstr(R.ResolvedQbeName);
+      Line := Line + EncodeLpstr(R.ResolvedEmitName);
       { external-name linkage: a free routine declared `external name 'socket'`
         emits NO Blaise wrapper symbol — the call site must link directly to the
-        C name.  ResolvedQbeName carries the mangled 'Unit_Name' (which does not
+        C name.  ResolvedEmitName carries the mangled 'Unit_Name' (which does not
         exist for an external), so IsExternal + ExternalName must round-trip or a
         caller compiled against the cached .bif emits an undefined 'Unit_Name'
         reference.  (Before v9 these were dropped; Net.Sockets.Socket linked from
@@ -2404,7 +2404,7 @@ begin
   Result.ReturnType  := MakeQualRef(RefUnit, RefType);
   Result.IsVirtual   := DecodeBool(AText, APos);
   Result.IsOverride  := DecodeBool(AText, APos);
-  Result.ResolvedQbeName := ReadLpstrAt(AText, APos);
+  Result.ResolvedEmitName := ReadLpstrAt(AText, APos);
   Result.VTableSlot  := StrToInt(ReadLpstrAt(AText, APos));
   { Order must mirror EncodeMethodSig: IsStatic follows VTableSlot, then
     IsOverload, then the visibility ordinal. }
@@ -3003,7 +3003,7 @@ begin
       R.Params.Add(Param);
     end;
     R.CallingConv := ReadLpstrAt(AText, APos);
-    R.ResolvedQbeName := ReadLpstrAt(AText, APos);
+    R.ResolvedEmitName := ReadLpstrAt(AText, APos);
     R.IsExternal := DecodeBool(AText, APos);
     R.ExternalName := ReadLpstrAt(AText, APos);
     R.IsVarArgs := DecodeBool(AText, APos);
