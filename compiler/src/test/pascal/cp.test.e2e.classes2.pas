@@ -22,6 +22,8 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_ClassARC_ReleaseTiming;
+    procedure TestRun_ClassBasics_Combined;
     { method pointers ('of object'); moved from cp.test.proctypes_ofobject,
       where they ran through a private GenIR -> qbe -> link pipeline }
     procedure TestRun_MethodPtr_NoArgs;
@@ -3091,6 +3093,225 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'field-direct' + LE + 'field-direct' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_ClassBasics_Combined;
+const
+  {
+    Class basics end to end: a global object's field written and read, a method
+    reading a program global, a separately implemented method called with a
+    different-case spelling, the vtable installed by a no-arg and an argument
+    constructor (a virtual call then dispatches), a constructor called through a
+    type alias running the user body, a forward-declared class (one vtable), a
+    forward declaration whose completing spelling differs in case, an overloaded
+    destructor reached through Free, and a string parameter passed to a method
+    (leak-checked). }
+  Src = '''
+    program P;
+    var gValue: Integer;
+    type
+      TBase = class
+        X: Integer;
+        procedure SetX(AVal: Integer);
+        function GetValue: Integer;
+        function Kind: string; virtual;
+        procedure Bar(S: string);
+      end;
+      TDer = class(TBase)
+        FN: Integer;
+        constructor Create(N: Integer);
+        function Kind: string; override;
+      end;
+      TThing = class
+        X: Integer;
+        constructor Create();
+      end;
+      TAlias = TThing;
+      TFwd = class;
+      TFwd = class
+        Y: Integer;
+      end;
+      TState = class;
+      Tstate = class
+        FName: string;
+      end;
+      TOv = class
+      public
+        Buf: string;
+        destructor Destroy(Why: Integer); overload;
+        destructor Destroy; overload;
+      end;
+    procedure TBase.SetX(AVal: Integer);
+    begin
+      Self.X := AVal
+    end;
+    function TBase.GetValue: Integer;
+    begin
+      Result := gValue + X
+    end;
+    function TBase.Kind: string;
+    begin
+      Result := 'base'
+    end;
+    procedure TBase.Bar(S: string);
+    begin
+      WriteLn('bar ', S)
+    end;
+    constructor TDer.Create(N: Integer);
+    begin
+      FN := N
+    end;
+    function TDer.Kind: string;
+    begin
+      Result := 'der'
+    end;
+    constructor TThing.Create();
+    begin
+      X := 7
+    end;
+    destructor TOv.Destroy(Why: Integer);
+    begin
+      WriteLn('destroy ', Why)
+    end;
+    destructor TOv.Destroy;
+    begin
+      WriteLn('destroy')
+    end;
+    var
+      F: TBase; D: TDer; B: TBase; A: TThing; W: TFwd; S: Tstate; O: TOv;
+    begin
+      F := TBase.Create();
+      F.X := 42;
+      WriteLn(F.X);
+      gValue := 100;
+      F.setx(5);
+      WriteLn(F.GetValue(), ' ', F.Kind());
+      D := TDer.Create(9);
+      B := D;
+      WriteLn(B.Kind(), ' ', D.FN);
+      A := TAlias.Create();
+      WriteLn(A.X);
+      W := TFwd.Create();
+      W.Y := 3;
+      S := Tstate.Create();
+      S.FName := 'st' + 'ate';
+      WriteLn(W.Y, ' ', S.FName);
+      F.Bar('heap-' + 'arg');
+      O := TOv.Create();
+      O.Buf := 'b';
+      O.Free();
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '42' + LE +
+    '105 base' + LE +
+    'der 9' + LE +
+    '7' + LE +
+    '3 state' + LE +
+    'bar heap-arg' + LE +
+    'destroy' + LE +
+    'end' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'bar heap-arg');
+end;
+
+procedure TE2EClasses2Tests.TestRun_ClassARC_ReleaseTiming;
+const
+  {
+    ARC release timing for class references, made visible by destructors that
+    print: assigning nil releases at once, Free releases immediately and nils the
+    variable so scope exit does not release again, a constructor with arguments
+    leaves exactly one reference (so nil-ing the only variable destroys it), a
+    field holding a shared child keeps it alive until the last owner goes and
+    the owner's field cleanup releases it, and scope exit releases what is left. }
+  Src = '''
+    program P;
+    type
+      TInner = class
+        V: Integer;
+        destructor Destroy; override;
+      end;
+      TOuter = class
+        Tag: string;
+        Child: TInner;
+        destructor Destroy; override;
+      end;
+      TCtor = class
+        FN: Integer;
+        constructor Create(N: Integer);
+        destructor Destroy; override;
+      end;
+    destructor TInner.Destroy;
+    begin
+      WriteLn('inner ', V, ' gone');
+      inherited Destroy()
+    end;
+    destructor TOuter.Destroy;
+    begin
+      WriteLn('outer ', Tag, ' gone');
+      inherited Destroy()
+    end;
+    constructor TCtor.Create(N: Integer);
+    begin
+      FN := N
+    end;
+    destructor TCtor.Destroy;
+    begin
+      WriteLn('ctor ', FN, ' gone');
+      inherited Destroy()
+    end;
+    procedure Run;
+    var A, B: TOuter; I: TInner; C: TCtor; Last: TInner;
+    begin
+      I := TInner.Create();
+      I.V := 1;
+      I := nil;
+      WriteLn('after nil');
+      I := TInner.Create();
+      I.V := 2;
+      I.Free();
+      WriteLn('after free ', I = nil);
+      C := TCtor.Create(3);
+      C := nil;
+      WriteLn('after ctor nil');
+      A := TOuter.Create();
+      A.Tag := 'a';
+      B := TOuter.Create();
+      B.Tag := 'b';
+      A.Child := TInner.Create();
+      A.Child.V := 4;
+      B.Child := A.Child;
+      A := nil;
+      WriteLn('child shared');
+      B := nil;
+      WriteLn('child released');
+      Last := TInner.Create();
+      Last.V := 5
+    end;
+    begin
+      Run();
+      WriteLn('done')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'inner 1 gone' + LE +
+    'after nil' + LE +
+    'inner 2 gone' + LE +
+    'after free True' + LE +
+    'ctor 3 gone' + LE +
+    'after ctor nil' + LE +
+    'outer a gone' + LE +
+    'child shared' + LE +
+    'outer b gone' + LE +
+    'inner 4 gone' + LE +
+    'child released' + LE +
+    'inner 5 gone' + LE +
+    'done' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'child released');
 end;
 
 initialization

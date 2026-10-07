@@ -253,7 +253,7 @@ found, for a ruling before they are migrated.
 | `cp.test.forin.pas` | 36 | pending
 | `cp.test.interfaces.pas` | 33 | pending
 | `cp.test.exceptions.pas` | 27 | pending
-| `cp.test.classes.pas` | 26 | pending
+| `cp.test.classes.pas` | 26 | done: 24 behaviour (e2e)
 | `cp.test.stringops.pas` | 25 | done: 23 behaviour (e2e)
 | `cp.test.proctypes.pas` | 25 | done: 13 behaviour (e2e), 10 front-end (Analyse)
 | `cp.test.selfhosting.pas` | 20 | done: 18 behaviour (e2e)
