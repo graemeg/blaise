@@ -75,10 +75,9 @@ const
 
   { The codegen units a flag must be read by.  Keep the labels short - they
     are the status-file column names. }
-  BACKEND_COUNT = 3;
-  BackendLabel: array[0..2] of string = ('qbe', 'x86_64', 'arm64');
-  BackendPath:  array[0..2] of string = (
-    'compiler/src/main/pascal/blaise.codegen.qbe.pas',
+  BACKEND_COUNT = 2;
+  BackendLabel: array[0..1] of string = ('x86_64', 'arm64');
+  BackendPath:  array[0..1] of string = (
     'compiler/src/main/pascal/blaise.codegen.native.x86_64.pas',
     'compiler/src/main/pascal/blaise.codegen.native.arm64.pas');
 
@@ -93,15 +92,15 @@ type
   public
     ClsName:   string;
     FieldName: string;
-    Counts:    array[0..2] of Integer;
-    Expected:  array[0..2] of Integer;   { -1 = 'unused' }
+    Counts:    array[0..1] of Integer;
+    Expected:  array[0..1] of Integer;   { -1 = 'unused' }
     HasStatus: Boolean;
   end;
 
 var
   Root:  string;
   Rows:  TObjectList;
-  Hay:   array[0..2] of string;   { each backend's comment-stripped text }
+  Hay:   array[0..1] of string;   { each backend's comment-stripped text }
 
 { ------------------------------------------------------------------ }
 { Small helpers                                                        }
@@ -371,7 +370,7 @@ begin
   Outp := TStringList.Create();
   try
     Outp.Add('# flag-coverage status - one line per codegen annotation flag.');
-    Outp.Add('# Format: <TClass>.<Field>  <qbe> <x86_64> <arm64>');
+    Outp.Add('# Format: <TClass>.<Field>  <x86_64> <arm64>');
     Outp.Add('#   a number = how many times that backend reads the flag');
     Outp.Add('#   unused   = that backend deliberately never reads it');
     Outp.Add('#');
@@ -482,7 +481,7 @@ begin
       Line := Line + IntToStr(Row.Counts[B]);
       while Length(Line) < 44 + (B + 1) * 9 do Line := Line + ' ';
     end;
-    if (Row.Counts[0] = 0) or (Row.Counts[1] = 0) or (Row.Counts[2] = 0) then
+    if (Row.Counts[0] = 0) or (Row.Counts[1] = 0) then
       Line := Line + '  <-- zero in a backend';
     WriteLn(Line);
   end;
