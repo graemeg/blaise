@@ -3903,6 +3903,18 @@ begin
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind =
        tyDynArray) and
+     SameText(TFuncCallExpr(AExpr).Name, 'Low') then
+  begin
+    { Low(D) of a dynamic array is always 0 }
+    Self.Emit(#9'movz x0, #0');
+    Exit;
+  end;
+  if (AExpr is TFuncCallExpr) and
+     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+     (TFuncCallExpr(AExpr).Args.Count = 1) and
+     (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
+     (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind =
+       tyDynArray) and
      SameText(TFuncCallExpr(AExpr).Name, 'High') then
   begin
     { High(D) = Length(D) - 1 }

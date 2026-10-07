@@ -20,15 +20,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TDynArrayTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
-    function CountOccurrences(const AHaystack, ANeedle: string): Integer;
   published
     { ------------------------------------------------------------------ }
     { Parser                                                               }
@@ -49,16 +47,6 @@ type
     { ------------------------------------------------------------------ }
     { Codegen                                                              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_DynArray_Var_AllocatedAsPointerSlot;
-    procedure TestCodegen_DynArray_Var_ZeroInitialised;
-    procedure TestCodegen_DynArray_SetLength_CallsRTL;
-    procedure TestCodegen_DynArray_Length_CallsRTL;
-    procedure TestCodegen_DynArray_Read_ComputesOffset;
-    procedure TestCodegen_DynArray_Write_ComputesOffset;
-    procedure TestCodegen_DynArray_High_CallsRTL;
-    procedure TestCodegen_DynArray_Low_ReturnsZero;
-    procedure TestCodegen_DynArray_AddrOfElement_ComputesOffset;
-    procedure TestCodegen_DynArray_AddrOfRecordFieldElement;
     procedure TestSemantic_DynArray_High_Accepted;
     procedure TestSemantic_DynArray_Low_Accepted;
 
@@ -66,16 +54,12 @@ type
     { Record elements: a[i] := r copies; a[i].F := v assigns in place      }
     { ------------------------------------------------------------------ }
     procedure TestParse_DynArray_RecordElem_FieldAssign_Accepted;
-    procedure TestCodegen_DynArray_RecordElem_Write_FieldwiseCopy;
-    procedure TestCodegen_DynArray_RecordElem_FieldAssign_StringARC;
 
     { ------------------------------------------------------------------ }
     { Array-typed FIELDS: r.A[i] := v writes the element, not the array    }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_RecordField_DynArrayElemAssign_Accepted;
     procedure TestParse_ChainedField_DynArrayElemAssign_Accepted;
-    procedure TestCodegen_RecordField_DynArrayElemWrite_StoresElement;
-    procedure TestCodegen_ClassField_DynArrayElemWrite_StoresElement;
   end;
 
 implementation
@@ -94,30 +78,6 @@ begin
   Result := ParseSrc(ASrc);
   A := TSemanticAnalyser.Create();
   try A.Analyse(Result); finally A.Free(); end;
-end;
-
-function TDynArrayTests.GenIR(const ASrc: string): string;
-var Prog: TProgram; CG: TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try CG.Generate(Prog); Result := CG.GetOutput(); finally CG.Free(); end;
-  finally Prog.Free(); end;
-end;
-
-function TDynArrayTests.CountOccurrences(
-  const AHaystack, ANeedle: string): Integer;
-var Pos2, I: Integer;
-begin
-  Result := 0;
-  I := 0;
-  repeat
-    Pos2 := PosEx(ANeedle, AHaystack, I);
-    if Pos2 < 0 then Break;
-    Inc(Result);
-    I := Pos2 + Length(ANeedle);
-  until False;
 end;
 
 { ------------------------------------------------------------------ }
@@ -266,112 +226,6 @@ end;
 { Codegen tests                                                        }
 { ------------------------------------------------------------------ }
 
-procedure TDynArrayTests.TestCodegen_DynArray_Var_AllocatedAsPointerSlot;
-var IR: string;
-begin
-  IR := GenIR('''
-      program Prg;
-      procedure Foo;
-      var A: array of Integer;
-      begin
-      end;
-      begin
-      end.
-      ''');
-  AssertTrue('alloc8 8 for dyn array var',
-    Self.CountOccurrences(IR, 'alloc8 8') > 0);
-end;
-
-procedure TDynArrayTests.TestCodegen_DynArray_Var_ZeroInitialised;
-var IR: string;
-begin
-  IR := GenIR('''
-      program Prg;
-      procedure Foo;
-      var A: array of Integer;
-      begin
-      end;
-      begin
-      end.
-      ''');
-  AssertTrue('storel 0 for nil init',
-    Self.CountOccurrences(IR, 'storel 0,') > 0);
-end;
-
-procedure TDynArrayTests.TestCodegen_DynArray_SetLength_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR('''
-      program Prg;
-      procedure Foo;
-      var A: array of Integer;
-      begin
-        SetLength(A, 5);
-      end;
-      begin
-      end.
-      ''');
-  AssertTrue('calls _DynArraySetLength',
-    Self.CountOccurrences(IR, 'call $_DynArraySetLength(') > 0);
-end;
-
-procedure TDynArrayTests.TestCodegen_DynArray_Length_CallsRTL;
-var IR: string;
-begin
-  IR := GenIR('''
-      program Prg;
-      procedure Foo;
-      var A: array of Integer; N: Integer;
-      begin
-        N := Length(A);
-      end;
-      begin
-      end.
-      ''');
-  AssertTrue('calls _DynArrayLength',
-    Self.CountOccurrences(IR, 'call $_DynArrayLength(') > 0);
-end;
-
-procedure TDynArrayTests.TestCodegen_DynArray_Read_ComputesOffset;
-var IR: string;
-begin
-  IR := GenIR('''
-      program Prg;
-      procedure Foo;
-      var A: array of Integer; X: Integer;
-      begin
-        SetLength(A, 3);
-        X := A[1];
-      end;
-      begin
-      end.
-      ''');
-  { Element read: loads data ptr, computes offset via mul + add, then loadw }
-  AssertTrue('mul for element offset in read',
-    Self.CountOccurrences(IR, 'mul') > 0);
-  AssertTrue('loadw for integer element read',
-    Self.CountOccurrences(IR, 'loadw') > 0);
-end;
-
-procedure TDynArrayTests.TestCodegen_DynArray_Write_ComputesOffset;
-var IR: string;
-begin
-  IR := GenIR('''
-      program Prg;
-      procedure Foo;
-      var A: array of Integer;
-      begin
-        SetLength(A, 3);
-        A[0] := 99;
-      end;
-      begin
-      end.
-      ''');
-  { Element write: storew for Integer element }
-  AssertTrue('storew for integer element write',
-    Self.CountOccurrences(IR, 'storew') > 0);
-end;
-
 procedure TDynArrayTests.TestSemantic_DynArray_High_Accepted;
 var Prog: TProgram;
 begin
@@ -406,92 +260,6 @@ begin
   Prog.Free();
 end;
 
-procedure TDynArrayTests.TestCodegen_DynArray_High_CallsRTL;
-var IR: string;
-begin
-  { High(dynArr) = DynArrayLength(dynArr) - 1; must call _DynArrayLength }
-  IR := GenIR('''
-      program Prg;
-      type Tar = array of Integer;
-      var ar: Tar;
-          i: Integer;
-      begin
-        SetLength(ar, 15);
-        i := High(ar);
-        WriteLn(i);
-      end.
-      ''');
-  AssertTrue('calls _DynArrayLength for High(dynArr)',
-    Pos('_DynArrayLength', IR) > 0);
-end;
-
-procedure TDynArrayTests.TestCodegen_DynArray_Low_ReturnsZero;
-var IR: string;
-begin
-  { Low(dynArr) is always 0; must emit a copy of 0 }
-  IR := GenIR('''
-      program Prg;
-      type Tar = array of Integer;
-      var ar: Tar;
-          i: Integer;
-      begin
-        i := Low(ar);
-        WriteLn(i);
-      end.
-      ''');
-  AssertTrue('emits constant 0 for Low(dynArr)',
-    Pos('copy 0', IR) > 0);
-end;
-
-procedure TDynArrayTests.TestCodegen_DynArray_AddrOfElement_ComputesOffset;
-var IR: string;
-begin
-  { Regression: @A[i] on a dyn-array used to raise "Unsupported L-value
-    form for var argument" because EmitAddrOfExpr only handled static
-    and open arrays.  The fix mirrors the open-array shape (element
-    size from TDynArrayTypeDesc.ElementType.RawSize, no LowBound).
-    Verify the offset arithmetic + base load are emitted without
-    going through a temporary aggregate copy. }
-  IR := GenIR('''
-      program Prg;
-      type TRec = record X: Integer; end;
-           PRec = ^TRec;
-      var A: array of TRec;
-          P: PRec;
-      begin
-        SetLength(A, 3);
-        P := @A[1]
-      end.
-      ''');
-  AssertTrue('mul for element offset in @A[i]',
-    Self.CountOccurrences(IR, 'mul') > 0);
-  AssertTrue('add to combine base + offset',
-    Self.CountOccurrences(IR, 'add') > 0);
-end;
-
-procedure TDynArrayTests.TestCodegen_DynArray_AddrOfRecordFieldElement;
-var IR: string;
-begin
-  IR := GenIR('''
-      program Prg;
-      type TRec = record X: Integer; end;
-           PRec = ^TRec;
-           THolder = record Items: array of TRec; end;
-      var A: array of TRec;
-          H: THolder;
-          P: PRec;
-      begin
-        SetLength(A, 3);
-        H.Items := A;
-        P := @H.Items[1]
-      end.
-      ''');
-  AssertTrue('mul for element offset in @Rec.DynArr[i]',
-    Self.CountOccurrences(IR, 'mul') > 0);
-  AssertTrue('add to combine base + offset',
-    Self.CountOccurrences(IR, 'add') > 0);
-end;
-
 procedure TDynArrayTests.TestParse_DynArray_RecordElem_FieldAssign_Accepted;
 var Prog: TProgram;
 begin
@@ -510,53 +278,6 @@ begin
       ''');
   AssertNotNil('program with a[i].Field := v parses', Prog);
   Prog.Free();
-end;
-
-procedure TDynArrayTests.TestCodegen_DynArray_RecordElem_Write_FieldwiseCopy;
-var IR: string;
-begin
-  { a[i] := r with a record element must copy the record contents
-    (ARC-aware fieldwise copy), not store the address of r into the
-    element slot. }
-  IR := GenIR('''
-      program Prg;
-      type TRec = record Name: String; Number: Integer; end;
-      procedure Foo;
-      var A: array of TRec;
-          R: TRec;
-      begin
-        SetLength(A, 2);
-        A[0] := R;
-      end;
-      begin
-      end.
-      ''');
-  AssertTrue('string field retained during element copy',
-    Self.CountOccurrences(IR, 'call $_StringAddRef') > 0);
-  AssertEquals('record address must not be stored into the element',
-    0, Self.CountOccurrences(IR, 'storel %_var_R,'));
-end;
-
-procedure TDynArrayTests.TestCodegen_DynArray_RecordElem_FieldAssign_StringARC;
-var IR: string;
-begin
-  { a[i].Name := s must write through the element address with string ARC
-    (retain new value, release old element field). }
-  IR := GenIR('''
-      program Prg;
-      type TRec = record Name: String; Number: Integer; end;
-      var A: array of TRec;
-          S: String;
-      begin
-        SetLength(A, 1);
-        S := 'hello';
-        A[0].Name := S;
-      end.
-      ''');
-  AssertTrue('retains the new string value',
-    Self.CountOccurrences(IR, 'call $_StringAddRef') > 0);
-  AssertTrue('releases the old element field value',
-    Self.CountOccurrences(IR, 'call $_StringRelease') > 0);
 end;
 
 procedure TDynArrayTests.TestSemantic_RecordField_DynArrayElemAssign_Accepted;
@@ -600,53 +321,6 @@ begin
       ''');
   AssertNotNil('chained field element assign parses', Prog);
   Prog.Free();
-end;
-
-procedure TDynArrayTests.TestCodegen_RecordField_DynArrayElemWrite_StoresElement;
-var IR: string;
-begin
-  IR := GenIR('''
-      program Prg;
-      type
-        TIA = array of Integer;
-        TR  = record A: TIA; end;
-      procedure Foo;
-      var r: TR;
-      begin
-        SetLength(r.A, 3);
-        r.A[1] := 10;
-      end;
-      begin
-      end.
-      ''');
-  AssertTrue('element offset arithmetic emitted',
-    Self.CountOccurrences(IR, 'mul') > 0);
-  AssertTrue('integer element stored with storew',
-    Self.CountOccurrences(IR, 'storew') > 0);
-end;
-
-procedure TDynArrayTests.TestCodegen_ClassField_DynArrayElemWrite_StoresElement;
-var IR: string;
-begin
-  IR := GenIR('''
-      program Prg;
-      type
-        TIA = array of Integer;
-        TC  = class A: TIA; end;
-      procedure Foo;
-      var c: TC;
-      begin
-        c := TC.Create();
-        SetLength(c.A, 3);
-        c.A[1] := 10;
-      end;
-      begin
-      end.
-      ''');
-  AssertTrue('element offset arithmetic emitted',
-    Self.CountOccurrences(IR, 'mul') > 0);
-  AssertTrue('integer element stored with storew',
-    Self.CountOccurrences(IR, 'storew') > 0);
 end;
 
 initialization

@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_DynArray_BoundsElementsAddressesRecords;
     procedure TestRun_SetLengthFillSum;
     procedure TestRun_LengthAndHigh;
     procedure TestRun_GrowPreservesContents;
@@ -750,6 +751,91 @@ begin
     leave non-narrow types untouched. }
   AssertRunsOnAll(Src, '0' + LE + '44' + LE + '255' + LE + '0' + LE +
     '-32768' + LE + '32767' + LE + '-2147483648' + LE + '4294967296' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_DynArray_BoundsElementsAddressesRecords;
+const
+  {
+    Dynamic arrays end to end: a fresh variable is empty, SetLength / Length /
+    High / Low, element read and write (scaled offsets), @A[I] and
+    @Holder.Items[I] addressing the element in place, a record element copied
+    field by field (the copy is independent and its string retained, not the
+    source's address stored), a string field written through A[I].Name, and an
+    element of a dyn-array field of a record and of a class. }
+  Src = '''
+    program DynArrays;
+    type
+      TRec = record
+        Name: string;
+        Number: Integer;
+      end;
+      PRec = ^TRec;
+      PInt = ^Integer;
+      THolder = record
+        Items: array of TRec;
+      end;
+      TIA = array of Integer;
+      TR = record
+        A: TIA;
+      end;
+      TC = class
+        A: TIA;
+      end;
+    procedure Run;
+    var
+      A: array of Integer;
+      RA: array of TRec;
+      R: TRec;
+      H: THolder;
+      P: PRec;
+      PI: PInt;
+      Rec: TR;
+      C: TC;
+      I: Integer;
+    begin
+      WriteLn(Length(A));
+      SetLength(A, 4);
+      for I := 0 to High(A) do
+        A[I] := I * 10;
+      WriteLn(Length(A), ' ', Low(A), ' ', High(A), ' ', A[3]);
+      PI := @A[2];
+      PI^ := 99;
+      WriteLn(A[2]);
+      SetLength(RA, 2);
+      R.Name := 'first';
+      R.Number := 1;
+      RA[0] := R;
+      R.Name := 'changed';
+      WriteLn(RA[0].Name, ' ', RA[0].Number);
+      RA[1].Name := 'second';
+      WriteLn(RA[1].Name);
+      H.Items := RA;
+      P := @H.Items[1];
+      P^.Number := 22;
+      WriteLn(RA[1].Number);
+      SetLength(Rec.A, 3);
+      Rec.A[1] := 10;
+      WriteLn(Rec.A[1]);
+      C := TC.Create();
+      SetLength(C.A, 2);
+      C.A[1] := 20;
+      WriteLn(C.A[1] + Rec.A[1])
+    end;
+    begin
+      Run()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '0' + LE +
+    '4 0 3 30' + LE +
+    '99' + LE +
+    'first 1' + LE +
+    'second' + LE +
+    '22' + LE +
+    '10' + LE +
+    '30' + LE, 0);
 end;
 
 initialization
