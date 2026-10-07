@@ -8,12 +8,11 @@
 
 unit cp.test.numerics.decimal;
 
-{ IR-level tests for the Numerics.Decimal stdlib unit (TDecimal).
+{ Semantic tests for the Numerics.Decimal stdlib unit (TDecimal).
 
-  These resolve Numerics.Decimal via TUnitLoader, run the semantic pass, and
-  inspect the generated QBE IR.  They cover the parser / semantic / codegen path
-  for TDecimal usage.  They CANNOT see RTL-contract or runtime-behaviour issues —
-  those are covered by cp.test.e2e.numerics.decimal.pas.
+  These resolve Numerics.Decimal via TUnitLoader and run the semantic pass.
+  They cover the parser / semantic path for TDecimal usage; runtime behaviour
+  is covered by cp.test.e2e.numerics.decimal.pas.
 
   Phase 0 surface: construction (DecFromInt / DecFromInt64 / DecFromStr),
   ToString / ToPlainString, Scale, IsZero, Sign. }
@@ -22,17 +21,15 @@ interface
 
 uses
   blaise.testing, strutils,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe, uUnitLoader;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, uUnitLoader;
 
 type
   TDecimalIRTests = class(TTestCase)
   private
     FRTLUnitPath: string;
     FStdlibUnitPath: string;
-    function  GenIR(const ASrc: string): string;
     procedure SemanticOK(const ASrc: string);
     procedure AnalyseExpectError(const ASrc: string);
-    function  IRContains(const AIR, AFragment: string): Boolean;
   protected
     procedure SetUp; override;
   published
@@ -77,10 +74,6 @@ type
     { --- Type errors --- }
     procedure TestSemantic_FromInt_WrongArgType_Error;
     procedure TestSemantic_AssignDecimalToInt_Error;
-
-    { --- IR shape --- }
-    procedure TestIR_FromStr_EmitsCall;
-    procedure TestIR_MethodCall_EmitsCall;
   end;
 
 implementation
@@ -93,46 +86,6 @@ begin
   ExeDir := ExtractFilePath(ParamStr(0));
   FRTLUnitPath := ExpandFileName(ExeDir + '../../compiler/src/main/pascal');
   FStdlibUnitPath := ExpandFileName(ExeDir + '../../stdlib/src/main/pascal');
-end;
-
-function TDecimalIRTests.GenIR(const ASrc: string): string;
-var
-  Lexer:       TLexer;
-  Parser:      TParser;
-  Prog:        TProgram;
-  Semantic:    TSemanticAnalyser;
-  CG:          TCodeGenQBE;
-  Loader:      TUnitLoader;
-  Units:       TObjectList;
-  SearchPaths: TStringList;
-  I:           Integer;
-begin
-  Lexer  := nil; Parser := nil; Prog := nil; Semantic := nil; CG := nil;
-  Loader := nil; Units  := nil; SearchPaths := nil;
-  try
-    Lexer       := TLexer.Create(ASrc);
-    Parser      := TParser.Create(Lexer);
-    Prog        := Parser.Parse();
-    Semantic    := TSemanticAnalyser.Create();
-    SearchPaths := TStringList.Create();
-    SearchPaths.Add(FRTLUnitPath);
-    SearchPaths.Add(FStdlibUnitPath);
-    Loader := TUnitLoader.Create(SearchPaths);
-    Units  := Loader.LoadAll(Prog.UsedUnits);
-    for I := 0 to Units.Count - 1 do
-      Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
-    Semantic.Analyse(Prog);
-    CG := TCodeGenQBE.Create();
-    CG.SetSymbolTable(Prog.SymbolTable);
-    for I := 0 to Units.Count - 1 do
-      CG.AppendUnit(TUnit(Units.Items[I]));
-    CG.AppendProgram(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free(); Semantic.Free();
-    Units.Free(); Loader.Free(); SearchPaths.Free();
-    Prog.Free(); Parser.Free(); Lexer.Free();
-  end;
 end;
 
 procedure TDecimalIRTests.SemanticOK(const ASrc: string);
@@ -176,11 +129,6 @@ begin
   except
     on E: ESemanticError do ; { expected }
   end;
-end;
-
-function TDecimalIRTests.IRContains(const AIR, AFragment: string): Boolean;
-begin
-  Result := Pos(AFragment, AIR) >= 0;
 end;
 
 { ------------------------------------------------------------------ }
@@ -419,30 +367,6 @@ begin
   AnalyseExpectError(
     'program P; uses Numerics.Decimal; var A: TDecimal; N: Integer; ' +
     'begin A := DecFromInt(5); N := A end.');
-end;
-
-{ ------------------------------------------------------------------ }
-{ IR shape                                                            }
-{ ------------------------------------------------------------------ }
-
-procedure TDecimalIRTests.TestIR_FromStr_EmitsCall;
-var IR: string;
-begin
-  IR := GenIR(
-    'program P; uses Numerics.Decimal; var A: TDecimal; ' +
-    'begin A := DecFromStr(''1.50'') end.');
-  AssertTrue('emits DecFromStr call',
-    IRContains(IR, 'DecFromStr'));
-end;
-
-procedure TDecimalIRTests.TestIR_MethodCall_EmitsCall;
-var IR: string;
-begin
-  IR := GenIR(
-    'program P; uses Numerics.Decimal; var A: TDecimal; N: Integer; ' +
-    'begin A := DecFromInt(7); N := A.Sign() end.');
-  AssertTrue('emits TDecimal_Sign call',
-    IRContains(IR, 'Sign'));
 end;
 
 initialization

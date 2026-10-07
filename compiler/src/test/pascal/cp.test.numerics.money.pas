@@ -8,28 +8,26 @@
 
 unit cp.test.numerics.money;
 
-{ IR-level tests for the Numerics.Money stdlib unit (TMoney).
+{ Semantic tests for the Numerics.Money stdlib unit (TMoney).
 
   These resolve Numerics.Money (and its Numerics.Decimal dependency) via
-  TUnitLoader, run the semantic pass, and inspect the generated QBE IR.  They
-  cover the parser / semantic / codegen path for TMoney usage.  RTL-contract and
-  runtime-behaviour issues are covered by cp.test.e2e.numerics.money.pas. }
+  TUnitLoader and run the semantic pass.  They cover the parser / semantic path
+  for TMoney usage.  RTL-contract and runtime-behaviour issues are covered by
+  cp.test.e2e.numerics.money.pas. }
 
 interface
 
 uses
   blaise.testing, strutils,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe, uUnitLoader;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, uUnitLoader;
 
 type
   TMoneyIRTests = class(TTestCase)
   private
     FRTLUnitPath: string;
     FStdlibUnitPath: string;
-    function  GenIR(const ASrc: string): string;
     procedure SemanticOK(const ASrc: string);
     procedure AnalyseExpectError(const ASrc: string);
-    function  IRContains(const AIR, AFragment: string): Boolean;
   protected
     procedure SetUp; override;
   published
@@ -65,10 +63,6 @@ type
     { --- Type errors --- }
     procedure TestSemantic_FromStr_WrongArgType_Error;
     procedure TestSemantic_AssignMoneyToInt_Error;
-
-    { --- IR shape --- }
-    procedure TestIR_FromStr_EmitsCall;
-    procedure TestIR_Add_EmitsCall;
   end;
 
 implementation
@@ -81,46 +75,6 @@ begin
   ExeDir := ExtractFilePath(ParamStr(0));
   FRTLUnitPath := ExpandFileName(ExeDir + '../../compiler/src/main/pascal');
   FStdlibUnitPath := ExpandFileName(ExeDir + '../../stdlib/src/main/pascal');
-end;
-
-function TMoneyIRTests.GenIR(const ASrc: string): string;
-var
-  Lexer:       TLexer;
-  Parser:      TParser;
-  Prog:        TProgram;
-  Semantic:    TSemanticAnalyser;
-  CG:          TCodeGenQBE;
-  Loader:      TUnitLoader;
-  Units:       TObjectList;
-  SearchPaths: TStringList;
-  I:           Integer;
-begin
-  Lexer  := nil; Parser := nil; Prog := nil; Semantic := nil; CG := nil;
-  Loader := nil; Units  := nil; SearchPaths := nil;
-  try
-    Lexer       := TLexer.Create(ASrc);
-    Parser      := TParser.Create(Lexer);
-    Prog        := Parser.Parse();
-    Semantic    := TSemanticAnalyser.Create();
-    SearchPaths := TStringList.Create();
-    SearchPaths.Add(FRTLUnitPath);
-    SearchPaths.Add(FStdlibUnitPath);
-    Loader := TUnitLoader.Create(SearchPaths);
-    Units  := Loader.LoadAll(Prog.UsedUnits);
-    for I := 0 to Units.Count - 1 do
-      Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
-    Semantic.Analyse(Prog);
-    CG := TCodeGenQBE.Create();
-    CG.SetSymbolTable(Prog.SymbolTable);
-    for I := 0 to Units.Count - 1 do
-      CG.AppendUnit(TUnit(Units.Items[I]));
-    CG.AppendProgram(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free(); Semantic.Free();
-    Units.Free(); Loader.Free(); SearchPaths.Free();
-    Prog.Free(); Parser.Free(); Lexer.Free();
-  end;
 end;
 
 procedure TMoneyIRTests.SemanticOK(const ASrc: string);
@@ -164,11 +118,6 @@ begin
   except
     on E: ESemanticError do ; { expected }
   end;
-end;
-
-function TMoneyIRTests.IRContains(const AIR, AFragment: string): Boolean;
-begin
-  Result := Pos(AFragment, AIR) >= 0;
 end;
 
 { ------------------------------------------------------------------ }
@@ -369,31 +318,6 @@ begin
   AnalyseExpectError(
     'program P; uses Numerics.Money; var M: TMoney; I: Integer; ' +
     'begin M := MoneyFromInt(1, ''USD''); I := M end.');
-end;
-
-{ ------------------------------------------------------------------ }
-{ IR shape                                                            }
-{ ------------------------------------------------------------------ }
-
-procedure TMoneyIRTests.TestIR_FromStr_EmitsCall;
-var IR: string;
-begin
-  IR := GenIR(
-    'program P; uses Numerics.Money; var M: TMoney; ' +
-    'begin M := MoneyFromStr(''1.50'', ''USD'') end.');
-  AssertTrue('emits MoneyFromStr call',
-    IRContains(IR, '$Numerics_Money_MoneyFromStr'));
-end;
-
-procedure TMoneyIRTests.TestIR_Add_EmitsCall;
-var IR: string;
-begin
-  IR := GenIR(
-    'program P; uses Numerics.Money; var A, B, C: TMoney; ' +
-    'begin A := MoneyFromInt(1, ''USD''); B := MoneyFromInt(2, ''USD''); ' +
-    'C := A.Add(B) end.');
-  AssertTrue('emits TMoney.Add call',
-    IRContains(IR, '$Numerics_Money_TMoney_Add'));
 end;
 
 initialization
