@@ -615,16 +615,21 @@ begin
     if (FA.PropRead <> nil) and (FA.PropRead.ReadMethod <> '') then
       Exit(True);
   end;
-  { TMethodCallExpr: constructor calls do NOT own; all other method calls DO. }
+  { TMethodCallExpr: constructor calls do NOT own (refcount zero), except
+    through a metaclass receiver (_ClassCreate, +1); all other method calls
+    DO. }
   if AExpr is TMethodCallExpr then
   begin
     MC := TMethodCallExpr(AExpr);
-    if not MC.IsConstructorCall then Result := True;
+    Result := (not MC.IsConstructorCall) or MC.IsMetaclassDispatch;
     Exit;
   end;
   if AExpr is TFuncCallExpr then
   begin
+    { ClassCreate(Cls, ...) is _ClassCreate (+1) whether or not a declared
+      constructor runs afterwards -- ResolvedDecl is nil for the implicit one }
     if (TFuncCallExpr(AExpr).ResolvedDecl <> nil) or
+       SameText(TFuncCallExpr(AExpr).Name, 'ClassCreate') or
        TFuncCallExpr(AExpr).IsIndirectCall then
       Result := True;
     Exit;

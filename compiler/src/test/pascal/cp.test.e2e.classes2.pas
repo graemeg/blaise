@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Metaclass_EqualityClassCreateAndFree;
     procedure TestRun_AliasConstructor_RunsUserCtor;
     procedure TestRun_Phase2Milestone_Stdout;
     procedure TestRun_Phase2Milestone_Valgrind;
@@ -2690,6 +2691,82 @@ begin
       WriteLn(IntToStr(A.Magic()))
     end.
     ''', '12345' + Chr(10), 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_Metaclass_EqualityClassCreateAndFree;
+const
+  {
+    Metaclass values: a class identifier is its typeinfo pointer, so metaclass
+    equality is a pointer comparison (both outcomes); ClassCreate passes the
+    constructor arguments to the most-derived constructor; a class with no
+    constructor of its own still yields a live instance through a metaclass.
+    Every instance built through a metaclass is freed: _ClassCreate hands back
+    an owned reference, so the assignment must not add a second one
+    (BUG-20261007-metaclass-create-leak). }
+  Src = '''
+    program P;
+    type
+      TBase = class(TObject)
+        destructor Destroy; override;
+      end;
+      TOther = class(TObject) end;
+      TFoo = class(TObject)
+        Value: Integer;
+        constructor Create(N: Integer); virtual;
+        destructor Destroy; override;
+      end;
+      TBar = class(TFoo)
+        constructor Create(N: Integer); override;
+      end;
+      TBaseClass = class of TBase;
+      TFooClass = class of TFoo;
+    var
+      Freed: Integer;
+    destructor TBase.Destroy;
+    begin Freed := Freed + 1; inherited Destroy() end;
+    constructor TFoo.Create(N: Integer);
+    begin Self.Value := N end;
+    destructor TFoo.Destroy;
+    begin Freed := Freed + 1; inherited Destroy() end;
+    constructor TBar.Create(N: Integer);
+    begin Self.Value := N * 100 end;
+    procedure Run;
+    var
+      C: TBaseClass;
+      FC: TFooClass;
+      F: TFoo;
+      B: TBase;
+    begin
+      C := TBase;
+      WriteLn(C = TBase, ' ', TBase = TBase, ' ', TBase = TOther);
+      FC := TFoo;
+      F := ClassCreate(FC, 7);
+      WriteLn(F.Value);
+      FC := TBar;
+      F := ClassCreate(FC, 7);
+      WriteLn(F.Value, ' ', F.ClassName);
+      F := FC.Create(8);
+      WriteLn(F.Value);
+      B := ClassCreate(C);
+      WriteLn(B.ClassName);
+      B := C.Create();
+      WriteLn(B <> nil)
+    end;
+    begin
+      Run();
+      WriteLn('freed ', Freed)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'True True False' + LE +
+    '7' + LE +
+    '700 TBar' + LE +
+    '800' + LE +
+    'TBase' + LE +
+    'True' + LE +
+    'freed 5' + LE, 0);
 end;
 
 initialization

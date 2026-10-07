@@ -546,6 +546,7 @@ type
       AArgs: TObjectList; AObjExpr: TASTExpr);
     procedure EmitMethodCallStmt(AStmt: TMethodCallStmt);
     procedure EmitMethodCallExpr(AExpr: TMethodCallExpr);
+    procedure EmitClassCreate(AExpr: TFuncCallExpr);
     { ABaseInfo describes the CONTAINING field for a nested Self path
       (Self.FIntermediate.SubField) — AFld then describes only SubField, whose
       Offset is relative to the intermediate.  If the intermediate is an
@@ -3470,6 +3471,15 @@ var
   Idx, I: Integer;
   EmptyArgs: TObjectList;
 begin
+  { ClassCreate carries the resolved CONSTRUCTOR in ResolvedDecl, so it must
+    be claimed before any arm that lowers a resolved call as a plain call }
+  if (AExpr is TFuncCallExpr) and
+     SameText(TFuncCallExpr(AExpr).Name, 'ClassCreate') and
+     (TFuncCallExpr(AExpr).Args.Count >= 1) then
+  begin
+    EmitClassCreate(TFuncCallExpr(AExpr));
+    Exit;
+  end;
   if IsJumboSetType(AExpr.ResolvedType) and
      (((AExpr is TFuncCallExpr) and
        (TFuncCallExpr(AExpr).ResolvedDecl <> nil)) or
@@ -13768,6 +13778,25 @@ begin
       EmitCallSym('_StringRelease');
     Exit;
   end;
+  if AStmt.IsConstructorCall and AStmt.IsMetaclassDispatch and
+     (AStmt.ObjExpr = nil) and (AStmt.ObjectName <> '') then
+  begin
+    { Cls.Create(args); with the result discarded: _ClassCreate hands back
+      the instance at +1, the constructor runs for its side effects (through
+      the NEW instance's vtable when virtual), and nothing holds the
+      reference, so it is released straight away (x86-64 parity). }
+    EmitLoadSlot('x0', AStmt.ObjectName);
+    EmitCallSym('_ClassCreate');
+    MD := TMethodDecl(AStmt.ResolvedMethod);
+    if MD <> nil then
+    begin
+      EmitPushX0();
+      EmitMethodCallCommon(MD, 'Create', AStmt.Args);
+      EmitPopTo('x0');
+    end;
+    EmitCallSym('_ClassRelease');
+    Exit;
+  end;
   if AStmt.IsConstructorCall or AStmt.IsImplicitSelf or
      ((AStmt.ObjectName = '') and (AStmt.ObjExpr = nil)
       and not AStmt.IsStaticCall) then
@@ -13894,6 +13923,34 @@ begin
   if (AStmt.ResolvedReturnTypeDesc <> nil) and
      (AStmt.ResolvedReturnTypeDesc.Kind = tyString) then
     EmitCallSym('_StringRelease');
+end;
+
+{ ClassCreate(Cls, args...): construction from a metaclass VALUE.  The
+  same lowering as Cls.Create(args) (the IsMetaclassDispatch arm of
+  EmitMethodCallExpr): _ClassCreate(typeinfo) allocates, installs the vtable
+  and returns the owned +1; the constructor uSemantic resolved on the base
+  class then runs on the new instance, dispatching through ITS vtable when
+  virtual (EmitMethodCallCommon keys on the VTableSlot), so a derived
+  override runs.  No resolved Create means the implicit default ctor. }
+procedure TArm64Backend.EmitClassCreate(AExpr: TFuncCallExpr);
+var
+  CtorArgs: TObjectList;
+  I: Integer;
+begin
+  Self.EmitExprToX0(TASTExpr(AExpr.Args.Items[0]));
+  EmitCallSym('_ClassCreate');
+  if AExpr.ResolvedDecl = nil then
+    Exit;
+  CtorArgs := TObjectList.Create(False);
+  try
+    for I := 1 to AExpr.Args.Count - 1 do
+      CtorArgs.Add(AExpr.Args.Items[I]);
+    EmitPushX0();               { keep the result across the ctor call }
+    EmitMethodCallCommon(TMethodDecl(AExpr.ResolvedDecl), 'Create', CtorArgs);
+    EmitPopTo('x0');
+  finally
+    CtorArgs.Free();
+  end;
 end;
 
 procedure TArm64Backend.EmitMethodCallExpr(AExpr: TMethodCallExpr);

@@ -14,14 +14,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TClassOfTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
     procedure AnalyseExpectErrorMsg(const ASrc, AExpectedSubstr: string);
   published
@@ -41,22 +40,15 @@ type
     procedure TestSemantic_CompareTwoMetaClassValues;
 
     { Codegen }
-    procedure TestCodegen_ClassIdent_EmitsTypeinfo;
-    procedure TestCodegen_MetaClassVar_StorelTypeinfo;
-    procedure TestCodegen_MetaClassEquality_UsesCEQL;
 
     { ClassCreate builtin (Step 11e): runtime construction via a
       metaclass value.  Lowers to '_ClassCreate(Cls)' followed by a
       static call to the resolved constructor. }
     procedure TestSemantic_ClassCreate_RejectsNonMetaclassFirstArg;
-    procedure TestCodegen_ClassCreate_EmitsAllocAndCtorCall;
-    procedure TestCodegen_ClassCreate_NoCtor_OnlyAllocCalled;
 
     { Metaclass-var dispatch: C.Create() emits _ClassCreate + indirect
       ctor call via vtable, not a static call to the base Create. }
     procedure TestSemantic_MetaclassVar_Create_Accepted;
-    procedure TestCodegen_MetaclassVar_Create_IndirectCtor;
-    procedure TestCodegen_MetaclassVar_Create_NoCtor_NoIndirectCall;
 
     { Bare 'C.Create' (no parens) on a metaclass variable must give the
       mandatory-parentheses diagnostic, not the misleading
@@ -87,23 +79,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TClassOfTests.GenIR(const ASrc: string): string;
-var Prog: TProgram; CG: TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -377,70 +352,6 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
-{  Codegen                                                             }
-{ ------------------------------------------------------------------ }
-
-procedure TClassOfTests.TestCodegen_ClassIdent_EmitsTypeinfo;
-const
-  Src =
-    '''
-        program P;
-        type
-          TBase = class(TObject) end;
-        var C: class of TBase;
-        begin
-          C := TBase
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('IR copies $typeinfo_TBase into a temp',
-    Pos('copy $typeinfo_TBase', IR) > 0);
-end;
-
-procedure TClassOfTests.TestCodegen_MetaClassVar_StorelTypeinfo;
-const
-  Src =
-    '''
-        program P;
-        type
-          TBase = class(TObject) end;
-        var C: class of TBase;
-        begin
-          C := TBase
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('storel into the metaclass var slot',
-    Pos('storel', IR) > 0);
-  { Program-level vars are emitted as global data, not stack slots. }
-  AssertTrue('var C is emitted as 8-byte global pointer slot',
-    Pos('export data $C = { l 0 }', IR) > 0);
-end;
-
-procedure TClassOfTests.TestCodegen_MetaClassEquality_UsesCEQL;
-const
-  Src =
-    '''
-        program P;
-        type
-          TBase = class(TObject) end;
-        var B: Boolean;
-        begin
-          B := TBase = TBase
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('metaclass equality uses ceql (pointer compare), not ceqw',
-    Pos('ceql', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
 { ClassCreate builtin                                                  }
 { ------------------------------------------------------------------ }
 
@@ -456,52 +367,6 @@ begin
         end.
         '''
   );
-end;
-
-procedure TClassOfTests.TestCodegen_ClassCreate_EmitsAllocAndCtorCall;
-const
-  Src =
-    '''
-        program P;
-        type
-          TFoo = class(TObject)
-            Value: Integer;
-            constructor Create(N: Integer);
-          end;
-        constructor TFoo.Create(N: Integer);
-        begin Self.Value := N end;
-        var C: class of TFoo; F: TFoo;
-        begin
-          C := TFoo;
-          F := ClassCreate(C, 7)
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('emits call to $_ClassCreate', Pos('call $_ClassCreate(', IR) > 0);
-  AssertTrue('emits indirect ctor call via vtable (no static TFoo_Create call)',
-    Pos('call $TFoo_Create(', IR) < 0);
-end;
-
-procedure TClassOfTests.TestCodegen_ClassCreate_NoCtor_OnlyAllocCalled;
-const
-  Src =
-    '''
-        program P;
-        type TFoo = class(TObject) end;
-        var C: class of TFoo; F: TFoo;
-        begin
-          C := TFoo;
-          F := ClassCreate(C)
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('emits call to $_ClassCreate', Pos('call $_ClassCreate(', IR) > 0);
-  AssertTrue('no constructor call emitted when class declares none',
-    Pos('TFoo_Create', IR) < 0);
 end;
 
 { ---------- Metaclass-var C.Create() dispatch tests ---------- }
@@ -522,50 +387,6 @@ const Src = '''
     ''';
 begin
   AnalyseSrc(Src);
-end;
-
-procedure TClassOfTests.TestCodegen_MetaclassVar_Create_IndirectCtor;
-const Src = '''
-    program P;
-    type
-      TFoo = class(TObject)
-        constructor Create;
-      end;
-    constructor TFoo.Create; begin end;
-    var C: class of TFoo; F: TFoo;
-    begin
-      C := TFoo;
-      F := C.Create()
-    end.
-    ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('emits _ClassCreate for runtime alloc',
-    Pos('call $_ClassCreate(', IR) > 0);
-  AssertTrue('emits indirect ctor call via vtable (loadl from vtable slot)',
-    Pos('loadl', IR) > 0);
-  AssertTrue('does NOT emit a static TFoo_Create call',
-    Pos('call $TFoo_Create(', IR) < 0);
-end;
-
-procedure TClassOfTests.TestCodegen_MetaclassVar_Create_NoCtor_NoIndirectCall;
-const Src = '''
-    program P;
-    type TFoo = class(TObject) end;
-    var C: class of TFoo; F: TFoo;
-    begin
-      C := TFoo;
-      F := C.Create()
-    end.
-    ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('emits _ClassCreate for runtime alloc',
-    Pos('call $_ClassCreate(', IR) > 0);
-  AssertTrue('no ctor call when class declares no Create',
-    Pos('TFoo_Create', IR) < 0);
 end;
 
 procedure TClassOfTests.TestSemantic_MetaclassVar_BareCreate_RequiresParens;
