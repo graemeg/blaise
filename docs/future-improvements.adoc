@@ -123,6 +123,43 @@ NOTE: It is important to note that the if-then-else expression differs from the 
 See also Delphi's documentation: https://docwiki.embarcadero.com/RADStudio/Florence/en/Conditional_Operators_(Delphi)
 
 
+=== Integer `in` a bracket literal
+
+`X in [1, 2]` and `X in [1..9]`, where `X` is an `Integer`, are rejected:
+"Right operand of 'in' must be a set type, got 'array of Integer'".  The
+`in` operator types a bracket-literal right operand as a set only when the
+left operand is an enum (it builds an anonymous `set of <enum>`).  An
+integer left operand has no set type to borrow, so the literal stays an
+open-array literal.  The idiom is common in Pascal code (`if C in [1, 3, 5]
+then`), and FPC and Delphi accept it.
+
+Today the workaround is a named set variable or type:
+
+[source,pascal]
+----
+type TSmall = set of 0..15;
+var S: TSmall;
+...
+S := [1..3];
+if X in S then ...
+----
+
+Open design questions:
+
+* The anonymous set's element type.  FPC and Delphi treat the literal as
+  `set of Byte`, so an element outside 0..255 is a compile error, and a
+  run-time `X` outside that range is simply not a member.  The alternative
+  is to size the set from the listed values (as the enum form does with
+  `SetLiteralBitCount`), widening to a jumbo set when a member is >= 64.
+* Whether a non-constant element (`X in [A, B]` with variables `A`, `B`)
+  should be accepted.  The FPC behaviour is to build the set at run time;
+  a simpler option is to lower the whole expression to an `or` chain of
+  comparisons (`(X = A) or (X = B)`), which also avoids the 0..255 limit
+  for constant elements.
+
+Wherever it lands, the rule must be recorded in `docs/language-rationale.adoc`.
+
+
 == Language — Features Required to Complete the punit Port
 
 The following features were identified as missing from Blaise while porting
