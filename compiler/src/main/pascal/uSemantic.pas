@@ -13670,7 +13670,22 @@ begin
     end
     else
       for I := 1 to AExpr.Args.Count - 1 do
+      begin
         Self.AnalyseListSlot(AExpr.Args, I);
+        { the variadic form takes scalars: an array would be passed as one
+          bare pointer.  The one array allowed is a forwarded array of const
+          standing in for the whole argument list. }
+        ArgType := TASTExpr(AExpr.Args.Items[I]).ResolvedType;
+        if (ArgType is TOpenArrayTypeDesc) and (AExpr.Args.Count = 2) and
+           (TOpenArrayTypeDesc(ArgType).ElementType <> nil) and
+           SameText(TOpenArrayTypeDesc(ArgType).ElementType.Name, 'TVarRec') then
+          Continue;
+        if (ArgType is TOpenArrayTypeDesc) or (ArgType is TDynArrayTypeDesc) or
+           (ArgType is TStaticArrayTypeDesc) then
+          SemanticError(Format('Format argument %d is an array; only an ' +
+            'array of const can be passed as the argument list', [I]),
+            TASTExpr(AExpr.Args.Items[I]).Line, TASTExpr(AExpr.Args.Items[I]).Col);
+      end;
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;

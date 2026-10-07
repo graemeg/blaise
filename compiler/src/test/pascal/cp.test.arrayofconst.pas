@@ -8,7 +8,7 @@
 
 unit cp.test.arrayofconst;
 
-{ Parser/semantic/IR tests for 'array of const' (heterogeneous variadic
+{ Parser/semantic tests for 'array of const' (heterogeneous variadic
   parameters).  A call-site bracket literal is boxed into an array of the
   intrinsic TVarRec record; the callee receives it as an open array of TVarRec.
   E2E coverage (compile + run on both backends) lives in
@@ -18,14 +18,13 @@ interface
 
 uses
   blaise.testing,
-  uLexer, uParser, uAST, uSemantic, uSymbolTable, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSemantic, uSymbolTable;
 
 type
   TArrayOfConstTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
-    function IRHas(const AIR, AFragment: string): Boolean;
+    procedure AssertFormatRejected(const ASrc: string);
   published
     { Intrinsic TVarRec + vt constants are always available (no uses). }
     procedure TestSemantic_TVarRec_IsIntrinsicRecord;
@@ -36,19 +35,13 @@ type
     procedure TestSemantic_HeterogeneousLiteral_Accepted;
     procedure TestSemantic_LiteralTypedAsArrayOfTVarRec;
 
-    { Codegen: TVarRec boxing. }
-    procedure TestCodegen_TagStoredPerElement;
-    procedure TestCodegen_DoubleElement_HeapBoxed;
-    procedure TestCodegen_SingleElement_WidenedBeforeBox;
-    procedure TestCodegen_SixteenByteStride;
-    { BUG-047: Format(fmt, forwarded array-of-const param) routes through
-      _StringFormatVarRecs (reads the runtime ptr + _high companion), NOT
-      the per-element boxing used for a bracket literal. }
-    procedure TestCodegen_ForwardedArrayToFormat_UsesVarRecsHelper;
-    { BUG-047 gate: a forwarded open array whose element is NOT TVarRec
-      (e.g. array of Integer) must NOT route through _StringFormatVarRecs —
-      reinterpreting raw elements as TVarRecs would be a wild pointer deref. }
-    procedure TestCodegen_ForwardedNonVarRecArray_NotVarRecsHelper;
+    { Format's variadic form takes scalars.  An open or dynamic array of a
+      non-TVarRec element is no Format argument: it would be passed as one
+      bare pointer and printed (or dereferenced) as garbage.  Only a
+      forwarded array of const may stand in for the argument list. }
+    procedure TestSemantic_FormatOverOpenArrayOfInteger_Rejected;
+    procedure TestSemantic_FormatOverDynArray_Rejected;
+    procedure TestSemantic_FormatOverForwardedArrayOfConst_Accepted;
   end;
 
 implementation
@@ -69,33 +62,6 @@ begin
   finally
     A.Free();
   end;
-end;
-
-function TArrayOfConstTests.GenIR(const ASrc: string): string;
-var
-  L: TLexer; P: TParser; Pr: TProgram; A: TSemanticAnalyser; CG: TCodeGenQBE;
-begin
-  L  := TLexer.Create(ASrc);
-  P  := TParser.Create(L);
-  Pr := P.Parse();
-  A  := TSemanticAnalyser.Create();
-  try
-    A.Analyse(Pr);
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Pr);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    A.Free(); Pr.Free(); P.Free(); L.Free();
-  end;
-end;
-
-function TArrayOfConstTests.IRHas(const AIR, AFragment: string): Boolean;
-begin
-  Result := Pos(AFragment, AIR) >= 0;
 end;
 
 { ------------------------------------------------------------------ }
@@ -177,76 +143,46 @@ end;
 { Codegen                                                             }
 { ------------------------------------------------------------------ }
 
-procedure TArrayOfConstTests.TestCodegen_TagStoredPerElement;
-var IR: string;
+procedure TArrayOfConstTests.AssertFormatRejected(const ASrc: string);
+var Raised: Boolean;
 begin
-  { Each element stores a vt tag byte (storeb) into its TVarRec slot. }
-  IR := GenIR(
-    'program X; procedure Foo(args: array of const); begin end; ' +
-    'begin Foo([42, ''hi'']) end.');
-  AssertTrue('emits a tag byte store', IRHas(IR, 'storeb'));
+  Raised := False;
+  try
+    AnalyseSrc(ASrc).Free();
+  except
+    on E: ESemanticError do
+    begin
+      Raised := True;
+      AssertTrue('message names the array argument: ' + E.Message,
+        Pos('array of const', E.Message) >= 0);
+    end;
+  end;
+  AssertTrue('Format over a non-TVarRec array is rejected', Raised);
 end;
 
-procedure TArrayOfConstTests.TestCodegen_DoubleElement_HeapBoxed;
-var IR: string;
+procedure TArrayOfConstTests.TestSemantic_FormatOverOpenArrayOfInteger_Rejected;
 begin
-  { A Double element is heap-boxed via _BlaiseGetMem and stored as a double. }
-  IR := GenIR(
-    'program X; procedure Foo(args: array of const); begin end; ' +
-    'begin Foo([3.5]) end.');
-  AssertTrue('double heap-boxed', IRHas(IR, '$_BlaiseGetMem'));
-  AssertTrue('double stored', IRHas(IR, 'stored'));
-end;
-
-procedure TArrayOfConstTests.TestCodegen_SingleElement_WidenedBeforeBox;
-var IR: string;
-begin
-  { A tySingle element evaluates to an 's' temp; it must be widened to a
-    double (exts) before the vtExtended box's 'stored' — qbe rejects a
-    'stored' whose operand is single-typed. }
-  IR := GenIR(
-    'program X; procedure Foo(args: array of const); begin end; ' +
-    'var S: Single; begin S := 2.5; Foo([S]) end.');
-  AssertTrue('single widened to double', IRHas(IR, '=d exts'));
-  AssertTrue('boxed value stored as double', IRHas(IR, 'stored'));
-end;
-
-procedure TArrayOfConstTests.TestCodegen_SixteenByteStride;
-var IR: string;
-begin
-  { The TVarRec array is allocated 16 bytes per element. }
-  IR := GenIR(
-    'program X; procedure Foo(args: array of const); begin end; ' +
-    'begin Foo([1, 2]) end.');
-  AssertTrue('alloc 32 bytes for 2 elements', IRHas(IR, 'alloc8 32'));
-end;
-
-procedure TArrayOfConstTests.TestCodegen_ForwardedArrayToFormat_UsesVarRecsHelper;
-var IR: string;
-begin
-  { A forwarded array-of-const param passed to Format calls the runtime
-    translator _StringFormatVarRecs and reads the _high companion slot —
-    it does NOT box per element (no alloc8 for a fresh TVarRec block). }
-  IR := GenIR(
-    'program X; ' +
-    'procedure Rep(const F: string; const A: array of const); ' +
-    'var S: string; begin S := Format(F, A); WriteLn(S) end; ' +
-    'begin Rep(''%d'', [1]) end.');
-  AssertTrue('calls _StringFormatVarRecs', IRHas(IR, '_StringFormatVarRecs'));
-  AssertTrue('reads the _high companion of the forwarded param',
-    IRHas(IR, '_var_A_high'));
-end;
-
-procedure TArrayOfConstTests.TestCodegen_ForwardedNonVarRecArray_NotVarRecsHelper;
-var IR: string;
-begin
-  IR := GenIR(
+  AssertFormatRejected(
     'program X; ' +
     'procedure P(const A: array of Integer); ' +
-    'var S: string; begin S := Format(''%d'', A); WriteLn(S) end; ' +
+    'var S: string; begin S := Format(''%d'', A) end; ' +
     'begin P([5, 6]) end.');
-  AssertTrue('array-of-Integer is NOT routed through the TVarRec translator',
-    not IRHas(IR, '_StringFormatVarRecs'));
+end;
+
+procedure TArrayOfConstTests.TestSemantic_FormatOverDynArray_Rejected;
+begin
+  AssertFormatRejected(
+    'program X; var D: array of Integer; S: string; ' +
+    'begin SetLength(D, 1); S := Format(''%d %d'', 1, D) end.');
+end;
+
+procedure TArrayOfConstTests.TestSemantic_FormatOverForwardedArrayOfConst_Accepted;
+begin
+  AnalyseSrc(
+    'program X; ' +
+    'procedure P(const F: string; const A: array of const); ' +
+    'var S: string; begin S := Format(F, A) end; ' +
+    'begin P(''%d'', [1]) end.').Free();
 end;
 
 initialization
