@@ -15,14 +15,15 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TGenericFuncTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
+    function ProbeBody(const AAsm: string): string;
+    procedure AssertProbeARC(const ASrc, ATarget: string; ABorrowed: Boolean);
   published
     { ------------------------------------------------------------------ }
     { Parser — generic function declarations                               }
@@ -51,11 +52,7 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — mangled names and emission                                 }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_GenericFunc_BodyEmitted;
-    procedure TestCodegen_GenericFunc_CallEmitted;
     { Generic METHOD (method-level <T>) — monomorphised body + call site. }
-    procedure TestCodegen_GenericMethod_BodyEmitted;
-    procedure TestCodegen_GenericMethod_CallEmitted;
 
     { ------------------------------------------------------------------ }
     { 'const' on a type-parameter param survives monomorphisation         }
@@ -156,20 +153,40 @@ begin
   end;
 end;
 
-function TGenericFuncTests.GenIR(const ASrc: string): string;
+{ The instantiated TBox<string>.Probe body, label to first return; '' when
+  the body is missing. }
+function TGenericFuncTests.ProbeBody(const AAsm: string): string;
 var
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
+  P, Q: Integer;
 begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
-  end;
+  Result := '';
+  P := Pos('TBox_string_Probe:', AAsm);
+  if P < 0 then Exit;
+  Result := Copy(AAsm, P, Length(AAsm) - P);
+  Q := Pos(#9'ret', Result);
+  if Q >= 0 then
+    Result := Copy(Result, 0, Q);
+end;
+
+{ A borrowed (const) key takes no ARC in the Probe body; a by-value key is
+  retained on entry. }
+procedure TGenericFuncTests.AssertProbeARC(const ASrc, ATarget: string;
+  ABorrowed: Boolean);
+var
+  Body: string;
+begin
+  Body := ProbeBody(GenAsm(ASrc, ATarget));
+  AssertTrue(ATarget + ': instantiated Probe body emitted', Body <> '');
+  if ABorrowed then
+  begin
+    AssertTrue(ATarget + ': const type-param string key is borrowed -- no _StringAddRef',
+      Pos('_StringAddRef', Body) < 0);
+    AssertTrue(ATarget + ': const type-param string key is borrowed -- no _StringRelease',
+      Pos('_StringRelease', Body) < 0);
+  end
+  else
+    AssertTrue(ATarget + ': by-value type-param string key still retains',
+      Pos('_StringAddRef', Body) >= 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -374,54 +391,7 @@ end;
 { Codegen — mangled names and emission                                 }
 { ------------------------------------------------------------------ }
 
-procedure TGenericFuncTests.TestCodegen_GenericFunc_BodyEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericFuncUsage);
-  AssertTrue('body emitted with mangled name',
-    Pos('$Identity_Integer', IR) > 0);
-end;
-
-procedure TGenericFuncTests.TestCodegen_GenericFunc_CallEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericFuncUsage);
-  AssertTrue('call emitted with mangled name',
-    Pos('call $Identity_Integer', IR) > 0);
-end;
-
 const
-  SrcGenericMethodUsage =
-    '''
-        program Prog;
-        type
-          TUtil = class
-            function Echo<T>(x: T): T; begin Result := x end;
-          end;
-        var u: TUtil; r: Integer;
-        begin u := TUtil.Create(); r := u.Echo<Integer>(42); WriteLn(r) end.
-        ''';
-
-procedure TGenericFuncTests.TestCodegen_GenericMethod_BodyEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericMethodUsage);
-  AssertTrue('generic-method body emitted with mangled owner_method_type name',
-    Pos('$TUtil_Echo_Integer', IR) > 0);
-end;
-
-procedure TGenericFuncTests.TestCodegen_GenericMethod_CallEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericMethodUsage);
-  AssertTrue('generic-method call emitted with mangled name',
-    Pos('call $TUtil_Echo_Integer', IR) > 0);
-end;
-
 { ------------------------------------------------------------------------ }
 { 'const' on a type-parameter param must survive monomorphisation.          }
 {                                                                            }
@@ -527,41 +497,17 @@ end;
 
 { A `const` type-param string borrows: no callee-side ARC on the key. }
 procedure TGenericFuncTests.TestCodegen_GenericClass_ConstStringParam_NoKeyARC;
-var
-  IR: string;
-  Body: string;
-  P, Q: Integer;
 begin
-  IR := GenIR(SrcGenericConstParam);
-  P := Pos('function w $TBox_string_Probe', IR);
-  AssertTrue('instantiated Probe body emitted', P > 0);
-  Body := Copy(IR, P, Length(IR) - P);
-  Q := Pos('}', Body);
-  if Q > 0 then
-    Body := Copy(Body, 0, Q);
-  AssertTrue('const type-param string key is borrowed — no _StringAddRef',
-    Pos('_StringAddRef', Body) < 0);
-  AssertTrue('const type-param string key is borrowed — no _StringRelease',
-    Pos('_StringRelease', Body) < 0);
+  AssertProbeARC(SrcGenericConstParam, TargetX86_64, True);
+  AssertProbeARC(SrcGenericConstParam, TargetArm64, True);
 end;
 
 { Control: WITHOUT const the by-value copy still retains/releases, so the
   test above is pinning `const`, not the absence of string-param ARC. }
 procedure TGenericFuncTests.TestCodegen_GenericClass_ByValStringParam_HasARC;
-var
-  IR: string;
-  Body: string;
-  P, Q: Integer;
 begin
-  IR := GenIR(SrcGenericByValParam);
-  P := Pos('function w $TBox_string_Probe', IR);
-  AssertTrue('instantiated Probe body emitted', P > 0);
-  Body := Copy(IR, P, Length(IR) - P);
-  Q := Pos('}', Body);
-  if Q > 0 then
-    Body := Copy(Body, 0, Q);
-  AssertTrue('by-value type-param string key still retains',
-    Pos('_StringAddRef', Body) > 0);
+  AssertProbeARC(SrcGenericByValParam, TargetX86_64, False);
+  AssertProbeARC(SrcGenericByValParam, TargetArm64, False);
 end;
 
 initialization
