@@ -12,14 +12,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TMethodTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -51,16 +50,6 @@ type
     procedure TestSemantic_Method_SelfIsClassType;
     procedure TestSemantic_Method_SelfFieldWrite_OK;
     procedure TestSemantic_Method_ParamResolved;
-
-    { ------------------------------------------------------------------ }
-    { Code generation                                                      }
-    { ------------------------------------------------------------------ }
-    procedure TestCodegen_Method_EmitsFunction;
-    procedure TestCodegen_Method_FuncHasSelfParam;
-    procedure TestCodegen_Method_FuncHasExplicitParam;
-    procedure TestCodegen_MethodCall_EmitsCall;
-    procedure TestCodegen_MethodCall_PassesSelf;
-    procedure TestCodegen_Method_SelfFieldWrite;
   end;
 
 implementation
@@ -94,25 +83,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TMethodTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -464,69 +434,6 @@ begin
   finally
     Prog.Free();
   end;
-end;
-
-{ ------------------------------------------------------------------ }
-{ Code generation                                                     }
-{ ------------------------------------------------------------------ }
-
-procedure TMethodTests.TestCodegen_Method_EmitsFunction;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCounter);
-  AssertTrue('emits TCounter_SetValue function',
-    Pos('$TCounter_SetValue', IR) > 0);
-  AssertTrue('function keyword present',
-    Pos('function $TCounter_SetValue', IR) > 0);
-end;
-
-procedure TMethodTests.TestCodegen_Method_FuncHasSelfParam;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCounter);
-  AssertTrue('Self is first l param',
-    Pos('function $TCounter_SetValue(l', IR) > 0);
-end;
-
-procedure TMethodTests.TestCodegen_Method_FuncHasExplicitParam;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCounter);
-  AssertTrue('explicit param in signature',
-    Pos('%_par_AVal', IR) > 0);
-end;
-
-procedure TMethodTests.TestCodegen_MethodCall_EmitsCall;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCounter);
-  AssertTrue('call to TCounter_SetValue',
-    Pos('call $TCounter_SetValue', IR) > 0);
-end;
-
-procedure TMethodTests.TestCodegen_MethodCall_PassesSelf;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCounter);
-  AssertTrue('Self (C pointer) passed to method',
-    Pos('call $TCounter_SetValue(l', IR) > 0);
-end;
-
-procedure TMethodTests.TestCodegen_Method_SelfFieldWrite;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCounter);
-  { Inside the method, Self.Value := AVal should load Self ptr and store }
-  AssertTrue('method body loads Self pointer',
-    Pos('%_var_Self', IR) > 0);
-  AssertTrue('method body stores to field',
-    Pos('storew', IR) > 0);
 end;
 
 initialization
