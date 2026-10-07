@@ -474,6 +474,12 @@ type
                                 qualified one ('TFoo.FInstance') resolve to ONE
                                 storage slot.  Mirrors ConstArrayQbe for consts.
                                 Empty = emit under Name. }
+    AliasOwner: string;       { non-empty only on the alias uSemantic defines for a
+                                contested module var's owner-prefixed emit name
+                                ('uva_V'): the unit that really declares and
+                                defines the variable.  OwningUnit stays empty so
+                                a backend uses the name verbatim, while this
+                                tells it the storage belongs to that unit. }
     IsThreadVar: Boolean;     { true for threadvar declarations; codegen emits
                                 TLS storage instead of plain global data }
     [Unretained] BlockSite: TObject; { TVarDeclStmt — non-owning; set for a

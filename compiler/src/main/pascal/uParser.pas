@@ -4466,6 +4466,7 @@ begin
     Assign.Line := Line;
     Assign.Col  := Col;
     Assign.Name := Name;
+    Assign.QualifierUnit := QualUnit;
     Assign.Expr := ParseExpr();
     Result := Assign;
   end

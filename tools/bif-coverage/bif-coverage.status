@@ -105,6 +105,7 @@ TNotExpr.Expr  serialise
 
 # TAssignment (uAST.pas:274)
 TAssignment.Name  serialise
+TAssignment.QualifierUnit  serialise
 TAssignment.Expr  serialise
 TAssignment.IsVarParam  safe
 TAssignment.IsGlobal  safe

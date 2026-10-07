@@ -96,6 +96,10 @@ type
     FCurrentUnitName: string;    { '' = program context; else the unit being emitted }
     FModuleVarNames: TStringList; { unit-level var names (both sections) — these
                                     take the owning-unit symbol prefix }
+    FOwnModuleVars: TStringList;  { 'Unit|Name' for every module var a unit (or
+                                    the program, Unit '') DECLARES: its own
+                                    declaration shadows a same-named var of a
+                                    unit it uses, so GlobalSym checks it first }
     FUnitInits:   TStringList;   { emitted <unit>_init symbols, called by _main }
     FUnitFinals:  TStringList;   { emitted <unit>_final symbols — called at
                                     program exit in REVERSE dependency order }
@@ -793,6 +797,9 @@ begin
   FStrLocals   := TStringList.Create();
   FStrGlobals  := TStringList.Create();
   FModuleVarNames := TStringList.Create();
+  FOwnModuleVars := TStringList.Create();
+  FOwnModuleVars.Sorted := True;
+  FOwnModuleVars.Duplicates := dupIgnore;
   FUnitInits   := TStringList.Create();
   FUnitFinals  := TStringList.Create();
   FGlobalInits := TDictionary<string, string>.Create();
@@ -844,6 +851,7 @@ begin
   FRefGlobals.Free();
   FStrGlobals.Free();
   FModuleVarNames.Free();
+  FOwnModuleVars.Free();
   FUnitInits.Free();
   FUnitFinals.Free();
   FGlobalInits.Free();
@@ -10224,6 +10232,16 @@ begin
   Result := AName;
   Owner := '';
   Base := ItabBaseName(AName);
+  { A module var the EMITTING unit declares belongs to that unit: its own
+    declaration shadows a same-named var of any unit it uses, while the flat
+    symbol table holds only the session's last-wins winner. }
+  if FOwnModuleVars.IndexOf(FCurrentUnitName + '|' + Base) >= 0 then
+  begin
+    if FCurrentUnitName = '' then Exit;
+    if (FProgramName <> '') and SameText(FCurrentUnitName, FProgramName) then Exit;
+    Result := MangleUnitPrefix(FCurrentUnitName) + AName;
+    Exit;
+  end;
   if FSymTable <> nil then
   begin
     Sym := FSymTable.Lookup(Base);
@@ -15161,6 +15179,7 @@ begin
     for J := 0 to VD.Names.Count - 1 do
     begin
       FGlobalNames.Add(VD.Names.Strings[J]);
+      FOwnModuleVars.Add('|' + VD.Names.Strings[J]);
       { a closure / method-pointer global is a 16-byte fat value (Code, Env). }
       if IsMethodPtrType(VD.ResolvedType) then
         FGlobalSize.Add(VD.Names.Strings[J], 16);
@@ -15903,6 +15922,7 @@ begin
     for J := 0 to VD.Names.Count - 1 do
     begin
       FModuleVarNames.Add(VD.Names.Strings[J]);
+      FOwnModuleVars.Add(FCurrentUnitName + '|' + VD.Names.Strings[J]);
       { register under the owning-unit-prefixed symbol so same-named vars
         in different units (or the program) cannot collide }
       N := GlobalSym(VD.Names.Strings[J]);

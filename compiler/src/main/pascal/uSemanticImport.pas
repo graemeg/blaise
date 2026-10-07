@@ -1231,6 +1231,8 @@ begin
         Mirrors RegisterConsts and the source-path DefineGlobalLastWins. }
       ATable.ExtractLocal(Entry.Name);
       ATable.Define(Sym);
+      if ASemantic <> nil then
+        ASemantic.NoteContestedGlobal(Entry.Name);
     end;
   end;
 end;

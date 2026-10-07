@@ -58,6 +58,7 @@ type
       unit's own slot (distinct storage), independent of the bare last-wins
       winner, so both values are readable side by side. }
     procedure TestRun_CrossUnitVar_QualifiedDisambig;
+    procedure TestRun_CrossUnitVar_SameName_DistinctStorage;
     { Cross-unit TYPE shadowing: two used units export a class of the same name;
       they coexist (no 'Duplicate type name' error, no link collision) and a
       bare reference binds to the unit later in `uses` (last-in-uses wins),
@@ -479,6 +480,56 @@ begin
     CompileAndRunWithUnits(UVA_Var, UVB_Var, DrvSrc, Output, RCode));
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('uva.V then uvb.V', '7' + LE + '9' + LE, Output);
+end;
+
+procedure TE2EUsesChainTests.TestRun_CrossUnitVar_SameName_DistinctStorage;
+const
+  { Two units declare the same uninitialised globals.  Each unit's own code
+    reaches its own copy (a unit's declarations shadow its uses clause), a
+    qualified write lands in the named unit's slot, and the managed strings
+    of both units are released at exit. }
+  UnitC = '''
+    unit uvc;
+    interface
+    var V: Integer; S: string;
+    procedure SetC;
+    function GetC: string;
+    implementation
+    procedure SetC; begin V := 1; S := 'c' + IntToStr(V) end;
+    function GetC: string; begin Result := S + '/' + IntToStr(V) end;
+    end.
+    ''';
+  UnitD = '''
+    unit uvd;
+    interface
+    var V: Integer; S: string;
+    procedure SetD;
+    function GetD: string;
+    implementation
+    procedure SetD; begin V := 2; S := 'd' + IntToStr(V) end;
+    function GetD: string; begin Result := S + '/' + IntToStr(V) end;
+    end.
+    ''';
+  DrvSrc = '''
+    program P;
+    uses uvc, uvd;
+    begin
+      SetC(); SetD();
+      WriteLn(uvc.V, ' ', uvd.V, ' ', V);
+      uvc.V := 10; uvd.V := 20;
+      WriteLn(GetC(), ' ', GetD());
+      uvc.S := uvc.S + '!';
+      WriteLn(uvc.S, ' ', uvd.S, ' ', S)
+    end.
+    ''';
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+link+run: ' + Output,
+    CompileAndRunWithUnits(UnitC, UnitD, DrvSrc, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('each unit keeps its own V and S',
+    '1 2 2' + LE + 'c1/10 d2/20' + LE + 'c1! d2 d2' + LE, Output);
 end;
 
 const

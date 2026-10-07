@@ -54,7 +54,11 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 21; { v21: an ENUM-MEMBER subrange alias (type TMid = eB..eC)
+  IFACE_VERSION = 22; { v22: an assignment ('asn') carries the unit qualifier
+                          of its target ('Unit.Var := ...'), which the parser
+                          used to drop -- a qualified write in a serialised
+                          body landed in the last-wins unit's variable.
+                        v21: an ENUM-MEMBER subrange alias (type TMid = eB..eC)
                           now writes a RESOLVED base: the exporter fills the
                           'alias' entry's TypeName with the base ENUM's name
                           and its bounds with the resolved ordinals.  The
@@ -1253,6 +1257,7 @@ begin
   if AStmt is TAssignment then
     Result := EncodeLpstr('asn') +
               EncodeLpstr(TAssignment(AStmt).Name) +
+              EncodeLpstr(TAssignment(AStmt).QualifierUnit) +
               EncodeExpr(TAssignment(AStmt).Expr)
   else if AStmt is TCompoundStmt then
     Result := EncodeLpstr('comp') +
@@ -2049,6 +2054,7 @@ begin
   begin
     ASn := TAssignment.Create();
     ASn.Name := ReadLpstrAt(AText, APos);
+    ASn.QualifierUnit := ReadLpstrAt(AText, APos);
     ASn.Expr := ReadExpr(AText, APos);
     Result := ASn;
   end

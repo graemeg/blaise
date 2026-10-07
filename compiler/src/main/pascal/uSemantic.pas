@@ -129,6 +129,8 @@ type
       unchanged (BUG-20260918-generic-body-edit-skips-consumer-rebuild).
       Names only; the hashes are attached at export time. }
     FGenericSourceUnits:   TStringList;
+    FContestedGlobals:     TStringList;  { module var names exported by more than one
+                                            unit in scope (a last-wins collision) }
     FForInLoopVars:        TStringList;  { stack of active for-in loop-variable names (nested loops
                                            push/pop); a write to one of these is diagnosed — the
                                            mutation goes to a per-iteration copy and is discarded }
@@ -690,6 +692,9 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+    { Record that two units in scope export module var AName (the cached-
+      interface import path's last-wins collision). }
+    procedure NoteContestedGlobal(const AName: string);
     procedure Analyse(AProg: TProgram);
     procedure AnalyseUnit(AUnit: TUnit);
     { Like AnalyseUnit but promotes interface-section symbols to the global
@@ -772,6 +777,14 @@ type
       it) and this unit's symbol is installed as the flat winner.  Same-unit
       redeclaration and module-name markers stay hard errors. }
     procedure DefineGlobalLastWins(ASym: TSymbol; ALine, ACol: Integer);
+
+    { The emit name a reference to module var ASym must use, or '' to keep its
+      bare name.  A reference is rewritten to its owner-prefixed symbol (as a
+      static class var is to its GlobalEmitName) when it is unit-qualified or
+      when the name is contested -- exported by two units in scope.  A
+      backend resolving the bare name could only find the last-wins winner,
+      so the qualified or shadowed unit's slot was unreachable. }
+    function ContestedVarEmitName(ASym: TSymbol; AQualified: Boolean): string;
 
     { Define a type name with the same cross-unit last-found-wins rule as
       DefineGlobalLastWins: a collision against a type owned by a DIFFERENT
@@ -1117,6 +1130,9 @@ begin
   FGenericSourceUnits.Duplicates := dupIgnore;
   FGenericSourceUnits.Sorted := True;
   FForInLoopVars        := TStringList.Create();
+  FContestedGlobals     := TStringList.Create();
+  FContestedGlobals.Sorted := True;
+  FContestedGlobals.Duplicates := dupIgnore;
   FForInLoopVars.CaseSensitive := False;
   FWarnings             := TStringList.Create();
   FSparseEnumWarned     := TStringList.Create();
@@ -1137,6 +1153,7 @@ begin
   FGenericSourceUnits.Free();
   FActiveTypeParams.Free();
   FForInLoopVars.Free();
+  FContestedGlobals.Free();
   FWarnings.Free();
   FSparseEnumWarned.Free();
   FUnitSymbols.Free();
@@ -6710,12 +6727,53 @@ begin
     if (Prev <> nil) and (Prev.OwningUnit <> '') then
       RegisterUnitSymbol(Prev.OwningUnit, Prev);
     FTable.Define(ASym);
+    Self.NoteContestedGlobal(ASym.Name);
   end;
   { Register every interface var in the per-unit cache keyed by its owning
     unit, so a qualified reference resolves against the declaring unit's own
     slot regardless of which unit won the bare (flat) slot. }
   if ASym.OwningUnit <> '' then
     RegisterUnitSymbol(ASym.OwningUnit, ASym);
+end;
+
+procedure TSemanticAnalyser.NoteContestedGlobal(const AName: string);
+begin
+  FContestedGlobals.Add(AName);
+end;
+
+function TSemanticAnalyser.ContestedVarEmitName(ASym: TSymbol;
+  AQualified: Boolean): string;
+var
+  Alias: TSymbol;
+begin
+  Result := '';
+  if (ASym = nil) or not ASym.IsGlobal or (ASym.Kind <> skVariable) or
+     ASym.IsClassVar or ASym.IsThreadVar or (ASym.OwningUnit = '') then
+    Exit;
+  if not AQualified and (FContestedGlobals.IndexOf(ASym.Name) < 0) then
+    Exit;
+  { an unmangled RTL unit's var keeps its bare symbol }
+  if MangleUnitPrefix(ASym.OwningUnit) = '' then
+    Exit;
+  Result := MangleUnitPrefix(ASym.OwningUnit) + ASym.Name;
+  { Make the emit name a global variable the backends can look up, as they
+    do any cross-unit var: no owning unit, so they use it verbatim. }
+  if FTable.Lookup(Result) = nil then
+  begin
+    Alias := TSymbol.Create(Result, skVariable, ASym.TypeDesc);
+    Alias.IsGlobal := True;
+    Alias.IsWeak := ASym.IsWeak;
+    if FTable.DefineGlobal(Alias) then
+    begin
+      { DefineGlobal stamps the unit being analysed; the alias must carry no
+        owner, or a backend would prefix the already-prefixed name again }
+      Alias.OwningUnit := '';
+      Alias.AliasOwner := ASym.OwningUnit;
+      Alias.IsImplPrivate := False;
+    end
+    else
+      Alias.Free();
+  end;
 end;
 
 procedure TSemanticAnalyser.DefineTypeLastWins(ASym: TSymbol;
@@ -10988,8 +11046,19 @@ var
   VarSym:  TSymbol;
   FldInfo: TFieldInfo;
   ExprType: TTypeDesc;
+  EmitName: string;
 begin
-  VarSym := FTable.Lookup(AAssign.Name);
+  { 'Unit.Var := ...' resolves against that unit's own exports, as a
+    qualified read does; a bare target goes through the uses chain. }
+  if AAssign.QualifierUnit <> '' then
+  begin
+    VarSym := ResolveQualified(AAssign.QualifierUnit, AAssign.Name);
+    if VarSym = nil then
+      SemanticError(Format('Identifier ''%s'' not declared in unit ''%s''',
+        [AAssign.Name, AAssign.QualifierUnit]), AAssign.Line, AAssign.Col);
+  end
+  else
+    VarSym := FTable.Lookup(AAssign.Name);
   { BUG-001: assigning to a for-in loop variable writes a per-iteration COPY
     that never reaches the collection element — almost always a mistake.
     Standard Pascal (FPC/Delphi) treats for-in as read-only, so the behaviour
@@ -11079,8 +11148,14 @@ begin
     it pre-mangled to keep codegen's module-var prefixing from double-applying. }
   if VarSym.IsGlobal and (VarSym.Kind = skVariable) then
   begin
+    EmitName := ContestedVarEmitName(VarSym, AAssign.QualifierUnit <> '');
     if VarSym.IsClassVar then
       AAssign.ResolvedOwnerUnit := PreMangledGlobalOwner
+    else if EmitName <> '' then
+    begin
+      AAssign.Name := EmitName;
+      AAssign.ResolvedOwnerUnit := PreMangledGlobalOwner;
+    end
     else
       AAssign.ResolvedOwnerUnit := VarSym.OwningUnit;
   end;
@@ -14855,6 +14930,7 @@ var
   FldInfo:   TFieldInfo;
   PropInfo:  TPropertyInfo;
   EnumRef:   TEnumMemberRef;
+  EmitName:  string;
 begin
   if AExpr is TNilLiteral then
     Result := FTable.TypeNil
@@ -14877,6 +14953,12 @@ begin
       operand).  Re-returning the type keeps resolution idempotent and avoids
       a spurious second ambiguity warning. }
     if TIdentExpr(AExpr).IsConstant and (AExpr.ResolvedType <> nil) then
+      Exit(AExpr.ResolvedType);
+    { Already rewritten to a pre-mangled global symbol (a static class var or
+      a contested module var), which is not a lookup key: keep a second
+      analysis idempotent. }
+    if (TIdentExpr(AExpr).ResolvedOwnerUnit = PreMangledGlobalOwner) and
+       (AExpr.ResolvedType <> nil) then
       Exit(AExpr.ResolvedType);
     { Unit-qualified reference 'Unit.Symbol' (parser preserved the unit in
       QualifierUnit).  Resolve via the directed-lookup primitive against
@@ -15055,10 +15137,19 @@ begin
     begin
       { A static class/record var's Name was rewritten above to its already
         fully-mangled GlobalEmitName (Unit_Class_Field); flag it so codegen's
-        module-var prefixing does not double-apply.  Plain module globals carry
-        their owning unit for owner-based mangling. }
+        module-var prefixing does not double-apply.  A contested or qualified
+        module var is rewritten the same way to its owner-prefixed symbol.
+        Plain module globals carry their owning unit for owner-based
+        mangling. }
+      EmitName := ContestedVarEmitName(Sym,
+        TIdentExpr(AExpr).QualifierUnit <> '');
       if Sym.IsClassVar then
         TIdentExpr(AExpr).ResolvedOwnerUnit := PreMangledGlobalOwner
+      else if EmitName <> '' then
+      begin
+        TIdentExpr(AExpr).Name := EmitName;
+        TIdentExpr(AExpr).ResolvedOwnerUnit := PreMangledGlobalOwner;
+      end
       else
         TIdentExpr(AExpr).ResolvedOwnerUnit := Sym.OwningUnit;
     end;

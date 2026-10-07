@@ -182,6 +182,11 @@ type
       unexported (Sym=nil at codegen) name may take the FCurrentUnitName context
       prefix — keeping class-var ClassVarEmitName and internal labels verbatim. }
     FModuleVarNames: TStringList;
+    { 'Unit|Name' for every module variable a unit (or the program) DECLARES.
+      GlobalSymName consults it first: inside a unit, its own declaration
+      shadows a same-named variable of any unit it uses, so the owner is the
+      declaring unit, not the flat symbol table's last-wins winner. }
+    FOwnModuleVars: TStringList;
     FDynElemHooks: TObjectList;     { borrowed TTypeDesc per generated dyn-array
                                       element hook (__DynElems_<n>) }
     FDynElemHooksDone: Integer;     { how many of them are already emitted }
@@ -377,6 +382,8 @@ type
       REFERENCED under this canonical name, so definition and reference always
       agree, and same-named vars across units no longer collide. }
     function GlobalSymName(const AName: string): string;
+    { True when the emitting unit (FCurrentUnitName) declares module var AName. }
+    function IsOwnModuleVar(const AName: string): Boolean;
     { Module-var owner→prefix, matching QBE.MangleGlobalOwner (program-name and
       RTL units → bare).  NOT ClassOwnerPrefix (which prefixes runtime.* classes). }
     function GlobalOwnerPrefix(const AOwner: string): string;
@@ -1449,6 +1456,9 @@ begin
   FModuleVarNames.CaseSensitive := True;
   FModuleVarNames.Sorted := True;
   FModuleVarNames.Duplicates := dupIgnore;
+  FOwnModuleVars := TStringList.Create();
+  FOwnModuleVars.Sorted := True;
+  FOwnModuleVars.Duplicates := dupIgnore;
   FGlobalInits         := TDictionary<string, TConstDecl>.Create();
   FThreadVarGlobals    := TDictionary<string, Boolean>.Create();
   FWeakGlobals         := TDictionary<string, Boolean>.Create();
@@ -1520,6 +1530,7 @@ begin
   FThreadVarGlobals.Free();
   FGlobalInits.Free();
   FModuleVarNames.Free();
+  FOwnModuleVars.Free();
   FGlobalOwners.Free();
   FDataGlobals.Free();
   inherited Destroy();
@@ -1569,11 +1580,19 @@ begin
   { Remember the owning unit so EmitDataSection / IsImportedGlobal can consult it
     without re-looking-up the mangled canonical key (which is not a symbol). }
   Owner := '';
-  if FSymTable <> nil then
+  if Self.IsOwnModuleVar(AName) then
+    Owner := FCurrentUnitName
+  else if FSymTable <> nil then
   begin
     Sym := FSymTable.Lookup(AName);
     if (Sym <> nil) and (Sym.Kind = skVariable) then
+    begin
       Owner := Sym.OwningUnit;
+      { a contested var's pre-mangled alias: the declaring unit owns (and
+        defines and releases) the storage }
+      if Sym.AliasOwner <> '' then
+        Owner := Sym.AliasOwner;
+    end;
   end;
   if not FGlobalOwners.ContainsKey(Key) then
     FGlobalOwners.Add(Key, Owner);
@@ -1728,11 +1747,26 @@ begin
   Result := MangleUnitPrefix(AOwner);
 end;
 
+function TX86_64Backend.IsOwnModuleVar(const AName: string): Boolean;
+begin
+  Result := (FOwnModuleVars <> nil) and
+    (FOwnModuleVars.IndexOf(FCurrentUnitName + '|' + AName) >= 0);
+end;
+
 function TX86_64Backend.GlobalSymName(const AName: string): string;
 var
   Sym: TSymbol;
 begin
   Result := AName;
+  { (0) A module var the EMITTING unit declares belongs to that unit: its own
+        declaration shadows a same-named var of any unit it uses.  The flat
+        symbol table holds only the last-wins winner across the whole session,
+        so resolving through it gave two units' same-named vars one owner. }
+  if Self.IsOwnModuleVar(AName) then
+  begin
+    Result := Self.GlobalOwnerPrefix(FCurrentUnitName) + AName;
+    Exit;
+  end;
   { Owner resolution mirrors QBE.GlobalVarUnitPrefix + VarRef:
     (1) an EXPORTED symbol (interface-section module var) is in the symbol table
         with a non-empty OwningUnit — a cross-unit reference must prefix by THAT
@@ -23483,6 +23517,7 @@ begin
         { Record as a module var FIRST so AddGlobal's GlobalSymName applies the
           owning-unit prefix (this loop runs with FCurrentUnitName = the owner). }
         FModuleVarNames.Add(VD.Names.Strings[J]);
+        FOwnModuleVars.Add(FCurrentUnitName + '|' + VD.Names.Strings[J]);
         Self.AddGlobal(VD.Names.Strings[J], VD.ResolvedType);
         if VD.IsThreadVar then
           Self.MarkThreadVar(VD.Names.Strings[J]);
@@ -23651,6 +23686,7 @@ begin
         { Record as a module var FIRST so AddGlobal's GlobalSymName applies the
           owning-unit prefix (this loop runs with FCurrentUnitName = the owner). }
         FModuleVarNames.Add(VD.Names.Strings[J]);
+        FOwnModuleVars.Add(FCurrentUnitName + '|' + VD.Names.Strings[J]);
         Self.AddGlobal(VD.Names.Strings[J], VD.ResolvedType);
         if VD.IsThreadVar then
           Self.MarkThreadVar(VD.Names.Strings[J]);
@@ -23675,6 +23711,7 @@ begin
         { Record as a module var FIRST so AddGlobal's GlobalSymName applies the
           owning-unit prefix (this loop runs with FCurrentUnitName = the owner). }
         FModuleVarNames.Add(VD.Names.Strings[J]);
+        FOwnModuleVars.Add(FCurrentUnitName + '|' + VD.Names.Strings[J]);
         Self.AddGlobal(VD.Names.Strings[J], VD.ResolvedType);
         if VD.IsThreadVar then
           Self.MarkThreadVar(VD.Names.Strings[J]);

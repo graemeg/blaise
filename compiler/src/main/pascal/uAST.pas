@@ -274,6 +274,10 @@ type
   TAssignment = class(TASTStmt)
   public
     Name:            string;
+    QualifierUnit:   string;     { set by the parser — non-empty when the target
+                                   is written unit-qualified, 'Unit.Var := ...';
+                                   uSemantic resolves it against that unit's own
+                                   exports, as for TIdentExpr.QualifierUnit }
     Expr:            TASTExpr;   { owned }
     IsVarParam:      Boolean;    { set by uSemantic — True if target is a var parameter }
     IsGlobal:        Boolean;    { set by uSemantic — True if target is a program-level global }

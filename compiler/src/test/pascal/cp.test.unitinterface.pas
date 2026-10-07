@@ -2747,7 +2747,9 @@ begin
   Iface := TUnitInterface.Create('U');
   try
     Buf := WriteUnitInterface(Iface);
-    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 21 since
+    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 22 since
+      an assignment carries its target's unit qualifier ('Unit.Var := ...'),
+      which the parser used to drop (v21 since
       an ENUM-MEMBER subrange alias now exports a RESOLVED base enum name +
       ordinal bounds; the parser leaves TypeName empty for that form, so a
       v20 .bif carried a blank base and the consumer could not import the
@@ -2770,7 +2772,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 21', Buf) = 0);
+      Pos('BLAISE-IFACE 22', Buf) = 0);
   finally
     Iface.Free();
   end;
