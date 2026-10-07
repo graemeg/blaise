@@ -2813,6 +2813,7 @@ procedure TArm64Backend.EmitFieldAssign(AStmt: TFieldAssignment);
 var
   RelStr: Boolean;
   CVStore: TAssignment;
+  IntfArgs: TObjectList;
 begin
   RelStr := False;
   if AStmt.IsClassVarWrite then
@@ -2955,6 +2956,21 @@ begin
   end;
   if AStmt.PropIndexExpr <> nil then
     NotYet('this field-assignment form', AStmt);
+  if AStmt.IntfWriteDesc <> nil then
+  begin
+    { I.Prop := V on an interface: FieldName was rewritten to the SETTER, so
+      dispatch it through the itab with V as its one argument }
+    IntfArgs := TObjectList.Create(False);
+    try
+      IntfArgs.Add(AStmt.Expr);
+      EmitIntfDispatch(AStmt.RecordName, TInterfaceTypeDesc(AStmt.IntfWriteDesc),
+        TInterfaceTypeDesc(AStmt.IntfWriteDesc).MethodIndex(AStmt.FieldName),
+        IntfArgs, AStmt.ObjExpr, AStmt.IsVarParam, nil);
+    finally
+      IntfArgs.Free();
+    end;
+    Exit;
+  end;
   if AStmt.FieldInfo = nil then
     NotYet('unresolved field assignment', AStmt);
   if AStmt.IsImplicitSelf then
@@ -3614,6 +3630,25 @@ begin
       EmitSlotAddr('x0', TFieldAccessExpr(AExpr).ClassVarEmitName)
     else
       EmitLoadSlot('x0', TFieldAccessExpr(AExpr).ClassVarEmitName);
+    Exit;
+  end;
+  if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsInterfaceCall and
+     (TFieldAccessExpr(AExpr).ResolvedClassType is TInterfaceTypeDesc) and
+     not IsAggregateReturn(AExpr.ResolvedType) then
+  begin
+    { I.Prop on an interface (or a parameterless I.M without parens): the
+      getter dispatched through the itab }
+    EmptyArgs := TObjectList.Create(False);
+    try
+      EmitIntfDispatch(TFieldAccessExpr(AExpr).RecordName,
+        TInterfaceTypeDesc(TFieldAccessExpr(AExpr).ResolvedClassType),
+        TInterfaceTypeDesc(TFieldAccessExpr(AExpr).ResolvedClassType)
+          .MethodIndex(TFieldAccessExpr(AExpr).FieldName),
+        EmptyArgs, TFieldAccessExpr(AExpr).Base,
+        TFieldAccessExpr(AExpr).IsVarParam, nil);
+    finally
+      EmptyArgs.Free();
+    end;
     Exit;
   end;
   if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsStaticPropGet then
