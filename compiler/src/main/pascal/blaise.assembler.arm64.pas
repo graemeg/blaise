@@ -570,6 +570,71 @@ begin
 end;
 
 { logical shifted register: and=00, orr=01, eor=10, ands=11 (opc<<29). }
+{ AArch64 logical (bitmask) immediate.  An encodable value is a run of S
+  ones rotated right by R inside an element of E bits (E = 2, 4, ..., 64),
+  replicated across the register; 0 and all-ones have no encoding.  A 32-bit
+  value is replicated to 64 bits first, which forces E <= 32 as the w form
+  requires.  Returns False when the value has no encoding. }
+function EncodeBitmaskImm(AValue: Int64; AIs64: Boolean;
+  out AN, AImmR, AImmS: Integer): Boolean;
+var
+  V, EMask, Elem, Run, Rot, HalfMask: UInt64;
+  E, Half, S, R, I: Integer;
+begin
+  Result := False;
+  AN := 0;
+  AImmR := 0;
+  AImmS := 0;
+  V := UInt64(AValue);
+  if not AIs64 then
+  begin
+    if (V shr 32) <> 0 then Exit;
+    V := V or (V shl 32);
+  end;
+  if (V = 0) or (V = not UInt64(0)) then Exit;
+  { smallest element size whose halves still agree }
+  E := 64;
+  while E > 2 do
+  begin
+    Half := E div 2;
+    HalfMask := (UInt64(1) shl Half) - 1;
+    if (V and HalfMask) <> ((V shr Half) and HalfMask) then Break;
+    E := Half;
+  end;
+  if E = 64 then
+    EMask := not UInt64(0)
+  else
+    EMask := (UInt64(1) shl E) - 1;
+  Elem := V and EMask;
+  S := 0;
+  for I := 0 to E - 1 do
+    if ((Elem shr I) and 1) <> 0 then
+      S := S + 1;
+  Run := (UInt64(1) shl S) - 1;
+  for R := 0 to E - 1 do
+  begin
+    if R = 0 then
+      Rot := Run
+    else
+      Rot := ((Run shr R) or (Run shl (E - R))) and EMask;
+    if Rot = Elem then
+    begin
+      if E = 64 then AN := 1;
+      AImmR := R;
+      AImmS := ((not (2 * E - 1)) and $3F) or (S - 1);
+      Exit(True);
+    end;
+  end;
+end;
+
+{ and/orr/eor/ands with a bitmask immediate. }
+function EncLogicImm(AIs64: Boolean; AOpc, AN, AImmR, AImmS: Integer;
+  ARd, ARn: Integer): Integer;
+begin
+  Result := (SfBit(AIs64) shl 31) or (AOpc shl 29) or $12000000
+    or (AN shl 22) or (AImmR shl 16) or (AImmS shl 10) or (ARn shl 5) or ARd;
+end;
+
 function EncLogicReg(AIs64: Boolean; AOpc: Integer;
   ARd, ARn, ARm: Integer): Integer;
 begin
@@ -994,6 +1059,7 @@ procedure TArm64Assembler.EncodeInstr;
     Wd: Integer;
     ShiftAmt: Integer;
     WidthM1: Integer;
+    LN, LImmR, LImmS: Integer;
   begin
     { zero-operand }
     if FL.Mnemonic = 'nop' then begin EmitW(Integer($D503201F)); Exit; end;
@@ -1183,8 +1249,16 @@ procedure TArm64Assembler.EncodeInstr;
       else if FL.Mnemonic = 'orr' then Opc := 1
       else if FL.Mnemonic = 'eor' then Opc := 2
       else Opc := 3;
+      if FA[2].Kind = okImm then
+      begin
+        if not EncodeBitmaskImm(FA[2].Imm, FA[0].Is64, LN, LImmR, LImmS) then
+          LineError('immediate has no logical (bitmask) encoding');
+        EmitW(EncLogicImm(FA[0].Is64, Opc, LN, LImmR, LImmS,
+          FA[0].Reg, FA[1].Reg));
+        Exit;
+      end;
       if FA[2].Kind <> okReg then
-        LineError('logical immediates not supported — materialise first');
+        LineError('logical operand must be a register or an immediate');
       EmitW(EncLogicReg(FA[0].Is64, Opc, FA[0].Reg, FA[1].Reg, FA[2].Reg));
       Exit;
     end;

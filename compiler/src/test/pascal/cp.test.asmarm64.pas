@@ -26,6 +26,7 @@ type
     function TextWords(const ABody: string; out AFile: TMachOFile): TMoSection;
     function WordAt(ASec: TMoSection; AIdx: Integer): Integer;
     procedure AssertWord(const AAsm: string; AExpected: Integer);
+    procedure AssertAsmRaises(const AAsm: string);
   published
     procedure TestNopRet;
     procedure TestAddSubSpRegisterUsesExtendedForm;
@@ -35,6 +36,12 @@ type
     procedure TestMovFamily;
     procedure TestMulDiv;
     procedure TestLogicAndShifts;
+    { Logical (bitmask) immediates: every element size 2..64, rotated runs,
+      both register widths -- encodings taken from the system assembler. }
+    procedure TestLogicImmediates;
+    { An immediate that is no rotated run of ones (or is 0 / all ones) has
+      no bitmask encoding and must be an error, not a wrong instruction. }
+    procedure TestLogicImmediate_NotEncodable_Raises;
     procedure TestLoadsStores;
     procedure TestLoadStore_UnscaledAutoDowngrade;
     procedure TestFloatOps;
@@ -166,6 +173,42 @@ begin
   AssertWord('lsl x0, x1, #4', Integer($D37CEC20));
   AssertWord('asr w0, w1, #1', Integer($13017C20));
   AssertWord('sxtw x0, w0', Integer($93407C00));
+end;
+
+procedure TArm64AsmTests.TestLogicImmediates;
+begin
+  AssertWord('and x0, x0, #0xff', Integer($92401C00));
+  AssertWord('and w0, w0, #0xff', Integer($12001C00));
+  AssertWord('orr x0, x1, #0x5555555555555555', Integer($B200F020));
+  AssertWord('eor x2, x3, #0xff00ff00ff00ff00', Integer($D2089C62));
+  AssertWord('ands w0, w1, #0x80000000', Integer($72010020));
+  AssertWord('and x0, x1, #0xfffffffffffffffe', Integer($927FF820));
+  AssertWord('and w0, w1, #0xfffffffe', Integer($121F7820));
+  AssertWord('and x0, x1, #0x8000000000000001', Integer($92410420));
+  AssertWord('ands x9, x10, #0xf0', Integer($F27C0D49));
+  AssertWord('orr w3, w4, #0x3c3c3c3c', Integer($3206CC83));
+end;
+
+procedure TArm64AsmTests.AssertAsmRaises(const AAsm: string);
+var
+  Raised: Boolean;
+begin
+  Raised := False;
+  try
+    AssembleArm64ToBytes(AAsm + LineEnding);
+  except
+    on E: EArm64Assembler do
+      Raised := True;
+  end;
+  AssertTrue(AAsm + ' raises', Raised);
+end;
+
+procedure TArm64AsmTests.TestLogicImmediate_NotEncodable_Raises;
+begin
+  AssertAsmRaises('and x0, x1, #0');
+  AssertAsmRaises('and x0, x1, #0x1234');
+  AssertAsmRaises('and x0, x1, #0xffffffffffffffff');
+  AssertAsmRaises('and w0, w1, #0xffffffff');
 end;
 
 procedure TArm64AsmTests.TestLoadsStores;
