@@ -264,19 +264,19 @@ found, for a ruling before they are migrated.
 | `cp.test.jumboset.pas` | 17 | pending
 | `cp.test.control.pas` | 17 | done: 15 behaviour (e2e)
 | `cp.test.procs.pas` | 16 | done: 11 behaviour (e2e), 3 QBE-only
-| `cp.test.pointers.pas` | 16 | pending
-| `cp.test.dynarray.pas` | 16 | pending
-| `cp.test.vtable.pas` | 15 | pending
+| `cp.test.pointers.pas` | 16 | done: 12 behaviour (e2e), 1 QBE-only
+| `cp.test.dynarray.pas` | 16 | done: 14 behaviour (e2e)
+| `cp.test.vtable.pas` | 15 | done: 11 behaviour (e2e), 1 code-gen (GenAsm)
 | `cp.test.uint64.pas` | 14 | done: 12 behaviour (e2e)
-| `cp.test.rangecheck.pas` | 14 | pending
-| `cp.test.inherit.pas` | 14 | pending
+| `cp.test.rangecheck.pas` | 14 | done: 12 front-end (Analyse)
+| `cp.test.inherit.pas` | 14 | done: 7 behaviour (e2e), 2 code-gen (GenAsm), 1 QBE-only
 | `cp.test.caseenum.pas` | 14 | done: 12 behaviour (e2e)
-| `cp.test.staticmembers.pas` | 12 | pending
-| `cp.test.proctypes_ofobject.pas` | 12 | pending
-| `cp.test.overload.pas` | 12 | pending
+| `cp.test.staticmembers.pas` | 12 | done: 10 behaviour (e2e)
+| `cp.test.proctypes_ofobject.pas` | 12 | done: 11 behaviour (e2e); its 5 QBE-only e2e tests moved to native
+| `cp.test.overload.pas` | 12 | done: 10 behaviour (e2e)
 | `cp.test.forloop.pas` | 12 | done: 10 behaviour (e2e)
-| `cp.test.anonmethods.pas` | 12 | pending
-| `cp.test.typetests.pas` | 11 | pending
+| `cp.test.anonmethods.pas` | 12 | done: 7 behaviour (e2e); its 13 QBE-only e2e tests moved to native
+| `cp.test.typetests.pas` | 11 | done: 9 behaviour (e2e)
 | `cp.test.process.pas` | 11 | done: 9 behaviour (existing e2e)
 | `cp.test.generics.pas` | 11 | done: 5 behaviour (e2e), 2 code-gen (GenAsm); GenUnitIR / GenCombinedIR tests remain (see below)
 | `cp.test.external.pas` | 11 | done: 9 code-gen (GenAsm); found BUG-20261007-x86-extern-record-byval
