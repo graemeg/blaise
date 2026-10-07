@@ -26,6 +26,8 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Arc_ClassRecordOwnership;
+    procedure TestRun_Arc_StringsParamsPointers;
     procedure TestRun_WeakAndUnretained_NonOwning;
     procedure TestRun_ClassArc_NoExplicitFree_Valgrind;
     procedure TestRun_InterfaceArc_CarriesLifetime_Valgrind;
@@ -1254,6 +1256,325 @@ begin
     'free 7' + LE +
     'weak field nil True' + LE +
     'done' + LE, 0);
+end;
+
+procedure TE2EArcTests.TestRun_Arc_StringsParamsPointers;
+const
+  {
+    ARC for strings, dynamic arrays and interfaces, leak-checked and compared
+    line for line with x86-64: copy-on-assign strings and concatenation;
+    by-value, const and var string / dyn-array / interface parameters with
+    variable, concatenation and call-result arguments; an interface var
+    parameter reassigned in the callee; property and default-property setters
+    fed a concatenation or a call result; an owned string stored into a
+    class's static-array field; interface and dyn-array values written and
+    read through typed pointers; and a class reference recovered from a
+    Pointer cast (it must take its own reference). }
+  Src = '''
+    program ArcA;
+    type
+      TArr = array of Integer;
+      IFoo = interface
+        function Val: Integer;
+      end;
+      TFoo = class(TObject, IFoo)
+        Tag: Integer;
+        function Val: Integer;
+        destructor Destroy; override;
+      end;
+      TBox = class
+      private
+        FCur: string;
+        FItems: array[0..3] of string;
+        procedure SetCur(AValue: string);
+        procedure SetItem(I: Integer; AValue: string);
+        function GetItem(I: Integer): string;
+      public
+        Names: array[0..1] of string;
+        property Cur: string read FCur write SetCur;
+        property Items[I: Integer]: string read GetItem write SetItem; default;
+      end;
+    function TFoo.Val: Integer; begin Result := Tag end;
+    destructor TFoo.Destroy;
+    begin
+      WriteLn('foo ', Tag, ' gone');
+      inherited Destroy()
+    end;
+    procedure TBox.SetCur(AValue: string); begin FCur := AValue end;
+    procedure TBox.SetItem(I: Integer; AValue: string); begin FItems[I] := AValue end;
+    function TBox.GetItem(I: Integer): string; begin Result := FItems[I] end;
+    function MakeS(): string; begin Result := 'm' + 'k' end;
+    function MakeArr(): TArr; begin SetLength(Result, 2); Result[1] := 5 end;
+    function MakeFoo(T: Integer): IFoo;
+    var F: TFoo;
+    begin
+      F := TFoo.Create();
+      F.Tag := T;
+      Result := F
+    end;
+    procedure ByVal(S: string); begin S := S + '!'; WriteLn(S) end;
+    procedure ByConst(const S: string); begin WriteLn(S) end;
+    procedure ByVar(var S: string); begin S := 'v-' + 'set' end;
+    procedure DynVal(A: TArr); begin WriteLn(Length(A), ' ', A[1]) end;
+    procedure DynConst(const A: TArr); begin WriteLn(A[1]) end;
+    procedure IntfVal(I: IFoo); begin WriteLn('val ', I.Val()) end;
+    procedure IntfConst(const I: IFoo); begin WriteLn('const ', I.Val()) end;
+    procedure IntfVar(var I: IFoo); begin I := MakeFoo(9) end;
+    procedure Run;
+    var
+      S, T, U: string; A, B: TArr; I, J: IFoo; Bx: TBox; PI: ^IFoo; PA: ^TArr;
+      P: Pointer; F, G: TFoo; E: TArr;
+    begin
+      S := 'he' + 'llo';
+      T := S;
+      S := 'wor' + 'ld';
+      WriteLn(T, ' ', S, ' ', T + S);
+      ByVal(S);
+      ByConst(S + '?');
+      ByConst(MakeS());
+      ByVar(U);
+      WriteLn(S, ' ', U);
+      A := MakeArr();
+      B := A;
+      DynVal(B);
+      DynConst(MakeArr());
+      I := MakeFoo(1);
+      IntfVal(I);
+      IntfConst(I);
+      IntfConst(MakeFoo(2));
+      IntfVar(I);
+      WriteLn('now ', I.Val());
+      Bx := TBox.Create();
+      Bx.Cur := S + T;
+      Bx[1] := S + '#';
+      Bx.Cur := MakeS();
+      Bx.Names[0] := MakeS();
+      WriteLn(Bx.Cur, ' ', Bx[1], ' ', Bx.Names[0]);
+      PI := GetMem(16);
+      ZeroMem(PI, 16);
+      PI^ := I;
+      J := PI^;
+      WriteLn('ptr ', J.Val());
+      PI^ := nil;
+      FreeMem(PI);
+      PA := GetMem(8);
+      ZeroMem(PA, 8);
+      PA^ := A;
+      WriteLn(Length(PA^));
+      PA^ := E;
+      FreeMem(PA);
+      G := TFoo.Create();
+      G.Tag := 7;
+      P := Pointer(G);
+      F := TFoo(P);
+      G := nil;
+      WriteLn('cast ', F.Tag);
+      F := nil;
+      I := nil;
+      J := nil;
+      Bx.Free();
+      WriteLn('end run')
+    end;
+    begin
+      Run();
+      WriteLn('done')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'hello world helloworld' + LE +
+    'world!' + LE +
+    'world?' + LE +
+    'mk' + LE +
+    'world v-set' + LE +
+    '2 5' + LE +
+    '5' + LE +
+    'val 1' + LE +
+    'const 1' + LE +
+    'const 2' + LE +
+    'foo 2 gone' + LE +
+    'foo 1 gone' + LE +
+    'now 9' + LE +
+    'mk world# mk' + LE +
+    'ptr 9' + LE +
+    '2' + LE +
+    'cast 7' + LE +
+    'foo 7 gone' + LE +
+    'foo 9 gone' + LE +
+    'end run' + LE +
+    'done' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'end run');
+end;
+
+procedure TE2EArcTests.TestRun_Arc_ClassRecordOwnership;
+const
+  {
+    ARC for class and record ownership, with destructors that print so the
+    release timing shows, leak-checked: reassigning a class variable (first
+    assignment, second, after a branch), a class without a destructor, a
+    generic class's destructor, Free on a static-array element (the slot is
+    nilled), static arrays of objects / strings / records released at scope
+    exit, a record copy with a static-array-of-string field (deep), a
+    discarded record call and a discarded interface call releasing their
+    results at once, closures held in a record and in a class, and a method
+    pointer that does not keep its object alive.  The two discarded calls
+    leaked on arm64. }
+  Src = '''
+    program ArcB;
+    type
+      TNode = class
+        Name: string;
+        constructor Create(const N: string);
+        destructor Destroy; override;
+        procedure Hello;
+      end;
+      TPlain = class
+        X: Integer;
+      end;
+      TG<T> = class
+        V: T;
+        destructor Destroy; override;
+      end;
+      TRec = record
+        S: string;
+        N: TNode;
+      end;
+      TStrRec = record
+        S: string;
+      end;
+      TArrRec = record
+        A: array[0..1] of string;
+      end;
+      TFn = reference to procedure;
+      TCR = record
+        F: TFn;
+      end;
+      TCC = class
+        F: TFn;
+      end;
+      TMP = procedure of object;
+      TMR = record
+        M: TMP;
+      end;
+      IFoo = interface
+        function Val: Integer;
+      end;
+      TFoo = class(TObject, IFoo)
+        function Val: Integer;
+        destructor Destroy; override;
+      end;
+    constructor TNode.Create(const N: string);
+    begin
+      Name := N
+    end;
+    destructor TNode.Destroy;
+    begin
+      WriteLn(Name, ' gone');
+      inherited Destroy()
+    end;
+    procedure TNode.Hello;
+    begin
+      WriteLn('hello ', Name)
+    end;
+    destructor TG<T>.Destroy;
+    begin
+      WriteLn('generic gone');
+      inherited Destroy()
+    end;
+    function TFoo.Val: Integer;
+    begin
+      Result := 1
+    end;
+    destructor TFoo.Destroy;
+    begin
+      WriteLn('foo gone');
+      inherited Destroy()
+    end;
+    function MakeRec: TRec;
+    begin
+      Result.S := 'r' + 's';
+      Result.N := TNode.Create('rec')
+    end;
+    function MakeIntf: IFoo;
+    begin
+      Result := TFoo.Create()
+    end;
+    procedure Run;
+    var
+      A, B: TNode; P: TPlain; G: TG<Integer>; SA: array[0..1] of TNode;
+      SS: array[0..1] of string; SR: array[0..1] of TStrRec;
+      AR1, AR2: TArrRec; CR: TCR; CC: TCC; MR: TMR; S: string; Flag: Boolean;
+    begin
+      A := TNode.Create('a');
+      A := TNode.Create('b');
+      WriteLn('after second');
+      Flag := True;
+      if Flag then B := TNode.Create('c') else B := nil;
+      B := TNode.Create('d');
+      WriteLn('after branch');
+      P := TPlain.Create();
+      P := nil;
+      G := TG<Integer>.Create();
+      G := nil;
+      SA[0] := TNode.Create('sa0');
+      SA[0].Free();
+      WriteLn(SA[0] = nil);
+      SA[1] := TNode.Create('sa1');
+      SS[0] := 'x' + 'y';
+      SR[0].S := 'p' + 'q';
+      AR1.A[0] := 'arr' + '0';
+      AR2 := AR1;
+      AR1.A[0] := 'changed';
+      WriteLn(AR2.A[0], ' ', AR1.A[0], ' ', SS[0], ' ', SR[0].S);
+      MakeRec();
+      WriteLn('after discard');
+      MakeIntf();
+      WriteLn('after intf discard');
+      S := 'cap';
+      CR.F := procedure begin WriteLn(S) end;
+      CR.F();
+      CC := TCC.Create();
+      CC.F := procedure begin WriteLn(S + '2') end;
+      CC.F();
+      CC := nil;
+      MR.M := @B.Hello;
+      MR.M();
+      B := nil;
+      WriteLn('after method pointer');
+      A := nil;
+      WriteLn('end run')
+    end;
+    begin
+      Run();
+      WriteLn('done')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'a gone' + LE +
+    'after second' + LE +
+    'c gone' + LE +
+    'after branch' + LE +
+    'generic gone' + LE +
+    'sa0 gone' + LE +
+    'True' + LE +
+    'arr0 changed xy pq' + LE +
+    'rec gone' + LE +
+    'after discard' + LE +
+    'foo gone' + LE +
+    'after intf discard' + LE +
+    'cap' + LE +
+    'cap2' + LE +
+    'hello d' + LE +
+    'd gone' + LE +
+    'after method pointer' + LE +
+    'b gone' + LE +
+    'end run' + LE +
+    'sa1 gone' + LE +
+    'done' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'end run');
 end;
 
 initialization
