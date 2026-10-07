@@ -4031,11 +4031,12 @@ begin
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
      (TFuncCallExpr(AExpr).Args.Count = 1) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
-     (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind =
-       tyDynArray) and
+     ((TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind =
+        tyDynArray) or
+      TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.IsString()) and
      SameText(TFuncCallExpr(AExpr).Name, 'Low') then
   begin
-    { Low(D) of a dynamic array is always 0 }
+    { Low of a dynamic array or a string is always 0 (Blaise is 0-based) }
     Self.Emit(#9'movz x0, #0');
     Exit;
   end;
@@ -4069,9 +4070,12 @@ begin
      (TFuncCallExpr(AExpr).Args.Count = 1) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
      TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.IsString()
-     and SameText(TFuncCallExpr(AExpr).Name, 'Length') then
+     and (SameText(TFuncCallExpr(AExpr).Name, 'Length') or
+          SameText(TFuncCallExpr(AExpr).Name, 'High')) then
   begin
-    { Length(S): 4-byte length 8 bytes below the data pointer.  In Blaise a
+    { Length(S), and High(S) = Length(S) - 1 (-1 for the empty string; Blaise
+      strings are 0-based).
+      Length(S): 4-byte length 8 bytes below the data pointer.  In Blaise a
       nil pointer IS the empty string, so the read must be nil-guarded — a bare
       `ldur w0,[x0,#-8]` on a nil string reads [nil-8] and faults (this crashed
       the .bif writer's EncodeLpstr on an empty routine field, macOS arm64,
@@ -4089,9 +4093,13 @@ begin
       EmitStrDisposeX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitPopTo('x0');
       Self.Emit(#9'add sp, sp, #16');
+      if SameText(TFuncCallExpr(AExpr).Name, 'High') then
+        Self.Emit(#9'sub x0, x0, #1');
       Exit;
     end;
     EmitStrLen('x0');
+    if SameText(TFuncCallExpr(AExpr).Name, 'High') then
+      Self.Emit(#9'sub x0, x0, #1');
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
