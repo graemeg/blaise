@@ -13,15 +13,16 @@ unit cp.test.attributes;
   Covers:
     * Parser: [Attr] syntax before class declarations stored on TClassTypeDef
     * Semantic: suffix convention; unknown attribute error; [Weak] unaffected
-    * Codegen: 8-slot typeinfo; $attrs_ table format; HasClassAttribute IR
-    * E2E: HasClassAttribute returns correct Boolean at runtime }
+    * Run time: the attribute tables and the RTTI builtins over them are
+      exercised by cp.test.e2e.attributes.
+
+  ProjectRootAttr / RunCmdAttr are still used by cp.test.anonmethods. }
 
 interface
 
 uses
   Classes, SysUtils, Process, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe,
-  cp.test.rtllink;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 function ProjectRootAttr: string;
 function RunCmdAttr(const AExe: string; const AArgs: array of string): Integer;
@@ -31,8 +32,6 @@ type
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
-    function CompileAndRun(const ASrc: string): string;
   published
     { Parser }
     procedure TestParse_AttributeOnClass_StoredOnClassTypeDef;
@@ -49,25 +48,6 @@ type
     procedure TestSemantic_UnknownAttribute_RaisesError;
     procedure TestSemantic_UnknownMethodAttribute_RaisesError;
     procedure TestSemantic_WeakOnField_StillWorks;
-
-    { Codegen }
-    procedure TestCodegen_TypeInfo_HasNineSlots;
-    procedure TestCodegen_NoAttrs_AttrsSlotZero;
-    procedure TestCodegen_WithAttrs_AttrsTableEmitted;
-    procedure TestCodegen_AttrsTable_PairsWithFactoryThunk;
-    procedure TestCodegen_AttrThunk_FunctionEmitted;
-    procedure TestCodegen_MethodAttrs_TableEmitted;
-    procedure TestCodegen_HasClassAttribute_EmitsRuntimeCall;
-    procedure TestCodegen_TCustomAttribute_StubsEmitted;
-
-    { End-to-end }
-    procedure TestE2E_HasClassAttribute_True;
-    procedure TestE2E_HasClassAttribute_False;
-    procedure TestE2E_HasClassAttribute_InheritedFromParent;
-    procedure TestE2E_HasClassAttribute_MultipleAttributes;
-    procedure TestE2E_GetClassAttribute_ReifiesConstructorArgs;
-    procedure TestE2E_GetClassAttribute_AbsentReturnsNil;
-    procedure TestE2E_MethodAttributes_HasGetCountAt;
   end;
 
 implementation
@@ -93,23 +73,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TCustomAttributeTests.GenIR(const ASrc: string): string;
-var Prog: TProgram; CG: TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -154,66 +117,6 @@ begin
     repeat Chunk := Proc.ReadOutput(); until (Chunk = '') and not Proc.Running;
     Proc.WaitOnExit();
     Result := Proc.ExitCode;
-  finally
-    Proc.Free();
-  end;
-end;
-
-function TCustomAttributeTests.CompileAndRun(const ASrc: string): string;
-var
-  IR:                       string;
-  Root:                     string;
-  QBE, Scratch:             string;
-  IRFile, AsmFile, BinFile: string;
-  Lst:                      TStringList;
-  Proc:                     TProcess;
-  Chunk:                    string;
-begin
-  Result := '';
-  Root   := ProjectRootAttr();
-  QBE    := Root + 'vendor/qbe/qbe';
-  if not RTLLinkToolchainAvailable(Root) then
-  begin
-    Result := '<toolchain-missing>';
-    Exit;
-  end;
-  Scratch := Root + 'compiler/target/test-attributes';
-  ForceDirectories(Scratch);
-  IRFile  := IncludeTrailingPathDelimiter(Scratch) + 'case.ssa';
-  AsmFile := IncludeTrailingPathDelimiter(Scratch) + 'case.s';
-  BinFile := IncludeTrailingPathDelimiter(Scratch) + 'case.bin';
-
-  IR := GenIR(ASrc);
-  Lst := TStringList.Create();
-  try
-    Lst.Text := IR;
-    Lst.SaveToFile(IRFile);
-  finally
-    Lst.Free();
-  end;
-
-  if RunCmdAttr(QBE, ['-o', AsmFile, IRFile]) <> 0 then
-  begin
-    Result := '<qbe-failed>';
-    Exit;
-  end;
-
-  if LinkProgramWithRTL(Root, AsmFile, BinFile) <> 0 then
-  begin
-    Result := '<link-failed>';
-    Exit;
-  end;
-
-  Proc := TProcess.Create(nil);
-  try
-    Proc.Executable := BinFile;
-    Proc.Execute();
-    Result := '';
-    repeat
-      Chunk := Proc.ReadOutput();
-      Result := Result + Chunk;
-    until (Chunk = '') and not Proc.Running;
-    Proc.WaitOnExit();
   finally
     Proc.Free();
   end;
@@ -540,372 +443,6 @@ begin
   Prog := AnalyseSrc(Src);
   Prog.Free();
   AssertTrue('[Weak] on field still resolves correctly', True);
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen tests                                                         }
-{ ------------------------------------------------------------------ }
-
-procedure TCustomAttributeTests.TestCodegen_TypeInfo_HasNineSlots;
-const
-  Src =
-    '''
-    program P;
-    type TFoo = class(TObject) end;
-    begin end.
-    ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('typeinfo emits 9 l-slots (attrs + method-attrs slots = l 0 ' +
-             'when no attributes)',
-    Pos('$typeinfo_TFoo = { l $typeinfo_TObject, l 0, l $__cn_TFoo + 12, l 0' +
-        ', l 8, l $_FieldCleanup_TFoo, l $vtable_TFoo, l 0, l 0 }', IR) > 0);
-end;
-
-procedure TCustomAttributeTests.TestCodegen_NoAttrs_AttrsSlotZero;
-const
-  Src =
-    '''
-    program P;
-    type TFoo = class(TObject) end;
-    begin end.
-    ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('attrs + method-attrs slots are l 0 when no attributes applied',
-    Pos(', l $vtable_TFoo, l 0, l 0 }', IR) > 0);
-  AssertTrue('no $attrs_TFoo data block emitted', Pos('$attrs_TFoo', IR) < 0);
-end;
-
-procedure TCustomAttributeTests.TestCodegen_WithAttrs_AttrsTableEmitted;
-const
-  Src =
-    '''
-    program P;
-    type
-      MyAttr = class(TCustomAttribute) end;
-      [MyAttr]
-      TFoo = class(TObject) end;
-    begin end.
-    ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('$attrs_TFoo data block emitted',
-    Pos('$attrs_TFoo', IR) > 0);
-  AssertTrue('typeinfo refs $attrs_TFoo in slot 7 (method-attrs slot 8 = 0)',
-    Pos(', l $vtable_TFoo, l $attrs_TFoo, l 0 }', IR) > 0);
-end;
-
-procedure TCustomAttributeTests.TestCodegen_AttrsTable_PairsWithFactoryThunk;
-const
-  Src =
-    '''
-    program P;
-    type
-      MyAttr = class(TCustomAttribute) end;
-      [MyAttr]
-      TFoo = class(TObject) end;
-    begin end.
-    ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('attrs table has count=1 and (typeinfo, thunk) pair for MyAttr',
-    Pos('$attrs_TFoo = { l 1, l $typeinfo_MyAttr, l $__attr_TFoo_c0 }', IR) > 0);
-end;
-
-procedure TCustomAttributeTests.TestCodegen_AttrThunk_FunctionEmitted;
-const
-  Src =
-    '''
-    program P;
-    type
-      MyAttr = class(TCustomAttribute) end;
-      [MyAttr]
-      TFoo = class(TObject) end;
-    begin end.
-    ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('factory thunk $__attr_TFoo_c0 emitted as a function',
-    Pos('$__attr_TFoo_c0(', IR) > 0);
-end;
-
-procedure TCustomAttributeTests.TestCodegen_MethodAttrs_TableEmitted;
-const
-  Src =
-    '''
-    program P;
-    type
-      MyAttr = class(TCustomAttribute) end;
-      TFoo = class(TObject)
-      published
-        [MyAttr]
-        procedure Run;
-      end;
-    procedure TFoo.Run;
-    begin
-    end;
-    begin end.
-    ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('$methattrs_TFoo data block emitted with count=1',
-    Pos('$methattrs_TFoo = { l 1', IR) > 0);
-  AssertTrue('entry is (method name, attr typeinfo, thunk) triple',
-    Pos('l $__mn_TFoo_Run + 12, l $typeinfo_MyAttr, l $__attr_TFoo_m', IR) > 0);
-  AssertTrue('typeinfo refs $methattrs_TFoo in slot 8',
-    Pos(', l $methattrs_TFoo }', IR) > 0);
-end;
-
-procedure TCustomAttributeTests.TestCodegen_HasClassAttribute_EmitsRuntimeCall;
-const
-  Src =
-    '''
-    program P;
-    type
-      ThreadedAttribute = class(TCustomAttribute) end;
-      [Threaded]
-      TFoo = class(TObject) end;
-    var B: Boolean;
-    begin
-      B := HasClassAttribute(TFoo, ThreadedAttribute)
-    end.
-    ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('HasClassAttribute emits call to $_HasClassAttribute',
-    Pos('call $_HasClassAttribute', IR) > 0);
-end;
-
-procedure TCustomAttributeTests.TestCodegen_TCustomAttribute_StubsEmitted;
-const
-  Src =
-    '''
-    program P;
-    begin end.
-    ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('$typeinfo_TCustomAttribute emitted unconditionally',
-    Pos('$typeinfo_TCustomAttribute', IR) > 0);
-  AssertTrue('$vtable_TCustomAttribute emitted unconditionally',
-    Pos('$vtable_TCustomAttribute', IR) > 0);
-  AssertTrue('$_FieldCleanup_TCustomAttribute emitted unconditionally',
-    Pos('$_FieldCleanup_TCustomAttribute', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
-{ End-to-end tests                                                      }
-{ ------------------------------------------------------------------ }
-
-procedure TCustomAttributeTests.TestE2E_HasClassAttribute_True;
-const
-  Src =
-    '''
-    program P;
-    type
-      ThreadedAttribute = class(TCustomAttribute) end;
-      [Threaded]
-      TFoo = class(TObject) end;
-    begin
-      WriteLn(HasClassAttribute(TFoo, ThreadedAttribute))
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', 'True' + #10, Output);
-end;
-
-procedure TCustomAttributeTests.TestE2E_HasClassAttribute_False;
-const
-  Src =
-    '''
-    program P;
-    type
-      ThreadedAttribute = class(TCustomAttribute) end;
-      TBar = class(TObject) end;
-    begin
-      WriteLn(HasClassAttribute(TBar, ThreadedAttribute))
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', 'False' + #10, Output);
-end;
-
-procedure TCustomAttributeTests.TestE2E_HasClassAttribute_InheritedFromParent;
-const
-  Src =
-    '''
-    program P;
-    type
-      ThreadedAttribute = class(TCustomAttribute) end;
-      [Threaded]
-      TBase = class(TObject) end;
-      TChild = class(TBase) end;
-    begin
-      WriteLn(HasClassAttribute(TBase, ThreadedAttribute));
-      WriteLn(HasClassAttribute(TChild, ThreadedAttribute))
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', 'True' + #10 + 'True' + #10, Output);
-end;
-
-procedure TCustomAttributeTests.TestE2E_HasClassAttribute_MultipleAttributes;
-const
-  Src =
-    '''
-    program P;
-    type
-      AttrA = class(TCustomAttribute) end;
-      AttrB = class(TCustomAttribute) end;
-      [AttrA]
-      [AttrB]
-      TFoo = class(TObject) end;
-    begin
-      WriteLn(HasClassAttribute(TFoo, AttrA));
-      WriteLn(HasClassAttribute(TFoo, AttrB))
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', 'True' + #10 + 'True' + #10, Output);
-end;
-
-procedure TCustomAttributeTests.TestE2E_GetClassAttribute_ReifiesConstructorArgs;
-const
-  Src =
-    '''
-    program P;
-    type
-      TestCaseAttribute = class(TCustomAttribute)
-      private
-        FName: string;
-        FArgs: string;
-      public
-        constructor Create(AName, AArgs: string);
-        property Name: string read FName;
-        property Args: string read FArgs;
-      end;
-      [TestCase('simple', '2,2,4')]
-      TFoo = class(TObject) end;
-    constructor TestCaseAttribute.Create(AName, AArgs: string);
-    begin
-      FName := AName;
-      FArgs := AArgs;
-    end;
-    var
-      A:  TObject;
-      TC: TestCaseAttribute;
-    begin
-      A := GetClassAttribute(TFoo, TestCaseAttribute);
-      if A = nil then
-        WriteLn('nil')
-      else
-      begin
-        TC := TestCaseAttribute(A);
-        WriteLn(TC.Name + '|' + TC.Args)
-      end
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', 'simple|2,2,4' + #10, Output);
-end;
-
-procedure TCustomAttributeTests.TestE2E_GetClassAttribute_AbsentReturnsNil;
-const
-  Src =
-    '''
-    program P;
-    type
-      MarkAttribute = class(TCustomAttribute) end;
-      TBar = class(TObject) end;
-    var
-      A: TObject;
-    begin
-      A := GetClassAttribute(TBar, MarkAttribute);
-      if A = nil then
-        WriteLn('nil')
-      else
-        WriteLn('instance')
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', 'nil' + #10, Output);
-end;
-
-procedure TCustomAttributeTests.TestE2E_MethodAttributes_HasGetCountAt;
-const
-  Src =
-    '''
-    program P;
-    type
-      MarkAttribute = class(TCustomAttribute)
-      private
-        FTag: string;
-      public
-        constructor Create(ATag: string);
-        property Tag: string read FTag;
-      end;
-      TFoo = class(TObject)
-      published
-        [Mark('alpha')]
-        [Mark('beta')]
-        procedure Run;
-      end;
-    constructor MarkAttribute.Create(ATag: string);
-    begin
-      FTag := ATag;
-    end;
-    procedure TFoo.Run;
-    begin
-    end;
-    var
-      A: TObject;
-      M: MarkAttribute;
-    begin
-      WriteLn(MethodAttributeCount(TFoo, 'Run'));
-      WriteLn(HasMethodAttribute(TFoo, 'Run', MarkAttribute));
-      WriteLn(HasMethodAttribute(TFoo, 'Missing', MarkAttribute));
-      A := GetMethodAttributeAt(TFoo, 'Run', 1);
-      M := MarkAttribute(A);
-      WriteLn(M.Tag);
-      A := GetMethodAttribute(TFoo, 'Run', MarkAttribute);
-      M := MarkAttribute(A);
-      WriteLn(M.Tag)
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout',
-    '2' + #10 + 'True' + #10 + 'False' + #10 + 'beta' + #10 + 'alpha' + #10,
-    Output);
 end;
 
 initialization

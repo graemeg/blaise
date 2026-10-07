@@ -153,6 +153,7 @@ uses
   cp.test.visibility,
   cp.test.publishedrtti,
   cp.test.attributes,
+  cp.test.e2e.attributes,
   cp.test.anonmethods,
   cp.test.e2e.anonmethods,
   cp.test.testingfw,
