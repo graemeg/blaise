@@ -103,6 +103,8 @@ type
     FUnitInits:   TStringList;   { emitted <unit>_init symbols, called by _main }
     FUnitFinals:  TStringList;   { emitted <unit>_final symbols — called at
                                     program exit in REVERSE dependency order }
+    FFiniReleased: TStringList;  { global symbols a <unit>_final releases —
+                                   _main's own exit walk skips them }
     FGlobalInits: TDictionary<string, string>;  { prefixed symbol -> .data
                                     directive for initialised globals }
     FGlobalStrInits: TStringList; { symbols of string-initialised globals }
@@ -576,7 +578,8 @@ type
     procedure EmitUnit(AUnit: TUnit); override;
     procedure EmitUnitInit(AUnit: TUnit);
     procedure EmitUnitSection(AUnit: TUnit; AStmts: TObjectList;
-      const ASym: string; ARegistry: TStringList);
+      const ASym: string; ARegistry: TStringList; AReleaseUnit: TUnit);
+    procedure EmitUnitGlobalReleases(ABlock: TBlock);
     function  ClassPrefixOwner(const AOwner: string): string;
     function  PropAccessorSym(const AOwnerType, AMethod: string): string;
     function  ClassSym(ATD: TTypeDecl): string;
@@ -802,6 +805,9 @@ begin
   FOwnModuleVars.Duplicates := dupIgnore;
   FUnitInits   := TStringList.Create();
   FUnitFinals  := TStringList.Create();
+  FFiniReleased := TStringList.Create();
+  FFiniReleased.Sorted := True;
+  FFiniReleased.Duplicates := dupIgnore;
   FGlobalInits := TDictionary<string, string>.Create();
   FGlobalStrInits := TStringList.Create();
   FGlobalStrVals  := TStringList.Create();
@@ -854,6 +860,7 @@ begin
   FOwnModuleVars.Free();
   FUnitInits.Free();
   FUnitFinals.Free();
+  FFiniReleased.Free();
   FGlobalInits.Free();
   FGlobalStrInits.Free();
   FGlobalStrVals.Free();
@@ -15432,14 +15439,18 @@ begin
   for I := FUnitFinals.Count - 1 downto 0 do
     Self.Emit(Format(#9'bl %s', [FUnitFinals.Strings[I]]));
   { release string globals before returning (ARC parity with x86-64's
-    program-exit global release) }
+    program-exit global release).  A unit-owned global is released by its
+    unit's final above, never here (FFiniReleased) -- in a whole-program
+    build the unit's globals share these lists with the program's. }
   for I := 0 to FStrGlobals.Count - 1 do
   begin
+    if FFiniReleased.IndexOf(FStrGlobals.Strings[I]) >= 0 then Continue;
     EmitLoadSlot('x0', FStrGlobals.Strings[I]);
     EmitCallSym('_StringRelease');
   end;
   for I := 0 to FRecGlobals.Count - 1 do
-    if AggHasManaged(TTypeDesc(FRecGlobals.Objects[I])) then
+    if AggHasManaged(TTypeDesc(FRecGlobals.Objects[I])) and
+       (FFiniReleased.IndexOf(FRecGlobals.Strings[I]) < 0) then
     begin
       Self.Emit(#9'str x19, [sp, #-16]!');
       EmitSlotAddr('x19', FRecGlobals.Strings[I]);
@@ -15449,22 +15460,26 @@ begin
     end;
   for I := 0 to FObjGlobals.Count - 1 do
   begin
+    if FFiniReleased.IndexOf(FObjGlobals.Strings[I]) >= 0 then Continue;
     EmitLoadSlot('x0', FObjGlobals.Strings[I]);
     EmitCallSym('_ClassRelease');
   end;
   for I := 0 to FIntfGlobals.Count - 1 do
   begin
+    if FFiniReleased.IndexOf(FIntfGlobals.Strings[I]) >= 0 then Continue;
     EmitLoadSlot('x0', FIntfGlobals.Strings[I]);
     EmitCallSym('_ClassRelease');
   end;
   for I := 0 to FDynGlobals.Count - 1 do
   begin
+    if FFiniReleased.IndexOf(FDynGlobals.Strings[I]) >= 0 then Continue;
     EmitLoadSlot('x0', FDynGlobals.Strings[I]);
     EmitCallSym('_DynArrayRelease');
   end;
   { release the Env half of 'reference to' closure globals (arkRefEnv) }
   for I := 0 to FRefGlobals.Count - 1 do
   begin
+    if FFiniReleased.IndexOf(FRefGlobals.Strings[I]) >= 0 then Continue;
     EmitSlotAddr('x0', FRefGlobals.Strings[I]);
     Self.Emit(#9'ldr x0, [x0, #8]');
     EmitCallSym('_ClassRelease');
@@ -15720,14 +15735,19 @@ begin
   end;
 
   { Initialization section: a parameterless <unit>_init routine that _main
-    calls (in dependency order) right after _BlaiseInit.  Finalization
-    becomes <unit>_final, called at program exit in REVERSE order —
-    genuinely invoked, unlike the x86 emit-but-never-call shape. }
+    calls (in dependency order) right after _BlaiseInit.  Teardown is
+    <unit>_final, called at program exit in REVERSE order.  It is emitted on
+    the shared UnitNeedsFini predicate -- a finalization section AND/OR
+    managed module globals -- the same one the driver uses to register a
+    dependency's final call (NoteDepFiniUnit), so the call list and the
+    defined symbols cannot drift.  The release walk lives in the unit's OWN
+    object, where implementation-section privates are reachable (x86-64
+    parity: <Unit>_fini). }
   if (AUnit.InitStmts <> nil) and (AUnit.InitStmts.Count > 0) then
     EmitUnitInit(AUnit);
-  if (AUnit.FinalStmts <> nil) and (AUnit.FinalStmts.Count > 0) then
+  if UnitNeedsFini(AUnit) then
     EmitUnitSection(AUnit, AUnit.FinalStmts,
-      DarwinSym(CodegenMangle(AUnit.Name) + '_final'), FUnitFinals);
+      DarwinSym(CodegenMangle(AUnit.Name) + '_final'), FUnitFinals, AUnit);
   EmitArrayConstData(AUnit.IntfBlock);
   EmitArrayConstData(AUnit.ImplBlock);
   FCurrentUnitName := '';
@@ -15736,7 +15756,7 @@ end;
 procedure TArm64Backend.EmitUnitInit(AUnit: TUnit);
 begin
   EmitUnitSection(AUnit, AUnit.InitStmts,
-    DarwinSym(CodegenMangle(AUnit.Name) + '_init'), FUnitInits);
+    DarwinSym(CodegenMangle(AUnit.Name) + '_init'), FUnitInits, nil);
 end;
 
 procedure TArm64Backend.NoteDepInitUnit(const AUnitName: string;
@@ -15753,26 +15773,16 @@ end;
 procedure TArm64Backend.NoteDepFiniUnit(const AUnitName: string;
   AHasFini: Boolean);
 begin
-  { Teardown twin: _main calls the finals in reverse registration order.
-
-    DELIBERATELY NOT WIRED UP YET.  AHasFini comes from the shared
-    UnitNeedsFini predicate, which is True for a unit with a finalization
-    section OR with managed (ARC) module globals.  arm64's EmitUnit currently
-    emits <Unit>_final ONLY for a real finalization section — it has no
-    managed-global release walk (x86-64 emits one inside its <Unit>_fini).
-    Registering the name here regardless would make _main call a symbol the
-    arm64 backend never defines, and the link fails on exactly the units whose
-    only teardown need is managed globals.
-
-    The missing managed-global teardown is a pre-existing arm64 LEAK, tracked
-    separately (BUG-20260723-arm64-unit-managed-global-teardown) — not a
-    correctness regression, and out of scope for the init-call fix above.
-    When that walk lands, register the name here on the same predicate
-    EmitUnit uses so the two cannot drift. }
+  { Teardown twin: the dep's <Unit>_final lives in its own object.  AHasFini
+    is the shared UnitNeedsFini predicate EmitUnit emits the final on, and the
+    mangling matches EmitUnit's exactly.  _main calls the finals in REVERSE
+    registration order. }
+  if AHasFini then
+    FUnitFinals.Add(DarwinSym(CodegenMangle(AUnitName) + '_final'));
 end;
 
 procedure TArm64Backend.EmitUnitSection(AUnit: TUnit; AStmts: TObjectList;
-  const ASym: string; ARegistry: TStringList);
+  const ASym: string; ARegistry: TStringList; AReleaseUnit: TUnit);
 var
   I, J: Integer;
   FrameAligned: Integer;
@@ -15795,17 +15805,25 @@ begin
   AddLocal('__iret', 16);
   { __rret: always >= 16 (register-shape record-call field reads) }
   J := 16;
-  for I := 0 to AStmts.Count - 1 do
-    if MaxManagedRecRet(TASTStmt(AStmts.Items[I])) > J then
-      J := MaxManagedRecRet(TASTStmt(AStmts.Items[I]));
+  if AStmts <> nil then
+    for I := 0 to AStmts.Count - 1 do
+      if MaxManagedRecRet(TASTStmt(AStmts.Items[I])) > J then
+        J := MaxManagedRecRet(TASTStmt(AStmts.Items[I]));
   AddLocal('__rret', J);
   ReservePendRelSlots();   { BUG-048: statement-scoped deferred class releases }
-  for I := 0 to AStmts.Count - 1 do
-    RegisterForSlots(TASTStmt(AStmts.Items[I]));
+  if AStmts <> nil then
+    for I := 0 to AStmts.Count - 1 do
+      RegisterForSlots(TASTStmt(AStmts.Items[I]));
   FForN := 0;
   FrameAligned := (FFrameSize + 15) and (not 15);
   Self.Emit('');
-  EmitGloblDef(ASym);
+  { An RTL (unmangled) unit's final is WEAK, like its globals: every object
+    that inlines the RTL unit carries a copy, and the copies must collapse
+    rather than multiply-define (x86-64 <Unit>_fini, GH #191). }
+  if (AReleaseUnit <> nil) and IsUnmangledUnit(AReleaseUnit.Name) then
+    EmitWeakDef(ASym)
+  else
+    EmitGloblDef(ASym);
   Self.Emit(ASym + ':');
   Self.Emit(#9'stp x29, x30, [sp, #-16]!');
   Self.Emit(#9'mov x29, sp');
@@ -15816,8 +15834,18 @@ begin
   FExcSlotN := 0;
   FFinallyBodies.Clear();
   FLoopExcDepth.Clear();
-  EmitStmtList(AStmts);
+  if AStmts <> nil then
+    EmitStmtList(AStmts);
   Self.Emit(FExitLabel + ':');
+  { Teardown: the user finalization code above runs FIRST (it may still read
+    the unit's globals), then the unit's managed globals are released --
+    after the exit label, so an Exit inside the finalization section does not
+    skip them. }
+  if AReleaseUnit <> nil then
+  begin
+    EmitUnitGlobalReleases(AReleaseUnit.IntfBlock);
+    EmitUnitGlobalReleases(AReleaseUnit.ImplBlock);
+  end;
   Self.Emit(#9'mov sp, x29');
   Self.Emit(#9'ldp x29, x30, [sp], #16');
   Self.Emit(#9'ret');
@@ -15829,6 +15857,71 @@ begin
   BodyBuf.Free();
   FFrame.Clear();
   FFrameSize := 0;
+end;
+
+{ Release one unit's ARC-managed module globals -- the body of the unit's
+  teardown in <unit>_final.  Dispatches on the shared ArcScopeExitReleaseKind
+  classifier and skips exactly what UnitBlockHasManagedGlobals skips (thread
+  vars, [Unretained]), so the predicate that decides whether a final exists
+  and the walk inside it agree.  Every symbol released here is recorded in
+  FFiniReleased: in a whole-program build the unit's globals also sit in the
+  program-exit lists, and _main must not release them a second time. }
+procedure TArm64Backend.EmitUnitGlobalReleases(ABlock: TBlock);
+var
+  I, J: Integer;
+  VD: TVarDecl;
+  N: string;
+begin
+  if ABlock = nil then Exit;
+  for I := 0 to ABlock.Decls.Count - 1 do
+  begin
+    VD := TVarDecl(ABlock.Decls.Items[I]);
+    if VD.ResolvedType = nil then Continue;
+    if VD.IsThreadVar then Continue;
+    if VD.IsUnretained then Continue;
+    if ArcScopeExitReleaseKind(VD.ResolvedType) = arkNone then Continue;
+    for J := 0 to VD.Names.Count - 1 do
+    begin
+      N := GlobalSym(VD.Names.Strings[J]);
+      case ArcScopeExitReleaseKind(VD.ResolvedType) of
+        arkString:
+          begin
+            EmitLoadSlot('x0', N);
+            EmitCallSym('_StringRelease');
+          end;
+        arkClass, arkIntf:
+          if VD.IsWeak then
+          begin
+            EmitSlotAddr('x0', N);
+            EmitCallSym('_WeakClear');
+          end
+          else
+          begin
+            EmitLoadSlot('x0', N);
+            EmitCallSym('_ClassRelease');
+          end;
+        arkDynArray:
+          begin
+            EmitLoadSlot('x0', N);
+            EmitCallSym('_DynArrayRelease');
+          end;
+        arkRefEnv:
+          begin
+            EmitSlotAddr('x0', N);
+            Self.Emit(#9'ldr x0, [x0, #8]');
+            EmitCallSym('_ClassRelease');
+          end;
+        arkAggregate:
+          begin
+            Self.Emit(#9'str x19, [sp, #-16]!');
+            EmitSlotAddr('x19', N);
+            Self.EmitManagedReleaseAt(VD.ResolvedType, 'x19', False);
+            Self.Emit(#9'ldr x19, [sp], #16');
+          end;
+      end;
+      FFiniReleased.Add(N);
+    end;
+  end;
 end;
 
 { Static (class-level) variables -- `static var` in a class or record --
