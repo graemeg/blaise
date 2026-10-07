@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_VarParam_AddressForwarding;
     { A var/out param must be stored at the DESTINATION's declared width.
       QBE keyed the store off the RHS type, so `X := 9` with `var X: Byte`
       emitted storew and wrote 4 bytes through a 1-byte destination —
@@ -324,6 +325,75 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '5' + LE, 0);
+end;
+
+procedure TE2EVarParamTests.TestRun_VarParam_AddressForwarding;
+const
+  {
+    var parameters receive the caller's ADDRESS: a write lands in the caller's
+    global, a swap exchanges both, a var parameter forwarded to a procedure or a
+    method passes the original address on (not the address of its own slot), and
+    a field of a global object is addressed through the loaded object pointer. }
+  Src = '''
+    program VarParams;
+    type
+      THelper = class
+        procedure SetVal(var N: Integer);
+      end;
+      TNode = class
+        Pad: Integer;
+        Value: Integer;
+      end;
+    procedure THelper.SetVal(var N: Integer);
+    begin N := 7 end;
+    procedure SetVal(var X: Integer);
+    begin X := 42 end;
+    procedure Swap(var A, B: Integer);
+    var T: Integer;
+    begin
+      T := A;
+      A := B;
+      B := T
+    end;
+    procedure SetToFive(var N: Integer);
+    begin N := 5 end;
+    procedure SetViaCaller(var N: Integer);
+    begin SetToFive(N) end;
+    procedure Wrapper(H: THelper; var N: Integer);
+    begin H.SetVal(N) end;
+    procedure Fill(var V: Integer);
+    begin V := 4096 end;
+    var
+      V, X, Y: Integer;
+      H: THelper;
+      N: TNode;
+    begin
+      V := 0;
+      SetVal(V);
+      WriteLn(V);
+      X := 1;
+      Y := 2;
+      Swap(X, Y);
+      WriteLn(X, ' ', Y);
+      SetViaCaller(V);
+      WriteLn(V);
+      H := THelper.Create();
+      Wrapper(H, V);
+      WriteLn(V);
+      N := TNode.Create();
+      N.Pad := -1;
+      Fill(N.Value);
+      WriteLn(N.Pad, ' ', N.Value)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '42' + LE +
+    '2 1' + LE +
+    '5' + LE +
+    '7' + LE +
+    '-1 4096' + LE, 0);
 end;
 
 initialization

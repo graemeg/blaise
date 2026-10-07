@@ -15,14 +15,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TVarParamTests = class(TTestCase)
   private
     function  ParseSrc(const ASrc: string): TProgram;
     function  AnalyseSrc(const ASrc: string): TProgram;
-    function  GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -61,18 +60,6 @@ type
     procedure TestSemantic_IntfVarParam_Variable_OK;
     procedure TestSemantic_NewPathsVarParam_Variable_OK;
 
-    { ------------------------------------------------------------------ }
-    { Codegen                                                              }
-    { ------------------------------------------------------------------ }
-    procedure TestCodegen_VarParam_SignatureUsesPointerType;
-    procedure TestCodegen_VarParam_CallPassesAddress;
-    procedure TestCodegen_VarParam_WriteStoresThroughPointer;
-    procedure TestCodegen_VarParam_ReadDereferencesPointer;
-    procedure TestCodegen_VarParam_Swap;
-    { Var-param forwarding: passing a var param directly to another var param }
-    procedure TestCodegen_VarParam_ForwardToProc;
-    procedure TestCodegen_VarParam_ForwardToMethod;
-
     { L-value var args beyond simple identifiers: a record-field access
       (R.F) and a pointer-deref-then-field (P^.F) must both be accepted
       where the parameter is var-typed. }
@@ -85,7 +72,6 @@ type
       the variable holding the class reference stores a pointer to the
       heap object — adding the offset to the variable's address points
       at unrelated memory.  See BUG-001 in bugs.txt. }
-    procedure TestCodegen_VarParam_ClassFieldLeaf_LoadsObjectPointer;
   end;
 
 implementation
@@ -115,23 +101,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TVarParamTests.GenIR(const ASrc: string): string;
-var P: TProgram; CG: TCodeGenQBE;
-begin
-  P := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(P);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    P.Free();
   end;
 end;
 
@@ -486,108 +455,6 @@ begin
   P.Free();
 end;
 
-{ ------------------------------------------------------------------ }
-{ Codegen tests                                                        }
-{ ------------------------------------------------------------------ }
-
-procedure TVarParamTests.TestCodegen_VarParam_SignatureUsesPointerType;
-var IR: string;
-begin
-  IR := GenIR(SrcVarSet);
-  { var X: Integer → pointer param, QBE type l }
-  AssertTrue('var param uses l type', Pos('l %_par_X', IR) > 0);
-end;
-
-procedure TVarParamTests.TestCodegen_VarParam_CallPassesAddress;
-var IR: string;
-begin
-  IR := GenIR(SrcVarSet);
-  { SetVal(V) must pass the address of V — V is a global so address is $V }
-  AssertTrue('call passes address of V', Pos('call $SetVal(l $V)', IR) > 0);
-end;
-
-procedure TVarParamTests.TestCodegen_VarParam_WriteStoresThroughPointer;
-var IR: string;
-begin
-  IR := GenIR(SrcVarSet);
-  { X := 42 inside SetVal must load the pointer then store through it }
-  AssertTrue('loads pointer for write', Pos('loadl %_var_X', IR) > 0);
-  AssertTrue('storew used for Integer write', Pos('storew', IR) > 0);
-end;
-
-procedure TVarParamTests.TestCodegen_VarParam_ReadDereferencesPointer;
-var IR: string;
-begin
-  IR := GenIR(SrcVarSwap);
-  { T := A inside Swap must load the pointer then load through it }
-  AssertTrue('loads pointer for read', Pos('loadl %_var_A', IR) > 0);
-end;
-
-procedure TVarParamTests.TestCodegen_VarParam_Swap;
-var IR: string;
-begin
-  IR := GenIR(SrcVarSwap);
-  { Both X and Y addresses passed to Swap — X and Y are globals so addresses are $X, $Y }
-  AssertTrue('passes address of X', Pos('l $X', IR) > 0);
-  AssertTrue('passes address of Y', Pos('l $Y', IR) > 0);
-end;
-
-procedure TVarParamTests.TestCodegen_VarParam_ForwardToProc;
-var IR: string;
-begin
-  { A var param forwarded directly to another procedure's var param.
-    SetViaCaller(var N) calls SetToFive(N) — N is a var param, so the codegen
-    must emit  loadl %_var_N  to get the original caller's address, then pass
-    that value.  Passing %_var_N directly (the slot address) is wrong. }
-  IR := GenIR(
-    '''
-        program FwdTest;
-        procedure SetToFive(var N: Integer);
-        begin N := 5 end;
-        procedure SetViaCaller(var N: Integer);
-        begin SetToFive(N) end;
-        var V: Integer;
-        begin V := 0; SetViaCaller(V) end.
-        ''');
-  AssertTrue('SetViaCaller must loadl %_var_N to obtain original pointer',
-    Pos('loadl %_var_N', IR) > 0);
-  AssertFalse('must NOT pass slot address directly',
-    Pos('call $SetToFive(l %_var_N)', IR) > 0);
-end;
-
-procedure TVarParamTests.TestCodegen_VarParam_ForwardToMethod;
-const
-  SrcMethodFwd =
-    '''
-        program MethodFwd;
-        type
-          THelper = class
-            procedure SetVal(var N: Integer);
-          end;
-        procedure THelper.SetVal(var N: Integer);
-        begin N := 7 end;
-        procedure Wrapper(H: THelper; var N: Integer);
-        begin H.SetVal(N) end;
-        var H: THelper; V: Integer;
-        begin
-          H := THelper.Create();
-          V := 0;
-          Wrapper(H, V);
-          H.Free()
-        end.
-        ''';
-var IR: string;
-begin
-  { Wrapper(H: THelper; var N: Integer) calls H.SetVal(N).
-    N is a var param so the codegen must emit loadl %_var_N and pass the
-    result, not %_var_N itself (which is only the pointer's storage slot). }
-  IR := GenIR(SrcMethodFwd);
-  AssertTrue('Wrapper must loadl %_var_N for method forwarding',
-    Pos('loadl %_var_N', IR) > 0);
-  AssertFalse('must NOT pass slot address directly to SetVal',
-    Pos('call $THelper_SetVal(l %_var_N)', IR) > 0);
-end;
-
 procedure TVarParamTests.TestSemantic_VarParam_FieldAccess_OK;
 var
   Prog: TProgram;
@@ -631,37 +498,6 @@ begin
         end.
         ''');
   Prog.Free();
-end;
-
-procedure TVarParamTests.TestCodegen_VarParam_ClassFieldLeaf_LoadsObjectPointer;
-const
-  SrcClassFieldVarArg =
-    '''
-        program ClassFieldVar;
-        procedure Fill(var V: Integer);
-        begin V := 4096 end;
-        type
-          TNode = class
-            Pad:   Integer;
-            Value: Integer;
-          end;
-        var N: TNode;
-        begin
-          N := TNode.Create();
-          Fill(N.Value)
-        end.
-        ''';
-var
-  IR: string;
-begin
-  IR := GenIR(SrcClassFieldVarArg);
-  { N is a global class reference, so the slot is $N and stores a pointer
-    to the heap object.  Computing the address of N.Value must first load
-    that pointer; `add $N, <offset>` would point at unrelated memory. }
-  AssertTrue('loads the class pointer from $N before offsetting',
-    Pos('loadl $N', IR) > 0);
-  AssertFalse('must NOT add a field offset to $N (the slot address)',
-    Pos('add $N,', IR) > 0);
 end;
 
 initialization

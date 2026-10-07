@@ -13282,6 +13282,19 @@ begin
       NotYet('var field argument on an owned transient base', Arg);
     EmitRecFieldAddrToX0(TFieldAccessExpr(Arg));
   end
+  else if (Arg is TStringSubscriptExpr) and
+          (TStringSubscriptExpr(Arg).StrExpr.ResolvedType <> nil) and
+          (TStringSubscriptExpr(Arg).StrExpr.ResolvedType.Kind = tyStaticArray) then
+    { an array element: the address the element read would load from }
+    EmitStaticElemAddr(TStringSubscriptExpr(Arg))
+  else if (Arg is TStringSubscriptExpr) and
+          (TStringSubscriptExpr(Arg).StrExpr.ResolvedType <> nil) and
+          (TStringSubscriptExpr(Arg).StrExpr.ResolvedType.Kind in
+            [tyDynArray, tyOpenArray]) then
+    EmitDynElemAddr(TStringSubscriptExpr(Arg))
+  else if Arg is TDerefExpr then
+    { P^: the variable a pointer designates lives at the pointer's value }
+    Self.EmitExprToX0(TDerefExpr(Arg).Expr)
   else
     NotYet('var argument from this expression', Arg);
 end;
