@@ -6954,6 +6954,25 @@ begin
   end;
   if (AExpr.ResolvedType = nil) or (AExpr.ResolvedType.Kind <> tyInterface) then
     NotYet('interface value from this expression', AExpr);
+  if AExpr is TAsExpr then
+  begin
+    { Obj as IFoo as a value (an argument, a field store): the itab comes
+      from _GetItab, a failed cast raises EInvalidCast, and the obj half is
+      a borrow of the source -- the same lowering as EmitInterfaceAsCast }
+    if ArcExprOwnsRef(TAsExpr(AExpr).Obj) then
+      NotYet('as-cast of an owned transient', AExpr);
+    Self.EmitExprToX0(TAsExpr(AExpr).Obj);
+    EmitPushX0();                     { the obj value }
+    EmitTypeinfoAddr('x1', TAsExpr(AExpr).TypeName);
+    EmitCallSym('_GetItab');          { x0 = itab or nil }
+    ItabSym := NewLabel('asok');
+    Self.Emit(Format(#9'cbnz x0, %s', [ItabSym]));
+    EmitRaiseInvalidCast();
+    Self.Emit(ItabSym + ':');
+    Self.Emit(#9'mov x1, x0');
+    EmitPopTo('x0');
+    Exit;
+  end;
   if AExpr is TIdentExpr then
   begin
     IE := TIdentExpr(AExpr);
