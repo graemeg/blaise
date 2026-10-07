@@ -142,7 +142,6 @@ type
       types unit-private, analyses their method bodies, and emits them
       alongside IntfBlock ones. }
     procedure TestNativeImplSectionClass_Compiles;
-    procedure TestQBEImplSectionClass_Compiles;
     { Regression: an IMPLEMENTATION-section class referenced as a METACLASS value
       (class-of / `TFoo` used as a value) in the unit's OWN initialization block.
       Per-unit codegen left DefineOwningUnit pointing at a dependency unit by the
@@ -151,7 +150,6 @@ type
       to a bare, undefined typeinfo symbol -> link-time garbage -> SIGSEGV.
       Both backends. }
     procedure TestNativeImplSectionMetaclassInInit_Runs;
-    procedure TestQBEImplSectionMetaclassInInit_Runs;
     { Regression: a class declared in unit A's IMPLEMENTATION section must NOT
       be visible to an unrelated unit B that never `uses` A — it previously
       leaked through the flat global scope. }
@@ -262,7 +260,6 @@ type
       var did not register as a shared global, and TReg.Tag did not resolve.
       Driving through --unit-cache exercises the real .bif write+read path on
       both backends. }
-    procedure TestStaticMembers_CrossUnit_QBE;
     procedure TestStaticMembers_CrossUnit_Native;
     { Regression (BUG-043 follow-ons, IFACE v13): RECORD methods vanished
       entirely from the cached interface (records never exported/imported
@@ -271,7 +268,6 @@ type
       its closure flag on import (anon-method args then failed overload
       scoring).  One warm-cache round trip covers all three, per backend. }
     procedure TestRecordMethodsAndClosures_WarmCache_Native;
-    procedure TestRecordMethodsAndClosures_WarmCache_QBE;
     { Regression: two units EACH declaring a same-named unit-level `var` (and a
       same-named `threadvar`) must emit DISTINCT global symbols on the native
       backend (ua_GVal / ub_GVal), not one colliding bare `GVal`.  The native
@@ -283,7 +279,6 @@ type
       regression re-surfaces as a hard link failure, and the printed values prove
       the two slots are genuinely independent. }
     procedure TestSameNamedModuleVar_AcrossUnits_ExternalLink_Native;
-    procedure TestSameNamedModuleVar_AcrossUnits_QBE;
     { Regression (GH #182 follow-up): a unit's INTERFACE-section array/jumbo-set
       const is compiled to its own .o under the (default) incremental model, and
       a consuming program in a SEPARATE .o references its backing data label
@@ -298,7 +293,6 @@ type
       their existing non-exported, bare-mangled form. }
     procedure TestInterfaceArrayConst_AcrossUnits_Native;
     procedure TestUnitInterfaceGlobals_ItabHalf_Native;
-    procedure TestInterfaceArrayConst_AcrossUnits_QBE;
     procedure TestInterfaceJumboSetConst_AcrossUnits_Native;
     { Regression (BUGS.md BUG-004): generic-instance symbols were mangled from
       FOUR inconsistent sources — the instantiating unit's prefix (source
@@ -447,7 +441,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -538,7 +532,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -604,7 +598,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -703,7 +697,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -778,7 +772,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -846,7 +840,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -924,7 +918,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -1013,7 +1007,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -1087,7 +1081,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -1160,7 +1154,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -1250,7 +1244,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -1336,7 +1330,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -1436,7 +1430,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -1533,7 +1527,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -1615,7 +1609,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -1686,7 +1680,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -1756,7 +1750,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -2008,7 +2002,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -2033,77 +2027,6 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_implcls exit code', 0, Rc);
   AssertEquals('use_implcls stdout', '7' + #10, Captured)
-end;
-
-procedure TSepCompileTests.TestQBEImplSectionClass_Compiles;
-{ Same as TestNativeImplSectionClass_Compiles but forces the QBE backend —
-  the QBE unit-emission loop (AppendUnit) must also walk ImplBlock classes. }
-const
-  UnitSrc =
-    '''
-    unit ImplClsQ;
-    interface
-    function MakeAndGet: Integer;
-    implementation
-    type
-      TFoo = class
-        FX: Integer;
-        constructor Create(AX: Integer);
-        function GetX: Integer;
-      end;
-    constructor TFoo.Create(AX: Integer);
-    begin FX := AX end;
-    function TFoo.GetX: Integer;
-    begin Result := FX end;
-    function MakeAndGet: Integer;
-    var F: TFoo;
-    begin
-      F := TFoo.Create(7);
-      Result := F.GetX();
-      F.Free()
-    end;
-    end.
-    ''';
-  ProgSrc =
-    '''
-    program UseImplClsQ;
-    uses ImplClsQ;
-    begin
-      WriteLn(MakeAndGet())
-    end.
-    ''';
-var
-  UnitPas, ProgPas, ProgBin: string;
-  Captured: string;
-  Rc: Integer;
-begin
-  if not ToolchainAvailable() then
-  begin
-    Fail('toolchain missing — qbe or RTL not found');
-    Exit
-  end;
-  if not FileExists(BlaisePath()) then
-  begin
-    Fail('blaise binary missing at ' + BlaisePath());
-    Exit
-  end;
-
-  UnitPas := FScratch + '/ImplClsQ.pas';
-  ProgPas := FScratch + '/use_implclsq.pas';
-  ProgBin := FScratch + '/use_implclsq';
-
-  WriteFile(UnitPas, UnitSrc);
-  WriteFile(ProgPas, ProgSrc);
-
-  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
-                   '--backend', 'qbe',
-                   '--unit-path', FScratch], Captured);
-  AssertEquals('blaise(use_implclsq) exit code (out: ' + Captured + ')', 0, Rc);
-  AssertTrue('use_implclsq exists', FileExists(ProgBin));
-
-  Rc := RunBinary(ProgBin, Captured);
-  AssertEquals('use_implclsq exit code', 0, Rc);
-  AssertEquals('use_implclsq stdout', '7' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestNativeImplSectionMetaclassInInit_Runs;
@@ -2158,7 +2081,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -2183,81 +2106,6 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_implmetan exit code', 0, Rc);
   AssertEquals('use_implmetan stdout', '42' + #10, Captured)
-end;
-
-procedure TSepCompileTests.TestQBEImplSectionMetaclassInInit_Runs;
-{ Same as TestNativeImplSectionMetaclassInInit_Runs but forces the QBE backend. }
-const
-  UnitSrc =
-    '''
-    unit ImplMetaQ;
-    interface
-    function MakeViaMeta: Integer;
-    implementation
-    type
-      TFoo = class
-        FX: Integer;
-        constructor Create;
-        function GetX: Integer;
-      end;
-      TFooClass = class of TFoo;
-    var
-      GCls: TFooClass;
-    constructor TFoo.Create;
-    begin FX := 42 end;
-    function TFoo.GetX: Integer;
-    begin Result := FX end;
-    function MakeViaMeta: Integer;
-    var F: TFoo;
-    begin
-      F := GCls.Create();
-      Result := F.GetX();
-      F.Free()
-    end;
-    initialization
-      GCls := TFoo;
-    end.
-    ''';
-  ProgSrc =
-    '''
-    program UseImplMetaQ;
-    uses ImplMetaQ;
-    begin
-      WriteLn(MakeViaMeta())
-    end.
-    ''';
-var
-  UnitPas, ProgPas, ProgBin: string;
-  Captured: string;
-  Rc: Integer;
-begin
-  if not ToolchainAvailable() then
-  begin
-    Fail('toolchain missing — qbe or RTL not found');
-    Exit
-  end;
-  if not FileExists(BlaisePath()) then
-  begin
-    Fail('blaise binary missing at ' + BlaisePath());
-    Exit
-  end;
-
-  UnitPas := FScratch + '/ImplMetaQ.pas';
-  ProgPas := FScratch + '/use_implmetaq.pas';
-  ProgBin := FScratch + '/use_implmetaq';
-
-  WriteFile(UnitPas, UnitSrc);
-  WriteFile(ProgPas, ProgSrc);
-
-  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
-                   '--backend', 'qbe',
-                   '--unit-path', FScratch], Captured);
-  AssertEquals('blaise(use_implmetaq) exit code (out: ' + Captured + ')', 0, Rc);
-  AssertTrue('use_implmetaq exists', FileExists(ProgBin));
-
-  Rc := RunBinary(ProgBin, Captured);
-  AssertEquals('use_implmetaq exit code', 0, Rc);
-  AssertEquals('use_implmetaq stdout', '42' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestImplSectionClass_DoesNotLeakCrossUnit;
@@ -2376,7 +2224,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -2451,7 +2299,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -2521,7 +2369,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -2648,7 +2496,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -2855,7 +2703,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -3163,7 +3011,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -3258,7 +3106,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -3378,7 +3226,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -3456,7 +3304,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -3520,7 +3368,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -3597,7 +3445,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -3756,7 +3604,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   UnitPas  := FScratch + '/recclos.pas';
@@ -3794,59 +3642,6 @@ begin
   Self.RunRecordMethodsAndClosuresWarmCache('native');
 end;
 
-procedure TSepCompileTests.TestRecordMethodsAndClosures_WarmCache_QBE;
-begin
-  Self.RunRecordMethodsAndClosuresWarmCache('qbe');
-end;
-
-procedure TSepCompileTests.TestStaticMembers_CrossUnit_QBE;
-var
-  UnitPas, ProgPas, ProgBin, CacheDir: string;
-  Captured: string;
-  Rc: Integer;
-begin
-  if not ToolchainAvailable() then
-  begin
-    Fail('toolchain missing — qbe or RTL not found');
-    Exit
-  end;
-  if not FileExists(BlaisePath()) then
-  begin
-    Fail('blaise binary missing at ' + BlaisePath());
-    Exit
-  end;
-
-  UnitPas  := FScratch + '/RegModU.pas';
-  ProgPas  := FScratch + '/use_reg_qbe.pas';
-  ProgBin  := FScratch + '/use_reg_qbe';
-  CacheDir := FScratch + '/units-static-qbe';
-
-  WriteFile(UnitPas, StaticRegModSrc);
-  WriteFile(ProgPas, StaticRegProgSrc);
-  ForceDirectories(CacheDir);
-
-  { Build 1 (clean cache): RegModU compiled from source, .o/.bif cached. }
-  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
-                   '--backend', 'qbe',
-                   '--unit-cache', CacheDir,
-                   '--unit-path', FScratch], Captured);
-  AssertEquals('qbe build1 exit (out: ' + Captured + ')', 0, Rc);
-  Rc := RunBinary(ProgBin, Captured);
-  AssertEquals('qbe build1 run exit', 0, Rc);
-  AssertEquals('qbe build1 stdout', '1' + #10 + '2' + #10 + '3' + #10 + '7' + #10, Captured);
-
-  { Build 2 (warm cache): RegModU loaded purely from its cached .bif — the
-    static facts must survive the .bif round-trip. }
-  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
-                   '--backend', 'qbe',
-                   '--unit-cache', CacheDir,
-                   '--unit-path', FScratch], Captured);
-  AssertEquals('qbe build2 exit (out: ' + Captured + ')', 0, Rc);
-  Rc := RunBinary(ProgBin, Captured);
-  AssertEquals('qbe build2 run exit', 0, Rc);
-  AssertEquals('qbe build2 stdout', '1' + #10 + '2' + #10 + '3' + #10 + '7' + #10, Captured)
-end;
-
 procedure TSepCompileTests.TestStaticMembers_CrossUnit_Native;
 var
   UnitPas, ProgPas, ProgBin, CacheDir: string;
@@ -3855,7 +3650,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -3952,7 +3747,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -3980,81 +3775,6 @@ begin
   AssertEquals('use_mv_native run exit', 0, Rc);
   AssertEquals('use_mv_native stdout',
     '11' + #10 + '22' + #10 + '33' + #10 + '44' + #10, Captured)
-end;
-
-procedure TSepCompileTests.TestSameNamedModuleVar_AcrossUnits_QBE;
-{ Same two-units-same-named-var shape on the QBE backend (module var only — the
-  QBE cross-unit threadvar TLS-reference path is a separate, pre-existing gap).
-  QBE already mangled module vars by owner; this pins that it keeps working and
-  that the two slots stay independent. }
-const
-  UnitASrc =
-    '''
-    unit uaMVq;
-    interface
-    procedure SetA(X: Integer);
-    function GetA: Integer;
-    implementation
-    var GVal: Integer;
-    procedure SetA(X: Integer); begin GVal := X; end;
-    function GetA: Integer; begin Result := GVal; end;
-    end.
-    ''';
-  UnitBSrc =
-    '''
-    unit ubMVq;
-    interface
-    procedure SetB(X: Integer);
-    function GetB: Integer;
-    implementation
-    var GVal: Integer;
-    procedure SetB(X: Integer); begin GVal := X; end;
-    function GetB: Integer; begin Result := GVal; end;
-    end.
-    ''';
-  ProgSrc =
-    '''
-    program useMVq;
-    uses uaMVq, ubMVq;
-    begin
-      SetA(11); SetB(22);
-      WriteLn(GetA());
-      WriteLn(GetB());
-    end.
-    ''';
-var
-  UnitAPas, UnitBPas, ProgPas, ProgBin, Captured: string;
-  Rc: Integer;
-begin
-  if not ToolchainAvailable() then
-  begin
-    Fail('toolchain missing — qbe or RTL not found');
-    Exit
-  end;
-  if not FileExists(BlaisePath()) then
-  begin
-    Fail('blaise binary missing at ' + BlaisePath());
-    Exit
-  end;
-
-  UnitAPas := FScratch + '/uaMVq.pas';
-  UnitBPas := FScratch + '/ubMVq.pas';
-  ProgPas  := FScratch + '/use_mv_qbe.pas';
-  ProgBin  := FScratch + '/use_mv_qbe';
-
-  WriteFile(UnitAPas, UnitASrc);
-  WriteFile(UnitBPas, UnitBSrc);
-  WriteFile(ProgPas, ProgSrc);
-
-  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
-                   '--backend', 'qbe',
-                   '--unit-path', FScratch], Captured);
-  AssertEquals('qbe build exit (out: ' + Captured + ')', 0, Rc);
-  AssertTrue('use_mv_qbe exists', FileExists(ProgBin));
-
-  Rc := RunBinary(ProgBin, Captured);
-  AssertEquals('use_mv_qbe run exit', 0, Rc);
-  AssertEquals('use_mv_qbe stdout', '11' + #10 + '22' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestGenericInstance_CrossUnitCache_DefaultPropSetter_Runs;
@@ -4183,7 +3903,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -4300,7 +4020,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -4479,7 +4199,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -4557,7 +4277,7 @@ var
 begin
   if not ToolchainAvailable() then
   begin
-    Fail('toolchain missing — qbe or RTL not found');
+    Fail('toolchain missing — compiler or RTL not found');
     Exit
   end;
   if not FileExists(BlaisePath()) then
@@ -4781,66 +4501,6 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_globintf_native exit code', 0, Rc);
   AssertEquals('use_globintf_native stdout', '8 10' + #10 + 'True' + #10, Captured)
-end;
-
-procedure TSepCompileTests.TestInterfaceArrayConst_AcrossUnits_QBE;
-{ Same shape as TestInterfaceArrayConst_AcrossUnits_Native, on the QBE
-  backend — the QBE emitter had the identical unexported-label gap (a
-  deliberate design choice for RTL/collision-safety that predates the
-  incremental default becoming universal; see EmitArrayConstData's export
-  condition in blaise.codegen.qbe.pas). }
-const
-  UnitSrc =
-    '''
-    unit PieceU2;
-    interface
-    type
-      TPieceType = (ptNil, ptWhitePawn, ptBlackPawn, ptRook,
-                    ptKnight, ptBishop, ptQueen, ptKing);
-      TPieceTypeStrict = ptWhitePawn..ptKing;
-    const
-      CTargets: array[TPieceTypeStrict, 0..1] of Int64 = (
-        (11, 12), (21, 22), (31, 32), (41, 42),
-        (51, 52), (61, 62), (71, 72));
-    implementation
-    end.
-    ''';
-  ProgSrc =
-    '''
-    program UsePiece2;
-    uses PieceU2;
-    begin
-      WriteLn(CTargets[ptWhitePawn, 0], ' ', CTargets[ptRook, 1], ' ',
-              CTargets[ptKing, 0])
-    end.
-    ''';
-var
-  UnitPas, ProgPas, ProgBin, UnitObj: string;
-  Captured: string;
-  Rc: Integer;
-begin
-  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  if not FileExists(BlaisePath()) then begin Ignore('blaise binary missing'); Exit; end;
-
-  UnitPas := FScratch + '/PieceU2.pas';
-  ProgPas := FScratch + '/use_piece_qbe.pas';
-  ProgBin := FScratch + '/use_piece_qbe';
-  UnitObj := FScratch + '/pieceu2.o';
-
-  WriteFile(UnitPas, UnitSrc);
-  WriteFile(ProgPas, ProgSrc);
-  DeleteFile(UnitObj);
-
-  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
-                   '--backend', 'qbe',
-                   '--unit-path', FScratch], Captured);
-  AssertEquals('blaise(use_piece_qbe) exit code (out: ' + Captured + ')', 0, Rc);
-  AssertTrue('use_piece_qbe exists', FileExists(ProgBin));
-  AssertTrue('per-unit PieceU2.o cached', FileExists(UnitObj));
-
-  Rc := RunBinary(ProgBin, Captured);
-  AssertEquals('use_piece_qbe exit code', 0, Rc);
-  AssertEquals('use_piece_qbe stdout', '11 32 71' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestInterfaceJumboSetConst_AcrossUnits_Native;

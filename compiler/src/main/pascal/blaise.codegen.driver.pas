@@ -26,9 +26,9 @@ unit blaise.codegen.driver;
 
     * Lowering and linking: turning the emitted IR file into a
       relocatable object (per-unit incremental path) or the final linked
-      binary (program path).  The QBE driver runs qbe + cc; the native
-      driver runs cc on its assembly directly, or the in-process
-      assembler + linker driver when --assembler internal is selected.
+      binary (program path).  The native driver runs cc on its assembly
+      directly, or the in-process assembler + linker driver when
+      --assembler internal is selected.
 
   Responsibilities a driver does NOT own:
 
@@ -59,7 +59,10 @@ uses
   uToolchain;
 
 type
-  TBackendKind = (bkQBE, bkNative);
+  { The registry stays enum-keyed after the QBE backend's removal in
+    v0.15.0, so a future backend is one more member and one more driver
+    unit, not a re-plumbing of the selection path. }
+  TBackendKind = (bkNative);
 
   { Result of offering an unrecognised flag to a driver (Chain of
     Responsibility). }
@@ -141,8 +144,7 @@ type
     function SupportsIncremental: Boolean; virtual;
 
     { True when uUnitLoader may reuse this backend's .o + .bif on a
-      content-hash match.  QBE = true today; native = false until it
-      learns to write .bif sidecars and the loader trusts them. }
+      content-hash match. }
     function SupportsWarmCache: Boolean; virtual;
 
     { True when the driver can emit a shared object (the `library` and
@@ -177,8 +179,7 @@ type
 
     { Per-unit codegen for the parallel incremental worker, configured to
       emit a single unit's IR with exports visible to sibling units.
-      Default nil: the driver does not support separate-unit emission and
-      the dispatcher falls back to the QBE driver. }
+      Default nil: the driver does not support separate-unit emission. }
     function CreateUnitCodeGen(AOpts: TBackendOpts): ICodeGen; virtual;
 
     { Lower one unit's IR file to a relocatable object (--incremental
@@ -190,8 +191,7 @@ type
       units are lowered on PARALLEL WORKER THREADS that share one opts object,
       so per-unit data on opts is a data race (it crashed the warm-cache build
       with a torn string pointer in StringAddRef).  Honoured by the native
-      driver on Mach-O targets; ELF embeds post-hoc via uElfObject, and the QBE
-      driver ignores it. }
+      driver on Mach-O targets; ELF embeds post-hoc via uElfObject. }
     function LowerToObject(const AIRFile, AObjFile: string;
       AOpts: TBackendOpts; const AIfaceBytes: string): string; virtual;
 
@@ -225,13 +225,6 @@ type
       LLVM backend").  Default ''. }
     function ValidateOptions(AOpts: TBackendOpts): string; virtual;
 
-    { Selection policy: does this backend produce the IR text that
-      --emit-ir prints?  QBE = True (fixpoint / RTL-Makefile contract on
-      byte-identical QBE IR); native = False (its IR IS assembly, surfaced
-      via --emit-asm).  PickTopDriver asks this instead of hard-coding
-      bkQBE.  Default False. }
-    function ClaimsEmitIR: Boolean; virtual;
-
   protected
     { The shared linker tool spec for ATarget (cc/clang, or the mingw
       cross-linker for a Windows target).  A subclass's DescribeTools builds
@@ -263,7 +256,7 @@ type
 
       AIncludeStartup controls whether runtime.start.o (which defines the bare
       `_start` entry) is included.  The native internal linker needs it (Blaise
-      owns the entry point); the cc/QBE link line must omit it (libc's startup
+      owns the entry point); the external cc link line must omit it (libc's startup
       provides `_start` and calls `main`), or the two `_start`s collide.
 
       AAlreadyProvided lists object paths the caller already puts on the link
@@ -359,12 +352,11 @@ function RegisteredBackendNames: TStringList;
   False on an unknown name; caller writes the user-facing error. }
 function ParseBackendName(const AName: string; out AKind: TBackendKind): Boolean;
 
-{ The single backend-selection policy decision.  --emit-ir always forces
-  QBE (the fixpoint check + RTL Makefile depend on byte-identical QBE
-  IR); --emit-asm implies native (its IR IS the .s text the consumer
-  expects); otherwise --backend selects directly. }
+{ The single backend-selection policy decision.  --emit-asm implies native
+  (its IR IS the .s text the consumer expects); otherwise --backend selects
+  directly. }
 function PickTopDriver(ABackend: TBackendKind;
-  AEmitIR, AEmitAsm: Boolean): TBackendDriver;
+  AEmitAsm: Boolean): TBackendDriver;
 
 implementation
 
@@ -476,9 +468,9 @@ end;
 
 { Indexed by Ord(TBackendKind).  The bound is a literal because the
   parser only accepts integer literals on array decls; keep the upper
-  bound in sync with the enum's highest ordinal (bkNative = 1). }
+  bound in sync with the enum's highest ordinal (bkNative = 0). }
 var
-  GDrivers: array[0..1] of TBackendDriver;
+  GDrivers: array[0..0] of TBackendDriver;
 
 function TBackendDriver.SupportsIncremental: Boolean;
 begin
@@ -554,11 +546,6 @@ end;
 function TBackendDriver.ValidateOptions(AOpts: TBackendOpts): string;
 begin
   Result := '';
-end;
-
-function TBackendDriver.ClaimsEmitIR: Boolean;
-begin
-  Result := False;
 end;
 
 function TBackendDriver.CreateUnitCodeGen(AOpts: TBackendOpts): ICodeGen;
@@ -873,11 +860,10 @@ begin
     { RTL objects, in link order. }
     for I := 0 to RTLObjs.Count - 1 do
       Args.Add(RTLObjs.Strings[I]);
-    { Link libraries are now demand-driven, not hardcoded: libm ('m') is added
-      by the QBE backend only when it emits a libm math call, and libpthread
-      ('pthread') flows from runtime.thread's `external 'pthread'` bindings.
-      Both arrive via AOpts.LinkLibs.  The native default, --static, and FreeBSD
-      paths need neither and get a clean link line.
+    { Link libraries are demand-driven, not hardcoded: libpthread ('pthread')
+      flows from runtime.thread's `external 'pthread'` bindings via
+      AOpts.LinkLibs.  The native default, --static, and FreeBSD paths need
+      none and get a clean link line.
       Libraries declared via 'external ''lib''' in the program or any used unit
       (plus the backend-demanded libs above) are emitted here as -l<name> — ld
       expands to lib<name>.so/.a. }
@@ -967,7 +953,7 @@ var
   I: Integer;
 begin
   Result := TStringList.Create();
-  for I := 0 to 1 do
+  for I := 0 to Ord(High(TBackendKind)) do
     if GDrivers[I] <> nil then
       Result.Add(GDrivers[I].Name());
 end;
@@ -977,7 +963,7 @@ var
   I: Integer;
 begin
   Result := False;
-  for I := 0 to 1 do
+  for I := 0 to Ord(High(TBackendKind)) do
     if (GDrivers[I] <> nil) and SameText(AName, GDrivers[I].Name()) then
     begin
       AKind := GDrivers[I].Kind();
@@ -987,23 +973,9 @@ begin
 end;
 
 function PickTopDriver(ABackend: TBackendKind;
-  AEmitIR, AEmitAsm: Boolean): TBackendDriver;
-var
-  I: Integer;
+  AEmitAsm: Boolean): TBackendDriver;
 begin
-  if AEmitIR then
-  begin
-    { --emit-ir prints the IR text of whichever backend claims it.  Ask
-      the drivers instead of hard-coding bkQBE, so a future IR-producing
-      backend (LLVM) needs no carve-out here. }
-    for I := 0 to 1 do
-      if (GDrivers[I] <> nil) and GDrivers[I].ClaimsEmitIR() then
-        Exit(GDrivers[I]);
-    { No registered backend claims --emit-ir: fall back to QBE, the
-      historical owner of the byte-identical IR contract. }
-    Result := GetDriver(bkQBE);
-  end
-  else if AEmitAsm then
+  if AEmitAsm then
     Result := GetDriver(bkNative)
   else
     Result := GetDriver(ABackend);

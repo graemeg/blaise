@@ -16,8 +16,7 @@ unit uToolchain;
 
   Resolution is uniform across all slots:
 
-    1. Explicit env-var override (BLAISE_QBE, BLAISE_AS, BLAISE_LINKER,
-       BLAISE_RTL).  If set and the file exists, use it verbatim.
+    1. Explicit env-var override (BLAISE_AS, BLAISE_LINKER, BLAISE_RTL).  If set and the file exists, use it verbatim.
     2. Walk $PATH for a list of candidate basenames in preference order.
     3. Fall back to the first candidate basename — RunProcess surfaces a
        "not found" error at exec time if the tool was actually needed.
@@ -25,7 +24,7 @@ unit uToolchain;
   This trimmed version was ported from a contributor LLVM-backend branch.  The
   LLVM-specific slots (llc / opt / llvm-dlltool, Windows import libs, well-
   known LLVM install-dir probing) were dropped: the native backend emits
-  assembly text and links with a cc driver, exactly like the QBE path. }
+  assembly text and links with a cc driver. }
 
 interface
 
@@ -41,10 +40,9 @@ type
                         TTokenKind.tkAs: a bare `tkAs` here is ambiguous and
                         bare-member resolution is cross-unit order-fragile,
                         which could bind it to TTokenKind.tkAs (ordinal 40) —
-                        out of range for this 4-member enum, sending downstream
+                        out of range for this 3-member enum, sending downstream
                         Kind-indexing off the end into a layout-sensitive crash. }
-    tkCCDriver,       { cc / gcc / clang-as-driver — GNU link line }
-    tkQBE             { qbe -o OUT IN.ssa }
+    tkCCDriver        { cc / gcc / clang-as-driver — GNU link line }
   );
 
   TTool = record
@@ -53,9 +51,8 @@ type
   end;
 
   TToolchain = record
-    QBE:        TTool;   { QBE backend only }
     Assembler:  TTool;   { native backend: assemble .s -> .o (reserved) }
-    Linker:     TTool;   { both backends: link final binary }
+    Linker:     TTool;   { link final binary }
   end;
 
   { One external tool a backend declares it needs (TBackendDriver.DescribeTools).
@@ -75,7 +72,7 @@ type
                 cross build the bare host fallback (step 4) is suppressed so we
                 don't link Windows output with the host cc. }
   TToolSpec = record
-    Name:        string;            { 'linker' | 'llc' | 'qbe' | 'as' }
+    Name:        string;            { 'linker' | 'llc' | 'as' }
     EnvVar:      string;            { per-tool override, e.g. 'BLAISE_LLC' }
     Cands:       array of string;   { ordered candidate basenames }
     CrossPrefix: string;            { triple prefix, 'x86_64-w64-mingw32-' }
@@ -84,12 +81,11 @@ type
 
   TToolSpecArray = array of TToolSpec;
 
-{ One-shot resolver — call once per native/QBE compile, read the resulting
+{ One-shot resolver — call once per compile, read the resulting
   record for every subprocess + library path. }
 function ResolveToolchain(const ATarget: TTargetDesc): TToolchain;
 
 { Per-tool resolvers — exported for diagnostics + selective use. }
-function ResolveQBE: TTool;
 function ResolveAssembler: TTool;
 function ResolveLinker(const ATarget: TTargetDesc): TTool;
 
@@ -304,12 +300,6 @@ end;
 { Per-tool resolvers                                                   }
 { ------------------------------------------------------------------ }
 
-function ResolveQBE: TTool;
-begin
-  Result.Path := ResolveToolPath('BLAISE_QBE', 'qbe', '');
-  Result.Kind := tkQBE;
-end;
-
 function ResolveAssembler: TTool;
 begin
   Result.Path := ResolveToolPath('BLAISE_AS', 'as', '');
@@ -404,7 +394,6 @@ end;
 
 function ResolveToolchain(const ATarget: TTargetDesc): TToolchain;
 begin
-  Result.QBE       := ResolveQBE();
   Result.Assembler := ResolveAssembler();
   Result.Linker    := ResolveLinker(ATarget);
 end;

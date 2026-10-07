@@ -11,11 +11,11 @@ unit cp.test.driver;
 { Unit tests for the backend-driver option contract (Steps 2-5 of
   docs/backend-options-design.adoc).
 
-  These exercise the real registered driver singletons (the QBE and native
-  drivers, pulled in via the uses clause so their initialization blocks
-  register them).  A test-only stub driver is deliberately avoided: it would
-  need a slot in the fixed array[0..1] registry and muddy the real
-  singletons.  Testing the actual drivers is both possible and more honest. }
+  These exercise the real registered driver singleton (the native driver,
+  pulled in via the uses clause so its initialization block registers it).  A
+  test-only stub driver is deliberately avoided: it would need a slot in the
+  fixed registry array and muddy the real singleton.  Testing the actual
+  driver is both possible and more honest. }
 
 interface
 
@@ -24,7 +24,6 @@ uses
   uStrCompat,                     { StrAt — byte reads, house style }
   blaise.codegen.driver,
   blaise.codegen.target,          { TTargetOS: osLinux / osFreeBSD }
-  blaise.codegen.qbe.driver,      { registers the QBE driver }
   blaise.codegen.native.driver;   { registers the native driver }
 
 type
@@ -67,26 +66,22 @@ type
     procedure TestNewestRTLSourceAge_IsTheMaximumOverTheSet;
     procedure TestNewestRTLSourceAge_MissingSourceDoesNotWin;
 
-    { ClaimsEmitIR selection policy. }
-    procedure TestQBE_ClaimsEmitIR_True;
-    procedure TestNative_ClaimsEmitIR_False;
+    { The registry after the QBE backend's removal (v0.15.0): native is the
+      only backend, and 'qbe' no longer names one. }
+    procedure TestRegistry_NativeIsTheOnlyBackend;
 
     { SupportsLibrary is keyed on the TARGET, not just the backend: shared
       objects are ELF-specific, so the native backend supports a library for
-      an ELF target and refuses for Mach-O.  QBE refuses outright. }
+      an ELF target and refuses for Mach-O. }
     procedure TestNative_SupportsLibrary_LinuxX86_64_True;
     procedure TestNative_SupportsLibrary_FreeBSDX86_64_True;
     procedure TestNative_SupportsLibrary_MacOSArm64_False;
-    procedure TestQBE_SupportsLibrary_LinuxX86_64_False;
 
     { Native owns --assembler via AcceptOption. }
     procedure TestNative_AcceptInternal_ConsumesValue_SetsFlag;
     procedure TestNative_AcceptExternal_ConsumesValue_ClearsFlag;
     procedure TestNative_AcceptBogus_ConsumesValue_FlagsBad;
     procedure TestNative_AcceptUnknownFlag_Unknown;
-
-    { QBE does not own --assembler. }
-    procedure TestQBE_AcceptAssembler_Unknown;
 
     { ValidateOptions. }
     procedure TestNative_Validate_BadValue_NonEmpty;
@@ -315,16 +310,20 @@ begin
   end;
 end;
 
-procedure TBackendDriverContractTests.TestQBE_ClaimsEmitIR_True;
+procedure TBackendDriverContractTests.TestRegistry_NativeIsTheOnlyBackend;
+var
+  Names: TStringList;
+  K: TBackendKind;
 begin
-  AssertTrue('QBE must claim --emit-ir',
-    GetDriver(bkQBE).ClaimsEmitIR());
-end;
-
-procedure TBackendDriverContractTests.TestNative_ClaimsEmitIR_False;
-begin
-  AssertFalse('native must not claim --emit-ir (its IR is --emit-asm)',
-    GetDriver(bkNative).ClaimsEmitIR());
+  Names := RegisteredBackendNames();
+  try
+    AssertEquals('one registered backend', 1, Names.Count);
+    AssertEquals('it is native', 'native', Names.Strings[0]);
+  finally
+    Names.Free();
+  end;
+  AssertTrue('native parses', ParseBackendName('native', K));
+  AssertFalse('qbe is not a backend any more', ParseBackendName('qbe', K));
 end;
 
 procedure TBackendDriverContractTests.TestNative_SupportsLibrary_LinuxX86_64_True;
@@ -354,15 +353,6 @@ begin
   MakeTarget(osMacOS, cpuArm64, T);
   AssertFalse('native must refuse a library for a Mach-O target',
     GetDriver(bkNative).SupportsLibrary(T));
-end;
-
-procedure TBackendDriverContractTests.TestQBE_SupportsLibrary_LinuxX86_64_False;
-var
-  T: TTargetDesc;
-begin
-  MakeTarget(osLinux, cpuX86_64, T);
-  AssertFalse('QBE emits no shared objects',
-    GetDriver(bkQBE).SupportsLibrary(T));
 end;
 
 procedure TBackendDriverContractTests.TestNative_AcceptInternal_ConsumesValue_SetsFlag;
@@ -421,20 +411,6 @@ begin
   try
     AssertEquals('an unowned flag is oaUnknown', Ord(oaUnknown),
       Ord(GetDriver(bkNative).AcceptOption('--nope', '', Opts)));
-  finally
-    Opts.Free();
-  end;
-end;
-
-procedure TBackendDriverContractTests.TestQBE_AcceptAssembler_Unknown;
-var
-  Opts: TBackendOpts;
-begin
-  Opts := TBackendOpts.Create();
-  try
-    { QBE does not own --assembler — Chain-of-Responsibility asymmetry. }
-    AssertEquals('QBE must not own --assembler', Ord(oaUnknown),
-      Ord(GetDriver(bkQBE).AcceptOption('--assembler', 'internal', Opts)));
   finally
     Opts.Free();
   end;

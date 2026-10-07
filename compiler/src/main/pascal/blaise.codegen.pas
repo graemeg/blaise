@@ -10,10 +10,9 @@ unit blaise.codegen;
 
 { Backend-neutral code-generator contract.
 
-  Both the QBE backend (blaise.codegen.qbe.TCodeGenQBE) and the native backend
-  (blaise.codegen.native.TCodeGenNative) implement ICodeGen, so the
-  driver in Blaise.pas runs one codegen sequence against the interface
-  rather than branching per backend.
+  The native backend (blaise.codegen.native.TCodeGenNative) implements
+  ICodeGen, so the driver in Blaise.pas runs one codegen sequence against the
+  interface rather than branching per backend.
 
   ICodeGen covers only what the driver invokes polymorphically.  Backend-
   specific configuration (e.g. the native backend's SetTarget) stays on the
@@ -82,8 +81,8 @@ type
 
     { Codegen-collected debug facts for the OPDF emitter (exact frame
       offsets, per-statement line labels, function extents).  Only the
-      native backend produces them; the QBE backend returns nil and the
-      OPDF emitter falls back to its approximate AST walk. }
+      native backend produces them; a codegen that returns nil leaves the
+      OPDF emitter to its approximate AST walk. }
     function  GetDebugFacts: TDbgFacts;
 
     { Multi-unit compilation: append unit IR to existing output without
@@ -114,26 +113,23 @@ type
       are skipped so no dangling call is emitted. }
     procedure NoteDepFiniUnit(const AUnitName: string; AHasFini: Boolean);
 
-    { Retrieve the complete generated output (QBE IR text for the QBE
-      backend; target assembly text for the native backend). }
+    { Retrieve the complete generated output (target assembly text). }
     function GetOutput: string;
 
-    { Link libraries the emitted code depends on (e.g. 'm' for libm math calls
-      the QBE backend lowers to $sqrt/$fabs/…).  The driver unions these into
-      its -l<name> list so a lib is linked only when actually used.  The native
-      backend emits float math inline and returns an empty list. }
+    { Link libraries the emitted code depends on.  The driver unions these
+      into its -l<name> list so a lib is linked only when actually used.  The
+      native backend emits float math inline and returns an empty list. }
     function GetRequiredLibs: TStringList;
   end;
 
 { ----------------------------------------------------------------------
   Shared System V / Win64 record-return ABI classifier.
 
-  Both the QBE backend and the native x86-64 backend must agree, byte for
-  byte, on how a record-typed return value is passed (sret vs register, and
-  which register class).  The decision is a pure walk over the record's field
-  layout plus the target OS — no backend state — so it lives here as free
-  functions that both backends call, instead of being carried as two
-  drift-prone twins.  Only RecretClassify consults the target (the Win64
+  Every x86-64 lowering site must agree, byte for byte, on how a record-typed
+  return value is passed (sret vs register, and which register class).  The
+  decision is a pure walk over the record's field layout plus the target OS —
+  no backend state — so it lives here as free functions rather than as
+  drift-prone per-site copies.  Only RecretClassify consults the target (the Win64
   aggregate rule); the leaf predicates are target-independent type walks. }
 
 { True when ARec (and every nested record) contains no managed content
@@ -201,7 +197,7 @@ function ArcTypeIsRefClosure(AType: TTypeDesc): Boolean;
 { True when AType transitively contains any ARC-managed leaf: a managed
   scalar (string / class / interface / dynamic array), a static array of
   managed elements (at any nesting depth), or a record with such content.
-  Both the QBE and x86-64 backends gate the scope-exit release of
+  The native backends gate the scope-exit release of
   static-array LOCALS on this (BUG-016 stage 2) so unmanaged arrays emit no
   dead walk code.  RecretManagedClean (the register-return ABI predicate)
   delegates its static-array-field arm to this walk, so the two agree that
@@ -210,8 +206,8 @@ function ArcTypeHasManagedContent(AType: TTypeDesc): Boolean;
 
 { Classify how a scope-exit ARC teardown walk must dispose of a variable of
   AType.  This is the SHARED dispatch key for every such walk in the compiler:
-  the QBE backend's EmitArcCleanup, and on x86-64 both the procedure-epilogue
-  decl walk and EmitGlobalReleases (the program-exit global walk).
+  on x86-64 both the procedure-epilogue decl walk and EmitGlobalReleases (the
+  program-exit global walk), and the per-unit teardown walks of both ISAs.
 
   Those walks were three independently hand-maintained if/else-if chains over
   the same TTypeKind values, and they drifted: the x86-64 global walk lacked
@@ -226,7 +222,7 @@ function ArcTypeHasManagedContent(AType: TTypeDesc): Boolean;
 
     * [Weak] — modifies how arkClass/arkIntf are emitted (_WeakClear against
       the slot address instead of a strong release of the slot value).
-    * storage/addressing — frame offset vs <name>(%rip) vs QBE VarRef, and
+    * storage/addressing — frame offset vs <name>(%rip) vs a GOT load, and
       whether the slot is skipped entirely (env fields, thread-vars).
 
   arkAggregate deliberately merges tyRecord and tyStaticArray: both are walked
@@ -292,7 +288,7 @@ function ArcExprIsUnownedStrTransient(AExpr: TASTExpr): Boolean;
 function ArcBuiltinStrArgOwnsRef(AExpr: TASTExpr): Boolean;
 
 { Mangle a Blaise symbol name into an assembler-legal identifier, shared by
-  both backends (formerly QBEMangle / NativeMangle).  Replaces the generic/
+  both ISA backends (formerly QBEMangle / NativeMangle).  Replaces the generic/
   overload metacharacters '<' ',' ' ' -> '_', drops '>', and maps the type-code
   sigils '$' '@' '^' to '_D_' '_V_' '_P_'.  A clean name (no metacharacter) is
   returned unchanged via a fast pre-scan that avoids per-character concat. }

@@ -17,8 +17,8 @@ unit cp.test.cli;
       single-dash FPC flags are gone; the binary is double-dash-only now.
 
     * Driver option contract surfacing (Steps 2-5): --assembler value
-      validation, wrong-backend rejection, and that ValidateOptions fires
-      even in stdout-only modes (--emit-ir).  These prove the
+      validation, and that ValidateOptions fires even in stdout-only modes
+      (--emit-asm).  These prove the
       drain -> ValidateOptions -> error -> exit-1 wiring in Blaise.pas,
       which is not unit-testable (ParseArgs is a non-exported program
       local). }
@@ -26,7 +26,8 @@ unit cp.test.cli;
 interface
 
 uses
-  SysUtils, Classes, Process, blaise.testing;
+  SysUtils, Classes, Process, blaise.testing,
+  blaise.codegen.target;   { TargetUsesElf / HostTarget: link-mode gating }
 
 type
   { Invokes the compiler binary directly and inspects the CLI contract. }
@@ -39,6 +40,10 @@ type
     FCounter: Integer;
     function ProjectRoot: string;
     function CompilerAvailable: Boolean;
+    { True when the host links ELF executables (Linux, FreeBSD).  The link-mode
+      policy (AUTO / --static / --dynamic) applies only there: macOS always
+      links dynamically against libSystem and rejects --static. }
+    function ElfHost: Boolean;
     { Run the compiler with the given args; capture combined stdout+stderr. }
     function RunCompiler(const AArgs: array of string;
       out ACombined: string): Integer;
@@ -48,7 +53,7 @@ type
     { `readelf -dW <exe>` output — the DT_NEEDED lines reveal which shared libs
       the binary links.  Empty string if readelf is unavailable. }
     function ReadelfDynamic(const AExe: string): string;
-    { Compile ASrc with the given backend (empty = default QBE), link against
+    { Compile ASrc with the given backend (empty = the default), link against
       the full RTL, run it, and report stdout + exit code.  Used for features
       that need stdlib units loaded + linked, which the in-process e2e harness
       cannot do. }
@@ -67,31 +72,26 @@ type
       program local). }
     procedure TestAssemblerInternalAccepted;
     procedure TestAssemblerBogusRejected;          { ValidateOptions surfaces }
-    procedure TestWrongBackendAssemblerRejected;   { addendum 2: qbe + --assembler }
-    procedure TestEmitIrStillValidatesAssembler;   { addendum 1: validate runs in stdout mode }
+    procedure TestEmitAsmStillValidatesAssembler;  { addendum 1: validate runs in stdout mode }
     procedure TestAssemblerLineInHelp;             { DescribeOptions drives --help }
-    { ---- emit-mode must match the explicitly chosen backend ----
-      --emit-ir is a QBE-only output mode; --emit-asm is native-only.  When
-      the user explicitly selects a backend that cannot produce that output,
-      the driver must error instead of silently switching backends. }
-    procedure TestEmitIr_WithExplicitNativeBackend_Rejected;
-    procedure TestEmitAsm_WithExplicitQbeBackend_Rejected;
-    procedure TestEmitIr_WithoutBackend_StillWorks;
-    procedure TestEmitIr_WithExplicitQbeBackend_StillWorks;
+    { ---- the QBE backend was removed in v0.15.0 ----
+      --backend qbe and --emit-ir (which printed QBE IR) are hard errors that
+      name the release and the replacement, not a generic unknown flag. }
+    procedure TestBackendQbe_Removed_Rejected;
+    procedure TestEmitIr_Removed_Rejected;
     { ---- external 'lib' propagates a -l<name> to the real link command ---- }
     { A program declaring `external 'lib'` for a NON-EXISTENT library must fail
       the link with the linker's "cannot find -l<lib>" — which only happens if
       the driver actually emitted -l<lib>.  The e2e harness can't test this (it
       links with a hardcoded `cc ... -lm -lpthread` and never calls
       LinkViaToolchain), so this drives the real compiler binary end to end. }
-    procedure TestExternalLib_MissingLib_FailsLink_QBE;
     procedure TestExternalLib_MissingLib_FailsLink_Native;
-    { ---- demand-driven link libs: -lm (QBE libm math) and -lpthread ---- }
-    { libm is added only when the QBE backend emits a libm call; native emits
-      float math inline and never links libm.  libpthread flows from
+    { ---- demand-driven link libs: no libm, and -lpthread only on demand ---- }
+    { Float math lowers to the pure-Pascal runtime.math, so libm is never
+      linked.  libpthread flows from
       runtime.thread's `external 'pthread'` — only when threads are used — and
       is a DT_NEEDED on the dynamic path, absent on --static/freestanding. }
-    procedure TestLibm_QBEFloatMath_LinksLibm;
+    procedure TestLibm_FloatMath_NoLibm;
     procedure TestLibm_NoFloatMath_NoLibm;
     procedure TestPthread_NativeThreads_LinksLibpthread;
     { AUTO link mode (docs/toolchain-independence.adoc): freestanding when no
@@ -123,9 +123,7 @@ type
            not the bare (unmappable) linker-script filename. ---- }
     procedure TestLinkerScriptLib_ResolvesToVersionedSoname_Native;
     { ---- div/mod by zero raises a catchable EDivByZero (needs stdlib) ---- }
-    procedure TestDivByZeroCaught_QBE;
     procedure TestDivByZeroCaught_Native;
-    procedure TestModByZeroCaught_QBE;
     procedure TestModByZeroCaught_Native;
     { ---- a bare --output (no directory part) must not anchor per-unit
            .o/.bif artefacts at the filesystem root ---- }
@@ -133,29 +131,25 @@ type
     { ---- BLAISE_BACKEND environment variable ----
       Backend precedence is: an explicit --backend flag first, then the
       BLAISE_BACKEND env var, then the compiled-in default (native).  Observed
-      through the native-only --assembler flag: the QBE driver reports it as an
-      unknown flag, so a QBE selection fails while a native selection accepts. }
-    procedure TestBackendEnv_Qbe_RejectsNativeOnlyFlag;
+      through the native driver's --assembler flag, which only a native
+      selection accepts. }
     procedure TestBackendEnv_Native_AcceptsNativeOnlyFlag;
-    procedure TestBackendEnv_ExplicitFlagBeatsEnv;
     procedure TestBackendEnv_InvalidValue_WarnsAndFallsBack;
   end;
 
 implementation
 
 { Print the "tests skipped" note at most once per suite run, so a CI
-  environment that lacks the QBE compiler binary surfaces the skip loudly
+  environment that lacks the compiler binary surfaces the skip loudly
   instead of silently reporting green with ~12 ignored tests. }
 var
   GCLISkipNoted: Boolean = False;
 
-{ Validity-probe cache for the fallback compiler.  The fallback path
-  (/tmp/fp_blaise2) is a transient fixpoint artifact that is frequently STALE —
-  built by an earlier, possibly-broken compiler.  Running the contract tests
-  against a stale binary produces a cascade of cryptic failures (e.g. SIGILL
-  from a since-fixed mis-encoding) that look like regressions but are not.
-  We probe the binary once (compile+run a trivial program) and, if it does not
-  behave, skip the suite with an actionable message instead of failing.
+{ Validity-probe cache for the compiler under test.  Running the contract
+  tests against a stale or broken binary produces a cascade of cryptic
+  failures that look like regressions but are not.  We probe the binary once
+  (compile+run a trivial program) and, if it does not behave, skip the suite
+  with an actionable message instead of failing.
   0 = not probed, 1 = good, 2 = bad. }
 var
   GCLIProbeState: Integer = 0;
@@ -176,7 +170,7 @@ begin
   Dir := GetCurrentDir();
   for Steps := 0 to 5 do
   begin
-    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'vendor/qbe') and
+    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'compiler/src/main/pascal') and
        DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'runtime') then
     begin
       Result := IncludeTrailingPathDelimiter(Dir);
@@ -192,16 +186,21 @@ end;
 procedure TCLIContractTests.SetUp;
 begin
   inherited SetUp();
-  FCompiler := GetEnvironmentVariable('BLAISE_QBE_COMPILER');
+  { The compiler the suite drives: $BLAISE_TEST_COMPILER, else the tree's own
+    compiler/target/blaise (the binary the e2e harness drives too). }
+  FCompiler := GetEnvironmentVariable('BLAISE_TEST_COMPILER');
   if FCompiler = '' then
-    FCompiler := '/tmp/fp_blaise3';
-  if not FileExists(FCompiler) then
-    FCompiler := '/tmp/fp_blaise2';
+    FCompiler := ProjectRoot() + 'compiler/target/blaise';
   FRTLPath := ProjectRoot() + 'compiler/src/main/pascal';
   FStdlibPath := ProjectRoot() + 'stdlib/src/main/pascal';
   FScratch := ProjectRoot() + 'compiler/target/cli_scratch/';
   ForceDirectories(FScratch);
   FCounter := 0;
+end;
+
+function TCLIContractTests.ElfHost: Boolean;
+begin
+  Result := TargetUsesElf(HostTarget());
 end;
 
 function TCLIContractTests.CompilerAvailable: Boolean;
@@ -218,7 +217,7 @@ begin
     GCLISkipNoted := True;
     WriteLn(StdErr, 'note: TCLIContractTests skipped — compiler binary "',
             FCompiler, '" or RTL source not found ',
-            '(set BLAISE_QBE_COMPILER to a QBE-backend blaise binary to run them)');
+            '(set BLAISE_TEST_COMPILER to a blaise binary to run them)');
     Exit;
   end;
   if not Result then Exit;
@@ -235,8 +234,7 @@ begin
       GCLIProbeState := 2;
       WriteLn(StdErr, 'note: TCLIContractTests skipped — compiler binary "',
               FCompiler, '" is stale/broken (probe program did not run); ',
-              'rebuild it or set BLAISE_QBE_COMPILER to a current QBE-backend ',
-              'blaise binary.');
+              'rebuild it or set BLAISE_TEST_COMPILER to a current blaise binary.');
     end;
   end;
   Result := GCLIProbeState = 1;
@@ -398,36 +396,7 @@ begin
     Pos('internal', Out_) >= 0);
 end;
 
-procedure TCLIContractTests.TestWrongBackendAssemblerRejected;
-var
-  Src, Out_: string;
-  EC: Integer;
-begin
-  if not CompilerAvailable() then
-  begin
-    Ignore('<toolchain-missing>');
-    Exit;
-  end;
-  { Addendum 2 (intentional behaviour change): --assembler is native-only.
-    Under --backend qbe the QBE driver returns oaUnknown for it, so the drain
-    reports it as an unknown flag and fails (previously silently accepted). }
-  Src := WriteScratchSource(
-    'program cli_wb;' + LineEnding +
-    'begin' + LineEnding +
-    '  WriteLn(1)' + LineEnding +
-    'end.');
-  EC := RunCompiler([
-    '--source', Src,
-    '--unit-path', FRTLPath,
-    '--unit-path', FStdlibPath,
-    '--backend', 'qbe',
-    '--assembler', 'internal',
-    '--output', FScratch + 'cli_wb_bin'
-  ], Out_);
-  AssertTrue('--assembler under --backend qbe must be rejected', EC <> 0);
-end;
-
-procedure TCLIContractTests.TestEmitIrStillValidatesAssembler;
+procedure TCLIContractTests.TestEmitAsmStillValidatesAssembler;
 var
   Src, Out_: string;
   EC: Integer;
@@ -439,9 +408,7 @@ begin
   end;
   { Addendum 1: ValidateOptions runs unconditionally, above the stdout-mode
     toolchain skip.  So a bad --assembler value is rejected even with
-    --emit-ir present (which selects the QBE driver for IR output).  Here the
-    wrong-backend rule fires first (QBE doesn't own --assembler), which is the
-    correct rejection either way — the point is it does NOT silently succeed. }
+    --emit-asm present — the point is it does NOT silently succeed. }
   Src := WriteScratchSource(
     'program cli_eir;' + LineEnding +
     'begin' + LineEnding +
@@ -453,9 +420,9 @@ begin
     '--unit-path', FStdlibPath,
     '--backend', 'native',
     '--assembler', 'bogus',
-    '--emit-ir'
+    '--emit-asm'
   ], Out_);
-  AssertTrue('bad --assembler must be rejected even with --emit-ir', EC <> 0);
+  AssertTrue('bad --assembler must be rejected even with --emit-asm', EC <> 0);
 end;
 
 procedure TCLIContractTests.TestAssemblerLineInHelp;
@@ -476,64 +443,34 @@ begin
     Pos('--assembler', Out_) >= 0);
 end;
 
-procedure TCLIContractTests.TestEmitIr_WithExplicitNativeBackend_Rejected;
+procedure TCLIContractTests.TestBackendQbe_Removed_Rejected;
 var
   Src, Out_: string;
   EC: Integer;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
-  { --emit-ir is a QBE-only output mode.  Asking for it under an explicit
-    --backend native must fail loudly, not silently emit QBE IR (which
-    ignores the requested backend).  --emit-asm is the native equivalent. }
+  Src := WriteScratchSource(
+    'program cli_bq;' + LineEnding + 'begin WriteLn(1) end.');
+  EC := RunCompiler([
+    '--source', Src, '--backend', 'qbe', '--output', FScratch + 'cli_bq_bin'],
+    Out_);
+  AssertTrue('--backend qbe must be rejected: ' + Out_, EC <> 0);
+  AssertTrue('error names the removal and the release: ' + Out_,
+    (Pos('removed', Out_) >= 0) and (Pos('v0.15.0', Out_) >= 0));
+end;
+
+procedure TCLIContractTests.TestEmitIr_Removed_Rejected;
+var
+  Src, Out_: string;
+  EC: Integer;
+begin
+  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
   Src := WriteScratchSource(
     'program cli_ei;' + LineEnding + 'begin WriteLn(1) end.');
-  EC := RunCompiler([
-    '--source', Src, '--backend', 'native', '--emit-ir'], Out_);
-  AssertTrue('--emit-ir + --backend native must be rejected: ' + Out_, EC <> 0);
-  AssertTrue('error mentions emit-ir/native mismatch',
-    (Pos('--emit-ir', Out_) >= 0) and (Pos('native', Out_) >= 0));
-end;
-
-procedure TCLIContractTests.TestEmitAsm_WithExplicitQbeBackend_Rejected;
-var
-  Src, Out_: string;
-  EC: Integer;
-begin
-  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
-  { Symmetric case: --emit-asm is native-only; requesting it under an
-    explicit --backend qbe must fail rather than silently switch to native. }
-  Src := WriteScratchSource(
-    'program cli_ea;' + LineEnding + 'begin WriteLn(1) end.');
-  EC := RunCompiler([
-    '--source', Src, '--backend', 'qbe', '--emit-asm'], Out_);
-  AssertTrue('--emit-asm + --backend qbe must be rejected: ' + Out_, EC <> 0);
-end;
-
-procedure TCLIContractTests.TestEmitIr_WithoutBackend_StillWorks;
-var
-  Src, Out_: string;
-  EC: Integer;
-begin
-  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
-  { No --backend given: --emit-ir resolves to the QBE default as before.
-    The new validation must only fire on an EXPLICIT incompatible backend. }
-  Src := WriteScratchSource(
-    'program cli_ei2;' + LineEnding + 'begin WriteLn(1) end.');
   EC := RunCompiler(['--source', Src, '--emit-ir'], Out_);
-  AssertEquals('--emit-ir with no --backend still emits QBE IR: ' + Out_, 0, EC);
-end;
-
-procedure TCLIContractTests.TestEmitIr_WithExplicitQbeBackend_StillWorks;
-var
-  Src, Out_: string;
-  EC: Integer;
-begin
-  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
-  { Explicit --backend qbe + --emit-ir is consistent — must succeed. }
-  Src := WriteScratchSource(
-    'program cli_ei3;' + LineEnding + 'begin WriteLn(1) end.');
-  EC := RunCompiler(['--source', Src, '--backend', 'qbe', '--emit-ir'], Out_);
-  AssertEquals('--emit-ir + --backend qbe is consistent: ' + Out_, 0, EC);
+  AssertTrue('--emit-ir must be rejected: ' + Out_, EC <> 0);
+  AssertTrue('error names the replacement: ' + Out_,
+    (Pos('removed', Out_) >= 0) and (Pos('--emit-asm', Out_) >= 0));
 end;
 
 function TCLIContractTests.RunBinary(const AExe: string;
@@ -653,20 +590,6 @@ const
     '  WriteLn(''unreached'')' + LineEnding +
     'end.';
 
-procedure TCLIContractTests.TestExternalLib_MissingLib_FailsLink_QBE;
-var SrcPath, BinPath, Out_: string; EC: Integer;
-begin
-  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
-  SrcPath := WriteScratchSource(SrcMissingExternalLib);
-  BinPath := FScratch + 'cli_misslib_qbe_' + IntToStr(FCounter);
-  EC := RunCompiler(['--source', SrcPath, '--backend', 'qbe',
-    '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
-    '--output', BinPath], Out_);
-  AssertTrue('link must fail (missing library)', EC <> 0);
-  AssertTrue('linker reports the -l<name> it could not find',
-    Pos('nosuchlib_blaise_xyz', Out_) >= 0);
-end;
-
 procedure TCLIContractTests.TestExternalLib_MissingLib_FailsLink_Native;
 var SrcPath, BinPath, Out_: string; EC: Integer;
 begin
@@ -686,7 +609,7 @@ begin
     Pos('nosuchlib_blaise_xyz', Out_) >= 0);
 end;
 
-procedure TCLIContractTests.TestLibm_QBEFloatMath_LinksLibm;
+procedure TCLIContractTests.TestLibm_FloatMath_NoLibm;
 var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
@@ -698,11 +621,11 @@ begin
     binary died at run time with "undefined symbol: pow". }
   SrcPath := WriteScratchSource(
     'program p; var d: Double; begin d := Sqrt(2.0); WriteLn(d > 1.0); end.');
-  BinPath := FScratch + 'cli_libm_qbe_' + IntToStr(FCounter);
-  EC := RunCompiler(['--source', SrcPath, '--backend', 'qbe',
+  BinPath := FScratch + 'cli_libm_' + IntToStr(FCounter);
+  EC := RunCompiler(['--source', SrcPath,
     '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
     '--output', BinPath], Out_);
-  AssertEquals('QBE Sqrt program links (out: ' + Out_ + ')', 0, EC);
+  AssertEquals('Sqrt program links (out: ' + Out_ + ')', 0, EC);
   Dyn := ReadelfDynamic(BinPath);
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
   AssertTrue('float-math binary does NOT link libm (runtime.math replaces it)',
@@ -717,11 +640,11 @@ begin
     demand-driven, not on every link. }
   SrcPath := WriteScratchSource(
     'program p; begin WriteLn(6 * 7); end.');
-  BinPath := FScratch + 'cli_nolibm_qbe_' + IntToStr(FCounter);
-  EC := RunCompiler(['--source', SrcPath, '--backend', 'qbe',
+  BinPath := FScratch + 'cli_nolibm_' + IntToStr(FCounter);
+  EC := RunCompiler(['--source', SrcPath,
     '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
     '--output', BinPath], Out_);
-  AssertEquals('plain QBE program links (out: ' + Out_ + ')', 0, EC);
+  AssertEquals('plain program links (out: ' + Out_ + ')', 0, EC);
   Dyn := ReadelfDynamic(BinPath);
   if Dyn = '' then begin Ignore('readelf unavailable'); Exit; end;
   AssertTrue('non-math binary does NOT link libm', Pos('libm.so', Dyn) < 0);
@@ -731,6 +654,11 @@ procedure TCLIContractTests.TestLinkAuto_PureProgram_Freestanding;
 var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  if not ElfHost() then
+  begin
+    Ignore('link modes are ELF-only; macOS always links dynamically');
+    Exit;
+  end;
   { A program binding no C libraries links FREESTANDING by default: no
     .dynamic section, no DT_NEEDED, no note on stderr. }
   SrcPath := WriteScratchSource(
@@ -752,6 +680,11 @@ procedure TCLIContractTests.TestLinkAuto_ExternalLib_DynamicWithNote;
 var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  if not ElfHost() then
+  begin
+    Ignore('link modes are ELF-only; macOS always links dynamically');
+    Exit;
+  end;
   { Binding an external C library flips the link to dynamic+libc and says
     so, naming the library. }
   SrcPath := WriteScratchSource(
@@ -778,6 +711,11 @@ procedure TCLIContractTests.TestLinkAuto_BareLibcSymbol_FallsBackWithNote;
 var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  if not ElfHost() then
+  begin
+    Ignore('link modes are ELF-only; macOS always links dynamically');
+    Exit;
+  end;
   { A bare `external name` binding a libc-only symbol: the freestanding
     probe finds it unresolved and falls back to dynamic+libc, naming the
     SYMBOL in the note.  (A bare symbol the static RTL provides — getenv,
@@ -802,6 +740,11 @@ procedure TCLIContractTests.TestLinkStatic_ExternalLib_Errors;
 var SrcPath, BinPath, Out_: string; EC: Integer;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  if not ElfHost() then
+  begin
+    Ignore('link modes are ELF-only; macOS always links dynamically');
+    Exit;
+  end;
   { --static + external 'lib' is a contradiction: a freestanding binary
     cannot load shared libraries.  Hard error naming the libs. }
   SrcPath := WriteScratchSource(
@@ -821,6 +764,11 @@ procedure TCLIContractTests.TestLinkStatic_UnresolvedSymbol_Errors;
 var SrcPath, BinPath, Out_: string; EC: Integer;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  if not ElfHost() then
+  begin
+    Ignore('link modes are ELF-only; macOS always links dynamically');
+    Exit;
+  end;
   { --static + a bare libc-only symbol: the pre-link probe names the
     symbols instead of dying mid-link with a bare undefined reference. }
   SrcPath := WriteScratchSource(
@@ -840,6 +788,11 @@ procedure TCLIContractTests.TestLinkDynamic_Flag_ForcesDynamic;
 var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  if not ElfHost() then
+  begin
+    Ignore('link modes are ELF-only; macOS always links dynamically');
+    Exit;
+  end;
   { --dynamic forces the libc-linked PIE for a program that would
     otherwise go freestanding; explicit choice, so no note. }
   SrcPath := WriteScratchSource(
@@ -914,6 +867,11 @@ procedure TCLIContractTests.TestPthread_StaticThreads_NoNeeded;
 var SrcPath, BinPath, Out_, Dyn: string; EC: Integer;
 begin
   if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
+  if not ElfHost() then
+  begin
+    Ignore('link modes are ELF-only; macOS always links dynamically');
+    Exit;
+  end;
   { A --static threaded binary is freestanding (no .dynamic section), so it must
     carry NO DT_NEEDED at all — threads come from the static kernel leaf, not
     libpthread.  Guards that AddNeededLib is skipped in static mode. }
@@ -951,7 +909,9 @@ begin
     Pos('TRUE', UpperCase(RunOut)) >= 0);
 
   { --static takes the freestanding sysconf shim instead of the host libc; it
-    must agree on the name it is being asked about. }
+    must agree on the name it is being asked about.  ELF hosts only: macOS
+    rejects --static (always dynamic against libSystem). }
+  if not ElfHost() then Exit;
   BinPath := FScratch + 'cli_ncpu_static_' + IntToStr(FCounter);
   EC := RunCompiler(['--source', SrcPath, '--backend', 'native', '--static',
     '--unit-path', FRTLPath, '--unit-path', FStdlibPath,
@@ -1034,17 +994,6 @@ begin
     Pos('[lib' + LibName + '.so]', Dyn) < 0);
 end;
 
-procedure TCLIContractTests.TestDivByZeroCaught_QBE;
-var Out_: string; EC: Integer;
-begin
-  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
-  AssertTrue('compile+run', CompileRunFull(SrcDivByZeroCaught, '', Out_, EC));
-  AssertEquals('exit code 0 (exception caught, not SIGFPE)', 0, EC);
-  AssertTrue('EDivByZero caught with message',
-    Pos('caught: Division by zero', Out_) >= 0);
-  AssertTrue('execution continued past the catch', Pos('after', Out_) >= 0);
-end;
-
 procedure TCLIContractTests.TestDivByZeroCaught_Native;
 var Out_: string; EC: Integer;
 begin
@@ -1054,15 +1003,6 @@ begin
   AssertTrue('EDivByZero caught with message',
     Pos('caught: Division by zero', Out_) >= 0);
   AssertTrue('execution continued past the catch', Pos('after', Out_) >= 0);
-end;
-
-procedure TCLIContractTests.TestModByZeroCaught_QBE;
-var Out_: string; EC: Integer;
-begin
-  if not CompilerAvailable() then begin Ignore('<toolchain-missing>'); Exit; end;
-  AssertTrue('compile+run', CompileRunFull(SrcModByZeroCaught, '', Out_, EC));
-  AssertEquals('exit code 0', 0, EC);
-  AssertTrue('mod by zero caught', Pos('mod caught', Out_) >= 0);
 end;
 
 procedure TCLIContractTests.TestModByZeroCaught_Native;
@@ -1129,9 +1069,8 @@ end;
 { ---- BLAISE_BACKEND env-var precedence ----
   These drive the real compiler binary with BLAISE_BACKEND set in the child's
   inherited environment (setenv in this process; the child inherits it across
-  fork+exec).  The native-only --assembler flag is the observable: the QBE
-  driver reports it as an unknown flag, so a QBE selection fails at the arg
-  drain while a native selection compiles.  setenv/unsetenv are bound directly
+  fork+exec).  The native driver's --assembler flag is the observable: only a
+  native selection accepts it.  setenv/unsetenv are bound directly
   to libc (already linked); no SetEnvironmentVariable builtin is needed. }
 function _setenv(Name, Value: Pointer; Overwrite: Integer): Integer;
   external name 'setenv';
@@ -1151,39 +1090,6 @@ var
 begin
   Key := 'BLAISE_BACKEND';
   _unsetenv(PChar(Key))
-end;
-
-procedure TCLIContractTests.TestBackendEnv_Qbe_RejectsNativeOnlyFlag;
-var
-  Src, Out_: string;
-  EC: Integer;
-begin
-  if not CompilerAvailable() then
-  begin
-    Ignore('<toolchain-missing>');
-    Exit;
-  end;
-  { BLAISE_BACKEND=qbe routes to the QBE driver, which rejects the native-only
-    --assembler flag as unknown — proving the env var selected the backend. }
-  Src := WriteScratchSource(
-    'program cli_env_qbe;' + LineEnding +
-    'begin' + LineEnding +
-    '  WriteLn(1)' + LineEnding +
-    'end.');
-  SetBackendEnv('qbe');
-  try
-    EC := RunCompiler([
-      '--source', Src,
-      '--unit-path', FRTLPath,
-      '--unit-path', FStdlibPath,
-      '--assembler', 'internal',
-      '--output', FScratch + 'cli_env_qbe_bin'
-    ], Out_);
-  finally
-    ClearBackendEnv();
-  end;
-  AssertTrue('BLAISE_BACKEND=qbe must route to QBE (rejects --assembler): ' + Out_,
-    EC <> 0);
 end;
 
 procedure TCLIContractTests.TestBackendEnv_Native_AcceptsNativeOnlyFlag;
@@ -1217,40 +1123,6 @@ begin
   end;
   AssertEquals('BLAISE_BACKEND=native must route to native (accepts --assembler): '
     + Out_, 0, EC);
-end;
-
-procedure TCLIContractTests.TestBackendEnv_ExplicitFlagBeatsEnv;
-var
-  Src, Out_: string;
-  EC: Integer;
-begin
-  if not CompilerAvailable() then
-  begin
-    Ignore('<toolchain-missing>');
-    Exit;
-  end;
-  { An explicit --backend qbe outranks BLAISE_BACKEND=native, so the QBE driver
-    is selected and rejects the native-only --assembler flag. }
-  Src := WriteScratchSource(
-    'program cli_env_flag;' + LineEnding +
-    'begin' + LineEnding +
-    '  WriteLn(1)' + LineEnding +
-    'end.');
-  SetBackendEnv('native');
-  try
-    EC := RunCompiler([
-      '--source', Src,
-      '--unit-path', FRTLPath,
-      '--unit-path', FStdlibPath,
-      '--backend', 'qbe',
-      '--assembler', 'internal',
-      '--output', FScratch + 'cli_env_flag_bin'
-    ], Out_);
-  finally
-    ClearBackendEnv();
-  end;
-  AssertTrue('explicit --backend qbe must outrank BLAISE_BACKEND=native: ' + Out_,
-    EC <> 0);
 end;
 
 procedure TCLIContractTests.TestBackendEnv_InvalidValue_WarnsAndFallsBack;

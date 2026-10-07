@@ -217,7 +217,7 @@ begin
   Dir := GetCurrentDir();
   for Steps := 0 to 5 do
   begin
-    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'vendor/qbe') and
+    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'compiler/src/main/pascal') and
        DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'runtime') then
     begin
       Result := IncludeTrailingPathDelimiter(Dir);
@@ -1013,7 +1013,7 @@ begin
   Dir := GetCurrentDir();
   for Steps := 0 to 5 do
   begin
-    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'vendor/qbe') and
+    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'compiler/src/main/pascal') and
        DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'runtime') then
     begin
       Result := IncludeTrailingPathDelimiter(Dir);
@@ -1480,7 +1480,7 @@ begin
   Dir := GetCurrentDir();
   for Steps := 0 to 5 do
   begin
-    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'vendor/qbe') and
+    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'compiler/src/main/pascal') and
        DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'runtime') then
     begin
       Result := IncludeTrailingPathDelimiter(Dir);
@@ -1911,7 +1911,7 @@ begin
   Dir := GetCurrentDir();
   for Steps := 0 to 5 do
   begin
-    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'vendor/qbe') and
+    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'compiler/src/main/pascal') and
        DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'runtime') then
     begin
       Result := IncludeTrailingPathDelimiter(Dir);
@@ -2044,7 +2044,7 @@ begin
   Dir := GetCurrentDir();
   for Steps := 0 to 5 do
   begin
-    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'vendor/qbe') and
+    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'compiler/src/main/pascal') and
        DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'runtime') then
     begin
       Result := IncludeTrailingPathDelimiter(Dir);

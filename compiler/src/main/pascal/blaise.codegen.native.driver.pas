@@ -10,7 +10,7 @@ unit blaise.codegen.native.driver;
 
 { TBackendDriver subclass for the native backend.
 
-  Differences from the QBE driver:
+  Shape of the driver:
 
     * The "IR" the native codegen emits IS the target .s assembly text,
       so IRFileExt is '.s' and no lowering tool runs before the link.
@@ -72,9 +72,8 @@ type
       AOpts: TBackendOpts; const AIfaceBytes: string): string; override;
 
     { Per-unit parallel compilation + warm cache: native emits a self-contained
-      object per unit (.s assembled to .o, plus an embedded .bif), the same as
-      QBE.  Enabling these routes the --incremental worker pool through the
-      native backend instead of falling back to QBE. }
+      object per unit (.s assembled to .o, plus an embedded .bif), which the
+      --incremental worker pool and the warm unit cache rely on. }
     function SupportsIncremental: Boolean; override;
     function SupportsWarmCache: Boolean; override;
     function SupportsLibrary(const ATarget: TTargetDesc): Boolean; override;
@@ -192,7 +191,7 @@ var
 begin
   Result := '';
   { For the native backend the "IR file" already IS the x86-64 assembly the
-    unit codegen emitted — there is no qbe step.  Assemble it to a relocatable
+    unit codegen emitted.  Assemble it to a relocatable
     object: in-process when --assembler internal, else via the toolchain's
     `cc -c`. }
   if AOpts.UseInternalAsm then
@@ -620,12 +619,12 @@ begin
 end;
 
 { The symbol prefixes the backends emit for class/interface metadata.  Kept in
-  one place because all three backends (x86-64, arm64, QBE) use the same set.
+  one place because both ISA backends (x86-64, arm64) use the same set.
 
   This guards the INTERNAL linker path only, which is where a dangling symbol
   of ours could pass silently (the probe's dynamic fallback would swallow it).
-  A QBE build links through external cc, which reports an undefined symbol
-  loudly on its own, so both paths end up diagnosed — just by different means.
+  A build linked through external cc reports an undefined symbol loudly on
+  its own, so both paths end up diagnosed — just by different means.
 
     typeinfo_   class/interface identity token
     vtable_     virtual method table

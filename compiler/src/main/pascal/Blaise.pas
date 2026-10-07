@@ -12,14 +12,14 @@ program Blaise;
 
   Usage:
     blaise --source Hello.pas --output hello
-    blaise --source Hello.pas --emit-ir
+    blaise --source Hello.pas --emit-asm
     blaise --source Hello.pas --output hello --target linux-x86_64
 
   Backend-specific work (codegen construction, IR lowering, linking)
   is dispatched through the TBackendDriver registry
   (blaise.codegen.driver); this file owns the shared pipeline only.
-  With --emit-ir / --emit-asm, the backend's IR text is written to
-  stdout and no binary is produced.
+  With --emit-asm, the generated assembly is written to stdout and no
+  binary is produced.
 }
 
 uses
@@ -27,7 +27,6 @@ uses
   uLexer, uParser, uAST, uSemantic, blaise.codegen,
   blaise.codegen.target,
   blaise.codegen.driver,
-  blaise.codegen.qbe.driver,
   blaise.codegen.native.driver,
   uUnitLoader, uDebugOPDF, uDebugFacts, uUnitInterface, uSemanticExport, uSemanticImport,
   uUnitInterfaceIO, uIfaceObject, uASTDump,
@@ -44,7 +43,7 @@ const
   CompilerName = 'Blaise';
 
 { Build the --backend usage fragment from the registered drivers, with
-  the default (bkQBE) entry marked.  Keeps the flag parser and the usage
+  the default (bkNative) entry marked.  Keeps the flag parser and the usage
   text from drifting out of sync with the registry when a backend is
   added. }
 function BackendUsageLine: string;
@@ -64,9 +63,7 @@ begin
       if ParseBackendName(Names.Strings[I], K) then
       begin
         if K = bkNative then
-          Result := Result + ' (default)'
-        else if K = bkQBE then
-          Result := Result + ' (deprecated)';
+          Result := Result + ' (default)';
       end;
     end;
   finally
@@ -86,7 +83,7 @@ begin
   WriteLn('');
   WriteLn('Usage:');
   WriteLn('  blaise --source <file.pas> --output <binary>');
-  WriteLn('  blaise --source <file.pas> --emit-ir');
+  WriteLn('  blaise --source <file.pas> --emit-asm');
   WriteLn('');
   WriteLn('Flags:');
   WriteLn(FormatFlagLine('--source <path>', 'Pascal source file'));
@@ -106,15 +103,14 @@ begin
     'Cross-compile target (default: ' + TargetName(HostTarget()) + ', the host).'));
   WriteLn(FormatFlagLine('', 'linux-x86_64, linux-i386, linux-arm64, freebsd-x86_64,'));
   WriteLn(FormatFlagLine('', 'windows-x86_64, macos-arm64'));
-  WriteLn(FormatFlagLine('--emit-ir', 'Print QBE IR to stdout and exit'));
   WriteLn(FormatFlagLine('--emit-asm',
-    'Print native assembly to stdout (requires --backend native)'));
+    'Print the generated assembly to stdout and exit'));
   { Backend-private flags: each registered driver contributes its own
     lines (already column-formatted via FormatFlagLine) so this block does
     not hard-code per-backend flags like --assembler. }
   DriverLines := TStringList.Create();
   try
-    for K := bkQBE to bkNative do
+    for K := Low(TBackendKind) to High(TBackendKind) do
     begin
       D := GetDriver(K);
       if D <> nil then
@@ -162,7 +158,7 @@ end;
 
 { Populate the two caller-constructed opts objects from the command line.
   AFront carries front-end-only state (paths, separate-compilation flags,
-  the EmitIR/EmitAsm output-mode policy flags, and the requested Backend
+  the EmitAsm output-mode policy flag, and the requested Backend
   kind that is the input to driver selection); AOpts carries the
   cross-cutting knobs a backend driver reads (Target, OPDFEnabled,
   DebugMode, UseInternalAsm).  Returns False (and writes a diagnostic) on a
@@ -190,7 +186,6 @@ begin
   Result := False;
   AFront.SourceFile     := '';
   AFront.OutputFile     := '';
-  AFront.EmitIR         := False;
   AFront.EmitAsm        := False;
   AFront.DumpAST        := False;
   AFront.Backend        := bkNative;
@@ -275,7 +270,13 @@ begin
     else if Arg = '--dynamic' then
       AOpts.LinkMode := lmDynamic
     else if Arg = '--emit-ir' then
-      AFront.EmitIR := True
+    begin
+      { Removed with the QBE backend: it printed QBE IR, which no longer
+        exists.  Name the replacement rather than report an unknown flag. }
+      WriteLn(StdErr, 'Error: --emit-ir was removed in Blaise v0.15.0 together',
+        ' with the QBE backend; use --emit-asm to inspect the generated code');
+      Exit;
+    end
     else if Arg = '--emit-asm' then
       AFront.EmitAsm := True
     else if Arg = '--dump-ast' then
@@ -287,6 +288,12 @@ begin
     else if (Arg = '--backend') and (I < ParamCount()) then
     begin
       Inc(I);
+      if SameText(ParamStr(I), 'qbe') then
+      begin
+        WriteLn(StdErr, 'Error: the QBE backend was removed in Blaise v0.15.0;',
+          ' native code generation is the only backend');
+        Exit;
+      end;
       if not ParseBackendName(ParamStr(I), AFront.Backend) then
       begin
         WriteLn(StdErr, 'Error: --backend ', ParamStr(I),
@@ -356,10 +363,10 @@ begin
     WriteLn(StdErr, 'Error: --source is required');
     Exit;
   end;
-  if (not AFront.EmitIR) and (not AFront.EmitAsm) and (not AFront.DumpAST) and
+  if (not AFront.EmitAsm) and (not AFront.DumpAST) and
      (AFront.OutputFile = '') then
   begin
-    WriteLn(StdErr, 'Error: --output is required (or use --emit-ir / --emit-asm / --dump-ast)');
+    WriteLn(StdErr, 'Error: --output is required (or use --emit-asm / --dump-ast)');
     Exit;
   end;
 
@@ -631,10 +638,9 @@ begin
       and the program's .opdf section into one, so pdr can break inside any
       unit.  Mirrors the whole-program path in the main driver.
 
-      QBE backend: GetDebugFacts returns nil (QBE assigns frames/addresses
-      itself), so per-unit OPDF is skipped here.  A per-unit .opdf.s sidecar
-      is impractical in the incremental pipeline; native is the debug backend
-      per CLAUDE.md, so QBE incremental units carry no per-unit OPDF. }
+      A codegen that collects no facts (GetDebugFacts = nil) gets no per-unit
+      OPDF: a per-unit .opdf.s sidecar is impractical in the incremental
+      pipeline. }
     if Self.Opts.OPDFEnabled then
     begin
       WFacts := WCG.GetDebugFacts();
@@ -688,7 +694,6 @@ var
   ConfigPaths: TStringList;
   CfgRtlSrc:   string;
   SrcDir:      string;
-  EmitIR:      Boolean;
   EmitAsm:     Boolean;
   DumpAST:     Boolean;
   OPDFEnabled: Boolean;
@@ -822,7 +827,6 @@ begin
     insertion below mutates the canonical list. }
   SourceFile     := Front.SourceFile;
   OutputFile     := Front.OutputFile;
-  EmitIR         := Front.EmitIR;
   EmitAsm        := Front.EmitAsm;
   DumpAST        := Front.DumpAST;
   Backend        := Front.Backend;
@@ -907,30 +911,10 @@ begin
     paths are complete. }
   SetUnitSearchPaths(SearchPaths);
 
-  { Emit-mode / backend compatibility.  --emit-ir prints QBE IR and
-    --emit-asm prints native assembly; PickTopDriver routes each to the
-    backend that produces it, ignoring --backend.  That silent override is
-    fine for the default backend, but when the user EXPLICITLY asked for a
-    backend that cannot produce the requested output we must reject it
-    rather than quietly switch — backend-specific output modes belong to
-    their backend. }
-  if Front.BackendExplicit and EmitIR and (not GetDriver(Backend).ClaimsEmitIR()) then
-  begin
-    WriteLn(StdErr, 'Error: --emit-ir prints QBE IR and is not supported by ',
-      '--backend native; use --emit-asm for native assembly');
-    Halt(1);
-  end;
-  if Front.BackendExplicit and EmitAsm and (Backend <> bkNative) then
-  begin
-    WriteLn(StdErr, 'Error: --emit-asm prints native assembly and is not ',
-      'supported by --backend qbe; use --emit-ir for QBE IR');
-    Halt(1);
-  end;
-
   { Resolve the top-program driver once.  All backend-selection policy
     lives in PickTopDriver; everything downstream dispatches through
     the driver. }
-  Driver := PickTopDriver(Backend, EmitIR, EmitAsm);
+  Driver := PickTopDriver(Backend, EmitAsm);
 
   { Drain the deferred backend-private flags (Chain of Responsibility).
     Each pending flag is offered to the resolved driver.  When the driver
@@ -979,10 +963,9 @@ begin
 
   { Pre-flight the backend toolchain before the front-end runs, so a
     missing tool surfaces immediately rather than after a full parse +
-    semantic pass.  Stdout-only modes (--emit-ir / --emit-asm /
-    --dump-ast) produce no binary and need no external tools — they must
+    semantic pass.  Stdout-only modes (--emit-asm / --dump-ast) produce no binary and need no external tools — they must
     never be blocked by a toolchain probe. }
-  if not (EmitIR or EmitAsm or DumpAST) then
+  if not (EmitAsm or DumpAST) then
   begin
     ToolErr := Driver.CheckToolchain(Opts);
     if ToolErr <> '' then
@@ -1181,18 +1164,15 @@ begin
       will auto-discover these and skip parsing the .pas.
 
       Each unit is compiled in a separate worker thread for parallel
-      codegen + qbe + cc.  The symbol table is read-only at this point
+      codegen + assembly.  The symbol table is read-only at this point
       (semantic analysis is complete), so concurrent reads are safe. }
-    if Incremental and (not EmitIR) and (not EmitAsm) and (not DumpAST)
+    if Incremental and (not EmitAsm) and (not DumpAST)
        and (Units <> nil) and (Units.Count > 0) then
     begin
-      { Pick a driver for the workers.  Prefer the top-program backend
-        when it supports per-unit emission; otherwise fall back to QBE —
-        QBE-emitted .o files link cleanly alongside any backend's
-        top-program object, so the cache stays usable. }
+      { The workers use the top-program backend; a driver selected here must
+        support per-unit emission (TCompileWorker reports a contract
+        violation otherwise). }
       WorkerDriver := GetDriver(Backend);
-      if not WorkerDriver.SupportsIncremental() then
-        WorkerDriver := GetDriver(bkQBE);
       Workers := TObjectList.Create(True);
       try
         { Resolve the directory the per-unit .o/.bif artefacts go in.
@@ -1262,8 +1242,7 @@ begin
 
     try
       { CG is an ICodeGen (ARC-managed) — no manual Free.  Backend
-        selection policy lives in PickTopDriver (--emit-ir always forces
-        QBE for fixpoint / RTL Makefile compatibility; --emit-asm implies
+        selection policy lives in PickTopDriver (--emit-asm implies
         native); the per-backend construction details — class to
         instantiate, knobs to wire — live behind Driver.CreateCodeGen. }
       if IsUnitMode then
@@ -1334,11 +1313,10 @@ begin
       end;
       IR := CG.GetOutput();
       { CG (ICodeGen) is released by ARC at program scope exit.  We avoid an
-        explicit `CG := nil` here: the stage-1 release binary mis-compiles an
-        explicit nil-assignment to an interface-typed global (emits a bare
-        single-slot store against an undefined $CG symbol).  That codegen gap
-        is fixed in this tree (EmitAssign interface-nil case in blaise.codegen.qbe),
-        but stage-1 predates the fix, so the driver must not rely on it. }
+        explicit `CG := nil` here: an older stage-1 release binary
+        mis-compiled an explicit nil-assignment to an interface-typed global
+        (a bare single-slot store against an undefined $CG symbol), so the
+        driver does not rely on it. }
 
       if OPDFEnabled then
       begin
@@ -1348,9 +1326,8 @@ begin
             offsets, per-statement labels, function end labels).  Append the
             OPDF section to the SAME assembly text — local labels resolve in
             one object file, no symbol exports needed, and line records get
-            statement granularity.  QBE backend: no facts are available (QBE
-            assigns frames/addresses itself), keep the separate .opdf.s with
-            the approximate AST-walk records. }
+            statement granularity.  A codegen without facts keeps the
+            separate .opdf.s with the approximate AST-walk records. }
           OE.SetFacts(CG.GetDebugFacts());
           if CG.GetDebugFacts() <> nil then
             IR := IR + LineEnding + OE.GetOutput()
@@ -1394,10 +1371,9 @@ begin
       via GetRequiredLibs, unioned in below. }
     if Opts.LinkLibs = nil then Opts.LinkLibs := TStringList.Create();
     if Opts.UserLinkLibs = nil then Opts.UserLinkLibs := TStringList.Create();
-    { Backend-demanded libraries: the QBE backend lowers Sqrt/Sin/Abs(double)/…
-      to libm calls and reports 'm' here, so libm is linked only when the
-      program actually uses float math (never on the native backend, which
-      emits float math inline). }
+    { Backend-demanded libraries: libraries the generated code itself calls
+      into, reported by the codegen (none today -- float math lowers to the
+      pure-Pascal runtime.math). }
     if CG <> nil then
     begin
       ReqLibs := CG.GetRequiredLibs();
@@ -1464,20 +1440,18 @@ begin
     Source.Free();
   end;
 
-  { --emit-ir / --emit-asm: write output to stdout and fall through to normal
+  { --emit-asm: write output to stdout and fall through to normal
     program exit so the main block's scope-exit ARC cleanup runs.  Calling
     Halt(0) here would lower to libc exit(), skipping every Pascal stack frame
     and leaving main's locals unreleased — defeating the leak tracker. }
-  if EmitIR or EmitAsm then
-    { Driver was picked to match the flag (QBE for --emit-ir, native for
-      --emit-asm — see PickTopDriver), so IR already holds the text the
-      user asked for. }
+  if EmitAsm then
+    { Driver was picked to match the flag (see PickTopDriver), so IR
+      already holds the text the user asked for. }
     Write(IR)
   else
   begin
     { Backend-neutral output dispatch: write the IR to a file with the
-      driver's extension (.ssa for QBE; .s for native — its IR IS the
-      assembly), then lower + link through the driver.  OPDFAsmFile may
+      driver's extension (.s for native — its IR IS the assembly), then lower + link through the driver.  OPDFAsmFile may
       have been bound to a sidecar path during the OPDF emit above, so
       refresh it onto Opts before the drivers read it. }
     Opts.OPDFAsmFile := OPDFAsmFile;

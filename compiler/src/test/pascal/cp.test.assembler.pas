@@ -147,15 +147,14 @@ type
 implementation
 
 { Print the "tests skipped" note at most once per suite run, so a CI
-  environment that lacks the QBE compiler binary surfaces the skip loudly
+  environment that lacks the compiler binary surfaces the skip loudly
   instead of silently reporting green with ~12 ignored tests. }
 var
   GInternalAsmSkipNoted: Boolean = False;
 
-{ Validity-probe cache for the fallback compiler — see the matching note in
-  cp.test.cli.pas.  The /tmp/fp_blaise2 fallback is a transient fixpoint
-  artifact that is often stale; a stale binary turns these e2e tests into a
-  cascade of cryptic failures.  Probe once and skip (not fail) on a bad probe.
+{ Validity-probe cache for the compiler under test — see the matching note in
+  cp.test.cli.pas.  A stale binary turns these e2e tests into a cascade of
+  cryptic failures.  Probe once and skip (not fail) on a bad probe.
   0 = not probed, 1 = good, 2 = bad. }
 var
   GInternalAsmProbeState: Integer = 0;
@@ -857,7 +856,7 @@ begin
   Dir := GetCurrentDir();
   for Steps := 0 to 5 do
   begin
-    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'vendor/qbe') and
+    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'compiler/src/main/pascal') and
        DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'runtime') then
     begin
       Result := IncludeTrailingPathDelimiter(Dir);
@@ -873,30 +872,16 @@ end;
 procedure TInternalAsmE2ETests.SetUp;
 begin
   inherited SetUp();
-  { Compiler resolution, in order: explicit override, then the two transient
-    fixpoint artefacts, then the BUILT compiler.
-
-    That last fallback is what makes this suite run at all off Linux.
-    /tmp/fp_blaise2|3 are produced by scripts/fixpoint.sh, which is a
-    Linux/FreeBSD path — on macOS they have never existed, so every test here
-    skipped and the suite guarded NOTHING while appearing green.  CLAUDE.md
-    names it a REQUIRED internal-assembler guard, so "absent but looks
-    present" is the one outcome it must not have
-    (BUG-20260728-internalasm-guard-skips-on-macos).
-
+  { Compiler resolution: $BLAISE_TEST_COMPILER, else the BUILT compiler.
     Any working compiler is sufficient: the probe below, and every test in
     this suite, compiles with '--backend native --assembler internal', so what
-    is under test is the INTERNAL ASSEMBLER, not the backend that produced the
-    compiler binary.  BLAISE_QBE_COMPILER keeps its name for compatibility
-    with existing invocations; it no longer implies a QBE-built binary.
-    Staleness is still handled — the validity probe rejects a broken binary
-    whichever slot it came from. }
-  FCompiler := GetEnvironmentVariable('BLAISE_QBE_COMPILER');
+    is under test is the INTERNAL ASSEMBLER.  (The suite once fell back to the
+    QBE fixpoint's /tmp/fp_blaise2|3 first; those never existed on macOS, so
+    every test here skipped and the suite guarded nothing while appearing
+    green -- BUG-20260728-internalasm-guard-skips-on-macos.)  Staleness is
+    handled by the validity probe. }
+  FCompiler := GetEnvironmentVariable('BLAISE_TEST_COMPILER');
   if FCompiler = '' then
-    FCompiler := '/tmp/fp_blaise2';
-  if not FileExists(FCompiler) then
-    FCompiler := '/tmp/fp_blaise3';
-  if not FileExists(FCompiler) then
     FCompiler := ProjectRoot() + 'compiler/target/blaise';
   FRTLPath := ProjectRoot() + 'compiler/src/main/pascal';
   FStdlibPath := ProjectRoot() + 'stdlib/src/main/pascal';
@@ -921,7 +906,7 @@ begin
             FCompiler, '" or RTL source not found.  This suite is a REQUIRED ',
             'internal-assembler guard, so a skip here means it is guarding ',
             'nothing: build the compiler (compiler/target/blaise) or set ',
-            'BLAISE_QBE_COMPILER to any working blaise binary.');
+            'BLAISE_TEST_COMPILER to any working blaise binary.');
     Exit;
   end;
   if not Result then Exit;
@@ -946,7 +931,7 @@ begin
       GInternalAsmProbeState := 2;
       WriteLn(StdErr, 'note: TInternalAsmE2ETests skipped — compiler binary "',
               FCompiler, '" is stale/broken (probe program did not run); ',
-              'rebuild it or set BLAISE_QBE_COMPILER to a current binary.');
+              'rebuild it or set BLAISE_TEST_COMPILER to a current binary.');
     end;
   end;
   Result := GInternalAsmProbeState = 1;

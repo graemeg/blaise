@@ -16,7 +16,7 @@ unit blaise.frontend.opts;
   carries everything the front-end consumes BEFORE or INDEPENDENTLY of any
   resolved driver: input/output paths, search paths, separate-compilation
   flags, and the output-mode policy flags that drive driver SELECTION
-  (EmitIR / EmitAsm) and the Backend kind that is the INPUT to selection.
+  (EmitAsm) and the Backend kind that is the INPUT to selection.
 
   The split keeps TBackendOpts from becoming a god-object: no driver method
   should ever see SourceFile / SearchPaths / EmitIfaceDir.  It lives in its
@@ -48,17 +48,13 @@ type
     DumpAST: Boolean;
     SkipDepCodegen: Boolean;
 
-    { Output-mode policy + selection input. EmitIR / EmitAsm pick the top
-      driver (see PickTopDriver) and govern stdout dispatch; Backend is the
-      requested backend kind, consumed by PickTopDriver before any driver
-      exists. }
-    EmitIR: Boolean;
+    { Output-mode policy + selection input. EmitAsm picks the top driver (see
+      PickTopDriver) and governs stdout dispatch; Backend is the requested
+      backend kind, consumed by PickTopDriver before any driver exists. }
     EmitAsm: Boolean;
     Backend: TBackendKind;
-    { True only when --backend was given explicitly.  Lets the emit-mode/
-      backend compatibility check distinguish "user asked for this backend"
-      from the silent QBE default, so --emit-ir under an explicit
-      --backend native is an error rather than a silent backend switch. }
+    { True only when --backend was given explicitly; an explicit flag
+      outranks the BLAISE_BACKEND environment variable. }
     BackendExplicit: Boolean;
 
     constructor Create;
