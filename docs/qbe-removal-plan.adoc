@@ -257,7 +257,7 @@ found, for a ruling before they are migrated.
 | `cp.test.stringops.pas` | 25 | pending
 | `cp.test.proctypes.pas` | 25 | pending
 | `cp.test.selfhosting.pas` | 20 | pending
-| `cp.test.highlow.pas` | 19 | pending
+| `cp.test.highlow.pas` | 19 | done: 17 behaviour (e2e)
 | `cp.test.collections.pas` | 19 | done: 17 behaviour (e2e)
 | `cp.test.records.pas` | 17 | done: 14 behaviour (e2e), 1 code-gen (GenAsm)
 | `cp.test.openarray.pas` | 17 | done: 15 behaviour (e2e)

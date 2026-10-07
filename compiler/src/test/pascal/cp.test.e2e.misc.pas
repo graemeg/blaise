@@ -24,6 +24,7 @@ type
     procedure SetUp; override;
   published
     procedure TestRun_IndirectFuncCallExpr_Shapes;
+    procedure TestRun_HighLow_OrdinalBounds;
     procedure TestRun_ChainedFields_ReadThroughEveryLevel;
     procedure TestRun_DefaultArgs_Materialised;
     procedure TestRun_IntToStr_FollowsSignedness;
@@ -3029,6 +3030,52 @@ begin
   AssertRunsOnAll(Src,
     '17' + LE +
     '4' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_HighLow_OrdinalBounds;
+const
+  {
+    High and Low of every ordinal type fold to the type's bounds, for a type name
+    and for a variable of that type alike, and each bound survives the store into
+    a variable of that type (a truncated or sign-extended fold would print wrongly). }
+  Src = '''
+    program P;
+    type TColour = (Red, Green, Blue);
+    var
+      N, X: Integer; B: Byte; W: Word; S: SmallInt; Bo: Boolean;
+      U: UInt32; Q: Int64; UQ: UInt64;
+    begin
+      N := High(Integer); Write(N, ' ');
+      N := Low(Integer); WriteLn(N);
+      B := High(Byte); Write(B, ' ');
+      B := Low(Byte); WriteLn(B);
+      W := High(Word); Write(W, ' ');
+      S := High(SmallInt); Write(S, ' ');
+      S := Low(SmallInt); WriteLn(S);
+      Bo := High(Boolean); Write(Bo, ' ');
+      Bo := Low(Boolean); WriteLn(Bo);
+      U := High(UInt32); WriteLn(U);
+      Q := High(Int64); WriteLn(Q);
+      UQ := High(UInt64); WriteLn(UQ);
+      N := Ord(High(TColour)); Write(N, ' ');
+      N := Ord(Low(TColour)); WriteLn(N);
+      N := High(X); Write(N, ' ');
+      B := High(B); Write(B, ' ');
+      Q := High(Q); WriteLn(Q)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '2147483647 -2147483648' + LE +
+    '255 0' + LE +
+    '65535 32767 -32768' + LE +
+    'True False' + LE +
+    '4294967295' + LE +
+    '9223372036854775807' + LE +
+    '18446744073709551615' + LE +
+    '2 0' + LE +
+    '2147483647 255 9223372036854775807' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_IndirectFuncCallExpr_Shapes;
