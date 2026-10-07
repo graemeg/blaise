@@ -12643,11 +12643,11 @@ begin
           end;
           tyString:
           begin
-            { High(S) = Length(S) - 1; load length from ARC header at data_ptr-8 }
+            { High(S) = Length(S) - 1.  The length comes from _StringLength,
+              which returns 0 for nil -- the empty string -- so High('') is -1.
+              Reading the ARC header at data_ptr-8 directly faulted on nil. }
             L := EmitExpr(TASTExpr(FC.Args.Items[0]));
-            R := AllocTemp();
-            EmitLine(Format('  %s =l sub %s, 8', [R, L]));
-            EmitLine(Format('  %s =w loadsw %s', [T, R]));
+            EmitLine(Format('  %s =w call $_StringLength(l %s)', [T, L]));
             R := AllocTemp();
             EmitLine(Format('  %s =w sub %s, 1', [R, T]));
             T := R;
