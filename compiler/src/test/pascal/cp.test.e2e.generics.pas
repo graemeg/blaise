@@ -23,6 +23,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_TwoInstances_SelfCallReachesOwnInstance;
     procedure TestRun_GenericForIn_UserEnumerator;
     procedure TestRun_IMap_OneCallSiteBothImplementations;
     procedure TestRun_TOrderedDictionary_KeepsInsertionOrder;
@@ -984,6 +985,48 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     '4 8 15 |' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_TwoInstances_SelfCallReachesOwnInstance;
+const
+  {
+    Two instances of one generic class side by side: a method of each instance
+    that calls another method through Self must reach ITS OWN instance's body
+    (TBox<Integer>.Init -> TBox<Integer>.SetValue, TBox<string>.Init ->
+    TBox<string>.SetValue), each storing into its own field type. }
+  Src = '''
+    program Prg;
+    type
+      TBox<T> = class
+        FValue: T;
+        procedure SetValue(V: T);
+        begin
+          Self.FValue := V
+        end;
+        procedure Init(V: T);
+        begin
+          Self.SetValue(V)
+        end;
+        function GetValue: T;
+        begin
+          Result := Self.FValue
+        end;
+      end;
+    var
+      A: TBox<Integer>;
+      B: TBox<string>;
+    begin
+      A := TBox<Integer>.Create();
+      B := TBox<string>.Create();
+      A.Init(42);
+      B.Init('forty-two');
+      WriteLn(A.GetValue(), ' ', B.GetValue())
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '42 forty-two' + LE, 0);
 end;
 
 initialization

@@ -23,7 +23,6 @@ type
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     function AnalyseUnit(const ASrc: string): TUnit;
     function GenUnitIR(const ASrc: string): string;
     function GenCombinedIR(const AUnitSrc, AProgSrc: string): string;
@@ -73,10 +72,6 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — monomorphized types                                        }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_Generic_TypeInfoEmitted;
-    procedure TestCodegen_Generic_ConstructorAllocsMemory;
-    procedure TestCodegen_Generic_MethodEmitted;
-    procedure TestCodegen_Generic_FieldAccessWorks;
 
     { ------------------------------------------------------------------ }
     { Codegen — unit-scope generic var                                     }
@@ -106,7 +101,6 @@ type
     { ------------------------------------------------------------------ }
     procedure TestSemantic_Generic_TwoInstancesOfSameClass_Resolve;
     procedure TestSemantic_Generic_TwoInstances_PointerFieldDistinctTypes;
-    procedure TestCodegen_Generic_TwoInstances_MethodCallsResolveToOwnInstance;
 
     { ------------------------------------------------------------------ }
     { Type-alias type argument resolves to one canonical instantiation    }
@@ -284,22 +278,6 @@ begin
     SA.Analyse(Result);
   finally
     SA.Free();
-  end;
-end;
-
-function TGenericsTests.GenIR(const ASrc: string): string;
-var
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
   end;
 end;
 
@@ -669,48 +647,6 @@ begin
   finally
     Prog.Free();
   end;
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen — monomorphized types                                        }
-{ ------------------------------------------------------------------ }
-
-procedure TGenericsTests.TestCodegen_Generic_TypeInfoEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericUsage);
-  AssertTrue('typeinfo for TBox_Integer emitted',
-    Pos('$typeinfo_TBox_Integer', IR) > 0);
-end;
-
-procedure TGenericsTests.TestCodegen_Generic_ConstructorAllocsMemory;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericUsage);
-  AssertTrue('constructor calls _ClassAlloc',
-    Pos('call $_ClassAlloc', IR) > 0);
-end;
-
-procedure TGenericsTests.TestCodegen_Generic_MethodEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericUsage);
-  AssertTrue('GetValue method emitted',
-    Pos('TBox_Integer_GetValue', IR) > 0);
-  AssertTrue('SetValue method emitted',
-    Pos('TBox_Integer_SetValue', IR) > 0);
-end;
-
-procedure TGenericsTests.TestCodegen_Generic_FieldAccessWorks;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericUsage);
-  { SetValue stores into FValue; verify a store instruction is emitted }
-  AssertTrue('method bodies emitted with stores', Pos('storew', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -1142,34 +1078,6 @@ begin
 end;
 
 const
-  { Two instances of the same generic class; one method calls another method
-    on the same class.  If the method body is shared across instances without
-    re-analysis, the inner Self.SetValue call will resolve to the same
-    instance for both — so TBox_String_Init would emit
-      call $TBox_Integer_SetValue
-    instead of $TBox_String_SetValue.  Per-instance AST body cloning ensures
-    each instance has its own analysed body and the correct call targets. }
-  SrcTwoInstancesMethodCallsOwn =
-    '''
-        program Prg;
-        type
-          TBox<T> = class
-            FValue: T;
-            procedure SetValue(V: T);
-            begin
-              Self.FValue := V
-            end;
-            procedure Init(V: T);
-            begin
-              Self.SetValue(V)
-            end;
-          end;
-        var
-          A: TBox<Integer>;
-          B: TBox<String>;
-        begin end.
-        ''';
-
 procedure TGenericsTests.TestSemantic_Generic_TwoInstances_PointerFieldDistinctTypes;
 var
   Prog: TProgram;
@@ -1195,41 +1103,6 @@ begin
   finally
     Prog.Free();
   end;
-end;
-
-procedure TGenericsTests.TestCodegen_Generic_TwoInstances_MethodCallsResolveToOwnInstance;
-var
-  IR:        string;
-  IntInit:   Integer;
-  StrInit:   Integer;
-  IntBody:   string;
-  StrBody:   string;
-begin
-  IR := GenIR(SrcTwoInstancesMethodCallsOwn);
-
-  { Locate the two Init function bodies in the IR. }
-  IntInit := Pos('function $TBox_Integer_Init', IR);
-  StrInit := Pos('function $TBox_String_Init', IR);
-  AssertTrue('TBox_Integer_Init function emitted', IntInit > 0);
-  AssertTrue('TBox_String_Init function emitted',  StrInit > 0);
-
-  { Take a window from each function start until the next 'function ' marker
-    (or end of string). }
-  if IntInit < StrInit then
-  begin
-    IntBody := Copy(IR, IntInit, StrInit - IntInit);
-    StrBody := Copy(IR, StrInit, Length(IR) - StrInit + 1);
-  end
-  else
-  begin
-    StrBody := Copy(IR, StrInit, IntInit - StrInit);
-    IntBody := Copy(IR, IntInit, Length(IR) - IntInit + 1);
-  end;
-
-  AssertTrue('TBox_Integer_Init body calls $TBox_Integer_SetValue',
-    Pos('call $TBox_Integer_SetValue', IntBody) > 0);
-  AssertTrue('TBox_String_Init body calls $TBox_String_SetValue',
-    Pos('call $TBox_String_SetValue', StrBody) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -1405,19 +1278,21 @@ begin
   end;
 end;
 
+{ Diamond inference (TBox<>.Create) must monomorphise exactly as the
+  explicit spelling: identical assembly on both ISAs. }
 procedure TGenericsTests.TestCodegen_Diamond_SingleArg_EmitsSameIR;
-var
-  IRExplicit, IRDiamond: string;
 begin
-  IRExplicit := GenIR(SrcGenericUsage);
-  IRDiamond  := GenIR(SrcDiamondSingleArg);
-  AssertEquals('diamond IR identical to explicit', IRExplicit, IRDiamond);
+  AssertEquals('x86-64: diamond asm identical to explicit',
+    GenAsm(SrcGenericUsage, TargetX86_64),
+    GenAsm(SrcDiamondSingleArg, TargetX86_64));
+  AssertEquals('arm64: diamond asm identical to explicit',
+    GenAsm(SrcGenericUsage, TargetArm64),
+    GenAsm(SrcDiamondSingleArg, TargetArm64));
 end;
 
 procedure TGenericsTests.TestCodegen_Diamond_TwoArgs_EmitsSameIR;
 var
   SrcExplicit: string;
-  IRExplicit, IRDiamond: string;
 begin
   SrcExplicit :=
     '''
@@ -1432,9 +1307,10 @@ begin
           P := TPair<string, Integer>.Create()
         end.
         ''';
-  IRExplicit := GenIR(SrcExplicit);
-  IRDiamond  := GenIR(SrcDiamondTwoArgs);
-  AssertEquals('diamond IR identical to explicit', IRExplicit, IRDiamond);
+  AssertEquals('x86-64: diamond asm identical to explicit',
+    GenAsm(SrcExplicit, TargetX86_64), GenAsm(SrcDiamondTwoArgs, TargetX86_64));
+  AssertEquals('arm64: diamond asm identical to explicit',
+    GenAsm(SrcExplicit, TargetArm64), GenAsm(SrcDiamondTwoArgs, TargetArm64));
 end;
 
 initialization
