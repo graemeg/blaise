@@ -24,6 +24,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_FloatElements_DynAndOpenArrays;
     { Inline anonymous declaration (regression: ensure existing behaviour holds) }
     procedure TestRun_AnonymousDecl_ReadWrite;
     procedure TestRun_AnonymousDecl_NonZeroBase;
@@ -1600,6 +1601,43 @@ begin
   LE := LineEnding;
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, 'ay bee' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_FloatElements_DynAndOpenArrays;
+const
+  {
+    Double and Single elements of dynamic arrays and of a Double open array
+    read in float context, alone and mixed in an expression.  arm64 lowered a
+    float element read only for static arrays ("not yet lowered: float
+    expression TStringSubscriptExpr"). }
+  Src = '''
+    program FL;
+    type TD = array of Double; TS = array of Single;
+    function Sum(const A: array of Double): Double;
+    var I: Integer;
+    begin
+      Result := 0;
+      for I := 0 to High(A) do Result := Result + A[I]
+    end;
+    var A: TD; B: TS; G: Int64;
+    begin
+      G := 7;
+      SetLength(A, 3); A[0] := 12.5; A[1] := -3.25; A[2] := 100.0;
+      WriteLn(A[0]); WriteLn(A[1]); WriteLn(A[2]);
+      SetLength(B, 2); B[0] := 1.5; B[1] := -0.25;
+      WriteLn(B[0]); WriteLn(B[1]);
+      WriteLn(Sum(A):0:2, ' ', (A[0] * B[0]):0:3, ' ', G)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '12.5' + #10 +
+    '-3.25' + #10 +
+    '100' + #10 +
+    '1.5' + #10 +
+    '-0.25' + #10 +
+    '109.25 18.750 7' + #10, 0);
 end;
 
 initialization

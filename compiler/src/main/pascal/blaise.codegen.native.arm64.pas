@@ -6241,10 +6241,11 @@ begin
   end;
   if (AExpr is TStringSubscriptExpr) and IsFloatExpr(AExpr) and
      (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) and
-     (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind =
-       tyStaticArray) then
+     (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind in
+       [tyStaticArray, tyDynArray, tyOpenArray]) then
   begin
-    { float array element: the integer path loads the bit pattern }
+    { float array element (static, dynamic or open array): the integer path
+      loads the bit pattern at the element's width }
     Self.EmitExprToX0(AExpr);
     if (AExpr.ResolvedType <> nil) and
        (AExpr.ResolvedType.Kind = tySingle) then
