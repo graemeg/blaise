@@ -251,7 +251,7 @@ found, for a ruling before they are migrated.
 | `cp.test.staticarray.pas` | 41 | pending
 | `cp.test.recordret.pas` | 36 | pending
 | `cp.test.forin.pas` | 36 | pending
-| `cp.test.interfaces.pas` | 33 | pending
+| `cp.test.interfaces.pas` | 33 | done: 31 behaviour (e2e)
 | `cp.test.exceptions.pas` | 27 | done: 22 behaviour (e2e), 3 QBE-only
 | `cp.test.classes.pas` | 26 | done: 24 behaviour (e2e)
 | `cp.test.stringops.pas` | 25 | done: 23 behaviour (e2e)

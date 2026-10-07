@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Interfaces_Combined;
     procedure TestRun_BasicDispatch;
     procedure TestRun_MethodWithArgs;
     procedure TestRun_PolymorphicThroughInterfaceVar;
@@ -1312,6 +1313,168 @@ begin
       WriteLn(Pick(0).Name())
     end.
     ''', 'beta' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_Interfaces_Combined;
+const
+  {
+    Interfaces end to end, leak-checked: the (obj, itab) pair in locals,
+    array elements and a record field (SizeOf 24 -- the pair is 16 bytes),
+    dispatch through each; is / as / Supports (two- and three-argument);
+    interface arguments from an identifier, an as-cast and a method
+    parameter; property read and write, including through a record field
+    (R.F.Value); nil compares on a local and on an interface Result; an
+    interface-returning method assigned and discarded; a record and an out
+    string through itab dispatch; and release timing -- reassigning the last
+    reference destroys at once, scope exit releases the rest. }
+  Src = '''
+    program P;
+    type
+      TOpts = record
+        A, B, C: Integer;
+        Name: string;
+      end;
+      IFoo = interface
+        function GetVal: Integer;
+        function GetValue(): Integer;
+        procedure SetValue(AValue: Integer);
+        property Value: Integer read GetValue write SetValue;
+        procedure Configure(const O: TOpts);
+        procedure Describe(out S: string);
+        function Again: IFoo;
+      end;
+      IBar = interface
+        function Bar: string;
+      end;
+      TFoo = class(TObject, IFoo)
+        FVal: Integer;
+        Tag: string;
+        constructor Create(const ATag: string; AVal: Integer);
+        destructor Destroy; override;
+        function GetVal: Integer;
+        function GetValue(): Integer;
+        procedure SetValue(AValue: Integer);
+        procedure Configure(const O: TOpts);
+        procedure Describe(out S: string);
+        function Again: IFoo;
+      end;
+      TPlain = class
+      end;
+      TRec = record
+        F: IFoo;
+        Tag: Integer;
+      end;
+      THelper = class
+        procedure Use(I: IFoo);
+      end;
+    constructor TFoo.Create(const ATag: string; AVal: Integer);
+    begin
+      Tag := ATag;
+      FVal := AVal
+    end;
+    destructor TFoo.Destroy;
+    begin
+      WriteLn('destroy ', Tag);
+      inherited Destroy()
+    end;
+    function TFoo.GetVal(): Integer; begin Result := FVal end;
+    function TFoo.GetValue(): Integer; begin Result := FVal * 10 end;
+    procedure TFoo.SetValue(AValue: Integer); begin FVal := AValue end;
+    procedure TFoo.Configure(const O: TOpts);
+    begin
+      FVal := O.A + O.B + O.C;
+      Tag := Tag + '/' + O.Name
+    end;
+    procedure TFoo.Describe(out S: string);
+    begin
+      S := 'desc-' + Tag
+    end;
+    function TFoo.Again: IFoo; begin Result := Self end;
+    procedure THelper.Use(I: IFoo);
+    begin
+      WriteLn('helper ', I.GetVal())
+    end;
+    procedure UseIntf(I: IFoo);
+    begin
+      WriteLn('use ', I.GetVal())
+    end;
+    function MaybeFoo(Make: Boolean): IFoo;
+    begin
+      if Make then Result := TFoo.Create('m', 4);
+      if Result = nil then WriteLn('result nil') else WriteLn('result set')
+    end;
+    procedure Run;
+    var
+      F, G, W: IFoo; D: IFoo; Arr: array[0..1] of IFoo; Obj, Pl: TObject;
+      R: TRec; H: THelper; O: TOpts; S: string; B: Boolean;
+    begin
+      F := TFoo.Create('a', 1);
+      WriteLn(F.GetVal());
+      Arr[0] := F;
+      Arr[1] := TFoo.Create('b', 2);
+      WriteLn(Arr[1].GetVal(), ' ', Arr[0].GetVal());
+      G := Arr[1];
+      Arr[1] := nil;
+      WriteLn('g ', G.GetVal());
+      Obj := TFoo.Create('c', 3);
+      Pl := TPlain.Create();
+      WriteLn(Obj is IFoo, ' ', Pl is IFoo, ' ', Supports(Obj, IFoo), ' ', Supports(Pl, IFoo));
+      B := Supports(Obj, IFoo, W);
+      WriteLn(B, ' ', W.GetVal());
+      UseIntf(Obj as IFoo);
+      UseIntf(F);
+      H := THelper.Create();
+      H.Use(G);
+      R.F := F;
+      R.Tag := 5;
+      WriteLn(SizeOf(TRec), ' ', R.Tag, ' ', R.F.GetVal());
+      F.Value := 13;
+      WriteLn(F.Value, ' ', R.F.Value);
+      if D = nil then WriteLn('local nil');
+      D := MaybeFoo(False);
+      D := MaybeFoo(True);
+      W := F.Again();
+      WriteLn('again ', W.GetVal());
+      F.Again();
+      O.A := 1; O.B := 2; O.C := 3; O.Name := 'cfg';
+      G.Configure(O);
+      G.Describe(S);
+      WriteLn(G.GetVal(), ' ', S);
+      G := F;
+      WriteLn('reassigned');
+      H.Free();
+      Pl.Free()
+    end;
+    begin
+      Run();
+      WriteLn('done')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '1' + LE +
+    '2 1' + LE +
+    'g 2' + LE +
+    'True False True False' + LE +
+    'True 3' + LE +
+    'use 3' + LE +
+    'use 1' + LE +
+    'helper 2' + LE +
+    '24 5 1' + LE +
+    '130 130' + LE +
+    'local nil' + LE +
+    'result nil' + LE +
+    'result set' + LE +
+    'again 13' + LE +
+    '6 desc-b/cfg' + LE +
+    'destroy b/cfg' + LE +
+    'reassigned' + LE +
+    'destroy c' + LE +
+    'destroy m' + LE +
+    'destroy a' + LE +
+    'done' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'reassigned');
 end;
 
 initialization
