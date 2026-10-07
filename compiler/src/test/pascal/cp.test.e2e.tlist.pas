@@ -254,10 +254,6 @@ procedure TE2ETListTests.TestRun_TList_ClassElements_RetainedAcrossScope;
 var Output: string; RCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+link+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcTListClassRetain, Output, RCode, False));
-  AssertEquals('exit code (qbe)', 0, RCode);
-  AssertEquals('retained elements readable (qbe)', '77' + #10 + '88' + #10, Output);
   AssertTrue('compile+link+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcTListClassRetain, Output, RCode, False));
   AssertEquals('exit code (native)', 0, RCode);
@@ -303,10 +299,6 @@ procedure TE2ETListTests.TestRun_TList_DefaultProperty_ReadWrite;
 var Output: string; RCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcTListDefaultRW, Output, RCode, False));
-  AssertEquals('exit code (qbe)', 0, RCode);
-  AssertEquals('List[i] read/write (qbe)', '300' + #10, Output);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcTListDefaultRW, Output, RCode, False));
   AssertEquals('exit code (native)', 0, RCode);
@@ -317,10 +309,6 @@ procedure TE2ETListTests.TestRun_TList_DefaultProperty_Polymorphic;
 var Output: string; RCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcTListDefaultPoly, Output, RCode, False));
-  AssertEquals('exit code (qbe)', 0, RCode);
-  AssertEquals('List[i].Area (qbe)', '25' + #10, Output);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcTListDefaultPoly, Output, RCode, False));
   AssertEquals('exit code (native)', 0, RCode);

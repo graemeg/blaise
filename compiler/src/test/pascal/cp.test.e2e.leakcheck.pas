@@ -38,7 +38,6 @@ type
     procedure TestDebug_MultipleLeaks_AllReported;
     procedure TestDebug_CycleRetained_Reported;
     procedure TestRelease_NoReport_WhenDebugOff;
-    procedure TestDebug_LeakReport_IncludesUnitAndLine;
     procedure TestDebug_LeakReport_IncludesUnitAndLine_Native;
     procedure TestDebug_StringLeak_Reported;
     procedure TestDebug_StringClean_NoReport;
@@ -47,14 +46,14 @@ type
     procedure TestDebug_ClassFieldFromCall_NoLeak;
 
     { local := MakeClass() consumes the call's +1 — no leak per assignment.
-      Pins the native class-assignment AddRef elision against the QBE backend. }
+      Pins the native class-assignment AddRef elision. }
     procedure TestDebug_FuncReturnAssign_NoLeak;
     { MakeClass() called in statement position discards its +1 result — it must
-      be released or one object leaks per call.  Both backends. }
+      be released or one object leaks per call. }
     procedure TestDebug_DiscardedClassReturn_NoLeak;
     { X := Call().ClassField must keep the field value valid past the base
-      release (QBE use-after-free before the deferred-base-release fix) and not
-      leak on QBE.  Correct output (42) is asserted on BOTH backends. }
+      release (a use-after-free before the deferred-base-release fix) and not
+      leak.  The correct output (42) is asserted, not just the leak report. }
     procedure TestDebug_CallResultClassFieldRead_NoUseAfterFree;
     { BUG-049: a class-field read off an owned transient in an UNBRACKETED
       statement context (a call argument, an if condition, and — per iteration
@@ -66,7 +65,7 @@ type
     { A deep chain MakeIt().A.B.N reads a scalar off a base that is itself two
       field-reads off an owned transient.  Each intermediate owned transient's
       release must be deferred to statement end so none leak, while the value
-      still survives (no UAF).  Both backends (BUG-003). }
+      still survives (no UAF) (BUG-003). }
     procedure TestDebug_DeepChainFieldRead_NoLeak;
     { Multiple same-named typed handlers share one slot — no over-release. }
     procedure TestDebug_MultiHandlerVar_NoOverRelease;
@@ -78,12 +77,10 @@ type
     { Objects allocated inside generic method bodies must be attributed
       to the unit that DECLARES the template (the line number already
       refers to the template source), not the instantiating unit. }
-    procedure TestDebug_GenericAllocSite_ReportsDefiningUnit;
     procedure TestDebug_GenericAllocSite_ReportsDefiningUnit_Native;
     { An interface-returning call passed directly as an argument — Show(Make())
       — hands the callee an owned (+1) fat pointer it borrows; the caller must
       release it after the call or one instance leaks. }
-    procedure TestDebug_IntfCallResultArg_NoLeak;
     procedure TestDebug_IntfCallResultArg_NoLeak_Native;
     { A call/getter result used as a field-access receiver must be released
       after the field load.  L[I].HitPoints — the TList<T>.Get getter returns
@@ -144,7 +141,6 @@ type
       plain procedure calls and method calls (the TList<string>.Add shape that
       leaked ~10 strings per directory-watcher poll in luhmann).  QBE already
       balances this via EmitOwnedArgReleases; pins the native fix. }
-    procedure TestDebug_ValueStrCallResultArg_NoLeak;
     procedure TestDebug_ValueStrCallResultArg_NoLeak_Native;
     { An owned (+1) string temp passed to a BUILT-IN — FileAge(PathOf()),
       Trim(Get()), Length(Make()), StrToInt(Make()), nested
@@ -152,7 +148,6 @@ type
       the RTL and historically never released the argument temp (both
       backends).  One string leaked per call; the luhmann directory watcher
       hit this once per note per poll via FileAge(AbsPathOf(Id)). }
-    procedure TestDebug_BuiltinOwnedStrArg_NoLeak;
     procedure TestDebug_BuiltinOwnedStrArg_NoLeak_Native;
     { rc=0 string transients (built-in results, _StringConcat results — all
       StrAlloc buffers with RefCount = 0) leak INVISIBLY: a bare
@@ -164,16 +159,11 @@ type
       (inline concat operand, user-call concat operand, nested built-in arg,
       concat-as-built-in-arg) would grow the arena count by ~150; the fixed
       compiler keeps it flat. }
-    { QBE variant: runtime.mem (inline asm) cannot be compiled by the QBE
-      backend, so no arena counting — the tracker-visible rc=1 shapes are
-      asserted instead; the rc=0 disposal is pinned by the NATIVE arena
-      test (the shape predicate is shared code in blaise.codegen). }
-    procedure TestDebug_StrTransientDispose_TrackerClean;
     procedure TestDebug_StrTransientDispose_NoArenaGrowth_Native;
     { A string-returning call/getter used DIRECTLY as a Write/WriteLn argument
       (WriteLn(GetBar)) returns a fresh +1 string that _SysWriteStr only borrows.
       EmitWrite previously never released it, leaking one string per call.  The
-      fix releases the owned string transient after the write (both backends). }
+      fix releases the owned string transient after the write. }
     procedure TestDebug_WriteLnCallArg_NoLeak;
     { Anonymous-method capture (Phase 2): the heap environment record must be
       allocated once and released exactly once — the enclosing frame drops its
@@ -241,7 +231,7 @@ type
       run the binary, and return its exit code (or the compiler's exit code,
       negated, on compile failure).  AOutput carries the binary's stdout
       (or the compiler diagnostics on compile failure).  ABackend is the
-      --backend argument: 'qbe' or 'native'.  A fresh scratch subdirectory is
+      --backend argument.  A fresh scratch subdirectory is
       used per call so the unit cache is always cold (avoids the separate
       warm-rebuild .bif round-trip bug for unit-interface static arrays). }
     function RunUnitFiniDebug(const ABackend, AUnit1Src, AUnit2Src,
@@ -505,23 +495,6 @@ const
     end.
     ''';
 
-procedure TE2ELeakCheckTests.TestDebug_GenericAllocSite_ReportsDefiningUnit;
-var
-  Output: string;
-  ExitCode: Integer;
-begin
-  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcGenericAllocSite, Output, ExitCode, True));
-  AssertEquals('exit 0', 0, ExitCode);
-  AssertTrue('leak header', Pos('Blaise leak report', Output) >= 0);
-  AssertTrue('enumerator class reported', Pos('TListEnumerator', Output) >= 0);
-  AssertTrue('defining unit in report, got: ' + Output,
-    Pos(' at Generics.Collections:', Output) >= 0);
-  AssertTrue('instantiating program NOT in report, got: ' + Output,
-    Pos(' at LeakGen:', Output) < 0);
-end;
-
 procedure TE2ELeakCheckTests.TestDebug_GenericAllocSite_ReportsDefiningUnit_Native;
 var
   Output: string;
@@ -628,21 +601,6 @@ begin
   AssertTrue('compile+run', CompileAndRunWithRTLDebug(SrcOneLeak, Output, ExitCode, False));
   AssertEquals('exit 0', 0, ExitCode);
   AssertTrue('no leak report', Pos('Blaise leak report', Output) < 0);
-end;
-
-procedure TE2ELeakCheckTests.TestDebug_LeakReport_IncludesUnitAndLine;
-var
-  Output: string;
-  ExitCode: Integer;
-begin
-  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcLeakWithSite, Output, ExitCode, True));
-  AssertEquals('exit 0', 0, ExitCode);
-  AssertTrue('leak header', Pos('Blaise leak report', Output) >= 0);
-  AssertTrue('class name', Pos('TBox', Output) >= 0);
-  AssertTrue('unit name in report', Pos('LeakSite', Output) >= 0);
-  AssertTrue('at separator', Pos(' at ', Output) >= 0);
 end;
 
 procedure TE2ELeakCheckTests.TestDebug_LeakReport_IncludesUnitAndLine_Native;
@@ -929,11 +887,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcClassFieldFromCall, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', '7' + LE, Output);
-  AssertTrue('no leak report (qbe)', Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcClassFieldFromCall, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -947,11 +900,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcFuncReturnAssign, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', '900' + LE, Output);
-  AssertTrue('no leak report (qbe)', Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcFuncReturnAssign, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -965,11 +913,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcDiscardedClassReturn, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', '100' + LE, Output);
-  AssertTrue('no leak report (qbe)', Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcDiscardedClassReturn, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -983,16 +926,8 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  { The CORRECTNESS guard (both backends): the stored field value must survive
-    the base release + allocation churn and still read 42.  QBE printed garbage
-    here before the deferred-base-release fix. }
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcCallResultClassFieldRead, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertTrue('field value survives base release, prints 42 (qbe)',
-    Pos('42' + LE, Output) >= 0);
-  { QBE now releases the deferred base at statement end, so no leak. }
-  AssertTrue('no leak report (qbe)', Pos('leak', Output) < 0);
+  { The CORRECTNESS guard: the stored field value must survive the base
+    release + allocation churn and still read 42. }
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcCallResultClassFieldRead, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1009,10 +944,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcTransientFieldInCallArg, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcTransientFieldInCallArg, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1025,10 +956,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcTransientFieldInIfCond, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcTransientFieldInIfCond, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1043,11 +970,6 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   { the loop runs 5 iterations; per-iteration flush releases each transient —
     a single post-loop flush would leak 4. }
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcTransientFieldInWhileCond, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertTrue('loop count (qbe)', Pos('5' + LE, Output) >= 0);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcTransientFieldInWhileCond, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1061,16 +983,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  { QBE (BUG-003 ii): the deep chain's intermediate owned transients must be
-    deferred-released at statement end — value 7 survives (no UAF) AND no leak. }
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcDeepChainFieldRead, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertTrue('deep-chain value survives, prints 7 (qbe)',
-    Pos('7' + LE, Output) >= 0);
-  AssertTrue('no leak report (qbe)', Pos('leak', Output) < 0);
-  { Native now has a statement-scoped deferred-release list too, so the deep
-    chain's intermediate owned transients are released (BUG-003 native half). }
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcDeepChainFieldRead, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1085,11 +997,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcMultiHandlerVar, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', '42' + LE, Output);
-  AssertTrue('no leak report (qbe)', Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcMultiHandlerVar, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1129,19 +1036,6 @@ const
       Show(MakeFoo(42))
     end.
     ''';
-
-procedure TE2ELeakCheckTests.TestDebug_IntfCallResultArg_NoLeak;
-var
-  Output: string;
-  ExitCode: Integer;
-begin
-  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcIntfCallResultArg, Output, ExitCode, True));
-  AssertEquals('exit 0', 0, ExitCode);
-  AssertEquals('stdout', '42' + LE, Output);
-  AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
-end;
 
 procedure TE2ELeakCheckTests.TestDebug_IntfCallResultArg_NoLeak_Native;
 var
@@ -1255,11 +1149,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcReceiverFieldAccess, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', '42' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcReceiverFieldAccess, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1273,11 +1162,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcStaticArrayOfInterface, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'abc' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcStaticArrayOfInterface, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1678,11 +1562,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcStaticArrayOfClass, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', '20' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcStaticArrayOfClass, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1696,11 +1575,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcStaticArrayOfString, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'val2' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcStaticArrayOfString, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1714,11 +1588,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcStaticArrayOfRecord, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'val2' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcStaticArrayOfRecord, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1732,11 +1601,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcStaticArrayOfClassExcExit, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'caught' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcStaticArrayOfClassExcExit, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1750,11 +1614,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcStaticArrayManualFree, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'CLEAN' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcStaticArrayManualFree, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1768,11 +1627,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcRecordStaticArrayField, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'val2' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcRecordStaticArrayField, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1786,11 +1640,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcRecordStaticArrayFieldByVal, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'val1' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcRecordStaticArrayFieldByVal, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1804,11 +1653,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcClassStaticArrayField, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'val2' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcClassStaticArrayField, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1822,11 +1666,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcProgStaticArrayOfClass, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', '20' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcProgStaticArrayOfClass, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1840,11 +1679,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcProgStaticArrayOfString, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'val2' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcProgStaticArrayOfString, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1858,11 +1692,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcProgStaticArrayOfInterface, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'abc' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcProgStaticArrayOfInterface, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1876,11 +1705,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcProgStaticArrayOfRecord, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'val2' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcProgStaticArrayOfRecord, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1894,11 +1718,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcProgStaticArrayManualFree, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'CLEAN' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcProgStaticArrayManualFree, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -1915,11 +1734,6 @@ begin
   { A caught exception leaks its `Exception (rc=0)` object on BOTH backends
     (pre-existing, filed separately), so assert on the ELEMENT class name
     instead of the bare word 'leak'. }
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcProgStaticArrayExcExit, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'caught' + LE, Output);
-  AssertTrue('no TObjX leaked (qbe), got: ' + Output, Pos('TObjX', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcProgStaticArrayExcExit, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -2068,51 +1882,6 @@ const
     end.
     ''';
 
-const
-  { Same transient shapes without the runtime.mem arena probe (QBE cannot
-    compile inline asm).  The user-call concat operand (rc=1) is
-    tracker-visible; a regression there reports leaks. }
-  SrcStrTransientDisposeQbe = '''
-    program P;
-    function MakeStr(I: Integer): string;
-    begin
-      Result := 'value-' + IntToStr(I);
-    end;
-    procedure SinkVal(S: string);
-    begin
-      if Length(S) = 0 then WriteLn('never');
-    end;
-    var
-      I: Integer;
-      S: string;
-    begin
-      for I := 1 to 200 do
-      begin
-        S := 'x' + IntToStr(I) + 'y';
-        S := MakeStr(I) + 'y';
-        S := LowerCase(Trim(MakeStr(I)));
-        SinkVal('v-' + IntToStr(I));
-        if FileExists('/nonexistent/' + IntToStr(I)) then
-          WriteLn('never');
-      end;
-      if Length(S) > 0 then
-        WriteLn('done');
-    end.
-    ''';
-
-procedure TE2ELeakCheckTests.TestDebug_StrTransientDispose_TrackerClean;
-var
-  Output: string;
-  ExitCode: Integer;
-begin
-  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcStrTransientDisposeQbe, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'done' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
-end;
-
 procedure TE2ELeakCheckTests.TestDebug_StrTransientDispose_NoArenaGrowth_Native;
 var
   Output: string;
@@ -2126,19 +1895,6 @@ begin
   AssertTrue('no leak report (native), got: ' + Output, Pos('leak', Output) < 0);
 end;
 
-procedure TE2ELeakCheckTests.TestDebug_BuiltinOwnedStrArg_NoLeak;
-var
-  Output: string;
-  ExitCode: Integer;
-begin
-  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcBuiltinOwnedStrArg, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'done' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
-end;
-
 procedure TE2ELeakCheckTests.TestDebug_BuiltinOwnedStrArg_NoLeak_Native;
 var
   Output: string;
@@ -2150,19 +1906,6 @@ begin
   AssertEquals('exit 0 (native)', 0, ExitCode);
   AssertEquals('stdout (native)', 'done' + LE, Output);
   AssertTrue('no leak report (native), got: ' + Output, Pos('leak', Output) < 0);
-end;
-
-procedure TE2ELeakCheckTests.TestDebug_ValueStrCallResultArg_NoLeak;
-var
-  Output: string;
-  ExitCode: Integer;
-begin
-  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcValueStrCallResultArg, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'done' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
 end;
 
 procedure TE2ELeakCheckTests.TestDebug_ValueStrCallResultArg_NoLeak_Native;
@@ -2184,11 +1927,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcWriteLnCallArg, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)', 'bcd' + LE + 'bcd' + LE + 'bcd' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcWriteLnCallArg, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);
@@ -2844,11 +2582,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  ExitCode := RunUnitFiniDebug('qbe', SrcUnitFiniArrayUnit, '',
-    SrcUnitFiniArrayProg, Output);
-  AssertEquals('exit 0 (qbe), got: ' + Output, 0, ExitCode);
-  AssertTrue('stdout has u1 (qbe), got: ' + Output, Pos('u1', Output) >= 0);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   ExitCode := RunUnitFiniDebug('native', SrcUnitFiniArrayUnit, '',
     SrcUnitFiniArrayProg, Output);
   AssertEquals('exit 0 (native), got: ' + Output, 0, ExitCode);
@@ -2862,12 +2595,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  ExitCode := RunUnitFiniDebug('qbe', SrcUnitFiniScalarUnit, '',
-    SrcUnitFiniScalarProg, Output);
-  AssertEquals('exit 0 (qbe), got: ' + Output, 0, ExitCode);
-  AssertTrue('stdout has scalar (qbe), got: ' + Output,
-    Pos('scalar', Output) >= 0);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   ExitCode := RunUnitFiniDebug('native', SrcUnitFiniScalarUnit, '',
     SrcUnitFiniScalarProg, Output);
   AssertEquals('exit 0 (native), got: ' + Output, 0, ExitCode);
@@ -2882,15 +2609,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  ExitCode := RunUnitFiniDebug('qbe', SrcUnitFiniClassUnit, '',
-    SrcUnitFiniClassProg, Output);
-  AssertEquals('exit 0 (qbe), got: ' + Output, 0, ExitCode);
-  { The destructor firing at teardown is the proof the release actually ran. }
-  AssertTrue('destructor ran at exit (qbe), got: ' + Output,
-    Pos('down thing', Output) >= 0);
-  AssertTrue('run before down (qbe), got: ' + Output,
-    Pos('run', Output) < Pos('down thing', Output));
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   ExitCode := RunUnitFiniDebug('native', SrcUnitFiniClassUnit, '',
     SrcUnitFiniClassProg, Output);
   AssertEquals('exit 0 (native), got: ' + Output, 0, ExitCode);
@@ -2907,11 +2625,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  ExitCode := RunUnitFiniDebug('qbe', SrcUnitFiniImplUnit, '',
-    SrcUnitFiniImplProg, Output);
-  AssertEquals('exit 0 (qbe), got: ' + Output, 0, ExitCode);
-  AssertTrue('stdout has xxx (qbe), got: ' + Output, Pos('xxx', Output) >= 0);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   ExitCode := RunUnitFiniDebug('native', SrcUnitFiniImplUnit, '',
     SrcUnitFiniImplProg, Output);
   AssertEquals('exit 0 (native), got: ' + Output, 0, ExitCode);
@@ -2925,15 +2638,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  ExitCode := RunUnitFiniDebug('qbe', SrcUnitFiniOrderUnitX,
-    SrcUnitFiniOrderUnitY, SrcUnitFiniOrderProg, Output);
-  AssertEquals('exit 0 (qbe), got: ' + Output, 0, ExitCode);
-  AssertTrue('Y destroyed (qbe), got: ' + Output, Pos('down Y', Output) >= 0);
-  AssertTrue('X destroyed (qbe), got: ' + Output, Pos('down X', Output) >= 0);
-  { Reverse init order: UFinY initialised last, so it finalises first. }
-  AssertTrue('Y down before X down (qbe), got: ' + Output,
-    Pos('down Y', Output) < Pos('down X', Output));
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   ExitCode := RunUnitFiniDebug('native', SrcUnitFiniOrderUnitX,
     SrcUnitFiniOrderUnitY, SrcUnitFiniOrderProg, Output);
   AssertEquals('exit 0 (native), got: ' + Output, 0, ExitCode);
@@ -2950,14 +2654,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  ExitCode := RunUnitFiniDebug('qbe', SrcUnitFiniFinalUnit, '',
-    SrcUnitFiniFinalProg, Output);
-  AssertEquals('exit 0 (qbe), got: ' + Output, 0, ExitCode);
-  { The finalization block runs at exit and can still read the unit global —
-    its ARC release happens only AFTER the user code. }
-  AssertTrue('finalization ran and saw the global (qbe), got: ' + Output,
-    Pos('final sees fin-live', Output) >= 0);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   ExitCode := RunUnitFiniDebug('native', SrcUnitFiniFinalUnit, '',
     SrcUnitFiniFinalProg, Output);
   AssertEquals('exit 0 (native), got: ' + Output, 0, ExitCode);
@@ -3002,13 +2698,6 @@ var
   ExitCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, Src, Output, ExitCode, True));
-  AssertEquals('exit 0 (qbe)', 0, ExitCode);
-  AssertEquals('stdout (qbe)',
-    'cat ab' + LE + 'make m' + LE + 'alias-arg abbb' + LE +
-    'alias-recv mbbb' + LE, Output);
-  AssertTrue('no leak report (qbe), got: ' + Output, Pos('leak', Output) < 0);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, Src, Output, ExitCode, True));
   AssertEquals('exit 0 (native)', 0, ExitCode);

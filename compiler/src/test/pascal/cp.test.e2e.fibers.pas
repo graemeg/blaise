@@ -375,7 +375,8 @@ begin
     'A:caught boom-A' + LE + 'M' + LE, 0)
 end;
 
-{ The design's QBE posture: compiling a program that pulls in the fiber
+{ QBE-only (delete with the backend, Phase 2).
+  The design's QBE posture: compiling a program that pulls in the fiber
   context unit under the QBE backend must fail with the documented inline-asm
   diagnostic (a clear error, not broken IR).  Drive the front end + QBE
   codegen in-process and assert on the exception message. }

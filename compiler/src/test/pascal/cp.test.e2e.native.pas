@@ -1421,12 +1421,8 @@ const
     end.
     ''';
 
-{ Every test below runs its source through BOTH backends (beQBE, beNative)
-  and asserts identical stdout/exit on each — the native backend's whole
-  correctness model is parity with QBE on the same source, so this exercises
-  both code generators against one hand-written expected value.  As native
-  gains features, more suites can adopt AssertRunsOnAll; until then this
-  suite covers the integer-family subset native supports. }
+{ Every test below runs its source through AssertRunsOnAll and asserts the
+  stdout / exit code against one hand-written expected value. }
 
 const
   SrcSretVarParamArg = '''

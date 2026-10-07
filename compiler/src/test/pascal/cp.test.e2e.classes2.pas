@@ -1940,10 +1940,6 @@ procedure TE2EClasses2Tests.TestRun_InterfaceProperty_CaseMismatchAndUses;
 var Output: string; RCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compile+run (qbe)',
-    CompileAndRunWithRTLDebugOn(beQBE, SrcIntfPropCaseUses, Output, RCode, False));
-  AssertEquals('exit code (qbe)', 0, RCode);
-  AssertEquals('output (qbe)', '13' + LE + '29' + LE, Output);
   AssertTrue('compile+run (native)',
     CompileAndRunWithRTLDebugOn(beNative, SrcIntfPropCaseUses, Output, RCode, False));
   AssertEquals('exit code (native)', 0, RCode);
