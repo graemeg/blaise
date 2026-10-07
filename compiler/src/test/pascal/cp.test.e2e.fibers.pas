@@ -29,7 +29,7 @@ interface
 
 uses
   SysUtils, Classes, contnrs, blaise.testing, uLexer, uParser, uAST,
-  uSemantic, uUnitLoader, blaise.codegen.qbe, cp.test.e2e.base;
+  uSemantic, uUnitLoader, cp.test.e2e.base;
 
 type
   TFiberE2ETests = class(TE2ETestCase)
@@ -40,7 +40,6 @@ type
     procedure TestFiberSwitch_PingPong_Interleaves;
     procedure TestFiberExit_TrampolineReturns_StackPooled;
     procedure TestFiberStack_GuardPageFaults;
-    procedure TestFiberUnit_QBEBackend_RejectsInlineAsm;
 
     { P1 — per-fiber exception state across FiberSwitch (the gate tests). }
     procedure TestFiberExc_TryExcept_SurvivesSwap;
@@ -312,16 +311,6 @@ const
     end.
     ''';
 
-  { Minimal uses-fibers program for the QBE guard test. }
-  SrcQBEGuard =
-    '''
-    program fiberqbe;
-    uses async.fibers.context;
-    begin
-      WriteLn(FiberStackPoolCount());
-    end.
-    ''';
-
 procedure TFiberE2ETests.SetUp;
 begin
   inherited SetUp();
@@ -373,59 +362,6 @@ begin
   AssertRTLRunsOnOne(beNative, 'fiber-exc-own', SrcExcEachFiberItsOwn,
     'A:try' + LE + 'B:try' + LE + 'B:caught boom-B' + LE +
     'A:caught boom-A' + LE + 'M' + LE, 0)
-end;
-
-{ QBE-only (delete with the backend, Phase 2).
-  The design's QBE posture: compiling a program that pulls in the fiber
-  context unit under the QBE backend must fail with the documented inline-asm
-  diagnostic (a clear error, not broken IR).  Drive the front end + QBE
-  codegen in-process and assert on the exception message. }
-procedure TFiberE2ETests.TestFiberUnit_QBEBackend_RejectsInlineAsm;
-var
-  Lexer: TLexer;
-  Parser: TParser;
-  Prog: TProgram;
-  Semantic: TSemanticAnalyser;
-  QCG: TCodeGenQBE;
-  Loader: TUnitLoader;
-  Units: TObjectList;
-  SearchPaths: TStringList;
-  I: Integer;
-  Msg: string;
-begin
-  Msg := '';
-  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
-  QCG := nil; Loader := nil; Units := nil; SearchPaths := nil;
-  try
-    Lexer := TLexer.Create(SrcQBEGuard);
-    Parser := TParser.Create(Lexer);
-    Prog := Parser.Parse();
-    Semantic := TSemanticAnalyser.Create();
-    SearchPaths := TStringList.Create();
-    SearchPaths.Add(ProjectRoot() + 'compiler/src/main/pascal');
-    SearchPaths.Add(ProjectRoot() + 'stdlib/src/main/pascal');
-    Loader := TUnitLoader.Create(SearchPaths);
-    Units := Loader.LoadAll(Prog.UsedUnits);
-    for I := 0 to Units.Count - 1 do
-      Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
-    Semantic.Analyse(Prog);
-    QCG := TCodeGenQBE.Create();
-    QCG.SetSymbolTable(Prog.SymbolTable);
-    try
-      for I := 0 to Units.Count - 1 do
-        QCG.AppendUnit(TUnit(Units.Items[I]));
-      QCG.AppendProgram(Prog);
-    except
-      on E: Exception do Msg := E.Message;
-    end;
-  finally
-    QCG.Free(); Semantic.Free();
-    Units.Free(); Loader.Free(); SearchPaths.Free();
-    Prog.Free(); Parser.Free(); Lexer.Free()
-  end;
-  AssertTrue('QBE must reject the fiber unit (no error raised)', Msg <> '');
-  AssertTrue('diagnostic must name the native backend (got: ' + Msg + ')',
-    Pos('native backend', Msg) >= 0)
 end;
 
 initialization

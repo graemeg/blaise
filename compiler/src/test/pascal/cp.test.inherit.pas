@@ -14,14 +14,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe, cp.test.harness;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TInheritTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
     procedure ParseExpectErrorMsg(const ASrc, AExpectedSubstr: string);
   published
@@ -33,7 +32,6 @@ type
     procedure TestSemantic_Nil_AssignToClassVar_OK;
     procedure TestSemantic_Nil_AssignToIntVar_RaisesError;
     procedure TestSemantic_Nil_CompareWithClassVar_OK;
-    procedure TestCodegen_MethodCall_NilGuard_EmitsCheckNil;
 
     { ------------------------------------------------------------------ }
     { Self-referential types                                               }
@@ -104,23 +102,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TInheritTests.GenIR(const ASrc: string): string;
-var Prog: TProgram; CG: TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -275,28 +256,6 @@ begin
             N := 1
         end.
         ''').Free();
-end;
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TInheritTests.TestCodegen_MethodCall_NilGuard_EmitsCheckNil;
-var IR: string;
-begin
-  IR := GenIR(
-    'program P;'               + LineEnding +
-    'type'                     + LineEnding +
-    '  TFoo = class'           + LineEnding +
-    '    procedure DoIt;'      + LineEnding +
-    '  end;'                   + LineEnding +
-    'procedure TFoo.DoIt();'     + LineEnding +
-    'begin'                    + LineEnding +
-    'end;'                     + LineEnding +
-    'var F: TFoo;'             + LineEnding +
-    'begin'                    + LineEnding +
-    '  F := TFoo.Create();'      + LineEnding +
-    '  F.DoIt()'                 + LineEnding +
-    'end.');
-  AssertTrue('_CheckNil emitted before method call', Pos('_CheckNil', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }

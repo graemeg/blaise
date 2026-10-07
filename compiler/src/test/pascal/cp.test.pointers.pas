@@ -15,7 +15,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe,
+  uLexer, uParser, uAST, uSymbolTable, uSemantic,
   blaise.codegen.native, blaise.codegen.native.backend, blaise.codegen.target;
 
 type
@@ -23,7 +23,6 @@ type
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
     procedure GenNativeExpectCodeGenError(const ASrc: string);
   published
@@ -58,7 +57,6 @@ type
       through must raise the backend's clean 'Unknown procedure' error on
       BOTH backends — never dereference the nil decl. }
     procedure TestNative_BuiltinFuncStatement_RaisesCleanly;
-    procedure TestQBE_BuiltinFuncStatement_RaisesCleanly;
 
     { ------------------------------------------------------------------ }
     { Codegen — emit malloc / free / load / store / pointer arithmetic     }
@@ -165,22 +163,6 @@ begin
     SA.Analyse(Result);
   finally
     SA.Free();
-  end;
-end;
-
-function TPointerTests.GenIR(const ASrc: string): string;
-var
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
   end;
 end;
 
@@ -461,26 +443,6 @@ begin
           Length(S)
         end.
         ''');
-end;
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TPointerTests.TestQBE_BuiltinFuncStatement_RaisesCleanly;
-begin
-  try
-    GenIR(
-      '''
-          program Prg;
-          var S: String;
-          begin
-            S := 'x';
-            Length(S)
-          end.
-          ''');
-    Fail('Expected ECodeGenError');
-  except
-    on E: ECodeGenError do ; { expected }
-  end;
 end;
 
 { ------------------------------------------------------------------ }

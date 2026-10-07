@@ -12,12 +12,11 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSemantic, blaise.codegen.qbe, cp.test.harness;
+  uLexer, uParser, uAST, uSemantic, cp.test.harness;
 
 type
   TARCTests = class(TTestCase)
   private
-    function GenIR(const ASrc: string): string;
     function IRContains(const AIR, AFragment: string): Boolean;
     function CountSubstring(const AHaystack, ANeedle: string): Integer;
     function FuncRegion(const AIR, AHeader: string): string;
@@ -65,7 +64,6 @@ type
     { Nil-slot release elision: first store to a class-typed local in the
       function entry block must skip _ClassRelease (slot is provably nil
       from EmitVarAllocs). }
-    procedure TestARC_FirstClassAssign_ElidesRelease;
 
     { Pointer-to-class coercion: assigning a Pointer-typed expression to a
       class-typed variable must emit _ClassAddRef (the LHS is ARC-managed). }
@@ -98,13 +96,11 @@ type
     { BUG-016 stage 2: static-array-of-managed LOCALS are released at scope
       exit (previously interface elements only).  The normal path must NOT
       zero the slots (AZero=False); only the exception-path walk zeroes. }
-    procedure TestARC_StaticArrayBlockExitRelease_DoesNotZeroSlots;
 
     { BUG-017: a static-array-of-managed FIELD of a record must be retained
       on record copy / value-param entry and released by the field walks —
       retain + copy + release land together or record copies over/under-
       release. }
-    procedure TestARC_RecordReturn_StaticArrayOnly_IsSret;
     { Discarded calls to sret-returning functions must pass a hidden result
       buffer and release the discarded result's managed content
       (BUG-20260722-discarded-sret-call-no-buffer). }
@@ -123,35 +119,6 @@ type
   end;
 
 implementation
-
-function TARCTests.GenIR(const ASrc: string): string;
-var
-  L:  TLexer;
-  P:  TParser;
-  Pr: TProgram;
-  A:  TSemanticAnalyser;
-  CG: TCodeGenQBE;
-begin
-  L  := TLexer.Create(ASrc);
-  P  := TParser.Create(L);
-  Pr := P.Parse();
-  A  := TSemanticAnalyser.Create();
-  try
-    A.Analyse(Pr);
-  finally
-    A.Free();
-  end;
-  CG := TCodeGenQBE.Create();
-  try
-    CG.Generate(Pr);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Pr.Free();
-    P.Free();
-    L.Free();
-  end;
-end;
 
 function TARCTests.IRContains(const AIR, AFragment: string): Boolean;
 begin
@@ -249,45 +216,6 @@ end;
 { ------------------------------------------------------------------ }
 
 const
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TARCTests.TestARC_FirstClassAssign_ElidesRelease;
-var
-  IR:      string;
-  FnPos:   Integer;
-  FnBody:  string;
-begin
-  { First class-typed assignment to a local in the function entry block:
-    the slot was just zeroed by EmitVarAllocs, so _ClassRelease(nil) is
-    elided. }
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TFoo = class
-            X: Integer;
-          end;
-        procedure DoIt;
-        var f: TFoo;
-        begin
-          f := TFoo.Create()
-        end;
-        begin
-          DoIt()
-        end.
-        ''');
-  FnPos := Pos('function $DoIt', IR);
-  AssertTrue('DoIt function emitted', FnPos > 0);
-  FnBody := Copy(IR, FnPos, Length(IR) - FnPos + 1);
-  AssertTrue('first store calls AddRef',
-    Pos('call $_ClassAddRef', FnBody) > 0);
-  { Block-exit release of f is still emitted, but the first-assignment
-    release must NOT appear before the block-exit one.  Exactly one
-    _ClassRelease in DoIt is the expected post-elision count. }
-  AssertEquals('exactly one _ClassRelease in DoIt',
-    1, CountSubstring(FnBody, 'call $_ClassRelease'));
-end;
-
 { ------------------------------------------------------------------ }
 { Return-value ownership transfer (string / dyn-array)                }
 { ------------------------------------------------------------------ }
@@ -333,79 +261,6 @@ const
         DoIt()
       end.
       ''';
-
-const
-const
-  { Borrowed class RHS (plain variable): the element store MUST retain.
-    Two _ClassAddRef sites: the `B := TC.Create()` constructor-assign and
-    the element store.  Also the shape for the block-exit release test:
-    after BUG-016 stage 2 the scope-exit walk releases both elements. }
-  SrcSAElemBorrowedClass = '''
-      program P;
-      type
-        TC = class
-        public
-          X: Integer;
-        end;
-      procedure Run();
-      var
-        A: array[0..1] of TC;
-        B: TC;
-      begin
-        B := TC.Create();
-        A[0] := B;
-      end;
-      begin
-        Run();
-      end.
-      ''';
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TARCTests.TestARC_StaticArrayBlockExitRelease_DoesNotZeroSlots;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSAElemBorrowedClass);
-  { Pins the AZero split: the NORMAL-path scope-exit walk passes
-    AZero=False, so the only zero store is B's nil-init.  (The exception-
-    path walk — EmitExcPathArcCleanup, currently unreferenced since
-    4fc5d2c5 — passes AZero=True for idempotency under nested handlers.) }
-  AssertEquals('normal-path element release does not zero the slots',
-    1, CountSubstring(IR, 'storel 0,'));
-end;
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TARCTests.TestARC_RecordReturn_StaticArrayOnly_IsSret;
-var
-  IR: string;
-begin
-  { A record whose ONLY managed content is a static-array field must be
-    classified as managed and returned via sret.  RecretManagedClean lacked
-    a tyStaticArray case, so a 16-byte record of two strings was "clean" and
-    REGISTER-returned — bypassing the ARC copy discipline entirely
-    (BUG-20260721-recretclean-static-array-of-managed). }
-  IR := GenIR(
-    '''
-      program P;
-      type
-        TR = record
-          Names: array[0..1] of string;
-        end;
-      function Make(): TR;
-      begin
-        Result.Names[0] := 'x';
-      end;
-      var
-        R: TR;
-      begin
-        R := Make();
-      end.
-      ''');
-  AssertTrue('static-array-of-string record returns via sret',
-    IRContains(IR, 'function $Make(l %_par__sret)'));
-end;
 
 procedure TARCTests.TestCodegen_ConstAndVarParams_TakeNoReference;
 const

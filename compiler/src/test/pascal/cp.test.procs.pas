@@ -12,14 +12,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TProcFuncTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -54,15 +53,12 @@ type
     { ------------------------------------------------------------------ }
     { Code generation                                                      }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_StandaloneFunc_EmitsFunctionWithRetType;
-    procedure TestCodegen_StandaloneFunc_HasResultVar;
 
     { Regression: float-typed parameter spill must use stored/stores
       (matching the QBE 'd'/'s' parameter type), not storel — QBE
       rejects 'storel %_par_D' for a 'd %_par_D' parameter. }
 
     { Nested procedures }
-    procedure TestCodegen_NestedProc_IsEmittedBeforeOuter;
     { Same as above but the nested routines are FUNCTIONS called as
       expressions (Helper(X) inside WriteLn), which exercises
       AnalyseFuncCallExpr rather than AnalyseProcCall.  The func-call path
@@ -106,25 +102,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TProcFuncTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -476,55 +453,6 @@ end;
 { ------------------------------------------------------------------ }
 { Code generation tests                                               }
 { ------------------------------------------------------------------ }
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TProcFuncTests.TestCodegen_StandaloneFunc_EmitsFunctionWithRetType;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcWithFunc);
-  AssertTrue('emits $Add function', Pos('$Add', IR) > 0);
-  { function has return type: 'function w $Add(' }
-  AssertTrue('function has return qtype', Pos('function w $Add', IR) > 0);
-end;
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TProcFuncTests.TestCodegen_StandaloneFunc_HasResultVar;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcWithFunc);
-  AssertTrue('Result variable slot emitted', Pos('%_var_Result', IR) > 0);
-end;
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TProcFuncTests.TestCodegen_NestedProc_IsEmittedBeforeOuter;
-const
-  Src =
-    '''
-        program P;
-        procedure Outer;
-          procedure Inner;
-          begin
-          end;
-        begin
-          Inner();
-        end;
-        begin
-          Outer();
-        end.
-        ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('Outer_Inner symbol present',
-    StrPos('$Outer_Inner', IR) >= 0);
-  AssertTrue('Inner appears before Outer in IR',
-    StrPos('$Outer_Inner', IR) < StrPos('$Outer(', IR));
-end;
 
 initialization
   RegisterTest(TProcFuncTests);

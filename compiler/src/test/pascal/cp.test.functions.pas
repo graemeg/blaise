@@ -12,14 +12,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TFunctionTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -53,9 +52,6 @@ type
     { ------------------------------------------------------------------ }
     { Code generation                                                      }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_Function_EmitsReturnType;
-    procedure TestCodegen_Function_ReturnTypeW;
-    procedure TestCodegen_Function_HasResultVar;
   end;
 
 implementation
@@ -89,25 +85,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TFunctionTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -431,39 +408,6 @@ end;
 { ------------------------------------------------------------------ }
 { Code generation                                                     }
 { ------------------------------------------------------------------ }
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TFunctionTests.TestCodegen_Function_EmitsReturnType;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGetterClass);
-  AssertTrue('function keyword with return type',
-    Pos('function w $TBox_GetValue', IR) > 0);
-end;
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TFunctionTests.TestCodegen_Function_ReturnTypeW;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcAdderClass);
-  AssertTrue('Add returns w (Integer)',
-    Pos('function w $TCalc_Add', IR) > 0);
-end;
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TFunctionTests.TestCodegen_Function_HasResultVar;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGetterClass);
-  AssertTrue('_var_Result allocated',
-    Pos('%_var_Result', IR) > 0);
-end;
 
 initialization
   RegisterTest(TFunctionTests);

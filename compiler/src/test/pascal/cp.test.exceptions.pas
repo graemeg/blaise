@@ -14,14 +14,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TExceptionTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -80,9 +79,6 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — setjmp-based real dispatch                                 }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_TryExcept_FrameAllocSize;
-    procedure TestCodegen_TryFinally_FrameAllocSize;
-    procedure TestCodegen_TryInsideFinally_AllFramesAllocated;
     { Exit inside try/finally must emit the finally body on the exit path,
       not just pop the frame. }
     { Exit inside the SECOND try block of a function must still pop its
@@ -143,23 +139,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TExceptionTests.GenIR(const ASrc: string): string;
-var Prog: TProgram; CG: TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -487,64 +466,6 @@ end;
 { ------------------------------------------------------------------ }
 { Codegen — setjmp-based real dispatch                                 }
 { ------------------------------------------------------------------ }
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TExceptionTests.TestCodegen_TryExcept_FrameAllocSize;
-var IR: string;
-begin
-  IR := GenIR(SrcTryExcept);
-  AssertTrue('try/except allocates 512-byte exc frame', Pos('alloc16 512', IR) > 0);
-end;
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TExceptionTests.TestCodegen_TryFinally_FrameAllocSize;
-var IR: string;
-begin
-  IR := GenIR(SrcTryFinally);
-  AssertTrue('try/finally allocates 512-byte exc frame', Pos('alloc16 512', IR) > 0);
-end;
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TExceptionTests.TestCodegen_TryInsideFinally_AllFramesAllocated;
-var
-  IR: string;
-  N: Integer;
-begin
-  { A try nested INSIDE a finally body is emitted more than once (normal
-    path + exception path, plus every non-local-exit unwind site), and each
-    emission consumes a fresh exception-frame slot.  Every %_exc_frame_N the
-    body references must have a matching alloc16 — an unallocated frame is
-    invalid QBE (regression: TTestCase.Run with a guarded TearDown). }
-  IR := GenIR(
-    '''
-        program P;
-        procedure Risky;
-        begin
-        end;
-        begin
-          try
-            Risky()
-          finally
-            try
-              Risky()
-            except
-              on E: TObject do WriteLn('caught')
-            end
-          end
-        end.
-        ''');
-  N := 0;
-  while Pos(Format('%%_exc_frame_%d', [N]), IR) > 0 do
-  begin
-    AssertTrue(Format('frame %d is allocated', [N]),
-      Pos(Format('%%_exc_frame_%d =l alloc16 512', [N]), IR) > 0);
-    N := N + 1;
-  end;
-  AssertTrue('the finally-nested try uses at least 3 frames', N >= 3);
-end;
 
 { ------------------------------------------------------------------ }
 { Codegen — ARC cleanup on exception paths                            }

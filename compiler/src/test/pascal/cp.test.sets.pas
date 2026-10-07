@@ -15,13 +15,12 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe,
+  uLexer, uParser, uAST, uSymbolTable, uSemantic,
   blaise.codegen.native, blaise.codegen.target, cp.test.harness;
 
 type
   TSetTests = class(TTestCase)
   private
-    function GenIR(const ASrc: string): string;
     function AnalyseSrc(const ASrc: string): TProgram;
     procedure SemanticOK(const ASrc: string);
     procedure SemanticFail(const ASrc: string);
@@ -132,7 +131,6 @@ type
     { The NON-aliasing control: a distinct destination must keep the direct
       form — memset straight into the destination, no temp, no memcpy.
       Guards against the aliasing predicate over-firing. }
-    procedure TestCodegen_DistinctDestRecordCall_KeepsDirectForm;
     { Native x86-64: a jumbo-set-returning call assigned back over one of its
       own arguments routes through a stack temp + memcpy. }
     procedure TestNative_SelfAssignedJumboSetCall_UsesTemp;
@@ -598,28 +596,6 @@ const
 { ------------------------------------------------------------------ }
 { Helpers                                                              }
 { ------------------------------------------------------------------ }
-
-function TSetTests.GenIR(const ASrc: string): string;
-var
-  Lex:  TLexer;
-  Par:  TParser;
-  SA:   TSemanticAnalyser;
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Lex  := TLexer.Create(ASrc);
-  Par  := TParser.Create(Lex);
-  Prog := Par.Parse();
-  Par.Free(); Lex.Free();
-  SA   := TSemanticAnalyser.Create();
-  SA.Analyse(Prog);
-  SA.Free();
-  CG   := TCodeGenQBE.Create();
-  CG.Generate(Prog);
-  Result := CG.GetOutput();
-  CG.Free();
-  Prog.Free();
-end;
 
 function TSetTests.AnalyseSrc(const ASrc: string): TProgram;
 var
@@ -1489,16 +1465,6 @@ end;
 { ------------------------------------------------------------------ }
 
 const
-  SrcDistinctDestRecordCall =
-    '''
-    program P;
-    type TR = record A, B: Integer; end;
-    function CompR(const S: TR): TR;
-    begin Result.A := S.B; Result.B := S.A end;
-    var R, T: TR;
-    begin R.A := 1; T := CompR(R) end.
-    ''';
-
   SrcSelfAssignJumboSetCall =
     '''
     program P;
@@ -1528,20 +1494,6 @@ const
     var S, T: TBigSet;
     begin S := [b70]; T := Comp(S) end.
     ''';
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TSetTests.TestCodegen_DistinctDestRecordCall_KeepsDirectForm;
-var IR: string;
-begin
-  IR := GenIR(SrcDistinctDestRecordCall);
-  { Non-aliasing: still the direct form — zero $T, then sret straight into it.
-    No temp, no trailing memcpy into $T. }
-  AssertTrue('non-aliasing call must still memset the destination directly',
-    Pos('call $memset(l $T,', IR) >= 0);
-  AssertTrue('non-aliasing call must not memcpy into the destination',
-    Pos('call $memcpy(l $T,', IR) < 0);
-end;
 
 procedure TSetTests.TestNative_SelfAssignedJumboSetCall_UsesTemp;
 var Asm_: string;

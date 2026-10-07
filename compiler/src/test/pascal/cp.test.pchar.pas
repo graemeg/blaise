@@ -15,13 +15,12 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe, cp.test.harness;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TPCharTests = class(TTestCase)
   private
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     { ------------------------------------------------------------------ }
     { Semantic                                                             }
@@ -33,7 +32,6 @@ type
     { ------------------------------------------------------------------ }
     { Codegen                                                              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_PChar_AllocEmitted;
     procedure TestCodegen_PCharSubscript_StoresByteDirectly;
   end;
 
@@ -54,23 +52,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TPCharTests.GenIR(const ASrc: string): string;
-var P: TProgram; CG: TCodeGenQBE;
-begin
-  P := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(P);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    P.Free();
   end;
 end;
 
@@ -146,16 +127,6 @@ end;
 { ------------------------------------------------------------------ }
 { Codegen tests                                                       }
 { ------------------------------------------------------------------ }
-
-{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
-  behaviour behind it. }
-procedure TPCharTests.TestCodegen_PChar_AllocEmitted;
-var IR: string;
-begin
-  IR := GenIR(SrcPCharCast);
-  { var p: PChar allocates an 8-byte pointer slot }
-  AssertTrue('alloc8 1 for PChar var', Pos('alloc8 1', IR) > 0);
-end;
 
 procedure TPCharTests.TestCodegen_PCharSubscript_StoresByteDirectly;
 const
