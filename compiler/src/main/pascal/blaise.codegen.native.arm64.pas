@@ -120,6 +120,12 @@ type
     FGenericDecls: TObjectList;  { owned — synthetic TTypeDecl wrappers around
                                    TGenericInstance clones so instances flow
                                    through the ordinary class machinery }
+    FGenericDefUnits: TStringList; { program generic-instance wrappers: Strings
+                                   = the template's declaring unit, Objects =
+                                   the wrapper TTypeDecl (borrowed) }
+    FLeakSiteUnit: string;       { --debug allocation-site unit override while
+                                   emitting a generic clone whose Line fields
+                                   refer to the declaring unit }
     FObjLocals:   TStringList;   { class-typed locals — released at scope exit }
     FWeakLocals:  TStringList;   { [Weak] class/interface locals — the obj slot is
                                    deregistered (_WeakClear) at scope exit }
@@ -342,6 +348,12 @@ type
     procedure EmitStrDisposeX0(AExpr: TASTExpr);
     procedure EmitFloatLitSection;
     procedure EmitStrLitAddr(AValue: string);
+    { --debug: register the new instance in x0 with the leak tracker
+      (_LeakTrackerRegister(obj, className, unitName, line)), keeping x0.
+      ATypeinfoReg names a register holding the class's typeinfo, or is ''
+      to address ATypeinfoSym; the class-name pointer sits at typeinfo+16. }
+    procedure EmitLeakTrackerRegister(const ATypeinfoReg, ATypeinfoSym: string;
+      ALine: Integer);
     { Emit the RHS of a BYTE store (strb) into x0 as a raw ordinal.
 
       Chr(N) must NOT be lowered through the normal _Chr call here: Chr returns
@@ -770,6 +782,7 @@ begin
   FClassDecls  := TObjectList.Create(False);
   FRecordDecls := TObjectList.Create(False);
   FGenericDecls := TObjectList.Create(True);
+  FGenericDefUnits := TStringList.Create();
   FUnitEmittedClasses := TObjectList.Create(False);
   FObjLocals   := TStringList.Create();
   FWeakLocals  := TStringList.Create();
@@ -820,6 +833,7 @@ begin
   FClassDecls.Free();
   FUnitEmittedClasses.Free();
   FGenericDecls.Free();
+  FGenericDefUnits.Free();
   FObjLocals.Free();
   FWeakLocals.Free();
   FObjGlobals.Free();
@@ -3662,6 +3676,38 @@ begin
   Self.Emit(Format(#9'adrp x0, __s%d@PAGE', [Idx]));
   Self.Emit(Format(#9'add x0, x0, __s%d@PAGEOFF', [Idx]));
   Self.Emit(#9'add x0, x0, #12');
+end;
+
+procedure TArm64Backend.EmitLeakTrackerRegister(const ATypeinfoReg,
+  ATypeinfoSym: string; ALine: Integer);
+var
+  UnitName: string;
+begin
+  if not FDebugMode then Exit;
+  { mirrors x86-64: the report names the program (or unit) and line of the
+    allocation }
+  UnitName := FLeakSiteUnit;
+  if UnitName = '' then
+    UnitName := FCurrentUnitName;
+  if UnitName = '' then
+    UnitName := FProgramName;
+  if ATypeinfoReg <> '' then
+    Self.Emit(Format(#9'ldr x1, [%s, #16]', [ATypeinfoReg]))
+  else
+  begin
+    Self.Emit(Format(#9'adrp x9, %s@PAGE', [ATypeinfoSym]));
+    Self.Emit(Format(#9'add x9, x9, %s@PAGEOFF', [ATypeinfoSym]));
+    Self.Emit(#9'ldr x1, [x9, #16]');
+  end;
+  { the instance and its class name share one 16-byte slot while the unit
+    name is materialised (EmitStrLitAddr writes x0) }
+  Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+  EmitStrLitAddr(UnitName);
+  Self.Emit(#9'mov x2, x0');
+  Self.Emit(#9'ldp x0, x1, [sp]');
+  EmitIntLiteral('x3', ALine);
+  EmitCallSym('_LeakTrackerRegister');
+  EmitPopTo('x0');
 end;
 
 procedure TArm64Backend.EmitConstArrayElemToVarRec(AElem: TASTExpr;
@@ -14586,7 +14632,16 @@ var
   I: Integer;
 begin
   Self.EmitExprToX0(TASTExpr(AExpr.Args.Items[0]));
-  EmitCallSym('_ClassCreate');
+  if FDebugMode then
+  begin
+    { keep the typeinfo for the leak tracker's class name }
+    EmitPushX0();
+    EmitCallSym('_ClassCreate');
+    EmitPopTo('x9');
+    EmitLeakTrackerRegister('x9', '', AExpr.Line);
+  end
+  else
+    EmitCallSym('_ClassCreate');
   if AExpr.ResolvedDecl = nil then
     Exit;
   CtorArgs := TObjectList.Create(False);
@@ -14621,6 +14676,11 @@ begin
     begin
       EmitLoadSlot('x0', AExpr.ObjectName);
       EmitCallSym('_ClassCreate');
+      if FDebugMode then
+      begin
+        EmitLoadSlot('x9', AExpr.ObjectName);  { the typeinfo VALUE }
+        EmitLeakTrackerRegister('x9', '', AExpr.Line);
+      end;
       MD := TMethodDecl(AExpr.ResolvedMethod);
       { a resolved ctor is CALLED even when Body = nil — imported unit
         interfaces carry declaration stubs; the body lives in the
@@ -14684,6 +14744,7 @@ begin
       Self.Emit(Format(#9'add x9, x9, %s@PAGEOFF', [VtableSym(Sym)]));
       Self.Emit(#9'str x9, [x0]');
     end;
+    EmitLeakTrackerRegister('', TypeinfoSym(Sym), AExpr.Line);
     MD := TMethodDecl(AExpr.ResolvedMethod);
     { called even when Body = nil — imported unit interfaces carry
       declaration stubs; the body lives in the owning unit's object }
@@ -14936,6 +14997,8 @@ begin
     TDcl.ResolvedDesc := GI.TypeDesc;
     FGenericDecls.Add(TDcl);
     FClassDecls.Add(TDcl);
+    if GI.DefUnitName <> '' then
+      FGenericDefUnits.AddObject(GI.DefUnitName, TDcl);
   end;
 
   { Generic INTERFACE instances (IComparer<Integer> etc): collect them so
@@ -15003,6 +15066,12 @@ begin
     if FUnitEmittedClasses.IndexOf(TTypeDecl(FClassDecls.Items[I])) >= 0 then
       Continue;
     CDef := TClassTypeDef(TTypeDecl(FClassDecls.Items[I]).Def);
+    { a generic clone's Line fields refer to the template's declaring unit:
+      report its allocations there, like x86-64 }
+    FLeakSiteUnit := '';
+    for J := 0 to FGenericDefUnits.Count - 1 do
+      if FGenericDefUnits.Objects[J] = FClassDecls.Items[I] then
+        FLeakSiteUnit := FGenericDefUnits.Strings[J];
     for J := 0 to CDef.Methods.Count - 1 do
     begin
       Decl := TMethodDecl(CDef.Methods.Items[J]);
@@ -15015,6 +15084,7 @@ begin
         Pos('<', TTypeDecl(FClassDecls.Items[I]).Name) >= 0);
     end;
   end;
+  FLeakSiteUnit := '';
 
   { Record method bodies.  Identical to the class walk above — a record method
     is an ordinary function (statically bound, no vtable slot); only its Self
@@ -15077,6 +15147,12 @@ begin
   { unit initialization sections, in dependency (append) order }
   for I := 0 to FUnitInits.Count - 1 do
     Self.Emit(Format(#9'bl %s', [FUnitInits.Strings[I]]));
+  { --debug: switch the ARC leak tracker on (it registers its own exit-time
+    report); strings and dyn-arrays are then tracked by the RTL, class
+    instances at each construction site (EmitLeakTrackerRegister).  Mirrors
+    x86-64, which enables it at the same point. }
+  if FDebugMode then
+    EmitCallSym('_LeakTrackerEnable');
 
   EmitStmtList(AProg.Block.Stmts);
 
