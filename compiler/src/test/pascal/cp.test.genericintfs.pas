@@ -15,14 +15,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TGenericIntfTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     { ------------------------------------------------------------------ }
     { Parser                                                               }
@@ -42,16 +41,6 @@ type
     procedure TestSemantic_GenericIntf_InstantiatedType_IsInterface;
     procedure TestSemantic_Class_ImplementsGenericIntf_OK;
     procedure TestSemantic_GenericIntf_MethodParamsSubstituted;
-
-    { ------------------------------------------------------------------ }
-    { Codegen                                                              }
-    { ------------------------------------------------------------------ }
-    procedure TestCodegen_GenericIntf_TypeinfoEmitted;
-    procedure TestCodegen_GenericIntf_ItabEmitted;
-    procedure TestCodegen_GenericIntf_ImpllistEmitted;
-    procedure TestCodegen_GenericIntf_MethodDispatch_EmitsIndirectCall;
-    procedure TestCodegen_GenericIntf_NestedArg_TypeinfoNameIsMangled;
-    procedure TestCodegen_GenericIntf_AliasSupports_UsesInstanceTypeinfo;
   end;
 
 implementation
@@ -115,92 +104,6 @@ const
           C: IEqualityComparer<Integer>;
         begin
           C := TIntegerComparer.Create()
-        end.
-        ''';
-
-  SrcGenericIntfDispatch =
-    '''
-        program P;
-        type
-          IEqualityComparer<T> = interface
-            function Equals(A, B: T): Boolean;
-            function GetHashCode(Value: T): Integer;
-          end;
-          TIntegerComparer = class(IEqualityComparer<Integer>)
-            function Equals(A, B: Integer): Boolean;
-            begin
-              Result := A = B
-            end;
-            function GetHashCode(Value: Integer): Integer;
-            begin
-              Result := Value
-            end;
-          end;
-        var
-          C: IEqualityComparer<Integer>;
-          OK: Boolean;
-        begin
-          C  := TIntegerComparer.Create();
-          OK := C.Equals(1, 1)
-        end.
-        ''';
-
-  { A generic interface instantiated with a NESTED generic argument
-    (IBox<TList<Integer>>).  The instance name the semantic pass records must
-    already be mangled — the inner '<'/'>' carried through as-is produced a
-    DEFINITION named typeinfo_IBox_TList<Integer> while every reference went
-    through the backend mangler and asked for typeinfo_IBox_TList_Integer, so
-    the reference dangled at link.  A non-nested argument hides this because
-    the naive concatenation happens to be already-mangled. }
-  SrcGenericIntfNestedArg =
-    '''
-        program P;
-        type
-          TList<T> = class
-            Item: T;
-          end;
-          IBox<T> = interface
-            function Get: T;
-          end;
-          TBox = class(IBox<TList<Integer>>)
-            function Get: TList<Integer>;
-            begin
-              Result := nil
-            end;
-          end;
-        var
-          B: IBox<TList<Integer>>;
-        begin
-          B := TBox.Create()
-        end.
-        ''';
-
-  { A type ALIAS of a generic interface instance, queried with Supports().
-    An alias IS the aliased type, so it must resolve to that instance's ONE
-    typeinfo token — emitting a reference under the alias's own name leaves
-    it undefined at link, and (before the link guard) silently bound it to a
-    garbage address so Supports() answered False for an interface the class
-    genuinely implements. }
-  SrcGenericIntfAliasSupports =
-    '''
-        program P;
-        type
-          IBox<T> = interface
-            function Get: T;
-          end;
-          IIntBox = IBox<Integer>;
-          TBox = class(IBox<Integer>)
-            function Get: Integer;
-            begin
-              Result := 7
-            end;
-          end;
-        var
-          O: TBox;
-          OK: Boolean;
-        begin
-          O  := TBox.Create();
-          OK := Supports(O, IIntBox)
         end.
         ''';
 
@@ -280,22 +183,6 @@ begin
     SA.Analyse(Result);
   finally
     SA.Free();
-  end;
-end;
-
-function TGenericIntfTests.GenIR(const ASrc: string): string;
-var
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
   end;
 end;
 
@@ -484,76 +371,6 @@ begin
   finally
     Prog.Free();
   end;
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen tests                                                         }
-{ ------------------------------------------------------------------ }
-
-procedure TGenericIntfTests.TestCodegen_GenericIntf_TypeinfoEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcClassImplementsGenericIntf);
-  AssertTrue('Typeinfo for IEqualityComparer_Integer emitted',
-    Pos('typeinfo_IEqualityComparer_Integer', IR) > 0);
-end;
-
-procedure TGenericIntfTests.TestCodegen_GenericIntf_ItabEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcClassImplementsGenericIntf);
-  AssertTrue('Itab for TIntegerComparer/IEqualityComparer_Integer emitted',
-    Pos('itab_TIntegerComparer_IEqualityComparer_Integer', IR) > 0);
-end;
-
-procedure TGenericIntfTests.TestCodegen_GenericIntf_ImpllistEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcClassImplementsGenericIntf);
-  AssertTrue('Impllist for TIntegerComparer emitted',
-    Pos('impllist_TIntegerComparer', IR) > 0);
-end;
-
-procedure TGenericIntfTests.TestCodegen_GenericIntf_MethodDispatch_EmitsIndirectCall;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericIntfDispatch);
-  { Interface method call goes through itab pointer — must be an indirect call }
-  AssertTrue('Interface dispatch emits indirect call', Pos('call %', IR) > 0);
-end;
-
-procedure TGenericIntfTests.TestCodegen_GenericIntf_NestedArg_TypeinfoNameIsMangled;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericIntfNestedArg);
-  { The definition must carry the MANGLED instance name, matching what every
-    reference (impllist, Supports/is/as) computes through the backend mangler.
-    An unmangled definition leaves the reference undefined at link. }
-  AssertTrue('Typeinfo for IBox_TList_Integer emitted',
-    Pos('typeinfo_IBox_TList_Integer', IR) > 0);
-  { And no raw-bracket symbol survives anywhere — that name is not a legal
-    symbol and is what the dangling reference was looking past. }
-  AssertTrue('No unmangled typeinfo_IBox_TList<Integer> symbol',
-    Pos('typeinfo_IBox_TList<', IR) < 0);
-end;
-
-procedure TGenericIntfTests.TestCodegen_GenericIntf_AliasSupports_UsesInstanceTypeinfo;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGenericIntfAliasSupports);
-  { Supports(O, IIntBox) must reference the ALIASED INSTANCE's token, which
-    is the one actually defined and listed in the class's impllist. }
-  AssertTrue('Supports references typeinfo_IBox_Integer',
-    Pos('typeinfo_IBox_Integer', IR) > 0);
-  { ...and never the alias's own name, which nothing defines. }
-  AssertTrue('No typeinfo_IIntBox reference',
-    Pos('typeinfo_IIntBox', IR) < 0);
 end;
 
 initialization

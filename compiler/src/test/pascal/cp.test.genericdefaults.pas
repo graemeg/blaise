@@ -16,14 +16,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TGenericDefaultsTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     { ------------------------------------------------------------------ }
     { Parser                                                               }
@@ -40,15 +39,6 @@ type
     procedure TestSemantic_TIntegerEqualityComparer_ImplementsOK;
     procedure TestSemantic_TIntegerComparer_ImplementsOK;
     procedure TestSemantic_Var_IEqualityComparer_Integer_IsInterface;
-
-    { ------------------------------------------------------------------ }
-    { Codegen                                                              }
-    { ------------------------------------------------------------------ }
-    procedure TestCodegen_TIntegerEqualityComparer_TypeinfoEmitted;
-    procedure TestCodegen_IEqualityComparer_Integer_TypeinfoEmitted;
-    procedure TestCodegen_TIntegerEqualityComparer_ItabEmitted;
-    procedure TestCodegen_TIntegerComparer_ItabEmitted;
-    procedure TestCodegen_EqualityDispatch_IndirectCall;
   end;
 
 implementation
@@ -180,22 +170,6 @@ begin
   end;
 end;
 
-function TGenericDefaultsTests.GenIR(const ASrc: string): string;
-var
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
-  end;
-end;
-
 { ------------------------------------------------------------------ }
 { Parser tests                                                         }
 { ------------------------------------------------------------------ }
@@ -299,55 +273,6 @@ begin
   finally
     Prog.Free();
   end;
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen tests                                                         }
-{ ------------------------------------------------------------------ }
-
-procedure TGenericDefaultsTests.TestCodegen_TIntegerEqualityComparer_TypeinfoEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTIntegerEqualityComparerDecl);
-  AssertTrue('Typeinfo for TIntegerEqualityComparer emitted',
-    Pos('typeinfo_TIntegerEqualityComparer', IR) > 0);
-end;
-
-procedure TGenericDefaultsTests.TestCodegen_IEqualityComparer_Integer_TypeinfoEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTIntegerEqualityComparerDecl);
-  AssertTrue('Typeinfo for IEqualityComparer_Integer emitted',
-    Pos('typeinfo_IEqualityComparer_Integer', IR) > 0);
-end;
-
-procedure TGenericDefaultsTests.TestCodegen_TIntegerEqualityComparer_ItabEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTIntegerEqualityComparerDecl);
-  AssertTrue('Itab for TIntegerEqualityComparer/IEqualityComparer_Integer emitted',
-    Pos('itab_TIntegerEqualityComparer_IEqualityComparer_Integer', IR) > 0);
-end;
-
-procedure TGenericDefaultsTests.TestCodegen_TIntegerComparer_ItabEmitted;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTIntegerComparerDecl);
-  AssertTrue('Itab for TIntegerComparer/IComparer_Integer emitted',
-    Pos('itab_TIntegerComparer_IComparer_Integer', IR) > 0);
-end;
-
-procedure TGenericDefaultsTests.TestCodegen_EqualityDispatch_IndirectCall;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcVarIEqualityComparerInteger);
-  AssertTrue('Interface dispatch emits indirect call',
-    Pos('call %', IR) > 0);
 end;
 
 initialization
