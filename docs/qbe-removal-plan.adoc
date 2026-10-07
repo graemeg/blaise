@@ -8,9 +8,8 @@
 |===
 | Decision | Remove the QBE backend; native code generation (x86-64, arm64) becomes the only backend.
 | Phase 0 | Done: `--help` marks `--backend qbe` and `BLAISE_BACKEND=qbe` as deprecated; the deprecation was announced to the community.
-| Phase 1 | In progress -- decouple the test suite from QBE.  1a and 1b done; 1c: all 78 `GenIR` files
-migrated -- the `GenIRBuiltin` / `GenIRAt` / `GenUnitIR` / `GenCombinedIR` helpers and the direct
-`TCodeGenQBE` users listed below the progress table remain.
+| Phase 1 | In progress -- decouple the test suite from QBE.  1a, 1b and 1c done (17 QBE-only
+unit tests remain, marked for deletion in Phase 2); 1d (the QBE-only e2e audit) next.
 | Phase 2 | Not started -- delete the backend.  Target: release v0.15.0, which also
 makes the macOS arm64 port usable.
 | Phase 3 | Not started -- documentation.
@@ -327,16 +326,17 @@ found, for a ruling before they are migrated.
 | `cp.test.packedrecord.pas` | 3 | done: 1 behaviour (e2e)
 |===
 
-Not in the counts above: two more QBE IR helpers built with `TCodeGenQBE`
-exactly like `GenIR` -- `GenIRBuiltin` (32 calls in `cp.test.math.pas`) and
-`GenIRAt` (2 calls in `cp.test.embed.pas`).  They fall under the same triage
-and the same exit criterion; found while migrating `cp.test.math.pas`.
-
-Also outside the counts: tests that build `TCodeGenQBE` through helpers of
-other names -- `GenUnitIR` and `GenCombinedIR` in `cp.test.generics.pas`
-(seven tests, mostly the QBE driver's `# WEAKSYM` markers) -- or directly,
-in units that have no `GenIR` at all (`cp.test.codegen.pas`,
-`cp.test.multifile.pas`, `cp.test.threadvar.pas`, `cp.test.units.pas`,
-among others).  `grep -l TCodeGenQBE` over the test sources is the complete
-list; the exit criterion covers them too.
+Not in the counts above, and also migrated: the other QBE IR helpers --
+`GenIRBuiltin` (32 calls in `cp.test.math.pas`, now e2e), `GenIRAt` (2 in
+`cp.test.embed.pas`, covered by the existing e2e), `GenUnitIR` /
+`GenCombinedIR` (`cp.test.generics.pas`, now `GenAsmWithUnit` checks of
+instance symbol names and weak binding; `cp.test.units.pas`, now
+`GenUnitAsm` checks of what a unit's object exports) -- and the direct
+`TCodeGenQBE` users `cp.test.codegen.pas` (43 checks to one e2e test, the
+IR source-comment check QBE-only), `cp.test.threadvar.pas` (one `GenAsm`
+check of thread-local placement) and `cp.test.multifile.pas` (covered by
+the cross-unit e2e tests).  `cp.test.harness.GenUnitAsm` was added for the
+unit-only object.  The remaining `TCodeGenQBE` users are the QBE-only unit
+tests and the e2e harness (`cp.test.e2e.base`, `cp.test.e2e.fibers`), which
+belong to 1d.
 
