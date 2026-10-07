@@ -27,6 +27,22 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_NestedSelfCapture_AndGenericClosurePerInstance;
+    { moved from cp.test.anonmethods, where they ran through a private
+      GenIR -> qbe -> link pipeline (QBE only) }
+    procedure TestRun_CaptureFreeLiteral_AssignAndCall;
+    procedure TestRun_FunctionLiteral_ReturnsValue;
+    procedure TestRun_AdapterFromPlainRoutine;
+    procedure TestRun_NilClosure_Assignable;
+    procedure TestRun_Arrow_ExprBody_MultiParam_Captures;
+    procedure TestRun_Arrow_SingleIdent_ProcedureTarget;
+    procedure TestRun_Arrow_BlockBody;
+    procedure TestRun_Arrow_MinusGreaterStaysDistinct;
+    procedure TestRun_Arrow_ArgPosition_Standalone;
+    procedure TestRun_Arrow_ArgPosition_MethodWithCapture;
+    procedure TestRun_Arrow_ArgPosition_OverloadByShape;
+    procedure TestRun_Arrow_ArgPosition_ProcTypeCalls;
+    procedure TestRun_GenericMethodOnGenericClass_Gate;
     procedure TestRun_CaptureLocal_ReadInClosure;
     procedure TestRun_ClosureWrite_VisibleInEnclosing;
     procedure TestRun_TwoClosures_ShareOneEnv;
@@ -1724,6 +1740,405 @@ begin
     '11' + LineEnding +
     '600' + LineEnding +
     '33' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_CaptureFreeLiteral_AssignAndCall;
+const
+  Src =
+    '''
+    program P;
+    type
+      TIntProc = reference to procedure(AValue: Integer);
+    var
+      V: TIntProc;
+    begin
+      V := procedure(AValue: Integer)
+      begin
+        WriteLn(AValue * 2)
+      end;
+      V(21)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '42' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_FunctionLiteral_ReturnsValue;
+const
+  Src =
+    '''
+    program P;
+    type
+      TAdd = reference to function(const A, B: Integer): Integer;
+    var
+      F: TAdd;
+    begin
+      F := function(const A, B: Integer): Integer
+      begin
+        Result := A + B
+      end;
+      WriteLn(F(19, 23))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '42' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_AdapterFromPlainRoutine;
+const
+  Src =
+    '''
+    program P;
+    type
+      TIntProc = reference to procedure(AValue: Integer);
+    procedure Show(AValue: Integer);
+    begin
+      WriteLn(AValue + 1)
+    end;
+    var
+      V: TIntProc;
+    begin
+      V := @Show;
+      V(41)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '42' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_NilClosure_Assignable;
+const
+  Src =
+    '''
+    program P;
+    type
+      TProc = reference to procedure;
+    var
+      V: TProc;
+    begin
+      V := procedure
+      begin
+        WriteLn('lived')
+      end;
+      V();
+      V := nil;
+      WriteLn('done')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'lived' + #10 + 'done' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Arrow_ExprBody_MultiParam_Captures;
+const
+  Src =
+    '''
+    program P;
+    type
+      TAdd = reference to function(A, B: Integer): Integer;
+    var
+      F: TAdd;
+      Base: Integer;
+    begin
+      Base := 40;
+      F := (A, B) -> A + B + Base;
+      WriteLn(F(1, 1))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '42' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Arrow_SingleIdent_ProcedureTarget;
+const
+  Src =
+    '''
+    program P;
+    type
+      TShow = reference to procedure(N: Integer);
+    var
+      P1: TShow;
+    begin
+      P1 := N -> WriteLn(N * 2);
+      P1(21)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '42' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Arrow_BlockBody;
+const
+  Src =
+    '''
+    program P;
+    type
+      TAdd = reference to function(A, B: Integer): Integer;
+    var
+      F: TAdd;
+    begin
+      F := (A, B) -> begin
+        Result := A * B
+      end;
+      WriteLn(F(6, 7))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '42' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Arrow_MinusGreaterStaysDistinct;
+const
+  Src =
+    '''
+    program P;
+    type
+      TF = reference to function(A: Integer): Integer;
+    var
+      F: TF;
+      X: Integer;
+    begin
+      F := (A) -> A - 1;
+      X := F(43);
+      if X > 41 then
+        WriteLn(X)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '42' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Arrow_ArgPosition_Standalone;
+const
+  Src =
+    '''
+    program P;
+    type
+      TSel = reference to function(N: Integer): Integer;
+    function Twice(N: Integer; F: TSel): Integer;
+    begin
+      Result := F(F(N))
+    end;
+    begin
+      WriteLn(Twice(10, X -> X + 6))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '22' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Arrow_ArgPosition_MethodWithCapture;
+const
+  Src =
+    '''
+    program P;
+    type
+      TPred = reference to function(N: Integer): Boolean;
+      TC = class
+        function CountIf(A, B, C: Integer; P: TPred): Integer;
+        begin
+          Result := 0;
+          if P(A) then Result := Result + 1;
+          if P(B) then Result := Result + 1;
+          if P(C) then Result := Result + 1
+        end;
+      end;
+    var
+      C: TC;
+      Limit: Integer;
+    begin
+      C := TC.Create();
+      Limit := 10;
+      WriteLn(C.CountIf(5, 11, 20, N -> N > Limit))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Arrow_ArgPosition_OverloadByShape;
+const
+  Src =
+    '''
+    program P;
+    type
+      TSel = reference to function(N: Integer): Integer;
+    function Pick(N: Integer; V: Integer): string; overload;
+    begin
+      Result := 'int:' + IntToStr(V)
+    end;
+    function Pick(N: Integer; F: TSel): string; overload;
+    begin
+      Result := 'fn:' + IntToStr(F(N))
+    end;
+    begin
+      WriteLn(Pick(20, 7));
+      WriteLn(Pick(20, X -> X * 2 + 2))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'int:7' + #10 + 'fn:42' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Arrow_ArgPosition_ProcTypeCalls;
+const
+  Src =
+    '''
+    program P;
+    type
+      TSel = reference to function(N: Integer): Integer;
+      TRun = reference to procedure(N: Integer; F: TSel);
+      TApply = reference to function(N: Integer; F: TSel): Integer;
+      TBox = class
+      public
+        FRun: TRun;
+        FApply: TApply;
+        procedure Drv();
+      end;
+    procedure TBox.Drv();
+    begin
+      FRun(1, X -> X + 10);
+      WriteLn(FApply(2, X -> X * 3))
+    end;
+    var
+      Run: TRun;
+      Apply: TApply;
+      B: TBox;
+    begin
+      Run := procedure(N: Integer; F: TSel)
+        begin
+          WriteLn(F(N))
+        end;
+      Apply := function(N: Integer; F: TSel): Integer
+        begin
+          Result := F(N)
+        end;
+      Run(4, X -> X + 1);
+      WriteLn(Apply(5, X -> X * 2));
+      B := TBox.Create();
+      B.FRun := Run;
+      B.FApply := Apply;
+      B.Drv();
+      B.FRun(6, X -> X - 1);
+      WriteLn(B.FApply(7, X -> X + 100));
+      B.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '5' + #10 + '10' + #10 + '11' + #10 + '6' + #10 + '5' + #10 + '107' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_GenericMethodOnGenericClass_Gate;
+const
+  Src =
+    '''
+    program P;
+    type
+      TSel<T, R> = reference to function(AVal: T): R;
+      TBox<T> = class
+      public
+        FVal: T;
+        function MapTo<R>(F: TSel<T, R>): R;
+      end;
+    function TBox<T>.MapTo<R>(F: TSel<T, R>): R;
+    begin
+      Result := F(FVal)
+    end;
+    var
+      B: TBox<Integer>;
+    begin
+      B := TBox<Integer>.Create();
+      B.FVal := 42;
+      WriteLn(B.MapTo<string>(N -> 'v' + IntToStr(N)));
+      WriteLn(B.MapTo<Integer>(N -> N + 1))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'v42' + #10 + '43' + #10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_NestedSelfCapture_AndGenericClosurePerInstance;
+const
+  {
+    Self reaches nested routines through the hidden _cap_Self pointer: a nested
+    procedure writing Self.FVal, and a nested RECORD-returning (sret) function
+    reading it (the sret call path once omitted the capture argument).  A
+    closure in a generic class body is monomorphised per instance, each
+    capturing its own Self. }
+  Src = '''
+    program NestedSelf;
+    type
+      TBig = record
+        A, B, C, D, E: Int64;
+      end;
+      TC = class
+        FVal: Int64;
+        procedure M();
+      end;
+      TGetter<T> = reference to function(): T;
+      TBox<T> = class
+        FVal: T;
+        function Make(): TGetter<T>;
+        begin
+          Result := function(): T
+            begin
+              Result := FVal
+            end;
+        end;
+      end;
+    procedure TC.M();
+      procedure Inner();
+      begin
+        Self.FVal := 7
+      end;
+      function MakeBig(): TBig;
+      begin
+        Result.A := Self.FVal * 10;
+        Result.E := Self.FVal + 1
+      end;
+    var B: TBig;
+    begin
+      Inner();
+      B := MakeBig();
+      WriteLn(Self.FVal, ' ', B.A, ' ', B.E)
+    end;
+    var
+      C: TC;
+      BI: TBox<Integer>;
+      BS: TBox<string>;
+      GI: TGetter<Integer>;
+      GS: TGetter<string>;
+    begin
+      C := TC.Create();
+      C.M();
+      BI := TBox<Integer>.Create();
+      BS := TBox<string>.Create();
+      BI.FVal := 42;
+      BS.FVal := 'forty-two';
+      GI := BI.Make();
+      GS := BS.Make();
+      BI.FVal := 43;
+      WriteLn(GI(), ' ', GS())
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '7 70 8' + #10 +
+    '43 forty-two' + #10, 0);
 end;
 
 initialization

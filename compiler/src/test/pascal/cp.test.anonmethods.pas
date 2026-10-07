@@ -18,26 +18,20 @@ unit cp.test.anonmethods;
       signature checking against the target; Phase-1 capture rejection
       (an enclosing local referenced from a literal body is undeclared in
       the thunk's module-scope analysis).
-    * Codegen (QBE): lifted '__closure_<n>' thunk with the hidden env
-      first param; 16-byte fat-value materialisation; closure-dispatch
-      call shape.
-    * E2E: capture-free literals assigned + called; function literals;
-      '@Routine' adapter coercion; nil closure assignment. }
+    * Run time: closures, captures, arrows and adapters are exercised by
+      cp.test.e2e.anonmethods. }
 
 interface
 
 uses
-  Classes, SysUtils, Process, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe,
-  cp.test.rtllink, cp.test.attributes;
+  Classes, SysUtils, blaise.testing,
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TAnonMethodTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
-    function CompileAndRun(const ASrc: string): string;
   published
     { Parser }
     procedure TestParse_ReferenceToProcedure_TypeDecl;
@@ -58,42 +52,20 @@ type
     procedure TestSemantic_Phase5_WeakNonSelfRejected;
     procedure TestSemantic_NestedRoutineInMethod_ImplicitSelfAccepted;
     procedure TestSemantic_NestedRoutineInMethod_SelfContainedAccepted;
-    procedure TestCodegen_NestedRoutineInMethod_SelfCapturedIR;
-    procedure TestCodegen_NestedSretFuncInMethod_SelfCapturedIR;
     procedure TestSemantic_Phase9a_ArrowWithoutTarget_Rejected;
     procedure TestSemantic_Phase6_GenericRefAlias_InstantiatesAtInteger;
     procedure TestSemantic_Phase6_GenericRefAlias_InstantiatesAtString;
 
     { Codegen }
-    procedure TestCodegen_ThunkEmitted;
-    procedure TestCodegen_LiteralMaterialisesFatValue;
-    procedure TestCodegen_Phase2_EnvAllocAndCleanupEmitted;
-    procedure TestCodegen_Phase2_CapturedAccessRedirected;
-    procedure TestCodegen_Phase2_ClosureCreationAddRefsEnv;
-    procedure TestCodegen_Phase2_FrameExitReleasesEnv;
-    procedure TestCodegen_Phase6_GenericBodyClosure_ThunksPerInstance;
 
     { End-to-end }
-    procedure TestE2E_CaptureFreeLiteral_AssignAndCall;
-    procedure TestE2E_FunctionLiteral_ReturnsValue;
-    procedure TestE2E_AdapterFromPlainRoutine;
-    procedure TestE2E_NilClosure_Assignable;
     { Phase 9a — terse '->' lambdas (desugared to TAnonMethodExpr). }
-    procedure TestE2E_Arrow_ExprBody_MultiParam_Captures;
-    procedure TestE2E_Arrow_SingleIdent_ProcedureTarget;
-    procedure TestE2E_Arrow_BlockBody;
-    procedure TestE2E_Arrow_MinusGreaterStaysDistinct;
     { Phase 9b — two-phase deferred inference: lambdas in ARGUMENT position. }
-    procedure TestE2E_Arrow_ArgPosition_Standalone;
-    procedure TestE2E_Arrow_ArgPosition_MethodWithCapture;
-    procedure TestE2E_Arrow_ArgPosition_OverloadByShape;
     { ... and through a procedural-typed VARIABLE or FIELD (implicit-Self and
       qualified), whose single signature types the lambda. }
     procedure TestSemantic_Arrow_ArgPosition_ProcTypeCalls_Inferred;
-    procedure TestE2E_Arrow_ArgPosition_ProcTypeCalls;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
-    procedure TestE2E_GenericMethodOnGenericClass_Gate;
   end;
 
 implementation
@@ -119,84 +91,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TAnonMethodTests.GenIR(const ASrc: string): string;
-var
-  Prog: TProgram;
-  CG:   TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
-  end;
-end;
-
-function TAnonMethodTests.CompileAndRun(const ASrc: string): string;
-var
-  IR:                       string;
-  Root:                     string;
-  QBE, Scratch:             string;
-  IRFile, AsmFile, BinFile: string;
-  Lst:                      TStringList;
-  Proc:                     TProcess;
-  Chunk:                    string;
-begin
-  Result := '';
-  Root   := ProjectRootAttr();
-  QBE    := Root + 'vendor/qbe/qbe';
-  if not RTLLinkToolchainAvailable(Root) then
-  begin
-    Result := '<toolchain-missing>';
-    Exit;
-  end;
-  Scratch := Root + 'compiler/target/test-anonmethods';
-  ForceDirectories(Scratch);
-  IRFile  := IncludeTrailingPathDelimiter(Scratch) + 'case.ssa';
-  AsmFile := IncludeTrailingPathDelimiter(Scratch) + 'case.s';
-  BinFile := IncludeTrailingPathDelimiter(Scratch) + 'case.bin';
-
-  IR := GenIR(ASrc);
-  Lst := TStringList.Create();
-  try
-    Lst.Text := IR;
-    Lst.SaveToFile(IRFile);
-  finally
-    Lst.Free();
-  end;
-
-  if RunCmdAttr(QBE, ['-o', AsmFile, IRFile]) <> 0 then
-  begin
-    Result := '<qbe-failed>';
-    Exit;
-  end;
-  if LinkProgramWithRTL(Root, AsmFile, BinFile) <> 0 then
-  begin
-    Result := '<link-failed>';
-    Exit;
-  end;
-
-  Proc := TProcess.Create(nil);
-  try
-    Proc.Executable := BinFile;
-    Proc.Execute();
-    Result := '';
-    repeat
-      Chunk := Proc.ReadOutput();
-      Result := Result + Chunk;
-    until (Chunk = '') and not Proc.Running;
-    Proc.WaitOnExit();
-  finally
-    Proc.Free();
   end;
 end;
 
@@ -713,226 +607,6 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
-{ Codegen tests                                                        }
-{ ------------------------------------------------------------------ }
-
-procedure TAnonMethodTests.TestCodegen_ThunkEmitted;
-const
-  Src =
-    '''
-    program P;
-    type
-      TIntProc = reference to procedure(AValue: Integer);
-    var
-      V: TIntProc;
-    begin
-      V := procedure(AValue: Integer)
-      begin
-        WriteLn(AValue)
-      end;
-      V(7)
-    end.
-    ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('lifted thunk $__closure_1 emitted',
-    Pos('$__closure_1(', IR) > 0);
-end;
-
-procedure TAnonMethodTests.TestCodegen_LiteralMaterialisesFatValue;
-const
-  Src =
-    '''
-    program P;
-    type
-      TProc = reference to procedure;
-    var
-      V: TProc;
-    begin
-      V := procedure
-      begin
-      end
-    end.
-    ''';
-var IR: string;
-begin
-  IR := GenIR(Src);
-  AssertTrue('16-byte fat value allocated', Pos('alloc8 16', IR) > 0);
-  AssertTrue('thunk address stored into the Code half',
-    Pos('storel $__closure_1', IR) > 0);
-end;
-
-const
-  { Shared source for the Phase-2 codegen tests: 'Run' has one captured
-    local (Outer) promoted into an env record, one non-captured local, and
-    a closure that both reads and writes the capture. }
-  Phase2CodegenSrc =
-    '''
-    program P;
-    type
-      TProc = reference to procedure;
-    procedure Run;
-    var
-      Outer: Integer;
-      Plain: Integer;
-      V: TProc;
-    begin
-      Outer := 1;
-      Plain := 2;
-      V := procedure
-      begin
-        Outer := Outer + 1;
-        WriteLn(Outer)
-      end;
-      V();
-      WriteLn(Outer + Plain)
-    end;
-    begin
-      Run()
-    end.
-    ''';
-
-procedure TAnonMethodTests.TestCodegen_Phase2_EnvAllocAndCleanupEmitted;
-var IR: string;
-begin
-  IR := GenIR(Phase2CodegenSrc);
-  AssertTrue('env record heap-allocated via _ClassAlloc',
-    Pos('call $_ClassAlloc(', IR) > 0);
-  AssertTrue('env field-cleanup function defined',
-    Pos('__env_', IR) > 0);
-end;
-
-procedure TAnonMethodTests.TestCodegen_Phase2_CapturedAccessRedirected;
-var IR: string;
-begin
-  IR := GenIR(Phase2CodegenSrc);
-  AssertTrue('captured local redirected through the env pointer',
-    Pos('%_env_Outer', IR) > 0);
-  AssertTrue('non-captured local still a plain frame slot',
-    Pos('%_var_Plain', IR) > 0);
-end;
-
-procedure TAnonMethodTests.TestCodegen_Phase2_ClosureCreationAddRefsEnv;
-var IR: string;
-begin
-  IR := GenIR(Phase2CodegenSrc);
-  AssertTrue('closure creation retains the env',
-    Pos('call $_ClassAddRef(', IR) > 0);
-end;
-
-procedure TAnonMethodTests.TestCodegen_Phase2_FrameExitReleasesEnv;
-var IR: string;
-begin
-  IR := GenIR(Phase2CodegenSrc);
-  AssertTrue('enclosing frame releases its env reference on exit',
-    Pos('call $_ClassRelease(', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
-{ End-to-end tests                                                     }
-{ ------------------------------------------------------------------ }
-
-procedure TAnonMethodTests.TestE2E_CaptureFreeLiteral_AssignAndCall;
-const
-  Src =
-    '''
-    program P;
-    type
-      TIntProc = reference to procedure(AValue: Integer);
-    var
-      V: TIntProc;
-    begin
-      V := procedure(AValue: Integer)
-      begin
-        WriteLn(AValue * 2)
-      end;
-      V(21)
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', '42' + #10, Output);
-end;
-
-procedure TAnonMethodTests.TestE2E_FunctionLiteral_ReturnsValue;
-const
-  Src =
-    '''
-    program P;
-    type
-      TAdd = reference to function(const A, B: Integer): Integer;
-    var
-      F: TAdd;
-    begin
-      F := function(const A, B: Integer): Integer
-      begin
-        Result := A + B
-      end;
-      WriteLn(F(19, 23))
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', '42' + #10, Output);
-end;
-
-procedure TAnonMethodTests.TestE2E_AdapterFromPlainRoutine;
-const
-  Src =
-    '''
-    program P;
-    type
-      TIntProc = reference to procedure(AValue: Integer);
-    procedure Show(AValue: Integer);
-    begin
-      WriteLn(AValue + 1)
-    end;
-    var
-      V: TIntProc;
-    begin
-      V := @Show;
-      V(41)
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', '42' + #10, Output);
-end;
-
-procedure TAnonMethodTests.TestE2E_NilClosure_Assignable;
-const
-  Src =
-    '''
-    program P;
-    type
-      TProc = reference to procedure;
-    var
-      V: TProc;
-    begin
-      V := procedure
-      begin
-        WriteLn('lived')
-      end;
-      V();
-      V := nil;
-      WriteLn('done')
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', 'lived' + #10 + 'done' + #10, Output);
-end;
-
-{ ------------------------------------------------------------------ }
 { Phase 6 — generics: reference-to aliases + closures in generic bodies }
 { ------------------------------------------------------------------ }
 
@@ -982,43 +656,6 @@ begin
   AnalyseSrc(Src).Free()
 end;
 
-procedure TAnonMethodTests.TestCodegen_NestedRoutineInMethod_SelfCapturedIR;
-const
-  Src =
-    '''
-    program P;
-    type
-      TC = class
-        FVal: Integer;
-        procedure M();
-      end;
-    procedure TC.M();
-      procedure Inner();
-      begin
-        Self.FVal := 7
-      end;
-    begin
-      Inner()
-    end;
-    var C: TC;
-    begin
-      C := TC.Create();
-      C.M()
-    end.
-    ''';
-var
-  IR: string;
-begin
-  { BUG-008: Self is threaded into the nested routine as a hidden
-    '_cap_Self' pointer param (the address of the method's Self slot); the
-    call site inside the method passes %_var_Self. }
-  IR := GenIR(Src);
-  AssertTrue('nested func takes hidden l %_cap_Self param',
-    Pos('l %_cap_Self', IR) >= 0);
-  AssertTrue('call site passes the Self slot address',
-    Pos('l %_var_Self', IR) >= 0)
-end;
-
 procedure TAnonMethodTests.TestSemantic_NestedRoutineInMethod_SelfContainedAccepted;
 const
   Src =
@@ -1047,59 +684,6 @@ begin
   AnalyseSrc(Src).Free()
 end;
 
-
-procedure TAnonMethodTests.TestCodegen_NestedSretFuncInMethod_SelfCapturedIR;
-const
-  Src =
-    '''
-    program P;
-    type
-      TBig = record
-        A: Int64;
-        B: Int64;
-        C: Int64;
-        D: Int64;
-        E: Int64;
-      end;
-      TC = class
-        FVal: Int64;
-        procedure M();
-      end;
-    procedure TC.M();
-      function MakeBig(): TBig;
-      var I: Integer;
-      begin
-        I := 0;
-        while I < 1 do
-        begin
-          Result.A := Self.FVal;
-          I := I + 1
-        end
-      end;
-    var B: TBig;
-    begin
-      B := MakeBig();
-      WriteLn(B.A)
-    end;
-    var C: TC;
-    begin
-      C := TC.Create();
-      C.M()
-    end.
-    ''';
-var
-  IR: string;
-begin
-  { A record-returning (sret) nested function that captures Self must receive
-    the hidden capture pointer at the sret call site too — the sret path has
-    its own arg-assembly loop (EmitRecordCallSret), which used to omit the
-    capture args entirely. }
-  IR := GenIR(Src);
-  AssertTrue('nested sret func takes hidden l %_cap_Self param',
-    Pos('l %_cap_Self', IR) >= 0);
-  AssertTrue('sret call site passes the Self slot address',
-    Pos(', l %_var_Self', IR) >= 0)
-end;
 
 procedure TAnonMethodTests.TestSemantic_Phase6_GenericRefAlias_InstantiatesAtInteger;
 var
@@ -1139,52 +723,6 @@ begin
   end
 end;
 
-procedure TAnonMethodTests.TestCodegen_Phase6_GenericBodyClosure_ThunksPerInstance;
-const
-  Src =
-    '''
-    program P;
-    type
-      TGetter<T> = reference to function(): T;
-      TBox<T> = class
-        FVal: T;
-        function Make(): TGetter<T>;
-        begin
-          Result := function(): T
-            begin
-              Result := FVal
-            end;
-        end;
-      end;
-    var
-      BI: TBox<Integer>;
-      BS: TBox<string>;
-      GI: TGetter<Integer>;
-      GS: TGetter<string>;
-    begin
-      BI := TBox<Integer>.Create();
-      BS := TBox<string>.Create();
-      GI := BI.Make();
-      GS := BS.Make();
-    end.
-    ''';
-var
-  IR: string;
-begin
-  { One monomorphised thunk + env per instantiation; env cleanup for the
-    string instance must release the managed captured Self (both instances
-    capture Self strongly), and the two instances must not share symbols. }
-  IR := GenIR(Src);
-  AssertTrue('Integer-instance Make body emitted',
-    Pos('TBox_Integer_Make', IR) > 0);
-  AssertTrue('string-instance Make body emitted',
-    Pos('TBox_string_Make', IR) > 0);
-  AssertTrue('closure thunk emitted for Integer instance',
-    Pos('__closure', IR) > 0);
-  AssertTrue('env cleanup functions emitted',
-    Pos('_FieldCleanup___env_', IR) > 0)
-end;
-
 { ------------------------------------------------------------------ }
 { Phase 9a — arrow lambdas                                            }
 { ------------------------------------------------------------------ }
@@ -1219,187 +757,9 @@ begin
   AssertTrue('arrow without target rejected', Caught)
 end;
 
-procedure TAnonMethodTests.TestE2E_Arrow_ExprBody_MultiParam_Captures;
-const
-  Src =
-    '''
-    program P;
-    type
-      TAdd = reference to function(A, B: Integer): Integer;
-    var
-      F: TAdd;
-      Base: Integer;
-    begin
-      Base := 40;
-      F := (A, B) -> A + B + Base;
-      WriteLn(F(1, 1))
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', '42' + #10, Output)
-end;
-
-procedure TAnonMethodTests.TestE2E_Arrow_SingleIdent_ProcedureTarget;
-const
-  Src =
-    '''
-    program P;
-    type
-      TShow = reference to procedure(N: Integer);
-    var
-      P1: TShow;
-    begin
-      P1 := N -> WriteLn(N * 2);
-      P1(21)
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', '42' + #10, Output)
-end;
-
-procedure TAnonMethodTests.TestE2E_Arrow_BlockBody;
-const
-  Src =
-    '''
-    program P;
-    type
-      TAdd = reference to function(A, B: Integer): Integer;
-    var
-      F: TAdd;
-    begin
-      F := (A, B) -> begin
-        Result := A * B
-      end;
-      WriteLn(F(6, 7))
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', '42' + #10, Output)
-end;
-
-procedure TAnonMethodTests.TestE2E_Arrow_MinusGreaterStaysDistinct;
-const
-  { 'A - B' and 'A > B' around an arrow: the '->' token must not swallow a
-    minus that is followed by a separate '>' comparison, and arithmetic
-    minus must be unaffected. }
-  Src =
-    '''
-    program P;
-    type
-      TF = reference to function(A: Integer): Integer;
-    var
-      F: TF;
-      X: Integer;
-    begin
-      F := (A) -> A - 1;
-      X := F(43);
-      if X > 41 then
-        WriteLn(X)
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', '42' + #10, Output)
-end;
-
 { ------------------------------------------------------------------ }
 { Phase 9b — deferred inference in argument position                  }
 { ------------------------------------------------------------------ }
-
-procedure TAnonMethodTests.TestE2E_Arrow_ArgPosition_Standalone;
-const
-  Src =
-    '''
-    program P;
-    type
-      TSel = reference to function(N: Integer): Integer;
-    function Twice(N: Integer; F: TSel): Integer;
-    begin
-      Result := F(F(N))
-    end;
-    begin
-      WriteLn(Twice(10, X -> X + 6))
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', '22' + #10, Output)
-end;
-
-procedure TAnonMethodTests.TestE2E_Arrow_ArgPosition_MethodWithCapture;
-const
-  Src =
-    '''
-    program P;
-    type
-      TPred = reference to function(N: Integer): Boolean;
-      TC = class
-        function CountIf(A, B, C: Integer; P: TPred): Integer;
-        begin
-          Result := 0;
-          if P(A) then Result := Result + 1;
-          if P(B) then Result := Result + 1;
-          if P(C) then Result := Result + 1
-        end;
-      end;
-    var
-      C: TC;
-      Limit: Integer;
-    begin
-      C := TC.Create();
-      Limit := 10;
-      WriteLn(C.CountIf(5, 11, 20, N -> N > Limit))
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', '2' + #10, Output)
-end;
-
-procedure TAnonMethodTests.TestE2E_Arrow_ArgPosition_OverloadByShape;
-const
-  { The lambda's SHAPE (one parameter, reference-typed formal) must steer
-    overload resolution: the Integer overload wins for 7, the lambda
-    overload wins for the arrow — mixing them must not regress plain args. }
-  Src =
-    '''
-    program P;
-    type
-      TSel = reference to function(N: Integer): Integer;
-    function Pick(N: Integer; V: Integer): string; overload;
-    begin
-      Result := 'int:' + IntToStr(V)
-    end;
-    function Pick(N: Integer; F: TSel): string; overload;
-    begin
-      Result := 'fn:' + IntToStr(F(N))
-    end;
-    begin
-      WriteLn(Pick(20, 7));
-      WriteLn(Pick(20, X -> X * 2 + 2))
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', 'int:7' + #10 + 'fn:42' + #10, Output)
-end;
 
 const
   SrcArrowProcTypeCalls =
@@ -1452,48 +812,6 @@ begin
     never inferred a pending lambda from the 'reference to' param.  They now
     share AnalyseProcTypeCallArgs with the qualified arms. }
   AnalyseSrc(SrcArrowProcTypeCalls).Free()
-end;
-
-procedure TAnonMethodTests.TestE2E_Arrow_ArgPosition_ProcTypeCalls;
-var Output: string;
-begin
-  Output := CompileAndRun(SrcArrowProcTypeCalls);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout',
-    '5' + #10 + '10' + #10 + '11' + #10 + '6' + #10 + '5' + #10 + '107' + #10,
-    Output)
-end;
-
-procedure TAnonMethodTests.TestE2E_GenericMethodOnGenericClass_Gate;
-const
-  Src =
-    '''
-    program P;
-    type
-      TSel<T, R> = reference to function(AVal: T): R;
-      TBox<T> = class
-      public
-        FVal: T;
-        function MapTo<R>(F: TSel<T, R>): R;
-      end;
-    function TBox<T>.MapTo<R>(F: TSel<T, R>): R;
-    begin
-      Result := F(FVal)
-    end;
-    var
-      B: TBox<Integer>;
-    begin
-      B := TBox<Integer>.Create();
-      B.FVal := 42;
-      WriteLn(B.MapTo<string>(N -> 'v' + IntToStr(N)));
-      WriteLn(B.MapTo<Integer>(N -> N + 1))
-    end.
-    ''';
-var Output: string;
-begin
-  Output := CompileAndRun(Src);
-  if Output = '<toolchain-missing>' then begin Ignore('toolchain unavailable'); Exit end;
-  AssertEquals('stdout', 'v42' + #10 + '43' + #10, Output)
 end;
 
 initialization

@@ -14,18 +14,13 @@ unit cp.test.attributes;
     * Parser: [Attr] syntax before class declarations stored on TClassTypeDef
     * Semantic: suffix convention; unknown attribute error; [Weak] unaffected
     * Run time: the attribute tables and the RTTI builtins over them are
-      exercised by cp.test.e2e.attributes.
-
-  ProjectRootAttr / RunCmdAttr are still used by cp.test.anonmethods. }
+      exercised by cp.test.e2e.attributes. }
 
 interface
 
 uses
-  Classes, SysUtils, Process, blaise.testing,
+  Classes, SysUtils, blaise.testing,
   uLexer, uParser, uAST, uSymbolTable, uSemantic;
-
-function ProjectRootAttr: string;
-function RunCmdAttr(const AExe: string; const AArgs: array of string): Integer;
 
 type
   TCustomAttributeTests = class(TTestCase)
@@ -73,52 +68,6 @@ begin
     A.Analyse(Result);
   finally
     A.Free();
-  end;
-end;
-
-function ProjectRootAttr: string;
-var
-  Dir, Parent: string;
-  Steps:       Integer;
-begin
-  Result := GetEnvironmentVariable('BLAISE_PROJECT_ROOT');
-  if Result <> '' then
-  begin
-    Result := IncludeTrailingPathDelimiter(Result);
-    Exit;
-  end;
-  Dir := GetCurrentDir();
-  for Steps := 0 to 6 do
-  begin
-    if FileExists(IncludeTrailingPathDelimiter(Dir) + 'vendor/qbe/qbe') then
-    begin
-      Result := IncludeTrailingPathDelimiter(Dir);
-      Exit;
-    end;
-    Parent := ExtractFileDir(Dir);
-    if (Parent = '') or (Parent = Dir) then Break;
-    Dir := Parent;
-  end;
-  Result := IncludeTrailingPathDelimiter(GetCurrentDir());
-end;
-
-function RunCmdAttr(const AExe: string; const AArgs: array of string): Integer;
-var
-  Proc: TProcess;
-  I:    Integer;
-  Chunk: string;
-begin
-  Proc := TProcess.Create(nil);
-  try
-    Proc.Executable := AExe;
-    for I := Low(AArgs) to High(AArgs) do
-      Proc.Parameters.Add(AArgs[I]);
-    Proc.Execute();
-    repeat Chunk := Proc.ReadOutput(); until (Chunk = '') and not Proc.Running;
-    Proc.WaitOnExit();
-    Result := Proc.ExitCode;
-  finally
-    Proc.Free();
   end;
 end;
 
