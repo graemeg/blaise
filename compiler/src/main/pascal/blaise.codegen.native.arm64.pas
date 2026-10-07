@@ -6780,8 +6780,14 @@ begin
       scratch through x8; the returned obj is OWNED (+1) }
     if TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).IsExternal then
       NotYet('external interface-returning call', AExpr);
-    EmitCall(TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl),
-      TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args, '__iret');
+    if TFuncCallExpr(AExpr).IsImplicitSelfMethod then
+      { a bare method name inside a method (f := MakeFoo()): Self is the
+        receiver and a virtual method dispatches through ITS vtable --
+        EmitRecCallDispatch does both, as for a record return }
+      EmitRecCallDispatch(AExpr, '__iret')
+    else
+      EmitCall(TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl),
+        TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args, '__iret');
     EmitSlotAddr('x9', '__iret');
     Self.Emit(#9'ldp x0, x1, [x9]');
     Result := True;
