@@ -23,6 +23,8 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Constants_Arrays;
+    procedure TestRun_Constants_Scalar;
     procedure TestRun_IndirectFuncCallExpr_Shapes;
     procedure TestRun_ProcTypes_IndirectCallShapes;
     procedure TestRun_SelfHostingRTLServices;
@@ -3295,6 +3297,236 @@ begin
     'high!' + LE +
     '4 2' + LE, 0);
   AssertLeakFreeOnAll(Src, 'high!');
+end;
+
+procedure TE2EMiscTests.TestRun_Constants_Scalar;
+const
+  {
+    Scalar constants end to end: untyped, typed and local (procedure,
+    function, method, class) constants; folded integer expressions
+    (precedence, parentheses, div / mod, unary minus, named references, shl /
+    or); folded floating-point expressions, including integer bit operations
+    inside a float expression (1.0 / (Z shl 53) is exactly 2^-53) and ordinal
+    casts that truncate or sign-extend (Byte(300), SmallInt(40000)); typed
+    constants of every basic type; casts of negative values to unsigned types;
+    or-chains of literals and named constants; and a typed Double variable
+    initialised from an integer expression. }
+  Src = '''
+    program Consts;
+    const
+      MaxCount = 10;
+      Neg = -1;
+      AppName = 'MyApp';
+      First = 5;
+    const
+      Second = 42;
+      Base = 10;
+      E1 = 2 * 3;
+      E2 = (2 * 3);
+      E3 = 2 + 3 * 4;
+      E4 = (2 + 3) * 4;
+      E5 = 100 div 7;
+      E6 = 100 mod 7;
+      E7 = Base * 2 + 1;
+      E8 = -5 * 3;
+      E9 = (1 shl 4) or 3;
+      FG_BLUE = 1;
+      FG_GREEN = 2;
+      FA = 2.0 * 3;
+      FB = 5 / 2;
+      FC = 1.5 + 3 - 0.5;
+      FD = (1 + 2) * 3.0;
+      FE = 1 + 2.0;
+      Pi2 = 3.14 * 2;
+      FN = -1.5 * 2;
+      Z = 1;
+      Eps = 1.0 / (Z shl 53);
+      Eps2 = 1.0 / (UInt64(1) shl 53);
+      BA = 1.0 / (255 and 15);
+      BB = 1.0 / (8 or 1);
+      BC = 1.0 / (12 xor 6);
+      BD = 1.0 / (1024 shr 2);
+      CA = 1.0 * (Byte(300) shl 1);
+      CB = 1.0 * (SmallInt(40000) shl 1);
+      TI: Integer = 100;
+      TL: Int64 = 1000000000000;
+      TD: Double = 3.14159;
+      TS: Single = 2.71828;
+      TB: Boolean = True;
+      TStr: string = 'hello';
+      TND: Double = -3.14159;
+      TNI: Integer = -42;
+      Scale: Double = 2.5;
+      CI: Integer = Integer(-11);
+      CC: Cardinal = Cardinal(-11);
+      CBy: Byte = Byte(-1);
+      CSi: SmallInt = SmallInt(-1);
+      CW: Word = Word(-1);
+      O1: Integer = 1 or 2 or 4;
+      O2: Integer = FG_BLUE or FG_GREEN;
+      O3: Integer = 1 or FG_BLUE or 4;
+      M1: Integer = $FF and 15;
+      S1: Integer = 1 shl 8;
+      TDX: Double = 2 * 3;
+    type
+      TThing = class
+      public
+        const Limit = 100;
+        procedure Show;
+      end;
+    procedure TThing.Show;
+    const Local = 55;
+    begin
+      WriteLn(Limit, ' ', Local)
+    end;
+    procedure Proc;
+    const Seven = 7;
+    begin
+      WriteLn(Seven)
+    end;
+    function Func: Integer;
+    const Hundred = 100;
+    begin
+      Result := Hundred
+    end;
+    var V: Double = 2 * 3; X: Integer; T: TThing;
+    begin
+      X := First;
+      WriteLn(MaxCount, ' ', Neg, ' ', AppName, ' ', X, ' ', Second);
+      Proc();
+      WriteLn(Func());
+      T := TThing.Create();
+      T.Show();
+      WriteLn(TThing.Limit);
+      T.Free();
+      WriteLn(E1, ' ', E2, ' ', E3, ' ', E4, ' ', E5, ' ', E6, ' ', E7, ' ', E8, ' ', E9);
+      WriteLn(FA:0:1, ' ', FB:0:1, ' ', FC:0:1, ' ', FD:0:1, ' ', FE:0:1, ' ',
+        Pi2:0:2, ' ', FN:0:1);
+      WriteLn((Eps * 9007199254740992.0):0:1, ' ', (Eps2 * 9007199254740992.0):0:1);
+      WriteLn((1 / BA):0:0, ' ', (1 / BB):0:0, ' ', (1 / BC):0:0, ' ', (1 / BD):0:0);
+      WriteLn(CA:0:0, ' ', CB:0:0);
+      WriteLn(TI, ' ', TL, ' ', TD:0:5, ' ', TS:0:5, ' ', TB, ' ', TStr, ' ',
+        TND:0:5, ' ', TNI, ' ', (Scale * 2):0:1);
+      WriteLn(CI, ' ', CC, ' ', CBy, ' ', CSi, ' ', CW);
+      WriteLn(O1, ' ', O2, ' ', O3, ' ', M1, ' ', S1, ' ', TDX:0:1, ' ', V:0:1)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '10 -1 MyApp 5 42' + LE +
+    '7' + LE +
+    '100' + LE +
+    '100 55' + LE +
+    '100' + LE +
+    '6 6 14 20 14 2 21 -15 19' + LE +
+    '6.0 2.5 4.0 9.0 3.0 6.28 -3.0' + LE +
+    '1.0 1.0' + LE +
+    '15 9 10 256' + LE +
+    '88 -51072' + LE +
+    '100 1000000000000 3.14159 2.71828 True hello -3.14159 -42 5.0' + LE +
+    '-11 4294967285 255 -1 65535' + LE +
+    '7 3 5 15 256 6.0 6.0' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_Constants_Arrays;
+const
+  {
+    Array constants end to end: string and integer elements indexed by an
+    enum, Int64 elements written as hex / octal bit patterns above High(Int64),
+    non-zero-based and range-indexed arrays read by constant and variable
+    index, a 2-D array (row-major), a named array-type alias, an or-chain and a
+    Cardinal cast as elements, class member const arrays read qualified and
+    bare inside a method, and routine-local const arrays.  The bare in-method
+    read had no data label: x86-64 segfaulted and arm64 rejected it. }
+  Src = '''
+    program AConsts;
+    type
+      TWeather = (Sunny, Cloudy, Rainy);
+      TDir = (North, East, South, West);
+      TColor = (Red, Green, Blue);
+      TArr = array[0..2] of Integer;
+      TPalette = class
+      public
+        const Names: array[TColor] of string = ('Red', 'Green', 'Blue');
+        const Items: array[1..3] of Integer = (11, 12, 13);
+        procedure Show;
+      end;
+    const
+      FG_BLUE = 1;
+      FG_GREEN = 2;
+      WeatherNames: array[TWeather] of string = ('Sunny', 'Cloudy', 'Rainy');
+      DirCost: array[TDir] of Integer = (1, 2, 3, 4);
+      B: array[0..2] of Int64 = (
+        $4040404040404040,
+        $8080808080808080,
+        &1000000000000000000000
+      );
+      Vals: array[5..7] of Integer = (50, 60, 70);
+      Days: array[1..3] of string = ('Mon', 'Tue', 'Wed');
+      M: array[0..1, 0..1] of Integer = ((1, 2), (3, 4));
+      AV: TArr = (10, 20, 30);
+      T: array[0..1] of Integer = (FG_BLUE or FG_GREEN, 99);
+      TC: array[0..1] of Cardinal = (Cardinal(-11), 42);
+    procedure TPalette.Show;
+    const Loc: array[0..1] of Integer = (7, 8);
+    var I: Integer;
+    begin
+      I := 1;
+      WriteLn(Names[Blue], ' ', Items[2], ' ', Loc[I])
+    end;
+    function DayName(D: Integer): string;
+    const Days: array[1..2] of string = ('Sat', 'Sun');
+    begin
+      Result := Days[D]
+    end;
+    procedure Tbl;
+    const Tbl: array[0..2] of Integer = (100, 200, 300);
+    var I: Integer;
+    begin
+      for I := 0 to 2 do Write(Tbl[I], ' ');
+      WriteLn()
+    end;
+    var
+      W: TWeather; D: TDir; I, J, Sum: Integer; P: TPalette;
+    begin
+      for W := Sunny to Rainy do Write(WeatherNames[W], ' ');
+      WriteLn();
+      Sum := 0;
+      for D := North to West do Sum := Sum + DirCost[D];
+      WriteLn(Sum, ' ', DirCost[South]);
+      WriteLn(B[0], ' ', B[1], ' ', B[2]);
+      I := 6;
+      WriteLn(Vals[5], ' ', Vals[I], ' ', Days[2]);
+      I := 3;
+      WriteLn(Days[I]);
+      for I := 0 to 1 do
+        for J := 0 to 1 do
+          Write(M[I, J], ' ');
+      WriteLn(M[1][0]);
+      WriteLn(AV[0] + AV[1] + AV[2], ' ', T[0], ' ', T[1], ' ', TC[0], ' ', TC[1]);
+      P := TPalette.Create();
+      P.Show();
+      WriteLn(P.Names[Red], ' ', TPalette.Items[3]);
+      P.Free();
+      WriteLn(DayName(1), ' ', DayName(2));
+      Tbl()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'Sunny Cloudy Rainy ' + LE +
+    '10 3' + LE +
+    '4629771061636907072 -9187201950435737472 -9223372036854775808' + LE +
+    '50 60 Tue' + LE +
+    'Wed' + LE +
+    '1 2 3 4 3' + LE +
+    '60 3 99 4294967285 42' + LE +
+    'Blue 12 8' + LE +
+    'Red 13' + LE +
+    'Sat Sun' + LE +
+    '100 200 300 ' + LE, 0);
 end;
 
 initialization

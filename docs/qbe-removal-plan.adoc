@@ -8,7 +8,9 @@
 |===
 | Decision | Remove the QBE backend; native code generation (x86-64, arm64) becomes the only backend.
 | Phase 0 | Done: `--help` marks `--backend qbe` and `BLAISE_BACKEND=qbe` as deprecated; the deprecation was announced to the community.
-| Phase 1 | In progress -- decouple the test suite from QBE.  1a and 1b done; 1c in progress.
+| Phase 1 | In progress -- decouple the test suite from QBE.  1a and 1b done; 1c: all 78 `GenIR` files
+migrated -- the `GenIRBuiltin` / `GenIRAt` / `GenUnitIR` / `GenCombinedIR` helpers and the direct
+`TCodeGenQBE` users listed below the progress table remain.
 | Phase 2 | Not started -- delete the backend.  Target: release v0.15.0, which also
 makes the macOS arm64 port usable.
 | Phase 3 | Not started -- documentation.
@@ -245,7 +247,7 @@ found, for a ruling before they are migrated.
 [cols="3,1,1",options="header"]
 |===
 | File | `GenIR` calls | Status
-| `cp.test.constants.pas` | 71 | pending
+| `cp.test.constants.pas` | 71 | done: 66 behaviour (e2e), 3 code-gen (GenAsm)
 | `cp.test.arc.pas` | 67 | done: 55 behaviour (e2e), 7 code-gen (GenAsm), 3 QBE-only
 | `cp.test.sets.pas` | 42 | done: 39 behaviour (e2e), 1 QBE-only
 | `cp.test.staticarray.pas` | 41 | done: 26 behaviour (e2e), 12 front-end (Analyse)
