@@ -8290,8 +8290,8 @@ begin
        not (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyDynArray]))) or
      (AStmt.IsVarParam and
       ((AStmt.ResolvedArrayType = nil) or
-       not (AStmt.ResolvedArrayType.Kind in [tyString, tyPChar,
-                                             tyDynArray, tyOpenArray]))) or
+       not (AStmt.ResolvedArrayType.Kind in [tyString, tyPChar, tyDynArray,
+                                             tyOpenArray, tyStaticArray]))) or
      (AStmt.IsImplicitSelf and ((AStmt.ImplicitFieldInfo = nil) or
        (AStmt.ResolvedArrayType = nil) or
        not (AStmt.ResolvedArrayType.Kind in [tyDynArray, tyStaticArray]))) then
@@ -8337,6 +8337,9 @@ begin
     Self.EmitExprToX0(AStmt.IndexExpr);
     EmitPushX0();
     EmitLoadSlot('x0', AStmt.ArrayName);
+    if AStmt.IsVarParam then
+      { var PChar parameter: the slot holds the caller variable's address }
+      Self.Emit(#9'ldr x0, [x0]');
     EmitPopTo('x1');
     Self.Emit(#9'add x9, x0, x1');
     if (AStmt.ValueExpr is TStringLiteral) then
@@ -8443,6 +8446,10 @@ begin
     if AStmt.IsVarParam then
       Self.Emit(#9'ldr x0, [x0]');
   end
+  else if AStmt.IsVarParam then
+    { a var static-array parameter: the slot holds the caller's array
+      address, which IS the element-0 base }
+    EmitLoadSlot('x0', AStmt.ArrayName)
   else
     EmitSlotAddr('x0', AStmt.ArrayName);
   EmitPopTo('x1');
@@ -10598,7 +10605,8 @@ begin
                  (Par.ResolvedType.Kind in [tyDouble, tyString, tyRecord,
                                             tyClass, tyDynArray,
                                             tyPointer, tyPChar,
-                                            tyMetaClass, tyInterface]))) then
+                                            tyMetaClass, tyInterface,
+                                            tyStaticArray]))) then
           NotYet('var parameter ''' + Par.ParamName + ''' of this type', ADecl);
         AddLocal(Par.ParamName, 8);
         Continue;
