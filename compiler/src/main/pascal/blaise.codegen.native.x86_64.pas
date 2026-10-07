@@ -7458,6 +7458,16 @@ begin
     Exit;
   end;
 
+  { FuncPtrExpr(args) returning a float (GetFn()(X), Fns[I](X)): the integer
+    arm runs the same call sequence -- callee into %rbx, EmitCallIndirect /
+    EmitMethodPtrCall -- and leaves the callee's result in %xmm0 untouched,
+    exactly as for the procedural-variable arm above. }
+  if AExpr is TIndirectFuncCallExpr then
+  begin
+    Self.EmitExprToEax(AExpr);
+    Exit;
+  end;
+
   raise ENativeCodeGenError.Create(
     'native backend: unsupported float expression form ' + AExpr.ClassName);
 end;
