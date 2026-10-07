@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_Pointers_WidthsConversionsCasts;
     procedure TestRun_AddrOfVarParam_IsCallersVariable;
     procedure TestRun_CastToUnitLocalPointerType;
     procedure TestRun_Pointer_GetMem_WriteRead_FreeMem;
@@ -628,6 +629,101 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '10' + LE + '13' + LE + '17' + LE, 0);
+end;
+
+procedure TE2EPointersTests.TestRun_Pointers_WidthsConversionsCasts;
+const
+  {
+    Typed pointers end to end: GetMem/FreeMem, dereferenced reads and writes at
+    each width, a Double and a Single written through their pointer types, an
+    Integer stored through ^Int64 (sign-extended: -5 stays -5) and a Cardinal
+    through ^Int64 (zero-extended: 4000000000 stays positive), an Integer
+    converted when stored through ^Double, byte arithmetic on an untyped
+    Pointer, the Pointer(Integer) / PtrUInt(Pointer) casts (a signed Integer
+    widens to pointer size by sign extension, as in C, Delphi and FPC -- the
+    QBE backend alone zero-extended), and a dynamic-array field written
+    through P^. }
+  Src = '''
+    program Pointers;
+    type
+      PInt = ^Integer;
+      PDbl = ^Double;
+      PSgl = ^Single;
+      PI64 = ^Int64;
+      PByte = ^Byte;
+      PRec = ^TRec;
+      TRec = record
+        DA: array of Integer;
+      end;
+    var
+      P: Pointer;
+      PI: PInt;
+      PD: PDbl;
+      PS: PSgl;
+      P64: PI64;
+      PB: PByte;
+      N: Integer;
+      C: Cardinal;
+      D: Double;
+      S: Single;
+      V: Int64;
+      R: TRec;
+      Ptr: PRec;
+      U: UInt64;
+    begin
+      P := GetMem(32);
+      PI := PInt(P);
+      PI^ := 1234;
+      WriteLn(PI^);
+      PD := PDbl(P);
+      PD^ := 2.5;
+      D := PD^;
+      WriteLn(Round(D * 100));
+      PS := PSgl(P);
+      PS^ := 1.25;
+      S := PS^;
+      WriteLn(Round(S * 100));
+      P64 := PI64(P);
+      N := -5;
+      P64^ := N;
+      WriteLn(P64^);
+      C := 4000000000;
+      P64^ := C;
+      WriteLn(P64^);
+      PD^ := N;
+      WriteLn(Round(PD^ * 10));
+      PB := PByte(P);
+      PB^ := 7;
+      PB := PByte(P + 3);
+      PB^ := 9;
+      WriteLn(PByte(P)^, ' ', PByte(P + 3)^);
+      FreeMem(P);
+      N := 42;
+      P := Pointer(N);
+      U := PtrUInt(P);
+      WriteLn(U);
+      N := -1;
+      U := PtrUInt(Pointer(N));
+      WriteLn(U);
+      Ptr := @R;
+      SetLength(R.DA, 3);
+      Ptr^.DA[0] := 100;
+      WriteLn(R.DA[0])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '1234' + LE +
+    '250' + LE +
+    '125' + LE +
+    '-5' + LE +
+    '4000000000' + LE +
+    '-50' + LE +
+    '7 9' + LE +
+    '42' + LE +
+    '18446744073709551615' + LE +
+    '100' + LE, 0);
 end;
 
 initialization

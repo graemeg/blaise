@@ -63,30 +63,17 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — emit malloc / free / load / store / pointer arithmetic     }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_GetMem_EmitsMalloc;
-    procedure TestCodegen_FreeMem_EmitsFree;
-    procedure TestCodegen_Deref_EmitsLoad;
-    procedure TestCodegen_PointerWrite_EmitsStore;
-    procedure TestCodegen_DoublePointerWrite_EmitsStored;
-    procedure TestCodegen_SinglePointerWrite_EmitsStores;
-    procedure TestCodegen_Int64PointerWrite_IntegerRhs_EmitsExtsw;
-    procedure TestCodegen_Int64PointerWrite_CardinalRhs_EmitsExtuw;
-    procedure TestCodegen_DoublePointerWrite_IntegerRhs_EmitsSwtof;
-    procedure TestCodegen_PointerArith_EmitsAdd;
 
     { ------------------------------------------------------------------ }
     { Pointer(intExpr) and PtrUInt(ptrExpr) cast pairs                    }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_Pointer_FromInt_ReturnsPointerType;
     procedure TestSemantic_PtrUInt_FromPointer_ReturnsUInt64Type;
-    procedure TestCodegen_Pointer_FromInt_EmitsExtuw;
-    procedure TestCodegen_PtrUInt_FromPointer_EmitsCopy;
 
     { ------------------------------------------------------------------ }
     { p^.field[index] := value (issue #118)                               }
     { ------------------------------------------------------------------ }
     procedure TestParse_DerefFieldSubscript_Parses;
-    procedure TestCodegen_DerefFieldSubscript_InIR;
   end;
 
 implementation
@@ -146,85 +133,6 @@ const
         begin
           Ptr^ := 42;
           V := Ptr^
-        end.
-        ''';
-
-  SrcDoublePtrWrite =
-    '''
-        program Prg;
-        var
-          PD: ^Double;
-          D:  Double;
-        begin
-          PD := @D;
-          PD^ := 3.14
-        end.
-        ''';
-
-  SrcSinglePtrWrite =
-    '''
-        program Prg;
-        var
-          PS: ^Single;
-          S:  Single;
-        begin
-          PS := @S;
-          PS^ := 1.25
-        end.
-        ''';
-
-  { BUG-020: a 32-bit Integer RHS stored through an ^Int64 must be widened
-    with extsw before the storel, or QBE rejects "storel <w>, ...". }
-  SrcInt64PtrIntRhs =
-    '''
-        program Prg;
-        var
-          Ptr: ^Int64;
-          I:   Integer;
-        begin
-          I := 42;
-          Ptr^ := I
-        end.
-        ''';
-
-  { BUG-020: an unsigned 32-bit RHS must be ZERO-extended (extuw) — extsw
-    would smear the sign bit and corrupt Cardinal values >= 2^31. }
-  SrcInt64PtrCardRhs =
-    '''
-        program Prg;
-        var
-          Ptr: ^Int64;
-          C:   Cardinal;
-        begin
-          C := 4000000000;
-          Ptr^ := C
-        end.
-        ''';
-
-  { An integer RHS stored through a float pointer must be CONVERTED (swtof),
-    not stored raw — 'stored <w>, ...' is rejected by QBE. }
-  SrcDoublePtrIntRhs =
-    '''
-        program Prg;
-        var
-          Ptr: ^Double;
-          I:   Integer;
-        begin
-          I := 3;
-          Ptr^ := I
-        end.
-        ''';
-
-  { Pointer arithmetic }
-  SrcPtrArith =
-    '''
-        program Prg;
-        var
-          P1: Pointer;
-          P2: Pointer;
-        begin
-          P1 := GetMem(16);
-          P2 := P1 + 4
         end.
         ''';
 
@@ -555,6 +463,8 @@ begin
         ''');
 end;
 
+{ QBE-only (delete with the backend, Phase 2): pins QBE syntax with no
+  behaviour behind it. }
 procedure TPointerTests.TestQBE_BuiltinFuncStatement_RaisesCleanly;
 begin
   try
@@ -576,103 +486,6 @@ end;
 { ------------------------------------------------------------------ }
 { Codegen tests                                                        }
 { ------------------------------------------------------------------ }
-
-procedure TPointerTests.TestCodegen_GetMem_EmitsMalloc;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcGetMem);
-  AssertTrue('GetMem should emit _BlaiseGetMem',
-    Pos('call $_BlaiseGetMem', IR) > 0);
-end;
-
-procedure TPointerTests.TestCodegen_FreeMem_EmitsFree;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcFreeMem);
-  AssertTrue('FreeMem should emit _BlaiseFreeMem',
-    Pos('call $_BlaiseFreeMem', IR) > 0);
-end;
-
-procedure TPointerTests.TestCodegen_Deref_EmitsLoad;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTypedPtrRW);
-  AssertTrue('Deref should emit loadw', Pos('loadw', IR) > 0);
-end;
-
-procedure TPointerTests.TestCodegen_PointerWrite_EmitsStore;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTypedPtrRW);
-  AssertTrue('Pointer write should emit storew', Pos('storew', IR) > 0);
-end;
-
-procedure TPointerTests.TestCodegen_DoublePointerWrite_EmitsStored;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcDoublePtrWrite);
-  AssertTrue('PDouble^ := val must emit stored',
-    Pos('stored', IR) > 0);
-  AssertFalse('PDouble^ write must not use storel',
-    Pos('storel %_t', IR) > 0);
-end;
-
-procedure TPointerTests.TestCodegen_SinglePointerWrite_EmitsStores;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSinglePtrWrite);
-  AssertTrue('PSingle^ := val must emit stores',
-    Pos('stores', IR) > 0);
-  AssertFalse('PSingle^ write must not use storel',
-    Pos('storel %_t', IR) > 0);
-end;
-
-procedure TPointerTests.TestCodegen_Int64PointerWrite_IntegerRhs_EmitsExtsw;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcInt64PtrIntRhs);
-  AssertTrue('Integer RHS through ^Int64 must be sign-extended (extsw) before storel',
-    Pos('extsw', IR) > 0);
-  AssertTrue('the widened value must be stored with storel',
-    Pos('storel', IR) > 0);
-end;
-
-procedure TPointerTests.TestCodegen_Int64PointerWrite_CardinalRhs_EmitsExtuw;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcInt64PtrCardRhs);
-  AssertTrue('Cardinal RHS through ^Int64 must be zero-extended (extuw) before storel',
-    Pos('extuw', IR) > 0);
-  AssertTrue('the widened value must be stored with storel',
-    Pos('storel', IR) > 0);
-end;
-
-procedure TPointerTests.TestCodegen_DoublePointerWrite_IntegerRhs_EmitsSwtof;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcDoublePtrIntRhs);
-  AssertTrue('Integer RHS through ^Double must be converted (swtof) before stored',
-    Pos('swtof', IR) > 0);
-  AssertTrue('the converted value must be stored with stored',
-    Pos('stored', IR) > 0);
-end;
-
-procedure TPointerTests.TestCodegen_PointerArith_EmitsAdd;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcPtrArith);
-  AssertTrue('Pointer arithmetic should emit add', Pos('add', IR) > 0);
-end;
 
 const
   SrcPointerFromInt =
@@ -719,24 +532,6 @@ begin
   end;
 end;
 
-procedure TPointerTests.TestCodegen_Pointer_FromInt_EmitsExtuw;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcPointerFromInt);
-  AssertTrue('Pointer(Integer) should zero-extend via extuw',
-    Pos('extuw', IR) >= 0);
-end;
-
-procedure TPointerTests.TestCodegen_PtrUInt_FromPointer_EmitsCopy;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcPtrUIntFromPtr);
-  AssertTrue('PtrUInt(Pointer) should emit copy (l→l)',
-    Pos('copy', IR) >= 0);
-end;
-
 const
   SrcDerefFieldSubscript =
     '''
@@ -762,13 +557,6 @@ begin
   Prog := ParseSrc(SrcDerefFieldSubscript);
   AssertNotNull('program parsed', Prog);
   Prog.Free();
-end;
-
-procedure TPointerTests.TestCodegen_DerefFieldSubscript_InIR;
-var IR: string;
-begin
-  IR := GenIR(SrcDerefFieldSubscript);
-  AssertTrue('IR non-empty', IR <> '');
 end;
 
 initialization
