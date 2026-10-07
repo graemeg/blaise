@@ -14602,12 +14602,25 @@ begin
           Self.Emit(Format(#9'addq $%d, %%rcx', [ISFld.Offset]));
         if ISFld.IsWeak then
         begin
+          Self.Emit(#9'pushq %rax');
+          Self.Emit(#9'subq $8, %rsp');
           Self.Emit(#9'movq %rax, %rsi');
           Self.Emit(#9'movq %rcx, %rdi');
           Self.Emit(#9'callq _WeakAssign');
+          Self.Emit(#9'addq $8, %rsp');
+          Self.Emit(#9'popq %rax');
         end
         else
           Self.EmitStoreVar('(%rcx)', Asgn.ResolvedLhsType);
+        { an owned +1 value (a call result) has no other owner once it sits
+          in a non-owning field: release it, as the explicit-receiver
+          field store does }
+        if (Asgn.ResolvedLhsType.Kind = tyClass) and
+           NativeExprOwnsRef(Asgn.Expr) then
+        begin
+          Self.Emit(#9'movq %rax, %rdi');
+          Self.Emit(#9'callq _ClassRelease');
+        end;
       end
       else if Asgn.ResolvedLhsType.IsString()
            or (Asgn.ResolvedLhsType.Kind = tyClass)
@@ -17229,7 +17242,18 @@ begin
         Self.Emit(#9'popq %rax');
         Self.Emit(Format(#9'leaq %d(%%rcx), %%rdi', [FA.FieldInfo.Offset]));
         Self.Emit(#9'movq %rax, %rsi');
-        Self.Emit(#9'callq _WeakAssign');
+        if NativeExprOwnsRef(FA.Expr) then
+        begin
+          { an owned +1 value has no other owner in a weak field }
+          Self.Emit(#9'pushq %rax');
+          Self.Emit(#9'subq $8, %rsp');
+          Self.Emit(#9'callq _WeakAssign');
+          Self.Emit(#9'addq $8, %rsp');
+          Self.Emit(#9'popq %rdi');
+          Self.Emit(#9'callq _ClassRelease');
+        end
+        else
+          Self.Emit(#9'callq _WeakAssign');
       end
       else if FA.FieldInfo.TypeDesc.Kind = tyClass then
       begin

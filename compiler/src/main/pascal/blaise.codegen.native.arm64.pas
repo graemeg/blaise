@@ -549,6 +549,7 @@ type
     procedure EmitMethodCallStmt(AStmt: TMethodCallStmt);
     procedure EmitMethodCallExpr(AExpr: TMethodCallExpr);
     procedure EmitClassCreate(AExpr: TFuncCallExpr);
+    procedure EmitNonOwningFieldStore(AFld: TFieldInfo; const ABase: string);
     { ABaseInfo describes the CONTAINING field for a nested Self path
       (Self.FIntermediate.SubField) — AFld then describes only SubField, whose
       Offset is relative to the intermediate.  If the intermediate is an
@@ -1404,6 +1405,28 @@ begin
   EmitImplicitBaseStep(AReg, ABaseInfo);
 end;
 
+{ Store the value on TOP of the stack (left there) into the non-owning
+  class field AFld of the instance at ABase: a plain store for
+  [Unretained], _WeakAssign(slot, value) for [Weak].  No refcount moves. }
+procedure TArm64Backend.EmitNonOwningFieldStore(AFld: TFieldInfo;
+  const ABase: string);
+begin
+  if AFld.IsWeak then
+  begin
+    if AFld.Offset <> 0 then
+      EmitAddSubImm('add', 'x0', ABase, AFld.Offset)
+    else
+      Self.Emit(Format(#9'mov x0, %s', [ABase]));
+    Self.Emit(#9'ldr x1, [sp]');
+    EmitCallSym('_WeakAssign');
+  end
+  else
+  begin
+    Self.Emit(#9'ldr x0, [sp]');
+    Self.Emit(Format(#9'str x0, [%s, #%d]', [ABase, AFld.Offset]));
+  end;
+end;
+
 procedure TArm64Backend.EmitInstanceFieldStore(AFld: TFieldInfo;
   AValueExpr: TASTExpr; const AInstSlot: string; AInstVarParam: Boolean;
   ABaseInfo: TFieldInfo);
@@ -1418,6 +1441,21 @@ begin
     frame slot AInstSlot ('Self' or a class-typed variable).  Managed
     fields run the retain/release discipline; the instance pointer is
     re-loaded after any release call (it clobbers scratch regs). }
+  if (AFld.TypeDesc.Kind = tyClass) and (AFld.IsUnretained or AFld.IsWeak) then
+  begin
+    { a NON-OWNING field takes no reference and drops none: a plain store
+      ([Unretained]) or the weak-table registration ([Weak]).  An owned +1
+      value (a call result) has no other owner, so it is released once the
+      store is done (x86-64 / QBE parity). }
+    Self.EmitExprToX0(AValueExpr);
+    EmitPushX0();                       { [value] }
+    EmitInstBase('x9', AInstSlot, AInstVarParam, ABaseInfo);
+    EmitNonOwningFieldStore(AFld, 'x9');
+    EmitPopTo('x0');
+    if ArcExprOwnsRef(AValueExpr) then
+      EmitCallSym('_ClassRelease');
+    Exit;
+  end;
   if AFld.TypeDesc.IsString() or (AFld.TypeDesc.Kind = tyClass) then
   begin
     Self.EmitExprToX0(AValueExpr);
@@ -1587,6 +1625,19 @@ begin
       EmitAddSubImm('add', 'x0', 'x0', AFld.Offset);
     EmitIntLiteral('x2', AFld.TypeDesc.RawSize());
     EmitCallSym('memcpy');
+    Exit;
+  end;
+  if (AFld.TypeDesc.Kind = tyClass) and (AFld.IsUnretained or AFld.IsWeak) then
+  begin
+    { non-owning field -- see EmitInstanceFieldStore }
+    Self.EmitExprToX0(AValueExpr);
+    EmitPushX0();                       { [base][value] }
+    Self.Emit(#9'ldr x9, [sp, #16]');
+    EmitNonOwningFieldStore(AFld, 'x9');
+    EmitPopTo('x0');
+    if ArcExprOwnsRef(AValueExpr) then
+      EmitCallSym('_ClassRelease');
+    Self.Emit(#9'add sp, sp, #16');     { drop the base }
     Exit;
   end;
   if AFld.TypeDesc.IsString() or (AFld.TypeDesc.Kind = tyClass) or

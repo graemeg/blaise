@@ -15,7 +15,8 @@
     3. Semantic — resolve WeakAttribute (with suffix fallback) and flag
                   the declaration; reject on non-reference types.
     4. Codegen  — weak vars use _WeakAssign / _WeakClear at every ARC
-                  insertion site.
+                  insertion site (run-time coverage:
+                  TE2EArcTests.TestRun_WeakAndUnretained_NonOwning).
     5. E2E      — parent/child cycle that leaks without [Weak] and is
                   valgrind-clean with it.
 
@@ -29,14 +30,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TWeakRefTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc, AExpectedFragment: string);
   published
     { ------------------------------------------------------------------ }
@@ -63,22 +63,10 @@ type
     procedure TestSemantic_WeakAttribute_SuffixMatches_Weak;
 
     { ------------------------------------------------------------------ }
-    { Codegen — weak-ref insertion                                         }
-    { ------------------------------------------------------------------ }
-    procedure TestCodegen_WeakVarAssign_UsesWeakAssign;
-    procedure TestCodegen_WeakVarScopeExit_UsesWeakClear;
-    procedure TestCodegen_WeakVarAssign_DoesNotCallClassAddRef;
-
-    { ------------------------------------------------------------------ }
     { [Unretained] — non-owning, no ARC, no weak registry                 }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_Unretained_OnInteger_RaisesError;
     procedure TestSemantic_Unretained_WithWeak_RaisesError;
-    procedure TestCodegen_UnretainedField_NoAddRefOnStore;
-    procedure TestCodegen_UnretainedField_NoWeakAssign;
-    procedure TestCodegen_UnretainedField_CleanupDoesNotRelease;
-    procedure TestCodegen_UnretainedField_ReleasesOwnedRHS;
-    procedure TestCodegen_UnretainedField_InheritedCleanupDoesNotRelease;
   end;
 
 implementation
@@ -114,25 +102,6 @@ begin
     Result := Prog;
   finally
     Analyser.Free();
-  end;
-end;
-
-function TWeakRefTests.GenIR(const ASrc: string): string;
-var
-  Prog:     TProgram;
-  CG:       TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
   end;
 end;
 
@@ -438,50 +407,7 @@ begin
   end;
 end;
 
-{ ------------------------------------------------------------------ }
-{ Codegen                                                             }
-{ ------------------------------------------------------------------ }
-
 const
-  SrcCodegenWeakAssign =
-    '''
-        program P;
-        type
-          TFoo = class
-          end;
-        var
-          Owner:       TFoo;
-          [Weak] Peek: TFoo;
-        begin
-          Owner := TFoo.Create();
-          Peek  := Owner
-        end.
-        ''';
-
-  { [Unretained] class field — a non-owning store with no ARC and no weak
-    registry.  FRef := AT must be a plain storel: no _ClassAddRef, no
-    _WeakAssign; and _FieldCleanup_THolder must not release it. }
-  SrcCodegenUnretainedField =
-    '''
-        program P;
-        type
-          TTarget = class
-            FN: Integer;
-          end;
-          THolder = class
-            [Unretained] FRef: TTarget;
-            procedure SetRef(AT: TTarget);
-          end;
-        procedure THolder.SetRef(AT: TTarget);
-        begin
-          FRef := AT
-        end;
-        var H: THolder;
-        begin
-          H := THolder.Create()
-        end.
-        ''';
-
   { [Unretained] on a non-class field is rejected. }
   SrcSemUnretainedInt =
     '''
@@ -508,45 +434,6 @@ const
         end.
         ''';
 
-procedure TWeakRefTests.TestCodegen_WeakVarAssign_UsesWeakAssign;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCodegenWeakAssign);
-  AssertTrue('weak assignment lowers to _WeakAssign',
-    Pos('call $_WeakAssign', IR) > 0);
-end;
-
-procedure TWeakRefTests.TestCodegen_WeakVarScopeExit_UsesWeakClear;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCodegenWeakAssign);
-  AssertTrue('weak scope exit calls _WeakClear',
-    Pos('call $_WeakClear', IR) > 0);
-end;
-
-procedure TWeakRefTests.TestCodegen_WeakVarAssign_DoesNotCallClassAddRef;
-var
-  IR, After: string;
-  FirstAssignEnd: Integer;
-begin
-  { Verify that the *weak* assignment does NOT addref.  Owner := TFoo.Create
-    still addrefs (strong).  We crudely split the IR on '_WeakAssign' and
-    assert no _ClassAddRef appears in the same basic block on either side
-    immediately around the weak call. }
-  IR := GenIR(SrcCodegenWeakAssign);
-  FirstAssignEnd := Pos('call $_WeakAssign', IR);
-  AssertTrue('_WeakAssign call present', FirstAssignEnd > 0);
-  { Scan a window of the surrounding 10 lines for a spurious _ClassAddRef
-    on the Peek assignment.  A simple heuristic: the lines between the
-    _WeakAssign call and the subsequent jmp/ret should not contain a
-    _ClassAddRef tied to the weak slot. }
-  After := Copy(IR, FirstAssignEnd, 200);
-  AssertTrue('no _ClassAddRef adjacent to the weak store',
-    Pos('_ClassAddRef', After) < 0);
-end;
-
 procedure TWeakRefTests.TestSemantic_Unretained_OnInteger_RaisesError;
 begin
   AnalyseExpectError(SrcSemUnretainedInt, 'Unretained');
@@ -555,137 +442,6 @@ end;
 procedure TWeakRefTests.TestSemantic_Unretained_WithWeak_RaisesError;
 begin
   AnalyseExpectError(SrcSemUnretainedWithWeak, 'mutually exclusive');
-end;
-
-procedure TWeakRefTests.TestCodegen_UnretainedField_NoAddRefOnStore;
-var
-  IR, Body: string;
-  P0, P1, N, Idx: Integer;
-begin
-  { Within THolder.SetRef the only _ClassAddRef is the parameter-entry retain
-    on AT (balanced by the scope-exit release).  A strong field store would
-    add a SECOND _ClassAddRef (on the value being stored into FRef); the
-    unretained store is a bare storel with no such retain.  Assert exactly one
-    _ClassAddRef in the function body. }
-  IR := GenIR(SrcCodegenUnretainedField);
-  P0 := Pos('$THolder_SetRef', IR);
-  AssertTrue('THolder_SetRef present', P0 > 0);
-  Body := Copy(IR, P0, Length(IR) - P0);
-  P1   := Pos('@method_exit', Body);
-  AssertTrue('method exit present', P1 > 0);
-  Body := Copy(Body, 0, P1);
-  N   := 0;
-  Idx := 0;
-  while True do
-  begin
-    Idx := PosEx('_ClassAddRef', Body, Idx);
-    if Idx < 0 then Break;
-    Inc(N);
-    Inc(Idx);
-  end;
-  AssertEquals('exactly one addref (the AT param entry, none for the store)',
-    1, N);
-end;
-
-procedure TWeakRefTests.TestCodegen_UnretainedField_NoWeakAssign;
-var
-  IR: string;
-begin
-  { [Unretained] is NOT [Weak]: it must not route through the weak table. }
-  IR := GenIR(SrcCodegenUnretainedField);
-  AssertTrue('unretained field does not use _WeakAssign',
-    Pos('_WeakAssign', IR) < 0);
-end;
-
-procedure TWeakRefTests.TestCodegen_UnretainedField_CleanupDoesNotRelease;
-var
-  IR, Cleanup: string;
-  P0, P1: Integer;
-begin
-  { _FieldCleanup_THolder must not release FRef — an unretained field is
-    non-owning, so cleanup is a no-op for it. }
-  IR := GenIR(SrcCodegenUnretainedField);
-  P0 := Pos('$_FieldCleanup_THolder', IR);
-  AssertTrue('_FieldCleanup_THolder present', P0 > 0);
-  Cleanup := Copy(IR, P0, 200);
-  P1 := Pos('}', Cleanup);
-  if P1 > 0 then Cleanup := Copy(Cleanup, 0, P1);
-  AssertTrue('unretained field cleanup does not release',
-    Pos('_ClassRelease', Cleanup) < 0);
-  AssertTrue('unretained field cleanup does not weak-clear',
-    Pos('_WeakClear', Cleanup) < 0);
-end;
-
-procedure TWeakRefTests.TestCodegen_UnretainedField_ReleasesOwnedRHS;
-var
-  IR, Body: string;
-  P0, P1: Integer;
-begin
-  IR := GenIR('''
-      program P;
-      type
-        TTarget = class end;
-        TPool = class
-          [Unretained] FCached: TTarget;
-          function MakeTarget: TTarget;
-          procedure CacheIt;
-        end;
-      function TPool.MakeTarget: TTarget;
-      begin
-        Result := TTarget.Create()
-      end;
-      procedure TPool.CacheIt;
-      begin
-        FCached := MakeTarget()
-      end;
-      begin
-      end.
-      ''');
-  P0 := Pos('$TPool_CacheIt', IR);
-  AssertTrue('TPool_CacheIt present', P0 > 0);
-  Body := Copy(IR, P0, Length(IR) - P0);
-  P1   := Pos('}', Body);
-  if P1 > 0 then Body := Copy(Body, 0, P1);
-  AssertTrue('unretained field release after store of owned RHS',
-    Pos('_ClassRelease', Body) > 0);
-end;
-
-procedure TWeakRefTests.TestCodegen_UnretainedField_InheritedCleanupDoesNotRelease;
-var
-  IR, Cleanup: string;
-  P0, P1: Integer;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TTarget = class end;
-          TBase = class
-            [Unretained] FRef: TTarget;
-          end;
-          TChild = class(TBase)
-            FOwned: TTarget;
-          end;
-        var C: TChild;
-        begin
-          C := TChild.Create()
-        end.
-        ''');
-  P0 := Pos('function $_FieldCleanup_TChild', IR);
-  AssertTrue('_FieldCleanup_TChild present', P0 > 0);
-  Cleanup := Copy(IR, P0, 400);
-  P1 := Pos('}', Cleanup);
-  if P1 > 0 then Cleanup := Copy(Cleanup, 0, P1);
-  { FOwned is a regular class field and must be released. }
-  AssertTrue('owned field is released',
-    Pos('_ClassRelease', Cleanup) > 0);
-  { But there must be exactly ONE _ClassRelease — the inherited
-    [Unretained] FRef must NOT be released.  Two releases would mean
-    the unretained flag was lost during inheritance. }
-  P0 := Pos('_ClassRelease', Cleanup);
-  P1 := Pos('_ClassRelease', Copy(Cleanup, P0 + 13, Length(Cleanup)));
-  AssertTrue('inherited [Unretained] field must not be released (only one release)',
-    P1 < 0);
 end;
 
 initialization

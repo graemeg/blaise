@@ -26,6 +26,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_WeakAndUnretained_NonOwning;
     procedure TestRun_ClassArc_NoExplicitFree_Valgrind;
     procedure TestRun_InterfaceArc_CarriesLifetime_Valgrind;
     procedure TestRun_WeakRef_BreaksCycle_Valgrind;
@@ -1137,6 +1138,122 @@ begin
     backend.  Native is the arm regression path: the pre-fix AddRef-pin left
     the transient graph unreleased here. }
   AssertLeakFreeOnAll(Src, '7');
+end;
+
+procedure TE2EArcTests.TestRun_WeakAndUnretained_NonOwning;
+const
+  {
+    [Weak] and [Unretained] are non-owning, and the destructor order shows it:
+    dropping the only strong reference frees the target at once and nils a weak
+    variable; a weak local deregisters at scope exit, so freeing its target later
+    writes into no dead frame; an unretained field store takes no reference and
+    holder cleanup releases none (inherited ones included), while an owned
+    right-hand side stored into one is still released -- for a [Weak] field
+    that frees it at once and nils the field (implicit Self and explicit
+    receiver alike). }
+  Src = '''
+    program WeakRefs;
+    type
+      TTarget = class
+        N: Integer;
+        constructor Create(AN: Integer);
+        destructor Destroy; override;
+      end;
+      THolder = class
+        [Unretained] FRef: TTarget;
+        procedure SetRef(AT: TTarget);
+      end;
+      TPool = class
+        [Unretained] FCached: TTarget;
+        function MakeTarget: TTarget;
+        procedure CacheIt;
+      end;
+      TBase = class
+        [Unretained] FRef: TTarget;
+      end;
+      TChild = class(TBase)
+        FOwned: TTarget;
+      end;
+      TWatcher = class
+        [Weak] FW: TTarget;
+        procedure Grab;
+      end;
+    constructor TTarget.Create(AN: Integer);
+    begin N := AN end;
+    destructor TTarget.Destroy;
+    begin WriteLn('free ', N); inherited Destroy() end;
+    procedure THolder.SetRef(AT: TTarget);
+    begin FRef := AT end;
+    function TPool.MakeTarget: TTarget;
+    begin Result := TTarget.Create(3) end;
+    procedure TPool.CacheIt;
+    begin FCached := MakeTarget() end;
+    function MakeT(AN: Integer): TTarget;
+    begin Result := TTarget.Create(AN) end;
+    procedure TWatcher.Grab;
+    begin FW := MakeT(6) end;
+    procedure Peek(T: TTarget);
+    var [Weak] W: TTarget;
+    begin
+      W := T;
+      WriteLn('peek ', W.N)
+    end;
+    var
+      Owner, T, X: TTarget;
+      [Weak] Watch: TTarget;
+      H: THolder;
+      P: TPool;
+      C: TChild;
+      W: TWatcher;
+    begin
+      Owner := TTarget.Create(1);
+      Watch := Owner;
+      Owner := nil;
+      WriteLn('watch nil ', Watch = nil);
+      H := THolder.Create();
+      T := TTarget.Create(2);
+      H.SetRef(T);
+      T := nil;
+      WriteLn('after T nil');
+      H := nil;
+      P := TPool.Create();
+      P.CacheIt();
+      WriteLn('after CacheIt');
+      P := nil;
+      X := TTarget.Create(4);
+      Peek(X);
+      C := TChild.Create();
+      C.FRef := X;
+      C.FOwned := TTarget.Create(5);
+      C := nil;
+      WriteLn('X alive ', X.N);
+      X := nil;
+      W := TWatcher.Create();
+      W.Grab();
+      WriteLn('weak field nil ', W.FW = nil);
+      W.FW := MakeT(7);
+      WriteLn('weak field nil ', W.FW = nil);
+      WriteLn('done')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'free 1' + LE +
+    'watch nil True' + LE +
+    'free 2' + LE +
+    'after T nil' + LE +
+    'free 3' + LE +
+    'after CacheIt' + LE +
+    'peek 4' + LE +
+    'free 5' + LE +
+    'X alive 4' + LE +
+    'free 4' + LE +
+    'free 6' + LE +
+    'weak field nil True' + LE +
+    'free 7' + LE +
+    'weak field nil True' + LE +
+    'done' + LE, 0);
 end;
 
 initialization
