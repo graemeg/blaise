@@ -26,6 +26,9 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_CompareStr_CompareText;
+    procedure TestRun_SaveToFile_LoadFromFile;
+    procedure TestRun_Objects_ReadWrite_AndFind;
     procedure TestRun_AddGet;
     procedure TestRun_Count;
     procedure TestRun_IndexOf_Found;
@@ -897,6 +900,109 @@ begin
   AssertEquals('exit 0', 0, RCode);
   { item with space is quoted, plain item is not }
   AssertEquals('CommaText quoted', '"hello world",foo', Trim(Output));
+end;
+
+procedure TE2ETStringListTests.TestRun_Objects_ReadWrite_AndFind;
+const
+  {
+    Objects[i] stores and returns the object associated with a line (the list
+    does not retain it, so the program keeps its own reference), and Find on a
+    sorted list honours CaseSensitive (True by default). }
+  Src = '''
+    program P;
+    uses Classes;
+    type
+      TTag = class
+        N: Integer;
+      end;
+    var L: TStringList; A, B: TTag; Idx: Integer;
+    begin
+      A := TTag.Create(); A.N := 1;
+      B := TTag.Create(); B.N := 2;
+      L := TStringList.Create();
+      L.Add('alpha');
+      L.Add('beta');
+      L.Objects[0] := A;
+      L.Objects[1] := B;
+      WriteLn(TTag(L.Objects[1]).N, ' ', TTag(L.Objects[0]).N);
+      L.Objects[1] := A;
+      WriteLn(TTag(L.Objects[1]).N);
+      L.Sorted := True;
+      WriteLn(L.Find('BETA', Idx), ' ', L.Find('beta', Idx), ' ', Idx);
+      L.CaseSensitive := False;
+      WriteLn(L.Find('BETA', Idx), ' ', Idx);
+      L.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRTLRunsOnAll(Src,
+    '2 1' + #10 +
+    '1' + #10 +
+    'False True 1' + #10 +
+    'True 1' + #10, 0);
+end;
+
+procedure TE2ETStringListTests.TestRun_SaveToFile_LoadFromFile;
+const
+  {
+    SaveToFile writes the lines and LoadFromFile reads them back, line for line,
+    into a fresh list. }
+  Src = '''
+    program P;
+    uses Classes;
+    var L, M: TStringList; Path: string; I: Integer;
+    begin
+      Path := GetTempDir() + 'blaise_e2e_tstringlist.txt';
+      L := TStringList.Create();
+      L.Add('first');
+      L.Add('  second');
+      L.Add('third');
+      L.SaveToFile(Path);
+      M := TStringList.Create();
+      M.LoadFromFile(Path);
+      WriteLn(M.Count);
+      for I := 0 to M.Count - 1 do
+        WriteLn('[', M.Strings[I], ']');
+      DeleteFile(Path);
+      L.Free();
+      M.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRTLRunsOnAll(Src,
+    '3' + #10 +
+    '[first]' + #10 +
+    '[  second]' + #10 +
+    '[third]' + #10, 0);
+end;
+
+procedure TE2ETStringListTests.TestRun_CompareStr_CompareText;
+const
+  {
+    CompareStr is case-sensitive and CompareText is not; both report the sign of
+    the ordering. }
+  Src = '''
+    program P;
+    function Sign(N: Integer): Integer;
+    begin
+      if N < 0 then Result := -1
+      else if N > 0 then Result := 1
+      else Result := 0
+    end;
+    begin
+      WriteLn(Sign(CompareStr('abc', 'abd')), ' ', Sign(CompareStr('abd', 'abc')), ' ',
+        Sign(CompareStr('abc', 'abc')), ' ', Sign(CompareStr('ABC', 'abc')));
+      WriteLn(Sign(CompareText('ABC', 'abc')), ' ', Sign(CompareText('abc', 'ABD')), ' ',
+        Sign(CompareText('b', 'A')))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '-1 1 0 -1' + #10 +
+    '0 -1 1' + #10, 0);
 end;
 
 initialization

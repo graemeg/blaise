@@ -27,12 +27,11 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TCollectionTests = class(TTestCase)
   private
-    function GenIR(const ASrc: string): string;
     procedure SemanticOK(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -41,30 +40,21 @@ type
     procedure TestSemantic_CompareStr_OK;
     procedure TestSemantic_CompareText_OK;
     procedure TestSemantic_CompareStr_ReturnsInteger;
-    procedure TestCodegen_CompareStr_CallsRTL;
-    procedure TestCodegen_CompareText_CallsRTL;
 
     { ------------------------------------------------------------------ }
     { ZeroMem builtin                                                      }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_ZeroMem_OK;
-    procedure TestCodegen_ZeroMem_CallsMemset;
 
     { ------------------------------------------------------------------ }
     { TObjectList — IR / semantic                                          }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_TObjectList_Compiles;
-    procedure TestCodegen_TObjectList_AddEmitsStore;
-    procedure TestCodegen_TObjectList_GetEmitsLoad;
-    procedure TestCodegen_TObjectList_GrowEmitsRealloc;
 
     { ------------------------------------------------------------------ }
     { TStringList — IR / semantic                                          }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_TStringList_Compiles;
-    procedure TestCodegen_TStringList_AddEmitsStringStore;
-    procedure TestCodegen_TStringList_FindEmitsCompare;
-    procedure TestCodegen_TStringList_ZeroMemInGrow;
 
     { ------------------------------------------------------------------ }
     { TStringList — Text property / LoadFromFile / SaveToFile              }
@@ -73,10 +63,6 @@ type
     procedure TestSemantic_TStringList_TextPropertySet;
     procedure TestSemantic_TStringList_LoadFromFile;
     procedure TestSemantic_TStringList_SaveToFile;
-    procedure TestCodegen_TStringList_TextGetCallsGetText;
-    procedure TestCodegen_TStringList_TextSetCallsSetText;
-    procedure TestCodegen_TStringList_LoadFromFileCallsReadFile;
-    procedure TestCodegen_TStringList_SaveToFileCallsWriteFile;
 
     { ------------------------------------------------------------------ }
     { TStringList — Strings[i] / Objects[i] indexed properties             }
@@ -85,10 +71,6 @@ type
     procedure TestSemantic_TStringList_StringsIndexedWrite;
     procedure TestSemantic_TStringList_ObjectsIndexedRead;
     procedure TestSemantic_TStringList_ObjectsIndexedWrite;
-    procedure TestCodegen_TStringList_StringsReadCallsGet;
-    procedure TestCodegen_TStringList_StringsWriteCallsPut;
-    procedure TestCodegen_TStringList_ObjectsReadCallsGetObject;
-    procedure TestCodegen_TStringList_ObjectsWriteCallsSetObject;
   end;
 
 implementation
@@ -142,19 +124,6 @@ const
           L := TObjectList.Create();
           L.Add(nil);
           L.Add(nil)
-        end.
-        ''';
-
-  SrcTObjectListGet =
-    SrcTObjectListBase +
-    '''
-        var
-          L: TObjectList;
-          P: Pointer;
-        begin
-          L := TObjectList.Create();
-          L.Add(nil);
-          P := L.Get(0)
         end.
         ''';
 
@@ -272,47 +241,9 @@ const
         end.
         ''';
 
-  SrcTStringListFind =
-    SrcTStringListBase +
-    '''
-        var
-          L: TStringList;
-          Idx: Integer;
-          Found: Boolean;
-        begin
-          L := TStringList.Create();
-          L.Add('alpha');
-          L.Add('beta');
-          Found := L.Find('alpha', Idx)
-        end.
-        ''';
-
 { ------------------------------------------------------------------ }
 { Helpers                                                              }
 { ------------------------------------------------------------------ }
-
-function TCollectionTests.GenIR(const ASrc: string): string;
-var
-  Lex:  TLexer;
-  Par:  TParser;
-  SA:   TSemanticAnalyser;
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Lex  := TLexer.Create(ASrc);
-  Par  := TParser.Create(Lex);
-  Prog := Par.Parse();
-  Par.Free();
-  Lex.Free();
-  SA   := TSemanticAnalyser.Create();
-  SA.Analyse(Prog);
-  SA.Free();
-  CG   := TCodeGenQBE.Create();
-  CG.Generate(Prog);
-  Result := CG.GetOutput();
-  CG.Free();
-  Prog.Free();
-end;
 
 procedure TCollectionTests.SemanticOK(const ASrc: string);
 var
@@ -371,24 +302,6 @@ begin
   Prog.Free();
 end;
 
-procedure TCollectionTests.TestCodegen_CompareStr_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCompareStr);
-  AssertTrue('CompareStr emits _StringCompare call',
-    Pos('_StringCompare', IR) > 0);
-end;
-
-procedure TCollectionTests.TestCodegen_CompareText_CallsRTL;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcCompareText);
-  AssertTrue('CompareText emits _StringCompareText call',
-    Pos('_StringCompareText', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { ZeroMem                                                              }
 { ------------------------------------------------------------------ }
@@ -396,14 +309,6 @@ end;
 procedure TCollectionTests.TestSemantic_ZeroMem_OK;
 begin
   SemanticOK(SrcZeroMem);
-end;
-
-procedure TCollectionTests.TestCodegen_ZeroMem_CallsMemset;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcZeroMem);
-  AssertTrue('ZeroMem emits memset call', Pos('call $memset', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -415,33 +320,6 @@ begin
   SemanticOK(SrcTObjectListUse);
 end;
 
-procedure TCollectionTests.TestCodegen_TObjectList_AddEmitsStore;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTObjectListUse);
-  AssertTrue('TObjectList.Add emits storel for Pointer element',
-    Pos('storel', IR) > 0);
-end;
-
-procedure TCollectionTests.TestCodegen_TObjectList_GetEmitsLoad;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTObjectListGet);
-  AssertTrue('TObjectList.Get emits loadl for Pointer element',
-    Pos('loadl', IR) > 0);
-end;
-
-procedure TCollectionTests.TestCodegen_TObjectList_GrowEmitsRealloc;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTObjectListUse);
-  AssertTrue('TObjectList.Grow() emits _BlaiseReallocMem call',
-    Pos('call $_BlaiseReallocMem', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { TStringList                                                           }
 { ------------------------------------------------------------------ }
@@ -449,34 +327,6 @@ end;
 procedure TCollectionTests.TestSemantic_TStringList_Compiles;
 begin
   SemanticOK(SrcTStringListUse);
-end;
-
-procedure TCollectionTests.TestCodegen_TStringList_AddEmitsStringStore;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTStringListUse);
-  { String ARC: Add must emit _StringAddRef for the stored string }
-  AssertTrue('TStringList.Add emits _StringAddRef for stored string',
-    Pos('_StringAddRef', IR) > 0);
-end;
-
-procedure TCollectionTests.TestCodegen_TStringList_FindEmitsCompare;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTStringListFind);
-  AssertTrue('TStringList.Find uses CompareText RTL call',
-    Pos('_StringCompareText', IR) > 0);
-end;
-
-procedure TCollectionTests.TestCodegen_TStringList_ZeroMemInGrow;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTStringListUse);
-  AssertTrue('TStringList.Grow() emits memset for zero-init of new string slots',
-    Pos('call $memset', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -656,42 +506,6 @@ begin
   SemanticOK(SrcSaveToFile);
 end;
 
-procedure TCollectionTests.TestCodegen_TStringList_TextGetCallsGetText;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTextGet);
-  AssertTrue('Text read emits GetText getter call',
-    Pos('TStringList_GetText', IR) > 0);
-end;
-
-procedure TCollectionTests.TestCodegen_TStringList_TextSetCallsSetText;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcTextSet);
-  AssertTrue('Text write emits SetText setter call',
-    Pos('TStringList_SetText', IR) > 0);
-end;
-
-procedure TCollectionTests.TestCodegen_TStringList_LoadFromFileCallsReadFile;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcLoadFromFile);
-  AssertTrue('LoadFromFile body calls _ReadFile',
-    Pos('_ReadFile', IR) > 0);
-end;
-
-procedure TCollectionTests.TestCodegen_TStringList_SaveToFileCallsWriteFile;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcSaveToFile);
-  AssertTrue('SaveToFile body calls _WriteFile',
-    Pos('_WriteFile', IR) > 0);
-end;
-
 { ------------------------------------------------------------------ }
 { Strings[i] / Objects[i] indexed properties                           }
 { ------------------------------------------------------------------ }
@@ -714,42 +528,6 @@ end;
 procedure TCollectionTests.TestSemantic_TStringList_ObjectsIndexedWrite;
 begin
   SemanticOK(SrcObjectsWrite);
-end;
-
-procedure TCollectionTests.TestCodegen_TStringList_StringsReadCallsGet;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcStringsRead);
-  AssertTrue('Strings[i] read emits Get getter call',
-    Pos('TStringList_Get', IR) > 0);
-end;
-
-procedure TCollectionTests.TestCodegen_TStringList_StringsWriteCallsPut;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcStringsWrite);
-  AssertTrue('Strings[i] write emits Put setter call',
-    Pos('TStringList_Put', IR) > 0);
-end;
-
-procedure TCollectionTests.TestCodegen_TStringList_ObjectsReadCallsGetObject;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcObjectsRead);
-  AssertTrue('Objects[i] read emits GetObject getter call',
-    Pos('TStringList_GetObject', IR) > 0);
-end;
-
-procedure TCollectionTests.TestCodegen_TStringList_ObjectsWriteCallsSetObject;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcObjectsWrite);
-  AssertTrue('Objects[i] write emits SetObject setter call',
-    Pos('TStringList_SetObject', IR) > 0);
 end;
 
 initialization
