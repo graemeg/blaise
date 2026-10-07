@@ -176,6 +176,9 @@ type
     FCurEnvCaptured: TStringList; { borrowed: the current routine's
                                    EnvCaptured -- names living in a PACKED env
                                    field rather than an 8-byte frame slot }
+    FEnvPacked: TStringList;     { owned: EnvCaptured + BlockEnvCaptured -- every
+                                   name living in a PACKED env, when a routine
+                                   has block envs (FCurEnvCaptured points here) }
     FEnvCaps: TStringList;       { owned: CapturedVars + EnvCaptured merged for
                                    a routine with a closure env (FCapturedVars
                                    points here while it is emitted) }
@@ -274,6 +277,7 @@ type
     function  EmitClosureResultCall(ACallDecl: TMethodDecl; const AName: string;
       AArgs: TObjectList): string;
     procedure EmitEnvPrologue(ADecl: TMethodDecl);
+    procedure EmitVarDeclStmt(AStmt: TVarDeclStmt);
     function  IsEnvCaptured(const AName: string): Boolean;
     procedure EmitCapturedLoad(AIdent: TIdentExpr);
     procedure EmitEnvCleanupFn(AEnv: TRecordTypeDesc);
@@ -780,11 +784,13 @@ begin
   FForN        := 0;
   FCapturedVars := nil;   { borrowed ref to ADecl.CapturedVars; not owned }
   FEnvCaps := TStringList.Create();
+  FEnvPacked := TStringList.Create();
 end;
 
 destructor TArm64Backend.Destroy;
 begin
   FEnvCaps.Free();
+  FEnvPacked.Free();
   FGlobalSize.Free();
   FRecGlobals.Free();
   FRecLocals.Free();
@@ -2155,6 +2161,77 @@ begin
   if not FFrame.ContainsKey(Result) then
     AddLocal(Result, 16);
   EmitCall(ACallDecl, AName, AArgs, Result);
+end;
+
+{ Block-scoped `var` statement (Phase 4), mirroring x86-64: (1) at the
+  env-allocation site the previous execution's block env is released and a
+  fresh one allocated, refilling the group's '_cap_' pointer slots -- so a
+  closure made in one iteration keeps that iteration's variables; (2) a
+  non-captured name re-zeroes its frame slot, releasing a managed old value;
+  (3) the optional initialiser runs as an ordinary (redirect-aware)
+  assignment. }
+procedure TArm64Backend.EmitVarDeclStmt(AStmt: TVarDeclStmt);
+var
+  Env: TRecordTypeDesc;
+  F: TFieldInfo;
+  Name: string;
+  T: TTypeDesc;
+  I: Integer;
+begin
+  if AStmt.IsEnvAllocSite then
+  begin
+    Env := TRecordTypeDesc(AStmt.EnvType);
+    if Env = nil then
+      NotYet('block env without an env record', AStmt);
+    EmitLoadSlot('x0', AStmt.EnvSlotName);
+    EmitCallSym('_ClassRelease');
+    EmitIntLiteral('x0', Env.TotalSize());
+    Self.Emit(Format(#9'adrp x1, %s@PAGE',
+      [FieldCleanupSym(CodegenMangle(Env.Name))]));
+    Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF',
+      [FieldCleanupSym(CodegenMangle(Env.Name))]));
+    EmitCallSym('_ClassAlloc');
+    EmitStoreSlot('x0', AStmt.EnvSlotName);
+    EmitCallSym('_ClassAddRef');
+    for I := 0 to Env.Fields.Count - 1 do
+    begin
+      F := TFieldInfo(Env.Fields.Items[I]);
+      EmitLoadSlot('x0', AStmt.EnvSlotName);
+      if F.Offset <> 0 then
+        EmitAddSubImm('add', 'x0', 'x0', F.Offset);
+      EmitStoreSlot('x0', '_cap_' + F.Name);
+    end;
+  end;
+  Name := AStmt.Decl.Names.Strings[0];
+  T := AStmt.Decl.ResolvedType;
+  if not IsCaptured(Name) and (T <> nil) then
+  begin
+    if T.IsString() or (T.Kind in [tyClass, tyDynArray]) then
+    begin
+      EmitLoadSlot('x0', Name);
+      if T.IsString() then
+        EmitCallSym('_StringRelease')
+      else if T.Kind = tyClass then
+        EmitCallSym('_ClassRelease')
+      else
+        EmitCallSym('_DynArrayRelease');
+      EmitStoreSlot('xzr', Name);
+    end
+    else if (T.Kind in [tyRecord, tyStaticArray]) or
+            IsMethodPtrType(T) or (T.Kind = tyInterface) then
+    begin
+      if AggHasManaged(T) or IsMethodPtrType(T) or (T.Kind = tyInterface) then
+        NotYet('block-scoped variable of a managed aggregate type', AStmt);
+      EmitSlotAddr('x0', Name);
+      Self.Emit(#9'mov x1, #0');
+      EmitIntLiteral('x2', T.RawSize());
+      EmitCallSym('memset');
+    end
+    else
+      EmitStoreSlot('xzr', Name);
+  end;
+  if AStmt.InitAssign <> nil then
+    EmitStmt(AStmt.InitAssign);
 end;
 
 procedure TArm64Backend.EmitEnvPrologue(ADecl: TMethodDecl);
@@ -6333,6 +6410,11 @@ begin
   if AStmt is TMethodCallStmt then
   begin
     EmitMethodCallStmt(TMethodCallStmt(AStmt));
+    Exit;
+  end;
+  if AStmt is TVarDeclStmt then
+  begin
+    EmitVarDeclStmt(TVarDeclStmt(AStmt));
     Exit;
   end;
   if AStmt is TInheritedCallStmt then
@@ -10683,6 +10765,18 @@ begin
          not IsLocal('Self') then
         AddLocal('Self', 8);
     end;
+    { Block-scoped captures (Phase 4): one tracking slot per block env (the
+      env of the block's CURRENT execution) and a '_cap_' pointer slot per
+      captured block var, refilled each time the block's env is allocated
+      (EmitVarDeclStmt).  Mirrors x86-64. }
+    if ADecl.BlockEnvTypes <> nil then
+      for I := 0 to ADecl.BlockEnvTypes.Count - 1 do
+        if not IsLocal('__envp_b' + IntToStr(I)) then
+          AddLocal('__envp_b' + IntToStr(I), 8);
+    if ADecl.BlockEnvCaptured <> nil then
+      for I := 0 to ADecl.BlockEnvCaptured.Count - 1 do
+        if not IsLocal('_cap_' + ADecl.BlockEnvCaptured.Strings[I]) then
+          AddLocal('_cap_' + ADecl.BlockEnvCaptured.Strings[I], 8);
     for I := 0 to ADecl.Params.Count - 1 do
     begin
       Par := TMethodParam(ADecl.Params.Items[I]);
@@ -11007,17 +11101,27 @@ begin
   end;
   FCapturedVars := ADecl.CapturedVars;
   FCurEnvCaptured := ADecl.EnvCaptured;
-  if (ADecl.BlockEnvTypes <> nil) or (ADecl.BlockEnvCaptured <> nil) then
-    NotYet('closure capture of a block-scoped variable', ADecl);
-  if ADecl.EnvCaptured <> nil then
+  if (ADecl.EnvCaptured <> nil) or (ADecl.BlockEnvCaptured <> nil) then
   begin
-    { the routine's own nested-routine captures plus its env captures: both
-      redirect through '_cap_<Name>' }
+    { the routine's own nested-routine captures plus its env and block-env
+      captures: all redirect through '_cap_<Name>'; the env ones are PACKED
+      (width-exact access) }
     FEnvCaps.Clear();
+    FEnvPacked.Clear();
     if ADecl.CapturedVars <> nil then
       FEnvCaps.AddStrings(ADecl.CapturedVars);
-    FEnvCaps.AddStrings(ADecl.EnvCaptured);
+    if ADecl.EnvCaptured <> nil then
+    begin
+      FEnvCaps.AddStrings(ADecl.EnvCaptured);
+      FEnvPacked.AddStrings(ADecl.EnvCaptured);
+    end;
+    if ADecl.BlockEnvCaptured <> nil then
+    begin
+      FEnvCaps.AddStrings(ADecl.BlockEnvCaptured);
+      FEnvPacked.AddStrings(ADecl.BlockEnvCaptured);
+    end;
     FCapturedVars := FEnvCaps;
+    FCurEnvCaptured := FEnvPacked;
   end;
   FIsFunction := ADecl.ResolvedReturnType <> nil;
   FResultFloat := FIsFunction and
@@ -11505,10 +11609,22 @@ begin
 
   if ADecl.EnvCaptured <> nil then
     EmitEnvPrologue(ADecl);
+  { block envs start empty: the first execution of each block allocates }
+  if ADecl.BlockEnvTypes <> nil then
+    for I := 0 to ADecl.BlockEnvTypes.Count - 1 do
+      EmitStoreSlot('xzr', '__envp_b' + IntToStr(I));
 
   EmitStmtList(ADecl.Body.Stmts);
 
   Self.Emit(FExitLabel + ':');
+  { drop each block env's frame reference (the last execution's env lives
+    on only if an escaped closure holds it) }
+  if ADecl.BlockEnvTypes <> nil then
+    for I := 0 to ADecl.BlockEnvTypes.Count - 1 do
+    begin
+      EmitLoadSlot('x0', '__envp_b' + IntToStr(I));
+      EmitCallSym('_ClassRelease');
+    end;
   { The enclosing frame drops its strong reference to the closure env; the
     env lives on iff an escaped closure still holds it.  A thunk BORROWS its
     env from the fat value it was called through -- no release. }
@@ -11651,6 +11767,9 @@ begin
   BodyBuf.Free();
   if (ADecl.EnvCaptured <> nil) and not ADecl.IsAnonThunk then
     EmitEnvCleanupFn(TRecordTypeDesc(ADecl.EnvType));
+  if ADecl.BlockEnvTypes <> nil then
+    for I := 0 to ADecl.BlockEnvTypes.Count - 1 do
+      EmitEnvCleanupFn(TRecordTypeDesc(ADecl.BlockEnvTypes.Items[I]));
   FFrame.Clear();
   FFrameSize := 0;
   FCapturedVars := nil;   { leg 17: end the capture window for this routine }
