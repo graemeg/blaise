@@ -3780,6 +3780,7 @@ end;
 procedure TArm64Backend.EmitExprToX0(AExpr: TASTExpr);
 var
   BE: TBinaryExpr;
+  FA: TFieldAccessExpr;
   JTmp: string;
   DivGuardOk: string;
   DivUnsigned: Boolean;
@@ -5744,6 +5745,39 @@ begin
       Exit;
     end;
     EmitSmallSetLiteral(TArrayLiteralExpr(AExpr));
+    Exit;
+  end;
+  if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsConstant and
+     (TFieldAccessExpr(AExpr).ConstArraySymbol <> '') then
+  begin
+    { TypeName.ConstArray[I] / bare TypeName.ConstArray: the semantic pass
+      folds the subscript into the node (PropIndexExpr) and names the data
+      blob (ConstArraySymbol) -- element load, or the blob's address }
+    FA := TFieldAccessExpr(AExpr);
+    if (FA.PropIndexExpr <> nil) and (FA.ConstArrayType <> nil) then
+    begin
+      Self.EmitExprToX0(FA.PropIndexExpr);
+      if TStaticArrayTypeDesc(FA.ConstArrayType).LowBound <> 0 then
+      begin
+        EmitIntLiteral('x9', TStaticArrayTypeDesc(FA.ConstArrayType).LowBound);
+        Self.Emit(#9'sub x0, x0, x9');
+      end;
+      EmitIntLiteral('x9',
+        TStaticArrayTypeDesc(FA.ConstArrayType).ElementType.RawSize());
+      Self.Emit(#9'mul x0, x0, x9');
+      Self.Emit(Format(#9'adrp x9, %s@PAGE', [CodegenMangle(FA.ConstArraySymbol)]));
+      Self.Emit(Format(#9'add x9, x9, %s@PAGEOFF',
+        [CodegenMangle(FA.ConstArraySymbol)]));
+      Self.Emit(#9'add x0, x9, x0');
+      if TStaticArrayTypeDesc(FA.ConstArrayType).ElementType.IsFloat() then
+        NotYet('float element of a member const array in integer context',
+          AExpr);
+      EmitElemLoad(TStaticArrayTypeDesc(FA.ConstArrayType).ElementType);
+      Exit;
+    end;
+    Self.Emit(Format(#9'adrp x0, %s@PAGE', [CodegenMangle(FA.ConstArraySymbol)]));
+    Self.Emit(Format(#9'add x0, x0, %s@PAGEOFF',
+      [CodegenMangle(FA.ConstArraySymbol)]));
     Exit;
   end;
   if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsConstant then
@@ -13389,6 +13423,7 @@ var
   CD: TConstDecl;
   Decl: TMethodDecl;
   Lbl, Dir: string;
+  MemberConsts: TObjectList;
 
   procedure EmitOne(ACD: TConstDecl; const ALbl: string);
   var
@@ -13495,6 +13530,31 @@ begin
         Lbl := CodegenMangle(CD.ResolvedSetQbeName)
       else
         Lbl := CodegenMangle(CD.Name);
+      EmitOne(CD, Lbl);
+    end;
+  end;
+  { MEMBER const arrays of this block's classes and records: the semantic
+    pass mints every reference as <TypeName>_<ConstName> (ConstArraySymbol on
+    the field-access node).  Always exported, as on x86-64 -- a unit's class
+    const is read from other separately-compiled objects.  Without this the
+    label was never defined and a read returned 0. }
+  for I := 0 to ABlock.TypeDecls.Count - 1 do
+  begin
+    if TTypeDecl(ABlock.TypeDecls.Items[I]).Def is TClassTypeDef then
+      MemberConsts := TClassTypeDef(TTypeDecl(ABlock.TypeDecls.Items[I]).Def).ConstDecls
+    else if TTypeDecl(ABlock.TypeDecls.Items[I]).Def is TRecordTypeDef then
+      MemberConsts := TRecordTypeDef(TTypeDecl(ABlock.TypeDecls.Items[I]).Def).ConstDecls
+    else
+      MemberConsts := nil;
+    if MemberConsts = nil then Continue;
+    for J := 0 to MemberConsts.Count - 1 do
+    begin
+      CD := TConstDecl(MemberConsts.Items[J]);
+      if not CD.IsArrayConst then Continue;
+      Lbl := CodegenMangle(TTypeDecl(ABlock.TypeDecls.Items[I]).Name + '_' +
+        CD.Name);
+      if not CD.IsExportedConst then
+        Self.Emit(Format('.globl %s', [Lbl]));
       EmitOne(CD, Lbl);
     end;
   end;
