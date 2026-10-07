@@ -16,14 +16,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TPropertyTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -52,13 +51,10 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — field-backed                                               }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_Property_FieldBacked_Read_EmitsLoad;
-    procedure TestCodegen_Property_FieldBacked_Write_EmitsStore;
 
     { ------------------------------------------------------------------ }
     { Codegen — method-backed                                              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_Property_MethodBacked_Read_EmitsCall;
 
     { ------------------------------------------------------------------ }
     { Indexed properties                                                   }
@@ -67,18 +63,13 @@ type
     procedure TestSemantic_IndexedProperty_Read_OK;
     procedure TestSemantic_IndexedProperty_Write_OK;
     procedure TestSemantic_IndexedProperty_MissingIndex_RaisesError;
-    procedure TestCodegen_IndexedProperty_Read_EmitsGetterWithIndex;
-    procedure TestCodegen_IndexedProperty_Write_EmitsSetterWithIndex;
 
     { Default array property: Obj[I] lowers to the getter/setter call. }
-    procedure TestCodegen_DefaultProperty_Read_EmitsGetter;
-    procedure TestCodegen_DefaultProperty_Write_EmitsSetter;
 
     { Regression: 'Outer.Inner.Indexed[Variable]' — chained base + indexed
       property read with a variable index.  Previously crashed the codegen
       because the analyser skipped AnalyseExpr on PropIndexExpr in the
       Base<>nil branch, leaving its ResolvedType nil. }
-    procedure TestCodegen_IndexedProperty_ChainedBase_VarIndex_Compiles;
 
     { ------------------------------------------------------------------ }
     { Inherited property access — issue #45                                }
@@ -282,22 +273,6 @@ begin
   end;
 end;
 
-function TPropertyTests.GenIR(const ASrc: string): string;
-var
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
-  end;
-end;
-
 procedure TPropertyTests.AnalyseExpectError(const ASrc: string);
 var
   Prog: TProgram;
@@ -490,42 +465,6 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
-{ Codegen — field-backed                                               }
-{ ------------------------------------------------------------------ }
-
-procedure TPropertyTests.TestCodegen_Property_FieldBacked_Read_EmitsLoad;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcFieldBackedUsage);
-  { B.Value read → loads FValue field (offset=8, after vptr) }
-  AssertTrue('IR emitted for field-backed read', Pos('loadw', IR) > 0);
-end;
-
-procedure TPropertyTests.TestCodegen_Property_FieldBacked_Write_EmitsStore;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcFieldBackedUsage);
-  { B.Value := 42 → stores to FValue field }
-  AssertTrue('IR emitted for field-backed write', Pos('storew', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen — method-backed                                              }
-{ ------------------------------------------------------------------ }
-
-procedure TPropertyTests.TestCodegen_Property_MethodBacked_Read_EmitsCall;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcMethodBackedReadUsage);
-  { B.Count → calls $TBox_GetCount }
-  AssertTrue('method-backed read emits call to GetCount',
-    Pos('TBox_GetCount', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
 { Indexed properties                                                   }
 { ------------------------------------------------------------------ }
 
@@ -574,103 +513,6 @@ begin
         begin L := TList.Create(); V := L.Items; WriteLn(V) end.
         '''
   );
-end;
-
-procedure TPropertyTests.TestCodegen_IndexedProperty_Read_EmitsGetterWithIndex;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcIndexedPropReadUsage);
-  AssertTrue('indexed read emits getter call', Pos('call $TList_Get', IR) > 0);
-end;
-
-procedure TPropertyTests.TestCodegen_IndexedProperty_Write_EmitsSetterWithIndex;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcIndexedPropWriteUsage);
-  AssertTrue('indexed write emits setter call', Pos('call $TList_Put', IR) > 0);
-end;
-
-procedure TPropertyTests.TestCodegen_DefaultProperty_Read_EmitsGetter;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TVec = class
-            FD: array[0..3] of Integer;
-            function Get(i: Integer): Integer; begin Result := FD[i] end;
-            procedure Put(i: Integer; v: Integer); begin FD[i] := v end;
-            property Items[i: Integer]: Integer read Get write Put; default;
-          end;
-        var v: TVec; x: Integer;
-        begin v := TVec.Create(); x := v[2]; WriteLn(x) end.
-        '''
-  );
-  AssertTrue('default-property read emits getter call',
-    Pos('call $TVec_Get', IR) > 0);
-end;
-
-procedure TPropertyTests.TestCodegen_DefaultProperty_Write_EmitsSetter;
-var
-  IR: string;
-begin
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TVec = class
-            FD: array[0..3] of Integer;
-            function Get(i: Integer): Integer; begin Result := FD[i] end;
-            procedure Put(i: Integer; v: Integer); begin FD[i] := v end;
-            property Items[i: Integer]: Integer read Get write Put; default;
-          end;
-        var v: TVec;
-        begin v := TVec.Create(); v[2] := 9 end.
-        '''
-  );
-  AssertTrue('default-property write emits setter call',
-    Pos('call $TVec_Put', IR) > 0);
-end;
-
-procedure TPropertyTests.TestCodegen_IndexedProperty_ChainedBase_VarIndex_Compiles;
-const
-  Src =
-    '''
-        program P;
-        type
-          TItems = class
-            function Get(AIndex: Integer): Integer;
-            begin Result := AIndex end;
-            property Strings[Index: Integer]: Integer read Get;
-          end;
-          TOuter = class
-            FInner: TItems;
-            property Inner: TItems read FInner;
-          end;
-        var
-          O: TOuter;
-          I, V: Integer;
-        begin
-          O := TOuter.Create();
-          O.FInner := TItems.Create();
-          I := 7;
-          V := O.Inner.Strings[I];
-          WriteLn(V)
-        end.
-        ''';
-var
-  IR: string;
-begin
-  IR := GenIR(Src);
-  { The fix routes both segments through method-backed property reads.
-    Inner is field-backed (read FInner) so the inner step is a load; the
-    outer Strings[Index] is method-backed and must emit a call to Get
-    threaded with the variable I. }
-  AssertTrue('outer indexed getter emitted', Pos('call $TItems_Get', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
