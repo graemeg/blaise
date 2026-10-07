@@ -21,6 +21,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_StringBuiltins_Combined;
     procedure TestRun_StringOps_Length;
     procedure TestRun_StringOps_Pos;
     procedure TestRun_StringOps_Copy;
@@ -810,6 +811,60 @@ begin
     '  WriteLn(Ord(S[2]))' + LE +
     'end.';
   AssertRunsOnAll(Src, '5' + LE + '233' + LE, 0);
+end;
+
+procedure TE2EStringOpsTests.TestRun_StringBuiltins_Combined;
+const
+  {
+    The string built-ins, 0-based: Length, Pos, Copy, Upper/LowerCase, SameText,
+    IntToStr / StrToInt, Format with an Integer, a string and a Double argument,
+    character subscripts compared against a char literal and a #nn literal,
+    Delete, SetLength, Low / High, and assignment through a var string
+    parameter (retain the new value, release the old one -- leak-checked). }
+  Src = '''
+    program P;
+    procedure Put(var S: string; const A, B: string);
+    begin
+      S := A + B
+    end;
+    var S, T, U, X: string; N: Integer; D: Double;
+    begin
+      S := 'Hello' + ' World';
+      WriteLn(Length(S), ' ', Pos('World', S), ' ', Pos('xyz', S), ' ', Copy(S, 6, 5));
+      WriteLn(UpperCase(S), ' ', LowerCase(S));
+      WriteLn(SameText('ABC', 'abc'), ' ', SameText('abc', 'abd'));
+      N := StrToInt('123');
+      WriteLn(IntToStr(-42), ' ', N + 1);
+      T := 'hi';
+      D := 3.5;
+      WriteLn(Format('value=%d', 42), ' ', Format('say %s', T), ' ', Format('v=%.1f', D));
+      N := Ord(S[0]);
+      Write(N);
+      if S[0] = 'H' then Write(' H');
+      if S[5] = #32 then Write(' space');
+      WriteLn();
+      T := 'hel' + 'lo';
+      Delete(T, 2, 3);
+      U := 'hel' + 'lo';
+      SetLength(U, 3);
+      WriteLn(T, ' ', U, ' ', Low(S), ' ', High(S), ' ', High(X));
+      Put(X, 'first', '-call');
+      Put(X, 'second', '-call');
+      WriteLn(X)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '11 6 -1 World' + LE +
+    'HELLO WORLD hello world' + LE +
+    'True False' + LE +
+    '-42 124' + LE +
+    'value=42 say hi v=3.5' + LE +
+    '72 H space' + LE +
+    'he hel 0 10 -1' + LE +
+    'second-call' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'second-call');
 end;
 
 initialization
