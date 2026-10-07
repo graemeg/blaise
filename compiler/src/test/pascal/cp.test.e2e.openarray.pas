@@ -25,6 +25,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_OpenArray_StringLiteral_HighAndForwarding;
     { Inline array literal call site }
     procedure TestRun_OpenArray_Sum;
     procedure TestRun_OpenArray_HighLow;
@@ -779,6 +780,41 @@ begin
     ''',
     '102' + #10 + '1003' + #10 + '1' + #10 + 'len=2' + #10 +
     '2' + #10 + 'len=1' + #10, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_OpenArray_StringLiteral_HighAndForwarding;
+const
+  {
+    Replaces the openarray GenIR checks: a string-element literal passes its
+    (data, high) pair -- High is 1 for two elements and 0 for one -- every element
+    is stored, and a string open array forwarded to another routine keeps both. }
+  Src = '''
+    program P;
+    procedure Inner(const B: array of string);
+    var I: Integer;
+    begin
+      Write(High(B), ':');
+      for I := Low(B) to High(B) do
+        Write(' ', B[I]);
+      WriteLn()
+    end;
+    procedure Outer(const A: array of string);
+    begin
+      WriteLn(Length(A), ' ', A[0]);
+      Inner(A)
+    end;
+    begin
+      Outer(['hello', 'world']);
+      Outer(['only'])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '2 hello' + #10 +
+    '1: hello world' + #10 +
+    '1 only' + #10 +
+    '0: only' + #10, 0);
 end;
 
 initialization

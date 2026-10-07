@@ -15,14 +15,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TOpenArrayTests = class(TTestCase)
   private
     function  ParseSrc(const ASrc: string): TProgram;
     function  AnalyseSrc(const ASrc: string): TProgram;
-    function  GenIR(const ASrc: string): string;
   published
     { ------------------------------------------------------------------ }
     { Parser                                                               }
@@ -44,12 +43,6 @@ type
     { ------------------------------------------------------------------ }
     { Codegen                                                              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_OpenArray_TwoParamsInSignature;
-    procedure TestCodegen_OpenArray_TwoAllocsEmitted;
-    procedure TestCodegen_High_LoadsHighSlot;
-    procedure TestCodegen_Low_EmitsZero;
-    procedure TestCodegen_Subscript_PointerArithmetic;
-    procedure TestCodegen_Forwarding_PassesTwoArgs;
 
     { ------------------------------------------------------------------ }
     { Array literal call site                                              }
@@ -59,10 +52,6 @@ type
     procedure TestParse_ArrayLiteral_SingleElement;
     procedure TestSemantic_ArrayLiteral_ResolvesToOpenArray;
     procedure TestSemantic_ArrayLiteral_ElementType;
-    procedure TestCodegen_ArrayLiteral_AllocsBuffer;
-    procedure TestCodegen_ArrayLiteral_StoresElements;
-    procedure TestCodegen_ArrayLiteral_HighIndexIsOne;
-    procedure TestCodegen_ArrayLiteral_SingleElem_HighZero;
 
     { ------------------------------------------------------------------ }
     { Length() on open-array and static-array parameters                  }
@@ -73,18 +62,13 @@ type
     { Length(A) on a static-array param emits a compile-time constant. }
     procedure TestSemantic_Length_StaticArray_Accepted;
     { IR: Length(open-array) loads the _high slot and adds 1. }
-    procedure TestCodegen_Length_OpenArray_EmitsHighPlusOne;
     { IR: Length(static-array) emits a constant equal to the element count. }
-    procedure TestCodegen_Length_StaticArray_EmitsConstant;
 
     { ------------------------------------------------------------------ }
     { Static array coerced to open-array parameter                         }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_StaticArrayToOpenArray_Accepted;
     procedure TestSemantic_StaticArrayToOpenArray_NonZeroBase_Accepted;
-    procedure TestCodegen_StaticArrayToOpenArray_PassesBasePtr;
-    procedure TestCodegen_StaticArrayToOpenArray_PassesCompileTimeHigh;
-    procedure TestCodegen_StaticArrayToOpenArray_NonZeroBase_HighIsFour;
   end;
 
 implementation
@@ -117,23 +101,6 @@ begin
   end;
 end;
 
-function TOpenArrayTests.GenIR(const ASrc: string): string;
-var P: TProgram; CG: TCodeGenQBE;
-begin
-  P := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(P);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    P.Free();
-  end;
-end;
-
 { ------------------------------------------------------------------ }
 { Shared source snippets                                              }
 { ------------------------------------------------------------------ }
@@ -157,28 +124,6 @@ const
           H := High(A);
           L := Low(A);
           Result := H - L + 1
-        end;
-        begin end.
-        ''';
-
-  SrcSubscript =
-    '''
-        program OA;
-        function First(const A: array of string): string;
-        begin
-          Result := A[0]
-        end;
-        begin end.
-        ''';
-
-  SrcForward =
-    '''
-        program OA;
-        procedure Inner(const B: array of string);
-        begin end;
-        procedure Outer(const A: array of string);
-        begin
-          Inner(A)
         end;
         begin end.
         ''';
@@ -357,61 +302,6 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
-{ Codegen tests                                                       }
-{ ------------------------------------------------------------------ }
-
-procedure TOpenArrayTests.TestCodegen_OpenArray_TwoParamsInSignature;
-var IR: string;
-begin
-  IR := GenIR(SrcPrintFirst);
-  { Open array emits data pointer + high index as two separate QBE params }
-  AssertTrue('data pointer param present', Pos('l %_par_A,', IR) > 0);
-  AssertTrue('high-index param present',   Pos('l %_par_A_high', IR) > 0);
-end;
-
-procedure TOpenArrayTests.TestCodegen_OpenArray_TwoAllocsEmitted;
-var IR: string;
-begin
-  IR := GenIR(SrcPrintFirst);
-  AssertTrue('data pointer slot allocated',  Pos('%_var_A =l alloc8', IR) > 0);
-  AssertTrue('high-index slot allocated',    Pos('%_var_A_high =l alloc8', IR) > 0);
-  AssertTrue('data pointer stored',          Pos('storel %_par_A, %_var_A', IR) > 0);
-  AssertTrue('high-index stored',            Pos('storel %_par_A_high, %_var_A_high', IR) > 0);
-end;
-
-procedure TOpenArrayTests.TestCodegen_High_LoadsHighSlot;
-var IR: string;
-begin
-  IR := GenIR(SrcHighLow);
-  AssertTrue('High(A) loads high slot', Pos('loadl %_var_A_high', IR) > 0);
-end;
-
-procedure TOpenArrayTests.TestCodegen_Low_EmitsZero;
-var IR: string;
-begin
-  IR := GenIR(SrcHighLow);
-  AssertTrue('Low(A) emits constant 0', Pos('copy 0', IR) > 0);
-end;
-
-procedure TOpenArrayTests.TestCodegen_Subscript_PointerArithmetic;
-var IR: string;
-begin
-  IR := GenIR(SrcSubscript);
-  { A[0] must load base pointer, multiply index by element size, add offset, load }
-  AssertTrue('loads base pointer',    Pos('loadl %_var_A', IR) > 0);
-  AssertTrue('pointer add emitted',   Pos('=l add', IR) > 0);
-end;
-
-procedure TOpenArrayTests.TestCodegen_Forwarding_PassesTwoArgs;
-var IR: string;
-begin
-  IR := GenIR(SrcForward);
-  { Inner(A) from Outer must pass both data ptr and high from A's two slots }
-  AssertTrue('forwards data pointer',  Pos('loadl %_var_A', IR) > 0);
-  AssertTrue('forwards high index',    Pos('loadl %_var_A_high', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
 { Array literal tests                                               }
 { ------------------------------------------------------------------ }
 
@@ -474,40 +364,6 @@ begin
   finally P.Free(); end;
 end;
 
-procedure TOpenArrayTests.TestCodegen_ArrayLiteral_AllocsBuffer;
-var IR: string;
-begin
-  IR := GenIR(SrcLiteralCall);
-  AssertTrue('buffer alloc emitted', Pos('alloc8', IR) > 0);
-end;
-
-procedure TOpenArrayTests.TestCodegen_ArrayLiteral_StoresElements;
-var IR: string;
-begin
-  IR := GenIR(SrcLiteralCall);
-  { Two string elements — each needs a storel }
-  AssertTrue('first storel emitted',  Pos('storel', IR) > 0);
-  { Count occurrences: need at least 2 storel instructions }
-  AssertTrue('second storel emitted',
-    PosEx('storel', IR, Pos('storel', IR) + 1) > 0);
-end;
-
-procedure TOpenArrayTests.TestCodegen_ArrayLiteral_HighIndexIsOne;
-var IR: string;
-begin
-  IR := GenIR(SrcLiteralCall);
-  { Two-element literal → high index = 1 }
-  AssertTrue('high index 1 in call', Pos('l 1', IR) > 0);
-end;
-
-procedure TOpenArrayTests.TestCodegen_ArrayLiteral_SingleElem_HighZero;
-var IR: string;
-begin
-  IR := GenIR(SrcLiteralSingle);
-  { Single-element literal → high index = 0 }
-  AssertTrue('high index 0 in call', Pos('l 0', IR) > 0);
-end;
-
 procedure TOpenArrayTests.TestSemantic_Length_OpenArray_Accepted;
 var P: TProgram;
 begin
@@ -522,23 +378,6 @@ begin
   P := AnalyseSrc(SrcLengthStaticArray);
   P.Free();
   AssertTrue('no error raised', True);
-end;
-
-procedure TOpenArrayTests.TestCodegen_Length_OpenArray_EmitsHighPlusOne;
-var IR: string;
-begin
-  IR := GenIR(SrcLengthOpenArray);
-  { Length(A) = High(A) + 1: load _high slot then add 1 }
-  AssertTrue('loads _high slot', Pos('loadl %_var_A_high', IR) > 0);
-  AssertTrue('adds 1 for length', Pos('add', IR) > 0);
-end;
-
-procedure TOpenArrayTests.TestCodegen_Length_StaticArray_EmitsConstant;
-var IR: string;
-begin
-  IR := GenIR(SrcLengthStaticArray);
-  { array[1..5] has 5 elements — Length emits the constant 5 }
-  AssertTrue('constant 5 emitted', Pos('copy 5', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -592,30 +431,6 @@ begin
   P := AnalyseSrc(SrcStaticToOpenNonZero);
   P.Free();
   AssertTrue('non-zero-base static array passed to open-array param compiles', True);
-end;
-
-procedure TOpenArrayTests.TestCodegen_StaticArrayToOpenArray_PassesBasePtr;
-var IR: string;
-begin
-  IR := GenIR(SrcStaticToOpen);
-  { Call must pass exactly two l arguments: the array base pointer and the high index }
-  AssertTrue('call passes two l args', Pos('call $Show(l', IR) > 0);
-end;
-
-procedure TOpenArrayTests.TestCodegen_StaticArrayToOpenArray_PassesCompileTimeHigh;
-var IR: string;
-begin
-  IR := GenIR(SrcStaticToOpen);
-  { array[0..3]: high = 3 - 0 = 3, passed as compile-time constant }
-  AssertTrue('high index 3 in call', Pos(', l 3', IR) > 0);
-end;
-
-procedure TOpenArrayTests.TestCodegen_StaticArrayToOpenArray_NonZeroBase_HighIsFour;
-var IR: string;
-begin
-  IR := GenIR(SrcStaticToOpenNonZero);
-  { array[3..7]: high = 7 - 3 = 4, passed as compile-time constant }
-  AssertTrue('high index 4 in call', Pos(', l 4', IR) > 0);
 end;
 
 initialization
