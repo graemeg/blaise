@@ -14,14 +14,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
   TForInTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
     procedure AnalyseExpectError(const ASrc: string);
     { Analyse ASrc and return the concatenated semantic warnings (one per line).
       Used to assert the BUG-001 for-in write diagnostics fire (or don't). }
@@ -61,17 +60,8 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — class enumerator                                           }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_ForIn_HasForInCondLabel;
-    procedure TestCodegen_ForIn_HasForInBodyLabel;
-    procedure TestCodegen_ForIn_HasForInEndLabel;
-    procedure TestCodegen_ForIn_CallsGetEnumerator;
-    procedure TestCodegen_ForIn_CallsMoveNext;
-    procedure TestCodegen_ForIn_CallsGetCurrent;
-    procedure TestCodegen_ForIn_JnzOnMoveNextResult;
-    procedure TestCodegen_ForIn_JumpsBackToCond;
     { A record-typed Current must sret straight into the loop variable
       (regression for the record-property-read heap corruption). }
-    procedure TestCodegen_ForIn_RecordCurrent_SretsIntoLoopVar;
 
     { ------------------------------------------------------------------ }
     { Semantic — static array                                              }
@@ -83,14 +73,8 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — static array                                               }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_ArrayForIn_HasForInCondLabel;
-    procedure TestCodegen_ArrayForIn_HasForInEndLabel;
-    procedure TestCodegen_ArrayForIn_LoadsElement;
     { Issue #169: a record loop variable is copied by value (managed field ARC),
       not truncated to a scalar load. }
-    procedure TestCodegen_ArrayForIn_RecordElement_CopiesByValue;
-    procedure TestCodegen_ArrayForIn_JumpsBackToCond;
-    procedure TestCodegen_ArrayForIn_NonZeroBased_AdjustsIndex;
 
     { ------------------------------------------------------------------ }
     { Semantic — set                                                       }
@@ -102,13 +86,6 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — set                                                        }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_SetForIn_HasForInCondLabel;
-    procedure TestCodegen_SetForIn_HasForInEndLabel;
-    procedure TestCodegen_SetForIn_HasForInNextLabel;
-    procedure TestCodegen_SetForIn_TestsBitWithShr;
-    procedure TestCodegen_SetForIn_TestsBitWithAnd1;
-    procedure TestCodegen_SetForIn_JumpsBackToCond;
-    procedure TestCodegen_SetForIn_EvaluatesMaskOnce;
 
     { ------------------------------------------------------------------ }
     { Semantic — dynamic array                                             }
@@ -119,11 +96,6 @@ type
     { ------------------------------------------------------------------ }
     { Codegen — dynamic array                                              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_DynArrayForIn_HasForInCondLabel;
-    procedure TestCodegen_DynArrayForIn_HasForInEndLabel;
-    procedure TestCodegen_DynArrayForIn_CallsDynArrayLength;
-    procedure TestCodegen_DynArrayForIn_LoadsElement;
-    procedure TestCodegen_DynArrayForIn_JumpsBackToCond;
 
     { ------------------------------------------------------------------ }
     { Semantic — string                                                    }
@@ -133,21 +105,6 @@ type
     procedure TestSemantic_StringForIn_NonOrdinalVar_RaisesError;
     procedure TestSemantic_StringForIn_WordVar_RaisesError;
     procedure TestSemantic_StringForIn_SmallIntVar_RaisesError;
-
-    { ------------------------------------------------------------------ }
-    { Codegen — string byte iteration                                      }
-    { ------------------------------------------------------------------ }
-    procedure TestCodegen_StringForIn_HasForInCondLabel;
-    procedure TestCodegen_StringForIn_HasForInEndLabel;
-    procedure TestCodegen_StringForIn_LoadsByteWithLoadub;
-    procedure TestCodegen_StringForIn_JumpsBackToCond;
-    procedure TestCodegen_StringForIn_UsesLengthFromHeader;
-
-    { ------------------------------------------------------------------ }
-    { Codegen — string codepoint iteration                                 }
-    { ------------------------------------------------------------------ }
-    procedure TestCodegen_CodePointForIn_CallsUtf8DecodeAt;
-    procedure TestCodegen_CodePointForIn_HasForInCondLabel;
   end;
 
 implementation
@@ -192,23 +149,6 @@ begin
     Result := A.GetWarnings().Text;
   finally
     A.Free();
-    Prog.Free();
-  end;
-end;
-
-function TForInTests.GenIR(const ASrc: string): string;
-var Prog: TProgram; CG: TCodeGenQBE;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.Generate(Prog);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
     Prog.Free();
   end;
 end;
@@ -641,67 +581,6 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
-{ Codegen tests                                                        }
-{ ------------------------------------------------------------------ }
-
-procedure TForInTests.TestCodegen_ForIn_HasForInCondLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcForIn);
-  AssertTrue('forin_cond label present', Pos('forin_cond', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ForIn_HasForInBodyLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcForIn);
-  AssertTrue('forin_body label present', Pos('forin_body', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ForIn_HasForInEndLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcForIn);
-  AssertTrue('forin_end label present', Pos('forin_end', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ForIn_CallsGetEnumerator;
-var IR: string;
-begin
-  IR := GenIR(SrcForIn);
-  AssertTrue('GetEnumerator called in IR',
-    Pos('TMyCol_GetEnumerator', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ForIn_CallsMoveNext;
-var IR: string;
-begin
-  IR := GenIR(SrcForIn);
-  AssertTrue('MoveNext called in IR', Pos('TMyEnum_MoveNext', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ForIn_CallsGetCurrent;
-var IR: string;
-begin
-  IR := GenIR(SrcForIn);
-  AssertTrue('GetCurrent called in IR', Pos('TMyEnum_GetCurrent', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ForIn_JnzOnMoveNextResult;
-var IR: string;
-begin
-  IR := GenIR(SrcForIn);
-  AssertTrue('jnz on MoveNext result', Pos('jnz', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ForIn_JumpsBackToCond;
-var IR: string;
-begin
-  IR := GenIR(SrcForIn);
-  AssertTrue('jmp back to forin_cond', Pos('jmp @forin_cond', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
 { Shared sources — static array                                        }
 { ------------------------------------------------------------------ }
 
@@ -715,24 +594,6 @@ const
         begin
           for X in Arr do
             X := X + 1
-        end.
-        ''';
-
-  { Issue #169: a record-typed loop variable must be copied by value, field by
-    field with ARC — not truncated to a scalar load.  The managed Name field
-    forces a _StringAddRef in the copy, which the old plain-storel scalar path
-    never emitted. }
-  SrcRecordArrayForIn =
-    '''
-        program P;
-        type
-          TRec = record Name: string; Number: Integer; end;
-        var
-          Arr: array[0..2] of TRec;
-          R:   TRec;
-        begin
-          for R in Arr do
-            WriteLn(R.Number)
         end.
         ''';
 
@@ -778,59 +639,6 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
-{ Codegen tests — static array                                         }
-{ ------------------------------------------------------------------ }
-
-procedure TForInTests.TestCodegen_ArrayForIn_HasForInCondLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcArrayForIn);
-  AssertTrue('forin_cond label present', Pos('forin_cond', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ArrayForIn_HasForInEndLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcArrayForIn);
-  AssertTrue('forin_end label present', Pos('forin_end', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ArrayForIn_LoadsElement;
-var IR: string;
-begin
-  IR := GenIR(SrcArrayForIn);
-  { Element load for Integer array: loadw from computed address }
-  AssertTrue('loadw emitted for array element', Pos('loadw', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ArrayForIn_RecordElement_CopiesByValue;
-var IR: string;
-begin
-  IR := GenIR(SrcRecordArrayForIn);
-  { A record loop variable is copied by value through EmitRecordCopy, which
-    ref-counts the managed Name field — so the copy emits a _StringAddRef.  The
-    pre-fix scalar path did a bare 8-byte storel with no ARC (issue #169), so
-    the presence of the string retain proves the whole record is copied. }
-  AssertTrue('record for-in copies managed field with ARC',
-    Pos('_StringAddRef', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ArrayForIn_JumpsBackToCond;
-var IR: string;
-begin
-  IR := GenIR(SrcArrayForIn);
-  AssertTrue('jmp back to forin_cond', Pos('jmp @forin_cond', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ArrayForIn_NonZeroBased_AdjustsIndex;
-var IR: string;
-begin
-  IR := GenIR(SrcArrayForInNonZero);
-  { Non-zero-based array needs a subtraction to compute element offset }
-  AssertTrue('sub instruction for offset adjustment', Pos('sub', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
 { Shared sources — dynamic array                                       }
 { ------------------------------------------------------------------ }
 
@@ -869,45 +677,6 @@ begin
             X := X
         end.
         ''');
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen tests — dynamic array                                        }
-{ ------------------------------------------------------------------ }
-
-procedure TForInTests.TestCodegen_DynArrayForIn_HasForInCondLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcDynArrayForIn);
-  AssertTrue('forin_cond label present', Pos('forin_cond', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_DynArrayForIn_HasForInEndLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcDynArrayForIn);
-  AssertTrue('forin_end label present', Pos('forin_end', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_DynArrayForIn_CallsDynArrayLength;
-var IR: string;
-begin
-  IR := GenIR(SrcDynArrayForIn);
-  AssertTrue('_DynArrayLength called in IR', Pos('_DynArrayLength', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_DynArrayForIn_LoadsElement;
-var IR: string;
-begin
-  IR := GenIR(SrcDynArrayForIn);
-  AssertTrue('loadw emitted for Integer array element', Pos('loadw', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_DynArrayForIn_JumpsBackToCond;
-var IR: string;
-begin
-  IR := GenIR(SrcDynArrayForIn);
-  AssertTrue('jmp back to forin_cond', Pos('jmp @forin_cond', IR) > 0);
 end;
 
 { ------------------------------------------------------------------ }
@@ -999,65 +768,6 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
-{ Codegen tests — string                                               }
-{ ------------------------------------------------------------------ }
-
-procedure TForInTests.TestCodegen_StringForIn_HasForInCondLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcStringForIn);
-  AssertTrue('forin_cond label present', Pos('forin_cond', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_StringForIn_HasForInEndLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcStringForIn);
-  AssertTrue('forin_end label present', Pos('forin_end', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_StringForIn_LoadsByteWithLoadub;
-var IR: string;
-begin
-  IR := GenIR(SrcStringForIn);
-  AssertTrue('loadub emitted for byte extraction', Pos('loadub', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_StringForIn_JumpsBackToCond;
-var IR: string;
-begin
-  IR := GenIR(SrcStringForIn);
-  AssertTrue('jmp back to forin_cond', Pos('jmp @forin_cond', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_StringForIn_UsesLengthFromHeader;
-var IR: string;
-begin
-  IR := GenIR(SrcStringForIn);
-  { Data-pointer convention: length is at data_ptr-8.
-    Codegen emits 'add <ptr>, -8' to reach the length field. }
-  AssertTrue('reads length at data_ptr-8', Pos(', -8', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen tests — string codepoint iteration                           }
-{ ------------------------------------------------------------------ }
-
-procedure TForInTests.TestCodegen_CodePointForIn_CallsUtf8DecodeAt;
-var IR: string;
-begin
-  IR := GenIR(SrcStringForInIntVar);
-  AssertTrue('calls _Utf8DecodeAt', Pos('$_Utf8DecodeAt', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_CodePointForIn_HasForInCondLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcStringForInIntVar);
-  AssertTrue('forin_cond label present', Pos('forin_cond', IR) > 0);
-end;
-
-{ ------------------------------------------------------------------ }
 { Shared sources — set iteration                                       }
 { ------------------------------------------------------------------ }
 
@@ -1120,103 +830,6 @@ begin
             X := X
         end.
         ''');
-end;
-
-{ ------------------------------------------------------------------ }
-{ Codegen tests — set                                                  }
-{ ------------------------------------------------------------------ }
-
-procedure TForInTests.TestCodegen_SetForIn_HasForInCondLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcSetForIn);
-  AssertTrue('forin_cond label present', Pos('forin_cond', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_SetForIn_HasForInEndLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcSetForIn);
-  AssertTrue('forin_end label present', Pos('forin_end', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_SetForIn_HasForInNextLabel;
-var IR: string;
-begin
-  IR := GenIR(SrcSetForIn);
-  AssertTrue('forin_next label present', Pos('forin_next', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_SetForIn_TestsBitWithShr;
-var IR: string;
-begin
-  IR := GenIR(SrcSetForIn);
-  AssertTrue('shr instruction emitted for bit extraction', Pos('=w shr', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_SetForIn_TestsBitWithAnd1;
-var IR: string;
-begin
-  IR := GenIR(SrcSetForIn);
-  AssertTrue('and 1 emitted for bit isolation', Pos('and', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_SetForIn_JumpsBackToCond;
-var IR: string;
-begin
-  IR := GenIR(SrcSetForIn);
-  AssertTrue('jmp back to forin_cond', Pos('jmp @forin_cond', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_SetForIn_EvaluatesMaskOnce;
-var IR: string;
-begin
-  { The set expression [Red, Blue] is a compile-time constant; the codegen
-    emits a single 'copy <mask>' and stores it — not a repeated evaluation.
-    Verify the mask constant 5 (bit0=Red, bit2=Blue) appears exactly once
-    as a copy operand. }
-  IR := GenIR(SrcSetForIn);
-  AssertTrue('mask value 5 emitted', Pos('copy 5', IR) > 0);
-end;
-
-procedure TForInTests.TestCodegen_ForIn_RecordCurrent_SretsIntoLoopVar;
-var IR: string;
-begin
-  { When the enumerator's Current returns a record with a managed field, the
-    loop-variable refresh must release the previous entry and let the getter
-    write the new record straight into the loop-var slot via sret.  A scalar-
-    return call here corrupted the managed field. }
-  IR := GenIR(
-    '''
-        program P;
-        type
-          TItem = record S: string; end;
-          TEnum = class
-            FI: Integer;
-            function GetCurrent: TItem;
-            function GetEnumerator: TEnum;
-            function MoveNext: Boolean;
-            property Current: TItem read GetCurrent;
-          end;
-        function TEnum.GetCurrent: TItem;
-        begin Result.S := 'x' end;
-        function TEnum.GetEnumerator: TEnum;
-        begin Result := Self end;
-        function TEnum.MoveNext: Boolean;
-        begin FI := FI + 1; Result := FI <= 2 end;
-        var E: TEnum; It: TItem;
-        begin
-          E := TEnum.Create();
-          for It in E do
-            WriteLn(It.S)
-        end.
-        ''');
-  { The getter is sret-called with $It (the loop var) as its hidden first arg. }
-  AssertTrue('Current sret-called into loop var',
-    Pos('call $TEnum_GetCurrent(l $It', IR) > 0);
-  { The previous entry is released before the getter overwrites the slot. }
-  AssertTrue('loop var released before refresh',
-    Pos('call $_StringRelease(l ', IR) > 0);
 end;
 
 initialization

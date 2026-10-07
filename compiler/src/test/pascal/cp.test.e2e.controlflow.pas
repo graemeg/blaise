@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_ForIn_AllCollectionKinds;
     procedure TestRun_Case_SelectsBranch;
     procedure TestRun_BreakAndExit;
     procedure TestRun_Repeat_BodyRunsBeforeTest;
@@ -671,6 +672,122 @@ begin
     '20 101 102 2' + LE +
     'takeB 1' + LE +
     'field 1' + LE, 0);
+end;
+
+procedure TE2EControlFlowTests.TestRun_ForIn_AllCollectionKinds;
+const
+  {
+    for-in over every collection kind, leak-checked: a class with
+    GetEnumerator / MoveNext / Current, zero- and non-zero-based static
+    arrays, a dynamic array (and an empty one), a string by Byte and by
+    code point (Integer loop variable: three code points from four bytes),
+    an array of records with a managed field, a set, and an enumerator whose
+    Current returns a managed record (refreshed into the loop variable
+    each iteration). }
+  Src = '''
+    program P;
+    type
+      TColor = (Red, Green, Blue);
+      TColorSet = set of TColor;
+      TRec = record Name: string; Number: Integer; end;
+      TItem = record S: string; end;
+      TMyEnum = class
+        FI, FMax: Integer;
+        function MoveNext: Boolean;
+        function GetCurrent: Integer;
+        property Current: Integer read GetCurrent;
+      end;
+      TMyCol = class
+        Count: Integer;
+        function GetEnumerator: TMyEnum;
+      end;
+      TItemEnum = class
+        FI: Integer;
+        function GetCurrent: TItem;
+        function GetEnumerator: TItemEnum;
+        function MoveNext: Boolean;
+        property Current: TItem read GetCurrent;
+      end;
+    function TMyEnum.MoveNext: Boolean;
+    begin
+      FI := FI + 1;
+      Result := FI <= FMax
+    end;
+    function TMyEnum.GetCurrent: Integer; begin Result := FI * 10 end;
+    function TMyCol.GetEnumerator: TMyEnum;
+    begin
+      Result := TMyEnum.Create();
+      Result.FMax := Count
+    end;
+    function TItemEnum.GetCurrent: TItem;
+    begin
+      Result.S := 'item-' + IntToStr(FI)
+    end;
+    function TItemEnum.GetEnumerator: TItemEnum; begin Result := Self end;
+    function TItemEnum.MoveNext: Boolean;
+    begin
+      FI := FI + 1;
+      Result := FI <= 3
+    end;
+    var
+      Col: TMyCol; X, I: Integer; Arr: array[0..4] of Integer;
+      NZ: array[3..7] of Integer; DA: array of Integer; S: string; B: Byte;
+      Recs: array[0..2] of TRec; R: TRec; CS: TColorSet; C: TColor;
+      E: TItemEnum; It: TItem;
+    begin
+      Col := TMyCol.Create();
+      Col.Count := 3;
+      for X in Col do Write(X, ' ');
+      WriteLn();
+      for I := 0 to 4 do Arr[I] := I * I;
+      for X in Arr do Write(X, ' ');
+      WriteLn();
+      for I := 3 to 7 do NZ[I] := I;
+      for X in NZ do Write(X, ' ');
+      WriteLn();
+      SetLength(DA, 3);
+      DA[0] := 7; DA[1] := 8; DA[2] := 9;
+      for X in DA do Write(X, ' ');
+      WriteLn();
+      SetLength(DA, 0);
+      for X in DA do Write('never');
+      S := 'Hi!';
+      for B in S do Write(B, ' ');
+      WriteLn();
+      S := 'a' + #233 + 'z';
+      for I in S do Write(I, ' ');
+      Write(Length(S));
+      WriteLn();
+      for I := 0 to 2 do
+      begin
+        Recs[I].Name := 'n' + IntToStr(I);
+        Recs[I].Number := I + 100
+      end;
+      for R in Recs do Write(R.Name, '=', R.Number, ' ');
+      WriteLn();
+      CS := [Red, Blue];
+      for C in CS do Write(Ord(C), ' ');
+      WriteLn();
+      E := TItemEnum.Create();
+      for It in E do Write(It.S, ' ');
+      WriteLn();
+      Col.Free();
+      E.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '10 20 30 ' + LE +
+    '0 1 4 9 16 ' + LE +
+    '3 4 5 6 7 ' + LE +
+    '7 8 9 ' + LE +
+    '72 105 33 ' + LE +
+    '97 233 122 4' + LE +
+    'n0=100 n1=101 n2=102 ' + LE +
+    '0 2 ' + LE +
+    'item-1 item-2 item-3 ' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'item-3');
 end;
 
 initialization
