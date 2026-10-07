@@ -277,19 +277,19 @@ found, for a ruling before they are migrated.
 | `cp.test.forloop.pas` | 12 | done: 10 behaviour (e2e)
 | `cp.test.anonmethods.pas` | 12 | pending
 | `cp.test.typetests.pas` | 11 | pending
-| `cp.test.process.pas` | 11 | pending
-| `cp.test.generics.pas` | 11 | pending
-| `cp.test.external.pas` | 11 | pending
-| `cp.test.constarg.pas` | 11 | pending
-| `cp.test.attributes.pas` | 11 | pending
-| `cp.test.weakref.pas` | 10 | pending
-| `cp.test.varparams.pas` | 10 | pending
-| `cp.test.varinit.pas` | 10 | pending
+| `cp.test.process.pas` | 11 | done: 9 behaviour (existing e2e)
+| `cp.test.generics.pas` | 11 | done: 5 behaviour (e2e), 2 code-gen (GenAsm); GenUnitIR / GenCombinedIR tests remain (see below)
+| `cp.test.external.pas` | 11 | done: 9 code-gen (GenAsm); found BUG-20261007-x86-extern-record-byval
+| `cp.test.constarg.pas` | 11 | done: 9 code-gen (GenAsm)
+| `cp.test.attributes.pas` | 11 | done: 8 behaviour (e2e); its 7 QBE-only e2e tests moved to native cp.test.e2e.attributes
+| `cp.test.weakref.pas` | 10 | done: 8 behaviour (e2e); found BUG-20261007-nonowning-field-store, BUG-20261007-arm64-weak-local-scope-exit
+| `cp.test.varparams.pas` | 10 | done: 8 behaviour (e2e)
+| `cp.test.varinit.pas` | 10 | done: 5 behaviour (existing e2e), 3 front-end (Analyse)
 | `cp.test.tdictionary.pas` | 10 | done: 8 behaviour (e2e)
 | `cp.test.smallint_word.pas` | 10 | done: 8 behaviour (e2e)
-| `cp.test.properties.pas` | 10 | pending
+| `cp.test.properties.pas` | 10 | done: 8 behaviour (existing e2e)
 | `cp.test.tordereddictionary.pas` | 9 | done: 7 behaviour (e2e)
-| `cp.test.publishedrtti.pas` | 9 | pending
+| `cp.test.publishedrtti.pas` | 9 | done: 6 behaviour (e2e); its 4 QBE-only e2e tests now one native test
 | `cp.test.imap.pas` | 9 | done: 7 behaviour (e2e)
 | `cp.test.classof.pas` | 9 | done: 7 behaviour (e2e); found BUG-20261007-metaclass-create-leak
 | `cp.test.repeatloop.pas` | 8 | done: 6 behaviour (e2e)
@@ -329,4 +329,12 @@ Not in the counts above: two more QBE IR helpers built with `TCodeGenQBE`
 exactly like `GenIR` -- `GenIRBuiltin` (32 calls in `cp.test.math.pas`) and
 `GenIRAt` (2 calls in `cp.test.embed.pas`).  They fall under the same triage
 and the same exit criterion; found while migrating `cp.test.math.pas`.
+
+Also outside the counts: tests that build `TCodeGenQBE` through helpers of
+other names -- `GenUnitIR` and `GenCombinedIR` in `cp.test.generics.pas`
+(seven tests, mostly the QBE driver's `# WEAKSYM` markers) -- or directly,
+in units that have no `GenIR` at all (`cp.test.codegen.pas`,
+`cp.test.multifile.pas`, `cp.test.threadvar.pas`, `cp.test.units.pas`,
+among others).  `grep -l TCodeGenQBE` over the test sources is the complete
+list; the exit criterion covers them too.
 
