@@ -10,8 +10,9 @@
 | Phase 0 | Done: `--help` marks `--backend qbe` and `BLAISE_BACKEND=qbe` as deprecated; the deprecation was announced to the community.
 | Phase 1 | Done -- the test suite no longer depends on QBE.  17 QBE-only unit tests and one
 QBE-only e2e test remain, marked for deletion in Phase 2.
-| Phase 2 | Not started -- delete the backend.  Target: release v0.15.0, which also
-makes the macOS arm64 port usable.
+| Phase 2 | Done -- the backend, its driver, tests, fixpoint, vendored source and CI
+steps are removed.  Ships in release v0.15.0, which also makes the macOS arm64
+port usable.
 | Phase 3 | Not started -- documentation.
 |===
 
@@ -218,6 +219,37 @@ Outcome:
 * Delete the tests marked QBE-only in Phase 1.
 * Tag the last release that contains the backend, so it remains buildable.
 
+=== Outcome
+
+[cols="1,3"]
+|===
+| Backend | `blaise.codegen.qbe` and `blaise.codegen.qbe.driver` deleted (about
+19,600 lines).  The compiler binary shrank from 4.9 MB to 4.0 MB (macOS arm64).
+| CLI | `--backend` is kept: native is the only registered backend, and the
+registry stays enum-keyed so an external backend (an LLVM backend is in
+development out of tree) plugs in through the same flag.  `--backend qbe` and
+`--emit-ir` are hard errors that name v0.15.0 and the replacement.
+`BLAISE_BACKEND=qbe` warns and uses native, like any unrecognised value of that
+environment variable.
+| Front end | QBE-named identifiers renamed (`ResolvedQbeName` ->
+`ResolvedEmitName`, `ConstArrayQbe` -> `ConstArrayLabel`, and their siblings);
+no `.bif` format change.  The semantic, AST and symbol-table units carry no QBE
+references.  The ISA backends keep historical "mirrors the QBE ..." comments;
+Phase 3 may trim them.
+| Tests | The 18 tests marked QBE-only in Phase 1, the QBE CLI/driver contract
+tests and the six `_QBE` separate-compilation tests are deleted; new tests pin
+the removal errors.  `TCLIContractTests` and `TInternalAsmE2ETests` drive
+`$BLAISE_TEST_COMPILER` (was `$BLAISE_QBE_COMPILER`), else
+`compiler/target/blaise`, instead of the QBE fixpoint's `/tmp/fp_blaise2|3` --
+so the CLI suite runs on macOS for the first time, with its ELF link-mode tests
+gated on an ELF host.
+| Scripts, CI, tools | `vendor/qbe/` and `scripts/fixpoint.sh` deleted; CI no
+longer builds QBE; `tools/flag-coverage` counts the two ISA backends; the
+benchmark runner measures native only; the `pasbuild-blaise-compile` plugin is
+a single native compile.
+| Last release with the backend | v0.14.0 (tagged, published).
+|===
+
 == Phase 3 -- documentation
 
 * Record the decision and its rationale in `docs/toolchain-independence.adoc`
@@ -250,6 +282,8 @@ Outcome:
   test (or is deleted when one exists), not an assembly check; `GenAsm` is
   kept for decisions a running program cannot observe (1c, revised after the
   first file).
+. `--backend` remains after the QBE removal: an external LLVM backend under
+  development hooks into it.  `--backend qbe` is a hard error naming v0.15.0.
 
 == Open questions
 
