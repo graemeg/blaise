@@ -12709,6 +12709,11 @@ begin
     for I := 0 to FGlobalNames.Count - 1 do
     begin
       if FGlobalInits.ContainsKey(FGlobalNames.Strings[I]) then Continue;
+      { an interface global's itab half is emitted INSIDE its 16-byte pair
+        block, right after the obj half (below), never on its own }
+      if (I > 0) and
+         (FGlobalNames.Strings[I] = FGlobalNames.Strings[I - 1] + '_itab') then
+        Continue;
       Self.Emit('.balign 8');
       if FGlobalWeak.IndexOf(FGlobalNames.Strings[I]) >= 0 then
         EmitWeakDef('_g_' + FGlobalNames.Strings[I])
@@ -12719,6 +12724,19 @@ begin
         Self.Emit(Format(#9'.zero %d', [J]))
       else
         Self.Emit(#9'.zero 8');
+      if (I + 1 < FGlobalNames.Count) and
+         (FGlobalNames.Strings[I + 1] = FGlobalNames.Strings[I] + '_itab') then
+      begin
+        { the (obj, itab) pair is ONE contiguous 16-byte block, so &G is the
+          address of the whole fat value -- what a var interface parameter
+          receives (x86-64 lays it out the same way) }
+        if FGlobalWeak.IndexOf(FGlobalNames.Strings[I + 1]) >= 0 then
+          EmitWeakDef('_g_' + FGlobalNames.Strings[I + 1])
+        else
+          EmitGloblDef('_g_' + FGlobalNames.Strings[I + 1]);
+        Self.Emit(Format('_g_%s:', [FGlobalNames.Strings[I + 1]]));
+        Self.Emit(#9'.zero 8');
+      end;
     end;
   end;
   if AnyData then
@@ -13464,15 +13482,7 @@ end;
 procedure TArm64Backend.EmitVarArgAddrToX0(Arg: TASTExpr);
 begin
   { x0 := the address a var/out parameter receives for the lvalue Arg }
-  if (Arg is TIdentExpr) and (Arg.ResolvedType <> nil) and
-     (Arg.ResolvedType.Kind = tyInterface) and
-     not IsLocal(TIdentExpr(Arg).Name) and
-     (TIdentExpr(Arg).ParamMode <> pmVar) and
-     not TIdentExpr(Arg).IsImplicitSelf then
-    { a global interface's halves are two separate symbols, so the
-      pair has no single address to hand over }
-    NotYet('var argument from a global interface variable', Arg)
-  else if Arg is TIdentExpr then
+  if Arg is TIdentExpr then
     { EmitRecIdentAddr handles all three: a var-param forward (slot
       holds the caller's address), an implicit-Self FIELD (Self + field
       offset — the leg-14 case, e.g. LkAddStr(var ..., FDynStrTab)), and
