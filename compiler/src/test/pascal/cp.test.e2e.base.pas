@@ -18,40 +18,25 @@ interface
 
 uses
   classes, sysutils, process, contnrs, blaise.testing,
-  uLexer, uParser, uAST, uSemantic, blaise.codegen.qbe, uUnitLoader,
+  uLexer, uParser, uAST, uSemantic, uUnitLoader,
   blaise.codegen, blaise.codegen.target, blaise.codegen.native;
 
 type
-  TBackend = (beQBE, beNative);
+  TBackend = (beNative);
   TBackends = set of TBackend;
 
 const
-  { The default backend set behind AssertRunsOnAll / AssertRTLRunsOnAll.
-    Native only: QBE is deprecated and leaves the default set first
-    (docs/qbe-removal-plan.adoc, Phase 1a).  A test that still needs QBE
-    names it explicitly -- AssertRunsOn([beQBE, ...]) -- until the Phase 1d
-    audit moves it to native or marks it for deletion. }
+  { The backend set behind AssertRunsOnAll / AssertRTLRunsOnAll: the native
+    backend for the host.  QBE left the e2e suite in Phase 1d of
+    docs/qbe-removal-plan.adoc. }
   AllBackends: TBackends = [beNative];
 
 function BackendName(ABackend: TBackend): string;
 
-{ True when ABackend can produce a program that actually RUNS on the host.
-  False for QBE on macOS — see TargetHasQBEBackend in blaise.codegen.target.
-  The e2e harness always compiles for the host, so the host target is the only
-  one that matters here. }
-function BackendRunnableOnHost(ABackend: TBackend): Boolean;
-
-{ The backend a QBE-only helper (CompileAndRun, CompileAndRunWithRTL, ...)
-  runs on: QBE where the host can run it, otherwise native.  QBE is
-  deprecated and was never ported to Mach-O, so on macOS those ~700 tests
-  used to be skipped outright; falling back to native turns them into real
-  coverage of the backend that ships there.  Linux keeps QBE unchanged. }
-function QBEOrNative(): TBackend;
 
 type
   TE2ETestCase = class(TTestCase)
   private
-    FQBE:         string;
     FRTLUnitPath: string;
     FStdlibUnitPath: string;
     FScratch:     string;
@@ -109,20 +94,18 @@ type
                             out AStdout: string;
                             out AExitCode: Integer;
                             const AExtraArgs: array of string): Boolean; overload;
-    { Native-backend equivalent of CompileAndRun: lowers the program to
-      assembly via TCodeGenNative (no QBE), links with cc, and runs.  The
-      correctness oracle is parity with the QBE path on the same source. }
+    { Same as CompileAndRun; kept for the callers that name the backend. }
     function  CompileAndRunNative(const ASrc: string;
                             out AStdout: string;
                             out AExitCode: Integer): Boolean;
-    { Compile and run ASrc on the chosen backend.  Shared front-end (lex,
-      parse, semantic); the backend selects QBE-text+qbe or direct native
-      assembly.  CompileAndRun and CompileAndRunNative both delegate here. }
+    { Compile and run ASrc on the chosen backend through the compiler's own
+      CLI.  CompileAndRun and CompileAndRunNative both delegate here. }
     function  CompileAndRunOn(ABackend: TBackend; const ASrc: string;
                             out AStdout: string;
                             out AExitCode: Integer): Boolean;
-    { As CompileAndRunOn but links with extra -l libraries (see
-      AssertRunsOnAllLibs). }
+    { As CompileAndRunOn; AExtraLibs is accepted for the callers that name
+      libraries, which the native compiler links itself from the program's
+      external declarations. }
     function  CompileAndRunOnLibs(ABackend: TBackend; const ASrc: string;
                             const AExtraLibs: array of string;
                             out AStdout: string;
@@ -154,29 +137,23 @@ type
     function  CompileAndRunWithRTLOn(ABackend: TBackend; const ASrc: string;
                             out AStdout: string;
                             out AExitCode: Integer): Boolean;
-    { QBE-only RTL compile+run.  Escape hatch for the rare case where native
-      has a known, documented gap that is tracked separately — keeps the rest of
-      a suite dual-backend while not blocking on the one failing construct.  Add
-      a comment at each call site naming the tracked bug. }
-    function  CompileAndRunWithRTLQBEOnly(const ASrc: string;
-                            out AStdout: string;
-                            out AExitCode: Integer): Boolean;
     { Per-backend worker used by AssertRunsOn (separate method because Blaise
       has no nested procedures). }
     procedure AssertRunsOnOne(ABackend: TBackend; const AName, ASrc,
                             AExpectedOut: string; AExpectedCode: Integer);
-    { Assert ASrc runs with NO ARC leak on both backends under the --debug
-      leak tracker.  Complements RunUnderValgrind: valgrind catches native
-      UAF / invalid access but is BLIND to ARC refcount leaks (the Blaise
-      allocator is mmap-backed, so valgrind sees zero malloc traffic); the
-      --debug tracker reports Blaise objects still live at exit — the true
-      leak signal.  Runs QBE and native, asserts exit 0 and no 'leak' in
-      stdout.  AExpectSubstr, when non-empty, must appear in stdout too. }
+    { Assert ASrc runs with NO ARC leak under the --debug leak tracker, on
+      every backend in AllBackends.  Complements RunUnderValgrind: valgrind
+      catches UAF / invalid access but is BLIND to ARC refcount leaks (the
+      Blaise allocator is mmap-backed, so valgrind sees zero malloc traffic);
+      the --debug tracker reports Blaise objects still live at exit — the true
+      leak signal.  Asserts exit 0 and no 'leak' in stdout.  AExpectSubstr,
+      when non-empty, must appear in stdout too. }
     procedure AssertLeakFreeOnAll(const ASrc: string; const AExpectSubstr: string);
+    { Compile ASrc and run it under valgrind --leak-check=full; True when
+      valgrind reports nothing.  ALog carries valgrind's report. }
     function  RunUnderValgrind(const ASrc: string; out ALog: string): Boolean;
-    { Native-backend twin of RunUnderValgrind: compile ASrc with the NATIVE
-      codegen, link, and run under valgrind.  Needed to detect native-only
-      use-after-free/leak bugs that the QBE-only RunUnderValgrind cannot see. }
+    { As RunUnderValgrind, but the in-process codegen + cc link and no leak
+      check: an invalid read or write alone fails it. }
     function  RunUnderValgrindNative(const ASrc: string; out ALog: string): Boolean;
     function  CompileAndRunWithRTL(const ASrc: string;
                                    out AStdout: string;
@@ -201,10 +178,8 @@ type
     function  CompileAndRunWithUnit(const AUnitName, AUnitSrc, ASrc: string;
                                    out AStdout: string;
                                    out AExitCode: Integer): Boolean;
-    { Backend-parameterised multi-unit compile+run: lowers the unit(s) + program
-      via the QBE or native backend (whole-program model: AppendUnit per
-      dependency, then AppendProgram), then links and runs.  The native path
-      exercises TX86_64Backend.EmitUnit / AppendProgram. }
+    { Backend-parameterised multi-unit compile+run: the user unit is written
+      to the scratch dir, which goes on the compiler's --unit-path. }
     function  CompileAndRunWithUnitOn(ABackend: TBackend;
                                    const AUnitName, AUnitSrc, ASrc: string;
                                    out AStdout: string;
@@ -213,7 +188,7 @@ type
     function  CompileAndRunWithUnitNative(const AUnitName, AUnitSrc, ASrc: string;
                                    out AStdout: string;
                                    out AExitCode: Integer): Boolean;
-    { Two-written-units compile+run (QBE).  Writes both units to the scratch
+    { Two-written-units compile+run.  Writes both units to the scratch
       dir (filename derived from each `unit <name>;` header) so the program's
       `uses` clause resolves them, then lowers + links + runs.  Needed for
       cross-unit tests (two units exporting the same name: last-wins shadowing,
@@ -254,7 +229,7 @@ begin
   Dir := GetCurrentDir();
   for Steps := 0 to 5 do
   begin
-    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'vendor/qbe') and
+    if DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'compiler/src/main/pascal') and
        DirectoryExists(IncludeTrailingPathDelimiter(Dir) + 'runtime') then
     begin
       Result := IncludeTrailingPathDelimiter(Dir);
@@ -269,14 +244,9 @@ end;
 
 function TE2ETestCase.ToolchainAvailable(): Boolean;
 begin
-  { Need the QBE assembler, the compiler binary (build-rtl-objects.sh drives it
-    to source-build the RTL), and the RTL source.  No blaise_rtl.a archive. }
-  { QBE is required only where the host can run it at all.  On macOS QBE
-    has no Mach-O port, every dual-backend test already drops its QBE arm
-    (AssertRunsOn), and no qbe binary exists -- requiring one there skipped
-    ~1450 native e2e tests as "toolchain unavailable". }
-  Result := (FileExists(FQBE) or not BackendRunnableOnHost(beQBE))
-        and FileExists(ProjectRoot() + 'compiler/target/blaise')
+  { The compiler binary (it compiles, assembles and links every e2e program
+    and source-builds the RTL) and the RTL source.  No archive, no qbe. }
+  Result := FileExists(ProjectRoot() + 'compiler/target/blaise')
         and FileExists(ProjectRoot() + 'compiler/src/main/pascal/runtime.arc.pas')
 end;
 
@@ -291,9 +261,6 @@ begin
   { Subclasses must call SetUpScratch to set FScratch and FCounter }
   inherited SetUp();
   FCounter := 0;
-  FQBE := GetEnvironmentVariable('BLAISE_QBE');
-  if FQBE = '' then
-    FQBE := ProjectRoot() + 'vendor/qbe/qbe';
   { RTL units (runtime.*, rtl.platform.*) now live in the compiler's own source
     tree after the RTL-unification move; the old runtime/src/main/pascal is empty. }
   FRTLUnitPath := ProjectRoot() + 'compiler/src/main/pascal';
@@ -531,89 +498,19 @@ function TE2ETestCase.CompileAndRunOnLibs(ABackend: TBackend; const ASrc: string
                                      const AExtraLibs: array of string;
                                      out AStdout: string;
                                      out AExitCode: Integer): Boolean;
-{ Single choke point for every compile+run in the harness, so the
-  unsupported-backend skip cannot be forgotten by a caller.  A QBE-ONLY test
-  (CompileAndRunWithRTLDebug and friends hard-code beQBE) has no other arm to
-  fall back on, so Ignore is the honest outcome: EIgnoredTest aborts the test and
-  it is REPORTED as skipped with this reason rather than passing vacuously.
-  Dual-backend callers never reach this — AssertRunsOn filters QBE out of the
-  set first, keeping their native arm. }
-var
-  Lexer:    TLexer;
-  Parser:   TParser;
-  Prog:     TProgram;
-  Semantic: TSemanticAnalyser;
-  QCG:      TCodeGenQBE;
-  Emitted:  string;       { QBE IR text }
-  IRFile:   string;
-  AsmFile:  string;
-  BinFile:  string;
-  ToolOut:  string;
-  Rc:       Integer;
 begin
-  Result := False;
-  { Gate EVERY backend-taking entry point, so a caller cannot bypass the
-    unsupported-backend skip.  Ignore raises EIgnoredTest: the test is REPORTED
-    as skipped with a reason, not silently passed.  Dual-backend callers never
-    arrive here for an unsupported backend — AssertRunsOn drops it from the set
-    first so their native arm still runs. }
-  if not BackendRunnableOnHost(ABackend) then
-    Ignore(BackendName(ABackend) +
-      ' backend is not supported on this host target');
-  { Native goes through the compiler's own CLI (front-end + codegen + internal
-    assemble + internal link all inside that one subprocess) — see
-    CompileAndRunNativeCLI.  Only QBE needs the manual IR/asm/link pipeline
-    below, because qbe itself is an external tool this compiler does not (and
-    is not meant to) absorb. }
-  if ABackend = beNative then
-  begin
-    Result := Self.CompileAndRunNativeCLI(ASrc, False, '', AStdout, AExitCode);
-    Exit
-  end;
-  Inc(FCounter);
-  IRFile  := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
-  AsmFile := FScratch + '/t' + IntToStr(FCounter) + '.s';
-  BinFile := FScratch + '/t' + IntToStr(FCounter);
-
-  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil; QCG := nil;
-  try
-    Lexer    := TLexer.Create(ASrc);
-    Parser   := TParser.Create(Lexer);
-    Prog     := Parser.Parse();
-    Semantic := TSemanticAnalyser.Create();
-    Semantic.Analyse(Prog);
-    QCG := TCodeGenQBE.Create();
-    QCG.Generate(Prog);
-    Emitted := QCG.GetOutput()
-  finally
-    QCG.Free();
-    Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free()
-  end;
-
-  { beNative already returned above via CompileAndRunNativeCLI; from here on
-    only the QBE path remains. }
-  WriteFile(IRFile, Emitted);
-  Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
-  if Rc <> 0 then begin AStdout := 'qbe failed: ' + ToolOut; AExitCode := Rc; Exit end;
-  Rc := LinkWithRTLLibs(AsmFile, BinFile, AExtraLibs, ToolOut);
-  if Rc <> 0 then begin AStdout := 'cc failed: ' + ToolOut; AExitCode := Rc; Exit end;
-  AExitCode := RunProcNoArgs(BinFile, AStdout);
-  Result := True
+  { Single choke point for a plain compile+run.  The compiler's own CLI does
+    front-end, codegen, assembly, RTL and link in one subprocess (see
+    CompileAndRunNativeCLI); it links the libraries a program's external
+    declarations name, so AExtraLibs needs no handling here. }
+  Result := Self.CompileAndRunNativeCLI(ASrc, False, '', AStdout, AExitCode)
 end;
 
 function TE2ETestCase.CompileAndRun(const ASrc: string;
                                     out AStdout: string;
                                     out AExitCode: Integer): Boolean;
 begin
-  { QBE-only.  A blanket dual-backend flip here is unsafe: some inline e2e
-    programs print non-deterministic values (e.g. GetProcessID) that cannot be
-    compared across two separate process runs, and several genuine native gaps
-    (StrToDouble/DoubleToStr formatting, InheritsFrom/ToString builtins, class
-    const-array, interface-field-assignment-RHS) are still open — see bugs.txt.
-    Suites whose programs ARE deterministic and native-clean use AssertRunsOnAll
-    instead, which runs both backends.  As the native gaps close, more inline
-    suites can migrate to AssertRunsOnAll. }
-  Result := Self.CompileAndRunOn(QBEOrNative(), ASrc, AStdout, AExitCode)
+  Result := Self.CompileAndRunOn(beNative, ASrc, AStdout, AExitCode)
 end;
 
 function TE2ETestCase.CompileAndRunNative(const ASrc: string;
@@ -642,30 +539,9 @@ begin
   AssertEquals('[' + AName + '] stdout', AExpectedOut, Output)
 end;
 
-function BackendRunnableOnHost(ABackend: TBackend): Boolean;
-begin
-  if ABackend = beQBE then
-    Result := TargetHasQBEBackend(HostTarget())
-  else
-    Result := True;
-end;
-
-function QBEOrNative(): TBackend;
-begin
-  if BackendRunnableOnHost(beQBE) then
-    Result := beQBE
-  else
-    Result := beNative;
-end;
-
 function BackendName(ABackend: TBackend): string;
 begin
-  case ABackend of
-    beQBE:    Result := 'qbe';
-    beNative: Result := 'native'
-  else
-    Result := 'unknown'
-  end
+  Result := 'native'
 end;
 
 procedure TE2ETestCase.AssertRunsOnAll(const ASrc, AExpectedOut: string;
@@ -686,8 +562,6 @@ var
   OK:     Boolean;
 begin
   Backends := AllBackends;
-  if not BackendRunnableOnHost(beQBE) then
-    Backends := Backends - [beQBE];
   if Backends = [] then
   begin
     Ignore('no backend supported on this host for this test');
@@ -708,21 +582,6 @@ procedure TE2ETestCase.AssertRunsOn(ABackends: TBackends; const ASrc, AExpectedO
 var
   BE: TBackend;
 begin
-  { Skip a backend the HOST target cannot actually run — QBE on macOS, which was
-    never ported to Mach-O (TargetHasQBEBackend).
-
-    FILTERED, not Ignore()d, and that distinction is the whole point: Ignore
-    raises EIgnoredTest and would mark the ENTIRE test skipped, silently
-    discarding the native arm of ~283 dual-backend tests that pass today.  By
-    dropping only the unsupported backend from the set, each test still runs and
-    still asserts on native — the coverage that matters on this platform — and
-    goes genuinely green rather than green-by-omission.
-
-    A test whose set becomes EMPTY is a different case: it had nothing but the
-    unsupported backend, so there is no coverage left to report and it is
-    honestly skipped. }
-  if not BackendRunnableOnHost(beQBE) then
-    ABackends := ABackends - [beQBE];
   if ABackends = [] then
   begin
     Ignore('no backend supported on this host for this test');
@@ -738,58 +597,14 @@ function TE2ETestCase.CompileAndRun(const ASrc: string;
                                     out AExitCode: Integer;
                                     const AExtraArgs: array of string): Boolean;
 var
-  Lexer:    TLexer;
-  Parser:   TParser;
-  Prog:     TProgram;
-  Semantic: TSemanticAnalyser;
-  CG:       TCodeGenQBE;
-  IR:       string;
-  IRFile:   string;
-  AsmFile:  string;
   BinFile:  string;
   ToolOut:  string;
   Rc:       Integer;
 begin
+  { As CompileAndRun, running the binary with AExtraArgs. }
   Result := False;
-  { Gate EVERY backend-taking entry point, so a caller cannot bypass the
-    unsupported-backend skip.  Ignore raises EIgnoredTest: the test is REPORTED
-    as skipped with a reason, not silently passed.  Dual-backend callers never
-    arrive here for an unsupported backend — AssertRunsOn drops it from the set
-    first so their native arm still runs. }
-  if QBEOrNative() = beNative then
-  begin
-    { No runnable QBE on this host: compile with the native backend and run
-      the binary with the same arguments. }
-    Rc := Self.CompileNativeCLI(ASrc, False, '', BinFile, ToolOut);
-    if Rc <> 0 then begin AStdout := 'compile failed: ' + ToolOut; AExitCode := Rc; Exit end;
-    AExitCode := RunProc(BinFile, AExtraArgs, AStdout);
-    Result := True;
-    Exit
-  end;
-  Inc(FCounter);
-  IRFile  := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
-  AsmFile := FScratch + '/t' + IntToStr(FCounter) + '.s';
-  BinFile := FScratch + '/t' + IntToStr(FCounter);
-
-  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil; CG := nil;
-  try
-    Lexer    := TLexer.Create(ASrc);
-    Parser   := TParser.Create(Lexer);
-    Prog     := Parser.Parse();
-    Semantic := TSemanticAnalyser.Create();
-    Semantic.Analyse(Prog);
-    CG       := TCodeGenQBE.Create();
-    CG.Generate(Prog);
-    IR       := CG.GetOutput()
-  finally
-    CG.Free(); Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free()
-  end;
-
-  WriteFile(IRFile, IR);
-  Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
-  if Rc <> 0 then begin AStdout := 'qbe failed: ' + ToolOut; AExitCode := Rc; Exit end;
-  Rc := LinkWithRTL(AsmFile, BinFile, ToolOut);
-  if Rc <> 0 then begin AStdout := 'cc failed: ' + ToolOut; AExitCode := Rc; Exit end;
+  Rc := Self.CompileNativeCLI(ASrc, False, '', BinFile, ToolOut);
+  if Rc <> 0 then begin AStdout := 'compile failed: ' + ToolOut; AExitCode := Rc; Exit end;
   AExitCode := RunProc(BinFile, AExtraArgs, AStdout);
   Result := True
 end;
@@ -800,67 +615,34 @@ var
   Output: string;
   ExitCode: Integer;
   Ok: Boolean;
+  BE: TBackend;
+  Tag: string;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  { QBE, --debug }
-  Ok := CompileAndRunWithRTLDebugOn(QBEOrNative(), ASrc, Output, ExitCode, True);
-  AssertTrue('qbe compile+run (--debug): ' + Output, Ok);
-  AssertEquals('qbe exit 0 (output: ' + Output + ')', 0, ExitCode);
-  if AExpectSubstr <> '' then
-    AssertTrue('qbe stdout contains ''' + AExpectSubstr + ''', got: ' + Output,
-      Pos(AExpectSubstr, Output) >= 0);
-  AssertTrue('qbe no leak report, got: ' + Output, Pos('leak', Output) < 0);
-  { native, --debug }
-  Ok := CompileAndRunWithRTLDebugOn(beNative, ASrc, Output, ExitCode, True);
-  AssertTrue('native compile+run (--debug): ' + Output, Ok);
-  AssertEquals('native exit 0 (output: ' + Output + ')', 0, ExitCode);
-  if AExpectSubstr <> '' then
-    AssertTrue('native stdout contains ''' + AExpectSubstr + ''', got: ' + Output,
-      Pos(AExpectSubstr, Output) >= 0);
-  AssertTrue('native no leak report, got: ' + Output, Pos('leak', Output) < 0);
+  for BE := Low(TBackend) to High(TBackend) do
+    if BE in AllBackends then
+    begin
+      Tag := BackendName(BE);
+      Ok := CompileAndRunWithRTLDebugOn(BE, ASrc, Output, ExitCode, True);
+      AssertTrue(Tag + ' compile+run (--debug): ' + Output, Ok);
+      AssertEquals(Tag + ' exit 0 (output: ' + Output + ')', 0, ExitCode);
+      if AExpectSubstr <> '' then
+        AssertTrue(Tag + ' stdout contains ''' + AExpectSubstr + ''', got: ' +
+          Output, Pos(AExpectSubstr, Output) >= 0);
+      AssertTrue(Tag + ' no leak report, got: ' + Output, Pos('leak', Output) < 0);
+    end;
 end;
 
 function TE2ETestCase.RunUnderValgrind(const ASrc: string; out ALog: string): Boolean;
 var
-  Lexer:    TLexer;
-  Parser:   TParser;
-  Prog:     TProgram;
-  Semantic: TSemanticAnalyser;
-  CG:       TCodeGenQBE;
-  IR:       string;
-  IRFile:   string;
-  AsmFile:  string;
   BinFile:  string;
   ToolOut:  string;
   Rc:       Integer;
 begin
   Result := False;
   ALog   := '';
-  Inc(FCounter);
-  IRFile  := FScratch + '/vg' + IntToStr(FCounter) + '.ssa';
-  AsmFile := FScratch + '/vg' + IntToStr(FCounter) + '.s';
-  BinFile := FScratch + '/vg' + IntToStr(FCounter);
-
-  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil; CG := nil;
-  try
-    Lexer    := TLexer.Create(ASrc);
-    Parser   := TParser.Create(Lexer);
-    Prog     := Parser.Parse();
-    Semantic := TSemanticAnalyser.Create();
-    Semantic.Analyse(Prog);
-    CG       := TCodeGenQBE.Create();
-    CG.Generate(Prog);
-    IR       := CG.GetOutput()
-  finally
-    CG.Free(); Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free()
-  end;
-
-  WriteFile(IRFile, IR);
-  Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
-  if Rc <> 0 then Exit;
-  Rc := LinkWithRTL(AsmFile, BinFile, ToolOut);
-  if Rc <> 0 then Exit;
-
+  Rc := Self.CompileNativeCLI(ASrc, False, '', BinFile, ToolOut);
+  if Rc <> 0 then begin ALog := 'compile failed: ' + ToolOut; Exit end;
   Rc := RunProc('valgrind',
     ['--error-exitcode=99', '--leak-check=full', '--quiet', BinFile], ALog);
   Result := Rc = 0
@@ -916,30 +698,9 @@ end;
 function TE2ETestCase.CompileAndRunWithRTL(const ASrc: string;
                                            out AStdout: string;
                                            out AExitCode: Integer): Boolean;
-var
-  NOut: string;
-  NCode: Integer;
-  NOk: Boolean;
 begin
-  { Run on BOTH backends and require parity.  Historically this helper was
-    QBE-only, which left every RTL/stdlib suite that uses it unvalidated on the
-    native backend.  We now compile+run the program with QBE first (its result
-    is returned so the caller's existing assertions still pin correctness), then
-    repeat on native and assert the native stdout/exit code match QBE.  A native
-    codegen or RTL-ABI divergence therefore fails the test with a clear message
-    rather than going unnoticed.  Debug-mode and *On variants stay single-backend
-    for callers that need a specific backend (e.g. leak checks). }
-  Result := Self.CompileAndRunWithRTLDebugOn(QBEOrNative(), ASrc, AStdout, AExitCode,
-                                             False);
-  if not Result then Exit;
-  NOk := Self.CompileAndRunWithRTLDebugOn(beNative, ASrc, NOut, NCode, False);
-  AssertTrue('[native] RTL compile+run: ' + NOut, NOk);
-  if NCode <> AExitCode then
-    AssertEquals('[native] exit code parity with qbe (native stdout: ' +
-      NOut + ')', AExitCode, NCode)
-  else
-    AssertEquals('[native] exit code parity with qbe', AExitCode, NCode);
-  AssertEquals('[native] stdout parity with qbe', AStdout, NOut);
+  Result := Self.CompileAndRunWithRTLDebugOn(beNative, ASrc, AStdout, AExitCode,
+                                             False)
 end;
 
 function TE2ETestCase.CompileAndRunWithRTL(const ASrc: string;
@@ -955,10 +716,7 @@ function TE2ETestCase.CompileAndRunWithRTLDebug(const ASrc: string;
                                            out AExitCode: Integer;
                                            ADebugMode: Boolean): Boolean;
 begin
-  { QBE-backed convenience; the full dual-backend implementation lives in
-    CompileAndRunWithRTLDebugOn.  Kept so existing QBE-only callers behave
-    exactly as before. }
-  Result := Self.CompileAndRunWithRTLDebugOn(QBEOrNative(), ASrc, AStdout, AExitCode,
+  Result := Self.CompileAndRunWithRTLDebugOn(beNative, ASrc, AStdout, AExitCode,
                                              ADebugMode)
 end;
 
@@ -968,14 +726,6 @@ function TE2ETestCase.CompileAndRunWithRTLOn(ABackend: TBackend;
                                            out AExitCode: Integer): Boolean;
 begin
   Result := Self.CompileAndRunWithRTLDebugOn(ABackend, ASrc, AStdout, AExitCode,
-                                             False)
-end;
-
-function TE2ETestCase.CompileAndRunWithRTLQBEOnly(const ASrc: string;
-                                           out AStdout: string;
-                                           out AExitCode: Integer): Boolean;
-begin
-  Result := Self.CompileAndRunWithRTLDebugOn(beQBE, ASrc, AStdout, AExitCode,
                                              False)
 end;
 
@@ -991,11 +741,6 @@ procedure TE2ETestCase.AssertRTLRunsOn(ABackends: TBackends;
 var
   BE: TBackend;
 begin
-  { Drop a backend the host cannot run (QBE on macOS), exactly as
-    AssertRunsOn does: otherwise the QBE arm Ignore()s the WHOLE test before
-    the native arm ever runs. }
-  if not BackendRunnableOnHost(beQBE) then
-    ABackends := ABackends - [beQBE];
   if ABackends = [] then
   begin
     Ignore('no backend supported on this host for this test');
@@ -1034,89 +779,18 @@ function TE2ETestCase.CompileAndRunWithRTLDebugOn(ABackend: TBackend;
                                          out AStdout: string;
                                          out AExitCode: Integer;
                                          ADebugMode: Boolean): Boolean;
-var
-  Lexer:       TLexer;
-  Parser:      TParser;
-  Prog:        TProgram;
-  Semantic:    TSemanticAnalyser;
-  QCG:         TCodeGenQBE;
-  Loader:      TUnitLoader;
-  Units:       TObjectList;
-  SearchPaths: TStringList;
-  Emitted:     string;
-  IRFile:      string;
-  AsmFile:     string;
-  BinFile:     string;
-  ToolOut:     string;
-  Rc:          Integer;
-  I:           Integer;
 begin
-  Result := False;
-  { Gate EVERY backend-taking entry point, so a caller cannot bypass the
-    unsupported-backend skip.  Ignore raises EIgnoredTest: the test is REPORTED
-    as skipped with a reason, not silently passed.  Dual-backend callers never
-    arrive here for an unsupported backend — AssertRunsOn drops it from the set
-    first so their native arm still runs. }
-  if not BackendRunnableOnHost(ABackend) then
-    Ignore(BackendName(ABackend) +
-      ' backend is not supported on this host target');
-  { Native goes through the compiler's own CLI — see CompileAndRunNativeCLI.
-    Its --unit-path RTL/stdlib pair already gives the compiler's own unit
-    loader exactly the search paths this method builds manually below for
-    QBE, so no separate whole-program AppendUnit dance is needed here. }
-  if ABackend = beNative then
-  begin
-    Result := Self.CompileAndRunNativeCLI(ASrc, ADebugMode, '', AStdout,
-                                          AExitCode);
-    Exit
-  end;
-  Inc(FCounter);
-  IRFile  := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
-  AsmFile := FScratch + '/t' + IntToStr(FCounter) + '.s';
-  BinFile := FScratch + '/t' + IntToStr(FCounter);
-
-  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
-  QCG := nil; Loader := nil; Units := nil; SearchPaths := nil;
-  try
-    Lexer    := TLexer.Create(ASrc);
-    Parser   := TParser.Create(Lexer);
-    Prog     := Parser.Parse();
-    Semantic := TSemanticAnalyser.Create();
-    SearchPaths := TStringList.Create();
-    SearchPaths.Add(FRTLUnitPath);
-    SearchPaths.Add(FStdlibUnitPath);
-    Loader := TUnitLoader.Create(SearchPaths);
-    Units  := Loader.LoadAll(Prog.UsedUnits);
-    for I := 0 to Units.Count - 1 do
-      Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
-    Semantic.Analyse(Prog);
-    QCG := TCodeGenQBE.Create();
-    QCG.SetDebugMode(ADebugMode);
-    QCG.SetSymbolTable(Prog.SymbolTable);
-    for I := 0 to Units.Count - 1 do
-      QCG.AppendUnit(TUnit(Units.Items[I]));
-    QCG.AppendProgram(Prog);
-    Emitted := QCG.GetOutput()
-  finally
-    QCG.Free(); Semantic.Free();
-    Units.Free(); Loader.Free(); SearchPaths.Free();
-    Prog.Free(); Parser.Free(); Lexer.Free()
-  end;
-
-  WriteFile(IRFile, Emitted);
-  Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
-  if Rc <> 0 then begin AStdout := 'qbe failed: ' + ToolOut; AExitCode := Rc; Exit end;
-  Rc := LinkWithRTL(AsmFile, BinFile, ToolOut);
-  if Rc <> 0 then begin AStdout := 'cc failed: ' + ToolOut; AExitCode := Rc; Exit end;
-  AExitCode := RunProcNoArgs(BinFile, AStdout);
-  Result := True
+  { The CLI's --unit-path RTL/stdlib pair gives the compiler's own unit
+    loader the search paths the program needs. }
+  Result := Self.CompileAndRunNativeCLI(ASrc, ADebugMode, '', AStdout,
+                                        AExitCode)
 end;
 
 function TE2ETestCase.CompileAndRunWithUnit(const AUnitName, AUnitSrc, ASrc: string;
                                             out AStdout: string;
                                             out AExitCode: Integer): Boolean;
 begin
-  Result := Self.CompileAndRunWithUnitOn(QBEOrNative(), AUnitName, AUnitSrc, ASrc,
+  Result := Self.CompileAndRunWithUnitOn(beNative, AUnitName, AUnitSrc, ASrc,
                                          AStdout, AExitCode)
 end;
 
@@ -1132,83 +806,12 @@ function TE2ETestCase.CompileAndRunWithUnitOn(ABackend: TBackend;
                                             const AUnitName, AUnitSrc, ASrc: string;
                                             out AStdout: string;
                                             out AExitCode: Integer): Boolean;
-var
-  Lexer:       TLexer;
-  Parser:      TParser;
-  Prog:        TProgram;
-  Semantic:    TSemanticAnalyser;
-  QCG:         TCodeGenQBE;
-  Loader:      TUnitLoader;
-  Units:       TObjectList;
-  SearchPaths: TStringList;
-  Emitted:     string;       { QBE IR text }
-  IRFile, AsmFile, BinFile, ToolOut, UnitFile: string;
-  Rc, I:       Integer;
 begin
-  Result := False;
-  { Gate EVERY backend-taking entry point, so a caller cannot bypass the
-    unsupported-backend skip.  Ignore raises EIgnoredTest: the test is REPORTED
-    as skipped with a reason, not silently passed.  Dual-backend callers never
-    arrive here for an unsupported backend — AssertRunsOn drops it from the set
-    first so their native arm still runs. }
-  if not BackendRunnableOnHost(ABackend) then
-    Ignore(BackendName(ABackend) +
-      ' backend is not supported on this host target');
-  UnitFile := FScratch + '/' + AUnitName + '.pas';
-  { Write the user unit to the scratch dir so the unit loader resolves it. }
-  WriteFile(UnitFile, AUnitSrc);
-
-  { Native goes through the compiler's own CLI, with FScratch as an extra
-    --unit-path so the just-written user unit resolves exactly as it does for
-    QBE's manual TUnitLoader below. }
-  if ABackend = beNative then
-  begin
-    Result := Self.CompileAndRunNativeCLI(ASrc, False, FScratch, AStdout,
-                                          AExitCode);
-    Exit
-  end;
-  Inc(FCounter);
-  IRFile   := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
-  AsmFile  := FScratch + '/t' + IntToStr(FCounter) + '.s';
-  BinFile  := FScratch + '/t' + IntToStr(FCounter);
-
-  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
-  QCG := nil;
-  Loader := nil; Units := nil; SearchPaths := nil;
-  try
-    Lexer    := TLexer.Create(ASrc);
-    Parser   := TParser.Create(Lexer);
-    Prog     := Parser.Parse();
-    Semantic := TSemanticAnalyser.Create();
-    SearchPaths := TStringList.Create();
-    SearchPaths.Add(FScratch);            { the written user unit }
-    SearchPaths.Add(FRTLUnitPath);
-    SearchPaths.Add(FStdlibUnitPath);
-    Loader := TUnitLoader.Create(SearchPaths);
-    Units  := Loader.LoadAll(Prog.UsedUnits);
-    for I := 0 to Units.Count - 1 do
-      Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
-    Semantic.Analyse(Prog);
-    QCG := TCodeGenQBE.Create();
-    QCG.SetSymbolTable(Prog.SymbolTable);
-    for I := 0 to Units.Count - 1 do
-      QCG.AppendUnit(TUnit(Units.Items[I]));
-    QCG.AppendProgram(Prog);
-    Emitted := QCG.GetOutput()
-  finally
-    QCG.Free();
-    Semantic.Free();
-    Units.Free(); Loader.Free(); SearchPaths.Free();
-    Prog.Free(); Parser.Free(); Lexer.Free()
-  end;
-
-  WriteFile(IRFile, Emitted);
-  Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
-  if Rc <> 0 then begin AStdout := 'qbe failed: ' + ToolOut; AExitCode := Rc; Exit end;
-  Rc := LinkWithRTL(AsmFile, BinFile, ToolOut);
-  if Rc <> 0 then begin AStdout := 'cc failed: ' + ToolOut; AExitCode := Rc; Exit end;
-  AExitCode := RunProcNoArgs(BinFile, AStdout);
-  Result := True
+  { Write the user unit to the scratch dir, which goes on the compiler's
+    --unit-path so the program's uses clause resolves it. }
+  WriteFile(FScratch + '/' + AUnitName + '.pas', AUnitSrc);
+  Result := Self.CompileAndRunNativeCLI(ASrc, False, FScratch, AStdout,
+                                        AExitCode)
 end;
 
 { Extract the unit name from a 'unit <name>;' header so the source can be
@@ -1233,84 +836,13 @@ function TE2ETestCase.CompileAndRunWithUnits(const AUnit1Src, AUnit2Src,
                                              ASrc: string;
                                              out AStdout: string;
                                              out AExitCode: Integer): Boolean;
-var
-  Lexer:       TLexer;
-  Parser:      TParser;
-  Prog:        TProgram;
-  Semantic:    TSemanticAnalyser;
-  QCG:         TCodeGenQBE;
-  CG:          ICodeGen;
-  Loader:      TUnitLoader;
-  Units:       TObjectList;
-  SearchPaths: TStringList;
-  Emitted:     string;
-  IRFile, AsmFile, BinFile, ToolOut: string;
-  Rc, I:       Integer;
 begin
-  Result := False;
-  { Gate EVERY backend-taking entry point, so a caller cannot bypass the
-    unsupported-backend skip.  Ignore raises EIgnoredTest: the test is REPORTED
-    as skipped with a reason, not silently passed.  Dual-backend callers never
-    arrive here for an unsupported backend — AssertRunsOn drops it from the set
-    first so their native arm still runs. }
-  if QBEOrNative() = beNative then
-  begin
-    { No runnable QBE on this host: write both units beside the program and
-      let the native compiler's own loader find them on the scratch path. }
-    WriteFile(FScratch + '/' + UnitNameOf(AUnit1Src) + '.pas', AUnit1Src);
-    WriteFile(FScratch + '/' + UnitNameOf(AUnit2Src) + '.pas', AUnit2Src);
-    Result := Self.CompileAndRunNativeCLI(ASrc, False, FScratch, AStdout,
-      AExitCode);
-    Exit
-  end;
-  Inc(FCounter);
-  IRFile   := FScratch + '/t' + IntToStr(FCounter) + '.ssa';
-  AsmFile  := FScratch + '/t' + IntToStr(FCounter) + '.s';
-  BinFile  := FScratch + '/t' + IntToStr(FCounter);
-
-  { Write both user units to the scratch dir so the loader resolves them.
-    Filenames are derived from each unit's own `unit <name>;` header. }
+  { Both units go beside the program, named from their own headers, so the
+    compiler's loader finds them on the scratch path. }
   WriteFile(FScratch + '/' + UnitNameOf(AUnit1Src) + '.pas', AUnit1Src);
   WriteFile(FScratch + '/' + UnitNameOf(AUnit2Src) + '.pas', AUnit2Src);
-
-  Lexer := nil; Parser := nil; Prog := nil; Semantic := nil;
-  QCG := nil; CG := nil;
-  Loader := nil; Units := nil; SearchPaths := nil;
-  try
-    Lexer    := TLexer.Create(ASrc);
-    Parser   := TParser.Create(Lexer);
-    Prog     := Parser.Parse();
-    Semantic := TSemanticAnalyser.Create();
-    SearchPaths := TStringList.Create();
-    SearchPaths.Add(FScratch);
-    SearchPaths.Add(FRTLUnitPath);
-    SearchPaths.Add(FStdlibUnitPath);
-    Loader := TUnitLoader.Create(SearchPaths);
-    Units  := Loader.LoadAll(Prog.UsedUnits);
-    for I := 0 to Units.Count - 1 do
-      Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
-    Semantic.Analyse(Prog);
-    QCG := TCodeGenQBE.Create();
-    CG  := QCG;
-    CG.SetSymbolTable(Prog.SymbolTable);
-    for I := 0 to Units.Count - 1 do
-      CG.AppendUnit(TUnit(Units.Items[I]));
-    CG.AppendProgram(Prog);
-    Emitted := CG.GetOutput()
-  finally
-    QCG.Free();
-    Semantic.Free();
-    Units.Free(); Loader.Free(); SearchPaths.Free();
-    Prog.Free(); Parser.Free(); Lexer.Free()
-  end;
-
-  WriteFile(IRFile, Emitted);
-  Rc := RunProc(FQBE, ['-o', AsmFile, IRFile], ToolOut);
-  if Rc <> 0 then begin AStdout := 'qbe failed: ' + ToolOut; AExitCode := Rc; Exit end;
-  Rc := LinkWithRTL(AsmFile, BinFile, ToolOut);
-  if Rc <> 0 then begin AStdout := 'cc failed: ' + ToolOut; AExitCode := Rc; Exit end;
-  AExitCode := RunProcNoArgs(BinFile, AStdout);
-  Result := True
+  Result := Self.CompileAndRunNativeCLI(ASrc, False, FScratch, AStdout,
+    AExitCode)
 end;
 
 end.

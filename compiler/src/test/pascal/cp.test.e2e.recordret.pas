@@ -1760,7 +1760,6 @@ begin
     have passed throughout and pinned nothing. }
   for B in AllBackends do
   begin
-    if not BackendRunnableOnHost(B) then Continue;
     AssertTrue(BackendName(B) + ': compile+link+run',
       CompileAndRunWithUnitOn(B, 'tokholder', UnitSrc, DrvSrc, Output, RCode));
     AssertEquals(BackendName(B) + ': exit code', 0, RCode);
