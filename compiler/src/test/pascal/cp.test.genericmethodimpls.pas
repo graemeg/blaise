@@ -18,14 +18,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TGenericMethodImplTests = class(TTestCase)
   private
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
-    function GenIR(const ASrc: string): string;
   published
     { ------------------------------------------------------------------ }
     { Parser                                                               }
@@ -44,9 +43,7 @@ type
     { ------------------------------------------------------------------ }
     { Codegen                                                              }
     { ------------------------------------------------------------------ }
-    procedure TestCodegen_SeparateImpl_ProducesSetValBody;
-    procedure TestCodegen_SeparateImpl_ProducesGetValBody;
-    procedure TestCodegen_SeparateImpl_IRMatchesInlineVersion;
+    procedure TestCodegen_SeparateImpl_AsmMatchesInlineVersion;
   end;
 
 implementation
@@ -149,22 +146,6 @@ begin
     SA.Analyse(Result);
   finally
     SA.Free();
-  end;
-end;
-
-function TGenericMethodImplTests.GenIR(const ASrc: string): string;
-var
-  CG:   TCodeGenQBE;
-  Prog: TProgram;
-begin
-  Prog := AnalyseSrc(ASrc);
-  CG   := TCodeGenQBE.Create();
-  try
-    CG.Generate(Prog);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Prog.Free();
   end;
 end;
 
@@ -278,31 +259,15 @@ end;
 { Codegen tests                                                         }
 { ------------------------------------------------------------------ }
 
-procedure TGenericMethodImplTests.TestCodegen_SeparateImpl_ProducesSetValBody;
-var
-  IR: string;
+{ A body supplied in the implementation section must lower exactly as the
+  same body written inline: any difference is a monomorphisation divergence
+  that a small program need not expose. }
+procedure TGenericMethodImplTests.TestCodegen_SeparateImpl_AsmMatchesInlineVersion;
 begin
-  IR := GenIR(SrcForwardOnly);
-  AssertTrue('SetVal body emitted',
-    Pos('$TBox_Integer_SetVal', IR) > 0);
-end;
-
-procedure TGenericMethodImplTests.TestCodegen_SeparateImpl_ProducesGetValBody;
-var
-  IR: string;
-begin
-  IR := GenIR(SrcForwardOnly);
-  AssertTrue('GetVal body emitted',
-    Pos('$TBox_Integer_GetVal', IR) > 0);
-end;
-
-procedure TGenericMethodImplTests.TestCodegen_SeparateImpl_IRMatchesInlineVersion;
-var
-  IRSep, IRInl: string;
-begin
-  IRSep := GenIR(SrcForwardOnly);
-  IRInl := GenIR(SrcInline);
-  AssertEquals('Separate-impl IR equals inline IR', IRInl, IRSep);
+  AssertEquals('x86-64: separate-impl asm equals inline asm',
+    GenAsm(SrcInline, TargetX86_64), GenAsm(SrcForwardOnly, TargetX86_64));
+  AssertEquals('arm64: separate-impl asm equals inline asm',
+    GenAsm(SrcInline, TargetArm64), GenAsm(SrcForwardOnly, TargetArm64));
 end;
 
 initialization
