@@ -20917,7 +20917,14 @@ var
   ParamType: TTypeDesc;
   IntIdx, XmmIdx, SlotOff: Integer;
   ArgPushed: Integer;
+  NCap: Integer;
+  CapName: string;
 begin
+  { A nested function's captured-var pointers are hidden LEADING arguments,
+    ahead of the sret buffer (the order the callee's prologue spills them). }
+  NCap := 0;
+  if (ADecl <> nil) and (ADecl.CapturedVars <> nil) then
+    NCap := ADecl.CapturedVars.Count;
   { Check if the callee returns a small POD record (or method pointer) via
     registers.  RetRec is the real record or the canonical method-ptr record. }
   RC := rcSret;
@@ -20986,6 +20993,12 @@ begin
       HasFloat := True;
   end;
 
+  if (NCap > 0) and
+     (HasFloat or (Self.SretUserSlots(ADecl, AArgs) + NCap > 5)) then
+    raise ENativeCodeGenError.Create(Format(
+      'x86-64: not yet lowered: a record-returning nested routine ''%s'' ' +
+      'that captures outer variables, called with floating-point or more ' +
+      'than %d register arguments', [ADecl.Name, 5 - NCap]));
   if HasFloat then
   begin
     { Slot-based: sret = slot 0 (%rdi), explicit args = slots 1..Count.  Each
@@ -21078,7 +21091,7 @@ begin
     CleanUp := AllocSz - (AArgs.Count + 1) * 8;
     Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, CleanUp, True);
   end
-  else if Self.SretUserSlots(ADecl, AArgs) <= 5 then
+  else if Self.SretUserSlots(ADecl, AArgs) + NCap <= 5 then
   begin
     { Push each arg's register slot(s) — an interface arg is a fat pointer that
       occupies TWO slots (obj then itab on top), so the push count is the SLOT
@@ -21127,12 +21140,28 @@ begin
         ArgPushed := ArgPushed + 8;
       end;
     end;
-    { Pop one register per pushed SLOT into %rsi onwards (%rdi is the sret ptr,
-      loaded below).  ArgPushed/8 = total slots; topmost slot -> highest reg. }
+    { Pop one register per pushed SLOT, after the captures and the sret ptr
+      (loaded below).  ArgPushed/8 = total slots; topmost slot -> highest reg. }
     for I := (ArgPushed div 8) - 1 downto 0 do
-      Self.Emit(#9'popq ' + SysVArg64(I + 1));
+      Self.Emit(#9'popq ' + SysVArg64(NCap + I + 1));
+    { Captured-var pointers into the leading registers: the outer var's
+      address, or -- when this frame itself only holds it captured -- the
+      address its _cap_ slot already carries (EmitCall's convention). }
+    for I := 0 to NCap - 1 do
+    begin
+      CapName := ADecl.CapturedVars.Strings[I];
+      if Self.IsCaptured(CapName) then
+        Self.Emit(Format(#9'movq %s, %s',
+          [Self.VarOperand('_cap_' + CapName), SysVArg64(I)]))
+      else if Self.IsLocal(CapName) then
+        Self.Emit(Format(#9'leaq %s, %s',
+          [Self.VarOperand(CapName), SysVArg64(I)]))
+      else
+        Self.Emit(Format(#9'leaq %s(%%rip), %s',
+          [Self.GlobalSymName(CapName), SysVArg64(I)]));
+    end;
     { The saved dest sits just below the hoist region. }
-    Self.Emit(Format(#9'movq %d(%%rsp), %%rdi', [HTotal]));
+    Self.Emit(Format(#9'movq %d(%%rsp), %s', [HTotal, SysVArg64(NCap)]));
     Self.Emit(#9'callq ' + AFuncSym);
     Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, 0, True);
   end
@@ -22705,9 +22734,13 @@ begin
   end;
   if FSretFunc then
   begin
-    { Save the sret buffer pointer from %rdi into the Result slot. }
-    Self.Emit(Format(#9'movq %%rdi, %s', [Self.VarOperand('Result')]));
-    IntIdx := 1;
+    { Save the sret buffer pointer into the Result slot.  It is the first
+      integer argument AFTER any captured-var pointers (a nested function
+      returning a record: captures, then the buffer, then Self -- the order
+      BuildFrame's IntIdx2 count and every caller use). }
+    Self.Emit(Format(#9'movq %s, %s',
+      [SysVArg64(IntIdx), Self.VarOperand('Result')]));
+    Inc(IntIdx);
   end;
   if (ADecl.OwnerTypeName <> '') and not ADecl.IsStatic then
   begin
