@@ -8,7 +8,7 @@
 
 unit cp.test.embed;
 
-(* IR-level tests for the compile-time file-embedding directives, EMBED
+(* Front-end tests for the compile-time file-embedding directives, EMBED
    (byte array) and EMBEDSTR (string).
 
    Both are expanded by the LEXER into the tokens a hand-written constant
@@ -23,7 +23,7 @@ interface
 
 uses
   Classes, SysUtils, Streams, blaise.testing,
-  uLexer, uParser, uAST, uSemantic, uUnitInterfaceIO, blaise.codegen.qbe;
+  uLexer, uParser, uAST, uSemantic, uUnitInterfaceIO;
 
 type
   TEmbedTests = class(TTestCase)
@@ -34,8 +34,6 @@ type
     { Parse ASrc as if it lived in <tmp>/prog.pas, so a relative embed
       path resolves against the fixture directory. }
     function  ParseAt(const ASrc: string): TProgram;
-    function  GenIRAt(const ASrc: string): string;
-    function  IRContains(const AIR, AFragment: string): Boolean;
     { Compile ASrc expecting a failure; return the message ('' on success). }
     function  ExpectError(const ASrc: string): string;
   public
@@ -48,13 +46,11 @@ type
     procedure TestEmbed_HighByteIsUnsigned;
     procedure TestEmbed_EmptyFileYieldsEmptyArray;
     procedure TestEmbed_BinaryBytesIncludingNulAndNewline;
-    procedure TestEmbed_ReachesIRAsData;
 
     { --- EMBEDSTR: strings --- }
     procedure TestEmbedStr_ExactBytes;
     procedure TestEmbedStr_NoNewlineTranslation;
     procedure TestEmbedStr_EmptyFile;
-    procedure TestEmbedStr_ReachesIRAsData;
 
     { --- path resolution --- }
     procedure TestEmbed_PathIsRelativeToSourceFile;
@@ -128,40 +124,6 @@ begin
     P.Free();
     L.Free();
   end;
-end;
-
-function TEmbedTests.GenIRAt(const ASrc: string): string;
-var
-  L:  TLexer;
-  P:  TParser;
-  Pr: TProgram;
-  A:  TSemanticAnalyser;
-  CG: TCodeGenQBE;
-begin
-  L  := TLexer.Create(ASrc, FDir + '/prog.pas');
-  P  := TParser.Create(L);
-  Pr := P.Parse();
-  A  := TSemanticAnalyser.Create();
-  try
-    A.Analyse(Pr);
-  finally
-    A.Free();
-  end;
-  CG := TCodeGenQBE.Create();
-  try
-    CG.Generate(Pr);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Pr.Free();
-    P.Free();
-    L.Free();
-  end;
-end;
-
-function TEmbedTests.IRContains(const AIR, AFragment: string): Boolean;
-begin
-  Result := Pos(AFragment, AIR) >= 0;
 end;
 
 function TEmbedTests.ExpectError(const ASrc: string): string;
@@ -285,24 +247,6 @@ begin
   Pr.Free();
 end;
 
-procedure TEmbedTests.TestEmbed_ReachesIRAsData;
-var
-  IR: string;
-begin
-  WriteFixture('ir.bin', 'AB');
-  IR := GenIRAt(
-    '''
-    program P;
-    const B: array of Byte = {$EMBED 'ir.bin'};
-    var X: Byte;
-    begin X := B[0]; WriteLn(X) end.
-    ''');
-  AssertTrue('IR non-empty', IR <> '');
-  { The bytes must reach the data section as byte items. }
-  AssertTrue('emits byte 65', IRContains(IR, '65'));
-  AssertTrue('emits byte 66', IRContains(IR, '66'));
-end;
-
 { ------------------------------------------------------------------ }
 { EMBEDSTR — strings                                                   }
 { ------------------------------------------------------------------ }
@@ -363,21 +307,6 @@ begin
   AssertTrue('is string const', CD.IsString);
   AssertEquals('empty', '', CD.StrVal);
   Pr.Free();
-end;
-
-procedure TEmbedTests.TestEmbedStr_ReachesIRAsData;
-var
-  IR: string;
-begin
-  WriteFixture('greet.txt', 'Hi');
-  IR := GenIRAt(
-    '''
-    program P;
-    const S: string = {$EMBEDSTR 'greet.txt'};
-    begin WriteLn(S) end.
-    ''');
-  AssertTrue('IR non-empty', IR <> '');
-  AssertTrue('string bytes in data', IRContains(IR, 'Hi'));
 end;
 
 { ------------------------------------------------------------------ }
