@@ -634,6 +634,12 @@ begin
       Result := True;
     Exit;
   end;
+  { FuncPtrExpr(args) -- a call through the procedure pointer an expression
+    yields (GetFn()(X), Fns[I](X)) -- returns +1 exactly like the
+    procedural-variable form above.  Missing here, the assignment retained
+    the result again and leaked one reference per call. }
+  if AExpr is TIndirectFuncCallExpr then
+    Exit(True);
   { Indexed property subscript: L[I] desugars to Subscript(FieldAccess(Items))
     where Items has a ReadMethod.  The subscript emitter delegates to the
     getter — the result inherits the +1. }
