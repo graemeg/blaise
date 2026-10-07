@@ -37,6 +37,7 @@ type
     procedure TestRun_ThreadVar_RecordField_PerThreadIsolation;
     procedure TestRun_ThreadVar_RecordMethod_PerThreadIsolation;
     procedure TestRun_ThreadVar_AddressOf_PerThreadIsolation;
+    procedure TestRun_StringThreadVar_PerThreadAndBalanced;
     procedure TestRun_PerThreadAllocator_IndependentAllocs;
     procedure TestRun_AtomicARC_SharedObject_NoCorruption;
   end;
@@ -76,6 +77,39 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRTLRunsOnAll(Src, 'main worker' + LineEnding, 0);
   AssertLeakFreeOnAll(Src, 'main worker');
+end;
+
+procedure TE2EThreadingTests.TestRun_StringThreadVar_PerThreadAndBalanced;
+const
+  { A STRING threadvar: each thread reads and writes its own copy, and the
+    ARC stores into the TLS slot balance -- arm64 rejected the declaration
+    ("threadvar of this type"). }
+  Src = '''
+    program tvs;
+    uses SysUtils, Classes;
+    type
+      TW = class(TThread) procedure Execute; override; end;
+    threadvar
+      GName: string;
+    var Seen: string;
+    procedure TW.Execute;
+    begin
+      GName := 'work' + 'er';
+      Seen := GName + '/' + IntToStr(Length(GName));
+      GName := '';
+    end;
+    var T: TW;
+    begin
+      GName := 'ma' + 'in';
+      T := TW.Create(False); T.WaitFor();
+      WriteLn(GName, ' ', Seen);
+      GName := '';
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRTLRunsOnAll(Src, 'main worker/6' + LineEnding, 0);
+  AssertLeakFreeOnAll(Src, 'main worker/6');
 end;
 
 procedure TE2EThreadingTests.TestRun_Thread_FinishesInsideConstructor_ObjectSurvives;

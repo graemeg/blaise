@@ -12,25 +12,18 @@ interface
 
 uses
   blaise.testing,
-  uLexer, uParser, uAST, uSemantic, blaise.codegen.qbe,
-  blaise.codegen.native, blaise.codegen.target, cp.test.targets;
+  uLexer, uParser, uAST, uSemantic,
+  blaise.codegen.native, blaise.codegen.target, cp.test.targets, cp.test.harness;
 
 type
   TThreadVarTests = class(TTestCase)
   private
-    function GenerateIR(const ASrc: string): string;
     function GenerateNativeAsm(const ASrc: string): string;
-    function IRContains(const AIR, AFragment: string): Boolean;
   published
     procedure TestParser_ThreadVarBlockParsed;
     procedure TestParser_ThreadVarIsGlobal;
     procedure TestSemantic_ThreadVarMustBeGlobalScope;
-    procedure TestCodegen_ThreadVarInteger_EmitsThreadData;
-    procedure TestCodegen_ThreadVarString_EmitsThreadData;
-    procedure TestCodegen_ThreadVarPointer_EmitsThreadData;
-    procedure TestCodegen_RegularVar_NoThreadPrefix;
-    procedure TestCodegen_MixedVarAndThreadVar;
-    procedure TestCodegen_ThreadVarStaticArray_EmitsCorrectSize;
+    procedure TestCodegen_ThreadVars_InThreadLocalStorage;
     { @ThreadVar must yield the PER-THREAD address (%fs:0 + @tpoff), not
       the static leaq Name(%rip).  A static address makes every thread's
       @TV identical — which silently broke the allocator's MyTid identity
@@ -40,35 +33,6 @@ type
   end;
 
 implementation
-
-function TThreadVarTests.GenerateIR(const ASrc: string): string;
-var
-  L:  TLexer;
-  P:  TParser;
-  Pr: TProgram;
-  A:  TSemanticAnalyser;
-  CG: TCodeGenQBE;
-begin
-  L  := TLexer.Create(ASrc);
-  P  := TParser.Create(L);
-  Pr := P.Parse();
-  A  := TSemanticAnalyser.Create();
-  try
-    A.Analyse(Pr);
-  finally
-    A.Free();
-  end;
-  CG := TCodeGenQBE.Create();
-  try
-    CG.Generate(Pr);
-    Result := CG.GetOutput();
-  finally
-    CG.Free();
-    Pr.Free();
-    P.Free();
-    L.Free();
-  end;
-end;
 
 function TThreadVarTests.GenerateNativeAsm(const ASrc: string): string;
 var
@@ -104,11 +68,6 @@ begin
   finally
     Pr.Free();
   end;
-end;
-
-function TThreadVarTests.IRContains(const AIR, AFragment: string): Boolean;
-begin
-  Result := Pos(AFragment, AIR) >= 0;
 end;
 
 procedure TThreadVarTests.TestParser_ThreadVarBlockParsed;
@@ -171,109 +130,61 @@ end;
 procedure TThreadVarTests.TestSemantic_ThreadVarMustBeGlobalScope;
 begin
   try
-    Self.GenerateIR(
+    Analyse(
       'program P;' + #10 +
       'procedure Foo;' + #10 +
       'threadvar' + #10 +
       '  Z: Integer;' + #10 +
       'begin end;' + #10 +
       'begin' + #10 +
-      'end.');
+      'end.').Free();
     Fail('Expected EParseError for threadvar inside procedure');
   except
     on E: EParseError do ;
   end;
 end;
 
-procedure TThreadVarTests.TestCodegen_ThreadVarInteger_EmitsThreadData;
+procedure TThreadVarTests.TestCodegen_ThreadVars_InThreadLocalStorage;
+const
+  Src = '''
+    program P;
+    var
+      A: Integer;
+    threadvar
+      Counter: Integer;
+      Name: String;
+      Ptr: Pointer;
+      Buckets: array[0..7] of Pointer;
+    begin
+      A := 1; Counter := 42; Name := 'hello'; Ptr := nil; Buckets[0] := nil
+    end.
+    ''';
 var
-  IR: string;
+  X86, A64: string;
+  Tbss: Integer;
 begin
-  IR := Self.GenerateIR(
-    'program P;' + #10 +
-    'threadvar' + #10 +
-    '  Counter: Integer;' + #10 +
-    'begin' + #10 +
-    '  Counter := 42' + #10 +
-    'end.');
-  AssertTrue(Self.IRContains(IR, 'export thread data $Counter'));
-end;
-
-procedure TThreadVarTests.TestCodegen_ThreadVarString_EmitsThreadData;
-var
-  IR: string;
-begin
-  IR := Self.GenerateIR(
-    'program P;' + #10 +
-    'threadvar' + #10 +
-    '  Name: String;' + #10 +
-    'begin' + #10 +
-    '  Name := ''hello''' + #10 +
-    'end.');
-  AssertTrue(Self.IRContains(IR, 'export thread data $Name'));
-end;
-
-procedure TThreadVarTests.TestCodegen_ThreadVarPointer_EmitsThreadData;
-var
-  IR: string;
-begin
-  IR := Self.GenerateIR(
-    'program P;' + #10 +
-    'threadvar' + #10 +
-    '  Ptr: Pointer;' + #10 +
-    'begin' + #10 +
-    '  Ptr := nil' + #10 +
-    'end.');
-  AssertTrue(Self.IRContains(IR, 'export thread data $Ptr'));
-end;
-
-procedure TThreadVarTests.TestCodegen_RegularVar_NoThreadPrefix;
-var
-  IR: string;
-begin
-  IR := Self.GenerateIR(
-    'program P;' + #10 +
-    'var' + #10 +
-    '  X: Integer;' + #10 +
-    'begin' + #10 +
-    '  X := 10' + #10 +
-    'end.');
-  AssertTrue(Self.IRContains(IR, 'export data $X'));
-  AssertFalse(Self.IRContains(IR, 'export thread data $X'));
-end;
-
-procedure TThreadVarTests.TestCodegen_MixedVarAndThreadVar;
-var
-  IR: string;
-begin
-  IR := Self.GenerateIR(
-    'program P;' + #10 +
-    'var' + #10 +
-    '  A: Integer;' + #10 +
-    'threadvar' + #10 +
-    '  B: Integer;' + #10 +
-    'begin' + #10 +
-    '  A := 1;' + #10 +
-    '  B := 2' + #10 +
-    'end.');
-  AssertTrue(Self.IRContains(IR, 'export data $A'));
-  AssertFalse(Self.IRContains(IR, 'export thread data $A'));
-  AssertTrue(Self.IRContains(IR, 'export thread data $B'));
-end;
-
-procedure TThreadVarTests.TestCodegen_ThreadVarStaticArray_EmitsCorrectSize;
-var
-  IR: string;
-begin
-  IR := Self.GenerateIR(
-    'program P;' + #10 +
-    'threadvar' + #10 +
-    '  Buckets: array[0..7] of Pointer;' + #10 +
-    'begin' + #10 +
-    '  Buckets[0] := nil' + #10 +
-    'end.');
-  AssertTrue(Self.IRContains(IR, 'export thread data $Buckets'));
-  AssertTrue(Self.IRContains(IR, 'z 64'));
+  { threadvars live in thread-local storage at their full size; an
+    ordinary global stays in ordinary data.  Per-thread isolation itself is
+    run by TE2EThreadingTests; this pins where the storage is placed. }
+  X86 := GenAsm(Src, TargetX86_64);
+  Tbss := Pos('.section .tbss', X86);
+  AssertTrue('x86-64: a .tbss section', Tbss >= 0);
+  AssertTrue('x86-64: Counter in .tbss', Pos(#10 + 'Counter:', X86) > Tbss);
+  AssertTrue('x86-64: Name in .tbss', Pos(#10 + 'Name:', X86) > Tbss);
+  AssertTrue('x86-64: Ptr in .tbss', Pos(#10 + 'Ptr:', X86) > Tbss);
+  AssertTrue('x86-64: Buckets is 64 bytes',
+    Pos('Buckets:' + #10 + #9 + '.skip 64', X86) > Tbss);
+  AssertTrue('x86-64: A is ordinary data', (Pos(#10 + 'A:', X86) >= 0) and
+    (Pos(#10 + 'A:', X86) < Tbss));
+  AssertTrue('x86-64: thread-pointer access', Pos('Counter@tpoff', X86) >= 0);
+  A64 := GenAsm(Src, TargetArm64);
+  AssertTrue('arm64: thread_bss section', Pos('__thread_bss', A64) >= 0);
+  AssertTrue('arm64: Counter storage', Pos(#10 + '_ts_Counter:', A64) >= 0);
+  AssertTrue('arm64: Counter TLV descriptor', Pos(#10 + '_tv_Counter:', A64) >= 0);
+  AssertTrue('arm64: Name TLV descriptor', Pos(#10 + '_tv_Name:', A64) >= 0);
+  AssertTrue('arm64: Buckets is 64 bytes',
+    Pos('_ts_Buckets:' + #10 + #9 + '.zero 64', A64) >= 0);
+  AssertTrue('arm64: A is ordinary data', Pos('_tv_A', A64) < 0);
 end;
 
 procedure TThreadVarTests.TestCodegenNative_AddrOfThreadVar_UsesTls;

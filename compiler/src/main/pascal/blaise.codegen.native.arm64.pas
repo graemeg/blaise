@@ -15186,10 +15186,12 @@ begin
       end;
       if VD.IsThreadVar then
       begin
-        { threadvars get a Mach-O TLV descriptor; unmanaged scalar kinds
-          and static arrays of them (per-thread ARC teardown is its own
-          problem, so managed kinds stay NotYet) }
+        { threadvars get a Mach-O TLV descriptor: scalar kinds, strings,
+          class references and unmanaged static arrays.  As on x86-64 a
+          managed threadvar is not released at exit -- its lifetime is
+          per-thread, not program-global }
         if not (IsIntFam(VD.ResolvedType) or
+                VD.ResolvedType.IsString() or
                 (VD.ResolvedType.Kind in [tyDouble, tyPointer, tyPChar,
                                           tyClass]) or
                 ((VD.ResolvedType.Kind = tyStaticArray) and
@@ -15913,9 +15915,11 @@ begin
         RegisterGlobalInit(N, VD);
       if VD.IsThreadVar then
       begin
-        { unmanaged scalar kinds and static arrays of them — per-thread
-          ARC teardown is its own problem, so managed kinds stay NotYet }
+        { scalar kinds, strings, class references and unmanaged static
+          arrays -- as on x86-64 a managed threadvar is not released at
+          exit, its lifetime being per-thread }
         if not (IsIntFam(VD.ResolvedType) or
+                VD.ResolvedType.IsString() or
                 (VD.ResolvedType.Kind in [tyDouble, tyPointer, tyPChar,
                                           tyClass]) or
                 ((VD.ResolvedType.Kind = tyStaticArray) and
