@@ -8154,6 +8154,11 @@ begin
           Sym.Visibility := CD.Visibility;
           Sym.OwnerTypeName := TD.Name;
           Sym.OwningUnit := FCurrentUnitName;
+          { the member blob's data label, as the qualified TFoo.Arr[I] path
+            mints it -- a BARE Arr[I] inside a method resolves to this symbol,
+            and without the label codegen read through no symbol at all
+            (x86-64 segfaulted, arm64 rejected it) }
+          Sym.ConstArrayQbe := TD.Name + '_' + CD.Name;
           Sym.ConstArray := TStringList.Create();
           for K := 0 to CD.ArrayElements.Count - 1 do
             Sym.ConstArray.Add(CD.ArrayElements[K]);
@@ -14950,6 +14955,10 @@ begin
         TIdentExpr(AExpr).IsConstant  := True;
         TIdentExpr(AExpr).ConstValue  := Sym.ConstValue;
         TIdentExpr(AExpr).ConstString := Sym.ConstString;
+        { a member const ARRAY read bare (Names[I] inside a method): carry the
+          blob's data label exactly as a block-level array const does }
+        if Sym.ConstArrayQbe <> '' then
+          TIdentExpr(AExpr).ConstArraySymbol := Sym.ConstArrayQbe;
         Result := Sym.TypeDesc;
         AExpr.ResolvedType := Result;
         Exit;
