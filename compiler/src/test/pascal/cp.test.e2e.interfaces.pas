@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_InterfaceProperty_ThroughRecordField;
     procedure TestRun_Interfaces_Combined;
     procedure TestRun_BasicDispatch;
     procedure TestRun_MethodWithArgs;
@@ -1322,11 +1323,11 @@ const
     array elements and a record field (SizeOf 24 -- the pair is 16 bytes),
     dispatch through each; is / as / Supports (two- and three-argument);
     interface arguments from an identifier, an as-cast and a method
-    parameter; property read and write, including through a record field
-    (R.F.Value); nil compares on a local and on an interface Result; an
+    parameter; property read and write; nil compares on a local and on an interface Result; an
     interface-returning method assigned and discarded; a record and an out
     string through itab dispatch; and release timing -- reassigning the last
-    reference destroys at once, scope exit releases the rest. }
+    reference destroys at once, Obj := nil and D := nil release theirs at
+    once, and scope exit releases the last one. }
   Src = '''
     program P;
     type
@@ -1429,7 +1430,7 @@ const
       R.Tag := 5;
       WriteLn(SizeOf(TRec), ' ', R.Tag, ' ', R.F.GetVal());
       F.Value := 13;
-      WriteLn(F.Value, ' ', R.F.Value);
+      WriteLn(F.Value);
       if D = nil then WriteLn('local nil');
       D := MaybeFoo(False);
       D := MaybeFoo(True);
@@ -1443,7 +1444,9 @@ const
       G := F;
       WriteLn('reassigned');
       H.Free();
-      Pl.Free()
+      Pl.Free();
+      Obj := nil;
+      D := nil
     end;
     begin
       Run();
@@ -1462,7 +1465,7 @@ begin
     'use 1' + LE +
     'helper 2' + LE +
     '24 5 1' + LE +
-    '130 130' + LE +
+    '130' + LE +
     'local nil' + LE +
     'result nil' + LE +
     'result set' + LE +
@@ -1475,6 +1478,55 @@ begin
     'destroy a' + LE +
     'done' + LE, 0);
   AssertLeakFreeOnAll(Src, 'reassigned');
+end;
+
+procedure TE2EInterfaceTests.TestRun_InterfaceProperty_ThroughRecordField;
+const
+  {
+    An interface property read through a record field (R.F.Value) dispatches
+    the getter through the field's itab, like a method call through the same
+    chain.  The semantic pass used to reject it ("requires a record or class
+    base, got 'IFoo'").  Native only: the QBE backend, due for removal, does
+    not support the chained receiver. }
+  Src = '''
+    program P;
+    type
+      IFoo = interface
+        function GetValue(): Integer;
+        procedure SetValue(AValue: Integer);
+        property Value: Integer read GetValue write SetValue;
+      end;
+      TFoo = class(TObject, IFoo)
+        FVal: Integer;
+        function GetValue(): Integer;
+        procedure SetValue(AValue: Integer);
+      end;
+      TRec = record
+        F: IFoo;
+        Tag: Integer;
+      end;
+      THolder = class
+        R: TRec;
+      end;
+    function TFoo.GetValue(): Integer; begin Result := FVal * 10 end;
+    procedure TFoo.SetValue(AValue: Integer); begin FVal := AValue end;
+    var R: TRec; H: THolder;
+    begin
+      R.F := TFoo.Create();
+      R.F.SetValue(4);
+      WriteLn(R.F.Value);
+      H := THolder.Create();
+      H.R.F := R.F;
+      H.R.F.SetValue(7);
+      WriteLn(H.R.F.Value, ' ', R.F.Value);
+      H.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '40' + LE +
+    '70 70' + LE, 0);
 end;
 
 initialization
