@@ -22,6 +22,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_MethodAddress_PublishedTable;
     procedure TestRun_Metaclass_EqualityClassCreateAndFree;
     procedure TestRun_AliasConstructor_RunsUserCtor;
     procedure TestRun_Phase2Milestone_Stdout;
@@ -2767,6 +2768,74 @@ begin
     'TBase' + LE +
     'True' + LE +
     'freed 5' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_MethodAddress_PublishedTable;
+const
+  {
+    The published-method table, read at run time by MethodAddress: every
+    published method is found under its own name (each call proves the
+    name/address pairing), a method that is only public and an unknown name are
+    not, and the walk continues into the parent's table. }
+  Src = '''
+    program Prg;
+    type
+      TStep = procedure(N: Integer) of object;
+      TBase = class(TObject)
+        FVal: Integer;
+      public
+        procedure Hidden(N: Integer);
+      published
+        procedure FromBase(N: Integer);
+      end;
+      TCalc = class(TBase)
+      published
+        procedure Add(N: Integer);
+        procedure Mul(N: Integer);
+        procedure Neg(N: Integer);
+      end;
+    procedure TBase.Hidden(N: Integer); begin FVal := -1 end;
+    procedure TBase.FromBase(N: Integer); begin FVal := FVal + N * 1000 end;
+    procedure TCalc.Add(N: Integer); begin FVal := FVal + N end;
+    procedure TCalc.Mul(N: Integer); begin FVal := FVal * N end;
+    procedure TCalc.Neg(N: Integer); begin FVal := -FVal end;
+    procedure Call(C: TCalc; const AName: string; N: Integer);
+    var M: TMethod; P: TStep;
+    begin
+      M.Code := MethodAddress(C, AName);
+      if M.Code = nil then
+      begin
+        WriteLn(AName, ' nil');
+        Exit
+      end;
+      M.Data := C;
+      P := TStep(M);
+      P(N);
+      WriteLn(AName, ' -> ', C.FVal)
+    end;
+    var C: TCalc;
+    begin
+      C := TCalc.Create();
+      Call(C, 'Add', 5);
+      Call(C, 'Mul', 3);
+      Call(C, 'Neg', 0);
+      Call(C, 'FromBase', 2);
+      Call(C, 'Hidden', 0);
+      Call(C, 'NoSuch', 0);
+      WriteLn(MethodAddress(C, 'Add') <> MethodAddress(C, 'Mul'));
+      C.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'Add -> 5' + LE +
+    'Mul -> 15' + LE +
+    'Neg -> -15' + LE +
+    'FromBase -> 1985' + LE +
+    'Hidden nil' + LE +
+    'NoSuch nil' + LE +
+    'True' + LE, 0);
 end;
 
 initialization
