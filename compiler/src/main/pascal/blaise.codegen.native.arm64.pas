@@ -121,6 +121,8 @@ type
                                    TGenericInstance clones so instances flow
                                    through the ordinary class machinery }
     FObjLocals:   TStringList;   { class-typed locals — released at scope exit }
+    FWeakLocals:  TStringList;   { [Weak] class/interface locals — the obj slot is
+                                   deregistered (_WeakClear) at scope exit }
     FObjGlobals:  TStringList;   { class-typed globals — released at program exit }
     FTlvGlobals:  TStringList;   { threadvar globals — Mach-O TLV descriptors }
     FTlvSize:     TDictionary<string, Integer>;  { per-thread storage bytes }
@@ -749,6 +751,7 @@ begin
   FGenericDecls := TObjectList.Create(True);
   FUnitEmittedClasses := TObjectList.Create(False);
   FObjLocals   := TStringList.Create();
+  FWeakLocals  := TStringList.Create();
   FObjGlobals  := TStringList.Create();
   FTlvGlobals  := TStringList.Create();
   FTlvSize     := TDictionary<string, Integer>.Create();
@@ -795,6 +798,7 @@ begin
   FUnitEmittedClasses.Free();
   FGenericDecls.Free();
   FObjLocals.Free();
+  FWeakLocals.Free();
   FObjGlobals.Free();
   FTlvGlobals.Free();
   FTlvSize.Free();
@@ -10282,6 +10286,7 @@ begin
   FRecLocals.Clear();
   FByValRecParams.Clear();
   FObjLocals.Clear();
+  FWeakLocals.Clear();
   FIntfLocals.Clear();
   FDynLocals.Clear();
   FRefLocals.Clear();
@@ -10548,6 +10553,11 @@ begin
         if not VD.IsWeak then
           FIntfLocals.Add(VD.Names.Strings[J]);
       end;
+      { a weak slot holds no reference but IS registered in the weak table:
+        it must be deregistered before the frame dies, or freeing the target
+        later nils a dead stack slot }
+      if VD.IsWeak and (VD.ResolvedType.Kind in [tyClass, tyInterface]) then
+        FWeakLocals.Add(VD.Names.Strings[J]);
     end;
   end;
   { 16-byte scratch for interface-returning calls (sret target).  Always
@@ -11158,6 +11168,12 @@ begin
   begin
     EmitLoadSlot('x0', FObjLocals.Strings[I]);
     EmitCallSym('_ClassRelease');
+  end;
+  { deregister [Weak] locals (their obj slot) from the weak table }
+  for I := 0 to FWeakLocals.Count - 1 do
+  begin
+    EmitSlotAddr('x0', FWeakLocals.Strings[I]);
+    EmitCallSym('_WeakClear');
   end;
   { release the obj half of interface locals }
   for I := 0 to FIntfLocals.Count - 1 do
@@ -14791,6 +14807,7 @@ begin
   FRecLocals.Clear();
   FByValRecParams.Clear();
   FObjLocals.Clear();
+  FWeakLocals.Clear();
   FIntfLocals.Clear();
   FForN := 0;
   AddLocal('__iret', 16);
