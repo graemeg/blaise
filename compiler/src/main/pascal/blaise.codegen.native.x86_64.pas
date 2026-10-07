@@ -7059,6 +7059,7 @@ end;
   shuffles. }
 procedure TX86_64Backend.EmitExprToXmm0(AExpr: TASTExpr);
 var
+  FloatElem: TTypeDesc;
   FL:  TFloatLiteral;
   BE:  TBinaryExpr;
   FC:  TFuncCallExpr;
@@ -7420,23 +7421,29 @@ begin
     paths; only the final load differs — movsd/movss into %xmm0 rather than a
     GPR load.  Without this case a float element read falls through to the
     error below. }
+  { A dynamic array and an OPEN array share the shape: the base expression
+    yields the data pointer, element I sits at I * ElemSize. }
+  FloatElem := nil;
   if (AExpr is TStringSubscriptExpr) and
-     (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) and
-     (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyDynArray) and
-     IsFloatFamily(TDynArrayTypeDesc(
-       TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType) then
+     (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) then
+  begin
+    if TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyDynArray then
+      FloatElem := TDynArrayTypeDesc(
+        TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType
+    else if TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind =
+            tyOpenArray then
+      FloatElem := TOpenArrayTypeDesc(
+        TStringSubscriptExpr(AExpr).StrExpr.ResolvedType).ElementType;
+  end;
+  if (FloatElem <> nil) and IsFloatFamily(FloatElem) then
   begin
     Self.EmitExprToEax(TStringSubscriptExpr(AExpr).StrExpr);
     Self.Emit(#9'pushq %rax');
     Self.EmitExprToEax(TStringSubscriptExpr(AExpr).IndexExpr);
-    Self.Emit(Format(#9'imulq $%d, %%rax',
-      [TDynArrayTypeDesc(TStringSubscriptExpr(AExpr).StrExpr.ResolvedType)
-        .ElementType.RawSize()]));
+    Self.Emit(Format(#9'imulq $%d, %%rax', [FloatElem.RawSize()]));
     Self.Emit(#9'popq %rcx');
     Self.Emit(#9'addq %rcx, %rax');
-    Self.EmitLoadFloat('(%rax)',
-      TDynArrayTypeDesc(TStringSubscriptExpr(AExpr).StrExpr.ResolvedType)
-        .ElementType);
+    Self.EmitLoadFloat('(%rax)', FloatElem);
     Exit;
   end;
   if (AExpr is TStringSubscriptExpr) and
