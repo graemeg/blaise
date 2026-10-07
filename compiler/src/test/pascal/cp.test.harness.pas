@@ -51,6 +51,9 @@ function GenAsm(const ASrc, ATarget: string): string;
 function GenAsmDebug(const ASrc, ATarget: string): string;
 { AUnitSrc is analysed for export and emitted ahead of the program. }
 function GenAsmWithUnit(const AUnitSrc, ASrc, ATarget: string): string;
+{ The object a unit compiled on its own produces (separate compilation):
+  its routines, globals and init / fini, with no program. }
+function GenUnitAsm(const AUnitSrc, ATarget: string): string;
 { The usual shape of a code-generation assertion: the lowering decision is
   the same on both ISAs, only the spelling differs.  Returns '' when the
   x86-64 assembly contains AX86 and the arm64 assembly contains AArm64,
@@ -190,6 +193,34 @@ end;
 function GenAsmWithUnit(const AUnitSrc, ASrc, ATarget: string): string;
 begin
   Result := GenerateAsm(AUnitSrc, ASrc, ATarget, False);
+end;
+
+function GenUnitAsm(const AUnitSrc, ATarget: string): string;
+var
+  U: TUnit;
+  A: TSemanticAnalyser;
+  CG: TCodeGenNative;
+begin
+  U := ParseUnitSrc(AUnitSrc);
+  try
+    A := TSemanticAnalyser.Create();
+    try
+      A.AnalyseUnit(U);
+      CG := TCodeGenNative.Create();
+      try
+        CG.SetTarget(TargetByName(ATarget));
+        CG.SetSymbolTable(U.SymbolTable);
+        CG.GenerateUnit(U);
+        Result := CG.GetOutput();
+      finally
+        CG.Free();
+      end;
+    finally
+      A.Free();
+    end;
+  finally
+    U.Free();
+  end;
 end;
 
 function AsmMissing(const ASrc, AX86, AArm64: string): string;

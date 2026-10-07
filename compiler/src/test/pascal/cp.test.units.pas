@@ -15,14 +15,13 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen.qbe, uUnitLoader;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, uUnitLoader, cp.test.harness;
 
 type
   TUnitTests = class(TTestCase)
   private
     function  ParseUnit(const ASrc: string): TUnit;
     function  AnalyseUnit(const ASrc: string): TUnit;
-    function  GenUnitIR(const ASrc: string): string;
     procedure AnalyseUnitExpectError(const ASrc: string);
   published
     { ------------------------------------------------------------------ }
@@ -88,10 +87,7 @@ type
     { Codegen                                                              }
     { ------------------------------------------------------------------ }
     procedure TestCodegen_Unit_NoMainFunction;
-    procedure TestCodegen_Unit_IntfFunctionsExported;
-    procedure TestCodegen_Unit_FunctionBodyInIR;
-    procedure TestCodegen_Unit_ImplOnlyFuncNotExported;
-    procedure TestCodegen_Unit_CorrectArithmetic;
+    procedure TestCodegen_Unit_ExportsInterfaceRoutinesOnly;
 
     { ------------------------------------------------------------------ }
     { Unit loader                                                          }
@@ -128,23 +124,6 @@ begin
     A.AnalyseUnit(Result);
   finally
     A.Free();
-  end;
-end;
-
-function TUnitTests.GenUnitIR(const ASrc: string): string;
-var U: TUnit; CG: TCodeGenQBE;
-begin
-  U := AnalyseUnit(ASrc);
-  try
-    CG := TCodeGenQBE.Create();
-    try
-      CG.GenerateUnit(U);
-      Result := CG.GetOutput();
-    finally
-      CG.Free();
-    end;
-  finally
-    U.Free();
   end;
 end;
 
@@ -535,48 +514,36 @@ end;
 { ------------------------------------------------------------------ }
 
 procedure TUnitTests.TestCodegen_Unit_NoMainFunction;
-var IR: string;
 begin
-  IR := GenUnitIR(SrcUnitFuncs);
-  AssertFalse('no $main in unit IR', Pos('$main', IR) > 0);
+  { A unit compiled on its own is a library object: no program entry. }
+  AssertTrue('x86-64: no main', Pos(#10 + 'main:', GenUnitAsm(SrcUnitFuncs, TargetX86_64)) < 0);
+  AssertTrue('arm64: no main', Pos(#10 + '_main:', GenUnitAsm(SrcUnitFuncs, TargetArm64)) < 0);
 end;
 
-procedure TUnitTests.TestCodegen_Unit_IntfFunctionsExported;
-var IR: string;
+procedure TUnitTests.TestCodegen_Unit_ExportsInterfaceRoutinesOnly;
+var
+  X86, A64: string;
 begin
-  IR := GenUnitIR(SrcUnitFuncs);
-  { Interface-declared functions carry the export keyword }
-  AssertTrue('export present for Add', Pos('export function', IR) > 0);
-end;
-
-procedure TUnitTests.TestCodegen_Unit_FunctionBodyInIR;
-var IR: string;
-begin
-  IR := GenUnitIR(SrcUnitFuncs);
-  AssertTrue('$MathUtils_Add in IR', Pos('$MathUtils_Add', IR) > 0);
-  AssertTrue('$MathUtils_Mul in IR', Pos('$MathUtils_Mul', IR) > 0);
-end;
-
-procedure TUnitTests.TestCodegen_Unit_ImplOnlyFuncNotExported;
-var IR: string; HelperPos: Integer; ExportPos: Integer;
-begin
-  IR := GenUnitIR(SrcUnitImplOnly);
-  { Helper is impl-only: its definition must NOT have 'export' prefix.
-    Pub is interface-declared: it must have 'export'. }
-  HelperPos := Pos('$Internals_Helper', IR);
-  ExportPos := Pos('export function', IR);
-  AssertTrue('$Internals_Helper present', HelperPos > 0);
-  { The 'export' keyword must not appear immediately before $Internals_Helper }
-  AssertTrue('$Internals_Pub exported', Pos('export function w $Internals_Pub', IR) > 0);
-  AssertFalse('$Internals_Helper not exported', Pos('export function w $Internals_Helper', IR) > 0);
-end;
-
-procedure TUnitTests.TestCodegen_Unit_CorrectArithmetic;
-var IR: string;
-begin
-  IR := GenUnitIR(SrcUnitFuncs);
-  AssertTrue('add instruction for Add', Pos('add', IR) > 0);
-  AssertTrue('mul instruction for Mul', Pos('mul', IR) > 0);
+  { Interface routines are defined under their unit-prefixed name and
+    exported for the objects that use the unit; an implementation-only
+    routine is defined but, on x86-64, stays private to the unit's object.  The symbol
+    binding is invisible within one program -- it decides what links. }
+  X86 := GenUnitAsm(SrcUnitFuncs, TargetX86_64);
+  A64 := GenUnitAsm(SrcUnitFuncs, TargetArm64);
+  AssertTrue('x86-64: MathUtils_Add defined', Pos(#10 + 'MathUtils_Add:', X86) >= 0);
+  AssertTrue('x86-64: MathUtils_Mul exported', Pos('.globl MathUtils_Mul', X86) >= 0);
+  AssertTrue('arm64: MathUtils_Add defined', Pos(#10 + '_MathUtils_Add:', A64) >= 0);
+  AssertTrue('arm64: MathUtils_Mul exported', Pos('.globl _MathUtils_Mul', A64) >= 0);
+  X86 := GenUnitAsm(SrcUnitImplOnly, TargetX86_64);
+  A64 := GenUnitAsm(SrcUnitImplOnly, TargetArm64);
+  AssertTrue('x86-64: Internals_Pub exported', Pos('.globl Internals_Pub', X86) >= 0);
+  AssertTrue('x86-64: Internals_Helper defined', Pos(#10 + 'Internals_Helper:', X86) >= 0);
+  AssertTrue('x86-64: Internals_Helper not exported',
+    Pos('.globl Internals_Helper', X86) < 0);
+  AssertTrue('arm64: Internals_Pub exported', Pos('.globl _Internals_Pub', A64) >= 0);
+  { arm64 exports every routine; the unit-prefixed name cannot collide, so
+    only its definition is pinned there }
+  AssertTrue('arm64: Internals_Helper defined', Pos(#10 + '_Internals_Helper:', A64) >= 0);
 end;
 
 procedure TUnitTests.TestSemantic_Unit_IntfVarVisibleInImpl;
