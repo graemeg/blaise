@@ -8,8 +8,8 @@
 |===
 | Decision | Remove the QBE backend; native code generation (x86-64, arm64) becomes the only backend.
 | Phase 0 | Done: `--help` marks `--backend qbe` and `BLAISE_BACKEND=qbe` as deprecated; the deprecation was announced to the community.
-| Phase 1 | In progress -- decouple the test suite from QBE.  1a, 1b and 1c done (17 QBE-only
-unit tests remain, marked for deletion in Phase 2); 1d (the QBE-only e2e audit) next.
+| Phase 1 | Done -- the test suite no longer depends on QBE.  17 QBE-only unit tests and one
+QBE-only e2e test remain, marked for deletion in Phase 2.
 | Phase 2 | Not started -- delete the backend.  Target: release v0.15.0, which also
 makes the macOS arm64 port usable.
 | Phase 3 | Not started -- documentation.
@@ -172,6 +172,23 @@ Review every `beQBE` / `QBEOrNative()` reference:
   are marked for deletion in Phase 2;
 * `cp.test.e2e.leakcheck.pas` (66 tests) gets particular care: leak checks
   must keep running on every native backend.
+
+Outcome:
+
+* The e2e harness (`cp.test.e2e.base`) is native-only: every helper that
+  ran on QBE where the host could now runs on the native backend through the
+  compiler's CLI, as it already did on macOS.  `TBackend` keeps only
+  `beNative`, and the harness needs no `qbe` binary.
+* Tests that ran a QBE leg and a native leg keep the native leg (33 leak
+  checks, six unit-finalisation checks, three TList tests and one interface
+  test).  Six QBE-only leak checks with native twins were deleted.
+* `TestFiberUnit_QBEBackend_RejectsInlineAsm` tests the QBE backend itself
+  and is marked QBE-only.
+* Moving the cross-unit tests off the in-process QBE pipeline exposed two
+  native defects that QBE had been masking, both fixed: same-named globals of
+  two units shared or lost storage on both native backends
+  (BUG-20261008-cross-unit-same-name-globals), and a cached unit's same-named
+  type was merged into another unit's (BUG-20261004-e2e-stale-scratch-unit-objects).
 
 === Exit criteria
 
