@@ -29,6 +29,7 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_MathGaps_VarParamsIndirectRecordSingleTrig;
     procedure TestRun_MinMaxSign;
     { --- Compiler builtins --- }
 
@@ -1862,6 +1863,60 @@ begin
     '-3 5' + LE +
     '1.5 -2.25' + LE +
     '-1 1 0' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_MathGaps_VarParamsIndirectRecordSingleTrig;
+const
+  {
+    Math gaps the existing math tests did not run: a var Double parameter
+    read (it used to be a 32-bit integer load of half the value) and an out
+    Double written, a record passed by const through a procedural variable
+    (the aggregate argument ABI), Single arguments to the hyperbolic and
+    inverse trigonometric functions (widened to Double and narrowed back), and
+    Integer arguments promoted to Double for Sin / Power / Double() /
+    Single() / real division. }
+  Src = '''
+    program MathGaps;
+    type
+      TR = record A, B: Integer; end;
+      TH = procedure(const R: TR);
+    procedure Q(var V: Double; out W: Double);
+    var X: Double;
+    begin
+      X := V;
+      W := X * 2
+    end;
+    procedure Show(const R: TR);
+    begin
+      WriteLn(R.A, ' ', R.B)
+    end;
+    var
+      D, E: Double; S, T: Single; H: TH; V: TR; I: Integer;
+    begin
+      D := 1.25;
+      Q(D, E);
+      WriteLn(E:0:2);
+      H := @Show;
+      V.A := 7; V.B := -3;
+      H(V);
+      S := 0.5;
+      T := Sinh(S); Write(T:0:4, ' ');
+      T := Cosh(S); Write(T:0:4, ' ');
+      T := Tanh(S); Write(T:0:4, ' ');
+      T := ArcTan(S); Write(T:0:4, ' ');
+      T := ArcSin(S); Write(T:0:4, ' ');
+      T := ArcCos(S); WriteLn(T:0:4);
+      I := 3;
+      WriteLn(Sin(I):0:4, ' ', Power(2, 10):0:0, ' ', Double(I):0:1, ' ', Single(I):0:1, ' ', (I / 2):0:1)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '2.50' + LE +
+    '7 -3' + LE +
+    '0.5211 1.1276 0.4621 0.4636 0.5236 1.0472' + LE +
+    '0.1411 1024 3.0 3.0 1.5' + LE, 0);
 end;
 
 initialization
