@@ -23,6 +23,8 @@ type
   protected
     procedure SetUp; override;
   published
+    procedure TestRun_DynArray_AggregateElements_ReleasedWithArray;
+    procedure TestRun_DynArray_ManagedElements_ReleasedWithArray;
     procedure TestRun_DynArray_BoundsElementsAddressesRecords;
     procedure TestRun_SetLengthFillSum;
     procedure TestRun_LengthAndHigh;
@@ -836,6 +838,198 @@ begin
     '22' + LE +
     '10' + LE +
     '30' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_DynArray_ManagedElements_ReleasedWithArray;
+const
+  {
+    A dynamic array owns its managed elements (BUG-20261007-dynarray-managed-
+    elems-never-released): strings, objects, interfaces and nested dynamic
+    arrays are released when the array's last reference goes -- at SetLength(A,
+    0), at scope exit and for a global at program exit -- and a shrink releases
+    the dropped tail at once.  SetLength on a SHARED array is copy-on-write
+    (BUG-20261004-setlength-frees-shared-dynarray): B keeps its two elements
+    after SetLength(A, 1), where it used to read freed memory.  Leak-checked. }
+  Src = '''
+    program DynScalar;
+    type
+      TBox = class
+        V: Integer;
+        constructor Create(AV: Integer);
+        destructor Destroy; override;
+      end;
+      IVal = interface
+        function Get: Integer;
+      end;
+      TVal = class(TObject, IVal)
+        N: Integer;
+        function Get: Integer;
+        destructor Destroy; override;
+      end;
+      TStrs = array of string;
+    constructor TBox.Create(AV: Integer); begin V := AV end;
+    destructor TBox.Destroy;
+    begin
+      WriteLn('box ', V, ' gone');
+      inherited Destroy()
+    end;
+    function TVal.Get: Integer; begin Result := N end;
+    destructor TVal.Destroy;
+    begin
+      WriteLn('val ', N, ' gone');
+      inherited Destroy()
+    end;
+    function MakeVal(AN: Integer): IVal;
+    var V: TVal;
+    begin
+      V := TVal.Create();
+      V.N := AN;
+      Result := V
+    end;
+    var GS: TStrs;
+    procedure Locals;
+    var
+      S: TStrs; B: array of TBox; I: array of IVal; N: array of TStrs;
+    begin
+      SetLength(S, 2);
+      S[0] := 'a' + 'b'; S[1] := 'c' + 'd';
+      SetLength(B, 3);
+      B[0] := TBox.Create(1); B[1] := TBox.Create(2); B[2] := TBox.Create(3);
+      WriteLn('shrink');
+      SetLength(B, 1);
+      WriteLn('shrunk ', Length(B), ' ', B[0].V);
+      SetLength(I, 1);
+      I[0] := MakeVal(7);
+      SetLength(N, 2);
+      SetLength(N[1], 1);
+      N[1][0] := 'n' + 'ested';
+      WriteLn(S[1], ' ', I[0].Get(), ' ', N[1][0]);
+      SetLength(B, 0);
+      SetLength(I, 0);
+      WriteLn('end locals')
+    end;
+    procedure Shared;
+    var A, B: array of TBox;
+    begin
+      SetLength(A, 2);
+      A[0] := TBox.Create(10); A[1] := TBox.Create(11);
+      B := A;
+      SetLength(A, 1);
+      WriteLn('shared ', Length(A), ' ', Length(B), ' ', B[1].V);
+      SetLength(B, 0);
+      WriteLn('b cleared');
+      SetLength(A, 0);
+      WriteLn('a cleared')
+    end;
+    begin
+      Locals();
+      Shared();
+      SetLength(GS, 1);
+      GS[0] := 'glo' + 'bal';
+      WriteLn(GS[0]);
+      WriteLn('done')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'shrink' + LE +
+    'box 2 gone' + LE +
+    'box 3 gone' + LE +
+    'shrunk 1 1' + LE +
+    'cd 7 nested' + LE +
+    'box 1 gone' + LE +
+    'val 7 gone' + LE +
+    'end locals' + LE +
+    'shared 1 2 11' + LE +
+    'box 11 gone' + LE +
+    'b cleared' + LE +
+    'box 10 gone' + LE +
+    'a cleared' + LE +
+    'global' + LE +
+    'done' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'a cleared');
+end;
+
+procedure TE2EDynArrayTests.TestRun_DynArray_AggregateElements_ReleasedWithArray;
+const
+  {
+    Records and static arrays with managed fields as dynamic-array elements
+    are released through a per-type element hook the native backends emit:
+    shrinking releases the dropped records' fields, a copy-on-write keeps the
+    shared original intact, and the last reference releases everything.
+    Leak-checked on the native backend (QBE emits no per-type hook). }
+  Src = '''
+    program DynAggregate;
+    type
+      TBox = class
+        V: Integer;
+        constructor Create(AV: Integer);
+        destructor Destroy; override;
+      end;
+      TInner = record
+        Names: array[0..1] of string;
+      end;
+      TRec = record
+        S: string;
+        B: TBox;
+        Inner: TInner;
+      end;
+      TPair = array[0..1] of string;
+    constructor TBox.Create(AV: Integer); begin V := AV end;
+    destructor TBox.Destroy;
+    begin
+      WriteLn('box ', V, ' gone');
+      inherited Destroy()
+    end;
+    procedure Run;
+    var R, Copy2: array of TRec; P: array of TPair; I: Integer;
+    begin
+      SetLength(R, 3);
+      for I := 0 to 2 do
+      begin
+        R[I].S := 'rec' + IntToStr(I);
+        R[I].B := TBox.Create(I);
+        R[I].Inner.Names[1] := 'in' + IntToStr(I)
+      end;
+      WriteLn('shrink');
+      SetLength(R, 2);
+      Copy2 := R;
+      SetLength(R, 1);
+      WriteLn(R[0].S, ' ', Copy2[1].S, ' ', Copy2[1].B.V, ' ', Copy2[1].Inner.Names[1]);
+      SetLength(Copy2, 0);
+      WriteLn('copy cleared');
+      SetLength(P, 2);
+      P[0][0] := 'p' + 'q';
+      P[1][1] := 'r' + 's';
+      WriteLn(P[0][0], ' ', P[1][1]);
+      SetLength(R, 0);
+      WriteLn('end run')
+    end;
+    begin
+      Run();
+      WriteLn('done')
+    end.
+    ''';
+var
+  RunOut: string;
+  Code: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'shrink' + LE +
+    'box 2 gone' + LE +
+    'rec0 rec1 1 in1' + LE +
+    'box 1 gone' + LE +
+    'copy cleared' + LE +
+    'pq rs' + LE +
+    'box 0 gone' + LE +
+    'end run' + LE +
+    'done' + LE, 0);
+  AssertTrue('native compile+run (--debug)',
+    CompileAndRunWithRTLDebugOn(beNative, Src, RunOut, Code, True));
+  AssertEquals('native exit 0 (output: ' + RunOut + ')', 0, Code);
+  AssertTrue('native no leak report, got: ' + RunOut, Pos('leak', RunOut) < 0);
 end;
 
 initialization

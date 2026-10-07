@@ -12160,6 +12160,7 @@ var
   NTemp:   string;
   ElemSz:  Integer;
   DAT:     TDynArrayTypeDesc;
+  Hook:    string;
 begin
   { EmitLValueAddr covers plain idents, var params, implicit-Self fields and
     field-access targets (R.F, C.F, P^.F); it raises for unsupported shapes. }
@@ -12170,8 +12171,24 @@ begin
   DAT     := TDynArrayTypeDesc(TASTExpr(ACall.Args.Items[0]).ResolvedType);
   ElemSz  := DAT.ElementType.RawSize();
   NewPtr  := AllocTemp();
-  EmitLine(Format('  %s =l call $_DynArraySetLength(l %s, w %s, w %d)',
-    [NewPtr, OldPtr, NTemp, ElemSz]));
+  { the element hook releases (and on copy-on-write retains) the managed
+    elements; the generated per-type hook for a record / static-array
+    element is native-only, so QBE passes none for those }
+  case ArcScopeExitReleaseKind(DAT.ElementType) of
+    arkString:   Hook := '$_DynElemsString';
+    arkClass:    Hook := '$_DynElemsClass';
+    arkIntf:     Hook := '$_DynElemsIntf';
+    arkDynArray: Hook := '$_DynElemsDynArray';
+    arkRefEnv:   Hook := '$_DynElemsRefEnv';
+  else
+    Hook := '';
+  end;
+  if Hook = '' then
+    EmitLine(Format('  %s =l call $_DynArraySetLength(l %s, w %s, w %d)',
+      [NewPtr, OldPtr, NTemp, ElemSz]))
+  else
+    EmitLine(Format('  %s =l call $_DynArraySetLengthM(l %s, w %s, w %d, l %s)',
+      [NewPtr, OldPtr, NTemp, ElemSz, Hook]));
   EmitLine(Format('  storel %s, %s', [NewPtr, Addr]));
 end;
 

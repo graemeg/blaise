@@ -1710,9 +1710,8 @@ procedure TE2EStaticArrayTests.TestRun_DynArray_ManagedElementOverwrite_Releases
 const
   {
     Overwriting a string or object element of a dynamic array releases the
-    old element at once (the array's own release does not yet release its
-    elements -- BUG-20261007-dynarray-managed-elems-never-released -- so this
-    test is not leak-checked). }
+    old element at once, and the array's own release (at program exit for
+    these globals) releases the rest.  Leak-checked. }
   Src = '''
     program DynElems;
     type
@@ -1744,7 +1743,9 @@ begin
   AssertRunsOnAll(Src,
     'dyn-two' + #10 +
     'box 3 gone' + #10 +
-    'end' + #10, 0);
+    'end' + #10 +
+    'box 4 gone' + #10, 0);
+  AssertLeakFreeOnAll(Src, 'dyn-two');
 end;
 
 procedure TE2EStaticArrayTests.TestRun_FloatElements_DynAndOpenArrays;

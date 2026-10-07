@@ -182,6 +182,9 @@ type
       unexported (Sym=nil at codegen) name may take the FCurrentUnitName context
       prefix — keeping class-var ClassVarEmitName and internal labels verbatim. }
     FModuleVarNames: TStringList;
+    FDynElemHooks: TObjectList;     { borrowed TTypeDesc per generated dyn-array
+                                      element hook (__DynElems_<n>) }
+    FDynElemHooksDone: Integer;     { how many of them are already emitted }
     FGlobalInits: TDictionary<string, TConstDecl>;  { global name → initialiser (var G: T = value) }
     FThreadVarGlobals: TDictionary<string, Boolean>;
     FWeakGlobals:      TDictionary<string, Boolean>;
@@ -422,6 +425,15 @@ type
                                  CD: TConstDecl);
     { Emit string literal blobs in .rodata. Called from EmitDataSection. }
     procedure EmitStrLitSection;
+    { The element hook of a dynamic array of AElem ('' when the elements are
+      unmanaged): a runtime routine for a scalar managed element, else a
+      per-type __DynElems_<n> emitted by EmitDynElemHooks. }
+    function  DynElemHookSym(AElem: TTypeDesc): string;
+    { %rdi = array, %esi = new length: %rax := the resized array.  Passes the
+      element hook (%rcx) to _DynArraySetLengthM when the element is managed. }
+    procedure EmitDynSetLengthCall(AElem: TTypeDesc);
+    { Emit the generated element hooks registered since the last call. }
+    procedure EmitDynElemHooks;
     { Emit an immortal class-name string blob in the data section and return
       the label+12 expression that points to the character data.  ASymName
       names the data symbol; AText is the runtime-visible string content. }
@@ -1433,6 +1445,7 @@ begin
   FDataGlobals         := TOrderedDictionary<string, TTypeDesc>.Create();
   FGlobalOwners        := TDictionary<string, string>.Create();
   FModuleVarNames      := TStringList.Create();
+  FDynElemHooks        := TObjectList.Create(False);
   FModuleVarNames.CaseSensitive := True;
   FModuleVarNames.Sorted := True;
   FModuleVarNames.Duplicates := dupIgnore;
@@ -1489,6 +1502,7 @@ end;
 destructor TX86_64Backend.Destroy;
 begin
   Self.ClearFrame();
+  FDynElemHooks.Free();
   FConstArgUnsafe.Free();
   FImportedUnits.Free();
   FFiniReleased.Free();
@@ -1743,6 +1757,95 @@ begin
     Result := Self.GlobalOwnerPrefix(FCurrentUnitName) + AName;
 end;
 
+function TX86_64Backend.DynElemHookSym(AElem: TTypeDesc): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  case ArcScopeExitReleaseKind(AElem) of
+    arkString:   Result := '_DynElemsString';
+    arkClass:    Result := '_DynElemsClass';
+    arkIntf:     Result := '_DynElemsIntf';
+    arkDynArray: Result := '_DynElemsDynArray';
+    arkRefEnv:   Result := '_DynElemsRefEnv';
+    arkAggregate:
+    begin
+      I := FDynElemHooks.IndexOf(AElem);
+      if I < 0 then
+        I := FDynElemHooks.Add(AElem);
+      Result := '__DynElems_' + IntToStr(I);
+    end;
+  end;
+end;
+
+procedure TX86_64Backend.EmitDynSetLengthCall(AElem: TTypeDesc);
+var
+  Hook: string;
+begin
+  Self.Emit(Format(#9'movl $%d, %%edx', [AElem.RawSize()]));
+  Hook := Self.DynElemHookSym(AElem);
+  if Hook = '' then
+  begin
+    Self.Emit(#9'callq _DynArraySetLength');
+    Exit;
+  end;
+  Self.Emit(Format(#9'leaq %s(%%rip), %%rcx', [Hook]));
+  Self.Emit(#9'callq _DynArraySetLengthM');
+end;
+
+procedure TX86_64Backend.EmitDynElemHooks;
+var
+  T: TTypeDesc;
+  Sym, LLoop, LRel, LNext, LDone: string;
+begin
+  { __DynElems_<n>(Data, Count, ARetain): retain (ARetain <> 0) or release
+    the managed content of Count consecutive elements of one aggregate
+    type.  %rbx walks the elements (the ARC walks need a callee-saved base;
+    they use %r14 themselves), %r12 counts down, %r13 holds the mode.  Four
+    pushes after %rbp keep the calls 16-byte aligned. }
+  while FDynElemHooksDone < FDynElemHooks.Count do
+  begin
+    T := TTypeDesc(FDynElemHooks.Items[FDynElemHooksDone]);
+    Sym := '__DynElems_' + IntToStr(FDynElemHooksDone);
+    FDynElemHooksDone := FDynElemHooksDone + 1;
+    LLoop := Self.NewLabel('dhl');
+    LRel := Self.NewLabel('dhr');
+    LNext := Self.NewLabel('dhn');
+    LDone := Self.NewLabel('dhd');
+    Self.Emit('.text');
+    Self.Emit(Sym + ':');
+    Self.Emit(#9'pushq %rbp');
+    Self.Emit(#9'movq %rsp, %rbp');
+    Self.Emit(#9'pushq %rbx');
+    Self.Emit(#9'pushq %r12');
+    Self.Emit(#9'pushq %r13');
+    Self.Emit(#9'pushq %r14');
+    Self.Emit(#9'movq %rdi, %rbx');
+    Self.Emit(#9'movslq %esi, %r12');
+    Self.Emit(#9'movl %edx, %r13d');
+    Self.Emit(LLoop + ':');
+    Self.Emit(#9'testq %r12, %r12');
+    Self.Emit(#9'jle ' + LDone);
+    Self.Emit(#9'testl %r13d, %r13d');
+    Self.Emit(#9'jz ' + LRel);
+    Self.EmitManagedAddRefAt(T, '%rbx');
+    Self.Emit(#9'jmp ' + LNext);
+    Self.Emit(LRel + ':');
+    Self.EmitManagedReleaseAt(T, '%rbx', False);
+    Self.Emit(LNext + ':');
+    Self.Emit(Format(#9'addq $%d, %%rbx', [T.RawSize()]));
+    Self.Emit(#9'decq %r12');
+    Self.Emit(#9'jmp ' + LLoop);
+    Self.Emit(LDone + ':');
+    Self.Emit(#9'popq %r14');
+    Self.Emit(#9'popq %r13');
+    Self.Emit(#9'popq %r12');
+    Self.Emit(#9'popq %rbx');
+    Self.Emit(#9'popq %rbp');
+    Self.Emit(#9'ret');
+  end;
+end;
+
 procedure TX86_64Backend.EmitDataSection;
 var
   I, Sz:    Integer;
@@ -1752,6 +1855,7 @@ var
   HasData, HasTbss: Boolean;
   InitCD:   TConstDecl;
 begin
+  Self.EmitDynElemHooks();
   if (FDataGlobals.Count = 0) and (FProgExcFrameCount = 0) and
      (not FProgHasJumboSet) and (not FProgHasPendRel) then
   begin
@@ -15843,8 +15947,8 @@ begin
         else
           Self.Emit(Format(#9'movq %s(%%rip), %%rdi', [Self.GlobalSymName(FDynArgName)]));
         { Element size into %edx. }
-        Self.Emit(Format(#9'movl $%d, %%edx', [FDynElemSz]));
-        Self.Emit(#9'callq _DynArraySetLength');
+        Self.EmitDynSetLengthCall(
+          TDynArrayTypeDesc(TASTExpr(PC.Args.Items[0]).ResolvedType).ElementType);
         { Store new data ptr back. }
         if Self.IsLocal(FDynArgName) then
           Self.Emit(Format(#9'movq %%rax, %s', [Self.VarOperand(FDynArgName)]))
@@ -15865,8 +15969,8 @@ begin
         Self.Emit(#9'subq $8, %rsp');   { keep calls 16-byte aligned }
         Self.Emit(#9'movl %eax, %esi');
         Self.Emit(#9'movq (%rdx), %rdi');
-        Self.Emit(Format(#9'movl $%d, %%edx', [FDynElemSz]));
-        Self.Emit(#9'callq _DynArraySetLength');
+        Self.EmitDynSetLengthCall(
+          TDynArrayTypeDesc(TASTExpr(PC.Args.Items[0]).ResolvedType).ElementType);
         Self.Emit(#9'addq $8, %rsp');
         Self.Emit(#9'popq %rdx');
         Self.Emit(#9'movq %rax, (%rdx)');

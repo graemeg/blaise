@@ -3243,17 +3243,31 @@ tracked separately as `BUG-20260920-cyclic-intf-inheritance-hangs`.
 
 Blaise supports heap-allocated, reference-counted dynamic arrays using the
 Delphi/FPC syntax `array of T`.  A dynamic array variable holds a pointer to
-element 0; the two 4-byte integers immediately before element 0 store the
-reference count and the current length (the "header").
+element 0; the 16 bytes before element 0 hold the element hook, the reference
+count and the current length (the "header").
 
 Memory layout (contiguous block)::
-  `[refcount:4][length:4][element 0][element 1]…[element N-1]`
+  `[element hook:8][refcount:4][length:4][element 0][element 1]…[element N-1]`
+
+The reference count is at `Ptr − 8` and the length at `Ptr − 4`; the hook was
+added in front of them so those two offsets never moved.  The hook is a
+routine that retains or releases the managed content of a run of elements --
+`nil` when the element type is unmanaged.
+
+A dynamic array OWNS its managed elements (strings, objects, interfaces,
+nested dynamic arrays, closures, and records / static arrays containing any of
+them): when the last reference to the array goes, every element is released.
 
 A nil pointer (zero value) represents an unassigned array.  The variable slot
 is 8 bytes on all platforms (a pointer).
 
 Supported built-ins::
-* `SetLength(A, N)` — resize the array to `N` elements; copies existing data.
+* `SetLength(A, N)` — resize the array to `N` elements, keeping the first
+  `min(old, N)`.  Shrinking releases the dropped elements; `SetLength(A, 0)`
+  drops this variable's reference.  When the array is SHARED (another
+  variable holds the same block) the resize is copy-on-write: this variable
+  gets a fresh block, the copied elements gain a reference, and the other
+  holders keep the original unchanged.
 * `Length(A)` — returns the current element count.
 * `A[I]` — zero-based element read/write.
 
@@ -3286,12 +3300,27 @@ is deferred.
 
 === RTL contract
 
-Two RTL functions implement resize and length queries:
+The RTL functions for resize, length and release:
+
+`_DynArraySetLengthM(Ptr, NewLen, ElemSize, Hook)`::
+  Allocates `16 + NewLen × ElemSize` bytes, writes the hook, refcount=1 and the
+  new length into the header, zeroes the element area and carries over
+  `min(OldLen, NewLen)` elements.  A uniquely owned old block is freed after
+  its dropped tail is released; a shared one is left to its other holders
+  (the copied elements are retained and this reference is dropped).  Returns
+  a pointer to element 0.  A nil `Hook` keeps the old block's.
 
 `_DynArraySetLength(Ptr, NewLen, ElemSize)`::
-  Allocates `DA_HDR + NewLen × ElemSize` bytes, writes refcount=1 and the new
-  length into the header, zeroes the element area, copies `min(OldLen, NewLen)`
-  existing elements, frees the old block, and returns a pointer to element 0.
+  The same with no hook of its own -- the entry a compiler built before the
+  hook existed calls, so it keeps working against a newer RTL.
+
+`_DynArrayRelease(Ptr)`::
+  Drops a reference; at zero, runs the hook over the elements and frees the
+  block.
+
+The hooks for scalar managed elements are RTL routines (`_DynElemsString`,
+`_DynElemsClass`, `_DynElemsIntf`, `_DynElemsDynArray`, `_DynElemsRefEnv`);
+for a record or static-array element the native backends emit one per type.
 
 `_DynArrayLength(Ptr)`::
   Reads the 4-byte integer at `Ptr − 4`.  Returns 0 if `Ptr` is nil.
@@ -3309,10 +3338,28 @@ and makes zero-based indexing natural: `A[I] = *(Ptr + I × ElemSize)`.
 avoids a separate allocation and keeps cache locality for length checks
 (`Ptr − 4`).  Delphi uses the same layout.
 
-*`SetLength` allocates fresh on every call*: reference counting on arrays is
-deferred to Phase 3 (ARC).  The current implementation always allocates a new
-block and copies, which is correct and safe, though not optimal for in-place
-growth.
+*The element type travels with the block*: whoever drops the LAST reference
+must release the elements, and only the atomic decrement in the RTL knows
+which release that is.  So the knowledge of how to release an element has to
+be in the block, recorded by the `SetLength` that created it -- the one place
+the compiler knows the element type.  Before the hook, a dynamic array of
+strings or objects leaked every element when it died, and `SetLength` freed a
+shared block from under its other holders.
+
+*Copy-on-write on `SetLength`*: a dynamic array assignment shares the block
+(`B := A`), so resizing one variable must not change the other.  Delphi and
+FPC behave the same way.  Element writes (`A[I] := X`) stay shared -- only
+`SetLength` separates the holders.
+
+*`SetLength` allocates fresh on every call*: the implementation always
+allocates a new block and moves or copies, which is correct and simple, though
+not optimal for in-place growth.
+
+*Alternatives considered for element ownership* -- an element-kind byte in the
+header with the RTL switching on it (cannot describe a record's field layout
+without a type table), and a release walk emitted by the compiler before every
+`_DynArrayRelease` (cannot know whether that release is the last one).  A
+hook pointer handles every element type with one indirect call.
 
 === Grammar
 

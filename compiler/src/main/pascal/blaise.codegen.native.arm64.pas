@@ -120,6 +120,9 @@ type
     FGenericDecls: TObjectList;  { owned — synthetic TTypeDecl wrappers around
                                    TGenericInstance clones so instances flow
                                    through the ordinary class machinery }
+    FDynElemHooks: TObjectList;  { borrowed TTypeDesc per generated dyn-array
+                                   element hook (__DynElems_<n>) }
+    FDynElemHooksDone: Integer;  { how many of them are already emitted }
     FGenericDefUnits: TStringList; { program generic-instance wrappers: Strings
                                    = the template's declaring unit, Objects =
                                    the wrapper TTypeDecl (borrowed) }
@@ -556,6 +559,15 @@ type
       storage (variable, field, element, call-result buffer), or a jumbo
       set's bitmap (whose value already evaluates to an address). }
     procedure EmitInlineBytesAddr(AExpr: TASTExpr);
+    { The element hook of a dynamic array of AElem ('' when the elements are
+      unmanaged): a runtime routine for a scalar managed element, else a
+      per-type __DynElems_<n> emitted by EmitDynElemHooks. }
+    function  DynElemHookSym(AElem: TTypeDesc): string;
+    { x0 = array, x1 = new length: x0 := the resized array.  Passes the
+      element hook (x3) to _DynArraySetLengthM when the element is managed. }
+    procedure EmitDynSetLengthCall(AElem: TTypeDesc);
+    { Emit the generated element hooks registered since the last call. }
+    procedure EmitDynElemHooks;
     function  RecReturnShape(ARec: TRecordTypeDesc): Integer;
 
     procedure EmitStrLitSection;
@@ -795,6 +807,7 @@ begin
   FRecordDecls := TObjectList.Create(False);
   FGenericDecls := TObjectList.Create(True);
   FGenericDefUnits := TStringList.Create();
+  FDynElemHooks := TObjectList.Create(False);
   FUnitEmittedClasses := TObjectList.Create(False);
   FObjLocals   := TStringList.Create();
   FWeakLocals  := TStringList.Create();
@@ -846,6 +859,7 @@ begin
   FUnitEmittedClasses.Free();
   FGenericDecls.Free();
   FGenericDefUnits.Free();
+  FDynElemHooks.Free();
   FObjLocals.Free();
   FWeakLocals.Free();
   FObjGlobals.Free();
@@ -2365,6 +2379,92 @@ begin
       tyClass:    if not F.IsWeak then EmitCallSym('_ClassAddRef');
       tyDynArray: EmitCallSym('_DynArrayAddRef');
     end;
+  end;
+end;
+
+function TArm64Backend.DynElemHookSym(AElem: TTypeDesc): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  case ArcScopeExitReleaseKind(AElem) of
+    arkString:   Result := DarwinSym('_DynElemsString');
+    arkClass:    Result := DarwinSym('_DynElemsClass');
+    arkIntf:     Result := DarwinSym('_DynElemsIntf');
+    arkDynArray: Result := DarwinSym('_DynElemsDynArray');
+    arkRefEnv:   Result := DarwinSym('_DynElemsRefEnv');
+    arkAggregate:
+    begin
+      I := FDynElemHooks.IndexOf(AElem);
+      if I < 0 then
+        I := FDynElemHooks.Add(AElem);
+      Result := DarwinSym('__DynElems_' + IntToStr(I));
+    end;
+  end;
+end;
+
+procedure TArm64Backend.EmitDynSetLengthCall(AElem: TTypeDesc);
+var
+  Hook: string;
+begin
+  EmitIntLiteral('x2', AElem.RawSize());
+  Hook := DynElemHookSym(AElem);
+  if Hook = '' then
+  begin
+    EmitCallSym('_DynArraySetLength');
+    Exit;
+  end;
+  Self.Emit(Format(#9'adrp x3, %s@PAGE', [Hook]));
+  Self.Emit(Format(#9'add x3, x3, %s@PAGEOFF', [Hook]));
+  EmitCallSym('_DynArraySetLengthM');
+end;
+
+procedure TArm64Backend.EmitDynElemHooks;
+var
+  T: TTypeDesc;
+  Sym, LLoop, LRel, LNext, LDone: string;
+begin
+  { __DynElems_<n>(Data, Count, ARetain): retain (ARetain <> 0) or release
+    the managed content of Count consecutive elements of one aggregate
+    type.  x19 walks the elements (the ARC walks need a callee-saved base),
+    x22 counts down, x23 holds the mode. }
+  while FDynElemHooksDone < FDynElemHooks.Count do
+  begin
+    T := TTypeDesc(FDynElemHooks.Items[FDynElemHooksDone]);
+    Sym := DarwinSym('__DynElems_' + IntToStr(FDynElemHooksDone));
+    FDynElemHooksDone := FDynElemHooksDone + 1;
+    LLoop := NewLabel('dhl');
+    LRel := NewLabel('dhr');
+    LNext := NewLabel('dhn');
+    LDone := NewLabel('dhd');
+    Self.Emit('');
+    Self.Emit('.text');
+    Self.Emit('.balign 4');
+    Self.Emit(Sym + ':');
+    Self.Emit(#9'stp x29, x30, [sp, #-48]!');
+    Self.Emit(#9'mov x29, sp');
+    Self.Emit(#9'stp x19, x22, [sp, #16]');
+    Self.Emit(#9'str x23, [sp, #32]');
+    Self.Emit(#9'mov x19, x0');
+    Self.Emit(#9'sxtw x22, w1');
+    Self.Emit(#9'mov w23, w2');
+    Self.Emit(LLoop + ':');
+    Self.Emit(#9'cmp x22, #0');
+    Self.Emit(#9'b.le ' + LDone);
+    Self.Emit(#9'cbz w23, ' + LRel);
+    Self.EmitManagedAddRefAt(T, 'x19');
+    Self.Emit(#9'b ' + LNext);
+    Self.Emit(LRel + ':');
+    Self.EmitManagedReleaseAt(T, 'x19', False);
+    Self.Emit(LNext + ':');
+    EmitAddSubImm('add', 'x19', 'x19', T.RawSize());
+    Self.Emit(#9'sub x22, x22, #1');
+    Self.Emit(#9'b ' + LLoop);
+    Self.Emit(LDone + ':');
+    Self.Emit(#9'ldp x19, x22, [sp, #16]');
+    Self.Emit(#9'ldr x23, [sp, #32]');
+    Self.Emit(#9'ldp x29, x30, [sp], #48');
+    Self.Emit(#9'ret');
   end;
 end;
 
@@ -7774,9 +7874,8 @@ begin
       EmitPushX0();                                       { [N][addr] }
       Self.Emit(#9'ldr x0, [x0]');                        { old array }
       Self.Emit(#9'ldr x1, [sp, #16]');                   { N }
-      EmitIntLiteral('x2', TDynArrayTypeDesc(
-        TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType.RawSize());
-      EmitCallSym('_DynArraySetLength');
+      EmitDynSetLengthCall(TDynArrayTypeDesc(
+        TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType);
       Self.Emit(#9'ldr x9, [sp]');                        { addr }
       Self.Emit(#9'str x0, [x9]');
       Self.Emit(#9'add sp, sp, #32');
@@ -7800,9 +7899,8 @@ begin
       EmitPushX0();                                       { [N][addr] }
       Self.Emit(#9'ldr x0, [x0]');                        { old array }
       Self.Emit(#9'ldr x1, [sp, #16]');                   { N }
-      EmitIntLiteral('x2', TDynArrayTypeDesc(
-        TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType.RawSize());
-      EmitCallSym('_DynArraySetLength');
+      EmitDynSetLengthCall(TDynArrayTypeDesc(
+        TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType);
       Self.Emit(#9'ldr x9, [sp]');                        { addr }
       Self.Emit(#9'str x0, [x9]');
       Self.Emit(#9'add sp, sp, #32');
@@ -7830,9 +7928,8 @@ begin
       EmitPushX0();                                       { [N][addr] }
       Self.Emit(#9'ldr x0, [x0]');                        { old array }
       Self.Emit(#9'ldr x1, [sp, #16]');                   { N }
-      EmitIntLiteral('x2', TDynArrayTypeDesc(
-        TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType.RawSize());
-      EmitCallSym('_DynArraySetLength');
+      EmitDynSetLengthCall(TDynArrayTypeDesc(
+        TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType);
       Self.Emit(#9'ldr x9, [sp]');                        { addr }
       Self.Emit(#9'str x0, [x9]');
       Self.Emit(#9'add sp, sp, #32');
@@ -7854,9 +7951,8 @@ begin
       EmitPushX0();                                       { [N][addr] }
       Self.Emit(#9'ldr x0, [x0]');                        { old array }
       Self.Emit(#9'ldr x1, [sp, #16]');                   { N }
-      EmitIntLiteral('x2', TDynArrayTypeDesc(
-        TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType.RawSize());
-      EmitCallSym('_DynArraySetLength');
+      EmitDynSetLengthCall(TDynArrayTypeDesc(
+        TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType);
       Self.Emit(#9'ldr x9, [sp]');                        { addr }
       Self.Emit(#9'str x0, [x9]');
       Self.Emit(#9'add sp, sp, #32');
@@ -7866,9 +7962,8 @@ begin
     EmitPushX0();
     EmitLoadSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
     EmitPopTo('x1');
-    EmitIntLiteral('x2', TDynArrayTypeDesc(
-      TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType.RawSize());
-    EmitCallSym('_DynArraySetLength');
+    EmitDynSetLengthCall(TDynArrayTypeDesc(
+      TASTExpr(ACall.Args.Items[0]).ResolvedType).ElementType);
     EmitStoreSlot('x0',
       TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
     Exit;
@@ -15402,6 +15497,7 @@ begin
   FAsm.Append(BodyBuf.ToString());
   BodyBuf.Free();
 
+  EmitDynElemHooks();
   EmitArrayConstData(AProg.Block);
   EmitStrLitSection();
   EmitFloatLitSection();
@@ -15917,6 +16013,7 @@ begin
   Self.Emit('.text');
   if FClassDecls.Count > 0 then
     EmitClassCleanupFns();
+  EmitDynElemHooks();
   EmitStrLitSection();
   EmitFloatLitSection();
   EmitGlobalsSection();

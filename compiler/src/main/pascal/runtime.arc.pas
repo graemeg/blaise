@@ -48,6 +48,16 @@ procedure _StringAddRef(Ptr: Pointer);
 procedure _StringRelease(Ptr: Pointer);
 procedure _DynArrayAddRef(Ptr: Pointer);
 procedure _DynArrayRelease(Ptr: Pointer);
+{ Element hooks for dynamic arrays of managed elements.  A hook retains
+  (ARetain <> 0) or releases the Count elements starting at Data; the
+  array's header records it (see _DynArraySetLengthM in runtime.str) and
+  _DynArrayRelease runs it when the last reference goes.  The backends emit
+  their own hook for a record / static-array element with managed fields. }
+procedure _DynElemsString(Data: Pointer; Count, ARetain: Integer);
+procedure _DynElemsClass(Data: Pointer; Count, ARetain: Integer);
+procedure _DynElemsDynArray(Data: Pointer; Count, ARetain: Integer);
+procedure _DynElemsIntf(Data: Pointer; Count, ARetain: Integer);
+procedure _DynElemsRefEnv(Data: Pointer; Count, ARetain: Integer);
 function  _StringEquals(S1, S2: Pointer): Integer;
 function  _StringConcat(S1, S2: Pointer): Pointer;
 procedure TObject_Destroy(Self: Pointer);
@@ -515,19 +525,23 @@ begin
   end;
 end;
 
-{ Dynamic-array buffer header is [refcount:4][length:4]; data pointer
-  points at element 0, so the refcount slot lives at Ptr - 8.  Layout
-  is defined by _DynArraySetLength in blaise_str.pas. }
+{ Dynamic-array block: [element hook:8][refcount:4][length:4][elements].
+  The data pointer points at element 0, so the refcount is at Ptr - 8, the
+  length at Ptr - 4 (both unchanged from the 8-byte header the hook was
+  added in front of -- code emitted by older compilers, and the debugger,
+  read them there) and the hook at Ptr - 16.  Layout is defined by
+  _DynArraySetLengthM in runtime.str. }
+
+type
+  TDynElemHook = procedure(Data: Pointer; Count, ARetain: Integer);
 
 procedure _DynArrayAddRef(Ptr: Pointer);
-const
-  DA_HDR = 8;
 var
   RC: PInteger;
   OldRC: Integer;
 begin
   if Ptr = nil then Exit;
-  RC := PInteger(Ptr - DA_HDR);
+  RC := PInteger(Ptr - 8);
   if RC^ = IMMORTAL then Exit;
   OldRC := _AtomicAddInt32(RC, 1);
   if (OldRC = 0) and GLTEnabled then
@@ -535,22 +549,98 @@ begin
 end;
 
 procedure _DynArrayRelease(Ptr: Pointer);
-const
-  DA_HDR = 8;
 var
-  Base:  Pointer;
-  RC:    PInteger;
-  OldRC: Integer;
+  RC:     PInteger;
+  OldRC:  Integer;
+  HookP:  ^Pointer;
+  LenP:   PInteger;
+  Hook:   TDynElemHook;
 begin
   if Ptr = nil then Exit;
-  Base := Ptr - DA_HDR;
-  RC   := PInteger(Base);
+  RC := PInteger(Ptr - 8);
   if RC^ = IMMORTAL then Exit;
   OldRC := _AtomicSubInt32(RC, 1);
   if OldRC = 1 then
   begin
     if GLTEnabled then LTDelete(Ptr);
-    _BlaiseFreeMem(Base);
+    { the last reference: release the managed elements first }
+    HookP := Ptr - 16;
+    if HookP^ <> nil then
+    begin
+      LenP := PInteger(Ptr - 4);
+      Hook := TDynElemHook(HookP^);
+      Hook(Ptr, LenP^, 0);
+    end;
+    _BlaiseFreeMem(Ptr - 16);
+  end;
+end;
+
+procedure _DynElemsString(Data: Pointer; Count, ARetain: Integer);
+var
+  I: Integer;
+  P: ^Pointer;
+begin
+  P := Data;
+  for I := 0 to Count - 1 do
+  begin
+    if ARetain <> 0 then _StringAddRef(P^) else _StringRelease(P^);
+    P := Pointer(P) + 8;
+  end;
+end;
+
+procedure _DynElemsClass(Data: Pointer; Count, ARetain: Integer);
+var
+  I: Integer;
+  P: ^Pointer;
+begin
+  P := Data;
+  for I := 0 to Count - 1 do
+  begin
+    if ARetain <> 0 then _ClassAddRef(P^) else _ClassRelease(P^);
+    P := Pointer(P) + 8;
+  end;
+end;
+
+procedure _DynElemsDynArray(Data: Pointer; Count, ARetain: Integer);
+var
+  I: Integer;
+  P: ^Pointer;
+begin
+  P := Data;
+  for I := 0 to Count - 1 do
+  begin
+    if ARetain <> 0 then _DynArrayAddRef(P^) else _DynArrayRelease(P^);
+    P := Pointer(P) + 8;
+  end;
+end;
+
+procedure _DynElemsIntf(Data: Pointer; Count, ARetain: Integer);
+var
+  I: Integer;
+  P: ^Pointer;
+begin
+  { an interface element is the 16-byte (obj, itab) pair; only the obj
+    half is counted }
+  P := Data;
+  for I := 0 to Count - 1 do
+  begin
+    if ARetain <> 0 then _ClassAddRef(P^) else _ClassRelease(P^);
+    P := Pointer(P) + 16;
+  end;
+end;
+
+procedure _DynElemsRefEnv(Data: Pointer; Count, ARetain: Integer);
+var
+  I: Integer;
+  P: ^Pointer;
+begin
+  { a 'reference to' closure element is (Code, Env); the Env at +8 is the
+    counted object }
+  P := Data + 8;
+  for I := 0 to Count - 1 do
+  begin
+    if ARetain <> 0 then _ClassAddRef(P^) else _ClassRelease(P^);
+    P := Pointer(P) + 16;
   end;
 end;
 

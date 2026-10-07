@@ -50,6 +50,9 @@ function  _BlaiseReallocMem(Ptr: Pointer; NewSize: Integer): Pointer;
 { ARC primitive from blaise_arc — used by _StringUnique to drop the old
   reference when copy-on-write replaces a shared/immortal string. }
 procedure _StringRelease(Ptr: Pointer);                external name '_StringRelease';
+{ ... and the dynamic-array release, which runs the element hook on the last
+  reference (SetLength drops a shared array's reference through it). }
+procedure _DynArrayRelease(Ptr: Pointer);              external name '_DynArrayRelease';
 
 { blaise_float binding — used by Format()'s %f/%e/%g handling. }
 function  _FormatFloatSpec(V: Double; Spec: Integer; Prec: Integer): Pointer;
@@ -101,10 +104,15 @@ function _Utf8DecodeAt(S: Pointer; Idx: Integer): Int64;
   nil represents an empty / unassigned array.
   Refcount = -1 marks immortal (statically-allocated).
 
-  _DynArraySetLength(OldPtr, NewLen, ElemSize) → new data pointer.
+  _DynArraySetLengthM(OldPtr, NewLen, ElemSize, Hook) → new data pointer;
+  Hook retains / releases managed elements (nil for unmanaged ones).
+  _DynArraySetLength(OldPtr, NewLen, ElemSize) → the same with no hook of
+  its own (the old block's is kept) -- the entry older compilers call.
   _DynArrayLength(Ptr) → length (0 for nil).
-  Refcount helpers (_DynArrayAddRef / _DynArrayRelease) live in
-  blaise_arc.pas alongside the other ARC primitives. }
+  Refcount helpers (_DynArrayAddRef / _DynArrayRelease) and the element
+  hooks live in runtime.arc alongside the other ARC primitives. }
+function _DynArraySetLengthM(Ptr: Pointer; NewLen, ElemSize: Integer;
+  Hook: Pointer): Pointer;
 function _DynArraySetLength(Ptr: Pointer; NewLen, ElemSize: Integer): Pointer;
 function _DynArrayLength(Ptr: Pointer): Integer;
 
@@ -1412,7 +1420,10 @@ end;
 { ------------------------------------------------------------------ }
 
 const
-  DA_HDR = 8;  { [refcount:4][length:4] before element 0 }
+  DA_HDR = 16;  { [hook:8][refcount:4][length:4] before element 0 }
+
+type
+  TDynElemHook = procedure(Data: Pointer; Count, ARetain: Integer);
 
 function _DynArrayLength(Ptr: Pointer): Integer;
 var
@@ -1432,47 +1443,83 @@ begin
   P^ := V;
 end;
 
-function _DynArraySetLength(Ptr: Pointer; NewLen, ElemSize: Integer): Pointer;
+function _DynArraySetLengthM(Ptr: Pointer; NewLen, ElemSize: Integer;
+  Hook: Pointer): Pointer;
 var
   NewBase:  Pointer;
+  NewData:  PChar;
   DataSz:   Integer;
   OldLen:   Integer;
   CopyLen:  Integer;
-  ZP:       PChar;
   ZI:       Integer;
   HdrPtr:   ^Integer;
+  HookSlot: ^Pointer;
+  RC:       ^Integer;
+  Shared:   Boolean;
+  H:        TDynElemHook;
 begin
+  { No hook of the caller's own (an unmanaged element, or code from an older
+    compiler): keep the one the existing block carries. }
+  if (Hook = nil) and (Ptr <> nil) then
+  begin
+    HookSlot := Ptr - 16;
+    Hook := HookSlot^;
+  end;
+  { SetLength(A, 0) drops THIS reference -- other holders keep the block --
+    and the last reference releases the elements. }
   if NewLen <= 0 then
   begin
-    if Ptr <> nil then
-      _BlaiseFreeMem(Ptr - DA_HDR);
+    _DynArrayRelease(Ptr);
     Exit(nil);
   end;
   DataSz  := DA_HDR + NewLen * ElemSize;
   NewBase := _BlaiseGetMem(DataSz);
-  { write header: refcount = 1, length = NewLen }
-  HdrPtr    := NewBase;
+  HookSlot  := NewBase;
+  HookSlot^ := Hook;
+  HdrPtr    := NewBase + 8;
   DaWriteInt32(HdrPtr, 1);           { refcount }
-  HdrPtr    := NewBase + 4;
+  HdrPtr    := NewBase + 12;
   DaWriteInt32(HdrPtr, NewLen);      { length }
-  { zero element area }
-  ZP := PChar(NewBase) + DA_HDR;
+  NewData := PChar(NewBase) + DA_HDR;
   ZI := 0;
   while ZI < NewLen * ElemSize do
   begin
-    ZP[ZI] := 0;
+    NewData[ZI] := 0;
     ZI := ZI + 1;
   end;
-  { copy existing elements }
   if Ptr <> nil then
   begin
-    OldLen  := _DynArrayLength(Ptr);
+    OldLen := _DynArrayLength(Ptr);
     if OldLen < NewLen then CopyLen := OldLen else CopyLen := NewLen;
     if CopyLen > 0 then
-      MemCopy(PChar(NewBase) + DA_HDR, PChar(Ptr), CopyLen * ElemSize);
-    _BlaiseFreeMem(Ptr - DA_HDR);
+      MemCopy(NewData, PChar(Ptr), CopyLen * ElemSize);
+    RC := Ptr - 8;
+    Shared := RC^ <> 1;
+    if Hook <> nil then
+      H := TDynElemHook(Hook);
+    if Shared then
+    begin
+      { copy-on-write: the other holders keep the old block, so the copied
+        elements gain a reference and this holder drops its own }
+      if (Hook <> nil) and (CopyLen > 0) then
+        H(NewData, CopyLen, 1);
+      _DynArrayRelease(Ptr);
+    end
+    else
+    begin
+      { uniquely owned: the elements MOVED; a shrink releases the tail that
+        did not come along, then the old block goes without its hook }
+      if (Hook <> nil) and (OldLen > NewLen) then
+        H(Ptr + NewLen * ElemSize, OldLen - NewLen, 0);
+      _BlaiseFreeMem(Ptr - DA_HDR);
+    end;
   end;
-  Result := PChar(NewBase) + DA_HDR;
+  Result := NewData;
+end;
+
+function _DynArraySetLength(Ptr: Pointer; NewLen, ElemSize: Integer): Pointer;
+begin
+  Result := _DynArraySetLengthM(Ptr, NewLen, ElemSize, nil);
 end;
 
 end.
