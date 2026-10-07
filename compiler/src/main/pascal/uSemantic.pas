@@ -10070,6 +10070,7 @@ begin
         ForS.Line, ForS.Col);
     ForS.VarName  := VarSym.Name;  { normalise to declared casing }
     ForS.IsGlobal := (VarSym <> nil) and VarSym.IsGlobal;
+    ForS.VarType  := VarSym.TypeDesc;
     if VarSym.Kind <> skVariable then
       SemanticError(
         Format('''%s'' is not a variable', [ForS.VarName]),

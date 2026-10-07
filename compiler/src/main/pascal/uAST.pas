@@ -332,6 +332,9 @@ type
   public
     VarName:   string;
     IsGlobal:  Boolean;   { set by uSemantic — VarName is a program-level global }
+    [Unretained] VarType: TTypeDesc;  { set by uSemantic — the loop variable's
+                            declared type (a captured counter lives in a packed
+                            closure env, so its access width comes from here) }
     StartExpr: TASTExpr;  { owned }
     EndExpr:   TASTExpr;  { owned }
     IsDownTo:  Boolean;

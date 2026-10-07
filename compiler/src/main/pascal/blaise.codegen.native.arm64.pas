@@ -8802,6 +8802,39 @@ var
   TopL, EndL, ContL: string;
   EndSlot: string;
   ForMark: Integer;
+
+  { the counter is a plain slot, unless a closure or nested routine captured
+    it: then it lives behind its '_cap_' pointer (in a packed env, at its
+    declared width) and the loop must read and write THAT storage so the
+    loop and the closures agree on one variable }
+  procedure LoadCounter;
+  begin
+    if IsCaptured(AStmt.VarName) and (AStmt.VarType <> nil) then
+    begin
+      EmitLoadSlot('x0', '_cap_' + AStmt.VarName);
+      EmitElemLoad(AStmt.VarType);
+    end
+    else
+      EmitLoadSlot('x0', AStmt.VarName);
+  end;
+
+  procedure StoreCounter;
+  begin
+    if IsCaptured(AStmt.VarName) and (AStmt.VarType <> nil) then
+    begin
+      EmitLoadSlot('x9', '_cap_' + AStmt.VarName);
+      case AStmt.VarType.RawSize() of
+        1: Self.Emit(#9'strb w0, [x9]');
+        2: Self.Emit(#9'strh w0, [x9]');
+        4: Self.Emit(#9'str w0, [x9]');
+      else
+        Self.Emit(#9'str x0, [x9]');
+      end;
+    end
+    else
+      EmitStoreSlot('x0', AStmt.VarName);
+  end;
+
 begin
   { the pre-pass registered one hidden end slot per for statement, consumed
     here in the same walk order }
@@ -8812,7 +8845,7 @@ begin
   ContL := NewLabel('fcont');
   ForMark := FPendingRelCount;
   Self.EmitExprToX0(AStmt.StartExpr);
-  EmitStoreSlot('x0', AStmt.VarName);
+  StoreCounter();
   Self.EmitExprToX0(AStmt.EndExpr);      { bound evaluated ONCE }
   EmitStoreSlot('x0', EndSlot);
   { start/end bounds may read a field off a transient; both are now stored to
@@ -8820,8 +8853,8 @@ begin
     test only RELOADS the slots, so a single flush suffices (BUG-049). }
   FlushNativePendingReleases(ForMark);
   Self.Emit(TopL + ':');
-  EmitLoadSlot('x0', AStmt.VarName);
   EmitLoadSlot('x1', EndSlot);
+  LoadCounter();
   Self.Emit(#9'cmp x0, x1');
   if AStmt.IsDownTo then
     Self.Emit(Format(#9'b.lt %s', [EndL]))
@@ -8835,12 +8868,12 @@ begin
   FBreakLbls.Delete(FBreakLbls.Count - 1);
   FLoopExcDepth.Delete(FLoopExcDepth.Count - 1);
   Self.Emit(ContL + ':');
-  EmitLoadSlot('x0', AStmt.VarName);
+  LoadCounter();
   if AStmt.IsDownTo then
     Self.Emit(#9'sub x0, x0, #1')
   else
     Self.Emit(#9'add x0, x0, #1');
-  EmitStoreSlot('x0', AStmt.VarName);
+  StoreCounter();
   Self.Emit(Format(#9'b %s', [TopL]));
   Self.Emit(EndL + ':');
 end;
