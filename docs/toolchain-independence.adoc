@@ -715,7 +715,9 @@ retired once the native backend had caught up.
   path had been masking (same-named globals of two units, cached-unit type
   merging), which were fixed in the process.
 
-The plan and its record of each step are in `docs/qbe-removal-plan.adoc`.
+The phased plan that carried this out (`docs/qbe-removal-plan.adoc`) was
+retired once complete; it remains in the git history (last revision in commit
+7f6e7520).
 
 == Dependency State by Phase
 

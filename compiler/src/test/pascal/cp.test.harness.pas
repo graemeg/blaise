@@ -9,7 +9,7 @@
 unit cp.test.harness;
 
 { Shared in-process harness for compiler unit tests
-  (docs/qbe-removal-plan.adoc, Phase 1b).
+  (introduced while moving the test suite off QBE, v0.15.0).
 
   Replaces the per-class copies of GenIR / GenAsm / AnalyseSrc:
 

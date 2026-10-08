@@ -5679,8 +5679,8 @@ always the stepping stone that got Blaise generating code with the least
 effort; it was never meant to stay.  `--backend` remains as the hook for
 further backends, and `--backend qbe` / `--emit-ir` are now errors that name
 the release.  The full rationale is in `docs/toolchain-independence.adoc`
-(_QBE retirement_) and the step-by-step record in
-`docs/qbe-removal-plan.adoc`.
+(_QBE retirement_); the step-by-step plan was retired once complete and
+remains in the git history.
 
 == Decimal Arithmetic — One `TDecimal`, No `Currency` Primitive
 

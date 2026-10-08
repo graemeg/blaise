@@ -27,8 +27,8 @@ type
 
 const
   { The backend set behind AssertRunsOnAll / AssertRTLRunsOnAll: the native
-    backend for the host.  QBE left the e2e suite in Phase 1d of
-    docs/qbe-removal-plan.adoc. }
+    backend for the host.  QBE left the e2e suite before the backend was
+    removed in v0.15.0. }
   AllBackends: TBackends = [beNative];
 
 function BackendName(ABackend: TBackend): string;
