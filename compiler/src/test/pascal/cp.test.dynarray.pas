@@ -20,7 +20,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TDynArrayTests = class(TTestCase)
@@ -60,6 +60,12 @@ type
     { ------------------------------------------------------------------ }
     procedure TestSemantic_RecordField_DynArrayElemAssign_Accepted;
     procedure TestParse_ChainedField_DynArrayElemAssign_Accepted;
+
+    { ------------------------------------------------------------------ }
+    { Whole-array store through a var/out param: deref the caller's slot   }
+    { ------------------------------------------------------------------ }
+    procedure TestCodegen_DynArray_VarParamStore_ReleasesThroughAddress;
+    procedure TestCodegen_DynArray_SubscriptOfCallResult_ReleasesIt;
   end;
 
 implementation
@@ -321,6 +327,55 @@ begin
       ''');
   AssertNotNil('chained field element assign parses', Prog);
   Prog.Free();
+end;
+
+procedure TDynArrayTests.TestCodegen_DynArray_VarParamStore_ReleasesThroughAddress;
+const
+  { A := B with A a var param: the slot holds the caller's ADDRESS, so the old
+    array is loaded and released THROUGH it and the new one stored there.
+    arm64 rejected this shape outright (not yet lowered) until GH #220's
+    TDictionary<string, array of Byte> hit it. }
+  Src = '''
+    program P;
+    type TBytes = array of Byte;
+    procedure Fill(var A: TBytes; const B: TBytes);
+    begin
+      A := B
+    end;
+    var X, Y: TBytes;
+    begin
+      Fill(X, Y)
+    end.
+    ''';
+begin
+  AssertEquals('old value released through the var-param address', '',
+    AsmMissing(Src,
+      #9'movq (%rcx), %rdi' + LineEnding + #9'subq $8, %rsp' + LineEnding +
+        #9'callq _DynArrayRelease',
+      #9'ldr x0, [x9]' + LineEnding + #9'bl __DynArrayRelease'));
+end;
+
+procedure TDynArrayTests.TestCodegen_DynArray_SubscriptOfCallResult_ReleasesIt;
+const
+  { MakeArr()[1]: the call's +1 array is subscripted in place and owned by
+    nobody else, so it must be released once the element is read.  x86-64
+    leaked it (2 GB peak for 20000 x 100 KB); arm64 refused the shape.  Nothing
+    else in this program releases a dyn array, so any release is that one. }
+  Src = '''
+    program P;
+    type TBytes = array of Byte;
+    function MakeArr(): TBytes;
+    begin
+      SetLength(Result, 3)
+    end;
+    var I: Integer;
+    begin
+      I := MakeArr()[1]
+    end.
+    ''';
+begin
+  AssertEquals('owned transient released after the element read', '',
+    AsmMissing(Src, #9'callq _DynArrayRelease', #9'bl __DynArrayRelease'));
 end;
 
 initialization

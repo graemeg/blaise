@@ -28,6 +28,7 @@ type
     procedure TestRun_IMap_OneCallSiteBothImplementations;
     procedure TestRun_TOrderedDictionary_KeepsInsertionOrder;
     procedure TestRun_TDictionary_AddLookupUpdateRemove;
+    procedure TestRun_TDictionary_DynArrayValue;
     procedure TestRun_TSet_IncludeExcludeContains;
     procedure TestRun_StackQueueList_OrderAcrossGrow;
     { Generic free functions }
@@ -1023,6 +1024,38 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     '42 forty-two' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_TDictionary_DynArrayValue;
+const
+  { GH #220: a dyn-array VALUE type.  x86-64 first failed to link (the
+    IMap<string, array of Byte> typeinfo was never emitted, fixed by
+    fbd36994); arm64 then could not store a dyn array into TryGetValue's
+    out param or the entry fields. }
+  Src = '''
+    program P;
+    uses Generics.Collections;
+    type
+      TBytes = array of Byte;
+    var
+      D: TDictionary<string, TBytes>;
+      A, V: TBytes;
+    begin
+      D := TDictionary<string, TBytes>.Create();
+      SetLength(A, 2);
+      A[1] := 9;
+      D.Add('a', A);
+      SetLength(A, 3);
+      D['b'] := A;
+      WriteLn(D['a'][1], ' ', Length(D['b']));
+      if D.TryGetValue('a', V) then
+        WriteLn('got ', Length(V), ' ', V[1]);
+      D.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '9 3' + LE + 'got 2 9' + LE, 0);
 end;
 
 initialization

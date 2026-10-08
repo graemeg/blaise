@@ -164,6 +164,7 @@ type
     { var-param interface: method dispatch and reassignment through the
       var param must reach the caller's variable. }
     procedure TestRun_VarParamInterface_DispatchAndReassign;
+    procedure TestRun_DynArrayStore_VarOutParamAndSelfField;
 
     { Metaclass-var constructor dispatch: cls.Create() runs the most-derived
       ctor body via vtable (implicitly virtual), not the base ctor statically. }
@@ -2205,6 +2206,66 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcVarParamIntf,
     'hello 1' + LE + 'hello 2' + LE + '2' + LE + 'hello 101' + LE + '101' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_DynArrayStore_VarOutParamAndSelfField;
+const
+  { Whole dyn-array stores into a var param, an out param and a bare field
+    inside a method, with the ARC counts kept honest: Swap's three-way
+    exchange only prints the right lengths if no store over- or
+    under-releases.  arm64 rejected every one of these targets (GH #220). }
+  Src = '''
+    program Prg;
+    type
+      TBytes = array of Byte;
+      TBox = class
+        FData: TBytes;
+        procedure Put(const A: TBytes);
+        procedure Get(out A: TBytes);
+        procedure Swap(var A: TBytes);
+      end;
+    procedure TBox.Put(const A: TBytes);
+    begin
+      FData := A;
+    end;
+    procedure TBox.Get(out A: TBytes);
+    begin
+      A := FData;
+    end;
+    procedure TBox.Swap(var A: TBytes);
+    var T: TBytes;
+    begin
+      T := FData;
+      FData := A;
+      A := T;
+    end;
+    procedure Fill(var A: TBytes; N: Integer);
+    var B: TBytes; I: Integer;
+    begin
+      SetLength(B, N);
+      for I := 0 to N - 1 do
+        B[I] := I + 1;
+      A := B;
+    end;
+    var
+      Box: TBox;
+      X, Y: TBytes;
+    begin
+      Fill(X, 3);
+      WriteLn(Length(X), ' ', X[2]);
+      Box := TBox.Create();
+      Box.Put(X);
+      Box.Get(Y);
+      WriteLn(Length(Y), ' ', Y[0]);
+      Fill(Y, 5);
+      Box.Swap(Y);
+      WriteLn(Length(Y), ' ', Length(Box.FData), ' ', Box.FData[4]);
+      Box.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '3 3' + LE + '3 1' + LE + '3 5 5' + LE, 0);
 end;
 
 { ---------- Metaclass-var constructor dispatch tests ---------- }

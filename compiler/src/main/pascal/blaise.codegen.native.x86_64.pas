@@ -226,6 +226,10 @@ type
       PENDREL_SLOTS the field-read falls back to the old AddRef-pin (safe leak),
       so overflow degrades rather than breaks. }
     FPendingRelCount: Integer;
+    FPendingRelSyms: array[0..PENDREL_SLOTS - 1] of string;
+                                { the RTL release routine for each live
+                                  _pendrel_N slot (_ClassRelease or
+                                  _DynArrayRelease) }
     FProgHasPendRel:  Boolean;  { $main used a pending-release slot -> emit .bss }
 
     { Loop label stacks for break/continue: the top entry is the innermost
@@ -918,6 +922,8 @@ type
       releases every deferred base whose slot index is >= AMark and resets the
       count, called by EmitStmt at leaf-statement boundaries AFTER the store. }
     function  DeferNativeClassRelease: Boolean;
+    function  DeferNativeRelease(const AReleaseSym: string): Boolean;
+    procedure DeferOwnedDynArrayBase(ABase: TASTExpr);
     procedure FlushNativePendingReleases(AMark: Integer);
     { Evaluate a boolean condition and branch: if true jump ATrueLabel, else
       fall through to AFalseLabel (a jmp is emitted to it). }
@@ -6919,6 +6925,24 @@ begin
   { Spill the owned-transient base pointer currently in %rax into the next free
     _pendrel slot and record it as pending.  Returns False (no slot free) so the
     caller falls back to its own inline handling — never emits incorrect code. }
+  Result := Self.DeferNativeRelease('_ClassRelease');
+end;
+
+procedure TX86_64Backend.DeferOwnedDynArrayBase(ABase: TASTExpr);
+begin
+  { The dyn array in %rax is about to be subscripted in place.  When it is an
+    owned transient (MakeArr()[I], D['k'][I]) the subscript holds its only
+    reference: defer its release to the statement boundary, after the element
+    has been consumed.  Without this every such read leaked the whole array.
+    With every slot in use it still leaks, as before -- never a UAF. }
+  if NativeExprOwnsRef(ABase) then
+    Self.DeferNativeRelease('_DynArrayRelease');
+end;
+
+function TX86_64Backend.DeferNativeRelease(const AReleaseSym: string): Boolean;
+begin
+  { as DeferNativeClassRelease, for any owned transient whose release is a
+    one-argument RTL call on the pointer in %rax }
   if FPendingRelCount >= PENDREL_SLOTS then
   begin
     Result := False;
@@ -6928,6 +6952,7 @@ begin
     [Self.VarOperand(Format('_pendrel_%d', [FPendingRelCount]))]));
   if not Self.IsLocal(Format('_pendrel_%d', [FPendingRelCount])) then
     FProgHasPendRel := True;   { $main body uses a .bss pendrel slot }
+  FPendingRelSyms[FPendingRelCount] := AReleaseSym;
   FPendingRelCount := FPendingRelCount + 1;
   Result := True;
 end;
@@ -6943,7 +6968,7 @@ begin
     FPendingRelCount := FPendingRelCount - 1;
     Self.Emit(Format(#9'movq %s, %%rdi',
       [Self.VarOperand(Format('_pendrel_%d', [FPendingRelCount]))]));
-    Self.Emit(#9'callq _ClassRelease');
+    Self.Emit(#9'callq ' + FPendingRelSyms[FPendingRelCount]);
   end;
 end;
 
@@ -7576,6 +7601,7 @@ begin
   if (FloatElem <> nil) and IsFloatFamily(FloatElem) then
   begin
     Self.EmitExprToEax(TStringSubscriptExpr(AExpr).StrExpr);
+    Self.DeferOwnedDynArrayBase(TStringSubscriptExpr(AExpr).StrExpr);
     Self.Emit(#9'pushq %rax');
     Self.EmitExprToEax(TStringSubscriptExpr(AExpr).IndexExpr);
     Self.Emit(Format(#9'imulq $%d, %%rax', [FloatElem.RawSize()]));
@@ -9915,6 +9941,7 @@ begin
   begin
     SAE := TStringSubscriptExpr(AExpr);
     Self.EmitExprToEax(SAE.StrExpr);
+    Self.DeferOwnedDynArrayBase(SAE.StrExpr);
     Self.Emit(#9'pushq %rax');
     Self.EmitExprToEax(SAE.IndexExpr);
     Self.Emit(Format(#9'imulq $%d, %%rax',

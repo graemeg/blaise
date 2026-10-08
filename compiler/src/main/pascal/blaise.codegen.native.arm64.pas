@@ -182,6 +182,10 @@ type
     FPendingRelCount: Integer;   { live statement-scoped deferred class
                                    releases (BUG-048/BUG-049) — also the next
                                    free _pendrel_N slot index }
+    FPendingRelSyms: array[0..PENDREL_SLOTS - 1] of string;
+                                 { the RTL release routine for each live
+                                   _pendrel_N slot (_ClassRelease or
+                                   _DynArrayRelease) }
     FIndirectSlot: string;       { VIRT_INDIRECT: frame slot holding the
                                    address of the procedural value to call }
     FJArgN: Integer;             { counter for '__jarg_<n>' jumbo-set
@@ -253,6 +257,7 @@ type
       the pending releases back down to a saved mark. }
     procedure ReservePendRelSlots;
     function  DeferNativeClassRelease: Boolean;
+    function  DeferNativeRelease(const AReleaseSym: string): Boolean;
     procedure FlushNativePendingReleases(AMark: Integer);
     { Load a captured var's field-access base / method receiver through its
       hidden '_cap_' slot (leg 19).  Returns True when AName was captured. }
@@ -1082,12 +1087,21 @@ begin
   { record the owned-transient base pointer (in x0) into the next free
     _pendrel slot; the caller keeps the borrowed field value.  Returns False
     when all slots are in use — the caller then falls back to the AddRef-pin. }
+  Result := DeferNativeRelease('_ClassRelease');
+end;
+
+function TArm64Backend.DeferNativeRelease(const AReleaseSym: string): Boolean;
+begin
+  { as DeferNativeClassRelease, for any owned transient whose release is a
+    one-argument RTL call on the value in x0 (an owned dyn array subscripted
+    in place: MakeArr()[I], D['k'][I]) }
   if FPendingRelCount >= PENDREL_SLOTS then
   begin
     Result := False;
     Exit;
   end;
   EmitStoreSlot('x0', Format('_pendrel_%d', [FPendingRelCount]));
+  FPendingRelSyms[FPendingRelCount] := AReleaseSym;
   FPendingRelCount := FPendingRelCount + 1;
   Result := True;
 end;
@@ -1100,7 +1114,7 @@ begin
   begin
     FPendingRelCount := FPendingRelCount - 1;
     EmitLoadSlot('x0', Format('_pendrel_%d', [FPendingRelCount]));
-    EmitCallSym('_ClassRelease');
+    EmitCallSym(FPendingRelSyms[FPendingRelCount]);
   end;
 end;
 
@@ -7462,9 +7476,15 @@ begin
      (AAsgn.ResolvedLhsType.Kind = tyDynArray) then
   begin
     { data-pointer ARC, mirroring the string discipline }
-    if AAsgn.IsWeakLhs or AAsgn.IsVarParam or
-       (AAsgn.ImplicitSelfField <> nil) then
-      NotYet('dyn-array assignment to this target', AAsgn);
+    if AAsgn.IsWeakLhs then
+      NotYet('dyn-array assignment to a [Weak] target', AAsgn);
+    if AAsgn.ImplicitSelfField <> nil then
+    begin
+      { bare dyn-array field := value inside a method: the instance-field
+        store retains/releases against the field slot (x86-64 parity) }
+      EmitImplicitSelfStore(AAsgn);
+      Exit;
+    end;
     Self.EmitExprToX0(AAsgn.Expr);
     if not ArcExprOwnsRef(AAsgn.Expr) then
     begin
@@ -7473,6 +7493,19 @@ begin
       EmitPopTo('x0');
     end;
     EmitPushX0();
+    if AAsgn.IsVarParam then
+    begin
+      { var/out param: the slot holds the caller's ADDRESS.  Release the old
+        array through it, then store the new one there (the address is
+        re-loaded because the release call clobbers x9). }
+      EmitLoadSlot('x9', AAsgn.Name);
+      Self.Emit(#9'ldr x0, [x9]');
+      EmitCallSym('_DynArrayRelease');
+      EmitLoadSlot('x9', AAsgn.Name);
+      EmitPopTo('x0');
+      Self.Emit(#9'str x0, [x9]');
+      Exit;
+    end;
     EmitLoadSlot('x0', AAsgn.Name);
     EmitCallSym('_DynArrayRelease');
     EmitPopTo('x0');
@@ -10637,13 +10670,18 @@ begin
   if not (ASub.StrExpr is TIdentExpr) then
   begin
     { a dyn array reached through an expression (an element of an outer
-      array, a field): its VALUE is the data pointer -- a borrow, so an
-      owned transient base would need a release }
-    if ArcExprOwnsRef(ASub.StrExpr) then
-      NotYet('subscript on an owned transient dyn array', ASub);
+      array, a field): its VALUE is the data pointer -- a borrow.  An owned
+      transient base (a call result: MakeArr()[I], D['k'][I]) holds the only
+      reference, so its release is deferred to the statement boundary, after
+      the element has been consumed -- releasing it here would leave the
+      element address dangling }
     Self.EmitExprToX0(ASub.IndexExpr);
     EmitPushX0();
     Self.EmitExprToX0(ASub.StrExpr);
+    if ArcExprOwnsRef(ASub.StrExpr) and
+       not DeferNativeRelease('_DynArrayRelease') then
+      NotYet('subscript on an owned transient dyn array (deferred-release ' +
+        'slots exhausted)', ASub);
     EmitPopTo('x1');
     EmitIntLiteral('x2', ESz);
     Self.Emit(#9'mul x1, x1, x2');
