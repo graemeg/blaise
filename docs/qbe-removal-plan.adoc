@@ -13,7 +13,8 @@ QBE-only e2e test remain, marked for deletion in Phase 2.
 | Phase 2 | Done -- the backend, its driver, tests, fixpoint, vendored source and CI
 steps are removed.  Ships in release v0.15.0, which also makes the macOS arm64
 port usable.
-| Phase 3 | Not started -- documentation.
+| Phase 3 | Done -- documentation updated; dated design records keep their QBE
+references with a short historical note.
 |===
 
 == Rationale
@@ -261,6 +262,23 @@ a single native compile.
 * Update the private `CLAUDE.md` notes: the "IR unit test + E2E test" rule
   for new features becomes "asm or semantic unit test + E2E test", and the
   debugging guidance compares x86-64 and arm64 instead of QBE and native.
+
+=== Outcome
+
+* The decision and its rationale are recorded in
+  `docs/toolchain-independence.adoc` (_QBE retirement_), with an update
+  cross-referencing it in `docs/language-rationale.adoc` (native backend as
+  default).  The project keeps a short account of how it started: QBE got
+  Blaise generating code with the least effort and was always meant to be
+  replaced once the native backend caught up.
+* `README.adoc`, `docs/testing-strategy.adoc` (with a new "Reading the
+  generated code" section) and the `docs/extending-ast.adoc` guide describe the
+  native-only pipeline and test layers; `docs/design.adoc` is marked as the
+  original design with notes on where the implementation diverged.
+* `docs/name-mangling.adoc`, `docs/bif-format.adoc`,
+  `docs/future-improvements.adoc` and the kanban/bindgen tool READMEs are
+  corrected.  Five dated design records carry a historical note.
+* The private `CLAUDE.md` notes are updated outside the repository.
 
 == Working method
 

@@ -11,6 +11,17 @@
 :reponame: new-pascal-compiler
 :mode: Builder / Open Source
 
+[NOTE]
+====
+This is the original design (April 2026) and is kept as the record of the
+project's starting plan.  Where the implementation took a different route the
+section says so.  The largest such change: Blaise started on QBE, as planned
+here, but the second backend became a native code generator with its own
+assembler and linker rather than LLVM, and QBE was removed in v0.15.0 once the
+native backend had caught up (see `docs/toolchain-independence.adoc`, _QBE
+retirement_).
+====
+
 == Problem Statement
 
 The Object Pascal ecosystem in 2026 has two options: Embarcadero Delphi (proprietary,
@@ -95,6 +106,16 @@ The following premises were agreed upon before design work began:
 == Backend Strategy
 
 === QBE First, LLVM Second
+
+[NOTE]
+====
+*Outcome.*  QBE did its job: it got Blaise to a working, self-hosting compiler
+with the least effort.  The follow-on backend turned out to be a native code
+generator (x86-64, then arm64) with an internal assembler and linker, which also
+serves the toolchain-independence goal.  QBE was removed in v0.15.0.  `--backend`
+stays as the hook for further backends; an LLVM backend is being developed out
+of tree.
+====
 
 https://c9x.me/compile/[QBE] is a lightweight compiler backend (~13k lines of C)
 targeting x86_64, ARM64, and RISC-V. It is:
@@ -292,7 +313,8 @@ Supported flags:
 | Emit OPDF debug info (Phase 5+)
 
 | `--emit-ir`
-| Emit QBE IR to stdout (useful for debugging the compiler)
+| Emit QBE IR to stdout (useful for debugging the compiler).  Removed in v0.15.0
+  with the QBE backend; `--emit-asm` prints the generated assembly instead.
 |===
 
 === Phase 1 — Bootstrap Pipeline (Months 1–4)
@@ -659,6 +681,7 @@ These are not open for reconsideration:
 
 | QBE
 | Vendored in the compiler repository, built from source. Version pinned.
+  (Removed in v0.15.0 together with the QBE backend.)
 
 | Interface TYPEID
 | `CRC32(UnitName + '.' + InterfaceName)` — deterministic across all builds.

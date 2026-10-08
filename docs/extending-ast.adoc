@@ -20,8 +20,9 @@ in three places*.
 . The semantic pass that consumes it (`uSemantic.pas`).
 . The `.bif` serialiser and deserialiser (`uUnitInterfaceIO.pas`).
 
-Codegen (`blaise.codegen.qbe.pas`) is a fourth
-place, but only when the node carries runtime semantics. A
+Codegen (`blaise.codegen.native.x86_64.pas` and
+`blaise.codegen.native.arm64.pas`) is a fourth place, but only when the node
+carries runtime semantics. A
 type-system-only change (e.g. adding a marker attribute) may need no
 codegen work.
 
@@ -92,10 +93,10 @@ if you forget to update the reader to match the writer (or vice versa),
 stage-2 emits `.bifs` stage-3 can't read.
 
 . *Add a test under `compiler/src/test/pascal/`* exercising the new
-  shape. For a new statement form, both an IR-level test
-  (`cp.test.<name>.pas`) asserting the emitted QBE shape and an
-  end-to-end test (`cp.test.e2e.<name>.pas`) that runs the resulting
-  binary.
+  shape. For a new statement form, both a unit test
+  (`cp.test.<name>.pas`) asserting the semantic annotation or the emitted
+  assembly on both ISAs, and an end-to-end test (`cp.test.e2e.<name>.pas`)
+  that runs the resulting binary.
 
 
 == Walked-Through Example: Adding a `when` Statement
@@ -233,43 +234,47 @@ Wire it into `AnalyseStmt`'s dispatch chain: `if AStmt is TWhenStmt then
 AnalyseWhenStmt(TWhenStmt(AStmt))`.
 
 
-=== Step 4: Codegen (QBE Backend)
+=== Step 4: Codegen (both ISA backends)
 
-In `blaise.codegen.qbe.pas`, add `EmitWhenStmt`. Each branch becomes a guard /
-body / next-branch label triple, modelled on `EmitIfStmt`'s expansion.
+Each native ISA backend lowers the node: `TX86_64Backend` in
+`blaise.codegen.native.x86_64.pas` and `TArm64Backend` in
+`blaise.codegen.native.arm64.pas`.  Both need an arm — a node one backend
+does not handle either raises a "not yet lowered" error or, worse, falls
+through to a more general arm and emits plausible but wrong code (the drift
+`tools/flag-coverage` watches for).  Each branch becomes a guard / body /
+next-branch label triple, modelled on the existing `if` lowering.
+
+The arm64 version, modelled on `TArm64Backend.EmitIf`:
 
 [source,pascal]
 ----
-procedure TCodeGenQBE.EmitWhenStmt(AStmt: TWhenStmt);
+procedure TArm64Backend.EmitWhen(AStmt: TWhenStmt);
 var
-  I:        Integer;
-  Branch:   TWhenBranch;
-  CondT:    string;
-  LblBody:  string;
-  LblNext:  string;
-  LblEnd:   string;
+  I: Integer;
+  Branch: TWhenBranch;
+  NextL, EndL: string;
 begin
-  LblEnd := AllocLabel('when_end');
+  EndL := NewLabel('whenend');
   for I := 0 to AStmt.Branches.Count - 1 do
   begin
     Branch := TWhenBranch(AStmt.Branches.Items[I]);
-    LblBody := AllocLabel(Format('when_b%d_body', [I]));
-    LblNext := AllocLabel(Format('when_b%d_next', [I]));
-    CondT := EmitExpr(Branch.Cond);
-    EmitLine(Format('  jnz %s, @%s, @%s', [CondT, LblBody, LblNext]));
-    EmitLine('@' + LblBody);
-    EmitStmt(Branch.Body);
-    EmitLine(Format('  jmp @%s', [LblEnd]));
-    EmitLine('@' + LblNext);
+    NextL := NewLabel('whennext');
+    Self.EmitCondToX0Flushed(Branch.Cond);
+    Self.Emit(Format(#9'cbz x0, %s', [NextL]));
+    Self.EmitStmt(Branch.Body);
+    Self.Emit(Format(#9'b %s', [EndL]));
+    Self.Emit(NextL + ':');
   end;
   if AStmt.ElseBody <> nil then
-    EmitStmt(AStmt.ElseBody);
-  EmitLine('@' + LblEnd);
+    Self.EmitStmt(AStmt.ElseBody);
+  Self.Emit(EndL + ':');
 end;
 ----
 
-Wire it into `EmitStmt`'s dispatch.
-
+The x86-64 version has the same shape, using `EmitCondBranchFlushed` to branch
+to the body or the next guard and `jmp` to the end label (see the `TIfStmt`
+arm of `TX86_64Backend.EmitStmt`).  Wire each into its backend's `EmitStmt`
+dispatch.
 
 === Step 5: `.bif` Serialiser — The One Most People Forget
 
@@ -379,9 +384,11 @@ error when binary-only and the compiler-id no longer matches.
 Add the canonical pair:
 
 `compiler/src/test/pascal/cp.test.when.pas`::
-  IR-level. Compile a small program with a `when` and assert the QBE IR
-  contains the expected branching shape (`jnz` followed by `jmp
-  @when_end`).
+  Unit-level, through `cp.test.harness`.  Assert the semantic pass accepts
+  and annotates the construct (`Analyse`, `SemanticError` for the error
+  cases).  Assert on the generated assembly (`GenAsm` / `AsmMissing` for
+  `TargetX86_64` and `TargetArm64`) only for a lowering decision a running
+  program cannot observe.
 
 `compiler/src/test/pascal/cp.test.e2e.when.pas`::
   End-to-end. Compile + run, assert the output matches the expected
@@ -498,11 +505,11 @@ For copy-paste convenience.
 * [ ] Parser recognises the new syntax (if user-facing)
 * [ ] Lexer keyword added if needed (`uLexer.pas`)
 * [ ] Semantic dispatch case in `AnalyseStmt` / `AnalyseExpr`
-* [ ] Codegen dispatch case in `EmitStmt` / `EmitExpr`
+* [ ] Codegen dispatch case in `EmitStmt` / `EmitExpr` of BOTH ISA backends (x86-64, arm64)
 * [ ] `.bif` encoder case in `EncodeStmt` / `EncodeExpr`
 * [ ] `.bif` decoder case in `ReadStmt` / `ReadExpr`
 * [ ] `IFACE_VERSION` bumped in `uUnitInterfaceIO.pas`
-* [ ] IR-level test under `compiler/src/test/pascal/cp.test.<name>.pas`
+* [ ] Unit test (semantic, or assembly on both ISAs) under `compiler/src/test/pascal/cp.test.<name>.pas`
 * [ ] E2E test under `cp.test.e2e.<name>.pas`
 * [ ] Tests registered in `TestRunner.pas` + `RegisterTest` in unit body
 * [ ] Full gate green: TestRunner / fixpoint / loader-testrunner

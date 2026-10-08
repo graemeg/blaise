@@ -248,7 +248,7 @@ A `method-list` and `method-decl-list` are structurally similar but
 not identical:
 
 * `method-list` (from `EncodeMethodSig`) carries class-method extras
-  the **codegen** needs: `IsVirtual`, `IsOverride`, `ResolvedQbeName`,
+  the **codegen** needs: `IsVirtual`, `IsOverride`, `ResolvedEmitName`,
   `VTableSlot`. Used by classes.
 * `method-decl-list` (from `EncodeMethodDecl`) lacks the resolved
   names — interfaces don't carry codegen state. Used by interfaces

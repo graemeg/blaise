@@ -16,11 +16,16 @@ files, and the linker would either error or silently bind to the wrong
 one. With prefixing, those become `$UnitA_Foo` and `$UnitB_Foo` —
 distinct global symbols, each resolvable independently.
 
-The scheme is *unit-name-as-prefix*: the QBE symbol for entity `Bar`
+The scheme is *unit-name-as-prefix*: the assembler symbol for entity `Bar`
 declared in unit `Foo.Sub` becomes `Foo_Sub_Bar`. Dots in unit names
 collapse to underscores. Case from the source is preserved (Pascal is
 case-insensitive at the language level, but linker symbols are
 case-sensitive and the mangler treats them literally).
+
+NOTE: The examples in this document write symbols with the `$` sigil of the
+QBE IR the scheme was first designed for.  The native backends spell the same
+names without it (`Foo_Sub_Bar`), and with Darwin's extra leading underscore
+on macOS (`_Foo_Sub_Bar`).
 
 For most user code this prefixing is invisible — every reference site
 goes through the same mangler at codegen time, so producer and consumer
@@ -29,7 +34,7 @@ agree.
 
 == When Mangling Applies
 
-Every QBE symbol emitted for a unit-scope entity is prefixed. The full
+Every assembler symbol emitted for a unit-scope entity is prefixed. The full
 list:
 
 [cols="1,2,2",options="header"]
@@ -81,10 +86,9 @@ list:
 | `$typeinfo_Classes_TBox_Integer`
 |===
 
-Local symbols inside a function body — basic-block labels (`@start`,
-`@if_then_0`), QBE temporaries (`%_t12`), variable slots
-(`%_var_X`) — are not prefixed. They are scoped to the QBE function
-they appear in.
+Local symbols inside a function body — branch labels and frame-relative
+variable slots — are not prefixed.  They are local to the function they
+appear in.
 
 
 == When Mangling Does *Not* Apply
@@ -134,7 +138,7 @@ Five categories accepted as "unmangled":
 The runtime is hand-written and has *hardcoded* references to specific
 symbol names that originate in these units. Concretely:
 
-`blaise.codegen.qbe.pas` emits calls and references like:
+The native backends emit calls and references like:
 
 * `$_StartUp` (program init, in `System` / `rtl.*`)
 * `$_SetArgs`
@@ -165,7 +169,7 @@ Two paths to fix this:
 . **Route everything through the symbol table** — every `$_Foo` in
   codegen becomes `RtlSym('_Foo')`, which consults a registry mapping
   logical names to mangled names. Cleaner long-term; mechanical refactor
-  of ~113 call sites in `blaise.codegen.qbe.pas`. Documented as a follow-up
+  of every hand-named RTL call site in the backends. Documented as a follow-up
   in `memory/project_unit_prefix_mangling.md`.
 
 
@@ -269,7 +273,7 @@ $Collections_TBox_Integer_Get          { method on the instance }
 ----
 
 The angle brackets in `TBox<Integer>` collapse to underscore-separated
-text via `QBEMangle`, then get the unit prefix on top.
+text via `CodegenMangle`, then get the unit prefix on top.
 
 
 == Adding a Unit to the Allowlist
@@ -280,13 +284,13 @@ for bare names.
 
 To add `mynew_rtl_unit` to the allowlist:
 
-. In `uSemantic.pas`, edit `IsUnmangledUnit`:
+. In `uSymbolTable.pas`, edit `IsUnmangledUnit`:
 +
 [source,pascal]
 ----
 if SameText(AUnitName, 'mynew_rtl_unit') then Exit;  { add this line }
 ----
-. In `blaise.codegen.qbe.pas`'s `ClassUnitPrefix`, mirror the same check.
+. Nothing to mirror: both ISA backends call the same `IsUnmangledUnit`.
 . Bump `COMPILER_ID` in `uCompilerId.pas` — the change affects which
   units emit prefixed symbols, so previously-built `.bif`s on disk
   become semantically incompatible.
@@ -320,8 +324,8 @@ prebuilt `.o`.
 === Property accessors
 
 Properties don't have their own symbols — they expand at call sites to
-calls into the read/write method. `blaise.codegen.qbe`'s property-access
-emission inserts the prefix via `ClassUnitPrefix(FldAccess.PropOwnerType)`
+calls into the read/write method. The backends' property-access emission
+inserts the prefix of the property's owner type
 so `MyList.Strings[0]` compiles to a call like
 `$Classes_TStringList_GetStrings`.
 
@@ -332,13 +336,13 @@ nearest `HasDestroyMethod = True` class and calls `<Class>_Destroy`.
 When that class is `TObject` (the typical case), the call site emits
 `$TObject_Destroy` (bare) because `TObject` is in the System
 allowlist. When the destructor is on a user class, the call emits
-`$UserUnit_TUserClass_Destroy` — prefix routed via `ClassUnitPrefix`.
+`$UserUnit_TUserClass_Destroy` — prefixed by the class's owning unit.
 
 === Imported class-method resolution
 
 When a consumer compiles a call to `TStringList.Get`, semantic does
 `FindMethodDecl('TStringList', 'Get')` and gets back a `TMethodDecl`
-whose `ResolvedQbeName` was deserialised from the imported `.bif`.
+whose `ResolvedEmitName` was deserialised from the imported `.bif`.
 That name is the *fully prefixed* form `Classes_TStringList_Get`.
 Codegen emits it as-is. The prefix never has to be reconstructed
 consumer-side.
@@ -362,7 +366,7 @@ consumer-side.
 
 * `5eb34b0` (2026-05-24) — `IsUnmangledUnit` + `MangleUnitPrefix`
   helpers landed; no call sites.
-* `3dd6b5a` — free-routine `ResolvedQbeName` sites apply the prefix.
+* `3dd6b5a` — free-routine `ResolvedQbeName` (now `ResolvedEmitName`) sites apply the prefix.
   Added `TAddrOfExpr.ResolvedFreeRoutine` for `@FuncName` codegen.
 * `e25a48e` — class methods + vtable slot ImplName sites; class
   context promoted to `ClassUnitPrefix` helper; imported class

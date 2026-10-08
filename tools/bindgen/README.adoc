@@ -215,7 +215,7 @@ Notes:
 * *Function-like macros* are code, not constants, and are skipped.
 * Doubly-nested anonymous records keep synthetic `anon_<n>` names.
 * Apple AArch64 varargs calls are rejected by the compiler for now
-  (Apple's ABI stacks anonymous args; Linux x86_64 and QBE work).
+  (Apple's ABI stacks anonymous args; Linux x86_64 works).
 
 == Development
 

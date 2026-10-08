@@ -15,12 +15,15 @@ A three-column Kanban board for the terminal, written entirely in Blaise Pascal.
 
 == Building
 
+From the project root:
+
 [source,bash]
 ----
-./build.sh [path-to-blaise-compiler]
+pasbuild compile -m blaise-kanban --compiler compiler/target/blaise
 ----
 
-The build script compiles the Blaise source to QBE IR, assembles it, and links the final binary.
+The compiler builds the RTL from source and assembles and links the binary
+itself; no external toolchain is involved.
 
 == Usage
 

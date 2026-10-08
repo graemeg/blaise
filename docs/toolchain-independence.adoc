@@ -5,8 +5,8 @@
 :sectnums:
 :icons: font
 :source-highlighter: rouge
-:revdate: 2026-06-12
-:revnumber: 1.1
+:revdate: 2026-10-08
+:revnumber: 1.2
 :status: ADOPTED
 
 == Problem Statement
@@ -44,9 +44,17 @@ hard parts of the Phase 5 risk profile below are already done, and an ELF
 object writer (`uElfObject.pas`) already exists for the incremental
 unit→`.o` path.
 
-== Current Pipeline
+*Status update (2026-10-08)*: the internal assembler and the internal ELF and
+Mach-O linkers have shipped and are the default toolchain, and the native
+backend now covers x86-64 and arm64.  The QBE backend was removed in v0.15.0 —
+see _QBE retirement_ for the decision and its rationale.  The pipeline and
+GCC-role sections below describe the toolchain as it was when this strategy was
+drafted; they are kept as the record of where the work started.
 
-For each compilation the following external processes are spawned:
+== Original Pipeline (historical)
+
+When this strategy was drafted, each compilation spawned the following external
+processes:
 
 [source]
 ----
@@ -75,7 +83,7 @@ blaise_mem.pas → Blaise → blaise_mem.ssa → qbe → blaise_mem.s → gcc -c
 The single hand-written assembly file (`blaise_setjmp_x86_64.s`) is also
 assembled with `gcc -c`.
 
-== Roles of GCC in the Current Pipeline
+== Roles of GCC in the Original Pipeline
 
 === Role 1 — Assembler (`gcc -c`)
 
@@ -183,9 +191,8 @@ in the target's libraries — a typo surfaces at load time on the target.
 *Scope and caveats.*
 
 * The policy is implemented in the native backend's internal linker (the
-  default toolchain).  The qbe backend and `--linker external` link through
-  the system `cc` and remain dynamic; `--static --backend qbe` is a loud
-  error (it used to be silently ignored).
+  default toolchain).  `--linker external` links through the system `cc` and
+  remains dynamic.
 * In dynamic mode the internal linker still emits unresolved symbols as
   dynamic imports without verifying any DT_NEEDED library provides them
   (the GH #199 failure shape); the auto-mode note at least names them.
@@ -486,7 +493,7 @@ independence plan.
 
 [cols="1,1"]
 |===
-| With QBE (current) | Without QBE (direct codegen)
+| With QBE (original) | Without QBE (direct codegen, now shipped)
 
 | Source → Blaise IR → QBE → `.s` → assembler → `.o` → linker → binary
 | Source → Blaise IR → native codegen → `.o` → linker → binary
@@ -554,9 +561,9 @@ annotated with what the shipped native backend has since delivered:
   records, interfaces, varargs-style RTL calls) is implemented and verified by
   `NATIVE_FIXPOINT_OK` plus the full test suite running natively.
 * *Each new platform* — Windows x64 ABI, AArch64 ABI, etc., each requires a
-  new arch subclass.  QBE currently gives aarch64 and riscv64 for free, which
-  is why the QBE backend remains the shipped default until native backends
-  cover the supported platforms.
+  new arch subclass.  QBE gave aarch64 and riscv64 for free, which is why it
+  stayed until the native backends covered the supported platforms; the
+  AArch64 subclass (macOS arm64) has since shipped.
 
 == Recommended Plan
 
@@ -676,20 +683,44 @@ bindings by design):
   nothing meanwhile, and the OPDF debugger must learn to trace clones
   (PTRACE_O_TRACECLONE) before self-managed threads are debuggable.
 
-=== QBE retirement (orthogonal, ongoing)
+=== QBE retirement (done in v0.15.0)
 
-The original draft treated direct machine-code generation as a future
-Phase 5; the native x86-64 backend has since shipped (see the status note
-in _Problem Statement_).  QBE is retired per platform once the
-corresponding native arch subclass reaches fixpoint quality; until then the
-QBE backend remains the shipped default and QBE-produced objects remain a
-validation reference for the internal assembler and linker.  AArch64 is
-the next architecture candidate.
+*Decision.*  The QBE backend was removed in v0.15.0; native code generation
+(x86-64 and arm64) is the only backend.  The last release that contains QBE is
+v0.14.0.  `--backend` remains, so an external backend (an LLVM backend is being
+developed out of tree) can plug in through it; `--backend qbe` and `--emit-ir`
+are hard errors that name the release and the replacement (`--emit-asm`).
+
+*Why QBE was there.*  QBE was the quickest way to get Blaise generating working
+code: a small, well-designed SSA back end that handled instruction selection,
+register allocation and three ISAs while the front end, the runtime and
+self-hosting were built.  It was always meant to be a stepping stone, to be
+retired once the native backend had caught up.
+
+*Why it was retired.*
+
+* *It contradicted the toolchain goal.*  With the internal assembler and
+  linkers in place, QBE was the last component that needed an external
+  assembler, a C compiler and a libc link.
+* *Self-hosting no longer needed it.*  The rolling bootstrap from the anchor
+  release is native-only.
+* *It was a second backend to keep in step* — about 19,600 lines against about
+  40,300 for all native code generation.  Every language change had to be
+  lowered twice, and the two drifted: QBE-specific silent miscompiles are part
+  of why `tools/flag-coverage` exists.
+* *Native ISAs now cross-check each other.*  The same e2e programs run on
+  x86-64 (Linux, FreeBSD) and arm64 (macOS), and disagreements between them have
+  exposed real defects; agreement between QBE and x86-64 never caught those.
+  Moving the test suite off QBE also exposed native bugs QBE's whole-program
+  path had been masking (same-named globals of two units, cached-unit type
+  merging), which were fixed in the process.
+
+The plan and its record of each step are in `docs/qbe-removal-plan.adoc`.
 
 == Dependency State by Phase
 
-Native-backend pipeline on Linux (the QBE pipeline keeps its external
-assembler until QBE itself is retired):
+Native-backend pipeline on Linux.  (The "Current" column is the state when
+this plan was drafted.)
 
 [cols="2,1,1,1,1,1"]
 |===
@@ -703,7 +734,7 @@ assembler until QBE itself is retired):
 | glibc (`-lc`) | Required | Required | Required | Required | Not required
 | libm (`-lm`) | Required | Required | Required | Required | Not required
 | pthreads (`-lpthread`) | Required | Required | Required | Required | Not required
-| QBE | Default backend | Default backend | Default backend | Default backend | Retired per platform
+| QBE | Default backend | Removed in v0.15.0 (independent of the phases) | — | — | —
 |===
 
 == Conclusion

@@ -1,6 +1,6 @@
 = Blaise Testing Strategy
 :author: Graeme Geldenhuys
-:revdate: 2026-05-16
+:revdate: 2026-10-08
 :toc:
 
 == Overview
@@ -49,22 +49,28 @@ dependencies.
 |===
 | Layer | Location | Framework | What it tests | Why this framework
 
-| Compiler IR tests
+| Compiler unit tests
 | `compiler/src/test/pascal/cp.test.*.pas`
 | blaise.testing
-| Parser, semantic analysis, and codegen logic.  Feed source strings through
-  the compiler pipeline and assert on generated QBE IR substrings.
-| Tests import compiler internals (`uParser`, `uSemantic`, `blaise.codegen.qbe`) and
-  run in-process.  Fast (~5 s for 1800+ tests).
+| Parser, semantic analysis, and codegen decisions.  Feed source strings
+  through the shared in-process harness (`cp.test.harness`): front-end
+  assertions check the annotated AST (`Analyse`, `SemanticError`); codegen
+  assertions check the generated assembly for BOTH x86-64 and arm64
+  (`GenAsm`, `AsmMissing`) — generating text needs no toolchain, so every ISA
+  is checked on every host.
+| Tests import compiler internals (`uParser`, `uSemantic`,
+  `blaise.codegen.native`) and run in-process.  Fast.
 
 | Compiler E2E tests
 | `compiler/src/test/pascal/cp.test.e2e.*.pas`
 | blaise.testing
-| Full toolchain: compile -> QBE -> gcc -> run -> assert on stdout/exit code.
-  Catches QBE-validity errors, ABI mismatches, and RTL-contract bugs that the
-  IR harness cannot see.
-| Same runner as IR tests.  ~150 ms per test; kept focused on behaviour the
-  IR harness cannot catch.
+| Full toolchain: the compiler binary compiles, assembles and links the
+  program, which is then run and checked on stdout/exit code.  Catches ABI
+  mismatches, encoding errors and RTL-contract bugs that the in-process
+  harness cannot see.  The same programs run on every native ISA the host
+  can execute (x86-64 on Linux/FreeBSD, arm64 on macOS).
+| Same runner as the unit tests.  Kept focused on behaviour the in-process
+  harness cannot catch.
 
 | Standard library tests
 | `stdlib/src/test/pascal/`
@@ -92,8 +98,8 @@ units like `strutils`, `dateutils`, and `generics.collections` — are
 module for the following reasons:
 
 Import dependencies::
-IR tests import compiler internals (`uLexer`, `uParser`, `uAST`,
-`uSymbolTable`, `uSemantic`, `blaise.codegen.qbe`, `uUnitLoader`).  Moving them
+Compiler unit tests import compiler internals (`uLexer`, `uParser`, `uAST`,
+`uSymbolTable`, `uSemantic`, `blaise.codegen.native`, `uUnitLoader`).  Moving them
 to `stdlib/` would create a circular build dependency: stdlib tests would
 depend on the compiler module, while the compiler module already depends on
 stdlib for its unit search path.
@@ -109,18 +115,24 @@ testing whether `ContainsStr` returns the right answer at runtime.
 E2E tests compile, link, and execute::
 E2E tests shell out to the Blaise compiler binary.  They are toolchain
 smoke tests that happen to use stdlib units as representative input.  Their
-true purpose is to verify the compile -> QBE -> link -> run pipeline.
+true purpose is to verify the compile -> assemble -> link -> run pipeline.
 
 Complementary, not redundant::
 Compiler tests and stdlib tests cover different failure modes.  A compiler
-IR test catches "the codegen emits invalid QBE for this construct."  A
+unit test catches "the codegen makes the wrong lowering decision for this
+construct."  A
 stdlib test catches "this function returns the wrong result at runtime."
 Both are needed; neither replaces the other.
 
 == Required tests for new features
 
-Every new language feature requires both an IR test and an E2E test in the
-compiler module — see the project CLAUDE.md for details.
+Every new language feature requires both a unit test (a semantic assertion,
+or an assembly assertion on both ISAs) and an E2E test in the compiler module.
+A unit test alone is not enough — plausible-looking assembly can still crash
+or compute the wrong result — and an E2E test alone does not pin down which
+lowering went wrong.  Where the behaviour is visible when the program runs,
+prefer the E2E test; keep assembly assertions for decisions a running program
+cannot observe.
 
 Every new stdlib unit or function should additionally have direct runtime
 tests in `stdlib/src/test/pascal/` using blaise.testing.  These tests
@@ -129,3 +141,23 @@ the compiler.
 
 Runtime primitives (memory allocator, ARC, string internals) are tested via
 punit in `runtime/src/test/pascal/`.
+
+== Reading the generated code
+
+Blaise began on the https://c9x.me/compile/[QBE] backend, whose readable IR was
+a convenient way to study code generation and a second lowering to compare
+against.  QBE was always a stepping stone: it was removed in v0.15.0 once the
+native backend had caught up (see `docs/toolchain-independence.adoc`).  The
+same jobs are now done with the native tools:
+
+* `--emit-asm` prints the assembly the compiler generates.  Add
+  `--target macos-arm64` or `--target linux-x86_64` to see the other ISA from
+  any host — comparing the two lowerings of one source is the replacement for
+  comparing QBE against native.
+* `--emit-asm` takes the whole-program path, while a normal `--output` build
+  compiles units separately.  When checking what a shipped binary actually
+  contains, disassemble the binary or build with `--no-incremental`.
+* `--dump-ast` shows the fully resolved AST (types, offsets, semantic flags),
+  which is usually the quickest way to see why an emitter chose a shape.
+* For runtime inspection, build with `--debug-opdf` and use the `pdr`
+  debugger.

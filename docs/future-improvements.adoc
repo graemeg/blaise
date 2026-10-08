@@ -494,12 +494,12 @@ note" for the full reconciliation.
   `await` point becomes a state transition.  The state machine holds
   captured variables and a continuation pointer.  No runtime scheduler or
   coroutine primitives needed — just ordinary function calls and ARC.
-* QBE constraints — QBE has no coroutine or `setjmp`-based context
-  switching primitives.  `async`/`await` via state-machine transform
-  does not require these — the compiler generates ordinary function calls
-  between states.  Green threads would require platform-specific context
-  switching (`swapcontext` or hand-rolled assembly), which is harder to
-  express through QBE.
+* Backend constraints (historical) — this was written when QBE, which has no
+  coroutine or context-switching primitives, was the default backend.
+  `async`/`await` via state-machine transform does not need them — the
+  compiler generates ordinary function calls between states.  With QBE gone
+  and inline assembly available in the native backends, context switching is
+  no longer an obstacle (the fiber runtime already relies on it).
 * Exception propagation — async tasks need a defined exception model.
   Structured concurrency naturally provides this: exceptions propagate
   to the parent scope and cancel sibling tasks.
@@ -523,10 +523,9 @@ class of bug twice.
 *Current state.*  `blaise.codegen.native.arm64.pas` wraps each instance in a
 synthetic `TTypeDecl` and appends it to both `FGenericDecls` (owning) and
 `FClassDecls` — the list every emitter iterates — so instances flow through
-the ordinary class machinery.  `blaise.codegen.native.x86_64.pas` and
-`blaise.codegen.qbe.pas` instead thread the instance list as a separate
-parameter and pair each class loop with a second, generic-only loop: six such
-loops in the x86-64 backend and nine in the QBE backend.
+the ordinary class machinery.  `blaise.codegen.native.x86_64.pas` instead threads the instance list as a
+separate parameter and pairs each class loop with a second, generic-only loop:
+six such loops.  (The removed QBE backend had nine.)
 
 *Why it matters.*  A fix applied to a class loop does not reach its generic
 twin unless the author notices the pairing.  Two consecutive commits in
@@ -567,10 +566,8 @@ that a symbol-emission refactor with no intended behavioural change can pass
 all five fixpoints and still ship a subtly different symbol, and the `-pre`
 bootstrap binary plus every downstream clone depend on those symbols.
 
-*Sequencing.*  Do the x86-64 backend first and alone, on its own branch — it
-is the smaller half, and it establishes whether the name-sniffing approach
-survives contact with a second backend before the QBE backend's 42
-`ClassSymNameForDecl` sites are committed to it.
+*Sequencing.*  Do it on its own branch.  With the QBE backend removed in
+v0.15.0, the x86-64 backend is the only one left with paired loops.
 
 *Cheaper interim guard.*  Rather than the full refactor, a static check in
 the spirit of `tools/flag-coverage` could assert that each backend's

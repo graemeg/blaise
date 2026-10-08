@@ -2,6 +2,14 @@
 :toc: macro
 :toclevels: 2
 
+[NOTE]
+====
+Written while Blaise still had its original QBE backend.  QBE references below
+describe that period; the backend was removed in v0.15.0 and native code
+generation (x86-64, arm64) is the only backend (see
+`docs/toolchain-independence.adoc`, _QBE retirement_).
+====
+
 == Status
 
 IMPLEMENTED 2026-06-11 — the port landed atomically in the native

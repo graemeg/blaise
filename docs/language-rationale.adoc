@@ -2280,8 +2280,7 @@ Specific properties that mattered for this decision:
   ship binaries built with Blaise without Apache attribution noise.
 
 . *NOTICE file mechanic* (Apache 2.0 Section 4(d)). Concentrates
-  third-party attribution requirements (currently QBE) in one
-  well-known file that downstream redistributors must preserve.
+  third-party attribution requirements in one well-known file that downstream redistributors must preserve.
 
 . *OSI-approved and SPDX-listed*. Tooling (FOSSology, ScanCode,
   GitHub licence detection) recognises both the licence and the
@@ -2300,10 +2299,10 @@ Specific properties that mattered for this decision:
   Apache-2.0 WITH Swift-exception` header.
 * `LICENSE` at the project root contains the full Apache 2.0 text
   followed by the Runtime Library Exception clause.
-* `NOTICE` at the project root contains attribution for vendored
-  third-party code (currently QBE under MIT).
-* `vendor/qbe/` retains its original MIT licence; QBE is invoked as a
-  subprocess and is not statically linked into the Blaise compiler.
+* `NOTICE` at the project root carries attribution for any vendored
+  third-party code.  Until v0.15.0 that was QBE (MIT), bundled under
+  `vendor/qbe/` and invoked as a subprocess; it left the repository with the
+  QBE backend, and the tree currently vendors no third-party code.
 
 ---
 
@@ -5663,10 +5662,25 @@ suspected internal-assembler or internal-linker defect:
   of the internal assembler.
 * `--linker external` — link with the host `cc`/`ld` instead of the internal
   linker.
-* `--backend qbe` — fall back to the QBE pipeline entirely (deprecated).
+* `--backend qbe` — fall back to the QBE pipeline entirely (deprecated;
+  removed in v0.15.0, see below).
 
 The default native build emits a single whole-program object; `--incremental`
 opts in to per-unit object emission with a warm cache.
+
+=== Update (v0.15.0): QBE backend removed
+
+The deferred removal happened in v0.15.0.  By then the oracle role QBE played
+was better served by the two native ISAs checking each other — the same e2e
+programs run on x86-64 (Linux, FreeBSD) and arm64 (macOS) — while keeping a
+second lowering in step had become a steady cost, and QBE was the last
+component needing an external assembler, C compiler and libc link.  QBE was
+always the stepping stone that got Blaise generating code with the least
+effort; it was never meant to stay.  `--backend` remains as the hook for
+further backends, and `--backend qbe` / `--emit-ir` are now errors that name
+the release.  The full rationale is in `docs/toolchain-independence.adoc`
+(_QBE retirement_) and the step-by-step record in
+`docs/qbe-removal-plan.adoc`.
 
 == Decimal Arithmetic — One `TDecimal`, No `Currency` Primitive
 

@@ -31,9 +31,8 @@ This compiler takes a different approach:
 See link:docs/design.adoc[docs/design.adoc] for the full architecture and
 implementation plan.
 
-The result — A modern, cross-platform Object Pascal compiler targeting native code
-via two backends: a direct native x86-64 code generator (the default since
-v0.12.0) and https://c9x.me/compile/[QBE] (now opt-in via `--backend qbe`).
+The result — A modern, cross-platform Object Pascal compiler that generates
+native code directly, with its own assembler and linker.
 Single language mode, single string type, zero-GUID interfaces, reified
 generics, and first-class
 https://github.com/graemeg/opdebugger[OPDF] debug format support — including
@@ -44,7 +43,7 @@ full source-level debugging of incrementally-compiled multi-unit programs.
 
 * **Self-Hosting:** Yes. Blaise bootstraps and recompiles itself with byte-for-byte fixpoint. FPC is no longer required — the entire toolchain runs on Blaise alone.
 * **Testing:** 4977+ tests and growing (Test-Driven Development from day one). The test suite itself compiles under Blaise, and runs in CI on both Linux and FreeBSD.
-* **Backends:** Two code-generation backends — a direct native x86-64 backend (the default since v0.12.0) and QBE (opt-in via `--backend qbe`). Both pass the full fixpoint and test suite.
+* **Backends:** A direct native code generator for x86-64 and arm64.  Blaise started out on https://c9x.me/compile/[QBE], which got it running with the least effort while the native backend was built; as planned, QBE was removed in v0.15.0 once the native backend had caught up (see link:docs/toolchain-independence.adoc[docs/toolchain-independence.adoc]).
 * **Targets:** Two targets — Linux x86_64 and FreeBSD x86_64 — with cross-compilation between them in either direction using no external tools or packages: the internal assembler and linker produce the foreign binary directly, and the self-hosting fixpoint is verified on both operating systems.
 * **Standard library:** A growing opt-in stdlib — generics collections, JSON (DOM + parser + writer), SHA-1 and Base64, RFC 4122 UUIDs, TCP sockets, WebSockets, a minimal HTTP/1.1 server, and a `blaise.testing` unit-test framework.
 
@@ -146,7 +145,7 @@ project.xml                       Root aggregator (packaging=pom)
 ├── compiler/                     The compiler binary (packaging=application)
 │   ├── project.xml
 │   └── src/
-│       ├── main/pascal/          uLexer, uParser, uAST, blaise.codegen.qbe, blaise.codegen.native.*, ...
+│       ├── main/pascal/          uLexer, uParser, uAST, uSemantic, blaise.codegen.native.*, ...
 │       │                         plus the RTL units (runtime.*.pas, rtl.platform.*.pas)
 │       └── test/pascal/          Test suite (blaise.testing, compiled by Blaise)
 │
@@ -168,7 +167,6 @@ project.xml                       Root aggregator (packaging=pom)
 │           ├── main/pascal/
 │           └── test/pascal/
 │
-├── vendor/qbe/                   Vendored QBE backend source (pinned, built from source)
 └── docs/                         Design documents and specifications
 ....
 
@@ -181,9 +179,10 @@ never committed to the repository.
 
 * A previously released Blaise binary (see `releases/`)
 * https://github.com/graemeg/pasbuild[PasBuild]
-* A C compiler (`gcc` or `clang`) for building the vendored QBE backend and linking
-* GNU `make` — only for building the vendored QBE backend. The compiler builds
-  and links its RTL from source, so plain compiler use needs no `make` at all.
+* No C compiler and no `make`: the compiler builds its RTL from source and
+  assembles and links with its own internal assembler and linker.  A C compiler
+  is used only when you ask for one with `--assembler external` or
+  `--linker external`.
 
 NOTE: FPC is *not* required. Blaise is fully self-hosting — each release binary
 compiles the next version. The bootstrap chain starts from the binary in
@@ -199,26 +198,13 @@ demand, so there is no separate runtime build to do first:
 # Resolve the newest release binary (substitute the path below for $RELEASE).
 RELEASE=$(ls -d releases/v*/ | sort -V | tail -1)blaise   # e.g. releases/v0.12.0/blaise
 
-# Compile the compiler using the release binary (native backend — the default
-# since v0.12.0 — needs no external assembler or QBE)
+# Compile the compiler using the release binary (needs no external assembler
+# or linker)
 $RELEASE \
   --source compiler/src/main/pascal/Blaise.pas \
   --unit-path compiler/src/main/pascal \
   --unit-path stdlib/src/main/pascal \
   --output compiler/target/blaise
-----
-
-To bootstrap via the opt-in QBE backend instead, build the vendored QBE once
-(`cd vendor/qbe && make`) and add `--backend qbe` — the compiler still drives
-the assemble + link itself:
-
-[source,shell]
-----
-$RELEASE \
-  --source compiler/src/main/pascal/Blaise.pas \
-  --unit-path compiler/src/main/pascal \
-  --unit-path stdlib/src/main/pascal \
-  --backend qbe --output compiler/target/blaise
 ----
 
 === Bootstrap a development checkout
@@ -267,29 +253,25 @@ Once built, the compiler binary is at `compiler/target/blaise`.
 
 [source,shell]
 ----
-# Compile a single-file program (native backend — default, no external tools)
+# Compile a single-file program (no external tools)
 compiler/target/blaise --source Hello.pas --output Hello
-
-# Compile via the opt-in QBE backend — the compiler drives qbe + the linker
-# for you.  No separate assemble/link step, and no archive to pass.
-compiler/target/blaise --source Hello.pas --backend qbe --output Hello
 
 # Compile with unit search paths
 compiler/target/blaise --source MyApp.pas \
   --unit-path src/units \
   --output MyApp
 
-# Emit QBE IR only (a debugging aid — prints IR instead of building)
-compiler/target/blaise --source Hello.pas --emit-ir
+# Print the generated assembly (a debugging aid — no binary is built)
+compiler/target/blaise --source Hello.pas --emit-asm
 ----
 
 [NOTE]
 ====
-`--emit-ir` / `--emit-asm` are *debugging aids*, not build steps: they print
-the generated IR/assembly and produce no binary.  Always build with
+`--emit-asm` is a *debugging aid*, not a build step: it prints the generated
+assembly and produces no binary.  Always build with
 `--output`, which lets the compiler own the whole pipeline.
 
-In particular, do **not** hand-link IR with `qbe` + `gcc`.  The compiler
+In particular, do **not** hand-assemble and link that output with `gcc`.  The compiler
 compiles the RTL from source on demand into a target-keyed object cache beside
 its own binary, so a manual link is both unnecessary and easy to get wrong (it
 was the cause of https://github.com/graemeg/blaise/issues/180[issue #180]).
