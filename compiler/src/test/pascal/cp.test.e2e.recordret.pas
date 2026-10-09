@@ -187,6 +187,11 @@ type
       belongs, so the callee wrote the record over the object; arm64 rejected
       it as not yet lowered. }
     procedure TestRun_DiscardedRecordReturn_ImplicitSelf;
+    { Every lowering of `inherited F(..)` returning a record or Single: the
+      statement form over an already-set Result, assignment, a register-
+      sized record, a field read, a float expression, and the statement
+      form outside a function (discarded; a string result too). }
+    procedure TestRun_InheritedRecordReturn_AllForms;
     { Regression: reading a PROPERTY whose getter returns a record with a
       managed (string) field.  The property read was emitted as a scalar-return
       call (object pointer where the sret pointer belongs), over-releasing the
@@ -1521,6 +1526,85 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'ok 1 x' + LE, 0);
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2ERecordReturnTests.TestRun_InheritedRecordReturn_AllForms;
+const
+  Src = '''
+    program P;
+    type
+      TTok = record Kind: Integer; Value: string; Line: Integer; end;
+      TPt = record X, Y: Integer; end;
+      TBase = class
+        function Next(N: Integer): TTok; virtual;
+        function Pt(N: Integer): TPt; virtual;
+        function S(N: Integer): Single; virtual;
+        function Tag(N: Integer): string; virtual;
+      end;
+      TDeriv = class(TBase)
+        function Next(N: Integer): TTok; override;
+        function Pt(N: Integer): TPt; override;
+        function S(N: Integer): Single; override;
+        procedure Show();
+      end;
+    function TBase.Next(N: Integer): TTok;
+    begin
+      Result.Kind := N;
+      Result.Value := 'hello-' + IntToStr(N);
+      Result.Line := 99
+    end;
+    function TBase.Pt(N: Integer): TPt;
+    begin
+      Result.X := N;
+      Result.Y := N * 2
+    end;
+    function TBase.S(N: Integer): Single;
+    begin
+      Result := N + 0.5
+    end;
+    function TBase.Tag(N: Integer): string;
+    begin
+      Result := 'tag' + IntToStr(N)
+    end;
+    function TDeriv.Next(N: Integer): TTok;
+    begin
+      Result.Value := 'old';
+      inherited Next(N);
+      Result.Line := Result.Line + 1
+    end;
+    function TDeriv.Pt(N: Integer): TPt;
+    begin
+      Result := inherited Pt(N + 1)
+    end;
+    function TDeriv.S(N: Integer): Single;
+    begin
+      inherited S(N)
+    end;
+    procedure TDeriv.Show();
+    var T: TTok;
+    begin
+      T := inherited Next(3);
+      WriteLn(T.Value, ' ', (inherited Pt(4)).Y, ' ', inherited S(1) * 2:0:1);
+      inherited Next(6);
+      inherited Tag(9)
+    end;
+    var D: TDeriv; T: TTok; Q: TPt;
+    begin
+      D := TDeriv.Create();
+      T := D.Next(7);
+      WriteLn(T.Kind, ' ', T.Value, ' ', T.Line);
+      Q := D.Pt(1);
+      WriteLn(Q.X, ' ', Q.Y);
+      WriteLn(D.S(2):0:1);
+      D.Show();
+      D.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '7 hello-7 100' + LE + '2 4' + LE + '2.5' + LE + 'hello-3 8 3.0' + LE, 0);
   AssertLeakFreeOnAll(Src, '');
 end;
 

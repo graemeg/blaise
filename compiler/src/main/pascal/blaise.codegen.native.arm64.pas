@@ -430,6 +430,8 @@ type
     procedure EmitNarrowX0(AType: TTypeDesc);
     procedure EmitBuiltinStrCall1(AArg: TASTExpr; const ASym: string);
     procedure EmitFormatCall(AArgs: TObjectList);
+    procedure EmitRecCallToSlot(AExpr: TASTExpr; const ASlot: string;
+      ART: TRecordTypeDesc; ANode: TASTNode);
     procedure EmitRecCallDispatch(AExpr: TASTExpr; const ADest: string;
       ASretSpOff: Integer = SRET_NO_BUF);
     procedure EmitBuiltinStrCall2(AArg0, AArg1: TASTExpr;
@@ -446,6 +448,8 @@ type
       ASelfPushed: Boolean; out ALitBase: Integer;
       out ATransBase: Integer; out ARecBase: Integer): Integer;
     function  IsRecordCallArg(AArg: TASTExpr): Boolean;
+    function  IsIntfRecordCall(AExpr: TASTExpr): Boolean;
+    function  IsExternalRecordCall(AExpr: TASTExpr): Boolean;
     procedure DecodeMemArg(const AEntry: string; out AOff, ASize: Integer);
     procedure EmitCall(ADecl: TMethodDecl; const AName: string;
       AArgs: TObjectList; const ASretDest: string = '';
@@ -6583,6 +6587,21 @@ begin
       Self.Emit(#9'fcvt d0, s0');
     Exit;
   end;
+  if (AExpr is TInheritedCallExpr) and
+     (TInheritedCallExpr(AExpr).ResolvedMethod <> nil) then
+  begin
+    { inherited F(..) returning a float: the static parent call with the
+      current Self; a Single comes back in s0 }
+    EmitLoadSlot('x0', 'Self');
+    EmitPushX0();
+    EmitCall(TMethodDecl(TInheritedCallExpr(AExpr).ResolvedMethod),
+      TInheritedCallExpr(AExpr).Name, TInheritedCallExpr(AExpr).Args,
+      '', True, VIRT_NONE);
+    if (AExpr.ResolvedType <> nil) and
+       (AExpr.ResolvedType.Kind = tySingle) then
+      Self.Emit(#9'fcvt d0, s0');
+    Exit;
+  end;
   { Numeric type-cast Double(X) / Single(X) in a float context (leg 30): the
     name resolves to a TYPE, so the node is a TFuncCallExpr with ResolvedDecl
     = nil and one argument — it is a real conversion, NEVER a call/bit copy.
@@ -6842,6 +6861,8 @@ end;
 procedure TArm64Backend.EmitStmtBody(AStmt: TASTStmt);
 var
   MD: TMethodDecl;
+  InhShim: TInheritedCallExpr;
+  Tmp: string;
 begin
   { empty statement (bare ';' bodies — `while X do ;`, `if C then ;`):
     nothing to emit.  Without this guard the fallthrough NotYet derefs
@@ -6893,8 +6914,38 @@ begin
       Exit;
     MD := TMethodDecl(TInheritedCallStmt(AStmt).ResolvedMethod);
     if (MD.ResolvedReturnType <> nil) and
-       ((MD.ResolvedReturnType.Kind in [tyRecord, tySingle]) or
-        IsAggregateReturn(MD.ResolvedReturnType)) then
+       (MD.ResolvedReturnType.Kind = tyRecord) then
+    begin
+      { `inherited Make(N);` sets the override's Result -- exactly
+        `Result := inherited Make(N)` (an sret function's Result is a local
+        buffer copied out through x8 at exit).  Outside a function the
+        result is discarded and its managed fields released. }
+      InhShim := TInheritedCallExpr.Create();
+      try
+        InhShim.Name := TInheritedCallStmt(AStmt).Name;
+        InhShim.Args := TInheritedCallStmt(AStmt).Args;
+        InhShim.ResolvedMethod := MD;
+        InhShim.ResolvedType := MD.ResolvedReturnType;
+        InhShim.Line := AStmt.Line;
+        InhShim.Col := AStmt.Col;
+        if FFrame.ContainsKey('Result') then
+          EmitRecCallToSlot(InhShim, 'Result',
+            TRecordTypeDesc(MD.ResolvedReturnType), AStmt)
+        else
+        begin
+          Tmp := EmitRecCallToRretSlot(InhShim);
+          if not RecretManagedClean(TRecordTypeDesc(MD.ResolvedReturnType)) then
+            EmitRecTempFieldReleases(TRecordTypeDesc(MD.ResolvedReturnType),
+              Tmp, 0);
+        end;
+      finally
+        InhShim.Args := nil;   { borrowed -- do not free }
+        InhShim.Free();
+      end;
+      Exit;
+    end;
+    if (MD.ResolvedReturnType <> nil) and
+       IsAggregateReturn(MD.ResolvedReturnType) then
       NotYet('inherited call statement to a function returning this type',
         AStmt);
     EmitLoadSlot('x0', 'Self');
@@ -6904,10 +6955,26 @@ begin
     { the statement form of `inherited F` sets Result: the parent's return
       value lands in the current Result slot (x86-64 / QBE parity) }
     if (MD.ResolvedReturnType <> nil) and
+       (MD.ResolvedReturnType.Kind <> tyVoid) and
+       not FFrame.ContainsKey('Result') then
+    begin
+      { outside a function the result is discarded -- there is no Result
+        slot (the store fell back to a global symbol) -- and an owned one is
+        released }
+      if MD.ResolvedReturnType.IsString() then
+        EmitCallSym('_StringRelease')
+      else if MD.ResolvedReturnType.Kind = tyClass then
+        EmitCallSym('_ClassRelease')
+      else if MD.ResolvedReturnType.Kind = tyDynArray then
+        EmitCallSym('_DynArrayRelease');
+    end
+    else if (MD.ResolvedReturnType <> nil) and
        (MD.ResolvedReturnType.Kind <> tyVoid) then
     begin
       if MD.ResolvedReturnType.Kind = tyDouble then
         EmitStoreSlot('d0', 'Result')
+      else if MD.ResolvedReturnType.Kind = tySingle then
+        EmitStoreSlot('s0', 'Result')
       else
         EmitStoreSlot('x0', 'Result');
     end;
@@ -7730,12 +7797,7 @@ begin
       record-returning-CALL-into-var-param sub-case (which writes through an
       sret/x8 destination) is not yet wired for the deref'd dest — keep it an
       honest hole (self-host only needs the copy form, R := Arr[i]). }
-    if AAsgn.IsVarParam and
-       (((AAsgn.Expr is TFuncCallExpr) and
-         (TFuncCallExpr(AAsgn.Expr).ResolvedDecl <> nil)) or
-        ((AAsgn.Expr is TMethodCallExpr) and
-         (TMethodCallExpr(AAsgn.Expr).ResolvedMethod <> nil) and
-         not TMethodCallExpr(AAsgn.Expr).IsConstructorCall)) then
+    if AAsgn.IsVarParam and IsRecordCallArg(AAsgn.Expr) then
     begin
       { V := F() with V a var/out record (TList<T>.TryGet's AValue :=
         Get(I)): the call lands in its own scratch first -- the destination
@@ -7743,8 +7805,7 @@ begin
         released and the bytes move in, the call's +1 field refs transferring
         (no retain).  Callee-saved x19/x22 hold the two addresses across the
         release walk. }
-      if (AAsgn.Expr is TFuncCallExpr) and
-         TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl).IsExternal then
+      if IsExternalRecordCall(AAsgn.Expr) then
         NotYet('external record-returning call', AAsgn);
       Self.Emit(#9'stp x19, x22, [sp, #-16]!');
       EmitRecCallToRret(AAsgn.Expr);
@@ -7761,54 +7822,10 @@ begin
       Exit;
     end;
     { record-returning call: classify the callee's return shape }
-    if ((AAsgn.Expr is TFuncCallExpr) and
-        (TFuncCallExpr(AAsgn.Expr).ResolvedDecl <> nil)) or
-       ((AAsgn.Expr is TMethodCallExpr) and
-        (TMethodCallExpr(AAsgn.Expr).ResolvedMethod <> nil) and
-        not TMethodCallExpr(AAsgn.Expr).IsConstructorCall) then
+    if IsRecordCallArg(AAsgn.Expr) then
     begin
-      if AAsgn.Expr is TFuncCallExpr then
-        RD := TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl)
-      else
-        RD := TMethodDecl(TMethodCallExpr(AAsgn.Expr).ResolvedMethod);
-      if RD.IsExternal then
-        { a C-side small-struct return needs full AAPCS64 marshalling
-          validation on real hardware first — keep the hole honest }
-        NotYet('external record-returning call', AAsgn);
-      Shape := RecReturnShape(TRecordTypeDesc(AAsgn.ResolvedLhsType));
-      if not RecretManagedClean(TRecordTypeDesc(AAsgn.ResolvedLhsType)) then
-      begin
-        { managed LHS: the callee's fresh value lands in the __rret
-          scratch first — the LHS may alias an argument, so its old field
-          refs are released only AFTER the call — then moves in with the
-          +1 field refs transferring (no retain). }
-        if Shape = 0 then
-          EmitRecCallDispatch(AAsgn.Expr, '__rret')
-        else
-        begin
-          EmitRecCallDispatch(AAsgn.Expr, '');
-          EmitSlotAddr('x9', '__rret');
-          EmitRecRegsStore(Shape, AAsgn.ResolvedLhsType.RawSize());
-        end;
-        Self.Emit(#9'str x19, [sp, #-16]!');
-        EmitSlotAddr('x19', AAsgn.Name);
-        Self.EmitRecordFieldReleases(
-          TRecordTypeDesc(AAsgn.ResolvedLhsType), 'x19');
-        Self.Emit(#9'ldr x19, [sp], #16');
-        EmitSlotAddr('x0', AAsgn.Name);
-        EmitSlotAddr('x1', '__rret');
-        EmitIntLiteral('x2', AAsgn.ResolvedLhsType.RawSize());
-        EmitCallSym('memcpy');
-        Exit;
-      end;
-      if Shape = 0 then
-      begin
-        EmitRecCallDispatch(AAsgn.Expr, AAsgn.Name);
-        Exit;
-      end;
-      EmitRecCallDispatch(AAsgn.Expr, '');
-      EmitSlotAddr('x9', AAsgn.Name);
-      EmitRecRegsStore(Shape, AAsgn.ResolvedLhsType.RawSize());
+      EmitRecCallToSlot(AAsgn.Expr, AAsgn.Name,
+        TRecordTypeDesc(AAsgn.ResolvedLhsType), AAsgn);
       Exit;
     end;
     { whole-record copy.  With managed fields the ARC discipline mirrors
@@ -9876,6 +9893,53 @@ begin
   EmitCallSym(ASym);
 end;
 
+procedure TArm64Backend.EmitRecCallToSlot(AExpr: TASTExpr;
+  const ASlot: string; ART: TRecordTypeDesc; ANode: TASTNode);
+var
+  Shape: Integer;
+begin
+  { Slot := <record-returning call>, the slot a plain (non-var-param) local or
+    global.  Shared by the assignment and by the statement form of
+    `inherited F(..)`, which sets Result. }
+  if IsExternalRecordCall(AExpr) then
+    { a C-side small-struct return needs full AAPCS64 marshalling
+      validation on real hardware first — keep the hole honest }
+    NotYet('external record-returning call', ANode);
+  Shape := RecReturnShape(ART);
+  if not RecretManagedClean(ART) then
+  begin
+    { managed LHS: the callee's fresh value lands in the __rret
+      scratch first — the LHS may alias an argument, so its old field
+      refs are released only AFTER the call — then moves in with the
+      +1 field refs transferring (no retain). }
+    if Shape = 0 then
+      EmitRecCallDispatch(AExpr, '__rret')
+    else
+    begin
+      EmitRecCallDispatch(AExpr, '');
+      EmitSlotAddr('x9', '__rret');
+      EmitRecRegsStore(Shape, ART.RawSize());
+    end;
+    Self.Emit(#9'str x19, [sp, #-16]!');
+    EmitSlotAddr('x19', ASlot);
+    Self.EmitRecordFieldReleases(ART, 'x19');
+    Self.Emit(#9'ldr x19, [sp], #16');
+    EmitSlotAddr('x0', ASlot);
+    EmitSlotAddr('x1', '__rret');
+    EmitIntLiteral('x2', ART.RawSize());
+    EmitCallSym('memcpy');
+    Exit;
+  end;
+  if Shape = 0 then
+  begin
+    EmitRecCallDispatch(AExpr, ASlot);
+    Exit;
+  end;
+  EmitRecCallDispatch(AExpr, '');
+  EmitSlotAddr('x9', ASlot);
+  EmitRecRegsStore(Shape, ART.RawSize());
+end;
+
 procedure TArm64Backend.EmitRecCallDispatch(AExpr: TASTExpr;
   const ADest: string; ASretSpOff: Integer);
 var
@@ -9889,6 +9953,47 @@ begin
   { record-returning call in an assignment: one dispatcher for free
     functions AND method receivers, so every return shape shares the
     same caller-side store logic }
+  if IsIntfRecordCall(AExpr) then
+  begin
+    { itab dispatch: ADest is the frame scratch the callee fills through x8
+      (sret); a register-returned shape comes back in x0:x1 / d0.. }
+    ME := TMethodCallExpr(AExpr);
+    if ASretSpOff <> SRET_NO_BUF then
+    begin
+      { the destination is an sp-relative argument buffer (Show(M.Make(7))),
+        which the itab dispatch cannot address: fill a frame temp, then move
+        the bytes -- and with them the +1 field references, which the
+        argument cleanup releases after the outer call.  The dispatch leaves
+        sp balanced, so sp + ASretSpOff is still the buffer. }
+      RecvTmp := '__iarg_' + IntToStr(FJArgN);
+      FJArgN := FJArgN + 1;
+      if not FFrame.ContainsKey(RecvTmp) then
+        AddLocal(RecvTmp, AExpr.ResolvedType.RawSize());
+      EmitIntfDispatch(ME.ObjectName, TInterfaceTypeDesc(ME.ResolvedClassType),
+        TInterfaceTypeDesc(ME.ResolvedClassType).MethodIndex(ME.Name), ME.Args,
+        ME.ObjExpr, ME.IsVarParam, nil, RecvTmp);
+      EmitAddSubImm('add', 'x0', 'sp', ASretSpOff);
+      EmitSlotAddr('x1', RecvTmp);
+      EmitIntLiteral('x2', AExpr.ResolvedType.RawSize());
+      EmitCallSym('memcpy');
+      Exit;
+    end;
+    EmitIntfDispatch(ME.ObjectName, TInterfaceTypeDesc(ME.ResolvedClassType),
+      TInterfaceTypeDesc(ME.ResolvedClassType).MethodIndex(ME.Name), ME.Args,
+      ME.ObjExpr, ME.IsVarParam, nil, ADest);
+    Exit;
+  end;
+  if AExpr is TInheritedCallExpr then
+  begin
+    { inherited F(..): a static call to the parent's body with the current
+      Self (the scalar twin is in EmitExprToX0) }
+    MD := TMethodDecl(TInheritedCallExpr(AExpr).ResolvedMethod);
+    EmitLoadSlot('x0', 'Self');
+    EmitPushX0();
+    EmitCall(MD, TInheritedCallExpr(AExpr).Name, TInheritedCallExpr(AExpr).Args,
+      ADest, True, VIRT_NONE, ASretSpOff);
+    Exit;
+  end;
   if AExpr is TMethodCallExpr then
   begin
     ME := TMethodCallExpr(AExpr);
@@ -12470,14 +12575,42 @@ function TArm64Backend.IsRecordCallArg(AArg: TASTExpr): Boolean;
 begin
   { a record-typed argument whose VALUE is produced by a call — it has no
     lvalue slot, so it must be materialised into a scratch buffer before
-    it can be passed by value.  Constructors do not return records. }
+    it can be passed by value.  Constructors do not return records.  An
+    interface method call (itab dispatch, no ResolvedMethod) and an
+    `inherited F(..)` expression are record calls too; EmitRecCallDispatch
+    lowers all four. }
   Result := (AArg.ResolvedType <> nil) and
             (AArg.ResolvedType.Kind = tyRecord) and
             (((AArg is TFuncCallExpr) and
               (TFuncCallExpr(AArg).ResolvedDecl <> nil)) or
              ((AArg is TMethodCallExpr) and
               (TMethodCallExpr(AArg).ResolvedMethod <> nil) and
-              not TMethodCallExpr(AArg).IsConstructorCall));
+              not TMethodCallExpr(AArg).IsConstructorCall) or
+             IsIntfRecordCall(AArg) or
+             ((AArg is TInheritedCallExpr) and
+              (TInheritedCallExpr(AArg).ResolvedMethod <> nil)));
+end;
+
+function TArm64Backend.IsIntfRecordCall(AExpr: TASTExpr): Boolean;
+begin
+  Result := (AExpr is TMethodCallExpr) and
+            (TMethodCallExpr(AExpr).ResolvedClassType <> nil) and
+            (TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyInterface) and
+            not TMethodCallExpr(AExpr).IsConstructorCall and
+            ((TMethodCallExpr(AExpr).ObjectName <> '') or
+             (TMethodCallExpr(AExpr).ObjExpr <> nil));
+end;
+
+function TArm64Backend.IsExternalRecordCall(AExpr: TASTExpr): Boolean;
+begin
+  { a C-side small-struct return needs full AAPCS64 marshalling validation
+    on real hardware first }
+  Result := ((AExpr is TFuncCallExpr) and
+             (TFuncCallExpr(AExpr).ResolvedDecl <> nil) and
+             TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).IsExternal) or
+            ((AExpr is TMethodCallExpr) and
+             (TMethodCallExpr(AExpr).ResolvedMethod <> nil) and
+             TMethodDecl(TMethodCallExpr(AExpr).ResolvedMethod).IsExternal);
 end;
 
 function TArm64Backend.ComputeStackArgArea(ADecl: TMethodDecl;
@@ -15017,6 +15150,8 @@ var
   MD: TMethodDecl;
   PT: TProceduralTypeDesc;
   IsAgg: Boolean;
+  Tmp, Dest: string;
+  Shape: Integer;
 begin
   if AStmt.IsProcFieldCall then
   begin
@@ -15105,6 +15240,38 @@ begin
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
        IsAggregateReturn(AStmt.ResolvedReturnTypeDesc) then
     begin
+      if AStmt.ResolvedReturnTypeDesc.Kind = tyRecord then
+      begin
+        { a discarded RECORD result: an sret callee still needs a real
+          buffer behind x8, and the fields it hands over are released (the
+          class-method twin is EmitDiscardedRecMethodCall) }
+        Tmp := '__dret_' + IntToStr(FJArgN);
+        FJArgN := FJArgN + 1;
+        if not FFrame.ContainsKey(Tmp) then
+          AddLocal(Tmp, AStmt.ResolvedReturnTypeDesc.RawSize());
+        Shape := RecReturnShape(TRecordTypeDesc(AStmt.ResolvedReturnTypeDesc));
+        if Shape = 0 then
+          Dest := Tmp
+        else
+          Dest := '';
+        EmitIntfDispatch(AStmt.ObjectName,
+          TInterfaceTypeDesc(AStmt.ResolvedClassType),
+          TInterfaceTypeDesc(AStmt.ResolvedClassType).MethodIndex(AStmt.Name),
+          AStmt.Args, AStmt.ObjExpr, AStmt.IsVarParam, AStmt.ImplicitBaseInfo,
+          Dest);
+        if not RecretManagedClean(
+                 TRecordTypeDesc(AStmt.ResolvedReturnTypeDesc)) then
+        begin
+          if Shape <> 0 then
+          begin
+            EmitSlotAddr('x9', Tmp);
+            EmitRecRegsStore(Shape, AStmt.ResolvedReturnTypeDesc.RawSize());
+          end;
+          EmitRecTempFieldReleases(
+            TRecordTypeDesc(AStmt.ResolvedReturnTypeDesc), Tmp, 0);
+        end;
+        Exit;
+      end;
       { a discarded interface result still uses the x8 sret contract; the
         owned obj half is dropped straight away }
       if AStmt.ResolvedReturnTypeDesc.Kind <> tyInterface then

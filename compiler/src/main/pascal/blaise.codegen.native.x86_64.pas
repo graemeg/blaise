@@ -7601,6 +7601,17 @@ begin
     Exit;
   end;
 
+  { inherited F(..) returning a float (inherited S(1) * 2): the static parent
+    call leaves the result in %xmm0, like the method call above }
+  if (AExpr is TInheritedCallExpr) and
+     (TInheritedCallExpr(AExpr).ResolvedMethod <> nil) then
+  begin
+    Self.EmitInheritedCallSeq(
+      TMethodDecl(TInheritedCallExpr(AExpr).ResolvedMethod),
+      TInheritedCallExpr(AExpr).Args, TInheritedCallExpr(AExpr).Name);
+    Exit;
+  end;
+
   { Float array element read A[I] (dynamic or static array of Double/Single).
     The element ADDRESS computation matches the integer EmitExprToEax subscript
     paths; only the final load differs — movsd/movss into %xmm0 rather than a
@@ -13112,6 +13123,7 @@ end;
 procedure TX86_64Backend.EmitInheritedCall(ACall: TInheritedCallStmt);
 var
   MD: TMethodDecl;
+  BufSz: Integer;
 begin
   { `inherited` on TObject (no parent body) is a no-op. }
   MD := TMethodDecl(ACall.ResolvedMethod);
@@ -13126,8 +13138,31 @@ begin
   if (MD.ResolvedReturnType <> nil) and
      (MD.ResolvedReturnType.Kind = tyRecord) then
   begin
-    Self.EmitInheritedRecordSret(MD, ACall.Args, ACall.Name,
-      Self.VarOperand('Result'), Self.FSretFunc);
+    if Self.FSretFunc or Self.IsLocal('Result') then
+    begin
+      Self.EmitInheritedRecordSret(MD, ACall.Args, ACall.Name,
+        Self.VarOperand('Result'), Self.FSretFunc);
+      Exit;
+    end;
+    { outside a function there is no Result to set (a procedure calling
+      `inherited Next(6);`): the record went to whatever Result resolved to.
+      Discard it into a throwaway buffer and release what it holds. }
+    BufSz := (MD.ResolvedReturnType.RawSize() + 15) and (-16);
+    Self.Emit(#9'pushq %rbx');
+    Self.Emit(Format(#9'subq $%d, %%rsp', [BufSz]));
+    Self.Emit(#9'movq %rsp, %rbx');
+    Self.Emit(#9'movq %rbx, %rdi');
+    Self.Emit(#9'xorl %esi, %esi');
+    Self.Emit(Format(#9'movq $%d, %%rdx', [BufSz]));
+    Self.Emit(#9'callq memset');
+    Self.EmitInheritedRecordSret(MD, ACall.Args, ACall.Name, '(%rbx)', False);
+    { arg evaluation may clobber %rbx; %rsp is balanced at the buffer }
+    Self.Emit(#9'movq %rsp, %rbx');
+    if not RecretManagedClean(TRecordTypeDesc(MD.ResolvedReturnType)) then
+      Self.EmitRecordFieldReleases(TRecordTypeDesc(MD.ResolvedReturnType),
+        '%rbx');
+    Self.Emit(Format(#9'addq $%d, %%rsp', [BufSz]));
+    Self.Emit(#9'popq %rbx');
     Exit;
   end;
 
@@ -13137,7 +13172,26 @@ begin
     so `Result := ...` is unnecessary for `inherited F;` to set Result. }
   if (MD.ResolvedReturnType <> nil) and (MD.ResolvedReturnType.Kind <> tyVoid) then
   begin
-    if IsFloatFamily(MD.ResolvedReturnType) then
+    if not Self.IsLocal('Result') then
+    begin
+      { outside a function the result is discarded; an owned one released }
+      if MD.ResolvedReturnType.IsString() then
+      begin
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _StringRelease');
+      end
+      else if MD.ResolvedReturnType.Kind = tyClass then
+      begin
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+      end
+      else if MD.ResolvedReturnType.Kind = tyDynArray then
+      begin
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _DynArrayRelease');
+      end;
+    end
+    else if IsFloatFamily(MD.ResolvedReturnType) then
       Self.EmitStoreFloat(Self.VarOperand('Result'), MD.ResolvedReturnType)
     else
       Self.EmitStoreVar(Self.VarOperand('Result'), MD.ResolvedReturnType);
@@ -19777,9 +19831,11 @@ begin
         { EmitExprToEax routes a method call through EmitMethodCallExpr, which
           has no sret-buffer path — it would leave %rax pointing at nothing.
           Allocate the buffer and drive the sret call directly, mirroring the
-          TFuncCallExpr path in EmitExprToEax. }
+          TFuncCallExpr path in EmitExprToEax.  EmitRecordCallSretAt picks the
+          itab path for an interface receiver (Show(M.MakeRect(7))), which
+          has no ResolvedMethod for EmitMethodSretCall. }
         Self.Emit(Format(#9'subq $%d, %%rsp', [Self.RecArgBufBytes(Arg)]));
-        Self.EmitMethodSretCall(TMethodCallExpr(Arg), '(%rsp)', False);
+        Self.EmitRecordCallSretAt(Arg, '(%rsp)', False);
         Self.Emit(#9'leaq (%rsp), %rax');
       end
       else if (Arg is TFieldAccessExpr) and
@@ -22382,12 +22438,15 @@ begin
 
   { Resolve the destination to an ABSOLUTE pointer FIRST, in callee-saved %r14,
     before any %rsp movement (arg pushes / overflow spill) can drift a
-    %rsp-relative ADest. }
-  Self.Emit(#9'pushq %r14');
+    %rsp-relative ADest -- including the push that saves %r14 itself: an
+    `(%rsp)` destination (a record-call argument buffer) resolved after it
+    pointed 8 bytes off. }
   if ADestIsIndirect then
-    Self.Emit(Format(#9'movq %s, %%r14', [ADest]))
+    Self.Emit(Format(#9'movq %s, %%rax', [ADest]))
   else
-    Self.Emit(Format(#9'leaq %s, %%r14', [ADest]));
+    Self.Emit(Format(#9'leaq %s, %%rax', [ADest]));
+  Self.Emit(#9'pushq %r14');
+  Self.Emit(#9'movq %rax, %r14');
 
   { Same unknown-signature hoist as EmitIntfSretMethodCall; the region sits
     BELOW any sret buffer space we reserve. }

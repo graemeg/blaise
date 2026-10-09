@@ -59,6 +59,10 @@ type
       record-return ABI and corrupt memory (bug #5). }
     procedure TestRun_InterfaceMethod_ReturnsSretRecord;
     procedure TestRun_InterfaceMethod_ReturnsRegisterRecord;
+    { An interface method returning a record, through every receiver and
+      destination: a global, a field of Self, a var param, reassignment over
+      a managed value, discarded, and as a by-const argument. }
+    procedure TestRun_InterfaceMethod_RecordReturn_AllForms;
     { A value-returning interface-method call whose receiver is an interface
       stored in a FIELD of Self (bare `FField.M()`), and one via a method-LOCAL
       interface variable copied from that field.  On the native backend both used
@@ -558,6 +562,76 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     'callee 5' + LE + 'assigned 5 10' + LE + 'callee 9' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_InterfaceMethod_RecordReturn_AllForms;
+const
+  Src = '''
+    program P;
+    type
+      TRect = record Name: string; N: Integer; end;
+      TPt = record X, Y: Integer; end;
+      IShape = interface
+        function MakeRect(AN: Integer): TRect;
+        function MakePt(AN: Integer): TPt;
+      end;
+      TShape = class(IShape)
+        function MakeRect(AN: Integer): TRect;
+        function MakePt(AN: Integer): TPt;
+      end;
+      TUser = class
+        FS: IShape;
+        procedure Go();
+      end;
+    function TShape.MakeRect(AN: Integer): TRect;
+    begin
+      Result.Name := 'r' + IntToStr(AN);
+      Result.N := AN
+    end;
+    function TShape.MakePt(AN: Integer): TPt;
+    begin
+      Result.X := AN;
+      Result.Y := AN * 2
+    end;
+    procedure Show(const R: TRect);
+    begin
+      WriteLn('show ', R.Name, ' ', R.N)
+    end;
+    procedure TUser.Go();
+    var R: TRect; Q: TPt;
+    begin
+      R := FS.MakeRect(3);
+      Q := FS.MakePt(4);
+      WriteLn(R.Name, ' ', Q.Y);
+      FS.MakeRect(5);
+      FS.MakePt(6)
+    end;
+    procedure ByVar(var S: IShape);
+    var R: TRect;
+    begin
+      R := S.MakeRect(8);
+      WriteLn(R.Name);
+      S.MakeRect(9)
+    end;
+    var M: IShape; R: TRect; U: TUser;
+    begin
+      M := TShape.Create();
+      R := M.MakeRect(1);
+      R := M.MakeRect(2);
+      WriteLn(R.Name, ' ', R.N);
+      Show(M.MakeRect(7));
+      U := TUser.Create();
+      U.FS := M;
+      U.Go();
+      ByVar(M);
+      U.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'r2 2' + LE + 'show r7 7' + LE + 'r3 8' + LE + 'r8' + LE, 0);
+  AssertLeakFreeOnAll(Src, '');
 end;
 
 procedure TE2EInterfaceTests.TestRun_InterfaceField_ValueReturn_InMethod;

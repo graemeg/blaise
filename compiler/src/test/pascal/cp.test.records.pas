@@ -74,6 +74,7 @@ type
     procedure TestCodegen_ManagedRecordCallReceiver_FieldsReleased;
     procedure TestCodegen_FloatFieldOfRecordCall_FreesBuffer;
     procedure TestCodegen_DiscardedRecordMethodResult_FieldsReleased;
+    procedure TestCodegen_InheritedAndIntfRecordReturn_Lowered;
   end;
 
 implementation
@@ -983,6 +984,47 @@ begin
     end;
     AssertEquals(Target + ': three discarding call sites', 3, Sites);
   end;
+end;
+
+procedure TRecordTests.TestCodegen_InheritedAndIntfRecordReturn_Lowered;
+const
+  Src = '''
+    program P;
+    type
+      TRect = record Name: string; N: Integer; end;
+      IShape = interface
+        function MakeRect(AN: Integer): TRect;
+      end;
+      TShape = class(IShape)
+        function MakeRect(AN: Integer): TRect;
+      end;
+      TDeriv = class(TShape)
+        function MakeRect(AN: Integer): TRect;
+      end;
+    function TShape.MakeRect(AN: Integer): TRect;
+    begin
+      Result.N := AN
+    end;
+    function TDeriv.MakeRect(AN: Integer): TRect;
+    begin
+      inherited MakeRect(AN)
+    end;
+    var M: IShape; R: TRect;
+    begin
+      M := TShape.Create();
+      R := M.MakeRect(5)
+    end.
+    ''';
+begin
+  { `inherited MakeRect(AN);` (statement form, sets Result) is a STATIC call
+    to the parent body with an sret buffer; `R := M.MakeRect(5)` is an itab
+    dispatch handing the callee a buffer (x8 on arm64).  arm64 rejected both
+    as not yet lowered. }
+  AssertEquals('inherited record call is a static parent call', '',
+    AsmMissing(Src, #9'callq TShape_MakeRect',
+      #9'sub x8, x29, #72' + #10 + #9'bl _TShape_MakeRect'));
+  AssertEquals('interface record call passes a result buffer', '',
+    AsmMissing(Src, #9'callq *%r11', #9'sub x8, x29'));
 end;
 
 initialization
