@@ -523,11 +523,31 @@ const
           Take(v);
         end.
         ''';
+  SrcMixed =
+    '''
+        program Test;
+        type
+          TMix = record x: Single; y: Double; end;
+        procedure Take(v: TMix); cdecl; external name 'take';
+        var v: TMix;
+        begin
+          Take(v);
+        end.
+        ''';
+var
+  AsmT: string;
 begin
-  { a float-bearing record needs SSE / s registers: refused, never passed
-    in the wrong registers }
+  { a float-bearing record needs SSE / s registers: refused, never passed in
+    the wrong registers -- x86-64 has no SSE-class record marshalling for C
+    calls yet }
   AssertCodegenRefused('x86-64', Src, TargetX86_64);
-  AssertCodegenRefused('arm64', Src, TargetArm64);
+  { arm64: an all-Single record is an AAPCS64 HFA, passed lane by lane in
+    s0/s1 exactly as C expects -- lowered, not refused }
+  AsmT := GenAsm(Src, TargetArm64);
+  AssertTrue('arm64: lane x in s0', Pos(#9'fcvt s0, d0', AsmT) >= 0);
+  AssertTrue('arm64: lane y in s1', Pos(#9'fcvt s1, d1', AsmT) >= 0);
+  { a MIXED float record is not an HFA: still refused on arm64 }
+  AssertCodegenRefused('arm64 mixed', SrcMixed, TargetArm64);
 end;
 
 procedure TExternalTests.AssertCodegenRefused(const AWhat, ASrc,
