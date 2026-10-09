@@ -73,6 +73,7 @@ type
     procedure TestCodegen_StmtRecordMethodOnClassRecordField_PassesAddress;
     procedure TestCodegen_ManagedRecordCallReceiver_FieldsReleased;
     procedure TestCodegen_FloatFieldOfRecordCall_FreesBuffer;
+    procedure TestCodegen_DiscardedRecordMethodResult_FieldsReleased;
   end;
 
 implementation
@@ -902,6 +903,78 @@ begin
   AssertTrue('x86-64: buffer freed right after the field load',
     Pos(#9'movss (%rcx), %xmm0' + #10 + #9'addq $16, %rsp',
       GenAsm(Src, TargetX86_64)) >= 0);
+end;
+
+procedure TRecordTests.TestCodegen_DiscardedRecordMethodResult_FieldsReleased;
+const
+  Src = '''
+    program P;
+    type
+      TTok = record Kind: Integer; Value: string; end;
+      TLexer = class
+        function Next(): TTok;
+      end;
+      TOwner = class
+        FLex: TLexer;
+        procedure Run();
+      end;
+    function TLexer.Next(): TTok;
+    begin
+      Result.Kind := 1;
+      Result.Value := 'v'
+    end;
+    procedure TOwner.Run();
+    begin
+      FLex.Next()
+    end;
+    var L: TLexer;
+    begin
+      L := TLexer.Create();
+      L.Next();
+      L.Free()
+    end.
+    ''';
+var
+  I, P, Q, Sites: Integer;
+  Target, AsmT, Call, CallOp, Rel, Tail: string;
+begin
+  { A method call statement whose managed record result is discarded --
+    on a named receiver (L.Next();) or a field of Self (FLex.Next();) --
+    must hand the callee a real sret buffer and
+    release the fields it handed over: the next call after each Next is the
+    Value field's release.  arm64 rejected both as not yet lowered. }
+  for I := 0 to 1 do
+  begin
+    if I = 0 then
+    begin
+      Target := TargetX86_64;
+      Call := #9'callq TLexer_Next';
+      CallOp := #9'callq ';
+      Rel := #9'callq _StringRelease';
+    end
+    else
+    begin
+      Target := TargetArm64;
+      Call := #9'bl _TLexer_Next';
+      CallOp := #9'bl ';
+      Rel := #9'bl __StringRelease';
+    end;
+    AsmT := GenAsm(Src, Target);
+    Sites := 0;
+    P := Pos(Call, AsmT);
+    while P >= 0 do
+    begin
+      Sites := Sites + 1;
+      Tail := Copy(AsmT, P + Length(Call), Length(AsmT));
+      Q := Pos(CallOp, Tail);
+      AssertTrue(Target + ': a call follows Next', Q >= 0);
+      AssertEquals(Target + ': the discarded result''s field is released next',
+        Rel, Copy(Tail, Q, Length(Rel)));
+      AsmT := Tail;
+      P := Pos(Call, AsmT);
+    end;
+    AssertEquals(Target + ': two discarding call sites', 2, Sites);
+  end;
 end;
 
 initialization

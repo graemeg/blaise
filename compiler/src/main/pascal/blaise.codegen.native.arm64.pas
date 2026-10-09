@@ -607,6 +607,10 @@ type
     procedure EmitTlvSections;
     procedure EmitMethodCallCommon(AMethod: TMethodDecl; const AName: string;
       AArgs: TObjectList);
+    procedure EmitDiscardedRecMethodCall(AMethod: TMethodDecl;
+      const AName: string; AArgs: TObjectList; ART: TTypeDesc;
+      ANode: TASTNode);
+    procedure EmitDiscardedRecStmtOnExpr(AStmt: TMethodCallStmt);
     procedure EmitMethodCallOnExpr(AMethod: TMethodDecl; const AName: string;
       AArgs: TObjectList; AObjExpr: TASTExpr);
     procedure EmitMethodCallStmt(AStmt: TMethodCallStmt);
@@ -14872,6 +14876,71 @@ begin
   EmitCall(AMethod, AName, AArgs, '', True, AMethod.VTableSlot);
 end;
 
+procedure TArm64Backend.EmitDiscardedRecMethodCall(AMethod: TMethodDecl;
+  const AName: string; AArgs: TObjectList; ART: TTypeDesc; ANode: TASTNode);
+var
+  Tmp: string;
+  Shape: Integer;
+begin
+  { A method call statement whose RECORD result is discarded (L.Next();),
+    receiver already in x0.  An sret result still needs a real buffer for the
+    callee to write -- without one x8 held whatever was left in it -- and the
+    references the callee handed over (a managed record's fields) must be
+    dropped.  The free-function twin is in EmitProcCall. }
+  if (ART = nil) or (ART.Kind <> tyRecord) then
+    NotYet('discarded aggregate-returning method call', ANode);
+  Tmp := '__dret_' + IntToStr(FJArgN);
+  FJArgN := FJArgN + 1;
+  if not FFrame.ContainsKey(Tmp) then
+    AddLocal(Tmp, ART.RawSize());
+  Shape := RecReturnShape(TRecordTypeDesc(ART));
+  EmitPushX0();
+  if Shape = 0 then
+    EmitCall(AMethod, AName, AArgs, Tmp, True, AMethod.VTableSlot)
+  else
+  begin
+    EmitCall(AMethod, AName, AArgs, '', True, AMethod.VTableSlot);
+    EmitSlotAddr('x9', Tmp);
+    EmitRecRegsStore(Shape, ART.RawSize());
+  end;
+  if not RecretManagedClean(TRecordTypeDesc(ART)) then
+    EmitRecTempFieldReleases(TRecordTypeDesc(ART), Tmp, 0);
+end;
+
+procedure TArm64Backend.EmitDiscardedRecStmtOnExpr(AStmt: TMethodCallStmt);
+var
+  Shim: TMethodCallExpr;
+  Tmp: string;
+begin
+  { The receiver-expression form (H.F.Make();, Make().Rec();): the
+    expression-context dispatcher already owns every receiver shape, so route
+    through it with a shim and drop the discarded result's fields. }
+  if AStmt.ResolvedReturnTypeDesc.Kind <> tyRecord then
+    NotYet('discarded aggregate-returning method call', AStmt);
+  Shim := TMethodCallExpr.Create();
+  try
+    Shim.ObjectName := AStmt.ObjectName;
+    Shim.Name := AStmt.Name;
+    Shim.Args := AStmt.Args;
+    Shim.ObjExpr := AStmt.ObjExpr;
+    Shim.ResolvedMethod := AStmt.ResolvedMethod;
+    Shim.ResolvedClassType := AStmt.ResolvedClassType;
+    Shim.ResolvedType := AStmt.ResolvedReturnTypeDesc;
+    Shim.IsGlobal := AStmt.IsGlobal;
+    Shim.IsVarParam := AStmt.IsVarParam;
+    Shim.Line := AStmt.Line;
+    Shim.Col := AStmt.Col;
+    Tmp := EmitRecCallToRretSlot(Shim);
+  finally
+    Shim.Args := nil;      { borrowed -- do not free }
+    Shim.ObjExpr := nil;   { borrowed -- do not free }
+    Shim.Free();
+  end;
+  if not RecretManagedClean(TRecordTypeDesc(AStmt.ResolvedReturnTypeDesc)) then
+    EmitRecTempFieldReleases(TRecordTypeDesc(AStmt.ResolvedReturnTypeDesc),
+      Tmp, 0);
+end;
+
 procedure TArm64Backend.EmitMethodCallOnExpr(AMethod: TMethodDecl;
   const AName: string; AArgs: TObjectList; AObjExpr: TASTExpr);
 var
@@ -14928,6 +14997,7 @@ procedure TArm64Backend.EmitMethodCallStmt(AStmt: TMethodCallStmt);
 var
   MD: TMethodDecl;
   PT: TProceduralTypeDesc;
+  IsAgg: Boolean;
 begin
   if AStmt.IsProcFieldCall then
   begin
@@ -14982,7 +15052,13 @@ begin
       EmitImplicitBaseStep makes exactly that choice. }
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
        IsAggregateReturn(AStmt.ResolvedReturnTypeDesc) then
-      NotYet('discarded aggregate-returning field-method call', AStmt);
+    begin
+      EmitLoadSlot('x0', 'Self');
+      EmitImplicitBaseStep('x0', AStmt.ImplicitBaseInfo);
+      EmitDiscardedRecMethodCall(TMethodDecl(AStmt.ResolvedMethod), AStmt.Name,
+        AStmt.Args, AStmt.ResolvedReturnTypeDesc, AStmt);
+      Exit;
+    end;
     EmitLoadSlot('x0', 'Self');
     EmitImplicitBaseStep('x0', AStmt.ImplicitBaseInfo);
     EmitMethodCallCommon(TMethodDecl(AStmt.ResolvedMethod), AStmt.Name,
@@ -15165,9 +15241,13 @@ begin
     EmitCall(MD, AStmt.Name, AStmt.Args);
     Exit;
   end;
-  if (AStmt.ResolvedReturnTypeDesc <> nil) and
-     IsAggregateReturn(AStmt.ResolvedReturnTypeDesc) then
-    NotYet('discarded aggregate-returning method call', AStmt);
+  IsAgg := (AStmt.ResolvedReturnTypeDesc <> nil) and
+    IsAggregateReturn(AStmt.ResolvedReturnTypeDesc);
+  if IsAgg and (AStmt.ObjExpr <> nil) then
+  begin
+    EmitDiscardedRecStmtOnExpr(AStmt);
+    Exit;
+  end;
   if AStmt.ObjExpr <> nil then
     EmitMethodCallOnExpr(MD, AStmt.Name, AStmt.Args, AStmt.ObjExpr)
   else
@@ -15180,6 +15260,12 @@ begin
       EmitLoadSlot('x0', AStmt.ObjectName);
       if AStmt.IsVarParam then
         Self.Emit(#9'ldr x0, [x0]');
+    end;
+    if IsAgg then
+    begin
+      EmitDiscardedRecMethodCall(MD, AStmt.Name, AStmt.Args,
+        AStmt.ResolvedReturnTypeDesc, AStmt);
+      Exit;
     end;
     EmitMethodCallCommon(MD, AStmt.Name, AStmt.Args);
   end;

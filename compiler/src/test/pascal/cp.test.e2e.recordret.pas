@@ -177,6 +177,11 @@ type
     { Discarded record-returning call via an expression receiver
       (Obj.RecordMethod();).  Tests the ObjExpr path. }
     procedure TestRun_DiscardedRecordReturn_ObjExprReceiver;
+    { Every other receiver form of a discarded record-returning method call:
+      a named receiver, a field of Self, var params (class and record), a
+      record method, a captured outer local.  The results' managed fields must be
+      released, not leaked. }
+    procedure TestRun_DiscardedRecordReturn_AllReceiverForms;
     { Regression: reading a PROPERTY whose getter returns a record with a
       managed (string) field.  The property read was emitted as a scalar-return
       call (object pointer where the sret pointer belongs), over-releasing the
@@ -1422,6 +1427,96 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'mytag' + LE, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_DiscardedRecordReturn_AllReceiverForms;
+const
+  Src = '''
+    program P;
+    type
+      TToken = record Kind: Integer; Value: string; end;
+      TBig = record A, B, C: Int64; end;
+      TPt = record
+        X, Y: Integer;
+        function Moved(D: Integer): TPt;
+        function Tok(): TToken;
+      end;
+      TLexer = class
+        FName: string;
+        function Next(): TToken;
+        function Big(): TBig;
+      end;
+      TOwner = class
+        FLex: TLexer;
+        procedure Run();
+      end;
+    function TPt.Moved(D: Integer): TPt;
+    begin
+      Result.X := X + D;
+      Result.Y := Y + D
+    end;
+    function TPt.Tok(): TToken;
+    begin
+      Result.Kind := X;
+      Result.Value := 'tok' + IntToStr(Y)
+    end;
+    function TLexer.Next(): TToken;
+    begin
+      Result.Kind := 42;
+      Result.Value := 'hello' + FName
+    end;
+    function TLexer.Big(): TBig;
+    begin
+      Result.A := 1;
+      Result.B := 2;
+      Result.C := 3
+    end;
+    procedure TOwner.Run();
+    begin
+      FLex.Next();
+      FLex.Big()
+    end;
+    procedure ByVar(var L: TLexer; var R: TPt);
+    begin
+      L.Next();
+      R.Moved(3);
+      R.Tok()
+    end;
+    procedure Outer();
+    var L: TLexer;
+      procedure Inner();
+      begin
+        L.Next()
+      end;
+    begin
+      L := TLexer.Create();
+      L.FName := 'in';
+      Inner();
+      L.Free()
+    end;
+    var L: TLexer; O: TOwner; R: TPt;
+    begin
+      L := TLexer.Create();
+      L.FName := 'x';
+      L.Next();
+      L.Big();
+      O := TOwner.Create();
+      O.FLex := L;
+      O.Run();
+      R.X := 1;
+      R.Y := 2;
+      R.Moved(1);
+      R.Tok();
+      ByVar(L, R);
+      Outer();
+      WriteLn('ok ', R.X, ' ', L.FName);
+      O.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'ok 1 x' + LE, 0);
+  AssertLeakFreeOnAll(Src, '');
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RecordProperty_Read_AllContexts;
