@@ -4173,6 +4173,18 @@ begin
       Self.Emit(#9'add x0, x0, #12');
       Exit;
     end;
+    if (TIdentExpr(AExpr).ConstArraySymbol <> '') and
+       IsInlineBytesAgg(AExpr.ResolvedType) then
+    begin
+      { a typed constant with a data blob -- `const C: set of Byte = [1..3]`:
+        like every jumbo-set value it evaluates to its bitmap's ADDRESS.
+        Folding it to ConstValue (0) made `X in C` test an empty set. }
+      Self.Emit(Format(#9'adrp x0, %s@PAGE',
+        [CodegenMangle(TIdentExpr(AExpr).ConstArraySymbol)]));
+      Self.Emit(Format(#9'add x0, x0, %s@PAGEOFF',
+        [CodegenMangle(TIdentExpr(AExpr).ConstArraySymbol)]));
+      Exit;
+    end;
     EmitIntLiteral('x0', TIdentExpr(AExpr).ConstValue);
     Exit;
   end;

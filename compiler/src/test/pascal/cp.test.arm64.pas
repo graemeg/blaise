@@ -87,6 +87,7 @@ type
     procedure TestCall_IntArgToFloatParamIsFloatClass;
     procedure TestRecordReturn_SingleHfaInSRegs;
     procedure TestRecordReturn_SmallImageStoredWidthExact;
+    procedure TestJumboSetTypedConst_IsBitmapAddress;
     { P0-2: generic RECORD instantiation.  A monomorphised record instance is
       a record with methods, so it rides the P0-1 machinery; only the instance
       walk itself was missing. }
@@ -1484,6 +1485,30 @@ begin
   AssertTrue('... before the result is consumed', PRel < PWrite);
   AssertTrue('the method result in x0 survives the release',
     PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PShow) < PRel);
+end;
+
+procedure TArm64BackendTests.TestJumboSetTypedConst_IsBitmapAddress;
+var
+  AsmT: string;
+  P: Integer;
+begin
+  { A typed jumbo-set constant (`const C: set of Byte = [1, 2, 3]`) has its
+    bitmap in a data blob; as a value it is that blob's ADDRESS, like every
+    jumbo set.  It was folded to its scalar ConstValue (0), so `2 in C` tested
+    an empty set -- wrong output, no diagnostic. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type TByteSet = set of Byte;
+    const C: TByteSet = [1, 2, 3];
+    begin
+      if 2 in C then WriteLn('y')
+    end.
+    ''', TargetArm64);
+  P := Pos(#9'bl __SetIn', AsmT);
+  AssertTrue('membership through _SetIn', P >= 0);
+  AssertTrue('the set operand is the blob address',
+    Pos(#9'adrp x0, __bac_', Copy(AsmT, 0, P)) >= 0);
 end;
 
 procedure TArm64BackendTests.TestRecordReturn_SingleHfaInSRegs;
