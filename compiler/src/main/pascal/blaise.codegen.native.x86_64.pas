@@ -12528,6 +12528,7 @@ var
   SretBufSize:   Integer;
   SretRT:        TRecordTypeDesc;
   SretShim:      TMethodCallExpr;
+  RecvIdent:     TIdentExpr;
 begin
   { Metaclass-var constructor dispatch in statement position: C.Create(args)
     where C is a 'class of' variable and the result is discarded.  Only the
@@ -12633,6 +12634,7 @@ begin
       TMethodCallExpr view of this statement node (the relevant fields are the
       same).  Args are borrowed and detached before Free. }
     SretShim := TMethodCallExpr.Create();
+    RecvIdent := nil;
     try
       SretShim.ObjectName       := ACall.ObjectName;
       SretShim.Name             := ACall.Name;
@@ -12642,11 +12644,27 @@ begin
       SretShim.ResolvedType     := ACall.ResolvedReturnTypeDesc;
       SretShim.IsGlobal         := ACall.IsGlobal;
       SretShim.IsVarParam       := ACall.IsVarParam;
+      if (ACall.ObjExpr = nil) and ACall.IsImplicitSelf and
+         (ACall.ImplicitBaseInfo <> nil) then
+      begin
+        { an interface FIELD of Self (FS.MakeRect(5); inside a method): the
+          expression form carries it as an implicit-Self ident receiver.
+          Passing only ObjectName read a global FS_obj / FS_itab that does
+          not exist and dispatched through garbage. }
+        RecvIdent := TIdentExpr.Create();
+        RecvIdent.Name := ACall.ObjectName;
+        RecvIdent.IsImplicitSelf := True;
+        RecvIdent.ImplicitFieldInfo := ACall.ImplicitBaseInfo;
+        RecvIdent.ResolvedType := ACall.ResolvedClassType;
+        SretShim.ObjExpr := RecvIdent;
+        SretShim.ObjectName := '';
+      end;
       Self.EmitIntfRecordSretDispatch(SretShim, '(%rbx)', False);
     finally
       SretShim.Args    := nil;   { borrowed — do not free }
       SretShim.ObjExpr := nil;   { borrowed — do not free }
       SretShim.Free();
+      RecvIdent.Free();
     end;
     { The dispatch may clobber %rbx during arg evaluation; %rsp is balanced and
       still points at the buffer, so re-derive the buffer address. }

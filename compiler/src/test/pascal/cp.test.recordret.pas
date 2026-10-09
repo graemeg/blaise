@@ -36,6 +36,10 @@ type
     procedure TestReturnAbi_IntegerPlusDouble_PerIsaClassification;
     procedure TestReturnAbi_ManagedField_HiddenResultPointer;
     procedure TestReturnAbi_Over16Bytes_HiddenResultPointer;
+    { A discarded record-returning call on an interface FIELD of Self
+      (FS.MakeRect(5); inside a method) must dispatch through the field, not
+      through a global FS_obj/FS_itab pair that does not exist (x86-64). }
+    procedure TestDiscardedIntfRecordCall_ImplicitSelfField_UsesTheField;
   end;
 
 implementation
@@ -156,6 +160,35 @@ begin
     Pos('movq %rdi, ', Callee(Src, 'Make3', TargetX86_64)) >= 0);
   AssertTrue('arm64: the result pointer arrives in x8',
     Pos('stur x8, ', Callee(Src, 'Make3', TargetArm64)) >= 0);
+end;
+
+procedure TRecordReturnTests.TestDiscardedIntfRecordCall_ImplicitSelfField_UsesTheField;
+const
+  Src = '''
+    program P;
+    type
+      TRect = record Name: string; N: Integer; end;
+      IShape = interface
+        function MakeRect(AN: Integer): TRect;
+      end;
+      TUser = class
+        FS: IShape;
+        procedure Go();
+      end;
+    procedure TUser.Go();
+    begin
+      FS.MakeRect(5)
+    end;
+    begin
+    end.
+    ''';
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(Src, TargetX86_64);
+  AssertTrue('x86-64: no global FS_obj receiver', Pos('FS_obj', AsmT) < 0);
+  AssertTrue('x86-64: no global FS_itab receiver', Pos('FS_itab', AsmT) < 0);
+  AssertTrue('x86-64: dispatched through the itab', Pos(#9'callq *%r11', AsmT) >= 0);
 end;
 
 initialization
