@@ -25,7 +25,8 @@ unit cp.test.e2e.errno;
 interface
 
 uses
-  SysUtils, Classes, Process, blaise.testing, cp.test.e2e.base;
+  SysUtils, Classes, Process, blaise.testing, cp.test.e2e.base,
+  blaise.codegen.target;
 
 type
   TErrnoE2ETests = class(TE2ETestCase)
@@ -53,7 +54,12 @@ const
     program errnoprobe;
 
     function pipe(Fds: Pointer): Integer; external name 'pipe';
-    function fcntl(Fd, Cmd, Arg: Integer): Integer; external name 'fcntl';
+    { fcntl is VARIADIC in C: declared as a plain 3-argument function, Apple
+      arm64 passes Arg in x2 where fcntl reads its variadic slot from the
+      stack -- F_SETFL got garbage flags and the read blocked forever.  On
+      System V the two conventions coincide, which is why this only bit on
+      macOS. }
+    function fcntl(Fd, Cmd: Integer): Integer; cdecl; varargs; external name 'fcntl';
     function xread(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
       external name 'read';
     function WouldBlock(N: Int64): Boolean; external name 'WouldBlock';
@@ -163,6 +169,13 @@ var
   Captured, Output: string;
   Rc: Integer;
 begin
+  { --static is the Linux freestanding profile; macOS binaries are always
+    dynamic against libSystem and the compiler rejects --static there. }
+  if HostTarget().OS = osMacOS then
+  begin
+    Ignore('--static has no macOS profile (always dynamic against libSystem)');
+    Exit
+  end;
   if not FileExists(BlaisePath()) then
   begin
     Fail('blaise binary missing at ' + BlaisePath());
