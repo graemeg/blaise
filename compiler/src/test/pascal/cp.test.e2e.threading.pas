@@ -643,7 +643,7 @@ const
   SrcThreadVarAddressOf =
     '''
     program P;
-    uses Classes;
+    uses Classes, runtime.atomic;
     type
       TAddrThread = class(TThread)
         MyId: Int64;
@@ -654,7 +654,7 @@ const
     threadvar
       TV: Int64;
     var
-      Corrupt: Integer;
+      Corrupt, Ready: Integer;
       Addrs: array[0..2] of Int64;
     procedure TAddrThread.Execute;
     var
@@ -663,6 +663,11 @@ const
     begin
       P := @TV;
       Addrs[Self.Slot] := Int64(PtrUInt(P));
+      { stay alive until all three have taken @TV: a thread that has already
+        exited may hand its thread-local block to a later one, so distinct
+        addresses are only guaranteed among threads alive together }
+      _AtomicAddInt32(@Ready, 1);
+      while _AtomicAddInt32(@Ready, 0) < 3 do ;
       P^ := Self.MyId;
       for I := 0 to 200000 do
         if TV <> Self.MyId then
@@ -675,6 +680,7 @@ const
       A, B, C: TAddrThread;
     begin
       Corrupt := 0;
+      Ready := 0;
       A := TAddrThread.Create(True);
       B := TAddrThread.Create(True);
       C := TAddrThread.Create(True);
