@@ -88,6 +88,7 @@ type
     procedure TestRecordReturn_SingleHfaInSRegs;
     procedure TestRecordReturn_SmallImageStoredWidthExact;
     procedure TestJumboSetTypedConst_IsBitmapAddress;
+    procedure TestWriteLn_StdErrSelectsFd2;
     { P0-2: generic RECORD instantiation.  A monomorphised record instance is
       a record with methods, so it rides the P0-1 machinery; only the instance
       walk itself was missing. }
@@ -1485,6 +1486,27 @@ begin
   AssertTrue('... before the result is consumed', PRel < PWrite);
   AssertTrue('the method result in x0 survives the release',
     PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PShow) < PRel);
+end;
+
+procedure TArm64BackendTests.TestWriteLn_StdErrSelectsFd2;
+const
+  Src = '''
+    program P;
+    begin
+      WriteLn(StdErr, 'oops')
+    end.
+    ''';
+var
+  AsmT: string;
+begin
+  { WriteLn(StdErr, ...): StdErr selects fd 2 and is not itself printed.
+    arm64 wrote the handle as the integer 2, to stdout, then the text. }
+  AssertEquals('text and newline go to fd 2', '',
+    AsmMissing(Src, 'movl $2, %edi', 'movz w0, #2'));
+  AsmT := GenAsm(Src, TargetArm64);
+  AssertTrue('arm64: StdErr is not printed as an integer',
+    Pos('__SysWriteInt', AsmT) < 0);
+  AssertTrue('arm64: nothing written to fd 1', Pos(#9'movz w0, #1', AsmT) < 0);
 end;
 
 procedure TArm64BackendTests.TestJumboSetTypedConst_IsBitmapAddress;

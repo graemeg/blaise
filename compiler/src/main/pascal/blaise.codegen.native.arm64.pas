@@ -8553,8 +8553,21 @@ var
   I: Integer;
   Arg: TASTExpr;
   K: TTypeKind;
+  StartIdx: Integer;
+  FdMov: string;
 begin
-  for I := 0 to ACall.Args.Count - 1 do
+  { WriteLn(StdErr, ...): the leading StdErr selects fd 2 and is not itself
+    printed (x86-64 EmitWrite parity).  It used to be written as the integer
+    2, to stdout, followed by the rest of the line. }
+  StartIdx := 0;
+  FdMov := #9'movz w0, #1';
+  if (ACall.Args.Count > 0) and (ACall.Args.Items[0] is TIdentExpr) and
+     SameText(TIdentExpr(ACall.Args.Items[0]).Name, 'StdErr') then
+  begin
+    StartIdx := 1;
+    FdMov := #9'movz w0, #2';
+  end;
+  for I := StartIdx to ACall.Args.Count - 1 do
   begin
     Arg := TASTExpr(ACall.Args.Items[I]);
     if Arg.ResolvedType <> nil then
@@ -8570,7 +8583,7 @@ begin
           after the write (rc=1 releases; rc=0 AddRef-then-Release) }
         EmitPushX0();
         Self.Emit(#9'mov x1, x0');
-        Self.Emit(#9'movz w0, #1');
+        Self.Emit(FdMov);
         EmitCallSym('_SysWriteStr');
         EmitPopTo('x0');
         EmitStrDisposeX0(Arg);
@@ -8578,28 +8591,28 @@ begin
       else
       begin
         Self.Emit(#9'mov x1, x0');
-        Self.Emit(#9'movz w0, #1');           { fd = stdout }
+        Self.Emit(FdMov);
         EmitCallSym('_SysWriteStr');
       end;
     end
     else if K in [tyDouble, tySingle] then
     begin
       Self.EmitExprToD0OrConvert(Arg);
-      Self.Emit(#9'movz w0, #1');
+      Self.Emit(FdMov);
       EmitCallSym('_SysWriteDouble');
     end
     else if K = tyBoolean then
     begin
       Self.EmitExprToX0(Arg);
       Self.Emit(#9'mov w1, w0');
-      Self.Emit(#9'movz w0, #1');
+      Self.Emit(FdMov);
       EmitCallSym('_SysWriteBool');
     end
     else if K = tyInt64 then
     begin
       Self.EmitExprToX0(Arg);
       Self.Emit(#9'mov x1, x0');
-      Self.Emit(#9'movz w0, #1');
+      Self.Emit(FdMov);
       EmitCallSym('_SysWriteInt64');
     end
     else if K = tyUInt64 then
@@ -8608,7 +8621,7 @@ begin
         bit set as a negative number }
       Self.EmitExprToX0(Arg);
       Self.Emit(#9'mov x1, x0');
-      Self.Emit(#9'movz w0, #1');
+      Self.Emit(FdMov);
       EmitCallSym('_SysWriteUInt64');
     end
     else if IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) then
@@ -8620,7 +8633,7 @@ begin
         value 4294967295 (macOS arm64, 2026-07-24).  Mirrors the tyInt64 arm and
         the IntToStr path, both of which pass x0 whole. }
       Self.Emit(#9'mov x1, x0');
-      Self.Emit(#9'movz w0, #1');
+      Self.Emit(FdMov);
       EmitCallSym('_SysWriteInt');
     end
     else
@@ -8628,7 +8641,7 @@ begin
   end;
   if ANewline then
   begin
-    Self.Emit(#9'movz w0, #1');
+    Self.Emit(FdMov);
     EmitCallSym('_SysWriteNewline');
   end;
 end;
