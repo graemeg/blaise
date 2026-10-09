@@ -2311,15 +2311,20 @@ end;
 
 procedure TE2EMiscTests.TestRun_Ifdef_DefineUndefIfndefNested;
 const
-  { DEFINE/UNDEF, IFNDEF, a predefined CPU/OS symbol, and nesting together. }
+  { DEFINE/UNDEF, IFNDEF, a predefined CPU/OS symbol, and nesting together.
+    The host's CPU symbol is predefined on every target -- CPUX86_64 or
+    CPUARM64 -- so either one marks the nested branch live (the test used to
+    name CPUX86_64 alone and failed, correctly, on arm64). }
   Src = '''
     program P;
     {$DEFINE FOO}
     {$UNDEF FOO}
+    {$IFDEF CPUX86_64}{$DEFINE HOSTCPU}{$ENDIF}
+    {$IFDEF CPUARM64}{$DEFINE HOSTCPU}{$ENDIF}
     begin
       {$IFDEF FOO}WriteLn('foo'){$ELSE}WriteLn('no-foo'){$ENDIF};
       {$IFNDEF BAR}WriteLn('no-bar'){$ENDIF};
-      {$IFDEF CPUX86_64}
+      {$IFDEF HOSTCPU}
         {$IFDEF BLAISE}WriteLn('cpu-blaise'){$ENDIF}
       {$ENDIF}
     end.
