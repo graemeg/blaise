@@ -85,6 +85,8 @@ type
     procedure TestRecordMethod_StmtOnSelfRecordFieldPassesAddress;
     procedure TestIntfCall_ScalarContextSuppliesSret;
     procedure TestCall_IntArgToFloatParamIsFloatClass;
+    procedure TestRecordReturn_SingleHfaInSRegs;
+    procedure TestRecordReturn_SmallImageStoredWidthExact;
     { P0-2: generic RECORD instantiation.  A monomorphised record instance is
       a record with methods, so it rides the P0-1 machinery; only the instance
       walk itself was missing. }
@@ -1482,6 +1484,65 @@ begin
   AssertTrue('... before the result is consumed', PRel < PWrite);
   AssertTrue('the method result in x0 survives the release',
     PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PShow) < PRel);
+end;
+
+procedure TArm64BackendTests.TestRecordReturn_SingleHfaInSRegs;
+var
+  AsmT: string;
+begin
+  { An all-Single record of up to four fields is an AAPCS64 homogeneous float
+    aggregate: lane I returns in sI and lives at offset 4*I.  It used to be
+    classed as an x0:x1 memory image, and the caller stored 16 bytes into the
+    4-byte global R -- the corruption behind TestRun_RcSSE1_Single_*. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type TF2 = record A, B: Single; end;
+    function M(A, B: Single): TF2;
+    begin
+      Result.A := A;
+      Result.B := B
+    end;
+    var R: TF2;
+    begin
+      R := M(1.5, 2.5)
+    end.
+    ''', TargetArm64);
+  AssertTrue('callee returns lane 1 in s1 from offset 4',
+    Pos(#9'ldr s1, [x9, #4]', AsmT) >= 0);
+  AssertTrue('caller stores lane 1 from s1 to offset 4',
+    Pos(#9'str s1, [x9, #4]', AsmT) >= 0);
+  AssertTrue('no x1 half stored for an 8-byte HFA',
+    Pos(#9'str x1, [x9, #8]', AsmT) < 0);
+end;
+
+procedure TArm64BackendTests.TestRecordReturn_SmallImageStoredWidthExact;
+var
+  AsmT: string;
+begin
+  { A 12-byte integer record returns as an x0:x1 memory image; the caller
+    must store exactly 12 bytes -- all of x0, then the low word of x1 -- not
+    the whole register pair (16 bytes) past the end of the record. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type T12 = record A, B, C: Integer; end;
+    function M(V: Integer): T12;
+    begin
+      Result.A := V;
+      Result.B := V;
+      Result.C := V
+    end;
+    var Q: T12;
+    begin
+      Q := M(5)
+    end.
+    ''', TargetArm64);
+  AssertTrue('first eight bytes from x0', Pos(#9'str x0, [x9]', AsmT) >= 0);
+  AssertTrue('last four bytes from the low word of x1',
+    Pos(#9'str w10, [x9, #8]', AsmT) >= 0);
+  AssertTrue('never a full x1 store past byte 12',
+    Pos(#9'str x1, [x9, #8]', AsmT) < 0);
 end;
 
 procedure TArm64BackendTests.TestCall_IntArgToFloatParamIsFloatClass;

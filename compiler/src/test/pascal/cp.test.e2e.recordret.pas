@@ -54,6 +54,7 @@ type
     procedure TestRun_RcSSEInt_DoubleInt64_RoundTrip;
     { rcSSE1 with Single — 4B record via xmm0 as `s`. }
     procedure TestRun_RcSSE1_Single_RoundTrip;
+    procedure TestRun_SingleHfa_AndOddSizedImages;
     { Nested record — inner TPoint (8 B int) embedded in 12 B outer → rcInt2. }
     procedure TestRun_RcInt2_NestedRecord_RoundTrip;
     { Two Single fields — 8 B, all-float leaves → rcSSE1. }
@@ -500,6 +501,65 @@ begin
   AssertTrue('compile+run', CompileAndRun(SrcSSEInt, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
   AssertEquals('Double+Int64 via (xmm0, rax)', '-1.5' + LE + '99', Trim(Output));
+end;
+
+procedure TE2ERecordReturnTests.TestRun_SingleHfa_AndOddSizedImages;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { All-Single records of 1..4 lanes returned and passed by value (lanes in
+    s registers on arm64), mixed with Double HFAs, spilling past the eighth
+    fp register, plus 3-, 7- and 12-byte integer images stored next to
+    guard bytes.  Each guard (G1, G2, H.G, H.H) must survive: a register
+    image stored wider than its record overwrote its neighbour. }
+  AssertRunsOnAll('''
+    program P;
+    type
+      TF1 = record A: Single; end;
+      TF2 = record A, B: Single; end;
+      TF3 = record A, B, C: Single; end;
+      TF4 = record A, B, C, D: Single; end;
+      TD2 = record A, B: Double; end;
+      TB3 = packed record A, B, C: Byte; end;
+      TB7 = packed record A: Integer; B: Word; C: Byte; end;
+      T12 = record A, B, C: Integer; end;
+      THold = packed record X: TB3; G: Byte; Y: TB7; H: Byte; end;
+    function M1(A: Single): TF1; begin Result.A := A end;
+    function M2(A, B: Single): TF2; begin Result.A := A; Result.B := B end;
+    function M3(A, B, C: Single): TF3; begin Result.A := A; Result.B := B; Result.C := C end;
+    function M4(A: Single): TF4; begin Result.A := A; Result.B := A * 2; Result.C := A * 3; Result.D := A * 4 end;
+    function Sum4(R: TF4): Single; begin Result := R.A + R.B + R.C + R.D end;
+    function Sum3(X: Double; R: TF3; Y: Single): Double; begin Result := X + R.A + R.B + R.C + Y end;
+    function Mix(R: TF2; D: TD2; S: TF1): Double; begin Result := R.A + R.B + D.A + D.B + S.A end;
+    function Spill(A, B, C, D, E, F, G: Double; R: TF2): Double;
+    begin Result := A + B + C + D + E + F + G + R.A * 100 + R.B * 1000 end;
+    function MB3(V: Byte): TB3; begin Result.A := V; Result.B := V + 1; Result.C := V + 2 end;
+    function MB7(V: Integer): TB7; begin Result.A := V; Result.B := 7; Result.C := 9 end;
+    function M12(V: Integer): T12; begin Result.A := V; Result.B := V; Result.C := V end;
+    var
+      R1: TF1; G1: Integer; R2: TF2; R3: TF3; R4: TF4; G2: Integer;
+      H: THold; Q: T12; PD: TD2;
+    begin
+      G1 := 111; G2 := 222;
+      R1 := M1(2.5); R2 := M2(1.5, 3.25); R3 := M3(1, 2, 3); R4 := M4(1.5);
+      WriteLn(R1.A:0:2, ' ', R2.A:0:2, ' ', R2.B:0:2, ' ', R3.C:0:2, ' ', R4.D:0:2, ' ', G1, ' ', G2);
+      WriteLn(Sum4(R4):0:2, ' ', Sum4(M4(1)):0:2, ' ', M3(4, 5, 6).B:0:2);
+      WriteLn(Sum3(10, R3, 0.5):0:2, ' ', Sum3(1, M3(1, 1, 1), 1):0:2);
+      PD.A := 100; PD.B := 200;
+      WriteLn(Mix(R2, PD, R1):0:2);
+      WriteLn(Spill(1, 2, 3, 4, 5, 6, 7, R2):0:2);
+      H.G := 77; H.H := 88;
+      H.X := MB3(10); H.Y := MB7(70000);
+      WriteLn(H.X.A, ' ', H.X.C, ' ', H.G, ' ', H.Y.A, ' ', H.Y.B, ' ', H.Y.C, ' ', H.H);
+      Q := M12(5); WriteLn(Q.C);
+    end.
+    ''',
+    '2.50 1.50 3.25 3.00 6.00 111 222' + LE +
+    '15.00 10.00 5.00' + LE +
+    '16.50 5.00' + LE +
+    '307.25' + LE +
+    '3428.00' + LE +
+    '10 12 77 70000 7 9 88' + LE +
+    '5' + LE, 0);
 end;
 
 procedure TE2ERecordReturnTests.TestRun_RcSSE1_Single_RoundTrip;

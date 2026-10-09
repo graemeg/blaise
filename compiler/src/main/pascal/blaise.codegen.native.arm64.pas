@@ -580,6 +580,8 @@ type
     { Emit the generated element hooks registered since the last call. }
     procedure EmitDynElemHooks;
     function  RecReturnShape(ARec: TRecordTypeDesc): Integer;
+    procedure EmitRecRegsStore(AShape, ASize: Integer);
+    procedure EmitHfaLaneToX0(AShape, AIdx: Integer; ASpill: Boolean);
 
     procedure EmitStrLitSection;
     procedure EmitGlobalsSection;
@@ -712,6 +714,34 @@ type
   end;
 
 implementation
+
+{ Record return / by-value parameter SHAPES (RecReturnShape):
+    0        sret / by reference          1  x0 memory image (<= 8 bytes)
+    2        x0:x1 memory image (9..16)   100+N  Double HFA, N lanes in d regs
+    200+N    Single HFA, N lanes in s regs
+  An AAPCS64 homogeneous float aggregate puts each lane in its own fp
+  register; the lane width (and so the memory stride) follows the element
+  type.  These helpers keep every consumer agnostic of which HFA it has. }
+function HfaCount(AShape: Integer): Integer;
+begin
+  Result := AShape mod 100;
+end;
+
+function HfaStride(AShape: Integer): Integer;
+begin
+  if AShape >= 200 then
+    Result := 4
+  else
+    Result := 8;
+end;
+
+function HfaReg(AShape, AIdx: Integer): string;
+begin
+  if AShape >= 200 then
+    Result := 's' + IntToStr(AIdx)
+  else
+    Result := 'd' + IntToStr(AIdx);
+end;
 
 { Integer-family predicate (local twin of the x86-64 unit's free function;
   candidate for a shared home in blaise.codegen once the leaf grows). }
@@ -1598,17 +1628,7 @@ begin
       begin
         EmitRecCallDispatch(AValueExpr, '');
         EmitSlotAddr('x9', '__rret');
-        case Shape of
-          1: Self.Emit(#9'str x0, [x9]');
-          2:
-          begin
-            Self.Emit(#9'str x0, [x9]');
-            Self.Emit(#9'str x1, [x9, #8]');
-          end;
-        else
-          for I := 0 to (Shape - 100) - 1 do
-            Self.Emit(Format(#9'str d%d, [x9, #%d]', [I, I * 8]));
-        end;
+        EmitRecRegsStore(Shape, TRecordTypeDesc(AFld.TypeDesc).RawSize());
       end;
       Self.Emit(#9'stp x19, x22, [sp, #-16]!');
       EmitInstBase('x22', AInstSlot, AInstVarParam, ABaseInfo);
@@ -1949,17 +1969,7 @@ begin
   begin
     EmitRecCallDispatch(AExpr, '');
     EmitSlotAddr('x9', Tmp);
-    case Shape of
-      1: Self.Emit(#9'str x0, [x9]');
-      2:
-      begin
-        Self.Emit(#9'str x0, [x9]');
-        Self.Emit(#9'str x1, [x9, #8]');
-      end;
-    else
-      for K := 0 to (Shape - 100) - 1 do
-        Self.Emit(Format(#9'str d%d, [x9, #%d]', [K, K * 8]));
-    end;
+    EmitRecRegsStore(Shape, AExpr.ResolvedType.RawSize());
   end;
   EmitSlotAddr('x0', Tmp);
   Result := Tmp;
@@ -7071,17 +7081,7 @@ begin
   begin
     EmitPropReadCall(AFld);
     EmitSlotAddr('x9', Tmp);
-    case Shape of
-      1: Self.Emit(#9'str x0, [x9]');
-      2:
-      begin
-        Self.Emit(#9'str x0, [x9]');
-        Self.Emit(#9'str x1, [x9, #8]');
-      end;
-    else
-      for K := 0 to (Shape - 100) - 1 do
-        Self.Emit(Format(#9'str d%d, [x9, #%d]', [K, K * 8]));
-    end;
+    EmitRecRegsStore(Shape, AFld.ResolvedType.RawSize());
   end;
   EmitSlotAddr('x0', Tmp);
 end;
@@ -7734,17 +7734,7 @@ begin
         begin
           EmitRecCallDispatch(AAsgn.Expr, '');
           EmitSlotAddr('x9', '__rret');
-          case Shape of
-            1: Self.Emit(#9'str x0, [x9]');
-            2:
-            begin
-              Self.Emit(#9'str x0, [x9]');
-              Self.Emit(#9'str x1, [x9, #8]');
-            end;
-          else
-            for I := 0 to (Shape - 100) - 1 do
-              Self.Emit(Format(#9'str d%d, [x9, #%d]', [I, I * 8]));
-          end;
+          EmitRecRegsStore(Shape, AAsgn.ResolvedLhsType.RawSize());
         end;
         Self.Emit(#9'str x19, [sp, #-16]!');
         EmitSlotAddr('x19', AAsgn.Name);
@@ -7764,17 +7754,7 @@ begin
       end;
       EmitRecCallDispatch(AAsgn.Expr, '');
       EmitSlotAddr('x9', AAsgn.Name);
-      case Shape of
-        1: Self.Emit(#9'str x0, [x9]');
-        2:
-        begin
-          Self.Emit(#9'str x0, [x9]');
-          Self.Emit(#9'str x1, [x9, #8]');
-        end;
-      else
-        for I := 0 to (Shape - 100) - 1 do
-          Self.Emit(Format(#9'str d%d, [x9, #%d]', [I, I * 8]));
-      end;
+      EmitRecRegsStore(Shape, AAsgn.ResolvedLhsType.RawSize());
       Exit;
     end;
     { whole-record copy.  With managed fields the ARC discipline mirrors
@@ -10998,24 +10978,33 @@ function TArm64Backend.RecReturnShape(ARec: TRecordTypeDesc): Integer;
 var
   I, NDoubles: Integer;
   F: TFieldInfo;
-  AllDouble: Boolean;
+  AllDouble, AllSingle: Boolean;
 begin
-  { HFA check first: up to four Double fields return in d0..d(N-1) —
-    AAPCS64's homogeneous float aggregate rule.  (Single-member HFAs are
-    rejected with the rest of Single support.) }
+  { HFA check first: up to four Double fields return in d0..d(N-1), up to
+    four Single fields in s0..s(N-1) -- AAPCS64's homogeneous float aggregate
+    rule.  An all-Single record used to fall through to the x0:x1 memory
+    image, which (besides breaking C interop) stored 16 bytes into a record
+    as small as 4. }
   AllDouble := ARec.Fields.Count > 0;
+  AllSingle := ARec.Fields.Count > 0;
   NDoubles := 0;
   for I := 0 to ARec.Fields.Count - 1 do
   begin
     F := TFieldInfo(ARec.Fields.Items[I]);
     if (F.TypeDesc = nil) or (F.TypeDesc.Kind <> tyDouble) then
-      AllDouble := False
-    else
-      NDoubles := NDoubles + 1;
+      AllDouble := False;
+    if (F.TypeDesc = nil) or (F.TypeDesc.Kind <> tySingle) then
+      AllSingle := False;
+    NDoubles := NDoubles + 1;
   end;
   if AllDouble and (NDoubles <= 4) then
   begin
     Result := 100 + NDoubles;
+    Exit;
+  end;
+  if AllSingle and (NDoubles <= 4) then
+  begin
+    Result := 200 + NDoubles;
     Exit;
   end;
   case Self.ClassifyRecordReturn(ARec) of
@@ -11026,6 +11015,80 @@ begin
       most 16 bytes returns as a MEMORY IMAGE in x0:x1 on AAPCS64 (no
       per-eightbyte class split like System V). }
     Result := 2;
+  end;
+end;
+
+{ Store a register-returned record (shape 1, 2 or an HFA, see HfaCount) into
+  the ASize-byte buffer at [x9].  Width-exact: a record of fewer than 8 or 16
+  bytes gets exactly ASize bytes, never the whole register pair.  Storing
+  x0:x1 wholesale wrote past the end of a small record -- harmless only while
+  alignment padding happened to follow it.  x10 is the scratch; x0/x1 and the
+  fp lanes are left intact. }
+procedure TArm64Backend.EmitRecRegsStore(AShape, ASize: Integer);
+
+  procedure StorePart(const AReg: string; AOff, ANum: Integer);
+  begin
+    if ANum >= 8 then
+    begin
+      if AOff = 0 then
+        Self.Emit(Format(#9'str %s, [x9]', [AReg]))
+      else
+        Self.Emit(Format(#9'str %s, [x9, #%d]', [AReg, AOff]));
+      Exit;
+    end;
+    Self.Emit(Format(#9'mov x10, %s', [AReg]));
+    if ANum >= 4 then
+    begin
+      Self.Emit(Format(#9'str w10, [x9, #%d]', [AOff]));
+      Self.Emit(#9'lsr x10, x10, #32');
+      AOff := AOff + 4;
+      ANum := ANum - 4;
+    end;
+    if ANum >= 2 then
+    begin
+      Self.Emit(Format(#9'strh w10, [x9, #%d]', [AOff]));
+      Self.Emit(#9'lsr x10, x10, #16');
+      AOff := AOff + 2;
+      ANum := ANum - 2;
+    end;
+    if ANum >= 1 then
+      Self.Emit(Format(#9'strb w10, [x9, #%d]', [AOff]));
+  end;
+
+var
+  K: Integer;
+begin
+  if AShape >= 100 then
+  begin
+    for K := 0 to HfaCount(AShape) - 1 do
+      Self.Emit(Format(#9'str %s, [x9, #%d]',
+        [HfaReg(AShape, K), K * HfaStride(AShape)]));
+    Exit;
+  end;
+  if ASize > 8 then
+  begin
+    StorePart('x0', 0, 8);
+    StorePart('x1', 8, ASize - 8);
+  end
+  else
+    StorePart('x0', 0, ASize);
+end;
+
+{ x0 := lane AIdx of the HFA record at [x9], as the caller's argument walk
+  pushes it.  A register-bound lane travels as its DOUBLE bit pattern (the pop
+  walk rebuilds d(N) and, for an 's' entry, narrows it); a spilled lane is
+  the raw value in an 8-byte slot, a Single in the low half. }
+procedure TArm64Backend.EmitHfaLaneToX0(AShape, AIdx: Integer; ASpill: Boolean);
+begin
+  if HfaStride(AShape) = 8 then
+    Self.Emit(Format(#9'ldr x0, [x9, #%d]', [AIdx * 8]))
+  else if ASpill then
+    Self.Emit(Format(#9'ldr w0, [x9, #%d]', [AIdx * 4]))
+  else
+  begin
+    Self.Emit(Format(#9'ldr s0, [x9, #%d]', [AIdx * 4]));
+    Self.Emit(#9'fcvt d0, s0');
+    Self.Emit(#9'fmov x0, d0');
   end;
 end;
 
@@ -11815,25 +11878,33 @@ begin
           end;
         end;
       else
-        { HFA of (ParShape - 100) Doubles in d(FIdx).. — spills wholly to the
-          stack when the fp bank cannot hold every lane (leg 29) }
-        if FIdx + (ParShape - 100) > 8 then
+        { HFA of HfaCount(ParShape) lanes in d/s(FIdx).. — spills wholly to
+          the stack when the fp bank cannot hold every lane (leg 29); each
+          spilled lane occupies an 8-byte slot, a Single in its low half }
+        if FIdx + HfaCount(ParShape) > 8 then
         begin
           SPOff := AlignTo(SPOff, 8);
           EmitSlotAddr('x9', Par.ParamName);
-          for K := 0 to (ParShape - 100) - 1 do
-          begin
-            Self.Emit(Format(#9'ldr x10, [x29, #%d]', [16 + SPOff + K * 8]));
-            Self.Emit(Format(#9'str x10, [x9, #%d]', [K * 8]));
-          end;
-          SPOff := SPOff + (ParShape - 100) * 8;
+          for K := 0 to HfaCount(ParShape) - 1 do
+            if HfaStride(ParShape) = 4 then
+            begin
+              Self.Emit(Format(#9'ldr w10, [x29, #%d]', [16 + SPOff + K * 8]));
+              Self.Emit(Format(#9'str w10, [x9, #%d]', [K * 4]));
+            end
+            else
+            begin
+              Self.Emit(Format(#9'ldr x10, [x29, #%d]', [16 + SPOff + K * 8]));
+              Self.Emit(Format(#9'str x10, [x9, #%d]', [K * 8]));
+            end;
+          SPOff := SPOff + HfaCount(ParShape) * 8;
         end
         else
         begin
           EmitSlotAddr('x9', Par.ParamName);
-          for K := 0 to (ParShape - 100) - 1 do
-            Self.Emit(Format(#9'str d%d, [x9, #%d]', [FIdx + K, K * 8]));
-          FIdx := FIdx + (ParShape - 100);
+          for K := 0 to HfaCount(ParShape) - 1 do
+            Self.Emit(Format(#9'str %s, [x9, #%d]',
+              [HfaReg(ParShape, FIdx + K), K * HfaStride(ParShape)]));
+          FIdx := FIdx + HfaCount(ParShape);
         end;
       end;
     end
@@ -12217,10 +12288,11 @@ begin
       end;
     else
       begin
-        { HFA: N doubles in d0..d(N-1) }
+        { HFA: N lanes in d0..d(N-1) (Double) or s0..s(N-1) (Single) }
         EmitSlotAddr('x9', 'Result');
-        for I := 0 to (RecShape - 100) - 1 do
-          Self.Emit(Format(#9'ldr d%d, [x9, #%d]', [I, I * 8]));
+        for I := 0 to HfaCount(RecShape) - 1 do
+          Self.Emit(Format(#9'ldr %s, [x9, #%d]',
+            [HfaReg(RecShape, I), I * HfaStride(RecShape)]));
       end;
     end;
   end
@@ -12435,12 +12507,12 @@ begin
           if NInt >= 7 then Off := AlignTo(Off, 8) + 16
           else NInt := NInt + 2;
       else
-        if NFloat + (RecReturnShape(TRecordTypeDesc(Arg.ResolvedType)) - 100) > 8 then
+        if NFloat + HfaCount(RecReturnShape(TRecordTypeDesc(Arg.ResolvedType))) > 8 then
           Off := AlignTo(Off, 8) +
-            (RecReturnShape(TRecordTypeDesc(Arg.ResolvedType)) - 100) * 8
+            HfaCount(RecReturnShape(TRecordTypeDesc(Arg.ResolvedType))) * 8
         else
           NFloat := NFloat +
-            (RecReturnShape(TRecordTypeDesc(Arg.ResolvedType)) - 100);
+            HfaCount(RecReturnShape(TRecordTypeDesc(Arg.ResolvedType)));
       end;
       Continue;
     end;
@@ -12817,17 +12889,7 @@ begin
           { buffer address: sp + (still-pushed eval slots) + RecBase + off }
           EmitAddSubImm('add', 'x9', 'sp',
             PopRegs.Count * 16 + RecBase + RecOff);
-          case Shape of
-            1: Self.Emit(#9'str x0, [x9]');
-            2:
-            begin
-              Self.Emit(#9'str x0, [x9]');
-              Self.Emit(#9'str x1, [x9, #8]');
-            end;
-          else
-            for K := 0 to (Shape - 100) - 1 do
-              Self.Emit(Format(#9'str d%d, [x9, #%d]', [K, K * 8]));
-          end;
+          EmitRecRegsStore(Shape, Arg.ResolvedType.RawSize());
           { now push the buffer's contents per shape, exactly like an
             lvalue record — the buffer address is re-derived each time
             because intervening pushes move sp but not the buffer }
@@ -12884,28 +12946,32 @@ begin
               end;
             end;
           else
-            if NFloat + (Shape - 100) > 8 then
-              for K := 0 to (Shape - 100) - 1 do
+            if ADecl.IsExternal and (HfaStride(Shape) = 4) and
+               (NFloat + HfaCount(Shape) > 8) then
+              NotYet('a Single-HFA record argument spilling to the stack ' +
+                'in a call to an external routine', Arg);
+            if NFloat + HfaCount(Shape) > 8 then
+              for K := 0 to HfaCount(Shape) - 1 do
               begin
                 EmitAddSubImm('add', 'x9', 'sp',
                   PopRegs.Count * 16 + RecBase + RecOff);
                 StackOff := AlignTo(StackOff, 8);
-                Self.Emit(Format(#9'ldr x0, [x9, #%d]', [K * 8]));
+                EmitHfaLaneToX0(Shape, K, True);
                 EmitPushX0();
                 PopRegs.Add(Format('m%d_%d', [StackOff, 8]));
                 StackOff := StackOff + 8;
               end
             else
             begin
-              for K := 0 to (Shape - 100) - 1 do
+              for K := 0 to HfaCount(Shape) - 1 do
               begin
                 EmitAddSubImm('add', 'x9', 'sp',
                   PopRegs.Count * 16 + RecBase + RecOff);
-                Self.Emit(Format(#9'ldr x0, [x9, #%d]', [K * 8]));
+                EmitHfaLaneToX0(Shape, K, False);
                 EmitPushX0();
-                PopRegs.Add('d' + IntToStr(NFloat + K));
+                PopRegs.Add(HfaReg(Shape, NFloat + K));
               end;
-              NFloat := NFloat + (Shape - 100);
+              NFloat := NFloat + HfaCount(Shape);
             end;
           end;
           RecOff := RecOff + AlignTo(Arg.ResolvedType.RawSize(), 16);
@@ -12978,29 +13044,33 @@ begin
             end;
           end;
         else
-          { HFA of (Shape - 100) Doubles in d(NFloat).. — address computed
+          { HFA of HfaCount(Shape) lanes in d/s(NFloat).. — address computed
             once into x9 (a subscript index is not re-evaluated).  Overflow
             (leg 29): all lanes travel as consecutive 8-byte stack slots. }
           EmitRecAddrToX0(Arg);
           Self.Emit(#9'mov x9, x0');
-          if NFloat + (Shape - 100) > 8 then
-            for K := 0 to (Shape - 100) - 1 do
+          if ADecl.IsExternal and (HfaStride(Shape) = 4) and
+             (NFloat + HfaCount(Shape) > 8) then
+            NotYet('a Single-HFA record argument spilling to the stack ' +
+              'in a call to an external routine', Arg);
+          if NFloat + HfaCount(Shape) > 8 then
+            for K := 0 to HfaCount(Shape) - 1 do
             begin
               StackOff := AlignTo(StackOff, 8);
-              Self.Emit(Format(#9'ldr x0, [x9, #%d]', [K * 8]));
+              EmitHfaLaneToX0(Shape, K, True);
               EmitPushX0();
               PopRegs.Add(Format('m%d_%d', [StackOff, 8]));
               StackOff := StackOff + 8;
             end
           else
           begin
-            for K := 0 to (Shape - 100) - 1 do
+            for K := 0 to HfaCount(Shape) - 1 do
             begin
-              Self.Emit(Format(#9'ldr x0, [x9, #%d]', [K * 8]));
+              EmitHfaLaneToX0(Shape, K, False);
               EmitPushX0();
-              PopRegs.Add('d' + IntToStr(NFloat + K));
+              PopRegs.Add(HfaReg(Shape, NFloat + K));
             end;
-            NFloat := NFloat + (Shape - 100);
+            NFloat := NFloat + HfaCount(Shape);
           end;
         end;
       end
