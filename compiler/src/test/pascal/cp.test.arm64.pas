@@ -91,6 +91,7 @@ type
     procedure TestWriteLn_StdErrSelectsFd2;
     procedure TestStrToInt_ValidatingWrapperWhenSysUtilsInScope;
     procedure TestRecordFieldStoreFromCall_ReleaseBaseSurvivesCalls;
+    procedure TestFieldOfIndexedRecordGetterOnClassField_CallsGetter;
     { P0-2: generic RECORD instantiation.  A monomorphised record instance is
       a record with methods, so it rides the P0-1 machinery; only the instance
       walk itself was missing. }
@@ -1488,6 +1489,44 @@ begin
   AssertTrue('... before the result is consumed', PRel < PWrite);
   AssertTrue('the method result in x0 survives the release',
     PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PShow) < PRel);
+end;
+
+procedure TArm64BackendTests.TestFieldOfIndexedRecordGetterOnClassField_CallsGetter;
+var
+  AsmT: string;
+begin
+  { H.Toks[1].Line, Toks a class field whose type has a default indexed
+    property returning a record: the element is the GETTER's result.  The
+    field-of-record-value path computed the address of the Toks slot itself
+    plus the Line offset -- no call, no index -- and read garbage. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TTok = record
+        Kind: Integer;
+        Value: string;
+        Line: Integer;
+      end;
+      TToks = class
+        function Get(I: Integer): TTok;
+        property Items[I: Integer]: TTok read Get; default;
+      end;
+      THolder = class
+        N: Integer;
+        Toks: TToks;
+      end;
+    function TToks.Get(I: Integer): TTok;
+    begin
+      Result.Line := I
+    end;
+    var H: THolder;
+    begin
+      WriteLn(H.Toks[1].Line)
+    end.
+    ''', TargetArm64);
+  AssertTrue('the getter is called for the element',
+    Pos(#9'bl _TToks_Get', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestRecordFieldStoreFromCall_ReleaseBaseSurvivesCalls;

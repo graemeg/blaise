@@ -1461,6 +1461,17 @@ begin
   { x0 := ADDRESS of the record VALUE named by a field access — the
     base for a chained read like FTok.Token.TextStart, where Token is a
     record-typed field and the outer access needs its address }
+  { a record-typed PROPERTY read (Obj.ListField[I] on a TList<TRec>, which
+    the semantic pass resolves to a getter call): its value is the getter's
+    result, materialised into a temp -- not the field slot.  Computing the
+    slot address ignored both the getter and the index, so H.Toks[0].Line
+    read H + 8 + 16 (garbage, then a crash).  EmitRecAddrToX0 already
+    routes this shape the same way. }
+  if RecordPropRead(AFA) <> nil then
+  begin
+    EmitRecPropToTemp(RecordPropRead(AFA));
+    Exit;
+  end;
   if AFA.FieldInfo = nil then
     NotYet('address of an unresolved field', AFA);
   { record-typed ELEMENT of an array field (Obj.ArrField[I] as an rvalue, e.g.
