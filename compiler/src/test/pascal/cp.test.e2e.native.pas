@@ -392,6 +392,9 @@ type
     procedure TestRun_Native_IntfFieldAsArg;
     { M8b — nil assignment to interface-typed fields (implicit-Self and non-Self). }
     procedure TestRun_Native_IntfFieldNilAssign;
+    procedure TestRun_Native_IntfFieldChainedReads;
+    procedure TestRun_Native_RecordFieldAsMethodReceiver;
+    procedure TestRun_Native_ManagedRecordCallResultReceiver;
     { M8b — dynarray element ARC: A[I] := 'new' releases old string at A[I]. }
     procedure TestRun_Native_DynArrayElemArc_String;
     { M8b — function returning interface: sret convention, obj+itab propagated. }
@@ -6040,6 +6043,161 @@ procedure TE2ENativeTests.TestRun_Native_IntfFieldNilAssign;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcIntfFieldNilAssign, '99' + LE + 'cleared' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_IntfFieldChainedReads;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { interface fields read as VALUES through every base shape: a class
+    variable, a chained class field, implicit Self, a record variable }
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      IVal = interface
+        function Get: Integer;
+      end;
+      TVal = class(TObject, IVal)
+        V: Integer;
+        function Get: Integer;
+      end;
+      THolder = class
+        F: IVal;
+        function Peek: Integer;
+      end;
+      TOuter = class
+        H: THolder;
+      end;
+      TRec = record
+        I: IVal;
+      end;
+    function TVal.Get: Integer; begin Result := V end;
+    function THolder.Peek: Integer; begin Result := F.Get() + 1 end;
+    var H: THolder; T: TVal; O: TOuter; R: TRec; X: IVal;
+    begin
+      T := TVal.Create(); T.V := 99;
+      H := THolder.Create(); H.F := T;
+      WriteLn(H.F.Get());
+      WriteLn(H.Peek());
+      O := TOuter.Create(); O.H := H;
+      X := O.H.F;
+      WriteLn(X.Get());
+      R.I := T;
+      X := nil;
+      X := R.I;
+      WriteLn(X.Get());
+      WriteLn(Assigned(O.H.F));
+      H.F := nil;
+      WriteLn(Assigned(H.F))
+    end.
+    ''', '99' + LE + '100' + LE + '99' + LE + '99' + LE + 'True' + LE +
+    'False' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_RecordFieldAsMethodReceiver;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { a record-typed FIELD as a method receiver: Self.X inside a record method
+    (DateUtils' TDateTime.ToString), a class field, and a field reached
+    through a record variable.  The method must see the field IN PLACE --
+    Bump writes through Self, so a copy would lose the update. }
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TInner = record
+        A, B: Integer;
+        function Sum: Integer;
+        procedure Bump;
+      end;
+      TOuter = record
+        Tag: Integer;
+        X: TInner;
+        function Total: Integer;
+      end;
+      TBox = class
+        N: Integer;
+        R: TInner;
+        function Get: Integer;
+      end;
+    function TInner.Sum: Integer; begin Result := A + B end;
+    procedure TInner.Bump; begin A := A + 100 end;
+    function TOuter.Total: Integer;
+    begin
+      Result := Self.X.Sum() + Tag
+    end;
+    function TBox.Get: Integer;
+    begin
+      Result := Self.R.Sum() + N
+    end;
+    var O: TOuter; Bx: TBox;
+    begin
+      O.Tag := 10; O.X.A := 1; O.X.B := 2;
+      WriteLn(O.Total());
+      Bx := TBox.Create();
+      Bx.N := 5; Bx.R.A := 3; Bx.R.B := 4;
+      WriteLn(Bx.Get());
+      WriteLn(Bx.R.Sum());
+      Bx.R.Bump();
+      WriteLn(Bx.R.A)
+    end.
+    ''', '13' + LE + '12' + LE + '7' + LE + '103' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_ManagedRecordCallResultReceiver;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { a MANAGED record returned by a call as a method receiver, scalar- and
+    record-returning (Make(I).Show(), Make(I).Neg().Show()).  The receiver
+    temp owns the result's field references: every TTag must be destroyed
+    exactly once -- a missing release leaks (Freed < 6), a double release
+    crashes. }
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TTag = class
+        N: Integer;
+        destructor Destroy; override;
+      end;
+      TM = record
+        T: TTag;
+        Code: string;
+        Amt: Integer;
+        function Neg: TM;
+        function Show: string;
+      end;
+    var Freed: Integer;
+    destructor TTag.Destroy;
+    begin
+      Freed := Freed + 1;
+      inherited Destroy();
+    end;
+    function TM.Neg: TM;
+    begin
+      Result.T := T;
+      Result.Code := Code + '!';
+      Result.Amt := -Amt
+    end;
+    function TM.Show: string;
+    begin
+      Result := Code + IntToStr(T.N) + ':' + IntToStr(Amt)
+    end;
+    function Make(A: Integer): TM;
+    begin
+      Result.T := TTag.Create();
+      Result.T.N := A;
+      Result.Code := 'U' + IntToStr(A);
+      Result.Amt := A
+    end;
+    var I: Integer;
+    begin
+      for I := 1 to 3 do
+      begin
+        WriteLn(Make(I).Show());
+        WriteLn(Make(I).Neg().Show())
+      end;
+      WriteLn('freed ', Freed)
+    end.
+    ''', 'U11:1' + LE + 'U1!1:-1' + LE + 'U22:2' + LE + 'U2!2:-2' + LE +
+    'U33:3' + LE + 'U3!3:-3' + LE + 'freed 6' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_DynArrayElemArc_String;

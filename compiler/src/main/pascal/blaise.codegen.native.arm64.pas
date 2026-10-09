@@ -281,6 +281,9 @@ type
     procedure EmitRecFieldAddrToX0(AFA: TFieldAccessExpr);
     procedure EmitRecAddrToX0(AExpr: TASTExpr);
     procedure EmitRecCallToRret(AExpr: TASTExpr);
+    function EmitRecCallToRretSlot(AExpr: TASTExpr): string;
+    procedure EmitRecTempFieldReleases(ART: TRecordTypeDesc;
+      const ASlot: string; ASpOff: Integer);
     procedure EmitPropRecvToX0(AStmt: TFieldAssignment);
     procedure EmitIndexedPropWrite(AProp: TPropertyInfo; const AOwner: string;
       AVSlot: Integer; AIndex, AValue: TASTExpr; AStmt: TASTStmt);
@@ -1890,6 +1893,36 @@ begin
 end;
 
 procedure TArm64Backend.EmitRecCallToRret(AExpr: TASTExpr);
+begin
+  EmitRecCallToRretSlot(AExpr);
+end;
+
+procedure TArm64Backend.EmitRecTempFieldReleases(ART: TRecordTypeDesc;
+  const ASlot: string; ASpOff: Integer);
+begin
+  { Release the managed fields of a record call-result temp once the call that
+    used it as a receiver has returned.  The temp holds the producing call's
+    references (a function result owns its fields), and the method only
+    borrowed them through Self.  The temp is the frame slot ASlot, or -- when
+    ASlot is empty -- the stack buffer at sp + ASpOff.  The method's result
+    survives in every register it can occupy (x0:x1, d0..d3), as in the
+    record-call-argument cleanup in EmitCall. }
+  Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+  Self.Emit(#9'stp d0, d1, [sp, #-16]!');
+  Self.Emit(#9'stp d2, d3, [sp, #-16]!');
+  Self.Emit(#9'str x19, [sp, #-16]!');
+  if ASlot <> '' then
+    EmitSlotAddr('x19', ASlot)
+  else
+    EmitAddSubImm('add', 'x19', 'sp', 64 + ASpOff);
+  Self.EmitRecordFieldReleases(ART, 'x19', False);
+  Self.Emit(#9'ldr x19, [sp], #16');
+  Self.Emit(#9'ldp d2, d3, [sp], #16');
+  Self.Emit(#9'ldp d0, d1, [sp], #16');
+  Self.Emit(#9'ldp x0, x1, [sp], #16');
+end;
+
+function TArm64Backend.EmitRecCallToRretSlot(AExpr: TASTExpr): string;
 var
   Shape, K: Integer;
   Tmp: string;
@@ -1927,6 +1960,7 @@ begin
     end;
   end;
   EmitSlotAddr('x0', Tmp);
+  Result := Tmp;
 end;
 
 procedure TArm64Backend.EmitPropRecvToX0(AStmt: TFieldAssignment);
@@ -5928,6 +5962,25 @@ begin
     Exit;
   end;
   if (AExpr is TFieldAccessExpr) and
+     (TFieldAccessExpr(AExpr).FieldInfo <> nil) and
+     (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc <> nil) and
+     (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind = tyRecord) and
+     (TFieldAccessExpr(AExpr).PropRead = nil) and
+     (not TFieldAccessExpr(AExpr).IsMethodCall) and
+     (not TFieldAccessExpr(AExpr).IsConstant) and
+     ((TFieldAccessExpr(AExpr).Base = nil) or
+      TFieldAccessExpr(AExpr).IsClassAccess) then
+  begin
+    { a RECORD-typed field of a class instance, of Self, or of a named record
+      (Obj.Rec, Self.Rec, bare Rec inside a method, R.Rec) yields the
+      sub-record's ADDRESS -- the value of a record IS its address, as for the
+      record-field arm further down.  The receiver of Self.Date.ToString()
+      inside a record method, and of Box.R.Sum() on a class, both arrive here;
+      the scalar-only arms below would otherwise reject the record type. }
+    EmitRecFieldAddrToX0(TFieldAccessExpr(AExpr));
+    Exit;
+  end;
+  if (AExpr is TFieldAccessExpr) and
      (TFieldAccessExpr(AExpr).Base <> nil) and
      (TFieldAccessExpr(AExpr).FieldInfo <> nil) and
      TFieldAccessExpr(AExpr).IsClassAccess and
@@ -5936,13 +5989,18 @@ begin
     { chained field read A.B.C: the base expression yields the instance
       pointer.  An OWNED transient base (a call result, +1) is kept across
       the field load and released after — the loaded scalar field value
-      survives the release. }
+      survives the release.  An interface/metaclass field is only taken off a
+      BORROWED base: the transient release below parks x0 alone and would
+      drop an interface's itab half in x1. }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
                tyDynArray]) or
+            ((TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
+               [tyInterface, tyMetaClass]) and
+             not ArcExprOwnsRef(TFieldAccessExpr(AExpr).Base)) or
             TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
       NotYet('read of a field of this type', AExpr);
     if ArcExprOwnsRef(TFieldAccessExpr(AExpr).Base) then
@@ -6037,7 +6095,7 @@ begin
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
-               tyDynArray]) or
+               tyDynArray, tyInterface, tyMetaClass]) or
             TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
       NotYet('read of a field of this type', AExpr);
     if TFieldAccessExpr(AExpr).IsImplicitSelf then
@@ -6085,7 +6143,7 @@ begin
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
-               tyDynArray]) or
+               tyDynArray, tyInterface, tyMetaClass]) or
             TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
       NotYet('read of a field of this type', AExpr);
     { captured record base (leg 19): a captured VALUE record's '_cap_' holds
@@ -6124,7 +6182,7 @@ begin
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
-               tyDynArray]) or
+               tyDynArray, tyInterface, tyMetaClass]) or
             TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
       NotYet('read of a field of this type', AExpr);
     EmitRecFieldAddrToX0(TFieldAccessExpr(TFieldAccessExpr(AExpr).Base));
@@ -6147,7 +6205,7 @@ begin
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
-               tyDynArray]) or
+               tyDynArray, tyInterface, tyMetaClass]) or
             TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
       NotYet('read of a field of this type', AExpr);
     EmitRecCallToRret(TFieldAccessExpr(AExpr).Base);   { x0 = __rret addr }
@@ -6171,7 +6229,7 @@ begin
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
               [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
-               tyDynArray]) or
+               tyDynArray, tyInterface, tyMetaClass]) or
             TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
       NotYet('read of a field of this type', AExpr);
     if RecordPropRead(TFieldAccessExpr(AExpr).Base) <> nil then
@@ -9725,7 +9783,11 @@ procedure TArm64Backend.EmitRecCallDispatch(AExpr: TASTExpr;
 var
   ME: TMethodCallExpr;
   MD: TMethodDecl;
+  RecvRT: TRecordTypeDesc;
+  RecvTmp: string;
 begin
+  RecvRT := nil;
+  RecvTmp := '';
   { record-returning call in an assignment: one dispatcher for free
     functions AND method receivers, so every return shape shares the
     same caller-side store logic }
@@ -9748,9 +9810,12 @@ begin
         EmitRecordBaseAddr('x0', ME.ObjectName, ME.IsVarParam)
       else if IsRecordCallArg(ME.ObjExpr) then
       begin
-        if AggHasManaged(ME.ObjExpr.ResolvedType) then
-          NotYet('record method call on a managed record call result', AExpr);
-        EmitRecCallToRret(ME.ObjExpr)
+        { a record call result as the receiver (MoneyFromStr(..).Negate()):
+          materialised into its per-site temp; a managed temp's fields are
+          released after the call, below }
+        RecvTmp := EmitRecCallToRretSlot(ME.ObjExpr);
+        if not RecretManagedClean(TRecordTypeDesc(ME.ObjExpr.ResolvedType)) then
+          RecvRT := TRecordTypeDesc(ME.ObjExpr.ResolvedType);
       end
       else
         EmitRecAddrToX0(ME.ObjExpr);
@@ -9771,6 +9836,8 @@ begin
     { No adjustment for the receiver push: EmitCall's pop walk consumes it
       (ASelfPushed), so by the time x8 is set sp is back to this level. }
     EmitCall(MD, ME.Name, ME.Args, ADest, True, MD.VTableSlot, ASretSpOff);
+    if RecvRT <> nil then
+      EmitRecTempFieldReleases(RecvRT, RecvTmp, 0);
     Exit;
   end;
   { A bare method call on implicit Self that returns a record (P := Make;) is a
@@ -14620,10 +14687,9 @@ begin
       (TUuid.RandomUuid().ToBytes()).  A record method's Self is an ADDRESS,
       so the result is materialised and copied into a stack temp that lives
       across the call -- __rret itself may be reused while the arguments
-      evaluate.  A managed record's temp would also need its fields
-      released afterwards; that stays an honest hole. }
-    if AggHasManaged(AObjExpr.ResolvedType) then
-      NotYet('method call on a managed record call result', AObjExpr);
+      evaluate.  The bitwise copy MOVES the call result's field references
+      into the temp, so a managed record's temp has its fields released once
+      the method returns (MoneyFromStr(..).ToString()). }
     Sz := (AObjExpr.ResolvedType.RawSize() + 15) and (not 15);
     EmitRecCallToRret(AObjExpr);           { x0 = __rret }
     EmitAddSubImm('sub', 'sp', 'sp', Sz);
@@ -14634,6 +14700,8 @@ begin
     Self.Emit(#9'mov x0, sp');
     EmitPushX0();                          { the receiver EmitCall pops }
     EmitCall(AMethod, AName, AArgs, '', True, AMethod.VTableSlot);
+    if not RecretManagedClean(TRecordTypeDesc(AObjExpr.ResolvedType)) then
+      EmitRecTempFieldReleases(TRecordTypeDesc(AObjExpr.ResolvedType), '', 0);
     EmitAddSubImm('add', 'sp', 'sp', Sz);  { drop the temp }
     Exit;
   end;

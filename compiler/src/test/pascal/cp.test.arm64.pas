@@ -78,6 +78,9 @@ type
     procedure TestRecordMethod_SelfPassedByAddress;
     procedure TestRecordMethod_ProcedureWritesThroughSelf;
     procedure TestRecordMethod_VarParamReceiverNotReAddressed;
+    procedure TestRecordMethod_RecordFieldReceiverIsAddress;
+    procedure TestRecordMethod_ManagedCallResultReceiverReleased;
+    procedure TestFieldRead_InterfaceFieldLoadsPair;
     { P0-2: generic RECORD instantiation.  A monomorphised record instance is
       a record with methods, so it rides the P0-1 machinery; only the instance
       walk itself was missing. }
@@ -1381,6 +1384,128 @@ begin
   AssertTrue('var-param receiver loaded from its slot',
     Pos(#9'ldr x', AsmT) >= 0);
   AssertTrue('callee body still emitted', Pos('TR_G:', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestRecordMethod_RecordFieldReceiverIsAddress;
+var
+  AsmT: string;
+  PCall: Integer;
+begin
+  { A record-typed FIELD as a method receiver -- Self.X.Sum() inside a record
+    method (DateUtils' TDateTime.ToString calls Self.Date.ToString()), and
+    Box.R.Sum() on a class.  The value of a record is its address, so the
+    receiver is Self/Box plus the field offset.  These used to be rejected
+    with "read of a field of this type". }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TInner = record
+        A, B: Integer;
+        function Sum(): Integer;
+      end;
+      TOuter = record
+        Tag: Integer;
+        X: TInner;
+        function Total(): Integer;
+      end;
+      TBox = class
+        N: Integer;
+        R: TInner;
+      end;
+    function TInner.Sum(): Integer;
+    begin
+      Result := A + B
+    end;
+    function TOuter.Total(): Integer;
+    begin
+      Result := Self.X.Sum() + Tag
+    end;
+    var O: TOuter; Bx: TBox;
+    begin
+      WriteLn(O.Total());
+      Bx := TBox.Create();
+      WriteLn(Bx.R.Sum())
+    end.
+    ''', TargetArm64);
+  AssertTrue('record-field receiver compiles', Pos('TOuter_Total:', AsmT) >= 0);
+  { X sits at offset 4 of TOuter: the receiver is Self + 4, not a load of it }
+  PCall := Pos('TOuter_Total:', AsmT);
+  AssertTrue('Self.X is Self + offset',
+    PosEx(#9'add x0, x0, #4', AsmT, PCall) > PCall);
+  AssertTrue('the inner method is called',
+    PosEx(#9'bl _TInner_Sum', AsmT, PCall) > PCall);
+end;
+
+procedure TArm64BackendTests.TestRecordMethod_ManagedCallResultReceiverReleased;
+var
+  AsmT: string;
+  PShow, PRel, PWrite: Integer;
+begin
+  { A MANAGED record returned by a call, used as a method receiver
+    (MoneyFromStr(..).ToString()).  The result is moved into a receiver temp
+    that owns the string field's reference; once the method returns, that
+    reference is released -- before the method's own string result is
+    consumed.  Previously refused outright ("method call on a managed record
+    call result"). }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TM = record
+        Code: string;
+        Amt: Integer;
+        function Show(): string;
+      end;
+    function TM.Show(): string;
+    begin
+      Result := Code
+    end;
+    function Make(): TM;
+    begin
+      Result.Code := 'USD';
+      Result.Amt := 1
+    end;
+    begin
+      WriteLn(Make().Show())
+    end.
+    ''', TargetArm64);
+  PShow := Pos(#9'bl _TM_Show', AsmT);
+  AssertTrue('method on the call result is called', PShow >= 0);
+  PRel := PosEx(#9'bl __StringRelease', AsmT, PShow);
+  PWrite := PosEx(#9'bl __SysWriteStr', AsmT, PShow);
+  AssertTrue('receiver temp field released after the call', PRel > PShow);
+  AssertTrue('... before the result is consumed', PRel < PWrite);
+  AssertTrue('the method result in x0 survives the release',
+    PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PShow) < PRel);
+end;
+
+procedure TArm64BackendTests.TestFieldRead_InterfaceFieldLoadsPair;
+var
+  AsmT: string;
+begin
+  { An interface-typed field of a class read as a value (Assigned(H.F),
+    X := O.H.F) loads the obj:itab PAIR.  The instance-field read arm
+    accepted every managed kind except interfaces. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IVal = interface
+        function Get(): Integer;
+      end;
+      THolder = class
+        N: Integer;
+        F: IVal;
+      end;
+    var H: THolder;
+    begin
+      H := THolder.Create();
+      WriteLn(Assigned(H.F))
+    end.
+    ''', TargetArm64);
+  AssertTrue('interface field read loads obj and itab',
+    Pos(#9'ldp x0, x1, [x0]', AsmT) >= 0);
 end;
 
 { ---- P0-2: generic record instantiation ----------------------------------
