@@ -55,6 +55,7 @@ type
     procedure TestDataDirectives_QuadSymbolReloc;
     procedure TestAsciiWithSemicolonAndSlashes;
     procedure TestExplicitWidthDataDirectives;
+    procedure TestDataDirective_LabelDifference;
     procedure TestCsetAndConditionals;
     procedure TestLseAtomics;
     procedure TestErrors_HaveLineNumbers;
@@ -499,6 +500,49 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64AsmTests.TestDataDirective_LabelDifference;
+var
+  F: TMachOFile;
+  D: TMoSection;
+  Raised: Boolean;
+begin
+  { `.4byte A - B` with both labels in one section is an assemble-time
+    constant -- the OPDF companion writes its RecordOffset this way.  It
+    used to reach ParseImmediate, whose lenient StrToInt64 turned it into 0
+    without a word; with a validating StrToInt it is an EConvertError. }
+  TextWords(
+    'nop' + LineEnding +
+    '.data' + LineEnding +
+    'lstart:' + LineEnding +
+    '.4byte lmid - lstart  # forward, comment ignored' + LineEnding +
+    '.8byte 0' + LineEnding +
+    'lmid:' + LineEnding +
+    '.2byte lstart - lmid' + LineEnding +
+    '.8byte lend - lstart' + LineEnding +
+    'lend:' + LineEnding, F);
+  try
+    D := F.FindSection('__DATA', '__data');
+    AssertTrue(D <> nil);
+    AssertEquals('lmid - lstart = 12', 12, StrAt(D.Data, 0));
+    AssertEquals('lstart - lmid = -12 (low byte)', 244, StrAt(D.Data, 12));
+    AssertEquals('lstart - lmid = -12 (high byte)', 255, StrAt(D.Data, 13));
+    AssertEquals('lend - lstart = 22', 22, StrAt(D.Data, 14));
+  finally
+    F.Free();
+  end;
+  { across sections the difference is not a constant: an error, never 0 }
+  Raised := False;
+  try
+    AssembleArm64ToBytes(
+      'ltext:' + LineEnding + 'nop' + LineEnding +
+      '.data' + LineEnding + 'ldata:' + LineEnding +
+      '.4byte ldata - ltext' + LineEnding);
+  except
+    on E: Exception do Raised := True;
+  end;
+  AssertTrue('cross-section difference is rejected', Raised);
 end;
 
 procedure TArm64AsmTests.TestCsetAndConditionals;

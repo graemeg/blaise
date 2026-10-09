@@ -113,6 +113,7 @@ type
     FNOps: Integer;
     procedure EmitW(AVal: Integer);
     procedure LineError(const AMsg: string);
+    function LabelDifference(const AExpr: string): Int64;
     function BranchDelta(const ASym: string; AKind: TContainerRelocKind;
       out AIsLocal: Boolean): Integer;
     procedure SymReloc(const ASym: string; ARef: TSymRef);
@@ -801,6 +802,31 @@ procedure TArm64Assembler.EmitW(AVal: Integer);
     FW.AppendDWord(FSection, AVal);
   end;
 
+{ `A - B` in a data directive: both labels in the SAME section, so the value
+  is an assemble-time constant, off(A) - off(B).  Pass 1 only sizes the
+  directive (labels may be forward), so it yields 0; pass 2 has every label.
+  An undefined label or a cross-section difference would need a relocation
+  pair -- reported, never silently assembled as 0 (which is what the lenient
+  ParseImmediate fallback used to do to every OPDF RecordOffset). }
+function TArm64Assembler.LabelDifference(const AExpr: string): Int64;
+var
+  P, SecA, SecB, OffA, OffB: Integer;
+  LA, LB: string;
+begin
+  Result := 0;
+  P := Pos(' - ', AExpr);
+  LA := TrimS(Copy(AExpr, 0, P));
+  LB := TrimS(Copy(AExpr, P + 3, Length(AExpr) - P - 3));
+  if FPassNo <> 2 then Exit;
+  if not (FLabelSec.TryGetValue(LA, SecA) and FLabelSec.TryGetValue(LB, SecB)) then
+    LineError('label difference needs two labels defined in this file: ' + AExpr);
+  if SecA <> SecB then
+    LineError('label difference across sections is not a constant: ' + AExpr);
+  FLabelOff.TryGetValue(LA, OffA);
+  FLabelOff.TryGetValue(LB, OffB);
+  Result := Int64(OffA) - Int64(OffB);
+end;
+
 procedure TArm64Assembler.LineError(const AMsg: string);
   begin
     raise EArm64Assembler.Create('line ' + IntToStr(FL.LineNum) + ': '
@@ -945,7 +971,7 @@ procedure TArm64Assembler.HandleDirective;
         for K := 0 to Vals.Count - 1 do
         begin
           Sy := Vals.Get(K);
-          if (FL.Mnemonic = '.quad') and
+          if (FL.Mnemonic = '.quad') and (Pos(' - ', Sy) < 0) and
              (not ((StrAt(Sy, 0) >= Ord('0')) and (StrAt(Sy, 0) <= Ord('9')))
               and (StrAt(Sy, 0) <> Ord('-'))) then
           begin
@@ -961,7 +987,11 @@ procedure TArm64Assembler.HandleDirective;
             FW.AppendQWord(FSection, 0);
             Continue;
           end;
-          V := ParseImmediate(Sy);
+          if Pos(' - ', Sy) > 0 then
+            { `A - B`: a label difference (the OPDF companion's RecordOffset) }
+            V := Self.LabelDifference(Sy)
+          else
+            V := ParseImmediate(Sy);
           if FL.Mnemonic = '.byte' then FW.AppendByte(FSection, Integer(V))
           else if FL.Mnemonic = '.hword' then FW.AppendWord(FSection, Integer(V))
           else if FL.Mnemonic = '.word' then FW.AppendDWord(FSection, Integer(V))
