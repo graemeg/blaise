@@ -1184,9 +1184,10 @@ end;
 
 { ----- Const registration --------------------------------------- }
 
-procedure RegisterConsts(AIface: TUnitInterface; ATable: TSymbolTable);
+procedure RegisterConsts(AIface: TUnitInterface; ATable: TSymbolTable;
+                         ASemantic: TSemanticAnalyser);
 var
-  I: Integer;
+  I, J: Integer;
   Entry: TConstEntry;
   Sym: TSymbol;
   TypeDesc: TTypeDesc;
@@ -1194,6 +1195,30 @@ begin
   for I := 0 to AIface.Consts.Count - 1 do
   begin
     Entry := TConstEntry(AIface.Consts.Items[I]);
+    if Entry.Decl.IsArrayConst and (Entry.Decl.ResolvedArrayType <> '') then
+    begin
+      { an ARRAY const: rebuild exactly what the source path
+        (AnalyseArrayConstDecls) defines -- its static-array type, its data
+        label in the declaring unit's object, and its elements }
+      TypeDesc := ResolveImportTypeName(Entry.Decl.ResolvedArrayType, ATable,
+        ASemantic);
+      if TypeDesc <> nil then
+      begin
+        Sym := TSymbol.Create(Entry.Decl.Name, skConstant, TypeDesc);
+        Sym.IsGlobal := True;
+        Sym.ConstArrayLabel := Entry.Decl.ResolvedEmitName;
+        Sym.ConstArray := TStringList.Create();
+        for J := 0 to Entry.Decl.ArrayElements.Count - 1 do
+          Sym.ConstArray.Add(Entry.Decl.ArrayElements.Strings[J]);
+        Sym.OwningUnit := AIface.Name;
+        if not ATable.Define(Sym) then
+        begin
+          ATable.ExtractLocal(Entry.Decl.Name);
+          ATable.Define(Sym);
+        end;
+        Continue;
+      end;
+    end;
     TypeDesc := ResolveTypeName(Entry.TypeRef.TypeName, ATable);
 
     { Untyped const: derive a builtin TTypeDesc from the literal kind.
@@ -1458,7 +1483,7 @@ begin
   ATable.DefineOwningUnit := AIface.Name;
   try
     RegisterTypes  (AIface, ATable, ASemantic);
-    RegisterConsts (AIface, ATable);
+    RegisterConsts (AIface, ATable, ASemantic);
     RegisterVars   (AIface, ATable, ASemantic);
     RegisterRoutines(AIface, ATable, ASemantic);
     RegisterGenericRoutines(AIface, ATable);

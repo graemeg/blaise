@@ -54,7 +54,13 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 22; { v22: an assignment ('asn') carries the unit qualifier
+  IFACE_VERSION = 23; { v23: a CONST entry carries an ARRAY const's resolved
+                          type spelling, data label and elements.  The block
+                          held only scalar fields, so a warm import rebuilt
+                          every interface array const as an Integer and the
+                          importing program was rejected
+                          (BUG-20261008-warm-embed-dynarray-const-import).
+                        v22: an assignment ('asn') carries the unit qualifier
                           of its target ('Unit.Var := ...'), which the parser
                           used to drop -- a qualified write in a serialised
                           body landed in the last-wins unit's variable.
@@ -328,6 +334,22 @@ begin
   Result := EncodeLpstr(AUnitName + '.' + ATypeName);
 end;
 
+{ v23: an array const's tail -- a presence flag, then its resolved type
+  spelling, data label and elements.  Absent (flag 0) for a scalar const. }
+function EncodeArrayConstTail(ADecl: TConstDecl): string;
+begin
+  if not ADecl.IsArrayConst or (ADecl.ResolvedArrayType = '') or
+     (ADecl.ArrayElements = nil) then
+  begin
+    Result := EncodeBool(False);
+    Exit;
+  end;
+  Result := EncodeBool(True) +
+            EncodeLpstr(ADecl.ResolvedArrayType) +
+            EncodeLpstr(ADecl.ResolvedEmitName) +
+            EncodeStringList(ADecl.ArrayElements);
+end;
+
 function WriteConsts(AIface: TUnitInterface): string;
 var
   I:  Integer;
@@ -345,7 +367,8 @@ begin
         EncodeQualRefParts(C.TypeRef.UnitName, C.TypeRef.TypeName) +
         EncodeInt64(C.Decl.IntVal) +
         EncodeLpstr(C.Decl.StrVal) +
-        EncodeFlags(C.Decl.IsString, C.Decl.IsFloat));
+        EncodeFlags(C.Decl.IsString, C.Decl.IsFloat) +
+        EncodeArrayConstTail(C.Decl));
     end;
     SB.AppendLine('END');
     Result := SB.ToString();
@@ -1694,6 +1717,15 @@ begin
     Entry.Decl.StrVal   := StrVal;
     Entry.Decl.IsString := IsString;
     Entry.Decl.IsFloat  := IsFloat;
+    { v23 array-const tail (EncodeArrayConstTail) }
+    if DecodeBool(AText, APos) then
+    begin
+      Entry.Decl.IsArrayConst      := True;
+      Entry.Decl.ResolvedArrayType := ReadLpstrAt(AText, APos);
+      Entry.Decl.ResolvedEmitName  := ReadLpstrAt(AText, APos);
+      Entry.Decl.ArrayElements     := TStringList.Create();
+      ReadStringListBlock(AText, APos, Entry.Decl.ArrayElements);
+    end;
     Entry.TypeRef       := MakeQualRef(RefUnit, RefType);
     AIface.AddConst(Entry);
   end;

@@ -238,6 +238,7 @@ type
     procedure TestRoundTrip_LinkLibsPreserved;
     { Int const round-trips. }
     procedure TestRoundTrip_IntConstPreserved;
+    procedure TestRoundTrip_ArrayConstPreserved;
     { Named integer subrange alias round-trips its IsSubrange + lo..hi bounds,
       so array[OtherUnit.TSub] still folds across separate compilation. }
     procedure TestRoundTrip_NamedSubrangeAlias_BoundsPreserved;
@@ -2747,7 +2748,9 @@ begin
   Iface := TUnitInterface.Create('U');
   try
     Buf := WriteUnitInterface(Iface);
-    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 22 since
+    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 23 since
+      a CONST entry carries an array const's resolved type, data label and
+      elements (v22 since
       an assignment carries its target's unit qualifier ('Unit.Var := ...'),
       which the parser used to drop (v21 since
       an ENUM-MEMBER subrange alias now exports a RESOLVED base enum name +
@@ -2772,7 +2775,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 22', Buf) = 0);
+      Pos('BLAISE-IFACE 23', Buf) = 0);
   finally
     Iface.Free();
   end;
@@ -2858,6 +2861,53 @@ begin
       AssertEquals('value',  Int64(4096), C.Decl.IntVal);
       AssertEquals('type ref unit', '$builtin', C.TypeRef.UnitName);
       AssertEquals('type ref name', 'Integer',  C.TypeRef.TypeName);
+    finally
+      Dst.Free();
+    end;
+  finally
+    Src.Free();
+  end;
+end;
+
+procedure TIfaceIOTests.TestRoundTrip_ArrayConstPreserved;
+var
+  Src, Dst: TUnitInterface;
+  C:        TConstEntry;
+  Buf:      string;
+begin
+  { An array const's resolved type, data label and elements survive the
+    .bif: the CONST block used to carry only the scalar fields, so a warm
+    import rebuilt it as an Integer
+    (BUG-20261008-warm-embed-dynarray-const-import).  A scalar const in the
+    same block stays a scalar. }
+  Src := BuildIfaceWithIntConst();
+  try
+    C := TConstEntry.Create();
+    C.Decl := TConstDecl.Create();
+    C.Decl.Name := 'Grid';
+    C.Decl.IsArrayConst := True;
+    C.Decl.ResolvedArrayType := 'array[0..1] of array[0..2] of Integer';
+    C.Decl.ResolvedEmitName := '__bac_Grid';
+    C.Decl.ArrayElements := TStringList.Create();
+    C.Decl.ArrayElements.Add('1');
+    C.Decl.ArrayElements.Add('-2');
+    C.TypeRef := MakeBuiltinRef('Integer');
+    Src.AddConst(C);
+    Buf := WriteUnitInterface(Src);
+    Dst := ReadUnitInterface(Buf);
+    try
+      C := Dst.FindConst('Grid');
+      AssertTrue('Grid present', C <> nil);
+      AssertTrue('is an array const', C.Decl.IsArrayConst);
+      AssertEquals('resolved type', 'array[0..1] of array[0..2] of Integer',
+        C.Decl.ResolvedArrayType);
+      AssertEquals('data label', '__bac_Grid', C.Decl.ResolvedEmitName);
+      AssertEquals('element count', 2, C.Decl.ArrayElements.Count);
+      AssertEquals('element 1', '-2', C.Decl.ArrayElements.Strings[1]);
+      C := Dst.FindConst('MaxBuf');
+      AssertTrue('scalar const still present', C <> nil);
+      AssertTrue('scalar const is not an array', not C.Decl.IsArrayConst);
+      AssertEquals('scalar value', Int64(4096), C.Decl.IntVal);
     finally
       Dst.Free();
     end;

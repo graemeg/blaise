@@ -783,6 +783,12 @@ type
       RTL-internal consts) do not collide at link time.  Empty for non-array
       consts. }
     ResolvedEmitName: string;
+    { The array const's RESOLVED type as a type spelling the importer can
+      rebuild -- 'array[0..2] of Integer', nested for a multi-dimensional
+      const -- set by uSemantic.  Every index form (range, enum, Boolean,
+      named type, EMBED) is reduced to its ordinal bounds here, so the .bif
+      carries one shape.  Empty for non-array consts. }
+    ResolvedArrayType: string;
     { Canonical, mangled data label for a JUMBO set const's byte blob
       (mirrors ResolvedEmitName for array consts). Empty otherwise. }
     ResolvedSetEmitName: string;

@@ -312,6 +312,10 @@ function BuildConstEntry(ASrc:        TConstDecl;
 begin
   Result := TConstEntry.Create();
   Result.Decl    := CloneConstDecl(ASrc);
+  { an array const's resolved type and data label travel with it, so an
+    importer can rebuild the const instead of reading it as a scalar }
+  Result.Decl.ResolvedEmitName  := ASrc.ResolvedEmitName;
+  Result.Decl.ResolvedArrayType := ASrc.ResolvedArrayType;
   Result.TypeRef := ResolveTypeRef(ASrc.TypeName, AIface, ADeps);
 end;
 

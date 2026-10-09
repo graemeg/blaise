@@ -248,6 +248,7 @@ type
       rejected @Cnt -- the same gap the source path had
       (BUG-20260923-addr-of-openarray-proc). }
     procedure TestIncrementalRebuild_OpenArrayProcType_Warm;
+    procedure TestIncrementalRebuild_InterfaceArrayConsts_Warm;
     procedure TestDebugOpdf_PerUnitSection_InDependencyObject;
     { Regression (F1-followup cross-unit static members): a class with `static`
       members — a static var, a static method, and a static const — declared in
@@ -3254,6 +3255,85 @@ begin
     Rc := RunBinary(ProgBin, Captured);
     AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
     AssertEquals(Format('build%d stdout', [Pass]), '3' + #10 + '5' + #10, Captured);
+  end;
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_InterfaceArrayConsts_Warm;
+const
+  LibSrc =
+    '''
+    unit ArrConsts;
+    interface
+    type
+      TColour = (cRed, cGreen, cBlue);
+      TTriple = array[0..2] of Integer;
+    const
+      Fixed: array[1..3] of Integer = (7, 8, 9);
+      Dyn: array of Byte = (4, 5, 6, 250);
+      Names: array[TColour] of string = ('red', 'green', 'blue');
+      Grid: array[0..1, 0..2] of Integer = ((1, 2, 3), (4, 5, 6));
+      Named: TTriple = (10, 20, 30);
+      Flags: array[Boolean] of Integer = (100, 200);
+    implementation
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseArrConsts;
+    uses ArrConsts;
+    var I: Integer;
+    begin
+      I := 2;
+      WriteLn(Fixed[1], ' ', Fixed[I], ' ', Low(Fixed), ' ', High(Fixed));
+      WriteLn(Dyn[3], ' ', Length(Dyn));
+      WriteLn(Names[cGreen], ' ', Names[cBlue]);
+      WriteLn(Grid[1, 2], ' ', Grid[0, I]);
+      WriteLn(Named[1]);
+      WriteLn(Flags[True])
+    end.
+    ''';
+var
+  LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc, Pass: Integer;
+begin
+  { Array constants declared in a unit INTERFACE, read by an importing
+    program.  Pass 0 builds the unit from source; pass 1 imports it from its
+    cached .bif.  The CONST block used to carry only scalar fields, so on the
+    warm pass every array const came back as an Integer and the program was
+    rejected ("String subscript '[]' requires a string expression, got
+    'Integer'") -- BUG-20261008-warm-embed-dynarray-const-import.  Every index
+    form is covered: integer range, dynamic, enum, multi-dimensional, a named
+    array type and Boolean. }
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  LibPas   := FScratch + '/ArrConsts.pas';
+  ProgPas  := FScratch + '/use_arrconsts.pas';
+  ProgBin  := FScratch + '/use_arrconsts';
+  CacheDir := FScratch + '/units-arrconsts';
+
+  WriteFile(LibPas, LibSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+  for Pass := 0 to 1 do
+  begin
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch], Captured);
+    AssertEquals(Format('build%d exit code (out: %s)', [Pass, Captured]), 0, Rc);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
+    AssertEquals(Format('build%d stdout', [Pass]),
+      '7 8 1 3' + #10 + '250 4' + #10 + 'green blue' + #10 + '6 3' + #10 +
+      '20' + #10 + '200' + #10, Captured);
   end;
 end;
 

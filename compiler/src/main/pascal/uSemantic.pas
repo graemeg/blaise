@@ -6878,6 +6878,23 @@ begin
     ACD.ArrayHighBound);
 end;
 
+
+{ A static-array type as a type SPELLING: 'array[L..H] of E', recursing into
+  a nested static array (a multi-dimensional const).  Used to carry an array
+  const's resolved type across a unit's .bif, where the importer parses it
+  back through its inline-type path. }
+function ConstArrayTypeSpelling(ATD: TTypeDesc): string;
+begin
+  if ATD is TStaticArrayTypeDesc then
+    Result := Format('array[%d..%d] of %s',
+      [TStaticArrayTypeDesc(ATD).LowBound, TStaticArrayTypeDesc(ATD).HighBound,
+       ConstArrayTypeSpelling(TStaticArrayTypeDesc(ATD).ElementType)])
+  else if ATD <> nil then
+    Result := ATD.Name
+  else
+    Result := '';
+end;
+
 procedure TSemanticAnalyser.AnalyseArrayConstDecls(ABlock: TBlock;
   AIsInterface: Boolean);
 { Second-pass constant analysis for array-typed constants.
@@ -7004,6 +7021,9 @@ begin
     CD.IsExportedConst := AIsInterface;
     if CD.ResolvedEmitName = '' then
       CD.ResolvedEmitName := Self.NewArrayConstLabel(CD.Name, AIsInterface);
+    { the resolved type, for the unit's .bif: an importer rebuilds the const
+      from this spelling (BUG-20261008-warm-embed-dynarray-const-import) }
+    CD.ResolvedArrayType := ConstArrayTypeSpelling(ArrTD);
     Sym := TSymbol.Create(CD.Name, skConstant, ArrTD);
     Sym.IsGlobal := True;
     Sym.ConstArrayLabel := CD.ResolvedEmitName;
