@@ -70,6 +70,7 @@ type
     { Single is a 4-byte IEEE-754 float — alignment 4, not 8.  A record
       of three back-to-back Single fields totals 12 bytes, not 24. }
     procedure TestSemantic_ThreeSingleRecord_TotalSizeIs12;
+    procedure TestCodegen_StmtRecordMethodOnClassRecordField_PassesAddress;
   end;
 
 implementation
@@ -776,6 +777,38 @@ begin
     AssertTrue(Target + ': no Release for a const record param',
       Pos('_StringRelease', GenAsm(Src, Target)) < 0);
   end;
+end;
+
+procedure TRecordTests.TestCodegen_StmtRecordMethodOnClassRecordField_PassesAddress;
+const
+  Src = '''
+    program P;
+    type
+      TInner = record
+        A, B: Integer;
+        procedure Bump;
+      end;
+      TBox = class
+        N: Integer;
+        R: TInner;
+      end;
+    procedure TInner.Bump; begin A := A + 100 end;
+    var Bx: TBox;
+    begin
+      Bx := TBox.Create();
+      Bx.R.Bump()
+    end.
+    ''';
+begin
+  { Bx.R.Bump(); as a STATEMENT: the receiver is an expression (ObjectName is
+    empty), and a record method's Self is the field's ADDRESS, instance + 12.
+    x86-64 took the named-record arm and emitted EmitVarAddr of the empty
+    name -- `leaq (%rip)` -- so Bump wrote through a garbage Self
+    (BUG-20261009-x86-class-record-field-method-stmt, segfault on Linux). }
+  AssertEquals('Self = Bx + field offset', '',
+    AsmMissing(Src, 'leaq 12(%rcx), %rcx', 'add x0, x0, #12'));
+  AssertTrue('x86-64: no address of an empty-named symbol',
+    Pos('leaq (%rip)', GenAsm(Src, TargetX86_64)) < 0);
 end;
 
 initialization

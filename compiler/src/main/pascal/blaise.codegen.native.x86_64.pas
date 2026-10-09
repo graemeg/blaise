@@ -12821,9 +12821,15 @@ begin
       if ACall.ImplicitBaseInfo.TypeDesc.Kind <> tyRecord then
         Self.Emit(#9'movq (%r10), %r10');
     end
-    else if MD.IsRecordMethod and ACall.IsVarParam then
+    { A record method on a NAMED record takes its address here.  A receiver
+      EXPRESSION (Bx.R.Bump(), ObjectName empty) falls through to the ObjExpr
+      arm, which yields a record-typed field's address -- EmitVarAddr of the
+      empty name emitted `leaq (%rip)` and called with a garbage Self.  The
+      expression path, EmitMethodCallExpr, already tests ObjectName first. }
+    else if MD.IsRecordMethod and ACall.IsVarParam and
+            (ACall.ObjectName <> '') then
       Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(ACall.ObjectName)]))
-    else if MD.IsRecordMethod then
+    else if MD.IsRecordMethod and (ACall.ObjectName <> '') then
     begin
       if FSretFunc and SameText(ACall.ObjectName, 'Result') then
         Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand('Result')]))
@@ -12887,9 +12893,15 @@ begin
       if ACall.ImplicitBaseInfo.TypeDesc.Kind <> tyRecord then
         Self.Emit(#9'movq (%rax), %rax');
     end
-    else if MD.IsRecordMethod and ACall.IsVarParam then
+    { A record method on a NAMED record takes its address here.  A receiver
+      EXPRESSION (Bx.R.Bump(), ObjectName empty) falls through to the ObjExpr
+      arm, which yields a record-typed field's address -- EmitVarAddr of the
+      empty name emitted `leaq (%rip)` and called with a garbage Self.  The
+      expression path, EmitMethodCallExpr, already tests ObjectName first. }
+    else if MD.IsRecordMethod and ACall.IsVarParam and
+            (ACall.ObjectName <> '') then
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]))
-    else if MD.IsRecordMethod then
+    else if MD.IsRecordMethod and (ACall.ObjectName <> '') then
     begin
       if FSretFunc and SameText(ACall.ObjectName, 'Result') then
         Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Result')]))
