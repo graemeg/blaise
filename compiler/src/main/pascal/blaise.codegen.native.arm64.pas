@@ -186,6 +186,8 @@ type
                                  { the RTL release routine for each live
                                    _pendrel_N slot (_ClassRelease or
                                    _DynArrayRelease) }
+    FPendRelUsed: Boolean;       { this frame deferred a release: its
+                                   _pendrel slots are zeroed at entry }
     FIndirectSlot: string;       { VIRT_INDIRECT: frame slot holding the
                                    address of the procedural value to call }
     FJArgN: Integer;             { counter for '__jarg_<n>' jumbo-set
@@ -259,6 +261,7 @@ type
     function  DeferNativeClassRelease: Boolean;
     function  DeferNativeRelease(const AReleaseSym: string): Boolean;
     procedure FlushNativePendingReleases(AMark: Integer);
+    procedure EmitPendRelSlotsZero;
     { Load a captured var's field-access base / method receiver through its
       hidden '_cap_' slot (leg 19).  Returns True when AName was captured. }
     function  EmitCapturedBase(const AReg, AName: string;
@@ -1112,6 +1115,7 @@ begin
   for I := 0 to PENDREL_SLOTS - 1 do
     AddLocal(Format('_pendrel_%d', [I]), 8);
   FPendingRelCount := 0;
+  FPendRelUsed := False;
   { Owned-string-transient CALL-ARG park slots (x29-relative, STABLE across the
     call's own arg pushes/pops and the post-call result spills).  A call parks
     each owned-string-transient arg here pre-call and reloads it post-call for
@@ -1151,7 +1155,24 @@ begin
   EmitStoreSlot('x0', Format('_pendrel_%d', [FPendingRelCount]));
   FPendingRelSyms[FPendingRelCount] := AReleaseSym;
   FPendingRelCount := FPendingRelCount + 1;
+  FPendRelUsed := True;
   Result := True;
+end;
+
+procedure TArm64Backend.EmitPendRelSlotsZero;
+var
+  I: Integer;
+begin
+  { A deferred release is armed only when the expression that defers runs,
+    but the statement-end flush is unconditional -- `(I > 2) and
+    (MakeA().B.V = 7)` skips the call on some iterations.  So every slot
+    starts at nil (written right after the frame reserve, in a frame that
+    defers at all) and the flush re-nils it, and a skipped evaluation
+    releases nil -- a no-op (BUG-20261009-pendrel-stale-slot). }
+  if not FPendRelUsed then
+    Exit;
+  for I := 0 to PENDREL_SLOTS - 1 do
+    EmitStoreSlot('xzr', Format('_pendrel_%d', [I]));
 end;
 
 procedure TArm64Backend.FlushNativePendingReleases(AMark: Integer);
@@ -1163,6 +1184,7 @@ begin
     FPendingRelCount := FPendingRelCount - 1;
     EmitLoadSlot('x0', Format('_pendrel_%d', [FPendingRelCount]));
     EmitCallSym(FPendingRelSyms[FPendingRelCount]);
+    EmitStoreSlot('xzr', Format('_pendrel_%d', [FPendingRelCount]));
   end;
 end;
 
@@ -12526,6 +12548,7 @@ begin
   FrameAligned := (FFrameSize + 15) and (not 15);
   if FrameAligned > 0 then
     EmitAddSubImm('sub', 'sp', 'sp', FrameAligned);
+  EmitPendRelSlotsZero();
   FAsm.Append(BodyBuf.ToString());
   BodyBuf.Free();
   if (ADecl.EnvCaptured <> nil) and not ADecl.IsAnonThunk then
@@ -16071,6 +16094,7 @@ begin
   FrameAligned := (FFrameSize + 15) and (not 15);
   if FrameAligned > 0 then
     EmitAddSubImm('sub', 'sp', 'sp', FrameAligned);
+  EmitPendRelSlotsZero();
   FAsm.Append(BodyBuf.ToString());
   BodyBuf.Free();
 
@@ -16432,6 +16456,7 @@ begin
   FrameAligned := (FFrameSize + 15) and (not 15);
   if FrameAligned > 0 then
     EmitAddSubImm('sub', 'sp', 'sp', FrameAligned);
+  EmitPendRelSlotsZero();
   FAsm.Append(BodyBuf.ToString());
   BodyBuf.Free();
   FFrame.Clear();

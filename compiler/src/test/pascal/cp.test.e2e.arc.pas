@@ -102,6 +102,12 @@ type
       register) and release the discarded result's managed content
       (BUG-20260722-discarded-sret-call-no-buffer). }
     procedure TestRun_DiscardedSretCalls_NoLeak;
+    { A deferred transient release under a short-circuit `and` that skips
+      the deferring operand on some iterations: the statement-end flush must
+      release nil, not an uninitialised slot (arm64 crashed) or the pointer an
+      earlier iteration already released (x86-64 double release, a crash
+      under --debug).  BUG-20261009-pendrel-stale-slot. }
+    procedure TestRun_DeferredRelease_ShortCircuitSkip;
     { A by-value dyn-array param must keep the buffer alive even when the
       caller's own reference is dropped mid-call
       (BUG-20260721-byval-dynarray-param-no-arc). }
@@ -923,6 +929,62 @@ begin
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('field values survive copy', '15' + LE, Output);
   { the double-release from a bare-memcpy copy shows up here }
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EArcTests.TestRun_DeferredRelease_ShortCircuitSkip;
+const
+  Src = '''
+    program P;
+    type
+      TB = class V: Integer; end;
+      TA = class
+        B: TB;
+        constructor Create();
+        destructor Destroy(); override;
+      end;
+    var Frees: Integer;
+    constructor TA.Create();
+    begin
+      B := TB.Create();
+      B.V := 7
+    end;
+    destructor TA.Destroy();
+    begin
+      Frees := Frees + 1;
+      inherited Destroy()
+    end;
+    function MakeA(): TA;
+    begin
+      Result := TA.Create()
+    end;
+    procedure Spoil();
+    var A, B, C, D, E, F, G, H: Int64;
+    begin
+      A := -1; B := -1; C := -1; D := -1; E := -1; F := -1; G := -1; H := -1;
+      if A + B + C + D + E + F + G + H = 0 then WriteLn('x')
+    end;
+    procedure Run(First: Boolean);
+    var I, Hits: Integer;
+    begin
+      Hits := 0;
+      for I := 0 to 5 do
+        if ((First and (I > 2)) or (not First and (I < 3))) and
+           (MakeA().B.V = 7) then
+          Hits := Hits + 1;
+      WriteLn(Hits, ' ', Frees)
+    end;
+    begin
+      Spoil();
+      Run(True);
+      Frees := 0;
+      Spoil();
+      Run(False)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '3 3' + LE + '3 3' + LE, 0);
   AssertLeakFreeOnAll(Src, '');
 end;
 

@@ -231,6 +231,8 @@ type
                                   _pendrel_N slot (_ClassRelease or
                                   _DynArrayRelease) }
     FProgHasPendRel:  Boolean;  { $main used a pending-release slot -> emit .bss }
+    FPendRelUsed:     Boolean;  { this function deferred a release: its frame
+                                  _pendrel slots are zeroed at entry }
 
     { Loop label stacks for break/continue: the top entry is the innermost
       loop's end-label (break) or condition-label (continue).
@@ -6207,6 +6209,7 @@ begin
     FFrame.Add(Format('_pendrel_%d', [I]), -Offset);
     FFrameTypes.Add(Format('_pendrel_%d', [I]), nil);
   end;
+  FPendRelUsed := False;
   { Register promotion: slots to save/restore the callee-saved incumbents
     of %r14/%r15 across this function (pass 2 only). }
   if FPromoActive then
@@ -6952,7 +6955,9 @@ begin
   Self.Emit(Format(#9'movq %%rax, %s',
     [Self.VarOperand(Format('_pendrel_%d', [FPendingRelCount]))]));
   if not Self.IsLocal(Format('_pendrel_%d', [FPendingRelCount])) then
-    FProgHasPendRel := True;   { $main body uses a .bss pendrel slot }
+    FProgHasPendRel := True    { $main body uses a .bss pendrel slot }
+  else
+    FPendRelUsed := True;      { a frame slot: zeroed at function entry }
   FPendingRelSyms[FPendingRelCount] := AReleaseSym;
   FPendingRelCount := FPendingRelCount + 1;
   Result := True;
@@ -6970,6 +6975,11 @@ begin
     Self.Emit(Format(#9'movq %s, %%rdi',
       [Self.VarOperand(Format('_pendrel_%d', [FPendingRelCount]))]));
     Self.Emit(#9'callq ' + FPendingRelSyms[FPendingRelCount]);
+    { re-nil the slot: a later evaluation of this statement that skips the
+      deferring operand (a short-circuit `and`) must release nil, not the
+      pointer already released here (BUG-20261009-pendrel-stale-slot) }
+    Self.Emit(Format(#9'movq $0, %s',
+      [Self.VarOperand(Format('_pendrel_%d', [FPendingRelCount]))]));
   end;
 end;
 
@@ -23752,6 +23762,12 @@ begin
   end;
   if FFrameSize > 0 then
     Self.Emit(Format(#9'subq $%d, %%rsp', [FFrameSize]));
+  { a frame that defers a release starts its _pendrel slots at nil: the
+    flush is unconditional, the arming is not }
+  if FPendRelUsed then
+    for I := 0 to PENDREL_SLOTS - 1 do
+      Self.Emit(Format(#9'movq $0, %s',
+        [Self.VarOperand(Format('_pendrel_%d', [I]))]));
   FAsm.Append(BodyBuf.ToString());
   BodyBuf.Free();
   Self.DbgEndFunc();

@@ -66,6 +66,11 @@ type
       (BUG-20260722-discarded-sret-call-no-buffer). }
     procedure TestMain_DiscardedRecordCall_ReleasesElements;
     procedure TestMain_DiscardedInterfaceCall_ReleasesObj;
+    { BUG-20261009-pendrel-stale-slot: a statement-deferred release must
+      re-nil its _pendrel slot after the flush (and the frame must start the
+      slots at nil), because a short-circuit `and` can skip the deferring
+      operand on a later evaluation of the same statement. }
+    procedure TestPendRel_SlotReNilledAfterFlush;
     { A by-value dyn-array parameter is a co-owning ref-counted pointer:
       the callee must retain it on entry and release it at exit
       (BUG-20260721-byval-dynarray-param-no-arc). }
@@ -407,6 +412,63 @@ begin
   MainR := Copy(MainR, 0, E);
   AssertTrue('discarded record result''s elements are released in main',
     Pos('_StringRelease', MainR) >= 0);
+end;
+
+procedure TNativeArcTests.TestPendRel_SlotReNilledAfterFlush;
+const
+  Src = '''
+    program P;
+    type
+      TB = class V: Integer; end;
+      TA = class
+        B: TB;
+        constructor Create();
+        destructor Destroy(); override;
+      end;
+    var Frees: Integer;
+    constructor TA.Create();
+    begin
+      B := TB.Create();
+      B.V := 7
+    end;
+    destructor TA.Destroy();
+    begin
+      Frees := Frees + 1;
+      inherited Destroy()
+    end;
+    function MakeA(): TA;
+    begin
+      Result := TA.Create()
+    end;
+    procedure Spoil();
+    var A, B, C, D, E, F, G, H: Int64;
+    begin
+      A := -1; B := -1; C := -1; D := -1; E := -1; F := -1; G := -1; H := -1;
+      if A + B + C + D + E + F + G + H = 0 then WriteLn('x')
+    end;
+    procedure Run(First: Boolean);
+    var I, Hits: Integer;
+    begin
+      Hits := 0;
+      for I := 0 to 5 do
+        if ((First and (I > 2)) or (not First and (I < 3))) and
+           (MakeA().B.V = 7) then
+          Hits := Hits + 1;
+      WriteLn(Hits, ' ', Frees)
+    end;
+    begin
+      Spoil();
+      Run(True);
+      Frees := 0;
+      Spoil();
+      Run(False)
+    end.
+    ''';
+begin
+  AssertEquals('the flushed slot is re-nilled', '',
+    AsmMissing(Src,
+      #9'callq _ClassRelease' + #10 + #9'addq $8, %rsp' + #10 + #9'movq $0, -',
+      #9'bl __ClassRelease' + #10 + #9'stur xzr, [x29, #-'));
 end;
 
 procedure TNativeArcTests.TestMain_DiscardedInterfaceCall_ReleasesObj;
