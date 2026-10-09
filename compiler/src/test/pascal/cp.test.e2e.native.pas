@@ -129,6 +129,10 @@ type
     procedure TestRun_Native_Double_Comparison;
     procedure TestRun_Native_Double_WriteLn;
     procedure TestRun_Native_Single_GlobalReadWrite;
+    { A Single-returning method -- static, virtual, through a field receiver
+      -- read in WriteLn, assigned, and in arithmetic.  arm64 left the s0
+      result unwidened and printed 0.0. }
+    procedure TestRun_Native_Single_MethodResult;
     procedure TestRun_Native_Double_FuncParam;
     procedure TestRun_Native_Double_FuncReturn;
     procedure TestRun_Native_FloatCompareInOrAnd;
@@ -2170,6 +2174,45 @@ procedure TE2ENativeTests.TestRun_Native_Double_WriteLn;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcDoubleWriteLn, '1.5' + LE + '2.5' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_Single_MethodResult;
+const
+  Src = '''
+    program P;
+    type
+      TBase = class
+        function S(N: Integer): Single; virtual;
+        function T(N: Integer): Single;
+      end;
+      THolder = class
+        F: TBase;
+      end;
+    function TBase.S(N: Integer): Single;
+    begin
+      Result := N + 0.5
+    end;
+    function TBase.T(N: Integer): Single;
+    begin
+      Result := N + 0.25
+    end;
+    var B: TBase; H: THolder; X: Single; D: Double;
+    begin
+      B := TBase.Create();
+      H := THolder.Create();
+      H.F := B;
+      WriteLn(B.S(2):0:2);
+      WriteLn(B.T(2):0:2);
+      X := B.S(3);
+      WriteLn(X:0:2);
+      D := H.F.T(4) * 2;
+      WriteLn(D:0:2);
+      H.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2.50' + LE + '2.25' + LE + '3.50' + LE + '8.50' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_Single_GlobalReadWrite;

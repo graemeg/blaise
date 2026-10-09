@@ -89,6 +89,9 @@ type
     procedure TestRecordReturn_SmallImageStoredWidthExact;
     procedure TestJumboSetTypedConst_IsBitmapAddress;
     procedure TestWriteLn_StdErrSelectsFd2;
+    { A Single-returning METHOD call in float context comes back in s0 and
+      must be widened to d0 (the D0 contract); arm64 read the stale d0. }
+    procedure TestSingleMethodResult_WidenedAfterCall;
     procedure TestStrToInt_ValidatingWrapperWhenSysUtilsInScope;
     procedure TestRecordFieldStoreFromCall_ReleaseBaseSurvivesCalls;
     procedure TestFieldOfIndexedRecordGetterOnClassField_CallsGetter;
@@ -1621,6 +1624,31 @@ begin
   AssertEquals('StrToInt64 -> validating wrapper', '',
     AsmMissing(Src, 'callq SysUtils__StrToInt64Checked',
       'bl _SysUtils__StrToInt64Checked'));
+end;
+
+procedure TArm64BackendTests.TestSingleMethodResult_WidenedAfterCall;
+const
+  Src = '''
+    program P;
+    type
+      TBase = class
+        function T(N: Integer): Single;
+      end;
+    function TBase.T(N: Integer): Single;
+    begin
+      Result := N + 0.5
+    end;
+    var B: TBase; X: Double;
+    begin
+      B := TBase.Create();
+      X := B.T(2);
+      WriteLn(X:0:1)
+    end.
+    ''';
+begin
+  AssertEquals('the Single result is widened right after the call', '',
+    AsmMissing(Src, #9'callq TBase_T' + #10 + #9'cvtss2sd %xmm0, %xmm0',
+      #9'bl _TBase_T' + #10 + #9'fcvt d0, s0'));
 end;
 
 procedure TArm64BackendTests.TestWriteLn_StdErrSelectsFd2;

@@ -6572,10 +6572,15 @@ begin
   if AExpr is TMethodCallExpr then
   begin
     { float-returning method call: the integer emitter's method paths end
-      at the call, and the value is already in d0 }
+      at the call, with a Double already in d0 -- a Single comes back in s0
+      and must be widened to honour the D0 contract (B.S(2) read the stale
+      d0 instead: 0.0) }
     if TMethodCallExpr(AExpr).IsConstructorCall then
       NotYet('constructor in float context', AExpr);
     EmitMethodCallExpr(TMethodCallExpr(AExpr));
+    if (AExpr.ResolvedType <> nil) and
+       (AExpr.ResolvedType.Kind = tySingle) then
+      Self.Emit(#9'fcvt d0, s0');
     Exit;
   end;
   { Numeric type-cast Double(X) / Single(X) in a float context (leg 30): the
