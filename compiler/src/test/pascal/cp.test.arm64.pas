@@ -81,6 +81,9 @@ type
     procedure TestRecordMethod_RecordFieldReceiverIsAddress;
     procedure TestRecordMethod_ManagedCallResultReceiverReleased;
     procedure TestFieldRead_InterfaceFieldLoadsPair;
+    procedure TestIsNaNIsInfinite_Inline;
+    procedure TestRecordMethod_StmtOnSelfRecordFieldPassesAddress;
+    procedure TestIntfCall_ScalarContextSuppliesSret;
     { P0-2: generic RECORD instantiation.  A monomorphised record instance is
       a record with methods, so it rides the P0-1 machinery; only the instance
       walk itself was missing. }
@@ -1478,6 +1481,116 @@ begin
   AssertTrue('... before the result is consumed', PRel < PWrite);
   AssertTrue('the method result in x0 survives the release',
     PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PShow) < PRel);
+end;
+
+procedure TArm64BackendTests.TestIntfCall_ScalarContextSuppliesSret;
+var
+  AsmT: string;
+  P: Integer;
+begin
+  { An interface-returning call whose obj half is used as a scalar -- here
+    downcast and dereferenced, TGreet(MakeI()).N.  The callee stores its
+    (obj, itab) pair through x8, so the caller must point x8 at a scratch
+    first.  The scalar path called it bare and the callee wrote through
+    whatever x8 held (segfault on device). }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IGreet = interface
+        function Name(): string;
+      end;
+      TGreet = class(TObject, IGreet)
+        N: Integer;
+        function Name(): string;
+      end;
+    function TGreet.Name(): string;
+    begin
+      Result := ''
+    end;
+    var G: IGreet;
+    function MakeI(): IGreet;
+    begin
+      Result := G
+    end;
+    begin
+      WriteLn(TGreet(MakeI()).N)
+    end.
+    ''', TargetArm64);
+  P := Pos(#9'bl _MakeI', AsmT);
+  AssertTrue('MakeI called', P >= 0);
+  AssertTrue('x8 set to the sret scratch just before the call',
+    Pos(#9'sub x8, x29, #', Copy(AsmT, P - 40, 40)) >= 0);
+end;
+
+procedure TArm64BackendTests.TestRecordMethod_StmtOnSelfRecordFieldPassesAddress;
+var
+  AsmT, Body: string;
+  P, E: Integer;
+begin
+  { FC.Inc(); as a STATEMENT inside a class method, FC a record field of
+    Self.  A record method's Self is the field's ADDRESS (Self + 8); the
+    statement path LOADED the field instead, passing the record's first eight
+    bytes as Self -- a silent miscompile that segfaulted at run time. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TCounter = record
+        Value: Integer;
+        procedure Inc;
+      end;
+      TApp = class
+        FC: TCounter;
+        procedure Run;
+      end;
+    procedure TCounter.Inc;
+    begin
+      Value := Value + 1
+    end;
+    procedure TApp.Run;
+    begin
+      FC.Inc()
+    end;
+    begin
+    end.
+    ''', TargetArm64);
+  P := Pos('_TApp_Run:', AsmT);
+  AssertTrue('TApp.Run emitted', P >= 0);
+  E := PosEx(#9'bl _TCounter_Inc', AsmT, P);
+  AssertTrue('record method called', E > P);
+  Body := Copy(AsmT, P, E - P);
+  AssertTrue('receiver is Self + field offset', Pos(#9'add x0, x0, #8', Body) >= 0);
+  AssertTrue('receiver is NOT a load of the field',
+    Pos(#9'ldr x0, [x0, #8]', Body) < 0);
+end;
+
+procedure TArm64BackendTests.TestIsNaNIsInfinite_Inline;
+var
+  AsmT: string;
+begin
+  { IsNaN / IsInfinite lower inline on arm64 -- there is no libm (and no RTL
+    routine) to call.  NaN is the one value unordered with itself; an infinity
+    is the exponent-all-ones, zero-mantissa pattern once the sign is shifted
+    out.  Previously "this call form ('IsNaN')". }
+  AsmT := GenAsm(
+    '''
+    program P;
+    var X: Double; S: Single;
+    begin
+      WriteLn(IsNaN(X));
+      WriteLn(IsInfinite(S))
+    end.
+    ''', TargetArm64);
+  AssertTrue('IsNaN compares the value with itself',
+    Pos(#9'fcmp d0, d0', AsmT) >= 0);
+  AssertTrue('... and tests the unordered (V) flag',
+    Pos(#9'cset x0, vs', AsmT) >= 0);
+  AssertTrue('IsInfinite works on the raw bits',
+    Pos(#9'fmov x0, d0', AsmT) >= 0);
+  AssertTrue('... with the sign shifted out',
+    Pos(#9'lsl x0, x0, #1', AsmT) >= 0);
+  AssertTrue('no libm call', Pos('isnan', AsmT) < 0);
 end;
 
 procedure TArm64BackendTests.TestFieldRead_InterfaceFieldLoadsPair;

@@ -4064,6 +4064,24 @@ begin
     EmitSlotAddr('x0', JTmp);
     Exit;
   end;
+  if (AExpr.ResolvedType <> nil) and
+     (AExpr.ResolvedType.Kind = tyInterface) and
+     (((AExpr is TFuncCallExpr) and
+       (TFuncCallExpr(AExpr).ResolvedDecl <> nil) and
+       not TFuncCallExpr(AExpr).IsIndirectCall) or
+      ((AExpr is TMethodCallExpr) and
+       (TMethodCallExpr(AExpr).ResolvedMethod <> nil) and
+       not TMethodCallExpr(AExpr).IsConstructorCall and
+       not TMethodCallExpr(AExpr).IsProcFieldCall)) then
+  begin
+    { an interface-returning call in a SCALAR context (TFoo(MakeI()).F,
+      Assigned(GetI())): the callee writes the (obj, itab) pair through x8,
+      so the call must supply the sret scratch exactly as the pair consumers
+      do.  Called bare it left x8 pointing anywhere and the callee's result
+      store faulted.  x0 = the obj half -- owned (+1), as for any call. }
+    EmitIntfPairToX0X1(AExpr, AExpr.ResolvedType);
+    Exit;
+  end;
   if AExpr is TIntLiteral then
   begin
     EmitIntLiteral('x0', TIntLiteral(AExpr).Value);
@@ -4673,6 +4691,32 @@ begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitCallSym('_BlaiseCeilD');
       Self.Emit(#9'fcvtzs x0, d0');
+      Exit;
+    end;
+    { float classification, inline -- x86-64 calls libc's __isnan/__isinf, but
+      Blaise binaries link no libm and macOS has no such entry points.  A
+      Single operand is promoted first; the promotion preserves NaN and
+      infinity, so one double test serves both widths.
+        IsNaN:      NaN is the only value unordered with itself (V set).
+        IsInfinite: shift the sign bit out; +/-inf is then exactly the
+                    all-ones exponent over a zero mantissa, $FFE0... }
+    if SameText(TFuncCallExpr(AExpr).Name, 'IsNaN') and
+       (TFuncCallExpr(AExpr).Args.Count = 1) then
+    begin
+      Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      Self.Emit(#9'fcmp d0, d0');
+      Self.Emit(#9'cset x0, vs');
+      Exit;
+    end;
+    if SameText(TFuncCallExpr(AExpr).Name, 'IsInfinite') and
+       (TFuncCallExpr(AExpr).Args.Count = 1) then
+    begin
+      Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      Self.Emit(#9'fmov x0, d0');
+      Self.Emit(#9'lsl x0, x0, #1');
+      EmitIntLiteral('x9', Int64($FFE0000000000000));
+      Self.Emit(#9'cmp x0, x9');
+      Self.Emit(#9'cset x0, eq');
       Exit;
     end;
     { process-control family (expression context): each takes the process
@@ -14776,14 +14820,16 @@ begin
      ((AStmt.ResolvedClassType = nil) or
       (AStmt.ResolvedClassType.Kind <> tyInterface)) then
   begin
-    { method call on a class-typed FIELD of Self: FLexer.Next() —
-      the receiver is loaded through Self at the field's offset }
+    { method call on a FIELD of Self: FLexer.Next() on a class-typed field
+      loads the instance pointer through Self; FC.Inc() on a RECORD-typed
+      field passes the field's ADDRESS (a record method's Self) -- loading it
+      handed the record's first 8 bytes over as Self and crashed.
+      EmitImplicitBaseStep makes exactly that choice. }
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
        IsAggregateReturn(AStmt.ResolvedReturnTypeDesc) then
       NotYet('discarded aggregate-returning field-method call', AStmt);
     EmitLoadSlot('x0', 'Self');
-    Self.Emit(Format(#9'ldr x0, [x0, #%d]',
-      [AStmt.ImplicitBaseInfo.Offset]));
+    EmitImplicitBaseStep('x0', AStmt.ImplicitBaseInfo);
     EmitMethodCallCommon(TMethodDecl(AStmt.ResolvedMethod), AStmt.Name,
       AStmt.Args);
     if AStmt.ResolvedReturnTypeDesc <> nil then
