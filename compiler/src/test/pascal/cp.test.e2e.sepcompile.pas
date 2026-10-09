@@ -30,7 +30,7 @@ unit cp.test.e2e.sepcompile;
 interface
 
 uses
-  classes, sysutils, process, blaise.testing,
+  classes, sysutils, process, streams, blaise.testing,
   cp.test.e2e.base, blaise.codegen.target;
 
 type
@@ -3439,9 +3439,8 @@ const
 var
   DepPas, ProgPas, ProgBin, CacheDir, DepObj: string;
   Captured, ObjOut: string;
-  Rc: Integer;
-  Proc: TProcess;
-  Chunk: string;
+  Rc, MagicAt, WantArch: Integer;
+  FIn: TFileInputStream;
 begin
   if not ToolchainAvailable() then
   begin
@@ -3477,24 +3476,27 @@ begin
   AssertTrue('use_opdfdep exists', FileExists(ProgBin));
   AssertTrue('dependency object exists at ' + DepObj, FileExists(DepObj));
 
-  { The unit .o must carry an .opdf section (objdump -h shows it). }
-  Proc := TProcess.Create(nil);
+  { The unit .o must carry an OPDF payload whose header names THIS host's
+    architecture.  Read the object's bytes rather than asking objdump (ELF-only
+    and absent on macOS): the header is the magic 'OPDF', a 2-byte version, a
+    16-byte build id, then TargetArch (opdf_types: archX86_64 = 2,
+    archAArch64 = 4).  The arm64 emitter used to write 2 on every target. }
+  FIn := TFileInputStream.Create(DepObj);
   try
-    Proc.Executable := 'objdump';
-    Proc.Parameters.Add('-h');
-    Proc.Parameters.Add(DepObj);
-    Proc.Execute();
-    ObjOut := '';
-    repeat
-      Chunk := Proc.ReadOutput();
-      ObjOut := ObjOut + Chunk
-    until (Chunk = '') and not Proc.Running;
-    Proc.WaitOnExit()
+    SetLength(ObjOut, Integer(FIn.Size()));
+    if Length(ObjOut) > 0 then
+      FIn.Read(PChar(ObjOut), Length(ObjOut));
   finally
-    Proc.Free()
+    FIn.Free();
   end;
-  AssertTrue('dependency .o has an .opdf section (objdump -h)',
-    Pos('.opdf', ObjOut) >= 0);
+  MagicAt := Pos('OPDF' + #1 + #0, ObjOut);
+  AssertTrue('dependency .o carries an OPDF payload', MagicAt >= 0);
+  if HostTarget().CPU = cpuArm64 then
+    WantArch := 4
+  else
+    WantArch := 2;
+  AssertEquals('OPDF TargetArch matches the host CPU', WantArch,
+    StrAt(ObjOut, MagicAt + 22));
 
   { The program still runs correctly. }
   Rc := RunBinary(ProgBin, Captured);

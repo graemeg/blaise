@@ -23,6 +23,7 @@ type
     procedure TestOPDF_SectionDeclaration;
     procedure TestOPDF_HeaderMagic;
     procedure TestOPDF_HeaderVersion;
+    procedure TestOPDF_HeaderTargetArch;
     procedure TestOPDF_TotalRecordsStreamTerminated;
     procedure TestOPDF_Primitive_Integer;
     procedure TestOPDF_Primitive_Boolean;
@@ -142,6 +143,42 @@ var
 begin
   IR := GenOPDF('program P; begin end.');
   AssertTrue('version word present', Contains(IR, '.2byte 1'));
+end;
+
+procedure TOPDFTests.TestOPDF_HeaderTargetArch;
+var
+  L:  TLexer;
+  P:  TParser;
+  Pr: TProgram;
+  A:  TSemanticAnalyser;
+  E:  TOPDFEmitter;
+  IR: string;
+begin
+  { TargetArch selects the debugger's architecture adapter (opdf_types:
+    archX86_64 = 2, archAArch64 = 4).  It was hard-coded to 2 for every
+    target; the driver now sets it from the build target. }
+  IR := GenOPDF('program P; begin end.');
+  AssertTrue('default is archX86_64', Contains(IR, '.byte 2                        # TargetArch'));
+  L  := TLexer.Create('program P; begin end.');
+  P  := TParser.Create(L);
+  Pr := P.Parse();
+  A  := TSemanticAnalyser.Create();
+  try
+    A.Analyse(Pr);
+    E := TOPDFEmitter.Create(Pr, 'test.pas');
+    try
+      E.TargetArch := 4;
+      IR := E.GetOutput();
+    finally
+      E.Free();
+    end;
+  finally
+    A.Free();
+    Pr.Free();
+    P.Free();
+    L.Free();
+  end;
+  AssertTrue('arm64 is archAArch64', Contains(IR, '.byte 4                        # TargetArch: archAArch64'));
 end;
 
 procedure TOPDFTests.TestOPDF_TotalRecordsStreamTerminated;

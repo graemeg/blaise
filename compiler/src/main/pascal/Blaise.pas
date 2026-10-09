@@ -649,6 +649,8 @@ begin
         WOPDF := TOPDFEmitter.CreateForUnit(Self.WorkUnit, Self.SymTable,
                                             Self.WorkUnit.SourceFile);
         try
+          if Self.Opts.Target.CPU = cpuArm64 then
+            WOPDF.TargetArch := 4;      { opdf_types archAArch64 }
           WOPDF.SetFacts(WFacts);
           WIR := WIR + LineEnding + WOPDF.GetOutput();
         finally
@@ -1322,6 +1324,8 @@ begin
       begin
         OE := TOPDFEmitter.Create(Prog, SourceFile);
         try
+          if Opts.Target.CPU = cpuArm64 then
+            OE.TargetArch := 4;         { opdf_types archAArch64 }
           { Native backend: codegen collected exact debug facts (frame
             offsets, per-statement labels, function end labels).  Append the
             OPDF section to the SAME assembly text — local labels resolve in

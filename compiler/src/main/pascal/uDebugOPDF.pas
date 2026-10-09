@@ -37,6 +37,10 @@ type
     FTotRecIdx:         Integer;  { FOutput line index of the TotalRecords placeholder }
     FUnitDirRecCountIdx: Integer;  { FOutput line index of the UnitDirectory RecordCount placeholder }
     FDone:        Boolean;
+    { OPDF header TargetArch (opdf_types.TTargetArch): archX86_64 = 2,
+      archAArch64 = 4.  Set by the driver from the build target; the debugger
+      picks its architecture adapter from it. }
+    FTargetArch:  Byte;
 
     function  FNV1a32(const S: string): Cardinal;
     function  GetOrAllocTypeID(const AName: string): Cardinal;
@@ -104,6 +108,8 @@ type
       and the program's .opdf section. }
     constructor CreateForUnit(AUnit: TUnit; ASymTable: TSymbolTable;
                               const ASourceFile: string);
+    { Header TargetArch code; defaults to archX86_64 (2). }
+    property TargetArch: Byte read FTargetArch write FTargetArch;
     { Optional codegen facts: when set, scopes/locals/lines are emitted
       from exact backend data instead of the approximate AST walk. }
     procedure SetFacts(AFacts: TDbgFacts);
@@ -175,6 +181,7 @@ begin
   FTotRecIdx          := -1;
   FUnitDirRecCountIdx := -1;
   FDone               := False;
+  FTargetArch         := 2;
 end;
 
 constructor TOPDFEmitter.CreateForUnit(AUnit: TUnit; ASymTable: TSymbolTable;
@@ -196,6 +203,7 @@ begin
   FTotRecIdx          := -1;
   FUnitDirRecCountIdx := -1;
   FDone               := False;
+  FTargetArch         := 2;
 end;
 
 { Escape a raw string value for a GNU-as / internal-assembler `.ascii "..."`
@@ -825,7 +833,11 @@ begin
   L('    .byte 79, 80, 68, 70           # Magic: OPDF');
   L('    .2byte 1                        # Version');
   L('    .byte 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  # BuildID (zeroed)');
-  L('    .byte 2                        # TargetArch: archX86_64');
+  if FTargetArch = 4 then
+    L('    .byte 4                        # TargetArch: archAArch64')
+  else
+    L(Format('    .byte %d                        # TargetArch: archX86_64',
+      [FTargetArch]));
   L('    .byte 8                        # PointerSize: 8');
   FTotRecIdx := FOutput.Count;
   { TotalRecords = 0 selects stream-terminated mode: the reader does not trust
