@@ -72,6 +72,10 @@ procedure AppendSuiteFilter(AFilters: TList<String>; const ASpec: string);
 function MatchesFilters(AFilters: TList<String>;
   const ASuite, AMethod: string): Boolean;
 
+{ Parse a [Threaded] suite subprocess's --verbose output into AResult.
+  Exposed for unit testing. }
+procedure ParseSubprocessOutput(const AOutput: string; AResult: TTestResult);
+
 
 implementation
 
@@ -390,57 +394,109 @@ begin
 end;
 
 { ParseSubprocessOutput: parse --verbose output from a suite subprocess
-  into AResult.  Called in the main thread after subprocess completes. }
+  into AResult.  Called in the main thread after subprocess completes.
+
+  The output is the verbose outcome lines ("CName.MName ... OUTCOME"), the
+  summary line, then the "Failures:" / "Errors:" sections, one entry per
+  failed test: "  MName: message".  A message may span SEVERAL lines (a
+  compile failure carries the compiler's diagnostics, blank lines and all),
+  so an entry runs until the next line that opens an entry for a test the
+  outcome lines reported as failed, or until the next section.  Ending the
+  section at the first unindented line instead dropped every later failure
+  of the suite from both the list and the count. }
 procedure ParseSubprocessOutput(const AOutput: string; AResult: TTestResult);
 var
   Lines:   TStringList;
+  Failed:  TSet<string>;
   I:       Integer;
   Line:    string;
   InFail:  Boolean;
   InErr:   Boolean;
+  Pending: Boolean;
+  PendErr: Boolean;
   P:       Integer;
   MsgName: string;
   MsgBody: string;
+
+  procedure FlushPending();
+  begin
+    if not Pending then Exit;
+    if PendErr then
+      AResult.AddError(MsgName, MsgBody)
+    else
+      AResult.AddFailure(MsgName, MsgBody);
+    Pending := False;
+  end;
+
 begin
   Lines := TStringList.Create();
-  Lines.Text := AOutput;
-  InFail := False;
-  InErr  := False;
-  for I := 0 to Lines.Count - 1 do
-  begin
-    Line := Lines.Strings[I];
-    if Line = 'Failures:' then begin InFail := True; InErr := False; Continue end;
-    if Line = 'Errors:'   then begin InErr  := True; InFail := False; Continue end;
-    if InFail or InErr then
+  Failed := TSet<string>.Create();
+  try
+    Lines.Text := AOutput;
+    InFail := False;
+    InErr := False;
+    Pending := False;
+    PendErr := False;
+    MsgName := '';
+    MsgBody := '';
+    for I := 0 to Lines.Count - 1 do
     begin
-      { Indented detail lines: "  MethodName: message" }
-      if (Length(Line) > 2) and (Copy(Line, 0, 2) = '  ') then
+      Line := Lines.Strings[I];
+      if Line = 'Failures:' then
       begin
+        FlushPending();
+        InFail := True; InErr := False;
+        Continue
+      end;
+      if Line = 'Errors:' then
+      begin
+        FlushPending();
+        InErr := True; InFail := False;
+        Continue
+      end;
+      if InFail or InErr then
+      begin
+        { "  MethodName: message" opens an entry -- but only for a name the
+          outcome lines reported as failed; anything else is a continuation
+          line of the current message }
         P := Pos(': ', Line);
-        if P >= 0 then
+        if (Length(Line) > 2) and (Copy(Line, 0, 2) = '  ') and (P > 2) and
+           Failed.Contains(Copy(Line, 2, P - 2)) then
         begin
+          FlushPending();
           MsgName := Copy(Line, 2, P - 2);
           MsgBody := Copy(Line, P + 2, Length(Line));
-          if InFail then
-            AResult.AddFailure(MsgName, MsgBody)
-          else
-            AResult.AddError(MsgName, MsgBody);
-        end;
+          PendErr := InErr;
+          Pending := True;
+        end
+        else if Pending then
+          MsgBody := MsgBody + #10 + Line;
         Continue;
       end;
-      InFail := False; InErr := False;
+      { Verbose outcome line: "CName.MName ... OUTCOME" }
+      if Pos(' ... ', Line) >= 0 then
+      begin
+        AResult.StartTest('', '');
+        if (Pos(' ... FAIL', Line) >= 0) or (Pos(' ... ERROR', Line) >= 0) then
+        begin
+          AResult.EndTest('FAIL');
+          { remember the method part for the detail sections }
+          P := Pos(' ... ', Line);
+          MsgName := Copy(Line, 0, P);
+          while Pos('.', MsgName) >= 0 do
+            MsgName := Copy(MsgName, Pos('.', MsgName) + 1, Length(MsgName));
+          Failed.Include(MsgName);
+        end
+        else if Pos(' ... IGNORED', Line) >= 0 then
+          AResult.EndTest('IGNORED')
+        else
+          AResult.EndTest('OK');
+      end;
     end;
-    { Verbose outcome line: "CName.MName ... OUTCOME" }
-    if Pos(' ... ', Line) >= 0 then
-    begin
-      AResult.StartTest('', '');
-      if (Pos(' ... FAIL', Line) >= 0) or (Pos(' ... ERROR', Line) >= 0) then
-        AResult.EndTest('FAIL')
-      else if Pos(' ... IGNORED', Line) >= 0 then
-        AResult.EndTest('IGNORED')
-      else
-        AResult.EndTest('OK');
-    end;
+    FlushPending();
+  finally
+    Failed.Free();
+    Lines.Free();
   end;
 end;
 

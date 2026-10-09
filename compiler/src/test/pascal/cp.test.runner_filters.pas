@@ -37,6 +37,11 @@ type
     procedure TestMatches_MethodFilterIsExact;
     procedure TestMatches_MethodFilterRejectsOtherMethod;
     procedure TestMatches_MultipleFiltersAreUnion;
+
+    procedure TestParseSub_SingleLineFailures;
+    procedure TestParseSub_MultiLineFailureKeepsLaterOnes;
+    procedure TestParseSub_ContinuationNotCountedAsTest;
+    procedure TestParseSub_FailuresThenErrors;
   end;
 
 implementation
@@ -163,6 +168,89 @@ begin
     MatchesFilters(L, 'TFoo', 'TestZ'));
   AssertFalse('neither hits, other class',
     MatchesFilters(L, 'TBaz', 'TestA'));
+end;
+
+{ ---- ParseSubprocessOutput -------------------------------------------------
+  A [Threaded] suite runs as a subprocess and its --verbose output is parsed
+  back into the parent's result.  A failure message may span several lines (a
+  compile failure carries the compiler's multi-line diagnostics).  The parser
+  used to end the Failures section at the first unindented line, so every
+  failure AFTER a multi-line one was dropped from the list AND the count --
+  on macOS that hid 27 of 58 failing tests behind a smaller total. }
+
+const
+  LE = #10;
+
+procedure TRunnerFiltersTests.TestParseSub_SingleLineFailures;
+var R: TTestResult;
+begin
+  R := TTestResult.Create();
+  ParseSubprocessOutput(
+    'TS.TestA ... OK' + LE +
+    'TS.TestB ... FAIL' + LE +
+    'TS.TestC ... FAIL' + LE +
+    'FAIL (3 tests, 2 failures, 0 errors)' + LE +
+    'Failures:' + LE +
+    '  TestB: expected 1' + LE +
+    '  TestC: expected 2' + LE, R);
+  AssertEquals('tests', 3, R.NumberOfTests);
+  AssertEquals('failures', 2, R.NumberOfFailures);
+  AssertEquals('listed', 2, R.Failures.Count);
+end;
+
+procedure TRunnerFiltersTests.TestParseSub_MultiLineFailureKeepsLaterOnes;
+var R: TTestResult;
+begin
+  R := TTestResult.Create();
+  ParseSubprocessOutput(
+    'TS.TestA ... FAIL' + LE +
+    'TS.TestB ... FAIL' + LE +
+    'TS.TestC ... FAIL' + LE +
+    'FAIL (3 tests, 3 failures, 0 errors)' + LE +
+    'Failures:' + LE +
+    '  TestA: compile failed: 2Code generation error: x' + LE +
+    '' + LE +
+    '  TestB: compile failed: line one' + LE +
+    'line two of the same message' + LE +
+    '  TestC: plain' + LE, R);
+  AssertEquals('every failure counted', 3, R.NumberOfFailures);
+  AssertEquals('every failure listed', 3, R.Failures.Count);
+  AssertTrue('continuation kept with its failure',
+    Pos('line two', R.Failures.Get(1)) >= 0);
+  AssertTrue('last failure named', Pos('TestC: plain', R.Failures.Get(2)) = 0);
+end;
+
+procedure TRunnerFiltersTests.TestParseSub_ContinuationNotCountedAsTest;
+var R: TTestResult;
+begin
+  R := TTestResult.Create();
+  { a message line that happens to contain ' ... ' is message text, not a
+    verbose outcome line, and must not inflate the test count }
+  ParseSubprocessOutput(
+    'TS.TestA ... FAIL' + LE +
+    'FAIL (1 tests, 1 failures, 0 errors)' + LE +
+    'Failures:' + LE +
+    '  TestA: Expected "a ... b"' + LE +
+    'Actual: "a ... c"' + LE, R);
+  AssertEquals('tests', 1, R.NumberOfTests);
+  AssertEquals('failures', 1, R.NumberOfFailures);
+end;
+
+procedure TRunnerFiltersTests.TestParseSub_FailuresThenErrors;
+var R: TTestResult;
+begin
+  R := TTestResult.Create();
+  ParseSubprocessOutput(
+    'TS.TestA ... FAIL' + LE +
+    'TS.TestB ... ERROR' + LE +
+    'FAIL (2 tests, 1 failures, 1 errors)' + LE +
+    'Failures:' + LE +
+    '  TestA: multi' + LE +
+    'line' + LE +
+    'Errors:' + LE +
+    '  TestB: EAccessViolation' + LE, R);
+  AssertEquals('failures', 1, R.NumberOfFailures);
+  AssertEquals('errors', 1, R.NumberOfErrors);
 end;
 
 initialization
