@@ -89,6 +89,7 @@ type
     procedure TestRecordReturn_SmallImageStoredWidthExact;
     procedure TestJumboSetTypedConst_IsBitmapAddress;
     procedure TestWriteLn_StdErrSelectsFd2;
+    procedure TestStrToInt_ValidatingWrapperWhenSysUtilsInScope;
     { P0-2: generic RECORD instantiation.  A monomorphised record instance is
       a record with methods, so it rides the P0-1 machinery; only the instance
       walk itself was missing. }
@@ -1486,6 +1487,30 @@ begin
   AssertTrue('... before the result is consumed', PRel < PWrite);
   AssertTrue('the method result in x0 survives the release',
     PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PShow) < PRel);
+end;
+
+procedure TArm64BackendTests.TestStrToInt_ValidatingWrapperWhenSysUtilsInScope;
+const
+  { EConvertError in scope stands in for `uses SysUtils` -- it is exactly what
+    the backends look up to choose the validating wrapper }
+  Src = '''
+    program P;
+    type EConvertError = class end;
+    begin
+      WriteLn(StrToInt('42abc'));
+      WriteLn(StrToInt64('99bad'))
+    end.
+    ''';
+begin
+  { StrToInt must reject trailing characters when SysUtils is in scope.
+    arm64 always called the lenient runtime _StrToInt, which stops at the
+    first non-digit: StrToInt('42abc') returned 42 instead of raising. }
+  AssertEquals('StrToInt -> validating wrapper', '',
+    AsmMissing(Src, 'callq SysUtils__StrToIntChecked',
+      'bl _SysUtils__StrToIntChecked'));
+  AssertEquals('StrToInt64 -> validating wrapper', '',
+    AsmMissing(Src, 'callq SysUtils__StrToInt64Checked',
+      'bl _SysUtils__StrToInt64Checked'));
 end;
 
 procedure TArm64BackendTests.TestWriteLn_StdErrSelectsFd2;

@@ -581,6 +581,11 @@ type
     procedure EmitDynElemHooks;
     function  RecReturnShape(ARec: TRecordTypeDesc): Integer;
     procedure EmitRecRegsStore(AShape, ASize: Integer);
+    { True when StrToInt/StrToInt64 should call the validating SysUtils
+      wrapper (raises EConvertError) instead of the lenient runtime routine:
+      SysUtils is in scope and is not the unit being emitted (the wrapper
+      itself calls StrToInt).  Twin of the x86-64 StrToIntChecked. }
+    function StrToIntChecked(): Boolean;
     procedure EmitHfaLaneToX0(AShape, AIdx: Integer; ASpill: Boolean);
 
     procedure EmitStrLitSection;
@@ -4532,16 +4537,27 @@ begin
         '_SetCurrentDir');
       Exit;
     end;
+    { With SysUtils in scope, StrToInt validates the WHOLE string and raises
+      EConvertError ('42abc' is not an integer); the bare runtime routine
+      stops at the first non-digit and returned 42 -- x86-64 parity. }
     if SameText(TFuncCallExpr(AExpr).Name, 'StrToInt') then
     begin
-      EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
-        '_StrToInt');
+      if Self.StrToIntChecked() then
+        EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
+          'SysUtils__StrToIntChecked')
+      else
+        EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
+          '_StrToInt');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'StrToInt64') then
     begin
-      EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
-        '_StrToInt64');
+      if Self.StrToIntChecked() then
+        EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
+          'SysUtils__StrToInt64Checked')
+      else
+        EmitBuiltinStrCall1(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
+          '_StrToInt64');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'Exec') then
@@ -11115,6 +11131,13 @@ begin
     Self.Emit(#9'fcvt d0, s0');
     Self.Emit(#9'fmov x0, d0');
   end;
+end;
+
+function TArm64Backend.StrToIntChecked(): Boolean;
+begin
+  Result := (FSymTable <> nil) and
+            (FSymTable.Lookup('EConvertError') <> nil) and
+            (not SameText(FCurrentUnitName, 'SysUtils'));
 end;
 
 procedure TArm64Backend.RegisterForSlots(AStmt: TASTStmt);
