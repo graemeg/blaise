@@ -279,7 +279,9 @@ fi
 
 # Edit ONLY the generic's body.  The declaring unit's interface is untouched,
 # so no interface hash changes and nothing else signals staleness.
-sed -i 's/Result := 111/Result := 222/' "$GWORK/src/gbfdep.pas"
+# (-i.bak, not bare -i: BSD sed on macOS/FreeBSD takes the suffix as required)
+sed -i.bak 's/Result := 111/Result := 222/' "$GWORK/src/gbfdep.pas"
+rm -f "$GWORK/src/gbfdep.pas.bak"
 
 # Warm: same cache.  The consumer must be recompiled, not served from cache.
 gb_build "$GWORK/g2"
