@@ -72,6 +72,7 @@ type
     procedure TestSemantic_ThreeSingleRecord_TotalSizeIs12;
     procedure TestCodegen_StmtRecordMethodOnClassRecordField_PassesAddress;
     procedure TestCodegen_ManagedRecordCallReceiver_FieldsReleased;
+    procedure TestCodegen_FloatFieldOfRecordCall_FreesBuffer;
   end;
 
 implementation
@@ -877,6 +878,30 @@ begin
       AssertTrue(Target + ': receiver field released after the call (' +
         IntToStr(J) + ')', Pos(Rel, Tail) > 0);
     end;
+end;
+
+procedure TRecordTests.TestCodegen_FloatFieldOfRecordCall_FreesBuffer;
+const
+  Src = '''
+    program P;
+    type TF2 = record A, B: Single; end;
+    function M2(A, B: Single): TF2;
+    begin
+      Result.A := A;
+      Result.B := B
+    end;
+    begin
+      WriteLn(M2(7, 8).B:0:2)
+    end.
+    ''';
+begin
+  { M2(..).B in float context: x86-64 materialises the call into a stack
+    buffer and must free it right after loading the field.  The float arm
+    went through EmitFieldAddrToRcx, which never freed it, so %rsp drifted
+    under WriteLn's already-pushed format string and the program crashed. }
+  AssertTrue('x86-64: buffer freed right after the field load',
+    Pos(#9'movss (%rcx), %xmm0' + #10 + #9'addq $16, %rsp',
+      GenAsm(Src, TargetX86_64)) >= 0);
 end;
 
 initialization

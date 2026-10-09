@@ -7370,8 +7370,29 @@ begin
 
   if AExpr is TFieldAccessExpr then
   begin
-    Self.EmitFieldAddrToRcx(TFieldAccessExpr(AExpr));
     Ty := TFieldAccessExpr(AExpr).FieldInfo.TypeDesc;
+    if (TFieldAccessExpr(AExpr).Base <> nil) and
+       Self.IsNativeRecordCall(TFieldAccessExpr(AExpr).Base) then
+    begin
+      { a float field of a record-returning CALL (MakeVec(..).Y): materialise
+        the result into a buffer, load the field, then FREE the buffer -- the
+        same discipline as the integer arm in EmitExprToEax.  Going through
+        EmitFieldAddrToRcx left the buffer allocated, so %rsp drifted under
+        any argument already pushed for the enclosing call (WriteLn's format
+        string was read back from the wrong slot and the program crashed). }
+      Self.Emit(Format(#9'subq $%d, %%rsp',
+        [Self.RecArgBufBytes(TFieldAccessExpr(AExpr).Base)]));
+      Self.EmitRecordCallSretAt(TFieldAccessExpr(AExpr).Base, '(%rsp)');
+      Self.Emit(#9'movq %rsp, %rcx');
+      if TFieldAccessExpr(AExpr).FieldInfo.Offset > 0 then
+        Self.Emit(Format(#9'leaq %d(%%rcx), %%rcx',
+          [TFieldAccessExpr(AExpr).FieldInfo.Offset]));
+      Self.EmitLoadFloat('(%rcx)', Ty);
+      Self.Emit(Format(#9'addq $%d, %%rsp',
+        [Self.RecArgBufBytes(TFieldAccessExpr(AExpr).Base)]));
+      Exit;
+    end;
+    Self.EmitFieldAddrToRcx(TFieldAccessExpr(AExpr));
     Self.EmitLoadFloat('(%rcx)', Ty);
     Exit;
   end;
