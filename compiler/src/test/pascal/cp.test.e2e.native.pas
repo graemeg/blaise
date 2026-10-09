@@ -395,6 +395,7 @@ type
     procedure TestRun_Native_IntfFieldChainedReads;
     procedure TestRun_Native_RecordFieldAsMethodReceiver;
     procedure TestRun_Native_ManagedRecordCallResultReceiver;
+    procedure TestRun_Native_ManagedRecordCallResultReceiver_Stmt;
     { M8b — dynarray element ARC: A[I] := 'new' releases old string at A[I]. }
     procedure TestRun_Native_DynArrayElemArc_String;
     { M8b — function returning interface: sret convention, obj+itab propagated. }
@@ -6198,6 +6199,50 @@ begin
     end.
     ''', 'U11:1' + LE + 'U1!1:-1' + LE + 'U22:2' + LE + 'U2!2:-2' + LE +
     'U33:3' + LE + 'U3!3:-3' + LE + 'freed 6' + LE, 0);
+end;
+
+procedure TE2ENativeTests.TestRun_Native_ManagedRecordCallResultReceiver_Stmt;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { the STATEMENT form, Make().Touch(); -- result discarded.  Every TTag must
+    be destroyed exactly once, and the receiver temp must not stay on the
+    stack: x86-64 left a 16-byte buffer behind per call, so 400000
+    iterations overflowed the stack, and released none of the fields. }
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TTag = class
+        destructor Destroy; override;
+      end;
+      TM = record
+        T: TTag;
+        S: string;
+        procedure Touch;
+        function Name: string;
+      end;
+    var Freed: Integer;
+    destructor TTag.Destroy;
+    begin
+      Freed := Freed + 1;
+      inherited Destroy();
+    end;
+    procedure TM.Touch; begin end;
+    function TM.Name: string; begin Result := S end;
+    function Make: TM;
+    begin
+      Result.T := TTag.Create();
+      Result.S := 'n' + IntToStr(Freed)
+    end;
+    var I: Integer;
+    begin
+      for I := 1 to 400000 do
+      begin
+        Make().Touch();
+        Make().Name()
+      end;
+      WriteLn('freed ', Freed)
+    end.
+    ''', 'freed 800000' + LE, 0);
 end;
 
 procedure TE2ENativeTests.TestRun_Native_DynArrayElemArc_String;

@@ -801,7 +801,8 @@ type
                                       const AName, ADest: string;
                                       ADestIsIndirect: Boolean);
     { Free a record-call-receiver buffer materialised by EmitMethodSretCall. }
-    procedure EmitMethodSretRecvCleanup(ABytes: Integer);
+    procedure EmitMethodSretRecvCleanup(ABytes: Integer; ARecvExpr: TASTExpr);
+    procedure EmitRecvBufFieldReleases(ARecvExpr: TASTExpr);
     { Emit the base ADDRESS of a NAMED LOCAL record into AReg (e.g.
       '%rcx', '%rax').  Normally a stack value record, so leaq the slot.
       The one exception is the sret-function Result: its frame slot holds
@@ -11461,8 +11462,9 @@ begin
     Self.EndCallArgs();
     if RecvBufBytes > 0 then
     begin
-      { Free the receiver buffer and restore %rbx (does not touch the return
-        registers %rax/%rdx/%xmm0/%xmm1). }
+      { Release the buffer's managed fields, free it and restore %rbx (none of
+        which disturbs the return registers %rax/%rdx/%xmm0/%xmm1). }
+      Self.EmitRecvBufFieldReleases(ACall.ObjExpr);
       Self.Emit(Format(#9'addq $%d, %%rsp', [RecvBufBytes]));
       Self.Emit(#9'popq %rbx');
     end;
@@ -11535,6 +11537,7 @@ begin
     HK.Free();
     if RecvBufBytes > 0 then
     begin
+      Self.EmitRecvBufFieldReleases(ACall.ObjExpr);
       Self.Emit(Format(#9'addq $%d, %%rsp', [RecvBufBytes]));
       Self.Emit(#9'popq %rbx');
     end;
@@ -12773,6 +12776,54 @@ begin
     end
     else
       Self.EmitCall(Sym, MD, ACall.Args);
+    Exit;
+  end;
+
+  { Record method on a record-CALL receiver in statement position
+    (Make().Show();).  The receiver is a transient record with no home: the
+    receiver arms below evaluated it into a stack buffer that was never
+    popped, and never released its managed fields.  EmitMethodCallExpr owns
+    exactly this shape -- buffer in %rbx, field release after the call, buffer
+    freed -- so route through it with a shim and drop the discarded result.
+    A record-returning method here takes the sret-discard path below. }
+  if MD.IsRecordMethod and (ACall.ObjectName = '') and
+     (ACall.ObjExpr <> nil) and Self.IsNativeRecordCall(ACall.ObjExpr) and
+     ((ACall.ResolvedReturnTypeDesc = nil) or
+      not (ACall.ResolvedReturnTypeDesc.Kind in [tyRecord, tyInterface])) then
+  begin
+    SretShim := TMethodCallExpr.Create();
+    try
+      SretShim.Name := ACall.Name;
+      SretShim.Args := ACall.Args;
+      SretShim.ObjExpr := ACall.ObjExpr;
+      SretShim.ResolvedMethod := ACall.ResolvedMethod;
+      SretShim.ResolvedClassType := ACall.ResolvedClassType;
+      SretShim.ResolvedType := ACall.ResolvedReturnTypeDesc;
+      Self.EmitMethodCallExpr(SretShim);
+    finally
+      SretShim.Args := nil;      { borrowed — do not free }
+      SretShim.ObjExpr := nil;   { borrowed — do not free }
+      SretShim.Free();
+    end;
+    { the discarded result is an owned +1 for a managed type }
+    if ACall.ResolvedReturnTypeDesc <> nil then
+    begin
+      if ACall.ResolvedReturnTypeDesc.IsString() then
+      begin
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _StringRelease');
+      end
+      else if ACall.ResolvedReturnTypeDesc.Kind = tyClass then
+      begin
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+      end
+      else if ACall.ResolvedReturnTypeDesc.Kind = tyDynArray then
+      begin
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _DynArrayRelease');
+      end;
+    end;
     Exit;
   end;
 
@@ -21441,10 +21492,41 @@ end;
 { Free a record-call-receiver buffer materialised by EmitMethodSretCall (see
   the RecvBufBytes prologue there).  No-op when ABytes = 0.  Does not touch the
   sret destination (written via its own pointer) nor any return register. }
-procedure TX86_64Backend.EmitMethodSretRecvCleanup(ABytes: Integer);
+{ Release the managed fields of a record-CALL receiver buffer, whose address
+  is in %rbx, once the method has returned.  The buffer holds the producing
+  call's references (a function result owns its fields) and the method only
+  borrowed them through Self, so without this every Make().Method() leaked
+  the result's strings/objects (BUG-20261009-x86-managed-callresult-receiver-
+  leak; arm64 does the same in EmitRecTempFieldReleases).  The method's result
+  survives in every register it can occupy: %rax/%rdx, %xmm0/%xmm1.  Emit
+  pads each release call to the SysV alignment. }
+procedure TX86_64Backend.EmitRecvBufFieldReleases(ARecvExpr: TASTExpr);
+begin
+  if (ARecvExpr = nil) or (ARecvExpr.ResolvedType = nil) or
+     (ARecvExpr.ResolvedType.Kind <> tyRecord) or
+     Self.IsRecordManagedClean(TRecordTypeDesc(ARecvExpr.ResolvedType)) then
+    Exit;
+  Self.Emit(#9'pushq %rax');
+  Self.Emit(#9'pushq %rdx');
+  Self.Emit(#9'subq $16, %rsp');
+  Self.Emit(#9'movsd %xmm0, (%rsp)');
+  Self.Emit(#9'subq $16, %rsp');
+  Self.Emit(#9'movsd %xmm1, (%rsp)');
+  Self.EmitRecordFieldReleases(TRecordTypeDesc(ARecvExpr.ResolvedType), '%rbx');
+  Self.Emit(#9'movsd (%rsp), %xmm1');
+  Self.Emit(#9'addq $16, %rsp');
+  Self.Emit(#9'movsd (%rsp), %xmm0');
+  Self.Emit(#9'addq $16, %rsp');
+  Self.Emit(#9'popq %rdx');
+  Self.Emit(#9'popq %rax');
+end;
+
+procedure TX86_64Backend.EmitMethodSretRecvCleanup(ABytes: Integer;
+  ARecvExpr: TASTExpr);
 begin
   if ABytes > 0 then
   begin
+    Self.EmitRecvBufFieldReleases(ARecvExpr);
     { Mirror the prologue's pushes: subq buffer, pushq %rbx, pushq %r14
       (in that order) -> free buffer, popq %rbx, popq %r14. }
     Self.Emit(Format(#9'addq $%d, %%rsp', [ABytes]));
@@ -21605,7 +21687,7 @@ begin
       Self.Emit(#9'callq ' + Sym);
     Self.EndCallArgs();
     Self.EmitRecordRegReturnCapture(LSretAddr, RetRec, RC, LSretIndirect);
-    Self.EmitMethodSretRecvCleanup(RecvBufBytes);
+    Self.EmitMethodSretRecvCleanup(RecvBufBytes, ACall.ObjExpr);
     Exit;
   end;
 
@@ -21765,7 +21847,7 @@ begin
     HD.Free();
     HK.Free();
     Self.Emit(#9'addq $8, %rsp');   { reclaim the saved dest slot }
-    Self.EmitMethodSretRecvCleanup(RecvBufBytes);
+    Self.EmitMethodSretRecvCleanup(RecvBufBytes, ACall.ObjExpr);
     Exit;
   end;
 
@@ -21876,7 +21958,7 @@ begin
   end;
   { Reclaim the saved dest slot. }
   Self.Emit(#9'addq $8, %rsp');
-  Self.EmitMethodSretRecvCleanup(RecvBufBytes);
+  Self.EmitMethodSretRecvCleanup(RecvBufBytes, ACall.ObjExpr);
 end;
 
 { Sret an inherited record return: build a transient implicit-Self method node

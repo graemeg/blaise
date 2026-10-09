@@ -71,6 +71,7 @@ type
       of three back-to-back Single fields totals 12 bytes, not 24. }
     procedure TestSemantic_ThreeSingleRecord_TotalSizeIs12;
     procedure TestCodegen_StmtRecordMethodOnClassRecordField_PassesAddress;
+    procedure TestCodegen_ManagedRecordCallReceiver_FieldsReleased;
   end;
 
 implementation
@@ -809,6 +810,73 @@ begin
     AsmMissing(Src, 'leaq 12(%rcx), %rcx', 'add x0, x0, #12'));
   AssertTrue('x86-64: no address of an empty-named symbol',
     Pos('leaq (%rip)', GenAsm(Src, TargetX86_64)) < 0);
+end;
+
+procedure TRecordTests.TestCodegen_ManagedRecordCallReceiver_FieldsReleased;
+const
+  { one statement-form and one expression-form use, in separate programs so
+    each assertion sees exactly one call site }
+  SrcStmt = '''
+    program P;
+    type
+      TTag = class end;
+      TM = record
+        T: TTag;
+        function Show: Integer;
+      end;
+    function TM.Show: Integer; begin Result := 1 end;
+    function Make: TM; begin Result.T := TTag.Create() end;
+    begin
+      Make().Show()
+    end.
+    ''';
+  SrcExpr = '''
+    program P;
+    type
+      TTag = class end;
+      TM = record
+        T: TTag;
+        function Show: Integer;
+      end;
+    function TM.Show: Integer; begin Result := 1 end;
+    function Make: TM; begin Result.T := TTag.Create() end;
+    var K: Integer;
+    begin
+      K := Make().Show()
+    end.
+    ''';
+var
+  I, J, P: Integer;
+  Target, Src, AsmT, Call, Rel, Tail: string;
+begin
+  { Make().Show(): the record Make returns is a transient receiver that owns
+    its managed fields; once Show returns, the T field must be released.
+    x86-64 never released it, in either position (and the statement form
+    also left the receiver buffer on the stack), so every such call leaked
+    (BUG-20261009-x86-managed-callresult-receiver-leak). }
+  for I := 0 to 1 do
+    for J := 0 to 1 do
+    begin
+      if I = 0 then
+      begin
+        Target := TargetX86_64;
+        Call := #9'callq TM_Show';
+        Rel := #9'callq _ClassRelease';
+      end
+      else
+      begin
+        Target := TargetArm64;
+        Call := #9'bl _TM_Show';
+        Rel := #9'bl __ClassRelease';
+      end;
+      if J = 0 then Src := SrcStmt else Src := SrcExpr;
+      AsmT := GenAsm(Src, Target);
+      P := Pos(Call, AsmT);
+      AssertTrue(Target + ': Show called', P >= 0);
+      Tail := Copy(AsmT, P, Length(AsmT) - P);
+      AssertTrue(Target + ': receiver field released after the call (' +
+        IntToStr(J) + ')', Pos(Rel, Tail) > 0);
+    end;
 end;
 
 initialization
