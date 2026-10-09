@@ -84,6 +84,7 @@ type
     procedure TestIsNaNIsInfinite_Inline;
     procedure TestRecordMethod_StmtOnSelfRecordFieldPassesAddress;
     procedure TestIntfCall_ScalarContextSuppliesSret;
+    procedure TestCall_IntArgToFloatParamIsFloatClass;
     { P0-2: generic RECORD instantiation.  A monomorphised record instance is
       a record with methods, so it rides the P0-1 machinery; only the instance
       walk itself was missing. }
@@ -1481,6 +1482,37 @@ begin
   AssertTrue('... before the result is consumed', PRel < PWrite);
   AssertTrue('the method result in x0 survives the release',
     PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PShow) < PRel);
+end;
+
+procedure TArm64BackendTests.TestCall_IntArgToFloatParamIsFloatClass;
+var
+  AsmT: string;
+  P, E: Integer;
+begin
+  { An INTEGER argument bound to a Single/Double parameter -- F(1, 7) against
+    (A: Single; N: Integer; B: Double) -- is converted and passed float-class.
+    Classified by its own type it went in x0, and every later argument moved
+    down a register: F read A from s0, which held nothing (wrong output on
+    device, TestRun_OverflowFloat_InterspersedWithInt). }
+  AsmT := GenAsm(
+    '''
+    program P;
+    function F(A: Single; N: Integer; B: Double): Integer;
+    begin
+      Result := Trunc(A + B) + N
+    end;
+    begin
+      WriteLn(F(1, 7, 2))
+    end.
+    ''', TargetArm64);
+  P := Pos('_main:', AsmT);
+  E := PosEx(#9'bl _F', AsmT, P);
+  AssertTrue('F called from main', (P >= 0) and (E > P));
+  AssertTrue('int literal converted to float',
+    Pos(#9'scvtf d0, x0', Copy(AsmT, P, E - P)) >= 0);
+  AssertTrue('A arrives in s0', Pos(#9'fcvt s0, d0', Copy(AsmT, P, E - P)) >= 0);
+  AssertTrue('B arrives in d1', Pos(#9'fmov d1, x9', Copy(AsmT, P, E - P)) >= 0);
+  AssertTrue('N arrives in x0', Pos(#9'ldr x0, [sp], #16', Copy(AsmT, P, E - P)) >= 0);
 end;
 
 procedure TArm64BackendTests.TestIntfCall_ScalarContextSuppliesSret;

@@ -282,6 +282,8 @@ type
     procedure EmitRecAddrToX0(AExpr: TASTExpr);
     procedure EmitRecCallToRret(AExpr: TASTExpr);
     function EmitRecCallToRretSlot(AExpr: TASTExpr): string;
+    function FloatArgIsFloatClass(ADecl: TMethodDecl; AIdx: Integer;
+      AArg: TASTExpr): Boolean;
     procedure EmitRecTempFieldReleases(ART: TRecordTypeDesc;
       const ASlot: string; ASpOff: Integer);
     procedure EmitPropRecvToX0(AStmt: TFieldAssignment);
@@ -12448,7 +12450,7 @@ begin
       else NInt := NInt + 2;
       Continue;
     end;
-    if IsFloatExpr(Arg) then
+    if FloatArgIsFloatClass(ADecl, I, Arg) then
     begin
       if (ADecl.IsVarArgs and (I >= ADecl.Params.Count)) or (NFloat >= 8) then
       begin
@@ -12502,6 +12504,26 @@ begin
   else
     PT := AArg.ResolvedType;
   Result := (PT <> nil) and (PT.Kind = tySingle);
+end;
+
+{ True when argument AIdx travels float-class (a d/s register or a float
+  stack slot).  A float EXPRESSION does; so does any argument bound to a
+  by-value float PARAMETER -- F(1, 2) against (A, B: Single) passes integer
+  literals that must be converted, and classifying them by their own type
+  put them in x0/x1 and shifted every later float argument down a register
+  (x86-64 makes the same decision in OverflowArgIsFloat). }
+function TArm64Backend.FloatArgIsFloatClass(ADecl: TMethodDecl;
+  AIdx: Integer; AArg: TASTExpr): Boolean;
+var
+  P: TMethodParam;
+begin
+  Result := IsFloatExpr(AArg);
+  if Result or (AIdx >= ADecl.Params.Count) then Exit;
+  P := TMethodParam(ADecl.Params.Items[AIdx]);
+  Result := (P.ResolvedType <> nil) and
+            (P.ResolvedType.Kind in [tyDouble, tySingle]) and
+            not P.IsVarParam and not P.IsOpenArray and
+            (AArg.ResolvedType <> nil) and IsIntFam(AArg.ResolvedType);
 end;
 
 procedure TArm64Backend.EmitCall(ADecl: TMethodDecl; const AName: string;
@@ -13098,10 +13120,10 @@ begin
           Inc(NInt);
         end;
       end
-      else if IsFloatExpr(Arg) then
+      else if FloatArgIsFloatClass(ADecl, I, Arg) then
       begin
         IsVariadicArg := ADecl.IsVarArgs and (I >= ADecl.Params.Count);
-        Self.EmitExprToD0(Arg);
+        Self.EmitExprToD0OrConvert(Arg);
         Self.Emit(#9'fmov x0, d0');
         EmitPushX0();
         if IsVariadicArg or (NFloat >= 8) then
