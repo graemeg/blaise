@@ -8504,7 +8504,12 @@ begin
     { bare method call on Self as a statement: Advance(); }
     if (TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType <> nil) and
        IsAggregateReturn(TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType) then
-      NotYet('discarded aggregate-returning implicit-Self call', ACall);
+    begin
+      EmitLoadSlot('x0', 'Self');
+      EmitDiscardedRecMethodCall(TMethodDecl(ACall.ResolvedDecl), ACall.Name,
+        ACall.Args, TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType, ACall);
+      Exit;
+    end;
     EmitLoadSlot('x0', 'Self');
     EmitMethodCallCommon(TMethodDecl(ACall.ResolvedDecl), ACall.Name,
       ACall.Args);
@@ -14886,13 +14891,22 @@ begin
     receiver already in x0.  An sret result still needs a real buffer for the
     callee to write -- without one x8 held whatever was left in it -- and the
     references the callee handed over (a managed record's fields) must be
-    dropped.  The free-function twin is in EmitProcCall. }
-  if (ART = nil) or (ART.Kind <> tyRecord) then
+    dropped.  The free-function twin is in EmitProcCall.  An interface result
+    takes the same x8 contract; its owned obj half is released. }
+  if (ART = nil) or not (ART.Kind in [tyRecord, tyInterface]) then
     NotYet('discarded aggregate-returning method call', ANode);
   Tmp := '__dret_' + IntToStr(FJArgN);
   FJArgN := FJArgN + 1;
   if not FFrame.ContainsKey(Tmp) then
     AddLocal(Tmp, ART.RawSize());
+  if ART.Kind = tyInterface then
+  begin
+    EmitPushX0();
+    EmitCall(AMethod, AName, AArgs, Tmp, True, AMethod.VTableSlot);
+    EmitLoadSlot('x0', Tmp);
+    EmitCallSym('_ClassRelease');
+    Exit;
+  end;
   Shape := RecReturnShape(TRecordTypeDesc(ART));
   EmitPushX0();
   if Shape = 0 then

@@ -913,6 +913,7 @@ const
       TTok = record Kind: Integer; Value: string; end;
       TLexer = class
         function Next(): TTok;
+        procedure Again();
       end;
       TOwner = class
         FLex: TLexer;
@@ -922,6 +923,10 @@ const
     begin
       Result.Kind := 1;
       Result.Value := 'v'
+    end;
+    procedure TLexer.Again();
+    begin
+      Next()
     end;
     procedure TOwner.Run();
     begin
@@ -939,10 +944,13 @@ var
   Target, AsmT, Call, CallOp, Rel, Tail: string;
 begin
   { A method call statement whose managed record result is discarded --
-    on a named receiver (L.Next();) or a field of Self (FLex.Next();) --
-    must hand the callee a real sret buffer and
+    on a named receiver (L.Next();), a field of Self (FLex.Next();) or
+    implicit Self (Next();) -- must hand the callee a real sret buffer and
     release the fields it handed over: the next call after each Next is the
-    Value field's release.  arm64 rejected both as not yet lowered. }
+    Value field's release.  arm64 rejected all three as not yet lowered;
+    x86-64 lowered the implicit-Self one as a bare call with Self in %rdi,
+    where the sret pointer belongs, so the callee wrote its record over the
+    object. }
   for I := 0 to 1 do
   begin
     if I = 0 then
@@ -973,7 +981,7 @@ begin
       AsmT := Tail;
       P := Pos(Call, AsmT);
     end;
-    AssertEquals(Target + ': two discarding call sites', 2, Sites);
+    AssertEquals(Target + ': three discarding call sites', 3, Sites);
   end;
 end;
 

@@ -182,6 +182,11 @@ type
       record method, a captured outer local.  The results' managed fields must be
       released, not leaked. }
     procedure TestRun_DiscardedRecordReturn_AllReceiverForms;
+    { A discarded record- or interface-returning call on IMPLICIT Self
+      (Next(); inside a method).  x86-64 passed Self where the sret pointer
+      belongs, so the callee wrote the record over the object; arm64 rejected
+      it as not yet lowered. }
+    procedure TestRun_DiscardedRecordReturn_ImplicitSelf;
     { Regression: reading a PROPERTY whose getter returns a record with a
       managed (string) field.  The property read was emitted as a scalar-return
       call (object pointer where the sret pointer belongs), over-releasing the
@@ -1516,6 +1521,81 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'ok 1 x' + LE, 0);
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2ERecordReturnTests.TestRun_DiscardedRecordReturn_ImplicitSelf;
+const
+  Src = '''
+    program P;
+    type
+      TToken = record Kind: Integer; Value: string; end;
+      TPt = record X, Y: Integer; end;
+      TBig = record A, B, C: Int64; end;
+      IGreet = interface
+        function Hi(): Integer;
+      end;
+      TG = class(TObject, IGreet)
+      public
+        function Hi(): Integer;
+      end;
+      TLexer = class
+        FName: string;
+        FCount: Integer;
+        function Next(): TToken;
+        function Pos(): TPt;
+        function Big(N: Integer): TBig; virtual;
+        function Greeter(): IGreet;
+        procedure Again();
+      end;
+    function TG.Hi(): Integer;
+    begin
+      Result := 1
+    end;
+    function TLexer.Next(): TToken;
+    begin
+      FCount := FCount + 1;
+      Result.Kind := 42;
+      Result.Value := 'hello' + FName
+    end;
+    function TLexer.Pos(): TPt;
+    begin
+      FCount := FCount + 1;
+      Result.X := 1;
+      Result.Y := 2
+    end;
+    function TLexer.Big(N: Integer): TBig;
+    begin
+      FCount := FCount + N;
+      Result.A := 1;
+      Result.B := 2;
+      Result.C := 3
+    end;
+    function TLexer.Greeter(): IGreet;
+    begin
+      FCount := FCount + 1;
+      Result := TG.Create()
+    end;
+    procedure TLexer.Again();
+    begin
+      Next();
+      Pos();
+      Big(10);
+      Greeter()
+    end;
+    var L: TLexer;
+    begin
+      L := TLexer.Create();
+      L.FName := 'abc';
+      L.Again();
+      WriteLn(L.FName, ' ', L.FCount);
+      L.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { FName and FCount intact: no callee wrote its result over the object }
+  AssertRunsOnAll(Src, 'abc 13' + LE, 0);
   AssertLeakFreeOnAll(Src, '');
 end;
 

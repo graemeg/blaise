@@ -14772,6 +14772,7 @@ var
   AliasSz:  Integer;
   DiscBufSz: Integer;
   DiscShim: TFuncCallExpr;
+  DiscMShim: TMethodCallExpr;
   PropRelStr: Boolean;
 begin
   { An empty statement (e.g. the body of `for x := 0 to N do;`) parses to a nil
@@ -16416,6 +16417,64 @@ begin
     if PC.IsImplicitSelfMethod and (PC.ResolvedDecl <> nil) then
     begin
       MD := TMethodDecl(PC.ResolvedDecl);
+      { A discarded RECORD result (Next(); inside a method) still takes the
+        sret / register-capture contract: a bare call handed Self over in %rdi,
+        where the sret pointer belongs, so the callee wrote its record over the
+        object.  Route through the method-sret machinery into a throwaway
+        buffer, then release the fields the callee handed over -- the free-
+        function twin is the sret-discard branch below. }
+      if (MD.ResolvedReturnType <> nil) and
+         (MD.ResolvedReturnType.Kind = tyRecord) then
+      begin
+        DiscBufSz := (MD.ResolvedReturnType.RawSize() + 15) and (-16);
+        Self.Emit(#9'pushq %rbx');
+        Self.Emit(Format(#9'subq $%d, %%rsp', [DiscBufSz]));
+        Self.Emit(#9'movq %rsp, %rbx');
+        Self.Emit(#9'movq %rbx, %rdi');
+        Self.Emit(#9'xorl %esi, %esi');
+        Self.Emit(Format(#9'movq $%d, %%rdx', [DiscBufSz]));
+        Self.Emit(#9'callq memset');
+        DiscMShim := TMethodCallExpr.Create();
+        try
+          DiscMShim.ResolvedMethod := MD;
+          DiscMShim.Name := PC.Name;
+          DiscMShim.Args := PC.Args;
+          Self.EmitMethodSretCall(DiscMShim, '(%rbx)', False, False);
+        finally
+          DiscMShim.Args := nil;   { borrowed — do not free }
+          DiscMShim.Free();
+        end;
+        { arg evaluation may clobber %rbx; %rsp is balanced at the buffer }
+        Self.Emit(#9'movq %rsp, %rbx');
+        if not RecretManagedClean(TRecordTypeDesc(MD.ResolvedReturnType)) then
+          Self.EmitRecordFieldReleases(
+            TRecordTypeDesc(MD.ResolvedReturnType), '%rbx');
+        Self.Emit(Format(#9'addq $%d, %%rsp', [DiscBufSz]));
+        Self.Emit(#9'popq %rbx');
+        Exit;
+      end;
+      if (MD.ResolvedReturnType <> nil) and
+         (MD.ResolvedReturnType.Kind = tyInterface) then
+      begin
+        { the interface twin: EmitIntfSretCall threads Self for an
+          implicit-Self call and leaves the fat pair at (%rsp) }
+        DiscShim := TFuncCallExpr.Create();
+        try
+          DiscShim.Name := PC.Name;
+          DiscShim.Args := PC.Args;
+          DiscShim.ResolvedDecl := PC.ResolvedDecl;
+          DiscShim.IsImplicitSelfMethod := True;
+          Self.EmitIntfSretCall(DiscShim);
+        finally
+          DiscShim.Args := nil;          { borrowed — do not free }
+          DiscShim.ResolvedDecl := nil;  { borrowed — do not free }
+          DiscShim.Free();
+        end;
+        Self.Emit(#9'movq (%rsp), %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+        Self.Emit(#9'addq $16, %rsp');
+        Exit;
+      end;
       { Self occupies %rdi, leaving %rsi..%r9 (5 registers) for arguments.  The
         push/pop-into-registers fast path is only valid when every argument
         slot fits a register — i.e. Self + args <= 6 total.  When the call has
