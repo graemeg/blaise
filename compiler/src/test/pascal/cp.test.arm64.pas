@@ -92,6 +92,7 @@ type
     procedure TestStrToInt_ValidatingWrapperWhenSysUtilsInScope;
     procedure TestRecordFieldStoreFromCall_ReleaseBaseSurvivesCalls;
     procedure TestFieldOfIndexedRecordGetterOnClassField_CallsGetter;
+    procedure TestVariadicIntArgs_EightByteStackSlots;
     { P0-2: generic RECORD instantiation.  A monomorphised record instance is
       a record with methods, so it rides the P0-1 machinery; only the instance
       walk itself was missing. }
@@ -1489,6 +1490,38 @@ begin
   AssertTrue('... before the result is consumed', PRel < PWrite);
   AssertTrue('the method result in x0 survives the release',
     PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PShow) < PRel);
+end;
+
+procedure TArm64BackendTests.TestVariadicIntArgs_EightByteStackSlots;
+var
+  AsmT, Main: string;
+  P, N: Integer;
+begin
+  { Apple arm64 passes every anonymous variadic argument on the stack in its
+    own 8-byte slot.  An Integer was sized at its natural 4 bytes, so two
+    packed into one slot and printf('%d %d %d', 1, 2, 3) printed
+    "1 3 <garbage>". }
+  AsmT := GenAsm(
+    '''
+    program P;
+    function printf(AFormat: PChar): Integer; cdecl; varargs; external 'c' name 'printf';
+    begin
+      printf(PChar('%d %d %d'), 1, 2, 3)
+    end.
+    ''', TargetArm64);
+  P := Pos('_main:', AsmT);
+  Main := Copy(AsmT, P, Pos(#9'bl _printf', AsmT) - P);
+  AssertTrue('no 4-byte packing of a variadic Integer',
+    Pos(#9'str w9, [sp', Main) < 0);
+  N := 0;
+  P := Pos(#9'str x9, [sp, #', Main);
+  while P >= 0 do
+  begin
+    Inc(N);
+    Main := Copy(Main, P + 1, Length(Main) - P - 1);
+    P := Pos(#9'str x9, [sp, #', Main);
+  end;
+  AssertEquals('one 8-byte stack slot per variadic Integer', 3, N);
 end;
 
 procedure TArm64BackendTests.TestFieldOfIndexedRecordGetterOnClassField_CallsGetter;

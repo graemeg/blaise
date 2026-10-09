@@ -12422,15 +12422,13 @@ end;
 
 function TArm64Backend.StackArgSize(AArg: TASTExpr): Integer;
 begin
-  { Apple packs stack args to natural size, with the C default promotions
-    for variadic args: sub-int widths promote to 4, floats to 8. }
+  { An argument beyond the declared parameters is a VARIADIC one.  Apple's
+    arm64 ABI passes every anonymous variadic argument on the stack in its
+    own 8-byte slot (after the C promotions; clang does the same) -- only
+    FIXED stack parameters are packed to natural size (StackParamSize).
+    Sizing an Integer at 4 packed two per slot, so printf('%d %d %d', 1, 2,
+    3) printed "1 3 <garbage>". }
   Result := 8;
-  if (AArg.ResolvedType <> nil) and IsIntFam(AArg.ResolvedType) then
-  begin
-    Result := AArg.ResolvedType.RawSize();
-    if Result < 4 then Result := 4;
-    if Result > 8 then Result := 8;
-  end;
 end;
 
 function TArm64Backend.StackParamSize(APar: TMethodParam): Integer;
