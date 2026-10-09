@@ -45,6 +45,10 @@ type
     { A derived `overload` method must MERGE with the inherited overload set,
       not shadow it — both the base and derived variants stay callable. }
     procedure TestRun_OverloadMergeAcrossInheritance;
+    { `inherited D(N);` (statement form) in a Double-returning override sets
+      Result from d0 -- a `stur d0` to the frame, which the internal arm64
+      assembler could not encode for an FP register. }
+    procedure TestRun_InheritedStmt_DoubleResult;
   end;
 
 implementation
@@ -685,6 +689,37 @@ begin
     'circle drawn' + LE +
     'pi r squared' + LE +
     'circle drawn' + LE, 0);
+end;
+
+procedure TE2EInheritTests.TestRun_InheritedStmt_DoubleResult;
+const
+  Src = '''
+    program P;
+    type
+      TBase = class
+        function D(N: Integer): Double; virtual;
+      end;
+      TDeriv = class(TBase)
+        function D(N: Integer): Double; override;
+      end;
+    function TBase.D(N: Integer): Double;
+    begin
+      Result := N + 0.25
+    end;
+    function TDeriv.D(N: Integer): Double;
+    begin
+      inherited D(N)
+    end;
+    var B: TBase;
+    begin
+      B := TDeriv.Create();
+      WriteLn(B.D(2):0:2);
+      B.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2.25' + LE, 0);
 end;
 
 initialization

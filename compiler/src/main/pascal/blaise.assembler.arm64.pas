@@ -1403,6 +1403,15 @@ procedure TArm64Assembler.EncodeInstr;
           SymReloc(FA[1].MemSym, FA[1].MemSymRef);
           EmitW(EncLdStUImm(Sz, True, Opc, FA[0].Reg, FA[1].Base, 0));
         end
+        { stur s0, [x29, #-24] -- an explicit unscaled form, or a negative /
+          misaligned offset in the signed 9-bit range (the GNU auto-select
+          below, for the FP registers too) }
+        else if (FL.Mnemonic = 'ldur') or (FL.Mnemonic = 'stur') or
+                (((FA[1].MemImm < 0) or
+                  ((FA[1].MemImm mod (Int64(1) shl Sz)) <> 0)) and
+                 (FA[1].MemImm >= -256) and (FA[1].MemImm <= 255)) then
+          EmitW(EncLdStUnscaled(Sz, True, Opc, FA[0].Reg, FA[1].Base,
+            FA[1].MemImm))
         else
           EmitW(EncLdStUImm(Sz, True, Opc, FA[0].Reg, FA[1].Base, FA[1].MemImm));
         Exit;

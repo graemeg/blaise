@@ -252,6 +252,14 @@ begin
   T := TextWords('ldur w2, [x3, #3]' + LineEnding, F);
   try UrWord := WordAt(T, 0); finally F.Free(); end;
   AssertWord('ldr w2, [x3, #3]', UrWord);
+
+  { the FP registers too: `stur s0, [x29, #-24]` (a Single stored to a frame
+    slot) raised "unscaled/negative load-store offset" -- the FP branch
+    always took the scaled form.  Words from Apple's `as`. }
+  AssertWord('stur s0, [x29, #-24]', Integer($BC1E83A0));
+  AssertWord('ldur d0, [x29, #-8]', Integer($FC5F83A0));
+  AssertWord('str s1, [x29, #-4]', Integer($BC1FC3A1));
+  AssertWord('ldr d2, [x9, #3]', Integer($FC403122));
 end;
 
 procedure TArm64AsmTests.TestFloatOps;
