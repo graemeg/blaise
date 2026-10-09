@@ -3394,11 +3394,17 @@ begin
     if IsRecordCallArg(AStmt.Expr) and
        not RecretManagedClean(TRecordTypeDesc(AStmt.FieldInfo.TypeDesc)) then
     begin
-      EmitRecordBaseAddr('x0', AStmt.RecordName, AStmt.IsVarParam);
+      { the walk calls _StringRelease/_ClassRelease per field, so its base
+        must survive calls: callee-saved x19, not x0 (with x0 the zeroing
+        store and every later field went through the release's return
+        value -- Result.Tool := MakeTool() segfaulted) }
+      Self.Emit(#9'str x19, [sp, #-16]!');
+      EmitRecordBaseAddr('x19', AStmt.RecordName, AStmt.IsVarParam);
       if AStmt.FieldInfo.Offset <> 0 then
-        EmitAddSubImm('add', 'x0', 'x0', AStmt.FieldInfo.Offset);
+        EmitAddSubImm('add', 'x19', 'x19', AStmt.FieldInfo.Offset);
       Self.EmitRecordFieldReleases(
-        TRecordTypeDesc(AStmt.FieldInfo.TypeDesc), 'x0');
+        TRecordTypeDesc(AStmt.FieldInfo.TypeDesc), 'x19');
+      Self.Emit(#9'ldr x19, [sp], #16');
     end;
     EmitRecordBaseAddr('x0', AStmt.RecordName, AStmt.IsVarParam);
     if AStmt.FieldInfo.Offset <> 0 then

@@ -90,6 +90,7 @@ type
     procedure TestJumboSetTypedConst_IsBitmapAddress;
     procedure TestWriteLn_StdErrSelectsFd2;
     procedure TestStrToInt_ValidatingWrapperWhenSysUtilsInScope;
+    procedure TestRecordFieldStoreFromCall_ReleaseBaseSurvivesCalls;
     { P0-2: generic RECORD instantiation.  A monomorphised record instance is
       a record with methods, so it rides the P0-1 machinery; only the instance
       walk itself was missing. }
@@ -1487,6 +1488,43 @@ begin
   AssertTrue('... before the result is consumed', PRel < PWrite);
   AssertTrue('the method result in x0 survives the release',
     PosEx(#9'stp x0, x1, [sp, #-16]!', AsmT, PShow) < PRel);
+end;
+
+procedure TArm64BackendTests.TestRecordFieldStoreFromCall_ReleaseBaseSurvivesCalls;
+var
+  AsmT: string;
+begin
+  { Result.Tool := MakeTool(): before the call's result is copied in, the
+    destination field's old managed refs are released, one runtime call per
+    field.  The walk's base was x0 -- the first release call clobbered it,
+    so the zeroing store went through _StringRelease's return value
+    (segfault on device).  The base is callee-saved x19 now. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TTool = record
+        Path: string;
+        Kind: Integer;
+      end;
+      TChain = record
+        Tool: TTool;
+      end;
+    function MakeTool: TTool;
+    begin
+      Result.Path := 'qbe';
+      Result.Kind := 5
+    end;
+    function Build: TChain;
+    begin
+      Result.Tool := MakeTool()
+    end;
+    begin
+    end.
+    ''', TargetArm64);
+  AssertTrue('old field released through x19', Pos(#9'ldr x0, [x19', AsmT) >= 0);
+  AssertTrue('nothing zeroed through x0 after a release call',
+    Pos(#9'str xzr, [x0', AsmT) < 0);
 end;
 
 procedure TArm64BackendTests.TestStrToInt_ValidatingWrapperWhenSysUtilsInScope;
