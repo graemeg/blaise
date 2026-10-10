@@ -805,6 +805,8 @@ type
     { Free a record-call-receiver buffer materialised by EmitMethodSretCall. }
     procedure EmitMethodSretRecvCleanup(ABytes: Integer; ARecvExpr: TASTExpr);
     procedure EmitRecvBufFieldReleases(ARecvExpr: TASTExpr);
+    procedure EmitRecCallBufFieldReadCleanup(ARecType, AFieldType: TTypeDesc;
+      AFloat: Boolean);
     { Emit the base ADDRESS of a NAMED LOCAL record into AReg (e.g.
       '%rcx', '%rax').  Normally a stack value record, so leaq the slot.
       The one exception is the sret-function Result: its frame slot holds
@@ -7398,6 +7400,8 @@ begin
         Self.Emit(Format(#9'leaq %d(%%rcx), %%rcx',
           [TFieldAccessExpr(AExpr).FieldInfo.Offset]));
       Self.EmitLoadFloat('(%rcx)', Ty);
+      Self.EmitRecCallBufFieldReadCleanup(
+        TFieldAccessExpr(AExpr).Base.ResolvedType, Ty, True);
       Self.Emit(Format(#9'addq $%d, %%rsp',
         [Self.RecArgBufBytes(TFieldAccessExpr(AExpr).Base)]));
       Exit;
@@ -10433,6 +10437,8 @@ begin
       if FAE.FieldInfo.Offset > 0 then
         Self.Emit(Format(#9'leaq %d(%%rcx), %%rcx', [FAE.FieldInfo.Offset]));
       Self.EmitLoadVar('(%rcx)', FAE.FieldInfo.TypeDesc);
+      Self.EmitRecCallBufFieldReadCleanup(FAE.Base.ResolvedType,
+        FAE.FieldInfo.TypeDesc, False);
       Self.Emit(Format(#9'addq $%d, %%rsp', [Self.RecArgBufBytes(FAE.Base)]));
       Exit;
     end;
@@ -21664,6 +21670,77 @@ end;
   leak; arm64 does the same in EmitRecTempFieldReleases).  The method's result
   survives in every register it can occupy: %rax/%rdx, %xmm0/%xmm1.  Emit
   pads each release call to the SysV alignment. }
+procedure TX86_64Backend.EmitRecCallBufFieldReadCleanup(ARecType,
+  AFieldType: TTypeDesc; AFloat: Boolean);
+var
+  PinSym, RelSym: string;
+begin
+  { F(5).Value: the field just loaded (%rax, or %xmm0 when AFloat) came from
+    the buffer at (%rsp) a record-returning call was materialised into, and
+    the buffer owns the call's field references -- it was freed without
+    releasing them, so every such read leaked the record
+    (BUG-20261009-recordcall-field-read-leak).  Release them now.  A MANAGED
+    field value would die with them, so it is pinned first (+1) and its
+    release deferred to the end of the statement, after the consumer -- the
+    read stays a borrow.  With every _pendrel slot in use the buffer is left
+    as it was (a leak, never a UAF). }
+  if (ARecType = nil) or (ARecType.Kind <> tyRecord) or
+     Self.IsRecordManagedClean(TRecordTypeDesc(ARecType)) then
+    Exit;
+  PinSym := '';
+  RelSym := '';
+  if AFieldType.IsString() then
+  begin
+    PinSym := '_StringAddRef';
+    RelSym := '_StringRelease';
+  end
+  else if AFieldType.Kind in [tyClass, tyInterface] then
+  begin
+    PinSym := '_ClassAddRef';
+    RelSym := '_ClassRelease';
+  end
+  else if AFieldType.Kind = tyDynArray then
+  begin
+    PinSym := '_DynArrayAddRef';
+    RelSym := '_DynArrayRelease';
+  end;
+  if (PinSym <> '') and (FPendingRelCount >= PENDREL_SLOTS) then
+    Exit;
+  { the loaded value and %rbx ride across the release walk; the buffer sits
+    just above them }
+  if AFloat then
+  begin
+    Self.Emit(#9'subq $16, %rsp');
+    Self.Emit(#9'movsd %xmm0, (%rsp)');
+  end
+  else
+  begin
+    Self.Emit(#9'pushq %rax');
+    Self.Emit(#9'pushq %rdx');
+  end;
+  if PinSym <> '' then
+  begin
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(#9'callq ' + PinSym);
+  end;
+  Self.Emit(#9'pushq %rbx');
+  Self.Emit(#9'leaq 24(%rsp), %rbx');
+  Self.EmitRecordFieldReleases(TRecordTypeDesc(ARecType), '%rbx');
+  Self.Emit(#9'popq %rbx');
+  if AFloat then
+  begin
+    Self.Emit(#9'movsd (%rsp), %xmm0');
+    Self.Emit(#9'addq $16, %rsp');
+  end
+  else
+  begin
+    Self.Emit(#9'popq %rdx');
+    Self.Emit(#9'popq %rax');
+  end;
+  if PinSym <> '' then
+    Self.DeferNativeRelease(RelSym);     { stores %rax }
+end;
+
 procedure TX86_64Backend.EmitRecvBufFieldReleases(ARecvExpr: TASTExpr);
 begin
   if (ARecvExpr = nil) or (ARecvExpr.ResolvedType = nil) or

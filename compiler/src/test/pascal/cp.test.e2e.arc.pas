@@ -108,6 +108,12 @@ type
       earlier iteration already released (x86-64 double release, a crash
       under --debug).  BUG-20261009-pendrel-stale-slot. }
     procedure TestRun_DeferredRelease_ShortCircuitSkip;
+    { A field read off a record-returning call or a record-typed property
+      (F(1).Value, B.Next(10).Kind, O.T.V, O[4].V) -- string, integer,
+      float, class and short-circuited forms -- must not leak the record.
+      BUG-20261009-recordcall-field-read-leak. }
+    procedure TestRun_RecordCallFieldRead_NoLeak;
+    procedure TestRun_RecordPropFieldRead_NoLeak;
     { A by-value dyn-array param must keep the buffer alive even when the
       caller's own reference is dropped mid-call
       (BUG-20260721-byval-dynarray-param-no-arc). }
@@ -929,6 +935,99 @@ begin
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('field values survive copy', '15' + LE, Output);
   { the double-release from a bare-memcpy copy shows up here }
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EArcTests.TestRun_RecordCallFieldRead_NoLeak;
+const
+  Src = '''
+    program P;
+    type
+      TObj = class V: Integer; end;
+      IGreet = interface function Hi(): Integer; end;
+      TG = class(TObject, IGreet) public function Hi(): Integer; end;
+      TTok = record
+        Kind: Integer; Value: string; D: Double; O: TObj; A: array of Integer;
+        G: IGreet;
+      end;
+      TBase = class
+        function Next(N: Integer): TTok; virtual;
+      end;
+    function TG.Hi(): Integer; begin Result := 42 end;
+    function F(N: Integer): TTok;
+    begin
+      Result.Kind := N; Result.Value := 'f-' + IntToStr(N); Result.D := N + 0.5;
+      Result.O := TObj.Create(); Result.O.V := N * 10;
+      SetLength(Result.A, 3); Result.A[1] := N;
+      Result.G := TG.Create()
+    end;
+    function TBase.Next(N: Integer): TTok;
+    begin
+      Result := F(N)
+    end;
+    procedure Show(B: TBase);
+    var S: string; K, I: Integer; X: Double; O: TObj; G: IGreet;
+    begin
+      WriteLn(F(1).Value);
+      S := F(2).Value; WriteLn(S);
+      K := F(3).Kind; WriteLn(K);
+      X := F(4).D; WriteLn(X:0:1);
+      WriteLn(F(5).Value + '!' + F(6).Value);
+      O := F(7).O; WriteLn(O.V);
+      WriteLn(F(8).O.V);
+      WriteLn(B.Next(10).Value, ' ', B.Next(11).Kind);
+      for I := 0 to 2 do
+        if (I > 0) and (F(I).Value = 'f-2') then WriteLn('hit ', I);
+      if Length(F(14).Value) > 2 then WriteLn('len')
+    end;
+    var B: TBase;
+    begin
+      B := TBase.Create();
+      Show(B);
+      B.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'f-1' + LE + 'f-2' + LE + '3' + LE + '4.5' + LE + 'f-5!f-6' + LE +
+    '70' + LE + '80' + LE + 'f-10 11' + LE + 'hit 2' + LE + 'len' + LE, 0);
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EArcTests.TestRun_RecordPropFieldRead_NoLeak;
+const
+  Src = '''
+    program P;
+    type
+      TT = record K: Integer; V: string; end;
+      TOb = class
+        function GetT(): TT;
+        function GetI(I: Integer): TT;
+        property T: TT read GetT;
+        property Items[I: Integer]: TT read GetI; default;
+      end;
+    function TOb.GetT(): TT;
+    begin
+      Result.K := 3; Result.V := 'p' + IntToStr(Result.K)
+    end;
+    function TOb.GetI(I: Integer): TT;
+    begin
+      Result.K := I; Result.V := 'i' + IntToStr(I)
+    end;
+    var O: TOb; S: string;
+    begin
+      O := TOb.Create();
+      WriteLn(O.T.V);
+      S := O.T.V; WriteLn(S);
+      WriteLn(O.T.K);
+      WriteLn(O[4].V, ' ', O[5].K);
+      O.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'p3' + LE + 'p3' + LE + '3' + LE + 'i4 5' + LE, 0);
   AssertLeakFreeOnAll(Src, '');
 end;
 

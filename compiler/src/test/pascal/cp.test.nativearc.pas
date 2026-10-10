@@ -71,6 +71,10 @@ type
       slots at nil), because a short-circuit `and` can skip the deferring
       operand on a later evaluation of the same statement. }
     procedure TestPendRel_SlotReNilledAfterFlush;
+    { BUG-20261009-recordcall-field-read-leak: F(1).V pins the loaded string
+      and then releases the call temp's fields (the pin's release is
+      deferred to the statement end). }
+    procedure TestRecordCallFieldRead_PinsThenReleasesTemp;
     { A by-value dyn-array parameter is a co-owning ref-counted pointer:
       the callee must retain it on entry and release it at exit
       (BUG-20260721-byval-dynarray-param-no-arc). }
@@ -412,6 +416,29 @@ begin
   MainR := Copy(MainR, 0, E);
   AssertTrue('discarded record result''s elements are released in main',
     Pos('_StringRelease', MainR) >= 0);
+end;
+
+procedure TNativeArcTests.TestRecordCallFieldRead_PinsThenReleasesTemp;
+const
+  Src = '''
+    program P;
+    type TT = record K: Integer; V: string; end;
+    function F(N: Integer): TT;
+    begin
+      Result.K := N;
+      Result.V := 'v'
+    end;
+    begin
+      WriteLn(F(1).V);
+      WriteLn(F(2).K)
+    end.
+    ''';
+begin
+  AssertEquals('the field is pinned, then the temp dismantled', '',
+    AsmMissing(Src,
+      #9'callq _StringAddRef' + #10 + #9'pushq %rbx' + #10 +
+        #9'leaq 24(%rsp), %rbx',
+      #9'bl __StringAddRef' + #10 + #9'ldp x0, x1, [sp], #16'));
 end;
 
 procedure TNativeArcTests.TestPendRel_SlotReNilledAfterFlush;

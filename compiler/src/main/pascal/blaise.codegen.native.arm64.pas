@@ -287,6 +287,8 @@ type
     function EmitRecCallToRretSlot(AExpr: TASTExpr): string;
     function FloatArgIsFloatClass(ADecl: TMethodDecl; AIdx: Integer;
       AArg: TASTExpr): Boolean;
+    procedure EmitRecCallFieldReadCleanup(ART: TRecordTypeDesc;
+      const ATmp: string; AFieldType: TTypeDesc);
     procedure EmitRecTempFieldReleases(ART: TRecordTypeDesc;
       const ASlot: string; ASpOff: Integer);
     procedure EmitPropRecvToX0(AStmt: TFieldAssignment);
@@ -650,7 +652,7 @@ type
       the default-property form Obj[I]), or nil }
     function  RecordPropRead(AExpr: TASTExpr): TFieldAccessExpr;
     { x0 := address of a per-site scratch holding a record property's value }
-    procedure EmitRecPropToTemp(AFld: TFieldAccessExpr);
+    function EmitRecPropToTemp(AFld: TFieldAccessExpr): string;
     procedure EmitInterfaceAsCast(AAsgn: TAssignment);
     { Load an interface-typed value into x0 (obj) / x1 (itab); True when the
       obj half is an OWNED +1 (a call result), False when it is borrowed. }
@@ -1963,6 +1965,51 @@ end;
 procedure TArm64Backend.EmitRecCallToRret(AExpr: TASTExpr);
 begin
   EmitRecCallToRretSlot(AExpr);
+end;
+
+procedure TArm64Backend.EmitRecCallFieldReadCleanup(ART: TRecordTypeDesc;
+  const ATmp: string; AFieldType: TTypeDesc);
+var
+  PinSym, RelSym: string;
+begin
+  { F(5).Value: the field just loaded (x0, x0:x1 or d0) came from the temp a
+    record-returning call was materialised into, and that temp owns the
+    call's field references -- nothing released them, so every such read
+    leaked the record (BUG-20261009-recordcall-field-read-leak).  Dismantle
+    the temp now.  A MANAGED field value would die with it, so it is pinned
+    first (+1) and its release deferred to the end of the statement, after
+    the consumer -- the read stays a borrow, exactly as before.  With every
+    _pendrel slot in use the temp is left as it was (a leak, never a UAF). }
+  if RecretManagedClean(ART) then
+    Exit;
+  PinSym := '';
+  RelSym := '';
+  if AFieldType.IsString() then
+  begin
+    PinSym := '_StringAddRef';
+    RelSym := '_StringRelease';
+  end
+  else if AFieldType.Kind in [tyClass, tyInterface] then
+  begin
+    PinSym := '_ClassAddRef';    { an interface pins through its obj half }
+    RelSym := '_ClassRelease';
+  end
+  else if AFieldType.Kind = tyDynArray then
+  begin
+    PinSym := '_DynArrayAddRef';
+    RelSym := '_DynArrayRelease';
+  end;
+  if PinSym <> '' then
+  begin
+    if FPendingRelCount >= PENDREL_SLOTS then
+      Exit;
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+    EmitCallSym(PinSym);
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+  end;
+  EmitRecTempFieldReleases(ART, ATmp, 0);   { keeps x0:x1 / d0..d3 }
+  if PinSym <> '' then
+    DeferNativeRelease(RelSym);             { stores x0; x1 untouched }
 end;
 
 procedure TArm64Backend.EmitRecTempFieldReleases(ART: TRecordTypeDesc;
@@ -4044,7 +4091,7 @@ procedure TArm64Backend.EmitExprToX0(AExpr: TASTExpr);
 var
   BE: TBinaryExpr;
   FA: TFieldAccessExpr;
-  JTmp: string;
+  JTmp, RecTmp: string;
   DivGuardOk: string;
   DivUnsigned: Boolean;
   CmpUnsigned: Boolean;
@@ -6316,11 +6363,22 @@ begin
                tyDynArray, tyInterface, tyMetaClass]) or
             TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
       NotYet('read of a field of this type', AExpr);
-    EmitRecFieldAddrToX0(TFieldAccessExpr(TFieldAccessExpr(AExpr).Base));
+    RecTmp := '';
+    if RecordPropRead(TFieldAccessExpr(AExpr).Base) <> nil then
+      { O.T.V: the getter's value, materialised into a temp that owns its
+        fields -- dismantled after the load, like a record call's }
+      RecTmp := EmitRecPropToTemp(
+        RecordPropRead(TFieldAccessExpr(AExpr).Base))
+    else
+      EmitRecFieldAddrToX0(TFieldAccessExpr(TFieldAccessExpr(AExpr).Base));
     if TFieldAccessExpr(AExpr).FieldInfo.Offset <> 0 then
       EmitAddSubImm('add', 'x0', 'x0',
         TFieldAccessExpr(AExpr).FieldInfo.Offset);
     EmitElemLoad(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc);
+    if RecTmp <> '' then
+      EmitRecCallFieldReadCleanup(
+        TRecordTypeDesc(TFieldAccessExpr(AExpr).Base.ResolvedType), RecTmp,
+        TFieldAccessExpr(AExpr).FieldInfo.TypeDesc);
     Exit;
   end;
   if (AExpr is TFieldAccessExpr) and
@@ -6339,11 +6397,14 @@ begin
                tyDynArray, tyInterface, tyMetaClass]) or
             TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
       NotYet('read of a field of this type', AExpr);
-    EmitRecCallToRret(TFieldAccessExpr(AExpr).Base);   { x0 = __rret addr }
+    RecTmp := EmitRecCallToRretSlot(TFieldAccessExpr(AExpr).Base);
     if TFieldAccessExpr(AExpr).FieldInfo.Offset <> 0 then
       EmitAddSubImm('add', 'x0', 'x0',
         TFieldAccessExpr(AExpr).FieldInfo.Offset);
     EmitElemLoad(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc);
+    EmitRecCallFieldReadCleanup(
+      TRecordTypeDesc(TFieldAccessExpr(AExpr).Base.ResolvedType), RecTmp,
+      TFieldAccessExpr(AExpr).FieldInfo.TypeDesc);
     Exit;
   end;
   if (AExpr is TFieldAccessExpr) and
@@ -6363,9 +6424,11 @@ begin
                tyDynArray, tyInterface, tyMetaClass]) or
             TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
       NotYet('read of a field of this type', AExpr);
+    RecTmp := '';
     if RecordPropRead(TFieldAccessExpr(AExpr).Base) <> nil then
       { L[I].Field on a default record property: the getter's value }
-      EmitRecPropToTemp(RecordPropRead(TFieldAccessExpr(AExpr).Base))
+      RecTmp := EmitRecPropToTemp(
+        RecordPropRead(TFieldAccessExpr(AExpr).Base))
     else
     case TStringSubscriptExpr(TFieldAccessExpr(AExpr).Base)
            .StrExpr.ResolvedType.Kind of
@@ -6382,6 +6445,10 @@ begin
       EmitAddSubImm('add', 'x0', 'x0',
         TFieldAccessExpr(AExpr).FieldInfo.Offset);
     EmitElemLoad(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc);
+    if RecTmp <> '' then
+      EmitRecCallFieldReadCleanup(
+        TRecordTypeDesc(TFieldAccessExpr(AExpr).Base.ResolvedType), RecTmp,
+        TFieldAccessExpr(AExpr).FieldInfo.TypeDesc);
     Exit;
   end;
   if (AExpr is TFieldAccessExpr) and
@@ -7205,7 +7272,7 @@ begin
     Result := TFieldAccessExpr(E);
 end;
 
-procedure TArm64Backend.EmitRecPropToTemp(AFld: TFieldAccessExpr);
+function TArm64Backend.EmitRecPropToTemp(AFld: TFieldAccessExpr): string;
 var
   Shape, K: Integer;
   Tmp: string;
@@ -7227,6 +7294,7 @@ begin
     EmitRecRegsStore(Shape, AFld.ResolvedType.RawSize());
   end;
   EmitSlotAddr('x0', Tmp);
+  Result := Tmp;
 end;
 
 procedure TArm64Backend.EmitInterfaceAssign(AAsgn: TAssignment);
