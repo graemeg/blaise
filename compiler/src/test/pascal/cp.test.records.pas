@@ -75,6 +75,7 @@ type
     procedure TestCodegen_FloatFieldOfRecordCall_FreesBuffer;
     procedure TestCodegen_DiscardedRecordMethodResult_FieldsReleased;
     procedure TestCodegen_InheritedAndIntfRecordReturn_Lowered;
+    procedure TestCodegen_RecordCallOnOwnedReceiver_ReleasesIt;
   end;
 
 implementation
@@ -1025,6 +1026,31 @@ begin
       #9'sub x8, x29, #72' + #10 + #9'bl _TShape_MakeRect'));
   AssertEquals('interface record call passes a result buffer', '',
     AsmMissing(Src, #9'callq *%r11', #9'sub x8, x29'));
+end;
+
+procedure TRecordTests.TestCodegen_RecordCallOnOwnedReceiver_ReleasesIt;
+const
+  Src = '''
+    program P;
+    type
+      TT = record K: Integer; V: string; end;
+      TL = class function Next(): TT; end;
+    function TL.Next(): TT; begin Result.K := 1; Result.V := 'v' end;
+    function MakeL(): TL; begin Result := TL.Create() end;
+    var T: TT;
+    begin
+      T := MakeL().Next()
+    end.
+    ''';
+begin
+  { MakeL().Next() returning a record: the owned +1 receiver is released --
+    deferred to the statement end on x86-64, parked and released right after
+    the call on arm64 (which rejected the form as not yet lowered; x86-64
+    leaked the object). }
+  AssertEquals('the owned receiver is released', '',
+    AsmMissing(Src, #9'movq %rax, _pendrel_0(%rip)',
+      #9'stp d2, d3, [sp, #-16]!' + #10 + #9'ldur x0, [x29, #-200]' + #10 +
+        #9'bl __ClassRelease'));
 end;
 
 initialization

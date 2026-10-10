@@ -10036,10 +10036,11 @@ var
   ME: TMethodCallExpr;
   MD: TMethodDecl;
   RecvRT: TRecordTypeDesc;
-  RecvTmp: string;
+  RecvTmp, OwnedRecv: string;
 begin
   RecvRT := nil;
   RecvTmp := '';
+  OwnedRecv := '';
   { record-returning call in an assignment: one dispatcher for free
     functions AND method receivers, so every return shape shares the
     same caller-side store logic }
@@ -10115,9 +10116,17 @@ begin
     end
     else if ME.ObjExpr <> nil then
     begin
-      if ArcExprOwnsRef(ME.ObjExpr) then
-        NotYet('record call on an owned transient receiver', AExpr);
       Self.EmitExprToX0(ME.ObjExpr);
+      if ArcExprOwnsRef(ME.ObjExpr) then
+      begin
+        { MakeL().Next(): the receiver is an owned +1 transient.  Park it in
+          a frame slot for the call and release it afterwards. }
+        OwnedRecv := '__rrecv_' + IntToStr(FJArgN);
+        FJArgN := FJArgN + 1;
+        if not FFrame.ContainsKey(OwnedRecv) then
+          AddLocal(OwnedRecv, 8);
+        EmitStoreSlot('x0', OwnedRecv);
+      end;
     end
     else
     begin
@@ -10131,6 +10140,19 @@ begin
     EmitCall(MD, ME.Name, ME.Args, ADest, True, MD.VTableSlot, ASretSpOff);
     if RecvRT <> nil then
       EmitRecTempFieldReleases(RecvRT, RecvTmp, 0);
+    if OwnedRecv <> '' then
+    begin
+      { drop the owned receiver; the result survives in every register it
+        can occupy (x0:x1, d0..d3) }
+      Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+      Self.Emit(#9'stp d0, d1, [sp, #-16]!');
+      Self.Emit(#9'stp d2, d3, [sp, #-16]!');
+      EmitLoadSlot('x0', OwnedRecv);
+      EmitCallSym('_ClassRelease');
+      Self.Emit(#9'ldp d2, d3, [sp], #16');
+      Self.Emit(#9'ldp d0, d1, [sp], #16');
+      Self.Emit(#9'ldp x0, x1, [sp], #16');
+    end;
     Exit;
   end;
   { A bare method call on implicit Self that returns a record (P := Make;) is a

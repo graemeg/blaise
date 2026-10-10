@@ -192,6 +192,10 @@ type
       sized record, a field read, a float expression, and the statement
       form outside a function (discarded; a string result too). }
     procedure TestRun_InheritedRecordReturn_AllForms;
+    { A record-returning method called on an owned transient receiver
+      (MakeL('a').Next()): assigned, register-sized, discarded and as a
+      field-read base.  Every receiver is freed exactly once. }
+    procedure TestRun_RecordCall_OwnedTransientReceiver;
     { Regression: reading a PROPERTY whose getter returns a record with a
       managed (string) field.  The property read was emitted as a scalar-return
       call (object pointer where the sret pointer belongs), over-releasing the
@@ -1526,6 +1530,56 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'ok 1 x' + LE, 0);
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2ERecordReturnTests.TestRun_RecordCall_OwnedTransientReceiver;
+const
+  Src = '''
+    program P;
+    type
+      TToken = record Kind: Integer; Value: string; end;
+      TPt = record X, Y: Integer; end;
+      TLexer = class
+        FName: string;
+        function Next(): TToken;
+        function Pos(): TPt;
+        destructor Destroy(); override;
+      end;
+    var Frees: Integer;
+    function TLexer.Next(): TToken;
+    begin
+      Result.Kind := 42; Result.Value := 'hello-' + FName
+    end;
+    function TLexer.Pos(): TPt;
+    begin
+      Result.X := 3; Result.Y := 4
+    end;
+    destructor TLexer.Destroy();
+    begin
+      Frees := Frees + 1;
+      inherited Destroy()
+    end;
+    function MakeL(const N: string): TLexer;
+    begin
+      Result := TLexer.Create();
+      Result.FName := N
+    end;
+    var T: TToken; Q: TPt;
+    begin
+      T := MakeL('a').Next();
+      WriteLn(T.Value, ' ', T.Kind);
+      Q := MakeL('b').Pos();
+      WriteLn(Q.X + Q.Y);
+      MakeL('c').Next();
+      WriteLn(MakeL('d').Next().Value);
+      WriteLn('frees ', Frees)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'hello-a 42' + LE + '7' + LE + 'hello-d' + LE + 'frees 4' + LE, 0);
   AssertLeakFreeOnAll(Src, '');
 end;
 
