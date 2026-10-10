@@ -1083,9 +1083,19 @@ open-array formals. The literal is a stack-allocated temporary:
   integer high index.
 
 The element type is inferred from the first element. All elements must
-resolve to the same type. Empty literals `[]` are a semantic error because
-the element type cannot be inferred without type-context propagation (which
-is deferred).
+resolve to the same type, with one exception: a literal whose elements are
+all integer constants binds to an open array of any integer element type,
+so `[0, 4]` may be passed to an `array of Byte` (GH #233). This mirrors the
+scalar rule, where an untyped integer constant converts to any integer
+parameter type. The literal is then laid out at the formal's element width.
+The binding is scored as a conversion, so an overload whose element type
+matches the literal exactly is still preferred. As with scalar constants, a
+plain `Byte` / `Word` destination is not range-checked; a subrange or enum
+element type is left to the normal type check. Integer variables are not
+narrowed implicitly.
+
+An empty literal `[]` passed to an open-array formal takes the formal's
+type and is passed as a zero-length array (`High = -1`).
 
 ---
 

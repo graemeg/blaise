@@ -71,6 +71,11 @@ type
       as its (data, high) pair. }
     procedure TestRun_OpenArrayParam_ProcVarCalls;
     procedure TestRun_OpenArrayParam_FieldClosureMethodPtrCalls;
+    { Constant-integer literals passed to Byte / Word / SmallInt / Int64 open
+      arrays through plain, method and inherited calls; an exact-element
+      overload still wins.  Includes GH #233's program as reported. }
+    procedure TestRun_IntLiteral_ToNarrowOpenArray;
+    procedure TestRun_GH233_KochTrainingString;
   end;
 
 implementation
@@ -815,6 +820,116 @@ begin
     '1: hello world' + #10 +
     '1 only' + #10 +
     '0: only' + #10, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_IntLiteral_ToNarrowOpenArray;
+const Src =
+  '''
+  program P;
+  const K = 300;
+  type
+    TBase = class
+      procedure Put(const A: array of Word); virtual;
+    end;
+    TKid = class(TBase)
+      procedure Put(const A: array of Word); override;
+    end;
+  procedure TBase.Put(const A: array of Word);
+  var I: Integer;
+  begin
+    for I := 0 to High(A) do Write(A[I], ' ');
+    WriteLn()
+  end;
+  procedure TKid.Put(const A: array of Word);
+  begin
+    Write('kid ');
+    inherited Put([60000, K, 1])
+  end;
+  procedure Bytes(const A: array of Byte);
+  var I: Integer;
+  begin
+    for I := 0 to High(A) do Write(A[I], ' ');
+    WriteLn()
+  end;
+  procedure Smalls(const A: array of SmallInt);
+  var I: Integer;
+  begin
+    for I := 0 to High(A) do Write(A[I], ' ');
+    WriteLn()
+  end;
+  procedure Bigs(const A: array of Int64);
+  var I: Integer;
+  begin
+    for I := 0 to High(A) do Write(A[I], ' ');
+    WriteLn()
+  end;
+  procedure Pick(const A: array of Byte); overload;
+  begin
+    WriteLn('byte ', Length(A))
+  end;
+  procedure Pick(const A: array of Integer); overload;
+  begin
+    WriteLn('integer ', Length(A))
+  end;
+  var O: TBase;
+  begin
+    Bytes([0, 4, 255]);
+    Smalls([-5, 32000]);
+    Bigs([5000000000, -1]);
+    O := TKid.Create();
+    O.Put([2, 3]);
+    O.Free();
+    Pick([1, 2])
+  end.
+  ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '0 4 255 ' + #10 +
+    '-5 32000 ' + #10 +
+    '5000000000 -1 ' + #10 +
+    'kid 60000 300 1 ' + #10 +
+    'integer 2' + #10, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_GH233_KochTrainingString;
+const Src =
+  '''
+  program it;
+  type
+    TkochGroup = array [0..42] of String;
+  const
+    cKochGroup: TkochGroup = ('K', 'M', 'R', 'S', 'U', 'A', 'P', 'T', 'L', 'O',
+      'W', 'I', '.', 'N', 'J', 'E', 'F', '0', 'Y', ',',
+      'V', 'G', '5', '/', 'Q', '9', 'Z', 'H', '3', '8',
+      'B', '?', '4', '2', '7', 'C', '1', 'D', '6', 'X',
+      '<BK>', '<SK>', '<AR>');
+  var
+    b, x: Byte;
+    ba: array [0..15] of Byte;
+  function trainingString(ACharNum: array of Byte): String;
+  var
+    b: Byte;
+  begin
+    for b in ACharNum do
+      result := result + cKochGroup[b] + ' ';
+  end;
+  begin
+    for x := 0 to 15 do
+      ba[x] := x * 2;
+    for b in ba do
+      Write(b, ' ');
+    WriteLn();
+    WriteLn(trainingString(ba));
+    WriteLn(trainingString([0, 40, 42]))
+  end.
+  ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '0 2 4 6 8 10 12 14 16 18 20 22 24 26 28 30 ' + #10 +
+    'K R U P L W . J F Y V 5 Q Z 3 B ' + #10 +
+    'K <BK> <AR> ' + #10, 0);
 end;
 
 initialization

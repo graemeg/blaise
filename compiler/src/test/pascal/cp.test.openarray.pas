@@ -15,7 +15,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TOpenArrayTests = class(TTestCase)
@@ -69,6 +69,14 @@ type
     { ------------------------------------------------------------------ }
     procedure TestSemantic_StaticArrayToOpenArray_Accepted;
     procedure TestSemantic_StaticArrayToOpenArray_NonZeroBase_Accepted;
+    { [0, 4] passed to an 'array of Byte' failed with "No matching overload":
+      the literal was typed 'array of Integer' from its first element, and
+      no rule let constant integers convert to the formal's element type
+      (found via GH #233). }
+    procedure TestSemantic_IntLiteralToByteOpenArray_Accepted;
+    procedure TestSemantic_NonConstElemToByteOpenArray_Rejected;
+    { The literal's element block must be laid out at the FORMAL's width. }
+    procedure TestCodegen_IntLiteralToByteOpenArray_ByteStores;
   end;
 
 implementation
@@ -431,6 +439,56 @@ begin
   P := AnalyseSrc(SrcStaticToOpenNonZero);
   P.Free();
   AssertTrue('non-zero-base static array passed to open-array param compiles', True);
+end;
+
+const
+  SrcIntLitToByteOpen =
+    '''
+        program P;
+        const K = 9;
+        procedure Show(const A: array of Byte);
+        begin
+          WriteLn(Length(A))
+        end;
+        begin
+          Show([7, 250, K, 1 + 2])
+        end.
+        ''';
+
+procedure TOpenArrayTests.TestSemantic_IntLiteralToByteOpenArray_Accepted;
+begin
+  AnalyseSrc(SrcIntLitToByteOpen).Free();
+end;
+
+procedure TOpenArrayTests.TestSemantic_NonConstElemToByteOpenArray_Rejected;
+var
+  Raised: Boolean;
+begin
+  { an Integer VARIABLE is not an untyped constant: no implicit narrowing }
+  Raised := False;
+  try
+    AnalyseSrc(
+      '''
+          program P;
+          procedure Show(const A: array of Byte);
+          begin
+          end;
+          var N: Integer;
+          begin
+            Show([N, 1])
+          end.
+          ''').Free();
+  except
+    on E: ESemanticError do
+      Raised := True;
+  end;
+  AssertTrue('an Integer variable element is not narrowed', Raised);
+end;
+
+procedure TOpenArrayTests.TestCodegen_IntLiteralToByteOpenArray_ByteStores;
+begin
+  AssertEquals('literal element stored one byte wide', '',
+    AsmMissing(SrcIntLitToByteOpen, #9'movb %al, 1(%rsp)', #9'strb w0, [x9]'));
 end;
 
 initialization

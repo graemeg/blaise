@@ -505,6 +505,8 @@ type
     procedure RetypeSetLiteralArgs(AArgs: TObjectList; AMDecl: TMethodDecl);
     { True when a bracket literal still holds an unexpanded lo..hi element. }
     function  LiteralHasRange(AExpr: TArrayLiteralExpr): Boolean;
+    function  LiteralNarrowsToOpenArray(AExpr: TASTExpr;
+      AParamType: TTypeDesc): Boolean;
     { Re-type one bracket-literal arg against its formal's type (the per-arg
       body of RetypeSetLiteralArgs, shared with procedural-type calls). }
     procedure RetypeBracketLiteralArg(AArg: TASTExpr; AParamType: TTypeDesc);
@@ -11360,7 +11362,13 @@ begin
         TArrayLiteralExpr(ACall.Args.Items[I]),
         TSetTypeDesc(Par.ResolvedType))
     else
+    begin
       ArgType := Self.AnalyseListSlot(ACall.Args, I);
+      { [] and constant-integer literals take the formal's open-array type }
+      RetypeBracketLiteralArg(TASTExpr(ACall.Args.Items[I]), Par.ResolvedType);
+      if TASTExpr(ACall.Args.Items[I]) is TArrayLiteralExpr then
+        ArgType := TASTExpr(ACall.Args.Items[I]).ResolvedType;
+    end;
     CheckTypesMatch(Par.ResolvedType, ArgType,
       Format('argument %d of inherited ''%s''', [I + 1, ACall.Name]),
       ACall.Line, ACall.Col);
@@ -11517,7 +11525,13 @@ begin
         TArrayLiteralExpr(ACall.Args.Items[I]),
         TSetTypeDesc(Par.ResolvedType))
     else
+    begin
       ArgType := Self.AnalyseListSlot(ACall.Args, I);
+      { [] and constant-integer literals take the formal's open-array type }
+      RetypeBracketLiteralArg(TASTExpr(ACall.Args.Items[I]), Par.ResolvedType);
+      if TASTExpr(ACall.Args.Items[I]) is TArrayLiteralExpr then
+        ArgType := TASTExpr(ACall.Args.Items[I]).ResolvedType;
+    end;
     CheckTypesMatch(Par.ResolvedType, ArgType,
       Format('argument %d of inherited ''%s''', [I + 1, ACall.Name]),
       ACall.Line, ACall.Col);
@@ -12322,6 +12336,49 @@ begin
       Exit(True);
 end;
 
+{ True when AExpr is a non-empty bracket literal of constant integers bound
+  for an open array of a different integer type: [0, 4] passed to an
+  'array of Byte'.  The literal was typed from its first element (array of
+  Integer), but an untyped integer constant converts to any integer type, as
+  it does for a scalar argument.  Subrange / enum element types are left to
+  the normal type check. }
+function TSemanticAnalyser.LiteralNarrowsToOpenArray(AExpr: TASTExpr;
+  AParamType: TTypeDesc): Boolean;
+var
+  I: Integer;
+  V: Int64;
+  Elem: TTypeDesc;
+  Slot: TASTExpr;
+begin
+  Result := False;
+  if not (AExpr is TArrayLiteralExpr) or (AParamType = nil) or
+     (AParamType.Kind <> tyOpenArray) then
+    Exit;
+  if TArrayLiteralExpr(AExpr).Elements.Count = 0 then
+    Exit;
+  Elem := TOpenArrayTypeDesc(AParamType).ElementType;
+  if (Elem = nil) or Elem.IsSubrange or
+     not (Elem.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64,
+                        tySmallInt, tyWord, tyByte]) then
+    Exit;
+  if (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyOpenArray) and
+     (TOpenArrayTypeDesc(AExpr.ResolvedType).ElementType = Elem) then
+    Exit;
+  { Every element an integer-typed constant.  A literal mixing Integer and
+    Int64 constants was flagged array-of-const by the untyped analysis; it
+    still qualifies.  Boolean / enum / Char constants do not. }
+  for I := 0 to TArrayLiteralExpr(AExpr).Elements.Count - 1 do
+  begin
+    Slot := TASTExpr(TArrayLiteralExpr(AExpr).Elements.Items[I]);
+    if (Slot.ResolvedType = nil) or
+       not (Slot.ResolvedType.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64,
+                                      tySmallInt, tyWord, tyByte]) or
+       not Self.TryEvalConstIntExpr(Slot, V) then
+      Exit;
+  end;
+  Result := True;
+end;
+
 procedure TSemanticAnalyser.RetypeBracketLiteralArg(AArg: TASTExpr;
   AParamType: TTypeDesc);
 begin
@@ -12357,6 +12414,14 @@ begin
      (TArrayLiteralExpr(AArg).Elements.Count = 0) and
      (AArg.ResolvedType = nil) then
     AArg.ResolvedType := AParamType;
+  { Constant integers bound for a narrower (or wider) integer element type:
+    pin the formal's type so the literal's element block is laid out at the
+    formal's element width (x86-64 sizes it from the literal's type). }
+  if Self.LiteralNarrowsToOpenArray(AArg, AParamType) then
+  begin
+    TArrayLiteralExpr(AArg).IsConstArray := False;
+    AArg.ResolvedType := AParamType;
+  end;
 end;
 
 { A call through a procedural-typed field has exactly one candidate signature,
@@ -12501,6 +12566,12 @@ begin
     Result := 2;
     Exit;
   end;
+  { Constant-integer bracket literal against an open array of another
+    integer type: a conversion, so an exact-element overload still wins.
+    Checked before the nil-arg bail: a literal mixing Integer and Int64
+    constants has no single element type, so it is left untyped. }
+  if Self.LiteralNarrowsToOpenArray(AArgExpr, AParam) then
+    Exit(1);
   if AArg = nil then Exit;
   { Integer literal (untyped constant) matches any integer type exactly —
     mirrors Pascal's treatment of untyped integer constants.  Floating-point
