@@ -69,6 +69,9 @@ type
 
     { Named-type alias array const (GitHub #113) }
     procedure TestRun_NamedArrayAlias_IntConst;
+    { Every element kind through a NAMED array type, at program and routine
+      scope (found via GH #233: only 4-byte integers worked). }
+    procedure TestRun_NamedArrayAlias_AllElementKinds;
 
     { Boolean / enum / named-const array-const elements fold to ordinals }
     procedure TestRun_BoolArrayConst_FoldsToOrdinals;
@@ -876,6 +879,68 @@ const
     ''';
 begin
   AssertRunsOnAll(Src, '10' + Chr(10) + '20' + Chr(10) + '30' + Chr(10), 0);
+end;
+
+procedure TE2EGapTests.TestRun_NamedArrayAlias_AllElementKinds;
+const
+  Src =
+    '''
+    program P;
+    type
+      TColor = (cRed, cGreen, cBlue);
+      TS = array[0..2] of string;
+      TB = array[0..3] of Byte;
+      TI = array[0..2] of Int64;
+      TC = array[0..2] of TColor;
+      TF = array[0..1] of Boolean;
+      TD = array[0..1] of Double;
+      TW = array[1..2] of Word;
+    const
+      cS: TS = ('K', 'M', '<BK>');
+      cB: TB = (1, 2, 3, 250);
+      cI: TI = (5000000000, -2, 7);
+      cC: TC = (cBlue, cRed, cGreen);
+      cF: TF = (True, False);
+      cD: TD = (1.5, -2.25);
+      cW: TW = (60000, 9);
+    procedure Local;
+    const
+      cL: TS = ('x', 'y', 'z');
+    var
+      I: Integer;
+    begin
+      for I := 0 to 2 do
+        Write(cL[I]);
+      WriteLn()
+    end;
+    var I: Integer;
+    begin
+      for I := 0 to 2 do Write(cS[I], ' ');
+      WriteLn();
+      for I := 0 to 3 do Write(cB[I], ' ');
+      WriteLn();
+      for I := 0 to 2 do Write(cI[I], ' ');
+      WriteLn();
+      for I := 0 to 2 do Write(Ord(cC[I]), ' ');
+      WriteLn();
+      WriteLn(cF[0], ' ', cF[1]);
+      WriteLn(cD[0]:0:2, ' ', cD[1]:0:2);
+      WriteLn(cW[1], ' ', cW[2]);
+      Local()
+    end.
+    ''';
+var LE: string;
+begin
+  LE := Chr(10);
+  AssertRunsOnAll(Src,
+    'K M <BK> ' + LE +
+    '1 2 3 250 ' + LE +
+    '5000000000 -2 7 ' + LE +
+    '2 0 1 ' + LE +
+    'True False' + LE +
+    '1.50 -2.25' + LE +
+    '60000 9' + LE +
+    'xyz' + LE, 0);
 end;
 
 procedure TE2EGapTests.TestRun_BoolArrayConst_FoldsToOrdinals;

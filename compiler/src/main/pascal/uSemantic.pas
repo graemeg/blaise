@@ -6922,7 +6922,11 @@ begin
       Continue;
     end;
     if not CD.IsArrayConst then Continue;
-    if (CD.ArrayElemType = '') and (CD.TypeName <> '') then
+    { A named array type (const C: TArr = (...)) is the only form that sets
+      TypeName; the inline form leaves it empty and fills ArrayElemType at
+      parse time.  Test TypeName alone: the named arm below fills
+      ArrayElemType too, and a re-analysis must keep the declared type. }
+    if CD.TypeName <> '' then
     begin
       ElemTD := FTable.FindType(CD.TypeName);
       if ElemTD = nil then
@@ -6938,6 +6942,23 @@ begin
           'Array const ''%s'' has %d element(s) but type ''%s'' expects %d',
           [CD.Name, CD.ArrayElements.Count, CD.TypeName, Expected]),
           CD.Line, CD.Col);
+      { The data emitters size and spell each element from ArrayElemType;
+        left empty, every element went out as a 4-byte integer, so string,
+        enum and float elements failed to assemble and Byte / Int64 ones had
+        the wrong width.  Publish the element type and bounds exactly as the
+        inline form carries them, and continue with the ELEMENT type so the
+        element folding below resolves enum members and Booleans. }
+      ElemTD := ArrTD.ElementType;
+      if ElemTD.Kind <> tyStaticArray then
+      begin
+        if ElemTD.Kind = tyString then
+          CD.ArrayElemType := 'string'
+        else
+          CD.ArrayElemType := ElemTD.Name;
+        CD.ArrayIsRangeIndexed := True;
+        CD.ArrayLowBound := ArrTD.LowBound;
+        CD.ArrayHighBound := ArrTD.HighBound;
+      end;
     end
     else
     begin

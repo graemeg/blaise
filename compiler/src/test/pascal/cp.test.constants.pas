@@ -63,6 +63,12 @@ type
     { Named type alias array constants (issue #113) }
     procedure TestArrayConst_NamedAlias_Parses;
     procedure TestArrayConst_NamedAlias_WrongCount_Error;
+    { A const of a NAMED static-array type left ArrayElemType empty, so the
+      data emitters on both ISAs wrote every element as a 4-byte integer:
+      string / enum / Double elements failed to assemble ("K" is not a valid
+      integer value) and Byte / Int64 ones silently had the wrong width
+      (found via GH #233). }
+    procedure TestArrayConst_NamedAlias_ElementTypeDrivesData;
 
     { Class-level array constants }
 
@@ -564,6 +570,56 @@ begin
     AssertTrue(T + ': local array const not exported',
       Pos('.globl __bac_', AsmText) < 0);
   end;
+end;
+
+procedure TConstTests.TestArrayConst_NamedAlias_ElementTypeDrivesData;
+const
+  StrSrc =
+    '''
+    program P;
+    type TG = array[0..1] of string;
+    const cG: TG = ('K', 'M');
+    var I: Integer;
+    begin
+      I := 1;
+      WriteLn(cG[I])
+    end.
+    ''';
+  ByteSrc =
+    '''
+    program P;
+    type TB = array[0..1] of Byte;
+    const cB: TB = (7, 250);
+    var I: Integer;
+    begin
+      I := 1;
+      WriteLn(cB[I])
+    end.
+    ''';
+  EnumSrc =
+    '''
+    program P;
+    type
+      TColor = (cRed, cGreen, cBlue);
+      TC = array[0..1] of TColor;
+    const cC: TC = (cBlue, cGreen);
+    var I: Integer;
+    begin
+      I := 1;
+      WriteLn(Ord(cC[I]))
+    end.
+    ''';
+begin
+  AssertEquals('string elements are string-literal pointers', '',
+    AsmMissing(StrSrc, #9'.quad __s', #9'.quad __bce_'));
+  AssertEquals('Byte elements are one byte wide', '',
+    AsmMissing(ByteSrc, #9'.byte 250', #9'.byte 250'));
+  AssertEquals('enum elements fold to their ordinals', '',
+    AsmMissing(EnumSrc, ' 2' + #10, ' 2' + #10));
+  AssertTrue('x86-64: no bare enum member in the data',
+    Pos(' cBlue', GenAsm(EnumSrc, TargetX86_64)) < 0);
+  AssertTrue('arm64: no bare enum member in the data',
+    Pos(' cBlue', GenAsm(EnumSrc, TargetArm64)) < 0);
 end;
 
 initialization
