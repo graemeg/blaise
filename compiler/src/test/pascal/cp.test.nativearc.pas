@@ -75,6 +75,9 @@ type
       and then releases the call temp's fields (the pin's release is
       deferred to the statement end). }
     procedure TestRecordCallFieldRead_PinsThenReleasesTemp;
+    { An owned transient method receiver (MakeL().Hello()) is released after
+      the call -- x86-64 never released it. }
+    procedure TestOwnedMethodReceiver_Released;
     { A by-value dyn-array parameter is a co-owning ref-counted pointer:
       the callee must retain it on entry and release it at exit
       (BUG-20260721-byval-dynarray-param-no-arc). }
@@ -416,6 +419,35 @@ begin
   MainR := Copy(MainR, 0, E);
   AssertTrue('discarded record result''s elements are released in main',
     Pos('_StringRelease', MainR) >= 0);
+end;
+
+procedure TNativeArcTests.TestOwnedMethodReceiver_Released;
+const
+  Src = '''
+    program P;
+    type
+      TL = class
+        procedure Hello();
+        function Num(): Integer;
+        destructor Destroy(); override;
+      end;
+    var Frees: Integer;
+    procedure TL.Hello(); begin WriteLn('hi') end;
+    function TL.Num(): Integer; begin Result := 5 end;
+    destructor TL.Destroy(); begin Frees := Frees + 1; inherited Destroy() end;
+    function MakeL(): TL; begin Result := TL.Create() end;
+    begin
+      MakeL().Hello();
+      MakeL().Num();
+      WriteLn(MakeL().Num());
+      WriteLn('frees ', Frees)
+    end.
+    ''';
+begin
+  AssertEquals('the owned receiver is parked for release', '',
+    AsmMissing(Src, #9'movq %rax, _pendrel_0(%rip)',
+      #9'bl _MakeL' + #10 + #9'str x0, [sp, #-16]!' + #10 +
+        #9'str x0, [sp, #-16]!'));
 end;
 
 procedure TNativeArcTests.TestRecordCallFieldRead_PinsThenReleasesTemp;

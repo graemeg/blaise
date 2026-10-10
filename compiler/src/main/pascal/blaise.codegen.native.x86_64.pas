@@ -805,6 +805,7 @@ type
     { Free a record-call-receiver buffer materialised by EmitMethodSretCall. }
     procedure EmitMethodSretRecvCleanup(ABytes: Integer; ARecvExpr: TASTExpr);
     procedure EmitRecvBufFieldReleases(ARecvExpr: TASTExpr);
+    procedure DeferOwnedClassRecv(ARecv: TASTExpr);
     procedure EmitRecCallBufFieldReadCleanup(ARecType, AFieldType: TTypeDesc;
       AFloat: Boolean);
     { Emit the base ADDRESS of a NAMED LOCAL record into AReg (e.g.
@@ -11492,6 +11493,7 @@ begin
     else if ACall.ObjExpr <> nil then
     begin
       Self.EmitExprToEax(ACall.ObjExpr);
+      Self.DeferOwnedClassRecv(ACall.ObjExpr);
       Self.Emit(#9'movq %rax, %r10');
     end
     else
@@ -11566,7 +11568,10 @@ begin
     else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
       Self.Emit(#9'movq %rbx, %rax')      { record-call receiver address }
     else if ACall.ObjExpr <> nil then
-      Self.EmitExprToEax(ACall.ObjExpr)
+    begin
+      Self.EmitExprToEax(ACall.ObjExpr);
+      Self.DeferOwnedClassRecv(ACall.ObjExpr);
+    end
     else
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
     Self.Emit(Format(#9'movq %%rax, 0(%%rsp)', []));
@@ -12974,6 +12979,7 @@ begin
     else if ACall.ObjExpr <> nil then
     begin
       Self.EmitExprToEax(ACall.ObjExpr);
+      Self.DeferOwnedClassRecv(ACall.ObjExpr);
       Self.Emit(#9'movq %rax, %r10');
     end
     else
@@ -13038,7 +13044,10 @@ begin
         Self.Emit(Format(#9'movq %s(%%rip), %%rax', [Self.GlobalSymName(ACall.ObjectName)]));
     end
     else if ACall.ObjExpr <> nil then
-      Self.EmitExprToEax(ACall.ObjExpr)
+    begin
+      Self.EmitExprToEax(ACall.ObjExpr);
+      Self.DeferOwnedClassRecv(ACall.ObjExpr);
+    end
     else
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
     Self.Emit(Format(#9'movq %%rax, 0(%%rsp)', []));
@@ -21741,6 +21750,18 @@ begin
     Self.DeferNativeRelease(RelSym);     { stores %rax }
 end;
 
+procedure TX86_64Backend.DeferOwnedClassRecv(ARecv: TASTExpr);
+begin
+  { MakeL().Hello() / WriteLn(MakeL().Num()): the method receiver just
+    evaluated into %rax is an owned +1 transient that nothing released --
+    every such call leaked the object.  Defer its release to the end of the
+    statement (after the call, which borrows it as Self); %rax is untouched.
+    With every _pendrel slot in use it leaks, as before -- never a UAF. }
+  if (ARecv.ResolvedType <> nil) and (ARecv.ResolvedType.Kind = tyClass) and
+     NativeExprOwnsRef(ARecv) then
+    Self.DeferNativeClassRelease();
+end;
+
 procedure TX86_64Backend.EmitRecvBufFieldReleases(ARecvExpr: TASTExpr);
 begin
   if (ARecvExpr = nil) or (ARecvExpr.ResolvedType = nil) or
@@ -21910,6 +21931,7 @@ begin
     else if ACall.ObjExpr <> nil then
     begin
       Self.EmitExprToEax(ACall.ObjExpr);
+      Self.DeferOwnedClassRecv(ACall.ObjExpr);
       Self.Emit(#9'movq %rax, %rdi');
     end
     else
@@ -22038,7 +22060,10 @@ begin
     else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
       Self.Emit(#9'movq %rbx, %rax')      { record-call receiver address }
     else if ACall.ObjExpr <> nil then
-      Self.EmitExprToEax(ACall.ObjExpr)
+    begin
+      Self.EmitExprToEax(ACall.ObjExpr);
+      Self.DeferOwnedClassRecv(ACall.ObjExpr);
+    end
     else
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
     Self.Emit(Format(#9'movq %%rax, 8(%%rsp)', []));
@@ -22132,6 +22157,7 @@ begin
     else if ACall.ObjExpr <> nil then
     begin
       Self.EmitExprToEax(ACall.ObjExpr);
+      Self.DeferOwnedClassRecv(ACall.ObjExpr);
       Self.Emit(#9'movq %rax, %rsi');
     end
     else
@@ -22183,7 +22209,10 @@ begin
     else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
       Self.Emit(#9'movq %rbx, %rax')      { record-call receiver address }
     else if ACall.ObjExpr <> nil then
-      Self.EmitExprToEax(ACall.ObjExpr)
+    begin
+      Self.EmitExprToEax(ACall.ObjExpr);
+      Self.DeferOwnedClassRecv(ACall.ObjExpr);
+    end
     else
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
     Self.Emit(Format(#9'movq %%rax, 8(%%rsp)', []));

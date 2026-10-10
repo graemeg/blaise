@@ -114,6 +114,10 @@ type
       BUG-20261009-recordcall-field-read-leak. }
     procedure TestRun_RecordCallFieldRead_NoLeak;
     procedure TestRun_RecordPropFieldRead_NoLeak;
+    { A method called on an owned transient receiver -- a statement, a
+      discarded function result, an expression -- frees the receiver
+      (x86-64 leaked every one). }
+    procedure TestRun_OwnedMethodReceiver_Freed;
     { A by-value dyn-array param must keep the buffer alive even when the
       caller's own reference is dropped mid-call
       (BUG-20260721-byval-dynarray-param-no-arc). }
@@ -935,6 +939,34 @@ begin
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('field values survive copy', '15' + LE, Output);
   { the double-release from a bare-memcpy copy shows up here }
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EArcTests.TestRun_OwnedMethodReceiver_Freed;
+const
+  Src = '''
+    program P;
+    type
+      TL = class
+        procedure Hello();
+        function Num(): Integer;
+        destructor Destroy(); override;
+      end;
+    var Frees: Integer;
+    procedure TL.Hello(); begin WriteLn('hi') end;
+    function TL.Num(): Integer; begin Result := 5 end;
+    destructor TL.Destroy(); begin Frees := Frees + 1; inherited Destroy() end;
+    function MakeL(): TL; begin Result := TL.Create() end;
+    begin
+      MakeL().Hello();
+      MakeL().Num();
+      WriteLn(MakeL().Num());
+      WriteLn('frees ', Frees)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'hi' + LE + '5' + LE + 'frees 3' + LE, 0);
   AssertLeakFreeOnAll(Src, '');
 end;
 
