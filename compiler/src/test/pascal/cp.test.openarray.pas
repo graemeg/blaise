@@ -77,6 +77,14 @@ type
     procedure TestSemantic_NonConstElemToByteOpenArray_Rejected;
     { The literal's element block must be laid out at the FORMAL's width. }
     procedure TestCodegen_IntLiteralToByteOpenArray_ByteStores;
+    { BUG-20261010-captured-open-array: a nested routine using its parent's
+      open-array parameter captured only the data slot, never '<A>_high', so
+      x86-64 linked High(A) against an undefined global (segfault at run
+      time) and arm64 rejected it.  The high slot is now captured with it. }
+    procedure TestSemantic_NestedCapture_OpenArray_CapturesHighSlot;
+    procedure TestCodegen_NestedCapture_OpenArray_NoGlobalHigh;
+    { An anonymous method cannot capture an open array (as in Delphi). }
+    procedure TestSemantic_AnonCapture_OpenArray_Rejected;
   end;
 
 implementation
@@ -489,6 +497,80 @@ procedure TOpenArrayTests.TestCodegen_IntLiteralToByteOpenArray_ByteStores;
 begin
   AssertEquals('literal element stored one byte wide', '',
     AsmMissing(SrcIntLitToByteOpen, #9'movb %al, 1(%rsp)', #9'strb w0, [x9]'));
+end;
+
+const
+  SrcNestedOpenArray =
+    '''
+        program P;
+        procedure Show(const A: array of Integer);
+          procedure Inner;
+          var I: Integer;
+          begin
+            for I := 0 to High(A) do
+              WriteLn(A[I])
+          end;
+        begin
+          Inner()
+        end;
+        begin
+          Show([1, 2])
+        end.
+        ''';
+
+procedure TOpenArrayTests.TestSemantic_NestedCapture_OpenArray_CapturesHighSlot;
+var
+  Prog: TProgram;
+  Outer, Inner: TMethodDecl;
+begin
+  Prog := AnalyseSrc(SrcNestedOpenArray);
+  try
+    Outer := TMethodDecl(Prog.Block.ProcDecls.Items[0]);
+    Inner := TMethodDecl(Outer.Body.ProcDecls.Items[0]);
+    AssertNotNull('Inner captured something', Inner.CapturedVars);
+    AssertTrue('data slot captured', Inner.CapturedVars.IndexOf('A') >= 0);
+    AssertTrue('high slot captured', Inner.CapturedVars.IndexOf('A_high') >= 0);
+    AssertTrue('recognised as an open-array capture',
+      Inner.CapturesOpenArray('A'));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TOpenArrayTests.TestCodegen_NestedCapture_OpenArray_NoGlobalHigh;
+var
+  X86: string;
+begin
+  { arm64 raised NotYet while generating; x86-64 named a global }
+  X86 := GenAsm(SrcNestedOpenArray, TargetX86_64);
+  AssertTrue('x86-64: no global A_high reference', Pos('A_high(%rip)', X86) < 0);
+  AssertTrue('arm64: generates', GenAsm(SrcNestedOpenArray, TargetArm64) <> '');
+end;
+
+procedure TOpenArrayTests.TestSemantic_AnonCapture_OpenArray_Rejected;
+var
+  Msg: string;
+begin
+  Msg := '';
+  try
+    AnalyseSrc(
+      '''
+          program P;
+          type TF = reference to function: Integer;
+          function Make(const A: array of Integer): TF;
+          begin
+            Result := function: Integer begin Result := High(A) end
+          end;
+          begin
+            WriteLn(Make([1])())
+          end.
+          ''').Free();
+  except
+    on E: ESemanticError do
+      Msg := E.Message;
+  end;
+  AssertTrue('rejected with an open-array capture message: ' + Msg,
+    Pos('Cannot capture open-array parameter', Msg) >= 0);
 end;
 
 initialization

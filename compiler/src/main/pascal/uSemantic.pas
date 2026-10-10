@@ -9261,6 +9261,7 @@ procedure TSemanticAnalyser.CollectCaptures(ADecl: TMethodDecl; AOuterDecl: TMet
   var-by-pointer parameter, and the call site passes the variable's address. }
 var
   OuterVars: TStringList;
+  OpenArrs:  TStringList;
   I, J, K:   Integer;
   VDecl:     TVarDecl;
   VName:     string;
@@ -9273,6 +9274,7 @@ begin
   if ADecl.Body = nil then Exit;
   if AOuterDecl = nil then Exit;
 
+  OpenArrs := TStringList.Create();
   OuterVars := TStringList.Create();
   TodoExprs := TObjectList.Create(False);
   TodoStmts := TObjectList.Create(False);
@@ -9308,7 +9310,16 @@ begin
       begin
         VName := TMethodParam(ChainDecl.Params.Items[I]).ParamName;
         if OuterVars.IndexOf(VName) < 0 then
+        begin
           OuterVars.Add(VName);
+          { an open-array parameter is a (data, high) slot pair: the
+            companion '<Name>_high' slot is capturable alongside it }
+          if TMethodParam(ChainDecl.Params.Items[I]).IsOpenArray then
+          begin
+            OpenArrs.Add(VName);
+            OuterVars.Add(VName + '_high');
+          end;
+        end;
       end;
       ChainDecl := ChainDecl.EnclosingDecl;
     end;
@@ -9343,7 +9354,8 @@ begin
         begin
           VName := VDecl.Names.Strings[J];
           for K := OuterVars.Count - 1 downto 0 do
-            if SameText(OuterVars.Strings[K], VName) then
+            if SameText(OuterVars.Strings[K], VName) or
+               SameText(OuterVars.Strings[K], VName + '_high') then
               OuterVars.Delete(K);
         end;
       end;
@@ -9351,7 +9363,8 @@ begin
     begin
       VName := TMethodParam(ADecl.Params.Items[I]).ParamName;
       for K := OuterVars.Count - 1 downto 0 do
-        if SameText(OuterVars.Strings[K], VName) then
+        if SameText(OuterVars.Strings[K], VName) or
+           SameText(OuterVars.Strings[K], VName + '_high') then
           OuterVars.Delete(K);
     end;
     if OuterVars.Count = 0 then Exit;
@@ -9628,7 +9641,16 @@ begin
         end;
       end;
     end;
+    { A captured open-array parameter brings its high slot with it: every
+      High / Length / for-in / forwarding path reads '<Name>_high', which a
+      nested routine otherwise had no way to reach (x86-64 linked it against
+      an undefined global, arm64 rejected it). }
+    for I := 0 to OpenArrs.Count - 1 do
+      if (ADecl.CapturedVars <> nil) and
+         (ADecl.CapturedVars.IndexOf(OpenArrs.Strings[I]) >= 0) then
+        MaybeCaptureName(ADecl, OuterVars, OpenArrs.Strings[I] + '_high');
   finally
+    OpenArrs.Free();
     OuterVars.Free();
     TodoExprs.Free();
     TodoStmts.Free();
@@ -17120,6 +17142,21 @@ begin
      (AThunk.CapturedVars.IndexOf('Self') >= 0) then
     SemanticError('Self cannot be captured by an anonymous method declared ' +
       'inside a nested routine of a method', AThunk.Line, AThunk.Col);
+  { An open-array parameter cannot be captured by an anonymous method (as in
+    Delphi): the closure may outlive the call, but the array is the caller's
+    temporary storage -- often a stack literal -- so there is nothing safe to
+    copy into the heap env.  A classic nested routine can capture one: it
+    never outlives its owner. }
+  if AThunk.CapturedVars <> nil then
+    for I := 0 to AThunk.CapturedVars.Count - 1 do
+    begin
+      Sym := FTable.Lookup(AThunk.CapturedVars.Strings[I]);
+      if (Sym <> nil) and (Sym.TypeDesc <> nil) and
+         (Sym.TypeDesc.Kind = tyOpenArray) then
+        SemanticError(Format('Cannot capture open-array parameter ''%s'' in ' +
+          'an anonymous method; copy it into a dynamic array first',
+          [AThunk.CapturedVars.Strings[I]]), AThunk.Line, AThunk.Col);
+    end;
   if (AThunk.CapturedVars = nil) and (not InMethod) then Exit;
 
   { Drop names shadowed by the literal's own params or locals — the walker

@@ -76,6 +76,10 @@ type
       overload still wins.  Includes GH #233's program as reported. }
     procedure TestRun_IntLiteral_ToNarrowOpenArray;
     procedure TestRun_GH233_KochTrainingString;
+    { BUG-20261010-captured-open-array: nested routines (two levels, and a
+      sibling call) reading the parent's open array through High / Length /
+      subscript / for-in, writing a var open array, and the empty case. }
+    procedure TestRun_NestedRoutine_CapturesOpenArray;
   end;
 
 implementation
@@ -930,6 +934,71 @@ begin
     '0 2 4 6 8 10 12 14 16 18 20 22 24 26 28 30 ' + #10 +
     'K R U P L W . J F Y V 5 Q Z 3 B ' + #10 +
     'K <BK> <AR> ' + #10, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_NestedRoutine_CapturesOpenArray;
+const Src =
+  '''
+  program P;
+  procedure Run(const A: array of Integer; var V: array of Byte);
+    procedure ShowLen;
+    begin
+      WriteLn('len ', Length(A), ' high ', High(A))
+    end;
+    procedure Inner;
+    var
+      I, X: Integer;
+      procedure Deeper;
+      var Y: Integer;
+      begin
+        for Y in A do Write('d', Y, ' ');
+        WriteLn();
+        V[0] := V[0] + 10
+      end;
+    begin
+      for I := 0 to High(A) do Write(A[I], ' ');
+      WriteLn();
+      for X in A do Write('[', X, ']');
+      WriteLn();
+      ShowLen();
+      Deeper()
+    end;
+  begin
+    Inner()
+  end;
+  procedure Join(const S: array of string);
+    function Glue: string;
+    var T: string;
+    begin
+      Result := '';
+      for T in S do Result := Result + T + '/'
+    end;
+  begin
+    WriteLn(Glue())
+  end;
+  var B: array[0..1] of Byte;
+  begin
+    B[0] := 1; B[1] := 2;
+    Run([1, 2, 3], B);
+    WriteLn(B[0], ' ', B[1]);
+    Run([], B);
+    WriteLn(B[0]);
+    Join(['a', 'b' + IntToStr(7)])
+  end.
+  ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '1 2 3 ' + #10 +
+    '[1][2][3]' + #10 +
+    'len 3 high 2' + #10 +
+    'd1 d2 d3 ' + #10 +
+    '11 2' + #10 +
+    #10 + #10 +
+    'len 0 high -1' + #10 +
+    #10 +
+    '21' + #10 +
+    'a/b7/' + #10, 0);
 end;
 
 initialization

@@ -1132,6 +1132,12 @@ type
                                published methods. }
     constructor Create;
     destructor Destroy; override;
+    { True when this nested routine captured AName as an enclosing routine's
+      OPEN-ARRAY parameter: the semantic pass then also captures its
+      companion '<AName>_high' slot, and codegen copies the (data, high) pair
+      into real local slots at entry so every open-array path reads them
+      unchanged.  The nearest enclosing declaration of AName decides. }
+    function CapturesOpenArray(const AName: string): Boolean;
   end;
 
   { Anonymous procedure/function literal as an expression:
@@ -1982,6 +1988,34 @@ begin
   AttrUses   := TObjectList.Create(True);
   VTableSlot := -1;
   OwnBody    := True;
+end;
+
+function TMethodDecl.CapturesOpenArray(const AName: string): Boolean;
+var
+  D: TMethodDecl;
+  I, J: Integer;
+  VD: TVarDecl;
+begin
+  Result := False;
+  if (CapturedVars = nil) or (CapturedVars.IndexOf(AName) < 0) or
+     (CapturedVars.IndexOf(AName + '_high') < 0) then
+    Exit;
+  D := EnclosingDecl;
+  while D <> nil do
+  begin
+    for I := 0 to D.Params.Count - 1 do
+      if SameText(TMethodParam(D.Params.Items[I]).ParamName, AName) then
+        Exit(TMethodParam(D.Params.Items[I]).IsOpenArray);
+    if D.Body <> nil then
+      for I := 0 to D.Body.Decls.Count - 1 do
+      begin
+        VD := TVarDecl(D.Body.Decls.Items[I]);
+        for J := 0 to VD.Names.Count - 1 do
+          if SameText(VD.Names.Strings[J], AName) then
+            Exit(False);
+      end;
+    D := D.EnclosingDecl;
+  end;
 end;
 
 destructor TMethodDecl.Destroy;

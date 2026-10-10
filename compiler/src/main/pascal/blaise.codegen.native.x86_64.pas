@@ -5961,6 +5961,16 @@ begin
     if (ADecl.OwnerTypeName = '') and
        (ADecl.CapturedVars.IndexOf('Self') >= 0) then
       Self.AddSlot('Self', nil, Offset);
+    { A captured OPEN-ARRAY parameter likewise gets real (data, high)
+      slots, filled through its two '_cap_' pointers in the prologue: the
+      pair never changes, so every open-array path reads it as in the
+      owner (otherwise '<Name>_high' resolved to an undefined global). }
+    for I := 0 to ADecl.CapturedVars.Count - 1 do
+      if ADecl.CapturesOpenArray(ADecl.CapturedVars.Strings[I]) then
+      begin
+        Self.AddSlot(ADecl.CapturedVars.Strings[I], nil, Offset);
+        Self.AddSlot(ADecl.CapturedVars.Strings[I] + '_high', nil, Offset);
+      end;
   end;
 
   { Phase-2 anonymous-method capture: the env base slot plus one
@@ -23332,6 +23342,20 @@ begin
       Self.Emit(#9'movq (%rax), %rax');
       Self.Emit(Format(#9'movq %%rax, %s', [Self.VarOperand('Self')]));
     end;
+    for I := 0 to ADecl.CapturedVars.Count - 1 do
+      if ADecl.CapturesOpenArray(ADecl.CapturedVars.Strings[I]) then
+      begin
+        Self.Emit(Format(#9'movq %s, %%rax',
+          [Self.VarOperand('_cap_' + ADecl.CapturedVars.Strings[I])]));
+        Self.Emit(#9'movq (%rax), %rax');
+        Self.Emit(Format(#9'movq %%rax, %s',
+          [Self.VarOperand(ADecl.CapturedVars.Strings[I])]));
+        Self.Emit(Format(#9'movq %s, %%rax',
+          [Self.VarOperand('_cap_' + ADecl.CapturedVars.Strings[I] + '_high')]));
+        Self.Emit(#9'movq (%rax), %rax');
+        Self.Emit(Format(#9'movq %%rax, %s',
+          [Self.VarOperand(ADecl.CapturedVars.Strings[I] + '_high')]));
+      end;
   end;
   if FSretFunc then
   begin

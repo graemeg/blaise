@@ -1061,6 +1061,20 @@ the dynamic array carries a header. An empty open array has `High = -1`,
 so the loop body never runs. The loop variable receives a copy of each
 element, exactly as for static and dynamic arrays.
 
+==== Capture
+
+A classic nested routine may use its enclosing routine's open-array
+parameter: `High`, `Length`, subscripts, for-in and forwarding all work.
+Both halves of the (data, high) pair are captured by address, and the nested
+routine copies the pair into its own slots at entry; the pair never changes
+during the call, so the copy is exact.
+
+An anonymous method may NOT capture an open-array parameter, matching
+Delphi. A closure can outlive the call, while the array is the caller's
+temporary storage (often a stack-allocated literal), so there is nothing
+that can safely be moved into the heap environment. The diagnostic
+suggests copying the elements into a dynamic array first.
+
 ==== ARC exclusion
 
 Open-array parameters are excluded from the ARC addref/release loops

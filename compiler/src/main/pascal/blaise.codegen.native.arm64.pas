@@ -9704,10 +9704,10 @@ begin
     if (TIdentExpr(AStmt.CollExpr).ParamMode = pmVar) and
        not AStmt.IsOpenArrayIter then
       NotYet('for-in over a var array parameter', AStmt);
+    { a captured open array has its pair copied into local slots at entry }
     if AStmt.IsOpenArrayIter and
-       (IsCaptured(TIdentExpr(AStmt.CollExpr).Name) or
-        not IsLocal(TIdentExpr(AStmt.CollExpr).Name + '_high')) then
-      NotYet('for-in over a captured open array', AStmt);
+       not IsLocal(TIdentExpr(AStmt.CollExpr).Name + '_high') then
+      NotYet('for-in over an open array without a local high slot', AStmt);
     if AStmt.IsArrayIter then
       Elem := TStaticArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType
     else if AStmt.IsOpenArrayIter then
@@ -11625,6 +11625,15 @@ begin
       if (ADecl.OwnerTypeName = '') and
          (ADecl.CapturedVars.IndexOf('Self') >= 0) then
         AddLocal('Self', 8);
+      { a captured OPEN-ARRAY parameter gets real (data, high) slots, filled
+        through its two '_cap_' pointers in the prologue -- the pair never
+        changes, so every open-array path reads it as in the owner }
+      for I := 0 to ADecl.CapturedVars.Count - 1 do
+        if ADecl.CapturesOpenArray(ADecl.CapturedVars.Strings[I]) then
+        begin
+          AddLocal(ADecl.CapturedVars.Strings[I], 8);
+          AddLocal(ADecl.CapturedVars.Strings[I] + '_high', 8);
+        end;
     end;
     if (ADecl.OwnerTypeName <> '') and not ADecl.IsStatic then
       AddLocal('Self', 8);
@@ -12077,6 +12086,16 @@ begin
       Self.Emit(#9'ldr x0, [x9]');
       EmitStoreSlot('x0', 'Self');
     end;
+    for I := 0 to ADecl.CapturedVars.Count - 1 do
+      if ADecl.CapturesOpenArray(ADecl.CapturedVars.Strings[I]) then
+      begin
+        EmitLoadSlot('x9', '_cap_' + ADecl.CapturedVars.Strings[I]);
+        Self.Emit(#9'ldr x0, [x9]');
+        EmitStoreSlot('x0', ADecl.CapturedVars.Strings[I]);
+        EmitLoadSlot('x9', '_cap_' + ADecl.CapturedVars.Strings[I] + '_high');
+        Self.Emit(#9'ldr x0, [x9]');
+        EmitStoreSlot('x0', ADecl.CapturedVars.Strings[I] + '_high');
+      end;
   end;
   if (ADecl.OwnerTypeName <> '') and not ADecl.IsStatic then
   begin
