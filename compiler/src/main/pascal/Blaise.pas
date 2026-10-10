@@ -1322,7 +1322,14 @@ begin
 
       if OPDFEnabled then
       begin
-        OE := TOPDFEmitter.Create(Prog, SourceFile);
+        { A unit compiled standalone has no program node (Prog is nil), so it
+          takes the unit-mode emitter the incremental workers use; the
+          program-mode emitter dereferenced the nil program (GH #231). }
+        if IsUnitMode then
+          OE := TOPDFEmitter.CreateForUnit(TopUnit, Semantic.GetSymbolTable(),
+                                           TopUnit.SourceFile)
+        else
+          OE := TOPDFEmitter.Create(Prog, SourceFile);
         try
           if Opts.Target.CPU = cpuArm64 then
             OE.TargetArch := 4;         { opdf_types archAArch64 }

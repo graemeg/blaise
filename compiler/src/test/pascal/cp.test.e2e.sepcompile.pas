@@ -250,6 +250,12 @@ type
     procedure TestIncrementalRebuild_OpenArrayProcType_Warm;
     procedure TestIncrementalRebuild_InterfaceArrayConsts_Warm;
     procedure TestDebugOpdf_PerUnitSection_InDependencyObject;
+    { Regression (GH #231): a UNIT passed as --source with --debug-opdf
+      segfaulted the compiler.  The top-level OPDF block built a PROGRAM-mode
+      emitter from the program node, which is nil in unit mode, so the type
+      pass dereferenced nil.  The standalone unit object must carry its own
+      OPDF section and still link into a program. }
+    procedure TestDebugOpdf_UnitAsSource_Compiles;
     { Regression (F1-followup cross-unit static members): a class with `static`
       members — a static var, a static method, and a static const — declared in
       one unit and used through the COMPILED .bif boundary from another unit.
@@ -3583,6 +3589,107 @@ begin
   AssertEquals('use_opdfdep exit code', 0, Rc);
   AssertEquals('use_opdfdep stdout', 'Hello, World' + #10 + 'Count is 2' + #10,
     Captured)
+end;
+
+procedure TSepCompileTests.TestDebugOpdf_UnitAsSource_Compiles;
+const
+  UnitSrc =
+    '''
+    unit OpdfTop;
+    interface
+    uses SysUtils;
+    type
+      TRate = (rLow = 8000, rHigh = 44100);
+      TSettings = record
+        Wpm: Integer;
+        Rate: TRate;
+        Level: Single;
+      end;
+    var
+      Defaults: TSettings;
+    function Describe(): string;
+    implementation
+    function Describe(): string;
+    var
+      N: Integer;
+    begin
+      N := Ord(Defaults.Rate);
+      Result := IntToStr(Defaults.Wpm) + ' ' + IntToStr(N)
+    end;
+    initialization
+      Defaults.Wpm := 18;
+      Defaults.Rate := rHigh;
+      Defaults.Level := 0.75;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseOpdfTop;
+    uses OpdfTop;
+    begin
+      WriteLn(Describe())
+    end.
+    ''';
+var
+  Dir, UnitPas, UnitObj, ProgPas, ProgBin: string;
+  Captured, ObjOut: string;
+  Rc, MagicAt, WantArch: Integer;
+  FIn: TFileInputStream;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  Dir := FScratch + '/gh231_unit_opdf';
+  ForceDirectories(Dir);
+  UnitPas := Dir + '/opdftop.pas';
+  UnitObj := Dir + '/opdftop.o';
+  ProgPas := Dir + '/use_opdftop.pas';
+  ProgBin := Dir + '/use_opdftop';
+  WriteFile(UnitPas, UnitSrc);
+  WriteFile(ProgPas, ProgSrc);
+
+  Rc := RunBlaise(['--source', UnitPas, '--output', UnitObj,
+                   '--debug-opdf',
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                  Captured);
+  AssertEquals('unit --debug-opdf exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('unit object exists', FileExists(UnitObj));
+
+  FIn := TFileInputStream.Create(UnitObj);
+  try
+    SetLength(ObjOut, Integer(FIn.Size()));
+    if Length(ObjOut) > 0 then
+      FIn.Read(PChar(ObjOut), Length(ObjOut));
+  finally
+    FIn.Free();
+  end;
+  MagicAt := Pos('OPDF' + #1 + #0, ObjOut);
+  AssertTrue('unit object carries an OPDF payload', MagicAt >= 0);
+  if HostTarget().CPU = cpuArm64 then
+    WantArch := 4
+  else
+    WantArch := 2;
+  AssertEquals('OPDF TargetArch matches the host CPU', WantArch,
+    StrAt(ObjOut, MagicAt + 22));
+
+  { The object is the only way to resolve OpdfTop once the source is gone. }
+  DeleteFile(UnitPas);
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--debug-opdf',
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                  Captured);
+  AssertEquals('program compile exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('use_opdftop exit code', 0, Rc);
+  AssertEquals('use_opdftop stdout', '18 44100' + #10, Captured)
 end;
 
 { Shared source for the two cross-unit static-member tests below.  RegModU
