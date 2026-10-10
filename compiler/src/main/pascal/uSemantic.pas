@@ -10473,9 +10473,48 @@ begin
         FCurrentLocalBlock.Decls.Add(SynthDecl);
       end;
     end
+    else if CollType.Kind = tyOpenArray then
+    begin
+      { ---- Open-array parameter iteration path (GH #233) ----
+        idx runs 0..High(A); the data pointer and high index live in the
+        parameter's slot pair.  An open-array value is only ever a
+        parameter name, so the collection is a plain identifier. }
+      if not (ForInS.CollExpr is TIdentExpr) then
+        SemanticError('for-in over an open array must name the parameter',
+          ForInS.Line, ForInS.Col);
+      ElemType := TOpenArrayTypeDesc(CollType).ElementType;
+
+      VarSym := FTable.Lookup(ForInS.VarName);
+      if VarSym = nil then
+        SemanticError(
+          Format('Undeclared loop variable ''%s''', [ForInS.VarName]),
+          ForInS.Line, ForInS.Col);
+      ForInS.VarName := VarSym.Name;
+      if VarSym.Kind <> skVariable then
+        SemanticError(
+          Format('''%s'' is not a variable', [ForInS.VarName]),
+          ForInS.Line, ForInS.Col);
+      CheckTypesMatch(VarSym.TypeDesc, ElemType,
+        'for-in loop variable', ForInS.Line, ForInS.Col);
+      ForInS.VarIsGlobal     := VarSym.IsGlobal;
+      ForInS.IsOpenArrayIter := True;
+      ForInS.ResolvedVarType := ElemType;
+
+      ForInS.IdxVarName := '__idx_' + IntToStr(FForInCounter);
+      Inc(FForInCounter);
+      if FCurrentLocalBlock <> nil then
+      begin
+        SynthDecl := TVarDecl.Create();
+        SynthDecl.Names.Add(ForInS.IdxVarName);
+        SynthDecl.TypeName    := 'Integer';
+        SynthDecl.ResolvedType := FTable.TypeInteger;
+        SynthDecl.IsGlobal    := False;
+        FCurrentLocalBlock.Decls.Add(SynthDecl);
+      end;
+    end
     else
       SemanticError(
-        'for-in collection must be a class instance, static array, dynamic array, string, or set',
+        'for-in collection must be a class instance, static array, dynamic array, open array, string, or set',
         ForInS.Line, ForInS.Col);
 
     Inc(FLoopDepth);

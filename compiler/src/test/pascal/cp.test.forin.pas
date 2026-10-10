@@ -14,7 +14,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TForInTests = class(TTestCase)
@@ -92,6 +92,18 @@ type
     { ------------------------------------------------------------------ }
     procedure TestSemantic_DynArrayForIn_Valid_OK;
     procedure TestSemantic_DynArrayForIn_VarTypeMismatch_RaisesError;
+
+    { ------------------------------------------------------------------ }
+    { Open-array parameter (GH #233)                                       }
+    { ------------------------------------------------------------------ }
+    { for-in over an open-array parameter was rejected outright ("for-in
+      collection must be a class instance, ...").  FPC and Delphi accept it. }
+    procedure TestSemantic_OpenArrayForIn_Valid_OK;
+    procedure TestSemantic_OpenArrayForIn_VarTypeMismatch_RaisesError;
+    { The bound is the parameter's companion high slot (inclusive), not a
+      dyn-array header read: an open array may be a static array or a
+      stack literal, neither of which has a length header. }
+    procedure TestCodegen_OpenArrayForIn_BoundIsHighSlot;
 
     { ------------------------------------------------------------------ }
     { Codegen — dynamic array                                              }
@@ -677,6 +689,61 @@ begin
             X := X
         end.
         ''');
+end;
+
+{ ------------------------------------------------------------------ }
+{ Open-array parameter (GH #233)                                       }
+{ ------------------------------------------------------------------ }
+
+const
+  SrcOpenArrayForIn =
+    '''
+        program P;
+        procedure Show(const A: array of Integer);
+        var
+          X: Integer;
+        begin
+          for X in A do
+            WriteLn(X)
+        end;
+        begin
+          Show([1, 2, 3])
+        end.
+        ''';
+
+procedure TForInTests.TestSemantic_OpenArrayForIn_Valid_OK;
+begin
+  AnalyseSrc(SrcOpenArrayForIn).Free();
+end;
+
+procedure TForInTests.TestSemantic_OpenArrayForIn_VarTypeMismatch_RaisesError;
+begin
+  AnalyseExpectError(
+    '''
+        program P;
+        procedure Show(const A: array of Integer);
+        var
+          X: string;
+        begin
+          for X in A do
+            WriteLn(X)
+        end;
+        begin
+          Show([1])
+        end.
+        ''');
+end;
+
+procedure TForInTests.TestCodegen_OpenArrayForIn_BoundIsHighSlot;
+begin
+  AssertEquals('open-array for-in compares the index against High', '',
+    AsmMissing(SrcOpenArrayForIn,
+      #9'cmpq %rcx, %rax' + #10 + #9'jle ',
+      #9'cmp x0, x1' + #10 + #9'b.gt '));
+  AssertTrue('x86-64: no dyn-array length read',
+    Pos('_DynArrayLength', GenAsm(SrcOpenArrayForIn, TargetX86_64)) < 0);
+  AssertTrue('arm64: no dyn-array length read',
+    Pos('_DynArrayLength', GenAsm(SrcOpenArrayForIn, TargetArm64)) < 0);
 end;
 
 { ------------------------------------------------------------------ }

@@ -367,6 +367,10 @@ type
     ArrayHigh:            Integer;    { compile-time upper bound }
     { Dynamic-array iteration path (IsDynArrayIter = True) }
     IsDynArrayIter:       Boolean;
+    { Open-array parameter iteration path (IsOpenArrayIter = True): the
+      collection is a plain open-array parameter; the bound is its
+      companion high slot, not a dyn-array header (GH #233) }
+    IsOpenArrayIter:      Boolean;
     { String byte-iteration path (IsStringIter = True) }
     IsStringIter:         Boolean;
     { String codepoint-iteration path (IsCodePointIter = True) }

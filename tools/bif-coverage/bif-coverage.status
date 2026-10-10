@@ -153,6 +153,7 @@ TForInStmt.IdxVarName  safe
 TForInStmt.ArrayLow  safe
 TForInStmt.ArrayHigh  safe
 TForInStmt.IsDynArrayIter  safe
+TForInStmt.IsOpenArrayIter  safe
 TForInStmt.IsStringIter  safe
 TForInStmt.IsCodePointIter  safe
 TForInStmt.AdvVarName  safe

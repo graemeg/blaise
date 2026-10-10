@@ -66,6 +66,10 @@ type
     { Dynamic array for..in }
     procedure TestRun_DynArray_ForIn_IteratesAllElements;
     procedure TestRun_DynArray_ForIn_EmptyArray_NoIterations;
+    { GH #233: for-in over an open-array parameter, fed by a static array, a
+      dyn array, array literals and an empty literal; Byte, string and
+      record elements; a var open array; break and continue. }
+    procedure TestRun_OpenArray_ForIn_AllArgumentForms;
 
     { Multi-dimensional arrays — run on both backends (QBE + native) }
     procedure TestRun_MultiDim_CommaForm_ReadWrite;
@@ -696,6 +700,99 @@ begin
   LE := LineEnding;
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '10' + LE + '20' + LE + '30' + LE + '40' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_OpenArray_ForIn_AllArgumentForms;
+const Src =
+  '''
+  program P;
+  type
+    TPt = record
+      X: Integer;
+      Name: string;
+    end;
+  const
+    cGroup: array[0..4] of string = ('K', 'M', 'R', 'S', 'U');
+  function Training(ACharNum: array of Byte): string;
+  var
+    b: Byte;
+  begin
+    Result := '';
+    for b in ACharNum do
+      Result := Result + cGroup[b] + ' '
+  end;
+  procedure ShowStrs(const A: array of string);
+  var
+    S: string;
+  begin
+    for S in A do
+      Write(S, ';');
+    WriteLn()
+  end;
+  function Count(const A: array of Integer): Integer;
+  var
+    X: Integer;
+  begin
+    Result := 0;
+    for X in A do
+      Inc(Result)
+  end;
+  procedure ShowPts(const A: array of TPt);
+  var
+    Pt: TPt;
+  begin
+    for Pt in A do
+      Write(Pt.Name, '=', Pt.X, ' ');
+    WriteLn()
+  end;
+  procedure SumVar(var A: array of Integer);
+  var
+    X, T: Integer;
+  begin
+    T := 0;
+    for X in A do
+    begin
+      if X = 3 then Continue;
+      if X = 5 then Break;
+      T := T + X
+    end;
+    WriteLn('sum ', T)
+  end;
+  var
+    ba: array[0..3] of Byte;
+    bb: array[0..1] of Byte;
+    da: array of Integer;
+    pts: array[0..1] of TPt;
+    sa: array[0..5] of Integer;
+    i: Integer;
+  begin
+    for i := 0 to 3 do
+      ba[i] := 3 - i;
+    WriteLn(Training(ba));
+    bb[0] := 0; bb[1] := 4;
+    WriteLn(Training(bb));
+    ShowStrs(['x', 'y' + IntToStr(2), 'z']);
+    SetLength(da, 3);
+    WriteLn(Count(da), ' ', Count([]), ' ', Count([7]));
+    pts[0].X := 1; pts[0].Name := 'a';
+    pts[1].X := 2; pts[1].Name := 'b' + IntToStr(9);
+    ShowPts(pts);
+    for i := 0 to 5 do
+      sa[i] := i + 1;
+    SumVar(sa)
+  end.
+  ''';
+var LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    'S R M K ' + LE +
+    'K U ' + LE +
+    'x;y2;z;' + LE +
+    '3 0 1' + LE +
+    'a=1 b9=2 ' + LE +
+    'sum 7' + LE, 0);
 end;
 
 procedure TE2EStaticArrayTests.TestRun_DynArray_ForIn_EmptyArray_NoIterations;

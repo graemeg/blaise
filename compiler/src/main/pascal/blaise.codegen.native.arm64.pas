@@ -9690,17 +9690,28 @@ begin
   NextL := NewLabel('finext');
   EndL := NewLabel('fiend');
 
-  if AStmt.IsArrayIter or AStmt.IsDynArrayIter then
+  if AStmt.IsArrayIter or AStmt.IsDynArrayIter or AStmt.IsOpenArrayIter then
   begin
-    { array iteration: idx runs low..high (static) / 0..len-1 (dynamic);
-      element address = base + (idx - low) * elemsize.  The collection
-      must be a plain ident — matches the subscript emitters. }
+    { array iteration: idx runs low..high (static) / 0..len-1 (dynamic) /
+      0..A_high (open array); element address = base + (idx - low) *
+      elemsize.  The collection must be a plain ident — matches the
+      subscript emitters. }
     if not (AStmt.CollExpr is TIdentExpr) then
       NotYet('for-in over this array expression', AStmt);
-    if TIdentExpr(AStmt.CollExpr).ParamMode = pmVar then
+    { a var OPEN array is still the plain (data, high) slot pair, so only
+      the static / dyn forms need the extra indirection that is not
+      handled here }
+    if (TIdentExpr(AStmt.CollExpr).ParamMode = pmVar) and
+       not AStmt.IsOpenArrayIter then
       NotYet('for-in over a var array parameter', AStmt);
+    if AStmt.IsOpenArrayIter and
+       (IsCaptured(TIdentExpr(AStmt.CollExpr).Name) or
+        not IsLocal(TIdentExpr(AStmt.CollExpr).Name + '_high')) then
+      NotYet('for-in over a captured open array', AStmt);
     if AStmt.IsArrayIter then
       Elem := TStaticArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType
+    else if AStmt.IsOpenArrayIter then
+      Elem := TOpenArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType
     else
       Elem := TDynArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType;
     if (Elem = nil) or
@@ -9717,6 +9728,15 @@ begin
     begin
       EmitLoadSlot('x0', AStmt.IdxVarName);
       EmitIntLiteral('x1', AStmt.ArrayHigh);
+      Self.Emit(#9'cmp x0, x1');
+      Self.Emit(Format(#9'b.gt %s', [EndL]));
+    end
+    else if AStmt.IsOpenArrayIter then
+    begin
+      { inclusive bound from the companion slot; an empty open array
+        carries High = -1, so the first test already exits }
+      EmitLoadSlot('x1', TIdentExpr(AStmt.CollExpr).Name + '_high');
+      EmitLoadSlot('x0', AStmt.IdxVarName);
       Self.Emit(#9'cmp x0, x1');
       Self.Emit(Format(#9'b.gt %s', [EndL]));
     end

@@ -1051,6 +1051,16 @@ Passing an open-array parameter `A` to another open-array formal forwards
 both `%_var_A` (data pointer) and `%_var_A_high` (high index) as two
 separate QBE arguments, preserving the ABI invariant.
 
+==== For-in iteration
+
+`for X in A do` over an open-array parameter iterates elements `0..High(A)`,
+as FPC and Delphi do (GH #233). The bound is read from the companion high
+slot rather than from a dynamic-array length header: the caller's data may
+be a static array, a dynamic array or a stack-allocated literal, and only
+the dynamic array carries a header. An empty open array has `High = -1`,
+so the loop body never runs. The loop variable receives a copy of each
+element, exactly as for static and dynamic arrays.
+
 ==== ARC exclusion
 
 Open-array parameters are excluded from the ARC addref/release loops

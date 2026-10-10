@@ -13763,7 +13763,7 @@ var
   LCond, LBody, LNext, LEnd: string;
   IdxOp:     string;
   SAT:       TStaticArrayTypeDesc;
-  DAT:       TDynArrayTypeDesc;
+  ElemT:     TTypeDesc;
   ElemSize:  Integer;
   GetEDecl, MNDecl, CurDecl: TMethodDecl;
   EnumOp, Sym: string;
@@ -13846,13 +13846,24 @@ begin
     Exit;
   end;
 
-  if AStmt.IsDynArrayIter then
+  if AStmt.IsDynArrayIter or AStmt.IsOpenArrayIter then
   begin
-    { ---- Dynamic array iteration ----
-      idx runs 0.._DynArrayLength(ptr)-1.  Element address =
+    { ---- Dynamic / open array iteration ----
+      idx runs 0.._DynArrayLength(ptr)-1 for a dyn array, 0..A_high for an
+      open-array parameter (GH #233: its data may be a static array or a
+      stack literal, with no length header).  Element address =
       data_ptr + idx * ElemSize. }
-    DAT      := TDynArrayTypeDesc(AStmt.CollExpr.ResolvedType);
-    ElemSize := DAT.ElementType.RawSize();
+    if AStmt.IsOpenArrayIter then
+    begin
+      ElemT := TOpenArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType;
+      { the (data, high) pair must be this frame's own slots }
+      if not Self.IsLocal(TIdentExpr(AStmt.CollExpr).Name + '_high') then
+        raise Exception.Create(
+          'native backend: for-in over a captured open array not yet supported');
+    end
+    else
+      ElemT := TDynArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType;
+    ElemSize := ElemT.RawSize();
     IdxOp    := Self.VarOperand(AStmt.IdxVarName);
     LCond := Self.NewLabel('ficond');
     LBody := Self.NewLabel('fibody');
@@ -13862,14 +13873,26 @@ begin
     Self.Emit(Format(#9'movl $0, %s', [IdxOp]));
 
     Self.Emit(LCond + ':');
-    { Get length via _DynArrayLength }
-    Self.EmitExprToEax(AStmt.CollExpr);
-    Self.Emit(#9'movq %rax, %rdi');
-    Self.Emit(#9'callq _DynArrayLength');
-    Self.Emit(#9'movl %eax, %ecx');
-    Self.Emit(Format(#9'movl %s, %%eax', [IdxOp]));
-    Self.Emit(#9'cmpl %ecx, %eax');
-    Self.Emit(#9'jl ' + LBody);
+    if AStmt.IsOpenArrayIter then
+    begin
+      { inclusive bound; an empty open array carries High = -1 }
+      Self.Emit(Format(#9'movq %s, %%rcx',
+        [Self.VarOperand(TIdentExpr(AStmt.CollExpr).Name + '_high')]));
+      Self.Emit(Format(#9'movslq %s, %%rax', [IdxOp]));
+      Self.Emit(#9'cmpq %rcx, %rax');
+      Self.Emit(#9'jle ' + LBody);
+    end
+    else
+    begin
+      { Get length via _DynArrayLength }
+      Self.EmitExprToEax(AStmt.CollExpr);
+      Self.Emit(#9'movq %rax, %rdi');
+      Self.Emit(#9'callq _DynArrayLength');
+      Self.Emit(#9'movl %eax, %ecx');
+      Self.Emit(Format(#9'movl %s, %%eax', [IdxOp]));
+      Self.Emit(#9'cmpl %ecx, %eax');
+      Self.Emit(#9'jl ' + LBody);
+    end;
     Self.Emit(#9'jmp ' + LEnd);
 
     Self.Emit(LBody + ':');
@@ -13878,23 +13901,28 @@ begin
     FContinueLabels.Push(LNext);
     FContinueExcDepths.Push(FExcDepth);
 
-    { Element address: data_ptr + idx * ElemSize }
-    Self.EmitExprToEax(AStmt.CollExpr);
+    { Element address: data_ptr + idx * ElemSize.  An open-array slot holds
+      the element-0 pointer directly, var or not. }
+    if AStmt.IsOpenArrayIter then
+      Self.Emit(Format(#9'movq %s, %%rax',
+        [Self.VarOperand(TIdentExpr(AStmt.CollExpr).Name)]))
+    else
+      Self.EmitExprToEax(AStmt.CollExpr);
     Self.Emit(#9'movq %rax, %rcx');
     Self.Emit(Format(#9'movslq %s, %%rax', [IdxOp]));
     Self.Emit(Format(#9'imulq $%d, %%rax, %%rax', [ElemSize]));
     Self.Emit(#9'addq %rcx, %rax');
-    if (DAT.ElementType.Kind = tyRecord) or (DAT.ElementType.RawSize() > 8) then
+    if (ElemT.Kind = tyRecord) or (ElemT.RawSize() > 8) then
       { %rax = element address; copy the aggregate by value. }
-      Self.EmitForInAggAssignElem(AStmt, DAT.ElementType, ElemSize)
+      Self.EmitForInAggAssignElem(AStmt, ElemT, ElemSize)
     else
     begin
       case ElemSize of
-        1: if IsUnsignedInt(DAT.ElementType) then
+        1: if IsUnsignedInt(ElemT) then
              Self.Emit(#9'movzbq (%rax), %rax')
            else
              Self.Emit(#9'movsbq (%rax), %rax');
-        2: if IsUnsignedInt(DAT.ElementType) then
+        2: if IsUnsignedInt(ElemT) then
              Self.Emit(#9'movzwq (%rax), %rax')
            else
              Self.Emit(#9'movswq (%rax), %rax');
@@ -13904,7 +13932,6 @@ begin
       end;
       Self.EmitForInAssignElem(AStmt);
     end;
-
     Self.EmitStmt(AStmt.Body);
     FContinueExcDepths.Pop();
     FContinueLabels.Pop();
