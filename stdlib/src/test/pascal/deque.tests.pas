@@ -40,6 +40,13 @@ type
   TDequeConcurrentTests = class(TTestCase)
   published
     procedure TestConcurrent_EveryTaskTakenExactlyOnce;
+    { Grow publishes a NEW buffer while thieves are stealing.  On a weakly
+      ordered CPU (arm64) the copied slots had to be visible before the new
+      FBuf pointer; a plain store let a thief read a stale slot, win the top
+      CAS and lose the task (intermittent macOS CI failure, 2026-10-10).
+      Many rounds of a capacity-2 deque with an unpopped backlog maximise
+      grow-while-stealing events. }
+    procedure TestConcurrent_GrowWhileStealing_NoTaskLost;
   end;
 
 implementation
@@ -271,6 +278,55 @@ begin
 
   GCC.Deque.Free();
   GCC.Deque := nil;
+end;
+
+procedure TDequeConcurrentTests.TestConcurrent_GrowWhileStealing_NoTaskLost;
+const
+  ROUNDS = 60;
+  ROUND_TASKS = 4000;
+var
+  Threads: array[0..CC_NUM_STEALERS - 1] of Int64;
+  Claims: array[0..ROUND_TASKS - 1] of Integer;
+  R, I, Missed, Doubled: Integer;
+  Item: Pointer;
+begin
+  Missed := 0;
+  Doubled := 0;
+  for R := 1 to ROUNDS do
+  begin
+    for I := 0 to ROUND_TASKS - 1 do
+      Claims[I] := 0;
+    GCC.Deque := TWorkStealDeque.Create(2);
+    GCC.Claims := @Claims[0];
+    GCC.Done := 0;
+    for I := 0 to CC_NUM_STEALERS - 1 do
+    begin
+      Threads[I] := 0;
+      pthread_create(@Threads[I], nil, Pointer(@StealerEntry), @GCC);
+    end;
+    { Push without popping, so a backlog builds and the buffer keeps
+      growing while the thieves steal from the top. }
+    for I := 0 to ROUND_TASKS - 1 do
+      GCC.Deque.PushBottom(Pointer(I + 1));
+    Item := GCC.Deque.PopBottom();
+    while Item <> nil do
+    begin
+      ClaimTask(@GCC, Item);
+      Item := GCC.Deque.PopBottom();
+    end;
+    GCC.Done := 1;
+    for I := 0 to CC_NUM_STEALERS - 1 do
+      pthread_join(Threads[I], nil);
+    for I := 0 to ROUND_TASKS - 1 do
+      if Claims[I] = 0 then
+        Missed := Missed + 1
+      else if Claims[I] > 1 then
+        Doubled := Doubled + 1;
+    GCC.Deque.Free();
+    GCC.Deque := nil;
+  end;
+  AssertEquals('no task lost across growth', 0, Missed);
+  AssertEquals('no task duplicated across growth', 0, Doubled);
 end;
 
 initialization

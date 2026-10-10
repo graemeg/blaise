@@ -162,8 +162,14 @@ begin
   NewB^.OldBuf := OldB;
   { Publish the new buffer.  The owner is the only writer of FBuf; a thief that
     read the old buffer before this store still sees a valid (retired) buffer,
-    and its Steal will fail the top-CAS if the owner has moved on. }
-  Self.FBuf := NewB;
+    and its Steal will fail the top-CAS if the owner has moved on.
+    The publish must be a RELEASE: the copied slots (and NewB's own Cap /
+    Mask / Slots) have to be visible before the pointer is.  A plain store let
+    a weakly ordered CPU (arm64) show a thief the new buffer ahead of its
+    contents, so it read a stale slot, won the top-CAS and lost the task.
+    The atomic exchange is a full barrier on both ISAs (x86 xchg, arm64
+    swpal); the thief's dependent load through FBuf then sees the copies. }
+  _AtomicXchgPtr(@Self.FBuf, NewB);
 end;
 
 procedure TWorkStealDeque.PushBottom(AItem: Pointer);
@@ -221,9 +227,11 @@ var
 begin
   T := Self.FTop;
   { Acquire ordering: read top before bottom (paired with PushBottom's release
-    on FBottom).  The atomic read of FBottom is a full barrier. }
-  _AtomicAddInt64(@Self.FBottom, 0);
-  B := Self.FBottom;
+    on FBottom).  The atomic read of FBottom is a full barrier, and B must be
+    the value IT returned: a separate plain re-read could observe a newer
+    bottom than the one the barrier synchronised with, leaving the slot and
+    FBuf reads below unordered against the owner's writes for that index. }
+  B := _AtomicAddInt64(@Self.FBottom, 0);
   if T >= B then
     Exit(nil);           { empty }
   { Read the item from the CURRENT buffer.  If the owner grew the buffer, the
