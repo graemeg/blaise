@@ -29,6 +29,11 @@ type
     procedure TestRun_Arc_ClassRecordOwnership;
     procedure TestRun_Arc_StringsParamsPointers;
     procedure TestRun_WeakAndUnretained_NonOwning;
+    { an [Unretained] / [Weak] field written through a CAST receiver
+      (TSub(L.Items[0]).F := V) takes no reference: x86-64 retained the new
+      value and RELEASED THE OLD one, which the field never owned -- an
+      over-release that freed the compiler's own type descriptors }
+    procedure TestRun_UnretainedFieldThroughCast_TakesNoReference;
     procedure TestRun_ClassArc_NoExplicitFree_Valgrind;
     procedure TestRun_InterfaceArc_CarriesLifetime_Valgrind;
     procedure TestRun_WeakRef_BreaksCycle_Valgrind;
@@ -1768,6 +1773,40 @@ begin
     'sa1 gone' + LE +
     'done' + LE, 0);
   AssertLeakFreeOnAll(Src, 'end run');
+end;
+
+procedure TE2EArcTests.TestRun_UnretainedFieldThroughCast_TakesNoReference;
+const
+  Src = '''
+    program UnretCast;
+    uses Contnrs;
+    type
+      TT = class N: Integer; end;
+      TBase = class public [Unretained] F: TT; [Weak] W: TT; end;
+      TSub = class(TBase) G: Integer; end;
+    function RC(O: TObject): Integer;
+    begin
+      { the count just past the header, minus this by-value parameter's own }
+      Result := PInteger(PChar(Pointer(O)) - 16)^ - 1
+    end;
+    var L: TObjectList; S: TSub; V, W: TT; P: TObject;
+    begin
+      L := TObjectList.Create(True);
+      S := TSub.Create(); L.Add(S); P := S;
+      V := TT.Create(); W := TT.Create();
+      S.F := V;                     { a plain store: no reference }
+      TSub(L.Items[0]).F := W;      { through a cast: must not release V }
+      TSub(P).F := V;               { through a cast: must not release W }
+      TSub(P).W := V;
+      TSub(L.Items[0]).W := W;
+      WriteLn(RC(V), ' ', RC(W));
+      V.N := 7; W.N := 8;
+      WriteLn(S.F.N, ' ', S.W.N)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '1 1' + #10 + '7 8' + #10, 0);
 end;
 
 initialization

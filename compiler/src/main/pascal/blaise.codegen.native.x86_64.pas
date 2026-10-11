@@ -663,6 +663,11 @@ type
     { Store the integer-family value currently in %rax into AOperand, using
       the right-width register sub-view for AType. }
     procedure EmitStoreVar(const AOperand: string; AType: TTypeDesc);
+    { Store the value in %rax into an [Unretained] or [Weak] class field at
+      ABaseReg + offset: no reference is taken (a weak one registers through
+      _WeakAssign), and an owned (+1) value has no other owner, so it is
+      released.  The named-receiver path's rule, shared. }
+    procedure EmitNonOwningFieldStore(AFA: TFieldAssignment; const ABaseReg: string);
     { Reserve an 8-byte-aligned frame slot for AName:AType, advancing AOffset. }
     procedure AddSlot(const AName: string; AType: TTypeDesc;
                       var AOffset: Integer);
@@ -17978,7 +17983,22 @@ begin
       the unified block above and never reach here). }
     if FA.ObjExpr <> nil then
     begin
-      if FA.FieldInfo.TypeDesc.IsString()
+      if (FA.FieldInfo.TypeDesc.Kind = tyClass) and
+         (FA.FieldInfo.IsUnretained or FA.FieldInfo.IsWeak) then
+      begin
+        { A non-owning field written through a receiver EXPRESSION (a cast,
+          TSub(L.Items[0]).F := V): it takes no reference, exactly as the
+          named-receiver path stores it.  The managed branch below retained the
+          new value and RELEASED THE OLD one, which the field never owned --
+          the compiler's own CreateFmt desugar over-released a type descriptor
+          that way, a use-after-free once nothing else leaked to mask it. }
+        Self.Emit(#9'pushq %rax');            { new value }
+        Self.EmitExprToEax(FA.ObjExpr);
+        Self.Emit(#9'movq %rax, %rcx');       { receiver base }
+        Self.Emit(#9'popq %rax');
+        Self.EmitNonOwningFieldStore(FA, '%rcx');
+      end
+      else if FA.FieldInfo.TypeDesc.IsString()
          or (FA.FieldInfo.TypeDesc.Kind = tyClass)
          or (FA.FieldInfo.TypeDesc.Kind = tyDynArray) then
       begin
@@ -18025,7 +18045,14 @@ begin
     end
     else if FSretFunc and (FA.RecordName = 'Result') then
     begin
-      if FA.FieldInfo.TypeDesc.IsString()
+      if (FA.FieldInfo.TypeDesc.Kind = tyClass) and
+         (FA.FieldInfo.IsUnretained or FA.FieldInfo.IsWeak) then
+      begin
+        { a non-owning field of the sret Result record: no reference }
+        Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('Result')]));
+        Self.EmitNonOwningFieldStore(FA, '%rcx');
+      end
+      else if FA.FieldInfo.TypeDesc.IsString()
          or (FA.FieldInfo.TypeDesc.Kind = tyClass)
          or (FA.FieldInfo.TypeDesc.Kind = tyDynArray) then
       begin
@@ -21533,6 +21560,35 @@ begin
   else
     { Ordinary local value record: the slot IS the record. }
     Self.Emit(Format(#9'leaq %s, %s', [Self.VarOperand(AName), AReg]));
+end;
+
+procedure TX86_64Backend.EmitNonOwningFieldStore(AFA: TFieldAssignment;
+  const ABaseReg: string);
+begin
+  if AFA.FieldInfo.IsWeak then
+  begin
+    Self.Emit(Format(#9'leaq %d(%s), %%rdi', [AFA.FieldInfo.Offset, ABaseReg]));
+    Self.Emit(#9'movq %rax, %rsi');
+    if NativeExprOwnsRef(AFA.Expr) then
+    begin
+      Self.Emit(#9'pushq %rax');
+      Self.Emit(#9'subq $8, %rsp');
+      Self.Emit(#9'callq _WeakAssign');
+      Self.Emit(#9'addq $8, %rsp');
+      Self.Emit(#9'popq %rdi');
+      Self.Emit(#9'callq _ClassRelease');
+    end
+    else
+      Self.Emit(#9'callq _WeakAssign');
+    Exit;
+  end;
+  Self.EmitStoreVar(Format('%d(%s)', [AFA.FieldInfo.Offset, ABaseReg]),
+    AFA.FieldInfo.TypeDesc);
+  if NativeExprOwnsRef(AFA.Expr) then
+  begin
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(#9'callq _ClassRelease');
+  end;
 end;
 
 procedure TX86_64Backend.EmitFieldAddrToRcx(AFA: TFieldAccessExpr);

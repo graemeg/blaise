@@ -47,6 +47,9 @@ type
     { an owned class transient argument (a call result) is borrowed by the
       callee, so the caller releases it after the call: x86-64 leaked it }
     procedure TestCall_OwnedClassTransientArg_ReleasedAfterCall;
+    { an [Unretained] field stored through a cast receiver takes no
+      reference: no retain of the new value, no release of the old }
+    procedure TestFieldStore_UnretainedThroughCast_NoArc;
     procedure TestX86_NestedJumboSetCallArg_Hoisted;
     procedure TestX86_ForIn_InterfaceCurrent_UsesSret;
     procedure TestX86_ForIn_InterfaceArrayElem_Retained;
@@ -742,6 +745,47 @@ begin
   Tail := StrCopyTail(Tail, E);
   AssertTrue('release after setter call',
     Pos('_StringRelease', Tail) >= 0);
+end;
+
+procedure TNativeArcTests.TestFieldStore_UnretainedThroughCast_NoArc;
+const
+  Src = '''
+    program P;
+    type
+      TT = class end;
+      TBase = class public [Unretained] F: TT; end;
+      TSub = class(TBase) G: Integer; end;
+    procedure ViaCast(AObj: TObject; V: TT);
+    begin
+      TSub(AObj).F := V
+    end;
+    begin
+    end.
+    ''';
+
+  function ReleasesIn(const AAsm, ALabel: string): Integer;
+  var
+    P, E, Q: Integer;
+  begin
+    { _ClassRelease calls between the routine's label and its first ret --
+      only the two by-value parameters' own releases belong there }
+    Result := 0;
+    P := Pos(#10 + ALabel + ':', AAsm);
+    if P < 0 then Exit(-1);
+    E := PosEx(#9'ret', AAsm, P);
+    Q := PosEx('ClassRelease', AAsm, P);
+    while (Q >= 0) and (Q < E) do
+    begin
+      Inc(Result);
+      Q := PosEx('ClassRelease', AAsm, Q + 1);
+    end;
+  end;
+
+begin
+  AssertEquals('x86-64: only the parameters are released', 2,
+    ReleasesIn(GenAsm(Src, TargetX86_64), 'ViaCast'));
+  AssertEquals('arm64: only the parameters are released', 2,
+    ReleasesIn(GenAsm(Src, TargetArm64), '_ViaCast'));
 end;
 
 initialization
