@@ -17,7 +17,7 @@ unit cp.test.e2e.base;
 interface
 
 uses
-  classes, sysutils, process, contnrs, blaise.testing,
+  classes, sysutils, strutils, process, contnrs, blaise.testing,
   uLexer, uParser, uAST, uSemantic, uUnitLoader,
   blaise.codegen, blaise.codegen.target, blaise.codegen.native;
 
@@ -215,6 +215,15 @@ var
     fast the kernel retires the previous inode. }
   GNativeCLICounter: Integer = 0;
 
+{ A [Threaded] suite reports through its subprocess's --verbose output, and
+  the parent keeps only the first line of a failure message: a compiler error
+  on the line after "compile failed" never reached the CI log.  Fold the
+  output onto that line. }
+function OneLine(const AText: string): string;
+begin
+  Result := ReplaceAll(Trim(AText), #10, ' | ');
+end;
+
 { ------------------------------------------------------------------ }
 { TE2ETestCase                                                         }
 { ------------------------------------------------------------------ }
@@ -362,7 +371,7 @@ var
 begin
   Result := False;
   Rc := Self.CompileNativeCLI(ASrc, ADebugMode, AExtraUnitPath, BinFile, ToolOut);
-  if Rc <> 0 then begin AStdout := 'compile failed: ' + ToolOut; AExitCode := Rc; Exit end;
+  if Rc <> 0 then begin AStdout := 'compile failed (exit ' + IntToStr(Rc) + '): ' + OneLine(ToolOut); AExitCode := Rc; Exit end;
   AExitCode := RunProcNoArgs(BinFile, AStdout);
   Result := True
 end;
@@ -604,7 +613,7 @@ begin
   { As CompileAndRun, running the binary with AExtraArgs. }
   Result := False;
   Rc := Self.CompileNativeCLI(ASrc, False, '', BinFile, ToolOut);
-  if Rc <> 0 then begin AStdout := 'compile failed: ' + ToolOut; AExitCode := Rc; Exit end;
+  if Rc <> 0 then begin AStdout := 'compile failed (exit ' + IntToStr(Rc) + '): ' + OneLine(ToolOut); AExitCode := Rc; Exit end;
   AExitCode := RunProc(BinFile, AExtraArgs, AStdout);
   Result := True
 end;
@@ -642,7 +651,7 @@ begin
   Result := False;
   ALog   := '';
   Rc := Self.CompileNativeCLI(ASrc, False, '', BinFile, ToolOut);
-  if Rc <> 0 then begin ALog := 'compile failed: ' + ToolOut; Exit end;
+  if Rc <> 0 then begin ALog := 'compile failed (exit ' + IntToStr(Rc) + '): ' + OneLine(ToolOut); Exit end;
   Rc := RunProc('valgrind',
     ['--error-exitcode=99', '--leak-check=full', '--quiet', BinFile], ALog);
   Result := Rc = 0
