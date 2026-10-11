@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TProcFuncTests = class(TTestCase)
@@ -21,6 +21,10 @@ type
     function AnalyseSrc(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { a nested routine capturing more variables than the integer
+      registers hold: the rest of the capture pointers go on the stack,
+      ahead of every other argument (both backends rejected it) }
+    procedure TestCodegen_NestedCapture_SpillsPastRegisters;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -453,6 +457,31 @@ end;
 { ------------------------------------------------------------------ }
 { Code generation tests                                               }
 { ------------------------------------------------------------------ }
+
+procedure TProcFuncTests.TestCodegen_NestedCapture_SpillsPastRegisters;
+const
+  Src = '''
+    program P;
+    procedure Outer;
+    var A, B, C, D, E, F, G, H, I, J: Integer;
+      function Inner(K: Integer): Integer;
+      begin Result := A + B + C + D + E + F + G + H + I + J + K end;
+    begin
+      A := 1; J := 10;
+      WriteLn(Inner(1000))
+    end;
+    begin
+      Outer()
+    end.
+    ''';
+begin
+  { the callee reads the seventh (x86-64) / ninth (arm64) capture pointer
+    from the caller's outgoing area: x86-64 straight from the incoming slot
+    at 16(%rbp), arm64 into its local slot after x7 }
+  AssertEquals('captures past the registers come from the stack', '',
+    AsmMissing(Src, #9'movq 16(%rbp), %rcx',
+      #9'stur x7, [x29, #-64]'#10#9'ldr x9, [x29, #16]'));
+end;
 
 initialization
   RegisterTest(TProcFuncTests);

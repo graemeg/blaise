@@ -12100,18 +12100,25 @@ begin
     its '_cap_<Name>' slot, then a captured method Self is loaded through
     _cap_Self into the real 'Self' slot.  Captures precede sret/Self/normal
     params, shifting them right — mirrors x86-64 EmitFunctionCore (:21005-21025).
-    A leg-17 nested routine never also has fewer than 8 captures+params spilling
-    past x7 in the compiler's own source; guard it if that ever changes. }
+    Past x7 they come from the caller's outgoing area like any parameter. }
   if (ADecl.CapturedVars <> nil) and (ADecl.CapturedVars.Count > 0) then
   begin
     for I := 0 to ADecl.CapturedVars.Count - 1 do
-    begin
       if J >= 8 then
-        NotYet('captured var spilling past x7', ADecl);
-      EmitStoreSlot('x' + IntToStr(J),
-        '_cap_' + ADecl.CapturedVars.Strings[I]);
-      Inc(J);
-    end;
+      begin
+        { past x7 the caller passed the pointer in the outgoing area, ahead
+          of every normal parameter }
+        SPOff := AlignTo(SPOff, 8);
+        Self.Emit(Format(#9'ldr x9, [x29, #%d]', [16 + SPOff]));
+        EmitStoreSlot('x9', '_cap_' + ADecl.CapturedVars.Strings[I]);
+        SPOff := SPOff + 8;
+      end
+      else
+      begin
+        EmitStoreSlot('x' + IntToStr(J),
+          '_cap_' + ADecl.CapturedVars.Strings[I]);
+        Inc(J);
+      end;
     if (ADecl.OwnerTypeName = '') and
        (ADecl.CapturedVars.IndexOf('Self') >= 0) then
     begin
@@ -12827,9 +12834,13 @@ begin
     the normal args — count them here or the register-vs-stack decision below
     drifts from EmitCall by CapturedVars.Count, under-reserving the outgoing
     stack area (mirrors x86-64 :18220-18221). }
-  if (ADecl <> nil) and (ADecl.CapturedVars <> nil) then
-    NInt := NInt + ADecl.CapturedVars.Count;
   Off := 0;
+  if (ADecl <> nil) and (ADecl.CapturedVars <> nil) then
+    for I := 0 to ADecl.CapturedVars.Count - 1 do
+      if NInt >= 8 then
+        Off := AlignTo(Off, 8) + 8           { past x7: a stack slot }
+      else
+        Inc(NInt);
   for I := 0 to AArgs.Count - 1 do
   begin
     Arg := TASTExpr(AArgs.Items[I]);
@@ -13093,8 +13104,6 @@ begin
         NotYet('capture args on a receiver call', nil);
       for I := 0 to ADecl.CapturedVars.Count - 1 do
       begin
-        if NInt >= 8 then
-          NotYet('capture argument spilling to the stack', nil);
         if IsCaptured(ADecl.CapturedVars.Strings[I]) then
           EmitLoadSlot('x0', '_cap_' + ADecl.CapturedVars.Strings[I])
         else if SameText(ADecl.CapturedVars.Strings[I], 'Self') then
@@ -13102,8 +13111,9 @@ begin
         else
           EmitSlotAddr('x0', ADecl.CapturedVars.Strings[I]);
         EmitPushX0();
-        PopRegs.Add('x' + IntToStr(NInt));
-        Inc(NInt);
+        { past x7 a capture pointer goes to the outgoing area, ahead of the
+          normal arguments -- the callee prologue reads it from there }
+        PopRegs.Add(Self.NextIntArgDest(NInt, StackOff));
       end;
     end;
     for I := 0 to AArgs.Count - 1 do

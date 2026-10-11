@@ -312,6 +312,10 @@ type
       here (names, with their sizes in FProgScratchSz) and emitted in
       EmitDataSection. }
     FProgScratch: TStringList;
+    { +rbp offset of an sret function's incoming result pointer when six or
+      more captured-variable pointers push it past the registers; 0 when it
+      arrives in a register }
+    FSretInOff: Integer;
     FProgScratchSz: TList<Integer>;
     FScratchN: Integer;
     { Whole-program multi-unit guard: the system-class (TObject /
@@ -5950,6 +5954,7 @@ begin
   Self.ClearFrame();
   FFrame      := TDictionary<string, Integer>.Create();
   FFrameTypes := TDictionary<string, TTypeDesc>.Create();
+  FSretInOff  := 0;
   Offset   := 0;
   StackOff := 16;  { first stack arg: +16(%rbp) — above saved %rbp and ret addr }
 
@@ -5989,8 +5994,28 @@ begin
     slot named '_cap_<VarName>' in the frame. }
   if (ADecl.CapturedVars <> nil) and (ADecl.CapturedVars.Count > 0) then
   begin
+    { the first six take the integer registers and are spilled to a local
+      slot; from the seventh on the pointer arrives on the stack, first in
+      the outgoing area (captures precede every other argument), and its
+      slot IS that incoming location }
     for I := 0 to ADecl.CapturedVars.Count - 1 do
-      Self.AddSlot('_cap_' + ADecl.CapturedVars.Strings[I], nil, Offset);
+      if I < 6 then
+        Self.AddSlot('_cap_' + ADecl.CapturedVars.Strings[I], nil, Offset)
+      else
+      begin
+        FFrame.Add('_cap_' + ADecl.CapturedVars.Strings[I], StackOff);
+        FFrameTypes.Add('_cap_' + ADecl.CapturedVars.Strings[I], nil);
+        Self.DbgRecordSlot('_cap_' + ADecl.CapturedVars.Strings[I], nil,
+          StackOff);
+        Inc(StackOff, 8);
+      end;
+    { the sret pointer follows the captures: on the stack too once they fill
+      the six registers }
+    if FSretFunc and (ADecl.CapturedVars.Count >= 6) then
+    begin
+      FSretInOff := StackOff;
+      Inc(StackOff, 8);
+    end;
     { A nested routine that captured the enclosing METHOD's Self (BUG-008)
       also gets a REAL 'Self' slot, filled in the prologue by loading through
       _cap_Self, so every hardcoded implicit-Self path works exactly as
@@ -20859,7 +20884,11 @@ begin
         begin
           Self.Emit(Format(#9'movq %d(%%rsp), %s', [SlotOff, SysVArg64(IntIdx)]));
           Inc(IntIdx);
-        end;
+        end
+        else
+          { a seventh+ capture overflows to the stack ahead of every other
+            argument -- it used to be dropped, so the callee read garbage }
+          OverflowOffs.Add(SlotOff);
         Inc(SlotOff, 8);
       end;
     for I := 0 to AArgs.Count - 1 do
@@ -23557,9 +23586,11 @@ begin
   begin
     for I := 0 to ADecl.CapturedVars.Count - 1 do
     begin
-      Self.Emit(Format(#9'movq %s, %s',
-        [SysVArg64(IntIdx),
-         Self.VarOperand('_cap_' + ADecl.CapturedVars.Strings[I])]));
+      { a seventh+ capture's slot is its incoming stack location already }
+      if IntIdx < 6 then
+        Self.Emit(Format(#9'movq %s, %s',
+          [SysVArg64(IntIdx),
+           Self.VarOperand('_cap_' + ADecl.CapturedVars.Strings[I])]));
       Inc(IntIdx);
     end;
     { Captured METHOD Self (BUG-008): _cap_Self holds the address of the
@@ -23594,8 +23625,14 @@ begin
       integer argument AFTER any captured-var pointers (a nested function
       returning a record: captures, then the buffer, then Self -- the order
       BuildFrame's IntIdx2 count and every caller use). }
-    Self.Emit(Format(#9'movq %s, %s',
-      [SysVArg64(IntIdx), Self.VarOperand('Result')]));
+    if IntIdx < 6 then
+      Self.Emit(Format(#9'movq %s, %s',
+        [SysVArg64(IntIdx), Self.VarOperand('Result')]))
+    else
+    begin
+      Self.Emit(Format(#9'movq %d(%%rbp), %%rax', [FSretInOff]));
+      Self.Emit(Format(#9'movq %%rax, %s', [Self.VarOperand('Result')]));
+    end;
     Inc(IntIdx);
   end;
   if (ADecl.OwnerTypeName <> '') and not ADecl.IsStatic then

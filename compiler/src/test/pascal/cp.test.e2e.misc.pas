@@ -23,6 +23,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { more captured variables than the integer registers hold, forwarded
+      on through a deeper nested routine }
+    procedure TestRun_NestedProc_CapturesSpillPastRegisters;
     procedure TestRun_CodegenBasics_Combined;
     procedure TestRun_Constants_Arrays;
     procedure TestRun_Constants_Scalar;
@@ -3660,6 +3663,38 @@ begin
     '-7.0 12.0' + LE +
     '1.50 3.75' + LE +
     '3.375 43.5 True False' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_NestedProc_CapturesSpillPastRegisters;
+const
+  Src = '''
+    program s2;
+    procedure Outer;
+    var A, B, C, D, E, F, G, H, I, J: Integer; S: string;
+      function Inner(K: Integer): Integer;
+      begin
+        Result := A + B + C + D + E + F + G + H + I + J + K;
+        S := S + '!';
+        J := J + 100
+      end;
+      function Deep: Integer;
+        function Deeper: Integer; begin Result := A * J + Length(S) end;
+      begin Result := Deeper() + Inner(1000) end;
+    begin
+      A := 1; B := 2; C := 3; D := 4; E := 5; F := 6; G := 7; H := 8; I := 9; J := 10; S := 'x';
+      WriteLn(Inner(1000));
+      WriteLn(J, ' ', S);
+      WriteLn(Deep());
+      WriteLn(J, ' ', S)
+    end;
+    begin
+      Outer()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '1055' + #10 + '110 x!' + #10 + '1267' + #10 +
+    '210 x!!' + #10, 0);
 end;
 
 initialization
