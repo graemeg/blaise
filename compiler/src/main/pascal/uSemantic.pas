@@ -569,7 +569,12 @@ type
     function  AnalyseExpr(AExpr: TASTExpr): TTypeDesc;
     function  AnalyseBinaryExpr(ABin: TBinaryExpr): TTypeDesc;
     function  AnalyseFieldAccess(AAccess: TFieldAccessExpr): TTypeDesc;
-    function  TryLowerDefaultPropertyIndex(AAccess: TFieldAccessExpr;
+    function  AnalyseFieldSubscript(AAccess: TFieldAccessExpr;
+      AFldType: TTypeDesc): TTypeDesc;
+    function  LowerImplicitSelfProp(const APropName: string;
+      ALine, ACol: Integer): TASTExpr;
+    function  LowerImplicitSelfPropBase(AAccess: TFieldAccessExpr): TASTExpr;
+    function  TryLowerPropertyValueIndex(AAccess: TFieldAccessExpr;
       APropInfo: TPropertyInfo): TTypeDesc;
     function  AnalyseIsExpr(AExpr: TIsExpr): TTypeDesc;
     function  AnalyseAsExpr(AExpr: TAsExpr): TTypeDesc;
@@ -828,7 +833,9 @@ type
       resolve against AExpectedType (the known target/element/parameter type).
       Returns the expression's resolved type.  Use this anywhere an expression
       is analysed into a context whose enum type is already known. }
-    function AnalyseExprHinted(AExpr: TASTExpr;
+    function AnalyseExprHinted(var AExpr: TASTExpr;
+                              AExpectedType: TTypeDesc): TTypeDesc;
+    function AnalyseExprHintedNoUnwrap(AExpr: TASTExpr;
                               AExpectedType: TTypeDesc): TTypeDesc;
 
     { How many enums declare a member of this name.  >1 means a bare,
@@ -1321,7 +1328,14 @@ begin
   Result := True;
 end;
 
-function TSemanticAnalyser.AnalyseExprHinted(AExpr: TASTExpr;
+function TSemanticAnalyser.AnalyseExprHinted(var AExpr: TASTExpr;
+                                            AExpectedType: TTypeDesc): TTypeDesc;
+begin
+  Result := AnalyseExprHintedNoUnwrap(AExpr, AExpectedType);
+  Self.UnwrapLoweredOperator(AExpr);
+end;
+
+function TSemanticAnalyser.AnalyseExprHintedNoUnwrap(AExpr: TASTExpr;
                                             AExpectedType: TTypeDesc): TTypeDesc;
 begin
   { A bracket set literal ([] or [a, b]) has no set type of its own — it must
@@ -8909,11 +8923,62 @@ begin
   end;
 end;
 
+function TSemanticAnalyser.LowerImplicitSelfProp(const APropName: string;
+  ALine, ACol: Integer): TASTExpr;
+var
+  FA: TFieldAccessExpr;
+begin
+  { Prop inside a method is Self.Prop: build and analyse the explicit form }
+  FA := TFieldAccessExpr.Create();
+  FA.Line       := ALine;
+  FA.Col        := ACol;
+  FA.RecordName := 'Self';
+  FA.FieldName  := APropName;
+  AnalyseExpr(FA);
+  Result := FA;
+end;
+
+function TSemanticAnalyser.LowerImplicitSelfPropBase(
+  AAccess: TFieldAccessExpr): TASTExpr;
+var
+  FA: TFieldAccessExpr;
+begin
+  { the unanalysed base Self.<RecordName>; AnalyseFieldAccess analyses it
+    through the chained arm }
+  FA := TFieldAccessExpr.Create();
+  FA.Line       := AAccess.Line;
+  FA.Col        := AAccess.Col;
+  FA.RecordName := 'Self';
+  FA.FieldName  := AAccess.RecordName;
+  Result := FA;
+end;
+
 procedure TSemanticAnalyser.UnwrapLoweredOperator(var ASlot: TASTExpr);
 var
   Bin:  TBinaryExpr;
   Call: TASTExpr;
+  FA:   TFieldAccessExpr;
+  IE:   TIdentExpr;
 begin
+  if (ASlot is TIdentExpr) and (TIdentExpr(ASlot).LoweredExpr <> nil) then
+  begin
+    IE := TIdentExpr(ASlot);
+    Call := IE.LoweredExpr;
+    IE.LoweredExpr := nil;   { ownership moves to the slot }
+    ASlot := Call;
+    IE.Free();
+    Exit;
+  end;
+  if (ASlot is TFieldAccessExpr) and
+     (TFieldAccessExpr(ASlot).LoweredSubscript <> nil) then
+  begin
+    FA := TFieldAccessExpr(ASlot);
+    Call := FA.LoweredSubscript;
+    FA.LoweredSubscript := nil;   { ownership moves to the slot }
+    ASlot := Call;
+    FA.Free();
+    Exit;
+  end;
   if not (ASlot is TBinaryExpr) then Exit;
   Bin := TBinaryExpr(ASlot);
   if Bin.LoweredCall = nil then Exit;
@@ -15276,6 +15341,10 @@ begin
             FindMethodDecl(FCurrentClass.Name, PropInfo.ReadMethod);
           if TIdentExpr(AExpr).ImplicitMethodDecl <> nil then
           begin
+            if PropInfo.IndexParamName = '' then
+              TIdentExpr(AExpr).LoweredExpr :=
+                Self.LowerImplicitSelfProp(TIdentExpr(AExpr).Name,
+                  AExpr.Line, AExpr.Col);
             TIdentExpr(AExpr).IsImplicitSelfMethod := True;
             TIdentExpr(AExpr).Name := PropInfo.ReadMethod;
             Result := PropInfo.TypeDesc;
@@ -15493,7 +15562,7 @@ begin
   end
   else if AExpr is TNotExpr then
   begin
-    Result := AnalyseExpr(TNotExpr(AExpr).Expr);
+    Result := AnalyseExprSlot(TNotExpr(AExpr).Expr);
     if Result.Kind = tyBoolean then
       Result := FTable.TypeBoolean
     else if Result.IsNumeric() and not Result.IsFloat() then
@@ -15526,27 +15595,48 @@ end;
   Returns the resolved element type, or nil when no lowering applies (the
   caller then handles Prop as before).  APropInfo is the already-resolved read
   property. }
-function TSemanticAnalyser.TryLowerDefaultPropertyIndex(
+function TSemanticAnalyser.TryLowerPropertyValueIndex(
   AAccess: TFieldAccessExpr; APropInfo: TPropertyInfo): TTypeDesc;
 var
   Inner:   TFieldAccessExpr;
   DefProp: TPropertyInfo;
+  Sub:     TStringSubscriptExpr;
 begin
   Result := nil;
   if (APropInfo.IndexParamName <> '') or (AAccess.PropIndexExpr = nil) then
     Exit;
-  if not (APropInfo.TypeDesc.Kind in [tyRecord, tyClass]) then
-    Exit;
-  DefProp := TRecordTypeDesc(APropInfo.TypeDesc).FindDefaultProperty();
-  if (DefProp = nil) or (DefProp.ReadMethod = '') then
-    Exit;
-  { Inner = the property getter without the index; carries the receiver. }
+  DefProp := nil;
+  if APropInfo.TypeDesc.Kind in [tyRecord, tyClass] then
+  begin
+    DefProp := TRecordTypeDesc(APropInfo.TypeDesc).FindDefaultProperty();
+    if (DefProp <> nil) and (DefProp.ReadMethod = '') then
+      DefProp := nil;
+  end;
+  { Inner = the property read without the index; carries the receiver. }
   Inner := TFieldAccessExpr.Create();
   Inner.Line       := AAccess.Line;
   Inner.Col        := AAccess.Col;
   Inner.Base       := AAccess.Base;        { transfer ownership (may be nil) }
   Inner.RecordName := AAccess.RecordName;
   Inner.FieldName  := AAccess.FieldName;
+  Inner.QualifierUnit := AAccess.QualifierUnit;
+  if DefProp = nil then
+  begin
+    { A string / array value: '(Recv.Prop)[idx]', a subscript of the property
+      read.  Without this the index was silently DROPPED and Recv.Prop[1]
+      evaluated to the whole value.  The subscript analysis below rejects a
+      type that cannot be subscripted. }
+    AAccess.Base := nil;
+    Sub := TStringSubscriptExpr.Create();
+    Sub.Line      := AAccess.Line;
+    Sub.Col       := AAccess.Col;
+    Sub.StrExpr   := Inner;
+    Sub.IndexExpr := AAccess.PropIndexExpr;
+    AAccess.PropIndexExpr := nil;
+    AAccess.LoweredSubscript := Sub;
+    Result := AnalyseExpr(Sub);
+    Exit;
+  end;
   { Re-point AAccess at the default property on that getter result; the
     PropIndexExpr ('[idx]') is left in place as its index. }
   AAccess.Base       := Inner;
@@ -15567,6 +15657,10 @@ var
   MDecl:    TMethodDecl;
   EnumOrd:  Integer;
 begin
+  { Already lowered to a subscript of the property value (re-analysis of a
+    node no slot helper has swapped out yet). }
+  if AAccess.LoweredSubscript <> nil then
+    Exit(AAccess.LoweredSubscript.ResolvedType);
   { Chained access: A.B.C — base is another expression whose type must be
     a record or class.  Leaf lookup uses Base.ResolvedType; RecordName path
     (no Base) is used only for the simple IDENT.IDENT form. }
@@ -15680,7 +15774,7 @@ begin
                              AAccess.Line, AAccess.Col);
       if (PropInfo <> nil) and (PropInfo.ReadField <> '') then
       begin
-        Result := TryLowerDefaultPropertyIndex(AAccess, PropInfo);
+        Result := TryLowerPropertyValueIndex(AAccess, PropInfo);
         if Result <> nil then
           Exit;
         AAccess.FieldName := PropInfo.ReadField;
@@ -15692,7 +15786,7 @@ begin
         '[idx]' to AAccess.PropIndexExpr when it parses 'Base.Prop[idx]'). }
       if (PropInfo <> nil) and (PropInfo.ReadMethod <> '') then
       begin
-        Result := TryLowerDefaultPropertyIndex(AAccess, PropInfo);
+        Result := TryLowerPropertyValueIndex(AAccess, PropInfo);
         if Result <> nil then
           Exit;
         if PropInfo.IndexParamName <> '' then
@@ -15763,60 +15857,7 @@ begin
     AAccess.FieldInfo := FldInfo;
     Result := FldInfo.TypeDesc;
     if AAccess.PropIndexExpr <> nil then
-    begin
-      { Subscript on a string field: Rec.Field[N] — emit char access. }
-      if FldInfo.TypeDesc.IsString() then
-      begin
-        Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-        AAccess.IsCharAccess := True;
-        Result := FTable.TypeInteger;
-        AAccess.ResolvedType := Result;
-      end
-      { Subscript on a class field: Rec.Field[I] — use the field type's indexed property. }
-      else if FldInfo.TypeDesc.Kind in [tyRecord, tyClass] then
-      begin
-        PropInfo := TRecordTypeDesc(FldInfo.TypeDesc).FindIndexedProperty();
-        if PropInfo <> nil then
-        begin
-          Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-          AAccess.PropRead      := PropInfo;
-          AAccess.PropOwnerType := PropAccessorOwner(
-            TRecordTypeDesc(FldInfo.TypeDesc).Name, PropInfo.ReadMethod);
-          AAccess.PropAccessorVSlot := PropAccessorVSlot(
-            TRecordTypeDesc(FldInfo.TypeDesc).Name, PropInfo.ReadMethod);
-          { CHAINED base (W.H.Toks[I]) — same reason as the leaf arm below:
-            without PropReadDecl the native record-sret gate is skipped and a
-            record-returning getter is called with no hidden buffer. }
-          AAccess.PropReadDecl := FindMethodDecl(
-            TRecordTypeDesc(FldInfo.TypeDesc).Name, PropInfo.ReadMethod);
-          Result := PropInfo.TypeDesc;
-          AAccess.ResolvedType := Result;
-        end;
-      end
-      else if FldInfo.TypeDesc.Kind = tyDynArray then
-      begin
-        Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-        AAccess.IsArrayAccess := True;
-        Result := TDynArrayTypeDesc(FldInfo.TypeDesc).ElementType;
-        AAccess.ResolvedType := Result;
-      end
-      else if FldInfo.TypeDesc.Kind = tyStaticArray then
-      begin
-        Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-        Self.CheckConstArrayIndexInRange(AAccess.PropIndexExpr,
-          FldInfo.TypeDesc, AAccess.FieldName, AAccess.Line, AAccess.Col);
-        AAccess.IsArrayAccess := True;
-        Result := TStaticArrayTypeDesc(FldInfo.TypeDesc).ElementType;
-        AAccess.ResolvedType := Result;
-      end
-      else if FldInfo.TypeDesc.Kind = tyOpenArray then
-      begin
-        Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-        AAccess.IsArrayAccess := True;
-        Result := TOpenArrayTypeDesc(FldInfo.TypeDesc).ElementType;
-        AAccess.ResolvedType := Result;
-      end;
-    end;
+      Result := Self.AnalyseFieldSubscript(AAccess, FldInfo.TypeDesc);
     Exit;
   end;
 
@@ -15860,7 +15901,7 @@ begin
           begin
             if PropInfo.ReadField <> '' then
             begin
-              Result := TryLowerDefaultPropertyIndex(AAccess, PropInfo);
+              Result := TryLowerPropertyValueIndex(AAccess, PropInfo);
               if Result <> nil then
                 Exit;
               AAccess.FieldName := PropInfo.ReadField;
@@ -15872,7 +15913,7 @@ begin
             else if PropInfo.ReadMethod <> '' then
             begin
               { Method-backed read (includes indexed properties) }
-              Result := TryLowerDefaultPropertyIndex(AAccess, PropInfo);
+              Result := TryLowerPropertyValueIndex(AAccess, PropInfo);
               if Result <> nil then
                 Exit;
               if PropInfo.IndexParamName <> '' then
@@ -15889,6 +15930,10 @@ begin
                 PropAccessorOwner(RT.Name, PropInfo.ReadMethod);
               AAccess.PropAccessorVSlot :=
                 PropAccessorVSlot(RT.Name, PropInfo.ReadMethod);
+              { as on the leaf and chained arms: the native aggregate-result
+                (sret) paths key on PropReadDecl }
+              AAccess.PropReadDecl := FindMethodDecl(RT.Name,
+                PropInfo.ReadMethod);
               Result := PropInfo.TypeDesc;
               AAccess.ResolvedType := Result;
               Exit;
@@ -15907,63 +15952,16 @@ begin
         end;
         Result := AAccess.FieldInfo.TypeDesc;
         if AAccess.PropIndexExpr <> nil then
-        begin
-          if AAccess.FieldInfo.TypeDesc.IsString() then
-          begin
-            Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-            AAccess.IsCharAccess := True;
-            Result := FTable.TypeInteger;
-            AAccess.ResolvedType := Result;
-          end
-          else if AAccess.FieldInfo.TypeDesc.Kind in [tyRecord, tyClass] then
-          begin
-            PropInfo := TRecordTypeDesc(AAccess.FieldInfo.TypeDesc).FindIndexedProperty();
-            if PropInfo <> nil then
-            begin
-              Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-              AAccess.PropRead      := PropInfo;
-              AAccess.PropOwnerType := PropAccessorOwner(
-                TRecordTypeDesc(AAccess.FieldInfo.TypeDesc).Name,
-                PropInfo.ReadMethod);
-              AAccess.PropAccessorVSlot := PropAccessorVSlot(
-                TRecordTypeDesc(AAccess.FieldInfo.TypeDesc).Name,
-                PropInfo.ReadMethod);
-              { IMPLICIT-Self base (FHolder.Toks[I] inside a method) — same
-                reason as the leaf arm; without PropReadDecl the native
-                record-sret gate is skipped. }
-              AAccess.PropReadDecl := FindMethodDecl(
-                TRecordTypeDesc(AAccess.FieldInfo.TypeDesc).Name,
-                PropInfo.ReadMethod);
-              Result := PropInfo.TypeDesc;
-              AAccess.ResolvedType := Result;
-            end;
-          end
-          else if AAccess.FieldInfo.TypeDesc.Kind = tyDynArray then
-          begin
-            Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-            AAccess.IsArrayAccess := True;
-            Result := TDynArrayTypeDesc(AAccess.FieldInfo.TypeDesc).ElementType;
-            AAccess.ResolvedType := Result;
-          end
-          else if AAccess.FieldInfo.TypeDesc.Kind = tyStaticArray then
-          begin
-            Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-            Self.CheckConstArrayIndexInRange(AAccess.PropIndexExpr,
-              AAccess.FieldInfo.TypeDesc, AAccess.FieldName,
-              AAccess.Line, AAccess.Col);
-            AAccess.IsArrayAccess := True;
-            Result := TStaticArrayTypeDesc(AAccess.FieldInfo.TypeDesc).ElementType;
-            AAccess.ResolvedType := Result;
-          end
-          else if AAccess.FieldInfo.TypeDesc.Kind = tyOpenArray then
-          begin
-            Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-            AAccess.IsArrayAccess := True;
-            Result := TOpenArrayTypeDesc(AAccess.FieldInfo.TypeDesc).ElementType;
-            AAccess.ResolvedType := Result;
-          end;
-        end;
+          Result := Self.AnalyseFieldSubscript(AAccess, AAccess.FieldInfo.TypeDesc);
         Exit;
+      end;
+      { Implicit Self.Prop.FieldName — RecordName is a PROPERTY of the current
+        class (P.Y inside a method): analyse it as the chained Self.P.Y. }
+      if FCurrentClass.FindProperty(AAccess.RecordName) <> nil then
+      begin
+        AAccess.Base := Self.LowerImplicitSelfPropBase(AAccess);
+        AAccess.RecordName := '';
+        Exit(Self.AnalyseFieldAccess(AAccess));
       end;
     end;
     SemanticError(
@@ -16210,7 +16208,7 @@ begin
       if PropInfo.ReadField <> '' then
       begin
         { Field-backed read: redirect to the backing field }
-        Result := TryLowerDefaultPropertyIndex(AAccess, PropInfo);
+        Result := TryLowerPropertyValueIndex(AAccess, PropInfo);
         if Result <> nil then
           Exit;
         AAccess.FieldName := PropInfo.ReadField;
@@ -16223,7 +16221,7 @@ begin
       else if PropInfo.ReadMethod <> '' then
       begin
         { Method-backed read (includes indexed properties) }
-        Result := TryLowerDefaultPropertyIndex(AAccess, PropInfo);
+        Result := TryLowerPropertyValueIndex(AAccess, PropInfo);
         if Result <> nil then
           Exit;
         if PropInfo.IndexParamName <> '' then
@@ -16287,64 +16285,76 @@ begin
   AAccess.FieldInfo := FldInfo;
   Result := FldInfo.TypeDesc;
   if AAccess.PropIndexExpr <> nil then
+    Result := Self.AnalyseFieldSubscript(AAccess, FldInfo.TypeDesc);
+end;
+
+{ Rec.Field[I] / Obj.Field[I]: the parser folds the trailing '[I]' into
+  PropIndexExpr, so the field's TYPE decides what the subscript means -- a
+  string byte, a (dynamic / static / open) array element, or the element
+  type's indexed property.  Any other type cannot be subscripted: those used
+  to be accepted silently with the index dropped, so H.FN[1] on an Integer
+  field read the whole field. }
+function TSemanticAnalyser.AnalyseFieldSubscript(AAccess: TFieldAccessExpr;
+  AFldType: TTypeDesc): TTypeDesc;
+var
+  PropInfo: TPropertyInfo;
+begin
+  Result := nil;
+  if AFldType.IsString() then
   begin
-    if FldInfo.TypeDesc.IsString() then
+    Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+    AAccess.IsCharAccess := True;
+    Result := FTable.TypeInteger;
+  end
+  else if AFldType.Kind in [tyRecord, tyClass] then
+  begin
+    PropInfo := TRecordTypeDesc(AFldType).FindIndexedProperty();
+    if PropInfo <> nil then
     begin
       Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-      AAccess.IsCharAccess := True;
-      Result := FTable.TypeInteger;
-      AAccess.ResolvedType := Result;
-    end
-    else if FldInfo.TypeDesc.Kind in [tyRecord, tyClass] then
-    begin
-      PropInfo := TRecordTypeDesc(FldInfo.TypeDesc).FindIndexedProperty();
-      if PropInfo <> nil then
-      begin
-        Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-        AAccess.PropRead      := PropInfo;
-        AAccess.PropOwnerType := PropAccessorOwner(
-          TRecordTypeDesc(FldInfo.TypeDesc).Name, PropInfo.ReadMethod);
-        AAccess.PropAccessorVSlot := PropAccessorVSlot(
-          TRecordTypeDesc(FldInfo.TypeDesc).Name, PropInfo.ReadMethod);
-        { Resolve the getter DECL too, not just the property.  The native
-          record-return path keys on PropReadDecl (PropRead alone is not
-          enough): without it a getter returning a RECORD is emitted with no
-          hidden sret buffer, so the receiver lands in %rdi where the callee
-          expects the buffer and every argument shifts one register -- Self
-          becomes the index and the callee dereferences it.  Reading
-          Obj.ListField[I] where the element is a record segfaulted; the same
-          read through a local (L := Obj.ListField; L[I]) took the property
-          path above, which does set this, and worked. }
-        AAccess.PropReadDecl := FindMethodDecl(
-          TRecordTypeDesc(FldInfo.TypeDesc).Name, PropInfo.ReadMethod);
-        Result := PropInfo.TypeDesc;
-        AAccess.ResolvedType := Result;
-      end;
-    end
-    else if FldInfo.TypeDesc.Kind = tyDynArray then
-    begin
-      Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-      AAccess.IsArrayAccess := True;
-      Result := TDynArrayTypeDesc(FldInfo.TypeDesc).ElementType;
-      AAccess.ResolvedType := Result;
-    end
-    else if FldInfo.TypeDesc.Kind = tyStaticArray then
-    begin
-      Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-      Self.CheckConstArrayIndexInRange(AAccess.PropIndexExpr,
-        FldInfo.TypeDesc, AAccess.FieldName, AAccess.Line, AAccess.Col);
-      AAccess.IsArrayAccess := True;
-      Result := TStaticArrayTypeDesc(FldInfo.TypeDesc).ElementType;
-      AAccess.ResolvedType := Result;
-    end
-    else if FldInfo.TypeDesc.Kind = tyOpenArray then
-    begin
-      Self.AnalyseExprSlot(AAccess.PropIndexExpr);
-      AAccess.IsArrayAccess := True;
-      Result := TOpenArrayTypeDesc(FldInfo.TypeDesc).ElementType;
-      AAccess.ResolvedType := Result;
+      AAccess.PropRead      := PropInfo;
+      AAccess.PropOwnerType := PropAccessorOwner(
+        TRecordTypeDesc(AFldType).Name, PropInfo.ReadMethod);
+      AAccess.PropAccessorVSlot := PropAccessorVSlot(
+        TRecordTypeDesc(AFldType).Name, PropInfo.ReadMethod);
+      { Resolve the getter DECL too, not just the property.  The native
+        record-return path keys on PropReadDecl (PropRead alone is not
+        enough): without it a getter returning a RECORD is emitted with no
+        hidden sret buffer, so the receiver lands in %rdi where the callee
+        expects the buffer and every argument shifts one register -- Self
+        becomes the index and the callee dereferences it.  Reading
+        Obj.ListField[I] where the element is a record segfaulted. }
+      AAccess.PropReadDecl := FindMethodDecl(
+        TRecordTypeDesc(AFldType).Name, PropInfo.ReadMethod);
+      Result := PropInfo.TypeDesc;
     end;
+  end
+  else if AFldType.Kind = tyDynArray then
+  begin
+    Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+    AAccess.IsArrayAccess := True;
+    Result := TDynArrayTypeDesc(AFldType).ElementType;
+  end
+  else if AFldType.Kind = tyStaticArray then
+  begin
+    Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+    Self.CheckConstArrayIndexInRange(AAccess.PropIndexExpr,
+      AFldType, AAccess.FieldName, AAccess.Line, AAccess.Col);
+    AAccess.IsArrayAccess := True;
+    Result := TStaticArrayTypeDesc(AFldType).ElementType;
+  end
+  else if AFldType.Kind = tyOpenArray then
+  begin
+    Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+    AAccess.IsArrayAccess := True;
+    Result := TOpenArrayTypeDesc(AFldType).ElementType;
   end;
+  if Result = nil then
+    SemanticError(
+      Format('Field ''%s'' of type ''%s'' cannot be subscripted',
+        [AAccess.FieldName, AFldType.Name]),
+      AAccess.Line, AAccess.Col);
+  AAccess.ResolvedType := Result;
 end;
 
 function TSemanticAnalyser.AnalyseBinaryExpr(ABin: TBinaryExpr): TTypeDesc;

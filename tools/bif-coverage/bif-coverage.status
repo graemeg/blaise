@@ -44,6 +44,7 @@ TIdentExpr.IsMetaclassRef  safe
 TIdentExpr.ConstArraySymbol  safe
 TIdentExpr.QualifierUnit  serialise
 TIdentExpr.ResolvedOwnerUnit  safe
+TIdentExpr.LoweredExpr  safe
 
 # TFieldAccessExpr (uAST.pas:135)
 TFieldAccessExpr.RecordName  serialise
@@ -75,6 +76,7 @@ TFieldAccessExpr.IsClassVarRead  safe
 TFieldAccessExpr.ClassVarEmitName  safe
 TFieldAccessExpr.IsStaticPropGet  safe
 TFieldAccessExpr.BackingFieldRedirect  safe
+TFieldAccessExpr.LoweredSubscript  safe
 
 # TIsExpr (uAST.pas:186)
 TIsExpr.Obj  serialise

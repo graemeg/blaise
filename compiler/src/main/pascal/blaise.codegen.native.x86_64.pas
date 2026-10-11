@@ -4932,9 +4932,7 @@ begin
       Self.Emit(#9'movq %rax, 8(%r15)');
       Self.Emit(#9'addq $16, %rsp');
     end
-    else if (AAsgn.Expr is TStringSubscriptExpr) and
-            (TStringSubscriptExpr(AAsgn.Expr).StrExpr is TFieldAccessExpr) and
-            (TFieldAccessExpr(TStringSubscriptExpr(AAsgn.Expr).StrExpr).PropRead <> nil) then
+    else if IsFoldedPropSubscript(AAsgn.Expr) then
     begin
     { Interface element read through an INDEXED PROPERTY: List[I] where the
       default property's getter returns an interface.  There is no element
@@ -5240,9 +5238,7 @@ begin
     Exit;
   end;
 
-  if (AAsgn.Expr is TStringSubscriptExpr) and
-     (TStringSubscriptExpr(AAsgn.Expr).StrExpr is TFieldAccessExpr) and
-     (TFieldAccessExpr(TStringSubscriptExpr(AAsgn.Expr).StrExpr).PropRead <> nil) then
+  if IsFoldedPropSubscript(AAsgn.Expr) then
   begin
   { Interface element read through an INDEXED PROPERTY: List[I] where the
     default property's getter returns an interface.  There is no element
@@ -8164,11 +8160,21 @@ begin
     Exit;
   end;
 
-  if ((AExpr is TFuncCallExpr) or (AExpr is TMethodCallExpr)) and
-     (AExpr.ResolvedType <> nil) and
-     (AExpr.ResolvedType.Kind = tyStaticArray) and
-     not ((AExpr is TFuncCallExpr) and
-          (TFuncCallExpr(AExpr).ResolvedDecl = nil)) then
+  { (a method-backed property read of a static array, Obj.Prop / Obj[I], is a
+    getter call too: without a buffer the getter wrote its result through
+    whatever %rdi held and the read yielded garbage) }
+  if (((AExpr is TFuncCallExpr) or (AExpr is TMethodCallExpr)) and
+      (AExpr.ResolvedType <> nil) and
+      (AExpr.ResolvedType.Kind = tyStaticArray) and
+      not ((AExpr is TFuncCallExpr) and
+           (TFuncCallExpr(AExpr).ResolvedDecl = nil))) or
+     ((AExpr.ResolvedType <> nil) and
+      (AExpr.ResolvedType.Kind = tyStaticArray) and
+      (((AExpr is TFieldAccessExpr) and
+        (TFieldAccessExpr(AExpr).PropReadDecl <> nil)) or
+       (IsFoldedPropSubscript(AExpr) and
+        (TFieldAccessExpr(TStringSubscriptExpr(AExpr).StrExpr).PropReadDecl
+          <> nil)))) then
   begin
     Self.EmitStaticArrayCallToRax(AExpr);
     Exit;
@@ -8211,8 +8217,9 @@ begin
     begin
       Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand('Self')]));
       IMD := TMethodDecl(TIdentExpr(AExpr).ImplicitMethodDecl);
-      Self.Emit(Format(#9'callq %s',
-        [MethodEmitNameNative(IMD, IMD.OwnerTypeName, IMD.Name)]));
+      { a virtual getter dispatches through the vtable, as Self.Prop does }
+      Self.EmitSelfDispatch(IMD,
+        MethodEmitNameNative(IMD, IMD.OwnerTypeName, IMD.Name));
       Exit;
     end;
     if TIdentExpr(AExpr).IsImplicitSelf and
@@ -10184,9 +10191,7 @@ begin
   { Indexed/default property read: Obj.Items[I] or Obj[I] (default property) —
     semantic has folded the index into StrExpr (a TFieldAccessExpr with PropRead
     + PropIndexExpr), leaving AExpr.IndexExpr nil.  Delegate to the StrExpr. }
-  if (AExpr is TStringSubscriptExpr) and
-     (TStringSubscriptExpr(AExpr).StrExpr is TFieldAccessExpr) and
-     (TFieldAccessExpr(TStringSubscriptExpr(AExpr).StrExpr).PropRead <> nil) then
+  if IsFoldedPropSubscript(AExpr) then
   begin
     Self.EmitExprToEax(TStringSubscriptExpr(AExpr).StrExpr);
     Exit;

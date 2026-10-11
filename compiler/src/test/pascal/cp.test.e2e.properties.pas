@@ -64,6 +64,18 @@ type
     { Setter-backed property written through a CHAINED base (A.B.Prop := V) }
     procedure TestRun_ChainedSetterPropertyWrite;
     procedure TestRun_ChainedSetterPropertyWrite_IndexedProp;
+
+    { Obj.Prop[I] / (Obj.Prop)[I] on a NON-indexed string / array property
+      (BUG-20261011-prop-value-subscript-dropped): the index was dropped, or
+      the whole value delegated as the element. }
+    procedure TestRun_PropertyValueSubscript;
+    { a static-array getter read as a value and as a subscript base
+      (BUG-20261011-staticarray-getter-value) }
+    procedure TestRun_StaticArrayGetterProperty;
+    { bare property reads inside a method: record / static-array getters,
+      P.Y, and a VIRTUAL getter overridden in a descendant
+      (BUG-20261011-implicit-self-prop-ident) }
+    procedure TestRun_ImplicitSelfPropertyReads;
   end;
 
 implementation
@@ -719,6 +731,124 @@ begin
       WriteLn(O.Inner.Slot[0] + O.Inner.Slot[1])
     end.
     ''', '33' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_PropertyValueSubscript;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TIntArr = array of Integer;
+      TStrArr = array of string;
+      THolder = class
+        FS: string;
+        FArr: TIntArr;
+        FSA: TStrArr;
+        function GetS: string;
+        function GetArr: TIntArr;
+        function GetSA: TStrArr;
+        property S: string read GetS;
+        property SF: string read FS;
+        property Arr: TIntArr read GetArr;
+        property AF: TIntArr read FArr;
+        property SA: TStrArr read GetSA;
+      end;
+    function THolder.GetS: string; begin Result := FS end;
+    function THolder.GetArr: TIntArr; begin Result := FArr end;
+    function THolder.GetSA: TStrArr; begin Result := FSA end;
+    var H: THolder; X: string;
+    begin
+      H := THolder.Create();
+      H.FS := 'abc';
+      SetLength(H.FArr, 2);
+      H.FArr[1] := 9;
+      SetLength(H.FSA, 2);
+      H.FSA[1] := 'x' + IntToStr(5);
+      WriteLn(H.S[1], ' ', H.SF[2], ' ', (H.S)[0]);
+      WriteLn(H.Arr[1], ' ', H.AF[1], ' ', (H.Arr)[1]);
+      X := H.SA[1];
+      WriteLn(X, ' ', (H.SA)[1], ' ', H.SA[1])
+    end.
+    ''', '98 99 97' + LE + '9 9 9' + LE + 'x5 x5 x5' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_StaticArrayGetterProperty;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TSA = array[0..2] of Integer;
+      TC = class
+        FSA: TSA;
+        function GetSA: TSA;
+        property SA: TSA read GetSA;
+        property SF: TSA read FSA;
+      end;
+    function TC.GetSA: TSA; begin Result := FSA end;
+    var O: TC; S: TSA;
+    begin
+      O := TC.Create();
+      O.FSA[0] := 5;
+      O.FSA[1] := 6;
+      O.FSA[2] := 7;
+      S := O.SA;
+      WriteLn(S[0], ' ', S[2]);
+      WriteLn(O.SA[1], ' ', (O.SA)[2], ' ', O.SF[0])
+    end.
+    ''', '5 7' + LE + '6 7 5' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_ImplicitSelfPropertyReads;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TPt = record X, Y, Z: Integer; end;
+      TSA = array[0..2] of Integer;
+      TBase = class
+        FP: TPt;
+        FSA: TSA;
+        function GetP: TPt;
+        function GetSA: TSA;
+        function GetN: Integer; virtual;
+        function GetStr: string; virtual;
+        property P: TPt read GetP;
+        property SA: TSA read GetSA;
+        property N: Integer read GetN;
+        property Str: string read GetStr;
+        procedure Show;
+      end;
+      TKid = class(TBase)
+        function GetN: Integer; override;
+        function GetStr: string; override;
+      end;
+    function TBase.GetP: TPt; begin Result := FP end;
+    function TBase.GetSA: TSA; begin Result := FSA end;
+    function TBase.GetN: Integer; begin Result := 1 end;
+    function TBase.GetStr: string; begin Result := 'base' end;
+    function TKid.GetN: Integer; begin Result := 2 end;
+    function TKid.GetStr: string; begin Result := 'kid' end;
+    procedure TBase.Show;
+    var Q: TPt; A: TSA;
+    begin
+      Q := P;
+      A := SA;
+      WriteLn(P.Y, ' ', Q.Z, ' ', A[1], ' ', SA[2]);
+      WriteLn(N, ' ', Str)
+    end;
+    var O: TBase;
+    begin
+      O := TKid.Create();
+      O.FP.Y := 4;
+      O.FP.Z := 5;
+      O.FSA[1] := 6;
+      O.FSA[2] := 7;
+      O.Show()
+    end.
+    ''', '4 5 6 7' + LE + '2 kid' + LE, 0);
 end;
 
 initialization

@@ -130,6 +130,13 @@ type
                                       units exporting the same var name reference distinct
                                       slots.  Not serialised — recomputed at analysis time;
                                       empty falls back to the bare-name resolution. }
+    { A bare method-backed PROPERTY read inside a method (Prop, meaning
+      Self.Prop): uSemantic builds the explicit 'Self.Prop' field access here
+      and the analyser's slot helpers swap it into the parent slot, so the
+      read takes the same getter path (virtual dispatch, aggregate result
+      buffer) as the explicit form.  An ident no slot helper reaches keeps its
+      IsImplicitSelfMethod annotation as the fallback. }
+    LoweredExpr: TASTExpr;          { owned — nil unless lowered }
   end;
 
   TFieldAccessExpr = class(TASTExpr)
@@ -180,6 +187,12 @@ type
                                      property, so re-analysis of this node must NOT
                                      re-check the backing field's visibility.  Transient
                                      analysis flag — not serialised. }
+    { Subscript of a NON-indexed property's value, Obj.Prop[I]: the parser folds
+      '[I]' into PropIndexExpr, which only an indexed property consumes.
+      uSemantic rewrites the read as the TStringSubscriptExpr '(Obj.Prop)[I]'
+      held here, and the analyser's slot helpers swap it into the parent slot
+      (as with TBinaryExpr.LoweredCall), so codegen never sees this node. }
+    LoweredSubscript: TASTExpr;       { owned — nil unless lowered }
     destructor Destroy; override;
   end;
 

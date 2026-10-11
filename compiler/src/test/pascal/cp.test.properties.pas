@@ -16,7 +16,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TPropertyTests = class(TTestCase)
@@ -77,6 +77,26 @@ type
     procedure TestSemantic_InheritedProperty_ViaSubclassVar_OK;
     procedure TestSemantic_InheritedProperty_ViaSelf_OK;
     procedure TestSemantic_InheritedProperty_BareIdent_InSubclassMethod_OK;
+
+    { ------------------------------------------------------------------ }
+    { Subscript of a property value -- BUG-20261011-prop-value-subscript- }
+    { dropped, BUG-20261011-implicit-self-prop-ident                      }
+    { ------------------------------------------------------------------ }
+    { Obj.Prop[I] on a NON-indexed property subscripts the value: the index
+      used to be dropped and the whole string / array came back. }
+    procedure TestSemantic_PropertyValueSubscript_ElementType;
+    { a field (or field-backed property) of a non-subscriptable type is an
+      error, not a silently dropped index }
+    procedure TestSemantic_FieldSubscript_NonSubscriptable_RaisesError;
+    { P.Y inside a method, P a property of the class: Self.P.Y }
+    procedure TestSemantic_ImplicitSelfPropertyBase_FieldRead_OK;
+    { a bare property read inside a method dispatches a VIRTUAL getter
+      through the vtable on both ISAs (x86-64 called it statically) }
+    procedure TestCodegen_ImplicitSelfVirtualGetter_NotStatic;
+    { a static-array getter read gets a result buffer: x86-64 passes the
+      receiver in %rsi after the sret pointer, arm64 points x8 at a frame
+      scratch (both called the getter with no buffer at all) }
+    procedure TestCodegen_StaticArrayGetter_SubscriptBase;
   end;
 
 implementation
@@ -587,6 +607,124 @@ begin
         end.
         '''
   ).Free();
+end;
+
+const
+  SrcPropValueHolder = '''
+    program P;
+    type
+      TIntArr = array of Integer;
+      TStrArr = array of string;
+      TSA = array[0..2] of Integer;
+      THolder = class
+        FS: string;
+        FArr: TIntArr;
+        FSA: TStrArr;
+        FFix: TSA;
+        FN: Integer;
+        function GetS: string;
+        function GetArr: TIntArr;
+        function GetSA: TStrArr;
+        function GetFix: TSA;
+        property S: string read GetS;
+        property SF: string read FS;
+        property Arr: TIntArr read GetArr;
+        property SA: TStrArr read GetSA;
+        property Fix: TSA read GetFix;
+        property NF: Integer read FN;
+      end;
+    function THolder.GetS: string; begin Result := FS end;
+    function THolder.GetArr: TIntArr; begin Result := FArr end;
+    function THolder.GetSA: TStrArr; begin Result := FSA end;
+    function THolder.GetFix: TSA; begin Result := FFix end;
+    var H: THolder; I: Integer; X: string;
+    begin
+      H := THolder.Create();
+      %s
+    end.
+    ''';
+
+procedure TPropertyTests.TestSemantic_PropertyValueSubscript_ElementType;
+begin
+  AssertEquals('element types of property-value subscripts', '',
+    SemanticError(Format(SrcPropValueHolder,
+      ['I := H.S[1]; I := H.SF[1]; I := H.Arr[1]; X := H.SA[0]; ' +
+       'I := H.Fix[2]; I := (H.S)[0]'])));
+end;
+
+procedure TPropertyTests.TestSemantic_FieldSubscript_NonSubscriptable_RaisesError;
+begin
+  AssertTrue('Integer field subscript is rejected',
+    Pos('cannot be subscripted',
+      SemanticError(Format(SrcPropValueHolder, ['I := H.FN[1]']))) >= 0);
+  AssertTrue('Integer field-backed property subscript is rejected',
+    SemanticError(Format(SrcPropValueHolder, ['I := H.NF[1]'])) <> '');
+end;
+
+const
+  SrcImplicitSelfProps = '''
+    program P;
+    type
+      TPt = record X, Y: Integer; end;
+      TBase = class
+        FP: TPt;
+        function GetP: TPt;
+        function GetN: Integer; virtual;
+        property P: TPt read GetP;
+        property N: Integer read GetN;
+        procedure Show;
+      end;
+      TKid = class(TBase)
+        function GetN: Integer; override;
+      end;
+    function TBase.GetP: TPt; begin Result := FP end;
+    function TBase.GetN: Integer; begin Result := 1 end;
+    function TKid.GetN: Integer; begin Result := 2 end;
+    procedure TBase.Show;
+    begin
+      WriteLn(P.Y, N)
+    end;
+    begin
+      TKid.Create().Show()
+    end.
+    ''';
+
+procedure TPropertyTests.TestSemantic_ImplicitSelfPropertyBase_FieldRead_OK;
+begin
+  AssertEquals('P.Y with P an implicit-Self property', '',
+    SemanticError(SrcImplicitSelfProps));
+end;
+
+procedure TPropertyTests.TestCodegen_ImplicitSelfVirtualGetter_NotStatic;
+begin
+  AssertTrue('x86-64: GetN is not called statically',
+    Pos(#9'callq TBase_GetN', GenAsm(SrcImplicitSelfProps, TargetX86_64)) < 0);
+  AssertTrue('arm64: GetN is not called statically',
+    Pos(#9'bl _TBase_GetN', GenAsm(SrcImplicitSelfProps, TargetArm64)) < 0);
+end;
+
+procedure TPropertyTests.TestCodegen_StaticArrayGetter_SubscriptBase;
+const
+  Src = '''
+    program P;
+    type
+      TSA = array[0..2] of Integer;
+      TC = class
+        FSA: TSA;
+        function GetSA: TSA;
+        property SA: TSA read GetSA;
+      end;
+    function TC.GetSA: TSA; begin Result := FSA end;
+    var O: TC;
+    begin
+      O := TC.Create();
+      WriteLn(O.SA[1])
+    end.
+    ''';
+begin
+  AssertEquals('static-array getter as a subscript base', '',
+    AsmMissing(Src, 'movq O(%rip), %rsi',
+      'ldr x0, [x9, _g_O@PAGEOFF]' + #10#9 + 'sub x8, x29, #'));
 end;
 
 initialization

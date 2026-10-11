@@ -175,6 +175,24 @@ function RecretClassify(ARec: TRecordTypeDesc;
   twins ExprOwnsRef / NativeExprOwnsRef). }
 function ArcExprOwnsRef(AExpr: TASTExpr): Boolean;
 
+{ True when AExpr is an INDEXED-property read L[I] / Obj.Items[I] that the
+  semantic pass folded into its StrExpr: a TStringSubscriptExpr whose StrExpr
+  is a property-read TFieldAccessExpr carrying the index in PropIndexExpr, and
+  whose own IndexExpr is nil.  Every backend arm that delegates such a
+  subscript to its StrExpr must test this, not just PropRead <> nil: a
+  subscript OF a non-indexed property's value, (Obj.Prop)[I], also has a
+  property-read StrExpr but keeps its index, and delegating it dropped the
+  index (the whole string / array pointer came back as the element). }
+function IsFoldedPropSubscript(AExpr: TASTExpr): Boolean;
+
+{ True when AExpr's value is produced by a CALL -- a function or method call,
+  a method-backed property read (Obj.Prop, or a bare Prop inside a method),
+  or an indexed-property read -- rather than read from storage.  An aggregate
+  (static array / record) value of that shape lives in a per-site result
+  buffer: a consumer that needs its address (a subscript base) takes the
+  buffer's, since the expression has no storage of its own. }
+function IsAggCallValue(AExpr: TASTExpr): Boolean;
+
 { True when AExpr is an ARRAY-ELEMENT l-value — a subscript whose base is a
   static, dynamic, or open array — i.e. a slot with a stable address that a
   consuming site (notably the Free lowering) can write through.  All three
@@ -648,13 +666,36 @@ begin
   { Indexed property subscript: L[I] desugars to Subscript(FieldAccess(Items))
     where Items has a ReadMethod.  The subscript emitter delegates to the
     getter — the result inherits the +1. }
-  if AExpr is TStringSubscriptExpr then
+  if IsFoldedPropSubscript(AExpr) and
+     (TFieldAccessExpr(TStringSubscriptExpr(AExpr).StrExpr).PropRead.ReadMethod <> '') then
+    Result := True;
+end;
+
+function IsAggCallValue(AExpr: TASTExpr): Boolean;
+var
+  FA: TFieldAccessExpr;
+begin
+  Result := False;
+  if AExpr = nil then Exit;
+  if (AExpr is TFuncCallExpr) or (AExpr is TMethodCallExpr) or
+     (AExpr is TIndirectFuncCallExpr) or IsFoldedPropSubscript(AExpr) then
+    Exit(True);
+  if AExpr is TIdentExpr then
+    Exit(TIdentExpr(AExpr).IsImplicitSelfMethod);
+  if AExpr is TFieldAccessExpr then
   begin
-    if (TStringSubscriptExpr(AExpr).StrExpr is TFieldAccessExpr) and
-       (TFieldAccessExpr(TStringSubscriptExpr(AExpr).StrExpr).PropRead <> nil) and
-       (TFieldAccessExpr(TStringSubscriptExpr(AExpr).StrExpr).PropRead.ReadMethod <> '') then
-      Result := True;
+    FA := TFieldAccessExpr(AExpr);
+    Result := FA.IsMethodCall or
+              ((FA.PropRead <> nil) and (FA.PropRead.ReadMethod <> ''));
   end;
+end;
+
+function IsFoldedPropSubscript(AExpr: TASTExpr): Boolean;
+begin
+  Result := (AExpr is TStringSubscriptExpr) and
+            (TStringSubscriptExpr(AExpr).IndexExpr = nil) and
+            (TStringSubscriptExpr(AExpr).StrExpr is TFieldAccessExpr) and
+            (TFieldAccessExpr(TStringSubscriptExpr(AExpr).StrExpr).PropRead <> nil);
 end;
 
 function ExprMayDeferTransientBase(AExpr: TASTExpr): Boolean;

@@ -4317,6 +4317,25 @@ begin
     EmitSlotAddr('x0', JTmp);
     Exit;
   end;
+  if IsInlineBytesAgg(AExpr.ResolvedType) and
+     (((AExpr is TFieldAccessExpr) and
+       (TFieldAccessExpr(AExpr).PropRead <> nil) and
+       (TFieldAccessExpr(AExpr).PropRead.ReadMethod <> '')) or
+      IsFoldedPropSubscript(AExpr)) then
+  begin
+    { the same for a static-array / jumbo-set GETTER (Obj.Prop, Obj[I]): it
+      returns through x8 too.  Called bare, x8 pointed anywhere and the
+      getter's result copy wrote through it. }
+    if IsFoldedPropSubscript(AExpr) then
+      AExpr := TStringSubscriptExpr(AExpr).StrExpr;
+    JTmp := '__jret_' + IntToStr(FJArgN);
+    FJArgN := FJArgN + 1;
+    if not FFrame.ContainsKey(JTmp) then
+      AddLocal(JTmp, AExpr.ResolvedType.RawSize());
+    EmitPropReadCall(TFieldAccessExpr(AExpr), JTmp);
+    EmitSlotAddr('x0', JTmp);
+    Exit;
+  end;
   if (AExpr.ResolvedType <> nil) and
      (AExpr.ResolvedType.Kind = tyInterface) and
      (((AExpr is TFuncCallExpr) and
@@ -5794,9 +5813,7 @@ begin
     must be caught BEFORE the string-subscript case below, which would take the
     nil IndexExpr as a byte index and EmitExprToX0(nil) → compiler segfault
     (macOS arm64, 2026-07-24).  Delegate to the StrExpr, mirroring x86-64. }
-  if (AExpr is TStringSubscriptExpr) and
-     (TStringSubscriptExpr(AExpr).StrExpr is TFieldAccessExpr) and
-     (TFieldAccessExpr(TStringSubscriptExpr(AExpr).StrExpr).PropRead <> nil) then
+  if IsFoldedPropSubscript(AExpr) then
   begin
     Self.EmitExprToX0(TStringSubscriptExpr(AExpr).StrExpr);
     Exit;
@@ -7372,6 +7389,8 @@ begin
   if AFld.PropRead.IsStatic then
   begin
     { static property: the getter is a class-level routine — no receiver }
+    if ASret <> '' then
+      EmitSlotAddr('x8', ASret);
     Self.Emit(Format(#9'bl %s',
       [PropAccessorSym(AFld.PropOwnerType, AFld.PropRead.ReadMethod)]));
     Exit;
@@ -11185,7 +11204,8 @@ begin
   ESz := TStaticArrayTypeDesc(
     ASub.StrExpr.ResolvedType).ElementType.RawSize();
   if not (ASub.StrExpr is TIdentExpr) or
-     (TIdentExpr(ASub.StrExpr).ParamMode = pmVar) then
+     (TIdentExpr(ASub.StrExpr).ParamMode = pmVar) or
+     TIdentExpr(ASub.StrExpr).IsImplicitSelfMethod then
   begin
     { any other base -- an element of an outer array (G[I][J], the
       desugared G[I, J]), an array field, P^, a var array parameter: the
@@ -11239,6 +11259,14 @@ procedure TArm64Backend.EmitArrayStorageAddr(AExpr: TASTExpr);
 var
   Sub: TStringSubscriptExpr;
 begin
+  if IsInlineBytesAgg(AExpr.ResolvedType) and IsAggCallValue(AExpr) then
+  begin
+    { MakeArr()[I], Obj.Prop[I], Prop[I] inside a method: a static-array-
+      returning call (a getter included) evaluates to the address of its
+      per-site result buffer -- it has no storage of its own to address }
+    Self.EmitExprToX0(AExpr);
+    Exit;
+  end;
   if AExpr is TIdentExpr then
   begin
     if TIdentExpr(AExpr).ConstArraySymbol <> '' then
@@ -11275,14 +11303,6 @@ begin
   if AExpr is TDerefExpr then
   begin
     Self.EmitExprToX0(TDerefExpr(AExpr).Expr);
-    Exit;
-  end;
-  if IsInlineBytesAgg(AExpr.ResolvedType) and
-     ((AExpr is TFuncCallExpr) or (AExpr is TMethodCallExpr)) then
-  begin
-    { MakeArr()[I]: a static-array-returning call evaluates to the address
-      of its per-site result buffer }
-    Self.EmitExprToX0(AExpr);
     Exit;
   end;
   NotYet('array storage of this expression', AExpr);
