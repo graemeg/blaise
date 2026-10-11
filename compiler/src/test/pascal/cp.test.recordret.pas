@@ -56,6 +56,9 @@ type
     { a DISCARDED result through a procedural value needs its own buffer: x8
       held whatever was left in it, and the callee wrote through it }
     procedure TestCodegen_DiscardedSretThroughProcValue_HasBuffer;
+    { a record returned by a C routine is lowered on both ISAs (arm64 refused
+      it as unvalidated) }
+    procedure TestCodegen_ExternalRecordReturn_Lowers;
     { a discarded string result of a method on a named receiver is released }
     procedure TestCodegen_DiscardedStringOnNamedReceiver_Released;
     { a float method called on implicit Self, used where a float is wanted }
@@ -357,6 +360,18 @@ begin
     begin H := TH.Create(); M := @H.Mk; M() end.
     ''', TargetArm64);
   AssertTrue('the call sets x8 to a result buffer', Pos(#9'sub x8, x29, #', A) >= 0);
+end;
+
+procedure TRecordReturnTests.TestCodegen_ExternalRecordReturn_Lowers;
+begin
+  AssertEquals('external record return lowers', '',
+    AsmMissing('''
+      program P;
+      type TDiv = record Quot, Rem: Integer; end;
+      function c_div(N, D: Integer): TDiv; external name 'div';
+      var A: TDiv;
+      begin A := c_div(17, 5); WriteLn(A.Quot) end.
+      ''', 'call', 'bl _div'));
 end;
 
 procedure TRecordReturnTests.TestCodegen_DiscardedStringOnNamedReceiver_Released;

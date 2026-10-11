@@ -57,6 +57,14 @@ type
       record's ADDRESS: BUG-20261007-x86-extern-record-byval.)  The second
       call passes a record-returning call's result straight through. }
     procedure TestRun_ExternalRecordParam_ByValue;
+
+    { Record RETURNED by a C routine: libc's div and ldiv return structs in
+      the integer registers (rax / x0 for 8 bytes, rax:rdx / x0:x1 for 16),
+      assigned, read, passed on and discarded. }
+    procedure TestRun_ExternalRecordReturn_IntegerShapes;
+    { Apple's __sincos_stret returns two Doubles (arm64: a homogeneous float
+      aggregate in d0:d1), __sincosf_stret two Singles (s0:s1). }
+    procedure TestRun_ExternalRecordReturn_FloatPair_Arm64;
   end;
 
 implementation
@@ -245,6 +253,58 @@ const Src = '''
     ''';
 begin
   AssertRunsOnAll(Src, '10.2.3.4' + Chr(10) + '192.168.1.254' + Chr(10), 0);
+end;
+
+procedure TE2EExternalTests.TestRun_ExternalRecordReturn_IntegerShapes;
+const
+  Src = '''
+    program P;
+    type
+      TDiv = record Quot, Rem: Integer; end;
+      TLDiv = record Quot, Rem: Int64; end;
+    function c_div(N, D: Integer): TDiv; external name 'div';
+    function c_ldiv(N, D: Int64): TLDiv; external name 'ldiv';
+    procedure Show(const D: TDiv); begin WriteLn('show ', D.Quot, ' ', D.Rem) end;
+    var A: TDiv; B: TLDiv;
+    begin
+      A := c_div(17, 5); WriteLn(A.Quot, ' ', A.Rem);
+      B := c_ldiv(100, 7); WriteLn(B.Quot, ' ', B.Rem);
+      WriteLn(c_div(9, 2).Rem, ' ', c_ldiv(50, 8).Quot);
+      Show(c_div(20, 6));
+      c_div(1, 1);
+      c_ldiv(1, 1)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '3 2' + #10 + '14 2' + #10 + '1 6' + #10 + 'show 3 2' + #10, 0);
+end;
+
+procedure TE2EExternalTests.TestRun_ExternalRecordReturn_FloatPair_Arm64;
+{$IFDEF CPUARM64}
+const
+  Src = '''
+    program P;
+    type
+      TSinCos = record S, C: Double; end;
+      TSinCosF = record S, C: Single; end;
+    function c_sincos(X: Double): TSinCos; external name '__sincos_stret';
+    function c_sincosf(X: Single): TSinCosF; external name '__sincosf_stret';
+    var D: TSinCos; F: TSinCosF;
+    begin
+      D := c_sincos(0.0); WriteLn(D.S:0:2, ' ', D.C:0:2);
+      F := c_sincosf(0.0); WriteLn(F.S:0:2, ' ', F.C:0:2);
+      WriteLn(c_sincos(0.0).C:0:2)
+    end.
+    ''';
+{$ENDIF}
+begin
+{$IFDEF CPUARM64}
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '0.00 1.00' + #10 + '0.00 1.00' + #10 + '1.00' + #10, 0);
+{$ELSE}
+  Ignore('__sincos_stret is an Apple arm64 symbol');
+{$ENDIF}
 end;
 
 initialization

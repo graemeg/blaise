@@ -464,7 +464,6 @@ type
       out ATransBase: Integer; out ARecBase: Integer): Integer;
     function  IsRecordCallArg(AArg: TASTExpr): Boolean;
     function  IsIntfRecordCall(AExpr: TASTExpr): Boolean;
-    function  IsExternalRecordCall(AExpr: TASTExpr): Boolean;
     procedure DecodeMemArg(const AEntry: string; out AOff, ASize: Integer);
     procedure EmitCall(ADecl: TMethodDecl; const AName: string;
       AArgs: TObjectList; const ASretDest: string = '';
@@ -8120,8 +8119,6 @@ begin
         released and the bytes move in, the call's +1 field refs transferring
         (no retain).  Callee-saved x19/x22 hold the two addresses across the
         release walk. }
-      if IsExternalRecordCall(AAsgn.Expr) then
-        NotYet('external record-returning call', AAsgn);
       Self.Emit(#9'stp x19, x22, [sp, #-16]!');
       EmitRecCallToRret(AAsgn.Expr);
       Self.Emit(#9'mov x19, x0');
@@ -10236,10 +10233,6 @@ begin
   { Slot := <record-returning call>, the slot a plain (non-var-param) local or
     global.  Shared by the assignment and by the statement form of
     `inherited F(..)`, which sets Result. }
-  if IsExternalRecordCall(AExpr) then
-    { a C-side small-struct return needs full AAPCS64 marshalling
-      validation on real hardware first — keep the hole honest }
-    NotYet('external record-returning call', ANode);
   Shape := RecReturnShape(ART);
   if not RecretManagedClean(ART) then
   begin
@@ -12999,18 +12992,6 @@ begin
             not TMethodCallExpr(AExpr).IsConstructorCall and
             ((TMethodCallExpr(AExpr).ObjectName <> '') or
              (TMethodCallExpr(AExpr).ObjExpr <> nil));
-end;
-
-function TArm64Backend.IsExternalRecordCall(AExpr: TASTExpr): Boolean;
-begin
-  { a C-side small-struct return needs full AAPCS64 marshalling validation
-    on real hardware first }
-  Result := ((AExpr is TFuncCallExpr) and
-             (TFuncCallExpr(AExpr).ResolvedDecl <> nil) and
-             TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).IsExternal) or
-            ((AExpr is TMethodCallExpr) and
-             (TMethodCallExpr(AExpr).ResolvedMethod <> nil) and
-             TMethodDecl(TMethodCallExpr(AExpr).ResolvedMethod).IsExternal);
 end;
 
 function TArm64Backend.ComputeStackArgArea(ADecl: TMethodDecl;
