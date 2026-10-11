@@ -39,6 +39,13 @@ type
       store (x86-64 retained it again and leaked one object per store), and
       passed to an interface parameter as obj + itab (x86-64 hoisted it as a
       single class slot, so the callee read the obj as the itab) }
+    { an owned dyn-array argument is released after the call; Length of
+      one is released once read; a discarded string result is released
+      (BUG-20261011-owned-dynarray-arg-leak -- the first two leaked on both
+      ISAs, the discard on x86-64) }
+    procedure TestOwnedDynArrayArg_ReleasedAfterCall;
+    procedure TestOwnedDynArrayLength_Released;
+    procedure TestDiscardedStringResult_Released;
     procedure TestOwnedClassToInterface_StoreConsumes;
     procedure TestOwnedClassToInterface_ArgPassesItab;
     procedure TestOwnedClassTest_ReleasedAfterCompare;
@@ -831,6 +838,50 @@ begin
         #9'pushq %rcx'#10#9'pushq %rax',
       #9'bl _MkT'#10#9'adrp x1, _itab_TThing_IThing@PAGE'#10 +
         #9'add x1, x1, _itab_TThing_IThing@PAGEOFF'#10#9'str x1, [sp, #-16]!'));
+end;
+
+const
+  SrcOwnedDynArray = '''
+    program P;
+    type
+      TIntArr = array of Integer;
+    function MakeArr: TIntArr; begin SetLength(Result, 2) end;
+    function MakeStr: string; begin Result := 'ab' end;
+    procedure UseConst(const A: TIntArr); begin end;
+    var N: Integer;
+    begin
+      UseConst(MakeArr());
+      N := Length(MakeArr());
+      MakeStr()
+    end.
+    ''';
+
+procedure TNativeArcTests.TestOwnedDynArrayArg_ReleasedAfterCall;
+begin
+  AssertEquals('UseConst(MakeArr()) releases the array after the call', '',
+    AsmMissing(SrcOwnedDynArray,
+      #9'callq _DynArrayRelease'#10#9'movq 0(%rsp), %rax'#10 +
+        #9'movq 8(%rsp), %rdx',
+      #9'bl __DynArrayRelease'#10#9'ldp d2, d3, [sp], #16'));
+end;
+
+procedure TNativeArcTests.TestOwnedDynArrayLength_Released;
+begin
+  AssertEquals('Length(MakeArr()) releases the array', '',
+    AsmMissing(SrcOwnedDynArray,
+      #9'callq _DynArrayLength'#10#9'movslq %eax, %rax'#10 +
+        #9'movq %rax, (%rsp)'#10#9'movq 8(%rsp), %rdi'#10 +
+        #9'callq _DynArrayRelease',
+      #9'bl __DynArrayLength'#10#9'ldr x1, [sp]'#10#9'str x0, [sp]'#10 +
+        #9'mov x0, x1'#10#9'bl __DynArrayRelease'));
+end;
+
+procedure TNativeArcTests.TestDiscardedStringResult_Released;
+begin
+  AssertEquals('MakeStr(); releases the discarded result', '',
+    AsmMissing(SrcOwnedDynArray,
+      #9'callq MakeStr'#10#9'movq %rax, %rdi'#10#9'callq _StringRelease',
+      #9'bl _MakeStr'#10#9'bl __StringRelease'));
 end;
 
 initialization

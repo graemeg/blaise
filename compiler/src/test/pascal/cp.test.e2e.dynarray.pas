@@ -94,6 +94,13 @@ type
       temp and never masked, so Inc of a Byte 255 read back 256 instead of 0
       (BUG-20260723-incdec-promoted-narrow-local). }
     procedure TestRun_IncDec_PromotedNarrowLocal;
+    { an owned dyn-array result consumed by a by-value, const or open-array
+      argument, by Length / High, or discarded, drops its +1: the array's
+      refcount is back to 1 afterwards (each leaked one reference -- the
+      whole array -- per evaluation; BUG-20261011-owned-dynarray-arg-leak).
+      The --debug tracker cannot see these: a fresh array is tracked only on
+      its 0 -> 1 retain. }
+    procedure TestRun_OwnedDynArrayTransients_Released;
   end;
 
 implementation
@@ -1030,6 +1037,42 @@ begin
     CompileAndRunWithRTLDebugOn(beNative, Src, RunOut, Code, True));
   AssertEquals('native exit 0 (output: ' + RunOut + ')', 0, Code);
   AssertTrue('native no leak report, got: ' + RunOut, Pos('leak', RunOut) < 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_OwnedDynArrayTransients_Released;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TIntArr = array of Integer;
+      PInt32 = ^Integer;
+    var
+      G: TIntArr;
+    function GetG: TIntArr;
+    begin
+      Result := G;
+    end;
+    function RC: Integer;
+    begin
+      Result := PInt32(Pointer(@G[0]) - 8)^;
+    end;
+    procedure UseArr(A: TIntArr); begin end;
+    procedure UseConst(const A: TIntArr); begin end;
+    procedure UseOpen(const A: array of Integer); begin end;
+    var
+      N: Integer;
+    begin
+      SetLength(G, 3);
+      WriteLn(RC());
+      UseArr(GetG());
+      UseConst(GetG());
+      UseOpen(GetG());
+      GetG();
+      N := Length(GetG()) + High(GetG());
+      WriteLn(N, ' ', RC());
+    end.
+    ''', '1' + LE + '5 1' + LE, 0);
 end;
 
 initialization

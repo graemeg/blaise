@@ -583,6 +583,10 @@ type
       buffer, Result living inline in the frame and copied out at exit.  C
       cannot pass or return an array by value, so for static arrays this is
       a Blaise-internal convention. }
+    { x0 := Length(AArg) for a dyn-array expression; an owned transient
+      (Length(MakeArr())) is released once its length is read -- it leaked
+      the whole array on every evaluation }
+    procedure EmitDynArrayLengthOf(AArg: TASTExpr);
     function  IsInlineBytesAgg(AType: TTypeDesc): Boolean;
     { x0 := the address of an IsInlineBytesAgg value: a static array's
       storage (variable, field, element, call-result buffer), or a jumbo
@@ -4641,8 +4645,7 @@ begin
      SameText(TFuncCallExpr(AExpr).Name, 'High') then
   begin
     { High(D) = Length(D) - 1 }
-    Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-    EmitCallSym('_DynArrayLength');
+    EmitDynArrayLengthOf(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
     Self.Emit(#9'sub x0, x0, #1');
     Exit;
   end;
@@ -4653,8 +4656,7 @@ begin
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind =
        tyDynArray) then
   begin
-    Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-    EmitCallSym('_DynArrayLength');
+    EmitDynArrayLengthOf(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
@@ -11510,6 +11512,25 @@ begin
   end;
 end;
 
+procedure TArm64Backend.EmitDynArrayLengthOf(AArg: TASTExpr);
+var
+  Owned: Boolean;
+begin
+  Owned := ArcExprOwnsRef(AArg);
+  Self.EmitExprToX0(AArg);
+  if Owned then
+    EmitPushX0();                    { the array, released below }
+  EmitCallSym('_DynArrayLength');
+  if Owned then
+  begin
+    Self.Emit(#9'ldr x1, [sp]');
+    Self.Emit(#9'str x0, [sp]');     { the length }
+    Self.Emit(#9'mov x0, x1');
+    EmitCallSym('_DynArrayRelease');
+    EmitPopTo('x0');
+  end;
+end;
+
 function TArm64Backend.IsInlineBytesAgg(AType: TTypeDesc): Boolean;
 begin
   Result := IsJumboSetType(AType) or
@@ -13070,6 +13091,11 @@ begin
         Lit := Lit +
           AlignTo(TArrayLiteralExpr(Arg).Elements.Count * ESz, 8);
       end;
+      { an owned dyn array coerced to the open array parks for its release
+        (shape 'D'), as in EmitCall }
+      if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyDynArray) and
+         ArcExprOwnsRef(Arg) then
+        Inc(Trans);
       { each half independently: register, else an 8-byte stack slot }
       for H := 0 to 1 do
         if NInt >= 8 then
@@ -13098,9 +13124,10 @@ begin
                 Self.ParamsHaveVarString(ADecl.Params)) then
         Inc(Trans);
     end;
-    { an owned CLASS transient (call-result argument) parks for one
-      post-call release — the callee only borrows it }
-    if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyClass) and
+    { an owned CLASS or DYN-ARRAY transient (call-result argument) parks for
+      one post-call release — the callee only borrows it }
+    if (Arg.ResolvedType <> nil) and
+       (Arg.ResolvedType.Kind in [tyClass, tyDynArray]) and
        ArcExprOwnsRef(Arg) then
       Inc(Trans);
     if (I < ADecl.Params.Count) and
@@ -13407,8 +13434,17 @@ begin
         else if (Arg.ResolvedType <> nil) and
                 (Arg.ResolvedType.Kind = tyDynArray) then
         begin
-          { dyn array coerced to open array: data ptr + (length - 1) }
+          { dyn array coerced to open array: data ptr + (length - 1).  An
+            owned transient (Sum(MakeArr())) parks for one post-call release
+            (shape 'D') -- the open array only borrows the data }
           Self.EmitExprToX0(Arg);
+          if ArcExprOwnsRef(Arg) then
+          begin
+            EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
+            TransShapes := TransShapes + 'D';
+            Inc(TransN);
+            FStrTransTop := TransTop + TransN;
+          end;
           EmitPushX0();
           PopRegs.Add(Self.NextIntArgDest(NInt, StackOff));
           Self.Emit(#9'ldr x0, [sp]');
@@ -13914,10 +13950,11 @@ begin
         { A dyn-array argument is an 8-byte ref-counted data pointer.  The callee
           owns its copy (a by-value dyn-array param retains in the prologue; a
           const param borrows), so the caller passes a BORROWED pointer — the
-          same single-register pass as a class/pointer arg.  (An owned-transient
+          same single-register pass as a class/pointer arg.  An owned-transient
           dyn-array arg — a function returning a dyn-array passed straight to a
-          call — would need post-call disposal like the string path; not yet
-          exercised, so kept simple.)  A fat proc (method-ptr / closure) is
+          call — is parked for one post-call release (shape 'D'), as an owned
+          class is (shape 'C'); without it every such call leaked the whole
+          array (BUG-20261011-owned-dynarray-arg-leak).  A fat proc (method-ptr / closure) is
           handled by the IsMethodPtrType arm above; only a PLAIN proc pointer
           reaches here. }
         IsVariadicArg := ADecl.IsVarArgs and (I >= ADecl.Params.Count);
@@ -13930,6 +13967,14 @@ begin
             for one post-call release (shape 'C') }
           EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
           TransShapes := TransShapes + 'C';
+          Inc(TransN);
+          FStrTransTop := TransTop + TransN;
+        end
+        else if (Arg.ResolvedType <> nil) and
+                (Arg.ResolvedType.Kind = tyDynArray) and ArcExprOwnsRef(Arg) then
+        begin
+          EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
+          TransShapes := TransShapes + 'D';
           Inc(TransN);
           FStrTransTop := TransTop + TransN;
         end;
@@ -14076,6 +14121,12 @@ begin
       begin
         { owned class transient: one release drops the borrowed +1 }
         EmitCallSym('_ClassRelease');
+        Continue;
+      end;
+      if Copy(TransShapes, I, 1) = 'D' then
+      begin
+        { owned dyn-array transient: likewise }
+        EmitCallSym('_DynArrayRelease');
         Continue;
       end;
       { shapes '0' and 'P' both had their _StringAddRef emitted BEFORE the

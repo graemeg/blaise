@@ -32,6 +32,9 @@ type
       default / bare, and an owned-transient RECEIVER (P3-1,
       BUG-20261011-intf-prop-setter): each +1 is released after the call }
     procedure TestDebug_OwnedTransientSetterValues_NoLeak;
+    { a string-returning function called as a statement releases the result
+      it discards (x86-64 released only a class result) }
+    procedure TestDebug_DiscardedStringResult_NoLeak;
     { an owned class call result narrowed to an interface -- into a local, a
       field, an implicit-Self field, a function Result and an interface
       argument -- is consumed, not retained a second time (x86-64 leaked one
@@ -3293,6 +3296,29 @@ begin
       WriteLn('done')
     end.
     ''', '1345' + #10 + 'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_DiscardedStringResult_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program P;
+    uses SysUtils;
+    function MakeStr(N: Integer): string;
+    begin
+      Result := 'x' + IntToStr(N)
+    end;
+    procedure Run;
+    var I: Integer;
+    begin
+      for I := 1 to 3 do
+        MakeStr(I)
+    end;
+    begin
+      Run();
+      WriteLn('done')
+    end.
+    ''', 'done');
 end;
 
 initialization

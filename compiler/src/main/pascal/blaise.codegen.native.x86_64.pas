@@ -44,6 +44,8 @@ const
                        saved (itab then obj, obj on top); obj released after }
   akClassConsume = 6; { owned (+1) class transient arg (a call result): saved
                         value, passed as a borrow; released after }
+  akDynConsume = 7;   { owned (+1) dyn-array transient arg: as akClassConsume,
+                        released with _DynArrayRelease }
 
   { Number of reserved statement-scoped deferred-release frame slots (BUG-003
     native half).  A single statement rarely defers more than one owned-transient
@@ -995,6 +997,9 @@ type
     function  DeferNativeClassRelease: Boolean;
     function  DeferNativeRelease(const AReleaseSym: string): Boolean;
     procedure DeferOwnedDynArrayBase(ABase: TASTExpr);
+    { %rax := Length(AArg) for a dyn-array expression; an owned transient
+      (Length(MakeArr())) is released once its length is read. }
+    procedure EmitDynArrayLengthOf(AArg: TASTExpr);
     procedure FlushNativePendingReleases(AMark: Integer);
     { Evaluate a boolean condition and branch: if true jump ATrueLabel, else
       fall through to AFalseLabel (a jmp is emitted to it). }
@@ -7117,6 +7122,30 @@ begin
   Result := Self.DeferNativeRelease('_ClassRelease');
 end;
 
+procedure TX86_64Backend.EmitDynArrayLengthOf(AArg: TASTExpr);
+var
+  Owned: Boolean;
+begin
+  Owned := NativeExprOwnsRef(AArg);
+  Self.EmitExprToEax(AArg);
+  if Owned then
+  begin
+    Self.Emit(#9'pushq %rax');           { the array, released below }
+    Self.Emit(#9'pushq %rax');           { (keeps %rsp 16-aligned) }
+  end;
+  Self.Emit(#9'movq %rax, %rdi');
+  Self.Emit(#9'callq _DynArrayLength');
+  Self.Emit(#9'movslq %eax, %rax');
+  if Owned then
+  begin
+    Self.Emit(#9'movq %rax, (%rsp)');    { the length }
+    Self.Emit(#9'movq 8(%rsp), %rdi');
+    Self.Emit(#9'callq _DynArrayRelease');
+    Self.Emit(#9'popq %rax');
+    Self.Emit(#9'addq $8, %rsp');
+  end;
+end;
+
 procedure TX86_64Backend.DeferOwnedDynArrayBase(ABase: TASTExpr);
 begin
   { The dyn array in %rax is about to be subscripted in place.  When it is an
@@ -8449,17 +8478,14 @@ begin
         tyDynArray:
         begin
           { High(A) = Length(A) - 1; delegate to RTL. }
-          Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
-          Self.Emit(#9'movq %rax, %rdi');
-          Self.Emit(#9'callq _DynArrayLength');
-          Self.Emit(#9'movslq %eax, %rax');
+          Self.EmitDynArrayLengthOf(TASTExpr(FC.Args.Items[0]));
           Self.Emit(#9'decq %rax');
         end;
         tyString:
         begin
-          Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
-          Self.Emit(#9'movq %rax, %rdi');
-          Self.Emit(#9'callq _StringLength');
+          { (through the builtin-string path, which disposes a transient
+            argument, as Length does) }
+          Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StringLength');
           Self.Emit(#9'movslq %eax, %rax');
           Self.Emit(#9'decq %rax');
         end;
@@ -8546,12 +8572,7 @@ begin
           Self.Emit(#9'incq %rax');
         end;
         tyDynArray:
-        begin
-          Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
-          Self.Emit(#9'movq %rax, %rdi');
-          Self.Emit(#9'callq _DynArrayLength');
-          Self.Emit(#9'movslq %eax, %rax');
-        end;
+          Self.EmitDynArrayLengthOf(TASTExpr(FC.Args.Items[0]));
       else
         { String: delegate to RTL. }
         Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StringLength');
@@ -12313,6 +12334,9 @@ begin
     begin
       { Dynamic array coerced to open-array: push data ptr + (length - 1). }
       Self.EmitExprToEax(AArg);          { data ptr -> %rax }
+      { an owned transient (Use(MakeArr())): the open array borrows its
+        data, so release it at the statement boundary }
+      Self.DeferOwnedDynArrayBase(AArg);
       Self.Emit(#9'pushq %rax');         { push ptr }
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq _DynArrayLength');
@@ -12768,6 +12792,9 @@ begin
       %rax; the call itself only touches memory below %rsp, never the
       positive-offset slot region. }
     Self.EmitExprToEax(AArg);
+    { an owned transient (Use(MakeArr())): the open array borrows its
+      data, so release it at the statement boundary }
+    Self.DeferOwnedDynArrayBase(AArg);
     Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [ADataOff]));
     Self.Emit(#9'movq %rax, %rdi');
     Self.Emit(#9'callq _DynArrayLength');
@@ -17178,21 +17205,15 @@ begin
     end;
     Self.EmitCall(FuncSymbolFromDecl(TMethodDecl(PC.ResolvedDecl)),
       TMethodDecl(PC.ResolvedDecl), PC.Args);
-    { A function called in statement position discards its result.  When the
-      result is a managed CLASS the callee transferred a +1 reference (it
-      AddRef'd on `Result := x` and did not release Result at scope exit); the
-      discard would leak it — the same transient-release rule the assignment/arg
-      paths apply, here for the discarded call.  The return is in %rax; release
-      it once.  Only tyClass needs this (String/dynarray discards balance via
-      the callee's scope-exit convention; non-managed returns own nothing).  A
-      bare TProcCall is never a constructor, so every tyClass return is owned. }
+    { A function called in statement position discards its result.  A managed
+      result -- class, string, dyn array or closure -- is a +1 the callee
+      transferred (it retained on `Result := x` and did not release Result at
+      scope exit), so the discard releases it once.  Only a class was
+      released: a discarded string or dyn-array result leaked on every call
+      (BUG-20261011-owned-dynarray-arg-leak; arm64 released all of them).  A
+      bare TProcCall is never a constructor, so every such return is owned. }
     MD := TMethodDecl(PC.ResolvedDecl);
-    if (MD.ResolvedReturnType <> nil) and
-       (MD.ResolvedReturnType.Kind = tyClass) then
-    begin
-      Self.Emit(#9'movq %rax, %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-    end;
+    Self.EmitDiscardedRegResult(MD.ResolvedReturnType);
     Exit;
   end;
 
@@ -20487,6 +20508,23 @@ begin
       AKinds.Add(akClassConsume);
       Continue;
     end;
+    { ... and an owned dyn-array transient (Use(MakeArr())): the by-value
+      parameter retains its own copy, so the call's +1 is the caller's to
+      drop -- it leaked the whole array on every call
+      (BUG-20261011-owned-dynarray-arg-leak). }
+    if (not IsVarPos) and (Arg.ResolvedType <> nil) and
+       (Arg.ResolvedType.Kind = tyDynArray) and ArcExprOwnsRef(Arg) and
+       not (((Par <> nil) and Par.IsOpenArray) or
+            ((PP <> nil) and (PP.TypeDesc <> nil) and
+             (PP.TypeDesc.Kind = tyOpenArray))) then
+    begin
+      Self.EmitExprToEax(Arg);
+      Self.Emit(#9'pushq %rax');
+      Result := Result + 8;
+      ADepths.Add(Result);
+      AKinds.Add(akDynConsume);
+      Continue;
+    end;
 
     { Const-string argument needing caller protection. }
     ConstStr := False;
@@ -20588,6 +20626,11 @@ begin
           an owned class transient argument. }
         Self.Emit(Format(#9'movq %d(%%rsp), %%rdi', [Off]));
         Self.Emit(#9'callq _ClassRelease');
+      end
+      else if K = akDynConsume then
+      begin
+        Self.Emit(Format(#9'movq %d(%%rsp), %%rdi', [Off]));
+        Self.Emit(#9'callq _DynArrayRelease');
       end
       else if TASTExpr(AArgs.Items[I]).ResolvedType.Kind = tyRecord then
       begin
@@ -20945,6 +20988,9 @@ begin
           { Dynamic array coerced to open-array: push data ptr +
             (runtime length - 1) as the high index. }
           Self.EmitExprToEax(Arg);          { data ptr -> %rax }
+          { an owned transient (Use(MakeArr())): the open array borrows its
+            data, so release it at the statement boundary }
+          Self.DeferOwnedDynArrayBase(Arg);
           Self.Emit(#9'pushq %rax');         { push ptr }
           Self.Emit(#9'movq %rax, %rdi');
           Self.Emit(#9'callq _DynArrayLength');
