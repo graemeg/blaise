@@ -146,11 +146,18 @@ begin
       until (Chunk = '') and not P.Running;
       P.WaitOnExit();
       Result := (P.ExitCode = 0) and FileExists(FBin);
+      if not Result then
+        ABuildLog := ABuildLog + LE + '[compiler exit ' + IntToStr(P.ExitCode) +
+          ', binary present: ' + BoolToStr(FileExists(FBin), True) + ']';
     finally
       P.Free();
     end;
   except
-    Result := False;
+    on E: Exception do
+    begin
+      ABuildLog := ABuildLog + LE + '[exception: ' + E.Message + ']';
+      Result := False;
+    end;
   end;
 end;
 
@@ -164,6 +171,7 @@ procedure TeHttpsClientE2ETests.TestHttpsLoopback_DecryptedBodyAndVerify;
 var
   P: TProcess;
   BuildLog, Output, Chunk: string;
+  Built: Boolean;
 begin
   if not ToolPresent('cc', '--version') then begin Ignore('cc unavailable'); Exit; end;
   if not ToolPresent('openssl', 'version') then begin Ignore('openssl unavailable'); Exit; end;
@@ -171,8 +179,11 @@ begin
   begin Ignore('compiler binary unavailable'); Exit; end;
   if not GenerateCert() then begin Ignore('cert generation failed'); Exit; end;
 
+  { Build first, then assert: the message argument is evaluated before the
+    call it would wrap, so passing the build inline reported an empty log. }
+  Built := Self.BuildHttpsProgram(BuildLog);
   AssertTrue('native https program built (--linker external): ' + BuildLog,
-    Self.BuildHttpsProgram(BuildLog));
+    Built);
 
   { Run the https loopback binary with the cert/key and capture stdout. }
   Output := '';
