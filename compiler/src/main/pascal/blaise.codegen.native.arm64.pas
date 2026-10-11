@@ -6949,6 +6949,23 @@ begin
       Self.Emit(#9'fcvt d0, s0');
     Exit;
   end;
+  if (AExpr is TFuncCallExpr) and
+     TFuncCallExpr(AExpr).IsImplicitSelfMethod and
+     (TFuncCallExpr(AExpr).ResolvedDecl <> nil) then
+  begin
+    { a float method called on Self without a receiver (Half(X) inside a
+      method): the integer-context twin loads Self and dispatches through
+      EmitMethodCallCommon, which picks the virtual slot; the Double / Single
+      result is already in d0 / s0 }
+    EmitLoadSlot('x0', 'Self');
+    EmitMethodCallCommon(
+      TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl),
+      TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args);
+    if (AExpr.ResolvedType <> nil) and
+       (AExpr.ResolvedType.Kind = tySingle) then
+      Self.Emit(#9'fcvt d0, s0');   { Single returns in s0 — widen }
+    Exit;
+  end;
   if AExpr is TFuncCallExpr then
   begin
     if TFuncCallExpr(AExpr).IsImplicitSelfMethod or

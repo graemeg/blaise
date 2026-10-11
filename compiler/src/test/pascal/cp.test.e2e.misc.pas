@@ -49,6 +49,9 @@ type
     procedure TestRun_BooleanOps_ShortCircuitAndNot;
     procedure TestRun_WriteLn_UInt64_HighBit_Unsigned;
     procedure TestRun_FloatArg_ConvertsToParamType;
+    { a float method called on implicit Self where a float (or its truncation)
+      is wanted: plain, virtual-override-through-inherited, and Single }
+    procedure TestRun_ImplicitSelfFloatCall_AllForms;
     { Boolean, WriteLn, break/exit }
     procedure TestRun_BooleanOps_AllExpressions;
     procedure TestRun_WriteLn_BoolVar_PrintsTrueOrFalse;
@@ -2567,6 +2570,45 @@ begin
       WriteLn(Frac)
     end.
     ''', '1.11022302462516e-16' + LE + '0.00390625' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_ImplicitSelfFloatCall_AllForms;
+const
+  Src = '''
+    program P;
+    type
+      TBase = class
+        function Half(X: Double): Double; virtual;
+        function Third(X: Single): Single;
+        procedure Go;
+      end;
+      TDer = class(TBase)
+        function Half(X: Double): Double; override;
+        procedure Go2;
+      end;
+    function TBase.Half(X: Double): Double; begin Result := X / 2.0 end;
+    function TBase.Third(X: Single): Single; begin Result := X / 3.0 end;
+    procedure TBase.Go;
+    var I: Integer; D: Double;
+    begin
+      I := Trunc(Half(9.0));
+      D := Half(5.0) + 1.0;
+      WriteLn(I, ' ', D:0:1, ' ', Round(Third(9.0)))
+    end;
+    function TDer.Half(X: Double): Double; begin Result := inherited Half(X) + 1.0 end;
+    procedure TDer.Go2;
+    begin
+      WriteLn(Trunc(Half(8.0)), ' ', Half(2.0):0:1)
+    end;
+    var B: TBase; D: TDer;
+    begin
+      B := TBase.Create(); B.Go();
+      D := TDer.Create(); D.Go(); D.Go2()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '4 3.5 3' + #10 + '5 4.5 3' + #10 + '5 2.0' + #10, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_FloatArg_ConvertsToParamType;

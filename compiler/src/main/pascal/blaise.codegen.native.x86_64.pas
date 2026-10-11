@@ -7699,7 +7699,10 @@ begin
         spills the overflow and returns the bytes to reclaim post-call. }
       CleanBytes := Self.EmitSretRegArgs(Self.CountArgSlots(MD.Params), 1);
       Self.Emit(#9'movq %r10, %rdi');
-      Self.Emit(#9'callq ' + FuncSymbolOf(FC));
+      { a virtual method dispatches through the vtable (Self may be a
+        more-derived instance), exactly as the integer-context call does; a
+        static callq bound to the declaring class and an override never ran }
+      Self.EmitSelfDispatch(MD, FuncSymbolOf(FC));
       if CleanBytes > 0 then
         Self.Emit(Format(#9'addq $%d, %%rsp', [CleanBytes]));
       Self.EndCallArgs();

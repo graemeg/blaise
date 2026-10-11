@@ -48,6 +48,11 @@ type
       (FS.MakeRect(5); inside a method) must dispatch through the field, not
       through a global FS_obj/FS_itab pair that does not exist (x86-64). }
     procedure TestDiscardedIntfRecordCall_ImplicitSelfField_UsesTheField;
+    { a float method called on implicit Self, used where a float is wanted }
+    procedure TestCodegen_ImplicitSelfFloatCall_InFloatContext;
+    { ... and a VIRTUAL one dispatches through the vtable: x86-64 called the
+      declaring class's body, so an override never ran }
+    procedure TestCodegen_ImplicitSelfFloatCall_Virtual_DispatchesThroughVtable;
   end;
 
 implementation
@@ -274,6 +279,42 @@ begin
       #9'movq 32(%rsp), %rax'#10#9'movq %rax, 8(%rsp)'#10 +
         #9'movq 40(%rsp), %rax'#10#9'movq %rax, 16(%rsp)',
       #9'bl _SR'#10));
+end;
+
+procedure TRecordReturnTests.TestCodegen_ImplicitSelfFloatCall_InFloatContext;
+begin
+  { Trunc(Half(9.0)) inside a method: the implicit-Self call is evaluated as a
+    float operand.  arm64 reported 'this call form in float context'. }
+  AssertEquals('implicit-Self float call lowers', '',
+    AsmMissing('''
+      program P;
+      type
+        TC = class
+          function Half(X: Double): Double;
+          procedure Go;
+        end;
+      function TC.Half(X: Double): Double; begin Result := X / 2.0 end;
+      procedure TC.Go; var I: Integer; begin I := Trunc(Half(9.0)); WriteLn(I) end;
+      var C: TC;
+      begin C := TC.Create(); C.Go() end.
+      ''', 'call', 'fcvtzs'));
+end;
+
+procedure TRecordReturnTests.TestCodegen_ImplicitSelfFloatCall_Virtual_DispatchesThroughVtable;
+begin
+  AssertEquals('virtual implicit-Self float call goes through the vtable', '',
+    AsmMissing('''
+      program P;
+      type
+        TBase = class
+          function Half(X: Double): Double; virtual;
+          procedure Go;
+        end;
+      function TBase.Half(X: Double): Double; begin Result := X / 2.0 end;
+      procedure TBase.Go; var D: Double; begin D := Half(5.0) + 1.0; WriteLn(D:0:1) end;
+      var B: TBase;
+      begin B := TBase.Create(); B.Go() end.
+      ''', 'callq *', 'blr x'));
 end;
 
 initialization
