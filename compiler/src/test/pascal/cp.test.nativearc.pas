@@ -40,6 +40,9 @@ type
     { A call with more than eight owned transient arguments: arm64 parked
       them in a fixed pool of eight frame slots and refused the ninth. }
     procedure TestCall_TenOwnedTransientArgs_Lowered;
+    { an owned class transient argument (a call result) is borrowed by the
+      callee, so the caller releases it after the call: x86-64 leaked it }
+    procedure TestCall_OwnedClassTransientArg_ReleasedAfterCall;
     procedure TestX86_NestedJumboSetCallArg_Hoisted;
     procedure TestX86_ForIn_InterfaceCurrent_UsesSret;
     procedure TestX86_ForIn_InterfaceArrayElem_Retained;
@@ -474,6 +477,26 @@ begin
     AsmMissing(Src, #9'callq Ten'#10, #9'bl _Ten'#10));
   AssertEquals('ten owned class transient args', '',
     AsmMissing(Src, #9'callq TenO'#10, #9'bl _TenO'#10));
+end;
+
+procedure TNativeArcTests.TestCall_OwnedClassTransientArg_ReleasedAfterCall;
+const
+  Src = '''
+    program P;
+    function O(I: Integer): TObject; begin Result := TObject.Create() end;
+    procedure One(O0: TObject); begin WriteLn(O0 <> nil) end;
+    begin
+      One(O(1))
+    end.
+    ''';
+begin
+  AssertEquals('the transient is released after the call', '',
+    AsmMissing(Src,
+      #9'callq One'#10#9'addq $8, %rsp'#10#9'subq $40, %rsp',
+      #9'bl _One'#10#9'stp x0, x1, [sp, #-16]!'));
+  AssertEquals('by _ClassRelease', '',
+    AsmMissing(Src, #9'movq 40(%rsp), %rdi'#10#9'callq _ClassRelease',
+      #9'bl __ClassRelease'));
 end;
 
 procedure TNativeArcTests.TestRecordCallFieldRead_PinsThenReleasesTemp;

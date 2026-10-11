@@ -42,6 +42,8 @@ const
   akStrConsume = 4;  { const-string consume: saved +1 value; released after }
   akIntfConsume = 5; { interface-returning-call arg: owned (+1) fat pointer
                        saved (itab then obj, obj on top); obj released after }
+  akClassConsume = 6; { owned (+1) class transient arg (a call result): saved
+                        value, passed as a borrow; released after }
 
   { Number of reserved statement-scoped deferred-release frame slots (BUG-003
     native half).  A single statement rarely defers more than one owned-transient
@@ -19951,6 +19953,22 @@ begin
       Continue;
     end;
 
+    { Owned class transient argument (Use(MakeObj()), Use(L.Items[I]) through
+      a getter): the call hands back +1 and the parameter only borrows it (a
+      by-value class parameter retains on entry and releases on exit), so the
+      caller must release it after the call -- it leaked one object per call.
+      arm64 parks the same shape for a post-call release (shape 'C'). }
+    if (not IsVarPos) and (Arg.ResolvedType <> nil) and
+       (Arg.ResolvedType.Kind = tyClass) and ArcExprOwnsRef(Arg) then
+    begin
+      Self.EmitExprToEax(Arg);
+      Self.Emit(#9'pushq %rax');
+      Result := Result + 8;
+      ADepths.Add(Result);
+      AKinds.Add(akClassConsume);
+      Continue;
+    end;
+
     { Const-string argument needing caller protection. }
     ConstStr := False;
     if Par <> nil then
@@ -20045,9 +20063,10 @@ begin
         Self.Emit(Format(#9'movq %d(%%rsp), %%rdi', [Off]));
         Self.Emit(#9'callq _StringRelease');
       end
-      else if K = akIntfConsume then
+      else if (K = akIntfConsume) or (K = akClassConsume) then
       begin
-        { Release the owned (+1) obj of a hoisted interface-call argument. }
+        { Release the owned (+1) obj of a hoisted interface-call argument, or
+          an owned class transient argument. }
         Self.Emit(Format(#9'movq %d(%%rsp), %%rdi', [Off]));
         Self.Emit(#9'callq _ClassRelease');
       end

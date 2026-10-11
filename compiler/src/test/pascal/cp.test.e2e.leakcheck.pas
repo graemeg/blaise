@@ -64,6 +64,9 @@ type
       parks its own transients above the enclosing call's, and a call may
       take more than eight of them }
     procedure TestDebug_NestedOwnedStringTransientArgs_NoLeak;
+    { owned class transients (call results) as call arguments are released
+      after the call }
+    procedure TestDebug_OwnedClassTransientArgs_NoLeak;
     procedure TestDebug_TransientFieldInIfCond_NoLeak;
     procedure TestDebug_TransientFieldInWhileCond_NoLeak;
     { A deep chain MakeIt().A.B.N reads a scalar off a base that is itself two
@@ -482,6 +485,51 @@ begin
   AssertEquals('stdout',
     'a1 a11!' + LE + 'a2 a12!' + LE + 'a3 a13!' + LE +
     'a0a1a2a3a4a5a6a7a8!a9!!' + LE, Output);
+  AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
+end;
+
+const
+  SrcClassTransArgs = '''
+    program ClsTrans;
+    uses generics.collections;
+    type
+      TFoo = class
+        N: Integer;
+        function Me: TFoo;
+      end;
+    function TFoo.Me: TFoo; begin Result := Self end;
+    function O(I: Integer): TObject; begin Result := TObject.Create() end;
+    function MkF(I: Integer): TFoo; begin Result := TFoo.Create(); Result.N := I end;
+    procedure One(O0: TObject); begin Write(O0 <> nil, ' ') end;
+    procedure OneC(const O0: TObject); begin Write(O0 <> nil, ' ') end;
+    procedure ShowF(F: TFoo); begin Write(F.N, ' ') end;
+    procedure TenO(O0, O1, O2, O3, O4, O5, O6, O7, O8, O9: TObject);
+    begin Write(O9 <> nil, ' ') end;
+    var L: TList<TFoo>; I: Integer;
+    begin
+      One(O(1));
+      OneC(O(2));
+      TenO(O(0), O(1), O(2), O(3), O(4), O(5), O(6), O(7), O(8), O(9));
+      L := TList<TFoo>.Create();
+      for I := 1 to 3 do L.Add(MkF(I));
+      L.Add(TFoo.Create());
+      ShowF(L[1]);
+      for I := 0 to L.Count - 1 do ShowF(L[I].Me());
+      L.Free();
+      WriteLn()
+    end.
+    ''';
+
+procedure TE2ELeakCheckTests.TestDebug_OwnedClassTransientArgs_NoLeak;
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(SrcClassTransArgs, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertEquals('stdout', 'True True True 2 1 2 3 0 ' + LE, Output);
   AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
 end;
 
