@@ -30,6 +30,14 @@ type
   private
     function Callee(const ASrc, AName, ATarget: string): string;
   published
+    { a hoisted interface-call result passed to a record-returning call fills
+      BOTH slots of its argument (the slot path reloaded one) }
+    procedure TestCodegen_SretCall_IntfResultArg_BothHalves;
+    { record-returning calls on x86-64 use the shared slot path: an open
+      array argument (rejected), and a VIRTUAL method past the registers
+      (dispatched statically, its var argument passed by value) }
+    procedure TestCodegen_SretCall_OpenArrayArg_Lowered;
+    procedure TestCodegen_SretMethodOverflow_DispatchesVirtually;
     procedure TestReturnAbi_TwoInt64_IntegerRegisterPair;
     procedure TestReturnAbi_OneDouble_FloatRegister;
     procedure TestReturnAbi_TwoDoubles_FloatRegisterPair;
@@ -189,6 +197,83 @@ begin
   AssertTrue('x86-64: no global FS_obj receiver', Pos('FS_obj', AsmT) < 0);
   AssertTrue('x86-64: no global FS_itab receiver', Pos('FS_itab', AsmT) < 0);
   AssertTrue('x86-64: dispatched through the itab', Pos(#9'callq *%r11', AsmT) >= 0);
+end;
+
+const
+  SrcSretShapes = '''
+    program P;
+    type
+      TBig = record A, B, C: Int64; end;
+      TBase = class
+        function Calc(A, B, C, D, E: Integer; var Z: Integer): TBig; virtual;
+      end;
+    function TBase.Calc(A, B, C, D, E: Integer; var Z: Integer): TBig;
+    begin Result.A := A + E; Z := 1 end;
+    function OA(const V: array of Integer; K: Integer): TBig;
+    begin Result.A := High(V); Result.C := K end;
+    var O: TBase; R: TBig; Z: Integer;
+    begin
+      O := TBase.Create();
+      R := O.Calc(1, 2, 3, 4, 5, Z);
+      R := OA([1, 2, 3], 7);
+      WriteLn(R.A, Z)
+    end.
+    ''';
+
+procedure TRecordReturnTests.TestCodegen_SretCall_OpenArrayArg_Lowered;
+begin
+  AssertEquals('OA lowers', '',
+    AsmMissing(SrcSretShapes, #9'callq OA'#10, #9'bl _OA'#10));
+end;
+
+procedure TRecordReturnTests.TestCodegen_SretMethodOverflow_DispatchesVirtually;
+const
+  Src = '''
+    program P;
+    type
+      TBig = record A, B, C: Int64; end;
+      TBase = class
+        function Calc(A, B, C, D, E: Integer; var Z: Integer): TBig; virtual;
+      end;
+    function TBase.Calc(A, B, C, D, E: Integer; var Z: Integer): TBig;
+    begin Result.A := A + E; Z := 1 end;
+    var O: TBase; R: TBig; Z: Integer;
+    begin
+      O := TBase.Create();
+      R := O.Calc(1, 2, 3, 4, 5, Z);
+      WriteLn(R.A, Z)
+    end.
+    ''';
+begin
+  AssertEquals('Calc goes through the vtable', '',
+    AsmMissing(Src,
+      #9'movq (%rsi), %rax'#10#9'movq 24(%rax), %rax'#10#9'callq *%rax',
+      #9'blr '));
+end;
+
+procedure TRecordReturnTests.TestCodegen_SretCall_IntfResultArg_BothHalves;
+const
+  Src = '''
+    program P;
+    type
+      IS1 = interface function V: Integer; end;
+      TS = class(TObject, IS1) N: Integer; function V: Integer; end;
+      TBig = record A, B, C: Int64; end;
+    function TS.V: Integer; begin Result := N end;
+    function MkS(K: Integer): IS1; var T: TS; begin T := TS.Create(); T.N := K; Result := T end;
+    function SR(const I: IS1; K: Integer): TBig; begin Result.A := I.V(); Result.B := K end;
+    var R: TBig;
+    begin
+      R := SR(MkS(9), 8);
+      WriteLn(R.A)
+    end.
+    ''';
+begin
+  AssertEquals('obj and itab both copied into the slot block', '',
+    AsmMissing(Src,
+      #9'movq 32(%rsp), %rax'#10#9'movq %rax, 8(%rsp)'#10 +
+        #9'movq 40(%rsp), %rax'#10#9'movq %rax, 16(%rsp)',
+      #9'bl _SR'#10));
 end;
 
 initialization

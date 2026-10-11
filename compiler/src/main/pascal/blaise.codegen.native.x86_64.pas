@@ -762,8 +762,11 @@ type
     function ExternalRecordArgSlots(ADecl: TMethodDecl; AIdx: Integer;
       AArg: TASTExpr): Integer;
     procedure EmitPushRecordBytes(ASize: Integer);
+    { ASretOnStack: the caller pushed a record result's destination pointer
+      just before calling this; it is passed as the hidden argument after any
+      captured-variable pointers (EmitSretCall). }
     procedure EmitCall(const AFuncSym: string; ADecl: TMethodDecl;
-                       AArgs: TObjectList);
+                       AArgs: TObjectList; ASretOnStack: Boolean = False);
     { Emit a call to a record-returning function using the sret convention:
       ASretAddr is the AT&T operand for the destination buffer (already allocated
       by the caller), passed as the hidden first integer argument in %rdi.
@@ -1209,7 +1212,14 @@ type
       The store loop must already have written float slots as their 8-byte bit
       pattern (movsd %xmm0). }
     function EmitMethodOverflowLoad(AParams, AArgs: TObjectList;
-      AAllocSz: Integer): Integer;
+      AAllocSz: Integer; ALeadSlots: Integer): Integer;
+    { the receiver of a record-returning method call into %rax }
+    procedure EmitMethodSretRecvToRax(ACall: TMethodCallExpr;
+      MD: TMethodDecl; ARecvBufBytes: Integer);
+    { a record-returning method call through the flat slot block: sret
+      pointer, Self, then every argument shape, overflow on the stack }
+    procedure EmitMethodSretSlotCall(ACall: TMethodCallExpr; MD: TMethodDecl;
+      const ASym: string; ARecvBufBytes: Integer; AForceStatic: Boolean);
     { Store every logical argument into its 8-byte slot in the >6-slot call
       frame already allocated at (%rsp): slot I goes to (I+1)*8(%rsp) (slot 0 is
       reserved for Self).  Dispatches per arg kind — a hoisted akRecCall buffer
@@ -1221,7 +1231,7 @@ type
       call path. }
     procedure EmitArgsToSlots(AArgs, AParams: TObjectList;
       AAllocSz, AHoistTotal: Integer;
-      AHoistDepths, AHoistKinds: TList<Integer>);
+      AHoistDepths, AHoistKinds: TList<Integer>; ALeadSlots: Integer);
     { True when the parameter at AIndex is a by-value float-family param (the
       caller must store its slot as an xmm bit pattern, not via %rax). }
     function OverflowArgIsFloat(AParams: TObjectList; AIndex: Integer): Boolean;
@@ -11423,9 +11433,9 @@ begin
         OverflowSlots := TotalSlots - 6;
         AllocSz := ((TotalSlots * 8 + 15) and (-16));
         Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
-        Self.EmitArgsToSlots(ACall.Args, MD.Params, AllocSz, HTotal, HD, HK);
+        Self.EmitArgsToSlots(ACall.Args, MD.Params, AllocSz, HTotal, HD, HK, 1);
         Self.Emit(Format(#9'movq %%rbx, 0(%%rsp)', []));
-        CleanUp := Self.EmitMethodOverflowLoad(MD.Params, ACall.Args, AllocSz);
+        CleanUp := Self.EmitMethodOverflowLoad(MD.Params, ACall.Args, AllocSz, 1);
         if ACall.IsMetaclassDispatch and (MD.VTableSlot >= 0) then
         begin
           Self.Emit(#9'movq (%rdi), %rax');
@@ -11623,7 +11633,7 @@ begin
     HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
     Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
 
-    Self.EmitArgsToSlots(ACall.Args, MD.Params, AllocSz, HTotal, HD, HK);
+    Self.EmitArgsToSlots(ACall.Args, MD.Params, AllocSz, HTotal, HD, HK, 1);
 
     if ACall.ObjectName <> '' then
     begin
@@ -11658,7 +11668,7 @@ begin
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
     Self.Emit(Format(#9'movq %%rax, 0(%%rsp)', []));
 
-    CleanUp := Self.EmitMethodOverflowLoad(MD.Params, ACall.Args, AllocSz);
+    CleanUp := Self.EmitMethodOverflowLoad(MD.Params, ACall.Args, AllocSz, 1);
     if MD.VTableSlot >= 0 then
     begin
       Self.Emit(#9'movq (%rdi), %rax');
@@ -11694,13 +11704,13 @@ begin
   HK := TList<Integer>.Create();
   HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', AArgs, HD, HK);
   Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
-  Self.EmitArgsToSlots(AArgs, MD.Params, AllocSz, HTotal, HD, HK);
+  Self.EmitArgsToSlots(AArgs, MD.Params, AllocSz, HTotal, HD, HK, 1);
   { Self into slot 0. }
   Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
   Self.Emit(#9'movq %rax, 0(%rsp)');
   { Load slot 0 -> %rdi (Self) and the arg slots into %rsi.. / %xmm0.., spilling
     the >6th integer slot to the stack; returns bytes to reclaim after the call. }
-  CleanUp := Self.EmitMethodOverflowLoad(MD.Params, AArgs, AllocSz);
+  CleanUp := Self.EmitMethodOverflowLoad(MD.Params, AArgs, AllocSz, 1);
   { Self is now in %rdi — dispatch (vtable-aware) exactly like Self.Method(). }
   Self.EmitSelfDispatch(MD, ASym);
   Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, CleanUp, True);
@@ -12600,7 +12610,7 @@ end;
 
 procedure TX86_64Backend.EmitArgsToSlots(AArgs, AParams: TObjectList;
   AAllocSz, AHoistTotal: Integer;
-  AHoistDepths, AHoistKinds: TList<Integer>);
+  AHoistDepths, AHoistKinds: TList<Integer>; ALeadSlots: Integer);
 var
   I, Dest, Slot: Integer;
   Arg: TASTExpr;
@@ -12612,8 +12622,9 @@ begin
     one, shifting every later slot: the callee then read a garbage high and
     wrote its out params through code addresses.  The reader
     (EmitMethodOverflowLoad / BuildArgSlotClasses) always walked flat slots;
-    the writer must match it. }
-  Slot := 1;
+    the writer must match it.  ALeadSlots hidden leading slots precede the
+    arguments: Self, or the sret pointer and Self. }
+  Slot := ALeadSlots;
   for I := 0 to AArgs.Count - 1 do
   begin
     Arg := TASTExpr(AArgs.Items[I]);
@@ -12631,12 +12642,30 @@ begin
       Continue;
     end;
     if (Par.ResolvedType <> nil) and
-       (Par.ResolvedType.Kind = tyInterface) then
-      { two-slot (obj + itab) interface args are not wired into the >6-slot
-        store path yet; fail loudly rather than shift every later slot }
-      raise ENativeCodeGenError.Create(
-        'native backend: interface argument in a >6-slot call is not ' +
-        'supported yet');
+       (Par.ResolvedType.Kind = tyInterface) and not Par.IsVarParam then
+    begin
+      { two flat slots, obj then itab (BuildArgSlotClasses counts two).  A
+        hoisted interface-call result is saved as a 16-byte pair, obj on top;
+        any other source goes through the ordinary push (obj, then itab on
+        top) and is popped straight into its slots. }
+      if AHoistKinds.Get(I) = akIntfConsume then
+      begin
+        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
+          [AAllocSz + AHoistTotal - AHoistDepths.Get(I)]));
+        Self.Emit(Format(#9'movq %d(%%rsp), %%rcx',
+          [AAllocSz + AHoistTotal - AHoistDepths.Get(I) + 8]));
+      end
+      else
+      begin
+        Self.EmitMethodArgPush(Par, Arg);
+        Self.Emit(#9'popq %rcx');     { itab }
+        Self.Emit(#9'popq %rax');     { obj }
+      end;
+      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [Dest]));
+      Self.Emit(Format(#9'movq %%rcx, %d(%%rsp)', [Dest + 8]));
+      Slot := Slot + 2;
+      Continue;
+    end;
     if AHoistKinds.Get(I) >= akRecCall then
     begin
       Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
@@ -12665,7 +12694,7 @@ begin
 end;
 
 function TX86_64Backend.EmitMethodOverflowLoad(AParams, AArgs: TObjectList;
-  AAllocSz: Integer): Integer;
+  AAllocSz: Integer; ALeadSlots: Integer): Integer;
 var
   I, IntIdx, XmmIdx, SlotOff: Integer;
   IsFloatSlot: TList<Integer>;   { per flat slot (slot 0 = Self): 1 = xmm }
@@ -12676,8 +12705,10 @@ begin
   IsFloatSlot := TList<Integer>.Create();
   OverflowOffs := TList<Integer>.Create();
   try
-    { Slot 0 = Self/receiver — always integer.  The per-arg slots follow. }
-    IsFloatSlot.Add(0);
+    { The ALeadSlots hidden leading slots (Self, or sret + Self) are always
+      integer.  The per-arg slots follow. }
+    for I := 0 to ALeadSlots - 1 do
+      IsFloatSlot.Add(0);
     Self.BuildArgSlotClasses(AParams, AArgs, IsFloatSlot);
 
     { Load register-bound slots; record integer-overflow slot offsets.  Self is
@@ -12813,9 +12844,9 @@ begin
         OverflowSlots := TotalSlots - 6;
         AllocSz := ((TotalSlots * 8 + 15) and (-16));
         Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
-        Self.EmitArgsToSlots(ACall.Args, MD.Params, AllocSz, HTotal, HD, HK);
+        Self.EmitArgsToSlots(ACall.Args, MD.Params, AllocSz, HTotal, HD, HK, 1);
         Self.Emit(Format(#9'movq %%rbx, 0(%%rsp)', []));
-        CleanUp := Self.EmitMethodOverflowLoad(MD.Params, ACall.Args, AllocSz);
+        CleanUp := Self.EmitMethodOverflowLoad(MD.Params, ACall.Args, AllocSz, 1);
         if MD.VTableSlot >= 0 then
         begin
           Self.Emit(#9'movq (%rdi), %rax');
@@ -13204,7 +13235,7 @@ begin
     HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
     Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
 
-    Self.EmitArgsToSlots(ACall.Args, MD.Params, AllocSz, HTotal, HD, HK);
+    Self.EmitArgsToSlots(ACall.Args, MD.Params, AllocSz, HTotal, HD, HK, 1);
 
     if ACall.IsImplicitSelf and (ACall.ImplicitBaseInfo <> nil) then
     begin
@@ -13250,7 +13281,7 @@ begin
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
     Self.Emit(Format(#9'movq %%rax, 0(%%rsp)', []));
 
-    CleanUp := Self.EmitMethodOverflowLoad(MD.Params, ACall.Args, AllocSz);
+    CleanUp := Self.EmitMethodOverflowLoad(MD.Params, ACall.Args, AllocSz, 1);
   end;
 
   if MD.VTableSlot >= 0 then
@@ -13331,11 +13362,11 @@ begin
     HK := TList<Integer>.Create();
     HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', AArgs, HD, HK);
     Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
-    Self.EmitArgsToSlots(AArgs, MD.Params, AllocSz, HTotal, HD, HK);
+    Self.EmitArgsToSlots(AArgs, MD.Params, AllocSz, HTotal, HD, HK, 1);
     { Self into slot 0 (the implicit first integer arg). }
     Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
     Self.Emit(Format(#9'movq %%rax, 0(%%rsp)', []));
-    CleanUp := Self.EmitMethodOverflowLoad(MD.Params, AArgs, AllocSz);
+    CleanUp := Self.EmitMethodOverflowLoad(MD.Params, AArgs, AllocSz, 1);
     Self.Emit(#9'callq ' + Sym);
     Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, CleanUp, True);
     HD.Free();
@@ -16827,11 +16858,11 @@ begin
       PCHK := TList<Integer>.Create();
       PCHTotal := Self.EmitArgHoist(MD.Params, nil, True, '', PC.Args, PCHD, PCHK);
       Self.Emit(Format(#9'subq $%d, %%rsp', [PCAllocSz]));
-      Self.EmitArgsToSlots(PC.Args, MD.Params, PCAllocSz, PCHTotal, PCHD, PCHK);
+      Self.EmitArgsToSlots(PC.Args, MD.Params, PCAllocSz, PCHTotal, PCHD, PCHK, 1);
       { Self into slot 0 -> %rdi. }
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
       Self.Emit(#9'movq %rax, 0(%rsp)');
-      PCCleanUp := Self.EmitMethodOverflowLoad(MD.Params, PC.Args, PCAllocSz);
+      PCCleanUp := Self.EmitMethodOverflowLoad(MD.Params, PC.Args, PCAllocSz, 1);
       Self.EmitSelfDispatch(MD, FuncSymbolFromDecl(MD));
       Self.EmitHoistEpilogue(PC.Args, PCHD, PCHK, PCHTotal, PCCleanUp, True);
       PCHD.Free();
@@ -20440,7 +20471,7 @@ end;
       integer args push to stack then pop to int regs; float args evaluated
       directly into xmm regs.  All args must fit in registers (≤6 each). }
 procedure TX86_64Backend.EmitCall(const AFuncSym: string; ADecl: TMethodDecl;
-                                  AArgs: TObjectList);
+                                  AArgs: TObjectList; ASretOnStack: Boolean);
 var
   I:              Integer;
   Arg:            TASTExpr;
@@ -20497,6 +20528,8 @@ begin
   { Count implicit captured-var pointer args (prepended before normal args). }
   if (ADecl <> nil) and (ADecl.CapturedVars <> nil) then
     Inc(SlotCount, ADecl.CapturedVars.Count);
+  if ASretOnStack then
+    Inc(SlotCount);          { the hidden result-buffer pointer }
 
   OverflowBytes := 0;
 
@@ -20518,7 +20551,7 @@ begin
       'routine ''%s'' alongside floating-point or stack arguments',
       [ADecl.Name]));
 
-  if (not HasFloat) and (SlotCount <= 6) then
+  if (not HasFloat) and (SlotCount <= 6) and not ASretOnStack then
   begin
     { Pure integer call with ≤6 slots: push/pop strategy.
       Open-array arg A pushes: data ptr first, then high index.
@@ -20716,6 +20749,14 @@ begin
         Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
         Inc(SlotOff, 8);
       end;
+    { The result-buffer pointer the caller saved sits just above the hoist
+      region; it is the next hidden argument. }
+    if ASretOnStack then
+    begin
+      Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [AllocSz + OALTotal]));
+      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
+      Inc(SlotOff, 8);
+    end;
 
     { Evaluate each arg left-to-right into its slot. }
     for I := 0 to AArgs.Count - 1 do
@@ -20731,7 +20772,22 @@ begin
       if ParamType = nil then
         ParamType := Arg.ResolvedType;
 
-      if (not IsOA) and (OALK.Get(I) >= akRecCall) then
+      if (not IsOA) and (OALK.Get(I) = akIntfConsume) then
+      begin
+        { Hoisted interface-returning-call argument: the saved 16-byte fat
+          pointer (obj on top at its depth, itab just above) fills the
+          argument's TWO slots.  It used to take the one-value reload below,
+          so the itab half was never passed and every later slot shifted
+          by one. }
+        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
+          [AllocSz + OALTotal - OALD.Get(I)]));
+        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
+        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
+          [AllocSz + OALTotal - OALD.Get(I) + 8]));
+        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff + 8]));
+        Inc(SlotOff, 16);
+      end
+      else if (not IsOA) and (OALK.Get(I) >= akRecCall) then
       begin
         { Hoisted record-call or const-string argument — reload the saved
           value from above the slot block. }
@@ -20891,6 +20947,17 @@ begin
           OverflowOffs.Add(SlotOff);
         Inc(SlotOff, 8);
       end;
+    if ASretOnStack then
+    begin
+      if IntIdx < 6 then
+      begin
+        Self.Emit(Format(#9'movq %d(%%rsp), %s', [SlotOff, SysVArg64(IntIdx)]));
+        Inc(IntIdx);
+      end
+      else
+        OverflowOffs.Add(SlotOff);
+      Inc(SlotOff, 8);
+    end;
     for I := 0 to AArgs.Count - 1 do
     begin
       Arg := TASTExpr(AArgs.Items[I]);
@@ -21582,28 +21649,9 @@ procedure TX86_64Backend.EmitSretCall(const AFuncSym: string; ADecl: TMethodDecl
                                       AArgs: TObjectList; const ASretAddr: string;
                                       ASretIsIndirect: Boolean);
 var
-  I:        Integer;
-  Arg:      TASTExpr;
-  IsVar:    Boolean;
-  AllocSz:  Integer;
-  CleanUp:  Integer;
   RC:       TRecReturnClass;
   RetRec:   TRecordTypeDesc;
-  HD:       TList<Integer>;
-  HK:       TList<Integer>;
-  HTotal:   Integer;
-  HasFloat: Boolean;
-  ParamType: TTypeDesc;
-  IntIdx, XmmIdx, SlotOff: Integer;
-  ArgPushed: Integer;
-  NCap: Integer;
-  CapName: string;
 begin
-  { A nested function's captured-var pointers are hidden LEADING arguments,
-    ahead of the sret buffer (the order the callee's prologue spills them). }
-  NCap := 0;
-  if (ADecl <> nil) and (ADecl.CapturedVars <> nil) then
-    NCap := ADecl.CapturedVars.Count;
   { Check if the callee returns a small POD record (or method pointer) via
     registers.  RetRec is the real record or the canonical method-ptr record. }
   RC := rcSret;
@@ -21648,254 +21696,15 @@ begin
       [ADecl.ResolvedReturnType.RawSize()]));
     Self.Emit(#9'callq memset');
   end;
-  HD := TList<Integer>.Create();
-  HK := TList<Integer>.Create();
-  if ADecl <> nil then
-    HTotal := Self.EmitArgHoist(ADecl.Params, nil, True, '', AArgs, HD, HK)
-  else
-    HTotal := Self.EmitArgHoist(nil, nil, True, '', AArgs, HD, HK);
-  { Detect a float-typed by-value argument: the integer push/pop path below
-    cannot carry one (it would route the float through %rax and an integer arg
-    register).  When present, use the slot-based scheme that places each float
-    arg in an %xmm register per the SysV ABI (mirrors EmitCall's float path). }
-  HasFloat := False;
-  for I := 0 to AArgs.Count - 1 do
-  begin
-    ParamType := nil;
-    if (ADecl <> nil) and (I < ADecl.Params.Count) then
-      ParamType := TMethodParam(ADecl.Params.Items[I]).ResolvedType;
-    if ParamType = nil then
-      ParamType := TASTExpr(AArgs.Items[I]).ResolvedType;
-    IsVar := (ADecl <> nil) and (I < ADecl.Params.Count) and
-             TMethodParam(ADecl.Params.Items[I]).IsVarParam;
-    if IsFloatFamily(ParamType) and not IsVar then
-      HasFloat := True;
-  end;
-
-  if (NCap > 0) and
-     (HasFloat or (Self.SretUserSlots(ADecl, AArgs) + NCap > 5)) then
-    raise ENativeCodeGenError.Create(Format(
-      'x86-64: not yet lowered: a record-returning nested routine ''%s'' ' +
-      'that captures outer variables, called with floating-point or more ' +
-      'than %d register arguments', [ADecl.Name, 5 - NCap]));
-  if HasFloat then
-  begin
-    { Slot-based: sret = slot 0 (%rdi), explicit args = slots 1..Count.  Each
-      arg is evaluated into its 8-byte slot (float via movsd/movss, integer via
-      movq), then int slots load into %rsi.. and float slots into %xmm0.., each
-      stream counted independently.  Args beyond the 5 int / 8 xmm registers
-      would need stack spill — record-returning functions with that many float
-      args do not occur yet, so guard the integer overflow loudly via SysVArg64. }
-    AllocSz := (((AArgs.Count + 1) * 8 + 15) and (-16));
-    Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
-    { Reload the saved sret dest (pushed just below the hoist region). }
-    Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [AllocSz + HTotal]));
-    Self.Emit(#9'movq %rax, 0(%rsp)');
-    for I := 0 to AArgs.Count - 1 do
-    begin
-      Arg := TASTExpr(AArgs.Items[I]);
-      ParamType := nil;
-      if (ADecl <> nil) and (I < ADecl.Params.Count) then
-        ParamType := TMethodParam(ADecl.Params.Items[I]).ResolvedType;
-      if ParamType = nil then
-        ParamType := Arg.ResolvedType;
-      IsVar := (ADecl <> nil) and (I < ADecl.Params.Count) and
-               TMethodParam(ADecl.Params.Items[I]).IsVarParam;
-      if HK.Get(I) >= akRecCall then
-      begin
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-          [AllocSz + HTotal - HD.Get(I)]));
-        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [(I + 1) * 8]));
-      end
-      else if IsFloatFamily(ParamType) and not IsVar then
-      begin
-        Self.EmitExprToXmm0(Arg);
-        { Match the value width to the PARAM width before spilling: an
-          integer/Double arg into a Single param narrows (cvtsd2ss), a Single
-          arg into a Double param widens (cvtss2sd).  Without this the movss/
-          movsd below deposits the wrong-width bit-pattern (BUG-027 class). }
-        Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
-          (ParamType <> nil) and (ParamType.Kind = tySingle));
-        if (ParamType <> nil) and (ParamType.Kind = tySingle) then
-          Self.Emit(Format(#9'movss %%xmm0, %d(%%rsp)', [(I + 1) * 8]))
-        else
-          Self.Emit(Format(#9'movsd %%xmm0, %d(%%rsp)', [(I + 1) * 8]));
-      end
-      else
-      begin
-        if IsVar then
-          Self.EmitVarArgAddrToRax(Arg)
-        else
-          Self.EmitExprToEax(Arg);
-        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [(I + 1) * 8]));
-      end;
-    end;
-    { Load sret ptr into %rdi, then int args into %rsi.. and float args into
-      %xmm0.., each stream advancing its own register index. }
-    Self.Emit(#9'movq 0(%rsp), %rdi');
-    IntIdx := 1;   { %rdi consumed by sret }
-    XmmIdx := 0;
-    for I := 0 to AArgs.Count - 1 do
-    begin
-      ParamType := nil;
-      if (ADecl <> nil) and (I < ADecl.Params.Count) then
-        ParamType := TMethodParam(ADecl.Params.Items[I]).ResolvedType;
-      if ParamType = nil then
-        ParamType := TASTExpr(AArgs.Items[I]).ResolvedType;
-      IsVar := (ADecl <> nil) and (I < ADecl.Params.Count) and
-               TMethodParam(ADecl.Params.Items[I]).IsVarParam;
-      SlotOff := (I + 1) * 8;
-      if IsFloatFamily(ParamType) and not IsVar then
-      begin
-        if (ParamType <> nil) and (ParamType.Kind = tySingle) then
-          Self.Emit(Format(#9'movss %d(%%rsp), %s', [SlotOff, SysVXmmArgRegs[XmmIdx]]))
-        else
-          Self.Emit(Format(#9'movsd %d(%%rsp), %s', [SlotOff, SysVXmmArgRegs[XmmIdx]]));
-        Inc(XmmIdx);
-      end
-      else
-      begin
-        Self.Emit(Format(#9'movq %d(%%rsp), %s', [SlotOff, SysVArg64(IntIdx)]));
-        Inc(IntIdx);
-      end;
-    end;
-    { %al = number of vector registers used (SysV varargs/AL convention; the
-      callee ignores it for a fixed prototype but the ABI requires it set). }
-    Self.Emit(Format(#9'movb $%d, %%al', [XmmIdx]));
-    { Drop the (Count+1) register-bound slots so any overflow sits at the top;
-      with <=5 args there is no overflow, so this reclaims the whole region
-      except the alignment padding. }
-    Self.Emit(Format(#9'addq $%d, %%rsp', [(AArgs.Count + 1) * 8]));
-    Self.Emit(#9'callq ' + AFuncSym);
-    CleanUp := AllocSz - (AArgs.Count + 1) * 8;
-    Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, CleanUp, True);
-  end
-  else if Self.SretUserSlots(ADecl, AArgs) + NCap <= 5 then
-  begin
-    { Push each arg's register slot(s) — an interface arg is a fat pointer that
-      occupies TWO slots (obj then itab on top), so the push count is the SLOT
-      count, not the arg count.  ArgPushed tracks bytes pushed so far so the
-      hoisted-value reloads stay correct as %rsp moves. }
-    ArgPushed := 0;
-    for I := 0 to AArgs.Count - 1 do
-    begin
-      Arg := TASTExpr(AArgs.Items[I]);
-      IsVar := (ADecl <> nil) and (I < ADecl.Params.Count) and
-               TMethodParam(ADecl.Params.Items[I]).IsVarParam;
-      ParamType := nil;
-      if (ADecl <> nil) and (I < ADecl.Params.Count) then
-        ParamType := TMethodParam(ADecl.Params.Items[I]).ResolvedType;
-      if ParamType = nil then
-        ParamType := Arg.ResolvedType;
-      if (not IsVar) and (HK.Get(I) = akIntfConsume) then
-      begin
-        { Hoisted interface-returning-call arg: reload the saved 16-byte fat
-          pointer (obj, then itab) and push both slots (obj first, itab on top). }
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [HTotal - HD.Get(I) + ArgPushed]));
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rcx', [HTotal - HD.Get(I) + ArgPushed + 8]));
-        Self.Emit(#9'pushq %rax');
-        Self.Emit(#9'pushq %rcx');
-        ArgPushed := ArgPushed + 16;
-      end
-      else if HK.Get(I) >= akRecCall then
-      begin
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [HTotal - HD.Get(I) + ArgPushed]));
-        Self.Emit(#9'pushq %rax');
-        ArgPushed := ArgPushed + 8;
-      end
-      else if (not IsVar) and (ParamType <> nil) and (ParamType.Kind = tyInterface) then
-      begin
-        { Direct interface arg (variable / field): push obj then itab. }
-        Self.EmitMethodArgPush(TMethodParam(ADecl.Params.Items[I]), Arg);
-        ArgPushed := ArgPushed + 16;
-      end
-      else
-      begin
-        if IsVar then
-          Self.EmitVarArgAddrToRax(Arg)
-        else
-          Self.EmitExprToEax(Arg);
-        Self.Emit(#9'pushq %rax');
-        ArgPushed := ArgPushed + 8;
-      end;
-    end;
-    { Pop one register per pushed SLOT, after the captures and the sret ptr
-      (loaded below).  ArgPushed/8 = total slots; topmost slot -> highest reg. }
-    for I := (ArgPushed div 8) - 1 downto 0 do
-      Self.Emit(#9'popq ' + SysVArg64(NCap + I + 1));
-    { Captured-var pointers into the leading registers: the outer var's
-      address, or -- when this frame itself only holds it captured -- the
-      address its _cap_ slot already carries (EmitCall's convention). }
-    for I := 0 to NCap - 1 do
-    begin
-      CapName := ADecl.CapturedVars.Strings[I];
-      if Self.IsCaptured(CapName) then
-        Self.Emit(Format(#9'movq %s, %s',
-          [Self.VarOperand('_cap_' + CapName), SysVArg64(I)]))
-      else if Self.IsLocal(CapName) then
-        Self.Emit(Format(#9'leaq %s, %s',
-          [Self.VarOperand(CapName), SysVArg64(I)]))
-      else
-        Self.Emit(Format(#9'leaq %s(%%rip), %s',
-          [Self.GlobalSymName(CapName), SysVArg64(I)]));
-    end;
-    { The saved dest sits just below the hoist region. }
-    Self.Emit(Format(#9'movq %d(%%rsp), %s', [HTotal, SysVArg64(NCap)]));
-    Self.Emit(#9'callq ' + AFuncSym);
-    Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, 0, True);
-  end
-  else
-  begin
-    { >5 explicit args + sret: pre-allocate (Count+1) slots (sret = slot 0,
-      explicit args = slots 1..Count).  Evaluate, load regs, leave overflow.
-      This overflow path assumes one slot per logical arg; an interface arg
-      (two slots) is not yet handled here.  Fail loudly rather than silently
-      mis-place registers — the <=5-slot path above covers interface args. }
-    for I := 0 to AArgs.Count - 1 do
-    begin
-      ParamType := nil;
-      if (ADecl <> nil) and (I < ADecl.Params.Count) then
-        ParamType := TMethodParam(ADecl.Params.Items[I]).ResolvedType;
-      if ParamType = nil then
-        ParamType := TASTExpr(AArgs.Items[I]).ResolvedType;
-      IsVar := (ADecl <> nil) and (I < ADecl.Params.Count) and
-               TMethodParam(ADecl.Params.Items[I]).IsVarParam;
-      if (not IsVar) and (ParamType <> nil) and (ParamType.Kind = tyInterface) then
-        raise ENativeCodeGenError.Create('native backend: interface argument in ' +
-          'an sret call with more than 5 register slots is not yet supported');
-    end;
-    AllocSz := (((AArgs.Count + 1) * 8 + 15) and (-16));
-    Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
-    Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [AllocSz + HTotal]));
-    Self.Emit(#9'movq %rax, 0(%rsp)');
-    for I := 0 to AArgs.Count - 1 do
-    begin
-      Arg := TASTExpr(AArgs.Items[I]);
-      IsVar := (ADecl <> nil) and (I < ADecl.Params.Count) and
-               TMethodParam(ADecl.Params.Items[I]).IsVarParam;
-      if HK.Get(I) >= akRecCall then
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-          [AllocSz + HTotal - HD.Get(I)]))
-      else if IsVar then
-        Self.EmitVarArgAddrToRax(Arg)
-      else
-        Self.EmitExprToEax(Arg);
-      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [(I + 1) * 8]));
-    end;
-    { Load sret ptr into %rdi, first 5 explicit args into %rsi..%r9. }
-    Self.Emit(#9'movq 0(%rsp), %rdi');
-    for I := 0 to 4 do
-      Self.Emit(Format(#9'movq %d(%%rsp), %s', [(I + 1) * 8, SysVArg64(I + 1)]));
-    { Shift %rsp past the 6 register-bound slots (sret + 5 args). }
-    Self.Emit(Format(#9'addq $%d, %%rsp', [6 * 8]));
-    Self.Emit(#9'callq ' + AFuncSym);
-    CleanUp := AllocSz - 6 * 8;
-    Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, CleanUp, True);
-  end;
+  { Every argument shape -- captured-variable pointers, open arrays,
+    interfaces, floats, hoisted temporaries, stack overflow -- goes through
+    EmitCall's slot path, with the saved destination as the hidden argument
+    after the captures.  The three special-purpose paths this replaces could
+    not pass an open array at all, a float with captures, or a float or
+    capture beyond the registers. }
+  Self.EmitCall(AFuncSym, ADecl, AArgs, True);
   { Reclaim the saved dest slot. }
   Self.Emit(#9'addq $8, %rsp');
-  HD.Free();
-  HK.Free();
 end;
 
 { Free a record-call-receiver buffer materialised by EmitMethodSretCall (see
@@ -22030,6 +21839,72 @@ end;
 { Emit a method call that returns a record via the sret convention.
   Register layout: %rdi = sret ptr, %rsi = Self, %rdx.. = user args.
   The destination buffer is at ASretAddr (AT&T operand, already allocated). }
+procedure TX86_64Backend.EmitMethodSretRecvToRax(ACall: TMethodCallExpr;
+  MD: TMethodDecl; ARecvBufBytes: Integer);
+begin
+  if ACall.ObjectName <> '' then
+  begin
+    if MD.IsRecordMethod and ACall.IsVarParam then
+      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]))
+    else if MD.IsRecordMethod then
+      Self.EmitVarAddr(ACall.ObjectName, '%rax')
+    else if ACall.IsVarParam then
+    begin
+      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]));
+      Self.Emit(#9'movq (%rax), %rax');
+    end
+    else if Self.IsLocal(ACall.ObjectName) then
+      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]))
+    else
+      Self.Emit(Format(#9'movq %s(%%rip), %%rax',
+        [Self.GlobalSymName(ACall.ObjectName)]));
+  end
+  else if (ACall.ObjExpr <> nil) and (ARecvBufBytes > 0) then
+    Self.Emit(#9'movq %rbx, %rax')      { record-call receiver address }
+  else if ACall.ObjExpr <> nil then
+  begin
+    Self.EmitExprToEax(ACall.ObjExpr);
+    Self.DeferOwnedClassRecv(ACall.ObjExpr);
+  end
+  else
+    Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
+end;
+
+procedure TX86_64Backend.EmitMethodSretSlotCall(ACall: TMethodCallExpr;
+  MD: TMethodDecl; const ASym: string; ARecvBufBytes: Integer;
+  AForceStatic: Boolean);
+var
+  HD, HK: TList<Integer>;
+  HTotal, AllocSz, CleanUp: Integer;
+begin
+  { Layout: slot 0 = the saved sret destination (pushed by the caller just
+    above the hoist region), slot 1 = Self, then each argument's flat slots
+    (EmitArgsToSlots).  EmitMethodOverflowLoad loads %rdi/%rsi/.. and
+    %xmm0.. and relocates the overflow below the block. }
+  HD := TList<Integer>.Create();
+  HK := TList<Integer>.Create();
+  HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
+  AllocSz := (((Self.CountArgSlots(MD.Params) + 2) * 8 + 15) and (-16));
+  Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
+  Self.EmitArgsToSlots(ACall.Args, MD.Params, AllocSz, HTotal, HD, HK, 2);
+  Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [AllocSz + HTotal]));
+  Self.Emit(#9'movq %rax, 0(%rsp)');
+  Self.EmitMethodSretRecvToRax(ACall, MD, ARecvBufBytes);
+  Self.Emit(#9'movq %rax, 8(%rsp)');
+  CleanUp := Self.EmitMethodOverflowLoad(MD.Params, ACall.Args, AllocSz, 2);
+  if (MD.VTableSlot >= 0) and not AForceStatic then
+  begin
+    Self.Emit(#9'movq (%rsi), %rax');
+    Self.Emit(Format(#9'movq %d(%%rax), %%rax', [(MD.VTableSlot + 1) * 8]));
+    Self.Emit(#9'callq *%rax');
+  end
+  else
+    Self.Emit(#9'callq ' + ASym);
+  Self.EmitHoistEpilogue(ACall.Args, HD, HK, HTotal, CleanUp, True);
+  HD.Free();
+  HK.Free();
+end;
+
 procedure TX86_64Backend.EmitMethodSretCall(ACall: TMethodCallExpr;
                                             const ASretAddr: string;
                                             ASretIsIndirect: Boolean;
@@ -22039,20 +21914,13 @@ var
   MD:       TMethodDecl;
   Sym:      string;
   Arg:      TASTExpr;
-  AllocSz:  Integer;
-  CleanUp:  Integer;
   RC:       TRecReturnClass;
   RetRec:   TRecordTypeDesc;
-  HD:       TList<Integer>;
-  HK:       TList<Integer>;
-  HTotal:   Integer;
   HasFloat: Boolean;
   ParamType: TTypeDesc;
-  IntIdx, XmmIdx, SlotOff: Integer;
   RecvBufBytes: Integer;
   LSretAddr: string;
   LSretIndirect: Boolean;
-  UserSlots: Integer;
 begin
   MD := TMethodDecl(ACall.ResolvedMethod);
   if MD = nil then
@@ -22219,140 +22087,22 @@ begin
       HasFloat := True;
   end;
 
-  if HasFloat then
+  { A float argument, or more slots than the registers hold (sret and Self
+    take two of the six), goes through the flat slot block -- every argument
+    shape, the overflow on the stack, virtual dispatch.  The two special
+    paths this replaces could not pass an open array, an interface, a var
+    argument or a record receiver in the overflow case, assumed no floats
+    there, and called a VIRTUAL method statically. }
+  if HasFloat or (Self.CountArgSlots(MD.Params) + 2 > 6) then
   begin
-    HD := TList<Integer>.Create();
-    HK := TList<Integer>.Create();
-    HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
-    AllocSz := (((ACall.Args.Count + 2) * 8 + 15) and (-16));
-    Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
-    { sret into slot 0. }
-    Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [AllocSz + HTotal]));
-    Self.Emit(#9'movq %rax, 0(%rsp)');
-    { Evaluate each explicit arg into slot I+2 (float kept in its slot for the
-      xmm load below; int/record-ptr via movq). }
-    for I := 0 to ACall.Args.Count - 1 do
-    begin
-      Arg := TASTExpr(ACall.Args.Items[I]);
-      ParamType := nil;
-      if I < MD.Params.Count then
-        ParamType := TMethodParam(MD.Params.Items[I]).ResolvedType;
-      if ParamType = nil then
-        ParamType := Arg.ResolvedType;
-      if HK.Get(I) >= akRecCall then
-      begin
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-          [AllocSz + HTotal - HD.Get(I)]));
-        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [(I + 2) * 8]));
-      end
-      else if IsFloatFamily(ParamType) and
-              not ((I < MD.Params.Count) and
-                   TMethodParam(MD.Params.Items[I]).IsVarParam) then
-      begin
-        Self.EmitExprToXmm0(Arg);
-        { Match the value width to the PARAM width before spilling — see the
-          same adjust in EmitSretCall (BUG-027 class). }
-        Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
-          (ParamType <> nil) and (ParamType.Kind = tySingle));
-        if (ParamType <> nil) and (ParamType.Kind = tySingle) then
-          Self.Emit(Format(#9'movss %%xmm0, %d(%%rsp)', [(I + 2) * 8]))
-        else
-          Self.Emit(Format(#9'movsd %%xmm0, %d(%%rsp)', [(I + 2) * 8]));
-      end
-      else
-      begin
-        if (I < MD.Params.Count) and TMethodParam(MD.Params.Items[I]).IsVarParam then
-          Self.EmitVarArgAddrToRax(Arg)
-        else
-          Self.EmitExprToEax(Arg);
-        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [(I + 2) * 8]));
-      end;
-    end;
-    { Self pointer into slot 1. }
-    if ACall.ObjectName <> '' then
-    begin
-      if MD.IsRecordMethod and ACall.IsVarParam then
-        Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]))
-      else if MD.IsRecordMethod then
-      begin
-        Self.EmitVarAddr(ACall.ObjectName, '%rax');
-      end
-      else if ACall.IsVarParam then
-      begin
-        Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]));
-        Self.Emit(#9'movq (%rax), %rax');
-      end
-      else if Self.IsLocal(ACall.ObjectName) then
-        Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]))
-      else
-        Self.Emit(Format(#9'movq %s(%%rip), %%rax', [Self.GlobalSymName(ACall.ObjectName)]));
-    end
-    else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
-      Self.Emit(#9'movq %rbx, %rax')      { record-call receiver address }
-    else if ACall.ObjExpr <> nil then
-    begin
-      Self.EmitExprToEax(ACall.ObjExpr);
-      Self.DeferOwnedClassRecv(ACall.ObjExpr);
-    end
-    else
-      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
-    Self.Emit(Format(#9'movq %%rax, 8(%%rsp)', []));
-    { Load registers: %rdi = sret, %rsi = Self, then int args into %rdx.. and
-      float args into %xmm0.. }
-    Self.Emit(#9'movq 0(%rsp), %rdi');
-    Self.Emit(#9'movq 8(%rsp), %rsi');
-    IntIdx := 2;   { %rdi (sret), %rsi (Self) consumed }
-    XmmIdx := 0;
-    for I := 0 to ACall.Args.Count - 1 do
-    begin
-      ParamType := nil;
-      if I < MD.Params.Count then
-        ParamType := TMethodParam(MD.Params.Items[I]).ResolvedType;
-      if ParamType = nil then
-        ParamType := TASTExpr(ACall.Args.Items[I]).ResolvedType;
-      SlotOff := (I + 2) * 8;
-      if IsFloatFamily(ParamType) and
-         not ((I < MD.Params.Count) and TMethodParam(MD.Params.Items[I]).IsVarParam) then
-      begin
-        if (ParamType <> nil) and (ParamType.Kind = tySingle) then
-          Self.Emit(Format(#9'movss %d(%%rsp), %s', [SlotOff, SysVXmmArgRegs[XmmIdx]]))
-        else
-          Self.Emit(Format(#9'movsd %d(%%rsp), %s', [SlotOff, SysVXmmArgRegs[XmmIdx]]));
-        Inc(XmmIdx);
-      end
-      else
-      begin
-        Self.Emit(Format(#9'movq %d(%%rsp), %s', [SlotOff, SysVArg64(IntIdx)]));
-        Inc(IntIdx);
-      end;
-    end;
-    Self.Emit(Format(#9'movb $%d, %%al', [XmmIdx]));
-    Self.Emit(Format(#9'addq $%d, %%rsp', [(ACall.Args.Count + 2) * 8]));
-    if (MD.VTableSlot >= 0) and not AForceStatic then
-    begin
-      Self.Emit(#9'movq (%rsi), %rax');
-      Self.Emit(Format(#9'movq %d(%%rax), %%rax', [(MD.VTableSlot + 1) * 8]));
-      { %al was clobbered by the vtable load; for a fixed prototype the callee
-        ignores it, so this is benign. }
-      Self.Emit(#9'callq *%rax');
-    end
-    else
-      Self.Emit(#9'callq ' + Sym);
-    CleanUp := AllocSz - (ACall.Args.Count + 2) * 8;
-    Self.EmitHoistEpilogue(ACall.Args, HD, HK, HTotal, CleanUp, True);
-    HD.Free();
-    HK.Free();
+    Self.EmitMethodSretSlotCall(ACall, MD, Sym, RecvBufBytes, AForceStatic);
     Self.Emit(#9'addq $8, %rsp');   { reclaim the saved dest slot }
     Self.EmitMethodSretRecvCleanup(RecvBufBytes, ACall.ObjExpr);
     Exit;
   end;
 
-  { Register-path guard is on SLOTS, not logical args: an interface argument is
-    a fat pointer occupying TWO integer registers, so a 2-arg call can need more
-    registers than 2.  sret (%rdi) + Self (%rsi) consume two; the user args must
-    fit in the remaining four. }
-  UserSlots := Self.CountArgSlots(MD.Params);
-  if UserSlots + 2 <= 6 then
+  { Register path: every slot fits in %rdx..%r9 (interface args take two;
+    sret %rdi and Self %rsi take the first two registers). }
   begin
     Self.BeginCallArgs(MD.Params, ACall.Args);
     for I := 0 to ACall.Args.Count - 1 do
@@ -22409,52 +22159,6 @@ begin
     else
       Self.Emit(#9'callq ' + Sym);
     Self.EndCallArgs();
-  end
-  else
-  begin
-    HD := TList<Integer>.Create();
-    HK := TList<Integer>.Create();
-    HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
-    AllocSz := (((ACall.Args.Count + 2) * 8 + 15) and (-16));
-    Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
-    Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [AllocSz + HTotal]));
-    Self.Emit(#9'movq %rax, 0(%rsp)');
-    for I := 0 to ACall.Args.Count - 1 do
-    begin
-      Arg := TASTExpr(ACall.Args.Items[I]);
-      if HK.Get(I) >= akRecCall then
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-          [AllocSz + HTotal - HD.Get(I)]))
-      else
-        Self.EmitExprToEax(Arg);
-      Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [(I + 2) * 8]));
-    end;
-    if ACall.ObjectName <> '' then
-    begin
-      if Self.IsLocal(ACall.ObjectName) then
-        Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]))
-      else
-        Self.Emit(Format(#9'movq %s(%%rip), %%rax', [Self.GlobalSymName(ACall.ObjectName)]));
-    end
-    else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
-      Self.Emit(#9'movq %rbx, %rax')      { record-call receiver address }
-    else if ACall.ObjExpr <> nil then
-    begin
-      Self.EmitExprToEax(ACall.ObjExpr);
-      Self.DeferOwnedClassRecv(ACall.ObjExpr);
-    end
-    else
-      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
-    Self.Emit(Format(#9'movq %%rax, 8(%%rsp)', []));
-    Self.Emit(#9'movq 0(%rsp), %rdi');
-    for I := 0 to 4 do
-      Self.Emit(Format(#9'movq %d(%%rsp), %s', [(I + 1) * 8, SysVArg64(I + 1)]));
-    Self.Emit(Format(#9'addq $%d, %%rsp', [6 * 8]));
-    Self.Emit(#9'callq ' + Sym);
-    CleanUp := AllocSz - 6 * 8;
-    Self.EmitHoistEpilogue(ACall.Args, HD, HK, HTotal, CleanUp, True);
-    HD.Free();
-    HK.Free();
   end;
   { Reclaim the saved dest slot. }
   Self.Emit(#9'addq $8, %rsp');

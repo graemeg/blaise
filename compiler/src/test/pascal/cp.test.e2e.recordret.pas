@@ -28,6 +28,13 @@ type
   protected
     procedure SetUp; override;
   published
+    { record-returning calls with every argument shape: open arrays,
+      floats, stack overflow, captures (incl. six or more), var arguments,
+      interfaces, a record receiver, virtual dispatch }
+    procedure TestRun_SretCall_OpenArrayAndOverflowArgs;
+    procedure TestRun_SretNested_CapturesWithFloatsAndOverflow;
+    procedure TestRun_SretNested_SixCaptures_ResultPointerOnStack;
+    procedure TestRun_SretMethod_OverflowVirtualIntfAndRecordReceiver;
     procedure TestRun_RecordReturn_RemainingShapes;
     { rcInt1 1B — single Byte field. }
     procedure TestRun_RcInt1_OneByte_RoundTrip;
@@ -2200,6 +2207,137 @@ begin
     '1 2 250 99' + LE +
     '1.25 -2.5 -7 3.75' + LE +
     '-3 4 100000' + LE, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_SretCall_OpenArrayAndOverflowArgs;
+const
+  Src = '''
+    program s4;
+    type TBig = record A, B, C: Int64; end;
+    function OA(const V: array of Integer; K: Integer): TBig;
+    var I: Integer;
+    begin Result.A := 0; for I := 0 to High(V) do Result.A := Result.A + V[I]; Result.B := High(V); Result.C := K end;
+    function OA6(A, B, C, D: Integer; const V: array of Integer; K: Integer): TBig;
+    begin Result.A := A + D; Result.B := High(V) * 10 + V[0]; Result.C := K end;
+    function Fl7(A, B, C, D, E, F: Integer; X: Double; G: Integer): TBig;
+    begin Result.A := A + F; Result.B := Trunc(X * 10); Result.C := G end;
+    var R: TBig;
+    begin
+      R := OA([1, 2, 3], 7); WriteLn(R.A, ' ', R.B, ' ', R.C);
+      R := OA6(1, 2, 3, 4, [5, 6], 7); WriteLn(R.A, ' ', R.B, ' ', R.C);
+      R := Fl7(1, 2, 3, 4, 5, 6, 2.5, 8); WriteLn(R.A, ' ', R.B, ' ', R.C);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '6 2 7' + #10 + '5 15 7' + #10 + '7 25 8' + #10, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_SretNested_CapturesWithFloatsAndOverflow;
+const
+  Src = '''
+    program s3;
+    uses SysUtils;
+    type
+      TBig = record A, B, C: Int64; end;
+      TSmall = record X, Y: Integer; end;
+    procedure Outer;
+    var A, B, C, D, E, F, G, H, I, J: Integer; R: Double;
+      function Mix(X: Double; const V: array of Integer; K, L: Integer; Y: Double): Double;
+      begin Result := A + J + X * 10 + Y * 100 + V[High(V)] * 1000 + K + L * 10000 + R end;
+      function MkBig(K: Integer): TBig;
+      begin Result.A := A + K; Result.B := J * K; Result.C := H end;
+      function MkSmall(K: Integer; Z: Double): TSmall;
+      begin Result.X := A + K; Result.Y := J + Trunc(Z) end;
+      function BigMany(K1, K2, K3, K4, K5, K6, K7: Integer): TBig;
+      begin Result.A := K1 + K7; Result.B := A + J; Result.C := K4 end;
+      procedure Bump(var Z: Integer); begin Z := Z + I + J end;
+    var Bg: TBig; Sm: TSmall; Q: Integer;
+    begin
+      A := 1; B := 2; C := 3; D := 4; E := 5; F := 6; G := 7; H := 8; I := 9; J := 10; R := 0.5;
+      WriteLn(Trunc(Mix(2.0, [3, 4], 5, 6, 7.0) * 10));
+      Bg := MkBig(3); WriteLn(Bg.A, ' ', Bg.B, ' ', Bg.C);
+      Sm := MkSmall(4, 2.5); WriteLn(Sm.X, ' ', Sm.Y);
+      Bg := BigMany(1, 2, 3, 4, 5, 6, 7); WriteLn(Bg.A, ' ', Bg.B, ' ', Bg.C);
+      Q := 1; Bump(Q); WriteLn(Q + B + C + D + E + F + G);
+    end;
+    begin
+      Outer()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '647365' + #10 + '4 30 8' + #10 + '5 12' + #10 +
+    '8 11 4' + #10 + '47' + #10, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_SretNested_SixCaptures_ResultPointerOnStack;
+const
+  Src = '''
+    program s5;
+    type TBig = record A, B, C: Int64; end;
+    procedure Outer;
+    var A, B, C, D, E, F, G: Integer;
+      function SixCap(K: Integer; X: Double; const V: array of Integer): TBig;
+      begin Result.A := A + B + C + D + E + F + G + K; Result.B := Trunc(X * 10); Result.C := V[High(V)] end;
+    var R: TBig;
+    begin
+      A := 1; B := 2; C := 3; D := 4; E := 5; F := 6; G := 7;
+      R := SixCap(100, 1.5, [8, 9]); WriteLn(R.A, ' ', R.B, ' ', R.C)
+    end;
+    begin Outer() end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '128 15 9' + #10, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_SretMethod_OverflowVirtualIntfAndRecordReceiver;
+const
+  Src = '''
+    program s8;
+    type
+      TBig = record A, B, C: Int64; end;
+      IN1 = interface function Get: Integer; end;
+      TN = class(TObject, IN1) V: Integer; function Get: Integer; end;
+      TBase = class
+        function Calc(A, B, C, D, E: Integer; var Z: Integer): TBig; virtual;
+        function Plain(A, B, C, D, E, F, G: Integer; const S: array of Integer): Integer;
+        function WithIntf(A, B, C, D: Integer; const I: IN1; E: Integer): TBig;
+      end;
+      TDer = class(TBase)
+        function Calc(A, B, C, D, E: Integer; var Z: Integer): TBig; override;
+      end;
+      TRec = record
+        K: Integer;
+        function Mk(A, B, C, D, E: Integer; X: Double): TBig;
+      end;
+    function TN.Get: Integer; begin Result := V end;
+    function TBase.Calc(A, B, C, D, E: Integer; var Z: Integer): TBig;
+    begin Result.A := 1; Result.B := A + E; Z := 11 end;
+    function TDer.Calc(A, B, C, D, E: Integer; var Z: Integer): TBig;
+    begin Result.A := 2; Result.B := A + E; Result.C := D; Z := 22 end;
+    function TBase.Plain(A, B, C, D, E, F, G: Integer; const S: array of Integer): Integer;
+    begin Result := A + G + S[High(S)] * 100 end;
+    function TBase.WithIntf(A, B, C, D: Integer; const I: IN1; E: Integer): TBig;
+    begin Result.A := A + D; Result.B := I.Get(); Result.C := E end;
+    function TRec.Mk(A, B, C, D, E: Integer; X: Double): TBig;
+    begin Result.A := K + E; Result.B := Trunc(X * 10); Result.C := A end;
+    var O: TBase; R: TBig; Z: Integer; N: TN; Rc: TRec;
+    begin
+      O := TDer.Create();
+      R := O.Calc(1, 2, 3, 4, 5, Z); WriteLn(R.A, ' ', R.B, ' ', R.C, ' ', Z);
+      WriteLn(O.Plain(1, 2, 3, 4, 5, 6, 7, [8, 9]));
+      N := TN.Create(); N.V := 42;
+      R := O.WithIntf(1, 2, 3, 4, N, 9); WriteLn(R.A, ' ', R.B, ' ', R.C);
+      Rc.K := 1000;
+      R := Rc.Mk(1, 2, 3, 4, 5, 1.5); WriteLn(R.A, ' ', R.B, ' ', R.C);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2 6 4 22' + #10 + '908' + #10 + '5 42 9' + #10 +
+    '1005 15 1' + #10, 0);
 end;
 
 initialization

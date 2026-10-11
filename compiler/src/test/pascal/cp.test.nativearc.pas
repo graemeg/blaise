@@ -126,8 +126,10 @@ var
 begin
   { Count(Fold(Fold(X))): the inner jumbo-set call is hoisted like a record
     call argument, so the outer Fold's sret destination is read from its own
-    saved slot (48 bytes up) rather than from 0(%rsp), which by then is the
-    inner result's bitmap. }
+    saved slot rather than from 0(%rsp), which by then is the inner result's
+    bitmap.  Record-returning calls go through EmitCall's slot path, so the
+    saved slot sits above the 48-byte hoist region AND the 16-byte slot
+    block: 64 bytes up, copied into the block's first slot (%rdi). }
   AsmT := GenAsm(
     '''
     program P;
@@ -149,7 +151,7 @@ begin
     ''', TargetX86_64);
   Body := Copy(AsmT, Pos('main:', AsmT), Length(AsmT));
   AssertTrue('outer destination read past the hoisted inner buffer',
-    Pos(#9'movq 48(%rsp), %rdi'#10#9'subq $8, %rsp'#10#9'callq Fold', Body) >= 0);
+    Pos(#9'movq 64(%rsp), %rax'#10#9'movq %rax, 0(%rsp)', Body) >= 0);
 end;
 
 procedure TNativeArcTests.TestX86_ForIn_InterfaceCurrent_UsesSret;
