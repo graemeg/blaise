@@ -15357,6 +15357,12 @@ begin
     Self.Emit(TAsmStmt(AStmt).Code);
     Exit;
   end;
+  if LoweredSetterCall(AStmt) <> nil then
+  begin
+    { a property write the semantic pass lowered to its setter call }
+    Self.EmitMethodCallStmt(LoweredSetterCall(AStmt));
+    Exit;
+  end;
   if AStmt is TAssignment then
   begin
     Asgn := TAssignment(AStmt);
@@ -19764,6 +19770,9 @@ var
 begin
   Result := 0;
   if AStmt = nil then Exit;
+  { a property write lowered to its setter call is emitted as that call }
+  if LoweredSetterCall(AStmt) <> nil then
+    Exit(InlineNeedStmtD(LoweredSetterCall(AStmt), ADepth));
   if AStmt is TCompoundStmt then
     for I := 0 to TCompoundStmt(AStmt).Stmts.Count - 1 do
     begin

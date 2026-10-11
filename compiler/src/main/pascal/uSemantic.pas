@@ -573,7 +573,12 @@ type
       AFldType: TTypeDesc): TTypeDesc;
     function  LowerImplicitSelfProp(const APropName: string;
       ALine, ACol: Integer): TASTExpr;
-    function  LowerImplicitSelfPropBase(AAccess: TFieldAccessExpr): TASTExpr;
+    function  SelfMemberAccess(const AName: string;
+      ALine, ACol: Integer): TASTExpr;
+    function  AnalysedRecvIdent(const AName: string;
+      ALine, ACol: Integer): TASTExpr;
+    function  BuildSetterCall(ARecv: TASTExpr; AProp: TPropertyInfo;
+      AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
     function  TryLowerPropertyValueIndex(AAccess: TFieldAccessExpr;
       APropInfo: TPropertyInfo): TTypeDesc;
     function  AnalyseIsExpr(AExpr: TIsExpr): TTypeDesc;
@@ -8938,19 +8943,74 @@ begin
   Result := FA;
 end;
 
-function TSemanticAnalyser.LowerImplicitSelfPropBase(
-  AAccess: TFieldAccessExpr): TASTExpr;
+function TSemanticAnalyser.SelfMemberAccess(const AName: string;
+  ALine, ACol: Integer): TASTExpr;
 var
   FA: TFieldAccessExpr;
 begin
-  { the unanalysed base Self.<RecordName>; AnalyseFieldAccess analyses it
-    through the chained arm }
+  { the unanalysed Self.<AName>, for a property of the current class used as
+    the base of a further access (P.Y, P.Y := V) }
   FA := TFieldAccessExpr.Create();
-  FA.Line       := AAccess.Line;
-  FA.Col        := AAccess.Col;
+  FA.Line       := ALine;
+  FA.Col        := ACol;
   FA.RecordName := 'Self';
-  FA.FieldName  := AAccess.RecordName;
+  FA.FieldName  := AName;
   Result := FA;
+end;
+
+function TSemanticAnalyser.AnalysedRecvIdent(const AName: string;
+  ALine, ACol: Integer): TASTExpr;
+var
+  IE: TIdentExpr;
+begin
+  { a fresh, analysed read of the variable / field / Self named AName: the
+    receiver expression of a lowered setter call }
+  IE := TIdentExpr.Create();
+  IE.Line := ALine;
+  IE.Col  := ACol;
+  IE.Name := AName;
+  Result := IE;
+  Self.AnalyseExprSlot(Result);
+end;
+
+{ Recv.SetX([Index,] Value) for a property write whose receiver is a CLASS
+  instance: the ordinary method-call statement, so the value and receiver are
+  marshalled exactly as for an explicit call -- an interface value as its
+  (obj, itab) pair, an owned transient value or receiver released after the
+  call, a float or record by its ABI class.  The hand-written setter paths in
+  the backends passed every value in one register and dropped owned
+  transients (an interface property write crashed on both ISAs).  AIndex and
+  AValue are already analysed (against the property's types) and are shared
+  with the assignment node, as is ARecv when it is the node's ObjExpr.
+  Returns nil -- the caller keeps its own lowering -- for a record receiver
+  (Self is an address there), a static property, or an unresolved setter. }
+function TSemanticAnalyser.BuildSetterCall(ARecv: TASTExpr;
+  AProp: TPropertyInfo; AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
+var
+  MDecl: TMethodDecl;
+  Call:  TMethodCallStmt;
+begin
+  Result := nil;
+  if (ARecv = nil) or (AProp = nil) or AProp.IsStatic or
+     (AProp.WriteMethod = '') then
+    Exit;
+  if (ARecv.ResolvedType = nil) or (ARecv.ResolvedType.Kind <> tyClass) then
+    Exit;
+  MDecl := FindMethodDecl(TRecordTypeDesc(ARecv.ResolvedType).Name,
+    AProp.WriteMethod);
+  if MDecl = nil then
+    Exit;
+  Call := TMethodCallStmt.Create();
+  Call.Line    := ANode.Line;
+  Call.Col     := ANode.Col;
+  Call.Name    := AProp.WriteMethod;
+  Call.ObjExpr := ARecv;
+  if AIndex <> nil then
+    Call.Args.Add(AIndex);
+  Call.Args.Add(AValue);
+  Call.ResolvedClassType := ARecv.ResolvedType;
+  Call.ResolvedMethod    := MDecl;
+  Result := Call;
 end;
 
 procedure TSemanticAnalyser.UnwrapLoweredOperator(var ASlot: TASTExpr);
@@ -11221,6 +11281,7 @@ procedure TSemanticAnalyser.AnalyseAssignment(AAssign: TAssignment);
 var
   VarSym:  TSymbol;
   FldInfo: TFieldInfo;
+  PropInfo: TPropertyInfo;
   ExprType: TTypeDesc;
   EmitName: string;
 begin
@@ -11284,6 +11345,39 @@ begin
       Self.CheckConstValueInRange(FldInfo.TypeDesc, AAssign.Expr,
         AAssign.Line, AAssign.Col);
       CheckTypesMatch(FldInfo.TypeDesc, ExprType, 'assignment', AAssign.Line, AAssign.Col);
+      Exit;
+    end;
+    { A bare PROPERTY of the current class (Prop := V inside a method):
+      Self.Prop := V.  A field-backed one writes its backing field; a
+      method-backed one becomes the call Self.SetProp(V). }
+    PropInfo := FCurrentClass.FindProperty(AAssign.Name);
+    if (PropInfo <> nil) and not PropInfo.IsStatic and
+       (PropInfo.IndexParamName = '') then
+    begin
+      if PropInfo.WriteField <> '' then
+      begin
+        AAssign.Name := PropInfo.WriteField;
+        Self.AnalyseAssignment(AAssign);
+        Exit;
+      end;
+      if PropInfo.WriteMethod = '' then
+        SemanticError(
+          Format('Property ''%s'' is read-only', [AAssign.Name]),
+          AAssign.Line, AAssign.Col);
+      InferArrowFromTarget(AAssign.Expr, PropInfo.TypeDesc);
+      ResolveDiamond(AAssign.Expr, PropInfo.TypeDesc);
+      ExprType := Self.AnalyseExprHinted(AAssign.Expr, PropInfo.TypeDesc);
+      Self.CheckConstValueInRange(PropInfo.TypeDesc, AAssign.Expr,
+        AAssign.Line, AAssign.Col);
+      CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
+        AAssign.Line, AAssign.Col);
+      AAssign.SetterCall := BuildSetterCall(
+        AnalysedRecvIdent('Self', AAssign.Line, AAssign.Col),
+        PropInfo, nil, AAssign.Expr, AAssign);
+      if AAssign.SetterCall = nil then
+        SemanticError(
+          Format('Property ''%s'' cannot be written here', [AAssign.Name]),
+          AAssign.Line, AAssign.Col);
       Exit;
     end;
   end;
@@ -11843,6 +11937,8 @@ begin
   ValType := Self.AnalyseExprSlot(AAssign.Expr);
   CheckTypesMatch(DefProp.TypeDesc, ValType, 'default property assignment',
     AAssign.Line, AAssign.Col);
+  AAssign.SetterCall := BuildSetterCall(AAssign.ObjExpr, DefProp,
+    AAssign.PropIndexExpr, AAssign.Expr, AAssign);
   Result := True;
 end;
 
@@ -11934,6 +12030,8 @@ begin
         ExprType := Self.AnalyseExprSlot(AAssign.Expr);
         CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
           AAssign.Line, AAssign.Col);
+        AAssign.SetterCall := BuildSetterCall(AAssign.ObjExpr, PropInfo,
+          AAssign.PropIndexExpr, AAssign.Expr, AAssign);
         Exit;
       end
       else
@@ -12023,6 +12121,10 @@ begin
             ExprType := Self.AnalyseExprSlot(AAssign.Expr);
             CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
               AAssign.Line, AAssign.Col);
+            if BaseType.Kind = tyClass then
+              AAssign.SetterCall := BuildSetterCall(
+                AnalysedRecvIdent(AAssign.RecordName, AAssign.Line, AAssign.Col),
+                PropInfo, AAssign.PropIndexExpr, AAssign.Expr, AAssign);
             Exit;
           end
           else
@@ -12039,6 +12141,21 @@ begin
           AAssign.Line, AAssign.Col);
         CheckTypesMatch(FldInfo.TypeDesc, ExprType, 'field assignment',
           AAssign.Line, AAssign.Col);
+        Exit;
+      end;
+      { Implicit Self.Prop.Member := V -- RecordName is a CLASS-typed property
+        of the current class: assign through the object it reads, as the
+        chained Self.Prop.Member := V.  (A record-typed property's value is a
+        copy, so a write through it would be lost; that stays an error.) }
+      PropInfo := FCurrentClass.FindProperty(AAssign.RecordName);
+      if (PropInfo <> nil) and (PropInfo.TypeDesc <> nil) and
+         (PropInfo.TypeDesc.Kind = tyClass) and
+         (PropInfo.IndexParamName = '') then
+      begin
+        AAssign.ObjExpr := Self.SelfMemberAccess(AAssign.RecordName,
+          AAssign.Line, AAssign.Col);
+        AAssign.RecordName := '';
+        Self.AnalyseFieldAssignment(AAssign);
         Exit;
       end;
     end;
@@ -12162,6 +12279,10 @@ begin
         ExprType := Self.AnalyseExprSlot(AAssign.Expr);
         CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
           AAssign.Line, AAssign.Col);
+        if RecSym.TypeDesc.Kind = tyClass then
+          AAssign.SetterCall := BuildSetterCall(
+            AnalysedRecvIdent(AAssign.RecordName, AAssign.Line, AAssign.Col),
+            PropInfo, AAssign.PropIndexExpr, AAssign.Expr, AAssign);
         Exit;
       end
       else if TryLowerDefaultPropertyWrite(AAssign, PropInfo.TypeDesc) then
@@ -15959,7 +16080,8 @@ begin
         class (P.Y inside a method): analyse it as the chained Self.P.Y. }
       if FCurrentClass.FindProperty(AAccess.RecordName) <> nil then
       begin
-        AAccess.Base := Self.LowerImplicitSelfPropBase(AAccess);
+        AAccess.Base := Self.SelfMemberAccess(AAccess.RecordName,
+          AAccess.Line, AAccess.Col);
         AAccess.RecordName := '';
         Exit(Self.AnalyseFieldAccess(AAccess));
       end;
@@ -18047,6 +18169,9 @@ begin
           ValType := AnalyseExprHinted(AStmt.ValueExpr, DefProp.TypeDesc);
           CheckTypesMatch(DefProp.TypeDesc, ValType, 'default property assignment',
             AStmt.Line, AStmt.Col);
+          AStmt.SetterCall := BuildSetterCall(
+            AnalysedRecvIdent(AStmt.ArrayName, AStmt.Line, AStmt.Col),
+            DefProp, AStmt.IndexExpr, AStmt.ValueExpr, AStmt);
           Exit;
         end;
       end;
@@ -18077,6 +18202,10 @@ begin
       ValType := AnalyseExprHinted(AStmt.ValueExpr, DefProp.TypeDesc);
       CheckTypesMatch(DefProp.TypeDesc, ValType, 'default property assignment',
         AStmt.Line, AStmt.Col);
+      if Sym.TypeDesc.Kind = tyClass then
+        AStmt.SetterCall := BuildSetterCall(
+          AnalysedRecvIdent(AStmt.ArrayName, AStmt.Line, AStmt.Col),
+          DefProp, AStmt.IndexExpr, AStmt.ValueExpr, AStmt);
       Exit;
     end;
   end;

@@ -115,6 +115,7 @@ TAssignment.IsThreadVar  safe
 TAssignment.IsWeakLhs  safe
 TAssignment.ImplicitSelfField  safe
 TAssignment.ResolvedOwnerUnit  safe
+TAssignment.SetterCall  safe
 
 # TIfStmt (uAST.pas:294)
 TIfStmt.Condition  serialise
@@ -207,6 +208,7 @@ TFieldAssignment.PropAccessorVSlot  safe
 TFieldAssignment.IsElemWrite  safe
 TFieldAssignment.IsClassVarWrite  safe
 TFieldAssignment.ClassVarEmitName  safe
+TFieldAssignment.SetterCall  safe
 
 # TStaticSubscriptAssign (uAST.pas:491)
 TStaticSubscriptAssign.ArrayName  serialise
@@ -218,6 +220,7 @@ TStaticSubscriptAssign.IsVarParam  safe
 TStaticSubscriptAssign.IsImplicitSelf  safe
 TStaticSubscriptAssign.PropOwnerType  safe
 TStaticSubscriptAssign.PropAccessorVSlot  safe
+TStaticSubscriptAssign.SetterCall  safe
 
 # TVarDeclStmt (uAST.pas:528)
 TVarDeclStmt.Decl  serialise

@@ -76,6 +76,13 @@ type
       P.Y, and a VIRTUAL getter overridden in a descendant
       (BUG-20261011-implicit-self-prop-ident) }
     procedure TestRun_ImplicitSelfPropertyReads;
+    { an interface-typed property written through its setter, plain and
+      indexed, from a variable, a call result and a class value
+      (BUG-20261011-intf-prop-setter) }
+    procedure TestRun_InterfacePropertySetter;
+    { bare property writes inside a method, field- and method-backed, and a
+      member of a class-typed property (BUG-20261011-implicit-self-prop-write) }
+    procedure TestRun_ImplicitSelfPropertyWrites;
   end;
 
 implementation
@@ -849,6 +856,107 @@ begin
       O.Show()
     end.
     ''', '4 5 6 7' + LE + '2 kid' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_InterfacePropertySetter;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      IThing = interface
+        function Val: Integer;
+      end;
+      TThing = class(TObject, IThing)
+        N: Integer;
+        function Val: Integer;
+      end;
+      THolder = class
+        FThing: IThing;
+        FS0, FS1: IThing;
+        procedure SetThing(V: IThing);
+        function GetSlot(I: Integer): IThing;
+        procedure SetSlot(I: Integer; V: IThing);
+        property Thing: IThing read FThing write SetThing;
+        property Slot[I: Integer]: IThing read GetSlot write SetSlot;
+      end;
+    function TThing.Val: Integer; begin Result := N end;
+    procedure THolder.SetThing(V: IThing); begin FThing := V end;
+    function THolder.GetSlot(I: Integer): IThing;
+    begin
+      if I = 0 then Result := FS0 else Result := FS1
+    end;
+    procedure THolder.SetSlot(I: Integer; V: IThing);
+    begin
+      if I = 0 then FS0 := V else FS1 := V
+    end;
+    function MakeThing(N: Integer): IThing;
+    var T: TThing;
+    begin
+      T := TThing.Create();
+      T.N := N;
+      Result := T
+    end;
+    var H: THolder; T: IThing; C: TThing;
+    begin
+      H := THolder.Create();
+      T := MakeThing(1);
+      H.Thing := T;
+      WriteLn(H.Thing.Val());
+      H.Thing := MakeThing(2);
+      WriteLn(H.Thing.Val());
+      C := TThing.Create();
+      C.N := 3;
+      H.Thing := C;
+      WriteLn(H.Thing.Val());
+      H.Slot[1] := MakeThing(4);
+      H.Slot[0] := T;
+      WriteLn(H.FS0.Val(), H.FS1.Val())
+    end.
+    ''', '1' + LE + '2' + LE + '3' + LE + '14' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_ImplicitSelfPropertyWrites;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      TInner = class
+        FN: Integer;
+        procedure SetN(V: Integer);
+        property N: Integer read FN write SetN;
+      end;
+      TC = class
+        FM: Integer;
+        FK: Integer;
+        FIn: TInner;
+        procedure SetK(V: Integer); virtual;
+        property K: Integer read FK write SetK;
+        property M: Integer read FM write FM;
+        property Inner: TInner read FIn;
+        procedure Go;
+      end;
+      TKid = class(TC)
+        procedure SetK(V: Integer); override;
+      end;
+    procedure TInner.SetN(V: Integer); begin FN := V * 10 end;
+    procedure TC.SetK(V: Integer); begin FK := V end;
+    procedure TKid.SetK(V: Integer); begin FK := V + 100 end;
+    procedure TC.Go;
+    begin
+      K := 1;
+      M := 2;
+      Inner.N := 3;
+      WriteLn(FK, ' ', FM, ' ', FIn.FN)
+    end;
+    var O: TC;
+    begin
+      O := TKid.Create();
+      O.FIn := TInner.Create();
+      O.Go()
+    end.
+    ''', '101 2 30' + LE, 0);
 end;
 
 initialization

@@ -97,6 +97,18 @@ type
       receiver in %rsi after the sret pointer, arm64 points x8 at a frame
       scratch (both called the getter with no buffer at all) }
     procedure TestCodegen_StaticArrayGetter_SubscriptBase;
+
+    { ------------------------------------------------------------------ }
+    { Setter writes -- BUG-20261011-intf-prop-setter,                     }
+    { BUG-20261011-implicit-self-prop-write                               }
+    { ------------------------------------------------------------------ }
+    { a bare property write inside a method: field- and method-backed, and
+      a member of a class-typed property (Inner.N := V) }
+    procedure TestSemantic_ImplicitSelfPropertyWrite_OK;
+    procedure TestSemantic_ImplicitSelfPropertyWrite_ReadOnly_RaisesError;
+    { an interface-typed setter receives the (obj, itab) pair: the itab half
+      was never loaded, so the setter stored a garbage itab }
+    procedure TestCodegen_InterfacePropertySetter_PassesPair;
   end;
 
 implementation
@@ -725,6 +737,80 @@ begin
   AssertEquals('static-array getter as a subscript base', '',
     AsmMissing(Src, 'movq O(%rip), %rsi',
       'ldr x0, [x9, _g_O@PAGEOFF]' + #10#9 + 'sub x8, x29, #'));
+end;
+
+const
+  SrcBareWrites = '''
+    program P;
+    type
+      TInner = class
+        FN: Integer;
+        procedure SetN(V: Integer);
+        property N: Integer read FN write SetN;
+      end;
+      TC = class
+        FM: Integer;
+        FIn: TInner;
+        procedure SetK(V: Integer);
+        property K: Integer read FM write SetK;
+        property M: Integer read FM write FM;
+        property Inner: TInner read FIn;
+        property RO: Integer read FM;
+        procedure Go;
+      end;
+    procedure TInner.SetN(V: Integer); begin FN := V end;
+    procedure TC.SetK(V: Integer); begin FM := V end;
+    procedure TC.Go;
+    begin
+      %s
+    end;
+    begin
+    end.
+    ''';
+
+procedure TPropertyTests.TestSemantic_ImplicitSelfPropertyWrite_OK;
+begin
+  AssertEquals('bare property writes inside a method', '',
+    SemanticError(Format(SrcBareWrites, ['K := 1; M := 2; Inner.N := 3'])));
+end;
+
+procedure TPropertyTests.TestSemantic_ImplicitSelfPropertyWrite_ReadOnly_RaisesError;
+begin
+  AssertTrue('a read-only property is rejected',
+    Pos('read-only', SemanticError(Format(SrcBareWrites, ['RO := 1']))) >= 0);
+end;
+
+procedure TPropertyTests.TestCodegen_InterfacePropertySetter_PassesPair;
+const
+  Src = '''
+    program P;
+    type
+      IThing = interface
+        function Val: Integer;
+      end;
+      TThing = class(TObject, IThing)
+        function Val: Integer;
+      end;
+      THolder = class
+        FThing: IThing;
+        procedure SetThing(V: IThing);
+        property Thing: IThing read FThing write SetThing;
+      end;
+    function TThing.Val: Integer; begin Result := 1 end;
+    procedure THolder.SetThing(V: IThing); begin FThing := V end;
+    var H: THolder; T: IThing;
+    begin
+      H := THolder.Create();
+      T := TThing.Create();
+      H.Thing := T
+    end.
+    ''';
+begin
+  AssertEquals('setter(Self, obj, itab)', '',
+    AsmMissing(Src,
+      'movq T_itab(%rip), %rcx',
+      'ldr x2, [sp], #16' + #10#9 + 'ldr x1, [sp], #16' + #10#9 +
+      'ldr x0, [sp], #16' + #10#9 + 'bl _THolder_SetThing'));
 end;
 
 initialization

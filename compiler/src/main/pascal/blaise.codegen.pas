@@ -193,6 +193,11 @@ function IsFoldedPropSubscript(AExpr: TASTExpr): Boolean;
   buffer's, since the expression has no storage of its own. }
 function IsAggCallValue(AExpr: TASTExpr): Boolean;
 
+{ The setter call a property-write statement was lowered to by the semantic
+  pass (TAssignment / TFieldAssignment / TStaticSubscriptAssign.SetterCall),
+  or nil.  Every backend emits that call in place of the statement. }
+function LoweredSetterCall(AStmt: TASTStmt): TMethodCallStmt;
+
 { True when AExpr is an ARRAY-ELEMENT l-value — a subscript whose base is a
   static, dynamic, or open array — i.e. a slot with a stable address that a
   consuming site (notably the Free lowering) can write through.  All three
@@ -669,6 +674,22 @@ begin
   if IsFoldedPropSubscript(AExpr) and
      (TFieldAccessExpr(TStringSubscriptExpr(AExpr).StrExpr).PropRead.ReadMethod <> '') then
     Result := True;
+end;
+
+function LoweredSetterCall(AStmt: TASTStmt): TMethodCallStmt;
+var
+  S: TASTStmt;
+begin
+  S := nil;
+  if AStmt is TAssignment then
+    S := TAssignment(AStmt).SetterCall
+  else if AStmt is TFieldAssignment then
+    S := TFieldAssignment(AStmt).SetterCall
+  else if AStmt is TStaticSubscriptAssign then
+    S := TStaticSubscriptAssign(AStmt).SetterCall;
+  Result := nil;
+  if S is TMethodCallStmt then
+    Result := TMethodCallStmt(S);
 end;
 
 function IsAggCallValue(AExpr: TASTExpr): Boolean;

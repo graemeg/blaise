@@ -305,6 +305,10 @@ type
                                    var target; codegen mangles the store address with it so
                                    same-named cross-unit globals write distinct slots.  See
                                    the matching field on TIdentExpr. }
+    { A bare property write inside a method (Prop := V, meaning
+      Self.Prop := V) whose setter is a method: lowered by uSemantic to the
+      call statement Self.SetProp(V), emitted instead of the node. }
+    SetterCall: TASTStmt;        { owned — nil unless lowered }
     destructor Destroy; override;
   end;
 
@@ -508,6 +512,13 @@ type
                               static var's type, for the delegated store. }
     ClassVarEmitName: string; { set with IsClassVarWrite — the mangled data-label
                               of the static var's storage slot. }
+    { A class-receiver SETTER write lowered by uSemantic to the ordinary
+      method-call statement Recv.SetX([Index,] Value) -- with the already
+      analysed value and index as its arguments -- so every value kind
+      (interface pair, owned transient, record, float) and every receiver
+      (owned transient included) takes the call path's marshalling.  Codegen
+      emits it instead of the node when non-nil. }
+    SetterCall: TASTStmt;       { owned — nil unless lowered }
     destructor Destroy; override;
   end;
 
@@ -538,6 +549,13 @@ type
     [Unretained] PropWriteInfo: TObject;  { TPropertyInfo — non-owned; nil = plain array write }
     PropOwnerType:     string;  { declaring class of the setter }
     PropAccessorVSlot: Integer; { setter vtable slot, -1 = static call }
+    { A class-receiver SETTER write lowered by uSemantic to the ordinary
+      method-call statement Recv.SetX([Index,] Value) -- with the already
+      analysed value and index as its arguments -- so every value kind
+      (interface pair, owned transient, record, float) and every receiver
+      (owned transient included) takes the call path's marshalling.  Codegen
+      emits it instead of the node when non-nil. }
+    SetterCall: TASTStmt;       { owned — nil unless lowered }
     destructor Destroy; override;
   end;
 

@@ -7194,6 +7194,12 @@ begin
     Self.Emit(TAsmStmt(AStmt).Code);
     Exit;
   end;
+  if LoweredSetterCall(AStmt) <> nil then
+  begin
+    { a property write the semantic pass lowered to its setter call }
+    EmitMethodCallStmt(LoweredSetterCall(AStmt));
+    Exit;
+  end;
   if AStmt is TAssignment then
   begin
     EmitAssignment(TAssignment(AStmt));

@@ -4905,8 +4905,12 @@ begin
     ''', TargetArm64);
   AssertTrue('default-property write calls the setter',
     Pos(#9'bl _TC_Put'#10, AsmT) >= 0);
-  AssertTrue('two-eightbyte record value loaded as a pair',
-    Pos(#9'ldp x2, x3, [x9]', AsmT) >= 0);
+  { (setter writes are lowered to the ordinary call, whose argument path
+    passes the record's two eightbytes in x2 and x3) }
+  AssertTrue('two-eightbyte record value in x2/x3',
+    Pos(#9'ldr x3, [sp], #16'#10#9'ldr x2, [sp], #16'#10 +
+        #9'ldr x1, [sp], #16'#10#9'ldr x0, [sp], #16'#10#9'bl _TC_PutRec',
+      AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestMultiDimArray_RowThenColumnStride;
@@ -8861,7 +8865,7 @@ begin
   { the setter receives value in x2 and key in x1 (popped in that order) }
   AssertTrue('value -> x2, key -> x1 before the setter call',
     Pos(#9'ldr x2, [sp], #16' + LF + #9'ldr x1, [sp], #16' + LF +
-        #9'bl _TBox_SetItem', AsmT) >= 0);
+        #9'ldr x0, [sp], #16' + LF + #9'bl _TBox_SetItem', AsmT) >= 0);
   Obj := AssembleArm64ToBytes(AsmT);
   F := ParseMachO(Obj, 'arm64sip.o');
   try

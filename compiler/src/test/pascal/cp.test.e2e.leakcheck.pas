@@ -27,6 +27,11 @@ type
     { owned transients only tested or passed on: an implicit-Self procedural
       FIELD call's result, and an object compared, is-tested or Assigned }
     procedure TestDebug_ImplicitSelfProcFieldResult_NoLeak;
+    { owned transients written through property SETTERS -- a class, an
+      interface and a class-narrowed-to-interface value, plain / indexed /
+      default / bare, and an owned-transient RECEIVER (P3-1,
+      BUG-20261011-intf-prop-setter): each +1 is released after the call }
+    procedure TestDebug_OwnedTransientSetterValues_NoLeak;
     { an owned class call result narrowed to an interface -- into a local, a
       field, an implicit-Self field, a function Result and an interface
       argument -- is consumed, not retained a second time (x86-64 leaked one
@@ -3157,6 +3162,86 @@ begin
     ''', 'caught');
 end;
 
+procedure TE2ELeakCheckTests.TestDebug_OwnedTransientSetterValues_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program P;
+    type
+      IThing = interface
+        function Val: Integer;
+      end;
+      TThing = class(TObject, IThing)
+        N: Integer;
+        function Val: Integer;
+      end;
+      TFoo = class
+        N: Integer;
+      end;
+      THolder = class
+        FFoo: TFoo;
+        FArr: array[0..1] of TFoo;
+        FThing: IThing;
+        procedure SetFoo(V: TFoo);
+        function GetItem(I: Integer): TFoo;
+        procedure SetItem(I: Integer; V: TFoo);
+        procedure SetThing(V: IThing);
+        property Foo: TFoo read FFoo write SetFoo;
+        property Items[I: Integer]: TFoo read GetItem write SetItem; default;
+        property Thing: IThing read FThing write SetThing;
+        procedure Fill;
+      end;
+    function TThing.Val: Integer; begin Result := N end;
+    procedure THolder.SetFoo(V: TFoo); begin FFoo := V end;
+    function THolder.GetItem(I: Integer): TFoo; begin Result := FArr[I] end;
+    procedure THolder.SetItem(I: Integer; V: TFoo); begin FArr[I] := V end;
+    procedure THolder.SetThing(V: IThing); begin FThing := V end;
+    function MakeFoo(N: Integer): TFoo;
+    begin
+      Result := TFoo.Create();
+      Result.N := N
+    end;
+    function MakeTThing(N: Integer): TThing;
+    begin
+      Result := TThing.Create();
+      Result.N := N
+    end;
+    function MakeThing(N: Integer): IThing;
+    begin
+      Result := MakeTThing(N)
+    end;
+    function MakeHolder: THolder;
+    begin
+      Result := THolder.Create()
+    end;
+    procedure THolder.Fill;
+    begin
+      Foo := MakeFoo(9);
+      Thing := MakeThing(9)
+    end;
+    procedure Run;
+    var H: THolder;
+    begin
+      H := THolder.Create();
+      H.Foo := MakeFoo(1);
+      H.Foo := MakeFoo(2);
+      H.Items[0] := MakeFoo(3);
+      H[1] := MakeFoo(4);
+      H[1] := MakeFoo(5);
+      H.Thing := MakeThing(6);
+      H.Thing := MakeTThing(7);
+      H.Fill();
+      MakeHolder().Foo := MakeFoo(8);
+      MakeHolder().Thing := MakeThing(8);
+      WriteLn(H.Foo.N, H[0].N, H[1].N, H.Thing.Val())
+    end;
+    begin
+      Run();
+      WriteLn('done')
+    end.
+    ''', '9359' + #10 + 'done');
+end;
+
 procedure TE2ELeakCheckTests.TestDebug_OwnedClassToInterface_NoLeak;
 begin
   AssertLeakFreeOnAll(
@@ -3209,7 +3294,6 @@ begin
     end.
     ''', '1345' + #10 + 'done');
 end;
-
 
 initialization
   RegisterTest(TE2ELeakCheckTests);
