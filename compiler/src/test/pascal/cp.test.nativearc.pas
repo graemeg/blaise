@@ -35,6 +35,12 @@ type
   published
     { an owned class transient tested with = / <>, is or Assigned is released
       afterwards (it leaked on both backends) }
+    { an owned class call result narrowed to an interface is CONSUMED by the
+      store (x86-64 retained it again and leaked one object per store), and
+      passed to an interface parameter as obj + itab (x86-64 hoisted it as a
+      single class slot, so the callee read the obj as the itab) }
+    procedure TestOwnedClassToInterface_StoreConsumes;
+    procedure TestOwnedClassToInterface_ArgPassesItab;
     procedure TestOwnedClassTest_ReleasedAfterCompare;
     procedure TestOwnedClassTest_ReleasedAfterIsAndAssigned;
     { x86-64 codegen fixes surfaced by the macOS bring-up's native-only
@@ -786,6 +792,45 @@ begin
     ReleasesIn(GenAsm(Src, TargetX86_64), 'ViaCast'));
   AssertEquals('arm64: only the parameters are released', 2,
     ReleasesIn(GenAsm(Src, TargetArm64), '_ViaCast'));
+end;
+
+const
+  SrcOwnedClassToIntf = '''
+    program P;
+    type
+      IThing = interface
+        function Val: Integer;
+      end;
+      TThing = class(TObject, IThing)
+        function Val: Integer;
+      end;
+    function TThing.Val: Integer; begin Result := 1 end;
+    function MkT: TThing; begin Result := TThing.Create() end;
+    function Use(T: IThing): Integer; begin Result := T.Val() end;
+    var T: IThing;
+    begin
+      T := MkT();
+      WriteLn(Use(MkT()))
+    end.
+    ''';
+
+procedure TNativeArcTests.TestOwnedClassToInterface_StoreConsumes;
+begin
+  AssertEquals('T := MkT() stores the +1 without a second retain', '',
+    AsmMissing(SrcOwnedClassToIntf,
+      #9'callq MkT'#10#9'pushq %rax'#10#9'movq T_obj(%rip), %rdi',
+      #9'add x1, x1, _itab_TThing_IThing@PAGEOFF'#10 +
+        #9'stp x0, x1, [sp, #-16]!'#10#9'adrp x9, _g_T@PAGE'));
+end;
+
+procedure TNativeArcTests.TestOwnedClassToInterface_ArgPassesItab;
+begin
+  AssertEquals('Use(MkT()) parks obj + itab for the call', '',
+    AsmMissing(SrcOwnedClassToIntf,
+      #9'callq MkT'#10#9'leaq itab_TThing_IThing(%rip), %rcx'#10 +
+        #9'pushq %rcx'#10#9'pushq %rax',
+      #9'bl _MkT'#10#9'adrp x1, _itab_TThing_IThing@PAGE'#10 +
+        #9'add x1, x1, _itab_TThing_IThing@PAGEOFF'#10#9'str x1, [sp, #-16]!'));
 end;
 
 initialization

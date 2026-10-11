@@ -27,6 +27,11 @@ type
     { owned transients only tested or passed on: an implicit-Self procedural
       FIELD call's result, and an object compared, is-tested or Assigned }
     procedure TestDebug_ImplicitSelfProcFieldResult_NoLeak;
+    { an owned class call result narrowed to an interface -- into a local, a
+      field, an implicit-Self field, a function Result and an interface
+      argument -- is consumed, not retained a second time (x86-64 leaked one
+      object per store, and passed the argument without its itab) }
+    procedure TestDebug_OwnedClassToInterface_NoLeak;
     procedure TestDebug_OwnedClassTested_NoLeak;
     procedure TestDebug_NoLeak_NoReport;
     procedure TestDebug_ExceptionHandlerVar_NoLeakNoOverRelease;
@@ -3151,6 +3156,60 @@ begin
     end.
     ''', 'caught');
 end;
+
+procedure TE2ELeakCheckTests.TestDebug_OwnedClassToInterface_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program t4;
+    type
+      IThing = interface
+        function Val: Integer;
+      end;
+      TThing = class(TObject, IThing)
+        N: Integer;
+        function Val: Integer;
+      end;
+      THolder = class
+        FThing: IThing;
+        procedure Fill;
+      end;
+    function TThing.Val: Integer; begin Result := N end;
+    function MakeTThing(N: Integer): TThing;
+    begin
+      Result := TThing.Create();
+      Result.N := N
+    end;
+    function AsThing(N: Integer): IThing;
+    begin
+      Result := MakeTThing(N)
+    end;
+    procedure THolder.Fill;
+    begin
+      FThing := MakeTThing(3)
+    end;
+    function Use(T: IThing): Integer;
+    begin
+      Result := T.Val()
+    end;
+    procedure Run;
+    var
+      H: THolder;
+      T: IThing;
+    begin
+      T := MakeTThing(1);
+      H := THolder.Create();
+      H.FThing := MakeTThing(2);
+      H.Fill();
+      WriteLn(T.Val(), H.FThing.Val(), AsThing(4).Val(), Use(MakeTThing(5)))
+    end;
+    begin
+      Run();
+      WriteLn('done')
+    end.
+    ''', '1345' + #10 + 'done');
+end;
+
 
 initialization
   RegisterTest(TE2ELeakCheckTests);

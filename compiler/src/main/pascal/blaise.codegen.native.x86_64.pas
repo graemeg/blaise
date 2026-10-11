@@ -4726,8 +4726,12 @@ begin
       ItabSym := 'itab_' + Self.ClassSymName(ClassRT.Name) + '_' + Self.IntfTypeInfoName(Intf.Name);
       Self.EmitExprToEax(AAsgn.Expr);
       Self.Emit(#9'pushq %rax');
-      Self.Emit(#9'movq %rax, %rdi');
-      Self.Emit(#9'callq _ClassAddRef');
+      { an owned +1 (a call result) is consumed, not retained again }
+      if not ArcExprOwnsRef(AAsgn.Expr) then
+      begin
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _ClassAddRef');
+      end;
       Self.Emit(#9'movq (%r15), %rdi');
       Self.Emit(#9'callq _ClassRelease');
       Self.Emit(#9'popq %rax');
@@ -4837,8 +4841,12 @@ begin
       ItabSym := 'itab_' + Self.ClassSymName(ClassRT.Name) + '_' + Self.IntfTypeInfoName(Intf.Name);
       Self.EmitExprToEax(AAsgn.Expr);
       Self.Emit(#9'pushq %rax');
-      Self.Emit(#9'movq %rax, %rdi');
-      Self.Emit(#9'callq _ClassAddRef');
+      { an owned +1 (a call result) is consumed, not retained again }
+      if not ArcExprOwnsRef(AAsgn.Expr) then
+      begin
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _ClassAddRef');
+      end;
       Self.Emit(#9'movq (%r15), %rdi');
       Self.Emit(#9'callq _ClassRelease');
       Self.Emit(#9'popq %rax');
@@ -5026,8 +5034,12 @@ begin
     ItabSym := 'itab_' + Self.ClassSymName(ClassRT.Name) + '_' + Self.IntfTypeInfoName(Intf.Name);
     Self.EmitExprToEax(AAsgn.Expr);       { new obj -> %rax }
     Self.Emit(#9'pushq %rax');
-    Self.Emit(#9'movq %rax, %rdi');
-    Self.Emit(#9'callq _ClassAddRef');
+    { an owned +1 (a call result) is consumed, not retained again }
+    if not ArcExprOwnsRef(AAsgn.Expr) then
+    begin
+      Self.Emit(#9'movq %rax, %rdi');
+      Self.Emit(#9'callq _ClassAddRef');
+    end;
     Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));   { old obj }
     Self.Emit(#9'callq _ClassRelease');
     Self.Emit(#9'popq %rax');              { new obj }
@@ -5298,8 +5310,12 @@ begin
     ItabSym := 'itab_' + Self.ClassSymName(ClassRT.Name) + '_' + Self.IntfTypeInfoName(Intf.Name);
     Self.EmitExprToEax(AExpr);
     Self.Emit(#9'pushq %rax');
-    Self.Emit(#9'movq %rax, %rdi');
-    Self.Emit(#9'callq _ClassAddRef');
+    { an owned +1 (a call result) is consumed, not retained again }
+    if not ArcExprOwnsRef(AExpr) then
+    begin
+      Self.Emit(#9'movq %rax, %rdi');
+      Self.Emit(#9'callq _ClassAddRef');
+    end;
     Self.Emit(#9'movq (%r15), %rdi');
     Self.Emit(#9'callq _ClassRelease');
     Self.Emit(#9'popq %rax');
@@ -20290,6 +20306,7 @@ var
   Par: TMethodParam;
   PP: TProcParamInfo;
   Arg: TASTExpr;
+  ParamIntf: TTypeDesc;
   IsVarPos: Boolean;
   ConstStr: Boolean;
   ValStr: Boolean;
@@ -20425,6 +20442,32 @@ begin
       by-value class parameter retains on entry and releases on exit), so the
       caller must release it after the call -- it leaked one object per call.
       arm64 parks the same shape for a post-call release (shape 'C'). }
+    if (not IsVarPos) and (Arg.ResolvedType <> nil) and
+       (Arg.ResolvedType.Kind = tyClass) and ArcExprOwnsRef(Arg) and
+       (((Par <> nil) and (Par.ResolvedType <> nil) and
+         (Par.ResolvedType.Kind = tyInterface)) or
+        ((PP <> nil) and (PP.TypeDesc <> nil) and
+         (PP.TypeDesc.Kind = tyInterface))) then
+    begin
+      { ... narrowed to an INTERFACE parameter (Use(MakeObj()) where Use
+        takes an IFoo): the argument occupies two slots, obj and the class's
+        static itab.  Hoisted as one class slot, only the obj was pushed and
+        the callee read it as the itab too. }
+      if Par <> nil then
+        ParamIntf := Par.ResolvedType
+      else
+        ParamIntf := PP.TypeDesc;
+      Self.EmitExprToEax(Arg);
+      Self.Emit(Format(#9'leaq itab_%s_%s(%%rip), %%rcx',
+        [Self.ClassSymName(TRecordTypeDesc(Arg.ResolvedType).Name),
+         Self.IntfTypeInfoName(ParamIntf.Name)]));
+      Self.Emit(#9'pushq %rcx');            { save itab }
+      Self.Emit(#9'pushq %rax');            { save obj (on top) }
+      Result := Result + 16;
+      ADepths.Add(Result);
+      AKinds.Add(akIntfConsume);
+      Continue;
+    end;
     if (not IsVarPos) and (Arg.ResolvedType <> nil) and
        (Arg.ResolvedType.Kind = tyClass) and ArcExprOwnsRef(Arg) then
     begin
