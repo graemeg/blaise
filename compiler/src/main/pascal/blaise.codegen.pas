@@ -185,6 +185,13 @@ function ArcExprOwnsRef(AExpr: TASTExpr): Boolean;
   index (the whole string / array pointer came back as the element). }
 function IsFoldedPropSubscript(AExpr: TASTExpr): Boolean;
 
+{ True for a constructor call's result, TFoo.Create(..): a fresh instance at
+  refcount 0 that nothing owns (ArcExprOwnsRef is False for it -- a store
+  takes the first reference).  Used directly as a method RECEIVER,
+  TFoo.Create().Run(), nothing ever took that reference, so the instance
+  leaked; a receiver site pins it (0 -> 1) and releases it after the call. }
+function ArcIsUnownedCtorResult(AExpr: TASTExpr): Boolean;
+
 { True when AExpr's value is produced by a CALL -- a function or method call,
   a method-backed property read (Obj.Prop, or a bare Prop inside a method),
   or an indexed-property read -- rather than read from storage.  An aggregate
@@ -647,6 +654,20 @@ begin
     Result := (not MC.IsConstructorCall) or MC.IsMetaclassDispatch;
     Exit;
   end;
+  { A class CAST of an owned value -- MakeObj() as TFoo, TFoo(MakeObj()) --
+    is the same pointer, so it carries the operand's +1: a consuming site
+    that saw only the cast retained it again (a store) or never released it
+    (a receiver, an argument), leaking the object on both backends. }
+  if (AExpr is TAsExpr) and (AExpr.ResolvedType.Kind = tyClass) then
+    Exit(ArcExprOwnsRef(TAsExpr(AExpr).Obj));
+  if (AExpr is TFuncCallExpr) and (AExpr.ResolvedType.Kind = tyClass) and
+     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+     (not TFuncCallExpr(AExpr).IsIndirectCall) and
+     (not TFuncCallExpr(AExpr).IsProcFieldCall) and
+     (TFuncCallExpr(AExpr).Args <> nil) and
+     (TFuncCallExpr(AExpr).Args.Count = 1) and
+     SameText(TFuncCallExpr(AExpr).Name, AExpr.ResolvedType.Name) then
+    Exit(ArcExprOwnsRef(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])));
   if AExpr is TFuncCallExpr then
   begin
     { ClassCreate(Cls, ...) is _ClassCreate (+1) whether or not a declared
@@ -709,6 +730,19 @@ begin
     Result := FA.IsMethodCall or
               ((FA.PropRead <> nil) and (FA.PropRead.ReadMethod <> ''));
   end;
+end;
+
+function ArcIsUnownedCtorResult(AExpr: TASTExpr): Boolean;
+begin
+  Result := False;
+  if (AExpr = nil) or (AExpr.ResolvedType = nil) or
+     (AExpr.ResolvedType.Kind <> tyClass) then
+    Exit;
+  if AExpr is TMethodCallExpr then
+    Result := TMethodCallExpr(AExpr).IsConstructorCall and
+              not TMethodCallExpr(AExpr).IsMetaclassDispatch
+  else if AExpr is TFieldAccessExpr then
+    Result := TFieldAccessExpr(AExpr).IsConstructorCall;
 end;
 
 function IsFoldedPropSubscript(AExpr: TASTExpr): Boolean;

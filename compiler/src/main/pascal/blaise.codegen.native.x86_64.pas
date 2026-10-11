@@ -4710,6 +4710,7 @@ var
   LFail:   string;
   LEnd:    string;
   ISFld:   TFieldInfo;
+  WeakPar: TMethodParam;
 begin
   Intf := TInterfaceTypeDesc(AAsgn.ResolvedLhsType);
   { Implicit Self.Field assignment: the fat pointer lives inside the object at
@@ -4997,6 +4998,36 @@ begin
     Exit;
   end;
 
+  { [Weak] F := <any other interface source>: the arms below are all STRONG
+    stores, so a weak target fed a call result or a class value was retained
+    like a normal variable -- it never nilled and leaked the +1.  Evaluate the
+    pair as for an interface argument (obj, then itab on top), register the
+    obj half in the weak table, store the itab, and drop an owned +1: nothing
+    else holds it, so it dies and the slot is nilled (P3-6). }
+  if AAsgn.IsWeakLhs and not ((AAsgn.Expr is TIdentExpr) and
+     (AAsgn.Expr.ResolvedType <> nil) and
+     (AAsgn.Expr.ResolvedType.Kind = tyInterface)) then
+  begin
+    WeakPar := TMethodParam.Create();
+    try
+      WeakPar.ResolvedType := Intf;
+      Self.EmitMethodArgPush(WeakPar, AAsgn.Expr);   { (itab, obj) }
+    finally
+      WeakPar.Free();
+    end;
+    Self.Emit(#9'popq %rax');                 { itab }
+    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
+    Self.Emit(#9'movq (%rsp), %rsi');         { obj }
+    Self.Emit(Format(#9'leaq %s, %%rdi', [ObjOp]));
+    Self.Emit(#9'callq _WeakAssign');
+    Self.Emit(#9'popq %rdi');                 { obj }
+    if NativeExprOwnsRef(AAsgn.Expr) or Self.IsIntfCallResult(AAsgn.Expr) or
+       ((AAsgn.Expr is TMethodCallExpr) and
+        not TMethodCallExpr(AAsgn.Expr).IsConstructorCall) then
+      Self.Emit(#9'callq _ClassRelease');
+    Exit;
+  end;
+
   { F := T as IFoo — runtime itab lookup via _GetItab(obj, typeinfo_IFoo).
     A nil result means the cast failed; raise EInvalidCast. }
   if (AAsgn.Expr is TAsExpr) and
@@ -5014,9 +5045,14 @@ begin
     LEnd  := Self.NewLabel('as_end');
     Self.Emit(#9'testq %rax, %rax');
     Self.Emit(#9'jz ' + LFail);
-    { Cast OK: addref new obj, release old, store obj + itab. }
-    Self.Emit(#9'movq 8(%rsp), %rdi');     { obj }
-    Self.Emit(#9'callq _ClassAddRef');
+    { Cast OK: addref new obj, release old, store obj + itab.  An OWNED
+      source (F := MakeObj() as IFoo) hands its +1 over -- retaining it again
+      leaked one object per cast. }
+    if not NativeExprOwnsRef(AE.Obj) then
+    begin
+      Self.Emit(#9'movq 8(%rsp), %rdi');   { obj }
+      Self.Emit(#9'callq _ClassAddRef');
+    end;
     Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));   { old obj }
     Self.Emit(#9'callq _ClassRelease');
     Self.Emit(#9'popq %rax');              { itab }
@@ -6572,6 +6608,12 @@ begin
     if FAE.Base <> nil then
     begin
       Self.EmitExprToEax(FAE.Base);
+      { An OWNED transient base (Bump(MakeObj().N), MakeObj().FChild.Free())
+        must outlive every use of the slot address: defer its release to the
+        statement boundary -- it leaked.  (With every slot busy it still
+        leaks, as before -- never a use-after-free.) }
+      if FAE.IsClassAccess and NativeExprOwnsRef(FAE.Base) then
+        Self.DeferNativeClassRelease();
       Self.Emit(#9'movq %rax, %rdx');
     end
     else if FAE.IsImplicitSelf then
@@ -8194,7 +8236,8 @@ var
   DivOkLbl: string;
   HasImm: Boolean;
   ImmV: Int64;
-  SuppOut: string;
+   SuppOut: string;
+   SuppOwned: Boolean;
   LSuppNo: string;
   LSuppEnd: string;
   SCAT: TStaticArrayTypeDesc;
@@ -9027,6 +9070,31 @@ begin
         Self.Emit(#9'movq %rbx, %rax');
         Self.Emit(#9'popq %rbx');
       end;
+      Exit;
+    end;
+    if SameText(FC.Name, 'OrdAt') and (FC.Args.Count = 2) and
+       ArcBuiltinStrArgOwnsRef(TASTExpr(FC.Args.Items[0])) then
+    begin
+      { OrdAt(MakeStr(), I) / OrdAt(A + B, I): the string transient is
+        disposed once the byte is read -- it leaked (P3-2).  An rc=0 one is
+        pinned first so the release balances. }
+      Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
+      Self.Emit(#9'pushq %rax');
+      Self.Emit(#9'pushq %rax');           { [str][str]: %rsp stays aligned }
+      if ArcExprIsUnownedStrTransient(TASTExpr(FC.Args.Items[0])) then
+      begin
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _StringAddRef');
+      end;
+      Self.EmitExprToEax(TASTExpr(FC.Args.Items[1]));
+      Self.Emit(#9'movl %eax, %esi');
+      Self.Emit(#9'movq (%rsp), %rdi');
+      Self.Emit(#9'callq _OrdAt');
+      Self.Emit(#9'movq %rax, (%rsp)');    { the byte }
+      Self.Emit(#9'movq 8(%rsp), %rdi');
+      Self.Emit(#9'callq _StringRelease');
+      Self.Emit(#9'popq %rax');
+      Self.Emit(#9'addq $8, %rsp');
       Exit;
     end;
     if SameText(FC.Name, 'OrdAt') and (FC.Args.Count = 2) then
@@ -11451,14 +11519,30 @@ begin
   if AExpr is TSupportsExpr then
   begin
     SuppOut := TSupportsExpr(AExpr).OutVarName;
+    { An OWNED object (Supports(MakeObj(), IFoo)) is released after the test
+      -- it leaked; with an out-var, a hit hands the +1 to the out-var. }
+    SuppOwned := NativeExprOwnsRef(TSupportsExpr(AExpr).Obj);
     Self.EmitExprToEax(TSupportsExpr(AExpr).Obj);
     if SuppOut = '' then
     begin
       { 2-arg form: boolean result only. }
+      if SuppOwned then
+      begin
+        Self.Emit(#9'pushq %rax');           { the object, released below }
+        Self.Emit(#9'pushq %rax');           { (keeps %rsp 16-aligned) }
+      end;
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
         [Self.IntfTypeInfoName(IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName))]));
       Self.Emit(#9'callq _ImplementsInterface');
+      if SuppOwned then
+      begin
+        Self.Emit(#9'movq %rax, (%rsp)');    { the result }
+        Self.Emit(#9'movq 8(%rsp), %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+        Self.Emit(#9'popq %rax');
+        Self.Emit(#9'addq $8, %rsp');
+      end;
       Exit;
     end;
     { 3-arg form.  Keep obj on the stack across the helper calls. }
@@ -11480,9 +11564,13 @@ begin
       [Self.IntfTypeInfoName(IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName))]));
     Self.Emit(#9'callq _GetItab');           { itab -> %rax }
     Self.Emit(#9'pushq %rax');               { (itab, obj) }
-    { ARC: retain new obj, release the out-var's old obj slot. }
-    Self.Emit(#9'movq 8(%rsp), %rdi');       { obj }
-    Self.Emit(#9'callq _ClassAddRef');
+    { ARC: retain new obj (an owned one is consumed), release the out-var's
+      old obj slot. }
+    if not SuppOwned then
+    begin
+      Self.Emit(#9'movq 8(%rsp), %rdi');     { obj }
+      Self.Emit(#9'callq _ClassAddRef');
+    end;
     Self.Emit(Format(#9'movq %s, %%rdi',
       [Self.IntfObjOperand(SuppOut, TSupportsExpr(AExpr).OutVarIsGlobal)]));
     Self.Emit(#9'callq _ClassRelease');
@@ -11495,6 +11583,11 @@ begin
     Self.Emit(#9'movl $1, %eax');
     Self.Emit(#9'jmp ' + LSuppEnd);
     Self.Emit(LSuppNo + ':');
+    if SuppOwned then
+    begin
+      Self.Emit(#9'movq (%rsp), %rdi');      { the owned obj }
+      Self.Emit(#9'callq _ClassRelease');
+    end;
     Self.Emit(#9'addq $8, %rsp');            { discard saved obj }
     Self.Emit(#9'movl $0, %eax');
     Self.Emit(LSuppEnd + ':');
@@ -11989,7 +12082,13 @@ begin
       raise ENativeCodeGenError.Create(
         'native backend: var/out field argument has no resolved field info');
     if FAE.Base <> nil then
-      Self.EmitExprToEax(FAE.Base)
+    begin
+      Self.EmitExprToEax(FAE.Base);
+      { an owned transient base (Bump(MakeObj().N)) lives to the statement
+        boundary, past the call that writes through the address }
+      if FAE.IsClassAccess and NativeExprOwnsRef(FAE.Base) then
+        Self.DeferNativeClassRelease();
+    end
     else if FAE.IsImplicitSelf then
     begin
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
@@ -13192,8 +13291,11 @@ begin
     end
     else if ACall.ObjExpr <> nil then
     begin
-      if (ACall.ObjExpr is TFieldAccessExpr) or (ACall.ObjExpr is TIdentExpr) or
-         ArcIsArrayElemSlot(ACall.ObjExpr) then
+      if (((ACall.ObjExpr is TFieldAccessExpr) and
+           not ((TFieldAccessExpr(ACall.ObjExpr).FieldInfo = nil) and
+                NativeExprOwnsRef(ACall.ObjExpr))) or
+          (ACall.ObjExpr is TIdentExpr) or
+          ArcIsArrayElemSlot(ACall.ObjExpr)) then
       begin
         { L-value receiver (Def.ClassDef.Free(), A[I].Free()): release AND nil
           the slot.  A stale pointer left here aliases the next allocation of
@@ -13209,6 +13311,9 @@ begin
       end
       else
       begin
+        { an owned +1 temporary -- a call result, or a GETTER read
+          (H.Foo.Free(), Foo read GetFoo) -- has no slot to nil: Free drops
+          that reference }
         Self.EmitExprToEax(ACall.ObjExpr);
         Self.Emit(#9'movq %rax, %rdi');
         Self.Emit(#9'callq _ClassRelease');
@@ -22360,7 +22465,20 @@ begin
     With every _pendrel slot in use it leaks, as before -- never a UAF. }
   if (ARecv.ResolvedType <> nil) and (ARecv.ResolvedType.Kind = tyClass) and
      NativeExprOwnsRef(ARecv) then
+    Self.DeferNativeClassRelease()
+  else if ArcIsUnownedCtorResult(ARecv) and
+          (FPendingRelCount < PENDREL_SLOTS) then
+  begin
+    { TFoo.Create().Run(): the fresh rc=0 instance is pinned, then released
+      with the owned receivers at the end of the statement -- it leaked }
+    Self.Emit(#9'pushq %rax');
+    Self.Emit(#9'pushq %rax');
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(#9'callq _ClassAddRef');
+    Self.Emit(#9'popq %rax');
+    Self.Emit(#9'addq $8, %rsp');
     Self.DeferNativeClassRelease();
+  end;
 end;
 
 procedure TX86_64Backend.EmitRecvBufFieldReleases(ARecvExpr: TASTExpr);

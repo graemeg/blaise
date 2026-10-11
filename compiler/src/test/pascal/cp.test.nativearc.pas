@@ -43,6 +43,14 @@ type
       one is released once read; a discarded string result is released
       (BUG-20261011-owned-dynarray-arg-leak -- the first two leaked on both
       ISAs, the discard on x86-64) }
+    { P3 owned-transient corners: the object / string a call hands back is
+      released after Supports and OrdAt use it; a constructor result used as
+      a receiver is pinned (0 -> 1) for the post-call release; an owned
+      interface stored into a [Weak] variable is registered and released }
+    procedure TestOwnedTransient_SupportsReleasesObject;
+    procedure TestOwnedTransient_OrdAtReleasesString;
+    procedure TestCtorResultReceiver_Pinned;
+    procedure TestOwnedIntoWeakInterface_Released;
     procedure TestOwnedDynArrayArg_ReleasedAfterCall;
     procedure TestOwnedDynArrayLength_Released;
     procedure TestDiscardedStringResult_Released;
@@ -882,6 +890,70 @@ begin
     AsmMissing(SrcOwnedDynArray,
       #9'callq MakeStr'#10#9'movq %rax, %rdi'#10#9'callq _StringRelease',
       #9'bl _MakeStr'#10#9'bl __StringRelease'));
+end;
+
+const
+  SrcOwnedCorners = '''
+    program P;
+    type
+      IThing = interface
+        function Val: Integer;
+      end;
+      TThing = class(TObject, IThing)
+        function Val: Integer;
+        procedure Go;
+      end;
+    function TThing.Val: Integer; begin Result := 3 end;
+    procedure TThing.Go; begin end;
+    function MkObj: TObject; begin Result := TThing.Create() end;
+    function MkI: IThing; begin Result := TThing.Create() end;
+    function MkS: string; begin Result := 'ab' end;
+    var B: Boolean; N: Integer; [Weak] WI: IThing;
+    begin
+      B := Supports(MkObj(), IThing);
+      N := OrdAt(MkS(), 1);
+      TThing.Create().Go();
+      WI := MkI()
+    end.
+    ''';
+
+procedure TNativeArcTests.TestOwnedTransient_SupportsReleasesObject;
+begin
+  AssertEquals('Supports(MkObj(), IThing) releases the object', '',
+    AsmMissing(SrcOwnedCorners,
+      #9'callq _ImplementsInterface'#10#9'movq %rax, (%rsp)'#10 +
+        #9'movq 8(%rsp), %rdi'#10#9'callq _ClassRelease',
+      #9'bl __GetItab'#10#9'cmp x0, #0'#10#9'cset x0, ne'#10 +
+        #9'ldr x1, [sp]'#10#9'str x0, [sp]'#10#9'mov x0, x1'#10 +
+        #9'bl __ClassRelease'));
+end;
+
+procedure TNativeArcTests.TestOwnedTransient_OrdAtReleasesString;
+begin
+  AssertEquals('OrdAt(MkS(), 1) releases the string', '',
+    AsmMissing(SrcOwnedCorners,
+      #9'callq _OrdAt'#10#9'movq %rax, (%rsp)'#10#9'movq 8(%rsp), %rdi'#10 +
+        #9'callq _StringRelease',
+      #9'bl __OrdAt'#10#9'ldr x1, [sp]'#10#9'str x0, [sp]'#10 +
+        #9'mov x0, x1'#10#9'bl __StringRelease'));
+end;
+
+procedure TNativeArcTests.TestCtorResultReceiver_Pinned;
+begin
+  AssertEquals('TThing.Create().Go() pins the fresh instance', '',
+    AsmMissing(SrcOwnedCorners,
+      #9'movq %rcx, (%rax)'#10#9'pushq %rax'#10#9'pushq %rax'#10 +
+        #9'movq %rax, %rdi'#10#9'callq _ClassAddRef',
+      #9'str x9, [x0]'#10#9'str x0, [sp, #-16]!'#10#9'bl __ClassAddRef'));
+end;
+
+procedure TNativeArcTests.TestOwnedIntoWeakInterface_Released;
+begin
+  AssertEquals('[Weak] WI := MkI() registers, then releases the +1', '',
+    AsmMissing(SrcOwnedCorners,
+      #9'callq _WeakAssign'#10#9'addq $8, %rsp'#10#9'popq %rdi'#10 +
+        #9'callq _ClassRelease',
+      #9'bl __WeakAssign'#10#9'ldp x0, x1, [sp], #16'#10#9'bl __ClassRelease'));
 end;
 
 initialization

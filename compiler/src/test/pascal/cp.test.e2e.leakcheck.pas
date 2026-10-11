@@ -35,6 +35,16 @@ type
     { a string-returning function called as a statement releases the result
       it discards (x86-64 released only a class result) }
     procedure TestDebug_DiscardedStringResult_NoLeak;
+    { P3 owned-transient corners, each leaked or was NotYet:
+      ClassName / ClassType / Supports / is-free `as` and hard casts of a
+      call result; a constructor result as a receiver; Free of a getter read
+      and through an owned base; a var argument through an owned base;
+      OrdAt of a string transient; an owned value into [Weak] targets }
+    procedure TestDebug_OwnedTransientCastsAndTests_NoLeak;
+    procedure TestDebug_CtorResultReceiver_NoLeak;
+    procedure TestDebug_FreeAndVarArgThroughOwnedBase_NoLeak;
+    procedure TestDebug_OrdAtStringTransient_NoLeak;
+    procedure TestDebug_OwnedIntoWeakTargets_NoLeak;
     { an owned class call result narrowed to an interface -- into a local, a
       field, an implicit-Self field, a function Result and an interface
       argument -- is consumed, not retained a second time (x86-64 leaked one
@@ -3319,6 +3329,213 @@ begin
       WriteLn('done')
     end.
     ''', 'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_OwnedTransientCastsAndTests_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program p34;
+    uses SysUtils;
+    type
+      IThing = interface
+        function Val: Integer;
+      end;
+      TThing = class(TObject, IThing)
+        function Val: Integer;
+      end;
+    function TThing.Val: Integer; begin Result := 3 end;
+    function MakeThing: TThing; begin Result := TThing.Create() end;
+    function MakeObj: TObject; begin Result := TThing.Create() end;
+    procedure Run;
+    var I: IThing; T: TThing;
+    begin
+      WriteLn(MakeThing().ClassName);
+      if MakeThing().ClassType = TThing then WriteLn('type ok');
+      if Supports(MakeObj(), IThing) then WriteLn('supports');
+      T := MakeObj() as TThing;
+      WriteLn(T.Val());
+      I := MakeObj() as IThing;
+      WriteLn(I.Val());
+      WriteLn((MakeObj() as TThing).Val());
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''', 'TThing' + #10 + 'type ok' + #10 + 'supports' + #10 + '3' + #10 + '3' + #10 + '3' + #10 + 'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_CtorResultReceiver_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program q17;
+    type
+      TC = class
+        procedure Go;
+        function Val: Integer;
+      end;
+    procedure TC.Go;
+    begin
+      WriteLn('go');
+    end;
+    function TC.Val: Integer;
+    begin
+      Result := 7;
+    end;
+    begin
+      TC.Create().Go();
+      WriteLn(TC.Create().Val());
+    end.
+    ''', 'go' + #10 + '7');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_FreeAndVarArgThroughOwnedBase_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program p33;
+    type
+      TFoo = class
+        N: Integer;
+        destructor Destroy; override;
+      end;
+      THolder = class
+        FFoo: TFoo;
+        function GetFoo: TFoo;
+        property Foo: TFoo read GetFoo;
+      end;
+    destructor TFoo.Destroy;
+    begin
+      WriteLn('destroy ', N);
+      inherited Destroy();
+    end;
+    function THolder.GetFoo: TFoo; begin Result := FFoo end;
+    function MakeFoo(N: Integer): TFoo;
+    begin
+      Result := TFoo.Create();
+      Result.N := N;
+    end;
+    function MakeHolder: THolder;
+    begin
+      Result := THolder.Create();
+      Result.FFoo := MakeFoo(9);
+    end;
+    var
+      H: THolder;
+    begin
+      MakeFoo(1).Free();
+      H := MakeHolder();
+      H.Foo.Free();
+      WriteLn('mid');
+      MakeHolder().FFoo.Free();
+      WriteLn('done');
+    end.
+    ''', 'destroy 1' + #10 + 'mid' + #10 + 'destroy 9' + #10 + 'done');
+  AssertLeakFreeOnAll(
+    '''
+    program p38;
+    type
+      TPt = record
+        X, Y: Integer;
+        function Sum: Integer;
+      end;
+      THolder = class
+        P: TPt;
+        N: Integer;
+      end;
+    function TPt.Sum: Integer; begin Result := X + Y end;
+    function MakeHolder: THolder;
+    begin
+      Result := THolder.Create();
+      Result.P.X := 2;
+      Result.P.Y := 5;
+      Result.N := 4;
+    end;
+    procedure Bump(var V: Integer); begin V := V + 1 end;
+    procedure Run;
+    var
+      Q: ^TPt;
+    begin
+      WriteLn(MakeHolder().P.Sum());
+      Bump(MakeHolder().N);
+      WriteLn('ok');
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''', '7' + #10 + 'ok' + #10 + 'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_OrdAtStringTransient_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program p32;
+    uses SysUtils;
+    function MakeStr(N: Integer): string;
+    begin
+      Result := 'ab' + IntToStr(N);
+    end;
+    procedure Run;
+    var I, S: Integer;
+    begin
+      S := 0;
+      for I := 1 to 3 do
+        S := S + OrdAt(MakeStr(I), 1) + OrdAt('x' + IntToStr(I), 0);
+      WriteLn(S);
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''', '654' + #10 + 'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_OwnedIntoWeakTargets_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program p36;
+    type
+      IThing = interface
+        function Val: Integer;
+      end;
+      TThing = class(TObject, IThing)
+        function Val: Integer;
+        destructor Destroy; override;
+      end;
+    function TThing.Val: Integer; begin Result := 3 end;
+    destructor TThing.Destroy;
+    begin
+      WriteLn('destroy');
+      inherited Destroy();
+    end;
+    function MakeThing: TThing; begin Result := TThing.Create() end;
+    function MakeI: IThing; begin Result := TThing.Create() end;
+    procedure Run;
+    var
+      [Weak] W: TThing;
+      [Weak] WI: IThing;
+      S: TThing;
+    begin
+      W := MakeThing();
+      WriteLn(Assigned(W));
+      S := MakeThing();
+      W := S;
+      WriteLn(Assigned(W));
+      S := nil;
+      WriteLn(Assigned(W));
+      WI := MakeI();
+      WriteLn(Assigned(WI));
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''', 'destroy' + #10 + 'False' + #10 + 'True' + #10 + 'destroy' + #10 + 'False' + #10 + 'destroy' + #10 + 'False' + #10 + 'done');
 end;
 
 initialization

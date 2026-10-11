@@ -1583,10 +1583,14 @@ begin
   begin
     if AFA.IsClassAccess then
     begin
-      { chained CLASS base: the base expression yields the instance pointer }
-      if ArcExprOwnsRef(AFA.Base) then
-        NotYet('record address on an owned transient base', AFA);
+      { chained CLASS base: the base expression yields the instance pointer.
+        An OWNED transient base (MakeObj().Rec.Sum(), Bump(MakeObj().N))
+        must outlive every use of the address, so its release is deferred to
+        the statement boundary (P3-7) }
       Self.EmitExprToX0(AFA.Base);
+      if ArcExprOwnsRef(AFA.Base) and not DeferNativeClassRelease() then
+        NotYet('field address on an owned transient base with all _pendrel '
+          + 'slots busy', AFA);
     end
     else if (AFA.Base.ResolvedType <> nil) and
             (AFA.Base.ResolvedType.Kind = tyRecord) then
@@ -4245,6 +4249,7 @@ var
   Lit: string;
   Idx, I: Integer;
   EmptyArgs: TObjectList;
+  Owned: Boolean;
 begin
   { ClassCreate carries the resolved CONSTRUCTOR in ResolvedDecl, so it must
     be claimed before any arm that lowers a resolved call as a plain call }
@@ -5156,14 +5161,28 @@ begin
     if SameText(TFuncCallExpr(AExpr).Name, 'OrdAt') then
     begin
       { OrdAt(S, I): byte value at 0-based index — (str, int) args }
-      if ArcExprOwnsRef(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])) then
-        NotYet('owned transient argument to OrdAt', AExpr);
+      { a string transient (OrdAt(MakeStr(), I), OrdAt(A + B, I)) is parked,
+        pinned when rc=0, and disposed once the byte is read (P3-2) }
+      Owned := ArcBuiltinStrArgOwnsRef(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      if Owned then
+      begin
+        Self.EmitOwnedStrTransientPin(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+        EmitPushX0();                   { parked for the release }
+      end;
       EmitPushX0();
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
       Self.Emit(#9'mov x1, x0');
       EmitPopTo('x0');
       EmitCallSym('_OrdAt');
+      if Owned then
+      begin
+        Self.Emit(#9'ldr x1, [sp]');
+        Self.Emit(#9'str x0, [sp]');    { the byte }
+        Self.Emit(#9'mov x0, x1');
+        EmitOwnedStrTransientRelease(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+        EmitPopTo('x0');
+      end;
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'ChangeFileExt') then
@@ -5974,9 +5993,12 @@ begin
       base is released after the read. }
     if TFieldAccessExpr(AExpr).Base <> nil then
     begin
-      if ArcExprOwnsRef(TFieldAccessExpr(AExpr).Base) then
-        NotYet('ClassName/ClassType on an owned transient base', AExpr);
       Self.EmitExprToX0(TFieldAccessExpr(AExpr).Base);
+      { MakeObj().ClassName: the owned object is parked and released after
+        the read -- the name and the typeinfo are static rodata, not owned
+        by the instance }
+      if ArcExprOwnsRef(TFieldAccessExpr(AExpr).Base) then
+        EmitPushX0();
     end
     else if TFieldAccessExpr(AExpr).IsImplicitSelf then
       EmitLoadSlot('x0', 'Self')
@@ -5987,6 +6009,9 @@ begin
     Self.Emit(#9'ldr x0, [x0]');    { typeinfo }
     if TFieldAccessExpr(AExpr).IsClassNameAccess then
       Self.Emit(#9'ldr x0, [x0, #16]');   { name string ptr }
+    if (TFieldAccessExpr(AExpr).Base <> nil) and
+       ArcExprOwnsRef(TFieldAccessExpr(AExpr).Base) then
+      EmitReleaseParkedClass();
     Exit;
   end;
   if (AExpr is TFieldAccessExpr) and
@@ -6243,15 +6268,20 @@ begin
     { Supports(Obj, IFoo): non-nil itab in the impllist chain.  The
       3-arg form populates the out-var's fat pointer on success and
       leaves it UNTOUCHED on failure (QBE parity). }
-    if ArcExprOwnsRef(TSupportsExpr(AExpr).Obj) then
-      NotYet('Supports on an owned transient', AExpr);
+    { An OWNED object (Supports(MakeObj(), IFoo)) is released after the test;
+      with an out-var, a hit hands the +1 to the out-var instead. }
+    Owned := ArcExprOwnsRef(TSupportsExpr(AExpr).Obj);
     if TSupportsExpr(AExpr).OutVarName = '' then
     begin
       Self.EmitExprToX0(TSupportsExpr(AExpr).Obj);
+      if Owned then
+        EmitPushX0();
       EmitTypeinfoAddr('x1', IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName));
       EmitCallSym('_GetItab');
       Self.Emit(#9'cmp x0, #0');
       Self.Emit(#9'cset x0, ne');
+      if Owned then
+        EmitReleaseParkedClass();
       Exit;
     end;
     Self.EmitExprToX0(TSupportsExpr(AExpr).Obj);
@@ -6264,8 +6294,11 @@ begin
     Self.Emit(Format(#9'cbz x0, %s', [CondName]));
     EmitPopTo('x0');
     EmitStoreSlot('x0', TSupportsExpr(AExpr).OutVarName + '_itab');
-    Self.Emit(#9'ldr x0, [sp]');
-    EmitCallSym('_ClassAddRef');
+    if not Owned then
+    begin
+      Self.Emit(#9'ldr x0, [sp]');
+      EmitCallSym('_ClassAddRef');
+    end;
     EmitLoadSlot('x0', TSupportsExpr(AExpr).OutVarName);
     EmitCallSym('_ClassRelease');
     EmitPopTo('x0');
@@ -6273,6 +6306,11 @@ begin
     Self.Emit(#9'movz x0, #1');
     Self.Emit(Format(#9'b %s', [Lit]));
     Self.Emit(CondName + ':');
+    if Owned then
+    begin
+      Self.Emit(#9'ldr x0, [sp, #16]');            { the owned obj }
+      EmitCallSym('_ClassRelease');
+    end;
     Self.Emit(#9'add sp, sp, #32');
     Self.Emit(#9'movz x0, #0');
     Self.Emit(Lit + ':');
@@ -7387,7 +7425,10 @@ end;
 
 procedure TArm64Backend.EmitPropReadCall(AFld: TFieldAccessExpr;
   const ASret: string);
+var
+  ParkSlot: string;
 begin
+  ParkSlot := '';
   { method-backed property read: a getter call on the receiver.  The value
     lands wherever the getter's return convention puts it (x0 for scalars,
     d0 for floats) — callers pick the register that matches the context.
@@ -7445,10 +7486,17 @@ begin
       borrows from it — alive for the rest of the statement.  x0 is untouched
       by the frame store, so it stays the receiver.  This mirrors x86-64,
       which spills such a base to a _pendrel slot for field reads. }
+    { With every slot busy, park the base in a transient slot instead and
+      release it as soon as the getter returns -- what x86-64 always does.
+      A managed getter result is a +1 of its own, so it does not depend on
+      the base staying alive (P3-5). }
     if ArcExprOwnsRef(AFld.Base) then
       if not DeferNativeClassRelease() then
-        NotYet('property read on an owned transient base with all _pendrel '
-          + 'slots busy', AFld);
+      begin
+        ParkSlot := StrTransSlot(FStrTransTop);
+        FStrTransTop := FStrTransTop + 1;
+        EmitStoreSlot('x0', ParkSlot);
+      end;
   end
   else if AFld.IsImplicitSelf then
     EmitLoadSlot('x0', 'Self')
@@ -7487,6 +7535,19 @@ begin
   else
     Self.Emit(Format(#9'bl %s',
       [PropAccessorSym(AFld.PropOwnerType, AFld.PropRead.ReadMethod)]));
+  if ParkSlot <> '' then
+  begin
+    { release the parked base, keeping every result register }
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+    Self.Emit(#9'stp d0, d1, [sp, #-16]!');
+    Self.Emit(#9'stp d2, d3, [sp, #-16]!');
+    EmitLoadSlot('x0', ParkSlot);
+    EmitCallSym('_ClassRelease');
+    Self.Emit(#9'ldp d2, d3, [sp], #16');
+    Self.Emit(#9'ldp d0, d1, [sp], #16');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+    FStrTransTop := FStrTransTop - 1;
+  end;
 end;
 
 function TArm64Backend.RecordPropRead(AExpr: TASTExpr): TFieldAccessExpr;
@@ -7535,6 +7596,7 @@ end;
 procedure TArm64Backend.EmitInterfaceAssign(AAsgn: TAssignment);
 var
   ItabSym: string;
+  Owned: Boolean;
 begin
   { fat-pointer stores: the obj half co-owns the backing instance (retain
     on store unless the source owns a +1, release the old); the itab half
@@ -7545,23 +7607,21 @@ begin
       half is plain data }
     if AAsgn.IsVarParam or (AAsgn.ImplicitSelfField <> nil) then
       NotYet('[Weak] interface assignment to this target', AAsgn);
-    if ArcExprOwnsRef(AAsgn.Expr) then
-      NotYet('owned transient into a [Weak] interface', AAsgn);
-    if (AAsgn.Expr.ResolvedType <> nil) and
-       (AAsgn.Expr.ResolvedType.Kind = tyClass) then
-    begin
-      Self.EmitExprToX0(AAsgn.Expr);
-      Self.Emit(#9'mov x1, x0');
-      EmitSlotAddr('x0', AAsgn.Name);
-      EmitCallSym('_WeakAssign');
-      ItabSym := IntfItabSym(TRecordTypeDesc(AAsgn.Expr.ResolvedType).Name,
-        AAsgn.ResolvedLhsType.Name);
-      Self.Emit(Format(#9'adrp x0, %s@PAGE', [ItabSym]));
-      Self.Emit(Format(#9'add x0, x0, %s@PAGEOFF', [ItabSym]));
-      EmitStoreSlot('x0', AAsgn.Name + '_itab');
-      Exit;
-    end;
-    NotYet('[Weak] interface assignment from this expression', AAsgn);
+    { any interface source (a class value narrowed, an interface variable,
+      field or call result) through the shared pair lowering.  The obj half
+      is registered in the weak table; an OWNED obj (WI := MakeI()) is then
+      released -- nothing else holds it, so it dies and the slot is nilled,
+      as for a [Weak] class variable (P3-6) }
+    Owned := EmitIntfPairToX0X1(AAsgn.Expr, AAsgn.ResolvedLhsType);
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [obj, itab] }
+    EmitStoreSlot('x1', AAsgn.Name + '_itab');
+    Self.Emit(#9'mov x1, x0');
+    EmitSlotAddr('x0', AAsgn.Name);
+    EmitCallSym('_WeakAssign');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+    if Owned and not (AAsgn.Expr is TNilLiteral) then
+      EmitCallSym('_ClassRelease');
+    Exit;
   end;
   if (AAsgn.Expr is TAsExpr) and (AAsgn.Expr.ResolvedType <> nil) and
      (AAsgn.Expr.ResolvedType.Kind = tyInterface) then
@@ -7614,8 +7674,6 @@ var
   OkL: string;
 begin
   AE := TAsExpr(AAsgn.Expr);
-  if ArcExprOwnsRef(AE.Obj) then
-    NotYet('as-cast of an owned transient', AAsgn);
   Self.EmitExprToX0(AE.Obj);
   EmitPushX0();                     { the obj value }
   { load the typeinfo address through EmitTypeinfoAddr so the symbol matches the
@@ -7627,9 +7685,13 @@ begin
   EmitRaiseInvalidCast();
   Self.Emit(OkL + ':');
   EmitStoreSlot('x0', AAsgn.Name + '_itab');
-  { obj half with the usual ARC: retain new (borrowed source), release old }
-  Self.Emit(#9'ldr x0, [sp]');      { peek the obj }
-  EmitCallSym('_ClassAddRef');
+  { obj half with the usual ARC: retain new (borrowed source), release old.
+    An OWNED source (I := MakeObj() as IFoo) hands its +1 to the variable. }
+  if not ArcExprOwnsRef(AE.Obj) then
+  begin
+    Self.Emit(#9'ldr x0, [sp]');    { peek the obj }
+    EmitCallSym('_ClassAddRef');
+  end;
   EmitLoadSlot('x0', AAsgn.Name);
   EmitCallSym('_ClassRelease');
   EmitPopTo('x0');
@@ -7674,8 +7736,8 @@ begin
     { Obj as IFoo as a value (an argument, a field store): the itab comes
       from _GetItab, a failed cast raises EInvalidCast, and the obj half is
       a borrow of the source -- the same lowering as EmitInterfaceAsCast }
-    if ArcExprOwnsRef(TAsExpr(AExpr).Obj) then
-      NotYet('as-cast of an owned transient', AExpr);
+    { (an OWNED source -- MakeObj() as IFoo -- yields an owned obj half) }
+    Result := ArcExprOwnsRef(TAsExpr(AExpr).Obj);
     Self.EmitExprToX0(TAsExpr(AExpr).Obj);
     EmitPushX0();                     { the obj value }
     EmitTypeinfoAddr('x1', TAsExpr(AExpr).TypeName);
@@ -8086,13 +8148,20 @@ begin
     if AAsgn.IsWeakLhs then
     begin
       { weak slot: registered in the weak table, no refcount held.  An
-        owned +1 RHS would leak into a non-owning slot — keep it honest }
-      if ArcExprOwnsRef(AAsgn.Expr) then
-        NotYet('owned transient into a [Weak] variable', AAsgn);
+        owned +1 RHS (W := MakeObj()) is registered, then its +1 dropped:
+        nothing else holds the object, so it dies and the weak table nils
+        the slot -- the x86-64 behaviour (P3-6) }
       Self.EmitExprToX0(AAsgn.Expr);
+      if ArcExprOwnsRef(AAsgn.Expr) then
+        EmitPushX0();
       Self.Emit(#9'mov x1, x0');
       EmitSlotAddr('x0', AAsgn.Name);
       EmitCallSym('_WeakAssign');
+      if ArcExprOwnsRef(AAsgn.Expr) then
+      begin
+        EmitPopTo('x0');
+        EmitCallSym('_ClassRelease');
+      end;
       Exit;
     end;
     { same ARC discipline as strings, through _Class* }
@@ -15054,11 +15123,9 @@ begin
     EmitSlotAddr('x0', TFieldAccessExpr(Arg).ClassVarEmitName)
   else if (Arg is TFieldAccessExpr) and
           (TFieldAccessExpr(Arg).FieldInfo <> nil) then
-  begin
-    if ArcExprOwnsRef(TFieldAccessExpr(Arg).Base) then
-      NotYet('var field argument on an owned transient base', Arg);
-    EmitRecFieldAddrToX0(TFieldAccessExpr(Arg));
-  end
+    { (an owned transient base is kept alive to the statement boundary by
+      EmitRecFieldAddrToX0) }
+    EmitRecFieldAddrToX0(TFieldAccessExpr(Arg))
   else if (Arg is TStringSubscriptExpr) and
           (TStringSubscriptExpr(Arg).StrExpr.ResolvedType <> nil) and
           (TStringSubscriptExpr(Arg).StrExpr.ResolvedType.Kind = tyStaticArray) then
@@ -15623,6 +15690,15 @@ begin
     the method invocation. }
   Owned := ArcExprOwnsRef(AObjExpr);
   Self.EmitExprToX0(AObjExpr);
+  if ArcIsUnownedCtorResult(AObjExpr) then
+  begin
+    { TFoo.Create().Run(): pin the fresh rc=0 instance so the post-call
+      release frees it -- nothing took a reference, so it leaked }
+    EmitPushX0();
+    EmitCallSym('_ClassAddRef');
+    EmitPopTo('x0');
+    Owned := True;
+  end;
   if Owned then
     EmitPushX0();               { copy for the post-call release }
   EmitPushX0();                 { the receiver EmitCall pops into x0 }
@@ -15828,6 +15904,16 @@ begin
       Self.Emit(#9'str xzr, [x9]');
       Exit;
     end;
+    if (AStmt.ObjExpr is TFieldAccessExpr) and
+       (TFieldAccessExpr(AStmt.ObjExpr).FieldInfo = nil) and
+       ArcExprOwnsRef(AStmt.ObjExpr) then
+    begin
+      { a GETTER read (H.Foo.Free(), Foo read GetFoo): no slot to nil; the
+        getter handed back a +1 and Free drops it }
+      Self.EmitExprToX0(AStmt.ObjExpr);
+      EmitCallSym('_ClassRelease');
+      Exit;
+    end;
     if AStmt.ObjExpr is TFieldAccessExpr then
     begin
       { X.Field.Free(): release AND nil through the field's address }
@@ -15835,10 +15921,14 @@ begin
         NotYet('Free on this receiver form', AStmt);
       if TFieldAccessExpr(AStmt.ObjExpr).Base <> nil then
       begin
-        { chained receiver: the base expression yields the instance }
-        if ArcExprOwnsRef(TFieldAccessExpr(AStmt.ObjExpr).Base) then
-          NotYet('Free through an owned transient base', AStmt);
+        { chained receiver: the base expression yields the instance.  An
+          owned transient base (MakeObj().FChild.Free()) is released at the
+          statement boundary, after its field has been freed and nilled }
         Self.EmitExprToX0(TFieldAccessExpr(AStmt.ObjExpr).Base);
+        if ArcExprOwnsRef(TFieldAccessExpr(AStmt.ObjExpr).Base) and
+           not DeferNativeClassRelease() then
+          NotYet('Free through an owned transient base with all _pendrel '
+            + 'slots busy', AStmt);
         Self.Emit(#9'mov x9, x0');
       end
       else if TFieldAccessExpr(AStmt.ObjExpr).IsImplicitSelf then
