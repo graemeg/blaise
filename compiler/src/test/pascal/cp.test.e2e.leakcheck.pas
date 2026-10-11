@@ -24,6 +24,10 @@ type
   protected
     procedure SetUp; override;
   published
+    { owned transients only tested or passed on: an implicit-Self procedural
+      FIELD call's result, and an object compared, is-tested or Assigned }
+    procedure TestDebug_ImplicitSelfProcFieldResult_NoLeak;
+    procedure TestDebug_OwnedClassTested_NoLeak;
     procedure TestDebug_NoLeak_NoReport;
     procedure TestDebug_ExceptionHandlerVar_NoLeakNoOverRelease;
     { BUG-20260720-exception-object-leak: a handler with NO bound variable (bare
@@ -530,6 +534,87 @@ begin
     CompileAndRunWithRTLDebug(SrcClassTransArgs, Output, ExitCode, True));
   AssertEquals('exit 0', 0, ExitCode);
   AssertEquals('stdout', 'True True True 2 1 2 3 0 ' + LE, Output);
+  AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
+end;
+
+const
+  SrcProcFieldResult = '''
+    program pl3;
+    uses SysUtils;
+    type
+      TC = reference to function(X: Integer): string;
+      TO1 = reference to function: TObject;
+      TS = function(X: Integer): string;
+      THost = class
+        C: TC; O: TO1; P: TS; S: string;
+        procedure Take(const A: string);
+        procedure Run;
+      end;
+    function SF(X: Integer): string; begin Result := 'p' + IntToStr(X) end;
+    procedure THost.Take(const A: string); begin WriteLn('take ', A) end;
+    procedure THost.Run;
+    var L: string; Ob: TObject;
+    begin
+      WriteLn(C(2));
+      L := C(3); WriteLn(L);
+      S := C(4); WriteLn(S);
+      Take(C(5));
+      WriteLn(C(6) + C(7));
+      Ob := O(); WriteLn(Ob <> nil);
+      WriteLn(O() <> nil);
+      WriteLn(P(8));
+      L := P(9) + '!'; WriteLn(L);
+    end;
+    var H: THost;
+    begin
+      H := THost.Create();
+      H.C := function(X: Integer): string begin Result := IntToStr(X) end;
+      H.O := function: TObject begin Result := TObject.Create() end;
+      H.P := @SF;
+      H.Run();
+    end.
+    ''';
+  SrcOwnedClassTested = '''
+    program OwnTest;
+    function MkO: TObject; begin Result := TObject.Create() end;
+    var B: Boolean; O: TObject;
+    begin
+      WriteLn(MkO() <> nil);
+      B := MkO() = nil; WriteLn(B);
+      if MkO() <> nil then WriteLn('yes');
+      WriteLn(MkO() is TObject);
+      WriteLn(Assigned(MkO()));
+      if Assigned(MkO()) and (MkO() is TObject) then WriteLn('ok');
+      WriteLn(MkO() = MkO());
+      O := MkO(); WriteLn(Assigned(O), ' ', O is TObject, ' ', O <> nil)
+    end.
+    ''';
+
+procedure TE2ELeakCheckTests.TestDebug_ImplicitSelfProcFieldResult_NoLeak;
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(SrcProcFieldResult, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertEquals('stdout', '2' + LE + '3' + LE + '4' + LE + 'take 5' + LE +
+    '67' + LE + 'True' + LE + 'True' + LE + 'p8' + LE + 'p9!' + LE, Output);
+  AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_OwnedClassTested_NoLeak;
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(SrcOwnedClassTested, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertEquals('stdout', 'True' + LE + 'False' + LE + 'yes' + LE + 'True' + LE +
+    'True' + LE + 'ok' + LE + 'False' + LE + 'True True True' + LE, Output);
   AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
 end;
 

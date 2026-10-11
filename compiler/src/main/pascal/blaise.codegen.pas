@@ -277,6 +277,10 @@ function ExprMayDeferTransientBase(AExpr: TASTExpr): Boolean;
 
   ArcExprIsUnownedStrTransient identifies the rc = 0 shapes. }
 function ArcExprIsUnownedStrTransient(AExpr: TASTExpr): Boolean;
+{ True for an = / <> comparison with an OWNED class operand (MakeObj() <> nil):
+  the backends park the operands, compare, then release the owned one --
+  comparing in place leaked the +1 the call returned. }
+function ArcIsOwnedClassCompare(AExpr: TASTExpr): Boolean;
 
 { Ownership predicate for a STRING argument to a BUILT-IN (FileAge, Trim,
   Length, StrToInt, ...) or a string-operator operand: True when the
@@ -624,9 +628,14 @@ begin
   begin
     { ClassCreate(Cls, ...) is _ClassCreate (+1) whether or not a declared
       constructor runs afterwards -- ResolvedDecl is nil for the implicit one }
+    { an implicit-Self procedural-FIELD call (C(2) inside a method, C a
+      closure / function-pointer field) returns +1 exactly like the
+      procedural-variable form -- not counting it leaked one string per
+      call on both backends }
     if (TFuncCallExpr(AExpr).ResolvedDecl <> nil) or
        SameText(TFuncCallExpr(AExpr).Name, 'ClassCreate') or
-       TFuncCallExpr(AExpr).IsIndirectCall then
+       TFuncCallExpr(AExpr).IsIndirectCall or
+       TFuncCallExpr(AExpr).IsProcFieldCall then
       Result := True;
     Exit;
   end;
@@ -715,9 +724,12 @@ begin
     file-system call in a loop grew the arena without bound on arm64.
     string(string) can be a pointer-preserving no-op, and disposing that
     would free the source, so every other cast-shaped call stays borrowed. }
+  { (an implicit-Self procedural-field call has no resolved decl either, but
+    it is a real call returning +1 -- ArcExprOwnsRef -- not a built-in) }
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
-     (not TFuncCallExpr(AExpr).IsIndirectCall) then
+     (not TFuncCallExpr(AExpr).IsIndirectCall) and
+     (not TFuncCallExpr(AExpr).IsProcFieldCall) then
   begin
     if not SameText(TFuncCallExpr(AExpr).Name, 'string') then
       Exit(True);
@@ -726,6 +738,21 @@ begin
        (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind = tyPChar) then
       Exit(True);
   end;
+end;
+
+function ArcIsOwnedClassCompare(AExpr: TASTExpr): Boolean;
+var
+  BE: TBinaryExpr;
+begin
+  Result := False;
+  if not (AExpr is TBinaryExpr) then Exit;
+  BE := TBinaryExpr(AExpr);
+  if not (BE.Op in [boEQ, boNE]) then Exit;
+  Result :=
+    ((BE.Left.ResolvedType <> nil) and (BE.Left.ResolvedType.Kind = tyClass) and
+     ArcExprOwnsRef(BE.Left)) or
+    ((BE.Right.ResolvedType <> nil) and (BE.Right.ResolvedType.Kind = tyClass) and
+     ArcExprOwnsRef(BE.Right));
 end;
 
 function ArcBuiltinStrArgOwnsRef(AExpr: TASTExpr): Boolean;

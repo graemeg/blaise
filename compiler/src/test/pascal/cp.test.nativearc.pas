@@ -33,6 +33,10 @@ type
   private
     function MainExitRegion(const AAsm: string): string;
   published
+    { an owned class transient tested with = / <>, is or Assigned is released
+      afterwards (it leaked on both backends) }
+    procedure TestOwnedClassTest_ReleasedAfterCompare;
+    procedure TestOwnedClassTest_ReleasedAfterIsAndAssigned;
     { x86-64 codegen fixes surfaced by the macOS bring-up's native-only
       e2e tests (asm generated in-process for linux-x86_64, so they run on
       any host). }
@@ -499,6 +503,42 @@ begin
   AssertEquals('by _ClassRelease', '',
     AsmMissing(Src, #9'movq 40(%rsp), %rdi'#10#9'callq _ClassRelease',
       #9'bl __ClassRelease'));
+end;
+
+const
+  SrcOwnedClassTests = '''
+    program P;
+    function MkO: TObject; begin Result := TObject.Create() end;
+    begin
+      WriteLn(MkO() <> nil);
+      WriteLn(MkO() is TObject);
+      WriteLn(Assigned(MkO()))
+    end.
+    ''';
+
+procedure TNativeArcTests.TestOwnedClassTest_ReleasedAfterCompare;
+begin
+  AssertEquals('MkO() <> nil releases the object', '',
+    AsmMissing(SrcOwnedClassTests,
+      #9'cmpq 8(%rsp), %rax'#10#9'setne %al'#10#9'movzbl %al, %eax'#10 +
+        #9'movq %rax, 16(%rsp)'#10#9'movq (%rsp), %rdi'#10#9'callq _ClassRelease',
+      #9'cmp x0, x1'#10#9'cset x0, ne'#10#9'str x0, [sp, #-16]!'#10 +
+        #9'ldr x0, [sp, #32]'#10#9'bl __ClassRelease'));
+end;
+
+procedure TNativeArcTests.TestOwnedClassTest_ReleasedAfterIsAndAssigned;
+begin
+  AssertEquals('MkO() is TObject releases the object', '',
+    AsmMissing(SrcOwnedClassTests,
+      #9'callq _IsInstance'#10#9'movq %rax, 8(%rsp)'#10#9'movq (%rsp), %rdi'#10 +
+        #9'callq _ClassRelease',
+      #9'bl __IsInstance'#10#9'ldr x1, [sp]'#10#9'str x0, [sp]'#10 +
+        #9'mov x0, x1'#10#9'bl __ClassRelease'));
+  AssertEquals('Assigned(MkO()) releases the object', '',
+    AsmMissing(SrcOwnedClassTests,
+      #9'testq %rax, %rax'#10#9'setne %al'#10#9'movzbl %al, %eax'#10 +
+        #9'movq %rax, 8(%rsp)'#10#9'movq (%rsp), %rdi'#10#9'callq _ClassRelease',
+      #9'cmp x0, #0'#10#9'cset x0, ne'#10#9'ldr x1, [sp]'#10#9'str x0, [sp]'));
 end;
 
 procedure TNativeArcTests.TestRecordCallFieldRead_PinsThenReleasesTemp;

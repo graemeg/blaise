@@ -1000,6 +1000,8 @@ type
       AHoistKind, AHoistOff, ADest: Integer);
     procedure EmitVarArgAddrToRax(AArg: TASTExpr);
     procedure EmitStaticArrayArgAddrToRax(AArg: TASTExpr);
+    function IsOwnedClassOperand(AExpr: TASTExpr): Boolean;
+    procedure EmitReleaseParkedClass;
     function IntfParamTypeAt(AIntf: TInterfaceTypeDesc; const AMethName: string;
       AIndex: Integer; AArg: TASTExpr): TTypeDesc;
     function IntfArgSlotClasses(AIntf: TInterfaceTypeDesc;
@@ -8661,6 +8663,18 @@ begin
     if SameText(FC.Name, 'Assigned') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
+      if Self.IsOwnedClassOperand(TASTExpr(FC.Args.Items[0])) then
+      begin
+        { Assigned(MakeObj()): release the owned (+1) object once tested --
+          it leaked }
+        Self.Emit(#9'subq $16, %rsp');
+        Self.Emit(#9'movq %rax, (%rsp)');
+        Self.Emit(#9'testq %rax, %rax');
+        Self.Emit(#9'setne %al');
+        Self.Emit(#9'movzbl %al, %eax');
+        Self.EmitReleaseParkedClass();
+        Exit;
+      end;
       Self.Emit(#9'testq %rax, %rax');
       Self.Emit(#9'setne %al');
       Self.Emit(#9'movzbl %al, %eax');
@@ -9579,6 +9593,40 @@ begin
   if AExpr is TBinaryExpr then
   begin
     BE := TBinaryExpr(AExpr);
+    if ArcIsOwnedClassCompare(BE) then
+    begin
+      { MakeObj() <> nil: both operands parked (slots 0 and 8), compared,
+        the 0/1 result kept at 16 across the releases of the owned (+1)
+        operand(s) -- comparing in place leaked the object. }
+      Self.Emit(#9'subq $32, %rsp');
+      Self.EmitExprToEax(BE.Left);
+      Self.Emit(#9'movq %rax, (%rsp)');
+      Self.EmitExprToEax(BE.Right);
+      Self.Emit(#9'movq %rax, 8(%rsp)');
+      Self.Emit(#9'movq (%rsp), %rax');
+      Self.Emit(#9'cmpq 8(%rsp), %rax');
+      if BE.Op = boEQ then
+        Self.Emit(#9'sete %al')
+      else
+        Self.Emit(#9'setne %al');
+      Self.Emit(#9'movzbl %al, %eax');
+      Self.Emit(#9'movq %rax, 16(%rsp)');
+      if (BE.Left.ResolvedType <> nil) and
+         (BE.Left.ResolvedType.Kind = tyClass) and ArcExprOwnsRef(BE.Left) then
+      begin
+        Self.Emit(#9'movq (%rsp), %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+      end;
+      if (BE.Right.ResolvedType <> nil) and
+         (BE.Right.ResolvedType.Kind = tyClass) and ArcExprOwnsRef(BE.Right) then
+      begin
+        Self.Emit(#9'movq 8(%rsp), %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+      end;
+      Self.Emit(#9'movq 16(%rsp), %rax');
+      Self.Emit(#9'addq $32, %rsp');
+      Exit;
+    end;
     { Float comparison evaluated for its boolean value (0/1 in %rax).
       EmitCondBranch handles float comparisons that are themselves the
       branch condition, but when a float comparison is a sub-expression —
@@ -11236,6 +11284,13 @@ begin
   if AExpr is TIsExpr then
   begin
     Self.EmitExprToEax(TIsExpr(AExpr).Obj);
+    { MakeObj() is TFoo: park the owned (+1) object and release it once
+      tested -- it leaked }
+    if Self.IsOwnedClassOperand(TIsExpr(AExpr).Obj) then
+    begin
+      Self.Emit(#9'subq $16, %rsp');
+      Self.Emit(#9'movq %rax, (%rsp)');
+    end;
     Self.Emit(#9'movq %rax, %rdi');
     if (TIsExpr(AExpr).ResolvedTargetType <> nil) and
        (TIsExpr(AExpr).ResolvedTargetType.Kind = tyInterface) then
@@ -11250,6 +11305,8 @@ begin
         [Self.ClassSymName(TIsExpr(AExpr).TypeName)]));
       Self.Emit(#9'callq _IsInstance');
     end;
+    if Self.IsOwnedClassOperand(TIsExpr(AExpr).Obj) then
+      Self.EmitReleaseParkedClass();
     Exit;
   end;
 
@@ -11869,6 +11926,24 @@ begin
   else
     raise ENativeCodeGenError.Create(
       'native backend: var/out argument must be a variable or field');
+end;
+
+function TX86_64Backend.IsOwnedClassOperand(AExpr: TASTExpr): Boolean;
+begin
+  { an object a call hands back +1 (ArcExprOwnsRef), used only for a test }
+  Result := (AExpr.ResolvedType <> nil) and
+            (AExpr.ResolvedType.Kind = tyClass) and ArcExprOwnsRef(AExpr);
+end;
+
+procedure TX86_64Backend.EmitReleaseParkedClass;
+begin
+  { the object is parked at (%rsp) in a 16-byte block and %rax holds the
+    test's result: release the object, keep the result, drop the block }
+  Self.Emit(#9'movq %rax, 8(%rsp)');
+  Self.Emit(#9'movq (%rsp), %rdi');
+  Self.Emit(#9'callq _ClassRelease');
+  Self.Emit(#9'movq 8(%rsp), %rax');
+  Self.Emit(#9'addq $16, %rsp');
 end;
 
 function TX86_64Backend.IntfArgSlotClasses(AIntf: TInterfaceTypeDesc;
@@ -13545,8 +13620,10 @@ begin
     directly instead of materialising a 0/1 via setcc/movzbl and then
     re-testing it.  Strings (content comparison via RTL call) and sets
     (subset semantics for <=/>=) keep the materialised path below. }
-  if AExpr is TBinaryExpr then
+  if (AExpr is TBinaryExpr) and not ArcIsOwnedClassCompare(AExpr) then
   begin
+    { (an owned-class comparison takes the value form below, which releases
+      the owned operand) }
     BE := TBinaryExpr(AExpr);
     if (BE.Op in [boEQ, boNE, boLT, boGT, boLE, boGE]) and
        ((BE.Left.ResolvedType = nil) or

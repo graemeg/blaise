@@ -264,6 +264,8 @@ type
     procedure ReservePendRelSlots;
     function StrTransSlot(AIdx: Integer): string;
     function NextIntArgDest(var ANInt, AStackOff: Integer): string;
+    function IsOwnedClassOperand(AExpr: TASTExpr): Boolean;
+    procedure EmitReleaseParkedClass;
     function  DeferNativeClassRelease: Boolean;
     function  DeferNativeRelease(const AReleaseSym: string): Boolean;
     procedure FlushNativePendingReleases(AMark: Integer);
@@ -1141,6 +1143,24 @@ begin
     JUMBO_SCRATCH_BYTES covers the widest jumbo set (a set's bitmap is capped
     at 32 bytes = 256 members), so one slot fits every instantiation. }
   AddLocal('_jset_scratch', JUMBO_SCRATCH_BYTES);
+end;
+
+function TArm64Backend.IsOwnedClassOperand(AExpr: TASTExpr): Boolean;
+begin
+  { an object a call hands back +1 (ArcExprOwnsRef), used only for a test }
+  Result := (AExpr.ResolvedType <> nil) and
+            (AExpr.ResolvedType.Kind = tyClass) and ArcExprOwnsRef(AExpr);
+end;
+
+procedure TArm64Backend.EmitReleaseParkedClass;
+begin
+  { [obj] is parked on the stack and x0 holds the test's result: release the
+    object, keeping the result }
+  Self.Emit(#9'ldr x1, [sp]');
+  Self.Emit(#9'str x0, [sp]');
+  Self.Emit(#9'mov x0, x1');
+  EmitCallSym('_ClassRelease');
+  EmitPopTo('x0');
 end;
 
 function TArm64Backend.NextIntArgDest(var ANInt, AStackOff: Integer): string;
@@ -4738,6 +4758,16 @@ begin
     if SameText(TFuncCallExpr(AExpr).Name, 'Assigned') then
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      if Self.IsOwnedClassOperand(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0])) then
+      begin
+        { Assigned(MakeObj()): the owned (+1) object is released once the
+          test is made -- it leaked }
+        EmitPushX0();
+        Self.Emit(#9'cmp x0, #0');
+        Self.Emit(#9'cset x0, ne');
+        Self.EmitReleaseParkedClass();
+        Exit;
+      end;
       Self.Emit(#9'cmp x0, #0');
       Self.Emit(#9'cset x0, ne');
       Exit;
@@ -5314,6 +5344,39 @@ begin
   if AExpr is TBinaryExpr then
   begin
     BE := TBinaryExpr(AExpr);
+    if ArcIsOwnedClassCompare(BE) then
+    begin
+      { MakeObj() <> nil: both operands parked, compared, and the 0/1 result
+        kept across the release of the owned (+1) operand(s) -- comparing in
+        place leaked the object.  Stack: [L][R][result]. }
+      Self.EmitExprToX0(BE.Left);
+      EmitPushX0();
+      Self.EmitExprToX0(BE.Right);
+      EmitPushX0();
+      Self.Emit(#9'ldr x1, [sp]');
+      Self.Emit(#9'ldr x0, [sp, #16]');
+      Self.Emit(#9'cmp x0, x1');
+      if BE.Op = boEQ then
+        Self.Emit(#9'cset x0, eq')
+      else
+        Self.Emit(#9'cset x0, ne');
+      EmitPushX0();
+      if (BE.Left.ResolvedType <> nil) and
+         (BE.Left.ResolvedType.Kind = tyClass) and ArcExprOwnsRef(BE.Left) then
+      begin
+        Self.Emit(#9'ldr x0, [sp, #32]');
+        EmitCallSym('_ClassRelease');
+      end;
+      if (BE.Right.ResolvedType <> nil) and
+         (BE.Right.ResolvedType.Kind = tyClass) and ArcExprOwnsRef(BE.Right) then
+      begin
+        Self.Emit(#9'ldr x0, [sp, #16]');
+        EmitCallSym('_ClassRelease');
+      end;
+      EmitPopTo('x0');
+      Self.Emit(#9'add sp, sp, #32');
+      Exit;
+    end;
     { X in SmallSet: ((set shr ord) and 1) and (ord < BitCount) — the
       range guard forces 0 for ordinals past the set width (a shift past
       the register width is undefined) }
@@ -5836,12 +5899,18 @@ begin
     { X is TFoo: _IsInstance(obj, typeinfo) walks the parent chain;
       interface targets query the impllist via _ImplementsInterface }
     Self.EmitExprToX0(TIsExpr(AExpr).Obj);
+    { MakeObj() is TFoo: the owned (+1) object is parked and released once
+      the test is made -- it leaked }
+    if Self.IsOwnedClassOperand(TIsExpr(AExpr).Obj) then
+      EmitPushX0();
     EmitTypeinfoAddr('x1', TIsExpr(AExpr).TypeName);
     if (TIsExpr(AExpr).ResolvedTargetType <> nil) and
        (TIsExpr(AExpr).ResolvedTargetType.Kind = tyInterface) then
       EmitCallSym('_ImplementsInterface')
     else
       EmitCallSym('_IsInstance');
+    if Self.IsOwnedClassOperand(TIsExpr(AExpr).Obj) then
+      Self.EmitReleaseParkedClass();
     Exit;
   end;
   if (AExpr is TAsExpr) and (AExpr.ResolvedType <> nil) and
