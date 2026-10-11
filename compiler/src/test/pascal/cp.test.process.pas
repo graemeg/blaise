@@ -19,7 +19,7 @@ unit cp.test.process;
 interface
 
 uses
-  Classes, SysUtils, blaise.testing,
+  Classes, SysUtils, process, blaise.testing,
   uLexer, uParser, uAST, uSymbolTable, uSemantic;
 
 type
@@ -43,6 +43,10 @@ type
     procedure TestSemantic_ProcessExecute_OK;
     procedure TestSemantic_ProcessWaitOnExit_OK;
     procedure TestSemantic_ProcessFree_OK;
+    { a child killed by a signal reports 128 + the signal number, as a shell
+      does -- it reported 1, indistinguishable from an ordinary failure, so a
+      crashing compiler in an e2e test read as "compile failed (exit 1)" }
+    procedure TestRun_SignalDeath_ExitCodeIs128PlusSignal;
   end;
 
 implementation
@@ -285,6 +289,27 @@ end;
 procedure TProcessBuiltinTests.TestSemantic_ProcessFree_OK;
 begin
   SemanticOK(SrcProcessFree);
+end;
+
+procedure TProcessBuiltinTests.TestRun_SignalDeath_ExitCodeIs128PlusSignal;
+var
+  P: TProcess;
+  Chunk: string;
+begin
+  P := TProcess.Create(nil);
+  try
+    P.Executable := '/bin/sh';
+    P.Parameters.Add('-c');
+    P.Parameters.Add('kill -SEGV $$');
+    P.Execute();
+    repeat
+      Chunk := P.ReadOutput()
+    until (Chunk = '') and not P.Running;
+    P.WaitOnExit();
+    AssertEquals('SIGSEGV (11) -> 139', 139, P.ExitCode);
+  finally
+    P.Free();
+  end;
 end;
 
 initialization

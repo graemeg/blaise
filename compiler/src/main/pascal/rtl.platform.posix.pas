@@ -1220,7 +1220,9 @@ begin
     if (Status and $7F) = 0 then
       P^.ExitCode := (Status shr 8) and $FF
     else
-      P^.ExitCode := 1;
+      { killed by a signal: 128 + the signal number, as a shell reports it
+        -- a bare 1 made a crash indistinguishable from an ordinary failure }
+      P^.ExitCode := 128 + (Status and $7F);
     P^.Waited := 1;
     Result := 0;
   end else if R = 0 then
@@ -1264,7 +1266,7 @@ begin
   if (Status and $7F) = 0 then
     P^.ExitCode := (Status shr 8) and $FF
   else
-    P^.ExitCode := 1;
+    P^.ExitCode := 128 + (Status and $7F);   { a signal death, as above }
   P^.Waited := 1;
 end;
 
