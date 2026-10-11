@@ -898,6 +898,11 @@ type
                                AProcType: TProceduralTypeDesc;
                                AArgs: TObjectList;
                                AFatPtr: Boolean = False);
+    { A call statement's DISCARDED register result: release what the callee
+      handed over -- a string, object or dynamic array in %rax, or a
+      closure's environment in %rdx (a method pointer comes back in
+      %rax:%rdx). }
+    procedure EmitDiscardedRegResult(AType: TTypeDesc);
     { Call a procedural-typed CLASS FIELD through a receiver
       (Self.FFn(args)).  The function pointer lives at [instance + Offset],
       which is not a %rbp/%rip-relative operand, so this cannot reuse
@@ -12891,7 +12896,9 @@ var
   HTotal:   Integer;
   RT:       TRecordTypeDesc;
   IsSretDiscard: Boolean;
+  IsIntfDiscard: Boolean;
   SretBufSize:   Integer;
+  SretBytes:     Integer;
   SretRT:        TRecordTypeDesc;
   SretShim:      TMethodCallExpr;
   RecvIdent:     TIdentExpr;
@@ -13232,15 +13239,28 @@ begin
     Exit;
   end;
 
-  IsSretDiscard := (ACall.ResolvedReturnTypeDesc <> nil) and
-    (ACall.ResolvedReturnTypeDesc.Kind = tyRecord) and
-    (ClassifyRecordReturn(TRecordTypeDesc(ACall.ResolvedReturnTypeDesc)) = rcSret);
+  { An interface result travels through the hidden pointer too: without the
+    buffer the callee took Self (%rdi) for it and wrote the pair over the
+    object. }
+  IsIntfDiscard := (ACall.ResolvedReturnTypeDesc <> nil) and
+    (ACall.ResolvedReturnTypeDesc.Kind = tyInterface);
+  IsSretDiscard := IsIntfDiscard or
+    ((ACall.ResolvedReturnTypeDesc <> nil) and
+     (ACall.ResolvedReturnTypeDesc.Kind = tyRecord) and
+     (ClassifyRecordReturn(TRecordTypeDesc(ACall.ResolvedReturnTypeDesc)) = rcSret));
   SretBufSize := 0;
+  SretBytes   := 0;
   SretRT      := nil;
-  if IsSretDiscard then
+  if IsIntfDiscard then
+  begin
+    SretBytes   := 16;
+    SretBufSize := 16;
+  end
+  else if IsSretDiscard then
   begin
     SretRT      := TRecordTypeDesc(ACall.ResolvedReturnTypeDesc);
-    SretBufSize := (SretRT.TotalSize() + 15) and (-16);
+    SretBytes   := SretRT.TotalSize();
+    SretBufSize := (SretBytes + 15) and (-16);
   end;
 
   UserSlots  := Self.CountArgSlots(MD.Params);
@@ -13258,7 +13278,7 @@ begin
       Self.Emit(#9'movq %rsp, %rbx');
       Self.Emit(#9'movq %rbx, %rdi');
       Self.Emit(#9'xorl %esi, %esi');
-      Self.Emit(Format(#9'movq $%d, %%rdx', [SretRT.TotalSize()]));
+      Self.Emit(Format(#9'movq $%d, %%rdx', [SretBytes]));
       Self.Emit(#9'callq memset');
     end;
 
@@ -13412,11 +13432,18 @@ begin
 
   if IsSretDiscard then
   begin
-    if not Self.IsRecordManagedClean(SretRT) then
+    if IsIntfDiscard then
+    begin
+      Self.Emit(#9'movq (%rbx), %rdi');     { the owned (+1) obj half }
+      Self.Emit(#9'callq _ClassRelease');
+    end
+    else if not Self.IsRecordManagedClean(SretRT) then
       Self.EmitRecordFieldReleases(SretRT, '%rbx');
     Self.Emit(Format(#9'addq $%d, %%rsp', [SretBufSize]));
     Self.Emit(#9'popq %rbx');
-  end;
+  end
+  else
+    Self.EmitDiscardedRegResult(ACall.ResolvedReturnTypeDesc);
 end;
 
 { Shared static-dispatch call sequence for both inherited forms.  Marshals
@@ -16952,6 +16979,7 @@ begin
         { Virtual implicit-Self call dispatches through the vtable. }
         Self.EmitSelfDispatch(MD, FuncSymbolFromDecl(MD));
         Self.EndCallArgs();
+        Self.EmitDiscardedRegResult(MD.ResolvedReturnType);
         Exit;
       end;
       { >6 slots: stack-spill path (mirrors EmitMethodCallStmt).  Reserve a
@@ -16974,6 +17002,7 @@ begin
       Self.EmitHoistEpilogue(PC.Args, PCHD, PCHK, PCHTotal, PCCleanUp, True);
       PCHD.Free();
       PCHK.Free();
+      Self.EmitDiscardedRegResult(MD.ResolvedReturnType);
       Exit;
     end;
     { No intrinsic case above matched and the semantic pass attached no
@@ -21550,6 +21579,31 @@ begin
     width.  Statement calls pass nil and need no result. }
   if AResultType <> nil then
     Self.EmitNarrowToType(AResultType);
+end;
+
+procedure TX86_64Backend.EmitDiscardedRegResult(AType: TTypeDesc);
+begin
+  if AType = nil then Exit;
+  if AType.IsString() then
+  begin
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(#9'callq _StringRelease');
+  end
+  else if AType.Kind = tyClass then
+  begin
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(#9'callq _ClassRelease');
+  end
+  else if AType.Kind = tyDynArray then
+  begin
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(#9'callq _DynArrayRelease');
+  end
+  else if IsMethodPtrType(AType) and TProceduralTypeDesc(AType).IsReference then
+  begin
+    Self.Emit(#9'movq %rdx, %rdi');
+    Self.Emit(#9'callq _ClassRelease');
+  end;
 end;
 
 procedure TX86_64Backend.EmitLocalRecordBase(const AName, AReg: string);

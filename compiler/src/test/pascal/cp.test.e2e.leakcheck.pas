@@ -71,6 +71,11 @@ type
     { owned class transients (call results) as call arguments are released
       after the call }
     procedure TestDebug_OwnedClassTransientArgs_NoLeak;
+    { a discarded string, object, interface or closure result of a method
+      called on a NAMED receiver (C.Make();) is released -- the statement's
+      return type was recorded only for a record, so every other kind leaked
+      and a closure had no x8 buffer }
+    procedure TestDebug_DiscardedResultOnNamedReceiver_NoLeak;
     procedure TestDebug_TransientFieldInIfCond_NoLeak;
     procedure TestDebug_TransientFieldInWhileCond_NoLeak;
     { A deep chain MakeIt().A.B.N reads a scalar off a base that is itself two
@@ -523,6 +528,50 @@ const
       WriteLn()
     end.
     ''';
+
+const
+  SrcNamedRecvDiscard = '''
+    program namedrecv;
+    uses SysUtils;
+    type
+      IFoo = interface procedure Hi; end;
+      TFoo = class(TObject, IFoo) procedure Hi; end;
+      TFn = reference to function: Integer;
+      TCls = class
+        function MkS(X: Integer): string;
+        function MkO: TObject;
+        function MkI: IFoo;
+        function MkFn(X: Integer): TFn;
+      end;
+    procedure TFoo.Hi; begin end;
+    function TCls.MkS(X: Integer): string; begin Result := 'v' + IntToStr(X) end;
+    function TCls.MkO: TObject; begin Result := TObject.Create() end;
+    function TCls.MkI: IFoo; begin Result := TFoo.Create() end;
+    function TCls.MkFn(X: Integer): TFn;
+    begin Result := function: Integer begin Result := X * 2 end end;
+    var C: TCls;
+    begin
+      C := TCls.Create();
+      C.MkS(1);
+      C.MkO();
+      C.MkI();
+      C.MkFn(1);
+      WriteLn('done');
+    end.
+    ''';
+
+procedure TE2ELeakCheckTests.TestDebug_DiscardedResultOnNamedReceiver_NoLeak;
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(SrcNamedRecvDiscard, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertTrue('output, got: ' + Output, Pos('done' + LE, Output) >= 0);
+  AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
+end;
 
 procedure TE2ELeakCheckTests.TestDebug_OwnedClassTransientArgs_NoLeak;
 var

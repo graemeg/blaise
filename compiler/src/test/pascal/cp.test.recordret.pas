@@ -48,6 +48,8 @@ type
       (FS.MakeRect(5); inside a method) must dispatch through the field, not
       through a global FS_obj/FS_itab pair that does not exist (x86-64). }
     procedure TestDiscardedIntfRecordCall_ImplicitSelfField_UsesTheField;
+    { a discarded string result of a method on a named receiver is released }
+    procedure TestCodegen_DiscardedStringOnNamedReceiver_Released;
     { a float method called on implicit Self, used where a float is wanted }
     procedure TestCodegen_ImplicitSelfFloatCall_InFloatContext;
     { ... and a VIRTUAL one dispatches through the vtable: x86-64 called the
@@ -279,6 +281,31 @@ begin
       #9'movq 32(%rsp), %rax'#10#9'movq %rax, 8(%rsp)'#10 +
         #9'movq 40(%rsp), %rax'#10#9'movq %rax, 16(%rsp)',
       #9'bl _SR'#10));
+end;
+
+procedure TRecordReturnTests.TestCodegen_DiscardedStringOnNamedReceiver_Released;
+const
+  Src = '''
+    program P;
+    type TC = class function Mk: string; end;
+    function TC.Mk: string; begin Result := Copy('abc', 0, 2) end;
+    var C: TC;
+    begin C := TC.Create(); C.Mk() end.
+    ''';
+var
+  A: string;
+  P: Integer;
+begin
+  { the release must follow the call in the main body -- the callee's own
+    code releases strings too, so the whole listing proves nothing }
+  A := GenAsm(Src, TargetX86_64);
+  P := Pos(#10'main:', A);
+  AssertTrue('x86-64 main releases the discarded string',
+    (P >= 0) and (PosEx('callq _StringRelease', A, P) >= 0));
+  A := GenAsm(Src, TargetArm64);
+  P := Pos(#10'_main:', A);
+  AssertTrue('arm64 main releases the discarded string',
+    (P >= 0) and (PosEx('bl __StringRelease', A, P) >= 0));
 end;
 
 procedure TRecordReturnTests.TestCodegen_ImplicitSelfFloatCall_InFloatContext;

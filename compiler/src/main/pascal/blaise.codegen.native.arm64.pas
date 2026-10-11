@@ -15330,7 +15330,8 @@ begin
     references the callee handed over (a managed record's fields) must be
     dropped.  The free-function twin is in EmitProcCall.  An interface result
     takes the same x8 contract; its owned obj half is released. }
-  if (ART = nil) or not (ART.Kind in [tyRecord, tyInterface]) then
+  if (ART = nil) or
+     not ((ART.Kind in [tyRecord, tyInterface]) or IsMethodPtrType(ART)) then
     NotYet('discarded aggregate-returning method call', ANode);
   Tmp := '__dret_' + IntToStr(FJArgN);
   FJArgN := FJArgN + 1;
@@ -15342,6 +15343,20 @@ begin
     EmitCall(AMethod, AName, AArgs, Tmp, True, AMethod.VTableSlot);
     EmitLoadSlot('x0', Tmp);
     EmitCallSym('_ClassRelease');
+    Exit;
+  end;
+  if IsMethodPtrType(ART) then
+  begin
+    { a closure / method pointer: a 16-byte (Code, Env) value through x8; a
+      'reference to' Env carries a +1 the callee handed over }
+    EmitPushX0();
+    EmitCall(AMethod, AName, AArgs, Tmp, True, AMethod.VTableSlot);
+    if TProceduralTypeDesc(ART).IsReference then
+    begin
+      EmitSlotAddr('x9', Tmp);
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');
+    end;
     Exit;
   end;
   Shape := RecReturnShape(TRecordTypeDesc(ART));

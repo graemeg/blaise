@@ -11114,9 +11114,11 @@ begin
   ACall.ResolvedMethod    := MDecl;
   ACall.IsGlobal          := ObjSym.IsGlobal;
   ACall.IsVarParam        := RecvSlotHoldsAddress(ObjSym);
-  if (MDecl.ResolvedReturnType <> nil) and
-     (MDecl.ResolvedReturnType.Kind = tyRecord) then
-    ACall.ResolvedReturnTypeDesc := MDecl.ResolvedReturnType;
+  { every kind, as the other receiver forms record it: a backend sizes a
+    discarded result's buffer and releases what it owns from this (a string,
+    object, interface or closure result on a named receiver -- C.Make(); --
+    went unreleased, or with no x8 buffer, when only a record set it) }
+  ACall.ResolvedReturnTypeDesc := MDecl.ResolvedReturnType;
 end;
 
 { If AExpr is a diamond constructor call (RecordName ends with '<>'), replace
