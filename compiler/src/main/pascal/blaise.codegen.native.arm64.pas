@@ -13140,19 +13140,14 @@ begin
           PopRegs.Add('x' + IntToStr(NInt + 1));
           LitOff := LitOff + AlignTo(N * ESz, 8);
         end
-        else if (Arg is TIdentExpr) and (Arg.ResolvedType <> nil) and
+        else if (Arg.ResolvedType <> nil) and
                 (Arg.ResolvedType.Kind = tyStaticArray) then
         begin
-          { static array: base address + compile-time high (0-rebased) }
-          if TIdentExpr(Arg).ConstArraySymbol <> '' then
-          begin
-            Self.Emit(Format(#9'adrp x0, %s@PAGE',
-              [CodegenMangle(TIdentExpr(Arg).ConstArraySymbol)]));
-            Self.Emit(Format(#9'add x0, x0, %s@PAGEOFF',
-              [CodegenMangle(TIdentExpr(Arg).ConstArraySymbol)]));
-          end
-          else
-            EmitSlotAddr('x0', TIdentExpr(Arg).Name);
+          { static array: storage address + compile-time high (0-rebased).
+            Any static-array expression -- a variable (incl. a var, by-value
+            or captured parameter), a const array, a field (C.A), an element
+            (M[1], RS[1].A), P^.A, or a call result (its per-site buffer). }
+          EmitArrayStorageAddr(Arg);
           EmitPushX0();
           PopRegs.Add('x' + IntToStr(NInt));
           EmitIntLiteral('x0',

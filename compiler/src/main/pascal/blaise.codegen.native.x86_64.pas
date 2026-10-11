@@ -306,6 +306,14 @@ type
       buffers (_jset_scratch_0/1) are emitted as .bss globals (main has no
       frame, so set-op result/literal buffers live in static storage). }
     FProgHasJumboSet: Boolean;
+    { Per-site result buffers of static-array calls used inside an expression
+      (MakeA(3)[2], Show(C.GetA())).  A framed routine grows its frame; the
+      frameless program main and unit init/final get static storage, listed
+      here (names, with their sizes in FProgScratchSz) and emitted in
+      EmitDataSection. }
+    FProgScratch: TStringList;
+    FProgScratchSz: TList<Integer>;
+    FScratchN: Integer;
     { Whole-program multi-unit guard: the system-class (TObject /
       TCustomAttribute) class-name strings, typeinfo, vtables and field-cleanup
       stubs are emitted by the FIRST class section that runs (the first unit
@@ -976,6 +984,10 @@ type
     function  ProcParamIsOpenArray(AProcType: TProceduralTypeDesc;
       AIndex: Integer): Boolean;
     procedure EmitVarArgAddrToRax(AArg: TASTExpr);
+    procedure EmitStaticArrayArgAddrToRax(AArg: TASTExpr);
+    function NewScratchOperand(ASize: Integer): string;
+    procedure EmitStaticArrayCallToRax(AExpr: TASTExpr);
+    procedure CheckForwardedOpenArrayArg(AArg: TASTExpr);
     { %rax holds the address of an array FIELD (static: inline storage;
       dyn/open: the data-pointer slot).  Apply AFAE.PropIndexExpr — loading
       the data pointer for a dyn/open array and adding (idx - LowBound) *
@@ -1506,6 +1518,9 @@ begin
   FExcFrameNext       := 0;
   FForEndNext         := 0;
   FProgExcFrameCount  := 0;
+  FProgScratch        := TStringList.Create();
+  FProgScratchSz      := TList<Integer>.Create();
+  FScratchN           := 0;
   FSystemDefsEmitted  := False;
   FUnitInitNames      := TStringList.Create();
   FUnitFiniNames      := TStringList.Create();
@@ -1525,6 +1540,8 @@ end;
 
 destructor TX86_64Backend.Destroy;
 begin
+  FProgScratch.Free();
+  FProgScratchSz.Free();
   Self.ClearFrame();
   FDynElemHooks.Free();
   FConstArgUnsafe.Free();
@@ -1905,7 +1922,8 @@ var
 begin
   Self.EmitDynElemHooks();
   if (FDataGlobals.Count = 0) and (FProgExcFrameCount = 0) and
-     (not FProgHasJumboSet) and (not FProgHasPendRel) then
+     (not FProgHasJumboSet) and (not FProgHasPendRel) and
+     (FProgScratch.Count = 0) then
   begin
     Self.EmitStrLitSection();
     Exit;
@@ -1923,6 +1941,7 @@ begin
   end;
   if FProgExcFrameCount > 0 then HasData := True;
   if FProgHasJumboSet then HasData := True;
+  if FProgScratch.Count > 0 then HasData := True;
   { Two passes: first .data globals, then .tbss threadvars. }
   if HasData then
     Self.Emit('.data');
@@ -2015,6 +2034,13 @@ begin
       Self.Emit(Self.GlobalBindDir(Name) + Name);
     Self.Emit(Name + ':');
     Self.Emit(Directive);
+  end;
+  { static-array call result buffers of frameless bodies }
+  for I := 0 to FProgScratch.Count - 1 do
+  begin
+    Self.Emit('.balign 16');
+    Self.Emit(FProgScratch.Strings[I] + ':');
+    Self.Emit(#9'.skip ' + IntToStr(FProgScratchSz.Items[I]));
   end;
   { Exception frame slots for the program-main body. }
   for I := 0 to FProgExcFrameCount - 1 do
@@ -8003,6 +8029,16 @@ begin
     Exit;
   end;
 
+  if ((AExpr is TFuncCallExpr) or (AExpr is TMethodCallExpr)) and
+     (AExpr.ResolvedType <> nil) and
+     (AExpr.ResolvedType.Kind = tyStaticArray) and
+     not ((AExpr is TFuncCallExpr) and
+          (TFuncCallExpr(AExpr).ResolvedDecl = nil)) then
+  begin
+    Self.EmitStaticArrayCallToRax(AExpr);
+    Exit;
+  end;
+
   if AExpr is TIntLiteral then
   begin
     { Shortest correct materialisation: movl (zero-extends), movq (sign-
@@ -11769,6 +11805,86 @@ begin
       'native backend: var/out argument must be a variable or field');
 end;
 
+procedure TX86_64Backend.EmitStaticArrayArgAddrToRax(AArg: TASTExpr);
+begin
+  { a static array that is not a bare variable -- a field (C.A, R.A), an
+    element of an array of arrays (M[1]), a field of an element (RS[1].A) or
+    of a dereference (P^.A) -- passed to an open-array parameter: its storage
+    address is the open array's data pointer.  An l-value, so the var
+    argument address walk computes it.  A static-array CALL result lands in a
+    per-site buffer, whose address EmitExprToEax yields. }
+  if (AArg is TFuncCallExpr) or (AArg is TMethodCallExpr) then
+    Self.EmitExprToEax(AArg)
+  else if (AArg is TIdentExpr) and Self.IsCaptured(TIdentExpr(AArg).Name) then
+  begin
+    { captured from the enclosing routine: _cap_ holds the address of the
+      outer variable -- for an outer PARAMETER that is its slot, which in
+      turn holds the array's address }
+    Self.Emit(Format(#9'movq %s, %%rax',
+      [Self.VarOperand('_cap_' + TIdentExpr(AArg).Name)]));
+    if TIdentExpr(AArg).ParamMode <> pmNone then
+      Self.Emit(#9'movq (%rax), %rax');
+  end
+  else
+    { a static-array parameter of any mode (var, const or by value) holds
+      the array's ADDRESS in its slot -- the var argument walk loads it; a
+      local, global or const array is addressed in place }
+    Self.EmitVarArgAddrToRax(AArg);
+end;
+
+function TX86_64Backend.NewScratchOperand(ASize: Integer): string;
+var
+  Name: string;
+  Sz: Integer;
+begin
+  { a fresh ASize-byte buffer for this call site.  A framed routine grows its
+    frame (the frame-reserve subq is written after the body, as for
+    EnsureExcFrameSlot); a frameless body gets a static buffer. }
+  Name := '_sacall_' + IntToStr(FScratchN);
+  Inc(FScratchN);
+  Sz := (ASize + 15) and (-16);
+  if Sz = 0 then
+    Sz := 16;
+  if FFrame = nil then
+  begin
+    FProgScratch.Add(Name);
+    FProgScratchSz.Add(Sz);
+    Exit(Name + '(%rip)');
+  end;
+  Inc(FFrameBottom, Sz);
+  FFrameBottom := (FFrameBottom + 15) and (-16);
+  FFrame.Add(Name, -FFrameBottom);
+  FFrameTypes.Add(Name, nil);
+  FFrameSize := (FFrameBottom + 15) and (-16);
+  Result := Format('%d(%%rbp)', [-FFrameBottom]);
+end;
+
+procedure TX86_64Backend.EmitStaticArrayCallToRax(AExpr: TASTExpr);
+var
+  Dest: string;
+begin
+  { a static-array-returning call inside an expression: the callee writes
+    its result through the hidden sret pointer, so give it a buffer and yield
+    the buffer's address -- the value of a static array IS its address.  The
+    call used to be made with no buffer at all: its first argument was taken
+    as the sret pointer and the result written through it. }
+  Dest := Self.NewScratchOperand(AExpr.ResolvedType.RawSize());
+  Self.EmitRecordCallSretAt(AExpr, Dest, False);
+  Self.Emit(Format(#9'leaq %s, %%rax', [Dest]));
+end;
+
+procedure TX86_64Backend.CheckForwardedOpenArrayArg(AArg: TASTExpr);
+begin
+  { the last open-array argument arm forwards an open-array PARAMETER (its
+    pointer slot and <name>_high sibling).  Anything else reaching it used to
+    be read as a TIdentExpr and named a global <name>_high that does not
+    exist. }
+  if not ((AArg is TIdentExpr) and (AArg.ResolvedType <> nil) and
+          (AArg.ResolvedType.Kind = tyOpenArray)) then
+    raise ENativeCodeGenError.Create(
+      'native backend: unsupported open-array argument expression');
+end;
+
 procedure TX86_64Backend.EmitMethodArgPush(APar: TMethodParam; AArg: TASTExpr);
 var
   ClassRT: TRecordTypeDesc;
@@ -11907,23 +12023,6 @@ begin
       raise ENativeCodeGenError.Create(
         'native backend: open-array literal argument reached EmitMethodArgPush'
         + ' — call site must hoist it via HoistOALitArgs')
-    else if (AArg is TIdentExpr) and
-            (TIdentExpr(AArg).ResolvedType <> nil) and
-            (TIdentExpr(AArg).ResolvedType.Kind = tyStaticArray) then
-    begin
-      if Self.IsLocal(TIdentExpr(AArg).Name) then
-        Self.Emit(Format(#9'leaq %s, %%rax',
-          [Self.VarOperand(TIdentExpr(AArg).Name)]))
-      else if TIdentExpr(AArg).ConstArraySymbol <> '' then
-        Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
-          [NativeMangle(TIdentExpr(AArg).ConstArraySymbol)]))
-      else
-        Self.EmitLeaqGlobal(TIdentExpr(AArg).Name, '%rax');
-      Self.Emit(#9'pushq %rax');
-      Self.Emit(Format(#9'pushq $%d',
-        [TStaticArrayTypeDesc(TIdentExpr(AArg).ResolvedType).HighBound -
-         TStaticArrayTypeDesc(TIdentExpr(AArg).ResolvedType).LowBound]));
-    end
     else if (AArg.ResolvedType <> nil) and
             (AArg.ResolvedType.Kind = tyDynArray) then
     begin
@@ -11936,8 +12035,18 @@ begin
       Self.Emit(#9'decq %rax');          { high = length - 1 }
       Self.Emit(#9'pushq %rax');         { push high }
     end
+    else if (AArg.ResolvedType <> nil) and
+            (AArg.ResolvedType.Kind = tyStaticArray) then
+    begin
+      Self.EmitStaticArrayArgAddrToRax(AArg);
+      Self.Emit(#9'pushq %rax');
+      Self.Emit(Format(#9'pushq $%d',
+        [TStaticArrayTypeDesc(AArg.ResolvedType).HighBound -
+         TStaticArrayTypeDesc(AArg.ResolvedType).LowBound]));
+    end
     else
     begin
+      Self.CheckForwardedOpenArrayArg(AArg);
       Self.Emit(Format(#9'movq %s, %%rax',
         [Self.VarOperand(TIdentExpr(AArg).Name)]));
       Self.Emit(#9'pushq %rax');
@@ -12366,24 +12475,6 @@ begin
   else if AArg is TArrayLiteralExpr then
     raise ENativeCodeGenError.Create(
       'native backend: open-array literal argument was not hoisted')
-  else if (AArg is TIdentExpr) and
-          (TIdentExpr(AArg).ResolvedType <> nil) and
-          (TIdentExpr(AArg).ResolvedType.Kind = tyStaticArray) then
-  begin
-    if Self.IsLocal(TIdentExpr(AArg).Name) then
-      Self.Emit(Format(#9'leaq %s, %%rax',
-        [Self.VarOperand(TIdentExpr(AArg).Name)]))
-    else if TIdentExpr(AArg).ConstArraySymbol <> '' then
-      Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
-        [NativeMangle(TIdentExpr(AArg).ConstArraySymbol)]))
-    else
-      Self.EmitLeaqGlobal(TIdentExpr(AArg).Name, '%rax');
-    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [ADataOff]));
-    Self.Emit(Format(#9'movq $%d, %%rax',
-      [TStaticArrayTypeDesc(TIdentExpr(AArg).ResolvedType).HighBound -
-       TStaticArrayTypeDesc(TIdentExpr(AArg).ResolvedType).LowBound]));
-    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [AHighOff]));
-  end
   else if (AArg.ResolvedType <> nil) and
           (AArg.ResolvedType.Kind = tyDynArray) then
   begin
@@ -12399,10 +12490,21 @@ begin
     Self.Emit(#9'decq %rax');
     Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [AHighOff]));
   end
+  else if (AArg.ResolvedType <> nil) and
+          (AArg.ResolvedType.Kind = tyStaticArray) then
+  begin
+    Self.EmitStaticArrayArgAddrToRax(AArg);
+    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [ADataOff]));
+    Self.Emit(Format(#9'movq $%d, %%rax',
+      [TStaticArrayTypeDesc(AArg.ResolvedType).HighBound -
+       TStaticArrayTypeDesc(AArg.ResolvedType).LowBound]));
+    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [AHighOff]));
+  end
   else
   begin
     { open-array param forwarded onwards: slot holds ptr, sibling
       <name>_high slot holds high }
+    Self.CheckForwardedOpenArrayArg(AArg);
     Self.Emit(Format(#9'movq %s, %%rax',
       [Self.VarOperand(TIdentExpr(AArg).Name)]));
     Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [ADataOff]));
@@ -20418,24 +20520,6 @@ begin
           Self.Emit(Format(#9'pushq $%d',
             [TArrayLiteralExpr(Arg).Elements.Count - 1]));
         end
-        else if (Arg is TIdentExpr) and
-                (TIdentExpr(Arg).ResolvedType <> nil) and
-                (TIdentExpr(Arg).ResolvedType.Kind = tyStaticArray) then
-        begin
-          if Self.IsLocal(TIdentExpr(Arg).Name) then
-            Self.Emit(Format(#9'leaq %s, %%rax',
-              [Self.VarOperand(TIdentExpr(Arg).Name)]))
-          else if TIdentExpr(Arg).ConstArraySymbol <> '' then
-            Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
-              [NativeMangle(TIdentExpr(Arg).ConstArraySymbol)]))
-          else
-            Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
-              [TIdentExpr(Arg).Name]));
-          Self.Emit(#9'pushq %rax');
-          Self.Emit(Format(#9'pushq $%d',
-            [TStaticArrayTypeDesc(TIdentExpr(Arg).ResolvedType).HighBound -
-             TStaticArrayTypeDesc(TIdentExpr(Arg).ResolvedType).LowBound]));
-        end
         else if (Arg.ResolvedType <> nil) and
                 (Arg.ResolvedType.Kind = tyDynArray) then
         begin
@@ -20449,8 +20533,18 @@ begin
           Self.Emit(#9'decq %rax');          { high = length - 1 }
           Self.Emit(#9'pushq %rax');         { push high }
         end
+        else if (Arg.ResolvedType <> nil) and
+                (Arg.ResolvedType.Kind = tyStaticArray) then
+        begin
+          Self.EmitStaticArrayArgAddrToRax(Arg);
+          Self.Emit(#9'pushq %rax');
+          Self.Emit(Format(#9'pushq $%d',
+            [TStaticArrayTypeDesc(Arg.ResolvedType).HighBound -
+             TStaticArrayTypeDesc(Arg.ResolvedType).LowBound]));
+        end
         else
         begin
+          Self.CheckForwardedOpenArrayArg(Arg);
           Self.Emit(Format(#9'movq %s, %%rax',
             [Self.VarOperand(TIdentExpr(Arg).Name)]));
           Self.Emit(#9'pushq %rax');
@@ -20576,27 +20670,6 @@ begin
             [TArrayLiteralExpr(Arg).Elements.Count - 1, SlotOff]));
           Inc(SlotOff, 8);
         end
-        else if (Arg is TIdentExpr) and
-                (TIdentExpr(Arg).ResolvedType <> nil) and
-                (TIdentExpr(Arg).ResolvedType.Kind = tyStaticArray) then
-        begin
-          if Self.IsLocal(TIdentExpr(Arg).Name) then
-            Self.Emit(Format(#9'leaq %s, %%rax',
-              [Self.VarOperand(TIdentExpr(Arg).Name)]))
-          else if TIdentExpr(Arg).ConstArraySymbol <> '' then
-            Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
-              [NativeMangle(TIdentExpr(Arg).ConstArraySymbol)]))
-          else
-            Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
-              [TIdentExpr(Arg).Name]));
-          Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
-          Inc(SlotOff, 8);
-          Self.Emit(Format(#9'movq $%d, %d(%%rsp)',
-            [TStaticArrayTypeDesc(TIdentExpr(Arg).ResolvedType).HighBound -
-             TStaticArrayTypeDesc(TIdentExpr(Arg).ResolvedType).LowBound,
-             SlotOff]));
-          Inc(SlotOff, 8);
-        end
         else if (Arg.ResolvedType <> nil) and
                 (Arg.ResolvedType.Kind = tyDynArray) then
         begin
@@ -20612,8 +20685,21 @@ begin
           Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
           Inc(SlotOff, 8);
         end
+        else if (Arg.ResolvedType <> nil) and
+                (Arg.ResolvedType.Kind = tyStaticArray) then
+        begin
+          Self.EmitStaticArrayArgAddrToRax(Arg);
+          Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
+          Inc(SlotOff, 8);
+          Self.Emit(Format(#9'movq $%d, %d(%%rsp)',
+            [TStaticArrayTypeDesc(Arg.ResolvedType).HighBound -
+             TStaticArrayTypeDesc(Arg.ResolvedType).LowBound,
+             SlotOff]));
+          Inc(SlotOff, 8);
+        end
         else
         begin
+          Self.CheckForwardedOpenArrayArg(Arg);
           Self.Emit(Format(#9'movq %s, %%rax',
             [Self.VarOperand(TIdentExpr(Arg).Name)]));
           Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));

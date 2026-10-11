@@ -80,6 +80,8 @@ type
       sibling call) reading the parent's open array through High / Length /
       subscript / for-in, writing a var open array, and the empty case. }
     procedure TestRun_NestedRoutine_CapturesOpenArray;
+    procedure TestRun_StaticArrayExpr_ToOpenArray;
+    procedure TestRun_StaticArrayParamsAndCalls_ToOpenArray;
   end;
 
 implementation
@@ -999,6 +1001,94 @@ begin
     #10 +
     '21' + #10 +
     'a/b7/' + #10, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_StaticArrayExpr_ToOpenArray;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..2] of Integer;
+      TC = class
+        A: TArr;
+        function GetA: TArr;
+      end;
+      TR = record A: TArr; end;
+      PRec = ^TR;
+    function TC.GetA: TArr; begin Result := A end;
+    procedure Show(const V: array of Integer);
+    var I: Integer;
+    begin
+      for I := 0 to High(V) do Write(V[I], ' ');
+      WriteLn(High(V))
+    end;
+    var
+      C: TC; R: TR; PQ: PRec; RS: array of TR;
+      M: array[0..1] of TArr;
+    begin
+      C := TC.Create();
+      C.A[1] := 5; R.A[2] := 9; PQ := @R;
+      SetLength(RS, 2); RS[1].A[0] := 4;
+      M[1][2] := 7;
+      Show(C.A);
+      Show(R.A);
+      Show(PQ^.A);
+      Show(RS[1].A);
+      Show(M[1]);
+      Show(C.GetA())
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '0 5 0 2' + #10 +
+    '0 0 9 2' + #10 +
+    '0 0 9 2' + #10 +
+    '4 0 0 2' + #10 +
+    '0 0 7 2' + #10 +
+    '0 5 0 2' + #10, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_StaticArrayParamsAndCalls_ToOpenArray;
+const
+  Src = '''
+    program se;
+    type TArr = array[0..2] of Integer;
+    procedure Show(const V: array of Integer);
+    var I: Integer;
+    begin for I := 0 to High(V) do Write(V[I], ' '); WriteLn(High(V)) end;
+    function MakeA(K: Integer): TArr; begin Result[0] := K; Result[1] := 0; Result[2] := K * 2 end;
+    procedure ByVar(var X: TArr); begin Show(X) end;
+    procedure ByVal(X: TArr); begin Show(X) end;
+    procedure ByConst(const X: TArr); begin Show(X) end;
+    procedure Outer2(var P: TArr; Q: TArr);
+      procedure Inner2; begin Show(P); Show(Q) end;
+    begin Inner2() end;
+    procedure Outer;
+    var L: TArr;
+      procedure Inner; begin Show(L) end;
+    begin L[0] := 8; Inner() end;
+    function Sum(K: Integer): Integer;
+    begin Result := MakeA(K)[0] + MakeA(K)[2] end;
+    var G: TArr; K: Integer;
+    begin
+      WriteLn(MakeA(3)[2]);
+      G[1] := 6;
+      ByVar(G); ByVal(G); ByConst(G);
+      Outer(); Outer2(G, MakeA(7));
+      for K := 1 to 2 do Show(MakeA(K));
+      WriteLn(Sum(5));
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '6' + #10 +
+    '0 6 0 2' + #10 + '0 6 0 2' + #10 + '0 6 0 2' + #10 +
+    '8 0 0 2' + #10 +
+    '0 6 0 2' + #10 + '7 0 14 2' + #10 +
+    '1 0 2 2' + #10 + '2 0 4 2' + #10 +
+    '15' + #10, 0);
 end;
 
 initialization

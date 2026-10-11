@@ -83,6 +83,14 @@ type
       time) and arm64 rejected it.  The high slot is now captured with it. }
     procedure TestSemantic_NestedCapture_OpenArray_CapturesHighSlot;
     procedure TestCodegen_NestedCapture_OpenArray_NoGlobalHigh;
+    { a static array reached through a field, an element or a call result,
+      passed to an open-array parameter }
+    procedure TestCodegen_StaticArrayExprToOpenArray_Lowered;
+    { a static-array call result inside an expression needs a result buffer }
+    procedure TestCodegen_StaticArrayCallResult_GetsBuffer;
+    { a static-array parameter forwarded as an open array passes the address
+      its slot holds, not the slot's own address }
+    procedure TestCodegen_StaticArrayParamToOpenArray_LoadsSlot;
     { An anonymous method cannot capture an open array (as in Delphi). }
     procedure TestSemantic_AnonCapture_OpenArray_Rejected;
   end;
@@ -545,6 +553,87 @@ begin
   X86 := GenAsm(SrcNestedOpenArray, TargetX86_64);
   AssertTrue('x86-64: no global A_high reference', Pos('A_high(%rip)', X86) < 0);
   AssertTrue('arm64: generates', GenAsm(SrcNestedOpenArray, TargetArm64) <> '');
+end;
+
+procedure TOpenArrayTests.TestCodegen_StaticArrayExprToOpenArray_Lowered;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..2] of Integer;
+      TC = class
+        A: TArr;
+        function GetA: TArr;
+      end;
+      TR = record A: TArr; end;
+      PRec = ^TR;
+    function TC.GetA: TArr; begin Result := A end;
+    procedure Show(const V: array of Integer);
+    var I: Integer;
+    begin
+      for I := 0 to High(V) do Write(V[I], ' ');
+      WriteLn(High(V))
+    end;
+    var
+      C: TC; R: TR; PQ: PRec; RS: array of TR;
+      M: array[0..1] of TArr;
+    begin
+      C := TC.Create();
+      C.A[1] := 5; R.A[2] := 9; PQ := @R;
+      SetLength(RS, 2); RS[1].A[0] := 4;
+      M[1][2] := 7;
+      Show(C.A);
+      Show(R.A);
+      Show(PQ^.A);
+      Show(RS[1].A);
+      Show(M[1]);
+      Show(C.GetA())
+    end.
+    ''';
+begin
+  { arm64 accepted only a bare static-array variable here and raised NotYet
+    for every other static-array expression }
+  AssertEquals('static-array expressions pass as open arrays', '',
+    AsmMissing(Src, #9'callq Show'#10, #9'bl _Show'#10));
+end;
+
+procedure TOpenArrayTests.TestCodegen_StaticArrayCallResult_GetsBuffer;
+const
+  Src = '''
+    program P;
+    type TArr = array[0..2] of Integer;
+    function MakeA(K: Integer): TArr; begin Result[2] := K * 2 end;
+    begin
+      WriteLn(MakeA(3)[2])
+    end.
+    ''';
+begin
+  { x86-64 made the call with no buffer: MakeA took its argument 3 as the
+    sret pointer and wrote its result through it }
+  AssertEquals('MakeA is given a result buffer', '',
+    AsmMissing(Src, #9'leaq _sacall_0(%rip), %rax', #9'bl _MakeA'#10));
+end;
+
+procedure TOpenArrayTests.TestCodegen_StaticArrayParamToOpenArray_LoadsSlot;
+const
+  Src = '''
+    program P;
+    type TArr = array[0..2] of Integer;
+    procedure Show(const V: array of Integer); begin WriteLn(V[0]) end;
+    procedure ByVar(var X: TArr); begin Show(X) end;
+    var G: TArr;
+    begin
+      ByVar(G)
+    end.
+    ''';
+begin
+  { x86-64 took the address OF the slot (leaq), so Show read the pointer
+    itself as the first element }
+  AssertEquals('the var parameter''s pointer is passed', '',
+    AsmMissing(Src,
+      #9'movq %rdi, -16(%rbp)'#10#9'movq -16(%rbp), %rax'#10#9'pushq %rax'#10 +
+        #9'pushq $2',
+      #9'bl _Show'#10));
 end;
 
 procedure TOpenArrayTests.TestSemantic_AnonCapture_OpenArray_Rejected;
