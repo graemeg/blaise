@@ -439,6 +439,7 @@ type
       symbol).  Read-only shared lists, set by the dispatcher. }
     AllUnits: TObjectList;         { TUnit siblings, includes WorkUnit itself }
     PrebuiltIfaces: TObjectList;   { TUnitInterface, may be nil }
+    procedure CompileUnit;
   protected
     procedure Execute; override;
   end;
@@ -591,6 +592,24 @@ begin
 end;
 
 procedure TCompileWorker.Execute;
+var
+  WView: TSymbolTableView;
+begin
+  { Every worker shares SymTable, and codegen re-points its DefineOwningUnit at
+    the unit being emitted -- shared, those writes raced between workers (see
+    TSymbolTableView).  Give this thread its own copy of that context. }
+  WView := nil;
+  if Self.SymTable <> nil then
+    WView := Self.SymTable.EnterThreadView();
+  try
+    Self.CompileUnit();
+  finally
+    if WView <> nil then
+      Self.SymTable.LeaveThreadView();
+  end;
+end;
+
+procedure TCompileWorker.CompileUnit;
 var
   WCG: ICodeGen;
   WIR: string;

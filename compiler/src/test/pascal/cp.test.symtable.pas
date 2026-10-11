@@ -11,6 +11,7 @@ unit cp.test.symtable;
 interface
 
 uses
+  SysUtils, Classes,
   blaise.testing,
   uSymbolTable;
 
@@ -61,6 +62,10 @@ type
     { Symbol properties }
     procedure TestSymbol_Variable_HasType;
     procedure TestSymbol_Procedure_HasVoidReturn;
+
+    { Per-thread lookup context (TSymbolTableView) }
+    procedure TestThreadView_SeededAndPrivateToTheThread;
+    procedure TestThreadView_ConcurrentWorkersEachSeeTheirOwnUnit;
   end;
 
 implementation
@@ -527,6 +532,98 @@ begin
     Sym := MakeProc('DoSomething');
     ST.Define(Sym);
     AssertNull('Procedure has no return type', ST.Lookup('DoSomething').TypeDesc);
+  finally
+    ST.Free();
+  end;
+end;
+
+{ ------------------------------------------------------------------ }
+{ Per-thread lookup context                                           }
+{ ------------------------------------------------------------------ }
+
+procedure TSymbolTableTests.TestThreadView_SeededAndPrivateToTheThread;
+var
+  ST: TSymbolTable;
+  V: TSymbolTableView;
+begin
+  ST := TSymbolTable.Create();
+  try
+    ST.DefineOwningUnit := 'Main';
+    ST.BypassUsesChain := False;
+    V := ST.EnterThreadView();
+    AssertEquals('view seeded from the table', 'Main', ST.DefineOwningUnit);
+    ST.DefineOwningUnit := 'Worker';
+    ST.BypassUsesChain := True;
+    AssertEquals('write lands in the view', 'Worker', ST.DefineOwningUnit);
+    AssertTrue('bypass write lands in the view', ST.BypassUsesChain);
+    ST.LeaveThreadView();
+    AssertEquals('table field untouched by the view', 'Main', ST.DefineOwningUnit);
+    AssertFalse('table bypass untouched by the view', ST.BypassUsesChain);
+    V := nil;
+  finally
+    ST.Free();
+  end;
+end;
+
+type
+  { One codegen worker's use of a shared table: re-point DefineOwningUnit at
+    "its" unit and read it straight back, many times over. }
+  TViewWorker = class(TThread)
+  public
+    Table: TSymbolTable;
+    UnitName: string;
+    Mismatches: Integer;
+  protected
+    procedure Execute; override;
+  end;
+
+procedure TViewWorker.Execute;
+var
+  V: TSymbolTableView;
+  I: Integer;
+begin
+  V := Self.Table.EnterThreadView();
+  try
+    for I := 1 to 20000 do
+    begin
+      Self.Table.DefineOwningUnit := Self.UnitName;
+      if Self.Table.DefineOwningUnit <> Self.UnitName then
+        Inc(Self.Mismatches);
+    end;
+  finally
+    Self.Table.LeaveThreadView();
+  end;
+end;
+
+procedure TSymbolTableTests.TestThreadView_ConcurrentWorkersEachSeeTheirOwnUnit;
+var
+  ST: TSymbolTable;
+  W: array[0..3] of TViewWorker;
+  I, Total: Integer;
+begin
+  { The incremental driver runs one worker per unit against ONE table.  With
+    DefineOwningUnit a plain shared field, a worker read back another worker's
+    unit -- and the racing string stores released old values twice. }
+  ST := TSymbolTable.Create();
+  try
+    ST.DefineOwningUnit := 'Program';
+    for I := 0 to 3 do
+    begin
+      W[I] := TViewWorker.Create(True);
+      W[I].Table := ST;
+      W[I].UnitName := 'unit' + IntToStr(I);   { a counted, heap string }
+      W[I].Start();
+    end;
+    Total := 0;
+    for I := 0 to 3 do
+    begin
+      W[I].WaitFor();
+      Total := Total + W[I].Mismatches;
+      W[I].Free();
+    end;
+    AssertEquals('reads of another worker''s unit', 0, Total);
+    AssertEquals('table field untouched by the workers', 'Program',
+      ST.DefineOwningUnit);
   finally
     ST.Free();
   end;

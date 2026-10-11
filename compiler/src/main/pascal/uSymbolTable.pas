@@ -566,6 +566,23 @@ type
     function LookupViaUsesChain(const AName: string): TSymbol; virtual;
   end;
 
+  { A thread's private copy of a symbol table's lookup context.  Incremental
+    builds run one codegen worker thread per unit against the SAME table, and
+    each worker re-points DefineOwningUnit at the unit it is emitting while the
+    uses-chain walker flips BypassUsesChain around its callbacks.  Shared, those
+    two fields raced: concurrent stores to the string field released its old
+    value twice (a "_StringRelease double-free" abort on x86-64), and a worker
+    could resolve names under another worker's unit or bypass state.  A worker
+    enters a view (TSymbolTable.EnterThreadView) before it touches the table;
+    from then on its reads and writes of both properties go to the view.
+    Threads that never enter one -- the main thread included -- use the
+    table's own fields, as before. }
+  TSymbolTableView = class
+    FTable: Pointer;                 { the table this is a view of (non-owning) }
+    FDefineOwningUnit: string;
+    FBypassUsesChain: Boolean;
+  end;
+
   TSymbolTable = class
   private
     FScopeStack: TObjectList;   { owned TScope, index 0 = global }
@@ -668,6 +685,11 @@ type
 
     function GetCurrentScope: TScope;
     function GetScopeDepth: Integer;
+    function ThreadView: TSymbolTableView;
+    function GetDefineOwningUnit: string;
+    procedure SetDefineOwningUnit(const AValue: string);
+    function GetBypassUsesChain: Boolean;
+    procedure SetBypassUsesChain(AValue: Boolean);
     function NewType(AKind: TTypeKind; const AName: string): TTypeDesc;
     procedure RegisterBuiltins;
   public
@@ -693,8 +715,15 @@ type
     { Auto-OwningUnit context.  When set, Define()/DefineGlobal() will
       populate Sym.OwningUnit from this string if the symbol has no
       explicit value.  Empty string clears the context. }
-    property DefineOwningUnit: string read FDefineOwningUnit
-                                       write FDefineOwningUnit;
+    property DefineOwningUnit: string read GetDefineOwningUnit
+                                       write SetDefineOwningUnit;
+
+    { Give the calling thread a private copy of DefineOwningUnit and
+      BypassUsesChain, seeded from the table's current values (see
+      TSymbolTableView).  The caller keeps the returned view alive and calls
+      LeaveThreadView, on the same thread, when done with the table. }
+    function EnterThreadView: TSymbolTableView;
+    procedure LeaveThreadView;
 
     { Impl-private context.  When True, Define()/DefineGlobal() mark the symbol
       IsImplPrivate so it stays visible only to its owning unit.  Set by the
@@ -712,8 +741,8 @@ type
       walker calls Lookup itself to retrieve the canonical TSymbol;
       flipping this flag for the duration of that call bypasses the
       hook to break recursion. }
-    property BypassUsesChain: Boolean read FBypassUsesChain
-                                       write FBypassUsesChain;
+    property BypassUsesChain: Boolean read GetBypassUsesChain
+                                       write SetBypassUsesChain;
 
     { Set by a backend for the duration of code emission; see FInCodegen. }
     property InCodegen: Boolean read FInCodegen write FInCodegen;
@@ -2272,12 +2301,86 @@ begin
 end;
 
 function TSymbolTable.DefineGlobal(ASymbol: TSymbol): Boolean;
+var
+  DOU: string;
 begin
-  if (ASymbol.OwningUnit = '') and (FDefineOwningUnit <> '') then
-    ASymbol.OwningUnit := FDefineOwningUnit;
+  DOU := Self.GetDefineOwningUnit();
+  if (ASymbol.OwningUnit = '') and (DOU <> '') then
+    ASymbol.OwningUnit := DOU;
   if FDefineImplPrivate then
     ASymbol.IsImplPrivate := True;
   Result := TScope(FScopeStack.Items[0]).Define(ASymbol);
+end;
+
+threadvar
+  { the TSymbolTableView the calling thread entered, or nil }
+  GSymTableView: Pointer;
+
+function TSymbolTable.ThreadView: TSymbolTableView;
+begin
+  Result := nil;
+  if (GSymTableView <> nil) and
+     (TSymbolTableView(GSymTableView).FTable = Pointer(Self)) then
+    Result := TSymbolTableView(GSymTableView);
+end;
+
+function TSymbolTable.EnterThreadView: TSymbolTableView;
+begin
+  Result := TSymbolTableView.Create();
+  Result.FTable := Pointer(Self);
+  Result.FDefineOwningUnit := FDefineOwningUnit;
+  Result.FBypassUsesChain := FBypassUsesChain;
+  GSymTableView := Pointer(Result);
+end;
+
+procedure TSymbolTable.LeaveThreadView;
+begin
+  if Self.ThreadView() <> nil then
+    GSymTableView := nil;
+end;
+
+function TSymbolTable.GetDefineOwningUnit: string;
+var
+  V: TSymbolTableView;
+begin
+  V := Self.ThreadView();
+  if V <> nil then
+    Result := V.FDefineOwningUnit
+  else
+    Result := FDefineOwningUnit;
+end;
+
+procedure TSymbolTable.SetDefineOwningUnit(const AValue: string);
+var
+  V: TSymbolTableView;
+begin
+  V := Self.ThreadView();
+  if V <> nil then
+    V.FDefineOwningUnit := AValue
+  else
+    FDefineOwningUnit := AValue;
+end;
+
+function TSymbolTable.GetBypassUsesChain: Boolean;
+var
+  V: TSymbolTableView;
+begin
+  V := Self.ThreadView();
+  if V <> nil then
+    Result := V.FBypassUsesChain
+  else
+    Result := FBypassUsesChain;
+end;
+
+procedure TSymbolTable.SetBypassUsesChain(AValue: Boolean);
+var
+  V: TSymbolTableView;
+begin
+  V := Self.ThreadView();
+  if V <> nil then
+    V.FBypassUsesChain := AValue
+  else
+    FBypassUsesChain := AValue;
 end;
 
 function TSymbolTable.GlobalScope: TScope;
@@ -2308,14 +2411,17 @@ begin
 end;
 
 function TSymbolTable.Define(ASymbol: TSymbol): Boolean;
+var
+  DOU: string;
 begin
   { Only auto-tag global-scope symbols.  Locals (parameters, var
     blocks inside method bodies, etc.) live in pushed scopes and
     must remain OwningUnit='' — uses-chain visibility doesn't apply
     to them. }
-  if (ASymbol.OwningUnit = '') and (FDefineOwningUnit <> '')
+  DOU := Self.GetDefineOwningUnit();
+  if (ASymbol.OwningUnit = '') and (DOU <> '')
      and (FScopeStack.Count = 1) then
-    ASymbol.OwningUnit := FDefineOwningUnit;
+    ASymbol.OwningUnit := DOU;
   if FDefineImplPrivate and (FScopeStack.Count = 1) then
     ASymbol.IsImplPrivate := True;
   { Propagate the owning unit onto the type descriptor so codegen can mangle a
@@ -2336,6 +2442,8 @@ function TSymbolTable.Lookup(const AName: string): TSymbol;
 var
   I: Integer;
   Sym: TSymbol;
+  DOU: string;
+  Bypass: Boolean;
 begin
   { Resolution layers, highest to lowest priority:
 
@@ -2374,6 +2482,9 @@ begin
     symbols in a dedicated pool.  Builtins (OwningUnit = '') and
     symbols owned by other units fall through to later layers. }
   Sym := TScope(FScopeStack.Items[0]).LookupLocal(AName);
+  { This thread's lookup context (its own view, if it entered one). }
+  DOU := Self.GetDefineOwningUnit();
+  Bypass := Self.GetBypassUsesChain();
   { Module-name marker at global scope: same rule as layer 1 — the
     name is reserved, resolves to nothing, and blocks lower layers. }
   if (Sym <> nil) and (Sym.Kind = skModule) then
@@ -2381,8 +2492,8 @@ begin
     Result := nil;
     Exit;
   end;
-  if (Sym <> nil) and (FDefineOwningUnit <> '')
-     and SameText(Sym.OwningUnit, FDefineOwningUnit) then
+  if (Sym <> nil) and (DOU <> '')
+     and SameText(Sym.OwningUnit, DOU) then
   begin
     Result := Sym;
     Exit;
@@ -2391,7 +2502,7 @@ begin
   { Layer 4 + 5 — the chain walker prepends System so we don't probe
     it separately.  Bypassed when the chain walker itself is calling
     us back to retrieve a canonical TSymbol. }
-  if (FUsesChainProvider <> nil) and not FBypassUsesChain then
+  if (FUsesChainProvider <> nil) and not Bypass then
   begin
     Result := FUsesChainProvider.LookupViaUsesChain(AName);
     if Result <> nil then Exit;
@@ -2418,9 +2529,9 @@ begin
     _FieldCleanup.  FDefineOwningUnit can have drifted to a dependency unit
     mid-emit, which would otherwise make this suppression wrongly fire and drop
     the class's typeinfo, leaving a dangling symbol the linker binds to garbage. }
-  if (Sym <> nil) and Sym.IsImplPrivate and (FDefineOwningUnit <> '')
-     and not FBypassUsesChain and not FInCodegen
-     and not SameText(Sym.OwningUnit, FDefineOwningUnit) then
+  if (Sym <> nil) and Sym.IsImplPrivate and (DOU <> '')
+     and not Bypass and not FInCodegen
+     and not SameText(Sym.OwningUnit, DOU) then
   begin
     Result := nil;
     Exit;
