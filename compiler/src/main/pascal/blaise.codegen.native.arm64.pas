@@ -192,6 +192,10 @@ type
                                    address of the procedural value to call }
     FJArgN: Integer;             { counter for '__jarg_<n>' jumbo-set
                                    argument snapshots }
+    FStrTransTop: Integer;       { '__strtrans_<n>' park slots in use by the
+                                   calls currently being emitted -- a call
+                                   nested in an argument parks ABOVE its
+                                   enclosing call's slots }
     FFretN: Integer;             { counter for '__fret_<n>' closure-result
                                    scratch slots (one per call site) }
     FCurEnvCaptured: TStringList; { borrowed: the current routine's
@@ -258,6 +262,7 @@ type
       record a base pointer (in x0) for release at statement end, and flush
       the pending releases back down to a saved mark. }
     procedure ReservePendRelSlots;
+    function StrTransSlot(AIdx: Integer): string;
     function  DeferNativeClassRelease: Boolean;
     function  DeferNativeRelease(const AReleaseSym: string): Boolean;
     procedure FlushNativePendingReleases(AMark: Integer);
@@ -1125,7 +1130,8 @@ begin
     slots, whose offset the arg pushes AND the result/d0 spills perturbed — the
     reload read a NEIGHBOURING (borrowed) string and freed it, poisoning the
     allocator (BUG-20260724-arm64-transient-arg-reload-off / classes-emit UAF).
-    A fixed x29-relative pool sidesteps all sp arithmetic. }
+    A fixed x29-relative pool sidesteps all sp arithmetic.  These are the
+    common case; StrTransSlot adds further slots on demand. }
   for I := 0 to STRTRANS_SLOTS - 1 do
     AddLocal(Format('__strtrans_%d', [I]), 8);
   { Jumbo-set operator destination.  ONE fixed frame slot, reserved in every
@@ -1134,6 +1140,16 @@ begin
     JUMBO_SCRATCH_BYTES covers the widest jumbo set (a set's bitmap is capped
     at 32 bytes = 256 members), so one slot fits every instantiation. }
   AddLocal('_jset_scratch', JUMBO_SCRATCH_BYTES);
+end;
+
+function TArm64Backend.StrTransSlot(AIdx: Integer): string;
+begin
+  { the AIdx'th owned-transient park slot of this frame.  The first
+    STRTRANS_SLOTS are reserved up front; a call with more owned transient
+    arguments, or calls nested deeper, get theirs added to the frame here. }
+  Result := '__strtrans_' + IntToStr(AIdx);
+  if not FFrame.ContainsKey(Result) then
+    AddLocal(Result, 8);
 end;
 
 function TArm64Backend.DeferNativeClassRelease: Boolean;
@@ -12970,7 +12986,7 @@ var
   PopRegs: TStringList;
   Reg: string;
   StackOff, StackArea, ASz: Integer;
-  TransBase, TransN: Integer;
+  TransBase, TransN, TransTop: Integer;
   TransShapes: string;
   IsVariadicArg: Boolean;
   LitBase, LitOff, ESz, N: Integer;
@@ -13004,6 +13020,7 @@ begin
   StackArea := ComputeStackArgAreaEx(ADecl, AArgs, ASelfPushed, LitBase,
     TransBase, RecBase);
   TransN := 0;
+  TransTop := FStrTransTop;
   TransShapes := '';
   LitOff := 0;
   RecOff := 0;
@@ -13451,13 +13468,12 @@ begin
           IntfT := Arg.ResolvedType;
         if EmitIntfPairToX0X1(Arg, IntfT) then
         begin
-          if TransN >= STRTRANS_SLOTS then
-            NotYet('more than 8 owned transient args in one call', Arg);
           Self.Emit(#9'str x1, [sp, #-16]!');
-          EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
+          EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
           Self.Emit(#9'ldr x1, [sp], #16');
           TransShapes := TransShapes + 'C';
           Inc(TransN);
+          FStrTransTop := TransTop + TransN;
         end;
         { obj then itab, matching the PopRegs order (pops run in reverse) }
         EmitPushX0();
@@ -13502,19 +13518,16 @@ begin
         EmitPushX0();
         if ArcExprOwnsRef(Arg) then
         begin
-          if TransN >= STRTRANS_SLOTS then
-            NotYet('more than 8 owned string transient args in one call', Arg);
-          EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
+          EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
           TransShapes := TransShapes + '1';
           Inc(TransN);
+          FStrTransTop := TransTop + TransN;
         end
         else if ArcExprIsUnownedStrTransient(Arg) and
                 (I < ADecl.Params.Count) and
                 TMethodParam(ADecl.Params.Items[I]).IsConstParam then
         begin
-          if TransN >= STRTRANS_SLOTS then
-            NotYet('more than 8 owned string transient args in one call', Arg);
-          EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
+          EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
           { PIN NOW, before the call (BUG-20260725-arm64-const-str-param-alias).
             A callee that stores its const parameter into a local retains it and
             releases that local at scope exit; at rc=0 the cycle reaches zero
@@ -13527,18 +13540,18 @@ begin
           EmitCallSym('_StringAddRef');
           TransShapes := TransShapes + '0';
           Inc(TransN);
+          FStrTransTop := TransTop + TransN;
         end
         else if (I < ADecl.Params.Count) and
                 Self.IsPinnedBorrowedStrArg(Arg,
                   Self.ParamsHaveVarString(ADecl.Params)) then
         begin
-          if TransN >= STRTRANS_SLOTS then
-            NotYet('more than 8 owned string transient args in one call', Arg);
-          EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
+          EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
           { pin NOW (value still in x0), before the call consumes it }
           EmitCallSym('_StringAddRef');
           TransShapes := TransShapes + 'P';
           Inc(TransN);
+          FStrTransTop := TransTop + TransN;
         end;
         if (ADecl.IsVarArgs and (I >= ADecl.Params.Count)) or (NInt >= 8) then
         begin
@@ -13673,11 +13686,10 @@ begin
         begin
           { owned class transient: the callee borrows it — park the +1
             for one post-call release (shape 'C') }
-          if TransN >= STRTRANS_SLOTS then
-            NotYet('more than 8 owned transient args in one call', Arg);
-          EmitStoreSlot('x0', Format('__strtrans_%d', [TransN]));
+          EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
           TransShapes := TransShapes + 'C';
           Inc(TransN);
+          FStrTransTop := TransTop + TransN;
         end;
         if IsVariadicArg or (NInt >= 8) then
         begin
@@ -13817,7 +13829,7 @@ begin
       { reload from the x29-relative park slot — stable across the arg pushes,
         the pop-walk, and the two result-preserving pushes above (the old
         sp-relative offset drifted with all three and freed the wrong string). }
-      EmitLoadSlot('x0', Format('__strtrans_%d', [I]));
+      EmitLoadSlot('x0', StrTransSlot(TransTop + I));
       if Copy(TransShapes, I, 1) = 'C' then
       begin
         { owned class transient: one release drops the borrowed +1 }
@@ -13833,6 +13845,9 @@ begin
     Self.Emit(#9'ldp d0, d1, [sp], #16');
     Self.Emit(#9'ldp x0, x1, [sp], #16');
   end;
+  { this call's park slots are free again for the next argument of an
+    enclosing call }
+  FStrTransTop := TransTop;
   { A record-CALL argument (Consume(MakeRec())) was materialised into a
     scratch buffer in the RecBase region and holds the producing call's
     references to its managed fields.  The callee only co-owns (by value) or

@@ -174,6 +174,7 @@ type
     procedure TestDefaultPropReadOnPlainVar_DelegatesToGetter;
     procedure TestWriteLnInteger_PassesSignExtended;
     procedure TestOwnedStrTransientArgs_ParkedInStableSlots;
+    procedure TestOwnedStrTransientArgs_NestedCallParksAbove;
     procedure TestInterfaces_StringArg;
     procedure TestInterfaces_AsCast;
     procedure TestOwnedStringTransientArg_Released;
@@ -4510,6 +4511,48 @@ begin
     Copy(Store2, 6, Length(Store2)), Copy(Load2, 6, Length(Load2)));
   { and the two transients use DIFFERENT slots }
   AssertTrue('the two transients occupy distinct x29 slots',
+    Store1 <> Store2);
+end;
+
+procedure TArm64BackendTests.TestOwnedStrTransientArgs_NestedCallParksAbove;
+var
+  AsmT, Body, Store1, Store2: string;
+  P, C1, C2, R1, R2, NL: Integer;
+begin
+  { F(A(K), G(A(K + 10))): the outer call parks A(K) in a __strtrans slot,
+    then evaluates its second argument -- a call with an owned transient
+    argument of its own.  Every call used to number its park slots from 0, so
+    the inner call parked A(K + 10) on top of the outer call's A(K): the inner
+    release freed A(K + 10), the outer released it AGAIN and A(K) leaked
+    (a segfault on the next iteration).  The inner call must park ABOVE the
+    slots its enclosing call is still holding. }
+  AsmT := GenAsm(
+    '''
+    program P;
+    uses SysUtils;
+    function A(I: Integer): string; begin Result := 'a' + IntToStr(I) end;
+    function G(const S: string): string; begin Result := S + '!' end;
+    procedure F(const X, Y: string); begin WriteLn(X, ' ', Y) end;
+    var K: Integer;
+    begin
+      K := 1;
+      F(A(K), G(A(K + 10)))
+    end.
+    ''', TargetArm64);
+  P := Pos('_main:', AsmT);
+  AssertTrue('program body emitted', P >= 0);
+  Body := Copy(AsmT, P, Length(AsmT) - P);
+  C1 := Pos(#9'bl _A'#10, Body);
+  AssertTrue('first A call emitted', C1 >= 0);
+  R1 := PosEx(#9'stur x0, [x29, #', Body, C1);
+  AssertTrue('outer transient parked at an x29 slot', R1 >= 0);
+  NL := PosEx(#10, Body, R1);  Store1 := Copy(Body, R1, NL - R1);
+  C2 := PosEx(#9'bl _A'#10, Body, C1 + 1);
+  AssertTrue('second A call emitted', C2 >= 0);
+  R2 := PosEx(#9'stur x0, [x29, #', Body, C2);
+  AssertTrue('inner transient parked at an x29 slot', R2 >= 0);
+  NL := PosEx(#10, Body, R2);  Store2 := Copy(Body, R2, NL - R2);
+  AssertTrue('the nested call parks in a slot the outer call is not holding',
     Store1 <> Store2);
 end;
 

@@ -60,6 +60,10 @@ type
       — a loop condition) must still release the transient.  Every statement is
       flush-bracketed, and loop conditions flush per iteration, so none leak. }
     procedure TestDebug_TransientFieldInCallArg_NoLeak;
+    { owned string transients as call arguments: a call nested in an argument
+      parks its own transients above the enclosing call's, and a call may
+      take more than eight of them }
+    procedure TestDebug_NestedOwnedStringTransientArgs_NoLeak;
     procedure TestDebug_TransientFieldInIfCond_NoLeak;
     procedure TestDebug_TransientFieldInWhileCond_NoLeak;
     { A deep chain MakeIt().A.B.N reads a scalar off a base that is itself two
@@ -448,6 +452,38 @@ const
       WriteLn(Total);
     end.
     ''';
+
+const
+  SrcNestedStrTransArgs = '''
+    program NestTrans;
+    uses SysUtils;
+    function A(I: Integer): string; begin Result := 'a' + IntToStr(I) end;
+    function G(const S: string): string; begin Result := S + '!' end;
+    procedure F(const X, Y: string); begin WriteLn(X, ' ', Y) end;
+    procedure Ten(const S0, S1, S2, S3, S4, S5, S6, S7, S8, S9: string);
+    begin WriteLn(S0, S1, S2, S3, S4, S5, S6, S7, S8, S9) end;
+    var K: Integer;
+    begin
+      for K := 1 to 3 do
+        F(A(K), G(A(K + 10)));
+      Ten(A(0), A(1), A(2), A(3), A(4), A(5), A(6), A(7), G(A(8)), G(G(A(9))))
+    end.
+    ''';
+
+procedure TE2ELeakCheckTests.TestDebug_NestedOwnedStringTransientArgs_NoLeak;
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(SrcNestedStrTransArgs, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertEquals('stdout',
+    'a1 a11!' + LE + 'a2 a12!' + LE + 'a3 a13!' + LE +
+    'a0a1a2a3a4a5a6a7a8!a9!!' + LE, Output);
+  AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
+end;
 
 procedure TE2ELeakCheckTests.TestDebug_ForInEnumerator_NoLeak;
 var

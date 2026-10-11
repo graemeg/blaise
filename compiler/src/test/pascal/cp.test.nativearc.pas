@@ -37,6 +37,9 @@ type
       e2e tests (asm generated in-process for linux-x86_64, so they run on
       any host). }
     procedure TestX86_SmallSetLiteral_RuntimeMemberOrredIn;
+    { A call with more than eight owned transient arguments: arm64 parked
+      them in a fixed pool of eight frame slots and refused the ninth. }
+    procedure TestCall_TenOwnedTransientArgs_Lowered;
     procedure TestX86_NestedJumboSetCallArg_Hoisted;
     procedure TestX86_ForIn_InterfaceCurrent_UsesSret;
     procedure TestX86_ForIn_InterfaceArrayElem_Retained;
@@ -448,6 +451,29 @@ begin
     AsmMissing(Src, #9'movq %rax, _pendrel_0(%rip)',
       #9'bl _MakeL' + #10 + #9'str x0, [sp, #-16]!' + #10 +
         #9'str x0, [sp, #-16]!'));
+end;
+
+procedure TNativeArcTests.TestCall_TenOwnedTransientArgs_Lowered;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    function A(I: Integer): string; begin Result := 'a' + IntToStr(I) end;
+    function O(I: Integer): TObject; begin Result := TObject.Create() end;
+    procedure Ten(const S0, S1, S2, S3, S4, S5, S6, S7, S8, S9: string);
+    begin WriteLn(S0, S9) end;
+    procedure TenO(O0, O1, O2, O3, O4, O5, O6, O7, O8, O9: TObject);
+    begin WriteLn(O9 <> nil) end;
+    begin
+      Ten(A(0), A(1), A(2), A(3), A(4), A(5), A(6), A(7), A(8), A(9));
+      TenO(O(0), O(1), O(2), O(3), O(4), O(5), O(6), O(7), O(8), O(9))
+    end.
+    ''';
+begin
+  AssertEquals('ten owned string transient args', '',
+    AsmMissing(Src, #9'callq Ten'#10, #9'bl _Ten'#10));
+  AssertEquals('ten owned class transient args', '',
+    AsmMissing(Src, #9'callq TenO'#10, #9'bl _TenO'#10));
 end;
 
 procedure TNativeArcTests.TestRecordCallFieldRead_PinsThenReleasesTemp;
