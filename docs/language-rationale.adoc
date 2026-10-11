@@ -4708,6 +4708,52 @@ publishing the interface as the API surface.
 * Indexed and default array properties in interfaces are not yet
   supported.
 
+== Interface Method Call Arguments
+
+=== Decision
+
+An argument to an interface method call is checked against the method's
+declared parameter exactly as for a direct call: a type mismatch is a
+compile-time error, too many arguments is an error, and a bracket literal
+takes its type from the formal (a set, an `array of const`, a narrower
+integer open array).  An argument also *travels* as the declared parameter
+dictates — an `Integer` passed to a `Double` parameter is converted and
+passed in a float register, a `Double` passed to a `Single` parameter is
+narrowed, and an `Int64` parameter beyond the register file occupies a full
+8-byte stack slot.
+
+[source,pascal]
+----
+type
+  IGauge = interface
+    function Scale(D: Double; N: Integer): Double;
+  end;
+...
+  G.Scale(2, 4);       // 2 is passed as the Double 2.0
+  G.Scale('x', 4);     // error: argument 1 of 'Scale': expected 'Double'
+----
+
+=== Rationale
+
+An interface call dispatches through the itab, so the implementing method
+is not known at the call site — only the interface's declaration is.  That
+declaration is the contract, and Delphi and FPC both check and convert
+against it.  Blaise previously recorded only each parameter's `var`/`out`
+flag on the interface type and classified every argument by its own type,
+so a mismatched call compiled and the callee read a register the caller
+never wrote.  The interface type now carries every method's declared
+parameters; the type names are resolved in the declaring scope where
+possible, otherwise at the first call site.
+
+=== Limitations
+
+* A parameter whose type name is visible from neither the declaring nor
+  the calling scope is left unchecked and classified by the argument.  On
+  arm64 such a call is rejected if its arguments would spill to the stack,
+  since stack slots are sized from the declared type.
+* A method name that is registered twice on an interface (an inherited
+  method redeclared by a child) is checked only for its `var` arguments.
+
 == Collection Ownership — ARC Conventions
 
 === Decision

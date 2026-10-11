@@ -25,6 +25,12 @@ type
     procedure TestRun_InterfaceProperty_ThroughRecordField;
     procedure TestRun_Interfaces_Combined;
     procedure TestRun_BasicDispatch;
+    { arguments classified by the DECLARED parameter: Integer to Double,
+      Double to Single, Int64 stack slots, ten doubles, a const string }
+    procedure TestRun_IntfCall_ArgsByDeclaredParams;
+    { a record-returning interface method taking float arguments, on every
+      receiver form including a call result }
+    procedure TestRun_IntfRecordReturn_FloatArgs_AllReceivers;
     procedure TestRun_MethodWithArgs;
     procedure TestRun_PolymorphicThroughInterfaceVar;
     procedure TestRun_ClassImplementsTwoInterfaces;
@@ -1601,6 +1607,88 @@ begin
   AssertRunsOnAll(Src,
     '40' + LE +
     '70 70' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_IntfCall_ArgsByDeclaredParams;
+const
+  Src = '''
+    program i1;
+    type
+      IG = interface
+        function Scale(D: Double; N: Integer): Double;
+        function Half(S: Single): Single;
+        function Many(A, B, C, D, E, F, G, H: Integer; I: Int64; J: Int64): Int64;
+        function Floats(A, B, C, D, E, F, G, H, I, J: Double): Double;
+        procedure Txt(const S: string; N: Integer);
+      end;
+      TG = class(TObject, IG)
+        function Scale(D: Double; N: Integer): Double;
+        function Half(S: Single): Single;
+        function Many(A, B, C, D, E, F, G, H: Integer; I: Int64; J: Int64): Int64;
+        function Floats(A, B, C, D, E, F, G, H, I, J: Double): Double;
+        procedure Txt(const S: string; N: Integer);
+      end;
+    function TG.Scale(D: Double; N: Integer): Double; begin Result := D * N end;
+    function TG.Half(S: Single): Single; begin Result := S / 2 end;
+    function TG.Many(A, B, C, D, E, F, G, H: Integer; I: Int64; J: Int64): Int64;
+    begin Result := A + B + C + D + E + F + G + H + I * 1000 + J * 100000 end;
+    function TG.Floats(A, B, C, D, E, F, G, H, I, J: Double): Double;
+    begin Result := A + I * 100 + J * 1000 end;
+    procedure TG.Txt(const S: string; N: Integer); begin WriteLn(S, N) end;
+    var G: IG; D: Double;
+    begin
+      G := TG.Create();
+      WriteLn(Trunc(G.Scale(2, 4)));
+      D := 3.0;
+      WriteLn(Trunc(G.Half(D) * 10));
+      WriteLn(G.Many(1, 2, 3, 4, 5, 6, 7, 8, 9, 7));
+      WriteLn(Trunc(G.Floats(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)));
+      G.Txt('n=', 5);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '8' + LE + '15' + LE + '709036' + LE + '10901' + LE +
+    'n=5' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_IntfRecordReturn_FloatArgs_AllReceivers;
+const
+  Src = '''
+    program i3;
+    type
+      TP = record X, Y, Z: Int64; end;
+      IG = interface
+        function Mk(D: Double; N: Integer): TP;
+        function Other: IG;
+      end;
+      TG = class(TObject, IG)
+        function Mk(D: Double; N: Integer): TP;
+        function Other: IG;
+      end;
+      THolder = class
+        F: IG;
+        procedure Run;
+      end;
+    function TG.Mk(D: Double; N: Integer): TP; begin Result.X := Trunc(D * 10); Result.Y := N; Result.Z := 3 end;
+    function TG.Other: IG; begin Result := Self end;
+    procedure THolder.Run;
+    var P: TP;
+    begin P := F.Mk(2.5, 7); WriteLn(P.X, ' ', P.Y, ' ', P.Z) end;
+    var G: IG; P: TP; H: THolder;
+    begin
+      G := TG.Create();
+      P := G.Mk(1.5, 4); WriteLn(P.X, ' ', P.Y, ' ', P.Z);
+      P := G.Mk(2, 5); WriteLn(P.X, ' ', P.Y, ' ', P.Z);
+      WriteLn(G.Mk(3.5, 6).X);
+      P := G.Other().Mk(4.5, 8); WriteLn(P.X, ' ', P.Y);
+      H := THolder.Create(); H.F := G; H.Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '15 4 3' + LE + '20 5 3' + LE + '35' + LE + '45 8' + LE +
+    '25 7 3' + LE, 0);
 end;
 
 initialization

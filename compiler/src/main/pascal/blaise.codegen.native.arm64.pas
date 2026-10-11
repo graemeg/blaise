@@ -14790,13 +14790,13 @@ var
   Slot, RecvSlot: string;
   Owned: Boolean;
   NInt, NFloat: Integer;
+  Params: TObjectList;
+  AllDeclared: Boolean;
 begin
   { itab dispatch through the ordinary call path, like a closure call
-    (EmitFatPtrCall): the interface type records each method's var/out flags
-    but not its parameter types, so the synthesised declaration types each
-    parameter by its ARGUMENT (x86-64's itab dispatch classifies the same
-    way -- the semantic pass does not yet check interface-call arguments
-    against the declared parameters; see the BUGS.md entry).  EmitCall then
+    (EmitFatPtrCall): the synthesised declaration takes each parameter's
+    declared type from the interface type, falling back to the ARGUMENT's
+    type where it is unknown.  EmitCall then
     lowers every argument class it knows -- doubles in d registers, records
     by shape, interfaces as pairs, closures, var/out addresses, owned
     transients released after the call, stack overflow past 8 registers.
@@ -14808,9 +14808,17 @@ begin
   { Stack-passed arguments need the DECLARED parameter types: Apple's arm64
     ABI packs stack arguments at their natural size, so an Integer literal
     classified by its own type would be written as 4 bytes where an Int64
-    parameter reads 8.  The interface type does not carry parameter types
-    yet (BUG-20261004-intf-call-args-unchecked), so a call that would spill
-    stays an honest hole; register-passed arguments are unaffected. }
+    parameter reads 8.  The interface type now carries them (resolved by the
+    semantic pass, BUG-20261004-intf-call-args-unchecked).  Only when one
+    cannot be resolved -- its type name is not visible from the declaring or
+    the calling scope -- does a call that would spill stay a hole;
+    register-passed arguments classify by the argument as before. }
+  Params := AIntf.MethodParams(AIdx);
+  AllDeclared := (Params <> nil) and (Params.Count >= AArgs.Count);
+  if AllDeclared then
+    for I := 0 to AArgs.Count - 1 do
+      if TIntfParamInfo(Params.Items[I]).TypeDesc = nil then
+        AllDeclared := False;
   NInt := 1;                                    { Self }
   NFloat := 0;
   for I := 0 to AArgs.Count - 1 do
@@ -14836,8 +14844,9 @@ begin
     else
       Inc(NInt);
   end;
-  if (NInt > 8) or (NFloat > 8) then
-    NotYet('interface call with stack-passed arguments', AObjExpr);
+  if ((NInt > 8) or (NFloat > 8)) and not AllDeclared then
+    NotYet('interface call with stack-passed arguments to a parameter of ' +
+      'an unresolved type', AObjExpr);
   Owned := EmitIntfRecvPair(AVarName, AObjExpr, AVarParam, AImplicitBase,
     AObjExpr);
   Slot := '__icall_' + IntToStr(FJArgN);
@@ -14870,6 +14879,14 @@ begin
       if (Par.ResolvedType = nil) and (Arg is TIntLiteral) then
         Par.ResolvedType := FSymTable.TypeInt64;
       Par.IsVarParam := AIntf.MethodParamIsVar(AIdx, I);
+      if (Params <> nil) and (I < Params.Count) and
+         (TIntfParamInfo(Params.Items[I]).TypeDesc <> nil) then
+      begin
+        { the declared parameter: width, float class, open array, const }
+        Par.ResolvedType := TIntfParamInfo(Params.Items[I]).TypeDesc;
+        Par.IsConstParam := TIntfParamInfo(Params.Items[I]).IsConst;
+        Par.IsOpenArray := TIntfParamInfo(Params.Items[I]).IsOpenArray;
+      end;
       Decl.Params.Add(Par);
     end;
     FIndirectSlot := Slot;

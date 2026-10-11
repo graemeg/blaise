@@ -985,6 +985,11 @@ type
       AIndex: Integer): Boolean;
     procedure EmitVarArgAddrToRax(AArg: TASTExpr);
     procedure EmitStaticArrayArgAddrToRax(AArg: TASTExpr);
+    function IntfParamTypeAt(AIntf: TInterfaceTypeDesc; const AMethName: string;
+      AIndex: Integer; AArg: TASTExpr): TTypeDesc;
+    function IntfArgSlotClasses(AIntf: TInterfaceTypeDesc;
+      const AMethName: string; AArgs: TObjectList; const AVFlags: string;
+      AHK: TList<Integer>): TList<Integer>;
     function NewScratchOperand(ASize: Integer): string;
     procedure EmitStaticArrayCallToRax(AExpr: TASTExpr);
     procedure CheckForwardedOpenArrayArg(AArg: TASTExpr);
@@ -3908,12 +3913,14 @@ begin
         raise ENativeCodeGenError.Create(
           'native backend: unsupported interface arg expression in interface dispatch');
     end
-    else if (Arg.ResolvedType <> nil) and IsFloatFamily(Arg.ResolvedType) then
+    else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
     begin
       { Float scalar argument: materialise to %xmm0 and push its 8-byte bit
         pattern as one slot; EmitIntfRegArgs routes it into an xmm register
         instead of an integer one. }
       Self.EmitExprToXmm0(Arg);
+      Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
+        Self.IntfParamTypeAt(AIntf, AMethName, I, Arg).Kind = tySingle);
       Self.Emit(#9'subq $8, %rsp');
       Self.Emit(#9'movsd %xmm0, 0(%rsp)');
     end
@@ -4033,7 +4040,7 @@ begin
       SlotClasses.Add(0);
       SlotClasses.Add(0);
     end
-    else if (Arg.ResolvedType <> nil) and IsFloatFamily(Arg.ResolvedType) then
+    else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
       SlotClasses.Add(1)
     else
       SlotClasses.Add(0);
@@ -4174,11 +4181,13 @@ begin
         raise ENativeCodeGenError.Create(
           'native backend: unsupported interface arg expression in field dispatch');
     end
-    else if (Arg.ResolvedType <> nil) and IsFloatFamily(Arg.ResolvedType) then
+    else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
     begin
       { Float scalar argument: push its 8-byte xmm bit pattern as one slot;
         EmitIntfRegArgs routes it into an xmm register. }
       Self.EmitExprToXmm0(Arg);
+      Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
+        Self.IntfParamTypeAt(AIntf, AMethName, I, Arg).Kind = tySingle);
       Self.Emit(#9'subq $8, %rsp');
       Self.Emit(#9'movsd %xmm0, 0(%rsp)');
     end
@@ -4224,7 +4233,7 @@ begin
       SlotClasses.Add(0);
       SlotClasses.Add(0);
     end
-    else if (Arg.ResolvedType <> nil) and IsFloatFamily(Arg.ResolvedType) then
+    else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
       SlotClasses.Add(1)
     else
       SlotClasses.Add(0);
@@ -11803,6 +11812,56 @@ begin
   else
     raise ENativeCodeGenError.Create(
       'native backend: var/out argument must be a variable or field');
+end;
+
+function TX86_64Backend.IntfArgSlotClasses(AIntf: TInterfaceTypeDesc;
+  const AMethName: string; AArgs: TObjectList; const AVFlags: string;
+  AHK: TList<Integer>): TList<Integer>;
+var
+  I: Integer;
+  Arg: TASTExpr;
+begin
+  { the register class of each pushed slot of an itab call, in push order
+    (0 = integer, 1 = xmm) -- mirrors the push loops: a hoisted value and a
+    var position are one integer slot, an interface two, a float one xmm }
+  Result := TList<Integer>.Create();
+  if AArgs = nil then
+    Exit;
+  for I := 0 to AArgs.Count - 1 do
+  begin
+    Arg := TASTExpr(AArgs.Items[I]);
+    if AHK.Get(I) >= akRecCall then
+      Result.Add(0)
+    else if Self.VarFlagAt(AVFlags, I) then
+      Result.Add(0)
+    else if (Arg.ResolvedType <> nil) and
+            (Arg.ResolvedType.Kind = tyInterface) then
+    begin
+      Result.Add(0);
+      Result.Add(0);
+    end
+    else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
+      Result.Add(1)
+    else
+      Result.Add(0);
+  end;
+end;
+
+function TX86_64Backend.IntfParamTypeAt(AIntf: TInterfaceTypeDesc;
+  const AMethName: string; AIndex: Integer; AArg: TASTExpr): TTypeDesc;
+var
+  Params: TObjectList;
+begin
+  { the declared type of an interface method's AIndex'th parameter, as the
+    semantic pass resolved it; the argument's own type where that is unknown.
+    An Integer argument to a Double parameter must travel in an xmm register
+    as a double, and a Double argument to a Single one as a single. }
+  Result := AArg.ResolvedType;
+  Params := AIntf.MethodParams(AIntf.MethodIndex(AMethName));
+  if (Params <> nil) and (AIndex < Params.Count) and
+     (TIntfParamInfo(Params.Items[AIndex]).TypeDesc <> nil) and
+     not TIntfParamInfo(Params.Items[AIndex]).IsOpenArray then
+    Result := TIntfParamInfo(Params.Items[AIndex]).TypeDesc;
 end;
 
 procedure TX86_64Backend.EmitStaticArrayArgAddrToRax(AArg: TASTExpr);
@@ -22509,6 +22568,7 @@ var
   VFlags: string;
   IE: TIdentExpr;
   OverflowBytes: Integer;
+  SlotClasses: TList<Integer>;
 begin
   IntfD := TInterfaceTypeDesc(ACall.ResolvedClassType);
   ArgN := 0;
@@ -22580,6 +22640,18 @@ begin
       else
         raise ENativeCodeGenError.Create(
           'native backend: unsupported interface arg expression in sret interface dispatch');
+    end
+    else if IsFloatFamily(Self.IntfParamTypeAt(IntfD, ACall.Name, I, Arg)) then
+    begin
+      { float argument: its 8-byte xmm bit pattern as one slot, at the
+        declared parameter's width; EmitIntfRegArgs routes it to an xmm
+        register (it was evaluated into %rax, and a float literal could not
+        be lowered at all) }
+      Self.EmitExprToXmm0(Arg);
+      Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
+        Self.IntfParamTypeAt(IntfD, ACall.Name, I, Arg).Kind = tySingle);
+      Self.Emit(#9'subq $8, %rsp');
+      Self.Emit(#9'movsd %xmm0, 0(%rsp)');
     end
     else
     begin
@@ -22656,7 +22728,10 @@ begin
   end;
   { Consume args (base 2: %rdi = sret buffer, %rsi = receiver obj); spill
     overflow slots beyond the 4 remaining registers to the stack. }
-  OverflowBytes := Self.EmitSretRegArgs(SlotOff, 2);
+  SlotClasses := Self.IntfArgSlotClasses(IntfD, ACall.Name, ACall.Args,
+    VFlags, HK);
+  OverflowBytes := Self.EmitIntfRegArgs(SlotClasses, 2);
+  SlotClasses.Free();
   Self.Emit(#9'movq %r10, %rsi');
   Self.Emit(#9'movq %rsp, %rdi');
   if OverflowBytes > 0 then
@@ -22687,6 +22762,8 @@ var
   OverflowBytes, ABase: Integer;
   RC: TRecReturnClass;
   RetRec: TRecordTypeDesc;
+  SlotClasses: TList<Integer>;
+  RecvOnStack: Boolean;
 begin
   IntfD := TInterfaceTypeDesc(ACall.ResolvedClassType);
   RetRec := TRecordTypeDesc(ACall.ResolvedType);
@@ -22705,6 +22782,27 @@ begin
     Self.Emit(Format(#9'leaq %s, %%rax', [ADest]));
   Self.Emit(#9'pushq %r14');
   Self.Emit(#9'movq %rax, %r14');
+
+  { A call-result receiver (G.Other().Mk(..)) is evaluated FIRST, before the
+    hoist and the argument pushes -- it is a call and would clobber them.
+    Its owned (+1) fat pair stays at the bottom of this call's stack region
+    until after the dispatch, then the obj is released.  Same discipline as
+    EmitInterfaceCall. }
+  RecvOnStack := False;
+  if (ACall.ObjExpr <> nil) and (ACall.ObjExpr is TFuncCallExpr) then
+  begin
+    Self.EmitIntfSretCall(TFuncCallExpr(ACall.ObjExpr));
+    RecvOnStack := True;
+  end
+  else if (ACall.ObjExpr <> nil) and (ACall.ObjExpr is TMethodCallExpr) and
+          (TMethodCallExpr(ACall.ObjExpr).ResolvedClassType <> nil) then
+  begin
+    if TMethodCallExpr(ACall.ObjExpr).ResolvedClassType.Kind = tyInterface then
+      Self.EmitIntfSretMethodCall(TMethodCallExpr(ACall.ObjExpr))
+    else
+      Self.EmitClassIntfSretMethodCall(TMethodCallExpr(ACall.ObjExpr));
+    RecvOnStack := True;
+  end;
 
   { Same unknown-signature hoist as EmitIntfSretMethodCall; the region sits
     BELOW any sret buffer space we reserve. }
@@ -22765,6 +22863,18 @@ begin
         raise ENativeCodeGenError.Create(
           'native backend: unsupported interface arg expression in sret interface record dispatch');
     end
+    else if IsFloatFamily(Self.IntfParamTypeAt(IntfD, ACall.Name, I, Arg)) then
+    begin
+      { float argument: its 8-byte xmm bit pattern as one slot, at the
+        declared parameter's width; EmitIntfRegArgs routes it to an xmm
+        register (it was evaluated into %rax, and a float literal could not
+        be lowered at all) }
+      Self.EmitExprToXmm0(Arg);
+      Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
+        Self.IntfParamTypeAt(IntfD, ACall.Name, I, Arg).Kind = tySingle);
+      Self.Emit(#9'subq $8, %rsp');
+      Self.Emit(#9'movsd %xmm0, 0(%rsp)');
+    end
     else
     begin
       Self.EmitExprToEax(Arg);
@@ -22778,7 +22888,13 @@ begin
       Pushed := Pushed + 8;
   end;
   { Resolve the receiver: obj into %r10, itab into %rax. }
-  if (ACall.ObjExpr <> nil) and (ACall.ObjExpr is TFieldAccessExpr) then
+  if RecvOnStack then
+  begin
+    { the receiver pair sits above the hoist region and the pushed args }
+    Self.Emit(Format(#9'movq %d(%%rsp), %%r10', [Pushed + HTotal]));
+    Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [Pushed + HTotal + 8]));
+  end
+  else if (ACall.ObjExpr <> nil) and (ACall.ObjExpr is TFieldAccessExpr) then
   begin
     Self.EmitInterfaceFieldAddr(TFieldAccessExpr(ACall.ObjExpr), '%r10');
     Self.Emit(#9'movq 8(%r10), %rax');
@@ -22838,6 +22954,8 @@ begin
       Inc(Slots);
   end;
 
+  SlotClasses := Self.IntfArgSlotClasses(IntfD, ACall.Name, ACall.Args,
+    VFlags, HK);
   if RC = rcSret then
   begin
     { Memory-class record: hidden sret pointer in %rdi, receiver obj in %rsi,
@@ -22851,7 +22969,7 @@ begin
     Self.Emit(#9'popq %r11');
     Self.Emit(#9'popq %r10');
     ABase := 2;
-    OverflowBytes := Self.EmitSretRegArgs(Slots, ABase);
+    OverflowBytes := Self.EmitIntfRegArgs(SlotClasses, ABase);
     Self.Emit(#9'movq %r10, %rsi');
     Self.Emit(#9'movq %r14, %rdi');
     Self.Emit(#9'callq *%r11');
@@ -22865,7 +22983,7 @@ begin
       visible args from %rsi (base index 1).  Capture the register return
       into the dest buffer (%r14). }
     ABase := 1;
-    OverflowBytes := Self.EmitSretRegArgs(Slots, ABase);
+    OverflowBytes := Self.EmitIntfRegArgs(SlotClasses, ABase);
     Self.Emit(#9'movq %r10, %rdi');
     Self.Emit(#9'callq *%r11');
     if OverflowBytes > 0 then
@@ -22876,7 +22994,15 @@ begin
   end;
   HD.Free();
   HK.Free();
+  if RecvOnStack then
+  begin
+    { release the owned receiver; the result is already in the dest buffer }
+    Self.Emit(#9'movq (%rsp), %rdi');
+    Self.Emit(#9'callq _ClassRelease');
+    Self.Emit(#9'addq $16, %rsp');
+  end;
   Self.Emit(#9'popq %r14');
+  SlotClasses.Free();
 end;
 
 procedure TX86_64Backend.EmitClassIntfSretMethodCall(ACall: TMethodCallExpr);

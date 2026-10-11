@@ -568,6 +568,31 @@ begin
   end;
 end;
 
+{ The declared parameters of an imported interface method (see
+  TIntfParamInfo): a plain type name resolves against the importing table
+  now; an open-array or generic one waits for the first call site. }
+function ImportIntfParamInfos(AMethod: TMethodDecl;
+  ATable: TSymbolTable): TObjectList;
+var
+  K: Integer;
+  P: TMethodParam;
+  Info: TIntfParamInfo;
+begin
+  Result := TObjectList.Create(True);
+  for K := 0 to AMethod.Params.Count - 1 do
+  begin
+    P := TMethodParam(AMethod.Params.Items[K]);
+    Info := TIntfParamInfo.Create();
+    Info.TypeName := P.TypeName;
+    Info.IsVar := P.IsVarParam;
+    Info.IsConst := P.IsConstParam;
+    Info.IsOpenArray := P.IsOpenArray;
+    if (not Info.IsOpenArray) and (StrPos('<', Info.TypeName) < 0) then
+      Info.TypeDesc := ResolveTypeName(Info.TypeName, ATable);
+    Result.Add(Info);
+  end;
+end;
+
 { Return AName in the casing of the matching method declaration, or AName
   unchanged when no declaration matches — emitted method symbols are
   case-sensitive at link time. }
@@ -624,14 +649,16 @@ begin
         IntfDesc.AddMethod(
           IntfDesc.Parent.MethodName(I),
           IntfDesc.Parent.MethodReturnTypeName(I),
-          IntfDesc.Parent.MethodParamVarFlagsStr(I));
+          IntfDesc.Parent.MethodParamVarFlagsStr(I),
+          IntfDesc.Parent.CloneMethodParams(I));
     end;
   end;
 
   for I := 0 to IntfDef.Methods.Count - 1 do
   begin
     M := TMethodDecl(IntfDef.Methods.Items[I]);
-    IntfDesc.AddMethod(M.Name, M.ReturnTypeName, ParamVarFlags(M));
+    IntfDesc.AddMethod(M.Name, M.ReturnTypeName, ParamVarFlags(M),
+      ImportIntfParamInfos(M, ATable));
   end;
 
   { Register interface properties.  Accessors are always interface methods

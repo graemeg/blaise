@@ -556,6 +556,9 @@ type
       validated at interface-dispatch sites — Phase 3 limitation). }
     procedure ValidateIntfMethodVarArgs(AArgs: TObjectList;
       AIntf: TInterfaceTypeDesc; const AName: string; ALine, ACol: Integer);
+    function IntfParamInfosFor(AMethod: TMethodDecl;
+      AParamNames, AArgs: TStringList): TObjectList;
+    function ResolveIntfParam(AInfo: TIntfParamInfo): TTypeDesc;
     procedure AnalyseCaseStmt(AStmt: TCaseStmt);
     function  AnalyseMethodCallExpr(AExpr: TMethodCallExpr): TTypeDesc;
     function  AnalyseFuncCallExpr(AExpr: TFuncCallExpr): TTypeDesc;
@@ -5091,7 +5094,8 @@ begin
       for I := 0 to Result.Parent.MethodCount() - 1 do
         Result.AddMethod(Result.Parent.MethodName(I),
           Result.Parent.MethodReturnTypeName(I),
-          Result.Parent.MethodParamVarFlagsStr(I));
+          Result.Parent.MethodParamVarFlagsStr(I),
+          Result.Parent.CloneMethodParams(I));
     end;
 
     { Register interface method names with substituted return types + var-param flags }
@@ -5108,7 +5112,7 @@ begin
       end;
       Result.AddMethod(MDecl.Name,
         SubstTypeParam(MDecl.ReturnTypeName, Templ.ParamNames, Args),
-        VarFlags);
+        VarFlags, IntfParamInfosFor(MDecl, Templ.ParamNames, Args));
     end;
 
     { Register the instantiation for codegen }
@@ -7638,7 +7642,8 @@ begin
         for J := 0 to IntfDesc.Parent.MethodCount() - 1 do
           IntfDesc.AddMethod(IntfDesc.Parent.MethodName(J),
             IntfDesc.Parent.MethodReturnTypeName(J),
-            IntfDesc.Parent.MethodParamVarFlagsStr(J));
+            IntfDesc.Parent.MethodParamVarFlagsStr(J),
+            IntfDesc.Parent.CloneMethodParams(J));
       end;
       for J := 0 to ITD.Methods.Count - 1 do
       begin
@@ -7651,7 +7656,8 @@ begin
           if Par.IsVarParam then VarFlags := VarFlags + '1'
                             else VarFlags := VarFlags + '0';
         end;
-        IntfDesc.AddMethod(MDecl.Name, MDecl.ReturnTypeName, VarFlags);
+        IntfDesc.AddMethod(MDecl.Name, MDecl.ReturnTypeName, VarFlags,
+          IntfParamInfosFor(MDecl, nil, nil));
       end;
       { Register interface properties.  Accessors must be methods of the
         interface itself (or an inherited one) — interfaces have no fields,
@@ -11470,11 +11476,61 @@ begin
   end;
 end;
 
+function TSemanticAnalyser.IntfParamInfosFor(AMethod: TMethodDecl;
+  AParamNames, AArgs: TStringList): TObjectList;
+var
+  K: Integer;
+  Par: TMethodParam;
+  Info: TIntfParamInfo;
+begin
+  { the declared parameters of an interface method, for call-site checking
+    and for the backends' argument classification.  A generic instance's
+    type names are substituted here.  A plain name is resolved now, in the
+    declaring scope; anything else waits for the first call site. }
+  Result := TObjectList.Create(True);
+  for K := 0 to AMethod.Params.Count - 1 do
+  begin
+    Par := TMethodParam(AMethod.Params.Items[K]);
+    Info := TIntfParamInfo.Create();
+    Info.TypeName := Par.TypeName;
+    if AParamNames <> nil then
+      Info.TypeName := SubstTypeParam(Par.TypeName, AParamNames, AArgs);
+    Info.IsVar := Par.IsVarParam;
+    Info.IsConst := Par.IsConstParam;
+    Info.IsOpenArray := Par.IsOpenArray;
+    if (not Info.IsOpenArray) and (StrPos('<', Info.TypeName) < 0) then
+      Info.TypeDesc := FTable.FindType(Info.TypeName);
+    Result.Add(Info);
+  end;
+end;
+
+function TSemanticAnalyser.ResolveIntfParam(AInfo: TIntfParamInfo): TTypeDesc;
+var
+  Elem: TTypeDesc;
+begin
+  if AInfo.TypeDesc = nil then
+  begin
+    if AInfo.IsOpenArray then
+    begin
+      Elem := FindTypeOrInstantiate(AInfo.TypeName);
+      if Elem <> nil then
+        AInfo.TypeDesc := FTable.ParamTypeFor(Elem, True);
+    end
+    else
+      AInfo.TypeDesc := FindTypeOrInstantiate(AInfo.TypeName);
+  end;
+  Result := AInfo.TypeDesc;
+end;
+
 procedure TSemanticAnalyser.ValidateIntfMethodVarArgs(AArgs: TObjectList;
   AIntf: TInterfaceTypeDesc; const AName: string; ALine, ACol: Integer);
 var
   I: Integer;
   MIdx: Integer;
+  Params: TObjectList;
+  Info: TIntfParamInfo;
+  Slot: TASTExpr;
+  ParT: TTypeDesc;
 begin
   if AIntf = nil then
     Exit;
@@ -11491,6 +11547,35 @@ begin
           ALine, ACol);
       WarnIfVarArgIsForInLoopVar(TASTExpr(AArgs.Items[I]));
     end;
+  end;
+  { Check each argument against the DECLARED parameter, as a direct call
+    does (BUG-20261004-intf-call-args-unchecked): only the var flags were
+    checked, so G.Scale(2, 4) against Scale(D: Double; N: Integer) passed 2
+    in an integer register to a callee reading a float one.  The resolved
+    types also drive the backends' argument classification.  A method name
+    registered twice (a redeclared inherited method) is left to the var
+    check above, as is a parameter whose type cannot be resolved here. }
+  Params := AIntf.MethodParams(MIdx);
+  if (Params = nil) or (AIntf.MethodNameCount(AName) <> 1) then
+    Exit;
+  if AArgs.Count > Params.Count then
+    SemanticError(Format(
+      'Interface method ''%s'' expects %d argument(s), got %d',
+      [AName, Params.Count, AArgs.Count]), ALine, ACol);
+  for I := 0 to AArgs.Count - 1 do
+  begin
+    Info := TIntfParamInfo(Params.Items[I]);
+    ParT := Self.ResolveIntfParam(Info);
+    if ParT = nil then
+      Continue;
+    Slot := TASTExpr(AArgs.Items[I]);
+    RetypeBracketLiteralArg(Slot, ParT);
+    if Info.IsVar then
+      CheckTypesMatch(ParT, Slot.ResolvedType,
+        Format('var argument %d of ''%s''', [I + 1, AName]), ALine, ACol)
+    else
+      CheckTypesMatch(ParT, Slot.ResolvedType,
+        Format('argument %d of ''%s''', [I + 1, AName]), ALine, ACol);
   end;
 end;
 

@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TInterfaceTests = class(TTestCase)
@@ -38,6 +38,13 @@ type
     procedure TestSemantic_Interface_MethodsRegistered;
     procedure TestSemantic_ClassImplements_OK;
     procedure TestSemantic_ClassImplements_MissingMethod_RaisesError;
+    { interface-call arguments are checked against the declared parameters
+      (BUG-20261004-intf-call-args-unchecked) }
+    procedure TestSemantic_IntfCall_ArgTypeMismatch_RaisesError;
+    procedure TestSemantic_IntfCall_TooManyArgs_RaisesError;
+    procedure TestSemantic_IntfCall_IntArgToDoubleParam_OK;
+    { ...and the backends classify them by the declared parameter }
+    procedure TestCodegen_IntfCall_IntArgToDoubleParam_Converted;
     procedure TestSemantic_ClassWithInterfaceAsFirstParent_OK;
     procedure TestSemantic_ClassWithInterfaceAsFirstParent_InheritsFromTObject;
 
@@ -504,6 +511,77 @@ end;
 procedure TInterfaceTests.TestSemantic_ClassImplements_MissingMethod_RaisesError;
 begin
   AnalyseExpectError(SrcClassMissingMethod);
+end;
+
+procedure TInterfaceTests.TestSemantic_IntfCall_ArgTypeMismatch_RaisesError;
+begin
+  AnalyseExpectError(
+    '''
+    program P;
+    type
+      IG = interface
+        function Scale(D: Double; N: Integer): Double;
+      end;
+    var G: IG;
+    begin
+      if G <> nil then WriteLn(G.Scale('x', 4))
+    end.
+    ''');
+end;
+
+procedure TInterfaceTests.TestSemantic_IntfCall_TooManyArgs_RaisesError;
+begin
+  AnalyseExpectError(
+    '''
+    program P;
+    type
+      IG = interface
+        procedure Run(N: Integer);
+      end;
+    var G: IG;
+    begin
+      if G <> nil then G.Run(1, 2)
+    end.
+    ''');
+end;
+
+procedure TInterfaceTests.TestSemantic_IntfCall_IntArgToDoubleParam_OK;
+begin
+  AnalyseSrc(
+    '''
+    program P;
+    type
+      IG = interface
+        function Scale(D: Double; N: Integer): Double;
+      end;
+    var G: IG; K: Integer;
+    begin
+      K := 2;
+      if G <> nil then WriteLn(G.Scale(K, 4))
+    end.
+    ''').Free();
+end;
+
+procedure TInterfaceTests.TestCodegen_IntfCall_IntArgToDoubleParam_Converted;
+begin
+  { the Integer K travels as a double in a float register: both backends
+    classified it by the argument and passed the raw integer }
+  AssertEquals('K is converted for the Double parameter', '',
+    AsmMissing(
+      '''
+    program P;
+    type
+      IG = interface
+        function Scale(D: Double; N: Integer): Double;
+      end;
+    var G: IG; K: Integer;
+    begin
+      K := 2;
+      if G <> nil then WriteLn(G.Scale(K, 4))
+    end.
+    ''',
+      #9'movslq K(%rip), %rax'#10#9'cvtsi2sdq %rax, %xmm0',
+      #9'scvtf d0, x0'#10#9'fmov x0, d0'));
 end;
 
 procedure TInterfaceTests.TestSemantic_ClassWithInterfaceAsFirstParent_OK;

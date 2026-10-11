@@ -302,18 +302,38 @@ type
   end;
 
   { Type descriptor for zero-GUID interface types (Phase 3). }
+  { One declared parameter of an interface method.  The type is carried by
+    NAME (substituted for a generic instance) and resolved by the semantic
+    pass -- at registration when it can, else at the first call site, where
+    every type is known.  TypeDesc stays nil when the name cannot be resolved
+    from either scope. }
+  TIntfParamInfo = class
+  public
+    TypeName:    string;   { element type name when IsOpenArray }
+    IsVar:       Boolean;
+    IsConst:     Boolean;
+    IsOpenArray: Boolean;
+    [Unretained] TypeDesc: TTypeDesc;   { TOpenArrayTypeDesc when IsOpenArray }
+    function Clone: TIntfParamInfo;
+  end;
+
   TInterfaceTypeDesc = class(TTypeDesc)
   private
     FMethods:     TStringList;  { method names, case-insensitive }
     FReturnTypes: TStringList;  { parallel: return type name, '' = procedure }
     FParamIsVar:  TStringList;  { parallel: comma-separated '1'/'0' per param; '1' = var param }
+    FParamInfos:  TObjectList;  { parallel, owned: a TObjectList of owned
+                                  TIntfParamInfo per method, or nil when the
+                                  declared parameters are unknown }
     FProperties:  TObjectList;  { owned TPropertyInfo — accessors are interface methods }
     [Unretained] FParent:      TInterfaceTypeDesc;  { not owned; nil if no parent }
   public
     constructor Create(const AName: string);
     destructor Destroy; override;
+    { AParams (owned TIntfParamInfo list, may be nil) passes to the type. }
     procedure AddMethod(const AName: string; const AReturnTypeName: string;
-                        const AParamIsVar: string = '');
+                        const AParamIsVar: string = '';
+                        AParams: TObjectList = nil);
     function  HasMethod(const AName: string): Boolean;
     function  MethodCount: Integer;
     function  MethodName(AIndex: Integer): string;
@@ -321,6 +341,14 @@ type
     function  MethodIndex(const AName: string): Integer;
     function  MethodParamIsVar(AMethodIndex: Integer; AParamIndex: Integer): Boolean;
     function  MethodParamVarFlagsStr(AMethodIndex: Integer): string;
+    { the declared parameters of a method (TIntfParamInfo), nil if unknown }
+    function  MethodParams(AMethodIndex: Integer): TObjectList;
+    { a fresh owned copy of MethodParams, for a child interface inheriting
+      the method; nil when unknown }
+    function  CloneMethodParams(AMethodIndex: Integer): TObjectList;
+    { number of methods registered under AName (an inherited method that is
+      redeclared appears twice) }
+    function  MethodNameCount(const AName: string): Integer;
     procedure AddProperty(AInfo: TPropertyInfo);
     { Walks the parent chain — a child interface sees inherited properties. }
     function  FindProperty(const AName: string): TPropertyInfo;
@@ -1373,6 +1401,7 @@ begin
   FMethods.CaseSensitive := False;
   FReturnTypes := TStringList.Create();
   FParamIsVar  := TStringList.Create();
+  FParamInfos  := TObjectList.Create(True);
   FProperties  := TObjectList.Create(True);
   FParent      := nil;
 end;
@@ -1380,6 +1409,7 @@ end;
 destructor TInterfaceTypeDesc.Destroy;
 begin
   FProperties.Free();
+  FParamInfos.Free();
   FParamIsVar.Free();
   FReturnTypes.Free();
   FMethods.Free();
@@ -1406,12 +1436,55 @@ begin
   Result := nil;
 end;
 
+function TIntfParamInfo.Clone: TIntfParamInfo;
+begin
+  Result := TIntfParamInfo.Create();
+  Result.TypeName := TypeName;
+  Result.IsVar := IsVar;
+  Result.IsConst := IsConst;
+  Result.IsOpenArray := IsOpenArray;
+  Result.TypeDesc := TypeDesc;
+end;
+
 procedure TInterfaceTypeDesc.AddMethod(const AName: string;
-  const AReturnTypeName: string; const AParamIsVar: string);
+  const AReturnTypeName: string; const AParamIsVar: string;
+  AParams: TObjectList);
 begin
   FMethods.Add(AName);
   FReturnTypes.Add(AReturnTypeName);
   FParamIsVar.Add(AParamIsVar);
+  FParamInfos.Add(AParams);
+end;
+
+function TInterfaceTypeDesc.MethodParams(AMethodIndex: Integer): TObjectList;
+begin
+  Result := nil;
+  if (AMethodIndex >= 0) and (AMethodIndex < FParamInfos.Count) then
+    Result := TObjectList(FParamInfos.Items[AMethodIndex]);
+end;
+
+function TInterfaceTypeDesc.CloneMethodParams(AMethodIndex: Integer): TObjectList;
+var
+  Src: TObjectList;
+  I: Integer;
+begin
+  Result := nil;
+  Src := Self.MethodParams(AMethodIndex);
+  if Src = nil then
+    Exit;
+  Result := TObjectList.Create(True);
+  for I := 0 to Src.Count - 1 do
+    Result.Add(TIntfParamInfo(Src.Items[I]).Clone());
+end;
+
+function TInterfaceTypeDesc.MethodNameCount(const AName: string): Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to FMethods.Count - 1 do
+    if SameText(FMethods.Strings[I], AName) then
+      Inc(Result);
 end;
 
 function TInterfaceTypeDesc.HasMethod(const AName: string): Boolean;
