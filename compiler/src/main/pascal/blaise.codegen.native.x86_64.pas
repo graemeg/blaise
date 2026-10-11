@@ -316,6 +316,10 @@ type
       more captured-variable pointers push it past the registers; 0 when it
       arrives in a register }
     FSretInOff: Integer;
+    { interface parameters whose obj half took the last integer register and
+      whose itab half arrived on the stack: name -> that half's +rbp offset.
+      The prologue copies it into the param's 16-byte slot. }
+    FIntfSplitHalf: TDictionary<string, Integer>;
     FProgScratchSz: TList<Integer>;
     FScratchN: Integer;
     { Whole-program multi-unit guard: the system-class (TObject /
@@ -990,6 +994,10 @@ type
       TProcParamInfo has no IsOpenArray flag; its resolved type carries it.) }
     function  ProcParamIsOpenArray(AProcType: TProceduralTypeDesc;
       AIndex: Integer): Boolean;
+    function  ProcParamIsIntfPair(AProcType: TProceduralTypeDesc;
+      AIndex: Integer): Boolean;
+    procedure EmitIntfPairToSlots(AArg: TASTExpr; AParamType: TTypeDesc;
+      AHoistKind, AHoistOff, ADest: Integer);
     procedure EmitVarArgAddrToRax(AArg: TASTExpr);
     procedure EmitStaticArrayArgAddrToRax(AArg: TASTExpr);
     function IntfParamTypeAt(AIntf: TInterfaceTypeDesc; const AMethName: string;
@@ -1561,6 +1569,7 @@ destructor TX86_64Backend.Destroy;
 begin
   FProgScratch.Free();
   FProgScratchSz.Free();
+  FIntfSplitHalf.Free();
   Self.ClearFrame();
   FDynElemHooks.Free();
   FConstArgUnsafe.Free();
@@ -5965,6 +5974,9 @@ begin
   FFrame      := TDictionary<string, Integer>.Create();
   FFrameTypes := TDictionary<string, TTypeDesc>.Create();
   FSretInOff  := 0;
+  if FIntfSplitHalf = nil then
+    FIntfSplitHalf := TDictionary<string, Integer>.Create();
+  FIntfSplitHalf.Clear();
   Offset   := 0;
   StackOff := 16;  { first stack arg: +16(%rbp) — above saved %rbp and ret addr }
 
@@ -6133,7 +6145,17 @@ begin
           IntfObjOperand/IntfItabOperand can address both halves.  Two IntIdx
           increments mirror the register-passing convention. }
         if IntIdx2 < 6 then
-          Self.AddSlot(P.ParamName, P.ResolvedType, Offset)
+        begin
+          Self.AddSlot(P.ParamName, P.ResolvedType, Offset);
+          { obj in the LAST integer register: the caller passed the itab
+            half on the stack (each eightbyte is placed independently, as for
+            an open array) -- the prologue copies it in }
+          if IntIdx2 = 5 then
+          begin
+            FIntfSplitHalf.SetItem(P.ParamName, StackOff);
+            Inc(StackOff, 8);
+          end;
+        end
         else
         begin
           FFrame.Add(P.ParamName, StackOff);
@@ -21117,6 +21139,48 @@ end;
   clobbered by arg evaluation in %rax), sets up args exactly as EmitCall does,
   then dispatches via `callq *%r10`.  AProcType supplies the param signature
   for var/out param detection; nil means all value params. }
+function TX86_64Backend.ProcParamIsIntfPair(AProcType: TProceduralTypeDesc;
+  AIndex: Integer): Boolean;
+begin
+  { a by-value (or const) interface parameter of a procedural signature:
+    passed as its two-slot fat pointer.  A var/out one is a single address. }
+  Result := (AProcType <> nil) and (AIndex < AProcType.Params.Count) and
+    (TProcParamInfo(AProcType.Params.Items[AIndex]).TypeDesc <> nil) and
+    (TProcParamInfo(AProcType.Params.Items[AIndex]).TypeDesc.Kind = tyInterface) and
+    not TProcParamInfo(AProcType.Params.Items[AIndex]).IsVarParam;
+end;
+
+procedure TX86_64Backend.EmitIntfPairToSlots(AArg: TASTExpr;
+  AParamType: TTypeDesc; AHoistKind, AHoistOff, ADest: Integer);
+var
+  Par: TMethodParam;
+begin
+  { store an interface argument's fat pointer into two 8-byte slots at
+    ADest(%rsp) (obj) and ADest+8 (itab).  A hoisted interface-call result
+    is reloaded from its saved pair at AHoistOff (obj on top); any other
+    source goes through the direct-call push (obj, then itab on top), which
+    also narrows a class value to the interface. }
+  if AHoistKind = akIntfConsume then
+  begin
+    Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [AHoistOff]));
+    Self.Emit(Format(#9'movq %d(%%rsp), %%rcx', [AHoistOff + 8]));
+  end
+  else
+  begin
+    Par := TMethodParam.Create();
+    try
+      Par.ResolvedType := AParamType;
+      Self.EmitMethodArgPush(Par, AArg);
+    finally
+      Par.Free();
+    end;
+    Self.Emit(#9'popq %rcx');     { itab }
+    Self.Emit(#9'popq %rax');     { obj }
+  end;
+  Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [ADest]));
+  Self.Emit(Format(#9'movq %%rcx, %d(%%rsp)', [ADest + 8]));
+end;
+
 function TX86_64Backend.ProcParamIsOpenArray(AProcType: TProceduralTypeDesc;
   AIndex: Integer): Boolean;
 begin
@@ -21174,7 +21238,8 @@ begin
     per arg shifted every slot after an open array). }
   NSlots := 0;
   for I := 0 to AArgs.Count - 1 do
-    if Self.ProcParamIsOpenArray(AProcType, I) then
+    if Self.ProcParamIsOpenArray(AProcType, I) or
+       Self.ProcParamIsIntfPair(AProcType, I) then
       NSlots := NSlots + 2
     else
       NSlots := NSlots + 1;
@@ -21192,6 +21257,20 @@ begin
           Slot * 8, Slot * 8 + 8)
       else
         Self.EmitOpenArrayArgToSlots(Arg, -1, Slot * 8, Slot * 8 + 8);
+      IsFloatSlot.Add(0);
+      IsFloatSlot.Add(0);
+      Slot := Slot + 2;
+      Continue;
+    end;
+    if Self.ProcParamIsIntfPair(AProcType, I) then
+    begin
+      { a by-value interface parameter: the fat pointer's TWO slots, obj
+        then itab, as a direct call passes it (BUG-20260924-proctype-
+        interface-arg: one slot was passed and the callee read its itab
+        from the next register) }
+      Self.EmitIntfPairToSlots(Arg,
+        TProcParamInfo(AProcType.Params.Items[I]).TypeDesc, HK.Get(I),
+        AllocSz + HTotal - HD.Get(I), Slot * 8);
       IsFloatSlot.Add(0);
       IsFloatSlot.Add(0);
       Slot := Slot + 2;
@@ -21308,138 +21387,57 @@ procedure TX86_64Backend.EmitProcFieldCall(AObjExpr: TASTExpr;
   AProcType: TProceduralTypeDesc; AArgs: TObjectList; AResultType: TTypeDesc;
   AReceiverIsRecord: Boolean);
 var
-  I:       Integer;
-  Arg:     TASTExpr;
-  IsVar:   Boolean;
   IsMeth:  Boolean;
-  Slots:   Integer;
-  ArgSlots: Integer;
-  Pushed:  Integer;
-  HD:      TList<Integer>;
-  HK:      TList<Integer>;
-  HTotal:  Integer;
 begin
   { 'reference to' closures carry their env in the Data half exactly like an
     'of object' method pointer carries Self — both must load and pass it. }
   IsMeth := (AProcType <> nil) and
             (AProcType.IsMethodPtr or AProcType.IsReference);
-  { A method pointer consumes %rdi for the captured Data (Self), leaving five
-    argument registers; a plain function pointer leaves all six.  Anything
-    larger would need the stack-overflow argument strategy — fail loudly
-    rather than emit a silently wrong call. }
-  { Count FLAT slots: an open-array arg is two (data pointer, high). }
-  Slots := 0;
-  for I := 0 to AArgs.Count - 1 do
-    if Self.ProcParamIsOpenArray(AProcType, I) then
-      Slots := Slots + 2
+  { The field's ADDRESS goes into callee-saved %rbx first (it survives the
+    argument evaluation), then EmitCallIndirect marshals the arguments
+    through '(%rbx)' -- the procedural value itself -- exactly as for a
+    procedural variable: floats in xmm registers, interfaces as their two
+    slots, open arrays, var addresses, stack overflow.  The former inline
+    push loop passed every argument as an integer VALUE (a float could not be
+    lowered at all), an interface as one slot, and stopped at six slots.  The
+    8-byte pad keeps %rsp 16-aligned across the %rbx save. }
+  Self.Emit(#9'pushq %rbx');
+  Self.Emit(#9'subq $8, %rsp');
+  if AObjExpr <> nil then
+  begin
+    if (AObjExpr is TIdentExpr) or (AObjExpr is TFieldAccessExpr) then
+      Self.EmitExprToEax(AObjExpr)
     else
-      Slots := Slots + 1;
-  ArgSlots := Slots;
-  if IsMeth then Slots := Slots + 1;
-  if Slots > 6 then
-    raise ENativeCodeGenError.Create(
-      'native backend: procedural-field call with >6 argument slots is not supported');
-
-  HD := TList<Integer>.Create();
-  HK := TList<Integer>.Create();
-  try
-    HTotal := Self.EmitArgHoist(nil, AProcType.Params, True, '', AArgs, HD, HK);
-    { Evaluate args left-to-right and push them.  var/out positions push the
-      argument's address; record-call/string args are reloaded from the hoist
-      region. }
-    Pushed := 0;
-    for I := 0 to AArgs.Count - 1 do
-    begin
-      Arg := TASTExpr(AArgs.Items[I]);
-      if Self.ProcParamIsOpenArray(AProcType, I) then
-      begin
-        { Two pushes' worth: data pointer lands above high, so the popq loop
-          (last slot first) delivers data then high in ascending registers. }
-        Self.Emit(#9'subq $16, %rsp');
-        if HK.Get(I) = akOALit then
-          Self.EmitOpenArrayArgToSlots(Arg,
-            HTotal - HD.Get(I) + Pushed * 8 + 16, 8, 0)
-        else
-          Self.EmitOpenArrayArgToSlots(Arg, -1, 8, 0);
-        Pushed := Pushed + 2;
-        Continue;
-      end;
-      IsVar := (I < AProcType.Params.Count) and
-               TProcParamInfo(AProcType.Params.Items[I]).IsVarParam;
-      Pushed := Pushed + 1;
-      if HK.Get(I) >= akRecCall then
-      begin
-        Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-          [HTotal - HD.Get(I) + (Pushed - 1) * 8]));
-        Self.Emit(#9'pushq %rax');
-      end
-      else if IsVar then
-      begin
-        Self.EmitVarArgAddrToRax(Arg);
-        Self.Emit(#9'pushq %rax');
-      end
-      else
-      begin
-        Self.EmitExprToEax(Arg);
-        Self.Emit(#9'pushq %rax');
-      end;
-    end;
-
-    { Load the receiver instance pointer into %rax.  This must be call-free so
-      it cannot clobber the already-pushed arguments. }
-    if AObjExpr <> nil then
-    begin
-      if (AObjExpr is TIdentExpr) or (AObjExpr is TFieldAccessExpr) then
-        Self.EmitExprToEax(AObjExpr)
-      else
-        raise ENativeCodeGenError.Create(
-          'native backend: unsupported receiver expression in procedural-field call');
-    end
-    else if AReceiverIsRecord then
-      { A record is a VALUE: its variable slot IS the record, so the receiver
-        base is the slot's ADDRESS.  Loading the slot's CONTENTS instead
-        treated the record's first 8 bytes as an instance pointer and
-        dispatched through garbage
-        (BUG-20260722-closure-record-field-direct-call).  A var/out record
-        param's slot already holds the caller's record address, so that case
-        wants the stored value — one load, not two.  EmitVarBaseToReg also
-        covers a CAPTURED record (a closure body calling R.F() on an outer
-        record) and the sret Result buffer, and is call-free so the arguments
-        pushed above survive. }
-      Self.EmitVarBaseToReg(AObjectName, not AIsVarParam, '%rax')
-    else if AIsVarParam then
-    begin
-      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(AObjectName)]));
-      Self.Emit(#9'movq (%rax), %rax');
-    end
-    else
-      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(AObjectName)]));
-
-    { %rax now holds the instance pointer; advance to the field slot (the code
-      pointer for a plain function pointer, or the 16-byte (Code, Data) block
-      for a method pointer). }
-    if AFieldInfo.Offset > 0 then
-      Self.Emit(Format(#9'addq $%d, %%rax', [AFieldInfo.Offset]));
-
-    if IsMeth then
-    begin
-      Self.Emit(#9'movq 8(%rax), %rdi');   { Data (Self) -> first argument }
-      Self.Emit(#9'movq (%rax), %r10');    { Code pointer }
-      for I := ArgSlots - 1 downto 0 do
-        Self.Emit(#9'popq ' + SysVArg64(I + 1));
-    end
-    else
-    begin
-      Self.Emit(#9'movq (%rax), %r10');    { Code pointer }
-      for I := ArgSlots - 1 downto 0 do
-        Self.Emit(#9'popq ' + SysVArg64(I));
-    end;
-    Self.Emit(#9'callq *%r10');
-    Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, 0, True);
-  finally
-    HD.Free();
-    HK.Free();
-  end;
+      raise ENativeCodeGenError.Create(
+        'native backend: unsupported receiver expression in procedural-field call');
+  end
+  else if AReceiverIsRecord then
+    { A record is a VALUE: its variable slot IS the record, so the receiver
+      base is the slot's ADDRESS.  Loading the slot's CONTENTS instead
+      treated the record's first 8 bytes as an instance pointer and
+      dispatched through garbage
+      (BUG-20260722-closure-record-field-direct-call).  A var/out record
+      param's slot already holds the caller's record address, so that case
+      wants the stored value — one load, not two.  EmitVarBaseToReg also
+      covers a CAPTURED record (a closure body calling R.F() on an outer
+      record) and the sret Result buffer. }
+    Self.EmitVarBaseToReg(AObjectName, not AIsVarParam, '%rax')
+  else if AIsVarParam then
+  begin
+    Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(AObjectName)]));
+    Self.Emit(#9'movq (%rax), %rax');
+  end
+  else
+    Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(AObjectName)]));
+  { %rax holds the instance pointer; advance to the field (the code pointer
+    for a plain function pointer, or the 16-byte (Code, Data) block for a
+    method pointer / closure). }
+  if AFieldInfo.Offset > 0 then
+    Self.Emit(Format(#9'addq $%d, %%rax', [AFieldInfo.Offset]));
+  Self.Emit(#9'movq %rax, %rbx');
+  Self.EmitCallIndirect('(%rbx)', AProcType, AArgs, IsMeth);
+  Self.Emit(#9'addq $8, %rsp');
+  Self.Emit(#9'popq %rbx');
 
   { Normalise the (32-bit-ABI) return value to the field signature's return
     width.  Statement calls pass nil and need no result. }
@@ -23194,6 +23192,7 @@ var
   BodyBuf:  TStringBuilder;
   VD:       TVarDecl;
   AKind:    TArcReleaseKind;
+  SplitOff: Integer;
 begin
   Sym := FuncSymbolFromDecl(ADecl);
   Self.DbgBeginFunc(Sym);
@@ -23401,6 +23400,13 @@ begin
         Self.Emit(Format(#9'movq %s, %s',
           [SysVArg64(IntIdx), Self.IntfItabOperand(P.ParamName, False)]));
         Inc(IntIdx);
+      end
+      else if FIntfSplitHalf.TryGetValue(P.ParamName, SplitOff) then
+      begin
+        { the itab half of a pair split across %r9 and the stack }
+        Self.Emit(Format(#9'movq %d(%%rbp), %%rax', [SplitOff]));
+        Self.Emit(Format(#9'movq %%rax, %s',
+          [Self.IntfItabOperand(P.ParamName, False)]));
       end;
     end
     else if P.IsVarParam then

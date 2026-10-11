@@ -23,6 +23,11 @@ type
   protected
     procedure SetUp; override;
   published
+    { procedural calls with interface, float and >6-slot arguments;
+      interface-call results into >6-slot calls }
+    procedure TestRun_ProcCalls_InterfaceAndFloatArgs;
+    procedure TestRun_ProcFieldCalls_AllForms;
+    procedure TestRun_IntfResultArg_PastRegisters;
     { more captured variables than the integer registers hold, forwarded
       on through a deeper nested routine }
     procedure TestRun_NestedProc_CapturesSpillPastRegisters;
@@ -3695,6 +3700,119 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '1055' + #10 + '110 x!' + #10 + '1267' + #10 +
     '210 x!!' + #10, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_ProcCalls_InterfaceAndFloatArgs;
+const
+  Src = '''
+    program pf;
+    type
+      IGreet = interface function Name(): string; end;
+      TGreet = class(TObject, IGreet) public function Name(): string; end;
+      TShow = procedure(const G: IGreet);
+      TF = function(X: Double; N: Integer): Integer;
+      TBox = class Show: TShow; F: TF; end;
+      TR = record Show: TShow; F: TF; end;
+    function TGreet.Name(): string; begin Result := 'bob' end;
+    procedure Show(const G: IGreet); begin WriteLn(G.Name()) end;
+    function FF(X: Double; N: Integer): Integer; begin Result := Trunc(X * 10) + N end;
+    var P: TShow; G: IGreet; B: TBox; R: TR;
+    begin
+      G := TGreet.Create(); Show(G);
+      P := @Show; P(G);
+      B := TBox.Create(); B.Show := @Show; B.Show(G);
+      B.F := @FF; WriteLn(B.F(2.5, 3));
+      R.Show := @Show; R.Show(G);
+      R.F := @FF; WriteLn(R.F(1.5, 4));
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'bob' + #10 + 'bob' + #10 + 'bob' + #10 + '28' + #10 +
+    'bob' + #10 + '19' + #10, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_ProcFieldCalls_AllForms;
+const
+  Src = '''
+    program pg;
+    uses SysUtils;
+    type
+      TM = procedure(A, B, C, D, E, F, G: Integer; var Z: Integer) of object;
+      TC = reference to function(const V: array of Integer; X: Double): string;
+      TP = function(A, B, C, D, E, F, G, H: Integer): Integer;
+      TR = record P: TP; end;
+      THost = class
+        K: Integer;
+        M: TM; C: TC; P: TP;
+        procedure Worker(A, B, C, D, E, F, G: Integer; var Z: Integer);
+        procedure Run;
+      end;
+    function Sum8(A, B, C, D, E, F, G, H: Integer): Integer; begin Result := A + H * 10 end;
+    procedure THost.Worker(A, B, C, D, E, F, G: Integer; var Z: Integer);
+    begin Z := A + G + K end;
+    procedure THost.Run;
+    var Z: Integer;
+    begin
+      M(1, 2, 3, 4, 5, 6, 7, Z); WriteLn(Z);
+      WriteLn(C([4, 5, 6], 1.5));
+      WriteLn(P(1, 2, 3, 4, 5, 6, 7, 8));
+    end;
+    procedure ViaVar(var R: TR); begin WriteLn(R.P(2, 0, 0, 0, 0, 0, 0, 3)) end;
+    var H: THost; Z: Integer; R: TR;
+    begin
+      H := THost.Create(); H.K := 100;
+      H.M := @H.Worker;
+      H.C := function(const V: array of Integer; X: Double): string
+             begin Result := IntToStr(High(V)) + ':' + IntToStr(V[2] + Trunc(X * 2) + H.K) end;
+      H.P := @Sum8;
+      H.M(1, 2, 3, 4, 5, 6, 7, Z); WriteLn(Z);
+      WriteLn(H.C([1, 2, 3], 2.5));
+      WriteLn(H.P(1, 2, 3, 4, 5, 6, 7, 8));
+      H.Run();
+      R.P := @Sum8; WriteLn(R.P(5, 0, 0, 0, 0, 0, 0, 1)); ViaVar(R);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '108' + #10 + '2:108' + #10 + '81' + #10 + '108' + #10 +
+    '2:109' + #10 + '81' + #10 + '15' + #10 + '32' + #10, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_IntfResultArg_PastRegisters;
+const
+  Src = '''
+    program m4;
+    type
+      IS1 = interface function V: Integer; end;
+      TS = class(TObject, IS1) N: Integer; function V: Integer; end;
+      TBig = record A, B, C: Int64; end;
+      TP = function(A, B, C, D, E: Integer; const I: IS1; F: Integer): Integer;
+      TK = class
+        function M(A, B, C, D, E: Integer; const I: IS1; F: Integer): Integer;
+      end;
+    function TS.V: Integer; begin Result := N end;
+    function MkS(K: Integer): IS1; var T: TS; begin T := TS.Create(); T.N := K; Result := T end;
+    function Seven(A, B, C, D, E: Integer; const I: IS1; F: Integer): Integer;
+    begin Result := A + E + I.V() * 10 + F * 1000 end;
+    function SevenF(X: Double; const I: IS1; F: Integer): Integer;
+    begin Result := Trunc(X) + I.V() * 10 + F * 1000 end;
+    function SR(const I: IS1; K: Integer): TBig; begin Result.A := I.V(); Result.B := K end;
+    function TK.M(A, B, C, D, E: Integer; const I: IS1; F: Integer): Integer;
+    begin Result := A + I.V() * 10 + F * 1000 end;
+    var P: TP; K: TK; R: TBig;
+    begin
+      WriteLn(Seven(1, 2, 3, 4, 5, MkS(6), 7));
+      WriteLn(SevenF(2.0, MkS(3), 4));
+      R := SR(MkS(9), 8); WriteLn(R.A, ' ', R.B);
+      P := @Seven; WriteLn(P(1, 2, 3, 4, 5, MkS(6), 7));
+      K := TK.Create(); WriteLn(K.M(1, 2, 3, 4, 5, MkS(6), 7));
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '7066' + #10 + '4032' + #10 + '9 8' + #10 + '7066' + #10 +
+    '7061' + #10, 0);
 end;
 
 initialization

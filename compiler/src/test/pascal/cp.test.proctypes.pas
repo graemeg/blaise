@@ -20,6 +20,13 @@ type
     function ParseSrc(const ASrc: string): TProgram;
     function FindTypeDecl(AProg: TProgram; const AName: string): TTypeDecl;
   published
+    { x86-64: an interface argument through a procedural variable is its
+      two-slot fat pointer (BUG-20260924-proctype-interface-arg); a float
+      argument to a procedural FIELD is an xmm slot; a by-value interface
+      parameter split across %r9 and the stack reads its itab half back }
+    procedure TestCodegen_ProcVarCall_InterfaceArg_TwoSlots;
+    procedure TestCodegen_ProcFieldCall_FloatArg_InXmm;
+    procedure TestCodegen_IntfParam_SplitAcrossLastRegister;
     { Parser — bare procedural type declarations }
     procedure TestParse_NoArgFunc_KindIsProcedural;
     procedure TestParse_NoArgFunc_ReturnTypeIsInteger;
@@ -516,6 +523,82 @@ begin
             N := C(5)
           end.
           ''') <> '');
+end;
+
+const
+  SrcProcIntfFloat = '''
+    program pf;
+    type
+      IGreet = interface function Name(): string; end;
+      TGreet = class(TObject, IGreet) public function Name(): string; end;
+      TShow = procedure(const G: IGreet);
+      TF = function(X: Double; N: Integer): Integer;
+      TBox = class Show: TShow; F: TF; end;
+      TR = record Show: TShow; F: TF; end;
+    function TGreet.Name(): string; begin Result := 'bob' end;
+    procedure Show(const G: IGreet); begin WriteLn(G.Name()) end;
+    function FF(X: Double; N: Integer): Integer; begin Result := Trunc(X * 10) + N end;
+    var P: TShow; G: IGreet; B: TBox; R: TR;
+    begin
+      G := TGreet.Create(); Show(G);
+      P := @Show; P(G);
+      B := TBox.Create(); B.Show := @Show; B.Show(G);
+      B.F := @FF; WriteLn(B.F(2.5, 3));
+      R.Show := @Show; R.Show(G);
+      R.F := @FF; WriteLn(R.F(1.5, 4));
+    end.
+    ''';
+
+procedure TProcTypesTests.TestCodegen_ProcVarCall_InterfaceArg_TwoSlots;
+begin
+  AssertEquals('P(G) passes obj and itab', '',
+    AsmMissing(SrcProcIntfFloat,
+      #9'movq %rax, 0(%rsp)'#10#9'movq %rcx, 8(%rsp)'#10 +
+        #9'movq 0(%rsp), %rdi'#10#9'movq 8(%rsp), %rsi'#10 +
+        #9'movq P(%rip), %r10',
+      #9'blr '));
+end;
+
+procedure TProcTypesTests.TestCodegen_ProcFieldCall_FloatArg_InXmm;
+begin
+  AssertEquals('B.F(2.5, 3) loads the float into %xmm0', '',
+    AsmMissing(SrcProcIntfFloat,
+      #9'movsd 0(%rsp), %xmm0',
+      #9'blr '));
+end;
+
+procedure TProcTypesTests.TestCodegen_IntfParam_SplitAcrossLastRegister;
+const
+  Src = '''
+    program m4;
+    type
+      IS1 = interface function V: Integer; end;
+      TS = class(TObject, IS1) N: Integer; function V: Integer; end;
+      TBig = record A, B, C: Int64; end;
+      TP = function(A, B, C, D, E: Integer; const I: IS1; F: Integer): Integer;
+      TK = class
+        function M(A, B, C, D, E: Integer; const I: IS1; F: Integer): Integer;
+      end;
+    function TS.V: Integer; begin Result := N end;
+    function MkS(K: Integer): IS1; var T: TS; begin T := TS.Create(); T.N := K; Result := T end;
+    function Seven(A, B, C, D, E: Integer; const I: IS1; F: Integer): Integer;
+    begin Result := A + E + I.V() * 10 + F * 1000 end;
+    function SevenF(X: Double; const I: IS1; F: Integer): Integer;
+    begin Result := Trunc(X) + I.V() * 10 + F * 1000 end;
+    function SR(const I: IS1; K: Integer): TBig; begin Result.A := I.V(); Result.B := K end;
+    function TK.M(A, B, C, D, E: Integer; const I: IS1; F: Integer): Integer;
+    begin Result := A + I.V() * 10 + F * 1000 end;
+    var P: TP; K: TK; R: TBig;
+    begin
+      WriteLn(Seven(1, 2, 3, 4, 5, MkS(6), 7));
+    end.
+    ''';
+begin
+  AssertEquals('Seven copies the itab half in from the stack', '',
+    AsmMissing(Src,
+      #9'movq %r9, -56(%rbp)'#10#9'movq 16(%rbp), %rax'#10 +
+        #9'movq %rax, -48(%rbp)',
+      #9'bl _Seven'#10));
 end;
 
 initialization
