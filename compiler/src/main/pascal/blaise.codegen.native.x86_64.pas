@@ -789,6 +789,10 @@ type
     function  SretUserSlots(ADecl: TMethodDecl; AArgs: TObjectList): Integer;
     { True when AExpr is a record-returning function or method call. }
     function  IsNativeRecordCall(AExpr: TASTExpr): Boolean;
+    { A call whose value is an interface, through EmitIntfSretCall: a function
+      returning one, or a call through a procedural variable or closure that
+      does. }
+    function  IsIntfCallResult(AExpr: TASTExpr): Boolean;
     { True when AExpr is a record-method call whose receiver is exactly the
       variable AName/AIsGlobal — i.e. M := M.Method(...) would have the sret
       destination alias Self.  Such an assignment must route the result through
@@ -898,11 +902,41 @@ type
                                AProcType: TProceduralTypeDesc;
                                AArgs: TObjectList;
                                AFatPtr: Boolean = False);
+    { The body of EmitCallIndirect.  ASretSaved: the caller has pushed the
+      result buffer's address above everything this call allocates, and the
+      callee returns its record through it -- the address goes to %rdi, the
+      closure environment (AFatPtr) moves to %rsi and the arguments start one
+      register later, the convention a record-returning METHOD uses. }
+    procedure EmitCallIndirectEx(const APtrOperand: string;
+                                 AProcType: TProceduralTypeDesc;
+                                 AArgs: TObjectList;
+                                 AFatPtr, ASretSaved: Boolean);
+    { EmitCallIndirect for a callee that returns a RECORD (or a method
+      pointer): the value lands in the buffer ASretAddr names (an operand
+      leaq can address, or -- ASretIsIndirect -- one holding a pointer to it).
+      A register-class result is captured from %rax / %rdx / %xmm0 / %xmm1
+      after the call, an sret one is written by the callee.  Mirrors
+      EmitSretCall for a call through a procedural value. }
+    { A record (or method pointer) returned through a procedural variable,
+      used as a value: the result lands in a per-site scratch whose address
+      is left in %rax -- the way any record-valued expression is consumed. }
+    procedure EmitIndirectRecordCallToRax(AFC: TFuncCallExpr);
+    procedure EmitDropScratchResult(const AScratch: string; AType: TTypeDesc);
     { A call statement's DISCARDED register result: release what the callee
       handed over -- a string, object or dynamic array in %rax, or a
       closure's environment in %rdx (a method pointer comes back in
       %rax:%rdx). }
     procedure EmitDiscardedRegResult(AType: TTypeDesc);
+    { The statement form, G(); -- the result is thrown away: it still needs
+      a buffer (or the callee writes through a stale %rdi) and the managed
+      content the callee handed over is released. }
+    procedure EmitDiscardedIndirectRecordCall(const AName: string;
+      APT: TProceduralTypeDesc; AArgs: TObjectList);
+    procedure EmitCallIndirectRec(const APtrOperand: string;
+                                  AProcType: TProceduralTypeDesc;
+                                  AArgs: TObjectList; AFatPtr: Boolean;
+                                  const ASretAddr: string;
+                                  ASretIsIndirect: Boolean);
     { Call a procedural-typed CLASS FIELD through a receiver
       (Self.FFn(args)).  The function pointer lives at [instance + Offset],
       which is not a %rbp/%rip-relative operand, so this cannot reuse
@@ -4736,10 +4770,7 @@ begin
       Self.Emit(#9'popq %rax');
       Self.Emit(#9'movq %rax, 8(%r15)');
     end
-    else if (AAsgn.Expr is TFuncCallExpr) and
-            (TFuncCallExpr(AAsgn.Expr).ResolvedDecl <> nil) and
-            (TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl).ResolvedReturnType <> nil) and
-            (TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl).ResolvedReturnType.Kind = tyInterface) then
+    else if Self.IsIntfCallResult(AAsgn.Expr) then
     begin
       Self.EmitIntfSretCall(TFuncCallExpr(AAsgn.Expr));
       Self.Emit(#9'movq (%r15), %rdi');
@@ -4860,10 +4891,7 @@ begin
       Self.Emit(#9'movq %rax, 8(%r15)');
       Self.Emit(#9'popq %r14');
     end
-    else if (AAsgn.Expr is TFuncCallExpr) and
-            (TFuncCallExpr(AAsgn.Expr).ResolvedDecl <> nil) and
-            (TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl).ResolvedReturnType <> nil) and
-            (TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl).ResolvedReturnType.Kind = tyInterface) then
+    else if Self.IsIntfCallResult(AAsgn.Expr) then
     begin
       Self.EmitIntfSretCall(TFuncCallExpr(AAsgn.Expr));
       Self.Emit(#9'movq (%r15), %rdi');
@@ -5161,10 +5189,7 @@ begin
     on the stack, pass its address as the hidden first arg (%rdi), call the
     function (which writes obj+itab into the buffer), then move the result to
     the LHS with ARC. }
-  if (AAsgn.Expr is TFuncCallExpr) and
-     (TFuncCallExpr(AAsgn.Expr).ResolvedDecl <> nil) and
-     (TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl).ResolvedReturnType <> nil) and
-     (TMethodDecl(TFuncCallExpr(AAsgn.Expr).ResolvedDecl).ResolvedReturnType.Kind = tyInterface) then
+  if Self.IsIntfCallResult(AAsgn.Expr) then
   begin
     Self.EmitIntfSretCall(TFuncCallExpr(AAsgn.Expr));
     { Sret buffer at (%rsp): obj at 0(%rsp), itab at 8(%rsp). }
@@ -5355,7 +5380,8 @@ begin
       Self.Emit(#9'pushq %rcx');           { obj on top }
     end
     else if (AExpr is TFuncCallExpr) and
-            (TFuncCallExpr(AExpr).ResolvedDecl <> nil) then
+            ((TFuncCallExpr(AExpr).ResolvedDecl <> nil) or
+             Self.IsIntfCallResult(AExpr)) then
     begin
       Self.EmitIntfSretCall(TFuncCallExpr(AExpr));
       Self.Emit(#9'movq (%r15), %rdi');
@@ -6804,6 +6830,20 @@ begin
   FDbgCur := nil;
 end;
 
+function TX86_64Backend.IsIntfCallResult(AExpr: TASTExpr): Boolean;
+begin
+  Result := False;
+  if not (AExpr is TFuncCallExpr) then Exit;
+  if (TFuncCallExpr(AExpr).ResolvedDecl <> nil) then
+    Result := (TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).ResolvedReturnType <> nil) and
+              (TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).ResolvedReturnType.Kind = tyInterface)
+  else
+    Result := TFuncCallExpr(AExpr).IsIndirectCall and
+              (TFuncCallExpr(AExpr).ResolvedProcType <> nil) and
+              (AExpr.ResolvedType <> nil) and
+              (AExpr.ResolvedType.Kind = tyInterface);
+end;
+
 function TX86_64Backend.IsNativeRecordCall(AExpr: TASTExpr): Boolean;
 begin
   Result := False;
@@ -6828,6 +6868,11 @@ begin
      (TFuncCallExpr(AExpr).ResolvedDecl <> nil) and
      (TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).ResolvedReturnType <> nil) and
      (TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).ResolvedReturnType.Kind = tyRecord) then
+    Exit(True);
+  { a record returned through a procedural variable or closure }
+  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
+     (TFuncCallExpr(AExpr).ResolvedProcType <> nil) and
+     (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyRecord) then
     Exit(True);
   if (AExpr is TInheritedCallExpr) and
      (TInheritedCallExpr(AExpr).ResolvedMethod <> nil) and
@@ -6911,7 +6956,16 @@ procedure TX86_64Backend.EmitFuncCallSret(AFC: TFuncCallExpr;
   const ADest: string; AIndirect: Boolean);
 var
   Synth: TMethodCallExpr;
+  IPT: TProceduralTypeDesc;
 begin
+  if AFC.IsIndirectCall and (AFC.ResolvedProcType <> nil) then
+  begin
+    { R := G(..) with G a procedural variable or closure }
+    IPT := TProceduralTypeDesc(AFC.ResolvedProcType);
+    Self.EmitCallIndirectRec(Self.VarOperand(AFC.Name), IPT, AFC.Args,
+      IPT.IsMethodPtr or IPT.IsReference, ADest, AIndirect);
+    Exit;
+  end;
   if AFC.IsImplicitSelfMethod then
   begin
     Synth := TMethodCallExpr.Create();
@@ -9385,6 +9439,12 @@ begin
       Self.EmitProcFieldCall(nil, 'Self', False, FC.ProcFieldInfo,
         TProceduralTypeDesc(FC.ResolvedProcType), FC.Args, FC.ResolvedType,
         False);
+      Exit;
+    end;
+    if FC.IsIndirectCall and (FC.ResolvedProcType <> nil) and
+       (FC.ResolvedType <> nil) and (AggRetRec(FC.ResolvedType) <> nil) then
+    begin
+      Self.EmitIndirectRecordCallToRax(FC);
       Exit;
     end;
     if FC.IsIndirectCall then
@@ -15779,9 +15839,14 @@ begin
     if (Asgn.ResolvedLhsType <> nil) and
        IsMethodPtrType(Asgn.ResolvedLhsType) and
        (Asgn.Expr is TFuncCallExpr) and
-       (TFuncCallExpr(Asgn.Expr).ResolvedDecl <> nil) and
-       IsMethodPtrType(
-         TMethodDecl(TFuncCallExpr(Asgn.Expr).ResolvedDecl).ResolvedReturnType) then
+       (((TFuncCallExpr(Asgn.Expr).ResolvedDecl <> nil) and
+         IsMethodPtrType(
+           TMethodDecl(TFuncCallExpr(Asgn.Expr).ResolvedDecl).ResolvedReturnType)) or
+        { F := P(X): a closure returned through a procedural variable }
+        (TFuncCallExpr(Asgn.Expr).IsIndirectCall and
+         (TFuncCallExpr(Asgn.Expr).ResolvedProcType <> nil) and
+         IsMethodPtrType(TProceduralTypeDesc(
+           TFuncCallExpr(Asgn.Expr).ResolvedProcType).ReturnType))) then
     begin
       if FSretFunc and SameText(Asgn.Name, 'Result') then
         Self.EmitFuncCallSret(TFuncCallExpr(Asgn.Expr),
@@ -16885,6 +16950,15 @@ begin
     begin
       Self.EmitProcFieldCall(nil, 'Self', False, PC.ProcFieldInfo,
         TProceduralTypeDesc(PC.ResolvedProcType), PC.Args, nil, False);
+      Exit;
+    end;
+    if PC.IsIndirectCall and (PC.ResolvedProcType <> nil) and
+       ((AggRetRec(TProceduralTypeDesc(PC.ResolvedProcType).ReturnType) <> nil) or
+        ((TProceduralTypeDesc(PC.ResolvedProcType).ReturnType <> nil) and
+         (TProceduralTypeDesc(PC.ResolvedProcType).ReturnType.Kind = tyInterface))) then
+    begin
+      Self.EmitDiscardedIndirectRecordCall(PC.Name,
+        TProceduralTypeDesc(PC.ResolvedProcType), PC.Args);
       Exit;
     end;
     if PC.IsIndirectCall then
@@ -19282,6 +19356,10 @@ begin
   if AArg.ResolvedType.Kind <> tyRecord then Exit;
   if (AArg is TFuncCallExpr) and (TFuncCallExpr(AArg).ResolvedDecl <> nil) then
     Exit(True);
+  { a record returned through a procedural variable or closure }
+  if (AArg is TFuncCallExpr) and TFuncCallExpr(AArg).IsIndirectCall and
+     (TFuncCallExpr(AArg).ResolvedProcType <> nil) then
+    Exit(True);
   if (AArg is TMethodCallExpr) and
      not TMethodCallExpr(AArg).IsConstructorCall then
     Exit(True);
@@ -20273,6 +20351,15 @@ begin
           TFuncCallExpr path in EmitExprToEax.  EmitRecordCallSretAt picks the
           itab path for an interface receiver (Show(M.MakeRect(7))), which
           has no ResolvedMethod for EmitMethodSretCall. }
+        Self.Emit(Format(#9'subq $%d, %%rsp', [Self.RecArgBufBytes(Arg)]));
+        Self.EmitRecordCallSretAt(Arg, '(%rsp)', False);
+        Self.Emit(#9'leaq (%rsp), %rax');
+      end
+      else if (Arg is TFuncCallExpr) and TFuncCallExpr(Arg).IsIndirectCall then
+      begin
+        { a record returned through a procedural variable or closure: the same
+          stack buffer protocol as a method call -- EmitExprToEax would give it
+          a per-site scratch instead and the region sized below would not exist }
         Self.Emit(Format(#9'subq $%d, %%rsp', [Self.RecArgBufBytes(Arg)]));
         Self.EmitRecordCallSretAt(Arg, '(%rsp)', False);
         Self.Emit(#9'leaq (%rsp), %rax');
@@ -21329,6 +21416,14 @@ procedure TX86_64Backend.EmitCallIndirect(const APtrOperand: string;
                                           AProcType: TProceduralTypeDesc;
                                           AArgs: TObjectList;
                                           AFatPtr: Boolean);
+begin
+  Self.EmitCallIndirectEx(APtrOperand, AProcType, AArgs, AFatPtr, False);
+end;
+
+procedure TX86_64Backend.EmitCallIndirectEx(const APtrOperand: string;
+                                            AProcType: TProceduralTypeDesc;
+                                            AArgs: TObjectList;
+                                            AFatPtr, ASretSaved: Boolean);
 var
   I:        Integer;
   Arg:      TASTExpr;
@@ -21452,7 +21547,9 @@ begin
   end;
   { Register assignment in flat-slot order; int and xmm sequences advance
     independently per SysV.  A fat pointer's Data half owns %rdi. }
-  if AFatPtr then IntIdx := 1 else IntIdx := 0;
+  IntIdx := 0;
+  if AFatPtr then IntIdx := IntIdx + 1;
+  if ASretSaved then IntIdx := IntIdx + 1;
   XmmIdx := 0;
   for I := 0 to NSlots - 1 do
   begin
@@ -21500,16 +21597,134 @@ begin
   begin
     Self.Emit(Format(#9'leaq %s, %%r11', [APtrOperand]));
     Self.Emit(#9'movq (%r11), %r10');     { Code }
-    Self.Emit(#9'movq 8(%r11), %rdi');    { Data: Self / closure env }
+    { Data: Self / closure env -- %rdi, or %rsi behind a result pointer }
+    if ASretSaved then
+      Self.Emit(#9'movq 8(%r11), %rsi')
+    else
+      Self.Emit(#9'movq 8(%r11), %rdi');
   end
   else
     Self.Emit(Format(#9'movq %s, %%r10', [APtrOperand]));
+  if ASretSaved then
+    { the saved result address sits above the hoist region and the slot
+      block (and any relocated overflow) allocated here }
+    Self.Emit(Format(#9'movq %d(%%rsp), %%rdi', [CleanUp + HTotal]));
   Self.Emit(#9'callq *%r10');
   Self.EmitHoistEpilogue(AArgs, HD, HK, HTotal, CleanUp, True);
   OvSlots.Free();
   IsFloatSlot.Free();
   HD.Free();
   HK.Free();
+end;
+
+procedure TX86_64Backend.EmitIndirectRecordCallToRax(AFC: TFuncCallExpr);
+var
+  Dest: string;
+  PT:   TProceduralTypeDesc;
+begin
+  PT := TProceduralTypeDesc(AFC.ResolvedProcType);
+  Dest := Self.NewScratchOperand(AFC.ResolvedType.RawSize());
+  Self.EmitCallIndirectRec(Self.VarOperand(AFC.Name), PT, AFC.Args,
+    PT.IsMethodPtr or PT.IsReference, Dest, False);
+  Self.Emit(Format(#9'leaq %s, %%rax', [Dest]));
+end;
+
+procedure TX86_64Backend.EmitDiscardedIndirectRecordCall(const AName: string;
+  APT: TProceduralTypeDesc; AArgs: TObjectList);
+var
+  RT:    TTypeDesc;
+  BufSz: Integer;
+begin
+  RT := APT.ReturnType;
+  BufSz := (RT.RawSize() + 15) and (-16);
+  Self.Emit(#9'pushq %rbx');
+  Self.Emit(Format(#9'subq $%d, %%rsp', [BufSz]));
+  Self.Emit(#9'movq %rsp, %rbx');
+  Self.EmitCallIndirectRec(Self.VarOperand(AName), APT, AArgs,
+    APT.IsMethodPtr or APT.IsReference, '(%rbx)', False);
+  { argument evaluation may have used %rbx; %rsp is balanced and still
+    points at the buffer }
+  Self.Emit(#9'movq %rsp, %rbx');
+  if RT.Kind = tyRecord then
+  begin
+    if not Self.IsRecordManagedClean(TRecordTypeDesc(RT)) then
+      Self.EmitRecordFieldReleases(TRecordTypeDesc(RT), '%rbx');
+  end
+  else if RT.Kind = tyInterface then
+  begin
+    { a discarded interface: the owned (+1) object half }
+    Self.Emit(#9'movq (%rbx), %rdi');
+    Self.Emit(#9'callq _ClassRelease');
+  end
+  else if IsMethodPtrType(RT) and TProceduralTypeDesc(RT).IsReference then
+  begin
+    { a discarded closure: drop the environment reference it carries }
+    Self.Emit(#9'movq 8(%rbx), %rdi');
+    Self.Emit(#9'callq _ClassRelease');
+  end;
+  Self.Emit(Format(#9'addq $%d, %%rsp', [BufSz]));
+  Self.Emit(#9'popq %rbx');
+end;
+
+procedure TX86_64Backend.EmitCallIndirectRec(const APtrOperand: string;
+                                             AProcType: TProceduralTypeDesc;
+                                             AArgs: TObjectList;
+                                             AFatPtr: Boolean;
+                                             const ASretAddr: string;
+                                             ASretIsIndirect: Boolean);
+var
+  RC:      TRecReturnClass;
+  RetRec:  TRecordTypeDesc;
+  IsIntf:  Boolean;
+  RetSize: Integer;
+begin
+  RetRec := nil;
+  IsIntf := False;
+  if AProcType <> nil then
+  begin
+    RetRec := AggRetRec(AProcType.ReturnType);
+    IsIntf := (AProcType.ReturnType <> nil) and
+              (AProcType.ReturnType.Kind = tyInterface);
+  end;
+  if (RetRec = nil) and not IsIntf then
+  begin
+    Self.EmitCallIndirectEx(APtrOperand, AProcType, AArgs, AFatPtr, False);
+    Exit;
+  end;
+  { an interface is a 16-byte (obj, itab) pair returned through the hidden
+    pointer, whatever its content }
+  if IsIntf then
+  begin
+    RC := rcSret;
+    RetSize := 16;
+  end
+  else
+  begin
+    RC := ClassifyRecordReturn(RetRec);
+    RetSize := RetRec.TotalSize();
+  end;
+  { zero the destination first, as EmitSretCall does: a partly filled result
+    (a record narrower than its register image) must not leave stale bytes }
+  if ASretIsIndirect then
+    Self.Emit(Format(#9'movq %s, %%rax', [ASretAddr]))
+  else
+    Self.Emit(Format(#9'leaq %s, %%rax', [ASretAddr]));
+  if RC = rcSret then
+    Self.Emit(#9'pushq %rax');     { saved: no register survives the args }
+  Self.Emit(#9'movq %rax, %rdi');
+  Self.Emit(#9'xorl %esi, %esi');
+  Self.Emit(Format(#9'movq $%d, %%rdx', [RetSize]));
+  Self.Emit(#9'callq memset');
+  if RC = rcSret then
+  begin
+    Self.EmitCallIndirectEx(APtrOperand, AProcType, AArgs, AFatPtr, True);
+    Self.Emit(#9'addq $8, %rsp');
+  end
+  else
+  begin
+    Self.EmitCallIndirectEx(APtrOperand, AProcType, AArgs, AFatPtr, False);
+    Self.EmitRecordRegReturnCapture(ASretAddr, RetRec, RC, ASretIsIndirect);
+  end;
 end;
 
 { Call a procedural-typed class field through a receiver — emits:
@@ -21524,6 +21739,8 @@ procedure TX86_64Backend.EmitProcFieldCall(AObjExpr: TASTExpr;
   AReceiverIsRecord: Boolean);
 var
   IsMeth:  Boolean;
+  RetType: TTypeDesc;
+  Dest:    string;
 begin
   { 'reference to' closures carry their env in the Data half exactly like an
     'of object' method pointer carries Self — both must load and pass it. }
@@ -21571,9 +21788,33 @@ begin
   if AFieldInfo.Offset > 0 then
     Self.Emit(Format(#9'addq $%d, %%rax', [AFieldInfo.Offset]));
   Self.Emit(#9'movq %rax, %rbx');
-  Self.EmitCallIndirect('(%rbx)', AProcType, AArgs, IsMeth);
+  { A record (or method pointer) result needs a buffer to land in: a per-site
+    scratch, whose address is the value of the call in an expression and whose
+    managed content is released when the call is a statement. }
+  RetType := nil;
+  if (AProcType <> nil) and ((AggRetRec(AProcType.ReturnType) <> nil) or
+     ((AProcType.ReturnType <> nil) and
+      (AProcType.ReturnType.Kind = tyInterface))) then
+    RetType := AProcType.ReturnType;
+  Dest := '';
+  if RetType <> nil then
+  begin
+    Dest := Self.NewScratchOperand(RetType.RawSize());
+    Self.EmitCallIndirectRec('(%rbx)', AProcType, AArgs, IsMeth, Dest, False);
+  end
+  else
+    Self.EmitCallIndirect('(%rbx)', AProcType, AArgs, IsMeth);
   Self.Emit(#9'addq $8, %rsp');
   Self.Emit(#9'popq %rbx');
+
+  if RetType <> nil then
+  begin
+    if AResultType <> nil then
+      Self.Emit(Format(#9'leaq %s, %%rax', [Dest]))
+    else
+      Self.EmitDropScratchResult(Dest, RetType);
+    Exit;
+  end;
 
   { Normalise the (32-bit-ABI) return value to the field signature's return
     width.  Statement calls pass nil and need no result. }
@@ -21602,6 +21843,36 @@ begin
   else if IsMethodPtrType(AType) and TProceduralTypeDesc(AType).IsReference then
   begin
     Self.Emit(#9'movq %rdx, %rdi');
+    Self.Emit(#9'callq _ClassRelease');
+  end;
+end;
+
+procedure TX86_64Backend.EmitDropScratchResult(const AScratch: string;
+  AType: TTypeDesc);
+begin
+  { Release what a DISCARDED record (or closure) result owns.  The callee
+    handed its managed fields (or its environment reference) over; nothing
+    else will let go of them. }
+  if AType.Kind = tyRecord then
+  begin
+    if not Self.IsRecordManagedClean(TRecordTypeDesc(AType)) then
+    begin
+      Self.Emit(#9'pushq %rbx');
+      Self.Emit(Format(#9'leaq %s, %%rbx', [AScratch]));
+      Self.EmitRecordFieldReleases(TRecordTypeDesc(AType), '%rbx');
+      Self.Emit(#9'popq %rbx');
+    end;
+  end
+  else if AType.Kind = tyInterface then
+  begin
+    Self.Emit(Format(#9'leaq %s, %%rax', [AScratch]));
+    Self.Emit(#9'movq (%rax), %rdi');
+    Self.Emit(#9'callq _ClassRelease');
+  end
+  else if IsMethodPtrType(AType) and TProceduralTypeDesc(AType).IsReference then
+  begin
+    Self.Emit(Format(#9'leaq %s, %%rax', [AScratch]));
+    Self.Emit(#9'movq 8(%rax), %rdi');
     Self.Emit(#9'callq _ClassRelease');
   end;
 end;
@@ -22393,7 +22664,19 @@ var
   HTotal: Integer;
   Pushed: Integer;
   OverflowBytes: Integer;
+  IPT:    TProceduralTypeDesc;
 begin
+  if ACall.IsIndirectCall and (ACall.ResolvedProcType <> nil) then
+  begin
+    { an interface returned through a procedural variable or closure: the same
+      (%rsp)-resident pair contract, the callee filling it through the hidden
+      result pointer }
+    IPT := TProceduralTypeDesc(ACall.ResolvedProcType);
+    Self.Emit(#9'subq $16, %rsp');
+    Self.EmitCallIndirectRec(Self.VarOperand(ACall.Name), IPT, ACall.Args,
+      IPT.IsMethodPtr or IPT.IsReference, '(%rsp)', False);
+    Exit;
+  end;
   MD := TMethodDecl(ACall.ResolvedDecl);
   FSym := FuncSymbolOf(ACall);
   ArgCnt := ACall.Args.Count;

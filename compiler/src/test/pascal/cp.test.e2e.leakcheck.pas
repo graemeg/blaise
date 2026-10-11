@@ -71,11 +71,22 @@ type
     { owned class transients (call results) as call arguments are released
       after the call }
     procedure TestDebug_OwnedClassTransientArgs_NoLeak;
+    { a record or interface result discarded through a procedural value (a
+      method pointer, closure, plain pointer or procedural field) lands in a
+      scratch buffer and its managed contents are released }
+    procedure TestDebug_DiscardedAggregateThroughProcValue_NoLeak;
+    { an interface returned through a plain procedural variable or a closure,
+      assigned, passed on, used as a receiver and discarded: every position
+      takes the owned (+1) reference and lets go of it }
+    procedure TestDebug_InterfaceThroughProcValue_NoLeak;
     { a discarded string, object, interface or closure result of a method
       called on a NAMED receiver (C.Make();) is released -- the statement's
       return type was recorded only for a record, so every other kind leaked
       and a closure had no x8 buffer }
     procedure TestDebug_DiscardedResultOnNamedReceiver_NoLeak;
+    { closures RETURNED by calls -- an implicit-Self method, a procedural
+      variable, a plain function -- called, kept and discarded }
+    procedure TestDebug_ClosureReturningCalls_NoLeak;
     procedure TestDebug_TransientFieldInIfCond_NoLeak;
     procedure TestDebug_TransientFieldInWhileCond_NoLeak;
     { A deep chain MakeIt().A.B.N reads a scalar off a base that is itself two
@@ -530,6 +541,98 @@ const
     ''';
 
 const
+  SrcDiscardedAggProc = '''
+    program da;
+    type
+      TBig = record A, B, C: Int64; end;
+      TSt = record N: Integer; S: string; end;
+      IFoo = interface procedure Hi; end;
+      TFoo = class(TObject, IFoo) procedure Hi; end;
+      TBigM = function: TBig of object;
+      TStC = reference to function(X: Integer): TSt;
+      TIfP = function: IFoo;
+      TIfC = reference to function: IFoo;
+      THost = class
+        BigF: TBigM; StF: TStC;
+        function Big: TBig;
+        procedure Run;
+      end;
+    procedure TFoo.Hi; begin end;
+    function THost.Big: TBig;
+    begin WriteLn('big'); Result.A := 1; Result.B := 2; Result.C := 3 end;
+    function MkIf: IFoo; begin Result := TFoo.Create() end;
+    procedure THost.Run;
+    begin
+      BigF(); StF(5)
+    end;
+    var H: THost; M: TBigM; SC: TStC; IP: TIfP; IC: TIfC; R: TBig; K: Integer;
+    begin
+      H := THost.Create(); K := 40;
+      M := @H.Big;
+      SC := function(X: Integer): TSt
+        begin Result.N := X + K; Result.S := 'str' + IntToStr(X) end;
+      IP := @MkIf;
+      IC := function: IFoo begin Result := TFoo.Create() end;
+      M(); R := M(); WriteLn(R.C);
+      SC(1); WriteLn(SC(2).S);
+      IP(); IC();
+      H.BigF := M; H.StF := SC;
+      H.Run(); H.BigF(); H.StF(3)
+    end.
+    ''';
+
+const
+  SrcIntfThroughProc = '''
+    program intfproc;
+    type
+      IFoo = interface procedure Hi; function N: Integer; end;
+      TFoo = class(TObject, IFoo) V: Integer; procedure Hi; function N: Integer; end;
+      TIfP = function(X: Integer): IFoo;
+      TIfC = reference to function(X: Integer): IFoo;
+    procedure TFoo.Hi; begin WriteLn('hi', V) end;
+    function TFoo.N: Integer; begin Result := V end;
+    function MkIf(X: Integer): IFoo;
+    var F: TFoo;
+    begin F := TFoo.Create(); F.V := X; Result := F end;
+    procedure Show(const I: IFoo); begin WriteLn('show', I.N()) end;
+    var IP: TIfP; IC: TIfC; I: IFoo;
+    begin
+      IP := @MkIf;
+      IC := function(X: Integer): IFoo
+        var F: TFoo;
+        begin F := TFoo.Create(); F.V := X + 100; Result := F end;
+      IP(1);
+      WriteLn('a');
+      IC(2);
+      WriteLn('b');
+      I := IP(3); I.Hi();
+      WriteLn('c');
+      I := IC(4); I.Hi();
+      WriteLn('d');
+      Show(IP(5));
+      Show(IC(6));
+      WriteLn('e');
+      WriteLn(IP(7).N());
+      WriteLn(IC(8).N());
+    end.
+    ''';
+
+procedure TE2ELeakCheckTests.TestDebug_InterfaceThroughProcValue_NoLeak;
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(SrcIntfThroughProc, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertTrue('output, got: ' + Output,
+    Pos('a' + LE + 'b' + LE + 'hi3' + LE + 'c' + LE + 'hi104' + LE + 'd' + LE +
+        'show5' + LE + 'show106' + LE + 'e' + LE + '7' + LE + '108' + LE, Output) >= 0);
+  AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
+end;
+
+const
   SrcNamedRecvDiscard = '''
     program namedrecv;
     uses SysUtils;
@@ -559,6 +662,42 @@ const
       WriteLn('done');
     end.
     ''';
+  SrcClosureReturning = '''
+    program closret;
+    type
+      TFn = reference to function: Integer;
+      TMk = function(X: Integer): TFn;
+      TCls = class
+        function MkFn(X: Integer): TFn;
+        procedure Go;
+      end;
+    function TCls.MkFn(X: Integer): TFn;
+    begin
+      Result := function: Integer begin Result := X * 2 end;
+    end;
+    procedure TCls.Go;
+    begin
+      MkFn(5);
+      WriteLn(MkFn(6)());
+    end;
+    function PlainMk(X: Integer): TFn;
+    begin
+      Result := function: Integer begin Result := X + 1 end;
+    end;
+    var C: TCls; P: TMk; F: TFn;
+    begin
+      C := TCls.Create();
+      C.MkFn(1);
+      C.Go();
+      P := @PlainMk;
+      P(3);
+      F := P(4);
+      WriteLn(F());
+      WriteLn(P(7)());
+      PlainMk(2);
+      WriteLn('done');
+    end.
+    ''';
 
 procedure TE2ELeakCheckTests.TestDebug_DiscardedResultOnNamedReceiver_NoLeak;
 var
@@ -570,6 +709,34 @@ begin
     CompileAndRunWithRTLDebug(SrcNamedRecvDiscard, Output, ExitCode, True));
   AssertEquals('exit 0', 0, ExitCode);
   AssertTrue('output, got: ' + Output, Pos('done' + LE, Output) >= 0);
+  AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_ClosureReturningCalls_NoLeak;
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(SrcClosureReturning, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertTrue('output, got: ' + Output,
+    Pos('12' + LE + '5' + LE + '8' + LE + 'done' + LE, Output) >= 0);
+  AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_DiscardedAggregateThroughProcValue_NoLeak;
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(SrcDiscardedAggProc, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertEquals('stdout', 'big' + LE + 'big' + LE + '3' + LE + 'str2' + LE +
+    'big' + LE + 'big' + LE, Output);
   AssertTrue('no leak report, got: ' + Output, Pos('leak', Output) < 0);
 end;
 

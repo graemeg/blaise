@@ -48,6 +48,14 @@ type
       (FS.MakeRect(5); inside a method) must dispatch through the field, not
       through a global FS_obj/FS_itab pair that does not exist (x86-64). }
     procedure TestDiscardedIntfRecordCall_ImplicitSelfField_UsesTheField;
+    { a record returned through a closure / procedural variable: assigned,
+      read, passed on and discarded -- a 16-byte one in registers, a 24-byte
+      one through the hidden result pointer }
+    procedure TestCodegen_ClosureRecordReturn_RegisterShape;
+    procedure TestCodegen_ClosureRecordReturn_SretShape;
+    { a DISCARDED result through a procedural value needs its own buffer: x8
+      held whatever was left in it, and the callee wrote through it }
+    procedure TestCodegen_DiscardedSretThroughProcValue_HasBuffer;
     { a discarded string result of a method on a named receiver is released }
     procedure TestCodegen_DiscardedStringOnNamedReceiver_Released;
     { a float method called on implicit Self, used where a float is wanted }
@@ -58,6 +66,33 @@ type
   end;
 
 implementation
+
+const
+  ClosureRecSrc = '''
+    program P;
+    type
+      TSmall = record A, B: Int64; end;
+      TBig = record A, B, C: Int64; end;
+      TFnS = reference to function(X: Integer): TSmall;
+      TFnB = reference to function(X: Integer): TBig;
+    procedure ShowS(const R: TSmall); begin WriteLn(R.A + R.B) end;
+    procedure ShowB(const R: TBig); begin WriteLn(R.A + R.C) end;
+    var GS: TFnS; GB: TFnB; S: TSmall; B: TBig;
+    begin
+      GS := function(X: Integer): TSmall
+        begin Result.A := X; Result.B := X + 1 end;
+      GB := function(X: Integer): TBig
+        begin Result.A := X; Result.B := 2; Result.C := X + 3 end;
+      S := GS(1);
+      WriteLn(GS(2).B);
+      ShowS(GS(3));
+      GS(4);
+      B := GB(5);
+      WriteLn(GB(6).C);
+      ShowB(GB(7));
+      GB(8)
+    end.
+    ''';
 
 function TRecordReturnTests.Callee(const ASrc, AName, ATarget: string): string;
 var
@@ -281,6 +316,47 @@ begin
       #9'movq 32(%rsp), %rax'#10#9'movq %rax, 8(%rsp)'#10 +
         #9'movq 40(%rsp), %rax'#10#9'movq %rax, 16(%rsp)',
       #9'bl _SR'#10));
+end;
+
+procedure TRecordReturnTests.TestCodegen_ClosureRecordReturn_RegisterShape;
+begin
+  { x86-64 calls through the closure's code word (callq *); arm64 blr's it.
+    Neither used to lower the call at all (arm64: 'record address of this
+    expression'). }
+  AssertEquals('closure record return lowers', '',
+    AsmMissing(ClosureRecSrc, 'callq *', 'blr x'));
+end;
+
+procedure TRecordReturnTests.TestCodegen_ClosureRecordReturn_SretShape;
+var
+  A: string;
+begin
+  { the 24-byte result comes back through the hidden result pointer: arm64
+    points x8 at the destination before the indirect call }
+  A := GenAsm(ClosureRecSrc, TargetArm64);
+  AssertTrue('arm64 passes a result buffer in x8', Pos(#9'sub x8, x29, #', A) >= 0);
+  { x86-64: the hidden result pointer takes %rdi, so the closure environment
+    moves to %rsi -- the convention a record-returning method uses }
+  A := GenAsm(ClosureRecSrc, TargetX86_64);
+  AssertTrue('x86-64 passes the environment in %rsi behind the result pointer',
+    Pos(#9'movq 8(%r11), %rsi', A) >= 0);
+end;
+
+procedure TRecordReturnTests.TestCodegen_DiscardedSretThroughProcValue_HasBuffer;
+var
+  A: string;
+begin
+  A := GenAsm('''
+    program P;
+    type
+      TBig = record A, B, C: Int64; end;
+      TM = function: TBig of object;
+      TH = class function Mk: TBig; end;
+    function TH.Mk: TBig; begin Result.A := 1 end;
+    var H: TH; M: TM;
+    begin H := TH.Create(); M := @H.Mk; M() end.
+    ''', TargetArm64);
+  AssertTrue('the call sets x8 to a result buffer', Pos(#9'sub x8, x29, #', A) >= 0);
 end;
 
 procedure TRecordReturnTests.TestCodegen_DiscardedStringOnNamedReceiver_Released;

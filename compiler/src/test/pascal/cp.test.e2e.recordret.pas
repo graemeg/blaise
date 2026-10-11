@@ -36,6 +36,9 @@ type
     procedure TestRun_SretNested_SixCaptures_ResultPointerOnStack;
     procedure TestRun_SretMethod_OverflowVirtualIntfAndRecordReceiver;
     procedure TestRun_RecordReturn_RemainingShapes;
+    { a record returned through a closure or a procedural variable, in every
+      position: assigned, field-read, passed on, discarded }
+    procedure TestRun_ClosureRecordReturn_AllPositions;
     { rcInt1 1B — single Byte field. }
     procedure TestRun_RcInt1_OneByte_RoundTrip;
     { rcInt1 2B — two Byte fields. }
@@ -2338,6 +2341,43 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '2 6 4 22' + #10 + '908' + #10 + '5 42 9' + #10 +
     '1005 15 1' + #10, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_ClosureRecordReturn_AllPositions;
+const
+  Src = '''
+    program P;
+    type
+      TSmall = record A, B: Integer; end;
+      TBig = record A, B, C: Int64; end;
+      TFnS = reference to function(X: Integer): TSmall;
+      TFnB = reference to function(X: Integer): TBig;
+      TPlain = function(X: Integer): TSmall;
+    function PlainMk(X: Integer): TSmall;
+    begin Result.A := X; Result.B := X + 1 end;
+    procedure ShowS(const R: TSmall); begin WriteLn(R.A + R.B) end;
+    var GS: TFnS; GB: TFnB; PP: TPlain; S: TSmall; B: TBig; K: Integer;
+    begin
+      K := 10;
+      GS := function(X: Integer): TSmall
+        begin Result.A := X + K; Result.B := X * 2 end;
+      GB := function(X: Integer): TBig
+        begin Result.A := X; Result.B := K; Result.C := X + K end;
+      PP := @PlainMk;
+      S := GS(1); WriteLn(S.A, ' ', S.B);
+      WriteLn(GS(2).B);
+      ShowS(GS(3));
+      GS(4);
+      B := GB(5); WriteLn(B.A, ' ', B.B, ' ', B.C);
+      WriteLn(GB(6).C);
+      S := PP(7); WriteLn(S.A, ' ', S.B);
+      WriteLn(PP(8).B)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '11 2' + #10 + '4' + #10 + '19' + #10 + '5 10 15' + #10 +
+    '16' + #10 + '7 8' + #10 + '9' + #10, 0);
 end;
 
 initialization

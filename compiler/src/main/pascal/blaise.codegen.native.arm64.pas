@@ -326,8 +326,10 @@ type
     { FuncPtrExpr(args): call through the procedure pointer an arbitrary
       expression yields (Fns[I](), GetFn()(X)).  Result in x0 / d0. }
     procedure EmitIndirectFuncCallExpr(AExpr: TIndirectFuncCallExpr);
+    { ASretDest / ASretSpOff: where a record result goes, as for EmitCall }
     procedure EmitFatPtrCall(const AAddrReg: string; AProcType: TProceduralTypeDesc;
-      AArgs: TObjectList; AIsFat: Boolean = True);
+      AArgs: TObjectList; AIsFat: Boolean = True;
+      const ASretDest: string = ''; ASretSpOff: Integer = SRET_NO_BUF);
     procedure EmitProcFieldAddr(const AObjectName: string; AObjExpr: TASTExpr;
       AIsVarParam, AImplicitSelf: Boolean; AReceiver: TTypeDesc;
       AField: TFieldInfo; ANode: TASTNode);
@@ -2388,6 +2390,43 @@ begin
     Result := True;
     Exit;
   end;
+  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsImplicitSelfMethod and
+     (TFuncCallExpr(AExpr).ResolvedDecl is TMethodDecl) and
+     IsMethodPtrType(TMethodDecl(
+       TFuncCallExpr(AExpr).ResolvedDecl).ResolvedReturnType) then
+  begin
+    { MkFn(X)() inside a method: Self is the receiver, dispatched through its
+      vtable like any implicit-Self call }
+    MD := TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl);
+    EmitLoadSlot('x0', 'Self');
+    EmitPushX0();
+    ATmp := '__fret_' + IntToStr(FFretN);
+    FFretN := FFretN + 1;
+    if not FFrame.ContainsKey(ATmp) then
+      AddLocal(ATmp, 16);
+    EmitCall(MD, TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args, ATmp,
+      True, MD.VTableSlot);
+    Result := True;
+    Exit;
+  end;
+  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
+     (TFuncCallExpr(AExpr).ResolvedProcType <> nil) and
+     IsMethodPtrType(TProceduralTypeDesc(
+       TFuncCallExpr(AExpr).ResolvedProcType).ReturnType) then
+  begin
+    { P(X)() with P a procedural variable whose result is a closure }
+    ATmp := '__fret_' + IntToStr(FFretN);
+    FFretN := FFretN + 1;
+    if not FFrame.ContainsKey(ATmp) then
+      AddLocal(ATmp, 16);
+    EmitSlotAddr('x9', TFuncCallExpr(AExpr).Name);
+    EmitFatPtrCall('x9',
+      TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType),
+      TFuncCallExpr(AExpr).Args,
+      IsMethodPtrType(TTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType)), ATmp);
+    Result := True;
+    Exit;
+  end;
   if not (AExpr is TMethodCallExpr) then
     Exit;
   MC := TMethodCallExpr(AExpr);
@@ -3078,13 +3117,15 @@ begin
 end;
 
 procedure TArm64Backend.EmitFatPtrCall(const AAddrReg: string;
-  AProcType: TProceduralTypeDesc; AArgs: TObjectList; AIsFat: Boolean);
+  AProcType: TProceduralTypeDesc; AArgs: TObjectList; AIsFat: Boolean;
+  const ASretDest: string; ASretSpOff: Integer);
 var
   I: Integer;
   Decl: TMethodDecl;
   Par: TMethodParam;
   Info: TProcParamInfo;
-  Slot: string;
+  Slot, Scratch, SretDest: string;
+  RT: TTypeDesc;
 begin
   { AAddrReg holds the address of a procedural value: a 16-byte fat value
     (Code at +0, Env/Self at +8) when AIsFat, else one plain code word.
@@ -3127,7 +3168,54 @@ begin
       EmitPushX0();
     end;
     FIndirectSlot := Slot;
-    EmitCall(Decl, '', AArgs, '', AIsFat, VIRT_INDIRECT);
+    { A result that comes back through x8 (a record over 16 bytes or with a
+      managed field, an interface, a jumbo set) needs a buffer for the callee
+      to write.  A caller that wants the value passes one; a call with none is
+      DISCARDED (G(); as a statement), and x8 would hold whatever was left in
+      it -- the callee then wrote through it.  Give it a scratch of its own and
+      drop what the callee handed over, as a discarded direct call does. }
+    SretDest := ASretDest;
+    Scratch := '';
+    RT := AProcType.ReturnType;
+    if (SretDest = '') and (ASretSpOff = SRET_NO_BUF) and (RT <> nil) and
+       ((RT.Kind = tyInterface) or IsInlineBytesAgg(RT) or
+        IsMethodPtrType(RT) or
+        ((RT.Kind = tyRecord) and
+         (RecReturnShape(TRecordTypeDesc(RT)) = 0))) then
+    begin
+      Scratch := '__dret_' + IntToStr(FJArgN);
+      FJArgN := FJArgN + 1;
+      if not FFrame.ContainsKey(Scratch) then
+        AddLocal(Scratch, RT.RawSize());
+      SretDest := Scratch;
+    end;
+    EmitCall(Decl, '', AArgs, SretDest, AIsFat, VIRT_INDIRECT, ASretSpOff);
+    if Scratch <> '' then
+    begin
+      if RT.Kind = tyInterface then
+      begin
+        EmitLoadSlot('x0', Scratch);
+        EmitCallSym('_ClassRelease');
+      end
+      else if IsMethodPtrType(RT) then
+      begin
+        { a discarded closure: its Env reference is the callee's +1 }
+        if TProceduralTypeDesc(RT).IsReference then
+        begin
+          EmitSlotAddr('x9', Scratch);
+          Self.Emit(#9'ldr x0, [x9, #8]');
+          EmitCallSym('_ClassRelease');
+        end;
+      end
+      else if (RT.Kind = tyRecord) and
+              not RecretManagedClean(TRecordTypeDesc(RT)) then
+      begin
+        Self.Emit(#9'str x19, [sp, #-16]!');
+        EmitSlotAddr('x19', Scratch);
+        Self.EmitRecordFieldReleases(TRecordTypeDesc(RT), 'x19', False);
+        Self.Emit(#9'ldr x19, [sp], #16');
+      end;
+    end;
   finally
     Decl.Free();
   end;
@@ -7633,6 +7721,22 @@ begin
     Self.Emit(#9'ldp x0, x1, [x0]');
     Exit;
   end;
+  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
+     (TFuncCallExpr(AExpr).ResolvedProcType <> nil) then
+  begin
+    { an interface returned through a procedural variable or closure: the
+      same x8 scratch, the callee's code reached through the value's address }
+    EmitSlotAddr('x9', TFuncCallExpr(AExpr).Name);
+    EmitFatPtrCall('x9',
+      TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType),
+      TFuncCallExpr(AExpr).Args,
+      IsMethodPtrType(TTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType)),
+      '__iret');
+    EmitSlotAddr('x9', '__iret');
+    Self.Emit(#9'ldp x0, x1, [x9]');
+    Result := True;
+    Exit;
+  end;
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl <> nil) then
   begin
@@ -10296,6 +10400,20 @@ begin
     end;
     Exit;
   end;
+  { A record returned through a procedural variable or closure (R := G(X)):
+    the callee value's address, then the same indirect call every other
+    closure call uses, with the result buffer riding as the sret destination. }
+  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
+     (TFuncCallExpr(AExpr).ResolvedProcType <> nil) then
+  begin
+    EmitSlotAddr('x9', TFuncCallExpr(AExpr).Name);
+    EmitFatPtrCall('x9',
+      TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType),
+      TFuncCallExpr(AExpr).Args,
+      IsMethodPtrType(TTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType)),
+      ADest, ASretSpOff);
+    Exit;
+  end;
   { A bare method call on implicit Self that returns a record (P := Make;) is a
     TFuncCallExpr with IsImplicitSelfMethod — it needs the SAME receiver setup a
     method call does (x0 := Self, pushed for EmitCall's method convention).  The
@@ -12862,7 +12980,9 @@ begin
   Result := (AArg.ResolvedType <> nil) and
             (AArg.ResolvedType.Kind = tyRecord) and
             (((AArg is TFuncCallExpr) and
-              (TFuncCallExpr(AArg).ResolvedDecl <> nil)) or
+              ((TFuncCallExpr(AArg).ResolvedDecl <> nil) or
+               (TFuncCallExpr(AArg).IsIndirectCall and
+                (TFuncCallExpr(AArg).ResolvedProcType <> nil)))) or
              ((AArg is TMethodCallExpr) and
               (TMethodCallExpr(AArg).ResolvedMethod <> nil) and
               not TMethodCallExpr(AArg).IsConstructorCall) or
