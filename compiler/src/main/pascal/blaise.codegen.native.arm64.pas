@@ -263,6 +263,7 @@ type
       the pending releases back down to a saved mark. }
     procedure ReservePendRelSlots;
     function StrTransSlot(AIdx: Integer): string;
+    function NextIntArgDest(var ANInt, AStackOff: Integer): string;
     function  DeferNativeClassRelease: Boolean;
     function  DeferNativeRelease(const AReleaseSym: string): Boolean;
     procedure FlushNativePendingReleases(AMark: Integer);
@@ -1140,6 +1141,24 @@ begin
     JUMBO_SCRATCH_BYTES covers the widest jumbo set (a set's bitmap is capped
     at 32 bytes = 256 members), so one slot fits every instantiation. }
   AddLocal('_jset_scratch', JUMBO_SCRATCH_BYTES);
+end;
+
+function TArm64Backend.NextIntArgDest(var ANInt, AStackOff: Integer): string;
+begin
+  { the destination of the next 8-byte int-class argument value in EmitCall's
+    pop walk: register x<ANInt> while one is free, else the next 8-byte slot
+    of the outgoing stack area (an 'm<off>_8' entry) }
+  if ANInt >= 8 then
+  begin
+    AStackOff := AlignTo(AStackOff, 8);
+    Result := Format('m%d_%d', [AStackOff, 8]);
+    AStackOff := AStackOff + 8;
+  end
+  else
+  begin
+    Result := 'x' + IntToStr(ANInt);
+    Inc(ANInt);
+  end;
 end;
 
 function TArm64Backend.StrTransSlot(AIdx: Integer): string;
@@ -12793,7 +12812,7 @@ function TArm64Backend.ComputeStackArgAreaEx(ADecl: TMethodDecl;
   AArgs: TObjectList; ASelfPushed: Boolean; out ALitBase: Integer;
   out ATransBase: Integer; out ARecBase: Integer): Integer;
 var
-  I, NInt, NFloat, Off, Sz, Trans, Lit, ESz, Rec: Integer;
+  I, H, NInt, NFloat, Off, Sz, Trans, Lit, ESz, Rec: Integer;
   Arg: TASTExpr;
 begin
   { dry-run of the classification walk in EmitCall — must stay in
@@ -12827,7 +12846,12 @@ begin
         Lit := Lit +
           AlignTo(TArrayLiteralExpr(Arg).Elements.Count * ESz, 8);
       end;
-      NInt := NInt + 2;
+      { each half independently: register, else an 8-byte stack slot }
+      for H := 0 to 1 do
+        if NInt >= 8 then
+          Off := AlignTo(Off, 8) + 8
+        else
+          Inc(NInt);
       Continue;
     end;
     { string transients get a release slot after the call when the CALLER
@@ -13088,9 +13112,10 @@ begin
       if (I < ADecl.Params.Count) and
          TMethodParam(ADecl.Params.Items[I]).IsOpenArray then
       begin
-        { open array: push (data ptr, high) as two int-class values }
-        if NInt >= 7 then
-          NotYet('open-array arguments spilling to the stack', Arg);
+        { open array: push (data ptr, high) as two int-class values.  Each
+          half takes the next integer register, or else the next 8-byte slot
+          of the outgoing area -- the two may split across x7 and the stack,
+          which is how the callee prologue reads them back }
         if Arg is TArrayLiteralExpr then
         begin
           { materialise the element block in the pre-reserved literal
@@ -13134,10 +13159,10 @@ begin
           EmitAddSubImm('add', 'x0', 'sp',
             PopRegs.Count * 16 + LitBase + LitOff);
           EmitPushX0();
-          PopRegs.Add('x' + IntToStr(NInt));
+          PopRegs.Add(Self.NextIntArgDest(NInt, StackOff));
           EmitIntLiteral('x0', N - 1);
           EmitPushX0();
-          PopRegs.Add('x' + IntToStr(NInt + 1));
+          PopRegs.Add(Self.NextIntArgDest(NInt, StackOff));
           LitOff := LitOff + AlignTo(N * ESz, 8);
         end
         else if (Arg.ResolvedType <> nil) and
@@ -13149,12 +13174,12 @@ begin
             (M[1], RS[1].A), P^.A, or a call result (its per-site buffer). }
           EmitArrayStorageAddr(Arg);
           EmitPushX0();
-          PopRegs.Add('x' + IntToStr(NInt));
+          PopRegs.Add(Self.NextIntArgDest(NInt, StackOff));
           EmitIntLiteral('x0',
             TStaticArrayTypeDesc(Arg.ResolvedType).HighBound -
             TStaticArrayTypeDesc(Arg.ResolvedType).LowBound);
           EmitPushX0();
-          PopRegs.Add('x' + IntToStr(NInt + 1));
+          PopRegs.Add(Self.NextIntArgDest(NInt, StackOff));
         end
         else if (Arg.ResolvedType <> nil) and
                 (Arg.ResolvedType.Kind = tyDynArray) then
@@ -13162,12 +13187,12 @@ begin
           { dyn array coerced to open array: data ptr + (length - 1) }
           Self.EmitExprToX0(Arg);
           EmitPushX0();
-          PopRegs.Add('x' + IntToStr(NInt));
+          PopRegs.Add(Self.NextIntArgDest(NInt, StackOff));
           Self.Emit(#9'ldr x0, [sp]');
           EmitCallSym('_DynArrayLength');
           Self.Emit(#9'sub x0, x0, #1');
           EmitPushX0();
-          PopRegs.Add('x' + IntToStr(NInt + 1));
+          PopRegs.Add(Self.NextIntArgDest(NInt, StackOff));
         end
         else if (Arg is TIdentExpr) and (Arg.ResolvedType <> nil) and
                 (Arg.ResolvedType.Kind = tyOpenArray) then
@@ -13175,14 +13200,13 @@ begin
           { forwarding an open-array param: both slots pass through }
           EmitLoadSlot('x0', TIdentExpr(Arg).Name);
           EmitPushX0();
-          PopRegs.Add('x' + IntToStr(NInt));
+          PopRegs.Add(Self.NextIntArgDest(NInt, StackOff));
           EmitLoadSlot('x0', TIdentExpr(Arg).Name + '_high');
           EmitPushX0();
-          PopRegs.Add('x' + IntToStr(NInt + 1));
+          PopRegs.Add(Self.NextIntArgDest(NInt, StackOff));
         end
         else
           NotYet('open-array argument from this expression', Arg);
-        NInt := NInt + 2;
       end
       else if (I < ADecl.Params.Count) and
          TMethodParam(ADecl.Params.Items[I]).IsVarParam then

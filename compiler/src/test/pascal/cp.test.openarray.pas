@@ -91,6 +91,9 @@ type
     { a static-array parameter forwarded as an open array passes the address
       its slot holds, not the slot's own address }
     procedure TestCodegen_StaticArrayParamToOpenArray_LoadsSlot;
+    { an open array past the integer registers (arm64 rejected it): both
+      halves on the stack, or split across x7 and the stack }
+    procedure TestCodegen_OpenArrayArg_SpillsToStack;
     { An anonymous method cannot capture an open array (as in Delphi). }
     procedure TestSemantic_AnonCapture_OpenArray_Rejected;
   end;
@@ -634,6 +637,28 @@ begin
       #9'movq %rdi, -16(%rbp)'#10#9'movq -16(%rbp), %rax'#10#9'pushq %rax'#10 +
         #9'pushq $2',
       #9'bl _Show'#10));
+end;
+
+procedure TOpenArrayTests.TestCodegen_OpenArrayArg_SpillsToStack;
+const
+  Src = '''
+    program P;
+    function F8(A, B, C, D, E, G, H, K: Integer; const V: array of Integer;
+      L: Integer): Integer;
+    begin Result := A + K + L + High(V) end;
+    function F7(A, B, C, D, E, G, H: Integer; const V: array of Integer): Integer;
+    begin Result := A + High(V) end;
+    var Arr: array[0..3] of Integer;
+    begin
+      WriteLn(F8(1, 2, 3, 4, 5, 6, 7, 8, Arr, 3));
+      WriteLn(F7(1, 2, 3, 4, 5, 6, 7, [9, 9]))
+    end.
+    ''';
+begin
+  AssertEquals('both calls lower', '',
+    AsmMissing(Src, #9'callq F8'#10, #9'bl _F8'#10));
+  AssertEquals('the split call lowers', '',
+    AsmMissing(Src, #9'callq F7'#10, #9'bl _F7'#10));
 end;
 
 procedure TOpenArrayTests.TestSemantic_AnonCapture_OpenArray_Rejected;

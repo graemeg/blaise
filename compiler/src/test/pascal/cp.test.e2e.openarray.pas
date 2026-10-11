@@ -82,6 +82,7 @@ type
     procedure TestRun_NestedRoutine_CapturesOpenArray;
     procedure TestRun_StaticArrayExpr_ToOpenArray;
     procedure TestRun_StaticArrayParamsAndCalls_ToOpenArray;
+    procedure TestRun_OpenArrayArgs_SpillToStack;
   end;
 
 implementation
@@ -1089,6 +1090,42 @@ begin
     '0 6 0 2' + #10 + '7 0 14 2' + #10 +
     '1 0 2 2' + #10 + '2 0 4 2' + #10 +
     '15' + #10, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_OpenArrayArgs_SpillToStack;
+const
+  Src = '''
+    program s1;
+    uses SysUtils;
+    function SumOA(const V: array of Integer): Integer;
+    var I: Integer;
+    begin Result := 0; for I := 0 to High(V) do Result := Result + V[I] end;
+    function F7(A, B, C, D, E, G, H: Integer; const V: array of Integer): Integer;
+    begin Result := A + B + C + D + E + G + H + SumOA(V) * 100 + High(V) * 10000 end;
+    function F8(A, B, C, D, E, G, H, K: Integer; const V: array of Integer; L: Integer): Integer;
+    begin Result := A + H + K + L * 1000 + SumOA(V) * 100 + High(V) * 100000 end;
+    function Two(const P: array of Integer; A, B, C, D, E: Integer; const Q: array of string): string;
+    var I: Integer;
+    begin Result := IntToStr(SumOA(P) + A + E) + ':'; for I := 0 to High(Q) do Result := Result + Q[I] end;
+    procedure ManyVar(A, B, C, D, E, G: Integer; var X: Integer; const V: array of Integer);
+    begin X := SumOA(V) + G end;
+    var Arr: array[0..3] of Integer; D: array of Integer; X: Integer;
+    begin
+      Arr[0] := 1; Arr[1] := 2; Arr[2] := 3; Arr[3] := 4;
+      SetLength(D, 2); D[0] := 5; D[1] := 6;
+      WriteLn(F7(1, 2, 3, 4, 5, 6, 7, Arr));
+      WriteLn(F7(1, 2, 3, 4, 5, 6, 7, [9, 9]));
+      WriteLn(F8(1, 2, 3, 4, 5, 6, 7, 8, D, 3));
+      WriteLn(F8(1, 2, 3, 4, 5, 6, 7, 8, [1, 2, 3], 4));
+      WriteLn(Two([1, 1], 1, 2, 3, 4, 5, ['a', 'b' + IntToStr(X)]));
+      ManyVar(1, 2, 3, 4, 5, 6, X, Arr); WriteLn(X);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '31028' + #10 + '11828' + #10 + '104116' + #10 + '204616' + #10 +
+    '8:ab0' + #10 + '16' + #10, 0);
 end;
 
 initialization
