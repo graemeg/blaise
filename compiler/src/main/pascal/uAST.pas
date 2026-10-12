@@ -1169,6 +1169,12 @@ type
       into real local slots at entry so every open-array path reads them
       unchanged.  The nearest enclosing declaration of AName decides. }
     function CapturesOpenArray(const AName: string): Boolean;
+    { The PARAMETER a captured name resolves to -- the nearest enclosing
+      level that owns AName declares it as a parameter -- or nil when it is
+      a local there (or not captured at all).  Tells a nested routine how
+      the owner stores it: a var/out param's storage holds the caller's
+      address. }
+    function CapturedParam(const AName: string): TMethodParam;
   end;
 
   { Anonymous procedure/function literal as an expression:
@@ -2022,28 +2028,35 @@ begin
 end;
 
 function TMethodDecl.CapturesOpenArray(const AName: string): Boolean;
+begin
+  Result := (CapturedVars <> nil) and
+            (CapturedVars.IndexOf(AName + '_high') >= 0) and
+            (CapturedParam(AName) <> nil) and
+            CapturedParam(AName).IsOpenArray;
+end;
+
+function TMethodDecl.CapturedParam(const AName: string): TMethodParam;
 var
   D: TMethodDecl;
   I, J: Integer;
   VD: TVarDecl;
 begin
-  Result := False;
-  if (CapturedVars = nil) or (CapturedVars.IndexOf(AName) < 0) or
-     (CapturedVars.IndexOf(AName + '_high') < 0) then
+  Result := nil;
+  if (CapturedVars = nil) or (CapturedVars.IndexOf(AName) < 0) then
     Exit;
   D := EnclosingDecl;
   while D <> nil do
   begin
     for I := 0 to D.Params.Count - 1 do
       if SameText(TMethodParam(D.Params.Items[I]).ParamName, AName) then
-        Exit(TMethodParam(D.Params.Items[I]).IsOpenArray);
+        Exit(TMethodParam(D.Params.Items[I]));
     if D.Body <> nil then
       for I := 0 to D.Body.Decls.Count - 1 do
       begin
         VD := TVarDecl(D.Body.Decls.Items[I]);
         for J := 0 to VD.Names.Count - 1 do
           if SameText(VD.Names.Strings[J], AName) then
-            Exit(False);
+            Exit;
       end;
     D := D.EnclosingDecl;
   end;

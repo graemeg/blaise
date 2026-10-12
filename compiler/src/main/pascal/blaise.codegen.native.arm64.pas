@@ -207,6 +207,15 @@ type
     FEnvCaps: TStringList;       { owned: CapturedVars + EnvCaptured merged for
                                    a routine with a closure env (FCapturedVars
                                    points here while it is emitted) }
+    FCapVarParams: TStringList;  { names, among the current routine's
+                                   captures, that are TRUE var/out params of
+                                   the routine that owns them: their '_cap_'
+                                   slot holds the address of a slot that holds
+                                   the CALLER's address (one deref further).
+                                   A by-value record param is inline in its
+                                   owner's frame, so it is not listed --
+                                   IsVarParam on a field access cannot tell
+                                   the two apart.  Filled by the frame setup. }
     FCapturedVars: TStringList;  { names captured from an enclosing routine
                                    while emitting a nested routine (leg 17).
                                    Each captured var V has a hidden leading
@@ -220,6 +229,7 @@ type
     { True when AName is captured from an enclosing routine in the current
       nested routine (accessed via its hidden '_cap_<Name>' pointer slot). }
     function  IsCaptured(const AName: string): Boolean;
+    function  IsCapturedVarParam(const AName: string): Boolean;
     { True when RecordName is a BY-VALUE record param (its inline copy lives in
       the ParamName slot, so its address is EmitSlotAddr, NOT EmitLoadSlot).
       The semantic pass flags EVERY record param IsVarParam=True (records pass
@@ -904,6 +914,7 @@ begin
   FDynGlobals := TStringList.Create();
   FRecLocals   := TStringList.Create();
   FByValRecParams := TStringList.Create();
+  FCapVarParams := TStringList.Create();
   FRecGlobals  := TStringList.Create();
   FRefLocals   := TStringList.Create();
   FRefGlobals  := TStringList.Create();
@@ -924,6 +935,7 @@ begin
   FRecGlobals.Free();
   FRecLocals.Free();
   FByValRecParams.Free();
+  FCapVarParams.Free();
   FRefLocals.Free();
   FRefGlobals.Free();
   FStrGlobals.Free();
@@ -975,6 +987,11 @@ end;
 function TArm64Backend.IsCaptured(const AName: string): Boolean;
 begin
   Result := (FCapturedVars <> nil) and (FCapturedVars.IndexOf(AName) >= 0);
+end;
+
+function TArm64Backend.IsCapturedVarParam(const AName: string): Boolean;
+begin
+  Result := IsCaptured(AName) and (FCapVarParams.IndexOf(AName) >= 0);
 end;
 
 { True when AName is captured into a closure env record.  Unlike a
@@ -1114,6 +1131,17 @@ end;
 procedure TArm64Backend.EmitRecordBaseAddr(const AReg, AName: string;
   AIsVarParam: Boolean);
 begin
+  { a record captured from an enclosing routine: '_cap_' holds the address
+    of its storage, which for a true var/out param is the slot holding the
+    caller's address.  A capture the prologue gave a REAL slot (a record
+    method's Self, reloaded through _cap_Self) is read as in the owner. }
+  if IsCaptured(AName) and not IsLocal(AName) then
+  begin
+    EmitLoadSlot(AReg, '_cap_' + AName);
+    if IsCapturedVarParam(AName) then
+      Self.Emit(Format(#9'ldr %s, [%s]', [AReg, AReg]));
+    Exit;
+  end;
   if AIsVarParam and not Self.IsByValueRecordParam(AName) then
     EmitLoadSlot(AReg, AName)          { true var/out: slot holds caller addr }
   else
@@ -6525,21 +6553,13 @@ begin
                tyDynArray, tyInterface, tyMetaClass]) or
             TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
       NotYet('read of a field of this type', AExpr);
-    { captured record base (leg 19): a captured VALUE record's '_cap_' holds
-      its address directly (no deref); a captured VAR-PARAM record's '_cap_'
-      holds &(the var-param slot), and that slot holds the caller's record
-      address — so one deref yields the base.  Both cases: want the record
-      ADDRESS, driven by IsVarParam. }
-    if IsCaptured(TFieldAccessExpr(AExpr).RecordName) then
-      EmitCapturedBase('x9', TFieldAccessExpr(AExpr).RecordName,
-        TFieldAccessExpr(AExpr).IsVarParam, False)
-    else
-      { TRUE var/out record → one deref; by-value record param / local / global
-        → EmitSlotAddr.  A by-value record param is IsVarParam=True too (records
-        pass by reference), so the '__pptr_' discriminator in EmitRecordBaseAddr
-        keeps them apart (was a double-deref that mis-read the first word). }
-      EmitRecordBaseAddr('x9', TFieldAccessExpr(AExpr).RecordName,
-        TFieldAccessExpr(AExpr).IsVarParam);
+    { TRUE var/out record → one deref; by-value record param / local / global
+      → EmitSlotAddr; a captured record through its '_cap_' slot.  A by-value
+      record param is IsVarParam=True too (records pass by reference), so
+      EmitRecordBaseAddr keeps them apart -- IsVarParam alone dereferenced a
+      captured by-value record's first word as its address (a segfault). }
+    EmitRecordBaseAddr('x9', TFieldAccessExpr(AExpr).RecordName,
+      TFieldAccessExpr(AExpr).IsVarParam);
     if TFieldAccessExpr(AExpr).FieldInfo.Offset <> 0 then
       Self.Emit(Format(#9'add x9, x9, #%d',
         [TFieldAccessExpr(AExpr).FieldInfo.Offset]));
@@ -11272,13 +11292,11 @@ begin
     Self.Emit(Format(#9'add x0, x0, %s@PAGEOFF',
       [CodegenMangle(TIdentExpr(ASub.StrExpr).ConstArraySymbol)]));
   end
-  else if TIdentExpr(ASub.StrExpr).IsImplicitSelf and
-          (TIdentExpr(ASub.StrExpr).ImplicitFieldInfo <> nil) then
-    { static-array FIELD of Self: the inline array storage is at Self+offset —
-      EmitRecIdentAddr yields that address (no deref), like leg 14 (leg 16) }
-    EmitRecIdentAddr('x0', TIdentExpr(ASub.StrExpr))
   else
-    EmitSlotAddr('x0', TIdentExpr(ASub.StrExpr).Name);
+    { a frame / global array, a static-array FIELD of Self (inline at
+      Self+offset, no deref -- leg 16), or one captured from an enclosing
+      routine (through '_cap_') }
+    EmitRecIdentAddr('x0', TIdentExpr(ASub.StrExpr));
   EmitPopTo('x1');
   EmitIntLiteral('x2', ESz);
   Self.Emit(#9'mul x1, x1, x2');
@@ -11906,6 +11924,7 @@ begin
   FStrLocals.Clear();
   FRecLocals.Clear();
   FByValRecParams.Clear();
+  FCapVarParams.Clear();
   FObjLocals.Clear();
   FWeakLocals.Clear();
   FIntfLocals.Clear();
@@ -11922,7 +11941,12 @@ begin
     if (ADecl.CapturedVars <> nil) and (ADecl.CapturedVars.Count > 0) then
     begin
       for I := 0 to ADecl.CapturedVars.Count - 1 do
+      begin
         AddLocal('_cap_' + ADecl.CapturedVars.Strings[I], 8);
+        if (ADecl.CapturedParam(ADecl.CapturedVars.Strings[I]) <> nil) and
+           ADecl.CapturedParam(ADecl.CapturedVars.Strings[I]).IsVarParam then
+          FCapVarParams.Add(ADecl.CapturedVars.Strings[I]);
+      end;
       if (ADecl.OwnerTypeName = '') and
          (ADecl.CapturedVars.IndexOf('Self') >= 0) then
         AddLocal('Self', 8);
@@ -16913,6 +16937,7 @@ begin
   FStrLocals.Clear();
   FRecLocals.Clear();
   FByValRecParams.Clear();
+  FCapVarParams.Clear();
   FObjLocals.Clear();
   FWeakLocals.Clear();
   FIntfLocals.Clear();

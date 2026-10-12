@@ -25,6 +25,13 @@ type
       registers hold: the rest of the capture pointers go on the stack,
       ahead of every other argument (both backends rejected it) }
     procedure TestCodegen_NestedCapture_SpillsPastRegisters;
+    { a captured var record param is reached through its '_cap_' slot with
+      ONE deref to the caller's record, a captured by-value one with none
+      (arm64 had no capture arm -- NotYet -- and its read arm dereferenced a
+      by-value record's first word as its address); x86-64 gives the nested
+      frame a real slot holding the owner's pointer, so every var-param
+      path finds it (they read a slot that frame did not have) }
+    procedure TestCodegen_CapturedRecordParams_ReachTheRecord;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -481,6 +488,39 @@ begin
   AssertEquals('captures past the registers come from the stack', '',
     AsmMissing(Src, #9'movq 16(%rbp), %rcx',
       #9'stur x7, [x29, #-64]'#10#9'ldr x9, [x29, #16]'));
+end;
+
+procedure TProcFuncTests.TestCodegen_CapturedRecordParams_ReachTheRecord;
+const
+  Src = '''
+    program P;
+    type TRec = record N: Integer; end;
+    procedure Outer(var R: TRec; V: TRec; I: Integer);
+      procedure Inner;
+      begin
+        WriteLn(R.N, V.N);
+      end;
+    begin
+      Inner();
+    end;
+    var G: TRec;
+    begin
+      Outer(G, G, 1);
+    end.
+    ''';
+begin
+  AssertEquals('captured var record: _cap_ then one deref', '',
+    AsmMissing(Src,
+      #9'movq -16(%rbp), %rax' + #10 + #9'movq (%rax), %rax' + #10 +
+        #9'movq %rax, -32(%rbp)',
+      #9'ldur x9, [x29, #-16]' + #10 + #9'ldr x9, [x9]' + #10 +
+        #9'mov x0, x9' + #10 + #9'ldrsw x0, [x0]'));
+  AssertEquals('captured by-value record: the _cap_ value is its address', '',
+    AsmMissing(Src,
+      #9'movq -8(%rbp), %rax' + #10 + #9'movq (%rax), %rax' + #10 +
+        #9'movq %rax, -24(%rbp)',
+      #9'ldur x9, [x29, #-8]' + #10 + #9'mov x0, x9' + #10 +
+        #9'ldrsw x0, [x0]'));
 end;
 
 initialization

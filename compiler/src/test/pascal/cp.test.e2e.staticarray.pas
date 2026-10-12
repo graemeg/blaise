@@ -24,6 +24,15 @@ type
   protected
     procedure SetUp; override;
   published
+    { by-value static-array and record params (x86-64 keeps a pointer to
+      the callee's copy in the slot: element writes, @A[I], Inc(A[I]) and
+      A := B took the slot's own address and wrote over the frame) and
+      static-array FIELD stores (x86-64 stored the source's address) }
+    procedure TestRun_ByValueAggregateParams_AndArrayFieldStores;
+    { the same with String elements: copies retain, the by-value copy
+      co-owns its elements (x86-64 shared them at the caller's count and
+      freed them under the caller) }
+    procedure TestRun_ManagedStaticArrays_CopiesAndParams;
     procedure TestRun_FloatElements_DynAndOpenArrays;
     procedure TestRun_DynArray_ManagedElementOverwrite_Releases;
     procedure TestRun_StaticArrays_Combined;
@@ -1880,6 +1889,88 @@ begin
     '1.5' + #10 +
     '-0.25' + #10 +
     '109.25 18.750 7' + #10, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_ByValueAggregateParams_AndArrayFieldStores;
+const
+  Src = '''
+    program ByValAggs;
+    type
+      PInt = ^Integer;
+      TArr = array[0..2] of Integer;
+      TRec = record N: Integer; A: TArr; end;
+      TObj = class A: TArr; end;
+    procedure SetVia(Q: PInt; V: Integer); begin Q^ := V end;
+    procedure BumpI(var X: Integer); begin X := X + 100 end;
+    procedure ShowA(const X: TArr); begin WriteLn(X[0], ' ', X[1], ' ', X[2]) end;
+    procedure Arr(A: TArr; B: TArr);
+    begin
+      A[1] := 9; SetVia(@A[0], 7); Inc(A[2]); BumpI(A[2]); ShowA(A);
+      A := B; A[0] := A[1] + A[2]; ShowA(A);
+    end;
+    procedure Rec(R: TRec; B: TArr);
+    begin
+      R.A[1] := 9; SetVia(@R.A[0], 7); Inc(R.A[2]); BumpI(R.A[2]); ShowA(R.A);
+      R.A := B; ShowA(R.A);
+    end;
+    var G, H, L: TArr; GR: TRec; O: TObj;
+    begin
+      G[0] := 1; G[1] := 2; G[2] := 3; H[0] := 4; H[1] := 5; H[2] := 6;
+      GR.A := G;
+      Arr(G, H); ShowA(G);
+      Rec(GR, H); ShowA(GR.A);
+      O := TObj.Create(); O.A := H; L := G; L[0] := 9; GR.A := L;
+      ShowA(O.A); ShowA(GR.A);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    '7 9 104' + LineEnding + '11 5 6' + LineEnding + '1 2 3' + LineEnding +
+    '7 9 104' + LineEnding + '4 5 6' + LineEnding + '1 2 3' + LineEnding +
+    '4 5 6' + LineEnding + '9 2 3' + LineEnding, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_ManagedStaticArrays_CopiesAndParams;
+const
+  Src = '''
+    program ManagedArrs;
+    uses SysUtils;
+    type TSA = array[0..1] of String;
+      TRec = record N: Integer; A: TSA; end;
+      TObj = class A: TSA; end;
+    function Mk(I: Integer): String; begin Result := 'v' + IntToStr(I) end;
+    procedure ByVal(A: TSA; B: TSA);
+    begin
+      A := B; A[0] := A[0] + '!';
+      WriteLn(A[0], A[1], B[0]);
+    end;
+    procedure Run;
+    var G, L: TSA; R: TRec; O: TObj; I: Integer;
+    begin
+      G[0] := Mk(1); G[1] := Mk(2);
+      for I := 1 to 3 do
+      begin
+        L := G; R.A := G; R.A := L;
+        O := TObj.Create(); O.A := G; O.A := R.A;
+        ByVal(G, L);
+      end;
+      L[0] := 'x' + G[0];
+      WriteLn(G[0], G[1], L[0], R.A[0], R.A[1], O.A[0]);
+    end;
+    begin
+      Run();
+    end.
+    ''';
+begin
+{$IFDEF CPUARM64}
+  Ignore('arm64 does not lower a managed static-array parameter or ' +
+    'whole-array store yet (compile-time NotYet)');
+{$ELSE}
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertLeakFreeOnAll(Src, 'v1!v2v1' + #10 + 'v1!v2v1' + #10 + 'v1!v2v1' +
+    #10 + 'v1v2xv1v1v2v1');
+{$ENDIF}
 end;
 
 initialization

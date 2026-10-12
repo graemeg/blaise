@@ -144,6 +144,14 @@ type
     procedure TestRun_NestedProc_ShadowsEnclosingLocal;
     { Nested proc captures an outer plain LOCAL record (field read + write). }
     procedure TestRun_NestedProc_CapturesLocalRecord;
+    { every by-reference form on a captured variable, one and two levels
+      down: field reads/writes, @R.N, @R.A[I], @I, @A[I], Inc(I), var
+      arguments, string append -- on var params, by-value params and
+      locals.  arm64 lowered almost none of it on a record (NotYet, or a
+      segfault reading a by-value record's first word as its address);
+      x86-64 crashed on @R.N, @I, Inc(I), S := S + 'x', BumpR(R) and a
+      by-value array element write }
+    procedure TestRun_NestedProc_CapturedByRefForms;
     { Nested proc captures an outer VAR ARRAY PARAMETER (element read + write).
       The captured var-param array slot is reached through the _cap_ pointer
       with one extra dereference; without it the element address resolved to a
@@ -3855,6 +3863,86 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '7066' + #10 + '4032' + #10 + '9 8' + #10 + '7066' + #10 +
     '7061' + #10, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_NestedProc_CapturedByRefForms;
+const
+  Src = '''
+    program CapForms;
+    type
+      PInt = ^Integer;
+      TArr = array[0..2] of Integer;
+      TRec = record N: Integer; A: TArr; S: String; end;
+    procedure SetVia(Q: PInt; V: Integer); begin Q^ := V end;
+    procedure BumpI(var X: Integer); begin X := X + 100 end;
+    procedure BumpR(var R: TRec); begin R.N := R.N + 1000 end;
+    procedure Show(const R: TRec; I: Integer; const S: String; const A: TArr);
+    begin
+      WriteLn(R.N, ' ', R.A[0], ' ', R.A[1], ' ', R.S, ' | ', I, ' ', S, ' | ', A[0], ' ', A[1])
+    end;
+    procedure ByVar(var R: TRec; var I: Integer; var S: String; var A: TArr);
+      procedure Inner;
+        procedure Deep;
+        begin
+          SetVia(@R.N, R.N + 1); SetVia(@R.A[1], 7); BumpR(R);
+          Inc(I); BumpI(I); SetVia(@I, I + 1); S := S + 'x';
+          A[0] := A[0] + 5; SetVia(@A[1], 6)
+        end;
+      begin
+        R.N := R.N + 10; R.S := R.S + 'v'; R.A[0] := R.A[1] + 3;
+        Deep();
+      end;
+    begin
+      Inner(); Show(R, I, S, A)
+    end;
+    procedure ByVal(R: TRec; I: Integer; S: String; A: TArr);
+      procedure Inner;
+        procedure Deep;
+        begin
+          SetVia(@R.N, R.N + 1); SetVia(@R.A[1], 7); BumpR(R);
+          Inc(I); BumpI(I); SetVia(@I, I + 1); S := S + 'x';
+          A[0] := A[0] + 5; SetVia(@A[1], 6)
+        end;
+      begin
+        R.N := R.N + 10; R.S := R.S + 'v'; R.A[0] := R.A[1] + 3;
+        Deep();
+      end;
+    begin
+      Inner(); Show(R, I, S, A)
+    end;
+    procedure Locals;
+    var R: TRec; I: Integer; S: String; A: TArr;
+      procedure Inner;
+        procedure Deep;
+        begin
+          SetVia(@R.N, R.N + 1); SetVia(@R.A[1], 7); BumpR(R);
+          Inc(I); BumpI(I); SetVia(@I, I + 1); S := S + 'x';
+          A[0] := A[0] + 5; SetVia(@A[1], 6)
+        end;
+      begin
+        R.N := R.N + 10; R.S := R.S + 'v'; R.A[0] := R.A[1] + 3;
+        Deep();
+      end;
+    begin
+      R.N := 1; R.A[1] := 2; R.S := 's'; I := 1; S := 't'; A[0] := 1;
+      Inner(); Show(R, I, S, A)
+    end;
+    var GR: TRec; GI: Integer; GS: String; GA: TArr;
+    begin
+      GR.N := 1; GR.A[1] := 2; GR.S := 's'; GI := 1; GS := 't'; GA[0] := 1;
+      ByVal(GR, GI, GS, GA); Show(GR, GI, GS, GA);
+      ByVar(GR, GI, GS, GA); Show(GR, GI, GS, GA);
+      Locals();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    '1012 5 7 sv | 103 tx | 6 6' + LE +
+    '1 0 2 s | 1 t | 1 0' + LE +
+    '1012 5 7 sv | 103 tx | 6 6' + LE +
+    '1012 5 7 sv | 103 tx | 6 6' + LE +
+    '1012 5 7 sv | 103 tx | 6 6' + LE, 0);
 end;
 
 initialization

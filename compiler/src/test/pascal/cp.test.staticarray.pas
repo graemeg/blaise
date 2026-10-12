@@ -15,7 +15,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TStaticArrayTests = class(TTestCase)
@@ -26,6 +26,15 @@ type
       source analysed cleanly. }
     function SemanticErrMsg(const ASrc: string): string;
   published
+    { x86-64 by-value static-array params keep a POINTER to the callee's
+      copy in their slot: an element write and a whole-array store must go
+      through it (both took the slot's own address and wrote over the
+      frame), and a managed copy co-owns its elements }
+    procedure TestNative_ByValueArrayParam_WritesThroughPointer;
+    procedure TestNative_ByValueManagedArrayParam_RetainsElements;
+    { R.A := G with A a static-array field copies the bytes (x86-64 stored
+      G's ADDRESS over A[0..1]) }
+    procedure TestNative_StaticArrayFieldStore_CopiesBytes;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1519,6 +1528,81 @@ begin
     var i: Integer;
     begin i := 9; WriteLn(TC.Names[i]) end.
     '''));
+end;
+
+procedure TStaticArrayTests.TestNative_ByValueArrayParam_WritesThroughPointer;
+const
+  Src = '''
+    program P;
+    type TArr = array[0..2] of Integer;
+    procedure Outer(A: TArr; B: TArr);
+    begin
+      A[1] := 9;
+      A := B;
+    end;
+    var G: TArr;
+    begin
+      Outer(G, G);
+    end.
+    ''';
+begin
+  { x86-64: the slot at -8 holds the copy's address; arm64 keeps the copy
+    inline at x29-16 }
+  AssertEquals('element write through the copy', '',
+    AsmMissing(Src,
+      #9'movq -8(%rbp), %rcx' + #10 + #9'addq %rcx, %rax',
+      #9'sub x0, x29, #16' + #10 + #9'ldr x1, [sp], #16'));
+  AssertEquals('whole-array store into the copy', '',
+    AsmMissing(Src,
+      #9'movq -8(%rbp), %rdi' + #10 + #9'movq $12, %rdx' + #10 +
+        #9'callq memcpy',
+      #9'sub x0, x29, #16' + #10 + #9'movz x2, #12' + #10 + #9'bl _memcpy'));
+end;
+
+procedure TStaticArrayTests.TestNative_ByValueManagedArrayParam_RetainsElements;
+const
+  Src = '''
+    program P;
+    type TSA = array[0..1] of String;
+    procedure Strs(S: TSA);
+    begin
+      WriteLn(S[0]);
+    end;
+    var G: TSA;
+    begin
+      Strs(G);
+    end.
+    ''';
+var
+  AsmT: string;
+begin
+  { x86-64 only: arm64 does not lower a managed static-array parameter yet
+    (a compile-time NotYet, never silent) }
+  AsmT := GenAsm(Src, TargetX86_64);
+  AssertTrue('each element retained on entry',
+    Pos(#9'movq -8(%rbp), %rbx' + #10 + #9'pushq %r15', AsmT) >= 0);
+  AssertTrue('and released at exit',
+    Pos(#9'callq _StringRelease', AsmT) >= 0);
+end;
+
+procedure TStaticArrayTests.TestNative_StaticArrayFieldStore_CopiesBytes;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..2] of Integer;
+      TRec = record N: Integer; A: TArr; end;
+    var G: TArr; R: TRec;
+    begin
+      R.A := G;
+    end.
+    ''';
+begin
+  AssertEquals('a 12-byte copy, not an 8-byte address store', '',
+    AsmMissing(Src,
+      #9'movq %r15, %rdi' + #10 + #9'movq %rbx, %rsi' + #10 +
+        #9'movq $12, %rdx' + #10 + #9'callq memcpy',
+      #9'add x0, x0, #4' + #10 + #9'movz x2, #12' + #10 + #9'bl _memcpy'));
 end;
 
 initialization

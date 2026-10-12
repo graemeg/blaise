@@ -215,6 +215,12 @@ type
     { Parallel to FFrame: the static type of each frame slot, so loads and
       stores pick the right width and signedness. }
     FFrameTypes: TDictionary<string, TTypeDesc>;
+    { by-value aggregate params (record, static array, jumbo set) of the
+      current frame, own or captured from the owner: the slot holds the
+      ADDRESS of the callee's copy, as for a var param.  A static-array
+      subscript or whole-value write carries IsVarParam only for a true var
+      param, so it needs this to know the slot is a pointer. }
+    FByValAggParams: TStringList;
     FFrameSize:  Integer;       { bytes to reserve for locals (16-aligned) }
 
     { Statement-scoped deferred class-release list (BUG-003 native half).
@@ -549,6 +555,7 @@ type
     { True when AName is a captured outer-scope variable in the current
       nested function (accessed via an implicit pointer param). }
     function IsCaptured(const AName: string): Boolean;
+    function IsByValAggParam(const AName: string): Boolean;
     { Load a variable's base (address or stored value) into ADstReg, handling
       local / global / nested-captured variables uniformly. }
     procedure EmitVarBaseToReg(const AName: string; AWantAddress: Boolean;
@@ -596,6 +603,7 @@ type
       (plain, sret and record-sret), so each accepts the same shapes. }
     procedure EmitIntfRecvPair(AObjExpr: TASTExpr; const AObjName: string;
                                AIsGlobal, AIsVarParam: Boolean);
+    procedure EmitCapturedVarAddr(AIdent: TIdentExpr; const ADstReg: string);
     procedure EmitInterfaceFieldCall(AFld: TFieldInfo; AIntf: TInterfaceTypeDesc;
                                 const AMethName: string; AArgs: TObjectList;
                                 ADiscardIntfRet: Boolean = False);
@@ -1627,6 +1635,7 @@ begin
   FProgScratchSz.Free();
   FIntfSplitHalf.Free();
   Self.ClearFrame();
+  FByValAggParams.Free();
   FDynElemHooks.Free();
   FConstArgUnsafe.Free();
   FImportedUnits.Free();
@@ -2917,6 +2926,20 @@ begin
     Result := NativeMangle(ATypeName + '_' + ADecl.Name)
   else
     Result := NativeMangle(ATypeName + '_' + AMethodName);
+end;
+
+function IsCapturedByRefParam(ADecl: TMethodDecl; const AName: string): Boolean;
+var
+  P: TMethodParam;
+begin
+  { a name ADecl captured that its owner received BY POINTER: the owner's
+    slot holds the data's address (see BuildFrame) }
+  P := ADecl.CapturedParam(AName);
+  Result := (P <> nil) and not P.IsOpenArray and
+            (P.IsVarParam or
+             ((P.ResolvedType <> nil) and
+              ((P.ResolvedType.Kind in [tyRecord, tyStaticArray]) or
+               IsJumboSet(P.ResolvedType))));
 end;
 
 function NativeExprOwnsRef(AExpr: TASTExpr): Boolean;
@@ -5717,6 +5740,11 @@ end;
 { Frame model                                                          }
 { ------------------------------------------------------------------ }
 
+function TX86_64Backend.IsByValAggParam(const AName: string): Boolean;
+begin
+  Result := (FByValAggParams <> nil) and (FByValAggParams.IndexOf(AName) >= 0);
+end;
+
 function TX86_64Backend.IsCaptured(const AName: string): Boolean;
 begin
   { An inline candidate captures nothing; without this, a callee ident
@@ -6104,6 +6132,9 @@ begin
   Self.ClearFrame();
   FFrame      := TDictionary<string, Integer>.Create();
   FFrameTypes := TDictionary<string, TTypeDesc>.Create();
+  if FByValAggParams = nil then
+    FByValAggParams := TStringList.Create();
+  FByValAggParams.Clear();
   FSretInOff  := 0;
   if FIntfSplitHalf = nil then
     FIntfSplitHalf := TDictionary<string, Integer>.Create();
@@ -6185,6 +6216,18 @@ begin
       begin
         Self.AddSlot(ADecl.CapturedVars.Strings[I], nil, Offset);
         Self.AddSlot(ADecl.CapturedVars.Strings[I] + '_high', nil, Offset);
+      end
+      { A captured BY-REFERENCE parameter (var / out, or a by-value record,
+        static array or jumbo set, which also arrive by pointer) gets a real
+        slot holding the same address the owner's slot holds.  That address
+        never changes, so every var-parameter path that reads the slot by
+        name works as in the owner -- dozens of them tested IsVarParam
+        before IsCaptured and read a slot this frame did not have. }
+      else if IsCapturedByRefParam(ADecl, ADecl.CapturedVars.Strings[I]) then
+      begin
+        Self.AddSlot(ADecl.CapturedVars.Strings[I], nil, Offset);
+        if not ADecl.CapturedParam(ADecl.CapturedVars.Strings[I]).IsVarParam then
+          FByValAggParams.Add(ADecl.CapturedVars.Strings[I]);
       end;
   end;
 
@@ -6305,6 +6348,7 @@ begin
                IsJumboSet(P.ResolvedType)) and
               not P.IsVarParam then
       begin
+        FByValAggParams.Add(P.ParamName);
         if IntIdx2 < 6 then
         begin
           Self.AddSlot(P.ParamName, nil, Offset);
@@ -6496,6 +6540,8 @@ begin
     FFrameTypes.Free();
     FFrameTypes := nil;
   end;
+  if FByValAggParams <> nil then
+    FByValAggParams.Clear();
   FFrameSize    := 0;
   FFrameBottom  := 0;
   FSretFunc     := False;
@@ -7310,16 +7356,17 @@ begin
         Self.Emit(Format(#9'addq $%d, %%rdx', [FI.Offset]));
       Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep, Arg0.ResolvedType);
     end
+    else if Self.IsCaptured(IE.Name) then
+    begin
+      { Captured outer variable (a var parameter included, which had taken
+        the ParamMode arm below and read a slot this frame does not have):
+        its address into %rdx, then the in-place add/sub through it. }
+      Self.EmitCapturedVarAddr(IE, '%rdx');
+      Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep, Arg0.ResolvedType);
+    end
     else if IE.ParamMode <> pmNone then
     begin
       Self.Emit(Format(#9'movq %s, %%rdx', [Self.VarOperand(IE.Name)]));
-      Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep, Arg0.ResolvedType);
-    end
-    else if Self.IsCaptured(IE.Name) then
-    begin
-      { Captured outer local: the _cap_ slot holds the var's ADDRESS — load it
-        into %rdx and do the in-place add/sub through it. }
-      Self.Emit(Format(#9'movq %s, %%rdx', [Self.VarOperand('_cap_' + IE.Name)]));
       Self.EmitIncDecAddrOp(IsInc, IsWide, HasStep, Arg0.ResolvedType);
     end
     else
@@ -11098,6 +11145,15 @@ begin
       Exit;
     end;
 
+    { @Captured — inside a nested routine an outer variable has no slot of
+      its own (EmitVarAddr below took the address of a slot that does not
+      exist in this frame) }
+    if (AOE.Expr is TIdentExpr) and Self.IsCaptured(TIdentExpr(AOE.Expr).Name) then
+    begin
+      Self.EmitCapturedVarAddr(TIdentExpr(AOE.Expr), '%rax');
+      Exit;
+    end;
+
     { @VarParam — the variable's slot holds a pointer to the caller's data;
       load that pointer value (not the slot address). }
     if (AOE.Expr is TIdentExpr) and (TIdentExpr(AOE.Expr).ParamMode <> pmNone) then
@@ -11186,7 +11242,10 @@ begin
           Self.Emit(#9'movq (%rcx), %rcx');
       end
       else if FAE.IsVarParam then
-        Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(FAE.RecordName)]))
+        { var / by-value record param: the slot holds the record's address
+          (through '_cap_' when captured -- VarOperand named a slot that
+          does not exist in a nested routine's frame) }
+        Self.EmitVarBaseToReg(FAE.RecordName, False, '%rcx')
       else
       begin
         Self.EmitVarBaseToReg(FAE.RecordName, True, '%rcx');
@@ -11261,7 +11320,10 @@ begin
           Self.Emit(#9'movq (%rcx), %rcx');
       end
       else if FAE.IsVarParam then
-        Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(FAE.RecordName)]))
+        { var / by-value record param: the slot holds the record's address
+          (through '_cap_' when captured -- VarOperand named a slot that
+          does not exist in a nested routine's frame) }
+        Self.EmitVarBaseToReg(FAE.RecordName, False, '%rcx')
       else
       begin
         Self.EmitVarBaseToReg(FAE.RecordName, True, '%rcx');
@@ -12082,12 +12144,31 @@ begin
   Self.Emit(#9'addq %rcx, %rax');            { element address }
 end;
 
+procedure TX86_64Backend.EmitCapturedVarAddr(AIdent: TIdentExpr;
+  const ADstReg: string);
+begin
+  { The address of a variable captured from an enclosing routine: its
+    '_cap_' slot holds the address of the owner's storage.  A by-reference
+    parameter's storage (var / out, or a by-value record, static array or
+    jumbo set, which also arrive by pointer) holds the data's address, so it
+    takes one load further -- the same rule as the uncaptured
+    `ParamMode <> pmNone` arms. }
+  Self.Emit(Format(#9'movq %s, %s',
+    [Self.VarOperand('_cap_' + AIdent.Name), ADstReg]));
+  if AIdent.ParamMode <> pmNone then
+    Self.Emit(Format(#9'movq (%s), %s', [ADstReg, ADstReg]));
+end;
+
 procedure TX86_64Backend.EmitVarArgAddrToRax(AArg: TASTExpr);
 var
   FAE: TFieldAccessExpr;
   SubAddrWrap: TAddrOfExpr;
 begin
-  if (AArg is TIdentExpr) and (TIdentExpr(AArg).ParamMode <> pmNone) then
+  if (AArg is TIdentExpr) and Self.IsCaptured(TIdentExpr(AArg).Name) then
+    { a captured variable passed on by reference (Bump(R) in a nested
+      routine): VarOperand / leaq named a slot this frame does not have }
+    Self.EmitCapturedVarAddr(TIdentExpr(AArg), '%rax')
+  else if (AArg is TIdentExpr) and (TIdentExpr(AArg).ParamMode <> pmNone) then
     Self.Emit(Format(#9'movq %s, %%rax',
       [Self.VarOperand(TIdentExpr(AArg).Name)]))
   else if (AArg is TIdentExpr) and TIdentExpr(AArg).IsImplicitSelf
@@ -16664,7 +16745,9 @@ begin
     begin
       Self.EmitExprToEax(Asgn.Expr);
       Self.Emit(#9'movq %rax, %rsi');
-      if Asgn.IsVarParam then
+      if Asgn.IsVarParam or Self.IsByValAggParam(Asgn.Name) then
+        { the slot holds the aggregate's address -- a by-value param's own
+          copy (A := B into a by-value array param copied over the frame) }
         Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(Asgn.Name)]))
       else if Self.IsCaptured(Asgn.Name) then
         Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand('_cap_' + Asgn.Name)]))
@@ -16688,18 +16771,22 @@ begin
         source's managed fields so the copy owns its own references.  Mirrors the
         string/dyn-array assignment paths' NativeExprOwnsRef guard and the
         record-field-store copy path. }
-      if (Asgn.ResolvedLhsType.Kind = tyRecord) and
-         not RecretManagedClean(TRecordTypeDesc(Asgn.ResolvedLhsType)) then
+      if ((Asgn.ResolvedLhsType.Kind = tyRecord) and
+          not RecretManagedClean(TRecordTypeDesc(Asgn.ResolvedLhsType))) or
+         ((Asgn.ResolvedLhsType.Kind = tyStaticArray) and
+          ArcTypeHasManagedContent(Asgn.ResolvedLhsType)) then
       begin
         { %rsi = source addr, %rdi = dest addr — preserve both across the ARC
-          calls in callee-saved registers (%rbx = source, %r15 = dest). }
+          calls in callee-saved registers (%rbx = source, %r15 = dest).  A
+          static array of managed elements needs the same per-element walk
+          (a bare memcpy shared each string at the source's refcount). }
         Self.Emit(#9'pushq %rbx');
         Self.Emit(#9'pushq %r15');
         Self.Emit(#9'movq %rsi, %rbx');
         Self.Emit(#9'movq %rdi, %r15');
         if not NativeExprOwnsRef(Asgn.Expr) then
-          Self.EmitRecordFieldRetains(TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(Asgn.ResolvedLhsType), '%r15', False);
+          Self.EmitManagedAddRefAt(Asgn.ResolvedLhsType, '%rbx');
+        Self.EmitManagedReleaseAt(Asgn.ResolvedLhsType, '%r15', False);
         Self.Emit(#9'movq %r15, %rdi');
         Self.Emit(#9'movq %rbx, %rsi');
         Self.Emit(Format(#9'movq $%d, %%rdx', [Asgn.ResolvedLhsType.RawSize()]));
@@ -18222,11 +18309,12 @@ begin
       Self.EmitStoreFloat('(%rcx)', FA.FieldInfo.TypeDesc);
       Exit;
     end;
-    { Record-typed field := record value: full copy with ARC (retain the
-      source's managed fields, release the destination's, then memcpy).
-      The scalar tail below would store just the source ADDRESS — an
-      8-byte pointer write masquerading as a record copy. }
-    if (FA.FieldInfo.TypeDesc.Kind = tyRecord) or
+    { Record- or static-array-typed field := value: full copy with ARC
+      (retain the source's managed content, release the destination's, then
+      memcpy).  The scalar tail below would store just the source ADDRESS —
+      an 8-byte pointer write masquerading as a copy (R.A := G with A a
+      static array stored G's address over A[0..1]). }
+    if (FA.FieldInfo.TypeDesc.Kind in [tyRecord, tyStaticArray]) or
        IsJumboSet(FA.FieldInfo.TypeDesc) then
     begin
       Self.EmitExprToEax(FA.Expr);       { source record / bitmap address }
@@ -18262,12 +18350,12 @@ begin
       Self.Emit(#9'subq $8, %rsp');
       Self.Emit(#9'movq %rcx, %r15');      { dest field addr }
       Self.Emit(#9'movq 24(%rsp), %rbx');  { src record addr }
-      { A jumbo set is a plain byte bitmap with no managed fields — only a
-        record carries per-field ARC. }
-      if FA.FieldInfo.TypeDesc.Kind = tyRecord then
+      { only managed content takes the walks (a jumbo set is a plain byte
+        bitmap; an Integer array would walk its elements for nothing) }
+      if ArcTypeHasManagedContent(FA.FieldInfo.TypeDesc) then
       begin
-        Self.EmitRecordFieldRetains(TRecordTypeDesc(FA.FieldInfo.TypeDesc), '%rbx');
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(FA.FieldInfo.TypeDesc), '%r15', False);
+        Self.EmitManagedAddRefAt(FA.FieldInfo.TypeDesc, '%rbx');
+        Self.EmitManagedReleaseAt(FA.FieldInfo.TypeDesc, '%r15', False);
       end;
       Self.Emit(#9'movq %r15, %rdi');
       Self.Emit(#9'movq %rbx, %rsi');
@@ -19054,7 +19142,10 @@ begin
       if SSA.ImplicitFieldInfo.Offset > 0 then
         Self.Emit(Format(#9'addq $%d, %%rcx', [SSA.ImplicitFieldInfo.Offset]));
     end
-    else if SSA.IsVarParam then
+    else if SSA.IsVarParam or Self.IsByValAggParam(SSA.ArrayName) then
+      { var or by-value array param: the slot holds the array's address --
+        a by-value one's own copy.  Taking the SLOT's address wrote the
+        elements over the frame (A[2] := 8 clobbered the saved %rbp). }
       Self.EmitVarBaseToReg(SSA.ArrayName, False, '%rcx')
     else if FSretFunc and SameText(SSA.ArrayName, 'Result') then
       Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(SSA.ArrayName)]))
@@ -23982,6 +24073,14 @@ begin
         Self.Emit(#9'movq (%rax), %rax');
         Self.Emit(Format(#9'movq %%rax, %s',
           [Self.VarOperand(ADecl.CapturedVars.Strings[I] + '_high')]));
+      end
+      else if IsCapturedByRefParam(ADecl, ADecl.CapturedVars.Strings[I]) then
+      begin
+        Self.Emit(Format(#9'movq %s, %%rax',
+          [Self.VarOperand('_cap_' + ADecl.CapturedVars.Strings[I])]));
+        Self.Emit(#9'movq (%rax), %rax');
+        Self.Emit(Format(#9'movq %%rax, %s',
+          [Self.VarOperand(ADecl.CapturedVars.Strings[I])]));
       end;
   end;
   if FSretFunc then
@@ -24332,6 +24431,18 @@ begin
       Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(P.ParamName)]));
       Self.EmitRecordFieldRetains(TRecordTypeDesc(P.ResolvedType), '%rbx');
       Self.Emit(#9'popq %rbx');
+    end
+    else if (P.ResolvedType.Kind = tyStaticArray) and
+            ArcTypeHasManagedContent(P.ResolvedType) then
+    begin
+      { a static array of managed elements: the callee's copy co-owns each
+        element, as a record param's fields do.  Without it the copy shared
+        the caller's strings at the caller's count, and a write into the
+        copy freed them under the caller. }
+      Self.Emit(#9'pushq %rbx');
+      Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(P.ParamName)]));
+      Self.EmitManagedAddRefAt(P.ResolvedType, '%rbx');
+      Self.Emit(#9'popq %rbx');
     end;
   end;
   { Body.  FExitLabel directs Exit statements to the epilogue. }
@@ -24517,6 +24628,15 @@ begin
       Self.Emit(#9'pushq %rbx');
       Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(P.ParamName)]));
       Self.EmitRecordFieldReleases(TRecordTypeDesc(P.ResolvedType), '%rbx');
+      Self.Emit(#9'popq %rbx');
+    end
+    else if (P.ResolvedType.Kind = tyStaticArray) and
+            ArcTypeHasManagedContent(P.ResolvedType) then
+    begin
+      { balances the entry retain of each managed element }
+      Self.Emit(#9'pushq %rbx');
+      Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(P.ParamName)]));
+      Self.EmitManagedReleaseAt(P.ResolvedType, '%rbx', False);
       Self.Emit(#9'popq %rbx');
     end;
   end;
