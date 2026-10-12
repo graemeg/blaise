@@ -26,6 +26,14 @@ type
       Used to assert the BUG-001 for-in write diagnostics fire (or don't). }
     function AnalyseWarnings(const ASrc: string): string;
   published
+    { for-in over a field array and over a dyn-array CALL (evaluated once,
+      released after the loop -- x86-64 called it twice a pass and never
+      released it; arm64 took only a plain identifier) }
+    procedure TestNative_ForIn_FieldAndCallCollections;
+    { for-in over an empty string: its nil data pointer reads as length 0
+      (x86-64 read -8(nil)); over a jumbo set: _SetIn per member (arm64
+      NotYet) }
+    procedure TestNative_ForIn_EmptyStringAndJumboSet;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -897,6 +905,46 @@ begin
             X := X
         end.
         ''');
+end;
+
+procedure TForInTests.TestNative_ForIn_FieldAndCallCollections;
+const
+  Src = '''
+    program P;
+    type
+      TDA = array of Integer;
+      TObj = class D: TDA; end;
+    function MkD: TDA; begin SetLength(Result, 1) end;
+    var O: TObj; I: Integer;
+    begin
+      for I in O.D do Write(I);
+      for I in MkD() do Write(I);
+    end.
+    ''';
+begin
+  AssertEquals('the field array is iterated', '',
+    AsmMissing(Src, #9'movq O(%rip), %rcx', #9'ldr x0, [x9, _g_O@PAGEOFF]'));
+  AssertEquals('the call result is released after the loop', '',
+    AsmMissing(Src, #9'callq _DynArrayRelease', #9'bl __DynArrayRelease'));
+end;
+
+procedure TForInTests.TestNative_ForIn_EmptyStringAndJumboSet;
+const
+  Src = '''
+    program P;
+    type TBig = set of 0..127;
+    var S: String; C, I: Integer; B: TBig;
+    begin
+      for C in S do Write(C);
+      for I in B do Write(I);
+    end.
+    ''';
+begin
+  AssertEquals('nil-safe length, member test per bit', '',
+    AsmMissing(Src, #9'testq %rax, %rax' + #10 + #9'je .Lficond',
+      #9'bl __SetIn'));
+  AssertTrue('x86-64 tests jumbo members too',
+    Pos(#9'callq _SetIn', GenAsm(Src, TargetX86_64)) >= 0);
 end;
 
 initialization

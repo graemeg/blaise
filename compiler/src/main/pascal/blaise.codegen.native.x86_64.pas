@@ -224,6 +224,10 @@ type
     { the current frame's var/out params, own or captured-and-materialised:
       the slot holds the caller variable's ADDRESS }
     FFrameVarParams: TStringList;
+    { captured by-reference parameters given a real slot in this nested
+      frame (holding the owner's pointer): they are NOT captures to the code
+      paths -- they are read exactly as the owner reads its own param }
+    FMaterialisedCaps: TStringList;
     FFrameSize:  Integer;       { bytes to reserve for locals (16-aligned) }
 
     { Statement-scoped deferred class-release list (BUG-003 native half).
@@ -617,6 +621,10 @@ type
       receiver (MakeObj().F := V) is released at the statement end; nothing
       released it, so every such store leaked the instance. }
     procedure EmitFieldRecvToEax(AFA: TFieldAssignment);
+    procedure LoadIntfIdentPair(AIdent: TIdentExpr; const AObj, AItab: string);
+    function  EmitForInStrOnce(AStmt: TForInStmt): string;
+    procedure EmitForInStrToRax(AStmt: TForInStmt; const ATmp: string);
+    procedure EmitForInStrRelease(const ATmp: string);
     { The address of an assignment's NAMED target: captured, var param, sret
       Result, frame local or global. }
     procedure EmitAsgnTargetAddr(AAsgn: TAssignment; const ADstReg: string);
@@ -1662,6 +1670,7 @@ begin
   Self.ClearFrame();
   FByValAggParams.Free();
   FFrameVarParams.Free();
+  FMaterialisedCaps.Free();
   FDynElemHooks.Free();
   FConstArgUnsafe.Free();
   FImportedUnits.Free();
@@ -4132,10 +4141,7 @@ begin
         end
         else
         begin
-          Self.Emit(Format(#9'movq %s, %%rax',
-            [Self.IntfObjOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]));
-          Self.Emit(Format(#9'movq %s, %%rcx',
-            [Self.IntfItabOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]));
+          Self.LoadIntfIdentPair(TIdentExpr(Arg), '%rax', '%rcx');
           Self.Emit(#9'pushq %rax');
           Self.Emit(#9'pushq %rcx');
         end;
@@ -4334,10 +4340,7 @@ begin
         end
         else
         begin
-          Self.Emit(Format(#9'movq %s, %%rax',
-            [Self.IntfObjOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]));
-          Self.Emit(Format(#9'movq %s, %%rcx',
-            [Self.IntfItabOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]));
+          Self.LoadIntfIdentPair(TIdentExpr(Arg), '%rax', '%rcx');
           Self.Emit(#9'pushq %rax');
           Self.Emit(#9'pushq %rcx');
         end;
@@ -4812,6 +4815,26 @@ var
   WeakPar: TMethodParam;
 begin
   Intf := TInterfaceTypeDesc(AAsgn.ResolvedLhsType);
+  { A captured interface (the enclosing routine's local) or a var interface
+    parameter: the pair lives behind a pointer -- '_cap_' or the param slot
+    -- not in a named slot of this frame, so the named-operand arms below
+    stored into a slot that is not the variable (an assignment with no
+    effect).  The shared slot store does the ARC through the address. }
+  if not AAsgn.IsWeakLhs and
+     ((Self.IsCaptured(AAsgn.Name) and not Self.IsLocal(AAsgn.Name)) or
+      (AAsgn.IsVarParam and Self.IsLocal(AAsgn.Name))) then
+  begin
+    Self.Emit(#9'pushq %rbx');
+    Self.Emit(#9'pushq %rbx');                 { keeps %rsp 16-aligned }
+    if Self.IsCaptured(AAsgn.Name) and not Self.IsLocal(AAsgn.Name) then
+      Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('_cap_' + AAsgn.Name)]))
+    else
+      Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(AAsgn.Name)]));
+    Self.EmitInterfaceToFieldSlotsAt(AAsgn.Expr, '%rbx', 0, AAsgn.ResolvedLhsType);
+    Self.Emit(#9'popq %rbx');
+    Self.Emit(#9'popq %rbx');
+    Exit;
+  end;
   { Implicit Self.Field assignment: the fat pointer lives inside the object at
     Self + FieldOffset (obj) and Self + FieldOffset + 8 (itab).
     Handle entirely here rather than falling through to the ObjOp/ItabOp paths
@@ -5820,6 +5843,8 @@ begin
     sharing a name with one of the CALLER's captured vars would be
     misrouted through the caller's _cap_ pointer. }
   if FInlineActive then Exit(False);
+  if (FMaterialisedCaps <> nil) and (FMaterialisedCaps.IndexOf(AName) >= 0) then
+    Exit(False);
   Result := ((FCapturedVars <> nil) and (FCapturedVars.IndexOf(AName) >= 0)) or
             ((FEnvVarNames <> nil) and (FEnvVarNames.IndexOf(AName) >= 0)) or
             ((FBlockEnvVarNames <> nil) and (FBlockEnvVarNames.IndexOf(AName) >= 0));
@@ -5986,6 +6011,38 @@ begin
     Result := Self.GlobalSymName(AName) + '_itab(%rip)';
 end;
 
+procedure TX86_64Backend.LoadIntfIdentPair(AIdent: TIdentExpr;
+  const AObj, AItab: string);
+begin
+  { AObj:AItab := the interface variable AIdent's (obj, itab) pair.  A var
+    parameter's slot holds the address of the caller's pair (reading the
+    slot as an inline pair passed the ADDRESS as the obj and the next slot
+    as the itab -- a crash), an sret Result's slot the buffer's address, a
+    capture's '_cap_' slot the owner's pair address. }
+  if (FSretFunc and SameText(AIdent.Name, 'Result')) or
+     (AIdent.ParamMode = pmVar) then
+    Self.Emit(Format(#9'movq %s, %%r11', [Self.VarOperand(AIdent.Name)]))
+  else if Self.IsCaptured(AIdent.Name) then
+    Self.Emit(Format(#9'movq %s, %%r11', [Self.VarOperand('_cap_' + AIdent.Name)]))
+  else if AIdent.IsImplicitSelf and (AIdent.ImplicitFieldInfo <> nil) then
+  begin
+    Self.Emit(Format(#9'movq %s, %%r11', [Self.VarOperand('Self')]));
+    if TFieldInfo(AIdent.ImplicitFieldInfo).Offset > 0 then
+      Self.Emit(Format(#9'addq $%d, %%r11',
+        [TFieldInfo(AIdent.ImplicitFieldInfo).Offset]));
+  end
+  else
+  begin
+    Self.Emit(Format(#9'movq %s, %s',
+      [Self.IntfObjOperand(AIdent.Name, AIdent.IsGlobal), AObj]));
+    Self.Emit(Format(#9'movq %s, %s',
+      [Self.IntfItabOperand(AIdent.Name, AIdent.IsGlobal), AItab]));
+    Exit;
+  end;
+  Self.Emit(Format(#9'movq (%%r11), %s', [AObj]));
+  Self.Emit(Format(#9'movq 8(%%r11), %s', [AItab]));
+end;
+
 procedure TX86_64Backend.PushIntfIdentPair(AIdent: TIdentExpr);
 begin
   if FSretFunc and SameText(AIdent.Name, 'Result') then
@@ -6026,11 +6083,9 @@ begin
   end
   else
   begin
-    Self.Emit(Format(#9'movq %s, %%rax',
-      [Self.IntfItabOperand(AIdent.Name, AIdent.IsGlobal)]));
-    Self.Emit(#9'pushq %rax');
-    Self.Emit(Format(#9'movq %s, %%rax',
-      [Self.IntfObjOperand(AIdent.Name, AIdent.IsGlobal)]));
+    { a plain or var-param variable }
+    Self.LoadIntfIdentPair(AIdent, '%rax', '%rcx');
+    Self.Emit(#9'pushq %rcx');
     Self.Emit(#9'pushq %rax');
   end;
 end;
@@ -6207,6 +6262,9 @@ begin
   if FFrameVarParams = nil then
     FFrameVarParams := TStringList.Create();
   FFrameVarParams.Clear();
+  if FMaterialisedCaps = nil then
+    FMaterialisedCaps := TStringList.Create();
+  FMaterialisedCaps.Clear();
   FSretInOff  := 0;
   if FIntfSplitHalf = nil then
     FIntfSplitHalf := TDictionary<string, Integer>.Create();
@@ -6298,6 +6356,7 @@ begin
       else if IsCapturedByRefParam(ADecl, ADecl.CapturedVars.Strings[I]) then
       begin
         Self.AddSlot(ADecl.CapturedVars.Strings[I], nil, Offset);
+        FMaterialisedCaps.Add(ADecl.CapturedVars.Strings[I]);
         if ADecl.CapturedParam(ADecl.CapturedVars.Strings[I]).IsVarParam then
           FFrameVarParams.Add(ADecl.CapturedVars.Strings[I])
         else
@@ -6620,6 +6679,8 @@ begin
     FByValAggParams.Clear();
   if FFrameVarParams <> nil then
     FFrameVarParams.Clear();
+  if FMaterialisedCaps <> nil then
+    FMaterialisedCaps.Clear();
   FFrameSize    := 0;
   FFrameBottom  := 0;
   FSretFunc     := False;
@@ -12274,6 +12335,44 @@ begin
     Self.Emit(Format(#9'movq (%s), %s', [ADstReg, ADstReg]));
 end;
 
+function TX86_64Backend.EmitForInStrOnce(AStmt: TForInStmt): string;
+begin
+  { a transient string collection (MkStr(N), S + T) is evaluated ONCE into
+    a per-site scratch, owned there and released after the loop -- it was
+    re-evaluated, and leaked, every pass.  '' for any other collection. }
+  Result := '';
+  if not ArcBuiltinStrArgOwnsRef(AStmt.CollExpr) then
+    Exit;
+  Result := Self.NewScratchOperand(8);
+  Self.EmitExprToEax(AStmt.CollExpr);
+  if ArcExprIsUnownedStrTransient(AStmt.CollExpr) then
+  begin
+    Self.Emit(#9'pushq %rax');
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(#9'callq _StringAddRef');
+    Self.Emit(#9'popq %rax');
+  end;
+  Self.Emit(Format(#9'movq %%rax, %s', [Result]));
+end;
+
+procedure TX86_64Backend.EmitForInStrToRax(AStmt: TForInStmt;
+  const ATmp: string);
+begin
+  if ATmp <> '' then
+    Self.Emit(Format(#9'movq %s, %%rax', [ATmp]))
+  else
+    Self.EmitExprToEax(AStmt.CollExpr);
+end;
+
+procedure TX86_64Backend.EmitForInStrRelease(const ATmp: string);
+begin
+  if ATmp = '' then
+    Exit;
+  Self.Emit(Format(#9'movq %s, %%rdi', [ATmp]));
+  Self.Emit(#9'callq _StringRelease');
+  Self.Emit(Format(#9'movq $0, %s', [ATmp]));
+end;
+
 procedure TX86_64Backend.EmitFieldRecvToEax(AFA: TFieldAssignment);
 begin
   Self.EmitExprToEax(AFA.ObjExpr);
@@ -12739,10 +12838,7 @@ begin
     else if AArg is TIdentExpr then
     begin
       { Interface variable: load both halves. }
-      Self.Emit(Format(#9'movq %s, %%rax',
-        [Self.IntfObjOperand(TIdentExpr(AArg).Name, TIdentExpr(AArg).IsGlobal)]));
-      Self.Emit(Format(#9'movq %s, %%rcx',
-        [Self.IntfItabOperand(TIdentExpr(AArg).Name, TIdentExpr(AArg).IsGlobal)]));
+      Self.LoadIntfIdentPair(TIdentExpr(AArg), '%rax', '%rcx');
       Self.Emit(#9'pushq %rax');         { push obj }
       Self.Emit(#9'pushq %rcx');         { push itab }
     end
@@ -14675,7 +14771,22 @@ begin
   Self.Emit(#9'pushq %r15');
   Self.Emit(#9'pushq %rbx');
   Self.Emit(#9'movq %rax, %rbx');            { src = element address }
-  Self.EmitVarAddr(AStmt.VarName, '%r15');   { dst = loop-var address }
+  { dst = loop-var address.  A GLOBAL interface variable has no symbol
+    under its bare name -- its pair starts at the <Name>_obj label (the
+    bare leaqs bound to garbage and the loop crashed) }
+  if Self.IsCaptured(AStmt.VarName) and not Self.IsLocal(AStmt.VarName) then
+    { a loop variable of the enclosing routine: its '_cap_' slot holds the
+      variable's address (the frame-slot leaq named a slot that is not
+      there) }
+    Self.Emit(Format(#9'movq %s, %%r15', [Self.VarOperand('_cap_' + AStmt.VarName)]))
+  else if (AElemType.Kind = tyInterface) and not Self.IsLocal(AStmt.VarName) then
+  begin
+    Self.AddGlobal(AStmt.VarName, AElemType);
+    Self.Emit(Format(#9'leaq %s_obj(%%rip), %%r15',
+      [Self.GlobalSymName(AStmt.VarName)]));
+  end
+  else
+    Self.EmitVarAddr(AStmt.VarName, '%r15');
   if AElemType.Kind = tyRecord then
   begin
     Self.EmitRecordFieldRetains(TRecordTypeDesc(AElemType), '%rbx');
@@ -14714,6 +14825,8 @@ var
   CurRT:     TRecordTypeDesc;
   SynthCur:  TMethodCallExpr;
   CurStore:  TAssignment;
+  StrTmp:    string;
+  CollTmp:   string;
 begin
   if AStmt.IsArrayIter then
   begin
@@ -14813,6 +14926,16 @@ begin
     LNext := Self.NewLabel('finext');
     LEnd  := Self.NewLabel('fiend');
 
+    { an owned collection (for E in MkD() do) is evaluated ONCE into a
+      scratch and released after the loop: it was re-evaluated twice every
+      pass (repeating its side effects) and never released }
+    CollTmp := '';
+    if AStmt.IsDynArrayIter and NativeExprOwnsRef(AStmt.CollExpr) then
+    begin
+      CollTmp := Self.NewScratchOperand(8);
+      Self.EmitExprToEax(AStmt.CollExpr);
+      Self.Emit(Format(#9'movq %%rax, %s', [CollTmp]));
+    end;
     Self.Emit(Format(#9'movl $0, %s', [IdxOp]));
 
     Self.Emit(LCond + ':');
@@ -14828,7 +14951,10 @@ begin
     else
     begin
       { Get length via _DynArrayLength }
-      Self.EmitExprToEax(AStmt.CollExpr);
+      if CollTmp <> '' then
+        Self.Emit(Format(#9'movq %s, %%rax', [CollTmp]))
+      else
+        Self.EmitExprToEax(AStmt.CollExpr);
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq _DynArrayLength');
       Self.Emit(#9'movl %eax, %ecx');
@@ -14849,6 +14975,8 @@ begin
     if AStmt.IsOpenArrayIter then
       Self.Emit(Format(#9'movq %s, %%rax',
         [Self.VarOperand(TIdentExpr(AStmt.CollExpr).Name)]))
+    else if CollTmp <> '' then
+      Self.Emit(Format(#9'movq %s, %%rax', [CollTmp]))
     else
       Self.EmitExprToEax(AStmt.CollExpr);
     Self.Emit(#9'movq %rax, %rcx');
@@ -14887,6 +15015,12 @@ begin
     Self.Emit(Format(#9'movl %%eax, %s', [IdxOp]));
     Self.Emit(#9'jmp ' + LCond);
     Self.Emit(LEnd + ':');
+    if CollTmp <> '' then
+    begin
+      Self.Emit(Format(#9'movq %s, %%rdi', [CollTmp]));
+      Self.Emit(#9'callq _DynArrayRelease');
+      Self.Emit(Format(#9'movq $0, %s', [CollTmp]));
+    end;
     Exit;
   end;
 
@@ -14902,11 +15036,18 @@ begin
     LNext := Self.NewLabel('finext');
     LEnd  := Self.NewLabel('fiend');
 
+    StrTmp := Self.EmitForInStrOnce(AStmt);
     Self.Emit(Format(#9'movl $0, %s', [IdxOp]));
 
     Self.Emit(LCond + ':');
-    Self.EmitExprToEax(AStmt.CollExpr);
+    Self.EmitForInStrToRax(AStmt, StrTmp);
+    { the length lives at data - 8; an empty string is nil (length 0) --
+      reading -8(nil) crashed `for C in S` on an empty S }
+    Self.Emit(#9'xorl %ecx, %ecx');
+    Self.Emit(#9'testq %rax, %rax');
+    Self.Emit(#9'je ' + LCond + '_nil');
     Self.Emit(#9'movl -8(%rax), %ecx');
+    Self.Emit(LCond + '_nil:');
     Self.Emit(Format(#9'movl %s, %%eax', [IdxOp]));
     Self.Emit(#9'cmpl %ecx, %eax');
     Self.Emit(#9'jl ' + LBody);
@@ -14918,7 +15059,7 @@ begin
     FContinueLabels.Push(LNext);
     FContinueExcDepths.Push(FExcDepth);
 
-    Self.EmitExprToEax(AStmt.CollExpr);
+    Self.EmitForInStrToRax(AStmt, StrTmp);
     Self.Emit(#9'movq %rax, %rdi');
     Self.Emit(Format(#9'movl %s, %%esi', [IdxOp]));
     Self.Emit(#9'callq _Utf8DecodeAt');
@@ -14938,6 +15079,7 @@ begin
     Self.Emit(Format(#9'movl %%eax, %s', [IdxOp]));
     Self.Emit(#9'jmp ' + LCond);
     Self.Emit(LEnd + ':');
+    Self.EmitForInStrRelease(StrTmp);
     Exit;
   end;
 
@@ -14953,12 +15095,19 @@ begin
     LNext := Self.NewLabel('finext');
     LEnd  := Self.NewLabel('fiend');
 
+    StrTmp := Self.EmitForInStrOnce(AStmt);
     Self.Emit(Format(#9'movl $0, %s', [IdxOp]));
 
     Self.Emit(LCond + ':');
     { Load string length from data_ptr - 8 }
-    Self.EmitExprToEax(AStmt.CollExpr);
+    Self.EmitForInStrToRax(AStmt, StrTmp);
+    { the length lives at data - 8; an empty string is nil (length 0) --
+      reading -8(nil) crashed `for C in S` on an empty S }
+    Self.Emit(#9'xorl %ecx, %ecx');
+    Self.Emit(#9'testq %rax, %rax');
+    Self.Emit(#9'je ' + LCond + '_nil');
     Self.Emit(#9'movl -8(%rax), %ecx');
+    Self.Emit(LCond + '_nil:');
     Self.Emit(Format(#9'movl %s, %%eax', [IdxOp]));
     Self.Emit(#9'cmpl %ecx, %eax');
     Self.Emit(#9'jl ' + LBody);
@@ -14971,7 +15120,7 @@ begin
     FContinueExcDepths.Push(FExcDepth);
 
     { Load byte at data_ptr + idx }
-    Self.EmitExprToEax(AStmt.CollExpr);
+    Self.EmitForInStrToRax(AStmt, StrTmp);
     Self.Emit(#9'movq %rax, %rcx');
     Self.Emit(Format(#9'movslq %s, %%rax', [IdxOp]));
     Self.Emit(#9'addq %rcx, %rax');
@@ -14990,6 +15139,7 @@ begin
     Self.Emit(Format(#9'movl %%eax, %s', [IdxOp]));
     Self.Emit(#9'jmp ' + LCond);
     Self.Emit(LEnd + ':');
+    Self.EmitForInStrRelease(StrTmp);
     Exit;
   end;
 
@@ -15092,8 +15242,18 @@ begin
   CurDecl  := TMethodDecl(AStmt.CurrentDecl);
   EnumOp   := Self.VarOperand(AStmt.EnumVarName);
 
-  { Call GetEnumerator on the collection }
+  { Call GetEnumerator on the collection.  An owned collection (for X in
+    MakeList() do) is kept in a scratch until the loop ends -- it leaked,
+    and an enumerator need not hold a reference of its own }
   Self.EmitExprToEax(AStmt.CollExpr);
+  CollTmp := '';
+  if (AStmt.CollExpr.ResolvedType <> nil) and
+     (AStmt.CollExpr.ResolvedType.Kind = tyClass) and
+     NativeExprOwnsRef(AStmt.CollExpr) then
+  begin
+    CollTmp := Self.NewScratchOperand(8);
+    Self.Emit(Format(#9'movq %%rax, %s', [CollTmp]));
+  end;
   Self.Emit(#9'movq %rax, %rdi');
   Sym := MethodEmitNameNative(GetEDecl, GetEDecl.OwnerTypeName, GetEDecl.Name);
   if GetEDecl.VTableSlot >= 0 then
@@ -15206,7 +15366,22 @@ begin
     end
     else
       Self.Emit(#9'callq ' + Sym);
-    Self.EmitForInAssignElem(AStmt);
+    if IsFloatFamily(AStmt.ResolvedVarType) then
+    begin
+      { a float Current comes back in %xmm0, not %rax: storing %rax gave
+        the loop variable 0.0 every pass }
+      if Self.IsCaptured(AStmt.VarName) then
+      begin
+        Self.Emit(Format(#9'movq %s, %%rcx',
+          [Self.VarOperand('_cap_' + AStmt.VarName)]));
+        Self.EmitStoreFloat('(%rcx)', AStmt.ResolvedVarType);
+      end
+      else
+        Self.EmitStoreFloat(Self.VarOperand(AStmt.VarName),
+          AStmt.ResolvedVarType);
+    end
+    else
+      Self.EmitForInAssignElem(AStmt);
   end;
 
   Self.EmitStmt(AStmt.Body);
@@ -15217,6 +15392,12 @@ begin
 
   Self.Emit(#9'jmp ' + LCond);
   Self.Emit(LEnd + ':');
+  if CollTmp <> '' then
+  begin
+    Self.Emit(Format(#9'movq %s, %%rdi', [CollTmp]));
+    Self.Emit(#9'callq _ClassRelease');
+    Self.Emit(Format(#9'movq $0, %s', [CollTmp]));
+  end;
 end;
 
 procedure TX86_64Backend.EmitCaseStmt(AStmt: TCaseStmt);
@@ -21642,10 +21823,7 @@ begin
         end
         else if Arg is TIdentExpr then
         begin
-          Self.Emit(Format(#9'movq %s, %%rax',
-            [Self.IntfObjOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]));
-          Self.Emit(Format(#9'movq %s, %%rcx',
-            [Self.IntfItabOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]));
+          Self.LoadIntfIdentPair(TIdentExpr(Arg), '%rax', '%rcx');
           Self.Emit(#9'pushq %rax');
           Self.Emit(#9'pushq %rcx');
         end
@@ -23546,10 +23724,7 @@ begin
         end
         else
         begin
-          Self.Emit(Format(#9'movq %s, %%rax',
-            [Self.IntfObjOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]));
-          Self.Emit(Format(#9'movq %s, %%rcx',
-            [Self.IntfItabOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]));
+          Self.LoadIntfIdentPair(TIdentExpr(Arg), '%rax', '%rcx');
           Self.Emit(#9'pushq %rax');
           Self.Emit(#9'pushq %rcx');
         end;
@@ -23727,10 +23902,7 @@ begin
         end
         else
         begin
-          Self.Emit(Format(#9'movq %s, %%rax',
-            [Self.IntfObjOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]));
-          Self.Emit(Format(#9'movq %s, %%rcx',
-            [Self.IntfItabOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]));
+          Self.LoadIntfIdentPair(TIdentExpr(Arg), '%rax', '%rcx');
           Self.Emit(#9'pushq %rax');
           Self.Emit(#9'pushq %rcx');
         end;

@@ -327,6 +327,8 @@ type
     function  IsFatLValue(AExpr: TASTExpr): Boolean;
     procedure EmitLValueAddrToX0(AExpr: TASTExpr);
     procedure EmitFatPairToX0X1(AExpr: TASTExpr; ARefTarget: Boolean);
+    procedure EmitForInArrayBase(AStmt: TForInStmt; const ATmp: string);
+    procedure EmitForInVarAddr(const AReg: string; AStmt: TForInStmt);
     procedure EmitFatTargetAddr(const AReg: string; AAsgn: TAssignment);
     procedure EmitParenlessCtor(AFA: TFieldAccessExpr);
     procedure EmitSetIncludeExclude(ACall: TProcCall; AInclude: Boolean);
@@ -2273,13 +2275,13 @@ begin
   { the named target's storage: through '_cap_' when captured (one deref
     further for a captured var param), the caller's address a var param's
     slot holds, else the slot }
-  if IsCaptured(AAsgn.Name) then
+  if IsCaptured(AAsgn.Name) and not IsLocal(AAsgn.Name) then
   begin
     EmitLoadSlot(AReg, '_cap_' + AAsgn.Name);
-    if AAsgn.IsVarParam then
+    if IsCapturedVarParam(AAsgn.Name) then
       Self.Emit(Format(#9'ldr %s, [%s]', [AReg, AReg]));
   end
-  else if AAsgn.IsVarParam then
+  else if AAsgn.IsVarParam and not IsByValueRecordParam(AAsgn.Name) then
     EmitLoadSlot(AReg, AAsgn.Name)
   else
     EmitSlotAddr(AReg, AAsgn.Name);
@@ -7887,8 +7889,16 @@ begin
   if AExpr is TIdentExpr then
   begin
     IE := TIdentExpr(AExpr);
-    if IsCaptured(IE.Name) then
-      NotYet('read of a captured interface variable', AExpr);
+    if IsCaptured(IE.Name) and not IsLocal(IE.Name) then
+    begin
+      { an interface of the enclosing routine: its pair through '_cap_' (one
+        deref further for a captured var parameter) }
+      EmitLoadSlot('x9', '_cap_' + IE.Name);
+      if IE.ParamMode = pmVar then
+        Self.Emit(#9'ldr x9, [x9]');
+      Self.Emit(#9'ldp x0, x1, [x9]');
+      Exit;
+    end;
     if (IE.IsImplicitSelf and (IE.ImplicitFieldInfo <> nil)) or
        (IE.ParamMode = pmVar) then
     begin
@@ -8049,6 +8059,16 @@ begin
     Self.Emit(#9'ldp x0, x1, [x9]');
     Exit;
   end;
+  if IsCaptured(AObjName) and not IsLocal(AObjName) then
+  begin
+    { a captured interface receiver: the pair through '_cap_' (it read the
+      nested frame's nonexistent '<Name>_itab' slot) }
+    EmitLoadSlot('x9', '_cap_' + AObjName);
+    if AVarParam or IsCapturedVarParam(AObjName) then
+      Self.Emit(#9'ldr x9, [x9]');
+    Self.Emit(#9'ldp x0, x1, [x9]');
+    Exit;
+  end;
   if AVarParam then
   begin
     EmitLoadSlot('x9', AObjName);
@@ -8183,9 +8203,60 @@ begin
     Self.Emit(#9'str x0, [x9]');
     Exit;
   end;
-  if IsCaptured(AAsgn.Name) and (AAsgn.ResolvedLhsType <> nil) and
-     (AAsgn.ResolvedLhsType.Kind in [tyInterface, tyDynArray, tyRecord]) then
-    NotYet('assignment to a captured managed variable of this type', AAsgn);
+  if IsCaptured(AAsgn.Name) and not IsLocal(AAsgn.Name) and
+     (AAsgn.ResolvedLhsType <> nil) and
+     (AAsgn.ResolvedLhsType.Kind = tyInterface) then
+  begin
+    { a captured interface: the shared pair store through its address }
+    EmitFatTargetAddr('x0', AAsgn);
+    EmitPushX0();
+    EmitIntfStoreStacked(0, AAsgn.Expr, AAsgn.ResolvedLhsType);
+    Exit;
+  end;
+  if IsCaptured(AAsgn.Name) and not IsLocal(AAsgn.Name) and
+     (AAsgn.ResolvedLhsType <> nil) and
+     (AAsgn.ResolvedLhsType.Kind = tyDynArray) then
+  begin
+    { a captured dyn array: retain-new / release-old through its address }
+    Self.EmitExprToX0(AAsgn.Expr);
+    if not ArcExprOwnsRef(AAsgn.Expr) then
+    begin
+      EmitPushX0();
+      EmitCallSym('_DynArrayAddRef');
+      EmitPopTo('x0');
+    end;
+    EmitPushX0();
+    EmitFatTargetAddr('x9', AAsgn);
+    Self.Emit(#9'ldr x0, [x9]');
+    EmitCallSym('_DynArrayRelease');
+    EmitFatTargetAddr('x9', AAsgn);
+    EmitPopTo('x0');
+    Self.Emit(#9'str x0, [x9]');
+    Exit;
+  end;
+  if IsCaptured(AAsgn.Name) and not IsLocal(AAsgn.Name) and
+     (AAsgn.ResolvedLhsType <> nil) and
+     (AAsgn.ResolvedLhsType.Kind = tyRecord) then
+  begin
+    { a captured record: the record copy discipline through its address
+      (retain the source's managed fields, release the target's, copy) }
+    Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+    EmitRecAddrToX0(AAsgn.Expr);
+    Self.Emit(#9'mov x19, x0');
+    EmitFatTargetAddr('x22', AAsgn);
+    if not RecretManagedClean(TRecordTypeDesc(AAsgn.ResolvedLhsType)) then
+    begin
+      Self.EmitRecordFieldRetains(TRecordTypeDesc(AAsgn.ResolvedLhsType), 'x19');
+      Self.EmitRecordFieldReleases(TRecordTypeDesc(AAsgn.ResolvedLhsType),
+        'x22', False);
+    end;
+    Self.Emit(#9'mov x0, x22');
+    Self.Emit(#9'mov x1, x19');
+    EmitIntLiteral('x2', AAsgn.ResolvedLhsType.RawSize());
+    EmitCallSym('memcpy');
+    Self.Emit(#9'ldp x19, x22, [sp], #16');
+    Exit;
+  end;
   if (AAsgn.ResolvedLhsType <> nil) and
      (AAsgn.ResolvedLhsType.Kind in [tyString, tyClass]) and
      (AAsgn.ImplicitSelfField <> nil) and not AAsgn.IsWeakLhs then
@@ -10012,19 +10083,24 @@ begin
     an extra AddRef there would leak one ref per iteration. }
   if (AStmt.ResolvedVarType <> nil) and
      (AStmt.ResolvedVarType.IsString() or
-      (AStmt.ResolvedVarType.Kind = tyClass)) then
+      (AStmt.ResolvedVarType.Kind in [tyClass, tyDynArray])) then
   begin
+    { a dyn-array loop variable co-owns its block like a string }
     EmitPushX0();
     if not AOwned then
     begin
       if AStmt.ResolvedVarType.IsString() then
         EmitCallSym('_StringAddRef')
+      else if AStmt.ResolvedVarType.Kind = tyDynArray then
+        EmitCallSym('_DynArrayAddRef')
       else
         EmitCallSym('_ClassAddRef');
     end;
     EmitLoadSlot('x0', AStmt.VarName);
     if AStmt.ResolvedVarType.IsString() then
       EmitCallSym('_StringRelease')
+    else if AStmt.ResolvedVarType.Kind = tyDynArray then
+      EmitCallSym('_DynArrayRelease')
     else
       EmitCallSym('_ClassRelease');
     EmitPopTo('x0');
@@ -10034,6 +10110,21 @@ begin
   EmitStoreSlot('x0', AStmt.VarName);
 end;
 
+procedure TArm64Backend.EmitForInVarAddr(const AReg: string;
+  AStmt: TForInStmt);
+begin
+  { the loop variable's storage: its slot, or through '_cap_' when it is a
+    variable of the enclosing routine }
+  if IsCaptured(AStmt.VarName) and not IsLocal(AStmt.VarName) then
+  begin
+    EmitLoadSlot(AReg, '_cap_' + AStmt.VarName);
+    if IsCapturedVarParam(AStmt.VarName) then
+      Self.Emit(Format(#9'ldr %s, [%s]', [AReg, AReg]));
+  end
+  else
+    EmitSlotAddr(AReg, AStmt.VarName);
+end;
+
 procedure TArm64Backend.EmitForInAssignAddr(AStmt: TForInStmt;
   AOwned: Boolean);
 begin
@@ -10041,7 +10132,8 @@ begin
   if AStmt.ResolvedVarType.Kind = tyInterface then
   begin
     { the (obj, itab) pair: retain a borrowed obj, release the old binding,
-      store both halves }
+      store both halves (through the variable's address: it may be a
+      capture of the enclosing routine) }
     Self.Emit(#9'ldp x0, x1, [x0]');
     if not AOwned then
     begin
@@ -10050,20 +10142,45 @@ begin
       Self.Emit(#9'ldp x0, x1, [sp], #16');
     end;
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');
-    EmitLoadSlot('x0', AStmt.VarName);
+    EmitForInVarAddr('x9', AStmt);
+    Self.Emit(#9'ldr x0, [x9]');
     EmitCallSym('_ClassRelease');
+    EmitForInVarAddr('x9', AStmt);
     Self.Emit(#9'ldp x0, x1, [sp], #16');
-    EmitStoreSlot('x0', AStmt.VarName);
-    EmitStoreSlot('x1', AStmt.VarName + '_itab');
+    Self.Emit(#9'stp x0, x1, [x9]');
     Exit;
   end;
-  { a record: the record-assignment discipline -- retain a borrowed
-    source's managed fields, release the loop variable's old ones, copy.
-    Callee-saved x19/x22 hold the two addresses across the walk calls. }
+  if IsMethodPtrType(AStmt.ResolvedVarType) then
+  begin
+    { a method pointer / closure: both halves; a 'reference to' loop
+      variable co-owns its Env (retain the borrowed new one, drop the old) }
+    Self.Emit(#9'ldp x0, x1, [x0]');
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+    if ArcTypeIsRefClosure(AStmt.ResolvedVarType) then
+    begin
+      if not AOwned then
+      begin
+        Self.Emit(#9'mov x0, x1');
+        EmitCallSym('_ClassAddRef');
+      end;
+      EmitForInVarAddr('x9', AStmt);
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');
+    end;
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+    EmitForInVarAddr('x9', AStmt);
+    Self.Emit(#9'stp x0, x1, [x9]');
+    Exit;
+  end;
+  { a record (or a jumbo set's bitmap): the record-assignment discipline --
+    retain a borrowed source's managed fields, release the loop variable's
+    old ones, copy.  Callee-saved x19/x22 hold the two addresses across the
+    walk calls. }
   Self.Emit(#9'stp x19, x22, [sp, #-16]!');
   Self.Emit(#9'mov x19, x0');
-  EmitSlotAddr('x22', AStmt.VarName);
-  if AggHasManaged(AStmt.ResolvedVarType) then
+  EmitForInVarAddr('x22', AStmt);
+  if (AStmt.ResolvedVarType.Kind = tyRecord) and
+     AggHasManaged(AStmt.ResolvedVarType) then
   begin
     if not AOwned then
       Self.EmitRecordFieldRetains(TRecordTypeDesc(AStmt.ResolvedVarType), 'x19');
@@ -10077,6 +10194,22 @@ begin
   Self.Emit(#9'ldp x19, x22, [sp], #16');
 end;
 
+procedure TArm64Backend.EmitForInArrayBase(AStmt: TForInStmt;
+  const ATmp: string);
+begin
+  { x0 := the collection's element-0 address: from the once-evaluated slot,
+    a static array's storage, an open array's data slot, or a dyn array's
+    data pointer (its value) }
+  if ATmp <> '' then
+    EmitLoadSlot('x0', ATmp)
+  else if AStmt.IsArrayIter then
+    EmitArrayStorageAddr(AStmt.CollExpr)
+  else if AStmt.IsOpenArrayIter then
+    EmitLoadSlot('x0', TIdentExpr(AStmt.CollExpr).Name)
+  else
+    Self.EmitExprToX0(AStmt.CollExpr);
+end;
+
 procedure TArm64Backend.EmitForIn(AStmt: TForInStmt);
 var
   IsAgg: Boolean;
@@ -10087,11 +10220,9 @@ var
   ESz: Integer;
   GetE, MN, Cur: TMethodDecl;
   EmptyArgs: TObjectList;
+  CollOwned: Boolean;
+  CollTmp: string;
 begin
-  if (AStmt.ResolvedVarType <> nil) and
-     (AStmt.ResolvedVarType.Kind in [tyRecord, tyInterface]) and
-     IsCaptured(AStmt.VarName) then
-    NotYet('captured for-in loop variable of this type', AStmt);
   IsAgg := (AStmt.ResolvedVarType <> nil) and
            (AStmt.ResolvedVarType.Kind in [tyRecord, tyInterface]);
   CondL := NewLabel('ficond');
@@ -10102,19 +10233,14 @@ begin
   begin
     { array iteration: idx runs low..high (static) / 0..len-1 (dynamic) /
       0..A_high (open array); element address = base + (idx - low) *
-      elemsize.  The collection must be a plain ident — matches the
-      subscript emitters. }
-    if not (AStmt.CollExpr is TIdentExpr) then
-      NotYet('for-in over this array expression', AStmt);
-    { a var OPEN array is still the plain (data, high) slot pair, so only
-      the static / dyn forms need the extra indirection that is not
-      handled here }
-    if (TIdentExpr(AStmt.CollExpr).ParamMode = pmVar) and
-       not AStmt.IsOpenArrayIter then
-      NotYet('for-in over a var array parameter', AStmt);
-    { a captured open array has its pair copied into local slots at entry }
+      elemsize.  The base -- the element-0 address -- is re-derived every
+      pass from any l-value collection (a local, a var param, a capture, a
+      field, an element, P^), as a subscript would; the body may resize a
+      dyn array.  A CALL collection (MakeArr(), Obj.Items()) is evaluated
+      once into a slot: an owned dyn array is released after the loop. }
     if AStmt.IsOpenArrayIter and
-       not IsLocal(TIdentExpr(AStmt.CollExpr).Name + '_high') then
+       not ((AStmt.CollExpr is TIdentExpr) and
+            IsLocal(TIdentExpr(AStmt.CollExpr).Name + '_high')) then
       NotYet('for-in over an open array without a local high slot', AStmt);
     if AStmt.IsArrayIter then
       Elem := TStaticArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType
@@ -10122,10 +10248,33 @@ begin
       Elem := TOpenArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType
     else
       Elem := TDynArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType;
-    if (Elem = nil) or
-       (not (Elem.Kind in [tyRecord, tyInterface]) and (Elem.RawSize() > 8)) then
-      NotYet('for-in over aggregate elements', AStmt);
+    if Elem = nil then
+      NotYet('unresolved element type', AStmt);
     ESz := Elem.RawSize();
+    { a call collection: once, into a slot }
+    Tmp := '';
+    CollOwned := False;
+    if not AStmt.IsOpenArrayIter and
+       not ((AStmt.CollExpr is TIdentExpr) or
+            (AStmt.CollExpr is TFieldAccessExpr) or
+            (AStmt.CollExpr is TStringSubscriptExpr) or
+            (AStmt.CollExpr is TDerefExpr)) or
+       (AStmt.IsDynArrayIter and ArcExprOwnsRef(AStmt.CollExpr)) or
+       (AStmt.IsArrayIter and IsAggCallValue(AStmt.CollExpr)) then
+    begin
+      Tmp := '__fiarr_' + IntToStr(FJArgN);
+      FJArgN := FJArgN + 1;
+      if not FFrame.ContainsKey(Tmp) then
+        AddLocal(Tmp, 8);
+      if AStmt.IsArrayIter then
+        EmitArrayStorageAddr(AStmt.CollExpr)
+      else
+      begin
+        Self.EmitExprToX0(AStmt.CollExpr);
+        CollOwned := ArcExprOwnsRef(AStmt.CollExpr);
+      end;
+      EmitStoreSlot('x0', Tmp);
+    end;
     if AStmt.IsArrayIter then
       EmitIntLiteral('x0', AStmt.ArrayLow)
     else
@@ -10151,17 +10300,14 @@ begin
     else
     begin
       { length re-read every pass — the body may SetLength }
-      EmitLoadSlot('x0', TIdentExpr(AStmt.CollExpr).Name);
+      EmitForInArrayBase(AStmt, Tmp);
       EmitCallSym('_DynArrayLength');
       Self.Emit(#9'mov x1, x0');
       EmitLoadSlot('x0', AStmt.IdxVarName);
       Self.Emit(#9'cmp x0, x1');
       Self.Emit(Format(#9'b.ge %s', [EndL]));
     end;
-    if AStmt.IsArrayIter then
-      EmitSlotAddr('x0', TIdentExpr(AStmt.CollExpr).Name)
-    else
-      EmitLoadSlot('x0', TIdentExpr(AStmt.CollExpr).Name);
+    EmitForInArrayBase(AStmt, Tmp);
     EmitLoadSlot('x1', AStmt.IdxVarName);
     if AStmt.IsArrayIter and (AStmt.ArrayLow <> 0) then
     begin
@@ -10171,13 +10317,17 @@ begin
     EmitIntLiteral('x2', ESz);
     Self.Emit(#9'mul x1, x1, x2');
     Self.Emit(#9'add x0, x0, x1');
-    if IsAgg then
-      { a record / interface element is copied from its address; the
-        element stays the array's, so the copy retains }
+    if IsAgg or IsMethodPtrType(Elem) or IsJumboSetType(Elem) then
+      { an aggregate element is copied from its address; the element stays
+        the array's, so the copy retains }
       EmitForInAssignAddr(AStmt, False)
     else
     begin
       EmitElemLoad(Elem);
+      if Elem.Kind in [tyDouble, tySingle] then
+        { a float element's bits went through x0 at the element's width;
+          a Single loop variable is its own 4-byte slot }
+        ;
       EmitForInAssignX0(AStmt, False);
     end;
     FBreakLbls.Add(EndL);
@@ -10193,6 +10343,13 @@ begin
     EmitStoreSlot('x0', AStmt.IdxVarName);
     Self.Emit(Format(#9'b %s', [CondL]));
     Self.Emit(EndL + ':');
+    if CollOwned then
+    begin
+      EmitLoadSlot('x0', Tmp);
+      EmitCallSym('_DynArrayRelease');
+      Self.Emit(#9'movz x0, #0');
+      EmitStoreSlot('x0', Tmp);
+    end;
     Exit;
   end;
 
@@ -10202,12 +10359,32 @@ begin
       Byte mode loads one byte per pass; codepoint mode calls
       _Utf8DecodeAt (packed result: low 32 = codepoint, high 32 = byte
       advance) and steps by the advance. }
-    if ArcBuiltinStrArgOwnsRef(AStmt.CollExpr) then
-      NotYet('for-in over a transient string', AStmt);
+    { a transient string (MkStr(N), S + T) is evaluated ONCE into a slot
+      and released after the loop -- it was re-evaluated every pass }
+    Tmp := '';
+    CollOwned := ArcBuiltinStrArgOwnsRef(AStmt.CollExpr);
+    if CollOwned then
+    begin
+      Tmp := '__fistr_' + IntToStr(FJArgN);
+      FJArgN := FJArgN + 1;
+      if not FFrame.ContainsKey(Tmp) then
+        AddLocal(Tmp, 8);
+      Self.EmitExprToX0(AStmt.CollExpr);
+      if ArcExprIsUnownedStrTransient(AStmt.CollExpr) then
+      begin
+        EmitPushX0();
+        EmitCallSym('_StringAddRef');
+        EmitPopTo('x0');
+      end;
+      EmitStoreSlot('x0', Tmp);
+    end;
     Self.Emit(#9'movz x0, #0');
     EmitStoreSlot('x0', AStmt.IdxVarName);
     Self.Emit(CondL + ':');
-    Self.EmitExprToX0(AStmt.CollExpr);
+    if CollOwned then
+      EmitLoadSlot('x0', Tmp)
+    else
+      Self.EmitExprToX0(AStmt.CollExpr);
     { length lives at [ptr-8]; a nil (empty) string must read as length 0,
       not fault on [nil-8] — see EmitStrLen. }
     NilLenL := NewLabel('flen0');
@@ -10220,7 +10397,10 @@ begin
     EmitLoadSlot('x0', AStmt.IdxVarName);
     Self.Emit(#9'cmp x0, x1');
     Self.Emit(Format(#9'b.ge %s', [EndL]));
-    Self.EmitExprToX0(AStmt.CollExpr);
+    if CollOwned then
+      EmitLoadSlot('x0', Tmp)
+    else
+      Self.EmitExprToX0(AStmt.CollExpr);
     if AStmt.IsCodePointIter then
     begin
       EmitLoadSlot('x1', AStmt.IdxVarName);
@@ -10257,6 +10437,13 @@ begin
     EmitStoreSlot('x0', AStmt.IdxVarName);
     Self.Emit(Format(#9'b %s', [CondL]));
     Self.Emit(EndL + ':');
+    if CollOwned then
+    begin
+      EmitLoadSlot('x0', Tmp);
+      EmitCallSym('_StringRelease');
+      Self.Emit(#9'movz x0, #0');
+      EmitStoreSlot('x0', Tmp);
+    end;
     Exit;
   end;
 
@@ -10265,7 +10452,50 @@ begin
     { set iteration: evaluate the mask ONCE into its synthetic slot, then
       walk bit positions 0..BitCount-1 and run the body for each set bit }
     if AStmt.SetIsJumbo then
-      NotYet('for-in over a jumbo set', AStmt);
+    begin
+      { a jumbo set: copy its bitmap ONCE into a frame slot (a literal's
+        buffer lives below sp and is given back right away), then test each
+        member with _SetIn }
+      Tmp := '__fijs_' + IntToStr(FJArgN);
+      FJArgN := FJArgN + 1;
+      if not FFrame.ContainsKey(Tmp) then
+        AddLocal(Tmp, AStmt.CollExpr.ResolvedType.RawSize());
+      ESz := JumboSetLiteralBytes(AStmt.CollExpr);
+      Self.EmitExprToX0(AStmt.CollExpr);
+      Self.Emit(#9'mov x1, x0');
+      EmitSlotAddr('x0', Tmp);
+      EmitIntLiteral('x2', AStmt.CollExpr.ResolvedType.RawSize());
+      EmitCallSym('memcpy');
+      if ESz > 0 then
+        EmitAddSubImm('add', 'sp', 'sp', ESz);
+      Self.Emit(#9'movz x0, #0');
+      EmitStoreSlot('x0', AStmt.IdxVarName);
+      Self.Emit(CondL + ':');
+      EmitLoadSlot('x0', AStmt.IdxVarName);
+      EmitIntLiteral('x1', AStmt.SetBitCount);
+      Self.Emit(#9'cmp x0, x1');
+      Self.Emit(Format(#9'b.ge %s', [EndL]));
+      EmitSlotAddr('x0', Tmp);
+      EmitLoadSlot('x1', AStmt.IdxVarName);
+      EmitCallSym('_SetIn');
+      Self.Emit(Format(#9'cbz x0, %s', [NextL]));
+      EmitLoadSlot('x0', AStmt.IdxVarName);
+      EmitForInAssignX0(AStmt, False);
+      FBreakLbls.Add(EndL);
+      FLoopExcDepth.Add(IntToStr(FExcDepth));
+      FContLbls.Add(NextL);
+      Self.EmitStmt(AStmt.Body);
+      FContLbls.Delete(FContLbls.Count - 1);
+      FBreakLbls.Delete(FBreakLbls.Count - 1);
+      FLoopExcDepth.Delete(FLoopExcDepth.Count - 1);
+      Self.Emit(NextL + ':');
+      EmitLoadSlot('x0', AStmt.IdxVarName);
+      Self.Emit(#9'add x0, x0, #1');
+      EmitStoreSlot('x0', AStmt.IdxVarName);
+      Self.Emit(Format(#9'b %s', [CondL]));
+      Self.Emit(EndL + ':');
+      Exit;
+    end;
     Self.EmitExprToX0(AStmt.CollExpr);
     EmitStoreSlot('x0', AStmt.SetMaskVarName);
     Self.Emit(#9'movz x0, #0');
@@ -10309,14 +10539,23 @@ begin
   Cur := TMethodDecl(AStmt.CurrentDecl);
   if (GetE = nil) or (MN = nil) or (Cur = nil) then
     NotYet('for-in over this collection', AStmt);
-  if (AStmt.ResolvedVarType <> nil) and
-     (AStmt.ResolvedVarType.Kind in [tyDouble, tySingle]) then
-    NotYet('float-typed enumerator Current', AStmt);
-  if ArcExprOwnsRef(AStmt.CollExpr) then
-    NotYet('for-in over an owned transient collection', AStmt);
+  CollOwned := ArcExprOwnsRef(AStmt.CollExpr);
   EmptyArgs := TObjectList.Create(False);
   try
     Self.EmitExprToX0(AStmt.CollExpr);
+    CollTmp := '';
+    if CollOwned then
+    begin
+      { an owned collection (for X in MakeList() do) lives in a slot until
+        the loop ends: an enumerator need not hold a reference of its own
+        (TList's does not), so releasing it earlier freed the list under
+        the loop }
+      CollTmp := '__ficoll_' + IntToStr(FJArgN);
+      FJArgN := FJArgN + 1;
+      if not FFrame.ContainsKey(CollTmp) then
+        AddLocal(CollTmp, 8);
+      EmitStoreSlot('x0', CollTmp);
+    end;
     EmitMethodCallCommon(GetE, 'GetEnumerator', EmptyArgs);
     EmitPushX0();
     EmitLoadSlot('x0', AStmt.EnumVarName);
@@ -10339,19 +10578,17 @@ begin
       Shape := 0;
       if AStmt.ResolvedVarType.Kind = tyRecord then
         Shape := RecReturnShape(TRecordTypeDesc(AStmt.ResolvedVarType));
-      if (Shape >= 100) then
-        NotYet('for-in over an HFA-record enumerator', AStmt);
       EmitLoadSlot('x0', AStmt.EnumVarName);
       EmitPushX0();
       if Shape = 0 then
         EmitCall(Cur, Cur.Name, EmptyArgs, Tmp, True, Cur.VTableSlot)
       else
       begin
+        { a register-returned record -- x0[:x1], or an HFA in d0..d3 / s0..s3
+          (TPt = record X, Y: Double) -- into the scratch }
         EmitCall(Cur, Cur.Name, EmptyArgs, '', True, Cur.VTableSlot);
         EmitSlotAddr('x9', Tmp);
-        Self.Emit(#9'str x0, [x9]');
-        if Shape = 2 then
-          Self.Emit(#9'str x1, [x9, #8]');
+        EmitRecRegsStore(Shape, AStmt.ResolvedVarType.RawSize());
       end;
       EmitSlotAddr('x0', Tmp);
       EmitForInAssignAddr(AStmt, True);
@@ -10360,7 +10597,18 @@ begin
     begin
       EmitLoadSlot('x0', AStmt.EnumVarName);
       EmitMethodCallCommon(Cur, Cur.Name, EmptyArgs);
-      EmitForInAssignX0(AStmt, True);
+      if (AStmt.ResolvedVarType <> nil) and
+         (AStmt.ResolvedVarType.Kind in [tyDouble, tySingle]) then
+      begin
+        { a float Current comes back in d0 (s0 for a Single) }
+        EmitForInVarAddr('x9', AStmt);
+        if AStmt.ResolvedVarType.Kind = tySingle then
+          Self.Emit(#9'str s0, [x9]')
+        else
+          Self.Emit(#9'str d0, [x9]');
+      end
+      else
+        EmitForInAssignX0(AStmt, True);
     end;
     FBreakLbls.Add(EndL);
     FLoopExcDepth.Add(IntToStr(FExcDepth));
@@ -10371,6 +10619,13 @@ begin
     FLoopExcDepth.Delete(FLoopExcDepth.Count - 1);
     Self.Emit(Format(#9'b %s', [CondL]));
     Self.Emit(EndL + ':');
+    if CollOwned then
+    begin
+      EmitLoadSlot('x0', CollTmp);
+      EmitCallSym('_ClassRelease');
+      Self.Emit(#9'movz x0, #0');
+      EmitStoreSlot('x0', CollTmp);
+    end;
   finally
     EmptyArgs.Free();
   end;

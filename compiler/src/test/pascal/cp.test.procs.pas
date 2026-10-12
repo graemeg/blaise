@@ -36,6 +36,11 @@ type
       routine: through '_cap_' (x86-64 wrote through an undefined global of
       that name) }
     procedure TestCodegen_CapturedDynArray_ElementAndSetLength;
+    { a var interface parameter's slot holds the address of the caller's
+      pair: passing it on reads the pair through it (x86-64 read the slot
+      as an inline pair -- a crash); a captured one goes through _cap_ and
+      that address (arm64: "load of variable 'V_itab'") }
+    procedure TestCodegen_VarAndCapturedInterface_PairThroughPointer;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -558,6 +563,31 @@ begin
       #9'movq -8(%rbp), %rdx' + #10 + #9'pushq %rdx',
       #9'ldur x0, [x29, #-8]' + #10 + #9'str x0, [sp, #-16]!' + #10 +
         #9'ldr x0, [x0]'));
+end;
+
+procedure TProcFuncTests.TestCodegen_VarAndCapturedInterface_PairThroughPointer;
+const
+  Src = '''
+    program P;
+    type IFoo = interface function Get: Integer; end;
+    procedure Show(const F: IFoo); begin end;
+    procedure Outer(var V: IFoo);
+      procedure Inner; begin Show(V) end;
+    begin
+      Show(V); Inner();
+    end;
+    var G: IFoo;
+    begin
+      Outer(G);
+    end.
+    ''';
+begin
+  AssertEquals('the pair is read through the pointer', '',
+    AsmMissing(Src,
+      #9'movq -16(%rbp), %r11' + #10 + #9'movq (%r11), %rax' + #10 +
+        #9'movq 8(%r11), %rcx',
+      #9'ldur x9, [x29, #-8]' + #10 + #9'ldr x9, [x9]' + #10 +
+        #9'ldp x0, x1, [x9]'));
 end;
 
 initialization

@@ -174,6 +174,11 @@ type
       method pointers, fields and elements included (x86-64 always False /
       True) }
     procedure TestRun_DynArrayElements_FloatFieldElements_FatNilTests;
+    { interfaces in nested routines and through var params: a captured local,
+      a captured var param and a captured by-value param read, assigned and
+      passed on, two levels down (arm64 refused them; x86-64 dropped every
+      assignment and crashed passing a var interface param on) }
+    procedure TestRun_CapturedAndVarInterfaces;
     { Nested proc captures an outer VAR ARRAY PARAMETER (element read + write).
       The captured var-param array slot is reached through the _cap_ pointer
       with one extra dereference; without it the element address resolved to a
@@ -4202,6 +4207,72 @@ begin
   AssertRunsOnAll(Src3,
     'True False False False False False True' + LE +
     'False True True True True True False' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_CapturedAndVarInterfaces;
+const
+  Src1 = '''
+    program ci;
+    type
+      IFoo = interface function Get: Integer; end;
+      THold = class(TObject, IFoo) N: Integer; function Get: Integer; end;
+    function THold.Get: Integer; begin Result := N end;
+    procedure Show(const F: IFoo); begin WriteLn(F.Get()) end;
+    function Mk(N: Integer): IFoo; var H: THold; begin H := THold.Create(); H.N := N; Result := H end;
+    procedure Outer(var V: IFoo; P: IFoo);
+    var L: IFoo;
+      procedure Inner;
+        procedure Deep; begin WriteLn(L.Get(), ' ', V.Get(), ' ', P.Get()) end;
+      begin
+        L := Mk(1); Show(L); Show(V); Show(P);
+        V := Mk(2); P := L; WriteLn(L <> nil, ' ', Assigned(P));
+        Deep();
+      end;
+    begin
+      Inner(); WriteLn(L.Get(), ' ', V.Get(), ' ', P.Get());
+    end;
+    var G: IFoo;
+    begin
+      G := Mk(5); Outer(G, Mk(6)); WriteLn(G.Get());
+    end.
+    ''';
+  Src2 = '''
+    program vi;
+    type IFoo = interface function Get: Integer; end;
+      THold = class(TObject, IFoo) function Get: Integer; end;
+    function THold.Get: Integer; begin Result := 42 end;
+    procedure Show(const F: IFoo); begin WriteLn(F.Get()) end;
+    procedure Outer(var V: IFoo); begin Show(V) end;
+    var G: IFoo;
+    begin G := THold.Create(); Outer(G) end.
+    ''';
+  Src3 = '''
+    program vs;
+    type IFoo = interface function Get: Integer; end;
+      THold = class(TObject, IFoo) N: Integer; function Get: Integer; end;
+    function THold.Get: Integer; begin Result := N end;
+    function Mk(N: Integer): IFoo; var H: THold; begin H := THold.Create(); H.N := N; Result := H end;
+    procedure SetV(var V: IFoo; const W: IFoo); begin V := Mk(2); WriteLn(V.Get()); V := W; WriteLn(V.Get()); V := nil; WriteLn(V = nil) end;
+    var G, H: IFoo;
+    begin G := Mk(1); H := Mk(3); SetV(G, H); WriteLn(G = nil) end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src1,
+    '1' + LE +
+    '5' + LE +
+    '6' + LE +
+    'True True' + LE +
+    '1 2 1' + LE +
+    '1 2 1' + LE +
+    '2' + LE, 0);
+  AssertRunsOnAll(Src2,
+    '42' + LE, 0);
+  AssertRunsOnAll(Src3,
+    '2' + LE +
+    '3' + LE +
+    'True' + LE +
+    'True' + LE, 0);
 end;
 
 initialization

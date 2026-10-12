@@ -61,6 +61,14 @@ type
       stored into ARRAY-FIELD elements, through Self and through an owned
       call receiver (both ISAs refused or miscompiled most of them) }
     procedure TestDebug_ArrayFieldElementStores_NoLeak;
+    { for-in over every collection form -- fields, Self fields, var params,
+      captures, P^, elements, dyn-array / string / class CALL results, jumbo
+      sets, float and HFA-record enumerator Currents, an empty string --
+      with String, interface, closure and jumbo-set elements (arm64 refused
+      most; x86-64 crashed on a global interface loop variable and on an
+      empty string, read a float Current as 0.0, and leaked or re-evaluated
+      call collections) }
+    procedure TestDebug_ForInForms_NoLeak;
     { an owned class call result narrowed to an interface -- into a local, a
       field, an implicit-Self field, a function Result and an interface
       argument -- is consumed, not retained a second time (x86-64 leaked one
@@ -3763,6 +3771,94 @@ begin
     'hi 7' + #10 +
     'False' + #10 +
     '3.00' + #10 +
+    'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_ForInForms_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program ForInForms;
+    uses SysUtils, Generics.Collections;
+    type
+      TBig = set of 0..127;
+      TClos = reference to function: Integer;
+      IFoo = interface function Get: Integer; end;
+      THold = class(TObject, IFoo) N: Integer; function Get: Integer; end;
+      TSA = array[0..1] of String;
+      TDA = array of IFoo;
+      TCA = array of TClos;
+      TJA = array[0..1] of TBig;
+      PSA = ^TSA;
+      TRec = record S: TSA; D: TDA; end;
+      TObj = class S: TSA; D: TDA; C: TCA; J: TJA; R: TRec; procedure Run; end;
+      TPt = record X, Y: Double; end;
+      TPtEnum = class I: Integer; function MoveNext: Boolean; function GetCurrent: TPt;
+        property Current: TPt read GetCurrent; end;
+      TPts = class function GetEnumerator: TPtEnum; end;
+      TDEnum = class I: Integer; function MoveNext: Boolean; function GetCurrent: Double;
+        property Current: Double read GetCurrent; end;
+      TDs = class function GetEnumerator: TDEnum; end;
+    var Hold: THold; GO: TObj; PS: PSA; AR: array[0..1] of TRec;
+    function THold.Get: Integer; begin Result := N end;
+    function TPtEnum.MoveNext: Boolean; begin I := I + 1; Result := I <= 2 end;
+    function TPtEnum.GetCurrent: TPt; begin Result.X := I; Result.Y := I * 0.5 end;
+    function TPts.GetEnumerator: TPtEnum; begin Result := TPtEnum.Create() end;
+    function TDEnum.MoveNext: Boolean; begin I := I + 1; Result := I <= 3 end;
+    function TDEnum.GetCurrent: Double; begin Result := I * 1.25 end;
+    function TDs.GetEnumerator: TDEnum; begin Result := TDEnum.Create() end;
+    function MkD: TDA; begin Result := GO.D end;
+    function MkObj: TObj; begin Result := GO end;
+    function MkStr(N: Integer): String; begin Result := 'ab' + IntToStr(N) end;
+    function MkList: TList<Integer>; begin Result := TList<Integer>.Create(); Result.Add(4); Result.Add(5) end;
+    procedure TObj.Run;
+    var E: String; F: IFoo; K: TClos; B: TBig; I: Integer;
+    begin
+      for E in S do Write(E, ' '); for F in D do Write(F.Get(), ' ');
+      for K in C do Write(K(), ' '); for B in J do Write(100 in B, ' ');
+      for E in Self.R.S do Write(E, ' '); WriteLn();
+    end;
+    procedure VarS(var A: TSA; var B: TDA);
+    var E: String; F: IFoo;
+    begin
+      for E in A do Write(E, ' '); for F in B do Write(F.Get(), ' '); WriteLn();
+    end;
+    procedure Cap;
+    var A: TSA; F: IFoo;
+      procedure Inner; var E: String; begin for E in A do Write(E, ' '); for F in GO.D do Write(F.Get(), ' ') end;
+    begin A[0] := 'c'; A[1] := 'd'; Inner(); WriteLn() end;
+    procedure Run;
+    var E: String; F: IFoo; C, I: Integer; P: TPt; D: Double; Pts: TPts; Ds: TDs; B: TBig;
+    begin
+      Hold := THold.Create(); Hold.N := 9;
+      GO := TObj.Create(); GO.S[0] := 'a'; GO.S[1] := 'b'; SetLength(GO.D, 2); GO.D[0] := Hold; GO.D[1] := Hold;
+      SetLength(GO.C, 1); GO.C[0] := function: Integer begin Result := 77 end;
+      GO.J[1] := [100]; GO.R.S[0] := 'x'; GO.R.S[1] := 'y'; GO.R.D := GO.D; AR[1] := GO.R; PS := @GO.S;
+      GO.Run(); VarS(GO.S, GO.D); Cap();
+      for E in PS^ do Write(E, ' '); for E in AR[1].S do Write(E, ' ');
+      for F in MkD() do Write(F.Get(), ' '); for F in MkObj().D do Write(F.Get(), ' '); WriteLn();
+      for C in MkStr(7) do Write(C, ' '); WriteLn();
+      B := [1, 70, 127]; for I in B do Write(I, ' '); WriteLn();
+      for I in MkList() do Write(I, ' '); WriteLn();
+      Pts := TPts.Create(); for P in Pts do Write(P.X:0:1, ',', P.Y:0:1, ' '); WriteLn();
+      Ds := TDs.Create(); for D in Ds do Write(D:0:2, ' '); WriteLn();
+      E := ''; for C in E do Write('!'); WriteLn('empty');
+      GO.C[0] := nil;
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''', 'a b 9 9 77 False True x y ' + #10 +
+    'a b 9 9 ' + #10 +
+    'c d 9 9 ' + #10 +
+    'a b x y 9 9 9 9 ' + #10 +
+    '97 98 55 ' + #10 +
+    '1 70 127 ' + #10 +
+    '4 5 ' + #10 +
+    '1.0,0.5 2.0,1.0 ' + #10 +
+    '1.25 2.50 3.75 ' + #10 +
+    'empty' + #10 +
     'done');
 end;
 
