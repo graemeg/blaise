@@ -33,6 +33,10 @@ type
       co-owns its elements (x86-64 shared them at the caller's count and
       freed them under the caller) }
     procedure TestRun_ManagedStaticArrays_CopiesAndParams;
+    { jumbo-set FIELDS, ELEMENTS and P^ as values -- copied, combined,
+      compared, tested -- and jumbo ELEMENT stores, literal sources included
+      in a 100k-iteration loop (arm64: 'array element of this width / type') }
+    procedure TestRun_JumboSet_FieldsElementsAndElementStores;
     procedure TestRun_FloatElements_DynAndOpenArrays;
     procedure TestRun_DynArray_ManagedElementOverwrite_Releases;
     procedure TestRun_StaticArrays_Combined;
@@ -1971,6 +1975,74 @@ begin
   AssertLeakFreeOnAll(Src, 'v1!v2v1' + #10 + 'v1!v2v1' + #10 + 'v1!v2v1' +
     #10 + 'v1v2xv1v1v2v1');
 {$ENDIF}
+end;
+
+procedure TE2EStaticArrayTests.TestRun_JumboSet_FieldsElementsAndElementStores;
+const
+  Src = '''
+    program j1;
+    type
+      TBig = set of 0..127;
+      PBig = ^TBig;
+      TRec = record S: TBig; end;
+      TObj = class S: TBig; R: TRec; A: array[0..1] of TBig; procedure Run; end;
+    var GR: TRec; GA: array[0..1] of TBig; DA: array of TBig; P: PBig; O: TObj;
+    procedure Show(const S: TBig); begin WriteLn(3 in S, ' ', 100 in S, ' ', 127 in S) end;
+    procedure TObj.Run; var L: TBig;
+    begin
+      L := S; Show(L); L := R.S; Show(L); L := A[1]; Show(L); L := Self.A[0]; Show(L);
+    end;
+    var L: TBig;
+    begin
+      GR.S := [3, 100]; GA[1] := [100, 127]; SetLength(DA, 2); DA[0] := [3, 127]; P := @GR.S;
+      O := TObj.Create(); O.S := [3]; O.R.S := [100]; O.A[1] := [127]; O.A[0] := [3, 100, 127];
+      L := GR.S; Show(L); L := GA[1]; Show(L); L := DA[0]; Show(L); L := P^; Show(L);
+      L := O.S; Show(L); L := O.R.S; Show(L); L := O.A[1]; Show(L);
+      O.Run();
+      Show(GR.S); Show(GA[1]); Show(DA[0]); Show(P^); Show(O.R.S);
+      L := GR.S + GA[1]; Show(L); WriteLn(GR.S = P^, ' ', GA[1] = DA[0]);
+      Include(O.S, 50); WriteLn(50 in O.S);
+    end.
+    ''';
+  Src2 = '''
+    program j2;
+    type TBig = set of 0..127;
+      TObj = class S: TBig; end;
+    var GA: array[0..1] of TBig; DA: array of TBig; O: TObj; I: Integer; L: TBig;
+    begin
+      O := TObj.Create(); O.S := [7, 99]; SetLength(DA, 2);
+      for I := 0 to 99999 do
+      begin
+        GA[I mod 2] := [I mod 128, 127];
+        DA[I mod 2] := GA[I mod 2];
+        GA[0] := O.S + DA[1];
+      end;
+      L := GA[0]; WriteLn(7 in L, ' ', 99 in L, ' ', 127 in L, ' ', 31 in DA[1], ' ', 31 in GA[1]);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    'True True False' + LineEnding +
+    'False True True' + LineEnding +
+    'True False True' + LineEnding +
+    'True True False' + LineEnding +
+    'True False False' + LineEnding +
+    'False True False' + LineEnding +
+    'False False True' + LineEnding +
+    'True False False' + LineEnding +
+    'False True False' + LineEnding +
+    'False False True' + LineEnding +
+    'True True True' + LineEnding +
+    'True True False' + LineEnding +
+    'False True True' + LineEnding +
+    'True False True' + LineEnding +
+    'True True False' + LineEnding +
+    'False True False' + LineEnding +
+    'True True True' + LineEnding +
+    'True False' + LineEnding +
+    'True' + LineEnding, 0);
+  AssertRunsOnAll(Src2, 'True True True True True' + LineEnding, 0);
 end;
 
 initialization

@@ -115,6 +115,9 @@ type
     { @MakeObj().N: the owned base outlives the address and is released at
       the statement end (x86-64 leaked it; arm64 was NotYet) }
     procedure TestAddrOfOwnedTransientField_ReleasedAtStatementEnd;
+    { MakeObj().S := V: the owned receiver is released at the statement end
+      (x86-64 never released it) }
+    procedure TestFieldStoreOwnedReceiver_Released;
     { A by-value dyn-array parameter is a co-owning ref-counted pointer:
       the callee must retain it on entry and release it at exit
       (BUG-20260721-byval-dynarray-param-no-arc). }
@@ -504,6 +507,23 @@ begin
   AssertEquals('the owned base is parked for the statement end', '',
     AsmMissing(Src, #9'callq MakeObj' + #10 + #9'movq %rax, _pendrel_0(%rip)',
       #9'bl _MakeObj' + #10 + #9'stur x0, [x29, #-'));
+end;
+
+procedure TNativeArcTests.TestFieldStoreOwnedReceiver_Released;
+const
+  Src = '''
+    program P;
+    type TObj = class N: Integer; end;
+    function MakeObj(): TObj; begin Result := TObj.Create() end;
+    begin
+      MakeObj().N := 5;
+    end.
+    ''';
+begin
+  AssertEquals('the owned receiver is parked for the statement end', '',
+    AsmMissing(Src, #9'callq MakeObj' + #10 + #9'addq $8, %rsp' + #10 +
+        #9'movq %rax, _pendrel_0(%rip)',
+      #9'bl _MakeObj'));
 end;
 
 procedure TNativeArcTests.TestCall_TenOwnedTransientArgs_Lowered;

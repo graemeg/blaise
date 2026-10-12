@@ -613,6 +613,10 @@ type
     procedure EmitIntfRecvPair(AObjExpr: TASTExpr; const AObjName: string;
                                AIsGlobal, AIsVarParam: Boolean);
     procedure EmitCapturedVarAddr(AIdent: TIdentExpr; const ADstReg: string);
+    { %rax := a field assignment's receiver EXPRESSION.  An owned class
+      receiver (MakeObj().F := V) is released at the statement end; nothing
+      released it, so every such store leaked the instance. }
+    procedure EmitFieldRecvToEax(AFA: TFieldAssignment);
     { The address of an assignment's NAMED target: captured, var param, sret
       Result, frame local or global. }
     procedure EmitAsgnTargetAddr(AAsgn: TAssignment; const ADstReg: string);
@@ -12215,6 +12219,15 @@ begin
     Self.Emit(Format(#9'movq (%s), %s', [ADstReg, ADstReg]));
 end;
 
+procedure TX86_64Backend.EmitFieldRecvToEax(AFA: TFieldAssignment);
+begin
+  Self.EmitExprToEax(AFA.ObjExpr);
+  if (AFA.ObjExpr.ResolvedType <> nil) and
+     (AFA.ObjExpr.ResolvedType.Kind = tyClass) and
+     NativeExprOwnsRef(AFA.ObjExpr) then
+    Self.DeferNativeClassRelease();
+end;
+
 procedure TX86_64Backend.EmitAsgnTargetAddr(AAsgn: TAssignment;
   const ADstReg: string);
 begin
@@ -16010,8 +16023,11 @@ begin
         Self.Emit(Format(#9'movq %s, %%r15', [Self.VarOperand('Self')]));
         if ISFld.Offset > 0 then
           Self.Emit(Format(#9'addq $%d, %%r15', [ISFld.Offset]));
-        Self.EmitRecordFieldRetains(TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(Asgn.ResolvedLhsType), '%r15', False);
+        { the generic walks: this arm takes static arrays too, and handing
+          one to the RECORD walk read its descriptor as a field list -- a
+          layout-dependent compiler crash (and no element ARC) }
+        Self.EmitManagedAddRefAt(Asgn.ResolvedLhsType, '%rbx');
+        Self.EmitManagedReleaseAt(Asgn.ResolvedLhsType, '%r15', False);
         Self.Emit(#9'movq %r15, %rdi');
         Self.Emit(#9'movq %rbx, %rsi');
         Self.Emit(Format(#9'movq $%d, %%rdx', [Asgn.ResolvedLhsType.RawSize()]));
@@ -17794,7 +17810,7 @@ begin
       begin
         { Receiver is an arbitrary expression (default-property write through a
           property/field result): its value is the object pointer. }
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %rdi');
       end
       else if FA.IsImplicitSelf then
@@ -17873,7 +17889,7 @@ begin
         Self.Emit(#9'pushq %rax');         { scaled element offset }
         if FA.ObjExpr <> nil then
         begin
-          Self.EmitExprToEax(FA.ObjExpr);
+          Self.EmitFieldRecvToEax(FA);
           Self.Emit(#9'movq %rax, %rcx');
         end
         else if FSretFunc and (FA.RecordName = 'Result') then
@@ -17932,7 +17948,7 @@ begin
       { Field slot address → %rdx, per receiver shape. }
       if FA.ObjExpr <> nil then
       begin
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %rdx');
       end
       else if FSretFunc and (FA.RecordName = 'Result') then
@@ -18027,7 +18043,7 @@ begin
     begin
       if FA.ObjExpr <> nil then
       begin
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %rcx');
       end
       else if FSretFunc and (FA.RecordName = 'Result') then
@@ -18074,7 +18090,7 @@ begin
       { Destination field's containing-object base → %rcx, per receiver shape. }
       if FA.ObjExpr <> nil then
       begin
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %rcx');
       end
       else if FSretFunc and (FA.RecordName = 'Result') then
@@ -18148,7 +18164,7 @@ begin
       Self.Emit(#9'pushq %rbx');
       if FA.ObjExpr <> nil then
       begin
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %rbx');
       end
       else if FSretFunc and (FA.RecordName = 'Result') then
@@ -18196,7 +18212,7 @@ begin
       Self.Emit(#9'pushq %rbx');
       if FA.ObjExpr <> nil then
       begin
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %rbx');
       end
       else if FSretFunc and (FA.RecordName = 'Result') then
@@ -18249,7 +18265,7 @@ begin
       Self.Emit(#9'pushq %rbx');
       if FA.ObjExpr <> nil then
       begin
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %rbx');
       end
       else if FSretFunc and (FA.RecordName = 'Result') then
@@ -18309,7 +18325,7 @@ begin
       { Field address -> %rbx. }
       if FA.ObjExpr <> nil then
       begin
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %rbx');
       end
       else if FSretFunc and (FA.RecordName = 'Result') then
@@ -18375,7 +18391,7 @@ begin
       begin
         Self.Emit(#9'subq $8, %rsp');
         Self.EmitStoreFloat('(%rsp)', FA.FieldInfo.TypeDesc);
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %rcx');
         Self.EmitLoadFloat('(%rsp)', FA.FieldInfo.TypeDesc);
         Self.Emit(#9'addq $8, %rsp');
@@ -18435,7 +18451,7 @@ begin
       { Destination field address -> %rcx per receiver shape. }
       if FA.ObjExpr <> nil then
       begin
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %rcx');
       end
       else if FSretFunc and (FA.RecordName = 'Result') then
@@ -18498,7 +18514,7 @@ begin
           the compiler's own CreateFmt desugar over-released a type descriptor
           that way, a use-after-free once nothing else leaked to mask it. }
         Self.Emit(#9'pushq %rax');            { new value }
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %rcx');       { receiver base }
         Self.Emit(#9'popq %rax');
         Self.EmitNonOwningFieldStore(FA, '%rcx');
@@ -18513,7 +18529,7 @@ begin
           receiver base across the ARC calls; the new value sits on the stack. }
         Self.Emit(#9'pushq %r15');
         Self.Emit(#9'pushq %rax');            { new value }
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %r15');       { receiver base }
         if not NativeExprOwnsRef(FA.Expr) then
         begin
@@ -18541,7 +18557,7 @@ begin
       else
       begin
         Self.Emit(#9'pushq %rax');
-        Self.EmitExprToEax(FA.ObjExpr);
+        Self.EmitFieldRecvToEax(FA);
         Self.Emit(#9'movq %rax, %rcx');
         Self.Emit(#9'popq %rax');
         Self.EmitStoreVar(Format('%d(%%rcx)', [FA.FieldInfo.Offset]),

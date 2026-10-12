@@ -419,6 +419,7 @@ type
     procedure AnalyseStmt(AStmt: TASTStmt);
     procedure AnalyseAssignment(AAssign: TAssignment);
     procedure AnalyseFieldAssignment(AAssign: TFieldAssignment);
+    procedure AnalyseFieldStoreValue(AAssign: TFieldAssignment; ATarget: TTypeDesc);
     function  TryAnalyseFieldElemWrite(AAssign: TFieldAssignment;
       AFldInfo: TFieldInfo): Boolean;
     function  TryLowerDefaultPropertyWrite(AAssign: TFieldAssignment;
@@ -12077,21 +12078,7 @@ begin
     AAssign.FieldInfo     := FldInfo;
     if TryAnalyseFieldElemWrite(AAssign, FldInfo) then
       Exit;
-    { Set-literal RHS into a tySet field — analyse with set context. }
-    if (FldInfo.TypeDesc.Kind = tySet) and (AAssign.Expr is TArrayLiteralExpr) then
-    begin
-      AnalyseSetLiteralExpr(TArrayLiteralExpr(AAssign.Expr),
-        TSetTypeDesc(FldInfo.TypeDesc));
-      Exit;
-    end;
-    { Phase 9a: a '->' lambda RHS takes its types from the field's
-      'reference to' type. }
-    InferArrowFromTarget(AAssign.Expr, FldInfo.TypeDesc);
-    ExprType := Self.AnalyseExprSlot(AAssign.Expr);
-    Self.CheckConstValueInRange(FldInfo.TypeDesc, AAssign.Expr,
-      AAssign.Line, AAssign.Col);
-    CheckTypesMatch(FldInfo.TypeDesc, ExprType, 'field assignment',
-      AAssign.Line, AAssign.Col);
+    Self.AnalyseFieldStoreValue(AAssign, FldInfo.TypeDesc);
     Exit;
   end;
   RecSym := FTable.Lookup(AAssign.RecordName);
@@ -12166,11 +12153,10 @@ begin
         AAssign.FieldInfo := FldInfo;
         if TryAnalyseFieldElemWrite(AAssign, FldInfo) then
           Exit;
-        ExprType := Self.AnalyseExprSlot(AAssign.Expr);
-        Self.CheckConstValueInRange(FldInfo.TypeDesc, AAssign.Expr,
-          AAssign.Line, AAssign.Col);
-        CheckTypesMatch(FldInfo.TypeDesc, ExprType, 'field assignment',
-          AAssign.Line, AAssign.Col);
+        { R.F := [a, b] with R a field of Self: this arm analysed the
+          literal with no set context ("expected 'TSmallSet' but got 'array
+          of TColor'") }
+        Self.AnalyseFieldStoreValue(AAssign, FldInfo.TypeDesc);
         Exit;
       end;
       { Implicit Self.Prop.Member := V -- RecordName is a CLASS-typed property
@@ -12337,21 +12323,31 @@ begin
   AAssign.FieldInfo := FldInfo;
   if TryAnalyseFieldElemWrite(AAssign, FldInfo) then
     Exit;
-  { Set-literal RHS into a tySet field — analyse with set context. }
-  if (FldInfo.TypeDesc.Kind = tySet) and (AAssign.Expr is TArrayLiteralExpr) then
+  Self.AnalyseFieldStoreValue(AAssign, FldInfo.TypeDesc);
+end;
+
+procedure TSemanticAnalyser.AnalyseFieldStoreValue(AAssign: TFieldAssignment;
+  ATarget: TTypeDesc);
+var
+  ExprType: TTypeDesc;
+begin
+  { the value of a store into a field of type ATarget, analysed in the
+    target's context: a bracket literal into a set field is a SET literal, a
+    '->' lambda takes the 'reference to' signature, a bare enum member
+    resolves against the field's enum.  One routine for every field-store
+    arm -- the arms had drifted apart. }
+  if (ATarget.Kind = tySet) and (AAssign.Expr is TArrayLiteralExpr) then
   begin
-    AnalyseSetLiteralExpr(TArrayLiteralExpr(AAssign.Expr),
-      TSetTypeDesc(FldInfo.TypeDesc));
+    AnalyseSetLiteralExpr(TArrayLiteralExpr(AAssign.Expr), TSetTypeDesc(ATarget));
     Exit;
   end;
-  if TryResolveBareEnumIdent(AAssign.Expr, FldInfo.TypeDesc) then
+  InferArrowFromTarget(AAssign.Expr, ATarget);
+  if TryResolveBareEnumIdent(AAssign.Expr, ATarget) then
     ExprType := AAssign.Expr.ResolvedType
   else
     ExprType := Self.AnalyseExprSlot(AAssign.Expr);
-  Self.CheckConstValueInRange(FldInfo.TypeDesc, AAssign.Expr,
-    AAssign.Line, AAssign.Col);
-  CheckTypesMatch(FldInfo.TypeDesc, ExprType, 'field assignment',
-    AAssign.Line, AAssign.Col);
+  Self.CheckConstValueInRange(ATarget, AAssign.Expr, AAssign.Line, AAssign.Col);
+  CheckTypesMatch(ATarget, ExprType, 'field assignment', AAssign.Line, AAssign.Col);
 end;
 
 function TSemanticAnalyser.MangleTypeCode(AType: TTypeDesc;

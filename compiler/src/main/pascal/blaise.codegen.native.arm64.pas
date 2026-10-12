@@ -9294,6 +9294,7 @@ procedure TArm64Backend.EmitStaticElemAssign(AStmt: TStaticSubscriptAssign);
 var
   Elem: TTypeDesc;
   FatAddr: TAddrOfExpr;
+  NL: Integer;
 begin
   if AStmt.PropWriteInfo <> nil then
   begin
@@ -9514,6 +9515,23 @@ begin
     EmitPopTo('x0');
     Self.Emit(#9'str x0, [x9]');
     Self.Emit(#9'add sp, sp, #16');
+    Exit;
+  end;
+  if IsJumboSetType(Elem) then
+  begin
+    { a jumbo-set element: copy the source bitmap (its value is its address)
+      into the element.  A literal source leaves its own buffer below sp, so
+      the parked element address is read from above it, and both go. }
+    NL := JumboSetLiteralBytes(AStmt.ValueExpr);
+    Self.EmitExprToX0(AStmt.ValueExpr);         { source bitmap address }
+    Self.Emit(#9'mov x1, x0');
+    if NL = 0 then
+      Self.Emit(#9'ldr x0, [sp]')
+    else
+      Self.Emit(Format(#9'ldr x0, [sp, #%d]', [NL]));
+    EmitIntLiteral('x2', Elem.RawSize());
+    EmitCallSym('memcpy');
+    EmitAddSubImm('add', 'sp', 'sp', NL + 16);
     Exit;
   end;
   if IsMethodPtrType(Elem) then
@@ -11530,6 +11548,13 @@ begin
   { load the element at [x0] into x0, width by element kind.  Signed
     2-byte loads need ldrsh (no assembler encoding yet) — NotYet. }
   if AElem = nil then NotYet('unresolved element type', nil);
+  { a jumbo set's VALUE is its bitmap's ADDRESS (every jumbo consumer --
+    assignment, operators, membership, arguments -- takes it so), and x0
+    already holds that address: there is nothing to load.  Loading it as a
+    scalar was 'array element of this width' for every jumbo FIELD and
+    ELEMENT read }
+  if IsJumboSetType(AElem) then
+    Exit;
   case AElem.RawSize() of
     1: Self.Emit(#9'ldrb w0, [x0]');
     2:

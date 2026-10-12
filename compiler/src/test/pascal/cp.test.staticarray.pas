@@ -35,6 +35,13 @@ type
     { R.A := G with A a static-array field copies the bytes (x86-64 stored
       G's ADDRESS over A[0..1]) }
     procedure TestNative_StaticArrayFieldStore_CopiesBytes;
+    { F := G inside a method, F a static array of strings: the element walk
+      retains (x86-64 handed the array type to the RECORD walk, which read
+      its descriptor as a field list -- a layout-dependent compiler crash) }
+    procedure TestNative_ImplicitSelfStaticArrayStore_RetainsElements;
+    { R.F := [a, b] with R a record field of Self is a SET literal ("expected
+      'TSmallSet' but got 'array of TColor'") }
+    procedure TestSemantic_SetLiteralIntoSelfRecordField;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1603,6 +1610,42 @@ begin
       #9'movq %r15, %rdi' + #10 + #9'movq %rbx, %rsi' + #10 +
         #9'movq $12, %rdx' + #10 + #9'callq memcpy',
       #9'add x0, x0, #4' + #10 + #9'movz x2, #12' + #10 + #9'bl _memcpy'));
+end;
+
+procedure TStaticArrayTests.TestNative_ImplicitSelfStaticArrayStore_RetainsElements;
+const
+  Src = '''
+    program P;
+    type
+      TSA = array[0..1] of String;
+      TObj = class F: TSA; procedure Put(const G: TSA); end;
+    procedure TObj.Put(const G: TSA); begin F := G end;
+    begin
+    end.
+    ''';
+begin
+  AssertTrue('elements retained',
+    Pos(#9'callq _StringAddRef', GenAsm(Src, TargetX86_64)) >= 0);
+end;
+
+procedure TStaticArrayTests.TestSemantic_SetLiteralIntoSelfRecordField;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse('''
+    program P;
+    type
+      TColor = (cRed, cGreen, cBlue);
+      TSmallSet = set of TColor;
+      TBig = set of 0..127;
+      TRec = record F: TSmallSet; B: TBig; end;
+      TObj = class R: TRec; procedure Run; end;
+    procedure TObj.Run; begin R.F := [cRed, cBlue]; R.B := [3, 100] end;
+    begin
+    end.
+    ''');
+  AssertNotNull('analysed', Prog);
+  Prog.Free();
 end;
 
 initialization

@@ -53,6 +53,10 @@ type
       closures retaining their env (x86-64 copied the source ADDRESS or one
       half and crashed; arm64 refused most sources and every element store) }
     procedure TestDebug_MethodPtrAndClosureCopies_NoLeak;
+    { MakeObj().S := V / MakeObj().P := @Hello release the owned receiver
+      (x86-64 leaked it); A := G with A a static-array field of Self (x86-64
+      crashed the compiler); R.F := [a, b] into a record field of Self }
+    procedure TestDebug_FieldStoresThroughCallsAndSelf_NoLeak;
     { an owned class call result narrowed to an interface -- into a local, a
       field, an implicit-Self field, a function Result and an interface
       argument -- is consumed, not retained a second time (x86-64 leaked one
@@ -3648,6 +3652,53 @@ begin
     'clos 7' + #10 +
     'hi 7' + #10 +
     'e 7' + #10 +
+    'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_FieldStoresThroughCallsAndSelf_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program FieldStores;
+    type
+      TColor = (cRed, cGreen, cBlue);
+      TSmallSet = set of TColor;
+      TBig = set of 0..127;
+      TSA = array[0..1] of Integer;
+      TProc = procedure;
+      TRec = record F: TSmallSet; B: TBig; end;
+      TObj = class
+        S: String; P: TProc; A: TSA; R: TRec;
+        procedure Run(const G: TSA);
+      end;
+    var GO: TObj;
+    procedure Hello; begin WriteLn('hello') end;
+    function MakeObj: TObj; begin Result := GO end;
+    procedure TObj.Run(const G: TSA);
+    begin
+      A := G; R.F := [cRed, cBlue]; R.B := [3, 100];
+      WriteLn(A[0], ' ', A[1], ' ', cBlue in R.F, ' ', 100 in R.B);
+    end;
+    procedure Run;
+    var G: TSA; I: Integer;
+    begin
+      GO := TObj.Create();
+      for I := 1 to 3 do
+      begin
+        MakeObj().S := 'abc'; MakeObj().P := @Hello;
+        G[0] := I; G[1] := Length(GO.S); GO.Run(G);
+      end;
+      GO.P(); WriteLn(GO.S);
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''', '1 3 True True' + #10 +
+    '2 3 True True' + #10 +
+    '3 3 True True' + #10 +
+    'hello' + #10 +
+    'abc' + #10 +
     'done');
 end;
 

@@ -210,6 +210,10 @@ type
     { L := F with F a Single field of Self: the 32-bit pattern goes through
       s0 (it was moved as a double: 1.5 read as 0.0, silently) }
     procedure TestImplicitSelfSingleField_ReadAsSingle;
+    { a jumbo-set FIELD read is its bitmap's address (it was loaded as a
+      scalar: 'array element of this width'), and a jumbo ELEMENT store
+      copies the bitmap into the element ('array element of this type') }
+    procedure TestJumboSetFieldReadAndElementStore_CopyBitmaps;
     procedure TestAddrOfVarParamClassField_DerefsSlot;
     procedure TestRecordProperty_ReadThroughSret;
     procedure TestSmallSetResult_ReturnedInX0;
@@ -5339,6 +5343,30 @@ begin
     ''', TargetArm64);
   AssertTrue('itab half written through the pointer',
     Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestJumboSetFieldReadAndElementStore_CopyBitmaps;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TBig = set of 0..127;
+      TObj = class S: TBig; end;
+    var GA: array[0..1] of TBig; O: TObj; L: TBig;
+    begin
+      L := O.S;
+      GA[1] := L;
+    end.
+    ''', TargetArm64);
+  AssertTrue('the field''s address is the copy source',
+    Pos(#9'add x0, x0, #8' + #10 + #9'mov x1, x0' + #10 +
+      #9'adrp x0, _g_L@PAGE', AsmT) >= 0);
+  AssertTrue('the element receives the bitmap',
+    Pos(#9'mov x1, x0' + #10 + #9'ldr x0, [sp]' + #10 + #9'movz x2, #16' +
+      #10 + #9'bl _memcpy' + #10 + #9'add sp, sp, #16', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestImplicitSelfSingleField_ReadAsSingle;
