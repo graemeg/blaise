@@ -16,7 +16,8 @@ interface
 uses
   Classes, SysUtils, blaise.testing,
   uLexer, uParser, uAST, uSymbolTable, uSemantic,
-  blaise.codegen.native, blaise.codegen.native.backend, blaise.codegen.target;
+  blaise.codegen.native, blaise.codegen.native.backend, blaise.codegen.target,
+  cp.test.harness;
 
 type
   TPointerTests = class(TTestCase)
@@ -72,6 +73,20 @@ type
     { p^.field[index] := value (issue #118)                               }
     { ------------------------------------------------------------------ }
     procedure TestParse_DerefFieldSubscript_Parses;
+
+    { ------------------------------------------------------------------ }
+    { P^.Method() / GetP()^ statements: the deref-then-field loops took   }
+    { '.Name' eagerly, so P^.Get() was a field read followed by a call    }
+    { ('Expression is not callable') and the statement forms did not      }
+    { parse at all                                                         }
+    { ------------------------------------------------------------------ }
+    procedure TestParse_DerefMethodCallExpr_IsMethodCall;
+    procedure TestParse_DerefMethodCallStmt_IsMethodCall;
+    procedure TestParse_CallResultDerefWrite_IsPointerWrite;
+    procedure TestParse_CallResultDerefFieldWrite_IsFieldAssignment;
+    { P^.Greet() with P: ^IG dispatches through the pair at the pointer
+      (x86-64 dispatched through undefined `_obj` / `_itab` symbols) }
+    procedure TestNative_DerefInterfaceReceiver_PairAtPointer;
   end;
 
 implementation
@@ -519,6 +534,109 @@ begin
   Prog := ParseSrc(SrcDerefFieldSubscript);
   AssertNotNull('program parsed', Prog);
   Prog.Free();
+end;
+
+const
+  SrcDerefCalls =
+    '''
+        program Prg;
+        begin
+          N := P^.Get();
+          P^.Bump();
+          GetP()^ := 7;
+          GetP()^.X := 8;
+          N := (P)^.Get()
+        end.
+        ''';
+
+procedure TPointerTests.TestParse_DerefMethodCallExpr_IsMethodCall;
+var
+  Prog: TProgram;
+  E: TASTExpr;
+begin
+  Prog := ParseSrc(SrcDerefCalls);
+  try
+    E := TAssignment(Prog.Block.Stmts[0]).Expr;
+    AssertTrue('P^.Get() is a method call', E is TMethodCallExpr);
+    AssertTrue('its receiver is the deref',
+      TMethodCallExpr(E).ObjExpr is TDerefExpr);
+    E := TAssignment(Prog.Block.Stmts[4]).Expr;
+    AssertTrue('(P)^.Get() is a method call', E is TMethodCallExpr);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPointerTests.TestParse_DerefMethodCallStmt_IsMethodCall;
+var
+  Prog: TProgram;
+begin
+  Prog := ParseSrc(SrcDerefCalls);
+  try
+    AssertTrue('P^.Bump() is a method-call statement',
+      Prog.Block.Stmts[1] is TMethodCallStmt);
+    AssertTrue('its receiver is the deref',
+      TMethodCallStmt(Prog.Block.Stmts[1]).ObjExpr is TDerefExpr);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPointerTests.TestParse_CallResultDerefWrite_IsPointerWrite;
+var
+  Prog: TProgram;
+begin
+  Prog := ParseSrc(SrcDerefCalls);
+  try
+    AssertTrue('GetP()^ := 7 is a pointer write',
+      Prog.Block.Stmts[2] is TPointerWriteStmt);
+    AssertTrue('through the call result',
+      TPointerWriteStmt(Prog.Block.Stmts[2]).PtrExpr is TFuncCallExpr);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPointerTests.TestParse_CallResultDerefFieldWrite_IsFieldAssignment;
+var
+  Prog: TProgram;
+begin
+  Prog := ParseSrc(SrcDerefCalls);
+  try
+    AssertTrue('GetP()^.X := 8 is a field assignment',
+      Prog.Block.Stmts[3] is TFieldAssignment);
+    AssertTrue('on the dereferenced call result',
+      TFieldAssignment(Prog.Block.Stmts[3]).ObjExpr is TDerefExpr);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPointerTests.TestNative_DerefInterfaceReceiver_PairAtPointer;
+const
+  Src = '''
+    program P;
+    type
+      IG = interface
+        function Greet: Int64;
+      end;
+      PIG = ^IG;
+    var
+      G: IG;
+      PG: PIG;
+    begin
+      PG := @G;
+      PG^.Greet();
+    end.
+    ''';
+begin
+  AssertEquals('obj and itab load through the pointer', '',
+    AsmMissing(Src,
+      #9'movq PG(%rip), %rax' + #10 + #9'movq %rax, %r10' + #10 +
+        #9'movq 8(%r10), %rax' + #10 + #9'movq (%r10), %r10',
+      #9'ldr x0, [x9, _g_PG@PAGEOFF]' + #10 + #9'ldp x0, x1, [x0]'));
+  AssertTrue('no nameless receiver slot',
+    Pos(#9'movq _obj(%rip)', GenAsm(Src, TargetX86_64)) < 0);
 end;
 
 initialization

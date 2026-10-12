@@ -1081,6 +1081,7 @@ Stmt
     | CompoundStmt
     | BlockVarDeclStmt
     | PointerWriteStmt
+    | DerefStmt
     | StaticSubscriptAssign
     | SubscriptFieldAssign
     | SubscriptMethodCall
@@ -1208,9 +1209,20 @@ CompoundStmt
     = BEGIN StmtList END
     ;
 
-(* Pointer write: P^ := Expr — store through pointer *)
+(* Pointer write: P^ := Expr — store through pointer.  The pointer may be a
+ * call result: GetP()^ := Expr. *)
 PointerWriteStmt
     = IDENT CARET ASSIGN Expr
+    | IDENT LPAREN [ ArgList ] RPAREN CARET ASSIGN Expr
+    ;
+
+(* Statements through a dereferenced pointer: a field write or a method call
+ * on the pointee, P^.Field := Expr, P^.Method(...), GetP()^.Field := Expr,
+ * GetP()^.Method(...).  The same postfix chain applies in expressions, so
+ * P^.Method() is a call, never a field read followed by a call. *)
+DerefStmt
+    = IDENT [ LPAREN [ ArgList ] RPAREN ] CARET DOT IDENT { Selector }
+      ( ASSIGN Expr | [ LPAREN [ ArgList ] RPAREN ] )
     ;
 
 FieldAssignment

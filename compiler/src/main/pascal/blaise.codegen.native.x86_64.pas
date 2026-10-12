@@ -591,6 +591,11 @@ type
                                 const AMethName: string; AArgs: TObjectList;
                                 AObjExpr: TASTExpr = nil;
                                 ADiscardIntfRet: Boolean = False);
+    { Load a call-free interface receiver's fat pair: obj into %r10, itab
+      into %rax.  The one receiver resolver shared by every itab dispatch
+      (plain, sret and record-sret), so each accepts the same shapes. }
+    procedure EmitIntfRecvPair(AObjExpr: TASTExpr; const AObjName: string;
+                               AIsGlobal, AIsVarParam: Boolean);
     procedure EmitInterfaceFieldCall(AFld: TFieldInfo; AIntf: TInterfaceTypeDesc;
                                 const AMethName: string; AArgs: TObjectList;
                                 ADiscardIntfRet: Boolean = False);
@@ -3856,6 +3861,107 @@ end;
   the stack, load the obj (Self) and the resolved code pointer into caller-saved
   scratch (%r10/%r11) that survive the pop loop, pop args into %rsi.. (shifted
   by one for Self in %rdi), set %rdi := obj, then `callq *%r11`. }
+procedure TX86_64Backend.EmitIntfRecvPair(AObjExpr: TASTExpr;
+  const AObjName: string; AIsGlobal, AIsVarParam: Boolean);
+begin
+  { A named (non-Self-field) ident receiver resolves through its name, the
+    same as a receiver the semantic pass left as ObjectName only }
+  if (AObjExpr <> nil) and (AObjExpr is TIdentExpr) and
+     not (TIdentExpr(AObjExpr).IsImplicitSelf and
+          (TIdentExpr(AObjExpr).ImplicitFieldInfo <> nil)) then
+  begin
+    Self.EmitIntfRecvPair(nil, TIdentExpr(AObjExpr).Name,
+      TIdentExpr(AObjExpr).IsGlobal,
+      AIsVarParam or (TIdentExpr(AObjExpr).ParamMode = pmVar));
+    Exit;
+  end;
+  if (AObjExpr <> nil) and (AObjExpr is TFieldAccessExpr) then
+  begin
+    Self.EmitInterfaceFieldAddr(TFieldAccessExpr(AObjExpr), '%r10');
+    Self.Emit(#9'movq 8(%r10), %rax');   { itab }
+    Self.Emit(#9'movq (%r10), %r10');    { obj }
+  end
+  else if (AObjExpr <> nil) and (AObjExpr is TIdentExpr) and
+          TIdentExpr(AObjExpr).IsImplicitSelf and
+          (TIdentExpr(AObjExpr).ImplicitFieldInfo <> nil) then
+  begin
+    { Interface-typed field of Self as receiver (bare `FField.M()` inside a
+      method): the fat pointer sits at Self + field offset (obj at +0,
+      itab at +8).  Guards against the named-global fallback emitting bogus
+      bare _obj/_itab labels. }
+    Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand('Self')]));
+    if TFieldInfo(TIdentExpr(AObjExpr).ImplicitFieldInfo).Offset > 0 then
+      Self.Emit(Format(#9'addq $%d, %%r10',
+        [TFieldInfo(TIdentExpr(AObjExpr).ImplicitFieldInfo).Offset]));
+    Self.Emit(#9'movq 8(%r10), %rax');   { itab }
+    Self.Emit(#9'movq (%r10), %r10');    { obj }
+  end
+  else if (AObjExpr <> nil) and (AObjExpr is TStringSubscriptExpr) and
+          (TStringSubscriptExpr(AObjExpr).StrExpr.ResolvedType <> nil) and
+          (TStringSubscriptExpr(AObjExpr).StrExpr.ResolvedType.Kind = tyStaticArray) then
+  begin
+    { Static-array interface element receiver (Arr[I].M()): the element is a
+      contiguous fat pointer (obj at the element address, itab at +8).  The
+      static-array guard keeps a class default-property subscript out — it is
+      subscript-shaped but has no array base, and would crash the compiler
+      inside EmitIntfStaticElemAddr. }
+    Self.EmitIntfStaticElemAddr(TStringSubscriptExpr(AObjExpr), '%r10');
+    Self.Emit(#9'movq 8(%r10), %rax');   { itab }
+    Self.Emit(#9'movq (%r10), %r10');    { obj }
+  end
+  else if (AObjExpr <> nil) and (AObjExpr is TStringSubscriptExpr) and
+          (TStringSubscriptExpr(AObjExpr).StrExpr.ResolvedType <> nil) and
+          (TStringSubscriptExpr(AObjExpr).StrExpr.ResolvedType.Kind in
+             [tyDynArray, tyOpenArray]) then
+  begin
+    { Dynamic / open-array interface element receiver (Arr[I].M()): the fat
+      pointer lives at data_ptr + index*16 (BUG-20260720-qbe-dynarray-intf-
+      elem-read, native side). }
+    Self.EmitIntfDynElemAddr(TStringSubscriptExpr(AObjExpr), '%r10');
+    Self.Emit(#9'movq 8(%r10), %rax');   { itab }
+    Self.Emit(#9'movq (%r10), %r10');    { obj }
+  end
+  else if (AObjExpr <> nil) and (AObjExpr is TDerefExpr) then
+  begin
+    { P^.M() with P: ^IFoo -- the pointer value IS the address of the
+      contiguous fat pair (obj at +0, itab at +8).  Without this arm the
+      nameless receiver fell to the named-slot branch and dispatched through
+      undefined `_obj` / `_itab` symbols. }
+    Self.EmitExprToEax(TDerefExpr(AObjExpr).Expr);
+    Self.Emit(#9'movq %rax, %r10');
+    Self.Emit(#9'movq 8(%r10), %rax');   { itab }
+    Self.Emit(#9'movq (%r10), %r10');    { obj }
+  end
+  else if AObjExpr <> nil then
+    { a call-shaped receiver must be evaluated BEFORE the args (the callers'
+      RecvOnStack arms); never fall to the nameless `_obj` slot below }
+    raise ENativeCodeGenError.Create(
+      'native backend: unsupported receiver expression in interface dispatch ('
+      + AObjExpr.ClassName + ')')
+  else if AIsVarParam then
+  begin
+    { var/out interface param receiver: the slot holds the address of the
+      caller's contiguous fat pointer — obj at +0, itab at +8. }
+    Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(AObjName)]));
+    Self.Emit(#9'movq 8(%r10), %rax');
+    Self.Emit(#9'movq (%r10), %r10');
+  end
+  else if Self.IsCaptured(AObjName) then
+  begin
+    { Captured interface local (BUG-038): the capture slot holds the ADDRESS
+      of the enclosing routine's contiguous fat pointer — obj at +0, itab at
+      +8 (the same shape as a var/out interface param). }
+    Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand('_cap_' + AObjName)]));
+    Self.Emit(#9'movq 8(%r10), %rax');
+    Self.Emit(#9'movq (%r10), %r10');
+  end
+  else
+  begin
+    Self.Emit(Format(#9'movq %s, %%r10', [Self.IntfObjOperand(AObjName, AIsGlobal)]));
+    Self.Emit(Format(#9'movq %s, %%rax', [Self.IntfItabOperand(AObjName, AIsGlobal)]));
+  end;
+end;
+
 procedure TX86_64Backend.EmitInterfaceCall(const AObjName: string;
                                            AIsGlobal: Boolean;
                                            AIsVarParam: Boolean;
@@ -4024,74 +4130,8 @@ begin
     Self.Emit(Format(#9'movq %d(%%rsp), %%r10', [Pushed + HTotal + DiscSz]));
     Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [Pushed + HTotal + DiscSz + 8]));
   end
-  else if (AObjExpr <> nil) and (AObjExpr is TFieldAccessExpr) then
-  begin
-    Self.EmitInterfaceFieldAddr(TFieldAccessExpr(AObjExpr), '%r10');
-    Self.Emit(#9'movq 8(%r10), %rax');   { itab }
-    Self.Emit(#9'movq (%r10), %r10');    { obj }
-  end
-  else if (AObjExpr <> nil) and (AObjExpr is TIdentExpr) and
-          TIdentExpr(AObjExpr).IsImplicitSelf and
-          (TIdentExpr(AObjExpr).ImplicitFieldInfo <> nil) then
-  begin
-    { Interface-typed field of Self as receiver (bare `FField.M()` inside a
-      method): the fat pointer sits at Self + field offset (obj at +0,
-      itab at +8).  Guards against the named-global fallback emitting bogus
-      bare _obj/_itab labels. }
-    Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand('Self')]));
-    if TFieldInfo(TIdentExpr(AObjExpr).ImplicitFieldInfo).Offset > 0 then
-      Self.Emit(Format(#9'addq $%d, %%r10',
-        [TFieldInfo(TIdentExpr(AObjExpr).ImplicitFieldInfo).Offset]));
-    Self.Emit(#9'movq 8(%r10), %rax');   { itab }
-    Self.Emit(#9'movq (%r10), %r10');    { obj }
-  end
-  else if (AObjExpr <> nil) and (AObjExpr is TStringSubscriptExpr) and
-          (TStringSubscriptExpr(AObjExpr).StrExpr.ResolvedType <> nil) and
-          (TStringSubscriptExpr(AObjExpr).StrExpr.ResolvedType.Kind = tyStaticArray) then
-  begin
-    { Static-array interface element receiver (Arr[I].M()): the element is a
-      contiguous fat pointer (obj at the element address, itab at +8).  The
-      static-array guard keeps a class default-property subscript out — it is
-      subscript-shaped but has no array base, and would crash the compiler
-      inside EmitIntfStaticElemAddr. }
-    Self.EmitIntfStaticElemAddr(TStringSubscriptExpr(AObjExpr), '%r10');
-    Self.Emit(#9'movq 8(%r10), %rax');   { itab }
-    Self.Emit(#9'movq (%r10), %r10');    { obj }
-  end
-  else if (AObjExpr <> nil) and (AObjExpr is TStringSubscriptExpr) and
-          (TStringSubscriptExpr(AObjExpr).StrExpr.ResolvedType <> nil) and
-          (TStringSubscriptExpr(AObjExpr).StrExpr.ResolvedType.Kind in
-             [tyDynArray, tyOpenArray]) then
-  begin
-    { Dynamic / open-array interface element receiver (Arr[I].M()): the fat
-      pointer lives at data_ptr + index*16 (BUG-20260720-qbe-dynarray-intf-
-      elem-read, native side). }
-    Self.EmitIntfDynElemAddr(TStringSubscriptExpr(AObjExpr), '%r10');
-    Self.Emit(#9'movq 8(%r10), %rax');   { itab }
-    Self.Emit(#9'movq (%r10), %r10');    { obj }
-  end
-  else if AIsVarParam then
-  begin
-    { var/out interface param receiver: the slot holds the address of the
-      caller's contiguous fat pointer — obj at +0, itab at +8. }
-    Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(AObjName)]));
-    Self.Emit(#9'movq 8(%r10), %rax');
-    Self.Emit(#9'movq (%r10), %r10');
-  end
-  else if Self.IsCaptured(AObjName) then
-  begin
-    { Captured interface local (BUG-038): the capture slot holds the ADDRESS
-      of the enclosing routine's contiguous fat pointer — obj at +0, itab at
-      +8 (the same shape as a var/out interface param). }
-    Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand('_cap_' + AObjName)]));
-    Self.Emit(#9'movq 8(%r10), %rax');
-    Self.Emit(#9'movq (%r10), %r10');
-  end
   else
-  begin
-    Self.Emit(Format(#9'movq %s, %%r10', [Self.IntfObjOperand(AObjName, AIsGlobal)]));
-    Self.Emit(Format(#9'movq %s, %%rax', [Self.IntfItabOperand(AObjName, AIsGlobal)]));
-  end;
+    Self.EmitIntfRecvPair(AObjExpr, AObjName, AIsGlobal, AIsVarParam);
   SlotOff := AIntf.MethodIndex(AMethName) * Ps;
   if SlotOff = 0 then
     Self.Emit(#9'movq (%rax), %r11')
@@ -23091,49 +23131,8 @@ begin
       Pushed := Pushed + 8;
   end;
   { Resolve the receiver: obj into %r10, itab into %rax. }
-  if (ACall.ObjExpr <> nil) and (ACall.ObjExpr is TFieldAccessExpr) then
-  begin
-    Self.EmitInterfaceFieldAddr(TFieldAccessExpr(ACall.ObjExpr), '%r10');
-    Self.Emit(#9'movq 8(%r10), %rax');
-    Self.Emit(#9'movq (%r10), %r10');
-  end
-  else if (ACall.ObjExpr <> nil) and (ACall.ObjExpr is TIdentExpr) and
-          TIdentExpr(ACall.ObjExpr).IsImplicitSelf and
-          (TIdentExpr(ACall.ObjExpr).ImplicitFieldInfo <> nil) then
-  begin
-    { Interface field of Self as receiver: fat pointer at Self + offset. }
-    IE := TIdentExpr(ACall.ObjExpr);
-    Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand('Self')]));
-    if TFieldInfo(IE.ImplicitFieldInfo).Offset > 0 then
-      Self.Emit(Format(#9'addq $%d, %%r10',
-        [TFieldInfo(IE.ImplicitFieldInfo).Offset]));
-    Self.Emit(#9'movq 8(%r10), %rax');
-    Self.Emit(#9'movq (%r10), %r10');
-  end
-  else if (ACall.ObjExpr <> nil) and (ACall.ObjExpr is TIdentExpr) then
-  begin
-    IE := TIdentExpr(ACall.ObjExpr);
-    Self.Emit(Format(#9'movq %s, %%r10',
-      [Self.IntfObjOperand(IE.Name, IE.IsGlobal)]));
-    Self.Emit(Format(#9'movq %s, %%rax',
-      [Self.IntfItabOperand(IE.Name, IE.IsGlobal)]));
-  end
-  else if ACall.ObjExpr <> nil then
-    raise ENativeCodeGenError.Create(
-      'native backend: unsupported receiver expression in sret interface dispatch')
-  else if ACall.IsVarParam then
-  begin
-    Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(ACall.ObjectName)]));
-    Self.Emit(#9'movq 8(%r10), %rax');
-    Self.Emit(#9'movq (%r10), %r10');
-  end
-  else
-  begin
-    Self.Emit(Format(#9'movq %s, %%r10',
-      [Self.IntfObjOperand(ACall.ObjectName, ACall.IsGlobal)]));
-    Self.Emit(Format(#9'movq %s, %%rax',
-      [Self.IntfItabOperand(ACall.ObjectName, ACall.IsGlobal)]));
-  end;
+  Self.EmitIntfRecvPair(ACall.ObjExpr, ACall.ObjectName, ACall.IsGlobal,
+    ACall.IsVarParam);
   SlotOff := IntfD.MethodIndex(ACall.Name) * 8;
   if SlotOff = 0 then
     Self.Emit(#9'movq (%rax), %r11')
@@ -23319,48 +23318,9 @@ begin
     Self.Emit(Format(#9'movq %d(%%rsp), %%r10', [Pushed + HTotal]));
     Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [Pushed + HTotal + 8]));
   end
-  else if (ACall.ObjExpr <> nil) and (ACall.ObjExpr is TFieldAccessExpr) then
-  begin
-    Self.EmitInterfaceFieldAddr(TFieldAccessExpr(ACall.ObjExpr), '%r10');
-    Self.Emit(#9'movq 8(%r10), %rax');
-    Self.Emit(#9'movq (%r10), %r10');
-  end
-  else if (ACall.ObjExpr <> nil) and (ACall.ObjExpr is TIdentExpr) and
-          TIdentExpr(ACall.ObjExpr).IsImplicitSelf and
-          (TIdentExpr(ACall.ObjExpr).ImplicitFieldInfo <> nil) then
-  begin
-    IE := TIdentExpr(ACall.ObjExpr);
-    Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand('Self')]));
-    if TFieldInfo(IE.ImplicitFieldInfo).Offset > 0 then
-      Self.Emit(Format(#9'addq $%d, %%r10',
-        [TFieldInfo(IE.ImplicitFieldInfo).Offset]));
-    Self.Emit(#9'movq 8(%r10), %rax');
-    Self.Emit(#9'movq (%r10), %r10');
-  end
-  else if (ACall.ObjExpr <> nil) and (ACall.ObjExpr is TIdentExpr) then
-  begin
-    IE := TIdentExpr(ACall.ObjExpr);
-    Self.Emit(Format(#9'movq %s, %%r10',
-      [Self.IntfObjOperand(IE.Name, IE.IsGlobal)]));
-    Self.Emit(Format(#9'movq %s, %%rax',
-      [Self.IntfItabOperand(IE.Name, IE.IsGlobal)]));
-  end
-  else if ACall.ObjExpr <> nil then
-    raise ENativeCodeGenError.Create(
-      'native backend: unsupported receiver expression in sret interface record dispatch')
-  else if ACall.IsVarParam then
-  begin
-    Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(ACall.ObjectName)]));
-    Self.Emit(#9'movq 8(%r10), %rax');
-    Self.Emit(#9'movq (%r10), %r10');
-  end
   else
-  begin
-    Self.Emit(Format(#9'movq %s, %%r10',
-      [Self.IntfObjOperand(ACall.ObjectName, ACall.IsGlobal)]));
-    Self.Emit(Format(#9'movq %s, %%rax',
-      [Self.IntfItabOperand(ACall.ObjectName, ACall.IsGlobal)]));
-  end;
+    Self.EmitIntfRecvPair(ACall.ObjExpr, ACall.ObjectName, ACall.IsGlobal,
+      ACall.IsVarParam);
   SlotOff := IntfD.MethodIndex(ACall.Name) * 8;
   if SlotOff = 0 then
     Self.Emit(#9'movq (%rax), %r11')

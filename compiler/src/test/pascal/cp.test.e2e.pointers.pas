@@ -54,6 +54,9 @@ type
       field of a class instance.  memcpy from that address proves the base
       (instance ptr + field offset + index*elemsize) is computed correctly. }
     procedure TestRun_AddrOfClassArrayFieldElement;
+    { P^.Method() / P^.Method statements / GetP()^ := / GetP()^.F := on a
+      class, an interface (incl. sret results and arguments) and a record }
+    procedure TestRun_DerefMethodCallsAndCallResultDerefs;
   end;
 
 implementation
@@ -87,6 +90,53 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '42 42 7' + LineEnding, 0);
+end;
+
+procedure TE2EPointersTests.TestRun_DerefMethodCallsAndCallResultDerefs;
+const
+  Src = '''
+    program DerefCalls;
+    type
+      IFoo = interface
+        function Get: Integer;
+        function Name: String;
+        function Self2: IFoo;
+        procedure Add(N: Integer; const S: String);
+      end;
+      TFoo = class(TObject, IFoo)
+        V: Integer;
+        function Get: Integer; function Name: String; function Self2: IFoo;
+        procedure Add(N: Integer; const S: String);
+      end;
+      PIFoo = ^IFoo;
+      PFoo = ^TFoo;
+      TIn = record Y: Integer; end;
+      TRec = record X: Integer; Inner: TIn; end;
+      PRec = ^TRec;
+      PInt = ^Integer;
+    function TFoo.Get: Integer; begin Result := V end;
+    function TFoo.Name: String; begin Result := 'foo' + IntToStr(V) end;
+    function TFoo.Self2: IFoo; begin Result := Self end;
+    procedure TFoo.Add(N: Integer; const S: String); begin V := V + N + Length(S) end;
+    var GR: TRec; GN: Integer; GF: TFoo;
+    function GetP: PRec; begin Result := @GR end;
+    function GetN: PInt; begin Result := @GN end;
+    function GetF: PFoo; begin Result := @GF end;
+    var I: IFoo; P: PIFoo; Q: PFoo; Arr: array[0..1] of IFoo; PA: PIFoo;
+    begin
+      GF := TFoo.Create(); GF.V := 3; I := GF; P := @I; Q := @GF;
+      WriteLn(Q^.Get(), ' ', P^.Get(), ' ', P^.Name(), ' ', P^.Self2().Get());
+      Q^.Add(1, ''); P^.Add(2, 'ab'); GetF()^.Add(0, 'x');
+      WriteLn(I.Get(), ' ', GetF()^.Get());
+      Arr[1] := I; PA := @Arr[1]; WriteLn(PA^.Name());
+      GetP()^.X := 7; GetP()^.Inner.Y := 8; GetN()^ := 9; GetF()^.V := 5;
+      WriteLn(GR.X, ' ', GR.Inner.Y, ' ', GN, ' ', GetP()^.X, ' ', (GetP())^.Inner.Y, ' ', GF.V);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRTLRunsOnAll(Src, '3 3 foo3 3' + LineEnding + '9 9' + LineEnding +
+    'foo9' + LineEnding + '7 8 9 7 8 5' + LineEnding, 0);
 end;
 
 procedure TE2EPointersTests.TestRun_CastToUnitLocalPointerType;

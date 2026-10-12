@@ -4058,6 +4058,27 @@ begin
         FldNode            := InnerFld;
         Advance();
       end;
+      if not Check(tkLBracket) and not Check(tkAssign) then
+      begin
+        { Ident^.Method(args) / Ident^.A.Method: a method call on the
+          dereferenced value, not a field write }
+        MCall := TMethodCallStmt.Create();
+        MCall.Line := Line;
+        MCall.Col := Col;
+        MCall.ObjectName := '';
+        MCall.Name := FldNode.FieldName;
+        MCall.ObjExpr := FldNode.Base;
+        FldNode.Base := nil;
+        FldNode.Free();
+        if Check(tkLParen) then
+        begin
+          Advance();  { consume '(' }
+          if not Check(tkRParen) then
+            ParseMethodCallArgList(MCall);
+          Expect(tkRParen);
+        end;
+        Exit(MCall);
+      end;
       FldAssign         := TFieldAssignment.Create();
       FldAssign.Line    := Line;
       FldAssign.Col     := Col;
@@ -4493,9 +4514,36 @@ begin
         end;
       end;
       Expect(tkRParen);
+      CastRcv := FCallNode;
+      if Check(tkCaret) then
+      begin
+        { F(args)^ ... : dereference the returned pointer }
+        DerefNode      := TDerefExpr.Create();
+        DerefNode.Line := FCurrent.Line;
+        DerefNode.Col  := FCurrent.Col;
+        DerefNode.Expr := FCallNode;
+        CastRcv        := DerefNode;
+        Advance();  { consume '^' }
+        if Check(tkAssign) then
+        begin
+          { F(args)^ := Expr }
+          Advance();
+          DerefNode.Expr   := nil;
+          DerefNode.Free();
+          PtrWrite         := TPointerWriteStmt.Create();
+          PtrWrite.Line    := Line;
+          PtrWrite.Col     := Col;
+          PtrWrite.PtrExpr := FCallNode;
+          PtrWrite.ValExpr := ParseExpr();
+          Exit(PtrWrite);
+        end;
+        if not Check(tkDot) then
+          raise EParseError.Create(Format(
+            'Expected ''.'' or '':='' after ''^'' at line %d col %d in %s',
+            [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
+      end;
       if Check(tkDot) then
       begin
-        CastRcv := FCallNode;
         { Chain parse: each step reads '.Ident', then either '(' (call) or
           more '.'. The final method call terminates as TMethodCallStmt. }
         while Check(tkDot) do
@@ -6182,18 +6230,9 @@ begin
           DerefNode.Col  := Col;
           DerefNode.Expr := Result;
           Result         := DerefNode;
-          { Deref-then-field: P^.Field or P^.Field.Sub ... }
-          while Check(tkDot) and (PeekKind() = tkIdent) do
-          begin
-            Advance();  { consume '.' }
-            FldNode           := TFieldAccessExpr.Create();
-            FldNode.Line      := FCurrent.Line;
-            FldNode.Col       := FCurrent.Col;
-            FldNode.FieldName := FCurrent.Value;
-            FldNode.Base      := Result;
-            Advance();  { consume field name }
-            Result := FldNode;
-          end;
+          { P^.Field / P^.Method(...) / P^.Arr[I] chain on through the
+            postfix loop below, which is the one place that tells a
+            '.Name(' call from a '.Name' field }
         end;
       end;
     tkLBracket:
@@ -6234,17 +6273,6 @@ begin
           DerefNode.Col  := FCurrent.Col;
           DerefNode.Expr := Inner;
           Result         := DerefNode;
-          while Check(tkDot) and (PeekKind() = tkIdent) do
-          begin
-            Advance();
-            FldNode           := TFieldAccessExpr.Create();
-            FldNode.Line      := FCurrent.Line;
-            FldNode.Col       := FCurrent.Col;
-            FldNode.FieldName := FCurrent.Value;
-            FldNode.Base      := Result;
-            Advance();
-            Result := FldNode;
-          end;
         end
         else
           Result := Inner;
