@@ -9555,6 +9555,11 @@ begin
             an implicit Self.Method() dispatch. }
           if TProcCall(CurStmt).IsImplicitSelfMethod then
             MaybeCaptureName(ADecl, OuterVars, 'Self');
+          { a call THROUGH an outer procedural variable (LM(), VC()) uses
+            that variable: it was never captured, so the nested routine
+            called through a slot of the same name it did not have }
+          if TProcCall(CurStmt).IsIndirectCall then
+            MaybeCaptureName(ADecl, OuterVars, TProcCall(CurStmt).Name);
           { A call to a SIBLING nested routine forwards the callee's captured
             outer variables by address, so the CALLER must capture them too —
             even when its own body never references them (BUG-031).  Only
@@ -9718,6 +9723,9 @@ begin
             class dispatches on the method's Self. }
           if TFuncCallExpr(CurExpr).IsImplicitSelfMethod then
             MaybeCaptureName(ADecl, OuterVars, 'Self');
+          { a call through an outer procedural variable -- see TProcCall }
+          if TFuncCallExpr(CurExpr).IsIndirectCall then
+            MaybeCaptureName(ADecl, OuterVars, TFuncCallExpr(CurExpr).Name);
           { Sibling nested-routine call: fold the callee's captures into the
             caller (BUG-031) — see the TProcCall branch. }
           if (TFuncCallExpr(CurExpr).ResolvedDecl <> nil) and
@@ -10923,6 +10931,7 @@ var
   I:       Integer;
   ObjType: TTypeDesc;
   FldInfo: TFieldInfo;
+  RecvIdent: TIdentExpr;
 begin
   { Call on a receiver expression: AProg.UsedUnits.Add(UName) }
   if ACall.ObjExpr <> nil then
@@ -11085,6 +11094,27 @@ begin
       begin
         ACall.ResolvedClassType := RT;
         ACall.ResolvedMethod    := nil;
+        Exit;
+      end;
+      { R.Handler() with R a field of Self and Handler a procedural FIELD of
+        R: an invocation of the field, not a method of R ("Class 'TRec' has
+        no method 'Handler'").  Make the receiver an explicit expression and
+        take the receiver-expression path, which already calls procedural
+        fields (Self.R.Handler() went that way). }
+      FldInfo := RT.FindField(ACall.Name);
+      if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
+         (FldInfo.TypeDesc.Kind = tyProcedural) and
+         (FindMethodDecl(RT.Name, ACall.Name) = nil) then
+      begin
+        RecvIdent := TIdentExpr.Create();
+        RecvIdent.Line := ACall.Line;
+        RecvIdent.Col := ACall.Col;
+        RecvIdent.Name := ACall.ObjectName;
+        ACall.ObjExpr := RecvIdent;
+        ACall.ObjectName := '';
+        ACall.IsImplicitSelf := False;
+        ACall.ImplicitBaseInfo := nil;
+        Self.AnalyseMethodCall(ACall);
         Exit;
       end;
       HintBareEnumMethodArgs(RT.Name, ACall.Name, ACall.Args);
@@ -14928,6 +14958,21 @@ begin
             Format('Undeclared identifier ''%s''', [AExpr.ObjectName]),
             AExpr.Line, AExpr.Col);
         end;
+      end;
+      if (ObjType <> nil) and (ObjType.Kind = tyRecord) then
+      begin
+        { a RECORD field of Self (R.Handler() calling a procedural field, or
+          R.Sum() a record method): the receiver-expression path handles
+          both -- it is what Self.R.Handler() takes.  Re-analysed from a
+          fresh receiver ident; this one was analysed only to type it. }
+        AExpr.ObjExpr.Free();
+        AExpr.ObjExpr := TIdentExpr.Create();
+        TIdentExpr(AExpr.ObjExpr).Name := AExpr.ObjectName;
+        TIdentExpr(AExpr.ObjExpr).Line := AExpr.Line;
+        TIdentExpr(AExpr.ObjExpr).Col  := AExpr.Col;
+        AExpr.ObjectName := '';
+        Result := Self.AnalyseMethodCallExpr(AExpr);
+        Exit;
       end;
       if (ObjType = nil) or not (ObjType.Kind in [tyClass, tyInterface]) then
       begin

@@ -152,6 +152,21 @@ type
       x86-64 crashed on @R.N, @I, Inc(I), S := S + 'x', BumpR(R) and a
       by-value array element write }
     procedure TestRun_NestedProc_CapturedByRefForms;
+    { SetLength on every l-value form: a Self field, Self.R.D, a var param, a
+      var record param's field, a capture, a capture's field, an object's
+      field, an array element (static and dyn), P^ and P^.F (arm64 refused
+      a string field of Self, a capture and P^; x86-64 refused P^ and wrote a
+      captured one through an undefined global) }
+    procedure TestRun_SetLength_AllLValueForms;
+    { a nested routine calling a captured method pointer / closure / var
+      procedural param, and indexing / resizing captured dyn arrays and
+      strings (both ISAs: not captured at all, or called through a slot the
+      frame did not have; x86-64 wrote through undefined globals) }
+    procedure TestRun_NestedProc_ProcVarsAndDynArrays;
+    { R.M() / R.F() / R.C() / R.Sum() with R a record field of Self (were
+      rejected); arm64 read a Single Self field as 0.0 and refused a var
+      Single param }
+    procedure TestRun_SelfRecordFieldCalls_AndSingles;
     { Nested proc captures an outer VAR ARRAY PARAMETER (element read + write).
       The captured var-param array slot is reached through the _cap_ pointer
       with one extra dereference; without it the element address resolved to a
@@ -3943,6 +3958,184 @@ begin
     '1012 5 7 sv | 103 tx | 6 6' + LE +
     '1012 5 7 sv | 103 tx | 6 6' + LE +
     '1012 5 7 sv | 103 tx | 6 6' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_SetLength_AllLValueForms;
+const
+  Src = '''
+    program SetLengthForms;
+    type
+      TDyn = array of Integer;
+      PDyn = ^TDyn;
+      PStr = ^String;
+      TRec = record D: TDyn; S: String; end;
+      PRec = ^TRec;
+      TObj = class D: TDyn; S: String; R: TRec; procedure Run; end;
+    var GD: TDyn; GS: String; GR: TRec; GO: TObj; AD: array[0..1] of TDyn;
+      AS2: array[0..1] of String; DD: array of TDyn; PD: PDyn; PS: PStr; PR: PRec;
+    procedure Show(const D: TDyn; const S: String); begin WriteLn(Length(D), ' ', Length(S)) end;
+    procedure TObj.Run;
+    begin
+      SetLength(D, 2); SetLength(S, 3); SetLength(Self.R.D, 4); SetLength(R.S, 5);
+      Show(D, S); Show(R.D, R.S)
+    end;
+    procedure VarP(var D: TDyn; var S: String; var R: TRec);
+    begin
+      SetLength(D, 6); SetLength(S, 7); SetLength(R.D, 8); SetLength(R.S, 9)
+    end;
+    procedure Cap;
+    var D: TDyn; S: String; R: TRec;
+      procedure Inner;
+      begin
+        SetLength(D, 1); SetLength(S, 2); SetLength(R.D, 3); SetLength(R.S, 4)
+      end;
+    begin
+      Inner(); Show(D, S); Show(R.D, R.S)
+    end;
+    procedure Run;
+    var LD: TDyn; LS: String;
+    begin
+      GO := TObj.Create(); SetLength(DD, 2); PD := @GD; PS := @GS; PR := @GR;
+      GO.Run();
+      VarP(GD, GS, GR); Show(GD, GS); Show(GR.D, GR.S);
+      Cap();
+      SetLength(LD, 3); SetLength(LS, 2); Show(LD, LS);
+      SetLength(GO.D, 3); SetLength(GO.S, 2); SetLength(GO.R.D, 4); Show(GO.D, GO.S); Show(GO.R.D, GO.S);
+      SetLength(AD[1], 3); SetLength(AS2[0], 2); Show(AD[1], AS2[0]);
+      SetLength(DD[1], 3); Show(DD[1], '');
+      SetLength(PD^, 5); SetLength(PS^, 6); Show(GD, GS);
+      SetLength(PR^.D, 1); SetLength(PR^.S, 2); Show(GR.D, GR.S);
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    '2 3' + LE +
+    '4 5' + LE +
+    '6 7' + LE +
+    '8 9' + LE +
+    '1 2' + LE +
+    '3 4' + LE +
+    '3 2' + LE +
+    '3 2' + LE +
+    '4 2' + LE +
+    '3 2' + LE +
+    '3 0' + LE +
+    '5 6' + LE +
+    '1 2' + LE +
+    'done' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_NestedProc_ProcVarsAndDynArrays;
+const
+  Src = '''
+    program NestedProcVarsAndArrays;
+    type
+      TMeth = procedure of object;
+      TClos = reference to procedure;
+      TDyn = array of Integer;
+      THold = class N: Integer; procedure Hi; end;
+    procedure THold.Hi; begin WriteLn('hi ', N) end;
+    procedure Calls(var VM: TMeth; VC: TClos);
+    var LM: TMeth;
+      procedure Inner;
+      begin
+        LM := VM;
+        LM(); VM(); VC();
+      end;
+    begin
+      Inner(); LM();
+    end;
+    procedure Arrays(var V: TDyn; P: TDyn);
+    var L: TDyn; S: String;
+      procedure Inner;
+      begin
+        L[0] := 5; V[1] := 6; P[0] := 7; S := S + 'x';
+        WriteLn(L[0] + V[1] + P[0], ' ', Length(L), ' ', S);
+        SetLength(L, 3); L[2] := 9; SetLength(S, 1); SetLength(V, 3); V[2] := 4;
+      end;
+    begin
+      SetLength(L, 1); S := 'q';
+      Inner(); WriteLn(L[0], ' ', L[2], ' ', V[1], ' ', P[0], ' ', Length(L), ' ', S, ' ', V[2]);
+    end;
+    var H: THold; M: TMeth; G, D: TDyn;
+    begin
+      H := THold.Create(); H.N := 7; M := @H.Hi;
+      Calls(M, procedure begin WriteLn('c') end);
+      SetLength(G, 2); SetLength(D, 1);
+      Arrays(G, D); WriteLn(G[1], ' ', D[0], ' ', Length(G), ' ', G[2]);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    'hi 7' + LE +
+    'hi 7' + LE +
+    'c' + LE +
+    'hi 7' + LE +
+    '18 1 qx' + LE +
+    '5 9 6 7 3 q 4' + LE +
+    '6 7 3 4' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_SelfRecordFieldCalls_AndSingles;
+const
+  Src = '''
+    program SelfRecordFieldCalls;
+    type
+      TMeth = procedure of object;
+      TFn = function: Integer of object;
+      TCl = reference to function: Integer;
+      THold = class N: Integer; procedure Hi; function Get: Integer; end;
+      TRec = record A: Integer; M: TMeth; F: TFn; C: TCl; function Sum: Integer; procedure Bump; end;
+      TObj = class R: TRec; F: Single; procedure Run; end;
+    procedure THold.Hi; begin WriteLn('hi ', N) end;
+    function THold.Get: Integer; begin Result := N end;
+    function TRec.Sum: Integer; begin Result := A + 1 end;
+    procedure TRec.Bump; begin A := A + 10 end;
+    procedure TObj.Run;
+    var X: Integer; L: Single;
+    begin
+      R.M(); Self.R.M();
+      X := R.F(); WriteLn(X, ' ', R.F() + 1, ' ', R.C(), ' ', Self.R.C());
+      R.Bump(); X := R.Sum(); WriteLn(X, ' ', R.Sum() * 2);
+      L := F; WriteLn(L:0:2, ' ', F:0:2); F := F + 1.25; WriteLn(F:0:2);
+    end;
+    procedure VS(var X: Single; Y: Single);
+    var L: Single;
+      procedure Inner;
+      begin
+        L := X + Y; X := X * 2; Y := Y + L;
+        WriteLn(L:0:2, ' ', X:0:2, ' ', Y:0:2);
+      end;
+    begin
+      L := 0; Inner(); WriteLn(L:0:2, ' ', X:0:2, ' ', Y:0:2);
+    end;
+    var H: THold; O: TObj; G: Single;
+    begin
+      H := THold.Create(); H.N := 7; O := TObj.Create();
+      O.R.M := @H.Hi; O.R.F := @H.Get; O.R.C := function: Integer begin Result := 9 end;
+      O.R.A := 1; O.F := 1.5;
+      O.Run(); O.R.C := nil;
+      G := 1.5; VS(G, 0.25); WriteLn(G:0:2);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    'hi 7' + LE +
+    'hi 7' + LE +
+    '7 8 9 9' + LE +
+    '12 24' + LE +
+    '1.50 1.50' + LE +
+    '2.75' + LE +
+    '1.75 3.00 2.00' + LE +
+    '1.75 3.00 2.00' + LE +
+    '3.00' + LE, 0);
 end;
 
 initialization

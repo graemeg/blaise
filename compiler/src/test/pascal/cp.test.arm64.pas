@@ -207,6 +207,9 @@ type
       NotYet); @O.N on a var-param class derefs the slot to the instance
       (the old arm read the slot itself -- a silent wrong address) }
     procedure TestAddrOfGlobalInterface_IsPairAddress;
+    { L := F with F a Single field of Self: the 32-bit pattern goes through
+      s0 (it was moved as a double: 1.5 read as 0.0, silently) }
+    procedure TestImplicitSelfSingleField_ReadAsSingle;
     procedure TestAddrOfVarParamClassField_DerefsSlot;
     procedure TestRecordProperty_ReadThroughSret;
     procedure TestSmallSetResult_ReturnedInX0;
@@ -5338,6 +5341,23 @@ begin
     Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
 end;
 
+procedure TArm64BackendTests.TestImplicitSelfSingleField_ReadAsSingle;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type TObj = class F: Single; procedure Run; end;
+    procedure TObj.Run; var L: Single; begin L := F end;
+    begin
+    end.
+    ''', TargetArm64);
+  AssertTrue('Single bits through s0',
+    Pos(#9'ldr w0, [x0]' + #10 + #9'fmov s0, w0' + #10 + #9'fcvt d0, s0',
+      AsmT) >= 0);
+end;
+
 procedure TArm64BackendTests.TestAddrOfGlobalInterface_IsPairAddress;
 var
   AsmT: string;
@@ -9496,8 +9516,11 @@ begin
   AssertTrue('result AddRef', Pos(#9'bl __StringAddRef', AsmT) >= 0);
   { the old value is released }
   AssertTrue('old released', Pos(#9'bl __StringRelease', AsmT) >= 0);
-  { the var-param form derefs the slot address to reach the caller's string }
-  AssertTrue('var-param slot dereferenced', Pos(#9'ldr x19, [x19]', AsmT) >= 0);
+  { the var-param form reaches the caller's string through the slot, which
+    holds its address: the slot's VALUE is the string slot's address }
+  AssertTrue('var-param slot dereferenced',
+    Pos(#9'ldur x0, [x29, #-8]' + #10 + #9'mov x19, x0' + #10 +
+      #9'ldr x0, [x19]', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestDynArrayParam_ConstBorrowsByValueRetains;

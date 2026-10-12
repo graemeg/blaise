@@ -221,6 +221,9 @@ type
       subscript or whole-value write carries IsVarParam only for a true var
       param, so it needs this to know the slot is a pointer. }
     FByValAggParams: TStringList;
+    { the current frame's var/out params, own or captured-and-materialised:
+      the slot holds the caller variable's ADDRESS }
+    FFrameVarParams: TStringList;
     FFrameSize:  Integer;       { bytes to reserve for locals (16-aligned) }
 
     { Statement-scoped deferred class-release list (BUG-003 native half).
@@ -556,6 +559,12 @@ type
       nested function (accessed via an implicit pointer param). }
     function IsCaptured(const AName: string): Boolean;
     function IsByValAggParam(const AName: string): Boolean;
+    { A call through the procedural variable AName (a plain pointer, a
+      method pointer or a closure).  A captured or var-param variable has no
+      slot of that name holding the value, so its address goes through
+      callee-saved %rbx first. }
+    procedure EmitIndirectNamedCall(const AName: string;
+      AProcType: TProceduralTypeDesc; AArgs: TObjectList);
     { Load a variable's base (address or stored value) into ADstReg, handling
       local / global / nested-captured variables uniformly. }
     procedure EmitVarBaseToReg(const AName: string; AWantAddress: Boolean;
@@ -604,6 +613,18 @@ type
     procedure EmitIntfRecvPair(AObjExpr: TASTExpr; const AObjName: string;
                                AIsGlobal, AIsVarParam: Boolean);
     procedure EmitCapturedVarAddr(AIdent: TIdentExpr; const ADstReg: string);
+    { The address of an assignment's NAMED target: captured, var param, sret
+      Result, frame local or global. }
+    procedure EmitAsgnTargetAddr(AAsgn: TAssignment; const ADstReg: string);
+    { Dest := Src for a 16-byte method pointer / 'reference to' closure read
+      from an l-value: copy both halves (a 'reference to' destination takes
+      a reference to the new env and drops the old one).  False when the
+      shape is not one it handles. }
+    function  EmitFatValueCopy(AAsgn: TAssignment): Boolean;
+    { %rax := the address of a method-pointer / closure value stored into
+      an array element (an l-value source; any other shape is refused at
+      compile time rather than stored 8 bytes wide) }
+    procedure EmitFatElemSourceAddr(AValue: TASTExpr);
     procedure EmitInterfaceFieldCall(AFld: TFieldInfo; AIntf: TInterfaceTypeDesc;
                                 const AMethName: string; AArgs: TObjectList;
                                 ADiscardIntfRet: Boolean = False);
@@ -1636,6 +1657,7 @@ begin
   FIntfSplitHalf.Free();
   Self.ClearFrame();
   FByValAggParams.Free();
+  FFrameVarParams.Free();
   FDynElemHooks.Free();
   FConstArgUnsafe.Free();
   FImportedUnits.Free();
@@ -5745,6 +5767,39 @@ begin
   Result := (FByValAggParams <> nil) and (FByValAggParams.IndexOf(AName) >= 0);
 end;
 
+procedure TX86_64Backend.EmitIndirectNamedCall(const AName: string;
+  AProcType: TProceduralTypeDesc; AArgs: TObjectList);
+var
+  IsFat, ByAddr: Boolean;
+begin
+  IsFat := (AProcType <> nil) and (AProcType.IsMethodPtr or AProcType.IsReference);
+  ByAddr := (Self.IsCaptured(AName) and not Self.IsLocal(AName)) or
+            ((FFrameVarParams <> nil) and (FFrameVarParams.IndexOf(AName) >= 0));
+  if not ByAddr then
+  begin
+    if IsFat then
+      Self.EmitMethodPtrCall(Self.VarOperand(AName), AProcType, AArgs)
+    else
+      Self.EmitCallIndirect(Self.VarOperand(AName), AProcType, AArgs);
+    Exit;
+  end;
+  { the variable's ADDRESS into %rbx (it survives the argument evaluation):
+    a capture's target, or the caller's variable a var param points at.
+    '(%rbx)' then names the variable itself, fat or plain. }
+  Self.Emit(#9'pushq %rbx');
+  Self.Emit(#9'subq $8, %rsp');
+  if Self.IsCaptured(AName) and not Self.IsLocal(AName) then
+    Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('_cap_' + AName)]))
+  else
+    Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(AName)]));
+  if IsFat then
+    Self.EmitMethodPtrCall('(%rbx)', AProcType, AArgs)
+  else
+    Self.EmitCallIndirect('(%rbx)', AProcType, AArgs);
+  Self.Emit(#9'addq $8, %rsp');
+  Self.Emit(#9'popq %rbx');
+end;
+
 function TX86_64Backend.IsCaptured(const AName: string): Boolean;
 begin
   { An inline candidate captures nothing; without this, a callee ident
@@ -6135,6 +6190,9 @@ begin
   if FByValAggParams = nil then
     FByValAggParams := TStringList.Create();
   FByValAggParams.Clear();
+  if FFrameVarParams = nil then
+    FFrameVarParams := TStringList.Create();
+  FFrameVarParams.Clear();
   FSretInOff  := 0;
   if FIntfSplitHalf = nil then
     FIntfSplitHalf := TDictionary<string, Integer>.Create();
@@ -6226,7 +6284,9 @@ begin
       else if IsCapturedByRefParam(ADecl, ADecl.CapturedVars.Strings[I]) then
       begin
         Self.AddSlot(ADecl.CapturedVars.Strings[I], nil, Offset);
-        if not ADecl.CapturedParam(ADecl.CapturedVars.Strings[I]).IsVarParam then
+        if ADecl.CapturedParam(ADecl.CapturedVars.Strings[I]).IsVarParam then
+          FFrameVarParams.Add(ADecl.CapturedVars.Strings[I])
+        else
           FByValAggParams.Add(ADecl.CapturedVars.Strings[I]);
       end;
   end;
@@ -6289,6 +6349,8 @@ begin
     for I := 0 to ADecl.Params.Count - 1 do
     begin
       P := TMethodParam(ADecl.Params.Items[I]);
+      if P.IsVarParam and not P.IsOpenArray then
+        FFrameVarParams.Add(P.ParamName);
       if P.IsOpenArray then
       begin
         { Two register slots: data pointer and high index. }
@@ -6542,6 +6604,8 @@ begin
   end;
   if FByValAggParams <> nil then
     FByValAggParams.Clear();
+  if FFrameVarParams <> nil then
+    FFrameVarParams.Clear();
   FFrameSize    := 0;
   FFrameBottom  := 0;
   FSretFunc     := False;
@@ -6669,6 +6733,10 @@ begin
       if FI.Offset > 0 then
         Self.Emit(Format(#9'addq $%d, %%rdx', [FI.Offset]));
     end
+    else if Self.IsCaptured(IE.Name) then
+      { a variable of the enclosing routine (SetLength(L, 3) in a nested
+        routine): its address through '_cap_' }
+      Self.EmitCapturedVarAddr(IE, '%rdx')
     else if IE.ParamMode <> pmNone then
       Self.Emit(Format(#9'movq %s, %%rdx', [Self.VarOperand(IE.Name)]))
     else
@@ -6756,6 +6824,14 @@ begin
       SlotAddrWrap.Expr := nil;   { AExpr owned by the caller }
       SlotAddrWrap.Free();
     end;
+    Self.Emit(#9'movq %rax, %rdx');
+    Exit;
+  end;
+  { P^ as an l-value slot (SetLength(PS^, N)): the pointer's value IS the
+    slot's address }
+  if AExpr is TDerefExpr then
+  begin
+    Self.EmitExprToEax(TDerefExpr(AExpr).Expr);
     Self.Emit(#9'movq %rax, %rdx');
     Exit;
   end;
@@ -7875,18 +7951,8 @@ begin
       (BUG-20260722-native-procvar-float-args). }
     if FC.IsIndirectCall then
     begin
-      if (FC.ResolvedProcType <> nil) and
-         (TProceduralTypeDesc(FC.ResolvedProcType).IsMethodPtr or
-          TProceduralTypeDesc(FC.ResolvedProcType).IsReference) then
-        Self.EmitMethodPtrCall(
-          Self.VarOperand(FC.Name),
-          TProceduralTypeDesc(FC.ResolvedProcType),
-          FC.Args)
-      else
-        Self.EmitCallIndirect(
-          Self.VarOperand(FC.Name),
-          TProceduralTypeDesc(FC.ResolvedProcType),
-          FC.Args);
+      Self.EmitIndirectNamedCall(FC.Name,
+        TProceduralTypeDesc(FC.ResolvedProcType), FC.Args);
       Exit;
     end;
     if FC.IsProcFieldCall then
@@ -9653,18 +9719,8 @@ begin
         'reference to' closures carry a 16-byte block — Data (Self / env)
         must be loaded from +8 and the user args shifted right, exactly as
         in the statement path. }
-      if (FC.ResolvedProcType <> nil) and
-         (TProceduralTypeDesc(FC.ResolvedProcType).IsMethodPtr or
-          TProceduralTypeDesc(FC.ResolvedProcType).IsReference) then
-        Self.EmitMethodPtrCall(
-          Self.VarOperand(FC.Name),
-          TProceduralTypeDesc(FC.ResolvedProcType),
-          FC.Args)
-      else
-        Self.EmitCallIndirect(
-          Self.VarOperand(FC.Name),   { local slot or global RIP-relative }
-          TProceduralTypeDesc(FC.ResolvedProcType),
-          FC.Args);
+      Self.EmitIndirectNamedCall(FC.Name,
+        TProceduralTypeDesc(FC.ResolvedProcType), FC.Args);
       { Normalise the return value width. }
       if FC.ResolvedType <> nil then
         Self.EmitNarrowToType(FC.ResolvedType);
@@ -12157,6 +12213,86 @@ begin
     [Self.VarOperand('_cap_' + AIdent.Name), ADstReg]));
   if AIdent.ParamMode <> pmNone then
     Self.Emit(Format(#9'movq (%s), %s', [ADstReg, ADstReg]));
+end;
+
+procedure TX86_64Backend.EmitAsgnTargetAddr(AAsgn: TAssignment;
+  const ADstReg: string);
+begin
+  if Self.IsCaptured(AAsgn.Name) then
+  begin
+    Self.Emit(Format(#9'movq %s, %s',
+      [Self.VarOperand('_cap_' + AAsgn.Name), ADstReg]));
+    if AAsgn.IsVarParam then
+      Self.Emit(Format(#9'movq (%s), %s', [ADstReg, ADstReg]));
+  end
+  else if (FSretFunc and SameText(AAsgn.Name, 'Result')) or AAsgn.IsVarParam then
+    Self.Emit(Format(#9'movq %s, %s', [Self.VarOperand(AAsgn.Name), ADstReg]))
+  else if Self.IsLocal(AAsgn.Name) then
+    Self.Emit(Format(#9'leaq %s, %s', [Self.VarOperand(AAsgn.Name), ADstReg]))
+  else
+  begin
+    Self.AddGlobal(AAsgn.Name, AAsgn.ResolvedLhsType);
+    Self.EmitLeaqGlobal(AAsgn.Name, ADstReg);
+  end;
+end;
+
+function TX86_64Backend.EmitFatValueCopy(AAsgn: TAssignment): Boolean;
+var
+  E: TASTExpr;
+  IsRef: Boolean;
+begin
+  Result := False;
+  E := AAsgn.Expr;
+  if (AAsgn.ResolvedLhsType = nil) or
+     not IsMethodPtrType(AAsgn.ResolvedLhsType) or
+     (E.ResolvedType = nil) or not IsMethodPtrType(E.ResolvedType) then
+    Exit;
+  if not (((E is TIdentExpr) and not TIdentExpr(E).IsConstant) or
+          ((E is TFieldAccessExpr) and (TFieldAccessExpr(E).FieldInfo <> nil) and
+           (TFieldAccessExpr(E).PropRead = nil)) or
+          (E is TStringSubscriptExpr) or (E is TDerefExpr)) then
+    Exit;
+  IsRef := TProceduralTypeDesc(AAsgn.ResolvedLhsType).IsReference;
+  Self.EmitVarArgAddrToRax(E);                 { source fat value }
+  Self.Emit(#9'pushq %rax');
+  if IsRef then
+  begin
+    Self.Emit(#9'movq 8(%rax), %rdi');         { retain the incoming env }
+    Self.Emit(#9'callq _ClassAddRef');
+  end;
+  Self.EmitAsgnTargetAddr(AAsgn, '%rcx');
+  if IsRef then
+  begin
+    Self.Emit(#9'pushq %rcx');
+    Self.Emit(#9'movq 8(%rcx), %rdi');         { then drop the old one }
+    Self.Emit(#9'callq _ClassRelease');
+    Self.Emit(#9'popq %rcx');
+  end;
+  Self.Emit(#9'popq %rsi');
+  Self.Emit(#9'movq (%rsi), %rax');
+  Self.Emit(#9'movq %rax, (%rcx)');
+  Self.Emit(#9'movq 8(%rsi), %rax');
+  Self.Emit(#9'movq %rax, 8(%rcx)');
+  Result := True;
+end;
+
+procedure TX86_64Backend.EmitFatElemSourceAddr(AValue: TASTExpr);
+begin
+  if AValue is TNilLiteral then
+  begin
+    { no source: the copy arm zeroes the element instead }
+    Self.Emit(#9'xorl %eax, %eax');
+    Exit;
+  end;
+  if not (((AValue is TIdentExpr) and not TIdentExpr(AValue).IsConstant) or
+          ((AValue is TFieldAccessExpr) and
+           (TFieldAccessExpr(AValue).FieldInfo <> nil) and
+           (TFieldAccessExpr(AValue).PropRead = nil)) or
+          (AValue is TStringSubscriptExpr) or (AValue is TDerefExpr)) then
+    raise ENativeCodeGenError.Create(Format(
+      'x86-64: not yet lowered: method-pointer / closure element store ' +
+      'from this expression at line %d col %d', [AValue.Line, AValue.Col]));
+  Self.EmitVarArgAddrToRax(AValue);
 end;
 
 procedure TX86_64Backend.EmitVarArgAddrToRax(AArg: TASTExpr);
@@ -16012,35 +16148,17 @@ begin
         Self.Emit(#9'callq _ClassAddRef');
         Exit;
       end;
-      if (Asgn.Expr is TIdentExpr) and
-         (Asgn.Expr.ResolvedType <> nil) and
-         (Asgn.Expr.ResolvedType.Kind = tyProcedural) and
-         (TProceduralTypeDesc(Asgn.Expr.ResolvedType).IsReference or
-          TProceduralTypeDesc(Asgn.Expr.ResolvedType).IsMethodPtr) then
-      begin
-        { Var-to-var copy (reference source, or a method-pointer variable
-          coerced into a closure — same 16-byte layout, receiver retained):
-          retain the incoming env/receiver, release the old one, then copy
-          the 16-byte block. }
-        if Self.IsLocal(TIdentExpr(Asgn.Expr).Name) then
-          Self.Emit(Format(#9'leaq %s, %%rsi',
-            [Self.VarOperand(TIdentExpr(Asgn.Expr).Name)]))
-        else
-          Self.Emit(Format(#9'leaq %s(%%rip), %%rsi',
-            [Self.GlobalSymName(TIdentExpr(Asgn.Expr).Name)]));
-        Self.Emit(#9'pushq %rsi');
-        Self.Emit(#9'movq 8(%rsi), %rdi');
-        Self.Emit(#9'callq _ClassAddRef');
-        Self.EmitVarAddr(Asgn.Name, '%rcx');
-        Self.Emit(#9'movq 8(%rcx), %rdi');
-        Self.Emit(#9'callq _ClassRelease');
-        Self.Emit(#9'popq %rsi');
-        Self.EmitVarAddr(Asgn.Name, '%rdi');
-        Self.Emit(#9'movq $16, %rdx');
-        Self.Emit(#9'callq memcpy');
-        Exit;
-      end;
+      { var-to-var copy (a reference source, or a method-pointer variable
+        coerced into a closure -- same 16-byte layout, receiver retained):
+        EmitFatValueCopy below, which reaches a Self field, a capture or a
+        var param too (this arm addressed only a local or a global) }
     end;
+    { L := M / L := O.F / L := R.F / L := A[I] for a method pointer or a
+      closure: copy BOTH halves.  The scalar tail stored the source's
+      ADDRESS as the code pointer (B := A between two locals called through
+      garbage) or loaded only the code half. }
+    if Self.EmitFatValueCopy(Asgn) then
+      Exit;
     { Method-pointer assignment from @Obj.Method: directly store the
       [CodePtr, ObjPtr] pair into the destination's 16-byte slot. }
     if (Asgn.ResolvedLhsType <> nil) and
@@ -16899,7 +17017,8 @@ begin
         leaked (BUG-20260723-native-delete-string-field-noop). }
       if (TASTExpr(PC.Args.Items[0]) is TIdentExpr) and
          not TIdentExpr(TASTExpr(PC.Args.Items[0])).IsImplicitSelf and
-         (TIdentExpr(TASTExpr(PC.Args.Items[0])).ParamMode = pmNone) then
+         (TIdentExpr(TASTExpr(PC.Args.Items[0])).ParamMode = pmNone) and
+         not Self.IsCaptured(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name) then
       begin
         Self.Emit(#9'pushq %rax');
         Self.Emit(#9'movq %rax, %rdi');
@@ -16944,7 +17063,8 @@ begin
     begin
       if (TASTExpr(PC.Args.Items[0]) is TIdentExpr) and
          not TIdentExpr(TASTExpr(PC.Args.Items[0])).IsImplicitSelf and
-         (TIdentExpr(TASTExpr(PC.Args.Items[0])).ParamMode = pmNone) then
+         (TIdentExpr(TASTExpr(PC.Args.Items[0])).ParamMode = pmNone) and
+         not Self.IsCaptured(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name) then
       begin
         FDynArgName := TIdentExpr(TASTExpr(PC.Args.Items[0])).Name;
         FDynElemSz :=
@@ -17004,7 +17124,8 @@ begin
       Self.Emit(#9'callq _StringSetLength');
       if (TASTExpr(PC.Args.Items[0]) is TIdentExpr) and
          not TIdentExpr(TASTExpr(PC.Args.Items[0])).IsImplicitSelf and
-         (TIdentExpr(TASTExpr(PC.Args.Items[0])).ParamMode = pmNone) then
+         (TIdentExpr(TASTExpr(PC.Args.Items[0])).ParamMode = pmNone) and
+         not Self.IsCaptured(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name) then
       begin
         Self.Emit(#9'pushq %rax');
         Self.Emit(#9'movq %rax, %rdi');
@@ -17257,16 +17378,8 @@ begin
     end;
     if PC.IsIndirectCall then
     begin
-      if (PC.ResolvedProcType <> nil) and
-         (TProceduralTypeDesc(PC.ResolvedProcType).IsMethodPtr or
-          TProceduralTypeDesc(PC.ResolvedProcType).IsReference) then
-        Self.EmitMethodPtrCall(Self.VarOperand(PC.Name),
-          TProceduralTypeDesc(PC.ResolvedProcType), PC.Args)
-      else
-        Self.EmitCallIndirect(
-          Self.VarOperand(PC.Name),
-          TProceduralTypeDesc(PC.ResolvedProcType),
-          PC.Args);
+      Self.EmitIndirectNamedCall(PC.Name,
+        TProceduralTypeDesc(PC.ResolvedProcType), PC.Args);
       Exit;
     end;
     if PC.IsImplicitSelfMethod and (PC.ResolvedDecl <> nil) then
@@ -18854,6 +18967,14 @@ begin
             Self.Emit(Format(#9'addq $%d, %%rcx', [SSA.ImplicitFieldInfo.Offset]));
           Self.Emit(#9'movq (%rcx), %rcx');
         end
+        else if Self.IsCaptured(SSA.ArrayName) and not Self.IsLocal(SSA.ArrayName) then
+        begin
+          { a dyn array captured from the enclosing routine: '_cap_' holds
+            the address of its slot (one load gives the data pointer); the
+            global fallback below named a symbol that does not exist }
+          Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('_cap_' + SSA.ArrayName)]));
+          Self.Emit(#9'movq (%rcx), %rcx');
+        end
         else if Self.IsLocal(SSA.ArrayName) then
         begin
           Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(SSA.ArrayName)]));
@@ -18892,6 +19013,14 @@ begin
             Self.Emit(Format(#9'addq $%d, %%r14', [SSA.ImplicitFieldInfo.Offset]));
           Self.Emit(#9'movq (%r14), %r14');
         end
+        else if Self.IsCaptured(SSA.ArrayName) and not Self.IsLocal(SSA.ArrayName) then
+        begin
+          { a dyn array captured from the enclosing routine: '_cap_' holds
+            the address of its slot (one load gives the data pointer); the
+            global fallback below named a symbol that does not exist }
+          Self.Emit(Format(#9'movq %s, %%r14', [Self.VarOperand('_cap_' + SSA.ArrayName)]));
+          Self.Emit(#9'movq (%r14), %r14');
+        end
         else if Self.IsLocal(SSA.ArrayName) then
         begin
           Self.Emit(Format(#9'movq %s, %%r14', [Self.VarOperand(SSA.ArrayName)]));
@@ -18921,6 +19050,8 @@ begin
       end
       else if DAElemType.Kind in [tyByte, tyBoolean] then
         Self.EmitByteRhsToEax(SSA.ValueExpr)
+      else if IsMethodPtrType(DAElemType) then
+        Self.EmitFatElemSourceAddr(SSA.ValueExpr)
       else
         Self.EmitExprToEax(SSA.ValueExpr);
       Self.Emit(#9'pushq %rax');
@@ -18937,6 +19068,14 @@ begin
         Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('Self')]));
         if SSA.ImplicitFieldInfo.Offset > 0 then
           Self.Emit(Format(#9'addq $%d, %%rcx', [SSA.ImplicitFieldInfo.Offset]));
+        Self.Emit(#9'movq (%rcx), %rcx');
+      end
+      else if Self.IsCaptured(SSA.ArrayName) and not Self.IsLocal(SSA.ArrayName) then
+      begin
+        { a dyn array captured from the enclosing routine: '_cap_' holds
+          the address of its slot (one load gives the data pointer); the
+          global fallback below named a symbol that does not exist }
+        Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('_cap_' + SSA.ArrayName)]));
         Self.Emit(#9'movq (%rcx), %rcx');
       end
       else if Self.IsLocal(SSA.ArrayName) then
@@ -18964,12 +19103,16 @@ begin
           Self.Emit(#9'addq $8, %rsp');         { drop stashed base ptr }
         Exit;
       end;
-      if (DAElemType.Kind = tyRecord) or IsJumboSet(DAElemType) then
+      if (DAElemType.Kind = tyRecord) or IsJumboSet(DAElemType) or
+         IsMethodPtrType(DAElemType) then
       begin
         { Record element: ARC-aware copy of the record contents (retain the
           source's managed fields, release the destination's, then memcpy).
           The source record address was pushed above; %rcx holds the element
-          address.  Push count stays even so calls remain 16-byte aligned. }
+          address.  Push count stays even so calls remain 16-byte aligned.
+          A method pointer / closure is the same 16-byte copy (a 'reference
+          to' one retains the new env and drops the old); EmitStoreVar would
+          have stored 8 bytes of it. }
         Self.Emit(#9'pushq %rbx');
         Self.Emit(#9'pushq %r15');
         Self.Emit(#9'subq $8, %rsp');
@@ -18980,11 +19123,25 @@ begin
         begin
           Self.EmitRecordFieldRetains(TRecordTypeDesc(DAElemType), '%rbx');
           Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15', False);
+        end
+        else if ArcTypeIsRefClosure(DAElemType) then
+        begin
+          if not (SSA.ValueExpr is TNilLiteral) then
+            Self.EmitRetainSlotAt(DAElemType, 8, '%rbx');
+          Self.EmitReleaseSlotAt(DAElemType, 8, '%r15', False);
         end;
-        Self.Emit(#9'movq %r15, %rdi');
-        Self.Emit(#9'movq %rbx, %rsi');
-        Self.Emit(Format(#9'movq $%d, %%rdx', [DAElemType.RawSize()]));
-        Self.Emit(#9'callq memcpy');
+        if IsMethodPtrType(DAElemType) and (SSA.ValueExpr is TNilLiteral) then
+        begin
+          Self.Emit(#9'movq $0, (%r15)');
+          Self.Emit(#9'movq $0, 8(%r15)');
+        end
+        else
+        begin
+          Self.Emit(#9'movq %r15, %rdi');
+          Self.Emit(#9'movq %rbx, %rsi');
+          Self.Emit(Format(#9'movq $%d, %%rdx', [DAElemType.RawSize()]));
+          Self.Emit(#9'callq memcpy');
+        end;
         Self.Emit(#9'addq $8, %rsp');
         Self.Emit(#9'popq %r15');
         Self.Emit(#9'popq %rbx');
@@ -19120,6 +19277,8 @@ begin
     end
     else if DAElemType.Kind in [tyByte, tyBoolean] then
       Self.EmitByteRhsToEax(SSA.ValueExpr)
+    else if IsMethodPtrType(DAElemType) then
+      Self.EmitFatElemSourceAddr(SSA.ValueExpr)
     else
       Self.EmitExprToEax(SSA.ValueExpr);
     Self.Emit(#9'pushq %rax');
@@ -19164,10 +19323,11 @@ begin
         Self.Emit(#9'addq $8, %rsp');           { drop stashed base address }
       Exit;
     end;
-    if (DAElemType.Kind = tyRecord) or IsJumboSet(DAElemType) then
+    if (DAElemType.Kind = tyRecord) or IsJumboSet(DAElemType) or
+       IsMethodPtrType(DAElemType) then
     begin
       { Record element: ARC-aware copy — same scheme as the dyn-array
-        record branch above. }
+        record branch above (a method pointer / closure included). }
       Self.Emit(#9'pushq %rbx');
       Self.Emit(#9'pushq %r15');
       Self.Emit(#9'subq $8, %rsp');
@@ -19178,11 +19338,25 @@ begin
       begin
         Self.EmitRecordFieldRetains(TRecordTypeDesc(DAElemType), '%rbx');
         Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15', False);
+      end
+      else if ArcTypeIsRefClosure(DAElemType) then
+      begin
+        if not (SSA.ValueExpr is TNilLiteral) then
+          Self.EmitRetainSlotAt(DAElemType, 8, '%rbx');
+        Self.EmitReleaseSlotAt(DAElemType, 8, '%r15', False);
       end;
-      Self.Emit(#9'movq %r15, %rdi');
-      Self.Emit(#9'movq %rbx, %rsi');
-      Self.Emit(Format(#9'movq $%d, %%rdx', [DAElemType.RawSize()]));
-      Self.Emit(#9'callq memcpy');
+      if IsMethodPtrType(DAElemType) and (SSA.ValueExpr is TNilLiteral) then
+      begin
+        Self.Emit(#9'movq $0, (%r15)');
+        Self.Emit(#9'movq $0, 8(%r15)');
+      end
+      else
+      begin
+        Self.Emit(#9'movq %r15, %rdi');
+        Self.Emit(#9'movq %rbx, %rsi');
+        Self.Emit(Format(#9'movq $%d, %%rdx', [DAElemType.RawSize()]));
+        Self.Emit(#9'callq memcpy');
+      end;
       Self.Emit(#9'addq $8, %rsp');
       Self.Emit(#9'popq %r15');
       Self.Emit(#9'popq %rbx');

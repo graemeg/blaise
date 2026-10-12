@@ -48,6 +48,11 @@ type
     { @MakeObj().N: the owned base is released at the statement end
       (x86-64 leaked it; arm64 was NotYet) }
     procedure TestDebug_AddrOfOwnedTransientField_NoLeak;
+    { method pointers and closures copied between locals, globals, fields,
+      record fields, elements, P^, captures and var params -- both halves,
+      closures retaining their env (x86-64 copied the source ADDRESS or one
+      half and crashed; arm64 refused most sources and every element store) }
+    procedure TestDebug_MethodPtrAndClosureCopies_NoLeak;
     { an owned class call result narrowed to an interface -- into a local, a
       field, an implicit-Self field, a function Result and an interface
       argument -- is consumed, not retained a second time (x86-64 leaked one
@@ -3569,6 +3574,81 @@ begin
       WriteLn('done');
     end.
     ''', 'destroy' + #10 + 'False' + #10 + 'True' + #10 + 'destroy' + #10 + 'False' + #10 + 'destroy' + #10 + 'False' + #10 + 'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_MethodPtrAndClosureCopies_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program FatCopies;
+    type
+      TMeth = procedure of object;
+      TClos = reference to procedure;
+      THold = class N: Integer; procedure Hi; end;
+      TRec = record M: TMeth; C: TClos; end;
+      PRec = ^TRec;
+      TObj = class M: TMeth; C: TClos; R: TRec; procedure Run; end;
+    procedure THold.Hi; begin WriteLn('hi ', N) end;
+    var GM: TMeth; GC: TClos; GR: TRec; AM: array[0..1] of TMeth; AC: array of TClos; PR: PRec;
+    procedure TObj.Run;
+    var LM: TMeth; LC: TClos;
+    begin
+      LM := M; LM(); LM := Self.R.M; LM();
+      LC := C; LC(); LC := Self.R.C; LC();
+      M := GM; M(); C := GC; C();
+      R.M := LM; R.M(); R.C := LC; R.C();
+    end;
+    procedure VarTargets(var VM: TMeth; var VC: TClos);
+    var LM: TMeth; LC: TClos;
+      procedure Inner;
+      begin
+        LM := VM; LM(); VM := GR.M; VM();
+        LC := VC; LC(); VC := GR.C; VC();
+      end;
+    begin
+      Inner(); VM := AM[1]; VM(); VC := AC[0]; VC(); LM := PR^.M; LM(); LC := PR^.C; LC();
+    end;
+    procedure Run;
+    var H: THold; O: TObj; LM: TMeth; LC: TClos;
+    begin
+      H := THold.Create(); H.N := 7;
+      GM := @H.Hi; GC := procedure begin WriteLn('clos ', H.N) end;
+      GR.M := GM; GR.C := GC; AM[1] := GM; SetLength(AC, 1); AC[0] := GC; PR := @GR;
+      O := TObj.Create(); O.M := GM; O.C := GC; O.R.M := GM; O.R.C := GC;
+      O.Run();
+      LM := GM; LC := GC;
+      VarTargets(LM, LC); LM(); LC();
+      GC := nil; SetLength(AC, 0); GR.C := nil; LC := nil;
+      O.C := nil; O.R.C := nil;
+      AM[0] := LM; LM := AM[0]; LM();
+      LC := procedure begin WriteLn('e ', H.N) end; SetLength(AC, 2); AC[1] := LC; LC := nil;
+      LC := AC[1]; LC(); AC[1] := nil; LC := nil; SetLength(AC, 0);
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''', 'hi 7' + #10 +
+    'hi 7' + #10 +
+    'clos 7' + #10 +
+    'clos 7' + #10 +
+    'hi 7' + #10 +
+    'clos 7' + #10 +
+    'hi 7' + #10 +
+    'clos 7' + #10 +
+    'hi 7' + #10 +
+    'hi 7' + #10 +
+    'clos 7' + #10 +
+    'clos 7' + #10 +
+    'hi 7' + #10 +
+    'clos 7' + #10 +
+    'hi 7' + #10 +
+    'clos 7' + #10 +
+    'hi 7' + #10 +
+    'clos 7' + #10 +
+    'hi 7' + #10 +
+    'e 7' + #10 +
+    'done');
 end;
 
 initialization

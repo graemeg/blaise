@@ -27,6 +27,20 @@ type
     procedure TestCodegen_ProcVarCall_InterfaceArg_TwoSlots;
     procedure TestCodegen_ProcFieldCall_FloatArg_InXmm;
     procedure TestCodegen_IntfParam_SplitAcrossLastRegister;
+    { a method pointer copied from another variable or a field moves BOTH
+      16 bytes (x86-64 stored the source's ADDRESS as the code pointer, or
+      only the code half; arm64 refused an implicit-Self field source) }
+    procedure TestCodegen_MethodPtrCopy_BothHalves;
+    { AM[I] := GM for a method-pointer element: a 16-byte copy on both (x86-64
+      stored 8 bytes, arm64 refused it) }
+    procedure TestCodegen_MethodPtrElementStore_CopiesBothHalves;
+    { R.M() / X := R.F() with R a record FIELD of Self and M/F procedural
+      fields of it: a call of the field ("Class 'TRec' has no method 'M'" /
+      "Undeclared identifier 'R'") }
+    procedure TestSemantic_ImplicitSelfRecordProcField_IsCalled;
+    { a nested routine that only CALLS an outer procedural variable captures
+      it (it called through a slot of that name it did not have) }
+    procedure TestSemantic_IndirectCallCallee_IsCaptured;
     { Parser — bare procedural type declarations }
     procedure TestParse_NoArgFunc_KindIsProcedural;
     procedure TestParse_NoArgFunc_ReturnTypeIsInteger;
@@ -599,6 +613,99 @@ begin
       #9'movq %r9, -56(%rbp)'#10#9'movq 16(%rbp), %rax'#10 +
         #9'movq %rax, -48(%rbp)',
       #9'bl _Seven'#10));
+end;
+
+procedure TProcTypesTests.TestCodegen_MethodPtrCopy_BothHalves;
+const
+  Src = '''
+    program P;
+    type
+      TMeth = procedure of object;
+      TObj = class M: TMeth; procedure Run; end;
+    procedure TObj.Run; var K: TMeth; begin K := M end;
+    var A, B: TMeth;
+    begin
+      B := A;
+    end.
+    ''';
+begin
+  AssertEquals('both halves copied', '',
+    AsmMissing(Src,
+      #9'popq %rsi' + #10 + #9'movq (%rsi), %rax' + #10 +
+        #9'movq %rax, (%rcx)' + #10 + #9'movq 8(%rsi), %rax' + #10 +
+        #9'movq %rax, 8(%rcx)',
+      #9'ldr x1, [sp], #16' + #10 + #9'ldp x9, x10, [x1]' + #10 +
+        #9'sub x1, x29, #'));
+end;
+
+procedure TProcTypesTests.TestCodegen_MethodPtrElementStore_CopiesBothHalves;
+const
+  Src = '''
+    program P;
+    type TMeth = procedure of object;
+    var GM: TMeth; AM: array[0..1] of TMeth;
+    begin
+      AM[1] := GM;
+    end.
+    ''';
+begin
+  AssertEquals('a 16-byte element copy', '',
+    AsmMissing(Src,
+      #9'movq $16, %rdx' + #10 + #9'callq memcpy',
+      #9'ldp x10, x11, [x1]' + #10 + #9'stp x10, x11, [x9]'));
+end;
+
+procedure TProcTypesTests.TestSemantic_ImplicitSelfRecordProcField_IsCalled;
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse('''
+    program P;
+    type
+      TFn = function: Integer of object;
+      TMeth = procedure of object;
+      TRec = record M: TMeth; F: TFn; end;
+      TObj = class R: TRec; procedure Run; end;
+    procedure TObj.Run;
+    var X: Integer;
+    begin
+      R.M();
+      X := R.F() + 1;
+    end;
+    begin
+    end.
+    ''');
+  AssertNotNull('analysed', Prog);
+  Prog.Free();
+end;
+
+procedure TProcTypesTests.TestSemantic_IndirectCallCallee_IsCaptured;
+var
+  Prog: TProgram;
+  Outer, Inner: TMethodDecl;
+begin
+  Prog := Analyse('''
+    program P;
+    type TClos = reference to procedure;
+    procedure Outer(VC: TClos);
+      procedure Inner;
+      begin
+        VC();
+      end;
+    begin
+      Inner();
+    end;
+    begin
+    end.
+    ''');
+  try
+    Outer := TMethodDecl(Prog.Block.ProcDecls.Items[0]);
+    Inner := TMethodDecl(Outer.Body.ProcDecls.Items[0]);
+    AssertTrue('VC captured',
+      (Inner.CapturedVars <> nil) and (Inner.CapturedVars.IndexOf('VC') >= 0));
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization

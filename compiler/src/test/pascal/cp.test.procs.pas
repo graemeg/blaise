@@ -32,6 +32,10 @@ type
       frame a real slot holding the owner's pointer, so every var-param
       path finds it (they read a slot that frame did not have) }
     procedure TestCodegen_CapturedRecordParams_ReachTheRecord;
+    { L[0] := 5 / SetLength(L, 3) on a dyn array captured from the outer
+      routine: through '_cap_' (x86-64 wrote through an undefined global of
+      that name) }
+    procedure TestCodegen_CapturedDynArray_ElementAndSetLength;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -521,6 +525,39 @@ begin
         #9'movq %rax, -24(%rbp)',
       #9'ldur x9, [x29, #-8]' + #10 + #9'mov x0, x9' + #10 +
         #9'ldrsw x0, [x0]'));
+end;
+
+procedure TProcFuncTests.TestCodegen_CapturedDynArray_ElementAndSetLength;
+const
+  Src = '''
+    program P;
+    type TDyn = array of Integer;
+    procedure Outer;
+    var L: TDyn;
+      procedure Inner;
+      begin
+        L[0] := 5;
+        SetLength(L, 3);
+      end;
+    begin
+      Inner();
+    end;
+    begin
+      Outer();
+    end.
+    ''';
+begin
+  AssertEquals('element store through _cap_', '',
+    AsmMissing(Src,
+      #9'movq -8(%rbp), %rcx' + #10 + #9'movq (%rcx), %rcx' + #10 +
+        #9'addq %rcx, %rax',
+      #9'ldur x0, [x29, #-8]' + #10 + #9'ldr x0, [x0]' + #10 +
+        #9'ldr x1, [sp], #16'));
+  AssertEquals('SetLength through _cap_', '',
+    AsmMissing(Src,
+      #9'movq -8(%rbp), %rdx' + #10 + #9'pushq %rdx',
+      #9'ldur x0, [x29, #-8]' + #10 + #9'str x0, [sp, #-16]!' + #10 +
+        #9'ldr x0, [x0]'));
 end;
 
 initialization
