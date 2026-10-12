@@ -203,6 +203,11 @@ type
     procedure TestClosureCall_DoubleArgInD0;
     procedure TestPointerWrite_RecordCopiesWithArc;
     procedure TestAddrOfLocalInterface_IsPairAddress;
+    { @G on a GLOBAL interface: its halves are one contiguous block (was
+      NotYet); @O.N on a var-param class derefs the slot to the instance
+      (the old arm read the slot itself -- a silent wrong address) }
+    procedure TestAddrOfGlobalInterface_IsPairAddress;
+    procedure TestAddrOfVarParamClassField_DerefsSlot;
     procedure TestRecordProperty_ReadThroughSret;
     procedure TestSmallSetResult_ReturnedInX0;
     procedure TestInterfaceFromDeref_PairLoad;
@@ -5331,6 +5336,53 @@ begin
     ''', TargetArm64);
   AssertTrue('itab half written through the pointer',
     Pos(#9'str x1, [x9, #8]', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestAddrOfGlobalInterface_IsPairAddress;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      IG = interface
+        function Greet: Int64;
+      end;
+      PIG = ^IG;
+    var
+      G: IG;
+      PG: PIG;
+    begin
+      PG := @G;
+    end.
+    ''', TargetArm64);
+  AssertTrue('&G is the pair block''s address',
+    Pos(#9'adrp x0, _g_G@PAGE' + #10 + #9'add x0, x0, _g_G@PAGEOFF', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestAddrOfVarParamClassField_DerefsSlot;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    type
+      TObj = class N: Integer; end;
+      PInt = ^Integer;
+    procedure Take(var O: TObj; var P: PInt);
+    begin
+      P := @O.N;
+    end;
+    var O: TObj; Q: PInt;
+    begin
+      Take(O, Q);
+    end.
+    ''', TargetArm64);
+  AssertTrue('slot -> caller var -> instance, then the field offset',
+    Pos(#9'ldur x0, [x29, #-8]' + #10 + #9'ldr x0, [x0]' + #10 +
+      #9'add x0, x0, #8', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestRecordProperty_ReadThroughSret;

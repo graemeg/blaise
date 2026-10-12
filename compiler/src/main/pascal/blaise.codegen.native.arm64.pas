@@ -6115,16 +6115,12 @@ begin
       { @IntfVar: an interface variable is a 16-byte (obj, itab) pair.  A
         frame local / parameter is ONE contiguous block (AddIntfLocal) and a
         Self field sits inline, so the pair's address is the obj slot's
-        address (EmitRecIdentAddr: slot, Self field or capture).  A GLOBAL is
-        still two separate symbols with no single address -- refuse it rather
-        than hand out an address whose +8 is not the itab. }
+        address (EmitRecIdentAddr: slot, Self field or capture).  A GLOBAL's
+        two halves are emitted as one contiguous 16-byte block too (the
+        _itab label sits inside it), so &G is the fat value's address. }
       if (TAddrOfExpr(AExpr).Expr.ResolvedType <> nil) and
          (TAddrOfExpr(AExpr).Expr.ResolvedType.Kind = tyInterface) then
       begin
-        if not IsLocal(TIdentExpr(TAddrOfExpr(AExpr).Expr).Name) and
-           not TIdentExpr(TAddrOfExpr(AExpr).Expr).IsImplicitSelf and
-           not IsCaptured(TIdentExpr(TAddrOfExpr(AExpr).Expr).Name) then
-          NotYet('address-of a global interface variable', AExpr);
         EmitRecIdentAddr('x0', TIdentExpr(TAddrOfExpr(AExpr).Expr));
         Exit;
       end;
@@ -6159,54 +6155,11 @@ begin
     if (TAddrOfExpr(AExpr).Expr is TFieldAccessExpr) and
        (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).FieldInfo <> nil) then
     begin
-      { @Rec.Field / @P^.Field: the field's address }
-      if TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base is TDerefExpr then
-        Self.EmitExprToX0(TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base)
-      else if (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base = nil) and
-              (not TFieldAccessExpr(TAddrOfExpr(AExpr).Expr)
-                     .IsClassAccess) and
-              (not TFieldAccessExpr(TAddrOfExpr(AExpr).Expr)
-                     .IsImplicitSelf) then
-        EmitSlotAddr('x0',
-          TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).RecordName)
-      else if (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base = nil) and
-              TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).IsClassAccess and
-              (not TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).IsImplicitSelf) then
-      begin
-        { @Obj.Field: the instance pointer the class variable holds }
-        if not EmitCapturedBase('x0',
-                 TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).RecordName,
-                 True, False) then
-          EmitLoadSlot('x0', TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).RecordName);
-      end
-      else if (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base <> nil) and
-              (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base.ResolvedType <> nil) and
-              (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base.ResolvedType.Kind
-                 = tyClass) and
-              not ArcExprOwnsRef(TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base) then
-        { @A.B.Field with B a class: B's value is the instance pointer }
-        Self.EmitExprToX0(TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base)
-      else if (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base <> nil) and
-              (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base.ResolvedType <> nil) and
-              (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base.ResolvedType.Kind
-                 = tyRecord) then
-        { @A.Rec.Field: the record base's own address }
-        EmitRecAddrToX0(TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base)
-      else if (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).Base = nil) and
-              TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).IsImplicitSelf and
-              (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).ImplicitBaseInfo <> nil) then
-      begin
-        { @FRec.Field / @FObj.Field inside a method: step from Self to the
-          base the same way every other implicit-Self access does }
-        EmitLoadSlot('x0', 'Self');
-        EmitImplicitBaseStep('x0',
-          TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).ImplicitBaseInfo);
-      end
-      else
-        NotYet('address-of on this field form', AExpr);
-      if TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).FieldInfo.Offset <> 0 then
-        Self.Emit(Format(#9'add x0, x0, #%d',
-          [TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).FieldInfo.Offset]));
+      { @Rec.Field / @P^.Field / @Obj.Field / @A.B.Field / @FRec.Field: the
+        field's address, composed exactly as every record-address consumer
+        composes it (var-param class bases dereferenced, an owned transient
+        class base deferred to the statement end) }
+      EmitRecFieldAddrToX0(TFieldAccessExpr(TAddrOfExpr(AExpr).Expr));
       Exit;
     end;
     if (TAddrOfExpr(AExpr).Expr is TStringSubscriptExpr) and

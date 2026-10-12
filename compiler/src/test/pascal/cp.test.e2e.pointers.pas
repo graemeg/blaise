@@ -54,6 +54,10 @@ type
       field of a class instance.  memcpy from that address proves the base
       (instance ptr + field offset + index*elemsize) is computed correctly. }
     procedure TestRun_AddrOfClassArrayFieldElement;
+    { P4-1 address-of forms: @GlobalIntf (arm64 NotYet), @O.N through a var
+      class parameter (arm64 read the SLOT -- wrote to the wrong place),
+      @Arr[I].F, @DynArr[I].F, @Arr[I].A[J], @O.Rec.F, @O.Rec.A[J] }
+    procedure TestRun_AddrOfFieldForms;
     { P^.Method() / P^.Method statements / GetP()^ := / GetP()^.F := on a
       class, an interface (incl. sret results and arguments) and a record }
     procedure TestRun_DerefMethodCallsAndCallResultDerefs;
@@ -90,6 +94,53 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '42 42 7' + LineEnding, 0);
+end;
+
+procedure TE2EPointersTests.TestRun_AddrOfFieldForms;
+const
+  Src = '''
+    program P;
+    type
+      IFoo = interface function Get: Integer; end;
+      TFoo = class(TObject, IFoo)
+        V: Integer;
+        function Get: Integer;
+      end;
+      TRec = record A, B: Integer; Arr: array[0..3] of Integer; end;
+      TObj = class
+        N: Integer;
+        R: TRec;
+      end;
+      PInt = ^Integer;
+      PIFoo = ^IFoo;
+    var
+      GI: IFoo;
+      Recs: array[0..2] of TRec;
+      DRecs: array of TRec;
+    function TFoo.Get: Integer; begin Result := V end;
+    procedure SetVia(P: PInt; V: Integer); begin P^ := V end;
+    procedure VarRec(var R: TRec); begin SetVia(@R.B, 77); SetVia(@R.Arr[2], 78) end;
+    procedure VarObj(var O: TObj); begin SetVia(@O.N, 55) end;
+    procedure UseIntfPtr(P: PIFoo); var I: IFoo; begin I := P^; WriteLn(I.Get()) end;
+    var
+      R: TRec; O: TObj; F: TFoo;
+    begin
+      F := TFoo.Create(); F.V := 42; GI := F;
+      UseIntfPtr(@GI);
+      VarRec(R); WriteLn(R.B, ' ', R.Arr[2]);
+      O := TObj.Create(); VarObj(O); WriteLn(O.N);
+      SetVia(@Recs[1].B, 11);
+      SetLength(DRecs, 3); SetVia(@DRecs[2].A, 12);
+      SetVia(@Recs[1].Arr[3], 13);
+      SetVia(@O.R.B, 14);
+      SetVia(@O.R.Arr[1], 15);
+      WriteLn(Recs[1].B, ' ', DRecs[2].A, ' ', Recs[1].Arr[3], ' ', O.R.B, ' ', O.R.Arr[1]);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '42' + LineEnding + '77 78' + LineEnding + '55' +
+    LineEnding + '11 12 13 14 15' + LineEnding, 0);
 end;
 
 procedure TE2EPointersTests.TestRun_DerefMethodCallsAndCallResultDerefs;

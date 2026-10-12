@@ -45,6 +45,9 @@ type
     procedure TestDebug_FreeAndVarArgThroughOwnedBase_NoLeak;
     procedure TestDebug_OrdAtStringTransient_NoLeak;
     procedure TestDebug_OwnedIntoWeakTargets_NoLeak;
+    { @MakeObj().N: the owned base is released at the statement end
+      (x86-64 leaked it; arm64 was NotYet) }
+    procedure TestDebug_AddrOfOwnedTransientField_NoLeak;
     { an owned class call result narrowed to an interface -- into a local, a
       field, an implicit-Self field, a function Result and an interface
       argument -- is consumed, not retained a second time (x86-64 leaked one
@@ -3492,6 +3495,36 @@ begin
       WriteLn('done');
     end.
     ''', '654' + #10 + 'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_AddrOfOwnedTransientField_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program p37;
+    type
+      TObj = class
+        N: Integer;
+        destructor Destroy; override;
+      end;
+      PInt = ^Integer;
+    destructor TObj.Destroy;
+    begin
+      WriteLn('destroy');
+      inherited Destroy();
+    end;
+    function MakeObj: TObj; begin Result := TObj.Create() end;
+    procedure Run;
+    var P: PInt;
+    begin
+      P := @MakeObj().N;
+      WriteLn(Assigned(P));
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''', 'destroy' + #10 + 'True' + #10 + 'done');
 end;
 
 procedure TE2ELeakCheckTests.TestDebug_OwnedIntoWeakTargets_NoLeak;

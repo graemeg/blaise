@@ -11164,6 +11164,10 @@ begin
       if FAE.Base <> nil then
       begin
         Self.EmitExprToEax(FAE.Base);
+        { an OWNED transient class base (@MakeObj().N) must outlive every use
+          of the address: release it at the statement end, not never }
+        if FAE.IsClassAccess and NativeExprOwnsRef(FAE.Base) then
+          Self.DeferNativeClassRelease();
         Self.Emit(#9'movq %rax, %rcx');
       end
       else if FAE.IsImplicitSelf then
@@ -11235,6 +11239,10 @@ begin
       if FAE.Base <> nil then
       begin
         Self.EmitExprToEax(FAE.Base);
+        { an OWNED transient class base (@MakeObj().N) must outlive every use
+          of the address: release it at the statement end, not never }
+        if FAE.IsClassAccess and NativeExprOwnsRef(FAE.Base) then
+          Self.DeferNativeClassRelease();
         Self.Emit(#9'movq %rax, %rcx');
       end
       else if FAE.IsImplicitSelf then
