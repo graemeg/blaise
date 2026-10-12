@@ -2954,6 +2954,16 @@ begin
     Result := NativeMangle(ATypeName + '_' + AMethodName);
 end;
 
+function IsFatLValueExpr(AExpr: TASTExpr): Boolean;
+begin
+  { a method pointer / closure with storage to address (EmitVarArgAddrToRax) }
+  Result := ((AExpr is TIdentExpr) and not TIdentExpr(AExpr).IsConstant) or
+            ((AExpr is TFieldAccessExpr) and
+             (TFieldAccessExpr(AExpr).FieldInfo <> nil) and
+             (TFieldAccessExpr(AExpr).PropRead = nil)) or
+            (AExpr is TStringSubscriptExpr) or (AExpr is TDerefExpr);
+end;
+
 function IsCapturedByRefParam(ADecl: TMethodDecl; const AName: string): Boolean;
 var
   P: TMethodParam;
@@ -7801,6 +7811,15 @@ begin
     Exit;
   end;
 
+  if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsArrayAccess then
+  begin
+    { O.A[I] with A an array FIELD of floats: load the ELEMENT (the arm
+      below loaded the array field's first bytes, at the field's width) }
+    Self.EmitVarArgAddrToRax(AExpr);
+    Self.Emit(#9'movq %rax, %rcx');
+    Self.EmitLoadFloat('(%rcx)', AExpr.ResolvedType);
+    Exit;
+  end;
   if AExpr is TFieldAccessExpr then
   begin
     Ty := TFieldAccessExpr(AExpr).FieldInfo.TypeDesc;
@@ -8971,6 +8990,20 @@ begin
         Self.Emit(#9'subl $1, %eax');
       Exit;
     end;
+    if SameText(FC.Name, 'Assigned') and (FC.Args.Count = 1) and
+       IsMethodPtrType(TASTExpr(FC.Args.Items[0]).ResolvedType) and
+       IsFatLValueExpr(TASTExpr(FC.Args.Items[0])) then
+    begin
+      { a method pointer / closure is assigned when its CODE half is set.
+        Its value evaluates to the 16-byte block's ADDRESS, which is never
+        nil -- Assigned(K) was True after K := nil }
+      Self.EmitVarArgAddrToRax(TASTExpr(FC.Args.Items[0]));
+      Self.Emit(#9'movq (%rax), %rax');
+      Self.Emit(#9'testq %rax, %rax');
+      Self.Emit(#9'setne %al');
+      Self.Emit(#9'movzbl %al, %eax');
+      Exit;
+    end;
     if SameText(FC.Name, 'Assigned') and (FC.Args.Count = 1) then
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
@@ -9925,6 +9958,28 @@ begin
   if AExpr is TBinaryExpr then
   begin
     BE := TBinaryExpr(AExpr);
+    if (BE.Op in [boEQ, boNE]) and
+       (((BE.Right is TNilLiteral) and IsMethodPtrType(BE.Left.ResolvedType) and
+         IsFatLValueExpr(BE.Left)) or
+        ((BE.Left is TNilLiteral) and IsMethodPtrType(BE.Right.ResolvedType) and
+         IsFatLValueExpr(BE.Right))) then
+    begin
+      { K = nil / K <> nil on a method pointer or closure: test its CODE half.
+        The value evaluates to the block's address, never nil, so K = nil was
+        always False }
+      if BE.Right is TNilLiteral then
+        Self.EmitVarArgAddrToRax(BE.Left)
+      else
+        Self.EmitVarArgAddrToRax(BE.Right);
+      Self.Emit(#9'movq (%rax), %rax');
+      Self.Emit(#9'testq %rax, %rax');
+      if BE.Op = boEQ then
+        Self.Emit(#9'sete %al')
+      else
+        Self.Emit(#9'setne %al');
+      Self.Emit(#9'movzbl %al, %eax');
+      Exit;
+    end;
     if ArcIsOwnedClassCompare(BE) then
     begin
       { MakeObj() <> nil: both operands parked (slots 0 and 8), compared,
@@ -12260,10 +12315,7 @@ begin
      not IsMethodPtrType(AAsgn.ResolvedLhsType) or
      (E.ResolvedType = nil) or not IsMethodPtrType(E.ResolvedType) then
     Exit;
-  if not (((E is TIdentExpr) and not TIdentExpr(E).IsConstant) or
-          ((E is TFieldAccessExpr) and (TFieldAccessExpr(E).FieldInfo <> nil) and
-           (TFieldAccessExpr(E).PropRead = nil)) or
-          (E is TStringSubscriptExpr) or (E is TDerefExpr)) then
+  if not IsFatLValueExpr(E) then
     Exit;
   IsRef := TProceduralTypeDesc(AAsgn.ResolvedLhsType).IsReference;
   Self.EmitVarArgAddrToRax(E);                 { source fat value }
@@ -12290,6 +12342,10 @@ begin
 end;
 
 procedure TX86_64Backend.EmitFatElemSourceAddr(AValue: TASTExpr);
+var
+  FAE: TFieldAccessExpr;
+  MD: TMethodDecl;
+  Pair: string;
 begin
   if AValue is TNilLiteral then
   begin
@@ -12297,11 +12353,44 @@ begin
     Self.Emit(#9'xorl %eax, %eax');
     Exit;
   end;
-  if not (((AValue is TIdentExpr) and not TIdentExpr(AValue).IsConstant) or
-          ((AValue is TFieldAccessExpr) and
-           (TFieldAccessExpr(AValue).FieldInfo <> nil) and
-           (TFieldAccessExpr(AValue).PropRead = nil)) or
-          (AValue is TStringSubscriptExpr) or (AValue is TDerefExpr)) then
+  if AValue is TAnonMethodExpr then
+  begin
+    { a literal: its own value slot (holding one Env reference, released
+      with the slot); the copy takes another for the element }
+    Self.EmitAnonValueToSlot(TAnonMethodExpr(AValue));
+    Exit;
+  end;
+  if (AValue is TAddrOfExpr) and
+     (TAddrOfExpr(AValue).Expr is TFieldAccessExpr) and
+     (TFieldAccessExpr(TAddrOfExpr(AValue).Expr).ResolvedMethod is TMethodDecl) and
+     not TMethodDecl(TFieldAccessExpr(TAddrOfExpr(AValue).Expr).ResolvedMethod).IsRecordMethod and
+     not TMethodDecl(TFieldAccessExpr(TAddrOfExpr(AValue).Expr).ResolvedMethod).IsStatic then
+  begin
+    { @Obj.M: build the (Code, receiver) pair in a per-site scratch and hand
+      its address to the copy (which retains the receiver for a 'reference
+      to' element, as it retains any source's Env) }
+    FAE := TFieldAccessExpr(TAddrOfExpr(AValue).Expr);
+    MD := TMethodDecl(FAE.ResolvedMethod);
+    Pair := Self.NewScratchOperand(16);
+    if FAE.Base <> nil then
+      Self.EmitExprToEax(FAE.Base)
+    else
+      Self.EmitVarBaseToReg(FAE.RecordName, False, '%rax');
+    Self.Emit(Format(#9'leaq %s, %%rcx', [Pair]));
+    Self.Emit(#9'movq %rax, 8(%rcx)');
+    if MD.VTableSlot >= 0 then
+    begin
+      Self.Emit(#9'movq (%rax), %rax');
+      Self.Emit(Format(#9'movq %d(%%rax), %%rax', [(MD.VTableSlot + 1) * 8]));
+    end
+    else
+      Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
+        [MethodEmitNameNative(MD, MD.OwnerTypeName, FAE.FieldName)]));
+    Self.Emit(#9'movq %rax, (%rcx)');
+    Self.Emit(#9'movq %rcx, %rax');
+    Exit;
+  end;
+  if not IsFatLValueExpr(AValue) then
     raise ENativeCodeGenError.Create(Format(
       'x86-64: not yet lowered: method-pointer / closure element store ' +
       'from this expression at line %d col %d', [AValue.Line, AValue.Col]));
@@ -17935,6 +18024,17 @@ begin
       end;
       if DAElemType.Kind in [tyByte, tyBoolean] then
         Self.EmitByteRhsToEax(FA.Expr)
+      else if IsMethodPtrType(DAElemType) then
+        Self.EmitFatElemSourceAddr(FA.Expr)
+      else if IsFloatFamily(DAElemType) then
+      begin
+        { a float element: its bit pattern travels through %rax (the integer
+          path rejected a float literal outright) }
+        Self.EmitExprToXmm0(FA.Expr);
+        Self.EmitXmm0WidthAdjust(FA.Expr.ResolvedType,
+          DAElemType.Kind = tySingle);
+        Self.Emit(#9'movq %xmm0, %rax');
+      end
       else
         Self.EmitExprToEax(FA.Expr);
       Self.Emit(#9'pushq %rax');           { value (or record src addr) }
@@ -17977,10 +18077,20 @@ begin
       Self.Emit(#9'popq %rax');            { scaled offset }
       Self.Emit(#9'addq %rax, %rdx');
       Self.Emit(#9'movq %rdx, %rcx');      { element address }
-      if (DAElemType.Kind = tyRecord) or IsJumboSet(DAElemType) then
+      if IsFloatFamily(DAElemType) then
+      begin
+        Self.Emit(#9'popq %rax');
+        Self.Emit(#9'movq %rax, %xmm0');
+        Self.EmitStoreFloat('(%rcx)', DAElemType);
+        Exit;
+      end;
+      if (DAElemType.Kind = tyRecord) or IsJumboSet(DAElemType) or
+         IsMethodPtrType(DAElemType) then
       begin
         { Record element: ARC-aware copy (retain src fields, release dest
-          fields, memcpy).  Source record address is on the stack. }
+          fields, memcpy).  Source record address is on the stack.  A method
+          pointer / closure is the same 16-byte copy (a 'reference to' one
+          retains the new env, drops the old). }
         Self.Emit(#9'pushq %rbx');
         Self.Emit(#9'pushq %r15');
         Self.Emit(#9'subq $8, %rsp');
@@ -17991,11 +18101,25 @@ begin
         begin
           Self.EmitRecordFieldRetains(TRecordTypeDesc(DAElemType), '%rbx');
           Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15', False);
+        end
+        else if ArcTypeIsRefClosure(DAElemType) then
+        begin
+          if not (FA.Expr is TNilLiteral) then
+            Self.EmitRetainSlotAt(DAElemType, 8, '%rbx');
+          Self.EmitReleaseSlotAt(DAElemType, 8, '%r15', False);
         end;
-        Self.Emit(#9'movq %r15, %rdi');
-        Self.Emit(#9'movq %rbx, %rsi');
-        Self.Emit(Format(#9'movq $%d, %%rdx', [DAElemType.RawSize()]));
-        Self.Emit(#9'callq memcpy');
+        if IsMethodPtrType(DAElemType) and (FA.Expr is TNilLiteral) then
+        begin
+          Self.Emit(#9'movq $0, (%r15)');
+          Self.Emit(#9'movq $0, 8(%r15)');
+        end
+        else
+        begin
+          Self.Emit(#9'movq %r15, %rdi');
+          Self.Emit(#9'movq %rbx, %rsi');
+          Self.Emit(Format(#9'movq $%d, %%rdx', [DAElemType.RawSize()]));
+          Self.Emit(#9'callq memcpy');
+        end;
         Self.Emit(#9'addq $8, %rsp');
         Self.Emit(#9'popq %r15');
         Self.Emit(#9'popq %rbx');
@@ -18029,6 +18153,21 @@ begin
         Self.Emit(#9'movq (%rsp), %rcx');
         Self.Emit(#9'movq (%rcx), %rdi');
         Self.Emit(#9'callq _ClassRelease');
+        Self.Emit(#9'popq %rcx');
+           end
+      else if DAElemType.Kind = tyDynArray then
+      begin
+        { a dyn-array element (a ragged array) co-owns its block: the same
+          retain-new / release-old store (it was a raw pointer store) }
+        Self.Emit(#9'pushq %rcx');
+        if not NativeExprOwnsRef(FA.Expr) then
+        begin
+          Self.Emit(#9'movq 8(%rsp), %rdi');
+          Self.Emit(#9'callq _DynArrayAddRef');
+        end;
+        Self.Emit(#9'movq (%rsp), %rcx');
+        Self.Emit(#9'movq (%rcx), %rdi');
+        Self.Emit(#9'callq _DynArrayRelease');
         Self.Emit(#9'popq %rcx');
       end;
       Self.Emit(#9'popq %rax');
@@ -19194,6 +19333,22 @@ begin
         Self.Emit(#9'movq (%rcx), %rdi');
         Self.Emit(#9'callq _ClassRelease');
         Self.Emit(#9'popq %rcx');
+           end
+      else if DAElemType.Kind = tyDynArray then
+      begin
+        { a dyn-array element (M[I] := D on a ragged array) co-owns its
+          block: it was a raw pointer store, so dropping D freed the block
+          M[I] still pointed at }
+        Self.Emit(#9'pushq %rcx');
+        if not NativeExprOwnsRef(SSA.ValueExpr) then
+        begin
+          Self.Emit(#9'movq 8(%rsp), %rdi');
+          Self.Emit(#9'callq _DynArrayAddRef');
+        end;
+        Self.Emit(#9'movq (%rsp), %rcx');
+        Self.Emit(#9'movq (%rcx), %rdi');
+        Self.Emit(#9'callq _DynArrayRelease');
+        Self.Emit(#9'popq %rcx');
       end;
       Self.Emit(#9'popq %rax');
       Self.EmitStoreVar('(%rcx)', DAElemType);
@@ -19408,6 +19563,22 @@ begin
       Self.Emit(#9'movq (%rsp), %rcx');
       Self.Emit(#9'movq (%rcx), %rdi');
       Self.Emit(#9'callq _ClassRelease');
+      Self.Emit(#9'popq %rcx');
+         end
+    else if DAElemType.Kind = tyDynArray then
+    begin
+      { a dyn-array element (M[I] := D on a ragged array) co-owns its
+        block: it was a raw pointer store, so dropping D freed the block
+        M[I] still pointed at }
+      Self.Emit(#9'pushq %rcx');
+      if not NativeExprOwnsRef(SSA.ValueExpr) then
+      begin
+        Self.Emit(#9'movq 8(%rsp), %rdi');
+        Self.Emit(#9'callq _DynArrayAddRef');
+      end;
+      Self.Emit(#9'movq (%rsp), %rcx');
+      Self.Emit(#9'movq (%rcx), %rdi');
+      Self.Emit(#9'callq _DynArrayRelease');
       Self.Emit(#9'popq %rcx');
     end;
     Self.Emit(#9'popq %rax');

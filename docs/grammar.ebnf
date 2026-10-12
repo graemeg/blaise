@@ -1082,6 +1082,7 @@ Stmt
     | BlockVarDeclStmt
     | PointerWriteStmt
     | DerefStmt
+    | CallChainStmt
     | StaticSubscriptAssign
     | SubscriptFieldAssign
     | SubscriptMethodCall
@@ -1223,6 +1224,15 @@ PointerWriteStmt
 DerefStmt
     = IDENT [ LPAREN [ ArgList ] RPAREN ] CARET DOT IDENT { Selector }
       ( ASSIGN Expr | [ LPAREN [ ArgList ] RPAREN ] )
+    ;
+
+(* A statement through a call's result: F(args).A.B := Expr,
+ * F(args).Arr[I] := Expr, F(args).M(...). *)
+CallChainStmt
+    = IDENT LPAREN [ ArgList ] RPAREN DOT IDENT { DOT IDENT }
+      ( ASSIGN Expr
+      | LBRACKET Expr RBRACKET ASSIGN Expr
+      | [ LPAREN [ ArgList ] RPAREN ] )
     ;
 
 FieldAssignment

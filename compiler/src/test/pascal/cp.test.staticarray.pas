@@ -42,6 +42,15 @@ type
     { R.F := [a, b] with R a record field of Self is a SET literal ("expected
       'TSmallSet' but got 'array of TColor'") }
     procedure TestSemantic_SetLiteralIntoSelfRecordField;
+    { M[I] := D on an array of dyn arrays co-owns the block (x86-64 stored
+      the raw pointer -- dropping D freed what M[I] pointed at; arm64
+      refused the store) }
+    procedure TestNative_DynArrayElement_Retained;
+    { X := O.A[I] with A an array FIELD of Doubles loads the ELEMENT (x86-64
+      loaded the field's first bytes) }
+    procedure TestNative_FloatArrayFieldElement_LoadsElement;
+    { MakeObj().A[I] := V parses as an element write through the call }
+    procedure TestParse_CallResultArrayFieldElemWrite;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1646,6 +1655,65 @@ begin
     ''');
   AssertNotNull('analysed', Prog);
   Prog.Free();
+end;
+
+procedure TStaticArrayTests.TestNative_DynArrayElement_Retained;
+const
+  Src = '''
+    program P;
+    type TDyn = array of Integer;
+    var M: array of TDyn; D: TDyn;
+    begin
+      M[0] := D;
+    end.
+    ''';
+begin
+  AssertEquals('retain new, release old', '',
+    AsmMissing(Src,
+      #9'callq _DynArrayAddRef' + #10 + #9'movq (%rsp), %rcx' + #10 +
+        #9'movq (%rcx), %rdi' + #10 + #9'callq _DynArrayRelease',
+      #9'bl __DynArrayAddRef' + #10 + #9'ldr x0, [sp], #16' + #10 +
+        #9'str x0, [sp, #-16]!' + #10 + #9'ldr x9, [sp, #16]' + #10 +
+        #9'ldr x0, [x9]' + #10 + #9'bl __DynArrayRelease'));
+end;
+
+procedure TStaticArrayTests.TestNative_FloatArrayFieldElement_LoadsElement;
+const
+  Src = '''
+    program P;
+    type TObj = class A: array[0..2] of Double; end;
+    var O: TObj; X: Double;
+    begin
+      X := O.A[1];
+    end.
+    ''';
+begin
+  AssertEquals('the element is loaded', '',
+    AsmMissing(Src,
+      #9'addq %rcx, %rax' + #10 + #9'movq %rax, %rcx' + #10 +
+        #9'movsd (%rcx), %xmm0',
+      #9'add x0, x0, x1' + #10 + #9'ldr x0, [x0]' + #10 + #9'fmov d0, x0'));
+end;
+
+procedure TStaticArrayTests.TestParse_CallResultArrayFieldElemWrite;
+var
+  Prog: TProgram;
+  FA: TFieldAssignment;
+begin
+  Prog := ParseSrc('''
+    program P;
+    begin
+      MakeObj().A[1] := 5;
+    end.
+    ''');
+  try
+    AssertTrue('a field assignment', Prog.Block.Stmts[0] is TFieldAssignment);
+    FA := TFieldAssignment(Prog.Block.Stmts[0]);
+    AssertTrue('through the call', FA.ObjExpr is TFuncCallExpr);
+    AssertNotNull('with the index', FA.PropIndexExpr);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization

@@ -57,6 +57,10 @@ type
       (x86-64 leaked it); A := G with A a static-array field of Self (x86-64
       crashed the compiler); R.F := [a, b] into a record field of Self }
     procedure TestDebug_FieldStoresThroughCallsAndSelf_NoLeak;
+    { method pointers, closures (literals included), dyn arrays and floats
+      stored into ARRAY-FIELD elements, through Self and through an owned
+      call receiver (both ISAs refused or miscompiled most of them) }
+    procedure TestDebug_ArrayFieldElementStores_NoLeak;
     { an owned class call result narrowed to an interface -- into a local, a
       field, an implicit-Self field, a function Result and an interface
       argument -- is consumed, not retained a second time (x86-64 leaked one
@@ -3699,6 +3703,66 @@ begin
     '3 3 True True' + #10 +
     'hello' + #10 +
     'abc' + #10 +
+    'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_ArrayFieldElementStores_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program ArrayFieldElems;
+    type
+      TDyn = array of Integer;
+      TClos = reference to function: Integer;
+      TMeth = procedure of object;
+      THold = class N: Integer; procedure Hi; end;
+      TObj = class
+        M: array[0..1] of TMeth; C: array of TClos; D: array[0..1] of TDyn;
+        F: array[0..2] of Double; S: array of Single;
+        procedure Run;
+      end;
+    var H: THold; GO: TObj;
+    procedure THold.Hi; begin WriteLn('hi ', N) end;
+    function MakeObj: TObj; begin Result := GO end;
+    function Mk(N: Integer): TDyn; begin SetLength(Result, 2); Result[1] := N end;
+    procedure TObj.Run;
+    var L: TMeth; K: TClos; X: TDyn;
+    begin
+      M[1] := @H.Hi; L := M[1]; L();
+      C[0] := function: Integer begin Result := 77 end; K := C[0]; WriteLn(K());
+      X := Mk(5); D[0] := X; SetLength(X, 0); X := Mk(9); WriteLn(D[0][1], ' ', X[1]);
+      F[2] := 2.5; S[1] := F[2] / 2; WriteLn(F[2]:0:2, ' ', S[1]:0:2);
+    end;
+    procedure Run;
+    var I: Integer; K: TClos; L: TMeth;
+    begin
+      H := THold.Create(); H.N := 7; GO := TObj.Create(); SetLength(GO.C, 1); SetLength(GO.S, 2);
+      for I := 1 to 2 do
+      begin
+        GO.Run();
+        MakeObj().M[0] := GO.M[1]; L := GO.M[0]; L();
+        MakeObj().C[0] := nil; K := GO.C[0]; WriteLn(Assigned(K));
+        MakeObj().F[0] := I * 1.5; WriteLn(GO.F[0]:0:2);
+      end;
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''', 'hi 7' + #10 +
+    '77' + #10 +
+    '5 9' + #10 +
+    '2.50 1.25' + #10 +
+    'hi 7' + #10 +
+    'False' + #10 +
+    '1.50' + #10 +
+    'hi 7' + #10 +
+    '77' + #10 +
+    '5 9' + #10 +
+    '2.50 1.25' + #10 +
+    'hi 7' + #10 +
+    'False' + #10 +
+    '3.00' + #10 +
     'done');
 end;
 

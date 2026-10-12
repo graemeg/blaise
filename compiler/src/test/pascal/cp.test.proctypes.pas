@@ -41,6 +41,12 @@ type
     { a nested routine that only CALLS an outer procedural variable captures
       it (it called through a slot of that name it did not have) }
     procedure TestSemantic_IndirectCallCallee_IsCaptured;
+    { O.C[I] := K into an array FIELD of closures: a 16-byte copy with the
+      Env retained (x86-64 stored 8 bytes; arm64 refused it) }
+    procedure TestCodegen_ClosureArrayFieldElemStore_CopiesPair;
+    { K = nil / Assigned(K) on a closure tests its CODE half (x86-64 tested
+      the block's address: always non-nil) }
+    procedure TestCodegen_ClosureNilCompare_TestsCodeHalf;
     { Parser — bare procedural type declarations }
     procedure TestParse_NoArgFunc_KindIsProcedural;
     procedure TestParse_NoArgFunc_ReturnTypeIsInteger;
@@ -652,7 +658,8 @@ begin
   AssertEquals('a 16-byte element copy', '',
     AsmMissing(Src,
       #9'movq $16, %rdx' + #10 + #9'callq memcpy',
-      #9'ldp x10, x11, [x1]' + #10 + #9'stp x10, x11, [x9]'));
+      #9'ldp x0, x1, [sp], #16' + #10 + #9'ldr x9, [sp], #16' + #10 +
+        #9'stp x0, x1, [x9]'));
 end;
 
 procedure TProcTypesTests.TestSemantic_ImplicitSelfRecordProcField_IsCalled;
@@ -706,6 +713,46 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TProcTypesTests.TestCodegen_ClosureArrayFieldElemStore_CopiesPair;
+const
+  Src = '''
+    program P;
+    type
+      TClos = reference to function: Integer;
+      TObj = class C: array[0..1] of TClos; end;
+    var O: TObj; K: TClos;
+    begin
+      O.C[1] := K;
+    end.
+    ''';
+begin
+  AssertEquals('Env retained, 16 bytes stored', '',
+    AsmMissing(Src,
+      #9'movq 8(%rbx), %rdi' + #10 + #9'callq _ClassAddRef' + #10 +
+        #9'movq 8(%r15), %rdi' + #10 + #9'callq _ClassRelease',
+      #9'ldr x9, [sp], #16' + #10 + #9'ldp x0, x1, [sp], #16' + #10 +
+        #9'stp x0, x1, [x9]'));
+end;
+
+procedure TProcTypesTests.TestCodegen_ClosureNilCompare_TestsCodeHalf;
+const
+  Src = '''
+    program P;
+    type TClos = reference to function: Integer;
+    var K: TClos; B: Boolean;
+    begin
+      B := K = nil;
+      B := Assigned(K);
+    end.
+    ''';
+begin
+  AssertEquals('the code half is tested', '',
+    AsmMissing(Src,
+      #9'leaq K(%rip), %rax' + #10 + #9'movq (%rax), %rax' + #10 +
+        #9'testq %rax, %rax' + #10 + #9'sete %al',
+      #9'ldr x0, [x9, _g_K@PAGEOFF]'));
 end;
 
 initialization

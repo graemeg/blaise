@@ -167,6 +167,13 @@ type
       rejected); arm64 read a Single Self field as 0.0 and refused a var
       Single param }
     procedure TestRun_SelfRecordFieldCalls_AndSingles;
+    { M[I] := D / S[I] := D then dropping D: the element still owns the block
+      (x86-64 read the freed, reused block); X := O.A[I] for an array field
+      of Doubles / Singles (x86-64 read the field's first bytes, and refused
+      a float literal store into R.A[I]); K = nil / Assigned on closures and
+      method pointers, fields and elements included (x86-64 always False /
+      True) }
+    procedure TestRun_DynArrayElements_FloatFieldElements_FatNilTests;
     { Nested proc captures an outer VAR ARRAY PARAMETER (element read + write).
       The captured var-param array slot is reached through the _cap_ pointer
       with one extra dereference; without it the element address resolved to a
@@ -4136,6 +4143,65 @@ begin
     '1.75 3.00 2.00' + LE +
     '1.75 3.00 2.00' + LE +
     '3.00' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_DynArrayElements_FloatFieldElements_FatNilTests;
+const
+  Src1 = '''
+    program dd;
+    type TDyn = array of Integer;
+    function Mk(N: Integer): TDyn; begin SetLength(Result, 3); Result[1] := N end;
+    var M: array of TDyn; S: array[0..1] of TDyn; D: TDyn; I: Integer; X: TDyn;
+    begin
+      SetLength(M, 2);
+      for I := 1 to 3 do
+      begin
+        D := Mk(I); M[0] := D; S[1] := D; SetLength(D, 0);
+        X := Mk(100 + I);
+        WriteLn(M[0][1], ' ', S[1][1]);
+      end;
+    end.
+    ''';
+  Src2 = '''
+    program fl;
+    type TObj = class A: array[0..2] of Double; D: array of Single; end;
+    var O: TObj; X: Double; Y: Single;
+    begin
+      O := TObj.Create(); SetLength(O.D, 3);
+      O.A[1] := 2.5; O.D[1] := 1.5;
+      X := O.A[1]; Y := O.D[1];
+      WriteLn(X:0:2, ' ', Y:0:2, ' ', O.A[1]:0:2, ' ', O.D[1]:0:2);
+      WriteLn(O.A[1] + 1:0:2);
+    end.
+    ''';
+  Src3 = '''
+    program an2;
+    type TClos = reference to function: Integer;
+      TMeth = procedure of object;
+      THold = class procedure Hi; end;
+      TObj = class C: TClos; M: TMeth; A: array[0..1] of TMeth; end;
+    procedure THold.Hi; begin end;
+    var O: TObj; K: TClos; M: TMeth; H: THold;
+    begin
+      O := TObj.Create(); H := THold.Create();
+      WriteLn(K = nil, ' ', K <> nil, ' ', Assigned(K), ' ', Assigned(O.C), ' ', Assigned(O.M), ' ', Assigned(O.A[1]), ' ', M = nil);
+      K := function: Integer begin Result := 1 end; O.C := K; M := @H.Hi; O.M := M; O.A[1] := M;
+      WriteLn(K = nil, ' ', K <> nil, ' ', Assigned(K), ' ', Assigned(O.C), ' ', Assigned(O.M), ' ', Assigned(O.A[1]), ' ', M = nil);
+      K := nil; O.C := nil;
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src1,
+    '1 1' + LE +
+    '2 2' + LE +
+    '3 3' + LE, 0);
+  AssertRunsOnAll(Src2,
+    '2.50 1.50 2.50 1.50' + LE +
+    '3.50' + LE, 0);
+  AssertRunsOnAll(Src3,
+    'True False False False False False True' + LE +
+    'False True True True True True False' + LE, 0);
 end;
 
 initialization

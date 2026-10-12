@@ -326,6 +326,7 @@ type
     procedure EmitFatPtrAssign(AAsgn: TAssignment);
     function  IsFatLValue(AExpr: TASTExpr): Boolean;
     procedure EmitLValueAddrToX0(AExpr: TASTExpr);
+    procedure EmitFatPairToX0X1(AExpr: TASTExpr; ARefTarget: Boolean);
     procedure EmitFatTargetAddr(const AReg: string; AAsgn: TAssignment);
     procedure EmitParenlessCtor(AFA: TFieldAccessExpr);
     procedure EmitSetIncludeExclude(ACall: TProcCall; AInclude: Boolean);
@@ -2284,6 +2285,77 @@ begin
     EmitSlotAddr(AReg, AAsgn.Name);
 end;
 
+procedure TArm64Backend.EmitFatPairToX0X1(AExpr: TASTExpr; ARefTarget: Boolean);
+var
+  FAE: TFieldAccessExpr;
+  MD: TMethodDecl;
+  Tmp: string;
+begin
+  { x0:x1 := a method pointer / closure VALUE (Code, Data/Env), for a
+    destination that is not a named variable (an array element).  A
+    'reference to' destination (ARefTarget) owns its Env: an l-value or
+    @Obj.M source or a literal is retained here; a closure-returning call
+    hands over its own +1. }
+  if AExpr is TNilLiteral then
+  begin
+    Self.Emit(#9'mov x0, xzr');
+    Self.Emit(#9'mov x1, xzr');
+    Exit;
+  end;
+  if IsFatLValue(AExpr) then
+  begin
+    EmitLValueAddrToX0(AExpr);
+    Self.Emit(#9'ldp x0, x1, [x0]');
+  end
+  else if AExpr is TAnonMethodExpr then
+  begin
+    { a literal: materialised into its own value slot (which keeps one Env
+      reference, released with the slot); the element takes another below }
+    EmitAnonValueToSlot(TAnonMethodExpr(AExpr));
+    Self.Emit(#9'ldp x0, x1, [x0]');
+  end
+  else if (AExpr is TAddrOfExpr) and
+          (TAddrOfExpr(AExpr).Expr is TFieldAccessExpr) and
+          (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).ResolvedMethod is TMethodDecl) then
+  begin
+    FAE := TFieldAccessExpr(TAddrOfExpr(AExpr).Expr);
+    MD := TMethodDecl(FAE.ResolvedMethod);
+    if MD.IsRecordMethod or MD.IsStatic or FAE.IsImplicitSelf or
+       ((FAE.Base <> nil) and ArcExprOwnsRef(FAE.Base)) then
+      NotYet('method pointer to this method form', AExpr);
+    if FAE.Base <> nil then
+      Self.EmitExprToX0(FAE.Base)
+    else if not EmitCapturedBase('x0', FAE.RecordName, True, False) then
+      EmitLoadSlot('x0', FAE.RecordName);
+    Self.Emit(#9'mov x1, x0');                 { Data = the receiver }
+    if MD.VTableSlot >= 0 then
+    begin
+      Self.Emit(#9'ldr x9, [x1]');
+      Self.Emit(Format(#9'ldr x0, [x9, #%d]', [(MD.VTableSlot + 1) * 8]));
+    end
+    else
+    begin
+      Self.Emit(Format(#9'adrp x0, %s@PAGE', [RoutineSym(MD, '')]));
+      Self.Emit(Format(#9'add x0, x0, %s@PAGEOFF', [RoutineSym(MD, '')]));
+    end;
+  end
+  else if EmitClosureResultToTemp(AExpr, Tmp) then
+  begin
+    EmitSlotAddr('x9', Tmp);
+    Self.Emit(#9'ldp x0, x1, [x9]');
+    Exit;                                      { the call's +1 transfers }
+  end
+  else
+    NotYet('closure / method-pointer element store from this expression', AExpr);
+  if ARefTarget then
+  begin
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');
+    Self.Emit(#9'mov x0, x1');
+    EmitCallSym('_ClassAddRef');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+  end;
+end;
+
 procedure TArm64Backend.EmitLValueAddrToX0(AExpr: TASTExpr);
 var
   Wrap: TAddrOfExpr;
@@ -3845,14 +3917,36 @@ begin
     element address — a value expression that reassigns/grows the SAME
     dyn-array field (R.Arr[i] := F() where F does SetLength(R.Arr,...)) would
     otherwise leave a stale/freed data pointer.  Matches the x86-64 order. }
-  if Elem.IsString() or (Elem.Kind = tyClass) then
+  if IsMethodPtrType(Elem) then
   begin
+    { a method pointer / closure element of an array field: the 16-byte
+      pair first (value-first rule), then the fresh element address }
+    EmitFatPairToX0X1(AStmt.Expr, ArcTypeIsRefClosure(Elem));
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [pair] }
+    EmitFieldElemAddrToX0(AStmt, Elem, IsDyn, Low);
+    EmitPushX0();                                 { [pair][elemaddr] }
+    if ArcTypeIsRefClosure(Elem) then
+    begin
+      Self.Emit(#9'ldr x0, [x0, #8]');
+      EmitCallSym('_ClassRelease');
+    end;
+    EmitPopTo('x9');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+    Self.Emit(#9'stp x0, x1, [x9]');
+    Exit;
+  end;
+  if Elem.IsString() or (Elem.Kind in [tyClass, tyDynArray]) then
+  begin
+    { a dyn-array element (a ragged array field) is a ref-counted pointer
+      too: the same retain-new / release-old store }
     Self.EmitExprToX0(AStmt.Expr);
     if not ArcExprOwnsRef(AStmt.Expr) then
     begin
       EmitPushX0();
       if Elem.IsString() then
         EmitCallSym('_StringAddRef')
+      else if Elem.Kind = tyDynArray then
+        EmitCallSym('_DynArrayAddRef')
       else
         EmitCallSym('_ClassAddRef');
       EmitPopTo('x0');
@@ -3863,6 +3957,8 @@ begin
     Self.Emit(#9'ldr x0, [x0]');               { old element value }
     if Elem.IsString() then
       EmitCallSym('_StringRelease')
+    else if Elem.Kind = tyDynArray then
+      EmitCallSym('_DynArrayRelease')
     else
       EmitCallSym('_ClassRelease');
     Self.Emit(#9'ldr x9, [sp]');               { elem address }
@@ -4011,9 +4107,12 @@ begin
     if (AStmt.ObjExpr.ResolvedType <> nil) and
        (AStmt.ObjExpr.ResolvedType.Kind = tyClass) then
     begin
-      if ArcExprOwnsRef(AStmt.ObjExpr) then
-        NotYet('array-field element write on an owned transient base', AStmt);
       Self.EmitExprToX0(AStmt.ObjExpr);
+      { an owned receiver (MakeObj().Arr[I] := V) outlives the store: its
+        release is deferred to the statement end }
+      if ArcExprOwnsRef(AStmt.ObjExpr) and not DeferNativeClassRelease() then
+        NotYet('array-field element write on an owned transient base with ' +
+          'all _pendrel slots busy', AStmt);
     end
     else
       EmitRecAddrToX0(AStmt.ObjExpr);
@@ -6446,6 +6545,7 @@ begin
       BORROWED base: the transient release below parks x0 alone and would
       drop an interface's itab half in x1. }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
@@ -6544,6 +6644,7 @@ begin
     { instance field read: the base is a POINTER — Obj's slot value, or
       Self for a bare field name inside a method }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
@@ -6592,6 +6693,7 @@ begin
   begin
     { plain Rec.Field read of a local/global/var-param record }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
@@ -6623,6 +6725,7 @@ begin
     { field of a RECORD-VALUED field access (FTok.Token.TextStart):
       compute the inner record's address, then load at the outer offset }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
@@ -6657,6 +6760,7 @@ begin
     { field of a record-RETURNING CALL (HostTarget().OS): materialise the
       record into the __rret scratch, then load the field at its offset }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
@@ -6684,6 +6788,7 @@ begin
     { field of a subscripted RECORD element: A[I].Kind — the subscript
       emitters yield the element address, the field loads at its offset }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
@@ -6748,6 +6853,7 @@ begin
       GS a record global), P^, a var param: EmitRecAddrToX0 yields the
       record's address, the field loads at its offset }
     if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
+            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
             (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
@@ -9293,7 +9399,6 @@ end;
 procedure TArm64Backend.EmitStaticElemAssign(AStmt: TStaticSubscriptAssign);
 var
   Elem: TTypeDesc;
-  FatAddr: TAddrOfExpr;
   NL: Integer;
 begin
   if AStmt.PropWriteInfo <> nil then
@@ -9491,15 +9596,18 @@ begin
     EmitIntfStoreStacked(0, AStmt.ValueExpr, Elem);
     Exit;
   end;
-  if Elem.IsString() or (Elem.Kind = tyClass) then
+  if Elem.IsString() or (Elem.Kind in [tyClass, tyDynArray]) then
   begin
+    { a dyn-array element (M[I] := D, a ragged array) co-owns its block like
+      a string or a class element }
     Self.EmitExprToX0(AStmt.ValueExpr);
-    if (Elem.IsString() and not ArcExprOwnsRef(AStmt.ValueExpr)) or
-       ((Elem.Kind = tyClass) and not ArcExprOwnsRef(AStmt.ValueExpr)) then
+    if not ArcExprOwnsRef(AStmt.ValueExpr) then
     begin
       EmitPushX0();
       if Elem.IsString() then
         EmitCallSym('_StringAddRef')
+      else if Elem.Kind = tyDynArray then
+        EmitCallSym('_DynArrayAddRef')
       else
         EmitCallSym('_ClassAddRef');
       EmitPopTo('x0');
@@ -9509,6 +9617,8 @@ begin
     Self.Emit(#9'ldr x0, [x9]');
     if Elem.IsString() then
       EmitCallSym('_StringRelease')
+    else if Elem.Kind = tyDynArray then
+      EmitCallSym('_DynArrayRelease')
     else
       EmitCallSym('_ClassRelease');
     Self.Emit(#9'ldr x9, [sp, #16]');
@@ -9537,46 +9647,19 @@ begin
   if IsMethodPtrType(Elem) then
   begin
     { a method pointer / closure element: 16 bytes, Code at +0 and Data /
-      Env at +8.  A 'reference to' element co-owns its Env (retain the new
-      one, then release the old). }
-    if AStmt.ValueExpr is TNilLiteral then
-    begin
-      if ArcTypeIsRefClosure(Elem) then
-      begin
-        Self.Emit(#9'ldr x9, [sp]');
-        Self.Emit(#9'ldr x0, [x9, #8]');
-        EmitCallSym('_ClassRelease');
-      end;
-      Self.Emit(#9'ldr x9, [sp], #16');
-      Self.Emit(#9'stp xzr, xzr, [x9]');
-      Exit;
-    end;
-    if not IsFatLValue(AStmt.ValueExpr) then
-      NotYet('closure / method-pointer element store from this expression',
-        AStmt);
-    FatAddr := TAddrOfExpr.Create();
-    try
-      FatAddr.Line := AStmt.Line;
-      FatAddr.Col := AStmt.Col;
-      FatAddr.Expr := AStmt.ValueExpr;
-      Self.EmitExprToX0(FatAddr);
-    finally
-      FatAddr.Expr := nil;   { owned by the statement }
-      FatAddr.Free();
-    end;
-    EmitPushX0();                              { [elemaddr][&src] }
+      Env at +8.  A 'reference to' element co-owns its Env (the new one is
+      retained by EmitFatPairToX0X1, the old one released here). }
+    EmitFatPairToX0X1(AStmt.ValueExpr, ArcTypeIsRefClosure(Elem));
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [elemaddr][pair] }
     if ArcTypeIsRefClosure(Elem) then
     begin
-      Self.Emit(#9'ldr x0, [x0, #8]');
-      EmitCallSym('_ClassAddRef');
       Self.Emit(#9'ldr x9, [sp, #16]');
       Self.Emit(#9'ldr x0, [x9, #8]');
       EmitCallSym('_ClassRelease');
     end;
-    EmitPopTo('x1');
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
     Self.Emit(#9'ldr x9, [sp], #16');
-    Self.Emit(#9'ldp x10, x11, [x1]');
-    Self.Emit(#9'stp x10, x11, [x9]');
+    Self.Emit(#9'stp x0, x1, [x9]');
     Exit;
   end;
   if Elem.Kind = tyDouble then
@@ -11580,9 +11663,11 @@ begin
         Self.Emit(#9'ldrsw x0, [x0]');
     8: Self.Emit(#9'ldr x0, [x0]');
     16:
-      if AElem.Kind = tyInterface then
+      if (AElem.Kind = tyInterface) or IsMethodPtrType(AElem) then
         { an interface value in a scalar context (I <> nil, Assigned) is its
-          obj half; the itab rides along in x1 for a pair consumer }
+          obj half; the itab rides along in x1 for a pair consumer.  A method
+          pointer / closure likewise: its Code half (Assigned(O.Handler)),
+          Data / Env in x1 }
         Self.Emit(#9'ldp x0, x1, [x0]')
       else
         NotYet(Format('array element of this width (%d bytes, %s)',

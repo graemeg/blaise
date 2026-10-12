@@ -4574,6 +4574,25 @@ begin
           FldNode.Base       := CastRcv;
           FldNode.FieldName  := SecondIdent;
           CastRcv            := FldNode;
+          if Check(tkLBracket) then
+          begin
+            { F(...).Arr[I] := V: an element write into an array field (or
+              an indexed property) of the call's result }
+            Advance();  { consume '[' }
+            FldAssign := TFieldAssignment.Create();
+            FldAssign.Line := Line;
+            FldAssign.Col := Col;
+            FldAssign.FieldName := FldNode.FieldName;
+            FldAssign.ObjExpr := FldNode.Base;
+            FldNode.Base := nil;
+            FldNode.Free();
+            CastRcv := nil;
+            FldAssign.PropIndexExpr := ParseExpr();
+            Expect(tkRBracket);
+            Expect(tkAssign);
+            FldAssign.Expr := ParseExpr();
+            Exit(FldAssign);
+          end;
         end;
         { Field assignment through typecast/chain: TCast(expr).Field := value }
         if Check(tkAssign) and (CastRcv is TFieldAccessExpr) then
