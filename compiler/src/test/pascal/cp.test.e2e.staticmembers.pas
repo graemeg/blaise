@@ -50,6 +50,10 @@ type
       position (TVal.Note(1); / discarded TVal.Make(2);) — the resolver
       only accepted class types there ('TVal' is not a variable). }
     procedure TestRun_RecordStaticCall_StatementPosition;
+    { TC.A[I] / TC.S[K], static indexed properties read from the program and
+      from an instance method: the index reaches the static getter (it was
+      dropped -- a wrong value on arm64, a crash on x86-64) }
+    procedure TestRun_StaticIndexedPropertyRead;
   end;
 
 implementation
@@ -558,6 +562,38 @@ begin
     'thing speaks' + #10 +
     'main done' + #10 +
     'TFoo freed at exit' + #10, 0);
+end;
+
+procedure TE2EStaticMembersTests.TestRun_StaticIndexedPropertyRead;
+const
+  Src = '''
+    program StIdx;
+    type
+      TC = class
+      private static var
+        FA: array[0..3] of Integer;
+      public
+        static function GetA(I: Integer): Integer;
+        static function GetS(const K: String): String;
+        static property A[I: Integer]: Integer read GetA;
+        static property S[K: String]: String read GetS;
+        procedure Run;
+      end;
+    static function TC.GetA(I: Integer): Integer; begin Result := FA[I] + I end;
+    static function TC.GetS(const K: String): String; begin Result := K + '!' end;
+    procedure TC.Run; begin WriteLn(TC.A[1], ' ', TC.S['in']) end;
+    var X: Integer; Str: String; O: TC;
+    begin
+      X := TC.A[2];
+      Str := TC.S['k'];
+      WriteLn(X, ' ', TC.A[3], ' ', Str, ' ', TC.S['z']);
+      O := TC.Create();
+      O.Run()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2 3 k! z!' + #10 + '1 in!' + #10, 0);
 end;
 
 initialization

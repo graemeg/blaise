@@ -4526,16 +4526,22 @@ begin
        (TFuncCallExpr(AExpr).ResolvedDecl <> nil) and
        not TFuncCallExpr(AExpr).IsIndirectCall) or
       ((AExpr is TMethodCallExpr) and
-       (TMethodCallExpr(AExpr).ResolvedMethod <> nil) and
-       not TMethodCallExpr(AExpr).IsConstructorCall and
-       not TMethodCallExpr(AExpr).IsProcFieldCall)) then
+       (((TMethodCallExpr(AExpr).ResolvedMethod <> nil) and
+         not TMethodCallExpr(AExpr).IsConstructorCall and
+         not TMethodCallExpr(AExpr).IsProcFieldCall) or
+        { an itab receiver (I.Me() <> nil) has no ResolvedMethod }
+        ((TMethodCallExpr(AExpr).ResolvedClassType <> nil) and
+         (TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyInterface))))) then
   begin
     { an interface-returning call in a SCALAR context (TFoo(MakeI()).F,
       Assigned(GetI())): the callee writes the (obj, itab) pair through x8,
       so the call must supply the sret scratch exactly as the pair consumers
       do.  Called bare it left x8 pointing anywhere and the callee's result
-      store faulted.  x0 = the obj half -- owned (+1), as for any call. }
-    EmitIntfPairToX0X1(AExpr, AExpr.ResolvedType);
+      store faulted.  x0 = the obj half; the call's +1 is released at the
+      statement boundary, so the value stays alive for the consuming
+      expression (no consumer released it: GetI() <> nil leaked). }
+    if EmitIntfPairToX0X1(AExpr, AExpr.ResolvedType) then
+      DeferNativeClassRelease();
     Exit;
   end;
   if AExpr is TIntLiteral then

@@ -126,6 +126,13 @@ type
       string value must be disposed after the setter call
       (BUG-20260721-propsetter-owned-transient-str-leak). }
     procedure TestMain_PropSetterConcatValue_DisposedAfterCall;
+    { G.GetI() = nil: an interface-returning call as a scalar operand gets
+      its sret buffer and its +1 obj is released at the statement end
+      (x86-64 passed no buffer -- a crash; arm64 leaked the obj) }
+    procedure TestIntfCallOperand_SretAndReleased;
+    { L := MkObj().GetI() / MkObj().FIntf: the owned receiver is released at
+      the statement end (x86-64 leaked it) }
+    procedure TestIntfFromOwnedReceiver_Released;
   end;
 
 implementation
@@ -994,6 +1001,61 @@ begin
       #9'callq _WeakAssign'#10#9'addq $8, %rsp'#10#9'popq %rdi'#10 +
         #9'callq _ClassRelease',
       #9'bl __WeakAssign'#10#9'ldp x0, x1, [sp], #16'#10#9'bl __ClassRelease'));
+end;
+
+procedure TNativeArcTests.TestIntfCallOperand_SretAndReleased;
+const
+  Src = '''
+    program P;
+    type
+      IFoo = interface function Get: Integer; end;
+      TObj = class
+        FV: IFoo;
+        function GetP(I: Integer): IFoo;
+      end;
+    function TObj.GetP(I: Integer): IFoo; begin Result := FV end;
+    var G: TObj;
+    begin
+      G := TObj.Create();
+      if G.GetP(0) = nil then WriteLn(0)
+    end.
+    ''';
+begin
+  AssertEquals('GetP(0) = nil: sret call, obj deferred for release', '',
+    AsmMissing(Src,
+      #9'movq %rsp, %rdi'#10#9'callq TObj_GetP'#10#9'movq (%rsp), %rax'#10 +
+        #9'addq $16, %rsp'#10#9'movq %rax, _pendrel_0(%rip)',
+      #9'bl _TObj_GetP'#10#9'sub x9, x29, #16'#10#9'ldp x0, x1, [x9]'#10 +
+        #9'stur x0, [x29, #'));
+end;
+
+procedure TNativeArcTests.TestIntfFromOwnedReceiver_Released;
+const
+  Src = '''
+    program P;
+    type
+      IFoo = interface function Get: Integer; end;
+      TObj = class
+        FV: IFoo;
+        function GetP(I: Integer): IFoo;
+      end;
+    function TObj.GetP(I: Integer): IFoo; begin Result := FV end;
+    var G: TObj; L: IFoo;
+    function MkObj: TObj; begin Result := G end;
+    begin
+      L := MkObj().GetP(0);
+      L := MkObj().FV
+    end.
+    ''';
+begin
+  AssertEquals('MkObj().GetP(0): receiver deferred for release', '',
+    AsmMissing(Src,
+      #9'movq %rax, _pendrel_0(%rip)'#10#9'movq %rax, %r10',
+      #9'bl _MkObj'#10#9'stur x0, [x29, #'));
+  AssertEquals('MkObj().FV: receiver deferred for release', '',
+    AsmMissing(Src,
+      #9'movq %rax, _pendrel_0(%rip)'#10#9'movq %rax, %r15',
+      #9'bl _MkObj'#10#9'stur x0, [x29, #'));
 end;
 
 initialization

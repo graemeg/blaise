@@ -1001,6 +1001,7 @@ type
                                 AReceiverIsRecord: Boolean);
     { Evaluate an integer expression; result left in %rax (64-bit-extended). }
     procedure EmitExprToEax(AExpr: TASTExpr);
+    function  EmitIntfCallObjToEax(AExpr: TASTExpr): Boolean;
     procedure EmitByteRhsToEax(AExpr: TASTExpr);
     { Evaluate a float expression (tyDouble or tySingle); result left in %xmm0.
       Binary ops: left → push onto int stack via subq/movsd, right → %xmm0,
@@ -5027,6 +5028,26 @@ begin
       Self.Emit(#9'movq %rax, 8(%r15)');
       Self.Emit(#9'popq %r14');
     end
+    else if (AAsgn.Expr.ResolvedType.Kind = tyInterface) and
+            (AAsgn.Expr is TFieldAccessExpr) and
+            (TFieldAccessExpr(AAsgn.Expr).FieldInfo <> nil) then
+    begin
+      { Result := Obj.FIntf: the field's fat pair, retained (it was an
+        "unsupported" compile error) }
+      Self.EmitInterfaceFieldAddr(TFieldAccessExpr(AAsgn.Expr), '%rax');
+      Self.Emit(#9'movq 8(%rax), %rcx');
+      Self.Emit(#9'pushq %rcx');
+      Self.Emit(#9'movq (%rax), %rcx');
+      Self.Emit(#9'pushq %rcx');
+      Self.Emit(#9'movq %rcx, %rdi');
+      Self.Emit(#9'callq _ClassAddRef');
+      Self.Emit(#9'movq (%r15), %rdi');
+      Self.Emit(#9'callq _ClassRelease');
+      Self.Emit(#9'popq %rax');
+      Self.Emit(#9'movq %rax, (%r15)');
+      Self.Emit(#9'popq %rax');
+      Self.Emit(#9'movq %rax, 8(%r15)');
+    end
     else if Self.IsIntfCallResult(AAsgn.Expr) then
     begin
       Self.EmitIntfSretCall(TFuncCallExpr(AAsgn.Expr));
@@ -5599,6 +5620,12 @@ begin
     { Nested receiver expression (e.g. Outer.Inner.G): evaluate it to the base
       address. }
     Self.EmitExprToEax(AFA.Base);
+    { an owned transient base (MkObj().FIntf) is released after the
+      statement, once the pair has been consumed -- it leaked }
+    if (AFA.Base.ResolvedType <> nil) and
+       (AFA.Base.ResolvedType.Kind = tyClass) and
+       NativeExprOwnsRef(AFA.Base) then
+      Self.DeferNativeClassRelease();
     Self.Emit(Format(#9'movq %%rax, %s', [ADstReg]));
   end
   else if AFA.IsImplicitSelf then
@@ -7872,6 +7899,16 @@ begin
     Exit;
   end;
 
+  if (AExpr is TFieldAccessExpr) and
+     (TFieldAccessExpr(AExpr).PropRead <> nil) and
+     (TFieldAccessExpr(AExpr).PropRead.ReadMethod <> '') then
+  begin
+    { a float PROPERTY read (O.P[I], P[I] in a method): the getter call,
+      whose result is already in %xmm0.  The field arm below dereferenced
+      the absent FieldInfo -- a compiler crash. }
+    Self.EmitExprToEax(AExpr);
+    Exit;
+  end;
   if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsArrayAccess then
   begin
     { O.A[I] with A an array FIELD of floats: load the ELEMENT (the arm
@@ -8451,6 +8488,38 @@ end;
   Int64 expression) is correct without per-node width tracking; the final
   store re-narrows to the destination slot's width.  Arithmetic and
   comparisons use 64-bit ops uniformly. }
+{ %rax := the obj half of an interface-returning CALL's result (a plain or
+  method call): the sret helper leaves the 16-byte fat pair at (%rsp), and
+  the callee's +1 obj reference is released at the statement boundary, so
+  the value stays alive for the consuming expression (falls back to a leak,
+  never a use-after-free, if all pendrel slots are taken).  Returns False,
+  emitting nothing, for any other expression. }
+function TX86_64Backend.EmitIntfCallObjToEax(AExpr: TASTExpr): Boolean;
+begin
+  Result := False;
+  if (AExpr.ResolvedType = nil) or (AExpr.ResolvedType.Kind <> tyInterface) then
+    Exit;
+  if (AExpr is TFuncCallExpr) and (TFuncCallExpr(AExpr).ResolvedDecl <> nil) then
+    Self.EmitIntfSretCall(TFuncCallExpr(AExpr))
+  else if (AExpr is TMethodCallExpr) and
+          (TMethodCallExpr(AExpr).ResolvedClassType <> nil) then
+  begin
+    { which sret helper applies depends on the RECEIVER: an interface
+      receiver dispatches through the itab, a class receiver is a direct or
+      vtable call }
+    if TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyInterface then
+      Self.EmitIntfSretMethodCall(TMethodCallExpr(AExpr))
+    else
+      Self.EmitClassIntfSretMethodCall(TMethodCallExpr(AExpr));
+  end
+  else
+    Exit;
+  Self.Emit(#9'movq (%rsp), %rax');
+  Self.Emit(#9'addq $16, %rsp');
+  Self.DeferNativeClassRelease();
+  Result := True;
+end;
+
 procedure TX86_64Backend.EmitExprToEax(AExpr: TASTExpr);
 var
   BE:  TBinaryExpr;
@@ -8484,6 +8553,13 @@ begin
     Self.Emit(#9'xorq %rax, %rax');
     Exit;
   end;
+
+  { an interface-returning call as a scalar operand (F() <> nil, O.GetI() = L,
+    Assigned(O.GetI())): the sret call, yielding the obj half.  The plain
+    call path passed no result buffer -- the callee wrote its fat pair
+    through the receiver register and the program crashed }
+  if Self.EmitIntfCallObjToEax(AExpr) then
+    Exit;
 
   { (a method-backed property read of a static array, Obj.Prop / Obj[I], is a
     getter call too: without a buffer the getter wrote its result through
@@ -9871,39 +9947,9 @@ begin
             [Self.IntfObjOperand(TIdentExpr(CastArg).Name,
                                  TIdentExpr(CastArg).IsGlobal)]));
       end
-      else if (CastArg.ResolvedType <> nil) and
-              (CastArg.ResolvedType.Kind = tyInterface) and
-              (CastArg is TFuncCallExpr) and
-              (TFuncCallExpr(CastArg).ResolvedDecl <> nil) then
+      else if Self.EmitIntfCallObjToEax(CastArg) then
       begin
-        { Interface-returning CALL operand: EmitIntfSretCall leaves the
-          16-byte fat pair at (%rsp).  The callee transferred a +1 obj
-          reference; defer its release to the statement boundary so the
-          cast result stays alive for the consuming expression (falls back
-          to a leak, never a use-after-free, if all pendrel slots are
-          taken). }
-        Self.EmitIntfSretCall(TFuncCallExpr(CastArg));
-        Self.Emit(#9'movq (%rsp), %rax');
-        Self.Emit(#9'addq $16, %rsp');
-        Self.DeferNativeClassRelease();
-      end
-      else if (CastArg.ResolvedType <> nil) and
-              (CastArg.ResolvedType.Kind = tyInterface) and
-              (CastArg is TMethodCallExpr) and
-              (TMethodCallExpr(CastArg).ResolvedClassType <> nil) then
-      begin
-        { Interface-returning METHOD-call operand (TG(Obj.GetI())): same sret
-          contract and same deferred obj release as the plain-call arm above.
-          Which sret helper applies depends on the RECEIVER: an interface
-          receiver dispatches through the itab, a class receiver is a direct
-          or vtable call. }
-        if TMethodCallExpr(CastArg).ResolvedClassType.Kind = tyInterface then
-          Self.EmitIntfSretMethodCall(TMethodCallExpr(CastArg))
-        else
-          Self.EmitClassIntfSretMethodCall(TMethodCallExpr(CastArg));
-        Self.Emit(#9'movq (%rsp), %rax');
-        Self.Emit(#9'addq $16, %rsp');
-        Self.DeferNativeClassRelease();
+        { Interface-returning call operand (TG(GetI()), TG(Obj.GetI())) }
       end
       else if (CastArg.ResolvedType <> nil) and
               (CastArg.ResolvedType.Kind = tyInterface) and
@@ -10872,7 +10918,17 @@ begin
     begin
       Self.Emit(#9'popq %rdi');
       Self.Emit(#9'pushq %rax');
-      Self.Emit(#9'callq _ClassRelease');
+      if IsFloatFamily(FAE.ResolvedType) then
+      begin
+        { a float result lives in %xmm0 across the release call }
+        Self.Emit(#9'subq $8, %rsp');
+        Self.Emit(#9'movsd %xmm0, (%rsp)');
+        Self.Emit(#9'callq _ClassRelease');
+        Self.Emit(#9'movsd (%rsp), %xmm0');
+        Self.Emit(#9'addq $8, %rsp');
+      end
+      else
+        Self.Emit(#9'callq _ClassRelease');
       Self.Emit(#9'popq %rax');
     end;
     Exit;
@@ -24154,6 +24210,12 @@ begin
   else if ACall.ObjExpr <> nil then
   begin
     Self.EmitExprToEax(ACall.ObjExpr);
+    { an owned transient receiver (MkObj().GetIt(), a getter read) is
+      released after the statement -- it leaked }
+    if (ACall.ObjExpr.ResolvedType <> nil) and
+       (ACall.ObjExpr.ResolvedType.Kind = tyClass) and
+       NativeExprOwnsRef(ACall.ObjExpr) then
+      Self.DeferNativeClassRelease();
     Self.Emit(#9'movq %rax, %r10');
   end
   else

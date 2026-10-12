@@ -69,6 +69,13 @@ type
       empty string, read a float Current as 0.0, and leaked or re-evaluated
       call collections) }
     procedure TestDebug_ForInForms_NoLeak;
+    { an interface-returning call as a scalar operand (GetI() <> nil,
+      Assigned(O.GetI()), O.GetI() = L) and an interface read through an
+      owned transient receiver (MkObj().GetI(), MkObj().FIntf, MkObj().P[I]):
+      x86-64 crashed on the operand (no sret buffer) and leaked the
+      receiver; arm64 leaked the operand's result and rejected an itab
+      receiver (L.Me() <> nil); x86-64 rejected Result := G.FIntf }
+    procedure TestDebug_IntfCallOperands_NoLeak;
     { an owned class call result narrowed to an interface -- into a local, a
       field, an implicit-Self field, a function Result and an interface
       argument -- is consumed, not retained a second time (x86-64 leaked one
@@ -3859,6 +3866,62 @@ begin
     '1.0,0.5 2.0,1.0 ' + #10 +
     '1.25 2.50 3.75 ' + #10 +
     'empty' + #10 +
+    'done');
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_IntfCallOperands_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program IntfOps;
+    type
+      IFoo = interface
+        function Get: Integer;
+        function Me: IFoo;
+      end;
+      THold = class(TObject, IFoo)
+        N: Integer;
+        function Get: Integer;
+        function Me: IFoo;
+      end;
+      TObj = class
+        FV: IFoo;
+        function GetP(I: Integer): IFoo;
+        property P[I: Integer]: IFoo read GetP;
+      end;
+    var G: TObj; L: IFoo;
+    function THold.Get: Integer; begin Result := N end;
+    function THold.Me: IFoo; begin Result := Self end;
+    function TObj.GetP(I: Integer): IFoo; begin Result := FV end;
+    function MkObj: TObj; begin Result := G end;
+    function MkI: IFoo; begin Result := L end;
+    function MkF: IFoo; begin Result := G.FV end;
+    procedure Run;
+    var H: THold; K: IFoo;
+    begin
+      H := THold.Create();
+      H.N := 7;
+      G := TObj.Create();
+      G.FV := H;
+      L := H;
+      WriteLn(MkI() <> nil, ' ', G.GetP(0) = L, ' ', Assigned(G.GetP(1)),
+        ' ', L.Me() <> nil, ' ', MkF().Get());
+      if G.P[0] = nil then WriteLn('nil');
+      K := MkObj().GetP(0);
+      Write(K.Get(), ' ');
+      K := MkObj().FV;
+      Write(K.Get(), ' ');
+      K := MkObj().P[2];
+      WriteLn(K.Get(), ' ', MkObj().GetP(0).Get(), ' ', MkObj().FV.Get());
+      L := nil;
+      G := nil
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''', 'True True True True 7' + #10 +
+    '7 7 7 7 7' + #10 +
     'done');
 end;
 

@@ -580,6 +580,10 @@ type
       ALine, ACol: Integer): TASTExpr;
     function  BuildSetterCall(ARecv: TASTExpr; AProp: TPropertyInfo;
       AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
+    function  BuildIndexedGetterCall(AAccess: TFieldAccessExpr): TASTExpr;
+    function  LowerStaticIndexedGet(AAccess: TFieldAccessExpr;
+      ART: TRecordTypeDesc; AProp: TPropertyInfo;
+      AGetter: TMethodDecl): TTypeDesc;
     function  TryLowerPropertyValueIndex(AAccess: TFieldAccessExpr;
       APropInfo: TPropertyInfo): TTypeDesc;
     function  AnalyseIsExpr(AExpr: TIsExpr): TTypeDesc;
@@ -9014,6 +9018,63 @@ begin
   Result := Call;
 end;
 
+{ Recv.GetX(Index) for an INTERFACE-typed indexed property read whose
+  receiver is a class instance: the ordinary method-call expression, so the
+  (obj, itab) result pair and an owned transient receiver are handled exactly
+  as for an explicit call.  The hand-written indexed-getter paths in the
+  backends returned a single register: arm64 rejected the read (NotYet) and
+  the x86-64 backend crashed.  The receiver and index move out of AAccess
+  (already analysed); the caller frees the emptied node.  Returns nil -- the
+  read keeps its own path -- for any other shape. }
+function TSemanticAnalyser.BuildIndexedGetterCall(
+  AAccess: TFieldAccessExpr): TASTExpr;
+var
+  Recv: TASTExpr;
+  MDecl: TMethodDecl;
+  Call: TMethodCallExpr;
+begin
+  Result := nil;
+  if (AAccess.PropRead = nil) or AAccess.PropRead.IsStatic or
+     (AAccess.PropRead.IndexParamName = '') or
+     (AAccess.PropIndexExpr = nil) or (AAccess.PropReadDecl = nil) then
+    Exit;
+  if (AAccess.ResolvedType = nil) or
+     (AAccess.ResolvedType.Kind <> tyInterface) then
+    Exit;
+  MDecl := TMethodDecl(AAccess.PropReadDecl);
+  if AAccess.Base <> nil then
+  begin
+    if (AAccess.Base.ResolvedType = nil) or
+       (AAccess.Base.ResolvedType.Kind <> tyClass) then
+      Exit;
+    Recv := AAccess.Base;
+    AAccess.Base := nil;
+  end
+  else
+  begin
+    if AAccess.RecordName = '' then
+      Exit;
+    Recv := Self.AnalysedRecvIdent(AAccess.RecordName, AAccess.Line,
+      AAccess.Col);
+    if (Recv.ResolvedType = nil) or (Recv.ResolvedType.Kind <> tyClass) then
+    begin
+      Recv.Free();
+      Exit;
+    end;
+  end;
+  Call := TMethodCallExpr.Create();
+  Call.Line    := AAccess.Line;
+  Call.Col     := AAccess.Col;
+  Call.Name    := AAccess.PropRead.ReadMethod;
+  Call.ObjExpr := Recv;
+  Call.Args.Add(AAccess.PropIndexExpr);
+  AAccess.PropIndexExpr := nil;
+  Call.ResolvedClassType := Recv.ResolvedType;
+  Call.ResolvedMethod    := MDecl;
+  Call.ResolvedType      := AAccess.ResolvedType;
+  Result := Call;
+end;
+
 procedure TSemanticAnalyser.UnwrapLoweredOperator(var ASlot: TASTExpr);
 var
   Bin:  TBinaryExpr;
@@ -9038,6 +9099,33 @@ begin
     FA.LoweredSubscript := nil;   { ownership moves to the slot }
     ASlot := Call;
     FA.Free();
+    Exit;
+  end;
+  if (ASlot is TStringSubscriptExpr) and
+     (TStringSubscriptExpr(ASlot).IndexExpr = nil) and
+     (((TStringSubscriptExpr(ASlot).StrExpr is TFieldAccessExpr) and
+       (TFieldAccessExpr(TStringSubscriptExpr(ASlot).StrExpr).PropRead <> nil)) or
+      { the read already lowered to its getter call (BuildIndexedGetterCall) }
+      (TStringSubscriptExpr(ASlot).StrExpr is TMethodCallExpr)) then
+  begin
+    { a subscript whose index moved onto an indexed PROPERTY read (P[I],
+      Obj.Prop[I] reached through a subscript): the read itself, the shape
+      the parser gives Obj.Prop[I] -- backends handled the indexless
+      wrapper only for some value types }
+    Call := TStringSubscriptExpr(ASlot).StrExpr;
+    TStringSubscriptExpr(ASlot).StrExpr := nil;
+    ASlot.Free();
+    ASlot := Call;
+    { fall through: the read itself may lower to its getter call below }
+  end;
+  if ASlot is TFieldAccessExpr then
+  begin
+    Call := Self.BuildIndexedGetterCall(TFieldAccessExpr(ASlot));
+    if Call <> nil then
+    begin
+      ASlot.Free();
+      ASlot := Call;
+    end;
     Exit;
   end;
   if not (ASlot is TBinaryExpr) then Exit;
@@ -15807,6 +15895,42 @@ begin
   Result := AnalyseFieldAccess(AAccess);
 end;
 
+{ TypeName.StaticProp[I]: an INDEXED static property read is the static
+  getter call TypeName.GetX(I), placed in LoweredSubscript for the slot
+  helper to swap in.  The static-property-get lowering called the getter with
+  no argument -- the index was dropped and the getter read a garbage
+  parameter (wrong value on arm64, a crash on x86-64).  Returns nil for a
+  non-indexed property (the caller keeps IsStaticPropGet). }
+function TSemanticAnalyser.LowerStaticIndexedGet(AAccess: TFieldAccessExpr;
+  ART: TRecordTypeDesc; AProp: TPropertyInfo; AGetter: TMethodDecl): TTypeDesc;
+var
+  Call: TMethodCallExpr;
+begin
+  Result := nil;
+  if AProp.IndexParamName = '' then
+    Exit;
+  if AAccess.PropIndexExpr = nil then
+    SemanticError(
+      Format('Indexed property ''%s'' requires an index expression',
+        [AAccess.FieldName]),
+      AAccess.Line, AAccess.Col);
+  Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+  Call := TMethodCallExpr.Create();
+  Call.Line := AAccess.Line;
+  Call.Col := AAccess.Col;
+  Call.ObjectName := ART.Name;
+  Call.Name := AProp.ReadMethod;
+  Call.Args.Add(AAccess.PropIndexExpr);
+  AAccess.PropIndexExpr := nil;
+  Call.IsStaticCall := True;
+  Call.ResolvedClassType := ART;
+  Call.ResolvedMethod := AGetter;
+  Call.ResolvedType := AGetter.ResolvedReturnType;
+  AAccess.LoweredSubscript := Call;
+  AAccess.ResolvedType := Call.ResolvedType;
+  Result := Call.ResolvedType;
+end;
+
 function TSemanticAnalyser.AnalyseFieldAccess(AAccess: TFieldAccessExpr): TTypeDesc;
 var
   RecSym:   TSymbol;
@@ -15865,6 +15989,9 @@ begin
             Format('Static property ''%s.%s'' getter ''%s'' is not a static method',
               [RT.Name, AAccess.FieldName, PropInfo.ReadMethod]),
             AAccess.Line, AAccess.Col);
+        Result := Self.LowerStaticIndexedGet(AAccess, RT, PropInfo, MDecl);
+        if Result <> nil then
+          Exit;
         AAccess.IsStaticPropGet   := True;
         AAccess.ResolvedMethod    := MDecl;
         AAccess.ResolvedClassType := BaseType;
@@ -16238,6 +16365,10 @@ begin
             Format('Static property ''%s.%s'' getter ''%s'' is not a static method',
               [AAccess.RecordName, AAccess.FieldName, PropInfo.ReadMethod]),
             AAccess.Line, AAccess.Col);
+        Result := Self.LowerStaticIndexedGet(AAccess,
+          TRecordTypeDesc(RecSym.TypeDesc), PropInfo, MDecl);
+        if Result <> nil then
+          Exit;
         AAccess.IsStaticPropGet := True;
         AAccess.ResolvedMethod  := MDecl;
         AAccess.ResolvedClassType := RecSym.TypeDesc;
@@ -16461,6 +16592,7 @@ function TSemanticAnalyser.AnalyseFieldSubscript(AAccess: TFieldAccessExpr;
   AFldType: TTypeDesc): TTypeDesc;
 var
   PropInfo: TPropertyInfo;
+  Inner: TFieldAccessExpr;
 begin
   Result := nil;
   if AFldType.IsString() then
@@ -16471,7 +16603,34 @@ begin
   end
   else if AFldType.Kind in [tyRecord, tyClass] then
   begin
-    PropInfo := TRecordTypeDesc(AFldType).FindIndexedProperty();
+    PropInfo := TRecordTypeDesc(AFldType).FindDefaultProperty();
+    if PropInfo = nil then
+      PropInfo := TRecordTypeDesc(AFldType).FindIndexedProperty();
+    if (PropInfo <> nil) and (PropInfo.ReadMethod <> '') and
+       ((AAccess.Base <> nil) or (AAccess.RecordName <> '')) then
+    begin
+      { R.O[I] / Obj.Fld[I] with the field a class or record that has an
+        indexed (default) property: the property of the FIELD'S VALUE,
+        R.O.<Prop>[I].  Attaching the getter to this access called it on
+        R (the field's owner) as Self -- a garbage read.  Re-point the
+        access at the property, with the field read as its receiver, as
+        TryLowerPropertyValueIndex does for a property value. }
+      Inner := TFieldAccessExpr.Create();
+      Inner.Line := AAccess.Line;
+      Inner.Col := AAccess.Col;
+      Inner.Base := AAccess.Base;
+      Inner.RecordName := AAccess.RecordName;
+      Inner.FieldName := AAccess.FieldName;
+      Inner.QualifierUnit := AAccess.QualifierUnit;
+      AAccess.Base := Inner;
+      AAccess.RecordName := '';
+      AAccess.FieldName := PropInfo.Name;
+      AAccess.FieldInfo := nil;
+      AAccess.IsClassAccess := False;
+      AAccess.IsVarParam := False;
+      Result := AnalyseFieldAccess(AAccess);
+      Exit;
+    end;
     if PropInfo <> nil then
     begin
       Self.AnalyseExprSlot(AAccess.PropIndexExpr);
@@ -17904,12 +18063,42 @@ begin
     which re-analyses the inner OL[0]).  Once resolved, return the cached type. }
   if AExpr.ResolvedType <> nil then
     Exit(AExpr.ResolvedType);
+  { P[I] inside a method, P an INDEXED PROPERTY of the current class (and no
+    variable of that name in scope): Self.P[I], so the indexed-property arm
+    below takes it.  As a bare identifier P was read with no index. }
+  if (AExpr.StrExpr is TIdentExpr) and (FCurrentClass <> nil) and
+     (FTable.Lookup(TIdentExpr(AExpr.StrExpr).Name) = nil) and
+     (FCurrentClass.FindField(TIdentExpr(AExpr.StrExpr).Name) = nil) and
+     (FCurrentClass.FindProperty(TIdentExpr(AExpr.StrExpr).Name) <> nil) and
+     (FCurrentClass.FindProperty(TIdentExpr(AExpr.StrExpr).Name).IndexParamName <> '') then
+  begin
+    DefFA := TFieldAccessExpr.Create();
+    DefFA.Line := AExpr.StrExpr.Line;
+    DefFA.Col := AExpr.StrExpr.Col;
+    DefFA.FieldName := TIdentExpr(AExpr.StrExpr).Name;
+    DefFA.Base := TIdentExpr.Create();
+    TIdentExpr(DefFA.Base).Name := 'Self';
+    DefFA.Base.Line := DefFA.Line;
+    DefFA.Base.Col := DefFA.Col;
+    AExpr.StrExpr.Free();
+    AExpr.StrExpr := DefFA;
+    { the index moves onto the property read, as the indexed arm below
+      leaves it (a subscript with no index wraps the resolved read) }
+    DefFA.PropIndexExpr := AExpr.IndexExpr;
+    AExpr.IndexExpr := nil;
+    Result := Self.AnalyseExprSlot(AExpr.StrExpr);
+    AExpr.ResolvedType := Result;
+    Exit;
+  end;
   StrType := Self.AnalyseExprSlot(AExpr.StrExpr);
   { Indexed property read: Obj.Prop[I] where Prop is a method-backed indexed property }
   if AExpr.StrExpr is TFieldAccessExpr then
   begin
     FldAccess := TFieldAccessExpr(AExpr.StrExpr);
-    if (FldAccess.PropRead <> nil) and (FldAccess.PropRead.IndexParamName <> '') then
+    { a read that already carries its index (D['a'], unwrapped from an inner
+      subscript) is a complete value: D['a'][1] subscripts that value }
+    if (FldAccess.PropRead <> nil) and (FldAccess.PropRead.IndexParamName <> '') and
+       (FldAccess.PropIndexExpr = nil) then
     begin
       IdxType := Self.AnalyseExprSlot(AExpr.IndexExpr);
       FldAccess.PropIndexExpr := AExpr.IndexExpr;
@@ -18186,6 +18375,24 @@ begin
           AStmt.Line, AStmt.Col);
         CheckTypesMatch(ElemT, ValType,
           Format('''%s'' element', [AStmt.ArrayName]), AStmt.Line, AStmt.Col);
+        Exit;
+      end;
+      { P[I] := V inside a method, P an INDEXED PROPERTY of the current
+        class: Self.P[I] := V, lowered to the setter call on Self (it was
+        "Undeclared variable 'P'") }
+      DefProp := FCurrentClass.FindProperty(AStmt.ArrayName);
+      if (BaseInfo = nil) and (DefProp <> nil) and
+         (DefProp.IndexTypeDesc <> nil) and (DefProp.WriteMethod <> '') then
+      begin
+        IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
+        CheckTypesMatch(DefProp.IndexTypeDesc, IdxType, 'property index',
+          AStmt.Line, AStmt.Col);
+        ValType := AnalyseExprHinted(AStmt.ValueExpr, DefProp.TypeDesc);
+        CheckTypesMatch(DefProp.TypeDesc, ValType, 'property assignment',
+          AStmt.Line, AStmt.Col);
+        AStmt.SetterCall := BuildSetterCall(
+          AnalysedRecvIdent('Self', AStmt.Line, AStmt.Col),
+          DefProp, AStmt.IndexExpr, AStmt.ValueExpr, AStmt);
         Exit;
       end;
       { Implicit Self.Field[I] := V where Field is a class with a writable

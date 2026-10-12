@@ -83,6 +83,10 @@ type
     { bare property writes inside a method, field- and method-backed, and a
       member of a class-typed property (BUG-20261011-implicit-self-prop-write) }
     procedure TestRun_ImplicitSelfPropertyWrites;
+    { indexed-property forms (P4-7): interface-typed reads through every
+      receiver shape, bare P[I] reads and writes in a method, a default
+      property on a record's class FIELD, and Double / Single reads }
+    procedure TestRun_IndexedPropertyForms;
   end;
 
 implementation
@@ -957,6 +961,70 @@ begin
       O.Go()
     end.
     ''', '101 2 30' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_IndexedPropertyForms;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program Prg;
+    type
+      IFoo = interface function Get: Integer; end;
+      THold = class(TObject, IFoo)
+        N: Integer;
+        function Get: Integer;
+      end;
+      TObj = class
+        FV: IFoo;
+        FA: array[0..3] of Integer;
+        FD: Double;
+        function GetP(I: Integer): IFoo;
+        function GetA(I: Integer): Integer;
+        procedure SetA(I: Integer; V: Integer);
+        function GetD(K: String): Double;
+        function GetS(I: Integer): Single;
+        property P[I: Integer]: IFoo read GetP;
+        property A[I: Integer]: Integer read GetA write SetA; default;
+        property D[K: String]: Double read GetD;
+        property S[I: Integer]: Single read GetS;
+        procedure Run;
+      end;
+      TRec = record O: TObj; end;
+    var G: TObj;
+    function THold.Get: Integer; begin Result := N end;
+    function TObj.GetP(I: Integer): IFoo; begin Result := FV end;
+    function TObj.GetA(I: Integer): Integer; begin Result := FA[I] end;
+    procedure TObj.SetA(I: Integer; V: Integer); begin FA[I] := V end;
+    function TObj.GetD(K: String): Double; begin Result := FD end;
+    function TObj.GetS(I: Integer): Single; begin Result := 1.5 * I end;
+    function MkObj: TObj; begin Result := G end;
+    procedure TObj.Run;
+    var L: IFoo;
+    begin
+      L := P[1];
+      WriteLn(L.Get(), ' ', P[2].Get(), ' ', Self.P[3].Get());
+      A[1] := 11;
+      Self.A[2] := 12;
+      Self[3] := 13;
+      WriteLn(A[1], ' ', Self.A[2], ' ', Self[3])
+    end;
+    var H: THold; L: IFoo; R: TRec;
+    begin
+      H := THold.Create();
+      H.N := 7;
+      G := TObj.Create();
+      G.FV := H;
+      G.FD := 2.5;
+      L := G.P[0];
+      WriteLn(L.Get(), ' ', MkObj().P[0].Get());
+      G.Run();
+      R.O := G;
+      R.O[0] := 10;
+      WriteLn(R.O[0], ' ', R.O[3]);
+      WriteLn(G.D['k']:0:1, ' ', G.S[2]:0:1)
+    end.
+    ''', '7 7' + LE + '7 7 7' + LE + '11 12 13' + LE + '10 13' + LE +
+    '2.5 3.0' + LE, 0);
 end;
 
 initialization

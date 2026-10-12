@@ -109,6 +109,25 @@ type
     { an interface-typed setter receives the (obj, itab) pair: the itab half
       was never loaded, so the setter stored a garbage itab }
     procedure TestCodegen_InterfacePropertySetter_PassesPair;
+
+    { ------------------------------------------------------------------ }
+    { Indexed-property forms -- P4-7                                      }
+    { ------------------------------------------------------------------ }
+    { an interface-typed indexed read lowers to the getter CALL, so the
+      (obj, itab) result pair takes the method-call path: arm64 rejected
+      the read, x86-64 crashed the compiler }
+    procedure TestSemantic_InterfaceIndexedPropRead_LowersToGetterCall;
+    { P[I] in a method, P an indexed property: Self.P[I].  The bare read
+      dropped the index; the bare write did not analyse }
+    procedure TestSemantic_ImplicitSelfIndexedProp_ReadAndWrite;
+    { R.O[I], O a class field with a default property: the getter runs on
+      the FIELD'S value, not on R }
+    procedure TestSemantic_FieldDefaultProperty_ReceiverIsField;
+    { a Double indexed read calls the getter (x86-64 crashed the compiler) }
+    procedure TestCodegen_FloatIndexedPropRead_CallsGetter;
+    { TC.A[I], A a static indexed property: the static getter call with the
+      index as its argument (the index was dropped -- a garbage read) }
+    procedure TestSemantic_StaticIndexedPropRead_PassesIndex;
   end;
 
 implementation
@@ -811,6 +830,181 @@ begin
       'movq T_itab(%rip), %rcx',
       'ldr x2, [sp], #16' + #10#9 + 'ldr x1, [sp], #16' + #10#9 +
       'ldr x0, [sp], #16' + #10#9 + 'bl _THolder_SetThing'));
+end;
+
+const
+  SrcIndexedForms = '''
+    program P;
+    type
+      IFoo = interface function Get: Integer; end;
+      THold = class(TObject, IFoo) function Get: Integer; end;
+      TObj = class
+        FV: IFoo;
+        FN: Integer;
+        function GetP(I: Integer): IFoo;
+        function GetN(I: Integer): Integer;
+        procedure SetN(I: Integer; V: Integer);
+        property P[I: Integer]: IFoo read GetP;
+        property N[I: Integer]: Integer read GetN write SetN; default;
+        procedure Run;
+      end;
+      TRec = record O: TObj; end;
+    function THold.Get: Integer; begin Result := 1 end;
+    function TObj.GetP(I: Integer): IFoo; begin Result := FV end;
+    function TObj.GetN(I: Integer): Integer; begin Result := FN end;
+    procedure TObj.SetN(I: Integer; V: Integer); begin FN := V end;
+    procedure TObj.Run;
+    var L: IFoo; K: Integer;
+    begin
+      L := P[1];
+      K := N[2];
+      N[3] := 4
+    end;
+    var O: TObj; L: IFoo; R: TRec; K: Integer;
+    begin
+      L := O.P[1];
+      K := R.O[2]
+    end.
+    ''';
+
+{ the analysed body of method AName: the implementation in ProcDecls, or
+  the class-body declaration it was attached to }
+function FindMethodBody(AProg: TProgram; const AName: string): TBlock;
+var
+  I, J: Integer;
+  MD: TMethodDecl;
+  TD: TTypeDecl;
+begin
+  Result := nil;
+  for I := 0 to AProg.Block.ProcDecls.Count - 1 do
+  begin
+    MD := TMethodDecl(AProg.Block.ProcDecls[I]);
+    if SameText(MD.Name, AName) and (MD.Body <> nil) then
+      Exit(MD.Body);
+  end;
+  for I := 0 to AProg.Block.TypeDecls.Count - 1 do
+  begin
+    TD := TTypeDecl(AProg.Block.TypeDecls[I]);
+    if TD.Def is TClassTypeDef then
+      for J := 0 to TClassTypeDef(TD.Def).Methods.Count - 1 do
+      begin
+        MD := TMethodDecl(TClassTypeDef(TD.Def).Methods[J]);
+        if SameText(MD.Name, AName) and (MD.Body <> nil) then
+          Exit(MD.Body);
+      end;
+  end;
+end;
+
+procedure TPropertyTests.TestSemantic_InterfaceIndexedPropRead_LowersToGetterCall;
+var
+  Prog: TProgram;
+  Body: TBlock;
+  E: TASTExpr;
+begin
+  Prog := AnalyseSrc(SrcIndexedForms);
+  try
+    E := TAssignment(Prog.Block.Stmts[0]).Expr;
+    AssertTrue('O.P[1] is a method call', E is TMethodCallExpr);
+    AssertEquals('getter', 'GetP', TMethodCallExpr(E).Name);
+    AssertEquals('index argument', 1, TMethodCallExpr(E).Args.Count);
+    Body := FindMethodBody(Prog, 'Run');
+    AssertNotNull('TObj.Run body', Body);
+    E := TAssignment(Body.Stmts[0]).Expr;
+    AssertTrue('P[1] in a method is a method call', E is TMethodCallExpr);
+    AssertEquals('getter in a method', 'GetP', TMethodCallExpr(E).Name);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPropertyTests.TestSemantic_ImplicitSelfIndexedProp_ReadAndWrite;
+var
+  Prog: TProgram;
+  Body: TBlock;
+  E: TASTExpr;
+begin
+  Prog := AnalyseSrc(SrcIndexedForms);
+  try
+    Body := FindMethodBody(Prog, 'Run');
+    AssertNotNull('TObj.Run body', Body);
+    E := TAssignment(Body.Stmts[1]).Expr;
+    AssertTrue('N[2] is the property read', E is TFieldAccessExpr);
+    AssertTrue('with its index', TFieldAccessExpr(E).PropIndexExpr <> nil);
+    AssertTrue('N[3] := 4 lowers to the setter',
+      TStaticSubscriptAssign(Body.Stmts[2]).SetterCall <> nil);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPropertyTests.TestSemantic_FieldDefaultProperty_ReceiverIsField;
+var
+  Prog: TProgram;
+  FA: TFieldAccessExpr;
+begin
+  Prog := AnalyseSrc(SrcIndexedForms);
+  try
+    FA := TFieldAccessExpr(TAssignment(Prog.Block.Stmts[1]).Expr);
+    AssertEquals('the default property', 'N', FA.FieldName);
+    AssertTrue('read via its getter', FA.PropRead <> nil);
+    AssertTrue('on the field read R.O', FA.Base is TFieldAccessExpr);
+    AssertEquals('receiver field', 'O', TFieldAccessExpr(FA.Base).FieldName);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPropertyTests.TestCodegen_FloatIndexedPropRead_CallsGetter;
+const
+  Src = '''
+    program P;
+    type
+      TObj = class
+        FD: Double;
+        function GetD(I: Integer): Double;
+        property D[I: Integer]: Double read GetD;
+      end;
+    function TObj.GetD(I: Integer): Double; begin Result := FD end;
+    var O: TObj; X: Double;
+    begin
+      O := TObj.Create();
+      X := O.D[1]
+    end.
+    ''';
+begin
+  AssertEquals('Double getter called', '',
+    AsmMissing(Src, 'callq TObj_GetD', 'bl _TObj_GetD'));
+end;
+
+procedure TPropertyTests.TestSemantic_StaticIndexedPropRead_PassesIndex;
+const
+  Src = '''
+    program P;
+    type
+      TC = class
+        static function GetA(I: Integer): Integer;
+        static property A[I: Integer]: Integer read GetA;
+      end;
+    static function TC.GetA(I: Integer): Integer; begin Result := I end;
+    var X: Integer;
+    begin
+      X := TC.A[2]
+    end.
+    ''';
+var
+  Prog: TProgram;
+  E: TASTExpr;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    E := TAssignment(Prog.Block.Stmts[0]).Expr;
+    AssertTrue('TC.A[2] is a method call', E is TMethodCallExpr);
+    AssertTrue('a static call', TMethodCallExpr(E).IsStaticCall);
+    AssertEquals('getter', 'GetA', TMethodCallExpr(E).Name);
+    AssertEquals('index argument', 1, TMethodCallExpr(E).Args.Count);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization
