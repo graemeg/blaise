@@ -626,6 +626,10 @@ type
     procedure DrainPendingAnonDecls(ABlock: TBlock);
     procedure CoerceRoutineToClosure(AAssign: TAssignment);
     procedure ResolveProceduralTypeDef(ATD: TTypeDecl);
+    { Resolve ADef's parameter and return types into ADesc (shared by named
+      procedural types and inline ones; AName is used in diagnostics) }
+    procedure FillProceduralTypeDesc(ADef: TProceduralTypeDef;
+      ADesc: TProceduralTypeDesc; const AName: string; ALine, ACol: Integer);
     function  AnalyseStringSubscriptExpr(AExpr: TStringSubscriptExpr): TTypeDesc;
     function  AnalyseArrayLiteralExpr(AExpr: TArrayLiteralExpr): TTypeDesc;
     function  AnalyseSetLiteralExpr(AExpr: TArrayLiteralExpr; ASetType: TSetTypeDesc): TTypeDesc;
@@ -18012,46 +18016,54 @@ end;
 
 procedure TSemanticAnalyser.ResolveProceduralTypeDef(ATD: TTypeDecl);
 var
-  Def: TProceduralTypeDef;
-  ProcDesc: TProceduralTypeDesc;
   Sym: TSymbol;
-  K: Integer;
-  MParam: TMethodParam;
-  ProcParam: TProcParamInfo;
-  TSym: TSymbol;
 begin
-  Def := TProceduralTypeDef(ATD.Def);
   Sym := FTable.Lookup(ATD.Name);
   if (Sym = nil) or not (Sym.TypeDesc is TProceduralTypeDesc) then
     SemanticError(Format('Internal: procedural type ''%s'' not registered',
       [ATD.Name]), ATD.Line, ATD.Col);
-  ProcDesc := TProceduralTypeDesc(Sym.TypeDesc);
-  ProcDesc.IsMethodPtr := Def.IsMethodPtr;
-  ProcDesc.IsReference := Def.IsReference;
-  for K := 0 to Def.Params.Count - 1 do
+  Self.FillProceduralTypeDesc(TProceduralTypeDef(ATD.Def),
+    TProceduralTypeDesc(Sym.TypeDesc), ATD.Name, ATD.Line, ATD.Col);
+end;
+
+procedure TSemanticAnalyser.FillProceduralTypeDesc(ADef: TProceduralTypeDef;
+  ADesc: TProceduralTypeDesc; const AName: string; ALine, ACol: Integer);
+var
+  K: Integer;
+  MParam: TMethodParam;
+  ProcParam: TProcParamInfo;
+  TD: TTypeDesc;
+begin
+  ADesc.IsMethodPtr := ADef.IsMethodPtr;
+  ADesc.IsReference := ADef.IsReference;
+  { Parameter and return types go through FindTypeOrInstantiate, as a
+    routine's own signature does, so an inline form (^T, set of T, array of
+    T, class of T) is built on demand rather than looked up by name only
+    (BUG-20261013-proctype-inline-param-types). }
+  for K := 0 to ADef.Params.Count - 1 do
   begin
-    MParam := TMethodParam(Def.Params.Items[K]);
-    TSym   := FTable.Lookup(MParam.TypeName);
-    if (TSym = nil) or (TSym.Kind <> skType) then
+    MParam := TMethodParam(ADef.Params.Items[K]);
+    TD := FindTypeOrInstantiate(MParam.TypeName);
+    if TD = nil then
       SemanticError(Format(
         'Unknown parameter type ''%s'' in procedural type ''%s''',
-        [MParam.TypeName, ATD.Name]), ATD.Line, ATD.Col);
-    MParam.ResolvedType := FTable.ParamTypeFor(TSym.TypeDesc, MParam.IsOpenArray);
+        [MParam.TypeName, AName]), ALine, ACol);
+    MParam.ResolvedType := FTable.ParamTypeFor(TD, MParam.IsOpenArray);
     ProcParam := TProcParamInfo.Create();
     ProcParam.Name         := MParam.ParamName;
     ProcParam.TypeDesc     := MParam.ResolvedType;
     ProcParam.IsVarParam   := MParam.IsVarParam;
     ProcParam.IsConstParam := MParam.IsConstParam;
-    ProcDesc.Params.Add(ProcParam);
+    ADesc.Params.Add(ProcParam);
   end;
-  if Def.IsFunction then
+  if ADef.IsFunction then
   begin
-    TSym := FTable.Lookup(Def.ReturnTypeName);
-    if (TSym = nil) or (TSym.Kind <> skType) then
+    TD := FindTypeOrInstantiate(ADef.ReturnTypeName);
+    if TD = nil then
       SemanticError(Format(
         'Unknown return type ''%s'' in procedural type ''%s''',
-        [Def.ReturnTypeName, ATD.Name]), ATD.Line, ATD.Col);
-    ProcDesc.ReturnType := TSym.TypeDesc;
+        [ADef.ReturnTypeName, AName]), ALine, ACol);
+    ADesc.ReturnType := TD;
   end;
 end;
 

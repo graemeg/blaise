@@ -101,6 +101,12 @@ type
     procedure TestSemantic_AddrOfOpenArrayProc_Assignable;
     procedure TestSemantic_AddrOfOpenArrayProc_ElementMismatch_Fails;
     procedure TestSemantic_ProcTypeOpenArrayParam_ScalarArg_Fails;
+    { BUG-20261013-proctype-inline-param-types: a parameter or return type
+      written as an inline type form (^T, set of T, array of T) resolves --
+      it was looked up by name only ("Unknown parameter type '^Integer'") --
+      and still takes part in the signature check }
+    procedure TestSemantic_ProcTypeInlineParamTypes_Resolve;
+    procedure TestSemantic_ProcTypeInlineParamType_Mismatch_Fails;
   end;
 
 implementation
@@ -754,6 +760,69 @@ begin
         #9'testq %rax, %rax' + #10 + #9'sete %al',
       #9'ldr x0, [x9, _g_K@PAGEOFF]'));
 end;
+
+procedure TProcTypesTests.TestSemantic_ProcTypeInlineParamTypes_Resolve;
+begin
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
+        program Test;
+        type
+          TPtr = procedure(P: ^Integer);
+          TSet = procedure(S: set of Byte);
+          TArr = function(): array of Integer;
+          TMeta = function(): class of TObject;
+        procedure UsePtr(P: ^Integer);
+        begin
+        end;
+        procedure UseSet(S: set of Byte);
+        begin
+        end;
+        function MkArr(): array of Integer;
+        begin
+        end;
+        function MkMeta(): class of TObject;
+        begin
+          Result := TObject
+        end;
+        var
+          A: TPtr;
+          B: TSet;
+          C: TArr;
+          D: TMeta;
+        begin
+          A := @UsePtr;
+          B := @UseSet;
+          C := @MkArr;
+          D := @MkMeta
+        end.
+        '''));
+end;
+
+procedure TProcTypesTests.TestSemantic_ProcTypeInlineParamType_Mismatch_Fails;
+begin
+  AssertTrue('a ^Byte routine must not match a ^Integer signature',
+    SemanticError(
+      '''
+          program Test;
+          type
+            TPtr = procedure(P: ^Integer);
+          procedure UsePtr(P: ^Byte);
+          begin
+          end;
+          var A: TPtr;
+          begin
+            A := @UsePtr
+          end.
+          ''') <> '');
+end;
+
+
+
+
+
+
+
 
 initialization
   RegisterTest(TProcTypesTests);

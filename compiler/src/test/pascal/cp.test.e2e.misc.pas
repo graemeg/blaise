@@ -36,6 +36,9 @@ type
     procedure TestRun_Constants_Scalar;
     procedure TestRun_IndirectFuncCallExpr_Shapes;
     procedure TestRun_ProcTypes_IndirectCallShapes;
+    { BUG-20261013-proctype-inline-param-types: a named procedural type whose
+      parameter or return type is ^T, set of T or array of T, called through }
+    procedure TestRun_ProcTypes_InlineParamAndReturnTypes;
     procedure TestRun_SelfHostingRTLServices;
     procedure TestRun_HighLow_OrdinalBounds;
     procedure TestRun_ChainedFields_ReadThroughEveryLevel;
@@ -4282,6 +4285,54 @@ begin
     'True' + LE +
     'True' + LE, 0);
 end;
+
+procedure TE2EMiscTests.TestRun_ProcTypes_InlineParamAndReturnTypes;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TPtr = procedure(P: ^Integer);
+      TSet = function(S: set of Byte): Boolean;
+      TArr = function(N: Integer): array of Integer;
+    procedure Bump(P: ^Integer);
+    begin
+      P^ := P^ + 1
+    end;
+    function HasFive(S: set of Byte): Boolean;
+    begin
+      Result := 5 in S
+    end;
+    function Mk(N: Integer): array of Integer;
+    var I: Integer;
+    begin
+      SetLength(Result, N);
+      for I := 0 to N - 1 do
+        Result[I] := I * 10
+    end;
+    var
+      A: TPtr;
+      B: TSet;
+      C: TArr;
+      X: Integer;
+      D: array of Integer;
+    begin
+      A := @Bump;
+      B := @HasFive;
+      C := @Mk;
+      X := 41;
+      A(@X);
+      WriteLn(X);
+      WriteLn(B([1, 5]), ' ', B([2]));
+      D := C(3);
+      WriteLn(Length(D), ' ', D[2])
+    end.
+    ''',
+    '42' + LE + 'True False' + LE + '3 20' + LE, 0);
+end;
+
+
 
 procedure TE2EMiscTests.TestBuildRtlObjects_CollatingLocale_PrintsOnlyObjects;
 var
