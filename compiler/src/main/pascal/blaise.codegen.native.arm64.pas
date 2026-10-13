@@ -183,6 +183,9 @@ type
                                    releases (BUG-048/BUG-049) — also the next
                                    free _pendrel_N slot index }
     FPendingRelSyms: array[0..PENDREL_SLOTS - 1] of string;
+    { non-nil: the slot holds the ADDRESS of an aggregate of this type (a
+      static-array result scratch) whose managed content the flush releases }
+    FPendingRelTypes: array[0..PENDREL_SLOTS - 1] of TTypeDesc;
                                  { the RTL release routine for each live
                                    _pendrel_N slot (_ClassRelease or
                                    _DynArrayRelease) }
@@ -282,6 +285,7 @@ type
     function IsOwnedClassOperand(AExpr: TASTExpr): Boolean;
     procedure EmitReleaseParkedClass;
     function  DeferNativeClassRelease: Boolean;
+    function  DeferAggRelease(AType: TTypeDesc): Boolean;
     function  DeferNativeRelease(const AReleaseSym: string): Boolean;
     procedure FlushNativePendingReleases(AMark: Integer);
     procedure EmitPendRelSlotsZero;
@@ -1271,9 +1275,21 @@ begin
   end;
   EmitStoreSlot('x0', Format('_pendrel_%d', [FPendingRelCount]));
   FPendingRelSyms[FPendingRelCount] := AReleaseSym;
+  FPendingRelTypes[FPendingRelCount] := nil;
   FPendingRelCount := FPendingRelCount + 1;
   FPendRelUsed := True;
   Result := True;
+end;
+
+function TArm64Backend.DeferAggRelease(AType: TTypeDesc): Boolean;
+begin
+  { x0 = the ADDRESS of an aggregate scratch holding +1 managed content (a
+    static-array call result): release it in place at the statement end.
+    Returns False (the content leaks, never a use-after-free) when every
+    slot is in use. }
+  Result := ArcTypeHasManagedContent(AType) and DeferNativeRelease('');
+  if Result then
+    FPendingRelTypes[FPendingRelCount - 1] := AType;
 end;
 
 procedure TArm64Backend.EmitPendRelSlotsZero;
@@ -1293,6 +1309,8 @@ begin
 end;
 
 procedure TArm64Backend.FlushNativePendingReleases(AMark: Integer);
+var
+  SkipLbl: string;
 begin
   { LIFO-release every base deferred since the mark, resetting the count.
     Emitted at the leaf-statement boundary where x0 is free. }
@@ -1300,7 +1318,21 @@ begin
   begin
     FPendingRelCount := FPendingRelCount - 1;
     EmitLoadSlot('x0', Format('_pendrel_%d', [FPendingRelCount]));
-    EmitCallSym(FPendingRelSyms[FPendingRelCount]);
+    if FPendingRelTypes[FPendingRelCount] <> nil then
+    begin
+      { an aggregate scratch: release its managed content in place (a nil
+        slot -- the deferring operand was skipped -- releases nothing) }
+      SkipLbl := NewLabel('pendagg');
+      Self.Emit(#9'cbz x0, ' + SkipLbl);
+      Self.Emit(#9'str x19, [sp, #-16]!');
+      Self.Emit(#9'mov x19, x0');
+      Self.EmitManagedReleaseAt(FPendingRelTypes[FPendingRelCount], 'x19',
+        True);
+      Self.Emit(#9'ldr x19, [sp], #16');
+      Self.Emit(SkipLbl + ':');
+    end
+    else
+      EmitCallSym(FPendingRelSyms[FPendingRelCount]);
     EmitStoreSlot('xzr', Format('_pendrel_%d', [FPendingRelCount]));
   end;
 end;
@@ -1912,6 +1944,27 @@ begin
     EmitCallSym('memcpy');
     Exit;
   end;
+  if (AFld.TypeDesc.Kind = tyStaticArray) and AggHasManaged(AFld.TypeDesc) then
+  begin
+    { a managed static-array field: retain the source's elements, release the
+      field's old ones (no zeroing, so F := F is exact), then copy.  The two
+      addresses live in callee-saved x19 / x22 across the walks. }
+    Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+    EmitRecAddrToX0(AValueExpr);                    { source address }
+    Self.Emit(#9'mov x19, x0');
+    Self.Emit(#9'ldr x22, [sp, #16]');              { the parked base }
+    if AFld.Offset <> 0 then
+      EmitAddSubImm('add', 'x22', 'x22', AFld.Offset);
+    Self.EmitManagedAddRefAt(AFld.TypeDesc, 'x19');
+    Self.EmitManagedReleaseAt(AFld.TypeDesc, 'x22', False);
+    Self.Emit(#9'mov x0, x22');
+    Self.Emit(#9'mov x1, x19');
+    EmitIntLiteral('x2', AFld.TypeDesc.RawSize());
+    EmitCallSym('memcpy');
+    Self.Emit(#9'ldp x19, x22, [sp], #16');
+    Self.Emit(#9'add sp, sp, #16');                 { drop the base }
+    Exit;
+  end;
   if (AFld.TypeDesc.Kind = tyClass) and (AFld.IsUnretained or AFld.IsWeak) then
   begin
     { non-owning field -- see EmitInstanceFieldStore }
@@ -2016,6 +2069,14 @@ begin
   { x0 := address of a record VALUE — every lvalue-ish record shape the
     copy paths accept: plain/var-param/implicit-Self idents, subscripted
     elements, and record-typed field accesses }
+  if (AExpr.ResolvedType <> nil) and
+     (AExpr.ResolvedType.Kind = tyStaticArray) and IsAggCallValue(AExpr) then
+  begin
+    { a static-array-returning call (or getter): it evaluates to the address
+      of its per-site result buffer }
+    Self.EmitExprToX0(AExpr);
+    Exit;
+  end;
   if RecordPropRead(AExpr) <> nil then
   begin
     { a record-typed property (L[I] on a TList<TRec>): its getter's value }
@@ -4499,6 +4560,9 @@ begin
       AddLocal(JTmp, AExpr.ResolvedType.RawSize());
     EmitRecCallDispatch(AExpr, JTmp);
     EmitSlotAddr('x0', JTmp);
+    { a managed static-array result: its +1 elements are released at the
+      statement end (every consumer copies with a retain) }
+    DeferAggRelease(AExpr.ResolvedType);
     Exit;
   end;
   if IsInlineBytesAgg(AExpr.ResolvedType) and
@@ -4518,6 +4582,7 @@ begin
       AddLocal(JTmp, AExpr.ResolvedType.RawSize());
     EmitPropReadCall(TFieldAccessExpr(AExpr), JTmp);
     EmitSlotAddr('x0', JTmp);
+    DeferAggRelease(AExpr.ResolvedType);
     Exit;
   end;
   if (AExpr.ResolvedType <> nil) and
@@ -8089,6 +8154,7 @@ procedure TArm64Backend.EmitAssignment(AAsgn: TAssignment);
 var
   I, Shape: Integer;
   RD: TMethodDecl;
+  ManagedAgg: Boolean;
 begin
   { Run := TRunMethod(M) — a RECORD cast to a method-pointer type.  Both sides
     are 16-byte fat values (Code at +0, Data/Env at +8), but the generic value
@@ -8126,7 +8192,7 @@ begin
   end;
   if IsInlineBytesAgg(AAsgn.ResolvedLhsType) then
   begin
-    { A := <static array of unmanaged elements> takes the same copy as a
+    { A := <static array> takes the same copy as a
       jumbo set: the value is the ADDRESS of its bytes (a variable's storage,
       or a call's per-site result buffer).
       S := <jumbo set>: a jumbo set is an inline byte bitmap and its value
@@ -8135,7 +8201,16 @@ begin
       first 8 bytes instead -- a pointer to the RHS's temporary bitmap, which
       dangled once its frame or loop iteration moved on. }
     EmitInlineBytesAddr(AAsgn.Expr);                { source bytes address }
-    Self.Emit(#9'mov x1, x0');
+    ManagedAgg := AggHasManaged(AAsgn.ResolvedLhsType);
+    if ManagedAgg then
+    begin
+      { managed elements: the callee-saved x19 / x22 hold the source and
+        target addresses across the retain / release walks }
+      Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+      Self.Emit(#9'mov x19, x0');
+    end
+    else
+      Self.Emit(#9'mov x1, x0');
     if AAsgn.ImplicitSelfField <> nil then
     begin
       EmitLoadSlot('x0', 'Self');
@@ -8151,10 +8226,23 @@ begin
       EmitLoadSlot('x0', AAsgn.Name)                { slot holds &set }
     else
       EmitSlotAddr('x0', AAsgn.Name);
+    if ManagedAgg then
+    begin
+      Self.Emit(#9'mov x22, x0');
+      { retain the source's elements first and release the target's old ones
+        without zeroing, so A := A is exact; a call result's scratch keeps
+        its own +1, dropped at the statement end }
+      Self.EmitManagedAddRefAt(AAsgn.ResolvedLhsType, 'x19');
+      Self.EmitManagedReleaseAt(AAsgn.ResolvedLhsType, 'x22', False);
+      Self.Emit(#9'mov x0, x22');
+      Self.Emit(#9'mov x1, x19');
+    end;
     EmitIntLiteral('x2', AAsgn.ResolvedLhsType.RawSize());
     { an operator result lands in its own frame slot, so source and target
       never partially overlap (S := S is an exact self-copy) }
     EmitCallSym('memcpy');
+    if ManagedAgg then
+      Self.Emit(#9'ldp x19, x22, [sp], #16');
     Exit;
   end;
   { Captured managed writes (leg 17).  '_cap_<Name>' holds &<Name>, so the ARC
@@ -9809,6 +9897,30 @@ begin
       EmitByteRhsToX0(AStmt.ValueExpr)
     else
       Self.EmitExprToX0(AStmt.ValueExpr);
+  end
+  else if Elem.Kind = tyStaticArray then
+  begin
+    { an element that is itself a static array (AA[I] := L, DA[I] := L): copy
+      its bytes from the source's address.  Managed elements follow the
+      retain-source-then-release-dest discipline (no zeroing, so a
+      self-assign is exact); the call result's scratch keeps its own +1,
+      dropped at the statement end. }
+    Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+    EmitRecAddrToX0(AStmt.ValueExpr);
+    Self.Emit(#9'mov x19, x0');
+    Self.Emit(#9'ldr x22, [sp, #16]');   { the parked element address }
+    if AggHasManaged(Elem) then
+    begin
+      Self.EmitManagedAddRefAt(Elem, 'x19');
+      Self.EmitManagedReleaseAt(Elem, 'x22', False);
+    end;
+    Self.Emit(#9'mov x0, x22');
+    Self.Emit(#9'mov x1, x19');
+    EmitIntLiteral('x2', Elem.RawSize());
+    EmitCallSym('memcpy');
+    Self.Emit(#9'ldp x19, x22, [sp], #16');
+    Self.Emit(#9'add sp, sp, #16');      { drop the element address }
+    Exit;
   end
   else
     NotYet('array element of this type', AStmt);
@@ -11960,9 +12072,12 @@ end;
 
 function TArm64Backend.IsInlineBytesAgg(AType: TTypeDesc): Boolean;
 begin
+  { a jumbo set or a static array, managed elements included: passed and
+    returned as inline bytes by address.  The ARC walks of a managed array
+    (retain on entry / copy, release on exit / overwrite) sit at the copy
+    points -- see AggHasManaged. }
   Result := IsJumboSetType(AType) or
-    ((AType <> nil) and (AType.Kind = tyStaticArray) and
-     not AggHasManaged(AType));
+    ((AType <> nil) and (AType.Kind = tyStaticArray));
 end;
 
 procedure TArm64Backend.EmitInlineBytesAddr(AExpr: TASTExpr);
@@ -12463,6 +12578,11 @@ begin
           the prologue's pass 2, so writes in the callee stay local }
         AddLocal(Par.ParamName, Par.ResolvedType.RawSize());
         AddLocal('__pptr_' + Par.ParamName, 8);
+        { a managed static array: the callee's copy co-owns its elements
+          (retained in prologue pass 3, released at exit); a const param
+          borrows them, as a const record param does }
+        if (not Par.IsConstParam) and AggHasManaged(Par.ResolvedType) then
+          FRecLocals.AddObject(Par.ParamName, Par.ResolvedType);
       end
       else
       begin
@@ -13186,6 +13306,17 @@ begin
       Self.Emit(#9'str x19, [sp, #-16]!');
       EmitSlotAddr('x19', Par.ParamName);
       Self.EmitRecordFieldRetains(TRecordTypeDesc(Par.ResolvedType), 'x19');
+      Self.Emit(#9'ldr x19, [sp], #16');
+    end
+    else if (Par.ResolvedType <> nil) and
+            (Par.ResolvedType.Kind = tyStaticArray) and
+            not Par.IsVarParam and not Par.IsConstParam and
+            AggHasManaged(Par.ResolvedType) then
+    begin
+      { a managed static array: the callee's copy co-owns every element }
+      Self.Emit(#9'str x19, [sp, #-16]!');
+      EmitSlotAddr('x19', Par.ParamName);
+      Self.EmitManagedAddRefAt(Par.ResolvedType, 'x19');
       Self.Emit(#9'ldr x19, [sp], #16');
     end;
   end;
@@ -14351,6 +14482,12 @@ begin
                 (not TIdentExpr(Arg).IsImplicitSelf) and
                 (not Self.IsCaptured(TIdentExpr(Arg).Name)) then
           EmitSlotAddr('x0', TIdentExpr(Arg).Name)
+        else if (Arg is TStringSubscriptExpr) or (Arg is TDerefExpr) or
+                ((Arg is TFieldAccessExpr) and IsFatLValue(Arg)) then
+          { an element (A[I]), P^ or field holding the closure: its own
+            address -- the value expression yielded the loaded word, and the
+            callee's copy of the 16 bytes read through it crashed }
+          EmitLValueAddrToX0(Arg)
         else
           Self.EmitExprToX0(Arg);
         EmitPushX0();

@@ -244,6 +244,10 @@ type
       so overflow degrades rather than breaks. }
     FPendingRelCount: Integer;
     FPendingRelSyms: array[0..PENDREL_SLOTS - 1] of string;
+    { non-nil: the slot holds the ADDRESS of an aggregate of this type (a
+      static-array call result's scratch buffer) whose managed content the
+      flush releases in place }
+    FPendingRelTypes: array[0..PENDREL_SLOTS - 1] of TTypeDesc;
                                 { the RTL release routine for each live
                                   _pendrel_N slot (_ClassRelease or
                                   _DynArrayRelease) }
@@ -2962,6 +2966,17 @@ begin
     Result := NativeMangle(ATypeName + '_' + ADecl.Name)
   else
     Result := NativeMangle(ATypeName + '_' + AMethodName);
+end;
+
+{ A field whose value is read by ADDRESS rather than loaded: a record, a static
+  array, a jumbo-set bitmap or a 16-byte closure / method pointer.  Loading a
+  word from it handed the first half of a fat value to a callee that copies 16
+  bytes through the pointer. }
+function IsAddrReadFieldType(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and
+    (IsJumboSet(AType) or (AType.Kind in [tyRecord, tyStaticArray]) or
+     IsMethodPtrType(AType));
 end;
 
 function IsFatLValueExpr(AExpr: TASTExpr): Boolean;
@@ -5695,31 +5710,28 @@ var
   SAT: TStaticArrayTypeDesc;
 begin
   SAT := TStaticArrayTypeDesc(ASub.StrExpr.ResolvedType);
-  Self.EmitExprToEax(ASub.IndexExpr);          { index -> %rax }
-  Self.EmitStaticElemScale(SAT);
-  { Base address of the array's inline storage into %rcx. }
+  { Base address of the array's inline storage.  A static-array PARAMETER
+    (any mode) holds the array's address in its slot; reading the slot as
+    the storage indexed the frame and the element read was garbage (a
+    crash).  EmitStaticArrayArgAddrToRax resolves every base form: a
+    parameter, a capture, a field, an element, a call result. }
   if (ASub.StrExpr is TIdentExpr) and
      TIdentExpr(ASub.StrExpr).IsImplicitSelf and
      (TIdentExpr(ASub.StrExpr).ImplicitFieldInfo <> nil) then
   begin
     { Static-array field of Self: inline storage at Self + field offset. }
-    Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('Self')]));
+    Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
     if TFieldInfo(TIdentExpr(ASub.StrExpr).ImplicitFieldInfo).Offset > 0 then
-      Self.Emit(Format(#9'addq $%d, %%rcx',
+      Self.Emit(Format(#9'addq $%d, %%rax',
         [TFieldInfo(TIdentExpr(ASub.StrExpr).ImplicitFieldInfo).Offset]));
   end
-  else if ASub.StrExpr is TIdentExpr then
-  begin
-    if Self.IsLocal(TIdentExpr(ASub.StrExpr).Name) then
-      Self.Emit(Format(#9'leaq %s, %%rcx',
-        [Self.VarOperand(TIdentExpr(ASub.StrExpr).Name)]))
-    else
-      Self.EmitLeaqGlobal(TIdentExpr(ASub.StrExpr).Name, '%rcx');
-  end
   else
-    raise ENativeCodeGenError.Create(
-      'native backend: unsupported interface static-array base expression');
-  Self.Emit(Format(#9'addq %%rax, %%rcx', []));
+    Self.EmitStaticArrayArgAddrToRax(ASub.StrExpr);
+  Self.Emit(#9'pushq %rax');
+  Self.EmitExprToEax(ASub.IndexExpr);          { index -> %rax }
+  Self.EmitStaticElemScale(SAT);
+  Self.Emit(#9'popq %rcx');
+  Self.Emit(#9'addq %rax, %rcx');
   Self.Emit(Format(#9'movq %%rcx, %s', [ADstReg]));
 end;
 
@@ -7479,11 +7491,14 @@ begin
   else
     FPendRelUsed := True;      { a frame slot: zeroed at function entry }
   FPendingRelSyms[FPendingRelCount] := AReleaseSym;
+  FPendingRelTypes[FPendingRelCount] := nil;
   FPendingRelCount := FPendingRelCount + 1;
   Result := True;
 end;
 
 procedure TX86_64Backend.FlushNativePendingReleases(AMark: Integer);
+var
+  SkipLbl: string;
 begin
   { Release every deferred base at slot index >= AMark (LIFO), then shrink the
     count back to the mark.  Called at leaf-statement boundaries AFTER the store,
@@ -7492,9 +7507,29 @@ begin
   while FPendingRelCount > AMark do
   begin
     FPendingRelCount := FPendingRelCount - 1;
-    Self.Emit(Format(#9'movq %s, %%rdi',
-      [Self.VarOperand(Format('_pendrel_%d', [FPendingRelCount]))]));
-    Self.Emit(#9'callq ' + FPendingRelSyms[FPendingRelCount]);
+    if FPendingRelTypes[FPendingRelCount] <> nil then
+    begin
+      { an aggregate scratch: release its managed content in place (a nil
+        slot -- the deferring operand was skipped -- releases nothing) }
+      SkipLbl := Self.NewLabel('pendagg');
+      Self.Emit(#9'pushq %rbx');
+      Self.Emit(#9'pushq %rbx');
+      Self.Emit(Format(#9'movq %s, %%rbx',
+        [Self.VarOperand(Format('_pendrel_%d', [FPendingRelCount]))]));
+      Self.Emit(#9'testq %rbx, %rbx');
+      Self.Emit(#9'jz ' + SkipLbl);
+      Self.EmitManagedReleaseAt(FPendingRelTypes[FPendingRelCount], '%rbx',
+        True);
+      Self.Emit(SkipLbl + ':');
+      Self.Emit(#9'popq %rbx');
+      Self.Emit(#9'popq %rbx');
+    end
+    else
+    begin
+      Self.Emit(Format(#9'movq %s, %%rdi',
+        [Self.VarOperand(Format('_pendrel_%d', [FPendingRelCount]))]));
+      Self.Emit(#9'callq ' + FPendingRelSyms[FPendingRelCount]);
+    end;
     { re-nil the slot: a later evaluation of this statement that skips the
       deferring operand (a short-circuit `and`) must release nil, not the
       pointer already released here (BUG-20261009-pendrel-stale-slot) }
@@ -10659,7 +10694,9 @@ begin
       (BUG-20261008-x86-dynarray-of-staticarray-elem). }
     if not ((TDynArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.Kind in
              [tyRecord, tyStaticArray]) or
-            IsJumboSet(TDynArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType)) then
+            IsJumboSet(TDynArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType) or
+            { a closure / method-pointer element is read by ADDRESS too }
+            IsMethodPtrType(TDynArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType)) then
       Self.EmitLoadVar('(%rax)',
         TDynArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType);
     Exit;
@@ -10686,7 +10723,11 @@ begin
       (BUG-20260721-jumbo-set-in-array-elem). }
     if not ((TStaticArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.Kind in
              [tyRecord, tyStaticArray]) or
-            IsJumboSet(TStaticArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType)) then
+            IsJumboSet(TStaticArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType) or
+            { a closure / method-pointer element is a 16-byte fat value read
+              by ADDRESS, as a closure identifier is: passed on, the callee
+              copies the 16 bytes through it }
+            IsMethodPtrType(TStaticArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType)) then
       Self.EmitLoadVar('(%rax)',
         TStaticArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType);
     Exit;
@@ -11093,8 +11134,7 @@ begin
       address INTO the buffer, so its lifetime must outlive this read and the
       buffer cannot be freed here. }
     if Self.IsNativeRecordCall(FAE.Base) and
-       not (IsJumboSet(FAE.FieldInfo.TypeDesc) or
-            (FAE.FieldInfo.TypeDesc.Kind in [tyRecord, tyStaticArray])) then
+       not (IsAddrReadFieldType(FAE.FieldInfo.TypeDesc)) then
     begin
       Self.Emit(Format(#9'subq $%d, %%rsp', [Self.RecArgBufBytes(FAE.Base)]));
       Self.EmitRecordCallSretAt(FAE.Base, '(%rsp)');
@@ -11113,8 +11153,7 @@ begin
     Self.Emit(#9'movq %rax, %rcx');
     if FAE.FieldInfo.Offset > 0 then
       Self.Emit(Format(#9'leaq %d(%%rcx), %%rcx', [FAE.FieldInfo.Offset]));
-    if (IsJumboSet(FAE.FieldInfo.TypeDesc) or
-         (FAE.FieldInfo.TypeDesc.Kind in [tyRecord, tyStaticArray])) then
+    if (IsAddrReadFieldType(FAE.FieldInfo.TypeDesc)) then
       Self.Emit(#9'movq %rcx, %rax')
     else
       Self.EmitLoadVar('(%rcx)', FAE.FieldInfo.TypeDesc);
@@ -11180,8 +11219,7 @@ begin
         Self.Emit(Format(#9'addq $%d, %%rcx', [FAE.ImplicitBaseInfo.Offset]));
       if FAE.IsClassAccess then
         Self.Emit(#9'movq (%rcx), %rcx');
-      if (IsJumboSet(FAE.FieldInfo.TypeDesc) or
-         (FAE.FieldInfo.TypeDesc.Kind in [tyRecord, tyStaticArray])) then
+      if (IsAddrReadFieldType(FAE.FieldInfo.TypeDesc)) then
         Self.Emit(Format(#9'leaq %d(%%rcx), %%rax', [FAE.FieldInfo.Offset]))
       else
         Self.EmitLoadVar(Format('%d(%%rcx)', [FAE.FieldInfo.Offset]),
@@ -11193,8 +11231,7 @@ begin
       if FAE.IsVarParam then
         { var-param class: slot -> caller var -> instance }
         Self.Emit(#9'movq (%rcx), %rcx');
-      if (IsJumboSet(FAE.FieldInfo.TypeDesc) or
-         (FAE.FieldInfo.TypeDesc.Kind in [tyRecord, tyStaticArray])) then
+      if (IsAddrReadFieldType(FAE.FieldInfo.TypeDesc)) then
         Self.Emit(Format(#9'leaq %d(%%rcx), %%rax', [FAE.FieldInfo.Offset]))
       else
         Self.EmitLoadVar(Format('%d(%%rcx)', [FAE.FieldInfo.Offset]),
@@ -11203,8 +11240,7 @@ begin
     else if FAE.IsVarParam then
     begin
       Self.EmitVarBaseToReg(FAE.RecordName, False, '%rcx');
-      if (IsJumboSet(FAE.FieldInfo.TypeDesc) or
-         (FAE.FieldInfo.TypeDesc.Kind in [tyRecord, tyStaticArray])) then
+      if (IsAddrReadFieldType(FAE.FieldInfo.TypeDesc)) then
         Self.Emit(Format(#9'leaq %d(%%rcx), %%rax', [FAE.FieldInfo.Offset]))
       else
         Self.EmitLoadVar(Format('%d(%%rcx)', [FAE.FieldInfo.Offset]),
@@ -11214,8 +11250,7 @@ begin
             (not (FSretFunc and SameText(FAE.RecordName, 'Result'))) and
             (not Self.IsLocal(FAE.RecordName)) and
             (FAE.FieldInfo.Offset = 0) and
-            (not (IsJumboSet(FAE.FieldInfo.TypeDesc) or
-                  (FAE.FieldInfo.TypeDesc.Kind in [tyRecord, tyStaticArray]))) and
+            (not (IsAddrReadFieldType(FAE.FieldInfo.TypeDesc))) and
             (not Self.IsThreadVarGlobal(FAE.RecordName)) then
       { Non-threadvar offset-0 fast path: read the field directly off the
         PC-relative global.  Only applies to a genuine global (not local, not
@@ -11228,8 +11263,7 @@ begin
         fields (record/static array/jumbo set) yield an ADDRESS in %rax; scalar
         fields are loaded by value. }
       Self.EmitVarBaseToReg(FAE.RecordName, True, '%rcx');
-      if (IsJumboSet(FAE.FieldInfo.TypeDesc) or
-         (FAE.FieldInfo.TypeDesc.Kind in [tyRecord, tyStaticArray])) then
+      if (IsAddrReadFieldType(FAE.FieldInfo.TypeDesc)) then
       begin
         if FAE.FieldInfo.Offset = 0 then
           Self.Emit(#9'movq %rcx, %rax')
@@ -11371,6 +11405,13 @@ begin
       if AOE.ResolvedFreeRoutine <> nil then
         Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
           [NativeMangle(TMethodDecl(AOE.ResolvedFreeRoutine).ResolvedEmitName)]))
+      else if Self.IsLocal(TIdentExpr(AOE.Expr).Name) and
+              not Self.IsCaptured(TIdentExpr(AOE.Expr).Name) then
+        { @F with F a LOCAL variable of procedural type (a closure / method
+          pointer): the address of its frame slot, not a global symbol of
+          that name }
+        Self.Emit(Format(#9'leaq %s, %%rax',
+          [Self.VarOperand(TIdentExpr(AOE.Expr).Name)]))
       else
         Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
           [Self.GlobalSymName(TIdentExpr(AOE.Expr).Name)]));
@@ -11639,12 +11680,11 @@ begin
   if AExpr is TDerefExpr then
   begin
     Self.EmitExprToEax(TDerefExpr(AExpr).Expr);
-    if (AExpr.ResolvedType <> nil) and
-       (IsJumboSet(AExpr.ResolvedType) or
-       (AExpr.ResolvedType.Kind in [tyRecord, tyStaticArray])) then
+    if IsAddrReadFieldType(AExpr.ResolvedType) then
     begin
-      { Pointer-to-record/array: the pointer value IS the record address.
-        Callers (field access, assignment) work with addresses for records. }
+      { Pointer-to-record/array/closure: the pointer value IS the aggregate's
+        address.  Callers (field access, assignment, a closure argument whose
+        callee copies 16 bytes) work with addresses for aggregates. }
     end
     else
     begin
@@ -12545,6 +12585,24 @@ begin
     Self.Emit(#9'movq %rcx, %rax');
     Exit;
   end;
+  if ((AValue is TFuncCallExpr) or (AValue is TMethodCallExpr)) and
+     (AValue.ResolvedType <> nil) and IsMethodPtrType(AValue.ResolvedType) and
+     not ((AValue is TFuncCallExpr) and
+          (TFuncCallExpr(AValue).ResolvedDecl = nil) and
+          not TFuncCallExpr(AValue).IsIndirectCall) then
+  begin
+    { a closure / method pointer RETURNED by a call (L[0] := MakeFn()): the
+      callee fills a per-site scratch pair, whose address the copy reads.  The
+      copy retains the Env for the element, so the scratch's own +1 is
+      released at the statement end. }
+    Pair := Self.NewScratchOperand(16);
+    Self.EmitRecordCallSretAt(AValue, Pair, False);
+    Self.Emit(Format(#9'leaq %s, %%rax', [Pair]));
+    if ArcTypeIsRefClosure(AValue.ResolvedType) and
+       Self.DeferNativeRelease('') then
+      FPendingRelTypes[FPendingRelCount - 1] := AValue.ResolvedType;
+    Exit;
+  end;
   if not IsFatLValueExpr(AValue) then
     raise ENativeCodeGenError.Create(Format(
       'x86-64: not yet lowered: method-pointer / closure element store ' +
@@ -12798,6 +12856,13 @@ begin
   Dest := Self.NewScratchOperand(AExpr.ResolvedType.RawSize());
   Self.EmitRecordCallSretAt(AExpr, Dest, False);
   Self.Emit(Format(#9'leaq %s, %%rax', [Dest]));
+  { The result's managed elements are released at the statement end: every
+    consumer copies from the buffer with a retain (MkA()[1], Sh(MkA()),
+    O.A := MkA() all leaked them).  No slot free: the elements leak, never
+    a use-after-free. }
+  if ArcTypeHasManagedContent(AExpr.ResolvedType) and
+     Self.DeferNativeRelease('') then
+    FPendingRelTypes[FPendingRelCount - 1] := AExpr.ResolvedType;
 end;
 
 procedure TX86_64Backend.CheckForwardedOpenArrayArg(AArg: TASTExpr);
@@ -13006,9 +13071,15 @@ begin
             (not Self.IsCaptured(TIdentExpr(AArg).Name)) then
       Self.Emit(Format(#9'leaq %s, %%rax',
         [Self.VarOperand(TIdentExpr(AArg).Name)]))
+    else if ((AArg is TStringSubscriptExpr) or (AArg is TDerefExpr) or
+             (AArg is TFieldAccessExpr)) and IsFatLValueExpr(AArg) then
+      { an element (A[I]), P^ or field holding the closure: its own address.
+        EmitExprToEax loaded the element's first WORD, and the callee's copy
+        of 16 bytes through it crashed. }
+      Self.EmitVarArgAddrToRax(AArg)
     else
-      { Field access / captured / call-returning forms: EmitExprToEax yields
-        the block address for aggregate-style reads. }
+      { captured / call-returning forms: EmitExprToEax yields the block
+        address for aggregate-style reads. }
       Self.EmitExprToEax(AArg);
     Self.Emit(#9'pushq %rax');
   end
@@ -16682,9 +16753,10 @@ begin
           Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(Asgn.Name)]))
         else
           Self.EmitVarAddr(Asgn.Name, '%rbx');
-        if Asgn.ResolvedLhsType.Kind = tyRecord then
-          Self.EmitRecordFieldReleases(
-            TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
+        if (Asgn.ResolvedLhsType.Kind = tyRecord) or
+           ((Asgn.ResolvedLhsType.Kind = tyStaticArray) and
+            ArcTypeHasManagedContent(Asgn.ResolvedLhsType)) then
+          Self.EmitManagedReleaseAt(Asgn.ResolvedLhsType, '%rbx', True);
         Self.Emit(#9'movq %rbx, %rdi');
         Self.Emit(#9'movq %r14, %rsi');
         Self.Emit(Format(#9'movq $%d, %%rdx', [AliasSz]));
@@ -16702,7 +16774,9 @@ begin
         call at this point cannot alias the dest — the aliasing sub-case Exited
         above).  Result on first entry is zeroed, but a loop reassigning Result
         has old fields too, so it is released alongside the others. }
-      if Asgn.ResolvedLhsType.Kind = tyRecord then
+      if (Asgn.ResolvedLhsType.Kind = tyRecord) or
+         ((Asgn.ResolvedLhsType.Kind = tyStaticArray) and
+          ArcTypeHasManagedContent(Asgn.ResolvedLhsType)) then
       begin
         Self.Emit(#9'pushq %rbx');
         if FSretFunc and SameText(Asgn.Name, 'Result') then
@@ -16716,8 +16790,7 @@ begin
           Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
           Self.EmitLeaqGlobal(Asgn.Name, '%rbx');
         end;
-        Self.EmitRecordFieldReleases(
-          TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
+        Self.EmitManagedReleaseAt(Asgn.ResolvedLhsType, '%rbx', True);
         Self.Emit(#9'popq %rbx');
       end;
       { For a local jumbo set the dest is leaq'd; EmitSretCall's caller passes
@@ -16853,9 +16926,10 @@ begin
           Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(Asgn.Name)]))
         else
           Self.EmitVarAddr(Asgn.Name, '%rbx');
-        if Asgn.ResolvedLhsType.Kind = tyRecord then
-          Self.EmitRecordFieldReleases(
-            TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
+        if (Asgn.ResolvedLhsType.Kind = tyRecord) or
+           ((Asgn.ResolvedLhsType.Kind = tyStaticArray) and
+            ArcTypeHasManagedContent(Asgn.ResolvedLhsType)) then
+          Self.EmitManagedReleaseAt(Asgn.ResolvedLhsType, '%rbx', True);
         Self.Emit(#9'movq %rbx, %rdi');
         Self.Emit(#9'movq %r14, %rsi');
         Self.Emit(Format(#9'movq $%d, %%rdx', [AliasSz]));
@@ -16869,7 +16943,9 @@ begin
         memsets and overwrites them, else each overwrite orphans one copy of
         every managed leaf (BUG-20260720-sret-assign-old-fields-leak).  The
         aliasing sub-case Exited above, so the call cannot read the dest here. }
-      if Asgn.ResolvedLhsType.Kind = tyRecord then
+      if (Asgn.ResolvedLhsType.Kind = tyRecord) or
+         ((Asgn.ResolvedLhsType.Kind = tyStaticArray) and
+          ArcTypeHasManagedContent(Asgn.ResolvedLhsType)) then
       begin
         Self.Emit(#9'pushq %rbx');
         if FSretFunc and SameText(Asgn.Name, 'Result') then
@@ -16883,8 +16959,7 @@ begin
           Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
           Self.EmitLeaqGlobal(Asgn.Name, '%rbx');
         end;
-        Self.EmitRecordFieldReleases(
-          TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
+        Self.EmitManagedReleaseAt(Asgn.ResolvedLhsType, '%rbx', True);
         Self.Emit(#9'popq %rbx');
       end;
       if FSretFunc and SameText(Asgn.Name, 'Result') then
@@ -16919,7 +16994,9 @@ begin
         aliasing an argument — `R := inherited M(R)` would UAF a source the call
         still reads (this arm has no fresh-temp-buffer aliasing path, unlike the
         method/func arms, so the guard is checked explicitly here). }
-      if (Asgn.ResolvedLhsType.Kind = tyRecord) and
+      if ((Asgn.ResolvedLhsType.Kind = tyRecord) or
+          ((Asgn.ResolvedLhsType.Kind = tyStaticArray) and
+           ArcTypeHasManagedContent(Asgn.ResolvedLhsType))) and
          not Self.CallAliasesDestVar(Asgn.Expr, Asgn.Name, Asgn.IsGlobal) then
       begin
         Self.Emit(#9'pushq %rbx');
@@ -16934,8 +17011,7 @@ begin
           Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
           Self.EmitLeaqGlobal(Asgn.Name, '%rbx');
         end;
-        Self.EmitRecordFieldReleases(
-          TRecordTypeDesc(Asgn.ResolvedLhsType), '%rbx');
+        Self.EmitManagedReleaseAt(Asgn.ResolvedLhsType, '%rbx', True);
         Self.Emit(#9'popq %rbx');
       end;
       if FSretFunc and SameText(Asgn.Name, 'Result') then
@@ -18321,7 +18397,7 @@ begin
         Self.EmitStoreFloat('(%rcx)', DAElemType);
         Exit;
       end;
-      if (DAElemType.Kind = tyRecord) or IsJumboSet(DAElemType) or
+      if (DAElemType.Kind in [tyRecord, tyStaticArray]) or IsJumboSet(DAElemType) or
          IsMethodPtrType(DAElemType) then
       begin
         { Record element: ARC-aware copy (retain src fields, release dest
@@ -18338,6 +18414,16 @@ begin
         begin
           Self.EmitRecordFieldRetains(TRecordTypeDesc(DAElemType), '%rbx');
           Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15', False);
+        end
+        else if DAElemType.Kind = tyStaticArray then
+        begin
+          { a whole static array of managed elements (AA[I] := L): retain the
+            source's elements unless an owned call result transfers them, then
+            release the old ones.  It fell to the scalar store, which wrote
+            the SOURCE ADDRESS into the element's first slot. }
+          if not NativeExprOwnsRef(FA.Expr) then
+            Self.EmitManagedAddRefAt(DAElemType, '%rbx');
+          Self.EmitManagedReleaseAt(DAElemType, '%r15', False);
         end
         else if ArcTypeIsRefClosure(DAElemType) then
         begin
@@ -19495,7 +19581,7 @@ begin
           Self.Emit(#9'addq $8, %rsp');         { drop stashed base ptr }
         Exit;
       end;
-      if (DAElemType.Kind = tyRecord) or IsJumboSet(DAElemType) or
+      if (DAElemType.Kind in [tyRecord, tyStaticArray]) or IsJumboSet(DAElemType) or
          IsMethodPtrType(DAElemType) then
       begin
         { Record element: ARC-aware copy of the record contents (retain the
@@ -19515,6 +19601,16 @@ begin
         begin
           Self.EmitRecordFieldRetains(TRecordTypeDesc(DAElemType), '%rbx');
           Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15', False);
+        end
+        else if DAElemType.Kind = tyStaticArray then
+        begin
+          { a whole static array of managed elements (AA[I] := L): retain the
+            source's elements unless an owned call result transfers them, then
+            release the old ones.  It fell to the scalar store, which wrote
+            the SOURCE ADDRESS into the element's first slot. }
+          if not NativeExprOwnsRef(SSA.ValueExpr) then
+            Self.EmitManagedAddRefAt(DAElemType, '%rbx');
+          Self.EmitManagedReleaseAt(DAElemType, '%r15', False);
         end
         else if ArcTypeIsRefClosure(DAElemType) then
         begin
@@ -19622,10 +19718,12 @@ begin
         if SSA.ImplicitFieldInfo.Offset > 0 then
           Self.Emit(Format(#9'addq $%d, %%r14', [SSA.ImplicitFieldInfo.Offset]));
       end
-      else if SSA.IsVarParam then
+      else if SSA.IsVarParam or Self.IsByValAggParam(SSA.ArrayName) then
         { var-param array: the slot holds the array POINTER (AWantAddress=False).
           For a captured var-param the _cap_ slot holds the address of that
-          pointer slot, so EmitVarBaseToReg(False) loads it and derefs once. }
+          pointer slot, so EmitVarBaseToReg(False) loads it and derefs once.
+          A by-value array param's slot holds its own copy's address too --
+          taking the slot's address wrote the pair over the frame. }
         Self.EmitVarBaseToReg(SSA.ArrayName, False, '%r14')
       else if FSretFunc and SameText(SSA.ArrayName, 'Result') then
         Self.Emit(Format(#9'movq %s, %%r14', [Self.VarOperand(SSA.ArrayName)]))
@@ -19652,7 +19750,8 @@ begin
         if SSA.ImplicitFieldInfo.Offset > 0 then
           Self.Emit(Format(#9'addq $%d, %%rcx', [SSA.ImplicitFieldInfo.Offset]));
       end
-      else if SSA.IsVarParam then
+      else if SSA.IsVarParam or Self.IsByValAggParam(SSA.ArrayName) then
+        { (a by-value array param: the slot holds its copy's address) }
         Self.EmitVarBaseToReg(SSA.ArrayName, False, '%rcx')
       else if FSretFunc and SameText(SSA.ArrayName, 'Result') then
         Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(SSA.ArrayName)]))
@@ -19731,7 +19830,7 @@ begin
         Self.Emit(#9'addq $8, %rsp');           { drop stashed base address }
       Exit;
     end;
-    if (DAElemType.Kind = tyRecord) or IsJumboSet(DAElemType) or
+    if (DAElemType.Kind in [tyRecord, tyStaticArray]) or IsJumboSet(DAElemType) or
        IsMethodPtrType(DAElemType) then
     begin
       { Record element: ARC-aware copy — same scheme as the dyn-array
@@ -19746,6 +19845,16 @@ begin
       begin
         Self.EmitRecordFieldRetains(TRecordTypeDesc(DAElemType), '%rbx');
         Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%r15', False);
+      end
+      else if DAElemType.Kind = tyStaticArray then
+      begin
+        { a whole static array of managed elements (AA[I] := L): retain the
+          source's elements unless an owned call result transfers them, then
+          release the old ones.  It fell to the scalar store, which wrote
+          the SOURCE ADDRESS into the element's first slot. }
+        if not NativeExprOwnsRef(SSA.ValueExpr) then
+          Self.EmitManagedAddRefAt(DAElemType, '%rbx');
+        Self.EmitManagedReleaseAt(DAElemType, '%r15', False);
       end
       else if ArcTypeIsRefClosure(DAElemType) then
       begin

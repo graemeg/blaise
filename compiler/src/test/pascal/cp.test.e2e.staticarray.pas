@@ -33,6 +33,14 @@ type
       co-owns its elements (x86-64 shared them at the caller's count and
       freed them under the caller) }
     procedure TestRun_ManagedStaticArrays_CopiesAndParams;
+    { a managed static array (array[..] of String / interface / closure)
+      through every copy point on both ISAs, leak-free: whole-array stores
+      to locals, globals, record and class fields, array elements and dyn
+      array elements; by-value, const and var parameters; call results and
+      results used as sources; a captured array (P4-8) }
+    procedure TestRun_ManagedStaticArrays_EveryForm_Strings;
+    procedure TestRun_ManagedStaticArrays_EveryForm_Interfaces;
+    procedure TestRun_ManagedStaticArrays_EveryForm_Closures;
     { jumbo-set FIELDS, ELEMENTS and P^ as values -- copied, combined,
       compared, tested -- and jumbo ELEMENT stores, literal sources included
       in a 100k-iteration loop (arm64: 'array element of this width / type') }
@@ -1967,14 +1975,438 @@ const
     end.
     ''';
 begin
-{$IFDEF CPUARM64}
-  Ignore('arm64 does not lower a managed static-array parameter or ' +
-    'whole-array store yet (compile-time NotYet)');
-{$ELSE}
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertLeakFreeOnAll(Src, 'v1!v2v1' + #10 + 'v1!v2v1' + #10 + 'v1!v2v1' +
     #10 + 'v1v2xv1v1v2v1');
-{$ENDIF}
+end;
+
+procedure TE2EStaticArrayTests.TestRun_ManagedStaticArrays_EveryForm_Strings;
+const
+  Src = '''
+    program ManagedStrArr;
+    uses SysUtils;
+    type
+      IFoo = interface function Get: Integer; end;
+      THold = class(TObject, IFoo) N: Integer; function Get: Integer; end;
+      TDA = array of Integer;
+      TR = record N: Integer; S: String; end;
+      TF = reference to function: Integer;
+      TE = String;
+      TSA = array[0..1] of TE;
+      TRA = record N: Integer; A: TSA; end;
+      TOA = class A: TSA; end;
+    var GG: TSA;
+    function THold.Get: Integer; begin Result := N end;
+    function MkH(N: Integer): IFoo; var H: THold; begin H := THold.Create(); H.N := N; Result := H end;
+    function V(N: Integer): TE; begin Result := 'v' + IntToStr(N) end;
+    function Pr(E: TE): String; begin Result := E end;
+    procedure Sh(const A: TSA); begin WriteLn(Pr(A[0]), ' ', Pr(A[1])) end;
+    procedure ByVal(A: TSA); begin A[0] := V(9); Sh(A) end;
+    procedure ByConst(const A: TSA); begin Sh(A) end;
+    procedure ByVar(var A: TSA); begin A[0] := V(9) end;
+    function MkA(N: Integer): TSA; begin Result[0] := V(N); Result[1] := V(N + 1) end;
+    function Pass(A: TSA): TSA; begin Result := A end;
+    procedure Run;
+    var L, L2: TSA; R: TRA; O: TOA; AA: array[0..1] of TSA; DA: array of TSA; I: Integer;
+      procedure Inner; begin L2 := L; L[1] := V(9) end;
+    begin
+      O := TOA.Create();
+      for I := 1 to 2 do
+      begin
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := L; L[0] := V(9); Sh(L2); Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L := GG; Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); GG := L; L[0] := V(9); Sh(GG);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); R.A := L; L[0] := V(9); Sh(R.A);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); R.A := L; L2 := R.A; Sh(L2);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); O.A := L; L[0] := V(9); Sh(O.A);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); O.A := L; L2 := O.A; Sh(L2);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); AA[1] := L; L[0] := V(9); Sh(AA[1]);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); AA[1] := L; L2 := AA[1]; Sh(L2);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); SetLength(DA, 2); DA[1] := L; L[0] := V(9); Sh(DA[1]);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); ByVal(L); Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); ByVal(GG); Sh(GG);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); O.A := L; R.A := L; ByVal(O.A); ByVal(R.A); Sh(O.A);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); AA[1] := L; ByVal(AA[1]); Sh(AA[1]);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); ByConst(L); ByConst(GG);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := L; ByVar(L2); Sh(L2); Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := MkA(5); Sh(L2); WriteLn(Pr(MkA(6)[1]));
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); ByConst(MkA(5)); ByVal(MkA(6));
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := MkA(5); R.A := MkA(6); O.A := MkA(7); AA[1] := MkA(8); GG := MkA(9); Sh(L2); Sh(R.A); Sh(O.A); Sh(AA[1]); Sh(GG);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); SetLength(DA, 2); DA[1] := MkA(4); Sh(DA[1]); L2 := Pass(MkA(2)); Sh(L2);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); Inner(); Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := Pass(L); Sh(L2);
+      end;
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertLeakFreeOnAll(Src,
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v1 v2' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v2' + #10 +
+    'v1 v2' + #10 +
+    'v9 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v1 v2' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v5 v6' + #10 +
+    'v7' + #10 +
+    'v5 v6' + #10 +
+    'v9 v7' + #10 +
+    'v5 v6' + #10 +
+    'v6 v7' + #10 +
+    'v7 v8' + #10 +
+    'v8 v9' + #10 +
+    'v9 v10' + #10 +
+    'v4 v5' + #10 +
+    'v2 v3' + #10 +
+    'v3 v9' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v1 v2' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v2' + #10 +
+    'v1 v2' + #10 +
+    'v9 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v1 v2' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v5 v6' + #10 +
+    'v7' + #10 +
+    'v5 v6' + #10 +
+    'v9 v7' + #10 +
+    'v5 v6' + #10 +
+    'v6 v7' + #10 +
+    'v7 v8' + #10 +
+    'v8 v9' + #10 +
+    'v9 v10' + #10 +
+    'v4 v5' + #10 +
+    'v2 v3' + #10 +
+    'v3 v9' + #10 +
+    'v3 v4' + #10 +
+    'done');
+end;
+
+procedure TE2EStaticArrayTests.TestRun_ManagedStaticArrays_EveryForm_Interfaces;
+const
+  Src = '''
+    program ManagedIntfArr;
+    uses SysUtils;
+    type
+      IFoo = interface function Get: Integer; end;
+      THold = class(TObject, IFoo) N: Integer; function Get: Integer; end;
+      TDA = array of Integer;
+      TR = record N: Integer; S: String; end;
+      TF = reference to function: Integer;
+      TE = IFoo;
+      TSA = array[0..1] of TE;
+      TRA = record N: Integer; A: TSA; end;
+      TOA = class A: TSA; end;
+    var GG: TSA;
+    function THold.Get: Integer; begin Result := N end;
+    function MkH(N: Integer): IFoo; var H: THold; begin H := THold.Create(); H.N := N; Result := H end;
+    function V(N: Integer): TE; begin Result := MkH(N) end;
+    function Pr(E: TE): String; begin Result := 'v' + IntToStr(E.Get()) end;
+    procedure Sh(const A: TSA); begin WriteLn(Pr(A[0]), ' ', Pr(A[1])) end;
+    procedure ByVal(A: TSA); begin A[0] := V(9); Sh(A) end;
+    procedure ByConst(const A: TSA); begin Sh(A) end;
+    procedure ByVar(var A: TSA); begin A[0] := V(9) end;
+    function MkA(N: Integer): TSA; begin Result[0] := V(N); Result[1] := V(N + 1) end;
+    function Pass(A: TSA): TSA; begin Result := A end;
+    procedure Run;
+    var L, L2: TSA; R: TRA; O: TOA; AA: array[0..1] of TSA; DA: array of TSA; I: Integer;
+      procedure Inner; begin L2 := L; L[1] := V(9) end;
+    begin
+      O := TOA.Create();
+      for I := 1 to 2 do
+      begin
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := L; L[0] := V(9); Sh(L2); Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L := GG; Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); GG := L; L[0] := V(9); Sh(GG);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); R.A := L; L[0] := V(9); Sh(R.A);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); R.A := L; L2 := R.A; Sh(L2);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); O.A := L; L[0] := V(9); Sh(O.A);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); O.A := L; L2 := O.A; Sh(L2);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); AA[1] := L; L[0] := V(9); Sh(AA[1]);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); AA[1] := L; L2 := AA[1]; Sh(L2);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); SetLength(DA, 2); DA[1] := L; L[0] := V(9); Sh(DA[1]);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); ByVal(L); Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); ByVal(GG); Sh(GG);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); O.A := L; R.A := L; ByVal(O.A); ByVal(R.A); Sh(O.A);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); AA[1] := L; ByVal(AA[1]); Sh(AA[1]);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); ByConst(L); ByConst(GG);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := L; ByVar(L2); Sh(L2); Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := MkA(5); Sh(L2); WriteLn(Pr(MkA(6)[1]));
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); ByConst(MkA(5)); ByVal(MkA(6));
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := MkA(5); R.A := MkA(6); O.A := MkA(7); AA[1] := MkA(8); GG := MkA(9); Sh(L2); Sh(R.A); Sh(O.A); Sh(AA[1]); Sh(GG);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); SetLength(DA, 2); DA[1] := MkA(4); Sh(DA[1]); L2 := Pass(MkA(2)); Sh(L2);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); Inner(); Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := Pass(L); Sh(L2);
+      end;
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertLeakFreeOnAll(Src,
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v1 v2' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v2' + #10 +
+    'v1 v2' + #10 +
+    'v9 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v1 v2' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v5 v6' + #10 +
+    'v7' + #10 +
+    'v5 v6' + #10 +
+    'v9 v7' + #10 +
+    'v5 v6' + #10 +
+    'v6 v7' + #10 +
+    'v7 v8' + #10 +
+    'v8 v9' + #10 +
+    'v9 v10' + #10 +
+    'v4 v5' + #10 +
+    'v2 v3' + #10 +
+    'v3 v9' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v1 v2' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v2' + #10 +
+    'v1 v2' + #10 +
+    'v9 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v1 v2' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v5 v6' + #10 +
+    'v7' + #10 +
+    'v5 v6' + #10 +
+    'v9 v7' + #10 +
+    'v5 v6' + #10 +
+    'v6 v7' + #10 +
+    'v7 v8' + #10 +
+    'v8 v9' + #10 +
+    'v9 v10' + #10 +
+    'v4 v5' + #10 +
+    'v2 v3' + #10 +
+    'v3 v9' + #10 +
+    'v3 v4' + #10 +
+    'done');
+end;
+
+procedure TE2EStaticArrayTests.TestRun_ManagedStaticArrays_EveryForm_Closures;
+const
+  Src = '''
+    program ManagedClosArr;
+    uses SysUtils;
+    type
+      IFoo = interface function Get: Integer; end;
+      THold = class(TObject, IFoo) N: Integer; function Get: Integer; end;
+      TDA = array of Integer;
+      TR = record N: Integer; S: String; end;
+      TF = reference to function: Integer;
+      TE = TF;
+      TSA = array[0..1] of TE;
+      TRA = record N: Integer; A: TSA; end;
+      TOA = class A: TSA; end;
+    var GG: TSA;
+    function THold.Get: Integer; begin Result := N end;
+    function MkH(N: Integer): IFoo; var H: THold; begin H := THold.Create(); H.N := N; Result := H end;
+    function V(N: Integer): TE; begin Result := function: Integer begin Result := N end end;
+    function Pr(E: TE): String; begin Result := 'v' + IntToStr(E()) end;
+    procedure Sh(const A: TSA); begin WriteLn(Pr(A[0]), ' ', Pr(A[1])) end;
+    procedure ByVal(A: TSA); begin A[0] := V(9); Sh(A) end;
+    procedure ByConst(const A: TSA); begin Sh(A) end;
+    procedure ByVar(var A: TSA); begin A[0] := V(9) end;
+    function MkA(N: Integer): TSA; begin Result[0] := V(N); Result[1] := V(N + 1) end;
+    function Pass(A: TSA): TSA; begin Result := A end;
+    procedure Run;
+    var L, L2: TSA; R: TRA; O: TOA; AA: array[0..1] of TSA; DA: array of TSA; I: Integer;
+      procedure Inner; begin L2 := L; L[1] := V(9) end;
+    begin
+      O := TOA.Create();
+      for I := 1 to 2 do
+      begin
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := L; L[0] := V(9); Sh(L2); Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L := GG; Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); GG := L; L[0] := V(9); Sh(GG);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); R.A := L; L[0] := V(9); Sh(R.A);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); R.A := L; L2 := R.A; Sh(L2);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); O.A := L; L[0] := V(9); Sh(O.A);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); O.A := L; L2 := O.A; Sh(L2);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); AA[1] := L; L[0] := V(9); Sh(AA[1]);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); AA[1] := L; L2 := AA[1]; Sh(L2);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); SetLength(DA, 2); DA[1] := L; L[0] := V(9); Sh(DA[1]);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); ByVal(L); Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); ByVal(GG); Sh(GG);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); O.A := L; R.A := L; ByVal(O.A); ByVal(R.A); Sh(O.A);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); AA[1] := L; ByVal(AA[1]); Sh(AA[1]);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); ByConst(L); ByConst(GG);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := L; ByVar(L2); Sh(L2); Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := MkA(5); Sh(L2); WriteLn(Pr(MkA(6)[1]));
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); ByConst(MkA(5)); ByVal(MkA(6));
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := MkA(5); R.A := MkA(6); O.A := MkA(7); AA[1] := MkA(8); GG := MkA(9); Sh(L2); Sh(R.A); Sh(O.A); Sh(AA[1]); Sh(GG);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); SetLength(DA, 2); DA[1] := MkA(4); Sh(DA[1]); L2 := Pass(MkA(2)); Sh(L2);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); Inner(); Sh(L);
+        GG[0] := V(1); GG[1] := V(2); L[0] := V(3); L[1] := V(4); L2 := Pass(L); Sh(L2);
+      end;
+    end;
+    begin
+      Run();
+      WriteLn('done');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertLeakFreeOnAll(Src,
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v1 v2' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v2' + #10 +
+    'v1 v2' + #10 +
+    'v9 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v1 v2' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v5 v6' + #10 +
+    'v7' + #10 +
+    'v5 v6' + #10 +
+    'v9 v7' + #10 +
+    'v5 v6' + #10 +
+    'v6 v7' + #10 +
+    'v7 v8' + #10 +
+    'v8 v9' + #10 +
+    'v9 v10' + #10 +
+    'v4 v5' + #10 +
+    'v2 v3' + #10 +
+    'v3 v9' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v1 v2' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v2' + #10 +
+    'v1 v2' + #10 +
+    'v9 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v3 v4' + #10 +
+    'v1 v2' + #10 +
+    'v9 v4' + #10 +
+    'v3 v4' + #10 +
+    'v5 v6' + #10 +
+    'v7' + #10 +
+    'v5 v6' + #10 +
+    'v9 v7' + #10 +
+    'v5 v6' + #10 +
+    'v6 v7' + #10 +
+    'v7 v8' + #10 +
+    'v8 v9' + #10 +
+    'v9 v10' + #10 +
+    'v4 v5' + #10 +
+    'v2 v3' + #10 +
+    'v3 v9' + #10 +
+    'v3 v4' + #10 +
+    'done');
 end;
 
 procedure TE2EStaticArrayTests.TestRun_JumboSet_FieldsElementsAndElementStores;

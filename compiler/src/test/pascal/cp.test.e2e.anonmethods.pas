@@ -146,6 +146,11 @@ type
       register (codegen error).  It now shares EmitCallIndirect's marshalling
       (found with BUG-20260923-addr-of-openarray-proc). }
     procedure TestRun_MethodPtrClosureVar_VarAndDoubleArgs;
+    { a closure held in an array element, a record field, a class field or
+      behind a pointer, passed on as a by-value closure argument: the
+      callee's 16-byte copy read through the loaded first WORD, a crash on
+      both ISAs (P4-8) }
+    procedure TestRun_ClosureArg_FromElementFieldAndDeref;
   end;
 
 implementation
@@ -2193,6 +2198,41 @@ begin
     '42' + #10 +
     '10.00' + #10, 0);
   AssertLeakFreeOnAll(Src, '10.00');
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureArg_FromElementFieldAndDeref;
+const
+  Src = '''
+    program ClosArgs;
+    uses SysUtils;
+    type
+      TF = reference to function: Integer;
+      TSA = array[0..1] of TF;
+      TR = record F: TF; end;
+      TOb = class F: TF; end;
+      PF = ^TF;
+    function V(N: Integer): TF; begin Result := function: Integer begin Result := N end end;
+    function Pr(E: TF): String; begin Result := 'v' + IntToStr(E()) end;
+    procedure Run;
+    var L: TSA; R: TR; O: TOb; P: PF; F: TF; DA: array of TF;
+    begin
+      L[1] := V(3);
+      R.F := V(4);
+      O := TOb.Create();
+      O.F := V(5);
+      F := V(6);
+      P := @F;
+      SetLength(DA, 2);
+      DA[1] := V(7);
+      WriteLn(Pr(L[1]), ' ', Pr(R.F), ' ', Pr(O.F), ' ', Pr(P^), ' ', Pr(F), ' ', Pr(DA[1]));
+    end;
+    begin
+      Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 'v3 v4 v5 v6 v6 v7');
 end;
 
 initialization

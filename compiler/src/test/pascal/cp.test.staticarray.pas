@@ -194,6 +194,24 @@ type
     procedure TestSemantic_ClassConstArray_ConstIndex_ViaInstance_Raises;
     procedure TestSemantic_ClassConstArray_ConstIndex_InRange_Accepted;
     procedure TestSemantic_ClassConstArray_VarIndex_NotDiagnosed;
+
+    { ------------------------------------------------------------------ }
+    { Managed static arrays (array[..] of String / interface / ...) -- P4-8 }
+    { ------------------------------------------------------------------ }
+    { a by-value managed array parameter: the callee's copy co-owns every
+      element (retained on entry, released at exit).  arm64 had no lowering
+      at all (a compile-time NotYet) }
+    procedure TestCodegen_ManagedArrayByValueParam_RetainedAndReleased;
+    { F.A := L, AA[I] := L, R.A := MkA(): the copy retains the source's
+      elements and releases the destination's old ones (arm64: NotYet) }
+    procedure TestCodegen_ManagedArrayStores_RetainAndRelease;
+    { an array-of-interface element read from a const parameter indexed the
+      frame instead of the array: x86-64 crashed }
+    procedure TestCodegen_IntfArrayParamElement_ReadsThroughParam;
+    { a closure held in an array element or behind a pointer, passed as a
+      by-value closure argument, passes the element's ADDRESS (the callee
+      copies 16 bytes through it); the loaded first word crashed }
+    procedure TestCodegen_ClosureElementArg_PassesAddress;
   end;
 
 implementation
@@ -1714,6 +1732,95 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+const
+  SrcManagedByVal = '''
+    program P;
+    type TSA = array[0..1] of String;
+    procedure ByVal(A: TSA);
+    begin
+    end;
+    var G: TSA;
+    begin
+      ByVal(G)
+    end.
+    ''';
+  SrcManagedStores = '''
+    program P;
+    type
+      TSA = array[0..1] of String;
+      TRec = record A: TSA; end;
+      TObj = class A: TSA; end;
+    function MkA: TSA; begin Result[0] := 'x' end;
+    var L: TSA; R: TRec; O: TObj; AA: array[0..1] of TSA;
+    begin
+      O := TObj.Create();
+      R.A := L;
+      O.A := L;
+      AA[1] := L;
+      L := MkA()
+    end.
+    ''';
+  SrcIntfArrayParam = '''
+    program P;
+    type
+      IFoo = interface function Get: Integer; end;
+      TSA = array[0..1] of IFoo;
+    function Pick(const A: TSA): Integer; begin Result := A[1].Get() end;
+    var G: TSA;
+    begin
+      WriteLn(Pick(G))
+    end.
+    ''';
+
+procedure TStaticArrayTests.TestCodegen_ManagedArrayByValueParam_RetainedAndReleased;
+begin
+  AssertEquals('the callee retains its copy and releases it at exit', '',
+    AsmMissing(SrcManagedByVal,
+      #9'callq _StringAddRef',
+      #9'bl __StringAddRef'));
+  AssertEquals('and releases it at exit', '',
+    AsmMissing(SrcManagedByVal,
+      #9'callq _StringRelease',
+      #9'bl __StringRelease'));
+end;
+
+procedure TStaticArrayTests.TestCodegen_ManagedArrayStores_RetainAndRelease;
+begin
+  AssertEquals('whole-array stores walk the elements', '',
+    AsmMissing(SrcManagedStores,
+      #9'callq _StringAddRef'#10#9'leaq 8(%r15), %r14',
+      #9'bl __StringAddRef'#10#9'add x20, x21, #8'));
+end;
+
+procedure TStaticArrayTests.TestCodegen_IntfArrayParamElement_ReadsThroughParam;
+begin
+  AssertEquals('the element address is computed from the parameter''s array', '',
+    AsmMissing(SrcIntfArrayParam,
+      #9'movq -8(%rbp), %rax'#10#9'pushq %rax'#10#9'movl $1, %eax',
+      #9'mul x1, x1, x2'#10#9'add x0, x0, x1'#10#9'ldp x0, x1, [x0]'));
+end;
+
+procedure TStaticArrayTests.TestCodegen_ClosureElementArg_PassesAddress;
+const
+  Src = '''
+    program Prg;
+    type
+      TF = reference to function: Integer;
+      TSA = array[0..1] of TF;
+    function Use(E: TF): Integer; begin Result := E() end;
+    var L: TSA;
+    begin
+      WriteLn(Use(L[1]))
+    end.
+    ''';
+begin
+  AssertEquals('the element address is the argument', '',
+    AsmMissing(Src,
+      #9'addq %rcx, %rax'#10#9'movq %rax, %rdi'#10#9'callq Use',
+      #9'add x0, x0, x1'#10#9'str x0, [sp, #-16]!'#10#9'ldr x0, [sp], #16'#10 +
+        #9'bl _Use'));
 end;
 
 initialization
