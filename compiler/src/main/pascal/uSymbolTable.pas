@@ -101,6 +101,13 @@ type
       them slip through — index checks should prefer this predicate. }
     function IsArrayIndex: Boolean;
     function IsRecord: Boolean;
+    { True when a value of this type transitively contains any ARC-managed
+      leaf: a string, class, interface, dynamic array or 'reference to'
+      closure, a static array of managed elements (at any nesting depth), or
+      a record with such content.  The one copy of the rule: the backends'
+      ArcTypeHasManagedContent delegates here, and the semantic pass uses it
+      to refuse a raw byte copy (Move) that would bypass reference counting. }
+    function HasManagedContent: Boolean;
     { True byte size of a value: 1 for Byte/Boolean, 4 for Integer/Single, 8
       for pointer/string/Int64/Double, sum-of-fields for records (with natural
       alignment padding).  Currently identical to RawSize. }
@@ -936,6 +943,31 @@ function TTypeDesc.IsArrayIndex: Boolean;
 begin
   Result := Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tySmallInt,
                      tyWord, tyByte, tyBoolean, tyEnum];
+end;
+
+function TTypeDesc.HasManagedContent: Boolean;
+var
+  I: Integer;
+  RT: TRecordTypeDesc;
+begin
+  Result := False;
+  if IsString() or (Kind in [tyClass, tyInterface, tyDynArray]) then
+    Exit(True);
+  { 'reference to' closure: the Env half at +8 is a strong ARC reference
+    (BUG-20260922-record-closure-field-not-managed). }
+  if (Kind = tyProcedural) and TProceduralTypeDesc(Self).IsReference then
+    Exit(True);
+  if Kind = tyStaticArray then
+    Exit((TStaticArrayTypeDesc(Self).ElementType <> nil) and
+      TStaticArrayTypeDesc(Self).ElementType.HasManagedContent());
+  if Kind = tyRecord then
+  begin
+    RT := TRecordTypeDesc(Self);
+    for I := 0 to RT.Fields.Count - 1 do
+      if (TFieldInfo(RT.Fields.Items[I]).TypeDesc <> nil) and
+         TFieldInfo(RT.Fields.Items[I]).TypeDesc.HasManagedContent() then
+        Exit(True);
+  end;
 end;
 
 function TTypeDesc.IsOrdinal: Boolean;
@@ -2299,6 +2331,8 @@ begin
   Sym := TSymbol.Create('Assigned', skFunction, FTypeBoolean); Define(Sym);
   { Memory utilities }
   Sym := TSymbol.Create('ZeroMem', skProcedure, nil); Define(Sym);
+  { Move(Source, Dest, Count) — overlap-safe byte copy between two variables }
+  Sym := TSymbol.Create('Move', skProcedure, nil); Define(Sym);
   { CLI arguments }
   Sym := TSymbol.Create('ParamCount', skFunction,  FTypeInteger); Define(Sym);
   Sym := TSymbol.Create('ParamStr',   skFunction,  FTypeString);  Define(Sym);

@@ -7380,3 +7380,63 @@ compiler.
   (Option A) over the `TInterfacedObject` model (Option B).  A porting
   project that wants the name can declare
   `TInterfacedObject = class end;` itself.
+
+== `Move` — an Intrinsic for Unmanaged Data
+
+=== Decision
+
+`Move(Source, Dest, Count)` copies `Count` bytes from the storage of the
+variable `Source` to the storage of the variable `Dest`, with the call shape
+FPC and Delphi use.  It is a compiler intrinsic, not a declared procedure:
+
+* *Any variable on either side*: an identifier, a field, a pointer
+  dereference (`P^`) or an array element (`A[2]`).  The compiler passes each
+  operand's address, so the call reads as in FPC and Delphi.
+* *Overlap-safe.*  The copy behaves as C `memmove`: shifting elements within
+  one array, in either direction, is correct.  A `Count` of zero or less
+  copies nothing.
+* *Unmanaged data only.*  If either operand's type holds reference-counted
+  data — a string, class, interface, dynamic array or `reference to` closure,
+  or a record or static array containing one at any depth — the call is a
+  compile-time error that names the type and points to assignment.  The
+  check runs per generic instantiation, so `TBox<Integer>` may use `Move` in
+  its body while `TBox<string>` is refused.
+
+Methods named `Move` (such as a list's `Move(CurIndex, NewIndex)`) are
+unaffected; as for every built-in routine, a standalone routine of that
+name cannot be redeclared.
+
+=== Rationale
+
+FPC and Delphi declare `Move(const Source; var Dest; Count: SizeInt)` with
+untyped parameters.  Blaise has no untyped parameters, and adding them only
+for `Move` would introduce a parameter form that disables type checking for
+every routine that adopted it.  An intrinsic keeps the familiar call shape
+without that cost, and — because the compiler sees both operands' types —
+it can do what a library routine cannot: refuse the unsafe cases.
+
+Those unsafe cases are the reason for the check.  A raw byte copy of a
+managed value duplicates a reference without incrementing its count, or
+overwrites one without releasing it.  The result is a leak, a double free,
+or a use after free, reported far from the `Move` that caused it.  In FPC and
+Delphi this is a known trap limited to strings, dynamic arrays and
+interfaces; in Blaise every class reference is managed as well, so the trap
+would cover most data.  Assignment is the correct copy for managed data and
+already handles records and static arrays element by element.
+
+Overlap safety follows the FPC and Delphi contract.  Porting code relies on
+it (the classic use is shifting array elements to open or close a gap), and
+a `memcpy` that silently corrupts on overlap would be a footgun of its own.
+
+=== Alternatives considered
+
+* *Untyped `const` / `var` parameters, then `Move` as an ordinary RTL
+  procedure.*  Rejected: a general hole in type checking to support one
+  routine, and the managed-type check would be impossible.
+* *A pointer-based `Move(@Source, @Dest, Count)`, like `ZeroMem`.*
+  Rejected: it differs from FPC and Delphi at every call site of ported
+  code, and the operands' types are lost behind `Pointer`, so the
+  managed-type check could not run.
+* *Allow managed types and leave the responsibility to the programmer*, as
+  FPC and Delphi do.  Rejected: under universal ARC the trap covers almost
+  all data, and the compiler can rule it out cheaply.

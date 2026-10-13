@@ -87,6 +87,23 @@ type
     { P^.Greet() with P: ^IG dispatches through the pair at the pointer
       (x86-64 dispatched through undefined `_obj` / `_itab` symbols) }
     procedure TestNative_DerefInterfaceReceiver_PairAtPointer;
+
+    { ------------------------------------------------------------------ }
+    { Move(Source, Dest, Count) — overlap-safe byte copy intrinsic         }
+    { ------------------------------------------------------------------ }
+    procedure TestSemantic_Move_Variables_Accepted;
+    procedure TestSemantic_Move_DerefOperands_Accepted;
+    procedure TestSemantic_Move_UnmanagedRecord_Accepted;
+    procedure TestSemantic_Move_WrongArity_Rejected;
+    procedure TestSemantic_Move_NonVariable_Rejected;
+    procedure TestSemantic_Move_NonIntegerCount_Rejected;
+    procedure TestSemantic_Move_String_Rejected;
+    procedure TestSemantic_Move_ClassRef_Rejected;
+    procedure TestSemantic_Move_DynArray_Rejected;
+    procedure TestSemantic_Move_RecordWithString_Rejected;
+    procedure TestSemantic_Move_StaticArrayOfInterface_Rejected;
+    procedure TestSemantic_Move_GenericManagedInstance_Rejected;
+    procedure TestNative_Move_CallsBlaiseMoveSourceFirst;
   end;
 
 implementation
@@ -637,6 +654,196 @@ begin
       #9'ldr x0, [x9, _g_PG@PAGEOFF]' + #10 + #9'ldp x0, x1, [x0]'));
   AssertTrue('no nameless receiver slot',
     Pos(#9'movq _obj(%rip)', GenAsm(Src, TargetX86_64)) < 0);
+end;
+
+const
+  SrcMoveOk = '''
+    program P;
+    var
+      A, B: array[0..3] of Integer;
+    begin
+      Move(A, B, SizeOf(A));
+    end.
+    ''';
+
+procedure TPointerTests.TestSemantic_Move_Variables_Accepted;
+begin
+  AssertEquals('Move between two static arrays', '', SemanticError(SrcMoveOk));
+end;
+
+procedure TPointerTests.TestSemantic_Move_DerefOperands_Accepted;
+begin
+  AssertEquals('Move through typed pointers and elements', '', SemanticError('''
+    program P;
+    type
+      PByte = ^Byte;
+    var
+      Src, Dst: PByte;
+      A: array[0..7] of Byte;
+      N: Int64;
+    begin
+      N := 4;
+      Move(Src^, Dst^, N);
+      Move(A[0], A[2], 6);
+    end.
+    '''));
+end;
+
+procedure TPointerTests.TestSemantic_Move_UnmanagedRecord_Accepted;
+begin
+  AssertEquals('record of plain fields', '', SemanticError('''
+    program P;
+    type
+      TPoint = record
+        X, Y: Integer;
+        Z: Double;
+      end;
+    var
+      A, B: TPoint;
+    begin
+      Move(A, B, SizeOf(TPoint));
+    end.
+    '''));
+end;
+
+procedure TPointerTests.TestSemantic_Move_WrongArity_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    var A, B: Integer;
+    begin
+      Move(A, B);
+    end.
+    ''');
+  AssertTrue('two arguments: ' + Msg, Pos(
+    '''Move'' requires exactly 3 arguments: Move(Source, Dest, Count)', Msg) >= 0);
+end;
+
+procedure TPointerTests.TestSemantic_Move_NonVariable_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    var B: Integer;
+    begin
+      Move(1, B, 4);
+    end.
+    ''');
+  AssertTrue('names the argument: ' + Msg,
+    Pos('First argument of ''Move'' must be a variable', Msg) >= 0);
+end;
+
+procedure TPointerTests.TestSemantic_Move_NonIntegerCount_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    var A, B: Integer;
+    begin
+      Move(A, B, 1.5);
+    end.
+    ''');
+  AssertTrue('names the count: ' + Msg,
+    Pos('Count argument of ''Move'' must be an integer', Msg) >= 0);
+end;
+
+procedure MoveRejectsManaged(ATest: TPointerTests; const ADecls, AArgs, AType: string);
+var
+  Msg: string;
+begin
+  Msg := SemanticError(
+    'program P;' + #10 + ADecls + #10 +
+    'begin' + #10 + '  Move(' + AArgs + ');' + #10 + 'end.');
+  ATest.AssertTrue(AType + ': names the type and the rule: ' + Msg,
+    (Pos('''Move'' cannot copy ''' + AType + '''', Msg) >= 0) and
+    (Pos('reference-counted', Msg) >= 0) and
+    (Pos('assignment', Msg) >= 0));
+end;
+
+procedure TPointerTests.TestSemantic_Move_String_Rejected;
+begin
+  MoveRejectsManaged(Self, 'var S, T: string;', 'S, T, 8', 'string');
+end;
+
+procedure TPointerTests.TestSemantic_Move_ClassRef_Rejected;
+begin
+  MoveRejectsManaged(Self, 'var A, B: TObject;', 'A, B, 8', 'TObject');
+end;
+
+procedure TPointerTests.TestSemantic_Move_DynArray_Rejected;
+begin
+  MoveRejectsManaged(Self,
+    'type TInts = array of Integer;' + #10 + 'var A, B: TInts;',
+    'A, B, 8', 'array of Integer');
+end;
+
+procedure TPointerTests.TestSemantic_Move_RecordWithString_Rejected;
+begin
+  { the managed field is nested, and only on the DESTINATION side }
+  MoveRejectsManaged(Self,
+    'type' + #10 +
+    '  TInner = record Name: string; end;' + #10 +
+    '  TOuter = record Id: Integer; Inner: TInner; end;' + #10 +
+    'var A: array[0..31] of Byte; B: TOuter;',
+    'A, B, SizeOf(TOuter)', 'TOuter');
+end;
+
+procedure TPointerTests.TestSemantic_Move_StaticArrayOfInterface_Rejected;
+begin
+  MoveRejectsManaged(Self,
+    'type' + #10 +
+    '  IFoo = interface end;' + #10 +
+    '  TFoos = array[0..1] of IFoo;' + #10 +
+    'var A, B: TFoos;',
+    'A, B, SizeOf(TFoos)', 'array[0..1] of IFoo');
+end;
+
+{ The check runs per instantiation: TBox<Integer> is fine, TBox<string>
+  is refused at the Move inside the generic body. }
+procedure TPointerTests.TestSemantic_Move_GenericManagedInstance_Rejected;
+const
+  Generic = '''
+    program P;
+    type
+      TBox<T> = class
+        A, B: T;
+        procedure CopyAB;
+      end;
+    procedure TBox<T>.CopyAB;
+    begin
+      Move(A, B, SizeOf(T));
+    end;
+
+    ''';
+var
+  Msg: string;
+begin
+  AssertEquals('Integer instance is fine', '', SemanticError(Generic + '''
+    var I: TBox<Integer>;
+    begin
+      I := TBox<Integer>.Create();
+    end.
+    '''));
+  Msg := SemanticError(Generic + '''
+    var S: TBox<string>;
+    begin
+      S := TBox<string>.Create();
+    end.
+    ''');
+  AssertTrue('string instance refused: ' + Msg,
+    Pos('''Move'' cannot copy ''string''', Msg) >= 0);
+end;
+
+procedure TPointerTests.TestNative_Move_CallsBlaiseMoveSourceFirst;
+begin
+  { Move(Source, Dest, Count) keeps the Pascal argument order in the RTL
+    call, so _BlaiseMove receives Source first. }
+  AssertEquals('lowers to _BlaiseMove', '',
+    AsmMissing(SrcMoveOk, 'callq _BlaiseMove', 'bl __BlaiseMove'));
 end;
 
 initialization

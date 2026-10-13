@@ -9,7 +9,7 @@
 unit runtime.cstub;
 
 // Freestanding C-library leaves the compiler and RTL emit calls to but which
-// are not syscalls: memcpy / memset / memcmp / strlen.  In a libc-backed build
+// are not syscalls: memcpy / memmove / memset / memcmp / strlen.  In a libc-backed build
 // these come from libc; in a --static build this unit supplies them so no libc
 // is needed (docs/linux-syscall-migration.adoc).
 //
@@ -20,6 +20,7 @@ unit runtime.cstub;
 //
 // Signatures match the C ABI the codegen assumes:
 //   void* memcpy(void* dst, const void* src, size_t n)   - returns dst
+//   void* memmove(void* dst, const void* src, size_t n)  - returns dst; overlap-safe
 //   void* memset(void* dst, int c, size_t n)             - returns dst
 //   int   memcmp(const void* a, const void* b, size_t n)
 //   size_t strlen(const char* s)
@@ -27,6 +28,7 @@ unit runtime.cstub;
 interface
 
 function memcpy(Dst, Src: Pointer; N: Int64): Pointer;
+function memmove(Dst, Src: Pointer; N: Int64): Pointer;
 function memset(Dst: Pointer; C: Integer; N: Int64): Pointer;
 function memcmp(A, B: Pointer; N: Int64): Integer;
 function strlen(S: PChar): Int64;
@@ -48,6 +50,36 @@ begin
   begin
     D[I] := S[I];
     I := I + 1;
+  end;
+  Result := Dst;
+end;
+
+{ Copies backwards when Dst lies above an overlapping Src, so no byte is
+  overwritten before it has been read. }
+function memmove(Dst, Src: Pointer; N: Int64): Pointer;
+var
+  D, S: PChar;
+  I: Int64;
+begin
+  D := PChar(Dst);
+  S := PChar(Src);
+  if PtrUInt(Dst) <= PtrUInt(Src) then
+  begin
+    I := 0;
+    while I < N do
+    begin
+      D[I] := S[I];
+      I := I + 1;
+    end;
+  end
+  else
+  begin
+    I := N - 1;
+    while I >= 0 do
+    begin
+      D[I] := S[I];
+      I := I - 1;
+    end;
   end;
   Result := Dst;
 end;

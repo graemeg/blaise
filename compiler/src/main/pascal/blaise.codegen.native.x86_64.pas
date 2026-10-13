@@ -17796,6 +17796,27 @@ begin
       Self.Emit(#9'callq exit');
       Exit;
     end;
+    { Move(Source, Dest, Count) -> _BlaiseMove(@Source, @Dest, Count): the
+      semantic pass rewrote both operands to address-of nodes.  The count is
+      widened to 64 bits by its own signedness. }
+    if SameText(PC.Name, 'Move') and (PC.ResolvedDecl = nil) and
+       (PC.Args.Count = 3) then
+    begin
+      Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
+      Self.Emit(#9'pushq %rax');
+      Self.EmitExprToEax(TASTExpr(PC.Args.Items[1]));
+      Self.Emit(#9'pushq %rax');
+      Self.EmitExprToEax(TASTExpr(PC.Args.Items[2]));
+      case TASTExpr(PC.Args.Items[2]).ResolvedType.Kind of
+        tyInteger, tySmallInt: Self.Emit(#9'movslq %eax, %rax');
+        tyUInt32, tyWord, tyByte: Self.Emit(#9'movl %eax, %eax');
+      end;
+      Self.Emit(#9'movq %rax, %rdx');
+      Self.Emit(#9'popq %rsi');
+      Self.Emit(#9'popq %rdi');
+      Self.Emit(#9'callq _BlaiseMove');
+      Exit;
+    end;
     if SameText(PC.Name, 'ZeroMem') and (PC.Args.Count = 2) then
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));

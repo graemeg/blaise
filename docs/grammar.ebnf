@@ -1404,6 +1404,14 @@ ArrayLiteral
  *   WriteLn  ( [ WriteArg { "," WriteArg } ] )  — print with trailing newline
  *   Write    ( WriteArg { "," WriteArg } )      — print without newline
  *   FreeMem  ( Pointer )    — calls libc free()
+ *   Move     ( Source, Dest, Count )
+ *            — copy Count bytes from the variable Source to the variable
+ *              Dest, overlap-safe (memmove); Count <= 0 copies nothing.
+ *              Source and Dest are any variables (identifier, field, P^,
+ *              array element), passed by address.  Neither may hold
+ *              reference-counted data (string, class, interface, dynamic
+ *              array, 'reference to', or a record/static array containing
+ *              one): that is a compile-time error.  Count is an integer.
  *)
 
 (* An argument of Write / WriteLn may carry a field width and, for a real

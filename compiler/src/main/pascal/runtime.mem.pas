@@ -67,6 +67,10 @@ uses
 function  _BlaiseGetMem(Size: Integer): Pointer;
 procedure _BlaiseFreeMem(Ptr: Pointer);
 function  _BlaiseReallocMem(Ptr: Pointer; NewSize: Integer): Pointer;
+{ Move(Source, Dest, Count): the semantic pass passes the two operands'
+  addresses in Pascal order (Source first).  Overlap-safe; a Count of zero
+  or less copies nothing, as in FPC and Delphi. }
+procedure _BlaiseMove(Src, Dst: Pointer; N: Int64);
 
 { Phase-5 teardown / reclamation API (concurrent-allocator-design.adoc,
   §Teardown, §Reclamation protocol).  The _Mem* functions below are
@@ -108,6 +112,7 @@ function  _libc_mmap(Addr: Pointer; Length: Int64; Prot, Flags, Fd: Integer;
 function  _libc_munmap(Addr: Pointer; Length: Int64): Integer;
             external name 'munmap';
 procedure _libc_memcpy(Dst, Src: Pointer; N: Int64); external name 'memcpy';
+procedure _libc_memmove(Dst, Src: Pointer; N: Int64); external name 'memmove';
 
 {$IFDEF BLAISE_MEMDEBUG}
 { Diagnostic-only: a double-free detector (BUG-20260724-arm64-classes-emit-
@@ -1013,6 +1018,12 @@ begin
     Result := LargeGetMem(Size)
   else
     Result := SmallGetMem(Size);
+end;
+
+procedure _BlaiseMove(Src, Dst: Pointer; N: Int64);
+begin
+  if (N > 0) and (Src <> Dst) then
+    _libc_memmove(Dst, Src, N);
 end;
 
 procedure _BlaiseFreeMem(Ptr: Pointer);

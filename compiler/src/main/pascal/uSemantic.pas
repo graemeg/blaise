@@ -427,6 +427,9 @@ type
     function  FloatBuiltinArgType(const AName: string; AArgType: TTypeDesc;
       ALine, ACol: Integer): TTypeDesc;
     procedure AnalyseProcCall(ACall: TProcCall);
+    { Move(Source, Dest, Count): validate, then rewrite Source and Dest to
+      their addresses so the backends lower a plain _BlaiseMove call. }
+    procedure AnalyseMoveCall(ACall: TProcCall);
     { Phase A/B overload resolution.  Walks FProcIndex collecting all
       decls whose name matches AName (case-insensitive); filters by
       arity; for the survivors, scores per-argument compatibility
@@ -13523,6 +13526,72 @@ begin
   end;
 end;
 
+{ Move(Source, Dest, Count) copies Count bytes from the storage of Source
+  to the storage of Dest, correctly when the two overlap (memmove).  Both
+  operands must be variables -- an identifier, field, dereference or array
+  element -- and neither may hold reference-counted data: a raw byte copy of
+  a string, class, interface, dynamic array or a record/array containing one
+  would duplicate or drop references without adjusting their counts.
+  Assignment is the correct copy for those, so the error says so.
+
+  Source and Dest are rewritten in place to '@Source' / '@Dest' nodes, so
+  both backends see an ordinary three-argument call: _BlaiseMove(@Source,
+  @Dest, Count). }
+procedure TSemanticAnalyser.AnalyseMoveCall(ACall: TProcCall);
+const
+  Ordinal: array[0..1] of string = ('First', 'Second');
+var
+  I: Integer;
+  Arg: TASTExpr;
+  AoE: TAddrOfExpr;
+  InnerType, CountType: TTypeDesc;
+begin
+  if ACall.Args.Count <> 3 then
+    SemanticError(
+      '''Move'' requires exactly 3 arguments: Move(Source, Dest, Count)',
+      ACall.Line, ACall.Col);
+  for I := 0 to 1 do
+  begin
+    Arg := TASTExpr(ACall.Args.Items[I]);
+    AoE := TAddrOfExpr.Create();
+    AoE.Line := Arg.Line;
+    AoE.Col := Arg.Col;
+    AoE.Expr := Arg;
+    ACall.Args.Items[I] := AoE;
+    Self.AnalyseAddrOfExpr(AoE);
+    if (AoE.ResolvedType is TProceduralTypeDesc) or
+       not IsVarArgLValue(AoE.Expr) then
+      SemanticError(
+        Format('%s argument of ''Move'' must be a variable', [Ordinal[I]]),
+        ACall.Line, ACall.Col);
+    InnerType := AoE.Expr.ResolvedType;
+    if (InnerType <> nil) and InnerType.HasManagedContent() then
+    begin
+      if InnerType.IsString() or
+         (InnerType.Kind in [tyClass, tyInterface, tyDynArray, tyProcedural]) then
+        SemanticError(
+          Format('''Move'' cannot copy ''%s'': it is reference-counted, and a '
+            + 'raw byte copy would bypass the reference count; use assignment '
+            + 'instead', [InnerType.Name]),
+          ACall.Line, ACall.Col)
+      else
+        SemanticError(
+          Format('''Move'' cannot copy ''%s'': it contains reference-counted '
+            + 'data (a string, class, interface or dynamic array), and a raw '
+            + 'byte copy would bypass the reference counts; use assignment '
+            + 'instead', [InnerType.Name]),
+          ACall.Line, ACall.Col);
+    end;
+    if I = 1 then
+      WarnIfVarArgIsForInLoopVar(AoE.Expr);   { only Dest is written }
+  end;
+  CountType := Self.AnalyseListSlot(ACall.Args, 2);
+  if (CountType = nil) or not (CountType.Kind in [tyInteger, tyInt64, tyUInt32,
+       tyUInt64, tySmallInt, tyWord, tyByte]) then
+    SemanticError('Count argument of ''Move'' must be an integer',
+      ACall.Line, ACall.Col);
+end;
+
 procedure TSemanticAnalyser.AnalyseProcCall(ACall: TProcCall);
 var
   Sym:     TSymbol;
@@ -13831,6 +13900,9 @@ begin
       WarnIfVarArgIsForInLoopVar(TASTExpr(ACall.Args.Items[0]));
       Self.AnalyseListSlot(ACall.Args, 1);
     end
+    else
+    if SameText(ACall.Name, 'Move') then
+      Self.AnalyseMoveCall(ACall)
     else
     if SameText(ACall.Name, 'Sleep') then
     begin

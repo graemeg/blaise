@@ -524,27 +524,9 @@ begin
 end;
 
 function ArcTypeHasManagedContent(AType: TTypeDesc): Boolean;
-var
-  I:  Integer;
-  RT: TRecordTypeDesc;
 begin
-  Result := False;
-  if AType = nil then Exit;
-  if AType.IsString() or
-     (AType.Kind in [tyClass, tyInterface, tyDynArray]) then
-    Exit(True);
-  { 'reference to' closure: the Env half at +8 is a strong ARC reference
-    (BUG-20260922-record-closure-field-not-managed). }
-  if ArcTypeIsRefClosure(AType) then Exit(True);
-  if AType.Kind = tyStaticArray then
-    Exit(ArcTypeHasManagedContent(TStaticArrayTypeDesc(AType).ElementType));
-  if AType.Kind = tyRecord then
-  begin
-    RT := TRecordTypeDesc(AType);
-    for I := 0 to RT.Fields.Count - 1 do
-      if ArcTypeHasManagedContent(TFieldInfo(RT.Fields.Items[I]).TypeDesc) then
-        Exit(True);
-  end;
+  { The rule itself lives on TTypeDesc so the semantic pass shares it. }
+  Result := (AType <> nil) and AType.HasManagedContent();
 end;
 
 function ArcScopeExitReleaseKind(AType: TTypeDesc): TArcReleaseKind;

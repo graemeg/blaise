@@ -61,6 +61,8 @@ type
     { P^.Method() / P^.Method statements / GetP()^ := / GetP()^.F := on a
       class, an interface (incl. sret results and arguments) and a record }
     procedure TestRun_DerefMethodCallsAndCallResultDerefs;
+    procedure TestRun_Move_CopiesAndHandlesOverlap;
+    procedure TestRun_Move_MethodNamedMoveStillCalled;
   end;
 
 implementation
@@ -825,6 +827,92 @@ begin
     '42' + LE +
     '18446744073709551615' + LE +
     '100' + LE, 0);
+end;
+
+{ Move(Source, Dest, Count): a plain copy, both overlap directions (the
+  memmove guarantee FPC and Delphi give), a record, a non-positive count
+  as a no-op, and an Int64 count.  The Linux x86-64 run links
+  freestanding, so it exercises the RTL's own memmove, not libc's. }
+procedure TE2EPointersTests.TestRun_Move_CopiesAndHandlesOverlap;
+const
+  Src = '''
+    program MoveDemo;
+    type
+      TPoint = record
+        X, Y: Integer;
+      end;
+    var
+      A, B: array[0..7] of Integer;
+      P, Q: TPoint;
+      I, Neg: Integer;
+      N: Int64;
+    begin
+      for I := 0 to 7 do
+        A[I] := I + 1;
+      Move(A, B, SizeOf(A));
+      WriteLn(B[0], ' ', B[7]);
+      Move(A[0], A[2], 6 * SizeOf(Integer));
+      for I := 0 to 7 do
+        Write(A[I], ' ');
+      WriteLn();
+      Move(A[2], A[0], 6 * SizeOf(Integer));
+      for I := 0 to 7 do
+        Write(A[I], ' ');
+      WriteLn();
+      P.X := 3;
+      P.Y := 4;
+      Move(P, Q, SizeOf(TPoint));
+      WriteLn(Q.X, ' ', Q.Y);
+      Neg := -1;
+      Move(A, B, Neg);
+      Move(A, B, 0);
+      WriteLn(B[0]);
+      N := SizeOf(Integer);
+      Move(A[7], B[0], N);
+      WriteLn(B[0]);
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src,
+    '1 8' + LineEnding +
+    '1 2 1 2 3 4 5 6 ' + LineEnding +
+    '1 2 3 4 5 6 5 6 ' + LineEnding +
+    '3 4' + LineEnding +
+    '1' + LineEnding +
+    '6' + LineEnding, 0);
+end;
+
+{ A METHOD named Move (TList.Move(CurIndex, NewIndex) in FPC/Delphi) keeps
+  working, called qualified and unqualified from inside the class: the
+  method is found before the intrinsic. }
+procedure TE2EPointersTests.TestRun_Move_MethodNamedMoveStillCalled;
+const
+  Src = '''
+    program MethodMove;
+    type
+      TItems = class
+        procedure Move(ACur, ANew: Integer);
+        procedure Shuffle;
+      end;
+    procedure TItems.Move(ACur, ANew: Integer);
+    begin
+      WriteLn('method Move ', ACur, ' ', ANew);
+    end;
+    procedure TItems.Shuffle;
+    begin
+      Move(1, 2);
+    end;
+    var
+      L: TItems;
+    begin
+      L := TItems.Create();
+      L.Move(3, 4);
+      L.Shuffle();
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src,
+    'method Move 3 4' + LineEnding + 'method Move 1 2' + LineEnding, 0);
 end;
 
 initialization
