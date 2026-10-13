@@ -641,6 +641,7 @@ type
       an array element (an l-value source; any other shape is refused at
       compile time rather than stored 8 bytes wide) }
     procedure EmitFatElemSourceAddr(AValue: TASTExpr);
+    procedure EmitFatArgAddrToRax(AArg: TASTExpr);
     procedure EmitInterfaceFieldCall(AFld: TFieldInfo; AIntf: TInterfaceTypeDesc;
                                 const AMethName: string; AArgs: TObjectList;
                                 ADiscardIntfRet: Boolean = False);
@@ -3163,8 +3164,29 @@ begin
     else if AStmt.Decl.ResolvedType.Kind in [tyInteger, tyUInt32, tyBoolean,
              tyByte, tyEnum, tySmallInt, tyWord] then
       Self.Emit(Format(#9'movl $0, %s', [Self.VarOperand(Name)]))
+    else if AStmt.Decl.ResolvedType.RawSize() <= 8 then
+      Self.Emit(Format(#9'movq $0, %s', [Self.VarOperand(Name)]))
     else
-      Self.Emit(Format(#9'movq $0, %s', [Self.VarOperand(Name)]));
+    begin
+      { an interface, closure, record or static array: release the previous
+        execution's managed content, then zero every byte.  One word was
+        zeroed and nothing released, so each loop iteration but the last
+        leaked its interface / string fields and left a stale itab or Env
+        half behind. }
+      if ArcTypeHasManagedContent(AStmt.Decl.ResolvedType) then
+      begin
+        Self.Emit(#9'pushq %rbx');
+        Self.Emit(#9'subq $8, %rsp');
+        Self.Emit(Format(#9'leaq %s, %%rbx', [Self.VarOperand(Name)]));
+        Self.EmitManagedReleaseAt(AStmt.Decl.ResolvedType, '%rbx', False);
+        Self.Emit(#9'addq $8, %rsp');
+        Self.Emit(#9'popq %rbx');
+      end;
+      Self.Emit(Format(#9'leaq %s, %%rdi', [Self.VarOperand(Name)]));
+      Self.Emit(#9'xorl %esi, %esi');
+      Self.Emit(Format(#9'movq $%d, %%rdx', [AStmt.Decl.ResolvedType.RawSize()]));
+      Self.Emit(#9'callq memset');
+    end;
   end;
   if AStmt.InitAssign <> nil then
     Self.EmitStmt(AStmt.InitAssign);
@@ -3277,6 +3299,29 @@ begin
         Self.Emit(Format(#9'movsd %s, %%xmm0', [Self.VarOperand(P.ParamName)]));
         Self.Emit(#9'movsd %xmm0, (%rcx)');
       end;
+    end
+    else if (F.TypeDesc.Kind in [tyInterface, tyStaticArray]) or
+            IsMethodPtrType(F.TypeDesc) or IsJumboSet(F.TypeDesc) then
+    begin
+      { A wider-than-a-word value: copy all of it, then the env's own
+        retain.  The word-sized arm below copied only an interface's obj
+        (the closure then dispatched through a nil itab) and a closure's
+        Code, and retained neither.  An interface or closure param holds
+        its value in the slot; a static array or jumbo set param holds the
+        value's ADDRESS. }
+      if (F.TypeDesc.Kind = tyStaticArray) or IsJumboSet(F.TypeDesc) then
+        Self.Emit(Format(#9'movq %s, %%rsi', [Self.VarOperand(P.ParamName)]))
+      else
+        Self.Emit(Format(#9'leaq %s, %%rsi', [Self.VarOperand(P.ParamName)]));
+      Self.Emit(Format(#9'movq %s, %%rdi',
+        [Self.VarOperand('_cap_' + P.ParamName)]));
+      Self.Emit(Format(#9'movq $%d, %%rdx', [F.TypeDesc.RawSize()]));
+      Self.Emit(#9'callq memcpy');
+      Self.Emit(#9'pushq %rbx');
+      Self.Emit(Format(#9'movq %s, %%rbx',
+        [Self.VarOperand('_cap_' + P.ParamName)]));
+      Self.EmitManagedAddRefAt(F.TypeDesc, '%rbx');
+      Self.Emit(#9'popq %rbx');
     end
     else if F.TypeDesc.Kind in [tyInteger, tyUInt32, tyBoolean, tyByte,
                                 tyEnum, tySmallInt, tyWord] then
@@ -5849,7 +5894,11 @@ var
   IsFat, ByAddr: Boolean;
 begin
   IsFat := (AProcType <> nil) and (AProcType.IsMethodPtr or AProcType.IsReference);
-  ByAddr := (Self.IsCaptured(AName) and not Self.IsLocal(AName)) or
+  { a captured name goes through _cap_ even when the declaring frame also
+    keeps a slot of that name: an env-hoisted local lives in the env, and
+    calling through the idle frame slot read a closure the capture never
+    wrote (F := Cap(X) inside a closure, then F() outside it) }
+  ByAddr := Self.IsCaptured(AName) or
             ((FFrameVarParams <> nil) and (FFrameVarParams.IndexOf(AName) >= 0));
   if not ByAddr then
   begin
@@ -5864,7 +5913,7 @@ begin
     '(%rbx)' then names the variable itself, fat or plain. }
   Self.Emit(#9'pushq %rbx');
   Self.Emit(#9'subq $8, %rsp');
-  if Self.IsCaptured(AName) and not Self.IsLocal(AName) then
+  if Self.IsCaptured(AName) then
     Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('_cap_' + AName)]))
   else
     Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(AName)]));
@@ -8582,6 +8631,7 @@ var
   LSuppNo: string;
   LSuppEnd: string;
   SCAT: TStaticArrayTypeDesc;
+  CalleeLV: Boolean;
 begin
   if AExpr is TNilLiteral then
   begin
@@ -11789,7 +11839,29 @@ begin
         would drift; %rbx survives the arg push/pop. }
       Self.Emit(#9'pushq %rbx');
       Self.Emit(#9'subq $16, %rsp');
-      Self.EmitRecordCallSretAt(TIndirectFuncCallExpr(AExpr).CalleeExpr, '(%rsp)');
+      CalleeLV := IsFatLValueExpr(TIndirectFuncCallExpr(AExpr).CalleeExpr) and
+        not (TIndirectFuncCallExpr(AExpr).CalleeExpr is TIdentExpr);
+      if CalleeLV then
+      begin
+        { an element, P^ or field holding the closure (L[0](), P^()): copy
+          its pair -- it reached the call-result arm and crashed the
+          compiler.  A 'reference to' copy holds its own Env reference for
+          the call, so a body that overwrites the slot cannot free the Env
+          it is running in; the release below drops it. }
+        Self.EmitVarArgAddrToRax(TIndirectFuncCallExpr(AExpr).CalleeExpr);
+        Self.Emit(#9'movq (%rax), %rcx');
+        Self.Emit(#9'movq %rcx, (%rsp)');
+        Self.Emit(#9'movq 8(%rax), %rcx');
+        Self.Emit(#9'movq %rcx, 8(%rsp)');
+        if TProceduralTypeDesc(
+             TIndirectFuncCallExpr(AExpr).ResolvedProcType).IsReference then
+        begin
+          Self.Emit(#9'movq %rcx, %rdi');
+          Self.Emit(#9'callq _ClassAddRef');
+        end;
+      end
+      else
+        Self.EmitRecordCallSretAt(TIndirectFuncCallExpr(AExpr).CalleeExpr, '(%rsp)');
       Self.Emit(#9'movq %rsp, %rbx');
       Self.EmitMethodPtrCall('(%rbx)',
         TProceduralTypeDesc(TIndirectFuncCallExpr(AExpr).ResolvedProcType),
@@ -11799,7 +11871,8 @@ begin
         %rax / %xmm0 (MakeAdder(1)(41), Obj.Make(7)(6)) }
       if TProceduralTypeDesc(
            TIndirectFuncCallExpr(AExpr).ResolvedProcType).IsReference and
-         ((TIndirectFuncCallExpr(AExpr).CalleeExpr is TFuncCallExpr) or
+         (CalleeLV or
+          (TIndirectFuncCallExpr(AExpr).CalleeExpr is TFuncCallExpr) or
           (TIndirectFuncCallExpr(AExpr).CalleeExpr is TMethodCallExpr)) then
       begin
         Self.Emit(#9'pushq %rax');
@@ -12877,6 +12950,38 @@ begin
       'native backend: unsupported open-array argument expression');
 end;
 
+{ Method-pointer / closure argument: the ADDRESS of the 16-byte fat value
+  goes in the argument's one slot, and the callee copies it into its own slot
+  (Phase 2b in EmitFunctionDef).  Shared by every call-argument strategy
+  (EmitMethodArgPush, both EmitCall paths): a path that fell back to
+  EmitExprToEax passed a call result's Code word as the pair's address. }
+procedure TX86_64Backend.EmitFatArgAddrToRax(AArg: TASTExpr);
+begin
+  if AArg is TAnonMethodExpr then
+    Self.EmitAnonValueToSlot(TAnonMethodExpr(AArg))
+  else if (AArg is TIdentExpr) and (not TIdentExpr(AArg).IsImplicitSelf) and
+          (not Self.IsCaptured(TIdentExpr(AArg).Name)) then
+    Self.Emit(Format(#9'leaq %s, %%rax',
+      [Self.VarOperand(TIdentExpr(AArg).Name)]))
+  else if ((AArg is TStringSubscriptExpr) or (AArg is TDerefExpr) or
+           (AArg is TFieldAccessExpr)) and IsFatLValueExpr(AArg) then
+    { an element (A[I]), P^ or field holding the closure: its own address.
+      EmitExprToEax loaded the element's first WORD, and the callee's copy
+      of 16 bytes through it crashed. }
+    Self.EmitVarArgAddrToRax(AArg)
+  else if ((AArg is TFuncCallExpr) or (AArg is TMethodCallExpr)) and
+          (AArg.ResolvedType <> nil) and IsMethodPtrType(AArg.ResolvedType) then
+    { a closure RETURNED by a call (Apply(MakeFn())): EmitExprToEax left the
+      pair in %rax:%rdx and the callee dereferenced the Code word as the
+      pair's address.  Land it in a per-site scratch the callee borrows;
+      the scratch's Env is released at the statement end. }
+    Self.EmitFatElemSourceAddr(AArg)
+  else
+    { captured forms: EmitExprToEax yields the block address for
+      aggregate-style reads. }
+    Self.EmitExprToEax(AArg);
+end;
+
 procedure TX86_64Backend.EmitMethodArgPush(APar: TMethodParam; AArg: TASTExpr);
 var
   ClassRT: TRecordTypeDesc;
@@ -13062,25 +13167,7 @@ begin
   end
   else if (APar <> nil) and IsMethodPtrType(APar.ResolvedType) then
   begin
-    { Method-pointer / closure argument: pass the ADDRESS of the 16-byte fat
-      value (one slot); the callee copies it into its own slot (Phase 2b in
-      EmitFunctionDef).  Literals materialise into their hidden value slot. }
-    if AArg is TAnonMethodExpr then
-      Self.EmitAnonValueToSlot(TAnonMethodExpr(AArg))
-    else if (AArg is TIdentExpr) and (not TIdentExpr(AArg).IsImplicitSelf) and
-            (not Self.IsCaptured(TIdentExpr(AArg).Name)) then
-      Self.Emit(Format(#9'leaq %s, %%rax',
-        [Self.VarOperand(TIdentExpr(AArg).Name)]))
-    else if ((AArg is TStringSubscriptExpr) or (AArg is TDerefExpr) or
-             (AArg is TFieldAccessExpr)) and IsFatLValueExpr(AArg) then
-      { an element (A[I]), P^ or field holding the closure: its own address.
-        EmitExprToEax loaded the element's first WORD, and the callee's copy
-        of 16 bytes through it crashed. }
-      Self.EmitVarArgAddrToRax(AArg)
-    else
-      { captured / call-returning forms: EmitExprToEax yields the block
-        address for aggregate-style reads. }
-      Self.EmitExprToEax(AArg);
+    Self.EmitFatArgAddrToRax(AArg);
     Self.Emit(#9'pushq %rax');
   end
   else
@@ -16149,6 +16236,7 @@ var
   DiscShim: TFuncCallExpr;
   DiscMShim: TMethodCallExpr;
   PropRelStr: Boolean;
+  PtrSlot: string;
 begin
   { An empty statement (e.g. the body of `for x := 0 to N do;`) parses to a nil
     statement — the parser's convention for "no statement here".  It is a valid,
@@ -16482,7 +16570,7 @@ begin
         if MD = nil then
           raise ENativeCodeGenError.Create(
             'native backend: anonymous method not lifted — semantic pass required');
-        Self.EmitVarAddr(Asgn.Name, '%rcx');
+        Self.EmitAsgnTargetAddr(Asgn, '%rcx');
         Self.Emit(#9'movq 8(%rcx), %rdi');
         Self.Emit(#9'pushq %rcx');
         Self.Emit(#9'callq _ClassRelease');
@@ -16509,7 +16597,7 @@ begin
       end;
       if Asgn.Expr is TNilLiteral then
       begin
-        Self.EmitVarAddr(Asgn.Name, '%rcx');
+        Self.EmitAsgnTargetAddr(Asgn, '%rcx');
         Self.Emit(#9'movq 8(%rcx), %rdi');
         Self.Emit(#9'pushq %rcx');
         Self.Emit(#9'callq _ClassRelease');
@@ -16533,7 +16621,7 @@ begin
         FAE := TFieldAccessExpr(TAddrOfExpr(Asgn.Expr).Expr);
         MD  := TMethodDecl(FAE.ResolvedMethod);
         { Release the old env before overwrite. }
-        Self.EmitVarAddr(Asgn.Name, '%rcx');
+        Self.EmitAsgnTargetAddr(Asgn, '%rcx');
         Self.Emit(#9'movq 8(%rcx), %rdi');
         Self.Emit(#9'callq _ClassRelease');
         { Receiver -> %rax (evaluated fresh; %rcx recomputed after). }
@@ -16541,7 +16629,7 @@ begin
           Self.EmitExprToEax(FAE.Base)
         else
           Self.EmitVarBaseToReg(FAE.RecordName, False, '%rax');
-        Self.EmitVarAddr(Asgn.Name, '%rcx');
+        Self.EmitAsgnTargetAddr(Asgn, '%rcx');
         Self.Emit(#9'movq %rax, 8(%rcx)');
         { Code pointer: vtable-resolved for virtual/override methods. }
         if MD.VTableSlot >= 0 then
@@ -16585,11 +16673,9 @@ begin
     begin
       FAE := TFieldAccessExpr(TAddrOfExpr(Asgn.Expr).Expr);
       MD  := TMethodDecl(FAE.ResolvedMethod);
-      { Destination address → %rcx }
-      if Self.IsLocal(Asgn.Name) then
-        Self.Emit(Format(#9'leaq %s, %%rcx', [Self.VarOperand(Asgn.Name)]))
-      else
-        Self.Emit(Format(#9'leaq %s(%%rip), %%rcx', [Self.GlobalSymName(Asgn.Name)]));
+      { Destination address → %rcx (a var param / capture through its
+        pointer, not the pointer's own slot) }
+      Self.EmitAsgnTargetAddr(Asgn, '%rcx');
       { Store object pointer at offset 8 first — a virtual method reads its
         code pointer from THIS instance's vtable. }
       if FAE.Base <> nil then
@@ -16667,21 +16753,27 @@ begin
          IsMethodPtrType(TProceduralTypeDesc(
            TFuncCallExpr(Asgn.Expr).ResolvedProcType).ReturnType))) then
     begin
-      if FSretFunc and SameText(Asgn.Name, 'Result') then
-        Self.EmitFuncCallSret(TFuncCallExpr(Asgn.Expr),
-          Self.VarOperand('Result'), True)
-      else if Asgn.IsVarParam then
-        Self.EmitFuncCallSret(TFuncCallExpr(Asgn.Expr),
-          Self.VarOperand(Asgn.Name), True)
-      else if Self.IsLocal(Asgn.Name) then
-        Self.EmitFuncCallSret(TFuncCallExpr(Asgn.Expr),
-          Self.VarOperand(Asgn.Name), False)
-      else
-      begin
-        Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
-        Self.EmitFuncCallSret(TFuncCallExpr(Asgn.Expr),
-          Self.GlobalSymName(Asgn.Name) + '(%rip)', False);
-      end;
+      { The call fills a fresh per-site scratch, THEN the pair moves into
+        the target: the sret helper zeroes its destination before the
+        arguments are evaluated, so F := Wrap(F) straight into F handed
+        Wrap a nil F.  A 'reference to' target owns its Env, so the old one
+        is released after the store (overwriting it leaked the old
+        closure's captures).  One address walk (EmitAsgnTargetAddr) serves
+        every target: sret Result, capture, var param, local, global. }
+      PtrSlot := Self.NewScratchOperand(16);
+      Self.EmitFuncCallSret(TFuncCallExpr(Asgn.Expr), PtrSlot, False);
+      Self.EmitAsgnTargetAddr(Asgn, '%rcx');
+      Self.Emit(#9'pushq 8(%rcx)');              { the old Env }
+      Self.Emit(#9'subq $8, %rsp');
+      Self.Emit(Format(#9'leaq %s, %%rsi', [PtrSlot]));
+      Self.Emit(#9'movq (%rsi), %rax');
+      Self.Emit(#9'movq %rax, (%rcx)');
+      Self.Emit(#9'movq 8(%rsi), %rax');
+      Self.Emit(#9'movq %rax, 8(%rcx)');
+      Self.Emit(#9'addq $8, %rsp');
+      Self.Emit(#9'popq %rdi');
+      if ArcTypeIsRefClosure(Asgn.ResolvedLhsType) then
+        Self.Emit(#9'callq _ClassRelease');
       Exit;
     end;
     if (Asgn.ResolvedLhsType <> nil) and
@@ -16691,21 +16783,27 @@ begin
        IsMethodPtrType(
          TMethodDecl(TMethodCallExpr(Asgn.Expr).ResolvedMethod).ResolvedReturnType) then
     begin
-      if FSretFunc and SameText(Asgn.Name, 'Result') then
-        Self.EmitMethodSretCall(TMethodCallExpr(Asgn.Expr),
-          Self.VarOperand('Result'), True)
-      else if Asgn.IsVarParam then
-        Self.EmitMethodSretCall(TMethodCallExpr(Asgn.Expr),
-          Self.VarOperand(Asgn.Name), True)
-      else if Self.IsLocal(Asgn.Name) then
-        Self.EmitMethodSretCall(TMethodCallExpr(Asgn.Expr),
-          Self.VarOperand(Asgn.Name), False)
-      else
-      begin
-        Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
-        Self.EmitMethodSretCall(TMethodCallExpr(Asgn.Expr),
-          Self.GlobalSymName(Asgn.Name) + '(%rip)', False);
-      end;
+      { The call fills a fresh per-site scratch, THEN the pair moves into
+        the target: the sret helper zeroes its destination before the
+        arguments are evaluated, so F := Wrap(F) straight into F handed
+        Wrap a nil F.  A 'reference to' target owns its Env, so the old one
+        is released after the store (overwriting it leaked the old
+        closure's captures).  One address walk (EmitAsgnTargetAddr) serves
+        every target: sret Result, capture, var param, local, global. }
+      PtrSlot := Self.NewScratchOperand(16);
+      Self.EmitMethodSretCall(TMethodCallExpr(Asgn.Expr), PtrSlot, False);
+      Self.EmitAsgnTargetAddr(Asgn, '%rcx');
+      Self.Emit(#9'pushq 8(%rcx)');              { the old Env }
+      Self.Emit(#9'subq $8, %rsp');
+      Self.Emit(Format(#9'leaq %s, %%rsi', [PtrSlot]));
+      Self.Emit(#9'movq (%rsi), %rax');
+      Self.Emit(#9'movq %rax, (%rcx)');
+      Self.Emit(#9'movq 8(%rsi), %rax');
+      Self.Emit(#9'movq %rax, 8(%rcx)');
+      Self.Emit(#9'addq $8, %rsp');
+      Self.Emit(#9'popq %rdi');
+      if ArcTypeIsRefClosure(Asgn.ResolvedLhsType) then
+        Self.Emit(#9'callq _ClassRelease');
       Exit;
     end;
     { sret assignment: LHS is a record (or jumbo set) variable; RHS is a
@@ -20039,6 +20137,45 @@ begin
       Self.Emit(#9'addq $8, %rsp');
       Self.Emit(#9'movss %xmm0, (%rcx)');
     end
+    else if IsMethodPtrType(TPointerWriteStmt(AStmt).BaseTy) then
+    begin
+      { P^ := V through a pointer to a closure / method pointer: both halves,
+        the element-store discipline (a 'reference to' target retains the
+        source's Env and releases its old one; a call result's scratch is
+        released at the statement end).  The scalar fallback below stored a
+        single word -- the RHS's Code, or an address -- and the closure the
+        pointer named was left unchanged. }
+      Self.EmitFatElemSourceAddr(TPointerWriteStmt(AStmt).ValExpr);
+      Self.Emit(#9'pushq %rax');           { source pair address }
+      Self.EmitExprToEax(TPointerWriteStmt(AStmt).PtrExpr);
+      Self.Emit(#9'pushq %rbx');
+      Self.Emit(#9'pushq %r15');
+      Self.Emit(#9'subq $8, %rsp');
+      Self.Emit(#9'movq %rax, %r15');      { dest pair address }
+      Self.Emit(#9'movq 24(%rsp), %rbx');  { source pair address }
+      if ArcTypeIsRefClosure(TPointerWriteStmt(AStmt).BaseTy) then
+      begin
+        if not (TPointerWriteStmt(AStmt).ValExpr is TNilLiteral) then
+          Self.EmitRetainSlotAt(TPointerWriteStmt(AStmt).BaseTy, 8, '%rbx');
+        Self.EmitReleaseSlotAt(TPointerWriteStmt(AStmt).BaseTy, 8, '%r15', False);
+      end;
+      if TPointerWriteStmt(AStmt).ValExpr is TNilLiteral then
+      begin
+        Self.Emit(#9'movq $0, (%r15)');
+        Self.Emit(#9'movq $0, 8(%r15)');
+      end
+      else
+      begin
+        Self.Emit(#9'movq (%rbx), %rax');
+        Self.Emit(#9'movq %rax, (%r15)');
+        Self.Emit(#9'movq 8(%rbx), %rax');
+        Self.Emit(#9'movq %rax, 8(%r15)');
+      end;
+      Self.Emit(#9'addq $8, %rsp');
+      Self.Emit(#9'popq %r15');
+      Self.Emit(#9'popq %rbx');
+      Self.Emit(#9'addq $8, %rsp');        { drop saved source address }
+    end
     else if (TPointerWriteStmt(AStmt).BaseTy <> nil) and
             ((TPointerWriteStmt(AStmt).BaseTy.Kind = tyRecord) or
              IsJumboSet(TPointerWriteStmt(AStmt).BaseTy)) then
@@ -21996,6 +22133,11 @@ begin
           raise ENativeCodeGenError.Create(
             'native backend: unsupported interface arg expression in EmitCall');
       end
+      else if IsMethodPtrType(ParamType) then
+      begin
+        Self.EmitFatArgAddrToRax(Arg);
+        Self.Emit(#9'pushq %rax');
+      end
       else
       begin
         Self.EmitExprToEax(Arg);
@@ -22209,6 +22351,12 @@ begin
         else
           raise ENativeCodeGenError.Create(
             'native backend: unsupported interface arg expression in EmitCall');
+      end
+      else if IsMethodPtrType(ParamType) then
+      begin
+        Self.EmitFatArgAddrToRax(Arg);
+        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
+        Inc(SlotOff, 8);
       end
       else
       begin

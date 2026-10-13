@@ -327,6 +327,7 @@ type
       is used by reference (leg 38).  For a capture-free literal Env is nil. }
     procedure EmitAnonValueToSlot(AME: TAnonMethodExpr);
     procedure EmitAnonValueInto(AME: TAnonMethodExpr; const ASlot: string);
+    procedure EmitAnonValueAtX9(AME: TAnonMethodExpr);
     procedure EmitFatPtrAssign(AAsgn: TAssignment);
     function  IsFatLValue(AExpr: TASTExpr): Boolean;
     procedure EmitLValueAddrToX0(AExpr: TASTExpr);
@@ -1013,7 +1014,13 @@ end;
 
 procedure TArm64Backend.EmitProcVarAddr(const AReg, AName: string);
 begin
-  if IsCaptured(AName) and not IsLocal(AName) then
+  { a captured name goes through '_cap_' even when the declaring frame also
+    keeps a slot of that name: an env-hoisted local lives in the env, and
+    calling through the idle slot read a closure the capture never wrote
+    (F := Cap(X) inside a closure, then F() outside it).  The IsLocal
+    exception elsewhere is for a record method's materialised Self, which
+    is never a procedural variable. }
+  if IsCaptured(AName) then
   begin
     EmitLoadSlot(AReg, '_cap_' + AName);
     if IsCapturedVarParam(AName) then
@@ -2282,6 +2289,12 @@ end;
 
 procedure TArm64Backend.EmitAnonValueInto(AME: TAnonMethodExpr;
   const ASlot: string);
+begin
+  EmitSlotAddr('x9', ASlot);
+  EmitAnonValueAtX9(AME);
+end;
+
+procedure TArm64Backend.EmitAnonValueAtX9(AME: TAnonMethodExpr);
 var
   MD: TMethodDecl;
   Sym: string;
@@ -2289,8 +2302,8 @@ begin
   MD := TMethodDecl(AME.LiftedDecl);
   if MD = nil then
     NotYet('anonymous method not lifted (semantic pass required)', AME);
-  { x9 := &slot; release the old Env half (nil-safe), then write Code and Env. }
-  EmitSlotAddr('x9', ASlot);
+  { x9 = the target's address (a slot, a capture, a var param's variable);
+    release the old Env half (nil-safe), then write Code and Env. }
   Self.Emit(#9'ldr x0, [x9, #8]');            { old Env }
   Self.Emit(#9'str x9, [sp, #-16]!');         { park &slot across the call }
   EmitCallSym('_ClassRelease');
@@ -2335,8 +2348,9 @@ procedure TArm64Backend.EmitFatTargetAddr(const AReg: string;
 begin
   { the named target's storage: through '_cap_' when captured (one deref
     further for a captured var param), the caller's address a var param's
-    slot holds, else the slot }
-  if IsCaptured(AAsgn.Name) and not IsLocal(AAsgn.Name) then
+    slot holds, else the slot.  Never Self, so a captured name always
+    goes through '_cap_' -- see EmitProcVarAddr }
+  if IsCaptured(AAsgn.Name) then
   begin
     EmitLoadSlot(AReg, '_cap_' + AAsgn.Name);
     if IsCapturedVarParam(AAsgn.Name) then
@@ -2492,24 +2506,25 @@ begin
     Self.Emit(#9'stp x9, x10, [x1]');
     Exit;
   end;
-  { the arms below address the target by slot name }
-  if IsCaptured(AAsgn.Name) or AAsgn.IsVarParam then
-    NotYet('closure / method-pointer assignment to this target', AAsgn);
+  { the arms below address the target through EmitFatTargetAddr, which
+    reaches a capture and a var param's variable as well as a slot (both
+    were refused) }
   if AAsgn.Expr is TAnonMethodExpr then
   begin
     { materialise the literal straight into the target (old Env released,
       captured Env retained -- EmitAnonValueInto) }
-    EmitAnonValueInto(TAnonMethodExpr(AAsgn.Expr), AAsgn.Name);
+    EmitFatTargetAddr('x9', AAsgn);
+    EmitAnonValueAtX9(TAnonMethodExpr(AAsgn.Expr));
     Exit;
   end;
   if AAsgn.Expr is TNilLiteral then
   begin
-    EmitSlotAddr('x9', AAsgn.Name);
+    EmitFatTargetAddr('x9', AAsgn);
     if IsRef then
     begin
       Self.Emit(#9'ldr x0, [x9, #8]');
       EmitCallSym('_ClassRelease');
-      EmitSlotAddr('x9', AAsgn.Name);
+      EmitFatTargetAddr('x9', AAsgn);
     end;
     Self.Emit(#9'stp xzr, xzr, [x9]');
     Exit;
@@ -2531,7 +2546,7 @@ begin
       NotYet('method pointer to this method form', AAsgn);
     if IsRef then
     begin
-      EmitSlotAddr('x9', AAsgn.Name);
+      EmitFatTargetAddr('x9', AAsgn);
       Self.Emit(#9'ldr x0, [x9, #8]');
       EmitCallSym('_ClassRelease');
     end;
@@ -2554,7 +2569,7 @@ begin
       Self.Emit(Format(#9'adrp x1, %s@PAGE', [RoutineSym(MD, '')]));
       Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF', [RoutineSym(MD, '')]));
     end;
-    EmitSlotAddr('x9', AAsgn.Name);
+    EmitFatTargetAddr('x9', AAsgn);
     EmitPopTo('x0');                           { receiver }
     Self.Emit(#9'stp x1, x0, [x9]');           { Code at +0, receiver at +8 }
     if IsRef then
@@ -2568,13 +2583,13 @@ begin
       Env is released and the pair moved in WITHOUT a retain }
     if IsRef then
     begin
-      EmitSlotAddr('x9', AAsgn.Name);
+      EmitFatTargetAddr('x9', AAsgn);
       Self.Emit(#9'ldr x0, [x9, #8]');
       EmitCallSym('_ClassRelease');
     end;
     EmitSlotAddr('x1', Tmp);
     Self.Emit(#9'ldp x9, x10, [x1]');
-    EmitSlotAddr('x1', AAsgn.Name);
+    EmitFatTargetAddr('x1', AAsgn);
     Self.Emit(#9'stp x9, x10, [x1]');
     Exit;
   end;
@@ -2586,6 +2601,7 @@ function TArm64Backend.EmitClosureResultToTemp(AExpr: TASTExpr;
 var
   MC: TMethodCallExpr;
   MD: TMethodDecl;
+  OwnSlot: string;
 begin
   { A call that RETURNS a closure / method pointer, lowered into a fresh
     16-byte frame scratch (named in ATmp) that holds the callee's +1 on the
@@ -2654,11 +2670,20 @@ begin
   { the receiver is pushed for EmitCall to pop into x0 (virtual dispatch
     keys on the method's VTableSlot) }
   MD := TMethodDecl(MC.ResolvedMethod);
+  OwnSlot := '';
   if MC.ObjExpr <> nil then
   begin
-    if ArcExprOwnsRef(MC.ObjExpr) then
-      NotYet('closure-returning call on an owned transient receiver', AExpr);
     Self.EmitExprToX0(MC.ObjExpr);
+    if ArcExprOwnsRef(MC.ObjExpr) then
+    begin
+      { MkOb().Mk(): the receiver is a +1 transient -- parked in a frame
+        slot across the call and released after it (a closure that keeps
+        Self holds its own reference through the env) }
+      OwnSlot := '__ownrecv_' + IntToStr(FFretN);
+      if not FFrame.ContainsKey(OwnSlot) then
+        AddLocal(OwnSlot, 8);
+      EmitStoreSlot('x0', OwnSlot);
+    end;
   end
   else if not EmitCapturedBase('x0', MC.ObjectName, True, MC.IsVarParam) then
   begin
@@ -2672,6 +2697,11 @@ begin
   if not FFrame.ContainsKey(ATmp) then
     AddLocal(ATmp, 16);
   EmitCall(MD, MC.Name, MC.Args, ATmp, True, MD.VTableSlot);
+  if OwnSlot <> '' then
+  begin
+    EmitLoadSlot('x0', OwnSlot);
+    EmitCallSym('_ClassRelease');
+  end;
   Result := True;
 end;
 
@@ -2744,10 +2774,19 @@ begin
       EmitStoreSlot('xzr', Name);
     end
     else if (T.Kind in [tyRecord, tyStaticArray]) or
-            IsMethodPtrType(T) or (T.Kind = tyInterface) then
+            IsMethodPtrType(T) or (T.Kind = tyInterface) or
+            IsJumboSetType(T) then
     begin
-      if AggHasManaged(T) or IsMethodPtrType(T) or (T.Kind = tyInterface) then
-        NotYet('block-scoped variable of a managed aggregate type', AStmt);
+      { release the previous execution's managed content (an interface's
+        obj, a closure's Env, a record's or array's fields), then zero
+        every byte }
+      if ArcTypeHasManagedContent(T) then
+      begin
+        Self.Emit(#9'str x19, [sp, #-16]!');
+        EmitSlotAddr('x19', Name);
+        Self.EmitManagedReleaseAt(T, 'x19', False);
+        Self.Emit(#9'ldr x19, [sp], #16');
+      end;
       EmitSlotAddr('x0', Name);
       Self.Emit(#9'mov x1, #0');
       EmitIntLiteral('x2', T.RawSize());
@@ -2841,10 +2880,26 @@ begin
     P := TMethodParam(ADecl.Params.Items[I]);
     if ADecl.EnvCaptured.IndexOf(P.ParamName) < 0 then Continue;
     F := Env.FindField(P.ParamName);
-    if P.IsVarParam or P.IsOpenArray or
-       (F.TypeDesc.Kind in [tyRecord, tyStaticArray, tyInterface, tySingle,
-                            tyProcedural]) then
+    if P.IsVarParam or P.IsOpenArray then
       NotYet('closure capture of a parameter of this type', ADecl);
+    if (F.TypeDesc.Kind in [tyRecord, tyStaticArray, tyInterface]) or
+       IsMethodPtrType(F.TypeDesc) or IsJumboSetType(F.TypeDesc) then
+    begin
+      { a value wider than a word, held inline in its param slot: copy all
+        of it, then the env's own references (an interface's obj, a
+        closure's Env, a record's or array's managed content) -- the env
+        owns its copy independently of the param, which the exit pass
+        releases }
+      EmitLoadSlot('x0', '_cap_' + P.ParamName);
+      EmitSlotAddr('x1', P.ParamName);
+      EmitIntLiteral('x2', F.TypeDesc.RawSize());
+      EmitCallSym('memcpy');
+      Self.Emit(#9'str x19, [sp, #-16]!');
+      EmitLoadSlot('x19', '_cap_' + P.ParamName);
+      Self.EmitManagedAddRefAt(F.TypeDesc, 'x19');
+      Self.Emit(#9'ldr x19, [sp], #16');
+      Continue;
+    end;
     EmitLoadSlot('x0', P.ParamName);
     EmitLoadSlot('x9', '_cap_' + P.ParamName);
     EmitStoreByWidth('x0', 'x9', F.TypeDesc);
@@ -3301,7 +3356,29 @@ begin
     { MakeClosure()(args) / Obj.GetFn()(args): the callee value lands in a
       +1 scratch; a 'reference to' Env is dropped after the call, with the
       result registers (x0 / d0) preserved across the release }
-    if not EmitClosureResultToTemp(AExpr.CalleeExpr, Slot) then
+    if IsFatLValue(AExpr.CalleeExpr) and
+       not (AExpr.CalleeExpr is TIdentExpr) then
+    begin
+      { L[0](), P^(), R.F(): copy the stored pair into a per-site scratch
+        that holds its OWN Env reference for the call (dropped below), so
+        a body that overwrites the slot cannot free the Env it runs in }
+      Slot := '__fret_' + IntToStr(FFretN);
+      FFretN := FFretN + 1;
+      if not FFrame.ContainsKey(Slot) then
+        AddLocal(Slot, 16);
+      EmitLValueAddrToX0(AExpr.CalleeExpr);
+      EmitPushX0();
+      EmitSlotAddr('x1', Slot);
+      EmitPopTo('x0');
+      Self.Emit(#9'ldp x9, x10, [x0]');
+      Self.Emit(#9'stp x9, x10, [x1]');
+      if PT.IsReference then
+      begin
+        Self.Emit(#9'mov x0, x10');
+        EmitCallSym('_ClassAddRef');
+      end;
+    end
+    else if not EmitClosureResultToTemp(AExpr.CalleeExpr, Slot) then
       NotYet('call through a closure / method pointer an expression yields',
         AExpr);
     if (AExpr.ResolvedType <> nil) and IsAggregateReturn(AExpr.ResolvedType) then
@@ -11239,6 +11316,28 @@ begin
     EmitIntfStoreStacked(0, AStmt.ValExpr, AStmt.BaseTy);
     Exit;
   end;
+  if IsMethodPtrType(AStmt.BaseTy) then
+  begin
+    { P^ := V through a pointer to a closure / method pointer: the (Code,
+      Env) pair, with EmitFatPairToX0X1's ownership (a 'reference to'
+      target holds its own Env: a copied one is retained, a call result's
+      +1 transfers); the old Env is released after the new value is in
+      hand, so P^ := P^ stays safe.  It reached the closure-call refusal. }
+    EmitFatPairToX0X1(AStmt.ValExpr, TProceduralTypeDesc(AStmt.BaseTy).IsReference);
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');        { [pair] }
+    Self.EmitExprToX0(AStmt.PtrExpr);
+    EmitPushX0();                                  { [pair][ptr] }
+    if TProceduralTypeDesc(AStmt.BaseTy).IsReference then
+    begin
+      Self.Emit(#9'ldr x0, [x0, #8]');
+      EmitCallSym('_ClassRelease');
+    end;
+    Self.Emit(#9'ldr x9, [sp]');
+    Self.Emit(#9'ldp x0, x1, [sp, #16]');
+    Self.Emit(#9'stp x0, x1, [x9]');
+    Self.Emit(#9'add sp, sp, #32');
+    Exit;
+  end;
   if AStmt.BaseTy.Kind in [tyDouble, tySingle] then
   begin
     Self.EmitExprToD0OrConvert(AStmt.ValExpr);
@@ -13836,6 +13935,7 @@ var
   RecSaved: Boolean;
   NarrowFix: Boolean;
   JTmp: string;
+  CTmp: string;
   JNB: Integer;
   IndSlot: string;
   IntfT: TTypeDesc;
@@ -14488,6 +14588,14 @@ begin
             address -- the value expression yielded the loaded word, and the
             callee's copy of the 16 bytes read through it crashed }
           EmitLValueAddrToX0(Arg)
+        else if EmitClosureResultToTemp(Arg, CTmp) then
+        begin
+          { a closure RETURNED by a call (Apply(MakeFn())): its frame scratch,
+            which the callee borrows; the scratch's +1 Env is released at
+            the statement end }
+          EmitSlotAddr('x0', CTmp);
+          DeferAggRelease(Arg.ResolvedType);
+        end
         else
           Self.EmitExprToX0(Arg);
         EmitPushX0();

@@ -151,6 +151,32 @@ type
       callee's 16-byte copy read through the loaded first WORD, a crash on
       both ISAs (P4-8) }
     procedure TestRun_ClosureArg_FromElementFieldAndDeref;
+    { a closure RETURNED by a call, passed straight on (Use(MakeFn()),
+      Use(Obj.Mk()), mixed with float args): x86-64 passed the Code word as
+      the pair's address (exit 255); arm64 refused the form }
+    procedure TestRun_ClosureCallResult_AsArgument;
+    { capturing a parameter wider than a word -- closure, static array
+      (by value and const), jumbo set, record (by value and const),
+      interface, Single, Double, plain procedural.  x86-64 copied one word
+      (an interface closure dispatched through a nil itab; a captured
+      closure param was 'Undeclared function'); arm64 refused them all }
+    procedure TestRun_Capture_WideParameters;
+    { closure stores into a var param and into a captured variable
+      (F := MakeFn() inside a closure, F() outside it) }
+    procedure TestRun_ClosureStore_VarParamAndCapturedTargets;
+    { F := MakeFn() over a live closure releases the old Env -- x86-64
+      zeroed it first, leaking its captures, and F := Wrap(F) passed Wrap
+      a nil F (exit 139) }
+    procedure TestRun_ClosureReassignFromCall_ReleasesOldEnv;
+    { P^ := V through a ^closure (call, var, literal, self, nil) and calls
+      through an element / dereference / temporary receiver in expression
+      position (BUG-20261013-closure-pointer-write,
+      BUG-20261013-call-through-element-expr) }
+    procedure TestRun_ClosurePointerWrite_AndExprCallForms;
+    { block-scoped interface / closure / managed-record variables in a
+      loop: each execution releases the previous value (x86-64 leaked all
+      but the last; arm64 refused the declaration) }
+    procedure TestRun_BlockVar_ManagedAggregatesPerIteration;
   end;
 
 implementation
@@ -2233,6 +2259,225 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertLeakFreeOnAll(Src, 'v3 v4 v5 v6 v6 v7');
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureCallResult_AsArgument;
+const
+  Src = '''
+    program CallArgs;
+    type
+      TF = reference to function: Integer;
+      TOb = class
+        N: Integer;
+        function Mk: TF;
+      end;
+    function TOb.Mk: TF; begin Result := function: Integer begin Result := N end end;
+    function Plain: TF; begin Result := function: Integer begin Result := 3 end end;
+    function Cap(K: Integer): TF; begin Result := function: Integer begin Result := K end end;
+    function Use(F: TF): Integer; begin Result := F() end;
+    function Use3(A: Integer; F: TF; B: Double): Integer; begin Result := A + F() + Trunc(B) end;
+    procedure Run;
+    var O: TOb;
+    begin
+      O := TOb.Create();
+      O.N := 4;
+      WriteLn('arg ', Use(Plain()), ' ', Use(Cap(6)), ' ', Use(O.Mk()), ' ',
+        Use3(1, Cap(6), 2.5));
+      O.Free();
+    end;
+    begin
+      Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 'arg 3 6 4 9');
+end;
+
+procedure TE2EAnonMethodTests.TestRun_Capture_WideParameters;
+const
+  Src = '''
+    program WideCaps;
+    uses SysUtils;
+    type
+      TF = reference to function: Integer;
+      TA = array[0..2] of string;
+      TBig = set of 0..99;
+      TRec = record A, B: Integer; S: string; end;
+      IThing = interface function Get: Integer; end;
+      TThing = class(TObject, IThing) function Get: Integer; end;
+      TPlain = function(X: Integer): Integer;
+    function TThing.Get: Integer; begin Result := 42 end;
+    function Dbl(X: Integer): Integer; begin Result := X * 2 end;
+    function Cap(K: Integer): TF; begin Result := function: Integer begin Result := K end end;
+    function CapFn(G: TF): TF; begin Result := function: Integer begin Result := G() + 100 end end;
+    function CapArr(A: TA): TF; begin Result := function: Integer begin Result := Length(A[0]) + Length(A[2]) end end;
+    function CapCArr(const A: TA): TF; begin Result := function: Integer begin Result := Length(A[1]) end end;
+    function CapSet(S: TBig): TF; begin Result := function: Integer begin if 77 in S then Result := 1 else Result := 0 end end;
+    function CapRec(R: TRec): TF; begin Result := function: Integer begin Result := R.A + R.B + Length(R.S) end end;
+    function CapCRec(const R: TRec): TF; begin Result := function: Integer begin Result := R.A * 10 + Length(R.S) end end;
+    function CapIntf(I: IThing): TF; begin Result := function: Integer begin Result := I.Get() end end;
+    function CapSingle(S: Single): TF; begin Result := function: Integer begin Result := Trunc(S * 10) end end;
+    function CapDouble(S: Double): TF; begin Result := function: Integer begin Result := Trunc(S * 10) end end;
+    function CapPlain(P: TPlain): TF; begin Result := function: Integer begin Result := P(21) end end;
+    procedure Run;
+    var F: TF; A: TA; S: TBig; R: TRec; T: IThing; Line: string;
+    begin
+      F := CapFn(Cap(1)); Line := IntToStr(F());
+      A[0] := 'ab'; A[1] := 'xyz'; A[2] := 'c';
+      F := CapArr(A); A[0] := ''; Line := Line + ' ' + IntToStr(F());
+      F := CapCArr(A); Line := Line + ' ' + IntToStr(F());
+      S := [3, 77]; F := CapSet(S); S := []; Line := Line + ' ' + IntToStr(F());
+      R.A := 1; R.B := 2; R.S := 'abcd'; F := CapRec(R); R.S := ''; Line := Line + ' ' + IntToStr(F());
+      R.S := 'zz'; F := CapCRec(R); R.S := ''; Line := Line + ' ' + IntToStr(F());
+      T := TThing.Create(); F := CapIntf(T); T := nil; Line := Line + ' ' + IntToStr(F());
+      F := CapSingle(1.5); Line := Line + ' ' + IntToStr(F());
+      F := CapDouble(2.5); Line := Line + ' ' + IntToStr(F());
+      F := CapPlain(@Dbl); Line := Line + ' ' + IntToStr(F());
+      WriteLn('caps ', Line);
+    end;
+    begin
+      Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 'caps 101 3 3 1 7 12 42 15 25 42');
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureStore_VarParamAndCapturedTargets;
+const
+  Src = '''
+    program Targets;
+    type
+      TF = reference to function: Integer;
+      TPI = reference to procedure(X: Integer);
+    function Cap(K: Integer): TF; begin Result := function: Integer begin Result := K end end;
+    procedure SetLit(var F: TF); begin F := function: Integer begin Result := 9 end end;
+    procedure SetCall(var F: TF); begin F := Cap(10) end;
+    procedure SetNil(var F: TF); begin F := nil end;
+    procedure Run;
+    var F, G: TF; P: TPI;
+    begin
+      SetLit(F); Write('var ', F());
+      SetCall(F); Write(' ', F());
+      SetNil(F); Write(' ', Assigned(F));
+      P := procedure(X: Integer) begin G := Cap(X) end;
+      P(5);
+      WriteLn(' captured ', G());
+    end;
+    begin
+      Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 'var 9 10 False captured 5');
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosureReassignFromCall_ReleasesOldEnv;
+const
+  Src = '''
+    program Reassign;
+    type
+      TF = reference to function: Integer;
+      TOb = class N: Integer; end;
+    function CapO(O: TOb): TF; begin Result := function: Integer begin Result := O.N end end;
+    function Wrap(G: TF): TF; begin Result := function: Integer begin Result := G() * 2 end end;
+    procedure Run;
+    var F: TF; O: TOb;
+    begin
+      O := TOb.Create(); O.N := 1;
+      F := CapO(O);
+      O := TOb.Create(); O.N := 2;
+      F := CapO(O);
+      O := nil;
+      F := Wrap(F);
+      WriteLn('re ', F());
+    end;
+    begin
+      Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 're 4');
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ClosurePointerWrite_AndExprCallForms;
+const
+  Src = '''
+    program PtrForms;
+    type
+      TF = reference to function: Integer;
+      PF = ^TF;
+      TOb = class
+        N: Integer;
+        function Mk: TF;
+      end;
+    function TOb.Mk: TF; begin Result := function: Integer begin Result := N end end;
+    function Cap(K: Integer): TF; begin Result := function: Integer begin Result := K end end;
+    function CapO(O: TOb): TF; begin Result := function: Integer begin Result := O.N + 1 end end;
+    function MkOb: TOb; begin Result := TOb.Create(); Result.N := 13 end;
+    procedure Run;
+    var F, G: TF; P: PF; L: array[0..1] of TF; D: array of TF; O: TOb;
+    begin
+      P := @F;
+      P^ := Cap(4); Write('p ', F());
+      O := TOb.Create(); O.N := 10;
+      P^ := CapO(O); O := nil; Write(' ', F(), ' ', P^());
+      G := Cap(9); P^ := G; Write(' ', F());
+      P^ := function: Integer begin Result := 77 end; Write(' ', P^());
+      P^ := P^; Write(' ', F());
+      P^ := nil; Write(' ', Assigned(F));
+      L[0] := CapO(TOb.Create()); Write(' e ', L[0]());
+      SetLength(D, 1); D[0] := Cap(6); Write(' ', D[0]());
+      F := MkOb().Mk(); WriteLn(' t ', F());
+    end;
+    begin
+      Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 'p 4 11 11 9 77 77 False e 1 6 t 13');
+end;
+
+procedure TE2EAnonMethodTests.TestRun_BlockVar_ManagedAggregatesPerIteration;
+const
+  Src = '''
+    program BlockVars;
+    uses SysUtils;
+    type
+      TF = reference to function: Integer;
+      IThing = interface function Get: Integer; end;
+      TThing = class(TObject, IThing) N: Integer; function Get: Integer; end;
+      TRec = record S: string; N: Integer; end;
+    function TThing.Get: Integer; begin Result := N end;
+    function Cap(K: Integer): TF; begin Result := function: Integer begin Result := K end end;
+    procedure Run;
+    var I, Sum: Integer; Fs: array[0..2] of TF;
+    begin
+      Sum := 0;
+      for I := 0 to 2 do
+      begin
+        var G: TF := Cap(I * 10);
+        var T: IThing := TThing.Create();
+        var R: TRec;
+        R.S := 'x' + IntToStr(I); R.N := I;
+        Sum := Sum + G() + Length(R.S) + R.N + T.Get();
+        var J: Integer := I;
+        Fs[I] := function: Integer begin Result := J * 100 end;
+      end;
+      WriteLn('blockvars ', Sum, ' ', Fs[0](), ' ', Fs[2]());
+    end;
+    begin
+      Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 'blockvars 39 0 200');
 end;
 
 initialization

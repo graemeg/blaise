@@ -25,7 +25,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TAnonMethodTests = class(TTestCase)
@@ -56,7 +56,30 @@ type
     procedure TestSemantic_Phase6_GenericRefAlias_InstantiatesAtInteger;
     procedure TestSemantic_Phase6_GenericRefAlias_InstantiatesAtString;
 
+    { A call through a captured closure PARAMETER inside an anonymous
+      method (G() in function(...) begin Result := G() end) was
+      'Undeclared function': the capture walker runs before the body is
+      analysed, so it never saw the call as a use of G. }
+    procedure TestSemantic_CallThroughCapturedClosureParam_Accepted;
+
     { Codegen }
+    { Use(MakeFn()): the closure a call returns lands in a per-site scratch
+      whose ADDRESS is the argument; x86-64 passed the Code word as the
+      pair's address (a crash), arm64 refused the form. }
+    procedure TestCodegen_ClosureCallResultArg_PassesScratchAddress;
+    { an interface parameter captured by an anonymous method: both 8-byte
+      halves into the env, plus the env's own reference; x86-64 copied the
+      obj word only (the closure dispatched through a nil itab), arm64
+      refused the form }
+    procedure TestCodegen_CapturedIntfParam_CopiesBothHalves;
+    { F := MakeFn() over a live closure: the call fills a scratch, the pair
+      moves in and the old Env is released after the store; x86-64 zeroed
+      the target first, leaking the old Env (and handing F := Wrap(F) a nil
+      F) }
+    procedure TestCodegen_ClosureReassignFromCall_ReleasesOldEnv;
+    { F() for an env-hoisted F (assigned inside a closure) calls through
+      the capture pointer, not the declaring frame's idle slot }
+    procedure TestCodegen_CallThroughEnvHoistedClosure_UsesCapture;
 
     { End-to-end }
     { Phase 9a — terse '->' lambdas (desugared to TAnonMethodExpr). }
@@ -812,6 +835,129 @@ begin
     never inferred a pending lambda from the 'reference to' param.  They now
     share AnalyseProcTypeCallArgs with the qualified arms. }
   AnalyseSrc(SrcArrowProcTypeCalls).Free()
+end;
+
+procedure TAnonMethodTests.TestSemantic_CallThroughCapturedClosureParam_Accepted;
+const
+  Src = '''
+    program Prg;
+    type
+      TF = reference to function: Integer;
+    function Wrap(G: TF): TF;
+    begin
+      Result := function: Integer begin Result := G() + 100 end
+    end;
+    begin
+    end.
+    ''';
+var
+  Prog: TProgram;
+  I: Integer;
+  MD: TMethodDecl;
+  Found: Boolean;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    Found := False;
+    for I := 0 to Prog.Block.ProcDecls.Count - 1 do
+    begin
+      MD := TMethodDecl(Prog.Block.ProcDecls.Items[I]);
+      if SameText(MD.Name, 'Wrap') and (MD.EnvCaptured <> nil) and
+         (MD.EnvCaptured.IndexOf('G') >= 0) then
+        Found := True;
+    end;
+    AssertTrue('G is promoted into Wrap''s closure env', Found);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TAnonMethodTests.TestCodegen_ClosureCallResultArg_PassesScratchAddress;
+const
+  Src = '''
+    program Prg;
+    type TF = reference to function: Integer;
+    function Plain: TF; begin Result := function: Integer begin Result := 3 end end;
+    function Use(E: TF): Integer; begin Result := E() end;
+    begin
+      WriteLn(Use(Plain()))
+    end.
+    ''';
+begin
+  AssertEquals('the result scratch is the argument, released at statement end', '',
+    AsmMissing(Src,
+      #9'movq %rax, _pendrel_0(%rip)'#10#9'movq %rax, %rdi'#10#9'callq Use',
+      #9'bl _Plain'#10#9'sub x0, x29, #'));
+end;
+
+procedure TAnonMethodTests.TestCodegen_CapturedIntfParam_CopiesBothHalves;
+const
+  Src = '''
+    program Prg;
+    type
+      TF = reference to function: Integer;
+      IThing = interface function Get: Integer; end;
+    function CapI(I: IThing): TF;
+    begin
+      Result := function: Integer begin Result := I.Get() end
+    end;
+    begin
+    end.
+    ''';
+begin
+  AssertEquals('16 bytes copied, then the env retains the obj', '',
+    AsmMissing(Src,
+      #9'movq $16, %rdx'#10#9'callq memcpy'#10#9'pushq %rbx'#10 +
+        #9'movq -16(%rbp), %rbx'#10#9'movq (%rbx), %rdi',
+      #9'bl _memcpy'#10#9'str x19, [sp, #-16]!'#10 +
+        #9'ldur x19, [x29, #-16]'#10#9'ldr x0, [x19, #0]'#10#9'bl __ClassAddRef'));
+end;
+
+procedure TAnonMethodTests.TestCodegen_ClosureReassignFromCall_ReleasesOldEnv;
+const
+  Src = '''
+    program Prg;
+    type TF = reference to function: Integer;
+    function Cap(K: Integer): TF; begin Result := function: Integer begin Result := K end end;
+    procedure Run;
+    var F: TF;
+    begin
+      F := Cap(1);
+      F := Cap(2);
+      WriteLn(F())
+    end;
+    begin Run() end.
+    ''';
+begin
+  AssertEquals('the old Env is kept aside and released after the store', '',
+    AsmMissing(Src,
+      #9'movq %rax, 8(%rcx)'#10#9'addq $8, %rsp'#10#9'popq %rdi'#10 +
+        #9'callq _ClassRelease',
+      #9'bl _Cap'#10#9'sub x9, x29, #16'#10#9'ldr x0, [x9, #8]'#10#9'bl __ClassRelease'));
+end;
+
+procedure TAnonMethodTests.TestCodegen_CallThroughEnvHoistedClosure_UsesCapture;
+const
+  Src = '''
+    program Prg;
+    type
+      TF = reference to function: Integer;
+      TP = reference to procedure(X: Integer);
+    function Cap(K: Integer): TF; begin Result := function: Integer begin Result := K end end;
+    procedure Run;
+    var F: TF; P: TP;
+    begin
+      P := procedure(X: Integer) begin F := Cap(X) end;
+      P(5);
+      WriteLn(F())
+    end;
+    begin Run() end.
+    ''';
+begin
+  AssertEquals('F() loads the _cap_F pointer, not the frame slot', '',
+    AsmMissing(Src,
+      #9'movq -16(%rbp), %rbx'#10#9'leaq (%rbx), %r11',
+      #9'ldur x9, [x29, #-16]'#10#9'mov x10, x9'));
 end;
 
 initialization

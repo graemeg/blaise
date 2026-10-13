@@ -9646,9 +9646,14 @@ begin
             MaybeCaptureName(ADecl, OuterVars, 'Self');
           { a call THROUGH an outer procedural variable (LM(), VC()) uses
             that variable: it was never captured, so the nested routine
-            called through a slot of the same name it did not have }
-          if TProcCall(CurStmt).IsIndirectCall then
-            MaybeCaptureName(ADecl, OuterVars, TProcCall(CurStmt).Name);
+            called through a slot of the same name it did not have.  Not
+            gated on IsIndirectCall: an anonymous method's body is walked
+            BEFORE it is analysed, so the flag is still unset there (G()
+            on a captured closure param was 'Undeclared function').  The
+            OuterVars filter admits only enclosing variables, and a
+            variable shadows any routine of its name, so a call naming one
+            is always a call through it. }
+          MaybeCaptureName(ADecl, OuterVars, TProcCall(CurStmt).Name);
           { A call to a SIBLING nested routine forwards the callee's captured
             outer variables by address, so the CALLER must capture them too —
             even when its own body never references them (BUG-031).  Only
@@ -9813,8 +9818,7 @@ begin
           if TFuncCallExpr(CurExpr).IsImplicitSelfMethod then
             MaybeCaptureName(ADecl, OuterVars, 'Self');
           { a call through an outer procedural variable -- see TProcCall }
-          if TFuncCallExpr(CurExpr).IsIndirectCall then
-            MaybeCaptureName(ADecl, OuterVars, TFuncCallExpr(CurExpr).Name);
+          MaybeCaptureName(ADecl, OuterVars, TFuncCallExpr(CurExpr).Name);
           { Sibling nested-routine call: fold the callee's captures into the
             caller (BUG-031) — see the TProcCall branch. }
           if (TFuncCallExpr(CurExpr).ResolvedDecl <> nil) and
