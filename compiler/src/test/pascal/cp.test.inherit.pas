@@ -73,6 +73,12 @@ type
     procedure TestSemantic_InheritsFrom_OnPointerVar_OK;
     procedure TestSemantic_InheritsFrom_OnClassInstance_OK;
     procedure TestSemantic_InheritsFrom_ReturnsBoolean;
+    { TInterfacedObject: Blaise has none, since every class is reference-
+      counted, so class(TInterfacedObject, IFoo) says to derive from TObject
+      instead of a bare "Unknown parent class" -- unless the program declares
+      its own TInterfacedObject, which is then an ordinary parent }
+    procedure TestSemantic_TInterfacedObjectParent_NamesTheRule;
+    procedure TestSemantic_UserTInterfacedObject_IsOrdinaryParent;
   end;
 
 implementation
@@ -567,6 +573,55 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TInheritTests.TestSemantic_TInterfacedObjectParent_NamesTheRule;
+var
+  Msg: string;
+begin
+  Msg := SemanticError(
+    '''
+      program P;
+      type
+        IFoo = interface
+          procedure Hi();
+        end;
+        TFoo = class(TInterfacedObject, IFoo)
+          procedure Hi();
+        end;
+      procedure TFoo.Hi();
+      begin
+      end;
+      begin
+      end.
+      ''');
+  AssertTrue('explains why there is no TInterfacedObject, got: ' + Msg,
+    Pos('every Blaise class is reference-counted', Msg) >= 0);
+  AssertTrue('and shows the Blaise form, got: ' + Msg,
+    Pos('class(TObject, IFoo)', Msg) >= 0);
+end;
+
+procedure TInheritTests.TestSemantic_UserTInterfacedObject_IsOrdinaryParent;
+begin
+  AssertEquals('a declared TInterfacedObject is an ordinary parent', '',
+    SemanticError(
+      '''
+        program P;
+        type
+          IFoo = interface
+            procedure Hi();
+          end;
+          TInterfacedObject = class
+          end;
+          TFoo = class(TInterfacedObject, IFoo)
+            procedure Hi();
+          end;
+        procedure TFoo.Hi();
+        begin
+        end;
+        begin
+        end.
+        '''));
 end;
 
 initialization

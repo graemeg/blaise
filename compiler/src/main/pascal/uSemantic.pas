@@ -7528,6 +7528,7 @@ var
   ParentRT:   TRecordTypeDesc;
   ParentSym:  TSymbol;
   GenParentDesc: TTypeDesc;
+  IntfList:   string;
   FldType:    TTypeDesc;
   FldName:    string;
   Sym:        TSymbol;
@@ -8109,6 +8110,26 @@ begin
           end
           else
           begin
+            { TInterfacedObject is the FPC/Delphi base that adds reference
+              counting; every Blaise class has it, so there is no such class
+              to derive from.  Say so, with the class(TObject, ...) form
+              (recognise, reject, explain -- language-rationale.adoc).  A
+              program that declares its own TInterfacedObject resolves it
+              above and never gets here. }
+            if (GenParentDesc = nil) and
+               SameText(TClassTypeDef(TD.Def).ParentName, 'TInterfacedObject') then
+            begin
+              IntfList := 'TObject';
+              for K := 0 to TClassTypeDef(TD.Def).ImplementsNames.Count - 1 do
+                IntfList := IntfList + ', ' +
+                  TClassTypeDef(TD.Def).ImplementsNames.Strings[K];
+              SemanticError(Format(
+                'Unknown parent class ''TInterfacedObject'' for ''%s'': every ' +
+                'Blaise class is reference-counted, so there is no separate ' +
+                'interfaced base class; derive from TObject and list the ' +
+                'interfaces: class(%s)', [TD.Name, IntfList]),
+                TD.Line, TD.Col);
+            end;
             if (GenParentDesc = nil) or not (GenParentDesc is TRecordTypeDesc) then
               SemanticError(
                 Format('Unknown parent class ''%s'' for ''%s''',

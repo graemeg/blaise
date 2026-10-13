@@ -18,7 +18,22 @@ type
   TParserTests = class(TTestCase)
   private
     function ParseSource(const ASrc: string): TProgram;
+    { the EParseError message for ASrc, or '' when it parses }
+    function ParseErrorMsg(const ASrc: string): string;
   published
+    { FPC/Delphi constructs Blaise deliberately omits are recognised and
+      rejected with the Blaise form ("recognise, reject, explain";
+      language-rationale.adoc).  They used to fail with an unrelated
+      message: goto 999 -> "Bare reference to 'goto' requires ()",
+      label 999; -> "Expected 'begin'", specialize TList<..> -> "Expected
+      ';'", generic TBox<T> -> "Expected '='".  goto, label, generic and
+      specialize remain ordinary identifiers. }
+    procedure TestGoto_NamesTheRule;
+    procedure TestLabel_NamesTheRule;
+    procedure TestGotoAndLabel_AsIdentifiers_StillParse;
+    procedure TestSpecialize_NamesTheRule;
+    procedure TestGeneric_NamesTheRule;
+    procedure TestGenericAndSpecialize_AsIdentifiers_StillParse;
     procedure TestParse_WriteFieldWidth_BecomesWriteFmt;
     procedure TestParse_WriteFieldWidth_InExpressionCallForm;
     procedure TestParse_ColonOutsideWrite_IsAnError;
@@ -962,6 +977,100 @@ begin
       Raised := True;
   end;
   AssertTrue('Foo(1:2) does not parse', Raised);
+end;
+
+function TParserTests.ParseErrorMsg(const ASrc: string): string;
+begin
+  Result := '';
+  try
+    ParseSource(ASrc).Free();
+  except
+    on E: EParseError do
+      Result := E.Message;
+  end;
+end;
+
+procedure TParserTests.TestGoto_NamesTheRule;
+var
+  Msg: string;
+begin
+  Msg := ParseErrorMsg('program P; begin goto 999; end.');
+  AssertTrue('goto <number> names the rule, got: ' + Msg,
+    Pos('''goto'' is not supported in Blaise', Msg) >= 0);
+  AssertTrue('and the replacement, got: ' + Msg, Pos('Exit', Msg) >= 0);
+  Msg := ParseErrorMsg(
+    'program P; procedure F(); begin goto Done; end; begin end.');
+  AssertTrue('goto <identifier> names the rule, got: ' + Msg,
+    Pos('''goto'' is not supported in Blaise', Msg) >= 0);
+end;
+
+procedure TParserTests.TestLabel_NamesTheRule;
+var
+  Msg: string;
+begin
+  Msg := ParseErrorMsg(
+    'program P; function F(): Boolean; label 999; begin Result := True; end; ' +
+    'begin end.');
+  AssertTrue('a routine''s label section names the rule, got: ' + Msg,
+    Pos('''label'' declarations are not supported in Blaise', Msg) >= 0);
+  AssertTrue('and the replacement, got: ' + Msg, Pos('Exit', Msg) >= 0);
+  Msg := ParseErrorMsg('program P; label 1, Done; begin end.');
+  AssertTrue('a program''s label section names the rule, got: ' + Msg,
+    Pos('''label'' declarations are not supported in Blaise', Msg) >= 0);
+end;
+
+procedure TParserTests.TestGotoAndLabel_AsIdentifiers_StillParse;
+begin
+  AssertEquals('goto and label are ordinary identifiers', '',
+    ParseErrorMsg(
+      'program P; var label, goto: Integer; ' +
+      'procedure label2(goto: Integer); begin end; ' +
+      'begin label := 1; goto := label + 1; label2(goto); end.'));
+end;
+
+procedure TParserTests.TestSpecialize_NamesTheRule;
+var
+  Msg: string;
+begin
+  Msg := ParseErrorMsg(
+    'program P; var L: specialize TList<Integer>; begin end.');
+  AssertTrue('specialize in a type names the rule, got: ' + Msg,
+    Pos('''specialize'' is not needed in Blaise', Msg) >= 0);
+  AssertTrue('and shows the Blaise spelling, got: ' + Msg,
+    Pos('TList<...>', Msg) >= 0);
+  Msg := ParseErrorMsg(
+    'program P; var L: TObject; begin L := specialize TList<Integer>.Create(); end.');
+  AssertTrue('specialize in an expression names the rule, got: ' + Msg,
+    Pos('''specialize'' is not needed in Blaise', Msg) >= 0);
+  Msg := ParseErrorMsg(
+    'program P; type TIntList = specialize TList<Integer>; begin end.');
+  AssertTrue('specialize in a type alias names the rule, got: ' + Msg,
+    Pos('''specialize'' is not needed in Blaise', Msg) >= 0);
+end;
+
+procedure TParserTests.TestGeneric_NamesTheRule;
+var
+  Msg: string;
+begin
+  Msg := ParseErrorMsg(
+    'program P; type generic TBox<T> = class V: T; end; begin end.');
+  AssertTrue('generic before a type names the rule, got: ' + Msg,
+    Pos('''generic'' is not needed in Blaise', Msg) >= 0);
+  AssertTrue('and shows the Blaise spelling, got: ' + Msg,
+    Pos('TBox<T> = ', Msg) >= 0);
+  Msg := ParseErrorMsg(
+    'program P; generic function Id<T>(X: T): T; begin Result := X; end; ' +
+    'begin end.');
+  AssertTrue('generic before a routine names the rule, got: ' + Msg,
+    Pos('''generic'' is not needed in Blaise', Msg) >= 0);
+end;
+
+procedure TParserTests.TestGenericAndSpecialize_AsIdentifiers_StillParse;
+begin
+  AssertEquals('generic and specialize are ordinary identifiers', '',
+    ParseErrorMsg(
+      'program P; type generic = Integer; var specialize: generic; ' +
+      'begin specialize := 1; end.'));
 end;
 
 initialization

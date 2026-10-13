@@ -89,6 +89,8 @@ type
     function  PeekKind(): TTokenKind;
     function  PeekKind2(): TTokenKind;  { two tokens ahead }
     procedure Expect(AKind: TTokenKind);
+    { an FPC/Delphi construct Blaise omits: raise its targeted message }
+    procedure RejectForeignConstruct;
     function  Check(AKind: TTokenKind): Boolean;
     function  CheckUnitNamePart: Boolean;
     function  ParseTypeName: string;  { reads Ident optionally followed by '<' ArgList '>' }
@@ -720,6 +722,7 @@ begin
   if not Check(tkIdent) then
     raise EParseError.Create(Format('Expected type name at line %d col %d in %s',
       [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
+  Self.RejectForeignConstruct();  { specialize TList<T> }
   Result := FCurrent.Value;
   Advance();
   { Qualified type name: 'UnitName.TypeName'.  The unit qualifier may itself
@@ -851,12 +854,57 @@ begin
   Result := Result + ')';
 end;
 
+{ "Recognise, reject, explain" (language-rationale.adoc): an FPC or Delphi
+  construct Blaise deliberately omits is reported as what it is, with the
+  Blaise form, instead of the unrelated error the parser would otherwise
+  reach.  goto, label, generic and specialize are ordinary identifiers in
+  Blaise, so each fires only on a following token no identifier use allows:
+
+    goto <number|identifier>         label <number|identifier>
+    specialize <identifier>          generic <identifier|procedure|function>
+
+  Called where the keyword would otherwise be consumed as a name, and from
+  Expect, so a construct met in a declaration section is caught too. }
+procedure TParser.RejectForeignConstruct;
+var
+  Kw, Where: string;
+begin
+  if not Check(tkIdent) then
+    Exit;
+  Kw := FCurrent.Value;
+  Where := Format(' at line %d col %d in %s',
+    [FCurrent.Line, FCurrent.Col, FLexer.Filename]);
+  if SameText(Kw, 'goto') and (PeekKind() in [tkIntLit, tkIdent]) then
+    raise EParseError.Create('''goto'' is not supported in Blaise: use Exit ' +
+      '(or Exit(Value)) to leave a routine, Break or Continue in a loop, and ' +
+      'try ... finally for clean-up' + Where +
+      ' (see language-rationale.adoc, "goto and label")');
+  if SameText(Kw, 'label') and (PeekKind() in [tkIntLit, tkIdent]) then
+    raise EParseError.Create('''label'' declarations are not supported in ' +
+      'Blaise, because there is no goto: use Exit (or Exit(Value)) to leave a ' +
+      'routine, Break or Continue in a loop' + Where +
+      ' (see language-rationale.adoc, "goto and label")');
+  if SameText(Kw, 'specialize') and (PeekKind() = tkIdent) then
+    raise EParseError.Create(Format('''specialize'' is not needed in Blaise: ' +
+      'generics use the Delphi syntax, so write ''%s<...>'' without the ' +
+      'keyword', [PeekValueAt(1)]) + Where);
+  if SameText(Kw, 'generic') and (PeekKind() = tkIdent) then
+    raise EParseError.Create(Format('''generic'' is not needed in Blaise: ' +
+      'generics use the Delphi syntax, so declare ''%s<T> = ...'' without the ' +
+      'keyword', [PeekValueAt(1)]) + Where);
+  if SameText(Kw, 'generic') and (PeekKind() in [tkFunction, tkProcedure]) then
+    raise EParseError.Create('''generic'' is not needed in Blaise: a generic ' +
+      'routine is declared without the keyword, as in ' +
+      '''function Name<T>(...)''' + Where);
+end;
+
 procedure TParser.Expect(AKind: TTokenKind);
 var
   gotName, gotDetail: string;
 begin
   if FCurrent.Kind <> AKind then
   begin
+    Self.RejectForeignConstruct();
     gotName := TokenKindName(FCurrent.Kind);
     if FCurrent.Value <> gotName then
       gotDetail := ' (''' + FCurrent.Value + ''')'
@@ -1125,6 +1173,7 @@ begin
     if not Check(tkIdent) then
       raise EParseError.Create(Format('Expected type name at line %d col %d in %s',
         [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
+    Self.RejectForeignConstruct();  { generic TBox<T> = ... }
     TD.Name := FCurrent.Value;
     Advance();
     { Check for generic type parameters: TBox<T>, TPair<K,V>, IFoo<T> }
@@ -3746,6 +3795,7 @@ var
   ExitS:       TExitStmt;
 begin
   Result := nil;
+  Self.RejectForeignConstruct();
 
   if Check(tkEnd) or Check(tkEOF) or Check(tkSemicolon) or Check(tkElse) then
     Exit;
@@ -5997,6 +6047,7 @@ var
   ParseIntFlag: Boolean;
   InhNode:      TInheritedCallExpr;
 begin
+  Self.RejectForeignConstruct();  { specialize TList<T>.Create() }
   { Terse lambda (Phase 9a): 'x -> ...' or '(params) -> ...' — must be
     detected before the plain ident / parenthesised-expression arms. }
   if ArrowLambdaAhead() then

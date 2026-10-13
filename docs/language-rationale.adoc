@@ -7300,3 +7300,83 @@ legacy code the common case is a jump to the end of a routine, which `Exit` or
   because even a jump within one routine can cross a nested `try` section or
   the scope of a managed variable.  Making that safe needs the same analysis
   as general `goto`, for a construct the structured forms already cover.
+
+== FPC and Delphi Constructs Blaise Omits — Recognise, Reject, Explain
+
+=== Decision
+
+Blaise does not accept syntax it does not support, not even by quietly
+ignoring it for compatibility.  Where an FPC or Delphi construct is
+deliberately left out of the language, the compiler recognises it and rejects
+it with a message that says it is not part of Blaise and gives the Blaise form.
+
+[cols="2,3", options="header"]
+|===
+| Construct | Message points to
+
+| `goto <label>`
+| `Exit` / `Exit(Value)`, `Break`, `Continue`, `try ... finally`
+  (see "`goto` and `label` — Not Supported")
+
+| `label <list>;`
+| the same: Blaise has no `goto`
+
+| `specialize TList<Integer>` (FPC `objfpc` mode)
+| `TList<Integer>`: generics use the Delphi syntax, without the keyword
+
+| `generic TBox<T> = ...`, `generic function F<T>(...)`
+| `TBox<T> = ...`, `function F<T>(...)`
+
+| `class(TInterfacedObject, IFoo)`
+| `class(TObject, IFoo)`: every Blaise class is reference-counted
+|===
+
+The keywords are ordinary identifiers in Blaise, so a variable named `label`,
+`goto`, `generic` or `specialize` keeps working.  Each message fires only on a
+following token that no identifier use allows: a number or identifier after
+`goto` or `label`, an identifier after `specialize`, and an identifier,
+`function` or `procedure` after `generic`.  A program that declares its own
+`TInterfacedObject` class gets an ordinary parent class, not the message.
+
+=== Rationale
+
+Accepting and ignoring a keyword (`specialize`, `generic`), or defining an
+empty `TInterfacedObject`, would make porting a little easier, but at a cost
+to the language:
+
+* *Two spellings of one construct.*  `specialize TList<Integer>` and
+  `TList<Integer>` would mean the same, and code written for Blaise would
+  carry a keyword that does nothing.  The generics section already chose the
+  Delphi spelling so that one rule covers the whole language.
+* *A reader is misled.*  Every token in a Blaise program should mean
+  something.  A `TInterfacedObject` alias would be worse than a keyword: in
+  FPC and Delphi it changes object lifetime (reference-counted, unlike a
+  manually freed `TObject`), and in Blaise there is no such difference to
+  express.
+* *There is no stopping point.*  Each ignored keyword invites the next
+  (`bitpacked`, `cvar`, mode switches), and the accepted syntax drifts away
+  from the documented grammar.
+
+Rejecting a construct with no explanation is the other failure: before these
+messages, `goto 999` reported "Bare reference to 'goto' requires () for a
+call" and `specialize TList<Integer>` reported "Expected ';' but got
+'identifier'".  A porter meets the error before any documentation, so the
+error has to carry the explanation.  Code that must build with both FPC and
+Blaise already has the right tool: conditional compilation
+(`{$IFDEF FPC}specialize{$ENDIF}`).
+
+The table is the place to add further constructs as porting reports
+identify them.  A whole-codebase report of the same constructs is the job of
+the planned migration analyser (`docs/design.adoc`, Phase 8), not of the
+compiler.
+
+=== Alternatives considered
+
+* *Accept and ignore `specialize` and `generic`*, as proposed in discussion
+  #230.  Rejected for the reasons above.
+* *Ship `TInterfacedObject` as an alias of `TObject` in the RTL.*  Rejected:
+  it would describe a lifetime model Blaise does not have.  The
+  class-ownership decision record in `docs/design.adoc` chose universal ARC
+  (Option A) over the `TInterfacedObject` model (Option B).  A porting
+  project that wants the name can declare
+  `TInterfacedObject = class end;` itself.
