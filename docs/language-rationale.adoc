@@ -7220,3 +7220,83 @@ lets a named procedural type use them, as in `procedure (P: ^Integer)` and
   FPC and Delphi exactly.  Rejected because it needs a separate, narrower
   type grammar for the same construct, and the wider form introduces nothing
   a named type does not already allow.
+
+== `goto` and `label` — Not Supported
+
+=== Decision
+
+Blaise does not support `goto` statements or `label` declarations, and will
+not add them.  `goto` and `label` are not reserved words in Blaise; they are
+ordinary identifiers.
+
+Every use has a structured replacement:
+
+[cols="1,2"]
+|===
+| Use of `goto` | Blaise form
+
+| Jump to the end of a routine (`goto 999` with `999:` before `end`)
+| `Exit`, or `Exit(Value)` in a function
+
+| Leave a loop, or skip to the next iteration
+| `Break`, `Continue`
+
+| Run clean-up code on every path out of a block
+| `try ... finally ... end`
+
+| Leave several nested loops at once
+| Move the loops into a nested routine and `Exit`, or test a flag in each
+  loop condition
+|===
+
+[source,pascal]
+----
+{ Coco/R CRS.pas -- before }
+function Comment: Boolean;
+label 999;
+begin
+  ...
+  if level = 0 then begin Comment := True; goto 999 end;
+  ...
+999:
+end;
+
+{ after }
+function Comment(): Boolean;
+begin
+  ...
+  if level = 0 then Exit(True);
+  ...
+end;
+----
+
+=== Rationale
+
+A goal of Blaise is to remove the language features that let a correct-looking
+program behave wrongly.  `goto` is one of the oldest of them.  A jump can enter
+or leave a block from any point, and in Blaise a block boundary does work that a
+jump would skip or repeat:
+
+* *ARC.*  Managed locals (strings, objects, interfaces, dynamic arrays,
+  closures) are released when control leaves their scope, and every
+  structured exit releases them on the way.  A jump out of a block would have
+  to perform those releases, and a jump into one would arrive at variables
+  that were never set up.
+* *`try`/`finally` and exceptions.*  Each protected block pushes an exception
+  frame, and `Exit`, `Break` and `Continue` already run the pending `finally`
+  sections in order.  A jump across a protected block would leave a stale
+  frame on the stack or skip a `finally` section.
+* *Reading the code.*  The structured forms say what the jump is for.  A
+  label number says nothing.
+
+FPC's `objfpc` mode, the mode closest to Blaise, already rejects `goto` unless
+`{$GOTO ON}` is given, so code written for it uses the structured forms.  In
+legacy code the common case is a jump to the end of a routine, which `Exit` or
+`Exit(Value)` replaces directly.
+
+=== Alternatives considered
+
+* *Support a restricted `goto` that stays within one routine.*  Rejected
+  because even a jump within one routine can cross a nested `try` section or
+  the scope of a managed variable.  Making that safe needs the same analysis
+  as general `goto`, for a construct the structured forms already cover.
