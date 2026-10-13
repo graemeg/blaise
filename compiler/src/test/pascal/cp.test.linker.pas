@@ -421,6 +421,14 @@ begin
     >15-char member rtl.platform.layout.linux.o — build the RTL objects from
     source and bundle them into a THROWAWAY .a with `ar` just for this test.
     `ar` is a test-time dependency only; the product/bootstrap no longer use it. }
+  { the ELF archive reader over HOST-built RTL objects bundled by the host's
+    ar: a macOS host builds Mach-O members and its ar writes BSD '#1/N'
+    long names, neither of which the ELF linker ever reads there }
+  if HostTarget().OS = osMacOS then
+  begin
+    Ignore('ELF archive reader: needs an ELF host (Mach-O objects, BSD ar)');
+    Exit;
+  end;
   Root     := ProjectRoot();
   Compiler := Root + 'compiler/target/blaise';
   if (not FileExists(Compiler))
@@ -1130,6 +1138,14 @@ begin
   end;
 
   AssertTrue('linked binary missing', FileExists(BinPath));
+  { the link runs on any host; RUNNING a static x86-64 ELF needs an x86-64
+    Linux or FreeBSD kernel (a macOS host refused it with exit 126) }
+  if (HostTarget().CPU <> cpuX86_64) or
+     not (HostTarget().OS in [osLinux, osFreeBSD]) then
+  begin
+    Ignore('running a static x86-64 ELF needs an x86-64 Linux/FreeBSD host');
+    Exit;
+  end;
   Rc := RunBin(BinPath, Output);
   AssertEquals('exit code from internally-linked binary', 7, Rc);
   AssertEquals('stdout from internally-linked binary',

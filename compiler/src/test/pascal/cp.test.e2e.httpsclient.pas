@@ -32,7 +32,7 @@ unit Cp.Test.E2E.HttpsClient;
 interface
 
 uses
-  SysUtils, process, blaise.testing, cp.test.e2e.base;
+  SysUtils, process, blaise.testing, cp.test.e2e.base, blaise.codegen.target;
 
 type
   TeHttpsClientE2ETests = class(TE2ETestCase)
@@ -139,6 +139,11 @@ begin
       P.Parameters.Add(Root + 'stdlib/src/main/pascal');
       P.Parameters.Add('--unit-path');
       P.Parameters.Add(Root + 'runtime/src/main/pascal');
+      if Self.OpenSslLibDir() <> '' then
+      begin
+        P.Parameters.Add('--lib-path');
+        P.Parameters.Add(Self.OpenSslLibDir());
+      end;
       P.Execute();
       repeat
         Chunk := P.ReadOutput();
@@ -175,6 +180,9 @@ var
 begin
   if not ToolPresent('cc', '--version') then begin Ignore('cc unavailable'); Exit; end;
   if not ToolPresent('openssl', 'version') then begin Ignore('openssl unavailable'); Exit; end;
+  { macOS ships the openssl CLI but no linkable libssl }
+  if (HostTarget().OS = osMacOS) and (Self.OpenSslLibDir() = '') then
+  begin Ignore('no linkable libssl (install a Homebrew OpenSSL)'); Exit; end;
   if not FileExists(Self.ProjectRoot() + 'compiler/target/blaise') then
   begin Ignore('compiler binary unavailable'); Exit; end;
   if not GenerateCert() then begin Ignore('cert generation failed'); Exit; end;

@@ -83,6 +83,10 @@ type
     procedure TestRun_StaticArrayExpr_ToOpenArray;
     procedure TestRun_StaticArrayParamsAndCalls_ToOpenArray;
     procedure TestRun_OpenArrayArgs_SpillToStack;
+    { owned transients (string, object) inside an open-array literal are
+      released after the call: x86-64 leaked every one, arm64 refused the
+      literal }
+    procedure TestRun_LiteralOwnedElements_ReleasedAfterCall;
   end;
 
 implementation
@@ -1126,6 +1130,39 @@ begin
   AssertRunsOnAll(Src,
     '31028' + #10 + '11828' + #10 + '104116' + #10 + '204616' + #10 +
     '8:ab0' + #10 + '16' + #10, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_LiteralOwnedElements_ReleasedAfterCall;
+const
+  Src = '''
+    program OALits;
+    uses SysUtils;
+    type TTag = class N: Integer; end;
+    function MkS(N: Integer): string; begin Result := 'f' + IntToStr(N) end;
+    function MkT(N: Integer): TTag; begin Result := TTag.Create(); Result.N := N end;
+    procedure Show(const AExe: string; const A: array of string; ATail: Integer);
+    var I: Integer; Line: string;
+    begin
+      Line := AExe;
+      for I := 0 to High(A) do Line := Line + ' ' + A[I];
+      WriteLn(Line, ' ', ATail)
+    end;
+    function SumTags(const A: array of TTag): Integer;
+    var I: Integer;
+    begin
+      Result := 0;
+      for I := 0 to High(A) do Result := Result + A[I].N
+    end;
+    var I: Integer;
+    begin
+      for I := 1 to 2 do
+        Show('gcc', ['-o', MkS(I), MkS(I * 10)], 7);
+      WriteLn('tags ', SumTags([MkT(1), MkT(2)]))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, 'gcc -o f2 f20 7');
 end;
 
 initialization

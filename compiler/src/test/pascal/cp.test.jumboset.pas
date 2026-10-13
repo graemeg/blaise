@@ -25,6 +25,10 @@ type
   TJumboSetTests = class(TTestCase)
   published
     procedure TestSmallSet_StillUsesRegister;
+    { s := V through a var jumbo-set param: the bitmap is copied into the
+      caller's storage the slot points at.  arm64 refused the parameter
+      ("var parameter of this type"). }
+    procedure TestCodegen_VarParam_CopiesIntoCallerStorage;
   end;
 
 implementation
@@ -77,6 +81,25 @@ begin
     AssertTrue(Target + ': small set does not call _SetUnion',
       Pos('_SetUnion', GenAsm(SmallSrc, Target)) < 0);
   end;
+end;
+
+procedure TJumboSetTests.TestCodegen_VarParam_CopiesIntoCallerStorage;
+const
+  Src = '''
+    program Prg;
+    type TB = 0..99; TBig = set of TB;
+    procedure Fill(var s: TBig); begin s := [5, 70] end;
+    var A: TBig;
+    begin
+      Fill(A);
+      WriteLn(70 in A)
+    end.
+    ''';
+begin
+  AssertEquals('memcpy into the address the var slot holds', '',
+    AsmMissing(Src,
+      #9'movq -32(%rbp), %rdi'#10#9'movq $32, %rdx'#10#9'callq memcpy',
+      #9'ldur x0, [x29, #-8]'#10#9'movz x2, #32'#10#9'bl _memcpy'));
 end;
 
 initialization

@@ -96,6 +96,10 @@ type
     procedure TestCodegen_OpenArrayArg_SpillsToStack;
     { An anonymous method cannot capture an open array (as in Delphi). }
     procedure TestSemantic_AnonCapture_OpenArray_Rejected;
+    { an owned transient element of an open-array literal (['a', Mk(1)]):
+      the literal borrows it, so it is released after the call.  x86-64
+      leaked it; arm64 refused the literal. }
+    procedure TestCodegen_LiteralOwnedElement_ReleasedAfterCall;
   end;
 
 implementation
@@ -685,6 +689,23 @@ begin
   end;
   AssertTrue('rejected with an open-array capture message: ' + Msg,
     Pos('Cannot capture open-array parameter', Msg) >= 0);
+end;
+
+procedure TOpenArrayTests.TestCodegen_LiteralOwnedElement_ReleasedAfterCall;
+const
+  Src = '''
+    program Prg;
+    procedure Show(const A: array of string); begin WriteLn(A[1]) end;
+    function Mk(N: Integer): string; begin Result := 'f' + IntToStr(N) end;
+    begin
+      Show(['a', Mk(1)])
+    end.
+    ''';
+begin
+  AssertEquals('the element is parked for a post-call release', '',
+    AsmMissing(Src,
+      #9'callq Mk'#10#9'movq %rax, _pendrel_0(%rip)',
+      #9'bl _Mk'#10#9'stur x0, [x29, #-'));
 end;
 
 initialization

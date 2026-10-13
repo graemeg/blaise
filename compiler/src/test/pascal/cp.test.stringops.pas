@@ -15,7 +15,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TStringOpsTests = class(TTestCase)
@@ -96,6 +96,10 @@ type
     procedure TestSemantic_High_StringArg_OK;
     procedure TestSemantic_Low_StringArg_ReturnsInteger;
     procedure TestSemantic_High_StringArg_ReturnsInteger;
+    { Delete(FS, I, N) on an implicit-Self string field (and any l-value):
+      the new string is stored through the field's ADDRESS.  arm64 refused
+      it ("load of variable 'FS'"). }
+    procedure TestCodegen_Delete_ImplicitSelfField_StoresThroughAddress;
   end;
 
 implementation
@@ -701,6 +705,23 @@ begin
     'program P;'          + LineEnding +
     'var S: string; I: Integer;' + LineEnding +
     'begin I := High(S) end.');
+end;
+
+procedure TStringOpsTests.TestCodegen_Delete_ImplicitSelfField_StoresThroughAddress;
+const
+  Src = '''
+    program Prg;
+    type TBox = class FS: string; procedure Trim2; end;
+    procedure TBox.Trim2; begin Delete(FS, 0, 2) end;
+    begin
+    end.
+    ''';
+begin
+  AssertEquals('the field''s address is parked across the call', '',
+    AsmMissing(Src,
+      #9'movq -8(%rbp), %rdx'#10#9'addq $8, %rdx'#10#9'pushq %rdx'#10 +
+        #9'movq (%rdx), %rdi'#10#9'callq _StringRelease',
+      #9'ldr x9, [sp]'#10#9'ldr x0, [x9]'#10#9'bl __StringDelete'));
 end;
 
 initialization

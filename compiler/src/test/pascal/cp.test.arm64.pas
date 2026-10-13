@@ -693,24 +693,25 @@ begin
   Raised := False;
   Msg := '';
   try
-    { A record-typed THREADVAR is the current stand-in for "a construct the
-      arm64 subset has not reached yet".  This has now been repointed twice —
-      it was a generic RECORD, then a JUMBO SET, and both now lower.  Repoint
-      it again rather than deleting it when this one lands too: the point of
-      the test is that a gap fails LOUDLY at compile time with a clear
-      file/line, never silently miscompiling. }
+    { A THREADVAR of a record with a MANAGED field is the current stand-in
+      for "a construct the arm64 subset has not reached yet".  This has now
+      been repointed three times -- it was a generic RECORD, then a JUMBO
+      SET, then an unmanaged record threadvar, and all of them now lower.
+      Repoint it again rather than deleting it when this one lands too: the
+      point of the test is that a gap fails LOUDLY at compile time with a
+      clear file/line, never silently miscompiling. }
     GenAsm(
       '''
       program P;
       type
         TR = record
-          X: Integer;
+          S: string;
         end;
       threadvar
         TV: TR;
       begin
-        TV.X := 1;
-        WriteLn(TV.X)
+        TV.S := 'a';
+        WriteLn(TV.S)
       end.
       ''', TargetArm64);
   except

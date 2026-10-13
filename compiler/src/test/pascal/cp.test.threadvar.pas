@@ -30,6 +30,9 @@ type
       (runtime.mem) and any code holding a pointer into a threadvar. }
     procedure TestCodegenNative_AddrOfThreadVar_UsesTls;
     procedure TestCodegenNative_AddrOfPlainGlobal_StaysRipRelative;
+    { an unmanaged RECORD threadvar: per-thread storage (Mach-O TLV / ELF
+      @tpoff) addressed for a field store.  arm64 refused the type. }
+    procedure TestCodegen_RecordThreadVar_FieldStoreThroughTls;
   end;
 
 implementation
@@ -224,6 +227,24 @@ begin
     Pos('leaq GV(%rip)', Asm_) >= 0);
   AssertTrue('@global takes no TLS path',
     Pos('GV@tpoff', Asm_) < 0);
+end;
+
+procedure TThreadVarTests.TestCodegen_RecordThreadVar_FieldStoreThroughTls;
+const
+  Src = '''
+    program Prg;
+    type TRec = record Tag: Integer; end;
+    threadvar TVR: TRec;
+    begin
+      TVR.Tag := 4;
+      WriteLn(TVR.Tag)
+    end.
+    ''';
+begin
+  AssertEquals('the field store goes through the thread-local address', '',
+    AsmMissing(Src,
+      #9'leaq TVR@tpoff(%rcx), %rcx'#10#9'popq %rax'#10#9'movl %eax, 0(%rcx)',
+      #9'mov x9, x0'#10#9'ldr x0, [sp], #16'#10#9'str w0, [x9, #0]'));
 end;
 
 initialization

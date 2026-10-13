@@ -5910,6 +5910,25 @@ begin
           Self.Emit(#9'cmp x0, x1');
           Self.Emit(#9'cset x0, ne');
         end;
+        boLE:
+        begin
+          { A <= B (subset): no member of A outside B -- A and not B = 0
+            (the complement as for boSub; the internal assembler has no bic) }
+          Self.Emit(#9'movn x2, #0');
+          Self.Emit(#9'eor x1, x1, x2');
+          Self.Emit(#9'and x0, x0, x1');
+          Self.Emit(#9'cmp x0, #0');
+          Self.Emit(#9'cset x0, eq');
+        end;
+        boGE:
+        begin
+          { A >= B (superset): B and not A = 0 }
+          Self.Emit(#9'movn x2, #0');
+          Self.Emit(#9'eor x0, x0, x2');
+          Self.Emit(#9'and x0, x0, x1');
+          Self.Emit(#9'cmp x0, #0');
+          Self.Emit(#9'cset x0, eq');
+        end;
       else
         NotYet('this set operation', AExpr);
       end;
@@ -8916,26 +8935,31 @@ begin
     Exit;
   end;
   if SameText(ACall.Name, 'Delete') and (ACall.ResolvedDecl = nil) and
-     (ACall.Args.Count = 3) and
-     (TASTExpr(ACall.Args.Items[0]) is TIdentExpr) then
+     (ACall.Args.Count = 3) then
   begin
     { Delete(S, I, N): _StringDelete returns the new string — retain it,
-      release the ident's old value, store back (x86 parity) }
-    Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
-    EmitPushX0();
+      release the old value, store back (x86 parity).  S is reached through
+      its ADDRESS (the var-argument walk), so an implicit-Self field, a var
+      param and a capture are written where they live -- the slot-name form
+      refused FS inside a method }
+    EmitVarArgAddrToX0(TASTExpr(ACall.Args.Items[0]));
+    EmitPushX0();                                  { [&S] }
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
-    EmitPushX0();
+    EmitPushX0();                                  { [&S][I] }
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[2]));
     Self.Emit(#9'mov x2, x0');
     EmitPopTo('x1');
-    EmitPopTo('x0');
+    Self.Emit(#9'ldr x9, [sp]');
+    Self.Emit(#9'ldr x0, [x9]');
     EmitCallSym('_StringDelete');
-    EmitPushX0();
+    EmitPushX0();                                  { [&S][new] }
     EmitCallSym('_StringAddRef');
-    EmitLoadSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
+    Self.Emit(#9'ldr x9, [sp, #16]');
+    Self.Emit(#9'ldr x0, [x9]');
     EmitCallSym('_StringRelease');
     EmitPopTo('x0');
-    EmitStoreSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
+    EmitPopTo('x9');
+    Self.Emit(#9'str x0, [x9]');
     Exit;
   end;
   if SameText(ACall.Name, 'DeleteFile') and (ACall.ResolvedDecl = nil) and
@@ -9967,9 +9991,12 @@ begin
   end
   else if IsIntFam(Elem) or
           (Elem.Kind in [tyBoolean, tyPointer, tyPChar]) or
-          IsPlainProcType(Elem) then
+          IsPlainProcType(Elem) or
+          ((Elem.Kind = tySet) and not IsJumboSetType(Elem)) then
   begin
-    { a 1-byte element is a byte store: Chr(N) must stay a raw ordinal }
+    { a 1-byte element is a byte store: Chr(N) must stay a raw ordinal.  A
+      small set is its bitmask in one register (a narrower source set is
+      zero-extended by its load), stored at the element's width. }
     if Elem.RawSize() = 1 then
       EmitByteRhsToX0(AStmt.ValueExpr)
     else
@@ -12622,7 +12649,7 @@ begin
                                             tyProcedural,
                                             tyPointer, tyPChar,
                                             tyMetaClass, tyInterface,
-                                            tyStaticArray]))) then
+                                            tyStaticArray, tySet]))) then
           NotYet('var parameter ''' + Par.ParamName + ''' of this type', ADecl);
         AddLocal(Par.ParamName, 8);
         FFrameVarParams.Add(Par.ParamName);
@@ -13936,6 +13963,7 @@ var
   NarrowFix: Boolean;
   JTmp: string;
   CTmp: string;
+  ElT: TTypeDesc;
   JNB: Integer;
   IndSlot: string;
   IntfT: TTypeDesc;
@@ -14058,11 +14086,28 @@ begin
           else
           for K := 0 to N - 1 do
           begin
-            if ArcExprOwnsRef(
-                 TASTExpr(TArrayLiteralExpr(Arg).Elements.Items[K])) then
-              NotYet('owned transient in an open-array literal', Arg);
             Self.EmitExprToX0(
               TASTExpr(TArrayLiteralExpr(Arg).Elements.Items[K]));
+            if ArcExprOwnsRef(
+                 TASTExpr(TArrayLiteralExpr(Arg).Elements.Items[K])) then
+            begin
+              { an owned transient element (['-o', MakeName(1)]): the literal
+                BORROWS it for the call, so it parks for one post-call
+                release like an owned string argument }
+              ElT := TASTExpr(TArrayLiteralExpr(Arg).Elements.Items[K]).ResolvedType;
+              if (ElT <> nil) and ElT.IsString() then
+                TransShapes := TransShapes + '1'
+              else if (ElT <> nil) and (ElT.Kind = tyClass) then
+                TransShapes := TransShapes + 'C'
+              else if (ElT <> nil) and (ElT.Kind = tyDynArray) then
+                TransShapes := TransShapes + 'D'
+              else
+                NotYet('owned transient of this type in an open-array literal',
+                  Arg);
+              EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
+              Inc(TransN);
+              FStrTransTop := TransTop + TransN;
+            end;
             EmitAddSubImm('add', 'x9', 'sp',
               PopRegs.Count * 16 + LitBase + LitOff + K * ESz);
             case ESz of
@@ -16992,20 +17037,20 @@ begin
       if VD.IsThreadVar then
       begin
         { threadvars get a Mach-O TLV descriptor: scalar kinds, strings,
-          class references and unmanaged static arrays.  As on x86-64 a
+          class references and unmanaged static arrays and records.  As on x86-64 a
           managed threadvar is not released at exit -- its lifetime is
           per-thread, not program-global }
         if not (IsIntFam(VD.ResolvedType) or
                 VD.ResolvedType.IsString() or
                 (VD.ResolvedType.Kind in [tyDouble, tyPointer, tyPChar,
                                           tyClass]) or
-                ((VD.ResolvedType.Kind = tyStaticArray) and
+                ((VD.ResolvedType.Kind in [tyStaticArray, tyRecord]) and
                  not AggHasManaged(VD.ResolvedType))) then
           NotYet('threadvar of this type', VD);
         if VD.InitConst <> nil then
           NotYet('initialised threadvar', VD);
         FTlvGlobals.Add(VD.Names.Strings[J]);
-        if VD.ResolvedType.Kind = tyStaticArray then
+        if VD.ResolvedType.Kind in [tyStaticArray, tyRecord] then
           FTlvSize.Items[VD.Names.Strings[J]] :=
             VD.ResolvedType.RawSize()
         else
@@ -17812,13 +17857,13 @@ begin
       if VD.IsThreadVar then
       begin
         { scalar kinds, strings, class references and unmanaged static
-          arrays -- as on x86-64 a managed threadvar is not released at
+          arrays and records -- as on x86-64 a managed threadvar is not released at
           exit, its lifetime being per-thread }
         if not (IsIntFam(VD.ResolvedType) or
                 VD.ResolvedType.IsString() or
                 (VD.ResolvedType.Kind in [tyDouble, tyPointer, tyPChar,
                                           tyClass]) or
-                ((VD.ResolvedType.Kind = tyStaticArray) and
+                ((VD.ResolvedType.Kind in [tyStaticArray, tyRecord]) and
                  not AggHasManaged(VD.ResolvedType))) then
           NotYet('threadvar of this type', VD);
         if VD.InitConst <> nil then
@@ -17827,7 +17872,7 @@ begin
         if (FCurrentUnitName <> '') and
            IsUnmangledUnit(FCurrentUnitName) then
           FGlobalWeak.Add('__tlv_' + N);
-        if VD.ResolvedType.Kind = tyStaticArray then
+        if VD.ResolvedType.Kind in [tyStaticArray, tyRecord] then
           FTlvSize.Items[N] := VD.ResolvedType.RawSize()
         else
           FTlvSize.Items[N] := 8;

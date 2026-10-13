@@ -20264,6 +20264,18 @@ begin
   for I := 0 to ALit.Elements.Count - 1 do
   begin
     Self.EmitExprToEax(TASTExpr(ALit.Elements.Items[I]));
+    { an owned transient element (['-o', MakeName(1)]): the literal only
+      BORROWS it for the call, so its reference is dropped at the statement
+      end.  It leaked before.  (%rax survives the deferral.) }
+    if NativeExprOwnsRef(TASTExpr(ALit.Elements.Items[I])) then
+    begin
+      if ElemType.IsString() then
+        Self.DeferNativeRelease('_StringRelease')
+      else if ElemType.Kind = tyClass then
+        Self.DeferNativeRelease('_ClassRelease')
+      else if ElemType.Kind = tyDynArray then
+        Self.DeferNativeRelease('_DynArrayRelease');
+    end;
     case ElemSize of
       1: Self.Emit(Format(#9'movb %%al, %d(%%rsp)', [I * ElemSize]));
       2: Self.Emit(Format(#9'movw %%ax, %d(%%rsp)', [I * ElemSize]));

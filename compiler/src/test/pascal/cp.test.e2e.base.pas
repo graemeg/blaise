@@ -85,6 +85,11 @@ type
     function  ProjectRoot: string;
     function  ToolchainAvailable(): Boolean;
     function  ValgrindAvailable(): Boolean;
+    { The directory holding a linkable libssl/libcrypto that the linker would
+      not search by itself, for a --lib-path: on macOS the system ships no
+      linkable libssl, so a Homebrew OpenSSL is located; '' elsewhere (the
+      system library path has it) and '' on a Mac without one. }
+    function  OpenSslLibDir(): string;
     procedure SetUpScratch(const ADirName: string);
     procedure SetUp; override;
     function  CompileAndRun(const ASrc: string;
@@ -249,6 +254,20 @@ begin
     Dir := Parent
   end;
   Result := IncludeTrailingPathDelimiter(GetCurrentDir())
+end;
+
+function TE2ETestCase.OpenSslLibDir(): string;
+const
+  Candidates: array[0..1] of string = ('/opt/homebrew/opt/openssl/lib',
+    '/usr/local/opt/openssl/lib');
+var
+  I: Integer;
+begin
+  Result := '';
+  if HostTarget().OS <> osMacOS then Exit;
+  for I := 0 to High(Candidates) do
+    if FileExists(Candidates[I] + '/libssl.dylib') then
+      Exit(Candidates[I]);
 end;
 
 function TE2ETestCase.ToolchainAvailable(): Boolean;

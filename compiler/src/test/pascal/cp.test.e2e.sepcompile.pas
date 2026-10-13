@@ -1817,8 +1817,34 @@ procedure TSepCompileTests.AssertNotStrongDef(const ANm, ASym, AWhere: string);
   text/data def (the GH #174 collision), 'W'/'V' = weak def (the fix), 'U' =
   external reference.  The bare base-class symbol re-defined by a leaf object
   must not be strong; weak or extern is fine.  (Blaise Pos is 0-based and
-  returns -1 when not found.) }
+  returns -1 when not found.)
+
+  Mach-O (a macOS host): BSD nm prints no weak letter -- a weak definition is
+  still 'D' or 'T' -- so ANm is 'nm -m' output instead, one
+  '<addr> (<seg>,<sect>) <binding> <name>' line per symbol, where the GH #174
+  collision is an 'external' (strong) definition and the fix is 'weak
+  external'.  Names carry the C '_' prefix and a unit global is '_g_<Name>'.
+  A table the backend keeps object-LOCAL (arm64's published-method table is
+  local '__pm_' labels, so there is no methods_ symbol) cannot collide, so on
+  Mach-O an absent symbol passes. }
+var
+  MName: string;
 begin
+  if HostTarget().OS = osMacOS then
+  begin
+    if ASym = 'GGh174' then
+      MName := '_g_' + ASym
+    else
+      MName := '_' + ASym;
+    { '(undefined) external' is a reference, not a definition }
+    AssertTrue(ASym + ' must not be a strong external def in ' + AWhere +
+      ' — GH #174', (Pos(') external ' + MName + #10, ANm + #10) < 0) or
+      (Pos('(undefined) external ' + MName + #10, ANm + #10) >= 0));
+    if Pos(' ' + MName + #10, ANm + #10) >= 0 then
+      AssertTrue(ASym + ' must be weak in ' + AWhere + ' — GH #174',
+        Pos(') weak external ' + MName + #10, ANm + #10) >= 0);
+    Exit
+  end;
   { Present at all — a trailing-newline exact match so a prefix (e.g.
     typeinfo_TGh174Base) is not matched by a search for a shorter name. }
   AssertTrue(ASym + ' present in ' + AWhere,
@@ -1940,10 +1966,21 @@ begin
   { Both leaf objects inline the base unit, so each re-defines the base class's
     bare symbols and the bare global.  None of these may be a STRONG local
     definition, or two members collide when archived + both pulled. }
-  Rc := RunProc('nm', [LeafAObj], NmA);
-  AssertEquals('nm leaf A', 0, Rc);
-  Rc := RunProc('nm', [LeafBObj], NmB);
-  AssertEquals('nm leaf B', 0, Rc);
+  { Mach-O: 'nm -m' spells the binding out (see AssertNotStrongDef) }
+  if HostTarget().OS = osMacOS then
+  begin
+    Rc := RunProc('nm', ['-m', LeafAObj], NmA);
+    AssertEquals('nm leaf A', 0, Rc);
+    Rc := RunProc('nm', ['-m', LeafBObj], NmB);
+    AssertEquals('nm leaf B', 0, Rc)
+  end
+  else
+  begin
+    Rc := RunProc('nm', [LeafAObj], NmA);
+    AssertEquals('nm leaf A', 0, Rc);
+    Rc := RunProc('nm', [LeafBObj], NmB);
+    AssertEquals('nm leaf B', 0, Rc)
+  end;
 
   AssertNotStrongDef(NmA, 'typeinfo_TGh174Base', 'leaf A');
   AssertNotStrongDef(NmA, 'vtable_TGh174Base', 'leaf A');

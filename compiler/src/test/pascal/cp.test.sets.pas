@@ -162,6 +162,12 @@ type
       has no value type" — on EVERY set type, not just jumbo ones. }
     procedure TestSemantic_ImplicitSelfSetField_EmptyLiteral;
     procedure TestSemantic_SetArrayElement_LiteralAssign;
+    { S <= T / S >= T on small sets: "A and not B = 0" (subset) and "B and
+      not A = 0" (superset).  arm64 refused both ("this set operation"). }
+    procedure TestCodegen_SmallSet_SubsetSuperset;
+    { A[I] := S for a small-set element: the bitmask stored at the element
+      width.  arm64 refused it ("array element of this type"). }
+    procedure TestCodegen_SmallSetElementStore;
   end;
 
 implementation
@@ -1546,6 +1552,49 @@ begin
         OA([1..3])
       end.
       ''')) >= 0);
+end;
+
+procedure TSetTests.TestCodegen_SmallSet_SubsetSuperset;
+const
+  Src = '''
+    program Prg;
+    type TS = set of 0..31;
+    var S, T: TS;
+    begin
+      S := [1, 2]; T := [1, 2, 3];
+      WriteLn(S <= T, S >= T)
+    end.
+    ''';
+begin
+  AssertEquals('subset: A and not B = 0', '',
+    AsmMissing(Src,
+      #9'notq %rcx'#10#9'andq %rcx, %rax'#10#9'testq %rax, %rax'#10#9'sete %al',
+      #9'movn x2, #0'#10#9'eor x1, x1, x2'#10#9'and x0, x0, x1'#10 +
+        #9'cmp x0, #0'#10#9'cset x0, eq'));
+  AssertEquals('superset: B and not A = 0', '',
+    AsmMissing(Src,
+      #9'notq %rax'#10#9'andq %rcx, %rax'#10#9'testq %rax, %rax',
+      #9'movn x2, #0'#10#9'eor x0, x0, x2'#10#9'and x0, x0, x1'#10 +
+        #9'cmp x0, #0'));
+end;
+
+procedure TSetTests.TestCodegen_SmallSetElementStore;
+const
+  Src = '''
+    program Prg;
+    type TS = set of 0..31;
+    var S: TS; A: array[0..1] of TS;
+    begin
+      S := [1, 2];
+      A[1] := S;
+      WriteLn(2 in A[1])
+    end.
+    ''';
+begin
+  AssertEquals('the 4-byte bitmask stored at the element', '',
+    AsmMissing(Src,
+      #9'popq %rax'#10#9'movl %eax, (%rcx)',
+      #9'ldr x9, [sp], #16'#10#9'str w0, [x9]'));
 end;
 
 initialization
