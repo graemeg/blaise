@@ -7145,3 +7145,78 @@ bits. This would allow a few more enumerations as set bases, but every set
 operation would need a per-type subtraction, the `set of lo..hi` form would
 become the odd one out, and set layout would no longer match FPC's for the
 enumerations both compilers accept.
+
+== Inline Procedural Types
+
+=== Decision
+
+A procedural type may be written inline wherever a type is expected, not only
+as a named declaration in the `type` section.  Every procedural form is
+accepted inline: `procedure (...)`, `function (...): T`, either of them with
+`of object`, and `reference to` either of them:
+
+[source,pascal]
+----
+var
+  Error:    procedure (nr, line, col: Integer; pos: Int64);
+  Compare:  function (const A, B: string): Integer;
+  OnChange: procedure (Sender: TObject) of object;
+  Next:     reference to function (X: Integer): Integer;
+
+type
+  TRec = record
+    F: function (A, B: Integer): Integer;
+  end;
+----
+
+An inline procedural type follows exactly the rules of a named one.
+Compatibility is structural, so an inline type and a named type with the same
+signature are assignable to each other, and so are two inline types.  A call
+through an inline-typed variable checks its arguments against the signature.
+`of object` and `reference to` remain mutually exclusive.
+
+A parameter of an inline procedural type may not carry a default value.  The
+compiler rejects one where it is written and asks for a named type instead.
+
+Both FPC and Delphi accept the inline form in a variable or field declaration,
+with the same syntax.  Ported code such as Coco/R's scanner unit declares its
+error callback this way (GH #222).  Blaise also accepts the form in every
+other type position, including parameter and result types, because one type
+grammar serves them all.
+
+=== Rationale
+
+The inline form introduces no new semantics.  It is a procedural type without
+a name, and procedural types in Blaise already compare by signature rather
+than by name, so leaving the name out cannot change what a program means.
+Requiring a named type only made ported code fail with "Expected type name",
+a parse error that gives no hint of the workaround.
+
+The implementation follows the inline set types: the parser encodes the type
+as a type-name string, and the semantic type resolver builds the descriptor
+from that string on demand.  The encoding keeps the procedural kind in front of
+the parameter list (`procedure of object(K:Integer)`), so a function whose
+result is itself a method pointer cannot be read two ways.  Because the type
+travels as a name, it works in every type position and is carried through a
+unit's cached interface (`.bif`) without a format change, as `array of T` and
+`set of T` are.  Generic substitution rewrites the parameter and result types
+inside the name, so `OnChange: procedure (const V: T)` in a generic class
+specialises with the class.
+
+Named and inline procedural types resolve their parameter and result types
+through one routine.  Making that routine build inline types on demand also
+lets a named procedural type use them, as in `procedure (P: ^Integer)` and
+`function (): array of Integer`, which a name-only lookup had rejected
+(BUG-20261013-proctype-inline-param-types).
+
+=== Alternatives considered
+
+* *Synthesise a named type declaration in the parser* and stage it into the
+  enclosing block.  Rejected for the reason given for inline sets: every
+  declaration site would have to flush the staged declaration, its position
+  relative to the variable would matter, and a unit interface would export an
+  invented type name.
+* *Allow the inline form only in variable and field declarations*, matching
+  FPC and Delphi exactly.  Rejected because it needs a separate, narrower
+  type grammar for the same construct, and the wider form introduces nothing
+  a named type does not already allow.

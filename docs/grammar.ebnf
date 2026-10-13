@@ -860,10 +860,17 @@ IdentList
     = IDENT { COMMA IDENT }
     ;
 
+(* A procedural type may be written inline in any type position:
+ *     var Error: procedure (nr, line, col: Integer; pos: Int64);
+ * It follows the rules of a named procedural type (structural
+ * compatibility, of object / reference to).  A parameter of an inline
+ * procedural type may not have a default value.  See
+ * language-rationale.adoc "Inline Procedural Types". *)
 TypeName
     = ArrayType                   (* static array: array[L..H] of T *)
     | DynArrayType                (* dynamic array: array of T *)
     | SetType                     (* bit-set over an enum base type *)
+    | ProceduralType              (* inline procedural type *)
     | CARET TypeName              (* pointer-to type: ^Integer, ^T, ^^T  *)
     | QualIdent LESS TypeArgList GREATER   (* generic instantiation: TList<Integer> *)
     | QualIdent                   (* simple type, built-in, or UnitName.TypeName *)

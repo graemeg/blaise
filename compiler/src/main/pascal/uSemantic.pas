@@ -630,6 +630,14 @@ type
       procedural types and inline ones; AName is used in diagnostics) }
     procedure FillProceduralTypeDesc(ADef: TProceduralTypeDef;
       ADesc: TProceduralTypeDesc; const AName: string; ALine, ACol: Integer);
+    { Inline procedural types (GH #222), encoded by
+      TParser.ParseInlineProcTypeName }
+    function  IsInlineProcTypeName(const AName: string): Boolean;
+    function  SplitInlineProcType(const AName: string; out AKind: string;
+      AHeads, ATypes: TStringList; out ARet: string): Boolean;
+    function  InstantiateInlineProcType(const AName: string): TTypeDesc;
+    function  SubstInlineProcType(const AName: string;
+      AParamNames, AArgs: TStringList): string;
     function  AnalyseStringSubscriptExpr(AExpr: TStringSubscriptExpr): TTypeDesc;
     function  AnalyseArrayLiteralExpr(AExpr: TArrayLiteralExpr): TTypeDesc;
     function  AnalyseSetLiteralExpr(AExpr: TArrayLiteralExpr; ASetType: TSetTypeDesc): TTypeDesc;
@@ -3909,6 +3917,251 @@ begin
   end;
 end;
 
+{ Split an inline procedural type name, as TParser.ParseInlineProcTypeName
+  encodes it, into its kind prefix (e.g. 'function of object'), one head per
+  parameter ('[var |const |out ]Name:' plus 'array of ' for an open array),
+  the matching parameter type names, and the return type ('' for a
+  procedure).  False when AName is not such an encoding.  Separators count
+  only outside brackets, because a parameter type may itself be an encoding
+  carrying ';', ':' and parentheses (a nested procedural type, set of (a,b),
+  array[0..3] of T). }
+function TSemanticAnalyser.SplitInlineProcType(const AName: string;
+  out AKind: string; AHeads, ATypes: TStringList; out ARet: string): Boolean;
+const
+  Kinds: array[0..5] of string = ('reference to procedure',
+    'reference to function', 'procedure of object', 'function of object',
+    'procedure', 'function');
+var
+  I, K, Depth, SegStart, ColonPos, CloseParen: Integer;
+  C: Integer;
+  Seg, Head, TypeN: string;
+begin
+  Result := False;
+  AKind := '';
+  ARet := '';
+  for K := 0 to High(Kinds) do
+    if (Length(AName) > Length(Kinds[K])) and
+       (StrHead(AName, Length(Kinds[K]) + 1) = Kinds[K] + '(') then
+    begin
+      AKind := Kinds[K];
+      Break;
+    end;
+  if AKind = '' then
+    Exit;
+  { Find the parameter list's closing parenthesis, splitting at each
+    depth-1 ';' on the way. }
+  Depth := 0;
+  CloseParen := -1;
+  SegStart := Length(AKind) + 1;
+  I := Length(AKind);
+  while I < Length(AName) do
+  begin
+    C := StrAt(AName, I);
+    if (C = Ord('(')) or (C = Ord('[')) then
+      Inc(Depth)
+    else if (C = Ord(')')) or (C = Ord(']')) then
+    begin
+      Dec(Depth);
+      if Depth = 0 then
+      begin
+        CloseParen := I;
+        Break;
+      end;
+    end;
+    if (C = Ord(';')) and (Depth = 1) then
+    begin
+      AHeads.Add(StrCopyFrom(AName, SegStart, I - SegStart));
+      SegStart := I + 1;
+    end;
+    Inc(I);
+  end;
+  if CloseParen < 0 then
+    Exit;
+  if CloseParen > SegStart then
+    AHeads.Add(StrCopyFrom(AName, SegStart, CloseParen - SegStart));
+  { Each segment is head:type; the name holds no ':', so the first one
+    separates them. }
+  for I := 0 to AHeads.Count - 1 do
+  begin
+    Seg := AHeads.Strings[I];
+    ColonPos := StrPos(':', Seg);
+    if ColonPos < 0 then
+      Exit;
+    Head := StrHead(Seg, ColonPos + 1);
+    TypeN := StrCopyTail(Seg, ColonPos + 1);
+    if (Length(TypeN) > 9) and (StrHead(TypeN, 9) = 'array of ') then
+    begin
+      Head := Head + 'array of ';
+      TypeN := StrCopyTail(TypeN, 9);
+    end;
+    AHeads.Strings[I] := Head;
+    ATypes.Add(TypeN);
+  end;
+  if CloseParen + 1 < Length(AName) then
+  begin
+    if StrAt(AName, CloseParen + 1) <> Ord(':') then
+      Exit;
+    ARet := StrCopyTail(AName, CloseParen + 2);
+  end;
+  Result := True;
+end;
+
+{ SubstTypeParam for an inline procedural type: each parameter type and the
+  return type is substituted and the name re-encoded in the same form. }
+function TSemanticAnalyser.SubstInlineProcType(const AName: string;
+  AParamNames, AArgs: TStringList): string;
+var
+  Kind, Ret: string;
+  Heads, Types: TStringList;
+  I: Integer;
+begin
+  Heads := TStringList.Create();
+  Types := TStringList.Create();
+  try
+    if not Self.SplitInlineProcType(AName, Kind, Heads, Types, Ret) then
+      Exit(AName);
+    Result := Kind + '(';
+    for I := 0 to Heads.Count - 1 do
+    begin
+      if I > 0 then
+        Result := Result + ';';
+      Result := Result + Heads.Strings[I] +
+        Self.SubstTypeParam(Types.Strings[I], AParamNames, AArgs);
+    end;
+    Result := Result + ')';
+    if Ret <> '' then
+      Result := Result + ':' + Self.SubstTypeParam(Ret, AParamNames, AArgs);
+  finally
+    Types.Free();
+    Heads.Free();
+  end;
+end;
+
+{ True when AName is an inline procedural type encoding: an identifier never
+  contains '(', so a name that starts with a procedural kind followed by '('
+  can only be one. }
+function TSemanticAnalyser.IsInlineProcTypeName(const AName: string): Boolean;
+begin
+  Result := (StrHead(AName, 10) = 'procedure(') or
+            (StrHead(AName, 9) = 'function(') or
+            (StrHead(AName, 20) = 'procedure of object(') or
+            (StrHead(AName, 19) = 'function of object(') or
+            (StrHead(AName, 13) = 'reference to ');
+end;
+
+{ Build (or reuse) the TProceduralTypeDesc for an inline procedural type
+  (GH #222).  The encoded parameter list becomes a transient
+  TProceduralTypeDef and goes through the same FillProceduralTypeDesc as a
+  named declaration, so both forms follow one set of rules.  The descriptor is
+  cached under a canonical name built from the RESOLVED parameter and return
+  types, mirroring 'array of T'; a cached entry is reused only when it holds
+  the very same types, since two scopes can each declare a local type of the
+  same name. }
+function TSemanticAnalyser.InstantiateInlineProcType(const AName: string): TTypeDesc;
+var
+  Kind, Ret, Head, CanonName: string;
+  Heads, Types: TStringList;
+  Def: TProceduralTypeDef;
+  Par: TMethodParam;
+  ParTypes: TObjectList;  { not owning: the resolved TTypeDesc of each parameter }
+  I: Integer;
+  TD: TTypeDesc;
+  Cand: TProceduralTypeDesc;
+  ProcDesc: TProceduralTypeDesc;
+  Same: Boolean;
+begin
+  Result := nil;
+  Heads := TStringList.Create();
+  Types := TStringList.Create();
+  ParTypes := TObjectList.Create(False);
+  Def := TProceduralTypeDef.Create();
+  try
+    if not Self.SplitInlineProcType(AName, Kind, Heads, Types, Ret) then
+      SemanticError(Format('Malformed inline procedural type ''%s''',
+        [AName]), 0, 0);
+    Def.IsFunction := StrPos('function', Kind) >= 0;
+    Def.IsMethodPtr := StrPos('of object', Kind) >= 0;
+    Def.IsReference := StrPos('reference to', Kind) >= 0;
+    Def.ReturnTypeName := Ret;
+    { the canonical name: the kind, then each parameter's mode and resolved
+      type (names do not take part in compatibility), then the return type }
+    CanonName := Kind + '(';
+    for I := 0 to Heads.Count - 1 do
+    begin
+      Head := Heads.Strings[I];
+      Par := TMethodParam.Create();
+      Par.TypeName := Types.Strings[I];
+      Par.IsOutParam := StrHead(Head, 4) = 'out ';
+      Par.IsVarParam := Par.IsOutParam or (StrHead(Head, 4) = 'var ');
+      Par.IsConstParam := StrHead(Head, 6) = 'const ';
+      if Par.IsOutParam or Par.IsVarParam then
+        Head := StrCopyTail(Head, 4)
+      else if Par.IsConstParam then
+        Head := StrCopyTail(Head, 6);
+      Par.IsOpenArray := StrPos(':array of ', Head) >= 0;
+      Par.ParamName := StrHead(Head, StrPos(':', Head));
+      Def.Params.Add(Par);
+      { An unknown parameter or return type makes the whole name unknown, as
+        for every other inline form: nil lets the caller report it at the
+        declaration's own line. }
+      TD := FindTypeOrInstantiate(Par.TypeName);
+      if TD = nil then
+        Exit(nil);
+      ParTypes.Add(TD);
+      if I > 0 then
+        CanonName := CanonName + '; ';
+      if Par.IsOutParam then
+        CanonName := CanonName + 'out '
+      else if Par.IsVarParam then
+        CanonName := CanonName + 'var '
+      else if Par.IsConstParam then
+        CanonName := CanonName + 'const ';
+      if Par.IsOpenArray then
+        CanonName := CanonName + 'array of ';
+      CanonName := CanonName + TD.Name;
+    end;
+    CanonName := CanonName + ')';
+    if Def.IsFunction then
+    begin
+      TD := FindTypeOrInstantiate(Ret);
+      if TD = nil then
+        Exit(nil);
+      CanonName := CanonName + ': ' + TD.Name;
+    end;
+    Result := FTable.FindType(CanonName);
+    if Result is TProceduralTypeDesc then
+    begin
+      Cand := TProceduralTypeDesc(Result);
+      Same := Cand.Params.Count = ParTypes.Count;
+      for I := 0 to ParTypes.Count - 1 do
+        if Same then
+        begin
+          TD := TProcParamInfo(Cand.Params.Items[I]).TypeDesc;
+          if TD is TOpenArrayTypeDesc then
+            TD := TOpenArrayTypeDesc(TD).ElementType;
+          Same := TD = TTypeDesc(ParTypes.Items[I]);
+        end;
+      if Same and Def.IsFunction then
+        Same := Cand.ReturnType = FindTypeOrInstantiate(Ret);
+      if Same then
+        Exit;
+    end;
+    ProcDesc := FTable.NewProceduralType(CanonName);
+    Self.FillProceduralTypeDesc(Def, ProcDesc, CanonName, 0, 0);
+    { Register only the first descriptor of a name, so the reuse probe above
+      keeps finding it; a same-named twin from another scope stays private to
+      the declaration that built it. }
+    if Result = nil then
+      FTable.DefineGlobal(TSymbol.Create(CanonName, skType, ProcDesc));
+    Result := ProcDesc;
+  finally
+    Def.Free();
+    ParTypes.Free();
+    Types.Free();
+    Heads.Free();
+  end;
+end;
+
 function TSemanticAnalyser.FindTypeOrInstantiate(const AName: string): TTypeDesc;
 var
   BaseName: string;
@@ -3925,6 +4178,11 @@ var
   DAT: TDynArrayTypeDesc;
   I, LtPos, DotPos: Integer;
 begin
+  { Inline procedural type 'procedure(...)' / 'function(...):T' (GH #222).
+    First, because the encoding may hold '.' and '<' (qualified or generic
+    parameter types) that the qualified-name scan below would misread. }
+  if Self.IsInlineProcTypeName(AName) then
+    Exit(Self.InstantiateInlineProcType(AName));
   { Unit-qualified type 'Unit.TypeName' — resolve against that specific unit's
     own exports FIRST, before the flat FindType below (which strips the
     qualifier and binds the tail through the uses chain, i.e. to the cross-unit
@@ -4295,6 +4553,12 @@ begin
   begin
     Exit('^' + Self.SubstTypeParam(StrCopyTail(Result, 1), AParamNames, AArgs));
   end;
+  { Inline procedural type: substitute inside each parameter type and the
+    return type, then re-encode.  Before the generic branch below, which
+    would read the first '<' of a parameter type as this name's own type
+    argument list. }
+  if Self.IsInlineProcTypeName(Result) then
+    Exit(Self.SubstInlineProcType(Result, AParamNames, AArgs));
   { Generic instantiation: SomeName<T,...> — substitute each type argument }
   BrOpen := StrPos('<', Result);
   if BrOpen >= 0 then

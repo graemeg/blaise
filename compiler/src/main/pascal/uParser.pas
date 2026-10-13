@@ -143,6 +143,8 @@ type
     function  ParseSetDef: TSetTypeDef;
     function  ParseRecordDef: TRecordTypeDef;
     function  ParseProceduralTypeDef: TProceduralTypeDef;
+    { An inline procedural type in a type position, as its encoded name }
+    function  ParseInlineProcTypeName: string;
     function  ParseGenericName: string;  { reads IDENT optionally followed by '<' TypeArgs '>' }
     function  ParseClassDef: TClassTypeDef;
     function  ParseInterfaceDef: TInterfaceTypeDef;
@@ -570,6 +572,13 @@ var
   Lows, Highs: TStringList;
   I: Integer;
 begin
+  { Inline procedural type: 'procedure(...)', 'function(...): T', either with
+    'of object', or 'reference to ...' (GH #222).  Encoded as a type-name
+    string the semantic resolver decodes on demand. }
+  if Check(tkProcedure) or Check(tkFunction) or
+     (Check(tkIdent) and SameText(FCurrent.Value, 'reference') and
+      (PeekKind() = tkTo)) then
+    Exit(Self.ParseInlineProcTypeName());
   { Array type: static 'array[L..H] of T' or dynamic 'array of T' }
   if Check(tkArray) then
   begin
@@ -2226,6 +2235,89 @@ begin
   except
     Result.Free();
     raise;
+  end;
+end;
+
+function TParser.ParseInlineProcTypeName: string;
+var
+  Def: TProceduralTypeDef;
+  IsRef: Boolean;
+  I: Integer;
+  Par: TMethodParam;
+  Line, Col: Integer;
+begin
+  { An inline procedural type has no declaration to hang a TProceduralTypeDef
+    on, so it travels as an encoded type name, like 'set of (a,b)' or
+    'array of T' -- valid in every type position and carried through a .bif
+    unchanged.  The encoding (decoded by TSemanticAnalyser.InstantiateInlineProcType):
+
+      <kind>(<param>;<param>...)[:<return type>]
+
+    <kind> is 'procedure' / 'function', optionally followed by ' of object' or
+    preceded by 'reference to ', so the flags sit before the parameter list
+    (a trailing ' of object' would be ambiguous when the return type is
+    itself a procedural type).  Each <param> is
+    [var |const |out ]<name>:[array of ]<type name>, with 'array of ' marking
+    an open array.  Type names are already-encoded strings, so nested forms
+    nest; the decoder splits on ';' and ':' only outside brackets. }
+  Line := FCurrent.Line;
+  Col := FCurrent.Col;
+  IsRef := Check(tkIdent);
+  if IsRef then
+  begin
+    Advance();  { consume 'reference' }
+    Advance();  { consume 'to' }
+    if not (Check(tkFunction) or Check(tkProcedure)) then
+      raise EParseError.Create(Format(
+        'Expected ''procedure'' or ''function'' after ''reference to'' ' +
+        'at line %d col %d in %s',
+        [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
+  end;
+  Def := Self.ParseProceduralTypeDef();
+  try
+    if IsRef and Def.IsMethodPtr then
+      raise EParseError.Create(Format(
+        '''reference to'' and ''of object'' are mutually exclusive ' +
+        'at line %d col %d in %s',
+        [Line, Col, FLexer.Filename]));
+    if Def.IsFunction then
+      Result := 'function'
+    else
+      Result := 'procedure';
+    if IsRef then
+      Result := 'reference to ' + Result
+    else if Def.IsMethodPtr then
+      Result := Result + ' of object';
+    Result := Result + '(';
+    for I := 0 to Def.Params.Count - 1 do
+    begin
+      Par := TMethodParam(Def.Params.Items[I]);
+      { A default would be accepted here and then silently dropped from the
+        encoding, so a call relying on it would fail with a confusing arity
+        error; reject it where it is written. }
+      if Par.DefaultValue <> nil then
+        raise EParseError.Create(Format(
+          'Default value not allowed in an inline procedural type ' +
+          'at line %d col %d in %s; declare a named type for it',
+          [Line, Col, FLexer.Filename]));
+      if I > 0 then
+        Result := Result + ';';
+      if Par.IsOutParam then
+        Result := Result + 'out '
+      else if Par.IsVarParam then
+        Result := Result + 'var '
+      else if Par.IsConstParam then
+        Result := Result + 'const ';
+      Result := Result + Par.ParamName + ':';
+      if Par.IsOpenArray then
+        Result := Result + 'array of ';
+      Result := Result + Par.TypeName;
+    end;
+    Result := Result + ')';
+    if Def.IsFunction then
+      Result := Result + ':' + Def.ReturnTypeName;
+  finally
+    Def.Free();
   end;
 end;
 

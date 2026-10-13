@@ -39,6 +39,13 @@ type
     { BUG-20261013-proctype-inline-param-types: a named procedural type whose
       parameter or return type is ^T, set of T or array of T, called through }
     procedure TestRun_ProcTypes_InlineParamAndReturnTypes;
+    { GH #222: an inline procedural type in a var declaration (global, local,
+      record field, of object, reference to) holds and calls the routine }
+    procedure TestRun_InlineProcTypes_AllPositions;
+    { GH #222 as reported (Coco/R's CRS unit): an inline procedural type on a
+      unit INTERFACE var, assigned and called from the program -- the type
+      survives the unit's cached interface }
+    procedure TestRun_InlineProcType_UnitInterfaceVar;
     procedure TestRun_SelfHostingRTLServices;
     procedure TestRun_HighLow_OrdinalBounds;
     procedure TestRun_ChainedFields_ReadThroughEveryLevel;
@@ -4332,7 +4339,121 @@ begin
     '42' + LE + 'True False' + LE + '3 20' + LE, 0);
 end;
 
+procedure TE2EMiscTests.TestRun_InlineProcTypes_AllPositions;
+const
+  Src = '''
+    program P;
+    type
+      TCounter = class
+        N: Integer;
+        procedure Add(K: Integer);
+      end;
+      TRec = record
+        F: function(A, B: Integer): Integer;
+      end;
+    procedure TCounter.Add(K: Integer);
+    begin
+      N := N + K
+    end;
+    procedure Show(N: Integer; const S: string);
+    begin
+      WriteLn(S, '=', N)
+    end;
+    function Mul(A, B: Integer): Integer;
+    begin
+      Result := A * B
+    end;
+    var
+      G: procedure(N: Integer; const S: string);
+      M: procedure(K: Integer) of object;
+      R: reference to function(X: Integer): Integer;
+      Rec: TRec;
+      C: TCounter;
+      Base: Integer;
+    procedure Local();
+    var
+      H: function(A, B: Integer): Integer;
+    begin
+      H := @Mul;
+      WriteLn(H(6, 7))
+    end;
+    begin
+      G := @Show;
+      G(1, 'global');
+      Local();
+      Rec.F := @Mul;
+      WriteLn(Rec.F(3, 5));
+      C := TCounter.Create();
+      M := @C.Add;
+      M(4);
+      M(5);
+      WriteLn(C.N);
+      Base := 100;
+      R := function(X: Integer): Integer
+           begin
+             Result := X + Base
+           end;
+      WriteLn(R(23));
+      G := nil;
+      WriteLn(Assigned(G))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    'global=1' + LE + '42' + LE + '15' + LE + '9' + LE + '123' + LE +
+    'False' + LE, 0);
+  AssertLeakFreeOnAll(Src, '');
+end;
 
+procedure TE2EMiscTests.TestRun_InlineProcType_UnitInterfaceVar;
+var
+  Output: string;
+  RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run: ' + Output, CompileAndRunWithUnitNative('crs',
+    '''
+    unit crs;
+
+    interface
+
+    var
+      errors: Integer;
+      Error: procedure(nr, line, col: Integer; pos: Int64);
+
+    procedure Get(var sym: Integer);
+
+    implementation
+
+    procedure Get(var sym: Integer);
+    begin
+      sym := 7;
+      if Assigned(Error) then
+        Error(sym, 3, 9, 1234)
+    end;
+
+    end.
+    ''',
+    '''
+    program P;
+    uses crs;
+    procedure Report(nr, line, col: Integer; pos: Int64);
+    begin
+      Inc(errors);
+      WriteLn('error ', nr, ' at ', line, ':', col, ' pos ', pos)
+    end;
+    var S: Integer;
+    begin
+      Get(S);
+      Error := @Report;
+      Get(S);
+      WriteLn('errors=', errors)
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('stdout', 'error 7 at 3:9 pos 1234' + LE + 'errors=1' + LE, Output);
+end;
 
 procedure TE2EMiscTests.TestBuildRtlObjects_CollatingLocale_PrintsOnlyObjects;
 var

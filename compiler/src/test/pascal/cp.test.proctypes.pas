@@ -107,6 +107,20 @@ type
       and still takes part in the signature check }
     procedure TestSemantic_ProcTypeInlineParamTypes_Resolve;
     procedure TestSemantic_ProcTypeInlineParamType_Mismatch_Fails;
+    { GH #222: an inline procedural type in a var declaration or a field
+      ("Expected type name").  Same structural rules as a named one: the
+      signature is checked on assignment and on a call, an inline and a named
+      type with the same signature are compatible, and the of object /
+      reference to flags keep the forms apart. }
+    procedure TestSemantic_InlineProcVar_Accepted;
+    procedure TestSemantic_InlineProcVar_WrongSignature_Fails;
+    procedure TestSemantic_InlineProcVar_CompatibleWithNamed;
+    procedure TestSemantic_InlineProcVar_WrongArgType_Fails;
+    procedure TestSemantic_InlineProcVar_OfObjectAndReference_Accepted;
+    procedure TestSemantic_InlineProcVar_OfObjectToBare_Fails;
+    { parameter modes are part of the encoded signature: var differs from
+      value, and a var-param inline type accepts a matching routine }
+    procedure TestSemantic_InlineProcVar_ParamMode_Distinguished;
   end;
 
 implementation
@@ -817,12 +831,165 @@ begin
           ''') <> '');
 end;
 
+procedure TProcTypesTests.TestSemantic_InlineProcVar_Accepted;
+begin
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
+        program Test;
+        type
+          TRec = record
+            F: function(A, B: Integer): Integer;
+          end;
+        procedure Report(nr, line, col: Integer; pos: Int64);
+        begin
+        end;
+        function Mul(A, B: Integer): Integer;
+        begin
+          Result := A * B
+        end;
+        var
+          Error: procedure(nr, line, col: Integer; pos: Int64);
+          R: TRec;
+          X: Integer;
+        procedure Local();
+        var H: function(A, B: Integer): Integer;
+        begin
+          H := @Mul;
+          X := H(2, 3)
+        end;
+        begin
+          Error := @Report;
+          Error(1, 2, 3, 4);
+          R.F := @Mul;
+          X := R.F(4, 5)
+        end.
+        '''));
+end;
 
+procedure TProcTypesTests.TestSemantic_InlineProcVar_WrongSignature_Fails;
+begin
+  AssertTrue('a routine with a different parameter list must not be assignable',
+    SemanticError(
+      '''
+          program Test;
+          procedure Report(nr, line: Integer);
+          begin
+          end;
+          var Error: procedure(nr, line, col: Integer);
+          begin
+            Error := @Report
+          end.
+          ''') <> '');
+end;
 
+procedure TProcTypesTests.TestSemantic_InlineProcVar_CompatibleWithNamed;
+begin
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
+        program Test;
+        type
+          TCmp = function(const A, B: string): Integer;
+        var
+          Named: TCmp;
+          Inline1: function(const X, Y: string): Integer;
+          Inline2: function(const P, Q: string): Integer;
+        begin
+          Inline1 := Named;
+          Named := Inline1;
+          Inline2 := Inline1
+        end.
+        '''));
+end;
 
+procedure TProcTypesTests.TestSemantic_InlineProcVar_WrongArgType_Fails;
+begin
+  AssertTrue('a call through an inline type checks argument types',
+    SemanticError(
+      '''
+          program Test;
+          var Error: procedure(nr: Integer; const S: string);
+          begin
+            Error('one', 'two')
+          end.
+          ''') <> '');
+end;
 
+procedure TProcTypesTests.TestSemantic_InlineProcVar_OfObjectAndReference_Accepted;
+begin
+  AssertEquals('program is accepted', '',
+    SemanticError(
+      '''
+        program Test;
+        type
+          TC = class
+            procedure Hi(K: Integer);
+          end;
+        procedure TC.Hi(K: Integer);
+        begin
+        end;
+        var
+          C: TC;
+          M: procedure(K: Integer) of object;
+          R: reference to function(X: Integer): Integer;
+          N: Integer;
+        begin
+          C := TC.Create();
+          M := @C.Hi;
+          M(1);
+          R := function(X: Integer): Integer
+               begin
+                 Result := X + 1
+               end;
+          N := R(2)
+        end.
+        '''));
+end;
 
+procedure TProcTypesTests.TestSemantic_InlineProcVar_OfObjectToBare_Fails;
+begin
+  AssertTrue('a method pointer must not bind to a bare procedural variable',
+    SemanticError(
+      '''
+          program Test;
+          var
+            M: procedure(K: Integer) of object;
+            P: procedure(K: Integer);
+          begin
+            P := M
+          end.
+          ''') <> '');
+end;
 
+procedure TProcTypesTests.TestSemantic_InlineProcVar_ParamMode_Distinguished;
+begin
+  AssertEquals('a var-param routine matches a var-param inline type', '',
+    SemanticError(
+      '''
+        program Test;
+        procedure Get(var sym: Integer);
+        begin
+          sym := 1
+        end;
+        var G: procedure(var sym: Integer);
+        begin
+          G := @Get
+        end.
+        '''));
+  AssertTrue('a value-param routine must not match a var-param inline type',
+    SemanticError(
+      '''
+          program Test;
+          procedure Get(sym: Integer);
+          begin
+          end;
+          var G: procedure(var sym: Integer);
+          begin
+            G := @Get
+          end.
+          ''') <> '');
+end;
 
 initialization
   RegisterTest(TProcTypesTests);
