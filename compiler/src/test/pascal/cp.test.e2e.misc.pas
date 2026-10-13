@@ -4461,7 +4461,7 @@ var
   SrcFile, AsmFile, ProgObj, Script, Compiler, ObjDir: string;
   AsmText, OutLocale, OutC: string;
   Lines: TStringList;
-  I: Integer;
+  I, Rc: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   { A program object whose symbol list mixes case and underscores, so a
@@ -4478,11 +4478,15 @@ begin
     '  WriteLn(L.Count)' + LE +
     'end.' + LE);
   Compiler := ProjectRoot() + 'compiler/target/blaise';
-  AssertEquals('emit-asm', 0, RunProc(Compiler,
-    ['--source', SrcFile, '--unit-path', FRTLUnitPath,
-     '--unit-path', FStdlibUnitPath, '--emit-asm'], AsmText));
-  WriteFile(AsmFile, AsmText);
-  AssertEquals('cc -c', 0, RunProc('cc', ['-c', '-o', ProgObj, AsmFile], OutC));
+  { Only stdout is assembly: RunProc merges stderr into its output, and any
+    compiler note there (a stale-cache recompile, say) would reach cc as a
+    syntax error.  So the shell writes stdout to the .s file itself. }
+  Rc := RunProc('sh',
+    ['-c', '"$1" --source "$2" --unit-path "$3" --unit-path "$4" --emit-asm > "$5"',
+     'sh', Compiler, SrcFile, FRTLUnitPath, FStdlibUnitPath, AsmFile], AsmText);
+  AssertEquals('emit-asm: ' + AsmText, 0, Rc);
+  Rc := RunProc('cc', ['-c', '-o', ProgObj, AsmFile], OutC);
+  AssertEquals('cc -c: ' + OutC, 0, Rc);
 
   Script := ProjectRoot() + 'scripts/build-rtl-objects.sh';
   ObjDir := FScratch + '/rtlsel-obj';
