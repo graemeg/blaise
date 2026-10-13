@@ -62,6 +62,12 @@ type
       analysed, so it never saw the call as a use of G. }
     procedure TestSemantic_CallThroughCapturedClosureParam_Accepted;
 
+    { A call through the procedural value an element or a dereference holds,
+      as a STATEMENT: A[I](args); and P^(args);  The parser read a subscript
+      in statement position as the start of an assignment or member access
+      ("Expected '.' or ':=' after subscript"). }
+    procedure TestParse_ExprCallStmt_ElementAndDeref;
+    procedure TestParse_ExprCallStmt_BareElementWithoutParens_Rejected;
     { Codegen }
     { Use(MakeFn()): the closure a call returns lands in a per-site scratch
       whose ADDRESS is the argument; x86-64 passed the Code word as the
@@ -80,6 +86,7 @@ type
     { F() for an env-hoisted F (assigned inside a closure) calls through
       the capture pointer, not the declaring frame's idle slot }
     procedure TestCodegen_CallThroughEnvHoistedClosure_UsesCapture;
+    procedure TestCodegen_ExprCallStmt_CallsThroughElement;
 
     { End-to-end }
     { Phase 9a — terse '->' lambdas (desugared to TAnonMethodExpr). }
@@ -958,6 +965,83 @@ begin
     AsmMissing(Src,
       #9'movq -16(%rbp), %rbx'#10#9'leaq (%rbx), %r11',
       #9'ldur x9, [x29, #-16]'#10#9'mov x10, x9'));
+end;
+
+procedure TAnonMethodTests.TestParse_ExprCallStmt_ElementAndDeref;
+const
+  Src = '''
+    program Prg;
+    type
+      TP = procedure(X: Integer);
+      PP = ^TP;
+    var A: array[0..1] of TP; P: PP;
+    begin
+      A[1](7);
+      A[0]();
+      P^(9)
+    end.
+    ''';
+var
+  Prog: TProgram;
+  I, N: Integer;
+begin
+  Prog := ParseSrc(Src);
+  try
+    N := 0;
+    for I := 0 to Prog.Block.Stmts.Count - 1 do
+      if Prog.Block.Stmts.Items[I] is TExprCallStmt then
+      begin
+        Inc(N);
+        AssertTrue('the call is an indirect call',
+          TExprCallStmt(Prog.Block.Stmts.Items[I]).Call is TIndirectFuncCallExpr);
+      end;
+    AssertEquals('three expression-call statements', 3, N);
+    AssertEquals('A[1](7) carries its argument', 1,
+      TIndirectFuncCallExpr(TExprCallStmt(Prog.Block.Stmts.Items[0]).Call).Args.Count);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TAnonMethodTests.TestParse_ExprCallStmt_BareElementWithoutParens_Rejected;
+const
+  Src = '''
+    program Prg;
+    type TP = procedure(X: Integer);
+    var A: array[0..1] of TP;
+    begin
+      A[1]
+    end.
+    ''';
+var
+  Raised: Boolean;
+begin
+  Raised := False;
+  try
+    ParseSrc(Src).Free();
+  except
+    on E: EParseError do Raised := True;
+  end;
+  AssertTrue('calls need parentheses, as everywhere else', Raised);
+end;
+
+procedure TAnonMethodTests.TestCodegen_ExprCallStmt_CallsThroughElement;
+const
+  Src = '''
+    program Prg;
+    type TP = procedure(X: Integer);
+    procedure Show(X: Integer); begin WriteLn(X) end;
+    var A: array[0..1] of TP;
+    begin
+      A[1] := @Show;
+      A[1](7)
+    end.
+    ''';
+begin
+  AssertEquals('the element value is the call target', '',
+    AsmMissing(Src,
+      #9'movq (%rax), %rax'#10#9'movq %rax, %rbx'#10#9'subq $16, %rsp',
+      #9'ldr x0, [x0]'#10#9'stur x0, [x29, #-'));
 end;
 
 initialization

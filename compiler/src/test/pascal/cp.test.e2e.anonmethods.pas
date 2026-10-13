@@ -177,6 +177,10 @@ type
       loop: each execution releases the previous value (x86-64 leaked all
       but the last; arm64 refused the declaration) }
     procedure TestRun_BlockVar_ManagedAggregatesPerIteration;
+    { A[I](args); and P^(args); as statements, over a bare procedural type,
+      a 'reference to' and a method pointer; a discarded string result is
+      released (BUG-20261012-call-element-statement) }
+    procedure TestRun_ExprCallStmt_ElementAndDeref;
   end;
 
 implementation
@@ -2478,6 +2482,52 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertLeakFreeOnAll(Src, 'blockvars 39 0 200');
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ExprCallStmt_ElementAndDeref;
+const
+  Src = '''
+    program ExprCalls;
+    uses SysUtils;
+    type
+      TP = procedure(X: Integer);
+      TR = reference to procedure(X: Integer);
+      TS = reference to function: string;
+      PR = ^TR;
+      TM = procedure of object;
+      TOb = class N: Integer; procedure Hi; end;
+    procedure TOb.Hi; begin Write(' hi', N) end;
+    procedure Show(X: Integer); begin Write(' show', X) end;
+    var
+      A: array[0..1] of TP;
+      R: array[0..1] of TR;
+      S: array[0..0] of TS;
+      M: array[0..0] of TM;
+      P: PR;
+      F: TR;
+      O: TOb;
+      Total: Integer;
+    begin
+      A[1] := @Show;
+      A[1](7);
+      R[0] := procedure(X: Integer) begin Total := Total + X end;
+      R[0](5); R[0](6);
+      Write(' total', Total);
+      F := procedure(X: Integer) begin Write(' deref', X) end;
+      P := @F;
+      P^(9);
+      S[0] := function: string begin Result := 'x' + IntToStr(Total) end;
+      S[0]();
+      O := TOb.Create(); O.N := 3;
+      M[0] := @O.Hi;
+      M[0]();
+      O.Free();
+      WriteLn()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, ' show7 total11 deref9 hi3');
 end;
 
 initialization

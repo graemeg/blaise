@@ -4560,6 +4560,16 @@ Create`) and constructor dispatch through a metaclass variable
 The `@` (address-of) operator is the sole exception: `@Obj.Method` takes a
 method reference and does not invoke the method, so no `()` is written.
 
+The same rule makes a call through a procedural value an *element* or a
+*dereference* holds unambiguous as a statement: `Handlers[I](X);` and
+`P^(X);` are calls, where Delphi and FPC must infer from context whether a
+bare `Handlers[I]` in statement position calls the handler or merely names
+it.  Both compilers accept the call form, so the statement is ordinary
+Pascal; Blaise simply never has the bare form to disambiguate.  (The
+expression form `Y := Handlers[I](X)` was already supported; only the
+statement form was missing, because the parser treated a subscript in
+statement position as the start of an assignment or a member access.)
+
 In standard Object Pascal (Delphi and FPC), a bare identifier that resolves
 to a parameterless function or procedure is ambiguous: it can be either a
 call or a reference to the function's `Result` variable (inside the function

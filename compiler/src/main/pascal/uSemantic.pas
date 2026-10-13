@@ -9752,6 +9752,8 @@ begin
           TodoExprs.Add(TPointerWriteStmt(CurStmt).PtrExpr);
           TodoExprs.Add(TPointerWriteStmt(CurStmt).ValExpr);
         end
+        else if CurStmt is TExprCallStmt then
+          TodoExprs.Add(TExprCallStmt(CurStmt).Call)
         else if CurStmt is TInheritedCallStmt then
         begin
           { 'inherited M(...)' dispatches on the method's Self. }
@@ -10995,6 +10997,8 @@ begin
     AnalyseInheritedCall(TInheritedCallStmt(AStmt))
   else if AStmt is TPointerWriteStmt then
     AnalysePointerWriteStmt(TPointerWriteStmt(AStmt))
+  else if AStmt is TExprCallStmt then
+    Self.AnalyseExprSlot(TExprCallStmt(AStmt).Call)
   else if AStmt is TStaticSubscriptAssign then
     AnalyseStaticSubscriptAssign(TStaticSubscriptAssign(AStmt))
   else if AStmt is TProcCall then

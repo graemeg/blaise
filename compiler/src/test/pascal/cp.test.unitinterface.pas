@@ -2775,7 +2775,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 23', Buf) = 0);
+      Pos('BLAISE-IFACE 24', Buf) = 0);
   finally
     Iface.Free();
   end;

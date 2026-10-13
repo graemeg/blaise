@@ -16237,6 +16237,7 @@ var
   DiscMShim: TMethodCallExpr;
   PropRelStr: Boolean;
   PtrSlot: string;
+  RetT: TTypeDesc;
 begin
   { An empty statement (e.g. the body of `for x := 0 to N do;`) parses to a nil
     statement — the parser's convention for "no statement here".  It is a valid,
@@ -18233,6 +18234,28 @@ begin
   begin
     { Class method call in statement position (result discarded). }
     Self.EmitMethodCallStmt(TMethodCallStmt(AStmt));
+    Exit;
+  end;
+
+  if AStmt is TExprCallStmt then
+  begin
+    { L[I](args); / P^(args);  The call runs as the expression it is; an
+      owned managed result nobody consumes is released here (a closure's
+      Env arrives in %rdx). }
+    Self.EmitExprToEax(TExprCallStmt(AStmt).Call);
+    RetT := TProceduralTypeDesc(
+      TIndirectFuncCallExpr(TExprCallStmt(AStmt).Call).ResolvedProcType).ReturnType;
+    if RetT <> nil then
+    begin
+      if RetT.IsString() then
+        Self.Emit(#9'movq %rax, %rdi'#10#9'callq _StringRelease')
+      else if RetT.Kind = tyClass then
+        Self.Emit(#9'movq %rax, %rdi'#10#9'callq _ClassRelease')
+      else if RetT.Kind = tyDynArray then
+        Self.Emit(#9'movq %rax, %rdi'#10#9'callq _DynArrayRelease')
+      else if ArcTypeIsRefClosure(RetT) then
+        Self.Emit(#9'movq %rdx, %rdi'#10#9'callq _ClassRelease');
+    end;
     Exit;
   end;
 

@@ -7563,6 +7563,15 @@ begin
     EmitMethodCallStmt(TMethodCallStmt(AStmt));
     Exit;
   end;
+  if AStmt is TExprCallStmt then
+  begin
+    { L[I](args); / P^(args);  The call runs as the expression it is; an
+      owned managed result nobody consumes is released }
+    Self.EmitExprToX0(TExprCallStmt(AStmt).Call);
+    EmitDiscardedProcResult(TProceduralTypeDesc(
+      TIndirectFuncCallExpr(TExprCallStmt(AStmt).Call).ResolvedProcType));
+    Exit;
+  end;
   if AStmt is TVarDeclStmt then
   begin
     EmitVarDeclStmt(TVarDeclStmt(AStmt));

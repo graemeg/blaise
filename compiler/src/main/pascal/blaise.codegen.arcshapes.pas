@@ -357,6 +357,8 @@ begin
       CollectAddressTakenStmt(TCaseBranch(CaseS.Branches.Items[I]).Stmt, ASet);
     CollectAddressTakenStmt(CaseS.ElseStmt, ASet);
   end
+  else if AStmt is TExprCallStmt then
+    CollectAddressTakenExpr(TExprCallStmt(AStmt).Call, ASet)
   else if AStmt is TPointerWriteStmt then
   begin
     PWrite := TPointerWriteStmt(AStmt);

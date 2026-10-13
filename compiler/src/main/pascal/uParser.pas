@@ -199,6 +199,7 @@ type
       to lower. }
     function ParseCallArg(const ACallee: string): TASTExpr;
     procedure ParseMethodCallArgList(ACall: TMethodCallStmt);
+    function  ParseExprCallStmt(ACallee: TASTExpr; ALine, ACol: Integer): TASTStmt;
   public
     constructor Create(ALexer: TLexer);
     destructor Destroy; override;
@@ -3598,6 +3599,36 @@ begin
   Result := VS;
 end;
 
+function TParser.ParseExprCallStmt(ACallee: TASTExpr; ALine, ACol: Integer): TASTStmt;
+{ ACallee( args ) as a statement: the callee is the expression holding a
+  procedural value (A[I], P^); FCurrent is the '('.  Takes ownership of
+  ACallee. }
+var
+  Ind:  TIndirectFuncCallExpr;
+  Stmt: TExprCallStmt;
+begin
+  Ind := TIndirectFuncCallExpr.Create();
+  Ind.Line := ALine;
+  Ind.Col := ACol;
+  Ind.CalleeExpr := ACallee;
+  Stmt := TExprCallStmt.Create();
+  Stmt.Line := ALine;
+  Stmt.Col := ACol;
+  Stmt.Call := Ind;
+  Advance();  { consume '(' }
+  if not Check(tkRParen) then
+  begin
+    Ind.Args.Add(ParseExpr());
+    while Check(tkComma) do
+    begin
+      Advance();
+      Ind.Args.Add(ParseExpr());
+    end;
+  end;
+  Expect(tkRParen);
+  Result := Stmt;
+end;
+
 function TParser.ParseStmt: TASTStmt;
 var
   Name:        string;
@@ -3953,6 +3984,12 @@ begin
           end;
           Continue;
         end;
+        if Check(tkLParen) then
+        begin
+          { Name[I](args); — a call through the procedural value the element
+            holds (a bare 'Name[I];' stays an error: calls need parentheses) }
+          Exit(ParseExprCallStmt(ChainBase, Line, Col));
+        end;
         if not Check(tkDot) then
           raise EParseError.Create(Format(
             'Expected ''.'' or '':='' after subscript at line %d col %d in %s',
@@ -4023,6 +4060,20 @@ begin
   if Check(tkCaret) then
   begin
     Advance();  { consume '^' }
+    if Check(tkLParen) then
+    begin
+      { Ident^(args); — a call through the procedural variable a pointer
+        addresses }
+      PtrIdNode        := TIdentExpr.Create();
+      PtrIdNode.Line   := Line;
+      PtrIdNode.Col    := Col;
+      PtrIdNode.Name   := Name;
+      DerefNode        := TDerefExpr.Create();
+      DerefNode.Line   := Line;
+      DerefNode.Col    := Col;
+      DerefNode.Expr   := PtrIdNode;
+      Exit(ParseExprCallStmt(DerefNode, Line, Col));
+    end;
     if Check(tkDot) then
     begin
       { Deref-then-field assignment: Ident^.Field := Expr

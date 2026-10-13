@@ -517,6 +517,15 @@ begin
     Exit;
   end;
 
+  if AStmt is TExprCallStmt then
+  begin
+    Line('ExprCallStmt');
+    Inc(IndentLevel);
+    DumpExpr(TExprCallStmt(AStmt).Call);
+    Dec(IndentLevel);
+    Exit;
+  end;
+
   if AStmt is TMethodCallStmt then
   begin
     Flags := '';

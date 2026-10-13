@@ -54,7 +54,10 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 23; { v23: a CONST entry carries an ARRAY const's resolved
+  IFACE_VERSION = 24; { v24: a statement kind 'ecs' -- L[I](args); and
+                          P^(args); (TExprCallStmt), a call through the
+                          procedural value an expression yields.
+                        v23: a CONST entry carries an ARRAY const's resolved
                           type spelling, data label and elements.  The block
                           held only scalar fields, so a warm import rebuilt
                           every interface array const as an Integer and the
@@ -1371,6 +1374,9 @@ begin
     Result := EncodeLpstr('pcall') +
               EncodeLpstr(TProcCall(AStmt).Name) +
               EncodeExprList(TProcCall(AStmt).Args)
+  else if AStmt is TExprCallStmt then
+    Result := EncodeLpstr('ecs') +
+              EncodeExpr(TExprCallStmt(AStmt).Call)
   else if AStmt is TMethodCallStmt then
     Result := EncodeLpstr('mcs') +
               EncodeLpstr(TMethodCallStmt(AStmt).ObjectName) +
@@ -2074,6 +2080,7 @@ var
   PCn:  TProcCall;
   VDSn: TVarDeclStmt;
   MCSn: TMethodCallStmt;
+  ECSn: TExprCallStmt;
   ICSn: TInheritedCallStmt;
   ASMn: TAsmStmt;
   C, I: Integer;
@@ -2227,6 +2234,12 @@ begin
     PCn.Name := ReadLpstrAt(AText, APos);
     ReadExprList(AText, APos, PCn.Args);
     Result := PCn;
+  end
+  else if Kind = 'ecs' then
+  begin
+    ECSn := TExprCallStmt.Create();
+    ECSn.Call := ReadExpr(AText, APos);
+    Result := ECSn;
   end
   else if Kind = 'mcs' then
   begin

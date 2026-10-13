@@ -595,6 +595,15 @@ type
     destructor Destroy; override;
   end;
 
+  { A call through a procedural VALUE an expression yields, as a statement:
+    L[I](args); and P^(args); (a procedural array element or a dereferenced
+    pointer to a procedural variable).  Call is a TIndirectFuncCallExpr whose
+    result, if any, is discarded. }
+  TExprCallStmt = class(TASTStmt)
+  public
+    Call: TASTExpr;  { owned — the TIndirectFuncCallExpr }
+  end;
+
   TProcCall = class(TASTStmt)
   public
     Name:         string;
@@ -2668,6 +2677,7 @@ var
   SSA_: TStaticSubscriptAssign;
   PWS_: TPointerWriteStmt;
   PC_:  TProcCall;
+  ECS_: TExprCallStmt;
   MCS_: TMethodCallStmt;
   ICS_: TInheritedCallStmt;
   I:    Integer;
@@ -2807,6 +2817,12 @@ begin
     for I := 0 to TProcCall(AStmt).Args.Count - 1 do
       PC_.Args.Add(CloneExpr(TASTExpr(TProcCall(AStmt).Args.Items[I])));
     Result := PC_;
+  end
+  else if AStmt is TExprCallStmt then
+  begin
+    ECS_ := TExprCallStmt.Create();
+    ECS_.Call := CloneExpr(TExprCallStmt(AStmt).Call);
+    Result := ECS_;
   end
   else if AStmt is TMethodCallStmt then
   begin

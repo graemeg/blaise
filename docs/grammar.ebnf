@@ -1082,6 +1082,7 @@ Stmt
     | BlockVarDeclStmt
     | PointerWriteStmt
     | DerefStmt
+    | ExprCallStmt
     | CallChainStmt
     | StaticSubscriptAssign
     | SubscriptFieldAssign
@@ -1233,6 +1234,23 @@ CallChainStmt
       ( ASSIGN Expr
       | LBRACKET Expr RBRACKET ASSIGN Expr
       | [ LPAREN [ ArgList ] RPAREN ] )
+    ;
+
+(* A call through the procedural VALUE an element or a dereference holds,
+ * as a statement: a procedural array element  Handlers[I](args);  (a bare
+ * procedural type, a method pointer, or a 'reference to'), the same with
+ * further subscripts  Grid[I][J](args);  or  R.Handlers[I](args);  (the
+ * chain must END in a subscript -- a trailing  .IDENT(  is a method call,
+ * SubscriptMethodCall), and a dereferenced pointer to a procedural variable
+ * P^(args);.  The parentheses are mandatory (a bare  Handlers[I];  is not a
+ * statement), exactly as for every other call.  A function's result, if any,
+ * is discarded (and released when it is managed).  The expression form
+ * Handlers[I](args) was already accepted; see language-rationale.adoc,
+ * "Mandatory parentheses on zero-argument calls". *)
+ExprCallStmt
+    = IDENT LBRACKET Expr { COMMA Expr } RBRACKET { SubscriptSuffix }
+      LPAREN [ ArgList ] RPAREN
+    | IDENT CARET LPAREN [ ArgList ] RPAREN
     ;
 
 FieldAssignment
