@@ -2333,6 +2333,8 @@ begin
   Sym := TSymbol.Create('ZeroMem', skProcedure, nil); Define(Sym);
   { Move(Source, Dest, Count) — overlap-safe byte copy between two variables }
   Sym := TSymbol.Create('Move', skProcedure, nil); Define(Sym);
+  { FillByte(Dest, Count, Value) — set Count bytes of a variable to Value }
+  Sym := TSymbol.Create('FillByte', skProcedure, nil); Define(Sym);
   { CLI arguments }
   Sym := TSymbol.Create('ParamCount', skFunction,  FTypeInteger); Define(Sym);
   Sym := TSymbol.Create('ParamStr',   skFunction,  FTypeString);  Define(Sym);

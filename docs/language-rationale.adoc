@@ -7329,6 +7329,10 @@ it with a message that says it is not part of Blaise and gives the Blaise form.
 
 | `class(TInterfacedObject, IFoo)`
 | `class(TObject, IFoo)`: every Blaise class is reference-counted
+
+| `FillChar(X, Count, Value)`
+| `FillByte(X, Count, Value)`: Blaise has no `Char` type, and the routine
+  fills bytes (see "`Move` and `FillByte` — Intrinsics for Unmanaged Data")
 |===
 
 The keywords are ordinary identifiers in Blaise, so a variable named `label`,
@@ -7381,7 +7385,7 @@ compiler.
   project that wants the name can declare
   `TInterfacedObject = class end;` itself.
 
-== `Move` — an Intrinsic for Unmanaged Data
+== `Move` and `FillByte` — Intrinsics for Unmanaged Data
 
 === Decision
 
@@ -7402,9 +7406,19 @@ FPC and Delphi use.  It is a compiler intrinsic, not a declared procedure:
   check runs per generic instantiation, so `TBox<Integer>` may use `Move` in
   its body while `TBox<string>` is refused.
 
+`FillByte(Dest, Count, Value)` sets `Count` bytes of the variable `Dest` to
+`Value`, with FPC's name and argument order.  `Dest` follows the same rules
+as a `Move` operand, including the managed-type check.  `Value` is an
+integer: a constant must be in 0..255, and a variable contributes its low
+byte.  A `Count` of zero or less writes nothing.
+
+`FillChar` is not provided.  A call to it is rejected with a message that
+names `FillByte` and shows `Ord('A')` for a character value (see "FPC and
+Delphi Constructs Blaise Omits").
+
 Methods named `Move` (such as a list's `Move(CurIndex, NewIndex)`) are
-unaffected; as for every built-in routine, a standalone routine of that
-name cannot be redeclared.
+unaffected; as for every built-in routine, a standalone routine named
+`Move` or `FillByte` cannot be redeclared.
 
 === Rationale
 
@@ -7424,6 +7438,18 @@ interfaces; in Blaise every class reference is managed as well, so the trap
 would cover most data.  Assignment is the correct copy for managed data and
 already handles records and static arrays element by element.
 
+The same trap applies to filling: `FillByte` over a record that holds a
+string overwrites the string's reference with bytes, so the next release of
+that field frees a pointer the program never owned.
+
+`FillChar` is the FPC and Delphi name, but the routine has never filled
+characters in any sense Blaise could honour: its count and its value are
+bytes, and in Delphi since 2009 a `Char` is two bytes, so the name no longer
+matches what the routine does.  Blaise has no `Char` type at all.
+`FillByte` is already the FPC name for exactly this operation and says what
+it does; accepting `FillChar` as well would give one routine two spellings,
+which the recognise-reject-explain policy rules out.
+
 Overlap safety follows the FPC and Delphi contract.  Porting code relies on
 it (the classic use is shifting array elements to open or close a gap), and
 a `memcpy` that silently corrupts on overlap would be a footgun of its own.
@@ -7437,6 +7463,11 @@ a `memcpy` that silently corrupts on overlap would be a footgun of its own.
   Rejected: it differs from FPC and Delphi at every call site of ported
   code, and the operands' types are lost behind `Pointer`, so the
   managed-type check could not run.
+* *Accept `FillChar` as an alias of `FillByte`.*  Rejected: two spellings
+  of one routine, and the name describes a `Char` type Blaise does not have.
+* *Accept a one-character string as the `FillByte` value*
+  (`FillByte(Buf, N, ' ')`).  Rejected: a string is not a byte, and the
+  conversion is one `Ord` call that the error message spells out.
 * *Allow managed types and leave the responsibility to the programmer*, as
   FPC and Delphi do.  Rejected: under universal ARC the trap covers almost
   all data, and the compiler can rule it out cheaply.

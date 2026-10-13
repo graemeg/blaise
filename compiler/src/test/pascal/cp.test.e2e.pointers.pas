@@ -63,6 +63,7 @@ type
     procedure TestRun_DerefMethodCallsAndCallResultDerefs;
     procedure TestRun_Move_CopiesAndHandlesOverlap;
     procedure TestRun_Move_MethodNamedMoveStillCalled;
+    procedure TestRun_FillByte_FillsAndTruncatesValue;
   end;
 
 implementation
@@ -913,6 +914,50 @@ const
 begin
   AssertRunsOnAll(Src,
     'method Move 3 4' + LineEnding + 'method Move 1 2' + LineEnding, 0);
+end;
+
+{ FillByte(Dest, Count, Value): a whole array, a slice from an element, a
+  record, a non-positive count as a no-op, a variable value (only its low
+  byte is used) and an Int64 count. }
+procedure TE2EPointersTests.TestRun_FillByte_FillsAndTruncatesValue;
+const
+  Src = '''
+    program FillDemo;
+    type
+      TPair = record
+        X, Y: Integer;
+      end;
+    var
+      A: array[0..7] of Byte;
+      R: TPair;
+      I, Neg, V: Integer;
+      N: Int64;
+    begin
+      FillByte(A, SizeOf(A), 7);
+      FillByte(A[2], 3, 9);
+      for I := 0 to 7 do
+        Write(A[I], ' ');
+      WriteLn();
+      R.X := 5;
+      R.Y := 6;
+      FillByte(R, SizeOf(TPair), 0);
+      WriteLn(R.X, ' ', R.Y);
+      Neg := -1;
+      FillByte(A, Neg, 1);
+      FillByte(A, 0, 1);
+      WriteLn(A[0]);
+      V := $1FF;
+      N := 2;
+      FillByte(A[6], N, V);
+      WriteLn(A[5], ' ', A[6], ' ', A[7]);
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src,
+    '7 7 9 9 9 7 7 7 ' + LineEnding +
+    '0 0' + LineEnding +
+    '7' + LineEnding +
+    '7 255 255' + LineEnding, 0);
 end;
 
 initialization

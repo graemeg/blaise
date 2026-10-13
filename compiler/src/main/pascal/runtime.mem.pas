@@ -71,6 +71,9 @@ function  _BlaiseReallocMem(Ptr: Pointer; NewSize: Integer): Pointer;
   addresses in Pascal order (Source first).  Overlap-safe; a Count of zero
   or less copies nothing, as in FPC and Delphi. }
 procedure _BlaiseMove(Src, Dst: Pointer; N: Int64);
+{ FillByte(Dest, Count, Value): sets Count bytes at Dst to the low byte of
+  Value; a Count of zero or less writes nothing. }
+procedure _BlaiseFillByte(Dst: Pointer; N: Int64; Value: Integer);
 
 { Phase-5 teardown / reclamation API (concurrent-allocator-design.adoc,
   §Teardown, §Reclamation protocol).  The _Mem* functions below are
@@ -113,6 +116,7 @@ function  _libc_munmap(Addr: Pointer; Length: Int64): Integer;
             external name 'munmap';
 procedure _libc_memcpy(Dst, Src: Pointer; N: Int64); external name 'memcpy';
 procedure _libc_memmove(Dst, Src: Pointer; N: Int64); external name 'memmove';
+procedure _libc_memset(Dst: Pointer; C: Integer; N: Int64); external name 'memset';
 
 {$IFDEF BLAISE_MEMDEBUG}
 { Diagnostic-only: a double-free detector (BUG-20260724-arm64-classes-emit-
@@ -1024,6 +1028,12 @@ procedure _BlaiseMove(Src, Dst: Pointer; N: Int64);
 begin
   if (N > 0) and (Src <> Dst) then
     _libc_memmove(Dst, Src, N);
+end;
+
+procedure _BlaiseFillByte(Dst: Pointer; N: Int64; Value: Integer);
+begin
+  if N > 0 then
+    _libc_memset(Dst, Value and $FF, N);
 end;
 
 procedure _BlaiseFreeMem(Ptr: Pointer);

@@ -104,6 +104,20 @@ type
     procedure TestSemantic_Move_StaticArrayOfInterface_Rejected;
     procedure TestSemantic_Move_GenericManagedInstance_Rejected;
     procedure TestNative_Move_CallsBlaiseMoveSourceFirst;
+
+    { ------------------------------------------------------------------ }
+    { FillByte(Dest, Count, Value) — byte fill intrinsic; FillChar is      }
+    { recognised and pointed at FillByte (Blaise has no Char type)         }
+    { ------------------------------------------------------------------ }
+    procedure TestSemantic_FillByte_Accepted;
+    procedure TestSemantic_FillByte_WrongArity_Rejected;
+    procedure TestSemantic_FillByte_NonVariable_Rejected;
+    procedure TestSemantic_FillByte_NonIntegerCount_Rejected;
+    procedure TestSemantic_FillByte_NonIntegerValue_Rejected;
+    procedure TestSemantic_FillByte_ValueOutOfRange_Rejected;
+    procedure TestSemantic_FillByte_Managed_Rejected;
+    procedure TestSemantic_FillChar_NamesFillByte;
+    procedure TestNative_FillByte_CallsBlaiseFillByte;
   end;
 
 implementation
@@ -844,6 +858,162 @@ begin
     call, so _BlaiseMove receives Source first. }
   AssertEquals('lowers to _BlaiseMove', '',
     AsmMissing(SrcMoveOk, 'callq _BlaiseMove', 'bl __BlaiseMove'));
+end;
+
+const
+  SrcFillOk = '''
+    program P;
+    var
+      A: array[0..7] of Byte;
+    begin
+      FillByte(A, SizeOf(A), 255);
+    end.
+    ''';
+
+procedure TPointerTests.TestSemantic_FillByte_Accepted;
+begin
+  AssertEquals('static array', '', SemanticError(SrcFillOk));
+  AssertEquals('deref, element and variable value', '', SemanticError('''
+    program P;
+    type
+      PByte = ^Byte;
+      TRec = record
+        X, Y: Integer;
+      end;
+    var
+      Q: PByte;
+      A: array[0..7] of Integer;
+      R: TRec;
+      V: Byte;
+      N: Int64;
+    begin
+      V := 7;
+      N := 4;
+      FillByte(Q^, N, V);
+      FillByte(A[2], 8, 0);
+      FillByte(R, SizeOf(TRec), 0);
+    end.
+    '''));
+end;
+
+procedure TPointerTests.TestSemantic_FillByte_WrongArity_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    var A: Integer;
+    begin
+      FillByte(A, 4);
+    end.
+    ''');
+  AssertTrue('two arguments: ' + Msg, Pos(
+    '''FillByte'' requires exactly 3 arguments: FillByte(Dest, Count, Value)',
+    Msg) >= 0);
+end;
+
+procedure TPointerTests.TestSemantic_FillByte_NonVariable_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    begin
+      FillByte(1, 4, 0);
+    end.
+    ''');
+  AssertTrue('names the argument: ' + Msg,
+    Pos('First argument of ''FillByte'' must be a variable', Msg) >= 0);
+end;
+
+procedure TPointerTests.TestSemantic_FillByte_NonIntegerCount_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    var A: Integer;
+    begin
+      FillByte(A, 1.5, 0);
+    end.
+    ''');
+  AssertTrue('names the count: ' + Msg,
+    Pos('Count argument of ''FillByte'' must be an integer', Msg) >= 0);
+end;
+
+procedure TPointerTests.TestSemantic_FillByte_NonIntegerValue_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    var A: Integer;
+    begin
+      FillByte(A, 4, ' ');
+    end.
+    ''');
+  AssertTrue('names the value and Ord: ' + Msg,
+    (Pos('Value argument of ''FillByte'' must be an integer', Msg) >= 0) and
+    (Pos('Ord(', Msg) >= 0));
+end;
+
+procedure TPointerTests.TestSemantic_FillByte_ValueOutOfRange_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    var A: Integer;
+    begin
+      FillByte(A, 4, 256);
+    end.
+    ''');
+  AssertTrue('names the range: ' + Msg,
+    Pos('Value argument of ''FillByte'' must be in 0..255, got 256', Msg) >= 0);
+end;
+
+procedure TPointerTests.TestSemantic_FillByte_Managed_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    type
+      TRec = record
+        Id: Integer;
+        Name: string;
+      end;
+    var R: TRec;
+    begin
+      FillByte(R, SizeOf(TRec), 0);
+    end.
+    ''');
+  AssertTrue('names the type and the rule: ' + Msg,
+    (Pos('''FillByte'' cannot fill ''TRec''', Msg) >= 0) and
+    (Pos('reference-counted', Msg) >= 0));
+end;
+
+procedure TPointerTests.TestSemantic_FillChar_NamesFillByte;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    var A: array[0..7] of Byte;
+    begin
+      FillChar(A, SizeOf(A), 0);
+    end.
+    ''');
+  AssertTrue('points to FillByte: ' + Msg,
+    (Pos('''FillChar'' is not available in Blaise', Msg) >= 0) and
+    (Pos('no Char type', Msg) >= 0) and
+    (Pos('FillByte(Dest, Count, Value)', Msg) >= 0));
+end;
+
+procedure TPointerTests.TestNative_FillByte_CallsBlaiseFillByte;
+begin
+  AssertEquals('lowers to _BlaiseFillByte', '',
+    AsmMissing(SrcFillOk, 'callq _BlaiseFillByte', 'bl __BlaiseFillByte'));
 end;
 
 initialization

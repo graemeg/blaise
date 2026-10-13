@@ -1412,6 +1412,12 @@ ArrayLiteral
  *              reference-counted data (string, class, interface, dynamic
  *              array, 'reference to', or a record/static array containing
  *              one): that is a compile-time error.  Count is an integer.
+ *   FillByte ( Dest, Count, Value )
+ *            — set Count bytes of the variable Dest to Value; Count <= 0
+ *              writes nothing.  Dest follows the Move rules above.  Value
+ *              is an integer; a constant must be in 0..255, a variable
+ *              contributes its low byte.  (FillChar is rejected with a
+ *              message naming FillByte: Blaise has no Char type.)
  *)
 
 (* An argument of Write / WriteLn may carry a field width and, for a real

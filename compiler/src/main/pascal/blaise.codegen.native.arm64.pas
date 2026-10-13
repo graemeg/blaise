@@ -8932,6 +8932,26 @@ begin
     EmitCallSym('_BlaiseMove');
     Exit;
   end;
+  { FillByte(Dest, Count, Value) -> _BlaiseFillByte(@Dest, Count, Value),
+    Dest already rewritten to an address-of node by the semantic pass. }
+  if SameText(ACall.Name, 'FillByte') and (ACall.ResolvedDecl = nil) and
+     (ACall.Args.Count = 3) then
+  begin
+    Self.EmitExprToX0(TASTExpr(ACall.Args.Items[0]));
+    EmitPushX0();
+    Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
+    case TASTExpr(ACall.Args.Items[1]).ResolvedType.Kind of
+      tyInteger, tySmallInt: Self.Emit(#9'sxtw x0, w0');
+      tyUInt32, tyWord, tyByte: Self.Emit(#9'mov w0, w0');
+    end;
+    EmitPushX0();
+    Self.EmitExprToX0(TASTExpr(ACall.Args.Items[2]));
+    Self.Emit(#9'mov w2, w0');
+    EmitPopTo('x1');
+    EmitPopTo('x0');
+    EmitCallSym('_BlaiseFillByte');
+    Exit;
+  end;
   if SameText(ACall.Name, 'ZeroMem') and (ACall.ResolvedDecl = nil) and
      (ACall.Args.Count = 2) then
   begin

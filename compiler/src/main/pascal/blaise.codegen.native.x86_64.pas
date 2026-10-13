@@ -17817,6 +17817,26 @@ begin
       Self.Emit(#9'callq _BlaiseMove');
       Exit;
     end;
+    { FillByte(Dest, Count, Value) -> _BlaiseFillByte(@Dest, Count, Value),
+      Dest already rewritten to an address-of node by the semantic pass. }
+    if SameText(PC.Name, 'FillByte') and (PC.ResolvedDecl = nil) and
+       (PC.Args.Count = 3) then
+    begin
+      Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
+      Self.Emit(#9'pushq %rax');
+      Self.EmitExprToEax(TASTExpr(PC.Args.Items[1]));
+      case TASTExpr(PC.Args.Items[1]).ResolvedType.Kind of
+        tyInteger, tySmallInt: Self.Emit(#9'movslq %eax, %rax');
+        tyUInt32, tyWord, tyByte: Self.Emit(#9'movl %eax, %eax');
+      end;
+      Self.Emit(#9'pushq %rax');
+      Self.EmitExprToEax(TASTExpr(PC.Args.Items[2]));
+      Self.Emit(#9'movl %eax, %edx');
+      Self.Emit(#9'popq %rsi');
+      Self.Emit(#9'popq %rdi');
+      Self.Emit(#9'callq _BlaiseFillByte');
+      Exit;
+    end;
     if SameText(PC.Name, 'ZeroMem') and (PC.Args.Count = 2) then
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));

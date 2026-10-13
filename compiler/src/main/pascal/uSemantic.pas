@@ -427,9 +427,15 @@ type
     function  FloatBuiltinArgType(const AName: string; AArgType: TTypeDesc;
       ALine, ACol: Integer): TTypeDesc;
     procedure AnalyseProcCall(ACall: TProcCall);
-    { Move(Source, Dest, Count): validate, then rewrite Source and Dest to
-      their addresses so the backends lower a plain _BlaiseMove call. }
+    { Raw-memory intrinsics Move(Source, Dest, Count) and FillByte(Dest,
+      Count, Value): validate, then rewrite the variable operands to their
+      addresses so the backends lower a plain RTL call. }
+    procedure AnalyseRawMemOperand(ACall: TProcCall; AIndex: Integer;
+      const ARoutine, APosition, AVerb, ARemedy: string; AWritten: Boolean);
+    function  AnalyseRawMemInteger(ACall: TProcCall; AIndex: Integer;
+      const ARoutine, ARole, AHint: string): TTypeDesc;
     procedure AnalyseMoveCall(ACall: TProcCall);
+    procedure AnalyseFillByteCall(ACall: TProcCall);
     { Phase A/B overload resolution.  Walks FProcIndex collecting all
       decls whose name matches AName (case-insensitive); filters by
       arity; for the survivors, scores per-argument compatibility
@@ -13526,69 +13532,109 @@ begin
   end;
 end;
 
-{ Move(Source, Dest, Count) copies Count bytes from the storage of Source
-  to the storage of Dest, correctly when the two overlap (memmove).  Both
-  operands must be variables -- an identifier, field, dereference or array
-  element -- and neither may hold reference-counted data: a raw byte copy of
-  a string, class, interface, dynamic array or a record/array containing one
-  would duplicate or drop references without adjusting their counts.
-  Assignment is the correct copy for those, so the error says so.
+{ One variable operand of a raw-memory intrinsic (Move, FillByte).  It must
+  be a variable -- an identifier, field, dereference or array element -- and
+  must not hold reference-counted data: a raw byte copy or fill of a string,
+  class, interface, dynamic array or a record/array containing one would
+  duplicate, drop or corrupt references without adjusting their counts.
 
-  Source and Dest are rewritten in place to '@Source' / '@Dest' nodes, so
-  both backends see an ordinary three-argument call: _BlaiseMove(@Source,
-  @Dest, Count). }
-procedure TSemanticAnalyser.AnalyseMoveCall(ACall: TProcCall);
-const
-  Ordinal: array[0..1] of string = ('First', 'Second');
+  The operand is rewritten in place to an '@Operand' node, so the backends
+  see a plain pointer argument.  APosition names it in a message ('First'),
+  AVerb says what the routine does to it ('copy', 'fill') and ARemedy is the
+  safe alternative the message offers.  AWritten marks the operand the
+  routine writes, for the for-in loop variable warning. }
+procedure TSemanticAnalyser.AnalyseRawMemOperand(ACall: TProcCall;
+  AIndex: Integer; const ARoutine, APosition, AVerb, ARemedy: string;
+  AWritten: Boolean);
 var
-  I: Integer;
   Arg: TASTExpr;
   AoE: TAddrOfExpr;
-  InnerType, CountType: TTypeDesc;
+  InnerType: TTypeDesc;
+begin
+  Arg := TASTExpr(ACall.Args.Items[AIndex]);
+  AoE := TAddrOfExpr.Create();
+  AoE.Line := Arg.Line;
+  AoE.Col := Arg.Col;
+  AoE.Expr := Arg;
+  ACall.Args.Items[AIndex] := AoE;
+  Self.AnalyseAddrOfExpr(AoE);
+  if (AoE.ResolvedType is TProceduralTypeDesc) or
+     not IsVarArgLValue(AoE.Expr) then
+    SemanticError(
+      Format('%s argument of ''%s'' must be a variable', [APosition, ARoutine]),
+      ACall.Line, ACall.Col);
+  InnerType := AoE.Expr.ResolvedType;
+  if (InnerType <> nil) and InnerType.HasManagedContent() then
+  begin
+    if InnerType.IsString() or
+       (InnerType.Kind in [tyClass, tyInterface, tyDynArray, tyProcedural]) then
+      SemanticError(
+        Format('''%s'' cannot %s ''%s'': it is reference-counted, and a raw '
+          + 'byte %s would bypass the reference count; %s',
+          [ARoutine, AVerb, InnerType.Name, AVerb, ARemedy]),
+        ACall.Line, ACall.Col)
+    else
+      SemanticError(
+        Format('''%s'' cannot %s ''%s'': it contains reference-counted data '
+          + '(a string, class, interface or dynamic array), and a raw byte %s '
+          + 'would bypass the reference counts; %s',
+          [ARoutine, AVerb, InnerType.Name, AVerb, ARemedy]),
+        ACall.Line, ACall.Col);
+  end;
+  if AWritten then
+    WarnIfVarArgIsForInLoopVar(AoE.Expr);
+end;
+
+{ An integer-typed argument of a raw-memory intrinsic; returns its type. }
+function TSemanticAnalyser.AnalyseRawMemInteger(ACall: TProcCall;
+  AIndex: Integer; const ARoutine, ARole, AHint: string): TTypeDesc;
+begin
+  Result := Self.AnalyseListSlot(ACall.Args, AIndex);
+  if (Result = nil) or not (Result.Kind in [tyInteger, tyInt64, tyUInt32,
+       tyUInt64, tySmallInt, tyWord, tyByte]) then
+    SemanticError(
+      Format('%s argument of ''%s'' must be an integer%s',
+        [ARole, ARoutine, AHint]),
+      ACall.Line, ACall.Col);
+end;
+
+{ Move(Source, Dest, Count) copies Count bytes from the storage of Source to
+  the storage of Dest, correctly when the two overlap (memmove).  Both
+  backends lower it to _BlaiseMove(@Source, @Dest, Count). }
+procedure TSemanticAnalyser.AnalyseMoveCall(ACall: TProcCall);
 begin
   if ACall.Args.Count <> 3 then
     SemanticError(
       '''Move'' requires exactly 3 arguments: Move(Source, Dest, Count)',
       ACall.Line, ACall.Col);
-  for I := 0 to 1 do
-  begin
-    Arg := TASTExpr(ACall.Args.Items[I]);
-    AoE := TAddrOfExpr.Create();
-    AoE.Line := Arg.Line;
-    AoE.Col := Arg.Col;
-    AoE.Expr := Arg;
-    ACall.Args.Items[I] := AoE;
-    Self.AnalyseAddrOfExpr(AoE);
-    if (AoE.ResolvedType is TProceduralTypeDesc) or
-       not IsVarArgLValue(AoE.Expr) then
-      SemanticError(
-        Format('%s argument of ''Move'' must be a variable', [Ordinal[I]]),
-        ACall.Line, ACall.Col);
-    InnerType := AoE.Expr.ResolvedType;
-    if (InnerType <> nil) and InnerType.HasManagedContent() then
-    begin
-      if InnerType.IsString() or
-         (InnerType.Kind in [tyClass, tyInterface, tyDynArray, tyProcedural]) then
-        SemanticError(
-          Format('''Move'' cannot copy ''%s'': it is reference-counted, and a '
-            + 'raw byte copy would bypass the reference count; use assignment '
-            + 'instead', [InnerType.Name]),
-          ACall.Line, ACall.Col)
-      else
-        SemanticError(
-          Format('''Move'' cannot copy ''%s'': it contains reference-counted '
-            + 'data (a string, class, interface or dynamic array), and a raw '
-            + 'byte copy would bypass the reference counts; use assignment '
-            + 'instead', [InnerType.Name]),
-          ACall.Line, ACall.Col);
-    end;
-    if I = 1 then
-      WarnIfVarArgIsForInLoopVar(AoE.Expr);   { only Dest is written }
-  end;
-  CountType := Self.AnalyseListSlot(ACall.Args, 2);
-  if (CountType = nil) or not (CountType.Kind in [tyInteger, tyInt64, tyUInt32,
-       tyUInt64, tySmallInt, tyWord, tyByte]) then
-    SemanticError('Count argument of ''Move'' must be an integer',
+  Self.AnalyseRawMemOperand(ACall, 0, 'Move', 'First', 'copy',
+    'use assignment instead', False);
+  Self.AnalyseRawMemOperand(ACall, 1, 'Move', 'Second', 'copy',
+    'use assignment instead', True);
+  Self.AnalyseRawMemInteger(ACall, 2, 'Move', 'Count', '');
+end;
+
+{ FillByte(Dest, Count, Value) sets Count bytes of the storage of Dest to
+  Value.  Value is an integer; a constant must be in 0..255, and a variable
+  contributes its low byte.  Both backends lower it to
+  _BlaiseFillByte(@Dest, Count, Value). }
+procedure TSemanticAnalyser.AnalyseFillByteCall(ACall: TProcCall);
+var
+  V: Int64;
+begin
+  if ACall.Args.Count <> 3 then
+    SemanticError(
+      '''FillByte'' requires exactly 3 arguments: FillByte(Dest, Count, Value)',
+      ACall.Line, ACall.Col);
+  Self.AnalyseRawMemOperand(ACall, 0, 'FillByte', 'First', 'fill',
+    'assign its fields instead', True);
+  Self.AnalyseRawMemInteger(ACall, 1, 'FillByte', 'Count', '');
+  Self.AnalyseRawMemInteger(ACall, 2, 'FillByte', 'Value',
+    ' in 0..255 (for a character, write Ord(''A''))');
+  if TryEvalConstIntExpr(TASTExpr(ACall.Args.Items[2]), V) and
+     ((V < 0) or (V > 255)) then
+    SemanticError(
+      Format('Value argument of ''FillByte'' must be in 0..255, got %d', [V]),
       ACall.Line, ACall.Col);
 end;
 
@@ -13690,6 +13736,14 @@ begin
     InstantiateGenericFunc(ACall.Name);
     Sym := FTable.Lookup(ACall.Name);
   end;
+  { Recognise, reject, explain: FPC/Delphi FillChar fills BYTES, and Blaise
+    has no Char type, so the routine is FillByte (FPC's own name for it). }
+  if (Sym = nil) and SameText(ACall.Name, 'FillChar') then
+    SemanticError(
+      '''FillChar'' is not available in Blaise, which has no Char type: use '
+      + 'FillByte(Dest, Count, Value), with Value in 0..255 (Ord(''A'') for a '
+      + 'character)',
+      ACall.Line, ACall.Col);
   if Sym = nil then
     SemanticError(
       Format('Undeclared procedure ''%s''', [ACall.Name]),
@@ -13903,6 +13957,9 @@ begin
     else
     if SameText(ACall.Name, 'Move') then
       Self.AnalyseMoveCall(ACall)
+    else
+    if SameText(ACall.Name, 'FillByte') then
+      Self.AnalyseFillByteCall(ACall)
     else
     if SameText(ACall.Name, 'Sleep') then
     begin
