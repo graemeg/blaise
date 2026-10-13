@@ -10,8 +10,9 @@ unit cp.test.runner_filters;
 
 { Unit tests for the suite-filter helpers in blaise.testing.runner.text.
   Exercises the pure-function parts (SplitSuiteSpec, AppendSuiteFilter,
-  MatchesFilters) so the CLI surface — multiple --suite flags and
-  comma-delimited values — has direct regression coverage. }
+  MatchesFilters, ParseRunnerArgs) so the CLI surface — multiple --suite
+  flags, comma-delimited values, --help and rejected options — has direct
+  regression coverage. }
 
 interface
 
@@ -42,6 +43,17 @@ type
     procedure TestParseSub_MultiLineFailureKeepsLaterOnes;
     procedure TestParseSub_ContinuationNotCountedAsTest;
     procedure TestParseSub_FailuresThenErrors;
+
+    procedure TestArgs_NoneRunsEverything;
+    procedure TestArgs_KnownOptions;
+    procedure TestArgs_HelpLongAndShort;
+    procedure TestArgs_UnknownOption_IsError;
+    procedure TestArgs_ShortVerbose_IsError;
+    procedure TestArgs_StrayArgument_IsError;
+    procedure TestArgs_SuiteWithoutValue_IsError;
+    procedure TestArgs_SuiteFollowedByOption_IsError;
+    procedure TestArgs_ExcludeCategoryWithoutValue_IsError;
+    procedure TestUsage_ListsEveryOption;
   end;
 
 implementation
@@ -251,6 +263,110 @@ begin
     '  TestB: EAccessViolation' + LE, R);
   AssertEquals('failures', 1, R.NumberOfFailures);
   AssertEquals('errors', 1, R.NumberOfErrors);
+end;
+
+function ArgList(const A: array of string): TList<String>;
+var I: Integer;
+begin
+  Result := TList<String>.Create();
+  for I := 0 to High(A) do
+    Result.Add(A[I]);
+end;
+
+procedure TRunnerFiltersTests.TestArgs_NoneRunsEverything;
+var F: TList<String>; V: Boolean; C, E: string;
+begin
+  F := TList<String>.Create();
+  AssertTrue('no arguments run', ParseRunnerArgs(ArgList([]), F, V, C, E) = raRun);
+  AssertEquals('no filters', 0, F.Count);
+  AssertFalse('not verbose', V);
+  AssertEquals('no category', '', C);
+  AssertEquals('no error', '', E);
+end;
+
+procedure TRunnerFiltersTests.TestArgs_KnownOptions;
+var F: TList<String>; V: Boolean; C, E: string;
+begin
+  F := TList<String>.Create();
+  AssertTrue('run', ParseRunnerArgs(
+    ArgList(['--verbose', '--suite', 'TA,TB.m', '--exclude-category', 'slow']),
+    F, V, C, E) = raRun);
+  AssertTrue('verbose', V);
+  AssertEquals('filters', 2, F.Count);
+  AssertEquals('first filter', 'TA', F.Get(0));
+  AssertEquals('category', 'slow', C);
+end;
+
+procedure TRunnerFiltersTests.TestArgs_HelpLongAndShort;
+var F: TList<String>; V: Boolean; C, E: string;
+begin
+  F := TList<String>.Create();
+  AssertTrue('--help', ParseRunnerArgs(ArgList(['--help']), F, V, C, E) = raHelp);
+  AssertTrue('-h', ParseRunnerArgs(ArgList(['-h']), F, V, C, E) = raHelp);
+  AssertTrue('help wins over other options',
+    ParseRunnerArgs(ArgList(['--verbose', '-h']), F, V, C, E) = raHelp);
+end;
+
+procedure TRunnerFiltersTests.TestArgs_UnknownOption_IsError;
+var F: TList<String>; V: Boolean; C, E: string;
+begin
+  F := TList<String>.Create();
+  AssertTrue('error', ParseRunnerArgs(ArgList(['--exlude-category', 'slow']),
+    F, V, C, E) = raError);
+  AssertEquals('message', 'unknown option ''--exlude-category''', E);
+end;
+
+procedure TRunnerFiltersTests.TestArgs_ShortVerbose_IsError;
+var F: TList<String>; V: Boolean; C, E: string;
+begin
+  F := TList<String>.Create();
+  AssertTrue('error', ParseRunnerArgs(ArgList(['-v']), F, V, C, E) = raError);
+  AssertEquals('message', 'unknown option ''-v''', E);
+end;
+
+procedure TRunnerFiltersTests.TestArgs_StrayArgument_IsError;
+var F: TList<String>; V: Boolean; C, E: string;
+begin
+  F := TList<String>.Create();
+  AssertTrue('error', ParseRunnerArgs(ArgList(['TFooTests']), F, V, C, E) = raError);
+  AssertEquals('message', 'unexpected argument ''TFooTests''', E);
+end;
+
+procedure TRunnerFiltersTests.TestArgs_SuiteWithoutValue_IsError;
+var F: TList<String>; V: Boolean; C, E: string;
+begin
+  F := TList<String>.Create();
+  AssertTrue('error', ParseRunnerArgs(ArgList(['--suite']), F, V, C, E) = raError);
+  AssertEquals('message', 'option ''--suite'' needs a value', E);
+end;
+
+procedure TRunnerFiltersTests.TestArgs_SuiteFollowedByOption_IsError;
+var F: TList<String>; V: Boolean; C, E: string;
+begin
+  F := TList<String>.Create();
+  AssertTrue('error', ParseRunnerArgs(ArgList(['--suite', '--verbose']),
+    F, V, C, E) = raError);
+  AssertEquals('message', 'option ''--suite'' needs a value', E);
+end;
+
+procedure TRunnerFiltersTests.TestArgs_ExcludeCategoryWithoutValue_IsError;
+var F: TList<String>; V: Boolean; C, E: string;
+begin
+  F := TList<String>.Create();
+  AssertTrue('error', ParseRunnerArgs(ArgList(['--exclude-category']),
+    F, V, C, E) = raError);
+  AssertEquals('message', 'option ''--exclude-category'' needs a value', E);
+end;
+
+procedure TRunnerFiltersTests.TestUsage_ListsEveryOption;
+var U: string;
+begin
+  U := RunnerUsage('TestRunner');
+  AssertTrue('program name', Pos('TestRunner', U) >= 0);
+  AssertTrue('--suite', Pos('--suite', U) >= 0);
+  AssertTrue('--verbose', Pos('--verbose', U) >= 0);
+  AssertTrue('--exclude-category', Pos('--exclude-category', U) >= 0);
+  AssertTrue('--help', Pos('--help', U) >= 0);
 end;
 
 initialization

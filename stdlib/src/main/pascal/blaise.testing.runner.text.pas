@@ -18,6 +18,13 @@
     --suite ClassName              run all tests in ClassName
     --suite ClassName.MethodName   run one specific test method
     --exclude-category Name        skip suites/methods marked [Category('Name')]
+    --verbose                      one outcome line per test
+    --help, -h                     print the usage and exit
+
+  Options are long-form only; -h is the one short form, because it is the
+  spelling nearly everyone tries first.  Any other option, a stray argument,
+  or an option missing its value prints the usage and exits with code 2 --
+  an ignored typo would otherwise run the whole suite and look like success.
 
   --suite may be passed multiple times, and each value may be a
   comma-delimited list.  These three invocations are equivalent:
@@ -50,7 +57,9 @@ function RunRegisteredTests: TTestResult;
 procedure PrintSummary(AResult: TTestResult);
 
 { Convenience: run, print, return 0 on all-green and 1 otherwise.
-  Respects --suite / --suite Class.Method command-line filtering.
+  Respects --suite / --suite Class.Method command-line filtering.  --help
+  or -h prints the usage and returns 0 without running anything; a bad
+  command line prints an error and the usage to stderr and returns 2.
   Programs can do 'Halt(RunAll)' as the last statement. }
 function RunAll: Integer;
 
@@ -75,6 +84,23 @@ function MatchesFilters(AFilters: TList<String>;
 { Parse a [Threaded] suite subprocess's --verbose output into AResult.
   Exposed for unit testing. }
 procedure ParseSubprocessOutput(const AOutput: string; AResult: TTestResult);
+
+type
+  { Outcome of parsing the runner's command line. }
+  TRunnerArgsResult = (raRun, raHelp, raError);
+
+{ Parse the runner's command-line arguments (AArgs excludes the program
+  name).  AFilters receives one entry per --suite filter; --suite may appear
+  multiple times and each value may be comma-delimited.  Returns raHelp for
+  --help or -h, raError (with AError set) for an unknown option, a stray
+  argument or an option missing its value, and raRun otherwise.  Exposed
+  for unit testing. }
+function ParseRunnerArgs(AArgs: TList<String>; AFilters: TList<String>;
+  out AVerbose: Boolean; out AExclCategory: string;
+  out AError: string): TRunnerArgsResult;
+
+{ The usage text, naming the program as AProgName. }
+function RunnerUsage(const AProgName: string): string;
 
 
 implementation
@@ -349,39 +375,89 @@ begin
   Result := False;
 end;
 
-{ Parse --suite, --verbose and --exclude-category from the process command
-  line.  AFilters receives one entry per filter; --suite may appear multiple
-  times and each --suite value may be comma-delimited.  Empty list
-  means "run everything".  AVerbose is True when --verbose is present.
-  AExclCategory is the value of --exclude-category ('' = no exclusion) —
-  suites/methods carrying a matching [Category('...')] are skipped.
-  AFilters must be created by the caller and is owned by the caller. }
-procedure ParseArgs(AFilters: TList<String>; out AVerbose: Boolean;
-  out AExclCategory: string);
+{ The value of the option at AArgs[AIndex], or '' when it is missing.  A
+  following argument that starts with '-' is the next option, not a value:
+  no suite or category name begins with one. }
+function OptionValue(AArgs: TList<String>; AIndex: Integer): string;
 var
-  I:   Integer;
-  Arg: string;
+  V: string;
 begin
-  AVerbose      := False;
-  AExclCategory := '';
-  I := 1;
-  while I <= ParamCount() do
+  Result := '';
+  if AIndex + 1 < AArgs.Count then
   begin
-    Arg := ParamStr(I);
-    if Arg = '--verbose' then
-      AVerbose := True
-    else if (Arg = '--suite') and (I < ParamCount()) then
+    V := AArgs.Get(AIndex + 1);
+    if (V <> '') and (Copy(V, 0, 1) <> '-') then
+      Result := V;
+  end;
+end;
+
+function ParseRunnerArgs(AArgs: TList<String>; AFilters: TList<String>;
+  out AVerbose: Boolean; out AExclCategory: string;
+  out AError: string): TRunnerArgsResult;
+var
+  I: Integer;
+  Arg: string;
+  Value: string;
+begin
+  AVerbose := False;
+  AExclCategory := '';
+  AError := '';
+  Result := raRun;
+  I := 0;
+  while I < AArgs.Count do
+  begin
+    Arg := AArgs.Get(I);
+    if (Arg = '--help') or (Arg = '-h') then
     begin
-      I := I + 1;
-      AppendSuiteFilter(AFilters, ParamStr(I));
+      Result := raHelp;
+      Exit;
     end
-    else if (Arg = '--exclude-category') and (I < ParamCount()) then
+    else if Arg = '--verbose' then
+      AVerbose := True
+    else if (Arg = '--suite') or (Arg = '--exclude-category') then
     begin
+      Value := OptionValue(AArgs, I);
+      if Value = '' then
+      begin
+        AError := 'option ''' + Arg + ''' needs a value';
+        Result := raError;
+        Exit;
+      end;
+      if Arg = '--suite' then
+        AppendSuiteFilter(AFilters, Value)
+      else
+        AExclCategory := Value;
       I := I + 1;
-      AExclCategory := ParamStr(I);
+    end
+    else if Copy(Arg, 0, 1) = '-' then
+    begin
+      AError := 'unknown option ''' + Arg + '''';
+      Result := raError;
+      Exit;
+    end
+    else
+    begin
+      AError := 'unexpected argument ''' + Arg + '''';
+      Result := raError;
+      Exit;
     end;
     I := I + 1;
   end;
+end;
+
+function RunnerUsage(const AProgName: string): string;
+begin
+  Result :=
+    'Usage: ' + AProgName + ' [options]' + #10 +
+    #10 +
+    'With no options, every registered test runs.' + #10 +
+    #10 +
+    'Options:' + #10 +
+    '  --suite Class[.Method]    run only the named suite or test method;' + #10 +
+    '                            repeat it, or separate names with commas' + #10 +
+    '  --exclude-category Name   skip tests marked [Category(''Name'')]' + #10 +
+    '  --verbose                 print one outcome line per test' + #10 +
+    '  --help, -h                print this help and exit' + #10;
 end;
 
 { -----------------------------------------------------------------------
@@ -735,9 +811,32 @@ var
   Filters:  TList<String>;
   Verbose:  Boolean;
   ExclCat:  string;
+  Args: TList<String>;
+  ArgError: string;
+  ProgName: string;
+  I: Integer;
 begin
   Filters := TList<String>.Create();
-  ParseArgs(Filters, Verbose, ExclCat);
+  Args := TList<String>.Create();
+  for I := 1 to ParamCount() do
+    Args.Add(ParamStr(I));
+  ProgName := ExtractFileName(ParamStr(0));
+  case ParseRunnerArgs(Args, Filters, Verbose, ExclCat, ArgError) of
+    raHelp:
+      begin
+        Write(RunnerUsage(ProgName));
+        Result := 0;
+        Exit;
+      end;
+    raError:
+      begin
+        WriteLn(StdErr, ProgName + ': ' + ArgError);
+        WriteLn(StdErr, '');
+        Write(StdErr, RunnerUsage(ProgName));
+        Result := 2;
+        Exit;
+      end;
+  end;
   R := RunFilteredTests(Filters, Verbose, ExclCat);
   PrintSummary(R);
   if (R.NumberOfFailures = 0) and (R.NumberOfErrors = 0) then

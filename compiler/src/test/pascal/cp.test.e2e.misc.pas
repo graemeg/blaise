@@ -311,6 +311,7 @@ type
       as in the C locale.  On Ubuntu 26.04 (uutils comm) it printed comm's
       sort-order warnings, which the harness passed to the linker. }
     procedure TestBuildRtlObjects_CollatingLocale_PrintsOnlyObjects;
+    procedure TestRun_TestRunner_HelpAndRejectedOptions;
   end;
 
 implementation
@@ -4503,6 +4504,56 @@ begin
     Lines.Free();
   end;
   AssertEquals('object selection depends on the locale', OutC, OutLocale);
+end;
+
+{ GH discussion #236: a blaise.testing runner silently ignored every option
+  it did not know, so '-v' (or a misspelt '--exclude-category') quietly ran
+  the whole suite.  It now answers --help / -h with usage and exit 0, and
+  rejects anything else it does not know with the usage and exit 2. }
+procedure TE2EMiscTests.TestRun_TestRunner_HelpAndRejectedOptions;
+const
+  Src = '''
+    program RunnerCli;
+    uses blaise.testing, blaise.testing.runner.text;
+    type
+      TCliTests = class(TTestCase)
+      published
+        procedure TestOne;
+      end;
+    procedure TCliTests.TestOne;
+    begin
+      AssertTrue('one', True)
+    end;
+    begin
+      RegisterTest(TCliTests);
+      Halt(RunAll())
+    end.
+    ''';
+var
+  BinFile, ToolOut, Output: string;
+  Rc: Integer;
+begin
+  Rc := CompileNativeCLI(Src, False, '', BinFile, ToolOut);
+  AssertEquals('compile: ' + ToolOut, 0, Rc);
+
+  AssertEquals('no arguments: exit', 0, RunProc(BinFile, [], Output));
+  AssertTrue('no arguments: runs the tests: ' + Output, Pos('OK (1 tests', Output) >= 0);
+
+  AssertEquals('--help: exit', 0, RunProc(BinFile, ['--help'], Output));
+  AssertTrue('--help: lists --verbose: ' + Output, Pos('--verbose', Output) >= 0);
+  AssertTrue('--help: runs no tests: ' + Output, Pos('OK (', Output) < 0);
+
+  AssertEquals('-h: exit', 0, RunProc(BinFile, ['-h'], Output));
+  AssertTrue('-h: lists --suite: ' + Output, Pos('--suite', Output) >= 0);
+
+  AssertEquals('-v: exit', 2, RunProc(BinFile, ['-v'], Output));
+  AssertTrue('-v: names the option: ' + Output,
+    Pos('unknown option ''-v''', Output) >= 0);
+  AssertTrue('-v: shows the usage: ' + Output, Pos('--verbose', Output) >= 0);
+  AssertTrue('-v: runs no tests: ' + Output, Pos('OK (', Output) < 0);
+
+  AssertEquals('--suite without value: exit', 2,
+    RunProc(BinFile, ['--suite'], Output));
 end;
 
 initialization
