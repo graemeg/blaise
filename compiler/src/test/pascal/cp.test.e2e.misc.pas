@@ -296,9 +296,17 @@ type
     procedure TestRun_IncDec_WideTarget_NarrowStep;
     { GH #195 — bit operators inside a float const expression, end to end. }
     procedure TestRun_BitOpsInFloatConstExpr;
+    { GH #235 — scripts/build-rtl-objects.sh --exclude-defined-by, run in a
+      collating locale, prints only object paths and picks the same objects
+      as in the C locale.  On Ubuntu 26.04 (uutils comm) it printed comm's
+      sort-order warnings, which the harness passed to the linker. }
+    procedure TestBuildRtlObjects_CollatingLocale_PrintsOnlyObjects;
   end;
 
 implementation
+
+uses
+  classes, sysutils;
 
 procedure TE2EMiscTests.SetUp;
 begin
@@ -4273,6 +4281,56 @@ begin
     '3' + LE +
     'True' + LE +
     'True' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestBuildRtlObjects_CollatingLocale_PrintsOnlyObjects;
+var
+  SrcFile, AsmFile, ProgObj, Script, Compiler, ObjDir: string;
+  AsmText, OutLocale, OutC: string;
+  Lines: TStringList;
+  I: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  { A program object whose symbol list mixes case and underscores, so a
+    collating sort and a byte-wise comm disagree on its order. }
+  SrcFile := FScratch + '/rtlsel.pas';
+  AsmFile := FScratch + '/rtlsel.s';
+  ProgObj := FScratch + '/rtlsel.o';
+  WriteFile(SrcFile,
+    'program P;' + LE +
+    'uses classes;' + LE +
+    'var L: TStringList;' + LE +
+    'begin' + LE +
+    '  L := TStringList.Create();' + LE +
+    '  WriteLn(L.Count)' + LE +
+    'end.' + LE);
+  Compiler := ProjectRoot() + 'compiler/target/blaise';
+  AssertEquals('emit-asm', 0, RunProc(Compiler,
+    ['--source', SrcFile, '--unit-path', FRTLUnitPath,
+     '--unit-path', FStdlibUnitPath, '--emit-asm'], AsmText));
+  WriteFile(AsmFile, AsmText);
+  AssertEquals('cc -c', 0, RunProc('cc', ['-c', '-o', ProgObj, AsmFile], OutC));
+
+  Script := ProjectRoot() + 'scripts/build-rtl-objects.sh';
+  ObjDir := FScratch + '/rtlsel-obj';
+  AssertEquals('script (C)', 0, RunProc('env',
+    ['LC_ALL=C', Script, Compiler, ObjDir, '--exclude-defined-by', ProgObj],
+    OutC));
+  AssertEquals('script (en_US.UTF-8)', 0, RunProc('env',
+    ['LC_ALL=en_US.UTF-8', Script, Compiler, ObjDir,
+     '--exclude-defined-by', ProgObj], OutLocale));
+
+  Lines := TStringList.Create();
+  try
+    Lines.Text := OutLocale;
+    for I := 0 to Lines.Count - 1 do
+      if Trim(Lines.Strings[I]) <> '' then
+        AssertTrue('not an object path: ' + Lines.Strings[I],
+          FileExists(Trim(Lines.Strings[I])));
+  finally
+    Lines.Free();
+  end;
+  AssertEquals('object selection depends on the locale', OutC, OutLocale);
 end;
 
 initialization

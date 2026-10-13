@@ -34,6 +34,16 @@
 
 set -e
 
+# Byte-order collation for every sort and comm below.  The symbol lists are
+# sorted by sort(1) and then compared by comm(1), and the two must agree on the
+# order.  Under a collating locale (en_US.UTF-8) they need not: Ubuntu 26.04
+# ships the uutils coreutils, whose comm compares bytes while sort follows the
+# locale, so comm printed "file 2 is not in sorted order" on stderr -- which
+# the e2e harness read as object paths and handed to the linker (GH #235) --
+# and an out-of-order comm can also mis-judge which objects are redundant.
+LC_ALL=C
+export LC_ALL
+
 BLAISE="$1"
 OUTDIR="$2"
 shift 2 || true
@@ -135,6 +145,9 @@ fi
 if [ -z "$COMPILER_ID" ]; then
   COMPILER_ID="unknown-$$"
 fi
+# The .syms caches are in byte order since GH #235; tagging the stamp wipes a
+# cache written by an earlier script in a collating locale's order.
+COMPILER_ID="$COMPILER_ID syms-C"
 if [ ! -f "$CACHE_STAMP" ] || [ "$(cat "$CACHE_STAMP")" != "$COMPILER_ID" ]; then
   rm -f "$OUTDIR"/*.o "$OUTDIR"/*.o.syms "$OUTDIR"/*.bif "$OUTDIR"/*.build.err
   printf '%s\n' "$COMPILER_ID" > "$CACHE_STAMP"

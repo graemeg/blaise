@@ -444,6 +444,19 @@ begin
   Proc := TProcess.Create(nil);
   try
     Objs.Text := ScriptOut;
+    { TProcess merges stderr into the output, so a diagnostic the script let
+      through would reach cc as an object path (GH #235: comm's sort-order
+      warnings became "ld: cannot find comm: ...").  Every line must name an
+      object the script built. }
+    for I := 0 to Objs.Count - 1 do
+      if (Trim(Objs.Strings[I]) <> '') and
+         not FileExists(Trim(Objs.Strings[I])) then
+      begin
+        AStdout := 'build-rtl-objects printed a line that is not an object: ' +
+          Objs.Strings[I];
+        Result := 1;
+        Exit;
+      end;
     Proc.Executable := 'cc';
     Proc.Parameters.Add('-o');
     Proc.Parameters.Add(ABinFile);
