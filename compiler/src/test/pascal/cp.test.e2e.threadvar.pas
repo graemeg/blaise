@@ -49,6 +49,7 @@ type
     procedure TestRun_InitialisedThreadVars_FloatBoolAndArray;
     procedure TestRun_ThreadVarsOfAUsedUnit;
     procedure TestRun_InitialisedThreadVars_DeclaredInUnit;
+    procedure TestRun_InitialisedThreadVars_DynamicLink;
   end;
 
 implementation
@@ -438,6 +439,31 @@ begin
     CompileAndRunWithUnitNative('tvu', UnitSrc, ProgSrc, Output, RCode));
   AssertEquals('exit code', 0, RCode);
   AssertEquals('stdout', '42 u' + LE + '42' + LE, Output);
+end;
+
+procedure TE2EThreadVarTests.TestRun_InitialisedThreadVars_DynamicLink;
+const
+  { a dynamic ELF image never carried the TLS initialisation image: .tdata
+    was placed past the data PT_LOAD, so every thread started from zeros
+    (and the copy ran off the end of the linker's buffer).  The other tests
+    link Linux programs freestanding; this one forces the libc link. }
+  Src = '''
+    program tvprobe;
+    threadvar
+      N: Integer = 40;
+      S: string = 'u';
+      M: Integer = 2;
+    begin WriteLn(N + M, ' ', S) end.
+    ''';
+var
+  Output: string;
+  RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run: ' + Output,
+    CompileAndRun(Src, Output, RCode, ['--dynamic']));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('stdout', '42 u' + LE, Output);
 end;
 
 initialization

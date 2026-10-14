@@ -65,6 +65,10 @@ type
     procedure TestExe_ElfHeaderIsExec;
     procedure TestExe_EntryPointMatchesSymbol;
     procedure TestExe_MissingEntry_Raises;
+    { The TLS block runs from the start of .tdata to the end of .tbss,
+      INCLUDING the alignment gap between them; PT_TLS p_memsz (and with it
+      every TPOFF) was the bare sum of the two sizes, 8 bytes short here }
+    procedure TestTls_BlockSizeCoversTheAlignmentGap;
   end;
 
   TLinkerE2ETests = class(TTestCase)
@@ -138,6 +142,11 @@ type
       executable's .dynsym or rtld aborts with "Undefined symbol".  The set is
       a per-target property (TLinkTarget.CrtExports); Linux needs none. }
     procedure TestDyn_FreeBSDTarget_ExportsCrtOwnedSymbols;
+    { a dynamic image carries the .tdata initialisation image in its file,
+      inside a PT_LOAD: it was placed past the data segment, never written
+      (the section-name table landed on its offset), and every thread
+      started from zeros }
+    procedure TestDyn_TdataImageWrittenAndLoaded;
     { The export list is opt-in per target: a Linux dynamic link must not grow
       .dynsym entries (and so must stay byte-identical to before). }
     procedure TestDyn_LinuxTarget_ExportsNothing;
@@ -634,6 +643,61 @@ begin
   end;
 end;
 
+function LeAt(const ABytes: string; AOff, ACount: Integer): Int64;
+var
+  K: Integer;
+begin
+  Result := 0;
+  for K := ACount - 1 downto 0 do
+    Result := (Result shl 8) or OrdAt(ABytes, AOff + K);
+end;
+
+{ The first program header of type APType in a linked image: its file offset,
+  virtual address, file size and memory size.  False when there is none. }
+function FindPhdr(const ABytes: string; APType: Integer;
+  out AOffset, AVAddr, AFileSz, AMemSz: Int64): Boolean;
+var
+  PhOff, PhEntSz, PhCount, J, E: Integer;
+begin
+  Result := False;
+  PhOff := Integer(LeAt(ABytes, 32, 8));
+  PhEntSz := Integer(LeAt(ABytes, 54, 2));
+  PhCount := Integer(LeAt(ABytes, 56, 2));
+  for J := 0 to PhCount - 1 do
+  begin
+    E := PhOff + J * PhEntSz;
+    if LeAt(ABytes, E, 4) = APType then
+    begin
+      AOffset := LeAt(ABytes, E + 8, 8);
+      AVAddr := LeAt(ABytes, E + 16, 8);
+      AFileSz := LeAt(ABytes, E + 32, 8);
+      AMemSz := LeAt(ABytes, E + 40, 8);
+      Exit(True);
+    end;
+  end;
+end;
+
+{ True when some PT_LOAD maps file bytes [AOff, AOff + ALen) from the file. }
+function FileRangeLoaded(const ABytes: string; AOff, ALen: Int64): Boolean;
+var
+  PhOff, PhEntSz, PhCount, J, E: Integer;
+  POff, PFileSz: Int64;
+begin
+  Result := False;
+  PhOff := Integer(LeAt(ABytes, 32, 8));
+  PhEntSz := Integer(LeAt(ABytes, 54, 2));
+  PhCount := Integer(LeAt(ABytes, 56, 2));
+  for J := 0 to PhCount - 1 do
+  begin
+    E := PhOff + J * PhEntSz;
+    if LeAt(ABytes, E, 4) <> 1 then Continue;      { PT_LOAD }
+    POff := LeAt(ABytes, E + 8, 8);
+    PFileSz := LeAt(ABytes, E + 32, 8);
+    if (AOff >= POff) and (AOff + ALen <= POff + PFileSz) then
+      Exit(True);
+  end;
+end;
+
 { ---- TLinkerTests ---- }
 
 { Assemble each asm string to a relocatable object, hand them all to a
@@ -1003,6 +1067,84 @@ begin
   end;
   Lk.Free();
   AssertTrue('missing entry symbol must raise ELinker', Raised);
+end;
+
+const
+  TlsAsm =
+    '.text' + LineEnding +
+    '.globl _start' + LineEnding +
+    '_start:' + LineEnding +
+    '  movl %fs:tb@tpoff, %eax' + LineEnding +
+    '  ret' + LineEnding +
+    '.section .tdata,"awT",@progbits' + LineEnding +
+    '.balign 4' + LineEnding +
+    '.globl ta' + LineEnding +
+    'ta:' + LineEnding +
+    '  .long 1592651789' + LineEnding +
+    '.section .tbss,"awT",@nobits' + LineEnding +
+    '.balign 8' + LineEnding +
+    '.globl tb' + LineEnding +
+    'tb:' + LineEnding +
+    '  .skip 12' + LineEnding;
+
+procedure TLinkerTests.TestTls_BlockSizeCoversTheAlignmentGap;
+var
+  Lk: TLinker;
+  Bytes: string;
+  Off, VAddr, FileSz, MemSz: Int64;
+begin
+  { .tdata is 4 bytes, .tbss starts 8-aligned at +8 and runs 12 bytes: the
+    block is 20 bytes, 24 once aligned -- not 4 + 12 = 16 }
+  Lk := LinkObjs([TlsAsm], '_start', Bytes);
+  try
+    AssertTrue('has PT_TLS', FindPhdr(Bytes, 7, Off, VAddr, FileSz, MemSz));
+    AssertEquals('p_filesz is .tdata', Int64(4), FileSz);
+    AssertEquals('p_memsz spans .tdata, the gap and .tbss', Int64(24), MemSz);
+  finally
+    Lk.Free();
+  end;
+end;
+
+procedure TDynLinkerTests.TestDyn_TdataImageWrittenAndLoaded;
+const
+  MainAsm =
+    '.text' + LineEnding +
+    '.globl main' + LineEnding +
+    'main:' + LineEnding +
+    '  movl %fs:ta@tpoff, %eax' + LineEnding +
+    '  ret' + LineEnding +
+    '.data' + LineEnding +
+    '.globl d' + LineEnding +
+    'd:' + LineEnding +
+    '  .quad 1' + LineEnding +
+    '.section .bss,"aw",@nobits' + LineEnding +
+    '.globl z' + LineEnding +
+    'z:' + LineEnding +
+    '  .skip 64' + LineEnding +
+    '.section .tdata,"awT",@progbits' + LineEnding +
+    '.balign 4' + LineEnding +
+    '.globl ta' + LineEnding +
+    'ta:' + LineEnding +
+    '  .long 1592651789' + LineEnding;
+var
+  Lk: TLinker;
+  Bytes: string;
+  Off, VAddr, FileSz, MemSz: Int64;
+begin
+  Lk := TLinker.Create();
+  try
+    Lk.SetDynamic(True);
+    Lk.AddOwnedObject(ParseElfObject(AssembleToBytes(MainAsm), 'main.o'));
+    Bytes := Lk.LinkToBytes('main');
+    AssertTrue('has PT_TLS', FindPhdr(Bytes, 7, Off, VAddr, FileSz, MemSz));
+    AssertEquals('p_filesz is .tdata', Int64(4), FileSz);
+    AssertTrue('the image lies inside the file', Off + FileSz <= Length(Bytes));
+    AssertEquals('the image holds .tdata', Int64($5EEDF00D),
+      LeAt(Bytes, Integer(Off), 4));
+    AssertTrue('a PT_LOAD maps the image', FileRangeLoaded(Bytes, Off, FileSz));
+  finally
+    Lk.Free();
+  end;
 end;
 
 { ---- TLinkerE2ETests ---- }
@@ -1532,15 +1674,6 @@ begin
     H := H and (not G);
   end;
   Result := Integer(H);
-end;
-
-function LeAt(const ABytes: string; AOff, ACount: Integer): Int64;
-var
-  K: Integer;
-begin
-  Result := 0;
-  for K := ACount - 1 downto 0 do
-    Result := (Result shl 8) or OrdAt(ABytes, AOff + K);
 end;
 
 function TDynLinkerTests.FindDynSym(const ABytes, AName: string;

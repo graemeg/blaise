@@ -250,6 +250,7 @@ type
     function PlacementBaseAddr(AObjIdx, ASecIdx: Integer): Int64;
     function FileOffset(AAddr: Int64): Integer;
     procedure PlaceSection(AM: TMergedSection; var AAddr: Int64);
+    procedure PlaceTlsSections(var AAddr: Int64);
     procedure LayoutSections;
     procedure BuildSymbols;
     function FindSymbol(const AName: string): TLinkSymbol;
@@ -635,6 +636,13 @@ var
   I: Integer;
 begin
   if Length(ASrc) = 0 then Exit;
+  { A section placed outside the image the writer sized is a layout bug.
+    Unchecked, the copy ran off the end of the buffer -- the payload was lost
+    from the file and the linker's own heap overwritten (a dynamic image's
+    .tdata did exactly that). }
+  if (AOff < 0) or (AOff + Length(ASrc) > Length(ABuf)) then
+    raise ELinker.Create(Format('internal: %d bytes at offset %d lie outside ' +
+      'the %d-byte image', [Length(ASrc), AOff, Length(ABuf)]));
   P := PChar(ABuf);
   for I := 0 to Length(ASrc) - 1 do
     P[AOff + I] := ASrc[I];
@@ -972,7 +980,7 @@ begin
   end;
 
   { Writable run starts on a fresh page.  TLS sections (.tdata/.tbss, SHF_TLS)
-    are placed separately below and must be skipped here. }
+    are placed by PlaceTlsSections, between the two loops, and skipped here. }
   Addr := LkAlignUp(Addr, FTarget.PageSize);
   for I := 0 to FMerger.Merged.Count - 1 do
   begin
@@ -983,6 +991,9 @@ begin
        and ((M.Flags and SHF_TLS) = 0) then
       Self.PlaceSection(M, Addr);
   end;
+  { TLS sections between the file-backed and the zerofill runs, as in
+    LayoutDynamic (PlaceTlsSections). }
+  Self.PlaceTlsSections(Addr);
   for I := 0 to FMerger.Merged.Count - 1 do
   begin
     M := FMerger.Merged.Get(I);
@@ -992,11 +1003,25 @@ begin
        and ((M.Flags and SHF_TLS) = 0) then
       Self.PlaceSection(M, Addr);
   end;
+end;
 
-  { TLS sections (.tdata then .tbss).  Mirror LayoutDynamic so a static ET_EXEC
-    also gets a correct TLS block + FTlsAddr/FTlsSize for TPOFF relocations and
-    the PT_TLS program header (which the freestanding _start reads to set up the
-    thread pointer). }
+{ Place the TLS sections (.tdata, then .tbss) at AAddr and record the block:
+  FTlsAddr / FTlsSize for TPOFF relocations and the PT_TLS header, which a
+  dynamic loader and the freestanding _start both read to build each thread's
+  block.  Both layouts call this between the writable file-backed sections and
+  the zerofill ones, so .tdata -- the initialisation image -- lies inside the
+  data PT_LOAD's file bytes (after .bss it was never written to a dynamic
+  image at all).
+
+  The block runs from the start of .tdata to the END of .tbss, so it includes
+  the alignment gap between them: summing the two sizes came up short whenever
+  .tdata's size was not a multiple of .tbss's alignment, and every TPOFF was
+  then off by the difference.  Variant II puts the thread pointer at the
+  ALIGNED end of the block, so the size is aligned too. }
+procedure TLinker.PlaceTlsSections(var AAddr: Int64);
+var
+  M: TMergedSection;
+begin
   FTlsAddr := 0;
   FTlsSize := 0;
   FTlsAlign := 1;
@@ -1004,7 +1029,7 @@ begin
   M := FMerger.FindMerged('.tdata');
   if M <> nil then
   begin
-    Self.PlaceSection(M, Addr);
+    Self.PlaceSection(M, AAddr);
     FTlsAddr := Self.MergedAddr(M);
     FTlsFileSize := M.Size;
     FTlsSize := M.Size;
@@ -1013,16 +1038,11 @@ begin
   M := FMerger.FindMerged('.tbss');
   if M <> nil then
   begin
-    Self.PlaceSection(M, Addr);
+    Self.PlaceSection(M, AAddr);
     if FTlsAddr = 0 then FTlsAddr := Self.MergedAddr(M);
-    FTlsSize := FTlsSize + M.Size;
+    FTlsSize := Self.MergedAddr(M) + M.Size - FTlsAddr;
     if M.Align > FTlsAlign then FTlsAlign := M.Align;
   end;
-  { Variant-II TLS: the thread pointer sits at the ALIGNED end of the block, and
-    TPOFF32 is computed as (sym - FTlsAddr - FTlsSize).  The freestanding _start
-    places TP at AlignUp(memsz, align); align FTlsSize to match so both agree even
-    when the raw section sum is not a multiple of FTlsAlign (else every threadvar
-    read is off by the alignment padding). }
   FTlsSize := LkAlignUp(FTlsSize, FTlsAlign);
 end;
 
@@ -1753,6 +1773,9 @@ begin
     if M.ShType <> SHT_NOBITS then
       Self.PlaceSection(M, Addr);
   end;
+  { TLS sections between the file-backed and the zerofill runs (see
+    PlaceTlsSections), so .tdata lies inside the data PT_LOAD's file bytes. }
+  Self.PlaceTlsSections(Addr);
   for I := 0 to FMerger.Merged.Count - 1 do
   begin
     M := FMerger.Merged.Get(I);
@@ -1767,33 +1790,6 @@ begin
       Self.PlaceSection(M, Addr);
   end;
 
-  { TLS sections (.tdata, .tbss).  PlaceSection aligns AAddr before
-    recording — FTlsAddr must be the aligned start, not the pre-align
-    cursor, so we read it back from MergedAddr after the first place. }
-  FTlsAddr := 0;
-  FTlsSize := 0;
-  FTlsAlign := 1;
-  FTlsFileSize := 0;
-  M := FMerger.FindMerged('.tdata');
-  if M <> nil then
-  begin
-    Self.PlaceSection(M, Addr);
-    FTlsAddr := Self.MergedAddr(M);
-    FTlsFileSize := M.Size;
-    FTlsSize := M.Size;
-    if M.Align > FTlsAlign then FTlsAlign := M.Align;
-  end;
-  M := FMerger.FindMerged('.tbss');
-  if M <> nil then
-  begin
-    Self.PlaceSection(M, Addr);
-    if FTlsAddr = 0 then FTlsAddr := Self.MergedAddr(M);
-    FTlsSize := FTlsSize + M.Size;
-    if M.Align > FTlsAlign then FTlsAlign := M.Align;
-  end;
-  { TP sits at the aligned end of the TLS block (variant II); align FTlsSize so
-    TPOFF32 (sym - FTlsAddr - FTlsSize) matches the aligned thread pointer. }
-  FTlsSize := LkAlignUp(FTlsSize, FTlsAlign);
 
   { Build .dynamic section.  The target's libc soname is at offset 1 in .dynstr
     (BuildDynamic writes it first).  Any extra DT_NEEDED libs (libthr/libm)
@@ -2353,8 +2349,10 @@ begin
         if RelroLo < 0 then RelroLo := A;
         if A + M.Size > RelroHi then RelroHi := A + M.Size;
       end
-      else if (M.Flags and SHF_TLS) = 0 then
+      else
       begin
+        { .tdata and .tbss sit inside the data run too (PlaceTlsSections):
+          the TLS image is file-backed data the loader must map }
         if DataLo < 0 then DataLo := A;
         if A + M.Size > DataMemHi then DataMemHi := A + M.Size;
         if (M.ShType <> SHT_NOBITS) and (A + M.Size > DataFileHi) then
