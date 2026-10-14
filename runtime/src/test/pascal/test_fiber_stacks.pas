@@ -43,7 +43,10 @@ var
 begin
   Base := FiberStackAcquire(5000, Total);
   AssertTrue('base not nil', Base <> nil);
-  AssertEquals('5000 rounds to 2 pages + guard', Int64(3 * FiberPageSize),
+  { whole pages plus the guard page: 2 + 1 with 4 KB pages, but 1 + 1 with
+    the 16 KB pages of macOS arm64 }
+  AssertEquals('5000 rounds up to whole pages + guard',
+    Int64(((5000 + FiberPageSize - 1) div FiberPageSize + 1) * FiberPageSize),
     Total);
   FiberStackReturn(Base, Total);
   Result := '';

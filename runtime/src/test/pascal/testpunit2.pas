@@ -333,5 +333,5 @@ begin
   AddTest('Test30', @DoTest30);
   AddTest('Test31', @DoTest31);
   AddTest('Test32', @DoTest32);
-  RunAllSysTests;
+  RunAllSysTests();
 end.

@@ -29,7 +29,10 @@ program test_blaise_errno;
 uses punit;
 
 function pipe(Fds: Pointer): Integer; external name 'pipe';
-function fcntl(Fd, Cmd, Arg: Integer): Integer; external name 'fcntl';
+{ fcntl is variadic: Apple's arm64 ABI passes variadic arguments on the
+  stack, so a fixed three-Integer declaration put the flags in a register
+  fcntl never read -- the pipe stayed blocking and the setup read hung. }
+function fcntl(Fd, Cmd: Integer): Integer; varargs; external name 'fcntl';
 function xread(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
   external name 'read';
 function WouldBlock(N: Int64): Boolean; external name 'WouldBlock';
