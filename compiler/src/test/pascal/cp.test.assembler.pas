@@ -28,6 +28,12 @@ type
     procedure TestQuadSymbol_EmitsReloc;
     procedure TestTLSPrefix_PrecedesRex;
     procedure TestTbssSymbol_TypedSttTls;
+    { .skip after a .balign in a NOBITS section: the alignment padding lives
+      only in the section's Size, and each pushed byte reset Size to the byte
+      count, discarding it -- labels after a .skip landed short (an interface
+      threadvar's _itab half 4 bytes into its _obj half) and .tbss came out
+      smaller than its contents }
+    procedure TestTbssSkipAfterAlign_KeepsPadding;
     procedure TestRipRelImmStore_AddendMinus8;
     procedure TestBranchUndefined_EmitsReloc;
     procedure TestNoteGnuStack_Present;
@@ -419,6 +425,55 @@ begin
           STT_TLS, Parsed.Symbols[I].SymType);
       end;
     AssertTrue('symbol tv not found in symtab', Found);
+  finally
+    Parsed.Free();
+  end;
+end;
+
+procedure TAsmEncodingTests.TestTbssSkipAfterAlign_KeepsPadding;
+var
+  Obj: string;
+  Parsed: TElfObjectFile;
+  Sec: TRdSection;
+  I: Integer;
+
+  function SymValue(const AName: string): Int64;
+  var
+    K: Integer;
+  begin
+    Result := -1;
+    for K := 0 to Parsed.Symbols.Count - 1 do
+      if Parsed.Symbols[K].Name = AName then
+        Result := Parsed.Symbols[K].Value;
+  end;
+
+begin
+  Obj := AssembleToBytes(
+    '.section .tbss,"awT",@nobits' + LineEnding +
+    '.balign 4' + LineEnding +
+    '.globl x' + LineEnding +
+    'x:' + LineEnding +
+    #9'.skip 4' + LineEnding +
+    '.balign 8' + LineEnding +
+    '.globl s' + LineEnding +
+    's:' + LineEnding +
+    #9'.skip 8' + LineEnding +
+    '.balign 8' + LineEnding +
+    '.globl g_obj' + LineEnding +
+    '.globl g_itab' + LineEnding +
+    'g_obj:' + LineEnding +
+    #9'.skip 8' + LineEnding +
+    'g_itab:' + LineEnding +
+    #9'.skip 8' + LineEnding);
+  Parsed := ParseElfObject(Obj, 'tbss-skip-test');
+  try
+    AssertEquals('x', 0, SymValue('x'));
+    AssertEquals('s after the 4-byte pad', 8, SymValue('s'));
+    AssertEquals('g_obj', 16, SymValue('g_obj'));
+    AssertEquals('g_itab right after g_obj''s 8 bytes', 24, SymValue('g_itab'));
+    Sec := Parsed.FindSection('.tbss');
+    AssertTrue('.tbss present', Sec <> nil);
+    AssertEquals('.tbss covers every slot', 32, Sec.Size);
   finally
     Parsed.Free();
   end;

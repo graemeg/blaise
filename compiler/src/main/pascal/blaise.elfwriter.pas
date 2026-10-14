@@ -232,7 +232,14 @@ begin
   end;
   Bytes[Count] := AVal and $FF;
   Count := Count + 1;
-  Size := Count;
+  { A NOBITS section's Size also carries the alignment padding AlignSection
+    adds without pushing bytes, so it grows with each byte rather than being
+    reset to Count -- which discarded that padding and placed every label
+    after a .skip short, and left .tbss smaller than its contents. }
+  if (Kind = cskBss) or (Kind = cskTbss) then
+    Size := Size + 1
+  else
+    Size := Count;
 end;
 
 function TElfWriterSection.AsString: string;
