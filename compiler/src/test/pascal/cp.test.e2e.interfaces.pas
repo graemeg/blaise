@@ -142,6 +142,12 @@ type
     { Interface element read through an INDEXED PROPERTY (TList<IFoo>[i]) }
     procedure TestRun_InterfaceElem_ViaIndexedProperty_ToLocal;
     procedure TestRun_InterfaceElem_ViaIndexedProperty_ToResult;
+
+    { A PROGRAM-level interface (or metaclass) global whose first use is a var
+      argument.  x86-64 registered program globals of these kinds only on an
+      assignment, so this one was never defined: the call linked against an
+      undefined <Name>_obj and the program died with no output. }
+    procedure TestRun_ProgramGlobals_ReachedOnlyThroughVarArg;
   end;
 
 implementation
@@ -1689,6 +1695,37 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '15 4 3' + LE + '20 5 3' + LE + '35' + LE + '45 8' + LE +
     '25 7 3' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_ProgramGlobals_ReachedOnlyThroughVarArg;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      IGreet = interface
+        function Hi(): string;
+      end;
+      TGreet = class(IGreet)
+        function Hi(): string;
+      end;
+      TA = class end;
+      TB = class(TA) end;
+      TAClass = class of TA;
+    function TGreet.Hi(): string; begin Result := 'hi' end;
+    var
+      G: IGreet;
+      M: TAClass;
+    procedure Fill(var X: IGreet); begin X := TGreet.Create() end;
+    procedure Pick(var X: TAClass); begin X := TB end;
+    begin
+      Fill(G);
+      WriteLn(G.Hi());
+      Pick(M);
+      WriteLn(M = TB)
+    end.
+    ''', 'hi' + LE + 'True' + LE, 0);
 end;
 
 initialization

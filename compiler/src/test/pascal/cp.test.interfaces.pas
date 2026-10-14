@@ -111,6 +111,9 @@ type
     { ------------------------------------------------------------------ }
     procedure TestSemantic_ForwardInterface_CompletedByFullDecl;
     procedure TestSemantic_ForwardInterface_Unresolved_RaisesError;
+    { a program-level interface global is DEFINED even when its only use is
+      a var argument (x86-64 left <Name>_obj undefined) }
+    procedure TestCodegen_ProgramIntfGlobal_DefinedWithoutAssignment;
   end;
 
 implementation
@@ -1049,6 +1052,26 @@ begin
         begin
         end.
         ''');
+end;
+
+procedure TInterfaceTests.TestCodegen_ProgramIntfGlobal_DefinedWithoutAssignment;
+const
+  Src = '''
+    program P;
+    type
+      IGreet = interface
+        function Hi(): string;
+      end;
+    var
+      G: IGreet;
+    procedure Fill(var X: IGreet); begin X := nil end;
+    begin
+      Fill(G)
+    end.
+    ''';
+begin
+  AssertEquals('the global''s storage is defined', '',
+    AsmMissing(Src, 'G_obj:', '_g_G:'));
 end;
 
 initialization

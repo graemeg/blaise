@@ -25642,7 +25642,11 @@ begin
   FCurrentUnitName := AProg.Name;
   FDbgSrcFile := '';
   FProgramName := AProg.Name;
-  { Register declared program-level variables as global slots. }
+  { Register declared program-level variables as global slots -- the same
+    kinds the unit registration below takes.  An interface global missing from
+    this list was only DEFINED when some assignment happened to register it, so
+    one reached first through a var argument linked against an undefined
+    <Name>_obj. }
   for I := 0 to AProg.Block.Decls.Count - 1 do
   begin
     VD := TVarDecl(AProg.Block.Decls.Items[I]);
@@ -25650,7 +25654,7 @@ begin
        ((VD.ResolvedType <> nil) and
         (VD.ResolvedType.Kind in [tyRecord, tyStaticArray, tyClass,
                                   tyProcedural, tyPointer, tyString, tyPChar,
-                                  tyDynArray, tySet])) then
+                                  tyDynArray, tyInterface, tyMetaClass, tySet])) then
       for J := 0 to VD.Names.Count - 1 do
       begin
         { Record as a module var FIRST so AddGlobal's GlobalSymName applies the
@@ -25819,7 +25823,7 @@ begin
        ((VD.ResolvedType <> nil) and
         (VD.ResolvedType.Kind in [tyRecord, tyStaticArray, tyClass,
                                   tyProcedural, tyPointer, tyString, tyPChar,
-                                  tyDynArray, tyInterface, tySet])) then
+                                  tyDynArray, tyInterface, tyMetaClass, tySet])) then
       for J := 0 to VD.Names.Count - 1 do
       begin
         { Record as a module var FIRST so AddGlobal's GlobalSymName applies the
@@ -25844,7 +25848,7 @@ begin
        ((VD.ResolvedType <> nil) and
         (VD.ResolvedType.Kind in [tyRecord, tyStaticArray, tyClass,
                                   tyProcedural, tyPointer, tyString, tyPChar,
-                                  tyDynArray, tyInterface, tySet])) then
+                                  tyDynArray, tyInterface, tyMetaClass, tySet])) then
       for J := 0 to VD.Names.Count - 1 do
       begin
         { Record as a module var FIRST so AddGlobal's GlobalSymName applies the
