@@ -665,6 +665,8 @@ type
       const AName: string; AArgs: TObjectList; ART: TTypeDesc;
       ANode: TASTNode);
     procedure EmitDiscardedRecStmtOnExpr(AStmt: TMethodCallStmt);
+    function EmitBuiltinReceiverToX0(AExpr: TMethodCallExpr): Boolean;
+    procedure EmitReleaseParkedReceiver;
     procedure EmitMethodCallOnExpr(AMethod: TMethodDecl; const AName: string;
       AArgs: TObjectList; AObjExpr: TASTExpr);
     procedure EmitMethodCallStmt(AStmt: TMethodCallStmt);
@@ -16426,6 +16428,51 @@ begin
       Tmp, 0);
 end;
 
+{ The receiver of a built-in TObject method (InheritsFrom, ToString) to x0:
+  an instance pointer, or a metaclass value.  Every receiver form an ordinary
+  method call accepts is lowered the same way -- a chained expression, a
+  captured variable, a var parameter.  Returns True when x0 is an OWNED +1
+  reference (a function or constructor result) the caller must release once
+  the call is done, as EmitMethodCallOnExpr does. }
+function TArm64Backend.EmitBuiltinReceiverToX0(AExpr: TMethodCallExpr): Boolean;
+begin
+  Result := False;
+  if AExpr.ObjExpr <> nil then
+  begin
+    Result := ArcExprOwnsRef(AExpr.ObjExpr);
+    Self.EmitExprToX0(AExpr.ObjExpr);
+    if ArcIsUnownedCtorResult(AExpr.ObjExpr) then
+    begin
+      { TFoo.Create().ToString(): pin the fresh rc=0 instance so the release
+        after the call frees it }
+      EmitPushX0();
+      EmitCallSym('_ClassAddRef');
+      EmitPopTo('x0');
+      Result := True;
+    end;
+    Exit;
+  end;
+  if AExpr.ObjectName = '' then
+    NotYet('built-in method without a receiver', AExpr);
+  if not EmitCapturedBase('x0', AExpr.ObjectName, True, AExpr.IsVarParam) then
+  begin
+    EmitLoadSlot('x0', AExpr.ObjectName);
+    if AExpr.IsVarParam then
+      Self.Emit(#9'ldr x0, [x0]');
+  end;
+end;
+
+{ Release the owned receiver EmitBuiltinReceiverToX0 handed back, parked one
+  stack slot up, keeping the call's result in x0. }
+procedure TArm64Backend.EmitReleaseParkedReceiver;
+begin
+  EmitPushX0();               { park the result }
+  Self.Emit(#9'ldr x0, [sp, #16]');
+  EmitCallSym('_ClassRelease');
+  EmitPopTo('x0');
+  Self.Emit(#9'add sp, sp, #16');   { drop the receiver copy }
+end;
+
 procedure TArm64Backend.EmitMethodCallOnExpr(AMethod: TMethodDecl;
   const AName: string; AArgs: TObjectList; AObjExpr: TASTExpr);
 var
@@ -16877,6 +16924,7 @@ var
   TD: TTypeDecl;
   I: Integer;
   Sym: string;
+  Owned: Boolean;
 begin
   if AExpr.IsConstructorCall then
   begin
@@ -16980,34 +17028,36 @@ begin
     { built-in TObject.ToString: always-virtual through vtable slot 1
       (offset 16 past the typeinfo back-pointer).  Returns an owned +1
       string. }
-    if (AExpr.ObjExpr <> nil) or (AExpr.ObjectName = '') then
-      NotYet('ToString on this receiver form', AExpr);
-    EmitLoadSlot('x0', AExpr.ObjectName);
-    if AExpr.IsVarParam then
-      Self.Emit(#9'ldr x0, [x0]');
+    Owned := EmitBuiltinReceiverToX0(AExpr);
+    if Owned then
+      EmitPushX0();               { copy for the post-call release }
     Self.Emit(#9'ldr x9, [x0]');
     Self.Emit(#9'ldr x9, [x9, #16]');
     Self.Emit(#9'blr x9');
+    if Owned then
+      EmitReleaseParkedReceiver();
     Exit;
   end;
   if AExpr.IsBuiltinInheritsFrom then
   begin
     { _InheritsFrom(child_ti, parent_ti): the receiver is a class
       instance (typeinfo from vtable[0]) or a metaclass variable }
-    if (AExpr.ObjExpr <> nil) or AExpr.IsVarParam or
-       (AExpr.ObjectName = '') then
-      NotYet('InheritsFrom on this receiver form', AExpr);
-    Self.EmitExprToX0(TASTExpr(AExpr.Args.Items[0]));
-    EmitPushX0();
-    EmitLoadSlot('x0', AExpr.ObjectName);
+    Owned := EmitBuiltinReceiverToX0(AExpr);
+    if Owned then
+      EmitPushX0();               { copy for the post-call release }
     if (AExpr.ResolvedClassType <> nil) and
        (AExpr.ResolvedClassType.Kind = tyClass) then
     begin
       Self.Emit(#9'ldr x0, [x0]');    { vtable }
       Self.Emit(#9'ldr x0, [x0]');    { slot 0 = typeinfo }
     end;
-    EmitPopTo('x1');
+    EmitPushX0();
+    Self.EmitExprToX0(TASTExpr(AExpr.Args.Items[0]));
+    Self.Emit(#9'mov x1, x0');
+    EmitPopTo('x0');
     EmitCallSym('_InheritsFrom');
+    if Owned then
+      EmitReleaseParkedReceiver();
     Exit;
   end;
   if AExpr.IsProcFieldCall then

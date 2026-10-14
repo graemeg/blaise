@@ -12272,6 +12272,10 @@ begin
   if ACall.IsBuiltinInheritsFrom then
   begin
     Self.EmitMethodReceiverToRax(ACall);     { instance ptr -> %rax }
+    { an owned receiver (MakeB().InheritsFrom(C), TB.Create()...) is
+      released at the end of the statement -- it leaked }
+    if ACall.ObjExpr <> nil then
+      Self.DeferOwnedClassRecv(ACall.ObjExpr);
     if (ACall.ResolvedClassType <> nil) and
        (ACall.ResolvedClassType.Kind = tyClass) then
     begin
@@ -12291,6 +12295,8 @@ begin
   if ACall.IsBuiltinToString then
   begin
     Self.EmitMethodReceiverToRax(ACall);     { instance ptr -> %rax }
+    if ACall.ObjExpr <> nil then
+      Self.DeferOwnedClassRecv(ACall.ObjExpr);
     Self.Emit(#9'movq %rax, %rdi');           { Self }
     Self.Emit(#9'movq (%rdi), %rax');         { vtable }
     Self.Emit(#9'movq 16(%rax), %rax');       { vtable[2] = ToString }

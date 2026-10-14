@@ -49,6 +49,11 @@ type
       Result from d0 -- a `stur d0` to the frame, which the internal arm64
       assembler could not encode for an FP register. }
     procedure TestRun_InheritedStmt_DoubleResult;
+    { InheritsFrom and ToString on every receiver form: a chained call
+      (E.ClassType.InheritsFrom -- punit's exception check), a field, a
+      function or constructor result (released after the call), Self and a
+      var parameter.  arm64 accepted only a plain variable. }
+    procedure TestRun_BuiltinMethods_EveryReceiverForm;
   end;
 
 implementation
@@ -720,6 +725,41 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '2.25' + LE, 0);
+end;
+
+procedure TE2EInheritTests.TestRun_BuiltinMethods_EveryReceiverForm;
+const
+  Src = '''
+    program P;
+    type
+      TA = class end;
+      TB = class(TA)
+        function ToString(): string; override;
+        function Check(): Boolean;
+      end;
+      TH = class B: TB; end;
+    function TB.ToString(): string; begin Result := 'B!' end;
+    function TB.Check(): Boolean; begin Result := Self.InheritsFrom(TA) end;
+    function MakeB(): TB; begin Result := TB.Create() end;
+    procedure VP(var X: TA); begin WriteLn(X.InheritsFrom(TB), ' ', X.ToString()) end;
+    var O: TObject; H: TH; A: TA;
+    begin
+      O := TB.Create();
+      WriteLn(O.ClassType.InheritsFrom(TA));
+      H := TH.Create(); H.B := TB.Create();
+      WriteLn(H.B.InheritsFrom(TA), ' ', H.B.ToString());
+      WriteLn(MakeB().InheritsFrom(TA), ' ', MakeB().ToString());
+      WriteLn(TB.Create().InheritsFrom(TH));
+      WriteLn(H.B.Check());
+      A := TB.Create(); VP(A);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'True' + LE + 'True B!' + LE + 'True B!' + LE + 'False' + LE +
+    'True' + LE + 'True B!' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'B!');
 end;
 
 initialization
