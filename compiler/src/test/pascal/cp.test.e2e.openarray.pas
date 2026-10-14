@@ -87,6 +87,13 @@ type
       released after the call: x86-64 leaked every one, arm64 refused the
       literal }
     procedure TestRun_LiteralOwnedElements_ReleasedAfterCall;
+    { every form of float element in an open-array literal: literals,
+      operators, unary minus, and each call form -- direct, indirect (an
+      element and a call result as the callee), closure, method pointer,
+      procedure variable and implicit Self -- in Double and Single blocks.
+      Both backends refused the literals, stored garbage for operators and
+      calls (inf, -2D, 0), and arm64 refused the call forms }
+    procedure TestRun_LiteralFloatElements_EveryForm;
   end;
 
 implementation
@@ -1163,6 +1170,67 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertLeakFreeOnAll(Src, 'gcc -o f2 f20 7');
+end;
+
+procedure TE2EOpenArrayTests.TestRun_LiteralFloatElements_EveryForm;
+const
+  Src = '''
+    program P;
+    type
+      TFn = function(X: Double): Double;
+      TFnS = function(X: Single): Single;
+      TRef = reference to function(X: Double): Double;
+      TRefS = reference to function(X: Single): Single;
+      TMeth = function(X: Double): Double of object;
+      TK = class
+        function Half(X: Double): Double;
+        function HalfS(X: Single): Single;
+        procedure Run();
+      end;
+    function Sum(const A: array of Double): Double;
+    var I: Integer;
+    begin Result := 0; for I := 0 to High(A) do Result := Result + A[I] end;
+    function SumS(const A: array of Single): Single;
+    var I: Integer;
+    begin Result := 0; for I := 0 to High(A) do Result := Result + A[I] end;
+    function Twice(X: Double): Double; begin Result := X * 2 end;
+    function TwiceS(X: Single): Single; begin Result := X * 2 end;
+    function GetFn(): TFn; begin Result := @Twice end;
+    function TK.Half(X: Double): Double; begin Result := X / 2 end;
+    function TK.HalfS(X: Single): Single; begin Result := X / 2 end;
+    procedure TK.Run();
+    begin
+      WriteLn('self ', Sum([Half(3), 1.0]):0:2, ' ', SumS([HalfS(3)]):0:2);
+    end;
+    var
+      Fns: array[0..0] of TFn; FnsS: array[0..0] of TFnS;
+      F: TFn; R: TRef; RS: TRefS; M: TMeth; K: TK; D: Double; S: Single;
+    begin
+      K := TK.Create();
+      D := 1.5; S := 2.5;
+      Fns[0] := @Twice; FnsS[0] := @TwiceS; F := @Twice; M := @K.Half;
+      R := function(X: Double): Double begin Result := X * 3 end;
+      RS := function(X: Single): Single begin Result := X * 3 end;
+      WriteLn('values ', Sum([1.0, 2.0]):0:2, ' ', Sum([D, D * 2]):0:2, ' ',
+        Sum([-D]):0:2, ' ', SumS([S, S + S]):0:2);
+      WriteLn('direct ', Sum([Twice(D)]):0:2, ' ', SumS([TwiceS(S)]):0:2);
+      WriteLn('indirect ', Sum([Fns[0](1), 1.0]):0:2, ' ',
+        SumS([FnsS[0](1)]):0:2, ' ', Sum([GetFn()(2), 1.0]):0:2);
+      WriteLn('closure ', Sum([R(1), 1.0]):0:2, ' ', SumS([RS(1)]):0:2, ' ',
+        Sum([M(5), 1.0]):0:2);
+      WriteLn('procvar ', Sum([F(1), 1.0]):0:2);
+      K.Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'values 3.00 4.50 -1.50 7.50' + #10 +
+    'direct 3.00 5.00' + #10 +
+    'indirect 3.00 2.00 5.00' + #10 +
+    'closure 4.00 3.00 3.50' + #10 +
+    'procvar 3.00' + #10 +
+    'self 2.50 1.50' + #10, 0);
 end;
 
 initialization

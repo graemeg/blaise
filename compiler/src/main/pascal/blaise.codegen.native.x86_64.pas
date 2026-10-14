@@ -20520,6 +20520,20 @@ begin
   Self.Emit(#9'movq %rsp, %rax');  { %rax = base of element storage }
   for I := 0 to ALit.Elements.Count - 1 do
   begin
+    if ElemType.Kind in [tyDouble, tySingle] then
+    begin
+      { a float element is evaluated as a float -- a literal, an operator or
+        a call has no integer form ([1.0, 2.0] was refused, [D * 2] stored
+        garbage, [-D] stored -2D, [F(X)] stored 0) -- in the block's width }
+      Self.EmitExprToXmm0(TASTExpr(ALit.Elements.Items[I]));
+      Self.EmitXmm0WidthAdjust(TASTExpr(ALit.Elements.Items[I]).ResolvedType,
+        ElemType.Kind = tySingle);
+      if ElemType.Kind = tySingle then
+        Self.Emit(Format(#9'movss %%xmm0, %d(%%rsp)', [I * ElemSize]))
+      else
+        Self.Emit(Format(#9'movsd %%xmm0, %d(%%rsp)', [I * ElemSize]));
+      Continue;
+    end;
     Self.EmitExprToEax(TASTExpr(ALit.Elements.Items[I]));
     { an owned transient element (['-o', MakeName(1)]): the literal only
       BORROWS it for the call, so its reference is dropped at the statement

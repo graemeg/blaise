@@ -271,6 +271,16 @@ type
       alias hazard that forces a plain-local source to pin). }
     function  ParamsHaveVarString(AParams: TObjectList): Boolean;
     procedure NotYet(const AWhat: string; ANode: TASTNode);
+    { A state the front end and the other lowerings rule out -- a compiler
+      bug, not a missing feature, so it says so instead of "not yet lowered". }
+    procedure InternalError(const AWhat: string; ANode: TASTNode);
+    { A float-returning call that reached the INTEGER emitter.  The integer
+      emitter carries a float only as raw bits, and only for a form that has
+      them (a variable, a field); a call leaves its result in d0 / s0, and a
+      consumer that needs a float evaluates it with EmitExprToD0OrConvert.
+      The consumer that did not -- an open-array literal's element store --
+      is fixed; arriving here means another one. }
+    procedure FloatCallInIntegerContext(const AForm: string; ANode: TASTNode);
 
     { ---- frame + operands ---- }
     procedure AddIntfLocal(const AName: string);
@@ -1085,6 +1095,23 @@ begin
   raise ENativeCodeGenError.Create(
     'arm64: not yet lowered: ' + AWhat + Pos
     + ' (the AArch64 backend subset grows incrementally — Phase 2)');
+end;
+
+procedure TArm64Backend.InternalError(const AWhat: string; ANode: TASTNode);
+var
+  Pos: string;
+begin
+  Pos := '';
+  if ANode <> nil then
+    Pos := Format(' at line %d col %d', [ANode.Line, ANode.Col]);
+  raise ENativeCodeGenError.Create('arm64: internal error: ' + AWhat + Pos);
+end;
+
+procedure TArm64Backend.FloatCallInIntegerContext(const AForm: string;
+  ANode: TASTNode);
+begin
+  InternalError('float-returning ' + AForm + ' reached the integer emitter ' +
+    '(its consumer must evaluate it with EmitExprToD0OrConvert)', ANode);
 end;
 
 { ---- frame + operands --------------------------------------------------- }
@@ -5723,7 +5750,7 @@ begin
   if AExpr is TIndirectFuncCallExpr then
   begin
     if IsFloatExpr(AExpr) then
-      NotYet('float-returning indirect call in integer context', AExpr);
+      FloatCallInIntegerContext('indirect call', AExpr);
     EmitIndirectFuncCallExpr(TIndirectFuncCallExpr(AExpr));
     Exit;
   end;
@@ -5734,7 +5761,7 @@ begin
       route to EmitFatPtrCall with the ADDRESS of the fat value.  Non-float,
       non-aggregate return only in this slice. }
     if IsFloatExpr(AExpr) then
-      NotYet('float-returning closure call in integer context', AExpr);
+      FloatCallInIntegerContext('closure call', AExpr);
     if (AExpr.ResolvedType <> nil) and
        IsAggregateReturn(AExpr.ResolvedType) then
       NotYet('aggregate-returning closure call', AExpr);
@@ -5762,7 +5789,7 @@ begin
   begin
     { bare method call on Self in expression position }
     if IsFloatExpr(AExpr) then
-      NotYet('float-returning implicit-Self call in integer context', AExpr);
+      FloatCallInIntegerContext('implicit-Self call', AExpr);
     if (AExpr.ResolvedType <> nil) and
        IsAggregateReturn(AExpr.ResolvedType) then
       NotYet('aggregate-returning implicit-Self call', AExpr);
@@ -5779,7 +5806,7 @@ begin
        (TFuncCallExpr(AExpr).ResolvedDecl = nil) then
       NotYet('this call form (''' + TFuncCallExpr(AExpr).Name + ''')', AExpr);
     if IsFloatExpr(AExpr) then
-      NotYet('float-returning call in integer context', AExpr);
+      FloatCallInIntegerContext('call', AExpr);
     if (AExpr.ResolvedType <> nil) and
        (AExpr.ResolvedType.Kind = tyRecord) then
       NotYet('record-returning call outside direct assignment', AExpr);
@@ -14245,6 +14272,27 @@ begin
           else
           for K := 0 to N - 1 do
           begin
+            ElT := TOpenArrayTypeDesc(
+              TMethodParam(ADecl.Params.Items[I]).ResolvedType).ElementType;
+            if (ElT <> nil) and (ElT.Kind in [tyDouble, tySingle]) then
+            begin
+              { a float element is evaluated as a float -- a literal, an
+                operator or a call has no integer form ([1.0, 2.0] was
+                refused, [D * 2] stored garbage, [-D] stored -2D) -- and
+                narrowed for a Single block }
+              Self.EmitExprToD0OrConvert(
+                TASTExpr(TArrayLiteralExpr(Arg).Elements.Items[K]));
+              EmitAddSubImm('add', 'x9', 'sp',
+                PopRegs.Count * 16 + LitBase + LitOff + K * ESz);
+              if ElT.Kind = tySingle then
+              begin
+                Self.Emit(#9'fcvt s0, d0');
+                Self.Emit(#9'str s0, [x9]');
+              end
+              else
+                Self.Emit(#9'str d0, [x9]');
+              Continue;
+            end;
             Self.EmitExprToX0(
               TASTExpr(TArrayLiteralExpr(Arg).Elements.Items[K]));
             if ArcExprOwnsRef(

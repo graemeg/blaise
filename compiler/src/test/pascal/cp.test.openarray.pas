@@ -100,6 +100,10 @@ type
       the literal borrows it, so it is released after the call.  x86-64
       leaked it; arm64 refused the literal. }
     procedure TestCodegen_LiteralOwnedElement_ReleasedAfterCall;
+    { a float element of an open-array literal is evaluated as a float and
+      stored at the block's width.  It went through the integer emitter:
+      a float literal was refused, an operator or a call stored garbage }
+    procedure TestCodegen_LiteralFloatElements_StoredAsFloats;
   end;
 
 implementation
@@ -706,6 +710,28 @@ begin
     AsmMissing(Src,
       #9'callq Mk'#10#9'movq %rax, _pendrel_0(%rip)',
       #9'bl _Mk'#10#9'stur x0, [x29, #-'));
+end;
+
+procedure TOpenArrayTests.TestCodegen_LiteralFloatElements_StoredAsFloats;
+const
+  Src = '''
+    program P;
+    function Sum(const A: array of Double): Double;
+    begin Result := A[0] end;
+    function SumS(const A: array of Single): Single;
+    begin Result := A[0] end;
+    var D: Double; S: Single;
+    begin
+      WriteLn(Sum([1.0, D * 2]):0:2);
+      WriteLn(SumS([S + S]):0:2);
+    end.
+    ''';
+begin
+  AssertEquals('Double elements stored from the float register', '',
+    AsmMissing(Src, #9'movsd %xmm0, 8(%rsp)', #9'str d0, [x9]'));
+  AssertEquals('Single elements narrowed and stored 4 bytes wide', '',
+    AsmMissing(Src, #9'movss %xmm0, 0(%rsp)',
+      #9'fcvt s0, d0'#10#9'str s0, [x9]'));
 end;
 
 initialization
