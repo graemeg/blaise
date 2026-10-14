@@ -6194,7 +6194,7 @@ begin
     if TInheritedCallExpr(AExpr).ResolvedMethod = nil then
       NotYet('unresolved inherited call', AExpr);
     if IsFloatExpr(AExpr) then
-      NotYet('float-returning inherited call in integer context', AExpr);
+      FloatCallInIntegerContext('inherited call', AExpr);
     EmitLoadSlot('x0', 'Self');
     EmitPushX0();
     EmitCall(TMethodDecl(TInheritedCallExpr(AExpr).ResolvedMethod),
@@ -6348,7 +6348,7 @@ begin
   if AExpr is TMethodCallExpr then
   begin
     if IsFloatExpr(AExpr) then
-      NotYet('float-returning method call in integer context', AExpr);
+      FloatCallInIntegerContext('method call', AExpr);
     if (AExpr.ResolvedType <> nil) and
        (AExpr.ResolvedType.Kind = tyRecord) then
       NotYet('record-returning method call', AExpr);
@@ -7404,9 +7404,8 @@ begin
       procedural variable goes through the integer path's call. }
     if IsMethodPtrType(TTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType)) then
     begin
-      if IsCaptured(TFuncCallExpr(AExpr).Name) then
-        NotYet('float-returning call through a captured closure variable',
-          AExpr);
+      { EmitProcVarAddr reaches a captured closure variable through its
+        _cap_ slot (a nested routine's or an anonymous method's) }
       EmitProcVarAddr('x9', TFuncCallExpr(AExpr).Name);
       EmitFatPtrCall('x9',
         TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType),

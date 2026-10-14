@@ -185,6 +185,11 @@ type
       nilled through the _cap_ pointer (arm64 refused the shape: "load of
       variable 'Cap'") }
     procedure TestRun_FreeOfCapturedVariable;
+    { a captured closure variable returning Double or Single, called from a
+      nested routine and from an anonymous method, in float contexts --
+      arm64 refused it ("float-returning call through a captured closure
+      variable") }
+    procedure TestRun_CapturedClosure_FloatResult;
   end;
 
 implementation
@@ -2559,6 +2564,42 @@ const Src =
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'freed'#10'True'#10'done'#10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_CapturedClosure_FloatResult;
+const Src =
+  '''
+  program P;
+  type
+    TRef = reference to function(X: Double): Double;
+    TRefS = reference to function(X: Single): Single;
+    TP = reference to procedure;
+  function Sum(const A: array of Double): Double;
+  var I: Integer;
+  begin Result := 0; for I := 0 to High(A) do Result := Result + A[I] end;
+  procedure Outer();
+  var R: TRef; RS: TRefS; Q: TP;
+    procedure Inner();
+    begin
+      WriteLn('nested ', R(1):0:2, ' ', RS(1):0:2, ' ', R(2) + 1:0:2)
+    end;
+  begin
+    R := function(X: Double): Double begin Result := X * 3 end;
+    RS := function(X: Single): Single begin Result := X * 3 end;
+    Inner();
+    Q := procedure
+      begin
+        WriteLn('anon ', R(4):0:2, ' ', RS(4):0:2, ' ', Sum([R(1), R(2)]):0:2)
+      end;
+    Q();
+  end;
+  begin
+    Outer()
+  end.
+  ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'nested 3.00 3.00 7.00'#10'anon 12.00 12.00 9.00'#10, 0);
 end;
 
 initialization
