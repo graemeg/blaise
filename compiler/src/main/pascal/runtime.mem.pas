@@ -48,7 +48,7 @@
 
   Teardown (phase 5, §Teardown of the design):
     Every arena is registered on a process-global registry (CAS
-    spinlock).  A thread-exit hook (pthread TSD destructor for workers,
+    spinlock).  A thread-exit hook (_BlaiseThreadAtExit for workers,
     __cxa_atexit for the main thread) unmaps the exiting thread's fully
     free arenas and marks the rest abandoned (OwnerTid = 0); abandoned
     arenas are later adopted or unmapped by the reclamation sweep, run
@@ -148,20 +148,21 @@ const
                           stale reference, small enough to bound memory. }
 {$ENDIF}
 
-{ Thread-exit hook bindings (phase 5).  pthread_key_create registers a
-  TSD destructor that pthreads runs on worker-thread exit; __cxa_atexit
-  covers the main thread (key destructors do not run for it).  The
-  static (libc-free) build resolves these from no-op seams in
-  runtime.thread.static.* — its worker threads exit via SYS_exit with
-  no TSD machinery, so their arenas are reclaimed only by later
-  adoption or at process exit (the static worker-thread allocator path
-  is out of scope; concurrent-allocator-design.adoc §Scope). }
-function _pthread_key_create(Key: Pointer; Dtor: Pointer): Integer;
-  external name 'pthread_key_create';
-{ Key is pthread_key_t — 64-bit on Darwin.  Declaring the parameter Integer
-  truncated it (harmless while keys are small, but wrong by type). }
-function _pthread_setspecific(Key: Int64; Value: Pointer): Integer;
-  external name 'pthread_setspecific';
+{ Thread-exit hook bindings (phase 5).  _BlaiseThreadAtExit registers a
+  callback the CALLING thread runs when it exits, while its threadvars are
+  still readable; the platform layout unit provides it (_tlv_atexit on
+  macOS, __cxa_thread_atexit_impl on Linux and FreeBSD -- libc's, or the
+  static build's own in runtime.thread.static.*).  __cxa_atexit covers the
+  main thread, which ends with exit() rather than a thread exit.
+
+  It is NOT a pthread key destructor any more.  Key destructors run in key
+  order, and on macOS dyld frees a thread's TLV storage from its OWN key,
+  created before ours, so our destructor read a FRESH zeroed block: the
+  sweep found no arenas and every worker's arenas stayed registered for
+  good (test_blaise_mem_mt failed three tests on arm64).  The static build's
+  no-op key seam meant its worker sweep never ran at all. }
+function _ThreadAtExit(Fn, Arg: Pointer): Integer;
+  external name '_BlaiseThreadAtExit';
 function _libc_cxa_atexit(Fn, Arg, DsoHandle: Pointer): Integer;
   external name '__cxa_atexit';
 
@@ -289,8 +290,7 @@ threadvar
   QRing: array[0..255] of Pointer;
   QIdx:  Integer;
 {$ENDIF}
-  { True once this thread's exit hook is armed (pthread_setspecific with a
-    non-nil value, so the TSD destructor fires at thread exit). }
+  { True once this thread's exit hook is registered (_ThreadAtExit). }
   ExitHookArmed: Boolean;
 
 { Process-global reclamation state (phase 5).  Everything below is
@@ -302,15 +302,7 @@ var
   GRegLock: Pointer;           { CAS spinlock word: nil = free }
   GArenaRegistry: PArena;      { all live arenas, linked via RemoteList }
   GAbandonedCount: Int64;      { registered arenas with OwnerTid = 0 }
-  GHooksReady: Integer;        { pthread key + atexit registered once }
-  { pthread_key_t of the exit destructor.  MUST be 64-bit: pthread_key_create
-    writes a full pthread_key_t through this pointer, and on Darwin (arm64 and
-    x86-64 alike) that type is 64 bits.  Declaring it Integer made the call
-    write 4 bytes past the variable, silently clobbering GExitKeyValue — a real
-    out-of-bounds global write (found auditing the 2026-07-23 macOS arm64
-    allocator failure). }
-  GExitKey: Int64;
-  GExitKeyValue: Int64;        { its per-thread value: any non-nil ptr }
+  GHooksReady: Integer;        { main-thread atexit sweep registered once }
 
 { Registry spinlock — CAS built on the allocator's own atomic leaves,
   deliberately NOT a pthread_mutex, so runtime.mem stays free of libc
@@ -505,8 +497,8 @@ begin
   RegLockRelease();
 end;
 
-{ Thread-exit sweep: run for a worker thread by the pthread TSD
-  destructor and for the main thread by the __cxa_atexit handler
+{ Thread-exit sweep: run for a worker thread by its thread-exit hook
+  (ThreadExitHook) and for the main thread by the __cxa_atexit handler
   (§Teardown).  Both run ON the owning thread, so its threadvars are
   still valid.  For every arena the thread owns:
 
@@ -577,9 +569,9 @@ begin
     FreeLists[I] := nil;
 end;
 
-{ TSD destructor (worker threads) and atexit handler (main thread).
-  Signatures match void (*)(void *). }
-procedure MemThreadExitSweep(Value: Pointer);
+{ The per-thread exit hook (_ThreadAtExit) and the main thread's atexit
+  handler.  Signatures match void (*)(void *). }
+procedure ThreadExitHook(Arg: Pointer);
 begin
   SweepThisThread();
 end;
@@ -589,24 +581,23 @@ begin
   SweepThisThread();
 end;
 
-{ Arm the exit hooks: once per process, register the TSD destructor and
-  the atexit sweep; once per thread, set a non-nil TSD value so the
-  destructor actually fires for this thread (§Teardown — "Why a
-  thread-exit hook exists, and how").  Called from AllocArena, i.e. only
-  on the arena-creation cold path. }
+{ Arm the exit hooks: once per process, register the main thread's atexit
+  sweep; once per thread, register ThreadExitHook to run when the thread
+  exits (§Teardown — "Why a thread-exit hook exists, and how").  Called from
+  AllocArena, i.e. only on the arena-creation cold path.  The flag is set
+  first: registering may itself allocate. }
 procedure EnsureExitHooks;
 begin
   if ExitHookArmed then Exit;
+  ExitHookArmed := True;
   RegLockAcquire();
   if GHooksReady = 0 then
   begin
-    _pthread_key_create(@GExitKey, Pointer(@MemThreadExitSweep));
     _libc_cxa_atexit(Pointer(@MemAtExitSweep), nil, nil);
     GHooksReady := 1;
   end;
   RegLockRelease();
-  _pthread_setspecific(GExitKey, @GExitKeyValue);
-  ExitHookArmed := True;
+  _ThreadAtExit(Pointer(@ThreadExitHook), nil);
 end;
 
 function MapFailed(P: Pointer): Boolean;

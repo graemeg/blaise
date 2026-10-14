@@ -99,6 +99,12 @@ function _SockNonBlock: Integer;   { SOCK_NONBLOCK = $800 (accept4) }
   sin_port (u16), sin_addr (u32), sin_zero[8].  (FreeBSD splits the first
   u16 into sin_len + a u8 sin_family — hence the seam.) }
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
+
+{ Flat function for runtime.mem: register Fn(Arg) to run when the CALLING
+  thread exits, while its threadvars are still readable.  glibc's
+  __cxa_thread_atexit_impl under a libc link; the --static build supplies
+  its own (runtime.thread.static.linux), run by the clone trampoline. }
+function _BlaiseThreadAtExit(Fn, Arg: Pointer): Integer;
 {$ENDIF}
 
 implementation
@@ -270,6 +276,20 @@ begin
     PB := Pointer(PChar(P) + I);
     PB^ := 0;                              { sin_zero }
   end;
+end;
+
+function cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Integer;
+  external name '__cxa_thread_atexit_impl';
+
+function _BlaiseThreadAtExit(Fn, Arg: Pointer): Integer;
+begin
+  { The third argument names the module the callback lives in (C passes
+    &__dso_handle, which has no Blaise equivalent); any address inside it
+    serves, so pass the callback's own.  It must not be nil: glibc keeps a
+    one-entry module cache that starts out nil, so a nil argument skipped the
+    lookup and the registration dereferenced a nil link map (every dynamic
+    program segfaulted on its first allocation). }
+  Result := cxa_thread_atexit_impl(Fn, Arg, Fn);
 end;
 {$ENDIF}
 

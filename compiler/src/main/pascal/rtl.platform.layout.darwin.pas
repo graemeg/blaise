@@ -107,6 +107,12 @@ function _SockNonBlock: Integer;   { no SOCK_NONBLOCK/accept4 on Darwin — 0 }
   (u8, = 16), sin_family (u8, = AF_INET), sin_port (u16), sin_addr (u32),
   sin_zero[8]. }
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
+
+{ Flat function for runtime.mem: register Fn(Arg) to run when the CALLING
+  thread exits, while its threadvars are still readable.  dyld's _tlv_atexit:
+  a pthread key destructor is NOT equivalent -- dyld frees the thread's TLV
+  block from its own key first, so a key destructor reads fresh storage. }
+function _BlaiseThreadAtExit(Fn, Arg: Pointer): Integer;
 {$ENDIF}
 
 implementation
@@ -343,6 +349,14 @@ begin
     PB := Pointer(PChar(P) + I);
     PB^ := 0;                              { sin_zero }
   end;
+end;
+
+procedure darwin_tlv_atexit(Fn, Arg: Pointer); external name '_tlv_atexit';
+
+function _BlaiseThreadAtExit(Fn, Arg: Pointer): Integer;
+begin
+  darwin_tlv_atexit(Fn, Arg);
+  Result := 0;
 end;
 {$ENDIF}
 

@@ -1002,13 +1002,22 @@ arena, not a leak that grows the process footprint.
 
 === Why a thread-exit hook exists, and how
 
-pthreads provides `pthread_key_create` with a destructor that runs on thread
-exit; the allocator registers a key whose destructor invokes the
-"mark-my-arenas-abandoned" walk. This is the standard idiom for per-thread
-allocator teardown and needs only `external name 'pthread_key_create'`/
-`'pthread_setspecific'` bindings in the same family as the existing `pthread_*`
-imports. For the main thread, an `__cxa_atexit` handler (already used by the leak
-tracker in `runtime.arc.pas:377`) performs the same final sweep.
+Each thread registers a thread-exit callback, through the platform layout's
+`_BlaiseThreadAtExit`, the first time it creates an arena; the callback invokes
+the "mark-my-arenas-abandoned" walk.  It runs on the exiting thread while its
+threadvars are still readable: `_tlv_atexit` on macOS, and
+`__cxa_thread_atexit_impl` on Linux and FreeBSD (libc's under a dynamic link,
+the static runtime's own, run by the thread trampoline, under `--static`).  For
+the main thread, an `__cxa_atexit` handler
+(already used by the leak tracker in `runtime.arc.pas:377`) performs the same
+final sweep.
+
+The first implementation used a `pthread_key_create` destructor.  That is the
+usual idiom, and it worked on Linux, but on macOS dyld frees a thread's TLV
+block from its own key, created before ours, so the destructor read freshly
+zeroed threadvars: it found no arenas, and every worker's arenas stayed
+registered.  The static build's key functions were no-ops, so its workers were
+never swept at all.
 
 [NOTE]
 .Teardown is a later phase (step 5), not part of the GO/NO-GO gate
@@ -1136,7 +1145,7 @@ and the header change is offset-correct. A divergent fixpoint *blocks the commit
   run after the async design's phased plan delivers the L1 scheduler
   (<<testing>>).
 . *Abandoned-arena reclamation.* Global arena registry, thread-exit hook
-  (`pthread_key` destructor + `__cxa_atexit` main sweep), adoption, per-arena
+  (thread-exit callback + `__cxa_atexit` main sweep), adoption, per-arena
   live-block counter and unmap-when-empty-and-abandoned. Stress with worker
   churn (workers spawned and joined mid-run).
 . *(Later) arm64 atomic siblings.* `casal`/`swpal`/`ldaddal` (LSE) or
@@ -1167,10 +1176,10 @@ and the header change is offset-correct. A divergent fixpoint *blocks the commit
 * *Boolean/pointer ABI mismatch in the asm leaves.* Mitigation: match the
   convention `_StringEquals`/`_InheritsFrom` already emit; the single-threaded
   atomics unit test pins it before any concurrent use.
-* *`pthread_self`/`pthread_key` unavailable in the static build.* Mitigation:
-  out of scope for v1 (the static/libc-free worker-thread path is an independent
-  unresolved blocker in the async doc); the dynamic build is the target and has
-  these symbols.
+* *`pthread_self`/`pthread_key` unavailable in the static build.* Resolved:
+  ownership uses a threadvar address, not `pthread_self`, and the static thread
+  runtime provides the thread-exit callback (`__cxa_thread_atexit_impl`) that
+  replaced the key destructor.
 
 [#alternatives]
 == Alternatives considered

@@ -51,17 +51,22 @@ function pthread_mutex_destroy(Mutex: Pointer): Integer;
 function pthread_create(Thread, Attr, StartRoutine, Arg: Pointer): Integer;
 function pthread_join(Thread: Int64; RetVal: Pointer): Integer;
 
-{ TSD no-op seam for the allocator's thread-exit hook (runtime.mem,
-  phase 5 of concurrent-allocator-design.adoc).  The static build has no
-  thread-specific-data machinery and its threads exit via SYS_exit with
-  no destructor pass, so key registration is accepted and ignored: a
-  static worker's arenas are never marked abandoned at thread exit —
-  they are reclaimed by later adoption sweeps or at process exit.  The
-  static worker-thread allocator path is explicitly out of scope
-  (§Scope of the design); returning 0 keeps the caller quiet.  The main
-  thread's sweep still runs — __cxa_atexit is real in runtime.libc2. }
-function pthread_key_create(Key, Dtor: Pointer): Integer;
-function pthread_setspecific(Key: Integer; Value: Pointer): Integer;
+{ C++-ABI thread-exit registration -- the name the platform layout unit's
+  _BlaiseThreadAtExit imports (runtime.mem's thread-exit hook, the
+  allocator sweep).  Fn(Arg) runs when the
+  calling thread exits, newest first; libc provides the same entry point
+  under a dynamic link.  A static worker runs its list from the thread
+  trampoline once its start routine returns.  The main thread ends with
+  exit_group and never runs its list: runtime.mem covers it through
+  __cxa_atexit.
+
+  This replaced a no-op pthread_key_create / pthread_setspecific pair that
+  accepted a destructor and never ran it, so a static worker's arenas were
+  never swept. }
+function __cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Integer;
+
+{ Run, newest first, and clear the calling thread's exit callbacks. }
+procedure _StaticThreadExitRun;
 
 { sysconf is provided by runtime.libc.linux (sched_getaffinity + popcount); it is
   not redefined here. }
@@ -185,7 +190,8 @@ end;
 
 { Raw clone of a thread.  Returns the child TID in the parent, 0 in the child.
   The child resumes here on its own stack (ChildStack) with %rax = 0, then this
-  routine, in the child branch, calls Entry(EntryArg) and exits the thread.
+  routine, in the child branch, calls Entry(EntryArg), runs the thread's exit
+  callbacks and exits the thread.
 
   Args (SysV): %rdi=Flags, %rsi=ChildStack(top), %rdx=ParentTid,
                %rcx=ChildTid, %r8=Tls, %r9=Entry, [stack]=EntryArg.
@@ -217,6 +223,7 @@ asm
     popq %rdi                 { %rdi = EntryArg (1st arg to Entry) }
     xorq %rbp, %rbp           { terminate the call chain for unwinders }
     call *%rax               { Entry(EntryArg) }
+    call _StaticThreadExitRun { this thread's exit callbacks }
 
     { Thread done: exit(0) this thread only (NOT exit_group). }
     xorl %edi, %edi
@@ -292,15 +299,44 @@ begin
   Result := 0;
 end;
 
-{ TSD no-op seam — see the interface comment. }
-function pthread_key_create(Key, Dtor: Pointer): Integer;
+{ Per-thread exit callbacks (see the interface comment).  runtime.mem
+  registers one per thread; the headroom is for callers of the C++ ABI. }
+const
+  MAX_THREAD_EXIT = 8;
+  ENOMEM_ERR = 12;
+
+type
+  TThreadExitProc = procedure(Arg: Pointer);
+
+threadvar
+  ThreadExitFn: array[0..7] of Pointer;
+  ThreadExitArg: array[0..7] of Pointer;
+  ThreadExitCount: Integer;
+
+function __cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Integer;
 begin
+  if ThreadExitCount >= MAX_THREAD_EXIT then
+  begin
+    Result := ENOMEM_ERR;
+    Exit;
+  end;
+  ThreadExitFn[ThreadExitCount] := Fn;
+  ThreadExitArg[ThreadExitCount] := Arg;
+  ThreadExitCount := ThreadExitCount + 1;
   Result := 0;
 end;
 
-function pthread_setspecific(Key: Integer; Value: Pointer): Integer;
+procedure _StaticThreadExitRun;
+var
+  F: TThreadExitProc;
 begin
-  Result := 0;
+  { a callback may register another, so the count is re-read each round }
+  while ThreadExitCount > 0 do
+  begin
+    ThreadExitCount := ThreadExitCount - 1;
+    F := TThreadExitProc(ThreadExitFn[ThreadExitCount]);
+    F(ThreadExitArg[ThreadExitCount]);
+  end;
 end;
 
 end.

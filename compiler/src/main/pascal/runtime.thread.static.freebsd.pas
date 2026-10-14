@@ -61,14 +61,22 @@ function pthread_mutex_destroy(Mutex: Pointer): Integer;
 function pthread_create(Thread, Attr, StartRoutine, Arg: Pointer): Integer;
 function pthread_join(Thread: Int64; RetVal: Pointer): Integer;
 
-{ TSD no-op seam for the allocator's thread-exit hook (runtime.mem,
-  phase 5 of concurrent-allocator-design.adoc) — same contract as the
-  Linux static shim: key registration is accepted and ignored; a static
-  worker's arenas are reclaimed by later adoption sweeps or at process
-  exit, and the main thread's sweep still runs via __cxa_atexit
-  (runtime.libc2). }
-function pthread_key_create(Key, Dtor: Pointer): Integer;
-function pthread_setspecific(Key: Integer; Value: Pointer): Integer;
+{ C++-ABI thread-exit registration -- the name the platform layout unit's
+  _BlaiseThreadAtExit imports (runtime.mem's thread-exit hook, the
+  allocator sweep).  Fn(Arg) runs when the
+  calling thread exits, newest first; libc provides the same entry point
+  under a dynamic link.  A static worker runs its list from the thread
+  trampoline once its start routine returns.  The main thread ends with
+  exit_group and never runs its list: runtime.mem covers it through
+  __cxa_atexit.
+
+  This replaced a no-op pthread_key_create / pthread_setspecific pair that
+  accepted a destructor and never ran it, so a static worker's arenas were
+  never swept. }
+function __cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Integer;
+
+{ Run, newest first, and clear the calling thread's exit callbacks. }
+procedure _StaticThreadExitRun;
 
 implementation
 
@@ -208,7 +216,7 @@ end;
 { The thread's entry point (thr_param.start_func).  The kernel starts the new
   thread here with %rdi = thr_param.arg (our control-block pointer), on the fresh
   stack, with the thread's own %fs already installed (tls_base).  We call the real
-  StartRoutine(Arg), then set JoinWord = 1 and _umtx_op-WAKE it so pthread_join
+  StartRoutine(Arg) and the thread's exit callbacks, then set JoinWord = 1 and _umtx_op-WAKE it so pthread_join
   unblocks, then thr_exit(nil) to terminate JUST this thread. }
 procedure _thr_trampoline(CBPtr: Pointer);
 var
@@ -218,6 +226,7 @@ begin
   CB := PThreadCB(CBPtr);
   Entry := CB^.StartRoutine;
   CallEntry(Entry, CB^.Arg);
+  _StaticThreadExitRun();
   { Terminate this thread AND signal the joiner in one kernel step: pass the
     join word as thr_exit's `state`.  The kernel does `suword(state, 1)` +
     umtx-wake on it AFTER the thread has stopped executing on its stack — so the
@@ -323,15 +332,44 @@ begin
   Result := 0;
 end;
 
-{ TSD no-op seam — see the interface comment. }
-function pthread_key_create(Key, Dtor: Pointer): Integer;
+{ Per-thread exit callbacks (see the interface comment).  runtime.mem
+  registers one per thread; the headroom is for callers of the C++ ABI. }
+const
+  MAX_THREAD_EXIT = 8;
+  ENOMEM_ERR = 12;
+
+type
+  TThreadExitProc = procedure(Arg: Pointer);
+
+threadvar
+  ThreadExitFn: array[0..7] of Pointer;
+  ThreadExitArg: array[0..7] of Pointer;
+  ThreadExitCount: Integer;
+
+function __cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Integer;
 begin
+  if ThreadExitCount >= MAX_THREAD_EXIT then
+  begin
+    Result := ENOMEM_ERR;
+    Exit;
+  end;
+  ThreadExitFn[ThreadExitCount] := Fn;
+  ThreadExitArg[ThreadExitCount] := Arg;
+  ThreadExitCount := ThreadExitCount + 1;
   Result := 0;
 end;
 
-function pthread_setspecific(Key: Integer; Value: Pointer): Integer;
+procedure _StaticThreadExitRun;
+var
+  F: TThreadExitProc;
 begin
-  Result := 0;
+  { a callback may register another, so the count is re-read each round }
+  while ThreadExitCount > 0 do
+  begin
+    ThreadExitCount := ThreadExitCount - 1;
+    F := TThreadExitProc(ThreadExitFn[ThreadExitCount]);
+    F(ThreadExitArg[ThreadExitCount]);
+  end;
 end;
 
 end.

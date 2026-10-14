@@ -362,7 +362,8 @@ const
 var
   I: Integer;
 begin
-  if (AName = '_tlv_bootstrap') or (AName = '__cxa_atexit') or
+  if (AName = '_tlv_bootstrap') or (AName = '_tlv_atexit') or
+     (AName = '__cxa_atexit') or
      (AName = '__error') or (AName = 'timegm') or (AName = 'write') or
      (AName = 'getrusage') or (AName = '__getdirentries64') or
      (AName = 'getentropy') or (AName = 'pthread_cond_init') or
