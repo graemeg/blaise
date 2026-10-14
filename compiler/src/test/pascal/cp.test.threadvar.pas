@@ -33,6 +33,18 @@ type
     { an unmanaged RECORD threadvar: per-thread storage (Mach-O TLV / ELF
       @tpoff) addressed for a field store.  arm64 refused the type. }
     procedure TestCodegen_RecordThreadVar_FieldStoreThroughTls;
+    { x86-64: every lowering that names a threadvar goes through its TLS
+      address.  SetLength / Delete / Free / sret results wrote the static
+      Name(%rip) -- the TLS template, not the thread's copy. }
+    procedure TestCodegenX86_ThreadVarUpdates_NeverRipRelative;
+    { lea ignores a segment override: leaq %fs:X@tpoff yields the bare
+      offset, so an address-of path must never emit it (a closure threadvar
+      call jumped through that offset) }
+    procedure TestCodegenX86_ThreadVarAddress_NeverLeaqThroughSegment;
+    { .tbss lays each threadvar out like the plain global of its type: the
+      interface obj+itab pair under its _obj / _itab labels, a closure's
+      16-byte Code+Env pair }
+    procedure TestCodegenX86_ThreadVarTbssLayout_MatchesPlainGlobals;
   end;
 
 implementation
@@ -245,6 +257,74 @@ begin
     AsmMissing(Src,
       #9'leaq TVR@tpoff(%rcx), %rcx'#10#9'popq %rax'#10#9'movl %eax, 0(%rcx)',
       #9'mov x9, x0'#10#9'ldr x0, [sp], #16'#10#9'str w0, [x9, #0]'));
+end;
+
+const
+  SrcThreadVarShapes = '''
+    program P;
+    type
+      IGreet = interface function Hi(): string; end;
+      TC = class N: Integer; end;
+      TR = record S: string; A, B: Integer; end;
+    function Mk(): TR; begin Result.A := 1 end;
+    threadvar
+      A: array of Integer;
+      S: string;
+      G: IGreet;
+      F: reference to procedure;
+      C: TC;
+      R: TR;
+    procedure Fill(var X: IGreet); begin X := nil end;
+    begin
+      SetLength(A, 2);
+      SetLength(S, 1);
+      Delete(S, 0, 1);
+      Fill(G);
+      F := procedure begin WriteLn(A[0]) end;
+      F();
+      C := TC.Create();
+      C.Free();
+      R := Mk()
+    end.
+    ''';
+
+procedure TThreadVarTests.TestCodegenX86_ThreadVarUpdates_NeverRipRelative;
+var
+  Asm_: string;
+begin
+  Asm_ := GenAsm(SrcThreadVarShapes, TargetX86_64);
+  AssertTrue('SetLength on a dyn-array threadvar', Pos(' A(%rip)', Asm_) < 0);
+  AssertTrue('SetLength / Delete on a string threadvar',
+    Pos(' S(%rip)', Asm_) < 0);
+  AssertTrue('Free nils a class threadvar', Pos(' C(%rip)', Asm_) < 0);
+  AssertTrue('an sret result into a record threadvar',
+    Pos(' R(%rip)', Asm_) < 0);
+  AssertTrue('the dyn array is stored back through TLS',
+    Pos(#9'movq %rax, %fs:A@tpoff', Asm_) >= 0);
+  AssertTrue('Free clears the TLS slot', Pos(#9'movq $0, %fs:C@tpoff', Asm_) >= 0);
+end;
+
+procedure TThreadVarTests.TestCodegenX86_ThreadVarAddress_NeverLeaqThroughSegment;
+var
+  Asm_: string;
+begin
+  Asm_ := GenAsm(SrcThreadVarShapes, TargetX86_64);
+  AssertTrue('no leaq through the %fs segment', Pos('leaq %fs:', Asm_) < 0);
+  AssertTrue('the interface pair''s address is thread pointer + offset',
+    Pos('leaq G_obj@tpoff(', Asm_) >= 0);
+  AssertTrue('the closure''s address is thread pointer + offset',
+    Pos('leaq F@tpoff(', Asm_) >= 0);
+end;
+
+procedure TThreadVarTests.TestCodegenX86_ThreadVarTbssLayout_MatchesPlainGlobals;
+var
+  Asm_: string;
+begin
+  Asm_ := GenAsm(SrcThreadVarShapes, TargetX86_64);
+  AssertTrue('interface threadvar: obj+itab pair',
+    Pos('G_obj:'#10#9'.skip 8'#10'G_itab:'#10#9'.skip 8', Asm_) >= 0);
+  AssertTrue('closure threadvar: 16-byte Code+Env pair',
+    Pos('F:'#10#9'.skip 16', Asm_) >= 0);
 end;
 
 initialization

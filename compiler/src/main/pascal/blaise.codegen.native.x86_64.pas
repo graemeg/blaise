@@ -471,6 +471,8 @@ type
     procedure EmitStrLitAddr(const AValue: string);
     { Emit an initialised global's data slot from its folded const value
       (var G: T = value).  Called from EmitDataSection inside the .data pass. }
+    { One zero-initialised threadvar in .tbss, laid out like a .data global. }
+    procedure EmitTlsZeroGlobal(const AName: string; AType: TTypeDesc);
     procedure EmitGlobalInitData(const AName: string; AType: TTypeDesc;
                                  CD: TConstDecl);
     { Emit string literal blobs in .rodata. Called from EmitDataSection. }
@@ -582,6 +584,8 @@ type
     { The AT&T operand addressing AName: "-N(%rbp)" for a frame local,
       "name(%rip)" for a global. }
     function VarOperand(const AName: string): string;
+    { Address of a global interface's obj+itab pair (TLS-aware). }
+    procedure EmitLeaqIntfGlobal(const AName: string; const ADstReg: string);
     procedure EmitLeaqGlobal(const AName: string; const ADstReg: string);
     { Load the ADDRESS of a named variable into ADstReg, whether it is a stack
       local (leaq off %rbp) or a global (PC-relative, or TLS via EmitLeaqGlobal
@@ -1108,6 +1112,8 @@ type
     function IntfArgSlotClasses(AIntf: TInterfaceTypeDesc;
       const AMethName: string; AArgs: TObjectList; const AVFlags: string;
       AHK: TList<Integer>): TList<Integer>;
+    { A scratch slot holding a threadvar's address: an indirect sret destination. }
+    function TlsSretDest(const AName: string): string;
     function NewScratchOperand(ASize: Integer): string;
     procedure EmitStaticArrayCallToRax(AExpr: TASTExpr);
     procedure CheckForwardedOpenArrayArg(AArg: TASTExpr);
@@ -2216,28 +2222,55 @@ begin
       Name := FDataGlobals.Keys[I];
       if Self.IsImportedGlobal(Name) then Continue;
       if not Self.IsThreadVarGlobal(Name) then Continue;
-      if (Self.GlobalType(Name) <> nil) and
-         (IsJumboSet(Self.GlobalType(Name)) or
-          (Self.GlobalType(Name).Kind in [tyRecord, tyStaticArray])) then
-        Sz := Self.GlobalType(Name).RawSize()
-      else if (Self.GlobalType(Name) <> nil) and
-              (Self.GlobalType(Name).Kind = tyDouble) then
-        Sz := 8
-      else
-      begin
-        Sz := IntByteSize(Self.GlobalType(Name));
-        if Sz < 4 then Sz := 4;
-      end;
-      if Sz >= 8 then
-        Self.Emit('.balign 8')
-      else
-        Self.Emit(Format('.balign %d', [Sz]));
-      Self.Emit('.globl ' + Name);
-      Self.Emit(Name + ':');
-      Self.Emit(Format(#9'.skip %d', [Sz]));
+      Self.EmitTlsZeroGlobal(Name, Self.GlobalType(Name));
     end;
   end;
   Self.EmitStrLitSection();
+end;
+
+procedure TX86_64Backend.EmitTlsZeroGlobal(const AName: string;
+  AType: TTypeDesc);
+var
+  Sz: Integer;
+begin
+  { One zero-initialised threadvar in .tbss.  The layout matches what the
+    .data pass gives a plain global of the same type, since every access path
+    is shared: an interface is the 16-byte obj+itab pair reached through its
+    Name_obj / Name_itab labels, a method pointer or closure is a 16-byte
+    Code+Data pair, an aggregate takes its full size.  .tbss holds no bytes,
+    so each slot is reserved with .skip rather than zero data directives. }
+  if (AType <> nil) and (AType.Kind = tyInterface) then
+  begin
+    Self.Emit('.balign 8');
+    Self.Emit(Self.GlobalBindDir(AName) + AName + '_obj');
+    Self.Emit(Self.GlobalBindDir(AName) + AName + '_itab');
+    Self.Emit(AName + '_obj:');
+    Self.Emit(#9'.skip 8');
+    Self.Emit(AName + '_itab:');
+    Self.Emit(#9'.skip 8');
+    Exit;
+  end;
+  if (AType <> nil) and (AType.Kind = tyProcedural) and
+     (TProceduralTypeDesc(AType).IsMethodPtr or
+      TProceduralTypeDesc(AType).IsReference) then
+    Sz := 16
+  else if (AType <> nil) and
+          (IsJumboSet(AType) or (AType.Kind in [tyRecord, tyStaticArray])) then
+    Sz := AType.RawSize()
+  else if (AType <> nil) and (AType.Kind = tyDouble) then
+    Sz := 8
+  else
+  begin
+    Sz := IntByteSize(AType);
+    if Sz < 4 then Sz := 4;
+  end;
+  if Sz >= 8 then
+    Self.Emit('.balign 8')
+  else
+    Self.Emit(Format('.balign %d', [Sz]));
+  Self.Emit(Self.GlobalBindDir(AName) + AName);
+  Self.Emit(AName + ':');
+  Self.Emit(Format(#9'.skip %d', [Sz]));
 end;
 
 procedure TX86_64Backend.EmitGlobalInitData(const AName: string;
@@ -5698,22 +5731,14 @@ begin
   end
   else if AFA.IsClassAccess then
   begin
-    if Self.IsLocal(AFA.RecordName) then
-      Self.Emit(Format(#9'movq %s, %s', [Self.VarOperand(AFA.RecordName), ADstReg]))
-    else
-      Self.Emit(Format(#9'movq %s(%%rip), %s',
-        [Self.GlobalSymName(AFA.RecordName), ADstReg]));
+    Self.Emit(Format(#9'movq %s, %s', [Self.VarOperand(AFA.RecordName), ADstReg]));
     if AFA.IsVarParam then
       { var-param class: slot -> caller var -> instance }
       Self.Emit(Format(#9'movq (%s), %s', [ADstReg, ADstReg]));
   end
   else if AFA.IsVarParam then
   begin
-    if Self.IsLocal(AFA.RecordName) then
-      Self.Emit(Format(#9'movq %s, %s', [Self.VarOperand(AFA.RecordName), ADstReg]))
-    else
-      Self.Emit(Format(#9'movq %s(%%rip), %s',
-        [Self.GlobalSymName(AFA.RecordName), ADstReg]));
+    Self.Emit(Format(#9'movq %s, %s', [Self.VarOperand(AFA.RecordName), ADstReg]));
   end
   else
     Self.EmitVarAddr(AFA.RecordName, ADstReg);
@@ -6077,9 +6102,27 @@ function TX86_64Backend.IntfObjOperand(const AName: string; AIsGlobal: Boolean):
 begin
   if (not AIsGlobal) and Self.IsLocal(AName) then
     Result := Self.VarOperand(AName)
+  else if Self.IsThreadVarGlobal(AName) then
+    Result := '%fs:' + Self.GlobalSymName(AName) + '_obj@tpoff'
   else
     { Owner-prefixed label matching EmitDataSection's <Name>_obj definition. }
     Result := Self.GlobalSymName(AName) + '_obj(%rip)';
+end;
+
+procedure TX86_64Backend.EmitLeaqIntfGlobal(const AName: string;
+  const ADstReg: string);
+begin
+  { Address of a global interface's 16-byte pair, which starts at its
+    <Name>_obj label -- in the thread's TLS block for a threadvar. }
+  if Self.IsThreadVarGlobal(AName) then
+  begin
+    Self.Emit(Format(#9'movq %%fs:0, %s', [ADstReg]));
+    Self.Emit(Format(#9'leaq %s_obj@tpoff(%s), %s',
+      [Self.GlobalSymName(AName), ADstReg, ADstReg]));
+  end
+  else
+    Self.Emit(Format(#9'leaq %s_obj(%%rip), %s',
+      [Self.GlobalSymName(AName), ADstReg]));
 end;
 
 { The itab half of an interface fat pointer.  Locals: 8 bytes above the obj
@@ -6095,6 +6138,8 @@ begin
     { Off is negative (slot base = obj). itab is 8 bytes higher in memory. }
     Result := Format('%d(%%rbp)', [Off + 8]);
   end
+  else if Self.IsThreadVarGlobal(AName) then
+    Result := '%fs:' + Self.GlobalSymName(AName) + '_itab@tpoff'
   else
     Result := Self.GlobalSymName(AName) + '_itab(%rip)';
 end;
@@ -11463,8 +11508,7 @@ begin
         Self.Emit(Format(#9'leaq %s, %%rax',
           [Self.VarOperand(TIdentExpr(AOE.Expr).Name)]))
       else
-        Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
-          [Self.GlobalSymName(TIdentExpr(AOE.Expr).Name)]));
+        Self.EmitLeaqGlobal(TIdentExpr(AOE.Expr).Name, '%rax');
       Exit;
     end;
 
@@ -11522,8 +11566,7 @@ begin
       else
       begin
         Self.AddGlobal(IE.Name, IE.ResolvedType);
-        Self.Emit(Format(#9'leaq %s_obj(%%rip), %%rax',
-          [Self.GlobalSymName(IE.Name)]));
+        Self.EmitLeaqIntfGlobal(IE.Name, '%rax');
       end;
       Exit;
     end;
@@ -12315,11 +12358,7 @@ begin
             [Self.VarOperand('_cap_' + ACall.ObjectName)]));
           Self.Emit(#9'movq (%r10), %r10');
         end
-        else if Self.IsLocal(ACall.ObjectName) then
-          Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(ACall.ObjectName)]))
-        else
-          Self.Emit(Format(#9'movq %s(%%rip), %%r10',
-            [Self.GlobalSymName(ACall.ObjectName)]));
+        else Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(ACall.ObjectName)]));
       end;
     end
     else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
@@ -12392,11 +12431,7 @@ begin
       end
       else
       begin
-        if Self.IsLocal(ACall.ObjectName) then
-          Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]))
-        else
-          Self.Emit(Format(#9'movq %s(%%rip), %%rax',
-            [Self.GlobalSymName(ACall.ObjectName)]));
+        Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]));
       end;
     end
     else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
@@ -12713,8 +12748,7 @@ begin
           (AArg.ResolvedType.Kind = tyInterface) then
     { Global interface: there is no bare Name symbol — the 16-byte fat
       pointer block starts at the Name_obj label. }
-    Self.Emit(Format(#9'leaq %s_obj(%%rip), %%rax',
-      [Self.GlobalSymName(TIdentExpr(AArg).Name)]))
+    Self.EmitLeaqIntfGlobal(TIdentExpr(AArg).Name, '%rax')
   else if AArg is TIdentExpr then
     Self.EmitLeaqGlobal(TIdentExpr(AArg).Name, '%rax')
   else if AArg is TFieldAccessExpr then
@@ -12888,6 +12922,16 @@ begin
       the array's ADDRESS in its slot -- the var argument walk loads it; a
       local, global or const array is addressed in place }
     Self.EmitVarArgAddrToRax(AArg);
+end;
+
+function TX86_64Backend.TlsSretDest(const AName: string): string;
+begin
+  { A threadvar has no RIP-relative operand an sret callee can be pointed at
+    with leaq, so its per-thread address is computed once into a scratch slot
+    and the slot is handed over as an INDIRECT destination. }
+  Result := Self.NewScratchOperand(8);
+  Self.EmitLeaqGlobal(AName, '%rax');
+  Self.Emit(Format(#9'movq %%rax, %s', [Result]));
 end;
 
 function TX86_64Backend.NewScratchOperand(ASize: Integer): string;
@@ -13211,10 +13255,7 @@ begin
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]));
       Self.Emit(#9'movq (%rax), %rax');
     end
-    else if Self.IsLocal(ACall.ObjectName) then
-      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]))
-    else
-      Self.Emit(Format(#9'movq %s(%%rip), %%rax', [Self.GlobalSymName(ACall.ObjectName)]));
+    else Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]));
   end
   else
     Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
@@ -14019,15 +14060,9 @@ begin
     end
     else
     begin
-      if Self.IsLocal(ACall.ObjectName) then
-        Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(ACall.ObjectName)]))
-      else
-        Self.Emit(Format(#9'movq %s(%%rip), %%rdi', [Self.GlobalSymName(ACall.ObjectName)]));
+      Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(ACall.ObjectName)]));
       Self.Emit(#9'callq _ClassRelease');
-      if Self.IsLocal(ACall.ObjectName) then
-        Self.Emit(Format(#9'movq $0, %s', [Self.VarOperand(ACall.ObjectName)]))
-      else
-        Self.Emit(Format(#9'movq $0, %s(%%rip)', [Self.GlobalSymName(ACall.ObjectName)]));
+      Self.Emit(Format(#9'movq $0, %s', [Self.VarOperand(ACall.ObjectName)]));
     end;
     Exit;
   end;
@@ -14215,10 +14250,7 @@ begin
           [Self.VarOperand('_cap_' + ACall.ObjectName)]));
         Self.Emit(#9'movq (%r10), %r10');
       end
-      else if Self.IsLocal(ACall.ObjectName) then
-        Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(ACall.ObjectName)]))
-      else
-        Self.Emit(Format(#9'movq %s(%%rip), %%r10', [Self.GlobalSymName(ACall.ObjectName)]));
+      else Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(ACall.ObjectName)]));
     end
     else if ACall.ObjExpr <> nil then
     begin
@@ -14282,10 +14314,7 @@ begin
     end
     else if ACall.ObjectName <> '' then
     begin
-      if Self.IsLocal(ACall.ObjectName) then
-        Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]))
-      else
-        Self.Emit(Format(#9'movq %s(%%rip), %%rax', [Self.GlobalSymName(ACall.ObjectName)]));
+      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]));
     end
     else if ACall.ObjExpr <> nil then
     begin
@@ -14933,7 +14962,7 @@ begin
     the storage address and is RELOADED after every runtime call below. }
   Cap := (not AStmt.VarIsGlobal) and Self.IsCaptured(AStmt.VarName);
   if AStmt.VarIsGlobal then
-    VarOp := Self.GlobalSymName(AStmt.VarName) + '(%rip)'
+    VarOp := Self.VarOperand(AStmt.VarName)
   else if Cap then
     VarOp := '(%r11)'
   else
@@ -14996,8 +15025,7 @@ begin
   else if (AElemType.Kind = tyInterface) and not Self.IsLocal(AStmt.VarName) then
   begin
     Self.AddGlobal(AStmt.VarName, AElemType);
-    Self.Emit(Format(#9'leaq %s_obj(%%rip), %%r15',
-      [Self.GlobalSymName(AStmt.VarName)]));
+    Self.EmitLeaqIntfGlobal(AStmt.VarName, '%r15');
   end
   else
     Self.EmitVarAddr(AStmt.VarName, '%r15');
@@ -16056,15 +16084,9 @@ begin
           The handler var slot is a pre-declared local: assign %r15 into it. }
         Self.Emit(#9'movq %r15, %rdi');
         Self.Emit(#9'callq _ClassAddRef');
-        if Self.IsLocal(H.VarName) then
-          Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(H.VarName)]))
-        else
-          Self.Emit(Format(#9'movq %s(%%rip), %%rdi', [Self.GlobalSymName(H.VarName)]));
+        Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(H.VarName)]));
         Self.Emit(#9'callq _ClassRelease');
-        if Self.IsLocal(H.VarName) then
-          Self.Emit(Format(#9'movq %%r15, %s', [Self.VarOperand(H.VarName)]))
-        else
-          Self.Emit(Format(#9'movq %%r15, %s(%%rip)', [Self.GlobalSymName(H.VarName)]));
+        Self.Emit(Format(#9'movq %%r15, %s', [Self.VarOperand(H.VarName)]));
       end;
       Self.EmitStmtList(H.Body.Stmts);
       { A handler with NO variable owns disposal too: the exception is created
@@ -16723,12 +16745,7 @@ begin
       { Source address: the cast argument (a TMethod record or another method ptr). }
       if TASTExpr(TFuncCallExpr(Asgn.Expr).Args.Items[0]) is TIdentExpr then
       begin
-        if Self.IsLocal(TIdentExpr(TASTExpr(TFuncCallExpr(Asgn.Expr).Args.Items[0])).Name) then
-          Self.Emit(Format(#9'leaq %s, %%rsi',
-            [Self.VarOperand(TIdentExpr(TASTExpr(TFuncCallExpr(Asgn.Expr).Args.Items[0])).Name)]))
-        else
-          Self.Emit(Format(#9'leaq %s(%%rip), %%rsi',
-            [Self.GlobalSymName(TIdentExpr(TASTExpr(TFuncCallExpr(Asgn.Expr).Args.Items[0])).Name)]));
+        Self.EmitVarAddr(TIdentExpr(TASTExpr(TFuncCallExpr(Asgn.Expr).Args.Items[0])).Name, '%rsi');
       end
       else
         raise ENativeCodeGenError.Create(
@@ -16906,8 +16923,12 @@ begin
       else
       begin
         Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
-        Self.EmitFuncCallSret(TFuncCallExpr(Asgn.Expr),
-          Self.GlobalSymName(Asgn.Name) + '(%rip)', False);
+        if Self.IsThreadVarGlobal(Asgn.Name) then
+          Self.EmitFuncCallSret(TFuncCallExpr(Asgn.Expr),
+            Self.TlsSretDest(Asgn.Name), True)
+        else
+          Self.EmitFuncCallSret(TFuncCallExpr(Asgn.Expr),
+            Self.GlobalSymName(Asgn.Name) + '(%rip)', False);
       end;
       Exit;
     end;
@@ -17073,8 +17094,12 @@ begin
       else
       begin
         Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
-        Self.EmitMethodSretCall(TMethodCallExpr(Asgn.Expr),
-          Self.GlobalSymName(Asgn.Name) + '(%rip)', False);
+        if Self.IsThreadVarGlobal(Asgn.Name) then
+          Self.EmitMethodSretCall(TMethodCallExpr(Asgn.Expr),
+            Self.TlsSretDest(Asgn.Name), True)
+        else
+          Self.EmitMethodSretCall(TMethodCallExpr(Asgn.Expr),
+            Self.GlobalSymName(Asgn.Name) + '(%rip)', False);
       end;
       Exit;
     end;
@@ -17131,10 +17156,16 @@ begin
       else
       begin
         Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
-        Self.EmitInheritedRecordSret(
-          TMethodDecl(TInheritedCallExpr(Asgn.Expr).ResolvedMethod),
-          TInheritedCallExpr(Asgn.Expr).Args, TInheritedCallExpr(Asgn.Expr).Name,
-          Self.GlobalSymName(Asgn.Name) + '(%rip)', False);
+        if Self.IsThreadVarGlobal(Asgn.Name) then
+          Self.EmitInheritedRecordSret(
+            TMethodDecl(TInheritedCallExpr(Asgn.Expr).ResolvedMethod),
+            TInheritedCallExpr(Asgn.Expr).Args, TInheritedCallExpr(Asgn.Expr).Name,
+            Self.TlsSretDest(Asgn.Name), True)
+        else
+          Self.EmitInheritedRecordSret(
+            TMethodDecl(TInheritedCallExpr(Asgn.Expr).ResolvedMethod),
+            TInheritedCallExpr(Asgn.Expr).Args, TInheritedCallExpr(Asgn.Expr).Name,
+            Self.GlobalSymName(Asgn.Name) + '(%rip)', False);
       end;
       Exit;
     end;
@@ -17540,20 +17571,10 @@ begin
         Self.Emit(#9'pushq %rax');
         Self.Emit(#9'movq %rax, %rdi');
         Self.Emit(#9'callq _StringAddRef');
-        if Self.IsLocal(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name) then
-          Self.Emit(Format(#9'movq %s, %%rdi',
-            [Self.VarOperand(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]))
-        else
-          Self.Emit(Format(#9'movq %s(%%rip), %%rdi',
-            [Self.GlobalSymName(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]));
+        Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]));
         Self.Emit(#9'callq _StringRelease');
         Self.Emit(#9'popq %rax');
-        if Self.IsLocal(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name) then
-          Self.Emit(Format(#9'movq %%rax, %s',
-            [Self.VarOperand(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]))
-        else
-          Self.Emit(Format(#9'movq %%rax, %s(%%rip)',
-            [Self.GlobalSymName(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]));
+        Self.Emit(Format(#9'movq %%rax, %s', [Self.VarOperand(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]));
       end
       else
       begin
@@ -17593,18 +17614,12 @@ begin
         Self.EmitExprToEax(TASTExpr(PC.Args.Items[1]));
         Self.Emit(#9'movl %eax, %esi');
         { Load current data ptr into %rdi (after N is evaluated). }
-        if Self.IsLocal(FDynArgName) then
-          Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(FDynArgName)]))
-        else
-          Self.Emit(Format(#9'movq %s(%%rip), %%rdi', [Self.GlobalSymName(FDynArgName)]));
+        Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(FDynArgName)]));
         { Element size into %edx. }
         Self.EmitDynSetLengthCall(
           TDynArrayTypeDesc(TASTExpr(PC.Args.Items[0]).ResolvedType).ElementType);
         { Store new data ptr back. }
-        if Self.IsLocal(FDynArgName) then
-          Self.Emit(Format(#9'movq %%rax, %s', [Self.VarOperand(FDynArgName)]))
-        else
-          Self.Emit(Format(#9'movq %%rax, %s(%%rip)', [Self.GlobalSymName(FDynArgName)]));
+        Self.Emit(Format(#9'movq %%rax, %s', [Self.VarOperand(FDynArgName)]));
       end
       else
       begin
@@ -17647,20 +17662,10 @@ begin
         Self.Emit(#9'pushq %rax');
         Self.Emit(#9'movq %rax, %rdi');
         Self.Emit(#9'callq _StringAddRef');
-        if Self.IsLocal(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name) then
-          Self.Emit(Format(#9'movq %s, %%rdi',
-            [Self.VarOperand(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]))
-        else
-          Self.Emit(Format(#9'movq %s(%%rip), %%rdi',
-            [Self.GlobalSymName(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]));
+        Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]));
         Self.Emit(#9'callq _StringRelease');
         Self.Emit(#9'popq %rax');
-        if Self.IsLocal(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name) then
-          Self.Emit(Format(#9'movq %%rax, %s',
-            [Self.VarOperand(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]))
-        else
-          Self.Emit(Format(#9'movq %%rax, %s(%%rip)',
-            [Self.GlobalSymName(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]));
+        Self.Emit(Format(#9'movq %%rax, %s', [Self.VarOperand(TIdentExpr(TASTExpr(PC.Args.Items[0])).Name)]));
       end
       else
       begin
@@ -19623,7 +19628,7 @@ begin
             Self.Emit(#9'movq (%rcx), %rcx');
         end
         else
-          Self.Emit(Format(#9'movq %s(%%rip), %%rcx', [Self.GlobalSymName(SSA.ArrayName)]));
+          Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(SSA.ArrayName)]));
         Self.Emit(#9'addq %rcx, %rax');
         Self.Emit(#9'movq %rax, %rbx');
         Self.EmitRecordFieldReleases(TRecordTypeDesc(DAElemType), '%rbx');
@@ -19668,8 +19673,7 @@ begin
             Self.Emit(#9'movq (%r14), %r14');
         end
         else
-          Self.Emit(Format(#9'movq %s(%%rip), %%r14',
-            [Self.GlobalSymName(SSA.ArrayName)]));
+          Self.Emit(Format(#9'movq %s, %%r14', [Self.VarOperand(SSA.ArrayName)]));
         Self.Emit(#9'addq %rax, %r14');          { %r14 = element address }
         Self.EmitInterfaceToFieldSlotsAt(SSA.ValueExpr, '%r14', 0, DAElemType);
         Self.Emit(#9'popq %r14');
@@ -19729,7 +19733,7 @@ begin
           Self.Emit(#9'movq (%rcx), %rcx');
       end
       else
-        Self.Emit(Format(#9'movq %s(%%rip), %%rcx', [Self.GlobalSymName(SSA.ArrayName)]));
+        Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(SSA.ArrayName)]));
       Self.Emit(#9'addq %rcx, %rax');
       Self.Emit(#9'movq %rax, %rcx');
       if IsFloatFamily(DAElemType) then
@@ -20725,7 +20729,27 @@ begin
 end;
 
 procedure TX86_64Backend.Emit(const ALine: string);
+var
+  P, Q: Integer;
+  Dst: string;
 begin
+  { `leaq %fs:X@tpoff, %reg` is never what a caller means: lea ignores the
+    segment override, so it yields the bare TLS offset instead of the
+    threadvar's address.  It arises wherever an address-of path formats a
+    threadvar's VarOperand, so it is rewritten here, once, to the real
+    per-thread address: thread pointer plus offset. }
+  if Copy(ALine, 0, 10) = #9'leaq %fs:' then
+  begin
+    P := Pos('@tpoff', ALine);
+    Q := Pos(', ', ALine);
+    if (P > 10) and (Q > P) then
+    begin
+      Dst := Copy(ALine, Q + 2, Length(ALine) - Q - 2);
+      Self.Emit(#9'movq %fs:0, ' + Dst);
+      Self.Emit(#9'leaq ' + Copy(ALine, 10, Q - 10) + '(' + Dst + '), ' + Dst);
+      Exit;
+    end;
+  end;
   if FPromoActive then
     Self.EmitTracked(Self.PromoRewrite(ALine))
   else
@@ -22074,16 +22098,9 @@ begin
         if Self.IsCaptured(ADecl.CapturedVars.Strings[I]) then
           Self.Emit(Format(#9'pushq %s',
             [Self.VarOperand('_cap_' + ADecl.CapturedVars.Strings[I])]))
-        else if Self.IsLocal(ADecl.CapturedVars.Strings[I]) then
-        begin
-          Self.Emit(Format(#9'leaq %s, %%rax',
-            [Self.VarOperand(ADecl.CapturedVars.Strings[I])]));
-          Self.Emit(#9'pushq %rax');
-        end
         else
         begin
-          Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
-            [Self.GlobalSymName(ADecl.CapturedVars.Strings[I])]));
+          Self.EmitVarAddr(ADecl.CapturedVars.Strings[I], '%rax');
           Self.Emit(#9'pushq %rax');
         end;
         OALPushed := OALPushed + 8;
@@ -22254,12 +22271,8 @@ begin
         if Self.IsCaptured(ADecl.CapturedVars.Strings[I]) then
           Self.Emit(Format(#9'movq %s, %%rax',
             [Self.VarOperand('_cap_' + ADecl.CapturedVars.Strings[I])]))
-        else if Self.IsLocal(ADecl.CapturedVars.Strings[I]) then
-          Self.Emit(Format(#9'leaq %s, %%rax',
-            [Self.VarOperand(ADecl.CapturedVars.Strings[I])]))
         else
-          Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
-            [Self.GlobalSymName(ADecl.CapturedVars.Strings[I])]));
+          Self.EmitVarAddr(ADecl.CapturedVars.Strings[I], '%rax');
         Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
         Inc(SlotOff, 8);
       end;
@@ -23600,11 +23613,7 @@ begin
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]));
       Self.Emit(#9'movq (%rax), %rax');
     end
-    else if Self.IsLocal(ACall.ObjectName) then
-      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]))
-    else
-      Self.Emit(Format(#9'movq %s(%%rip), %%rax',
-        [Self.GlobalSymName(ACall.ObjectName)]));
+    else Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]));
   end
   else if (ACall.ObjExpr <> nil) and (ARecvBufBytes > 0) then
     Self.Emit(#9'movq %rbx, %rax')      { record-call receiver address }
@@ -23765,10 +23774,7 @@ begin
       end
       else
       begin
-        if Self.IsLocal(ACall.ObjectName) then
-          Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(ACall.ObjectName)]))
-        else
-          Self.Emit(Format(#9'movq %s(%%rip), %%rdi', [Self.GlobalSymName(ACall.ObjectName)]));
+        Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(ACall.ObjectName)]));
       end;
     end
     else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
@@ -23873,10 +23879,7 @@ begin
       end
       else
       begin
-        if Self.IsLocal(ACall.ObjectName) then
-          Self.Emit(Format(#9'movq %s, %%rsi', [Self.VarOperand(ACall.ObjectName)]))
-        else
-          Self.Emit(Format(#9'movq %s(%%rip), %%rsi', [Self.GlobalSymName(ACall.ObjectName)]));
+        Self.Emit(Format(#9'movq %s, %%rsi', [Self.VarOperand(ACall.ObjectName)]));
       end;
     end
     else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
@@ -24535,10 +24538,7 @@ begin
         [Self.VarOperand('_cap_' + ACall.ObjectName)]));
       Self.Emit(#9'movq (%r10), %r10');
     end
-    else if Self.IsLocal(ACall.ObjectName) then
-      Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(ACall.ObjectName)]))
-    else
-      Self.Emit(Format(#9'movq %s(%%rip), %%r10', [Self.GlobalSymName(ACall.ObjectName)]));
+    else Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(ACall.ObjectName)]));
   end
   else if ACall.ObjExpr <> nil then
   begin
