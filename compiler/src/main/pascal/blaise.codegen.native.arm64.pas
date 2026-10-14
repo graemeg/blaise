@@ -652,6 +652,12 @@ type
     procedure EmitClassCleanupFns;
     procedure EmitClassMetaSections;
     procedure EmitTlvAddr(const ASym: string);
+    { register a threadvar as a TLV, sized like the plain global of its type }
+    procedure RegisterTlvGlobal(const ASym: string; AVD: TVarDecl);
+    { ASym, the GlobalSym of AName, is threadvar storage }
+    function  IsTlvSlot(const AName, ASym: string): Boolean;
+    { x0 := this thread's address of threadvar slot ASym; False if none }
+    function  TlvSlotAddrToX0(const AName, ASym: string): Boolean;
     procedure EmitTlvSections;
     procedure EmitMethodCallCommon(AMethod: TMethodDecl; const AName: string;
       AArgs: TObjectList);
@@ -1428,9 +1434,8 @@ begin
     Exit;
   end;
   Sym := GlobalSym(AName);
-  if FTlvGlobals.IndexOf(Sym) >= 0 then
+  if TlvSlotAddrToX0(AName, Sym) then
   begin
-    EmitTlvAddr(Sym);
     Self.Emit(Format(#9'ldr %s, [x0]', [AReg]));
     Exit;
   end;
@@ -1565,11 +1570,11 @@ begin
     Exit;
   end;
   Sym := GlobalSym(AName);
-  if FTlvGlobals.IndexOf(Sym) >= 0 then
+  if IsTlvSlot(AName, Sym) then
   begin
     { park the value across the thunk call }
     Self.Emit(Format(#9'str %s, [sp, #-16]!', [AReg]));
-    EmitTlvAddr(Sym);
+    TlvSlotAddrToX0(AName, Sym);
     Self.Emit(#9'mov x9, x0');
     Self.Emit(#9'ldr x0, [sp], #16');
     Self.Emit(#9'str x0, [x9]');
@@ -1596,9 +1601,8 @@ begin
     Exit;
   end;
   Sym := GlobalSym(AName);
-  if FTlvGlobals.IndexOf(Sym) >= 0 then
+  if TlvSlotAddrToX0(AName, Sym) then
   begin
-    EmitTlvAddr(Sym);
     if AReg <> 'x0' then
       Self.Emit(Format(#9'mov %s, x0', [AReg]));
     Exit;
@@ -11665,6 +11669,53 @@ begin
   Result := MangleUnitPrefix(Owner) + AName;
 end;
 
+procedure TArm64Backend.RegisterTlvGlobal(const ASym: string; AVD: TVarDecl);
+var
+  Ty: TTypeDesc;
+begin
+  { A threadvar is a Mach-O TLV: per-thread storage reached through its
+    descriptor (EmitTlvAddr), never an ordinary _g_ global.  The storage has
+    the layout a plain global of the type would have, because every access
+    goes through the same EmitLoadSlot / EmitStoreSlot / EmitSlotAddr: an
+    interface is ONE 16-byte obj+itab block (its <Name>_itab half resolves
+    to the TLV address + 8, see TlvSlotAddrToX0), a closure or method pointer
+    a 16-byte Code+Env pair, an aggregate its full size.  Threadvars are not on the program-exit release lists -- their lifetime is
+    per-thread (as on x86-64). }
+  Ty := AVD.ResolvedType;
+  FTlvGlobals.Add(ASym);
+  if (Ty.Kind = tyInterface) or IsMethodPtrType(Ty) then
+    FTlvSize.Items[ASym] := 16
+  else if (Ty.Kind in [tyRecord, tyStaticArray]) or
+          ((Ty is TSetTypeDesc) and TSetTypeDesc(Ty).IsJumbo()) then
+    FTlvSize.Items[ASym] := Ty.RawSize()
+  else
+    FTlvSize.Items[ASym] := 8;
+  if AVD.InitConst <> nil then
+    NotYet('initialised threadvar', AVD);
+end;
+
+function TArm64Backend.IsTlvSlot(const AName, ASym: string): Boolean;
+begin
+  { ASym (the mangled GlobalSym of AName) names threadvar storage: a TLV this
+    object defines, or the itab half <Name>_itab of an interface TLV }
+  Result := FTlvGlobals.IndexOf(ItabBaseName(ASym)) >= 0;
+end;
+
+function TArm64Backend.TlvSlotAddrToX0(const AName, ASym: string): Boolean;
+var
+  Base: string;
+begin
+  { x0 := this thread's address of threadvar slot ASym.  An interface TLV is
+    ONE 16-byte block, so its itab half lives 8 bytes in.  False when ASym is
+    no threadvar. }
+  Result := IsTlvSlot(AName, ASym);
+  if not Result then Exit;
+  Base := ItabBaseName(ASym);
+  EmitTlvAddr(Base);
+  if Base <> ASym then
+    Self.Emit(#9'add x0, x0, #8');
+end;
+
 procedure TArm64Backend.RegisterGlobalInit(const ASym: string; AVD: TVarDecl);
 var
   SAT: TStaticArrayTypeDesc;
@@ -17060,8 +17111,13 @@ begin
       RTL helpers. }
     for J := 0 to VD.Names.Count - 1 do
     begin
-      FGlobalNames.Add(VD.Names.Strings[J]);
       FOwnModuleVars.Add('|' + VD.Names.Strings[J]);
+      if VD.IsThreadVar then
+      begin
+        RegisterTlvGlobal(VD.Names.Strings[J], VD);
+        Continue;
+      end;
+      FGlobalNames.Add(VD.Names.Strings[J]);
       { a closure / method-pointer global is a 16-byte fat value (Code, Env). }
       if IsMethodPtrType(VD.ResolvedType) then
         FGlobalSize.Add(VD.Names.Strings[J], 16);
@@ -17084,30 +17140,6 @@ begin
         FGlobalSize.Add(VD.Names.Strings[J] + '_itab', 8);
         if not VD.IsWeak then
           FIntfGlobals.Add(VD.Names.Strings[J]);
-      end;
-      if VD.IsThreadVar then
-      begin
-        { threadvars get a Mach-O TLV descriptor: scalar kinds, strings,
-          class references and unmanaged static arrays and records.  As on x86-64 a
-          managed threadvar is not released at exit -- its lifetime is
-          per-thread, not program-global }
-        if not (IsIntFam(VD.ResolvedType) or
-                VD.ResolvedType.IsString() or
-                (VD.ResolvedType.Kind in [tyDouble, tyPointer, tyPChar,
-                                          tyClass]) or
-                ((VD.ResolvedType.Kind in [tyStaticArray, tyRecord]) and
-                 not AggHasManaged(VD.ResolvedType))) then
-          NotYet('threadvar of this type', VD);
-        if VD.InitConst <> nil then
-          NotYet('initialised threadvar', VD);
-        FTlvGlobals.Add(VD.Names.Strings[J]);
-        if VD.ResolvedType.Kind in [tyStaticArray, tyRecord] then
-          FTlvSize.Items[VD.Names.Strings[J]] :=
-            VD.ResolvedType.RawSize()
-        else
-          FTlvSize.Items[VD.Names.Strings[J]] := 8;
-        { not an ordinary global: no _g_ bss entry }
-        FGlobalNames.Delete(FGlobalNames.Count - 1);
       end;
       if VD.ResolvedType.Kind in [tyRecord, tyStaticArray] then
       begin
@@ -17898,6 +17930,15 @@ begin
       { register under the owning-unit-prefixed symbol so same-named vars
         in different units (or the program) cannot collide }
       N := GlobalSym(VD.Names.Strings[J]);
+      if VD.IsThreadVar then
+      begin
+        { an RTL-unit threadvar collapses across objects like a plain RTL
+          global (GH #174) -- separate TLS slots would be wrong }
+        if (FCurrentUnitName <> '') and IsUnmangledUnit(FCurrentUnitName) then
+          FGlobalWeak.Add('__tlv_' + N);
+        RegisterTlvGlobal(N, VD);
+        Continue;
+      end;
       FGlobalNames.Add(N);
       { an RTL-unit global carries a bare symbol every inlining object
         re-defines — weak binding lets the copies collapse (GH #174) }
@@ -17905,31 +17946,6 @@ begin
         FGlobalWeak.Add(N);
       if VD.InitConst <> nil then
         RegisterGlobalInit(N, VD);
-      if VD.IsThreadVar then
-      begin
-        { scalar kinds, strings, class references and unmanaged static
-          arrays and records -- as on x86-64 a managed threadvar is not released at
-          exit, its lifetime being per-thread }
-        if not (IsIntFam(VD.ResolvedType) or
-                VD.ResolvedType.IsString() or
-                (VD.ResolvedType.Kind in [tyDouble, tyPointer, tyPChar,
-                                          tyClass]) or
-                ((VD.ResolvedType.Kind in [tyStaticArray, tyRecord]) and
-                 not AggHasManaged(VD.ResolvedType))) then
-          NotYet('threadvar of this type', VD);
-        if VD.InitConst <> nil then
-          NotYet('initialised threadvar', VD);
-        FTlvGlobals.Add(N);
-        if (FCurrentUnitName <> '') and
-           IsUnmangledUnit(FCurrentUnitName) then
-          FGlobalWeak.Add('__tlv_' + N);
-        if VD.ResolvedType.Kind in [tyStaticArray, tyRecord] then
-          FTlvSize.Items[N] := VD.ResolvedType.RawSize()
-        else
-          FTlvSize.Items[N] := 8;
-        FGlobalNames.Delete(FGlobalNames.Count - 1);
-        FGlobalSize.Remove(N);
-      end;
       if VD.ResolvedType.Kind = tyString then
         FStrGlobals.Add(N);
       if (VD.ResolvedType.Kind = tyClass) and not VD.IsWeak then

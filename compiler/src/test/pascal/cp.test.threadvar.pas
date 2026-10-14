@@ -45,6 +45,13 @@ type
       interface obj+itab pair under its _obj / _itab labels, a closure's
       16-byte Code+Env pair }
     procedure TestCodegenX86_ThreadVarTbssLayout_MatchesPlainGlobals;
+    { arm64: a threadvar of every type is a Mach-O TLV whose storage is sized
+      like the plain global (it refused all but scalars, strings, classes and
+      unmanaged aggregates), and never also an ordinary _g_ global }
+    procedure TestCodegenArm64_ThreadVarStorage_SizedLikePlainGlobals;
+    { an interface threadvar is ONE 16-byte TLV; its itab half is reached at
+      the TLV address + 8, keeping the pair contiguous for a var argument }
+    procedure TestCodegenArm64_IntfThreadVar_ItabAtTlvPlus8;
   end;
 
 implementation
@@ -325,6 +332,45 @@ begin
     Pos('G_obj:'#10#9'.skip 8'#10'G_itab:'#10#9'.skip 8', Asm_) >= 0);
   AssertTrue('closure threadvar: 16-byte Code+Env pair',
     Pos('F:'#10#9'.skip 16', Asm_) >= 0);
+end;
+
+procedure TThreadVarTests.TestCodegenArm64_ThreadVarStorage_SizedLikePlainGlobals;
+var
+  Asm_: string;
+begin
+  Asm_ := GenAsm(SrcThreadVarShapes, TargetArm64);
+  AssertTrue('interface: obj+itab', Pos('_ts_G:'#10#9'.zero 16', Asm_) >= 0);
+  AssertTrue('closure: Code+Env', Pos('_ts_F:'#10#9'.zero 16', Asm_) >= 0);
+  AssertTrue('managed record: its full size',
+    Pos('_ts_R:'#10#9'.zero 16', Asm_) >= 0);
+  AssertTrue('dyn array: one pointer', Pos('_ts_A:'#10#9'.zero 8', Asm_) >= 0);
+  AssertTrue('no ordinary global for the interface',
+    Pos('_g_G', Asm_) < 0);
+  AssertTrue('no ordinary global for the dyn array', Pos('_g_A', Asm_) < 0);
+end;
+
+procedure TThreadVarTests.TestCodegenArm64_IntfThreadVar_ItabAtTlvPlus8;
+const
+  Src = '''
+    program P;
+    type
+      IGreet = interface function Hi(): string; end;
+      TGreet = class(IGreet) function Hi(): string; end;
+    function TGreet.Hi(): string; begin Result := 'hi' end;
+    threadvar G: IGreet;
+    begin
+      G := TGreet.Create();
+      WriteLn(G.Hi())
+    end.
+    ''';
+var
+  Asm_: string;
+begin
+  Asm_ := GenAsm(Src, TargetArm64);
+  AssertTrue('the itab half is 8 bytes into the TLV',
+    Pos('_tv_G@PAGEOFF'#10#9'ldr x9, [x0]'#10#9'blr x9'#10#9'add x0, x0, #8',
+      Asm_) >= 0);
+  AssertTrue('no separate itab global', Pos('_g_G_itab', Asm_) < 0);
 end;
 
 initialization

@@ -121,6 +121,7 @@ uses
   cp.test.e2e.tstringlist,
   cp.test.e2e.tcomponent,
   cp.test.e2e.threading,
+  cp.test.e2e.threadvar,
   cp.test.e2e.callalign,
   cp.test.e2e.errno,
   cp.test.e2e.fibers,

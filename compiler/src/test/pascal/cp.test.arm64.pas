@@ -693,25 +693,28 @@ begin
   Raised := False;
   Msg := '';
   try
-    { A THREADVAR of a record with a MANAGED field is the current stand-in
+    { An element of a dyn-array FIELD of a record-returning call
+      (BUG-20261010-recordcall-field-address-base) is the current stand-in
       for "a construct the arm64 subset has not reached yet".  This has now
-      been repointed three times -- it was a generic RECORD, then a JUMBO
-      SET, then an unmanaged record threadvar, and all of them now lower.
-      Repoint it again rather than deleting it when this one lands too: the
-      point of the test is that a gap fails LOUDLY at compile time with a
-      clear file/line, never silently miscompiling. }
+      been repointed four times -- it was a generic RECORD, then a JUMBO SET,
+      then an unmanaged record threadvar, then a managed one, and all of them
+      now lower.  Repoint it again rather than deleting it when this one lands
+      too: the point of the test is that a gap fails LOUDLY at compile time
+      with a clear file/line, never silently miscompiling. }
     GenAsm(
       '''
       program P;
       type
         TR = record
-          S: string;
+          A: array of Integer;
         end;
-      threadvar
-        TV: TR;
+      function F(N: Integer): TR;
       begin
-        TV.S := 'a';
-        WriteLn(TV.S)
+        SetLength(Result.A, 2);
+        Result.A[1] := N
+      end;
+      begin
+        WriteLn(F(9).A[1])
       end.
       ''', TargetArm64);
   except
