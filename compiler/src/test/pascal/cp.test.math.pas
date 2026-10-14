@@ -49,6 +49,9 @@ type
     procedure TestSemantic_Floor_ReturnsInteger;
     procedure TestSemantic_Round_OK;
     procedure TestSemantic_Round_ReturnsInteger;
+    { Round rounds half to EVEN (banker's), as Delphi and FPC do: one
+      round-to-nearest conversion on each ISA, for Double and Single }
+    procedure TestCodegen_Round_TiesToEvenConversion;
     procedure TestSemantic_Trunc_OK;
     procedure TestSemantic_Trunc_ReturnsInteger;
     procedure TestSemantic_Ceil_IntegerArg_Accepted;
@@ -1162,6 +1165,25 @@ procedure TMathTests.TestSemantic_IntegerDiv_RejectsFloat;
 begin
   SemanticError(
     'program P; var X, Y: Double; R: Integer; begin R := Trunc(Y div X) end.');
+end;
+
+procedure TMathTests.TestCodegen_Round_TiesToEvenConversion;
+const
+  Src = '''
+    program P;
+    var D: Double; S: Single; R: Int64;
+    begin
+      R := Round(D);
+      R := Round(S)
+    end.
+    ''';
+begin
+  AssertEquals('Double', '', AsmMissing(Src, #9'cvtsd2si %xmm0, %rax', #9'fcvtns x0, d0'));
+  AssertEquals('Single', '', AsmMissing(Src, #9'cvtss2si %xmm0, %rax', #9'fcvtns x0, d0'));
+  AssertTrue('x86-64: no half-away helper',
+    Pos('_BlaiseRoundD', GenAsm(Src, TargetX86_64)) < 0);
+  AssertTrue('arm64: no half-away helper',
+    Pos('_BlaiseRoundD', GenAsm(Src, TargetArm64)) < 0);
 end;
 
 initialization

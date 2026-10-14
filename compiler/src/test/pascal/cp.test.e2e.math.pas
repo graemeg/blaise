@@ -42,8 +42,12 @@ type
     procedure TestRun_Ceil_Negative;
     procedure TestRun_Floor_Positive;
     procedure TestRun_Floor_Negative;
-    procedure TestRun_Round_HalfUp;
-    procedure TestRun_Round_HalfDown;
+    procedure TestRun_Round_HalfToEven_Positive;
+    procedure TestRun_Round_HalfToEven_Negative;
+    { Round is banker's rounding, as in Delphi and FPC: exact halves go to
+      the even neighbour, everything else to the nearest; Single and Int64
+      range too.  It rounded halves away from zero (2.5 -> 3) }
+    procedure TestRun_Round_BankersEveryCase;
     procedure TestRun_Trunc_Positive;
     procedure TestRun_Trunc_Negative;
 
@@ -300,7 +304,7 @@ begin
   AssertEquals('floor(-2.3)', '-3', Trim(Output));
 end;
 
-procedure TE2EMathTests.TestRun_Round_HalfUp;
+procedure TE2EMathTests.TestRun_Round_HalfToEven_Positive;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(
@@ -311,10 +315,10 @@ begin
       R := Round(2.5);
       WriteLn(IntToStr(R))
     end.
-    ''', '3' + Chr(10), 0);
+    ''', '2' + Chr(10), 0);
 end;
 
-procedure TE2EMathTests.TestRun_Round_HalfDown;
+procedure TE2EMathTests.TestRun_Round_HalfToEven_Negative;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(
@@ -325,7 +329,30 @@ begin
       R := Round(-2.5);
       WriteLn(IntToStr(R))
     end.
-    ''', '-3' + Chr(10), 0);
+    ''', '-2' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_Round_BankersEveryCase;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    const
+      V: array[0..12] of Double = (0.5, 1.5, 2.5, 3.5, 6.5, -0.5, -1.5,
+        -2.5, -3.5, 2.4, 2.6, -2.6, 0.49999999999999994);
+    var I: Integer; S: Single; D: Double; Q: Int64;
+    begin
+      for I := 0 to 12 do Write(Round(V[I]), ' ');
+      WriteLn();
+      S := 2.5; Write(Round(S), ' ');
+      S := 3.5; Write(Round(S), ' ');
+      S := -4.5; WriteLn(Round(S));
+      D := 40000000000.5; Q := Round(D); Write(Q, ' ');
+      D := 4503599627370495.5; Q := Round(D); WriteLn(Q);
+    end.
+    ''', '0 2 2 4 6 0 -2 -2 -4 2 3 -3 0 ' + Chr(10) +
+         '2 4 -4' + Chr(10) + '40000000000 4503599627370496' + Chr(10), 0);
 end;
 
 procedure TE2EMathTests.TestRun_Trunc_Positive;

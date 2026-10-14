@@ -4061,6 +4061,66 @@ evaluate `10 / 3` as integer division to `3` before passing it to
 `Round`, so the result would silently be `3` regardless of whether
 the rational answer rounds up or down.
 
+== `Round` — Banker's Rounding
+
+=== Decision
+
+`Round(X)` rounds to the nearest integer and resolves an exact half to the
+*even* neighbour (round half to even, "banker's rounding"):
+
+[cols="1,1",options="header"]
+|===
+| Expression | Result
+| `Round(0.5)` | `0`
+| `Round(1.5)` | `2`
+| `Round(2.5)` | `2`
+| `Round(-2.5)` | `-2`
+| `Round(2.6)` | `3`
+|===
+
+This is the behaviour of `Round` in Delphi and FPC.  A `Single` argument
+rounds the same way (it widens to `Double` exactly).
+
+=== Rationale
+
+* *Porting safety.*  Code moved from Delphi or FPC computes the same results.
+  A different rule changes values only at exact halves, with no error or
+  warning, which is the hardest kind of difference to find in a port: totals,
+  pixel positions and table indices drift by one in a few cases.
+* *No bias.*  Rounding every half away from zero pushes the sum of many
+  rounded values away from zero; rounding half to even does not.  That is why
+  it is the IEEE 754 default rounding mode, and why `Numerics.Money` already
+  defaults to it (`rmHalfEven`).
+* *Cost.*  It is what the hardware's round-to-nearest conversion does, so
+  `Round` is one instruction on each ISA (`cvtsd2si` / `cvtss2si` on x86-64,
+  `fcvtns` on arm64) instead of a runtime call followed by a truncation.
+
+Delphi's `Round` follows the current FPU rounding mode (`SetRoundMode`), with
+round-to-nearest-even as the default.  The Blaise conversions also read the
+current mode; Blaise has no `SetRoundMode`, so the mode is always the default.
+
+=== History
+
+Until 2026-10-14 `Round` rounded half away from zero (`Round(2.5) = 3`),
+through a port of C's `round()`.  The code comments gave Delphi and FPC
+compatibility as the reason, which was mistaken: both round half to even.
+Nothing in this document recorded the old rule, and the tests that pinned it
+recorded what the code did rather than a decision.
+
+=== Alternatives Rejected
+
+*Half away from zero* (C's `round()`, school arithmetic).  It is the more
+familiar rule, and `Round(2.5) = 2` surprises people who have not met
+banker's rounding.  Rejected because it silently changes results of ported
+Delphi and FPC code, and because it is biased.  Code that needs half away from
+zero (a port of C or Java logic, for example) should call a routine that says
+so explicitly; `runtime.math` keeps the `round()` port (`_BlaiseRoundD`) for
+such a routine.
+
+*Follow a per-program rounding-mode setting.*  Not needed until Blaise offers
+`SetRoundMode`; the instructions chosen already honour the mode, so adding it
+later changes nothing here.
+
 == `High` and `Low` on Ordinal Types
 
 === Decision

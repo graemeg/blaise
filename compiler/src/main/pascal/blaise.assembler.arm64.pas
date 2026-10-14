@@ -1564,10 +1564,15 @@ procedure TArm64Assembler.EncodeInstr;
       EmitW(Wd);
       Exit;
     end;
-    if FL.Mnemonic = 'fcvtzs' then
+    if (FL.Mnemonic = 'fcvtzs') or (FL.Mnemonic = 'fcvtns') then
     begin
+      { fcvtzs rounds toward zero (rmode 11), fcvtns to nearest with ties
+        to even (rmode 00) -- the Round builtin }
       NeedOps(2);
-      Wd := Integer($1E380000) or (FA[1].Reg shl 5) or FA[0].Reg;
+      if FL.Mnemonic = 'fcvtzs' then
+        Wd := Integer($1E380000) or (FA[1].Reg shl 5) or FA[0].Reg
+      else
+        Wd := Integer($1E200000) or (FA[1].Reg shl 5) or FA[0].Reg;
       if FA[1].Is64 then Wd := Wd or (1 shl 22);       { double source }
       if FA[0].Is64 then Wd := Wd or (1 shl 31);       { 64-bit dest }
       EmitW(Wd);

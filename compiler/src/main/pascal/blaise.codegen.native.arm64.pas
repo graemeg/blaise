@@ -5328,15 +5328,12 @@ begin
       EmitCallSym('_UInt64ToStr');
       Exit;
     end;
-    { float -> integer.  Mirrors x86-64 exactly: round/floor/ceil go through
-      the pure-Pascal runtime.math helper first (_BlaiseRoundD is the musl
-      round() port -- half-AWAY-from-zero, which the FPU rounding mode would
-      get wrong) and the integral result is then truncated, so the semantics
-      match the x86-64 and QBE backends with no libm/libSystem dependency.
-      AArch64's one-instruction fcvtas/fcvtms/fcvtps would also work, but the
-      internal assembler implements only fcvtzs of that family today.
-      EmitExprToD0OrConvert promotes a Single operand to double, and AAPCS
-      passes/returns the double in d0, so no shuffling is needed. }
+    { float -> integer.  Trunc is fcvtzs; Round is fcvtns, round to nearest
+      with ties to EVEN (banker's rounding, as in Delphi and FPC -- see
+      language-rationale.adoc); floor / ceil go through the pure-Pascal
+      runtime.math helpers and the integral result is then truncated.
+      EmitExprToD0OrConvert promotes a Single operand to double exactly, so
+      one double conversion serves both widths. }
     if SameText(TFuncCallExpr(AExpr).Name, 'Trunc') then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
@@ -5346,8 +5343,7 @@ begin
     if SameText(TFuncCallExpr(AExpr).Name, 'Round') then
     begin
       Self.EmitExprToD0OrConvert(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
-      EmitCallSym('_BlaiseRoundD');
-      Self.Emit(#9'fcvtzs x0, d0');
+      Self.Emit(#9'fcvtns x0, d0');
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'Floor') then

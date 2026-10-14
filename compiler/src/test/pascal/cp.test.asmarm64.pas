@@ -272,6 +272,9 @@ begin
   AssertWord('fcmp d0, #0.0', Integer($1E602008));
   AssertWord('scvtf d0, x1', Integer($9E620020));
   AssertWord('fcvtzs x0, d1', Integer($9E780020));
+  { round to nearest, ties to even -- the Round builtin (clang-verified) }
+  AssertWord('fcvtns x0, d1', Integer($9E600020));
+  AssertWord('fcvtns x3, d7', Integer($9E6000E3));
   AssertWord('fmov d0, x1', Integer($9E670020));
   AssertWord('fmov x0, d1', Integer($9E660020));
   AssertWord('fmov d0, d1', Integer($1E604020));

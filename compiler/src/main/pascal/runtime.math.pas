@@ -32,8 +32,10 @@
     _BlaiseSqrtD                         musl sqrt.c (fdlibm bit-by-bit,
                                          correctly rounded)
     _BlaiseFloorD/_BlaiseCeilD           musl floor.c/ceil.c
-    _BlaiseRoundD                        musl round.c (half away from zero,
-                                         the documented Blaise Round rule)
+    _BlaiseRoundD                        musl round.c (half away from zero;
+                                         NOT the Round builtin, which is
+                                         banker's -- kept for an explicit
+                                         half-away routine)
     _BlaiseFabs/_BlaiseScalbn            musl fabs.c/scalbn.c
 
   Porting rules used throughout (read this before touching a function):
@@ -271,8 +273,9 @@ begin
   Result := X + Y;
 end;
 
-{ Round half away from zero -- C99 round(), which is the documented
-  semantics of the Blaise Round builtin (NOT banker's rounding). }
+{ Round half away from zero -- C99 round().  The Round BUILTIN rounds half
+  to even (banker's, as Delphi and FPC do) with one conversion instruction;
+  this port is what an explicit half-away routine would use. }
 function _BlaiseRoundD(X: Double): Double;
 var
   B: Int64;

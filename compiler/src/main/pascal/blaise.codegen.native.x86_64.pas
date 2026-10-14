@@ -9538,23 +9538,17 @@ begin
     end;
     if SameText(FC.Name, 'Round') and (FC.Args.Count = 1) then
     begin
-      { Round half-away-from-zero, matching Delphi/FPC Round() and the QBE
-        backend.  cvtsd2si/cvtss2si alone would honour the FPU rounding mode
-        (round-half-to-even / banker's), which disagrees with QBE — so route
-        through C99 round()/roundf() first, then truncate the integral result. }
+      { Round to nearest with ties to EVEN (banker's rounding), as Delphi and
+        FPC do: cvtsd2si / cvtss2si convert under the MXCSR rounding mode,
+        whose default is exactly that (language-rationale.adoc).  This
+        rounded half AWAY from zero (2.5 -> 3) through a C99 round() port,
+        on the mistaken belief that Delphi and FPC did. }
       Self.EmitExprToXmm0(TASTExpr(FC.Args.Items[0]));
       if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
          (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tySingle) then
-      begin
-        Self.Emit(#9'cvtss2sd %xmm0, %xmm0');
-        Self.Emit(#9'callq _BlaiseRoundD');
-        Self.Emit(#9'cvttsd2si %xmm0, %rax');
-      end
+        Self.Emit(#9'cvtss2si %xmm0, %rax')
       else
-      begin
-        Self.Emit(#9'callq _BlaiseRoundD');
-        Self.Emit(#9'cvttsd2si %xmm0, %rax');
-      end;
+        Self.Emit(#9'cvtsd2si %xmm0, %rax');
       Exit;
     end;
     if SameText(FC.Name, 'Trunc') and (FC.Args.Count = 1) then
