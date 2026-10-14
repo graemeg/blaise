@@ -181,6 +181,10 @@ type
       a 'reference to' and a method pointer; a discarded string result is
       released (BUG-20261012-call-element-statement) }
     procedure TestRun_ExprCallStmt_ElementAndDeref;
+    { Cap.Free() inside a closure, Cap a captured local: the slot is freed and
+      nilled through the _cap_ pointer (arm64 refused the shape: "load of
+      variable 'Cap'") }
+    procedure TestRun_FreeOfCapturedVariable;
   end;
 
 implementation
@@ -2528,6 +2532,33 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertLeakFreeOnAll(Src, ' show7 total11 deref9 hi3');
+end;
+
+procedure TE2EAnonMethodTests.TestRun_FreeOfCapturedVariable;
+const Src =
+  '''
+  program P;
+  type
+    TProc = reference to procedure;
+    TN = class destructor Destroy; override; end;
+  destructor TN.Destroy; begin WriteLn('freed') end;
+  var Q: TProc;
+  procedure Make();
+  var Cap: TN;
+  begin
+    Cap := TN.Create();
+    Q := procedure begin Cap.Free(); WriteLn(Cap = nil) end;
+  end;
+  begin
+    Make();
+    Q();
+    Q := nil;
+    WriteLn('done')
+  end.
+  ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'freed'#10'True'#10'done'#10, 0);
 end;
 
 initialization

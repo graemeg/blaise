@@ -16811,6 +16811,18 @@ begin
     end;
     if AStmt.IsImplicitSelf then
       NotYet('Free on this receiver form', AStmt);
+    if EmitCapturedBase('x0', AStmt.ObjectName, False, AStmt.IsVarParam) then
+    begin
+      { a variable captured from the enclosing routine has no frame slot of
+        its own here: free through its storage address (the _cap_ pointer)
+        and nil it there, in the enclosing routine's frame or env }
+      EmitPushX0();
+      Self.Emit(#9'ldr x0, [x0]');
+      EmitCallSym('_ClassRelease');
+      EmitPopTo('x9');
+      Self.Emit(#9'str xzr, [x9]');
+      Exit;
+    end;
     if AStmt.IsVarParam then
     begin
       { the slot holds the caller's ADDRESS: free through it, nil it }
