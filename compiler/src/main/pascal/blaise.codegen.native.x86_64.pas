@@ -1814,11 +1814,21 @@ end;
 function TX86_64Backend.IsThreadVarGlobal(const AName: string): Boolean;
 var
   Dummy: Boolean;
+  Sym: TSymbol;
 begin
   { Accepts either a bare AST name or an already-canonical key; GlobalSymName is
     idempotent on the canonical form (the mangled key is not a module-var
     symbol, so it returns verbatim). }
   Result := FThreadVarGlobals.TryGetValue(Self.GlobalSymName(AName), Dummy);
+  if Result or (FSymTable = nil) then Exit;
+  { A threadvar of a USED unit is marked only in the symbol table (IsThreadVar
+    travels through the .bif).  Without this, a reference that no assignment
+    had marked was emitted Name(%rip) -- the TLS TEMPLATE, not the thread's
+    copy.  A module var this object declares shadows the used unit's. }
+  if FOwnModuleVars.IndexOf(FCurrentUnitName + '|' + AName) >= 0 then Exit;
+  Sym := FSymTable.Lookup(AName);
+  Result := (Sym <> nil) and (Sym.Kind = skVariable) and Sym.IsThreadVar and
+            (Sym.OwningUnit <> '');
 end;
 
 function TX86_64Backend.IsWeakGlobal(const AName: string): Boolean;

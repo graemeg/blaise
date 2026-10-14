@@ -43,6 +43,7 @@ type
     procedure TestRun_InterfaceThreadVar_VarAndConstArgs;
     procedure TestRun_MethodPointerThreadVar;
     procedure TestRun_MetaclassThreadVar_VarArg;
+    procedure TestRun_ThreadVarsOfAUsedUnit;
   end;
 
 implementation
@@ -290,6 +291,48 @@ begin
     procedure Pick(var X: TAClass); begin X := TB; end;
     begin M := TA; WriteLn(M = TA); Pick(G); WriteLn(G = TB); Pick(M); WriteLn(M = TB); end.
     ''', 'True' + LE + 'True' + LE + 'True' + LE, 0);
+end;
+
+procedure TE2EThreadVarTests.TestRun_ThreadVarsOfAUsedUnit;
+const
+  { threadvars a USED unit declares, reached from the program under separate
+    compilation: arm64 referenced them as ordinary _g_ globals and the link
+    failed ("undefined symbol _g_tvw_X"), for every type }
+  UnitSrc = '''
+    unit tvw;
+    interface
+    type
+      IGreet = interface function Hi(): string; end;
+      TGreet = class(IGreet) function Hi(): string; end;
+    threadvar
+      X: Integer;
+      S: string;
+      G: IGreet;
+    implementation
+    function TGreet.Hi(): string; begin Result := 'hi' end;
+    end.
+    ''';
+  ProgSrc = '''
+    program P;
+    uses tvw;
+    begin
+      X := 3;
+      S := 'ab';
+      G := TGreet.Create();
+      WriteLn(X, S, G.Hi());
+      G := nil;
+      S := ''
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run: ' + Output,
+    CompileAndRunWithUnitNative('tvw', UnitSrc, ProgSrc, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('stdout', '3abhi' + LE, Output);
 end;
 
 initialization

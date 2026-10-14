@@ -654,7 +654,7 @@ type
     procedure EmitTlvAddr(const ASym: string);
     { register a threadvar as a TLV, sized like the plain global of its type }
     procedure RegisterTlvGlobal(const ASym: string; AVD: TVarDecl);
-    { ASym, the GlobalSym of AName, is threadvar storage }
+    { ASym, the GlobalSym of AName, is threadvar storage (own or imported) }
     function  IsTlvSlot(const AName, ASym: string): Boolean;
     { x0 := this thread's address of threadvar slot ASym; False if none }
     function  TlvSlotAddrToX0(const AName, ASym: string): Boolean;
@@ -11695,10 +11695,21 @@ begin
 end;
 
 function TArm64Backend.IsTlvSlot(const AName, ASym: string): Boolean;
+var
+  Base: string;
+  Sym: TSymbol;
 begin
   { ASym (the mangled GlobalSym of AName) names threadvar storage: a TLV this
-    object defines, or the itab half <Name>_itab of an interface TLV }
-  Result := FTlvGlobals.IndexOf(ItabBaseName(ASym)) >= 0;
+    object defines, the itab half <Name>_itab of an interface TLV, or a
+    threadvar a USED unit defines -- its _tv_ descriptor is a global symbol
+    of that unit's object, so this one reaches it the same way }
+  Base := ItabBaseName(ASym);
+  Result := FTlvGlobals.IndexOf(Base) >= 0;
+  if Result or (FSymTable = nil) then Exit;
+  if FOwnModuleVars.IndexOf(FCurrentUnitName + '|' + ItabBaseName(AName)) >= 0 then
+    Exit;
+  Sym := FSymTable.Lookup(ItabBaseName(AName));
+  Result := (Sym <> nil) and (Sym.Kind = skVariable) and Sym.IsThreadVar;
 end;
 
 function TArm64Backend.TlvSlotAddrToX0(const AName, ASym: string): Boolean;
