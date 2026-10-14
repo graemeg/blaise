@@ -28,6 +28,10 @@ type
     procedure TestQuadSymbol_EmitsReloc;
     procedure TestTLSPrefix_PrecedesRex;
     procedure TestTbssSymbol_TypedSttTls;
+    { an initialised threadvar's .tdata: a TLS PROGBITS section carrying the
+      initial bytes, its symbols STT_TLS.  The assembler did not recognise the
+      section and the ELF writer refused the kind. }
+    procedure TestTdataSection_TlsImageAndSttTls;
     { .skip after a .balign in a NOBITS section: the alignment padding lives
       only in the section's Size, and each pushed byte reset Size to the byte
       count, discarding it -- labels after a .skip landed short (an interface
@@ -422,6 +426,41 @@ begin
       begin
         Found := True;
         AssertEquals('.tbss symbol must be STT_TLS',
+          STT_TLS, Parsed.Symbols[I].SymType);
+      end;
+    AssertTrue('symbol tv not found in symtab', Found);
+  finally
+    Parsed.Free();
+  end;
+end;
+
+procedure TAsmEncodingTests.TestTdataSection_TlsImageAndSttTls;
+var
+  Obj: string;
+  Parsed: TElfObjectFile;
+  Sec: TRdSection;
+  I: Integer;
+  Found: Boolean;
+begin
+  Obj := AssembleToBytes(
+    '.section .tdata,"awT",@progbits' + LineEnding +
+    '.balign 4' + LineEnding +
+    '.globl tv' + LineEnding +
+    'tv:' + LineEnding +
+    #9'.long 5' + LineEnding);
+  Parsed := ParseElfObject(Obj, 'tdata-test');
+  try
+    Sec := Parsed.FindSection('.tdata');
+    AssertTrue('.tdata section present', Sec <> nil);
+    AssertEquals('.tdata holds bytes', SHT_PROGBITS, Sec.ShType);
+    AssertTrue('.tdata is thread-local', (Sec.Flags and SHF_TLS) <> 0);
+    AssertEquals('the initial value', #5#0#0#0, Sec.Data);
+    Found := False;
+    for I := 0 to Parsed.Symbols.Count - 1 do
+      if Parsed.Symbols[I].Name = 'tv' then
+      begin
+        Found := True;
+        AssertEquals('.tdata symbol must be STT_TLS',
           STT_TLS, Parsed.Symbols[I].SymType);
       end;
     AssertTrue('symbol tv not found in symtab', Found);

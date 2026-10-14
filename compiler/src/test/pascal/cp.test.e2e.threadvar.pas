@@ -43,7 +43,12 @@ type
     procedure TestRun_InterfaceThreadVar_VarAndConstArgs;
     procedure TestRun_MethodPointerThreadVar;
     procedure TestRun_MetaclassThreadVar_VarArg;
+    procedure TestRun_InitialisedIntegerThreadVar;
+    procedure TestRun_InitialisedStringThreadVar;
+    procedure TestRun_InitialisedThreadVar_EveryThreadStartsFromIt;
+    procedure TestRun_InitialisedThreadVars_FloatBoolAndArray;
     procedure TestRun_ThreadVarsOfAUsedUnit;
+    procedure TestRun_InitialisedThreadVars_DeclaredInUnit;
   end;
 
 implementation
@@ -293,6 +298,66 @@ begin
     ''', 'True' + LE + 'True' + LE + 'True' + LE, 0);
 end;
 
+procedure TE2EThreadVarTests.TestRun_InitialisedIntegerThreadVar;
+begin
+  { an initialised threadvar starts from its value: x86-64 dropped the initialiser (printed 0); arm64 refused it }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program tvprobe;
+    threadvar N: Integer = 5;
+    begin WriteLn(N); N := N + 1; WriteLn(N); end.
+    ''', '5' + LE + '6' + LE, 0);
+end;
+
+procedure TE2EThreadVarTests.TestRun_InitialisedStringThreadVar;
+begin
+  { a string initialiser points at an immortal literal in the TLS image }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program tvprobe;
+    threadvar S: string = 'abc';
+    begin WriteLn(S); S := S + 'd'; WriteLn(S); end.
+    ''', 'abc' + LE + 'abcd' + LE, 0);
+end;
+
+procedure TE2EThreadVarTests.TestRun_InitialisedThreadVar_EveryThreadStartsFromIt;
+begin
+  { every thread starts from the declared value, not only the main thread }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRTLRunsOnAll(
+    '''
+    program tvprobe;
+    uses Classes;
+    threadvar N: Integer = 5;
+    threadvar S: string;
+    type TW = class(TThread) procedure Execute(); override; end;
+    var Got: Integer; GotS: string;
+    procedure TW.Execute(); begin Got := N; N := 99; S := 'w'; GotS := S; end;
+    var T: TW;
+    begin S := 'main'; T := TW.Create(False); T.WaitFor(); WriteLn(Got, ' ', N, ' ', GotS, ' ', S); end.
+    ''', '5 5 w main' + LE, 0);
+end;
+
+procedure TE2EThreadVarTests.TestRun_InitialisedThreadVars_FloatBoolAndArray;
+begin
+  { initialisers of the other scalar kinds and of static arrays }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program tvprobe;
+    threadvar
+      D: Double = 2.5;
+      B: Boolean = True;
+      W: Word = 513;
+      Q: Int64 = 1099511627776;
+      A: array[0..2] of Integer = (4, 5, 6);
+      T: array[0..1] of string = ('x', 'yz');
+    begin WriteLn(D:0:1, ' ', B, ' ', W, ' ', Q, ' ', A[0] + A[1] + A[2], ' ', T[0], T[1]); A[1] := 0; WriteLn(A[0] + A[1] + A[2]); end.
+    ''', '2.5 True 513 1099511627776 15 xyz' + LE + '10' + LE, 0);
+end;
+
 procedure TE2EThreadVarTests.TestRun_ThreadVarsOfAUsedUnit;
 const
   { threadvars a USED unit declares, reached from the program under separate
@@ -333,6 +398,46 @@ begin
     CompileAndRunWithUnitNative('tvw', UnitSrc, ProgSrc, Output, RCode));
   AssertEquals('exit code', 0, RCode);
   AssertEquals('stdout', '3abhi' + LE, Output);
+end;
+
+procedure TE2EThreadVarTests.TestRun_InitialisedThreadVars_DeclaredInUnit;
+const
+  { a unit's initialised threadvars, interface and implementation section,
+    reach the program through separate compilation }
+  UnitSrc = '''
+    unit tvu;
+    interface
+    threadvar
+      Counter: Integer = 40;
+      Tag: string = 'u';
+    function Bump(): Integer;
+    implementation
+    threadvar
+      Step: Integer = 2;
+    function Bump(): Integer;
+    begin
+      Counter := Counter + Step;
+      Result := Counter
+    end;
+    end.
+    ''';
+  ProgSrc = '''
+    program P;
+    uses tvu;
+    begin
+      WriteLn(Bump(), ' ', Tag);
+      WriteLn(Counter)
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run: ' + Output,
+    CompileAndRunWithUnitNative('tvu', UnitSrc, ProgSrc, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('stdout', '42 u' + LE + '42' + LE, Output);
 end;
 
 initialization

@@ -730,11 +730,11 @@ const
     ELF never emits.  Adding a kind that ELF *does* emit means extending the
     list AND this bound — otherwise the section is silently dropped from the
     object with no error. }
-  MaxSecOrder = 6;
+  MaxSecOrder = 7;
 
 var
   Buf: string;
-  { Section ordering: NULL, .text, .data, .rodata, .bss, .tbss, .opdf,
+  { Section ordering: NULL, .text, .data, .rodata, .bss, .tdata, .tbss, .opdf,
     .init_array, then .rela.text, .rela.data, .rela.rodata,
     then .symtab, .strtab, .shstrtab.
     We track which sections exist and their SHT indices. }
@@ -784,9 +784,12 @@ begin
   SecOrder[1] := cskData;
   SecOrder[2] := cskRodata;
   SecOrder[3] := cskBss;
-  SecOrder[4] := cskTbss;
-  SecOrder[5] := cskOpdf;
-  SecOrder[6] := cskInitArray;
+  { .tdata before .tbss: the TLS initialisation image precedes its zerofill
+    tail, the order the linker's PT_TLS block expects }
+  SecOrder[4] := cskTdata;
+  SecOrder[5] := cskTbss;
+  SecOrder[6] := cskOpdf;
+  SecOrder[7] := cskInitArray;
 
   NumDataSecs := 0;
   for I := 0 to MaxSecOrder do
@@ -1070,6 +1073,12 @@ begin
           ShFlags := SHF_ALLOC or SHF_WRITE;
           ShType  := SHT_NOBITS;
         end;
+        cskTdata:
+        begin
+          { initialised threadvars: the per-thread initialisation image }
+          ShFlags := SHF_ALLOC or SHF_WRITE or SHF_TLS;
+          ShType  := SHT_PROGBITS;
+        end;
         cskTbss:
         begin
           ShFlags := SHF_ALLOC or SHF_WRITE or SHF_TLS;
@@ -1093,7 +1102,7 @@ begin
           ShType  := SHT_INIT_ARRAY;
         end;
       else
-        { cskTdata / cskTvars / cskIface are Mach-O-only section kinds and
+        { cskTvars / cskIface are Mach-O-only section kinds and
           never reach the ELF writer.  Without this arm they would inherit the
           PREVIOUS iteration's ShFlags/ShType (neither is reset per loop) and
           silently emit a malformed section header.  Fail loudly instead. }

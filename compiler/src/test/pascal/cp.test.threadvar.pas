@@ -52,6 +52,9 @@ type
     { an interface threadvar is ONE 16-byte TLV; its itab half is reached at
       the TLV address + 8, keeping the pair contiguous for a var argument }
     procedure TestCodegenArm64_IntfThreadVar_ItabAtTlvPlus8;
+    { an initialised threadvar's value is the TLS image every thread starts
+      from (.tdata / __thread_data); an uninitialised one stays zerofill }
+    procedure TestCodegen_InitialisedThreadVar_InTlsImage;
   end;
 
 implementation
@@ -371,6 +374,26 @@ begin
     Pos('_tv_G@PAGEOFF'#10#9'ldr x9, [x0]'#10#9'blr x9'#10#9'add x0, x0, #8',
       Asm_) >= 0);
   AssertTrue('no separate itab global', Pos('_g_G_itab', Asm_) < 0);
+end;
+
+procedure TThreadVarTests.TestCodegen_InitialisedThreadVar_InTlsImage;
+const
+  Src = '''
+    program P;
+    threadvar
+      N: Integer = 5;
+      Z: Integer;
+    begin
+      WriteLn(N + Z)
+    end.
+    ''';
+begin
+  AssertEquals('the initial value is in the TLS image', '',
+    AsmMissing(Src,
+      '.section .tdata,"awT",@progbits'#10'.balign 4'#10'.globl N'#10'N:'#10#9'.long 5',
+      '.section __DATA,__thread_data'#10'.balign 8'#10'.globl _ts_N'#10'_ts_N:'#10#9'.quad 5'));
+  AssertEquals('an uninitialised threadvar stays zerofill', '',
+    AsmMissing(Src, 'Z:'#10#9'.skip 4', '_ts_Z:'#10#9'.zero 8'));
 end;
 
 initialization

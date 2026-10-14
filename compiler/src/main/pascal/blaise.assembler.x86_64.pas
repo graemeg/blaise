@@ -2921,6 +2921,8 @@ begin
       ASection := cskRodata
     else if StartsWithStr(Args, '.tbss') then
       ASection := cskTbss
+    else if StartsWithStr(Args, '.tdata') then
+      ASection := cskTdata
     else if StartsWithStr(Args, '.note.GNU-stack') then
       Exit
     else if StartsWithStr(Args, '.data') then
@@ -3416,7 +3418,7 @@ begin
           section; mirror that.  External linkers resolve @tpoff against a
           non-TLS symbol as a plain vaddr, which puts threadvars at a wild
           positive thread-pointer offset in cc-linked binaries. }
-        if LabelVal.Section = cskTbss then
+        if (LabelVal.Section = cskTbss) or (LabelVal.Section = cskTdata) then
           SType := cstTLS
         else
           SType := cstNone;

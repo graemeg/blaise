@@ -839,8 +839,9 @@ ThreadVarSection
 
 (* ThreadVarSection declares thread-local storage variables.  Only allowed
  * at program/unit scope (not inside procedures).  Each thread gets its own
- * copy of the variable, zero-initialised on thread creation.  Syntactically
- * identical to VarSection except for the keyword. *)
+ * copy of the variable, created from the declared initialiser when the
+ * VarDecl carries one ( = ConstValue ) and zero-initialised otherwise.
+ * Syntactically identical to VarSection except for the keyword. *)
 
 (* A variable declaration may carry an initialiser ( = ConstValue ).  The
  * initialiser uses the same value grammar as a typed constant (scalar,

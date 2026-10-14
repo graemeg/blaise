@@ -11679,7 +11679,9 @@ begin
     goes through the same EmitLoadSlot / EmitStoreSlot / EmitSlotAddr: an
     interface is ONE 16-byte obj+itab block (its <Name>_itab half resolves
     to the TLV address + 8, see TlvSlotAddrToX0), a closure or method pointer
-    a 16-byte Code+Env pair, an aggregate its full size.  Threadvars are not on the program-exit release lists -- their lifetime is
+    a 16-byte Code+Env pair, an aggregate its full size.  An initialiser
+    becomes the TLV's __thread_data image, copied into every new thread.
+    Threadvars are not on the program-exit release lists -- their lifetime is
     per-thread (as on x86-64). }
   Ty := AVD.ResolvedType;
   FTlvGlobals.Add(ASym);
@@ -11691,7 +11693,7 @@ begin
   else
     FTlvSize.Items[ASym] := 8;
   if AVD.InitConst <> nil then
-    NotYet('initialised threadvar', AVD);
+    RegisterGlobalInit(ASym, AVD);
 end;
 
 function TArm64Backend.IsTlvSlot(const AName, ASym: string): Boolean;
@@ -15069,7 +15071,9 @@ var
   Directive: string;
   AnyBss, AnyData: Boolean;
 begin
-  if FGlobalNames.Count = 0 then Exit;
+  { a string-initialised THREADVAR has no _g_ global but still needs its
+    immortal blob below }
+  if (FGlobalNames.Count = 0) and (FGlobalStrInits.Count = 0) then Exit;
   AnyBss := False;
   AnyData := False;
   for I := 0 to FGlobalNames.Count - 1 do
@@ -17428,23 +17432,45 @@ end;
 procedure TArm64Backend.EmitTlvSections;
 var
   I, Sz: Integer;
-begin
-  if FTlvGlobals.Count = 0 then Exit;
-  { per-thread storage: zerofill in __thread_bss, sized per variable }
-  Self.Emit('.section __DATA,__thread_bss');
-  for I := 0 to FTlvGlobals.Count - 1 do
+  Directive: string;
+  AnyInit: Boolean;
+
+  procedure EmitStorageLabel(const ASym: string);
   begin
-    if not FTlvSize.TryGetValue(FTlvGlobals.Strings[I], Sz) then
-      Sz := 8;
     Self.Emit('.balign 8');
     { threadvars follow the same GH #174 collapse rule as plain globals —
       per-unit objects may each carry a copy of an RTL threadvar, and the
       copies MUST collapse to one (separate TLS slots would be wrong) }
-    if FGlobalWeak.IndexOf('__tlv_' + FTlvGlobals.Strings[I]) >= 0 then
-      EmitWeakDef('_ts_' + FTlvGlobals.Strings[I])
+    if FGlobalWeak.IndexOf('__tlv_' + ASym) >= 0 then
+      EmitWeakDef('_ts_' + ASym)
     else
-      EmitGloblDef('_ts_' + FTlvGlobals.Strings[I]);
-    Self.Emit(Format('_ts_%s:', [FTlvGlobals.Strings[I]]));
+      EmitGloblDef('_ts_' + ASym);
+    Self.Emit(Format('_ts_%s:', [ASym]));
+  end;
+
+begin
+  if FTlvGlobals.Count = 0 then Exit;
+  { per-thread storage.  An initialised threadvar's initial value goes in
+    __thread_data, the image dyld copies into every new thread; the rest are
+    zerofill in __thread_bss, sized per variable. }
+  AnyInit := False;
+  for I := 0 to FTlvGlobals.Count - 1 do
+  begin
+    if not FGlobalInits.TryGetValue(FTlvGlobals.Strings[I], Directive) then
+      Continue;
+    if not AnyInit then
+      Self.Emit('.section __DATA,__thread_data');
+    AnyInit := True;
+    EmitStorageLabel(FTlvGlobals.Strings[I]);
+    Self.Emit(Directive);
+  end;
+  Self.Emit('.section __DATA,__thread_bss');
+  for I := 0 to FTlvGlobals.Count - 1 do
+  begin
+    if FGlobalInits.ContainsKey(FTlvGlobals.Strings[I]) then Continue;
+    if not FTlvSize.TryGetValue(FTlvGlobals.Strings[I], Sz) then
+      Sz := 8;
+    EmitStorageLabel(FTlvGlobals.Strings[I]);
     Self.Emit(Format(#9'.zero %d', [Sz]));
   end;
   { TLV descriptors: three quads — thunk, key, storage.  The thunk names dyld's

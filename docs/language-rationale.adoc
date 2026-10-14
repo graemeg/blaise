@@ -4444,8 +4444,39 @@ adding a second formatter to every backend.
 
 *Decision:* Blaise supports the `threadvar` keyword for declaring thread-local
 storage variables.  Syntactically it mirrors `var` but places the variable in
-TLS rather than the global data section.  Each thread receives its own
-zero-initialised copy.
+TLS rather than the global data section.  Each thread receives its own copy,
+zero-initialised unless the declaration carries an initialiser.
+
+*Initialised threadvars:* a threadvar may carry an initialiser, exactly as a
+`var` declaration may (`threadvar Depth: Integer = 1;`).  Every thread, not
+only the main thread, starts from the declared value.
+
+The initial value costs nothing at run time.  Both object formats already
+describe thread-local storage as an initialisation image followed by a
+zerofill tail: `.tdata` + `.tbss` in ELF (covered by `PT_TLS`), and
+`__thread_data` + `__thread_bss` in Mach-O.  The loader (or the freestanding
+`_start`) copies the image into each new thread's block, so an initialised
+threadvar is placed in the image and an uninitialised one in the zerofill
+tail.  A string initialiser is a pointer to an immortal literal, which the
+copy duplicates safely.
+
+Alternatives considered:
+
+* Reject an initialiser with a semantic error.  This matched the original
+  wording of this section ("zero-initialised copy"), but the grammar has always
+  accepted the form, and the x86-64 backend silently dropped the value, so a
+  program printed 0 where it declared 5.  Supporting it is cheaper than the
+  diagnostic would be, since the platform mechanism exists for this purpose.
+* Initialise in the main thread only, from the program's initialisation code.
+  Rejected: a worker thread would then see zero, which is the surprising
+  behaviour the declaration exists to avoid.
+
+*Managed threadvars and thread exit:* a threadvar of a managed type (string,
+dynamic array, interface, class reference, closure, or a record holding one)
+is not released when its thread ends, nor at program exit.  Its lifetime is
+per-thread and the runtime has no per-thread finalisation hook yet, so a
+thread that leaves a managed value in a threadvar leaks it.  A thread that
+must not leak assigns `nil` / `''` before it finishes.
 
 *Scope restriction:* `threadvar` is only allowed at program or unit scope (not
 inside procedures or methods).  Attempting to use it at local scope produces a
@@ -4457,8 +4488,16 @@ references use `thread $Name`.  QBE generates correct local-exec TLS access
 patterns on Linux x86_64 (`%fs:Name@tpoff`).
 
 *Native backend:* The x86_64 native backend emits threadvars in
-`.section .tbss,"awT",@nobits` and accesses them via `%fs:Name@tpoff`
-(local-exec TLS model).
+`.section .tbss,"awT",@nobits` (initialised ones in `.tdata`) and accesses
+them via `%fs:Name@tpoff` (local-exec TLS model).  Every lowering that
+needs a threadvar's address forms it as the thread pointer plus that offset.
+
+The arm64 backend (macOS) makes each threadvar a Mach-O thread-local variable:
+a `__thread_vars` descriptor whose thunk returns the calling thread's address
+of its storage in `__thread_data` / `__thread_bss`.  The storage has the
+layout a plain global of the same type would have (an interface is one
+16-byte obj + itab block), so every access path is shared with ordinary
+globals.
 
 *Unit interface serialisation:* The `IsThreadVar` flag is serialised through
 `.bif` files so that importing units correctly mark symbols as thread-local.
@@ -4947,7 +4986,8 @@ does not cover all cases (pointers, out-params, aliasing).
   new type kind is silently skipped.
 * Global variables are placed in the `.data` section with explicit zero
   directives (`.quad 0`, `.long 0`, etc.); threadvars are placed in `.tbss`
-  (zero-initialised thread-local storage).
+  (zero-initialised thread-local storage), or `.tdata` when they carry an
+  initialiser.
 * Class instances are zeroed by `_ClassAlloc` via `memset` before the
   constructor runs.
 

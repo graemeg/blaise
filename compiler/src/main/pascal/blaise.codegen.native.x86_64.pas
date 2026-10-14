@@ -2101,8 +2101,8 @@ begin
     if Self.IsImportedGlobal(Name) then Continue;
     IsTls := Self.IsThreadVarGlobal(Name);
     if IsTls then Continue;
-    { Initialised global (var G: T = value): emit the folded value.  threadvars
-      are excluded (they live in .tbss / always zero). }
+    { Initialised global (var G: T = value): emit the folded value.  Threadvars
+      were skipped above -- an initialised one goes in .tdata, below. }
     if FGlobalInits.TryGetValue(Name, InitCD) then
     begin
       Self.EmitGlobalInitData(Name, Self.GlobalType(Name), InitCD);
@@ -2223,15 +2223,31 @@ begin
       Self.Emit(#9'.skip 8');
     end;
   end;
-  { Threadvar globals: emit in .tbss (zero-initialised thread-local storage). }
+  { Threadvar globals.  An initialised one (threadvar N: T = value) goes in
+    .tdata, the TLS initialisation image every new thread is started from;
+    the rest are zero-initialised in .tbss.  .tdata is emitted first so the
+    image precedes its zerofill tail. }
   if HasTbss then
   begin
+    HasData := False;
+    for I := 0 to FDataGlobals.Count - 1 do
+    begin
+      Name := FDataGlobals.Keys[I];
+      if Self.IsImportedGlobal(Name) then Continue;
+      if not Self.IsThreadVarGlobal(Name) then Continue;
+      if not FGlobalInits.TryGetValue(Name, InitCD) then Continue;
+      if not HasData then
+        Self.Emit('.section .tdata,"awT",@progbits');
+      HasData := True;
+      Self.EmitGlobalInitData(Name, Self.GlobalType(Name), InitCD);
+    end;
     Self.Emit('.section .tbss,"awT",@nobits');
     for I := 0 to FDataGlobals.Count - 1 do
     begin
       Name := FDataGlobals.Keys[I];
       if Self.IsImportedGlobal(Name) then Continue;
       if not Self.IsThreadVarGlobal(Name) then Continue;
+      if FGlobalInits.TryGetValue(Name, InitCD) then Continue;
       Self.EmitTlsZeroGlobal(Name, Self.GlobalType(Name));
     end;
   end;
