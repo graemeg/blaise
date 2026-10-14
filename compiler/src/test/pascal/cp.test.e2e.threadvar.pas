@@ -49,6 +49,10 @@ type
     procedure TestRun_InitialisedThreadVars_FloatBoolAndArray;
     procedure TestRun_ThreadVarsOfAUsedUnit;
     procedure TestRun_InitialisedThreadVars_DeclaredInUnit;
+    procedure TestRun_ThreadExit_ReleasesEveryManagedKind;
+    procedure TestRun_ThreadExit_ReleasesAReferenceItOnlyRetained;
+    procedure TestRun_MainThreadVar_ReleasedAtProgramExit;
+    procedure TestRun_ThreadExit_ReleasesAUsedUnitsThreadVar;
     procedure TestRun_InitialisedThreadVars_DynamicLink;
   end;
 
@@ -439,6 +443,122 @@ begin
     CompileAndRunWithUnitNative('tvu', UnitSrc, ProgSrc, Output, RCode));
   AssertEquals('exit code', 0, RCode);
   AssertEquals('stdout', '42 u' + LE + '42' + LE, Output);
+end;
+
+procedure TE2EThreadVarTests.TestRun_ThreadExit_ReleasesEveryManagedKind;
+begin
+  { a worker's managed threadvars are released when it exits -- class,
+    interface, record field, dyn-array element and closure env.  Nothing
+    released them, on either backend: the count was 0 }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRTLRunsOnAll(
+    '''
+    program tvprobe;
+    uses Classes;
+    type
+      TNoisy = class destructor Destroy; override; end;
+      IGreet = interface function Hi(): string; end;
+      TGreet = class(IGreet) function Hi(): string; destructor Destroy; override; end;
+      TRec = record O: TNoisy; N: Integer; end;
+      TProc = reference to procedure;
+    var Freed: Integer;
+    destructor TNoisy.Destroy; begin Freed := Freed + 1 end;
+    function TGreet.Hi(): string; begin Result := 'hi' end;
+    destructor TGreet.Destroy; begin Freed := Freed + 1 end;
+    threadvar
+      C: TNoisy; G: IGreet; R: TRec; A: array of TNoisy; P: TProc;
+    type TW = class(TThread) procedure Execute(); override; end;
+    procedure TW.Execute();
+    var Cap: TNoisy;
+    begin
+      C := TNoisy.Create();
+      G := TGreet.Create();
+      R.O := TNoisy.Create();
+      SetLength(A, 1);
+      A[0] := TNoisy.Create();
+      Cap := TNoisy.Create();
+      P := procedure begin Cap.Free() end;
+    end;
+    var T: TW;
+    begin T := TW.Create(False); T.WaitFor(); WriteLn(Freed); end.
+    ''', '5' + LE, 0);
+end;
+
+procedure TE2EThreadVarTests.TestRun_ThreadExit_ReleasesAReferenceItOnlyRetained;
+begin
+  { the worker only RETAINS a shared object (no allocation of its own), and
+    its [Weak] and [Unretained] threadvars own nothing: the object dies when
+    main drops the last reference, not before and not never }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRTLRunsOnAll(
+    '''
+    program tvprobe;
+    uses Classes;
+    type
+      TNoisy = class destructor Destroy; override; end;
+      TW = class(TThread) procedure Execute(); override; end;
+    destructor TNoisy.Destroy; begin WriteLn('freed') end;
+    threadvar
+      Held: TNoisy;
+      [Weak] W: TNoisy;
+      [Unretained] U: TNoisy;
+    var Shared: TNoisy;
+    procedure TW.Execute(); begin Held := Shared; W := Shared; U := Shared; end;
+    var T: TW;
+    begin
+      Shared := TNoisy.Create();
+      T := TW.Create(False); T.WaitFor();
+      WriteLn('joined'); Shared := nil; WriteLn('dropped');
+    end.
+    ''', 'joined' + LE + 'freed' + LE + 'dropped' + LE, 0);
+end;
+
+procedure TE2EThreadVarTests.TestRun_MainThreadVar_ReleasedAtProgramExit;
+begin
+  { the main thread ends with exit(), not a thread exit: its copies are
+    released at program end like the globals }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program tvprobe;
+    type TNoisy = class destructor Destroy; override; end;
+    destructor TNoisy.Destroy; begin WriteLn('freed') end;
+    threadvar C: TNoisy;
+    begin C := TNoisy.Create(); WriteLn('end') end.
+    ''', 'end' + LE + 'freed' + LE, 0);
+end;
+
+procedure TE2EThreadVarTests.TestRun_ThreadExit_ReleasesAUsedUnitsThreadVar;
+const
+  { the threadvar and its finaliser live in the unit's object; the
+    program's worker arms the unit's node }
+  UnitSrc = '''
+    unit tvx;
+    interface
+    type TNoisy = class destructor Destroy; override; end;
+    threadvar Held: TNoisy;
+    var Freed: Integer;
+    implementation
+    destructor TNoisy.Destroy; begin Freed := Freed + 1 end;
+    end.
+    ''';
+  ProgSrc = '''
+    program P;
+    uses Classes, tvx;
+    type TW = class(TThread) procedure Execute(); override; end;
+    procedure TW.Execute(); begin Held := TNoisy.Create() end;
+    var T: TW;
+    begin T := TW.Create(False); T.WaitFor(); WriteLn(Freed) end.
+    ''';
+var
+  Output: string;
+  RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run: ' + Output,
+    CompileAndRunWithUnitNative('tvx', UnitSrc, ProgSrc, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('stdout', '1' + LE, Output);
 end;
 
 procedure TE2EThreadVarTests.TestRun_InitialisedThreadVars_DynamicLink;

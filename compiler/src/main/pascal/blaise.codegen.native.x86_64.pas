@@ -197,6 +197,7 @@ type
     FGlobalInits: TDictionary<string, TConstDecl>;  { global name → initialiser (var G: T = value) }
     FThreadVarGlobals: TDictionary<string, Boolean>;
     FWeakGlobals:      TDictionary<string, Boolean>;
+    FUnretainedGlobals: TDictionary<string, Boolean>;
     { Class-name string blobs already emitted to avoid duplicate label errors.
       Keyed by mangled name. }
     FClassNameEmitted: TDictionary<string, Boolean>;
@@ -398,7 +399,13 @@ type
     procedure RegisterClassVars(AFields: TObjectList);
     procedure MarkThreadVar(const AName: string);
     procedure MarkWeakGlobal(const AName: string);
+    procedure MarkUnretainedGlobal(const AName: string);
     function IsThreadVarGlobal(const AName: string): Boolean;
+    { A threadvar the routine being lowered touches: note its node if the
+      type is managed (TNativeBackend.NoteTvArm). }
+    procedure NoteThreadVarTouch(const AName: string);
+    procedure EmitThreadVarFini(const AName: string);
+    function  TvArmCallText(const ANode: string): string; override;
     function IsWeakGlobal(const AName: string): Boolean;
     { True when the global's owning unit was imported from a cached .bif/.o
       (SkipDepCodegen): the cached object DEFINES the global, so this object
@@ -1624,6 +1631,7 @@ begin
   FGlobalInits         := TDictionary<string, TConstDecl>.Create();
   FThreadVarGlobals    := TDictionary<string, Boolean>.Create();
   FWeakGlobals         := TDictionary<string, Boolean>.Create();
+  FUnretainedGlobals := TDictionary<string, Boolean>.Create();
   FClassNameEmitted    := TDictionary<string, Boolean>.Create();
   FStrLits             := TStringList.Create();
   FBreakLabels        := TStack<string>.Create();
@@ -1698,6 +1706,7 @@ begin
   FClassNameEmitted.Free();
   FStrLits.Free();
   FWeakGlobals.Free();
+  FUnretainedGlobals.Free();
   FThreadVarGlobals.Free();
   FGlobalInits.Free();
   FModuleVarNames.Free();
@@ -1809,6 +1818,41 @@ begin
   Key := Self.GlobalSymName(AName);
   if not FWeakGlobals.ContainsKey(Key) then
     FWeakGlobals.Add(Key, True);
+end;
+
+procedure TX86_64Backend.MarkUnretainedGlobal(const AName: string);
+var
+  Key: string;
+begin
+  Key := Self.GlobalSymName(AName);
+  if not FUnretainedGlobals.ContainsKey(Key) then
+    FUnretainedGlobals.Add(Key, True);
+end;
+
+procedure TX86_64Backend.NoteThreadVarTouch(const AName: string);
+var
+  Ty: TTypeDesc;
+  Sym: TSymbol;
+begin
+  { The same type-only test the defining object uses to emit the node
+    (EmitDataSection): this object's own declaration, else the symbol
+    table for a threadvar of a used unit. }
+  if FTvArmNodes = nil then Exit;
+  Ty := Self.GlobalType(AName);
+  if (Ty = nil) and (FSymTable <> nil) then
+  begin
+    Sym := FSymTable.Lookup(AName);
+    if Sym <> nil then
+      Ty := Sym.TypeDesc;
+  end;
+  if ArcScopeExitReleaseKind(Ty) <> arkNone then
+    NoteTvArm('_tvn_' + Self.GlobalSymName(AName));
+end;
+
+function TX86_64Backend.TvArmCallText(const ANode: string): string;
+begin
+  Result := #9'leaq ' + ANode + '(%rip), %rdi' + #10 +
+            #9'callq _ThreadVarArm' + #10;
 end;
 
 function TX86_64Backend.IsThreadVarGlobal(const AName: string): Boolean;
@@ -2250,8 +2294,107 @@ begin
       if FGlobalInits.TryGetValue(Name, InitCD) then Continue;
       Self.EmitTlsZeroGlobal(Name, Self.GlobalType(Name));
     end;
+    { thread-exit teardown of the managed ones }
+    for I := 0 to FDataGlobals.Count - 1 do
+    begin
+      Name := FDataGlobals.Keys[I];
+      if Self.IsImportedGlobal(Name) then Continue;
+      if not Self.IsThreadVarGlobal(Name) then Continue;
+      if ArcScopeExitReleaseKind(Self.GlobalType(Name)) = arkNone then Continue;
+      Self.EmitThreadVarFini(Name);
+    end;
   end;
   Self.EmitStrLitSection();
+end;
+
+{ A managed threadvar's thread-exit teardown: the finaliser _tvf_<Name>
+  releases the CALLING thread's copy and leaves the slot nil (nil first, then
+  release, so a destructor that reads the variable sees nil), and the node
+  _tvn_<Name> -- Next, Fini, Registered: runtime.mem's TThreadVarNode -- that
+  every routine touching the variable arms on entry.  [Weak] slots are
+  cleared through the weak table; an [Unretained] one owns nothing and is
+  only nilled.  An interface's storage starts at its <Name>_obj label, with
+  the itab 8 bytes in. }
+procedure TX86_64Backend.EmitThreadVarFini(const AName: string);
+var
+  Ty: TTypeDesc;
+  Dummy: Boolean;
+  Lbl: string;
+begin
+  Ty := Self.GlobalType(AName);
+  Lbl := AName;
+  if Ty.Kind = tyInterface then
+    Lbl := AName + '_obj';
+  Self.Emit('.text');
+  Self.Emit('_tvf_' + AName + ':');
+  Self.Emit(#9'pushq %rbp');
+  Self.Emit(#9'movq %rsp, %rbp');
+  Self.Emit(#9'pushq %rbx');
+  Self.Emit(#9'subq $8, %rsp');
+  Self.Emit(#9'movq %fs:0, %rbx');
+  Self.Emit(#9'leaq ' + Lbl + '@tpoff(%rbx), %rbx');
+  case ArcScopeExitReleaseKind(Ty) of
+    arkString, arkDynArray, arkClass:
+      if Self.IsWeakGlobal(AName) then
+      begin
+        Self.Emit(#9'movq %rbx, %rdi');
+        Self.Emit(#9'callq _WeakClear');
+      end
+      else if FUnretainedGlobals.TryGetValue(AName, Dummy) then
+        Self.Emit(#9'movq $0, (%rbx)')
+      else
+      begin
+        Self.Emit(#9'movq (%rbx), %rdi');
+        Self.Emit(#9'movq $0, (%rbx)');
+        if Ty.IsString() then
+          Self.Emit(#9'callq _StringRelease')
+        else if Ty.Kind = tyDynArray then
+          Self.Emit(#9'callq _DynArrayRelease')
+        else
+          Self.Emit(#9'callq _ClassRelease');
+      end;
+    arkIntf:
+      if Self.IsWeakGlobal(AName) then
+      begin
+        Self.Emit(#9'movq %rbx, %rdi');
+        Self.Emit(#9'callq _WeakClear');
+        Self.Emit(#9'movq $0, 8(%rbx)');
+      end
+      else if FUnretainedGlobals.TryGetValue(AName, Dummy) then
+      begin
+        Self.Emit(#9'movq $0, (%rbx)');
+        Self.Emit(#9'movq $0, 8(%rbx)');
+      end
+      else
+      begin
+        Self.Emit(#9'movq (%rbx), %rdi');
+        Self.Emit(#9'movq $0, (%rbx)');
+        Self.Emit(#9'movq $0, 8(%rbx)');
+        Self.Emit(#9'callq _ClassRelease');
+      end;
+    arkRefEnv:
+      begin
+        { closure: Code at +0, Env at +8 -- the Env is the reference }
+        Self.Emit(#9'movq 8(%rbx), %rdi');
+        Self.Emit(#9'movq $0, (%rbx)');
+        Self.Emit(#9'movq $0, 8(%rbx)');
+        Self.Emit(#9'callq _ClassRelease');
+      end;
+    arkAggregate:
+      Self.EmitManagedReleaseAt(Ty, '%rbx', True);
+  end;
+  Self.Emit(#9'addq $8, %rsp');
+  Self.Emit(#9'popq %rbx');
+  Self.Emit(#9'popq %rbp');
+  Self.Emit(#9'ret');
+  Self.Emit('.type _tvf_' + AName + ', @function');
+  Self.Emit('.data');
+  Self.Emit('.balign 8');
+  Self.Emit(Self.GlobalBindDir(AName) + '_tvn_' + AName);
+  Self.Emit('_tvn_' + AName + ':');
+  Self.Emit(#9'.quad 0');
+  Self.Emit(#9'.quad _tvf_' + AName);
+  Self.Emit(#9'.quad 0');
 end;
 
 procedure TX86_64Backend.EmitTlsZeroGlobal(const AName: string;
@@ -6060,7 +6203,10 @@ begin
     if (Length(AName) = 0) or (StrAt(AName, 0) <> 95) then    { '_' }
     begin
       if Self.IsThreadVarGlobal(AName) then
+      begin
+        Self.NoteThreadVarTouch(AName);
         Exit('%fs:' + Self.GlobalSymName(AName) + '@tpoff');
+      end;
       Exit(Self.GlobalSymName(AName) + '(%rip)');
     end;
   end;
@@ -6078,10 +6224,13 @@ begin
       Result := Format('-%d(%%rbp)', [-Off])
   end
   else if Self.IsThreadVarGlobal(AName) then
+  begin
     { Threadvars are unit-prefixed too (a same-named threadvar in two units would
       otherwise collide); the .tbss definition and this %fs:...@tpoff reference
       both apply GlobalSymName so they agree. }
+    Self.NoteThreadVarTouch(AName);
     Result := '%fs:' + Self.GlobalSymName(AName) + '@tpoff'
+  end
   else
     { Module global: reference the owner-prefixed symbol so it binds to the
       matching definition (mirrors QBE's VarRef honouring ResolvedOwnerUnit). }
@@ -6092,6 +6241,7 @@ procedure TX86_64Backend.EmitLeaqGlobal(const AName: string; const ADstReg: stri
 begin
   if Self.IsThreadVarGlobal(AName) then
   begin
+    Self.NoteThreadVarTouch(AName);
     Self.Emit(Format(#9'movq %%fs:0, %s', [ADstReg]));
     Self.Emit(Format(#9'leaq %s@tpoff(%s), %s',
       [Self.GlobalSymName(AName), ADstReg, ADstReg]));
@@ -6129,7 +6279,10 @@ begin
   if (not AIsGlobal) and Self.IsLocal(AName) then
     Result := Self.VarOperand(AName)
   else if Self.IsThreadVarGlobal(AName) then
+  begin
+    Self.NoteThreadVarTouch(AName);
     Result := '%fs:' + Self.GlobalSymName(AName) + '_obj@tpoff'
+  end
   else
     { Owner-prefixed label matching EmitDataSection's <Name>_obj definition. }
     Result := Self.GlobalSymName(AName) + '_obj(%rip)';
@@ -6142,6 +6295,7 @@ begin
     <Name>_obj label -- in the thread's TLS block for a threadvar. }
   if Self.IsThreadVarGlobal(AName) then
   begin
+    Self.NoteThreadVarTouch(AName);
     Self.Emit(Format(#9'movq %%fs:0, %s', [ADstReg]));
     Self.Emit(Format(#9'leaq %s_obj@tpoff(%s), %s',
       [Self.GlobalSymName(AName), ADstReg, ADstReg]));
@@ -6165,7 +6319,10 @@ begin
     Result := Format('%d(%%rbp)', [Off + 8]);
   end
   else if Self.IsThreadVarGlobal(AName) then
+  begin
+    Self.NoteThreadVarTouch(AName);
     Result := '%fs:' + Self.GlobalSymName(AName) + '_itab@tpoff'
+  end
   else
     Result := Self.GlobalSymName(AName) + '_itab(%rip)';
 end;
@@ -24906,6 +25063,8 @@ var
   VD:       TVarDecl;
   AKind:    TArcReleaseKind;
   SplitOff: Integer;
+  SavedArmNodes: TStringList;
+  SavedArmPos: Integer;
 begin
   Sym := FuncSymbolFromDecl(ADecl);
   Self.DbgBeginFunc(Sym);
@@ -24969,6 +25128,7 @@ begin
   SavedAsm := FAsm;
   BodyBuf := TStringBuilder.Create();
   FAsm := BodyBuf;
+  Self.TvArmBegin(SavedArmNodes, SavedArmPos);
   try
   { Register promotion: save the callee-saved incumbents into their frame
     slots, then explicitly load any STACK-passed promoted param (it has no
@@ -25417,6 +25577,7 @@ begin
       Self.Emit(Format(#9'movq $0, %s',
         [Self.VarOperand('__envp_b' + IntToStr(I))]));
   FExitLabel := Self.NewLabel('exit');
+  Self.TvArmMark();   { arm managed threadvars here, after the spills }
   if ADecl.Body <> nil then
     Self.EmitStmtList(ADecl.Body.Stmts);
   { Epilogue: Exit lands here.  The Result is loaded into %rax/%xmm0 only AFTER
@@ -25635,6 +25796,7 @@ begin
     Self.Emit(#9'popq %rbp');
     Self.Emit(#9'ret');
   finally
+    Self.TvArmEnd(SavedArmNodes, SavedArmPos);
     FAsm := SavedAsm;
   end;
   if FFrameSize > 0 then
@@ -25669,6 +25831,8 @@ var
   I, J:  Integer;
   VD:    TVarDecl;
   Decl:  TMethodDecl;
+  SavedArmNodes: TStringList;
+  SavedArmPos: Integer;
 begin
   if FSymTable <> nil then FSymTable.InCodegen := True;
   FCurrentUnitName := AProg.Name;
@@ -25696,6 +25860,8 @@ begin
         Self.AddGlobal(VD.Names.Strings[J], VD.ResolvedType);
         if VD.IsThreadVar then
           Self.MarkThreadVar(VD.Names.Strings[J]);
+        if VD.IsUnretained then
+          Self.MarkUnretainedGlobal(VD.Names.Strings[J]);
         if VD.IsWeak then
           Self.MarkWeakGlobal(VD.Names.Strings[J]);
         if VD.InitConst <> nil then
@@ -25777,6 +25943,8 @@ begin
     Self.Emit(#9'callq _LeakTrackerEnable');
   { Program body. }
   FExitLabel := Self.NewLabel('main_exit');
+  Self.TvArmBegin(SavedArmNodes, SavedArmPos);
+  Self.TvArmMark();
   Self.EmitStmtList(AProg.Block.Stmts);
   { Epilogue: Exit lands here; release ARC-managed globals, then return 0.
     Mirrors the QBE backend, which releases each managed global at @main_exit so
@@ -25790,12 +25958,17 @@ begin
     privates this translation unit cannot even name.  Then the program's own
     globals are released (a program global may hold a back-reference into a
     unit global's object graph, so the program-owned references go last). }
+  { The main thread's managed threadvars come first: it ends with exit(), not
+    a thread exit, so its copies are released here, as a worker's are while
+    every unit is still alive (runtime.mem _ThreadVarsRelease). }
+  Self.Emit(#9'callq _ThreadVarsRelease');
   for I := FUnitFiniNames.Count - 1 downto 0 do
     Self.Emit(#9'callq ' + FUnitFiniNames.Strings[I] + '_fini');
   Self.EmitGlobalReleases();
   Self.Emit(#9'movl $0, %eax');
   Self.Emit(#9'leave');
   Self.Emit(#9'ret');
+  Self.TvArmEnd(SavedArmNodes, SavedArmPos);
   Self.DbgEndFunc();
   Self.Emit('.type main, @function');
   { Mark the stack non-executable (matches QBE output). }
@@ -25833,6 +26006,8 @@ var
                              emitted once with the IntfBlock pass — never
                              duplicate them). }
   SavedDOU:  string;        { prior FSymTable.DefineOwningUnit, restored at end }
+  SavedArmNodes: TStringList;
+  SavedArmPos: Integer;
 begin
   FCurrentUnitName := AUnit.Name;
   FDbgSrcFile := AUnit.SourceFile;
@@ -25865,6 +26040,8 @@ begin
         Self.AddGlobal(VD.Names.Strings[J], VD.ResolvedType);
         if VD.IsThreadVar then
           Self.MarkThreadVar(VD.Names.Strings[J]);
+        if VD.IsUnretained then
+          Self.MarkUnretainedGlobal(VD.Names.Strings[J]);
         { Mirror EmitProgram's weak registration so the <Unit>_fini walk
           clears a [Weak] slot instead of strong-releasing it. }
         if VD.IsWeak then
@@ -25890,6 +26067,8 @@ begin
         Self.AddGlobal(VD.Names.Strings[J], VD.ResolvedType);
         if VD.IsThreadVar then
           Self.MarkThreadVar(VD.Names.Strings[J]);
+        if VD.IsUnretained then
+          Self.MarkUnretainedGlobal(VD.Names.Strings[J]);
         { Mirror EmitProgram's weak registration so the <Unit>_fini walk
           clears a [Weak] slot instead of strong-releasing it. }
         if VD.IsWeak then
@@ -25979,10 +26158,13 @@ begin
     Self.Emit(NativeMangle(AUnit.Name) + '_init:');
     Self.Emit(#9'pushq %rbp');
     Self.Emit(#9'movq %rsp, %rbp');
+    Self.TvArmBegin(SavedArmNodes, SavedArmPos);
+    Self.TvArmMark();
     Self.EmitStmtList(AUnit.InitStmts);
     Self.Emit(#9'movl $0, %eax');
     Self.Emit(#9'leave');
     Self.Emit(#9'ret');
+    Self.TvArmEnd(SavedArmNodes, SavedArmPos);
     Self.Emit('.type ' + NativeMangle(AUnit.Name) + '_init, @function');
   end;
 
@@ -26025,6 +26207,8 @@ begin
     Self.Emit(NativeMangle(AUnit.Name) + '_fini:');
     Self.Emit(#9'pushq %rbp');
     Self.Emit(#9'movq %rsp, %rbp');
+    Self.TvArmBegin(SavedArmNodes, SavedArmPos);
+    Self.TvArmMark();
     if (AUnit.FinalStmts <> nil) and (AUnit.FinalStmts.Count > 0) then
       Self.EmitStmtList(AUnit.FinalStmts);
     Self.EmitUnitGlobalReleases(AUnit.IntfBlock);
@@ -26032,6 +26216,7 @@ begin
     Self.Emit(#9'movl $0, %eax');
     Self.Emit(#9'leave');
     Self.Emit(#9'ret');
+    Self.TvArmEnd(SavedArmNodes, SavedArmPos);
     Self.Emit('.type ' + NativeMangle(AUnit.Name) + '_fini, @function');
   end;
 

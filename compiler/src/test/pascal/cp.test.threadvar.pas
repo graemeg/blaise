@@ -55,6 +55,17 @@ type
     { an initialised threadvar's value is the TLS image every thread starts
       from (.tdata / __thread_data); an uninitialised one stays zerofill }
     procedure TestCodegen_InitialisedThreadVar_InTlsImage;
+    { a routine touching a MANAGED threadvar arms its node on entry, after
+      the argument spill, so the thread's exit hook releases its copy }
+    procedure TestCodegen_ManagedThreadVar_RoutineArmsNodeAfterSpill;
+    { an unmanaged threadvar has no node and arms nothing }
+    procedure TestCodegen_UnmanagedThreadVar_NoNode;
+    { the node names the finaliser, which nils the slot before releasing }
+    procedure TestCodegen_ManagedThreadVar_NodeAndFinaliser;
+    { the main thread ends with exit(), so _main releases its copies itself }
+    procedure TestCodegen_Main_ReleasesMainThreadCopies;
+    { a used unit's managed threadvar arms the UNIT's node }
+    procedure TestCodegen_UsedUnitThreadVar_ArmsTheUnitsNode;
   end;
 
 implementation
@@ -394,6 +405,95 @@ begin
       '.section __DATA,__thread_data'#10'.balign 8'#10'.globl _ts_N'#10'_ts_N:'#10#9'.quad 5'));
   AssertEquals('an uninitialised threadvar stays zerofill', '',
     AsmMissing(Src, 'Z:'#10#9'.skip 4', '_ts_Z:'#10#9'.zero 8'));
+end;
+
+procedure TThreadVarTests.TestCodegen_ManagedThreadVar_RoutineArmsNodeAfterSpill;
+const
+  Src = '''
+    program P;
+    threadvar S: string;
+    procedure Put(const A: string; N: Integer);
+    begin
+      S := A
+    end;
+    begin
+      Put('x', 1)
+    end.
+    ''';
+begin
+  AssertEquals('Put arms S right after spilling its arguments', '',
+    AsmMissing(Src,
+      #9'movl %esi, -16(%rbp)'#10#9'leaq _tvn_S(%rip), %rdi'#10#9'callq _ThreadVarArm',
+      #9'stur x1, [x29, #-16]'#10#9'adrp x0, _tvn_S@PAGE'#10 +
+        #9'add x0, x0, _tvn_S@PAGEOFF'#10#9'bl __ThreadVarArm'));
+end;
+
+procedure TThreadVarTests.TestCodegen_UnmanagedThreadVar_NoNode;
+const
+  Src = '''
+    program P;
+    type TPair = record A, B: Integer; end;
+    threadvar N: Integer; D: Double; R: TPair;
+    begin
+      N := 1; D := 2.0; R.A := 3
+    end.
+    ''';
+begin
+  AssertTrue('x86-64: no node', Pos('_tvn_', GenAsm(Src, TargetX86_64)) < 0);
+  AssertTrue('arm64: no node', Pos('_tvn_', GenAsm(Src, TargetArm64)) < 0);
+end;
+
+procedure TThreadVarTests.TestCodegen_ManagedThreadVar_NodeAndFinaliser;
+const
+  Src = '''
+    program P;
+    threadvar S: string;
+    begin
+      S := 'x'
+    end.
+    ''';
+  Node = '_tvn_S:'#10#9'.quad 0'#10#9'.quad _tvf_S'#10#9'.quad 0';
+begin
+  AssertEquals('node: Next, Fini, Registered', '', AsmMissing(Src, Node, Node));
+  AssertEquals('finaliser nils the slot, then releases the old value', '',
+    AsmMissing(Src,
+      #9'movq (%rbx), %rdi'#10#9'movq $0, (%rbx)'#10#9'callq _StringRelease',
+      #9'ldr x0, [x19]'#10#9'str xzr, [x19]'#10#9'bl __StringRelease'));
+end;
+
+procedure TThreadVarTests.TestCodegen_Main_ReleasesMainThreadCopies;
+const
+  Src = '''
+    program P;
+    begin
+    end.
+    ''';
+begin
+  AssertEquals('_main calls _ThreadVarsRelease', '',
+    AsmMissing(Src, #9'callq _ThreadVarsRelease', #9'bl __ThreadVarsRelease'));
+end;
+
+procedure TThreadVarTests.TestCodegen_UsedUnitThreadVar_ArmsTheUnitsNode;
+const
+  USrc = '''
+    unit tvu;
+    interface
+    threadvar S: string;
+    implementation
+    end.
+    ''';
+  PSrc = '''
+    program P;
+    uses tvu;
+    begin
+      S := 'x'
+    end.
+    ''';
+begin
+  AssertTrue('x86-64: arms tvu''s node',
+    Pos(#9'leaq _tvn_tvu_S(%rip), %rdi', GenAsmWithUnit(USrc, PSrc, TargetX86_64)) >= 0);
+  AssertTrue('arm64: arms tvu''s node',
+    Pos(#9'adrp x0, _tvn_tvu_S@PAGE', GenAsmWithUnit(USrc, PSrc, TargetArm64)) >= 0);
 end;
 
 initialization

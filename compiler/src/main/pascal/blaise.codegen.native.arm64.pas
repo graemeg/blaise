@@ -658,7 +658,10 @@ type
     function  IsTlvSlot(const AName, ASym: string): Boolean;
     { x0 := this thread's address of threadvar slot ASym; False if none }
     function  TlvSlotAddrToX0(const AName, ASym: string): Boolean;
+    procedure NoteTlvTouch(const AName, ABase: string);
     procedure EmitTlvSections;
+    procedure EmitThreadVarFini(const ASym: string; AVD: TVarDecl);
+    function  TvArmCallText(const ANode: string): string; override;
     procedure EmitMethodCallCommon(AMethod: TMethodDecl; const AName: string;
       AArgs: TObjectList);
     procedure EmitDiscardedRecMethodCall(AMethod: TMethodDecl;
@@ -11684,9 +11687,10 @@ begin
     a 16-byte Code+Env pair, an aggregate its full size.  An initialiser
     becomes the TLV's __thread_data image, copied into every new thread.
     Threadvars are not on the program-exit release lists -- their lifetime is
-    per-thread (as on x86-64). }
+    per-thread (as on x86-64): a managed one is released at THREAD exit
+    through its node and finaliser (EmitThreadVarFini). }
   Ty := AVD.ResolvedType;
-  FTlvGlobals.Add(ASym);
+  FTlvGlobals.AddObject(ASym, AVD);
   if (Ty.Kind = tyInterface) or IsMethodPtrType(Ty) then
     FTlvSize.Items[ASym] := 16
   else if (Ty.Kind in [tyRecord, tyStaticArray]) or
@@ -11726,9 +11730,42 @@ begin
   Result := IsTlvSlot(AName, ASym);
   if not Result then Exit;
   Base := ItabBaseName(ASym);
+  NoteTlvTouch(AName, Base);
   EmitTlvAddr(Base);
   if Base <> ASym then
     Self.Emit(#9'add x0, x0, #8');
+end;
+
+procedure TArm64Backend.NoteTlvTouch(const AName, ABase: string);
+var
+  I: Integer;
+  Ty: TTypeDesc;
+  Sym: TSymbol;
+begin
+  { A managed threadvar touched by the routine being lowered: it arms the
+    variable's node on entry (the call TvArmEnd splices in).  The type comes
+    from this object's own declaration, else from the symbol table -- the
+    same type-only test EmitTlvSections uses to decide the node exists. }
+  if FTvArmNodes = nil then Exit;
+  Ty := nil;
+  I := FTlvGlobals.IndexOf(ABase);
+  if I >= 0 then
+    Ty := TVarDecl(FTlvGlobals.Objects[I]).ResolvedType
+  else if FSymTable <> nil then
+  begin
+    Sym := FSymTable.Lookup(ItabBaseName(AName));
+    if Sym <> nil then
+      Ty := Sym.TypeDesc;
+  end;
+  if ArcScopeExitReleaseKind(Ty) <> arkNone then
+    NoteTvArm('_tvn_' + ABase);
+end;
+
+function TArm64Backend.TvArmCallText(const ANode: string): string;
+begin
+  Result := #9'adrp x0, ' + ANode + '@PAGE' + #10 +
+            #9'add x0, x0, ' + ANode + '@PAGEOFF' + #10 +
+            #9'bl ' + DarwinSym('_ThreadVarArm') + #10;
 end;
 
 procedure TArm64Backend.RegisterGlobalInit(const ASym: string; AVD: TVarDecl);
@@ -13016,6 +13053,8 @@ var
   Sym: string;
   RecShape, ParShape: Integer;
   Par: TMethodParam;
+  SavedArmNodes: TStringList;
+  SavedArmPos: Integer;
 begin
   Sym := RoutineSym(ADecl, ADecl.Name);
   { nostackframe: the body is an inline-asm block that owns the entire
@@ -13129,6 +13168,7 @@ begin
   SavedAsm := FAsm;
   BodyBuf := TStringBuilder.Create();
   FAsm := BodyBuf;
+  TvArmBegin(SavedArmNodes, SavedArmPos);
   FExcDepth := 0;
   FExcSlotN := 0;
   FFinallyBodies.Clear();
@@ -13623,6 +13663,7 @@ begin
     for I := 0 to ADecl.BlockEnvTypes.Count - 1 do
       EmitStoreSlot('xzr', '__envp_b' + IntToStr(I));
 
+  TvArmMark();   { arm managed threadvars here, after the spills }
   EmitStmtList(ADecl.Body.Stmts);
 
   Self.Emit(FExitLabel + ':');
@@ -13769,6 +13810,7 @@ begin
   Self.Emit(#9'mov sp, x29');
   Self.Emit(#9'ldp x29, x30, [sp], #16');
   Self.Emit(#9'ret');
+  TvArmEnd(SavedArmNodes, SavedArmPos);
   FAsm := SavedAsm;
   FrameAligned := (FFrameSize + 15) and (not 15);
   if FrameAligned > 0 then
@@ -17140,6 +17182,8 @@ var
   GRDef: TRecordTypeDef;
   GI: TGenericInstance;
   SavedAsm, BodyBuf: TStringBuilder;
+  SavedArmNodes: TStringList;
+  SavedArmPos: Integer;
 begin
   FProgramName := AProg.Name;
   FCurrentUnitName := '';
@@ -17399,6 +17443,7 @@ begin
   SavedAsm := FAsm;
   BodyBuf := TStringBuilder.Create();
   FAsm := BodyBuf;
+  TvArmBegin(SavedArmNodes, SavedArmPos);
   FExcDepth := 0;
   FExcSlotN := 0;
   FFinallyBodies.Clear();
@@ -17415,9 +17460,14 @@ begin
   if FDebugMode then
     EmitCallSym('_LeakTrackerEnable');
 
+  TvArmMark();
   EmitStmtList(AProg.Block.Stmts);
 
   Self.Emit(FExitLabel + ':');
+  { the main thread's managed threadvars: it ends with exit(), not a thread
+    exit, so its copies are released here -- first, as a worker's are while
+    every unit is still alive (runtime.mem _ThreadVarsRelease) }
+  EmitCallSym('_ThreadVarsRelease');
   { unit finalization sections, REVERSE dependency order, before the
     global releases (finalizers may still touch their unit's globals) }
   for I := FUnitFinals.Count - 1 downto 0 do
@@ -17472,6 +17522,7 @@ begin
   Self.Emit(#9'mov sp, x29');
   Self.Emit(#9'ldp x29, x30, [sp], #16');
   Self.Emit(#9'ret');
+  TvArmEnd(SavedArmNodes, SavedArmPos);
   FAsm := SavedAsm;
   FrameAligned := (FFrameSize + 15) and (not 15);
   if FrameAligned > 0 then
@@ -17552,6 +17603,93 @@ begin
     Self.Emit(#9'.quad 0');
     Self.Emit(Format(#9'.quad _ts_%s', [FTlvGlobals.Strings[I]]));
   end;
+  { thread-exit teardown of the managed ones }
+  for I := 0 to FTlvGlobals.Count - 1 do
+    if ArcScopeExitReleaseKind(
+         TVarDecl(FTlvGlobals.Objects[I]).ResolvedType) <> arkNone then
+      EmitThreadVarFini(FTlvGlobals.Strings[I],
+        TVarDecl(FTlvGlobals.Objects[I]));
+end;
+
+{ A managed threadvar's thread-exit teardown: the finaliser _tvf_<Sym>
+  releases the CALLING thread's copy and leaves the slot nil (nil first, then
+  release, so a destructor that reads the variable sees nil), and the node
+  _tvn_<Sym> -- Next, Fini, Registered: runtime.mem's TThreadVarNode --
+  that every routine touching the variable arms on entry.  [Weak] slots are
+  cleared through the weak table; an [Unretained] one owns nothing and is
+  only nilled. }
+procedure TArm64Backend.EmitThreadVarFini(const ASym: string; AVD: TVarDecl);
+var
+  Ty: TTypeDesc;
+begin
+  Ty := AVD.ResolvedType;
+  Self.Emit('.text');
+  Self.Emit('.p2align 2');
+  Self.Emit(Format('_tvf_%s:', [ASym]));
+  Self.Emit(#9'stp x29, x30, [sp, #-16]!');
+  Self.Emit(#9'mov x29, sp');
+  Self.Emit(#9'str x19, [sp, #-16]!');
+  EmitTlvAddr(ASym);
+  Self.Emit(#9'mov x19, x0');
+  case ArcScopeExitReleaseKind(Ty) of
+    arkString, arkDynArray, arkClass:
+      if AVD.IsWeak then
+      begin
+        Self.Emit(#9'mov x0, x19');
+        EmitCallSym('_WeakClear');
+      end
+      else if AVD.IsUnretained then
+        Self.Emit(#9'str xzr, [x19]')
+      else
+      begin
+        Self.Emit(#9'ldr x0, [x19]');
+        Self.Emit(#9'str xzr, [x19]');
+        if Ty.IsString() then
+          EmitCallSym('_StringRelease')
+        else if Ty.Kind = tyDynArray then
+          EmitCallSym('_DynArrayRelease')
+        else
+          EmitCallSym('_ClassRelease');
+      end;
+    arkIntf:
+      { one 16-byte block: object at +0, itab at +8 }
+      if AVD.IsWeak then
+      begin
+        Self.Emit(#9'mov x0, x19');
+        EmitCallSym('_WeakClear');
+        Self.Emit(#9'str xzr, [x19, #8]');
+      end
+      else if AVD.IsUnretained then
+        Self.Emit(#9'stp xzr, xzr, [x19]')
+      else
+      begin
+        Self.Emit(#9'ldr x0, [x19]');
+        Self.Emit(#9'stp xzr, xzr, [x19]');
+        EmitCallSym('_ClassRelease');
+      end;
+    arkRefEnv:
+      begin
+        { closure: Code at +0, Env at +8 -- the Env is the reference }
+        Self.Emit(#9'ldr x0, [x19, #8]');
+        Self.Emit(#9'stp xzr, xzr, [x19]');
+        EmitCallSym('_ClassRelease');
+      end;
+    arkAggregate:
+      Self.EmitManagedReleaseAt(Ty, 'x19', True);
+  end;
+  Self.Emit(#9'ldr x19, [sp], #16');
+  Self.Emit(#9'ldp x29, x30, [sp], #16');
+  Self.Emit(#9'ret');
+  Self.Emit(SecData());
+  Self.Emit('.balign 8');
+  if FGlobalWeak.IndexOf('__tlv_' + ASym) >= 0 then
+    EmitWeakDef('_tvn_' + ASym)
+  else
+    EmitGloblDef('_tvn_' + ASym);
+  Self.Emit(Format('_tvn_%s:', [ASym]));
+  Self.Emit(#9'.quad 0');
+  Self.Emit(Format(#9'.quad _tvf_%s', [ASym]));
+  Self.Emit(#9'.quad 0');
 end;
 
 procedure TArm64Backend.EmitUnit(AUnit: TUnit);
@@ -17794,6 +17932,8 @@ var
   I, J: Integer;
   FrameAligned: Integer;
   SavedAsm, BodyBuf: TStringBuilder;
+  SavedArmNodes: TStringList;
+  SavedArmPos: Integer;
 begin
   ARegistry.Add(ASym);
   FIsFunction := False;
@@ -17839,10 +17979,12 @@ begin
   SavedAsm := FAsm;
   BodyBuf := TStringBuilder.Create();
   FAsm := BodyBuf;
+  TvArmBegin(SavedArmNodes, SavedArmPos);
   FExcDepth := 0;
   FExcSlotN := 0;
   FFinallyBodies.Clear();
   FLoopExcDepth.Clear();
+  TvArmMark();
   if AStmts <> nil then
     EmitStmtList(AStmts);
   Self.Emit(FExitLabel + ':');
@@ -17858,6 +18000,7 @@ begin
   Self.Emit(#9'mov sp, x29');
   Self.Emit(#9'ldp x29, x30, [sp], #16');
   Self.Emit(#9'ret');
+  TvArmEnd(SavedArmNodes, SavedArmPos);
   FAsm := SavedAsm;
   FrameAligned := (FFrameSize + 15) and (not 15);
   if FrameAligned > 0 then

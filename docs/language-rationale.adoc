@@ -4472,11 +4472,42 @@ Alternatives considered:
   behaviour the declaration exists to avoid.
 
 *Managed threadvars and thread exit:* a threadvar of a managed type (string,
-dynamic array, interface, class reference, closure, or a record holding one)
-is not released when its thread ends, nor at program exit.  Its lifetime is
-per-thread and the runtime has no per-thread finalisation hook yet, so a
-thread that leaves a managed value in a threadvar leaks it.  A thread that
-must not leak assigns `nil` / `''` before it finishes.
+dynamic array, interface, class reference, `reference to` closure, or a
+record or static array holding one) is released when its thread ends, exactly
+as a global is released at program exit.  Each such variable has a finaliser
+that releases the calling thread's copy and leaves it nil, and a node the
+runtime keeps on a process-wide list.  Every routine that touches the variable
+registers the node and arms its thread's exit hook on entry; the hook runs all
+registered finalisers on the exiting thread, newest first.  The main thread
+ends with `exit()` rather than a thread exit, so the program releases its
+copies itself, before the unit finalization sections run, which is the order
+a worker sees.  `[Weak]` threadvars are cleared through the weak table and
+`[Unretained]` ones are only set to nil.
+
+A finaliser runs after the thread's start routine has returned.  A destructor
+it triggers may assign a threadvar again; that value is not released (the
+list runs once), the same contract C++ gives `thread_local` objects created
+during thread teardown.
+
+The hook is the platform's thread-exit callback, not a pthread key
+destructor: `_tlv_atexit` on macOS, `__cxa_thread_atexit_impl` on Linux and
+FreeBSD (libc's under a dynamic link, the runtime's own in a `--static`
+binary, run by the thread trampoline).  A key destructor is not equivalent on
+macOS, where dyld frees a thread's TLV storage from its own key before ours
+runs, so the destructor sees freshly zeroed variables.
+
+Alternatives considered:
+
+* Document the leak and require threads to clear their threadvars before
+  finishing (the previous rule).  Rejected: a managed type is managed so that
+  no code has to remember this, and a `[Weak]` threadvar left registered in
+  the weak table points into a freed TLS block.
+* Arm the hook when a thread first allocates.  Rejected: a thread can hold a
+  reference it never allocated (`Held := Shared` only retains), and that
+  reference would leak.
+* Arm the hook on every access to the variable rather than once per routine.
+  Rejected: the call would sit in the middle of expression evaluation, where
+  argument and scratch registers are live; routine entry has none live.
 
 *Scope restriction:* `threadvar` is only allowed at program or unit scope (not
 inside procedures or methods).  Attempting to use it at local scope produces a

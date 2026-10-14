@@ -62,17 +62,17 @@ function pthread_create(Thread, Attr, StartRoutine, Arg: Pointer): Integer;
 function pthread_join(Thread: Int64; RetVal: Pointer): Integer;
 
 { C++-ABI thread-exit registration -- the name the platform layout unit's
-  _BlaiseThreadAtExit imports (runtime.mem's thread-exit hook, the
-  allocator sweep).  Fn(Arg) runs when the
+  _BlaiseThreadAtExit imports (runtime.mem's thread-exit hook: managed
+  threadvar release, then the allocator sweep).  Fn(Arg) runs when the
   calling thread exits, newest first; libc provides the same entry point
   under a dynamic link.  A static worker runs its list from the thread
   trampoline once its start routine returns.  The main thread ends with
   exit_group and never runs its list: runtime.mem covers it through
-  __cxa_atexit.
+  __cxa_atexit and the program's own _ThreadVarsRelease.
 
   This replaced a no-op pthread_key_create / pthread_setspecific pair that
   accepted a destructor and never ran it, so a static worker's arenas were
-  never swept. }
+  never swept and its managed threadvars never released. }
 function __cxa_thread_atexit_impl(Fn, Arg, Dso: Pointer): Integer;
 
 { Run, newest first, and clear the calling thread's exit callbacks. }

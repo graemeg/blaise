@@ -73,6 +73,26 @@ type
     function  AsmContainsFrom(AMark: Integer; const ANeedle: string): Boolean;
     function  AsmCountFrom(AMark: Integer; const ANeedle: string): Integer;
 
+    { ---- managed threadvar arming ----
+
+      A routine that touches a managed threadvar (string, dyn array, class,
+      interface, closure, or an aggregate holding one) calls
+      _ThreadVarArm(@node) on entry, so the thread's exit hook releases its
+      copy (runtime.mem).  Which nodes a routine needs is known only once its
+      body is lowered, so the TLS-address leaf of each backend notes the touch
+      (NoteTvArm) and TvArmEnd splices the calls in at the offset TvArmMark
+      recorded -- just before the first statement, where no argument register
+      is still live.  Scopes nest: a routine emitted while another is open
+      (a nested or lifted body) saves and restores the outer state. }
+    FTvArmNodes: TStringList;   { nodes the open routine arms; nil = none open }
+    FTvArmPos: Integer;         { splice offset in FAsm; -1 = not marked yet }
+    procedure TvArmBegin(var ASavedNodes: TStringList; var ASavedPos: Integer);
+    procedure TvArmMark;
+    procedure TvArmEnd(ASavedNodes: TStringList; ASavedPos: Integer);
+    procedure NoteTvArm(const ANode: string);
+    { The ISA's call sequence _ThreadVarArm(@ANode), as assembly lines. }
+    function  TvArmCallText(const ANode: string): string; virtual; abstract;
+
     function IsRecordManagedClean(ARec: TRecordTypeDesc): Boolean;
     function IsRecordAllIntegerLeaves(ARec: TRecordTypeDesc): Boolean;
     function IsRecordAllFloatLeaves(ARec: TRecordTypeDesc): Boolean;
@@ -286,6 +306,46 @@ function TNativeBackend.AsmCountFrom(AMark: Integer;
   const ANeedle: string): Integer;
 begin
   Result := FAsm.CountFrom(AMark, ANeedle);
+end;
+
+procedure TNativeBackend.TvArmBegin(var ASavedNodes: TStringList;
+  var ASavedPos: Integer);
+begin
+  ASavedNodes := FTvArmNodes;
+  ASavedPos := FTvArmPos;
+  FTvArmNodes := TStringList.Create();
+  FTvArmPos := -1;
+end;
+
+procedure TNativeBackend.TvArmMark;
+begin
+  FTvArmPos := FAsm.Length;
+end;
+
+procedure TNativeBackend.NoteTvArm(const ANode: string);
+begin
+  if (FTvArmNodes <> nil) and (FTvArmNodes.IndexOf(ANode) < 0) then
+    FTvArmNodes.Add(ANode);
+end;
+
+procedure TNativeBackend.TvArmEnd(ASavedNodes: TStringList; ASavedPos: Integer);
+var
+  I: Integer;
+  S, Calls: string;
+begin
+  if (FTvArmNodes.Count > 0) and (FTvArmPos >= 0) then
+  begin
+    Calls := '';
+    for I := 0 to FTvArmNodes.Count - 1 do
+      Calls := Calls + TvArmCallText(FTvArmNodes.Strings[I]);
+    S := FAsm.ToString();
+    FAsm.Truncate(FTvArmPos);
+    FAsm.Append(Calls);
+    FAsm.Append(Copy(S, FTvArmPos, Length(S) - FTvArmPos));
+  end;
+  FTvArmNodes.Free();
+  FTvArmNodes := ASavedNodes;
+  FTvArmPos := ASavedPos;
 end;
 
 { The record-return ABI classifier and its leaf predicates now live as shared

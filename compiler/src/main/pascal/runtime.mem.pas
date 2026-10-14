@@ -75,6 +75,18 @@ procedure _BlaiseMove(Src, Dst: Pointer; N: Int64);
   Value; a Count of zero or less writes nothing. }
 procedure _BlaiseFillByte(Dst: Pointer; N: Int64; Value: Integer);
 
+{ Managed threadvars at thread exit.  For each threadvar of a managed type
+  (string, dynamic array, class, interface, closure, or an aggregate holding
+  one) the declaring module emits a TThreadVarNode and a parameterless
+  finaliser that releases the CALLING thread's copy and nils it.  Every
+  routine that touches such a variable calls _ThreadVarArm(@node) on entry,
+  so a thread that ever held a value has its exit hook registered, and the
+  hook runs every registered finaliser.  The main thread exits through
+  exit(), so the program's _main calls _ThreadVarsRelease itself, before the
+  unit finalization sections. }
+procedure _ThreadVarArm(Node: Pointer);
+procedure _ThreadVarsRelease;
+
 { Phase-5 teardown / reclamation API (concurrent-allocator-design.adoc,
   §Teardown, §Reclamation protocol).  The _Mem* functions below are
   maintenance and diagnostic entry points — none of them is on the
@@ -224,6 +236,19 @@ type
     Next: PFreeNode;
   end;
 
+  { One managed threadvar's teardown record, emitted by the compiler in the
+    declaring module's data: Next links the process-wide list, Fini is the
+    variable's finaliser, Registered is set once the node is on the list.
+    The compiler writes this layout -- keep it in step with the backends'
+    EmitThreadVarNode. }
+  PThreadVarNode = ^TThreadVarNode;
+  TThreadVarNode = record
+    Next:       PThreadVarNode;
+    Fini:       Pointer;
+    Registered: Int64;
+  end;
+  TThreadVarFini = procedure;
+
   PLargeFreeNode = ^TLargeFreeNode;
   TLargeFreeNode = record
     Next:        PLargeFreeNode;
@@ -303,6 +328,7 @@ var
   GArenaRegistry: PArena;      { all live arenas, linked via RemoteList }
   GAbandonedCount: Int64;      { registered arenas with OwnerTid = 0 }
   GHooksReady: Integer;        { main-thread atexit sweep registered once }
+  GThreadVarNodes: PThreadVarNode;  { registered threadvar finalisers }
 
 { Registry spinlock — CAS built on the allocator's own atomic leaves,
   deliberately NOT a pthread_mutex, so runtime.mem stays free of libc
@@ -569,10 +595,34 @@ begin
     FreeLists[I] := nil;
 end;
 
+{ Run every registered threadvar finaliser on the calling thread: each
+  releases that thread's copy of one managed threadvar and nils it, so a
+  second run is a no-op.  The list head is read under the registry lock (it
+  orders the node's Next/Fini stores before this load); nodes are never
+  unlinked, so the walk itself needs no lock. }
+procedure _ThreadVarsRelease;
+var
+  N: PThreadVarNode;
+  F: TThreadVarFini;
+begin
+  RegLockAcquire();
+  N := GThreadVarNodes;
+  RegLockRelease();
+  while N <> nil do
+  begin
+    F := TThreadVarFini(N^.Fini);
+    F();
+    N := N^.Next;
+  end;
+end;
+
 { The per-thread exit hook (_ThreadAtExit) and the main thread's atexit
-  handler.  Signatures match void (*)(void *). }
+  handler.  Threadvars go first: releasing them runs destructors that may
+  still allocate and free, and the sweep must see the result.  Signatures
+  match void (*)(void *). }
 procedure ThreadExitHook(Arg: Pointer);
 begin
+  _ThreadVarsRelease();
   SweepThisThread();
 end;
 
@@ -584,8 +634,8 @@ end;
 { Arm the exit hooks: once per process, register the main thread's atexit
   sweep; once per thread, register ThreadExitHook to run when the thread
   exits (§Teardown — "Why a thread-exit hook exists, and how").  Called from
-  AllocArena, i.e. only on the arena-creation cold path.  The flag is set
-  first: registering may itself allocate. }
+  AllocArena (the arena-creation cold path) and from _ThreadVarArm.  The flag
+  is set first: registering may itself allocate. }
 procedure EnsureExitHooks;
 begin
   if ExitHookArmed then Exit;
@@ -598,6 +648,29 @@ begin
   end;
   RegLockRelease();
   _ThreadAtExit(Pointer(@ThreadExitHook), nil);
+end;
+
+{ Called on entry to every routine that touches a managed threadvar, with
+  that variable's node: puts the node on the process-wide list (once) and
+  makes sure this thread's exit hook will run.  The unlocked Registered
+  read is only a fast path; the decision is re-made under the lock. }
+procedure _ThreadVarArm(Node: Pointer);
+var
+  N: PThreadVarNode;
+begin
+  N := PThreadVarNode(Node);
+  if N^.Registered = 0 then
+  begin
+    RegLockAcquire();
+    if N^.Registered = 0 then
+    begin
+      N^.Next := GThreadVarNodes;
+      GThreadVarNodes := N;
+      N^.Registered := 1;
+    end;
+    RegLockRelease();
+  end;
+  EnsureExitHooks();
 end;
 
 function MapFailed(P: Pointer): Boolean;
