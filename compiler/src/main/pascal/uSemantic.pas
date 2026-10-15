@@ -129,6 +129,10 @@ type
       unchanged (BUG-20260918-generic-body-edit-skips-consumer-rebuild).
       Names only; the hashes are attached at export time. }
     FGenericSourceUnits:   TStringList;
+    FDeferredConsts:       TObjectList;  { not owned: scalar TConstDecls that wait for
+                                           the block's types (FoldScalarConst) }
+    FConstOwner:           string;       { the type whose member consts are being
+                                           folded: a bare sibling name resolves }
     FContestedGlobals:     TStringList;  { module var names exported by more than one
                                             unit in scope (a last-wins collision) }
     FForInLoopVars:        TStringList;  { stack of active for-in loop-variable names (nested loops
@@ -326,6 +330,14 @@ type
     function  EvalConstIntExpr(AExpr: TASTExpr; ALine, ACol: Integer): Int64;
     function  EvalConstFloatExpr(AExpr: TASTExpr; ALine, ACol: Integer): string;
     function  IsFloatConstExpr(AExpr: TASTExpr): Boolean;
+    function  LookupConstSym(const AName: string): TSymbol;
+    function  IsStringConstExpr(AExpr: TASTExpr): Boolean;
+    function  EvalConstStrExpr(AExpr: TASTExpr; ALine, ACol: Integer): string;
+    function  ConstExprOrdinalType(AExpr: TASTExpr): TTypeDesc;
+    function  ConstExprAwaitsTypes(AExpr: TASTExpr): Boolean;
+    function  ConstAwaitsTypes(CD: TConstDecl): Boolean;
+    procedure DefineScalarConst(ABlock: TBlock; AIndex: Integer;
+      CD: TConstDecl; TD: TTypeDesc);
     { Non-raising counterpart of EvalConstIntExpr: True (and AValue set) only
       when AExpr is a compile-time integer constant.  EvalConstIntExpr itself
       raises on a non-constant expression, which is no use where a
@@ -1182,6 +1194,7 @@ begin
   FGenericSourceUnits.Sorted := True;
   FForInLoopVars        := TStringList.Create();
   FContestedGlobals     := TStringList.Create();
+  FDeferredConsts       := TObjectList.Create(False);
   FContestedGlobals.Sorted := True;
   FContestedGlobals.Duplicates := dupIgnore;
   FForInLoopVars.CaseSensitive := False;
@@ -1205,6 +1218,7 @@ begin
   FActiveTypeParams.Free();
   FForInLoopVars.Free();
   FContestedGlobals.Free();
+  FDeferredConsts.Free();
   FWarnings.Free();
   FSparseEnumWarned.Free();
   FUnitSymbols.Free();
@@ -6046,7 +6060,7 @@ begin
     { Named-constant reference; also resolves True/False to 1/0. }
     if SameText(TIdentExpr(AExpr).Name, 'True') then Exit(1);
     if SameText(TIdentExpr(AExpr).Name, 'False') then Exit(0);
-    IdSym := FTable.Lookup(TIdentExpr(AExpr).Name);
+    IdSym := Self.LookupConstSym(TIdentExpr(AExpr).Name);
     if (IdSym = nil) or (IdSym.Kind <> skConstant) then
     begin
       { Bare enum member used in a constant expression (e.g. an array
@@ -6090,6 +6104,9 @@ begin
   if AExpr is TFuncCallExpr then
   begin
     FC := TFuncCallExpr(AExpr);
+    { Ord(X) of an ordinal constant (Ord(eC), Ord(True)): its ordinal }
+    if SameText(FC.Name, 'Ord') and (FC.Args <> nil) and (FC.Args.Count = 1) then
+      Exit(EvalConstIntExpr(TASTExpr(FC.Args.Items[0]), ALine, ACol));
     if (FC.Args <> nil) and (FC.Args.Count = 1) then
     begin
       CastSym := FTable.Lookup(FC.Name);
@@ -6145,6 +6162,142 @@ begin
     'Constant expression is not a compile-time integer', ALine, ACol);
 end;
 
+{ A named constant referenced from a constant expression.  While a type's
+  member consts are folded (FConstOwner), a bare sibling name resolves to the
+  qualified member first, as it does inside the type's methods. }
+function TSemanticAnalyser.LookupConstSym(const AName: string): TSymbol;
+begin
+  Result := nil;
+  if FConstOwner <> '' then
+  begin
+    Result := FTable.Lookup(FConstOwner + '.' + AName);
+    if (Result <> nil) and (Result.Kind <> skConstant) then
+      Result := nil;
+  end;
+  if Result = nil then
+    Result := FTable.Lookup(AName);
+end;
+
+function TSemanticAnalyser.IsStringConstExpr(AExpr: TASTExpr): Boolean;
+var
+  Sym: TSymbol;
+begin
+  Result := False;
+  if AExpr is TStringLiteral then
+    Exit(True);
+  if AExpr is TIdentExpr then
+  begin
+    Sym := Self.LookupConstSym(TIdentExpr(AExpr).Name);
+    Exit((Sym <> nil) and (Sym.Kind = skConstant) and
+         (Sym.TypeDesc <> nil) and Sym.TypeDesc.IsString());
+  end;
+  if (AExpr is TBinaryExpr) and (TBinaryExpr(AExpr).Op = boAdd) then
+    Result := Self.IsStringConstExpr(TBinaryExpr(AExpr).Left) or
+              Self.IsStringConstExpr(TBinaryExpr(AExpr).Right);
+end;
+
+{ A string constant expression: literals and named string constants joined
+  by '+'. }
+function TSemanticAnalyser.EvalConstStrExpr(AExpr: TASTExpr;
+  ALine, ACol: Integer): string;
+var
+  Sym: TSymbol;
+begin
+  Result := '';
+  if AExpr is TStringLiteral then
+    Exit(TStringLiteral(AExpr).Value);
+  if AExpr is TIdentExpr then
+  begin
+    Sym := Self.LookupConstSym(TIdentExpr(AExpr).Name);
+    if (Sym = nil) or (Sym.Kind <> skConstant) or (Sym.TypeDesc = nil) or
+       not Sym.TypeDesc.IsString() then
+      SemanticError(Format(
+        'Constant expression references ''%s'', which is not a string constant',
+        [TIdentExpr(AExpr).Name]), ALine, ACol);
+    Exit(Sym.ConstString);
+  end;
+  if (AExpr is TBinaryExpr) and (TBinaryExpr(AExpr).Op = boAdd) then
+    Exit(Self.EvalConstStrExpr(TBinaryExpr(AExpr).Left, ALine, ACol) +
+         Self.EvalConstStrExpr(TBinaryExpr(AExpr).Right, ALine, ACol));
+  SemanticError('Constant expression is not a compile-time string',
+    ALine, ACol);
+end;
+
+{ The type an ordinal constant expression carries over to the constant it
+  initialises: a bare constant reference keeps its referent's type (an
+  alias), an enum member its enum, True / False Boolean, and a typecast its
+  target type.  nil -- any other integer expression is typed by magnitude. }
+function TSemanticAnalyser.ConstExprOrdinalType(AExpr: TASTExpr): TTypeDesc;
+var
+  Sym: TSymbol;
+  EnumRef: TEnumMemberRef;
+begin
+  Result := nil;
+  if AExpr is TIdentExpr then
+  begin
+    if SameText(TIdentExpr(AExpr).Name, 'True') or
+       SameText(TIdentExpr(AExpr).Name, 'False') then
+      Exit(FTable.TypeBoolean);
+    Sym := Self.LookupConstSym(TIdentExpr(AExpr).Name);
+    if (Sym <> nil) and (Sym.Kind = skConstant) then
+      Exit(Sym.TypeDesc);
+    EnumRef := ResolveEnumMember(TIdentExpr(AExpr).Name, nil);
+    if EnumRef <> nil then
+      Exit(EnumRef.EnumDesc);
+    Exit;
+  end;
+  if (AExpr is TFuncCallExpr) and (TFuncCallExpr(AExpr).Args <> nil) and
+     (TFuncCallExpr(AExpr).Args.Count = 1) then
+  begin
+    Sym := FTable.Lookup(TFuncCallExpr(AExpr).Name);
+    if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) and
+       Sym.TypeDesc.IsOrdinal() then
+      Result := Sym.TypeDesc;
+  end;
+end;
+
+{ True when a constant expression names something only the block's TYPE
+  declarations will define -- an enum member, or a type used as a cast --
+  so the constant must wait for the second pass. }
+function TSemanticAnalyser.ConstExprAwaitsTypes(AExpr: TASTExpr): Boolean;
+var
+  I: Integer;
+  Sym: TSymbol;
+begin
+  Result := False;
+  if AExpr = nil then Exit;
+  if AExpr is TIdentExpr then
+  begin
+    if SameText(TIdentExpr(AExpr).Name, 'True') or
+       SameText(TIdentExpr(AExpr).Name, 'False') then
+      Exit;
+    Sym := Self.LookupConstSym(TIdentExpr(AExpr).Name);
+    Exit(((Sym = nil) or (Sym.Kind <> skConstant)) and
+         (ResolveEnumMember(TIdentExpr(AExpr).Name, nil) = nil));
+  end;
+  if AExpr is TBinaryExpr then
+    Exit(Self.ConstExprAwaitsTypes(TBinaryExpr(AExpr).Left) or
+         Self.ConstExprAwaitsTypes(TBinaryExpr(AExpr).Right));
+  if AExpr is TNotExpr then
+    Exit(Self.ConstExprAwaitsTypes(TNotExpr(AExpr).Expr));
+  if AExpr is TFuncCallExpr then
+  begin
+    if not SameText(TFuncCallExpr(AExpr).Name, 'Ord') and
+       (FTable.Lookup(TFuncCallExpr(AExpr).Name) = nil) then
+      Exit(True);
+    if TFuncCallExpr(AExpr).Args <> nil then
+      for I := 0 to TFuncCallExpr(AExpr).Args.Count - 1 do
+        if Self.ConstExprAwaitsTypes(TASTExpr(TFuncCallExpr(AExpr).Args.Items[I])) then
+          Exit(True);
+  end;
+end;
+
+function TSemanticAnalyser.ConstAwaitsTypes(CD: TConstDecl): Boolean;
+begin
+  Result := ((CD.TypeName <> '') and (FTable.FindType(CD.TypeName) = nil)) or
+            Self.ConstExprAwaitsTypes(CD.IntValueExpr);
+end;
+
 function TSemanticAnalyser.IsFloatConstExpr(AExpr: TASTExpr): Boolean;
 var
   Bin: TBinaryExpr;
@@ -6156,7 +6309,7 @@ begin
     Exit(True);
   if AExpr is TIdentExpr then
   begin
-    Sym := FTable.Lookup(TIdentExpr(AExpr).Name);
+    Sym := Self.LookupConstSym(TIdentExpr(AExpr).Name);
     if (Sym <> nil) and (Sym.Kind = skConstant) and
        (Sym.TypeDesc <> nil) and Sym.TypeDesc.IsFloat() then
       Exit(True);
@@ -6439,7 +6592,7 @@ begin
 
   if AExpr is TIdentExpr then
   begin
-    IdSym := FTable.Lookup(TIdentExpr(AExpr).Name);
+    IdSym := Self.LookupConstSym(TIdentExpr(AExpr).Name);
     if (IdSym = nil) or (IdSym.Kind <> skConstant) then
     begin
       SemanticError(Format(
@@ -6893,6 +7046,7 @@ var
   J:        Integer;
   RefSym:   TSymbol;
   Resolved: string;
+  OrdType:  TTypeDesc;
 begin
   { Fold a scalar constant's value into CD (string parts, bit-op and
     arithmetic expressions, float expressions) and return its type: the
@@ -6908,7 +7062,7 @@ begin
     begin
       if CD.ConstParts.Objects[J] <> nil then
       begin
-        RefSym := FTable.Lookup(CD.ConstParts[J]);
+        RefSym := Self.LookupConstSym(CD.ConstParts[J]);
         if (RefSym <> nil) and (RefSym.Kind = skConstant) then
           Resolved := Resolved + RefSym.ConstString
         else
@@ -6924,14 +7078,24 @@ begin
     named-constant values in scope. }
   if CD.IntExprTokens <> nil then
     CD.IntVal := FoldConstBitOpExpr(CD.IntExprTokens, CD.Line, CD.Col);
-  if (CD.IntValueExpr <> nil) and IsFloatConstExpr(CD.IntValueExpr) then
+  OrdType := nil;
+  if (CD.IntValueExpr <> nil) and Self.IsStringConstExpr(CD.IntValueExpr) then
+  begin
+    CD.StrVal   := Self.EvalConstStrExpr(CD.IntValueExpr, CD.Line, CD.Col);
+    CD.IsString := True;
+    CD.IsFloat  := False;
+  end
+  else if (CD.IntValueExpr <> nil) and IsFloatConstExpr(CD.IntValueExpr) then
   begin
     CD.StrVal  := EvalConstFloatExpr(CD.IntValueExpr, CD.Line, CD.Col);
     CD.IsFloat := True;
     CD.IsString := False;
   end
   else if CD.IntValueExpr <> nil then
+  begin
     CD.IntVal := EvalConstIntExpr(CD.IntValueExpr, CD.Line, CD.Col);
+    OrdType := Self.ConstExprOrdinalType(CD.IntValueExpr);
+  end;
   if CD.IsSet then
     Exit(nil);
   if CD.TypeName <> '' then
@@ -6951,6 +7115,8 @@ begin
     Result := FTable.TypeString
   else if CD.IsFloat then
     Result := FTable.TypeDouble
+  else if OrdType <> nil then
+    Result := OrdType
   { Untyped integer constant: pick the width by magnitude so a value that does
     not fit in 32 bits is NOT silently truncated to Integer (issue #133).  A
     UInt64-range bit pattern (above High(Int64)) types as UInt64; a value
@@ -6965,68 +7131,92 @@ end;
 
 procedure TSemanticAnalyser.AnalyseConstDecls(ABlock: TBlock);
 var
-  I, J:   Integer;
-  CD:     TConstDecl;
-  Sym:    TSymbol;
-  RefSym: TSymbol;
-  Prev:   TSymbol;
-  TD:     TTypeDesc;
-  IsSameBlockDup: Boolean;
+  I:  Integer;
+  CD: TConstDecl;
+  TD: TTypeDesc;
 begin
   for I := 0 to ABlock.ConstDecls.Count - 1 do
   begin
     CD := TConstDecl(ABlock.ConstDecls.Items[I]);
     if CD.IsArrayConst then Continue;  { handled by AnalyseArrayConstDecls }
-
-    TD := Self.FoldScalarConst(CD);
     { Set-valued constants reference enum members, which are not registered
       until AnalyseTypeDecls runs — so they are resolved in the second pass
-      (AnalyseArrayConstDecls), like array consts. }
+      (AnalyseArrayConstDecls), like array consts.  So is a scalar one that
+      names an enum member or a type the block declares. }
     if CD.IsSet then Continue;
-    Sym              := TSymbol.Create(CD.Name, skConstant, TD);
-    Sym.ConstValue   := CD.IntVal;
-    Sym.ConstString  := CD.StrVal;
-    if not FTable.Define(Sym) then
+    if Self.ConstAwaitsTypes(CD) then
     begin
-      { A module-name marker blocking the Define is always a hard error
-        (issue #84). }
-      RefSym := FTable.CurrentScope.LookupLocal(CD.Name);
-      if (RefSym <> nil) and (RefSym.Kind = skModule) then
-      begin
-        Sym.Free();
-        SemanticError(Format('Duplicate identifier ''%s''', [CD.Name]),
-          CD.Line, CD.Col);
-      end;
-      { Same-block duplicate (the unit declares the name twice itself) is a
-        hard error. }
-      IsSameBlockDup := False;
-      for J := 0 to I - 1 do
-        if SameText(TConstDecl(ABlock.ConstDecls.Items[J]).Name, CD.Name) then
-        begin
-          IsSameBlockDup := True;
-          Break;
-        end;
-      if IsSameBlockDup then
-      begin
-        Sym.Free();
-        SemanticError(Format('Duplicate identifier ''%s''', [CD.Name]), CD.Line, CD.Col);
-      end;
-      { Cross-unit collision: last-in-uses wins.  Detach the prior unit's
-        const and stash it in the per-unit cache so a qualified reference
-        (Unit.Const) can still reach the shadowed value; install this unit's
-        const as the flat winner.  Mirrors RegisterConsts on the prebuilt-
-        import path so source-loaded and prebuilt deps behave identically. }
-      Prev := FTable.ExtractLocal(CD.Name);
-      if (Prev <> nil) and (Prev.OwningUnit <> '') then
-        RegisterUnitSymbol(Prev.OwningUnit, Prev);
-      FTable.Define(Sym);
+      FDeferredConsts.Add(CD);
+      Continue;
     end;
-    { Register every interface const in the per-unit cache keyed by its owning
-      unit, so a qualified reference resolves against the declaring unit's own
-      value regardless of which unit won the bare (flat) slot. }
-    if Sym.OwningUnit <> '' then
-      RegisterUnitSymbol(Sym.OwningUnit, Sym);
+    TD := Self.FoldScalarConst(CD);
+    Self.DefineScalarConst(ABlock, I, CD, TD);
   end;
+end;
+
+{ Define the folded scalar constant CD (the AIndex-th of ABlock) with type TD:
+  a same-block duplicate is an error, a cross-unit collision last-wins. }
+procedure TSemanticAnalyser.DefineScalarConst(ABlock: TBlock; AIndex: Integer;
+  CD: TConstDecl; TD: TTypeDesc);
+var
+  I, J:   Integer;
+  Sym:    TSymbol;
+  RefSym: TSymbol;
+  Prev:   TSymbol;
+  IsSameBlockDup: Boolean;
+begin
+  I := AIndex;
+  { An untyped constant whose type is not the one its literal kind implies
+    (an alias, an enum member, Int64 by magnitude) records that type, so a
+    unit that imports it from the cached .bif types it identically
+    (RegisterConsts falls back to the literal kind: string / Double /
+    Integer). }
+  if (CD.TypeName = '') and (TD <> nil) and (TD <> FTable.TypeString) and
+     (TD <> FTable.TypeDouble) and (TD <> FTable.TypeInteger) then
+    CD.TypeName := TD.Name;
+  Sym              := TSymbol.Create(CD.Name, skConstant, TD);
+  Sym.ConstValue   := CD.IntVal;
+  Sym.ConstString  := CD.StrVal;
+  if not FTable.Define(Sym) then
+  begin
+    { A module-name marker blocking the Define is always a hard error
+      (issue #84). }
+    RefSym := FTable.CurrentScope.LookupLocal(CD.Name);
+    if (RefSym <> nil) and (RefSym.Kind = skModule) then
+    begin
+      Sym.Free();
+      SemanticError(Format('Duplicate identifier ''%s''', [CD.Name]),
+        CD.Line, CD.Col);
+    end;
+    { Same-block duplicate (the unit declares the name twice itself) is a
+      hard error. }
+    IsSameBlockDup := False;
+    for J := 0 to I - 1 do
+      if SameText(TConstDecl(ABlock.ConstDecls.Items[J]).Name, CD.Name) then
+      begin
+        IsSameBlockDup := True;
+        Break;
+      end;
+    if IsSameBlockDup then
+    begin
+      Sym.Free();
+      SemanticError(Format('Duplicate identifier ''%s''', [CD.Name]), CD.Line, CD.Col);
+    end;
+    { Cross-unit collision: last-in-uses wins.  Detach the prior unit's
+      const and stash it in the per-unit cache so a qualified reference
+      (Unit.Const) can still reach the shadowed value; install this unit's
+      const as the flat winner.  Mirrors RegisterConsts on the prebuilt-
+      import path so source-loaded and prebuilt deps behave identically. }
+    Prev := FTable.ExtractLocal(CD.Name);
+    if (Prev <> nil) and (Prev.OwningUnit <> '') then
+      RegisterUnitSymbol(Prev.OwningUnit, Prev);
+    FTable.Define(Sym);
+  end;
+  { Register every interface const in the per-unit cache keyed by its owning
+    unit, so a qualified reference resolves against the declaring unit's own
+    value regardless of which unit won the bare (flat) slot. }
+  if Sym.OwningUnit <> '' then
+    RegisterUnitSymbol(Sym.OwningUnit, Sym);
 end;
 
 procedure TSemanticAnalyser.DefineGlobalLastWins(ASym: TSymbol;
@@ -7246,6 +7436,14 @@ begin
   for I := 0 to ABlock.ConstDecls.Count - 1 do
   begin
     CD := TConstDecl(ABlock.ConstDecls.Items[I]);
+    { A scalar constant deferred by AnalyseConstDecls (it names an enum
+      member or a type of this block): the types are registered now. }
+    if FDeferredConsts.IndexOf(CD) >= 0 then
+    begin
+      FDeferredConsts.Remove(CD);
+      Self.DefineScalarConst(ABlock, I, CD, Self.FoldScalarConst(CD));
+      Continue;
+    end;
     { Set-valued constants are resolved here too — enum members are now in
       scope (AnalyseTypeDecls ran before this pass). }
     if CD.IsSet then
@@ -8630,7 +8828,12 @@ begin
         begin
           { typed and folded exactly as a unit-level const: a float,
             Boolean or folded member const was typed Integer with value 0 }
-          ParType := Self.FoldScalarConst(CD);
+          FConstOwner := TD.Name;
+          try
+            ParType := Self.FoldScalarConst(CD);
+          finally
+            FConstOwner := '';
+          end;
           if ParType = nil then
             ParType := FTable.TypeInteger;   { a set member const }
           { Qualified name only — TFoo.MaxItems.  The unqualified form is

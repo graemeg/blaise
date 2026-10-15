@@ -772,12 +772,20 @@ ConstArrayValue
  * Supports the arithmetic operators + - * / div, unary minus, named-constant
  * references, and parentheses.
  *
- * Both integer and float expressions are folded to a single value by the
- * semantic pass, which resolves named-constant references. *)
+ * STRING expressions: string literals and named string constants joined by
+ * '+'.
+ *
+ * Every form is folded to a single value by the semantic pass, which resolves
+ * named-constant references and types the result BY ITS OPERANDS: a bare
+ * named-constant reference is an alias with that constant's type, an enum
+ * member gives the enum's type, True / False give Boolean, Ord(X) is X's
+ * ordinal, and a typecast T(X) gives T.  A constant naming an enum member or
+ * a type declared in the same block is folded after the block's types. *)
 ConstExpr
     = ConstArithExpr
-    | StrLit { PLUS StrLit }    (* string constant, with concatenation *)
-    | IDENT                    (* named constant reference, e.g. True / False *)
+    | ( StrLit | IDENT ) { PLUS ( StrLit | IDENT ) }
+                               (* string constant, with concatenation *)
+    | IDENT                    (* named constant / enum member, e.g. True *)
     ;
 
 (* Arithmetic constant expression — covers both integer and float.  The
@@ -795,7 +803,10 @@ ConstArithTerm
 ConstArithFactor
     = IntLit
     | FloatLit
-    | IDENT                        (* named integer or float constant *)
+    | IDENT                        (* named integer or float constant, or an
+                                      enum member *)
+    | IDENT LPAREN ConstArithExpr RPAREN
+                                   (* Ord(X), or an ordinal typecast T(X) *)
     | MINUS ConstArithFactor       (* unary minus *)
     | LPAREN ConstArithExpr RPAREN
     ;

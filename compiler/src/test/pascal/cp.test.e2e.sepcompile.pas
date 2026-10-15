@@ -249,6 +249,10 @@ type
       (BUG-20260923-addr-of-openarray-proc). }
     procedure TestIncrementalRebuild_OpenArrayProcType_Warm;
     procedure TestIncrementalRebuild_InterfaceArrayConsts_Warm;
+    { Scalar interface constants whose type is not their literal kind -- an
+      enum member, an alias, True, an Int64-sized value -- keep that type
+      when imported from the cached .bif. }
+    procedure TestIncrementalRebuild_InterfaceTypedScalarConsts_Warm;
     procedure TestDebugOpdf_PerUnitSection_InDependencyObject;
     { Regression (GH #231): a UNIT passed as --source with --debug-opdf
       segfaulted the compiler.  The top-level OPDF block built a PROGRAM-mode
@@ -3377,6 +3381,81 @@ begin
     AssertEquals(Format('build%d stdout', [Pass]),
       '7 8 1 3' + #10 + '250 4' + #10 + 'green blue' + #10 + '6 3' + #10 +
       '20' + #10 + '200' + #10, Captured);
+  end;
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_InterfaceTypedScalarConsts_Warm;
+const
+  LibSrc =
+    '''
+    unit ScalConsts;
+    interface
+    type
+      TColour = (cRed, cGreen, cBlue);
+    const
+      Base = 5;
+      Alias = Base;
+      Fav = cGreen;
+      Typed: TColour = cBlue;
+      On = True;
+      Big = 40000000000;
+      Ratio = 2.5;
+      Same = Ratio;
+      Tag = 'v' + 'w';
+    implementation
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseScalConsts;
+    uses ScalConsts;
+    procedure Show(X: Integer); overload; begin Write('int ') end;
+    procedure Show(X: Int64); overload; begin Write('int64 ') end;
+    procedure Show(X: TColour); overload; begin Write('colour ') end;
+    procedure Show(X: Boolean); overload; begin Write('bool ') end;
+    var C: TColour;
+    begin
+      C := Fav;
+      WriteLn(Alias + 1, ' ', Ord(C), ' ', Ord(Typed), ' ', On, ' ', C = Fav);
+      WriteLn(Big, ' ', Same * 2:0:2, ' ', Tag);
+      Show(Alias); Show(Fav); Show(Typed); Show(On); Show(Big);
+      WriteLn()
+    end.
+    ''';
+var
+  LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc, Pass: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  LibPas   := FScratch + '/ScalConsts.pas';
+  ProgPas  := FScratch + '/use_scalconsts.pas';
+  ProgBin  := FScratch + '/use_scalconsts';
+  CacheDir := FScratch + '/units-scalconsts';
+
+  WriteFile(LibPas, LibSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+  for Pass := 0 to 1 do
+  begin
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch], Captured);
+    AssertEquals(Format('build%d exit code (out: %s)', [Pass, Captured]), 0, Rc);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
+    AssertEquals(Format('build%d stdout', [Pass]),
+      '6 1 2 True True' + #10 + '40000000000 5.00 vw' + #10 +
+      'int colour colour bool int64 ' + #10, Captured);
   end;
 end;
 

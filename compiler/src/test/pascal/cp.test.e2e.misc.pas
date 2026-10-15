@@ -76,6 +76,10 @@ type
     procedure TestRun_Const_IntegerConst;
     procedure TestRun_Const_StringConst;
     procedure TestRun_Const_NegativeConst;
+    { Identifier-led constant values -- alias, arithmetic, enum member,
+      Ord, string concat, float alias, typed enum, member-const alias --
+      fold by type (BUG-20261015-const-ident-rhs-typed-string). }
+    procedure TestRun_Const_IdentLedValues;
     procedure TestRun_Const_CompileTimeExpression;
     procedure TestRun_Const_LocalArrayInFunction;
 
@@ -1142,6 +1146,41 @@ begin
   AssertEquals('exit code 0', 0, RCode);
   AssertEquals('Jan Feb Dec days',
     '31' + LE + '28' + LE + '31' + LE, Output);
+end;
+
+procedure TE2EMiscTests.TestRun_Const_IdentLedValues;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TE = (eA, eB, eC);
+      TC = class
+        const M = 3;
+        const N = M * 2;
+        const Q = M;
+      end;
+    const
+      A = 5;
+      B = A;
+      C = A + 1;
+      F = 2.5;
+      G = F;
+      S = 'x';
+      T = S + 'y' + S;
+      KB = True;
+      KE = eB;
+      KT: TE = eC;
+      KO = Ord(eC) + A;
+    begin
+      WriteLn(B, ' ', B + B, ' ', C);
+      WriteLn(G + G:0:2, ' ', T, ' ', KB);
+      WriteLn(Ord(KE), ' ', Ord(KT), ' ', KO, ' ', KE = eB);
+      WriteLn(TC.N, ' ', TC.Q);
+    end.
+    ''',
+    '5 10 6' + LE + '5.00 xyx True' + LE + '1 2 7 True' + LE + '6 3' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_Const_NegativeConst;

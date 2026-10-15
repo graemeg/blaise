@@ -89,6 +89,13 @@ type
     { Compile-time floating-point constant expressions (issue #108) }
     { GH #195 — bit operators inside a FLOAT constant expression.  They fold
       as Int64 (not Double), which the 1 shl 53 case depends on. }
+
+    { A value that starts with an identifier is an expression folded by type:
+      an alias keeps its referent's type, an enum member gives its enum,
+      True gives Boolean, and string / float / integer expressions fold as
+      such.  The parser sent every one to the string-concat path: B = A
+      with an integer A was an empty STRING. }
+    procedure TestSemantic_ConstIdentValue_TypedByReferent;
   end;
 
 implementation
@@ -620,6 +627,76 @@ begin
     Pos(' cBlue', GenAsm(EnumSrc, TargetX86_64)) < 0);
   AssertTrue('arm64: no bare enum member in the data',
     Pos(' cBlue', GenAsm(EnumSrc, TargetArm64)) < 0);
+end;
+
+procedure TConstTests.TestSemantic_ConstIdentValue_TypedByReferent;
+const
+  Src = '''
+    program P;
+    type
+      TE = (eA, eB, eC);
+    const
+      A = 5;
+      B = A;
+      C = A + 1;
+      F = 2.5;
+      G = F;
+      S = 'x';
+      T = S + 'y';
+      KB = True;
+      KE = eB;
+      KT: TE = eC;
+      KO = Ord(eC);
+    var I: Integer; D: Double; Str: string; Bo: Boolean; E: TE;
+    begin
+      I := B;
+      I := C;
+      D := G;
+      Str := T;
+      Bo := KB;
+      E := KE;
+      E := KT;
+      I := KO;
+    end.
+    ''';
+var
+  L: TLexer;
+  P: TParser;
+  Prog: TProgram;
+  SA: TSemanticAnalyser;
+
+  function Rhs(AIdx: Integer): TIdentExpr;
+  begin
+    Result := TIdentExpr(TAssignment(Prog.Block.Stmts.Items[AIdx]).Expr);
+  end;
+
+begin
+  L := TLexer.Create(Src);
+  P := TParser.Create(L);
+  try
+    Prog := P.Parse();
+  finally
+    P.Free();
+    L.Free();
+  end;
+  SA := TSemanticAnalyser.Create();
+  try
+    SA.Analyse(Prog);
+    AssertEquals('B type', 'Integer', Rhs(0).ResolvedType.Name);
+    AssertEquals('B value', 5, Integer(Rhs(0).ConstValue));
+    AssertEquals('C value', 6, Integer(Rhs(1).ConstValue));
+    AssertEquals('G type', 'Double', Rhs(2).ResolvedType.Name);
+    AssertEquals('T text', 'xy', Rhs(3).ConstString);
+    AssertEquals('KB type', 'Boolean', Rhs(4).ResolvedType.Name);
+    AssertEquals('KE type', 'TE', Rhs(5).ResolvedType.Name);
+    AssertEquals('KE value', 1, Integer(Rhs(5).ConstValue));
+    AssertEquals('KT type', 'TE', Rhs(6).ResolvedType.Name);
+    AssertEquals('KT value', 2, Integer(Rhs(6).ConstValue));
+    AssertEquals('KO value', 2, Integer(Rhs(7).ConstValue));
+  finally
+    SA.Free();
+    Prog.Free();
+  end;
 end;
 
 initialization

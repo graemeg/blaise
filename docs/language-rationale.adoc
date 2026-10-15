@@ -3708,13 +3708,36 @@ express `2 + 3 * 4` correctly.
 
 === Scope
 
-Constant expressions fold to an integer.  Floating-point constant arithmetic
-(`const X = 3.14 * 2`) and string concatenation beyond the existing literal/
-named-constant `+` form are not folded by this path; a multi-token float or
-string expression is left for a future extension.  Compile-time constants are
-not yet accepted as static-array bounds (`array[0..N-1]`), which is a separate
-parser limitation in the type grammar, independent of constant-expression
-folding.
+Integer expressions fold as described above; float expressions are covered in
+_Floating-Point Constant Expressions_.  Compile-time constants are not yet
+accepted as static-array bounds (`array[0..N-1]`), which is a separate parser
+limitation in the type grammar, independent of constant-expression folding.
+
+=== Typing by Operand
+
+A constant takes its type from what its value is made of, as in Delphi and
+FPC:
+
+[cols="2,1",options="header"]
+|===
+| Declaration | Type of `K`
+| `K = A` (`A` a constant) | the type of `A` -- an alias
+| `K = eGreen` (an enum member) | the enum
+| `K = True` | `Boolean`
+| `K = TColour(1)` | `TColour`
+| `K = S + 'x'` (`S` a string constant) | `string`
+| `K = A + 1`, `K = Ord(eGreen)` | an integer type wide enough for the value
+|===
+
+A constant that names an enum member or a type declared in the same block is
+folded after the block's type declarations, because constants are otherwise
+analysed first (array bounds may name them).
+
+Until 2026-10-15 the parser sent every value that began with an identifier to
+the string-concatenation path: `B = A` with an integer `A` produced an empty
+*string*, `B = A` with a float `A` produced the string `'2.5'`, `A + 1` was a
+parse error, and `K = eGreen` was "Undeclared constant".  None of this was a
+decision -- the grammar already allowed identifier-led arithmetic.
 
 == Array-of-enum Typed Constants
 

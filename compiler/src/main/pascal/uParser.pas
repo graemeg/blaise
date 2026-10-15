@@ -2127,16 +2127,19 @@ begin
         end;
       Expect(tkRBracket);
     end
-    else if Check(tkStringLit) or Check(tkIdent) then
+    else if Check(tkIdent) then
+    begin
+      { Any other identifier-led value -- an alias (B = A), arithmetic
+        (A + 1), a string concat (S + 'x'), an enum member (eB), Ord(eC):
+        an expression the semantic pass folds BY TYPE (FoldScalarConst).
+        Sending it to the string-concat path typed B = A as a string. }
+      CD.IsString := False;
+      CD.IntValueExpr := Self.ParseExpr();
+    end
+    else if Check(tkStringLit) then
     begin
       CD.IsString := True;
-      if Check(tkIdent) then
-      begin
-        CD.ConstParts := TStringList.Create();
-        CD.ConstParts.AddObject(FCurrent.Value, TObject(1));
-      end
-      else
-        CD.StrVal := FCurrent.Value;
+      CD.StrVal := FCurrent.Value;
       Advance();
       while Check(tkPlus) do
       begin
