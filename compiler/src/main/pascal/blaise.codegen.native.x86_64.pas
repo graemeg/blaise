@@ -1022,6 +1022,7 @@ type
     { Evaluate a float expression (tyDouble or tySingle); result left in %xmm0.
       Binary ops: left → push onto int stack via subq/movsd, right → %xmm0,
       pop left → %xmm1, then addsd/subsd/mulsd/divsd. }
+    procedure EmitFloatConstToXmm0(const AText: string; ASingle: Boolean);
     procedure EmitExprToXmm0(AExpr: TASTExpr);
     function EmitFloatBuiltin(FC: TFuncCallExpr): Boolean;
     { Load a float (Double or Single) from AOperand into %xmm0. }
@@ -8064,6 +8065,31 @@ end;
   right operand into %xmm0, then pop the left into %xmm1 and combine.
   This mirrors the integer strategy (push %rax) without requiring movaps/movups
   shuffles. }
+procedure TX86_64Backend.EmitFloatConstToXmm0(const AText: string;
+  ASingle: Boolean);
+begin
+  { a folded float constant's source text, emitted to .rodata at its
+    declared width and loaded exactly as a TFloatLiteral is }
+  if ASingle then
+  begin
+    Self.Emit(Format(#9'movss .LF%s(%%rip), %%xmm0', [IntToStr(FLabelCount)]));
+    Self.Emit('.section .rodata');
+    Self.Emit('.balign 4');
+    Self.Emit(Format('.LF%s:', [IntToStr(FLabelCount)]));
+    Self.Emit(Format(#9'.float %s', [AText]));
+  end
+  else
+  begin
+    Self.Emit(Format(#9'movsd .LF%s(%%rip), %%xmm0', [IntToStr(FLabelCount)]));
+    Self.Emit('.section .rodata');
+    Self.Emit('.balign 8');
+    Self.Emit(Format('.LF%s:', [IntToStr(FLabelCount)]));
+    Self.Emit(Format(#9'.double %s', [AText]));
+  end;
+  Self.Emit('.text');
+  Inc(FLabelCount);
+end;
+
 procedure TX86_64Backend.EmitExprToXmm0(AExpr: TASTExpr);
 var
   FloatElem: TTypeDesc;
@@ -8158,26 +8184,8 @@ begin
       a TFloatLiteral does. }
     if TIdentExpr(AExpr).IsConstant and IsFloatFamily(AExpr.ResolvedType) then
     begin
-      IsS := (AExpr.ResolvedType <> nil) and
-             (AExpr.ResolvedType.Kind = tySingle);
-      if IsS then
-      begin
-        Self.Emit(Format(#9'movss .LF%s(%%rip), %%xmm0', [IntToStr(FLabelCount)]));
-        Self.Emit('.section .rodata');
-        Self.Emit('.balign 4');
-        Self.Emit(Format('.LF%s:', [IntToStr(FLabelCount)]));
-        Self.Emit(Format(#9'.float %s', [TIdentExpr(AExpr).ConstString]));
-      end
-      else
-      begin
-        Self.Emit(Format(#9'movsd .LF%s(%%rip), %%xmm0', [IntToStr(FLabelCount)]));
-        Self.Emit('.section .rodata');
-        Self.Emit('.balign 8');
-        Self.Emit(Format('.LF%s:', [IntToStr(FLabelCount)]));
-        Self.Emit(Format(#9'.double %s', [TIdentExpr(AExpr).ConstString]));
-      end;
-      Self.Emit('.text');
-      Inc(FLabelCount);
+      Self.EmitFloatConstToXmm0(TIdentExpr(AExpr).ConstString,
+        AExpr.ResolvedType.Kind = tySingle);
       Exit;
     end;
     Ty := AExpr.ResolvedType;
@@ -8211,6 +8219,19 @@ begin
     Exit;
   end;
 
+  if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsConstant then
+  begin
+    { a float member const: an element of a member const ARRAY (TFoo.K[I])
+      loads into %xmm0 through the integer arm; a scalar (TFoo.Ratio) has
+      no storage and inlines its folded text, like a named constant.  The
+      field arm below dereferenced the absent FieldInfo. }
+    if TFieldAccessExpr(AExpr).ConstArraySymbol <> '' then
+      Self.EmitExprToEax(AExpr)
+    else
+      Self.EmitFloatConstToXmm0(TFieldAccessExpr(AExpr).ConstString,
+        AExpr.ResolvedType.Kind = tySingle);
+    Exit;
+  end;
   if (AExpr is TFieldAccessExpr) and
      (TFieldAccessExpr(AExpr).PropRead <> nil) and
      (TFieldAccessExpr(AExpr).PropRead.ReadMethod <> '') then

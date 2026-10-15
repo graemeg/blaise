@@ -288,6 +288,7 @@ type
     function  InstantiateGenericMethod(const AOwnerType, AInstName: string): TMethodDecl;
 
     procedure AnalyseBlock(ABlock: TBlock; AIsProgramTop: Boolean = False);
+    function FoldScalarConst(CD: TConstDecl): TTypeDesc;
     procedure AnalyseConstDecls(ABlock: TBlock);
     { Resolve a set-valued const decl (IsSet): fold the member bitmask into
       CD.IntVal and register the const symbol with its tySet type. }
@@ -6880,6 +6881,81 @@ begin
     Sym.Free();   { duplicate — cross-unit shadowing tolerated, like scalar consts }
 end;
 
+function TSemanticAnalyser.FoldScalarConst(CD: TConstDecl): TTypeDesc;
+var
+  J:        Integer;
+  RefSym:   TSymbol;
+  Resolved: string;
+begin
+  { Fold a scalar constant's value into CD (string parts, bit-op and
+    arithmetic expressions, float expressions) and return its type: the
+    written type of a typed constant, else String / Double / an integer type
+    wide enough for the value.  Shared by unit-level and member consts, so
+    a member const is typed and valued exactly like a unit-level one.  A
+    set constant is resolved later (AnalyseArrayConstDecls): nil. }
+  Result := nil;
+  if CD.IsString and (CD.ConstParts <> nil) then
+  begin
+    Resolved := '';
+    for J := 0 to CD.ConstParts.Count - 1 do
+    begin
+      if CD.ConstParts.Objects[J] <> nil then
+      begin
+        RefSym := FTable.Lookup(CD.ConstParts[J]);
+        if (RefSym <> nil) and (RefSym.Kind = skConstant) then
+          Resolved := Resolved + RefSym.ConstString
+        else
+          SemanticError(Format('Undeclared constant ''%s''', [CD.ConstParts[J]]),
+                        CD.Line, CD.Col);
+      end
+      else
+        Resolved := Resolved + CD.ConstParts[J];
+    end;
+    CD.StrVal := Resolved;
+  end;
+  { Deferred bit-op expression: fold now using the already-defined
+    named-constant values in scope. }
+  if CD.IntExprTokens <> nil then
+    CD.IntVal := FoldConstBitOpExpr(CD.IntExprTokens, CD.Line, CD.Col);
+  if (CD.IntValueExpr <> nil) and IsFloatConstExpr(CD.IntValueExpr) then
+  begin
+    CD.StrVal  := EvalConstFloatExpr(CD.IntValueExpr, CD.Line, CD.Col);
+    CD.IsFloat := True;
+    CD.IsString := False;
+  end
+  else if CD.IntValueExpr <> nil then
+    CD.IntVal := EvalConstIntExpr(CD.IntValueExpr, CD.Line, CD.Col);
+  if CD.IsSet then
+    Exit(nil);
+  if CD.TypeName <> '' then
+  begin
+    Result := FTable.FindType(CD.TypeName);
+    if Result = nil then
+      SemanticError(Format('Unknown type ''%s'' in typed constant ''%s''',
+        [CD.TypeName, CD.Name]), CD.Line, CD.Col);
+    if (not CD.IsFloat) and (not CD.IsString) and
+       (Result <> nil) and (Result.Kind in [tyDouble, tySingle]) then
+    begin
+      CD.StrVal  := IntToStr(CD.IntVal);
+      CD.IsFloat := True;
+    end;
+  end
+  else if CD.IsString then
+    Result := FTable.TypeString
+  else if CD.IsFloat then
+    Result := FTable.TypeDouble
+  { Untyped integer constant: pick the width by magnitude so a value that does
+    not fit in 32 bits is NOT silently truncated to Integer (issue #133).  A
+    UInt64-range bit pattern (above High(Int64)) types as UInt64; a value
+    outside the signed 32-bit range types as Int64; otherwise Integer. }
+  else if CD.IsUInt64 then
+    Result := FTable.TypeUInt64
+  else if (CD.IntVal > 2147483647) or (CD.IntVal < -2147483648) then
+    Result := FTable.TypeInt64
+  else
+    Result := FTable.TypeInteger;
+end;
+
 procedure TSemanticAnalyser.AnalyseConstDecls(ABlock: TBlock);
 var
   I, J:   Integer;
@@ -6888,7 +6964,6 @@ var
   RefSym: TSymbol;
   Prev:   TSymbol;
   TD:     TTypeDesc;
-  Resolved: string;
   IsSameBlockDup: Boolean;
 begin
   for I := 0 to ABlock.ConstDecls.Count - 1 do
@@ -6896,68 +6971,11 @@ begin
     CD := TConstDecl(ABlock.ConstDecls.Items[I]);
     if CD.IsArrayConst then Continue;  { handled by AnalyseArrayConstDecls }
 
-    if CD.IsString and (CD.ConstParts <> nil) then
-    begin
-      Resolved := '';
-      for J := 0 to CD.ConstParts.Count - 1 do
-      begin
-        if CD.ConstParts.Objects[J] <> nil then
-        begin
-          RefSym := FTable.Lookup(CD.ConstParts[J]);
-          if (RefSym <> nil) and (RefSym.Kind = skConstant) then
-            Resolved := Resolved + RefSym.ConstString
-          else
-            SemanticError(Format('Undeclared constant ''%s''', [CD.ConstParts[J]]),
-                          CD.Line, CD.Col);
-        end
-        else
-          Resolved := Resolved + CD.ConstParts[J];
-      end;
-      CD.StrVal := Resolved;
-    end;
-    { Deferred bit-op expression: fold now using the already-defined
-      named-constant values in scope. }
-    if CD.IntExprTokens <> nil then
-      CD.IntVal := FoldConstBitOpExpr(CD.IntExprTokens, CD.Line, CD.Col);
-    if (CD.IntValueExpr <> nil) and IsFloatConstExpr(CD.IntValueExpr) then
-    begin
-      CD.StrVal  := EvalConstFloatExpr(CD.IntValueExpr, CD.Line, CD.Col);
-      CD.IsFloat := True;
-      CD.IsString := False;
-    end
-    else if CD.IntValueExpr <> nil then
-      CD.IntVal := EvalConstIntExpr(CD.IntValueExpr, CD.Line, CD.Col);
+    TD := Self.FoldScalarConst(CD);
     { Set-valued constants reference enum members, which are not registered
       until AnalyseTypeDecls runs — so they are resolved in the second pass
       (AnalyseArrayConstDecls), like array consts. }
     if CD.IsSet then Continue;
-    if CD.TypeName <> '' then
-    begin
-      TD := FTable.FindType(CD.TypeName);
-      if TD = nil then
-        SemanticError(Format('Unknown type ''%s'' in typed constant ''%s''',
-          [CD.TypeName, CD.Name]), CD.Line, CD.Col);
-      if (not CD.IsFloat) and (not CD.IsString) and
-         (TD <> nil) and (TD.Kind in [tyDouble, tySingle]) then
-      begin
-        CD.StrVal  := IntToStr(CD.IntVal);
-        CD.IsFloat := True;
-      end;
-    end
-    else if CD.IsString then
-      TD := FTable.TypeString
-    else if CD.IsFloat then
-      TD := FTable.TypeDouble
-    { Untyped integer constant: pick the width by magnitude so a value that does
-      not fit in 32 bits is NOT silently truncated to Integer (issue #133).  A
-      UInt64-range bit pattern (above High(Int64)) types as UInt64; a value
-      outside the signed 32-bit range types as Int64; otherwise Integer. }
-    else if CD.IsUInt64 then
-      TD := FTable.TypeUInt64
-    else if (CD.IntVal > 2147483647) or (CD.IntVal < -2147483648) then
-      TD := FTable.TypeInt64
-    else
-      TD := FTable.TypeInteger;
     Sym              := TSymbol.Create(CD.Name, skConstant, TD);
     Sym.ConstValue   := CD.IntVal;
     Sym.ConstString  := CD.StrVal;
@@ -8597,10 +8615,11 @@ begin
         end
         else
         begin
-          if CD.IsString then
-            ParType := FTable.TypeString
-          else
-            ParType := FTable.TypeInteger;
+          { typed and folded exactly as a unit-level const: a float,
+            Boolean or folded member const was typed Integer with value 0 }
+          ParType := Self.FoldScalarConst(CD);
+          if ParType = nil then
+            ParType := FTable.TypeInteger;   { a set member const }
           { Qualified name only — TFoo.MaxItems.  The unqualified form is
             resolved through the owning type's scope (see AnalyseIdent), not
             by defining the bare member name globally. }

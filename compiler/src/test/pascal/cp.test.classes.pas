@@ -131,6 +131,11 @@ type
     procedure TestSemantic_ConstructorPrefix_CreateFmt;
     procedure TestSemantic_PointerTypeAlias;
     procedure TestSemantic_MetaclassAlias;
+    { A scalar member const is typed and folded exactly like a unit-level
+      one: float, Single, Boolean, folded expression, Int64 by magnitude.
+      Every kind but integer and string used to type as Integer with the
+      value 0 (a float read 0.0, KSum read 0). }
+    procedure TestSemantic_ClassConst_TypedLikeGlobalConst;
   end;
 
 implementation
@@ -1434,6 +1439,57 @@ begin
         begin
         end.
         ''');
+end;
+
+procedure TClassTests.TestSemantic_ClassConst_TypedLikeGlobalConst;
+const
+  Src = '''
+    program P;
+    type
+      TC = class
+        const KF = 2.5;
+        const KS: Single = 1.25;
+        const KSum = 2 + 3 * 4;
+        const KB: Boolean = True;
+        const KBig = 40000000000;
+        const KStr = 'ab' + 'cd';
+      end;
+    var D: Double; S: Single; I: Integer; B: Boolean; L: Int64; T: string;
+    begin
+      D := TC.KF;
+      S := TC.KS;
+      I := TC.KSum;
+      B := TC.KB;
+      L := TC.KBig;
+      T := TC.KStr;
+    end.
+    ''';
+var
+  Prog: TProgram;
+  A: TSemanticAnalyser;
+
+  function RhsOf(AIdx: Integer): TFieldAccessExpr;
+  begin
+    Result := TFieldAccessExpr(TAssignment(Prog.Block.Stmts.Items[AIdx]).Expr);
+  end;
+
+begin
+  Prog := ParseSrc(Src);
+  A := TSemanticAnalyser.Create();
+  try
+    A.Analyse(Prog);
+    AssertEquals('KF type', 'Double', RhsOf(0).ResolvedType.Name);
+    AssertEquals('KF text', '2.5', RhsOf(0).ConstString);
+    AssertEquals('KS type', 'Single', RhsOf(1).ResolvedType.Name);
+    AssertEquals('KSum type', 'Integer', RhsOf(2).ResolvedType.Name);
+    AssertEquals('KSum value', 14, Integer(RhsOf(2).ConstValue));
+    AssertEquals('KB type', 'Boolean', RhsOf(3).ResolvedType.Name);
+    AssertEquals('KBig type', 'Int64', RhsOf(4).ResolvedType.Name);
+    AssertEquals('KStr text', 'abcd', RhsOf(5).ConstString);
+  finally
+    A.Free();
+    Prog.Free();
+  end;
 end;
 
 initialization

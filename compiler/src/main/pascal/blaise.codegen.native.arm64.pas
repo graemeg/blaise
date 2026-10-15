@@ -401,6 +401,7 @@ type
     procedure EmitPopTo(const AReg: string);
     procedure EmitIntLiteral(const AReg: string; AValue: Int64);
     { Float expression lowering (result in d0). }
+    procedure EmitFloatConstToD0(const ALit: string; ASingle: Boolean);
     procedure EmitExprToD0(AExpr: TASTExpr);
     { Float-context operand: floats via EmitExprToD0, integers via
       EmitExprToX0 + scvtf widening. }
@@ -6686,9 +6687,8 @@ begin
       Self.Emit(Format(#9'add x9, x9, %s@PAGEOFF',
         [CodegenMangle(FA.ConstArraySymbol)]));
       Self.Emit(#9'add x0, x9, x0');
-      if TStaticArrayTypeDesc(FA.ConstArrayType).ElementType.IsFloat() then
-        NotYet('float element of a member const array in integer context',
-          AExpr);
+      { a float element loads as its bit pattern, the integer-context
+        contract for floats (EmitExprToD0's field arm moves it to d0) }
       EmitElemLoad(TStaticArrayTypeDesc(FA.ConstArrayType).ElementType);
       Exit;
     end;
@@ -7097,6 +7097,27 @@ begin
     or (AExpr is TFloatLiteral);
 end;
 
+procedure TArm64Backend.EmitFloatConstToD0(const ALit: string;
+  ASingle: Boolean);
+var
+  Idx: Integer;
+begin
+  { a folded float constant's source text, as a .rodata double addressed
+    via an adrp/PAGEOFF pair -- the same pool as a TFloatLiteral }
+  Idx := FFloatLits.IndexOf(ALit);
+  if Idx < 0 then
+    Idx := FFloatLits.Add(ALit);
+  Self.Emit(Format(#9'adrp x9, __d%d@PAGE', [Idx]));
+  Self.Emit(Format(#9'ldr d0, [x9, __d%d@PAGEOFF]', [Idx]));
+  if ASingle then
+  begin
+    { the pool slot holds a double image of the literal; round to the
+      declared Single precision so the value matches a Single load }
+    Self.Emit(#9'fcvt s0, d0');
+    Self.Emit(#9'fcvt d0, s0');
+  end;
+end;
+
 procedure TArm64Backend.EmitExprToD0(AExpr: TASTExpr);
 var
   BE: TBinaryExpr;
@@ -7125,19 +7146,18 @@ begin
       text — so loading from a symbol named after it would reference an
       undefined label.  Same .rodata pool as a TFloatLiteral (mirrors the
       x86-64 arm of this rule). }
-    Lit := TIdentExpr(AExpr).ConstString;
-    Idx := FFloatLits.IndexOf(Lit);
-    if Idx < 0 then
-      Idx := FFloatLits.Add(Lit);
-    Self.Emit(Format(#9'adrp x9, __d%d@PAGE', [Idx]));
-    Self.Emit(Format(#9'ldr d0, [x9, __d%d@PAGEOFF]', [Idx]));
-    if AExpr.ResolvedType.Kind = tySingle then
-    begin
-      { the pool slot holds a double image of the literal; round to the
-        declared Single precision so the value matches a Single load }
-      Self.Emit(#9'fcvt s0, d0');
-      Self.Emit(#9'fcvt d0, s0');
-    end;
+    EmitFloatConstToD0(TIdentExpr(AExpr).ConstString,
+      AExpr.ResolvedType.Kind = tySingle);
+    Exit;
+  end;
+  if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsConstant and
+     (TFieldAccessExpr(AExpr).ConstArraySymbol = '') and
+     (AExpr.ResolvedType <> nil) and AExpr.ResolvedType.IsFloat() then
+  begin
+    { a float member const (TFoo.Ratio, Obj.Ratio): no storage either --
+      inline its folded text like the named-constant arm above }
+    EmitFloatConstToD0(TFieldAccessExpr(AExpr).ConstString,
+      AExpr.ResolvedType.Kind = tySingle);
     Exit;
   end;
   if (AExpr is TIdentExpr) and TIdentExpr(AExpr).IsImplicitSelf and
@@ -7252,7 +7272,8 @@ begin
       and must be widened to honour the D0 contract (B.S(2) read the stale
       d0 instead: 0.0) }
     if TMethodCallExpr(AExpr).IsConstructorCall then
-      NotYet('constructor in float context', AExpr);
+      InternalError('constructor call in a float context (a constructor ' +
+        'yields a class)', AExpr);
     EmitMethodCallExpr(TMethodCallExpr(AExpr));
     if (AExpr.ResolvedType <> nil) and
        (AExpr.ResolvedType.Kind = tySingle) then
@@ -7427,6 +7448,17 @@ begin
       Self.Emit(#9'fcvt d0, s0');
     Exit;
   end;
+  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsProcFieldCall then
+  begin
+    { Handler(X) inside a method, Handler a float-returning procedural
+      FIELD of Self: the integer twin (EmitProcFieldCall) ends at the call,
+      the result in d0 / s0 }
+    Self.EmitExprToX0(AExpr);
+    if (AExpr.ResolvedType <> nil) and
+       (AExpr.ResolvedType.Kind = tySingle) then
+      Self.Emit(#9'fcvt d0, s0');
+    Exit;
+  end;
   if (AExpr is TFuncCallExpr) and
      TFuncCallExpr(AExpr).IsImplicitSelfMethod and
      (TFuncCallExpr(AExpr).ResolvedDecl <> nil) then
@@ -7446,9 +7478,12 @@ begin
   end;
   if AExpr is TFuncCallExpr then
   begin
+    { every float builtin, type cast, indirect, procedural-field and
+      implicit-Self call has its own arm above }
     if TFuncCallExpr(AExpr).IsImplicitSelfMethod or
        (TFuncCallExpr(AExpr).ResolvedDecl = nil) then
-      NotYet('this call form in float context', AExpr);
+      InternalError('float call ' + TFuncCallExpr(AExpr).Name +
+        ' has no float lowering', AExpr);
     EmitCall(TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl),
       TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args);
     if (AExpr.ResolvedType <> nil) and
@@ -7483,7 +7518,9 @@ begin
       boMul:   Self.Emit(#9'fmul d0, d0, d1');
       boSlash: Self.Emit(#9'fdiv d0, d0, d1');
     else
-      NotYet('float binary operator', AExpr);
+      { the semantic pass types only + - * / as a float }
+      InternalError('float-typed binary operator ' + IntToStr(Ord(BE.Op)),
+        AExpr);
     end;
     Exit;
   end;
@@ -7501,7 +7538,15 @@ begin
       Self.Emit(#9'ldr d0, [x0]');
     Exit;
   end;
-  NotYet('float expression ' + AExpr.ClassName, AExpr);
+  { an integer-typed operand reached the float emitter directly: convert
+    it, as the x86-64 twin does (its consumer normally converts first) }
+  if not IsFloatExpr(AExpr) then
+  begin
+    Self.EmitExprToD0OrConvert(AExpr);
+    Exit;
+  end;
+  InternalError('float expression ' + AExpr.ClassName +
+    ' has no float lowering', AExpr);
 end;
 
 procedure TArm64Backend.EmitExprToD0OrConvert(AExpr: TASTExpr);

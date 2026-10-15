@@ -135,6 +135,14 @@ type
     procedure TestRun_ClassConst_IntViaType;
     procedure TestRun_ClassConst_StringViaType;
     procedure TestRun_ClassConst_ViaInstanceAndType;
+    { Every scalar member-const kind reads its value -- through the type,
+      an instance and bare inside a method -- with float elements of a
+      member const array.  Floats, Booleans and folded expressions read 0. }
+    procedure TestRun_ClassConst_EveryScalarKind;
+    { A float-returning call through a procedural FIELD of Self, bare
+      inside a method (FFn(X) + 1), plain and method-pointer, Double and
+      Single: arm64 refused it in a float context. }
+    procedure TestRun_ProcField_FloatResult_ImplicitSelf;
 
     { Interface properties: read/write through the interface variable. }
     procedure TestRun_InterfaceProperty_ReadWrite;
@@ -1898,6 +1906,87 @@ procedure TE2EClasses2Tests.TestRun_ClassConst_ViaInstanceAndType;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcClassConstInstAndType, '10' + LE + '10' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_ClassConst_EveryScalarKind;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TC = class
+        const KF = 2.5;
+        const KNeg = -0.75;
+        const KQ = 1.0 / 4;
+        const KS: Single = 1.25;
+        const KD: Double = 3.5;
+        const KSum = 2 + 3 * 4;
+        const KB: Boolean = True;
+        const KBig = 40000000000;
+        const KA: array[0..2] of Double = (0.5, 1.5, 2.5);
+        const KSA: array[0..1] of Single = (4.25, 8.5);
+        function Total(): Double;
+      end;
+    function TC.Total(): Double;
+    begin
+      Result := KF + KD + KA[2] + KS;
+    end;
+    var C: TC; D: Double; S: Single; I: Integer;
+    begin
+      C := TC.Create();
+      D := TC.KF;
+      S := TC.KS;
+      WriteLn(D:0:2, ' ', S:0:2, ' ', TC.KD:0:2, ' ', C.KF:0:2);
+      WriteLn(TC.KNeg:0:2, ' ', TC.KQ:0:2, ' ', TC.KF * 2 + C.KD:0:2);
+      WriteLn(TC.KSum, ' ', TC.KB, ' ', TC.KBig);
+      WriteLn(TC.KA[1]:0:2, ' ', C.KA[2]:0:2, ' ', TC.KSA[0]:0:2);
+      I := 1;
+      D := TC.KA[I] + TC.KSA[I];
+      WriteLn(D:0:2, ' ', C.Total():0:2);
+    end.
+    ''',
+    '2.50 1.25 3.50 2.50' + LE + '-0.75 0.25 8.50' + LE +
+    '14 True 40000000000' + LE + '1.50 2.50 4.25' + LE +
+    '10.00 9.75' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_ProcField_FloatResult_ImplicitSelf;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TFn = function(A: Double): Double;
+      TSFn = function(A: Single): Single;
+      TObjFn = function(A: Double): Double of object;
+      TC = class
+        FFn: TFn;
+        FSFn: TSFn;
+        FM: TObjFn;
+        FBase: Double;
+        function Twice(A: Double): Double;
+        function Use(): Double;
+      end;
+    function Sq(A: Double): Double; begin Result := A * A; end;
+    function Half(A: Single): Single; begin Result := A / 2; end;
+    function TC.Twice(A: Double): Double; begin Result := A * 2 + FBase; end;
+    function TC.Use(): Double;
+    begin
+      Result := FFn(3.0) + 1;
+      Result := Result + FM(1.5) + FSFn(5.0);
+    end;
+    var C: TC;
+    begin
+      C := TC.Create();
+      C.FFn := @Sq;
+      C.FSFn := @Half;
+      C.FBase := 0.25;
+      C.FM := @C.Twice;
+      WriteLn(C.Use():0:2);
+    end.
+    ''', '15.75' + LE, 0);
 end;
 
 const
