@@ -32,6 +32,10 @@ type
       floats, stack overflow, captures (incl. six or more), var arguments,
       interfaces, a record receiver, virtual dispatch }
     procedure TestRun_SretCall_OpenArrayAndOverflowArgs;
+    { A register-returned record from a bare method call on Self, passed as
+      an argument (Sum(Mk(3)) inside a method): x86-64 called Mk with an
+      sret buffer it never filled, so the callee read zeros. }
+    procedure TestRun_ImplicitSelfRecordCall_AsArgument;
     procedure TestRun_SretNested_CapturesWithFloatsAndOverflow;
     procedure TestRun_SretNested_SixCaptures_ResultPointerOnStack;
     procedure TestRun_SretMethod_OverflowVirtualIntfAndRecordReceiver;
@@ -2210,6 +2214,49 @@ begin
     '1 2 250 99' + LE +
     '1.25 -2.5 -7 3.75' + LE +
     '-3 4 100000' + LE, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_ImplicitSelfRecordCall_AsArgument;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TPt = record X, Y: Integer; end;
+      TBig = record A, B, C: Int64; end;
+      TC = class
+        function Mk(N: Integer): TPt;
+        function MkV(N: Integer): TPt; virtual;
+        function MkB(N: Integer): TBig;
+        function Sum(const P: TPt): Integer;
+        function SumV(P: TPt): Integer;
+        function SumB(const P: TBig): Int64;
+        procedure Run();
+      end;
+      TD = class(TC)
+        function MkV(N: Integer): TPt; override;
+      end;
+    function TC.Mk(N: Integer): TPt; begin Result.X := N; Result.Y := N * 2; end;
+    function TC.MkV(N: Integer): TPt; begin Result.X := N; Result.Y := 0; end;
+    function TC.MkB(N: Integer): TBig; begin Result.A := N; Result.B := N; Result.C := N; end;
+    function TC.Sum(const P: TPt): Integer; begin Result := P.X + P.Y; end;
+    function TC.SumV(P: TPt): Integer; begin Result := P.X + P.Y; end;
+    function TC.SumB(const P: TBig): Int64; begin Result := P.A + P.B + P.C; end;
+    function TD.MkV(N: Integer): TPt; begin Result.X := N; Result.Y := 100; end;
+    procedure TC.Run();
+    begin
+      WriteLn(Sum(Mk(3)), ' ', SumV(Mk(3)), ' ', SumB(MkB(3)), ' ',
+        Self.Sum(Mk(3)), ' ', Sum(MkV(1)));
+    end;
+    var O: TC;
+    begin
+      O := TC.Create();
+      O.Run();
+      O := TD.Create();
+      O.Run();
+    end.
+    ''', '9 9 9 9 1' + LE + '9 9 9 9 101' + LE, 0);
 end;
 
 procedure TE2ERecordReturnTests.TestRun_SretCall_OpenArrayAndOverflowArgs;

@@ -10311,27 +10311,11 @@ begin
       Self.Emit(Format(#9'subq $%d, %%rsp',
         [(SretRetSize(MD.ResolvedReturnType) + 15) and (-16)]));
       if FC.IsImplicitSelfMethod then
-      begin
-        Self.Emit(#9'leaq (%rsp), %r10');
-        Self.Emit(#9'movq %r10, %rdi');
-        Self.Emit(#9'xorl %esi, %esi');
-        Self.Emit(Format(#9'movq $%d, %%rdx',
-          [SretRetSize(MD.ResolvedReturnType)]));
-        Self.Emit(#9'callq memset');
-        Self.Emit(#9'leaq (%rsp), %r10');
-        Self.BeginCallArgs(MD.Params, FC.Args);
-        for I := 0 to FC.Args.Count - 1 do
-          Self.PushCallArg(TMethodParam(MD.Params.Items[I]),
-            TASTExpr(FC.Args.Items[I]), I);
-        Self.Emit(Format(#9'movq %s, %%r11', [Self.VarOperand('Self')]));
-        Self.EmitPopMethodArgsToRegs(MD.Params, FC.Args, 2);
-        Self.Emit(#9'movq %r11, %rsi');
-        Self.Emit(#9'movq %r10, %rdi');
-        { Virtual record-sret implicit-Self call dispatches via the vtable
-          (Self in %rsi, sret buffer in %rdi). }
-        Self.EmitSelfDispatchVia(MD, FuncSymbolOf(FC), '%rsi');
-        Self.EndCallArgs();
-      end
+        { a bare method call on Self: EmitMethodSretCall classifies the
+          return -- a small record comes back in registers, NOT through an
+          sret buffer (passing one here left it unwritten: Sum(Mk(3)) read
+          zeros) -- and dispatches a virtual method through Self }
+        Self.EmitFuncCallSret(FC, '(%rsp)', False)
       else
         Self.EmitSretCall(FuncSymbolOf(FC), MD, FC.Args, '(%rsp)', False);
       Self.Emit(#9'leaq (%rsp), %rax');
