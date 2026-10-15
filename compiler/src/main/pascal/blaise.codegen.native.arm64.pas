@@ -3589,8 +3589,12 @@ begin
     (Obj[I] := V, a TStaticSubscriptAssign carrying PropWriteInfo) }
   if AProp.IsStatic then
     NotYet('static indexed property write', AStmt);
+  { a float value needs a d register: every route here with one -- class and
+    interface receivers -- is lowered to the setter call by the semantic
+    pass (BuildSetterCall / BuildIntfSetterCall) }
   if AProp.TypeDesc.IsFloat() then
-    NotYet('float indexed property write', AStmt);
+    InternalError('float indexed property write was not lowered to its ' +
+      'setter call', AStmt);
   { The index rides in one integer register — an int OR a string (a
     pointer) fits identically (leg 18).  A string KEY is passed BORROWED:
     the by-value setter param retains its own copy only if it stores the
@@ -3736,7 +3740,6 @@ procedure TArm64Backend.EmitFieldAssign(AStmt: TFieldAssignment);
 var
   RelStr: Boolean;
   CVStore: TAssignment;
-  IntfArgs: TObjectList;
 begin
   RelStr := False;
   if AStmt.IsClassVarWrite then
@@ -3879,21 +3882,6 @@ begin
   end;
   if AStmt.PropIndexExpr <> nil then
     NotYet('this field-assignment form', AStmt);
-  if AStmt.IntfWriteDesc <> nil then
-  begin
-    { I.Prop := V on an interface: FieldName was rewritten to the SETTER, so
-      dispatch it through the itab with V as its one argument }
-    IntfArgs := TObjectList.Create(False);
-    try
-      IntfArgs.Add(AStmt.Expr);
-      EmitIntfDispatch(AStmt.RecordName, TInterfaceTypeDesc(AStmt.IntfWriteDesc),
-        TInterfaceTypeDesc(AStmt.IntfWriteDesc).MethodIndex(AStmt.FieldName),
-        IntfArgs, AStmt.ObjExpr, AStmt.IsVarParam, nil);
-    finally
-      IntfArgs.Free();
-    end;
-    Exit;
-  end;
   if AStmt.FieldInfo = nil then
     NotYet('unresolved field assignment', AStmt);
   if AStmt.IsImplicitSelf then
@@ -4627,7 +4615,12 @@ begin
      not IsAggregateReturn(AExpr.ResolvedType) then
   begin
     { I.Prop on an interface (or a parameterless I.M without parens): the
-      getter dispatched through the itab }
+      getter dispatched through the itab.  An indexed read is lowered to the
+      getter call by the semantic pass (BuildIndexedGetterCall); here it
+      would drop the index. }
+    if TFieldAccessExpr(AExpr).PropIndexExpr <> nil then
+      InternalError('indexed interface property read was not lowered to ' +
+        'its getter call', AExpr);
     EmptyArgs := TObjectList.Create(False);
     try
       EmitIntfDispatch(TFieldAccessExpr(AExpr).RecordName,

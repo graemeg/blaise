@@ -11136,6 +11136,12 @@ begin
      TFieldAccessExpr(AExpr).IsInterfaceCall then
   begin
     FAE := TFieldAccessExpr(AExpr);
+    { an indexed read is lowered to the getter call by the semantic pass
+      (BuildIndexedGetterCall); here it would drop the index }
+    if FAE.PropIndexExpr <> nil then
+      raise ENativeCodeGenError.Create(
+        'native backend: internal error: indexed interface property read ' +
+        'was not lowered to its getter call');
     { a chained receiver (R.F.Value) is an expression; EmitInterfaceCall
       loads obj/itab from it as for H.G.Greet() }
     Self.EmitInterfaceCall(FAE.RecordName, FAE.IsGlobal, FAE.IsVarParam,
@@ -16452,7 +16458,6 @@ var
   SetLValAddr: TAddrOfExpr;
   SetWide:     Boolean;
   ISFld:   TFieldInfo;
-  IntfArgs: TObjectList;
   PCUserSlots, PCTotalSlots, PCOverflow, PCCleanUp, PCAllocSz, PCDest: Integer;
   PCHD, PCHK: TList<Integer>;
   PCHTotal: Integer;
@@ -18534,21 +18539,6 @@ begin
       finally
         CVStore.Expr := nil;
         CVStore.Free();
-      end;
-      Exit;
-    end;
-    { Interface property write: I.Prop := V — FieldName holds the SETTER
-      (rewritten by semantic); dispatch through the itab with V as the
-      single argument. }
-    if FA.IntfWriteDesc <> nil then
-    begin
-      IntfArgs := TObjectList.Create(False);
-      try
-        IntfArgs.Add(FA.Expr);
-        Self.EmitInterfaceCall(FA.RecordName, FA.IsGlobal, FA.IsVarParam,
-          TInterfaceTypeDesc(FA.IntfWriteDesc), FA.FieldName, IntfArgs);
-      finally
-        IntfArgs.Free();
       end;
       Exit;
     end;

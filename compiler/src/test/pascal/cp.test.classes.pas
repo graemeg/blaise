@@ -136,6 +136,9 @@ type
       Every kind but integer and string used to type as Integer with the
       value 0 (a float read 0.0, KSum read 0). }
     procedure TestSemantic_ClassConst_TypedLikeGlobalConst;
+    { `const` on a property's index parameter, as in Delphi and FPC
+      (Values[const Name: string]), was a parse error. }
+    procedure TestParse_Property_ConstIndexParam;
   end;
 
 implementation
@@ -1488,6 +1491,28 @@ begin
     AssertEquals('KStr text', 'abcd', RhsOf(5).ConstString);
   finally
     A.Free();
+    Prog.Free();
+  end;
+end;
+
+procedure TClassTests.TestParse_Property_ConstIndexParam;
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc('''
+    program P;
+    type
+      TC = class
+        function GetV(const K: string): string;
+        property Values[const K: string]: string read GetV;
+      end;
+    function TC.GetV(const K: string): string; begin Result := K; end;
+    begin
+    end.
+    ''');
+  try
+    AssertTrue('const index parameter accepted', Prog <> nil);
+  finally
     Prog.Free();
   end;
 end;

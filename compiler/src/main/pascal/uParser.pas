@@ -3454,10 +3454,15 @@ begin
         [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
     Result.Name := FCurrent.Value;
     Advance();
-    { Optional index parameter: 'property Name[ParamName: TypeName]: ...' }
+    { Optional index parameter: 'property Name[ParamName: TypeName]: ...',
+      the name optionally prefixed by `const` as in Delphi and FPC
+      (Values[const Name: string]).  The accessors' own signatures decide how
+      the index is passed, so the modifier needs no record here. }
     if Check(tkLBracket) then
     begin
       Advance();  { consume '[' }
+      if Check(tkConst) then
+        Advance();
       if not Check(tkIdent) then
         raise EParseError.Create(Format(
           'Expected index parameter name at line %d col %d in %s',

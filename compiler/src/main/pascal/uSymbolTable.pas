@@ -359,6 +359,7 @@ type
     procedure AddProperty(AInfo: TPropertyInfo);
     { Walks the parent chain — a child interface sees inherited properties. }
     function  FindProperty(const AName: string): TPropertyInfo;
+    function  FindDefaultProperty: TPropertyInfo;
     property  Parent: TInterfaceTypeDesc read FParent write FParent;
   end;
 
@@ -1465,6 +1466,23 @@ begin
   end;
   if FParent <> nil then
     Exit(FParent.FindProperty(AName));
+  Result := nil;
+end;
+
+function TInterfaceTypeDesc.FindDefaultProperty: TPropertyInfo;
+{ the property marked `default` (I[K] sugar), own then inherited; nil if
+  the interface has none }
+var
+  I: Integer;
+begin
+  for I := 0 to FProperties.Count - 1 do
+  begin
+    Result := TPropertyInfo(FProperties.Items[I]);
+    if Result.IsDefault then
+      Exit;
+  end;
+  if FParent <> nil then
+    Exit(FParent.FindDefaultProperty());
   Result := nil;
 end;
 

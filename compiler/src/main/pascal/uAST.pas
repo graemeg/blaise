@@ -497,11 +497,6 @@ type
     PropAccessorVSlot: Integer;  { set by uSemantic — setter vtable slot, -1 = static call }
     IsElemWrite: Boolean;   { set by uSemantic — FieldName is an array-typed field and
                               PropIndexExpr selects the element to store into }
-    [Unretained] IntfWriteDesc: TTypeDesc;  { set by uSemantic — non-nil = interface
-                              property write: RecordName is interface-typed and
-                              FieldName has been rewritten to the SETTER method;
-                              codegen dispatches it through the itab with Expr
-                              as the single argument }
     IsClassVarWrite: Boolean; { set by uSemantic — qualified STATIC (class-level)
                               variable write 'TFoo.StaticVar := V'.  The target is
                               the single shared global emitted under

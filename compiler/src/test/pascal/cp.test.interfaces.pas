@@ -96,6 +96,10 @@ type
     procedure TestSemantic_InterfaceProperty_UnknownAccessor_RaisesError;
     procedure TestSemantic_InterfaceProperty_WriteToReadOnly_RaisesError;
     procedure TestSemantic_InterfaceProperty_InheritedFromParent_OK;
+    { An interface property read and write lower to the accessor CALL, the
+      index as its first argument: the hand-written itab arms dispatched
+      the getter / setter with the index dropped. }
+    procedure TestSemantic_InterfaceIndexedProperty_LowersToAccessorCalls;
 
     { ------------------------------------------------------------------ }
     { Regression — interface idents as values; interface-returning        }
@@ -1072,6 +1076,49 @@ const
 begin
   AssertEquals('the global''s storage is defined', '',
     AsmMissing(Src, 'G_obj:', '_g_G:'));
+end;
+
+procedure TInterfaceTests.TestSemantic_InterfaceIndexedProperty_LowersToAccessorCalls;
+const
+  Src = '''
+    program P;
+    type
+      IV = interface
+        function GetV(I: Integer): Double;
+        procedure SetV(I: Integer; V: Double);
+        property Vals[I: Integer]: Double read GetV write SetV;
+      end;
+    var X: IV; D: Double;
+    begin
+      X.Vals[2] := 1.5;
+      D := X.Vals[3];
+    end.
+    ''';
+var
+  Prog: TProgram;
+  SA: TSemanticAnalyser;
+  FA: TFieldAssignment;
+  Rhs: TASTExpr;
+begin
+  Prog := ParseSrc(Src);
+  SA := TSemanticAnalyser.Create();
+  try
+    SA.Analyse(Prog);
+    FA := TFieldAssignment(Prog.Block.Stmts.Items[0]);
+    AssertTrue('write lowered to a setter call',
+      FA.SetterCall is TMethodCallStmt);
+    AssertEquals('setter', 'SetV', TMethodCallStmt(FA.SetterCall).Name);
+    AssertEquals('setter args (index, value)', 2,
+      TMethodCallStmt(FA.SetterCall).Args.Count);
+    Rhs := TAssignment(Prog.Block.Stmts.Items[1]).Expr;
+    AssertTrue('read lowered to a getter call', Rhs is TMethodCallExpr);
+    AssertEquals('getter', 'GetV', TMethodCallExpr(Rhs).Name);
+    AssertEquals('getter args (index)', 1, TMethodCallExpr(Rhs).Args.Count);
+    AssertEquals('read type', 'Double', Rhs.ResolvedType.Name);
+  finally
+    SA.Free();
+    Prog.Free();
+  end;
 end;
 
 initialization

@@ -591,6 +591,13 @@ type
     function  BuildSetterCall(ARecv: TASTExpr; AProp: TPropertyInfo;
       AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
     function  BuildIndexedGetterCall(AAccess: TFieldAccessExpr): TASTExpr;
+    procedure AnalyseIntfPropIndex(AProp: TPropertyInfo; AIndex: TASTExpr;
+      const AIntfName, APropName: string; ALine, ACol: Integer);
+    procedure LowerIntfPropWrite(AAssign: TFieldAssignment;
+      AIntf: TInterfaceTypeDesc; ARecvSym: TSymbol);
+    function  BuildIntfSetterCall(AObjExpr: TASTExpr; ARecvSym: TSymbol;
+      AIntf: TInterfaceTypeDesc; AProp: TPropertyInfo;
+      AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
     function  LowerStaticIndexedGet(AAccess: TFieldAccessExpr;
       ART: TRecordTypeDesc; AProp: TPropertyInfo;
       AGetter: TMethodDecl): TTypeDesc;
@@ -8013,6 +8020,12 @@ begin
         if PropDecl.WriteName <> '' then
           PropInfo.WriteMethod :=
             IntfDesc.MethodName(IntfDesc.MethodIndex(PropDecl.WriteName));
+        { the index, as for a class property: without it an indexed access
+          dispatched the accessor with the index dropped }
+        PropInfo.IndexParamName := PropDecl.IndexParamName;
+        if PropDecl.IndexTypeName <> '' then
+          PropInfo.IndexTypeDesc := FindTypeOrInstantiate(PropDecl.IndexTypeName);
+        PropInfo.IsDefault := PropDecl.IsDefault;
         IntfDesc.AddProperty(PropInfo);
       end;
       Continue;
@@ -9335,6 +9348,95 @@ begin
   Result := Call;
 end;
 
+{ The index of an interface property access (I.Items[K]): analysed against
+  the property's declared index type.  An index on a plain property, or none
+  on an indexed one, is an error -- the itab arms dispatched the accessor
+  with whatever arguments were written, the index silently dropped. }
+procedure TSemanticAnalyser.AnalyseIntfPropIndex(AProp: TPropertyInfo;
+  AIndex: TASTExpr; const AIntfName, APropName: string; ALine, ACol: Integer);
+var
+  IdxType: TTypeDesc;
+begin
+  if AProp.IndexParamName = '' then
+  begin
+    if AIndex <> nil then
+      SemanticError(Format('Interface property ''%s.%s'' is not indexed',
+        [AIntfName, APropName]), ALine, ACol);
+    Exit;
+  end;
+  if AIndex = nil then
+    SemanticError(Format('Interface property ''%s.%s'' requires an index',
+      [AIntfName, APropName]), ALine, ACol);
+  IdxType := Self.AnalyseExprSlot(AIndex);
+  if AProp.IndexTypeDesc <> nil then
+    CheckTypesMatch(AProp.IndexTypeDesc, IdxType, 'property index',
+      ALine, ACol);
+end;
+
+{ I.Prop := V / I.Items[K] := V through an interface: the setter CALL,
+  dispatched through the itab like an explicit I.SetProp(K, V), so the index
+  and a value of any ABI class are marshalled as for a call.  The receiver is
+  the assignment's ObjExpr (a chained R.F.Prop), else the named variable
+  ARecvSym. }
+procedure TSemanticAnalyser.LowerIntfPropWrite(AAssign: TFieldAssignment;
+  AIntf: TInterfaceTypeDesc; ARecvSym: TSymbol);
+var
+  PropInfo: TPropertyInfo;
+  ExprType: TTypeDesc;
+begin
+  PropInfo := AIntf.FindProperty(AAssign.FieldName);
+  if PropInfo = nil then
+    SemanticError(
+      Format('Interface ''%s'' has no property ''%s''',
+        [AIntf.Name, AAssign.FieldName]),
+      AAssign.Line, AAssign.Col);
+  if PropInfo.WriteMethod = '' then
+    SemanticError(
+      Format('Interface property ''%s.%s'' is read-only',
+        [AIntf.Name, AAssign.FieldName]),
+      AAssign.Line, AAssign.Col);
+  Self.AnalyseIntfPropIndex(PropInfo, AAssign.PropIndexExpr, AIntf.Name,
+    AAssign.FieldName, AAssign.Line, AAssign.Col);
+  if TryResolveBareEnumIdent(AAssign.Expr, PropInfo.TypeDesc) then
+    ExprType := AAssign.Expr.ResolvedType
+  else
+    ExprType := Self.AnalyseExprSlot(AAssign.Expr);
+  CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
+    AAssign.Line, AAssign.Col);
+  AAssign.FieldName := PropInfo.WriteMethod;
+  AAssign.SetterCall := Self.BuildIntfSetterCall(AAssign.ObjExpr, ARecvSym,
+    AIntf, PropInfo, AAssign.PropIndexExpr, AAssign.Expr, AAssign);
+end;
+
+{ The setter call for an interface property write: the receiver is AObjExpr
+  (an expression) or else the named variable ARecvSym.  AIndex and AValue
+  are already analysed and are shared with the assignment node. }
+function TSemanticAnalyser.BuildIntfSetterCall(AObjExpr: TASTExpr;
+  ARecvSym: TSymbol; AIntf: TInterfaceTypeDesc; AProp: TPropertyInfo;
+  AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
+var
+  Call: TMethodCallStmt;
+begin
+  Call := TMethodCallStmt.Create();
+  Call.Line := ANode.Line;
+  Call.Col  := ANode.Col;
+  Call.Name := AProp.WriteMethod;
+  if AObjExpr <> nil then
+    Call.ObjExpr := AObjExpr
+  else
+  begin
+    Call.ObjectName := ARecvSym.Name;
+    Call.IsGlobal   := ARecvSym.IsGlobal;
+    Call.IsVarParam := ARecvSym.Kind = skVarParameter;
+  end;
+  if AIndex <> nil then
+    Call.Args.Add(AIndex);
+  Call.Args.Add(AValue);
+  Call.ResolvedClassType := AIntf;
+  Call.ResolvedMethod    := nil;   { nil = interface dispatch }
+  Result := Call;
+end;
+
 { Recv.GetX(Index) for an INTERFACE-typed indexed property read whose
   receiver is a class instance: the ordinary method-call expression, so the
   (obj, itab) result pair and an owned transient receiver are handled exactly
@@ -9351,6 +9453,38 @@ var
   Call: TMethodCallExpr;
 begin
   Result := nil;
+  if AAccess.IsInterfaceCall and
+     (AAccess.ResolvedClassType is TInterfaceTypeDesc) then
+  begin
+    { a property read (or bare parameterless method) through an INTERFACE:
+      the accessor call dispatched through the itab, the index as its
+      argument -- the itab arms of the backends dropped the index, had no
+      float arm (x86-64) and no record arm (both). }
+    Call := TMethodCallExpr.Create();
+    Call.Line := AAccess.Line;
+    Call.Col  := AAccess.Col;
+    Call.Name := AAccess.FieldName;
+    if AAccess.Base <> nil then
+    begin
+      Call.ObjExpr := AAccess.Base;
+      AAccess.Base := nil;
+    end
+    else
+    begin
+      Call.ObjectName := AAccess.RecordName;
+      Call.IsGlobal   := AAccess.IsGlobal;
+      Call.IsVarParam := AAccess.IsVarParam;
+    end;
+    if AAccess.PropIndexExpr <> nil then
+    begin
+      Call.Args.Add(AAccess.PropIndexExpr);
+      AAccess.PropIndexExpr := nil;
+    end;
+    Call.ResolvedClassType := AAccess.ResolvedClassType;
+    Call.ResolvedMethod    := nil;   { nil = interface dispatch }
+    Call.ResolvedType      := AAccess.ResolvedType;
+    Exit(Call);
+  end;
   if (AAccess.PropRead = nil) or AAccess.PropRead.IsStatic or
      (AAccess.PropRead.IndexParamName = '') or
      (AAccess.PropIndexExpr = nil) or (AAccess.PropReadDecl = nil) then
@@ -9421,7 +9555,9 @@ begin
   if (ASlot is TStringSubscriptExpr) and
      (TStringSubscriptExpr(ASlot).IndexExpr = nil) and
      (((TStringSubscriptExpr(ASlot).StrExpr is TFieldAccessExpr) and
-       (TFieldAccessExpr(TStringSubscriptExpr(ASlot).StrExpr).PropRead <> nil)) or
+       ((TFieldAccessExpr(TStringSubscriptExpr(ASlot).StrExpr).PropRead <> nil) or
+        { a default INTERFACE property: an itab accessor read }
+        TFieldAccessExpr(TStringSubscriptExpr(ASlot).StrExpr).IsInterfaceCall)) or
       { the read already lowered to its getter call (BuildIndexedGetterCall) }
       (TStringSubscriptExpr(ASlot).StrExpr is TMethodCallExpr)) then
   begin
@@ -12404,6 +12540,12 @@ begin
   if AAssign.ObjExpr <> nil then
   begin
     ObjType := Self.AnalyseExprSlot(AAssign.ObjExpr);
+    if ObjType.Kind = tyInterface then
+    begin
+      { R.F.Prop := V with F an interface: the setter call through F }
+      Self.LowerIntfPropWrite(AAssign, TInterfaceTypeDesc(ObjType), nil);
+      Exit;
+    end;
     if not (ObjType.Kind in [tyRecord, tyClass]) then
       SemanticError(
         Format('Field assignment: expression is not a record or class (got %s)',
@@ -12630,34 +12772,15 @@ begin
     SemanticError(
       Format('''%s'' is not a variable', [AAssign.RecordName]),
       AAssign.Line, AAssign.Col);
-  { Interface property write: I.Prop := V lowers to the setter dispatched
-    through the itab.  FieldName is rewritten to the setter method name;
-    codegen reads IntfWriteDesc to emit the indirect call. }
+  { Interface property write: I.Prop := V / I.Items[K] := V lowers to the
+    setter call dispatched through the itab. }
   if RecSym.TypeDesc.Kind = tyInterface then
   begin
-    IntfDesc := TInterfaceTypeDesc(RecSym.TypeDesc);
-    PropInfo := IntfDesc.FindProperty(AAssign.FieldName);
-    if PropInfo = nil then
-      SemanticError(
-        Format('Interface ''%s'' has no property ''%s''',
-          [IntfDesc.Name, AAssign.FieldName]),
-        AAssign.Line, AAssign.Col);
-    if PropInfo.WriteMethod = '' then
-      SemanticError(
-        Format('Interface property ''%s.%s'' is read-only',
-          [IntfDesc.Name, AAssign.FieldName]),
-        AAssign.Line, AAssign.Col);
-    AAssign.RecordName    := RecSym.Name;  { normalise to declared casing }
-    AAssign.FieldName     := PropInfo.WriteMethod;
-    AAssign.IntfWriteDesc := IntfDesc;
-    AAssign.IsGlobal      := RecSym.IsGlobal;
-    AAssign.IsVarParam    := RecSym.Kind = skVarParameter;
-    if TryResolveBareEnumIdent(AAssign.Expr, PropInfo.TypeDesc) then
-      ExprType := AAssign.Expr.ResolvedType
-    else
-      ExprType := Self.AnalyseExprSlot(AAssign.Expr);
-    CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
-      AAssign.Line, AAssign.Col);
+    AAssign.RecordName := RecSym.Name;  { normalise to declared casing }
+    AAssign.IsGlobal   := RecSym.IsGlobal;
+    AAssign.IsVarParam := RecSym.Kind = skVarParameter;
+    Self.LowerIntfPropWrite(AAssign, TInterfaceTypeDesc(RecSym.TypeDesc),
+      RecSym);
     Exit;
   end;
   if not (RecSym.TypeDesc.Kind in [tyRecord, tyClass]) then
@@ -16472,6 +16595,8 @@ begin
             Format('Interface property ''%s.%s'' is write-only',
               [IntfDesc.Name, AAccess.FieldName]),
             AAccess.Line, AAccess.Col);
+        Self.AnalyseIntfPropIndex(PropInfo, AAccess.PropIndexExpr,
+          IntfDesc.Name, AAccess.FieldName, AAccess.Line, AAccess.Col);
         AAccess.FieldName := PropInfo.ReadMethod;
       end;
       AAccess.IsInterfaceCall   := True;
@@ -16864,6 +16989,8 @@ begin
           Format('Interface property ''%s.%s'' is write-only',
             [IntfDesc.Name, AAccess.FieldName]),
           AAccess.Line, AAccess.Col);
+      Self.AnalyseIntfPropIndex(PropInfo, AAccess.PropIndexExpr,
+        IntfDesc.Name, AAccess.FieldName, AAccess.Line, AAccess.Col);
       AAccess.FieldName := PropInfo.ReadMethod;
     end;
     AAccess.IsInterfaceCall  := True;
@@ -18620,9 +18747,12 @@ begin
     property is sugar for Obj.<DefaultProp>[I].  Synthesise the field-access for
     the default property's getter, analyse it (which sets PropRead / owner /
     vtable slot), and reuse the indexed-property-read path above. }
-  if (StrType.Kind in [tyClass, tyRecord]) then
+  if StrType.Kind in [tyClass, tyRecord, tyInterface] then
   begin
-    DefProp := TRecordTypeDesc(StrType).FindDefaultProperty();
+    if StrType.Kind = tyInterface then
+      DefProp := TInterfaceTypeDesc(StrType).FindDefaultProperty()
+    else
+      DefProp := TRecordTypeDesc(StrType).FindDefaultProperty();
     if (DefProp <> nil) and (DefProp.ReadMethod <> '') then
     begin
       DefFA := TFieldAccessExpr.Create();
@@ -18887,6 +19017,31 @@ begin
       AStmt.Line, AStmt.Col);
   end;
   AStmt.ArrayName := Sym.Name;  { normalise to declared casing }
+  { Default interface property write: I[K] := V -- the setter call through
+    the itab, as for I.Items[K] := V }
+  if Sym.TypeDesc.Kind = tyInterface then
+  begin
+    DefProp := TInterfaceTypeDesc(Sym.TypeDesc).FindDefaultProperty();
+    if DefProp <> nil then
+    begin
+      if DefProp.WriteMethod = '' then
+        SemanticError(
+          Format('Interface property ''%s.%s'' is read-only',
+            [Sym.TypeDesc.Name, DefProp.Name]),
+          AStmt.Line, AStmt.Col);
+      AStmt.IsGlobal   := Sym.IsGlobal;
+      AStmt.IsVarParam := Sym.Kind = skVarParameter;
+      Self.AnalyseIntfPropIndex(DefProp, AStmt.IndexExpr, Sym.TypeDesc.Name,
+        DefProp.Name, AStmt.Line, AStmt.Col);
+      ValType := AnalyseExprHinted(AStmt.ValueExpr, DefProp.TypeDesc);
+      CheckTypesMatch(DefProp.TypeDesc, ValType, 'default property assignment',
+        AStmt.Line, AStmt.Col);
+      AStmt.SetterCall := Self.BuildIntfSetterCall(nil, Sym,
+        TInterfaceTypeDesc(Sym.TypeDesc), DefProp, AStmt.IndexExpr,
+        AStmt.ValueExpr, AStmt);
+      Exit;
+    end;
+  end;
   { Default array property write: Obj[I] := V where Obj's class/record has a
     `default` indexed property with a setter — lower to a setter call. }
   if Sym.TypeDesc.Kind in [tyClass, tyRecord] then

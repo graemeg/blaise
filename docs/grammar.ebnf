@@ -628,7 +628,10 @@ MethodSignatureList
 PropertyDecl
     = [ STATIC ]                                    (* per-member static prefix *)
       "property" IDENT
-      [ LBRACKET IDENT COLON TypeName RBRACKET ]   (* optional index parameter *)
+      [ LBRACKET [ CONST ] IDENT COLON TypeName RBRACKET ]
+                                                   (* optional index parameter;
+                                                      CONST is accepted as in
+                                                      Delphi/FPC *)
       COLON TypeName
       [ "read"  IDENT ]
       [ "write" IDENT ]

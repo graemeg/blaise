@@ -23,6 +23,12 @@ type
     procedure SetUp; override;
   published
     procedure TestRun_InterfaceProperty_ThroughRecordField;
+    { Interface properties of every kind -- indexed and plain, Integer,
+      Double, Single and string, read and written, on a variable and on a
+      chained receiver.  An indexed read or write dropped the index on
+      both backends (arm64 crashed, x86-64 failed to compile), and a float
+      property crashed the x86-64 compiler. }
+    procedure TestRun_InterfaceProperty_EveryKind;
     procedure TestRun_Interfaces_Combined;
     procedure TestRun_BasicDispatch;
     { arguments classified by the DECLARED parameter: Integer to Double,
@@ -1613,6 +1619,84 @@ begin
   AssertRunsOnAll(Src,
     '40' + LE +
     '70 70' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_InterfaceProperty_EveryKind;
+const
+  Src = '''
+    program P;
+    type
+      IV = interface
+        function GetN(I: Integer): Integer;
+        procedure SetN(I: Integer; V: Integer);
+        function GetD(I: Integer): Double;
+        procedure SetD(I: Integer; V: Double);
+        function GetS(): Single;
+        procedure SetS(V: Single);
+        function GetR(): Double;
+        procedure SetR(V: Double);
+        function GetT(const K: string): string;
+        procedure SetT(const K: string; const V: string);
+        property Ns[I: Integer]: Integer read GetN write SetN;
+        property Ds[I: Integer]: Double read GetD write SetD;
+        property S: Single read GetS write SetS;
+        property R: Double read GetR write SetR;
+        property Ts[const K: string]: string read GetT write SetT;
+      end;
+      TV = class(TObject, IV)
+        FN: array[0..3] of Integer;
+        FD: array[0..3] of Double;
+        FS: Single;
+        FR: Double;
+        FT: string;
+        function GetN(I: Integer): Integer;
+        procedure SetN(I: Integer; V: Integer);
+        function GetD(I: Integer): Double;
+        procedure SetD(I: Integer; V: Double);
+        function GetS(): Single;
+        procedure SetS(V: Single);
+        function GetR(): Double;
+        procedure SetR(V: Double);
+        function GetT(const K: string): string;
+        procedure SetT(const K: string; const V: string);
+      end;
+      THolder = class
+        F: IV;
+      end;
+    function TV.GetN(I: Integer): Integer; begin Result := FN[I]; end;
+    procedure TV.SetN(I: Integer; V: Integer); begin FN[I] := V; end;
+    function TV.GetD(I: Integer): Double; begin Result := FD[I]; end;
+    procedure TV.SetD(I: Integer; V: Double); begin FD[I] := V; end;
+    function TV.GetS(): Single; begin Result := FS; end;
+    procedure TV.SetS(V: Single); begin FS := V; end;
+    function TV.GetR(): Double; begin Result := FR; end;
+    procedure TV.SetR(V: Double); begin FR := V; end;
+    function TV.GetT(const K: string): string; begin Result := K + '=' + FT; end;
+    procedure TV.SetT(const K: string; const V: string); begin FT := K + V; end;
+    var X: IV; H: THolder; I: Integer;
+    begin
+      X := TV.Create();
+      X.Ns[1] := 7;
+      I := 2;
+      X.Ns[I] := X.Ns[1] * 3;
+      X.Ds[3] := 2.25;
+      X.S := 1.5;
+      X.R := X.Ds[3] * 2;
+      X.Ts['k'] := 'v';
+      WriteLn(X.Ns[1], ' ', X.Ns[I], ' ', X.Ds[3]:0:2, ' ', X.S:0:2, ' ',
+        X.R:0:2, ' ', X.Ts['a']);
+      H := THolder.Create();
+      H.F := X;
+      H.F.Ds[0] := H.F.R + 1;
+      WriteLn(H.F.Ds[0]:0:2, ' ', H.F.Ns[2], ' ', X.Ds[0]:0:2);
+      H.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '7 21 2.25 1.50 4.50 a=kv' + LE +
+    '5.50 21 5.50' + LE, 0);
 end;
 
 procedure TE2EInterfaceTests.TestRun_IntfCall_ArgsByDeclaredParams;
