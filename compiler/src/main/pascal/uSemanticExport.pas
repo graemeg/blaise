@@ -366,6 +366,7 @@ begin
     VTableSlot alone cannot distinguish a static method from a final
     non-virtual instance method (both are -1). }
   Result.IsStatic     := ASrc.IsStatic;
+  Result.IsConstructor := ASrc.IsConstructor;
   { Carry the `overload` directive so a cross-unit overload set whose members
     are split across an imported class and its ancestor is not truncated by
     ResolveMethodOverload's hiding walk (which stops at a non-overload). }

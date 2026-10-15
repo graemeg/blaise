@@ -139,6 +139,11 @@ type
     { `const` on a property's index parameter, as in Delphi and FPC
       (Values[const Name: string]), was a parse error. }
     procedure TestParse_Property_ConstIndexParam;
+    { A constructor is what is DECLARED `constructor`, whatever its name:
+      a static factory named Create* is a plain static call, and
+      `constructor Init` is constructed through its type
+      (BUG-20261015-ctor-identified-by-name). }
+    procedure TestSemantic_CtorIdentity_ByKeyword;
   end;
 
 implementation
@@ -1513,6 +1518,52 @@ begin
   try
     AssertTrue('const index parameter accepted', Prog <> nil);
   finally
+    Prog.Free();
+  end;
+end;
+
+procedure TClassTests.TestSemantic_CtorIdentity_ByKeyword;
+const
+  Src = '''
+    program P;
+    type
+      TFoo = class
+        V: Integer;
+        constructor Init(A: Integer);
+        static function CreateDefault(): TFoo;
+        static function CreateCount(): Integer;
+      end;
+    constructor TFoo.Init(A: Integer); begin V := A; end;
+    function TFoo.CreateDefault(): TFoo; begin Result := TFoo.Init(42); end;
+    function TFoo.CreateCount(): Integer; begin Result := 7; end;
+    var F: TFoo; N: Integer;
+    begin
+      F := TFoo.Init(1);
+      F := TFoo.CreateDefault();
+      N := TFoo.CreateCount();
+    end.
+    ''';
+var
+  Prog: TProgram;
+  A: TSemanticAnalyser;
+
+  function RhsOf(AIdx: Integer): TMethodCallExpr;
+  begin
+    Result := TMethodCallExpr(TAssignment(Prog.Block.Stmts.Items[AIdx]).Expr);
+  end;
+
+begin
+  Prog := ParseSrc(Src);
+  A := TSemanticAnalyser.Create();
+  try
+    A.Analyse(Prog);
+    AssertTrue('Init is a constructor call', RhsOf(0).IsConstructorCall);
+    AssertFalse('CreateDefault is not a constructor call',
+      RhsOf(1).IsConstructorCall);
+    AssertTrue('CreateDefault is a static call', RhsOf(1).IsStaticCall);
+    AssertEquals('CreateCount type', 'Integer', RhsOf(2).ResolvedType.Name);
+  finally
+    A.Free();
     Prog.Free();
   end;
 end;

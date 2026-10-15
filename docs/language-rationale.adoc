@@ -2808,6 +2808,30 @@ assignment algorithm.
 
 ---
 
+== A Constructor Is What Is Declared `constructor`
+
+=== Decision
+
+A method is a constructor because it is declared with the `constructor`
+keyword, whatever its name.  `TFoo.Init(1)` constructs when `Init` is declared
+`constructor Init(...)`; `TFoo.CreateDefault()` is a plain static call when
+`CreateDefault` is declared `static function CreateDefault(): TFoo`.  The
+implicit vtable slot of the previous section belongs to declared constructors
+only.  A `Create`-prefixed call with no declared method of that name still
+means the implicit `TObject.Create` (or the `CreateFmt` sugar).
+
+=== Rationale
+
+Delphi and FPC decide by the declaration.  Until 2026-10-15 Blaise decided by
+the name -- any type-qualified call to a method named `Create*` was lowered as
+construction -- so a static factory such as `CreateFromFile`, a common Delphi
+pattern, allocated and returned a fresh, empty object instead of running, with
+no diagnostic.  A constructor with any other name could not be called through
+its type at all.  The keyword was parsed and discarded; `TMethodDecl` now
+records it (`IsConstructor`, carried in the `.bif`).
+
+---
+
 == `case` Statement on String Selector
 
 === Decision

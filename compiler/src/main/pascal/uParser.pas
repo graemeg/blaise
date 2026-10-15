@@ -3030,7 +3030,10 @@ begin
     else if Check(tkProcedure) then
       Advance()
     else if Check(tkConstructor) or Check(tkDestructor) then
-      Advance()
+    begin
+      Result.IsConstructor := Check(tkConstructor);
+      Advance();
+    end
     else
       Expect(tkProcedure);  { will produce a clear error message }
     if not Check(tkIdent) then
@@ -5395,7 +5398,10 @@ begin
     else if Check(tkProcedure) then
       Advance()
     else if Check(tkConstructor) or Check(tkDestructor) then
-      Advance()
+    begin
+      Result.IsConstructor := Check(tkConstructor);
+      Advance();
+    end
     else
       Expect(tkProcedure);
     if not Check(tkIdent) then

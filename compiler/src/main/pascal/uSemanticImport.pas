@@ -1396,6 +1396,7 @@ begin
   { Carry static-ness so the semantic pass's TypeName.StaticMethod() resolution
     (which checks MDecl.IsStatic) succeeds for a method imported from a .bif. }
   Result.IsStatic   := ASig.IsStatic;
+  Result.IsConstructor := ASig.IsConstructor;
   { Carry the `overload` directive so ResolveMethodOverload's hiding walk treats
     an imported overload as overloadable — otherwise an overload set split
     across an imported class and its ancestor is truncated to the derived level. }

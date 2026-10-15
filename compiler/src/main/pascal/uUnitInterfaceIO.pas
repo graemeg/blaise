@@ -54,7 +54,10 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 24; { v24: a statement kind 'ecs' -- L[I](args); and
+  IFACE_VERSION = 25; { v25: TRoutineSig / TMethodDecl.IsConstructor after
+                          IsStatic -- a constructor is what is declared one,
+                          not inferred from a Create* name.
+                        v24: a statement kind 'ecs' -- L[I](args); and
                           P^(args); (TExprCallStmt), a call through the
                           procedural value an expression yields.
                         v23: a CONST entry carries an ARRAY const's resolved
@@ -608,6 +611,7 @@ begin
     { static-method flag — distinct from VTableSlot (both static and final
       non-virtual instance methods carry slot -1). }
     EncodeBool (AR.IsStatic) +
+    EncodeBool (AR.IsConstructor) +
     { `overload` directive — must round-trip so a split overload set is not
       truncated by the importer's hiding walk. }
     EncodeBool (AR.IsOverload) +
@@ -734,6 +738,7 @@ begin
                                          rejected cross-unit as "not a static
                                          method" while the same code compiled
                                          inside the declaring unit. }
+    EncodeBool (AM.IsConstructor) +
     EncodeCount(AM.Params.Count);
   for J := 0 to AM.Params.Count - 1 do
   begin
@@ -2454,6 +2459,7 @@ begin
   { Order must mirror EncodeMethodSig: IsStatic follows VTableSlot, then
     IsOverload, then the visibility ordinal. }
   Result.IsStatic    := DecodeBool(AText, APos);
+  Result.IsConstructor := DecodeBool(AText, APos);
   Result.IsOverload  := DecodeBool(AText, APos);
   Result.Visibility  := TMemberVisibility(StrToInt(ReadLpstrAt(AText, APos)));
   { Generic-method type params (Phase 10). }
@@ -2543,8 +2549,10 @@ begin
   Result.IsVirtual      := DecodeBool(AText, APos);
   Result.IsOverride     := DecodeBool(AText, APos);
   Result.IsOverload     := DecodeBool(AText, APos);
-  { Order must mirror EncodeMethodDecl: IsStatic follows IsOverload. }
+  { Order must mirror EncodeMethodDecl: IsStatic follows IsOverload, then
+    IsConstructor. }
   Result.IsStatic       := DecodeBool(AText, APos);
+  Result.IsConstructor  := DecodeBool(AText, APos);
   Pc := DecodeCount(AText, APos);
   for J := 1 to Pc do
   begin
@@ -2717,6 +2725,7 @@ begin
       rejected as "not a static method".  Inside the declaring unit the same
       code worked, because there the template AST is used directly. }
     MD.IsStatic       := Sig.IsStatic;
+    MD.IsConstructor  := Sig.IsConstructor;
     MD.IsOverload     := Sig.IsOverload;
     { Visibility likewise — the sig has carried it since v5, but dropping it
       here left the rebuilt decl at its zero value (mvPublic), so a `private`

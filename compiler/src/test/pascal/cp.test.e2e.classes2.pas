@@ -143,6 +143,10 @@ type
       inside a method (FFn(X) + 1), plain and method-pointer, Double and
       Single: arm64 refused it in a float context. }
     procedure TestRun_ProcField_FloatResult_ImplicitSelf;
+    { Constructors by declaration, not by name: a static factory named
+      Create* returned a fresh EMPTY object; `constructor Init` could not
+      be called through its type or a metaclass variable. }
+    procedure TestRun_CtorIdentity_ByKeyword;
 
     { Interface properties: read/write through the interface variable. }
     procedure TestRun_InterfaceProperty_ReadWrite;
@@ -1949,6 +1953,41 @@ begin
     '2.50 1.25 3.50 2.50' + LE + '-0.75 0.25 8.50' + LE +
     '14 True 40000000000' + LE + '1.50 2.50 4.25' + LE +
     '10.00 9.75' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_CtorIdentity_ByKeyword;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    type
+      TBase = class
+        V: Integer;
+        constructor Init(A: Integer);
+        static function CreateDefault(): TBase;
+        static function CreateCount(): Integer;
+      end;
+      TDerived = class(TBase)
+        constructor Init(A: Integer);
+      end;
+      TBaseClass = class of TBase;
+    var Made: Integer;
+    constructor TBase.Init(A: Integer); begin V := A; Made := Made + 1; end;
+    function TBase.CreateDefault(): TBase; begin Result := TBase.Init(42); end;
+    function TBase.CreateCount(): Integer; begin Result := Made * 10; end;
+    constructor TDerived.Init(A: Integer); begin V := A * 2; Made := Made + 1; end;
+    var B: TBase; C: TBaseClass;
+    begin
+      B := TBase.CreateDefault();
+      WriteLn(B.V, ' ', Made, ' ', TBase.CreateCount());
+      B := TBase.Init(5);
+      WriteLn(B.V, ' ', Made);
+      C := TDerived;
+      B := C.Init(6);
+      WriteLn(B.V, ' ', B.ClassName, ' ', Made);
+    end.
+    ''', '42 1 10' + LE + '5 2' + LE + '12 TDerived 3' + LE, 0);
 end;
 
 procedure TE2EClasses2Tests.TestRun_ProcField_FloatResult_ImplicitSelf;

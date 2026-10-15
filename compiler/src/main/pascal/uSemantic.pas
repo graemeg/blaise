@@ -331,6 +331,7 @@ type
     function  EvalConstFloatExpr(AExpr: TASTExpr; ALine, ACol: Integer): string;
     function  IsFloatConstExpr(AExpr: TASTExpr): Boolean;
     function  LookupConstSym(const AName: string): TSymbol;
+    function  CallsConstructor(AType: TTypeDesc; const AName: string): Boolean;
     function  IsStringConstExpr(AExpr: TASTExpr): Boolean;
     function  EvalConstStrExpr(AExpr: TASTExpr; ALine, ACol: Integer): string;
     function  ConstExprOrdinalType(AExpr: TASTExpr): TTypeDesc;
@@ -3198,7 +3199,7 @@ begin
   M := TMethodDecl(AMDecl);
   { A constructor is always reachable (you must be able to instantiate the
     type); enforcing visibility on Create would block legitimate construction. }
-  if SameText(M.Name, 'Create') then Exit;
+  if M.IsConstructor then Exit;
   { VisibilityUnit when set (a generic instance, whose OwningUnit names the
     analysing compilation rather than the declaring one); OwningUnit otherwise. }
   if M.VisibilityUnit <> '' then
@@ -4771,6 +4772,7 @@ begin
         travel with it or a `class operator` on a generic loses its operator
         identity in the instance. }
       NewMDecl.IsStatic      := MDecl.IsStatic;
+      NewMDecl.IsConstructor := MDecl.IsConstructor;
       NewMDecl.IsOperator    := MDecl.IsOperator;
       NewMDecl.OperatorKind  := MDecl.OperatorKind;
       NewMDecl.Visibility    := MDecl.Visibility;
@@ -4891,8 +4893,7 @@ begin
         RT.OverrideVTableSlot(
           RT.FindVTableSlot(NewMDecl.Name),
           '$' + ATypeName + '_' + NewMDecl.Name)
-      else if (SameText(NewMDecl.Name, 'Create') or
-               (StrPos('Create', NewMDecl.Name) = 0)) and
+      else if NewMDecl.IsConstructor and
               (not NewMDecl.IsVirtual) and (not NewMDecl.IsOverride) then
       begin
         if RT.FindVTableSlot(NewMDecl.Name) >= 0 then
@@ -4966,8 +4967,7 @@ begin
           RT.DestroyResolvedEmitName := NewMDecl.ResolvedEmitName;
       end;
 
-      if NewMDecl.IsVirtual or NewMDecl.IsOverride or
-         (SameText(NewMDecl.Name, 'Create') or (StrPos('Create', NewMDecl.Name) = 0)) then
+      if NewMDecl.IsVirtual or NewMDecl.IsOverride or NewMDecl.IsConstructor then
         NewMDecl.VTableSlot := RT.FindVTableSlot(NewMDecl.Name);
 
       for K := 0 to NewMDecl.Params.Count - 1 do
@@ -6160,6 +6160,26 @@ begin
 
   SemanticError(
     'Constant expression is not a compile-time integer', ALine, ACol);
+end;
+
+{ Does Type.AName(...) construct?  It does when the method it names is
+  DECLARED `constructor`; a static factory named Create* is a plain static
+  call (it returned a fresh EMPTY object when the name decided), and
+  `constructor Init` constructs.  With no declared method of that name, a
+  Create* name means the implicit TObject.Create or the CreateFmt sugar --
+  the constructor path then reports what is missing. }
+function TSemanticAnalyser.CallsConstructor(AType: TTypeDesc;
+  const AName: string): Boolean;
+var
+  MD: TMethodDecl;
+begin
+  MD := nil;
+  if (AType <> nil) and (AType is TRecordTypeDesc) then
+    MD := FindMethodDecl(TRecordTypeDesc(AType).Name, AName);
+  if MD <> nil then
+    Result := MD.IsConstructor
+  else
+    Result := SameText(AName, 'Create') or (StrPos('Create', AName) = 0);
 end;
 
 { A named constant referenced from a constant expression.  While a type's
@@ -8488,8 +8508,7 @@ begin
             if Slot >= 0 then
               RT.VTableEntryAt(Slot).IsAbstract := False;
           end
-          else if (SameText(MDecl.Name, 'Create') or
-                   (StrPos('Create', MDecl.Name) = 0)) and
+          else if MDecl.IsConstructor and
                   (not MDecl.IsVirtual) and (not MDecl.IsOverride) then
           begin
             Slot := RT.FindVTableSlot(MangledKey);
@@ -8698,8 +8717,7 @@ begin
 
         { Retrieve the vtable slot assigned in the pre-pass above.
           Constructors get implicit vtable slots (metaclass dispatch). }
-        if MDecl.IsVirtual or MDecl.IsOverride or
-           (SameText(MDecl.Name, 'Create') or (StrPos('Create', MDecl.Name) = 0)) then
+        if MDecl.IsVirtual or MDecl.IsOverride or MDecl.IsConstructor then
         begin
           MDecl.VTableSlot := RT.FindVTableSlot(MangledKey);
           if MDecl.IsOverride and (MDecl.VTableSlot < 0) then
@@ -11908,7 +11926,8 @@ begin
       ACall.Line, ACall.Col);
   { Metaclass-var constructor dispatch in statement position. }
   if (ObjSym.TypeDesc.Kind = tyMetaClass) and
-     (SameText(ACall.Name, 'Create') or (StrPos('Create', ACall.Name) = 0)) then
+     Self.CallsConstructor(TMetaClassTypeDesc(ObjSym.TypeDesc).BaseClass,
+       ACall.Name) then
   begin
     RT := TRecordTypeDesc(TMetaClassTypeDesc(ObjSym.TypeDesc).BaseClass);
     HintBareEnumMethodArgs(RT.Name, ACall.Name, ACall.Args);
@@ -15943,7 +15962,7 @@ begin
     method resolves here rather than falling through to "is not a variable". }
   if (ObjSym.Kind = skType) and (ObjSym.TypeDesc <> nil) and
      (ObjSym.TypeDesc.Kind in [tyClass, tyRecord]) and
-     not (SameText(AExpr.Name, 'Create') or (StrPos('Create', AExpr.Name) = 0)) then
+     not Self.CallsConstructor(ObjSym.TypeDesc, AExpr.Name) then
   begin
     for I := 0 to AExpr.Args.Count - 1 do
       Self.AnalyseListSlot(AExpr.Args, I);
@@ -15977,8 +15996,7 @@ begin
   { Constructor call with args: TypeName.Create(arg1, arg2, ...) or any
     method on a class type starting with Create (e.g. CreateFmt). }
   if (ObjSym.Kind = skType) and
-     (SameText(AExpr.Name, 'Create') or
-      (StrPos('Create', AExpr.Name) = 0)) then
+     Self.CallsConstructor(ObjSym.TypeDesc, AExpr.Name) then
   begin
     if ObjSym.TypeDesc.Kind <> tyClass then
       SemanticError(
@@ -16084,7 +16102,8 @@ begin
     metaclass variable.  Resolve against the BaseClass and flag for
     indirect ctor dispatch via vtable at codegen time. }
   if (ObjSym.TypeDesc.Kind = tyMetaClass) and
-     (SameText(AExpr.Name, 'Create') or (StrPos('Create', AExpr.Name) = 0)) then
+     Self.CallsConstructor(TMetaClassTypeDesc(ObjSym.TypeDesc).BaseClass,
+       AExpr.Name) then
   begin
     RT := TRecordTypeDesc(TMetaClassTypeDesc(ObjSym.TypeDesc).BaseClass);
     HintBareEnumMethodArgs(RT.Name, AExpr.Name, AExpr.Args);

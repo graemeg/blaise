@@ -327,6 +327,7 @@ TRoutineSig.VTableSlot  serialise
 TRoutineSig.ResolvedEmitName  serialise
 TRoutineSig.IsVirtual  serialise
 TRoutineSig.IsOverride  serialise
+TRoutineSig.IsConstructor  serialise
 TRoutineSig.IsStatic  serialise
 TRoutineSig.IsOverload  serialise
 TRoutineSig.Visibility  serialise

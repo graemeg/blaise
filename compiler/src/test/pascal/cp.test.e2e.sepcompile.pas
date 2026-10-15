@@ -253,6 +253,9 @@ type
       enum member, an alias, True, an Int64-sized value -- keep that type
       when imported from the cached .bif. }
     procedure TestIncrementalRebuild_InterfaceTypedScalarConsts_Warm;
+    { Constructor identity crosses the .bif: `constructor Init` constructs
+      and a static factory named Create* is a plain call, from the cache. }
+    procedure TestIncrementalRebuild_CtorIdentity_Warm;
     procedure TestDebugOpdf_PerUnitSection_InDependencyObject;
     { Regression (GH #231): a UNIT passed as --source with --debug-opdf
       segfaulted the compiler.  The top-level OPDF block built a PROGRAM-mode
@@ -3456,6 +3459,78 @@ begin
     AssertEquals(Format('build%d stdout', [Pass]),
       '6 1 2 True True' + #10 + '40000000000 5.00 vw' + #10 +
       'int colour colour bool int64 ' + #10, Captured);
+  end;
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_CtorIdentity_Warm;
+const
+  LibSrc =
+    '''
+    unit CtorLib;
+    interface
+    type
+      TThing = class
+        V: Integer;
+        constructor Init(A: Integer);
+        static function CreateDefault(): TThing;
+      end;
+      TThingClass = class of TThing;
+      TBigThing = class(TThing)
+        constructor Init(A: Integer);
+      end;
+    implementation
+    constructor TThing.Init(A: Integer); begin V := A; end;
+    function TThing.CreateDefault(): TThing; begin Result := TThing.Init(42); end;
+    constructor TBigThing.Init(A: Integer); begin V := A * 100; end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseCtorLib;
+    uses CtorLib;
+    var T: TThing; C: TThingClass;
+    begin
+      T := TThing.CreateDefault();
+      Write(T.V, ' ');
+      T := TThing.Init(3);
+      Write(T.V, ' ');
+      C := TBigThing;
+      T := C.Init(2);
+      WriteLn(T.V)
+    end.
+    ''';
+var
+  LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc, Pass: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  LibPas   := FScratch + '/CtorLib.pas';
+  ProgPas  := FScratch + '/use_ctorlib.pas';
+  ProgBin  := FScratch + '/use_ctorlib';
+  CacheDir := FScratch + '/units-ctorlib';
+
+  WriteFile(LibPas, LibSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+  for Pass := 0 to 1 do
+  begin
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch], Captured);
+    AssertEquals(Format('build%d exit code (out: %s)', [Pass, Captured]), 0, Rc);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
+    AssertEquals(Format('build%d stdout', [Pass]), '42 3 200' + #10, Captured);
   end;
 end;
 

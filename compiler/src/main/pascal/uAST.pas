@@ -1097,6 +1097,11 @@ type
                                        Distinct from VTableSlot's "static dispatch"
                                        (= non-virtual); a static method also never
                                        receives a Self pointer. }
+    IsConstructor:      Boolean;     { set by uParser — declared `constructor`.
+                                       A constructor is what is DECLARED one,
+                                       whatever its name: a static factory
+                                       named Create* is a plain static method,
+                                       and `constructor Init` constructs. }
     IsOperator:         Boolean;     { set by uParser — declared `class operator`.
                                        An operator method IS a static method
                                        (IsStatic is set too), so mangling, .bif
@@ -3042,6 +3047,7 @@ begin
     export clone made every cross-unit static method look like a normal
     instance method, so TypeName.StaticMethod() resolution failed. }
   Result.IsStatic       := ASrc.IsStatic;
+  Result.IsConstructor  := ASrc.IsConstructor;
   Result.IsOperator     := ASrc.IsOperator;
   Result.OperatorKind   := ASrc.OperatorKind;
   Result.Visibility     := ASrc.Visibility;
