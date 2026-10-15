@@ -48,6 +48,10 @@ type
       the even neighbour, everything else to the nearest; Single and Int64
       range too.  It rounded halves away from zero (2.5 -> 3) }
     procedure TestRun_Round_BankersEveryCase;
+    { Round and Trunc return Int64, as in Delphi and FPC: a result past
+      the 32-bit range survives WriteLn, IntToStr and arithmetic with no
+      Int64 variable in between, and still narrows into an Integer. }
+    procedure TestRun_RoundTrunc_Int64Result;
     procedure TestRun_Trunc_Positive;
     procedure TestRun_Trunc_Negative;
 
@@ -353,6 +357,27 @@ begin
     end.
     ''', '0 2 2 4 6 0 -2 -2 -4 2 3 -3 0 ' + Chr(10) +
          '2 4 -4' + Chr(10) + '40000000000 4503599627370496' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_RoundTrunc_Int64Result;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    var D: Double; S: Single; I: Integer;
+    begin
+      D := 40000000000.5;
+      WriteLn(Round(D));
+      WriteLn(IntToStr(Trunc(D)));
+      WriteLn(Round(D) * 2 + Trunc(-D));
+      S := 3.0e10;
+      WriteLn(Trunc(S));
+      I := Round(2.5) + Trunc(7.9);
+      WriteLn(I);
+    end.
+    ''', '40000000000' + Chr(10) + '40000000000' + Chr(10) +
+         '40000000000' + Chr(10) + '30000001024' + Chr(10) + '9' + Chr(10), 0);
 end;
 
 procedure TE2EMathTests.TestRun_Trunc_Positive;

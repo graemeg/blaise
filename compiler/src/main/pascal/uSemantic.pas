@@ -14767,7 +14767,12 @@ begin
       SemanticError(AExpr.Name + ' requires exactly one argument', AExpr.Line, AExpr.Col);
     ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
     FloatBuiltinArgType(AExpr.Name, ArgType, AExpr.Line, AExpr.Col);
-    Result := FTable.TypeInteger;
+    { Round and Trunc return Int64, Ceil and Floor Integer -- the System
+      and Math signatures of Delphi and FPC (language-rationale.adoc). }
+    if SameText(AExpr.Name, 'Round') or SameText(AExpr.Name, 'Trunc') then
+      Result := FTable.TypeInt64
+    else
+      Result := FTable.TypeInteger;
     AExpr.ResolvedType := Result;
     Exit;
   end;

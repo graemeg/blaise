@@ -42,18 +42,18 @@ type
     procedure TestSemantic_Sqrt_ReturnsDouble;
     procedure TestSemantic_Sqrt_IntegerArg_Accepted;
 
-    { Ceil / Floor / Round / Trunc → Integer }
+    { Ceil / Floor → Integer; Round / Trunc → Int64, as in Delphi and FPC }
     procedure TestSemantic_Ceil_OK;
     procedure TestSemantic_Ceil_ReturnsInteger;
     procedure TestSemantic_Floor_OK;
     procedure TestSemantic_Floor_ReturnsInteger;
     procedure TestSemantic_Round_OK;
-    procedure TestSemantic_Round_ReturnsInteger;
+    procedure TestSemantic_Round_ReturnsInt64;
     { Round rounds half to EVEN (banker's), as Delphi and FPC do: one
       round-to-nearest conversion on each ISA, for Double and Single }
     procedure TestCodegen_Round_TiesToEvenConversion;
     procedure TestSemantic_Trunc_OK;
-    procedure TestSemantic_Trunc_ReturnsInteger;
+    procedure TestSemantic_Trunc_ReturnsInt64;
     procedure TestSemantic_Ceil_IntegerArg_Accepted;
 
     { Integer arguments to float builtins coerce to Double (FPC/Delphi
@@ -355,7 +355,7 @@ begin
     'program P; var X: Double; R: Integer; begin R := Round(X) end.');
 end;
 
-procedure TMathTests.TestSemantic_Round_ReturnsInteger;
+procedure TMathTests.TestSemantic_Round_ReturnsInt64;
 var
   Lexer:    TLexer;
   Parser:   TParser;
@@ -372,7 +372,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Integer', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Int64', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
   end;
@@ -384,7 +384,7 @@ begin
     'program P; var X: Double; R: Integer; begin R := Trunc(X) end.');
 end;
 
-procedure TMathTests.TestSemantic_Trunc_ReturnsInteger;
+procedure TMathTests.TestSemantic_Trunc_ReturnsInt64;
 var
   Lexer:    TLexer;
   Parser:   TParser;
@@ -401,7 +401,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Integer', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Int64', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
   end;

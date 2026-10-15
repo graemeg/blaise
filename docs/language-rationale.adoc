@@ -4121,6 +4121,49 @@ such a routine.
 `SetRoundMode`; the instructions chosen already honour the mode, so adding it
 later changes nothing here.
 
+== Result Types of `Round`, `Trunc`, `Ceil` and `Floor`
+
+=== Decision
+
+[cols="1,1",options="header"]
+|===
+| Function | Result type
+| `Round(X)` | `Int64`
+| `Trunc(X)` | `Int64`
+| `Ceil(X)` | `Integer`
+| `Floor(X)` | `Integer`
+|===
+
+These are the signatures of Delphi and FPC: `Round` and `Trunc` are `System`
+functions returning `Int64`, while `Ceil` and `Floor` are `Math` functions
+returning `Integer`.  An `Int64` result narrows implicitly into an `Integer`
+variable, so `I := Round(X)` compiles as before.
+
+=== Rationale
+
+* *Porting safety.*  With a 32-bit result, `WriteLn(Round(40000000000.5))`
+  printed `1345294336` on x86-64: the value was truncated with no error,
+  while Delphi and FPC print `40000000000`.  The same truncation reached
+  `IntToStr`, arithmetic and overload resolution wherever the result was used
+  directly rather than stored in an `Int64` variable first.
+* *No cost.*  Both ISAs already converted into a 64-bit register
+  (`cvtsd2si` into `%rax`, `fcvtns` into `x0`); only the declared type was
+  narrower.
+* *`Ceil` and `Floor` follow the same rule*: match Delphi and FPC.  Their
+  `Integer` result is what ported code expects from overload resolution.
+
+=== History
+
+Until 2026-10-15 all four functions returned `Integer`.  No decision recorded
+that choice; it was the type given when the built-ins were first declared.
+
+=== Alternatives Rejected
+
+*`Int64` for all four.*  Safer against overflow in `Ceil` and `Floor`, but it
+departs from both Delphi and FPC, whose `Math` units keep those functions
+`Integer` and add `Ceil64` and `Floor64` for the wide case.  Matching them
+keeps ported code resolving to the same overloads.
+
 == `High` and `Low` on Ordinal Types
 
 === Decision
