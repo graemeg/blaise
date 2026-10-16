@@ -12454,6 +12454,17 @@ begin
     end;
     Exit;
   end;
+  if (AExpr is TFieldAccessExpr) and
+     (TFieldAccessExpr(AExpr).ConstArraySymbol <> '') then
+  begin
+    { a member const ARRAY (ShowOpen(TFoo.Names), for X in TFoo.Names): its
+      storage is the data blob's label -- it has no field to address }
+    Self.Emit(Format(#9'adrp x0, %s@PAGE',
+      [CodegenMangle(TFieldAccessExpr(AExpr).ConstArraySymbol)]));
+    Self.Emit(Format(#9'add x0, x0, %s@PAGEOFF',
+      [CodegenMangle(TFieldAccessExpr(AExpr).ConstArraySymbol)]));
+    Exit;
+  end;
   if AExpr is TFieldAccessExpr then
   begin
     EmitRecFieldAddrToX0(TFieldAccessExpr(AExpr));

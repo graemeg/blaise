@@ -20,6 +20,9 @@ type
     function Analyse(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { a class array const may be written with a named array type
+      (const CA: TArr = (...)), as a unit-level const may }
+    procedure TestClassArrayConst_NamedArrayType;
     { inside a method a record field shadows a same-named global in a field
       access (R.N), as it does for a bare identifier }
     procedure TestFieldAccess_FieldShadowsGlobal_InMethod;
@@ -677,6 +680,30 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TSemanticTests.TestClassArrayConst_NamedArrayType;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..3] of Integer;
+      TObj = class
+      public
+        const CA: TArr = (5, 6, 7, 8);
+      end;
+    procedure ShowOpen(const A: array of Integer); begin end;
+    begin
+      ShowOpen(TObj.CA)
+    end.
+    ''';
+begin
+  { a member array const written with a NAMED array type is accepted (it was
+    "Unknown element type ''") and, passed as an open array, is addressed
+    through its data label on both ISAs (there is no field to address) }
+  AssertEquals('accepted', '', SemanticError(Src));
+  AssertEquals('the data label is the storage', '',
+    AsmMissing(Src, 'leaq TObj_CA(%rip), %rax', 'adrp x0, TObj_CA@PAGE'));
 end;
 
 initialization

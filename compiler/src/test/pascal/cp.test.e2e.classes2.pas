@@ -22,6 +22,13 @@ type
   protected
     procedure SetUp; override;
   published
+    { Class and record array consts written with a named array type
+      (const CA: TArr = (...), const CN: TNames = (...)), read qualified, bare
+      inside a method, passed as an open array and iterated.  The declaration was
+      rejected ("Unknown element type ''"), and a member const array passed as an
+      open array or iterated failed to compile on both ISAs ("address of an
+      unresolved field" / "var/out field argument has no resolved field info"). }
+    procedure TestRun_MemberArrayConst_NamedArrayType;
     { Inside a method a record field shadows a same-named global for a field
       access, directly and inside a closure: R.N and R.A[1] read and wrote the
       GLOBAL R (while the deeper R.In1.N reached the field), on both ISAs. }
@@ -3545,6 +3552,44 @@ begin
     'global 0 0 0 0' + LineEnding +
     'field  5 6 7 8' + LineEnding +
     'global 0 0 0 0' + LineEnding, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_MemberArrayConst_NamedArrayType;
+const
+  Src = '''
+    program CC2;
+    type
+      TArr = array[0..3] of Integer;
+      TColour = (cRed, cGreen, cBlue);
+      TNames = array[0..1] of string;
+      TObj = class
+      public
+        const CI: array[0..3] of Integer = (1, 2, 3, 4);
+        const CA: TArr = (5, 6, 7, 8);
+        const CN: TNames = ('ann', 'bob');
+        procedure Show;
+      end;
+      TRec = record
+        const RA: TArr = (20, 21, 22, 23);
+      end;
+    const GA: TArr = (9, 10, 11, 12);
+    procedure TObj.Show; begin WriteLn(CA[1], ' ', CN[0]); end;
+    procedure ShowOpen(const A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
+    var O: TObj; X: Integer;
+    begin
+      WriteLn(TObj.CI[2], ' ', TObj.CA[2], ' ', GA[2], ' ', TObj.CN[1], ' ', TRec.RA[3]);
+      O := TObj.Create(); O.Show(); O.Free();
+      ShowOpen(TObj.CA);
+      for X in TObj.CA do Write(X, ' '); WriteLn();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '3 7 11 bob 23' + LineEnding +
+    '6 ann' + LineEnding +
+    '5 6 7 8 ' + LineEnding +
+    '5 6 7 8 ' + LineEnding, 0);
 end;
 
 initialization

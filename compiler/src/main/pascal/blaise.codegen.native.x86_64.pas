@@ -13121,6 +13121,14 @@ begin
         [NativeMangle(FAE.ClassVarEmitName)]));
       Exit;
     end;
+    { a member const ARRAY (ShowOpen(TFoo.Names)): its storage is the data
+      blob's label -- it has no FieldInfo either }
+    if FAE.ConstArraySymbol <> '' then
+    begin
+      Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
+        [NativeMangle(FAE.ConstArraySymbol)]));
+      Exit;
+    end;
     if FAE.FieldInfo = nil then
       raise ENativeCodeGenError.Create(
         'native backend: var/out field argument has no resolved field info');

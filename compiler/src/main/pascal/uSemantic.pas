@@ -278,6 +278,11 @@ type
       variable and the class has a record / class field of that name: the
       field shadows the global, as it does for a bare identifier. }
     function  FieldShadowsGlobal(const AName: string; ASym: TSymbol): Boolean;
+    { The static-array type of an array constant written with a NAMED type
+      (const C: TArr = (...)), checked against the value count, with the
+      element type and bounds published into CD as the inline form carries
+      them (the data emitters size each element from ArrayElemType). }
+    function  NamedArrayConstType(CD: TConstDecl): TStaticArrayTypeDesc;
 
     { Canonicalises the type arguments of a generic instantiation name by
       resolving each argument through any alias chain to its underlying type's
@@ -3770,6 +3775,43 @@ begin
         RepairedIndices.Free();
       end;
     end;
+  end;
+end;
+
+function TSemanticAnalyser.NamedArrayConstType(CD: TConstDecl): TStaticArrayTypeDesc;
+var
+  TD, ElemTD: TTypeDesc;
+  Expected: Integer;
+begin
+  TD := FTable.FindType(CD.TypeName);
+  if TD = nil then
+    SemanticError(Format('Unknown type ''%s'' in typed constant ''%s''',
+      [CD.TypeName, CD.Name]), CD.Line, CD.Col);
+  if TD.Kind <> tyStaticArray then
+    SemanticError(Format('Type ''%s'' is not a static array in typed constant ''%s''',
+      [CD.TypeName, CD.Name]), CD.Line, CD.Col);
+  Result := TStaticArrayTypeDesc(TD);
+  Expected := Result.HighBound - Result.LowBound + 1;
+  if CD.ArrayElements.Count <> Expected then
+    SemanticError(Format(
+      'Array const ''%s'' has %d element(s) but type ''%s'' expects %d',
+      [CD.Name, CD.ArrayElements.Count, CD.TypeName, Expected]),
+      CD.Line, CD.Col);
+  { The data emitters size and spell each element from ArrayElemType; left
+    empty, every element went out as a 4-byte integer, so string, enum and
+    float elements failed to assemble and Byte / Int64 ones had the wrong
+    width.  Publish the element type and bounds exactly as the inline form
+    carries them. }
+  ElemTD := Result.ElementType;
+  if ElemTD.Kind <> tyStaticArray then
+  begin
+    if ElemTD.Kind = tyString then
+      CD.ArrayElemType := 'string'
+    else
+      CD.ArrayElemType := ElemTD.Name;
+    CD.ArrayIsRangeIndexed := True;
+    CD.ArrayLowBound := Result.LowBound;
+    CD.ArrayHighBound := Result.HighBound;
   end;
 end;
 
@@ -7496,37 +7538,10 @@ begin
       ArrayElemType too, and a re-analysis must keep the declared type. }
     if CD.TypeName <> '' then
     begin
-      ElemTD := FTable.FindType(CD.TypeName);
-      if ElemTD = nil then
-        SemanticError(Format('Unknown type ''%s'' in typed constant ''%s''',
-          [CD.TypeName, CD.Name]), CD.Line, CD.Col);
-      if ElemTD.Kind <> tyStaticArray then
-        SemanticError(Format('Type ''%s'' is not a static array in typed constant ''%s''',
-          [CD.TypeName, CD.Name]), CD.Line, CD.Col);
-      ArrTD := TStaticArrayTypeDesc(ElemTD);
-      Expected := ArrTD.HighBound - ArrTD.LowBound + 1;
-      if CD.ArrayElements.Count <> Expected then
-        SemanticError(Format(
-          'Array const ''%s'' has %d element(s) but type ''%s'' expects %d',
-          [CD.Name, CD.ArrayElements.Count, CD.TypeName, Expected]),
-          CD.Line, CD.Col);
-      { The data emitters size and spell each element from ArrayElemType;
-        left empty, every element went out as a 4-byte integer, so string,
-        enum and float elements failed to assemble and Byte / Int64 ones had
-        the wrong width.  Publish the element type and bounds exactly as the
-        inline form carries them, and continue with the ELEMENT type so the
-        element folding below resolves enum members and Booleans. }
+      { continue with the ELEMENT type so the element folding below resolves
+        enum members and Booleans }
+      ArrTD := Self.NamedArrayConstType(CD);
       ElemTD := ArrTD.ElementType;
-      if ElemTD.Kind <> tyStaticArray then
-      begin
-        if ElemTD.Kind = tyString then
-          CD.ArrayElemType := 'string'
-        else
-          CD.ArrayElemType := ElemTD.Name;
-        CD.ArrayIsRangeIndexed := True;
-        CD.ArrayLowBound := ArrTD.LowBound;
-        CD.ArrayHighBound := ArrTD.HighBound;
-      end;
     end
     else
     begin
@@ -8810,39 +8825,47 @@ begin
         CD := TConstDecl(ConstList.Items[J]);
         if CD.IsArrayConst then
         begin
-          ElemTD := FTable.FindType(CD.ArrayElemType);
-          if ElemTD = nil then
-            SemanticError(Format('Unknown element type ''%s'' in class array const ''%s''',
-              [CD.ArrayElemType, CD.Name]), CD.Line, CD.Col);
-          if CD.ArrayIsRangeIndexed then
-            ArrTD := Self.BuildConstArrayType(CD, ElemTD)
+          if CD.TypeName <> '' then
+            { a NAMED array type (const CA: TArr = (...)): resolved as the
+              unit-level form resolves it.  The arm below reads only the
+              inline form's fields, so this was "Unknown element type ''" }
+            ArrTD := Self.NamedArrayConstType(CD)
           else
           begin
-            IdxTD := FTable.FindType(CD.ArrayIndexType);
-            if IdxTD = nil then
-              SemanticError(Format('Unknown index type ''%s'' in class array const ''%s''',
-                [CD.ArrayIndexType, CD.Name]), CD.Line, CD.Col);
-            if IdxTD.Kind <> tyEnum then
-              SemanticError(Format('Class array const index must be an enum, got ''%s''',
-                [IdxTD.Name]), CD.Line, CD.Col);
-            EnumDesc := TEnumTypeDesc(IdxTD);
-            { Span + bounds come from the index type's ordinal range — the
-              subrange's own bounds, or MIN..MAX declared ordinal for a full
-              enum (GH #182 follow-up, and
-              BUG-20260922-explicit-ordinal-enum-array-bounds) — same rule as
-              the unit-level array-const arm. }
-            Self.EnumIndexBounds(EnumDesc, ELo, EHi);
-            Self.WarnIfEnumIndexSparse(EnumDesc,
-              Format('class array const ''%s''', [CD.Name]), CD.Line, CD.Col);
-            Expected := EHi - ELo + 1;
-            if CD.ArrayElements.Count <> Expected then
-              SemanticError(Format(
-                'Class array const ''%s'' has %d element(s) but index type ' +
-                '''%s'' spans ordinals %d..%d and needs %d',
-                [CD.Name, CD.ArrayElements.Count, CD.ArrayIndexType,
-                 ELo, EHi, Expected]),
-                CD.Line, CD.Col);
-            ArrTD := FTable.NewStaticArrayType(ElemTD, ELo, EHi);
+            ElemTD := FTable.FindType(CD.ArrayElemType);
+            if ElemTD = nil then
+              SemanticError(Format('Unknown element type ''%s'' in class array const ''%s''',
+                [CD.ArrayElemType, CD.Name]), CD.Line, CD.Col);
+            if CD.ArrayIsRangeIndexed then
+              ArrTD := Self.BuildConstArrayType(CD, ElemTD)
+            else
+            begin
+              IdxTD := FTable.FindType(CD.ArrayIndexType);
+              if IdxTD = nil then
+                SemanticError(Format('Unknown index type ''%s'' in class array const ''%s''',
+                  [CD.ArrayIndexType, CD.Name]), CD.Line, CD.Col);
+              if IdxTD.Kind <> tyEnum then
+                SemanticError(Format('Class array const index must be an enum, got ''%s''',
+                  [IdxTD.Name]), CD.Line, CD.Col);
+              EnumDesc := TEnumTypeDesc(IdxTD);
+              { Span + bounds come from the index type's ordinal range — the
+                subrange's own bounds, or MIN..MAX declared ordinal for a full
+                enum (GH #182 follow-up, and
+                BUG-20260922-explicit-ordinal-enum-array-bounds) — same rule as
+                the unit-level array-const arm. }
+              Self.EnumIndexBounds(EnumDesc, ELo, EHi);
+              Self.WarnIfEnumIndexSparse(EnumDesc,
+                Format('class array const ''%s''', [CD.Name]), CD.Line, CD.Col);
+              Expected := EHi - ELo + 1;
+              if CD.ArrayElements.Count <> Expected then
+                SemanticError(Format(
+                  'Class array const ''%s'' has %d element(s) but index type ' +
+                  '''%s'' spans ordinals %d..%d and needs %d',
+                  [CD.Name, CD.ArrayElements.Count, CD.ArrayIndexType,
+                   ELo, EHi, Expected]),
+                  CD.Line, CD.Col);
+              ArrTD := FTable.NewStaticArrayType(ElemTD, ELo, EHi);
+            end;
           end;
           Sym := TSymbol.Create(TD.Name + '.' + CD.Name, skConstant, ArrTD);
           Sym.IsGlobal := True;
