@@ -26,6 +26,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { TFoo.StaticArr[I] reads / writes one element of a static or dynamic
+      array, and a default property through a static object }
+    procedure TestRun_StaticVar_ElementReadWrite;
     { Static members of aggregate type: a record static var's field
       (TC.SB.S), a record / closure static property, a static method returning
       a closure called directly, and `inherited GetT();` for an interface
@@ -663,6 +666,74 @@ begin
     'show sb1 9' + LineEnding +
     '5 14 21' + LineEnding +
     '6 svar' + LineEnding, 0);
+end;
+
+procedure TE2EStaticMembersTests.TestRun_StaticVar_ElementReadWrite;
+const
+  Src = '''
+    program P;
+    type
+      TIA = array of Integer;
+      TItems = class
+        FData: array[0..3] of Integer;
+        function GetItem(I: Integer): Integer;
+        procedure SetItem(I: Integer; V: Integer);
+        property Items[I: Integer]: Integer read GetItem write SetItem; default;
+      end;
+      TC = class
+        static var V: TIA;
+        static var S: array[0..2] of Integer;
+        static var Names: array of string;
+        static var Box: TItems;
+        static procedure Show;
+      end;
+    function TItems.GetItem(I: Integer): Integer;
+    begin
+      Result := FData[I];
+    end;
+    procedure TItems.SetItem(I: Integer; V: Integer);
+    begin
+      FData[I] := V;
+    end;
+    static procedure TC.Show;
+    begin
+      WriteLn(V[0], ' ', S[2], ' ', Names[1]);
+    end;
+    var
+      X: Integer;
+      N: string;
+    begin
+      SetLength(TC.V, 2);
+      TC.V[1] := 5;
+      TC.V[0] := TC.V[1] + 1;
+      X := TC.V[1];
+      WriteLn(X, ' ', TC.V[0]);
+      TC.S[2] := 7;
+      TC.S[0] := TC.S[2] * 2;
+      WriteLn(TC.S[0], ' ', TC.S[2]);
+      TC.Names := ['a', 'b'];
+      N := 'n' + IntToStr(X);
+      TC.Names[1] := N;
+      WriteLn(TC.Names[0], TC.Names[1], Length(TC.Names[1]));
+      TC.Box := TItems.Create();
+      TC.Box[2] := 9;
+      WriteLn(TC.Box[2]);
+      TC.Show();
+    end.
+    ''';
+var
+  LE: string;
+  RunOut: string;
+  Code: Integer;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '5 6' + LE + '14 7' + LE + 'an52' + LE + '9' + LE + '6 7 n5' + LE, 0);
+  AssertTrue('native compile+run (--debug)',
+    CompileAndRunWithRTLDebugOn(beNative, Src, RunOut, Code, True));
+  AssertEquals('native exit 0 (output: ' + RunOut + ')', 0, Code);
+  AssertTrue('native no leak report, got: ' + RunOut, Pos('leak', RunOut) < 0);
 end;
 
 initialization

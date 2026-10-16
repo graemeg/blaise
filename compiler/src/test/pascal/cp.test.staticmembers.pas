@@ -575,6 +575,9 @@ type
     function AnalyseSrc(const ASrc: string): TProgram;
     procedure AnalyseExpectErrorMsg(const ASrc, AExpectedSubstr: string);
   published
+    { TFoo.StaticArr[I] reads and writes one element (the index was dropped,
+      so the whole array was read and written) }
+    procedure TestSem_StaticVar_ElementReadWrite;
     { static var resolves to a shared global, not an instance field }
     procedure TestSem_StaticVar_BareReadResolves;
     procedure TestSem_StaticVar_NotAnInstanceField;
@@ -836,6 +839,41 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TStaticMembersSemTests.TestSem_StaticVar_ElementReadWrite;
+const
+  Src =
+    '''
+        program P;
+        type
+          TC = class
+            static var V: array of Integer;
+            static var S: array[0..2] of Integer;
+          end;
+        var X: Integer;
+        begin
+          TC.V[1] := 5;
+          TC.S[2] := TC.V[1];
+          X := TC.V[1] + TC.S[2];
+        end.
+        ''';
+  SrcBad =
+    '''
+        program P;
+        type
+          TC = class
+            static var V: array of Integer;
+          end;
+        begin
+          TC.V[1] := 'a';
+        end.
+        ''';
+var Prog: TProgram;
+begin
+  Prog := AnalyseSrc(Src);
+  Prog.Free();
+  AnalyseExpectErrorMsg(SrcBad, 'element');
 end;
 
 initialization

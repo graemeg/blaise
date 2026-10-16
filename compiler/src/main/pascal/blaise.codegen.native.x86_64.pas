@@ -16838,6 +16838,7 @@ var
   FA:    TFieldAssignment;
   LNilStore, LSkipAdd, LDone: string;
   CVStore: TAssignment;
+  CVElem: TStaticSubscriptAssign;
   FAE:   TFieldAccessExpr;
   SSA:   TStaticSubscriptAssign;
   MD:    TMethodDecl;
@@ -18884,6 +18885,27 @@ begin
   if AStmt is TFieldAssignment then
   begin
     FA := TFieldAssignment(AStmt);
+    { TFoo.StaticVar[I] := V: an element write into the shared global array,
+      through a borrowed subscript-write node }
+    if FA.IsClassVarWrite and FA.IsElemWrite then
+    begin
+      CVElem := TStaticSubscriptAssign.Create();
+      try
+        CVElem.Line := FA.Line;
+        CVElem.Col := FA.Col;
+        CVElem.ArrayName := FA.ClassVarEmitName;
+        CVElem.IsGlobal := True;
+        CVElem.ResolvedArrayType := FA.ClassVarLhsType;
+        CVElem.IndexExpr := FA.PropIndexExpr;
+        CVElem.ValueExpr := FA.Expr;
+        Self.EmitStmt(CVElem);
+      finally
+        CVElem.IndexExpr := nil;
+        CVElem.ValueExpr := nil;
+        CVElem.Free();
+      end;
+      Exit;
+    end;
     { Qualified STATIC var write 'TFoo.X := V': lower exactly like a bare global
       store to the shared slot.  Delegate to the TAssignment path via a borrowed
       synthetic node (Expr nilled before Free so the shared expression is not

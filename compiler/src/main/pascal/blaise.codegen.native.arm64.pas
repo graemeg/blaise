@@ -3979,8 +3979,30 @@ procedure TArm64Backend.EmitFieldAssign(AStmt: TFieldAssignment);
 var
   RelStr: Boolean;
   CVStore: TAssignment;
+  CVElem: TStaticSubscriptAssign;
 begin
   RelStr := False;
+  if AStmt.IsClassVarWrite and AStmt.IsElemWrite then
+  begin
+    { TFoo.StaticVar[I] := V: an element write into the shared global array,
+      through a borrowed subscript-write node }
+    CVElem := TStaticSubscriptAssign.Create();
+    try
+      CVElem.Line := AStmt.Line;
+      CVElem.Col := AStmt.Col;
+      CVElem.ArrayName := AStmt.ClassVarEmitName;
+      CVElem.IsGlobal := True;
+      CVElem.ResolvedArrayType := AStmt.ClassVarLhsType;
+      CVElem.IndexExpr := AStmt.PropIndexExpr;
+      CVElem.ValueExpr := AStmt.Expr;
+      EmitStaticElemAssign(CVElem);
+    finally
+      CVElem.IndexExpr := nil;      { owned by AStmt }
+      CVElem.ValueExpr := nil;
+      CVElem.Free();
+    end;
+    Exit;
+  end;
   if AStmt.IsClassVarWrite then
   begin
     { TFoo.StaticVar := V: a store to the one shared global (ClassVarEmitName)

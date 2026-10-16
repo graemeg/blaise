@@ -455,7 +455,11 @@ type
     procedure AnalyseFieldAssignment(AAssign: TFieldAssignment);
     procedure AnalyseFieldStoreValue(AAssign: TFieldAssignment; ATarget: TTypeDesc);
     function  TryAnalyseFieldElemWrite(AAssign: TFieldAssignment;
-      AFldInfo: TFieldInfo): Boolean;
+      AFieldType: TTypeDesc): Boolean;
+    { TypeName.StaticVar[I] read: the parser folds the subscript into
+      PropIndexExpr; lower it to a subscript of the static-var read
+      (LoweredSubscript).  nil when there is no index. }
+    function  TryLowerStaticVarIndex(AAccess: TFieldAccessExpr): TTypeDesc;
     function  TryLowerDefaultPropertyWrite(AAssign: TFieldAssignment;
       AMemberType: TTypeDesc): Boolean;
     function  FloatBuiltinArgType(const AName: string; AArgType: TTypeDesc;
@@ -12755,7 +12759,7 @@ end;
   the array type.  Returns False when there is no subscript to interpret;
   errors out when a subscript is applied to a non-array field. }
 function TSemanticAnalyser.TryAnalyseFieldElemWrite(AAssign: TFieldAssignment;
-  AFldInfo: TFieldInfo): Boolean;
+  AFieldType: TTypeDesc): Boolean;
 var
   ElemT:    TTypeDesc;
   IdxType:  TTypeDesc;
@@ -12764,16 +12768,16 @@ begin
   Result := False;
   if AAssign.PropIndexExpr = nil then
     Exit;
-  if AFldInfo.TypeDesc.Kind = tyDynArray then
-    ElemT := TDynArrayTypeDesc(AFldInfo.TypeDesc).ElementType
-  else if AFldInfo.TypeDesc.Kind = tyStaticArray then
-    ElemT := TStaticArrayTypeDesc(AFldInfo.TypeDesc).ElementType
+  if AFieldType.Kind = tyDynArray then
+    ElemT := TDynArrayTypeDesc(AFieldType).ElementType
+  else if AFieldType.Kind = tyStaticArray then
+    ElemT := TStaticArrayTypeDesc(AFieldType).ElementType
   else
   begin
     { A class field carrying a default array property: the subscript is a write
       through that default property, Recv.Field[I] := V → (Recv.Field).Default[I]
       := V.  Otherwise the subscript is meaningless on this field. }
-    if TryLowerDefaultPropertyWrite(AAssign, AFldInfo.TypeDesc) then
+    if TryLowerDefaultPropertyWrite(AAssign, AFieldType) then
     begin
       Result := True;
       Exit;
@@ -12787,7 +12791,7 @@ begin
   IdxType := Self.AnalyseExprSlot(AAssign.PropIndexExpr);
   if not IdxType.IsArrayIndex() then
     SemanticError('Array index must be an ordinal type', AAssign.Line, AAssign.Col);
-  Self.CheckConstArrayIndexInRange(AAssign.PropIndexExpr, AFldInfo.TypeDesc,
+  Self.CheckConstArrayIndexInRange(AAssign.PropIndexExpr, AFieldType,
     AAssign.FieldName, AAssign.Line, AAssign.Col);
   { Hint a bracket set literal against the element set type — a plain-variable
     array element write already does this (AnalyseExprHinted), but the
@@ -12974,7 +12978,7 @@ begin
                            AAssign.Line, AAssign.Col);
     AAssign.IsClassAccess := ObjType.Kind = tyClass;
     AAssign.FieldInfo     := FldInfo;
-    if TryAnalyseFieldElemWrite(AAssign, FldInfo) then
+    if TryAnalyseFieldElemWrite(AAssign, FldInfo.TypeDesc) then
       Exit;
     Self.AnalyseFieldStoreValue(AAssign, FldInfo.TypeDesc);
     Exit;
@@ -13059,7 +13063,7 @@ begin
               AAssign.Line, AAssign.Col);
         end;
         AAssign.FieldInfo := FldInfo;
-        if TryAnalyseFieldElemWrite(AAssign, FldInfo) then
+        if TryAnalyseFieldElemWrite(AAssign, FldInfo.TypeDesc) then
           Exit;
         { R.F := [a, b] with R a field of Self: this arm analysed the
           literal with no set context ("expected 'TSmallSet' but got 'array
@@ -13102,10 +13106,19 @@ begin
       AssertStaticVarVisible(VarSym.Visibility, VarSym.OwningUnit,
                              VarSym.OwnerTypeName, AAssign.FieldName,
                            AAssign.Line, AAssign.Col);
+      { TFoo.StaticVar[I] := V: an element write into the static array (the
+        subscript was taken for the whole-variable store, and the element
+        value checked against the array type), or a write through the
+        static object's default property, re-targeted at its setter }
+      if TryAnalyseFieldElemWrite(AAssign, VarSym.TypeDesc) and
+         not AAssign.IsElemWrite then
+        Exit;
       AAssign.IsClassVarWrite  := True;
       AAssign.ClassVarEmitName := VarSym.GlobalEmitName;
       AAssign.ClassVarLhsType  := VarSym.TypeDesc;
       AAssign.IsGlobal         := True;
+      if AAssign.IsElemWrite then
+        Exit;
       if (VarSym.TypeDesc.Kind = tySet) and (AAssign.Expr is TArrayLiteralExpr) then
       begin
         AnalyseSetLiteralExpr(TArrayLiteralExpr(AAssign.Expr),
@@ -13222,7 +13235,7 @@ begin
                          AAssign.Line, AAssign.Col);
 
   AAssign.FieldInfo := FldInfo;
-  if TryAnalyseFieldElemWrite(AAssign, FldInfo) then
+  if TryAnalyseFieldElemWrite(AAssign, FldInfo.TypeDesc) then
     Exit;
   Self.AnalyseFieldStoreValue(AAssign, FldInfo.TypeDesc);
 end;
@@ -16823,6 +16836,36 @@ end;
   Returns the resolved element type, or nil when no lowering applies (the
   caller then handles Prop as before).  APropInfo is the already-resolved read
   property. }
+function TSemanticAnalyser.TryLowerStaticVarIndex(
+  AAccess: TFieldAccessExpr): TTypeDesc;
+var
+  Inner: TFieldAccessExpr;
+  Sub:   TStringSubscriptExpr;
+begin
+  Result := nil;
+  if AAccess.PropIndexExpr = nil then
+    Exit;
+  { (TypeName.StaticVar)[I]: the index was silently DROPPED, so TC.V[1]
+    read the whole array }
+  Inner := TFieldAccessExpr.Create();
+  Inner.Line := AAccess.Line;
+  Inner.Col := AAccess.Col;
+  Inner.Base := AAccess.Base;              { transfer ownership (may be nil) }
+  AAccess.Base := nil;
+  Inner.RecordName := AAccess.RecordName;
+  Inner.FieldName := AAccess.FieldName;
+  Inner.QualifierUnit := AAccess.QualifierUnit;
+  Sub := TStringSubscriptExpr.Create();
+  Sub.Line := AAccess.Line;
+  Sub.Col := AAccess.Col;
+  Sub.StrExpr := Inner;
+  Sub.IndexExpr := AAccess.PropIndexExpr;
+  AAccess.PropIndexExpr := nil;
+  AAccess.LoweredSubscript := Sub;
+  Result := AnalyseExpr(Sub);
+  AAccess.ResolvedType := Result;
+end;
+
 function TSemanticAnalyser.TryLowerPropertyValueIndex(
   AAccess: TFieldAccessExpr; APropInfo: TPropertyInfo): TTypeDesc;
 var
@@ -16947,6 +16990,9 @@ begin
         AssertStaticVarVisible(Sym.Visibility, Sym.OwningUnit,
                                Sym.OwnerTypeName, AAccess.FieldName,
                                AAccess.Line, AAccess.Col);
+        Result := Self.TryLowerStaticVarIndex(AAccess);
+        if Result <> nil then
+          Exit;
         AAccess.IsClassVarRead   := True;
         AAccess.IsGlobal         := True;
         AAccess.ClassVarEmitName := Sym.GlobalEmitName;
@@ -17327,6 +17373,9 @@ begin
         AssertStaticVarVisible(Sym.Visibility, Sym.OwningUnit,
                                Sym.OwnerTypeName, AAccess.FieldName,
                              AAccess.Line, AAccess.Col);
+        Result := Self.TryLowerStaticVarIndex(AAccess);
+        if Result <> nil then
+          Exit;
         AAccess.IsClassVarRead := True;
         AAccess.IsGlobal       := True;
         AAccess.ClassVarEmitName := Sym.GlobalEmitName;
