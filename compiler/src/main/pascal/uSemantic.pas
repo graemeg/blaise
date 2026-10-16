@@ -131,6 +131,9 @@ type
     FGenericSourceUnits:   TStringList;
     FDeferredConsts:       TObjectList;  { not owned: scalar TConstDecls that wait for
                                            the block's types (FoldScalarConst) }
+    FRawMemAddrOf:         Boolean;      { AnalyseAddrOfExpr runs for a Move /
+                                           FillByte operand, which checks the
+                                           operand itself with a better message }
     FConstOwner:           string;       { the type whose member consts are being
                                            folded: a bare sibling name resolves }
     FContestedGlobals:     TStringList;  { module var names exported by more than one
@@ -278,6 +281,8 @@ type
       variable and the class has a record / class field of that name: the
       field shadows the global, as it does for a bare identifier. }
     function  FieldShadowsGlobal(const AName: string; ASym: TSymbol): Boolean;
+    { True when AExpr (already analysed) denotes storage that @ may address. }
+    function  IsAddressable(AExpr: TASTExpr): Boolean;
     { O.P[I] := V with P a NON-indexed array-typed property: an element write
       into the property's value.  True when that applies; the element then
       lives in the property's READ field, and a property read through a
@@ -3833,6 +3838,30 @@ begin
         'through a method, so the element would be written into a ' +
         'temporary copy', [AAssign.FieldName]),
       AAssign.Line, AAssign.Col);
+end;
+
+function TSemanticAnalyser.IsAddressable(AExpr: TASTExpr): Boolean;
+var
+  FA: TFieldAccessExpr;
+begin
+  if AExpr is TIdentExpr then
+    { a variable, parameter, field of Self or constant array -- not a scalar
+      constant, which has no storage }
+    Exit(not TIdentExpr(AExpr).IsConstant or
+         (TIdentExpr(AExpr).ConstArraySymbol <> ''));
+  if AExpr is TFieldAccessExpr then
+  begin
+    FA := TFieldAccessExpr(AExpr);
+    if FA.IsMethodCall or FA.IsConstructorCall then
+      Exit(False);
+    if (FA.PropRead <> nil) and (FA.PropRead.ReadMethod <> '') then
+      Exit(False);                             { a getter's result }
+    Exit(not FA.IsConstant or (FA.ConstArraySymbol <> ''));
+  end;
+  if AExpr is TStringSubscriptExpr then
+    { an element -- not O[I] on a default property, which is a getter call }
+    Exit(TStringSubscriptExpr(AExpr).IndexExpr <> nil);
+  Result := AExpr is TDerefExpr;
 end;
 
 function TSemanticAnalyser.FieldShadowsGlobal(const AName: string;
@@ -14000,7 +14029,12 @@ begin
   AoE.Col := Arg.Col;
   AoE.Expr := Arg;
   ACall.Args.Items[AIndex] := AoE;
-  Self.AnalyseAddrOfExpr(AoE);
+  FRawMemAddrOf := True;
+  try
+    Self.AnalyseAddrOfExpr(AoE);
+  finally
+    FRawMemAddrOf := False;
+  end;
   if (AoE.ResolvedType is TProceduralTypeDesc) or
      not IsVarArgLValue(AoE.Expr) then
     SemanticError(
@@ -18882,6 +18916,12 @@ begin
     end;
   end;
   InnerType := Self.AnalyseExprSlot(AExpr.Expr);
+  { only storage has an address: a variable, a field, an element or P^.  A
+    call result, an operator or a literal is a value with nowhere to point
+    at; both backends rejected it late as an unsupported address-of form }
+  if not FRawMemAddrOf and not Self.IsAddressable(AExpr.Expr) then
+    SemanticError('Cannot take the address of this expression: it is not a ' +
+      'variable, field, array element or dereference', AExpr.Line, AExpr.Col);
   { @S[I] / @O.S[I] -- the address of one BYTE of a string.  S[I] reads as an
     Integer-typed byte value, so the pointer type came out ^Integer and P^
     read four bytes.  It is a ^Byte.  The string must be a variable or field:

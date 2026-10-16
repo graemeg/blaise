@@ -20,6 +20,9 @@ type
     function Analyse(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { @ takes the address of storage -- a variable, field, element or P^ -- and
+      rejects a value with nowhere to point at }
+    procedure TestAddrOf_RequiresStorage;
     { an element write through a non-indexed array property follows its read
       specifier }
     procedure TestArrayPropertyElementWrite_FollowsReadField;
@@ -790,6 +793,51 @@ begin
   AssertEquals('field-read: accepted', '', SemanticError(SrcField));
   AssertTrue('getter-read: rejected with the reason',
     Pos('read through a method', SemanticError(SrcGetter)) >= 0);
+end;
+
+procedure TSemanticTests.TestAddrOf_RequiresStorage;
+const
+  SrcOk = '''
+    program P;
+    type
+      TRec = record N: Integer; A: array[0..1] of Integer; end;
+      PRec = ^TRec;
+    var X: Integer; R: TRec; PR: PRec; Q: ^Integer; A: array[0..2] of Integer;
+    begin
+      Q := @X; Q := @R.N; Q := @R.A[1]; Q := @A[2]; PR := @R; Q := @PR^.N;
+    end.
+    ''';
+  SrcCall = '''
+    program P;
+    function F: Integer; begin Result := 1; end;
+    var Q: ^Integer;
+    begin
+      Q := @F();
+    end.
+    ''';
+  SrcExpr = '''
+    program P;
+    var Q: ^Integer; X: Integer;
+    begin
+      Q := @(X + 1);
+    end.
+    ''';
+  SrcConst = '''
+    program P;
+    const K = 3;
+    var Q: ^Integer;
+    begin
+      Q := @K;
+    end.
+    ''';
+begin
+  { @ addresses storage only; a call result, an operator or a scalar constant
+    is rejected here (both backends used to fail late, "unsupported
+    address-of form") }
+  AssertEquals('storage: accepted', '', SemanticError(SrcOk));
+  AssertTrue('a call result', Pos('Cannot take the address', SemanticError(SrcCall)) >= 0);
+  AssertTrue('an operator', Pos('Cannot take the address', SemanticError(SrcExpr)) >= 0);
+  AssertTrue('a constant', Pos('Cannot take the address', SemanticError(SrcConst)) >= 0);
 end;
 
 initialization

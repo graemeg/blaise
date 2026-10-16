@@ -1615,6 +1615,39 @@ the member identifiers are not in scope during the first pass.
 
 ---
 
+=== The address-of operator `@` takes storage only
+
+==== Decision
+
+`@X` is accepted only when `X` denotes storage: a variable or parameter, a
+field, an array or string element, a constant array, or a dereference
+`P^`.  Anything else is a value with nowhere to point at and is rejected by
+the semantic pass with _Cannot take the address of this expression_:
+
+- a function or method call result — `@F()`;
+- a property read through a getter method;
+- an operator result or a literal — `@(X + 1)`;
+- a scalar constant — `@K` for `const K = 3`.
+
+(`@Proc` and `@O.Method` — the address of a routine — are procedural and
+method-pointer values, covered in the sections below, not storage
+addresses.)
+
+==== Rationale
+
+The address of a temporary would dangle as soon as the statement that
+produced it ended, and a scalar constant is folded into the code and has
+no storage at all.  Before this rule the front end let such operands
+through and each backend failed late, with an internal "unsupported
+address-of form" message that pointed at the compiler rather than at the
+program.  Rejecting them in the semantic pass gives one source-level
+diagnostic on every target.
+
+`Move` and `FillByte` operands keep their own l-value check, whose message
+names the argument and the routine.
+
+---
+
 === Procedural Types (`function`/`procedure` pointers)
 
 ==== Decision
