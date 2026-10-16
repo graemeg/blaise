@@ -274,6 +274,10 @@ type
       Returns the canonical name (e.g. 'TGenEnum<Integer>') suitable for
       FindTypeOrInstantiate. Has no effect on names without '<'. }
     function  ResolveScopeBoundTypeParams(const ATypeName: string): string;
+    { True inside a method when ASym -- what AName resolved to -- is a GLOBAL
+      variable and the class has a record / class field of that name: the
+      field shadows the global, as it does for a bare identifier. }
+    function  FieldShadowsGlobal(const AName: string; ASym: TSymbol): Boolean;
 
     { Canonicalises the type arguments of a generic instantiation name by
       resolving each argument through any alias chain to its underlying type's
@@ -3767,6 +3771,20 @@ begin
       end;
     end;
   end;
+end;
+
+function TSemanticAnalyser.FieldShadowsGlobal(const AName: string;
+  ASym: TSymbol): Boolean;
+var
+  FI: TFieldInfo;
+begin
+  Result := False;
+  if (FCurrentClass = nil) or (ASym = nil) or not ASym.IsGlobal or
+     (ASym.Kind <> skVariable) then
+    Exit;
+  FI := FCurrentClass.FindField(AName);
+  Result := (FI <> nil) and (FI.TypeDesc <> nil) and
+            (FI.TypeDesc.Kind in [tyRecord, tyClass]);
 end;
 
 function TSemanticAnalyser.ResolveScopeBoundTypeParams(const ATypeName: string): string;
@@ -12855,6 +12873,10 @@ begin
     Exit;
   end;
   RecSym := FTable.Lookup(AAssign.RecordName);
+  { inside a method a record / class field shadows a same-named global, as
+    for a bare identifier: R.N := 5 wrote the global R }
+  if FieldShadowsGlobal(AAssign.RecordName, RecSym) then
+    RecSym := nil;
   { BUG-001: a field write through a for-in loop variable whose element type is
     a RECORD (a per-iteration value copy) is discarded — it never reaches the
     collection element.  A for-in over an array/list of CLASS references binds
@@ -16948,7 +16970,13 @@ begin
   if AAccess.QualifierUnit <> '' then
     RecSym := ResolveQualified(AAccess.QualifierUnit, AAccess.RecordName);
   if RecSym = nil then
+  begin
     RecSym := FTable.Lookup(AAccess.RecordName);
+    { inside a method a record / class field shadows a same-named global, as
+      for a bare identifier: R.N read the global R }
+    if FieldShadowsGlobal(AAccess.RecordName, RecSym) then
+      RecSym := nil;
+  end;
   { If the name contains '<' and wasn't found, resolve scope-bound type params
     (e.g. 'TGenEnum<T>' → 'TGenEnum<Integer>' when T=Integer is in scope)
     and update AAccess.RecordName so codegen sees the concrete instantiation. }

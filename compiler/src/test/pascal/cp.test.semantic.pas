@@ -20,6 +20,9 @@ type
     function Analyse(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { inside a method a record field shadows a same-named global in a field
+      access (R.N), as it does for a bare identifier }
+    procedure TestFieldAccess_FieldShadowsGlobal_InMethod;
     procedure TestSemantic_WriteFieldWidth_LowersToFormat;
     procedure TestSemantic_WriteFieldWidth_DecimalsOnInteger_Rejected;
     procedure TestSemantic_WriteFieldWidth_NonIntegerWidth_Rejected;
@@ -616,6 +619,64 @@ begin
     Pos('not supported for a value', SemanticError(
       'program P; type TR = record A: Integer; end; var R: TR; ' +
       'begin WriteLn(R:5) end.')) >= 0);
+end;
+
+procedure TSemanticTests.TestFieldAccess_FieldShadowsGlobal_InMethod;
+const
+  Src = '''
+    program P;
+    type
+      TRec = record N: Integer; end;
+      TObj = class
+      public
+        R: TRec;
+        procedure Direct;
+      end;
+    var R: TRec;
+    procedure TObj.Direct;
+    var X: Integer;
+    begin
+      R.N := 5;
+      X := R.N;
+    end;
+    begin
+    end.
+    ''';
+var
+  Prog: TProgram;
+  M: TMethodDecl;
+  I, J: Integer;
+begin
+  { inside a method the record FIELD R shadows the global R for a field
+    access, exactly as for a bare identifier: R.N read and wrote the global }
+  Prog := Analyse(Src);
+  try
+    { the analysed body hangs off the class's method list }
+    M := nil;
+    for I := 0 to Prog.Block.TypeDecls.Count - 1 do
+      if TTypeDecl(Prog.Block.TypeDecls.Items[I]).Def is TClassTypeDef then
+        for J := 0 to TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls.Items[I]).Def)
+                         .Methods.Count - 1 do
+          if (TMethodDecl(TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls.Items[I]).Def)
+                .Methods.Items[J]).Name = 'Direct') and
+             (TMethodDecl(TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls.Items[I]).Def)
+                .Methods.Items[J]).Body <> nil) then
+            M := TMethodDecl(TClassTypeDef(TTypeDecl(Prog.Block.TypeDecls.Items[I]).Def)
+                   .Methods.Items[J]);
+    AssertTrue('method found', M <> nil);
+    AssertTrue('method has a body', M.Body <> nil);
+    AssertEquals('two statements', 2, M.Body.Stmts.Count);
+    AssertTrue('a field assignment', M.Body.Stmts.Items[0] is TFieldAssignment);
+    AssertTrue('write: R.N := 5 is Self.R.N',
+      TFieldAssignment(M.Body.Stmts.Items[0]).IsImplicitSelf);
+    AssertTrue('an assignment', M.Body.Stmts.Items[1] is TAssignment);
+    AssertTrue('of a field access',
+      TAssignment(M.Body.Stmts.Items[1]).Expr is TFieldAccessExpr);
+    AssertTrue('read: X := R.N is Self.R.N',
+      TFieldAccessExpr(TAssignment(M.Body.Stmts.Items[1]).Expr).IsImplicitSelf);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization

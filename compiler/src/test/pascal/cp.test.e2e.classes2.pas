@@ -22,6 +22,10 @@ type
   protected
     procedure SetUp; override;
   published
+    { Inside a method a record field shadows a same-named global for a field
+      access, directly and inside a closure: R.N and R.A[1] read and wrote the
+      GLOBAL R (while the deeper R.In1.N reached the field), on both ISAs. }
+    procedure TestRun_RecordField_ShadowsGlobal_InFieldAccess;
     procedure TestRun_ClassARC_ReleaseTiming;
     procedure TestRun_ClassBasics_Combined;
     { method pointers ('of object'); moved from cp.test.proctypes_ofobject,
@@ -3497,6 +3501,50 @@ begin
     'inner 5 gone' + LE +
     'done' + LE, 0);
   AssertLeakFreeOnAll(Src, 'child released');
+end;
+
+procedure TE2EClasses2Tests.TestRun_RecordField_ShadowsGlobal_InFieldAccess;
+const
+  Src = '''
+    program Sc1;
+    type
+      TArr = array[0..3] of Integer;
+      TInner = record A: TArr; N: Integer; end;
+      TRec = record A: TArr; In1: TInner; N: Integer; end;
+      TObj = class
+      public
+        R: TRec;
+        procedure Run;
+        procedure Direct;
+      end;
+    var R: TRec;
+    procedure ShowGlobal(I: Integer); begin WriteLn('global ', R.N, ' ', R.A[I], ' ', R.In1.N, ' ', R.In1.A[I]); end;
+    procedure TObj.Run;
+    var F: reference to procedure;
+    begin
+      F := procedure begin R.N := 1; R.A[1] := 71; R.In1.N := 2; R.In1.A[1] := 72; end;
+      F();
+      WriteLn('field  ', Self.R.N, ' ', Self.R.A[1], ' ', Self.R.In1.N, ' ', Self.R.In1.A[1]);
+      ShowGlobal(1);
+    end;
+    procedure TObj.Direct;
+    begin
+      R.N := 5; R.A[2] := 6; R.In1.N := 7; R.In1.A[2] := 8;
+      WriteLn('field  ', Self.R.N, ' ', Self.R.A[2], ' ', Self.R.In1.N, ' ', Self.R.In1.A[2]);
+      ShowGlobal(2);
+    end;
+    var O: TObj;
+    begin
+      O := TObj.Create(); O.Run(); O.Direct(); O.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'field  1 71 2 72' + LineEnding +
+    'global 0 0 0 0' + LineEnding +
+    'field  5 6 7 8' + LineEnding +
+    'global 0 0 0 0' + LineEnding, 0);
 end;
 
 initialization
