@@ -34,6 +34,8 @@ type
     { last (rightmost) 0-based index of ASub in AStr, or -1 if absent }
     function RPos(const ASub, AStr: string): Integer;
   published
+    { a value cast to a static-array type is its operand's storage }
+    procedure TestStaticArrayValueCast_IsTheOperandStorage;
     procedure TestHello_PrologueAndFrameChain;
     procedure TestHello_StringLiteral_AdrpAddPair;
     procedure TestHello_RtlCallsAndEpilogue;
@@ -9770,6 +9772,27 @@ begin
   Between := Copy(AsmT, LoadPos, CallPos - LoadPos);
   AssertTrue('plain-local by-value string arg is NOT pinned',
     Pos(#9'bl __StringAddRef', Between) < 0);
+end;
+
+procedure TArm64BackendTests.TestStaticArrayValueCast_IsTheOperandStorage;
+const
+  Src = '''
+    program P;
+    type TArr = array[0..3] of Integer;
+    procedure ShowOpen(const A: array of Integer); begin end;
+    var Raw: array[0..3] of Integer;
+    begin
+      ShowOpen(TArr(Raw))
+    end.
+    ''';
+var
+  A: string;
+begin
+  { TArr(Raw) reinterprets Raw's storage: the open array's data is Raw's own
+    address (it was a NotYet "this call form ('TArr')") }
+  A := GenAsm(Src, TargetArm64);
+  AssertTrue('Raw is addressed', Pos('_g_Raw@PAGE', A) >= 0);
+  AssertTrue('and passed on', Pos(#9'bl _ShowOpen', A) >= 0);
 end;
 
 initialization

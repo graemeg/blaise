@@ -345,6 +345,7 @@ type
     procedure EmitFatPtrAssign(AAsgn: TAssignment);
     function  IsFatLValue(AExpr: TASTExpr): Boolean;
     procedure EmitLValueAddrToX0(AExpr: TASTExpr);
+    function  IsStaticArrayValueCast(AExpr: TASTExpr): Boolean;
     procedure EmitStrByteAddrToX0(AIndex: TASTExpr; AStrSlot: TASTExpr;
       ACharField: TFieldAccessExpr);
     procedure EmitFatPairToX0X1(AExpr: TASTExpr; ARefTarget: Boolean);
@@ -2572,6 +2573,23 @@ begin
     Wrap.Expr := nil;   { owned by the caller's node }
     Wrap.Free();
   end;
+end;
+
+function TArm64Backend.IsStaticArrayValueCast(AExpr: TASTExpr): Boolean;
+begin
+  { TArr(X) -- a type cast (no routine behind the call) to a static array
+    type, of a static array of the same size }
+  Result := (AExpr is TFuncCallExpr) and
+            (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+            not TFuncCallExpr(AExpr).IsIndirectCall and
+            (TFuncCallExpr(AExpr).Args.Count = 1) and
+            (AExpr.ResolvedType <> nil) and
+            (AExpr.ResolvedType.Kind = tyStaticArray) and
+            (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
+            (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind =
+               tyStaticArray) and
+            (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.RawSize() =
+               AExpr.ResolvedType.RawSize());
 end;
 
 procedure TArm64Backend.EmitStrByteAddrToX0(AIndex: TASTExpr;
@@ -6018,6 +6036,12 @@ begin
     EmitMethodCallCommon(
       TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl),
       TFuncCallExpr(AExpr).Name, TFuncCallExpr(AExpr).Args);
+    Exit;
+  end;
+  if IsStaticArrayValueCast(AExpr) then
+  begin
+    { a static array's value is its address (B := TArr(X), ShowOpen(TArr(X))) }
+    EmitArrayStorageAddr(AExpr);
     Exit;
   end;
   if AExpr is TFuncCallExpr then
@@ -12463,6 +12487,15 @@ procedure TArm64Backend.EmitArrayStorageAddr(AExpr: TASTExpr);
 var
   Sub: TStringSubscriptExpr;
 begin
+  if IsStaticArrayValueCast(AExpr) then
+  begin
+    { TArr(X): a value cast of a same-sized array reinterprets its storage,
+      so the array lives at the operand's address (as TRec(R) does in
+      EmitRecAddrToX0).  Tested before the call arm below: a cast is a
+      TFuncCallExpr too, and that arm would send it straight back here. }
+    EmitArrayStorageAddr(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+    Exit;
+  end;
   if IsInlineBytesAgg(AExpr.ResolvedType) and IsAggCallValue(AExpr) then
   begin
     { MakeArr()[I], Obj.Prop[I], Prop[I] inside a method: a static-array-

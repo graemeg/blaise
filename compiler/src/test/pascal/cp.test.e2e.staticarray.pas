@@ -24,6 +24,10 @@ type
   protected
     procedure SetUp; override;
   published
+    { A value cast to a static-array type of a same-sized array -- TArr(O.FArr),
+      TArr(Raw) of an anonymous array -- assigned, passed as an open array,
+      iterated and subscripted.  arm64 refused it ("this call form ('TArr')"). }
+    procedure TestRun_StaticArrayValueCast;
     { by-value static-array and record params (x86-64 keeps a pointer to
       the callee's copy in the slot: element writes, @A[I], Inc(A[I]) and
       A := B took the slot's own address and wrote over the frame) and
@@ -2475,6 +2479,35 @@ begin
     'True False' + LineEnding +
     'True' + LineEnding, 0);
   AssertRunsOnAll(Src2, 'True True True True True' + LineEnding, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_StaticArrayValueCast;
+const
+  Src = '''
+    program CA;
+    type
+      TArr = array[0..3] of Integer;
+      TObj = class public FArr: TArr; end;
+    procedure ShowOpen(const A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
+    var O: TObj; B: TArr; Raw: array[0..3] of Integer; X: Integer;
+    begin
+      O := TObj.Create(); O.FArr[1] := 4; Raw[2] := 9;
+      B := TArr(O.FArr); ShowOpen(B);
+      ShowOpen(TArr(O.FArr));
+      B := TArr(Raw); ShowOpen(B);
+      for X in TArr(Raw) do Write(X); WriteLn();
+      WriteLn(TArr(Raw)[2]);
+      O.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '0 4 0 0 ' + LineEnding +
+    '0 4 0 0 ' + LineEnding +
+    '0 0 9 0 ' + LineEnding +
+    '0090' + LineEnding +
+    '9' + LineEnding, 0);
 end;
 
 initialization
