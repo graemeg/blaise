@@ -22,6 +22,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { TGreet(MakeI()).X: the call's owned reference is released -- the shared
+      object goes when its last real holder lets go }
+    procedure TestRun_ClassCastOfInterfaceCall_ReleasesTheCallRef;
     { Interface (and closure) values read through a class PROPERTY getter, a
       static var, a static property, and as chained call receivers
       (C.PT.Name(), TC.ST.Name(), J.Next.Next.Name()).  arm64 refused them;
@@ -1942,6 +1945,64 @@ begin
     'show si' + LineEnding +
     'u nonnil' + LineEnding +
     'v st++ st' + LineEnding, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_ClassCastOfInterfaceCall_ReleasesTheCallRef;
+const
+  Src = '''
+    program P;
+    type
+      IGreet = interface
+        function Hi: Integer;
+      end;
+      TGreet = class(TObject, IGreet)
+        N: Integer;
+        S: string;
+        function Hi: Integer;
+        procedure Bump;
+        destructor Destroy; override;
+      end;
+    function TGreet.Hi: Integer;
+    begin
+      Result := N;
+    end;
+    procedure TGreet.Bump;
+    begin
+      N := N + 1;
+    end;
+    destructor TGreet.Destroy;
+    begin
+      WriteLn('gone');
+      inherited Destroy();
+    end;
+    var G: IGreet;
+    function MakeI(): IGreet;
+    begin
+      Result := G;
+    end;
+    procedure Run;
+    begin
+      G := TGreet.Create();
+      TGreet(MakeI()).N := 5;
+      WriteLn(TGreet(MakeI()).N);
+      TGreet(MakeI()).S := 'x';
+      WriteLn(TGreet(MakeI()).S, TGreet(MakeI()).Hi());
+      TGreet(MakeI()).Bump();
+      WriteLn(G.Hi());
+      G := nil;
+      WriteLn('after nil');
+    end;
+    begin
+      Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { every cast use leaked one reference to G's object, so G := nil never
+    freed it (BUG-20261009-cast-of-owned-intf-call-leaks): 'gone' must come
+    before 'after nil' }
+  AssertRunsOnAll(Src,
+    '5' + LE + 'x5' + LE + '6' + LE + 'gone' + LE + 'after nil' + LE, 0);
 end;
 
 initialization
