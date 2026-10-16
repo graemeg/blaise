@@ -32,6 +32,20 @@ type
     procedure TestClientServerEcho;
     procedure TestConcurrentClients;
     procedure TestGracefulStop;
+    { A write to a peer that has closed reports failure instead of raising
+      SIGPIPE (macOS has no MSG_NOSIGNAL; sockets carry SO_NOSIGPIPE). }
+    procedure TestWrite_PeerClosed_ClientSide;
+    procedure TestWrite_PeerClosed_ServerSide;
+  end;
+
+  { Handler: close at once, without reading or writing. }
+  TCloseHandler = class(IConnHandler)
+    procedure Handle(AConn: TTcpConn);
+  end;
+
+  { Handler: keep writing until a write fails, then stop the server. }
+  TWriteUntilFailHandler = class(IConnHandler)
+    procedure Handle(AConn: TTcpConn);
   end;
 
   { Handler: read one line, write it back with an 'echo:' prefix, close. }
@@ -179,6 +193,126 @@ begin
 
   AssertEquals('server stopped and Serve returned', 'stopped ', GResult);
   AssertFalse('server not running after stop', GServer.Running);
+  ResetScheduler();
+  GServer.Free();
+  GHandler := nil;
+end;
+
+procedure TCloseHandler.Handle(AConn: TTcpConn);
+begin
+  { returning closes the connection }
+end;
+
+function KiloChunk: string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to 63 do
+    Result := Result + '0123456789abcdef';
+end;
+
+{ Write until a write fails (or give up after ~1 s).  True if one failed. }
+function WriteUntilFail(AConn: TTcpConn): Boolean;
+var
+  I: Integer;
+  Chunk: string;
+begin
+  Chunk := KiloChunk();
+  Result := False;
+  I := 0;
+  while (not Result) and (I < 200) do
+  begin
+    Result := not AConn.Write(Chunk);
+    FiberSleep(5);
+    I := I + 1;
+  end;
+end;
+
+procedure TWriteUntilFailHandler.Handle(AConn: TTcpConn);
+begin
+  if WriteUntilFail(AConn) then
+    GResult := 'writefail'
+  else
+    GResult := 'nofail';
+  GServer.Stop();
+end;
+
+procedure WriteToClosedServerClientFiber(AArg: Pointer);
+var
+  Cli: TTcpClient;
+  Conn: TTcpConn;
+begin
+  FiberSleep(2);
+  Cli := TTcpClient.Create();
+  Conn := Cli.Connect('127.0.0.1', GPort);
+  Cli.Free();
+  if Conn = nil then
+    GResult := 'connfail'
+  else
+  begin
+    if WriteUntilFail(Conn) then
+      GResult := 'writefail'
+    else
+      GResult := 'nofail';
+    Conn.Free();
+  end;
+  GServer.Stop();
+end;
+
+procedure CloseAtOnceClientFiber(AArg: Pointer);
+var
+  Cli: TTcpClient;
+  Conn: TTcpConn;
+begin
+  FiberSleep(2);
+  Cli := TTcpClient.Create();
+  Conn := Cli.Connect('127.0.0.1', GPort);
+  Cli.Free();
+  if Conn = nil then
+  begin
+    GResult := 'connfail';
+    GServer.Stop();
+  end
+  else
+    Conn.Free();
+end;
+
+procedure TNetTcpTests.TestWrite_PeerClosed_ClientSide;
+const
+  PORT = 29404;
+begin
+  GServer := TTcpServer.Create(PORT);
+  AssertTrue('server start', GServer.Start());
+  GHandler := TCloseHandler.Create();
+  GPort := PORT;
+  GResult := '';
+
+  SpawnFiber(@ServerFiber, nil);
+  SpawnFiber(@WriteToClosedServerClientFiber, nil);
+  RunScheduler();
+
+  AssertEquals('client write to a closed server fails', 'writefail', GResult);
+  ResetScheduler();
+  GServer.Free();
+  GHandler := nil;
+end;
+
+procedure TNetTcpTests.TestWrite_PeerClosed_ServerSide;
+const
+  PORT = 29405;
+begin
+  GServer := TTcpServer.Create(PORT);
+  AssertTrue('server start', GServer.Start());
+  GHandler := TWriteUntilFailHandler.Create();
+  GPort := PORT;
+  GResult := '';
+
+  SpawnFiber(@ServerFiber, nil);
+  SpawnFiber(@CloseAtOnceClientFiber, nil);
+  RunScheduler();
+
+  AssertEquals('server write to a closed client fails', 'writefail', GResult);
   ResetScheduler();
   GServer.Free();
   GHandler := nil;

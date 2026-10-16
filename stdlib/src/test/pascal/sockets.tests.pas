@@ -26,6 +26,7 @@ type
     procedure TestTcpRoundTrip_Local;
     procedure TestAcceptConn_BlockingFromNonBlockingListener;
     procedure TestSendAll_NonBlockingFullBuffer;
+    procedure TestSendAll_PeerClosed_NoSigPipe;
   end;
 
   { Reads AFd until EOF and keeps every byte, so a test can send more than the
@@ -206,6 +207,43 @@ begin
 
   Drain := nil;
   Close(Conn);
+  Close(Cli);
+  Close(Srv);
+end;
+
+{ Writing to a connection the peer has closed must report failure, not kill
+  the process.  Linux and FreeBSD suppress SIGPIPE per call with MSG_NOSIGNAL;
+  macOS has no such flag, so every socket this unit creates carries the
+  SO_NOSIGPIPE option instead.  Nothing here calls IgnoreSigPipe: without the
+  option the first write after the peer's RST raises SIGPIPE and the test
+  runner dies (exit 141). }
+procedure TSocketsTests.TestSendAll_PeerClosed_NoSigPipe;
+const
+  PORT = 28768;
+var
+  Srv, Cli, Conn, I: Integer;
+  Ok: Boolean;
+  Chunk: string;
+begin
+  Srv := TcpListenLocal(PORT, 8);
+  AssertTrue('listen', Srv >= 0);
+  Cli := TcpConnectLocal(PORT);
+  AssertTrue('connect', Cli >= 0);
+  Conn := AcceptConn(Srv);
+  AssertTrue('accept', Conn >= 0);
+  Close(Conn);
+
+  Chunk := PatternBytes(1024);
+  Ok := True;
+  I := 0;
+  while Ok and (I < 200) do
+  begin
+    Ok := SendAll(Cli, Chunk);
+    Sleep(5);
+    I := I + 1;
+  end;
+  AssertFalse('a write to a closed peer fails', Ok);
+
   Close(Cli);
   Close(Srv);
 end;

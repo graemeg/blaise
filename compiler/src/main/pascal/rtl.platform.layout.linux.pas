@@ -93,6 +93,7 @@ function _SoError: Integer;        { SO_ERROR     = 4 }
 function _MsgNoSignal: Integer;    { MSG_NOSIGNAL = $4000 }
 function _ONonBlock: Integer;      { O_NONBLOCK   = $800 }
 function _SockNonBlock: Integer;   { SOCK_NONBLOCK = $800 (accept4) }
+function _SoNoSigPipe: Integer;    { none — MSG_NOSIGNAL covers it — 0 }
 
 { Fill a 16-byte struct sockaddr_in at P for AF_INET.  APortN/AAddrN are
   ALREADY in network byte order.  Linux layout: sin_family (u16, = AF_INET),
@@ -257,6 +258,7 @@ function _SoError: Integer;      begin Result := 4;    end;
 function _MsgNoSignal: Integer;  begin Result := $4000; end;
 function _ONonBlock: Integer;    begin Result := $800; end;
 function _SockNonBlock: Integer; begin Result := $800; end;
+function _SoNoSigPipe: Integer;  begin Result := 0;    end;
 
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
 var

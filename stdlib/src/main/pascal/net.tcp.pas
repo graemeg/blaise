@@ -323,6 +323,7 @@ begin
   Fd := Socket(AF_INET, SOCK_STREAM, 0);
   if Fd < 0 then
     Exit;
+  SuppressSigPipe(Fd);
   SetNonBlocking(Fd);
   FillSockAddr(SA, Ip, APort);
   Rc := FiberConnect(Fd, @SA, 16);

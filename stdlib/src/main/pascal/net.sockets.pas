@@ -101,6 +101,9 @@ function SO_REUSEPORT: Integer; external name '_SoReusePort';
 { send(2) flag: a write to a peer-closed socket returns EPIPE instead of
   raising SIGPIPE (whose default action terminates the process). }
 function MSG_NOSIGNAL: Integer; external name '_MsgNoSignal';
+{ Socket option with the same purpose, for the OS that has no MSG_NOSIGNAL:
+  SO_NOSIGPIPE on macOS, 0 where MSG_NOSIGNAL already does the job. }
+function SO_NOSIGPIPE: Integer; external name '_SoNoSigPipe';
 
 type
   { struct sockaddr_in — exactly 16 bytes on Linux and FreeBSD.  The first two
@@ -225,6 +228,13 @@ function SendAll(AFd: Integer; const S: string): Boolean;
 { Convert ACount bytes at ABuf into a Blaise string (raw bytes). }
 function BytesToString(ABuf: Pointer; ACount: Integer): string;
 
+{ Make a write to AFd after the peer has gone fail with EPIPE rather than raise
+  SIGPIPE.  Every socket this unit creates or accepts already has it; call it
+  on a socket made with the raw Socket binding.  A no-op where MSG_NOSIGNAL
+  covers each send (Linux, FreeBSD); sets SO_NOSIGPIPE on macOS, which has no
+  MSG_NOSIGNAL. }
+procedure SuppressSigPipe(AFd: Integer);
+
 { Ignore SIGPIPE process-wide so a write to a closed socket cannot terminate
   the process.  Call once at startup. }
 procedure IgnoreSigPipe;
@@ -316,6 +326,7 @@ begin
     Result := -1;
     Exit;
   end;
+  SuppressSigPipe(Fd);
 
   One := 1;
   SetSockOpt(Fd, SOL_SOCKET(), SO_REUSEADDR(), @One, 4);
@@ -352,6 +363,7 @@ begin
     Result := -1;
     Exit;
   end;
+  SuppressSigPipe(Fd);
 
   One := 1;
   SetSockOpt(Fd, SOL_SOCKET(), SO_REUSEADDR(), @One, 4);
@@ -387,6 +399,7 @@ begin
     Result := -1;
     Exit;
   end;
+  SuppressSigPipe(Fd);
 
   One := 1;
   SetSockOpt(Fd, SOL_SOCKET(), SO_REUSEADDR(), @One, 4);
@@ -427,6 +440,7 @@ begin
     Result := -1;
     Exit;
   end;
+  SuppressSigPipe(Fd);
   FillSockAddr(SA, AAddr, APort);
   if Connect(Fd, @SA, 16) <> 0 then
   begin
@@ -446,7 +460,10 @@ function AcceptConn(AListenFd: Integer): Integer;
 begin
   Result := Accept(AListenFd, nil, nil);
   if Result >= 0 then
+  begin
     MakeBlocking(Result);
+    SuppressSigPipe(Result);
+  end;
 end;
 
 function RecvString(AFd: Integer; AMaxBytes: Integer): string;
@@ -567,6 +584,17 @@ begin
     SB.AppendByte(Byte(P[I]));
   Result := SB.ToString();
   SB.Free();
+end;
+
+procedure SuppressSigPipe(AFd: Integer);
+var
+  One: Integer;
+begin
+  if (AFd >= 0) and (SO_NOSIGPIPE() <> 0) then
+  begin
+    One := 1;
+    SetSockOpt(AFd, SOL_SOCKET(), SO_NOSIGPIPE(), @One, 4);
+  end;
 end;
 
 procedure IgnoreSigPipe;

@@ -25,8 +25,9 @@ unit rtl.platform.layout.darwin;
 // The O_* creation flags share FreeBSD's values (both BSD-derived); the
 // CLOCK_* ids and the socket-layer constants have Darwin-specific values.
 // Darwin has NO MSG_NOSIGNAL (SIGPIPE suppression is the SO_NOSIGPIPE socket
-// option) and no SOCK_NONBLOCK/accept4 — both report 0 so callers fall back
-// to their portable paths (fcntl O_NONBLOCK after accept).
+// option, which _SoNoSigPipe names) and no SOCK_NONBLOCK/accept4 — both
+// report 0 so callers fall back to their portable paths (SO_NOSIGPIPE on each
+// new socket; fcntl O_NONBLOCK after accept).
 
 interface
 
@@ -93,7 +94,9 @@ function _ClockMonotonicId: Integer;
 { Socket-layer OS constants (Net.Sockets / async.io).  Darwin values from
   sys/socket.h / sys/fcntl.h.  _MsgNoSignal and _SockNonBlock are 0 —
   Darwin has neither flag; callers detect 0 and use their portable
-  fallbacks (SIGPIPE suppression via SO_NOSIGPIPE is a future seam). }
+  fallbacks.  SIGPIPE is suppressed per socket instead: Net.Sockets sets
+  _SoNoSigPipe on every socket it creates (the other targets report 0
+  there, because MSG_NOSIGNAL already covers each send). }
 function _SolSocket: Integer;      { SOL_SOCKET   = $FFFF }
 function _SoReuseAddr: Integer;    { SO_REUSEADDR = $0004 }
 function _SoReusePort: Integer;    { SO_REUSEPORT = $0200 }
@@ -101,6 +104,7 @@ function _SoError: Integer;        { SO_ERROR     = $1007 }
 function _MsgNoSignal: Integer;    { no MSG_NOSIGNAL on Darwin — 0 }
 function _ONonBlock: Integer;      { O_NONBLOCK   = $0004 }
 function _SockNonBlock: Integer;   { no SOCK_NONBLOCK/accept4 on Darwin — 0 }
+function _SoNoSigPipe: Integer;    { SO_NOSIGPIPE = $1022 }
 
 { Fill a 16-byte struct sockaddr_in at P for AF_INET.  APortN/AAddrN are
   ALREADY in network byte order.  Darwin layout matches FreeBSD: sin_len
@@ -328,6 +332,7 @@ function _SoError: Integer;      begin Result := $1007; end;
 function _MsgNoSignal: Integer;  begin Result := 0;     end;
 function _ONonBlock: Integer;    begin Result := $0004; end;
 function _SockNonBlock: Integer; begin Result := 0;     end;
+function _SoNoSigPipe: Integer;  begin Result := $1022; end;
 
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
 var

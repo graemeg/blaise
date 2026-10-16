@@ -107,6 +107,7 @@ function _SoError: Integer;        { SO_ERROR     = $1007 }
 function _MsgNoSignal: Integer;    { MSG_NOSIGNAL = $20000 }
 function _ONonBlock: Integer;      { O_NONBLOCK   = $0004 }
 function _SockNonBlock: Integer;   { SOCK_NONBLOCK = $20000000 (accept4) }
+function _SoNoSigPipe: Integer;    { unused — MSG_NOSIGNAL covers it — 0 }
 
 { Fill a 16-byte struct sockaddr_in at P for AF_INET.  APortN/AAddrN are
   ALREADY in network byte order.  FreeBSD layout: sin_len (u8, = 16),
@@ -276,6 +277,7 @@ function _SoError: Integer;      begin Result := $1007;     end;
 function _MsgNoSignal: Integer;  begin Result := $20000;    end;
 function _ONonBlock: Integer;    begin Result := $0004;     end;
 function _SockNonBlock: Integer; begin Result := $20000000; end;
+function _SoNoSigPipe: Integer;  begin Result := 0;         end;
 
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
 var

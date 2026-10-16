@@ -111,12 +111,16 @@ function SOCK_NONBLOCK: Integer; external name '_SockNonBlock';  { accept4 flag 
   -- unconditionally, because that is the only thing this unit ever asks
   accept4 for, and Darwin's SOCK_NONBLOCK seam value is 0 (there is no such
   flag), so AFlags cannot carry the request.  Not atomic the way accept4 is,
-  but the fd is not yet visible to any other code. }
+  but the fd is not yet visible to any other code.  The connection also gets
+  SO_NOSIGPIPE, Darwin's stand-in for the MSG_NOSIGNAL its sends cannot use. }
 function c_accept4(AFd: Integer; AAddr, AAddrLen: Pointer; AFlags: Integer): Integer;
 begin
   Result := c_accept(AFd, AAddr, AAddrLen);
   if Result >= 0 then
+  begin
     c_fcntl3(Result, F_SETFL, c_fcntl3(Result, F_GETFL, 0) or O_NONBLOCK());
+    SuppressSigPipe(Result);
+  end;
 end;
 {$ENDIF}
 function SOL_SOCKET_: Integer;   external name '_SolSocket';
