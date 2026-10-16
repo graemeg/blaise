@@ -24,6 +24,10 @@ type
   protected
     procedure SetUp; override;
   published
+    { record call results (string and dyn-array fields) as address bases in every
+      call form release what they own: a getter's result (O.R.A[1]) leaked a
+      string on arm64 }
+    procedure TestDebug_RecordCallAddressBases_NoLeak;
     procedure TestDebug_DiscardedResultsEveryKind_NoLeak;
     procedure TestDebug_StaticAggregateMembers_NoLeak;
     procedure TestDebug_InterfaceGettersStatics_NoLeak;
@@ -4395,6 +4399,88 @@ begin
   AssertEquals('exit 0', 0, ExitCode);
   AssertEquals('stdout',
     'done' + LineEnding, Output);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_RecordCallAddressBases_NoLeak;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..3] of Integer;
+      TRec = record
+        A: TArr; S: string; D: array of Integer;
+        function Clone: TRec;
+      end;
+      TRecFn = reference to function(N: Integer): TRec;
+      IMk = interface
+        function Mk(N: Integer): TRec;
+      end;
+      TBase = class(IMk)
+      public
+        function Mk(N: Integer): TRec; virtual;
+      end;
+      TObj = class(TBase)
+      private
+        FR: TRec;
+        function GetR: TRec;
+        function GetRI(I: Integer): TRec;
+        static function GetSR: TRec;
+      public
+        function Mk(N: Integer): TRec; override;
+        procedure Run;
+        static function SMk(N: Integer): TRec;
+        property R: TRec read GetR;
+        property RI[I: Integer]: TRec read GetRI;
+        static property SR: TRec read GetSR;
+      end;
+    function F(N: Integer): TRec;
+    var I: Integer;
+    begin
+      for I := 0 to 3 do Result.A[I] := N + I;
+      Result.S := 's' + IntToStr(N);
+      SetLength(Result.D, 3); Result.D[1] := N * 10;
+    end;
+    function TRec.Clone: TRec; begin Result := Self; Result.A[0] := Result.A[0] + 1000; end;
+    function TBase.Mk(N: Integer): TRec; begin Result := F(N); end;
+    function TObj.Mk(N: Integer): TRec; begin Result := F(N + 1); end;
+    function TObj.GetR: TRec; begin Result := F(40); end;
+    function TObj.GetRI(I: Integer): TRec; begin Result := F(I); end;
+    static function TObj.GetSR: TRec; begin Result := F(50); end;
+    static function TObj.SMk(N: Integer): TRec; begin Result := F(N); end;
+    function MkFn: TRecFn; begin Result := function(N: Integer): TRec begin Result := F(N * 2); end; end;
+    procedure ShowOpen(const A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
+    procedure TObj.Run; begin WriteLn(Mk(4).A[1], ' ', Mk(4).D[1], ' ', inherited Mk(4).A[2], ' ', Self.Mk(4).A[3]); end;
+    var O: TObj; I: IMk; Fn: TRecFn; R: TRec; Pi: ^Integer; X: Integer;
+    begin
+      O := TObj.Create(); I := O; Fn := MkFn();
+      WriteLn(F(1).A[1], ' ', F(1).S[1], ' ', F(1).D[1]);
+      WriteLn(O.Mk(1).A[1], ' ', O.Mk(1).S[1], ' ', O.Mk(1).D[1]);
+      WriteLn(TObj.SMk(2).A[1], ' ', TObj.SMk(2).D[1]);
+      WriteLn(I.Mk(3).A[1], ' ', I.Mk(3).S[1], ' ', I.Mk(3).D[1]);
+      O.Run();
+      WriteLn(Fn(5).A[1], ' ', MkFn()(5).A[2], ' ', Fn(5).D[1]);
+      WriteLn(O.R.A[1], ' ', O.R.D[1], ' ', O.RI[7].A[2], ' ', TObj.SR.A[3]);
+      R := F(8); WriteLn(R.Clone().A[0], ' ', F(8).Clone().A[1], ' ', R.Clone().D[1]);
+      O.Free();
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(Src, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertEquals('stdout',
+    '2 49 10' + LineEnding +
+    '3 50 20' + LineEnding +
+    '3 20' + LineEnding +
+    '5 52 40' + LineEnding +
+    '6 50 6 8' + LineEnding +
+    '11 12 100' + LineEnding +
+    '41 400 9 53' + LineEnding +
+    '1008 9 80' + LineEnding, Output);
 end;
 
 initialization

@@ -1698,7 +1698,11 @@ begin
     routes this shape the same way. }
   if RecordPropRead(AFA) <> nil then
   begin
+    { (the temp owns the getter result's managed fields; the address
+      consumer copies with a retain, so the temp is released at the
+      statement end -- it leaked a string per O.R.A[1]) }
     EmitRecPropToTemp(RecordPropRead(AFA));
+    DeferAggRelease(AFA.ResolvedType);
     Exit;
   end;
   if AFA.IsClassVarRead then
@@ -2137,8 +2141,22 @@ begin
   end;
   if RecordPropRead(AExpr) <> nil then
   begin
-    { a record-typed property (L[I] on a TList<TRec>): its getter's value }
+    { a record-typed property (L[I] on a TList<TRec>): its getter's value,
+      released at the statement end -- the address consumer copies out of
+      it with a retain (the field-read paths that dismantle the temp
+      themselves call EmitRecPropToTemp directly, not through here) }
     EmitRecPropToTemp(RecordPropRead(AExpr));
+    DeferAggRelease(AExpr.ResolvedType);
+    Exit;
+  end;
+  if IsRecordCallArg(AExpr) then
+  begin
+    { a record CALL as an address base -- F(9).A[1], O.Mk(3).In1.A[2],
+      @F(9).A[1], ShowOpen(F(2).A): the result has no slot of its own, so it
+      is materialised into its per-site scratch and kept alive to the end of
+      the statement (its managed fields are released by the _pendrel flush),
+      and the scratch's address is the record's address }
+    EmitAggCallScalarToX0(AExpr);
     Exit;
   end;
   if AExpr is TIdentExpr then

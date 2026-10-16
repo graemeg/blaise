@@ -28,6 +28,26 @@ type
   protected
     procedure SetUp; override;
   published
+    { Record call results passed as arguments, side by side: a managed record from
+      a method on Self (hoisted into its own stack buffer) and a register-returned
+      one from a plain call -- Resolve(Self.MakeSpec(), Host()).  The hoist leant
+      on EmitExprToEax leaving a plain call's result at %rsp; once that result got
+      a frame scratch the hoist region was missized and x86-64 crashed. }
+    procedure TestRun_RecordCallArgs_ManagedAndRegisterShaped;
+    { Record call results consumed through their address: an open-array argument
+      (ShowOpen(O.Mk(1).A)), @, Length/High, and several in one expression.  On
+      x86-64 a plain call's result buffer was a mid-expression `subq` that was
+      never freed, so the next pop of an operand already pushed read the buffer:
+      F(1).A[1] + F(2).A[1] + F(3).A[1] gave 7, not 9. }
+    procedure TestRun_RecordCallAsAddressBase_EveryConsumer;
+    { A record produced by every call form -- function, method, static method,
+      interface method, implicit-Self method, inherited, closure, GetFn()(X),
+      getter, indexed getter, static property, record method -- used as the base
+      of an element, string-char or dyn-array read (F(9).A[1], O.R.D[1]).  arm64
+      refused the record call base ("record address of this expression",
+      BUG-20261010-recordcall-field-address-base); x86-64 called a method,
+      inherited or getter base with no result buffer and crashed. }
+    procedure TestRun_RecordCallAsAddressBase_EveryCallForm;
     { Discarded results of every owned kind on every receiver form -- implicit
       Self, a named object, a call result, a field, a static method, a free
       function: each needs a result buffer when it returns through x8 / the
@@ -2689,6 +2709,205 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     'done' + LineEnding, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_RecordCallAsAddressBase_EveryCallForm;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..3] of Integer;
+      TRec = record
+        A: TArr; S: string; D: array of Integer;
+        function Clone: TRec;
+      end;
+      TRecFn = reference to function(N: Integer): TRec;
+      IMk = interface
+        function Mk(N: Integer): TRec;
+      end;
+      TBase = class(IMk)
+      public
+        function Mk(N: Integer): TRec; virtual;
+      end;
+      TObj = class(TBase)
+      private
+        FR: TRec;
+        function GetR: TRec;
+        function GetRI(I: Integer): TRec;
+        static function GetSR: TRec;
+      public
+        function Mk(N: Integer): TRec; override;
+        procedure Run;
+        static function SMk(N: Integer): TRec;
+        property R: TRec read GetR;
+        property RI[I: Integer]: TRec read GetRI;
+        static property SR: TRec read GetSR;
+      end;
+    function F(N: Integer): TRec;
+    var I: Integer;
+    begin
+      for I := 0 to 3 do Result.A[I] := N + I;
+      Result.S := 's' + IntToStr(N);
+      SetLength(Result.D, 3); Result.D[1] := N * 10;
+    end;
+    function TRec.Clone: TRec; begin Result := Self; Result.A[0] := Result.A[0] + 1000; end;
+    function TBase.Mk(N: Integer): TRec; begin Result := F(N); end;
+    function TObj.Mk(N: Integer): TRec; begin Result := F(N + 1); end;
+    function TObj.GetR: TRec; begin Result := F(40); end;
+    function TObj.GetRI(I: Integer): TRec; begin Result := F(I); end;
+    static function TObj.GetSR: TRec; begin Result := F(50); end;
+    static function TObj.SMk(N: Integer): TRec; begin Result := F(N); end;
+    function MkFn: TRecFn; begin Result := function(N: Integer): TRec begin Result := F(N * 2); end; end;
+    procedure ShowOpen(const A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
+    procedure TObj.Run; begin WriteLn(Mk(4).A[1], ' ', Mk(4).D[1], ' ', inherited Mk(4).A[2], ' ', Self.Mk(4).A[3]); end;
+    var O: TObj; I: IMk; Fn: TRecFn; R: TRec; Pi: ^Integer; X: Integer;
+    begin
+      O := TObj.Create(); I := O; Fn := MkFn();
+      WriteLn(F(1).A[1], ' ', F(1).S[1], ' ', F(1).D[1]);
+      WriteLn(O.Mk(1).A[1], ' ', O.Mk(1).S[1], ' ', O.Mk(1).D[1]);
+      WriteLn(TObj.SMk(2).A[1], ' ', TObj.SMk(2).D[1]);
+      WriteLn(I.Mk(3).A[1], ' ', I.Mk(3).S[1], ' ', I.Mk(3).D[1]);
+      O.Run();
+      WriteLn(Fn(5).A[1], ' ', MkFn()(5).A[2], ' ', Fn(5).D[1]);
+      WriteLn(O.R.A[1], ' ', O.R.D[1], ' ', O.RI[7].A[2], ' ', TObj.SR.A[3]);
+      R := F(8); WriteLn(R.Clone().A[0], ' ', F(8).Clone().A[1], ' ', R.Clone().D[1]);
+      O.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '2 49 10' + LineEnding +
+    '3 50 20' + LineEnding +
+    '3 20' + LineEnding +
+    '5 52 40' + LineEnding +
+    '6 50 6 8' + LineEnding +
+    '11 12 100' + LineEnding +
+    '41 400 9 53' + LineEnding +
+    '1008 9 80' + LineEnding, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_RecordCallAsAddressBase_EveryConsumer;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..3] of Integer;
+      TRec = record
+        A: TArr; S: string; D: array of Integer;
+        function Clone: TRec;
+      end;
+      TRecFn = reference to function(N: Integer): TRec;
+      IMk = interface
+        function Mk(N: Integer): TRec;
+      end;
+      TBase = class(IMk)
+      public
+        function Mk(N: Integer): TRec; virtual;
+      end;
+      TObj = class(TBase)
+      private
+        FR: TRec;
+        function GetR: TRec;
+        function GetRI(I: Integer): TRec;
+        static function GetSR: TRec;
+      public
+        function Mk(N: Integer): TRec; override;
+        procedure Run;
+        static function SMk(N: Integer): TRec;
+        property R: TRec read GetR;
+        property RI[I: Integer]: TRec read GetRI;
+        static property SR: TRec read GetSR;
+      end;
+    function F(N: Integer): TRec;
+    var I: Integer;
+    begin
+      for I := 0 to 3 do Result.A[I] := N + I;
+      Result.S := 's' + IntToStr(N);
+      SetLength(Result.D, 3); Result.D[1] := N * 10;
+    end;
+    function TRec.Clone: TRec; begin Result := Self; Result.A[0] := Result.A[0] + 1000; end;
+    function TBase.Mk(N: Integer): TRec; begin Result := F(N); end;
+    function TObj.Mk(N: Integer): TRec; begin Result := F(N + 1); end;
+    function TObj.GetR: TRec; begin Result := F(40); end;
+    function TObj.GetRI(I: Integer): TRec; begin Result := F(I); end;
+    static function TObj.GetSR: TRec; begin Result := F(50); end;
+    static function TObj.SMk(N: Integer): TRec; begin Result := F(N); end;
+    function MkFn: TRecFn; begin Result := function(N: Integer): TRec begin Result := F(N * 2); end; end;
+    procedure ShowOpen(const A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
+    procedure TObj.Run; begin end;
+    var O: TObj; I: IMk; Fn: TRecFn; R: TRec; Pi: ^Integer; X: Integer;
+    begin
+      O := TObj.Create(); I := O; Fn := MkFn();
+      ShowOpen(O.Mk(1).A); ShowOpen(I.Mk(1).A); ShowOpen(TObj.SMk(1).A); ShowOpen(Fn(1).A); ShowOpen(O.R.A); ShowOpen(F(1).D);
+      Pi := @O.Mk(3).A[1]; WriteLn(Pi^); Pi := @I.Mk(3).A[2]; WriteLn(Pi^); Pi := @Fn(3).A[3]; WriteLn(Pi^);
+      WriteLn(Length(O.Mk(4).A), ' ', Length(I.Mk(4).D), ' ', High(Fn(4).A), ' ', Length(O.Mk(4).S));
+      X := O.Mk(5).A[1] + I.Mk(5).A[1] + TObj.SMk(5).A[1] + Fn(5).A[1] + F(5).A[1] + O.R.A[1]; WriteLn(X);
+      X := F(1).A[1] + F(2).A[1] + F(3).A[1]; WriteLn(X);
+      WriteLn(F(1).A[1] + F(2).A[1] + F(3).A[1] + F(4).A[1]);
+      O.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '2 3 4 5 ' + LineEnding +
+    '2 3 4 5 ' + LineEnding +
+    '1 2 3 4 ' + LineEnding +
+    '2 3 4 5 ' + LineEnding +
+    '40 41 42 43 ' + LineEnding +
+    '0 10 0 ' + LineEnding +
+    '5' + LineEnding +
+    '6' + LineEnding +
+    '9' + LineEnding +
+    '4 3 3 2' + LineEnding +
+    '78' + LineEnding +
+    '9' + LineEnding +
+    '14' + LineEnding, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_RecordCallArgs_ManagedAndRegisterShaped;
+const
+  Src = '''
+    program TS;
+    type
+      TOS = (osLinux, osMac);
+      TCPU = (cpuX, cpuA);
+      TTarget = record OS: TOS; CPU: TCPU; end;
+      TSpec = record
+        Name: string; EnvVar: string; Cands: array of string; Prefix: string; HostTool: Boolean;
+      end;
+      TT = class
+        function MakeSpec: TSpec;
+        procedure Run;
+      end;
+    function Host: TTarget; begin Result.OS := osLinux; Result.CPU := cpuA; end;
+    function Resolve(const ASpec: TSpec; const ATarget: TTarget): string;
+    begin
+      Result := ASpec.Name + ':' + IntToStr(Length(ASpec.Cands)) + ':' + IntToStr(Ord(ATarget.CPU));
+    end;
+    function TT.MakeSpec: TSpec;
+    begin
+      Result.Name := 'linker'; SetLength(Result.Cands, 2); Result.Cands[0] := 'cc'; Result.Cands[1] := 'clang';
+    end;
+    procedure TT.Run;
+    var R: string;
+    begin
+      R := Resolve(Self.MakeSpec(), Host());
+      WriteLn(R);
+      R := Resolve(MakeSpec(), Host());
+      WriteLn(R);
+    end;
+    var T: TT;
+    begin
+      T := TT.Create(); T.Run(); T.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'linker:2:1' + LineEnding +
+    'linker:2:1' + LineEnding, 0);
 end;
 
 initialization

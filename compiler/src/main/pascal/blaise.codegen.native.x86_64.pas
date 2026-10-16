@@ -8986,6 +8986,25 @@ begin
     Exit;
   end;
 
+  { A RECORD-returning call as a value, in every call form -- F(9).A[1],
+    O.Mk(3).A[2], TC.SMk(4).N, I.Mk(1).D[1], inherited Mk(4).A[2], the
+    getter behind O.R.A[1] / O.RI[7].D[1], GetFn()(5).A[3].  The callee
+    returns through the hidden result pointer, so the call gets a per-site
+    FRAME scratch and the scratch's address is the record's value (its
+    managed fields are released at the statement end).
+    Each form used to be handled differently, and wrongly: a method call,
+    an inherited call or a getter passed no buffer at all (the callee took
+    Self as the result pointer and crashed), and a plain call allocated its
+    buffer with `subq` mid-expression and never freed it, so the next pop of
+    an operand already pushed for the enclosing expression read the buffer
+    instead -- F(1).A[1] + F(2).A[1] + F(3).A[1] gave 7, not 9. }
+  if (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyRecord) and
+     Self.IsNativeRecordCall(AExpr) then
+  begin
+    Self.EmitAggCallToRax(AExpr);
+    Exit;
+  end;
+
   if AExpr is TIntLiteral then
   begin
     { Shortest correct materialisation: movl (zero-extends), movq (sign-
@@ -22052,8 +22071,21 @@ begin
         Self.EmitRecordCallSretAt(Arg, '(%rsp)', False);
         Self.Emit(#9'leaq (%rsp), %rax');
       end
+      else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyRecord) then
+      begin
+        { any other record call (F(X), inherited F(X), a static getter): the
+          same explicit stack buffer.  This used to lean on EmitExprToEax
+          leaving its sret buffer at %rsp -- the stray `subq` that corrupted
+          operands pushed by an enclosing expression -- and once that took a
+          frame scratch, the region sized below no longer existed and every
+          later argument reload read the wrong slot (a crash passing
+          Resolve(Self.MakeSpec(), Host())). }
+        Self.Emit(Format(#9'subq $%d, %%rsp', [Self.RecArgBufBytes(Arg)]));
+        Self.EmitRecordCallSretAt(Arg, '(%rsp)', False);
+        Self.Emit(#9'leaq (%rsp), %rax');
+      end
       else
-        Self.EmitExprToEax(Arg);        { buffer at %rsp, pointer in %rax }
+        Self.EmitExprToEax(Arg);        { jumbo set: buffer at %rsp, pointer in %rax }
       { The buffer (RecArgBufBytes, 16-aligned) plus the 8-byte saved pointer
         would leave the hoist region 8 bytes off 16-alignment.  Reserve a
         16-byte slot for the pointer (push + 8-byte pad) so the total stays a

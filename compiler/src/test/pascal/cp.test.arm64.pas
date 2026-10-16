@@ -693,28 +693,28 @@ begin
   Raised := False;
   Msg := '';
   try
-    { An element of a dyn-array FIELD of a record-returning call
-      (BUG-20261010-recordcall-field-address-base) is the current stand-in
-      for "a construct the arm64 subset has not reached yet".  This has now
-      been repointed four times -- it was a generic RECORD, then a JUMBO SET,
-      then an unmanaged record threadvar, then a managed one, and all of them
-      now lower.  Repoint it again rather than deleting it when this one lands
-      too: the point of the test is that a gap fails LOUDLY at compile time
-      with a clear file/line, never silently miscompiling. }
+    { A procedural-field call on an OWNED transient receiver (MkObj().Fn())
+      is the current stand-in for "a construct the arm64 subset has not
+      reached yet".  This has now been repointed five times -- it was a
+      generic RECORD, then a JUMBO SET, then an unmanaged record threadvar,
+      then a managed one, then an element of a record call's dyn-array field,
+      and all of them now lower.  Repoint it again rather than deleting it
+      when this one lands too: the point of the test is that a gap fails
+      LOUDLY at compile time with a clear file/line, never silently
+      miscompiling. }
     GenAsm(
       '''
       program P;
       type
-        TR = record
-          A: array of Integer;
-        end;
-      function F(N: Integer): TR;
+        TFn = reference to function: Integer;
+        TObj = class Fn: TFn; end;
+      function MkObj: TObj;
       begin
-        SetLength(Result.A, 2);
-        Result.A[1] := N
+        Result := TObj.Create();
+        Result.Fn := function: Integer begin Result := 7 end
       end;
       begin
-        WriteLn(F(9).A[1])
+        WriteLn(MkObj().Fn())
       end.
       ''', TargetArm64);
   except

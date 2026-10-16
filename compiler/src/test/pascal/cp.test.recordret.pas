@@ -30,6 +30,9 @@ type
   private
     function Callee(const ASrc, AName, ATarget: string): string;
   published
+    { a record call as the base of an element read (F(1).A[1], O.MkRec(3).A[2])
+      materialises into a per-site frame scratch on both ISAs }
+    procedure TestCodegen_RecordCallFieldBase_FrameScratchPerSite;
     { TC.SGetI(); -- a discarded static method's interface result still needs
       a buffer for the callee to write: both ISAs called it with none }
     procedure TestCodegen_DiscardedStaticIntfResult_PassesBuffer;
@@ -493,6 +496,35 @@ begin
   AssertTrue('arm64: x8 is set right before the call',
     Pos(#10#9'bl _TC_SGetI', GenAsm(Src, TargetArm64)) >
     Pos(#9'sub x8, x29, #', GenAsm(Src, TargetArm64)));
+end;
+
+procedure TRecordReturnTests.TestCodegen_RecordCallFieldBase_FrameScratchPerSite;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..3] of Integer;
+      TRec = record A: TArr; end;
+      TObj = class
+      public
+        function MkRec(N: Integer): TRec;
+      end;
+    function F(N: Integer): TRec; begin Result.A[1] := N; end;
+    function TObj.MkRec(N: Integer): TRec; begin Result.A[2] := N; end;
+    var O: TObj; X: Integer;
+    begin
+      X := F(1).A[1] + F(2).A[1] + F(3).A[1];
+      X := O.MkRec(3).A[2];
+    end.
+    ''';
+begin
+  { arm64 lowers a record call as an element base at all (it was a NotYet);
+    x86-64 gives each call a scratch of its own (no mid-expression subq), the
+    method call included (it was passed no buffer) }
+  AssertEquals('per-site scratch, method call too', '',
+    AsmMissing(Src, 'leaq _sacall_3(%rip), %rax', 'bl _TObj_MkRec'));
+  AssertTrue('x86-64: three plain calls, three scratches',
+    Pos('leaq _sacall_2(%rip), %rax', GenAsm(Src, TargetX86_64)) >= 0);
 end;
 
 initialization
