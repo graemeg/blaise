@@ -25114,11 +25114,9 @@ begin
   begin
     Self.EmitExprToEax(ACall.ObjExpr);
     { an owned transient receiver (MkObj().GetIt(), a getter read) is
-      released after the statement -- it leaked }
-    if (ACall.ObjExpr.ResolvedType <> nil) and
-       (ACall.ObjExpr.ResolvedType.Kind = tyClass) and
-       NativeExprOwnsRef(ACall.ObjExpr) then
-      Self.DeferNativeClassRelease();
+      released after the statement -- it leaked -- and so is a fresh
+      constructor result (TFoo.Create().GetIt()), pinned first }
+    Self.DeferOwnedClassRecv(ACall.ObjExpr);
     Self.Emit(#9'movq %rax, %r10');
   end
   else

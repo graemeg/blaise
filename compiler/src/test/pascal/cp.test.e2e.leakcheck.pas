@@ -24,6 +24,12 @@ type
   protected
     procedure SetUp; override;
   published
+    { A fresh constructor result as the receiver of a method returning an
+      aggregate -- TT.Create().GetB() (a record), .GetI() (an interface), .GetFn()
+      (a closure) -- read, assigned or discarded, frees the instance after the
+      call.  It has no owner but the call, so it must be pinned and released;
+      arm64 leaked it for a record result, x86-64 for an interface result. }
+    procedure TestDebug_CtorResultReceiver_AggregateResults_NoLeak;
     { a managed static array from a getter passed as an open array releases its
       elements }
     procedure TestDebug_StaticArrayGetterOpenArrayArg_NoLeak;
@@ -4727,6 +4733,57 @@ begin
   AssertEquals('stdout',
     'a1 b2 ' + LineEnding +
     'a1 b2 ' + LineEnding, Output);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_CtorResultReceiver_AggregateResults_NoLeak;
+const
+  Src = '''
+    program CtorRecv;
+    type
+      IThing = interface function Name: string; end;
+      TThing = class(IThing) function Name: string; end;
+      TFn = reference to function(A: Integer): Integer;
+      TBig = record A, B, C: Int64; S: string; end;
+      TT = class
+        function GetI: IThing;
+        function GetFn: TFn;
+        function GetB: TBig;
+        function GetN: Integer;
+      end;
+    function TThing.Name: string; begin Result := 'thing'; end;
+    function TT.GetI: IThing; begin Result := TThing.Create(); end;
+    function TT.GetFn: TFn; begin Result := function(A: Integer): Integer begin Result := A * 3; end; end;
+    function TT.GetB: TBig; begin Result.S := 'big' + IntToStr(1); Result.C := 7; end;
+    function TT.GetN: Integer; begin Result := 3; end;
+    var I: IThing; F: TFn; B: TBig;
+    begin
+      WriteLn(TT.Create().GetI().Name());
+      I := TT.Create().GetI(); WriteLn(I.Name());
+      WriteLn(TT.Create().GetFn()(4));
+      F := TT.Create().GetFn(); WriteLn(F(5));
+      WriteLn(TT.Create().GetB().S, ' ', TT.Create().GetB().C);
+      B := TT.Create().GetB(); WriteLn(B.S);
+      TT.Create().GetB();
+      TT.Create().GetI();
+      WriteLn(TT.Create().GetN());
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(Src, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertEquals('stdout',
+    'thing' + LineEnding +
+    'thing' + LineEnding +
+    '12' + LineEnding +
+    '15' + LineEnding +
+    'big1 7' + LineEnding +
+    'big1' + LineEnding +
+    '3' + LineEnding, Output);
 end;
 
 initialization

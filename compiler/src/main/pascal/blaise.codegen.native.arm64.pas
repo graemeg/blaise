@@ -11488,7 +11488,16 @@ begin
     else if ME.ObjExpr <> nil then
     begin
       Self.EmitExprToX0(ME.ObjExpr);
-      if ArcExprOwnsRef(ME.ObjExpr) then
+      if ArcIsUnownedCtorResult(ME.ObjExpr) then
+      begin
+        { TFoo.Create().MakeRec(): pin the fresh rc=0 instance so the release
+          after the call frees it, as the scalar method path does -- nothing
+          took a reference, so it leaked }
+        EmitPushX0();
+        EmitCallSym('_ClassAddRef');
+        EmitPopTo('x0');
+      end;
+      if ArcExprOwnsRef(ME.ObjExpr) or ArcIsUnownedCtorResult(ME.ObjExpr) then
       begin
         { MakeL().Next(): the receiver is an owned +1 transient.  Park it in
           a frame slot for the call and release it afterwards. }
