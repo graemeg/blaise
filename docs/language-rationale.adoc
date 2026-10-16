@@ -1776,6 +1776,14 @@ Literals inside RECORD methods and STATIC methods do not capture a
 receiver (records are caller-frame storage, not ARC instances; static
 methods have none); their member references fail with clear errors.
 
+A literal NESTED inside another literal (a closure that returns a
+closure) is an ordinary closure value as long as it captures nothing from
+the enclosing literal — its own parameters, locals and `Result` are its
+own.  Capturing the enclosing literal's names would need the inner
+environment to reach the outer one (environment chaining), which is
+deferred, so that remains a clear compile-time error rather than a
+silently wrong capture.
+
 === Method-pointer → `reference to` coercion (Phase 3)
 
 An `of object` value of matching callable signature (flags aside) assigns

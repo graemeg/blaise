@@ -62,6 +62,18 @@ type
       analysed, so it never saw the call as a use of G. }
     procedure TestSemantic_CallThroughCapturedClosureParam_Accepted;
 
+    { A literal nested in another literal that captures nothing is an
+      ordinary closure value; it was rejected as "capturing variables of an
+      enclosing anonymous method" before its captures were even collected.
+      Capturing the enclosing literal's names still needs environment
+      chaining and stays a clear error. }
+    procedure TestSemantic_NestedLiteral_NoCaptures_Accepted;
+    procedure TestSemantic_NestedLiteral_CapturingOuterLiteral_Rejected;
+    { A literal inside a STATIC method: there is no Self to capture, and the
+      conservative instance-method Self capture failed with "Cannot resolve
+      captured variable 'Self'". }
+    procedure TestSemantic_StaticMethodLiteral_CapturesNoSelf;
+
     { A call through the procedural value an element or a dereference holds,
       as a STATEMENT: A[I](args); and P^(args);  The parser read a subscript
       in statement position as the start of an assignment or member access
@@ -451,6 +463,98 @@ begin
     AssertNotNull('thunk records env captures', Thunk.EnvCaptured);
     AssertTrue('Step captured', Thunk.EnvCaptured.IndexOf('Step') >= 0);
     AssertTrue('Self captured', Thunk.EnvCaptured.IndexOf('Self') >= 0);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TAnonMethodTests.TestSemantic_NestedLiteral_NoCaptures_Accepted;
+const
+  Src =
+    '''
+    program P;
+    type
+      TKFn = reference to function(A: Integer): Integer;
+      TCFn = reference to function(): TKFn;
+    function GetC(): TCFn;
+    begin
+      Result := function(): TKFn
+        begin
+          Result := function(A: Integer): Integer begin Result := A + 1000; end;
+        end;
+    end;
+    begin
+      WriteLn(GetC()()(5))
+    end.
+    ''';
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc(Src);
+  Prog.Free();
+end;
+
+procedure TAnonMethodTests.TestSemantic_NestedLiteral_CapturingOuterLiteral_Rejected;
+const
+  Src =
+    '''
+    program P;
+    type
+      TKFn = reference to function(A: Integer): Integer;
+      TCFn = reference to function(B: Integer): TKFn;
+    function GetC(): TCFn;
+    begin
+      Result := function(B: Integer): TKFn
+        begin
+          Result := function(A: Integer): Integer begin Result := A + B; end;
+        end;
+    end;
+    begin
+      WriteLn(GetC()(1)(5))
+    end.
+    ''';
+begin
+  AssertTrue('capturing the enclosing literal''s parameter is rejected',
+    Pos('enclosing anonymous method', SemanticError(Src)) >= 0);
+end;
+
+procedure TAnonMethodTests.TestSemantic_StaticMethodLiteral_CapturesNoSelf;
+const
+  Src =
+    '''
+    program P;
+    type
+      TKFn = reference to function(A: Integer): Integer;
+      TC = class
+        static function MakeFn(N: Integer): TKFn;
+      end;
+    static function TC.MakeFn(N: Integer): TKFn;
+    begin
+      Result := function(A: Integer): Integer begin Result := A * N; end;
+    end;
+    begin
+      WriteLn(TC.MakeFn(3)(7))
+    end.
+    ''';
+var
+  Prog:  TProgram;
+  MD:    TMethodDecl;
+  Thunk: TMethodDecl;
+  I:     Integer;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    Thunk := nil;
+    for I := 0 to Prog.Block.ProcDecls.Count - 1 do
+    begin
+      MD := TMethodDecl(Prog.Block.ProcDecls.Items[I]);
+      if MD.Name = '__closure_1' then Thunk := MD;
+    end;
+    AssertNotNull('lifted thunk registered', Thunk);
+    AssertNotNull('thunk records env captures', Thunk.EnvCaptured);
+    AssertTrue('N captured', Thunk.EnvCaptured.IndexOf('N') >= 0);
+    AssertTrue('no Self in a static method',
+      Thunk.EnvCaptured.IndexOf('Self') < 0);
   finally
     Prog.Free();
   end;

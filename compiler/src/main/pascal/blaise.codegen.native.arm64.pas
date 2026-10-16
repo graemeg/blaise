@@ -2699,6 +2699,17 @@ begin
   if not (AExpr is TMethodCallExpr) then
     Exit;
   MC := TMethodCallExpr(AExpr);
+  if (MC.ResolvedMethod is TMethodDecl) and
+     (MC.IsStaticCall or TMethodDecl(MC.ResolvedMethod).IsStatic) and
+     not MC.IsConstructorCall and
+     IsMethodPtrType(TMethodDecl(MC.ResolvedMethod).ResolvedReturnType) then
+  begin
+    { TFoo.MakeFn(X) -- a static method: no receiver }
+    ATmp := EmitClosureResultCall(TMethodDecl(MC.ResolvedMethod), MC.Name,
+      MC.Args);
+    Result := True;
+    Exit;
+  end;
   if not (MC.ResolvedMethod is TMethodDecl) or MC.IsConstructorCall or
      MC.IsStaticCall or MC.IsProcFieldCall or MC.IsMetaclassDispatch or
      TMethodDecl(MC.ResolvedMethod).IsRecordMethod or

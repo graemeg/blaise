@@ -18345,10 +18345,10 @@ begin
       NESTED ROUTINES resolve (BUG-008) — a literal directly inside the
       method body is still the InMethod case (conservative Self capture). }
     InMethod := True;
-  if Encl.IsAnonThunk then
-    SemanticError('Capturing variables of an enclosing anonymous method ' +
-      'is not yet supported (nested closure environments are a later phase)',
-      AThunk.Line, AThunk.Col);
+  { a STATIC method has no Self to capture: its literals capture like those
+    of a standalone routine }
+  if InMethod and Encl.IsStatic then
+    InMethod := False;
 
   CollectCaptures(AThunk, Encl);
   { An anonymous method inside a CLASSIC NESTED ROUTINE of a method cannot
@@ -18395,6 +18395,17 @@ begin
         end;
       if Own then AThunk.CapturedVars.Delete(I);
     end;
+  { A literal nested in another literal: one that captures nothing needs no
+    environment and is an ordinary closure value.  Capturing the enclosing
+    literal's names would need environment chaining, which is deferred. }
+  if Encl.IsAnonThunk then
+  begin
+    if (AThunk.CapturedVars <> nil) and (AThunk.CapturedVars.Count > 0) then
+      SemanticError('Capturing variables of an enclosing anonymous method ' +
+        'is not yet supported (nested closure environments are a later phase)',
+        AThunk.Line, AThunk.Col);
+    Exit;
+  end;
   { Classify captures: BLOCK-SCOPED names (declared by a 'var' statement,
     Phase 4) belong to their declaring block's per-execution env; all other
     names belong to the routine-level frame env.  v1 supports ONE scope per

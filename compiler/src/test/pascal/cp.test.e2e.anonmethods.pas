@@ -190,6 +190,10 @@ type
       arm64 refused it ("float-returning call through a captured closure
       variable") }
     procedure TestRun_CapturedClosure_FloatResult;
+    { a literal nested in another one that captures nothing, and a literal
+      inside a static method (no Self) -- both were rejected at compile time }
+    procedure TestRun_NestedNonCapturingLiteral;
+    procedure TestRun_LiteralInStaticMethod;
   end;
 
 implementation
@@ -2600,6 +2604,56 @@ const Src =
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'nested 3.00 3.00 7.00'#10'anon 12.00 12.00 9.00'#10, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_NestedNonCapturingLiteral;
+const
+  Src = '''
+    program P;
+    type
+      TKFn = reference to function(A: Integer): Integer;
+      TCFn = reference to function(): TKFn;
+    function GetC(): TCFn;
+    begin
+      Result := function(): TKFn
+        begin
+          Result := function(A: Integer): Integer begin Result := A + 1000; end;
+        end;
+    end;
+    var C: TCFn; K: TKFn;
+    begin
+      C := GetC();
+      K := C();
+      WriteLn(K(6), ' ', K(5));
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '1006 1005' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_LiteralInStaticMethod;
+const
+  Src = '''
+    program P;
+    type
+      TKFn = reference to function(A: Integer): Integer;
+      TC = class
+        static function MakeFn(N: Integer): TKFn;
+      end;
+    static function TC.MakeFn(N: Integer): TKFn;
+    begin
+      Result := function(A: Integer): Integer begin Result := A * N; end;
+    end;
+    var K: TKFn;
+    begin
+      K := TC.MakeFn(3);
+      WriteLn(K(7));
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '21' + LineEnding, 0);
 end;
 
 initialization
