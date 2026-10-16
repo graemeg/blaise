@@ -28,6 +28,25 @@ type
   protected
     procedure SetUp; override;
   published
+    { Discarded results of every owned kind on every receiver form -- implicit
+      Self, a named object, a call result, a field, a static method, a free
+      function: each needs a result buffer when it returns through x8 / the
+      hidden pointer, and what it owns released.  A static method's interface
+      result wrote through a garbage pointer on both ISAs, and its string, a
+      discarded closure from MkC().GetFn() and a free function's closure
+      leaked or corrupted memory. }
+    procedure TestRun_DiscardedResultsEveryKind;
+    { Aggregate-returning calls in SCALAR contexts and through inherited:
+      Assigned(GetFn()), TMethod(C.GetM()).Code, I.GetFn()(4), a discarded
+      I.GetFn(), `inherited GetFn();` setting a closure Result.  arm64 refused
+      them (the P6 "not yet lowered" family); x86-64 crashed. }
+    procedure TestRun_AggregateCallsInScalarContexts;
+    { Record, interface and closure results through the procedural value an
+      EXPRESSION yields (GetB()(5).S, I := GetI()(), GetC()()(5)) -- read,
+      assigned, passed, compared and discarded.  arm64 refused every form;
+      x86-64 compiled some and crashed (no result buffer), segfaulted the
+      compiler on GetC()()(5), and rejected the interface forms. }
+    procedure TestRun_ExprCalleeAggregateResults;
     { record-returning calls with every argument shape: open arrays,
       floats, stack overflow, captures (incl. six or more), var arguments,
       interfaces, a record receiver, virtual dispatch }
@@ -2425,6 +2444,251 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '11 2' + #10 + '4' + #10 + '19' + #10 + '5 10 15' + #10 +
     '16' + #10 + '7 8' + #10 + '9' + #10, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_ExprCalleeAggregateResults;
+const
+  Src = '''
+    program g;
+    type
+      TPt = record X, Y: Integer; end;
+      TBig = record A, B, C: Int64; S: string; end;
+      IThing = interface
+        function Name(): string;
+      end;
+      TThing = class(TObject, IThing)
+        FN: string;
+        constructor Create(const N: string);
+        function Name(): string;
+      end;
+      TBFn = reference to function(A: Integer): TBig;
+      TPFn = reference to function(A: Integer): TPt;
+      TIFn = reference to function(): IThing;
+      TKFn = reference to function(A: Integer): Integer;
+      TCFn = reference to function(): TKFn;
+    constructor TThing.Create(const N: string); begin FN := N; end;
+    function TThing.Name(): string; begin Result := FN; end;
+    function GetB(): TBFn; begin Result := function(A: Integer): TBig begin Result.A := A; Result.S := 'B' + IntToStr(A); end; end;
+    function GetP(): TPFn; begin Result := function(A: Integer): TPt begin Result.X := A; Result.Y := A * 2; end; end;
+    function GetI(): TIFn; begin Result := function(): IThing begin Result := TThing.Create('I'); end; end;
+    function GetC(): TCFn; begin Result := function(): TKFn begin Result := function(A: Integer): Integer begin Result := A + 1000; end; end; end;
+    procedure ShowB(const B: TBig); begin WriteLn('showB ', B.S); end;
+    procedure ShowBv(B: TBig); begin WriteLn('showBv ', B.S); end;
+    procedure ShowP(P: TPt); begin WriteLn('showP ', P.Y); end;
+    procedure ShowI(const I: IThing); begin WriteLn('showI ', I.Name()); end;
+    procedure ShowK(K: TKFn); begin WriteLn('showK ', K(1)); end;
+    var B: TBig; P: TPt; I: IThing; K: TKFn;
+    begin
+      WriteLn('1 ', GetB()(5).S);
+      B := GetB()(6); WriteLn('2 ', B.S);
+      ShowB(GetB()(7));
+      ShowBv(GetB()(8));
+      GetB()(9);
+      WriteLn('3 ', GetP()(5).Y);
+      P := GetP()(6); WriteLn('4 ', P.X);
+      ShowP(GetP()(7));
+      GetP()(9);
+      WriteLn('5 ', GetI()().Name());
+      I := GetI()(); WriteLn('6 ', I.Name());
+      ShowI(GetI()());
+      GetI()();
+      WriteLn('7 ', GetC()()(5));
+      K := GetC()(); WriteLn('8 ', K(6));
+      ShowK(GetC()());
+      GetC()();
+      if GetI()() <> nil then WriteLn('9 nonnil');
+      if GetP()(3).X = 3 then WriteLn('10 eq');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '1 B5' + LineEnding +
+    '2 B6' + LineEnding +
+    'showB B7' + LineEnding +
+    'showBv B8' + LineEnding +
+    '3 10' + LineEnding +
+    '4 6' + LineEnding +
+    'showP 14' + LineEnding +
+    '5 I' + LineEnding +
+    '6 I' + LineEnding +
+    'showI I' + LineEnding +
+    '7 1005' + LineEnding +
+    '8 1006' + LineEnding +
+    'showK 1001' + LineEnding +
+    '9 nonnil' + LineEnding +
+    '10 eq' + LineEnding, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_AggregateCallsInScalarContexts;
+const
+  Src = '''
+    program h;
+    type
+      TPt = record X, Y: Integer; end;
+      TBig = record A, B, C: Int64; S: string; end;
+      TKFn = reference to function(A: Integer): Integer;
+      TMFn = function(A: Integer): Integer of object;
+      IThing = interface
+        function GetFn(): TKFn;
+        function GetB(): TBig;
+      end;
+      TC = class(TObject, IThing)
+        function GetFn(): TKFn;
+        function GetM(): TMFn;
+        function GetB(): TBig;
+        function GetP(): TPt;
+        function Dbl(A: Integer): Integer;
+        procedure Run();
+      end;
+      TD = class(TC)
+        function GetFn(): TKFn;
+        function GetB(): TBig;
+        procedure Run2();
+      end;
+    function MkFn(): TKFn; begin Result := function(A: Integer): Integer begin Result := A + 1; end; end;
+    function MkP(A: Integer): TPt; begin Result.X := A; Result.Y := A * 10; end;
+    function MkC(): TC; begin Result := TC.Create(); end;
+    function TC.GetFn(): TKFn; begin Result := function(A: Integer): Integer begin Result := A * 2; end; end;
+    function TC.GetM(): TMFn; begin Result := @Self.Dbl; end;
+    function TC.GetB(): TBig; begin Result.S := 'cb'; Result.A := 1; end;
+    function TC.GetP(): TPt; begin Result.X := 4; Result.Y := 9; end;
+    function TC.Dbl(A: Integer): Integer; begin Result := A * 4; end;
+    procedure TC.Run();
+    var Fv: TKFn;
+    begin
+      if Assigned(GetFn()) then WriteLn('r1 assigned');
+      WriteLn('r2 ', GetP().Y);
+      WriteLn('r3 ', GetM()(5));
+      Fv := GetFn();
+      WriteLn('r4 ', Fv(2));
+      GetFn();
+      GetM();
+      GetB();
+    end;
+    function TD.GetFn(): TKFn; begin inherited GetFn(); end;
+    function TD.GetB(): TBig; begin inherited GetB(); Result.B := 5; end;
+    procedure TD.Run2();
+    begin
+      inherited GetFn();
+      inherited GetB();
+      WriteLn('d1 ', GetFn()(7), ' ', GetB().S, GetB().B);
+    end;
+    var C: TC; I: IThing; Fv: TKFn; Mv: TMFn; D: TD;
+    begin
+      C := TC.Create();
+      C.Run();
+      if Assigned(MkFn()) then WriteLn('1 assigned');
+      if Assigned(C.GetFn()) then WriteLn('2 assigned');
+      WriteLn('3 ', MkP(3).Y);
+      WriteLn('4 ', C.GetP().X);
+      WriteLn('5 ', C.GetM()(3));
+      Mv := C.GetM(); WriteLn('6 ', Mv(1));
+      I := C;
+      WriteLn('7 ', I.GetFn()(4));
+      Fv := I.GetFn(); WriteLn('8 ', Fv(5));
+      I.GetFn();
+      I.GetB();
+      MkC().GetFn();
+      MkC().GetB();
+      MkC().GetM();
+      if Assigned(I.GetFn()) then WriteLn('9 assigned');
+      WriteLn('10 ', TMethod(C.GetM()).Code <> nil);
+      D := TD.Create();
+      D.Run2();
+      WriteLn('11 ', I.GetB().S);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'r1 assigned' + LineEnding +
+    'r2 9' + LineEnding +
+    'r3 20' + LineEnding +
+    'r4 4' + LineEnding +
+    '1 assigned' + LineEnding +
+    '2 assigned' + LineEnding +
+    '3 30' + LineEnding +
+    '4 4' + LineEnding +
+    '5 12' + LineEnding +
+    '6 4' + LineEnding +
+    '7 8' + LineEnding +
+    '8 10' + LineEnding +
+    '9 assigned' + LineEnding +
+    '10 True' + LineEnding +
+    'd1 14 cb5' + LineEnding +
+    '11 cb' + LineEnding, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_DiscardedResultsEveryKind;
+const
+  Src = '''
+    program j;
+    type
+      TBig = record A, B, C: Int64; S: string; end;
+      TPt = record X, Y: Integer; end;
+      TKFn = reference to function(A: Integer): Integer;
+      TArr = array of Integer;
+      IThing = interface
+        function Name(): string;
+      end;
+      TC = class(TObject, IThing)
+        Inner: TC;
+        function Name(): string;
+        function GetS(): string;
+        function GetC(): TC;
+        function GetA(): TArr;
+        function GetI(): IThing;
+        function GetFn(): TKFn;
+        function GetB(): TBig;
+        function GetP(): TPt;
+        static function SGetS(): string;
+        static function SGetI(): IThing;
+        static function SGetFn(): TKFn;
+        static function SGetB(): TBig;
+        procedure Run();
+      end;
+    function TC.Name(): string; begin Result := 'n'; end;
+    function TC.GetS(): string; begin Result := 'abc' + IntToStr(1); end;
+    function TC.GetC(): TC; begin Result := TC.Create(); end;
+    function TC.GetA(): TArr; begin SetLength(Result, 3); end;
+    function TC.GetI(): IThing; begin Result := TC.Create(); end;
+    function TC.GetFn(): TKFn; begin Result := function(A: Integer): Integer begin Result := A; end; end;
+    function TC.GetB(): TBig; begin Result.S := 'x' + IntToStr(2); end;
+    function TC.GetP(): TPt; begin Result.X := 1; end;
+    static function TC.SGetS(): string; begin Result := 'q' + IntToStr(3); end;
+    static function TC.SGetI(): IThing; begin Result := TC.Create(); end;
+    static function TC.SGetFn(): TKFn; begin Result := function(A: Integer): Integer begin Result := A; end; end;
+    static function TC.SGetB(): TBig; begin Result.S := 'y' + IntToStr(4); end;
+    procedure TC.Run();
+    begin
+      GetS(); GetC(); GetA(); GetI(); GetFn(); GetB(); GetP();
+      Inner.GetS(); Inner.GetC(); Inner.GetA(); Inner.GetI(); Inner.GetFn(); Inner.GetB(); Inner.GetP();
+    end;
+    function MkC(): TC; begin Result := TC.Create(); end;
+    function MkFn(): TKFn; begin Result := function(A: Integer): Integer begin Result := A; end; end;
+    function MkI(): IThing; begin Result := TC.Create(); end;
+    function MkB(): TBig; begin Result.S := 'z' + IntToStr(5); end;
+    function MkS(): string; begin Result := 'z' + IntToStr(6); end;
+    type TSA = array[0..1] of string;
+    function MkSA(): TSA; begin Result[0] := 'w' + IntToStr(7); end;
+    var C: TC;
+    begin
+      C := TC.Create();
+      C.Inner := TC.Create();
+      C.Run();
+      C.GetS(); C.GetC(); C.GetA(); C.GetI(); C.GetFn(); C.GetB(); C.GetP();
+      MkC().GetS(); MkC().GetC(); MkC().GetA(); MkC().GetI(); MkC().GetFn(); MkC().GetB(); MkC().GetP();
+      C.Inner.GetS(); C.Inner.GetC(); C.Inner.GetA(); C.Inner.GetI(); C.Inner.GetFn(); C.Inner.GetB(); C.Inner.GetP();
+      TC.SGetS(); TC.SGetI(); TC.SGetFn(); TC.SGetB();
+      MkFn(); MkI(); MkB(); MkS(); MkSA();
+      WriteLn('done');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'done' + LineEnding, 0);
 end;
 
 initialization

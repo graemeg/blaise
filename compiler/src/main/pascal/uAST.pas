@@ -691,10 +691,10 @@ type
     { Set by uSemantic: }
     [Unretained] ResolvedClassType:  TTypeDesc;   { not owned }
     [Unretained] ResolvedMethod:     TObject;     { TMethodDecl — not owned; avoids forward ref }
-    { Set by uSemantic for itab dispatch only: the method's resolved return
-      type.  A discarded interface/record-returning call in statement
-      position still needs the sret calling convention — codegen reads this
-      to allocate a throwaway buffer. }
+    { Set by uSemantic: the method's resolved return type.  A discarded
+      aggregate-returning call in statement position still needs the sret
+      calling convention, and an owned result must be released — codegen
+      reads this to allocate a throwaway buffer and drop what it holds. }
     [Unretained] ResolvedReturnTypeDesc: TTypeDesc;  { not owned; nil for procedures }
     IsImplicitSelf:     Boolean;     { ObjectName is a field of Self }
     [Unretained] ImplicitBaseInfo:   TFieldInfo;  { not owned — the field of Self }

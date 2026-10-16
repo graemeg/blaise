@@ -17,7 +17,7 @@
 
 TFieldAccessExpr.FieldInfo                245  180
 TFieldAccessExpr.IsConstant               10  23
-TFieldAccessExpr.IsConstructorCall        7  15
+TFieldAccessExpr.IsConstructorCall        7  17
 TFieldAccessExpr.IsClassAccess            56  13
 TFieldAccessExpr.IsImplicitSelf           61  38
 TFieldAccessExpr.IsMethodCall             3  5
@@ -26,17 +26,17 @@ TFieldAccessExpr.IsGlobal                 34  4
 TFieldAccessExpr.IsClassNameAccess        1  2
 TFieldAccessExpr.IsClassTypeAccess        1  1
 TFieldAccessExpr.IsBuiltinToString        1  1
-TFieldAccessExpr.IsVarParam               145  104
+TFieldAccessExpr.IsVarParam               145  106
 TFieldAccessExpr.PropIndexExpr            22  21
 TFieldAccessExpr.IsCharAccess             1  1
 TFieldAccessExpr.IsArrayAccess            12  5
-TFieldAccessExpr.IsClassVarRead           4  6
-TFieldAccessExpr.IsStaticPropGet          1  2
-TMethodCallExpr.IsConstructorCall         7  15
+TFieldAccessExpr.IsClassVarRead           6  7
+TFieldAccessExpr.IsStaticPropGet          9  7
+TMethodCallExpr.IsConstructorCall         7  17
 TMethodCallExpr.IsMetaclassDispatch       4  4
-TMethodCallExpr.IsStaticCall              4  6
+TMethodCallExpr.IsStaticCall              6  7
 TMethodCallExpr.IsGlobal                  34  4
-TMethodCallExpr.IsVarParam                145  104
+TMethodCallExpr.IsVarParam                145  106
 TMethodCallExpr.IsBuiltinToString         1  1
 TMethodCallExpr.IsBuiltinInheritsFrom     1  1
-TMethodCallExpr.IsProcFieldCall           5  9
+TMethodCallExpr.IsProcFieldCall           5  10

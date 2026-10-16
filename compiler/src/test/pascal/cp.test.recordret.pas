@@ -30,6 +30,13 @@ type
   private
     function Callee(const ASrc, AName, ATarget: string): string;
   published
+    { TC.SGetI(); -- a discarded static method's interface result still needs
+      a buffer for the callee to write: both ISAs called it with none }
+    procedure TestCodegen_DiscardedStaticIntfResult_PassesBuffer;
+    { GetB()(5).S: a record result through the procedural value an expression
+      yields gets a result buffer -- x8 on arm64 (which refused the form), the
+      hidden first argument on x86-64 (which passed none and crashed) }
+    procedure TestCodegen_ExprCalleeRecordResult_PassesBuffer;
     { a hoisted interface-call result passed to a record-returning call fills
       BOTH slots of its argument (the slot path reloaded one) }
     procedure TestCodegen_SretCall_IntfResultArg_BothHalves;
@@ -433,6 +440,59 @@ begin
       var B: TBase;
       begin B := TBase.Create(); B.Go() end.
       ''', 'callq *', 'blr x'));
+end;
+
+procedure TRecordReturnTests.TestCodegen_ExprCalleeRecordResult_PassesBuffer;
+const
+  Src = '''
+    program P;
+    type
+      TBig = record A, B, C: Int64; S: string; end;
+      TBFn = reference to function(A: Integer): TBig;
+    function GetB(): TBFn;
+    begin
+      Result := function(A: Integer): TBig begin Result.S := 'B'; end;
+    end;
+    begin
+      WriteLn(GetB()(5).S)
+    end.
+    ''';
+var
+  A: string;
+  P: Integer;
+begin
+  AssertEquals('the indirect call takes a result pointer', '',
+    AsmMissing(Src, #9'movq 16(%rsp), %rdi'#10#9'callq *%r10',
+      #9'ldr x9, [x10]'#10#9'blr x9'));
+  A := GenAsm(Src, TargetArm64);
+  P := Pos(#9'ldr x9, [x10]'#10#9'blr x9', A);
+  AssertTrue('arm64: x8 points at the buffer just before the call',
+    Pos(#9'sub x8, x29, #', Copy(A, P - 60, 60)) >= 0);
+end;
+
+procedure TRecordReturnTests.TestCodegen_DiscardedStaticIntfResult_PassesBuffer;
+const
+  Src = '''
+    program P;
+    type
+      IThing = interface function Name(): string; end;
+      TC = class(TObject, IThing)
+        function Name(): string;
+        static function SGetI(): IThing;
+      end;
+    function TC.Name(): string; begin Result := 'n' end;
+    static function TC.SGetI(): IThing; begin Result := TC.Create() end;
+    begin
+      TC.SGetI()
+    end.
+    ''';
+begin
+  AssertEquals('the call is given a result buffer', '',
+    AsmMissing(Src, #9'movq %rsp, %rdi'#10#9'callq TC_SGetI',
+      #9'sub x8, x29, #'));
+  AssertTrue('arm64: x8 is set right before the call',
+    Pos(#10#9'bl _TC_SGetI', GenAsm(Src, TargetArm64)) >
+    Pos(#9'sub x8, x29, #', GenAsm(Src, TargetArm64)));
 end;
 
 initialization

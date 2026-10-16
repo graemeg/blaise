@@ -11783,9 +11783,9 @@ begin
     ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
     ACall.ResolvedClassType := RT;
     ACall.ResolvedMethod    := MDecl;
-    if (MDecl.ResolvedReturnType <> nil) and
-       (MDecl.ResolvedReturnType.Kind = tyRecord) then
-      ACall.ResolvedReturnTypeDesc := MDecl.ResolvedReturnType;
+    { every kind, as on a named receiver: Make().GetFn(); discarded a closure
+      result with no x8 buffer when only a record set it }
+    ACall.ResolvedReturnTypeDesc := MDecl.ResolvedReturnType;
     Exit;
   end;
 
@@ -11822,9 +11822,7 @@ begin
     ACall.ResolvedClassType := RT;
     ACall.ResolvedMethod    := MDecl;
     ACall.IsStaticCall      := True;
-    if (MDecl.ResolvedReturnType <> nil) and
-       (MDecl.ResolvedReturnType.Kind = tyRecord) then
-      ACall.ResolvedReturnTypeDesc := MDecl.ResolvedReturnType;
+    ACall.ResolvedReturnTypeDesc := MDecl.ResolvedReturnType;
     Exit;
   end;
   { Inside a method, class fields shadow same-named globals.  Try the
@@ -11907,9 +11905,7 @@ begin
       ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
       ACall.ResolvedClassType := RT;
       ACall.ResolvedMethod    := MDecl;
-      if (MDecl.ResolvedReturnType <> nil) and
-         (MDecl.ResolvedReturnType.Kind = tyRecord) then
-        ACall.ResolvedReturnTypeDesc := MDecl.ResolvedReturnType;
+      ACall.ResolvedReturnTypeDesc := MDecl.ResolvedReturnType;
       Exit;
     end;
   end;

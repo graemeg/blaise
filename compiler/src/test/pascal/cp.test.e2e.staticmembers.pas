@@ -26,6 +26,11 @@ type
   protected
     procedure SetUp; override;
   published
+    { Static members of aggregate type: a record static var's field
+      (TC.SB.S), a record / closure static property, a static method returning
+      a closure called directly, and `inherited GetT();` for an interface
+      result.  x86-64 read the static record as a pointer and crashed. }
+    procedure TestRun_StaticAggregateMembers;
     procedure TestRun_StaticVar_ReleasedAtExit_AndIntfFirstArg;
     procedure TestRun_StaticMethod_NoSelf;
     procedure TestRun_StaticVar_SharedAcrossCalls;
@@ -594,6 +599,70 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '2 3 k! z!' + #10 + '1 in!' + #10, 0);
+end;
+
+procedure TE2EStaticMembersTests.TestRun_StaticAggregateMembers;
+const
+  Src = '''
+    program k;
+    type
+      TBig = record A, B, C: Int64; S: string; end;
+      TKFn = reference to function(A: Integer): Integer;
+      IThing = interface
+        function Name(): string;
+      end;
+      TC = class(TObject, IThing)
+      public static var
+        SB: TBig;
+      public
+        FN: string;
+        function Name(): string;
+        function GetT(): IThing; virtual;
+        procedure Touch(); virtual;
+        static function GetSB(): TBig;
+        static function GetSF(): TKFn;
+        static property PSB: TBig read GetSB;
+        static property PSF: TKFn read GetSF;
+      end;
+      TD = class(TC)
+        function GetT(): IThing; override;
+        procedure Touch(); override;
+      end;
+    function TC.Name(): string; begin Result := FN; end;
+    function TC.GetT(): IThing; var C: TC; begin C := TC.Create(); C.FN := 'base'; Result := C; end;
+    procedure TC.Touch(); begin end;
+    static function TC.GetSB(): TBig; begin Result.S := 'sb' + IntToStr(1); Result.B := 9; end;
+    static function TC.GetSF(): TKFn; begin Result := function(A: Integer): Integer begin Result := A * 7; end; end;
+    function TD.GetT(): IThing; begin inherited GetT(); end;
+    procedure TD.Touch(); begin inherited GetT(); end;
+    procedure Show(const B: TBig); begin WriteLn('show ', B.S, ' ', B.B); end;
+    var D: TD; I: IThing; B: TBig; F: TKFn;
+    begin
+      D := TD.Create();
+      I := D.GetT();
+      WriteLn('1 ', I.Name());
+      WriteLn('2 ', D.GetT().Name());
+      D.Touch();
+      WriteLn('3 ', TC.PSB.S, ' ', TC.PSB.B);
+      B := TC.PSB;
+      WriteLn('4 ', B.S);
+      Show(TC.PSB);
+      F := TC.PSF;
+      WriteLn('5 ', F(2), ' ', TC.GetSF()(3));
+      TC.SB.S := 'svar';
+      WriteLn('6 ', TC.SB.S);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '1 base' + LineEnding +
+    '2 base' + LineEnding +
+    '3 sb1 9' + LineEnding +
+    '4 sb1' + LineEnding +
+    'show sb1 9' + LineEnding +
+    '5 14 21' + LineEnding +
+    '6 svar' + LineEnding, 0);
 end;
 
 initialization

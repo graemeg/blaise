@@ -22,6 +22,11 @@ type
   protected
     procedure SetUp; override;
   published
+    { Interface (and closure) values read through a class PROPERTY getter, a
+      static var, a static property, and as chained call receivers
+      (C.PT.Name(), TC.ST.Name(), J.Next.Next.Name()).  arm64 refused them;
+      the x86-64 compiler segfaulted on the getter forms. }
+    procedure TestRun_InterfaceFromGettersAndStaticMembers;
     procedure TestRun_InterfaceProperty_ThroughRecordField;
     { Interface properties of every kind -- indexed and plain, Integer,
       Double, Single and string, read and written, on a variable and on a
@@ -1810,6 +1815,133 @@ begin
       WriteLn(M = TB)
     end.
     ''', 'hi' + LE + 'True' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_InterfaceFromGettersAndStaticMembers;
+const
+  Src = '''
+    program f;
+    type
+      TPt = record X, Y: Integer; end;
+      TBig = record A, B, C: Int64; S: string; end;
+      TBFn = reference to function(A: Integer): Integer;
+      IThing = interface
+        function Name(): string;
+        function GetNext(): IThing;
+        function GetPos(): TPt;
+        function GetBig(): TBig;
+        function GetFn(): TBFn;
+        property Next: IThing read GetNext;
+        property Pos: TPt read GetPos;
+        property Big: TBig read GetBig;
+        property Fn: TBFn read GetFn;
+      end;
+      TThing = class(TObject, IThing)
+        FN: string;
+        constructor Create(const N: string);
+        function Name(): string;
+        function GetNext(): IThing;
+        function GetPos(): TPt;
+        function GetBig(): TBig;
+        function GetFn(): TBFn;
+      end;
+      TC = class
+      public static var
+        SI: IThing;
+      public
+        T: IThing;
+        function GetT(): IThing;
+        static function GetST(): IThing;
+        function GetFn(): TBFn;
+        procedure Run();
+        property PT: IThing read GetT;
+        property PF: TBFn read GetFn;
+        static property ST: IThing read GetST;
+      end;
+    constructor TThing.Create(const N: string); begin FN := N; end;
+    function TThing.Name(): string; begin Result := FN; end;
+    function TThing.GetNext(): IThing; begin Result := TThing.Create(FN + '+'); end;
+    function TThing.GetPos(): TPt; begin Result.X := Length(FN); Result.Y := 5; end;
+    function TThing.GetBig(): TBig; begin Result.C := 77; Result.S := FN + '!'; end;
+    function TThing.GetFn(): TBFn; begin Result := function(A: Integer): Integer begin Result := A * 3; end; end;
+    function TC.GetT(): IThing; begin Result := T; end;
+    static function TC.GetST(): IThing; begin Result := TThing.Create('st'); end;
+    function TC.GetFn(): TBFn; begin Result := function(A: Integer): Integer begin Result := A + 100; end; end;
+    procedure TC.Run();
+    var I: IThing;
+    begin
+      WriteLn('a ', PT.Name());
+      WriteLn('b ', Self.PT.Name());
+      I := PT;
+      WriteLn('c ', I.Name());
+      if PT <> nil then WriteLn('d nonnil');
+      WriteLn('e ', GetFn()(1));
+    end;
+    procedure Show(const I: IThing); begin WriteLn('show ', I.Name()); end;
+    var C: TC; I, J: IThing; P: TPt; B: TBig; Fv: TBFn;
+    begin
+      C := TC.Create();
+      C.T := TThing.Create('thing');
+      C.Run();
+      WriteLn('f ', C.PT.Name());
+      I := C.PT;
+      WriteLn('g ', I.Name());
+      Show(C.PT);
+      WriteLn('h ', I.Next.Name());
+      J := I.Next;
+      WriteLn('i ', J.Next.Next.Name());
+      Show(I.Next);
+      WriteLn('j ', I.Pos.X, ' ', I.Pos.Y);
+      P := I.Pos;
+      WriteLn('k ', P.X);
+      WriteLn('l ', I.Big.S, ' ', I.Big.C);
+      B := I.Big;
+      WriteLn('m ', B.S);
+      Fv := I.Fn;
+      WriteLn('o ', Fv(5));
+      Fv := C.PF;
+      WriteLn('p ', Fv(5));
+      TC.SI := TThing.Create('si');
+      WriteLn('q ', TC.SI.Name());
+      I := TC.SI;
+      WriteLn('r ', I.Name());
+      WriteLn('s ', TC.ST.Name());
+      I := TC.ST;
+      WriteLn('t ', I.Name());
+      Show(TC.ST);
+      Show(TC.SI);
+      if I.Next <> nil then WriteLn('u nonnil');
+      WriteLn('v ', I.Next.Next.Name(), ' ', TC.ST.Name());
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'a thing' + LineEnding +
+    'b thing' + LineEnding +
+    'c thing' + LineEnding +
+    'd nonnil' + LineEnding +
+    'e 101' + LineEnding +
+    'f thing' + LineEnding +
+    'g thing' + LineEnding +
+    'show thing' + LineEnding +
+    'h thing+' + LineEnding +
+    'i thing+++' + LineEnding +
+    'show thing+' + LineEnding +
+    'j 5 5' + LineEnding +
+    'k 5' + LineEnding +
+    'l thing! 77' + LineEnding +
+    'm thing!' + LineEnding +
+    'o 15' + LineEnding +
+    'p 105' + LineEnding +
+    'q si' + LineEnding +
+    'r si' + LineEnding +
+    's st' + LineEnding +
+    't st' + LineEnding +
+    'show st' + LineEnding +
+    'show si' + LineEnding +
+    'u nonnil' + LineEnding +
+    'v st++ st' + LineEnding, 0);
 end;
 
 initialization

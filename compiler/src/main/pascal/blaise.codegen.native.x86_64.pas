@@ -882,6 +882,21 @@ type
     { Sret a record-returning call (function or method) into ADest. }
     procedure EmitRecordCallSretAt(AExpr: TASTExpr; const ADest: string;
       AIndirect: Boolean = False);
+    { A property read as the getter call it stands for (a borrowing shim;
+      FreeGetterCallShim releases it) }
+    function  BuildGetterCallShim(AFAE: TFieldAccessExpr;
+      out ARecvFAE: TFieldAccessExpr; out ASynthArgs: TObjectList): TMethodCallExpr;
+    procedure FreeGetterCallShim(ASynth: TMethodCallExpr;
+      ARecvFAE: TFieldAccessExpr; ASynthArgs: TObjectList);
+    { GetFn()(X) returning an aggregate, written to ADest }
+    procedure EmitIndirectExprCallSret(AExpr: TIndirectFuncCallExpr;
+      const ADest: string; AIndirect: Boolean);
+    { An interface value with no in-place storage as an OWNED pair at
+      (%rsp); False (nothing emitted) for the forms read in place }
+    function  EmitIntfValueOnStack(AExpr: TASTExpr): Boolean;
+    function  IsIntfStackValue(AExpr: TASTExpr): Boolean;
+    procedure EmitIntfStackValueStore(AExpr: TASTExpr;
+      const AObjOp, AItabOp: string);
     { Sret call for a TFuncCallExpr: routes an implicit-Self method through the
       vtable-aware method-sret emitter, a free function through EmitSretCall. }
     procedure EmitFuncCallSret(AFC: TFuncCallExpr; const ADest: string;
@@ -985,6 +1000,10 @@ type
       used as a value: the result lands in a per-site scratch whose address
       is left in %rax -- the way any record-valued expression is consumed. }
     procedure EmitIndirectRecordCallToRax(AFC: TFuncCallExpr);
+    procedure EmitAggCallToRax(AExpr: TASTExpr);
+    procedure EmitDiscardedStaticAggCall(ACall: TMethodCallStmt;
+      AMD: TMethodDecl);
+    function  IsFatCallValue(AExpr: TASTExpr): Boolean;
     procedure EmitDropScratchResult(const AScratch: string; AType: TTypeDesc);
     { A call statement's DISCARDED register result: release what the callee
       handed over -- a string, object or dynamic array in %rax, or a
@@ -4317,38 +4336,15 @@ begin
   Ps := 8;
   ArgN := 0;
   if AArgs <> nil then ArgN := AArgs.Count;
-  RecvOnStack := False;
-  if (AObjExpr <> nil) and (AObjExpr is TFuncCallExpr) then
-  begin
-    { Function-call receiver (GetDriver().Info()): evaluate it FIRST via the
-      sret convention — it is a call and would clobber pushed args.  The
-      owned (+1) fat pair stays at (%rsp) until after the dispatch, then the
-      obj is released. }
-    Self.EmitIntfSretCall(TFuncCallExpr(AObjExpr));
-    RecvOnStack := True;
-  end
-  else if (AObjExpr <> nil) and (AObjExpr is TMethodCallExpr) and
-          (TMethodCallExpr(AObjExpr).ResolvedClassType <> nil) then
-  begin
-    { Method-call receiver (B.Get().Value(), L.Get(0).Value()): same shape as
-      the TFuncCallExpr case above and it must take the same sret path.  A
-      call result has no NAME, so without this arm the receiver fell through
-      to the named-slot branch below with an empty AObjName and emitted
-      `movq _obj(%rip)` / `movq _itab(%rip)` — symbols that are never
-      defined.  The linker bound them to arbitrary addresses, so the program
-      compiled clean and segfaulted at run time.  Reached most often through
-      a generic container monomorphised at an interface element type.
-
-      Which sret helper applies depends on the RECEIVER of the inner call,
-      not on its return type: a class receiver (B.Get, where B: TBox<IFoo>)
-      is a direct call, while an interface receiver dispatches through the
-      itab.  Same discrimination as the assignment paths below. }
-    if TMethodCallExpr(AObjExpr).ResolvedClassType.Kind = tyInterface then
-      Self.EmitIntfSretMethodCall(TMethodCallExpr(AObjExpr))
-    else
-      Self.EmitClassIntfSretMethodCall(TMethodCallExpr(AObjExpr));
-    RecvOnStack := True;
-  end;
+  { A call-shaped receiver (GetDriver().Info(), B.Get().Value(), a getter,
+    GetFn()().Info()): evaluate it FIRST -- it is a call and would clobber
+    pushed args.  The owned (+1) fat pair stays at (%rsp) until after the
+    dispatch, then the obj is released.  A call result has no NAME, so
+    without this the receiver fell through to the named-slot branch below
+    with an empty AObjName and emitted `movq _obj(%rip)` / `movq
+    _itab(%rip)` -- symbols that are never defined; the linker bound them to
+    arbitrary addresses and the program segfaulted at run time. }
+  RecvOnStack := (AObjExpr <> nil) and Self.EmitIntfValueOnStack(AObjExpr);
   DiscSz := 0;
   if ADiscardIntfRet then
   begin
@@ -5138,6 +5134,9 @@ begin
       Self.Emit(#9'movq $0, (%r15)');
       Self.Emit(#9'movq $0, 8(%r15)');
     end
+    else if Self.IsIntfStackValue(AAsgn.Expr) then
+      { a call result, getter or static var }
+      Self.EmitIntfStackValueStore(AAsgn.Expr, '(%r15)', '8(%r15)')
     else if (AAsgn.Expr.ResolvedType.Kind = tyInterface) and (AAsgn.Expr is TIdentExpr) then
     begin
       Self.PushIntfIdentPair(TIdentExpr(AAsgn.Expr));
@@ -5165,47 +5164,6 @@ begin
       Self.Emit(#9'movq %rax, (%r15)');
       Self.Emit(#9'popq %rax');
       Self.Emit(#9'movq %rax, 8(%r15)');
-    end
-    else if Self.IsIntfCallResult(AAsgn.Expr) then
-    begin
-      Self.EmitIntfSretCall(TFuncCallExpr(AAsgn.Expr));
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'movq (%rsp), %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'movq 8(%rsp), %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-      Self.Emit(#9'addq $16, %rsp');
-    end
-    else if (AAsgn.Expr is TMethodCallExpr) and
-            (TMethodCallExpr(AAsgn.Expr).ResolvedClassType <> nil) and
-            (TMethodCallExpr(AAsgn.Expr).ResolvedClassType.Kind = tyInterface) then
-    begin
-      { Interface-method call (itab dispatch) returning an interface — the
-        callee hands back an OWNED +1 fat pointer in the sret buffer. }
-      Self.EmitIntfSretMethodCall(TMethodCallExpr(AAsgn.Expr));
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'movq (%rsp), %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'movq 8(%rsp), %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-      Self.Emit(#9'addq $16, %rsp');
-    end
-    else if (AAsgn.Expr is TMethodCallExpr) and
-            (TMethodCallExpr(AAsgn.Expr).ResolvedClassType <> nil) and
-            (TMethodCallExpr(AAsgn.Expr).ResolvedClassType.Kind = tyClass) then
-    begin
-      { Class-receiver method call returning an interface — sret protocol;
-        the callee hands back an OWNED +1 fat pointer. }
-      Self.EmitClassIntfSretMethodCall(TMethodCallExpr(AAsgn.Expr));
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'movq (%rsp), %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'movq 8(%rsp), %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-      Self.Emit(#9'addq $16, %rsp');
     end
     else
       raise ENativeCodeGenError.Create(
@@ -5253,6 +5211,9 @@ begin
       Self.Emit(#9'movq $0, (%r15)');
       Self.Emit(#9'movq $0, 8(%r15)');
     end
+    else if Self.IsIntfStackValue(AAsgn.Expr) then
+      { a call result, getter or static var }
+      Self.EmitIntfStackValueStore(AAsgn.Expr, '(%r15)', '8(%r15)')
     else if (AAsgn.Expr.ResolvedType.Kind = tyInterface) and (AAsgn.Expr is TIdentExpr) then
     begin
       Self.PushIntfIdentPair(TIdentExpr(AAsgn.Expr));
@@ -5310,47 +5271,6 @@ begin
       Self.Emit(#9'movq %rax, (%r15)');
       Self.Emit(#9'popq %rax');
       Self.Emit(#9'movq %rax, 8(%r15)');
-    end
-    else if Self.IsIntfCallResult(AAsgn.Expr) then
-    begin
-      Self.EmitIntfSretCall(TFuncCallExpr(AAsgn.Expr));
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'movq (%rsp), %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'movq 8(%rsp), %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-      Self.Emit(#9'addq $16, %rsp');
-    end
-    else if (AAsgn.Expr is TMethodCallExpr) and
-            (TMethodCallExpr(AAsgn.Expr).ResolvedClassType <> nil) and
-            (TMethodCallExpr(AAsgn.Expr).ResolvedClassType.Kind = tyInterface) then
-    begin
-      { Interface-method call (itab dispatch) returning an interface — the
-        callee hands back an OWNED +1 fat pointer in the sret buffer. }
-      Self.EmitIntfSretMethodCall(TMethodCallExpr(AAsgn.Expr));
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'movq (%rsp), %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'movq 8(%rsp), %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-      Self.Emit(#9'addq $16, %rsp');
-    end
-    else if (AAsgn.Expr is TMethodCallExpr) and
-            (TMethodCallExpr(AAsgn.Expr).ResolvedClassType <> nil) and
-            (TMethodCallExpr(AAsgn.Expr).ResolvedClassType.Kind = tyClass) then
-    begin
-      { Class-receiver method call returning an interface — sret protocol;
-        the callee hands back an OWNED +1 fat pointer. }
-      Self.EmitClassIntfSretMethodCall(TMethodCallExpr(AAsgn.Expr));
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'movq (%rsp), %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'movq 8(%rsp), %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-      Self.Emit(#9'addq $16, %rsp');
     end
     else if IsFoldedPropSubscript(AAsgn.Expr) then
     begin
@@ -5427,10 +5347,18 @@ begin
     Self.Emit(Format(#9'leaq %s, %%rdi', [ObjOp]));
     Self.Emit(#9'callq _WeakAssign');
     Self.Emit(#9'popq %rdi');                 { obj }
-    if NativeExprOwnsRef(AAsgn.Expr) or Self.IsIntfCallResult(AAsgn.Expr) or
+    if NativeExprOwnsRef(AAsgn.Expr) or Self.IsIntfStackValue(AAsgn.Expr) or
        ((AAsgn.Expr is TMethodCallExpr) and
         not TMethodCallExpr(AAsgn.Expr).IsConstructorCall) then
       Self.Emit(#9'callq _ClassRelease');
+    Exit;
+  end;
+
+  { F := <call result / getter / static var>: the owned pair the shared
+    lowering leaves at (%rsp) moves in without a retain }
+  if Self.IsIntfStackValue(AAsgn.Expr) then
+  begin
+    Self.EmitIntfStackValueStore(AAsgn.Expr, ObjOp, ItabOp);
     Exit;
   end;
 
@@ -5642,61 +5570,6 @@ begin
     Exit;
   end;
 
-  { F := FuncReturningInterface() — sret convention: allocate a 16-byte buffer
-    on the stack, pass its address as the hidden first arg (%rdi), call the
-    function (which writes obj+itab into the buffer), then move the result to
-    the LHS with ARC. }
-  if Self.IsIntfCallResult(AAsgn.Expr) then
-  begin
-    Self.EmitIntfSretCall(TFuncCallExpr(AAsgn.Expr));
-    { Sret buffer at (%rsp): obj at 0(%rsp), itab at 8(%rsp). }
-    Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));  { old obj }
-    Self.Emit(#9'callq _ClassRelease');
-    Self.Emit(#9'movq (%rsp), %rax');
-    Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
-    Self.Emit(#9'movq 8(%rsp), %rax');
-    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
-    Self.Emit(#9'addq $16, %rsp');
-    Exit;
-  end;
-
-  { F := SomeIntf.Method(args) where Method (itab dispatch) returns an
-    interface — same sret protocol; the callee hands back an OWNED +1 fat
-    pointer, so release the old obj and store without an extra AddRef. }
-  if (AAsgn.Expr is TMethodCallExpr) and
-     (TMethodCallExpr(AAsgn.Expr).ResolvedClassType <> nil) and
-     (TMethodCallExpr(AAsgn.Expr).ResolvedClassType.Kind = tyInterface) then
-  begin
-    Self.EmitIntfSretMethodCall(TMethodCallExpr(AAsgn.Expr));
-    Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));  { old obj }
-    Self.Emit(#9'callq _ClassRelease');
-    Self.Emit(#9'movq (%rsp), %rax');
-    Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
-    Self.Emit(#9'movq 8(%rsp), %rax');
-    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
-    Self.Emit(#9'addq $16, %rsp');
-    Exit;
-  end;
-
-  { F := Obj.Method() where Obj is class-typed and Method returns an
-    interface — sret protocol with the receiver in %rsi; the callee hands
-    back an OWNED +1 fat pointer, so release the old obj and store without
-    an extra AddRef. }
-  if (AAsgn.Expr is TMethodCallExpr) and
-     (TMethodCallExpr(AAsgn.Expr).ResolvedClassType <> nil) and
-     (TMethodCallExpr(AAsgn.Expr).ResolvedClassType.Kind = tyClass) then
-  begin
-    Self.EmitClassIntfSretMethodCall(TMethodCallExpr(AAsgn.Expr));
-    Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));  { old obj }
-    Self.Emit(#9'callq _ClassRelease');
-    Self.Emit(#9'movq (%rsp), %rax');
-    Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
-    Self.Emit(#9'movq 8(%rsp), %rax');
-    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
-    Self.Emit(#9'addq $16, %rsp');
-    Exit;
-  end;
-
   if IsFoldedPropSubscript(AAsgn.Expr) then
   begin
   { Interface element read through an INDEXED PROPERTY: List[I] where the
@@ -5770,6 +5643,14 @@ begin
     Self.Emit(Format(#9'leaq %s(%%rip), %%rax', [ItabSym]));
     Self.Emit(#9'movq %rax, 8(%r15)');
   end
+  else if (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyInterface) and
+          Self.IsIntfStackValue(AExpr) then
+  begin
+    { a call result, getter or static var: its owned pair moves in }
+    Self.EmitIntfStackValueStore(AExpr, '(%r15)', '8(%r15)');
+    Self.Emit(#9'popq %r15');
+    Exit;
+  end
   else if (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyInterface) then
   begin
     { Interface source: copy obj+itab from the source's fat pointer.  A named
@@ -5837,21 +5718,6 @@ begin
       Self.Emit(#9'pushq %rcx');           { itab }
       Self.Emit(#9'movq (%rax), %rcx');
       Self.Emit(#9'pushq %rcx');           { obj on top }
-    end
-    else if (AExpr is TFuncCallExpr) and
-            ((TFuncCallExpr(AExpr).ResolvedDecl <> nil) or
-             Self.IsIntfCallResult(AExpr)) then
-    begin
-      Self.EmitIntfSretCall(TFuncCallExpr(AExpr));
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'movq (%rsp), %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'movq 8(%rsp), %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-      Self.Emit(#9'addq $16, %rsp');
-      Self.Emit(#9'popq %r15');
-      Exit;
     end
     else
       raise ENativeCodeGenError.Create(
@@ -7482,9 +7348,12 @@ begin
      (TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).ResolvedReturnType <> nil) and
      (TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).ResolvedReturnType.Kind = tyRecord) then
     Exit(True);
-  { a record returned through a procedural variable or closure }
-  if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
-     (TFuncCallExpr(AExpr).ResolvedProcType <> nil) and
+  { a record returned through a procedural variable or closure, or through
+    the procedural value an expression yields (GetFn()(X)) }
+  if (((AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
+       (TFuncCallExpr(AExpr).ResolvedProcType <> nil)) or
+      ((AExpr is TIndirectFuncCallExpr) and
+       (TIndirectFuncCallExpr(AExpr).ResolvedProcType <> nil))) and
      (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyRecord) then
     Exit(True);
   if (AExpr is TInheritedCallExpr) and
@@ -7502,6 +7371,10 @@ begin
      (TFieldAccessExpr(AExpr).PropReadDecl <> nil) and
      (TFieldAccessExpr(AExpr).PropRead.TypeDesc <> nil) and
      (TFieldAccessExpr(AExpr).PropRead.TypeDesc.Kind = tyRecord) then
+    Exit(True);
+  { a STATIC property's getter returning a record (TFoo.Origin) }
+  if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsStaticPropGet and
+     (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyRecord) then
     Exit(True);
   { A DEFAULT-array-property subscript (Obj[I]) that returns a record is lowered
     as a TStringSubscriptExpr wrapping that same record-returning PropRead
@@ -7598,15 +7471,285 @@ begin
       AFC.Args, ADest, AIndirect);
 end;
 
+function TX86_64Backend.BuildGetterCallShim(AFAE: TFieldAccessExpr;
+  out ARecvFAE: TFieldAccessExpr; out ASynthArgs: TObjectList): TMethodCallExpr;
+var
+  Synth: TMethodCallExpr;
+begin
+  { A method-backed property read (O.Prop, O.Prop[I], TFoo.StaticProp) as the
+    getter call it stands for, so it shares every call-result path with the
+    written-out call.  The shim BORROWS the receiver and index expressions;
+    FreeGetterCallShim detaches them.  An INDEXED property threads its index
+    into the synthesised call as the getter's single argument
+    (BUG-20260719-native-indexed-prop-record). }
+  ARecvFAE := nil;
+  ASynthArgs := nil;
+  Synth := TMethodCallExpr.Create();
+  Synth.Line := AFAE.Line;
+  Synth.Col := AFAE.Col;
+  Synth.ResolvedType := AFAE.ResolvedType;
+  if AFAE.IsStaticPropGet then
+  begin
+    { TFoo.StaticProp: the static getter, no receiver }
+    Synth.Name := TMethodDecl(AFAE.ResolvedMethod).Name;
+    Synth.ResolvedMethod := AFAE.ResolvedMethod;
+    Synth.ResolvedClassType := AFAE.ResolvedClassType;
+    Synth.IsStaticCall := True;
+    Exit(Synth);
+  end;
+  Synth.Name := AFAE.PropRead.ReadMethod;
+  Synth.ResolvedMethod := AFAE.PropReadDecl;
+  if AFAE.FieldInfo <> nil then
+  begin
+    { Obj.ListField[I]: AFAE names a FIELD that is itself the receiver, and
+      the subscript indexes the field's VALUE.  (In the property shape
+      below, AFAE names the property and AFAE.Base is the receiver.)  Passing
+      AFAE.Base here would send the OUTER object as Self -- the callee would
+      read TList fields off the wrong instance.  FieldInfo is set only for
+      a real field access, so it is the discriminator.
+
+      The receiver is a COPY of the field access with the subscript
+      stripped: aliasing AFAE itself would re-enter this same node (its
+      PropIndexExpr still set) when the receiver is evaluated. }
+    ARecvFAE := TFieldAccessExpr.Create();
+    ARecvFAE.Line         := AFAE.Line;
+    ARecvFAE.Col          := AFAE.Col;
+    ARecvFAE.Base         := AFAE.Base;      { borrowed -- detached on free }
+    ARecvFAE.RecordName   := AFAE.RecordName;
+    ARecvFAE.FieldName    := AFAE.FieldName;
+    ARecvFAE.FieldInfo    := AFAE.FieldInfo;
+    ARecvFAE.IsGlobal     := AFAE.IsGlobal;
+    ARecvFAE.IsClassAccess := AFAE.IsClassAccess;
+    { These three say HOW to reach the receiver, not what it is, so they
+      must travel with the copy: the leaf receiver ladders branch on
+      IsImplicitSelf (bare FField[I] inside a method) and IsVarParam (a
+      var/out or by-value record param) before any field-offset load.
+      Dropping either emits the wrong base -- silently wrong data, not a
+      crash. }
+    ARecvFAE.IsImplicitSelf   := AFAE.IsImplicitSelf;
+    ARecvFAE.ImplicitBaseInfo := AFAE.ImplicitBaseInfo;
+    ARecvFAE.IsVarParam       := AFAE.IsVarParam;
+    ARecvFAE.ResolvedType := AFAE.FieldInfo.TypeDesc;
+    Synth.ObjExpr := ARecvFAE;
+  end
+  else
+  begin
+    Synth.ObjExpr := AFAE.Base;        { borrowed -- detached on free }
+    if AFAE.Base = nil then
+    begin
+      Synth.ObjectName := AFAE.RecordName;
+      Synth.IsGlobal   := AFAE.IsGlobal;
+    end;
+  end;
+  if AFAE.PropIndexExpr <> nil then
+  begin
+    { non-owning list carrying the borrowed index expr }
+    ASynthArgs := TObjectList.Create(False);
+    ASynthArgs.Add(AFAE.PropIndexExpr);
+    Synth.Args.Free();
+    Synth.Args := ASynthArgs;
+  end;
+  Result := Synth;
+end;
+
+procedure TX86_64Backend.FreeGetterCallShim(ASynth: TMethodCallExpr;
+  ARecvFAE: TFieldAccessExpr; ASynthArgs: TObjectList);
+begin
+  ASynth.ObjExpr := nil;   { do not free the borrowed base expression }
+  if ASynthArgs <> nil then
+    ASynth.Args := nil;    { do not free the borrowed index expr }
+  ASynth.Free();
+  ASynthArgs.Free();       { frees the wrapper list only (OwnsObjects=False) }
+  if ARecvFAE <> nil then
+  begin
+    ARecvFAE.Base := nil;  { borrowed from the property read }
+    ARecvFAE.Free();
+  end;
+end;
+
+procedure TX86_64Backend.EmitIndirectExprCallSret(AExpr: TIndirectFuncCallExpr;
+  const ADest: string; AIndirect: Boolean);
+var
+  PT: TProceduralTypeDesc;
+  IsFat, CalleeLV: Boolean;
+begin
+  { GetFn()(X) returning an aggregate (a record, a closure, an interface):
+    the callee value the expression yields is parked in a stack buffer whose
+    address rides in callee-saved %rbx across the argument evaluation, and
+    the result is written to ADest -- resolved to an absolute address FIRST,
+    before any %rsp movement can drift a %rsp-relative destination.
+    Layout below the saved %rbx: [0..15] callee value, [16] destination. }
+  PT := TProceduralTypeDesc(AExpr.ResolvedProcType);
+  IsFat := PT.IsMethodPtr or PT.IsReference;
+  if AIndirect then
+    Self.Emit(Format(#9'movq %s, %%rax', [ADest]))
+  else
+    Self.Emit(Format(#9'leaq %s, %%rax', [ADest]));
+  Self.Emit(#9'pushq %rbx');
+  Self.Emit(#9'subq $32, %rsp');
+  Self.Emit(#9'movq %rax, 16(%rsp)');
+  CalleeLV := False;
+  if IsFat then
+  begin
+    CalleeLV := IsFatLValueExpr(AExpr.CalleeExpr);
+    if CalleeLV then
+    begin
+      { an element, P^ or field holding the closure: a copy that holds its
+        own Env reference for the call, dropped below }
+      Self.EmitVarArgAddrToRax(AExpr.CalleeExpr);
+      Self.Emit(#9'movq (%rax), %rcx');
+      Self.Emit(#9'movq %rcx, (%rsp)');
+      Self.Emit(#9'movq 8(%rax), %rcx');
+      Self.Emit(#9'movq %rcx, 8(%rsp)');
+      if PT.IsReference then
+      begin
+        Self.Emit(#9'movq %rcx, %rdi');
+        Self.Emit(#9'callq _ClassAddRef');
+      end;
+    end
+    else
+      Self.EmitRecordCallSretAt(AExpr.CalleeExpr, '(%rsp)');
+  end
+  else
+  begin
+    Self.EmitExprToEax(AExpr.CalleeExpr);
+    Self.Emit(#9'movq %rax, (%rsp)');
+  end;
+  Self.Emit(#9'movq %rsp, %rbx');
+  Self.EmitCallIndirectRec('(%rbx)', PT, AExpr.Args, IsFat, '16(%rbx)', True);
+  { a 'reference to' callee copy / call result holds an Env reference of
+    its own -- the result is in memory, so no register needs keeping }
+  if IsFat and PT.IsReference then
+  begin
+    Self.Emit(#9'movq 8(%rbx), %rdi');
+    Self.Emit(#9'callq _ClassRelease');
+  end;
+  Self.Emit(#9'addq $32, %rsp');
+  Self.Emit(#9'popq %rbx');
+end;
+
+function TX86_64Backend.IsIntfStackValue(AExpr: TASTExpr): Boolean;
+begin
+  { the forms EmitIntfValueOnStack lowers (keep the two in step) -- an
+    interface-typed value only: a constructor call is a class value }
+  Result := (AExpr.ResolvedType <> nil) and
+    (AExpr.ResolvedType.Kind = tyInterface) and
+   (Self.IsIntfCallResult(AExpr) or
+    ((AExpr is TMethodCallExpr) and
+     (TMethodCallExpr(AExpr).ResolvedClassType <> nil)) or
+    (AExpr is TIndirectFuncCallExpr) or
+    ((AExpr is TInheritedCallExpr) and
+     (TInheritedCallExpr(AExpr).ResolvedMethod <> nil)) or
+    ((AExpr is TFieldAccessExpr) and
+     (TFieldAccessExpr(AExpr).IsClassVarRead or
+      TFieldAccessExpr(AExpr).IsStaticPropGet or
+      ((TFieldAccessExpr(AExpr).PropRead <> nil) and
+       (TFieldAccessExpr(AExpr).PropReadDecl <> nil)))));
+end;
+
+procedure TX86_64Backend.EmitIntfStackValueStore(AExpr: TASTExpr;
+  const AObjOp, AItabOp: string);
+begin
+  { Dest := <call result / getter / static var>: the OWNED pair lands at
+    (%rsp); the old obj is released and the pair moved in without a retain }
+  Self.EmitIntfValueOnStack(AExpr);
+  Self.Emit(Format(#9'movq %s, %%rdi', [AObjOp]));   { old obj }
+  Self.Emit(#9'callq _ClassRelease');
+  Self.Emit(#9'movq (%rsp), %rax');
+  Self.Emit(Format(#9'movq %%rax, %s', [AObjOp]));
+  Self.Emit(#9'movq 8(%rsp), %rax');
+  Self.Emit(Format(#9'movq %%rax, %s', [AItabOp]));
+  Self.Emit(#9'addq $16, %rsp');
+end;
+
+function TX86_64Backend.EmitIntfValueOnStack(AExpr: TASTExpr): Boolean;
+var
+  Synth: TMethodCallExpr;
+  RecvFAE: TFieldAccessExpr;
+  SynthArgs: TObjectList;
+  FAE: TFieldAccessExpr;
+begin
+  { An interface value that has no storage to read in place -- a call
+    result, a property getter, a static var -- as an OWNED (obj, itab) pair
+    at (%rsp), 16 bytes, for the consumer to move or release.  Every
+    consumer shares this one set of forms, so a form added here reaches all
+    of them.  False, with nothing emitted, for the forms read in place (a
+    variable, field, element), which the consumers address directly. }
+  Result := Self.IsIntfStackValue(AExpr);
+  if not Result then
+    Exit;
+  if Self.IsIntfCallResult(AExpr) then
+  begin
+    Self.EmitIntfSretCall(TFuncCallExpr(AExpr));
+    Exit;
+  end;
+  if (AExpr is TMethodCallExpr) and
+     (TMethodCallExpr(AExpr).ResolvedClassType <> nil) then
+  begin
+    if TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyInterface then
+      Self.EmitIntfSretMethodCall(TMethodCallExpr(AExpr))
+    else
+      Self.EmitClassIntfSretMethodCall(TMethodCallExpr(AExpr));
+    Exit;
+  end;
+  if AExpr is TIndirectFuncCallExpr then
+  begin
+    Self.Emit(#9'subq $16, %rsp');
+    Self.EmitIndirectExprCallSret(TIndirectFuncCallExpr(AExpr), '(%rsp)',
+      False);
+    Exit;
+  end;
+  if AExpr is TInheritedCallExpr then
+  begin
+    { inherited F(..): the parent's body, statically, with the current Self }
+    Self.Emit(#9'subq $16, %rsp');
+    Self.Emit(#9'movq $0, (%rsp)');
+    Self.Emit(#9'movq $0, 8(%rsp)');
+    Self.EmitInheritedRecordSret(
+      TMethodDecl(TInheritedCallExpr(AExpr).ResolvedMethod),
+      TInheritedCallExpr(AExpr).Args, TInheritedCallExpr(AExpr).Name,
+      '(%rsp)', False);
+    Exit;
+  end;
+  if AExpr is TFieldAccessExpr then
+  begin
+    FAE := TFieldAccessExpr(AExpr);
+    if FAE.IsClassVarRead then
+    begin
+      { TFoo.StaticVar: a borrow of the shared global, retained so the
+        consumer sees the same owned pair as from a call }
+      Self.Emit(Format(#9'pushq %s',
+        [Self.IntfItabOperand(FAE.ClassVarEmitName, True)]));
+      Self.Emit(Format(#9'pushq %s',
+        [Self.IntfObjOperand(FAE.ClassVarEmitName, True)]));
+      Self.Emit(#9'movq (%rsp), %rdi');
+      Self.Emit(#9'callq _ClassAddRef');
+      Exit;
+    end;
+    if FAE.IsStaticPropGet or
+       ((FAE.PropRead <> nil) and (FAE.PropReadDecl <> nil)) then
+    begin
+      Synth := Self.BuildGetterCallShim(FAE, RecvFAE, SynthArgs);
+      try
+        Self.EmitClassIntfSretMethodCall(Synth);
+      finally
+        Self.FreeGetterCallShim(Synth, RecvFAE, SynthArgs);
+      end;
+      Exit;
+    end;
+  end;
+  raise ENativeCodeGenError.Create(
+    'native backend: internal error: IsIntfStackValue accepted a form ' +
+    'EmitIntfValueOnStack does not lower (' + AExpr.ClassName + ')');
+end;
+
 procedure TX86_64Backend.EmitRecordCallSretAt(AExpr: TASTExpr; const ADest: string;
   AIndirect: Boolean);
 var
-  FAE:      TFieldAccessExpr;
-  RecvFAE:  TFieldAccessExpr;
-  Synth:    TMethodCallExpr;
+  Synth:     TMethodCallExpr;
+  RecvFAE:   TFieldAccessExpr;
   SynthArgs: TObjectList;
 begin
-  RecvFAE := nil;
   { Unwrap a default-array-property subscript (Obj[I]) to its inner
     record-returning PropRead FieldAccess so it shares the sret path with the
     named form (BUG-002 A-indexed via default subscript). }
@@ -7614,86 +7757,25 @@ begin
     AExpr := TStringSubscriptExpr(AExpr).StrExpr;
   { Record-returning property read (O.Prop): a getter call, so synthesise the
     method call from the resolved getter decl and route it through
-    EmitMethodSretCall exactly as a record-returning method call.  An INDEXED
-    property (PropIndexExpr <> nil) threads its index into the synthesised call
-    as the getter's single argument (BUG-20260719-native-indexed-prop-record) —
-    EmitMethodSretCall then marshals it correctly for both the register-return
-    and sret-return record classes, exactly as for a direct O.Get(index) call. }
+    EmitMethodSretCall exactly as a record-returning method call. }
   if (AExpr is TFieldAccessExpr) and
-     (TFieldAccessExpr(AExpr).PropRead <> nil) and
-     (TFieldAccessExpr(AExpr).PropReadDecl <> nil) then
+     (TFieldAccessExpr(AExpr).IsStaticPropGet or
+      ((TFieldAccessExpr(AExpr).PropRead <> nil) and
+       (TFieldAccessExpr(AExpr).PropReadDecl <> nil))) then
   begin
-    FAE := TFieldAccessExpr(AExpr);
-    Synth := TMethodCallExpr.Create();
-    SynthArgs := nil;
+    Synth := Self.BuildGetterCallShim(TFieldAccessExpr(AExpr), RecvFAE,
+      SynthArgs);
     try
-      Synth.Name           := FAE.PropRead.ReadMethod;
-      Synth.ResolvedMethod := FAE.PropReadDecl;
-      Synth.ResolvedType   := FAE.ResolvedType;
-      if FAE.FieldInfo <> nil then
-      begin
-        { Obj.ListField[I]: FAE names a FIELD that is itself the receiver, and
-          the subscript indexes the field's VALUE.  (In the property shape
-          below, FAE names the property and FAE.Base is the receiver.)  Passing
-          FAE.Base here would send the OUTER object as Self -- the callee would
-          read TList fields off the wrong instance.  FieldInfo is set only for
-          a real field access, so it is the discriminator.
-
-          The receiver is a COPY of the field access with the subscript
-          stripped: aliasing FAE itself would re-enter this same node (its
-          PropIndexExpr still set) when the receiver is evaluated. }
-        RecvFAE := TFieldAccessExpr.Create();
-        RecvFAE.Line         := FAE.Line;
-        RecvFAE.Col          := FAE.Col;
-        RecvFAE.Base         := FAE.Base;      { borrowed — detached below }
-        RecvFAE.RecordName   := FAE.RecordName;
-        RecvFAE.FieldName    := FAE.FieldName;
-        RecvFAE.FieldInfo    := FAE.FieldInfo;
-        RecvFAE.IsGlobal     := FAE.IsGlobal;
-        RecvFAE.IsClassAccess := FAE.IsClassAccess;
-        { These three say HOW to reach the receiver, not what it is, so they
-          must travel with the copy: the leaf receiver ladders branch on
-          IsImplicitSelf (bare FField[I] inside a method) and IsVarParam (a
-          var/out or by-value record param) before any field-offset load.
-          Dropping either emits the wrong base — silently wrong data, not a
-          crash. }
-        RecvFAE.IsImplicitSelf   := FAE.IsImplicitSelf;
-        RecvFAE.ImplicitBaseInfo := FAE.ImplicitBaseInfo;
-        RecvFAE.IsVarParam       := FAE.IsVarParam;
-        RecvFAE.ResolvedType := FAE.FieldInfo.TypeDesc;
-        Synth.ObjExpr := RecvFAE;
-      end
-      else
-      begin
-        Synth.ObjExpr := FAE.Base;        { borrowed — detached before Free }
-        if FAE.Base = nil then
-        begin
-          Synth.ObjectName := FAE.RecordName;
-          Synth.IsGlobal   := FAE.IsGlobal;
-        end;
-      end;
-      if FAE.PropIndexExpr <> nil then
-      begin
-        { non-owning list carrying the borrowed index expr — detached below }
-        SynthArgs := TObjectList.Create(False);
-        SynthArgs.Add(FAE.PropIndexExpr);
-        Synth.Args := SynthArgs;
-      end;
       Self.EmitMethodSretCall(Synth, ADest, AIndirect);
     finally
-      Synth.ObjExpr := nil;   { do not free the borrowed base expression }
-      Synth.Args    := nil;   { do not free the borrowed index expr }
-      Synth.Free();
-      SynthArgs.Free();       { frees the wrapper list only (OwnsObjects=False) }
-      if RecvFAE <> nil then
-      begin
-        RecvFAE.Base := nil;  { borrowed from FAE — must not be freed here }
-        RecvFAE.Free();
-      end;
+      Self.FreeGetterCallShim(Synth, RecvFAE, SynthArgs);
     end;
     Exit;
   end;
-  if (AExpr is TMethodCallExpr) and
+  if AExpr is TIndirectFuncCallExpr then
+    Self.EmitIndirectExprCallSret(TIndirectFuncCallExpr(AExpr), ADest,
+      AIndirect)
+  else if (AExpr is TMethodCallExpr) and
      (TMethodCallExpr(AExpr).ResolvedClassType <> nil) and
      (TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyInterface) then
     { Interface (itab) record-returning dispatch — EmitMethodSretCall raises on
@@ -8832,20 +8914,9 @@ begin
   Result := False;
   if (AExpr.ResolvedType = nil) or (AExpr.ResolvedType.Kind <> tyInterface) then
     Exit;
-  if (AExpr is TFuncCallExpr) and (TFuncCallExpr(AExpr).ResolvedDecl <> nil) then
-    Self.EmitIntfSretCall(TFuncCallExpr(AExpr))
-  else if (AExpr is TMethodCallExpr) and
-          (TMethodCallExpr(AExpr).ResolvedClassType <> nil) then
-  begin
-    { which sret helper applies depends on the RECEIVER: an interface
-      receiver dispatches through the itab, a class receiver is a direct or
-      vtable call }
-    if TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyInterface then
-      Self.EmitIntfSretMethodCall(TMethodCallExpr(AExpr))
-    else
-      Self.EmitClassIntfSretMethodCall(TMethodCallExpr(AExpr));
-  end
-  else
+  { every interface value without in-place storage -- a call, a getter, a
+    static var -- through the one shared lowering }
+  if not Self.EmitIntfValueOnStack(AExpr) then
     Exit;
   Self.Emit(#9'movq (%rsp), %rax');
   Self.Emit(#9'addq $16, %rsp');
@@ -9469,6 +9540,20 @@ begin
         Its value evaluates to the 16-byte block's ADDRESS, which is never
         nil -- Assigned(K) was True after K := nil }
       Self.EmitVarArgAddrToRax(TASTExpr(FC.Args.Items[0]));
+      Self.Emit(#9'movq (%rax), %rax');
+      Self.Emit(#9'testq %rax, %rax');
+      Self.Emit(#9'setne %al');
+      Self.Emit(#9'movzbl %al, %eax');
+      Exit;
+    end;
+    if SameText(FC.Name, 'Assigned') and (FC.Args.Count = 1) and
+       IsMethodPtrType(TASTExpr(FC.Args.Items[0]).ResolvedType) and
+       Self.IsFatCallValue(TASTExpr(FC.Args.Items[0])) then
+    begin
+      { Assigned(GetFn()): the returned pair lands in a per-site scratch
+        whose Env is released at the statement end (it leaked), and the test
+        is on its CODE half }
+      Self.EmitFatElemSourceAddr(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'movq (%rax), %rax');
       Self.Emit(#9'testq %rax, %rax');
       Self.Emit(#9'setne %al');
@@ -11095,6 +11180,16 @@ begin
   if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsClassVarRead then
   begin
     FAE := TFieldAccessExpr(AExpr);
+    if (FAE.ResolvedType <> nil) and
+       ((FAE.ResolvedType.Kind in [tyRecord, tyStaticArray]) or
+        IsJumboSet(FAE.ResolvedType)) then
+    begin
+      { an inline aggregate's value is its ADDRESS (TFoo.SB.F read 8 bytes
+        of the record as a pointer and dereferenced them) }
+      Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
+        [NativeMangle(FAE.ClassVarEmitName)]));
+      Exit;
+    end;
     Self.Emit(Format(#9'movq %s(%%rip), %%rax',
       [NativeMangle(FAE.ClassVarEmitName)]));
     if (FAE.ResolvedType <> nil) and IsIntFamily(FAE.ResolvedType) then
@@ -11104,6 +11199,16 @@ begin
 
   { Static property read: TypeName.StaticProp — call the static getter (no Self
     argument); result in %rax. }
+  if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsStaticPropGet and
+     (AExpr.ResolvedType <> nil) and
+     ((AExpr.ResolvedType.Kind in [tyRecord, tyStaticArray]) or
+      IsJumboSet(AExpr.ResolvedType)) then
+  begin
+    { a record / static-array static getter returns through the hidden
+      result pointer: its per-site buffer's address }
+    Self.EmitAggCallToRax(AExpr);
+    Exit;
+  end;
   if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsStaticPropGet then
   begin
     FAE := TFieldAccessExpr(AExpr);
@@ -12051,6 +12156,14 @@ begin
     (arg evaluation may invoke callq which clobbers caller-saved regs), push
     args, pop them into registers, load the saved func ptr into %r10, and
     dispatch via callq *%r10. }
+  if (AExpr is TIndirectFuncCallExpr) and (AExpr.ResolvedType <> nil) and
+     (AExpr.ResolvedType.Kind = tyRecord) then
+  begin
+    { GetFn()(X) yielding a record: its per-site buffer's address, the
+      managed fields released at the statement end }
+    Self.EmitAggCallToRax(AExpr);
+    Exit;
+  end;
   if AExpr is TIndirectFuncCallExpr then
   begin
     { Method-pointer callee ('of object'): the callee yields a 16-byte
@@ -12838,6 +12951,22 @@ begin
   Result := True;
 end;
 
+function TX86_64Backend.IsFatCallValue(AExpr: TASTExpr): Boolean;
+begin
+  { a closure / method-pointer value PRODUCED by a call -- the forms
+    EmitRecordCallSretAt lowers into a buffer: a direct, method, indirect or
+    expression-callee call, an inherited call, a property getter }
+  Result := (AExpr is TMethodCallExpr) or (AExpr is TIndirectFuncCallExpr) or
+    (AExpr is TInheritedCallExpr) or
+    ((AExpr is TFuncCallExpr) and
+     ((TFuncCallExpr(AExpr).ResolvedDecl <> nil) or
+      TFuncCallExpr(AExpr).IsIndirectCall)) or
+    ((AExpr is TFieldAccessExpr) and
+     (TFieldAccessExpr(AExpr).IsStaticPropGet or
+      ((TFieldAccessExpr(AExpr).PropRead <> nil) and
+       (TFieldAccessExpr(AExpr).PropReadDecl <> nil))));
+end;
+
 procedure TX86_64Backend.EmitFatElemSourceAddr(AValue: TASTExpr);
 var
   FAE: TFieldAccessExpr;
@@ -12887,11 +13016,8 @@ begin
     Self.Emit(#9'movq %rcx, %rax');
     Exit;
   end;
-  if ((AValue is TFuncCallExpr) or (AValue is TMethodCallExpr)) and
-     (AValue.ResolvedType <> nil) and IsMethodPtrType(AValue.ResolvedType) and
-     not ((AValue is TFuncCallExpr) and
-          (TFuncCallExpr(AValue).ResolvedDecl = nil) and
-          not TFuncCallExpr(AValue).IsIndirectCall) then
+  if (AValue.ResolvedType <> nil) and IsMethodPtrType(AValue.ResolvedType) and
+     Self.IsFatCallValue(AValue) then
   begin
     { a closure / method pointer RETURNED by a call (L[0] := MakeFn()): the
       callee fills a per-site scratch pair, whose address the copy reads.  The
@@ -13156,14 +13282,20 @@ begin
 end;
 
 procedure TX86_64Backend.EmitStaticArrayCallToRax(AExpr: TASTExpr);
+begin
+  Self.EmitAggCallToRax(AExpr);
+end;
+
+procedure TX86_64Backend.EmitAggCallToRax(AExpr: TASTExpr);
 var
   Dest: string;
 begin
-  { a static-array-returning call inside an expression: the callee writes
-    its result through the hidden sret pointer, so give it a buffer and yield
-    the buffer's address -- the value of a static array IS its address.  The
-    call used to be made with no buffer at all: its first argument was taken
-    as the sret pointer and the result written through it. }
+  { an aggregate-returning call inside an expression (a static array, or a
+    record through GetFn()(X)): the callee writes its result through the
+    hidden sret pointer, so give it a buffer and yield the buffer's address
+    -- the value of an inline aggregate IS its address.  The call used to be
+    made with no buffer at all: its first argument was taken as the sret
+    pointer and the result written through it. }
   Dest := Self.NewScratchOperand(AExpr.ResolvedType.RawSize());
   Self.EmitRecordCallSretAt(AExpr, Dest, False);
   Self.Emit(Format(#9'leaq %s, %%rax', [Dest]));
@@ -13207,8 +13339,8 @@ begin
       EmitExprToEax loaded the element's first WORD, and the callee's copy
       of 16 bytes through it crashed. }
     Self.EmitVarArgAddrToRax(AArg)
-  else if ((AArg is TFuncCallExpr) or (AArg is TMethodCallExpr)) and
-          (AArg.ResolvedType <> nil) and IsMethodPtrType(AArg.ResolvedType) then
+  else if (AArg.ResolvedType <> nil) and IsMethodPtrType(AArg.ResolvedType) and
+          Self.IsFatCallValue(AArg) then
     { a closure RETURNED by a call (Apply(MakeFn())): EmitExprToEax left the
       pair in %rax:%rdx and the callee dereferenced the Code word as the
       pair's address.  Land it in a per-site scratch the callee borrows;
@@ -13306,19 +13438,17 @@ begin
       Self.Emit(#9'pushq %rax');         { push obj }
       Self.Emit(#9'pushq %rcx');         { push itab }
     end
-    else if ((AArg is TFuncCallExpr) or (AArg is TMethodCallExpr)) and
-            (AArg.ResolvedType <> nil) and
-            (AArg.ResolvedType.Kind = tyInterface) then
+    else if (AArg.ResolvedType <> nil) and
+            (AArg.ResolvedType.Kind = tyInterface) and
+            Self.IsIntfStackValue(AArg) then
     begin
-      { Interface-returning call result passed positionally, e.g.
-        Show(MakeFoo(42)).  EmitIntfSretCall leaves the owned (+1) fat pointer
-        at (%rsp): obj at 0, itab at 8.  Load both halves and push in the
-        arg-slot order (obj first, itab on top), then drop the sret buffer.
-        The pushed obj keeps the +1 ref; the callee borrows it for the call. }
-      if AArg is TFuncCallExpr then
-        Self.EmitIntfSretCall(TFuncCallExpr(AArg))
-      else
-        Self.EmitIntfSretMethodCall(TMethodCallExpr(AArg));
+      { Interface-returning call result (or getter, static var) passed
+        positionally, e.g. Show(MakeFoo(42)).  The shared lowering leaves the
+        owned (+1) fat pointer at (%rsp): obj at 0, itab at 8.  Load both
+        halves and push in the arg-slot order (obj first, itab on top), then
+        drop the sret buffer.  The pushed obj keeps the +1 ref; the callee
+        borrows it for the call. }
+      Self.EmitIntfValueOnStack(AArg);
       Self.Emit(#9'movq (%rsp), %rax');   { obj }
       Self.Emit(#9'movq 8(%rsp), %rcx');  { itab }
       Self.Emit(#9'addq $16, %rsp');      { drop the sret buffer }
@@ -14002,6 +14132,55 @@ end;
 
 { Emit a TMethodCallStmt (class method call in statement position).
   Same as EmitMethodCallExpr but for statement nodes. }
+procedure TX86_64Backend.EmitDiscardedStaticAggCall(ACall: TMethodCallStmt;
+  AMD: TMethodDecl);
+var
+  Shim: TMethodCallExpr;
+  RT: TTypeDesc;
+  Buf: string;
+begin
+  { TypeName.StaticF(..); whose interface / closure / static-array result is
+    discarded: the call fills a buffer of its own and what the result owns
+    (the obj half, the Env, managed elements) is dropped }
+  RT := ACall.ResolvedReturnTypeDesc;
+  Shim := TMethodCallExpr.Create();
+  try
+    Shim.Line := ACall.Line;
+    Shim.Col := ACall.Col;
+    Shim.Name := ACall.Name;
+    Shim.Args.Free();
+    Shim.Args := ACall.Args;
+    Shim.ResolvedMethod := AMD;
+    Shim.ResolvedClassType := ACall.ResolvedClassType;
+    Shim.ResolvedType := RT;
+    Shim.IsStaticCall := True;
+    if RT.Kind = tyInterface then
+    begin
+      Self.EmitClassIntfSretMethodCall(Shim);
+      Self.Emit(#9'movq (%rsp), %rdi');
+      Self.Emit(#9'callq _ClassRelease');
+      Self.Emit(#9'addq $16, %rsp');
+    end
+    else
+    begin
+      Buf := Self.NewScratchOperand(RT.RawSize());
+      Self.EmitMethodSretCall(Shim, Buf, False);
+      if ArcTypeHasManagedContent(RT) then
+      begin
+        Self.Emit(#9'pushq %rbx');
+        Self.Emit(#9'subq $8, %rsp');
+        Self.Emit(Format(#9'leaq %s, %%rbx', [Buf]));
+        Self.EmitManagedReleaseAt(RT, '%rbx', False);
+        Self.Emit(#9'addq $8, %rsp');
+        Self.Emit(#9'popq %rbx');
+      end;
+    end;
+  finally
+    Shim.Args := nil;   { borrowed -- do not free }
+    Shim.Free();
+  end;
+end;
+
 procedure TX86_64Backend.EmitMethodCallStmt(ACall: TMethodCallStmt);
 var
   I:        Integer;
@@ -14109,9 +14288,12 @@ begin
   if (ACall.ResolvedClassType <> nil) and
      (ACall.ResolvedClassType.Kind = tyInterface) and
      (ACall.ResolvedReturnTypeDesc <> nil) and
-     (ACall.ResolvedReturnTypeDesc.Kind = tyRecord) then
+     ((ACall.ResolvedReturnTypeDesc.Kind = tyRecord) or
+      IsMethodPtrType(ACall.ResolvedReturnTypeDesc)) then
   begin
-    SretRT := TRecordTypeDesc(ACall.ResolvedReturnTypeDesc);
+    { (a closure / method pointer takes the same path as the 16-byte record
+      it is laid out as; its Env is dropped below) }
+    SretRT := AggRetRec(ACall.ResolvedReturnTypeDesc);
     SretBufSize := (SretRT.TotalSize() + 15) and (-16);
     Self.Emit(#9'pushq %rbx');
     Self.Emit(Format(#9'subq $%d, %%rsp', [SretBufSize]));
@@ -14161,7 +14343,13 @@ begin
     { The dispatch may clobber %rbx during arg evaluation; %rsp is balanced and
       still points at the buffer, so re-derive the buffer address. }
     Self.Emit(#9'movq %rsp, %rbx');
-    Self.EmitRecordFieldReleases(SretRT, '%rbx');
+    if ACall.ResolvedReturnTypeDesc.Kind = tyRecord then
+      Self.EmitRecordFieldReleases(SretRT, '%rbx')
+    else if ArcTypeIsRefClosure(ACall.ResolvedReturnTypeDesc) then
+    begin
+      Self.Emit(#9'movq 8(%rbx), %rdi');
+      Self.Emit(#9'callq _ClassRelease');
+    end;
     Self.Emit(Format(#9'addq $%d, %%rsp', [SretBufSize]));
     Self.Emit(#9'popq %rbx');
     Exit;
@@ -14305,8 +14493,37 @@ begin
       Self.Emit(Format(#9'addq $%d, %%rsp', [SretBufSize]));
       Self.Emit(#9'popq %rbx');
     end
+    else if (ACall.ResolvedReturnTypeDesc <> nil) and
+            ((ACall.ResolvedReturnTypeDesc.Kind in [tyInterface, tyStaticArray]) or
+             IsJumboSet(ACall.ResolvedReturnTypeDesc) or
+             IsMethodPtrType(ACall.ResolvedReturnTypeDesc)) then
+      { an interface, closure, static array or jumbo set comes back through
+        the hidden result pointer too -- without a buffer the callee wrote
+        through whatever %rdi held }
+      Self.EmitDiscardedStaticAggCall(ACall, MD)
     else
+    begin
       Self.EmitCall(Sym, MD, ACall.Args);
+      { a discarded owned result (user routine results are rc=1) }
+      if ACall.ResolvedReturnTypeDesc <> nil then
+      begin
+        if ACall.ResolvedReturnTypeDesc.IsString() then
+        begin
+          Self.Emit(#9'movq %rax, %rdi');
+          Self.Emit(#9'callq _StringRelease');
+        end
+        else if ACall.ResolvedReturnTypeDesc.Kind = tyClass then
+        begin
+          Self.Emit(#9'movq %rax, %rdi');
+          Self.Emit(#9'callq _ClassRelease');
+        end
+        else if ACall.ResolvedReturnTypeDesc.Kind = tyDynArray then
+        begin
+          Self.Emit(#9'movq %rax, %rdi');
+          Self.Emit(#9'callq _DynArrayRelease');
+        end;
+      end;
+    end;
     Exit;
   end;
 
@@ -14623,10 +14840,71 @@ procedure TX86_64Backend.EmitInheritedCall(ACall: TInheritedCallStmt);
 var
   MD: TMethodDecl;
   BufSz: Integer;
+  Shim: TInheritedCallExpr;
+  Asgn: TAssignment;
+  Pair: string;
 begin
   { `inherited` on TObject (no parent body) is a no-op. }
   MD := TMethodDecl(ACall.ResolvedMethod);
   if MD = nil then Exit;
+
+  { An interface or closure result: inside the override it is
+    `Result := inherited F(..)`, through the ordinary assignment and its ARC
+    discipline; outside a function it is discarded and what it owns (the
+    obj half, the Env) dropped.  It took the scalar store below, which kept
+    only the first word -- or wrote through a garbage sret pointer. }
+  if (MD.ResolvedReturnType <> nil) and
+     ((MD.ResolvedReturnType.Kind = tyInterface) or
+      IsMethodPtrType(MD.ResolvedReturnType)) then
+  begin
+    Shim := TInheritedCallExpr.Create();
+    Asgn := nil;
+    try
+      Shim.Name := ACall.Name;
+      Shim.Args := ACall.Args;
+      Shim.ResolvedMethod := MD;
+      Shim.ResolvedType := MD.ResolvedReturnType;
+      Shim.Line := ACall.Line;
+      Shim.Col := ACall.Col;
+      if Self.IsLocal('Result') then
+      begin
+        Asgn := TAssignment.Create();
+        Asgn.Line := ACall.Line;
+        Asgn.Col := ACall.Col;
+        Asgn.Name := 'Result';
+        Asgn.ResolvedLhsType := MD.ResolvedReturnType;
+        Asgn.Expr := Shim;
+        Self.EmitStmtBody(Asgn);
+      end
+      else if MD.ResolvedReturnType.Kind = tyInterface then
+      begin
+        Self.EmitIntfValueOnStack(Shim);
+        Self.Emit(#9'movq (%rsp), %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+        Self.Emit(#9'addq $16, %rsp');
+      end
+      else
+      begin
+        Pair := Self.NewScratchOperand(16);
+        Self.EmitRecordCallSretAt(Shim, Pair, False);
+        if ArcTypeIsRefClosure(MD.ResolvedReturnType) then
+        begin
+          Self.Emit(Format(#9'leaq %s, %%rax', [Pair]));
+          Self.Emit(#9'movq 8(%rax), %rdi');
+          Self.Emit(#9'callq _ClassRelease');
+        end;
+      end;
+    finally
+      if Asgn <> nil then
+      begin
+        Asgn.Expr := nil;      { the shim is freed below }
+        Asgn.Free();
+      end;
+      Shim.Args := nil;        { borrowed -- do not free }
+      Shim.Free();
+    end;
+    Exit;
+  end;
 
   { A record-returning parent uses the sret ABI, not a %rax value: route it
     through the sret path writing straight into the current Result slot (the
@@ -16954,55 +17232,23 @@ begin
       record so BOTH halves are captured into the 16-byte destination slot. }
     if (Asgn.ResolvedLhsType <> nil) and
        IsMethodPtrType(Asgn.ResolvedLhsType) and
-       (Asgn.Expr is TFuncCallExpr) and
-       (((TFuncCallExpr(Asgn.Expr).ResolvedDecl <> nil) and
-         IsMethodPtrType(
-           TMethodDecl(TFuncCallExpr(Asgn.Expr).ResolvedDecl).ResolvedReturnType)) or
-        { F := P(X): a closure returned through a procedural variable }
-        (TFuncCallExpr(Asgn.Expr).IsIndirectCall and
-         (TFuncCallExpr(Asgn.Expr).ResolvedProcType <> nil) and
-         IsMethodPtrType(TProceduralTypeDesc(
-           TFuncCallExpr(Asgn.Expr).ResolvedProcType).ReturnType))) then
+       (Asgn.Expr.ResolvedType <> nil) and
+       IsMethodPtrType(Asgn.Expr.ResolvedType) and
+       Self.IsFatCallValue(Asgn.Expr) then
     begin
-      { The call fills a fresh per-site scratch, THEN the pair moves into
-        the target: the sret helper zeroes its destination before the
-        arguments are evaluated, so F := Wrap(F) straight into F handed
-        Wrap a nil F.  A 'reference to' target owns its Env, so the old one
-        is released after the store (overwriting it leaked the old
-        closure's captures).  One address walk (EmitAsgnTargetAddr) serves
-        every target: sret Result, capture, var param, local, global. }
+      { Every call form that produces one -- a function, method, interface
+        method, procedural variable or expression callee, an inherited
+        call, a property getter -- through the one sret dispatcher.  The call
+        fills a fresh per-site scratch, THEN the pair moves into the target:
+        the sret helper zeroes its destination before the arguments are
+        evaluated, so F := Wrap(F) straight into F handed Wrap a nil F.  A
+        'reference to' target owns its Env, so the old one is released after
+        the store (overwriting it leaked the old closure's captures).  One
+        address walk (EmitAsgnTargetAddr) serves every target: sret Result,
+        capture, var param, local, global.  (A getter or interface call took
+        no arm here, and only the Code half was stored.) }
       PtrSlot := Self.NewScratchOperand(16);
-      Self.EmitFuncCallSret(TFuncCallExpr(Asgn.Expr), PtrSlot, False);
-      Self.EmitAsgnTargetAddr(Asgn, '%rcx');
-      Self.Emit(#9'pushq 8(%rcx)');              { the old Env }
-      Self.Emit(#9'subq $8, %rsp');
-      Self.Emit(Format(#9'leaq %s, %%rsi', [PtrSlot]));
-      Self.Emit(#9'movq (%rsi), %rax');
-      Self.Emit(#9'movq %rax, (%rcx)');
-      Self.Emit(#9'movq 8(%rsi), %rax');
-      Self.Emit(#9'movq %rax, 8(%rcx)');
-      Self.Emit(#9'addq $8, %rsp');
-      Self.Emit(#9'popq %rdi');
-      if ArcTypeIsRefClosure(Asgn.ResolvedLhsType) then
-        Self.Emit(#9'callq _ClassRelease');
-      Exit;
-    end;
-    if (Asgn.ResolvedLhsType <> nil) and
-       IsMethodPtrType(Asgn.ResolvedLhsType) and
-       (Asgn.Expr is TMethodCallExpr) and
-       (TMethodCallExpr(Asgn.Expr).ResolvedMethod <> nil) and
-       IsMethodPtrType(
-         TMethodDecl(TMethodCallExpr(Asgn.Expr).ResolvedMethod).ResolvedReturnType) then
-    begin
-      { The call fills a fresh per-site scratch, THEN the pair moves into
-        the target: the sret helper zeroes its destination before the
-        arguments are evaluated, so F := Wrap(F) straight into F handed
-        Wrap a nil F.  A 'reference to' target owns its Env, so the old one
-        is released after the store (overwriting it leaked the old
-        closure's captures).  One address walk (EmitAsgnTargetAddr) serves
-        every target: sret Result, capture, var param, local, global. }
-      PtrSlot := Self.NewScratchOperand(16);
-      Self.EmitMethodSretCall(TMethodCallExpr(Asgn.Expr), PtrSlot, False);
+      Self.EmitRecordCallSretAt(Asgn.Expr, PtrSlot, False);
       Self.EmitAsgnTargetAddr(Asgn, '%rcx');
       Self.Emit(#9'pushq 8(%rcx)');              { the old Env }
       Self.Emit(#9'subq $8, %rsp');
@@ -17175,7 +17421,8 @@ begin
        (Asgn.ResolvedLhsType.Kind = tyRecord) and
        Self.IsNativeRecordCall(Asgn.Expr) and
        (((Asgn.Expr is TFieldAccessExpr) and
-         (TFieldAccessExpr(Asgn.Expr).PropRead <> nil)) or
+         ((TFieldAccessExpr(Asgn.Expr).PropRead <> nil) or
+          TFieldAccessExpr(Asgn.Expr).IsStaticPropGet)) or
         (Asgn.Expr is TStringSubscriptExpr)) then
     begin
       Self.Emit(#9'pushq %rbx');
@@ -21829,13 +22076,12 @@ begin
       (%rsp) over a 16-byte buffer: obj@0, itab@8.  Save it as a contiguous
       16-byte pair (itab pushed first, obj on top); depth records the obj. }
     if (not IsVarPos) and
-       ((Arg is TFuncCallExpr) or (Arg is TMethodCallExpr)) and
-       (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
+       (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) and
+       Self.IsIntfStackValue(Arg) then
     begin
-      if Arg is TFuncCallExpr then
-        Self.EmitIntfSretCall(TFuncCallExpr(Arg))
-      else
-        Self.EmitIntfSretMethodCall(TMethodCallExpr(Arg));
+      { (a getter or static var too: the shared lowering hands every such
+        form over as an owned pair) }
+      Self.EmitIntfValueOnStack(Arg);
       Self.Emit(#9'movq (%rsp), %rax');     { obj }
       Self.Emit(#9'movq 8(%rsp), %rcx');    { itab }
       Self.Emit(#9'addq $16, %rsp');        { drop the sret buffer }
@@ -24256,10 +24502,16 @@ var
   IE: TIdentExpr;
   OverflowBytes: Integer;
   SlotClasses: TList<Integer>;
+  RecvOnStack: Boolean;
 begin
   IntfD := TInterfaceTypeDesc(ACall.ResolvedClassType);
   ArgN := 0;
   if ACall.Args <> nil then ArgN := ACall.Args.Count;
+  { A call-shaped receiver (I.Next().Next().Name(), MkT().Self2()) is
+    evaluated FIRST -- it is a call and would clobber the pushed args.  Its
+    owned pair sits above the hoist region until after the dispatch. }
+  RecvOnStack := (ACall.ObjExpr <> nil) and
+    Self.EmitIntfValueOnStack(ACall.ObjExpr);
   { Same unknown-signature hoist as EmitInterfaceCall; the region sits BELOW
     the sret buffer (see EmitIntfSretCall for the layout rationale). }
   HD := TList<Integer>.Create();
@@ -24350,8 +24602,15 @@ begin
       Pushed := Pushed + 8;
   end;
   { Resolve the receiver: obj into %r10, itab into %rax. }
-  Self.EmitIntfRecvPair(ACall.ObjExpr, ACall.ObjectName, ACall.IsGlobal,
-    ACall.IsVarParam);
+  if RecvOnStack then
+  begin
+    { above the args, the sret buffer and the hoist region }
+    Self.Emit(Format(#9'movq %d(%%rsp), %%r10', [Pushed + 16 + HTotal]));
+    Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [Pushed + 16 + HTotal + 8]));
+  end
+  else
+    Self.EmitIntfRecvPair(ACall.ObjExpr, ACall.ObjectName, ACall.IsGlobal,
+      ACall.IsVarParam);
   SlotOff := IntfD.MethodIndex(ACall.Name) * 8;
   if SlotOff = 0 then
     Self.Emit(#9'movq (%rax), %r11')
@@ -24387,6 +24646,17 @@ begin
     hoist region so the caller's `fat pointer at (%rsp)` contract holds. }
   Self.EmitHoistEpilogue(ACall.Args, HD, HK, HTotal, 16, False);
   Self.EmitSretBufferSlideDown(HTotal);
+  if RecvOnStack then
+  begin
+    { drop the owned receiver, then move the result pair up over it }
+    Self.Emit(#9'movq 16(%rsp), %rdi');
+    Self.Emit(#9'callq _ClassRelease');
+    Self.Emit(#9'movq (%rsp), %rax');
+    Self.Emit(#9'movq %rax, 16(%rsp)');
+    Self.Emit(#9'movq 8(%rsp), %rax');
+    Self.Emit(#9'movq %rax, 24(%rsp)');
+    Self.Emit(#9'addq $16, %rsp');
+  end;
   HD.Free();
   HK.Free();
 end;
@@ -24409,7 +24679,9 @@ var
   RecvOnStack: Boolean;
 begin
   IntfD := TInterfaceTypeDesc(ACall.ResolvedClassType);
-  RetRec := TRecordTypeDesc(ACall.ResolvedType);
+  { a closure / method pointer is returned as the 16-byte record it is laid
+    out as (casting its procedural type to a record read garbage fields) }
+  RetRec := AggRetRec(ACall.ResolvedType);
   RC := ClassifyRecordReturn(RetRec);
   ArgN := 0;
   if ACall.Args <> nil then ArgN := ACall.Args.Count;
@@ -24431,21 +24703,8 @@ begin
     Its owned (+1) fat pair stays at the bottom of this call's stack region
     until after the dispatch, then the obj is released.  Same discipline as
     EmitInterfaceCall. }
-  RecvOnStack := False;
-  if (ACall.ObjExpr <> nil) and (ACall.ObjExpr is TFuncCallExpr) then
-  begin
-    Self.EmitIntfSretCall(TFuncCallExpr(ACall.ObjExpr));
-    RecvOnStack := True;
-  end
-  else if (ACall.ObjExpr <> nil) and (ACall.ObjExpr is TMethodCallExpr) and
-          (TMethodCallExpr(ACall.ObjExpr).ResolvedClassType <> nil) then
-  begin
-    if TMethodCallExpr(ACall.ObjExpr).ResolvedClassType.Kind = tyInterface then
-      Self.EmitIntfSretMethodCall(TMethodCallExpr(ACall.ObjExpr))
-    else
-      Self.EmitClassIntfSretMethodCall(TMethodCallExpr(ACall.ObjExpr));
-    RecvOnStack := True;
-  end;
+  RecvOnStack := (ACall.ObjExpr <> nil) and
+    Self.EmitIntfValueOnStack(ACall.ObjExpr);
 
   { Same unknown-signature hoist as EmitIntfSretMethodCall; the region sits
     BELOW any sret buffer space we reserve. }
