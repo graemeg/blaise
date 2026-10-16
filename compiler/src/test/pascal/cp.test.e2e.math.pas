@@ -52,6 +52,9 @@ type
       the 32-bit range survives WriteLn, IntToStr and arithmetic with no
       Int64 variable in between, and still narrows into an Integer. }
     procedure TestRun_RoundTrunc_Int64Result;
+    { Ceil and Floor return Int64 like Round and Trunc: a result past the
+      32-bit range survives with no Int64 variable in between. }
+    procedure TestRun_CeilFloor_Int64Result;
     procedure TestRun_Trunc_Positive;
     procedure TestRun_Trunc_Negative;
 
@@ -378,6 +381,29 @@ begin
     end.
     ''', '40000000000' + Chr(10) + '40000000000' + Chr(10) +
          '40000000000' + Chr(10) + '30000001024' + Chr(10) + '9' + Chr(10), 0);
+end;
+
+procedure TE2EMathTests.TestRun_CeilFloor_Int64Result;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(
+    '''
+    program P;
+    var D: Double; S: Single; I: Integer;
+    begin
+      D := 40000000000.5;
+      WriteLn(Ceil(D));
+      WriteLn(IntToStr(Floor(D)));
+      WriteLn(Ceil(D) * 2 + Floor(-D));
+      S := 3.0e10;
+      WriteLn(Floor(S));
+      WriteLn(Ceil(-2.5), ' ', Floor(-2.5));
+      I := Ceil(2.1) + Floor(7.9);
+      WriteLn(I);
+    end.
+    ''', '40000000001' + Chr(10) + '40000000000' + Chr(10) +
+         '40000000001' + Chr(10) + '30000001024' + Chr(10) +
+         '-2 -3' + Chr(10) + '10' + Chr(10), 0);
 end;
 
 procedure TE2EMathTests.TestRun_Trunc_Positive;

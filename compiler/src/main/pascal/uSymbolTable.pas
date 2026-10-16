@@ -2402,11 +2402,11 @@ begin
   { Math builtins — Sqrt/Ceil/Floor/Round/Trunc/Ln/Log2/Log10/Power,
     Sin/Cos/Tan/ArcTan/ArcTan2, IsNaN/IsInfinite.
     Return types marked here are overridden in uSemantic.AnalyseFuncCallExpr
-    (e.g. Ceil/Floor return Integer, Round/Trunc Int64; Sin/Cos/Tan return the arg
+    (e.g. Ceil/Floor/Round/Trunc return Int64; Sin/Cos/Tan return the arg
     type; IsNaN/IsInfinite return Boolean). }
   Sym := TSymbol.Create('Sqrt',       skFunction, FTypeDouble);  Define(Sym);
-  Sym := TSymbol.Create('Ceil',       skFunction, FTypeInteger); Define(Sym);
-  Sym := TSymbol.Create('Floor',      skFunction, FTypeInteger); Define(Sym);
+  Sym := TSymbol.Create('Ceil',       skFunction, FTypeInt64);   Define(Sym);
+  Sym := TSymbol.Create('Floor',      skFunction, FTypeInt64);   Define(Sym);
   Sym := TSymbol.Create('Round',      skFunction, FTypeInt64);   Define(Sym);
   Sym := TSymbol.Create('Trunc',      skFunction, FTypeInt64);   Define(Sym);
   Sym := TSymbol.Create('Ln',         skFunction, FTypeDouble);  Define(Sym);

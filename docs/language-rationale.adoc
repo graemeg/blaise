@@ -4180,44 +4180,54 @@ later changes nothing here.
 
 === Decision
 
+All four float-to-integer built-ins return `Int64`:
+
 [cols="1,1",options="header"]
 |===
 | Function | Result type
 | `Round(X)` | `Int64`
 | `Trunc(X)` | `Int64`
-| `Ceil(X)` | `Integer`
-| `Floor(X)` | `Integer`
+| `Ceil(X)` | `Int64`
+| `Floor(X)` | `Int64`
 |===
 
-These are the signatures of Delphi and FPC: `Round` and `Trunc` are `System`
-functions returning `Int64`, while `Ceil` and `Floor` are `Math` functions
-returning `Integer`.  An `Int64` result narrows implicitly into an `Integer`
-variable, so `I := Round(X)` compiles as before.
+An `Int64` result narrows implicitly into an `Integer` variable, so
+`I := Ceil(X)` compiles as before.
 
 === Rationale
 
-* *Porting safety.*  With a 32-bit result, `WriteLn(Round(40000000000.5))`
-  printed `1345294336` on x86-64: the value was truncated with no error,
-  while Delphi and FPC print `40000000000`.  The same truncation reached
-  `IntToStr`, arithmetic and overload resolution wherever the result was used
-  directly rather than stored in an `Int64` variable first.
+* *No silent truncation.*  With a 32-bit result, `WriteLn(Round(40000000000.5))`
+  printed `1345294336` on x86-64 and `WriteLn(Ceil(40000000000.5))` printed
+  `1345294337`: the value was cut to 32 bits with no error.  The same
+  truncation reached `IntToStr`, arithmetic and overload resolution wherever
+  the result was used directly rather than stored in an `Int64` variable
+  first.
+* *One rule for the family.*  The four functions do the same job and differ
+  only in rounding direction.  Giving them different result types would make
+  `Ceil(X)` overflow where `Round(X)` does not, for the same `X`.
 * *No cost.*  Both ISAs already converted into a 64-bit register
-  (`cvtsd2si` into `%rax`, `fcvtns` into `x0`); only the declared type was
-  narrower.
-* *`Ceil` and `Floor` follow the same rule*: match Delphi and FPC.  Their
-  `Integer` result is what ported code expects from overload resolution.
+  (`cvtsd2si` / `cvttsd2si` into `%rax`, `fcvtns` / `fcvtzs` into `x0`); only
+  the declared type was narrower.
+* *Matches Delphi and FPC for `Round` and `Trunc`*, whose `System`
+  declarations return `Int64`.
 
 === History
 
-Until 2026-10-15 all four functions returned `Integer`.  No decision recorded
-that choice; it was the type given when the built-ins were first declared.
+Until 2026-10-15 all four functions returned `Integer`; no decision recorded
+that choice.  On 2026-10-15 `Round` and `Trunc` became `Int64` to match
+Delphi and FPC, and `Ceil` and `Floor` kept `Integer`, the type of their
+`Math` declarations in those compilers.  On 2026-10-16 `Ceil` and `Floor`
+became `Int64` too, for the consistency described above.
 
 === Alternatives Rejected
 
-*`Int64` for all four.*  Safer against overflow in `Ceil` and `Floor`, but it
-departs from both Delphi and FPC, whose `Math` units keep those functions
-`Integer` and add `Ceil64` and `Floor64` for the wide case.  Matching them
-keeps ported code resolving to the same overloads.
+*`Integer` for `Ceil` and `Floor`, as in the Delphi and FPC `Math` units*
+(which add `Ceil64` and `Floor64` for the wide case).  Exact signature parity
+was the reason for keeping it, but it leaves two members of one family
+truncating where the other two do not.  Ported code is unaffected in practice:
+an `Int64` result assigns to an `Integer` exactly as before, and the only
+visible difference is that a result outside the 32-bit range is now correct.
+Blaise therefore provides no separate `Ceil64` / `Floor64`.
 
 == `High` and `Low` on Ordinal Types
 

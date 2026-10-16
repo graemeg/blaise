@@ -42,11 +42,11 @@ type
     procedure TestSemantic_Sqrt_ReturnsDouble;
     procedure TestSemantic_Sqrt_IntegerArg_Accepted;
 
-    { Ceil / Floor → Integer; Round / Trunc → Int64, as in Delphi and FPC }
+    { Ceil / Floor / Round / Trunc → Int64 }
     procedure TestSemantic_Ceil_OK;
-    procedure TestSemantic_Ceil_ReturnsInteger;
+    procedure TestSemantic_Ceil_ReturnsInt64;
     procedure TestSemantic_Floor_OK;
-    procedure TestSemantic_Floor_ReturnsInteger;
+    procedure TestSemantic_Floor_ReturnsInt64;
     procedure TestSemantic_Round_OK;
     procedure TestSemantic_Round_ReturnsInt64;
     { Round rounds half to EVEN (banker's), as Delphi and FPC do: one
@@ -297,7 +297,7 @@ begin
     'program P; var X: Double; R: Integer; begin R := Ceil(X) end.');
 end;
 
-procedure TMathTests.TestSemantic_Ceil_ReturnsInteger;
+procedure TMathTests.TestSemantic_Ceil_ReturnsInt64;
 var
   Lexer:    TLexer;
   Parser:   TParser;
@@ -314,7 +314,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Integer', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Int64', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
   end;
@@ -326,7 +326,7 @@ begin
     'program P; var X: Double; R: Integer; begin R := Floor(X) end.');
 end;
 
-procedure TMathTests.TestSemantic_Floor_ReturnsInteger;
+procedure TMathTests.TestSemantic_Floor_ReturnsInt64;
 var
   Lexer:    TLexer;
   Parser:   TParser;
@@ -343,7 +343,7 @@ begin
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts.Items[0]);
     AssertNotNil('resolved type', Assign.Expr.ResolvedType);
-    AssertEquals('return type', 'Integer', Assign.Expr.ResolvedType.Name);
+    AssertEquals('return type', 'Int64', Assign.Expr.ResolvedType.Name);
   finally
     Semantic.Free(); Prog.Free(); Parser.Free(); Lexer.Free();
   end;
