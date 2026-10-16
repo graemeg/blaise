@@ -1778,7 +1778,7 @@ begin
         field's offset.  Handles Rec.RecField.Field / A.B.C. }
       EmitRecAddrToX0(AFA.Base)
     else
-      NotYet('record address through this base form', AFA);
+      InternalError('chained field base is neither a class nor a record', AFA);
   end
   else if AFA.IsImplicitSelf then
     EmitLoadSlot('x0', 'Self')
@@ -2205,7 +2205,7 @@ begin
       tyDynArray, tyOpenArray:
         EmitDynElemAddr(TStringSubscriptExpr(AExpr));
     else
-      NotYet('record address of this subscript base', AExpr);
+      InternalError('record element of a non-array subscript base', AExpr);
     end;
     Exit;
   end;
@@ -2274,7 +2274,8 @@ begin
     DeferAggRelease(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType);
     Exit;
   end;
-  NotYet('record address of this expression', AExpr);
+  InternalError('record address of an expression that is not a ' +
+    'variable, element, field, dereference or call', AExpr);
 end;
 
 procedure TArm64Backend.EmitRecCallToRret(AExpr: TASTExpr);
@@ -4004,7 +4005,8 @@ begin
     if AStmt.PropIndexExpr <> nil then
     begin
       if AStmt.IsElemWrite then
-        NotYet('array-field element write via subscript', AStmt);
+        InternalError('element write through a method-backed property (the ' +
+          'front end routes it to the read field)', AStmt);
       EmitIndexedPropWrite(TPropertyInfo(AStmt.PropWriteInfo),
         AStmt.PropOwnerType, AStmt.PropAccessorVSlot, AStmt.PropIndexExpr,
         AStmt.Expr, AStmt);
@@ -4296,7 +4298,8 @@ begin
         IsClassAccess address arm below does not add; keep it honest until a
         var-param class base is wired end-to-end. }
   if AStmt.IsImplicitSelf and (AStmt.ObjExpr <> nil) then
-    NotYet('array-field element write on this base form', AStmt);
+    InternalError('array-field element write with both implicit Self and ' +
+      'an object base', AStmt);
   if AStmt.FieldInfo = nil then
     NotYet('unresolved field element write', AStmt);
   if AStmt.FieldInfo.TypeDesc.Kind = tyDynArray then
@@ -6496,7 +6499,7 @@ begin
   if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsCharAccess then
   begin
     if TFieldAccessExpr(AExpr).PropIndexExpr = nil then
-      NotYet('string-field subscript without an index', AExpr);
+      InternalError('string-field char access without an index', AExpr);
     Self.EmitExprToX0(TFieldAccessExpr(AExpr).PropIndexExpr);
     EmitPushX0();
     EmitRecFieldAddrToX0(TFieldAccessExpr(AExpr));
@@ -6861,7 +6864,7 @@ begin
       Self.EmitExprToX0(TDerefExpr(TAddrOfExpr(AExpr).Expr).Expr);
       Exit;
     end;
-    NotYet('address-of on this expression', AExpr);
+    InternalError('address-of an operand the front end does not admit', AExpr);
   end;
   if AExpr is TSupportsExpr then
   begin
@@ -7249,7 +7252,7 @@ begin
         EmitDynElemAddr(
           TStringSubscriptExpr(TFieldAccessExpr(AExpr).Base));
     else
-      NotYet('field read on this subscript base', AExpr);
+      InternalError('field read on a non-array subscript base', AExpr);
     end;
     if TFieldAccessExpr(AExpr).FieldInfo.Offset <> 0 then
       EmitAddSubImm('add', 'x0', 'x0',
@@ -12537,7 +12540,7 @@ begin
       tyStaticArray: EmitStaticElemAddr(Sub);
       tyDynArray, tyOpenArray: EmitDynElemAddr(Sub);
     else
-      NotYet('array storage through this subscript base', AExpr);
+      InternalError('inner array of a non-array subscript base', AExpr);
     end;
     Exit;
   end;
@@ -12562,7 +12565,8 @@ begin
     Self.EmitExprToX0(TDerefExpr(AExpr).Expr);
     Exit;
   end;
-  NotYet('array storage of this expression', AExpr);
+  InternalError('static-array storage of an expression that is not a ' +
+    'variable, element, field, cast, call or dereference', AExpr);
 end;
 
 procedure TArm64Backend.EmitDynElemAddr(ASub: TStringSubscriptExpr);
@@ -12645,7 +12649,7 @@ begin
     pointer BEFORE adding the field offset (the QBE trap: adding the offset to
     the slot address yields a garbage pointer). }
   if AFAE.FieldInfo = nil then
-    NotYet('address of an array-field element with no field info', AFAE);
+    InternalError('address of an array-field element with no field info', AFAE);
   { --- base into x0 --- }
   if (AFAE.Base <> nil) and (AFAE.Base.ResolvedType <> nil) and
      (AFAE.Base.ResolvedType.Kind = tyRecord) then
@@ -12709,7 +12713,7 @@ begin
     LowB := 0;
   end
   else
-    NotYet('address of a non-array field element', AFAE);
+    InternalError('address of an element of a non-array field', AFAE);
   EmitPushX0();                                    { park base }
   Self.EmitExprToX0(AFAE.PropIndexExpr);           { index -> x0 }
   if LowB <> 0 then
