@@ -80,6 +80,10 @@ type
       ("Expected '.' or ':=' after subscript"). }
     procedure TestParse_ExprCallStmt_ElementAndDeref;
     procedure TestParse_ExprCallStmt_BareElementWithoutParens_Rejected;
+    { ...and through the value a CALL returns: GetFn()(X); and
+      GetMaker()(X).Run();  The statement parser stopped at the first call
+      ("Expected 'end' but got '('"). }
+    procedure TestParse_ExprCallStmt_CallResultCallee;
     { Codegen }
     { Use(MakeFn()): the closure a call returns lands in a per-site scratch
       whose ADDRESS is the argument; x86-64 passed the Code word as the
@@ -1102,6 +1106,43 @@ begin
     AssertEquals('three expression-call statements', 3, N);
     AssertEquals('A[1](7) carries its argument', 1,
       TIndirectFuncCallExpr(TExprCallStmt(Prog.Block.Stmts.Items[0]).Call).Args.Count);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TAnonMethodTests.TestParse_ExprCallStmt_CallResultCallee;
+const
+  Src = '''
+    program Prg;
+    begin
+      GetFn()(7);
+      GetFn()(1)(2);
+      GetMaker()(3).Run(4)
+    end.
+    ''';
+var
+  Prog: TProgram;
+  Ind: TIndirectFuncCallExpr;
+  MC: TMethodCallStmt;
+begin
+  Prog := ParseSrc(Src);
+  try
+    AssertEquals('three statements', 3, Prog.Block.Stmts.Count);
+    AssertTrue('GetFn()(7) is an expression-call statement',
+      Prog.Block.Stmts.Items[0] is TExprCallStmt);
+    Ind := TIndirectFuncCallExpr(TExprCallStmt(Prog.Block.Stmts.Items[0]).Call);
+    AssertTrue('its callee is the call GetFn()', Ind.CalleeExpr is TFuncCallExpr);
+    AssertEquals('it carries its argument', 1, Ind.Args.Count);
+    Ind := TIndirectFuncCallExpr(TExprCallStmt(Prog.Block.Stmts.Items[1]).Call);
+    AssertTrue('GetFn()(1)(2) chains two indirect calls',
+      Ind.CalleeExpr is TIndirectFuncCallExpr);
+    AssertTrue('a method call ends the third chain',
+      Prog.Block.Stmts.Items[2] is TMethodCallStmt);
+    MC := TMethodCallStmt(Prog.Block.Stmts.Items[2]);
+    AssertEquals('method name', 'Run', MC.Name);
+    AssertEquals('method args', 1, MC.Args.Count);
+    AssertTrue('receiver is GetMaker()(3)', MC.ObjExpr is TIndirectFuncCallExpr);
   finally
     Prog.Free();
   end;

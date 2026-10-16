@@ -196,6 +196,7 @@ type
     function  ParseAddSub: TASTExpr;
     function  ParseTerm: TASTExpr;
     function  ParseFactor: TASTExpr;
+    function  ParsePostfixChain(ABase: TASTExpr): TASTExpr;
     procedure ParseArgList(ACall: TProcCall);
     { One call argument.  Inside Write / WriteLn an argument may carry a
       field width and, for a real, a decimal count -- X:W or X:W:D -- which
@@ -204,6 +205,7 @@ type
     function ParseCallArg(const ACallee: string): TASTExpr;
     procedure ParseMethodCallArgList(ACall: TMethodCallStmt);
     function  ParseExprCallStmt(ACallee: TASTExpr; ALine, ACol: Integer): TASTStmt;
+    function  CallChainStmt(AExpr: TASTExpr; ALine, ACol: Integer): TASTStmt;
   public
     constructor Create(ALexer: TLexer);
     destructor Destroy; override;
@@ -3781,6 +3783,44 @@ begin
   Result := Stmt;
 end;
 
+function TParser.CallChainStmt(AExpr: TASTExpr; ALine, ACol: Integer): TASTStmt;
+{ A statement made of a postfix chain (GetFn()(X); GetFn()(X).Run();): the
+  last link must be a call -- a call through the value the chain yields, or
+  a method call on it.  Takes ownership of AExpr. }
+var
+  Stmt:  TExprCallStmt;
+  MCall: TMethodCallStmt;
+  ME:    TMethodCallExpr;
+begin
+  if AExpr is TIndirectFuncCallExpr then
+  begin
+    Stmt := TExprCallStmt.Create();
+    Stmt.Line := ALine;
+    Stmt.Col := ACol;
+    Stmt.Call := AExpr;
+    Exit(Stmt);
+  end;
+  if AExpr is TMethodCallExpr then
+  begin
+    ME := TMethodCallExpr(AExpr);
+    MCall := TMethodCallStmt.Create();
+    MCall.Line := ALine;
+    MCall.Col := ACol;
+    MCall.ObjectName := ME.ObjectName;
+    MCall.Name := ME.Name;
+    MCall.ObjExpr := ME.ObjExpr;
+    ME.ObjExpr := nil;
+    while ME.Args.Count > 0 do
+      MCall.Args.Add(ME.Args.Extract(ME.Args.Items[0]));
+    ME.Free();
+    Exit(MCall);
+  end;
+  AExpr.Free();
+  raise EParseError.Create(Format(
+    'Expected a call at line %d col %d in %s',
+    [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
+end;
+
 function TParser.ParseStmt: TASTStmt;
 var
   Name:        string;
@@ -4719,6 +4759,10 @@ begin
       end;
       Expect(tkRParen);
       CastRcv := FCallNode;
+      if Check(tkLParen) then
+        { F(args)(more): a call through the procedural value F returns --
+          the full postfix chain, which must end in a call }
+        Exit(Self.CallChainStmt(Self.ParsePostfixChain(FCallNode), Line, Col));
       if Check(tkCaret) then
       begin
         { F(args)^ ... : dereference the returned pointer }
@@ -6056,7 +6100,6 @@ var
   NegNode:    TBinaryExpr;
   SubNode:       TStringSubscriptExpr;
   ArrNode:       TArrayLiteralExpr;
-  IndCallNode:   TIndirectFuncCallExpr;
   ParseIntV:    Int64;
   ParseIntFlag: Boolean;
   InhNode:      TInheritedCallExpr;
@@ -6509,6 +6552,22 @@ begin
       'Expected expression at line %d col %d in %s',
       [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
   end;
+  Result := Self.ParsePostfixChain(Result);
+end;
+
+function TParser.ParsePostfixChain(ABase: TASTExpr): TASTExpr;
+{ The postfix suffixes that may follow a primary expression -- shared by
+  ParseFactor and by statements that begin with a call whose result is
+  used further (GetFn()(X);).  Takes ownership of ABase. }
+var
+  FldNode:     TFieldAccessExpr;
+  MCallNode:   TMethodCallExpr;
+  DerefNode:   TDerefExpr;
+  SecondName:  string;
+  SubNode:     TStringSubscriptExpr;
+  IndCallNode: TIndirectFuncCallExpr;
+begin
+  Result := ABase;
   { Postfix chaining loop: Expr.Field, Expr.Method(...), Expr[i], Expr^, Expr(...) }
   while Check(tkDot) or Check(tkLBracket) or Check(tkCaret) or Check(tkLParen) do
   begin

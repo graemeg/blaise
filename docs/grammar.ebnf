@@ -1273,6 +1273,22 @@ ExprCallStmt
     = IDENT LBRACKET Expr { COMMA Expr } RBRACKET { SubscriptSuffix }
       LPAREN [ ArgList ] RPAREN
     | IDENT CARET LPAREN [ ArgList ] RPAREN
+    | IDENT LPAREN [ ArgList ] RPAREN LPAREN [ ArgList ] RPAREN { CallSuffix }
+    ;
+
+(* The last ExprCallStmt form calls through the procedural value a CALL
+ * returns: GetFn()(X);  MakeAdder(1)(2)(3);  GetMaker()(7).Show('box');.
+ * After the first call's result is called, the full expression postfix
+ * chain may follow, and the chain must END in a call -- either a further
+ * call through the value (an indirect call) or a method call on it
+ * (DOT IDENT LPAREN ... RPAREN).  A chain ending in a field or subscript is
+ * not a statement.  The result of the final call, if any, is discarded and
+ * released when it is managed. *)
+CallSuffix
+    = LPAREN [ ArgList ] RPAREN
+    | DOT IDENT [ LPAREN [ ArgList ] RPAREN ]
+    | LBRACKET Expr { COMMA Expr } RBRACKET
+    | CARET
     ;
 
 FieldAssignment

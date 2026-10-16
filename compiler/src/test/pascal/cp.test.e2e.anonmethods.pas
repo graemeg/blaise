@@ -194,6 +194,9 @@ type
       inside a static method (no Self) -- both were rejected at compile time }
     procedure TestRun_NestedNonCapturingLiteral;
     procedure TestRun_LiteralInStaticMethod;
+    { a call through the procedural value a call returns, as a statement:
+      GetFn()(X); and GetMaker()(X).Show(); }
+    procedure TestRun_ExprCallStmt_CallResultCallee;
   end;
 
 implementation
@@ -2654,6 +2657,47 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '21' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ExprCallStmt_CallResultCallee;
+const
+  Src = '''
+    program P;
+    type
+      TShow = reference to procedure(N: Integer);
+      TKFn = reference to function(A: Integer): Integer;
+      TBox = class
+        V: Integer;
+        procedure Show(Tag: string);
+      end;
+      TMaker = reference to function(N: Integer): TBox;
+    procedure TBox.Show(Tag: string); begin WriteLn(Tag, ' ', V); end;
+    function GetShow(): TShow;
+    begin
+      Result := procedure(N: Integer) begin WriteLn('show ', N); end;
+    end;
+    function GetFn(): TKFn;
+    begin
+      Result := function(A: Integer): Integer begin WriteLn('fn ', A); Result := A; end;
+    end;
+    function GetMaker(): TMaker;
+    begin
+      Result := function(N: Integer): TBox
+        begin
+          Result := TBox.Create();
+          Result.V := N * 10;
+        end;
+    end;
+    begin
+      GetShow()(5);
+      GetFn()(6);
+      GetMaker()(7).Show('box');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'show 5' + LineEnding + 'fn 6' + LineEnding +
+    'box 70' + LineEnding, 0);
 end;
 
 initialization
