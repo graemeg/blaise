@@ -5077,18 +5077,22 @@ var
   WeakPar: TMethodParam;
 begin
   Intf := TInterfaceTypeDesc(AAsgn.ResolvedLhsType);
-  { A captured interface (the enclosing routine's local) or a var interface
-    parameter: the pair lives behind a pointer -- '_cap_' or the param slot
-    -- not in a named slot of this frame, so the named-operand arms below
-    stored into a slot that is not the variable (an assignment with no
-    effect).  The shared slot store does the ARC through the address. }
+  { A captured interface or a var interface parameter: the pair lives behind
+    a pointer -- '_cap_' or the param slot -- not in a named slot of this
+    frame, so the named-operand arms below stored into a slot that is not the
+    variable (an assignment with no effect).  That holds in the DECLARING
+    routine too: once a closure captures the variable it lives in the env,
+    and the routine's own slot of that name is idle (G := X there went to the
+    idle slot, and G.Hi() then dispatched on the env's nil).  IsCaptured
+    already excludes a capture materialised into a real slot.  The shared
+    slot store does the ARC through the address. }
   if not AAsgn.IsWeakLhs and
-     ((Self.IsCaptured(AAsgn.Name) and not Self.IsLocal(AAsgn.Name)) or
+     (Self.IsCaptured(AAsgn.Name) or
       (AAsgn.IsVarParam and Self.IsLocal(AAsgn.Name))) then
   begin
     Self.Emit(#9'pushq %rbx');
     Self.Emit(#9'pushq %rbx');                 { keeps %rsp 16-aligned }
-    if Self.IsCaptured(AAsgn.Name) and not Self.IsLocal(AAsgn.Name) then
+    if Self.IsCaptured(AAsgn.Name) then
       Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('_cap_' + AAsgn.Name)]))
     else
       Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(AAsgn.Name)]));
@@ -15521,7 +15525,7 @@ begin
   { dst = loop-var address.  A GLOBAL interface variable has no symbol
     under its bare name -- its pair starts at the <Name>_obj label (the
     bare leaqs bound to garbage and the loop crashed) }
-  if Self.IsCaptured(AStmt.VarName) and not Self.IsLocal(AStmt.VarName) then
+  if Self.IsCaptured(AStmt.VarName) then
     { a loop variable of the enclosing routine: its '_cap_' slot holds the
       variable's address (the frame-slot leaq named a slot that is not
       there) }
@@ -20098,7 +20102,7 @@ begin
             Self.Emit(Format(#9'addq $%d, %%rcx', [SSA.ImplicitFieldInfo.Offset]));
           Self.Emit(#9'movq (%rcx), %rcx');
         end
-        else if Self.IsCaptured(SSA.ArrayName) and not Self.IsLocal(SSA.ArrayName) then
+        else if Self.IsCaptured(SSA.ArrayName) then
         begin
           { a dyn array captured from the enclosing routine: '_cap_' holds
             the address of its slot (one load gives the data pointer); the
@@ -20144,7 +20148,7 @@ begin
             Self.Emit(Format(#9'addq $%d, %%r14', [SSA.ImplicitFieldInfo.Offset]));
           Self.Emit(#9'movq (%r14), %r14');
         end
-        else if Self.IsCaptured(SSA.ArrayName) and not Self.IsLocal(SSA.ArrayName) then
+        else if Self.IsCaptured(SSA.ArrayName) then
         begin
           { a dyn array captured from the enclosing routine: '_cap_' holds
             the address of its slot (one load gives the data pointer); the
@@ -20200,7 +20204,7 @@ begin
           Self.Emit(Format(#9'addq $%d, %%rcx', [SSA.ImplicitFieldInfo.Offset]));
         Self.Emit(#9'movq (%rcx), %rcx');
       end
-      else if Self.IsCaptured(SSA.ArrayName) and not Self.IsLocal(SSA.ArrayName) then
+      else if Self.IsCaptured(SSA.ArrayName) then
       begin
         { a dyn array captured from the enclosing routine: '_cap_' holds
           the address of its slot (one load gives the data pointer); the

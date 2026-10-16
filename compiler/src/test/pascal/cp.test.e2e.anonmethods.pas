@@ -27,6 +27,19 @@ type
   protected
     procedure SetUp; override;
   published
+    { Captured dyn-array, interface and string variables are shared with the
+      declaring routine in both directions, and a for-in inside a closure may use
+      the enclosing routine's variables as its loop variable.  x86-64 sent an
+      interface assignment and a dyn-array element store in the DECLARING routine
+      to its idle frame slot (G.Hi() then dispatched on the env's nil: a crash);
+      arm64 refused the captured loop variable ("store to variable 'X'"). }
+    procedure TestRun_CapturedManagedVars_SharedWithDeclaringRoutine;
+    { A local RECORD captured by a closure is one variable, shared by the closure
+      and the routine that declares it: each sees the other's field writes (plain,
+      nested, array-field, string) and a whole-record assignment.  On arm64 the
+      declaring routine read and wrote its own idle frame slot instead of the
+      closure env, so the closure saw zeros and its writes were lost. }
+    procedure TestRun_CapturedLocalRecord_SharedWithDeclaringRoutine;
     procedure TestRun_ClosureResult_FieldStoreAndImmediateCall;
     procedure TestRun_NestedSelfCapture_AndGenericClosurePerInstance;
     { moved from cp.test.anonmethods, where they ran through a private
@@ -2698,6 +2711,98 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'show 5' + LineEnding + 'fn 6' + LineEnding +
     'box 70' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_CapturedLocalRecord_SharedWithDeclaringRoutine;
+const
+  Src = '''
+    program CapRec;
+    type
+      TArr = array[0..3] of Integer;
+      TInner = record A: TArr; N: Integer; end;
+      TRec = record A: TArr; In1: TInner; N: Integer; S: string; end;
+    procedure Run;
+    var L, L2: TRec; K: Integer; F: reference to procedure;
+    begin
+      L.N := 3; L.S := 'outer'; L.A[2] := 20;
+      F := procedure
+           begin
+             WriteLn('closure sees ', L.N, ' ', L.S, ' ', L.A[2]);
+             L.N := L.N + 1; L.In1.N := 2; L.A[1] := 81; L.In1.A[1] := 82; L.S := L.S + '+';
+             K := 5;
+           end;
+      F();
+      WriteLn(L.N, ' ', L.In1.N, ' ', L.A[1], ' ', L.In1.A[1], ' ', L.S, ' ', K);
+      L2 := L; L2.N := 99; L2.S := 'copy';
+      F := procedure begin L := L2; end;
+      F();
+      WriteLn(L.N, ' ', L.S, ' ', L.A[1]);
+    end;
+    var G: TRec; F: reference to procedure;
+    begin
+      Run();
+      F := procedure begin G.N := 1; G.In1.N := 2; G.A[1] := 81; G.In1.A[1] := 82; end;
+      F();
+      WriteLn(G.N, ' ', G.In1.N, ' ', G.A[1], ' ', G.In1.A[1]);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'closure sees 3 outer 20' + LineEnding +
+    '4 2 81 82 outer+ 5' + LineEnding +
+    '99 copy 81' + LineEnding +
+    '1 2 81 82' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_CapturedManagedVars_SharedWithDeclaringRoutine;
+const
+  Src = '''
+    program CapMgd;
+    type
+      IGreet = interface function Hi: string; end;
+      TG = class(IGreet) FN: string; constructor Create(const N: string); function Hi: string; end;
+    constructor TG.Create(const N: string); begin FN := N; end;
+    function TG.Hi: string; begin Result := 'hi ' + FN; end;
+    procedure Run;
+    var G: IGreet; D: array of Integer; SD: array of string; S, Acc: string; X, Sum: Integer; B: Byte;
+        F: reference to procedure;
+    begin
+      SetLength(D, 2); D[1] := 10; G := TG.Create('a'); S := 'x' + IntToStr(1);
+      F := procedure begin WriteLn(Length(D), ' ', D[1], ' ', G.Hi(), ' ', S); end;
+      F();
+      F := procedure
+           begin
+             SetLength(D, 3); D[0] := 5; D[2] := 7;
+             G := TG.Create('b'); S := S + 'y';
+           end;
+      F();
+      WriteLn(Length(D), ' ', D[0], D[1], D[2], ' ', G.Hi(), ' ', S);
+      D[1] := 4; G := nil;
+      F := procedure begin WriteLn(D[1], ' ', G = nil); end;
+      F();
+      SetLength(SD, 2); SD[0] := 'p' + IntToStr(1); SD[1] := 'q';
+      Sum := 0; Acc := '';
+      F := procedure
+           begin
+             for X in D do Sum := Sum + X;
+             for S in SD do Acc := Acc + S;
+             for B in D do Sum := Sum + B;
+           end;
+      F();
+      WriteLn(Sum, ' ', X, ' ', Acc, ' ', S, ' ', B);
+    end;
+    begin
+      Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '2 10 hi a x1' + LineEnding +
+    '3 5107 hi b x1y' + LineEnding +
+    '4 True' + LineEnding +
+    '32 7 p1q q 7' + LineEnding, 0);
 end;
 
 initialization

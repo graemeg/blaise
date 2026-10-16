@@ -24,6 +24,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { captured managed variables assigned in the declaring routine and in a
+      closure keep exactly one owner: nothing leaks and nothing is freed twice }
+    procedure TestDebug_CapturedManagedVars_NoLeak;
     { every field kind read off an owned transient instance releases the
       instance exactly once, however many such reads one statement holds }
     procedure TestDebug_OwnedTransientBase_EveryFieldKind_NoLeak;
@@ -4631,6 +4634,62 @@ begin
     'True' + LineEnding +
     '436' + LineEnding +
     's2a1p5s2bp5s2a1p5hi1' + LineEnding, Output);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_CapturedManagedVars_NoLeak;
+const
+  Src = '''
+    program CapMgd;
+    type
+      IGreet = interface function Hi: string; end;
+      TG = class(IGreet) FN: string; constructor Create(const N: string); function Hi: string; end;
+    constructor TG.Create(const N: string); begin FN := N; end;
+    function TG.Hi: string; begin Result := 'hi ' + FN; end;
+    procedure Run;
+    var G: IGreet; D: array of Integer; SD: array of string; S, Acc: string; X, Sum: Integer; B: Byte;
+        F: reference to procedure;
+    begin
+      SetLength(D, 2); D[1] := 10; G := TG.Create('a'); S := 'x' + IntToStr(1);
+      F := procedure begin WriteLn(Length(D), ' ', D[1], ' ', G.Hi(), ' ', S); end;
+      F();
+      F := procedure
+           begin
+             SetLength(D, 3); D[0] := 5; D[2] := 7;
+             G := TG.Create('b'); S := S + 'y';
+           end;
+      F();
+      WriteLn(Length(D), ' ', D[0], D[1], D[2], ' ', G.Hi(), ' ', S);
+      D[1] := 4; G := nil;
+      F := procedure begin WriteLn(D[1], ' ', G = nil); end;
+      F();
+      SetLength(SD, 2); SD[0] := 'p' + IntToStr(1); SD[1] := 'q';
+      Sum := 0; Acc := '';
+      F := procedure
+           begin
+             for X in D do Sum := Sum + X;
+             for S in SD do Acc := Acc + S;
+             for B in D do Sum := Sum + B;
+           end;
+      F();
+      WriteLn(Sum, ' ', X, ' ', Acc, ' ', S, ' ', B);
+    end;
+    begin
+      Run();
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(Src, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertEquals('stdout',
+    '2 10 hi a x1' + LineEnding +
+    '3 5107 hi b x1y' + LineEnding +
+    '4 True' + LineEnding +
+    '32 7 p1q q 7' + LineEnding, Output);
 end;
 
 initialization

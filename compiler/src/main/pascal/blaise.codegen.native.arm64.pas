@@ -237,6 +237,7 @@ type
       nested routine (accessed via its hidden '_cap_<Name>' pointer slot). }
     function  IsCaptured(const AName: string): Boolean;
     function  IsCapturedVarParam(const AName: string): Boolean;
+    function  UsesCapSlot(const AName: string): Boolean;
     { x-reg := the storage address of a procedural variable named AName: a
       frame/global slot, a var param's pointee, or a capture's target }
     procedure EmitProcVarAddr(const AReg, AName: string);
@@ -1043,6 +1044,20 @@ begin
   Result := IsCaptured(AName) and (FCapVarParams.IndexOf(AName) >= 0);
 end;
 
+function TArm64Backend.UsesCapSlot(const AName: string): Boolean;
+begin
+  { a captured name is reached through its '_cap_' slot -- in a nested
+    routine AND in the declaring routine, whose own slot of that name is idle
+    once the variable is hoisted into the closure env (the env copy is the
+    one every closure shares).  The one exception is a record method's Self,
+    which the nested prologue materialises into a real slot and which is
+    then read as in the owner.  Testing `not IsLocal(Name)` instead sent
+    the DECLARING routine to its idle slot: a record captured by a closure
+    read zeros and lost every write the closure made. }
+  Result := IsCaptured(AName) and
+            not (SameText(AName, 'Self') and IsLocal(AName));
+end;
+
 procedure TArm64Backend.EmitProcVarAddr(const AReg, AName: string);
 begin
   { a captured name goes through '_cap_' even when the declaring frame also
@@ -1217,11 +1232,10 @@ end;
 procedure TArm64Backend.EmitRecordBaseAddr(const AReg, AName: string;
   AIsVarParam: Boolean);
 begin
-  { a record captured from an enclosing routine: '_cap_' holds the address
-    of its storage, which for a true var/out param is the slot holding the
-    caller's address.  A capture the prologue gave a REAL slot (a record
-    method's Self, reloaded through _cap_Self) is read as in the owner. }
-  if IsCaptured(AName) and not IsLocal(AName) then
+  { a captured record (in a nested routine, or env-hoisted in the declaring
+    one): '_cap_' holds the address of its storage, which for a true var/out
+    param is the slot holding the caller's address (UsesCapSlot) }
+  if UsesCapSlot(AName) then
   begin
     EmitLoadSlot(AReg, '_cap_' + AName);
     if IsCapturedVarParam(AName) then
@@ -8322,7 +8336,7 @@ begin
   if AExpr is TIdentExpr then
   begin
     IE := TIdentExpr(AExpr);
-    if IsCaptured(IE.Name) and not IsLocal(IE.Name) then
+    if UsesCapSlot(IE.Name) then
     begin
       { an interface of the enclosing routine: its pair through '_cap_' (one
         deref further for a captured var parameter) }
@@ -8545,7 +8559,7 @@ begin
     Self.Emit(#9'ldp x0, x1, [x9]');
     Exit;
   end;
-  if IsCaptured(AObjName) and not IsLocal(AObjName) then
+  if UsesCapSlot(AObjName) then
   begin
     { a captured interface receiver: the pair through '_cap_' (it read the
       nested frame's nonexistent '<Name>_itab' slot) }
@@ -8712,7 +8726,7 @@ begin
     Self.Emit(#9'str x0, [x9]');
     Exit;
   end;
-  if IsCaptured(AAsgn.Name) and not IsLocal(AAsgn.Name) and
+  if UsesCapSlot(AAsgn.Name) and
      (AAsgn.ResolvedLhsType <> nil) and
      (AAsgn.ResolvedLhsType.Kind = tyInterface) then
   begin
@@ -8722,7 +8736,7 @@ begin
     EmitIntfStoreStacked(0, AAsgn.Expr, AAsgn.ResolvedLhsType);
     Exit;
   end;
-  if IsCaptured(AAsgn.Name) and not IsLocal(AAsgn.Name) and
+  if UsesCapSlot(AAsgn.Name) and
      (AAsgn.ResolvedLhsType <> nil) and
      (AAsgn.ResolvedLhsType.Kind = tyDynArray) then
   begin
@@ -8743,7 +8757,7 @@ begin
     Self.Emit(#9'str x0, [x9]');
     Exit;
   end;
-  if IsCaptured(AAsgn.Name) and not IsLocal(AAsgn.Name) and
+  if UsesCapSlot(AAsgn.Name) and
      (AAsgn.ResolvedLhsType <> nil) and
      (AAsgn.ResolvedLhsType.Kind = tyRecord) then
   begin
@@ -10622,6 +10636,39 @@ begin
     set paths) is retained before it replaces the old binding; an OWNED
     value (enumerator Current getter result, +1) transfers straight in —
     an extra AddRef there would leak one ref per iteration. }
+  if UsesCapSlot(AStmt.VarName) then
+  begin
+    { a loop variable of the ENCLOSING routine (for X in D inside a closure):
+      its storage is in the env, at its declared width -- not a frame slot of
+      this routine (it was a NotYet "store to variable 'X'") }
+    EmitPushX0();
+    if (AStmt.ResolvedVarType <> nil) and
+       (AStmt.ResolvedVarType.IsString() or
+        (AStmt.ResolvedVarType.Kind in [tyClass, tyDynArray])) then
+    begin
+      if not AOwned then
+      begin
+        if AStmt.ResolvedVarType.IsString() then
+          EmitCallSym('_StringAddRef')
+        else if AStmt.ResolvedVarType.Kind = tyDynArray then
+          EmitCallSym('_DynArrayAddRef')
+        else
+          EmitCallSym('_ClassAddRef');
+      end;
+      EmitForInVarAddr('x9', AStmt);
+      Self.Emit(#9'ldr x0, [x9]');
+      if AStmt.ResolvedVarType.IsString() then
+        EmitCallSym('_StringRelease')
+      else if AStmt.ResolvedVarType.Kind = tyDynArray then
+        EmitCallSym('_DynArrayRelease')
+      else
+        EmitCallSym('_ClassRelease');
+    end;
+    EmitForInVarAddr('x9', AStmt);
+    EmitPopTo('x0');
+    EmitStoreByWidth('x0', 'x9', AStmt.ResolvedVarType);
+    Exit;
+  end;
   if (AStmt.ResolvedVarType <> nil) and
      (AStmt.ResolvedVarType.IsString() or
       (AStmt.ResolvedVarType.Kind in [tyClass, tyDynArray])) then
@@ -10656,7 +10703,7 @@ procedure TArm64Backend.EmitForInVarAddr(const AReg: string;
 begin
   { the loop variable's storage: its slot, or through '_cap_' when it is a
     variable of the enclosing routine }
-  if IsCaptured(AStmt.VarName) and not IsLocal(AStmt.VarName) then
+  if UsesCapSlot(AStmt.VarName) then
   begin
     EmitLoadSlot(AReg, '_cap_' + AStmt.VarName);
     if IsCapturedVarParam(AStmt.VarName) then
