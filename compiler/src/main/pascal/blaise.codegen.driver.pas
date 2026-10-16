@@ -303,9 +303,26 @@ function BuildRTLUnitList(AStatic: Boolean;
   changed, so a rebuilt compiler linked the previous one's RTL objects and the
   failure surfaced far from its cause.  See the RTLCacheKey note in the
   implementation for why the identity goes in the directory NAME rather than a
-  stamp file.  No trailing delimiter.  Exposed for unit testing;
+  stamp file.  ASrcKey (RTLSourceKey) adds the identity of the RTL SOURCES the
+  objects are built from.  No trailing delimiter.  Exposed for unit testing;
   EnsureRTLObjects is the only production caller. }
-function RTLObjectCacheDir(const ATarget: TTargetDesc): string;
+function RTLObjectCacheDir(const ATarget: TTargetDesc;
+  const ASrcKey: string = ''): string;
+
+{ Short key identifying the RTL SOURCES a cached object set is built from: a
+  content hash over the listed units' source text, in list order.
+
+  BUG-20261014: the cache was keyed by target and compiler only, and judged
+  freshness by mtime.  Neither says WHICH sources built an object, so one
+  compile against another tree (--rtl-src at an exported, newer-mtime copy of
+  an older commit) left that tree's objects in the shared directory, and every
+  later compile against the real tree linked them -- dyld then aborted on a
+  symbol the real source defines.  Keying by content rather than by tree path
+  also covers a copy that preserves mtimes.  It goes in the directory NAME,
+  like the compiler key, for the same race-freedom reasons (see RTLCacheKey).
+  A missing source is folded in as a marker; EnsureRTLObjects reports it.
+  Exposed for unit testing. }
+function RTLSourceKey(const ASrcDir: string; AUnits: TStringList): string;
 
 { Newest mtime across the sources of the RTL unit set — the staleness threshold
   every cached RTL object is measured against.
@@ -410,10 +427,31 @@ begin
   Result := Copy(ContentHashFnv1a64(EffectiveCompilerId()), 0, 12);
 end;
 
-function RTLObjectCacheDir(const ATarget: TTargetDesc): string;
+function RTLObjectCacheDir(const ATarget: TTargetDesc;
+  const ASrcKey: string): string;
 begin
   Result := IncludeTrailingPathDelimiter(CompilerBinDir()) + 'rtl'
     + '/' + TargetName(ATarget) + '-' + RTLCacheKey();
+  if ASrcKey <> '' then
+    Result := Result + '-' + ASrcKey;
+end;
+
+function RTLSourceKey(const ASrcDir: string; AUnits: TStringList): string;
+var
+  I: Integer;
+  Path, Acc: string;
+begin
+  Acc := '';
+  for I := 0 to AUnits.Count - 1 do
+  begin
+    Path := IncludeTrailingPathDelimiter(ASrcDir) + AUnits.Strings[I] + '.pas';
+    Acc := Acc + AUnits.Strings[I] + #10;
+    if FileExists(Path) then
+      Acc := Acc + ReadWholeFile(Path) + #10
+    else
+      Acc := Acc + '<missing>' + #10;
+  end;
+  Result := Copy(ContentHashFnv1a64(Acc), 0, 12);
 end;
 
 function NewestRTLSourceAge(const ASrcDir: string; AUnits: TStringList): Int64;
@@ -702,13 +740,6 @@ begin
     It is also COMPILER-KEYED (RTLCacheKey): mtime alone cannot see that the
     COMPILER changed, so a shared-per-target directory handed a new compiler
     the previous one's objects — see the BUG-20260726 note on RTLCacheKey. }
-  CacheDir := RTLObjectCacheDir(AOpts.Target);
-  ForceDirectories(CacheDir);
-  BuildDir := IncludeTrailingPathDelimiter(CacheDir) + 'build-' +
-              IntToStr(_driver_getpid());
-  ForceDirectories(BuildDir);
-  BlaiseBin := ParamStr(0);
-
   { The unit list to build/link, in leaf-first order.  Selection is driven off
     the target (AOpts.Target.OS) and link mode: the platform layout adapter
     follows the target, and a static link swaps in the freestanding per-OS
@@ -719,8 +750,16 @@ begin
     links libc: crt1 supplies _start and environ, so the freestanding kernel
     leaf must stay off that line or both are doubly defined.
     See BuildRTLUnitList. }
+  { The cache is SOURCE-KEYED too (RTLSourceKey): an object set is only ever
+    served to a build against the very sources it was compiled from. }
   Units := BuildRTLUnitList(AStaticLink and AIncludeStartup,
     AOpts.Target.OS, AOpts.Target.CPU);
+  CacheDir := RTLObjectCacheDir(AOpts.Target, RTLSourceKey(SrcDir, Units));
+  ForceDirectories(CacheDir);
+  BuildDir := IncludeTrailingPathDelimiter(CacheDir) + 'build-' +
+              IntToStr(_driver_getpid());
+  ForceDirectories(BuildDir);
+  BlaiseBin := ParamStr(0);
 
   { One threshold for the whole set, not each unit's own source — see
     NewestRTLSourceAge for the mis-linked-compiler this closes. }

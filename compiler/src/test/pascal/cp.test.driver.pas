@@ -32,6 +32,9 @@ type
     FAgeCounter: Integer;   { unique scratch dir per NewestRTLSourceAge test }
     function ListContains(AList: TStringList; const AName: string): Boolean;
   published
+    { the RTL object cache is keyed by the CONTENT of the RTL sources, so
+      objects built from one source tree are never served to another }
+    procedure TestRTLCacheDir_IsSourceKeyed;
     { Per-target RTL unit-list selection (FreeBSD Step 5).  BuildRTLUnitList is
       the pure selection helper EnsureRTLObjects drives off AOpts.Static +
       AOpts.Target.OS; these assert Linux vs FreeBSD swaps without invoking the
@@ -752,6 +755,50 @@ begin
 end;
 
 { ---- Registration ---- }
+
+procedure TBackendDriverContractTests.TestRTLCacheDir_IsSourceKeyed;
+var
+  Base, DirA, DirB, DirC: string;
+  Units: TStringList;
+  T: TTargetDesc;
+  KA, KB, KC: string;
+begin
+  { BUG-20261014-rtl-objcache-keyed-by-compiler-only: one compile with
+    --rtl-src at another (newer-mtime) tree poisoned the cache, and every
+    later compile linked that tree's objects.  The key now follows what the
+    sources SAY, not where they live or how old they are. }
+  Base := IncludeTrailingPathDelimiter(GetTempDir()) + 'blz_rtlkey_' +
+          IntToStr(FAgeCounter) + '/';
+  FAgeCounter := FAgeCounter + 1;
+  DirA := Base + 'a/';
+  DirB := Base + 'b/';
+  DirC := Base + 'c/';
+  ForceDirectories(DirA);
+  ForceDirectories(DirB);
+  ForceDirectories(DirC);
+  WriteFile(DirA + 'u1.pas', 'unit u1; procedure P; begin end; end.');
+  WriteFile(DirA + 'u2.pas', 'unit u2; end.');
+  WriteFile(DirB + 'u1.pas', 'unit u1; procedure Q; begin end; end.');
+  WriteFile(DirB + 'u2.pas', 'unit u2; end.');
+  WriteFile(DirC + 'u1.pas', 'unit u1; procedure P; begin end; end.');
+  WriteFile(DirC + 'u2.pas', 'unit u2; end.');
+  Units := TStringList.Create();
+  try
+    Units.Add('u1');
+    Units.Add('u2');
+    KA := RTLSourceKey(DirA, Units);
+    KB := RTLSourceKey(DirB, Units);
+    KC := RTLSourceKey(DirC, Units);
+  finally
+    Units.Free();
+  end;
+  AssertEquals('source key length', 12, Length(KA));
+  AssertTrue('different sources, different key', KA <> KB);
+  AssertEquals('same sources in another tree, same key', KA, KC);
+  MakeTarget(osMacOS, cpuArm64, T);
+  AssertTrue('different sources, different cache dir',
+    RTLObjectCacheDir(T, KA) <> RTLObjectCacheDir(T, KB));
+end;
 
 initialization
   RegisterTest(TBackendDriverContractTests);
