@@ -20,6 +20,9 @@ type
     function Analyse(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { an element write through a non-indexed array property follows its read
+      specifier }
+    procedure TestArrayPropertyElementWrite_FollowsReadField;
     { @S[N] is the address of one byte: a ^Byte, of a variable or field only }
     procedure TestAddrOfStringByte_IsPointerToByte;
     { a class array const may be written with a named array type
@@ -737,6 +740,56 @@ begin
   AssertTrue('not a ^Integer', SemanticError(SrcInt) <> '');
   AssertTrue('a byte of a temporary string is rejected',
     Pos('would dangle', SemanticError(SrcTemp)) >= 0);
+end;
+
+procedure TSemanticTests.TestArrayPropertyElementWrite_FollowsReadField;
+const
+  SrcField = '''
+    program P;
+    type
+      TArr = array[0..3] of Integer;
+      TObj = class
+      private
+        FArr: TArr;
+        procedure SetArr(const V: TArr);
+      public
+        property AP: TArr read FArr write FArr;
+        property AW: TArr read FArr write SetArr;
+        procedure Show;
+      end;
+    procedure TObj.SetArr(const V: TArr); begin end;
+    procedure TObj.Show; begin AP[3] := 25; AW[1] := 2; end;
+    var O: TObj;
+    begin
+      O.AP[1] := 11; O.AW[2] := 12;
+    end.
+    ''';
+  SrcGetter = '''
+    program P;
+    type
+      TArr = array[0..3] of Integer;
+      TObj = class
+      private
+        function GetArr: TArr;
+        procedure SetArr(const V: TArr);
+      public
+        property AM: TArr read GetArr write SetArr;
+      end;
+    function TObj.GetArr: TArr; begin end;
+    procedure TObj.SetArr(const V: TArr); begin end;
+    var O: TObj;
+    begin
+      O.AM[2] := 12;
+    end.
+    ''';
+begin
+  { an element write through a field-read array property, bare or qualified,
+    writes the read field (the bare form was "Undeclared variable"); through
+    a getter-read one it is rejected, naming the reason (it was a type
+    mismatch against the whole array) }
+  AssertEquals('field-read: accepted', '', SemanticError(SrcField));
+  AssertTrue('getter-read: rejected with the reason',
+    Pos('read through a method', SemanticError(SrcGetter)) >= 0);
 end;
 
 initialization

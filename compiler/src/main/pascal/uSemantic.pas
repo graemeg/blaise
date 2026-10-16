@@ -278,6 +278,12 @@ type
       variable and the class has a record / class field of that name: the
       field shadows the global, as it does for a bare identifier. }
     function  FieldShadowsGlobal(const AName: string; ASym: TSymbol): Boolean;
+    { O.P[I] := V with P a NON-indexed array-typed property: an element write
+      into the property's value.  True when that applies; the element then
+      lives in the property's READ field, and a property read through a
+      method is rejected (the write would land in a temporary copy). }
+    function  ElemWriteThroughProp(AProp: TPropertyInfo;
+      AAssign: TFieldAssignment): Boolean;
     { The static-array type of an array constant written with a NAMED type
       (const C: TArr = (...)), checked against the value count, with the
       element type and bounds published into CD as the inline form carries
@@ -3813,6 +3819,20 @@ begin
     CD.ArrayLowBound := Result.LowBound;
     CD.ArrayHighBound := Result.HighBound;
   end;
+end;
+
+function TSemanticAnalyser.ElemWriteThroughProp(AProp: TPropertyInfo;
+  AAssign: TFieldAssignment): Boolean;
+begin
+  Result := (AProp <> nil) and (AProp.IndexParamName = '') and
+            (AAssign.PropIndexExpr <> nil) and (AProp.TypeDesc <> nil) and
+            (AProp.TypeDesc.Kind in [tyStaticArray, tyDynArray]);
+  if Result and (AProp.ReadField = '') then
+    SemanticError(
+      Format('Cannot assign to an element of property ''%s'': it is read ' +
+        'through a method, so the element would be written into a ' +
+        'temporary copy', [AAssign.FieldName]),
+      AAssign.Line, AAssign.Col);
 end;
 
 function TSemanticAnalyser.FieldShadowsGlobal(const AName: string;
@@ -12845,7 +12865,13 @@ begin
         AssertMemberVisibleV(PropInfo.Visibility, PropInfo.DeclaringUnit,
                              PropInfo.DeclaringType, AAssign.FieldName,
                              AAssign.Line, AAssign.Col);
-      if (PropInfo <> nil) and (PropInfo.WriteField <> '') then
+      if ElemWriteThroughProp(PropInfo, AAssign) then
+      begin
+        { A.B.P[I] := V: the element lives in the read field }
+        AAssign.FieldName := PropInfo.ReadField;
+        FldInfo           := RT.FindField(PropInfo.ReadField);
+      end
+      else if (PropInfo <> nil) and (PropInfo.WriteField <> '') then
       begin
         AAssign.FieldName := PropInfo.WriteField;
         FldInfo           := RT.FindField(PropInfo.WriteField);
@@ -12931,7 +12957,13 @@ begin
         if FldInfo = nil then
         begin
           PropInfo := RT.FindProperty(AAssign.FieldName);
-          if (PropInfo <> nil) and (PropInfo.WriteField <> '') then
+          if ElemWriteThroughProp(PropInfo, AAssign) then
+          begin
+            { FInner.P[I] := V: the element lives in the read field }
+            AAssign.FieldName := PropInfo.ReadField;
+            FldInfo           := RT.FindField(PropInfo.ReadField);
+          end
+          else if (PropInfo <> nil) and (PropInfo.WriteField <> '') then
           begin
             AAssign.FieldName := PropInfo.WriteField;
             FldInfo           := RT.FindField(PropInfo.WriteField);
@@ -13068,7 +13100,13 @@ begin
       AssertMemberVisibleV(PropInfo.Visibility, PropInfo.DeclaringUnit,
                            PropInfo.DeclaringType, AAssign.FieldName,
                            AAssign.Line, AAssign.Col);
-      if PropInfo.WriteField <> '' then
+      if ElemWriteThroughProp(PropInfo, AAssign) then
+      begin
+        { O.P[I] := V: the element lives in the read field }
+        AAssign.FieldName := PropInfo.ReadField;
+        FldInfo           := RT.FindField(PropInfo.ReadField);
+      end
+      else if PropInfo.WriteField <> '' then
       begin
         { Field-backed write: redirect to the backing field }
         AAssign.FieldName := PropInfo.WriteField;
@@ -19265,10 +19303,32 @@ begin
           Format('''%s'' element', [AStmt.ArrayName]), AStmt.Line, AStmt.Col);
         Exit;
       end;
+      { AP[I] := V inside a method, AP an array-typed property READ FROM A
+        FIELD (property AP: TArr read FArr write FArr): the element lives in
+        that field, so this is FArr[I] := V -- as the qualified O.AP[I] := V
+        and the bare read AP[I] already are.  It was "Undeclared variable". }
+      DefProp := FCurrentClass.FindProperty(AStmt.ArrayName);
+      if (BaseInfo = nil) and (DefProp <> nil) and
+         (DefProp.IndexTypeDesc = nil) and (DefProp.ReadField <> '') and
+         (DefProp.TypeDesc <> nil) and
+         (DefProp.TypeDesc.Kind in [tyStaticArray, tyDynArray]) then
+      begin
+        AStmt.ArrayName := DefProp.ReadField;
+        Self.AnalyseStaticSubscriptAssign(AStmt);
+        Exit;
+      end;
+      if (BaseInfo = nil) and (DefProp <> nil) and
+         (DefProp.IndexTypeDesc = nil) and (DefProp.ReadMethod <> '') and
+         (DefProp.TypeDesc <> nil) and
+         (DefProp.TypeDesc.Kind in [tyStaticArray, tyDynArray]) then
+        SemanticError(
+          Format('Cannot assign to an element of property ''%s'': it is read ' +
+            'through a method, so the element would be written into a ' +
+            'temporary copy', [AStmt.ArrayName]),
+          AStmt.Line, AStmt.Col);
       { P[I] := V inside a method, P an INDEXED PROPERTY of the current
         class: Self.P[I] := V, lowered to the setter call on Self (it was
         "Undeclared variable 'P'") }
-      DefProp := FCurrentClass.FindProperty(AStmt.ArrayName);
       if (BaseInfo = nil) and (DefProp <> nil) and
          (DefProp.IndexTypeDesc <> nil) and (DefProp.WriteMethod <> '') then
       begin

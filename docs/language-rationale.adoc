@@ -817,6 +817,17 @@ the idiomatic subscript syntax the compiler source already uses.
   names in the declaration are more transparent and consistent with the
   existing non-indexed property design.
 
+==== Element writes through an array-typed property
+
+A *non-indexed* property whose type is an array — `property AP: TArr read
+FArr write FArr` — is not an indexed property, but `Obj.AP[I] := V` (and a
+bare `AP[I] := V` inside a method) is still meaningful when the property is
+read straight from a field: the element lives in that field, so the write
+goes to `FArr[I]`.  This is the Delphi rule — an element write follows the
+*read* specifier — and it holds whatever the write specifier is.  A property
+read through a method is rejected: the getter returns a copy, so the element
+would be written into a temporary and lost.
+
 ==== Default array property
 
 An indexed property may carry the `default` directive, marking it as the

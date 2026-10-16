@@ -23,6 +23,15 @@ type
   protected
     procedure SetUp; override;
   published
+    { Inside a method a bare element write through a field-read array property
+      (AP[3] := 25, DP[1] := 'd1') writes the backing field; it was rejected as
+      "Undeclared variable". }
+    procedure TestRun_BareArrayPropertyElementWrite_InMethod;
+    { An element write through a non-indexed array-typed property read from a
+      field -- qualified, through a chained base and through an implicit-Self
+      field -- writes the read field's element, whatever the write specifier (the
+      setter is not called). }
+    procedure TestRun_ArrayPropertyElementWrite_WritesReadField;
     procedure TestRun_FieldBackedReadWrite;
     procedure TestRun_GetterSetter;
     procedure TestRun_ReadOnlyComputed;
@@ -1025,6 +1034,78 @@ begin
     end.
     ''', '7 7' + LE + '7 7 7' + LE + '11 12 13' + LE + '10 13' + LE +
     '2.5 3.0' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_ArrayPropertyElementWrite_WritesReadField;
+const
+  Src = '''
+    program BQ;
+    type
+      TArr = array[0..3] of Integer;
+      TObj = class
+      private
+        FArr: TArr;
+        FIn: TObj;
+        procedure SetArr(const V: TArr);
+      public
+        property AP: TArr read FArr write FArr;
+        property AW: TArr read FArr write SetArr;
+        property Inner: TObj read FIn;
+        procedure Show;
+      end;
+    procedure TObj.SetArr(const V: TArr); begin FArr := V; FArr[0] := -1; end;
+    procedure TObj.Show; begin FIn.AP[2] := 7; FIn.AW[3] := 8; end;
+    var O: TObj;
+    begin
+      O := TObj.Create(); O.FIn := TObj.Create();
+      O.AP[1] := 11; O.AW[2] := 12;
+      WriteLn(O.FArr[1], ' ', O.FArr[2], ' ', O.FArr[0]);
+      O.Show(); WriteLn(O.FIn.FArr[2], ' ', O.FIn.FArr[3]);
+      O.Inner.AP[0] := 5; WriteLn(O.FIn.FArr[0]);
+      O.FIn.Free(); O.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '11 12 0' + LineEnding +
+    '7 8' + LineEnding +
+    '5' + LineEnding, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_BareArrayPropertyElementWrite_InMethod;
+const
+  Src = '''
+    program BP;
+    type
+      TArr = array[0..3] of Integer;
+      TObj = class
+      private
+        FArr: TArr;
+        FD: array of string;
+        function GetArr: TArr;
+      public
+        property AP: TArr read FArr write FArr;
+        property DP: array of string read FD write FD;
+        property AG: TArr read GetArr;
+        procedure Show;
+      end;
+    function TObj.GetArr: TArr; begin Result := FArr; end;
+    procedure TObj.Show;
+    begin
+      AP[3] := 25; AP[0] := AP[3] + 1;
+      SetLength(FD, 2); DP[1] := 'd' + IntToStr(1);
+      WriteLn(FArr[3], ' ', FArr[0], ' ', AP[3], ' ', FD[1], ' ', DP[1]);
+    end;
+    var O: TObj;
+    begin
+      O := TObj.Create(); O.Show(); O.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '25 26 25 d1 d1' + LineEnding, 0);
 end;
 
 initialization
