@@ -11774,6 +11774,40 @@ begin
       Exit;
     end;
 
+    { @S[I] / @Rec.S[I] -- the address of one BYTE of a string variable or
+      field.  A pointer handed out may be written through, so the string is
+      made unique in its own slot first (copy-on-write, as S[I] := B does).
+      It was rejected as an unsupported address-of form. }
+    if ((AOE.Expr is TStringSubscriptExpr) and
+        (TStringSubscriptExpr(AOE.Expr).IndexExpr <> nil) and
+        (TStringSubscriptExpr(AOE.Expr).StrExpr.ResolvedType <> nil) and
+        (TStringSubscriptExpr(AOE.Expr).StrExpr.ResolvedType.Kind = tyString)) or
+       ((AOE.Expr is TFieldAccessExpr) and TFieldAccessExpr(AOE.Expr).IsCharAccess and
+        (TFieldAccessExpr(AOE.Expr).PropIndexExpr <> nil)) then
+    begin
+      if AOE.Expr is TStringSubscriptExpr then
+      begin
+        Self.EmitExprToEax(TStringSubscriptExpr(AOE.Expr).IndexExpr);
+        Self.Emit(#9'pushq %rax');
+        Self.EmitVarArgAddrToRax(TStringSubscriptExpr(AOE.Expr).StrExpr);
+      end
+      else
+      begin
+        Self.EmitExprToEax(TFieldAccessExpr(AOE.Expr).PropIndexExpr);
+        Self.Emit(#9'pushq %rax');
+        Self.EmitVarArgAddrToRax(AOE.Expr);     { the field's own slot }
+      end;
+      Self.Emit(#9'pushq %rbx');
+      Self.Emit(#9'movq %rax, %rbx');            { %rbx = &slot }
+      Self.Emit(#9'movq (%rbx), %rdi');
+      Self.Emit(#9'callq _StringUnique');
+      Self.Emit(#9'movq %rax, (%rbx)');
+      Self.Emit(#9'popq %rbx');
+      Self.Emit(#9'popq %rcx');                  { index }
+      Self.Emit(#9'addq %rcx, %rax');
+      Exit;
+    end;
+
     { @Array[I] — address of array element.  The inner expression is
       TStringSubscriptExpr (the parser's postfix-bracket node).  Compute
       base + index * elemSize without the final load. }

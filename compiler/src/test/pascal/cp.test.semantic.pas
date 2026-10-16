@@ -20,6 +20,8 @@ type
     function Analyse(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { @S[N] is the address of one byte: a ^Byte, of a variable or field only }
+    procedure TestAddrOfStringByte_IsPointerToByte;
     { a class array const may be written with a named array type
       (const CA: TArr = (...)), as a unit-level const may }
     procedure TestClassArrayConst_NamedArrayType;
@@ -704,6 +706,37 @@ begin
   AssertEquals('accepted', '', SemanticError(Src));
   AssertEquals('the data label is the storage', '',
     AsmMissing(Src, 'leaq TObj_CA(%rip), %rax', 'adrp x0, TObj_CA@PAGE'));
+end;
+
+procedure TSemanticTests.TestAddrOfStringByte_IsPointerToByte;
+const
+  SrcByte = '''
+    program P;
+    var S: string; Q: ^Byte;
+    begin
+      Q := @S[1];
+    end.
+    ''';
+  SrcInt = '''
+    program P;
+    var S: string; Q: ^Integer;
+    begin
+      Q := @S[1];
+    end.
+    ''';
+  SrcTemp = '''
+    program P;
+    function F: string; begin Result := 'ab'; end;
+    var Q: ^Byte;
+    begin
+      Q := @F()[1];
+    end.
+    ''';
+begin
+  AssertEquals('@S[N] is a ^Byte', '', SemanticError(SrcByte));
+  AssertTrue('not a ^Integer', SemanticError(SrcInt) <> '');
+  AssertTrue('a byte of a temporary string is rejected',
+    Pos('would dangle', SemanticError(SrcTemp)) >= 0);
 end;
 
 initialization

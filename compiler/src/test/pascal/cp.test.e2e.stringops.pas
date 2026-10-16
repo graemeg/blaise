@@ -21,6 +21,12 @@ type
   protected
     procedure SetUp; override;
   published
+    { @S[N] points at one byte of the string, made unique first: a literal-backed
+      local, a shared string (the other holder keeps its value), an object field,
+      a record field, a var parameter and a captured variable.  Neither backend
+      lowered it ("address-of on this expression" / "unsupported TAddrOfExpr
+      form"), and the semantic pass typed it ^Integer. }
+    procedure TestRun_AddrOfStringByte_CopyOnWrite;
     procedure TestRun_StringBuiltins_Combined;
     procedure TestRun_StringOps_Length;
     procedure TestRun_StringOps_Pos;
@@ -865,6 +871,47 @@ begin
     'he hel 0 10 -1' + LE +
     'second-call' + LE, 0);
   AssertLeakFreeOnAll(Src, 'second-call');
+end;
+
+procedure TE2EStringOpsTests.TestRun_AddrOfStringByte_CopyOnWrite;
+const
+  Src = '''
+    program SB1;
+    type
+      TObj = class public S: string; end;
+      TRec = record S: string; end;
+    var G: string;
+    procedure ViaVar(var V: string); var P: ^Byte; begin P := @V[1]; P^ := 90; end;
+    procedure Run;
+    var S, T: string; P: ^Byte; O: TObj; R: TRec; F: reference to procedure;
+    begin
+      S := 'hello';                 { literal-backed }
+      P := @S[0]; P^ := 72;         { 'H' }
+      WriteLn(S);
+      S := 'ab' + IntToStr(12); T := S;
+      P := @S[1]; P^ := 66;         { copy-on-write: T unchanged }
+      WriteLn(S, ' ', T, ' ', P^);
+      O := TObj.Create(); O.S := 'xyz';
+      P := @O.S[2]; P^ := 90; WriteLn(O.S);
+      R.S := 'pqr'; P := @R.S[0]; P^ := 80; WriteLn(R.S);
+      G := 'glob'; ViaVar(G); WriteLn(G);
+      F := procedure begin P := @S[0]; P^ := 97; end;
+      F(); WriteLn(S);
+      O.Free();
+    end;
+    begin
+      Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'Hello' + LineEnding +
+    'aB12 ab12 66' + LineEnding +
+    'xyZ' + LineEnding +
+    'Pqr' + LineEnding +
+    'gZob' + LineEnding +
+    'aB12' + LineEnding, 0);
 end;
 
 initialization

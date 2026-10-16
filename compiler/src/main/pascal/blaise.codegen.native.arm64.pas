@@ -345,6 +345,8 @@ type
     procedure EmitFatPtrAssign(AAsgn: TAssignment);
     function  IsFatLValue(AExpr: TASTExpr): Boolean;
     procedure EmitLValueAddrToX0(AExpr: TASTExpr);
+    procedure EmitStrByteAddrToX0(AIndex: TASTExpr; AStrSlot: TASTExpr;
+      ACharField: TFieldAccessExpr);
     procedure EmitFatPairToX0X1(AExpr: TASTExpr; ARefTarget: Boolean);
     procedure EmitForInArrayBase(AStmt: TForInStmt; const ATmp: string);
     procedure EmitForInVarAddr(const AReg: string; AStmt: TForInStmt);
@@ -2570,6 +2572,31 @@ begin
     Wrap.Expr := nil;   { owned by the caller's node }
     Wrap.Free();
   end;
+end;
+
+procedure TArm64Backend.EmitStrByteAddrToX0(AIndex: TASTExpr;
+  AStrSlot: TASTExpr; ACharField: TFieldAccessExpr);
+begin
+  { x0 := @S[I] -- the address of one byte of a string variable / field.  A
+    pointer handed out may be written through, so the string is made unique
+    in its own slot first (copy-on-write, as S[I] := B does): a literal-backed
+    or shared string would otherwise be modified for every holder, or hit
+    read-only memory.  The slot is the string variable (AStrSlot) or, for the
+    folded Rec.S[I] form, the field itself (ACharField). }
+  Self.EmitExprToX0(AIndex);
+  EmitPushX0();                                  { [sp] = index }
+  if ACharField <> nil then
+    EmitRecFieldAddrToX0(ACharField)             { the field's slot }
+  else
+    EmitLValueAddrToX0(AStrSlot);                { the variable's slot }
+  Self.Emit(#9'str x19, [sp, #-16]!');
+  Self.Emit(#9'mov x19, x0');
+  Self.Emit(#9'ldr x0, [x19]');
+  EmitCallSym('_StringUnique');
+  Self.Emit(#9'str x0, [x19]');
+  Self.Emit(#9'ldr x19, [sp], #16');
+  EmitPopTo('x1');
+  Self.Emit(#9'add x0, x0, x1');
 end;
 
 procedure TArm64Backend.EmitFatPtrAssign(AAsgn: TAssignment);
@@ -6722,6 +6749,16 @@ begin
       Exit;
     end;
     if (TAddrOfExpr(AExpr).Expr is TFieldAccessExpr) and
+       TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).IsCharAccess and
+       (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).PropIndexExpr <> nil) then
+    begin
+      { @Rec.S[I] / @Obj.S[I] -- a byte of a string FIELD (the index is
+        folded into the field access) }
+      EmitStrByteAddrToX0(TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).PropIndexExpr,
+        nil, TFieldAccessExpr(TAddrOfExpr(AExpr).Expr));
+      Exit;
+    end;
+    if (TAddrOfExpr(AExpr).Expr is TFieldAccessExpr) and
        (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).FieldInfo <> nil) and
        TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).IsArrayAccess then
     begin
@@ -6756,6 +6793,14 @@ begin
         tyDynArray, tyOpenArray:
         begin
           EmitDynElemAddr(TStringSubscriptExpr(TAddrOfExpr(AExpr).Expr));
+          Exit;
+        end;
+        tyString:
+        begin
+          { @S[I] -- a byte of a string variable or field }
+          EmitStrByteAddrToX0(
+            TStringSubscriptExpr(TAddrOfExpr(AExpr).Expr).IndexExpr,
+            TStringSubscriptExpr(TAddrOfExpr(AExpr).Expr).StrExpr, nil);
           Exit;
         end;
         tyPChar:

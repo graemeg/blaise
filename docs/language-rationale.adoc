@@ -225,6 +225,17 @@ one alias never disturbs another, and a literal reused elsewhere stays
 pristine.  Both backends emit the same `_StringUnique` → write-back →
 `storeb` sequence.
 
+==== Address of a byte — `@S[N]`
+
+`@S[N]` is the address of the Nth byte and has type `^Byte`, matching what
+`S[N]` reads.  (The subscript value is held as an `Integer`, so the pointer
+type used to come out `^Integer`, and `P^` read four bytes.)  A pointer
+handed out may be written through, so taking the address performs the same
+copy-on-write as `S[N] := b`: the string is made unique in its own slot
+first.  The string must be a variable, parameter or field: `@F()[N]` is
+rejected, because the address of a byte of a temporary string would dangle
+as soon as the statement ended.
+
 ==== What is not supported
 
 Codepoint-level indexing is not supported via subscript syntax.  Use

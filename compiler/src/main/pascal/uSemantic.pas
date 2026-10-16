@@ -18844,6 +18844,29 @@ begin
     end;
   end;
   InnerType := Self.AnalyseExprSlot(AExpr.Expr);
+  { @S[I] / @O.S[I] -- the address of one BYTE of a string.  S[I] reads as an
+    Integer-typed byte value, so the pointer type came out ^Integer and P^
+    read four bytes.  It is a ^Byte.  The string must be a variable or field:
+    the address of a byte of a temporary string would dangle at once. }
+  if ((AExpr.Expr is TStringSubscriptExpr) and
+      (TStringSubscriptExpr(AExpr.Expr).IndexExpr <> nil) and
+      (TStringSubscriptExpr(AExpr.Expr).StrExpr.ResolvedType <> nil) and
+      TStringSubscriptExpr(AExpr.Expr).StrExpr.ResolvedType.IsString()) or
+     ((AExpr.Expr is TFieldAccessExpr) and
+      TFieldAccessExpr(AExpr.Expr).IsCharAccess) then
+  begin
+    if (AExpr.Expr is TStringSubscriptExpr) and
+       not (((TStringSubscriptExpr(AExpr.Expr).StrExpr is TIdentExpr) and
+             not TIdentExpr(TStringSubscriptExpr(AExpr.Expr).StrExpr).IsConstant) or
+            ((TStringSubscriptExpr(AExpr.Expr).StrExpr is TFieldAccessExpr) and
+             not TFieldAccessExpr(TStringSubscriptExpr(AExpr.Expr).StrExpr).IsMethodCall and
+             not TFieldAccessExpr(TStringSubscriptExpr(AExpr.Expr).StrExpr).IsConstant and
+             ((TFieldAccessExpr(TStringSubscriptExpr(AExpr.Expr).StrExpr).PropRead = nil) or
+              (TFieldAccessExpr(TStringSubscriptExpr(AExpr.Expr).StrExpr).PropRead.ReadMethod = '')))) then
+      SemanticError('Cannot take the address of a byte of a string that is ' +
+        'not a variable or field (it would dangle)', AExpr.Line, AExpr.Col);
+    InnerType := FTable.TypeByte;
+  end;
   PtrName := '^' + InnerType.Name;
   Result := FindTypeOrInstantiate(PtrName);
   if Result = nil then
