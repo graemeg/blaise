@@ -37,6 +37,19 @@ type
       must serve ALL of them with zero errors on one worker.  The full numbers
       come from the standalone benchmark program (bench_async_http). }
     procedure TestFiberHttpHighConcurrency;
+    { A body far larger than a socket send buffer: the connection is
+      non-blocking by design, so every partial write and EAGAIN must be
+      carried through to the last byte. }
+    procedure TestFiberHttpLargeBody;
+  end;
+
+  { Serves a fixed body, whatever the request. }
+  TBigBodyHandler = class(IRequestHandler)
+  private
+    FBody: string;
+  public
+    constructor Create(const ABody: string);
+    procedure Handle(ARequest: THttpRequest; AResponse: THttpResponse);
   end;
 
   { Echoes the request path in the body, so a client can verify per-request
@@ -97,6 +110,16 @@ end;
 procedure TPathHandler.Handle(ARequest: THttpRequest; AResponse: THttpResponse);
 begin
   AResponse.SetText(200, 'text/plain', 'path=' + ARequest.Path);
+end;
+
+constructor TBigBodyHandler.Create(const ABody: string);
+begin
+  FBody := ABody;
+end;
+
+procedure TBigBodyHandler.Handle(ARequest: THttpRequest; AResponse: THttpResponse);
+begin
+  AResponse.SetText(200, 'application/octet-stream', FBody);
 end;
 
 { --- a tiny fiber HTTP client over Net.Tcp --------------------------------- }
@@ -230,6 +253,23 @@ begin
   B2 := HttpGetOnConn(Conn, '/second', False);
   GResult := B1 + '|' + B2;
   Conn.Free();
+  GHttpServer.Stop();
+end;
+
+procedure BigBodyClientFiber(AArg: Pointer);
+var
+  Cli: TTcpClient;
+  Conn: TTcpConn;
+begin
+  FiberSleep(2);
+  Cli := TTcpClient.Create();
+  Conn := Cli.Connect('127.0.0.1', GPort);
+  Cli.Free();
+  if Conn <> nil then
+  begin
+    GResult := HttpGetOnConn(Conn, '/big', False);
+    Conn.Free();
+  end;
   GHttpServer.Stop();
 end;
 
@@ -429,6 +469,38 @@ begin
 
   AssertEquals('every one of the concurrent client fibers got a correct 200',
     NClients, GHcOk);
+  ResetScheduler();
+  GHttpServer.Free();
+  GHandler := nil;
+end;
+
+procedure THttpFiberTests.TestFiberHttpLargeBody;
+const
+  PORT = 29415;
+  SIZE = 1024 * 1024 + 4321;
+var
+  SB: TStringBuilder;
+  Body: string;
+  I: Integer;
+begin
+  SB := TStringBuilder.Create();
+  for I := 0 to SIZE - 1 do
+    SB.AppendByte(Byte((I * 7 + I div 251) mod 256));
+  Body := SB.ToString();
+  SB.Free();
+
+  GHttpServer := THttpFiberServer.Create(PORT);
+  AssertTrue('http server start', GHttpServer.Start());
+  GHandler := TBigBodyHandler.Create(Body);
+  GPort := PORT;
+  GResult := '';
+
+  SpawnFiber(@HttpServerFiber, nil);
+  SpawnFiber(@BigBodyClientFiber, nil);
+  RunScheduler();
+
+  AssertEquals('every body byte arrives', SIZE, Length(GResult));
+  AssertTrue('body intact', GResult = Body);
   ResetScheduler();
   GHttpServer.Free();
   GHandler := nil;

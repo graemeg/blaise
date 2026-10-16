@@ -15,7 +15,8 @@ unit HttpServer.Tests;
 interface
 
 uses
-  blaise.testing, Net.Http.Server, Net.Sockets, Net.WebSockets, StrUtils;
+  blaise.testing, Classes, SysUtils, Net.Http.Server, Net.Sockets, Net.WebSockets,
+  StrUtils;
 
 type
   THttpServerTests = class(TTestCase)
@@ -26,6 +27,32 @@ type
     procedure TestRoundTrip;
     procedure TestStartAnyRoundTrip;
     procedure TestWebSocketUpgradeAndBroadcast;
+    procedure TestLargeBody_NonBlockingListener;
+    procedure TestSlowClient_NonBlockingListener;
+  end;
+
+  { Serves a fixed body, whatever the request. }
+  TBodyHandler = class(IRequestHandler)
+  private
+    FBody: string;
+  public
+    constructor Create(const ABody: string);
+    procedure Handle(ARequest: THttpRequest; AResponse: THttpResponse);
+  end;
+
+  { Drives a server the way an application with an event loop does (Luhmann):
+    the listener is non-blocking and PollOnce is called until one connection
+    has been served.  Runs on its own thread so the test can act as client. }
+  TPollServeThread = class(TThread)
+  private
+    FServer: THttpServer;
+    FHandler: IRequestHandler;
+    FServed: Boolean;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AServer: THttpServer; AHandler: IRequestHandler);
+    property Served: Boolean read FServed;
   end;
 
   { A trivial handler: echoes the path and the 'q' query param. }
@@ -39,6 +66,69 @@ procedure TEchoHandler.Handle(ARequest: THttpRequest; AResponse: THttpResponse);
 begin
   AResponse.SetText(200, 'text/plain',
     ARequest.Path + '|' + ARequest.QueryParam('q'));
+end;
+
+constructor TBodyHandler.Create(const ABody: string);
+begin
+  FBody := ABody;
+end;
+
+procedure TBodyHandler.Handle(ARequest: THttpRequest; AResponse: THttpResponse);
+begin
+  AResponse.SetText(200, 'application/octet-stream', FBody);
+end;
+
+constructor TPollServeThread.Create(AServer: THttpServer; AHandler: IRequestHandler);
+begin
+  FServer := AServer;
+  FHandler := AHandler;
+  FServed := False;
+  inherited Create(False);
+end;
+
+procedure TPollServeThread.Execute;
+var
+  Tries: Integer;
+begin
+  { Give up after ~10 s rather than hang the suite if no client arrives. }
+  Tries := 0;
+  while (not FServed) and (Tries < 10000) do
+  begin
+    FServed := FServer.PollOnce(FHandler);
+    if not FServed then
+    begin
+      Sleep(1);
+      Tries := Tries + 1;
+    end;
+  end;
+end;
+
+{ Read the whole response until the server closes, in large chunks: a
+  megabyte through a 1 KB string-concatenation loop would be quadratic. }
+function RecvAllLarge(AFd: Integer): string;
+var
+  SB: TStringBuilder;
+  Chunk: string;
+begin
+  SB := TStringBuilder.Create();
+  repeat
+    Chunk := RecvString(AFd, 65536);
+    SB.Append(Chunk);
+  until Chunk = '';
+  Result := SB.ToString();
+  SB.Free();
+end;
+
+function PatternBody(ACount: Integer): string;
+var
+  SB: TStringBuilder;
+  I: Integer;
+begin
+  SB := TStringBuilder.Create();
+  for I := 0 to ACount - 1 do
+    SB.AppendByte(Byte((I * 7 + I div 251) mod 256));
+  Result := SB.ToString();
+  SB.Free();
 end;
 
 { Read until the server closes the connection.  One recv is not enough: the
@@ -181,6 +271,81 @@ begin
   AssertEquals('opcode', WS_OP_TEXT, D.Opcode);
   AssertEquals('payload', 'reload', D.Payload);
 
+  Close(Cli);
+  Srv.Free();
+end;
+
+{ A body far larger than a socket send buffer, served after SetNonBlocking.
+  On macOS the accepted connection used to inherit O_NONBLOCK from the
+  listener, send(2) hit EAGAIN once ~320 KB was buffered, SendAll gave up, and
+  the connection closed with the body cut short (Luhmann's cytoscape.min.js). }
+procedure THttpServerTests.TestLargeBody_NonBlockingListener;
+const
+  PORT = 28994;
+  SIZE = 1024 * 1024 + 4321;
+var
+  Srv: THttpServer;
+  H: IRequestHandler;
+  Body, Resp: string;
+  Cli, Sep: Integer;
+  T: TPollServeThread;
+begin
+  Body := PatternBody(SIZE);
+  Srv := THttpServer.Create(PORT);
+  AssertTrue('start', Srv.Start());
+  Srv.SetNonBlocking();
+  H := TBodyHandler.Create(Body);
+  T := TPollServeThread.Create(Srv, H);
+
+  Cli := TcpConnectLocal(PORT);
+  AssertTrue('connect', Cli >= 0);
+  AssertTrue('send', SendAll(Cli, 'GET /big HTTP/1.1'#13#10'Host: x'#13#10#13#10));
+  Resp := RecvAllLarge(Cli);
+  T.WaitFor();
+  AssertTrue('served', T.Served);
+
+  AssertTrue('200', ContainsStr(Resp, '200 OK'));
+  AssertTrue('content-length', ContainsStr(Resp, 'Content-Length: ' + IntToStr(SIZE)));
+  Sep := PosEx(#13#10#13#10, Resp, 0);
+  AssertTrue('head terminator', Sep >= 0);
+  AssertEquals('every body byte arrives', SIZE, Length(Resp) - (Sep + 4));
+  AssertTrue('body intact', Copy(Resp, Sep + 4, SIZE) = Body);
+
+  T := nil;
+  Close(Cli);
+  Srv.Free();
+end;
+
+{ The request arrives AFTER the server has accepted the connection (a slow
+  client, or a large request still in flight).  An accepted connection that
+  inherited O_NONBLOCK read nothing, so the server parsed an empty request. }
+procedure THttpServerTests.TestSlowClient_NonBlockingListener;
+const
+  PORT = 28995;
+var
+  Srv: THttpServer;
+  H: IRequestHandler;
+  Resp: string;
+  Cli: Integer;
+  T: TPollServeThread;
+begin
+  Srv := THttpServer.Create(PORT);
+  AssertTrue('start', Srv.Start());
+  Srv.SetNonBlocking();
+  H := TEchoHandler.Create();
+  T := TPollServeThread.Create(Srv, H);
+
+  Cli := TcpConnectLocal(PORT);
+  AssertTrue('connect', Cli >= 0);
+  Sleep(200);                       { the server accepts before the request }
+  AssertTrue('send', SendAll(Cli, 'GET /slow?q=late HTTP/1.1'#13#10'Host: x'#13#10#13#10));
+  Resp := RecvAllLarge(Cli);
+  T.WaitFor();
+
+  AssertTrue('200', ContainsStr(Resp, '200 OK'));
+  AssertTrue('request read in full', ContainsStr(Resp, '/slow|late'));
+
+  T := nil;
   Close(Cli);
   Srv.Free();
 end;

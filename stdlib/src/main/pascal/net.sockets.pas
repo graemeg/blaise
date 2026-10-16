@@ -190,7 +190,12 @@ function TcpConnect(AAddr: UInt32; APort: UInt16): Integer;
 function TcpConnectLocal(APort: UInt16): Integer;
 
 { Accept the next pending connection on a listening socket.  Returns the
-  connected fd, or -1 (e.g. on a non-blocking socket with nothing waiting). }
+  connected fd, or -1 (e.g. on a non-blocking socket with nothing waiting).
+  The connection is always BLOCKING, whatever the listener's mode: macOS and
+  the BSDs copy O_NONBLOCK from the listener to the accepted socket and Linux
+  does not, so without this a server that polls a non-blocking listener would
+  get blocking connections on one OS and non-blocking ones on another.  Call
+  MakeNonBlocking on the result if that is what you want. }
 function AcceptConn(AListenFd: Integer): Integer;
 
 { Receive up to AMaxBytes from AFd and return them as a string (raw bytes).
@@ -204,8 +209,16 @@ procedure Close(AFd: Integer);
 { Make AFd non-blocking (accept/recv return immediately when nothing waits). }
 procedure MakeNonBlocking(AFd: Integer);
 
+{ Make AFd blocking again (the inverse of MakeNonBlocking). }
+procedure MakeBlocking(AFd: Integer);
+
+{ True if AFd is in non-blocking mode. }
+function IsNonBlocking(AFd: Integer): Boolean;
+
 { Send the whole string, looping until every byte is written.  Uses
   MSG_NOSIGNAL so a dead peer yields a False result rather than SIGPIPE.
+  Works on a non-blocking socket too: when the send buffer is full it waits
+  for room rather than failing, and leaves the socket's mode as it found it.
   Returns True on success. }
 function SendAll(AFd: Integer; const S: string): Boolean;
 
@@ -222,6 +235,7 @@ uses
   StrUtils;
 
 const
+  F_GETFL    = 3;
   F_SETFL    = 4;
   SIGPIPE    = 13;
   SIG_IGN    = 1;      { (void*)1 }
@@ -236,6 +250,10 @@ function c_signal(ASignum: Integer; AHandler: Pointer): Pointer; external name '
 function _ONonBlock: Integer; external name '_ONonBlock';
 procedure _SockAddrIn4Fill(P: Pointer; APortN: UInt16; AAddrN: UInt32);
   external name '_SockAddrIn4Fill';
+
+{ errno classification (runtime.errno.<profile>), chosen at link time. }
+function WouldBlock(N: Int64): Boolean; external name 'WouldBlock';
+function Interrupted(N: Int64): Boolean; external name 'Interrupted';
 
 function IPv4(A, B, C, D: Byte): UInt32;
 begin
@@ -427,6 +445,8 @@ end;
 function AcceptConn(AListenFd: Integer): Integer;
 begin
   Result := Accept(AListenFd, nil, nil);
+  if Result >= 0 then
+    MakeBlocking(Result);
 end;
 
 function RecvString(AFd: Integer; AMaxBytes: Integer): string;
@@ -454,15 +474,43 @@ begin
 end;
 
 procedure MakeNonBlocking(AFd: Integer);
+var
+  Flags: Integer;
 begin
-  if AFd >= 0 then
-    c_fcntl(AFd, F_SETFL, _ONonBlock());
+  if AFd < 0 then
+    Exit;
+  { Add the bit to the existing status flags rather than replacing them. }
+  Flags := c_fcntl(AFd, F_GETFL);
+  if Flags < 0 then
+    Flags := 0;
+  c_fcntl(AFd, F_SETFL, Flags or _ONonBlock());
+end;
+
+procedure MakeBlocking(AFd: Integer);
+var
+  Flags: Integer;
+begin
+  if AFd < 0 then
+    Exit;
+  Flags := c_fcntl(AFd, F_GETFL);
+  if (Flags >= 0) and ((Flags and _ONonBlock()) <> 0) then
+    c_fcntl(AFd, F_SETFL, Flags and (not _ONonBlock()));
+end;
+
+function IsNonBlocking(AFd: Integer): Boolean;
+var
+  Flags: Integer;
+begin
+  Flags := c_fcntl(AFd, F_GETFL);
+  Result := (Flags >= 0) and ((Flags and _ONonBlock()) <> 0);
 end;
 
 function SendAll(AFd: Integer; const S: string): Boolean;
 var
-  Total, N: Integer;
+  Total: Integer;
+  N: Int64;
   P: PChar;
+  Restore: Boolean;
 begin
   Total := Length(S);
   if Total = 0 then
@@ -471,18 +519,35 @@ begin
     Exit;
   end;
   P := PChar(S);
+  Restore := False;
+  Result := True;
   while Total > 0 do
   begin
     N := Send(AFd, P, Total, MSG_NOSIGNAL());
-    if N <= 0 then
+    if N > 0 then
+    begin
+      P := P + N;
+      Total := Total - Integer(N);
+    end
+    else if Interrupted(N) then
+      Continue
+    else if WouldBlock(N) then
+    begin
+      { A full send buffer on a non-blocking socket means "not yet", not
+        failure.  Wait for room by finishing the send in blocking mode -- the
+        same fallback async.io's FiberSendT uses outside a fiber -- and put
+        the caller's mode back afterwards. }
+      MakeBlocking(AFd);
+      Restore := True;
+    end
+    else
     begin
       Result := False;
-      Exit;
+      Break;
     end;
-    P := P + N;
-    Total := Total - N;
   end;
-  Result := True;
+  if Restore then
+    MakeNonBlocking(AFd);
 end;
 
 function BytesToString(ABuf: Pointer; ACount: Integer): string;

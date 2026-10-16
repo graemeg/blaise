@@ -463,7 +463,10 @@ begin
           'Content-Length: ' + IntToStr(Length(AResp.Body)) + #13#10 +
           'Connection: close' + #13#10 +
           #13#10;
-  SendAll(AConnFd, Head);
+  { A failed head means the peer is gone; sending the body would only fail
+    again.  There is no one left to report to: ServeConn closes the fd next. }
+  if not SendAll(AConnFd, Head) then
+    Exit;
   if Length(AResp.Body) > 0 then
     SendAll(AConnFd, AResp.Body);
 end;
