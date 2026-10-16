@@ -26,6 +26,18 @@ type
   protected
     procedure SetUp; override;
   published
+    { for-in over an array field of an OWNED transient instance (MkObj().Arr,
+      MkObj().D): the instance is made once and outlives the loop -- a dyn-array
+      field read released it inline, so the loop walked freed elements }
+    procedure TestRun_ForIn_OwnedTransientArrayFields;
+    { Every field kind read off an OWNED transient instance (MkObj().S,
+      MkObj().D, MkObj().F, MkObj().P.A[2], MkObj().Arr[1], ...) -- and more such
+      reads in one statement than the 8 deferred-release slots reserved up front.
+      A string or dyn-array field was released inline with the instance, so
+      S := MkObj().S read freed storage (garbage, then a crash, on both ISAs); an
+      array-field element or float field never released the instance at all; and
+      a ninth deferral was a NotYet on arm64. }
+    procedure TestRun_OwnedTransientBase_EveryFieldKind;
     procedure TestRun_Arc_ClassRecordOwnership;
     procedure TestRun_Arc_StringsParamsPointers;
     procedure TestRun_WeakAndUnretained_NonOwning;
@@ -1807,6 +1819,103 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '1 1' + #10 + '7 8' + #10, 0);
+end;
+
+procedure TE2EArcTests.TestRun_OwnedTransientBase_EveryFieldKind;
+const
+  Src = '''
+    program Owned;
+    type
+      IGreet = interface function Hi: string; end;
+      TG = class(IGreet) function Hi: string; end;
+      TColour = (cRed, cGreen, cBlue);
+      TArr = array[0..3] of Integer;
+      TPt = record X, Y: Integer; S: string; A: TArr; end;
+      TObj = class
+      public
+        F: Double; Sg: Single; I64: Int64; G: IGreet; C: set of TColour; P: TPt;
+        N: Integer; S: string; D: array of string; Arr: TArr;
+      end;
+    function TG.Hi: string; begin Result := 'hi' + IntToStr(1); end;
+    function MkObj: TObj;
+    begin
+      Result := TObj.Create(); Result.F := 2.5; Result.Sg := 1.5; Result.I64 := 40000000000;
+      Result.G := TG.Create(); Result.C := [cGreen, cBlue];
+      Result.P.X := 7; Result.P.S := 'p' + IntToStr(5); Result.P.A[2] := 9;
+      Result.N := 3; Result.S := 's' + IntToStr(2);
+      SetLength(Result.D, 2); Result.D[0] := 'a' + IntToStr(1); Result.D[1] := 'b';
+      Result.Arr[1] := 77;
+    end;
+    procedure ShowPt(const P: TPt); begin WriteLn(P.X, ' ', P.S); end;
+    var D: Double; P: TPt; S: string; Ds: array of string; X: Integer; Pi: ^Integer;
+    begin
+      S := MkObj().S; WriteLn(S, ' ', MkObj().S, ' ', MkObj().N);
+      Ds := MkObj().D; WriteLn(Length(Ds), ' ', Ds[0], ' ', Length(MkObj().D), ' ', MkObj().D[0]);
+      WriteLn(MkObj().F:0:2, ' ', MkObj().Sg:0:2, ' ', MkObj().I64);
+      D := MkObj().F + MkObj().F; WriteLn(D:0:2);
+      WriteLn(MkObj().G.Hi(), ' ', cBlue in MkObj().C);
+      P := MkObj().P; WriteLn(P.X, ' ', P.S);
+      ShowPt(MkObj().P);
+      WriteLn(MkObj().P.S, ' ', MkObj().P.X, ' ', MkObj().P.A[2]);
+      WriteLn(MkObj().Arr[1]);
+      MkObj().Arr[2] := 5; MkObj().D[0] := 'x';
+      Pi := @MkObj().Arr[1]; WriteLn(Pi <> nil);
+      X := MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] +
+           MkObj().P.A[2] + MkObj().P.A[2] + MkObj().P.A[2] + MkObj().P.A[2] + MkObj().P.A[2] +
+           MkObj().N + MkObj().N;
+      WriteLn(X);
+      S := MkObj().S + MkObj().D[0] + MkObj().P.S + MkObj().S + MkObj().D[1] + MkObj().P.S +
+           MkObj().S + MkObj().D[0] + MkObj().P.S + MkObj().G.Hi();
+      WriteLn(S);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    's2 s2 3' + LineEnding +
+    '2 a1 2 a1' + LineEnding +
+    '2.50 1.50 40000000000' + LineEnding +
+    '5.00' + LineEnding +
+    'hi1 True' + LineEnding +
+    '7 p5' + LineEnding +
+    '7 p5' + LineEnding +
+    'p5 7 9' + LineEnding +
+    '77' + LineEnding +
+    'True' + LineEnding +
+    '436' + LineEnding +
+    's2a1p5s2bp5s2a1p5hi1' + LineEnding, 0);
+end;
+
+procedure TE2EArcTests.TestRun_ForIn_OwnedTransientArrayFields;
+const
+  Src = '''
+    program ForInOwn;
+    type
+      TArr = array[0..3] of Integer;
+      TObj = class
+      public
+        Arr: TArr;
+        D: array of string;
+      end;
+    var Calls: Integer;
+    function MkObj: TObj;
+    begin
+      Calls := Calls + 1;
+      Result := TObj.Create(); Result.Arr[2] := 22;
+      SetLength(Result.D, 2); Result.D[0] := 'x' + IntToStr(Calls); Result.D[1] := 'y';
+    end;
+    var X, Sum: Integer; S, Acc: string;
+    begin
+      Sum := 0; for X in MkObj().Arr do Sum := Sum + X; WriteLn('Arr sum=', Sum, ' calls=', Calls);
+      Calls := 0;
+      Acc := ''; for S in MkObj().D do Acc := Acc + S; WriteLn('D ', Acc, ' calls=', Calls);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'Arr sum=22 calls=1' + LineEnding +
+    'D x1y calls=1' + LineEnding, 0);
 end;
 
 initialization

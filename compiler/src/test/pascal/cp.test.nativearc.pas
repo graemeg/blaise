@@ -33,6 +33,9 @@ type
   private
     function MainExitRegion(const AAsm: string): string;
   published
+    { an owned transient base's release is deferred however many one statement
+      holds: the pool grows past its reserved slots }
+    procedure TestNative_OwnedTransientBases_DeferredPastEightSlots;
     { an owned class transient tested with = / <>, is or Assigned is released
       afterwards (it leaked on both backends) }
     { an owned class call result narrowed to an interface is CONSUMED by the
@@ -1056,6 +1059,34 @@ begin
     AsmMissing(Src,
       #9'movq %rax, _pendrel_0(%rip)'#10#9'movq %rax, %r15',
       #9'bl _MkObj'#10#9'stur x0, [x29, #'));
+end;
+
+procedure TNativeArcTests.TestNative_OwnedTransientBases_DeferredPastEightSlots;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..3] of Integer;
+      TObj = class Arr: TArr; S: string; end;
+    function MkObj: TObj; begin Result := TObj.Create(); end;
+    var X: Integer; S: string;
+    begin
+      X := MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] +
+           MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1] + MkObj().Arr[1];
+      S := MkObj().S;
+    end.
+    ''';
+var
+  A: string;
+begin
+  { ten owned transients in one statement: the deferred-release pool grows
+    past its 8 reserved slots ($main's .bss block on x86-64; arm64 refused
+    the ninth), and a STRING field read defers the instance's release too
+    rather than releasing it under the borrowed value }
+  A := GenAsm(Src, TargetX86_64);
+  AssertTrue('x86-64: a tenth slot', Pos('_pendrel_9(%rip)', A) >= 0);
+  AssertTrue('x86-64: no eleventh', Pos('_pendrel_10', A) < 0);
+  AssertTrue('arm64 lowers it', Pos(#9'bl _MkObj', GenAsm(Src, TargetArm64)) >= 0);
 end;
 
 initialization

@@ -240,15 +240,17 @@ type
       and its release DEFERRED to the end of the enclosing leaf statement, AFTER
       the field value has been stored.  FPendingRelCount is how many slots are
       live right now; a leaf statement captures it, emits, then releases the new
-      ones (FlushNativePendingReleases).  If a single statement would exceed
-      PENDREL_SLOTS the field-read falls back to the old AddRef-pin (safe leak),
-      so overflow degrades rather than breaks. }
+      ones (FlushNativePendingReleases).  PENDREL_SLOTS slots are reserved up
+      front; a statement that defers more grows the pool (the frame, or
+      $main's .bss block). }
     FPendingRelCount: Integer;
-    FPendingRelSyms: array[0..PENDREL_SLOTS - 1] of string;
+    FPendingRelSyms: array of string;
     { non-nil: the slot holds the ADDRESS of an aggregate of this type (a
       static-array call result's scratch buffer) whose managed content the
       flush releases in place }
-    FPendingRelTypes: array[0..PENDREL_SLOTS - 1] of TTypeDesc;
+    FPendingRelTypes: array of TTypeDesc;
+    FPendRelSlots: Integer;     { _pendrel_N slots the current frame has }
+    FProgPendRelSlots: Integer; { _pendrel_N .bss slots $main needs }
                                 { the RTL release routine for each live
                                   _pendrel_N slot (_ClassRelease or
                                   _DynArrayRelease) }
@@ -1073,8 +1075,8 @@ type
       AElemType: TTypeDesc);
     { BUG-003 native half: statement-scoped deferred class-release.
       DeferNativeClassRelease spills the pointer currently in %rax to the next
-      free _pendrel slot and returns True; returns False (caller keeps its own
-      handling) when all PENDREL_SLOTS are in use.  FlushNativePendingReleases
+      free _pendrel slot (growing the pool when it is full) and returns True.
+      FlushNativePendingReleases
       releases every deferred base whose slot index is >= AMark and resets the
       count, called by EmitStmt at leaf-statement boundaries AFTER the store. }
     function  DeferNativeClassRelease: Boolean;
@@ -2280,7 +2282,7 @@ begin
     fine. }
   if FProgHasPendRel then
   begin
-    for I := 0 to PENDREL_SLOTS - 1 do
+    for I := 0 to FProgPendRelSlots - 1 do
     begin
       Self.Emit('.balign 8');
       Self.Emit(Format('_pendrel_%d:', [I]));
@@ -6809,6 +6811,7 @@ begin
     FFrame.Add(Format('_pendrel_%d', [I]), -Offset);
     FFrameTypes.Add(Format('_pendrel_%d', [I]), nil);
   end;
+  FPendRelSlots := PENDREL_SLOTS;
   FPendRelUsed := False;
   { Register promotion: slots to save/restore the callee-saved incumbents
     of %r14/%r15 across this function (pass 2 only). }
@@ -7795,8 +7798,7 @@ end;
 function TX86_64Backend.DeferNativeClassRelease: Boolean;
 begin
   { Spill the owned-transient base pointer currently in %rax into the next free
-    _pendrel slot and record it as pending.  Returns False (no slot free) so the
-    caller falls back to its own inline handling — never emits incorrect code. }
+    _pendrel slot and record it as pending.  Always succeeds (True). }
   Result := Self.DeferNativeRelease('_ClassRelease');
 end;
 
@@ -7838,11 +7840,27 @@ end;
 function TX86_64Backend.DeferNativeRelease(const AReleaseSym: string): Boolean;
 begin
   { as DeferNativeClassRelease, for any owned transient whose release is a
-    one-argument RTL call on the pointer in %rax }
-  if FPendingRelCount >= PENDREL_SLOTS then
+    one-argument RTL call on the pointer in %rax.  A full pool grows: a framed
+    routine gets another _pendrel_N frame slot (the frame-reserve subq and the
+    entry zeroing are written after the body), $main another .bss slot. }
+  if Self.IsLocal('_pendrel_0') then
   begin
-    Result := False;
-    Exit;
+    if FPendingRelCount >= FPendRelSlots then
+    begin
+      Inc(FFrameBottom, 8);
+      FFrameBottom := (FFrameBottom + 7) and (-8);
+      FFrame.Add(Format('_pendrel_%d', [FPendRelSlots]), -FFrameBottom);
+      FFrameTypes.Add(Format('_pendrel_%d', [FPendRelSlots]), nil);
+      FFrameSize := (FFrameBottom + 15) and (-16);
+      FPendRelSlots := FPendRelSlots + 1;
+    end;
+  end
+  else if FPendingRelCount >= FProgPendRelSlots then
+    FProgPendRelSlots := FPendingRelCount + 1;
+  if FPendingRelCount >= Length(FPendingRelSyms) then
+  begin
+    SetLength(FPendingRelSyms, FPendingRelCount + PENDREL_SLOTS);
+    SetLength(FPendingRelTypes, FPendingRelCount + PENDREL_SLOTS);
   end;
   Self.Emit(Format(#9'movq %%rax, %s',
     [Self.VarOperand(Format('_pendrel_%d', [FPendingRelCount]))]));
@@ -8357,6 +8375,21 @@ begin
         TFieldAccessExpr(AExpr).Base.ResolvedType, Ty, True);
       Self.Emit(Format(#9'addq $%d, %%rsp',
         [Self.RecArgBufBytes(TFieldAccessExpr(AExpr).Base)]));
+      Exit;
+    end;
+    if (TFieldAccessExpr(AExpr).Base <> nil) and
+       NativeExprOwnsRef(TFieldAccessExpr(AExpr).Base) then
+    begin
+      { a float field of an OWNED transient instance (MkObj().F): the
+        instance is released at the statement end, like every other field
+        read on such a base -- EmitFieldAddrToRcx never released it }
+      Self.EmitExprToEax(TFieldAccessExpr(AExpr).Base);
+      Self.DeferNativeClassRelease();
+      Self.Emit(#9'movq %rax, %rcx');
+      if TFieldAccessExpr(AExpr).FieldInfo.Offset > 0 then
+        Self.Emit(Format(#9'leaq %d(%%rcx), %%rcx',
+          [TFieldAccessExpr(AExpr).FieldInfo.Offset]));
+      Self.EmitLoadFloat('(%rcx)', Ty);
       Exit;
     end;
     Self.EmitFieldAddrToRcx(TFieldAccessExpr(AExpr));
@@ -11433,8 +11466,12 @@ begin
     if FAE.Base <> nil then
     begin
       { Chained receiver (c.N.Arr[I]): the base expression evaluates to the
-        record/object address. }
+        record/object address.  An OWNED transient instance (MkObj().Arr[1])
+        outlives the element read: its release is deferred to the statement
+        end (%rax survives).  It was never released at all. }
       Self.EmitExprToEax(FAE.Base);
+      if NativeExprOwnsRef(FAE.Base) then
+        Self.DeferNativeClassRelease();
       Self.Emit(#9'movq %rax, %rcx');
     end
     else if FAE.IsImplicitSelf then
@@ -11567,45 +11604,21 @@ begin
     if NativeExprOwnsRef(FAE.Base) then
     begin
       { The loaded field value (%rax) is borrowed from the owned transient base
-        (on the stack).  If the field is itself a managed class/interface ref it
-        aliases INTO the base's object graph — releasing the base inline runs its
-        _FieldCleanup, freeing the very object the loaded pointer designates, so
-        the value dangles for the rest of the chain (MakeIt().A.B.Method():
-        freeing the MakeIt() transient frees A, whose cleanup frees B, before B's
-        method runs).  DEFER the base release to the end of the enclosing leaf
-        statement (BUG-003 native half): spill the base to a _pendrel slot so it
-        stays alive through the field value's use, then FlushNativePendingReleases
-        releases it after the store.  For a SCALAR field there is no aliasing, so
-        release the base inline as before. }
-      if FAE.FieldInfo.TypeDesc.Kind in [tyClass, tyInterface] then
-      begin
-        { Field value in %rax, base on the stack.  Stash the field value, pop the
-          base into %rax, and try to defer its release. }
-        Self.Emit(#9'movq %rax, %rcx');    { %rcx = field value (survives defer) }
-        Self.Emit(#9'popq %rax');          { %rax = owned transient base }
-        if Self.DeferNativeClassRelease() then
-          { base spilled to a _pendrel slot; released at statement end }
-          Self.Emit(#9'movq %rcx, %rax')   { restore the field value }
-        else
-        begin
-          { All _pendrel slots in use — fall back to the AddRef-pin (safe leak):
-            pin the field value so the inline base release does not free it. }
-          Self.Emit(#9'pushq %rax');       { save base again }
-          Self.Emit(#9'movq %rcx, %rdi');  { AddRef the field value }
-          Self.Emit(#9'callq _ClassAddRef');
-          Self.Emit(#9'popq %rdi');        { base -> %rdi }
-          Self.Emit(#9'callq _ClassRelease');
-          Self.Emit(#9'movq %rcx, %rax');  { restore the field value }
-        end;
-      end
-      else
-      begin
-        { Scalar field: no aliasing.  Release the base inline. }
-        Self.Emit(#9'popq %rdi');
-        Self.Emit(#9'pushq %rax');
-        Self.Emit(#9'callq _ClassRelease');
-        Self.Emit(#9'popq %rax');
-      end;
+        (on the stack): a class / interface ref, a string, a dyn array, or --
+        for a record or static-array field -- an address INSIDE the base.
+        Releasing the base inline runs its _FieldCleanup and frees what the
+        value designates (MakeIt().A.B.Method(): freeing the MakeIt()
+        transient frees A, whose cleanup frees B, before B's method runs).
+        DEFER the base release to the end of the enclosing leaf statement
+        (BUG-003 native half): spill the base to a _pendrel slot so it stays
+        alive through the value's use; FlushNativePendingReleases releases it
+        after the store.  Every field kind takes this path: strings and dyn
+        arrays used to be released inline as "scalar", so S := MkObj().S and
+        D := MkObj().D read freed storage whenever the value was computed. }
+      Self.Emit(#9'movq %rax, %rcx');    { %rcx = field value (survives defer) }
+      Self.Emit(#9'popq %rax');          { %rax = owned transient base }
+      Self.DeferNativeClassRelease();
+      Self.Emit(#9'movq %rcx, %rax');    { restore the field value }
     end;
     Exit;
   end;
@@ -23998,8 +24011,6 @@ begin
     PinSym := '_DynArrayAddRef';
     RelSym := '_DynArrayRelease';
   end;
-  if (PinSym <> '') and (FPendingRelCount >= PENDREL_SLOTS) then
-    Exit;
   { the loaded value and %rbx ride across the release walk; the buffer sits
     just above them }
   if AFloat then
@@ -24041,12 +24052,11 @@ begin
     evaluated into %rax is an owned +1 transient that nothing released --
     every such call leaked the object.  Defer its release to the end of the
     statement (after the call, which borrows it as Self); %rax is untouched.
-    With every _pendrel slot in use it leaks, as before -- never a UAF. }
+  }
   if (ARecv.ResolvedType <> nil) and (ARecv.ResolvedType.Kind = tyClass) and
      NativeExprOwnsRef(ARecv) then
     Self.DeferNativeClassRelease()
-  else if ArcIsUnownedCtorResult(ARecv) and
-          (FPendingRelCount < PENDREL_SLOTS) then
+  else if ArcIsUnownedCtorResult(ARecv) then
   begin
     { TFoo.Create().Run(): the fresh rc=0 instance is pinned, then released
       with the owned receivers at the end of the statement -- it leaked }
@@ -26127,7 +26137,7 @@ begin
   { a frame that defers a release starts its _pendrel slots at nil: the
     flush is unconditional, the arming is not }
   if FPendRelUsed then
-    for I := 0 to PENDREL_SLOTS - 1 do
+    for I := 0 to FPendRelSlots - 1 do
       Self.Emit(Format(#9'movq $0, %s',
         [Self.VarOperand(Format('_pendrel_%d', [I]))]));
   FAsm.Append(BodyBuf.ToString());

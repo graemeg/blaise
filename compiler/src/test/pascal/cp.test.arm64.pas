@@ -8391,10 +8391,11 @@ var
   Obj: string;
   F: TMachOFile;
 begin
-  { STRING field on an owned transient base (MakeThing().Name): the base is
-    released INLINE after the load — the string data pointer survives (the
-    common case is an immortal literal); mirrors x86-64's string discipline.
-    No __StringAddRef pin. }
+  { STRING field on an owned transient base (MakeThing().Name): the string
+    belongs to the base, so releasing the base inline freed the value just
+    read whenever it was computed (S := MkObj().S read garbage).  The base
+    release is DEFERRED to the end of the statement, exactly as for a class
+    field below.  No __StringAddRef pin. }
   AsmStr := GenAsm(
     '''
     program P;
@@ -8416,13 +8417,13 @@ begin
     end.
     ''', TargetArm64);
   { the field-read region is after 'bl _MakeThing' in $main: the base is
-    loaded, field read, base released inline — NO AddRef between the call
-    and the release (contrast the class arm, which pins) }
-  AssertTrue('string field: base released inline after the call',
+    parked, the field read, and the base SPILLED to a _pendrel slot -- no
+    release between the call and the store, and no AddRef pin }
+  AssertTrue('string field: base deferred after the call',
     Pos(#9'bl _MakeThing' + LF + #9'str x0, [sp, #-16]!' + LF +
         #9'add x0, x0, #8' + LF + #9'ldr x0, [x0]' + LF +
         #9'str x0, [sp, #-16]!' + LF + #9'ldr x0, [sp, #16]' + LF +
-        #9'bl __ClassRelease', AsmStr) >= 0);
+        #9'stur x0, [x29, ', AsmStr) >= 0);
 
   { CLASS field on an owned transient base (MakeThing().Obj): the field value
     aliases into the base's graph, so the base release is DEFERRED to the end
