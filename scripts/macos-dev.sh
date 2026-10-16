@@ -83,7 +83,11 @@ case "$cmd" in
     echo "stage-2 binary: $W/s2/blaise"
     if [ $INSTALL -eq 1 ]; then
       mkdir -p "$TGT"
-      cp "$W/s2/blaise" "$TGT/blaise"
+      # Copy beside, then rename: a NEW inode.  The kernel caches a signed
+      # binary's code signature per vnode, so overwriting it in place with
+      # different bytes gets every later exec SIGKILLed (exit 137).
+      cp "$W/s2/blaise" "$TGT/blaise.install"
+      mv -f "$TGT/blaise.install" "$TGT/blaise"
       echo "installed stage-2 as $TGT/blaise"
     fi
     ;;
