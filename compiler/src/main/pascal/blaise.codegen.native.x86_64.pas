@@ -13267,9 +13267,11 @@ begin
     element of an array of arrays (M[1]), a field of an element (RS[1].A) or
     of a dereference (P^.A) -- passed to an open-array parameter: its storage
     address is the open array's data pointer.  An l-value, so the var
-    argument address walk computes it.  A static-array CALL result lands in a
-    per-site buffer, whose address EmitExprToEax yields. }
-  if (AArg is TFuncCallExpr) or (AArg is TMethodCallExpr) then
+    argument address walk computes it.  A static-array CALL result -- a
+    getter (O.AG, O.AI[7], a bare AG inside a method) and an inherited call
+    included -- lands in a per-site buffer, whose address EmitExprToEax
+    yields; a getter went down the l-value walk, which found no field. }
+  if IsAggCallValue(AArg) or (AArg is TInheritedCallExpr) then
     Self.EmitExprToEax(AArg)
   else if (AArg is TIdentExpr) and Self.IsCaptured(TIdentExpr(AArg).Name) then
   begin

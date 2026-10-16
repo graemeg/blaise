@@ -24,6 +24,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { a managed static array from a getter passed as an open array releases its
+      elements }
+    procedure TestDebug_StaticArrayGetterOpenArrayArg_NoLeak;
     { captured managed variables assigned in the declaring routine and in a
       closure keep exactly one owner: nothing leaks and nothing is freed twice }
     procedure TestDebug_CapturedManagedVars_NoLeak;
@@ -4690,6 +4693,40 @@ begin
     '3 5107 hi b x1y' + LineEnding +
     '4 True' + LineEnding +
     '32 7 p1q q 7' + LineEnding, Output);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_StaticArrayGetterOpenArrayArg_NoLeak;
+const
+  Src = '''
+    program OA2;
+    type
+      TSArr = array[0..1] of string;
+      TObj = class
+      private
+        function GetS: TSArr;
+      public
+        property SG: TSArr read GetS;
+      end;
+    function TObj.GetS: TSArr; begin Result[0] := 'a' + IntToStr(1); Result[1] := 'b' + IntToStr(2); end;
+    procedure ShowOpen(const A: array of string); var X: string; begin for X in A do Write(X, ' '); WriteLn(); end;
+    var O: TObj;
+    begin
+      O := TObj.Create();
+      ShowOpen(O.SG); ShowOpen(O.GetS());
+      O.Free();
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(Src, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertEquals('stdout',
+    'a1 b2 ' + LineEnding +
+    'a1 b2 ' + LineEnding, Output);
 end;
 
 initialization

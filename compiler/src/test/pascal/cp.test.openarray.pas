@@ -23,6 +23,8 @@ type
     function  ParseSrc(const ASrc: string): TProgram;
     function  AnalyseSrc(const ASrc: string): TProgram;
   published
+    { a static array from a getter passed to an open-array parameter }
+    procedure TestCodegen_StaticArrayGetter_OpenArrayArg_CallsGetter;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -732,6 +734,32 @@ begin
   AssertEquals('Single elements narrowed and stored 4 bytes wide', '',
     AsmMissing(Src, #9'movss %xmm0, 0(%rsp)',
       #9'fcvt s0, d0'#10#9'str s0, [x9]'));
+end;
+
+procedure TOpenArrayTests.TestCodegen_StaticArrayGetter_OpenArrayArg_CallsGetter;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..3] of Integer;
+      TObj = class
+      private
+        function GetArr: TArr;
+      public
+        property AG: TArr read GetArr;
+      end;
+    function TObj.GetArr: TArr; begin end;
+    procedure ShowOpen(const A: array of Integer); begin end;
+    var O: TObj;
+    begin
+      ShowOpen(O.AG)
+    end.
+    ''';
+begin
+  { the getter's result buffer is the open array's data: the getter is called
+    (x86-64 rejected the shape, walking O.AG as a field l-value) }
+  AssertEquals('the getter is called', '',
+    AsmMissing(Src, #9'callq TObj_GetArr', #9'bl _TObj_GetArr'));
 end;
 
 initialization

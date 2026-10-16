@@ -25,6 +25,12 @@ type
   protected
     procedure SetUp; override;
   published
+    { A static array produced by a GETTER -- O.AG, an indexed O.AI[7], a bare AG
+      and Self.AG inside a method -- passed to an open-array parameter, const or
+      by value, with managed elements too.  x86-64 sent the getter down the
+      l-value address walk, which found no field ("var/out field argument has no
+      resolved field info"). }
+    procedure TestRun_StaticArrayGetter_AsOpenArrayArg;
     procedure TestRun_OpenArray_StringLiteral_HighAndForwarding;
     { Inline array literal call site }
     procedure TestRun_OpenArray_Sum;
@@ -1231,6 +1237,50 @@ begin
     'closure 4.00 3.00 3.50' + #10 +
     'procvar 3.00' + #10 +
     'self 2.50 1.50' + #10, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_StaticArrayGetter_AsOpenArrayArg;
+const
+  Src = '''
+    program OA1;
+    type
+      TArr = array[0..3] of Integer;
+      TObj = class
+      private
+        FArr: TArr;
+        function GetArr: TArr;
+        function GetArrI(I: Integer): TArr;
+      public
+        property AG: TArr read GetArr;
+        property AI[I: Integer]: TArr read GetArrI;
+        procedure Run;
+      end;
+    function TObj.GetArr: TArr; begin Result := FArr; Result[0] := 99; end;
+    function TObj.GetArrI(I: Integer): TArr; begin Result := FArr; Result[1] := I; end;
+    procedure ShowOpen(const A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
+    procedure ShowVal(A: array of Integer); var X: Integer; begin for X in A do Write(X, ' '); WriteLn(); end;
+    procedure TObj.Run; begin ShowOpen(AG); ShowOpen(Self.AG); ShowOpen(GetArr()); end;
+    var O: TObj;
+    begin
+      O := TObj.Create(); O.FArr[3] := 3;
+      ShowOpen(O.GetArr());
+      ShowOpen(O.AG);
+      ShowOpen(O.AI[7]);
+      ShowVal(O.AG);
+      O.Run();
+      O.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '99 0 0 3 ' + LineEnding +
+    '99 0 0 3 ' + LineEnding +
+    '0 7 0 3 ' + LineEnding +
+    '99 0 0 3 ' + LineEnding +
+    '99 0 0 3 ' + LineEnding +
+    '99 0 0 3 ' + LineEnding +
+    '99 0 0 3 ' + LineEnding, 0);
 end;
 
 initialization
