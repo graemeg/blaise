@@ -23,6 +23,8 @@ type
   protected
     procedure SetUp; override;
   published
+    { DA := [..] builds a fresh dynamic array: every target and element kind }
+    procedure TestRun_DynArrayLiteral_EveryTargetAndElementKind;
     procedure TestRun_DynArray_AggregateElements_ReleasedWithArray;
     procedure TestRun_DynArray_ManagedElements_ReleasedWithArray;
     procedure TestRun_DynArray_BoundsElementsAddressesRecords;
@@ -1073,6 +1075,177 @@ begin
       WriteLn(N, ' ', RC());
     end.
     ''', '1' + LE + '5 1' + LE, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_DynArrayLiteral_EveryTargetAndElementKind;
+const
+  SrcTargets = '''
+    program P;
+    type
+      TIA = array of Integer;
+      TDA = array of Double;
+      TObj = class
+        N: Integer;
+        constructor Create(AN: Integer);
+      end;
+      TRec = record
+        A: Integer;
+        S: string;
+      end;
+      THolder = class
+        Items: TIA;
+      end;
+    constructor TObj.Create(AN: Integer);
+    begin
+      N := AN;
+    end;
+    function MkS(I: Integer): string;
+    begin
+      Result := 'm' + IntToStr(I);
+    end;
+    function SumD(D: TIA): Integer;
+    var I: Integer;
+    begin
+      Result := 0;
+      for I := 0 to High(D) do Result := Result + D[I];
+    end;
+    function Make: TIA;
+    begin
+      Result := [7, 8, 9];
+    end;
+    var
+      C: array of Integer;
+      E: TIA;
+      D: TDA;
+      S: array of string;
+      X: string;
+      M: array of TIA;
+      B: array of Byte;
+      H: THolder;
+      Os: array of TObj;
+      R: TRec;
+      Rs: array of TRec;
+    begin
+      C := [1, 2];
+      WriteLn(Length(C), ' ', C[0], ' ', C[1]);
+      C := [];
+      WriteLn(Length(C));
+      D := [1.5, 2];
+      WriteLn(Trunc(D[0] * 10), ' ', Trunc(D[1] * 10));
+      X := 'x';
+      S := ['a', X, MkS(3)];
+      WriteLn(S[0], S[1], S[2]);
+      M := [[1, 2], [3]];
+      WriteLn(Length(M), Length(M[0]), Length(M[1]), M[1][0]);
+      B := [1, 255];
+      WriteLn(B[0] + B[1]);
+      H := THolder.Create();
+      H.Items := [4, 5];
+      WriteLn(H.Items[1]);
+      Os := [TObj.Create(1), TObj.Create(2)];
+      WriteLn(Os[1].N);
+      R.A := 1;
+      R.S := 'r' + X;
+      Rs := [R, R];
+      WriteLn(Rs[1].S, Rs[0].A);
+      WriteLn(SumD([1, 2, 3]));
+      E := Make();
+      WriteLn(E[2]);
+    end.
+    ''';
+  SrcElements = '''
+    program P;
+    type
+      IThing = interface
+        function Id: Integer;
+      end;
+      TThing = class(TObject, IThing)
+        FId: Integer;
+        constructor Create(AId: Integer);
+        function Id: Integer;
+      end;
+      TIA = array of Integer;
+      TRec = record
+        A: Integer;
+        S: string;
+      end;
+      TProc = procedure of object;
+      TRunner = class
+        N: Integer;
+        procedure Run;
+      end;
+    constructor TThing.Create(AId: Integer);
+    begin
+      FId := AId;
+    end;
+    function TThing.Id: Integer;
+    begin
+      Result := FId;
+    end;
+    procedure TRunner.Run;
+    begin
+      WriteLn('run ', N);
+    end;
+    function MkRec(I: Integer): TRec;
+    begin
+      Result.A := I;
+      Result.S := 's' + IntToStr(I);
+    end;
+    function Make(N: Integer): TIA;
+    begin
+      Result := [N, N + 1];
+    end;
+    var
+      Ints: array of IThing;
+      T: IThing;
+      Rs: array of TRec;
+      M: array of TIA;
+      Fs: array of Single;
+      Ps: array of TProc;
+      R: TRunner;
+      S: array of string;
+      I: Integer;
+    begin
+      T := TThing.Create(5);
+      Ints := [T, TThing.Create(6)];
+      WriteLn(Ints[0].Id(), Ints[1].Id());
+      Rs := [MkRec(1), MkRec(2)];
+      WriteLn(Rs[1].S, Rs[0].A);
+      M := [Make(1), Make(10), []];
+      WriteLn(M[1][1], ' ', Length(M[2]));
+      Fs := [0.5, 2];
+      WriteLn(Trunc(Fs[0] * 10 + Fs[1]));
+      R := TRunner.Create();
+      R.N := 3;
+      Ps := [@R.Run];
+      Ps[0]();
+      for I := 1 to 3 do
+        S := ['a' + IntToStr(I), 'b'];
+      WriteLn(S[0], S[1]);
+      S := [S[1], S[0]];
+      WriteLn(S[0], S[1]);
+    end.
+    ''';
+var
+  RunOut: string;
+  Code: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { targets: var, empty, Result, field, argument; elements: Integer, Double
+    from an integer, borrowed / owned strings, nested literals, Byte,
+    objects, records (BUG-20261014-dynarray-literal-assignment) }
+  AssertRunsOnAll(SrcTargets,
+    '2 1 2' + LE + '0' + LE + '15 20' + LE + 'axm3' + LE + '2213' + LE +
+    '256' + LE + '5' + LE + '2' + LE + 'rx1' + LE + '6' + LE + '9' + LE, 0);
+  { interfaces, record calls, owned nested arrays, Single, method pointers,
+    reassignment over a live array -- and nothing leaks }
+  AssertRunsOnAll(SrcElements,
+    '56' + LE + 's21' + LE + '11 0' + LE + '7' + LE + 'run 3' + LE +
+    'a3b' + LE + 'ba3' + LE, 0);
+  AssertTrue('native compile+run (--debug)',
+    CompileAndRunWithRTLDebugOn(beNative, SrcElements, RunOut, Code, True));
+  AssertEquals('native exit 0 (output: ' + RunOut + ')', 0, Code);
+  AssertTrue('native no leak report, got: ' + RunOut, Pos('leak', RunOut) < 0);
 end;
 
 initialization

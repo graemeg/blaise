@@ -477,6 +477,10 @@ type
     procedure EmitTryFinally(AStmt: TTryFinallyStmt);
     procedure EmitTryExcept(AStmt: TTryExceptStmt);
     procedure EmitStaticElemAssign(AStmt: TStaticSubscriptAssign);
+    { Store AValue into the element whose address is parked on the stack
+      top, dropping the park (see the body for the ARC discipline). }
+    procedure EmitElemStoreStacked(AElem: TTypeDesc; AValue: TASTExpr;
+      ANode: TASTNode);
     procedure EmitRaise(AStmt: TRaiseStmt);
     procedure EmitRepeat(AStmt: TRepeatStmt);
     procedure EmitCase(AStmt: TCaseStmt);
@@ -604,6 +608,8 @@ type
       runtime.arc's _MethodAddress walks. }
     procedure EmitMethodsTable(ACD: TClassTypeDef; const ACSym: string;
       out AMethodsRef: string);
+    { x0 := a fresh dynamic array holding the literal's elements (+1). }
+    procedure EmitDynArrayLiteral(AExpr: TArrayLiteralExpr);
     procedure EmitSmallSetLiteral(AExpr: TArrayLiteralExpr);
     procedure EmitJumboSetOp(ABE: TBinaryExpr);
     procedure EmitJumboSetLiteral(AExpr: TArrayLiteralExpr);
@@ -6920,6 +6926,12 @@ begin
     Exit;
   end;
   if (AExpr is TArrayLiteralExpr) and (AExpr.ResolvedType <> nil) and
+     (AExpr.ResolvedType.Kind = tyDynArray) then
+  begin
+    EmitDynArrayLiteral(TArrayLiteralExpr(AExpr));
+    Exit;
+  end;
+  if (AExpr is TArrayLiteralExpr) and (AExpr.ResolvedType <> nil) and
      (AExpr.ResolvedType.Kind = tySet) then
   begin
     if TSetTypeDesc(AExpr.ResolvedType).IsJumbo() then
@@ -10067,10 +10079,205 @@ begin
   Self.Emit(EndL + ':');
 end;
 
-procedure TArm64Backend.EmitStaticElemAssign(AStmt: TStaticSubscriptAssign);
+{ Store AValue into the element whose address is parked on the stack top,
+  and drop the park: retain a borrowed managed value (an owned one moves
+  in), release the element's previous value, copy an aggregate.  Shared by
+  the subscript write and the dynamic-array literal, whose fresh zeroed
+  elements make the release a no-op. }
+procedure TArm64Backend.EmitElemStoreStacked(AElem: TTypeDesc; AValue: TASTExpr;
+  ANode: TASTNode);
 var
   Elem: TTypeDesc;
   NL: Integer;
+begin
+  Elem := AElem;
+  if Elem.Kind = tyInterface then
+  begin
+    { the element IS an (obj, itab) pair: the shared pair store retains the
+      new obj, releases the old one and writes both halves }
+    EmitIntfStoreStacked(0, AValue, Elem);
+    Exit;
+  end;
+  if Elem.IsString() or (Elem.Kind in [tyClass, tyDynArray]) then
+  begin
+    { a dyn-array element (M[I] := D, a ragged array) co-owns its block like
+      a string or a class element }
+    Self.EmitExprToX0(AValue);
+    if not ArcExprOwnsRef(AValue) then
+    begin
+      EmitPushX0();
+      if Elem.IsString() then
+        EmitCallSym('_StringAddRef')
+      else if Elem.Kind = tyDynArray then
+        EmitCallSym('_DynArrayAddRef')
+      else
+        EmitCallSym('_ClassAddRef');
+      EmitPopTo('x0');
+    end;
+    EmitPushX0();                              { [addr][val] }
+    Self.Emit(#9'ldr x9, [sp, #16]');
+    Self.Emit(#9'ldr x0, [x9]');
+    if Elem.IsString() then
+      EmitCallSym('_StringRelease')
+    else if Elem.Kind = tyDynArray then
+      EmitCallSym('_DynArrayRelease')
+    else
+      EmitCallSym('_ClassRelease');
+    Self.Emit(#9'ldr x9, [sp, #16]');
+    EmitPopTo('x0');
+    Self.Emit(#9'str x0, [x9]');
+    Self.Emit(#9'add sp, sp, #16');
+    Exit;
+  end;
+  if IsJumboSetType(Elem) then
+  begin
+    { a jumbo-set element: copy the source bitmap (its value is its address)
+      into the element.  A literal source leaves its own buffer below sp, so
+      the parked element address is read from above it, and both go. }
+    NL := JumboSetLiteralBytes(AValue);
+    Self.EmitExprToX0(AValue);         { source bitmap address }
+    Self.Emit(#9'mov x1, x0');
+    if NL = 0 then
+      Self.Emit(#9'ldr x0, [sp]')
+    else
+      Self.Emit(Format(#9'ldr x0, [sp, #%d]', [NL]));
+    EmitIntLiteral('x2', Elem.RawSize());
+    EmitCallSym('memcpy');
+    EmitAddSubImm('add', 'sp', 'sp', NL + 16);
+    Exit;
+  end;
+  if IsMethodPtrType(Elem) then
+  begin
+    { a method pointer / closure element: 16 bytes, Code at +0 and Data /
+      Env at +8.  A 'reference to' element co-owns its Env (the new one is
+      retained by EmitFatPairToX0X1, the old one released here). }
+    EmitFatPairToX0X1(AValue, ArcTypeIsRefClosure(Elem));
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [elemaddr][pair] }
+    if ArcTypeIsRefClosure(Elem) then
+    begin
+      Self.Emit(#9'ldr x9, [sp, #16]');
+      Self.Emit(#9'ldr x0, [x9, #8]');
+      EmitCallSym('_ClassRelease');
+    end;
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+    Self.Emit(#9'ldr x9, [sp], #16');
+    Self.Emit(#9'stp x0, x1, [x9]');
+    Exit;
+  end;
+  if Elem.Kind = tyDouble then
+  begin
+    Self.EmitExprToD0OrConvert(AValue);
+    Self.Emit(#9'fmov x0, d0');
+  end
+  else if Elem.Kind = tySingle then
+  begin
+    Self.EmitExprToD0OrConvert(AValue);
+    Self.Emit(#9'fcvt s0, d0');
+    Self.Emit(#9'ldr x9, [sp], #16');
+    Self.Emit(#9'str s0, [x9]');
+    Exit;
+  end
+  else if Elem.Kind = tyRecord then
+  begin
+    { record element: memcpy from the source record's address — managed
+      fields follow the retain-source-then-release-dest discipline.
+      A record-returning CALL source has no lvalue: materialise it into the
+      __rret scratch first (its +1 field refs transfer), release the dest
+      element's old managed refs, then memcpy __rret -> element (no source
+      retain — the transfer is exact).  Mirrors the field-store leg. }
+    if IsRecordCallArg(AValue) then
+    begin
+      EmitRecCallToRret(AValue);   { x0 = result addr; +1 transfers }
+      Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+      Self.Emit(#9'mov x19, x0');           { the result, across the walk }
+      Self.Emit(#9'ldr x22, [sp, #16]');    { the parked element address }
+      if not RecretManagedClean(TRecordTypeDesc(Elem)) then
+        Self.EmitRecordFieldReleases(TRecordTypeDesc(Elem), 'x22');
+      Self.Emit(#9'mov x0, x22');
+      Self.Emit(#9'mov x1, x19');
+      EmitIntLiteral('x2', Elem.RawSize());
+      EmitCallSym('memcpy');
+      Self.Emit(#9'ldp x19, x22, [sp], #16');
+      Self.Emit(#9'add sp, sp, #16');        { drop the element address }
+      Exit;
+    end;
+    if not RecretManagedClean(TRecordTypeDesc(Elem)) then
+    begin
+      Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+      EmitRecAddrToX0(AValue);
+      Self.Emit(#9'mov x19, x0');
+      Self.Emit(#9'ldr x22, [sp, #16]');   { the parked element address }
+      Self.EmitRecordFieldRetains(TRecordTypeDesc(Elem), 'x19');
+      { copy site: no-zero release (BUG-20260720-managed-record-self-assign) }
+      Self.EmitRecordFieldReleases(TRecordTypeDesc(Elem), 'x22', False);
+      Self.Emit(#9'mov x0, x22');
+      Self.Emit(#9'mov x1, x19');
+      EmitIntLiteral('x2', Elem.RawSize());
+      EmitCallSym('memcpy');
+      Self.Emit(#9'ldp x19, x22, [sp], #16');
+      Self.Emit(#9'add sp, sp, #16');      { drop the element address }
+      Exit;
+    end;
+    EmitRecAddrToX0(AValue);
+    Self.Emit(#9'mov x1, x0');
+    Self.Emit(#9'ldr x0, [sp], #16');      { the parked element address }
+    EmitIntLiteral('x2', Elem.RawSize());
+    EmitCallSym('memcpy');
+    Exit;
+  end
+  else if IsIntFam(Elem) or
+          (Elem.Kind in [tyBoolean, tyPointer, tyPChar]) or
+          IsPlainProcType(Elem) or
+          ((Elem.Kind = tySet) and not IsJumboSetType(Elem)) then
+  begin
+    { a 1-byte element is a byte store: Chr(N) must stay a raw ordinal.  A
+      small set is its bitmask in one register (a narrower source set is
+      zero-extended by its load), stored at the element's width. }
+    if Elem.RawSize() = 1 then
+      EmitByteRhsToX0(AValue)
+    else
+      Self.EmitExprToX0(AValue);
+  end
+  else if Elem.Kind = tyStaticArray then
+  begin
+    { an element that is itself a static array (AA[I] := L, DA[I] := L): copy
+      its bytes from the source's address.  Managed elements follow the
+      retain-source-then-release-dest discipline (no zeroing, so a
+      self-assign is exact); the call result's scratch keeps its own +1,
+      dropped at the statement end. }
+    Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+    EmitRecAddrToX0(AValue);
+    Self.Emit(#9'mov x19, x0');
+    Self.Emit(#9'ldr x22, [sp, #16]');   { the parked element address }
+    if AggHasManaged(Elem) then
+    begin
+      Self.EmitManagedAddRefAt(Elem, 'x19');
+      Self.EmitManagedReleaseAt(Elem, 'x22', False);
+    end;
+    Self.Emit(#9'mov x0, x22');
+    Self.Emit(#9'mov x1, x19');
+    EmitIntLiteral('x2', Elem.RawSize());
+    EmitCallSym('memcpy');
+    Self.Emit(#9'ldp x19, x22, [sp], #16');
+    Self.Emit(#9'add sp, sp, #16');      { drop the element address }
+    Exit;
+  end
+  else
+    NotYet('array element of this type', ANode);
+  Self.Emit(#9'ldr x9, [sp], #16');
+  case Elem.RawSize() of
+    1: Self.Emit(#9'strb w0, [x9]');
+    2: Self.Emit(#9'strh w0, [x9]');   { Word / SmallInt elements }
+    4: Self.Emit(#9'str w0, [x9]');
+    8: Self.Emit(#9'str x0, [x9]');
+  else
+    NotYet('array element of this width', ANode);
+  end;
+end;
+
+procedure TArm64Backend.EmitStaticElemAssign(AStmt: TStaticSubscriptAssign);
+var
+  Elem: TTypeDesc;
 begin
   if AStmt.PropWriteInfo <> nil then
   begin
@@ -10260,188 +10467,7 @@ begin
   Self.Emit(#9'mul x1, x1, x2');
   Self.Emit(#9'add x0, x0, x1');
   EmitPushX0();                                { [elemaddr] }
-  if Elem.Kind = tyInterface then
-  begin
-    { the element IS an (obj, itab) pair: the shared pair store retains the
-      new obj, releases the old one and writes both halves }
-    EmitIntfStoreStacked(0, AStmt.ValueExpr, Elem);
-    Exit;
-  end;
-  if Elem.IsString() or (Elem.Kind in [tyClass, tyDynArray]) then
-  begin
-    { a dyn-array element (M[I] := D, a ragged array) co-owns its block like
-      a string or a class element }
-    Self.EmitExprToX0(AStmt.ValueExpr);
-    if not ArcExprOwnsRef(AStmt.ValueExpr) then
-    begin
-      EmitPushX0();
-      if Elem.IsString() then
-        EmitCallSym('_StringAddRef')
-      else if Elem.Kind = tyDynArray then
-        EmitCallSym('_DynArrayAddRef')
-      else
-        EmitCallSym('_ClassAddRef');
-      EmitPopTo('x0');
-    end;
-    EmitPushX0();                              { [addr][val] }
-    Self.Emit(#9'ldr x9, [sp, #16]');
-    Self.Emit(#9'ldr x0, [x9]');
-    if Elem.IsString() then
-      EmitCallSym('_StringRelease')
-    else if Elem.Kind = tyDynArray then
-      EmitCallSym('_DynArrayRelease')
-    else
-      EmitCallSym('_ClassRelease');
-    Self.Emit(#9'ldr x9, [sp, #16]');
-    EmitPopTo('x0');
-    Self.Emit(#9'str x0, [x9]');
-    Self.Emit(#9'add sp, sp, #16');
-    Exit;
-  end;
-  if IsJumboSetType(Elem) then
-  begin
-    { a jumbo-set element: copy the source bitmap (its value is its address)
-      into the element.  A literal source leaves its own buffer below sp, so
-      the parked element address is read from above it, and both go. }
-    NL := JumboSetLiteralBytes(AStmt.ValueExpr);
-    Self.EmitExprToX0(AStmt.ValueExpr);         { source bitmap address }
-    Self.Emit(#9'mov x1, x0');
-    if NL = 0 then
-      Self.Emit(#9'ldr x0, [sp]')
-    else
-      Self.Emit(Format(#9'ldr x0, [sp, #%d]', [NL]));
-    EmitIntLiteral('x2', Elem.RawSize());
-    EmitCallSym('memcpy');
-    EmitAddSubImm('add', 'sp', 'sp', NL + 16);
-    Exit;
-  end;
-  if IsMethodPtrType(Elem) then
-  begin
-    { a method pointer / closure element: 16 bytes, Code at +0 and Data /
-      Env at +8.  A 'reference to' element co-owns its Env (the new one is
-      retained by EmitFatPairToX0X1, the old one released here). }
-    EmitFatPairToX0X1(AStmt.ValueExpr, ArcTypeIsRefClosure(Elem));
-    Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [elemaddr][pair] }
-    if ArcTypeIsRefClosure(Elem) then
-    begin
-      Self.Emit(#9'ldr x9, [sp, #16]');
-      Self.Emit(#9'ldr x0, [x9, #8]');
-      EmitCallSym('_ClassRelease');
-    end;
-    Self.Emit(#9'ldp x0, x1, [sp], #16');
-    Self.Emit(#9'ldr x9, [sp], #16');
-    Self.Emit(#9'stp x0, x1, [x9]');
-    Exit;
-  end;
-  if Elem.Kind = tyDouble then
-  begin
-    Self.EmitExprToD0OrConvert(AStmt.ValueExpr);
-    Self.Emit(#9'fmov x0, d0');
-  end
-  else if Elem.Kind = tySingle then
-  begin
-    Self.EmitExprToD0OrConvert(AStmt.ValueExpr);
-    Self.Emit(#9'fcvt s0, d0');
-    Self.Emit(#9'ldr x9, [sp], #16');
-    Self.Emit(#9'str s0, [x9]');
-    Exit;
-  end
-  else if Elem.Kind = tyRecord then
-  begin
-    { record element: memcpy from the source record's address — managed
-      fields follow the retain-source-then-release-dest discipline.
-      A record-returning CALL source has no lvalue: materialise it into the
-      __rret scratch first (its +1 field refs transfer), release the dest
-      element's old managed refs, then memcpy __rret -> element (no source
-      retain — the transfer is exact).  Mirrors the field-store leg. }
-    if IsRecordCallArg(AStmt.ValueExpr) then
-    begin
-      EmitRecCallToRret(AStmt.ValueExpr);   { x0 = result addr; +1 transfers }
-      Self.Emit(#9'stp x19, x22, [sp, #-16]!');
-      Self.Emit(#9'mov x19, x0');           { the result, across the walk }
-      Self.Emit(#9'ldr x22, [sp, #16]');    { the parked element address }
-      if not RecretManagedClean(TRecordTypeDesc(Elem)) then
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(Elem), 'x22');
-      Self.Emit(#9'mov x0, x22');
-      Self.Emit(#9'mov x1, x19');
-      EmitIntLiteral('x2', Elem.RawSize());
-      EmitCallSym('memcpy');
-      Self.Emit(#9'ldp x19, x22, [sp], #16');
-      Self.Emit(#9'add sp, sp, #16');        { drop the element address }
-      Exit;
-    end;
-    if not RecretManagedClean(TRecordTypeDesc(Elem)) then
-    begin
-      Self.Emit(#9'stp x19, x22, [sp, #-16]!');
-      EmitRecAddrToX0(AStmt.ValueExpr);
-      Self.Emit(#9'mov x19, x0');
-      Self.Emit(#9'ldr x22, [sp, #16]');   { the parked element address }
-      Self.EmitRecordFieldRetains(TRecordTypeDesc(Elem), 'x19');
-      { copy site: no-zero release (BUG-20260720-managed-record-self-assign) }
-      Self.EmitRecordFieldReleases(TRecordTypeDesc(Elem), 'x22', False);
-      Self.Emit(#9'mov x0, x22');
-      Self.Emit(#9'mov x1, x19');
-      EmitIntLiteral('x2', Elem.RawSize());
-      EmitCallSym('memcpy');
-      Self.Emit(#9'ldp x19, x22, [sp], #16');
-      Self.Emit(#9'add sp, sp, #16');      { drop the element address }
-      Exit;
-    end;
-    EmitRecAddrToX0(AStmt.ValueExpr);
-    Self.Emit(#9'mov x1, x0');
-    Self.Emit(#9'ldr x0, [sp], #16');      { the parked element address }
-    EmitIntLiteral('x2', Elem.RawSize());
-    EmitCallSym('memcpy');
-    Exit;
-  end
-  else if IsIntFam(Elem) or
-          (Elem.Kind in [tyBoolean, tyPointer, tyPChar]) or
-          IsPlainProcType(Elem) or
-          ((Elem.Kind = tySet) and not IsJumboSetType(Elem)) then
-  begin
-    { a 1-byte element is a byte store: Chr(N) must stay a raw ordinal.  A
-      small set is its bitmask in one register (a narrower source set is
-      zero-extended by its load), stored at the element's width. }
-    if Elem.RawSize() = 1 then
-      EmitByteRhsToX0(AStmt.ValueExpr)
-    else
-      Self.EmitExprToX0(AStmt.ValueExpr);
-  end
-  else if Elem.Kind = tyStaticArray then
-  begin
-    { an element that is itself a static array (AA[I] := L, DA[I] := L): copy
-      its bytes from the source's address.  Managed elements follow the
-      retain-source-then-release-dest discipline (no zeroing, so a
-      self-assign is exact); the call result's scratch keeps its own +1,
-      dropped at the statement end. }
-    Self.Emit(#9'stp x19, x22, [sp, #-16]!');
-    EmitRecAddrToX0(AStmt.ValueExpr);
-    Self.Emit(#9'mov x19, x0');
-    Self.Emit(#9'ldr x22, [sp, #16]');   { the parked element address }
-    if AggHasManaged(Elem) then
-    begin
-      Self.EmitManagedAddRefAt(Elem, 'x19');
-      Self.EmitManagedReleaseAt(Elem, 'x22', False);
-    end;
-    Self.Emit(#9'mov x0, x22');
-    Self.Emit(#9'mov x1, x19');
-    EmitIntLiteral('x2', Elem.RawSize());
-    EmitCallSym('memcpy');
-    Self.Emit(#9'ldp x19, x22, [sp], #16');
-    Self.Emit(#9'add sp, sp, #16');      { drop the element address }
-    Exit;
-  end
-  else
-    NotYet('array element of this type', AStmt);
-  Self.Emit(#9'ldr x9, [sp], #16');
-  case Elem.RawSize() of
-    1: Self.Emit(#9'strb w0, [x9]');
-    2: Self.Emit(#9'strh w0, [x9]');   { Word / SmallInt elements }
-    4: Self.Emit(#9'str w0, [x9]');
-    8: Self.Emit(#9'str x0, [x9]');
-  else
-    NotYet('array element of this width', AStmt);
-  end;
+  EmitElemStoreStacked(Elem, AStmt.ValueExpr, AStmt);
 end;
 
 procedure TArm64Backend.EmitRaise(AStmt: TRaiseStmt);
@@ -12261,6 +12287,35 @@ begin
     FGlobalInits.Add(ASym, #9'.double ' + AVD.InitConst.StrVal)
   else
     FGlobalInits.Add(ASym, Format(#9'.quad %d', [AVD.InitConst.IntVal]));
+end;
+
+procedure TArm64Backend.EmitDynArrayLiteral(AExpr: TArrayLiteralExpr);
+var
+  Elem: TTypeDesc;
+  I:    Integer;
+begin
+  { x0 := a fresh array (refcount 1) of the elements.  SetLength from nil
+    allocates them zeroed, so each element store sees an empty slot: a
+    borrowed managed value is retained, an owned one moves in. }
+  if AExpr.Elements.Count = 0 then
+  begin
+    Self.Emit(#9'mov x0, xzr');
+    Exit;
+  end;
+  Elem := TDynArrayTypeDesc(AExpr.ResolvedType).ElementType;
+  Self.Emit(#9'mov x0, xzr');
+  EmitIntLiteral('x1', AExpr.Elements.Count);
+  EmitDynSetLengthCall(Elem);
+  EmitPushX0();                                  { [data] }
+  for I := 0 to AExpr.Elements.Count - 1 do
+  begin
+    Self.Emit(#9'ldr x0, [sp]');
+    if I > 0 then
+      EmitAddSubImm('add', 'x0', 'x0', I * Elem.RawSize());
+    EmitPushX0();                                { [data][elemaddr] }
+    EmitElemStoreStacked(Elem, TASTExpr(AExpr.Elements.Items[I]), AExpr);
+  end;
+  EmitPopTo('x0');
 end;
 
 procedure TArm64Backend.EmitSmallSetLiteral(AExpr: TArrayLiteralExpr);

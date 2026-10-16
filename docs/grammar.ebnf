@@ -1060,8 +1060,9 @@ WeakCaptureList
 (* Set literals use the same bracket notation as array literals.
    The semantic pass distinguishes them by assignment-target type context:
    when the LHS is a set type, LBRACKET ExprList RBRACKET is a set literal;
-   otherwise it is an array literal.  An empty LBRACKET RBRACKET is valid
-   only as a set literal (the empty set).
+   otherwise it is an array literal.  An empty LBRACKET RBRACKET takes its
+   meaning from the target: the empty set, an empty open array, or an empty
+   (nil) dynamic array.
 
    A set element may be a single value or a range `lo .. hi` (issue #105).
    Both range bounds must be compile-time constants of the set's base type;
@@ -1404,9 +1405,14 @@ ArrayLiteral
     = LBRACKET Expr { COMMA Expr } RBRACKET
     ;
 
-(* ArrayLiteral is a stack-allocated temporary array passed to open-array formals.
- * The element type is inferred from the first element; all elements must match.
- * Empty literals [] are a semantic error (element type cannot be inferred).
+(* ArrayLiteral takes its type from its context.  Passed to an open-array
+ * formal it is a stack-allocated temporary; its element type is inferred from
+ * the first element and all elements must match (integer constants also bind
+ * to any integer element type).  Given a dynamic-array type -- assigned to a
+ * dynamic-array variable, field or Result, passed to a dynamic-array formal,
+ * or nested as an element of one -- it builds a fresh dynamic array, each
+ * element checked against the element type as an assignment would be.
+ * Elsewhere [] has no element type and is a semantic error.
  * The postfix subscript Expr[N] is not available on an ArrayLiteral directly. *)
 
 (* Pointer dereference P^ is a postfix on any Factor result:

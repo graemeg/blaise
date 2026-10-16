@@ -28,6 +28,12 @@ type
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
   published
+    { a dynamic-array literal allocates a fresh array and retains a borrowed
+      managed element (an owned one moves in) }
+    procedure TestCodegen_DynArrayLiteral_FreshArrayRetainsBorrowed;
+    { a bracket literal assigned to a dynamic array takes the target's type;
+      each element is checked against the element type }
+    procedure TestSemantic_DynArrayLiteral_TypedFromTarget;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -376,6 +382,68 @@ const
 begin
   AssertEquals('owned transient released after the element read', '',
     AsmMissing(Src, #9'callq _DynArrayRelease', #9'bl __DynArrayRelease'));
+end;
+
+procedure TDynArrayTests.TestSemantic_DynArrayLiteral_TypedFromTarget;
+const
+  SrcOk = '''
+    program P;
+    type TIA = array of Integer;
+    var C: array of Integer; D: array of Double; M: array of TIA;
+    begin
+      C := [1, 2]; C := []; D := [1.5, 2]; M := [[1], [], [2, 3]];
+    end.
+    ''';
+  SrcElem = '''
+    program P;
+    var C: array of Integer;
+    begin
+      C := [1, 'a'];
+    end.
+    ''';
+  SrcRange = '''
+    program P;
+    var C: array of Integer;
+    begin
+      C := [1..3];
+    end.
+    ''';
+  SrcSub = '''
+    program P;
+    type TSub = 1..5;
+    var C: array of TSub;
+    begin
+      C := [2, 7];
+    end.
+    ''';
+begin
+  { DA := [1, 2] was rejected with "expected 'array of Integer' but got
+    'array of Integer'" -- the literal had an anonymous type of its own
+    (BUG-20261014-dynarray-literal-assignment) }
+  AssertEquals('dyn-array literals accepted', '', SemanticError(SrcOk));
+  AssertTrue('element type checked',
+    Pos('dynamic-array literal element', SemanticError(SrcElem)) >= 0);
+  AssertTrue('a range is a set form',
+    Pos('only allowed in a set literal', SemanticError(SrcRange)) >= 0);
+  AssertTrue('subrange element range-checked',
+    Pos('out of range', SemanticError(SrcSub)) >= 0);
+end;
+
+procedure TDynArrayTests.TestCodegen_DynArrayLiteral_FreshArrayRetainsBorrowed;
+const
+  Src = '''
+    program P;
+    var S: array of string; X: string;
+    begin
+      X := 'x';
+      S := [X];
+    end.
+    ''';
+begin
+  AssertEquals('fresh array', '',
+    AsmMissing(Src, #9'callq _DynArraySetLengthM', #9'bl __DynArraySetLengthM'));
+  AssertEquals('borrowed element retained', '',
+    AsmMissing(Src, #9'callq _StringAddRef', #9'bl __StringAddRef'));
 end;
 
 initialization

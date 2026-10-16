@@ -1133,6 +1133,38 @@ narrowed implicitly.
 An empty literal `[]` passed to an open-array formal takes the formal's
 type and is passed as a zero-length array (`High = -1`).
 
+==== Dynamic-array literals
+
+An array literal given a dynamic-array type builds a fresh dynamic array of
+its elements: `DA := [1, 2]`, as in Delphi (XE7 and later) and FPC.  The
+type comes from the context, exactly as a set literal's does — an
+assignment to a dynamic-array variable, field, class variable or `Result`,
+an argument to a dynamic-array formal, or an element of an enclosing
+dynamic-array literal (`M := [[1, 2], [3]]`).  `DA := []` assigns the empty
+(nil) array.
+
+Each element is checked as an assignment to the element type would be, so
+`[1.5, 2]` is a valid `array of Double` and `[1, 255]` a valid
+`array of Byte`.  Range checking follows the scalar rule too: a subrange or
+enum element type rejects an out-of-range constant, while a plain `Byte` or
+`Word` element, like a `Byte` variable, is not checked.  A `lo..hi` range is
+a set-literal form and is rejected here.
+
+The literal owns its array, like a call returning one: the target takes the
+reference without retaining it.  The elements are stored as the element
+write `DA[I] := V` stores them — a borrowed string, object, interface or
+dynamic array is retained, an owned one (a call result) moves in, and a
+record is copied with its managed fields retained.
+
+As an argument, a dynamic-array literal is a conversion in overload
+resolution, so an open-array overload of the same element type is
+preferred.
+
+Before this, an assignment gave the literal its own anonymous array type,
+which was never compatible with the target's, and the diagnostic printed the
+same type name twice (`expected 'array of Integer' but got 'array of
+Integer'`).
+
 ---
 
 === Calling-Convention Directives (`cdecl`, `stdcall`, …)

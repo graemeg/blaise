@@ -830,6 +830,8 @@ type
       element, and leave the base pointer in %rax.  Returns the number of bytes
       allocated on the stack (caller must addq that amount after the call). }
     function EmitOpenArrayLiteral(ALit: TArrayLiteralExpr): Integer;
+    { %rax := a fresh dynamic array holding the literal's elements (+1). }
+    procedure EmitDynArrayLiteral(ALit: TArrayLiteralExpr);
     function EmitConstArrayLiteral(ALit: TArrayLiteralExpr): Integer;
     { Emit a direct call to a user procedure/function; result (if any) in %eax.
       ADecl is the callee's declaration (needed for var/out param handling);
@@ -12082,6 +12084,13 @@ begin
 
   { P^ — pointer dereference read.  Load the pointer into %rcx, then load
     the pointed-to value into %rax through (%rcx). }
+  { Dynamic-array literal: a fresh array (+1) of the elements }
+  if (AExpr is TArrayLiteralExpr) and
+     (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyDynArray) then
+  begin
+    Self.EmitDynArrayLiteral(TArrayLiteralExpr(AExpr));
+    Exit;
+  end;
   { Set literal [EnumA, EnumC, ...] — compute bitmask at compile time. }
   if (AExpr is TArrayLiteralExpr) and
      (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tySet) then
@@ -20853,6 +20862,93 @@ end;
 { Allocate stack storage for an inline open-array literal, fill elements in
   order, and leave a pointer to element 0 in %rax.  Returns the bytes allocated
   on the stack; caller must addq that after the call to reclaim them. }
+procedure TX86_64Backend.EmitDynArrayLiteral(ALit: TArrayLiteralExpr);
+var
+  Elem: TTypeDesc;
+  V:    TASTExpr;
+  I:    Integer;
+  Dst:  string;
+begin
+  { SetLength from nil allocates the elements zeroed, so each store sees an
+    empty slot and releases nothing: a borrowed managed value is retained,
+    an owned one moves in.  The data pointer lives in callee-saved %rbx
+    across the element evaluations; %r15 carries an aggregate source. }
+  if ALit.Elements.Count = 0 then
+  begin
+    Self.Emit(#9'xorl %eax, %eax');
+    Exit;
+  end;
+  Elem := TDynArrayTypeDesc(ALit.ResolvedType).ElementType;
+  Self.Emit(#9'pushq %rbx');
+  Self.Emit(#9'pushq %r15');
+  Self.Emit(#9'xorl %edi, %edi');
+  Self.Emit(Format(#9'movl $%d, %%esi', [ALit.Elements.Count]));
+  Self.EmitDynSetLengthCall(Elem);
+  Self.Emit(#9'movq %rax, %rbx');
+  for I := 0 to ALit.Elements.Count - 1 do
+  begin
+    V := TASTExpr(ALit.Elements.Items[I]);
+    Dst := Format('%d(%%rbx)', [I * Elem.RawSize()]);
+    if Elem.Kind = tyInterface then
+      Self.EmitInterfaceToFieldSlotsAt(V, '%rbx', I * Elem.RawSize(), Elem)
+    else if (Elem.Kind = tyRecord) and Self.IsNativeRecordCall(V) then
+      { the callee builds its Result in the element; its +1 refs transfer }
+      Self.EmitRecordCallSretAt(V, Dst)
+    else if IsFloatFamily(Elem) then
+    begin
+      Self.EmitExprToXmm0(V);
+      Self.EmitXmm0WidthAdjust(V.ResolvedType, Elem.Kind = tySingle);
+      Self.EmitStoreFloat(Dst, Elem);
+    end
+    else if (Elem.Kind in [tyRecord, tyStaticArray]) or IsJumboSet(Elem) or
+            IsMethodPtrType(Elem) then
+    begin
+      { an aggregate: retain the source's managed contents, then copy }
+      if IsMethodPtrType(Elem) and (V is TNilLiteral) then
+        Continue;                                  { already nil }
+      if IsMethodPtrType(Elem) then
+        Self.EmitFatElemSourceAddr(V)
+      else
+        Self.EmitExprToEax(V);
+      Self.Emit(#9'movq %rax, %r15');
+      if Elem.Kind = tyRecord then
+        Self.EmitRecordFieldRetains(TRecordTypeDesc(Elem), '%r15')
+      else if (Elem.Kind = tyStaticArray) and not NativeExprOwnsRef(V) then
+        Self.EmitManagedAddRefAt(Elem, '%r15')
+      else if ArcTypeIsRefClosure(Elem) then
+        Self.EmitRetainSlotAt(Elem, 8, '%r15');
+      Self.Emit(Format(#9'leaq %s, %%rdi', [Dst]));
+      Self.Emit(#9'movq %r15, %rsi');
+      Self.Emit(Format(#9'movq $%d, %%rdx', [Elem.RawSize()]));
+      Self.Emit(#9'callq memcpy');
+    end
+    else
+    begin
+      if Elem.Kind in [tyByte, tyBoolean] then
+        Self.EmitByteRhsToEax(V)
+      else
+        Self.EmitExprToEax(V);
+      if (Elem.IsString() or (Elem.Kind in [tyClass, tyDynArray])) and
+         not NativeExprOwnsRef(V) then
+      begin
+        Self.Emit(#9'movq %rax, %r15');
+        Self.Emit(#9'movq %rax, %rdi');
+        if Elem.IsString() then
+          Self.Emit(#9'callq _StringAddRef')
+        else if Elem.Kind = tyClass then
+          Self.Emit(#9'callq _ClassAddRef')
+        else
+          Self.Emit(#9'callq _DynArrayAddRef');
+        Self.Emit(#9'movq %r15, %rax');
+      end;
+      Self.EmitStoreVar(Dst, Elem);
+    end;
+  end;
+  Self.Emit(#9'movq %rbx, %rax');
+  Self.Emit(#9'popq %r15');
+  Self.Emit(#9'popq %rbx');
+end;
+
 function TX86_64Backend.EmitOpenArrayLiteral(ALit: TArrayLiteralExpr): Integer;
 var
   OAType:   TOpenArrayTypeDesc;

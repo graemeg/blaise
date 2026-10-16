@@ -620,6 +620,9 @@ begin
     balanced and leaks one buffer per call. }
   if not (AExpr.ResolvedType.Kind in [tyClass, tyDynArray])
      and not AExpr.ResolvedType.IsString() then Exit;
+  { a dynamic-array literal ([1, 2] given a dyn-array type) is a fresh array }
+  if AExpr is TArrayLiteralExpr then
+    Exit(True);
   if AExpr is TIdentExpr then
   begin
     IE := TIdentExpr(AExpr);
