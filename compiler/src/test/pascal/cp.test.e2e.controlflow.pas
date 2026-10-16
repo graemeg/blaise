@@ -22,6 +22,13 @@ type
   protected
     procedure SetUp; override;
   published
+    { for-in over a collection reached through a call -- a record call's field
+      (F(3).A, F(3).D), a getter's (O.R.A), a static-array call, an element
+      with a call in its index (Pool[G()].A) -- runs the call ONCE.  x86-64
+      ran it once per element (twice a pass for a dyn array) and crashed on
+      the managed shapes; arm64 refused the record call bases.  A borrowed
+      array is held for the loop, so the body may resize the original. }
+    procedure TestRun_ForIn_CollectionThroughCall_EvaluatedOnce;
     procedure TestRun_ForIn_AllCollectionKinds;
     procedure TestRun_Case_SelectsBranch;
     procedure TestRun_BreakAndExit;
@@ -788,6 +795,73 @@ begin
     '0 2 ' + LE +
     'item-1 item-2 item-3 ' + LE, 0);
   AssertLeakFreeOnAll(Src, 'item-3');
+end;
+
+procedure TE2EControlFlowTests.TestRun_ForIn_CollectionThroughCall_EvaluatedOnce;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..3] of Integer;
+      TRec = record A: TArr; D: array of Integer; end;
+      TObj = class
+      public
+        Arr: TArr;
+        D: array of string;
+        function GetR: TRec;
+        property R: TRec read GetR;
+      end;
+    var Calls: Integer; Pool: array of TRec; Keep: TObj;
+    function F(N: Integer): TRec;
+    begin
+      Calls := Calls + 1;
+      Result.A[1] := N; SetLength(Result.D, 2); Result.D[1] := N * 10;
+    end;
+    function TObj.GetR: TRec; begin Result := F(7); end;
+    function MkArr: TArr; begin Calls := Calls + 1; Result[3] := 33; end;
+    function G: Integer; begin Calls := Calls + 1; Result := 1; end;
+    function MkObj: TObj;
+    begin
+      Calls := Calls + 1;
+      Result := TObj.Create(); Result.Arr[2] := 22;
+      SetLength(Result.D, 2); Result.D[0] := 'x' + IntToStr(Calls); Result.D[1] := 'y';
+    end;
+    function GetKeep: TObj; begin Calls := Calls + 1; Result := Keep; end;
+    procedure Report(const AWhat: string; ASum: Integer);
+    begin
+      WriteLn(AWhat, ' sum=', ASum, ' calls=', Calls);
+      Calls := 0;
+    end;
+    var O: TObj; X, Sum: Integer; S, Acc: string;
+    begin
+      O := TObj.Create();
+      SetLength(Pool, 2); Pool[1].A[0] := 5;
+      Sum := 0; for X in F(3).A do Sum := Sum + X; Report('F(3).A', Sum);
+      Sum := 0; for X in F(3).D do Sum := Sum + X; Report('F(3).D', Sum);
+      Sum := 0; for X in O.R.A do Sum := Sum + X; Report('O.R.A', Sum);
+      Sum := 0; for X in MkArr() do Sum := Sum + X; Report('MkArr()', Sum);
+      Sum := 0; for X in Pool[G()].A do Sum := Sum + X; Report('Pool[G()].A', Sum);
+      Keep := TObj.Create(); SetLength(Keep.D, 3); Keep.D[0] := 'a'; Keep.D[1] := 'b'; Keep.D[2] := 'c';
+      Acc := '';
+      for S in GetKeep().D do
+      begin
+        SetLength(Keep.D, 0);
+        Acc := Acc + S;
+      end;
+      WriteLn(Acc, ' ', Length(Keep.D)); Report('GetKeep().D', 0);
+      O.Free(); Keep.Free();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'F(3).A sum=3 calls=1' + LineEnding +
+    'F(3).D sum=30 calls=1' + LineEnding +
+    'O.R.A sum=7 calls=1' + LineEnding +
+    'MkArr() sum=33 calls=1' + LineEnding +
+    'Pool[G()].A sum=5 calls=1' + LineEnding +
+    'abc 0' + LineEnding +
+    'GetKeep().D sum=0 calls=1' + LineEnding, 0);
 end;
 
 initialization

@@ -10853,8 +10853,12 @@ begin
             (AStmt.CollExpr is TStringSubscriptExpr) or
             (AStmt.CollExpr is TDerefExpr)) or
        (AStmt.IsDynArrayIter and ArcExprOwnsRef(AStmt.CollExpr)) or
-       (AStmt.IsArrayIter and IsAggCallValue(AStmt.CollExpr)) then
+       (AStmt.IsArrayIter and IsAggCallValue(AStmt.CollExpr)) or
+       (not AStmt.IsOpenArrayIter and AccessPathHasCall(AStmt.CollExpr)) then
     begin
+      { (a field or element reached THROUGH a call -- F(3).A, O.R.D with a
+        getter, Arr[G()] -- is evaluated once too: re-deriving it every pass
+        ran the call once per element) }
       Tmp := '__fiarr_' + IntToStr(FJArgN);
       FJArgN := FJArgN + 1;
       if not FFrame.ContainsKey(Tmp) then
@@ -10865,6 +10869,17 @@ begin
       begin
         Self.EmitExprToX0(AStmt.CollExpr);
         CollOwned := ArcExprOwnsRef(AStmt.CollExpr);
+        if not CollOwned then
+        begin
+          { a BORROWED dyn array held across the loop: take a reference,
+            so the body resizing or dropping the original cannot free the
+            elements still being walked (Delphi holds the array the same
+            way); released after the loop like an owned one }
+          EmitPushX0();
+          EmitCallSym('_DynArrayAddRef');
+          EmitPopTo('x0');
+          CollOwned := True;
+        end;
       end;
       EmitStoreSlot('x0', Tmp);
     end;

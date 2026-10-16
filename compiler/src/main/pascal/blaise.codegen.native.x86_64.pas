@@ -15574,6 +15574,18 @@ begin
     LNext := Self.NewLabel('finext');
     LEnd  := Self.NewLabel('fiend');
 
+    { a collection that runs a CALL to produce it -- MkArr(), F(3).A,
+      O.R.A through a getter, Arr[G()].A -- is evaluated ONCE: its storage
+      address goes into a scratch.  Re-deriving it in the body (as for a
+      plain l-value) ran the call once per element. }
+    CollTmp := '';
+    if AccessPathHasCall(AStmt.CollExpr) then
+    begin
+      CollTmp := Self.NewScratchOperand(8);
+      Self.EmitExprToEax(AStmt.CollExpr);
+      Self.Emit(Format(#9'movq %%rax, %s', [CollTmp]));
+    end;
+
     { Initialise index to ArrayLow }
     Self.Emit(Format(#9'movl $%d, %%eax', [AStmt.ArrayLow]));
     Self.Emit(Format(#9'movl %%eax, %s', [IdxOp]));
@@ -15591,7 +15603,10 @@ begin
     FContinueExcDepths.Push(FExcDepth);
 
     { Compute element address: base + (idx - ArrayLow) * ElemSize }
-    Self.EmitExprToEax(AStmt.CollExpr);
+    if CollTmp <> '' then
+      Self.Emit(Format(#9'movq %s, %%rax', [CollTmp]))
+    else
+      Self.EmitExprToEax(AStmt.CollExpr);
     Self.Emit(#9'movq %rax, %rcx');
     Self.Emit(Format(#9'movslq %s, %%rax', [IdxOp]));
     if AStmt.ArrayLow <> 0 then
@@ -15663,10 +15678,24 @@ begin
       scratch and released after the loop: it was re-evaluated twice every
       pass (repeating its side effects) and never released }
     CollTmp := '';
-    if AStmt.IsDynArrayIter and NativeExprOwnsRef(AStmt.CollExpr) then
+    if AStmt.IsDynArrayIter and
+       (NativeExprOwnsRef(AStmt.CollExpr) or
+        AccessPathHasCall(AStmt.CollExpr)) then
     begin
+      { (so is a BORROWED array reached through a call -- F(3).D, O.R.D
+        through a getter -- which ran the call twice per pass.  It is held
+        with a reference of its own for the loop, so the body resizing or
+        dropping the original cannot free the elements being walked, as
+        Delphi holds it; released after the loop like an owned one) }
       CollTmp := Self.NewScratchOperand(8);
       Self.EmitExprToEax(AStmt.CollExpr);
+      if not NativeExprOwnsRef(AStmt.CollExpr) then
+      begin
+        Self.Emit(#9'pushq %rax');
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _DynArrayAddRef');
+        Self.Emit(#9'popq %rax');
+      end;
       Self.Emit(Format(#9'movq %%rax, %s', [CollTmp]));
     end;
     Self.Emit(Format(#9'movl $0, %s', [IdxOp]));

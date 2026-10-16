@@ -24,6 +24,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { for-in over collections reached through calls releases every result and
+      the reference it holds on a borrowed array }
+    procedure TestDebug_ForInThroughCall_NoLeak;
     { record call results (string and dyn-array fields) as address bases in every
       call form release what they own: a getter's result (O.R.A[1]) leaked a
       string on arm64 }
@@ -4481,6 +4484,79 @@ begin
     '11 12 100' + LineEnding +
     '41 400 9 53' + LineEnding +
     '1008 9 80' + LineEnding, Output);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_ForInThroughCall_NoLeak;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..3] of Integer;
+      TRec = record A: TArr; D: array of Integer; end;
+      TObj = class
+      public
+        Arr: TArr;
+        D: array of string;
+        function GetR: TRec;
+        property R: TRec read GetR;
+      end;
+    var Calls: Integer; Pool: array of TRec; Keep: TObj;
+    function F(N: Integer): TRec;
+    begin
+      Calls := Calls + 1;
+      Result.A[1] := N; SetLength(Result.D, 2); Result.D[1] := N * 10;
+    end;
+    function TObj.GetR: TRec; begin Result := F(7); end;
+    function MkArr: TArr; begin Calls := Calls + 1; Result[3] := 33; end;
+    function G: Integer; begin Calls := Calls + 1; Result := 1; end;
+    function MkObj: TObj;
+    begin
+      Calls := Calls + 1;
+      Result := TObj.Create(); Result.Arr[2] := 22;
+      SetLength(Result.D, 2); Result.D[0] := 'x' + IntToStr(Calls); Result.D[1] := 'y';
+    end;
+    function GetKeep: TObj; begin Calls := Calls + 1; Result := Keep; end;
+    procedure Report(const AWhat: string; ASum: Integer);
+    begin
+      WriteLn(AWhat, ' sum=', ASum, ' calls=', Calls);
+      Calls := 0;
+    end;
+    var O: TObj; X, Sum: Integer; S, Acc: string;
+    begin
+      O := TObj.Create();
+      SetLength(Pool, 2); Pool[1].A[0] := 5;
+      Sum := 0; for X in F(3).A do Sum := Sum + X; Report('F(3).A', Sum);
+      Sum := 0; for X in F(3).D do Sum := Sum + X; Report('F(3).D', Sum);
+      Sum := 0; for X in O.R.A do Sum := Sum + X; Report('O.R.A', Sum);
+      Sum := 0; for X in MkArr() do Sum := Sum + X; Report('MkArr()', Sum);
+      Sum := 0; for X in Pool[G()].A do Sum := Sum + X; Report('Pool[G()].A', Sum);
+      Keep := TObj.Create(); SetLength(Keep.D, 3); Keep.D[0] := 'a'; Keep.D[1] := 'b'; Keep.D[2] := 'c';
+      Acc := '';
+      for S in GetKeep().D do
+      begin
+        SetLength(Keep.D, 0);
+        Acc := Acc + S;
+      end;
+      WriteLn(Acc, ' ', Length(Keep.D)); Report('GetKeep().D', 0);
+      O.Free(); Keep.Free();
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compile+run',
+    CompileAndRunWithRTLDebug(Src, Output, ExitCode, True));
+  AssertEquals('exit 0', 0, ExitCode);
+  AssertEquals('stdout',
+    'F(3).A sum=3 calls=1' + LineEnding +
+    'F(3).D sum=30 calls=1' + LineEnding +
+    'O.R.A sum=7 calls=1' + LineEnding +
+    'MkArr() sum=33 calls=1' + LineEnding +
+    'Pool[G()].A sum=5 calls=1' + LineEnding +
+    'abc 0' + LineEnding +
+    'GetKeep().D sum=0 calls=1' + LineEnding, Output);
 end;
 
 initialization

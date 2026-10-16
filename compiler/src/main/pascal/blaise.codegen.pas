@@ -200,6 +200,16 @@ function ArcIsUnownedCtorResult(AExpr: TASTExpr): Boolean;
   buffer's, since the expression has no storage of its own. }
 function IsAggCallValue(AExpr: TASTExpr): Boolean;
 
+{ True when evaluating AExpr may run a CALL anywhere along its access path --
+  the expression itself, a base it is read through (F(3).A, O.R.A where R has
+  a getter, MkObj().Arr), or an index (Arr[G()]).  False only for a pure
+  storage path: identifiers, fields, subscripts with call-free indexes, P^,
+  and literals.  A consumer that re-derives an address on every use (a for-in
+  over an l-value) must evaluate such an expression ONCE instead, or it runs
+  the call again each time.  An unfamiliar node kind counts as a call:
+  evaluating once is always correct. }
+function AccessPathHasCall(AExpr: TASTExpr): Boolean;
+
 { The setter call a property-write statement was lowered to by the semantic
   pass (TAssignment / TFieldAssignment / TStaticSubscriptAssign.SetterCall),
   or nil.  Every backend emits that call in place of the statement. }
@@ -712,6 +722,38 @@ begin
     Result := FA.IsMethodCall or
               ((FA.PropRead <> nil) and (FA.PropRead.ReadMethod <> ''));
   end;
+end;
+
+function AccessPathHasCall(AExpr: TASTExpr): Boolean;
+var
+  FA: TFieldAccessExpr;
+begin
+  if AExpr = nil then
+    Exit(False);
+  if IsAggCallValue(AExpr) or (AExpr is TInheritedCallExpr) then
+    Exit(True);
+  if (AExpr is TIntLiteral) or (AExpr is TFloatLiteral) or
+     (AExpr is TStringLiteral) or (AExpr is TNilLiteral) then
+    Exit(False);
+  if AExpr is TIdentExpr then
+    Exit(False);
+  if AExpr is TFieldAccessExpr then
+  begin
+    FA := TFieldAccessExpr(AExpr);
+    Exit(AccessPathHasCall(FA.Base) or AccessPathHasCall(FA.PropIndexExpr));
+  end;
+  if AExpr is TStringSubscriptExpr then
+    Exit(AccessPathHasCall(TStringSubscriptExpr(AExpr).StrExpr) or
+         AccessPathHasCall(TStringSubscriptExpr(AExpr).IndexExpr));
+  if AExpr is TDerefExpr then
+    Exit(AccessPathHasCall(TDerefExpr(AExpr).Expr));
+  if AExpr is TBinaryExpr then
+    Exit((TBinaryExpr(AExpr).LoweredCall <> nil) or
+         AccessPathHasCall(TBinaryExpr(AExpr).Left) or
+         AccessPathHasCall(TBinaryExpr(AExpr).Right));
+  if AExpr is TNotExpr then
+    Exit(AccessPathHasCall(TNotExpr(AExpr).Expr));
+  Result := True;
 end;
 
 function ArcIsUnownedCtorResult(AExpr: TASTExpr): Boolean;

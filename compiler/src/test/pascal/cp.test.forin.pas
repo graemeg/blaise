@@ -26,6 +26,10 @@ type
       Used to assert the BUG-001 for-in write diagnostics fire (or don't). }
     function AnalyseWarnings(const ASrc: string): string;
   published
+    { a field or element reached THROUGH a call (F(3).A, GetK().D) is evaluated
+      once for the whole loop, a borrowed dyn array held with a reference of its
+      own -- both ISAs re-derived it, and so re-ran the call, every pass }
+    procedure TestNative_ForIn_CollectionThroughCall_CalledOnce;
     { for-in over a field array and over a dyn-array CALL (evaluated once,
       released after the loop -- x86-64 called it twice a pass and never
       released it; arm64 took only a plain identifier) }
@@ -945,6 +949,38 @@ begin
       #9'bl __SetIn'));
   AssertTrue('x86-64 tests jumbo members too',
     Pos(#9'callq _SetIn', GenAsm(Src, TargetX86_64)) >= 0);
+end;
+
+procedure TForInTests.TestNative_ForIn_CollectionThroughCall_CalledOnce;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[0..3] of Integer;
+      TRec = record A: TArr; end;
+      TObj = class D: array of Integer; end;
+    var K: TObj; I: Integer;
+    function F(N: Integer): TRec; begin Result.A[1] := N; end;
+    function GetK: TObj; begin Result := K; end;
+    begin
+      for I in F(3).A do Write(I);
+      for I in GetK().D do Write(I);
+    end.
+    ''';
+var
+  A: string;
+  P: Integer;
+begin
+  A := GenAsm(Src, TargetX86_64);
+  P := Pos(#9'callq F'#10, A);
+  AssertTrue('x86-64 calls F', P >= 0);
+  AssertTrue('x86-64 calls F once', PosEx(#9'callq F'#10, A, P + 1) < 0);
+  A := GenAsm(Src, TargetArm64);
+  P := Pos(#9'bl _F'#10, A);
+  AssertTrue('arm64 calls F', P >= 0);
+  AssertTrue('arm64 calls F once', PosEx(#9'bl _F'#10, A, P + 1) < 0);
+  AssertEquals('a borrowed array is held for the loop', '',
+    AsmMissing(Src, #9'callq _DynArrayAddRef', #9'bl __DynArrayAddRef'));
 end;
 
 initialization
