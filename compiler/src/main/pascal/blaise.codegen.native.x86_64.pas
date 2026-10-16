@@ -11884,6 +11884,18 @@ begin
       Exit;
     end;
 
+    { @Result in a routine returning through the hidden result pointer (a
+      large record): the Result slot holds the CALLER's buffer address, which
+      is the record's address -- as for a var parameter.  Its own slot address
+      was taken, so P^.X := 4 wrote into the frame and the caller read zeros
+      (and the overwrite could crash). }
+    if (AOE.Expr is TIdentExpr) and FSretFunc and
+       SameText(TIdentExpr(AOE.Expr).Name, 'Result') then
+    begin
+      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Result')]));
+      Exit;
+    end;
+
     { @VarParam — the variable's slot holds a pointer to the caller's data;
       load that pointer value (not the slot address). }
     if (AOE.Expr is TIdentExpr) and (TIdentExpr(AOE.Expr).ParamMode <> pmNone) then

@@ -28,6 +28,12 @@ type
   protected
     procedure SetUp; override;
   published
+    { @Result inside a record-returning function or method, written through: for
+      a large record (returned through the hidden result pointer) it is the
+      caller's buffer.  x86-64 took the address of the Result SLOT, which holds
+      that pointer, so the writes landed in the frame -- the caller read zeros
+      and the program crashed. }
+    procedure TestRun_AddrOfResult_InRecordFunction;
     { Record call results passed as arguments, side by side: a managed record from
       a method on Self (hoisted into its own stack buffer) and a register-returned
       one from a plain call -- Resolve(Self.MakeSpec(), Host()).  The hoist leant
@@ -2908,6 +2914,32 @@ begin
   AssertRunsOnAll(Src,
     'linker:2:1' + LineEnding +
     'linker:2:1' + LineEnding, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_AddrOfResult_InRecordFunction;
+const
+  Src = '''
+    program AR;
+    type
+      TBig = record X: Integer; A: array[0..3] of Integer; end;
+      TSmall = record X, Y: Integer; end;
+      TObj = class function MkBig: TBig; function MkSmall: TSmall; end;
+    function MkBig: TBig; var P: ^TBig; begin P := @Result; P^.X := 4; P^.A[2] := 5; end;
+    function MkSmall: TSmall; var P: ^TSmall; begin P := @Result; P^.Y := 6; end;
+    function TObj.MkBig: TBig; var P: ^TBig; begin P := @Result; P^.X := 7; end;
+    function TObj.MkSmall: TSmall; var P: ^TSmall; begin P := @Result; P^.Y := 8; end;
+    var O: TObj;
+    begin
+      WriteLn(MkBig().X, ' ', MkBig().A[2], ' ', MkSmall().Y);
+      O := TObj.Create();
+      WriteLn(O.MkBig().X, ' ', O.MkSmall().Y);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '4 5 6' + LineEnding +
+    '7 8' + LineEnding, 0);
 end;
 
 initialization
