@@ -23,6 +23,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { array-of-T fields of a generic class and record hold managed and plain
+      elements }
+    procedure TestRun_ArrayOfTypeParamFields;
     procedure TestRun_TwoInstances_SelfCallReachesOwnInstance;
     procedure TestRun_GenericForIn_UserEnumerator;
     procedure TestRun_IMap_OneCallSiteBothImplementations;
@@ -1056,6 +1059,46 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '9 3' + LE + 'got 2 9' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_ArrayOfTypeParamFields;
+const
+  Src = '''
+    program P;
+    type
+      TBox<T> = class
+        FItems: array of T;
+        FFix: array[0..1] of T;
+        FNest: array of array of T;
+        procedure Add(const V: T);
+      end;
+      TRB<T> = record
+        D: array of T;
+      end;
+    procedure TBox<T>.Add(const V: T);
+    begin
+      SetLength(FItems, Length(FItems) + 1);
+      FItems[High(FItems)] := V;
+      FFix[1] := V;
+      SetLength(FNest, 1);
+      FNest[0] := FItems
+    end;
+    var
+      B: TBox<string>;
+      R: TRB<Integer>;
+    begin
+      B := TBox<string>.Create();
+      B.Add('x');
+      B.Add('y');
+      WriteLn(Length(B.FItems), B.FItems[1], B.FFix[1], Length(B.FNest[0]));
+      SetLength(R.D, 3);
+      R.D[2] := 7;
+      WriteLn(R.D[2])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2yy2' + LE + '7' + LE, 0);
 end;
 
 initialization

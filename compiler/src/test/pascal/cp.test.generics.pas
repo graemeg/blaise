@@ -26,6 +26,9 @@ type
     function AnalyseUnit(const ASrc: string): TUnit;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { array-typed fields of a generic class take the type argument: dynamic,
+      static and nested }
+    procedure TestSem_ArrayOfTypeParamFields_Substituted;
     { ------------------------------------------------------------------ }
     { Parser — generic type declarations                                   }
     { ------------------------------------------------------------------ }
@@ -1256,6 +1259,39 @@ begin
     GenAsm(SrcExplicit, TargetX86_64), GenAsm(SrcDiamondTwoArgs, TargetX86_64));
   AssertEquals('arm64: diamond asm identical to explicit',
     GenAsm(SrcExplicit, TargetArm64), GenAsm(SrcDiamondTwoArgs, TargetArm64));
+end;
+
+procedure TGenericsTests.TestSem_ArrayOfTypeParamFields_Substituted;
+const
+  Src = '''
+      program P;
+      type
+        TBox<T> = class
+          FItems: array of T;
+          FFix: array[0..1] of T;
+          FNest: array of array of T;
+        end;
+      var B: TBox<string>;
+      begin
+      end.
+      ''';
+var
+  Prog: TProgram;
+  RT:   TRecordTypeDesc;
+begin
+  Prog := Self.AnalyseSrc(Src);
+  try
+    RT := TRecordTypeDesc(Prog.SymbolTable.FindType('TBox<string>'));
+    AssertNotNull('instance', RT);
+    AssertEquals('dynamic', 'array of string',
+      RT.FindField('FItems').TypeDesc.Name);
+    AssertEquals('static', 'array[0..1] of string',
+      RT.FindField('FFix').TypeDesc.Name);
+    AssertEquals('nested', 'array of array of string',
+      RT.FindField('FNest').TypeDesc.Name);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization

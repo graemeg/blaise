@@ -4713,6 +4713,21 @@ begin
   begin
     Exit('^' + Self.SubstTypeParam(StrCopyTail(Result, 1), AParamNames, AArgs));
   end;
+  { Dynamic array: array of T → array of Integer.  Without this a generic
+    class field 'FItems: array of T' kept the parameter name and failed to
+    resolve when the class was instantiated. }
+  if (Length(Result) > 9) and SameText(StrHead(Result, 9), 'array of ') then
+    Exit('array of ' +
+      Self.SubstTypeParam(StrCopyTail(Result, 9), AParamNames, AArgs));
+  { Static array: array[0..1] of T, array[TEnum] of T -- the element type
+    follows the first ' of ' (an index never contains one) }
+  if (Length(Result) > 6) and SameText(StrHead(Result, 6), 'array[') and
+     (StrPos(' of ', Result) > 0) then
+  begin
+    I := StrPos(' of ', Result) + 4;
+    Exit(StrHead(Result, I) +
+      Self.SubstTypeParam(StrCopyTail(Result, I), AParamNames, AArgs));
+  end;
   { Inline procedural type: substitute inside each parameter type and the
     return type, then re-encode.  Before the generic branch below, which
     would read the first '<' of a parameter type as this name's own type
