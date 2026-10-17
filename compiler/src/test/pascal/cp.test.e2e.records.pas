@@ -22,6 +22,10 @@ type
   protected
     procedure SetUp; override;
   published
+    { A.B.R := V for a managed record field R, from a variable, a call, the
+      field itself and an array-element base: every value lands, and each
+      object the record holds is freed exactly once, when it is replaced }
+    procedure TestRun_ChainedManagedRecordFieldStore;
     procedure TestRun_Record_CallResultArgs_AllShapes_LeakFree;
     procedure TestRun_Record_ByValManagedArgs_LeakFree;
     procedure TestRun_Record_Sizes;
@@ -2124,6 +2128,69 @@ begin
     'y3 two-heap 7 3' + LE +
     '400' + LE, 0);
   AssertLeakFreeOnAll(Src, '400');
+end;
+
+procedure TE2ERecordsTests.TestRun_ChainedManagedRecordFieldStore;
+const
+  Src = '''
+    program P;
+    type
+      TK = class
+        Tag: string;
+        destructor Destroy(); override;
+      end;
+      TMR = record S: string; K: TK; end;
+      TObj = class
+        MR: TMR;
+      end;
+      TBox = class
+        O: TObj;
+        procedure Fill(const AV: TMR);
+      end;
+    destructor TK.Destroy();
+    begin
+      WriteLn('gone ', Tag);
+      inherited Destroy()
+    end;
+    procedure TBox.Fill(const AV: TMR);
+    begin
+      O.MR := AV
+    end;
+    function MkMR(const AT: string): TMR;
+    begin
+      Result.S := AT + '!';
+      Result.K := TK.Create();
+      Result.K.Tag := AT
+    end;
+    var
+      B: TBox;
+      X: TMR;
+      Arr: array[0..1] of TBox;
+    begin
+      B := TBox.Create();
+      B.O := TObj.Create();
+      X := MkMR('x');
+      B.O.MR := X;
+      WriteLn(B.O.MR.S);
+      B.O.MR := MkMR('call');
+      WriteLn(B.O.MR.S);
+      B.O.MR := B.O.MR;
+      WriteLn(B.O.MR.S);
+      B.Fill(MkMR('fill'));
+      WriteLn(B.O.MR.S);
+      Arr[1] := B;
+      Arr[1].O.MR := X;
+      WriteLn(B.O.MR.S);
+      X.K := nil;
+      B.O := nil;
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'x!' + LE + 'call!' + LE + 'call!' + LE + 'gone call' + LE + 'fill!' + LE +
+    'gone fill' + LE + 'x!' + LE + 'gone x' + LE + 'end' + LE, 0);
 end;
 
 initialization

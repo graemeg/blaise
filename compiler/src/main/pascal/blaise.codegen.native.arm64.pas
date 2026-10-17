@@ -2014,7 +2014,9 @@ end;
 procedure TArm64Backend.EmitInstanceFieldStoreStacked(AFld: TFieldInfo;
   AValueExpr: TASTExpr);
 var
-  NB: Integer;
+  NB:    Integer;
+  Shape: Integer;
+  Rec:   TRecordTypeDesc;
 begin
   { like EmitInstanceFieldStore, but the instance pointer is on TOP of the
     stack (pushed by the caller); consumed on exit.  Needed for chained
@@ -2058,6 +2060,59 @@ begin
     Self.Emit(#9'mov x0, x22');
     Self.Emit(#9'mov x1, x19');
     EmitIntLiteral('x2', AFld.TypeDesc.RawSize());
+    EmitCallSym('memcpy');
+    Self.Emit(#9'ldp x19, x22, [sp], #16');
+    Self.Emit(#9'add sp, sp, #16');                 { drop the base }
+    Exit;
+  end;
+  if AFld.TypeDesc.Kind = tyRecord then
+  begin
+    { a MANAGED record field (the plain kind is the memcpy above), as
+      EmitInstanceFieldStore's record arm with the base parked on the stack:
+      a record call's fresh value lands in __rret and its +1 field refs
+      transfer; any other value retains its fields first.  Either way the
+      field's old refs are released before the copy. }
+    Rec := TRecordTypeDesc(AFld.TypeDesc);
+    if ((AValueExpr is TFuncCallExpr) and
+        (TFuncCallExpr(AValueExpr).ResolvedDecl <> nil)) or
+       ((AValueExpr is TMethodCallExpr) and
+        (TMethodCallExpr(AValueExpr).ResolvedMethod <> nil) and
+        not TMethodCallExpr(AValueExpr).IsConstructorCall) then
+    begin
+      Shape := RecReturnShape(Rec);
+      if Shape = 0 then
+        EmitRecCallDispatch(AValueExpr, '__rret')
+      else
+      begin
+        EmitRecCallDispatch(AValueExpr, '');
+        EmitSlotAddr('x9', '__rret');
+        EmitRecRegsStore(Shape, Rec.RawSize());
+      end;
+      Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+      Self.Emit(#9'ldr x22, [sp, #16]');            { the parked base }
+      if AFld.Offset <> 0 then
+        EmitAddSubImm('add', 'x22', 'x22', AFld.Offset);
+      if not RecretManagedClean(Rec) then
+        Self.EmitRecordFieldReleases(Rec, 'x22');
+      Self.Emit(#9'mov x0, x22');
+      EmitSlotAddr('x1', '__rret');
+    end
+    else
+    begin
+      Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+      EmitRecAddrToX0(AValueExpr);                  { source address }
+      Self.Emit(#9'mov x19, x0');
+      Self.Emit(#9'ldr x22, [sp, #16]');            { the parked base }
+      if AFld.Offset <> 0 then
+        EmitAddSubImm('add', 'x22', 'x22', AFld.Offset);
+      Self.EmitRecordFieldRetains(Rec, 'x19');
+      { copy site: no-zero release keeps a self-copy exact
+        (BUG-20260720-managed-record-self-assign) }
+      Self.EmitRecordFieldReleases(Rec, 'x22', False);
+      Self.Emit(#9'mov x0, x22');
+      Self.Emit(#9'mov x1, x19');
+    end;
+    EmitIntLiteral('x2', Rec.RawSize());
     EmitCallSym('memcpy');
     Self.Emit(#9'ldp x19, x22, [sp], #16');
     Self.Emit(#9'add sp, sp, #16');                 { drop the base }

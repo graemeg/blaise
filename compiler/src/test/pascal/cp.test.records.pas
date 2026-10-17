@@ -21,6 +21,9 @@ type
     function AnalyseSrc(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { A.B.R := X with a managed record field R: the copy retains the source's
+      managed fields (arm64 had no chained-base arm for a managed record) }
+    procedure TestCodegen_ChainedManagedRecordFieldStore_RetainsSource;
     { ------------------------------------------------------------------ }
     { Lexer — new keywords                                                }
     { ------------------------------------------------------------------ }
@@ -1051,6 +1054,30 @@ begin
     AsmMissing(Src, #9'movq %rax, _pendrel_0(%rip)',
       #9'stp d2, d3, [sp, #-16]!' + #10 + #9'ldur x0, [x29, #-200]' + #10 +
         #9'bl __ClassRelease'));
+end;
+
+procedure TRecordTests.TestCodegen_ChainedManagedRecordFieldStore_RetainsSource;
+const
+  Src = '''
+      program P;
+      type
+        TMR = record S: string; N: Integer; end;
+        TObj = class
+          MR: TMR;
+        end;
+        TBox = class
+          O: TObj;
+        end;
+      procedure Put(B: TBox; const X: TMR);
+      begin
+        B.O.MR := X
+      end;
+      begin
+      end.
+      ''';
+begin
+  AssertEquals('the source string is retained', '',
+    AsmMissing(Src, 'callq _StringAddRef', 'bl __StringAddRef'));
 end;
 
 initialization
