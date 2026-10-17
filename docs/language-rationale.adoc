@@ -6905,6 +6905,30 @@ implicit `Self` and takes its operands as explicit parameters.
   a record the declared `Equal` operator is the only meaning of `=` and there
   is no conflict.  A class author who wants value equality should expose an
   `Equals` method or an `IEqualityComparer<T>`.
+* *A record comparison without an operator is an error.* `A = B`, `A < B`
+  and the rest on records with no matching `class operator` are rejected
+  with a message naming the operator to declare.  There is no built-in
+  value comparison to fall back on: a byte-wise compare would be wrong for
+  managed fields (two equal strings at different addresses), for floats
+  (`-0.0 = 0.0`, NaN) and for padding.  Until this rule was enforced the
+  front end let such comparisons through and each backend compared
+  something different -- the record addresses on x86-64, a single word on
+  arm64 -- and the declared comparison operators were never called at all.
+  Static arrays have no comparison operators either, as in Delphi and FPC.
+* *In a generic, the error waits for a call.* A generic body that compares
+  `T` (`TList<T>.IndexOf` does, with `Ptr^ = Value`) can still be
+  instantiated with a record that declares no `Equal`: `TList<TMatch>` is
+  a useful list even though `IndexOf` has no meaning for it.  The routine
+  whose body needs the missing operator is marked unavailable for that
+  instance, the mark passes to every routine of the instance that calls it
+  (directly or not), and only a *call* of a marked routine from outside a
+  generic body is an error, naming the operator to declare:
+  `'TList<TMatch>.IndexOf' is not available for its type arguments:
+  Operator '=' is not defined for record type 'TMatch'; declare class
+  operator Equal`.  Rejecting the instantiation outright would make every
+  record element type declare comparison operators it may never need; a
+  byte-wise default (Delphi's `TEqualityComparer` for records) would
+  compare managed fields by address and be silently wrong.
 * *`<>` is not derived from `=`.* "You wrote it, it exists" — a type must
   declare `NotEqual` explicitly.  Auto-derivation is a possible later
   convenience; synthesising behaviour nobody wrote is the surprising default.

@@ -39,6 +39,18 @@ type
       the method decl at index AIdx of its Methods list. }
     function  FindMethod(AProg: TProgram; const ATypeName, AMethodName: string): TMethodDecl;
   published
+    { a generic whose body compares T is usable with a record T that has no
+      Equal; only a call of a routine that needs the comparison -- directly or
+      through another routine of the instance -- is an error }
+    procedure TestSem_GenericComparison_UnavailableOnlyWhenCalled;
+    { static arrays have no comparison operators }
+    procedure TestSem_StaticArrayComparison_Rejected;
+    { a record with no comparison operator has no meaning for `=`: an error,
+      not a silent byte or address comparison }
+    procedure TestSem_RecordComparison_WithoutOperator_Rejected;
+    { a comparison of records is the declared comparison operator, the only
+      meaning `=` has for a record }
+    procedure TestSem_RecordComparison_LowersToOperator;
     { --- Phase 1: parser --- }
     procedure TestParse_RecordOperator_Add;
     procedure TestParse_ClassOperator_Add;
@@ -661,6 +673,196 @@ end;
 { ------------------------------------------------------------------ }
 { Phase 2 — IR                                                        }
 { ------------------------------------------------------------------ }
+
+procedure TOperatorTests.TestSem_RecordComparison_LowersToOperator;
+const
+  Src = '''
+      program P;
+      type
+        TP = record
+          X: Integer;
+          class operator Equal(const A, B: TP): Boolean;
+          class operator LessThan(const A, B: TP): Boolean;
+        end;
+      class operator TP.Equal(const A, B: TP): Boolean;
+      begin
+        Result := A.X = B.X
+      end;
+      class operator TP.LessThan(const A, B: TP): Boolean;
+      begin
+        Result := A.X < B.X
+      end;
+      var A, B: TP;
+      begin
+        if A = B then WriteLn('eq');
+        if A < B then WriteLn('lt')
+      end.
+      ''';
+var
+  Prog:  TProgram;
+  I:     Integer;
+  Cond:  TASTExpr;
+  Names: string;
+begin
+  Prog := Self.AnalyseSrc(Src);
+  try
+    Names := '';
+    for I := 0 to Prog.Block.Stmts.Count - 1 do
+    begin
+      if not (TObject(Prog.Block.Stmts.Items[I]) is TIfStmt) then Continue;
+      Cond := TIfStmt(Prog.Block.Stmts.Items[I]).Condition;
+      if (Cond is TBinaryExpr) and (TBinaryExpr(Cond).LoweredCall <> nil) then
+        Cond := TBinaryExpr(Cond).LoweredCall;
+      AssertTrue('comparison lowered to a method call', Cond is TMethodCallExpr);
+      AssertEquals('receiver is the owner type', 'TP',
+        TMethodCallExpr(Cond).ObjectName);
+      Names := Names + TMethodCallExpr(Cond).Name + ' ';
+    end;
+    AssertEquals('both comparisons lowered', 'Equal LessThan ', Names);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TOperatorTests.TestSem_RecordComparison_WithoutOperator_Rejected;
+const
+  SrcEq = '''
+      program P;
+      type
+        TP = record
+          X: Integer;
+        end;
+      var A, B: TP;
+      begin
+        if A = B then WriteLn('eq')
+      end.
+      ''';
+  SrcLt = '''
+      program P;
+      type
+        TP = record
+          X: Integer;
+          class operator Equal(const A, B: TP): Boolean;
+        end;
+      class operator TP.Equal(const A, B: TP): Boolean;
+      begin
+        Result := A.X = B.X
+      end;
+      var A, B: TP;
+      begin
+        if A < B then WriteLn('lt')
+      end.
+      ''';
+begin
+  Self.AnalyseExpectError(SrcEq);
+  Self.AnalyseExpectError(SrcLt);
+end;
+
+procedure TOperatorTests.TestSem_StaticArrayComparison_Rejected;
+const
+  Src = '''
+      program P;
+      type
+        TArr = array[0..2] of Integer;
+      var A, B: TArr;
+      begin
+        if A = B then WriteLn('eq')
+      end.
+      ''';
+begin
+  Self.AnalyseExpectError(Src);
+end;
+
+procedure TOperatorTests.TestSem_GenericComparison_UnavailableOnlyWhenCalled;
+const
+  SrcUnused = '''
+      program P;
+      type
+        TQ = record
+          X: Integer;
+        end;
+        TBag<T> = class
+          FItems: array of T;
+          function HasBoth(const A, B: T): Boolean;
+          function Has(const V: T): Boolean;
+          function Count(): Integer;
+        end;
+      function TBag<T>.HasBoth(const A, B: T): Boolean;
+      begin
+        Result := Has(A) and Self.Has(B)
+      end;
+      function TBag<T>.Has(const V: T): Boolean;
+      var I: Integer;
+      begin
+        Result := False;
+        for I := 0 to High(FItems) do
+          if FItems[I] = V then
+            Result := True
+      end;
+      function TBag<T>.Count(): Integer;
+      begin
+        Result := Length(FItems)
+      end;
+      var B: TBag<TQ>;
+          Q: TQ;
+      begin
+        B := TBag<TQ>.Create();
+        WriteLn(B.Count())
+      end.
+      ''';
+  SrcCalled = '''
+      program P;
+      type
+        TQ = record
+          X: Integer;
+        end;
+        TBag<T> = class
+          FItems: array of T;
+          function HasBoth(const A, B: T): Boolean;
+          function Has(const V: T): Boolean;
+          function Count(): Integer;
+        end;
+      function TBag<T>.HasBoth(const A, B: T): Boolean;
+      begin
+        Result := Has(A) and Self.Has(B)
+      end;
+      function TBag<T>.Has(const V: T): Boolean;
+      var I: Integer;
+      begin
+        Result := False;
+        for I := 0 to High(FItems) do
+          if FItems[I] = V then
+            Result := True
+      end;
+      function TBag<T>.Count(): Integer;
+      begin
+        Result := Length(FItems)
+      end;
+      var B: TBag<TQ>;
+          Q: TQ;
+      begin
+        B := TBag<TQ>.Create();
+        WriteLn(B.HasBoth(Q, Q))
+      end.
+      ''';
+var
+  Prog: TProgram;
+  Msg:  string;
+begin
+  Prog := Self.AnalyseSrc(SrcUnused);
+  Prog.Free();
+  Msg := '';
+  try
+    Prog := Self.AnalyseSrc(SrcCalled);
+    Prog.Free();
+  except
+    on E: ESemanticError do Msg := E.Message;
+  end;
+  AssertTrue('the call is rejected: ' + Msg,
+    Pos('''TBag<TQ>.HasBoth'' is not available', Msg) >= 0);
+  AssertTrue('the reason names the operator: ' + Msg,
+    Pos('class operator Equal', Msg) >= 0);
+end;
 
 initialization
   RegisterTest(TOperatorTests);

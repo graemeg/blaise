@@ -67,6 +67,17 @@ type
       GenericInstances moves them into the real owner once analysis begins so
       codegen still emits the instance's methods. }
     FPendingGenericInstances:       TObjectList; { TGenericInstance — not owned }
+    { Calls made inside generic-instance bodies, as parallel caller / callee
+      TMethodDecl lists (not owned): an instance routine that needs a missing
+      operator marks itself unavailable, and PropagateUnavailable passes the
+      mark to every instance routine that calls it, whatever order the bodies
+      were analysed in.  FUnavailDirty: a mark has been added since the last
+      propagation. }
+    FUnavailCallers:   TObjectList;
+    FUnavailCallees:   TObjectList;
+    FUnavailDirty:     Boolean;
+    { Operand subtrees replaced by a rewrite (owned; freed with the analyser) }
+    FDiscardedNodes:   TObjectList;
     { True while analysing a nested routine declared inside a METHOD body:
       the enclosing method's Self is capturable like any other outer name
       (BUG-008) — CollectCaptures lists it in the outer-vars set and the
@@ -451,6 +462,19 @@ type
     function  SynthAnonEnum(const AMemberList: string): TEnumTypeDesc;
     procedure AnalyseStmts(ABlock: TBlock);
     procedure AnalyseStmt(AStmt: TASTStmt);
+    procedure AnalyseStmtCore(AStmt: TASTStmt);
+    { Generic-instance availability (see FUnavailCallers).  NoteRoutineUse
+      runs after every analysed statement and expression: inside a generic
+      instance body it records the call edge, outside it rejects a call of
+      an unavailable routine. }
+    function  InGenericInstanceBody: Boolean;
+    procedure NoteRoutineUse(ANode: TASTNode);
+    procedure MarkRoutineUnavailable(ADecl: TMethodDecl; const AReason: string);
+    procedure PropagateUnavailable;
+    { A comparison with no meaning for its operand types: an error -- or,
+      inside a generic instance body, a mark on the routine (so the error
+      comes only if it is called) and a rewrite to a constant False. }
+    function  RejectComparison(ABin: TBinaryExpr; const AMsg: string): TTypeDesc;
     procedure AnalyseAssignment(AAssign: TAssignment);
     procedure AnalyseFieldAssignment(AAssign: TFieldAssignment);
     procedure AnalyseFieldStoreValue(AAssign: TFieldAssignment; ATarget: TTypeDesc);
@@ -615,6 +639,7 @@ type
     function  AnalyseWriteFmt(AExpr: TFuncCallExpr): TTypeDesc;
     function  AnalyseIndirectFuncCallExpr(AExpr: TIndirectFuncCallExpr): TTypeDesc;
     function  AnalyseExpr(AExpr: TASTExpr): TTypeDesc;
+    function  AnalyseExprCore(AExpr: TASTExpr): TTypeDesc;
     function  AnalyseBinaryExpr(ABin: TBinaryExpr): TTypeDesc;
     function  AnalyseFieldAccess(AAccess: TFieldAccessExpr): TTypeDesc;
     function  AnalyseFieldSubscript(AAccess: TFieldAccessExpr;
@@ -1237,6 +1262,9 @@ begin
   FWarnings             := TStringList.Create();
   FSparseEnumWarned     := TStringList.Create();
   FPendingGenericInstances       := TObjectList.Create(False);
+  FUnavailCallers       := TObjectList.Create(False);
+  FUnavailCallees       := TObjectList.Create(False);
+  FDiscardedNodes       := TObjectList.Create(True);
   FPendingGenericRecordInstances := TObjectList.Create(False);
   FPendingGenericIntfInstances   := TObjectList.Create(False);
   FPendingAnonDecls     := TObjectList.Create(False);
@@ -1250,6 +1278,9 @@ begin
   FPendingGenericIntfInstances.Free();
   FPendingGenericRecordInstances.Free();
   FPendingGenericInstances.Free();
+  FUnavailCallers.Free();
+  FUnavailCallees.Free();
+  FDiscardedNodes.Free();
   FGenericSourceUnits.Free();
   FActiveTypeParams.Free();
   FForInLoopVars.Free();
@@ -11183,6 +11214,122 @@ begin
 end;
 
 procedure TSemanticAnalyser.AnalyseStmt(AStmt: TASTStmt);
+begin
+  Self.AnalyseStmtCore(AStmt);
+  Self.NoteRoutineUse(AStmt);
+end;
+
+function TSemanticAnalyser.InGenericInstanceBody: Boolean;
+begin
+  Result := (FActiveTypeParams.Count > 0) and (FCurrentEnclosingDecl <> nil);
+end;
+
+procedure TSemanticAnalyser.MarkRoutineUnavailable(ADecl: TMethodDecl;
+  const AReason: string);
+begin
+  if (ADecl = nil) or (ADecl.UnavailableReason <> '') then
+    Exit;
+  ADecl.UnavailableReason := AReason;
+  FUnavailDirty := True;
+end;
+
+procedure TSemanticAnalyser.PropagateUnavailable;
+var
+  I:       Integer;
+  Changed: Boolean;
+  Caller:  TMethodDecl;
+  Callee:  TMethodDecl;
+begin
+  repeat
+    Changed := False;
+    for I := 0 to FUnavailCallers.Count - 1 do
+    begin
+      Caller := TMethodDecl(FUnavailCallers.Items[I]);
+      Callee := TMethodDecl(FUnavailCallees.Items[I]);
+      if (Callee.UnavailableReason <> '') and
+         (Caller.UnavailableReason = '') then
+      begin
+        Caller.UnavailableReason := Callee.UnavailableReason;
+        Changed := True;
+      end;
+    end;
+  until not Changed;
+  FUnavailDirty := False;
+end;
+
+procedure TSemanticAnalyser.NoteRoutineUse(ANode: TASTNode);
+var
+  Callee: TObject;
+  Decl:   TMethodDecl;
+begin
+  Callee := nil;
+  if ANode is TMethodCallExpr then
+    Callee := TMethodCallExpr(ANode).ResolvedMethod
+  else if ANode is TFuncCallExpr then
+    Callee := TFuncCallExpr(ANode).ResolvedDecl
+  else if ANode is TFieldAccessExpr then
+    Callee := TFieldAccessExpr(ANode).ResolvedMethod
+  else if ANode is TInheritedCallExpr then
+    Callee := TInheritedCallExpr(ANode).ResolvedMethod
+  else if ANode is TMethodCallStmt then
+    Callee := TMethodCallStmt(ANode).ResolvedMethod
+  else if ANode is TProcCall then
+    Callee := TProcCall(ANode).ResolvedDecl
+  else if ANode is TInheritedCallStmt then
+    Callee := TInheritedCallStmt(ANode).ResolvedMethod;
+  if not (Callee is TMethodDecl) then
+    Exit;
+  Decl := TMethodDecl(Callee);
+  if InGenericInstanceBody() then
+  begin
+    if Decl = FCurrentEnclosingDecl then
+      Exit;
+    FUnavailCallers.Add(FCurrentEnclosingDecl);
+    FUnavailCallees.Add(Decl);
+    if Decl.UnavailableReason <> '' then
+      MarkRoutineUnavailable(FCurrentEnclosingDecl, Decl.UnavailableReason);
+    Exit;
+  end;
+  if FUnavailDirty then
+    Self.PropagateUnavailable();
+  if Decl.UnavailableReason <> '' then
+    SemanticError(
+      Format('''%s.%s'' is not available for its type arguments: %s',
+        [Decl.OwnerTypeName, Decl.Name, Decl.UnavailableReason]),
+      ANode.Line, ANode.Col);
+end;
+
+function TSemanticAnalyser.RejectComparison(ABin: TBinaryExpr;
+  const AMsg: string): TTypeDesc;
+var
+  Lit: TIntLiteral;
+begin
+  if not InGenericInstanceBody() then
+    SemanticError(AMsg, ABin.Line, ABin.Col);
+  MarkRoutineUnavailable(FCurrentEnclosingDecl, AMsg);
+  { The routine can never run (every call of it is now an error), but its
+    body is still emitted: give the comparison a meaning every backend has,
+    0 = 1. }
+  FDiscardedNodes.Add(ABin.Left);
+  FDiscardedNodes.Add(ABin.Right);
+  Lit := TIntLiteral.Create();
+  Lit.Line := ABin.Line;
+  Lit.Col := ABin.Col;
+  Lit.Value := 0;
+  ABin.Left := Lit;
+  Lit := TIntLiteral.Create();
+  Lit.Line := ABin.Line;
+  Lit.Col := ABin.Col;
+  Lit.Value := 1;
+  ABin.Right := Lit;
+  ABin.Op := boEQ;
+  Self.AnalyseExpr(ABin.Left);
+  Self.AnalyseExpr(ABin.Right);
+  Result := FTable.TypeBoolean;
+  ABin.ResolvedType := Result;
+end;
+
+procedure TSemanticAnalyser.AnalyseStmtCore(AStmt: TASTStmt);
 var
   IfS:    TIfStmt;
   CmpS:   TCompoundStmt;
@@ -16504,6 +16651,12 @@ begin
 end;
 
 function TSemanticAnalyser.AnalyseExpr(AExpr: TASTExpr): TTypeDesc;
+begin
+  Result := Self.AnalyseExprCore(AExpr);
+  Self.NoteRoutineUse(AExpr);
+end;
+
+function TSemanticAnalyser.AnalyseExprCore(AExpr: TASTExpr): TTypeDesc;
 var
   Sym:       TSymbol;
   FldInfo:   TFieldInfo;
@@ -17896,6 +18049,36 @@ begin
     begin
       CoerceToCharOrd(TStringLiteral(ABin.Left));
       LType := ABin.Left.ResolvedType;
+    end;
+    { A record compares only through its declared comparison operator -- the
+      one meaning a comparison has for a record (see "Operator Overloading").
+      Without one it is an error: the backends had no rule for it and each
+      compared something different (addresses, or the first word). }
+    if (LType.Kind = tyRecord) or (RType.Kind = tyRecord) then
+    begin
+      OpType := Self.TryLowerOperator(ABin, LType, RType);
+      if OpType <> nil then
+        Exit(OpType);
+      if LType.Kind = tyRecord then
+        OpType := LType
+      else
+        OpType := RType;
+      Exit(Self.RejectComparison(ABin,
+        Format('Operator ''%s'' is not defined for record type ''%s''; '
+               + 'declare class operator %s',
+          [BinaryOpName(ABin.Op), OpType.Name,
+           OperatorKindName(BinaryOpToOperatorKind(ABin.Op))])));
+    end;
+    { A static array has no comparison operators, as in Delphi and FPC }
+    if (LType.Kind = tyStaticArray) or (RType.Kind = tyStaticArray) then
+    begin
+      if LType.Kind = tyStaticArray then
+        OpType := LType
+      else
+        OpType := RType;
+      Exit(Self.RejectComparison(ABin,
+        Format('Operator ''%s'' is not defined for static-array type ''%s''',
+          [BinaryOpName(ABin.Op), OpType.Name])));
     end;
     { nil can be compared with class, interface, pointer, or PChar types }
     if not (

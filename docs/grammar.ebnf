@@ -1365,6 +1365,11 @@ Expr
 
 (* IS and AS have the lowest precedence.  IDENT is the target type name. *)
 
+(* A Comparison of two records is a call of the record's declared comparison
+ * operator (Equal, NotEqual, LessThan, ...); with no such operator it is a
+ * semantic error.  Static arrays have no comparison operators.  A class
+ * compares by identity under = and <>. *)
+
 Comparison
     = Additive [ ( EQUALS | NOT_EQUALS | LESS | GREATER | LESS_EQ | GREATER_EQ ) Additive ]
     ;

@@ -31,6 +31,11 @@ type
   protected
     procedure SetUp; override;
   published
+    { a generic body's comparison of T runs a record T's Equal; a record with
+      none still instantiates the generic for the routines that do not compare }
+    procedure TestRun_Operator_GenericComparisonUsesRecordEqual;
+    { every comparison of records runs the declared operator }
+    procedure TestRun_Operator_RecordComparisons;
     procedure TestRun_Operator_RecordAddAndBuiltins;
     { register-return path: small all-Integer record }
     procedure TestRun_Operator_RecordAdd_RegisterReturn;
@@ -338,6 +343,123 @@ begin
     'ab 3' + LE +
     'xy' + LE +
     '3' + LE, 0);
+end;
+
+procedure TE2EOperatorTests.TestRun_Operator_RecordComparisons;
+const
+  Src = '''
+    program P;
+    type
+      TP = record
+        X: Integer;
+        Name: string;
+        class operator Equal(const A, B: TP): Boolean;
+        class operator NotEqual(const A, B: TP): Boolean;
+        class operator LessThan(const A, B: TP): Boolean;
+        class operator GreaterThanOrEqual(const A, B: TP): Boolean;
+      end;
+    class operator TP.Equal(const A, B: TP): Boolean;
+    begin
+      Result := A.X = B.X
+    end;
+    class operator TP.NotEqual(const A, B: TP): Boolean;
+    begin
+      Result := A.X <> B.X
+    end;
+    class operator TP.LessThan(const A, B: TP): Boolean;
+    begin
+      Result := A.X < B.X
+    end;
+    class operator TP.GreaterThanOrEqual(const A, B: TP): Boolean;
+    begin
+      Result := A.X >= B.X
+    end;
+    function Mk(AX: Integer; const AName: string): TP;
+    begin
+      Result.X := AX;
+      Result.Name := AName
+    end;
+    var A, B: TP;
+    begin
+      A := Mk(1, 'a');
+      B := Mk(1, 'b');
+      WriteLn(A = B, ' ', A <> B, ' ', A < B, ' ', A >= B);
+      B.X := 2;
+      WriteLn(A = B, ' ', A <> B, ' ', A < B, ' ', A >= B);
+      WriteLn(Mk(3, 'c') = Mk(3, 'd'), ' ', Mk(2, 'e') < A);
+      if A = Mk(1, 'z') then WriteLn('match')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'True False False True' + LE +
+    'False True True False' + LE +
+    'True False' + LE +
+    'match' + LE, 0);
+end;
+
+procedure TE2EOperatorTests.TestRun_Operator_GenericComparisonUsesRecordEqual;
+const
+  Src = '''
+    program P;
+    type
+      TP = record
+        X: Integer;
+        S: string;
+        class operator Equal(const A, B: TP): Boolean;
+      end;
+      TQ = record
+        X: Integer;
+      end;
+      TBag<T> = class
+        FItems: array of T;
+        procedure Add(const V: T);
+        function Has(const V: T): Boolean;
+        function Count(): Integer;
+      end;
+    class operator TP.Equal(const A, B: TP): Boolean;
+    begin
+      Result := A.X = B.X
+    end;
+    procedure TBag<T>.Add(const V: T);
+    begin
+      SetLength(FItems, Length(FItems) + 1);
+      FItems[High(FItems)] := V
+    end;
+    function TBag<T>.Has(const V: T): Boolean;
+    var I: Integer;
+    begin
+      Result := False;
+      for I := 0 to High(FItems) do
+        if FItems[I] = V then
+          Result := True
+    end;
+    function TBag<T>.Count(): Integer;
+    begin
+      Result := Length(FItems)
+    end;
+    function Mk(AX: Integer; const AStr: string): TP;
+    begin
+      Result.X := AX;
+      Result.S := AStr
+    end;
+    var
+      B: TBag<TP>;
+      BQ: TBag<TQ>;
+      Q: TQ;
+    begin
+      B := TBag<TP>.Create();
+      B.Add(Mk(4, 'a'));
+      WriteLn(B.Has(Mk(4, 'other')), ' ', B.Has(Mk(5, 'a')));
+      BQ := TBag<TQ>.Create();
+      BQ.Add(Q);
+      WriteLn(BQ.Count())
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'True False' + LE + '1' + LE, 0);
 end;
 
 initialization

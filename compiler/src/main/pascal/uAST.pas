@@ -1109,6 +1109,14 @@ type
                                        marks it as a candidate for operator
                                        resolution in AnalyseBinaryExpr. }
     OperatorKind:       TOperatorKind; { okNone unless IsOperator }
+    UnavailableReason:  string;      { set by uSemantic -- non-empty when this
+                                       generic-instance routine cannot be used
+                                       for its type arguments: its body needs an
+                                       operator the argument lacks (TList<TRec>
+                                       .IndexOf with no Equal on TRec), or it
+                                       calls a routine that does.  A call from
+                                       outside generic bodies is then an error
+                                       naming the reason. }
     VTableSlot:         Integer;     { -1 = static; >=0 = vtable index (set by uSemantic) }
     TypeParams:         TStringList; { non-nil = generic function template; owns param names }
     TypeParamConstraints: TStringList; { parallel to TypeParams; '' = unconstrained,
