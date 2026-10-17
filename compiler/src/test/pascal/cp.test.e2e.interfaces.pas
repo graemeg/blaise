@@ -22,6 +22,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { interface and metaclass fields read off a call result: the value
+      outlives the transient object, which is freed once, after the statement }
+    procedure TestRun_IntfAndMetaclassFieldOfCallResult;
     { TGreet(MakeI()).X: the call's owned reference is released -- the shared
       object goes when its last real holder lets go }
     procedure TestRun_ClassCastOfInterfaceCall_ReleasesTheCallRef;
@@ -2003,6 +2006,70 @@ begin
     before 'after nil' }
   AssertRunsOnAll(Src,
     '5' + LE + 'x5' + LE + '6' + LE + 'gone' + LE + 'after nil' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_IntfAndMetaclassFieldOfCallResult;
+const
+  Src = '''
+    program P;
+    type
+      IThing = interface
+        function Name(): string;
+      end;
+      TThing = class(TObject, IThing)
+        N: string;
+        function Name(): string;
+        destructor Destroy(); override;
+      end;
+      TA = class end;
+      TAC = class of TA;
+      TObj = class
+        FI: IThing;
+        FC: TAC;
+        destructor Destroy(); override;
+      end;
+    function TThing.Name(): string;
+    begin
+      Result := N
+    end;
+    destructor TThing.Destroy();
+    begin
+      WriteLn('thing gone');
+      inherited Destroy()
+    end;
+    destructor TObj.Destroy();
+    begin
+      WriteLn('obj gone');
+      inherited Destroy()
+    end;
+    function MkObj(): TObj;
+    var T: TThing;
+    begin
+      Result := TObj.Create();
+      T := TThing.Create();
+      T.N := 'tn';
+      Result.FI := T;
+      Result.FC := TA
+    end;
+    var
+      I: IThing;
+      C: TAC;
+    begin
+      I := MkObj().FI;
+      WriteLn(I.Name());
+      C := MkObj().FC;
+      WriteLn(C = TA);
+      WriteLn(MkObj().FI <> nil, MkObj().FC = TA);
+      I := nil;
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'obj gone' + LE + 'tn' + LE + 'obj gone' + LE + 'thing gone' + LE +
+    'True' + LE + 'TrueTrue' + LE + 'obj gone' + LE + 'thing gone' + LE +
+    'obj gone' + LE + 'thing gone' + LE + 'thing gone' + LE + 'end' + LE, 0);
 end;
 
 initialization

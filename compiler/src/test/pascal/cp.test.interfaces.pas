@@ -21,6 +21,9 @@ type
     function AnalyseSrc(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { an interface or metaclass field read off a call result (MkObj().FI,
+      MkObj().FC): arm64 stopped with 'read of a field of this type' }
+    procedure TestCodegen_IntfAndMetaclassFieldOfCallResult;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1119,6 +1122,34 @@ begin
     SA.Free();
     Prog.Free();
   end;
+end;
+
+procedure TInterfaceTests.TestCodegen_IntfAndMetaclassFieldOfCallResult;
+const
+  Src = '''
+      program P;
+      type
+        IThing = interface
+          function Name(): string;
+        end;
+        TA = class end;
+        TAC = class of TA;
+        TObj = class
+          FI: IThing;
+          FC: TAC;
+        end;
+      function MkObj(): TObj;
+      begin
+        Result := TObj.Create()
+      end;
+      var B: Boolean;
+      begin
+        B := (MkObj().FI <> nil) and (MkObj().FC = TA)
+      end.
+      ''';
+begin
+  AssertEquals('both reads compile', '',
+    AsmMissing(Src, 'callq MkObj', 'bl _MkObj'));
 end;
 
 initialization

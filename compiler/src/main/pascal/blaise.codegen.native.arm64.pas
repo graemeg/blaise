@@ -925,6 +925,21 @@ begin
      ((AType.Kind = tyProcedural) and not IsMethodPtrType(AType)));
 end;
 
+{ A field type whose VALUE a field-read arm of EmitExprToX0 loads into x0
+  (x1): every scalar, managed reference and fat pair.  A record, static
+  array or jumbo set is an aggregate: its consumers take its ADDRESS
+  (EmitRecAddrToX0, EmitArrayStorageAddr, the jumbo-set paths) and never
+  ask for its value here -- the field-read arms reaching one is a backend
+  bug, not a missing lowering. }
+function IsScalarFieldValue(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and
+    (IsSmallSetType(AType) or IsMethodPtrType(AType) or
+     IsPlainWordRef(AType) or IsIntFam(AType) or AType.IsString() or
+     (AType.Kind in [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
+                     tyDynArray, tyInterface, tyMetaClass]));
+end;
+
 constructor TArm64Backend.Create(const ATarget: TTargetDesc);
 begin
   inherited Create(ATarget);
@@ -7136,21 +7151,10 @@ begin
     { chained field read A.B.C: the base expression yields the instance
       pointer.  An OWNED transient base (a call result, +1) is kept across
       the field load and released after — the loaded scalar field value
-      survives the release.  An interface/metaclass field is only taken off a
-      BORROWED base: the transient release below parks x0 alone and would
-      drop an interface's itab half in x1. }
-    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
-              [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
-               tyDynArray]) or
-            ((TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
-               [tyInterface, tyMetaClass]) and
-             not ArcExprOwnsRef(TFieldAccessExpr(AExpr).Base)) or
-            TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
-      NotYet('read of a field of this type', AExpr);
+      survives the release; an interface field's itab half (x1) is parked
+      with it. }
+    if not IsScalarFieldValue(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) then
+      InternalError('read of an aggregate field as a scalar value', AExpr);
     if ArcExprOwnsRef(TFieldAccessExpr(AExpr).Base) then
     begin
       { The base is an owned +1 transient; releasing it runs its
@@ -7172,15 +7176,21 @@ begin
         Self.Emit(Format(#9'add x0, x0, #%d',
           [TFieldAccessExpr(AExpr).FieldInfo.Offset]));
       EmitElemLoad(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc);
-      EmitPushX0();                    { [base][fieldval] -- both parked on the
-                                         stack across the defer so no volatile
-                                         register has to survive the slot
-                                         spill (clobbers x9) }
+      { [base][fieldval] -- both parked on the stack across the defer so no
+        volatile register has to survive the slot spill (clobbers x9); an
+        interface value is the x0/x1 pair }
+      if TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind = tyInterface then
+        Self.Emit(#9'stp x0, x1, [sp, #-16]!')
+      else
+        EmitPushX0();
       Self.Emit(#9'ldr x0, [sp, #16]'); { x0 = owned transient base }
       { EVERY statement is flush-bracketed (BUG-049), so a deferred base is
         always released -- no context leaks }
       DeferNativeClassRelease();        { spill base -> _pendrel slot }
-      EmitPopTo('x0');                  { fieldval }
+      if TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind = tyInterface then
+        Self.Emit(#9'ldp x0, x1, [sp], #16')
+      else
+        EmitPopTo('x0');                { fieldval }
       Self.Emit(#9'add sp, sp, #16');   { drop base }
       Exit;
     end;
@@ -7200,15 +7210,8 @@ begin
   begin
     { instance field read: the base is a POINTER — Obj's slot value, or
       Self for a bare field name inside a method }
-    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
-              [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
-               tyDynArray, tyInterface, tyMetaClass]) or
-            TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
-      NotYet('read of a field of this type', AExpr);
+    if not IsScalarFieldValue(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) then
+      InternalError('read of an aggregate field as a scalar value', AExpr);
     if TFieldAccessExpr(AExpr).IsImplicitSelf then
       EmitLoadSlot('x0', 'Self')
     else
@@ -7249,15 +7252,8 @@ begin
      (not TFieldAccessExpr(AExpr).IsConstant) then
   begin
     { plain Rec.Field read of a local/global/var-param record }
-    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
-              [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
-               tyDynArray, tyInterface, tyMetaClass]) or
-            TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
-      NotYet('read of a field of this type', AExpr);
+    if not IsScalarFieldValue(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) then
+      InternalError('read of an aggregate field as a scalar value', AExpr);
     { TRUE var/out record → one deref; by-value record param / local / global
       → EmitSlotAddr; a captured record through its '_cap_' slot.  A by-value
       record param is IsVarParam=True too (records pass by reference), so
@@ -7281,15 +7277,8 @@ begin
   begin
     { field of a RECORD-VALUED field access (FTok.Token.TextStart):
       compute the inner record's address, then load at the outer offset }
-    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
-              [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
-               tyDynArray, tyInterface, tyMetaClass]) or
-            TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
-      NotYet('read of a field of this type', AExpr);
+    if not IsScalarFieldValue(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) then
+      InternalError('read of an aggregate field as a scalar value', AExpr);
     RecTmp := '';
     if RecordPropRead(TFieldAccessExpr(AExpr).Base) <> nil then
       { O.T.V: the getter's value, materialised into a temp that owns its
@@ -7319,15 +7308,8 @@ begin
   begin
     { field of a record-RETURNING CALL (HostTarget().OS): materialise the
       record into the __rret scratch, then load the field at its offset }
-    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
-              [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
-               tyDynArray, tyInterface, tyMetaClass]) or
-            TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
-      NotYet('read of a field of this type', AExpr);
+    if not IsScalarFieldValue(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) then
+      InternalError('read of an aggregate field as a scalar value', AExpr);
     RecTmp := EmitRecCallToRretSlot(TFieldAccessExpr(AExpr).Base);
     if TFieldAccessExpr(AExpr).FieldInfo.Offset <> 0 then
       EmitAddSubImm('add', 'x0', 'x0',
@@ -7347,15 +7329,8 @@ begin
   begin
     { field of a subscripted RECORD element: A[I].Kind — the subscript
       emitters yield the element address, the field loads at its offset }
-    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
-              [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
-               tyDynArray, tyInterface, tyMetaClass]) or
-            TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
-      NotYet('read of a field of this type', AExpr);
+    if not IsScalarFieldValue(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) then
+      InternalError('read of an aggregate field as a scalar value', AExpr);
     RecTmp := '';
     if RecordPropRead(TFieldAccessExpr(AExpr).Base) <> nil then
       { L[I].Field on a default record property: the getter's value }
@@ -7412,15 +7387,8 @@ begin
       identifier carried as a Base node (the receiver of GS.Box.Bump(),
       GS a record global), P^, a var param: EmitRecAddrToX0 yields the
       record's address, the field loads at its offset }
-    if not (IsSmallSetType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsMethodPtrType(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsPlainWordRef(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            IsIntFam(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) or
-            (TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.Kind in
-              [tyDouble, tySingle, tyClass, tyPointer, tyPChar,
-               tyDynArray, tyInterface, tyMetaClass]) or
-            TFieldAccessExpr(AExpr).FieldInfo.TypeDesc.IsString()) then
-      NotYet('read of a field of this type', AExpr);
+    if not IsScalarFieldValue(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc) then
+      InternalError('read of an aggregate field as a scalar value', AExpr);
     EmitRecAddrToX0(TFieldAccessExpr(AExpr).Base);
     if TFieldAccessExpr(AExpr).FieldInfo.Offset <> 0 then
       EmitAddSubImm('add', 'x0', 'x0',
