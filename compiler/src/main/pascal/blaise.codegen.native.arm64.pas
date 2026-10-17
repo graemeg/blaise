@@ -2215,7 +2215,8 @@ begin
       method-pointer kind was routed above) }
     Self.EmitExprToX0(AValueExpr)
   else
-    NotYet('store to a field of this type', AValueExpr);
+    { every field kind has an arm above }
+    InternalError('store to a field of an unhandled type', AValueExpr);
   Self.Emit(#9'ldr x9, [sp], #16');     { pop the base }
   case AFld.TypeDesc.RawSize() of
     1: Self.Emit(Format(#9'strb w0, [x9, #%d]', [AFld.Offset]));
@@ -4213,7 +4214,11 @@ begin
     Exit;
   end;
   if AStmt.PropIndexExpr <> nil then
-    NotYet('this field-assignment form', AStmt);
+    { a subscripted field write is an element write (IsElemWrite) or a
+      property write (PropWriteInfo), both routed above; the front end
+      rejects any other }
+    InternalError('subscripted field write that is neither an element nor '
+      + 'a property write', AStmt);
   if AStmt.FieldInfo = nil then
     NotYet('unresolved field assignment', AStmt);
   if AStmt.IsImplicitSelf then
@@ -10340,7 +10345,8 @@ begin
     Exit;
   end
   else
-    NotYet('array element of this type', ANode);
+    { every element kind the front end admits has an arm above }
+    InternalError('array element of an unhandled type', ANode);
   Self.Emit(#9'ldr x9, [sp], #16');
   case Elem.RawSize() of
     1: Self.Emit(#9'strb w0, [x9]');
@@ -10348,7 +10354,7 @@ begin
     4: Self.Emit(#9'str w0, [x9]');
     8: Self.Emit(#9'str x0, [x9]');
   else
-    NotYet('array element of this width', ANode);
+    InternalError('array element of an unhandled width', ANode);
   end;
 end;
 
@@ -10382,7 +10388,10 @@ begin
      (AStmt.IsImplicitSelf and ((AStmt.ImplicitFieldInfo = nil) or
        (AStmt.ResolvedArrayType = nil) or
        not (AStmt.ResolvedArrayType.Kind in [tyDynArray, tyStaticArray]))) then
-    NotYet('subscript write on this array form', AStmt);
+    { the front end rejects these: a multi-dimensional base that is not an
+      array, a subscripted var param of a non-array type, an implicit-Self
+      subscript of a field that is not an array }
+    InternalError('subscript write on an unsupported array form', AStmt);
   if (AStmt.ResolvedArrayType <> nil) and
      (AStmt.ResolvedArrayType.Kind = tyString) then
   begin
@@ -10452,7 +10461,7 @@ begin
   if (AStmt.ResolvedArrayType = nil) or
      not (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyDynArray,
                                            tyOpenArray]) then
-    NotYet('subscript write on this base type', AStmt);
+    InternalError('subscript write on a non-array base', AStmt);
   if AStmt.ResolvedArrayType.Kind = tyDynArray then
     Elem := TDynArrayTypeDesc(AStmt.ResolvedArrayType).ElementType
   else if AStmt.ResolvedArrayType.Kind = tyOpenArray then
@@ -10485,7 +10494,10 @@ begin
     else
     begin
       if ArcExprOwnsRef(AStmt.BaseExpr) then
-        NotYet('subscript write through an owned transient base', AStmt);
+        { no statement form writes through a call result: F()[I] := V does
+          not parse }
+        InternalError('subscript write through an owned transient base',
+          AStmt);
       Self.EmitExprToX0(AStmt.BaseExpr);
     end;
   end
@@ -12907,11 +12919,11 @@ begin
           Data / Env in x1 }
         Self.Emit(#9'ldp x0, x1, [x0]')
       else
-        NotYet(Format('array element of this width (%d bytes, %s)',
-          [AElem.RawSize(), AElem.Name]), nil);
+        InternalError(Format('scalar load of a %d-byte %s (an aggregate is '
+          + 'used by address)', [AElem.RawSize(), AElem.Name]), nil);
   else
-    NotYet(Format('array element of this width (%d bytes, %s)',
-      [AElem.RawSize(), AElem.Name]), nil);
+    InternalError(Format('scalar load of a %d-byte %s (an aggregate is '
+      + 'used by address)', [AElem.RawSize(), AElem.Name]), nil);
   end;
 end;
 
