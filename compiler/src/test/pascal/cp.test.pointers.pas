@@ -27,6 +27,10 @@ type
     procedure AnalyseExpectError(const ASrc: string);
     procedure GenNativeExpectCodeGenError(const ASrc: string);
   published
+    { P^ := Row through a pointer to a static array copies the row; a managed
+      row retains the source's elements (x86-64 stored the row's ADDRESS,
+      arm64 stopped with 'pointer write of a managed static array') }
+    procedure TestCodegen_PointerWriteOfStaticArray_CopiesAndRetains;
     { ------------------------------------------------------------------ }
     { Parser — pointer type names and expressions                          }
     { ------------------------------------------------------------------ }
@@ -1014,6 +1018,39 @@ procedure TPointerTests.TestNative_FillByte_CallsBlaiseFillByte;
 begin
   AssertEquals('lowers to _BlaiseFillByte', '',
     AsmMissing(SrcFillOk, 'callq _BlaiseFillByte', 'bl __BlaiseFillByte'));
+end;
+
+procedure TPointerTests.TestCodegen_PointerWriteOfStaticArray_CopiesAndRetains;
+const
+  SrcPlain = '''
+      program P;
+      type
+        TRow = array[0..2] of Integer;
+        PRow = ^TRow;
+      procedure Put(P: PRow; const R: TRow);
+      begin
+        P^ := R
+      end;
+      begin
+      end.
+      ''';
+  SrcManaged = '''
+      program P;
+      type
+        TSRow = array[0..1] of string;
+        PSRow = ^TSRow;
+      procedure Put(P: PSRow; const R: TSRow);
+      begin
+        P^ := R
+      end;
+      begin
+      end.
+      ''';
+begin
+  AssertEquals('the row is copied', '',
+    AsmMissing(SrcPlain, 'callq memcpy', 'bl _memcpy'));
+  AssertEquals('the managed row retains its elements', '',
+    AsmMissing(SrcManaged, 'callq _StringAddRef', 'bl __StringAddRef'));
 end;
 
 initialization

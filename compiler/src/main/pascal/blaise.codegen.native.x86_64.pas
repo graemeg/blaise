@@ -20822,14 +20822,17 @@ begin
       Self.Emit(#9'addq $8, %rsp');        { drop saved source address }
     end
     else if (TPointerWriteStmt(AStmt).BaseTy <> nil) and
-            ((TPointerWriteStmt(AStmt).BaseTy.Kind = tyRecord) or
+            ((TPointerWriteStmt(AStmt).BaseTy.Kind in
+               [tyRecord, tyStaticArray]) or
              IsJumboSet(TPointerWriteStmt(AStmt).BaseTy)) then
     begin
-      { Whole-RECORD (or whole jumbo-set bitmap) store through a typed pointer:
-        ARC-aware copy (retain source fields, release dest fields, memcpy) —
-        the scalar fallback below would store the aggregate's ADDRESS instead
-        of its bytes (BUG-039).  Same sequence as the array-element record
-        write.  A jumbo set carries no managed fields, so it skips the ARC. }
+      { Whole-RECORD, whole static-array (or whole jumbo-set bitmap) store
+        through a typed pointer: ARC-aware copy (retain the source's managed
+        fields / elements, release the destination's, memcpy) -- the scalar
+        fallback below would store the aggregate's ADDRESS instead of its
+        bytes (BUG-039; a static array took that fallback until 2026-10-17).
+        Same sequence as the array-element record write.  A jumbo set
+        carries no managed fields, so it skips the ARC. }
       Self.EmitExprToEax(TPointerWriteStmt(AStmt).ValExpr);
       Self.Emit(#9'pushq %rax');           { source record address }
       Self.EmitExprToEax(TPointerWriteStmt(AStmt).PtrExpr);
@@ -20846,6 +20849,13 @@ begin
           (BUG-20260720-managed-record-self-assign) }
         Self.EmitRecordFieldReleases(
           TRecordTypeDesc(TPointerWriteStmt(AStmt).BaseTy), '%r15', False);
+      end
+      else if (TPointerWriteStmt(AStmt).BaseTy.Kind = tyStaticArray) and
+              ArcTypeHasManagedContent(TPointerWriteStmt(AStmt).BaseTy) then
+      begin
+        Self.EmitManagedAddRefAt(TPointerWriteStmt(AStmt).BaseTy, '%rbx');
+        Self.EmitManagedReleaseAt(TPointerWriteStmt(AStmt).BaseTy, '%r15',
+          False);
       end;
       Self.Emit(#9'movq %r15, %rdi');
       Self.Emit(#9'movq %rbx, %rsi');

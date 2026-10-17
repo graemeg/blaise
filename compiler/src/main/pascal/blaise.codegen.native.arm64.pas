@@ -12011,16 +12011,15 @@ begin
     EmitAddSubImm('add', 'sp', 'sp', NB + 16);
     Exit;
   end;
-  if (AStmt.BaseTy.Kind = tyRecord) or
-     ((AStmt.BaseTy.Kind = tyStaticArray) and
-      not AggHasManaged(AStmt.BaseTy)) then
+  if AStmt.BaseTy.Kind in [tyRecord, tyStaticArray] then
   begin
     { P^ := R (TList<TRec>.Add's Dest^ := Value): the x86-64 record-copy
       discipline -- retain the source's managed fields, release the
       destination's old ones (no-zero, so P^ := P^ stays exact), memcpy.  A
       record-returning call is materialised first and its +1 references
-      TRANSFER, so it is not retained again.  The two addresses live in
-      callee-saved x19/x22 across the walk calls. }
+      TRANSFER, so it is not retained again; a static array's call result is
+      borrowed scratch, so its elements are always retained.  The two
+      addresses live in callee-saved x19/x22 across the walk calls. }
     Self.EmitExprToX0(AStmt.PtrExpr);
     EmitPushX0();                                  { [ptr] }
     Self.Emit(#9'stp x19, x22, [sp, #-16]!');
@@ -12037,6 +12036,12 @@ begin
         Self.EmitRecordFieldRetains(TRecordTypeDesc(AStmt.BaseTy), 'x19');
       Self.EmitRecordFieldReleases(TRecordTypeDesc(AStmt.BaseTy), 'x22',
         False);
+    end
+    else if (AStmt.BaseTy.Kind = tyStaticArray) and
+            AggHasManaged(AStmt.BaseTy) then
+    begin
+      Self.EmitManagedAddRefAt(AStmt.BaseTy, 'x19');
+      Self.EmitManagedReleaseAt(AStmt.BaseTy, 'x22', False);
     end;
     Self.Emit(#9'mov x0, x22');
     Self.Emit(#9'mov x1, x19');
@@ -12046,8 +12051,6 @@ begin
     Self.Emit(#9'add sp, sp, #16');                { drop the pointer }
     Exit;
   end;
-  if AStmt.BaseTy.Kind = tyStaticArray then
-    NotYet('pointer write of a managed static array', AStmt);
   Self.EmitExprToX0(AStmt.ValExpr);
   EmitPushX0();
   Self.EmitExprToX0(AStmt.PtrExpr);
@@ -12059,7 +12062,8 @@ begin
     4: Self.Emit(#9'str w0, [x9]');
     8: Self.Emit(#9'str x0, [x9]');
   else
-    NotYet('pointer write of this width', AStmt);
+    { every aggregate is copied above; a scalar is 1, 2, 4 or 8 bytes }
+    InternalError('pointer write of an unhandled width', AStmt);
   end;
 end;
 

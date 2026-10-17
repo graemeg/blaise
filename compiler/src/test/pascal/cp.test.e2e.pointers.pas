@@ -22,6 +22,10 @@ type
   protected
     procedure SetUp; override;
   published
+    { P^ := V through pointers to plain, string and object rows, from a
+      variable, a call and the target itself; each object is freed once, when
+      its row is replaced }
+    procedure TestRun_PointerWriteOfStaticArray;
     procedure TestRun_Pointers_WidthsConversionsCasts;
     procedure TestRun_AddrOfVarParam_IsCallersVariable;
     procedure TestRun_CastToUnitLocalPointerType;
@@ -958,6 +962,84 @@ begin
     '0 0' + LineEnding +
     '7' + LineEnding +
     '7 255 255' + LineEnding, 0);
+end;
+
+procedure TE2EPointersTests.TestRun_PointerWriteOfStaticArray;
+const
+  Src = '''
+    program P;
+    type
+      TK = class
+        Tag: string;
+        destructor Destroy(); override;
+      end;
+      TRow = array[0..2] of Integer;
+      TSRow = array[0..1] of string;
+      TKRow = array[0..1] of TK;
+      PRow = ^TRow;
+      PSRow = ^TSRow;
+      PKRow = ^TKRow;
+    destructor TK.Destroy();
+    begin
+      WriteLn('gone ', Tag);
+      inherited Destroy()
+    end;
+    function MkK(const AT: string): TK;
+    begin
+      Result := TK.Create();
+      Result.Tag := AT
+    end;
+    function MkS(const AT: string): TSRow;
+    begin
+      Result[0] := AT + '0';
+      Result[1] := AT + '1'
+    end;
+    var
+      R, R2: TRow;
+      PR: PRow;
+      S, S2: TSRow;
+      PS: PSRow;
+      K, KK: TKRow;
+      PK: PKRow;
+    begin
+      R[0] := 1;
+      R[1] := 2;
+      R[2] := 3;
+      PR := @R2;
+      PR^ := R;
+      WriteLn(R2[0], R2[1], R2[2]);
+      PS := @S2;
+      S[0] := 'a';
+      S[1] := 'b';
+      S[0] := S[0] + 'x';
+      PS^ := S;
+      S[0] := 'changed';
+      WriteLn(S2[0], S2[1]);
+      PS^ := MkS('m');
+      WriteLn(S2[0], S2[1]);
+      PS^ := PS^;
+      WriteLn(S2[0]);
+      K[0] := MkK('k0');
+      K[1] := MkK('k1');
+      PK := @KK;
+      PK^ := K;
+      K[0] := nil;
+      K[1] := nil;
+      WriteLn('dropped');
+      K[0] := MkK('n');
+      PK^ := K;
+      WriteLn('replaced');
+      K[0] := nil;
+      KK[0] := nil;
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '123' + LE + 'axb' + LE + 'm0m1' + LE + 'm0' + LE + 'dropped' + LE +
+    'gone k0' + LE + 'gone k1' + LE + 'replaced' + LE + 'gone n' + LE +
+    'end' + LE, 0);
 end;
 
 initialization
