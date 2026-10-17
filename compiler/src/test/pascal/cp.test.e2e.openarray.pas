@@ -25,6 +25,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { the elements of a literal typed by its open-array formal arrive as the
+      formal's element type: objects dispatch virtually, integers become floats }
+    procedure TestRun_ArrayLiteralArg_TakesFormalElementType;
     { A static array produced by a GETTER -- O.AG, an indexed O.AI[7], a bare AG
       and Self.AG inside a method -- passed to an open-array parameter, const or
       by value, with managed elements too.  x86-64 sent the getter down the
@@ -1281,6 +1284,83 @@ begin
     '99 0 0 3 ' + LineEnding +
     '99 0 0 3 ' + LineEnding +
     '99 0 0 3 ' + LineEnding, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_ArrayLiteralArg_TakesFormalElementType;
+const
+  Src = '''
+    program P;
+    type
+      TA = class
+        function Name(): string; virtual;
+      end;
+      TB = class(TA)
+        function Name(): string; override;
+      end;
+      TAC = class of TA;
+    function TA.Name(): string;
+    begin
+      Result := 'A'
+    end;
+    function TB.Name(): string;
+    begin
+      Result := 'B'
+    end;
+    function Names(const L: array of TA): string;
+    var I: Integer;
+    begin
+      Result := '';
+      for I := 0 to High(L) do
+        Result := Result + L[I].Name()
+    end;
+    function Sum(const L: array of Double): Double;
+    var I: Integer;
+    begin
+      Result := 0;
+      for I := 0 to High(L) do
+        Result := Result + L[I]
+    end;
+    function SumS(const L: array of Single): Single;
+    var I: Integer;
+    begin
+      Result := 0;
+      for I := 0 to High(L) do
+        Result := Result + L[I]
+    end;
+    function Pick(const L: array of Integer): string; overload;
+    begin
+      Result := 'int'
+    end;
+    function Pick(const L: array of Double): string; overload;
+    begin
+      Result := 'dbl'
+    end;
+    function Kinds(const L: array of TAC): string;
+    var I: Integer;
+    begin
+      Result := '';
+      for I := 0 to High(L) do
+        if L[I] = TB then
+          Result := Result + 'b'
+        else
+          Result := Result + 'a'
+    end;
+    var X: TA; Y: TB; I: Integer; D: Double;
+    begin
+      X := TA.Create();
+      Y := TB.Create();
+      I := 3;
+      D := 0.25;
+      WriteLn(Names([X, Y]), Names([Y, X, Y]), Names([Y]));
+      WriteLn(Sum([1, 2.5, I, D]):0:2, ' ', SumS([1, I, 0.5]):0:2);
+      WriteLn(Pick([1, 2]), Pick([1, 2.5]), Pick([I]), Pick([D]));
+      WriteLn(Kinds([TB, TA, TB]))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'ABBABB' + #10 + '6.75 4.50' + #10 + 'intdblintdbl' + #10 + 'bab' + #10, 0);
 end;
 
 initialization

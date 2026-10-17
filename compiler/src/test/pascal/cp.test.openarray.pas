@@ -23,6 +23,10 @@ type
     function  ParseSrc(const ASrc: string): TProgram;
     function  AnalyseSrc(const ASrc: string): TProgram;
   published
+    { a bracket literal for an open-array formal takes the formal's element
+      type when its elements fit: subclasses, metaclasses, integers for a float
+      formal.  An overload whose element type the literal already has wins. }
+    procedure TestSem_ArrayLiteralArg_TakesFormalElementType;
     { a static array from a getter passed to an open-array parameter }
     procedure TestCodegen_StaticArrayGetter_OpenArrayArg_CallsGetter;
     { ------------------------------------------------------------------ }
@@ -760,6 +764,59 @@ begin
     (x86-64 rejected the shape, walking O.AG as a field l-value) }
   AssertEquals('the getter is called', '',
     AsmMissing(Src, #9'callq TObj_GetArr', #9'bl _TObj_GetArr'));
+end;
+
+procedure TOpenArrayTests.TestSem_ArrayLiteralArg_TakesFormalElementType;
+const
+  Src = '''
+      program P;
+      type
+        TA = class end;
+        TB = class(TA) end;
+        TAC = class of TA;
+      procedure Objs(const L: array of TA);
+      begin
+      end;
+      procedure Kinds(const L: array of TAC);
+      begin
+      end;
+      procedure Nums(const L: array of Double);
+      begin
+      end;
+      function Pick(const L: array of Integer): Integer; overload;
+      begin
+        Result := 1
+      end;
+      function Pick(const L: array of Double): Integer; overload;
+      begin
+        Result := 2
+      end;
+      var X: TA; Y: TB; N: Integer;
+      begin
+        Objs([X, Y]);
+        Objs([Y]);
+        Kinds([TB, TA]);
+        Nums([1, 2.5]);
+        N := Pick([1, 2]);
+        N := Pick([1, 2.5])
+      end.
+      ''';
+  BadSrc = '''
+      program P;
+      type
+        TA = class end;
+      procedure Objs(const L: array of TA);
+      begin
+      end;
+      var X: TA;
+      begin
+        Objs([X, 3])
+      end.
+      ''';
+begin
+  AssertEquals('every literal is accepted', '', SemanticError(Src));
+  AssertTrue('an element that does not fit is still an error',
+    SemanticError(BadSrc) <> '');
 end;
 
 initialization

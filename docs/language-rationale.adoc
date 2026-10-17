@@ -1118,17 +1118,25 @@ open-array formals. The literal is a stack-allocated temporary:
 * The call receives two QBE arguments: the buffer pointer and the literal
   integer high index.
 
-The element type is inferred from the first element. All elements must
-resolve to the same type, with one exception: a literal whose elements are
-all integer constants binds to an open array of any integer element type,
-so `[0, 4]` may be passed to an `array of Byte` (GH #233). This mirrors the
-scalar rule, where an untyped integer constant converts to any integer
-parameter type. The literal is then laid out at the formal's element width.
+The literal takes its type from the formal, element by element: each
+element must be assignable to the formal's element type, exactly as a
+scalar argument must be assignable to its parameter.  So `[Dog, Cat]` is a
+valid `array of TAnimal`, `[TDog, TCat]` a valid `array of TAnimalClass`,
+`[1, 2.5, I]` a valid `array of Double`, and `[0, 4]` a valid
+`array of Byte` (GH #233: an untyped integer constant converts to any
+integer element type, with the literal laid out at the formal's element
+width).  As with scalar constants, a plain `Byte` / `Word` destination is
+not range-checked; a subrange or enum element type rejects an out-of-range
+constant.  Integer variables are not narrowed implicitly, and a float never
+becomes an integer.
+
 The binding is scored as a conversion, so an overload whose element type
-matches the literal exactly is still preferred. As with scalar constants, a
-plain `Byte` / `Word` destination is not range-checked; a subrange or enum
-element type is left to the normal type check. Integer variables are not
-narrowed implicitly.
+the literal already has -- taken from its own elements, the first one
+deciding -- is still preferred: `Pick([1, 2])` chooses `array of Integer`
+over `array of Double`, while `Pick([1, 2.5])` can only be the latter.
+Until 2026-10-17 a literal had to match the formal's element type exactly,
+apart from the integer-constant case: `[Y]` with `Y: TDog` did not match an
+`array of TAnimal` at all.
 
 An empty literal `[]` passed to an open-array formal takes the formal's
 type and is passed as a zero-length array (`High = -1`).

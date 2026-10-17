@@ -720,17 +720,24 @@ type
     function  AnalyseStringSubscriptExpr(AExpr: TStringSubscriptExpr): TTypeDesc;
     function  AnalyseArrayLiteralExpr(AExpr: TArrayLiteralExpr): TTypeDesc;
     function  AnalyseSetLiteralExpr(AExpr: TArrayLiteralExpr; ASetType: TSetTypeDesc): TTypeDesc;
-    { A bracket literal given its type by a dynamic-array target (DA := [1, 2],
-      a dyn-array argument, a dyn-array element): a FRESH array of the
-      elements.  Each element is checked as an assignment to the element type
-      would be; a nested literal takes the element type as its own context.
-      AAnalysed: the elements were already analysed (an argument's eager pass). }
-    function  AnalyseDynArrayLiteral(ALit: TArrayLiteralExpr;
-      ADynType: TDynArrayTypeDesc; AAnalysed: Boolean): TTypeDesc;
-    { Overload score of a bracket literal against a dynamic-array formal:
-      1 (a conversion) when every element fits the element type, else 0. }
-    function  DynArrayLiteralScore(AParam: TDynArrayTypeDesc;
+    { A bracket literal given its type by an array target: a dynamic array
+      (DA := [1, 2], a dyn-array argument or element -- a FRESH array of the
+      elements) or an open-array formal ([Dog, Cat] for 'array of TAnimal').
+      Each element is checked as an assignment to the element type would be;
+      a nested literal takes the element type as its own context.  AAnalysed:
+      the elements were already analysed (an argument's eager pass). }
+    function  AnalyseArrayLiteralAs(ALit: TArrayLiteralExpr;
+      AArrType: TTypeDesc; AAnalysed: Boolean): TTypeDesc;
+    { Overload score of a bracket literal against an array formal of element
+      type AElem: 1 (a conversion) when every element fits, else 0. }
+    function  ArrayLiteralScore(AElem: TTypeDesc;
       ALit: TArrayLiteralExpr): Integer;
+    { True when an element of ALit is an integer VARIABLE (or other
+      non-constant) of a wider type than the integer element type AElem:
+      an open-array literal does not narrow one implicitly (GH #233 -- a
+      constant may narrow, its value is known). }
+    function  LiteralNarrowsVariable(AElem: TTypeDesc;
+      ALit: TArrayLiteralExpr): Boolean;
     { The arguments match no overload.  With a single candidate of the right
       arity, report the first argument that does not fit it, with both types
       -- "No matching overload" says nothing useful about a routine that is
@@ -1477,7 +1484,7 @@ begin
                 TSetTypeDesc(AExpectedType))
   else if (AExpectedType <> nil) and (AExpectedType.Kind = tyDynArray) and
           (AExpr is TArrayLiteralExpr) then
-    Result := Self.AnalyseDynArrayLiteral(TArrayLiteralExpr(AExpr),
+    Result := Self.AnalyseArrayLiteralAs(TArrayLiteralExpr(AExpr),
                 TDynArrayTypeDesc(AExpectedType), False)
   else if TryResolveBareEnumIdent(AExpr, AExpectedType) then
     Result := AExpr.ResolvedType
@@ -12413,7 +12420,7 @@ begin
       if (FldInfo.TypeDesc <> nil) and (FldInfo.TypeDesc.Kind = tyDynArray) and
          (AAssign.Expr is TArrayLiteralExpr) then
       begin
-        Self.AnalyseDynArrayLiteral(TArrayLiteralExpr(AAssign.Expr),
+        Self.AnalyseArrayLiteralAs(TArrayLiteralExpr(AAssign.Expr),
           TDynArrayTypeDesc(FldInfo.TypeDesc), False);
         Exit;
       end;
@@ -12531,7 +12538,7 @@ begin
   { Dynamic-array literal: DA := [1, 2] builds a fresh array }
   if (VarSym.TypeDesc.Kind = tyDynArray) and (AAssign.Expr is TArrayLiteralExpr) then
   begin
-    Self.AnalyseDynArrayLiteral(TArrayLiteralExpr(AAssign.Expr),
+    Self.AnalyseArrayLiteralAs(TArrayLiteralExpr(AAssign.Expr),
       TDynArrayTypeDesc(VarSym.TypeDesc), False);
     Exit;
   end;
@@ -13293,7 +13300,7 @@ begin
       end;
       if (VarSym.TypeDesc.Kind = tyDynArray) and (AAssign.Expr is TArrayLiteralExpr) then
       begin
-        Self.AnalyseDynArrayLiteral(TArrayLiteralExpr(AAssign.Expr),
+        Self.AnalyseArrayLiteralAs(TArrayLiteralExpr(AAssign.Expr),
           TDynArrayTypeDesc(VarSym.TypeDesc), False);
         Exit;
       end;
@@ -13423,7 +13430,7 @@ begin
   end;
   if (ATarget.Kind = tyDynArray) and (AAssign.Expr is TArrayLiteralExpr) then
   begin
-    Self.AnalyseDynArrayLiteral(TArrayLiteralExpr(AAssign.Expr),
+    Self.AnalyseArrayLiteralAs(TArrayLiteralExpr(AAssign.Expr),
       TDynArrayTypeDesc(ATarget), False);
     Exit;
   end;
@@ -13803,7 +13810,7 @@ begin
   if AParamType.Kind = tyDynArray then
   begin
     { a dynamic-array formal: the literal is a fresh array of its type }
-    Self.AnalyseDynArrayLiteral(TArrayLiteralExpr(AArg),
+    Self.AnalyseArrayLiteralAs(TArrayLiteralExpr(AArg),
       TDynArrayTypeDesc(AParamType), True);
     Exit;
   end;
@@ -13836,6 +13843,17 @@ begin
     TArrayLiteralExpr(AArg).IsConstArray := False;
     AArg.ResolvedType := AParamType;
   end;
+  { Any other literal not already of the formal's element type: give it the
+    formal's type, element by element (see ArgMatchScore) }
+  if (AParamType.Kind = tyOpenArray) and
+     (TArrayLiteralExpr(AArg).Elements.Count > 0) and
+     (TOpenArrayTypeDesc(AParamType).ElementType <> nil) and
+     not SameText(TOpenArrayTypeDesc(AParamType).ElementType.Name, 'TVarRec') and
+     not ((AArg.ResolvedType <> nil) and
+          (AArg.ResolvedType.Kind = tyOpenArray) and
+          (TOpenArrayTypeDesc(AArg.ResolvedType).ElementType =
+           TOpenArrayTypeDesc(AParamType).ElementType)) then
+    Self.AnalyseArrayLiteralAs(TArrayLiteralExpr(AArg), AParamType, True);
 end;
 
 { A call through a procedural-typed field has exactly one candidate signature,
@@ -13920,7 +13938,28 @@ begin
   end;
 end;
 
-function TSemanticAnalyser.DynArrayLiteralScore(AParam: TDynArrayTypeDesc;
+function TSemanticAnalyser.LiteralNarrowsVariable(AElem: TTypeDesc;
+  ALit: TArrayLiteralExpr): Boolean;
+var
+  I: Integer;
+  V: Int64;
+  Slot: TASTExpr;
+begin
+  Result := False;
+  if (AElem = nil) or AElem.IsFloat() or not AElem.IsNumeric() then
+    Exit;
+  for I := 0 to ALit.Elements.Count - 1 do
+  begin
+    Slot := TASTExpr(ALit.Elements.Items[I]);
+    if (Slot.ResolvedType <> nil) and Slot.ResolvedType.IsNumeric() and
+       not Slot.ResolvedType.IsFloat() and
+       (Slot.ResolvedType.RawSize() > AElem.RawSize()) and
+       not Self.TryEvalConstIntExpr(Slot, V) then
+      Exit(True);
+  end;
+end;
+
+function TSemanticAnalyser.ArrayLiteralScore(AElem: TTypeDesc;
   ALit: TArrayLiteralExpr): Integer;
 var
   I: Integer;
@@ -13930,7 +13969,7 @@ begin
   for I := 0 to ALit.Elements.Count - 1 do
   begin
     Slot := TASTExpr(ALit.Elements.Items[I]);
-    if Self.ArgMatchScore(AParam.ElementType, Slot.ResolvedType, Slot) = 0 then
+    if Self.ArgMatchScore(AElem, Slot.ResolvedType, Slot) = 0 then
       Exit(0);
   end;
 end;
@@ -14001,7 +14040,7 @@ begin
     before the nil-arg bail, since [] and a mixed literal are untyped. }
   if (AParam.Kind = tyDynArray) and (AArgExpr is TArrayLiteralExpr) then
   begin
-    Result := Self.DynArrayLiteralScore(TDynArrayTypeDesc(AParam),
+    Result := Self.ArrayLiteralScore(TDynArrayTypeDesc(AParam).ElementType,
       TArrayLiteralExpr(AArgExpr));
     Exit;
   end;
@@ -14011,6 +14050,27 @@ begin
     constants has no single element type, so it is left untyped. }
   if Self.LiteralNarrowsToOpenArray(AArgExpr, AParam) then
     Exit(1);
+  { Any other bracket literal against an open-array formal whose element
+    type it was not given by its own elements ([Y] with Y: TDog for 'array
+    of TAnimal', [1, 2.5] for 'array of Double', [TB, TA] for 'array of
+    TAClass'): a conversion, matched when every element fits.  A literal
+    already of the formal's element type falls through to the exact match
+    below. }
+  if (AParam.Kind = tyOpenArray) and (AArgExpr is TArrayLiteralExpr) and
+     (TArrayLiteralExpr(AArgExpr).Elements.Count > 0) and
+     (TOpenArrayTypeDesc(AParam).ElementType <> nil) and
+     not SameText(TOpenArrayTypeDesc(AParam).ElementType.Name, 'TVarRec') and
+     not LiteralHasRange(TArrayLiteralExpr(AArgExpr)) and
+     not ((AArg <> nil) and (AArg.Kind = tyOpenArray) and
+          (TOpenArrayTypeDesc(AArg).ElementType =
+           TOpenArrayTypeDesc(AParam).ElementType)) then
+  begin
+    if Self.LiteralNarrowsVariable(TOpenArrayTypeDesc(AParam).ElementType,
+         TArrayLiteralExpr(AArgExpr)) then
+      Exit(0);
+    Exit(Self.ArrayLiteralScore(TOpenArrayTypeDesc(AParam).ElementType,
+      TArrayLiteralExpr(AArgExpr)));
+  end;
   if AArg = nil then Exit;
   { Integer literal (untyped constant) matches any integer type exactly —
     mirrors Pascal's treatment of untyped integer constants.  Floating-point
@@ -19971,23 +20031,33 @@ begin
   AExpr.ResolvedType := Result;
 end;
 
-function TSemanticAnalyser.AnalyseDynArrayLiteral(ALit: TArrayLiteralExpr;
-  ADynType: TDynArrayTypeDesc; AAnalysed: Boolean): TTypeDesc;
+function TSemanticAnalyser.AnalyseArrayLiteralAs(ALit: TArrayLiteralExpr;
+  AArrType: TTypeDesc; AAnalysed: Boolean): TTypeDesc;
 var
   Elem:    TTypeDesc;
   ActType: TTypeDesc;
   Slot:    TASTExpr;
   I:       Integer;
+  What:    string;
 begin
-  Elem := ADynType.ElementType;
+  if AArrType.Kind = tyOpenArray then
+  begin
+    Elem := TOpenArrayTypeDesc(AArrType).ElementType;
+    What := 'open-array literal';
+  end
+  else
+  begin
+    Elem := TDynArrayTypeDesc(AArrType).ElementType;
+    What := 'dynamic-array literal';
+  end;
   if LiteralHasRange(ALit) then
     SemanticError('A range lo..hi is only allowed in a set literal, not a ' +
-      'dynamic-array literal', ALit.Line, ALit.Col);
+      What, ALit.Line, ALit.Col);
   for I := 0 to ALit.Elements.Count - 1 do
   begin
     Slot := TASTExpr(ALit.Elements.Items[I]);
     if (Slot is TArrayLiteralExpr) and (Elem.Kind = tyDynArray) then
-      ActType := Self.AnalyseDynArrayLiteral(TArrayLiteralExpr(Slot),
+      ActType := Self.AnalyseArrayLiteralAs(TArrayLiteralExpr(Slot),
         TDynArrayTypeDesc(Elem), AAnalysed)
     else if (Slot is TArrayLiteralExpr) and (Elem.Kind = tySet) then
     begin
@@ -20002,12 +20072,11 @@ begin
       ALit.Elements.Items[I] := Slot;
     end;
     Self.CheckConstValueInRange(Elem, Slot, Slot.Line, Slot.Col);
-    CheckTypesMatch(Elem, ActType, 'dynamic-array literal element',
-      Slot.Line, Slot.Col);
+    CheckTypesMatch(Elem, ActType, What + ' element', Slot.Line, Slot.Col);
   end;
   ALit.IsConstArray := False;
-  ALit.ResolvedType := ADynType;
-  Result := ADynType;
+  ALit.ResolvedType := AArrType;
+  Result := AArrType;
 end;
 
 function TSemanticAnalyser.SetLiteralBitCount(AExpr: TArrayLiteralExpr;
