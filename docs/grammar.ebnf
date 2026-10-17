@@ -1273,6 +1273,8 @@ CallChainStmt
 ExprCallStmt
     = IDENT LBRACKET Expr { COMMA Expr } RBRACKET { SubscriptSuffix }
       LPAREN [ ArgList ] RPAREN
+    | IDENT DOT IDENT { Selector } LBRACKET Expr RBRACKET { SubscriptSuffix }
+      LPAREN [ ArgList ] RPAREN       (* A.B.Handlers[I](X); *)
     | IDENT CARET LPAREN [ ArgList ] RPAREN
     | IDENT LPAREN [ ArgList ] RPAREN LPAREN [ ArgList ] RPAREN { CallSuffix }
     ;
@@ -1308,6 +1310,12 @@ Selector
     | LBRACKET Expr RBRACKET
     | DOT IDENT LPAREN [ ArgList ] RPAREN
     ;
+
+(* Any sequence of Selectors may follow the first member, including a field
+ * or a further subscript after an element: A.B.Arr[I].F := V and
+ * A.B.Grid[I][J] := V.  (The parser accepted these only after a plain
+ * IDENT DOT IDENT base until 2026-10-17; past a chained base it stopped at
+ * the element with "Expected ':='".) *)
 
 MethodCall
     = IDENT DOT IDENT

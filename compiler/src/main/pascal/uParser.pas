@@ -206,6 +206,8 @@ type
     procedure ParseMethodCallArgList(ACall: TMethodCallStmt);
     function  ParseExprCallStmt(ACallee: TASTExpr; ALine, ACol: Integer): TASTStmt;
     function  CallChainStmt(AExpr: TASTExpr; ALine, ACol: Integer): TASTStmt;
+    function  ChainTailStmt(ABase: TASTExpr; const ARootName: string;
+      ALine, ACol: Integer): TASTStmt;
   public
     constructor Create(ALexer: TLexer);
     destructor Destroy; override;
@@ -3783,6 +3785,84 @@ begin
   Result := Stmt;
 end;
 
+function TParser.ChainTailStmt(ABase: TASTExpr; const ARootName: string;
+  ALine, ACol: Integer): TASTStmt;
+{ The rest of a statement whose designator chain a hand-written arm of
+  ParseStmt has built up to ABase but cannot continue (B.O.Arr[0].Y := V,
+  B.O.Grid[0][1] := V, O.Handlers[1](X);): the remaining postfix links are
+  parsed as in an expression, then the statement is an assignment to the
+  chain or a call through it.  Takes ownership of ABase. }
+var
+  Chain:     TASTExpr;
+  Sub:       TStringSubscriptExpr;
+  Fld:       TFieldAccessExpr;
+  FldAssign: TFieldAssignment;
+  SubAssign: TStaticSubscriptAssign;
+begin
+  Chain := Self.ParsePostfixChain(ABase);
+  if not Check(tkAssign) then
+    Exit(Self.CallChainStmt(Chain, ALine, ACol));
+  Advance();  { consume ':=' }
+  if Chain is TFieldAccessExpr then
+  begin
+    { ...Field := V }
+    Fld := TFieldAccessExpr(Chain);
+    FldAssign := TFieldAssignment.Create();
+    FldAssign.Line := ALine;
+    FldAssign.Col := ACol;
+    FldAssign.FieldName := Fld.FieldName;
+    FldAssign.ObjExpr := Fld.Base;
+    Fld.Base := nil;
+    Fld.Free();
+    FldAssign.Expr := ParseExpr();
+    Exit(FldAssign);
+  end;
+  if (Chain is TStringSubscriptExpr) and
+     (TStringSubscriptExpr(Chain).StrExpr is TFieldAccessExpr) then
+  begin
+    { ...Field[I] := V -- an element of an array-typed field (or an indexed
+      property write; the semantic pass tells them apart) }
+    Sub := TStringSubscriptExpr(Chain);
+    Fld := TFieldAccessExpr(Sub.StrExpr);
+    FldAssign := TFieldAssignment.Create();
+    FldAssign.Line := ALine;
+    FldAssign.Col := ACol;
+    FldAssign.FieldName := Fld.FieldName;
+    FldAssign.ObjExpr := Fld.Base;
+    Fld.Base := nil;
+    FldAssign.PropIndexExpr := Sub.IndexExpr;
+    Sub.IndexExpr := nil;
+    Sub.Free();  { frees the detached field node too }
+    FldAssign.Expr := ParseExpr();
+    Exit(FldAssign);
+  end;
+  if Chain is TStringSubscriptExpr then
+  begin
+    { ...[I][J] := V -- an element of the array the chain yields }
+    Sub := TStringSubscriptExpr(Chain);
+    SubAssign := TStaticSubscriptAssign.Create();
+    SubAssign.Line := ALine;
+    SubAssign.Col := ACol;
+    SubAssign.ArrayName := ARootName;
+    SubAssign.BaseExpr := Sub.StrExpr;
+    SubAssign.IndexExpr := Sub.IndexExpr;
+    Sub.StrExpr := nil;
+    Sub.IndexExpr := nil;
+    Sub.Free();
+    try
+      SubAssign.ValueExpr := ParseExpr();
+    except
+      SubAssign.Free();
+      raise;
+    end;
+    Exit(SubAssign);
+  end;
+  Chain.Free();
+  raise EParseError.Create(Format(
+    'Invalid assignment target at line %d col %d in %s',
+    [ALine, ACol, FLexer.Filename]));
+end;
+
 function TParser.CallChainStmt(AExpr: TASTExpr; ALine, ACol: Integer): TASTStmt;
 { A statement made of a postfix chain (GetFn()(X); GetFn()(X).Run();): the
   last link must be a call -- a call through the value the chain yields, or
@@ -4524,9 +4604,8 @@ begin
           ChainBase.Free();
           raise;
         end;
-        raise EParseError.Create(Format(
-          'Expected '':='' or ''('' after chain at line %d col %d in %s',
-          [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
+        { any other link (a call through an element, O.Handlers[1](X);) }
+        Exit(Self.ChainTailStmt(ChainBase, Name, Line, Col));
       end;
     end
     else if Check(tkAssign) then
@@ -4598,6 +4677,25 @@ begin
             MCall := nil;
             FldAssign.PropIndexExpr := ParseExpr();
             Expect(tkRBracket);
+            if not Check(tkAssign) then
+            begin
+              { the chain goes on past the element -- A.B.Arr[I].F := V,
+                A.B.Grid[I][J] := V, A.B.Handlers[I](X); }
+              FldNode := TFieldAccessExpr.Create();
+              FldNode.Line := Line;
+              FldNode.Col := Col;
+              FldNode.Base := FldAssign.ObjExpr;
+              FldNode.FieldName := FldAssign.FieldName;
+              FldAssign.ObjExpr := nil;
+              SubNode := TStringSubscriptExpr.Create();
+              SubNode.Line := Line;
+              SubNode.Col := Col;
+              SubNode.StrExpr := FldNode;
+              SubNode.IndexExpr := FldAssign.PropIndexExpr;
+              FldAssign.PropIndexExpr := nil;
+              FldAssign.Free();
+              Exit(Self.ChainTailStmt(SubNode, Name, Line, Col));
+            end;
             Expect(tkAssign);
             FldAssign.Expr := ParseExpr();
             Exit(FldAssign);

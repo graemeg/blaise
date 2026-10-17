@@ -23,6 +23,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { statements whose chain continues past a field element: field writes,
+      nested-row element writes and calls through procedural elements }
+    procedure TestRun_ChainPastFieldElement;
     { procedural calls with interface, float and >6-slot arguments;
       interface-call results into >6-slot calls }
     procedure TestRun_ProcCalls_InterfaceAndFloatArgs;
@@ -4597,6 +4600,63 @@ begin
 
   AssertEquals('--suite without value: exit', 2,
     RunProc(BinFile, ['--suite'], Output));
+end;
+
+procedure TE2EMiscTests.TestRun_ChainPastFieldElement;
+const
+  Src = '''
+    program P;
+    type
+      TEv = procedure(A: Integer) of object;
+      TPr = procedure(A: Integer);
+      THandler = class
+        procedure Go(A: Integer);
+      end;
+      TPt = record X, Y: Integer; end;
+      TRow = array[0..2] of Integer;
+      TObj = class
+        AR: array[0..1] of TPt;
+        DR: array of TPt;
+        A2: array[0..1] of TRow;
+        AM: array[0..1] of TEv;
+        PR: array[0..1] of TPr;
+        H: THandler;
+      end;
+      TBox = class
+        O: TObj;
+      end;
+    procedure THandler.Go(A: Integer);
+    begin
+      WriteLn('go ', A)
+    end;
+    procedure Hi(A: Integer);
+    begin
+      WriteLn('hi ', A)
+    end;
+    var
+      O: TObj;
+      B: TBox;
+    begin
+      O := TObj.Create();
+      B := TBox.Create();
+      B.O := O;
+      O.H := THandler.Create();
+      SetLength(O.DR, 2);
+      B.O.AR[0].Y := 8;
+      B.O.DR[1].X := 7;
+      B.O.A2[0][1] := 6;
+      B.O.A2[1][2] := 5;
+      WriteLn(O.AR[0].Y, O.DR[1].X, O.A2[0][1], O.A2[1][2]);
+      O.AM[1] := @O.H.Go;
+      O.PR[0] := @Hi;
+      O.AM[1](1);
+      B.O.AM[1](2);
+      B.O.PR[0](3)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '8765' + #10 + 'go 1' + #10 + 'go 2' + #10 + 'hi 3' + #10, 0);
 end;
 
 initialization

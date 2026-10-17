@@ -21,6 +21,9 @@ type
     { the EParseError message for ASrc, or '' when it parses }
     function ParseErrorMsg(const ASrc: string): string;
   published
+    { a chained base's field element may be followed by more chain: a field
+      write, a further subscript, or a call through the element }
+    procedure TestParse_ChainPastFieldElement;
     { FPC/Delphi constructs Blaise deliberately omits are recognised and
       rejected with the Blaise form ("recognise, reject, explain";
       language-rationale.adoc).  They used to fail with an unrelated
@@ -1071,6 +1074,32 @@ begin
     ParseErrorMsg(
       'program P; type generic = Integer; var specialize: generic; ' +
       'begin specialize := 1; end.'));
+end;
+
+procedure TParserTests.TestParse_ChainPastFieldElement;
+var
+  Prog: TProgram;
+  Fld:  TFieldAssignment;
+  Sub:  TStaticSubscriptAssign;
+begin
+  Prog := ParseSource(
+    'program P; var B, V: Integer;'
+    + ' begin B.O.AR[0].Y := V; B.O.A2[0][1] := V; B.O.AM[1](V) end.');
+  try
+    AssertTrue('A.B.Arr[I].F := V is a field assignment',
+      Prog.Block.Stmts.Items[0] is TFieldAssignment);
+    Fld := TFieldAssignment(Prog.Block.Stmts.Items[0]);
+    AssertEquals('final field', 'Y', Fld.FieldName);
+    AssertTrue('on the element', Fld.ObjExpr is TStringSubscriptExpr);
+    AssertTrue('A.B.Grid[I][J] := V is an element write',
+      Prog.Block.Stmts.Items[1] is TStaticSubscriptAssign);
+    Sub := TStaticSubscriptAssign(Prog.Block.Stmts.Items[1]);
+    AssertTrue('of the row the chain yields', Sub.BaseExpr is TStringSubscriptExpr);
+    AssertTrue('A.B.Handlers[I](X) is a call through the element',
+      Prog.Block.Stmts.Items[2] is TExprCallStmt);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization
