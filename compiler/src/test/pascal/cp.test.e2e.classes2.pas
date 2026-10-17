@@ -22,6 +22,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { metaclass values in static- and dynamic-array elements, written by
+      element store and by a literal, read back and compared }
+    procedure TestRun_MetaclassArrayElements;
     { Class and record array consts written with a named array type
       (const CA: TArr = (...), const CN: TNames = (...)), read qualified, bare
       inside a method, passed as an open array and iterated.  The declaration was
@@ -3590,6 +3593,35 @@ begin
     '6 ann' + LineEnding +
     '5 6 7 8 ' + LineEnding +
     '5 6 7 8 ' + LineEnding, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_MetaclassArrayElements;
+const
+  Src = '''
+    program P;
+    type
+      TA = class end;
+      TB = class(TA) end;
+      TAC = class of TA;
+    var
+      S: array[0..1] of TAC;
+      D: array of TAC;
+      C: TAC;
+    begin
+      S[1] := TB;
+      S[0] := TA;
+      SetLength(D, 1);
+      D[0] := TB;
+      WriteLn(S[1] = TB, S[0] = TA, D[0] = TB);
+      D := [TA, TB, TB];
+      for C in D do
+        Write(C = TB, ' ');
+      WriteLn()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'TrueTrueTrue' + LE + 'False True True ' + LE, 0);
 end;
 
 initialization

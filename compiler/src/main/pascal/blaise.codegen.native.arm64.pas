@@ -10334,12 +10334,13 @@ begin
   end
   else if IsIntFam(Elem) or
           (Elem.Kind in [tyBoolean, tyPointer, tyPChar]) or
-          IsPlainProcType(Elem) or
+          IsPlainWordRef(Elem) or
           ((Elem.Kind = tySet) and not IsJumboSetType(Elem)) then
   begin
     { a 1-byte element is a byte store: Chr(N) must stay a raw ordinal.  A
       small set is its bitmask in one register (a narrower source set is
-      zero-extended by its load), stored at the element's width. }
+      zero-extended by its load), stored at the element's width.  A
+      metaclass or plain procedure is one code / typeinfo word. }
     if Elem.RawSize() = 1 then
       EmitByteRhsToX0(AValue)
     else

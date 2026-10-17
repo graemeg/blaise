@@ -14,7 +14,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TClassOfTests = class(TTestCase)
@@ -24,6 +24,9 @@ type
     procedure AnalyseExpectError(const ASrc: string);
     procedure AnalyseExpectErrorMsg(const ASrc, AExpectedSubstr: string);
   published
+    { M[I] := TB stores the class's typeinfo word into a metaclass array
+      element (arm64 stopped with 'array element of this type') }
+    procedure TestCodegen_MetaclassArrayElementStore;
     { Parser }
     procedure TestParse_ClassOf_AsAlias;
     procedure TestParse_ClassOf_VarDecl;
@@ -405,6 +408,24 @@ const Src = '''
     ''';
 begin
   AnalyseExpectErrorMsg(Src, 'requires () for a call');
+end;
+
+procedure TClassOfTests.TestCodegen_MetaclassArrayElementStore;
+const
+  Src = '''
+      program P;
+      type
+        TA = class end;
+        TB = class(TA) end;
+        TAC = class of TA;
+      var M: array[0..1] of TAC;
+      begin
+        M[1] := TB
+      end.
+      ''';
+begin
+  AssertEquals('the typeinfo word is stored', '',
+    AsmMissing(Src, 'leaq typeinfo_TB(%rip)', 'adrp x0, _typeinfo_TB@PAGE'));
 end;
 
 initialization
