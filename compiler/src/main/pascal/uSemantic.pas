@@ -731,6 +731,12 @@ type
       1 (a conversion) when every element fits the element type, else 0. }
     function  DynArrayLiteralScore(AParam: TDynArrayTypeDesc;
       ALit: TArrayLiteralExpr): Integer;
+    { The arguments match no overload.  With a single candidate of the right
+      arity, report the first argument that does not fit it, with both types
+      -- "No matching overload" says nothing useful about a routine that is
+      not overloaded.  Raises in every case. }
+    procedure RejectCallArgs(ACands: TObjectList; AArgs: TObjectList;
+      const AName: string; ALine, ACol: Integer);
     { Expand [lo..hi] range elements of a set literal into individual member
       idents (issue #105).  Constant ascending ranges only. }
     procedure ExpandSetRanges(AExpr: TArrayLiteralExpr; ABaseEnum: TEnumTypeDesc);
@@ -9459,9 +9465,7 @@ begin
     Best := Self.PickBestCandidate(ArityMatch, AArgs, Ambiguous);
 
     if Best = nil then
-      SemanticError(
-        Format('No matching overload for ''%s.%s'' with %d argument(s)',
-          [ATypeName, AMethodName, Arity]),
+      Self.RejectCallArgs(ArityMatch, AArgs, ATypeName + '.' + AMethodName,
         ALine, ACol);
     if Ambiguous then
       SemanticError(
@@ -14056,9 +14060,18 @@ begin
     Exit(2);
   end;
   { Numeric widening: both numerics, kinds differ.  Captures
-    Integer→Int64, Integer→Double, Single→Double, Byte→Integer, etc. }
+    Integer→Int64, Integer→Double, Single→Double, Byte→Integer, etc.  The
+    same rules as CheckTypesMatch: a float never converts to an integer
+    without Trunc / Round, and Int64 / UInt64 need an explicit cast.  (A
+    Double argument for an Integer formal used to score here, and the call
+    paths trust the score -- the callee received the float's bit pattern.) }
   if AParam.IsNumeric() and AArg.IsNumeric() then
   begin
+    if AArg.IsFloat() and not AParam.IsFloat() then
+      Exit(0);
+    if ((AParam.Kind = tyInt64) and (AArg.Kind = tyUInt64)) or
+       ((AParam.Kind = tyUInt64) and (AArg.Kind = tyInt64)) then
+      Exit(0);
     Exit(1);
   end;
   { Fall-through: probe full assignability via CheckTypesMatch.  This
@@ -14072,6 +14085,38 @@ begin
     on E: ESemanticError do
       Result := 0;
   end;
+end;
+
+procedure TSemanticAnalyser.RejectCallArgs(ACands: TObjectList;
+  AArgs: TObjectList; const AName: string; ALine, ACol: Integer);
+var
+  Cand: TMethodDecl;
+  Par:  TMethodParam;
+  Arg:  TASTExpr;
+  J:    Integer;
+begin
+  if (ACands.Count = 1) and (AArgs <> nil) then
+  begin
+    Cand := TMethodDecl(ACands.Items[0]);
+    for J := 0 to AArgs.Count - 1 do
+    begin
+      if J >= Cand.Params.Count then
+        Break;
+      Par := TMethodParam(Cand.Params.Items[J]);
+      Arg := TASTExpr(AArgs.Items[J]);
+      if (Par.ResolvedType <> nil) and (Arg.ResolvedType <> nil) and
+         (ArgMatchScore(Par.ResolvedType, Arg.ResolvedType, Arg) = 0) then
+        SemanticError(
+          Format('Type mismatch in argument %d of ''%s'': expected ''%s'' '
+                 + 'but got ''%s''',
+            [J + 1, AName, Par.ResolvedType.Name, Arg.ResolvedType.Name]),
+          ALine, ACol);
+    end;
+  end;
+  SemanticError(
+    Format('No matching overload for ''%s'' with %d argument(s)',
+      [AName, AArgs.Count]),
+    ALine, ACol);
 end;
 
 function TSemanticAnalyser.ResolveStandaloneOverload(const AName: string;
@@ -14237,10 +14282,7 @@ begin
     end;
 
     if BestScore < 0 then
-      SemanticError(
-        Format('No matching overload for ''%s'' with %d argument(s)',
-          [AName, AArity]),
-        ALine, ACol);
+      Self.RejectCallArgs(ArityMatch, AArgs, AName, ALine, ACol);
     if BestCount > 1 then
       SemanticError(
         Format('Ambiguous overload of ''%s'' — multiple candidates match equally',

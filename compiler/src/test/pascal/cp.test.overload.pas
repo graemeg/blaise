@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TOverloadTests = class(TTestCase)
@@ -21,6 +21,10 @@ type
     function AnalyseSrc(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { a float argument never converts to an integer formal (Trunc / Round are
+      explicit), and Int64 / UInt64 need a cast -- for procedures, functions and
+      methods alike; the message names the argument and both types }
+    procedure TestSem_FloatArgForIntegerParam_Rejected;
     { Phase A — arity-distinct standalone overloading }
 
     { Parser: 'overload' directive sets the IsOverload flag on TMethodDecl }
@@ -381,6 +385,46 @@ begin
     overload (indexed first) and then failed to fill parameter B. }
   Prog := AnalyseSrc(SrcCtorOverload);
   Prog.Free();
+end;
+
+procedure TOverloadTests.TestSem_FloatArgForIntegerParam_Rejected;
+const
+  Head = '''
+      program P;
+      type
+        TO1 = class
+          procedure M(X: Integer);
+        end;
+      procedure TO1.M(X: Integer);
+      begin
+      end;
+      procedure P1(X: Integer);
+      begin
+      end;
+      function F1(X: Int64): Int64;
+      begin
+        Result := X
+      end;
+      procedure U1(X: UInt64);
+      begin
+      end;
+      var D: Double; I: Int64; O: TO1;
+      begin
+      ''';
+begin
+  AssertEquals('procedure', 0,
+    Pos('Type mismatch in argument 1 of ''P1'': expected ''Integer'' but got ''Double''',
+      SemanticError(Head + 'P1(D) end.')));
+  AssertTrue('float literal',
+    Pos('argument 1 of ''P1''', SemanticError(Head + 'P1(2.5) end.')) >= 0);
+  AssertTrue('function',
+    Pos('argument 1 of ''F1''', SemanticError(Head + 'I := F1(D) end.')) >= 0);
+  AssertTrue('method',
+    Pos('argument 1 of ''TO1.M''', SemanticError(Head + 'O.M(D) end.')) >= 0);
+  AssertTrue('Int64 for UInt64',
+    Pos('argument 1 of ''U1''', SemanticError(Head + 'U1(I) end.')) >= 0);
+  AssertEquals('Integer widens to Int64 and Double still', '',
+    SemanticError(Head + 'I := F1(3); D := 1 end.'));
 end;
 
 initialization
