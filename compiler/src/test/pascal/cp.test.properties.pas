@@ -25,6 +25,10 @@ type
     function AnalyseSrc(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { a property read through a getter has no storage: it cannot be resized
+      by SetLength or passed to a var parameter (both reached the backends and
+      failed there); a field-backed property and a field still can }
+    procedure TestSem_GetterPropertyIsNotAVariable;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1005,6 +1009,47 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TPropertyTests.TestSem_GetterPropertyIsNotAVariable;
+const
+  Head = '''
+      program P;
+      type
+        TIA = array of Integer;
+        TRows = array of TIA;
+        TObj = class
+          FRows: TRows;
+          FN: Integer;
+          function GetRow(I: Integer): TIA;
+          function GetN(): Integer;
+          property Row[I: Integer]: TIA read GetRow;
+          property N: Integer read GetN;
+          property NF: Integer read FN write FN;
+        end;
+      function TObj.GetRow(I: Integer): TIA;
+      begin
+        Result := FRows[I]
+      end;
+      function TObj.GetN(): Integer;
+      begin
+        Result := FN
+      end;
+      procedure Bump(var X: Integer);
+      begin
+        X := X + 1
+      end;
+      var O: TObj;
+      begin
+      ''';
+begin
+  AssertTrue('SetLength on an indexed getter property',
+    Pos('must be an assignable variable',
+      SemanticError(Head + 'SetLength(O.Row[1], 5) end.')) >= 0);
+  AssertTrue('a getter property for a var parameter',
+    Pos('must be a variable', SemanticError(Head + 'Bump(O.N) end.')) >= 0);
+  AssertEquals('a field-backed property and a field are variables', '',
+    SemanticError(Head + 'Bump(O.NF); Bump(O.FN); SetLength(O.FRows[1], 2) end.'));
 end;
 
 initialization

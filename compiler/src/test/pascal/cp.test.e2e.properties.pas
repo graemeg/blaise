@@ -23,6 +23,10 @@ type
   protected
     procedure SetUp; override;
   published
+    { an element of the dynamic array a property returns is storage shared
+      with the field, so SetLength on it resizes the field's element; a
+      field-backed property passes to a var parameter }
+    procedure TestRun_ElementOfPropertyValueIsResizable;
     { Inside a method a bare element write through a field-read array property
       (AP[3] := 25, DP[1] := 'd1') writes the backing field; it was rejected as
       "Undeclared variable". }
@@ -1106,6 +1110,44 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     '25 26 25 d1 d1' + LineEnding, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_ElementOfPropertyValueIsResizable;
+const
+  Src = '''
+    program P;
+    type
+      TIA = array of Integer;
+      TRows = array of TIA;
+      TObj = class
+        FRows: TRows;
+        FN: Integer;
+        function GetRows(): TRows;
+        property Rows: TRows read GetRows;
+        property NF: Integer read FN write FN;
+      end;
+    function TObj.GetRows(): TRows;
+    begin
+      Result := FRows
+    end;
+    procedure Bump(var X: Integer);
+    begin
+      X := X + 1
+    end;
+    var O: TObj;
+    begin
+      O := TObj.Create();
+      SetLength(O.FRows, 2);
+      SetLength(O.Rows[1], 4);
+      WriteLn(Length(O.FRows[1]));
+      Bump(O.NF);
+      Bump(O.FN);
+      WriteLn(O.FN)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '4' + LE + '2' + LE, 0);
 end;
 
 initialization

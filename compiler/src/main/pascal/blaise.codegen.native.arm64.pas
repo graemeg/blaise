@@ -9372,7 +9372,8 @@ begin
     if (TASTExpr(ACall.Args.Items[0]) is TFieldAccessExpr) and
        (TFieldAccessExpr(TASTExpr(ACall.Args.Items[0])).PropIndexExpr <> nil)
        and not TFieldAccessExpr(TASTExpr(ACall.Args.Items[0])).IsArrayAccess then
-      NotYet('SetLength on this field-lvalue form', ACall);
+      { an indexed property read is a value: IsVarArgLValue rejects it }
+      InternalError('SetLength on an indexed property', ACall);
     if not (TASTExpr(ACall.Args.Items[0]) is TIdentExpr) or
        (TIdentExpr(TASTExpr(ACall.Args.Items[0])).ParamMode = pmVar) or
        IsCaptured(TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name) or

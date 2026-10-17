@@ -12665,10 +12665,24 @@ end;
 function TSemanticAnalyser.IsVarArgLValue(AExpr: TASTExpr): Boolean;
 var
   BaseKind: TTypeKind;
+  Fld: TFieldAccessExpr;
 begin
-  if (AExpr is TIdentExpr) or (AExpr is TFieldAccessExpr) or
-     (AExpr is TDerefExpr) then
+  if (AExpr is TIdentExpr) or (AExpr is TDerefExpr) then
     Exit(True);
+  if AExpr is TFieldAccessExpr then
+  begin
+    Fld := TFieldAccessExpr(AExpr);
+    { Obj.Prop[I] on a non-indexed property: the element of the value }
+    if Fld.LoweredSubscript <> nil then
+      Exit(Self.IsVarArgLValue(Fld.LoweredSubscript));
+    { a property read through a getter (indexed or not), a method call, a
+      constant or a character of a string field is a VALUE with no storage
+      behind it: SetLength(O.Rows[1], N) on an indexed property passed the
+      front end and failed in both backends }
+    Exit(not (Fld.IsConstant or Fld.IsMethodCall or (Fld.PropRead <> nil) or
+              Fld.IsStaticPropGet or Fld.IsCharAccess or
+              ((Fld.PropIndexExpr <> nil) and not Fld.IsArrayAccess)));
+  end;
   { Array element a[i] (a TStringSubscriptExpr over an array base) is a
     valid var/out actual.  String / PChar subscripts yield a char by value,
     not a standalone addressable element, so they are not accepted. }
