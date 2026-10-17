@@ -4390,7 +4390,8 @@ begin
   else if AStmt.FieldInfo.TypeDesc.Kind = tyStaticArray then
     Elem := TStaticArrayTypeDesc(AStmt.FieldInfo.TypeDesc).ElementType
   else
-    NotYet('field element write on this field type', AStmt);
+    { the front end rejects a subscript write on a non-array field }
+    InternalError('field element write on a non-array field', AStmt);
   IsDyn := AStmt.FieldInfo.TypeDesc.Kind = tyDynArray;
   Low := 0;
   if not IsDyn then
@@ -4552,10 +4553,39 @@ begin
       EmitAddSubImm('add', 'sp', 'sp', NB);
     Exit;
   end;
+  if Elem.Kind = tyStaticArray then
+  begin
+    { an element that is itself a static array (Box.Rows[I] := Row): copy its
+      bytes from the source's address, value first as above.  A managed
+      element retains the source and releases the old one, with no zeroing
+      so a self-assign is exact -- as EmitElemStoreStacked does for a plain
+      array; a call result's scratch keeps its own +1, dropped at the
+      statement end. }
+    EmitRecAddrToX0(AStmt.Expr);                       { x0 = source address }
+    EmitPushX0();                                      { park [srcaddr] }
+    EmitFieldElemAddrToX0(AStmt, Elem, IsDyn, Low);    { x0 = &element (fresh) }
+    Self.Emit(#9'stp x19, x22, [sp, #-16]!');
+    Self.Emit(#9'mov x22, x0');                        { x22 = dest element }
+    Self.Emit(#9'ldr x19, [sp, #16]');                 { x19 = source addr }
+    if AggHasManaged(Elem) then
+    begin
+      Self.EmitManagedAddRefAt(Elem, 'x19');
+      Self.EmitManagedReleaseAt(Elem, 'x22', False);
+    end;
+    Self.Emit(#9'mov x0, x22');
+    Self.Emit(#9'mov x1, x19');
+    EmitIntLiteral('x2', Elem.RawSize());
+    EmitCallSym('memcpy');
+    Self.Emit(#9'ldp x19, x22, [sp], #16');
+    Self.Emit(#9'add sp, sp, #16');                    { drop srcaddr }
+    Exit;
+  end;
   if not IsIntFam(Elem) and (Elem.Kind <> tyPointer) and
-     (Elem.Kind <> tyPChar) and not IsSmallSetType(Elem) then
-    NotYet('field array element of this type', AStmt);
-  { integer-family element: value first, then address, then store by width }
+     (Elem.Kind <> tyPChar) and not IsSmallSetType(Elem) and
+     not IsPlainWordRef(Elem) then
+    InternalError('field array element of an unhandled type', AStmt);
+  { integer-family element (or a one-word metaclass / plain procedural
+    reference): value first, then address, then store by width }
   Self.EmitExprToX0(AStmt.Expr);
   EmitPushX0();                                { [val] }
   EmitFieldElemAddrToX0(AStmt, Elem, IsDyn, Low);

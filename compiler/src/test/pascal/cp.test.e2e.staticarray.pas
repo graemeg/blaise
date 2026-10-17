@@ -24,6 +24,10 @@ type
   protected
     procedure SetUp; override;
   published
+    { element writes through array fields whose element is a static array
+      (plain, managed and object rows) or a one-word reference (metaclass,
+      plain procedure); each object a row holds is freed once, when replaced }
+    procedure TestRun_FieldArrayElements_RowsAndWordRefs;
     { A value cast to a static-array type of a same-sized array -- TArr(O.FArr),
       TArr(Raw) of an anonymous array -- assigned, passed as an open array,
       iterated and subscripted.  arm64 refused it ("this call form ('TArr')"). }
@@ -2508,6 +2512,115 @@ begin
     '0 0 9 0 ' + LineEnding +
     '0090' + LineEnding +
     '9' + LineEnding, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_FieldArrayElements_RowsAndWordRefs;
+const
+  Src = '''
+    program P;
+    type
+      TK = class
+        Tag: string;
+        destructor Destroy(); override;
+      end;
+      TKC = class of TK;
+      TProc = procedure(A: Integer);
+      TRow = array[0..2] of Integer;
+      TSRow = array[0..1] of string;
+      TKRow = array[0..1] of TK;
+      TObj = class
+        A2: array[0..1] of TRow;
+        D2: array of TRow;
+        S2: array[0..1] of TSRow;
+        K2: array of TKRow;
+        MC: array[0..1] of TKC;
+        PR: array of TProc;
+      end;
+      TBox = class
+        O: TObj;
+      end;
+    destructor TK.Destroy();
+    begin
+      WriteLn('gone ', Tag);
+      inherited Destroy()
+    end;
+    procedure Hello(A: Integer);
+    begin
+      WriteLn('hello ', A)
+    end;
+    function MkK(const AT: string): TK;
+    begin
+      Result := TK.Create();
+      Result.Tag := AT
+    end;
+    function MkSRow(const AT: string): TSRow;
+    begin
+      Result[0] := AT + '0';
+      Result[1] := AT + '1'
+    end;
+    var
+      O: TObj;
+      B: TBox;
+      Row: TRow;
+      SR: TSRow;
+      KR: TKRow;
+      I: Integer;
+      C: TKC;
+      Pr: TProc;
+    begin
+      O := TObj.Create();
+      B := TBox.Create();
+      B.O := O;
+      SetLength(O.D2, 2);
+      SetLength(O.K2, 1);
+      SetLength(O.PR, 1);
+      Row[0] := 1;
+      Row[1] := 2;
+      Row[2] := 3;
+      O.A2[1] := Row;
+      B.O.A2[0] := Row;
+      O.D2[1] := Row;
+      B.O.D2[0] := O.A2[1];
+      WriteLn(O.A2[1][2], O.A2[0][0], O.D2[1][1], O.D2[0][2]);
+      SR := MkSRow('s');
+      O.S2[1] := SR;
+      B.O.S2[0] := MkSRow('c');
+      O.S2[0] := O.S2[0];
+      SR[0] := 'changed';
+      WriteLn(O.S2[1][0], O.S2[1][1], O.S2[0][0], O.S2[0][1]);
+      KR[0] := MkK('k0');
+      KR[1] := MkK('k1');
+      O.K2[0] := KR;
+      KR[0] := nil;
+      KR[1] := nil;
+      WriteLn('dropped');
+      for I := 1 to 2 do
+      begin
+        KR[0] := MkK('L' + IntToStr(I));
+        B.O.K2[0] := KR
+      end;
+      KR[0] := nil;
+      O.MC[1] := TK;
+      B.O.MC[0] := TK;
+      C := O.MC[1];
+      WriteLn(C = TK, O.MC[0] = TK);
+      O.PR[0] := @Hello;
+      Pr := O.PR[0];
+      Pr(7);
+      B.O := nil;
+      O := nil;
+      WriteLn('end')
+    end.
+    ''';
+var
+  LE: string;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  LE := LineEnding;
+  AssertRunsOnAll(Src,
+    '3123' + LE + 's0s1c0c1' + LE + 'dropped' + LE + 'gone k0' + LE +
+    'gone k1' + LE + 'gone L1' + LE + 'TrueTrue' + LE + 'hello 7' + LE +
+    'gone L2' + LE + 'end' + LE, 0);
 end;
 
 initialization

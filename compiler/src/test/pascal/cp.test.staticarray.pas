@@ -26,6 +26,9 @@ type
       source analysed cleanly. }
     function SemanticErrMsg(const ASrc: string): string;
   published
+    { O.Rows[I] := Row on an array-of-static-array field copies the row's
+      bytes (arm64 stopped with 'field array element of this type') }
+    procedure TestCodegen_FieldArrayOfRows_ElementStoreCopies;
     { x86-64 by-value static-array params keep a POINTER to the callee's
       copy in their slot: an element write and a whole-array store must go
       through it (both took the slot's own address and wrote over the
@@ -1821,6 +1824,27 @@ begin
       #9'addq %rcx, %rax'#10#9'movq %rax, %rdi'#10#9'callq Use',
       #9'add x0, x0, x1'#10#9'str x0, [sp, #-16]!'#10#9'ldr x0, [sp], #16'#10 +
         #9'bl _Use'));
+end;
+
+procedure TStaticArrayTests.TestCodegen_FieldArrayOfRows_ElementStoreCopies;
+const
+  Src = '''
+      program P;
+      type
+        TRow = array[0..2] of Integer;
+        TObj = class
+          Rows: array[0..1] of TRow;
+        end;
+      procedure Put(O: TObj; const R: TRow);
+      begin
+        O.Rows[1] := R
+      end;
+      begin
+      end.
+      ''';
+begin
+  AssertEquals('the row is copied in', '',
+    AsmMissing(Src, 'callq memcpy', 'bl _memcpy'));
 end;
 
 initialization
