@@ -23,6 +23,10 @@ type
     procedure SemanticOK(const ASrc: string);
     procedure SemanticError(const ASrc: string);
   published
+    { S[N] := B on a string FIELD or ELEMENT: accepted (it was "not an array" /
+      "Undeclared variable") and copy-on-write in the field's own slot; a
+      getter property is still rejected }
+    procedure TestSemCodegen_ByteWriteIntoStringField;
     { ------------------------------------------------------------------ }
     { Length                                                               }
     { ------------------------------------------------------------------ }
@@ -722,6 +726,65 @@ begin
       #9'movq -8(%rbp), %rdx'#10#9'addq $8, %rdx'#10#9'pushq %rdx'#10 +
         #9'movq (%rdx), %rdi'#10#9'callq _StringRelease',
       #9'ldr x9, [sp]'#10#9'ldr x0, [x9]'#10#9'bl __StringDelete'));
+end;
+
+procedure TStringOpsTests.TestSemCodegen_ByteWriteIntoStringField;
+const
+  Src = '''
+      program P;
+      type
+        TR = record S: string; end;
+        TObj = class
+          S: string;
+          procedure Go();
+        end;
+      procedure TObj.Go();
+      begin
+        S[1] := 66
+      end;
+      procedure Put(var R: TR; O: TObj; var A: array of string);
+      begin
+        R.S[0] := 65;
+        O.S[0] := 65;
+        A[0][1] := 67
+      end;
+      begin
+      end.
+      ''';
+  SrcGetter = '''
+      program P;
+      type
+        TObj = class
+          FG: string;
+          function GetG(): string;
+          property G: string read GetG;
+        end;
+      function TObj.GetG(): string;
+      begin
+        Result := FG
+      end;
+      var O: TObj;
+      begin
+        O.G[0] := 65
+      end.
+      ''';
+var
+  Prog: TProgram;
+  Msg:  string;
+begin
+  Prog := Analyse(Src);
+  Prog.Free();
+  AssertEquals('each write makes the string unique in its slot', '',
+    AsmMissing(Src, 'callq _StringUnique', 'bl __StringUnique'));
+  Msg := '';
+  try
+    Prog := Analyse(SrcGetter);
+    Prog.Free();
+  except
+    on E: ESemanticError do Msg := E.Message;
+  end;
+  AssertTrue('a getter property is not storage: ' + Msg,
+    Pos('read through a method', Msg) >= 0);
 end;
 
 initialization

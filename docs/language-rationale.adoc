@@ -225,6 +225,18 @@ one alias never disturbs another, and a literal reused elsewhere stays
 pristine.  Both backends emit the same `_StringUnique` → write-back →
 `storeb` sequence.
 
+The target may be any string that is storage: a variable or parameter, a
+field (`R.S[N]`, `Obj.S[N]`, `A.B.S[N]`, a bare `S[N]` or `Self.S[N]` inside
+a method), an array element (`SA[I][N]`), a field-backed property
+(`Obj.P[N]`, written in its read field) or a static variable.  The
+copy-on-write happens in that slot, so writing a byte of a field never
+disturbs another variable sharing the string, exactly as for a local.  As
+in Delphi and FPC, a property read through a getter is rejected -- the byte
+would land in a temporary copy -- and so is any other value that is not
+storage.  (Until 2026-10-17 only a variable or parameter was accepted:
+fields gave "Field 'S' is not an array" and elements "Multi-dimensional
+subscript base must be a static or dynamic array".)
+
 ==== Address of a byte — `@S[N]`
 
 `@S[N]` is the address of the Nth byte and has type `^Byte`, matching what

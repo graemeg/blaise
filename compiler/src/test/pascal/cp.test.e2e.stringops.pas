@@ -21,6 +21,11 @@ type
   protected
     procedure SetUp; override;
   published
+    { S[N] := B through every string l-value: array elements, record, object,
+      chained and var-param fields, Self fields (bare and qualified), a
+      field-backed property and a static variable -- each copy-on-write, so
+      a string shared with another variable keeps its own bytes }
+    procedure TestRun_ByteWriteIntoStringFieldsAndElements;
     { @S[N] points at one byte of the string, made unique first: a literal-backed
       local, a shared string (the other holder keeps its value), an object field,
       a record field, a var parameter and a captured variable.  Neither backend
@@ -912,6 +917,75 @@ begin
     'Pqr' + LineEnding +
     'gZob' + LineEnding +
     'aB12' + LineEnding, 0);
+end;
+
+procedure TE2EStringOpsTests.TestRun_ByteWriteIntoStringFieldsAndElements;
+const
+  Src = '''
+    program P;
+    type
+      TR = record S: string; end;
+      TObj = class
+        S: string;
+        R: TR;
+        FP: string;
+        property P: string read FP write FP;
+        static var SV: string;
+        procedure Go();
+      end;
+      TBox = class
+        O: TObj;
+      end;
+    procedure TObj.Go();
+    begin
+      S[1] := 66;
+      Self.S[2] := 67;
+      P[0] := 80;
+      R.S[0] := 82
+    end;
+    procedure PR(var X: TR);
+    begin
+      X.S[1] := 86
+    end;
+    var
+      SA: array[0..1] of string;
+      DA: array of string;
+      R: TR;
+      O: TObj;
+      B: TBox;
+      Keep: string;
+    begin
+      SA[1] := 'hello';
+      SetLength(DA, 1);
+      DA[0] := 'world';
+      R.S := 'rec';
+      O := TObj.Create();
+      O.S := 'obj';
+      O.R.S := 'orec';
+      O.FP := 'prop';
+      B := TBox.Create();
+      B.O := O;
+      Keep := SA[1];
+      SA[1][0] := 72;
+      DA[0][0] := 87;
+      B.O.S[0] := 79;
+      O.R.S[1] := 82;
+      O.P[1] := 81;
+      TObj.SV := 'stat';
+      TObj.SV[0] := 83;
+      WriteLn(SA[1], ' ', Keep, ' ', DA[0], ' ', O.S, ' ', O.R.S, ' ', O.FP,
+        ' ', TObj.SV);
+      O.Go();
+      WriteLn(O.S, ' ', O.FP, ' ', O.R.S);
+      PR(R);
+      WriteLn(R.S)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'Hello hello World Obj oRec pQop Stat' + LE + 'OBC PQop RRec' + LE +
+    'rVc' + LE, 0);
 end;
 
 initialization

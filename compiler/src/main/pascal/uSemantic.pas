@@ -478,6 +478,10 @@ type
     procedure AnalyseAssignment(AAssign: TAssignment);
     procedure AnalyseFieldAssignment(AAssign: TFieldAssignment);
     procedure AnalyseFieldStoreValue(AAssign: TFieldAssignment; ATarget: TTypeDesc);
+    { The index and value of a byte write S[I] := B into a string: a numeric
+      index, and a byte -- a numeric ordinal, Chr(n) or a one-character
+      string, the forms Blaise uses in place of a Char type. }
+    procedure AnalyseStrByteWrite(AIndex, AValue: TASTExpr; ALine, ACol: Integer);
     function  TryAnalyseFieldElemWrite(AAssign: TFieldAssignment;
       AFieldType: TTypeDesc): Boolean;
     { TypeName.StaticVar[I] read: the parser folds the subscript into
@@ -3894,7 +3898,7 @@ function TSemanticAnalyser.ElemWriteThroughProp(AProp: TPropertyInfo;
 begin
   Result := (AProp <> nil) and (AProp.IndexParamName = '') and
             (AAssign.PropIndexExpr <> nil) and (AProp.TypeDesc <> nil) and
-            (AProp.TypeDesc.Kind in [tyStaticArray, tyDynArray]);
+            (AProp.TypeDesc.Kind in [tyStaticArray, tyDynArray, tyString]);
   if Result and (AProp.ReadField = '') then
     SemanticError(
       Format('Cannot assign to an element of property ''%s'': it is read ' +
@@ -12945,6 +12949,22 @@ end;
   subscript is an ELEMENT index — the RHS must match the element type, not
   the array type.  Returns False when there is no subscript to interpret;
   errors out when a subscript is applied to a non-array field. }
+procedure TSemanticAnalyser.AnalyseStrByteWrite(AIndex, AValue: TASTExpr;
+  ALine, ACol: Integer);
+var
+  IdxType: TTypeDesc;
+  ValType: TTypeDesc;
+begin
+  IdxType := Self.AnalyseExprSlot(AIndex);
+  if not IdxType.IsNumeric() then
+    SemanticError('String subscript index must be numeric', ALine, ACol);
+  ValType := Self.AnalyseExprSlot(AValue);
+  if not (ValType.IsNumeric() or (ValType.Kind = tyString)) then
+    SemanticError(
+      'String element assignment requires a byte, Chr(...), or ' +
+      'single-character value', ALine, ACol);
+end;
+
 function TSemanticAnalyser.TryAnalyseFieldElemWrite(AAssign: TFieldAssignment;
   AFieldType: TTypeDesc): Boolean;
 var
@@ -12955,6 +12975,15 @@ begin
   Result := False;
   if AAssign.PropIndexExpr = nil then
     Exit;
+  if AFieldType.IsString() then
+  begin
+    { R.S[I] := B: a byte of a string field, copy-on-write in the field's
+      own slot as for a string variable }
+    Self.AnalyseStrByteWrite(AAssign.PropIndexExpr, AAssign.Expr,
+      AAssign.Line, AAssign.Col);
+    AAssign.IsElemWrite := True;
+    Exit(True);
+  end;
   if AFieldType.Kind = tyDynArray then
     ElemT := TDynArrayTypeDesc(AFieldType).ElementType
   else if AFieldType.Kind = tyStaticArray then
@@ -19727,6 +19756,20 @@ begin
   if AStmt.BaseExpr <> nil then
   begin
     AStmt.ResolvedArrayType := Self.AnalyseExprSlot(AStmt.BaseExpr);
+    if (AStmt.ResolvedArrayType <> nil) and
+       AStmt.ResolvedArrayType.IsString() then
+    begin
+      { SA[I][J] := B, FS[J] := B: a byte of a string held in an element or
+        a field, copy-on-write in that slot.  The string must be storage: a
+        byte of a temporary would be written and lost. }
+      if not IsVarArgLValue(AStmt.BaseExpr) then
+        SemanticError('Cannot assign to a byte of a string that is not a ' +
+          'variable, field or element', AStmt.Line, AStmt.Col);
+      AStmt.ResolvedArrayType := FTable.TypeString;
+      Self.AnalyseStrByteWrite(AStmt.IndexExpr, AStmt.ValueExpr,
+        AStmt.Line, AStmt.Col);
+      Exit;
+    end;
     if (AStmt.ResolvedArrayType = nil) or
        not (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyDynArray]) then
       SemanticError(
@@ -19756,6 +19799,19 @@ begin
     if FCurrentClass <> nil then
     begin
       BaseInfo := FCurrentClass.FindField(AStmt.ArrayName);
+      if (BaseInfo <> nil) and (BaseInfo.TypeDesc <> nil) and
+         BaseInfo.TypeDesc.IsString() then
+      begin
+        { FS[I] := B on a string field of Self: the byte write through the
+          field, as the base form above (the identifier resolves to Self's
+          field) }
+        AStmt.BaseExpr := TIdentExpr.Create();
+        AStmt.BaseExpr.Line := AStmt.Line;
+        AStmt.BaseExpr.Col := AStmt.Col;
+        TIdentExpr(AStmt.BaseExpr).Name := AStmt.ArrayName;
+        Self.AnalyseStaticSubscriptAssign(AStmt);
+        Exit;
+      end;
       if (BaseInfo <> nil) and
          (BaseInfo.TypeDesc <> nil) and
          (BaseInfo.TypeDesc.Kind in [tyDynArray, tyStaticArray]) then
@@ -19787,7 +19843,7 @@ begin
       if (BaseInfo = nil) and (DefProp <> nil) and
          (DefProp.IndexTypeDesc = nil) and (DefProp.ReadField <> '') and
          (DefProp.TypeDesc <> nil) and
-         (DefProp.TypeDesc.Kind in [tyStaticArray, tyDynArray]) then
+         (DefProp.TypeDesc.Kind in [tyStaticArray, tyDynArray, tyString]) then
       begin
         AStmt.ArrayName := DefProp.ReadField;
         Self.AnalyseStaticSubscriptAssign(AStmt);
@@ -19929,20 +19985,13 @@ begin
     AStmt.IsGlobal := Sym.IsGlobal;
     AStmt.IsVarParam := Sym.Kind = skVarParameter;
     AStmt.ResolvedArrayType := FTable.TypeString;
-    IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
-    if not IdxType.IsNumeric() then
-      SemanticError('String subscript index must be numeric',
-        AStmt.Line, AStmt.Col);
     { The RHS is a single byte.  Accept a numeric ordinal, or the
       Char-shaped forms the language uses in place of a Char type: Chr(n)
       and single-character string literals (the codegen's byte-RHS path
       stores their first byte).  Mirrors the read side, where S[I] yields a
       byte ordinal. }
-    ValType := Self.AnalyseExprSlot(AStmt.ValueExpr);
-    if not (ValType.IsNumeric() or (ValType.Kind = tyString)) then
-      SemanticError(
-        'String element assignment requires a byte, Chr(...), or ' +
-        'single-character value', AStmt.Line, AStmt.Col);
+    Self.AnalyseStrByteWrite(AStmt.IndexExpr, AStmt.ValueExpr,
+      AStmt.Line, AStmt.Col);
     Exit;
   end;
   { Dynamic array subscript write: A[I] := V }

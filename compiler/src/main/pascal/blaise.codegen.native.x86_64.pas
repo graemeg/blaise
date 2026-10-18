@@ -638,6 +638,11 @@ type
       receiver (MakeObj().F := V) is released at the statement end; nothing
       released it, so every such store leaked the instance. }
     procedure EmitFieldRecvToEax(AFA: TFieldAssignment);
+    { AReg := the address of the field AFA writes: its receiver per shape
+      (chained base, sret Result, implicit Self, class or var-param variable,
+      record variable) plus the field's offset }
+    procedure EmitFieldAssignSlotAddrToReg(AFA: TFieldAssignment;
+      const AReg: string);
     procedure LoadIntfIdentPair(AIdent: TIdentExpr; const AObj, AItab: string);
     function  EmitForInStrOnce(AStmt: TForInStmt): string;
     procedure EmitForInStrToRax(AStmt: TForInStmt; const ATmp: string);
@@ -12975,6 +12980,37 @@ begin
   Self.Emit(Format(#9'movq $0, %s', [ATmp]));
 end;
 
+procedure TX86_64Backend.EmitFieldAssignSlotAddrToReg(AFA: TFieldAssignment;
+  const AReg: string);
+begin
+  if AFA.ObjExpr <> nil then
+  begin
+    Self.EmitFieldRecvToEax(AFA);
+    Self.Emit(Format(#9'movq %%rax, %s', [AReg]));
+  end
+  else if FSretFunc and (AFA.RecordName = 'Result') then
+    Self.Emit(Format(#9'movq %s, %s', [Self.VarOperand('Result'), AReg]))
+  else if AFA.IsImplicitSelf then
+  begin
+    Self.Emit(Format(#9'movq %s, %s', [Self.VarOperand('Self'), AReg]));
+    if (AFA.ImplicitBaseInfo <> nil) and (AFA.ImplicitBaseInfo.Offset > 0) then
+      Self.Emit(Format(#9'addq $%d, %s', [AFA.ImplicitBaseInfo.Offset, AReg]));
+    if AFA.IsClassAccess then
+      Self.Emit(Format(#9'movq (%s), %s', [AReg, AReg]));
+  end
+  else if AFA.IsClassAccess or AFA.IsVarParam then
+  begin
+    Self.EmitVarBaseToReg(AFA.RecordName, False, AReg);
+    if AFA.IsClassAccess and AFA.IsVarParam then
+      { var-param class: slot -> caller var -> instance }
+      Self.Emit(Format(#9'movq (%s), %s', [AReg, AReg]));
+  end
+  else
+    Self.EmitVarBaseToReg(AFA.RecordName, True, AReg);
+  if AFA.FieldInfo.Offset > 0 then
+    Self.Emit(Format(#9'addq $%d, %s', [AFA.FieldInfo.Offset, AReg]));
+end;
+
 procedure TX86_64Backend.EmitFieldRecvToEax(AFA: TFieldAssignment);
 begin
   Self.EmitExprToEax(AFA.ObjExpr);
@@ -19002,6 +19038,30 @@ begin
       Evaluate the value, the scaled index, then the field slot address;
       for a dynamic array deref the slot to reach the data pointer; store
       by ELEMENT type with the same ARC rules as plain subscript writes. }
+    if FA.IsElemWrite and FA.FieldInfo.TypeDesc.IsString() then
+    begin
+      { R.S[I] := B on a string field: copy-on-write in the field's own slot,
+        as the string-variable subscript write does.  %rbx holds the slot's
+        address across _StringUnique, which may replace the string. }
+      Self.EmitByteRhsToEax(FA.Expr);
+      Self.Emit(#9'pushq %rax');                  { byte value }
+      Self.EmitExprToEax(FA.PropIndexExpr);
+      Self.Emit(#9'pushq %rax');                  { index }
+      Self.Emit(#9'pushq %rbx');
+      Self.Emit(#9'subq $8, %rsp');               { align to 16 }
+      Self.EmitFieldAssignSlotAddrToReg(FA, '%rbx');
+      Self.Emit(#9'movq (%rbx), %rdi');
+      Self.Emit(#9'callq _StringUnique');
+      Self.Emit(#9'movq %rax, (%rbx)');
+      Self.Emit(#9'movq %rax, %rcx');
+      Self.Emit(#9'addq $8, %rsp');
+      Self.Emit(#9'popq %rbx');
+      Self.Emit(#9'popq %rax');                   { index }
+      Self.Emit(#9'addq %rax, %rcx');
+      Self.Emit(#9'popq %rax');                   { byte value }
+      Self.Emit(#9'movb %al, (%rcx)');
+      Exit;
+    end;
     if FA.IsElemWrite then
     begin
       if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
@@ -19033,34 +19093,7 @@ begin
             [TStaticArrayTypeDesc(FA.FieldInfo.TypeDesc).LowBound]));
         Self.Emit(#9'imulq $16, %rax');
         Self.Emit(#9'pushq %rax');         { scaled element offset }
-        if FA.ObjExpr <> nil then
-        begin
-          Self.EmitFieldRecvToEax(FA);
-          Self.Emit(#9'movq %rax, %rcx');
-        end
-        else if FSretFunc and (FA.RecordName = 'Result') then
-          Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('Result')]))
-        else if FA.IsImplicitSelf then
-        begin
-          Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('Self')]));
-          if (FA.ImplicitBaseInfo <> nil) and (FA.ImplicitBaseInfo.Offset > 0) then
-            Self.Emit(Format(#9'addq $%d, %%rcx', [FA.ImplicitBaseInfo.Offset]));
-          if FA.IsClassAccess then
-            Self.Emit(#9'movq (%rcx), %rcx');
-        end
-        else if FA.IsClassAccess then
-        begin
-          Self.EmitVarBaseToReg(FA.RecordName, False, '%rcx');
-          if FA.IsVarParam then
-            Self.Emit(#9'movq (%rcx), %rcx');
-        end
-        else if FA.IsVarParam then
-        begin
-          Self.EmitVarBaseToReg(FA.RecordName, False, '%rcx');
-        end
-        else Self.EmitVarBaseToReg(FA.RecordName, True, '%rcx');
-        if FA.FieldInfo.Offset > 0 then
-          Self.Emit(Format(#9'addq $%d, %%rcx', [FA.FieldInfo.Offset]));
+        Self.EmitFieldAssignSlotAddrToReg(FA, '%rcx');
         if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
           Self.Emit(#9'movq (%rcx), %rcx'); { heap data pointer (fresh) }
         Self.Emit(#9'popq %rax');
@@ -19102,33 +19135,7 @@ begin
           [TStaticArrayTypeDesc(FA.FieldInfo.TypeDesc).LowBound]));
       Self.Emit(Format(#9'imulq $%d, %%rax', [DAElemType.RawSize()]));
       Self.Emit(#9'pushq %rax');           { scaled element offset }
-      { Field slot address → %rdx, per receiver shape. }
-      if FA.ObjExpr <> nil then
-      begin
-        Self.EmitFieldRecvToEax(FA);
-        Self.Emit(#9'movq %rax, %rdx');
-      end
-      else if FSretFunc and (FA.RecordName = 'Result') then
-        Self.Emit(Format(#9'movq %s, %%rdx', [Self.VarOperand('Result')]))
-      else if FA.IsImplicitSelf then
-      begin
-        Self.Emit(Format(#9'movq %s, %%rdx', [Self.VarOperand('Self')]));
-        if (FA.ImplicitBaseInfo <> nil) and (FA.ImplicitBaseInfo.Offset > 0) then
-          Self.Emit(Format(#9'addq $%d, %%rdx', [FA.ImplicitBaseInfo.Offset]));
-        if FA.IsClassAccess then
-          Self.Emit(#9'movq (%rdx), %rdx');
-      end
-      else if FA.IsClassAccess or FA.IsVarParam then
-      begin
-        Self.EmitVarBaseToReg(FA.RecordName, False, '%rdx');
-        if FA.IsClassAccess and FA.IsVarParam then
-          { var-param class: slot -> caller var -> instance }
-          Self.Emit(#9'movq (%rdx), %rdx');
-      end
-      else
-        Self.EmitVarBaseToReg(FA.RecordName, True, '%rdx');
-      if FA.FieldInfo.Offset > 0 then
-        Self.Emit(Format(#9'addq $%d, %%rdx', [FA.FieldInfo.Offset]));
+      Self.EmitFieldAssignSlotAddrToReg(FA, '%rdx');
       if FA.FieldInfo.TypeDesc.Kind = tyDynArray then
         Self.Emit(#9'movq (%rdx), %rdx');  { data pointer }
       Self.Emit(#9'popq %rax');            { scaled offset }
@@ -20114,12 +20121,22 @@ begin
         alone (3rd push) would misalign, so reserve a paired 8-byte pad. }
       Self.Emit(#9'pushq %rbx');                  { preserve %rbx }
       Self.Emit(#9'subq $8, %rsp');               { align to 16 }
-      { %rbx := address of the slot holding the data pointer. }
-      Self.EmitVarBaseToReg(SSA.ArrayName, True, '%rbx');
-      if SSA.IsVarParam then
-        { var/out param: slot holds the caller variable's address; that is
-          where the string pointer actually lives. }
-        Self.Emit(#9'movq (%rbx), %rbx');
+      { %rbx := address of the slot holding the data pointer: a string held
+        in an element or a field (SA[I][J] := B, FS[J] := B) through its
+        l-value address, a variable through its slot }
+      if SSA.BaseExpr <> nil then
+      begin
+        Self.EmitVarArgAddrToRax(SSA.BaseExpr);
+        Self.Emit(#9'movq %rax, %rbx');
+      end
+      else
+      begin
+        Self.EmitVarBaseToReg(SSA.ArrayName, True, '%rbx');
+        if SSA.IsVarParam then
+          { var/out param: slot holds the caller variable's address; that is
+            where the string pointer actually lives. }
+          Self.Emit(#9'movq (%rbx), %rbx');
+      end;
       Self.Emit(#9'movq (%rbx), %rdi');           { old data pointer }
       Self.Emit(#9'callq _StringUnique');         { %rax = unique pointer }
       Self.Emit(#9'movq %rax, (%rbx)');           { write back to slot }

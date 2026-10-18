@@ -402,6 +402,10 @@ type
       dyn-array cannot leave a stale data pointer. }
     procedure EmitFieldElemAddrToX0(AStmt: TFieldAssignment; AElem: TTypeDesc;
       AIsDyn: Boolean; ALow: Integer);
+    { x0 := the address of the field AStmt writes (Rec.Field, Obj.Field,
+      A.B.Field, FInner.Field): the receiver per its shape plus the field's
+      offset.  An owned receiver's release is deferred to the statement end. }
+    procedure EmitFieldAssignSlotAddrToX0(AStmt: TFieldAssignment);
 
     { ---- expression lowering (result in x0) ---- }
     procedure EmitExprToX0(AExpr: TASTExpr);
@@ -4405,6 +4409,29 @@ begin
       'an object base', AStmt);
   if AStmt.FieldInfo = nil then
     NotYet('unresolved field element write', AStmt);
+  if AStmt.FieldInfo.TypeDesc.IsString() then
+  begin
+    { R.S[I] := B on a string field: copy-on-write in the field's own slot,
+      as EmitStaticElemAssign does for a string variable -- x19 holds the
+      slot's address across _StringUnique, which may replace the string }
+    EmitByteRhsToX0(AStmt.Expr);
+    EmitPushX0();                                  { [byte] }
+    Self.EmitExprToX0(AStmt.PropIndexExpr);
+    EmitPushX0();                                  { [byte][index] }
+    Self.Emit(#9'str x19, [sp, #-16]!');
+    EmitFieldAssignSlotAddrToX0(AStmt);
+    Self.Emit(#9'mov x19, x0');                    { x19 = &field slot }
+    Self.Emit(#9'ldr x0, [x19]');
+    EmitCallSym('_StringUnique');
+    Self.Emit(#9'str x0, [x19]');
+    Self.Emit(#9'mov x9, x0');
+    Self.Emit(#9'ldr x19, [sp], #16');
+    EmitPopTo('x1');                               { index }
+    Self.Emit(#9'add x9, x9, x1');
+    EmitPopTo('x0');                               { byte }
+    Self.Emit(#9'strb w0, [x9]');
+    Exit;
+  end;
   if AStmt.FieldInfo.TypeDesc.Kind = tyDynArray then
     Elem := TDynArrayTypeDesc(AStmt.FieldInfo.TypeDesc).ElementType
   else if AStmt.FieldInfo.TypeDesc.Kind = tyStaticArray then
@@ -4633,6 +4660,17 @@ begin
   else if ALow < 0 then
     EmitAddSubImm('add', 'x0', 'x0', -ALow);   { subtracting a negative low }
   EmitPushX0();                                { [index] }
+  EmitFieldAssignSlotAddrToX0(AStmt);
+  if AIsDyn then
+    Self.Emit(#9'ldr x0, [x0]');               { dyn-array: slot holds data ptr }
+  EmitPopTo('x1');                             { index }
+  EmitIntLiteral('x2', AElem.RawSize());
+  Self.Emit(#9'mul x1, x1, x2');
+  Self.Emit(#9'add x0, x0, x1');               { x0 = element address }
+end;
+
+procedure TArm64Backend.EmitFieldAssignSlotAddrToX0(AStmt: TFieldAssignment);
+begin
   if AStmt.ObjExpr <> nil then
   begin
     { a chained base (A.B.Arr[I], P^.Arr[I], R.Items[J].Arr[I]): a class-typed
@@ -4668,12 +4706,6 @@ begin
     EmitRecordBaseAddr('x0', AStmt.RecordName, AStmt.IsVarParam);
   if AStmt.FieldInfo.Offset <> 0 then
     EmitAddSubImm('add', 'x0', 'x0', AStmt.FieldInfo.Offset);
-  if AIsDyn then
-    Self.Emit(#9'ldr x0, [x0]');               { dyn-array: slot holds data ptr }
-  EmitPopTo('x1');                             { index }
-  EmitIntLiteral('x2', AElem.RawSize());
-  Self.Emit(#9'mul x1, x1, x2');
-  Self.Emit(#9'add x0, x0, x1');               { x0 = element address }
 end;
 
 { ---- expressions --------------------------------------------------------- }
@@ -10380,7 +10412,8 @@ begin
     param), so IsVarParam is only a blocker for the aggregate-array forms. }
   if ((AStmt.BaseExpr <> nil) and
       ((AStmt.ResolvedArrayType = nil) or
-       not (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyDynArray]))) or
+       not (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyDynArray,
+                                             tyString]))) or
      (AStmt.IsVarParam and
       ((AStmt.ResolvedArrayType = nil) or
        not (AStmt.ResolvedArrayType.Kind in [tyString, tyPChar, tyDynArray,
@@ -10409,11 +10442,21 @@ begin
     EmitPushX0();                                  { [sp] = index }
     { preserve x19 (callee-saved) across the _StringUnique call }
     Self.Emit(#9'str x19, [sp, #-16]!');
-    EmitSlotAddr('x19', AStmt.ArrayName);          { x19 = &slot }
-    if AStmt.IsVarParam then
-      { var/out param: the slot holds the caller variable's ADDRESS; the string
-        pointer lives one deref further. }
-      Self.Emit(#9'ldr x19, [x19]');
+    if AStmt.BaseExpr <> nil then
+    begin
+      { a string held in an element or a field (SA[I][J] := B, FS[J] := B):
+        the address of its slot, as @ computes it }
+      EmitLValueAddrToX0(AStmt.BaseExpr);
+      Self.Emit(#9'mov x19, x0');
+    end
+    else
+    begin
+      EmitSlotAddr('x19', AStmt.ArrayName);        { x19 = &slot }
+      if AStmt.IsVarParam then
+        { var/out param: the slot holds the caller variable's ADDRESS; the
+          string pointer lives one deref further. }
+        Self.Emit(#9'ldr x19, [x19]');
+    end;
     Self.Emit(#9'ldr x0, [x19]');                  { old data pointer }
     EmitCallSym('_StringUnique');               { x0 = unique writable ptr }
     Self.Emit(#9'str x0, [x19]');                  { write back to slot }

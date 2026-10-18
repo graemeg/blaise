@@ -1124,7 +1124,9 @@ Stmt
  * The same single-subscript form also covers an indexed write into a string
  * (S[I] := <byte>), a PChar (P[I] := <byte>), a dynamic array, and a default
  * indexed property.  The base kind is resolved by the semantic pass, not the
- * grammar.  For a string the write is copy-on-write (the buffer is made
+ * grammar.  A string byte write accepts any string that is storage --
+ * variable, field (FieldAssignment's Selector form R.S[I] := B), array
+ * element (a[i][j] := B), field-backed property, static variable.  For a string the write is copy-on-write (the buffer is made
  * uniquely owned before the byte store) — see the "String Subscript S[N]"
  * section of language-rationale.adoc. *)
 (* Block-scoped variable declaration in statement position (anonymous-
