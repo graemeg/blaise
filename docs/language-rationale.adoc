@@ -642,8 +642,11 @@ compile-time error rather than a change of meaning.
 *Phasing.*  The classic names remain builtin and keep their meaning for
 now; diagnostics still print the classic spelling.  Integer literals keep
 the magnitude rule below until the planned change to context-typed literals
-defaulting to `Int`; the classic names later move to an opt-in
-`ClassicPascalTypes` unit.  The design document holds the full plan.
+defaulting to `Int`.  The opt-in stdlib unit `ClassicPascalTypes` supplies
+the FPC / Delphi names Blaise has no builtin for (`LongInt`, `ShortInt`,
+`NativeInt`, `Real`, `Extended`, ... -- `Extended` is `Float64`, not the x87
+80-bit type); the classic names that are still builtins move into it when
+they are retired.  The design document holds the full plan.
 
 ==== Int64 ↔ UInt64 conversion is explicit
 

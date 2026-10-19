@@ -412,10 +412,15 @@ Key points:
   exploited 80-bit intermediates. The unit's documentation carries a warning,
   and the migration analyser flags every `Extended` use site.
 * `Int64`/`UInt64` need no entry — the names are already canonical.
-* Mechanically the unit is exported type aliases. Between Phase 2 and Phase 6
-  several of its names (`Integer`, `Double`, ...) also exist as builtins; the
-  unit-scope alias then shadows an identical builtin type, which must be
-  proven harmless by tests in Phase 2.
+* Mechanically the unit is exported type aliases.  A unit cannot redeclare
+  a builtin type name (`Duplicate type name 'Integer'`; verified in Phase 2),
+  so the unit is delivered in two steps.  Phase 2 ships the names Blaise has
+  no builtin for: `ShortInt`, `LongInt`, `LongWord`, `NativeInt`,
+  `NativeUInt`, `PtrInt`, `Real`, `Extended`, `Comp`.  The eight classic
+  names that are still builtins (`Integer`, `Cardinal`, `SmallInt`, `Word`,
+  `QWord`, `PtrUInt`, `Single`, `Double`) move into the unit in Phase 6, in
+  the same commit that removes them as builtins.  Code that uses the unit
+  sees the full classic set at every point in between.
 
 === D9. The C interop false-friend
 
@@ -533,8 +538,8 @@ the project's test rules.
 
 *Phase 2 — compatibility and tooling.*
 
-* `ClassicPascalTypes` stdlib unit with the full D8 table, plus stdlib tests
-  (including the builtin-shadowing case from D8).
+* `ClassicPascalTypes` stdlib unit with the D8 names that are not builtins,
+  plus stdlib tests (see D8 for why the remaining eight wait for Phase 6).
 * BlaiseGuard rule reporting classic type names with recommended migrations
   (D11).
 * Migration-analyser mapping (`Integer` → `Int32` suggestion, `Extended`
@@ -574,7 +579,8 @@ the project's test rules.
 *Phase 6 — remove the old builtins (the flip).*
 
 * Delete `Integer`, `Cardinal`, `Single`, `Double`, `SmallInt`, `Word`,
-  `QWord` and `PtrUInt` from `uSymbolTable`; rename the canonical display
+  `QWord` and `PtrUInt` from `uSymbolTable` and add them to
+  `ClassicPascalTypes` in the same commit; rename the canonical display
   names to the fixed-width spellings. External code uses
   `ClassicPascalTypes`. Unknown classic names produce the D11 error message.
 

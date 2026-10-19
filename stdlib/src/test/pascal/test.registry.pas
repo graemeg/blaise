@@ -55,7 +55,8 @@ uses
   Imap.Tests,
   Ftp.Tests,
   Nntp.Tests,
-  Regex.Tests;
+  Regex.Tests,
+  ClassicPascalTypes.Tests;
 
 implementation
 
