@@ -34,6 +34,7 @@ type
       to IFoo anyway, a compile error (pointing at as) otherwise }
     procedure TestSemantic_InterfaceCast_CheckedConversion;
     procedure TestCodegen_InterfaceCast_LowersAsItsOperand;
+    procedure TestCodegen_ExternalIntfReturningCall_UsesResultBuffer;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1382,6 +1383,29 @@ begin
     lowers into an interface target: a class value takes its static itab }
   AssertEquals('casts compile on both ISAs', '',
     AsmMissing(Src, 'itab_TImp_', 'itab_TImp_'));
+end;
+
+procedure TInterfaceTests.TestCodegen_ExternalIntfReturningCall_UsesResultBuffer;
+const
+  Src = '''
+      program P;
+      type
+        IThing = interface
+          function N(): Integer;
+        end;
+      function ExtMake(): IThing; external name 'RealMake';
+      var I: IThing;
+      begin
+        I := ExtMake()
+      end.
+      ''';
+begin
+  { the result buffer goes in the hidden-pointer register (x8 / %rdi) }
+  AssertEquals('external interface call', '',
+    AsmMissing(Src, #9'movq %rsp, %rdi'#10#9'callq RealMake',
+      #9'bl _RealMake'#10#9'sub x9, x29, #'));
+  AssertTrue('arm64 sets x8', Pos(#9'sub x8, x29, #',
+    GenAsm(Src, TargetArm64)) >= 0);
 end;
 
 initialization

@@ -41,6 +41,10 @@ type
     { IFoo(X) as a checked conversion: from a class value (borrowed and
       owned) and a descendant interface, into every consumer }
     procedure TestRun_InterfaceCast_IntoEveryConsumer;
+    { an external routine returning an interface follows the Blaise
+      convention (result through the hidden pointer); arm64 stopped with
+      external interface-returning call }
+    procedure TestRun_ExternalIntfReturningCall;
     { TGreet(MakeI()).X: the call's owned reference is released -- the shared
       object goes when its last real holder lets go }
     procedure TestRun_ClassCastOfInterfaceCall_ReleasesTheCallRef;
@@ -2467,6 +2471,42 @@ begin
     'show 1' + LE + 'field 1' + LE + 'result 1' + LE + 'show 2' + LE +
     'gone 2' + LE + 'owned 3' + LE + 'gone 4' + LE + 'owned recv 4' + LE +
     'gone 3' + LE + 'nil False' + LE + 'gone 1' + LE + 'end' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_ExternalIntfReturningCall;
+const
+  Src = '''
+    program Q;
+    type
+      IThing = interface
+        function N(): Integer;
+      end;
+      TThing = class(TObject, IThing)
+        FN: Integer;
+        function N(): Integer;
+        destructor Destroy(); override;
+      end;
+    function TThing.N(): Integer; begin Result := FN end;
+    destructor TThing.Destroy(); begin WriteLn('gone ', FN); inherited Destroy() end;
+    function RealMake(AN: Integer): IThing;
+    var T: TThing;
+    begin T := TThing.Create(); T.FN := AN; Result := T end;
+    function ExtMake(AN: Integer): IThing; external name 'RealMake';
+    var I: IThing; K: Integer;
+    begin
+      I := ExtMake(5); WriteLn('ext ', I.N());
+      K := ExtMake(6).N(); WriteLn('ext recv ', K);
+      I := nil;
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { 'external name' binds the declaration to a Blaise function linked in
+    the same program, so both sides use the Blaise convention }
+  AssertRunsOnAll(Src,
+    'ext 5' + LE + 'gone 6' + LE + 'ext recv 6' + LE + 'gone 5' + LE +
+    'end' + LE, 0);
 end;
 
 initialization

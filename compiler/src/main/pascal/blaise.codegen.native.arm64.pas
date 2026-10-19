@@ -8664,9 +8664,9 @@ begin
      (TFuncCallExpr(AExpr).ResolvedDecl <> nil) then
   begin
     { interface-returning call: the callee fills the 16-byte __iret
-      scratch through x8; the returned obj is OWNED (+1) }
-    if TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).IsExternal then
-      NotYet('external interface-returning call', AExpr);
+      scratch through x8; the returned obj is OWNED (+1).  An external one
+      (a Blaise-built shared library: no C function returns an interface)
+      follows the same Blaise convention, as on x86-64. }
     if TFuncCallExpr(AExpr).IsImplicitSelfMethod then
       { a bare method name inside a method (f := MakeFoo()): Self is the
         receiver and a virtual method dispatches through ITS vtable --
