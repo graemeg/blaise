@@ -25,6 +25,11 @@ type
     { interface and metaclass fields read off a call result: the value
       outlives the transient object, which is freed once, after the statement }
     procedure TestRun_IntfAndMetaclassFieldOfCallResult;
+    { a procedural field whose result comes back through the hidden result
+      buffer (an interface, a record over 16 bytes), called on an explicit
+      receiver and on implicit Self, into every consumer }
+    procedure TestRun_ProcFieldCall_AggregateResult;
+    procedure TestRun_ProcFieldCall_AggregateResult_DiscardedAndRepeated;
     { TGreet(MakeI()).X: the call's owned reference is released -- the shared
       object goes when its last real holder lets go }
     procedure TestRun_ClassCastOfInterfaceCall_ReleasesTheCallRef;
@@ -2070,6 +2075,188 @@ begin
     'obj gone' + LE + 'tn' + LE + 'obj gone' + LE + 'thing gone' + LE +
     'True' + LE + 'TrueTrue' + LE + 'obj gone' + LE + 'thing gone' + LE +
     'obj gone' + LE + 'thing gone' + LE + 'thing gone' + LE + 'end' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_ProcFieldCall_AggregateResult;
+const
+  Src = '''
+    program P;
+    type
+      IThing = interface
+        function N(): Integer;
+      end;
+      TThing = class(TObject, IThing)
+        FN: Integer;
+        function N(): Integer;
+        destructor Destroy(); override;
+      end;
+      TBig = record A, B, C: Int64; end;
+      TIFac = function(): IThing of object;
+      TRFac = function(): TBig of object;
+      THold = class
+        FI: TIFac;
+        FR: TRFac;
+        FKeep: IThing;
+        Count: Integer;
+        function MakeI(): IThing;
+        function MakeR(): TBig;
+        function Again(): IThing;
+        procedure Run();
+      end;
+    function TThing.N(): Integer;
+    begin
+      Result := FN
+    end;
+    destructor TThing.Destroy();
+    begin
+      WriteLn('gone ', FN);
+      inherited Destroy()
+    end;
+    function THold.MakeI(): IThing;
+    var T: TThing;
+    begin
+      Count := Count + 1;
+      T := TThing.Create();
+      T.FN := Count;
+      Result := T
+    end;
+    function THold.MakeR(): TBig;
+    begin
+      Result.A := 1;
+      Result.B := 2;
+      Result.C := 3
+    end;
+    function THold.Again(): IThing;
+    begin
+      Result := FI()
+    end;
+    procedure Show(const I: IThing);
+    begin
+      WriteLn('show ', I.N())
+    end;
+    procedure THold.Run();
+    var I: IThing; R: TBig; K: Integer;
+    begin
+      I := FI();
+      WriteLn('self local ', I.N());
+      FKeep := FI();
+      WriteLn('self field ', FKeep.N());
+      Show(FI());
+      K := FI().N();
+      WriteLn('self recv ', K);
+      R := FR();
+      WriteLn('self rec ', R.A + R.B + R.C, ' ', FR().C)
+    end;
+    var
+      H: THold;
+      I: IThing;
+      R: TBig;
+      K: Integer;
+    begin
+      H := THold.Create();
+      H.FI := @H.MakeI;
+      H.FR := @H.MakeR;
+      I := H.FI();
+      WriteLn('local ', I.N());
+      Show(H.FI());
+      K := H.FI().N();
+      WriteLn('recv ', K);
+      I := H.Again();
+      WriteLn('result ', I.N());
+      R := H.FR();
+      WriteLn('rec ', R.A + R.B + R.C, ' ', H.FR().B);
+      I := nil;
+      H.Run();
+      H.FKeep := nil;
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { every transient result is released at its statement's end: each object
+    is gone before the next line prints }
+  AssertRunsOnAll(Src,
+    'local 1' + LE +
+    'show 2' + LE + 'gone 2' + LE +
+    'gone 3' + LE + 'recv 3' + LE +
+    'gone 1' + LE + 'result 4' + LE +
+    'rec 6 2' + LE +
+    'gone 4' + LE +
+    'self local 5' + LE +
+    'self field 6' + LE +
+    'show 7' + LE + 'gone 7' + LE +
+    'gone 8' + LE + 'self recv 8' + LE +
+    'self rec 6 3' + LE +
+    'gone 5' + LE +
+    'gone 6' + LE +
+    'end' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_ProcFieldCall_AggregateResult_DiscardedAndRepeated;
+const
+  Src = '''
+    program P;
+    type
+      IThing = interface
+        function N(): Integer;
+      end;
+      TThing = class(TObject, IThing)
+        FN: Integer;
+        function N(): Integer;
+        destructor Destroy(); override;
+      end;
+      TBig = record A, B, C: Int64; S: string; end;
+      TIFac = function(): IThing of object;
+      TRFac = function(): TBig of object;
+      THold = class
+        FI: TIFac;
+        FR: TRFac;
+        Count: Integer;
+        function MakeI(): IThing;
+        function MakeR(): TBig;
+        procedure Run();
+      end;
+    function TThing.N(): Integer; begin Result := FN end;
+    destructor TThing.Destroy(); begin WriteLn('gone ', FN); inherited Destroy() end;
+    function THold.MakeI(): IThing;
+    var T: TThing;
+    begin Count := Count + 1; T := TThing.Create(); T.FN := Count; Result := T end;
+    function THold.MakeR(): TBig;
+    begin Result.A := 1; Result.B := 2; Result.C := 3; Result.S := 'x' + IntToStr(Count) end;
+    procedure THold.Run();
+    var K, Sum: Integer;
+    begin
+      FI();
+      Sum := 0;
+      for K := 1 to 3 do Sum := Sum + FI().N();
+      WriteLn('self sum ', Sum);
+      FR();
+      WriteLn(FR().S)
+    end;
+    var H: THold; K, Sum: Integer; R: TBig;
+    begin
+      H := THold.Create(); H.FI := @H.MakeI; H.FR := @H.MakeR;
+      H.FI();
+      Sum := 0;
+      for K := 1 to 3 do Sum := Sum + H.FI().N();
+      WriteLn('sum ', Sum);
+      WriteLn(Assigned(H.FI()));
+      H.FR();
+      R := H.FR(); WriteLn(R.S, ' ', R.A + R.C);
+      H.Run();
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { a discarded result is released, and a call repeated in a loop hands the
+    callee a clean result buffer each time (the callee releases what the
+    buffer holds when it assigns Result) }
+  AssertRunsOnAll(Src,
+    'gone 1' + LE + 'gone 2' + LE + 'gone 3' + LE + 'gone 4' + LE +
+    'sum 9' + LE + 'True' + LE + 'gone 5' + LE + 'x5 4' + LE +
+    'gone 6' + LE + 'gone 7' + LE + 'gone 8' + LE + 'gone 9' + LE +
+    'self sum 24' + LE + 'x9' + LE + 'end' + LE, 0);
 end;
 
 initialization

@@ -7648,7 +7648,7 @@ begin
     interface-typed value only: a constructor call is a class value }
   Result := (AExpr.ResolvedType <> nil) and
     (AExpr.ResolvedType.Kind = tyInterface) and
-   (Self.IsIntfCallResult(AExpr) or
+   (Self.IsIntfCallResult(AExpr) or IsProcFieldCallExpr(AExpr) or
     ((AExpr is TMethodCallExpr) and
      (TMethodCallExpr(AExpr).ResolvedClassType <> nil)) or
     (AExpr is TIndirectFuncCallExpr) or
@@ -7695,6 +7695,30 @@ begin
   if Self.IsIntfCallResult(AExpr) then
   begin
     Self.EmitIntfSretCall(TFuncCallExpr(AExpr));
+    Exit;
+  end;
+  if IsProcFieldCallExpr(AExpr) then
+  begin
+    { Obj.Handler() / Handler(): EmitProcFieldCall fills a zeroed per-site
+      scratch through the hidden result pointer and leaves its address in
+      %rax; the owned pair moves from there to the stack }
+    if AExpr is TFuncCallExpr then
+      Self.EmitProcFieldCall(nil, 'Self', False,
+        TFuncCallExpr(AExpr).ProcFieldInfo,
+        TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType),
+        TFuncCallExpr(AExpr).Args, AExpr.ResolvedType, False)
+    else
+      Self.EmitProcFieldCall(TMethodCallExpr(AExpr).ObjExpr,
+        TMethodCallExpr(AExpr).ObjectName, TMethodCallExpr(AExpr).IsVarParam,
+        TMethodCallExpr(AExpr).ProcFieldInfo,
+        TProceduralTypeDesc(TMethodCallExpr(AExpr).ResolvedProcType),
+        TMethodCallExpr(AExpr).Args, AExpr.ResolvedType,
+        (TMethodCallExpr(AExpr).ResolvedClassType <> nil) and
+        (TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyRecord));
+    Self.Emit(#9'movq 8(%rax), %rcx');
+    Self.Emit(#9'pushq %rcx');            { itab }
+    Self.Emit(#9'movq (%rax), %rcx');
+    Self.Emit(#9'pushq %rcx');            { obj on top }
     Exit;
   end;
   if (AExpr is TMethodCallExpr) and

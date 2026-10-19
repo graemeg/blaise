@@ -198,6 +198,9 @@ function ArcIsUnownedCtorResult(AExpr: TASTExpr): Boolean;
   (static array / record) value of that shape lives in a per-site result
   buffer: a consumer that needs its address (a subscript base) takes the
   buffer's, since the expression has no storage of its own. }
+{ Obj.Handler(..) or, inside a method, Handler(..): a call through a
+  procedural-typed field, as a value }
+function IsProcFieldCallExpr(AExpr: TASTExpr): Boolean;
 function IsAggCallValue(AExpr: TASTExpr): Boolean;
 
 { True when evaluating AExpr may run a CALL anywhere along its access path --
@@ -706,6 +709,13 @@ begin
   Result := nil;
   if S is TMethodCallStmt then
     Result := TMethodCallStmt(S);
+end;
+
+function IsProcFieldCallExpr(AExpr: TASTExpr): Boolean;
+begin
+  Result := ((AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsProcFieldCall) or
+            ((AExpr is TMethodCallExpr) and
+             TMethodCallExpr(AExpr).IsProcFieldCall);
 end;
 
 function IsAggCallValue(AExpr: TASTExpr): Boolean;

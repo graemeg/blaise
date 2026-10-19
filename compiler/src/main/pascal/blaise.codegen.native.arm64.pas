@@ -381,7 +381,10 @@ type
     procedure EmitDiscardedProcResult(APT: TProceduralTypeDesc);
     procedure EmitProcFieldCall(const AObjectName: string; AObjExpr: TASTExpr;
       AIsVarParam, AImplicitSelf: Boolean; AReceiver: TTypeDesc;
-      AField: TFieldInfo; AArgs: TObjectList; ANode: TASTNode);
+      AField: TFieldInfo; AArgs: TObjectList; ANode: TASTNode;
+      const ASretDest: string = ''; ASretSpOff: Integer = SRET_NO_BUF);
+    procedure EmitProcFieldCallExpr(AExpr: TASTExpr; const ASretDest: string;
+      ASretSpOff: Integer = SRET_NO_BUF);
     { Release an owned-transient STRING value in x0 by shape, mirroring
       EmitCall's post-call disposal: a concat/rc=0 unowned transient
       (ArcExprIsUnownedStrTransient) needs AddRef+Release (0->1->0 frees once);
@@ -3662,20 +3665,40 @@ end;
 procedure TArm64Backend.EmitProcFieldCall(const AObjectName: string;
   AObjExpr: TASTExpr; AIsVarParam, AImplicitSelf: Boolean;
   AReceiver: TTypeDesc; AField: TFieldInfo; AArgs: TObjectList;
-  ANode: TASTNode);
+  ANode: TASTNode; const ASretDest: string; ASretSpOff: Integer);
 var
   PT: TProceduralTypeDesc;
 begin
   { Obj.Handler(args) / Handler(args) where Handler is a procedural-typed
     FIELD: address the field, then dispatch through it -- a closure / method
     pointer as a fat value (Env or Self in x0), a plain procedure pointer as
-    one code word. }
+    one code word.  A result that comes back through x8 (an interface, a
+    record too big for registers) lands in ASretDest. }
   if (AField = nil) or not (AField.TypeDesc is TProceduralTypeDesc) then
     NotYet('procedural-field call on this field', ANode);
   PT := TProceduralTypeDesc(AField.TypeDesc);
   EmitProcFieldAddr(AObjectName, AObjExpr, AIsVarParam, AImplicitSelf,
     AReceiver, AField, ANode);
-  EmitFatPtrCall('x0', PT, AArgs, IsMethodPtrType(PT));
+  EmitFatPtrCall('x0', PT, AArgs, IsMethodPtrType(PT), ASretDest, ASretSpOff);
+end;
+
+procedure TArm64Backend.EmitProcFieldCallExpr(AExpr: TASTExpr;
+  const ASretDest: string; ASretSpOff: Integer);
+var
+  ME: TMethodCallExpr;
+begin
+  { a procedural-field call (IsProcFieldCallExpr) with its result buffer }
+  if AExpr is TFuncCallExpr then
+  begin
+    EmitProcFieldCall('', nil, False, True, nil,
+      TFuncCallExpr(AExpr).ProcFieldInfo, TFuncCallExpr(AExpr).Args, AExpr,
+      ASretDest, ASretSpOff);
+    Exit;
+  end;
+  ME := TMethodCallExpr(AExpr);
+  EmitProcFieldCall(ME.ObjectName, ME.ObjExpr, ME.IsVarParam, False,
+    ME.ResolvedClassType, ME.ProcFieldInfo, ME.Args, AExpr, ASretDest,
+    ASretSpOff);
 end;
 
 procedure TArm64Backend.EmitDiscardedProcResult(APT: TProceduralTypeDesc);
@@ -5110,7 +5133,8 @@ begin
          not TMethodCallExpr(AExpr).IsProcFieldCall) or
         { an itab receiver (I.Me() <> nil) has no ResolvedMethod }
         ((TMethodCallExpr(AExpr).ResolvedClassType <> nil) and
-         (TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyInterface))))) then
+         (TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyInterface)))) or
+      IsProcFieldCallExpr(AExpr)) then
   begin
     { an interface-returning call in a SCALAR context (TFoo(MakeI()).F,
       Assigned(GetI())): the callee writes the (obj, itab) pair through x8,
@@ -8649,6 +8673,16 @@ begin
     Result := True;
     Exit;
   end;
+  if IsProcFieldCallExpr(AExpr) then
+  begin
+    { Obj.Handler() / Handler(): an interface returned through a procedural
+      field -- the same x8 scratch, an OWNED obj half }
+    EmitProcFieldCallExpr(AExpr, '__iret');
+    EmitSlotAddr('x9', '__iret');
+    Self.Emit(#9'ldp x0, x1, [x9]');
+    Result := True;
+    Exit;
+  end;
   if (AExpr is TFuncCallExpr) and TFuncCallExpr(AExpr).IsIndirectCall and
      (TFuncCallExpr(AExpr).ResolvedProcType <> nil) then
   begin
@@ -11562,6 +11596,12 @@ begin
     { GetFn()(X): the callee value an expression yields, called with the
       result buffer as its sret destination }
     EmitIndirectFuncCallExpr(TIndirectFuncCallExpr(AExpr), ADest, ASretSpOff);
+    Exit;
+  end;
+  if IsProcFieldCallExpr(AExpr) then
+  begin
+    { Obj.Handler(X) / Handler(X): the same, through a procedural field }
+    EmitProcFieldCallExpr(AExpr, ADest, ASretSpOff);
     Exit;
   end;
   if (AExpr is TFieldAccessExpr) and TFieldAccessExpr(AExpr).IsStaticPropGet then
@@ -14521,7 +14561,7 @@ begin
              ((AArg is TMethodCallExpr) and
               (TMethodCallExpr(AArg).ResolvedMethod <> nil) and
               not TMethodCallExpr(AArg).IsConstructorCall) or
-             IsIntfRecordCall(AArg) or
+             IsIntfRecordCall(AArg) or IsProcFieldCallExpr(AArg) or
              ((AArg is TInheritedCallExpr) and
               (TInheritedCallExpr(AArg).ResolvedMethod <> nil)));
 end;

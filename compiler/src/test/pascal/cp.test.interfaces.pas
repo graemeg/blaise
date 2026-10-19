@@ -24,6 +24,7 @@ type
     { an interface or metaclass field read off a call result (MkObj().FI,
       MkObj().FC): arm64 stopped with 'read of a field of this type' }
     procedure TestCodegen_IntfAndMetaclassFieldOfCallResult;
+    procedure TestCodegen_ProcFieldCall_AggregateResult;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1150,6 +1151,43 @@ const
 begin
   AssertEquals('both reads compile', '',
     AsmMissing(Src, 'callq MkObj', 'bl _MkObj'));
+end;
+
+procedure TInterfaceTests.TestCodegen_ProcFieldCall_AggregateResult;
+const
+  Src = '''
+      program P;
+      type
+        IThing = interface
+          function N(): Integer;
+        end;
+        TBig = record A, B, C: Int64; end;
+        TIFac = function(): IThing of object;
+        TRFac = function(): TBig of object;
+        THold = class
+          FI: TIFac;
+          FR: TRFac;
+          procedure Run();
+        end;
+      procedure THold.Run();
+      var I: IThing; R: TBig;
+      begin
+        I := FI();
+        R := FR()
+      end;
+      var H: THold; I: IThing; R: TBig;
+      begin
+        H := THold.Create();
+        I := H.FI();
+        R := H.FR()
+      end.
+      ''';
+begin
+  { a procedural-field call whose result comes back through the hidden
+    result buffer (an interface, a record over 16 bytes): both receiver
+    forms compile on both ISAs }
+  AssertEquals('proc-field aggregate results compile', '',
+    AsmMissing(Src, 'callq', 'blr'));
 end;
 
 initialization
