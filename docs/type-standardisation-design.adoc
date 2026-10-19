@@ -3,7 +3,8 @@
 :toclevels: 3
 :sectnums:
 
-Status: ACCEPTED — all design decisions signed off 2026-10-19. +
+Status: ACCEPTED — all design decisions signed off 2026-10-19.  Phases 0–3
+implemented 2026-10-19/20 (see <<progress>>). +
 Release placement: phases 0–3 (additive, non-breaking) target *v0.15.0*;
 phases 4–7 (breaking) open the *v0.16* development cycle. +
 Scope: surface type system (builtin type names), stdlib API signatures,
@@ -502,6 +503,33 @@ The announcement in discussion #106 is revised on the following points:
   and the final removal of the old builtins touches every test source. The
   realistic shape is: additive half in v0.15.0, breaking half at the start of
   the v0.16 cycle, where it gets CI soak time before the next release.
+
+[#progress]
+== Progress
+
+[cols="1,3",options="header"]
+|===
+| Phase | Delivered
+
+| 0
+| Alias-identical overloads rejected at declaration (D12); found on the way:
+  overloads on array and metaclass types given distinct labels, and a
+  program's overloaded `forward` paired with its body.
+
+| 1
+| `Int`, `UInt`, `Int32`, `UInt8`, `Float`, `Float32`, `Float64` as
+  transparent aliases; `Int8` as a new type kind.  Found on the way: arm64
+  stored a const array of an aliased element type at the wrong width.
+
+| 2
+| `ClassicPascalTypes` (the non-builtin half; see D8); BlaiseGuard BL-2006;
+  `bindgen` on the width-stating names.  Found on the way: a narrow argument
+  now picks the closest wider overload instead of reporting ambiguity.
+
+| 3
+| Language rationale (D1–D12 and the planned Phase 4 changes), grammar
+  notes, README.
+|===
 
 [#timeline]
 == Implementation timeline

@@ -1557,6 +1557,8 @@ Decimals      = Expr ;
  *   - Mixing Int64 and UInt64 in an arithmetic or comparison expression
  *     requires an explicit cast (UInt64(x) / Int64(x)).  All other
  *     integer types widen implicitly into both.
+ *   - Planned: context-typed literals defaulting to Int replace the
+ *     magnitude rule above (docs/type-standardisation-design.adoc, D4).
  *)
 
 

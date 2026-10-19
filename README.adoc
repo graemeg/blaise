@@ -19,6 +19,12 @@ This compiler takes a different approach:
 
 * *One language mode.* No `{$mode}` switches; no legacy dialect support.
 * *One string type.* UTF-8 reference-counted string and 0-based indexing. `RawBytes` for binary data.
+* *Type names that say what they mean.* `Int` / `UInt` are the machine's
+  pointer-sized integers; `Int8` .. `Int64`, `UInt8` .. `UInt64`, `Float32` and
+  `Float64` state their width, and `Float` is always `Float64`.  FPC's
+  `Integer` was frozen at 32 bits two decades ago; the classic names are being
+  retired to an opt-in `ClassicPascalTypes` unit (see
+  link:docs/type-standardisation-design.adoc[the design]).
 * *One memory model.* Automatic reference counting applies uniformly to
   strings, classes, and interfaces. No manual/auto split between `TObject`
   and `TInterfacedObject`; `[Weak]` breaks cycles. `Free` is retained as a
@@ -124,6 +130,18 @@ full source-level debugging of incrementally-compiled multi-unit programs.
 | `TObject` vs `TInterfacedObject` split
 | One unified class model under automatic reference counting; `[Weak]`
   breaks cycles
+
+| `Extended` (80-bit x87), `Real`, `Comp`, `Currency`
+| `Extended` exists only on x86; floats are `Float32` / `Float64`, and
+  `Float` is always `Float64`.  `Currency` gives way to a stdlib decimal type.
+  `ClassicPascalTypes` maps `Extended` and `Real` to `Float64` for ported code
+
+| Classic integer and float names (`Integer`, `Cardinal`, `LongInt`,
+  `SmallInt`, `Word`, `Double`, ...)
+| Being retired in favour of names that state their width (`Int32`, `UInt32`,
+  `Int16`, `UInt16`, `Float64`, ...) and the pointer-sized `Int` / `UInt`.
+  They remain available through the opt-in `ClassicPascalTypes` unit;
+  BlaiseGuard rule BL-2006 suggests each replacement.  `Byte` stays.
 |===
 
 == 📢 Community

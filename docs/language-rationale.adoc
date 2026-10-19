@@ -639,14 +639,47 @@ general and fixed-width code.  The transparent alias avoids that friction;
 its one cost, that the pair above collides on a 64-bit target, is a
 compile-time error rather than a change of meaning.
 
-*Phasing.*  The classic names remain builtin and keep their meaning for
-now; diagnostics still print the classic spelling.  Integer literals keep
-the magnitude rule below until the planned change to context-typed literals
-defaulting to `Int`.  The opt-in stdlib unit `ClassicPascalTypes` supplies
-the FPC / Delphi names Blaise has no builtin for (`LongInt`, `ShortInt`,
-`NativeInt`, `Real`, `Extended`, ... -- `Extended` is `Float64`, not the x87
-80-bit type); the classic names that are still builtins move into it when
-they are retired.  The design document holds the full plan.
+*`Byte` stays.*  `Byte` is kept as a builtin alias of `UInt8` rather than
+retired with the other classic names: it means "one raw octet" rather than
+"a small number", reads naturally in binary I/O over `RawBytes`, and Go
+keeps `byte` beside `uint8` for the same reason.  The remaining classic
+names (`Integer`, `Cardinal`, `SmallInt`, `Word`, `QWord`, `PtrUInt`,
+`Single`, `Double`) carry FPC's frozen-width connotations and will be
+retired.
+
+*Retirement, without deprecation warnings.*  The classic names that are
+still builtins keep their meaning for now, and diagnostics still print the
+classic spelling.  They will be removed as builtins in one step and move to
+the opt-in stdlib unit `ClassicPascalTypes`, which already supplies the FPC
+/ Delphi names Blaise never had as builtins (`LongInt`, `ShortInt`,
+`NativeInt`, `Real`, `Extended`, ... -- `Extended` is `Float64`, not the
+x87 80-bit type).  There is deliberately no deprecation-warning period:
+Blaise is young and its users expect change between releases, and a warning
+cycle would delay the removal by a whole release for little benefit.
+Migration guidance comes from tooling instead: BlaiseGuard rule BL-2006
+reports every classic type name with its replacement as a quick-fix.
+
+*Planned with the retirement.*  Three changes are decided and follow in the
+next release cycle, because each one changes the meaning of existing code:
+
+* *Context-typed integer literals.*  A literal will take its type from its
+  context (`var B: UInt8 = 255` needs no cast) and default to `Int` where
+  the context gives none, replacing the magnitude rule below.  Because
+  Blaise has no inline `var` and no variable type inference, the default is
+  visible mainly in overload resolution, generic argument inference and the
+  width of intermediate arithmetic (`1 shl 40`).
+* *`Length`, `Count`, `SetLength`, `IndexOf` and friends use `Int`.*  Lengths
+  and counts widen to the pointer-sized integer, lifting the
+  2^31^-element ceiling on strings, `RawBytes` and collections.  All of them
+  move together; a surface where `Length` is 64-bit but `Count` is 32-bit
+  would be permanently inconsistent.
+* *Counts stay signed.*  `Length` and `Count` return the signed `Int`, so
+  `for I := Count - 1 downto 0` cannot underflow — the reason Go made
+  `len()` signed.  `UInt` and the unsigned fixed-width names are for bit
+  manipulation, hashes and formats defined as unsigned, and a warning for a
+  `downto 0` loop over an unsigned variable comes with the change.
+
+The design document holds the full plan.
 
 ==== Int64 ↔ UInt64 conversion is explicit
 
@@ -686,6 +719,9 @@ Untyped integer literals are typed by magnitude:
 The bit pattern is preserved in every case; the literal type only
 selects which signed/unsigned interpretation the surrounding expression
 sees.
+
+This rule is due to be replaced by context-typed literals defaulting to
+`Int` (see _Platform-honest type names_ above).
 
 ==== Radix prefixes
 
@@ -1458,6 +1494,32 @@ convention (e.g. a user's legacy `MyUnit.pas`).
 ---
 
 == Platform Interoperability
+
+=== C integer and float types
+
+When transcribing a C declaration, use the fixed-width Blaise type that
+matches the C type's width on the target — never the pointer-sized `Int`
+for C `int`.  On every current target (all LP64):
+
+[cols="2,1",options="header"]
+|===
+| C type | Blaise type
+
+| `int`, `int32_t` / `unsigned int`, `uint32_t` | `Int32` / `UInt32`
+| `short`, `int16_t` / `unsigned short`, `uint16_t` | `Int16` / `UInt16`
+| `signed char`, `int8_t` / `unsigned char`, `uint8_t` | `Int8` / `UInt8`
+| `char` | `Byte` (its signedness is implementation-defined; it carries text)
+| `long`, `long long`, `int64_t` | `Int64`
+| `unsigned long`, `unsigned long long`, `uint64_t` | `UInt64`
+| `intptr_t`, `ssize_t`, `ptrdiff_t` | `Int`
+| `uintptr_t`, `size_t` | `UInt`
+| `float` / `double` | `Float32` / `Float64`
+|===
+
+The one trap is the short name: C `int` is 32 bits, Blaise `Int` is 64.
+Developers arriving from Go meet the same false friend, as do those from
+Kotlin, Java or C#, where `Int` / `int` is a fixed 32-bit type.  `bindgen`
+emits bindings by this table.
 
 === POSIX and Xlib (Linux, macOS BSD layer)
 
@@ -2526,6 +2588,14 @@ directive on any same-named declaration is a compile-time
 "duplicate identifier" error.  Resolution at the call site follows
 Delphi semantics — exact-type match is preferred over widening match,
 and an unresolvable tie is a compile-time "ambiguous overload" error.
+
+Two overloads whose parameters are the *same types* are a duplicate
+declaration, rejected at the second one — including when the types are
+spelled differently through a type alias: `F(UInt32)` and `F(Cardinal)`,
+or `F(Int)` and `F(Int64)` on a 64-bit target.  The message names the alias
+pair (`'Cardinal' and 'UInt32' are the same type`).  Signatures are compared
+in the form that names the emitted symbol, so the check catches exactly the
+pairs that would otherwise collide.
 
 === Rationale
 
