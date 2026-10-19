@@ -42,6 +42,9 @@ type
       labels on both ISAs (they all mangled to '?' and collided); two
       declared names of one array shape are one type and are rejected }
     procedure TestAsm_ArrayAndMetaclassOverloads_DistinctLabels;
+    { in a program, an overloaded forward pairs with its body of the same
+      signature -- calls resolve, and each overload is emitted once }
+    procedure TestSem_ProgramOverloadForward_PairsWithBody;
     { Phase A — arity-distinct standalone overloading }
 
     { Parser: 'overload' directive sets the IsOverload flag on TMethodDecl }
@@ -622,6 +625,47 @@ begin
       begin
       end.
       ''')) >= 0);
+end;
+
+procedure TOverloadTests.TestSem_ProgramOverloadForward_PairsWithBody;
+const
+  Src = '''
+    program p;
+    procedure F(X: Integer); overload; forward;
+    procedure F(const X: string); overload; forward;
+    procedure G;
+    begin
+      F(1);
+      F('a')
+    end;
+    procedure F(X: Integer); overload;
+    begin
+    end;
+    procedure F(const X: string);
+    begin
+    end;
+    begin
+      G()
+    end.
+    ''';
+var
+  Text: string;
+  Target: string;
+  I: Integer;
+begin
+  AssertEquals('calls resolve', '', SemanticError(Src));
+  for I := 0 to 1 do
+  begin
+    if I = 0 then
+      Target := TargetX86_64
+    else
+      Target := TargetArm64;
+    Text := GenAsm(Src, Target);
+    AssertTrue(Target + ' F(Integer) emitted', Pos('F_D_i:', Text) >= 0);
+    AssertTrue(Target + ' F(Integer) emitted once',
+      Pos('F_D_i:', Copy(Text, Pos('F_D_i:', Text) + 1, MaxInt)) < 0);
+    AssertTrue(Target + ' F(string) emitted', Pos('F_D_S:', Text) >= 0);
+  end;
 end;
 
 initialization

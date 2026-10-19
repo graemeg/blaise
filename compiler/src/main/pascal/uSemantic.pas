@@ -221,6 +221,10 @@ type
       IndexOf can return a same-named decl from an imported unit. }
     function IndexOfProcInUnit(const AName, AUnitName: string): Integer;
 
+    { The FProcIndex entry of the current unit's body-less overloaded forward
+      that ABody implements (same mangled signature), or -1. }
+    function IndexOfOverloadForward(ABody: TMethodDecl): Integer;
+
     { The emitted/imported link symbol for a standalone routine: the
       `external name` for an external binding (defaulting to the Pascal name),
       else ResolvedEmitName (bare name for unmangled RTL units) or the name. }
@@ -2226,6 +2230,25 @@ begin
     if SameText(FProcIndex.Strings[I], AName) and
        SameText(TMethodDecl(FProcIndex.Objects[I]).OwningUnit, AUnitName) then
       Exit(I);
+  Result := -1;
+end;
+
+function TSemanticAnalyser.IndexOfOverloadForward(ABody: TMethodDecl): Integer;
+var
+  I:   Integer;
+  Fwd: TMethodDecl;
+  Sig: string;
+begin
+  Sig := MangleParamSig(ABody);
+  for I := 0 to FProcIndex.Count - 1 do
+  begin
+    Fwd := TMethodDecl(FProcIndex.Objects[I]);
+    if SameText(FProcIndex.Strings[I], ABody.Name) and
+       SameText(Fwd.OwningUnit, FCurrentUnitName) and
+       Fwd.IsOverload and (Fwd.Body = nil) and (not Fwd.IsExternal) and
+       (MangleParamSig(Fwd) = Sig) then
+      Exit(I);
+  end;
   Result := -1;
 end;
 
@@ -10155,6 +10178,7 @@ var
   Sym:     TSymbol;
   CurUnit:  string;
   PrevUnit: string;
+  Fwd:     TMethodDecl;
 begin
   for I := 0 to ABlock.ProcDecls.Count - 1 do
   begin
@@ -10211,7 +10235,24 @@ begin
       that unit's decl.  It then took the Continue below and was never defined
       into the program's scope, and the call reported "Undeclared function".
       AnalyseUnit restricts the same lookup for the unit-to-unit case; this is
-      the program case. }
+      the program case.
+
+      An overloaded forward pairs by mangled signature instead, and its body
+      may omit the directive -- as in a unit's implementation section. }
+    if (ADecl.Body <> nil) and
+       (FCurrentEnclosingDecl = nil) and (FCurrentMethodOwner = nil) then
+    begin
+      J := IndexOfOverloadForward(ADecl);
+      if J >= 0 then
+      begin
+        Fwd := TMethodDecl(FProcIndex.Objects[J]);
+        ADecl.IsOverload := True;
+        ADecl.ResolvedEmitName := Fwd.ResolvedEmitName;
+        TransferDefaultValues(Fwd, ADecl);
+        ReplaceProcIndexObject(J, ADecl);
+        Continue;
+      end;
+    end;
     if not ADecl.IsOverload then
     begin
       J := IndexOfProcInUnit(ADecl.Name, FCurrentUnitName);

@@ -23,6 +23,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { a program's overloaded forward declarations pair with their bodies:
+      an earlier routine calls each overload before its body appears }
+    procedure TestRun_ProgramOverloadForward_CallsEachBody;
     { statements whose chain continues past a field element: field writes,
       nested-row element writes and calls through procedural elements }
     procedure TestRun_ChainPastFieldElement;
@@ -4657,6 +4660,34 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '8765' + #10 + 'go 1' + #10 + 'go 2' + #10 + 'hi 3' + #10, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_ProgramOverloadForward_CallsEachBody;
+const
+  Src = '''
+    program P;
+    procedure F(X: Integer); overload; forward;
+    procedure F(const X: string); overload; forward;
+    procedure G;
+    begin
+      F(41);
+      F('abc')
+    end;
+    procedure F(X: Integer); overload;
+    begin
+      WriteLn('int ', X + 1)
+    end;
+    procedure F(const X: string);
+    begin
+      WriteLn('str ', X)
+    end;
+    begin
+      G()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'int 42' + #10 + 'str abc' + #10, 0);
 end;
 
 initialization
