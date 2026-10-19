@@ -34,6 +34,10 @@ type
       parameter, Result, an element, an argument, a receiver; a borrowed
       and an owned source; a failed cast in argument position raises }
     procedure TestRun_AsCast_IntoEveryConsumer;
+    { interface values read in place -- an element of a field of Self, a
+      dynamic-array element, P^ -- into every consumer, and interface
+      arguments that spill to the stack (a class value among them) }
+    procedure TestRun_InPlaceIntfSources_IntoEveryConsumer;
     { TGreet(MakeI()).X: the call's owned reference is released -- the shared
       object goes when its last real holder lets go }
     procedure TestRun_ClassCastOfInterfaceCall_ReleasesTheCallRef;
@@ -2324,6 +2328,87 @@ begin
     'elem 1' + LE + 'show 1' + LE + 'recv 1' + LE + 'owned 2' + LE +
     'show 3' + LE + 'gone 3' + LE + 'invalid cast' + LE +
     'gone 2' + LE + 'gone 1' + LE + 'end' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_InPlaceIntfSources_IntoEveryConsumer;
+const
+  Src = '''
+    program Q;
+    type
+      IThing = interface
+        function N(): Integer;
+        procedure Take(const X: IThing);
+      end;
+      TThing = class(TObject, IThing)
+        FN: Integer;
+        function N(): Integer;
+        procedure Take(const X: IThing);
+        destructor Destroy(); override;
+      end;
+      PThing = ^IThing;
+      THold = class
+        FS: IThing;
+        FArr: array[0..1] of IThing;
+        function First(): IThing;
+        procedure Run(var V: IThing; out W: IThing);
+      end;
+    var Sum: Integer;
+    function TThing.N(): Integer; begin Result := FN end;
+    procedure TThing.Take(const X: IThing); begin Sum := Sum + X.N() end;
+    destructor TThing.Destroy(); begin WriteLn('gone ', FN); inherited Destroy() end;
+    function Mk(AN: Integer): IThing;
+    var T: TThing;
+    begin T := TThing.Create(); T.FN := AN; Result := T end;
+    procedure Take(const X: IThing); begin Sum := Sum + X.N() end;
+    procedure Many(A, B, C, D, E: Integer; X, Y, Z: IThing);
+    begin Sum := Sum + A + B + C + D + E + X.N() + Y.N() + Z.N() end;
+    type TMany = procedure(A, B, C, D, E: Integer; X, Y, Z: IThing);
+    function THold.First(): IThing; begin Result := FArr[0] end;
+    procedure THold.Run(var V: IThing; out W: IThing);
+    var IT: IThing;
+    begin
+      FS := FArr[1];
+      V := FArr[0];
+      W := FArr[1];
+      IT := FArr[0];
+      IT.Take(FArr[1]);
+      Take(FArr[0])
+    end;
+    var
+      H: THold; G: array of IThing; P: PThing; A, B, IT, L: IThing; F: TMany;
+      T: TThing;
+    begin
+      H := THold.Create();
+      H.FArr[0] := Mk(1); H.FArr[1] := Mk(2);
+      SetLength(G, 2); G[0] := Mk(3); P := @G[0];
+      L := H.First(); WriteLn('result ', L.N());
+      H.Run(A, B); WriteLn('run ', A.N(), ' ', B.N(), ' ', H.FS.N(), ' ', Sum);
+      H.FS := G[0]; WriteLn('dyn field ', H.FS.N());
+      H.FS := P^; WriteLn('deref field ', H.FS.N());
+      G[1] := P^; WriteLn('deref elem ', G[1].N());
+      IT := H.FArr[0];
+      Sum := 0; IT.Take(G[0]); IT.Take(P^); Take(P^); WriteLn('args ', Sum);
+      T := TThing.Create(); T.FN := 4; F := @Many;
+      Sum := 0; Many(0, 0, 0, 0, 0, T, H.FArr[1], G[0]); WriteLn('spill ', Sum);
+      Sum := 0; F(0, 0, 0, 0, 0, P^, T, G[0]); WriteLn('spill pv ', Sum);
+      H.FArr[0] := nil; H.FArr[1] := nil; H.FS := nil;
+      A := nil; B := nil; L := nil; IT := nil;
+      SetLength(G, 0); T := nil;
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { x86-64 rejected FArr[I] (inside a method) as Result, a field of Self
+    and an interface-method argument; a dynamic-array element and P^ in
+    several consumers; and passed a class value to a stack-spilled
+    interface parameter through a nonexistent '<Name>_itab' symbol }
+  AssertRunsOnAll(Src,
+    'result 1' + LE + 'run 1 2 2 3' + LE + 'dyn field 3' + LE +
+    'deref field 3' + LE + 'deref elem 3' + LE + 'args 9' + LE +
+    'spill 9' + LE + 'spill pv 10' + LE +
+    'gone 2' + LE + 'gone 1' + LE + 'gone 3' + LE + 'gone 4' + LE +
+    'end' + LE, 0);
 end;
 
 initialization

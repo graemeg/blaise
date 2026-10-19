@@ -1057,7 +1057,7 @@ begin
       #9'bl _MkObj'#10#9'stur x0, [x29, #'));
   AssertEquals('MkObj().FV: receiver deferred for release', '',
     AsmMissing(Src,
-      #9'movq %rax, _pendrel_0(%rip)'#10#9'movq %rax, %r15',
+      #9'movq %rax, _pendrel_0(%rip)'#10#9'addq $8, %rax',
       #9'bl _MkObj'#10#9'stur x0, [x29, #'));
 end;
 

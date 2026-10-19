@@ -26,6 +26,7 @@ type
     procedure TestCodegen_IntfAndMetaclassFieldOfCallResult;
     procedure TestCodegen_ProcFieldCall_AggregateResult;
     procedure TestCodegen_AsCast_IntoFieldAndVarParam;
+    procedure TestCodegen_StackSpilledIntfArg_ClassValueUsesClassItab;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1220,6 +1221,42 @@ begin
     unsupported-RHS error }
   AssertEquals('as-cast targets compile', '',
     AsmMissing(Src, 'callq _GetItab', 'bl __GetItab'));
+end;
+
+procedure TInterfaceTests.TestCodegen_StackSpilledIntfArg_ClassValueUsesClassItab;
+const
+  Src = '''
+      program P;
+      type
+        IThing = interface
+          function N(): Integer;
+        end;
+        TThing = class(TObject, IThing)
+          function N(): Integer;
+        end;
+      function TThing.N(): Integer;
+      begin
+        Result := 1
+      end;
+      procedure Many(A, B, C, D, E: Integer; X, Y, Z: IThing);
+      begin
+      end;
+      var T: TThing;
+      begin
+        T := TThing.Create();
+        Many(1, 2, 3, 4, 5, T, T, T)
+      end.
+      ''';
+var
+  AsmText: string;
+begin
+  { Z spills to the stack: its itab is the class's static one, not a slot
+    named after the variable (T_itab never existed; the link went dynamic
+    to find it and the program crashed) }
+  AsmText := GenAsm(Src, TargetX86_64);
+  AssertTrue('no T_itab', Pos('T_itab', AsmText) < 0);
+  AssertEquals('class itab on both ISAs', '',
+    AsmMissing(Src, 'itab_TThing_', 'itab_TThing_'));
 end;
 
 initialization

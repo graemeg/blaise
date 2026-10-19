@@ -906,6 +906,13 @@ type
     function  IsIntfStackValue(AExpr: TASTExpr): Boolean;
     procedure EmitIntfStackValueStore(AExpr: TASTExpr;
       const AObjOp, AItabOp: string);
+    { An interface value read IN PLACE -- a field, an element, P^ -- and the
+      address of its (obj, itab) pair }
+    function  IsIntfPlace(AExpr: TASTExpr): Boolean;
+    procedure EmitIntfPlaceAddr(AExpr: TASTExpr; const AReg: string);
+    { Push a BORROWED interface pair -- a variable or an in-place value --
+      obj on top (the store order) or itab on top (the argument order) }
+    procedure PushIntfBorrowPair(AExpr: TASTExpr; AItabOnTop: Boolean);
     { Sret call for a TFuncCallExpr: routes an implicit-Self method through the
       vtable-aware method-sret emitter, a free function through EmitSretCall. }
     procedure EmitFuncCallSret(AFC: TFuncCallExpr; const ADest: string;
@@ -1129,6 +1136,8 @@ type
       var/out params push one value; interface params push two (itab first, then
       obj — reversed so the pop loop restores them in the correct register order). }
     procedure EmitMethodArgPush(APar: TMethodParam; AArg: TASTExpr);
+    { Push an argument for an interface parameter: obj, then itab on top }
+    procedure PushIntfArg(AArg: TASTExpr; AIntfType: TTypeDesc);
     procedure EmitOpenArrayArgToSlots(AArg: TASTExpr;
       AHoistedPtrOff, ADataOff, AHighOff: Integer);
     { Is the AIndex'th param of a procedural signature an open array?  (A
@@ -4394,38 +4403,8 @@ begin
     end
     else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
     begin
-      if Arg is TIdentExpr then
-      begin
-        if TIdentExpr(Arg).IsImplicitSelf and
-           (TIdentExpr(Arg).ImplicitFieldInfo <> nil) then
-        begin
-          Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
-          if TFieldInfo(TIdentExpr(Arg).ImplicitFieldInfo).Offset > 0 then
-            Self.Emit(Format(#9'addq $%d, %%rax',
-              [TFieldInfo(TIdentExpr(Arg).ImplicitFieldInfo).Offset]));
-          Self.Emit(#9'movq (%rax), %rcx');
-          Self.Emit(#9'movq 8(%rax), %rdx');
-          Self.Emit(#9'pushq %rcx');
-          Self.Emit(#9'pushq %rdx');
-        end
-        else
-        begin
-          Self.LoadIntfIdentPair(TIdentExpr(Arg), '%rax', '%rcx');
-          Self.Emit(#9'pushq %rax');
-          Self.Emit(#9'pushq %rcx');
-        end;
-      end
-      else if Arg is TFieldAccessExpr then
-      begin
-        Self.EmitInterfaceFieldAddr(TFieldAccessExpr(Arg), '%rax');
-        Self.Emit(#9'movq (%rax), %rcx');
-        Self.Emit(#9'movq 8(%rax), %rdx');
-        Self.Emit(#9'pushq %rcx');
-        Self.Emit(#9'pushq %rdx');
-      end
-      else
-        raise ENativeCodeGenError.Create(
-          'native backend: unsupported interface arg expression in interface dispatch');
+      { a variable or an in-place value (call results were hoisted) }
+      Self.PushIntfBorrowPair(Arg, True);
     end
     else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
     begin
@@ -4593,38 +4572,8 @@ begin
     end
     else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
     begin
-      if Arg is TIdentExpr then
-      begin
-        if TIdentExpr(Arg).IsImplicitSelf and
-           (TIdentExpr(Arg).ImplicitFieldInfo <> nil) then
-        begin
-          Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
-          if TFieldInfo(TIdentExpr(Arg).ImplicitFieldInfo).Offset > 0 then
-            Self.Emit(Format(#9'addq $%d, %%rax',
-              [TFieldInfo(TIdentExpr(Arg).ImplicitFieldInfo).Offset]));
-          Self.Emit(#9'movq (%rax), %rcx');
-          Self.Emit(#9'movq 8(%rax), %rdx');
-          Self.Emit(#9'pushq %rcx');
-          Self.Emit(#9'pushq %rdx');
-        end
-        else
-        begin
-          Self.LoadIntfIdentPair(TIdentExpr(Arg), '%rax', '%rcx');
-          Self.Emit(#9'pushq %rax');
-          Self.Emit(#9'pushq %rcx');
-        end;
-      end
-      else if Arg is TFieldAccessExpr then
-      begin
-        Self.EmitInterfaceFieldAddr(TFieldAccessExpr(Arg), '%rax');
-        Self.Emit(#9'movq (%rax), %rcx');
-        Self.Emit(#9'movq 8(%rax), %rdx');
-        Self.Emit(#9'pushq %rcx');
-        Self.Emit(#9'pushq %rdx');
-      end
-      else
-        raise ENativeCodeGenError.Create(
-          'native backend: unsupported interface arg expression in field dispatch');
+      { a variable or an in-place value (call results were hoisted) }
+      Self.PushIntfBorrowPair(Arg, True);
     end
     else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
     begin
@@ -5105,206 +5054,28 @@ begin
     Self.Emit(#9'popq %rbx');
     Exit;
   end;
-  { Implicit Self.Field assignment: the fat pointer lives inside the object at
-    Self + FieldOffset (obj) and Self + FieldOffset + 8 (itab).
-    Handle entirely here rather than falling through to the ObjOp/ItabOp paths
-    below (which use fixed operand strings that could be clobbered by calls). }
+  { Implicit Self.Field assignment: the fat pointer lives inside the object
+    at Self + FieldOffset (obj) and Self + FieldOffset + 8 (itab) -- the
+    shared pair store, like any other field }
   if AAsgn.ImplicitSelfField <> nil then
   begin
     ISFld := TFieldInfo(AAsgn.ImplicitSelfField);
-    { Compute Self + FieldOffset into %r15 (callee-saved: survives callq). }
-    Self.Emit(#9'pushq %r15');
-    Self.Emit(Format(#9'movq %s, %%r15', [Self.VarOperand('Self')]));
-    if ISFld.Offset > 0 then
-      Self.Emit(Format(#9'addq $%d, %%r15', [ISFld.Offset]));
-    { Now (%r15) = obj slot, 8(%r15) = itab slot. }
-    if AAsgn.Expr.ResolvedType.Kind = tyClass then
-    begin
-      ClassRT := TRecordTypeDesc(AAsgn.Expr.ResolvedType);
-      ItabSym := 'itab_' + Self.ClassSymName(ClassRT.Name) + '_' + Self.IntfTypeInfoName(Intf.Name);
-      Self.EmitExprToEax(AAsgn.Expr);
-      Self.Emit(#9'pushq %rax');
-      { an owned +1 (a call result) is consumed, not retained again }
-      if not ArcExprOwnsRef(AAsgn.Expr) then
-      begin
-        Self.Emit(#9'movq %rax, %rdi');
-        Self.Emit(#9'callq _ClassAddRef');
-      end;
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(Format(#9'leaq %s(%%rip), %%rax', [ItabSym]));
-      Self.Emit(#9'movq %rax, 8(%r15)');
-    end
-    else if AAsgn.Expr is TNilLiteral then
-    begin
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'movq $0, (%r15)');
-      Self.Emit(#9'movq $0, 8(%r15)');
-    end
-    else if Self.IsIntfStackValue(AAsgn.Expr) then
-      { a call result, getter or static var }
-      Self.EmitIntfStackValueStore(AAsgn.Expr, '(%r15)', '8(%r15)')
-    else if (AAsgn.Expr.ResolvedType.Kind = tyInterface) and (AAsgn.Expr is TIdentExpr) then
-    begin
-      Self.PushIntfIdentPair(TIdentExpr(AAsgn.Expr));
-      Self.Emit(#9'movq %rax, %rdi');
-      Self.Emit(#9'callq _ClassAddRef');
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-    end
-    else if (AAsgn.Expr.ResolvedType.Kind = tyInterface) and (AAsgn.Expr is TFieldAccessExpr) then
-    begin
-      Self.EmitInterfaceFieldAddr(TFieldAccessExpr(AAsgn.Expr), '%rax');
-      Self.Emit(#9'movq 8(%rax), %rcx');
-      Self.Emit(#9'pushq %rcx');
-      Self.Emit(#9'movq (%rax), %rcx');
-      Self.Emit(#9'pushq %rcx');
-      Self.Emit(#9'movq %rcx, %rdi');
-      Self.Emit(#9'callq _ClassAddRef');
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-    end
-    else
-      raise ENativeCodeGenError.Create(
-        'native backend: unsupported interface-field assignment RHS');
-    Self.Emit(#9'popq %r15');
+    Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
+    Self.EmitInterfaceToFieldSlotsAt(AAsgn.Expr, '%rax', ISFld.Offset,
+      AAsgn.ResolvedLhsType);
     Exit;
   end;
 
-  { sret interface Result: the Result slot holds a pointer to the caller's
-    16-byte buffer.  Dereference it into %r15 so that (%r15)=obj, 8(%r15)=itab. }
+  { sret interface Result, or a var/out interface parameter: the slot holds a
+    POINTER to the caller's 16-byte fat-pointer block -- the same store }
   if (FSretFunc and SameText(AAsgn.Name, 'Result')) or AAsgn.IsVarParam then
   begin
-    { Both shapes hold a POINTER to the caller's 16-byte fat-pointer block:
-      the sret Result slot, or a var/out interface param slot. }
-    Self.Emit(#9'pushq %r15');
     if AAsgn.IsVarParam then
-      Self.Emit(Format(#9'movq %s, %%r15', [Self.VarOperand(AAsgn.Name)]))
+      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(AAsgn.Name)]))
     else
-      Self.Emit(Format(#9'movq %s, %%r15', [Self.VarOperand('Result')]));
-    ObjOp  := '(%r15)';
-    ItabOp := '8(%r15)';
-    if AAsgn.Expr.ResolvedType.Kind = tyClass then
-    begin
-      ClassRT := TRecordTypeDesc(AAsgn.Expr.ResolvedType);
-      ItabSym := 'itab_' + Self.ClassSymName(ClassRT.Name) + '_' + Self.IntfTypeInfoName(Intf.Name);
-      Self.EmitExprToEax(AAsgn.Expr);
-      Self.Emit(#9'pushq %rax');
-      { an owned +1 (a call result) is consumed, not retained again }
-      if not ArcExprOwnsRef(AAsgn.Expr) then
-      begin
-        Self.Emit(#9'movq %rax, %rdi');
-        Self.Emit(#9'callq _ClassAddRef');
-      end;
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(Format(#9'leaq %s(%%rip), %%rax', [ItabSym]));
-      Self.Emit(#9'movq %rax, 8(%r15)');
-    end
-    else if AAsgn.Expr is TNilLiteral then
-    begin
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'movq $0, (%r15)');
-      Self.Emit(#9'movq $0, 8(%r15)');
-    end
-    else if Self.IsIntfStackValue(AAsgn.Expr) then
-      { a call result, getter or static var }
-      Self.EmitIntfStackValueStore(AAsgn.Expr, '(%r15)', '8(%r15)')
-    else if (AAsgn.Expr.ResolvedType.Kind = tyInterface) and (AAsgn.Expr is TIdentExpr) then
-    begin
-      Self.PushIntfIdentPair(TIdentExpr(AAsgn.Expr));
-      Self.Emit(#9'movq %rax, %rdi');
-      Self.Emit(#9'callq _ClassAddRef');
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-    end
-    else if (AAsgn.Expr.ResolvedType.Kind = tyInterface) and
-            (AAsgn.Expr is TDerefExpr) then
-    begin
-      { Result := Src^ where Src: ^IFoo — exactly the body of TList<T>.Get
-        monomorphised at T = an interface, which is what made TList<IFoo>
-        uninstantiable.  The pointee is a contiguous fat pointer; load both
-        words from it before storing into the sret destination.  %r14 is
-        callee-saved so the source address survives the ARC calls, and %r15
-        (the sret destination) must not be disturbed. }
-      Self.Emit(#9'pushq %r14');
-      Self.EmitExprToEax(TDerefExpr(AAsgn.Expr).Expr);
-      Self.Emit(#9'movq %rax, %r14');
-      Self.Emit(#9'movq 8(%r14), %rax');
-      Self.Emit(#9'pushq %rax');
-      Self.Emit(#9'movq (%r14), %rax');
-      Self.Emit(#9'pushq %rax');
-      Self.Emit(#9'movq %rax, %rdi');
-      Self.Emit(#9'callq _ClassAddRef');
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-      Self.Emit(#9'popq %r14');
-    end
-    else if (AAsgn.Expr.ResolvedType.Kind = tyInterface) and
-            (AAsgn.Expr is TFieldAccessExpr) and
-            (TFieldAccessExpr(AAsgn.Expr).FieldInfo <> nil) then
-    begin
-      { Result := Obj.FIntf: the field's fat pair, retained (it was an
-        "unsupported" compile error) }
-      Self.EmitInterfaceFieldAddr(TFieldAccessExpr(AAsgn.Expr), '%rax');
-      Self.Emit(#9'movq 8(%rax), %rcx');
-      Self.Emit(#9'pushq %rcx');
-      Self.Emit(#9'movq (%rax), %rcx');
-      Self.Emit(#9'pushq %rcx');
-      Self.Emit(#9'movq %rcx, %rdi');
-      Self.Emit(#9'callq _ClassAddRef');
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-    end
-    else if IsFoldedPropSubscript(AAsgn.Expr) then
-    begin
-    { Interface element read through an INDEXED PROPERTY: List[I] where the
-      default property's getter returns an interface.  There is no element
-      address to take -- the getter hands back the fat pair BY VALUE through
-      the sret convention -- so this is the class-receiver-call shape.
-      EmitRecordCallSretAt already unwraps the subscript to its PropRead
-      FieldAccess and synthesises the getter call, so it does the marshalling;
-      it just was never reached from the interface paths. }
-      Self.Emit(#9'subq $16, %rsp');
-      Self.EmitRecordCallSretAt(AAsgn.Expr, '(%rsp)', False);
-      Self.Emit(#9'movq (%r15), %rdi');
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'movq (%rsp), %rax');
-      Self.Emit(#9'movq %rax, (%r15)');
-      Self.Emit(#9'movq 8(%rsp), %rax');
-      Self.Emit(#9'movq %rax, 8(%r15)');
-      Self.Emit(#9'addq $16, %rsp');
-    end
-    else
-      raise ENativeCodeGenError.Create(
-        'native backend: unsupported sret interface Result assignment RHS');
-    Self.Emit(#9'popq %r15');
+      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Result')]));
+    Self.EmitInterfaceToFieldSlotsAt(AAsgn.Expr, '%rax', 0,
+      AAsgn.ResolvedLhsType);
     Exit;
   end;
 
@@ -5426,21 +5197,12 @@ begin
     Exit;
   end;
 
-  { F := H.G where the RHS is an interface stored in a record/class field.  The
-    fat pointer is contiguous in the field's memory (obj at the field address,
-    itab at +8) — load both, addref the new obj, release the old, store both. }
-  if (AAsgn.Expr.ResolvedType <> nil) and
-     (AAsgn.Expr.ResolvedType.Kind = tyInterface) and
-     (AAsgn.Expr is TFieldAccessExpr) then
+  { F := an interface read in place -- a field (H.G), an element (Arr[I],
+    H.FArr[I]), P^: copy the pair with ARC }
+  if Self.IsIntfPlace(AAsgn.Expr) then
   begin
-    { Compute the source field's base address into %r15 (callee-saved). }
-    Self.Emit(#9'pushq %r15');
-    Self.EmitInterfaceFieldAddr(TFieldAccessExpr(AAsgn.Expr), '%r15');
-    Self.Emit(#9'movq 8(%r15), %rax');     { src itab }
-    Self.Emit(#9'pushq %rax');             { itab }
-    Self.Emit(#9'movq (%r15), %rax');      { src obj }
-    Self.Emit(#9'pushq %rax');             { obj; stack now (obj, itab) }
-    Self.Emit(#9'movq %rax, %rdi');
+    Self.PushIntfBorrowPair(AAsgn.Expr, False);
+    Self.Emit(#9'movq (%rsp), %rdi');      { new obj }
     Self.Emit(#9'callq _ClassAddRef');
     Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));   { old obj }
     Self.Emit(#9'callq _ClassRelease');
@@ -5448,117 +5210,6 @@ begin
     Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
     Self.Emit(#9'popq %rax');              { itab }
     Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
-    Self.Emit(#9'popq %r15');
-    Exit;
-  end;
-
-  { F := P^ where the RHS is an interface read through a typed pointer.  The
-    pointee is a contiguous fat pointer (obj at the pointer value, itab at +8)
-    — the same shape as the field-access case above, with the pointer VALUE
-    standing in for the field address.  Without this arm the read hit the
-    fail-loud else: the native backend addresses interfaces by NAMED SLOT
-    (X_obj / X_itab), so no address-based read path existed at all. }
-  if (AAsgn.Expr.ResolvedType <> nil) and
-     (AAsgn.Expr.ResolvedType.Kind = tyInterface) and
-     (AAsgn.Expr is TDerefExpr) then
-  begin
-    Self.Emit(#9'pushq %r15');
-    Self.EmitExprToEax(TDerefExpr(AAsgn.Expr).Expr);
-    Self.Emit(#9'movq %rax, %r15');
-    Self.Emit(#9'movq 8(%r15), %rax');     { src itab }
-    Self.Emit(#9'pushq %rax');
-    Self.Emit(#9'movq (%r15), %rax');      { src obj }
-    Self.Emit(#9'pushq %rax');
-    Self.Emit(#9'movq %rax, %rdi');
-    Self.Emit(#9'callq _ClassAddRef');
-    Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));   { old obj }
-    Self.Emit(#9'callq _ClassRelease');
-    Self.Emit(#9'popq %rax');              { new obj }
-    Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
-    Self.Emit(#9'popq %rax');              { itab }
-    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
-    Self.Emit(#9'popq %r15');
-    Exit;
-  end;
-
-  { F := Arr[I] where the RHS is an interface element of a static array.  The
-    element is a contiguous fat pointer (obj at the element address, itab at +8)
-    — compute the element address into %r15 and copy obj+itab with ARC, mirroring
-    the field-access case above. }
-  { The StrExpr guard is load-bearing: a class default-property subscript
-    (L[0], which desugars to the Items getter) is ALSO a TStringSubscriptExpr,
-    but it has no static-array base and no evaluated index.  Without the check
-    it fell in here and EmitIntfStaticElemAddr cast the class type to
-    TStaticArrayTypeDesc and dereferenced a nil index expression — segfaulting
-    the COMPILER rather than reporting anything. }
-  if (AAsgn.Expr.ResolvedType <> nil) and
-     (AAsgn.Expr.ResolvedType.Kind = tyInterface) and
-     (AAsgn.Expr is TStringSubscriptExpr) and
-     (TStringSubscriptExpr(AAsgn.Expr).StrExpr.ResolvedType <> nil) and
-     (TStringSubscriptExpr(AAsgn.Expr).StrExpr.ResolvedType.Kind = tyStaticArray) then
-  begin
-    Self.Emit(#9'pushq %r15');
-    Self.EmitIntfStaticElemAddr(TStringSubscriptExpr(AAsgn.Expr), '%r15');
-    Self.Emit(#9'movq 8(%r15), %rax');     { src itab }
-    Self.Emit(#9'pushq %rax');
-    Self.Emit(#9'movq (%r15), %rax');      { src obj }
-    Self.Emit(#9'pushq %rax');
-    Self.Emit(#9'movq %rax, %rdi');
-    Self.Emit(#9'callq _ClassAddRef');
-    Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));   { old obj }
-    Self.Emit(#9'callq _ClassRelease');
-    Self.Emit(#9'popq %rax');              { new obj }
-    Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
-    Self.Emit(#9'popq %rax');              { itab }
-    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
-    Self.Emit(#9'popq %r15');
-    Exit;
-  end;
-  { Same, for a dynamic / open-array interface element source: fat pointer at
-    data_ptr + index*16 (BUG-20260720-qbe-dynarray-intf-elem-read). }
-  if (AAsgn.Expr.ResolvedType <> nil) and
-     (AAsgn.Expr.ResolvedType.Kind = tyInterface) and
-     (AAsgn.Expr is TStringSubscriptExpr) and
-     (TStringSubscriptExpr(AAsgn.Expr).StrExpr.ResolvedType <> nil) and
-     (TStringSubscriptExpr(AAsgn.Expr).StrExpr.ResolvedType.Kind in
-        [tyDynArray, tyOpenArray]) then
-  begin
-    Self.Emit(#9'pushq %r15');
-    Self.EmitIntfDynElemAddr(TStringSubscriptExpr(AAsgn.Expr), '%r15');
-    Self.Emit(#9'movq 8(%r15), %rax');     { src itab }
-    Self.Emit(#9'pushq %rax');
-    Self.Emit(#9'movq (%r15), %rax');      { src obj }
-    Self.Emit(#9'pushq %rax');
-    Self.Emit(#9'movq %rax, %rdi');
-    Self.Emit(#9'callq _ClassAddRef');
-    Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));   { old obj }
-    Self.Emit(#9'callq _ClassRelease');
-    Self.Emit(#9'popq %rax');              { new obj }
-    Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
-    Self.Emit(#9'popq %rax');              { itab }
-    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
-    Self.Emit(#9'popq %r15');
-    Exit;
-  end;
-
-  if IsFoldedPropSubscript(AAsgn.Expr) then
-  begin
-  { Interface element read through an INDEXED PROPERTY: List[I] where the
-    default property's getter returns an interface.  There is no element
-    address to take -- the getter hands back the fat pair BY VALUE through
-    the sret convention -- so this is the class-receiver-call shape.
-    EmitRecordCallSretAt already unwraps the subscript to its PropRead
-    FieldAccess and synthesises the getter call, so it does the marshalling;
-    it just was never reached from the interface paths. }
-    Self.Emit(#9'subq $16, %rsp');
-    Self.EmitRecordCallSretAt(AAsgn.Expr, '(%rsp)', False);
-    Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));  { old obj }
-    Self.Emit(#9'callq _ClassRelease');
-    Self.Emit(#9'movq (%rsp), %rax');
-    Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
-    Self.Emit(#9'movq 8(%rsp), %rax');
-    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
-    Self.Emit(#9'addq $16, %rsp');
     Exit;
   end;
 
@@ -5624,75 +5275,9 @@ begin
   end
   else if (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyInterface) then
   begin
-    { Interface source: copy obj+itab from the source's fat pointer.  A named
-      interface local/global uses split _obj/_itab slots; an interface stored in
-      a record/class field uses a contiguous fat pointer (obj / obj+8). }
-    if AExpr is TIdentExpr then
-    begin
-      if TIdentExpr(AExpr).IsImplicitSelf and
-         (TIdentExpr(AExpr).ImplicitFieldInfo <> nil) then
-      begin
-        Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
-        if TFieldInfo(TIdentExpr(AExpr).ImplicitFieldInfo).Offset > 0 then
-          Self.Emit(Format(#9'addq $%d, %%rax',
-            [TFieldInfo(TIdentExpr(AExpr).ImplicitFieldInfo).Offset]));
-        Self.Emit(#9'movq 8(%rax), %rcx');
-        Self.Emit(#9'pushq %rcx');
-        Self.Emit(#9'movq (%rax), %rcx');
-        Self.Emit(#9'pushq %rcx');
-      end
-      else
-        Self.PushIntfIdentPair(TIdentExpr(AExpr));
-    end
-    else if AExpr is TFieldAccessExpr then
-    begin
-      Self.EmitInterfaceFieldAddr(TFieldAccessExpr(AExpr), '%rax');
-      Self.Emit(#9'movq 8(%rax), %rcx');
-      Self.Emit(#9'pushq %rcx');
-      Self.Emit(#9'movq (%rax), %rcx');
-      Self.Emit(#9'pushq %rcx');
-    end
-    else if AExpr is TDerefExpr then
-    begin
-      { Interface read through a typed pointer (P^): the pointer VALUE is the
-        address of the contiguous fat pointer. }
-      Self.EmitExprToEax(TDerefExpr(AExpr).Expr);
-      Self.Emit(#9'movq 8(%rax), %rcx');
-      Self.Emit(#9'pushq %rcx');           { itab }
-      Self.Emit(#9'movq (%rax), %rcx');
-      Self.Emit(#9'pushq %rcx');           { obj on top }
-    end
-    else if (AExpr is TStringSubscriptExpr) and
-            (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) and
-            (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyStaticArray) then
-    begin
-      { Static-array interface element source (Arr[I]): contiguous fat pointer.
-        The static-array guard keeps a class default-property subscript (L[0])
-        out — it is subscript-shaped but has no array base and no evaluated
-        index, and would crash EmitIntfStaticElemAddr.  It falls through to the
-        fail-loud else below instead. }
-      Self.EmitIntfStaticElemAddr(TStringSubscriptExpr(AExpr), '%rax');
-      Self.Emit(#9'movq 8(%rax), %rcx');
-      Self.Emit(#9'pushq %rcx');           { itab }
-      Self.Emit(#9'movq (%rax), %rcx');
-      Self.Emit(#9'pushq %rcx');           { obj on top }
-    end
-    else if (AExpr is TStringSubscriptExpr) and
-            (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) and
-            (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind in
-               [tyDynArray, tyOpenArray]) then
-    begin
-      { Dynamic / open-array interface element source: fat pointer at
-        data_ptr + index*16 (BUG-20260720-qbe-dynarray-intf-elem-read). }
-      Self.EmitIntfDynElemAddr(TStringSubscriptExpr(AExpr), '%rax');
-      Self.Emit(#9'movq 8(%rax), %rcx');
-      Self.Emit(#9'pushq %rcx');           { itab }
-      Self.Emit(#9'movq (%rax), %rcx');
-      Self.Emit(#9'pushq %rcx');           { obj on top }
-    end
-    else
-      raise ENativeCodeGenError.Create(
-        'native backend: unsupported interface source for interface-field store');
+    { a variable or an in-place value (field, element, P^): a borrow,
+      retained for the store }
+    Self.PushIntfBorrowPair(AExpr, False);
     Self.Emit(#9'movq (%rsp), %rdi');        { new obj }
     Self.Emit(#9'callq _ClassAddRef');
     Self.Emit(#9'movq (%r15), %rdi');        { old obj }
@@ -5726,7 +5311,8 @@ begin
        (AFA.Base.ResolvedType.Kind = tyClass) and
        NativeExprOwnsRef(AFA.Base) then
       Self.DeferNativeClassRelease();
-    Self.Emit(Format(#9'movq %%rax, %s', [ADstReg]));
+    if ADstReg <> '%rax' then
+      Self.Emit(Format(#9'movq %%rax, %s', [ADstReg]));
   end
   else if AFA.IsImplicitSelf then
   begin
@@ -5774,6 +5360,81 @@ begin
     Self.Emit(#9'addq %rcx, %rax');
     if ADstReg <> '%rax' then
       Self.Emit(Format(#9'movq %%rax, %s', [ADstReg]));
+  end;
+end;
+
+function TX86_64Backend.IsIntfPlace(AExpr: TASTExpr): Boolean;
+var
+  FA: TFieldAccessExpr;
+begin
+  { the forms EmitIntfPlaceAddr addresses (keep the two in step) }
+  Result := False;
+  if (AExpr = nil) or (AExpr.ResolvedType = nil) or
+     (AExpr.ResolvedType.Kind <> tyInterface) or Self.IsIntfStackValue(AExpr) then
+    Exit;
+  if AExpr is TFieldAccessExpr then
+  begin
+    FA := TFieldAccessExpr(AExpr);
+    Exit((FA.FieldInfo <> nil) and not FA.IsMethodCall and
+         not FA.IsInterfaceCall);
+  end;
+  if AExpr is TDerefExpr then
+    Exit(True);
+  if (AExpr is TStringSubscriptExpr) and
+     (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType <> nil) then
+    Exit(TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind in
+           [tyStaticArray, tyDynArray, tyOpenArray]);
+end;
+
+procedure TX86_64Backend.EmitIntfPlaceAddr(AExpr: TASTExpr; const AReg: string);
+begin
+  if AExpr is TFieldAccessExpr then
+    { a field, Self's or another instance's, or an element of an array
+      field (H.FArr[I]) }
+    Self.EmitInterfaceFieldAddr(TFieldAccessExpr(AExpr), AReg)
+  else if AExpr is TDerefExpr then
+  begin
+    { P^ with P: ^IFoo -- the pointer value is the pair's address }
+    Self.EmitExprToEax(TDerefExpr(AExpr).Expr);
+    if AReg <> '%rax' then
+      Self.Emit(Format(#9'movq %%rax, %s', [AReg]));
+  end
+  else if TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind = tyStaticArray then
+    Self.EmitIntfStaticElemAddr(TStringSubscriptExpr(AExpr), AReg)
+  else
+    Self.EmitIntfDynElemAddr(TStringSubscriptExpr(AExpr), AReg);
+end;
+
+procedure TX86_64Backend.PushIntfBorrowPair(AExpr: TASTExpr;
+  AItabOnTop: Boolean);
+begin
+  if AExpr is TNilLiteral then
+  begin
+    Self.Emit(#9'pushq $0');
+    Self.Emit(#9'pushq $0');
+    Exit;
+  end;
+  if AExpr is TIdentExpr then
+    Self.PushIntfIdentPair(TIdentExpr(AExpr))
+  else if Self.IsIntfPlace(AExpr) then
+  begin
+    Self.EmitIntfPlaceAddr(AExpr, '%rax');
+    Self.Emit(#9'movq 8(%rax), %rcx');
+    Self.Emit(#9'pushq %rcx');            { itab }
+    Self.Emit(#9'movq (%rax), %rcx');
+    Self.Emit(#9'pushq %rcx');            { obj on top }
+  end
+  else
+    raise ENativeCodeGenError.Create(
+      'native backend: internal error: an interface value that is neither ' +
+      'a variable, an in-place value nor a stack value (' +
+      AExpr.ClassName + ')');
+  if AItabOnTop then
+  begin
+    Self.Emit(#9'popq %rax');             { obj }
+    Self.Emit(#9'popq %rcx');             { itab }
+    Self.Emit(#9'pushq %rax');
+    Self.Emit(#9'pushq %rcx');            { itab on top }
   end;
 end;
 
@@ -7607,7 +7268,7 @@ begin
   Result := (AExpr.ResolvedType <> nil) and
     (AExpr.ResolvedType.Kind = tyInterface) and
    (Self.IsIntfCallResult(AExpr) or IsProcFieldCallExpr(AExpr) or
-    (AExpr is TAsExpr) or
+    (AExpr is TAsExpr) or IsFoldedPropSubscript(AExpr) or
     ((AExpr is TMethodCallExpr) and
      (TMethodCallExpr(AExpr).ResolvedClassType <> nil)) or
     (AExpr is TIndirectFuncCallExpr) or
@@ -7655,6 +7316,16 @@ begin
   if Self.IsIntfCallResult(AExpr) then
   begin
     Self.EmitIntfSretCall(TFuncCallExpr(AExpr));
+    Exit;
+  end;
+  if IsFoldedPropSubscript(AExpr) then
+  begin
+    { L[I] through a default indexed property: the getter hands the pair
+      back by value through the hidden result pointer }
+    Self.Emit(#9'subq $16, %rsp');
+    Self.Emit(#9'movq $0, (%rsp)');
+    Self.Emit(#9'movq $0, 8(%rsp)');
+    Self.EmitRecordCallSretAt(AExpr, '(%rsp)', False);
     Exit;
   end;
   if AExpr is TAsExpr then
@@ -13499,11 +13170,47 @@ begin
     Self.EmitExprToEax(AArg);
 end;
 
-procedure TX86_64Backend.EmitMethodArgPush(APar: TMethodParam; AArg: TASTExpr);
+procedure TX86_64Backend.PushIntfArg(AArg: TASTExpr; AIntfType: TTypeDesc);
 var
   ClassRT: TRecordTypeDesc;
   IntfDesc: TInterfaceTypeDesc;
   ItabSym: string;
+begin
+  { Interface param: push obj first (lower register slot), then itab (higher
+    register slot).  The pop loop runs high-to-low, so itab (pushed last) is
+    popped first into the higher register, obj (pushed first) into the lower. }
+  IntfDesc := TInterfaceTypeDesc(AIntfType);
+  if AArg.ResolvedType.Kind = tyClass then
+  begin
+    { Class expression → interface: emit obj, look up static itab. }
+    ClassRT := TRecordTypeDesc(AArg.ResolvedType);
+    ItabSym := 'itab_' + Self.ClassSymName(ClassRT.Name) + '_' + Self.IntfTypeInfoName(IntfDesc.Name);
+    Self.EmitExprToEax(AArg);          { obj -> %rax }
+    Self.Emit(#9'pushq %rax');         { push obj }
+    Self.Emit(Format(#9'leaq %s(%%rip), %%rax', [ItabSym]));
+    Self.Emit(#9'pushq %rax');         { push itab }
+  end
+  else if Self.IsIntfStackValue(AArg) then
+  begin
+    { Interface-returning call result (or getter, static var, as-cast)
+      passed positionally, e.g. Show(MakeFoo(42)).  The shared lowering
+      leaves the owned (+1) fat pointer at (%rsp): obj at 0, itab at 8.
+      Load both halves and push in the arg-slot order (obj first, itab on
+      top), then drop the sret buffer.  The pushed obj keeps the +1 ref;
+      the callee borrows it for the call. }
+    Self.EmitIntfValueOnStack(AArg);
+    Self.Emit(#9'movq (%rsp), %rax');   { obj }
+    Self.Emit(#9'movq 8(%rsp), %rcx');  { itab }
+    Self.Emit(#9'addq $16, %rsp');      { drop the sret buffer }
+    Self.Emit(#9'pushq %rax');          { push obj }
+    Self.Emit(#9'pushq %rcx');          { push itab }
+  end
+  else
+    { a variable or an in-place value: a borrow }
+    Self.PushIntfBorrowPair(AArg, True);
+end;
+
+procedure TX86_64Backend.EmitMethodArgPush(APar: TMethodParam; AArg: TASTExpr);
 begin
   if (APar <> nil) and APar.IsVarParam then
   begin
@@ -13512,98 +13219,7 @@ begin
   end
   else if (APar <> nil) and (APar.ResolvedType <> nil) and
           (APar.ResolvedType.Kind = tyInterface) then
-  begin
-    { Interface param: push obj first (lower register slot), then itab (higher
-      register slot).  The pop loop runs high-to-low, so itab (pushed last) is
-      popped first into the higher register, obj (pushed first) into the lower. }
-    IntfDesc := TInterfaceTypeDesc(APar.ResolvedType);
-    if AArg.ResolvedType.Kind = tyClass then
-    begin
-      { Class expression → interface: emit obj, look up static itab. }
-      ClassRT := TRecordTypeDesc(AArg.ResolvedType);
-      ItabSym := 'itab_' + Self.ClassSymName(ClassRT.Name) + '_' + Self.IntfTypeInfoName(IntfDesc.Name);
-      Self.EmitExprToEax(AArg);          { obj -> %rax }
-      Self.Emit(#9'pushq %rax');         { push obj }
-      Self.Emit(Format(#9'leaq %s(%%rip), %%rax', [ItabSym]));
-      Self.Emit(#9'pushq %rax');         { push itab }
-    end
-    else if (AArg is TIdentExpr) and
-            TIdentExpr(AArg).IsImplicitSelf and
-            (TIdentExpr(AArg).ImplicitFieldInfo <> nil) then
-    begin
-      { Implicit Self.field of interface type: load from object layout. }
-      Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
-      if TFieldInfo(TIdentExpr(AArg).ImplicitFieldInfo).Offset > 0 then
-        Self.Emit(Format(#9'addq $%d, %%rax',
-          [TFieldInfo(TIdentExpr(AArg).ImplicitFieldInfo).Offset]));
-      Self.Emit(#9'movq (%rax), %rcx');  { obj }
-      Self.Emit(#9'movq 8(%rax), %rdx'); { itab }
-      Self.Emit(#9'pushq %rcx');         { push obj }
-      Self.Emit(#9'pushq %rdx');         { push itab }
-    end
-    else if AArg is TFieldAccessExpr then
-    begin
-      Self.EmitInterfaceFieldAddr(TFieldAccessExpr(AArg), '%rax');
-      Self.Emit(#9'movq (%rax), %rcx');
-      Self.Emit(#9'movq 8(%rax), %rdx');
-      Self.Emit(#9'pushq %rcx');
-      Self.Emit(#9'pushq %rdx');
-    end
-    else if (AArg is TIdentExpr) and Self.IsCaptured(TIdentExpr(AArg).Name) then
-    begin
-      { Captured interface local (BUG-038): dereference the capture pointer
-        for both halves. }
-      Self.Emit(Format(#9'movq %s, %%rax',
-        [Self.VarOperand('_cap_' + TIdentExpr(AArg).Name)]));
-      Self.Emit(#9'movq (%rax), %rcx');   { obj }
-      Self.Emit(#9'movq 8(%rax), %rdx');  { itab }
-      Self.Emit(#9'pushq %rcx');          { push obj }
-      Self.Emit(#9'pushq %rdx');          { push itab }
-    end
-    else if AArg is TIdentExpr then
-    begin
-      { Interface variable: load both halves. }
-      Self.LoadIntfIdentPair(TIdentExpr(AArg), '%rax', '%rcx');
-      Self.Emit(#9'pushq %rax');         { push obj }
-      Self.Emit(#9'pushq %rcx');         { push itab }
-    end
-    else if (AArg.ResolvedType <> nil) and
-            (AArg.ResolvedType.Kind = tyInterface) and
-            Self.IsIntfStackValue(AArg) then
-    begin
-      { Interface-returning call result (or getter, static var) passed
-        positionally, e.g. Show(MakeFoo(42)).  The shared lowering leaves the
-        owned (+1) fat pointer at (%rsp): obj at 0, itab at 8.  Load both
-        halves and push in the arg-slot order (obj first, itab on top), then
-        drop the sret buffer.  The pushed obj keeps the +1 ref; the callee
-        borrows it for the call. }
-      Self.EmitIntfValueOnStack(AArg);
-      Self.Emit(#9'movq (%rsp), %rax');   { obj }
-      Self.Emit(#9'movq 8(%rsp), %rcx');  { itab }
-      Self.Emit(#9'addq $16, %rsp');      { drop the sret buffer }
-      Self.Emit(#9'pushq %rax');          { push obj }
-      Self.Emit(#9'pushq %rcx');          { push itab }
-    end
-    else if (AArg is TStringSubscriptExpr) and
-            (TStringSubscriptExpr(AArg).StrExpr.ResolvedType <> nil) and
-            (TStringSubscriptExpr(AArg).StrExpr.ResolvedType.Kind in
-               [tyStaticArray, tyDynArray, tyOpenArray]) then
-    begin
-      { Interface array element passed as an argument (Use(Arr[I])): fat pointer
-        at the element address (BUG-20260720-qbe-dynarray-intf-elem-read). }
-      if TStringSubscriptExpr(AArg).StrExpr.ResolvedType.Kind = tyStaticArray then
-        Self.EmitIntfStaticElemAddr(TStringSubscriptExpr(AArg), '%rax')
-      else
-        Self.EmitIntfDynElemAddr(TStringSubscriptExpr(AArg), '%rax');
-      Self.Emit(#9'movq (%rax), %rcx');   { obj }
-      Self.Emit(#9'movq 8(%rax), %rdx');  { itab }
-      Self.Emit(#9'pushq %rcx');          { push obj }
-      Self.Emit(#9'pushq %rdx');          { push itab }
-    end
-    else
-      raise ENativeCodeGenError.Create(
-        'native backend: unsupported interface argument expression');
-  end
+    Self.PushIntfArg(AArg, APar.ResolvedType)
   else if (APar <> nil) and APar.IsOpenArray then
   begin
     if AArg is TArrayLiteralExpr then
@@ -22915,25 +22531,7 @@ begin
       end
       else if (ParamType <> nil) and (ParamType.Kind = tyInterface) then
       begin
-        if (ADecl <> nil) and (I < ADecl.Params.Count) then
-          Self.EmitMethodArgPush(TMethodParam(ADecl.Params.Items[I]), Arg)
-        else if Arg is TFieldAccessExpr then
-        begin
-          Self.EmitInterfaceFieldAddr(TFieldAccessExpr(Arg), '%rax');
-          Self.Emit(#9'movq (%rax), %rcx');
-          Self.Emit(#9'movq 8(%rax), %rdx');
-          Self.Emit(#9'pushq %rcx');
-          Self.Emit(#9'pushq %rdx');
-        end
-        else if Arg is TIdentExpr then
-        begin
-          Self.LoadIntfIdentPair(TIdentExpr(Arg), '%rax', '%rcx');
-          Self.Emit(#9'pushq %rax');
-          Self.Emit(#9'pushq %rcx');
-        end
-        else
-          raise ENativeCodeGenError.Create(
-            'native backend: unsupported interface arg expression in EmitCall');
+        Self.PushIntfArg(Arg, ParamType);
       end
       else if IsMethodPtrType(ParamType) then
       begin
@@ -23111,44 +22709,15 @@ begin
       end
       else if (ParamType <> nil) and (ParamType.Kind = tyInterface) then
       begin
-        if (ADecl <> nil) and (I < ADecl.Params.Count) then
-        begin
-          Self.EmitExprToEax(Arg);
-          Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
-          Inc(SlotOff, 8);
-          { Interface itab — for a simple ident, load from itab slot. }
-          if Arg is TIdentExpr then
-            Self.Emit(Format(#9'movq %s, %%rax',
-              [Self.IntfItabOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]))
-          else
-            Self.Emit(#9'xorq %rax, %rax');
-          Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
-          Inc(SlotOff, 8);
-        end
-        else if Arg is TFieldAccessExpr then
-        begin
-          Self.EmitInterfaceFieldAddr(TFieldAccessExpr(Arg), '%rax');
-          Self.Emit(#9'movq (%rax), %rcx');
-          Self.Emit(Format(#9'movq %%rcx, %d(%%rsp)', [SlotOff]));
-          Inc(SlotOff, 8);
-          Self.Emit(#9'movq 8(%rax), %rcx');
-          Self.Emit(Format(#9'movq %%rcx, %d(%%rsp)', [SlotOff]));
-          Inc(SlotOff, 8);
-        end
-        else if Arg is TIdentExpr then
-        begin
-          Self.Emit(Format(#9'movq %s, %%rax',
-            [Self.IntfObjOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]));
-          Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
-          Inc(SlotOff, 8);
-          Self.Emit(Format(#9'movq %s, %%rax',
-            [Self.IntfItabOperand(TIdentExpr(Arg).Name, TIdentExpr(Arg).IsGlobal)]));
-          Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
-          Inc(SlotOff, 8);
-        end
-        else
-          raise ENativeCodeGenError.Create(
-            'native backend: unsupported interface arg expression in EmitCall');
+        { through the push form every other interface argument uses (a class
+          value takes its static itab -- the slot named after the variable
+          did not exist), then into the two stack slots }
+        Self.PushIntfArg(Arg, ParamType);
+        Self.Emit(#9'popq %rcx');              { itab }
+        Self.Emit(#9'popq %rax');              { obj }
+        Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
+        Self.Emit(Format(#9'movq %%rcx, %d(%%rsp)', [SlotOff + 8]));
+        Inc(SlotOff, 16);
       end
       else if IsMethodPtrType(ParamType) then
       begin
@@ -24812,38 +24381,8 @@ begin
     end
     else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
     begin
-      if Arg is TIdentExpr then
-      begin
-        if TIdentExpr(Arg).IsImplicitSelf and
-           (TIdentExpr(Arg).ImplicitFieldInfo <> nil) then
-        begin
-          Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
-          if TFieldInfo(TIdentExpr(Arg).ImplicitFieldInfo).Offset > 0 then
-            Self.Emit(Format(#9'addq $%d, %%rax',
-              [TFieldInfo(TIdentExpr(Arg).ImplicitFieldInfo).Offset]));
-          Self.Emit(#9'movq (%rax), %rcx');
-          Self.Emit(#9'movq 8(%rax), %rdx');
-          Self.Emit(#9'pushq %rcx');
-          Self.Emit(#9'pushq %rdx');
-        end
-        else
-        begin
-          Self.LoadIntfIdentPair(TIdentExpr(Arg), '%rax', '%rcx');
-          Self.Emit(#9'pushq %rax');
-          Self.Emit(#9'pushq %rcx');
-        end;
-      end
-      else if Arg is TFieldAccessExpr then
-      begin
-        Self.EmitInterfaceFieldAddr(TFieldAccessExpr(Arg), '%rax');
-        Self.Emit(#9'movq (%rax), %rcx');
-        Self.Emit(#9'movq 8(%rax), %rdx');
-        Self.Emit(#9'pushq %rcx');
-        Self.Emit(#9'pushq %rdx');
-      end
-      else
-        raise ENativeCodeGenError.Create(
-          'native backend: unsupported interface arg expression in sret interface dispatch');
+      { a variable or an in-place value (call results were hoisted) }
+      Self.PushIntfBorrowPair(Arg, True);
     end
     else if IsFloatFamily(Self.IntfParamTypeAt(IntfD, ACall.Name, I, Arg)) then
     begin
@@ -24997,38 +24536,8 @@ begin
     end
     else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
     begin
-      if Arg is TIdentExpr then
-      begin
-        if TIdentExpr(Arg).IsImplicitSelf and
-           (TIdentExpr(Arg).ImplicitFieldInfo <> nil) then
-        begin
-          Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
-          if TFieldInfo(TIdentExpr(Arg).ImplicitFieldInfo).Offset > 0 then
-            Self.Emit(Format(#9'addq $%d, %%rax',
-              [TFieldInfo(TIdentExpr(Arg).ImplicitFieldInfo).Offset]));
-          Self.Emit(#9'movq (%rax), %rcx');
-          Self.Emit(#9'movq 8(%rax), %rdx');
-          Self.Emit(#9'pushq %rcx');
-          Self.Emit(#9'pushq %rdx');
-        end
-        else
-        begin
-          Self.LoadIntfIdentPair(TIdentExpr(Arg), '%rax', '%rcx');
-          Self.Emit(#9'pushq %rax');
-          Self.Emit(#9'pushq %rcx');
-        end;
-      end
-      else if Arg is TFieldAccessExpr then
-      begin
-        Self.EmitInterfaceFieldAddr(TFieldAccessExpr(Arg), '%rax');
-        Self.Emit(#9'movq (%rax), %rcx');
-        Self.Emit(#9'movq 8(%rax), %rdx');
-        Self.Emit(#9'pushq %rcx');
-        Self.Emit(#9'pushq %rdx');
-      end
-      else
-        raise ENativeCodeGenError.Create(
-          'native backend: unsupported interface arg expression in sret interface record dispatch');
+      { a variable or an in-place value (call results were hoisted) }
+      Self.PushIntfBorrowPair(Arg, True);
     end
     else if IsFloatFamily(Self.IntfParamTypeAt(IntfD, ACall.Name, I, Arg)) then
     begin
