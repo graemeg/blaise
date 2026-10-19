@@ -684,7 +684,8 @@ type
       (obj + static $itab_<Class>_<Interface>) and an interface source (copy
       obj+itab), retaining the new obj and releasing the old. }
     procedure EmitInterfaceToFieldSlotsAt(AExpr: TASTExpr;
-      const ABaseReg: string; AOffset: Integer; AIntfType: TTypeDesc);
+      const ABaseReg: string; AOffset: Integer; AIntfType: TTypeDesc;
+      AFld: TFieldInfo = nil);
     { Compute the address of an interface-typed FIELD's contiguous fat pointer
       (obj at the address, itab at +8) into ADstReg (an AT&T register operand
       such as '%r15').  Handles the receiver shapes a TFieldAccessExpr can take:
@@ -5079,7 +5080,7 @@ begin
     ISFld := TFieldInfo(AAsgn.ImplicitSelfField);
     Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
     Self.EmitInterfaceToFieldSlotsAt(AAsgn.Expr, '%rax', ISFld.Offset,
-      AAsgn.ResolvedLhsType);
+      AAsgn.ResolvedLhsType, ISFld);
     Exit;
   end;
 
@@ -5235,14 +5236,17 @@ begin
 end;
 
 procedure TX86_64Backend.EmitInterfaceToFieldSlotsAt(AExpr: TASTExpr;
-  const ABaseReg: string; AOffset: Integer; AIntfType: TTypeDesc);
+  const ABaseReg: string; AOffset: Integer; AIntfType: TTypeDesc;
+  AFld: TFieldInfo);
 { Store an interface RHS into a contiguous fat-pointer field.  The destination
   base address is taken from ABaseReg into the callee-saved %r15 so it survives
-  the ARC calls; obj slot is (%r15), itab slot is 8(%r15). }
+  the ARC calls; obj slot is (%r15), itab slot is 8(%r15).  AFld, when given,
+  is the destination field: a [Weak] or [Unretained] one takes no reference. }
 var
   Intf:    TInterfaceTypeDesc;
   ClassRT: TRecordTypeDesc;
   ItabSym: string;
+  Owned:   Boolean;
 begin
   if (AIntfType = nil) or (AIntfType.Kind <> tyInterface) then
     raise ENativeCodeGenError.Create(
@@ -5255,6 +5259,54 @@ begin
   if AOffset > 0 then
     Self.Emit(Format(#9'addq $%d, %%r15', [AOffset]));
   { Now (%r15) = obj slot, 8(%r15) = itab slot. }
+
+  if (AFld <> nil) and (AFld.IsWeak or AFld.IsUnretained) then
+  begin
+    { a NON-OWNING interface field takes no reference and drops none: the
+      obj half is registered in the weak table ([Weak]) or stored plainly
+      ([Unretained]); the itab half is plain data.  An owned source has no
+      other owner, so it is released once stored -- as for a non-owning
+      class field.  The pair is (obj, itab) at (%rsp) in every arm. }
+    if (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyClass) then
+    begin
+      Self.EmitExprToEax(AExpr);
+      Owned := NativeExprOwnsRef(AExpr);
+      Self.Emit(Format(#9'leaq itab_%s_%s(%%rip), %%rcx',
+        [Self.ClassSymName(TRecordTypeDesc(AExpr.ResolvedType).Name),
+         Self.IntfTypeInfoName(Intf.Name)]));
+      Self.Emit(#9'pushq %rcx');
+      Self.Emit(#9'pushq %rax');
+    end
+    else if Self.IsIntfStackValue(AExpr) then
+    begin
+      Self.EmitIntfValueOnStack(AExpr);
+      Owned := True;
+    end
+    else
+    begin
+      Self.PushIntfBorrowPair(AExpr, False);
+      Owned := False;
+    end;
+    Self.Emit(#9'movq 8(%rsp), %rax');
+    Self.Emit(#9'movq %rax, 8(%r15)');      { itab }
+    if AFld.IsWeak then
+    begin
+      Self.Emit(#9'movq %r15, %rdi');
+      Self.Emit(#9'movq (%rsp), %rsi');
+      Self.Emit(#9'callq _WeakAssign');
+    end
+    else
+    begin
+      Self.Emit(#9'movq (%rsp), %rax');
+      Self.Emit(#9'movq %rax, (%r15)');
+    end;
+    Self.Emit(#9'popq %rdi');               { obj }
+    Self.Emit(#9'addq $8, %rsp');
+    if Owned then
+      Self.Emit(#9'callq _ClassRelease');
+    Self.Emit(#9'popq %r15');
+    Exit;
+  end;
 
   if AExpr is TNilLiteral then
   begin
@@ -18907,7 +18959,7 @@ begin
       end
       else Self.EmitVarBaseToReg(FA.RecordName, True, '%rcx');
       Self.EmitInterfaceToFieldSlotsAt(FA.Expr, '%rcx', FA.FieldInfo.Offset,
-        FA.FieldInfo.TypeDesc);
+        FA.FieldInfo.TypeDesc, FA.FieldInfo);
       Exit;
     end;
     { Method-pointer (of object) field assignment from @Obj.Method: store the

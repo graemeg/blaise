@@ -746,7 +746,7 @@ type
     { Store an interface value into the 16-byte (obj, itab) pair at
       [base + AOff], the base on TOP of the stack (consumed). }
     procedure EmitIntfStoreStacked(AOff: Integer; AValueExpr: TASTExpr;
-      AIntfType: TTypeDesc);
+      AIntfType: TTypeDesc; AFld: TFieldInfo = nil);
     { x0/x1 := the (obj, itab) pair of an interface method-call RECEIVER }
     function  EmitIntfRecvPair(const AObjName: string; AObjExpr: TASTExpr;
       AVarParam: Boolean; AImplicitBase: TFieldInfo; ANode: TASTNode;
@@ -2050,7 +2050,7 @@ begin
   end;
   if AFld.TypeDesc.Kind = tyInterface then
   begin
-    EmitIntfStoreStacked(AFld.Offset, AValueExpr, AFld.TypeDesc);
+    EmitIntfStoreStacked(AFld.Offset, AValueExpr, AFld.TypeDesc, AFld);
     Exit;
   end;
   if ((AFld.TypeDesc.Kind = tyRecord) or (AFld.TypeDesc.Kind = tyStaticArray)) and
@@ -8431,7 +8431,7 @@ begin
     EmitInstBase('x0', 'Self', False);
     EmitPushX0();
     EmitIntfStoreStacked(TFieldInfo(AAsgn.ImplicitSelfField).Offset,
-      AAsgn.Expr, AAsgn.ResolvedLhsType);
+      AAsgn.Expr, AAsgn.ResolvedLhsType, TFieldInfo(AAsgn.ImplicitSelfField));
     Exit;
   end;
   if AAsgn.IsVarParam then
@@ -8706,8 +8706,35 @@ begin
 end;
 
 procedure TArm64Backend.EmitIntfStoreStacked(AOff: Integer;
-  AValueExpr: TASTExpr; AIntfType: TTypeDesc);
+  AValueExpr: TASTExpr; AIntfType: TTypeDesc; AFld: TFieldInfo);
+var
+  Owned: Boolean;
 begin
+  if (AFld <> nil) and (AFld.IsWeak or AFld.IsUnretained) then
+  begin
+    { a NON-OWNING interface field takes no reference and drops none: the
+      obj half is registered in the weak table ([Weak]) or stored plainly
+      ([Unretained]); the itab half is plain data either way.  An owned
+      source has no other owner, so it is released once stored -- as for
+      a non-owning class field (EmitInstanceFieldStore) }
+    Owned := EmitIntfPairToX0X1(AValueExpr, AIntfType);
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [base][obj,itab] }
+    Self.Emit(#9'ldr x9, [sp, #16]');
+    Self.Emit(Format(#9'str x1, [x9, #%d]', [AOff + 8]));
+    if AFld.IsWeak then
+    begin
+      EmitAddSubImm('add', 'x0', 'x9', AOff);
+      Self.Emit(#9'ldr x1, [sp]');
+      EmitCallSym('_WeakAssign');
+    end
+    else
+      Self.Emit(Format(#9'str x0, [x9, #%d]', [AOff]));
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+    if Owned and not (AValueExpr is TNilLiteral) then
+      EmitCallSym('_ClassRelease');
+    Self.Emit(#9'add sp, sp, #16');             { drop the base }
+    Exit;
+  end;
   { [base] is on top of the stack.  Retain the new obj unless the source
     already owns it, release the old obj, then store both halves; the base
     is re-read after the release call (it clobbers scratch registers). }

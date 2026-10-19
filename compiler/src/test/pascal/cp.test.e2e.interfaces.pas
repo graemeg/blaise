@@ -45,6 +45,10 @@ type
       convention (result through the hidden pointer); arm64 stopped with
       external interface-returning call }
     procedure TestRun_ExternalIntfReturningCall;
+    { [Weak] and [Unretained] INTERFACE fields take no reference: a weak
+      one goes nil when the object dies, an unretained one never keeps it
+      (both stored strongly before, on both ISAs) }
+    procedure TestRun_NonOwningInterfaceFields;
     { TGreet(MakeI()).X: the call's owned reference is released -- the shared
       object goes when its last real holder lets go }
     procedure TestRun_ClassCastOfInterfaceCall_ReleasesTheCallRef;
@@ -2506,6 +2510,81 @@ begin
     the same program, so both sides use the Blaise convention }
   AssertRunsOnAll(Src,
     'ext 5' + LE + 'gone 6' + LE + 'ext recv 6' + LE + 'gone 5' + LE +
+    'end' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_NonOwningInterfaceFields;
+const
+  Src = '''
+    program Q;
+    type
+      IThing = interface
+        function N(): Integer;
+      end;
+      TThing = class(TObject, IThing)
+        FN: Integer;
+        function N(): Integer;
+        destructor Destroy(); override;
+      end;
+      THold = class
+        [Weak] FW: IThing;
+        [Unretained] FU: IThing;
+        Inner: THold;
+        procedure SetW(const X: IThing);
+        procedure SetU(const X: IThing);
+        destructor Destroy(); override;
+      end;
+    function TThing.N(): Integer; begin Result := FN end;
+    destructor TThing.Destroy(); begin WriteLn('gone ', FN); inherited Destroy() end;
+    procedure THold.SetW(const X: IThing); begin FW := X end;
+    procedure THold.SetU(const X: IThing); begin FU := X end;
+    destructor THold.Destroy(); begin WriteLn('hold gone'); inherited Destroy() end;
+    function Mk(AN: Integer): TThing; begin Result := TThing.Create(); Result.FN := AN end;
+    function MkI(AN: Integer): IThing; begin Result := Mk(AN) end;
+    var H: THold; I, J: IThing; T: TThing;
+    begin
+      H := THold.Create();
+      H.FW := MkI(1);
+      WriteLn('owned weak ', Assigned(H.FW));
+      T := Mk(2);
+      H.FW := T;
+      WriteLn('class weak ', H.FW.N());
+      T := nil;
+      WriteLn('after class ', Assigned(H.FW));
+      I := MkI(3); J := MkI(4);
+      H.SetW(I);
+      H.SetW(J);
+      I := nil;
+      WriteLn('reassigned ', H.FW.N());
+      H.FW := nil;
+      J := nil;
+      H.Inner := THold.Create();
+      I := MkI(5);
+      H.Inner.FW := I;
+      WriteLn('chained ', H.Inner.FW.N());
+      H.Inner := nil;
+      I := nil;
+      I := MkI(6);
+      H.SetU(I);
+      WriteLn('unretained ', H.FU.N());
+      H.FW := I;
+      H := nil;
+      WriteLn('holder freed ', I.N());
+      I := nil;
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { an owned source dies at once; a class value, a reassignment and a
+    chained store all leave the weak field nil once the object goes; the
+    holder's teardown unregisters its weak slot (the object outlives it) }
+  AssertRunsOnAll(Src,
+    'gone 1' + LE + 'owned weak False' + LE + 'class weak 2' + LE +
+    'gone 2' + LE + 'after class False' + LE + 'gone 3' + LE +
+    'reassigned 4' + LE + 'gone 4' + LE + 'chained 5' + LE +
+    'hold gone' + LE + 'gone 5' + LE + 'unretained 6' + LE +
+    'hold gone' + LE + 'holder freed 6' + LE + 'gone 6' + LE +
     'end' + LE, 0);
 end;
 

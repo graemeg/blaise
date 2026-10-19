@@ -35,6 +35,7 @@ type
     procedure TestSemantic_InterfaceCast_CheckedConversion;
     procedure TestCodegen_InterfaceCast_LowersAsItsOperand;
     procedure TestCodegen_ExternalIntfReturningCall_UsesResultBuffer;
+    procedure TestCodegen_WeakInterfaceField_RegistersInWeakTable;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1406,6 +1407,33 @@ begin
       #9'bl _RealMake'#10#9'sub x9, x29, #'));
   AssertTrue('arm64 sets x8', Pos(#9'sub x8, x29, #',
     GenAsm(Src, TargetArm64)) >= 0);
+end;
+
+procedure TInterfaceTests.TestCodegen_WeakInterfaceField_RegistersInWeakTable;
+const
+  Src = '''
+      program P;
+      type
+        IThing = interface
+          function N(): Integer;
+        end;
+        THold = class
+          [Weak] FW: IThing;
+          procedure SetW(const X: IThing);
+        end;
+      procedure THold.SetW(const X: IThing);
+      begin
+        FW := X
+      end;
+      var H: THold; I: IThing;
+      begin
+        H := THold.Create();
+        H.FW := I
+      end.
+      ''';
+begin
+  AssertEquals('weak interface field stores register the slot', '',
+    AsmMissing(Src, 'callq _WeakAssign', 'bl __WeakAssign'));
 end;
 
 initialization

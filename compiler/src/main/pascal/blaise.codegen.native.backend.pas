@@ -444,7 +444,7 @@ begin
     end;
     if not ArcFieldIsManagedScalar(F.TypeDesc) then
       Continue;
-    if F.IsUnretained and (F.TypeDesc.Kind = tyClass) then
+    if F.IsUnretained then
       Continue;
     if F.IsWeak then
     begin
@@ -551,7 +551,7 @@ begin
     end;
     if not ArcFieldIsManagedScalar(F.TypeDesc) then
       Continue;
-    if F.IsUnretained and (F.TypeDesc.Kind = tyClass) then
+    if F.IsUnretained then
       Continue;
     if F.IsWeak then Continue;
     Self.EmitRetainSlotAt(F.TypeDesc, F.Offset, ABaseReg);
