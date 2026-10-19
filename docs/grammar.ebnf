@@ -1518,20 +1518,29 @@ Decimals      = Expr ;
  *                                             Length(S)-1 for strings (runtime).
  *                                             Float types: error.
  *
- * Built-in types (pre-populated in the symbol table):
+ * Built-in types (pre-populated in the symbol table).  An alias is the
+ * same type as the name it aliases (a transparent alias), not a distinct
+ * type of equal width; see docs/type-standardisation-design.adoc.
  *
  *   Integer   — 32-bit signed integer   (QBE type: w)
+ *               Alias: Int32
  *   Int64     — 64-bit signed integer   (QBE type: l)
+ *               Alias: Int (pointer-sized signed; 64-bit on every target)
  *   UInt32    — 32-bit unsigned integer (QBE type: w)
  *               Alias: Cardinal
  *   UInt64    — 64-bit unsigned integer (QBE type: l)
- *               Aliases: QWord, PtrUInt (the pointer-sized unsigned)
+ *               Aliases: UInt (pointer-sized unsigned), QWord, PtrUInt
  *   SmallInt  — 16-bit signed integer   (QBE type: w, stored as h)
  *               Alias: Int16
  *   Word      — 16-bit unsigned integer (QBE type: w, stored as h)
  *               Alias: UInt16
  *   Boolean   — 1-byte boolean          (QBE type: w; 0 = false, 1 = true)
  *   Byte      — 8-bit unsigned integer  (QBE type: w, stored as b)
+ *               Alias: UInt8
+ *   Double    — 64-bit IEEE 754 float
+ *               Aliases: Float64, Float (always 64-bit, never platform-sized)
+ *   Single    — 32-bit IEEE 754 float
+ *               Alias: Float32
  *   String    — ARC-managed UTF-8 string pointer (QBE type: l)
  *   Pointer   — untyped pointer         (QBE type: l)
  *   ^T        — typed pointer to T; created on demand (QBE type: l)

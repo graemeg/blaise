@@ -2173,6 +2173,19 @@ begin
   Define(TSymbol.Create('Double',  skType, FTypeDouble));
   Define(TSymbol.Create('Single',  skType, FTypeSingle));
 
+  { The platform-honest names (docs/type-standardisation-design.adoc).  Each
+    is a transparent alias -- the very same TTypeDesc as the type it names,
+    so the two spellings are one type for assignment, overloading and
+    generics alike.  Int / UInt are pointer-sized (64-bit on every current
+    target); Float is always Float64, never platform-sized. }
+  Define(TSymbol.Create('Int',     skType, FTypeInt64));
+  Define(TSymbol.Create('UInt',    skType, FTypeUInt64));
+  Define(TSymbol.Create('Int32',   skType, FTypeInteger));
+  Define(TSymbol.Create('UInt8',   skType, FTypeByte));
+  Define(TSymbol.Create('Float',   skType, FTypeDouble));
+  Define(TSymbol.Create('Float32', skType, FTypeSingle));
+  Define(TSymbol.Create('Float64', skType, FTypeDouble));
+
   { TObject — root of the class hierarchy; no fields, no parent }
   TObjectDesc := NewClassType('TObject');
   TObjectDesc.AddVTableSlot('Destroy',  '$TObject_Destroy');

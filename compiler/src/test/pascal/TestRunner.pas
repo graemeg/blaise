@@ -148,6 +148,8 @@ uses
   cp.test.genericforin,
   cp.test.proctypes,
   cp.test.overload,
+  cp.test.typestd,
+  cp.test.e2e.typestd,
   cp.test.classof,
   cp.test.staticmembers,
   cp.test.e2e.staticmembers,

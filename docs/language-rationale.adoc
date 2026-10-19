@@ -566,13 +566,13 @@ Blaise defines five integer types with fixed, platform-independent widths:
 |===
 | Type | Width | QBE IR type | Aliases
 
-| `Integer` | 32-bit signed   | `w` |
-| `Int64`   | 64-bit signed   | `l` |
+| `Integer` | 32-bit signed   | `w` | `Int32`
+| `Int64`   | 64-bit signed   | `l` | `Int`
 | `UInt32`  | 32-bit unsigned | `w` | `Cardinal`
-| `UInt64`  | 64-bit unsigned | `l` | `QWord`, `PtrUInt`
+| `UInt64`  | 64-bit unsigned | `l` | `UInt`, `QWord`, `PtrUInt`
 | `SmallInt`| 16-bit signed   | `w` (2 bytes in storage) | `Int16`
 | `Word`    | 16-bit unsigned | `w` (2 bytes in storage) | `UInt16`
-| `Byte`    | 8-bit unsigned  | `w` (1 byte in storage) |
+| `Byte`    | 8-bit unsigned  | `w` (1 byte in storage) | `UInt8`
 |===
 
 `Integer` is 32-bit on all platforms.  This matches FPC's behaviour and
@@ -591,6 +591,52 @@ targets it is identical to `UInt64`.
 `Byte` is 8-bit unsigned.  In registers and temporaries it is widened to
 `w` (32-bit QBE word).  Field and array element storage uses 1 byte per
 `Byte` element, consistent with FPC.
+
+==== Platform-honest type names
+
+Alongside the classic names, Blaise provides the names set out in
+`docs/type-standardisation-design.adoc` (discussion #106):
+
+* `Int` / `UInt` — the pointer-sized signed / unsigned integer.  Every
+  current target is 64-bit, so they are `Int64` / `UInt64`; a future 32-bit
+  target would make them 32-bit.
+* `Int32`, `UInt8` — fixed-width spellings of `Integer` and `Byte`, joining
+  the existing `Int16`, `UInt16`, `Int64`, `UInt32` and `UInt64`.
+* `Float64`, `Float32` — fixed-width spellings of `Double` and `Single`.
+* `Float` — always `Float64`, on every platform.
+
+Each is a *transparent alias*: the same type as the name it aliases, not a
+distinct type of equal width.  The spellings therefore assign freely, share
+generic instances, and form one overload signature — `F(Int)` and
+`F(Int64)` is a duplicate declaration and is rejected as such.
+
+*Why the names.*  FPC and Delphi froze `Integer` and `Cardinal` at 32 bits
+when 64-bit platforms arrived, so the classic names no longer mean what
+they suggest, and developers arriving from Go, Swift or Rust expect `Int` to
+be the machine's natural integer.  New names were chosen rather than
+redefining `Integer`, because a redefined `Integer` would silently change
+the meaning of ported code without changing its text.
+
+*Why `Float` is not platform-sized.*  `Int` follows the platform word
+because pointers, indices and sizes do.  Floats have no such coupling: a
+32-bit CPU computes 64-bit doubles natively in hardware.  And whereas a
+narrower integer only narrows the *range*, a narrower float changes the
+*rounding of every calculation*, so one program would print different
+results on different targets — and constant folding would depend on the
+target.  No mainstream language sizes its default float by platform.
+
+*Alias rather than distinct type.*  Go and Swift make `int` / `Int` a
+distinct type from the 64-bit integer, which keeps `F(Int)` / `F(Int64)` a
+legal pair on every target but costs a conversion at every boundary between
+general and fixed-width code.  The transparent alias avoids that friction;
+its one cost, that the pair above collides on a 64-bit target, is a
+compile-time error rather than a change of meaning.
+
+*Phasing.*  The classic names remain builtin and keep their meaning for
+now; diagnostics still print the classic spelling.  Integer literals keep
+the magnitude rule below until the planned change to context-typed literals
+defaulting to `Int`; the classic names later move to an opt-in
+`ClassicPascalTypes` unit.  The design document holds the full plan.
 
 ==== Int64 ↔ UInt64 conversion is explicit
 
@@ -689,10 +735,14 @@ for any realistic string length.
 
 ==== Alternatives rejected
 
-* *Platform-native integer width* — rejected.  A 64-bit `Integer` on 64-bit
-  targets would break FPC ABI compatibility and cause silent data loss when
-  interoperating with existing 32-bit FPC code or C functions that expect
-  `int32_t`.  Explicit `Int64` covers the cases that genuinely need 64 bits.
+* *Redefining `Integer` as platform-native* — rejected.  A 64-bit `Integer`
+  on 64-bit targets would break FPC ABI compatibility and cause silent data
+  loss when interoperating with existing 32-bit FPC code or C functions that
+  expect `int32_t`.  The platform-native integer is instead the new name
+  `Int` (see _Platform-honest type names_), leaving `Integer` at 32 bits.
+  This bullet originally rejected platform-native width outright; the
+  type-standardisation design superseded that, by giving it a name of its
+  own.
 
 * *`LongInt` alias* — deferred.  The FPC/Delphi `LongInt` name maps to
   a 32-bit signed integer (identical to Blaise's `Integer`) and could

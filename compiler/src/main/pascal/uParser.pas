@@ -1482,7 +1482,7 @@ begin
   if PeekKind() <> tkLParen then Exit;
   TypeName := FCurrent.Value;
   Width := 0; IsSigned := False;
-  if SameText(TypeName, 'Byte') then
+  if SameText(TypeName, 'Byte') or SameText(TypeName, 'UInt8') then
     begin Width := 8;  IsSigned := False; end
   else if SameText(TypeName, 'ShortInt') then
     begin Width := 8;  IsSigned := True; end
@@ -1490,15 +1490,16 @@ begin
     begin Width := 16; IsSigned := True; end
   else if SameText(TypeName, 'Word') or SameText(TypeName, 'UInt16') then
     begin Width := 16; IsSigned := False; end
-  else if SameText(TypeName, 'Integer') or SameText(TypeName, 'LongInt') then
+  else if SameText(TypeName, 'Integer') or SameText(TypeName, 'LongInt')
+       or SameText(TypeName, 'Int32') then
     begin Width := 32; IsSigned := True; end
   else if SameText(TypeName, 'Cardinal') or SameText(TypeName, 'LongWord')
        or SameText(TypeName, 'UInt32') then
     begin Width := 32; IsSigned := False; end
-  else if SameText(TypeName, 'Int64') then
+  else if SameText(TypeName, 'Int64') or SameText(TypeName, 'Int') then
     begin Width := 64; IsSigned := True; end
   else if SameText(TypeName, 'UInt64') or SameText(TypeName, 'QWord')
-       or SameText(TypeName, 'PtrUInt') then
+       or SameText(TypeName, 'PtrUInt') or SameText(TypeName, 'UInt') then
     begin Width := 64; IsSigned := False; end
   else
     Exit;  { unknown / non-integer type name — not our cast }

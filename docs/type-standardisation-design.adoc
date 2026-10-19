@@ -542,9 +542,11 @@ the project's test rules.
 
 *Phase 3 — documentation.*
 
-* `docs/language-rationale.adoc`: replace the "platform-native integer width
-  — rejected" alternative with the decisions in this document (D1–D12), and
-  record the literal-typing rule change scheduled for Phase 4.
+* `docs/language-rationale.adoc`: record the remaining decisions (D4–D12)
+  and the literal-typing rule change scheduled for Phase 4.  The alias names
+  themselves, and the revision of the "platform-native integer width —
+  rejected" alternative, already landed with Phase 1, as the project requires
+  for any language change.
 * `docs/grammar.ebnf`: no rule change is expected (builtin type names are
   identifiers, not grammar productions); confirm and note.
 * README and user-facing documentation present `Int`/`UInt` and the
