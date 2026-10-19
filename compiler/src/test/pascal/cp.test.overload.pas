@@ -45,6 +45,10 @@ type
     { in a program, an overloaded forward pairs with its body of the same
       signature -- calls resolve, and each overload is emitted once }
     procedure TestSem_ProgramOverloadForward_PairsWithBody;
+    { a narrow integer argument picks the CLOSEST wider overload instead of
+      reporting the widenings as equally good (FPC and Delphi agree): routines
+      and methods alike; an equidistant pair is still ambiguous }
+    procedure TestSem_NarrowArg_PicksClosestWidening;
     { Phase A — arity-distinct standalone overloading }
 
     { Parser: 'overload' directive sets the IsOverload flag on TMethodDecl }
@@ -666,6 +670,39 @@ begin
       Pos('F_D_i:', Copy(Text, Pos('F_D_i:', Text) + 1, MaxInt)) < 0);
     AssertTrue(Target + ' F(string) emitted', Pos('F_D_S:', Text) >= 0);
   end;
+end;
+
+procedure TOverloadTests.TestSem_NarrowArg_PicksClosestWidening;
+const
+  Head = '''
+    program p;
+    procedure A(const M: string; X, Y: Integer); overload; begin end;
+    procedure A(const M: string; X, Y: Int64); overload; begin end;
+    procedure A(const M: string; X, Y: Double); overload; begin end;
+    type
+      TC = class
+        procedure B(X: Int64); overload;
+        procedure B(X: Integer); overload;
+      end;
+    procedure TC.B(X: Int64); begin end;
+    procedure TC.B(X: Integer); begin end;
+    procedure W(X: Word); overload; begin end;
+    procedure W(X: SmallInt); overload; begin end;
+    procedure F(X: Single); overload; begin end;
+    procedure F(X: Double); overload; begin end;
+    var
+      V8: Int8; VB: Byte; VS: SmallInt; VW: Word; VI: Integer; O: TC;
+    begin
+    ''';
+begin
+  AssertEquals('Int8 -> Integer', '', SemanticError(Head + 'A(''m'', 1, V8) end.'));
+  AssertEquals('Byte -> Integer', '', SemanticError(Head + 'A(''m'', 1, VB) end.'));
+  AssertEquals('SmallInt -> Integer', '', SemanticError(Head + 'A(''m'', 1, VS) end.'));
+  AssertEquals('Word -> Integer', '', SemanticError(Head + 'A(''m'', VW, VW) end.'));
+  AssertEquals('method: Byte -> Integer', '', SemanticError(Head + 'O.B(VB) end.'));
+  AssertEquals('Byte -> Word over SmallInt', '', SemanticError(Head + 'W(VB) end.'));
+  AssertTrue('Integer to Single or Double stays ambiguous',
+    Pos('Ambiguous overload', SemanticError(Head + 'F(VI) end.')) >= 0);
 end;
 
 initialization

@@ -45,6 +45,10 @@ type
       fields, a typed constant, a global set in the unit's initialization,
       and an Int8 / Byte overload pair }
     procedure TestRun_Int8_AcrossUnitInterface;
+    { a narrow argument reaches the CLOSEST wider overload: Int8 / Byte /
+      SmallInt reach Integer over Int64 and Double, a Byte reaches Word over
+      SmallInt, an Integer reaches Int64 over Double -- routines and methods }
+    procedure TestRun_NarrowArg_ReachesClosestOverload;
   end;
 
 implementation
@@ -316,6 +320,43 @@ begin
   AssertEquals('exit code', 0, RCode);
   AssertEquals('output',
     '-7 -42 -100 -3 4' + #10 + 'i8 -5' + #10 + 'u8 250' + #10, Output);
+end;
+
+procedure TE2ETypeStdTests.TestRun_NarrowArg_ReachesClosestOverload;
+const
+  Src = '''
+    program P;
+    procedure A(X: Integer); overload; begin WriteLn('Integer') end;
+    procedure A(X: Int64); overload; begin WriteLn('Int64') end;
+    procedure A(X: Double); overload; begin WriteLn('Double') end;
+    procedure W(X: Word); overload; begin WriteLn('Word') end;
+    procedure W(X: SmallInt); overload; begin WriteLn('SmallInt') end;
+    procedure L(X: Int64); overload; begin WriteLn('Int64') end;
+    procedure L(X: Double); overload; begin WriteLn('Double') end;
+    type
+      TC = class
+        procedure B(X: Int64); overload;
+        procedure B(X: Integer); overload;
+      end;
+    procedure TC.B(X: Int64); begin WriteLn('m Int64') end;
+    procedure TC.B(X: Integer); begin WriteLn('m Integer ', X) end;
+    var
+      V8: Int8; VB: Byte; VS: SmallInt; VI: Integer; O: TC;
+    begin
+      V8 := -1; VB := 2; VS := 3; VI := 4;
+      A(V8); A(VB); A(VS);
+      W(VB);
+      L(VI);
+      O := TC.Create();
+      O.B(V8);
+      O.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'Integer' + #10 + 'Integer' + #10 + 'Integer' + #10 +
+    'Word' + #10 + 'Int64' + #10 + 'm Integer -1' + #10, 0);
 end;
 
 initialization

@@ -2766,6 +2766,23 @@ function F(A: Integer): Integer; overload;
 the call `F(42)` resolves to the second overload (no defaulting
 needed), not the first — even though both type-score equally.
 
+When candidates still tie, the one with more exact-type arguments wins.
+After that, the *closest* implicit conversions win.  Each widened argument
+has a distance: integer to a wider integer costs twice the growth in bytes,
+plus one for a change of signedness; `Single` to `Double` costs one; an
+integer to a float costs more than any integer widening.  The candidate
+with the smallest total wins, so a `Byte` or `Int8` argument reaches an
+`Integer` overload before an `Int64` one, a `Byte` reaches `Word` before
+`SmallInt`, and an `Integer` reaches `Int64` before `Double`.  Only an equal
+total is ambiguous — for example an `Integer` argument against `Single` and
+`Double` overloads.
+
+FPC and Delphi both prefer the closest widening.  Before this rule Blaise
+rated every widening alike and reported such calls as ambiguous — a
+frequent nuisance with the narrow integer types (`AssertEquals(Msg, 1, B)`
+with `B: Int8`).  The rule only decides calls that were previously
+rejected, so no call that compiled before changes its target.
+
 === Alternatives rejected
 
 * *No default values; force explicit overload pyramids.*  Every port

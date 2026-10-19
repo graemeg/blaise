@@ -586,6 +586,16 @@ type
       one of the same unit; must run before ADecl is registered. }
     procedure CheckOverloadUnique(ADecl: TMethodDecl);
     { Per-arg compatibility: 2 = exact, 1 = widening, 0 = no match. }
+    { How far an implicit conversion of AArg to AParam travels: 0 for an
+      exact match, then integer-to-wider-integer by size (and a step for a
+      change of signedness), Single to Double, and integer to float last.
+      Breaks a tie between overloads that ArgMatchScore rates equally. }
+    function  ArgWideningCost(AParam: TTypeDesc; AArg: TTypeDesc;
+                AArgExpr: TASTExpr): Integer;
+    { The summed ArgWideningCost of ACand's first AN parameters against
+      AArgs. }
+    function  WideningCost(ACand: TMethodDecl; AArgs: TObjectList;
+                AN: Integer): Integer;
     function  ArgMatchScore(AParam: TTypeDesc; AArg: TTypeDesc;
                 AArgExpr: TASTExpr = nil): Integer;
     { Shared enum of a bracket literal's elements, or nil (see impl). }
@@ -9616,6 +9626,8 @@ var
   Best:      TMethodDecl;
   ExactNew:  Integer;
   ExactBest: Integer;
+  CostNew: Integer;
+  CostBest: Integer;
   S1, S2:    Integer;
 begin
   AAmbiguous := False;
@@ -9672,7 +9684,20 @@ begin
         BestCount := 1;
       end
       else if ExactNew = ExactBest then
-        Inc(BestCount);
+      begin
+        { Tertiary tie-break: the closest implicit conversions win -- a Byte
+          argument reaches Integer before Int64, an integer reaches Int64
+          before Double (BUG-20261020-overload-widening-unranked). }
+        CostNew := Self.WideningCost(Cand, AArgs, Arity);
+        CostBest := Self.WideningCost(Best, AArgs, Arity);
+        if CostNew < CostBest then
+        begin
+          Best      := Cand;
+          BestCount := 1;
+        end
+        else if CostNew = CostBest then
+          Inc(BestCount);
+      end;
       { ExactNew < ExactBest: keep current Best, don't increment BestCount }
     end;
   end;
@@ -14268,6 +14293,44 @@ begin
   end;
 end;
 
+function TSemanticAnalyser.ArgWideningCost(AParam: TTypeDesc;
+  AArg: TTypeDesc; AArgExpr: TASTExpr): Integer;
+var
+  ArgInt:   Boolean;
+  ParamInt: Boolean;
+begin
+  Result := 0;
+  if (AParam = nil) or (AArg = nil) then Exit;
+  if Self.ArgMatchScore(AParam, AArg, AArgExpr) = 2 then Exit;
+  ArgInt := AArg.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tyInt8,
+    tySmallInt, tyWord, tyByte];
+  ParamInt := AParam.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tyInt8,
+    tySmallInt, tyWord, tyByte];
+  if ArgInt and ParamInt then
+  begin
+    Result := 2 * (AParam.RawSize() - AArg.RawSize());
+    if (AArg.Kind in [tyUInt32, tyUInt64, tyWord, tyByte]) <>
+       (AParam.Kind in [tyUInt32, tyUInt64, tyWord, tyByte]) then
+      Inc(Result);
+  end
+  else if (AArg.Kind = tySingle) and (AParam.Kind = tyDouble) then
+    Result := 1
+  else if ArgInt and AParam.IsFloat() then
+    Result := 64;
+end;
+
+function TSemanticAnalyser.WideningCost(ACand: TMethodDecl;
+  AArgs: TObjectList; AN: Integer): Integer;
+var
+  J: Integer;
+begin
+  Result := 0;
+  for J := 0 to AN - 1 do
+    Result := Result + Self.ArgWideningCost(
+      TMethodParam(ACand.Params.Items[J]).ResolvedType,
+      TASTExpr(AArgs.Items[J]).ResolvedType, TASTExpr(AArgs.Items[J]));
+end;
+
 function TSemanticAnalyser.ArgMatchScore(AParam: TTypeDesc;
   AArg: TTypeDesc; AArgExpr: TASTExpr): Integer;
 begin
@@ -14490,6 +14553,8 @@ var
   TotalCnt:    Integer;
   ExactNew:    Integer;
   ExactBest:   Integer;
+  CostNew: Integer;
+  CostBest: Integer;
   S1, S2:      Integer;
   FixedN:      Integer;
   DefaultedN:  Integer;
@@ -14623,13 +14688,23 @@ begin
         end
         else if ExactNew = ExactBest then
         begin
-          { Two candidates may denote the SAME underlying link symbol: two
-            units each declaring `external name 'strlen'`, or an
-            `external name '_BlaiseGetMem'` binding alongside the real
-            _BlaiseGetMem exported by blaise_mem.  They score identically but
-            are ONE function — not an ambiguous overload.  Collapse instead of
-            erroring. }
-          if not SameLinkSymbol(Cand, Best) then
+          { Tertiary tie-break: the closest implicit conversions win -- a Byte
+            argument reaches Integer before Int64, an integer reaches Int64
+            before Double (BUG-20261020-overload-widening-unranked). }
+          CostNew := Self.WideningCost(Cand, AArgs, FixedN);
+          CostBest := Self.WideningCost(Best, AArgs, FixedN);
+          if CostNew < CostBest then
+          begin
+            Best      := Cand;
+            BestCount := 1;
+          end
+          { An equal cost is a true tie -- unless the two candidates denote
+            the SAME underlying link symbol: two units each declaring
+            `external name 'strlen'`, or an `external name '_BlaiseGetMem'`
+            binding alongside the real _BlaiseGetMem exported by blaise_mem.
+            They score identically but are ONE function — not an ambiguous
+            overload.  Collapse instead of erroring. }
+          else if (CostNew = CostBest) and not SameLinkSymbol(Cand, Best) then
             Inc(BestCount);
         end;
       end;
