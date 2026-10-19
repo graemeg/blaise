@@ -27,6 +27,9 @@ type
     procedure TestCodegen_ProcFieldCall_AggregateResult;
     procedure TestCodegen_AsCast_IntoFieldAndVarParam;
     procedure TestCodegen_StackSpilledIntfArg_ClassValueUsesClassItab;
+    { an untyped Pointer carries no method table, so it cannot become an
+      interface (assignment or argument); the other direction stays legal }
+    procedure TestSemantic_PointerToInterface_Rejected;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1257,6 +1260,33 @@ begin
   AssertTrue('no T_itab', Pos('T_itab', AsmText) < 0);
   AssertEquals('class itab on both ISAs', '',
     AsmMissing(Src, 'itab_TThing_', 'itab_TThing_'));
+end;
+
+procedure TInterfaceTests.TestSemantic_PointerToInterface_Rejected;
+const
+  Head = '''
+      program P;
+      type
+        IThing = interface
+          function N(): Integer;
+        end;
+      procedure Take(const X: IThing);
+      begin
+      end;
+      var Ptr: Pointer; I: IThing;
+      begin
+      ''';
+var
+  Msg: string;
+begin
+  Msg := SemanticError(Head + 'I := Ptr end.');
+  AssertTrue('assignment rejected: ' + Msg,
+    Pos('Pointer', Msg) >= 0);
+  Msg := SemanticError(Head + 'Take(Ptr) end.');
+  AssertTrue('argument rejected: ' + Msg, Pos('Pointer', Msg) >= 0);
+  AssertEquals('interface to Pointer is fine', '',
+    SemanticError(Head + 'Ptr := I end.'));
+  AssertEquals('nil is fine', '', SemanticError(Head + 'I := nil end.'));
 end;
 
 initialization

@@ -5109,6 +5109,40 @@ possible, otherwise at the first call site.
 * A method name that is registered twice on an interface (an inherited
   method redeclared by a child) is checked only for its `var` arguments.
 
+
+== Converting to an Interface
+
+=== Decision
+
+An untyped `Pointer` cannot be assigned or passed to an interface.  The
+other direction stays legal: an interface converts to `Pointer` (it yields
+the object reference), and `nil` converts to any interface.
+
+[source,pascal]
+----
+var P: Pointer; I: IThing;
+...
+  I := P;        // error: an untyped Pointer cannot become interface 'IThing'
+  Take(P);       // error, the same for an argument
+  P := I;        // fine
+  I := nil;      // fine
+----
+
+=== Rationale
+
+A Blaise interface value is a pair: the object and the method table (itab)
+for that interface.  A bare pointer holds an address and nothing else, so
+there is no itab to put in the second half.  The assignment used to pass
+the type check and then fail in both code generators.  Delphi rejects the
+conversion as well; there an interface is one pointer, but Delphi still
+requires the source to be an interface or an object.
+
+=== Alternatives Rejected
+
+* *Look the itab up at run time* -- a raw pointer is not known to be an
+  object at all, and when it is, `Obj as IThing` already says so explicitly.
+* *Leave the itab nil* -- the first call through the interface would crash.
+
 == Collection Ownership — ARC Conventions
 
 === Decision

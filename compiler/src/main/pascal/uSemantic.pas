@@ -2031,14 +2031,26 @@ begin
       Walk := Walk.Parent;
     end;
   end;
-  { Untyped pointer accepts any class/interface/string/PChar reference and vice-versa }
+  { Untyped pointer accepts any class/interface/string/PChar reference and
+    vice-versa -- except Pointer -> interface: an interface value is an
+    (object, method table) pair and a bare pointer carries no method table
+    (Delphi rejects it too) }
   if (AExpected.Kind = tyPointer) and
      (TPointerTypeDesc(AExpected).BaseType = nil) and
      (AActual.Kind in [tyClass, tyInterface, tyString, tyPointer, tyPChar]) then
     Exit;
   if (AActual.Kind = tyPointer) and
      (TPointerTypeDesc(AActual).BaseType = nil) and
-     (AExpected.Kind in [tyClass, tyInterface, tyString, tyPointer, tyPChar]) then
+     (AExpected.Kind = tyInterface) then
+    SemanticError(
+      Format('Type mismatch in %s: an untyped Pointer cannot become ' +
+        'interface ''%s'' -- an interface value carries the object''s ' +
+        'method table, which a Pointer does not; pass the object itself ' +
+        '(a class value) or use ''as''', [AContext, AExpected.Name]),
+      ALine, ACol);
+  if (AActual.Kind = tyPointer) and
+     (TPointerTypeDesc(AActual).BaseType = nil) and
+     (AExpected.Kind in [tyClass, tyString, tyPointer, tyPChar]) then
     Exit;
   { PChar is compatible with PChar }
   if (AExpected.Kind = tyPChar) and (AActual.Kind = tyPChar) then Exit;
