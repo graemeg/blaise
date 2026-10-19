@@ -12,6 +12,7 @@
     "BL-2003": { "enabled": true, "severity": "info" },
     "BL-2004": { "enabled": true, "severity": "info" },
     "BL-2005": { "enabled": true, "severity": "warning" },
+    "BL-2006": { "enabled": true, "severity": "info" },
     "BL-3001": { "enabled": true, "severity": "warning", "params": { "minTokens": 30, "ignoreIdentifierNames": false } },
     "BL-3002": { "enabled": true, "severity": "warning" }
   }

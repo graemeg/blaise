@@ -215,7 +215,8 @@ always means the same thing.
   would be wrong advice for another Pascal dialect. ARC means no manual
   `Free` (BL-2001, BL-2002); strings are 0-based (BL-2003); `Ord(S[i])`
   miscompiled under the self-hosted native stage so `StrAt`/`OrdAt` is the
-  house form (BL-2004); a swallowed exception hides a real failure (BL-2005).
+  house form (BL-2004); a swallowed exception hides a real failure (BL-2005);
+  the classic type names give way to width-stating ones (BL-2006).
 
 | `BL-3xxx`
 | Structural / cross-cutting
@@ -250,6 +251,7 @@ correctness checks with none of the style opinions.
 | BL-2003 | StringIndexing    | ✅ implemented (heuristic, token-based, INFO)
 | BL-2004 | OrdSubscript      | ✅ implemented (`Ord(S[i])` → StrAt/OrdAt, INFO)
 | BL-2005 | EmptyHandler      | ✅ implemented (swallowed exception / empty finally)
+| BL-2006 | ClassicTypeNames  | ✅ implemented (`Integer` → `Int32`, `Double` → `Float64`, ... with a quick-fix; token-based, INFO)
 | BL-3001 | DuplicateCodeBlock | ✅ implemented (Rabin-Karp, cross-file)
 | BL-3002 | ExhaustiveCase    | ✅ implemented (enum `case` with no `else`)
 |===

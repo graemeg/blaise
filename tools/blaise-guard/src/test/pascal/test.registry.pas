@@ -30,6 +30,7 @@ uses
   Guard.Rule.OrdSubscript.Tests,
   Guard.Rule.EmptyHandler.Tests,
   Guard.Rule.ExhaustiveCase.Tests,
+  Guard.Rule.ClassicTypeNames.Tests,
   Guard.Suppression.Tests;
 
 implementation

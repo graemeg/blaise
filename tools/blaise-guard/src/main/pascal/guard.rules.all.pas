@@ -29,6 +29,7 @@ uses
   Guard.Rule.StringIndexing,    { BL-2003 }
   Guard.Rule.OrdSubscript,      { BL-2004 }
   Guard.Rule.EmptyHandler,      { BL-2005 }
+  Guard.Rule.ClassicTypeNames,  { BL-2006 }
   Guard.Rule.DuplicateCodeBlock, { BL-3001 }
   Guard.Rule.ExhaustiveCase;    { BL-3002 }
 
