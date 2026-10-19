@@ -116,17 +116,25 @@ function MapBuiltin(const AType: string): string;
 begin
   Result := '';
   if AType = 'void' then Exit;
-  if (AType = 'char') or (AType = 'signed char') or (AType = 'unsigned char') then
+  { The width-stating Blaise names throughout (C `int` is Int32, never the
+    pointer-sized Int).  Plain `char` stays Byte: its signedness is
+    implementation-defined (signed on x86-64 and Apple arm64, unsigned on
+    Linux arm64) and it nearly always carries text. }
+  if AType = 'char' then
     Result := 'Byte'
+  else if AType = 'signed char' then
+    Result := 'Int8'
+  else if AType = 'unsigned char' then
+    Result := 'UInt8'
   else if (AType = 'short') or (AType = 'short int') or
           (AType = 'signed short') or (AType = 'signed short int') then
-    Result := 'SmallInt'
+    Result := 'Int16'
   else if (AType = 'unsigned short') or (AType = 'unsigned short int') then
-    Result := 'Word'
+    Result := 'UInt16'
   else if (AType = 'int') or (AType = 'signed int') or (AType = 'signed') then
-    Result := 'Integer'
+    Result := 'Int32'
   else if (AType = 'unsigned int') or (AType = 'unsigned') then
-    Result := 'Cardinal'
+    Result := 'UInt32'
   else if (AType = 'long') or (AType = 'long int') or
           (AType = 'signed long') or (AType = 'signed long int') or
           (AType = 'long long') or (AType = 'long long int') or
@@ -136,9 +144,9 @@ begin
           (AType = 'unsigned long long') or (AType = 'unsigned long long int') then
     Result := 'UInt64'
   else if AType = 'float' then
-    Result := 'Single'
+    Result := 'Float32'
   else if AType = 'double' then
-    Result := 'Double'
+    Result := 'Float64'
   else if (AType = '_Bool') or (AType = 'bool') then
     Result := 'Boolean'
   { Standard typedef vocabulary: these are declared in system headers
@@ -151,17 +159,19 @@ begin
           (AType = 'intptr_t') or (AType = 'int64_t') or
           (AType = 'time_t') or (AType = 'off_t') or (AType = 'clock_t') then
     Result := 'Int64'
-  else if (AType = 'int8_t') or (AType = 'uint8_t') or (AType = 'u_char') then
-    Result := 'Byte'   { int8_t loses signedness: Blaise has no signed 8-bit }
+  else if AType = 'int8_t' then
+    Result := 'Int8'
+  else if (AType = 'uint8_t') or (AType = 'u_char') then
+    Result := 'UInt8'
   else if (AType = 'int16_t') then
-    Result := 'SmallInt'
+    Result := 'Int16'
   else if (AType = 'uint16_t') or (AType = 'u_short') then
-    Result := 'Word'
+    Result := 'UInt16'
   else if (AType = 'int32_t') or (AType = 'pid_t') then
-    Result := 'Integer'
+    Result := 'Int32'
   else if (AType = 'uint32_t') or (AType = 'u_int') or
           (AType = 'uid_t') or (AType = 'gid_t') or (AType = 'wchar_t') then
-    Result := 'Cardinal'
+    Result := 'UInt32'
   else if (AType = 'va_list') or (AType = '__builtin_va_list') or
           (AType = '__gnuc_va_list') then
     Result := 'Pointer';

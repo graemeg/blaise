@@ -40,14 +40,16 @@ begin
   Result := True;
   if ABlaiseName = 'Byte' then ASize := 1
   else if ABlaiseName = 'Boolean' then ASize := 1
-  else if ABlaiseName = 'SmallInt' then ASize := 2
-  else if ABlaiseName = 'Word' then ASize := 2
-  else if ABlaiseName = 'Integer' then ASize := 4
-  else if ABlaiseName = 'Cardinal' then ASize := 4
-  else if ABlaiseName = 'Single' then ASize := 4
+  else if ABlaiseName = 'Int8' then ASize := 1
+  else if ABlaiseName = 'UInt8' then ASize := 1
+  else if ABlaiseName = 'Int16' then ASize := 2
+  else if ABlaiseName = 'UInt16' then ASize := 2
+  else if ABlaiseName = 'Int32' then ASize := 4
+  else if ABlaiseName = 'UInt32' then ASize := 4
+  else if ABlaiseName = 'Float32' then ASize := 4
   else if ABlaiseName = 'Int64' then ASize := 8
   else if ABlaiseName = 'UInt64' then ASize := 8
-  else if ABlaiseName = 'Double' then ASize := 8
+  else if ABlaiseName = 'Float64' then ASize := 8
   else if ABlaiseName = 'Pointer' then ASize := 8
   else if ABlaiseName = 'PChar' then ASize := 8
   else Result := False;

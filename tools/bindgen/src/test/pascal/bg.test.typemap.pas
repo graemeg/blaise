@@ -32,18 +32,18 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
-    procedure TestMap_Int_IsInteger;
-    procedure TestMap_UnsignedInt_IsCardinal;
+    procedure TestMap_Int_IsInt32;
+    procedure TestMap_UnsignedInt_IsUInt32;
     procedure TestMap_Long_IsInt64;
     procedure TestMap_UnsignedLong_IsUInt64;
     procedure TestMap_LongLong_IsInt64;
     procedure TestMap_UnsignedLongLong_IsUInt64;
-    procedure TestMap_Short_IsSmallInt;
-    procedure TestMap_UnsignedShort_IsWord;
+    procedure TestMap_Short_IsInt16;
+    procedure TestMap_UnsignedShort_IsUInt16;
     procedure TestMap_Char_IsByte;
-    procedure TestMap_UnsignedChar_IsByte;
-    procedure TestMap_Float_IsSingle;
-    procedure TestMap_Double_IsDouble;
+    procedure TestMap_UnsignedChar_IsUInt8;
+    procedure TestMap_Float_IsFloat32;
+    procedure TestMap_Double_IsFloat64;
     procedure TestMap_Bool_IsBoolean;
     procedure TestMap_Void_IsEmpty;
     procedure TestMap_ConstQualifier_Stripped;
@@ -85,14 +85,14 @@ begin
   FMapper := nil;
 end;
 
-procedure TTypeMapTests.TestMap_Int_IsInteger;
+procedure TTypeMapTests.TestMap_Int_IsInt32;
 begin
-  AssertEquals('Integer', FMapper.Map('int'));
+  AssertEquals('Int32', FMapper.Map('int'));
 end;
 
-procedure TTypeMapTests.TestMap_UnsignedInt_IsCardinal;
+procedure TTypeMapTests.TestMap_UnsignedInt_IsUInt32;
 begin
-  AssertEquals('Cardinal', FMapper.Map('unsigned int'));
+  AssertEquals('UInt32', FMapper.Map('unsigned int'));
 end;
 
 procedure TTypeMapTests.TestMap_Long_IsInt64;
@@ -115,14 +115,14 @@ begin
   AssertEquals('UInt64', FMapper.Map('unsigned long long'));
 end;
 
-procedure TTypeMapTests.TestMap_Short_IsSmallInt;
+procedure TTypeMapTests.TestMap_Short_IsInt16;
 begin
-  AssertEquals('SmallInt', FMapper.Map('short'));
+  AssertEquals('Int16', FMapper.Map('short'));
 end;
 
-procedure TTypeMapTests.TestMap_UnsignedShort_IsWord;
+procedure TTypeMapTests.TestMap_UnsignedShort_IsUInt16;
 begin
-  AssertEquals('Word', FMapper.Map('unsigned short'));
+  AssertEquals('UInt16', FMapper.Map('unsigned short'));
 end;
 
 procedure TTypeMapTests.TestMap_Char_IsByte;
@@ -130,19 +130,19 @@ begin
   AssertEquals('Byte', FMapper.Map('char'));
 end;
 
-procedure TTypeMapTests.TestMap_UnsignedChar_IsByte;
+procedure TTypeMapTests.TestMap_UnsignedChar_IsUInt8;
 begin
-  AssertEquals('Byte', FMapper.Map('unsigned char'));
+  AssertEquals('UInt8', FMapper.Map('unsigned char'));
 end;
 
-procedure TTypeMapTests.TestMap_Float_IsSingle;
+procedure TTypeMapTests.TestMap_Float_IsFloat32;
 begin
-  AssertEquals('Single', FMapper.Map('float'));
+  AssertEquals('Float32', FMapper.Map('float'));
 end;
 
-procedure TTypeMapTests.TestMap_Double_IsDouble;
+procedure TTypeMapTests.TestMap_Double_IsFloat64;
 begin
-  AssertEquals('Double', FMapper.Map('double'));
+  AssertEquals('Float64', FMapper.Map('double'));
 end;
 
 procedure TTypeMapTests.TestMap_Bool_IsBoolean;
@@ -159,7 +159,7 @@ end;
 
 procedure TTypeMapTests.TestMap_ConstQualifier_Stripped;
 begin
-  AssertEquals('Integer', FMapper.Map('const int'));
+  AssertEquals('Int32', FMapper.Map('const int'));
 end;
 
 procedure TTypeMapTests.TestMap_StructTag_Stripped;
@@ -223,7 +223,7 @@ end;
 
 procedure TTypeMapTests.TestMap_FixedArray_IsStaticArray;
 begin
-  AssertEquals('array[0..3] of Integer', FMapper.Map('int[4]'));
+  AssertEquals('array[0..3] of Int32', FMapper.Map('int[4]'));
 end;
 
 procedure TTypeMapTests.TestMap_FunctionPtr_IsPointer;
@@ -235,7 +235,7 @@ end;
 
 procedure TTypeMapTests.TestFnPtrDecl_IntArgs_FunctionType;
 begin
-  AssertEquals('function(a0: PDisplay; a1: Integer): Integer',
+  AssertEquals('function(a0: PDisplay; a1: Int32): Int32',
     FMapper.FnPtrDecl('int (*)(Display *, int)'));
 end;
 
@@ -247,7 +247,7 @@ end;
 
 procedure TTypeMapTests.TestFnPtrDecl_NoParams;
 begin
-  AssertEquals('function: Integer', FMapper.FnPtrDecl('int (*)(void)'));
+  AssertEquals('function: Int32', FMapper.FnPtrDecl('int (*)(void)'));
 end;
 
 procedure TTypeMapTests.TestFnPtrDecl_Variadic_Fails;
@@ -262,7 +262,7 @@ begin
     FMapper.MapCallback('int (*)(Display *, XID)', 'XSampleIfEvent_predicate'));
   AssertEquals('one synth type', 1, FMapper.ProcTypes.Count);
   AssertEquals('TXSampleIfEvent_predicate', FMapper.ProcTypes[0].Name);
-  AssertEquals('function(a0: PDisplay; a1: XID): Integer',
+  AssertEquals('function(a0: PDisplay; a1: XID): Int32',
     FMapper.ProcTypes[0].Decl);
 end;
 
@@ -278,7 +278,7 @@ end;
 
 procedure TTypeMapTests.TestMapCallback_NonFnPtr_FallsBackToMap;
 begin
-  AssertEquals('Integer', FMapper.MapCallback('int', 'ignored'));
+  AssertEquals('Int32', FMapper.MapCallback('int', 'ignored'));
   AssertEquals('Pointer', FMapper.MapCallback('int (*)(int, ...)', 'vararg_cb'));
 end;
 
@@ -308,11 +308,13 @@ end;
 
 procedure TTypeMapTests.TestMap_StdintTypes;
 begin
-  AssertEquals('Byte', FMapper.Map('uint8_t'));
-  AssertEquals('SmallInt', FMapper.Map('int16_t'));
-  AssertEquals('Word', FMapper.Map('uint16_t'));
-  AssertEquals('Integer', FMapper.Map('int32_t'));
-  AssertEquals('Cardinal', FMapper.Map('uint32_t'));
+  AssertEquals('UInt8', FMapper.Map('uint8_t'));
+  AssertEquals('Int8', FMapper.Map('int8_t'));
+  AssertEquals('Int8', FMapper.Map('signed char'));
+  AssertEquals('Int16', FMapper.Map('int16_t'));
+  AssertEquals('UInt16', FMapper.Map('uint16_t'));
+  AssertEquals('Int32', FMapper.Map('int32_t'));
+  AssertEquals('UInt32', FMapper.Map('uint32_t'));
   AssertEquals('Int64', FMapper.Map('int64_t'));
   AssertEquals('UInt64', FMapper.Map('uint64_t'));
   AssertEquals('Int64', FMapper.Map('intptr_t'));

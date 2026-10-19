@@ -431,8 +431,8 @@ developers arriving from Kotlin, Java or C# — where `Int`/`int` is a fixed
 32-bit type — meet the same false friend. The interop documentation states
 the rule in one line — *when transcribing a C header, C `int` is `Int32`, C
 `long` on LP64 is `Int64`, and Blaise `Int` corresponds to C
-`intptr_t`/`ssize_t`, never to C `int`* — and the migration analyser's report
-and `bindgen` output follow that mapping.
+`intptr_t`/`ssize_t`, never to C `int`* — and `bindgen` output follows that
+mapping.
 
 === D10. Compiler-internal usage
 
@@ -542,8 +542,13 @@ the project's test rules.
   plus stdlib tests (see D8 for why the remaining eight wait for Phase 6).
 * BlaiseGuard rule reporting classic type names with recommended migrations
   (D11).
-* Migration-analyser mapping (`Integer` → `Int32` suggestion, `Extended`
-  flag, C-interop table from D9 in the report output).
+* Migration report: delivered by BlaiseGuard rule BL-2006 rather than the
+  migration analyser.  `tools/migration-analyser` turned out to be an empty
+  placeholder, and BL-2006 already reports every classic name with its
+  replacement as a quick-fix (`Extended` with its precision warning).
+* `bindgen` emits the width-stating names and follows D9 (`int` → `Int32`;
+  `signed char` / `int8_t` → `Int8`, which the missing signed 8-bit type had
+  forced to `Byte`).
 
 *Phase 3 — documentation.*
 
@@ -569,6 +574,10 @@ the project's test rules.
 * Loop-variable inference and the D6 unsigned-`downto` diagnostic.
 
 *Phase 5 — mechanical rename of Blaise's own source.*
+
+* Regenerate `bindings/src/main/pascal/x11.pas` with the Phase 2 `bindgen`
+  (it needs clang and the X11 development headers).  Until then the
+  committed unit still uses the classic names, which remain builtins.
 
 * `Integer` → `Int32`, `Cardinal` → `UInt32`, `Double` → `Float64`, ... across
   compiler, runtime, stdlib, tools and tests. Behaviour-preserving; the native

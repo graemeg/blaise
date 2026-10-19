@@ -260,7 +260,8 @@ const
     type references even though the unit does not declare them. }
   BuiltinTypeNames =
     ' INTEGER INT64 UINT32 CARDINAL UINT64 QWORD PTRUINT SMALLINT INT16' +
-    ' WORD UINT16 BYTE BOOLEAN POINTER PCHAR DOUBLE SINGLE ';
+    ' WORD UINT16 BYTE BOOLEAN POINTER PCHAR DOUBLE SINGLE' +
+    ' INT UINT INT8 INT32 UINT8 FLOAT FLOAT32 FLOAT64 ';
 
 function KnownTypeName(ADeclared: TSet<string>; const AName: string): Boolean;
 begin
@@ -310,7 +311,7 @@ var
   J: Integer;
 begin
   if E.Name <> '' then
-    ATypeLines.Add('  ' + E.Name + ' = Integer;');
+    ATypeLines.Add('  ' + E.Name + ' = Int32;');
   for J := 0 to E.Members.Count - 1 do
     AConstLines.Add('  ' + E.Members[J].Name + ' = ' +
       IntToStr(E.Members[J].Value) + ';');

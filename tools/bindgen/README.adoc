@@ -167,12 +167,13 @@ end.
 |===
 | C type | Blaise type
 
-| `char`, `signed char`, `unsigned char`, `int8_t`, `uint8_t` | `Byte`
-| `short` / `unsigned short`, `int16_t` / `uint16_t` | `SmallInt` / `Word`
-| `int` / `unsigned int`, `int32_t` / `uint32_t` | `Integer` / `Cardinal`
+| `char` | `Byte`
+| `signed char`, `int8_t` / `unsigned char`, `uint8_t` | `Int8` / `UInt8`
+| `short` / `unsigned short`, `int16_t` / `uint16_t` | `Int16` / `UInt16`
+| `int` / `unsigned int`, `int32_t` / `uint32_t` | `Int32` / `UInt32`
 | `long`, `long long`, `int64_t`, `ssize_t`, `ptrdiff_t`, `time_t`, `off_t` | `Int64`
 | `unsigned long`, `unsigned long long`, `uint64_t`, `size_t`, `uintptr_t` | `UInt64`
-| `float` / `double` | `Single` / `Double`
+| `float` / `double` | `Float32` / `Float64`
 | `_Bool` | `Boolean`
 | `char *`, `const char *` | `PChar`
 | `void *`, `va_list`, function pointers | `Pointer`
@@ -182,9 +183,12 @@ end.
 
 Notes:
 
-* Blaise has no signed 8-bit type; `signed char` and `int8_t` map to
-  `Byte` (identical size and ABI class; only arithmetic interpretation
-  differs).
+* Output uses Blaise's width-stating type names
+  (docs/type-standardisation-design.adoc).  C `int` is `Int32`, never the
+  pointer-sized `Int`.
+* Plain `char` maps to `Byte`: its signedness is implementation-defined
+  (signed on x86-64 and Apple arm64, unsigned on Linux arm64) and it nearly
+  always carries text.  `signed char` / `int8_t` map to `Int8`.
 * Parameter names that collide with Blaise keywords get a trailing
   underscore (`type` → `type_`); unnamed C parameters become `a0`,
   `a1`, ….
@@ -202,9 +206,9 @@ Notes:
 * *Variadic functions* are emitted with the `varargs` directive
   (compiler support since IFACE v14): `printf(PChar('%d'), N)` works.
   Extra args must be C-passable; the compiler rejects `string`
-  (pass `PChar(...)`) and `Single` (pass `Double(...)`).
+  (pass `PChar(...)`) and `Float32` (pass `Float64(...)`).
 * *Bitfields* collapse into storage-unit fields
-  (`__bits0: Cardinal; { C bitfields: a:1 b:3 c:12 }`) with C-exact
+  (`__bits0: UInt32; { C bitfields: a:1 b:3 c:12 }`) with C-exact
   record sizes; individual bit accessors remain a TODO.
 * A function whose signature uses a BY-VALUE type from a filtered-out
   header is skipped with a note (a pointer would have degraded to

@@ -185,7 +185,7 @@ var
   Src: string;
 begin
   Src := Self.Emit();
-  AssertTrue('alias', ContainsStr(Src, 'XOrientation = Integer;'));
+  AssertTrue('alias', ContainsStr(Src, 'XOrientation = Int32;'));
   AssertTrue('implicit member', ContainsStr(Src, 'XOrientVertical = 0;'));
   AssertTrue('explicit member', ContainsStr(Src, 'XOrientHorizontal = 5;'));
 end;
@@ -196,7 +196,7 @@ var
 begin
   Src := Self.Emit();
   AssertTrue('record open', ContainsStr(Src, 'XPoint = record'));
-  AssertTrue('int field', ContainsStr(Src, 'x: Integer;'));
+  AssertTrue('int field', ContainsStr(Src, 'x: Int32;'));
   AssertTrue('unsigned long field', ContainsStr(Src, 'serial: UInt64;'));
   AssertTrue('char* field', ContainsStr(Src, 'name: PChar;'));
 end;
@@ -214,18 +214,18 @@ begin
     are emitted as callable declarations, not skipped. }
   Src := Self.Emit();
   AssertTrue(ContainsStr(Src,
-    'function XVariadicThing(mode: Integer): Integer; cdecl; varargs; ' +
+    'function XVariadicThing(mode: Int32): Int32; cdecl; varargs; ' +
     'external ''X11'' name ''XVariadicThing'';'));
 end;
 
 procedure TEmitTests.TestEmit_ReservedWordParam_Renamed;
 begin
-  AssertTrue(ContainsStr(Self.Emit(), 'type_: Integer'));
+  AssertTrue(ContainsStr(Self.Emit(), 'type_: Int32'));
 end;
 
 procedure TEmitTests.TestEmit_UnnamedParam_Synthesised;
 begin
-  AssertTrue(ContainsStr(Self.Emit(), 'a1: Double'));
+  AssertTrue(ContainsStr(Self.Emit(), 'a1: Float64'));
 end;
 
 procedure TEmitTests.TestEmit_PtrAliases_PrecedeOtherTypes;
@@ -326,11 +326,11 @@ begin
   FModel.AddRecord(R);
   Src := Self.Emit();
   AssertTrue('scalar accessor decl', ContainsStr(Src,
-    'function XSampleEvent_kind(var AUnion: XSampleEvent): PInteger;'));
+    'function XSampleEvent_kind(var AUnion: XSampleEvent): PInt32;'));
   AssertTrue('record accessor decl', ContainsStr(Src,
     'function XSampleEvent_pt(var AUnion: XSampleEvent): PXPoint;'));
   AssertTrue('body cast', ContainsStr(Src, 'Result := PXPoint(@AUnion);'));
-  AssertTrue('PInteger alias', ContainsStr(Src, 'PInteger = ^Integer;'));
+  AssertTrue('PInt32 alias', ContainsStr(Src, 'PInt32 = ^Int32;'));
 end;
 
 procedure TEmitTests.TestEmit_UnionAccessor_ArrayMemberSkipped;
@@ -366,7 +366,7 @@ begin
   FModel.AddTypedef(TCTypedef.Create('XEvent', 'union _XEvent'));
   Src := Self.Emit();
   AssertTrue('typedef-named accessor', ContainsStr(Src,
-    'function XEvent_kind(var AUnion: XEvent): PInteger;'));
+    'function XEvent_kind(var AUnion: XEvent): PInt32;'));
   AssertTrue('tag-named accessor absent',
     not ContainsStr(Src, 'function _XEvent_kind'));
 end;
@@ -379,7 +379,7 @@ begin
     'int (*)(Display *, int)'));
   Src := Self.Emit();
   AssertTrue(ContainsStr(Src,
-    'XErrorHandler = function(a0: PDisplay; a1: Integer): Integer;'));
+    'XErrorHandler = function(a0: PDisplay; a1: Int32): Int32;'));
 end;
 
 procedure TEmitTests.TestEmit_InlineFnPtrParam_SynthesisedType;
@@ -393,7 +393,7 @@ begin
   FModel.AddFunction(F);
   Src := Self.Emit();
   AssertTrue('synth type declared', ContainsStr(Src,
-    'TXIfThing_predicate = function(a0: PDisplay; a1: XID): Integer;'));
+    'TXIfThing_predicate = function(a0: PDisplay; a1: XID): Int32;'));
   AssertTrue('param uses it', ContainsStr(Src,
     'XIfThing(predicate: TXIfThing_predicate)'));
 end;
