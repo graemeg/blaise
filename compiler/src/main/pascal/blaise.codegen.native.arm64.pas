@@ -9113,7 +9113,16 @@ begin
       if ArcExprOwnsRef(AAsgn.Expr) then
         EmitPushX0();
       Self.Emit(#9'mov x1, x0');
-      EmitSlotAddr('x0', AAsgn.Name);
+      if IsCaptured(AAsgn.Name) then
+      begin
+        { a captured weak variable (a nested routine's or a closure's): the
+          slot is behind the '_cap_' address }
+        EmitLoadSlot('x0', '_cap_' + AAsgn.Name);
+        if AAsgn.IsVarParam then
+          Self.Emit(#9'ldr x0, [x0]');
+      end
+      else
+        EmitSlotAddr('x0', AAsgn.Name);
       EmitCallSym('_WeakAssign');
       if ArcExprOwnsRef(AAsgn.Expr) then
       begin

@@ -10302,6 +10302,9 @@ begin
         Sym := TSymbol.Create(ADecl.EnvCaptured.Strings[I], skVariable,
           TRecordTypeDesc(ADecl.EnvType).FindField(
             ADecl.EnvCaptured.Strings[I]).TypeDesc);
+        { a captured [Weak] variable is assigned weakly in the body too }
+        Sym.IsWeak := TRecordTypeDesc(ADecl.EnvType).FindField(
+          ADecl.EnvCaptured.Strings[I]).IsWeak;
         FTable.Define(Sym);
       end;
 
@@ -19115,6 +19118,9 @@ begin
           SemanticError(Format('Cannot resolve captured variable ''%s''',
             [Name]), AThunk.Line, AThunk.Col);
         Env.AddField(Name, Sym.TypeDesc);
+        { a captured [Weak] variable stays weak in the env: stores register
+          the slot, the env cleanup unregisters it }
+        Env.FindField(Name).IsWeak := Sym.IsWeak;
       end;
       if Encl.BlockEnvCaptured.IndexOf(Name) < 0 then
         Encl.BlockEnvCaptured.Add(Name);
@@ -19184,6 +19190,7 @@ begin
         SemanticError(Format('Cannot resolve captured variable ''%s''',
           [Name]), AThunk.Line, AThunk.Col);
       Env.AddField(Name, Sym.TypeDesc);
+      Env.FindField(Name).IsWeak := Sym.IsWeak;   { see the block env above }
       Encl.EnvCaptured.Add(Name);
       if Name = 'Self' then SelfJustAdded := True;
     end;

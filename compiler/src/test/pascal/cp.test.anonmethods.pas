@@ -110,6 +110,7 @@ type
     { ... and through a procedural-typed VARIABLE or FIELD (implicit-Self and
       qualified), whose single signature types the lambda. }
     procedure TestSemantic_Arrow_ArgPosition_ProcTypeCalls_Inferred;
+    procedure TestCodegen_CapturedWeakLocal_ClosureBodyRegistersSlot;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
   end;
@@ -1187,6 +1188,30 @@ begin
     AsmMissing(Src,
       #9'movq (%rax), %rax'#10#9'movq %rax, %rbx'#10#9'subq $16, %rsp',
       #9'ldr x0, [x0]'#10#9'stur x0, [x29, #-'));
+end;
+
+procedure TAnonMethodTests.TestCodegen_CapturedWeakLocal_ClosureBodyRegistersSlot;
+const
+  Src = '''
+      program P;
+      type
+        TProc = reference to procedure;
+      procedure Run();
+      var [Weak] W: TObject; S: TObject; P: TProc;
+      begin
+        S := TObject.Create();
+        P := procedure begin W := S end;
+        P()
+      end;
+      begin
+        Run()
+      end.
+      ''';
+begin
+  { the store in the closure body goes through the env slot's weak
+    registration (x86-64 rejected it as not lowered; arm64 retained) }
+  AssertEquals('closure body weak store', '',
+    AsmMissing(Src, 'callq _WeakAssign', 'bl __WeakAssign'));
 end;
 
 initialization

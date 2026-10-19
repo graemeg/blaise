@@ -17570,11 +17570,7 @@ begin
         in the weak table (nil just deregisters it).  An owned +1 value has
         no other owner, so it is released after the store, which frees it
         and nils the slot (BUG-20261007-x86-weak-var-assign). }
-      if Asgn.IsVarParam or Self.IsCaptured(Asgn.Name) then
-        raise ENativeCodeGenError.Create(Format(
-          'x86-64: not yet lowered: [Weak] assignment through a var ' +
-          'parameter or a capture at line %d col %d', [Asgn.Line, Asgn.Col]));
-      if not Self.IsLocal(Asgn.Name) then
+      if (not Self.IsLocal(Asgn.Name)) and not Self.IsCaptured(Asgn.Name) then
       begin
         Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
         Self.MarkWeakGlobal(Asgn.Name);
@@ -17583,7 +17579,19 @@ begin
       Self.Emit(#9'pushq %rax');
       Self.Emit(#9'subq $8, %rsp');
       Self.Emit(#9'movq %rax, %rsi');
-      Self.Emit(Format(#9'leaq %s, %%rdi', [Self.VarOperand(Asgn.Name)]));
+      if Self.IsCaptured(Asgn.Name) then
+      begin
+        { a captured weak variable (a nested routine's or a closure's): the
+          slot is behind the '_cap_' address }
+        Self.Emit(Format(#9'movq %s, %%rdi',
+          [Self.VarOperand('_cap_' + Asgn.Name)]));
+        if Asgn.IsVarParam then
+          Self.Emit(#9'movq (%rdi), %rdi');
+      end
+      else if Asgn.IsVarParam then
+        Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(Asgn.Name)]))
+      else
+        Self.Emit(Format(#9'leaq %s, %%rdi', [Self.VarOperand(Asgn.Name)]));
       Self.Emit(#9'callq _WeakAssign');
       Self.Emit(#9'addq $8, %rsp');
       Self.Emit(#9'popq %rax');

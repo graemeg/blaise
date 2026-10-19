@@ -34,6 +34,10 @@ type
       to its idle frame slot (G.Hi() then dispatched on the env's nil: a crash);
       arm64 refused the captured loop variable ("store to variable 'X'"). }
     procedure TestRun_CapturedManagedVars_SharedWithDeclaringRoutine;
+    { a [Weak] local (class or interface) captured by a closure or a nested
+      routine stays weak: assigned in the body, in the declaring routine,
+      and after the declaring routine has returned }
+    procedure TestRun_CapturedWeakLocals_StayWeak;
     { A local RECORD captured by a closure is one variable, shared by the closure
       and the routine that declares it: each sees the other's field writes (plain,
       nested, array-field, string) and a whole-record assignment.  On arm64 the
@@ -2803,6 +2807,100 @@ begin
     '3 5107 hi b x1y' + LineEnding +
     '4 True' + LineEnding +
     '32 7 p1q q 7' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_CapturedWeakLocals_StayWeak;
+const
+  Src = '''
+    program Q;
+    type
+      IThing = interface
+        function N(): Integer;
+      end;
+      TThing = class(TObject, IThing)
+        FN: Integer;
+        function N(): Integer;
+        destructor Destroy(); override;
+      end;
+      TProc = reference to procedure;
+    function TThing.N(): Integer; begin Result := FN end;
+    destructor TThing.Destroy(); begin WriteLn('gone ', FN); inherited Destroy() end;
+    procedure WithIntf();
+    var [Weak] W: IThing; S: IThing; P: TProc;
+    begin
+      S := TThing.Create();
+      P := procedure begin W := S end;
+      P();
+      WriteLn('intf ', W.N());
+      S := nil;
+      WriteLn('intf after ', Assigned(W));
+      P := nil
+    end;
+    procedure WithClass();
+    var [Weak] W: TThing; S: TThing; P: TProc;
+    begin
+      S := TThing.Create(); S.FN := 2;
+      P := procedure begin W := S end;
+      P();
+      WriteLn('class ', W.N());
+      S := nil;
+      WriteLn('class after ', Assigned(W));
+      P := nil
+    end;
+    function MakeProbe(const S: IThing): TProc;
+    var [Weak] W: IThing;
+    begin
+      W := S;
+      Result := procedure begin WriteLn('probe ', Assigned(W)) end
+    end;
+    procedure Declaring();
+    var [Weak] W: IThing; S: IThing; P: TProc;
+    begin
+      P := procedure begin WriteLn('decl sees ', Assigned(W)) end;
+      S := TThing.Create();
+      W := S;
+      P();
+      S := nil;
+      P()
+    end;
+    procedure NestedClass();
+    var [Weak] W: TThing; S: TThing;
+      procedure Inner(); begin W := S end;
+    begin
+      S := TThing.Create(); S.FN := 9;
+      Inner();
+      WriteLn('nested class ', W.N());
+      S := nil;
+      WriteLn('nested class after ', Assigned(W))
+    end;
+    var Pr: TProc; Keep: IThing;
+    begin
+      Keep := TThing.Create();
+      Pr := MakeProbe(Keep);
+      Pr();
+      Keep := nil;
+      Pr();
+      Pr := nil;
+      Declaring();
+      NestedClass();
+      WithIntf();
+      WriteLn('--');
+      WithClass();
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { the closure env's field for a [Weak] local was a strong field and the
+    lifted body's symbol was not weak: the object never died while the
+    closure lived, and the env released it at teardown }
+  AssertRunsOnAll(Src,
+    'probe True' + LineEnding + 'gone 0' + LineEnding + 'probe False' + LineEnding +
+    'decl sees True' + LineEnding + 'gone 0' + LineEnding + 'decl sees False' + LineEnding +
+    'nested class 9' + LineEnding + 'gone 9' + LineEnding + 'nested class after False' + LineEnding +
+    'intf 0' + LineEnding + 'gone 0' + LineEnding + 'intf after False' + LineEnding + '--' + LineEnding +
+    'class 2' + LineEnding + 'gone 2' + LineEnding + 'class after False' + LineEnding +
+    'end' + LineEnding, 0);
 end;
 
 initialization
