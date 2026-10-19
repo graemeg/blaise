@@ -8429,6 +8429,22 @@ begin
       EmitCallSym('_ClassRelease');
     Exit;
   end;
+  if AAsgn.IsUnretainedLhs then
+  begin
+    { [Unretained]: a plain store of both halves -- no retain of the new
+      obj, no release of the old; an owned source has no other owner and is
+      released once stored.  (A captured target took the address path in
+      EmitAssignment.) }
+    Owned := EmitIntfPairToX0X1(AAsgn.Expr, AAsgn.ResolvedLhsType);
+    Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [obj, itab] }
+    EmitStoreSlot('x1', AAsgn.Name + '_itab');
+    Self.Emit(#9'ldr x0, [sp]');
+    EmitStoreSlot('x0', AAsgn.Name);
+    Self.Emit(#9'ldp x0, x1, [sp], #16');
+    if Owned and not (AAsgn.Expr is TNilLiteral) then
+      EmitCallSym('_ClassRelease');
+    Exit;
+  end;
   if AAsgn.ImplicitSelfField <> nil then
   begin
     { FIntf := value inside a method: the pair is a field of Self }
@@ -8940,7 +8956,8 @@ begin
     Exit;
   end;
   if IsCaptured(AAsgn.Name) and (AAsgn.ResolvedLhsType <> nil) and
-     (AAsgn.ResolvedLhsType.Kind = tyClass) and not AAsgn.IsWeakLhs then
+     (AAsgn.ResolvedLhsType.Kind = tyClass) and not AAsgn.IsWeakLhs and
+     not AAsgn.IsUnretainedLhs then
   begin
     Self.EmitExprToX0(AAsgn.Expr);
     if not ArcExprOwnsRef(AAsgn.Expr) then
@@ -8971,7 +8988,7 @@ begin
     EmitFatTargetAddr('x0', AAsgn);
     EmitPushX0();
     EmitIntfStoreStacked(0, AAsgn.Expr, AAsgn.ResolvedLhsType,
-      AAsgn.IsWeakLhs);
+      AAsgn.IsWeakLhs, AAsgn.IsUnretainedLhs);
     Exit;
   end;
   if UsesCapSlot(AAsgn.Name) and
@@ -9137,6 +9154,31 @@ begin
         EmitPopTo('x0');
         EmitCallSym('_ClassRelease');
       end;
+      Exit;
+    end;
+    if AAsgn.IsUnretainedLhs then
+    begin
+      { an [Unretained] variable holds no reference: a plain store, through
+        the capture when captured; an owned +1 value has no other owner and
+        is released once stored }
+      Self.EmitExprToX0(AAsgn.Expr);
+      EmitPushX0();
+      if IsCaptured(AAsgn.Name) then
+      begin
+        EmitLoadSlot('x9', '_cap_' + AAsgn.Name);
+        if AAsgn.IsVarParam then
+          Self.Emit(#9'ldr x9, [x9]');
+        Self.Emit(#9'ldr x0, [sp]');
+        Self.Emit(#9'str x0, [x9]');
+      end
+      else
+      begin
+        Self.Emit(#9'ldr x0, [sp]');
+        EmitStoreSlot('x0', AAsgn.Name);
+      end;
+      EmitPopTo('x0');
+      if ArcExprOwnsRef(AAsgn.Expr) then
+        EmitCallSym('_ClassRelease');
       Exit;
     end;
     { same ARC discipline as strings, through _Class* }
@@ -13702,7 +13744,7 @@ begin
       if (VD.ResolvedType.Kind = tyProcedural) and
          TProceduralTypeDesc(VD.ResolvedType).IsReference then
         FRefLocals.Add(VD.Names.Strings[J]);
-      if (VD.ResolvedType.Kind = tyClass) and not VD.IsWeak then
+      if (VD.ResolvedType.Kind = tyClass) and not VD.IsWeak and not VD.IsUnretained then
         FObjLocals.Add(VD.Names.Strings[J]);
       if VD.ResolvedType.Kind = tyDynArray then
         FDynLocals.Add(VD.Names.Strings[J]);
@@ -13710,7 +13752,7 @@ begin
       begin
         { fat pointer: split obj/itab slots; the obj half co-owns the
           backing instance (weak slots hold no ref — not released) }
-        if not VD.IsWeak then
+        if not (VD.IsWeak or VD.IsUnretained) then
           FIntfLocals.Add(VD.Names.Strings[J]);
       end;
       { a weak slot holds no reference but IS registered in the weak table:
@@ -18057,7 +18099,7 @@ begin
         RegisterGlobalInit(VD.Names.Strings[J], VD);
       if VD.ResolvedType.Kind = tyString then
         FStrGlobals.Add(VD.Names.Strings[J]);
-      if (VD.ResolvedType.Kind = tyClass) and not VD.IsWeak then
+      if (VD.ResolvedType.Kind = tyClass) and not VD.IsWeak and not VD.IsUnretained then
         FObjGlobals.Add(VD.Names.Strings[J]);
       if VD.ResolvedType.Kind = tyDynArray then
         FDynGlobals.Add(VD.Names.Strings[J]);
@@ -18070,7 +18112,7 @@ begin
       begin
         FGlobalNames.Add(VD.Names.Strings[J] + '_itab');
         FGlobalSize.Add(VD.Names.Strings[J] + '_itab', 8);
-        if not VD.IsWeak then
+        if not (VD.IsWeak or VD.IsUnretained) then
           FIntfGlobals.Add(VD.Names.Strings[J]);
       end;
       if VD.ResolvedType.Kind in [tyRecord, tyStaticArray] then
@@ -18926,7 +18968,7 @@ begin
       FGlobalNames.Add(N);
       if T.Kind = tyString then
         FStrGlobals.Add(N);
-      if (T.Kind = tyClass) and not FDecl.IsWeak then
+      if (T.Kind = tyClass) and not FDecl.IsWeak and not FDecl.IsUnretained then
         FObjGlobals.Add(N);
       if T.Kind = tyDynArray then
         FDynGlobals.Add(N);
@@ -18936,7 +18978,7 @@ begin
       begin
         FGlobalNames.Add(N + '_itab');
         FGlobalSize.Items[N + '_itab'] := 8;
-        if not FDecl.IsWeak then
+        if not (FDecl.IsWeak or FDecl.IsUnretained) then
           FIntfGlobals.Add(N);
       end;
       if T.Kind in [tyRecord, tyStaticArray] then
@@ -19001,7 +19043,7 @@ begin
         RegisterGlobalInit(N, VD);
       if VD.ResolvedType.Kind = tyString then
         FStrGlobals.Add(N);
-      if (VD.ResolvedType.Kind = tyClass) and not VD.IsWeak then
+      if (VD.ResolvedType.Kind = tyClass) and not VD.IsWeak and not VD.IsUnretained then
         FObjGlobals.Add(N);
       if VD.ResolvedType.Kind = tyDynArray then
         FDynGlobals.Add(N);
@@ -19009,7 +19051,7 @@ begin
       begin
         FGlobalNames.Add(N + '_itab');
         FGlobalSize.Add(N + '_itab', 8);
-        if not VD.IsWeak then
+        if not (VD.IsWeak or VD.IsUnretained) then
           FIntfGlobals.Add(N);
       end;
       if VD.ResolvedType.Kind in [tyRecord, tyStaticArray] then

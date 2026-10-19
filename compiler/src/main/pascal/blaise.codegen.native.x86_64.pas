@@ -5067,7 +5067,7 @@ begin
     else
       Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(AAsgn.Name)]));
     Self.EmitInterfaceToFieldSlotsAt(AAsgn.Expr, '%rbx', 0,
-      AAsgn.ResolvedLhsType, AAsgn.IsWeakLhs);
+      AAsgn.ResolvedLhsType, AAsgn.IsWeakLhs, AAsgn.IsUnretainedLhs);
     Self.Emit(#9'popq %rbx');
     Self.Emit(#9'popq %rbx');
     Exit;
@@ -5107,9 +5107,15 @@ begin
   ObjOp  := Self.IntfObjOperand(AAsgn.Name, AAsgn.IsGlobal);
   ItabOp := Self.IntfItabOperand(AAsgn.Name, AAsgn.IsGlobal);
 
-  { F := nil — release old obj, zero both slots. }
+  { F := nil — release old obj, zero both slots ([Unretained]: just zero). }
   if AAsgn.Expr is TNilLiteral then
   begin
+    if AAsgn.IsUnretainedLhs then
+    begin
+      Self.Emit(Format(#9'movq $0, %s', [ObjOp]));
+      Self.Emit(Format(#9'movq $0, %s', [ItabOp]));
+      Exit;
+    end;
     if AAsgn.IsWeakLhs then
       Self.Emit(Format(#9'leaq %s, %%rdi', [ObjOp]))
     else
@@ -5120,6 +5126,29 @@ begin
       Self.Emit(#9'callq _ClassRelease');
     Self.Emit(Format(#9'movq $0, %s', [ObjOp]));
     Self.Emit(Format(#9'movq $0, %s', [ItabOp]));
+    Exit;
+  end;
+
+  { [Unretained] F := <any interface source>: a plain store of both halves
+    -- no retain of the new obj, no release of the old; an owned source has
+    no other owner and is released once stored }
+  if AAsgn.IsUnretainedLhs then
+  begin
+    WeakPar := TMethodParam.Create();
+    try
+      WeakPar.ResolvedType := Intf;
+      Self.EmitMethodArgPush(WeakPar, AAsgn.Expr);   { (itab, obj) }
+    finally
+      WeakPar.Free();
+    end;
+    Self.Emit(#9'popq %rax');                 { itab }
+    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
+    Self.Emit(#9'popq %rdi');                 { obj }
+    Self.Emit(Format(#9'movq %%rdi, %s', [ObjOp]));
+    if NativeExprOwnsRef(AAsgn.Expr) or Self.IsIntfStackValue(AAsgn.Expr) or
+       ((AAsgn.Expr is TMethodCallExpr) and
+        not TMethodCallExpr(AAsgn.Expr).IsConstructorCall) then
+      Self.Emit(#9'callq _ClassRelease');
     Exit;
   end;
 
@@ -17564,6 +17593,36 @@ begin
       Self.EmitInterfaceAssign(Asgn);
     end
     else if (Asgn.ResolvedLhsType <> nil) and
+            (Asgn.ResolvedLhsType.Kind = tyClass) and Asgn.IsUnretainedLhs then
+    begin
+      { an [Unretained] variable holds no reference: a plain store, through
+        the capture or a var parameter's address; an owned +1 value has no
+        other owner and is released once stored }
+      if (not Self.IsLocal(Asgn.Name)) and not Self.IsCaptured(Asgn.Name) then
+        Self.AddGlobal(Asgn.Name, Asgn.ResolvedLhsType);
+      Self.EmitExprToEax(Asgn.Expr);
+      if Self.IsCaptured(Asgn.Name) then
+      begin
+        Self.Emit(Format(#9'movq %s, %%rcx',
+          [Self.VarOperand('_cap_' + Asgn.Name)]));
+        if Asgn.IsVarParam then
+          Self.Emit(#9'movq (%rcx), %rcx');
+        Self.Emit(#9'movq %rax, (%rcx)');
+      end
+      else if Asgn.IsVarParam then
+      begin
+        Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand(Asgn.Name)]));
+        Self.Emit(#9'movq %rax, (%rcx)');
+      end
+      else
+        Self.Emit(Format(#9'movq %%rax, %s', [Self.VarOperand(Asgn.Name)]));
+      if NativeExprOwnsRef(Asgn.Expr) then
+      begin
+        Self.Emit(#9'movq %rax, %rdi');
+        Self.Emit(#9'callq _ClassRelease');
+      end;
+    end
+    else if (Asgn.ResolvedLhsType <> nil) and
             (Asgn.ResolvedLhsType.Kind = tyClass) and Asgn.IsWeakLhs then
     begin
       { a [Weak] variable holds no reference: _WeakAssign registers the slot
@@ -25715,6 +25774,8 @@ begin
     begin
       VD := TVarDecl(ADecl.Body.Decls.Items[I]);
       if VD.ResolvedType = nil then Continue;
+      { an [Unretained] local holds no reference }
+      if VD.IsUnretained then Continue;
       AKind := ArcScopeExitReleaseKind(VD.ResolvedType);
       case AKind of
         { String locals: release the string. }

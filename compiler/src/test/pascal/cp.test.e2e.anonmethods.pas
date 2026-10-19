@@ -38,6 +38,9 @@ type
       routine stays weak: assigned in the body, in the declaring routine,
       and after the declaring routine has returned }
     procedure TestRun_CapturedWeakLocals_StayWeak;
+    { an [Unretained] local (class or interface; plain, captured by a
+      closure or a nested routine, global) takes no reference }
+    procedure TestRun_UnretainedLocals_TakeNoReference;
     { A local RECORD captured by a closure is one variable, shared by the closure
       and the routine that declares it: each sees the other's field writes (plain,
       nested, array-field, string) and a whole-record assignment.  On arm64 the
@@ -2901,6 +2904,89 @@ begin
     'intf 0' + LineEnding + 'gone 0' + LineEnding + 'intf after False' + LineEnding + '--' + LineEnding +
     'class 2' + LineEnding + 'gone 2' + LineEnding + 'class after False' + LineEnding +
     'end' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_UnretainedLocals_TakeNoReference;
+const
+  Src = '''
+    program Q;
+    type
+      IThing = interface
+        function N(): Integer;
+      end;
+      TThing = class(TObject, IThing)
+        FN: Integer;
+        function N(): Integer;
+        destructor Destroy(); override;
+      end;
+      TProc = reference to procedure;
+    function TThing.N(): Integer; begin Result := FN end;
+    destructor TThing.Destroy(); begin WriteLn('gone ', FN); inherited Destroy() end;
+    function Mk(AN: Integer): TThing; begin Result := TThing.Create(); Result.FN := AN end;
+    procedure PlainClass();
+    var [Unretained] U: TThing; S: TThing;
+    begin
+      S := Mk(1);
+      U := S;
+      WriteLn('class ', U.N());
+      S := nil;
+      WriteLn('class after')
+    end;
+    procedure PlainIntf();
+    var [Unretained] U: IThing; S: IThing;
+    begin
+      S := Mk(2);
+      U := S;
+      WriteLn('intf ', U.N());
+      S := nil;
+      WriteLn('intf after')
+    end;
+    procedure OwnedSource();
+    var [Unretained] U: TThing;
+    begin
+      U := Mk(3);
+      WriteLn('owned after')
+    end;
+    procedure InClosure();
+    var [Unretained] U: TThing; S: TThing; P: TProc;
+    begin
+      S := Mk(4);
+      P := procedure begin U := S end;
+      P();
+      WriteLn('closure ', U.N());
+      S := nil;
+      WriteLn('closure after');
+      P := nil
+    end;
+    procedure InNested();
+    var [Unretained] U: IThing; S: IThing;
+      procedure Inner(); begin U := S end;
+    begin
+      S := Mk(5);
+      Inner();
+      WriteLn('nested ', U.N());
+      S := nil;
+      WriteLn('nested after')
+    end;
+    var [Unretained] GU: TThing; GS: TThing;
+    begin
+      PlainClass(); PlainIntf(); OwnedSource(); InClosure(); InNested();
+      GS := Mk(6); GU := GS; WriteLn('global ', GU.N()); GS := nil;
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { each object dies as soon as its strong holder lets go; an owned source
+    dies at once (BUG-20261019-unretained-local-strong: the attribute was
+    never resolved on a variable, so every store retained) }
+  AssertRunsOnAll(Src,
+    'class 1' + LineEnding + 'gone 1' + LineEnding + 'class after' + LineEnding +
+    'intf 2' + LineEnding + 'gone 2' + LineEnding + 'intf after' + LineEnding +
+    'gone 3' + LineEnding + 'owned after' + LineEnding +
+    'closure 4' + LineEnding + 'gone 4' + LineEnding + 'closure after' + LineEnding +
+    'nested 5' + LineEnding + 'gone 5' + LineEnding + 'nested after' + LineEnding +
+    'global 6' + LineEnding + 'gone 6' + LineEnding + 'end' + LineEnding, 0);
 end;
 
 initialization

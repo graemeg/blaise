@@ -7557,6 +7557,7 @@ begin
     Alias := TSymbol.Create(Result, skVariable, ASym.TypeDesc);
     Alias.IsGlobal := True;
     Alias.IsWeak := ASym.IsWeak;
+    Alias.IsUnretained := ASym.IsUnretained;
     if FTable.DefineGlobal(Alias) then
     begin
       { DefineGlobal stamps the unit being analysed; the alias must carry no
@@ -10305,6 +10306,8 @@ begin
         { a captured [Weak] variable is assigned weakly in the body too }
         Sym.IsWeak := TRecordTypeDesc(ADecl.EnvType).FindField(
           ADecl.EnvCaptured.Strings[I]).IsWeak;
+        Sym.IsUnretained := TRecordTypeDesc(ADecl.EnvType).FindField(
+          ADecl.EnvCaptured.Strings[I]).IsUnretained;
         FTable.Define(Sym);
       end;
 
@@ -11080,6 +11083,20 @@ begin
           Decl.Line, Decl.Col);
       Decl.IsWeak := True;
     end;
+    { Resolve [Unretained]: a non-owning reference with no ARC and no weak
+      registry, under the same class / interface constraint }
+    if HasUnretainedAttribute(Decl.Attributes) then
+    begin
+      if not ((Typ.Kind = tyClass) or (Typ.Kind = tyInterface)) then
+        SemanticError(
+          Format('[Unretained] can only be applied to class or interface ' +
+                 'types, not ''%s''', [Decl.TypeName]),
+          Decl.Line, Decl.Col);
+      if Decl.IsWeak then
+        SemanticError('[Weak] and [Unretained] are mutually exclusive',
+          Decl.Line, Decl.Col);
+      Decl.IsUnretained := True;
+    end;
 
     { Depth 2 = inside the top-level program block — these are global variables. }
     Decl.IsGlobal := (FScopeDepth = 1);  { depth 1 = main program block (global scope) }
@@ -11133,6 +11150,7 @@ begin
           Decl.Line, Decl.Col);
       Sym := TSymbol.Create(VarName, skVariable, Typ);
       Sym.IsWeak      := Decl.IsWeak;
+      Sym.IsUnretained := Decl.IsUnretained;
       Sym.IsGlobal    := Decl.IsGlobal;
       Sym.IsThreadVar := Decl.IsThreadVar;
       if not FTable.Define(Sym) then
@@ -12574,6 +12592,7 @@ begin
   AAssign.IsVarParam      := (VarSym.Kind = skVarParameter);
   AAssign.ResolvedLhsType := VarSym.TypeDesc;
   AAssign.IsWeakLhs       := VarSym.IsWeak;
+  AAssign.IsUnretainedLhs := VarSym.IsUnretained;
   AAssign.IsGlobal        := VarSym.IsGlobal;
   AAssign.IsThreadVar     := VarSym.IsThreadVar;
   { Owning unit of a module-scope global target, so the store address is
@@ -19121,6 +19140,7 @@ begin
         { a captured [Weak] variable stays weak in the env: stores register
           the slot, the env cleanup unregisters it }
         Env.FindField(Name).IsWeak := Sym.IsWeak;
+        Env.FindField(Name).IsUnretained := Sym.IsUnretained;
       end;
       if Encl.BlockEnvCaptured.IndexOf(Name) < 0 then
         Encl.BlockEnvCaptured.Add(Name);
@@ -19191,6 +19211,7 @@ begin
           [Name]), AThunk.Line, AThunk.Col);
       Env.AddField(Name, Sym.TypeDesc);
       Env.FindField(Name).IsWeak := Sym.IsWeak;   { see the block env above }
+      Env.FindField(Name).IsUnretained := Sym.IsUnretained;
       Encl.EnvCaptured.Add(Name);
       if Name = 'Self' then SelfJustAdded := True;
     end;

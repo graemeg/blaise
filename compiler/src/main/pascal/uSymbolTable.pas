@@ -498,6 +498,8 @@ type
     IsWeak:     Boolean;      { true for variables declared [Weak]; codegen
                                 keys off this to emit _WeakAssign instead
                                 of the strong addref/release pattern. }
+    IsUnretained: Boolean;    { true for variables declared [Unretained]:
+                                stores take no reference and drop none }
     IsGlobal:   Boolean;      { true for program-level variables; codegen uses
                                 data-section storage instead of stack alloc }
     IsClassVar: Boolean;      { true for a STATIC (class-level) variable.  Stored

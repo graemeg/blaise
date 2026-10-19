@@ -300,6 +300,10 @@ type
                                    was declared [Weak]; codegen emits a
                                    _WeakAssign in place of the strong
                                    addref/release pattern. }
+    IsUnretainedLhs: Boolean;    { set by uSemantic — True if the LHS symbol
+                                   was declared [Unretained]: a plain store,
+                                   no retain of the new value and no release
+                                   of the old }
     ImplicitSelfField: TObject;  { TFieldInfo — non-nil when LHS is bare field (implicit Self) }
     ResolvedOwnerUnit: string;   { set by uSemantic — owning unit of a module-scope global
                                    var target; codegen mangles the store address with it so

@@ -111,6 +111,7 @@ type
       qualified), whose single signature types the lambda. }
     procedure TestSemantic_Arrow_ArgPosition_ProcTypeCalls_Inferred;
     procedure TestCodegen_CapturedWeakLocal_ClosureBodyRegistersSlot;
+    procedure TestSemantic_UnretainedLocal_Constraints;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
   end;
@@ -1212,6 +1213,24 @@ begin
     registration (x86-64 rejected it as not lowered; arm64 retained) }
   AssertEquals('closure body weak store', '',
     AsmMissing(Src, 'callq _WeakAssign', 'bl __WeakAssign'));
+end;
+
+procedure TAnonMethodTests.TestSemantic_UnretainedLocal_Constraints;
+const
+  Head = '''
+      program P;
+      ''';
+var
+  Msg: string;
+begin
+  AssertEquals('class local', '',
+    SemanticError(Head + 'var [Unretained] O: TObject; begin end.'));
+  Msg := SemanticError(Head + 'var [Unretained] N: Integer; begin end.');
+  AssertTrue('non-reference type rejected: ' + Msg,
+    Pos('[Unretained] can only be applied', Msg) >= 0);
+  Msg := SemanticError(Head + 'var [Weak] [Unretained] O: TObject; begin end.');
+  AssertTrue('with [Weak] rejected: ' + Msg,
+    Pos('mutually exclusive', Msg) >= 0);
 end;
 
 initialization

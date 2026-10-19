@@ -113,6 +113,7 @@ TAssignment.IsVarParam  safe
 TAssignment.IsGlobal  safe
 TAssignment.IsThreadVar  safe
 TAssignment.IsWeakLhs  safe
+TAssignment.IsUnretainedLhs  safe
 TAssignment.ImplicitSelfField  safe
 TAssignment.ResolvedOwnerUnit  safe
 TAssignment.SetterCall  safe
