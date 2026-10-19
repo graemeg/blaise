@@ -23,6 +23,10 @@ type
   protected
     procedure SetUp; override;
   published
+    { overloads distinguished only by an array or metaclass parameter type --
+      distinct dynamic arrays, distinct static arrays, distinct metaclasses --
+      each get their own label and each call reaches its own body }
+    procedure TestRun_Overloads_OnArrayAndMetaclassTypes;
     { DA := [..] builds a fresh dynamic array: every target and element kind }
     procedure TestRun_DynArrayLiteral_EveryTargetAndElementKind;
     procedure TestRun_DynArray_AggregateElements_ReleasedWithArray;
@@ -1246,6 +1250,41 @@ begin
     CompileAndRunWithRTLDebugOn(beNative, SrcElements, RunOut, Code, True));
   AssertEquals('native exit 0 (output: ' + RunOut + ')', 0, Code);
   AssertTrue('native no leak report, got: ' + RunOut, Pos('leak', RunOut) < 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_Overloads_OnArrayAndMetaclassTypes;
+const
+  Src = '''
+    program P;
+    type
+      TInts = array of Integer;
+      TStrs = array of string;
+      TPair = array[0..1] of Integer;
+      TTrio = array[0..2] of Integer;
+      TA = class end;
+      TB = class end;
+      TAClass = class of TA;
+      TBClass = class of TB;
+    procedure F(const X: TInts); overload; begin WriteLn('ints ', Length(X)) end;
+    procedure F(const X: TStrs); overload; begin WriteLn('strs ', Length(X)) end;
+    procedure G(const X: TPair); overload; begin WriteLn('pair ', X[1]) end;
+    procedure G(const X: TTrio); overload; begin WriteLn('trio ', X[2]) end;
+    procedure H(X: TAClass); overload; begin WriteLn('a') end;
+    procedure H(X: TBClass); overload; begin WriteLn('b') end;
+    var I: TInts; S: TStrs; Pr: TPair; Tr: TTrio;
+    begin
+      SetLength(I, 2); SetLength(S, 3);
+      Pr[1] := 7; Tr[2] := 9;
+      F(I); F(S);
+      G(Pr); G(Tr);
+      H(TA); H(TB)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'ints 2' + #10 + 'strs 3' + #10 + 'pair 7' + #10 + 'trio 9' + #10 +
+    'a' + #10 + 'b' + #10, 0);
 end;
 
 initialization

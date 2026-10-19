@@ -13610,6 +13610,7 @@ function TSemanticAnalyser.MangleTypeCode(AType: TTypeDesc;
 var
   Base: string;
   PT:   TPointerTypeDesc;
+  SA:   TStaticArrayTypeDesc;
 begin
   if AType = nil then
   begin
@@ -13644,6 +13645,28 @@ begin
                           TOpenArrayTypeDesc(AType).ElementType, False);
     tySet:       Base := 'T' + AType.Name;
     tyProcedural:Base := 'F' + AType.Name;
+    { Array types are structural -- two declared names of one shape are the
+      same type, and the descriptor's name is the shape ('array[0..1] of
+      Integer', not label-safe) -- so the code spells the shape.  A negative
+      bound has no '-' in a label, so it reads 'n'. }
+    tyDynArray:  Base := 'Y' + MangleTypeCode(
+                           TDynArrayTypeDesc(AType).ElementType, False);
+    tyStaticArray:
+      begin
+        SA := TStaticArrayTypeDesc(AType);
+        Base := 'Z';
+        if SA.LowBound < 0 then
+          Base := Base + 'n' + IntToStr(-SA.LowBound)
+        else
+          Base := Base + IntToStr(SA.LowBound);
+        if SA.HighBound < 0 then
+          Base := Base + '_n' + IntToStr(-SA.HighBound)
+        else
+          Base := Base + '_' + IntToStr(SA.HighBound);
+        Base := Base + '_' + MangleTypeCode(SA.ElementType, False);
+      end;
+    tyMetaClass: Base := 'M' + MangleTypeCode(
+                           TMetaClassTypeDesc(AType).BaseClass, False);
   else
     Base := '?';
   end;
@@ -13672,8 +13695,8 @@ var
 begin
   { The mangled signature is what names the emitted label, so equal
     signatures are exactly the pairs that would collide.  A '?' code stands
-    for a type the mangler cannot spell (dynamic and static arrays, ...):
-    two such signatures may be different types, so they are not judged here. }
+    for a type kind the mangler has no spelling for: two such signatures may
+    be different types, so they are not judged here. }
   Sig := MangleParamSig(A);
   Result := (StrPos('?', Sig) < 0) and (Sig = MangleParamSig(B));
 end;

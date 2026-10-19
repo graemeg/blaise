@@ -37,6 +37,11 @@ type
     { a unit's interface overloads still pair with implementation bodies that
       omit the directive, and an alias spelling in the body matches }
     procedure TestSem_UnitOverloads_PairWithBodies;
+    { array and metaclass parameter types spell their shape in the mangled
+      signature, so overloads on distinct ones get distinct, label-safe
+      labels on both ISAs (they all mangled to '?' and collided); two
+      declared names of one array shape are one type and are rejected }
+    procedure TestAsm_ArrayAndMetaclassOverloads_DistinctLabels;
     { Phase A — arity-distinct standalone overloading }
 
     { Parser: 'overload' directive sets the IsOverload flag on TMethodDecl }
@@ -565,6 +570,58 @@ const
 begin
   AssertEquals('AnalyseUnit', '', UnitSemanticError(Src, False));
   AssertEquals('AnalyseUnitForExport', '', UnitSemanticError(Src, True));
+end;
+
+procedure TOverloadTests.TestAsm_ArrayAndMetaclassOverloads_DistinctLabels;
+const
+  Src = '''
+    program p;
+    type
+      TInts = array of Integer;
+      TStrs = array of string;
+      TPair = array[0..1] of Integer;
+      TTrio = array[0..2] of Integer;
+      TA = class end;
+      TAClass = class of TA;
+    procedure F(const X: TInts); overload; begin end;
+    procedure F(const X: TStrs); overload; begin end;
+    procedure G(const X: TPair); overload; begin end;
+    procedure G(const X: TTrio); overload; begin end;
+    procedure H(X: TAClass); overload; begin end;
+    procedure H(X: Integer); overload; begin end;
+    begin
+    end.
+    ''';
+var
+  Text: string;
+  Target: string;
+  I: Integer;
+begin
+  for I := 0 to 1 do
+  begin
+    if I = 0 then
+      Target := TargetX86_64
+    else
+      Target := TargetArm64;
+    Text := GenAsm(Src, Target);
+    AssertTrue(Target + ' F(TInts)', Pos('F_D_Yi:', Text) >= 0);
+    AssertTrue(Target + ' F(TStrs)', Pos('F_D_YS:', Text) >= 0);
+    AssertTrue(Target + ' G(TPair)', Pos('G_D_Z0_1_i:', Text) >= 0);
+    AssertTrue(Target + ' G(TTrio)', Pos('G_D_Z0_2_i:', Text) >= 0);
+    AssertTrue(Target + ' H(TAClass)', Pos('H_D_MKTA:', Text) >= 0);
+    AssertTrue(Target + ' no unspellable code', Pos('_D_?', Text) < 0);
+  end;
+  AssertTrue('one array shape under two names is one signature',
+    Pos('has the same parameter signature', SemanticError('''
+      program p;
+      type
+        TA = array of Integer;
+        TB = array of Integer;
+      procedure F(const X: TA); overload; begin end;
+      procedure F(const X: TB); overload; begin end;
+      begin
+      end.
+      ''')) >= 0);
 end;
 
 initialization
