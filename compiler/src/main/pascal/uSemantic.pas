@@ -572,6 +572,15 @@ type
     { Full mangled signature for a TMethodDecl: '$<code1><code2>…'.
       Empty parameter list yields '$' (lone dollar). }
     function  MangleParamSig(ADecl: TMethodDecl): string;
+    { Two overloads of one name whose parameters are the same types (an alias
+      such as Cardinal is its target type) -- they would share a label. }
+    function  SameOverloadSig(A, B: TMethodDecl): Boolean;
+    { Raise the duplicate-signature error for ADecl, which repeats APrev. }
+    procedure ReportDuplicateOverload(ADecl, APrev: TMethodDecl;
+                const AQualName: string);
+    { Reject a standalone overload that repeats the signature of an earlier
+      one of the same unit; must run before ADecl is registered. }
+    procedure CheckOverloadUnique(ADecl: TMethodDecl);
     { Per-arg compatibility: 2 = exact, 1 = widening, 0 = no match. }
     function  ArgMatchScore(AParam: TTypeDesc; AArg: TTypeDesc;
                 AArgExpr: TASTExpr = nil): Integer;
@@ -2454,6 +2463,7 @@ begin
       else
         MDecl.ResolvedEmitName := CurrentUnitPrefix() + MDecl.Name;
 
+      CheckOverloadUnique(MDecl);
       RegisterProcDecl(MDecl.Name, MDecl);
 
       if MDecl.ReturnTypeName <> '' then
@@ -2595,6 +2605,10 @@ begin
       begin
         { Matched an interface forward decl — verify param count }
         MDecl := TMethodDecl(FProcIndex.Objects[ImplIdx]);
+        { A match that already has a body is an earlier implementation, so
+          ImplDecl repeats its signature rather than implementing a forward. }
+        if MDecl.IsOverload and (MDecl.Body <> nil) then
+          ReportDuplicateOverload(ImplDecl, MDecl, ImplDecl.Name);
         if MDecl.Params.Count <> ImplDecl.Params.Count then
           SemanticError(
             Format('Signature mismatch for ''%s'': interface has %d params, implementation has %d',
@@ -2788,6 +2802,7 @@ begin
     else
       MDecl.ResolvedEmitName := CurrentUnitPrefix() + MDecl.Name;
 
+    CheckOverloadUnique(MDecl);
     RegisterProcDecl(MDecl.Name, MDecl);
 
     if MDecl.ReturnTypeName <> '' then
@@ -2951,6 +2966,10 @@ begin
       begin
         { Matches an interface forward decl — verify param count and update index }
         MDecl := TMethodDecl(FProcIndex.Objects[ImplIdx]);
+        { A match that already has a body is an earlier implementation, so
+          ImplDecl repeats its signature rather than implementing a forward. }
+        if MDecl.IsOverload and (MDecl.Body <> nil) then
+          ReportDuplicateOverload(ImplDecl, MDecl, ImplDecl.Name);
         if MDecl.Params.Count <> ImplDecl.Params.Count then
           SemanticError(
             Format('Signature mismatch for ''%s'': interface has %d params, implementation has %d',
@@ -8927,6 +8946,10 @@ begin
                 Format('Duplicate method ''%s.%s'' (missing ''overload'' directive?)',
                   [TD.Name, MDecl.Name]),
                 MDecl.Line, MDecl.Col);
+            if (TMethodDecl(Grp.Items[K]) <> MDecl) and
+               SameOverloadSig(MDecl, TMethodDecl(Grp.Items[K])) then
+              ReportDuplicateOverload(MDecl, TMethodDecl(Grp.Items[K]),
+                TD.Name + '.' + MDecl.Name);
           end;
         FMethodIndex.AddObject(Key, MDecl);
         AddGroupEntry(FMethodGroups, Key, MDecl);
@@ -10216,7 +10239,10 @@ begin
       method body (FCurrentMethodOwner set) — both cases must be excluded
       from the global index. }
     if (FCurrentEnclosingDecl = nil) and (FCurrentMethodOwner = nil) then
+    begin
+      CheckOverloadUnique(ADecl);
       RegisterProcDecl(ADecl.Name, ADecl);
+    end;
 
     { Register in symbol table }
     if ADecl.ReturnTypeName <> '' then
@@ -13637,6 +13663,72 @@ begin
   begin
     Par    := TMethodParam(ADecl.Params.Items[I]);
     Result := Result + MangleTypeCode(Par.ResolvedType, Par.IsVarParam);
+  end;
+end;
+
+function TSemanticAnalyser.SameOverloadSig(A, B: TMethodDecl): Boolean;
+var
+  Sig: string;
+begin
+  { The mangled signature is what names the emitted label, so equal
+    signatures are exactly the pairs that would collide.  A '?' code stands
+    for a type the mangler cannot spell (dynamic and static arrays, ...):
+    two such signatures may be different types, so they are not judged here. }
+  Sig := MangleParamSig(A);
+  Result := (StrPos('?', Sig) < 0) and (Sig = MangleParamSig(B));
+end;
+
+procedure TSemanticAnalyser.ReportDuplicateOverload(ADecl, APrev: TMethodDecl;
+  const AQualName: string);
+var
+  Msg: string;
+  I:   Integer;
+  PA:  TMethodParam;
+  PB:  TMethodParam;
+begin
+  Msg := Format('Overload of ''%s'' has the same parameter signature as the ' +
+    'declaration at line %d', [AQualName, APrev.Line]);
+  { Name the first pair of spellings that differ: the usual cause is an alias
+    the author took for a distinct type. }
+  for I := 0 to ADecl.Params.Count - 1 do
+  begin
+    PA := TMethodParam(ADecl.Params.Items[I]);
+    PB := TMethodParam(APrev.Params.Items[I]);
+    if not SameText(PA.TypeName, PB.TypeName) then
+    begin
+      Msg := Msg + Format(' (''%s'' and ''%s'' are the same type)',
+        [PA.TypeName, PB.TypeName]);
+      Break;
+    end;
+  end;
+  SemanticError(Msg, ADecl.Line, ADecl.Col);
+end;
+
+procedure TSemanticAnalyser.CheckOverloadUnique(ADecl: TMethodDecl);
+var
+  Grp:   TObjectList;
+  K:     Integer;
+  Prev:  TMethodDecl;
+  UName: string;
+begin
+  if (not ADecl.IsOverload) or ADecl.IsExternal then Exit;
+  Grp := GroupOf(FProcGroups, ADecl.Name);
+  if Grp = nil then Exit;
+  UName := ADecl.OwningUnit;
+  if UName = '' then
+    UName := FCurrentUnitName;
+  for K := 0 to Grp.Count - 1 do
+  begin
+    Prev := TMethodDecl(Grp.Items[K]);
+    { A same-named routine of another unit is a distinct routine; an
+      external binding has no label of its own to collide; and a body-less
+      forward with a body is a declaration and its implementation. }
+    if (Prev = ADecl) or (not Prev.IsOverload) or Prev.IsExternal or
+       (not SameText(Prev.OwningUnit, UName)) or
+       ((Prev.Body = nil) <> (ADecl.Body = nil)) then
+      Continue;
+    if SameOverloadSig(ADecl, Prev) then
+      ReportDuplicateOverload(ADecl, Prev, ADecl.Name);
   end;
 end;
 

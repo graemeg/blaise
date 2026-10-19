@@ -25,6 +25,18 @@ type
       explicit), and Int64 / UInt64 need a cast -- for procedures, functions and
       methods alike; the message names the argument and both types }
     procedure TestSem_FloatArgForIntegerParam_Rejected;
+    { overloads whose parameter types differ only by an alias of the same type
+      (UInt32 / Cardinal) are one signature: rejected at the second
+      declaration, naming both spellings, instead of reaching the assembler
+      as a duplicate label -- standalone, method, unit interface (both
+      analysis paths) and unit implementation-only alike }
+    procedure TestSem_AliasDuplicateOverload_Standalone_Rejected;
+    procedure TestSem_AliasDuplicateOverload_Method_Rejected;
+    procedure TestSem_AliasDuplicateOverload_UnitInterface_Rejected;
+    procedure TestSem_AliasDuplicateOverload_UnitImplOnly_Rejected;
+    { a unit's interface overloads still pair with implementation bodies that
+      omit the directive, and an alias spelling in the body matches }
+    procedure TestSem_UnitOverloads_PairWithBodies;
     { Phase A — arity-distinct standalone overloading }
 
     { Parser: 'overload' directive sets the IsOverload flag on TMethodDecl }
@@ -425,6 +437,134 @@ begin
     Pos('argument 1 of ''U1''', SemanticError(Head + 'U1(I) end.')) >= 0);
   AssertEquals('Integer widens to Int64 and Double still', '',
     SemanticError(Head + 'I := F1(3); D := 1 end.'));
+end;
+
+const
+  AliasDupMsg = 'has the same parameter signature as the declaration at line';
+  AliasDupPair = '''Cardinal'' and ''UInt32'' are the same type';
+
+{ The semantic error raised while analysing AUnitSrc -- through AnalyseUnit
+  (separate compilation) when AForExport is False, else through
+  AnalyseUnitForExport ahead of a trivial program -- or '' when none. }
+function UnitSemanticError(const AUnitSrc: string; AForExport: Boolean): string;
+begin
+  Result := '';
+  try
+    if AForExport then
+      GenAsmWithUnit(AUnitSrc, 'program p; uses ua; begin end.', TargetX86_64)
+    else
+      GenUnitAsm(AUnitSrc, TargetX86_64);
+  except
+    on E: ESemanticError do
+      Result := E.Message;
+  end;
+end;
+
+procedure TOverloadTests.TestSem_AliasDuplicateOverload_Standalone_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program p;
+    procedure F(X: UInt32); overload; begin end;
+    procedure F(X: Cardinal); overload; begin end;
+    begin
+    end.
+    ''');
+  AssertTrue('duplicate signature reported: ' + Msg, Pos(AliasDupMsg, Msg) >= 0);
+  AssertTrue('alias pair named: ' + Msg, Pos(AliasDupPair, Msg) >= 0);
+  AssertTrue('reported at the second declaration: ' + Msg,
+    Pos('line 3', Msg) >= 0);
+end;
+
+procedure TOverloadTests.TestSem_AliasDuplicateOverload_Method_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program p;
+    type
+      TC = class
+        procedure F(X: UInt32); overload;
+        procedure F(X: Cardinal); overload;
+      end;
+    procedure TC.F(X: UInt32);
+    begin
+    end;
+    begin
+    end.
+    ''');
+  AssertTrue('duplicate signature reported: ' + Msg, Pos(AliasDupMsg, Msg) >= 0);
+  AssertTrue('alias pair named: ' + Msg, Pos(AliasDupPair, Msg) >= 0);
+  AssertTrue('qualified name: ' + Msg, Pos('''TC.F''', Msg) >= 0);
+end;
+
+procedure TOverloadTests.TestSem_AliasDuplicateOverload_UnitInterface_Rejected;
+const
+  Src = '''
+    unit ua;
+    interface
+    procedure F(X: UInt32); overload;
+    procedure F(X: Cardinal); overload;
+    implementation
+    procedure F(X: UInt32);
+    begin
+    end;
+    end.
+    ''';
+var
+  Msg: string;
+begin
+  Msg := UnitSemanticError(Src, False);
+  AssertTrue('AnalyseUnit: ' + Msg, Pos(AliasDupMsg, Msg) >= 0);
+  AssertTrue('AnalyseUnit pair: ' + Msg, Pos(AliasDupPair, Msg) >= 0);
+  Msg := UnitSemanticError(Src, True);
+  AssertTrue('AnalyseUnitForExport: ' + Msg, Pos(AliasDupMsg, Msg) >= 0);
+  AssertTrue('AnalyseUnitForExport pair: ' + Msg, Pos(AliasDupPair, Msg) >= 0);
+end;
+
+procedure TOverloadTests.TestSem_AliasDuplicateOverload_UnitImplOnly_Rejected;
+const
+  Src = '''
+    unit ua;
+    interface
+    implementation
+    procedure F(X: UInt32); overload;
+    begin
+    end;
+    procedure F(X: Cardinal); overload;
+    begin
+    end;
+    end.
+    ''';
+var
+  Msg: string;
+begin
+  Msg := UnitSemanticError(Src, False);
+  AssertTrue('AnalyseUnit: ' + Msg, Pos(AliasDupMsg, Msg) >= 0);
+  Msg := UnitSemanticError(Src, True);
+  AssertTrue('AnalyseUnitForExport: ' + Msg, Pos(AliasDupMsg, Msg) >= 0);
+end;
+
+procedure TOverloadTests.TestSem_UnitOverloads_PairWithBodies;
+const
+  Src = '''
+    unit ua;
+    interface
+    procedure F(X: UInt32); overload;
+    procedure F(X: Int64); overload;
+    implementation
+    procedure F(X: Cardinal);
+    begin
+    end;
+    procedure F(X: Int64);
+    begin
+    end;
+    end.
+    ''';
+begin
+  AssertEquals('AnalyseUnit', '', UnitSemanticError(Src, False));
+  AssertEquals('AnalyseUnitForExport', '', UnitSemanticError(Src, True));
 end;
 
 initialization
