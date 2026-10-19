@@ -8499,7 +8499,9 @@ begin
     Exit;
   end;
   if (AExpr.ResolvedType = nil) or (AExpr.ResolvedType.Kind <> tyInterface) then
-    NotYet('interface value from this expression', AExpr);
+    InternalError('interface value from a source that is neither nil, a ' +
+      'class nor an interface (the front end admits no other: an untyped ' +
+      'Pointer is rejected)', AExpr);
   if AExpr is TAsExpr then
   begin
     { Obj as IFoo as a value (an argument, a field store): the itab comes
@@ -8593,7 +8595,9 @@ begin
     end;
     if (FA.FieldInfo = nil) or (FA.PropRead <> nil) or FA.IsMethodCall or
        FA.IsInterfaceCall or (FA.PropIndexExpr <> nil) then
-      NotYet('interface value from this field form', AExpr);
+      InternalError('interface value from a field access with no field ' +
+        '(a getter, an itab accessor and an indexed property are lowered ' +
+        'to calls by the front end)', AExpr);
     { an interface FIELD: both halves sit side by side in the instance }
     EmitRecFieldAddrToX0(FA);
     Self.Emit(#9'ldp x0, x1, [x0]');
@@ -8615,7 +8619,8 @@ begin
       tyStaticArray: EmitStaticElemAddr(TStringSubscriptExpr(AExpr));
       tyDynArray, tyOpenArray: EmitDynElemAddr(TStringSubscriptExpr(AExpr));
     else
-      NotYet('interface value from this subscript', AExpr);
+      InternalError('interface element of a non-array subscript base ' +
+        '(a default property is unwrapped to its getter)', AExpr);
     end;
     Self.Emit(#9'ldp x0, x1, [x0]');
     Exit;
@@ -8702,13 +8707,16 @@ begin
         handles the receiver forms and virtual dispatch }
       EmitRecCallDispatch(AExpr, '__iret')
     else
-      NotYet('interface value from this method-call form', AExpr);
+      InternalError('interface value from a method call with no method ' +
+        '(a constructor yields a class value; a procedural field is ' +
+        'lowered above)', AExpr);
     EmitSlotAddr('x9', '__iret');
     Self.Emit(#9'ldp x0, x1, [x9]');
     Result := True;
     Exit;
   end;
-  NotYet('interface value from this expression', AExpr);
+  InternalError('interface value from an expression form the front end ' +
+    'does not produce', AExpr);
 end;
 
 procedure TArm64Backend.EmitIntfStoreStacked(AOff: Integer;
@@ -17082,7 +17090,8 @@ begin
       Exit(DarwinSym(CodegenMangle(Sym)));
     AncRT := AncRT.Parent;
   end;
-  NotYet('implementation of interface method ''' + AMethName + '''', nil);
+  InternalError('no implementation of interface method ''' + AMethName +
+    ''' in the class chain (the front end requires every one)', nil);
   Result := '';
 end;
 
@@ -17456,7 +17465,8 @@ begin
     { itab dispatch on an interface-typed receiver: a named variable, a var
       parameter, a field of Self (FIntf.M()), or a receiver expression }
     if AStmt.IsImplicitSelf and (AStmt.ImplicitBaseInfo = nil) then
-      NotYet('interface dispatch on this receiver form', AStmt);
+      InternalError('interface dispatch on an implicit-Self receiver with ' +
+        'no field (Self is a class value, not an interface)', AStmt);
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
        IsAggregateReturn(AStmt.ResolvedReturnTypeDesc) then
     begin
