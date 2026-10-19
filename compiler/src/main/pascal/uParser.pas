@@ -1484,7 +1484,7 @@ begin
   Width := 0; IsSigned := False;
   if SameText(TypeName, 'Byte') or SameText(TypeName, 'UInt8') then
     begin Width := 8;  IsSigned := False; end
-  else if SameText(TypeName, 'ShortInt') then
+  else if SameText(TypeName, 'ShortInt') or SameText(TypeName, 'Int8') then
     begin Width := 8;  IsSigned := True; end
   else if SameText(TypeName, 'SmallInt') or SameText(TypeName, 'Int16') then
     begin Width := 16; IsSigned := True; end

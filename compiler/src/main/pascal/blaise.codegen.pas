@@ -408,7 +408,7 @@ begin
     F := TFieldInfo(ARec.Fields.Items[I]);
     case F.TypeDesc.Kind of
       tyInteger, tyInt64, tyUInt32, tyUInt64,
-      tySmallInt, tyWord, tyByte, tyBoolean,
+      tySmallInt, tyInt8, tyWord, tyByte, tyBoolean,
       tyEnum, tyPointer, tyProcedural, tyMetaClass:
         ;
       tyRecord:
@@ -453,7 +453,7 @@ begin
     F := TFieldInfo(ARec.Fields.Items[I]);
     case F.TypeDesc.Kind of
       tyInteger, tyInt64, tyUInt32, tyUInt64,
-      tySmallInt, tyWord, tyByte, tyBoolean,
+      tySmallInt, tyInt8, tyWord, tyByte, tyBoolean,
       tyEnum, tyPointer, tyProcedural, tyMetaClass,
       tyDouble, tySingle: ;
       tyRecord:

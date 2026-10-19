@@ -418,7 +418,7 @@ begin
   if HasBeenEmitted(CName) then Exit;
   case AType.Kind of
     tyInteger, tyInt64, tyUInt32, tyUInt64,
-    tySmallInt, tyWord, tyByte, tyBoolean,
+    tySmallInt, tyInt8, tyWord, tyByte, tyBoolean,
     tyDouble, tySingle:
       EmitPrimitive(AType);
     tyString:
@@ -457,7 +457,7 @@ begin
   SzB      := AType.RawSize();
   case AType.Kind of
     tyBoolean:         begin SubKind := SK_BOOLEAN; IsSigned := 0; end;
-    tyInt64, tyInteger, tySmallInt:
+    tyInt64, tyInteger, tySmallInt, tyInt8:
                        begin SubKind := SK_INTEGER;  IsSigned := 1; end;
     tyDouble, tySingle:
                        { Single (4B) / Double (8B) — pdr keys off SubKind=skFloat

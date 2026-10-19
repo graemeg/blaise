@@ -31,6 +31,15 @@ type
     procedure TestSem_NewAndClassicNames_Interchangeable;
     { a constant typecast through a new name folds at its width }
     procedure TestSem_ConstTypecast_FoldsAtWidth;
+    { Int8 is a type of its own: signed, one byte, -128..127 }
+    procedure TestSem_Int8_SignedOneByte;
+    { a constant assignment to Int8 follows the same rule as Byte: plain
+      integer types are not range-checked (only subranges and enums are) }
+    procedure TestSem_Int8_ConstAssignment_RuleMatchesByte;
+    { Int8 and Byte are different types: an overload pair on them is legal }
+    procedure TestSem_Int8AndByte_DistinctOverloads;
+    { an Int8 read sign-extends on both ISAs (movsbq / the lsl-asr pair) }
+    procedure TestAsm_Int8Read_SignExtends;
   end;
 
 implementation
@@ -150,6 +159,81 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TTypeStdTests.TestSem_Int8_SignedOneByte;
+var
+  Prog: TProgram;
+  T: TTypeDesc;
+begin
+  Prog := Analyse('''
+    program p;
+    var X: Int8;
+    begin
+    end.
+    ''');
+  try
+    T := Prog.SymbolTable.FindType('Int8');
+    AssertNotNull('Int8 is a type', T);
+    AssertTrue('Int8 is its own kind, not Byte',
+      T <> Prog.SymbolTable.FindType('Byte'));
+    AssertEquals('one byte', 1, T.RawSize());
+    AssertTrue('an integer', T.IsNumeric() and T.IsOrdinal() and
+      (not T.IsFloat()));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TTypeStdTests.TestSem_Int8_ConstAssignment_RuleMatchesByte;
+const
+  Src = '''
+    program p;
+    var X: %s;
+    begin
+      X := 300
+    end.
+    ''';
+begin
+  AssertEquals('Int8 is checked exactly as Byte is',
+    SemanticError(Format(Src, ['Byte'])), SemanticError(Format(Src, ['Int8'])));
+  AssertEquals('-128 and 127 fit', '',
+    SemanticError('''
+      program p;
+      var X: Int8;
+      begin
+        X := -128;
+        X := 127
+      end.
+      '''));
+end;
+
+procedure TTypeStdTests.TestSem_Int8AndByte_DistinctOverloads;
+begin
+  AssertEquals('', '', SemanticError('''
+    program p;
+    procedure F(X: Int8); overload; begin end;
+    procedure F(X: Byte); overload; begin end;
+    var A: Int8; B: Byte;
+    begin
+      F(A); F(B)
+    end.
+    '''));
+end;
+
+procedure TTypeStdTests.TestAsm_Int8Read_SignExtends;
+const
+  Src = '''
+    program p;
+    var X: Int8; Y: Int64;
+    begin
+      X := -1;
+      Y := X;
+      WriteLn(Y)
+    end.
+    ''';
+begin
+  AssertEquals('', '', AsmMissing(Src, 'movsbq', 'asr x0, x0, #56'));
 end;
 
 initialization

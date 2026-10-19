@@ -49,6 +49,7 @@ begin
     tyUInt32:     Result := Result + ':UInt32';
     tyUInt64:     Result := Result + ':UInt64';
     tySmallInt:   Result := Result + ':SmallInt';
+    tyInt8:       Result := Result + ':Int8';
     tyWord:       Result := Result + ':Word';
     tyByte:       Result := Result + ':Byte';
     tyBoolean:    Result := Result + ':Boolean';

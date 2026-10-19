@@ -34,6 +34,17 @@ type
     procedure TestRun_NewNames_OverloadSelection;
     { const arrays of the new names store elements at the true width }
     procedure TestRun_NewNames_ConstArrays;
+    { an Int8 reads back sign-extended from every place it can live: local,
+      global, record and class field, static and dynamic array element, var
+      parameter, function result and const array }
+    procedure TestRun_Int8_SignExtendsEverywhere;
+    { Int8 arithmetic wraps at 8 bits on store; comparison, division and
+      Low/High are signed; casts and constant casts truncate to 8 bits }
+    procedure TestRun_Int8_SignedSemantics;
+    { Int8 crosses a unit boundary: exported routines, a record of Int8
+      fields, a typed constant, a global set in the unit's initialization,
+      and an Int8 / Byte overload pair }
+    procedure TestRun_Int8_AcrossUnitInterface;
   end;
 
 implementation
@@ -166,6 +177,145 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     '-2 8 -20 1.5 0.75' + #10 + '5000000000 255 30 2.5 1.25' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_Int8_SignExtendsEverywhere;
+const
+  Src = '''
+    program P;
+    type
+      TRec = record
+        Pad: Byte;
+        V: Int8;
+        W: Int8;
+      end;
+      TObj = class
+        V: Int8;
+      end;
+    const
+      CA: array[0..2] of Int8 = (-1, 100, -128);
+    var
+      G: Int8;
+      R: TRec;
+      O: TObj;
+      SA: array[0..3] of Int8;
+      DA: array of Int8;
+      L: Int8;
+      I: Integer;
+
+    procedure Neg(var X: Int8);
+    begin
+      X := -X
+    end;
+
+    function MinusTwo: Int8;
+    begin
+      Result := -2
+    end;
+
+    begin
+      L := -3;
+      G := -4;
+      R.Pad := 255; R.V := -5; R.W := 6;
+      O := TObj.Create;
+      O.V := -7;
+      SA[2] := -8;
+      SetLength(DA, 3);
+      DA[1] := -9;
+      Neg(R.W);
+      I := 1;
+      WriteLn(L, ' ', G, ' ', R.V, ' ', R.W, ' ', O.V, ' ', SA[2], ' ',
+        DA[I], ' ', MinusTwo(), ' ', CA[0], ' ', CA[I], ' ', CA[2]);
+      WriteLn(SizeOf(Int8), ' ', SizeOf(TRec), ' ', R.Pad);
+      O.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '-3 -4 -5 -6 -7 -8 -9 -2 -1 100 -128' + #10 +
+    '1 3 255' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_Int8_SignedSemantics;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    const
+      K = Int8(200);
+    var
+      A, B: Int8;
+      L: Int64;
+    begin
+      A := 127;
+      A := A + 1;
+      WriteLn(A);
+      B := -1;
+      WriteLn(B < 0, ' ', B < A, ' ', B > A);
+      A := -100;
+      WriteLn(A div 7, ' ', A mod 7);
+      WriteLn(Low(Int8), ' ', High(Int8));
+      L := 200;
+      WriteLn(Int8(L), ' ', K);
+      WriteLn(IntToStr(B), ' ', Format('%d', [B]))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '-128' + #10 +
+    'True False True' + #10 +
+    '-14 -2' + #10 +
+    '-128 127' + #10 +
+    '-56 -56' + #10 +
+    '-1 -1' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_Int8_AcrossUnitInterface;
+const
+  UnitSrc = '''
+    unit u8;
+    interface
+    type
+      TPair8 = record A, B: Int8; end;
+    const
+      KMin: Int8 = -100;
+    var
+      G8: Int8;
+    function Neg8(X: Int8): Int8;
+    function MakePair(A, B: Int8): TPair8;
+    procedure F(X: Int8); overload;
+    procedure F(X: Byte); overload;
+    implementation
+    function Neg8(X: Int8): Int8; begin Result := -X end;
+    function MakePair(A, B: Int8): TPair8; begin Result.A := A; Result.B := B end;
+    procedure F(X: Int8); begin WriteLn('i8 ', X) end;
+    procedure F(X: Byte); begin WriteLn('u8 ', X) end;
+    initialization
+      G8 := -42;
+    end.
+    ''';
+  Src = '''
+    program P;
+    uses u8;
+    var Pr: TPair8; X: Int8; Y: Byte;
+    begin
+      Pr := MakePair(-3, 4);
+      X := -5; Y := 250;
+      WriteLn(Neg8(7), ' ', G8, ' ', KMin, ' ', Pr.A, ' ', Pr.B);
+      F(X); F(Y)
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run', CompileAndRunWithUnit('u8', UnitSrc, Src, Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('output',
+    '-7 -42 -100 -3 4' + #10 + 'i8 -5' + #10 + 'u8 250' + #10, Output);
 end;
 
 initialization

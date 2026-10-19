@@ -1537,6 +1537,7 @@ Decimals      = Expr ;
  *   Boolean   — 1-byte boolean          (QBE type: w; 0 = false, 1 = true)
  *   Byte      — 8-bit unsigned integer  (QBE type: w, stored as b)
  *               Alias: UInt8
+ *   Int8      — 8-bit signed integer (stored as one byte)
  *   Double    — 64-bit IEEE 754 float
  *               Aliases: Float64, Float (always 64-bit, never platform-sized)
  *   Single    — 32-bit IEEE 754 float

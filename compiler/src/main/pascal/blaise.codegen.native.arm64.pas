@@ -855,7 +855,7 @@ function IsIntFam(AType: TTypeDesc): Boolean;
 begin
   Result := (AType <> nil) and
     (AType.Kind in [tyInteger, tyInt64, tyUInt64, tyUInt32, tyByte,
-                    tySmallInt, tyWord, tyBoolean, tyEnum]);
+                    tyInt8, tySmallInt, tyWord, tyBoolean, tyEnum]);
 end;
 
 { True for unsigned integer-family types (local twin of the x86-64 unit's
@@ -881,7 +881,7 @@ end;
 function IsNarrow32Ord(AType: TTypeDesc): Boolean;
 begin
   Result := (AType <> nil) and
-    (AType.Kind in [tyInteger, tyUInt32, tyByte, tySmallInt, tyWord,
+    (AType.Kind in [tyInteger, tyUInt32, tyByte, tyInt8, tySmallInt, tyWord,
                     tyBoolean, tyEnum]);
 end;
 
@@ -4962,7 +4962,7 @@ begin
     tyBoolean:
       begin Tag := 1; Self.EmitExprToX0(AElem);
         Self.Emit(#9'and x0, x0, #0xff'); end;   { zero-extend the byte }
-    tyInteger, tyUInt32, tyByte, tySmallInt, tyWord:
+    tyInteger, tyUInt32, tyByte, tySmallInt, tyInt8, tyWord:
       begin Tag := 0; Self.EmitExprToX0(AElem);
         Self.Emit(#9'sxtw x0, w0'); end;          { sign-extend to 64 bits }
     tyEnum:
@@ -5368,7 +5368,7 @@ begin
      (TFuncCallExpr(AExpr).Args.Count = 1) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind in
-       [tyEnum, tyByte, tyBoolean, tySmallInt, tyWord, tyInteger,
+       [tyEnum, tyByte, tyBoolean, tyInt8, tySmallInt, tyWord, tyInteger,
         tyUInt32, tyInt64, tyUInt64]) and
      (SameText(TFuncCallExpr(AExpr).Name, 'High') or
       SameText(TFuncCallExpr(AExpr).Name, 'Low')) then
@@ -5393,6 +5393,7 @@ begin
             .MaxOrdinal());
         tyByte:     EmitIntLiteral('x0', 255);
         tyBoolean:  EmitIntLiteral('x0', 1);
+        tyInt8:     EmitIntLiteral('x0', 127);
         tySmallInt: EmitIntLiteral('x0', 32767);
         tyWord:     EmitIntLiteral('x0', 65535);
         tyInteger:  EmitIntLiteral('x0', 2147483647);
@@ -5407,6 +5408,7 @@ begin
         tyEnum:     EmitIntLiteral('x0', TEnumTypeDesc(
           TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType)
             .MinOrdinal());
+        tyInt8:     EmitIntLiteral('x0', -128);
         tySmallInt: EmitIntLiteral('x0', -32768);
         tyInteger:  EmitIntLiteral('x0', -2147483648);
         tyInt64:    EmitIntLiteral('x0', Int64($8000000000000000));
@@ -9536,7 +9538,7 @@ begin
     EmitPushX0();
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[2]));
     case TASTExpr(ACall.Args.Items[2]).ResolvedType.Kind of
-      tyInteger, tySmallInt: Self.Emit(#9'sxtw x2, w0');
+      tyInteger, tySmallInt, tyInt8: Self.Emit(#9'sxtw x2, w0');
       tyUInt32, tyWord, tyByte: Self.Emit(#9'mov w2, w0');
     else
       Self.Emit(#9'mov x2, x0');
@@ -9555,7 +9557,7 @@ begin
     EmitPushX0();
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
     case TASTExpr(ACall.Args.Items[1]).ResolvedType.Kind of
-      tyInteger, tySmallInt: Self.Emit(#9'sxtw x0, w0');
+      tyInteger, tySmallInt, tyInt8: Self.Emit(#9'sxtw x0, w0');
       tyUInt32, tyWord, tyByte: Self.Emit(#9'mov w0, w0');
     end;
     EmitPushX0();
@@ -11920,7 +11922,7 @@ begin
     end;
     IsIntArg := (Arg.ResolvedType = nil) or
       (Arg.ResolvedType.Kind in [tyInteger, tyBoolean, tyByte, tyUInt32,
-                                 tyInt64, tyUInt64, tySmallInt, tyWord,
+                                 tyInt64, tyUInt64, tyInt8, tySmallInt, tyWord,
                                  tyEnum]);
     Self.EmitExprToX0(Arg);
     Self.Emit(Format(#9'str x0, [sp, #%d]', [I * 16 + 8]));
@@ -12013,6 +12015,11 @@ begin
     begin
       Self.Emit(#9'lsl x0, x0, #48');
       Self.Emit(#9'asr x0, x0, #48');
+    end;
+    tyInt8:
+    begin
+      Self.Emit(#9'lsl x0, x0, #56');
+      Self.Emit(#9'asr x0, x0, #56');
     end;
     tyBoolean:
     begin
@@ -12493,7 +12500,7 @@ begin
       Exit;
     end;
     case SAT.ElementType.Kind of
-      tyByte, tyBoolean: ElemDir := #9'.byte ';
+      tyByte, tyInt8, tyBoolean: ElemDir := #9'.byte ';
       tySmallInt, tyWord: ElemDir := #9'.hword ';
       tyInt64, tyUInt64, tyPointer, tyPChar: ElemDir := #9'.quad ';
       tyDouble: ElemDir := #9'.double ';
@@ -13030,7 +13037,17 @@ begin
   if IsJumboSetType(AElem) then
     Exit;
   case AElem.RawSize() of
-    1: Self.Emit(#9'ldrb w0, [x0]');
+    1:
+    begin
+      Self.Emit(#9'ldrb w0, [x0]');
+      { no ldrsb in the internal assembler either: sign-extend an Int8 with
+        the shift pair (a Byte, Boolean or 1-byte set stays zero-extended) }
+      if AElem.Kind = tyInt8 then
+      begin
+        Self.Emit(#9'lsl x0, x0, #56');
+        Self.Emit(#9'asr x0, x0, #56');
+      end;
+    end;
     2:
     begin
       Self.Emit(#9'ldrh w0, [x0]');
@@ -16435,7 +16452,7 @@ begin
       Result := Result + 'x'
     else
       case Par.ResolvedType.Kind of
-        tyInteger, tyUInt32, tySmallInt, tyWord, tyByte, tyEnum:
+        tyInteger, tyUInt32, tySmallInt, tyInt8, tyWord, tyByte, tyEnum:
           Result := Result + 'i';
         tyInt64, tyUInt64:
           Result := Result + 'I';

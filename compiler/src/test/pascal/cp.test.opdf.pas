@@ -30,6 +30,8 @@ type
     procedure TestOPDF_Primitive_Int64;
     procedure TestOPDF_Primitive_Double_SubKindFloat;
     procedure TestOPDF_Primitive_Single_SubKindFloat;
+    { Int8 is described as a signed 1-byte integer, so pdr sign-extends it }
+    procedure TestOPDF_Primitive_Int8_Signed;
     procedure TestOPDF_AnsiStr_Record;
     { A string constant whose value contains a double-quote, newline or
       backslash must be C-escaped in the recConstant `.ascii` line, else the
@@ -216,6 +218,20 @@ var
 begin
   IR := GenOPDF('program P; begin end.');
   AssertTrue('recPrimitive Int64 present', Contains(IR, '# recPrimitive: Int64'));
+end;
+
+procedure TOPDFTests.TestOPDF_Primitive_Int8_Signed;
+var
+  IR: string;
+  P:  Integer;
+  Rec: string;
+begin
+  IR := GenOPDF('program P; var X: Int8; begin X := -1 end.');
+  P := Pos('# recPrimitive: Int8', IR);
+  AssertTrue('Int8 recPrimitive present', P >= 0);
+  Rec := Copy(IR, P, 220);
+  AssertTrue('Int8 is one byte', Pos('.byte 1  # SizeInBytes', Rec) >= 0);
+  AssertTrue('Int8 is signed', Pos('.byte 1  # IsSigned', Rec) >= 0);
 end;
 
 procedure TOPDFTests.TestOPDF_Primitive_Double_SubKindFloat;

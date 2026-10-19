@@ -1519,7 +1519,7 @@ begin
     Exit(8);
   end;
   case AType.Kind of
-    tyByte, tyBoolean:                          Result := 1;
+    tyByte, tyInt8, tyBoolean:                  Result := 1;
     tySmallInt, tyWord:                         Result := 2;
     tyInteger, tyUInt32, tyEnum:                Result := 4;
     tyInt64, tyUInt64,
@@ -1631,7 +1631,7 @@ begin
       Result := Result + 'x'
     else
       case Par.ResolvedType.Kind of
-        tyInteger, tyUInt32, tySmallInt, tyWord, tyByte, tyEnum:
+        tyInteger, tyUInt32, tySmallInt, tyInt8, tyWord, tyByte, tyEnum:
           Result := Result + 'i';
         tyInt64, tyUInt64:
           Result := Result + 'I';
@@ -2518,7 +2518,7 @@ begin
       Exit;
     end;
     case ElemKind of
-      tyByte, tyBoolean:           ElemDir := #9'.byte ';
+      tyByte, tyInt8, tyBoolean:   ElemDir := #9'.byte ';
       tySmallInt, tyWord:          ElemDir := #9'.word ';
       tyInt64, tyUInt64, tyPointer, tyPChar: ElemDir := #9'.quad ';
       tyDouble:                    ElemDir := #9'.double ';
@@ -2561,7 +2561,7 @@ begin
         Self.Emit(AName + ':');
         Self.Emit(Format(#9'.float %s', [CD.StrVal]));
       end;
-    tyByte, tyBoolean:
+    tyByte, tyInt8, tyBoolean:
       begin
         Self.Emit('.balign 1');
         if Copy(AName, 0, 2) <> '.L' then Self.Emit(Self.GlobalBindDir(AName) + AName);
@@ -3373,7 +3373,7 @@ begin
       Self.Emit(Format(#9'movq $0, %s', [Self.VarOperand(Name)]));
     end
     else if AStmt.Decl.ResolvedType.Kind in [tyInteger, tyUInt32, tyBoolean,
-             tyByte, tyEnum, tySmallInt, tyWord] then
+             tyByte, tyEnum, tyInt8, tySmallInt, tyWord] then
       Self.Emit(Format(#9'movl $0, %s', [Self.VarOperand(Name)]))
     else if AStmt.Decl.ResolvedType.RawSize() <= 8 then
       Self.Emit(Format(#9'movq $0, %s', [Self.VarOperand(Name)]))
@@ -3535,7 +3535,7 @@ begin
       Self.Emit(#9'popq %rbx');
     end
     else if F.TypeDesc.Kind in [tyInteger, tyUInt32, tyBoolean, tyByte,
-                                tyEnum, tySmallInt, tyWord] then
+                                tyEnum, tyInt8, tySmallInt, tyWord] then
     begin
       Self.Emit(Format(#9'movl %s, %%eax', [Self.VarOperand(P.ParamName)]));
       Self.Emit(Format(#9'movq %s, %%rcx',
@@ -9056,6 +9056,7 @@ begin
         case TASTExpr(FC.Args.Items[0]).ResolvedType.Kind of
           tyByte:     Self.EmitImmToReg(255, '%rax', '%eax');
           tyBoolean:  Self.EmitImmToReg(1, '%rax', '%eax');
+          tyInt8:     Self.EmitImmToReg(127, '%rax', '%eax');
           tySmallInt: Self.EmitImmToReg(32767, '%rax', '%eax');
           tyWord:     Self.EmitImmToReg(65535, '%rax', '%eax');
           tyInteger:  Self.EmitImmToReg(2147483647, '%rax', '%eax');
@@ -9099,6 +9100,7 @@ begin
           Self.EmitImmToReg(
             TEnumTypeDesc(TASTExpr(FC.Args.Items[0]).ResolvedType).MinOrdinal(),
             '%rax', '%eax');
+        tyInt8:     Self.Emit(#9'movq $-128, %rax');
         tySmallInt: Self.Emit(#9'movq $-32768, %rax');
         tyInteger:  Self.Emit(#9'movq $-2147483648, %rax');
         { Low(Int64) = -9223372036854775808, the Int64 minimum — a true
@@ -18119,7 +18121,7 @@ begin
       Self.Emit(#9'pushq %rax');
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[2]));
       case TASTExpr(PC.Args.Items[2]).ResolvedType.Kind of
-        tyInteger, tySmallInt: Self.Emit(#9'movslq %eax, %rax');
+        tyInteger, tySmallInt, tyInt8: Self.Emit(#9'movslq %eax, %rax');
         tyUInt32, tyWord, tyByte: Self.Emit(#9'movl %eax, %eax');
       end;
       Self.Emit(#9'movq %rax, %rdx');
@@ -18137,7 +18139,7 @@ begin
       Self.Emit(#9'pushq %rax');
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[1]));
       case TASTExpr(PC.Args.Items[1]).ResolvedType.Kind of
-        tyInteger, tySmallInt: Self.Emit(#9'movslq %eax, %rax');
+        tyInteger, tySmallInt, tyInt8: Self.Emit(#9'movslq %eax, %rax');
         tyUInt32, tyWord, tyByte: Self.Emit(#9'movl %eax, %eax');
       end;
       Self.Emit(#9'pushq %rax');
@@ -20814,7 +20816,7 @@ begin
           Self.Emit(#9'movzbl %al, %eax');
           Self.Emit(Format(#9'movq %%rax, %d(%%rbx)', [Off + 8]));
         end;
-      tyInteger, tyUInt32, tyByte, tySmallInt, tyWord:
+      tyInteger, tyUInt32, tyByte, tySmallInt, tyInt8, tyWord:
         begin
           Tag := 0;   { vtInteger }
           Self.EmitExprToEax(Elem);
@@ -24919,7 +24921,7 @@ function IsIntFamily(AType: TTypeDesc): Boolean;
 begin
   Result := (AType <> nil) and
     (AType.Kind in [tyInteger, tyUInt32, tyInt64, tyUInt64,
-                    tySmallInt, tyWord, tyByte, tyBoolean, tyEnum]);
+                    tyInt8, tySmallInt, tyWord, tyByte, tyBoolean, tyEnum]);
 end;
 
 { Emit a Format(Fmt, Arg1, ..., ArgN) call via the RTL's _StringFormatN.
@@ -25018,7 +25020,7 @@ begin
       end;
       IsIntArg := (Arg.ResolvedType = nil) or
         (Arg.ResolvedType.Kind in [tyInteger, tyBoolean, tyByte, tyUInt32,
-                                    tyInt64, tyUInt64, tySmallInt, tyWord, tyEnum]);
+                                    tyInt64, tyUInt64, tyInt8, tySmallInt, tyWord, tyEnum]);
       if IsIntArg then
         Self.Emit(Format(#9'movq $0, %d(%%rbx)', [I * 16]))
       else
@@ -25527,7 +25529,7 @@ begin
       if TVarDecl(ADecl.Body.Decls.Items[I]).ResolvedType = nil then Continue;
       case TVarDecl(ADecl.Body.Decls.Items[I]).ResolvedType.Kind of
 
-        tyInteger, tyUInt32, tySmallInt, tyWord, tyBoolean, tyByte, tyEnum:
+        tyInteger, tyUInt32, tySmallInt, tyInt8, tyWord, tyBoolean, tyByte, tyEnum:
           for J := 0 to TVarDecl(ADecl.Body.Decls.Items[I]).Names.Count - 1 do
             Self.Emit(Format(#9'movl $0, %s',
               [Self.VarOperand(TVarDecl(ADecl.Body.Decls.Items[I]).Names.Strings[J])]));

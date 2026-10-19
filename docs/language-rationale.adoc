@@ -573,6 +573,7 @@ Blaise defines five integer types with fixed, platform-independent widths:
 | `SmallInt`| 16-bit signed   | `w` (2 bytes in storage) | `Int16`
 | `Word`    | 16-bit unsigned | `w` (2 bytes in storage) | `UInt16`
 | `Byte`    | 8-bit unsigned  | `w` (1 byte in storage) | `UInt8`
+| `Int8`    | 8-bit signed    | `w` (1 byte in storage) |
 |===
 
 `Integer` is 32-bit on all platforms.  This matches FPC's behaviour and
@@ -602,6 +603,12 @@ Alongside the classic names, Blaise provides the names set out in
   target would make them 32-bit.
 * `Int32`, `UInt8` — fixed-width spellings of `Integer` and `Byte`, joining
   the existing `Int16`, `UInt16`, `Int64`, `UInt32` and `UInt64`.
+* `Int8` — the 8-bit signed integer (-128..127).  Unlike the names above it
+  is a type of its own, not an alias: Blaise had no signed 8-bit type
+  before.  It sign-extends wherever it is read, widens implicitly into every
+  wider integer type, and follows the same constant-assignment rule as
+  `Byte` (plain integer types are not range-checked; subranges and enums
+  are).  `F(Int8)` and `F(Byte)` are a genuine overload pair.
 * `Float64`, `Float32` — fixed-width spellings of `Double` and `Single`.
 * `Float` — always `Float64`, on every platform.
 

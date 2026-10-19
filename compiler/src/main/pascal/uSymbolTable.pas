@@ -66,7 +66,8 @@ type
                    Not 'of object' (method ptr), not 'reference to' (closure). }
     tyDouble,    { 64-bit IEEE 754 float }
     tySingle,    { 32-bit IEEE 754 float }
-    tyMetaClass  { 'class of TFoo' — typeinfo pointer, see TMetaClassTypeDesc }
+    tyMetaClass, { 'class of TFoo' — typeinfo pointer, see TMetaClassTypeDesc }
+    tyInt8       { Int8 — 8-bit signed (appended: existing ordinals stay put) }
   );
 
   TTypeDesc = class
@@ -665,6 +666,7 @@ type
     [Unretained] FTypeSmallInt: TTypeDesc;
     [Unretained] FTypeWord:     TTypeDesc;
     [Unretained] FTypeByte:     TTypeDesc;
+    [Unretained] FTypeInt8:     TTypeDesc;
     [Unretained] FTypeBoolean: TTypeDesc;
     [Unretained] FTypeString:  TTypeDesc;
     [Unretained] FTypeVoid:    TTypeDesc;
@@ -929,7 +931,7 @@ end;
 
 function TTypeDesc.IsNumeric: Boolean;
 begin
-  Result := Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tySmallInt, tyWord, tyByte, tyEnum, tyDouble, tySingle];
+  Result := Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tyInt8, tySmallInt, tyWord, tyByte, tyEnum, tyDouble, tySingle];
 end;
 
 function TTypeDesc.IsFloat: Boolean;
@@ -944,7 +946,7 @@ end;
 
 function TTypeDesc.IsArrayIndex: Boolean;
 begin
-  Result := Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tySmallInt,
+  Result := Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tyInt8, tySmallInt,
                      tyWord, tyByte, tyBoolean, tyEnum];
 end;
 
@@ -975,7 +977,7 @@ end;
 
 function TTypeDesc.IsOrdinal: Boolean;
 begin
-  Result := Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tySmallInt, tyWord, tyByte, tyBoolean, tyEnum];
+  Result := Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tyInt8, tySmallInt, tyWord, tyByte, tyBoolean, tyEnum];
 end;
 
 function TTypeDesc.IsRecord: Boolean;
@@ -996,7 +998,7 @@ end;
 function TTypeDesc.RawSize: Integer;
 begin
   case Kind of
-    tyByte, tyBoolean: Result := 1;
+    tyByte, tyInt8, tyBoolean: Result := 1;
     tySmallInt, tyWord: Result := 2;
     tyInteger, tyUInt32, tyEnum: Result := 4;
     tyInt64, tyUInt64, tyString, tyClass, tyPointer, tyNil, tyDouble: Result := 8;
@@ -1026,7 +1028,7 @@ begin
     tyInteger, tyUInt32, tyEnum: Result := 4;
     tyInt64, tyUInt64:   Result := 8;
     tySmallInt, tyWord:  Result := 2;
-    tyByte, tyBoolean:   Result := 1;  { true byte; stack slots are alloc4-padded by codegen }
+    tyByte, tyInt8, tyBoolean: Result := 1;  { true byte; stack slots are alloc4-padded by codegen }
     tyString:            Result := 8;  { pointer size on 64-bit }
     tyRecord:            Result := TRecordTypeDesc(Self).TotalSize();
     tyNil:               Result := 8;
@@ -1054,7 +1056,7 @@ function TTypeDesc.AllocAlign: Integer;
 begin
   case Kind of
     tyInteger, tyUInt32, tyEnum: Result := 4;
-    tyByte, tyBoolean:   Result := 1;  { natural alignment }
+    tyByte, tyInt8, tyBoolean: Result := 1;  { natural alignment }
     tySmallInt, tyWord:  Result := 2;
     tySingle:            Result := 4;
     tyInt64, tyUInt64, tyString:   Result := 8;
@@ -2143,6 +2145,7 @@ begin
   FTypeSmallInt := NewType(tySmallInt, 'SmallInt');
   FTypeWord     := NewType(tyWord,     'Word');
   FTypeByte     := NewType(tyByte,     'Byte');
+  FTypeInt8 := NewType(tyInt8, 'Int8');
   FTypeBoolean := NewType(tyBoolean, 'Boolean');
   FTypeString  := NewType(tyString,  'string');
   FTypeVoid    := NewType(tyVoid,    'void');
@@ -2165,6 +2168,7 @@ begin
   Define(TSymbol.Create('Word',     skType, FTypeWord));
   Define(TSymbol.Create('UInt16',   skType, FTypeWord));      { Delphi alias }
   Define(TSymbol.Create('Byte',    skType, FTypeByte));
+  Define(TSymbol.Create('Int8',    skType, FTypeInt8));
   Define(TSymbol.Create('Boolean', skType, FTypeBoolean));
   Define(TSymbol.Create('string',  skType, FTypeString));
   Define(TSymbol.Create('Pointer', skType, FTypePointer));

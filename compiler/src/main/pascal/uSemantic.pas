@@ -1864,7 +1864,7 @@ begin
   if SameText(AConstraint, 'record') then
   begin
     if not (ArgType.Kind in [tyRecord, tyInteger, tyInt64, tyUInt32, tyUInt64,
-                             tySmallInt, tyWord, tyByte, tyBoolean, tyString,
+                             tyInt8, tySmallInt, tyWord, tyByte, tyBoolean, tyString,
                              tyPointer]) then
       raise ESemanticError.Create(Format(
         'Type ''%s'' does not satisfy constraint ''%s: record'' in %s',
@@ -6317,6 +6317,7 @@ begin
   IsSigned := True;
   case ATypeDesc.Kind of
     tyByte:     begin Width := 8;  IsSigned := False; end;
+    tyInt8:     begin Width := 8;  end;
     tySmallInt: begin Width := 16; end;
     tyWord:     begin Width := 16; IsSigned := False; end;
     tyInteger:  begin Width := 32; end;
@@ -11069,7 +11070,7 @@ begin
   begin
     K := ADecl.ResolvedReturnType.Kind;
     if not (K in [tyInteger, tyUInt32, tyBoolean, tyByte, tyEnum,
-                  tyInt64, tyUInt64, tySmallInt, tyWord,
+                  tyInt64, tyUInt64, tyInt8, tySmallInt, tyWord,
                   tyDouble, tySingle, tyPointer, tyPChar]) then
       Exit;
   end;
@@ -11082,7 +11083,7 @@ begin
     if Par.ResolvedType = nil then Exit;
     K := Par.ResolvedType.Kind;
     if not (K in [tyInteger, tyUInt32, tyBoolean, tyByte, tyEnum,
-                  tyInt64, tyUInt64, tySmallInt, tyWord,
+                  tyInt64, tyUInt64, tyInt8, tySmallInt, tyWord,
                   tyDouble, tySingle, tyPointer, tyPChar]) then
       Exit;
   end;
@@ -13094,7 +13095,7 @@ begin
   if AArgType.IsFloat() then
     Exit(AArgType);
   if AArgType.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64,
-                       tySmallInt, tyWord, tyByte] then
+                       tyInt8, tySmallInt, tyWord, tyByte] then
     Exit(FTable.TypeDouble);
   SemanticError(
     Format('%s requires a numeric argument, got ''%s''',
@@ -13663,6 +13664,7 @@ begin
     tyUInt32:   Base := 'u';
     tyUInt64:   Base := 'Q';
     tySmallInt: Base := 'h';
+    tyInt8:     Base := 'g';
     tyWord:     Base := 'H';
     tyByte:     Base := 'y';
     tyBoolean:  Base := 'b';
@@ -13947,7 +13949,7 @@ begin
         Format('varargs argument %d of ''%s'' has no type', [I + 1, AName]),
         ALine, ACol);
     case T.Kind of
-      tyInteger, tyInt64, tyUInt32, tyUInt64, tySmallInt, tyWord, tyByte,
+      tyInteger, tyInt64, tyUInt32, tyUInt64, tySmallInt, tyInt8, tyWord, tyByte,
       tyBoolean, tyEnum, tyDouble, tyPChar, tyPointer, tyNil: ;
       tySingle:
         SemanticError(
@@ -14065,7 +14067,7 @@ begin
   Elem := TOpenArrayTypeDesc(AParamType).ElementType;
   if (Elem = nil) or Elem.IsSubrange or
      not (Elem.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64,
-                        tySmallInt, tyWord, tyByte]) then
+                        tyInt8, tySmallInt, tyWord, tyByte]) then
     Exit;
   if (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyOpenArray) and
      (TOpenArrayTypeDesc(AExpr.ResolvedType).ElementType = Elem) then
@@ -14078,7 +14080,7 @@ begin
     Slot := TASTExpr(TArrayLiteralExpr(AExpr).Elements.Items[I]);
     if (Slot.ResolvedType = nil) or
        not (Slot.ResolvedType.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64,
-                                      tySmallInt, tyWord, tyByte]) or
+                                      tyInt8, tySmallInt, tyWord, tyByte]) or
        not Self.TryEvalConstIntExpr(Slot, V) then
       Exit;
   end;
@@ -14371,7 +14373,7 @@ begin
   if (AArgExpr is TIntLiteral) and AParam.IsNumeric() then
   begin
     if AParam.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64,
-                       tySmallInt, tyWord, tyByte] then
+                       tyInt8, tySmallInt, tyWord, tyByte] then
       Result := 2
     else
       Result := 1;  { Double, Single — widening }
@@ -14710,7 +14712,7 @@ function TSemanticAnalyser.AnalyseRawMemInteger(ACall: TProcCall;
 begin
   Result := Self.AnalyseListSlot(ACall.Args, AIndex);
   if (Result = nil) or not (Result.Kind in [tyInteger, tyInt64, tyUInt32,
-       tyUInt64, tySmallInt, tyWord, tyByte]) then
+       tyUInt64, tyInt8, tySmallInt, tyWord, tyByte]) then
     SemanticError(
       Format('%s argument of ''%s'' must be an integer%s',
         [ARole, ARoutine, AHint]),
@@ -15179,7 +15181,7 @@ begin
     SemanticError('Malformed Write field width', AExpr.Line, AExpr.Col);
   VT := Self.AnalyseListSlot(AExpr.Args, 0);
   WT := Self.AnalyseListSlot(AExpr.Args, 1);
-  if (WT = nil) or not (WT.Kind in [tyInteger, tyInt64, tyUInt32, tySmallInt,
+  if (WT = nil) or not (WT.Kind in [tyInteger, tyInt64, tyUInt32, tyInt8, tySmallInt,
                                     tyWord, tyByte]) then
     SemanticError('A Write field width must be an integer',
       TASTExpr(AExpr.Args.Items[1]).Line, TASTExpr(AExpr.Args.Items[1]).Col);
@@ -15187,7 +15189,7 @@ begin
   if AExpr.Args.Count = 3 then
   begin
     WT := Self.AnalyseListSlot(AExpr.Args, 2);
-    if (WT = nil) or not (WT.Kind in [tyInteger, tyInt64, tyUInt32, tySmallInt,
+    if (WT = nil) or not (WT.Kind in [tyInteger, tyInt64, tyUInt32, tyInt8, tySmallInt,
                                       tyWord, tyByte]) then
       SemanticError('A Write decimal count must be an integer',
         TASTExpr(AExpr.Args.Items[2]).Line, TASTExpr(AExpr.Args.Items[2]).Col);
@@ -15220,7 +15222,7 @@ begin
     Value := MkCall('IntToStr', Value);
     Conv := 's';
   end
-  else if VT.Kind in [tyInteger, tyInt64, tyUInt32, tySmallInt, tyWord,
+  else if VT.Kind in [tyInteger, tyInt64, tyUInt32, tyInt8, tySmallInt, tyWord,
                       tyByte] then
     Conv := 'd'
   else if VT.Kind = tyBoolean then
@@ -15373,7 +15375,7 @@ begin
       begin
         if (TASTExpr(AExpr.Args.Items[2]).ResolvedType = nil) or
            not (TASTExpr(AExpr.Args.Items[2]).ResolvedType.Kind in
-                [tyInteger, tyInt64, tyByte, tySmallInt, tyWord, tyUInt32]) then
+                [tyInteger, tyInt64, tyByte, tyInt8, tySmallInt, tyWord, tyUInt32]) then
           SemanticError(AExpr.Name + ': third argument must be an integer index',
             AExpr.Line, AExpr.Col);
       end;
@@ -15450,7 +15452,7 @@ begin
       SemanticError('Pointer cast requires exactly one argument', AExpr.Line, AExpr.Col);
     ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
     if not (ArgType.Kind in [tyInteger, tyInt64, tyUInt64, tyUInt32, tyByte,
-                              tySmallInt, tyWord, tyPointer, tyPChar, tyString,
+                              tyInt8, tySmallInt, tyWord, tyPointer, tyPChar, tyString,
                               tyClass, tyMetaClass, tyProcedural, tyNil]) then
       SemanticError(
         Format('Pointer cast requires an integer, pointer, or class expression, got ''%s''',
@@ -15470,7 +15472,7 @@ begin
       SemanticError('PtrUInt cast requires exactly one argument', AExpr.Line, AExpr.Col);
     ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
     if not (ArgType.Kind in [tyInteger, tyInt64, tyUInt64, tyUInt32, tyByte,
-                              tySmallInt, tyWord, tyPointer, tyPChar, tyString,
+                              tyInt8, tySmallInt, tyWord, tyPointer, tyPChar, tyString,
                               tyClass, tyNil]) then
       SemanticError(
         Format('PtrUInt cast requires an integer, pointer, or class expression, got ''%s''',
@@ -15655,7 +15657,7 @@ begin
       CoerceToCharOrd rejects literals that are not exactly one byte. }
     if (Sym.TypeDesc <> nil) and
        (Sym.TypeDesc.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64,
-                              tySmallInt, tyWord, tyByte]) and
+                              tyInt8, tySmallInt, tyWord, tyByte]) and
        (TASTExpr(AExpr.Args.Items[0]) is TStringLiteral) then
       CoerceToCharOrd(TStringLiteral(AExpr.Args.Items[0]));
     Result := Sym.TypeDesc;
