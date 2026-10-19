@@ -632,7 +632,8 @@ type
       into %rax.  The one receiver resolver shared by every itab dispatch
       (plain, sret and record-sret), so each accepts the same shapes. }
     procedure EmitIntfRecvPair(AObjExpr: TASTExpr; const AObjName: string;
-                               AIsGlobal, AIsVarParam: Boolean);
+                               AIsGlobal, AIsVarParam: Boolean;
+                               AIntf: TTypeDesc);
     procedure EmitCapturedVarAddr(AIdent: TIdentExpr; const ADstReg: string);
     { %rax := a field assignment's receiver EXPRESSION.  An owned class
       receiver (MakeObj().F := V) is released at the statement end; nothing
@@ -4231,8 +4232,24 @@ end;
   scratch (%r10/%r11) that survive the pop loop, pop args into %rsi.. (shifted
   by one for Self in %rdi), set %rdi := obj, then `callq *%r11`. }
 procedure TX86_64Backend.EmitIntfRecvPair(AObjExpr: TASTExpr;
-  const AObjName: string; AIsGlobal, AIsVarParam: Boolean);
+  const AObjName: string; AIsGlobal, AIsVarParam: Boolean; AIntf: TTypeDesc);
 begin
+  { A CLASS value converted to the dispatched interface (the operand of
+    IFoo(Obj).M(), which the front end unwraps to Obj): the obj itself and
+    that interface's static itab; an owned one is released at the end of
+    the statement }
+  if (AObjExpr <> nil) and (AObjExpr.ResolvedType <> nil) and
+     (AObjExpr.ResolvedType.Kind = tyClass) then
+  begin
+    Self.EmitExprToEax(AObjExpr);
+    if NativeExprOwnsRef(AObjExpr) then
+      Self.DeferNativeClassRelease();
+    Self.Emit(#9'movq %rax, %r10');
+    Self.Emit(Format(#9'leaq itab_%s_%s(%%rip), %%rax',
+      [Self.ClassSymName(TRecordTypeDesc(AObjExpr.ResolvedType).Name),
+       Self.IntfTypeInfoName(AIntf.Name)]));
+    Exit;
+  end;
   { A named (non-Self-field) ident receiver resolves through its name, the
     same as a receiver the semantic pass left as ObjectName only }
   if (AObjExpr <> nil) and (AObjExpr is TIdentExpr) and
@@ -4241,7 +4258,7 @@ begin
   begin
     Self.EmitIntfRecvPair(nil, TIdentExpr(AObjExpr).Name,
       TIdentExpr(AObjExpr).IsGlobal,
-      AIsVarParam or (TIdentExpr(AObjExpr).ParamMode = pmVar));
+      AIsVarParam or (TIdentExpr(AObjExpr).ParamMode = pmVar), AIntf);
     Exit;
   end;
   if (AObjExpr <> nil) and (AObjExpr is TFieldAccessExpr) then
@@ -4444,7 +4461,7 @@ begin
     Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [Pushed + HTotal + DiscSz + 8]));
   end
   else
-    Self.EmitIntfRecvPair(AObjExpr, AObjName, AIsGlobal, AIsVarParam);
+    Self.EmitIntfRecvPair(AObjExpr, AObjName, AIsGlobal, AIsVarParam, AIntf);
   SlotOff := AIntf.MethodIndex(AMethName) * Ps;
   if SlotOff = 0 then
     Self.Emit(#9'movq (%rax), %r11')
@@ -24417,7 +24434,7 @@ begin
   end
   else
     Self.EmitIntfRecvPair(ACall.ObjExpr, ACall.ObjectName, ACall.IsGlobal,
-      ACall.IsVarParam);
+      ACall.IsVarParam, IntfD);
   SlotOff := IntfD.MethodIndex(ACall.Name) * 8;
   if SlotOff = 0 then
     Self.Emit(#9'movq (%rax), %r11')
@@ -24572,7 +24589,7 @@ begin
   end
   else
     Self.EmitIntfRecvPair(ACall.ObjExpr, ACall.ObjectName, ACall.IsGlobal,
-      ACall.IsVarParam);
+      ACall.IsVarParam, IntfD);
   SlotOff := IntfD.MethodIndex(ACall.Name) * 8;
   if SlotOff = 0 then
     Self.Emit(#9'movq (%rax), %r11')

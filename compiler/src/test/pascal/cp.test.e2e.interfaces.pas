@@ -38,6 +38,9 @@ type
       dynamic-array element, P^ -- into every consumer, and interface
       arguments that spill to the stack (a class value among them) }
     procedure TestRun_InPlaceIntfSources_IntoEveryConsumer;
+    { IFoo(X) as a checked conversion: from a class value (borrowed and
+      owned) and a descendant interface, into every consumer }
+    procedure TestRun_InterfaceCast_IntoEveryConsumer;
     { TGreet(MakeI()).X: the call's owned reference is released -- the shared
       object goes when its last real holder lets go }
     procedure TestRun_ClassCastOfInterfaceCall_ReleasesTheCallRef;
@@ -2409,6 +2412,61 @@ begin
     'spill 9' + LE + 'spill pv 10' + LE +
     'gone 2' + LE + 'gone 1' + LE + 'gone 3' + LE + 'gone 4' + LE +
     'end' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_InterfaceCast_IntoEveryConsumer;
+const
+  Src = '''
+    program Q;
+    type
+      IBase = interface
+        function A(): Integer;
+      end;
+      IDer = interface(IBase)
+        function B(): Integer;
+      end;
+      TImp = class(TObject, IDer)
+        FN: Integer;
+        function A(): Integer;
+        function B(): Integer;
+        destructor Destroy(); override;
+      end;
+      THold = class
+        FB: IBase;
+        function Get(O: TImp): IBase;
+      end;
+    function TImp.A(): Integer; begin Result := FN end;
+    function TImp.B(): Integer; begin Result := FN * 10 end;
+    destructor TImp.Destroy(); begin WriteLn('gone ', FN); inherited Destroy() end;
+    function Mk(AN: Integer): TImp; begin Result := TImp.Create(); Result.FN := AN end;
+    function THold.Get(O: TImp): IBase; begin Result := IBase(O) end;
+    procedure Show(const X: IBase); begin WriteLn('show ', X.A()) end;
+    var O: TImp; D: IDer; B: IBase; H: THold; K: Integer;
+    begin
+      O := Mk(1);
+      B := IBase(O); WriteLn('class ', B.A());
+      D := O;
+      B := IBase(D); WriteLn('upcast ', B.A());
+      WriteLn('recv ', IBase(D).A(), ' ', IDer(D).B(), ' ', IBase(O).A());
+      Show(IBase(O)); Show(IBase(D));
+      H := THold.Create();
+      H.FB := IBase(D); WriteLn('field ', H.FB.A());
+      B := H.Get(O); WriteLn('result ', B.A());
+      Show(IBase(Mk(2)));
+      B := IBase(Mk(3)); WriteLn('owned ', B.A());
+      K := IBase(Mk(4)).A(); WriteLn('owned recv ', K);
+      B := IBase(nil); WriteLn('nil ', Assigned(B));
+      H.FB := nil; D := nil; O := nil;
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'class 1' + LE + 'upcast 1' + LE + 'recv 1 10 1' + LE + 'show 1' + LE +
+    'show 1' + LE + 'field 1' + LE + 'result 1' + LE + 'show 2' + LE +
+    'gone 2' + LE + 'owned 3' + LE + 'gone 4' + LE + 'owned recv 4' + LE +
+    'gone 3' + LE + 'nil False' + LE + 'gone 1' + LE + 'end' + LE, 0);
 end;
 
 initialization

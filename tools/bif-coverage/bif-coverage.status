@@ -256,6 +256,7 @@ TFuncCallExpr.HasClassAttrClass  safe
 TFuncCallExpr.HasClassAttrAttr  safe
 TFuncCallExpr.AttrRTTIBuiltin  safe
 TFuncCallExpr.IsProcFieldCall  safe
+TFuncCallExpr.IsIntfConversion  safe
 
 # TIndirectFuncCallExpr (uAST.pas:661)
 TIndirectFuncCallExpr.CalleeExpr  serialise

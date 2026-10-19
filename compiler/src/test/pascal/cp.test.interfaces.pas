@@ -30,6 +30,10 @@ type
     { an untyped Pointer carries no method table, so it cannot become an
       interface (assignment or argument); the other direction stays legal }
     procedure TestSemantic_PointerToInterface_Rejected;
+    { IFoo(X) is a checked conversion: accepted where X could be assigned
+      to IFoo anyway, a compile error (pointing at as) otherwise }
+    procedure TestSemantic_InterfaceCast_CheckedConversion;
+    procedure TestCodegen_InterfaceCast_LowersAsItsOperand;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1287,6 +1291,97 @@ begin
   AssertEquals('interface to Pointer is fine', '',
     SemanticError(Head + 'Ptr := I end.'));
   AssertEquals('nil is fine', '', SemanticError(Head + 'I := nil end.'));
+end;
+
+procedure TInterfaceTests.TestSemantic_InterfaceCast_CheckedConversion;
+const
+  Head = '''
+      program P;
+      type
+        IBase = interface
+          function A(): Integer;
+        end;
+        IDer = interface(IBase)
+          function B(): Integer;
+        end;
+        IOther = interface
+          function C(): Integer;
+        end;
+        TImp = class(TObject, IDer)
+          function A(): Integer;
+          function B(): Integer;
+        end;
+        TNo = class end;
+      function TImp.A(): Integer;
+      begin
+        Result := 1
+      end;
+      function TImp.B(): Integer;
+      begin
+        Result := 2
+      end;
+      var O: TImp; N: TNo; D: IDer; B: IBase; X: IOther; Ptr: Pointer;
+      begin
+      ''';
+var
+  Msg: string;
+begin
+  AssertEquals('class implementing it', '', SemanticError(Head + 'B := IBase(O) end.'));
+  AssertEquals('same interface', '', SemanticError(Head + 'B := IBase(B) end.'));
+  AssertEquals('descendant interface', '', SemanticError(Head + 'B := IBase(D) end.'));
+  AssertEquals('nil', '', SemanticError(Head + 'B := IBase(nil) end.'));
+  Msg := SemanticError(Head + 'X := IOther(D) end.');
+  AssertTrue('unrelated interface rejected: ' + Msg, Pos('as IOther', Msg) >= 0);
+  Msg := SemanticError(Head + 'D := IDer(B) end.');
+  AssertTrue('ancestor to descendant rejected: ' + Msg, Pos('as IDer', Msg) >= 0);
+  Msg := SemanticError(Head + 'X := IOther(N) end.');
+  AssertTrue('class not implementing it rejected: ' + Msg,
+    Pos('as IOther', Msg) >= 0);
+  Msg := SemanticError(Head + 'B := IBase(Ptr) end.');
+  AssertTrue('Pointer rejected: ' + Msg, Pos('IBase', Msg) >= 0);
+end;
+
+procedure TInterfaceTests.TestCodegen_InterfaceCast_LowersAsItsOperand;
+const
+  Src = '''
+      program P;
+      type
+        IBase = interface
+          function A(): Integer;
+        end;
+        IDer = interface(IBase)
+          function B(): Integer;
+        end;
+        IOther = interface
+          function C(): Integer;
+        end;
+        TImp = class(TObject, IDer)
+          function A(): Integer;
+          function B(): Integer;
+        end;
+        TNo = class end;
+      function TImp.A(): Integer;
+      begin
+        Result := 1
+      end;
+      function TImp.B(): Integer;
+      begin
+        Result := 2
+      end;
+      var O: TImp; N: TNo; D: IDer; B: IBase; X: IOther; Ptr: Pointer;
+      begin
+        O := TImp.Create();
+        B := IBase(O);
+        D := O;
+        B := IBase(D);
+        WriteLn(IBase(D).A(), IBase(O).A())
+      end.
+      ''';
+begin
+  { the cast is replaced by its operand, which every consumer already
+    lowers into an interface target: a class value takes its static itab }
+  AssertEquals('casts compile on both ISAs', '',
+    AsmMissing(Src, 'itab_TImp_', 'itab_TImp_'));
 end;
 
 initialization

@@ -823,6 +823,12 @@ type
     function  IsSubtypeOf(AActual, AExpected: TTypeDesc): Boolean;
     function  InterfaceInheritsFrom(
       AActual, AExpected: TInterfaceTypeDesc): Boolean;
+    { True when a value of type AActual may be assigned to interface
+      AIntf: nil, the same or a descendant interface, or a class that
+      (through any ancestor) implements AIntf or a descendant of it }
+    function  ConvertsToInterface(AActual, AIntf: TTypeDesc): Boolean;
+    { IFoo(X): a checked conversion, accepted where X converts to IFoo }
+    procedure AnalyseInterfaceCast(AExpr: TFuncCallExpr; AIntf: TTypeDesc);
     { Validates a generic type parameter's constraint against a concrete type
       argument name.  Raises ESemanticError on constraint violation.
       AConstraint: '' (no constraint), 'class', 'record', or a type name. }
@@ -1929,12 +1935,73 @@ begin
   Result := False;
 end;
 
+function TSemanticAnalyser.ConvertsToInterface(AActual,
+  AIntf: TTypeDesc): Boolean;
+var
+  Walk: TRecordTypeDesc;
+  I: Integer;
+begin
+  Result := False;
+  if (AActual = nil) or (AIntf = nil) or (AIntf.Kind <> tyInterface) then
+    Exit;
+  if (AActual = AIntf) or (AActual.Kind = tyNil) then
+    Exit(True);
+  if AActual.Kind = tyInterface then
+    Exit(InterfaceInheritsFrom(TInterfaceTypeDesc(AActual),
+      TInterfaceTypeDesc(AIntf)));
+  { a descendant inherits its parent's interface implementations, so the
+    whole parent chain is scanned, not just the class's own list (issue
+    #130 bug3) }
+  if AActual.Kind = tyClass then
+  begin
+    Walk := TRecordTypeDesc(AActual);
+    while Walk <> nil do
+    begin
+      for I := 0 to Walk.ImplementsCount() - 1 do
+        if (Walk.ImplementsIntfAt(I) = AIntf) or
+           ((Walk.ImplementsIntfAt(I) is TInterfaceTypeDesc) and
+            InterfaceInheritsFrom(TInterfaceTypeDesc(Walk.ImplementsIntfAt(I)),
+                                  TInterfaceTypeDesc(AIntf))) then
+          Exit(True);
+      Walk := Walk.Parent;
+    end;
+  end;
+end;
+
+procedure TSemanticAnalyser.AnalyseInterfaceCast(AExpr: TFuncCallExpr;
+  AIntf: TTypeDesc);
+var
+  ArgType: TTypeDesc;
+begin
+  { IFoo(X) is a checked conversion: an interface value is an (object,
+    itab) pair, so relabelling some other interface's pair -- the unchecked
+    reinterpretation of Delphi and FPC -- would dispatch through the wrong
+    method table.  X must convert to IFoo exactly as for an assignment;
+    the run-time query is 'X as IFoo'.  The node is then replaced by X
+    (UnwrapLoweredOperator), which every consumer lowers into an IFoo
+    target already. }
+  ArgType := TASTExpr(AExpr.Args.Items[0]).ResolvedType;
+  if (ArgType <> nil) and (ArgType.Kind = tyPointer) then
+    CheckTypesMatch(AIntf, ArgType, 'type cast', AExpr.Line, AExpr.Col);
+  if not ConvertsToInterface(ArgType, AIntf) then
+  begin
+    if ArgType = nil then
+      SemanticError(Format('Type cast ''%s'' of an untyped value',
+        [AIntf.Name]), AExpr.Line, AExpr.Col);
+    SemanticError(
+      Format('Type cast ''%s(...)'': ''%s'' is not known to support ''%s''; ' +
+        'an interface cast is checked at compile time -- use ''X as %s'' ' +
+        'to query the object at run time',
+        [AIntf.Name, ArgType.Name, AIntf.Name, AIntf.Name]),
+      AExpr.Line, AExpr.Col);
+  end;
+  AExpr.IsIntfConversion := True;
+end;
+
 procedure TSemanticAnalyser.CheckTypesMatch(AExpected, AActual: TTypeDesc;
   const AContext: string; ALine, ACol: Integer);
 var
   RT:   TRecordTypeDesc;
-  Walk: TRecordTypeDesc;
-  I:    Integer;
 begin
   if AExpected = AActual then
     Exit;
@@ -2006,31 +2073,13 @@ begin
   if (AExpected.Kind = tyClass) and (AExpected.Name = 'TObject') and
      (AActual.Kind = tyClass) then
     Exit;
-  { interface → base interface: IDerived is assignable to IBase when IBase is
-    on IDerived's parent chain (IDog = interface(IAnimal) -> IDog is-a IAnimal). }
-  if (AExpected.Kind = tyInterface) and (AActual.Kind = tyInterface) then
-    if InterfaceInheritsFrom(TInterfaceTypeDesc(AActual),
-                             TInterfaceTypeDesc(AExpected)) then
-      Exit;
-  { class → interface: allowed when the class — or ANY of its ancestors —
-    implements that interface (or a descendant of it: implementing IDog also
-    satisfies IAnimal).  A descendant inherits its parent's interface
-    implementations, so the whole parent chain must be scanned, not just the
-    class's own ImplementsList (issue #130 bug3). }
-  if (AExpected.Kind = tyInterface) and (AActual.Kind = tyClass) then
-  begin
-    Walk := TRecordTypeDesc(AActual);
-    while Walk <> nil do
-    begin
-      for I := 0 to Walk.ImplementsCount() - 1 do
-        if (Walk.ImplementsIntfAt(I) = AExpected) or
-           ((Walk.ImplementsIntfAt(I) is TInterfaceTypeDesc) and
-            InterfaceInheritsFrom(TInterfaceTypeDesc(Walk.ImplementsIntfAt(I)),
-                                  TInterfaceTypeDesc(AExpected))) then
-          Exit;
-      Walk := Walk.Parent;
-    end;
-  end;
+  { interface → base interface (IDog = interface(IAnimal) -> IDog is-a
+    IAnimal), and class → interface when the class or any ancestor
+    implements it or a descendant of it }
+  if (AExpected.Kind = tyInterface) and
+     (AActual.Kind in [tyInterface, tyClass]) and
+     ConvertsToInterface(AActual, AExpected) then
+    Exit;
   { Untyped pointer accepts any class/interface/string/PChar reference and
     vice-versa -- except Pointer -> interface: an interface value is an
     (object, method table) pair and a bare pointer carries no method table
@@ -9936,6 +9985,16 @@ var
   FA:   TFieldAccessExpr;
   IE:   TIdentExpr;
 begin
+  if (ASlot is TFuncCallExpr) and TFuncCallExpr(ASlot).IsIntfConversion then
+  begin
+    { IFoo(X), a checked conversion (AnalyseInterfaceCast): the slot takes
+      X itself, which every consumer converts to its interface target }
+    Call := TASTExpr(TFuncCallExpr(ASlot).Args.Extract(
+      TFuncCallExpr(ASlot).Args.Items[0]));
+    ASlot.Free();
+    ASlot := Call;
+    Exit;
+  end;
   if (ASlot is TIdentExpr) and (TIdentExpr(ASlot).LoweredExpr <> nil) then
   begin
     IE := TIdentExpr(ASlot);
@@ -15423,6 +15482,8 @@ begin
       CoerceToCharOrd(TStringLiteral(AExpr.Args.Items[0]));
     Result := Sym.TypeDesc;
     AExpr.ResolvedType := Result;
+    if (Result <> nil) and (Result.Kind = tyInterface) then
+      AnalyseInterfaceCast(AExpr, Result);
     Exit;
   end;
 

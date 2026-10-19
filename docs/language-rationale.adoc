@@ -5114,6 +5114,21 @@ possible, otherwise at the first call site.
 
 === Decision
 
+A cast to an interface type, `IFoo(X)`, is a *checked conversion*: it is
+accepted where `X` could be assigned to `IFoo` anyway -- `nil`, `IFoo`
+itself or a descendant interface, or a class that (through any ancestor)
+implements `IFoo` or a descendant of it -- and means exactly that
+conversion.  Any other operand is a compile-time error that points at
+`X as IFoo`, the run-time query.
+
+[source,pascal]
+----
+  B := IBase(Obj);          // Obj's class implements IBase: fine
+  WriteLn(IBase(D).A());    // D: IDer, IDer = interface(IBase): fine
+  X := IOther(D);           // error: 'IDer' is not known to support 'IOther'
+  X := D as IOther;         // the run-time query
+----
+
 An untyped `Pointer` cannot be assigned or passed to an interface.  The
 other direction stays legal: an interface converts to `Pointer` (it yields
 the object reference), and `nil` converts to any interface.
@@ -5131,17 +5146,34 @@ var P: Pointer; I: IThing;
 === Rationale
 
 A Blaise interface value is a pair: the object and the method table (itab)
-for that interface.  A bare pointer holds an address and nothing else, so
-there is no itab to put in the second half.  The assignment used to pass
+for that interface.  In Delphi and FPC an interface is a single pointer and
+`IFoo(X)` relabels it unchecked; in Blaise relabelling `IOther`'s pair as
+`IFoo` would dispatch through the wrong method table, so an unchecked cast
+has no safe meaning.  Restricting the cast to conversions the compiler can
+prove keeps ported code that writes `IFoo(Obj)` compiling, gives the cast
+the same meaning as an assignment, and leaves the run-time question to
+`as`, where it is visible.  The cast was previously accepted for any
+operand and then failed in both code generators.
+
+A bare pointer holds an address and nothing else, so there is no itab to
+put in the second half.  The assignment used to pass
 the type check and then fail in both code generators.  Delphi rejects the
 conversion as well; there an interface is one pointer, but Delphi still
 requires the source to be an interface or an object.
 
 === Alternatives Rejected
 
-* *Look the itab up at run time* -- a raw pointer is not known to be an
-  object at all, and when it is, `Obj as IThing` already says so explicitly.
-* *Leave the itab nil* -- the first call through the interface would crash.
+* *An unchecked reinterpretation, as in Delphi and FPC* -- with a two-word
+  interface value it calls through the wrong itab.
+* *A run-time check under the cast syntax (like `as`)* -- hides a query
+  that can fail behind syntax that reads as a conversion.
+* *Reject every interface cast* -- ported code that writes `IFoo(Obj)`,
+  which is sound, would stop compiling.
+* *Look the itab up at run time for a `Pointer`* -- a raw pointer is not
+  known to be an object at all, and when it is, `Obj as IThing` already
+  says so explicitly.
+* *Leave a `Pointer`'s itab nil* -- the first call through the interface
+  would crash.
 
 == Collection Ownership — ARC Conventions
 

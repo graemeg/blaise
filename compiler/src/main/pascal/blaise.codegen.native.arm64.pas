@@ -749,7 +749,8 @@ type
       AIntfType: TTypeDesc);
     { x0/x1 := the (obj, itab) pair of an interface method-call RECEIVER }
     function  EmitIntfRecvPair(const AObjName: string; AObjExpr: TASTExpr;
-      AVarParam: Boolean; AImplicitBase: TFieldInfo; ANode: TASTNode): Boolean;
+      AVarParam: Boolean; AImplicitBase: TFieldInfo; ANode: TASTNode;
+      AIntf: TTypeDesc): Boolean;
     function  IntfItabSym(const AClassName, AIntfName: string): string;
     procedure EmitTypeinfoAddr(const AReg, ATypeName: string);
     procedure EmitVarArgAddrToX0(Arg: TASTExpr);
@@ -8729,7 +8730,7 @@ end;
 
 function TArm64Backend.EmitIntfRecvPair(const AObjName: string;
   AObjExpr: TASTExpr; AVarParam: Boolean; AImplicitBase: TFieldInfo;
-  ANode: TASTNode): Boolean;
+  ANode: TASTNode; AIntf: TTypeDesc): Boolean;
 begin
   { x0/x1 := the receiver pair.  Result = the obj half is an OWNED +1 (a
     call result: MakeIntf().M()), which the caller releases after the call;
@@ -8737,7 +8738,10 @@ begin
   Result := False;
   if AObjExpr <> nil then
   begin
-    Result := EmitIntfPairToX0X1(AObjExpr, AObjExpr.ResolvedType);
+    { converted to the DISPATCHED interface: a class value (the operand of
+      IFoo(Obj).M(), which the front end unwraps to Obj) takes that
+      interface's static itab }
+    Result := EmitIntfPairToX0X1(AObjExpr, AIntf);
     Exit;
   end;
   if AImplicitBase <> nil then
@@ -16695,7 +16699,7 @@ begin
     NotYet('interface call with stack-passed arguments to a parameter of ' +
       'an unresolved type', AObjExpr);
   Owned := EmitIntfRecvPair(AVarName, AObjExpr, AVarParam, AImplicitBase,
-    AObjExpr);
+    AObjExpr, AIntf);
   Slot := '__icall_' + IntToStr(FJArgN);
   FJArgN := FJArgN + 1;
   if not FFrame.ContainsKey(Slot) then

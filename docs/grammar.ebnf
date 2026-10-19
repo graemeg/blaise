@@ -1443,6 +1443,10 @@ ArrayLiteral
  * Type cast: TypeName LPAREN Expr RPAREN — parsed as an IDENT followed by
  * LPAREN, identical to a function call.  The semantic pass distinguishes casts
  * from calls by checking whether the symbol resolves to a type or a function.
+ * A cast to an INTERFACE type, IFoo(X), is a checked conversion: X must be
+ * assignable to IFoo (nil, IFoo or a descendant interface, or a class that
+ * implements IFoo); anything else is an error -- 'X as IFoo' is the run-time
+ * query.  See language-rationale.adoc, "Converting to an Interface".
  *)
 
 

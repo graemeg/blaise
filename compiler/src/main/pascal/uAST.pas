@@ -646,6 +646,9 @@ type
                                       procedural-typed field of the current class
                                       (implicit Self.Field), used as an expression }
     [Unretained] ProcFieldInfo: TFieldInfo; { not owned — the procedural field, when IsProcFieldCall }
+    IsIntfConversion:      Boolean; { set by uSemantic — IFoo(X), a checked
+                                      conversion to an interface; the slot
+                                      unwrap replaces the node by X }
     constructor Create;
     destructor Destroy; override;
   end;
