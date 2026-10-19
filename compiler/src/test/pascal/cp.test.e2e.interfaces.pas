@@ -49,6 +49,10 @@ type
       one goes nil when the object dies, an unretained one never keeps it
       (both stored strongly before, on both ISAs) }
     procedure TestRun_NonOwningInterfaceFields;
+    { a [Weak] interface local assigned by a nested routine (through its
+      capture), from a captured source: arm64 stored it strongly, x86-64
+      read the captured source through nonexistent <Name>_obj symbols }
+    procedure TestRun_WeakInterfaceLocal_AssignedByNestedRoutine;
     { TGreet(MakeI()).X: the call's owned reference is released -- the shared
       object goes when its last real holder lets go }
     procedure TestRun_ClassCastOfInterfaceCall_ReleasesTheCallRef;
@@ -2586,6 +2590,63 @@ begin
     'hold gone' + LE + 'gone 5' + LE + 'unretained 6' + LE +
     'hold gone' + LE + 'holder freed 6' + LE + 'gone 6' + LE +
     'end' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_WeakInterfaceLocal_AssignedByNestedRoutine;
+const
+  Src = '''
+    program Q;
+    type
+      IThing = interface
+        function N(): Integer;
+      end;
+      TThing = class(TObject, IThing)
+        function N(): Integer;
+        destructor Destroy(); override;
+      end;
+    function TThing.N(): Integer; begin Result := 7 end;
+    destructor TThing.Destroy(); begin WriteLn('gone'); inherited Destroy() end;
+    procedure Outer();
+    var [Weak] W: IThing; S: IThing;
+      procedure Inner();
+      begin
+        W := S
+      end;
+      procedure InnerNil();
+      begin
+        W := nil
+      end;
+    begin
+      S := TThing.Create();
+      Inner();
+      WriteLn('captured weak ', W.N());
+      S := nil;
+      WriteLn(Assigned(W));
+      S := TThing.Create();
+      Inner();
+      InnerNil();
+      WriteLn(Assigned(W));
+      S := nil;
+      WriteLn('end outer')
+    end;
+    procedure Plain();
+    var [Weak] W: IThing; S: IThing;
+    begin
+      S := TThing.Create();
+      W := S;
+      S := nil;
+      WriteLn('plain ', Assigned(W))
+    end;
+    begin
+      Plain();
+      Outer();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'gone' + LE + 'plain False' + LE + 'captured weak 7' + LE + 'gone' + LE +
+    'False' + LE + 'False' + LE + 'gone' + LE + 'end outer' + LE, 0);
 end;
 
 initialization

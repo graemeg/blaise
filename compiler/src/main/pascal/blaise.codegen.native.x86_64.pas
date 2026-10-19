@@ -685,7 +685,7 @@ type
       obj+itab), retaining the new obj and releasing the old. }
     procedure EmitInterfaceToFieldSlotsAt(AExpr: TASTExpr;
       const ABaseReg: string; AOffset: Integer; AIntfType: TTypeDesc;
-      AFld: TFieldInfo = nil);
+      AWeak: Boolean = False; AUnretained: Boolean = False);
     { Compute the address of an interface-typed FIELD's contiguous fat pointer
       (obj at the address, itab at +8) into ADstReg (an AT&T register operand
       such as '%r15').  Handles the receiver shapes a TFieldAccessExpr can take:
@@ -5057,8 +5057,7 @@ begin
     idle slot, and G.Hi() then dispatched on the env's nil).  IsCaptured
     already excludes a capture materialised into a real slot.  The shared
     slot store does the ARC through the address. }
-  if not AAsgn.IsWeakLhs and
-     (Self.IsCaptured(AAsgn.Name) or
+  if (Self.IsCaptured(AAsgn.Name) or
       (AAsgn.IsVarParam and Self.IsLocal(AAsgn.Name))) then
   begin
     Self.Emit(#9'pushq %rbx');
@@ -5067,7 +5066,8 @@ begin
       Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('_cap_' + AAsgn.Name)]))
     else
       Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand(AAsgn.Name)]));
-    Self.EmitInterfaceToFieldSlotsAt(AAsgn.Expr, '%rbx', 0, AAsgn.ResolvedLhsType);
+    Self.EmitInterfaceToFieldSlotsAt(AAsgn.Expr, '%rbx', 0,
+      AAsgn.ResolvedLhsType, AAsgn.IsWeakLhs);
     Self.Emit(#9'popq %rbx');
     Self.Emit(#9'popq %rbx');
     Exit;
@@ -5080,7 +5080,7 @@ begin
     ISFld := TFieldInfo(AAsgn.ImplicitSelfField);
     Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand('Self')]));
     Self.EmitInterfaceToFieldSlotsAt(AAsgn.Expr, '%rax', ISFld.Offset,
-      AAsgn.ResolvedLhsType, ISFld);
+      AAsgn.ResolvedLhsType, ISFld.IsWeak, ISFld.IsUnretained);
     Exit;
   end;
 
@@ -5123,15 +5123,13 @@ begin
     Exit;
   end;
 
-  { [Weak] F := <any other interface source>: the arms below are all STRONG
+  { [Weak] F := <any interface source>: the arms below are all STRONG
     stores, so a weak target fed a call result or a class value was retained
     like a normal variable -- it never nilled and leaked the +1.  Evaluate the
     pair as for an interface argument (obj, then itab on top), register the
     obj half in the weak table, store the itab, and drop an owned +1: nothing
     else holds it, so it dies and the slot is nilled (P3-6). }
-  if AAsgn.IsWeakLhs and not ((AAsgn.Expr is TIdentExpr) and
-     (AAsgn.Expr.ResolvedType <> nil) and
-     (AAsgn.Expr.ResolvedType.Kind = tyInterface)) then
+  if AAsgn.IsWeakLhs then
   begin
     WeakPar := TMethodParam.Create();
     try
@@ -5189,29 +5187,16 @@ begin
      (AAsgn.Expr.ResolvedType.Kind = tyInterface) and
      (AAsgn.Expr is TIdentExpr) then
   begin
-    if AAsgn.IsWeakLhs then
-    begin
-      Self.Emit(Format(#9'movq %s, %%rsi',
-        [Self.IntfObjOperand(TIdentExpr(AAsgn.Expr).Name, TIdentExpr(AAsgn.Expr).IsGlobal)]));
-      Self.Emit(Format(#9'leaq %s, %%rdi', [ObjOp]));
-      Self.Emit(#9'callq _WeakAssign');
-      Self.Emit(Format(#9'movq %s, %%rax',
-        [Self.IntfItabOperand(TIdentExpr(AAsgn.Expr).Name, TIdentExpr(AAsgn.Expr).IsGlobal)]));
-      Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
-    end
-    else
-    begin
-      { Load src obj+itab; addref new obj; release old obj; store both. }
-      Self.PushIntfIdentPair(TIdentExpr(AAsgn.Expr));
-      Self.Emit(#9'movq %rax, %rdi');
-      Self.Emit(#9'callq _ClassAddRef');
-      Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));   { old obj }
-      Self.Emit(#9'callq _ClassRelease');
-      Self.Emit(#9'popq %rax');              { new obj }
-      Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
-      Self.Emit(#9'popq %rax');              { itab }
-      Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
-    end;
+    { Load src obj+itab; addref new obj; release old obj; store both. }
+    Self.PushIntfIdentPair(TIdentExpr(AAsgn.Expr));
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(#9'callq _ClassAddRef');
+    Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));   { old obj }
+    Self.Emit(#9'callq _ClassRelease');
+    Self.Emit(#9'popq %rax');              { new obj }
+    Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
+    Self.Emit(#9'popq %rax');              { itab }
+    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
     Exit;
   end;
 
@@ -5237,11 +5222,11 @@ end;
 
 procedure TX86_64Backend.EmitInterfaceToFieldSlotsAt(AExpr: TASTExpr;
   const ABaseReg: string; AOffset: Integer; AIntfType: TTypeDesc;
-  AFld: TFieldInfo);
+  AWeak, AUnretained: Boolean);
 { Store an interface RHS into a contiguous fat-pointer field.  The destination
   base address is taken from ABaseReg into the callee-saved %r15 so it survives
-  the ARC calls; obj slot is (%r15), itab slot is 8(%r15).  AFld, when given,
-  is the destination field: a [Weak] or [Unretained] one takes no reference. }
+  the ARC calls; obj slot is (%r15), itab slot is 8(%r15).  A [Weak] or
+  [Unretained] destination (AWeak / AUnretained) takes no reference. }
 var
   Intf:    TInterfaceTypeDesc;
   ClassRT: TRecordTypeDesc;
@@ -5260,9 +5245,10 @@ begin
     Self.Emit(Format(#9'addq $%d, %%r15', [AOffset]));
   { Now (%r15) = obj slot, 8(%r15) = itab slot. }
 
-  if (AFld <> nil) and (AFld.IsWeak or AFld.IsUnretained) then
+  if AWeak or AUnretained then
   begin
-    { a NON-OWNING interface field takes no reference and drops none: the
+    { a NON-OWNING interface slot (a field, or a [Weak] variable behind an
+      address) takes no reference and drops none: the
       obj half is registered in the weak table ([Weak]) or stored plainly
       ([Unretained]); the itab half is plain data.  An owned source has no
       other owner, so it is released once stored -- as for a non-owning
@@ -5289,7 +5275,7 @@ begin
     end;
     Self.Emit(#9'movq 8(%rsp), %rax');
     Self.Emit(#9'movq %rax, 8(%r15)');      { itab }
-    if AFld.IsWeak then
+    if AWeak then
     begin
       Self.Emit(#9'movq %r15, %rdi');
       Self.Emit(#9'movq (%rsp), %rsi');
@@ -18959,7 +18945,7 @@ begin
       end
       else Self.EmitVarBaseToReg(FA.RecordName, True, '%rcx');
       Self.EmitInterfaceToFieldSlotsAt(FA.Expr, '%rcx', FA.FieldInfo.Offset,
-        FA.FieldInfo.TypeDesc, FA.FieldInfo);
+        FA.FieldInfo.TypeDesc, FA.FieldInfo.IsWeak, FA.FieldInfo.IsUnretained);
       Exit;
     end;
     { Method-pointer (of object) field assignment from @Obj.Method: store the

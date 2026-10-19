@@ -746,7 +746,8 @@ type
     { Store an interface value into the 16-byte (obj, itab) pair at
       [base + AOff], the base on TOP of the stack (consumed). }
     procedure EmitIntfStoreStacked(AOff: Integer; AValueExpr: TASTExpr;
-      AIntfType: TTypeDesc; AFld: TFieldInfo = nil);
+      AIntfType: TTypeDesc; AWeak: Boolean = False;
+      AUnretained: Boolean = False);
     { x0/x1 := the (obj, itab) pair of an interface method-call RECEIVER }
     function  EmitIntfRecvPair(const AObjName: string; AObjExpr: TASTExpr;
       AVarParam: Boolean; AImplicitBase: TFieldInfo; ANode: TASTNode;
@@ -2050,7 +2051,8 @@ begin
   end;
   if AFld.TypeDesc.Kind = tyInterface then
   begin
-    EmitIntfStoreStacked(AFld.Offset, AValueExpr, AFld.TypeDesc, AFld);
+    EmitIntfStoreStacked(AFld.Offset, AValueExpr, AFld.TypeDesc, AFld.IsWeak,
+      AFld.IsUnretained);
     Exit;
   end;
   if ((AFld.TypeDesc.Kind = tyRecord) or (AFld.TypeDesc.Kind = tyStaticArray)) and
@@ -8408,7 +8410,9 @@ begin
     { weak interface: the obj half goes through the weak table; the itab
       half is plain data }
     if AAsgn.IsVarParam or (AAsgn.ImplicitSelfField <> nil) then
-      NotYet('[Weak] interface assignment to this target', AAsgn);
+      InternalError('[Weak] interface assignment to a var parameter or ' +
+        'field: [Weak] marks only variables here (a field is a field store)',
+        AAsgn);
     { any interface source (a class value narrowed, an interface variable,
       field or call result) through the shared pair lowering.  The obj half
       is registered in the weak table; an OWNED obj (WI := MakeI()) is then
@@ -8431,7 +8435,9 @@ begin
     EmitInstBase('x0', 'Self', False);
     EmitPushX0();
     EmitIntfStoreStacked(TFieldInfo(AAsgn.ImplicitSelfField).Offset,
-      AAsgn.Expr, AAsgn.ResolvedLhsType, TFieldInfo(AAsgn.ImplicitSelfField));
+      AAsgn.Expr, AAsgn.ResolvedLhsType,
+      TFieldInfo(AAsgn.ImplicitSelfField).IsWeak,
+      TFieldInfo(AAsgn.ImplicitSelfField).IsUnretained);
     Exit;
   end;
   if AAsgn.IsVarParam then
@@ -8706,13 +8712,14 @@ begin
 end;
 
 procedure TArm64Backend.EmitIntfStoreStacked(AOff: Integer;
-  AValueExpr: TASTExpr; AIntfType: TTypeDesc; AFld: TFieldInfo);
+  AValueExpr: TASTExpr; AIntfType: TTypeDesc; AWeak, AUnretained: Boolean);
 var
   Owned: Boolean;
 begin
-  if (AFld <> nil) and (AFld.IsWeak or AFld.IsUnretained) then
+  if AWeak or AUnretained then
   begin
-    { a NON-OWNING interface field takes no reference and drops none: the
+    { a NON-OWNING interface slot (a field, or a [Weak] variable behind an
+      address) takes no reference and drops none: the
       obj half is registered in the weak table ([Weak]) or stored plainly
       ([Unretained]); the itab half is plain data either way.  An owned
       source has no other owner, so it is released once stored -- as for
@@ -8721,7 +8728,7 @@ begin
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [base][obj,itab] }
     Self.Emit(#9'ldr x9, [sp, #16]');
     Self.Emit(Format(#9'str x1, [x9, #%d]', [AOff + 8]));
-    if AFld.IsWeak then
+    if AWeak then
     begin
       EmitAddSubImm('add', 'x0', 'x9', AOff);
       Self.Emit(#9'ldr x1, [sp]');
@@ -8951,10 +8958,12 @@ begin
      (AAsgn.ResolvedLhsType <> nil) and
      (AAsgn.ResolvedLhsType.Kind = tyInterface) then
   begin
-    { a captured interface: the shared pair store through its address }
+    { a captured interface: the shared pair store through its address (a
+      [Weak] one registers the slot rather than retaining) }
     EmitFatTargetAddr('x0', AAsgn);
     EmitPushX0();
-    EmitIntfStoreStacked(0, AAsgn.Expr, AAsgn.ResolvedLhsType);
+    EmitIntfStoreStacked(0, AAsgn.Expr, AAsgn.ResolvedLhsType,
+      AAsgn.IsWeakLhs);
     Exit;
   end;
   if UsesCapSlot(AAsgn.Name) and
