@@ -145,6 +145,15 @@ type
     procedure EmitStaticArrayAddRefElems(AType: TStaticArrayTypeDesc;
                                          const ABaseReg: string);
 
+    { The storage width in bytes of one element of a const array whose
+      element type is named AElemType, and whether it is a float (then 4 is
+      Single, 8 is Double).  The name resolves through the symbol table, so
+      every spelling of a type -- a builtin alias such as Int16 or QWord, or a
+      user alias -- gets its real width; builtin names map directly when
+      there is no table.  Unknown names default to 4 (an Integer). }
+    function  ConstElemSize(const AElemType: string;
+                            out AIsFloat: Boolean): Integer;
+
     { ---- ARC walk primitives (abstract per-CPU leaves) ---- }
 
     { The callee-saved scratch register a nested-record recursion walks with
@@ -598,6 +607,60 @@ begin
     Self.EmitManagedAddRefAt(AType.ElementType, Self.ArcArrayElemReg());
   end;
   Self.ArcLeaveArrayWalk();
+end;
+
+function TNativeBackend.ConstElemSize(const AElemType: string;
+  out AIsFloat: Boolean): Integer;
+var
+  TD: TTypeDesc;
+begin
+  AIsFloat := False;
+  TD := nil;
+  if FSymTable <> nil then
+    TD := FSymTable.FindType(AElemType);
+  if TD <> nil then
+  begin
+    if TD.Kind = tyDouble then
+    begin
+      AIsFloat := True;
+      Exit(8);
+    end;
+    if TD.Kind = tySingle then
+    begin
+      AIsFloat := True;
+      Exit(4);
+    end;
+    Result := TD.RawSize();
+    if (Result = 1) or (Result = 2) or (Result = 4) or (Result = 8) then
+      Exit;
+    Exit(4);
+  end;
+  { No table (some callers build a codegen without one): the builtin
+    spellings. }
+  if SameText(AElemType, 'Double') or SameText(AElemType, 'Float') or
+     SameText(AElemType, 'Float64') then
+  begin
+    AIsFloat := True;
+    Exit(8);
+  end;
+  if SameText(AElemType, 'Single') or SameText(AElemType, 'Float32') then
+  begin
+    AIsFloat := True;
+    Exit(4);
+  end;
+  if SameText(AElemType, 'Boolean') or SameText(AElemType, 'Byte') or
+     SameText(AElemType, 'UInt8') or SameText(AElemType, 'Int8') or
+     SameText(AElemType, 'ShortInt') or SameText(AElemType, 'AnsiChar') then
+    Exit(1);
+  if SameText(AElemType, 'SmallInt') or SameText(AElemType, 'Int16') or
+     SameText(AElemType, 'Word') or SameText(AElemType, 'UInt16') then
+    Exit(2);
+  if SameText(AElemType, 'Int64') or SameText(AElemType, 'UInt64') or
+     SameText(AElemType, 'QWord') or SameText(AElemType, 'PtrUInt') or
+     SameText(AElemType, 'Int') or SameText(AElemType, 'UInt') or
+     SameText(AElemType, 'Pointer') then
+    Exit(8);
+  Result := 4;
 end;
 
 function TNativeBackend.GenerateProgram(AProg: TProgram): string;

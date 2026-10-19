@@ -2785,48 +2785,17 @@ end;
   stride.  Defaults to .long (4-byte Integer) when the type is unknown. }
 function TX86_64Backend.ConstElemAsmDir(const AElemType: string): string;
 var
-  TD: TTypeDesc;
-  Sz: Integer;
+  IsFloat: Boolean;
 begin
-  { Map built-in scalar names directly so the result is correct even when
-    FSymTable is unset (some callers build a codegen without a table); user
-    types fall back to the table, defaulting to .long (4-byte). }
-  if SameText(AElemType, 'Boolean') or SameText(AElemType, 'Byte') or
-     SameText(AElemType, 'ShortInt') or SameText(AElemType, 'AnsiChar') then
-    Exit(#9'.byte');
-  if SameText(AElemType, 'SmallInt') or SameText(AElemType, 'Word') then
-    Exit(#9'.word');
   { Float elements need a FLOAT directive: '.quad 0.25' silently
     mis-assembles (gas reads the mantissa text as an integer expression),
     so every element of a const Double array loaded as garbage. }
-  if SameText(AElemType, 'Double') then
-    Exit(#9'.double');
-  if SameText(AElemType, 'Single') then
-    Exit(#9'.float');
-  if SameText(AElemType, 'Int64') or SameText(AElemType, 'UInt64') or
-     SameText(AElemType, 'Pointer') then
-    Exit(#9'.quad');
-  if SameText(AElemType, 'Integer') or SameText(AElemType, 'UInt32') or
-     SameText(AElemType, 'LongInt') or SameText(AElemType, 'Cardinal') then
-    Exit(#9'.long');
-  Sz := 4;
-  if FSymTable <> nil then
-  begin
-    TD := FSymTable.FindType(AElemType);
-    if TD <> nil then
-    begin
-      { A named alias of a float type must keep the float directive too. }
-      if TD.Kind = tyDouble then Exit(#9'.double');
-      if TD.Kind = tySingle then Exit(#9'.float');
-      Sz := TD.RawSize();
-    end;
-  end;
-  case Sz of
+  case Self.ConstElemSize(AElemType, IsFloat) of
     1: Result := #9'.byte';
     2: Result := #9'.word';
-    8: Result := #9'.quad';
+    8: if IsFloat then Result := #9'.double' else Result := #9'.quad';
   else
-    Result := #9'.long';
+    if IsFloat then Result := #9'.float' else Result := #9'.long';
   end;
 end;
 

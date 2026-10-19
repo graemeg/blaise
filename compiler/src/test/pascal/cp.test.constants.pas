@@ -20,6 +20,11 @@ type
     function ParseUnit(const ASrc: string): TUnit;
     function IRContains(const AIR, AFragment: string): Boolean;
   published
+    { a const array's data directive follows the element type's real width
+      for EVERY spelling of it -- builtin aliases (Int16, UInt16, QWord,
+      PtrUInt) and user aliases alike; arm64 matched only the classic names
+      and stored the rest as 4-byte .word }
+    procedure TestCodegen_ConstArray_AliasElementWidths;
     { a routine-local array const is a private data item }
     procedure TestCodegen_LocalArrayConst_PrivateDataLabel;
     { Exported interface constant is visible in importing program }
@@ -697,6 +702,33 @@ begin
     SA.Free();
     Prog.Free();
   end;
+end;
+
+procedure TConstTests.TestCodegen_ConstArray_AliasElementWidths;
+const
+  Src = '''
+    program P;
+    type
+      TMyHalf = Int16;
+    const
+      A: array[0..1] of Int16 = (11, 12);
+      B: array[0..1] of UInt16 = (21, 22);
+      C: array[0..1] of QWord = (31, 32);
+      D: array[0..1] of PtrUInt = (41, 42);
+      E: array[0..1] of TMyHalf = (51, 52);
+    var I: Integer;
+    begin
+      I := 1;
+      WriteLn(A[I], B[I], C[I], D[I], E[I])
+    end.
+    ''';
+begin
+  AssertEquals('Int16', '', AsmMissing(Src, #9'.word 11', #9'.hword 11'));
+  AssertEquals('UInt16', '', AsmMissing(Src, #9'.word 21', #9'.hword 21'));
+  AssertEquals('QWord', '', AsmMissing(Src, #9'.quad 31', #9'.quad 31'));
+  AssertEquals('PtrUInt', '', AsmMissing(Src, #9'.quad 41', #9'.quad 41'));
+  AssertEquals('user alias of Int16', '',
+    AsmMissing(Src, #9'.word 51', #9'.hword 51'));
 end;
 
 initialization

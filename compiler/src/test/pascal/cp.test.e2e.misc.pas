@@ -23,6 +23,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { a const array of an aliased element type (Int16, UInt16, QWord, a user
+      alias) stores and reads back elements at the type's true width }
+    procedure TestRun_ConstArray_AliasElementWidths;
     { a program's overloaded forward declarations pair with their bodies:
       an earlier routine calls each overload before its body appears }
     procedure TestRun_ProgramOverloadForward_CallsEachBody;
@@ -4688,6 +4691,28 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'int 42' + #10 + 'str abc' + #10, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_ConstArray_AliasElementWidths;
+const
+  Src = '''
+    program P;
+    type
+      TMyHalf = Int16;
+    const
+      A: array[0..2] of Int16 = (1, 2, -3);
+      Q: array[0..2] of QWord = (10, 20, 30);
+      W: array[0..2] of UInt16 = (100, 200, 300);
+      M: array[0..2] of TMyHalf = (7, 8, 9);
+    var I: Integer;
+    begin
+      for I := 1 to 2 do
+        WriteLn(A[I], ' ', Q[I], ' ', W[I], ' ', M[I])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2 20 200 8' + #10 + '-3 30 300 9' + #10, 0);
 end;
 
 initialization

@@ -16140,6 +16140,7 @@ var
   procedure EmitOne(ACD: TConstDecl; const ALbl: string);
   var
     E: Integer;
+    IsFloat: Boolean;
   begin
     { A unit's INTERFACE-section const is referenced from other separately-
       compiled .o files under incremental compilation and must be exported;
@@ -16194,21 +16195,13 @@ var
     Self.Emit(SecRodata());
     Self.Emit('.balign 8');
     Self.Emit(ALbl + ':');
-    if SameText(ACD.ArrayElemType, 'Byte') or
-       SameText(ACD.ArrayElemType, 'Boolean') then
-      Dir := #9'.byte '
-    else if SameText(ACD.ArrayElemType, 'SmallInt') or
-            SameText(ACD.ArrayElemType, 'Word') then
-      Dir := #9'.hword '
-    else if SameText(ACD.ArrayElemType, 'Int64') or
-            SameText(ACD.ArrayElemType, 'UInt64') then
-      Dir := #9'.quad '
-    else if SameText(ACD.ArrayElemType, 'Double') then
-      Dir := #9'.double '
-    else if SameText(ACD.ArrayElemType, 'Single') then
-      Dir := #9'.float '
+    case Self.ConstElemSize(ACD.ArrayElemType, IsFloat) of
+      1: Dir := #9'.byte ';
+      2: Dir := #9'.hword ';
+      8: if IsFloat then Dir := #9'.double ' else Dir := #9'.quad ';
     else
-      Dir := #9'.word ';
+      if IsFloat then Dir := #9'.float ' else Dir := #9'.word ';
+    end;
     for E := 0 to ACD.ArrayElements.Count - 1 do
       Self.Emit(Dir + ACD.ArrayElements.Strings[E]);
   end;
