@@ -1,0 +1,583 @@
+= Type Standardisation: Platform-Honest Integer and Float Types
+:toc:
+:toclevels: 3
+:sectnums:
+
+Status: ACCEPTED — all design decisions signed off 2026-10-19. +
+Release placement: phases 0–3 (additive, non-breaking) target *v0.15.0*;
+phases 4–7 (breaking) open the *v0.16* development cycle. +
+Scope: surface type system (builtin type names), stdlib API signatures,
+compatibility unit, migration tooling, rollout across the self-hosting chain. +
+Origin: community announcement in
+https://github.com/graemeg/blaise/discussions/106[discussion #106]; first
+drafted 2026-07-10, revised 2026-10-19.
+
+== Motivation
+
+=== The `Integer`/`Cardinal` lie
+
+Pascal introduced semantic type names so code would scale across 16-, 32- and
+64-bit platforms:
+
+* `Integer` — "the natural signed integer for this platform"
+* `Cardinal` — "the natural unsigned integer for this platform"
+
+When 64-bit systems became ubiquitous in the mid-2000s, Delphi and FPC froze
+both at 32 bits for backwards compatibility. The original promise of
+platform-native sizing is gone; the names now suggest something they do not
+deliver. On a modern 64-bit machine:
+
+[source,pascal]
+----
+{ FPC/Delphi on a 64-bit system }
+var x: Integer;        { 32-bit, despite the name }
+var y: Cardinal;       { 32-bit, despite the name }
+var z: Int64;          { 64-bit as expected }
+----
+
+Blaise documents its own `Integer` honestly as a fixed 32-bit type
+(`docs/language-rationale.adoc`, integer types section), so within Blaise the
+defect is one of connotation rather than of behaviour. The substantive problem
+is different: Blaise has *no default integer type that matches the machine*.
+Lengths, counts and indices are 32-bit, which imposes a 2^31^-element ceiling
+on strings, `RawBytes` and collections in a 64-bit systems language, and every
+developer arriving from Go, Swift or Rust must first learn which of several
+historical names to use.
+
+=== The floating-point mess
+
+The classic float family has the same disease plus an architecture trap:
+
+* `Real` — "platform-native", in practice frozen (usually 64-bit)
+* `Single` / `Double` — 32-/64-bit IEEE 754 (fine, but inconsistent naming)
+* `Extended` — 80-bit x87 only; code using it does not port to ARM or RISC-V
+* `Comp` — an obsolete 64-bit integer in float clothing
+
+Blaise currently provides only `Single` and `Double`; `Real`, `Extended`,
+`Comp` and `Currency` were never adopted (`Currency` is dropped in favour of a
+stdlib decimal type; see `docs/future-improvements.adoc`).
+
+=== The clean-slate opportunity
+
+Blaise carries no legacy code base and no 1980s promises. It can choose names
+that are honest, consistent, and familiar to developers arriving from Go,
+Swift, Rust or Zig. Critically, it chooses *new* names rather than silently
+redefining old ones — redefining `Integer` to be 64-bit would be strictly
+worse than dropping it, because ported code would change meaning without
+changing text.
+
+== Current state (2026-10-19)
+
+The builtin integer and float names registered in
+`TSymbolTable.RegisterBuiltins` (`compiler/src/main/pascal/uSymbolTable.pas`):
+
+[cols="1,1,2", options="header"]
+|===
+| `TTypeKind` | Canonical name | Existing aliases
+
+| `tyInteger`  | `Integer`  | —
+| `tyInt64`    | `Int64`    | —
+| `tyUInt32`   | `UInt32`   | `Cardinal`
+| `tyUInt64`   | `UInt64`   | `QWord`, `PtrUInt`
+| `tySmallInt` | `SmallInt` | `Int16`
+| `tyWord`     | `Word`     | `UInt16`
+| `tyByte`     | `Byte`     | —
+| `tySingle`   | `Single`   | —
+| `tyDouble`   | `Double`   | —
+|===
+
+Observations relevant to this design:
+
+* There is *no signed 8-bit type kind*. `Int8` (and `ShortInt` in the
+  compatibility unit) cannot be a pure alias; it requires a new `TTypeKind`.
+* Missing names: `Int8`, `Int32`, `UInt8`, `Int`, `UInt`, `Float`,
+  `Float32`, `Float64`.
+* Every currently supported target — Linux x86-64, FreeBSD x86-64, macOS
+  arm64 — is LP64. A platform-sized `Int` is therefore 64-bit everywhere
+  today.
+* Generic instantiation already treats aliases as one type: `TList<Int16>` and
+  `TList<SmallInt>` in one program share an instance and link cleanly
+  (verified 2026-10-19).
+* Overload declaration does *not*: two overloads differing only by an alias are
+  accepted and collide in the assembler. Tracked as
+  `BUG-20261019-alias-duplicate-overload`; see <<d12>>.
+* `Format('%d', [AnInt64])` formats the full 64-bit value (verified
+  2026-10-19), so the Phase 0 prerequisite of the original draft is already
+  met. The `%u` (unsigned decimal) specifier is not supported.
+* `docs/language-rationale.adoc` currently records "platform-native integer
+  width" as a *rejected* alternative. Phase 3 revises that section.
+
+== The type families
+
+[cols="1,2,2", options="header"]
+|===
+| Family | Types | Meaning
+
+| Platform-native integer
+| `Int`, `UInt`
+| Pointer-width signed/unsigned integer (64-bit on every currently supported
+  target; 32-bit on a future 32-bit target)
+
+| Fixed-width integer
+| `Int8`, `Int16`, `Int32`, `Int64` +
+  `UInt8`, `UInt16`, `UInt32`, `UInt64`
+| Exactly the stated width, on every platform, forever
+
+| Floating point
+| `Float`, `Float32`, `Float64`
+| IEEE 754; see <<float-sizing>> — `Float` is a fixed alias of `Float64`,
+  NOT platform-sized
+
+| Octet
+| `Byte`
+| Builtin alias of `UInt8`; see D7
+
+| Unchanged
+| `Boolean`, `Char`, `String`, `Pointer`, `RawBytes`
+| Not part of this standardisation
+|===
+
+Removed as builtins in Phase 6 (available afterwards only via the
+compatibility unit, <<classic-unit>>):
+`Integer`, `Cardinal`, `Single`, `Double`, `SmallInt`, `Word`, `QWord`,
+`PtrUInt`. The compatibility unit additionally supplies names Blaise never
+had as builtins: `ShortInt`, `LongInt`, `LongWord`, `NativeInt`,
+`NativeUInt`, `PtrInt`, `Real`, `Extended`, `Comp`.
+
+Design properties this buys:
+
+* *Honesty* — `Int` genuinely adapts to the platform, and the documentation
+  says so upfront.
+* *Clarity in systems code* — `UInt32` or `Float64` means exactly that width,
+  always, everywhere.
+* *Uniform naming* — everything derives from `Int`, `UInt` or `Float`;
+  the fixed-width name is the base name plus its width.
+* *Portability by default* — no x86-only `Extended`; nothing in the core
+  language is architecture-specific.
+* *Familiarity* — `Int` as the pointer-sized default matches Go `int`, Swift
+  `Int` and Rust `isize` (note the false friend in D9 for developers arriving
+  from Kotlin, Java or C#).
+
+== Design decisions
+
+All decisions below are *decided*. Each lists the options considered, the
+analysis, and the outcome.
+
+=== D1. `Int`/`UInt` platform-native sizing — decided
+
+*Options.*
+
+. Platform-native (Go `int`, Swift `Int`, Rust `isize`, Zig `usize`).
+. Fixed 64-bit under the name `Int` (C#'s `long`-by-another-name).
+. Retain frozen-32-bit semantics under a new name.
+
+*Analysis.* Pointer-width integers are justified by hardware reality: array
+indexing, lengths, memory sizes and pointer arithmetic genuinely scale with
+the platform word. Option 3 recreates the problem being solved. Option 2 is
+defensible but wastes the honest name — and on a hypothetical 32-bit embedded
+target it forces 64-bit arithmetic everywhere. Every currently supported
+target is 64-bit, so `Int` = `Int64` in practice; the 32-bit behaviour is a
+promise that stays untested until a 32-bit target exists. A future i386/arm32
+port must budget a revalidation pass for code that silently assumed 64-bit
+`Int`.
+
+*Decision.* Option 1, platform-native (pointer-sized). The untested-32-bit
+caveat is recorded in the language rationale.
+
+[#float-sizing]
+=== D2. `Float` sizing — decided: fixed alias of `Float64`
+
+*Original proposal.* `Float` (announced as `Real`) is platform-sized: 32-bit
+on 32-bit platforms, 64-bit on 64-bit platforms, for naming symmetry with
+`Int`.
+
+*Options.*
+
+. Platform-sized `Float` (the original proposal).
+. `Float` is a fixed alias of `Float64` on every platform.
+. No `Float` at all — users must write `Float32`/`Float64`.
+
+*Analysis.* The symmetry argument does not survive contact with hardware.
+`Int` tracks the platform word because pointers, indices and sizes do. Floats
+have no such coupling: a 32-bit x86 or ARM CPU has an FPU that processes
+64-bit doubles natively — there is no performance, ABI or correctness reason
+for a 32-bit platform to prefer 32-bit floats. No mainstream language ships a
+platform-sized float (C `double`, Go `float64`, Rust `f64`, Swift `Double`
+are all fixed), and the reason is semantic, not aesthetic: *integer width
+differences affect range; float width differences change every intermediate
+rounding.* A `Float` whose precision varies by target makes the same program
+print different numbers on different platforms — numeric drift that no test
+suite on the primary platform will ever catch. It also poisons constant
+folding: the compiler could not fold `X / 3.0` without knowing the target's
+`Float` width, and cross-compiled output would differ from host output in
+ways unrelated to the target OS.
+
+*Decision.* Option 2: `Float` is a fixed, transparent alias of `Float64`
+everywhere — the universal "default float is double" convention. This keeps
+the naming family (`Float`, `Float32`, `Float64`), answers the naming
+consistency question raised in the discussion (`Real` breaking the
+`Int`/`UInt` pattern), and discards only the trap. The asymmetry with `Int`
+is deliberate: it is exactly the asymmetry the hardware has.
+
+=== D3. Alias or distinct nominal type? — decided: transparent alias
+
+*Question.* On x86-64, is `Int` *the same type* as `Int64`, or a distinct
+type of identical width?
+
+*Options.*
+
+. Transparent alias: `Int` and `Int64` are two names for one type.
+. Distinct nominal types of equal width, implicitly convertible.
+. Distinct and explicitly convertible only.
+
+*Prior art.* Go uses a transparent alias only for `byte`/`uint8` and
+`rune`/`int32`; Go's `int` is a *distinct* type from `int64`, requiring
+explicit conversion. Swift's `Int` is likewise distinct from `Int64`. The
+languages whose `Int` Blaise follows therefore chose option 3, not option 1.
+
+*Analysis.* Distinct types make an overload pair `F(Int)` / `F(Int64)` a
+legal, portable pair on every target — which removes the overload-collision
+concern raised in the discussion. The cost is conversion noise at every
+boundary between "general" and "systems" code, and an overload resolver that
+needs ranking rules when an argument converts implicitly to both (option 2),
+plus extra work in the constant typer and generics instantiation. With a
+transparent alias, `F(Int)` and `F(Int64)` collide on 64-bit targets but
+would not collide on a 32-bit target. That asymmetry is acceptable: it can
+only affect code first written on a 32-bit Blaise, which does not exist; the
+collision is a compile-time error, never a silent change of meaning; and
+overload sets should be written in fixed-width terms anyway. The alias model
+requires the collision to be *reported correctly* at declaration, which today
+it is not (<<d12>>).
+
+*Decision.* Option 1, transparent alias, resolved at type-registration time
+per target.
+
+*Mechanics.*
+
+* All new names except `Int8` map onto existing `TTypeKind`s (`Int32` →
+  `tyInteger`, `UInt8` → `tyByte`, `Float64` → `tyDouble`, `Float32` →
+  `tySingle`, `Int` → `tyInt64`, `UInt` → `tyUInt64`, ...). The internal
+  enumeration keeps its constant names.
+* `Int8` requires a *new* `TTypeKind` (signed 8-bit). That is the only part
+  of Phase 1 with codegen impact: sign-extending loads and stores on both
+  ISAs, range checks, conversions, `.bif` encoding, `EmitTypeDesc` in
+  `uDebugOPDF.pas`, and the `flag-coverage` baseline.
+* No OPDF specification or pdr change is required for `Int8`: the OPDF
+  primitive record already carries a byte size and an `IsSigned` flag, and
+  pdr's integer formatter (`pdr_typesys.pas`) already decodes a signed
+  1-byte value. The emitter needs only a `SK_INTEGER`/`IsSigned = 1` case for
+  the new kind.
+* Diagnostics, RTTI and OPDF print the `TTypeDesc` name. Until Phase 6 those
+  stay as they are (`Integer`, `SmallInt`, `Double`, ...) so existing test
+  expectations do not churn; Phase 6 renames the canonical display names to
+  the fixed-width spellings (`Int32`, `Int16`, `Float64`, ...).
+
+=== D4. Literal typing and promotion — decided: context-typed
+
+*Question.* What is the type of the literal `42`? Of `3.14`?
+
+*Options.*
+
+. Integer literals default to `Int`; float literals to `Float` (= `Float64`).
+. Integer literals default to `Int32`, widening on demand.
+. Literals are untyped-until-context (Go/Zig `comptime_int` style), defaulting
+  to `Int`/`Float64` when context gives no hint.
+
+*Current behaviour.* An unhinted integer literal is typed by magnitude
+(`Integer` if it fits in 32 bits, else `Int64`, else `UInt64`), and the
+semantic pass already performs hinted analysis (`AnalyseExprHinted`).
+
+*Analysis.* Option 3 is closest to current behaviour and gives the best
+ergonomics: `var B: UInt8 = 255;` works without casts, and an unhinted `42`
+lands on `Int`. Option 2 recreates FPC's 32-bit default and makes `Int`
+second-class in its own language. With `Float` fixed at 64-bit (D2), float
+literal folding is target-independent. Because Blaise has no inline `var`
+and no variable type inference, the blast radius of the default is smaller
+than in Go or Swift: it is visible mainly in overload resolution
+(`F(Integer)` vs `F(Int64)` called with `42`), generic argument inference, and
+the width of intermediate arithmetic (`1 shl 40`).
+
+*Decision.* Option 3: context-typed literals with `Int` / `Float64` defaults.
+
+*Placement.* Changing the unhinted default from 32-bit to `Int` alters
+overload selection and intermediate-arithmetic width for existing code, so it
+is a breaking change and lands in Phase 4, together with D5. Phases 0–3 keep
+the current magnitude rule.
+
+=== D5. Standard function and collection signatures — decided: widen everything
+
+*Question.* What do `Length`, `Pos`, `IndexOf`, `Count`, `SizeOf`, `Ord`,
+`High`/`Low` return, and what does `SetLength` accept?
+
+This is the largest hidden cost in the whole proposal and drives most of the
+timeline. Today these traffic in 32-bit `Integer`. With `Int` as the
+language's default, they return `Int` — on current targets a widening from 32
+to 64 bits that ripples through every arithmetic expression, every `for` loop
+bound, and every stored index field (`Integer` occurs roughly 5,600 times
+across the compiler and stdlib sources).
+
+*Consequences to plan for:*
+
+* `TList<T>.FCount` and friends widening from 32 to 64 bits is a *field
+  layout change*: the full layout-change protocol applies (stage-2 rebuild
+  before trusting anything; refresh the `-pre` binary; `.bif` interface
+  version bump; OPDF field-offset records; `bif-coverage --reset`).
+* `for I := 0 to Length(S) - 1` — the loop variable's inferred type must
+  follow, or every such loop gains a hidden narrowing.
+* Code relying on 32-bit wraparound (hash functions in particular) must
+  keep explicit `UInt32`/`Int32` operands; the Phase 5 rename preserves
+  this, but any code that is *widened* instead of renamed must be audited.
+* `MaxInt` is a 32-bit builtin constant used as a "to end of string" sentinel
+  in `Copy`; it must be reviewed alongside the `Copy` count parameter.
+* `Format('%d')` already handles 64-bit arguments; adding the `%u` (unsigned
+  decimal) specifier is a worthwhile companion change, so that `UInt` and
+  `UInt64` values above `High(Int64)` format correctly.
+
+*Options.*
+
+. Widen the full surface (`Length`, `Count`, `SetLength`, `IndexOf`, ...) to
+  `Int` in one coordinated change.
+. Keep 32-bit returns under the new spelling `Int32` and defer widening.
+. Widen `Length`/`SetLength` (language builtins) but keep collection `Count`
+  at `Int32`.
+
+*Analysis.* Option 3 creates a permanently inconsistent surface — the worst
+outcome. Option 2 is honest but bakes a 2-billion-element ceiling into a
+64-bit systems language and guarantees a second migration later, when there
+will be more code and more external users. Option 1 costs one coordinated,
+well-understood layout-change cycle now, while the user base is small.
+
+*Decision.* Option 1, as its own phase (Phase 4) with the full verification
+battery, at the start of the v0.16 cycle.
+
+=== D6. Steering users away from `UInt` for counting
+
+`for I := Count - 1 downto 0` with an unsigned index underflows at zero and
+never terminates — the classic unsigned-loop trap, and the reason Go made
+`len()` signed. `Length`/`Count` therefore return *signed* `Int`, and the
+documentation states plainly: use `Int` for counting and indexing; reserve
+`UInt`/`UIntNN` for bit manipulation, hashes, and formats that are defined as
+unsigned. A semantic warning on `downto 0` over an unsigned loop variable is
+a cheap diagnostic added in Phase 4.
+
+=== D7. Which classic names survive as builtins? — decided: `Byte` only
+
+*Analysis.* `Byte` is semantic rather than legacy — "one raw octet" versus
+"a small number". Go kept `byte` as an alias of `uint8` for exactly this
+reason, Blaise's `RawBytes`-centric binary I/O reads naturally with it, and
+the discussion asked for it to stay. Everything else in the classic family
+(`Word`, `SmallInt`, `ShortInt`, `LongInt`, `Cardinal`, `Integer`, `Single`,
+`Double`, `Real`) carries FPC's frozen-width connotations and belongs in the
+compatibility unit only.
+
+*Decision.* `Byte` remains a builtin, as a transparent alias of `UInt8`
+(`UInt8` becomes the canonical display name in Phase 6). `Char` is unrelated
+to this proposal and stays.
+
+[#classic-unit]
+=== D8. The `ClassicPascalTypes` compatibility unit
+
+An opt-in stdlib unit restoring the familiar names as transparent aliases,
+for porting FPC/Delphi code. (The announcement called it
+`LegacyPascalTypes`; `ClassicPascalTypes` was chosen as the friendlier name.)
+
+[cols="1,1,2", options="header"]
+|===
+| Classic name | Maps to | Note
+
+| `Integer`     | `Int32`   | Frozen width preserved — ported code keeps its semantics
+| `Cardinal`    | `UInt32`  |
+| `SmallInt`    | `Int16`   |
+| `ShortInt`    | `Int8`    | Requires the new signed 8-bit kind (D3)
+| `Word`        | `UInt16`  |
+| `LongInt`     | `Int32`   |
+| `LongWord`    | `UInt32`  |
+| `QWord`       | `UInt64`  |
+| `NativeInt`   | `Int`     |
+| `NativeUInt`  | `UInt`    |
+| `PtrInt`      | `Int`     |
+| `PtrUInt`     | `UInt`    |
+| `Single`      | `Float32` |
+| `Double`      | `Float64` |
+| `Real`        | `Float64` |
+| `Extended`    | `Float64` | Precision CHANGE versus x86 FPC: 80-bit results become 64-bit — documented prominently
+| `Comp`        | `Int64`   | It always was one
+|===
+
+Key points:
+
+* The mapping is deliberately *frozen-width* (`Integer` → `Int32`, not
+  `Int`): ported code keeps the semantics it was written against.
+* `Extended` → `Float64` silently changes results for code that genuinely
+  exploited 80-bit intermediates. The unit's documentation carries a warning,
+  and the migration analyser flags every `Extended` use site.
+* `Int64`/`UInt64` need no entry — the names are already canonical.
+* Mechanically the unit is exported type aliases. Between Phase 2 and Phase 6
+  several of its names (`Integer`, `Double`, ...) also exist as builtins; the
+  unit-scope alias then shadows an identical builtin type, which must be
+  proven harmless by tests in Phase 2.
+
+=== D9. The C interop false-friend
+
+For the fixed-width family, C interop is self-describing (`Int32` ↔
+`int32_t`). The trap is the short name: on LP64 targets, C `int` is 32-bit but
+Blaise `Int` is 64-bit. Go users hit the equivalent trap constantly, and
+developers arriving from Kotlin, Java or C# — where `Int`/`int` is a fixed
+32-bit type — meet the same false friend. The interop documentation states
+the rule in one line — *when transcribing a C header, C `int` is `Int32`, C
+`long` on LP64 is `Int64`, and Blaise `Int` corresponds to C
+`intptr_t`/`ssize_t`, never to C `int`* — and the migration analyser's report
+and `bindgen` output follow that mapping.
+
+=== D10. Compiler-internal usage
+
+The compiler, runtime and stdlib use the fixed-width names. The
+behaviour-preserving migration is the *mechanical rename* `Integer` → `Int32`,
+`Cardinal` → `UInt32`, `Double` → `Float64` etc., which changes no layout, no
+semantics and no generated code — an ideal fixpoint-verified commit.
+Opportunistic *widening* of internal fields to `Int` is a separate,
+case-by-case decision outside the rename (widening a field is a layout
+change; see D5). The internal `TTypeKind` enumeration keeps its existing
+constant names — renaming `tyInteger` across the source tree buys nothing and
+risks much.
+
+=== D11. Removal without a deprecation period — decided
+
+*Options.*
+
+. The old builtin names emit a deprecation warning for one release, then are
+  removed.
+. Hard removal in Phase 6, with a targeted error message.
+
+*Analysis.* Blaise is at an early stage; its users expect breaking change
+between releases, and a warning cycle would delay the flip by a full release
+for little benefit. Guidance is better delivered by tooling than by the
+compiler: BlaiseGuard already performs source analysis and can report every
+classic type name together with its recommended replacement.
+
+*Decision.* Option 2. The compiler emits no deprecation warnings. After
+Phase 6 an unknown classic name produces an error that names the fix
+("`Integer` is not a builtin type — use `Int32` (or `Int`), or add
+`uses ClassicPascalTypes`"). A new BlaiseGuard rule, introduced in Phase 2,
+reports classic type names with the recommended migration (`Integer` →
+`Int32`, or `Int` for counts and indices; `Double` → `Float64`; `Extended` →
+`Float64` with a precision warning; ...).
+
+[#d12]
+=== D12. Alias-identical overloads are a declaration error — decided
+
+*Problem.* Two `overload` routines whose parameter types differ only by an
+alias (`UInt32`/`Cardinal`, `Int16`/`SmallInt`) are accepted today. With no
+call site the build fails in the internal assembler (`duplicate label:
+_F_D_u`); with a call site the error is "Ambiguous overload" at the call
+rather than at the declaration (`BUG-20261019-alias-duplicate-overload`).
+This design adds several new alias pairs (`Int`/`Int64`, `Byte`/`UInt8`,
+`Float`/`Float64`, `Int32`/`Integer`), which would make the defect common.
+
+*Decision.* Overload signatures are compared by resolved type identity, and a
+duplicate is rejected at the second declaration with a message that names
+the alias relationship, for example: "Overload of 'F' has the same signature
+as the declaration at line 2 (`Int` and `Int64` are the same type on this
+target)". This is fixed first, in Phase 0.
+
+== Revisions to the original announcement
+
+The announcement in discussion #106 is revised on the following points:
+
+. *Platform-sized `Real`* — replaced by `Float`, a fixed alias of `Float64`
+  (D2).
+. *`LegacyPascalTypes`* — renamed `ClassicPascalTypes` (D8).
+. *`Byte`* — stays as a builtin alias of `UInt8` (D7), following community
+  feedback.
+. *"Rolling out over the next few days"* — the self-hosting chain makes that
+  unrealistic for the full migration. Every new type name must be *taught* to
+  the compiler in one commit before any later commit may *use* it (the
+  teach-then-use rule the rolling bootstrap enforces), the stdlib widening is
+  a field-layout change requiring the full stage-2 and fixpoint discipline,
+  and the final removal of the old builtins touches every test source. The
+  realistic shape is: additive half in v0.15.0, breaking half at the start of
+  the v0.16 cycle, where it gets CI soak time before the next release.
+
+[#timeline]
+== Implementation timeline
+
+Ordered for the self-hosting chain: each phase is one or more commits, each
+commit passes the full verification battery (the five fixpoint scripts plus
+the full test suite built by the stage-2 compiler, on Linux x86-64 and macOS
+arm64), and no commit uses a name the previous commit's binary does not know.
+Every new language-visible name gets a semantic unit test and an e2e test, per
+the project's test rules.
+
+=== v0.15.0 — additive, nothing breaks
+
+*Phase 0 — prerequisites.*
+
+* Fix `BUG-20261019-alias-duplicate-overload` (D12): reject alias-identical
+  overload signatures at declaration.
+* `Format('%d')` 64-bit support: already in place (verified 2026-10-19); no
+  work required.
+
+*Phase 1 — teach the names.*
+
+* Register `Int`, `UInt`, `Int32`, `UInt8`, `Float`, `Float32` and `Float64`
+  as builtin aliases in `uSymbolTable` (`Int16`/`UInt16` already exist).
+  Nothing is removed or renamed; diagnostics keep their current type names.
+* Add the signed 8-bit `TTypeKind` and register `Int8`: codegen on both ISAs,
+  conversions and range checks, `.bif` encoding (IFACE version bump),
+  `bif-coverage` and `flag-coverage` baselines, and a signed 1-byte case in
+  `EmitTypeDesc` (`uDebugOPDF.pas`). The OPDF specification and pdr need no
+  change (see D3); a pdr integration check that prints an `Int8` local
+  confirms it.
+* Unit tests and e2e tests for every new name on both ISAs, including an
+  overload test proving `F(Int)`/`F(Int64)` is rejected per D12.
+
+*Phase 2 — compatibility and tooling.*
+
+* `ClassicPascalTypes` stdlib unit with the full D8 table, plus stdlib tests
+  (including the builtin-shadowing case from D8).
+* BlaiseGuard rule reporting classic type names with recommended migrations
+  (D11).
+* Migration-analyser mapping (`Integer` → `Int32` suggestion, `Extended`
+  flag, C-interop table from D9 in the report output).
+
+*Phase 3 — documentation.*
+
+* `docs/language-rationale.adoc`: replace the "platform-native integer width
+  — rejected" alternative with the decisions in this document (D1–D12), and
+  record the literal-typing rule change scheduled for Phase 4.
+* `docs/grammar.ebnf`: no rule change is expected (builtin type names are
+  identifiers, not grammar productions); confirm and note.
+* README and user-facing documentation present `Int`/`UInt` and the
+  fixed-width names as the recommended types.
+* v0.15.0 is cut: new names available, nothing existing broken.
+
+=== v0.16 cycle — breaking
+
+*Phase 4 — literal typing and API widening.*
+
+* Context-typed literals with `Int`/`Float64` defaults (D4).
+* `Length`/`Pos`/`SetLength`/`IndexOf`/`Count` et al. move to `Int` (D5) in
+  one coordinated change. Full layout-change protocol: stage-2 rebuild,
+  `-pre` refresh, IFACE bump, OPDF offsets, warm-cache fixpoint attention.
+* Loop-variable inference and the D6 unsigned-`downto` diagnostic.
+
+*Phase 5 — mechanical rename of Blaise's own source.*
+
+* `Integer` → `Int32`, `Cardinal` → `UInt32`, `Double` → `Float64`, ... across
+  compiler, runtime, stdlib, tools and tests. Behaviour-preserving; the native
+  fixpoint diff should be empty modulo type-name strings. Several commits,
+  tree-region by tree-region, each green. The BlaiseGuard rule from Phase 2
+  doubles as the completeness check.
+
+*Phase 6 — remove the old builtins (the flip).*
+
+* Delete `Integer`, `Cardinal`, `Single`, `Double`, `SmallInt`, `Word`,
+  `QWord` and `PtrUInt` from `uSymbolTable`; rename the canonical display
+  names to the fixed-width spellings. External code uses
+  `ClassicPascalTypes`. Unknown classic names produce the D11 error message.
+
+*Phase 7 — post-flip cleanup.*
+
+* BlaiseGuard and migration-analyser self-check over the tree; FreeBSD
+  full-tier dispatch; refresh `-pre`; fold this document's decisions into the
+  language rationale as the permanent record.
