@@ -25,6 +25,7 @@ type
       MkObj().FC): arm64 stopped with 'read of a field of this type' }
     procedure TestCodegen_IntfAndMetaclassFieldOfCallResult;
     procedure TestCodegen_ProcFieldCall_AggregateResult;
+    procedure TestCodegen_AsCast_IntoFieldAndVarParam;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1188,6 +1189,37 @@ begin
     forms compile on both ISAs }
   AssertEquals('proc-field aggregate results compile', '',
     AsmMissing(Src, 'callq', 'blr'));
+end;
+
+procedure TInterfaceTests.TestCodegen_AsCast_IntoFieldAndVarParam;
+const
+  Src = '''
+      program P;
+      type
+        IThing = interface
+          function N(): Integer;
+        end;
+        THold = class
+          FS: IThing;
+          procedure SetFrom(O: TObject);
+        end;
+      procedure THold.SetFrom(O: TObject);
+      begin
+        FS := O as IThing
+      end;
+      procedure ByVar(O: TObject; var X: IThing);
+      begin
+        X := O as IThing
+      end;
+      begin
+      end.
+      ''';
+begin
+  { an as-cast stored into a field of Self or a var parameter: arm64
+    stopped with 'as-cast into this interface target', x86-64 with an
+    unsupported-RHS error }
+  AssertEquals('as-cast targets compile', '',
+    AsmMissing(Src, 'callq _GetItab', 'bl __GetItab'));
 end;
 
 initialization

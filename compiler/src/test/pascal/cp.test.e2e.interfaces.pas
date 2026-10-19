@@ -30,6 +30,10 @@ type
       receiver and on implicit Self, into every consumer }
     procedure TestRun_ProcFieldCall_AggregateResult;
     procedure TestRun_ProcFieldCall_AggregateResult_DiscardedAndRepeated;
+    { Obj as IFoo into every consumer: a field of Self, a var / out
+      parameter, Result, an element, an argument, a receiver; a borrowed
+      and an owned source; a failed cast in argument position raises }
+    procedure TestRun_AsCast_IntoEveryConsumer;
     { TGreet(MakeI()).X: the call's owned reference is released -- the shared
       object goes when its last real holder lets go }
     procedure TestRun_ClassCastOfInterfaceCall_ReleasesTheCallRef;
@@ -2257,6 +2261,69 @@ begin
     'sum 9' + LE + 'True' + LE + 'gone 5' + LE + 'x5 4' + LE +
     'gone 6' + LE + 'gone 7' + LE + 'gone 8' + LE + 'gone 9' + LE +
     'self sum 24' + LE + 'x9' + LE + 'end' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_AsCast_IntoEveryConsumer;
+const
+  Src = '''
+    program P;
+    uses sysutils;
+    type
+      IThing = interface
+        function N(): Integer;
+      end;
+      TThing = class(TObject, IThing)
+        FN: Integer;
+        function N(): Integer;
+        destructor Destroy(); override;
+      end;
+      TPlain = class end;
+      THold = class
+        FS: IThing;
+        procedure SetFrom(O: TObject);
+        function Get(O: TObject): IThing;
+      end;
+    function TThing.N(): Integer; begin Result := FN end;
+    destructor TThing.Destroy(); begin WriteLn('gone ', FN); inherited Destroy() end;
+    function Make(AN: Integer): TObject;
+    var T: TThing;
+    begin T := TThing.Create(); T.FN := AN; Result := T end;
+    procedure THold.SetFrom(O: TObject); begin FS := O as IThing end;
+    function THold.Get(O: TObject): IThing; begin Result := O as IThing end;
+    procedure ByVar(O: TObject; var X: IThing); begin X := O as IThing end;
+    procedure ByOut(O: TObject; out X: IThing); begin X := O as IThing end;
+    procedure Show(const X: IThing); begin WriteLn('show ', X.N()) end;
+    var
+      O: TObject; H: THold; I: IThing; A: array of IThing; K: Integer;
+    begin
+      O := Make(1);
+      H := THold.Create();
+      H.SetFrom(O); WriteLn('field ', H.FS.N());
+      ByVar(O, I); WriteLn('var ', I.N());
+      I := nil; ByOut(O, I); WriteLn('out ', I.N());
+      I := H.Get(O); WriteLn('result ', I.N());
+      SetLength(A, 1); A[0] := O as IThing; WriteLn('elem ', A[0].N());
+      Show(O as IThing);
+      K := (O as IThing).N(); WriteLn('recv ', K);
+      H.FS := Make(2) as IThing; WriteLn('owned ', H.FS.N());
+      Show(Make(3) as IThing);
+      try
+        Show(TPlain.Create() as IThing);
+        WriteLn('no raise')
+      except
+        on E: EInvalidCast do WriteLn('invalid cast')
+      end;
+      H.FS := nil; I := nil; SetLength(A, 0); O := nil;
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'field 1' + LE + 'var 1' + LE + 'out 1' + LE + 'result 1' + LE +
+    'elem 1' + LE + 'show 1' + LE + 'recv 1' + LE + 'owned 2' + LE +
+    'show 3' + LE + 'gone 3' + LE + 'invalid cast' + LE +
+    'gone 2' + LE + 'gone 1' + LE + 'end' + LE, 0);
 end;
 
 initialization

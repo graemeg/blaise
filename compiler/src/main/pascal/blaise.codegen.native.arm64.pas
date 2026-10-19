@@ -738,7 +738,6 @@ type
     function  RecordPropRead(AExpr: TASTExpr): TFieldAccessExpr;
     { x0 := address of a per-site scratch holding a record property's value }
     function EmitRecPropToTemp(AFld: TFieldAccessExpr): string;
-    procedure EmitInterfaceAsCast(AAsgn: TAssignment);
     { Load an interface-typed value into x0 (obj) / x1 (itab); True when the
       obj half is an OWNED +1 (a call result), False when it is borrowed. }
     function  EmitIntfPairToX0X1(AExpr: TASTExpr; AIntfType: TTypeDesc): Boolean;
@@ -8425,16 +8424,6 @@ begin
       EmitCallSym('_ClassRelease');
     Exit;
   end;
-  if (AAsgn.Expr is TAsExpr) and (AAsgn.Expr.ResolvedType <> nil) and
-     (AAsgn.Expr.ResolvedType.Kind = tyInterface) then
-  begin
-    { I := Obj as IFoo — runtime itab lookup through the impllist chain;
-      a nil result is an invalid cast }
-    if AAsgn.IsVarParam or (AAsgn.ImplicitSelfField <> nil) then
-      NotYet('as-cast into this interface target', AAsgn);
-    EmitInterfaceAsCast(AAsgn);
-    Exit;
-  end;
   if AAsgn.ImplicitSelfField <> nil then
   begin
     { FIntf := value inside a method: the pair is a field of Self }
@@ -8468,36 +8457,6 @@ begin
     returns through x0 }
   EmitStoreSlot('x0', AAsgn.Name);
   EmitStoreSlot('x1', AAsgn.Name + '_itab');
-end;
-
-procedure TArm64Backend.EmitInterfaceAsCast(AAsgn: TAssignment);
-var
-  AE: TAsExpr;
-  OkL: string;
-begin
-  AE := TAsExpr(AAsgn.Expr);
-  Self.EmitExprToX0(AE.Obj);
-  EmitPushX0();                     { the obj value }
-  { load the typeinfo address through EmitTypeinfoAddr so the symbol matches the
-    prefixed definition/impllist (LINK-1: a bare name here dangled). }
-  EmitTypeinfoAddr('x1', AE.TypeName);
-  EmitCallSym('_GetItab');       { x0 = itab or nil }
-  OkL := NewLabel('asok');
-  Self.Emit(Format(#9'cbnz x0, %s', [OkL]));
-  EmitRaiseInvalidCast();
-  Self.Emit(OkL + ':');
-  EmitStoreSlot('x0', AAsgn.Name + '_itab');
-  { obj half with the usual ARC: retain new (borrowed source), release old.
-    An OWNED source (I := MakeObj() as IFoo) hands its +1 to the variable. }
-  if not ArcExprOwnsRef(AE.Obj) then
-  begin
-    Self.Emit(#9'ldr x0, [sp]');    { peek the obj }
-    EmitCallSym('_ClassAddRef');
-  end;
-  EmitLoadSlot('x0', AAsgn.Name);
-  EmitCallSym('_ClassRelease');
-  EmitPopTo('x0');
-  EmitStoreSlot('x0', AAsgn.Name);
 end;
 
 function TArm64Backend.EmitIntfPairToX0X1(AExpr: TASTExpr;
@@ -8538,8 +8497,9 @@ begin
   begin
     { Obj as IFoo as a value (an argument, a field store): the itab comes
       from _GetItab, a failed cast raises EInvalidCast, and the obj half is
-      a borrow of the source -- the same lowering as EmitInterfaceAsCast }
-    { (an OWNED source -- MakeObj() as IFoo -- yields an owned obj half) }
+      a borrow of the source, or owned when the source is (MakeObj() as
+      IFoo).  Every target -- a variable, a field of Self, a var / out
+      parameter -- takes it through this one lowering. }
     Result := ArcExprOwnsRef(TAsExpr(AExpr).Obj);
     Self.EmitExprToX0(TAsExpr(AExpr).Obj);
     EmitPushX0();                     { the obj value }

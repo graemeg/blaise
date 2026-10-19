@@ -5074,12 +5074,9 @@ procedure TX86_64Backend.EmitInterfaceAssign(AAsgn: TAssignment);
 var
   Intf:    TInterfaceTypeDesc;
   ClassRT: TRecordTypeDesc;
-  AE:      TAsExpr;
   ItabSym: string;
   ObjOp:   string;
   ItabOp:  string;
-  LFail:   string;
-  LEnd:    string;
   ISFld:   TFieldInfo;
   WeakPar: TMethodParam;
 begin
@@ -5372,45 +5369,6 @@ begin
   if Self.IsIntfStackValue(AAsgn.Expr) then
   begin
     Self.EmitIntfStackValueStore(AAsgn.Expr, ObjOp, ItabOp);
-    Exit;
-  end;
-
-  { F := T as IFoo — runtime itab lookup via _GetItab(obj, typeinfo_IFoo).
-    A nil result means the cast failed; raise EInvalidCast. }
-  if (AAsgn.Expr is TAsExpr) and
-     (AAsgn.Expr.ResolvedType <> nil) and
-     (AAsgn.Expr.ResolvedType.Kind = tyInterface) then
-  begin
-    AE := TAsExpr(AAsgn.Expr);
-    Self.EmitExprToEax(AE.Obj);          { obj -> %rax }
-    Self.Emit(#9'pushq %rax');            { keep obj on the stack across calls }
-    Self.Emit(#9'movq %rax, %rdi');
-    Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi', [Self.IntfTypeInfoName(AE.TypeName)]));
-    Self.Emit(#9'callq _GetItab');         { itab -> %rax }
-    Self.Emit(#9'pushq %rax');            { keep itab; stack now (itab, obj) }
-    LFail := Self.NewLabel('as_fail');
-    LEnd  := Self.NewLabel('as_end');
-    Self.Emit(#9'testq %rax, %rax');
-    Self.Emit(#9'jz ' + LFail);
-    { Cast OK: addref new obj, release old, store obj + itab.  An OWNED
-      source (F := MakeObj() as IFoo) hands its +1 over -- retaining it again
-      leaked one object per cast. }
-    if not NativeExprOwnsRef(AE.Obj) then
-    begin
-      Self.Emit(#9'movq 8(%rsp), %rdi');   { obj }
-      Self.Emit(#9'callq _ClassAddRef');
-    end;
-    Self.Emit(Format(#9'movq %s, %%rdi', [ObjOp]));   { old obj }
-    Self.Emit(#9'callq _ClassRelease');
-    Self.Emit(#9'popq %rax');              { itab }
-    Self.Emit(Format(#9'movq %%rax, %s', [ItabOp]));
-    Self.Emit(#9'popq %rax');              { obj }
-    Self.Emit(Format(#9'movq %%rax, %s', [ObjOp]));
-    Self.Emit(#9'jmp ' + LEnd);
-    Self.Emit(LFail + ':');
-    Self.Emit(#9'addq $16, %rsp');         { discard pushed obj+itab }
-    Self.EmitRaiseInvalidCast();
-    Self.Emit(LEnd + ':');
     Exit;
   end;
 
@@ -7649,6 +7607,7 @@ begin
   Result := (AExpr.ResolvedType <> nil) and
     (AExpr.ResolvedType.Kind = tyInterface) and
    (Self.IsIntfCallResult(AExpr) or IsProcFieldCallExpr(AExpr) or
+    (AExpr is TAsExpr) or
     ((AExpr is TMethodCallExpr) and
      (TMethodCallExpr(AExpr).ResolvedClassType <> nil)) or
     (AExpr is TIndirectFuncCallExpr) or
@@ -7678,6 +7637,7 @@ end;
 
 function TX86_64Backend.EmitIntfValueOnStack(AExpr: TASTExpr): Boolean;
 var
+  LOk: string;
   Synth: TMethodCallExpr;
   RecvFAE: TFieldAccessExpr;
   SynthArgs: TObjectList;
@@ -7695,6 +7655,32 @@ begin
   if Self.IsIntfCallResult(AExpr) then
   begin
     Self.EmitIntfSretCall(TFuncCallExpr(AExpr));
+    Exit;
+  end;
+  if AExpr is TAsExpr then
+  begin
+    { Obj as IFoo: the itab from _GetItab, a failed cast raises
+      EInvalidCast; a borrowed obj is retained, so every consumer sees the
+      same owned pair as from a call (an owned source hands its +1 over) }
+    Self.EmitExprToEax(TAsExpr(AExpr).Obj);
+    Self.Emit(#9'pushq %rax');            { itab slot, filled below }
+    Self.Emit(#9'pushq %rax');            { obj }
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
+      [Self.IntfTypeInfoName(TAsExpr(AExpr).TypeName)]));
+    Self.Emit(#9'callq _GetItab');
+    LOk := Self.NewLabel('as_ok');
+    Self.Emit(#9'testq %rax, %rax');
+    Self.Emit(#9'jnz ' + LOk);
+    Self.Emit(#9'addq $16, %rsp');
+    Self.EmitRaiseInvalidCast();
+    Self.Emit(LOk + ':');
+    Self.Emit(#9'movq %rax, 8(%rsp)');
+    if not NativeExprOwnsRef(TAsExpr(AExpr).Obj) then
+    begin
+      Self.Emit(#9'movq (%rsp), %rdi');
+      Self.Emit(#9'callq _ClassAddRef');
+    end;
     Exit;
   end;
   if IsProcFieldCallExpr(AExpr) then
@@ -13540,24 +13526,6 @@ begin
       Self.Emit(#9'pushq %rax');         { push obj }
       Self.Emit(Format(#9'leaq %s(%%rip), %%rax', [ItabSym]));
       Self.Emit(#9'pushq %rax');         { push itab }
-    end
-    else if AArg is TAsExpr then
-    begin
-      { T as IFoo: runtime itab lookup. }
-      Self.EmitExprToEax(TAsExpr(AArg).Obj);
-      Self.Emit(#9'pushq %rax');         { save obj for push below }
-      Self.Emit(#9'movq %rax, %rdi');
-      Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
-        [Self.IntfTypeInfoName(TAsExpr(AArg).TypeName)]));
-      Self.Emit(#9'callq _GetItab');
-      Self.Emit(#9'pushq %rax');         { itab on top; obj below }
-      { Stack top: itab, below: obj — but we need obj first (lower slot).
-        Swap: pop itab into %rcx, leave obj on stack, push itab back. }
-      Self.Emit(#9'popq %rcx');          { rcx = itab }
-      { %rax is still obj (was saved before callq). Re-load from stack: }
-      Self.Emit(#9'movq (%rsp), %rax'); { rax = obj (already on stack) }
-      { Stack already has obj; push itab on top. }
-      Self.Emit(#9'pushq %rcx');         { itab on top, obj below ✓ }
     end
     else if (AArg is TIdentExpr) and
             TIdentExpr(AArg).IsImplicitSelf and
