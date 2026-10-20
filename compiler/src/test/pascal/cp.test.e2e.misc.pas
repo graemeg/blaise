@@ -121,6 +121,11 @@ type
       with no 'Self.' prefix), as an expression and as a statement. }
     procedure TestRun_ImplicitSelfProcField_Expr;
     procedure TestRun_ImplicitSelfProcField_Stmt;
+    { FInner.FP(7); as a statement inside a method, FInner a field of Self
+      and FP a procedural field of its class -- plain, 'reference to' and
+      'of object' (BUG-20260923-implicit-field-procfield-stmt: "Class
+      'TInner' has no method 'FP'") }
+    procedure TestRun_ImplicitFieldProcField_Stmt;
 
     { Default parameters }
     procedure TestRun_DefaultParam_OmitLast;
@@ -1391,6 +1396,44 @@ procedure TE2EMiscTests.TestRun_ImplicitSelfProcField_Stmt;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcImplicitProcFieldStmt, 'hi' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_ImplicitFieldProcField_Stmt;
+const
+  Src = '''
+    program PFS;
+    type
+      TP = procedure(N: Integer);
+      TC = reference to procedure(N: Integer);
+      TM = procedure(N: Integer) of object;
+      TInner = class
+        FP: TP;
+        FC: TC;
+        FM: TM;
+        procedure Show(N: Integer);
+      end;
+      TBox = class
+        FInner: TInner;
+        procedure Run;
+      end;
+    procedure TInner.Show(N: Integer); begin WriteLn('m ', N); end;
+    procedure Plain(N: Integer); begin WriteLn('p ', N); end;
+    procedure TBox.Run;
+    begin
+      FInner.FP(7);
+      FInner.FC(8);
+      FInner.FM(9);
+    end;
+    var B: TBox;
+    begin
+      B := TBox.Create(); B.FInner := TInner.Create();
+      B.FInner.FP := @Plain; B.FInner.FC := @Plain; B.FInner.FM := @B.FInner.Show;
+      B.Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'p 7' + LE + 'p 8' + LE + 'm 9' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_DefaultParam_OmitLast;
