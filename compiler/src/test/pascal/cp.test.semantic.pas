@@ -35,6 +35,12 @@ type
       access (R.N), as it does for a bare identifier }
     procedure TestFieldAccess_FieldShadowsGlobal_InMethod;
     procedure TestSemantic_WriteFieldWidth_LowersToFormat;
+    { Succ/Pred take any ordinal -- Boolean too -- and no float (found by
+      the ordinal matrix) }
+    procedure TestSemantic_SuccPred_Boolean_Accepted;
+    procedure TestSemantic_SuccPred_Float_Rejected;
+    { Succ/Pred of a 64-bit value step in 64 bits (x86-64 used addl/subl) }
+    procedure TestCodegen_SuccPred_Int64_64BitStep;
     procedure TestSemantic_WriteFieldWidth_DecimalsOnInteger_Rejected;
     procedure TestSemantic_WriteFieldWidth_NonIntegerWidth_Rejected;
     procedure TestSemantic_WriteFieldWidth_UnsupportedType_Rejected;
@@ -593,6 +599,47 @@ begin
 end;
 
 { Write / WriteLn field widths (semantic lowering to Format). }
+procedure TSemanticTests.TestSemantic_SuccPred_Boolean_Accepted;
+begin
+  AssertEquals('no error', '', SemanticError('''
+    program P;
+    var B: Boolean;
+    begin
+      B := Succ(False);
+      B := Pred(B);
+    end.
+    '''));
+end;
+
+procedure TSemanticTests.TestSemantic_SuccPred_Float_Rejected;
+begin
+  AssertTrue('float rejected', Pos('requires an ordinal',
+    SemanticError('''
+      program P;
+      var D: Double;
+      begin
+        D := Succ(1.5);
+      end.
+      ''')) >= 0);
+end;
+
+procedure TSemanticTests.TestCodegen_SuccPred_Int64_64BitStep;
+const
+  Src = '''
+    program P;
+    var V: Int64;
+    begin
+      V := Pred(V);
+      V := Succ(V);
+    end.
+    ''';
+begin
+  AssertEquals('64-bit Pred', '',
+    AsmMissing(Src, #9'subq $1, %rax', #9'sub x0, x0, #1'));
+  AssertEquals('64-bit Succ', '',
+    AsmMissing(Src, #9'addq $1, %rax', #9'add x0, x0, #1'));
+end;
+
 procedure TSemanticTests.TestSemantic_WriteFieldWidth_LowersToFormat;
 var
   Prog: TProgram;

@@ -9320,9 +9320,19 @@ begin
     if (SameText(FC.Name, 'Succ') or SameText(FC.Name, 'Pred')) and
        (FC.Args.Count = 1) then
     begin
-      { Next/previous ordinal value: +1 / -1.  Result keeps the arg's type. }
+      { Next/previous ordinal value: +1 / -1.  Result keeps the arg's type,
+        so a 64-bit argument steps in 64 bits: the 32-bit form truncated
+        Pred(High(Int64)) to 4294967294 (found by the ordinal matrix). }
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
-      if SameText(FC.Name, 'Succ') then
+      if (FC.ResolvedType <> nil) and
+         (FC.ResolvedType.Kind in [tyInt64, tyUInt64]) then
+      begin
+        if SameText(FC.Name, 'Succ') then
+          Self.Emit(#9'addq $1, %rax')
+        else
+          Self.Emit(#9'subq $1, %rax');
+      end
+      else if SameText(FC.Name, 'Succ') then
         Self.Emit(#9'addl $1, %eax')
       else
         Self.Emit(#9'subl $1, %eax');

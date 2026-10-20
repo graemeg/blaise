@@ -15702,9 +15702,9 @@ begin
       AExpr.Line, AExpr.Col);
   end;
 
-  { Succ(x)/Pred(x): the next/previous value of an ordinal (enum or integer
-    family).  Result keeps the argument's type, so Succ(enum) is still that
-    enum.  Codegen lowers to +1 / -1 on the ordinal value.  Handled here,
+  { Succ(x)/Pred(x): the next/previous value of an ordinal (integer family,
+    enum or Boolean -- IsNumeric let a float through and refused Boolean).
+    Result keeps the argument's type, so Succ(enum) is still that enum.  Codegen lowers to +1 / -1 on the ordinal value.  Handled here,
     before the symbol lookup, since these are builtins with no symbol. }
   if SameText(AExpr.Name, 'Succ') or SameText(AExpr.Name, 'Pred') then
   begin
@@ -15712,10 +15712,10 @@ begin
       SemanticError(Format('%s requires exactly 1 argument', [AExpr.Name]),
         AExpr.Line, AExpr.Col);
     Result := Self.AnalyseListSlot(AExpr.Args, 0);
-    if (Result = nil) or
-       not ((Result.Kind = tyEnum) or Result.IsNumeric()) then
+    if (Result = nil) or not Result.IsOrdinal() then
       SemanticError(
-        Format('%s requires an ordinal (enum or integer) argument', [AExpr.Name]),
+        Format('%s requires an ordinal (integer, enum or Boolean) argument',
+          [AExpr.Name]),
         AExpr.Line, AExpr.Col);
     AExpr.ResolvedType := Result;
     Exit;
