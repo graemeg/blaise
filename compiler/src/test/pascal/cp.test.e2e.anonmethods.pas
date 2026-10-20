@@ -256,6 +256,8 @@ type
       copied 16 bytes from the Code word as an address; arm64 took the
       getter read for a plain field) }
     procedure TestRun_TMethodCastOfCallResult;
+    { a cast of a call result as a method-pointer / closure argument }
+    procedure TestRun_FatCastOfCallResult_AsArgument;
   end;
 
 implementation
@@ -3489,6 +3491,33 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'True' + LineEnding + '222' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_FatCastOfCallResult_AsArgument;
+const
+  Src = '''
+    program Prg;
+    type
+      TM = procedure(A: Integer) of object;
+      TC = reference to procedure(A: Integer);
+      TImp = class N: Integer; procedure M(A: Integer); end;
+    var Sum: Integer; O: TImp;
+    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
+    function GetM(): TM; begin Result := @O.M; end;
+    function GetC(): TC; begin Result := procedure(A: Integer) begin Sum := Sum + A end; end;
+    procedure Take(X: TM); begin X(10); end;
+    procedure TakeC(const X: TC); begin X(1000); end;
+    begin
+      O := TImp.Create(); O.N := 3;
+      Take(TM(GetM()));
+      TakeC(TC(GetC()));
+      TakeC(TC(GetM()));
+      WriteLn(Sum);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '4030' + LineEnding, 0);
 end;
 
 initialization

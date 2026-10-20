@@ -13274,8 +13274,9 @@ begin
     Self.Emit(#9'movq $0, (%rax)');
     Self.Emit(#9'movq $0, 8(%rax)');
   end
-  else if AArg is TAddrOfExpr then
-    { @Obj.M: the pair built in a scratch (the shared source lowering) }
+  else if (AArg is TAddrOfExpr) or Self.IsFatValueCast(AArg) then
+    { @Obj.M, TM(GetM()), TC(F): the pair built in a scratch, or the cast
+      operand's own address (the shared source lowering) }
     Self.EmitFatElemSourceAddr(AArg)
   else if AArg is TAnonMethodExpr then
     Self.EmitAnonValueToSlot(TAnonMethodExpr(AArg))

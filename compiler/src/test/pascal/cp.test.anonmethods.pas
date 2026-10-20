@@ -159,6 +159,10 @@ type
     { TMethod(GetM()): the pair a call returns is landed in a scratch whose
       address is the record value (x86-64 used the Code word as the address) }
     procedure TestCodegen_TMethodCastOfCall_UsesPairAddress;
+    { Take(TM(GetM())): a cast of a call result as a method-pointer argument
+      passes the address of the pair the call returned (x86-64 passed the
+      Code word as the address) }
+    procedure TestCodegen_FatCastArg_PassesPairAddress;
     procedure TestSemantic_UnretainedLocal_Constraints;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
@@ -1680,6 +1684,29 @@ const
     ''';
 begin
   AssertEquals('the pair lands in a scratch first', '',
+    AsmMissing(Src,
+      #9'callq GetM'#10#9'leaq _sacall_0(%rip), %rcx'#10 +
+        #9'movq %rax, (%rcx)'#10#9'movq %rdx, 8(%rcx)',
+      #9'bl _GetM'#10#9'sub x0, x29, #'));
+end;
+
+procedure TAnonMethodTests.TestCodegen_FatCastArg_PassesPairAddress;
+const
+  Src = '''
+    program Prg;
+    type
+      TM = procedure(A: Integer) of object;
+      TImp = class procedure M(A: Integer); end;
+    var O: TImp;
+    procedure TImp.M(A: Integer); begin end;
+    function GetM(): TM; begin Result := @O.M end;
+    procedure Take(X: TM); begin end;
+    begin
+      Take(TM(GetM()))
+    end.
+    ''';
+begin
+  AssertEquals('the pair lands in a scratch, whose address is the argument', '',
     AsmMissing(Src,
       #9'callq GetM'#10#9'leaq _sacall_0(%rip), %rcx'#10 +
         #9'movq %rax, (%rcx)'#10#9'movq %rdx, 8(%rcx)',
