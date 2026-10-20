@@ -14,7 +14,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TForTests = class(TTestCase)
@@ -54,6 +54,14 @@ type
     { ------------------------------------------------------------------ }
     { Codegen                                                              }
     { ------------------------------------------------------------------ }
+    { the loop leaves when the counter EQUALS the end, tested before the
+      step, so the loop ends even when the end is High(T) (GH #237) }
+    procedure TestCodegen_For_ExitTestBeforeStep;
+    { an unsigned counter's entry guard compares unsigned }
+    procedure TestCodegen_For_UnsignedCounter_UnsignedGuard;
+    { an Int8 global counter is stored at its declared width, not the
+      start expression's (a literal start made it a 4-byte store) }
+    procedure TestCodegen_For_Int8GlobalCounter_ByteStore;
   end;
 
 implementation
@@ -322,6 +330,56 @@ end;
 { ------------------------------------------------------------------ }
 { Codegen tests                                                        }
 { ------------------------------------------------------------------ }
+
+procedure TForTests.TestCodegen_For_ExitTestBeforeStep;
+const
+  Src = '''
+    program P;
+    var I: Int8; C: Integer;
+    begin
+      for I := Low(Int8) to High(Int8) do
+        C := C + 1;
+    end.
+    ''';
+begin
+  AssertEquals('equality exit', '',
+    AsmMissing(Src, 'je .Lflast', 'b.eq Lflast'));
+end;
+
+procedure TForTests.TestCodegen_For_UnsignedCounter_UnsignedGuard;
+const
+  Src = '''
+    program P;
+    var U, Hi: UInt64; C: Integer;
+    begin
+      Hi := 5;
+      for U := 1 to Hi do
+        C := C + 1;
+    end.
+    ''';
+begin
+  AssertEquals('unsigned entry guard', '',
+    AsmMissing(Src, 'ja .Lfend', 'b.hi Lfend'));
+end;
+
+procedure TForTests.TestCodegen_For_Int8GlobalCounter_ByteStore;
+const
+  Src = '''
+    program P;
+    var I: Int8; C: Integer;
+    begin
+      for I := 1 to 3 do
+        C := C + 1;
+    end.
+    ''';
+var
+  Code: string;
+begin
+  Code := GenAsm(Src, TargetX86_64);
+  AssertTrue('byte store of the counter', Pos('movb %al, I(%rip)', Code) >= 0);
+  AssertTrue('no 4-byte store of the counter',
+    Pos('movl %eax, I(%rip)', Code) < 0);
+end;
 
 initialization
   RegisterTest(TForTests);

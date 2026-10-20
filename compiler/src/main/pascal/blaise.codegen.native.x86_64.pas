@@ -787,6 +787,10 @@ type
     procedure EmitSretBufferSlideDown(AHoistTotal: Integer);
     { Lower a Write/WriteLn call (ANewline = WriteLn). }
     procedure EmitWrite(ACall: TProcCall; ANewline: Boolean);
+    procedure EmitCounterLoad(AFor: TForStmt; const AVarOp: string;
+      AVarType: TTypeDesc);
+    procedure EmitCounterStep(AFor: TForStmt; const AVarOp: string;
+      AVarType: TTypeDesc);
     { Lower a for loop. }
     procedure EmitForStmt(AFor: TForStmt);
     { Lower a for-in loop.  Dispatches to one of five strategies depending on
@@ -15206,10 +15210,41 @@ begin
   end;
 end;
 
+{ the for counter into %rax: through its '_cap_' pointer when a closure or
+  nested routine captured it, else from its own slot }
+procedure TX86_64Backend.EmitCounterLoad(AFor: TForStmt; const AVarOp: string;
+  AVarType: TTypeDesc);
+begin
+  if Self.IsCaptured(AFor.VarName) then
+  begin
+    Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('_cap_' + AFor.VarName)]));
+    Self.EmitLoadVar('(%rcx)', AVarType);
+  end
+  else
+    Self.EmitLoadVar(AVarOp, AVarType);
+end;
+
+{ step the for counter (in %rax) by one and store it back }
+procedure TX86_64Backend.EmitCounterStep(AFor: TForStmt; const AVarOp: string;
+  AVarType: TTypeDesc);
+begin
+  if AFor.IsDownTo then
+    Self.Emit(#9'subq $1, %rax')
+  else
+    Self.Emit(#9'addq $1, %rax');
+  if Self.IsCaptured(AFor.VarName) then
+  begin
+    Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('_cap_' + AFor.VarName)]));
+    Self.EmitStoreVar('(%rcx)', AVarType);
+  end
+  else
+    Self.EmitStoreVar(AVarOp, AVarType);
+end;
+
 procedure TX86_64Backend.EmitForStmt(AFor: TForStmt);
 var
   VarOp, EndSlot:              string;
-  LCond, LBody, LNext, LEnd:  string;
+  LBody, LNext, LLast, LEnd:   string;
   VarType:                     TTypeDesc;
   FForBoundMark:               Integer;
 begin
@@ -15217,7 +15252,12 @@ begin
     VarType := Self.LocalType(AFor.VarName)
   else
   begin
-    VarType := AFor.StartExpr.ResolvedType;
+    { a global counter is accessed at its DECLARED width: the start
+      expression's type made an Int8 counter with a literal start a 4-byte
+      store, clobbering the next global (GH #237) }
+    VarType := AFor.VarType;
+    if VarType = nil then
+      VarType := AFor.StartExpr.ResolvedType;
     Self.AddGlobal(AFor.VarName, VarType);
   end;
   VarOp   := Self.VarOperand(AFor.VarName);
@@ -15232,9 +15272,9 @@ begin
     Self.AddGlobal(EndSlot, VarType);
     EndSlot := EndSlot + '(%rip)';
   end;
-  LCond := Self.NewLabel('fcond');
   LBody := Self.NewLabel('fbody');
   LNext := Self.NewLabel('fnext');
+  LLast := Self.NewLabel('flast');
   LEnd  := Self.NewLabel('fend');
 
   { A captured loop counter (nested-proc or anonymous-method env) lives
@@ -15259,10 +15299,35 @@ begin
     single flush of their deferred bases suffices (BUG-049). }
   Self.FlushNativePendingReleases(FForBoundMark);
 
-  { ROTATED loop: the condition sits at the BOTTOM — each iteration runs
-    increment + compare + one taken branch back to the body, instead of a
-    body-end jmp plus the top-of-loop compare-and-two-branches. }
-  Self.Emit(#9'jmp ' + LCond);
+  { The loop leaves when the counter EQUALS the end, tested BEFORE the
+    step: stepping first and then comparing with the end overflowed the
+    counter when the end is its type's limit (High(Int8) + 1 wraps to
+    Low(Int8)), and the loop never ended (GH #237).  So: one entry guard
+    (an empty range runs zero times), then body, equality exit, step.  An
+    unsigned counter's guard compares unsigned -- loads zero-extend, so
+    only a UInt64 bound above High(Int64) needs it, but it is correct for
+    every unsigned width.  The equality test needs no signedness.  Leaving
+    through it still steps the counter once, so after a completed loop it
+    holds End + 1 as before -- what closures sharing the counter observe
+    (the documented 3,3,3 trap); the exit is already decided, so a wrap
+    there is harmless.  Break and an empty range leave it unstepped. }
+  Self.EmitCounterLoad(AFor, VarOp, VarType);
+  Self.EmitLoadVarToReg(EndSlot, VarType, '%rcx', '%ecx');
+  Self.Emit(#9'cmpq %rcx, %rax');
+  if AFor.IsDownTo then
+  begin
+    if IsUnsignedInt(VarType) then
+      Self.Emit(#9'jb ' + LEnd)
+    else
+      Self.Emit(#9'jl ' + LEnd);
+  end
+  else
+  begin
+    if IsUnsignedInt(VarType) then
+      Self.Emit(#9'ja ' + LEnd)
+    else
+      Self.Emit(#9'jg ' + LEnd);
+  end;
 
   Self.Emit(LBody + ':');
   FBreakLabels.Push(LEnd);
@@ -15276,40 +15341,16 @@ begin
   FBreakLabels.Pop();
 
   Self.Emit(LNext + ':');
-  if Self.IsCaptured(AFor.VarName) then
-  begin
-    Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('_cap_' + AFor.VarName)]));
-    Self.EmitLoadVar('(%rcx)', VarType);
-  end
-  else
-    Self.EmitLoadVar(VarOp, VarType);
-  if AFor.IsDownTo then
-    Self.Emit(#9'subq $1, %rax')
-  else
-    Self.Emit(#9'addq $1, %rax');
-  if Self.IsCaptured(AFor.VarName) then
-  begin
-    Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('_cap_' + AFor.VarName)]));
-    Self.EmitStoreVar('(%rcx)', VarType);
-  end
-  else
-    Self.EmitStoreVar(VarOp, VarType);
-  Self.Emit(LCond + ':');
-  if Self.IsCaptured(AFor.VarName) then
-  begin
-    Self.Emit(Format(#9'movq %s, %%rcx', [Self.VarOperand('_cap_' + AFor.VarName)]));
-    Self.EmitLoadVar('(%rcx)', VarType);
-  end
-  else
-    Self.EmitLoadVar(VarOp, VarType);
+  Self.EmitCounterLoad(AFor, VarOp, VarType);
   { The end value is a plain slot/global load with no side effects and no
-    %rax use — straight into %rcx, no push/pop bracket. }
+    %rax use -- straight into %rcx, no push/pop bracket. }
   Self.EmitLoadVarToReg(EndSlot, VarType, '%rcx', '%ecx');
   Self.Emit(#9'cmpq %rcx, %rax');
-  if AFor.IsDownTo then
-    Self.Emit(#9'jge ' + LBody)
-  else
-    Self.Emit(#9'jle ' + LBody);
+  Self.Emit(#9'je ' + LLast);
+  Self.EmitCounterStep(AFor, VarOp, VarType);
+  Self.Emit(#9'jmp ' + LBody);
+  Self.Emit(LLast + ':');
+  Self.EmitCounterStep(AFor, VarOp, VarType);
   Self.Emit(LEnd + ':');
 end;
 

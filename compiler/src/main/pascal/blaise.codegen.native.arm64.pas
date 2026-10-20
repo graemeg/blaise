@@ -10768,7 +10768,7 @@ end;
 
 procedure TArm64Backend.EmitFor(AStmt: TForStmt);
 var
-  TopL, EndL, ContL: string;
+  TopL, EndL, ContL, LastL: string;
   EndSlot: string;
   ForMark: Integer;
 
@@ -10804,6 +10804,23 @@ var
       EmitStoreSlot('x0', AStmt.VarName);
   end;
 
+  procedure StepCounter;
+  begin
+    if AStmt.IsDownTo then
+      Self.Emit(#9'sub x0, x0, #1')
+    else
+      Self.Emit(#9'add x0, x0, #1');
+    StoreCounter();
+  end;
+
+  procedure EmitCounterCmp;
+  begin
+    if IsNarrow32Ord(AStmt.VarType) then
+      Self.Emit(#9'cmp w0, w1')
+    else
+      Self.Emit(#9'cmp x0, x1');
+  end;
+
 begin
   { the pre-pass registered one hidden end slot per for statement, consumed
     here in the same walk order }
@@ -10812,6 +10829,7 @@ begin
   TopL  := NewLabel('for');
   EndL  := NewLabel('fend');
   ContL := NewLabel('fcont');
+  LastL := NewLabel('flast');
   ForMark := FPendingRelCount;
   Self.EmitExprToX0(AStmt.StartExpr);
   StoreCounter();
@@ -10821,14 +10839,38 @@ begin
     slots (x0 free), so flush their deferred bases once — the per-iteration
     test only RELOADS the slots, so a single flush suffices (BUG-049). }
   FlushNativePendingReleases(ForMark);
-  Self.Emit(TopL + ':');
+  { The loop leaves when the counter EQUALS the end, tested BEFORE the
+    step: stepping first and then comparing overflowed a counter whose end
+    is its type's limit -- High(Int64) + 1, or a captured counter stored
+    back at its declared width -- and the loop never ended (GH #237).  So:
+    one entry guard (an empty range runs zero times), then body, equality
+    exit, step.  An unsigned counter's guard compares unsigned (a UInt64
+    bound above High(Int64) ran zero times); equality needs no signedness.
+    A 32-bit-or-narrower counter compares in w registers: its upper half is
+    non-canonical (see IsNarrow32Ord), which an equality test must ignore.
+    Leaving through the equality test still steps the counter once, so after
+    a completed loop it holds End + 1 as before -- what closures sharing the
+    counter observe (the documented 3,3,3 trap); the exit is already decided,
+    so a wrap there is harmless.  Break and an empty range leave it
+    unstepped. }
   EmitLoadSlot('x1', EndSlot);
   LoadCounter();
-  Self.Emit(#9'cmp x0, x1');
+  EmitCounterCmp();
   if AStmt.IsDownTo then
-    Self.Emit(Format(#9'b.lt %s', [EndL]))
+  begin
+    if IsUnsignedIntA64(AStmt.VarType) then
+      Self.Emit(Format(#9'b.lo %s', [EndL]))
+    else
+      Self.Emit(Format(#9'b.lt %s', [EndL]));
+  end
   else
-    Self.Emit(Format(#9'b.gt %s', [EndL]));
+  begin
+    if IsUnsignedIntA64(AStmt.VarType) then
+      Self.Emit(Format(#9'b.hi %s', [EndL]))
+    else
+      Self.Emit(Format(#9'b.gt %s', [EndL]));
+  end;
+  Self.Emit(TopL + ':');
   FBreakLbls.Add(EndL);
   FLoopExcDepth.Add(IntToStr(FExcDepth));
   FContLbls.Add(ContL);
@@ -10837,13 +10879,14 @@ begin
   FBreakLbls.Delete(FBreakLbls.Count - 1);
   FLoopExcDepth.Delete(FLoopExcDepth.Count - 1);
   Self.Emit(ContL + ':');
+  EmitLoadSlot('x1', EndSlot);
   LoadCounter();
-  if AStmt.IsDownTo then
-    Self.Emit(#9'sub x0, x0, #1')
-  else
-    Self.Emit(#9'add x0, x0, #1');
-  StoreCounter();
+  EmitCounterCmp();
+  Self.Emit(Format(#9'b.eq %s', [LastL]));
+  StepCounter();
   Self.Emit(Format(#9'b %s', [TopL]));
+  Self.Emit(LastL + ':');
+  StepCounter();
   Self.Emit(EndL + ':');
 end;
 

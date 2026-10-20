@@ -34,6 +34,8 @@ type
     procedure TestRun_BreakAndExit;
     procedure TestRun_Repeat_BodyRunsBeforeTest;
     procedure TestRun_For_BoundsAndDirection;
+    { a for loop ending at its counter type's limit stops there (GH #237) }
+    procedure TestRun_For_EndsAtTypeLimit_NoWrap;
     procedure TestRun_IfElse_TakesEachBranch;
     procedure TestRun_IntegerCompare_Signed;
     procedure TestRun_For_Upward_PrintsRange;
@@ -522,6 +524,245 @@ begin
     '1 0 -1 -2 |' + LE +
     'empty 0' + LE +
     'compound 36' + LE, 0);
+end;
+
+procedure TE2EControlFlowTests.TestRun_For_EndsAtTypeLimit_NoWrap;
+const
+  {
+    A for loop runs once per value from start to end INCLUSIVE whatever the
+    counter's type -- even when the end is the type's own limit
+    (for I := Low(Int8) to High(Int8)).  Both backends incremented the counter
+    and then compared it with the end, so the step past High(T) wrapped to
+    Low(T) and the loop never ended (GH #237): x86-64 for every type narrower
+    than 64 bits, arm64 for Int64 and for a captured counter (stored at its
+    declared width).  An unsigned counter compares unsigned (a bound above
+    High(Int64) ran zero times), and an Int8 global with literal bounds is
+    stored at its own width on x86-64 (a 4-byte store clobbered the next
+    global).  Every loop also guards against running away.
+  }
+  Src = '''
+    program P;
+    var
+      i8: Int8;
+      i16: Int16;
+      b: Byte;
+      w: Word;
+      u32: UInt32;
+      i64: Int64;
+      u64: UInt64;
+      gA: Int8;
+      gB: Int8;
+      c: Integer;
+      big: UInt64;
+
+    procedure Captured;
+    var
+      k: Int8;
+      n: Integer;
+      F: reference to procedure;
+    begin
+      n := 0;
+      F := procedure
+        begin
+          if k = High(Int8) then
+            n := n + 1000;
+          n := n + 1;
+        end;
+      for k := 120 to High(Int8) do
+      begin
+        F();
+        if n > 3000 then
+          Break;
+      end;
+      WriteLn('cap ', n);
+    end;
+
+    procedure Nested;
+    var
+      k: Int16;
+      n: Integer;
+      procedure Bump;
+      begin
+        n := n + 1;
+      end;
+    begin
+      n := 0;
+      for k := High(Int16) - 3 to High(Int16) do
+      begin
+        Bump();
+        if n > 3000 then
+          Break;
+      end;
+      WriteLn('nest ', n);
+    end;
+
+    procedure Locals;
+    var
+      k: Int8;
+      q: UInt64;
+      n: Integer;
+    begin
+      n := 0;
+      for k := Low(Int8) to High(Int8) do
+      begin
+        n := n + 1;
+        if n > 3000 then
+          Break;
+      end;
+      WriteLn('loc ', n);
+      n := 0;
+      for q := 2 downto 0 do
+      begin
+        n := n + 1;
+        if n > 3000 then
+          Break;
+      end;
+      WriteLn('locq ', n);
+    end;
+
+    begin
+      c := 0;
+      for i8 := Low(Int8) to High(Int8) do
+      begin
+        c := c + 1;
+        if c > 3000 then
+          Break;
+      end;
+      WriteLn('i8 ', c);
+      c := 0;
+      for i8 := High(Int8) downto Low(Int8) do
+      begin
+        c := c + 1;
+        if c > 3000 then
+          Break;
+      end;
+      WriteLn('i8d ', c);
+      c := 0;
+      for i16 := Low(Int16) to High(Int16) do
+      begin
+        c := c + 1;
+        if c > 70000 then
+          Break;
+      end;
+      WriteLn('i16 ', c);
+      c := 0;
+      for b := 0 to 255 do
+      begin
+        c := c + 1;
+        if c > 3000 then
+          Break;
+      end;
+      WriteLn('b ', c);
+      c := 0;
+      for b := 255 downto 0 do
+      begin
+        c := c + 1;
+        if c > 3000 then
+          Break;
+      end;
+      WriteLn('bd ', c);
+      c := 0;
+      for w := High(Word) - 2 to High(Word) do
+      begin
+        c := c + 1;
+        if c > 3000 then
+          Break;
+      end;
+      WriteLn('w ', c);
+      c := 0;
+      for u32 := High(UInt32) - 2 to High(UInt32) do
+      begin
+        c := c + 1;
+        if c > 3000 then
+          Break;
+      end;
+      WriteLn('u32 ', c);
+      c := 0;
+      for i64 := High(Int64) - 2 to High(Int64) do
+      begin
+        c := c + 1;
+        if c > 3000 then
+          Break;
+      end;
+      WriteLn('i64 ', c);
+      c := 0;
+      for i64 := Low(Int64) + 2 downto Low(Int64) do
+      begin
+        c := c + 1;
+        if c > 3000 then
+          Break;
+      end;
+      WriteLn('i64d ', c);
+      c := 0;
+      for u64 := High(UInt64) - 2 to High(UInt64) do
+      begin
+        c := c + 1;
+        if c > 3000 then
+          Break;
+      end;
+      WriteLn('u64 ', c);
+      c := 0;
+      for u64 := 2 downto 0 do
+      begin
+        c := c + 1;
+        if c > 3000 then
+          Break;
+      end;
+      WriteLn('u64d ', c);
+      c := 0;
+      for i8 := 5 to 4 do
+        c := c + 1;
+      for u64 := 1 to 0 do
+        c := c + 1;
+      for b := 0 downto 1 do
+        c := c + 1;
+      WriteLn('empty ', c);
+      c := 0;
+      for u64 := 0 to 2 do
+        c := c + 1;
+      WriteLn('u64s ', c);
+      c := 0;
+      big := High(UInt64) - 1;
+      for u64 := big - 2 to big do
+        c := c + 1;
+      for u64 := 1 to big do
+      begin
+        c := c + 1;
+        if c > 5 then
+          Break;
+      end;
+      WriteLn('u64big ', c);
+      gB := 7;
+      for gA := 1 to 3 do
+        c := c + 1;
+      WriteLn('nb ', gB);
+      Captured();
+      Nested();
+      Locals();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'i8 256' + LE +
+    'i8d 256' + LE +
+    'i16 65536' + LE +
+    'b 256' + LE +
+    'bd 256' + LE +
+    'w 3' + LE +
+    'u32 3' + LE +
+    'i64 3' + LE +
+    'i64d 3' + LE +
+    'u64 3' + LE +
+    'u64d 3' + LE +
+    'empty 0' + LE +
+    'u64s 3' + LE +
+    'u64big 6' + LE +
+    'nb 7' + LE +
+    'cap 1008' + LE +
+    'nest 4' + LE +
+    'loc 256' + LE +
+    'locq 3' + LE, 0);
 end;
 
 procedure TE2EControlFlowTests.TestRun_Repeat_BodyRunsBeforeTest;

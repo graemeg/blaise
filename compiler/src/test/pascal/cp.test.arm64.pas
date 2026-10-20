@@ -803,8 +803,11 @@ begin
     specific offset. }
   AssertTrue('bound stored to a hidden x29 slot',
     Pos(#9'stur x0, [x29, #-', AsmT) >= 0);
-  AssertTrue('signed compare against the bound', Pos(#9'cmp x0, x1', AsmT) >= 0);
-  AssertTrue('exit branch on greater', Pos(#9'b.gt Lfend', AsmT) >= 0);
+  { an Integer counter compares in w registers: the upper half of a 32-bit
+    value is non-canonical (GH #237) }
+  AssertTrue('32-bit compare against the bound', Pos(#9'cmp w0, w1', AsmT) >= 0);
+  AssertTrue('entry guard on greater', Pos(#9'b.gt Lfend', AsmT) >= 0);
+  AssertTrue('equality exit before the step', Pos(#9'b.eq Lflast', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestPipeline_FunctionsAssembleToMachO;
