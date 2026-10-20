@@ -49,6 +49,15 @@ build() {
   [ $rc -eq 0 ] || { echo "BUILD FAILED (exit $rc): $out"; exit 1; }
 }
 
+# The dev-layout blaise.cfg beside compiler/target/blaise, as PasBuild's
+# resource copy puts it there on Linux.  Without it the compiler falls back
+# to ~/.blaise.cfg, whose unit-path (another checkout's stdlib) is searched
+# BEFORE --unit-path: a worktree's tests then compiled against the wrong
+# stdlib (a new TStringList.Sort was "no method 'Sort'").
+install_cfg() {
+  cp compiler/src/main/resources/blaise.cfg "$TGT/blaise.cfg"
+}
+
 cmd=${1:-}; shift || true
 case "$cmd" in
   compile)
@@ -58,6 +67,7 @@ case "$cmd" in
     mkdir -p "$TGT"
     build "$BIN" "$SRC/Blaise.pas" "$TGT/blaise.new"
     mv "$TGT/blaise.new" "$TGT/blaise"
+    install_cfg
     ;;
   fixpoint)
     BIN=""
@@ -88,6 +98,7 @@ case "$cmd" in
       # different bytes gets every later exec SIGKILLed (exit 137).
       cp "$W/s2/blaise" "$TGT/blaise.install"
       mv -f "$TGT/blaise.install" "$TGT/blaise"
+      install_cfg
       echo "installed stage-2 as $TGT/blaise"
     fi
     ;;
