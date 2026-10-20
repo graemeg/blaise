@@ -2025,6 +2025,25 @@ STRONG-retains (unlike a bare method pointer).  This deliberately changes
 lifetime: the callback keeps its receiver alive, which is the correct ARC
 behaviour for an escaping callback.
 
+The conversion applies wherever a value meets a `reference to` target — a
+variable, a field, an array element, `P^`, a property, a function result or
+an argument — and so does the `@Routine` adapter coercion.  Both were first
+implemented for a plain variable only, so `Obj.OnEvent := @Handler` or
+`Subscribe(@Obj.M)` was a type error while `F := @Obj.M` compiled; a
+conversion that depends on the syntactic shape of the destination is not a
+rule a reader can predict.
+
+The `@Routine` adapter is a capture-free literal even inside a method body.
+Literals in a method capture `Self` conservatively, but the adapter names
+only its own parameters and a standalone routine, so capturing `Self` for it
+bought nothing and turned `FHandler := @Routine` into a reference cycle (the
+object holds the closure, the closure's environment holds the object).
+
+The reverse direction stays an error, now with its reason: a `reference to`
+value cannot become an `of object` method pointer, because the closure may
+own its environment or receiver, and an `of object` value holds its Data
+half unretained — nothing would keep that alive.
+
 Consequence (documented trap, also Delphi's behaviour): a loop variable
 captured by closures created inside the loop is ONE shared env field —
 after the loop, every such closure observes the final value.  Per-iteration

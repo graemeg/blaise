@@ -1158,6 +1158,12 @@ type
                                      literal carried a '[Weak Self]' capture
                                      list (Phase 5): the shared env's Self
                                      field is weak }
+    IsRoutineAdapter: Boolean;     { set by uSemantic — the literal (and its
+                                     THUNK) is the forwarding adapter built
+                                     for '@Routine' into a 'reference to'
+                                     target: it names only its own params and
+                                     a standalone routine, so a method body
+                                     does not capture Self for it }
     EnvSlotName: string;           { set by uSemantic on the THUNK — where the
                                      creation site finds the env base in the
                                      ENCLOSING frame: '' = the frame env

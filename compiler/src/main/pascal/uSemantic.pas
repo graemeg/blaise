@@ -730,7 +730,8 @@ type
     procedure AnalyseVarDeclStmt(AStmt: TVarDeclStmt);
     procedure PromoteAnonCaptures(AThunk: TMethodDecl);
     procedure DrainPendingAnonDecls(ABlock: TBlock);
-    procedure CoerceRoutineToClosure(AAssign: TAssignment);
+    procedure CoerceRoutineToTarget(var AExpr: TASTExpr; ATarget: TTypeDesc);
+    function  IsRoutineAddr(AExpr: TASTExpr): Boolean;
     procedure ResolveProceduralTypeDef(ATD: TTypeDecl);
     { Resolve ADef's parameter and return types into ADesc (shared by named
       procedural types and inline ones; AName is used in diagnostics) }
@@ -1497,6 +1498,7 @@ end;
 function TSemanticAnalyser.AnalyseExprHinted(var AExpr: TASTExpr;
                                             AExpectedType: TTypeDesc): TTypeDesc;
 begin
+  CoerceRoutineToTarget(AExpr, AExpectedType);
   Result := AnalyseExprHintedNoUnwrap(AExpr, AExpectedType);
   Self.UnwrapLoweredOperator(AExpr);
 end;
@@ -2021,6 +2023,13 @@ begin
   AExpr.IsIntfConversion := True;
 end;
 
+function IsRefProcType(AType: TTypeDesc): Boolean;
+begin
+  { a 'reference to' procedural type }
+  Result := (AType <> nil) and (AType.Kind = tyProcedural) and
+            TProceduralTypeDesc(AType).IsReference;
+end;
+
 procedure TSemanticAnalyser.CheckTypesMatch(AExpected, AActual: TTypeDesc;
   const AContext: string; ALine, ACol: Integer);
 var
@@ -2156,6 +2165,22 @@ begin
     if TProceduralTypeDesc(AExpected).IsCompatibleWith(
          TProceduralTypeDesc(AActual)) then
       Exit;
+    { an 'of object' value becomes a 'reference to' closure whose Env is
+      the receiver, which the target retains -- into any target, not only
+      a variable }
+    if TProceduralTypeDesc(AExpected).IsReference and
+       TProceduralTypeDesc(AActual).IsMethodPtr and
+       TProceduralTypeDesc(AExpected).SignatureMatches(
+         TProceduralTypeDesc(AActual)) then
+      Exit;
+    if TProceduralTypeDesc(AExpected).IsMethodPtr and
+       TProceduralTypeDesc(AActual).IsReference and
+       TProceduralTypeDesc(AExpected).SignatureMatches(
+         TProceduralTypeDesc(AActual)) then
+      SemanticError(Format('Type mismatch in %s: a ''reference to'' value ' +
+        'cannot become the ''of object'' method pointer ''%s'' (an ''of ' +
+        'object'' value does not keep what the closure owns alive)',
+        [AContext, AExpected.Name]), ALine, ACol);
   end;
   SemanticError(
     Format('Type mismatch in %s: expected ''%s'' but got ''%s''',
@@ -12595,6 +12620,7 @@ begin
       AAssign.ImplicitSelfField := FldInfo;
       AAssign.ResolvedLhsType   := FldInfo.TypeDesc;
       InferArrowFromTarget(AAssign.Expr, FldInfo.TypeDesc);
+      CoerceRoutineToTarget(AAssign.Expr, FldInfo.TypeDesc);
       ResolveDiamond(AAssign.Expr, FldInfo.TypeDesc);
       { Set-literal RHS into a tySet field via the bare (implicit-Self) form:
         analyse with the field's set type as context, exactly as the plain
@@ -12717,9 +12743,7 @@ begin
 
   { '@Routine' assigned to a 'reference to' variable coerces via a
     forwarding adapter literal. }
-  if (VarSym.TypeDesc <> nil) and (VarSym.TypeDesc.Kind = tyProcedural) and
-     TProceduralTypeDesc(VarSym.TypeDesc).IsReference then
-    CoerceRoutineToClosure(AAssign);
+  CoerceRoutineToTarget(AAssign.Expr, VarSym.TypeDesc);
 
   { Set-literal assignment: [elem, ...] on RHS when LHS is a set type }
   if (VarSym.TypeDesc.Kind = tySet) and (AAssign.Expr is TArrayLiteralExpr) then
@@ -12750,18 +12774,6 @@ begin
     ExprType := AAssign.Expr.ResolvedType
   else
     ExprType := Self.AnalyseExprSlot(AAssign.Expr);
-  { Method-pointer → 'reference to' coercion (Phase 3): an 'of object'
-    value of matching callable signature becomes a closure whose Env is
-    the strong-retained receiver (uniform closure ABI: code(env, args) is
-    the method call itself).  Accepted for @Obj.M and method-pointer
-    variables alike; codegen keys off the RHS shape/type. }
-  if (VarSym.TypeDesc <> nil) and (VarSym.TypeDesc.Kind = tyProcedural) and
-     TProceduralTypeDesc(VarSym.TypeDesc).IsReference and
-     (ExprType <> nil) and (ExprType.Kind = tyProcedural) and
-     TProceduralTypeDesc(ExprType).IsMethodPtr and
-     TProceduralTypeDesc(VarSym.TypeDesc).SignatureMatches(
-       TProceduralTypeDesc(ExprType)) then
-    Exit;
   Self.CheckConstValueInRange(VarSym.TypeDesc, AAssign.Expr,
     AAssign.Line, AAssign.Col);
   CheckTypesMatch(VarSym.TypeDesc, ExprType, 'assignment', AAssign.Line, AAssign.Col);
@@ -13667,6 +13679,7 @@ begin
     Exit;
   end;
   InferArrowFromTarget(AAssign.Expr, ATarget);
+  CoerceRoutineToTarget(AAssign.Expr, ATarget);
   if TryResolveBareEnumIdent(AAssign.Expr, ATarget) then
     ExprType := AAssign.Expr.ResolvedType
   else
@@ -14494,6 +14507,13 @@ begin
       Exit(0);
     Exit(1);
   end;
+  { '@Routine' against a 'reference to' parameter of the same callable
+    shape: a conversion (the adapter literal is built once the callee is
+    chosen -- ResolveDeferredArrowArgs) }
+  if IsRoutineAddr(AArgExpr) and IsRefProcType(AParam) and
+     (AArg <> nil) and (AArg.Kind = tyProcedural) and
+     TProceduralTypeDesc(AParam).SignatureMatches(TProceduralTypeDesc(AArg)) then
+    Exit(1);
   { Fall-through: probe full assignability via CheckTypesMatch.  This
     covers nil-literal, class subtypes, untyped-Pointer compatibility,
     enum/integer crossover, procedural-type signature compatibility,
@@ -18892,8 +18912,21 @@ procedure TSemanticAnalyser.ResolveDeferredArrowArgs(AArgs: TObjectList;
 var
   I:   Integer;
   Par: TMethodParam;
+  Arg: TASTExpr;
 begin
   if AMDecl = nil then Exit;
+  { '@Routine' into a 'reference to' parameter: the forwarding adapter
+    literal replaces the argument once the callee is known (overload
+    resolution matched it by signature -- ArgMatchScore) }
+  for I := 0 to AArgs.Count - 1 do
+    if (I < AMDecl.Params.Count) and IsRoutineAddr(TASTExpr(AArgs.Items[I])) and
+       IsRefProcType(TMethodParam(AMDecl.Params.Items[I]).ResolvedType) then
+    begin
+      Arg := TASTExpr(AArgs.Items[I]);
+      CoerceRoutineToTarget(Arg, TMethodParam(AMDecl.Params.Items[I]).ResolvedType);
+      AArgs.Items[I] := Arg;
+      AnalyseExpr(Arg);
+    end;
   for I := 0 to AArgs.Count - 1 do
     if IsPendingArrow(TASTExpr(AArgs.Items[I])) and
        (I < AMDecl.Params.Count) then
@@ -19096,6 +19129,7 @@ begin
       MD.Params.Add(CloneMethodParam(TMethodParam(AExpr.Decl.Params.Items[I])));
     MD.Body       := AExpr.Decl.Body;
     MD.OwnBody    := False;     { the literal's Decl keeps ownership }
+    MD.IsRoutineAdapter := AExpr.Decl.IsRoutineAdapter;
     MD.IsImplOnly := FCurrentUnit <> nil;
     AExpr.LiftedName := MD.Name;
     AExpr.LiftedDecl := MD;
@@ -19392,8 +19426,10 @@ begin
     not the body names it): implicit member access cannot be detected
     syntactically before analysis, and the cost is one env field.  This
     also matches the strong-retain lifetime rule — a callback keeps its
-    receiver alive.  (The [Weak] escape is Phase 5.) }
-  if InMethod then
+    receiver alive.  (The [Weak] escape is Phase 5.)  The '@Routine'
+    adapter is the exception: it provably names no member, and capturing
+    Self would make 'FHandler := @Routine' a reference cycle. }
+  if InMethod and not AThunk.IsRoutineAdapter then
   begin
     if AThunk.CapturedVars = nil then
       AThunk.CapturedVars := TStringList.Create();
@@ -19513,15 +19549,29 @@ begin
   end;
 end;
 
-procedure TSemanticAnalyser.CoerceRoutineToClosure(AAssign: TAssignment);
-{ '@Routine' assigned to a 'reference to' variable: desugar the RHS into a
-  capture-free anonymous-method literal that forwards to the routine — the
-  design's "adapter thunk" (docs/anonymous-methods-design.adoc,
-  Conversions).  The literal then flows through AnalyseAnonMethodExpr and
-  ordinary codegen, so both backends get the adapter for free and the
-  signature is validated by the forwarding call + CheckTypesMatch.
-  Method-pointer coercion (strong-retained receiver) is a later phase.
-  Callers guard: LHS type is tyProcedural with IsReference. }
+function TSemanticAnalyser.IsRoutineAddr(AExpr: TASTExpr): Boolean;
+var
+  Sym: TSymbol;
+begin
+  { '@Routine' -- the address of a standalone procedure or function }
+  Result := False;
+  if not (AExpr is TAddrOfExpr) then Exit;
+  if not (TAddrOfExpr(AExpr).Expr is TIdentExpr) then Exit;
+  Sym := FTable.Lookup(TIdentExpr(TAddrOfExpr(AExpr).Expr).Name);
+  Result := (Sym <> nil) and (Sym.Kind in [skFunction, skProcedure]) and
+            (Sym.Decl <> nil);
+end;
+
+procedure TSemanticAnalyser.CoerceRoutineToTarget(var AExpr: TASTExpr;
+  ATarget: TTypeDesc);
+{ '@Routine' flowing into a 'reference to' target -- a variable, a field, an
+  element, P^, a property, an argument: desugar it into a capture-free
+  anonymous-method literal that forwards to the routine -- the design's
+  "adapter thunk" (docs/anonymous-methods-design.adoc, Conversions).  The
+  literal then flows through AnalyseAnonMethodExpr and ordinary codegen, so
+  both backends get the adapter for free and the signature is validated by
+  the forwarding call + CheckTypesMatch.  Call it before AExpr is analysed;
+  any other expression or target is left alone. }
 var
   Sym:     TSymbol;
   MD:      TMethodDecl;
@@ -19534,19 +19584,17 @@ var
   Par:     TMethodParam;
   I:       Integer;
 begin
-  if not (AAssign.Expr is TAddrOfExpr) then Exit;
-  if not (TAddrOfExpr(AAssign.Expr).Expr is TIdentExpr) then Exit;
-  Sym := FTable.Lookup(TIdentExpr(TAddrOfExpr(AAssign.Expr).Expr).Name);
-  if (Sym = nil) or not (Sym.Kind in [skFunction, skProcedure]) then Exit;
-  if Sym.Decl = nil then Exit;
+  if not IsRefProcType(ATarget) or not IsRoutineAddr(AExpr) then Exit;
+  Sym := FTable.Lookup(TIdentExpr(TAddrOfExpr(AExpr).Expr).Name);
   MD := TMethodDecl(Sym.Decl);
 
   AME      := TAnonMethodExpr.Create();
-  AME.Line := AAssign.Line;
-  AME.Col  := AAssign.Col;
+  AME.Line := AExpr.Line;
+  AME.Col  := AExpr.Col;
   NewDecl  := TMethodDecl.Create();
-  NewDecl.Line := AAssign.Line;
-  NewDecl.Col  := AAssign.Col;
+  NewDecl.IsRoutineAdapter := True;
+  NewDecl.Line := AExpr.Line;
+  NewDecl.Col  := AExpr.Col;
   NewDecl.ReturnTypeName := MD.ReturnTypeName;
   for I := 0 to MD.Params.Count - 1 do
     NewDecl.Params.Add(CloneMethodParam(TMethodParam(MD.Params.Items[I])));
@@ -19554,21 +19602,21 @@ begin
   if MD.ReturnTypeName <> '' then
   begin
     FCall := TFuncCallExpr.Create();
-    FCall.Line := AAssign.Line;
-    FCall.Col  := AAssign.Col;
+    FCall.Line := AExpr.Line;
+    FCall.Col  := AExpr.Col;
     FCall.Name := MD.Name;
     for I := 0 to MD.Params.Count - 1 do
     begin
       Par := TMethodParam(MD.Params.Items[I]);
       Idn := TIdentExpr.Create();
-      Idn.Line := AAssign.Line;
-      Idn.Col  := AAssign.Col;
+      Idn.Line := AExpr.Line;
+      Idn.Col  := AExpr.Col;
       Idn.Name := Par.ParamName;
       FCall.Args.Add(Idn);
     end;
     Asn := TAssignment.Create();
-    Asn.Line := AAssign.Line;
-    Asn.Col  := AAssign.Col;
+    Asn.Line := AExpr.Line;
+    Asn.Col  := AExpr.Col;
     Asn.Name := 'Result';
     Asn.Expr := FCall;
     NewDecl.Body.Stmts.Add(Asn);
@@ -19576,23 +19624,23 @@ begin
   else
   begin
     PCall := TProcCall.Create();
-    PCall.Line := AAssign.Line;
-    PCall.Col  := AAssign.Col;
+    PCall.Line := AExpr.Line;
+    PCall.Col  := AExpr.Col;
     PCall.Name := MD.Name;
     for I := 0 to MD.Params.Count - 1 do
     begin
       Par := TMethodParam(MD.Params.Items[I]);
       Idn := TIdentExpr.Create();
-      Idn.Line := AAssign.Line;
-      Idn.Col  := AAssign.Col;
+      Idn.Line := AExpr.Line;
+      Idn.Col  := AExpr.Col;
       Idn.Name := Par.ParamName;
       PCall.Args.Add(Idn);
     end;
     NewDecl.Body.Stmts.Add(PCall);
   end;
   AME.Decl := NewDecl;
-  AAssign.Expr.Free();
-  AAssign.Expr := AME;
+  AExpr.Free();
+  AExpr := AME;
 end;
 
 function TSemanticAnalyser.AnalyseAddrOfExpr(AExpr: TAddrOfExpr): TTypeDesc;

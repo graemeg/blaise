@@ -227,6 +227,10 @@ type
       consumer's own subset of sources; both ISAs crashed on a nil argument) }
     procedure TestRun_FatValue_MethodPointerSources;
     procedure TestRun_FatValue_ClosureSources;
+    { a method pointer and '@Routine' into every 'reference to' target -- a
+      field, an element, P^, an argument (only a variable converted); the
+      receiver is retained by each closure and freed with the last one }
+    procedure TestRun_ReferenceTargets_ConvertMethodsAndRoutines;
   end;
 
 implementation
@@ -3151,6 +3155,59 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'show 90' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ReferenceTargets_ConvertMethodsAndRoutines;
+const
+  Src = '''
+    program P;
+    type
+      TM = procedure(A: Integer) of object;
+      TC = reference to procedure(A: Integer);
+      TRec = record F: TC; end;
+      TImp = class
+        N: Integer;
+        destructor Destroy; override;
+        procedure M(A: Integer);
+      end;
+      THold = class
+        FS: TC;
+        FArr: array[0..1] of TC;
+        FR: TRec;
+        procedure Run(O: TImp; L: TM);
+      end;
+    var Sum: Integer; H: THold; GArr: array of TC; PC: ^TC;
+    destructor TImp.Destroy; begin WriteLn('freed ', N); inherited Destroy(); end;
+    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
+    procedure Plain(A: Integer); begin Sum := Sum + A * 1000; end;
+    procedure Take(X: TC); begin X(1); end;
+    procedure THold.Run(O: TImp; L: TM);
+    begin
+      FS := @O.M; FS(1);
+      FArr[1] := L; FArr[1](10);
+      FR.F := @Plain; FR.F(1);
+      Take(@O.M);
+      Take(L);
+      Take(@Plain);
+      GArr[0] := @Plain; GArr[0](2);
+      PC := @FArr[0]; PC^ := @O.M; FArr[0](100);
+    end;
+    var O: TImp;
+    begin
+      SetLength(GArr, 1);
+      H := THold.Create();
+      O := TImp.Create(); O.N := 3;
+      H.Run(O, @O.M);
+      O := nil;
+      WriteLn('sum ', Sum);
+      H := nil;
+      WriteLn('end');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'sum 4339' + LineEnding + 'freed 3' + LineEnding +
+    'end' + LineEnding, 0);
 end;
 
 initialization

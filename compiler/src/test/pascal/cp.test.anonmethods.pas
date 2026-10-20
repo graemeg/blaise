@@ -120,6 +120,15 @@ type
       pair (the callee copies 16 bytes through it: a bare 0 faulted on both
       ISAs); @Obj.M is a pair built in a scratch (x86-64 refused it) }
     procedure TestCodegen_FatArg_NilAndMethodRef;
+    { a method pointer converts to 'reference to' wherever the value meets
+      its target -- a field, an element, P^, an argument -- not only a
+      variable; '@Routine' becomes the forwarding adapter there too, and the
+      adapter inside a method body captures nothing (a conservative Self
+      capture made 'FHandler := @Routine' a reference cycle) }
+    procedure TestSemantic_MethodPtrIntoReferenceTargets_Accepted;
+    procedure TestSemantic_RoutineIntoReferenceArg_BecomesAdapter;
+    procedure TestSemantic_RoutineAdapterInMethod_CapturesNothing;
+    procedure TestSemantic_ReferenceIntoOfObject_Rejected;
     procedure TestSemantic_UnretainedLocal_Constraints;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
@@ -1311,6 +1320,119 @@ begin
     AsmMissing(Src,
       #9'movq $0, (%rax)'#10#9'movq $0, 8(%rax)'#10#9'movq %rax, %rdi'#10#9'callq Take',
       #9'stp xzr, xzr, [x0]'#10#9'str x0, [sp, #-16]!'));
+end;
+
+procedure TAnonMethodTests.TestSemantic_MethodPtrIntoReferenceTargets_Accepted;
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc('''
+    program Prg;
+    type
+      TM = procedure(A: Integer) of object;
+      TC = reference to procedure(A: Integer);
+      TRec = record F: TC; end;
+      TImp = class procedure M(A: Integer); end;
+      THold = class
+        FS: TC;
+        FArr: array[0..1] of TC;
+        FR: TRec;
+        procedure Run(O: TImp; L: TM);
+      end;
+    var GArr: array of TC; PC: ^TC;
+    procedure TImp.M(A: Integer); begin end;
+    procedure Take(X: TC); begin end;
+    procedure THold.Run(O: TImp; L: TM);
+    begin
+      FS := @O.M;
+      FS := L;
+      FArr[1] := @O.M;
+      FR.F := L;
+      GArr[0] := @O.M;
+      PC^ := L;
+      Take(@O.M);
+      Take(L)
+    end;
+    begin
+    end.
+    ''');
+  AssertNotNull('every method-pointer conversion analysed', Prog);
+  Prog.Free();
+end;
+
+procedure TAnonMethodTests.TestSemantic_RoutineIntoReferenceArg_BecomesAdapter;
+var
+  Prog: TProgram;
+  Call: TProcCall;
+begin
+  Prog := AnalyseSrc('''
+    program Prg;
+    type TC = reference to procedure(A: Integer);
+    procedure Plain(A: Integer); begin end;
+    procedure Take(X: TC); begin end;
+    begin
+      Take(@Plain)
+    end.
+    ''');
+  try
+    Call := TProcCall(Prog.Block.Stmts.Items[0]);
+    AssertTrue('the argument is the forwarding adapter literal',
+      TObject(Call.Args.Items[0]) is TAnonMethodExpr);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TAnonMethodTests.TestSemantic_RoutineAdapterInMethod_CapturesNothing;
+var
+  Prog: TProgram;
+  MD, Thunk: TMethodDecl;
+  I: Integer;
+begin
+  Prog := AnalyseSrc('''
+    program Prg;
+    type
+      TC = reference to procedure(A: Integer);
+      THold = class
+        FS: TC;
+        procedure Run;
+      end;
+    procedure Plain(A: Integer); begin end;
+    procedure THold.Run;
+    begin
+      FS := @Plain
+    end;
+    begin
+    end.
+    ''');
+  try
+    Thunk := nil;
+    for I := 0 to Prog.Block.ProcDecls.Count - 1 do
+    begin
+      MD := TMethodDecl(Prog.Block.ProcDecls.Items[I]);
+      if MD.Name = '__closure_1' then Thunk := MD;
+    end;
+    AssertNotNull('adapter thunk lifted', Thunk);
+    AssertTrue('the adapter is marked', Thunk.IsRoutineAdapter);
+    AssertTrue('no env: Self is not captured', Thunk.EnvCaptured = nil);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TAnonMethodTests.TestSemantic_ReferenceIntoOfObject_Rejected;
+begin
+  AssertTrue('a closure does not become an of-object method pointer',
+    Pos('cannot become the ''of object'' method pointer', SemanticError('''
+      program Prg;
+      type
+        TM = procedure(A: Integer) of object;
+        TC = reference to procedure(A: Integer);
+      var M: TM; C: TC;
+      begin
+        M := C
+      end.
+      ''')) >= 0);
 end;
 
 initialization
