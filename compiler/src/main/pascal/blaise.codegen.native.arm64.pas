@@ -2501,7 +2501,7 @@ end;
 procedure TArm64Backend.EmitAnonValueToSlot(AME: TAnonMethodExpr);
 begin
   if AME.ValueSlotName = '' then
-    NotYet('anonymous method has no value slot', AME);
+    InternalError('anonymous method without a value slot (the semantic pass gives every literal one)', AME);
   EmitAnonValueInto(AME, AME.ValueSlotName);
 end;
 
@@ -2519,7 +2519,7 @@ var
 begin
   MD := TMethodDecl(AME.LiftedDecl);
   if MD = nil then
-    NotYet('anonymous method not lifted (semantic pass required)', AME);
+    InternalError('anonymous method not lifted (the semantic pass lifts every literal)', AME);
   { x9 = the target's address (a slot, a capture, a var param's variable);
     release the old Env half (nil-safe), then write Code and Env. }
   Self.Emit(#9'ldr x0, [x9, #8]');            { old Env }
@@ -2622,7 +2622,7 @@ begin
     FAE := TFieldAccessExpr(TAddrOfExpr(AExpr).Expr);
     MD := TMethodDecl(FAE.ResolvedMethod);
     if MD.IsRecordMethod or MD.IsStatic or FAE.IsImplicitSelf then
-      NotYet('method pointer to this method form', AExpr);
+      InternalError('method pointer to a record, static or implicit-Self method form (the front end rejects or rewrites them)', AExpr);
     if FAE.Base <> nil then
     begin
       Self.EmitExprToX0(FAE.Base);
@@ -3113,7 +3113,7 @@ begin
   begin
     Env := TRecordTypeDesc(AStmt.EnvType);
     if Env = nil then
-      NotYet('block env without an env record', AStmt);
+      InternalError('block env without an env record (set at every env allocation site)', AStmt);
     EmitLoadSlot('x0', AStmt.EnvSlotName);
     EmitCallSym('_ClassRelease');
     EmitIntLiteral('x0', Env.TotalSize());
@@ -3191,7 +3191,7 @@ begin
     EmitEnvPrologue. }
   Env := TRecordTypeDesc(ADecl.EnvType);
   if Env = nil then
-    NotYet('closure env without an env record', ADecl);
+    InternalError('closure env without an env record (set with EnvCaptured)', ADecl);
   if ADecl.IsAnonThunk then
     EmitLoadSlot('x0', '__env')
   else
@@ -3211,7 +3211,7 @@ begin
     Name := ADecl.EnvCaptured.Strings[I];
     F := Env.FindField(Name);
     if F = nil then
-      NotYet('captured name without an env field', ADecl);
+      InternalError('captured name without an env field (every EnvCaptured name has one)', ADecl);
     EmitAddSubImm('add', 'x1', 'x0', F.Offset);
     EmitStoreSlot('x1', '_cap_' + Name);
   end;
@@ -3256,7 +3256,7 @@ begin
     if ADecl.EnvCaptured.IndexOf(P.ParamName) < 0 then Continue;
     F := Env.FindField(P.ParamName);
     if P.IsVarParam or P.IsOpenArray then
-      NotYet('closure capture of a parameter of this type', ADecl);
+      InternalError('closure capture of a var or open-array parameter (the front end rejects both)', ADecl);
     if (F.TypeDesc.Kind in [tyRecord, tyStaticArray, tyInterface]) or
        IsMethodPtrType(F.TypeDesc) or IsJumboSetType(F.TypeDesc) then
     begin
@@ -3546,7 +3546,7 @@ begin
     which runs before any argument is evaluated; a receiver it returns is
     released at the statement end. }
   if AField = nil then
-    NotYet('procedural-field call without field info', ANode);
+    InternalError('procedural-field call without field info (set with IsProcFieldCall)', ANode);
   IsRec := (AReceiver <> nil) and (AReceiver.Kind = tyRecord);
   if AImplicitSelf then
     EmitLoadSlot('x0', 'Self')        { a record method's Self is an address too }
@@ -3600,7 +3600,7 @@ begin
     one code word.  A result that comes back through x8 (an interface, a
     record too big for registers) lands in ASretDest. }
   if (AField = nil) or not (AField.TypeDesc is TProceduralTypeDesc) then
-    NotYet('procedural-field call on this field', ANode);
+    InternalError('procedural-field call on a field that is not procedural (the front end resolves only those)', ANode);
   PT := TProceduralTypeDesc(AField.TypeDesc);
   EmitProcFieldAddr(AObjectName, AObjExpr, AIsVarParam, AImplicitSelf,
     AReceiver, AField, ANode);
@@ -3653,7 +3653,7 @@ begin
     pair, copied with its own Env reference (below). }
   PT := TProceduralTypeDesc(AExpr.ResolvedProcType);
   if PT = nil then
-    NotYet('indirect call without a resolved procedural type', AExpr);
+    InternalError('indirect call without a resolved procedural type (set by the semantic pass)', AExpr);
   if IsMethodPtrType(PT) then
   begin
     { MakeClosure()(args), Obj.GetFn()(args), L[0](), P^(), TM(M)(args):
@@ -11751,7 +11751,7 @@ begin
     { the _high companion must be a slot of the CURRENT frame; a captured
       array-of-const param does not forward it (parity with x86-64) }
     if not IsLocal(TIdentExpr(AArgs.Items[1]).Name + '_high') then
-      NotYet('Format over a captured array-of-const parameter',
+      InternalError('Format over an array-of-const parameter without its _high slot (a nested routine materialises it; a closure cannot capture an open array)',
         TASTExpr(AArgs.Items[1]));
     Self.EmitExprToX0(TASTExpr(AArgs.Items[0]));   { fmt }
     EmitPushX0();                                   { [fmt] }
@@ -14845,7 +14845,7 @@ begin
     if (ADecl.CapturedVars <> nil) and (ADecl.CapturedVars.Count > 0) then
     begin
       if ASelfPushed then
-        NotYet('capture args on a receiver call', nil);
+        InternalError('capture args on a receiver call (only nested routines capture, and a type with methods cannot be declared inside a routine)', nil);
       for I := 0 to ADecl.CapturedVars.Count - 1 do
       begin
         if IsCaptured(ADecl.CapturedVars.Strings[I]) then
@@ -17323,7 +17323,7 @@ begin
       procedural-typed field (BUG-20260922) }
     if (AStmt.ProcFieldInfo = nil) or
        not (AStmt.ProcFieldInfo.TypeDesc is TProceduralTypeDesc) then
-      NotYet('procedural-field call on this field', AStmt);
+      InternalError('procedural-field call on a field that is not procedural (the front end resolves only those)', AStmt);
     PT := TProceduralTypeDesc(AStmt.ProcFieldInfo.TypeDesc);
     if AStmt.IsImplicitSelf and (AStmt.ImplicitBaseInfo <> nil) then
     begin
