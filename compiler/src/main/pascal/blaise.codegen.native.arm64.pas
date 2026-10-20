@@ -2658,6 +2658,8 @@ begin
     { TRunMethod(M) / TM(F): a value cast reinterprets the operand's 16 bytes
       -- a TMethod record at its address, or another fat value }
     Inner := TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]);
+    if Inner is TNilLiteral then
+      Exit(Self.EmitFatSourceAddrToX0(Inner, ATarget));
     if Inner.ResolvedType.Kind = tyRecord then
     begin
       EmitRecAddrToX0(Inner);
@@ -3637,57 +3639,50 @@ procedure TArm64Backend.EmitIndirectFuncCallExpr(AExpr: TIndirectFuncCallExpr;
 var
   PT: TProceduralTypeDesc;
   Slot: string;
+  Owned: Boolean;
 begin
   { The callee value is parked in a per-site frame slot -- the arguments may
     themselves call -- and the call goes through EmitFatPtrCall's plain-pointer
     form, so every argument class (var, float, open array) is lowered exactly
-    as for a direct call.  A closure / method-pointer callee yields a 16-byte
-    fat value whose Env ownership a temporary would have to manage; that
-    stays an honest hole. }
+    as for a direct call.  A closure / method-pointer callee is a 16-byte
+    pair, copied with its own Env reference (below). }
   PT := TProceduralTypeDesc(AExpr.ResolvedProcType);
   if PT = nil then
     NotYet('indirect call without a resolved procedural type', AExpr);
   if IsMethodPtrType(PT) then
   begin
-    { MakeClosure()(args) / Obj.GetFn()(args): the callee value lands in a
-      +1 scratch; a 'reference to' Env is dropped after the call, with the
-      result registers (x0 / d0) preserved across the release }
-    if IsFatLValue(AExpr.CalleeExpr) and
-       not (AExpr.CalleeExpr is TIdentExpr) then
+    { MakeClosure()(args), Obj.GetFn()(args), L[0](), P^(), TM(M)(args):
+      the callee pair, from the shared source lowering, is copied into a
+      per-site scratch that holds its OWN Env reference for the call -- a
+      body that overwrites the source cannot free the Env it runs in -- and
+      a 'reference to' Env is dropped after the call }
+    Slot := NewFretSlot();
+    Owned := EmitFatSourceAddrToX0(AExpr.CalleeExpr, PT);
+    EmitSlotAddr('x1', Slot);
+    Self.Emit(#9'ldp x9, x10, [x0]');
+    Self.Emit(#9'stp x9, x10, [x1]');
+    if PT.IsReference and not Owned then
     begin
-      { L[0](), P^(), R.F(): copy the stored pair into a per-site scratch
-        that holds its OWN Env reference for the call (dropped below), so
-        a body that overwrites the slot cannot free the Env it runs in }
-      Slot := '__fret_' + IntToStr(FFretN);
-      FFretN := FFretN + 1;
-      if not FFrame.ContainsKey(Slot) then
-        AddLocal(Slot, 16);
-      EmitLValueAddrToX0(AExpr.CalleeExpr);
-      EmitPushX0();
-      EmitSlotAddr('x1', Slot);
-      EmitPopTo('x0');
-      Self.Emit(#9'ldp x9, x10, [x0]');
-      Self.Emit(#9'stp x9, x10, [x1]');
-      if PT.IsReference then
-      begin
-        Self.Emit(#9'mov x0, x10');
-        EmitCallSym('_ClassAddRef');
-      end;
-    end
-    else if not EmitClosureResultToTemp(AExpr.CalleeExpr, Slot) then
-      NotYet('call through a closure / method pointer an expression yields',
-        AExpr);
+      Self.Emit(#9'mov x0, x10');
+      EmitCallSym('_ClassAddRef');
+    end;
     EmitSlotAddr('x9', Slot);
     EmitFatPtrCall('x9', PT, AExpr.Args, True, ASret, ASretSpOff);
     if PT.IsReference then
     begin
-      Self.Emit(#9'stp x0, xzr, [sp, #-16]!');
-      Self.Emit(#9'str d0, [sp, #8]');
+      { every result register survives the release: x0:x1 (a 16-byte
+        record) and d0..d3 (a floating-point HFA) }
+      Self.Emit(#9'sub sp, sp, #48');
+      Self.Emit(#9'stp x0, x1, [sp]');
+      Self.Emit(#9'stp d0, d1, [sp, #16]');
+      Self.Emit(#9'stp d2, d3, [sp, #32]');
       EmitSlotAddr('x9', Slot);
       Self.Emit(#9'ldr x0, [x9, #8]');
       EmitCallSym('_ClassRelease');
-      Self.Emit(#9'ldr d0, [sp, #8]');
-      Self.Emit(#9'ldr x0, [sp], #16');
+      Self.Emit(#9'ldp d2, d3, [sp, #32]');
+      Self.Emit(#9'ldp d0, d1, [sp, #16]');
+      Self.Emit(#9'ldp x0, x1, [sp]');
+      Self.Emit(#9'add sp, sp, #48');
     end;
     Exit;
   end;

@@ -661,6 +661,8 @@ type
       compile time rather than stored 8 bytes wide) }
     procedure EmitFatElemSourceAddr(AValue: TASTExpr);
     procedure EmitFatArgAddrToRax(AArg: TASTExpr);
+    procedure EmitFatCalleeCopy(ACallee: TASTExpr; AIsRef: Boolean);
+    function  IsFatValueCast(AExpr: TASTExpr): Boolean;
     procedure EmitInterfaceFieldCall(AFld: TFieldInfo; AIntf: TInterfaceTypeDesc;
                                 const AMethName: string; AArgs: TObjectList;
                                 ADiscardIntfRet: Boolean = False);
@@ -7267,7 +7269,7 @@ procedure TX86_64Backend.EmitIndirectExprCallSret(AExpr: TIndirectFuncCallExpr;
   const ADest: string; AIndirect: Boolean);
 var
   PT: TProceduralTypeDesc;
-  IsFat, CalleeLV: Boolean;
+  IsFat: Boolean;
 begin
   { GetFn()(X) returning an aggregate (a record, a closure, an interface):
     the callee value the expression yields is parked in a stack buffer whose
@@ -7284,28 +7286,8 @@ begin
   Self.Emit(#9'pushq %rbx');
   Self.Emit(#9'subq $32, %rsp');
   Self.Emit(#9'movq %rax, 16(%rsp)');
-  CalleeLV := False;
   if IsFat then
-  begin
-    CalleeLV := IsFatLValueExpr(AExpr.CalleeExpr);
-    if CalleeLV then
-    begin
-      { an element, P^ or field holding the closure: a copy that holds its
-        own Env reference for the call, dropped below }
-      Self.EmitVarArgAddrToRax(AExpr.CalleeExpr);
-      Self.Emit(#9'movq (%rax), %rcx');
-      Self.Emit(#9'movq %rcx, (%rsp)');
-      Self.Emit(#9'movq 8(%rax), %rcx');
-      Self.Emit(#9'movq %rcx, 8(%rsp)');
-      if PT.IsReference then
-      begin
-        Self.Emit(#9'movq %rcx, %rdi');
-        Self.Emit(#9'callq _ClassAddRef');
-      end;
-    end
-    else
-      Self.EmitRecordCallSretAt(AExpr.CalleeExpr, '(%rsp)');
-  end
+    Self.EmitFatCalleeCopy(AExpr.CalleeExpr, PT.IsReference)
   else
   begin
     Self.EmitExprToEax(AExpr.CalleeExpr);
@@ -8741,7 +8723,6 @@ var
   LSuppNo: string;
   LSuppEnd: string;
   SCAT: TStaticArrayTypeDesc;
-  CalleeLV: Boolean;
 begin
   if AExpr is TNilLiteral then
   begin
@@ -12027,49 +12008,32 @@ begin
         would drift; %rbx survives the arg push/pop. }
       Self.Emit(#9'pushq %rbx');
       Self.Emit(#9'subq $16, %rsp');
-      CalleeLV := IsFatLValueExpr(TIndirectFuncCallExpr(AExpr).CalleeExpr) and
-        not (TIndirectFuncCallExpr(AExpr).CalleeExpr is TIdentExpr);
-      if CalleeLV then
-      begin
-        { an element, P^ or field holding the closure (L[0](), P^()): copy
-          its pair -- it reached the call-result arm and crashed the
-          compiler.  A 'reference to' copy holds its own Env reference for
-          the call, so a body that overwrites the slot cannot free the Env
-          it is running in; the release below drops it. }
-        Self.EmitVarArgAddrToRax(TIndirectFuncCallExpr(AExpr).CalleeExpr);
-        Self.Emit(#9'movq (%rax), %rcx');
-        Self.Emit(#9'movq %rcx, (%rsp)');
-        Self.Emit(#9'movq 8(%rax), %rcx');
-        Self.Emit(#9'movq %rcx, 8(%rsp)');
-        if TProceduralTypeDesc(
-             TIndirectFuncCallExpr(AExpr).ResolvedProcType).IsReference then
-        begin
-          Self.Emit(#9'movq %rcx, %rdi');
-          Self.Emit(#9'callq _ClassAddRef');
-        end;
-      end
-      else
-        Self.EmitRecordCallSretAt(TIndirectFuncCallExpr(AExpr).CalleeExpr, '(%rsp)');
+      Self.EmitFatCalleeCopy(TIndirectFuncCallExpr(AExpr).CalleeExpr,
+        TProceduralTypeDesc(
+          TIndirectFuncCallExpr(AExpr).ResolvedProcType).IsReference);
       Self.Emit(#9'movq %rsp, %rbx');
       Self.EmitMethodPtrCall('(%rbx)',
         TProceduralTypeDesc(TIndirectFuncCallExpr(AExpr).ResolvedProcType),
         TIndirectFuncCallExpr(AExpr).Args);
-      { a 'reference to' value returned by a CALL carries the callee's +1 on
-        its Env -- drop it now the call is done, keeping the result in
-        %rax / %xmm0 (MakeAdder(1)(41), Obj.Make(7)(6)) }
+      { the 'reference to' copy's own Env reference -- drop it now the call
+        is done, keeping the result in %rax / %xmm0 (MakeAdder(1)(41),
+        Obj.Make(7)(6)) }
       if TProceduralTypeDesc(
-           TIndirectFuncCallExpr(AExpr).ResolvedProcType).IsReference and
-         (CalleeLV or
-          (TIndirectFuncCallExpr(AExpr).CalleeExpr is TFuncCallExpr) or
-          (TIndirectFuncCallExpr(AExpr).CalleeExpr is TMethodCallExpr)) then
+           TIndirectFuncCallExpr(AExpr).ResolvedProcType).IsReference then
       begin
+        { every result register survives the release: %rax:%rdx (a 16-byte
+          record) and %xmm0:%xmm1 }
         Self.Emit(#9'pushq %rax');
-        Self.Emit(#9'subq $8, %rsp');
+        Self.Emit(#9'pushq %rdx');
+        Self.Emit(#9'subq $16, %rsp');
         Self.Emit(#9'movsd %xmm0, (%rsp)');
+        Self.Emit(#9'movsd %xmm1, 8(%rsp)');
         Self.Emit(#9'movq 8(%rbx), %rdi');
         Self.Emit(#9'callq _ClassRelease');
+        Self.Emit(#9'movsd 8(%rsp), %xmm1');
         Self.Emit(#9'movsd (%rsp), %xmm0');
-        Self.Emit(#9'addq $8, %rsp');
+        Self.Emit(#9'addq $16, %rsp');
+        Self.Emit(#9'popq %rdx');
         Self.Emit(#9'popq %rax');
       end;
       Self.Emit(#9'addq $16, %rsp');
@@ -12803,11 +12767,27 @@ begin
   { an lvalue, or @MkObj().M -- a method of a receiver only a call result
     holds, typed 'reference to' (the other @Obj.M forms have arms of their
     own) }
-  if not IsFatLValueExpr(E) and
+  if not IsFatLValueExpr(E) and not Self.IsFatValueCast(E) and
      not ((E is TAddrOfExpr) and ArcTypeIsRefClosure(E.ResolvedType)) then
     Exit;
   IsRef := TProceduralTypeDesc(AAsgn.ResolvedLhsType).IsReference;
-  if E is TAddrOfExpr then
+  if Self.IsFatValueCast(E) and
+     (TFuncCallExpr(E).Args.Items[0] is TNilLiteral) then
+  begin
+    { TC(nil): the target becomes nil, releasing a 'reference to' Env }
+    Self.EmitAsgnTargetAddr(AAsgn, '%rcx');
+    if IsRef then
+    begin
+      Self.Emit(#9'pushq %rcx');
+      Self.Emit(#9'movq 8(%rcx), %rdi');
+      Self.Emit(#9'callq _ClassRelease');
+      Self.Emit(#9'popq %rcx');
+    end;
+    Self.Emit(#9'movq $0, (%rcx)');
+    Self.Emit(#9'movq $0, 8(%rcx)');
+    Exit(True);
+  end;
+  if (E is TAddrOfExpr) or Self.IsFatValueCast(E) then
     Self.EmitFatElemSourceAddr(E)              { @Obj.M: a built pair }
   else
     Self.EmitVarArgAddrToRax(E);               { source fat value }
@@ -12904,16 +12884,11 @@ begin
       FPendingRelTypes[FPendingRelCount - 1] := AValue.ResolvedType;
     Exit;
   end;
-  if (AValue is TFuncCallExpr) and (TFuncCallExpr(AValue).ResolvedDecl = nil) and
-     not TFuncCallExpr(AValue).IsIndirectCall and
-     not TFuncCallExpr(AValue).IsProcFieldCall and
-     (TFuncCallExpr(AValue).Args.Count = 1) and
-     (TASTExpr(TFuncCallExpr(AValue).Args.Items[0]).ResolvedType <> nil) and
-     ((TASTExpr(TFuncCallExpr(AValue).Args.Items[0]).ResolvedType.Kind = tyRecord) or
-      IsMethodPtrType(TASTExpr(TFuncCallExpr(AValue).Args.Items[0]).ResolvedType)) then
+  if Self.IsFatValueCast(AValue) then
   begin
-    { TGreet(M) / TM(F): a value cast reinterprets the operand's 16 bytes --
-      a TMethod record at its address, or another fat value }
+    { TGreet(M) / TM(F) / TC(nil): a value cast reinterprets the operand's
+      16 bytes -- a TMethod record at its address, or another fat value
+      (nil included) }
     if TASTExpr(TFuncCallExpr(AValue).Args.Items[0]).ResolvedType.Kind = tyRecord then
       Self.EmitVarArgAddrToRax(TASTExpr(TFuncCallExpr(AValue).Args.Items[0]))
     else
@@ -13239,6 +13214,45 @@ end;
   (Phase 2b in EmitFunctionDef).  Shared by every call-argument strategy
   (EmitMethodArgPush, both EmitCall paths): a path that fell back to
   EmitExprToEax passed a call result's Code word as the pair's address. }
+function TX86_64Backend.IsFatValueCast(AExpr: TASTExpr): Boolean;
+var
+  Arg: TASTExpr;
+begin
+  { TM(X) -- a type cast (no routine behind the call) to a method pointer /
+    closure type, of a TMethod record, another fat value, or nil }
+  Result := False;
+  if not ((AExpr is TFuncCallExpr) and (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+          not TFuncCallExpr(AExpr).IsIndirectCall and
+          not TFuncCallExpr(AExpr).IsProcFieldCall and
+          (TFuncCallExpr(AExpr).Args.Count = 1)) then
+    Exit;
+  Arg := TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]);
+  Result := (Arg is TNilLiteral) or
+    ((Arg.ResolvedType <> nil) and
+     ((Arg.ResolvedType.Kind = tyRecord) or IsMethodPtrType(Arg.ResolvedType)));
+end;
+
+procedure TX86_64Backend.EmitFatCalleeCopy(ACallee: TASTExpr;
+  AIsRef: Boolean);
+begin
+  { the callee of a call through a value an expression yields -- an
+    element, P^, a field, a call result, a cast, @Obj.M -- copied into the
+    16 bytes at (%rsp) through the shared source lowering.  A 'reference
+    to' copy holds its own Env reference for the call (the caller drops it
+    afterwards), so a body that overwrites the source cannot free the Env it
+    runs in; a call result's own +1 is released at the statement end. }
+  Self.EmitFatElemSourceAddr(ACallee);
+  Self.Emit(#9'movq (%rax), %rcx');
+  Self.Emit(#9'movq %rcx, (%rsp)');
+  Self.Emit(#9'movq 8(%rax), %rcx');
+  Self.Emit(#9'movq %rcx, 8(%rsp)');
+  if AIsRef then
+  begin
+    Self.Emit(#9'movq %rcx, %rdi');
+    Self.Emit(#9'callq _ClassAddRef');
+  end;
+end;
+
 procedure TX86_64Backend.EmitFatArgAddrToRax(AArg: TASTExpr);
 begin
   if AArg is TNilLiteral then

@@ -150,6 +150,12 @@ type
     { Obj.GetFn()(X); as a STATEMENT -- the expression form parsed, the
       statement stopped at the second '(' }
     procedure TestParse_MethodCallResultCallee_Stmt;
+    { a call through the value an expression yields: the callee pair comes
+      from the shared source lowering (x86-64 called a cast TM(M)(5) as a
+      ROUTINE named TM), the copy takes its own Env reference, and on arm64
+      every result register survives the release after the call (x1 was
+      lost: a 16-byte record result read back its second half as 0) }
+    procedure TestCodegen_ExprCallee_SharedSourceAndResultRegs;
     procedure TestSemantic_UnretainedLocal_Constraints;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
@@ -1627,6 +1633,32 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TAnonMethodTests.TestCodegen_ExprCallee_SharedSourceAndResultRegs;
+const
+  Src = '''
+    program Prg;
+    type
+      TC = reference to procedure(A: Integer);
+      TPair = record A, B: Int64; end;
+      TPF = reference to function(N: Integer): TPair;
+    var P: TPair;
+    function GetC(): TC; begin Result := procedure(A: Integer) begin end end;
+    function GetPF(): TPF;
+    begin
+      Result := function(N: Integer): TPair begin Result.A := N end
+    end;
+    begin
+      TC(GetC())(1);
+      P := GetPF()(3)
+    end.
+    ''';
+begin
+  AssertEquals('copy with its own Env reference; result registers kept', '',
+    AsmMissing(Src,
+      #9'movq 8(%rax), %rcx'#10#9'movq %rcx, 8(%rsp)'#10#9'movq %rcx, %rdi',
+      #9'sub sp, sp, #48'#10#9'stp x0, x1, [sp]'#10#9'stp d0, d1, [sp, #16]'));
 end;
 
 initialization

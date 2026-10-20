@@ -247,6 +247,10 @@ type
     { Obj.GetFn()(X); as a statement, a procedure and a function result, and
       a closure owning an object (released with the discarded closure) }
     procedure TestRun_MethodCallResultCallee_Stmt;
+    { calls through a cast (TM(M)(5), TM(O.GetM())(3)), casts into variables
+      (TM(call), TC(call), TC(nil), TM(nil)) and a 16-byte record result of a
+      call-result closure }
+    procedure TestRun_ExprCallee_CastsAndRecordResult;
   end;
 
 implementation
@@ -3411,6 +3415,45 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'show 5' + LineEnding + 'fn 12' + LineEnding +
     'owned 10' + LineEnding + 'box freed 9' + LineEnding + 'end' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_ExprCallee_CastsAndRecordResult;
+const
+  Src = '''
+    program Prg;
+    type
+      TM = procedure(A: Integer) of object;
+      TC = reference to procedure(A: Integer);
+      TPair = record A, B: Int64; end;
+      TPF = reference to function(N: Integer): TPair;
+      TImp = class N: Integer; procedure M(A: Integer); function GetM(): TM; end;
+    var Sum: Integer; O: TImp; L: TM; C: TC; MR: TMethod; P: TPair; K: Integer;
+    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
+    function TImp.GetM(): TM; begin Result := @Self.M; end;
+    function GetC(): TC; begin Result := procedure(A: Integer) begin Sum := Sum + A end; end;
+    function GetPF(): TPF;
+    begin
+      K := 100;
+      Result := function(N: Integer): TPair begin Result.A := N + K; Result.B := N * K; end;
+    end;
+    begin
+      O := TImp.Create(); O.N := 2;
+      L := @O.M; MR := TMethod(L);
+      TM(MR)(5);
+      TM(O.GetM())(3);
+      L := TM(O.GetM()); L(1);
+      C := TC(GetC()); C(1);
+      WriteLn(Sum);
+      C := TC(nil); L := TM(nil);
+      WriteLn(Assigned(C), ' ', Assigned(L));
+      P := GetPF()(3);
+      WriteLn(P.A, ' ', P.B);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '19' + LineEnding + 'False False' + LineEnding +
+    '103 300' + LineEnding, 0);
 end;
 
 initialization
