@@ -143,6 +143,10 @@ type
       method pointer -- x86-64 built one and called S with the object in
       its first parameter }
     procedure TestSemantic_AddrOfStaticMethod_Rejected;
+    { a literal inside a RECORD method may capture the method's locals and
+      params but not Self: it captured the caller's record by address (and
+      typed the env slot as the record, corrupting it) }
+    procedure TestSemantic_RecordMethodClosure_SelfUseRejected;
     procedure TestSemantic_UnretainedLocal_Constraints;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
@@ -1548,6 +1552,45 @@ begin
   AssertTrue('@Static inside a method',
     Pos('is a static method: it has no receiver', SemanticError(Head +
       'procedure TImp.Run; var K: TM; begin K := @S end; begin end.')) >= 0);
+end;
+
+procedure TAnonMethodTests.TestSemantic_RecordMethodClosure_SelfUseRejected;
+const
+  Head = '''
+    program Prg;
+    type
+      TC = reference to procedure(A: Integer);
+      TRec = record
+        N: Integer;
+        function Get: Integer;
+        function Mk(Z: Integer): TC;
+      end;
+    var Sum: Integer;
+    function TRec.Get: Integer; begin Result := N end;
+    function TRec.Mk(Z: Integer): TC;
+    var K: Integer;
+    begin
+      K := Z;
+      Result := procedure(A: Integer) begin
+    ''';
+  Tail = '''
+      end
+    end;
+    begin
+    end.
+    ''';
+  Msg = 'cannot use Self or the record''s members';
+var
+  Prog: TProgram;
+begin
+  AssertTrue('a field', Pos(Msg, SemanticError(Head + 'Sum := N' + Tail)) >= 0);
+  AssertTrue('explicit Self',
+    Pos(Msg, SemanticError(Head + 'Sum := Self.N' + Tail)) >= 0);
+  AssertTrue('a method', Pos(Msg, SemanticError(Head + 'Sum := Get()' + Tail)) >= 0);
+  AssertTrue('a field write', Pos(Msg, SemanticError(Head + 'N := A' + Tail)) >= 0);
+  Prog := AnalyseSrc(Head + 'Sum := Sum + A * K * Z' + Tail);
+  AssertNotNull('locals and params are captured', Prog);
+  Prog.Free();
 end;
 
 initialization

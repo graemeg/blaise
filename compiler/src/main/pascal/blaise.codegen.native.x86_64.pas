@@ -3576,6 +3576,7 @@ var
   I, J, K: Integer;
   MD:   TMethodDecl;
   TD:   TTypeDecl;
+  Methods: TObjectList;
 begin
   if ABlock = nil then Exit;
   for I := 0 to ABlock.ProcDecls.Count - 1 do
@@ -3592,14 +3593,22 @@ begin
     if MD.Body <> nil then
       Self.EmitEnvCleanupDefs(MD.Body);
   end;
-  { Enclosing frames that are METHOD bodies (Phase 3). }
+  { Enclosing frames that are METHOD bodies (Phase 3) -- of a class or of
+    a record (a record method's literal captures its locals too; its
+    env's cleanup was never emitted, an undefined symbol at link time). }
   for I := 0 to ABlock.TypeDecls.Count - 1 do
   begin
     TD := TTypeDecl(ABlock.TypeDecls.Items[I]);
-    if not (TD.Def is TClassTypeDef) then Continue;
-    for J := 0 to TClassTypeDef(TD.Def).Methods.Count - 1 do
+    if TD.Def is TClassTypeDef then
+      Methods := TClassTypeDef(TD.Def).Methods
+    else if TD.Def is TRecordTypeDef then
+      Methods := TRecordTypeDef(TD.Def).Methods
+    else
+      Continue;
+    if Methods = nil then Continue;
+    for J := 0 to Methods.Count - 1 do
     begin
-      MD := TMethodDecl(TClassTypeDef(TD.Def).Methods.Items[J]);
+      MD := TMethodDecl(Methods.Items[J]);
       if (MD.EnvType <> nil) and (not MD.IsAnonThunk) then
         Self.EmitFieldCleanupFn(NativeMangle(TRecordTypeDesc(MD.EnvType).Name),
           TRecordTypeDesc(MD.EnvType), False);

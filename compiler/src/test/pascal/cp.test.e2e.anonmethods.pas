@@ -238,6 +238,12 @@ type
     { @MkObj(N).M into an argument, a variable, a field and an element: the
       closure owns the receiver, which dies when the closure does }
     procedure TestRun_AddrOfCallResultMethod_OwnsReceiver;
+    { a literal inside a record method capturing the method's local and
+      parameter (x86-64 never emitted the env's cleanup and linked an
+      undefined symbol; the conservatively captured Self corrupted the env),
+      returned into a variable, an argument and an element (arm64 refused a
+      record method's closure result) }
+    procedure TestRun_RecordMethodClosure_CapturesLocals;
   end;
 
 implementation
@@ -3313,6 +3319,49 @@ begin
   AssertRunsOnAll(Src, 'freed 1' + LineEnding + 'after take' + LineEnding +
     'held' + LineEnding + 'freed 2' + LineEnding + 'freed 3' + LineEnding +
     'freed 4' + LineEnding + '10' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_RecordMethodClosure_CapturesLocals;
+const
+  Src = '''
+    program P;
+    type
+      TC = reference to procedure(A: Integer);
+      TRec = record
+        N: Integer;
+        function Mk(Z: Integer): TC;
+      end;
+    var Sum: Integer; C: TC; R: TRec; A: array of TC;
+    function TRec.Mk(Z: Integer): TC;
+    var K: Integer;
+    begin
+      K := N;
+      Result := procedure(A: Integer) begin Sum := Sum + A * K * Z end;
+    end;
+    procedure Take(X: TC); begin X(10); end;
+    function MkLocal(): TC;
+    var L: TRec;
+    begin
+      L.N := 7;
+      C := L.Mk(2);
+      Result := C;
+    end;
+    begin
+      C := MkLocal();
+      C(1);
+      WriteLn(Sum);
+      R.N := 3;
+      Take(R.Mk(1));
+      SetLength(A, 1);
+      A[0] := R.Mk(5);
+      A[0](100);
+      WriteLn(Sum);
+      C := nil;
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '14' + LineEnding + '1544' + LineEnding, 0);
 end;
 
 initialization

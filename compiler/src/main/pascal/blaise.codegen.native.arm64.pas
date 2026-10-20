@@ -2977,6 +2977,17 @@ begin
     Result := True;
     Exit;
   end;
+  if (MC.ResolvedMethod is TMethodDecl) and
+     TMethodDecl(MC.ResolvedMethod).IsRecordMethod and
+     IsMethodPtrType(TMethodDecl(MC.ResolvedMethod).ResolvedReturnType) then
+  begin
+    { R.MkFn(X) -- a RECORD method: Self is the record's address, which the
+      record-call dispatcher supplies (a call-result receiver included) }
+    ATmp := NewFretSlot();
+    EmitRecCallDispatch(AExpr, ATmp);
+    Result := True;
+    Exit;
+  end;
   if not (MC.ResolvedMethod is TMethodDecl) or MC.IsConstructorCall or
      MC.IsStaticCall or MC.IsProcFieldCall or MC.IsMetaclassDispatch or
      TMethodDecl(MC.ResolvedMethod).IsRecordMethod or

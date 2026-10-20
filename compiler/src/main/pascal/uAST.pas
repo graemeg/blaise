@@ -1158,6 +1158,14 @@ type
                                      literal carried a '[Weak Self]' capture
                                      list (Phase 5): the shared env's Self
                                      field is weak }
+    [Unretained] RecordMethodHost: TObject; { TMethodDecl — not owned; set by
+                                     uSemantic on a THUNK lifted from a RECORD
+                                     method: that method.  The thunk may use
+                                     its locals and params, never Self (the
+                                     caller's record, which it could outlive) }
+    [Unretained] RecordSelfType: TObject; { TRecordTypeDesc — not owned; that
+                                     method's record type, the implicit-Self
+                                     context the thunk body is analysed in }
     IsRoutineAdapter: Boolean;     { set by uSemantic — the literal (and its
                                      THUNK) is the forwarding adapter built
                                      for '@Routine' into a 'reference to'

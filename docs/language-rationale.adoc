@@ -2086,6 +2086,20 @@ captured by closures created inside the loop is ONE shared env field —
 after the loop, every such closure observes the final value.  Per-iteration
 snapshots require a block-scoped fresh binding (Phase 4).
 
+=== Anonymous methods inside record methods
+
+A literal inside a record method may capture that method's locals and
+parameters, but may not use `Self` — the record's fields, methods or `Self`
+itself.  A record method's `Self` is the caller's record, held by address
+(effectively a `var` parameter, which closures cannot capture either), and a
+closure can outlive it: a closure that read a field after the record went
+out of scope read freed stack.  This is Delphi's rule ("Cannot capture
+symbol 'Self'").  The rejected alternative was to capture a copy of the
+record — safe, but a write inside the closure would then silently miss the
+original (decided 2026-10-20).  The message suggests copying what the
+closure needs into a local first.  Literals in CLASS methods keep capturing
+`Self` (an ARC instance) as before.
+
 === Block-scoped `var` and per-iteration capture (Phase 4)
 
 Phase 4 adds a *block-scoped variable declaration statement* —

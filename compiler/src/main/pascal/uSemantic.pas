@@ -729,6 +729,7 @@ type
     function  AnalyseAnonMethodExpr(AExpr: TAnonMethodExpr): TTypeDesc;
     procedure AnalyseVarDeclStmt(AStmt: TVarDeclStmt);
     procedure PromoteAnonCaptures(AThunk: TMethodDecl);
+    procedure RejectRecordSelfUse(AThunk: TMethodDecl);
     procedure DrainPendingAnonDecls(ABlock: TBlock);
     procedure CoerceRoutineToTarget(var AExpr: TASTExpr; ATarget: TTypeDesc);
     function  CallField(ART: TRecordTypeDesc; const AName: string;
@@ -10388,10 +10389,21 @@ begin
       FCurrentClass       := TRecordTypeDesc(SelfFld.TypeDesc);
       FCurrentMethodOwner := TRecordTypeDesc(SelfFld.TypeDesc);
     end;
+  end
+  else if ADecl.IsAnonThunk and (ADecl.RecordSelfType <> nil) then
+  begin
+    { lifted from a RECORD method: Self is not captured (the closure may not
+      use it -- RejectRecordSelfUse), but the body is analysed in the
+      record's context so a member use resolves and is reported as such }
+    FCurrentClass       := TRecordTypeDesc(ADecl.RecordSelfType);
+    FCurrentMethodOwner := TRecordTypeDesc(ADecl.RecordSelfType);
   end;
   FTable.PushScope();
   Inc(FScopeDepth);
   try
+    if ADecl.IsAnonThunk and (ADecl.RecordSelfType <> nil) then
+      FTable.Define(TSymbol.Create('Self', skVariable,
+        TRecordTypeDesc(ADecl.RecordSelfType)));
     { Define Result for functions }
     if ADecl.ResolvedReturnType <> nil then
     begin
@@ -19301,6 +19313,15 @@ begin
     of a standalone routine }
   if InMethod and Encl.IsStatic then
     InMethod := False;
+  { a RECORD method's Self is the caller's record: the literal may not use
+    it, so it is not captured; DrainPendingAnonDecls rejects a use once the
+    body is analysed (in the record's context, so its members resolve) }
+  if InMethod and Encl.IsRecordMethod then
+  begin
+    AThunk.RecordMethodHost := Encl;
+    AThunk.RecordSelfType := FCurrentClass;
+    InMethod := False;
+  end;
 
   CollectCaptures(AThunk, Encl);
   { An anonymous method inside a CLASSIC NESTED ROUTINE of a method cannot
@@ -19552,7 +19573,41 @@ begin
     MD.ResolvedEmitName := CurrentUnitPrefix() + MD.Name;
     ABlock.ProcDecls.Add(MD);
     AnalyseStandaloneDecl(MD);
+    if MD.RecordMethodHost <> nil then
+      RejectRecordSelfUse(MD);
   end;
+end;
+
+procedure TSemanticAnalyser.RejectRecordSelfUse(AThunk: TMethodDecl);
+var
+  Saved: TStringList;
+  SavedNested: Boolean;
+  UsesSelf: Boolean;
+begin
+  { An anonymous method inside a RECORD method may not use Self -- its
+    fields, methods or properties, or Self itself: Self is the caller's
+    record, held by address, and the closure can outlive it (it read freed
+    stack on arm64).  Delphi rejects the same capture.  The analysed body
+    is walked by the nested-routine capture walker, which counts every
+    implicit member use as a use of Self. }
+  Saved := AThunk.CapturedVars;
+  SavedNested := FInNestedOfMethod;
+  AThunk.CapturedVars := nil;
+  FInNestedOfMethod := True;
+  try
+    CollectCaptures(AThunk, TMethodDecl(AThunk.RecordMethodHost));
+    UsesSelf := (AThunk.CapturedVars <> nil) and
+            (AThunk.CapturedVars.IndexOf('Self') >= 0);
+  finally
+    AThunk.CapturedVars.Free();
+    AThunk.CapturedVars := Saved;
+    FInNestedOfMethod := SavedNested;
+  end;
+  if UsesSelf then
+    SemanticError('An anonymous method inside a record method cannot use ' +
+      'Self or the record''s members: Self is the caller''s record, which ' +
+      'the closure could outlive -- copy what it needs into a local first',
+      AThunk.Line, AThunk.Col);
 end;
 
 function TSemanticAnalyser.CallField(ART: TRecordTypeDesc;
