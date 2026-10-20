@@ -1047,6 +1047,7 @@ type
       narrowing).  Receiver shapes: a named var/global via AObjectName, a
       var/out param (AIsVarParam), or a call-free AObjExpr (an identifier or
       field access). }
+    procedure EmitProcFieldCallExpr(AExpr: TASTExpr);
     procedure EmitProcFieldCall(AObjExpr: TASTExpr; const AObjectName: string;
                                 AIsVarParam: Boolean; AFieldInfo: TFieldInfo;
                                 AProcType: TProceduralTypeDesc;
@@ -7412,19 +7413,7 @@ begin
     { Obj.Handler() / Handler(): EmitProcFieldCall fills a zeroed per-site
       scratch through the hidden result pointer and leaves its address in
       %rax; the owned pair moves from there to the stack }
-    if AExpr is TFuncCallExpr then
-      Self.EmitProcFieldCall(nil, 'Self', False,
-        TFuncCallExpr(AExpr).ProcFieldInfo,
-        TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType),
-        TFuncCallExpr(AExpr).Args, AExpr.ResolvedType, False)
-    else
-      Self.EmitProcFieldCall(TMethodCallExpr(AExpr).ObjExpr,
-        TMethodCallExpr(AExpr).ObjectName, TMethodCallExpr(AExpr).IsVarParam,
-        TMethodCallExpr(AExpr).ProcFieldInfo,
-        TProceduralTypeDesc(TMethodCallExpr(AExpr).ResolvedProcType),
-        TMethodCallExpr(AExpr).Args, AExpr.ResolvedType,
-        (TMethodCallExpr(AExpr).ResolvedClassType <> nil) and
-        (TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyRecord));
+    Self.EmitProcFieldCallExpr(AExpr);
     Self.Emit(#9'movq 8(%rax), %rcx');
     Self.Emit(#9'pushq %rcx');            { itab }
     Self.Emit(#9'movq (%rax), %rcx');
@@ -7518,6 +7507,20 @@ begin
     finally
       Self.FreeGetterCallShim(Synth, RecvFAE, SynthArgs);
     end;
+    Exit;
+  end;
+  if IsProcFieldCallExpr(AExpr) then
+  begin
+    { Obj.FGet() / FGet(): the call fills its own scratch (the method-sret
+      helper has no method to dispatch to); the result moves to ADest }
+    Self.EmitProcFieldCallExpr(AExpr);
+    Self.Emit(#9'movq %rax, %rsi');
+    if AIndirect then
+      Self.Emit(Format(#9'movq %s, %%rdi', [ADest]))
+    else
+      Self.Emit(Format(#9'leaq %s, %%rdi', [ADest]));
+    Self.Emit(Format(#9'movq $%d, %%rdx', [AExpr.ResolvedType.RawSize()]));
+    Self.Emit(#9'callq memcpy');
     Exit;
   end;
   if AExpr is TIndirectFuncCallExpr then
@@ -12820,7 +12823,7 @@ begin
     EmitRecordCallSretAt lowers into a buffer: a direct, method, indirect or
     expression-callee call, an inherited call, a property getter }
   Result := (AExpr is TMethodCallExpr) or (AExpr is TIndirectFuncCallExpr) or
-    (AExpr is TInheritedCallExpr) or
+    (AExpr is TInheritedCallExpr) or IsProcFieldCallExpr(AExpr) or
     ((AExpr is TFuncCallExpr) and
      ((TFuncCallExpr(AExpr).ResolvedDecl <> nil) or
       TFuncCallExpr(AExpr).IsIndirectCall)) or
@@ -12877,6 +12880,22 @@ begin
         [MethodEmitNameNative(MD, MD.OwnerTypeName, FAE.FieldName)]));
     Self.Emit(#9'movq %rax, (%rcx)');
     Self.Emit(#9'movq %rcx, %rax');
+    Exit;
+  end;
+  if (AValue is TFuncCallExpr) and (TFuncCallExpr(AValue).ResolvedDecl = nil) and
+     not TFuncCallExpr(AValue).IsIndirectCall and
+     not TFuncCallExpr(AValue).IsProcFieldCall and
+     (TFuncCallExpr(AValue).Args.Count = 1) and
+     (TASTExpr(TFuncCallExpr(AValue).Args.Items[0]).ResolvedType <> nil) and
+     ((TASTExpr(TFuncCallExpr(AValue).Args.Items[0]).ResolvedType.Kind = tyRecord) or
+      IsMethodPtrType(TASTExpr(TFuncCallExpr(AValue).Args.Items[0]).ResolvedType)) then
+  begin
+    { TGreet(M) / TM(F): a value cast reinterprets the operand's 16 bytes --
+      a TMethod record at its address, or another fat value }
+    if TASTExpr(TFuncCallExpr(AValue).Args.Items[0]).ResolvedType.Kind = tyRecord then
+      Self.EmitVarArgAddrToRax(TASTExpr(TFuncCallExpr(AValue).Args.Items[0]))
+    else
+      Self.EmitFatElemSourceAddr(TASTExpr(TFuncCallExpr(AValue).Args.Items[0]));
     Exit;
   end;
   if (AValue.ResolvedType <> nil) and IsMethodPtrType(AValue.ResolvedType) and
@@ -13200,7 +13219,18 @@ end;
   EmitExprToEax passed a call result's Code word as the pair's address. }
 procedure TX86_64Backend.EmitFatArgAddrToRax(AArg: TASTExpr);
 begin
-  if AArg is TAnonMethodExpr then
+  if AArg is TNilLiteral then
+  begin
+    { nil: a zeroed pair -- the callee copies 16 bytes through the address,
+      so a bare 0 faulted }
+    Self.Emit(Format(#9'leaq %s, %%rax', [Self.NewScratchOperand(16)]));
+    Self.Emit(#9'movq $0, (%rax)');
+    Self.Emit(#9'movq $0, 8(%rax)');
+  end
+  else if AArg is TAddrOfExpr then
+    { @Obj.M: the pair built in a scratch (the shared source lowering) }
+    Self.EmitFatElemSourceAddr(AArg)
+  else if AArg is TAnonMethodExpr then
     Self.EmitAnonValueToSlot(TAnonMethodExpr(AArg))
   else if (AArg is TIdentExpr) and (not TIdentExpr(AArg).IsImplicitSelf) and
           (not Self.IsCaptured(TIdentExpr(AArg).Name)) then
@@ -16656,10 +16686,10 @@ begin
           Self.Emit(#9'xorl %r12d, %r12d')
         else
         begin
-          if Asgn.Expr is TAnonMethodExpr then
-            Self.EmitAnonValueToSlot(TAnonMethodExpr(Asgn.Expr))
-          else
-            Self.EmitExprToEax(Asgn.Expr);
+          { the source's address through the shared lowering (a call
+            result lands in a scratch released at the statement end; a
+            plain EmitExprToEax yielded the pair itself, not its address) }
+          Self.EmitFatElemSourceAddr(Asgn.Expr);
           Self.Emit(#9'movq %rax, %r12');
         end;
         Self.Emit(Format(#9'movq %s, %%rbx', [Self.VarOperand('Self')]));
@@ -19230,10 +19260,7 @@ begin
         Self.Emit(#9'xorl %r12d, %r12d')
       else
       begin
-        if FA.Expr is TAnonMethodExpr then
-          Self.EmitAnonValueToSlot(TAnonMethodExpr(FA.Expr))
-        else
-          Self.EmitExprToEax(FA.Expr);
+        Self.EmitFatElemSourceAddr(FA.Expr);
         Self.Emit(#9'movq %rax, %r12');
       end;
       { Field address -> %rbx. }
@@ -23392,6 +23419,26 @@ end;
     movq 8(%rax), %rdi   (of object only: Data -> first arg)
     movq (%rax), %r10    ; code pointer
     popq <arg regs>      ; callq *%r10 }
+procedure TX86_64Backend.EmitProcFieldCallExpr(AExpr: TASTExpr);
+begin
+  { a procedural-field call (IsProcFieldCallExpr) as a value: an aggregate
+    result (an interface, a record, a closure / method pointer) lands in a
+    zeroed per-site scratch whose address is left in %rax }
+  if AExpr is TFuncCallExpr then
+    Self.EmitProcFieldCall(nil, 'Self', False,
+      TFuncCallExpr(AExpr).ProcFieldInfo,
+      TProceduralTypeDesc(TFuncCallExpr(AExpr).ResolvedProcType),
+      TFuncCallExpr(AExpr).Args, AExpr.ResolvedType, False)
+  else
+    Self.EmitProcFieldCall(TMethodCallExpr(AExpr).ObjExpr,
+      TMethodCallExpr(AExpr).ObjectName, TMethodCallExpr(AExpr).IsVarParam,
+      TMethodCallExpr(AExpr).ProcFieldInfo,
+      TProceduralTypeDesc(TMethodCallExpr(AExpr).ResolvedProcType),
+      TMethodCallExpr(AExpr).Args, AExpr.ResolvedType,
+      (TMethodCallExpr(AExpr).ResolvedClassType <> nil) and
+      (TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyRecord));
+end;
+
 procedure TX86_64Backend.EmitProcFieldCall(AObjExpr: TASTExpr;
   const AObjectName: string; AIsVarParam: Boolean; AFieldInfo: TFieldInfo;
   AProcType: TProceduralTypeDesc; AArgs: TObjectList; AResultType: TTypeDesc;

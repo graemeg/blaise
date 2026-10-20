@@ -663,8 +663,8 @@ begin
       #9'popq %rsi' + #10 + #9'movq (%rsi), %rax' + #10 +
         #9'movq %rax, (%rcx)' + #10 + #9'movq 8(%rsi), %rax' + #10 +
         #9'movq %rax, 8(%rcx)',
-      #9'ldr x1, [sp], #16' + #10 + #9'ldp x9, x10, [x1]' + #10 +
-        #9'sub x1, x29, #'));
+      #9'ldr x9, [sp], #16' + #10 + #9'ldp x10, x11, [x9]' + #10 +
+        #9'stp x10, x11, [x1]'));
 end;
 
 procedure TProcTypesTests.TestCodegen_MethodPtrElementStore_CopiesBothHalves;

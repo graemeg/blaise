@@ -221,6 +221,12 @@ type
     { a call through the procedural value a call returns, as a statement:
       GetFn()(X); and GetMaker()(X).Show(); }
     procedure TestRun_ExprCallStmt_CallResultCallee;
+    { a method pointer / a closure copied from another field, an element or
+      a procedural-field call into fields and arguments, nil and @Obj.M as
+      arguments, with the closure Env's lifetime (arm64 lowered each
+      consumer's own subset of sources; both ISAs crashed on a nil argument) }
+    procedure TestRun_FatValue_MethodPointerSources;
+    procedure TestRun_FatValue_ClosureSources;
   end;
 
 implementation
@@ -2991,6 +2997,121 @@ begin
     'closure 4' + LineEnding + 'gone 4' + LineEnding + 'closure after' + LineEnding +
     'nested 5' + LineEnding + 'gone 5' + LineEnding + 'nested after' + LineEnding +
     'global 6' + LineEnding + 'gone 6' + LineEnding + 'end' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_FatValue_MethodPointerSources;
+const
+  Src = '''
+    program P;
+    type
+      TM = procedure(A: Integer) of object;
+      TGet = function: TM of object;
+      TImp = class
+        N: Integer;
+        procedure M(A: Integer);
+      end;
+      TRec = record F: TM; end;
+      THold = class
+        FS, FS2: TM;
+        FArr: array[0..1] of TM;
+        FDyn: array of TM;
+        FGet: TGet;
+        FR: TRec;
+        function Mk(): TM;
+        procedure Run();
+      end;
+    var TI: TImp; Sum: Integer; GArr: array of TM; H: THold;
+    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
+    function THold.Mk(): TM; begin Result := @TI.M; end;
+    procedure Take(X: TM); begin X(100); end;
+    procedure TakeC(const X: TM); begin X(1000); end;
+    procedure TakeOpt(X: TM); begin if Assigned(X) then X(10000) else WriteLn('none'); end;
+    procedure THold.Run();
+    var L: TM; LR: TRec;
+    begin
+      FS := FS2; FS(1);
+      FS := FArr[0]; FS(2);
+      FS := GArr[0]; FS(3);
+      LR.F := FDyn[0]; LR.F(4);
+      FR.F := FS2; FR.F(5);
+      L := FGet(); L(6);
+      FS := FGet(); FS(7);
+      Take(FS2);
+      TakeC(FGet());
+      TakeOpt(nil);
+      TakeOpt(@TI.M);
+      WriteLn(Sum);
+    end;
+    begin
+      TI := TImp.Create(); TI.N := 1;
+      H := THold.Create();
+      H.FS2 := @TI.M; H.FArr[0] := @TI.M;
+      SetLength(H.FDyn, 1); H.FDyn[0] := @TI.M;
+      SetLength(GArr, 1); GArr[0] := @TI.M;
+      H.FGet := @H.Mk;
+      H.Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'none' + LineEnding + '11128' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_FatValue_ClosureSources;
+const
+  Src = '''
+    program P;
+    type
+      TC = reference to procedure(A: Integer);
+      TGet = function: TC of object;
+      TBox = class
+        N: Integer;
+        destructor Destroy; override;
+      end;
+      TRec = record F: TC; end;
+      THold = class
+        FS, FS2: TC;
+        FArr: array[0..1] of TC;
+        FGet: TGet;
+        function Mk(): TC;
+        procedure Run();
+      end;
+    var Sum: Integer; H: THold;
+    destructor TBox.Destroy; begin WriteLn('freed ', N); inherited Destroy(); end;
+    function MkC(N: Integer): TC;
+    var B: TBox;
+    begin
+      B := TBox.Create(); B.N := N;
+      Result := procedure(A: Integer) begin Sum := Sum + A * B.N; end;
+    end;
+    function THold.Mk(): TC; begin Result := MkC(2); end;
+    procedure Take(X: TC); begin X(100); end;
+    procedure THold.Run();
+    var LR: TRec;
+    begin
+      FS := FS2; FS(1);
+      FArr[1] := FArr[0]; FArr[1](1);
+      LR.F := FS2; LR.F(1);
+      FS := FGet(); FS(1);
+      Take(FGet());
+      WriteLn('mid ', Sum);
+      FS := nil;
+      WriteLn('cleared');
+    end;
+    begin
+      H := THold.Create();
+      H.FS2 := MkC(1); H.FArr[0] := H.FS2;
+      H.FGet := @H.Mk;
+      H.Run();
+      H := nil;
+      WriteLn('end');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'freed 2' + LineEnding + 'mid 205' + LineEnding + 'freed 2' + LineEnding +
+    'cleared' + LineEnding + 'freed 1' + LineEnding + 'end' + LineEnding, 0);
 end;
 
 procedure TE2EAnonMethodTests.TestRun_NestedRoutineInMethod_ProcFieldCall;

@@ -111,6 +111,15 @@ type
       qualified), whose single signature types the lambda. }
     procedure TestSemantic_Arrow_ArgPosition_ProcTypeCalls_Inferred;
     procedure TestCodegen_CapturedWeakLocal_ClosureBodyRegistersSlot;
+    { every method-pointer / closure source into every consumer: a field
+      filled from another field, an element or a procedural-field call, and
+      those values passed as arguments (arm64 lowered each consumer's own
+      subset of sources) }
+    procedure TestCodegen_FatValue_SourcesIntoFieldsAndArgs;
+    { nil passed to a method-pointer parameter is the address of a zeroed
+      pair (the callee copies 16 bytes through it: a bare 0 faulted on both
+      ISAs); @Obj.M is a pair built in a scratch (x86-64 refused it) }
+    procedure TestCodegen_FatArg_NilAndMethodRef;
     procedure TestSemantic_UnretainedLocal_Constraints;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
@@ -1050,7 +1059,8 @@ begin
     AsmMissing(Src,
       #9'movq %rax, 8(%rcx)'#10#9'addq $8, %rsp'#10#9'popq %rdi'#10 +
         #9'callq _ClassRelease',
-      #9'bl _Cap'#10#9'sub x9, x29, #16'#10#9'ldr x0, [x9, #8]'#10#9'bl __ClassRelease'));
+      #9'str x0, [sp, #-16]!'#10#9'sub x9, x29, #16'#10#9'ldr x0, [x9, #8]'#10 +
+        #9'bl __ClassRelease'));
 end;
 
 procedure TAnonMethodTests.TestCodegen_CallThroughEnvHoistedClosure_UsesCapture;
@@ -1231,6 +1241,76 @@ begin
   Msg := SemanticError(Head + 'var [Weak] [Unretained] O: TObject; begin end.');
   AssertTrue('with [Weak] rejected: ' + Msg,
     Pos('mutually exclusive', Msg) >= 0);
+end;
+
+procedure TAnonMethodTests.TestCodegen_FatValue_SourcesIntoFieldsAndArgs;
+const
+  Src = '''
+    program Prg;
+    type
+      TM = procedure(A: Integer) of object;
+      TC = reference to procedure(A: Integer);
+      TGetM = function: TM of object;
+      TGetC = function: TC of object;
+      TRec = record F: TM; G: TC; end;
+      THold = class
+        FS, FS2: TM;
+        FC, FC2: TC;
+        FArr: array[0..1] of TM;
+        FDyn: array of TC;
+        FGetM: TGetM;
+        FGetC: TGetC;
+        FR: TRec;
+        procedure Run();
+      end;
+    var GArr: array of TM;
+    procedure Take(X: TM); begin X(1) end;
+    procedure TakeC(const X: TC); begin X(1) end;
+    procedure THold.Run();
+    var L: TM; LR: TRec;
+    begin
+      FS := FS2;
+      FS := FArr[0];
+      FS := GArr[0];
+      FC := FDyn[0];
+      LR.F := FS2;
+      FR.G := FC2;
+      L := FGetM();
+      FS := FGetM();
+      FC := FGetC();
+      Take(FS2);
+      Take(FGetM());
+      TakeC(FC2);
+      TakeC(FGetC())
+    end;
+    begin
+    end.
+    ''';
+begin
+  AssertEquals('every source compiles into fields and arguments', '',
+    AsmMissing(Src, 'callq Take', 'bl _TakeC'));
+end;
+
+procedure TAnonMethodTests.TestCodegen_FatArg_NilAndMethodRef;
+const
+  Src = '''
+    program Prg;
+    type
+      TM = procedure(A: Integer) of object;
+      TImp = class procedure M(A: Integer); end;
+    procedure TImp.M(A: Integer); begin end;
+    procedure Take(X: TM); begin end;
+    var O: TImp;
+    begin
+      Take(nil);
+      Take(@O.M)
+    end.
+    ''';
+begin
+  AssertEquals('nil is a zeroed pair', '',
+    AsmMissing(Src,
+      #9'movq $0, (%rax)'#10#9'movq $0, 8(%rax)'#10#9'movq %rax, %rdi'#10#9'callq Take',
+      #9'stp xzr, xzr, [x0]'#10#9'str x0, [sp, #-16]!'));
 end;
 
 initialization

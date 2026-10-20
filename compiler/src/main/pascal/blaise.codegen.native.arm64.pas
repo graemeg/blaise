@@ -348,7 +348,8 @@ type
     function  IsStaticArrayValueCast(AExpr: TASTExpr): Boolean;
     procedure EmitStrByteAddrToX0(AIndex: TASTExpr; AStrSlot: TASTExpr;
       ACharField: TFieldAccessExpr);
-    procedure EmitFatPairToX0X1(AExpr: TASTExpr; ARefTarget: Boolean);
+    procedure EmitFatPairToX0X1(AExpr: TASTExpr; ATarget: TTypeDesc);
+    function  EmitFatSourceAddrToX0(AExpr: TASTExpr; ATarget: TTypeDesc): Boolean;
     procedure EmitForInArrayBase(AStmt: TForInStmt; const ATmp: string);
     procedure EmitForInVarAddr(const AReg: string; AStmt: TForInStmt);
     procedure EmitFatTargetAddr(const AReg: string; AAsgn: TAssignment);
@@ -2574,69 +2575,134 @@ begin
     EmitSlotAddr(AReg, AAsgn.Name);
 end;
 
-procedure TArm64Backend.EmitFatPairToX0X1(AExpr: TASTExpr; ARefTarget: Boolean);
+function TArm64Backend.EmitFatSourceAddrToX0(AExpr: TASTExpr;
+  ATarget: TTypeDesc): Boolean;
 var
   FAE: TFieldAccessExpr;
   MD: TMethodDecl;
   Tmp: string;
+  Inner: TASTExpr;
+begin
+  { x0 := the ADDRESS of a 16-byte method pointer / closure value (Code at
+    +0, Data / Env at +8) for a consumer to copy from -- the one source
+    lowering every consumer shares: an assignment, a field, element or P^
+    store, an argument.  Returns True when the value is OWNED: its scratch
+    holds a +1 on the Env (a 'reference to' call result, or a receiver a
+    call returned), which a consumer that keeps the value takes over and
+    any other consumer releases at the statement end.  Otherwise it is
+    borrowed, and a 'reference to' consumer retains the Env.  ATarget is
+    the consumer's type. }
+  Result := False;
+  if AExpr is TNilLiteral then
+  begin
+    Tmp := NewFretSlot();
+    EmitSlotAddr('x0', Tmp);
+    Self.Emit(#9'stp xzr, xzr, [x0]');
+    Exit;
+  end;
+  if AExpr is TAnonMethodExpr then
+  begin
+    { a literal: materialised into its own value slot, which keeps one Env
+      reference (released with the slot) }
+    EmitAnonValueToSlot(TAnonMethodExpr(AExpr));
+    Exit;
+  end;
+  if (AExpr is TAddrOfExpr) and
+     (TAddrOfExpr(AExpr).Expr is TFieldAccessExpr) and
+     (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).ResolvedMethod is TMethodDecl) then
+  begin
+    { @Obj.M: (Code, receiver) built in a scratch.  A virtual method's code
+      comes from the receiver's own vtable, so @Obj.M captures the dynamic
+      override exactly as a direct Obj.M() call would. }
+    FAE := TFieldAccessExpr(TAddrOfExpr(AExpr).Expr);
+    MD := TMethodDecl(FAE.ResolvedMethod);
+    if MD.IsRecordMethod or MD.IsStatic or FAE.IsImplicitSelf then
+      NotYet('method pointer to this method form', AExpr);
+    if FAE.Base <> nil then
+    begin
+      Self.EmitExprToX0(FAE.Base);
+      if ArcExprOwnsRef(FAE.Base) then
+      begin
+        { a receiver a call returned: only a 'reference to' consumer can
+          own it (the front end rejects the 'of object' form) }
+        if not ArcTypeIsRefClosure(ATarget) then
+          InternalError('method pointer on an owned transient receiver ' +
+            'into an ''of object'' target', AExpr);
+        Result := True;
+      end;
+    end
+    else if not EmitCapturedBase('x0', FAE.RecordName, True, False) then
+      EmitLoadSlot('x0', FAE.RecordName);
+    if MD.VTableSlot >= 0 then
+    begin
+      Self.Emit(#9'ldr x9, [x0]');
+      Self.Emit(Format(#9'ldr x1, [x9, #%d]', [(MD.VTableSlot + 1) * 8]));
+    end
+    else
+    begin
+      Self.Emit(Format(#9'adrp x1, %s@PAGE', [RoutineSym(MD, '')]));
+      Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF', [RoutineSym(MD, '')]));
+    end;
+    Tmp := NewFretSlot();
+    EmitSlotAddr('x9', Tmp);
+    Self.Emit(#9'stp x1, x0, [x9]');
+    Self.Emit(#9'mov x0, x9');
+    Exit;
+  end;
+  if (AExpr is TFuncCallExpr) and
+     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+     not TFuncCallExpr(AExpr).IsIndirectCall and
+     (TFuncCallExpr(AExpr).Args.Count = 1) and
+     (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) then
+  begin
+    { TRunMethod(M) / TM(F): a value cast reinterprets the operand's 16 bytes
+      -- a TMethod record at its address, or another fat value }
+    Inner := TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]);
+    if Inner.ResolvedType.Kind = tyRecord then
+    begin
+      EmitRecAddrToX0(Inner);
+      Exit;
+    end;
+    if IsMethodPtrType(Inner.ResolvedType) then
+    begin
+      Result := Self.EmitFatSourceAddrToX0(Inner, ATarget);
+      Exit;
+    end;
+  end;
+  if EmitClosureResultToTemp(AExpr, Tmp) then
+  begin
+    { a call result: the callee filled a fresh scratch through x8, and a
+      'reference to' result handed over its Env reference with it }
+    EmitSlotAddr('x0', Tmp);
+    Result := ArcTypeIsRefClosure(AExpr.ResolvedType);
+    Exit;
+  end;
+  if IsFatLValue(AExpr) then
+  begin
+    { a variable, field, element or P^: its own storage }
+    EmitLValueAddrToX0(AExpr);
+    Exit;
+  end;
+  NotYet('closure / method-pointer value from this expression', AExpr);
+end;
+
+procedure TArm64Backend.EmitFatPairToX0X1(AExpr: TASTExpr; ATarget: TTypeDesc);
+var
+  Owned: Boolean;
 begin
   { x0:x1 := a method pointer / closure VALUE (Code, Data/Env), for a
-    destination that is not a named variable (an array element).  A
-    'reference to' destination (ARefTarget) owns its Env: an l-value or
-    @Obj.M source or a literal is retained here; a closure-returning call
-    hands over its own +1. }
+    destination that is not a named variable (an element, P^).  A
+    'reference to' destination owns its Env: a borrowed source is retained
+    here, an owned one hands over its +1. }
   if AExpr is TNilLiteral then
   begin
     Self.Emit(#9'mov x0, xzr');
     Self.Emit(#9'mov x1, xzr');
     Exit;
   end;
-  if IsFatLValue(AExpr) then
-  begin
-    EmitLValueAddrToX0(AExpr);
-    Self.Emit(#9'ldp x0, x1, [x0]');
-  end
-  else if AExpr is TAnonMethodExpr then
-  begin
-    { a literal: materialised into its own value slot (which keeps one Env
-      reference, released with the slot); the element takes another below }
-    EmitAnonValueToSlot(TAnonMethodExpr(AExpr));
-    Self.Emit(#9'ldp x0, x1, [x0]');
-  end
-  else if (AExpr is TAddrOfExpr) and
-          (TAddrOfExpr(AExpr).Expr is TFieldAccessExpr) and
-          (TFieldAccessExpr(TAddrOfExpr(AExpr).Expr).ResolvedMethod is TMethodDecl) then
-  begin
-    FAE := TFieldAccessExpr(TAddrOfExpr(AExpr).Expr);
-    MD := TMethodDecl(FAE.ResolvedMethod);
-    if MD.IsRecordMethod or MD.IsStatic or FAE.IsImplicitSelf or
-       ((FAE.Base <> nil) and ArcExprOwnsRef(FAE.Base)) then
-      NotYet('method pointer to this method form', AExpr);
-    if FAE.Base <> nil then
-      Self.EmitExprToX0(FAE.Base)
-    else if not EmitCapturedBase('x0', FAE.RecordName, True, False) then
-      EmitLoadSlot('x0', FAE.RecordName);
-    Self.Emit(#9'mov x1, x0');                 { Data = the receiver }
-    if MD.VTableSlot >= 0 then
-    begin
-      Self.Emit(#9'ldr x9, [x1]');
-      Self.Emit(Format(#9'ldr x0, [x9, #%d]', [(MD.VTableSlot + 1) * 8]));
-    end
-    else
-    begin
-      Self.Emit(Format(#9'adrp x0, %s@PAGE', [RoutineSym(MD, '')]));
-      Self.Emit(Format(#9'add x0, x0, %s@PAGEOFF', [RoutineSym(MD, '')]));
-    end;
-  end
-  else if EmitClosureResultToTemp(AExpr, Tmp) then
-  begin
-    EmitSlotAddr('x9', Tmp);
-    Self.Emit(#9'ldp x0, x1, [x9]');
-    Exit;                                      { the call's +1 transfers }
-  end
-  else
-    NotYet('closure / method-pointer element store from this expression', AExpr);
-  if ARefTarget then
+  Owned := Self.EmitFatSourceAddrToX0(AExpr, ATarget);
+  Self.Emit(#9'ldp x0, x1, [x0]');
+  if ArcTypeIsRefClosure(ATarget) and not Owned then
   begin
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');
     Self.Emit(#9'mov x0, x1');
@@ -2706,11 +2772,7 @@ end;
 
 procedure TArm64Backend.EmitFatPtrAssign(AAsgn: TAssignment);
 var
-  IsRef: Boolean;
-  Tmp: string;
-  FAE: TFieldAccessExpr;
-  MD: TMethodDecl;
-  FldAddr: TAddrOfExpr;
+  IsRef, Owned: Boolean;
 begin
   { Closure ('reference to') / method-pointer ('of object') target: a 16-byte
     fat value, Code at +0 and Env/Data at +8.  The generic scalar path stored
@@ -2729,37 +2791,6 @@ begin
   end;
   IsRef := (AAsgn.ResolvedLhsType.Kind = tyProcedural) and
            TProceduralTypeDesc(AAsgn.ResolvedLhsType).IsReference;
-  if IsFatLValue(AAsgn.Expr) then
-  begin
-    { F := G / F := Obj.FieldF / F := FField / F := A[I] / F := P^: the
-      source's 16 bytes through its address (a transient @-wrapper reaches
-      a Self field, a capture, a var param, an element and a deref alike),
-      Env retained before the old one is released so F := F is safe }
-    FldAddr := TAddrOfExpr.Create();
-    try
-      FldAddr.Line := AAsgn.Line;
-      FldAddr.Col := AAsgn.Col;
-      FldAddr.Expr := AAsgn.Expr;
-      Self.EmitExprToX0(FldAddr);
-    finally
-      FldAddr.Expr := nil;   { owned by the assignment }
-      FldAddr.Free();
-    end;
-    EmitPushX0();                                { [&src] }
-    if IsRef then
-    begin
-      Self.Emit(#9'ldr x0, [x0, #8]');
-      EmitCallSym('_ClassAddRef');
-      EmitFatTargetAddr('x9', AAsgn);
-      Self.Emit(#9'ldr x0, [x9, #8]');
-      EmitCallSym('_ClassRelease');
-    end;
-    EmitPopTo('x1');
-    Self.Emit(#9'ldp x9, x10, [x1]');
-    EmitFatTargetAddr('x1', AAsgn);
-    Self.Emit(#9'stp x9, x10, [x1]');
-    Exit;
-  end;
   { the arms below address the target through EmitFatTargetAddr, which
     reaches a capture and a var param's variable as well as a slot (both
     were refused) }
@@ -2783,71 +2814,29 @@ begin
     Self.Emit(#9'stp xzr, xzr, [x9]');
     Exit;
   end;
-  if (AAsgn.Expr is TAddrOfExpr) and
-     (TAddrOfExpr(AAsgn.Expr).Expr is TFieldAccessExpr) and
-     (TFieldAccessExpr(TAddrOfExpr(AAsgn.Expr).Expr).ResolvedMethod is TMethodDecl) then
+  { every other source -- another variable, field, element or P^, @Obj.M,
+    a call result, a TMethod cast -- through the shared source lowering:
+    a borrowed Env is retained before the old one is released (so F := F
+    is safe), an owned one moves in }
+  Owned := EmitFatSourceAddrToX0(AAsgn.Expr, AAsgn.ResolvedLhsType);
+  EmitPushX0();                                { [&src] }
+  if IsRef then
   begin
-    { F := @Obj.Method: build the (Code, receiver) pair straight into the
-      target -- the same layout as a closure whose Env is the receiver.  A
-      virtual method resolves through the receiver's vtable, so @Obj.M
-      captures the dynamic override exactly as a direct Obj.M() call would.
-      A 'reference to' target takes a strong reference to the receiver and
-      releases the old Env; an 'of object' target holds it unretained, as
-      on x86-64. }
-    FAE := TFieldAccessExpr(TAddrOfExpr(AAsgn.Expr).Expr);
-    MD := TMethodDecl(FAE.ResolvedMethod);
-    if MD.IsRecordMethod or MD.IsStatic or FAE.IsImplicitSelf then
-      NotYet('method pointer to this method form', AAsgn);
-    if IsRef then
+    if not Owned then
     begin
-      EmitFatTargetAddr('x9', AAsgn);
-      Self.Emit(#9'ldr x0, [x9, #8]');
-      EmitCallSym('_ClassRelease');
-    end;
-    if FAE.Base <> nil then
-    begin
-      if ArcExprOwnsRef(FAE.Base) then
-        NotYet('method pointer on an owned transient receiver', AAsgn);
-      Self.EmitExprToX0(FAE.Base);
-    end
-    else if not EmitCapturedBase('x0', FAE.RecordName, True, False) then
-      EmitLoadSlot('x0', FAE.RecordName);
-    EmitPushX0();                              { [receiver] }
-    if MD.VTableSlot >= 0 then
-    begin
-      Self.Emit(#9'ldr x9, [x0]');             { vtable }
-      Self.Emit(Format(#9'ldr x1, [x9, #%d]', [(MD.VTableSlot + 1) * 8]));
-    end
-    else
-    begin
-      Self.Emit(Format(#9'adrp x1, %s@PAGE', [RoutineSym(MD, '')]));
-      Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF', [RoutineSym(MD, '')]));
+      Self.Emit(#9'ldr x0, [x0, #8]');
+      EmitCallSym('_ClassAddRef');
     end;
     EmitFatTargetAddr('x9', AAsgn);
-    EmitPopTo('x0');                           { receiver }
-    Self.Emit(#9'stp x1, x0, [x9]');           { Code at +0, receiver at +8 }
-    if IsRef then
-      EmitCallSym('_ClassAddRef');
-    Exit;
+    Self.Emit(#9'ldr x0, [x9, #8]');
+    EmitCallSym('_ClassRelease');
   end;
-  if EmitClosureResultToTemp(AAsgn.Expr, Tmp) then
-  begin
-    { F := MakeClosure(...) / F := Obj.MakeClosure(...): the callee filled a
-      fresh scratch through x8 and handed over its Env reference, so the old
-      Env is released and the pair moved in WITHOUT a retain }
-    if IsRef then
-    begin
-      EmitFatTargetAddr('x9', AAsgn);
-      Self.Emit(#9'ldr x0, [x9, #8]');
-      EmitCallSym('_ClassRelease');
-    end;
-    EmitSlotAddr('x1', Tmp);
-    Self.Emit(#9'ldp x9, x10, [x1]');
-    EmitFatTargetAddr('x1', AAsgn);
-    Self.Emit(#9'stp x9, x10, [x1]');
-    Exit;
-  end;
-  NotYet('closure / method-pointer assignment from this expression', AAsgn);
+  { the target's address first: a threadvar's is a call into the TLS
+    accessor, which clobbers the scratch registers }
+  EmitFatTargetAddr('x1', AAsgn);
+  EmitPopTo('x9');
+  Self.Emit(#9'ldp x10, x11, [x9]');
+  Self.Emit(#9'stp x10, x11, [x1]');
 end;
 
 function TArm64Backend.EmitClosureResultToTemp(AExpr: TASTExpr;
@@ -2864,6 +2853,15 @@ begin
     False when AExpr is not one of the call forms handled here. }
   Result := False;
   ATmp := '';
+  if IsProcFieldCallExpr(AExpr) and IsMethodPtrType(AExpr.ResolvedType) then
+  begin
+    { Obj.FGet() / FGet(): a closure returned through a procedural-typed
+      FIELD, written through x8 like any other closure result }
+    ATmp := NewFretSlot();
+    EmitProcFieldCallExpr(AExpr, ATmp);
+    Result := True;
+    Exit;
+  end;
   if (AExpr is TFuncCallExpr) and
      (TFuncCallExpr(AExpr).ResolvedDecl is TMethodDecl) and
      not TFuncCallExpr(AExpr).IsIndirectCall and
@@ -3470,11 +3468,7 @@ end;
 procedure TArm64Backend.EmitFatFieldStoreStacked(AFld: TFieldInfo;
   AValueExpr: TASTExpr);
 var
-  IsRef: Boolean;
-  FAE: TFieldAccessExpr;
-  MD: TMethodDecl;
-  SrcAddr: TAddrOfExpr;
-  Tmp: string;
+  IsRef, Owned: Boolean;
 begin
   { A closure / method-pointer FIELD (16 bytes: Code, Env) at AFld.Offset of
     the instance whose address is on TOP of the stack (consumed).  The value
@@ -3498,108 +3492,16 @@ begin
     Self.Emit(#9'stp xzr, xzr, [x9]');
     Exit;
   end;
-  if (AValueExpr is TAddrOfExpr) and
-     (TAddrOfExpr(AValueExpr).Expr is TFieldAccessExpr) and
-     (TFieldAccessExpr(TAddrOfExpr(AValueExpr).Expr).ResolvedMethod is TMethodDecl) then
-  begin
-    { Field := @Obj.Method: (Code, receiver) built straight into the field;
-      a virtual method's code comes from the receiver's own vtable }
-    FAE := TFieldAccessExpr(TAddrOfExpr(AValueExpr).Expr);
-    MD := TMethodDecl(FAE.ResolvedMethod);
-    if MD.IsRecordMethod or MD.IsStatic or FAE.IsImplicitSelf or
-       ((FAE.Base <> nil) and ArcExprOwnsRef(FAE.Base)) then
-      NotYet('method pointer to this method form', AValueExpr);
-    if IsRef then
-    begin
-      Self.Emit(#9'ldr x9, [sp]');
-      EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
-      Self.Emit(#9'ldr x0, [x9, #8]');
-      EmitCallSym('_ClassRelease');              { the old Env }
-    end;
-    if FAE.Base <> nil then
-      Self.EmitExprToX0(FAE.Base)
-    else if not EmitCapturedBase('x0', FAE.RecordName, True, False) then
-      EmitLoadSlot('x0', FAE.RecordName);
-    if MD.VTableSlot >= 0 then
-    begin
-      Self.Emit(#9'ldr x9, [x0]');
-      Self.Emit(Format(#9'ldr x1, [x9, #%d]', [(MD.VTableSlot + 1) * 8]));
-    end
-    else
-    begin
-      Self.Emit(Format(#9'adrp x1, %s@PAGE', [RoutineSym(MD, '')]));
-      Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF', [RoutineSym(MD, '')]));
-    end;
-    Self.Emit(#9'ldr x9, [sp], #16');            { pop the base }
-    EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
-    Self.Emit(#9'stp x1, x0, [x9]');             { Code, receiver }
-    if IsRef then
-      EmitCallSym('_ClassAddRef');               { x0 = receiver }
-    Exit;
-  end;
-  if EmitClosureResultToTemp(AValueExpr, Tmp) then
-  begin
-    { Field := MakeClosure(...) / Obj.MakeClosure(...): the scratch already
-      owns the callee's Env reference, so the old Env is released and the
-      pair moved in WITHOUT a retain }
-    if IsRef then
-    begin
-      Self.Emit(#9'ldr x9, [sp]');
-      EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
-      Self.Emit(#9'ldr x0, [x9, #8]');
-      EmitCallSym('_ClassRelease');              { the old Env }
-    end;
-    EmitSlotAddr('x1', Tmp);
-    Self.Emit(#9'ldp x10, x11, [x1]');
-    Self.Emit(#9'ldr x9, [sp], #16');            { pop the base }
-    EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
-    Self.Emit(#9'stp x10, x11, [x9]');
-    Exit;
-  end;
-  if AValueExpr is TAnonMethodExpr then
-    EmitAnonValueToSlot(TAnonMethodExpr(AValueExpr))
-  else if (AValueExpr is TFuncCallExpr) and
-          (TFuncCallExpr(AValueExpr).ResolvedDecl = nil) and
-          (not TFuncCallExpr(AValueExpr).IsIndirectCall) and
-          (TFuncCallExpr(AValueExpr).Args.Count = 1) and
-          (TASTExpr(TFuncCallExpr(AValueExpr).Args.Items[0]).ResolvedType <> nil) and
-          (TASTExpr(TFuncCallExpr(AValueExpr).Args.Items[0]).ResolvedType.Kind
-             = tyRecord) then
-    { TGreet(M): a TMethod record reinterpreted as the fat value -- its
-      address is the source of the 16-byte copy (the local-slot twin is in
-      EmitAssignment) }
-    EmitRecAddrToX0(TASTExpr(TFuncCallExpr(AValueExpr).Args.Items[0]))
-  else if (AValueExpr is TIdentExpr) and IsMethodPtrType(AValueExpr.ResolvedType) and
-          not IsCaptured(TIdentExpr(AValueExpr).Name) and
-          (TIdentExpr(AValueExpr).ParamMode = pmNone) and
-          not TIdentExpr(AValueExpr).IsImplicitSelf then
-    EmitSlotAddr('x0', TIdentExpr(AValueExpr).Name)
-  else if (AValueExpr is TFieldAccessExpr) and
-          (TFieldAccessExpr(AValueExpr).FieldInfo <> nil) and
-          not TFieldAccessExpr(AValueExpr).IsMethodCall and
-          (TFieldAccessExpr(AValueExpr).PropRead = nil) then
-  begin
-    { another closure FIELD as the source: address it via a transient @ }
-    SrcAddr := TAddrOfExpr.Create();
-    try
-      SrcAddr.Line := AValueExpr.Line;
-      SrcAddr.Col := AValueExpr.Col;
-      SrcAddr.Expr := AValueExpr;
-      Self.EmitExprToX0(SrcAddr);
-    finally
-      SrcAddr.Expr := nil;   { owned by the caller's node }
-      SrcAddr.Free();
-    end;
-  end
-  else
-    NotYet('closure / method-pointer field store from this expression',
-      AValueExpr);
+  Owned := EmitFatSourceAddrToX0(AValueExpr, AFld.TypeDesc);
   EmitPushX0();                                  { [base][&value] }
   if IsRef then
   begin
-    Self.Emit(#9'ldr x0, [sp]');
-    Self.Emit(#9'ldr x0, [x0, #8]');
-    EmitCallSym('_ClassAddRef');                 { the field's own Env ref }
+    if not Owned then
+    begin
+      Self.Emit(#9'ldr x0, [sp]');
+      Self.Emit(#9'ldr x0, [x0, #8]');
+      EmitCallSym('_ClassAddRef');               { the field's own Env ref }
+    end;
     Self.Emit(#9'ldr x9, [sp, #16]');
     EmitAddSubImm('add', 'x9', 'x9', AFld.Offset);
     Self.Emit(#9'ldr x0, [x9, #8]');
@@ -4477,7 +4379,7 @@ begin
   begin
     { a method pointer / closure element of an array field: the 16-byte
       pair first (value-first rule), then the fresh element address }
-    EmitFatPairToX0X1(AStmt.Expr, ArcTypeIsRefClosure(Elem));
+    EmitFatPairToX0X1(AStmt.Expr, Elem);
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [pair] }
     EmitFieldElemAddrToX0(AStmt, Elem, IsDyn, Low);
     EmitPushX0();                                 { [pair][elemaddr] }
@@ -8839,34 +8741,9 @@ var
   RD: TMethodDecl;
   ManagedAgg: Boolean;
 begin
-  { Run := TRunMethod(M) — a RECORD cast to a method-pointer type.  Both sides
-    are 16-byte fat values (Code at +0, Data/Env at +8), but the generic value
-    cast lowers to a single x0 word, so only Code was stored and Data was left
-    as whatever the slot already held.  EmitFatPtrCall then read Data from that
-    stale half and called the method with a junk Self — the shape
-    blaise.testing's RunTest uses to dispatch every published test, so every
-    test crashed on its first field access.  Copy BOTH words. }
-  if (AAsgn.ResolvedLhsType <> nil) and
-     IsMethodPtrType(AAsgn.ResolvedLhsType) and
-     (AAsgn.Expr is TFuncCallExpr) and
-     (TFuncCallExpr(AAsgn.Expr).ResolvedDecl = nil) and
-     (not TFuncCallExpr(AAsgn.Expr).IsIndirectCall) and
-     (TFuncCallExpr(AAsgn.Expr).Args.Count = 1) and
-     (TASTExpr(TFuncCallExpr(AAsgn.Expr).Args.Items[0]).ResolvedType <> nil) and
-     (TASTExpr(TFuncCallExpr(AAsgn.Expr).Args.Items[0]).ResolvedType.Kind
-        = tyRecord) then
-  begin
-    if IsCaptured(AAsgn.Name) or AAsgn.IsVarParam then
-      NotYet('method-pointer cast into a captured or var-param target', AAsgn);
-    { x0 = &source record; x9 = &destination fat slot (local or global) }
-    EmitRecAddrToX0(TASTExpr(TFuncCallExpr(AAsgn.Expr).Args.Items[0]));
-    Self.Emit(#9'ldr x1, [x0]');          { Code }
-    Self.Emit(#9'ldr x2, [x0, #8]');      { Data / Env }
-    EmitSlotAddr('x9', AAsgn.Name);
-    Self.Emit(#9'str x1, [x9]');
-    Self.Emit(#9'str x2, [x9, #8]');
-    Exit;
-  end;
+  { a method pointer / closure target -- a 16-byte (Code, Data / Env)
+    value, every source form included (a TRunMethod(M) record cast too:
+    blaise.testing's RunTest dispatches every published test that way) }
   if (AAsgn.ResolvedLhsType <> nil) and
      IsMethodPtrType(AAsgn.ResolvedLhsType) then
   begin
@@ -10359,7 +10236,7 @@ begin
     { a method pointer / closure element: 16 bytes, Code at +0 and Data /
       Env at +8.  A 'reference to' element co-owns its Env (the new one is
       retained by EmitFatPairToX0X1, the old one released here). }
-    EmitFatPairToX0X1(AValue, ArcTypeIsRefClosure(Elem));
+    EmitFatPairToX0X1(AValue, Elem);
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');      { [elemaddr][pair] }
     if ArcTypeIsRefClosure(Elem) then
     begin
@@ -12096,7 +11973,7 @@ begin
       target holds its own Env: a copied one is retained, a call result's
       +1 transfers); the old Env is released after the new value is in
       hand, so P^ := P^ stays safe.  It reached the closure-call refusal. }
-    EmitFatPairToX0X1(AStmt.ValExpr, TProceduralTypeDesc(AStmt.BaseTy).IsReference);
+    EmitFatPairToX0X1(AStmt.ValExpr, AStmt.BaseTy);
     Self.Emit(#9'stp x0, x1, [sp, #-16]!');        { [pair] }
     Self.EmitExprToX0(AStmt.PtrExpr);
     EmitPushX0();                                  { [pair][ptr] }
@@ -14880,7 +14757,7 @@ var
   RecSaved: Boolean;
   NarrowFix: Boolean;
   JTmp: string;
-  CTmp: string;
+  FatParTy: TTypeDesc;
   ElT: TTypeDesc;
   JNB: Integer;
   IndSlot: string;
@@ -15552,36 +15429,28 @@ begin
           Inc(NInt);
         end;
       end
-      else if IsMethodPtrType(Arg.ResolvedType) then
+      else if IsMethodPtrType(Arg.ResolvedType) or
+              ((I < ADecl.Params.Count) and
+               IsMethodPtrType(TMethodParam(ADecl.Params.Items[I]).ResolvedType)) then
       begin
-        { closure / method-pointer arg: pass the ADDRESS of the 16-byte fat
-          value in ONE integer register; the callee copies it (prologue pass 2).
-          A literal materialises into its hidden value slot first
-          (EmitAnonValueToSlot yields the slot address in x0); a plain closure
-          variable yields its own slot address. }
+        { closure / method-pointer arg (nil and @Obj.M included -- the
+          PARAMETER says the slot is fat): pass the ADDRESS of the 16-byte
+          value in ONE integer register; the callee copies it (prologue pass
+          2).  The source lowering is the one every consumer shares; an owned
+          value (a 'reference to' call result) is released at the statement
+          end, the callee having borrowed it. }
         IsVariadicArg := ADecl.IsVarArgs and (I >= ADecl.Params.Count);
-        if Arg is TAnonMethodExpr then
-          EmitAnonValueToSlot(TAnonMethodExpr(Arg))
-        else if (Arg is TIdentExpr) and
-                (not TIdentExpr(Arg).IsImplicitSelf) and
-                (not Self.IsCaptured(TIdentExpr(Arg).Name)) then
-          EmitSlotAddr('x0', TIdentExpr(Arg).Name)
-        else if (Arg is TStringSubscriptExpr) or (Arg is TDerefExpr) or
-                ((Arg is TFieldAccessExpr) and IsFatLValue(Arg)) then
-          { an element (A[I]), P^ or field holding the closure: its own
-            address -- the value expression yielded the loaded word, and the
-            callee's copy of the 16 bytes read through it crashed }
-          EmitLValueAddrToX0(Arg)
-        else if EmitClosureResultToTemp(Arg, CTmp) then
-        begin
-          { a closure RETURNED by a call (Apply(MakeFn())): its frame scratch,
-            which the callee borrows; the scratch's +1 Env is released at
-            the statement end }
-          EmitSlotAddr('x0', CTmp);
-          DeferAggRelease(Arg.ResolvedType);
-        end
+        if I < ADecl.Params.Count then
+          FatParTy := TMethodParam(ADecl.Params.Items[I]).ResolvedType
         else
-          Self.EmitExprToX0(Arg);
+          FatParTy := Arg.ResolvedType;
+        if EmitFatSourceAddrToX0(Arg, FatParTy) then
+        begin
+          if ArcTypeIsRefClosure(FatParTy) then
+            DeferAggRelease(FatParTy)
+          else
+            DeferAggRelease(Arg.ResolvedType);
+        end;
         EmitPushX0();
         if IsVariadicArg or (NInt >= 8) then
         begin
