@@ -695,28 +695,24 @@ begin
   Raised := False;
   Msg := '';
   try
-    { A procedural-field call on an OWNED transient receiver (MkObj().Fn())
-      is the current stand-in for "a construct the arm64 subset has not
-      reached yet".  This has now been repointed five times -- it was a
-      generic RECORD, then a JUMBO SET, then an unmanaged record threadvar,
-      then a managed one, then an element of a record call's dyn-array field,
-      and all of them now lower.  Repoint it again rather than deleting it
-      when this one lands too: the point of the test is that a gap fails
-      LOUDLY at compile time with a clear file/line, never silently
-      miscompiling. }
+    { An EXTERNAL routine returning a jumbo set (S := GetBig()) is the
+      current stand-in for "a construct the arm64 subset has not reached
+      yet".  This has now been repointed six times -- it was a generic
+      RECORD, then a JUMBO SET, then an unmanaged record threadvar, then a
+      managed one, then an element of a record call's dyn-array field, then
+      a procedural-field call on an owned transient receiver, and all of
+      them now lower.  Repoint it again rather than deleting it when this
+      one lands too: the point of the test is that a gap fails LOUDLY at
+      compile time with a clear file/line, never silently miscompiling. }
     GenAsm(
       '''
       program P;
-      type
-        TFn = reference to function: Integer;
-        TObj = class Fn: TFn; end;
-      function MkObj: TObj;
+      type TBig = set of Byte;
+      function GetBig: TBig; external 'libfoo' name 'get_big';
+      var S: TBig;
       begin
-        Result := TObj.Create();
-        Result.Fn := function: Integer begin Result := 7 end
-      end;
-      begin
-        WriteLn(MkObj().Fn())
+        S := GetBig();
+        WriteLn(5 in S)
       end.
       ''', TargetArm64);
   except

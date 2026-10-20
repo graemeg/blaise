@@ -126,6 +126,10 @@ type
       'of object' (BUG-20260923-implicit-field-procfield-stmt: "Class
       'TInner' has no method 'FP'") }
     procedure TestRun_ImplicitFieldProcField_Stmt;
+    { a call through a procedural field of a receiver a call returned, or
+      an array element, as a statement and in an expression: the receiver
+      lives through the call and is freed at the statement end }
+    procedure TestRun_ProcFieldCall_OnCallResultReceiver;
 
     { Default parameters }
     procedure TestRun_DefaultParam_OmitLast;
@@ -1434,6 +1438,48 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'p 7' + LE + 'p 8' + LE + 'm 9' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_ProcFieldCall_OnCallResultReceiver;
+const
+  Src = '''
+    program R3;
+    type
+      TP = procedure(N: Integer);
+      TF = function(N: Integer): Integer;
+      TC = reference to function(N: Integer): string;
+      THold = class
+        FP: TP; FF: TF; FC: TC; Tag: Integer;
+        destructor Destroy; override;
+      end;
+    var Sum: Integer; Arr: array of THold;
+    destructor THold.Destroy; begin WriteLn('hold freed ', Tag); inherited Destroy(); end;
+    function MkHold(T: Integer): THold;
+    begin
+      Result := THold.Create(); Result.Tag := T;
+      Result.FP := @Plain; Result.FF := @Twice;
+      Result.FC := function(N: Integer): string begin Result := 'c' + IntToStr(N) end;
+    end;
+    procedure Plain(N: Integer); begin Sum := Sum + N; end;
+    function Twice(N: Integer): Integer; begin Result := N * 2; end;
+    begin
+      MkHold(1).FP(5);
+      WriteLn('after stmt');
+      Sum := Sum + MkHold(2).FF(10);
+      WriteLn('after expr');
+      WriteLn(MkHold(3).FC(7));
+      SetLength(Arr, 1); Arr[0] := MkHold(4);
+      Arr[0].FP(100);
+      WriteLn(Sum);
+      SetLength(Arr, 0);
+      WriteLn('end');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'hold freed 1' + LE + 'after stmt' + LE + 'hold freed 2' + LE +
+    'after expr' + LE + 'c7' + LE + 'hold freed 3' + LE + '125' + LE +
+    'hold freed 4' + LE + 'end' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_DefaultParam_OmitLast;

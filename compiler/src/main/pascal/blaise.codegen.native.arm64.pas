@@ -3525,7 +3525,8 @@ begin
     the class-vs-record rule (BUG-20260722-closure-record-field-direct-call):
     a class reference's VALUE is the instance, a record's ADDRESS is its
     storage.  Every arm here is call-free except the chained-expression one,
-    which runs before any argument is evaluated. }
+    which runs before any argument is evaluated; a receiver it returns is
+    released at the statement end. }
   if AField = nil then
     NotYet('procedural-field call without field info', ANode);
   IsRec := (AReceiver <> nil) and (AReceiver.Kind = tyRecord);
@@ -3537,9 +3538,11 @@ begin
       EmitRecAddrToX0(AObjExpr)
     else
     begin
-      if ArcExprOwnsRef(AObjExpr) then
-        NotYet('procedural-field call on an owned transient receiver', ANode);
       Self.EmitExprToX0(AObjExpr);
+      { MkHold().FP(5): a receiver a call returned stays alive through the
+        call, released at the statement end }
+      if ArcExprOwnsRef(AObjExpr) then
+        DeferNativeClassRelease();
     end;
   end
   else if IsRec then

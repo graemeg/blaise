@@ -44,6 +44,10 @@ type
     { FGet() / FProc(1) -- a call through a procedural FIELD of Self, bare,
       inside a nested routine of a method reads Self, so Self is captured }
     procedure TestCodegen_NestedProcFieldCall_CapturesSelf;
+    { MkHold().FP(5): a call through a procedural field of a receiver a call
+      returned -- the receiver is parked for release at the statement end
+      (arm64 refused it, x86-64 had no arm for a call receiver) }
+    procedure TestCodegen_ProcFieldCall_OnCallResultReceiver;
     { O.C[I] := K into an array FIELD of closures: a 16-byte copy with the
       Env retained (x86-64 stored 8 bytes; arm64 refused it) }
     procedure TestCodegen_ClosureArrayFieldElemStore_CopiesPair;
@@ -770,6 +774,25 @@ begin
     AsmMissing(Src,
       #9'movq -8(%rbp), %rax'#10#9'movq (%rax), %rax'#10#9'movq %rax, -24(%rbp)',
       #9'ldur x9, [x29, #-8]'#10#9'ldr x0, [x9]'#10#9'stur x0, [x29, #-24]'));
+end;
+
+procedure TProcTypesTests.TestCodegen_ProcFieldCall_OnCallResultReceiver;
+const
+  Src = '''
+    program Prg;
+    type
+      TP = procedure(N: Integer);
+      THold = class FP: TP; end;
+    function MkHold(): THold; begin Result := THold.Create() end;
+    begin
+      MkHold().FP(5)
+    end.
+    ''';
+begin
+  AssertEquals('the receiver is parked for the statement-end release', '',
+    AsmMissing(Src,
+      #9'callq MkHold'#10#9'movq %rax, _pendrel_0(%rip)',
+      #9'bl _MkHold'#10#9'stur x0, [x29, #-'));
 end;
 
 procedure TProcTypesTests.TestCodegen_ClosureArrayFieldElemStore_CopiesPair;

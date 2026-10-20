@@ -23477,11 +23477,17 @@ begin
   Self.Emit(#9'subq $8, %rsp');
   if AObjExpr <> nil then
   begin
-    if (AObjExpr is TIdentExpr) or (AObjExpr is TFieldAccessExpr) then
-      Self.EmitExprToEax(AObjExpr)
-    else
+    if not ((AObjExpr is TIdentExpr) or (AObjExpr is TFieldAccessExpr)) and
+       ((AObjExpr.ResolvedType = nil) or
+        (AObjExpr.ResolvedType.Kind <> tyClass)) then
       raise ENativeCodeGenError.Create(
         'native backend: unsupported receiver expression in procedural-field call');
+    Self.EmitExprToEax(AObjExpr);
+    { MkHold().FP(5) / Arr[I].FP(5): any class receiver; one a call
+      returned stays alive through the call, released at the statement
+      end }
+    if NativeExprOwnsRef(AObjExpr) then
+      Self.DeferNativeClassRelease();
   end
   else if AReceiverIsRecord then
     { A record is a VALUE: its variable slot IS the record, so the receiver
