@@ -148,7 +148,8 @@ begin
   WriteLn('  blaise.cfg (next to the binary, then ~/.blaise.cfg) can set, one');
   WriteLn('  per line: unit-path=<dir> (repeatable) and rtl-src=<dir>.  A relative');
   WriteLn('  path is resolved against the config file''s directory; --rtl-src on');
-  WriteLn('  the command line overrides rtl-src= in the config.');
+  WriteLn('  the command line overrides rtl-src= in the config, and every');
+  WriteLn('  --unit-path is searched before the config''s unit-paths.');
   WriteLn('');
   WriteLn('Environment:');
   WriteLn('  BLAISE_BACKEND=<id>  selects the backend when --backend is not given');
@@ -866,16 +867,19 @@ begin
 
   ConfigPaths := TStringList.Create();
   try
-    { blaise.cfg supplies extra unit-paths and, optionally, rtl-src.  A CLI
-      --rtl-src (already in Opts.RTLSrcDir) takes precedence: only let the config
-      set it when the CLI did not.  Seed CfgRtlSrc with the CLI value so the
-      config only overrides an EMPTY one. }
+    { blaise.cfg supplies extra unit-paths and, optionally, rtl-src.  The CLI
+      takes precedence for both: a --rtl-src (already in Opts.RTLSrcDir) wins,
+      so the config sets it only when the CLI did not (CfgRtlSrc is seeded with
+      the CLI value), and the config's unit-paths are a FALLBACK searched after
+      every --unit-path.  Inserting them first let ~/.blaise.cfg's stdlib (another
+      checkout's) shadow a worktree's own, and the dev-layout config's stdlib
+      shadow the compiler sources when building the TestRunner. }
     CfgRtlSrc := Opts.RTLSrcDir;
     LoadConfigPaths(ConfigPaths, CfgRtlSrc);
     if Opts.RTLSrcDir = '' then
       Opts.RTLSrcDir := CfgRtlSrc;
-    for I := ConfigPaths.Count - 1 downto 0 do
-      SearchPaths.Insert(0, ConfigPaths.Strings[I]);
+    for I := 0 to ConfigPaths.Count - 1 do
+      SearchPaths.Add(ConfigPaths.Strings[I]);
   finally
     ConfigPaths.Free();
   end;

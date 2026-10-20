@@ -102,6 +102,11 @@ type
     procedure TestLinkStatic_ExternalLib_Errors;
     procedure TestLinkStatic_UnresolvedSymbol_Errors;
     procedure TestLinkDynamic_Flag_ForcesDynamic;
+    { a unit-path from blaise.cfg is a FALLBACK: an explicit --unit-path is
+      searched first.  The config's paths were put ahead of it, so a stale
+      stdlib in ~/.blaise.cfg shadowed a worktree's own (and the dev-layout
+      config shadowed the compiler sources when building the TestRunner). }
+    procedure TestConfigUnitPath_DoesNotShadowCliUnitPath;
     { The auto-dynamic binary must RUN, not merely link.  Everything the
       dynamic profile changes — the PIE container, PT_INTERP, the per-OS entry
       unit's hand-off into libc, the crt-owned exports the loader resolves
@@ -1162,6 +1167,58 @@ begin
 end;
 
 { ---- Registration ---- }
+
+procedure TCLIContractTests.TestConfigUnitPath_DoesNotShadowCliUnitPath;
+var
+  Base, CfgDir, CliDir, BinDir, Src, Exe, Out_: string;
+  Saved: string;
+  Proc: TProcess;
+  EC: Integer;
+begin
+  if not CompilerAvailable() then begin Ignore('compiler unavailable'); Exit end;
+  Base := FScratch + 'cfgorder/';
+  CfgDir := Base + 'fromcfg/';
+  CliDir := Base + 'fromcli/';
+  BinDir := Base + 'bin/';
+  ForceDirectories(CfgDir);
+  ForceDirectories(CliDir);
+  ForceDirectories(BinDir);
+  WriteFile(CfgDir + 'cfgprobe.pas',
+    'unit cfgprobe;' + LineEnding + 'interface' + LineEnding +
+    'const Who = ''config'';' + LineEnding + 'implementation' + LineEnding + 'end.');
+  WriteFile(CliDir + 'cfgprobe.pas',
+    'unit cfgprobe;' + LineEnding + 'interface' + LineEnding +
+    'const Who = ''cli'';' + LineEnding + 'implementation' + LineEnding + 'end.');
+  { a copy of the compiler with its own blaise.cfg naming the config dir }
+  Proc := TProcess.Create(nil);
+  try
+    Proc.Executable := '/bin/cp';
+    Proc.Parameters.Add(FCompiler);
+    Proc.Parameters.Add(BinDir + 'blaise');
+    Proc.Execute();
+    Proc.WaitOnExit();
+  finally
+    Proc.Free();
+  end;
+  WriteFile(BinDir + 'blaise.cfg',
+    'unit-path=' + CfgDir + LineEnding +
+    'rtl-src=' + ProjectRoot() + 'compiler/src/main/pascal' + LineEnding);
+  Src := WriteScratchSource(
+    'program P;' + LineEnding + 'uses cfgprobe;' + LineEnding +
+    'begin' + LineEnding + '  WriteLn(Who)' + LineEnding + 'end.');
+  Exe := Base + 'probe';
+  Saved := FCompiler;
+  FCompiler := BinDir + 'blaise';
+  try
+    EC := RunCompiler(['--source', Src, '--unit-path', CliDir, '--output', Exe],
+      Out_);
+  finally
+    FCompiler := Saved;
+  end;
+  AssertEquals('compiles: ' + Out_, 0, EC);
+  AssertEquals('runs', 0, RunBinary(Exe, Out_));
+  AssertEquals('the --unit-path unit wins', 'cli', Trim(Out_));
+end;
 
 initialization
   RegisterTest(TCLIContractTests);
