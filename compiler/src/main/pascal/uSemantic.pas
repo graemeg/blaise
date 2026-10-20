@@ -4659,13 +4659,37 @@ begin
         Result := SAT;
       end;
     end
+    else if (IdxTD <> nil) and (BaseType <> nil) and
+            (IdxTD.Kind in [tyInt8, tyByte, tySmallInt, tyWord]) then
+    begin
+      { an 8- or 16-bit integer type indexes its whole range
+        (array[Byte] of T is array[0..255] of T), as in FPC and Delphi;
+        wider integer types would be gigabytes and stay rejected }
+      case IdxTD.Kind of
+        tyInt8:     begin LVal := -128;   HVal := 127;   end;
+        tyByte:     begin LVal := 0;      HVal := 255;   end;
+        tySmallInt: begin LVal := -32768; HVal := 32767; end;
+      else
+        begin LVal := 0; HVal := 65535; end;
+      end;
+      CanonName := Format('array[%d..%d] of %s', [LVal, HVal, BaseType.Name]);
+      Result    := FTable.FindType(CanonName);
+      if Result = nil then
+      begin
+        SAT := FTable.NewStaticArrayType(BaseType, LVal, HVal);
+        Sym := TSymbol.Create(CanonName, skType, SAT);
+        FTable.DefineGlobal(Sym);
+        Result := SAT;
+      end;
+    end
     else if IdxTD = nil then
       SemanticError(Format('Unknown index type ''%s''', [IdxName]), 0, 0)
     else if (IdxTD.Kind <> tyEnum) and (IdxTD.Kind <> tyBoolean) and
             (not IdxTD.IsSubrange) then
       SemanticError(Format(
         '''%s'' is not a valid array index type (expected an enumeration, '
-        + 'Boolean, or an integer subrange)', [IdxName]), 0, 0);
+        + 'Boolean, an 8- or 16-bit integer type, or an integer subrange)',
+        [IdxName]), 0, 0);
     Exit;
   end;
   { Range-indexed static array: 'array[L..H] of TypeName' — create on demand.

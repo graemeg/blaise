@@ -1388,6 +1388,9 @@ Blaise supports fixed-size, stack-allocated arrays declared as
 | `array[Boolean] of T` — Boolean index
 | Supported. Boolean is a 2-element ordinal, so `array[Boolean] of T` folds to `array[0..1] of T`, indexed by `False` (0) and `True` (1). Rejecting it was an oversight — the ordinal-index resolver only admitted enum and subrange kinds (GH #181).
 
+| `array[Byte] of T` — 8- or 16-bit integer-type index
+| Supported for `Byte`, `Int8`, `Word` and `Int16` (and their classic aliases): the type indexes its whole range, so `array[Byte] of T` folds to `array[0..255] of T` and `array[Int8] of T` to `array[-128..127] of T`, as in FPC and Delphi. `Int32` and wider are rejected — 2^32 elements is never what was meant (FPC rejects it as too large). Found missing by the ordinal types × constructs matrix (2026-10-21).
+
 | `array[TSubrange] of T` — named integer-subrange index
 | Supported. The subrange (`type TIdx = lo..hi;`) supplies the index range, so `array[TIdx] of T` folds to `array[lo..hi] of T`; the subrange's values remain ordinary unchecked integers of its underlying storage type.
 
@@ -6351,8 +6354,10 @@ standard `TStaticArrayTypeDesc` with bounds `0..N-1`.
 === Alternatives considered
 
 * *Support non-enum ordinal index types (`array[Byte]`, `array[Boolean]`).*
-  Deferred.  These require a different size-computation path (256 elements for
-  `Byte`, 2 for `Boolean`) and the enum form covers the primary use case.
+  Deferred at first, since the enum form covered the primary use case; both
+  have since been implemented — `array[Boolean]` for GH #181, and the 8- and
+  16-bit integer types (`array[Byte]`, `array[Int8]`, `array[Word]`,
+  `array[Int16]`) on 2026-10-21 (see the static-array feature table).
 * *Store the enum type in `TStaticArrayTypeDesc`.*  Rejected.  The type
   descriptor erases the index origin after semantic analysis, storing only
   integer bounds.  This simplifies the codegen and is consistent with how

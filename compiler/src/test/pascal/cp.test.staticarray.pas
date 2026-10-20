@@ -138,6 +138,10 @@ type
     procedure TestSemantic_BooleanIndex_ConstBounds;
     procedure TestSemantic_BooleanIndex_ConstWrongCount;
     procedure TestSemantic_StringIndex_RaisesTargetedError;
+    { an 8- or 16-bit integer type indexes its whole range, as in FPC and
+      Delphi; a 32-bit one is rejected (found by the ordinal matrix) }
+    procedure TestSemantic_SmallIntTypeIndex_Bounds;
+    procedure TestSemantic_Int32TypeIndex_Rejected;
 
     { ------------------------------------------------------------------ }
     { BUG-20260921-const-array-index-out-of-bounds — a CONSTANT index    }
@@ -940,6 +944,45 @@ begin
   finally
     P.Free();
   end;
+end;
+
+procedure TStaticArrayTests.TestSemantic_SmallIntTypeIndex_Bounds;
+var P: TProgram; SAT: TStaticArrayTypeDesc;
+
+  procedure CheckDecl(AIdx: Integer; ALow, AHigh: Integer; const AWhat: string);
+  begin
+    SAT := TStaticArrayTypeDesc(TVarDecl(P.Block.Decls.Items[AIdx]).ResolvedType);
+    AssertEquals(AWhat + ' low', ALow, SAT.LowBound);
+    AssertEquals(AWhat + ' high', AHigh, SAT.HighBound);
+  end;
+
+begin
+  P := AnalyseSrc('''
+    program P;
+    var A: array[Byte] of Integer;
+    var B: array[Int8] of Integer;
+    var C: array[Word] of Byte;
+    var D: array[Int16] of Byte;
+    begin end.
+    ''');
+  try
+    CheckDecl(0, 0, 255, 'Byte');
+    CheckDecl(1, -128, 127, 'Int8');
+    CheckDecl(2, 0, 65535, 'Word');
+    CheckDecl(3, -32768, 32767, 'Int16');
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticArrayTests.TestSemantic_Int32TypeIndex_Rejected;
+begin
+  AssertTrue('Int32 index rejected', Pos('not a valid array index type',
+    SemanticError('''
+      program P;
+      var A: array[Int32] of Byte;
+      begin end.
+      ''')) >= 0);
 end;
 
 procedure TStaticArrayTests.TestSemantic_BooleanIndex_ConstBounds;
