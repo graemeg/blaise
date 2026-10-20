@@ -10115,10 +10115,9 @@ begin
       Self.Emit(BodyL + ':');
       if H.VarName <> '' then
       begin
-        { bind: retain the exception (balances the scope-exit release of
-          the handler var), release any prior binding, store }
-        Self.Emit(#9'ldr x0, [sp]');
-        EmitCallSym('_ClassAddRef');
+        { bind: the in-flight reference MOVES into the handler var (whose
+          scope-exit release disposes of the exception); release any prior
+          binding, store }
         EmitLoadSlot('x0', H.VarName);
         EmitCallSym('_ClassRelease');
         Self.Emit(#9'ldr x0, [sp]');
@@ -10126,14 +10125,11 @@ begin
       end;
       for J := 0 to H.Body.Stmts.Count - 1 do
         EmitStmt(TASTStmt(H.Body.Stmts.Items[J]));
-      { A handler with NO variable owns disposal: the exception is created rc=0
-        and only borrowed, so without a handler-var slot it would be orphaned
-        (BUG-20260720-exception-object-leak).  Balanced AddRef/Release
-        (0->1->0) frees it + deregisters (the pointer is still at [sp]). }
+      { A handler with NO variable disposes of the exception: it drops the
+        in-flight reference (BUG-20260720-exception-object-leak; the pointer
+        is still at [sp]) }
       if H.VarName = '' then
       begin
-        Self.Emit(#9'ldr x0, [sp]');
-        EmitCallSym('_ClassAddRef');
         Self.Emit(#9'ldr x0, [sp]');
         EmitCallSym('_ClassRelease');
       end;
@@ -10145,10 +10141,8 @@ begin
     begin
       for J := 0 to AStmt.ElseBody.Stmts.Count - 1 do
         EmitStmt(TASTStmt(AStmt.ElseBody.Stmts.Items[J]));
-      { else HANDLES without a variable — dispose (re-raise path below forwards
-        the borrow and must NOT dispose). }
-      Self.Emit(#9'ldr x0, [sp]');
-      EmitCallSym('_ClassAddRef');
+      { else HANDLES without a variable — drop the in-flight reference (the
+        re-raise path below forwards it and must NOT). }
       Self.Emit(#9'ldr x0, [sp]');
       EmitCallSym('_ClassRelease');
       Self.Emit(#9'add sp, sp, #16');
@@ -10162,15 +10156,14 @@ begin
   end
   else
   begin
-    { bare except: catch-all body.  Capture the borrowed exception BEFORE the
-      frame pop, dispose it after the body (BUG-20260720-exception-object-leak). }
+    { bare except: catch-all body.  Capture the exception BEFORE the frame
+      pop, drop the in-flight reference after the body
+      (BUG-20260720-exception-object-leak). }
     EmitCallSym('_CurrentException');
     Self.Emit(#9'str x0, [sp, #-16]!');
     EmitCallSym('_PopExcFrame');
     for I := 0 to AStmt.ExceptBody.Stmts.Count - 1 do
       EmitStmt(TASTStmt(AStmt.ExceptBody.Stmts.Items[I]));
-    Self.Emit(#9'ldr x0, [sp]');
-    EmitCallSym('_ClassAddRef');
     Self.Emit(#9'ldr x0, [sp]');
     EmitCallSym('_ClassRelease');
     Self.Emit(#9'add sp, sp, #16');
@@ -10606,6 +10599,15 @@ begin
     residual of BUG-049; the common contexts are all flushed and leak-free.
     Mirrors the x86-64 backend. }
   Self.EmitExprToX0(AStmt.Expr);
+  { the in-flight exception owns one reference: an owned operand (a
+    constructor or a call) hands its +1 over, a borrowed one (a variable,
+    a field) is retained for it }
+  if not ArcExprOwnsRef(AStmt.Expr) then
+  begin
+    EmitPushX0();
+    EmitCallSym('_ClassAddRef');
+    EmitPopTo('x0');
+  end;
   EmitCallSym('_Raise');
 end;
 
@@ -11641,16 +11643,7 @@ begin
     else if ME.ObjExpr <> nil then
     begin
       Self.EmitExprToX0(ME.ObjExpr);
-      if ArcIsUnownedCtorResult(ME.ObjExpr) then
-      begin
-        { TFoo.Create().MakeRec(): pin the fresh rc=0 instance so the release
-          after the call frees it, as the scalar method path does -- nothing
-          took a reference, so it leaked }
-        EmitPushX0();
-        EmitCallSym('_ClassAddRef');
-        EmitPopTo('x0');
-      end;
-      if ArcExprOwnsRef(ME.ObjExpr) or ArcIsUnownedCtorResult(ME.ObjExpr) then
+      if ArcExprOwnsRef(ME.ObjExpr) then
       begin
         { MakeL().Next(): the receiver is an owned +1 transient.  Park it in
           a frame slot for the call and release it afterwards. }
@@ -17210,15 +17203,6 @@ begin
   begin
     Result := ArcExprOwnsRef(AExpr.ObjExpr);
     Self.EmitExprToX0(AExpr.ObjExpr);
-    if ArcIsUnownedCtorResult(AExpr.ObjExpr) then
-    begin
-      { TFoo.Create().ToString(): pin the fresh rc=0 instance so the release
-        after the call frees it }
-      EmitPushX0();
-      EmitCallSym('_ClassAddRef');
-      EmitPopTo('x0');
-      Result := True;
-    end;
     Exit;
   end;
   if AExpr.ObjectName = '' then
@@ -17286,15 +17270,6 @@ begin
     EmitRecAddrToX0(AObjExpr)
   else
     Self.EmitExprToX0(AObjExpr);
-  if ArcIsUnownedCtorResult(AObjExpr) then
-  begin
-    { TFoo.Create().Run(): pin the fresh rc=0 instance so the post-call
-      release frees it -- nothing took a reference, so it leaked }
-    EmitPushX0();
-    EmitCallSym('_ClassAddRef');
-    EmitPopTo('x0');
-    Owned := True;
-  end;
   if Owned then
     EmitPushX0();               { copy for the post-call release }
   EmitPushX0();                 { the receiver EmitCall pops into x0 }
@@ -17783,14 +17758,12 @@ begin
     end;
     if Sym = '' then
       NotYet('constructor for class ''' + AExpr.ObjectName + '''', AExpr);
-    { Allocate at refcount ZERO, mirroring x86-64 (:10604): _ClassAlloc does
-      NOT take a reference, and the vtable is installed here.  _ClassCreate
-      must NOT be used on this path — it ends with _ClassAddRef, and the
-      SHARED ArcExprOwnsRef deliberately reports a constructor call as NOT
-      owning, so the assignment site adds the one reference itself.  Calling
-      _ClassCreate here left every instance one reference above zero: nothing
-      was ever freed and no destructor ever ran (arm64 leaked every object it
-      constructed). }
+    { Allocate, install the vtable, and take the constructor call's OWNED
+      reference before the body runs (ArcExprOwnsRef reports a constructor
+      call as owning, so the consumer takes it over): an instance under
+      construction is never at refcount 0, which a retain/release pair in
+      the body -- Self captured by a closure, handed to a worker thread --
+      would otherwise take back to 0 and free.  x86-64 does the same. }
     if AExpr.ResolvedClassType is TRecordTypeDesc then
       EmitIntLiteral('x0',
         TRecordTypeDesc(AExpr.ResolvedClassType).TotalSize())
@@ -17806,6 +17779,9 @@ begin
       Self.Emit(Format(#9'add x9, x9, %s@PAGEOFF', [VtableSym(Sym)]));
       Self.Emit(#9'str x9, [x0]');
     end;
+    EmitPushX0();
+    EmitCallSym('_ClassAddRef');      { the call's owned reference }
+    EmitPopTo('x0');
     EmitLeakTrackerRegister('', TypeinfoSym(Sym), AExpr.Line);
     MD := TMethodDecl(AExpr.ResolvedMethod);
     { called even when Body = nil — imported unit interfaces carry

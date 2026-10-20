@@ -11932,7 +11932,8 @@ begin
   end;
 
   { TypeName.Create — allocate a new class instance.
-    Returns the instance pointer in %rax.  Does NOT do ARC (caller's job). }
+    Returns the instance pointer in %rax, holding the call's owned (+1)
+    reference, which the consumer takes over. }
   if (AExpr is TFieldAccessExpr) and
      TFieldAccessExpr(AExpr).IsConstructorCall then
   begin
@@ -11952,6 +11953,12 @@ begin
         [Self.ClassSymName(FAE.ResolvedType.Name)]));
       Self.Emit(#9'movq %rcx, (%rax)');
     end;
+    { the constructor call's OWNED reference, taken before the body runs
+      (see the TypeName.Create(args) arm) }
+    Self.Emit(#9'pushq %rax');
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(#9'callq _ClassAddRef');
+    Self.Emit(#9'popq %rax');
     if FDebugMode then
     begin
       Self.Emit(#9'pushq %rbx');
@@ -12283,6 +12290,16 @@ begin
         Self.Emit(Format(#9'leaq vtable_%s(%%rip), %%rcx', [Self.ClassSymName(RT.Name)]));
         Self.Emit(#9'movq %rcx, (%rax)');
       end;
+      { the constructor call's OWNED reference (ArcExprOwnsRef reports a
+        constructor call as owning, as _ClassCreate's already was), taken
+        before the body runs: an instance under construction is never at
+        refcount 0, which a retain/release pair in the body -- Self captured
+        by a closure, handed to a worker thread -- would take back to 0 and
+        free (BUG-20261020-thread-exit-flaky-segv) }
+      Self.Emit(#9'pushq %rax');
+      Self.Emit(#9'movq %rax, %rdi');
+      Self.Emit(#9'callq _ClassAddRef');
+      Self.Emit(#9'popq %rax');
     end;
     if FDebugMode then
     begin
@@ -16455,28 +16472,20 @@ begin
       Self.Emit(LblBody + ':');
       if H.VarName <> '' then
       begin
-        { Retain the exception to balance the scope-exit release (the handler
-          var is a class local; EmitFunctionDef will emit a release at epilogue
-          only for string vars, but we retain here to match QBE backend ARC).
-          Release any PRIOR binding first — the slot is shared by every
-          same-named handler in the function.
+        { The in-flight reference MOVES into the handler var, whose scope-exit
+          release disposes of the exception.  Release any PRIOR binding first
+          — the slot is shared by every same-named handler in the function.
           The handler var slot is a pre-declared local: assign %r15 into it. }
-        Self.Emit(#9'movq %r15, %rdi');
-        Self.Emit(#9'callq _ClassAddRef');
         Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(H.VarName)]));
         Self.Emit(#9'callq _ClassRelease');
         Self.Emit(Format(#9'movq %%r15, %s', [Self.VarOperand(H.VarName)]));
       end;
       Self.EmitStmtList(H.Body.Stmts);
-      { A handler with NO variable owns disposal too: the exception is created
-        rc=0 and only borrowed, so with no handler-var slot to release it at
-        scope exit it would be orphaned (BUG-20260720-exception-object-leak).
-        Balanced AddRef/Release (0->1->0) frees it + deregisters from the tracker
-        (%r15 holds the exception, callee-saved across the body). }
+      { A handler with NO variable disposes of the exception: it drops the
+        in-flight reference (BUG-20260720-exception-object-leak; %r15 holds
+        the exception, callee-saved across the body). }
       if H.VarName = '' then
       begin
-        Self.Emit(#9'movq %r15, %rdi');
-        Self.Emit(#9'callq _ClassAddRef');
         Self.Emit(#9'movq %r15, %rdi');
         Self.Emit(#9'callq _ClassRelease');
       end;
@@ -16489,10 +16498,8 @@ begin
     if AStmt.ElseBody <> nil then
     begin
       Self.EmitStmtList(AStmt.ElseBody.Stmts);
-      { The else branch HANDLES without a variable — dispose the exception.
-        (The re-raise path below forwards the borrow — must NOT dispose.) }
-      Self.Emit(#9'movq %r15, %rdi');
-      Self.Emit(#9'callq _ClassAddRef');
+      { The else branch HANDLES without a variable — drop the in-flight
+        reference.  (The re-raise path below forwards it — must NOT.) }
       Self.Emit(#9'movq %r15, %rdi');
       Self.Emit(#9'callq _ClassRelease');
       Self.Emit(#9'jmp ' + LblEnd);
@@ -16506,16 +16513,14 @@ begin
   end
   else
   begin
-    { Plain catch-all except body.  Capture the borrowed exception into a
-      callee-saved reg BEFORE popping the frame, so it can be disposed after the
-      body (BUG-20260720-exception-object-leak). }
+    { Plain catch-all except body.  Capture the exception into a callee-saved
+      reg BEFORE popping the frame, so its in-flight reference can be dropped
+      after the body (BUG-20260720-exception-object-leak). }
     Self.Emit(#9'pushq %r15');
     Self.Emit(#9'callq _CurrentException');
     Self.Emit(#9'movq %rax, %r15');
     Self.EmitPopExcFrame();
     Self.EmitStmtList(AStmt.ExceptBody.Stmts);
-    Self.Emit(#9'movq %r15, %rdi');
-    Self.Emit(#9'callq _ClassAddRef');
     Self.Emit(#9'movq %r15, %rdi');
     Self.Emit(#9'callq _ClassRelease');
     Self.Emit(#9'popq %r15');
@@ -16541,6 +16546,16 @@ begin
       shape is the sole residual of BUG-049; the common contexts (conditions,
       loops, call arguments) are all flushed and leak-free. }
     Self.EmitExprToEax(AStmt.Expr);
+    { the in-flight exception owns one reference: an owned operand (a
+      constructor or a call) hands its +1 over, a borrowed one (a variable,
+      a field) is retained for it }
+    if not NativeExprOwnsRef(AStmt.Expr) then
+    begin
+      Self.Emit(#9'pushq %rax');
+      Self.Emit(#9'movq %rax, %rdi');
+      Self.Emit(#9'callq _ClassAddRef');
+      Self.Emit(#9'popq %rax');
+    end;
     Self.Emit(#9'movq %rax, %rdi');
     Self.Emit(#9'callq _Raise');
   end
@@ -24027,19 +24042,7 @@ begin
   }
   if (ARecv.ResolvedType <> nil) and (ARecv.ResolvedType.Kind = tyClass) and
      NativeExprOwnsRef(ARecv) then
-    Self.DeferNativeClassRelease()
-  else if ArcIsUnownedCtorResult(ARecv) then
-  begin
-    { TFoo.Create().Run(): the fresh rc=0 instance is pinned, then released
-      with the owned receivers at the end of the statement -- it leaked }
-    Self.Emit(#9'pushq %rax');
-    Self.Emit(#9'pushq %rax');
-    Self.Emit(#9'movq %rax, %rdi');
-    Self.Emit(#9'callq _ClassAddRef');
-    Self.Emit(#9'popq %rax');
-    Self.Emit(#9'addq $8, %rsp');
     Self.DeferNativeClassRelease();
-  end;
 end;
 
 procedure TX86_64Backend.EmitRecvBufFieldReleases(ARecvExpr: TASTExpr);

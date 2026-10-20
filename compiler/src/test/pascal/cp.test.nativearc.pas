@@ -47,12 +47,15 @@ type
       (BUG-20261011-owned-dynarray-arg-leak -- the first two leaked on both
       ISAs, the discard on x86-64) }
     { P3 owned-transient corners: the object / string a call hands back is
-      released after Supports and OrdAt use it; a constructor result used as
-      a receiver is pinned (0 -> 1) for the post-call release; an owned
+      released after Supports and OrdAt use it; a constructor result is
+      owned from its allocation (retained before the body runs); an owned
       interface stored into a [Weak] variable is registered and released }
     procedure TestOwnedTransient_SupportsReleasesObject;
     procedure TestOwnedTransient_OrdAtReleasesString;
-    procedure TestCtorResultReceiver_Pinned;
+    procedure TestCtorResult_OwnedAtAllocation;
+    { raise E (a variable) retains for the in-flight exception; raise
+      EFoo.Create() hands the constructor's own reference over }
+    procedure TestRaise_BorrowedOperandRetained;
     procedure TestOwnedIntoWeakInterface_Released;
     { R.O := MkN() for a record VARIABLE or a var record param: the call's
       +1 moves into the field -- x86-64 retained it again (a leak per store) }
@@ -991,13 +994,36 @@ begin
         #9'mov x0, x1'#10#9'bl __StringRelease'));
 end;
 
-procedure TNativeArcTests.TestCtorResultReceiver_Pinned;
+procedure TNativeArcTests.TestCtorResult_OwnedAtAllocation;
 begin
-  AssertEquals('TThing.Create().Go() pins the fresh instance', '',
+  { a constructor call takes its owned reference right after allocation,
+    before the body runs (BUG-20261020-thread-exit-flaky-segv); the
+    receiver of TThing.Create().Go() is then an ordinary owned transient,
+    with no pin of a refcount-0 instance }
+  AssertEquals('the fresh instance is retained once allocated', '',
     AsmMissing(SrcOwnedCorners,
-      #9'movq %rcx, (%rax)'#10#9'pushq %rax'#10#9'pushq %rax'#10 +
-        #9'movq %rax, %rdi'#10#9'callq _ClassAddRef',
+      #9'movq %rcx, (%rax)'#10#9'pushq %rax'#10#9'movq %rax, %rdi'#10 +
+        #9'callq _ClassAddRef'#10#9'popq %rax',
       #9'str x9, [x0]'#10#9'str x0, [sp, #-16]!'#10#9'bl __ClassAddRef'));
+end;
+
+procedure TNativeArcTests.TestRaise_BorrowedOperandRetained;
+const
+  Src = '''
+    program P;
+    type EFoo = class end;
+    var E: EFoo;
+    begin
+      E := EFoo.Create();
+      raise E
+    end.
+    ''';
+begin
+  AssertEquals('the borrowed operand is retained before _Raise', '',
+    AsmMissing(Src,
+      #9'callq _ClassAddRef'#10#9'addq $8, %rsp'#10#9'popq %rax'#10 +
+        #9'movq %rax, %rdi'#10#9'callq _Raise',
+      #9'bl __ClassAddRef'#10#9'ldr x0, [sp], #16'#10#9'bl __Raise'));
 end;
 
 procedure TNativeArcTests.TestOwnedIntoRecordVarField_NoRetain;

@@ -449,12 +449,12 @@ procedure TE2EThreadVarTests.TestRun_ThreadExit_ReleasesEveryManagedKind;
 begin
   { a worker's managed threadvars are released when it exits -- class,
     interface, record field, dyn-array element and closure env.  Nothing
-    released them, on either backend: the count was 0.  The thread is
-    started AFTER T holds it: started from the constructor (Create(False)),
-    the closure's conservatively captured Self could take the instance
-    0 -> 1 -> 0 and free it before the constructor returned (~10% under
-    load) -- BUG-20261020-thread-exit-flaky-segv, fixed by making a
-    constructor call return an owned reference; restore Create(False) then. }
+    released them, on either backend: the count was 0.  The thread starts
+    from the constructor (Create(False)) and the closure captures Self: with
+    the instance at refcount 0 under construction, the worker could take it
+    0 -> 1 -> 0 and free it before Create returned (~10% under load,
+    BUG-20261020-thread-exit-flaky-segv) -- a constructor call now owns its
+    instance from allocation. }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRTLRunsOnAll(
     '''
@@ -485,7 +485,7 @@ begin
       P := procedure begin Cap.Free() end;
     end;
     var T: TW;
-    begin T := TW.Create(True); T.Start(); T.WaitFor(); WriteLn(Freed); end.
+    begin T := TW.Create(False); T.WaitFor(); WriteLn(Freed); end.
     ''', '5' + LE, 0);
 end;
 

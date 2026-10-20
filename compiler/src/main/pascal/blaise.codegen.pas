@@ -190,7 +190,6 @@ function IsFoldedPropSubscript(AExpr: TASTExpr): Boolean;
   takes the first reference).  Used directly as a method RECEIVER,
   TFoo.Create().Run(), nothing ever took that reference, so the instance
   leaked; a receiver site pins it (0 -> 1) and releases it after the call. }
-function ArcIsUnownedCtorResult(AExpr: TASTExpr): Boolean;
 
 { True when AExpr's value is produced by a CALL -- a function or method call,
   a method-backed property read (Obj.Prop, or a bare Prop inside a method),
@@ -632,26 +631,26 @@ begin
     if IE.IsImplicitSelfMethod then
       Exit(True);
   end;
-  { Constructor calls via TFieldAccessExpr (TFoo.Create) — do NOT own. }
+  { A constructor call (TFoo.Create) hands back an OWNED reference: the
+    instance is retained right after allocation, so it is never at
+    refcount 0 while its constructor runs (a retain/release pair inside the
+    constructor -- a closure capturing Self, a worker thread started from
+    it -- took it 0 -> 1 -> 0 and freed it under the constructor), and the
+    consumer takes that reference over like a function result's. }
   if AExpr is TFieldAccessExpr then
   begin
     FA := TFieldAccessExpr(AExpr);
-    if FA.IsConstructorCall then Exit;
+    if FA.IsConstructorCall then begin Result := True; Exit end;
     if FA.IsMethodCall then begin Result := True; Exit end;
     { Method-backed property read (read GetX): the getter returns +1.
       Field-backed reads (read FX) emit a plain load and do NOT own. }
     if (FA.PropRead <> nil) and (FA.PropRead.ReadMethod <> '') then
       Exit(True);
   end;
-  { TMethodCallExpr: constructor calls do NOT own (refcount zero), except
-    through a metaclass receiver (_ClassCreate, +1); all other method calls
-    DO. }
+  { TMethodCallExpr: every method call owns its class result, a constructor
+    call included (allocated at +1, like _ClassCreate through a metaclass) }
   if AExpr is TMethodCallExpr then
-  begin
-    MC := TMethodCallExpr(AExpr);
-    Result := (not MC.IsConstructorCall) or MC.IsMetaclassDispatch;
-    Exit;
-  end;
+    Exit(True);
   { A class CAST of an owned value -- MakeObj() as TFoo, TFoo(MakeObj()) --
     is the same pointer, so it carries the operand's +1: a consuming site
     that saw only the cast retained it again (a store) or never released it
@@ -767,19 +766,6 @@ begin
   if AExpr is TNotExpr then
     Exit(AccessPathHasCall(TNotExpr(AExpr).Expr));
   Result := True;
-end;
-
-function ArcIsUnownedCtorResult(AExpr: TASTExpr): Boolean;
-begin
-  Result := False;
-  if (AExpr = nil) or (AExpr.ResolvedType = nil) or
-     (AExpr.ResolvedType.Kind <> tyClass) then
-    Exit;
-  if AExpr is TMethodCallExpr then
-    Result := TMethodCallExpr(AExpr).IsConstructorCall and
-              not TMethodCallExpr(AExpr).IsMetaclassDispatch
-  else if AExpr is TFieldAccessExpr then
-    Result := TFieldAccessExpr(AExpr).IsConstructorCall;
 end;
 
 function IsFoldedPropSubscript(AExpr: TASTExpr): Boolean;

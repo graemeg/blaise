@@ -152,6 +152,20 @@ type
     { a class FIELD of a record variable / var record param assigned a call
       result: each replaced object is freed (x86-64 leaked every one) }
     procedure TestRun_RecordVarField_OwnedStore_NoLeak;
+    { a constructor call owns its instance from allocation: a retain /
+      release pair inside the constructor (Self through a routine's local, a
+      closure capturing Self then cleared) took the instance 0 -> 1 -> 0 --
+      it was destroyed under the constructor and again when dropped
+      (BUG-20261020-thread-exit-flaky-segv) }
+    procedure TestRun_CtorSelfRetainRelease_NotFreedEarly;
+    { a temporary constructed object (TFoo.Create(3).N) is released at the
+      end of its statement -- it was never freed }
+    procedure TestRun_CtorTemporary_Released;
+    { the in-flight exception owns one reference: raise of an owned operand
+      hands it over, of a variable retains it; a handler var takes it over,
+      a handler without one releases it; re-raise and finally pass it on --
+      every exception freed exactly once }
+    procedure TestRun_ExceptionOwnership_EveryPath;
   end;
 
 implementation
@@ -1919,6 +1933,119 @@ begin
   AssertRunsOnAll(Src,
     'Arr sum=22 calls=1' + LineEnding +
     'D x1y calls=1' + LineEnding, 0);
+end;
+
+procedure TE2EArcTests.TestRun_CtorSelfRetainRelease_NotFreedEarly;
+const
+  Src = '''
+    program C1;
+    type
+      TC = reference to procedure;
+      TFoo = class
+        N: Integer;
+        constructor Create;
+        destructor Destroy; override;
+      end;
+    procedure Touch(O: TFoo);
+    var L: TFoo;
+    begin
+      L := O;
+    end;
+    constructor TFoo.Create;
+    var P: TC;
+    begin
+      Touch(Self);
+      P := procedure begin end;
+      P := nil;
+      N := 42;
+    end;
+    destructor TFoo.Destroy; begin WriteLn('destroyed ', N); inherited Destroy(); end;
+    var F: TFoo;
+    begin
+      F := TFoo.Create();
+      WriteLn('made ', F.N);
+      F := nil;
+      WriteLn('end');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'made 42' + LineEnding + 'destroyed 42' + LineEnding +
+    'end' + LineEnding, 0);
+end;
+
+procedure TE2EArcTests.TestRun_CtorTemporary_Released;
+const
+  Src = '''
+    program C2;
+    type
+      TFoo = class
+        N: Integer;
+        constructor Create(AN: Integer);
+        destructor Destroy; override;
+      end;
+    var Keep: TFoo;
+    constructor TFoo.Create(AN: Integer); begin N := AN; if AN = 2 then Keep := Self; end;
+    destructor TFoo.Destroy; begin WriteLn('destroyed ', N); inherited Destroy(); end;
+    begin
+      Keep := TFoo.Create(2);
+      WriteLn('after 2');
+      WriteLn(TFoo.Create(3).N);
+      WriteLn('after 3');
+      Keep := nil;
+      WriteLn('end');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'after 2' + LineEnding + '3' + LineEnding +
+    'destroyed 3' + LineEnding + 'after 3' + LineEnding + 'destroyed 2' +
+    LineEnding + 'end' + LineEnding, 0);
+end;
+
+procedure TE2EArcTests.TestRun_ExceptionOwnership_EveryPath;
+const
+  Src = '''
+    program C3;
+    uses SysUtils;
+    type
+      EFoo = class(Exception)
+        Tag: Integer;
+        destructor Destroy; override;
+      end;
+    destructor EFoo.Destroy; begin WriteLn('freed ', Tag); inherited Destroy(); end;
+    function MkE(T: Integer): EFoo; begin Result := EFoo.Create('m'); Result.Tag := T; end;
+    procedure Inner;
+    begin
+      try
+        raise MkE(3);
+      except
+        on X: EFoo do begin WriteLn('inner ', X.Tag); raise; end;
+      end;
+    end;
+    var E: EFoo;
+    begin
+      E := EFoo.Create('b'); E.Tag := 1;
+      try raise E; except on X: EFoo do WriteLn('caught ', X.Tag); end;
+      WriteLn('still held ', E.Tag);
+      E := nil;
+      try raise MkE(2); except WriteLn('bare'); end;
+      try Inner(); except on X: EFoo do WriteLn('outer ', X.Tag); end;
+      try
+        try raise MkE(4); finally WriteLn('finally'); end;
+      except
+        on X: EFoo do WriteLn('after finally ', X.Tag);
+      end;
+      WriteLn('end');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRTLRunsOnAll(Src, 'caught 1' + LineEnding + 'still held 1' + LineEnding +
+    'bare' + LineEnding + 'freed 2' + LineEnding + 'inner 3' + LineEnding +
+    'freed 1' + LineEnding + 'outer 3' + LineEnding + 'finally' + LineEnding +
+    'freed 3' + LineEnding + 'after finally 4' + LineEnding + 'end' + LineEnding +
+    'freed 4' + LineEnding, 0);
 end;
 
 procedure TE2EArcTests.TestRun_RecordVarField_OwnedStore_NoLeak;

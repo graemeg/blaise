@@ -1026,6 +1026,33 @@ written code.
   (file handles, network connections) and is more predictable in
   latency-sensitive or systems contexts.
 
+==== A constructor call returns an owned reference
+
+`TFoo.Create(...)` hands back a reference the consumer OWNS, exactly as a
+function result does: the instance is retained right after it is allocated,
+before the constructor body runs, and the assignment, argument, field store
+or `raise` that receives it takes that reference over (an expression that
+discards it — `TFoo.Create().Run()`, `TFoo.Create(3).N` — releases it at the
+end of the statement).  A constructor called through a metaclass
+(`Cls.Create`) always worked this way (`_ClassCreate` returns +1).
+
+Originally a plain constructor call allocated at refcount 0 and the
+consumer added the first reference.  That left every instance at 0 while its
+own constructor ran, so any retain/release pair inside the body freed it
+under the constructor: `Self` passed to a routine whose local retained and
+dropped it, a closure capturing `Self` and then cleared, or a worker thread
+started from the constructor (`TThread.Create(False)`) whose closure captured
+`Self` and was released at thread exit.  The instance was destroyed before
+the caller ever saw it — and destroyed again when the caller dropped it.
+A temporary constructed object (`TFoo.Create(3).N`) was also never freed.
+Owned construction is the Swift / Objective-C rule (`alloc` returns +1) and
+removes the whole class: an object under construction cannot reach 0.
+
+An exception follows the same rule: the in-flight exception owns one
+reference.  `raise` hands an owned operand's reference over (or retains a
+borrowed one, `raise E`), a handler variable takes it over, and a handler
+without a variable releases it.
+
 ==== Known limitation: reference cycles
 
 ARC cannot automatically collect reference cycles. Blaise provides two
@@ -5042,6 +5069,12 @@ Delphi and FPC.  Thread lifetime is managed entirely through ARC: when the
 last reference to a `TThread` instance is released, `Destroy` calls `WaitFor`
 (which calls `pthread_join`), blocking until the OS thread has fully exited
 before the object's memory is freed.
+
+Starting the thread from the constructor (`TThread.Create(False)`) is safe:
+a constructor call owns its instance from allocation (see *A constructor call
+returns an owned reference* under ARC), so a worker that retains and
+releases the instance — a closure in `Execute` capturing `Self` — cannot take
+it to 0 while the constructor is still running.
 
 The trampoline (the free procedure passed to `pthread_create`) does *not*
 hold an ARC reference to the `TThread` instance.  It accesses the object
