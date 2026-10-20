@@ -10111,6 +10111,17 @@ begin
     if FC.ResolvedDecl = nil then
     begin
       CastArg := TASTExpr(FC.Args.Items[0]);
+      if (FC.ResolvedType <> nil) and (FC.ResolvedType.Kind = tyRecord) and
+         (CastArg.ResolvedType <> nil) and IsMethodPtrType(CastArg.ResolvedType) then
+      begin
+        { TMethod(M) / TMethod(GetM()) / TMethod(L[0]): a method pointer or
+          closure reinterpreted as a record -- the record value is the
+          pair's ADDRESS, from the shared source lowering (a call result's
+          pair came back in %rax:%rdx and its Code word was copied from as
+          the address) }
+        Self.EmitFatElemSourceAddr(CastArg);
+        Exit;
+      end;
       if (CastArg.ResolvedType <> nil) and
          (CastArg.ResolvedType.Kind = tyInterface) and
          (CastArg is TIdentExpr) then

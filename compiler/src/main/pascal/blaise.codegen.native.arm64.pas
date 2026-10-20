@@ -2244,8 +2244,6 @@ begin
 end;
 
 procedure TArm64Backend.EmitRecAddrToX0(AExpr: TASTExpr);
-var
-  Tmp: string;
 begin
   { x0 := address of a record VALUE — every lvalue-ish record shape the
     copy paths accept: plain/var-param/implicit-Self idents, subscripted
@@ -2323,8 +2321,25 @@ begin
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.RawSize() =
         AExpr.ResolvedType.RawSize()) and
-     ((TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind = tyRecord) or
-      IsMethodPtrType(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType)) and
+     IsMethodPtrType(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType) then
+  begin
+    { TMethod(M) / TMethod(GetM()) / TMethod(L[0]): a method pointer or
+      closure reinterpreted as a record -- its pair's address from the
+      shared source lowering (a getter read was taken for a plain field);
+      an owned call result's Env is released at the statement end }
+    if EmitFatSourceAddrToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
+         TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType) then
+      DeferAggRelease(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType);
+    Exit;
+  end;
+  if (AExpr is TFuncCallExpr) and
+     (TFuncCallExpr(AExpr).ResolvedDecl = nil) and
+     (not TFuncCallExpr(AExpr).IsIndirectCall) and
+     (TFuncCallExpr(AExpr).Args.Count = 1) and
+     (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
+     (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.RawSize() =
+        AExpr.ResolvedType.RawSize()) and
+     (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind = tyRecord) and
      ((TFuncCallExpr(AExpr).Args.Items[0] is TIdentExpr) or
       (TFuncCallExpr(AExpr).Args.Items[0] is TFieldAccessExpr)) then
   begin
@@ -2342,22 +2357,12 @@ begin
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
      (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.RawSize() =
         AExpr.ResolvedType.RawSize()) and
-     ((TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind = tyRecord) or
-      IsMethodPtrType(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType)) then
+     (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind = tyRecord) then
   begin
-    { TMethod(GetM()) / TRec(MkRec()): a value cast of a CALL reinterprets
-      the result's buffer -- materialised and kept alive to the statement
-      end like any aggregate result in a scalar context }
-    Tmp := '';
-    if TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.Kind = tyRecord then
-      EmitRecCallToRretSlot(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]))
-    else
-    begin
-      if not EmitClosureResultToTemp(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
-               Tmp) then
-        NotYet('value cast of a closure returned by this call form', AExpr);
-      EmitSlotAddr('x0', Tmp);
-    end;
+    { TRec(MkRec()): a value cast of a CALL reinterprets the result's buffer
+      -- materialised and kept alive to the statement end like any aggregate
+      result in a scalar context (a method pointer operand is above) }
+    EmitRecCallToRretSlot(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
     DeferAggRelease(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType);
     Exit;
   end;

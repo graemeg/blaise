@@ -251,6 +251,11 @@ type
       (TM(call), TC(call), TC(nil), TM(nil)) and a 16-byte record result of a
       call-result closure }
     procedure TestRun_ExprCallee_CastsAndRecordResult;
+    { TMethod(GetM()) / TMethod(L[0]) / TMethod(L.Get(0)): a method pointer
+      from a call or a getter reinterpreted as the TMethod record (x86-64
+      copied 16 bytes from the Code word as an address; arm64 took the
+      getter read for a plain field) }
+    procedure TestRun_TMethodCastOfCallResult;
   end;
 
 implementation
@@ -3454,6 +3459,36 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '19' + LineEnding + 'False False' + LineEnding +
     '103 300' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_TMethodCastOfCallResult;
+const
+  Src = '''
+    program Prg;
+    type
+      TM = procedure(A: Integer) of object;
+      TImp = class N: Integer; procedure M(A: Integer); end;
+      TList = class
+        FA: array[0..1] of TM;
+        function Get(I: Integer): TM;
+        property Items[I: Integer]: TM read Get; default;
+      end;
+    var Sum: Integer; O: TImp; L: TList; MR: TMethod; X: TM;
+    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
+    function TList.Get(I: Integer): TM; begin Result := FA[I]; end;
+    function GetM(): TM; begin Result := @O.M; end;
+    begin
+      O := TImp.Create(); O.N := 2; L := TList.Create(); L.FA[0] := @O.M;
+      MR := TMethod(GetM()); WriteLn(MR.Data = Pointer(O));
+      X := TM(MR); X(1);
+      MR := TMethod(L[0]); X := TM(MR); X(10);
+      MR := TMethod(L.Get(0)); X := TM(MR); X(100);
+      WriteLn(Sum);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'True' + LineEnding + '222' + LineEnding, 0);
 end;
 
 initialization

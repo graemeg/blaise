@@ -156,6 +156,9 @@ type
       every result register survives the release after the call (x1 was
       lost: a 16-byte record result read back its second half as 0) }
     procedure TestCodegen_ExprCallee_SharedSourceAndResultRegs;
+    { TMethod(GetM()): the pair a call returns is landed in a scratch whose
+      address is the record value (x86-64 used the Code word as the address) }
+    procedure TestCodegen_TMethodCastOfCall_UsesPairAddress;
     procedure TestSemantic_UnretainedLocal_Constraints;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
@@ -1659,6 +1662,28 @@ begin
     AsmMissing(Src,
       #9'movq 8(%rax), %rcx'#10#9'movq %rcx, 8(%rsp)'#10#9'movq %rcx, %rdi',
       #9'sub sp, sp, #48'#10#9'stp x0, x1, [sp]'#10#9'stp d0, d1, [sp, #16]'));
+end;
+
+procedure TAnonMethodTests.TestCodegen_TMethodCastOfCall_UsesPairAddress;
+const
+  Src = '''
+    program Prg;
+    type
+      TM = procedure(A: Integer) of object;
+      TImp = class procedure M(A: Integer); end;
+    var O: TImp; MR: TMethod;
+    procedure TImp.M(A: Integer); begin end;
+    function GetM(): TM; begin Result := @O.M end;
+    begin
+      MR := TMethod(GetM())
+    end.
+    ''';
+begin
+  AssertEquals('the pair lands in a scratch first', '',
+    AsmMissing(Src,
+      #9'callq GetM'#10#9'leaq _sacall_0(%rip), %rcx'#10 +
+        #9'movq %rax, (%rcx)'#10#9'movq %rdx, 8(%rcx)',
+      #9'bl _GetM'#10#9'sub x0, x29, #'));
 end;
 
 initialization
