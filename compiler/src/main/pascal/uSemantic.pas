@@ -731,6 +731,8 @@ type
     procedure PromoteAnonCaptures(AThunk: TMethodDecl);
     procedure DrainPendingAnonDecls(ABlock: TBlock);
     procedure CoerceRoutineToTarget(var AExpr: TASTExpr; ATarget: TTypeDesc);
+    function  CallField(ART: TRecordTypeDesc; const AName: string;
+      ALine, ACol: Integer): TFieldInfo;
     function  IsRoutineAddr(AExpr: TASTExpr): Boolean;
     procedure ResolveProceduralTypeDef(ATD: TTypeDecl);
     { Resolve ADef's parameter and return types into ADesc (shared by named
@@ -12253,7 +12255,7 @@ begin
     { Procedural-typed field (Obj.Inner.Handler(..)): detected BEFORE the
       args are analysed so they are typed once against the field signature
       (BUG-20260722-procfield-set-literal-arg). }
-    FldInfo := RT.FindField(ACall.Name);
+    FldInfo := CallField(RT, ACall.Name, ACall.Line, ACall.Col);
     if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
        (FldInfo.TypeDesc.Kind = tyProcedural) and
        (FindMethodDecl(RT.Name, ACall.Name) = nil) then
@@ -12373,7 +12375,7 @@ begin
         no method 'Handler'").  Make the receiver an explicit expression and
         take the receiver-expression path, which already calls procedural
         fields (Self.R.Handler() went that way). }
-      FldInfo := RT.FindField(ACall.Name);
+      FldInfo := CallField(RT, ACall.Name, ACall.Line, ACall.Col);
       if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
          (FldInfo.TypeDesc.Kind = tyProcedural) and
          (FindMethodDecl(RT.Name, ACall.Name) = nil) then
@@ -12499,7 +12501,7 @@ begin
     procedural-typed local variable.  Detected BEFORE the args are analysed
     so they are typed once against the field signature
     (BUG-20260722-procfield-set-literal-arg). }
-  FldInfo := RT.FindField(ACall.Name);
+  FldInfo := CallField(RT, ACall.Name, ACall.Line, ACall.Col);
   if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
      (FldInfo.TypeDesc.Kind = tyProcedural) and
      (FindMethodDecl(RT.Name, ACall.Name) = nil) then
@@ -14941,7 +14943,7 @@ begin
     { No method of that name — an unqualified procedural-typed field of the
       current class (implicit Self.Field) dispatches through its stored
       pointer, mirroring the explicit Self.Field() path. }
-    FldInfo := FCurrentClass.FindField(ACall.Name);
+    FldInfo := CallField(FCurrentClass, ACall.Name, ACall.Line, ACall.Col);
     if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
        (FldInfo.TypeDesc.Kind = tyProcedural) then
     begin
@@ -15720,7 +15722,7 @@ begin
     { No method of that name — an unqualified procedural-typed field of the
       current class (implicit Self.Field) called as an expression dispatches
       through its stored pointer and yields the signature's return type. }
-    FldInfo := FCurrentClass.FindField(AExpr.Name);
+    FldInfo := CallField(FCurrentClass, AExpr.Name, AExpr.Line, AExpr.Col);
     if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
        (FldInfo.TypeDesc.Kind = tyProcedural) then
     begin
@@ -16595,7 +16597,7 @@ begin
     { Procedural-typed field (Obj.Inner.Fn(..)): detected BEFORE the args are
       analysed so they are typed once against the field signature
       (BUG-20260722-procfield-set-literal-arg). }
-    FldInfo := RT.FindField(AExpr.Name);
+    FldInfo := CallField(RT, AExpr.Name, AExpr.Line, AExpr.Col);
     if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
        (FldInfo.TypeDesc.Kind = tyProcedural) and
        (FindMethodDecl(RT.Name, AExpr.Name) = nil) then
@@ -16743,7 +16745,7 @@ begin
       { Procedural-typed field: detected BEFORE the args are analysed so they
         are typed once against the field signature
         (BUG-20260722-procfield-set-literal-arg). }
-      FldInfo := RT.FindField(AExpr.Name);
+      FldInfo := CallField(RT, AExpr.Name, AExpr.Line, AExpr.Col);
       if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
          (FldInfo.TypeDesc.Kind = tyProcedural) and
          (FindMethodDecl(RT.Name, AExpr.Name) = nil) then
@@ -17027,7 +17029,7 @@ begin
     A procedural-typed field (F.Fn(..)) has one signature, so it is detected
     BEFORE the args are analysed and they are typed once against it
     (BUG-20260722-procfield-set-literal-arg). }
-  FldInfo := RT.FindField(AExpr.Name);
+  FldInfo := CallField(RT, AExpr.Name, AExpr.Line, AExpr.Col);
   if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
      (FldInfo.TypeDesc.Kind = tyProcedural) and
      (FindMethodDecl(RT.Name, AExpr.Name) = nil) then
@@ -19551,6 +19553,32 @@ begin
     ABlock.ProcDecls.Add(MD);
     AnalyseStandaloneDecl(MD);
   end;
+end;
+
+function TSemanticAnalyser.CallField(ART: TRecordTypeDesc;
+  const AName: string; ALine, ACol: Integer): TFieldInfo;
+var
+  PI: TPropertyInfo;
+begin
+  { the FIELD a call Recv.Name(..) / Name(..) may go through: the field of
+    that name, or -- when there is none -- the backing field of a
+    field-backed property of procedural type, so Obj.OnChange(Sender) calls
+    through the event property exactly as through its field (the Delphi
+    event idiom).  A method of the name wins, as for a field. }
+  Result := ART.FindField(AName);
+  if Result <> nil then Exit;
+  PI := ART.FindProperty(AName);
+  if (PI = nil) or (PI.TypeDesc = nil) or (PI.TypeDesc.Kind <> tyProcedural) or
+     (PI.IndexParamName <> '') or PI.IsStatic or
+     (FindMethodDecl(ART.Name, AName) <> nil) then
+    Exit;
+  AssertMemberVisibleV(PI.Visibility, PI.DeclaringUnit, PI.DeclaringType,
+    AName, ALine, ACol);
+  if PI.ReadField = '' then
+    SemanticError(Format('A call through property ''%s'' needs a field-backed ' +
+      'read; its getter is not supported as a callee yet -- read the property ' +
+      'into a variable and call that', [AName]), ALine, ACol);
+  Result := ART.FindField(PI.ReadField);
 end;
 
 function TSemanticAnalyser.IsRoutineAddr(AExpr: TASTExpr): Boolean;

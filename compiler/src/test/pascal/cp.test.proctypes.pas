@@ -48,6 +48,11 @@ type
       returned -- the receiver is parked for release at the statement end
       (arm64 refused it, x86-64 had no arm for a call receiver) }
     procedure TestCodegen_ProcFieldCall_OnCallResultReceiver;
+    { Obj.OnChange(Sender) / OnChange(Self): a call through a field-backed
+      property of procedural type is a call through its backing field; a
+      getter-backed one is refused with a clear message }
+    procedure TestSemantic_CallThroughProcProperty_UsesBackingField;
+    procedure TestSemantic_CallThroughGetterProcProperty_Rejected;
     { O.C[I] := K into an array FIELD of closures: a 16-byte copy with the
       Env retained (x86-64 stored 8 bytes; arm64 refused it) }
     procedure TestCodegen_ClosureArrayFieldElemStore_CopiesPair;
@@ -793,6 +798,58 @@ begin
     AsmMissing(Src,
       #9'callq MkHold'#10#9'movq %rax, _pendrel_0(%rip)',
       #9'bl _MkHold'#10#9'stur x0, [x29, #-'));
+end;
+
+procedure TProcTypesTests.TestSemantic_CallThroughProcProperty_UsesBackingField;
+var
+  Prog: TProgram;
+  Call: TMethodCallStmt;
+begin
+  Prog := Analyse('''
+    program P;
+    type
+      TNotify = procedure(Sender: TObject) of object;
+      TBox = class
+      private
+        FOnChange: TNotify;
+      public
+        property OnChange: TNotify read FOnChange write FOnChange;
+        procedure Fire;
+      end;
+    procedure TBox.Fire; begin OnChange(Self) end;
+    var B: TBox;
+    begin
+      B.OnChange(B)
+    end.
+    ''');
+  try
+    Call := TMethodCallStmt(Prog.Block.Stmts.Items[0]);
+    AssertTrue('a procedural-field call', Call.IsProcFieldCall);
+    AssertEquals('through the backing field', 'FOnChange',
+      Call.ProcFieldInfo.Name);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TProcTypesTests.TestSemantic_CallThroughGetterProcProperty_Rejected;
+begin
+  AssertTrue('a getter-backed callee is refused clearly',
+    Pos('needs a field-backed read', SemanticError('''
+      program P;
+      type
+        TFn = function(N: Integer): Integer;
+        TBox = class
+          FFn: TFn;
+          function GetFn: TFn;
+          property Fn: TFn read GetFn;
+        end;
+      function TBox.GetFn: TFn; begin Result := FFn end;
+      var B: TBox;
+      begin
+        WriteLn(B.Fn(1))
+      end.
+      ''')) >= 0);
 end;
 
 procedure TProcTypesTests.TestCodegen_ClosureArrayFieldElemStore_CopiesPair;

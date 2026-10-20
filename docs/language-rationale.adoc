@@ -1888,6 +1888,15 @@ in the Data half, and a pointer built anyway called `S` with the object in
 its first parameter.  Taking a static method's address as a plain procedure
 pointer (Delphi's `@TFoo.ClassStaticMethod`) is not supported yet.
 
+A property of procedural type is called like the field behind it:
+`Obj.OnChange(Sender)`, and `OnChange(Self)` inside the class, call through
+the stored value — the Delphi and FPC event idiom (`if Assigned(OnChange)
+then OnChange(Self)`), which Blaise rejected as "no method 'OnChange'".  A
+field-backed read (`read FOnChange`) resolves to its backing field, so the
+call is exactly a procedural-field call and the property's visibility is
+checked as for a read.  A getter-backed property is not callable yet and
+says so; reading it into a variable first works.
+
 Type compatibility requires return types to match (both nil or both the
 same `TTypeDesc`), parameter lists to match pairwise on type and mode
 (`var`/`const`/value), AND the `IsMethodPtr` flag to match — a bare

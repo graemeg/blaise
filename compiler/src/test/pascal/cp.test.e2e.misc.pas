@@ -130,6 +130,11 @@ type
       an array element, as a statement and in an expression: the receiver
       lives through the call and is freed at the statement end }
     procedure TestRun_ProcFieldCall_OnCallResultReceiver;
+    { calls through field-backed properties of procedural type -- 'of
+      object', plain and 'reference to' -- inside the class, from a nested
+      routine, through a receiver and a chained receiver, statement and
+      expression, the property inherited (all were "no method 'OnChange'") }
+    procedure TestRun_CallThroughProcProperty;
 
     { Default parameters }
     procedure TestRun_DefaultParam_OmitLast;
@@ -1480,6 +1485,69 @@ begin
   AssertRunsOnAll(Src, 'hold freed 1' + LE + 'after stmt' + LE + 'hold freed 2' + LE +
     'after expr' + LE + 'c7' + LE + 'hold freed 3' + LE + '125' + LE +
     'hold freed 4' + LE + 'end' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_CallThroughProcProperty;
+const
+  Src = '''
+    program P;
+    type
+      TNotify = procedure(Sender: TObject) of object;
+      TFn = function(N: Integer): Integer;
+      TC = reference to function(N: Integer): Integer;
+      TBase = class
+      private
+        FOnChange: TNotify;
+        FFn: TFn;
+        FC: TC;
+      public
+        property OnChange: TNotify read FOnChange write FOnChange;
+        property Fn: TFn read FFn write FFn;
+        property C: TC read FC write FC;
+      end;
+      TBox = class(TBase)
+        Tag: Integer;
+        procedure Fire;
+        procedure Show(Sender: TObject);
+      end;
+      THolder = class
+        Box: TBox;
+        procedure Run;
+      end;
+    procedure TBox.Show(Sender: TObject); begin WriteLn('changed ', TBox(Sender).Tag); end;
+    procedure TBox.Fire;
+      procedure Inner;
+      begin
+        OnChange(Self);
+      end;
+    begin
+      if Assigned(OnChange) then OnChange(Self);
+      WriteLn(Fn(4), ' ', C(4));
+      Inner();
+    end;
+    procedure THolder.Run;
+    begin
+      Box.OnChange(Box);
+      WriteLn(Box.Fn(6) + Box.C(6));
+    end;
+    function Twice(N: Integer): Integer; begin Result := N * 2; end;
+    var B: TBox; H: THolder;
+    begin
+      B := TBox.Create(); B.Tag := 7; B.OnChange := @B.Show; B.Fn := @Twice;
+      B.C := function(N: Integer): Integer begin Result := N + 100 end;
+      B.Fire();
+      B.OnChange(B);
+      WriteLn(B.Fn(5), ' ', B.C(5));
+      H := THolder.Create(); H.Box := B;
+      H.Run();
+      H.Box.OnChange(B);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'changed 7' + LE + '8 104' + LE + 'changed 7' + LE +
+    'changed 7' + LE + '10 105' + LE + 'changed 7' + LE + '118' + LE +
+    'changed 7' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_DefaultParam_OmitLast;
