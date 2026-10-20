@@ -231,6 +231,10 @@ type
       field, an element, P^, an argument (only a variable converted); the
       receiver is retained by each closure and freed with the last one }
     procedure TestRun_ReferenceTargets_ConvertMethodsAndRoutines;
+    { @Method and @FField.Method inside a method body (and a nested routine
+      of it): Self, or that field of Self, is the receiver; a virtual
+      method dispatches on the receiver's class }
+    procedure TestRun_AddrOfImplicitSelfMethod;
   end;
 
 implementation
@@ -3208,6 +3212,71 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'sum 4339' + LineEnding + 'freed 3' + LineEnding +
     'end' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_AddrOfImplicitSelfMethod;
+const
+  Src = '''
+    program Own;
+    type
+      TM = procedure(A: Integer) of object;
+      TC = reference to procedure(A: Integer);
+      TImp = class
+        N: Integer;
+        destructor Destroy; override;
+        procedure M(A: Integer); virtual;
+      end;
+      TSub = class(TImp)
+        procedure M(A: Integer); override;
+      end;
+      THold = class
+        N: Integer;
+        FO: TImp;
+        FS: TM;
+        FC: TC;
+        destructor Destroy; override;
+        procedure Own(A: Integer);
+        procedure Run;
+      end;
+    var Sum: Integer;
+    destructor TImp.Destroy; begin WriteLn('imp freed'); inherited Destroy(); end;
+    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
+    procedure TSub.M(A: Integer); begin Sum := Sum + A * N * 2; end;
+    destructor THold.Destroy; begin WriteLn('hold freed'); inherited Destroy(); end;
+    procedure THold.Own(A: Integer); begin Sum := Sum + A * N; end;
+    procedure Take(X: TM); begin X(1000); end;
+    procedure THold.Run;
+    var L: TM;
+      procedure Inner;
+      begin
+        L := @Own;
+      end;
+    begin
+      L := @Own; L(1);
+      FS := @Own; FS(2);
+      Take(@Own);
+      L := @FO.M; L(10);
+      FS := @FO.M; FS(20);
+      Take(@FO.M);
+      Inner(); L(3);
+      FC := @FO.M; FC(100);
+      WriteLn(Sum);
+    end;
+    var H: THold;
+    begin
+      H := THold.Create(); H.N := 1; H.FO := TSub.Create(); H.FO.N := 5;
+      H.Run();
+      H.FO := nil;
+      WriteLn('fo cleared');
+      H.FC := nil;
+      H := nil;
+      WriteLn('end');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '12306' + LineEnding + 'fo cleared' + LineEnding +
+    'imp freed' + LineEnding + 'hold freed' + LineEnding + 'end' + LineEnding, 0);
 end;
 
 initialization

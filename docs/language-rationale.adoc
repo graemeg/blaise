@@ -1873,6 +1873,15 @@ RunMethod := TRunMethod(m);
 RunMethod;
 ----
 
+A method pointer is written `@Obj.Method` (the receiver is any class
+expression: a variable, `Self`, a field, a chain).  Inside a method body
+`@Method` and `@FField.Method` mean `@Self.Method` and `@Self.FField.Method`,
+exactly as a bare `Method()` call or `FField.Method()` call does there; both
+forms were rejected ("Bare reference to 'Method' requires () for a call")
+until the implicit receiver was resolved for `@` as it is for a call.  A
+local, a parameter or a standalone routine of the same name shadows the
+method, again as for a call.
+
 Type compatibility requires return types to match (both nil or both the
 same `TTypeDesc`), parameter lists to match pairwise on type and mode
 (`var`/`const`/value), AND the `IsMethodPtr` flag to match — a bare

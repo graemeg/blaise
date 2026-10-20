@@ -129,6 +129,10 @@ type
     procedure TestSemantic_RoutineIntoReferenceArg_BecomesAdapter;
     procedure TestSemantic_RoutineAdapterInMethod_CapturesNothing;
     procedure TestSemantic_ReferenceIntoOfObject_Rejected;
+    { @Method and @FField.Method inside a method body take Self (or that
+      field of Self) as the receiver, as a call does; both were rejected
+      as a bare reference to a method }
+    procedure TestSemantic_AddrOfImplicitSelfMethod_IsMethodPointer;
     procedure TestSemantic_UnretainedLocal_Constraints;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
@@ -1433,6 +1437,43 @@ begin
         M := C
       end.
       ''')) >= 0);
+end;
+
+procedure TAnonMethodTests.TestSemantic_AddrOfImplicitSelfMethod_IsMethodPointer;
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc('''
+    program Prg;
+    type
+      TM = procedure(A: Integer) of object;
+      TImp = class procedure M(A: Integer); end;
+      THold = class
+        FO: TImp;
+        FS: TM;
+        procedure Own(A: Integer);
+        procedure Run;
+      end;
+    procedure TImp.M(A: Integer); begin end;
+    procedure Take(X: TM); begin end;
+    procedure THold.Own(A: Integer); begin end;
+    procedure THold.Run;
+    var L: TM;
+      procedure Inner;
+      begin
+        L := @Own
+      end;
+    begin
+      L := @Own;
+      FS := @FO.M;
+      Take(@Own);
+      Take(@FO.M)
+    end;
+    begin
+    end.
+    ''');
+  AssertNotNull('@Method and @FField.Method analysed', Prog);
+  Prog.Free();
 end;
 
 initialization

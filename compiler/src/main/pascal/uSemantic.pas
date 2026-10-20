@@ -19711,6 +19711,31 @@ begin
     end;
   end;
 
+  { @Method inside a method body: the receiver is Self -- rewritten to the
+    explicit @Self.Method, which the arm below builds the method pointer
+    for.  A local, a parameter or a routine of the same name shadows the
+    method, as it does for a call. }
+  if (AExpr.Expr is TIdentExpr) and (FCurrentClass <> nil) and
+     (FCurrentClass.Kind = tyClass) then
+  begin
+    IdentExpr := TIdentExpr(AExpr.Expr);
+    FSym := FTable.Lookup(IdentExpr.Name);
+    MD := FindMethodDecl(FCurrentClass.Name, IdentExpr.Name);
+    if (FSym = nil) and (MD <> nil) and not MD.IsStatic then
+    begin
+      FldExpr := TFieldAccessExpr.Create();
+      FldExpr.Line := IdentExpr.Line;
+      FldExpr.Col := IdentExpr.Col;
+      FldExpr.FieldName := IdentExpr.Name;
+      FldExpr.Base := TIdentExpr.Create();
+      FldExpr.Base.Line := IdentExpr.Line;
+      FldExpr.Base.Col := IdentExpr.Col;
+      TIdentExpr(FldExpr.Base).Name := 'Self';
+      AExpr.Expr.Free();
+      AExpr.Expr := FldExpr;
+    end;
+  end;
+
   { @Obj.MethodName — method pointer construction.  The inner expression is a
     TFieldAccessExpr whose base is a class instance and whose field name
     resolves to a method on that class.  Build a method-pointer type
@@ -19734,6 +19759,22 @@ begin
       begin
         FldExpr.RecordName := Sym.Name;  { normalise to declared casing }
         FldExpr.IsGlobal := Sym.IsGlobal;
+      end
+      else if (Sym = nil) and (FCurrentClass <> nil) and
+              (FCurrentClass.Kind = tyClass) and
+              (FCurrentClass.FindField(FldExpr.RecordName) <> nil) and
+              (FCurrentClass.FindField(FldExpr.RecordName).TypeDesc <> nil) and
+              (FCurrentClass.FindField(FldExpr.RecordName).TypeDesc.Kind = tyClass) then
+      begin
+        { @FObj.M inside a method, FObj a field of Self: the receiver is that
+          field's value -- an explicit base expression (the implicit-Self
+          field read), as for @Self.FObj.M }
+        FldExpr.Base := TIdentExpr.Create();
+        FldExpr.Base.Line := FldExpr.Line;
+        FldExpr.Base.Col := FldExpr.Col;
+        TIdentExpr(FldExpr.Base).Name := FldExpr.RecordName;
+        FldExpr.RecordName := '';
+        BaseType := Self.AnalyseExprSlot(FldExpr.Base);
       end;
     end
     else
