@@ -235,6 +235,9 @@ type
       of it): Self, or that field of Self, is the receiver; a virtual
       method dispatches on the receiver's class }
     procedure TestRun_AddrOfImplicitSelfMethod;
+    { @MkObj(N).M into an argument, a variable, a field and an element: the
+      closure owns the receiver, which dies when the closure does }
+    procedure TestRun_AddrOfCallResultMethod_OwnsReceiver;
   end;
 
 implementation
@@ -3277,6 +3280,39 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '12306' + LineEnding + 'fo cleared' + LineEnding +
     'imp freed' + LineEnding + 'hold freed' + LineEnding + 'end' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_AddrOfCallResultMethod_OwnsReceiver;
+const
+  Src = '''
+    program P;
+    type
+      TC = reference to procedure(A: Integer);
+      TImp = class
+        N: Integer;
+        destructor Destroy; override;
+        procedure M(A: Integer);
+      end;
+      THold = class FS: TC; end;
+    var Sum: Integer; H: THold; L: TC; A: array of TC;
+    destructor TImp.Destroy; begin WriteLn('freed ', N); inherited Destroy(); end;
+    procedure TImp.M(A: Integer); begin Sum := Sum + A * N; end;
+    function MkObj(N: Integer): TImp; begin Result := TImp.Create(); Result.N := N; end;
+    procedure Take(X: TC); begin X(1); end;
+    begin
+      Take(@MkObj(1).M);
+      WriteLn('after take');
+      L := @MkObj(2).M; L(1); WriteLn('held'); L := nil;
+      H := THold.Create(); H.FS := @MkObj(3).M; H.FS(1); H := nil;
+      SetLength(A, 1); A[0] := @MkObj(4).M; A[0](1); SetLength(A, 0);
+      WriteLn(Sum);
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'freed 1' + LineEnding + 'after take' + LineEnding +
+    'held' + LineEnding + 'freed 2' + LineEnding + 'freed 3' + LineEnding +
+    'freed 4' + LineEnding + '10' + LineEnding, 0);
 end;
 
 initialization

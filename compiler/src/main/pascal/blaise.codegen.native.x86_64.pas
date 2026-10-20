@@ -12791,10 +12791,17 @@ begin
      not IsMethodPtrType(AAsgn.ResolvedLhsType) or
      (E.ResolvedType = nil) or not IsMethodPtrType(E.ResolvedType) then
     Exit;
-  if not IsFatLValueExpr(E) then
+  { an lvalue, or @MkObj().M -- a method of a receiver only a call result
+    holds, typed 'reference to' (the other @Obj.M forms have arms of their
+    own) }
+  if not IsFatLValueExpr(E) and
+     not ((E is TAddrOfExpr) and ArcTypeIsRefClosure(E.ResolvedType)) then
     Exit;
   IsRef := TProceduralTypeDesc(AAsgn.ResolvedLhsType).IsReference;
-  Self.EmitVarArgAddrToRax(E);                 { source fat value }
+  if E is TAddrOfExpr then
+    Self.EmitFatElemSourceAddr(E)              { @Obj.M: a built pair }
+  else
+    Self.EmitVarArgAddrToRax(E);               { source fat value }
   Self.Emit(#9'pushq %rax');
   if IsRef then
   begin
@@ -12880,6 +12887,12 @@ begin
         [MethodEmitNameNative(MD, MD.OwnerTypeName, FAE.FieldName)]));
     Self.Emit(#9'movq %rax, (%rcx)');
     Self.Emit(#9'movq %rcx, %rax');
+    { a receiver a call returned (@MkObj().M, a 'reference to' value): the
+      scratch holds its +1, released at the statement end once the copy
+      has taken its own }
+    if (FAE.Base <> nil) and NativeExprOwnsRef(FAE.Base) and
+       Self.DeferNativeRelease('') then
+      FPendingRelTypes[FPendingRelCount - 1] := AValue.ResolvedType;
     Exit;
   end;
   if (AValue is TFuncCallExpr) and (TFuncCallExpr(AValue).ResolvedDecl = nil) and

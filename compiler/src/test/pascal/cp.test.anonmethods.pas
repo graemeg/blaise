@@ -133,6 +133,12 @@ type
       field of Self) as the receiver, as a call does; both were rejected
       as a bare reference to a method }
     procedure TestSemantic_AddrOfImplicitSelfMethod_IsMethodPointer;
+    { @MkObj().M -- a method of a receiver only a call result holds -- is a
+      closure owning the receiver: it converts to 'reference to' targets and
+      is rejected by 'of object' ones (x86-64 leaked the receiver; arm64
+      refused it) }
+    procedure TestSemantic_AddrOfCallResultMethod_IsReference;
+    procedure TestSemantic_AddrOfCallResultMethod_IntoOfObject_Rejected;
     procedure TestSemantic_UnretainedLocal_Constraints;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
@@ -1474,6 +1480,48 @@ begin
     ''');
   AssertNotNull('@Method and @FField.Method analysed', Prog);
   Prog.Free();
+end;
+
+procedure TAnonMethodTests.TestSemantic_AddrOfCallResultMethod_IsReference;
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc('''
+    program Prg;
+    type
+      TC = reference to procedure(A: Integer);
+      TImp = class procedure M(A: Integer); end;
+      THold = class FS: TC; end;
+    var L: TC; H: THold; A: array of TC;
+    procedure TImp.M(A: Integer); begin end;
+    function MkObj(): TImp; begin Result := TImp.Create() end;
+    procedure Take(X: TC); begin end;
+    begin
+      L := @MkObj().M;
+      H.FS := @MkObj().M;
+      A[0] := @MkObj().M;
+      Take(@MkObj().M)
+    end.
+    ''');
+  AssertNotNull('a call-result receiver converts to reference to', Prog);
+  Prog.Free();
+end;
+
+procedure TAnonMethodTests.TestSemantic_AddrOfCallResultMethod_IntoOfObject_Rejected;
+begin
+  AssertTrue('nothing would own the receiver of an of-object value',
+    Pos('a method of an object only a call result holds', SemanticError('''
+      program Prg;
+      type
+        TM = procedure(A: Integer) of object;
+        TImp = class procedure M(A: Integer); end;
+      var L: TM;
+      procedure TImp.M(A: Integer); begin end;
+      function MkObj(): TImp; begin Result := TImp.Create() end;
+      begin
+        L := @MkObj().M
+      end.
+      ''')) >= 0);
 end;
 
 initialization

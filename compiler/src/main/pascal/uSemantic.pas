@@ -1184,6 +1184,9 @@ type
 
 implementation
 
+uses
+  blaise.codegen;
+
 { Float<->string conversion uses the RTL's pure-Pascal _DoubleToStr / _StrToDouble,
   NOT libc's snprintf / strtod.  snprintf is a genuinely variadic function;
   declaring it with a fixed Double parameter violates the SysV x86-64 variadic ABI
@@ -2178,8 +2181,9 @@ begin
        TProceduralTypeDesc(AExpected).SignatureMatches(
          TProceduralTypeDesc(AActual)) then
       SemanticError(Format('Type mismatch in %s: a ''reference to'' value ' +
+        '(a closure, or a method of an object only a call result holds) ' +
         'cannot become the ''of object'' method pointer ''%s'' (an ''of ' +
-        'object'' value does not keep what the closure owns alive)',
+        'object'' value does not keep its receiver or captures alive)',
         [AContext, AExpected.Name]), ALine, ACol);
   end;
   SemanticError(
@@ -19788,7 +19792,15 @@ begin
         FldExpr.IsMethodCall   := False;  { @Obj.M is not a call }
         FldExpr.ResolvedMethod := MD;
         ProcDesc := FTable.NewProceduralType('');
-        ProcDesc.IsMethodPtr := True;
+        { a receiver only a call result holds (@MkObj().M) has no other
+          owner, so the value is a closure that owns it -- 'reference to':
+          it converts to a 'reference to' target, and an 'of object' target
+          (whose Data is unretained) rejects it.  ArcExprOwnsRef is the rule
+          both backends lower ownership by. }
+        if (FldExpr.Base <> nil) and ArcExprOwnsRef(FldExpr.Base) then
+          ProcDesc.IsReference := True
+        else
+          ProcDesc.IsMethodPtr := True;
         for K := 0 to MD.Params.Count - 1 do
         begin
           MParam := TMethodParam(MD.Params.Items[K]);

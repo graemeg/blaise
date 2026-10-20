@@ -2053,6 +2053,19 @@ value cannot become an `of object` method pointer, because the closure may
 own its environment or receiver, and an `of object` value holds its Data
 half unretained — nothing would keep that alive.
 
+A method of a receiver that only a call result holds — `@MkObj().M` — is a
+`reference to` value, not an `of object` one: nothing else owns that
+receiver, so the closure takes the call's reference and keeps the object
+alive exactly as long as itself (`Subscribe(@MkObj().M)` lives as long as the
+subscription).  Into an `of object` target it is therefore a compile-time
+error.  Rejected alternatives (decided 2026-10-20): keep the object alive
+for ever, which is what FPC and Delphi do by default only because they have
+no ARC (the object leaks unless freed by hand); or release it at the end of
+the statement, which leaves the method pointer dangling.  Whether the
+receiver is a call result is decided by the same ownership rule the backends
+lower by (`ArcExprOwnsRef`): a function or method call, a getter-backed
+property, a cast of one.
+
 Consequence (documented trap, also Delphi's behaviour): a loop variable
 captured by closures created inside the loop is ONE shared env field —
 after the loop, every such closure observes the final value.  Per-iteration
