@@ -7361,6 +7361,17 @@ Full design, including the prior-art survey (Go, Rust, Zig, Swift, C#) and why
 Swift's runtime-bundle model does not fit a freestanding single-file binary:
 `docs/embedded-resources-design.adoc`.
 
+== Types Declared Inside a Routine
+
+A routine's own `type` section may declare records, enumerations, aliases,
+pointer, set and array types and interfaces.  A type with METHODS — a class,
+or a record with methods — is a compile-time error there ("declare it at
+program or unit level").  The compiler never emitted the method bodies of a
+routine-local type, so such a program used to fail only at link time (an
+undefined vtable or method symbol).  FPC and Delphi reject a local class as
+well; supporting local types with methods would need their bodies lifted to
+module level and is not planned.
+
 == Nested Types — a Type as a Namespace
 
 === Decision

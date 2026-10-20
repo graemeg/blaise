@@ -144,6 +144,10 @@ type
       `constructor Init` is constructed through its type
       (BUG-20261015-ctor-identified-by-name). }
     procedure TestSemantic_CtorIdentity_ByKeyword;
+    { a class, or a record with methods, declared inside a routine: a clean
+      error -- their method bodies were never emitted, so the program
+      failed to link }
+    procedure TestSemantic_LocalTypeWithMethods_Rejected;
   end;
 
 implementation
@@ -1566,6 +1570,35 @@ begin
     A.Free();
     Prog.Free();
   end;
+end;
+
+procedure TClassTests.TestSemantic_LocalTypeWithMethods_Rejected;
+begin
+  AssertTrue('a local class',
+    Pos('A class declared inside a routine is not supported', SemanticError('''
+      program P;
+      procedure Outer;
+      type
+        TLocal = class procedure Run; end;
+      procedure TLocal.Run; begin end;
+      begin
+      end;
+      begin
+      end.
+      ''')) >= 0);
+  AssertTrue('a local record with methods',
+    Pos('A record with methods declared inside a routine is not supported',
+      SemanticError('''
+      program P;
+      procedure Outer;
+      type
+        TRecM = record A: Integer; function Twice: Integer; end;
+      function TRecM.Twice: Integer; begin Result := A * 2 end;
+      begin
+      end;
+      begin
+      end.
+      ''')) >= 0);
 end;
 
 initialization

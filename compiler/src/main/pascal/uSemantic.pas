@@ -6239,7 +6239,27 @@ end;
 procedure TSemanticAnalyser.AnalyseBlock(ABlock: TBlock; AIsProgramTop: Boolean = False);
 var
   I: Integer;
+  TD: TTypeDecl;
 begin
+  { A routine's own type section may declare records, enums, aliases and
+    interfaces, but not a type with METHODS: the method bodies are never
+    emitted for a local type (a class linked against an undefined vtable,
+    a record method against an undefined routine).  FPC and Delphi reject a
+    local class too. }
+  if (FCurrentEnclosingDecl <> nil) or (FCurrentMethodDecl <> nil) then
+    for I := 0 to ABlock.TypeDecls.Count - 1 do
+    begin
+      TD := TTypeDecl(ABlock.TypeDecls.Items[I]);
+      if TD.Def is TClassTypeDef then
+        SemanticError(Format('A class declared inside a routine is not ' +
+          'supported: declare ''%s'' at program or unit level', [TD.Name]),
+          TD.Line, TD.Col);
+      if (TD.Def is TRecordTypeDef) and (TRecordTypeDef(TD.Def).Methods <> nil) and
+         (TRecordTypeDef(TD.Def).Methods.Count > 0) then
+        SemanticError(Format('A record with methods declared inside a ' +
+          'routine is not supported: declare ''%s'' at program or unit level',
+          [TD.Name]), TD.Line, TD.Col);
+    end;
   { Type declarations are registered in the outer scope so they remain visible
     after the block scope is popped — needed for var declarations and the
     transferred symbol table used by codegen. }
