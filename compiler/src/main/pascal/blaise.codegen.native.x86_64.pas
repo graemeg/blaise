@@ -19729,10 +19729,16 @@ begin
       end
       else if FA.FieldInfo.TypeDesc.Kind = tyClass then
       begin
-        Self.Emit(#9'pushq %rcx');
-        Self.Emit(#9'movq 8(%rsp), %rdi');
-        Self.Emit(#9'callq _ClassAddRef');
-        Self.Emit(#9'popq %rcx');
+        { retain a borrowed value; an owned one (a call result) moves in --
+          as the string and dyn-array arms beside it do.  The retain was
+          unconditional, so R.O := MkObj() leaked one reference per store }
+        if not NativeExprOwnsRef(FA.Expr) then
+        begin
+          Self.Emit(#9'pushq %rcx');
+          Self.Emit(#9'movq 8(%rsp), %rdi');
+          Self.Emit(#9'callq _ClassAddRef');
+          Self.Emit(#9'popq %rcx');
+        end;
         Self.Emit(Format(#9'movq %d(%%rcx), %%rdi', [FA.FieldInfo.Offset]));
         Self.Emit(#9'pushq %rcx');
         Self.Emit(#9'callq _ClassRelease');
@@ -19784,10 +19790,16 @@ begin
       end
       else if FA.FieldInfo.TypeDesc.Kind = tyClass then
       begin
-        Self.Emit(#9'pushq %rcx');
-        Self.Emit(#9'movq 8(%rsp), %rdi');
-        Self.Emit(#9'callq _ClassAddRef');
-        Self.Emit(#9'popq %rcx');
+        { retain a borrowed value; an owned one (a call result) moves in --
+          as the string and dyn-array arms beside it do.  The retain was
+          unconditional, so R.O := MkObj() leaked one reference per store }
+        if not NativeExprOwnsRef(FA.Expr) then
+        begin
+          Self.Emit(#9'pushq %rcx');
+          Self.Emit(#9'movq 8(%rsp), %rdi');
+          Self.Emit(#9'callq _ClassAddRef');
+          Self.Emit(#9'popq %rcx');
+        end;
         Self.Emit(Format(#9'movq %d(%%rcx), %%rdi', [FA.FieldInfo.Offset]));
         Self.Emit(#9'pushq %rcx');
         Self.Emit(#9'callq _ClassRelease');

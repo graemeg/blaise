@@ -54,6 +54,9 @@ type
     procedure TestOwnedTransient_OrdAtReleasesString;
     procedure TestCtorResultReceiver_Pinned;
     procedure TestOwnedIntoWeakInterface_Released;
+    { R.O := MkN() for a record VARIABLE or a var record param: the call's
+      +1 moves into the field -- x86-64 retained it again (a leak per store) }
+    procedure TestOwnedIntoRecordVarField_NoRetain;
     procedure TestOwnedDynArrayArg_ReleasedAfterCall;
     procedure TestOwnedDynArrayLength_Released;
     procedure TestDiscardedStringResult_Released;
@@ -995,6 +998,28 @@ begin
       #9'movq %rcx, (%rax)'#10#9'pushq %rax'#10#9'pushq %rax'#10 +
         #9'movq %rax, %rdi'#10#9'callq _ClassAddRef',
       #9'str x9, [x0]'#10#9'str x0, [sp, #-16]!'#10#9'bl __ClassAddRef'));
+end;
+
+procedure TNativeArcTests.TestOwnedIntoRecordVarField_NoRetain;
+const
+  Src = '''
+    program P;
+    type
+      TN = class end;
+      TRec = record O: TN; end;
+    function MkN(): TN; begin Result := TN.Create() end;
+    procedure SetVar(var R: TRec); begin R.O := MkN() end;
+    var G: TRec;
+    begin
+      SetVar(G)
+    end.
+    ''';
+begin
+  AssertEquals('the owned result moves straight in', '',
+    AsmMissing(Src,
+      #9'callq MkN'#10#9'pushq %rax'#10#9'movq -8(%rbp), %rcx'#10 +
+        #9'movq 0(%rcx), %rdi'#10#9'pushq %rcx'#10#9'callq _ClassRelease',
+      #9'bl _MkN'));
 end;
 
 procedure TNativeArcTests.TestOwnedIntoWeakInterface_Released;

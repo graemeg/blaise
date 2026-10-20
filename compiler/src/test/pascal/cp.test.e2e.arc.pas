@@ -149,6 +149,9 @@ type
       post-call release double-frees
       (BUG-20260721-propsetter-owned-transient-str-leak). }
     procedure TestRun_PropSetterTransient_NonStoringSetter_NoDoubleFree;
+    { a class FIELD of a record variable / var record param assigned a call
+      result: each replaced object is freed (x86-64 leaked every one) }
+    procedure TestRun_RecordVarField_OwnedStore_NoLeak;
   end;
 
 implementation
@@ -1916,6 +1919,34 @@ begin
   AssertRunsOnAll(Src,
     'Arr sum=22 calls=1' + LineEnding +
     'D x1y calls=1' + LineEnding, 0);
+end;
+
+procedure TE2EArcTests.TestRun_RecordVarField_OwnedStore_NoLeak;
+const
+  Src = '''
+    program P;
+    type
+      TN = class
+        Tag: Integer;
+        destructor Destroy; override;
+      end;
+      TRec = record O: TN; end;
+    var G: TRec;
+    destructor TN.Destroy; begin WriteLn('freed ', Tag); inherited Destroy(); end;
+    function MkN(T: Integer): TN; begin Result := TN.Create(); Result.Tag := T; end;
+    procedure SetVar(var R: TRec; T: Integer); begin R.O := MkN(T); end;
+    begin
+      G.O := MkN(1);
+      G.O := MkN(2);
+      SetVar(G, 3);
+      G.O := nil;
+      WriteLn('end');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'freed 1' + LineEnding + 'freed 2' + LineEnding +
+    'freed 3' + LineEnding + 'end' + LineEnding, 0);
 end;
 
 initialization
