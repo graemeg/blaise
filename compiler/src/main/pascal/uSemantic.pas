@@ -10656,7 +10656,8 @@ begin
         begin
           { A bare call that resolved to a method of the enclosing class is
             an implicit Self.Method() dispatch. }
-          if TProcCall(CurStmt).IsImplicitSelfMethod then
+          if TProcCall(CurStmt).IsImplicitSelfMethod or
+             (TProcCall(CurStmt).ProcFieldInfo <> nil) then
             MaybeCaptureName(ADecl, OuterVars, 'Self');
           { a call THROUGH an outer procedural variable (LM(), VC()) uses
             that variable: it was never captured, so the nested routine
@@ -10830,8 +10831,10 @@ begin
         else if CurExpr is TFuncCallExpr then
         begin
           { A bare function call that resolved to a method of the enclosing
-            class dispatches on the method's Self. }
-          if TFuncCallExpr(CurExpr).IsImplicitSelfMethod then
+            class dispatches on the method's Self; a bare call through a
+            procedural FIELD (FGet()) reads that field of Self. }
+          if TFuncCallExpr(CurExpr).IsImplicitSelfMethod or
+             (TFuncCallExpr(CurExpr).ProcFieldInfo <> nil) then
             MaybeCaptureName(ADecl, OuterVars, 'Self');
           { a call through an outer procedural variable -- see TProcCall }
           MaybeCaptureName(ADecl, OuterVars, TFuncCallExpr(CurExpr).Name);

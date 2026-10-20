@@ -41,6 +41,9 @@ type
     { a nested routine that only CALLS an outer procedural variable captures
       it (it called through a slot of that name it did not have) }
     procedure TestSemantic_IndirectCallCallee_IsCaptured;
+    { FGet() / FProc(1) -- a call through a procedural FIELD of Self, bare,
+      inside a nested routine of a method reads Self, so Self is captured }
+    procedure TestCodegen_NestedProcFieldCall_CapturesSelf;
     { O.C[I] := K into an array FIELD of closures: a 16-byte copy with the
       Env retained (x86-64 stored 8 bytes; arm64 refused it) }
     procedure TestCodegen_ClosureArrayFieldElemStore_CopiesPair;
@@ -733,6 +736,40 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TProcTypesTests.TestCodegen_NestedProcFieldCall_CapturesSelf;
+const
+  Src = '''
+    program P;
+    type
+      TFn = function: Integer of object;
+      TProc = procedure(A: Integer) of object;
+      THold = class
+        FGet: TFn;
+        FProc: TProc;
+        procedure Run;
+      end;
+    procedure THold.Run;
+    var X: Integer;
+      procedure Inner;
+      begin
+        X := FGet();
+        FProc(1);
+      end;
+    begin
+      Inner();
+    end;
+    begin
+    end.
+    ''';
+begin
+  { the nested routine's prologue loads Self through its _cap_Self slot
+    (the first hidden argument) into its own Self slot }
+  AssertEquals('Self captured by the nested routine', '',
+    AsmMissing(Src,
+      #9'movq -8(%rbp), %rax'#10#9'movq (%rax), %rax'#10#9'movq %rax, -24(%rbp)',
+      #9'ldur x9, [x29, #-8]'#10#9'ldr x0, [x9]'#10#9'stur x0, [x29, #-24]'));
 end;
 
 procedure TProcTypesTests.TestCodegen_ClosureArrayFieldElemStore_CopiesPair;

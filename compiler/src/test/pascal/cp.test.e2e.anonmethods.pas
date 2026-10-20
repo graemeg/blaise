@@ -108,6 +108,10 @@ type
     procedure TestRun_NestedRoutineInMethod_SelfInRecordMethod;
     procedure TestRun_NestedRoutineInMethod_SelfVirtualDispatch;
     procedure TestRun_NestedRoutineInMethod_InheritedCall;
+    { a bare call through a procedural FIELD of Self from a nested routine
+      (FFn(5), FProc(X)): Self was not captured, so arm64 refused the load
+      and x86-64 linked against a global named 'Self' }
+    procedure TestRun_NestedRoutineInMethod_ProcFieldCall;
     procedure TestRun_NestedRoutineInMethod_ExprCallCapture;
     procedure TestRun_NestedRoutineInMethod_BlockVarInitFromSelf;
     { Phase 6 — generics: reference-to aliases + closures in generic bodies }
@@ -2987,6 +2991,45 @@ begin
     'closure 4' + LineEnding + 'gone 4' + LineEnding + 'closure after' + LineEnding +
     'nested 5' + LineEnding + 'gone 5' + LineEnding + 'nested after' + LineEnding +
     'global 6' + LineEnding + 'gone 6' + LineEnding + 'end' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_NestedRoutineInMethod_ProcFieldCall;
+const
+  Src = '''
+    program P;
+    type
+      TFn = function(A: Integer): Integer of object;
+      TProc = procedure(A: Integer) of object;
+      THold = class
+        N: Integer;
+        FFn: TFn;
+        FProc: TProc;
+        function Twice(A: Integer): Integer;
+        procedure Show(A: Integer);
+        procedure Run();
+      end;
+    function THold.Twice(A: Integer): Integer; begin Result := A * 2 * N; end;
+    procedure THold.Show(A: Integer); begin WriteLn('show ', A * N); end;
+    procedure THold.Run();
+    var X: Integer;
+      procedure Inner();
+      begin
+        X := FFn(5);
+        FProc(X);
+      end;
+    begin
+      Inner();
+    end;
+    var H: THold;
+    begin
+      H := THold.Create(); H.N := 3;
+      H.FFn := @H.Twice; H.FProc := @H.Show;
+      H.Run();
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'show 90' + LineEnding, 0);
 end;
 
 initialization
