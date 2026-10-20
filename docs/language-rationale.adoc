@@ -1882,6 +1882,12 @@ until the implicit receiver was resolved for `@` as it is for a call.  A
 local, a parameter or a standalone routine of the same name shadows the
 method, again as for a call.
 
+A `static` method has no receiver, so `@Obj.S` (and `@S` inside a method) is
+a compile-time error rather than a method pointer: there is no `Self` to put
+in the Data half, and a pointer built anyway called `S` with the object in
+its first parameter.  Taking a static method's address as a plain procedure
+pointer (Delphi's `@TFoo.ClassStaticMethod`) is not supported yet.
+
 Type compatibility requires return types to match (both nil or both the
 same `TTypeDesc`), parameter lists to match pairwise on type and mode
 (`var`/`const`/value), AND the `IsMethodPtr` flag to match — a bare

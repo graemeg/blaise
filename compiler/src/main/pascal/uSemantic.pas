@@ -19725,7 +19725,11 @@ begin
     IdentExpr := TIdentExpr(AExpr.Expr);
     FSym := FTable.Lookup(IdentExpr.Name);
     MD := FindMethodDecl(FCurrentClass.Name, IdentExpr.Name);
-    if (FSym = nil) and (MD <> nil) and not MD.IsStatic then
+    if (FSym = nil) and (MD <> nil) and MD.IsStatic then
+      SemanticError(Format('''%s'' is a static method: it has no receiver, ' +
+        'so it cannot be bound into a method pointer',
+        [IdentExpr.Name]), AExpr.Line, AExpr.Col);
+    if (FSym = nil) and (MD <> nil) then
     begin
       FldExpr := TFieldAccessExpr.Create();
       FldExpr.Line := IdentExpr.Line;
@@ -19786,6 +19790,10 @@ begin
     if (BaseType <> nil) and (BaseType.Kind = tyClass) then
     begin
       MD := FindMethodDecl(TRecordTypeDesc(BaseType).Name, FldExpr.FieldName);
+      if (MD <> nil) and MD.IsStatic then
+        SemanticError(Format('''%s'' is a static method: it has no receiver, ' +
+          'so it cannot be bound into a method pointer',
+          [FldExpr.FieldName]), AExpr.Line, AExpr.Col);
       if MD <> nil then
       begin
         FldExpr.IsClassAccess  := True;

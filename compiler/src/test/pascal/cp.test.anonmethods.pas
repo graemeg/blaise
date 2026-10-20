@@ -139,6 +139,10 @@ type
       refused it) }
     procedure TestSemantic_AddrOfCallResultMethod_IsReference;
     procedure TestSemantic_AddrOfCallResultMethod_IntoOfObject_Rejected;
+    { @O.S and @S (inside a method), S a static method: no receiver, so no
+      method pointer -- x86-64 built one and called S with the object in
+      its first parameter }
+    procedure TestSemantic_AddrOfStaticMethod_Rejected;
     procedure TestSemantic_UnretainedLocal_Constraints;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
@@ -1522,6 +1526,28 @@ begin
         L := @MkObj().M
       end.
       ''')) >= 0);
+end;
+
+procedure TAnonMethodTests.TestSemantic_AddrOfStaticMethod_Rejected;
+const
+  Head = '''
+    program Prg;
+    type
+      TM = procedure(A: Integer) of object;
+      TImp = class
+        static procedure S(A: Integer);
+        procedure Run;
+      end;
+    static procedure TImp.S(A: Integer); begin end;
+    var O: TImp; L: TM;
+    ''';
+begin
+  AssertTrue('@Obj.Static',
+    Pos('is a static method: it has no receiver', SemanticError(Head +
+      'procedure TImp.Run; begin end; begin L := @O.S end.')) >= 0);
+  AssertTrue('@Static inside a method',
+    Pos('is a static method: it has no receiver', SemanticError(Head +
+      'procedure TImp.Run; var K: TM; begin K := @S end; begin end.')) >= 0);
 end;
 
 initialization
