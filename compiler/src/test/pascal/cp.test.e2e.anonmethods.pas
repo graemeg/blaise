@@ -244,6 +244,9 @@ type
       returned into a variable, an argument and an element (arm64 refused a
       record method's closure result) }
     procedure TestRun_RecordMethodClosure_CapturesLocals;
+    { Obj.GetFn()(X); as a statement, a procedure and a function result, and
+      a closure owning an object (released with the discarded closure) }
+    procedure TestRun_MethodCallResultCallee_Stmt;
   end;
 
 implementation
@@ -3362,6 +3365,52 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '14' + LineEnding + '1544' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_MethodCallResultCallee_Stmt;
+const
+  Src = '''
+    program P;
+    type
+      TShow = reference to procedure(N: Integer);
+      TKFn = reference to function(A: Integer): Integer;
+      TBox = class
+        Tag: Integer;
+        destructor Destroy; override;
+      end;
+      THold = class
+        function MkShow(): TShow;
+        function MkFn(K: Integer): TKFn;
+        function MkOwned(): TShow;
+      end;
+    destructor TBox.Destroy; begin WriteLn('box freed ', Tag); inherited Destroy(); end;
+    function THold.MkShow(): TShow;
+    begin
+      Result := procedure(N: Integer) begin WriteLn('show ', N); end;
+    end;
+    function THold.MkFn(K: Integer): TKFn;
+    begin
+      Result := function(A: Integer): Integer begin WriteLn('fn ', A * K); Result := A * K; end;
+    end;
+    function THold.MkOwned(): TShow;
+    var B: TBox;
+    begin
+      B := TBox.Create(); B.Tag := 9;
+      Result := procedure(N: Integer) begin WriteLn('owned ', N + B.Tag); end;
+    end;
+    var H: THold;
+    begin
+      H := THold.Create();
+      H.MkShow()(5);
+      H.MkFn(3)(4);
+      H.MkOwned()(1);
+      WriteLn('end');
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'show 5' + LineEnding + 'fn 12' + LineEnding +
+    'owned 10' + LineEnding + 'box freed 9' + LineEnding + 'end' + LineEnding, 0);
 end;
 
 initialization

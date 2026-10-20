@@ -1279,10 +1279,13 @@ ExprCallStmt
       LPAREN [ ArgList ] RPAREN       (* A.B.Handlers[I](X); *)
     | IDENT CARET LPAREN [ ArgList ] RPAREN
     | IDENT LPAREN [ ArgList ] RPAREN LPAREN [ ArgList ] RPAREN { CallSuffix }
+    | IDENT DOT IDENT LPAREN [ ArgList ] RPAREN LPAREN [ ArgList ] RPAREN
+      { CallSuffix }                  (* Obj.GetFn()(X); *)
     ;
 
-(* The last ExprCallStmt form calls through the procedural value a CALL
- * returns: GetFn()(X);  MakeAdder(1)(2)(3);  GetMaker()(7).Show('box');.
+(* The last two ExprCallStmt forms call through the procedural value a CALL
+ * returns: GetFn()(X);  MakeAdder(1)(2)(3);  GetMaker()(7).Show('box');
+ * Obj.GetFn()(X);  (the method form was accepted only as an expression).
  * After the first call's result is called, the full expression postfix
  * chain may follow, and the chain must END in a call -- either a further
  * call through the value (an indirect call) or a method call on it

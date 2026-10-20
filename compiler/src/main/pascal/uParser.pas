@@ -4759,6 +4759,22 @@ begin
             'Bare reference to ''%s.%s'' requires () for a call at line %d col %d in %s',
             [Name, SecondIdent, Line, Col, FLexer.Filename]));
         end;
+        { Name.GetFn(args)(more): a call through the procedural value the
+          method returns -- the full postfix chain, which must end in a call
+          (the GetFn(args)(more) twin is in the plain-call arm) }
+        if Check(tkLParen) then
+        begin
+          MCallExpr            := TMethodCallExpr.Create();
+          MCallExpr.Line       := Line;
+          MCallExpr.Col        := Col;
+          MCallExpr.ObjectName := MCall.ObjectName;
+          MCallExpr.Name       := MCall.Name;
+          while MCall.Args.Count > 0 do
+            MCallExpr.Args.Add(MCall.Args.Extract(MCall.Args.Items[0]));
+          MCall.Free();
+          MCall := nil;
+          Exit(Self.CallChainStmt(Self.ParsePostfixChain(MCallExpr), Line, Col));
+        end;
         { Post-method chain: Name.Method(args).Field := value or .Method2(args) }
         if Check(tkDot) then
         begin

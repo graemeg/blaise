@@ -147,6 +147,9 @@ type
       params but not Self: it captured the caller's record by address (and
       typed the env slot as the record, corrupting it) }
     procedure TestSemantic_RecordMethodClosure_SelfUseRejected;
+    { Obj.GetFn()(X); as a STATEMENT -- the expression form parsed, the
+      statement stopped at the second '(' }
+    procedure TestParse_MethodCallResultCallee_Stmt;
     procedure TestSemantic_UnretainedLocal_Constraints;
     { Phase 10 gate — a generic METHOD with its own type param on a generic
       class monomorphises and runs (TBox<T>.MapTo<R>, two different R's). }
@@ -1591,6 +1594,39 @@ begin
   Prog := AnalyseSrc(Head + 'Sum := Sum + A * K * Z' + Tail);
   AssertNotNull('locals and params are captured', Prog);
   Prog.Free();
+end;
+
+procedure TAnonMethodTests.TestParse_MethodCallResultCallee_Stmt;
+const
+  Src = '''
+    program Prg;
+    begin
+      H.GetFn()(7);
+      H.GetFn(1)(2)(3);
+      H.GetMaker()(3).Run(4)
+    end.
+    ''';
+var
+  Prog: TProgram;
+  Ind: TIndirectFuncCallExpr;
+begin
+  Prog := ParseSrc(Src);
+  try
+    AssertEquals('three statements', 3, Prog.Block.Stmts.Count);
+    AssertTrue('H.GetFn()(7) is an expression-call statement',
+      Prog.Block.Stmts.Items[0] is TExprCallStmt);
+    Ind := TIndirectFuncCallExpr(TExprCallStmt(Prog.Block.Stmts.Items[0]).Call);
+    AssertTrue('its callee is the method call H.GetFn()',
+      Ind.CalleeExpr is TMethodCallExpr);
+    AssertEquals('it carries its argument', 1, Ind.Args.Count);
+    Ind := TIndirectFuncCallExpr(TExprCallStmt(Prog.Block.Stmts.Items[1]).Call);
+    AssertTrue('H.GetFn(1)(2)(3) chains the indirect calls',
+      Ind.CalleeExpr is TIndirectFuncCallExpr);
+    AssertTrue('a method call ends the third chain',
+      Prog.Block.Stmts.Items[2] is TMethodCallStmt);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization
