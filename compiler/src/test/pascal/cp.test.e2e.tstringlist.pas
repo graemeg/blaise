@@ -49,6 +49,11 @@ type
     procedure TestRun_CaseInsensitive_IndexOf;
     procedure TestRun_Duplicates_Ignore;
     procedure TestRun_CustomSort;
+    { setting Sorted to True sorts the entries already in the list (they
+      stayed in insertion order, so Find missed and the order came from
+      whatever filled the list); changing CaseSensitive on a sorted list
+      re-sorts it; Sort sorts on demand }
+    procedure TestRun_SetSorted_SortsExistingEntries;
     procedure TestRun_CommaText_Get;
     procedure TestRun_CommaText_Set;
     procedure TestRun_CommaText_Quoted;
@@ -836,6 +841,40 @@ begin
   finally
     Lines.Free()
   end
+end;
+
+procedure TE2ETStringListTests.TestRun_SetSorted_SortsExistingEntries;
+const
+  Src = '''
+    program P;
+    uses Classes;
+    var L: TStringList; Idx: Integer;
+    procedure Show(L: TStringList);
+    var I: Integer; S: string;
+    begin
+      S := '';
+      for I := 0 to L.Count - 1 do S := S + L[I] + ' ';
+      WriteLn(S);
+    end;
+    begin
+      L := TStringList.Create();
+      L.Add('cherry'); L.Add('Banana'); L.Add('apple');
+      L.Sorted := True;
+      Show(L);
+      WriteLn(L.Find('cherry', Idx), ' ', Idx);
+      L.CaseSensitive := False;
+      Show(L);
+      L.Sorted := False;
+      L.Add('aardvark');
+      L.Sort();
+      Show(L);
+      L.Free()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRTLRunsOnAll(Src, 'Banana apple cherry ' + LineEnding + 'True 2' + LineEnding +
+    'apple Banana cherry ' + LineEnding + 'aardvark apple Banana cherry ' + LineEnding, 0);
 end;
 
 procedure TE2ETStringListTests.TestRun_CustomSort;

@@ -211,6 +211,10 @@ type
     procedure   SaveToFile(APath: string);
     function    GetEnumerator: TStringListEnumerator;
     procedure   CustomSort(ACompare: TStringListSortCompare);
+    { Sort by the list's own comparison (CaseSensitive).  Setting Sorted to
+      True sorts the entries already there, as does changing CaseSensitive
+      on a sorted list -- the FPC / Delphi behaviour. }
+    procedure   Sort;
     function    GetCommaText: string;
     procedure   SetCommaText(const S: string);
     property Count:         Integer read FCount;
@@ -493,12 +497,36 @@ begin
     Self.HashInsertIdx(I);
 end;
 
+function SortCompareStr(const A: string; const B: string): Integer;
+begin
+  Result := CompareStr(A, B)
+end;
+
+function SortCompareText(const A: string; const B: string): Integer;
+begin
+  Result := CompareText(A, B)
+end;
+
+procedure TStringList.Sort;
+begin
+  if Self.FCaseSensitive then
+    Self.CustomSort(@SortCompareStr)
+  else
+    Self.CustomSort(@SortCompareText)
+end;
+
 procedure TStringList.SetSorted(AValue: Boolean);
 begin
   if AValue <> Self.FSorted then
   begin
     Self.FSorted := AValue;
     Self.HashInvalidate();
+    { a list made sorted must BE sorted: Find and Add binary-search it.  The
+      entries already there were left in insertion order, so lookups missed
+      and the order came from whatever filled the list (a directory
+      listing came back in filesystem order). }
+    if AValue then
+      Self.Sort();
   end;
 end;
 
@@ -508,6 +536,9 @@ begin
   begin
     Self.FCaseSensitive := AValue;
     Self.HashInvalidate();
+    { a sorted list's order depends on the comparison }
+    if Self.FSorted then
+      Self.Sort();
   end;
 end;
 

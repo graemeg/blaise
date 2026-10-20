@@ -271,9 +271,11 @@ begin
   { ListDir must return each entry's WHOLE name.  On macOS the RTL bound the
     legacy getdirentries, whose 32-bit-inode dirent puts the name at offset
     8, while the Darwin layout reads the 64-bit-inode layout (name at 21):
-    'alpha.txt' came back as 'lpha.txt'.  The entries are sorted (TStringList
-    sorts case-insensitively) so the
-    expectation does not depend on directory order. }
+    'alpha.txt' came back as 'lpha.txt'.  The entries are sorted
+    case-insensitively so the expectation does not depend on directory
+    order (a TStringList is case-sensitive by default, and Sorted := True
+    did not sort at all until it was fixed -- the test passed or failed
+    with the filesystem's listing order). }
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   Dir := FScratch + '/listdir_probe';
   ForceDirectories(Dir);
@@ -286,6 +288,7 @@ begin
     'begin' + LineEnding +
     '  L := TStringList.Create();' + LineEnding +
     '  L.Text := ListDir(''' + Dir + ''');' + LineEnding +
+    '  L.CaseSensitive := False;' + LineEnding +
     '  L.Sorted := True;' + LineEnding +
     '  WriteLn(L.Count, '' '', L[0], '' '', L[1]);' + LineEnding +
     '  L.Free()' + LineEnding +
