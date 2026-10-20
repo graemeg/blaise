@@ -104,6 +104,7 @@ uses
   cp.test.e2e.sysutils,
   cp.test.e2e.caseenum,
   cp.test.e2e.controlflow,
+  cp.test.e2e.ordinalmatrix,
   cp.test.e2e.records,
   cp.test.e2e.operators,
   cp.test.e2e.native,
