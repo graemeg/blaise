@@ -45,6 +45,11 @@ type
       legal with a warning; storage (an array element) gets none }
     procedure TestSem_DefaultPropWriteOnCallResult_IsSetterCall;
     procedure TestSem_DefaultPropWriteOnRecordTemp_Warns;
+    { a FIELD write into a record call result (F().X, F().Inner.X, F().SA[I])
+      is lost with the temporary: an error, as in FPC (it compiled silently).
+      A dynamic-array element or an object field reached through it is shared
+      storage and stays legal; a setter-backed property warns }
+    procedure TestSem_FieldWriteOnRecordTemp_IsError;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1217,6 +1222,39 @@ begin
   AssertEquals('a class result and a record element do not warn', '',
     Trim(SemanticWarnings(DefPropCallResultHead +
       'begin MkH()[0] := 1; RA[0][1] := 2; end.')));
+end;
+
+procedure TPropertyTests.TestSem_FieldWriteOnRecordTemp_IsError;
+const
+  Head = '''
+    program P;
+    type
+      TC = class V: Integer; end;
+      TIn = record X: Integer; end;
+      TRec = record
+        DA: array of Integer; SA: array[0..1] of Integer; C: TC; Inner: TIn;
+        FP: Integer;
+        procedure SetP(A: Integer);
+        property P: Integer read FP write SetP;
+      end;
+    var G: TRec;
+    procedure TRec.SetP(A: Integer); begin FP := A end;
+    function MkR(): TRec; begin Result := G end;
+    ''';
+var
+  W: string;
+begin
+  AssertTrue('F().FP := V', Pos('temporary ''TRec'' record',
+    SemanticError(Head + 'begin MkR().FP := 1; end.')) >= 0);
+  AssertTrue('F().Inner.X := V', Pos('temporary ''TIn'' record',
+    SemanticError(Head + 'begin MkR().Inner.X := 1; end.')) >= 0);
+  AssertTrue('F().SA[0] := V', Pos('temporary ''TRec'' record',
+    SemanticError(Head + 'begin MkR().SA[0] := 1; end.')) >= 0);
+  AssertEquals('shared storage through the temporary is legal', '',
+    SemanticError(Head + 'begin MkR().DA[0] := 1; MkR().C.V := 2; G.FP := 3; end.'));
+  W := SemanticWarnings(Head + 'begin MkR().P := 1; end.');
+  AssertTrue('a setter on the temporary warns: ' + W,
+    Pos('property ''P'' of a temporary ''TRec'' record is discarded', W) >= 0);
 end;
 
 procedure TPropertyTests.TestSem_GetterPropertyIsNotAVariable;

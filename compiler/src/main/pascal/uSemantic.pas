@@ -13948,6 +13948,13 @@ begin
               AAssign.Line, AAssign.Col);
           Self.AnalyseExprSlot(AAssign.PropIndexExpr);
         end;
+        if (ObjType.Kind = tyRecord) and
+           Self.IsRecordTemporary(AAssign.ObjExpr) then
+          SemanticWarning(
+            Format('write through property ''%s'' of a temporary ''%s'' ' +
+              'record is discarded (the setter changes a copy that is ' +
+              'thrown away)', [PropInfo.Name, ObjType.Name]),
+            AAssign.Line, AAssign.Col);
         AAssign.PropWriteInfo := PropInfo;
         AAssign.PropOwnerType :=
           PropAccessorOwner(RT.Name, PropInfo.WriteMethod);
@@ -13969,6 +13976,18 @@ begin
       AssertMemberVisibleV(FldInfo.Visibility, FldInfo.DeclaringUnit,
                            FldInfo.DeclaringType, AAssign.FieldName,
                            AAssign.Line, AAssign.Col);
+    { F().X := V, F().Inner.X := V, F().SA[I] := V: the field is part of
+      the record F returned, a temporary discarded after the statement, so
+      the write would be lost -- an error, as in FPC and Delphi.  An element
+      of a dynamic array or a default property of an object reached through
+      it is shared storage, and stays legal. }
+    if (ObjType.Kind = tyRecord) and Self.IsRecordTemporary(AAssign.ObjExpr) and
+       not ((AAssign.PropIndexExpr <> nil) and (FldInfo.TypeDesc <> nil) and
+            (FldInfo.TypeDesc.Kind in [tyDynArray, tyClass, tyInterface])) then
+      SemanticError(
+        Format('Cannot assign to field ''%s'' of a temporary ''%s'' record ' +
+          '(a call result or getter read): the write would be lost',
+          [AAssign.FieldName, ObjType.Name]), AAssign.Line, AAssign.Col);
     AAssign.IsClassAccess := ObjType.Kind = tyClass;
     AAssign.FieldInfo     := FldInfo;
     if TryAnalyseFieldElemWrite(AAssign, FldInfo.TypeDesc) then

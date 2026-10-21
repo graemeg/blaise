@@ -4342,8 +4342,14 @@ straight after the statement, so the write can only have side effects
 inside the setter.  It is almost always a mistake, so Blaise accepts it
 with a warning; FPC is silent.  The warning is not issued when the record
 is storage (an array element, `RA[I][J] := V`), where the write sticks.
-A plain field write through a record result (`MakeVec().X := 5`) is not
-changed by this rule.
+A setter-backed non-default property on a record result
+(`MakeVec().Prop := 5`) gets the same warning.  A plain field write through
+a record result (`MakeVec().X := 5`, `MakeVec().Inner.X := 5`) is an error,
+as in FPC and Delphi: there is no setter to run, only a copy to lose.
+Writes that only pass through the temporary to shared storage, such as an
+element of its dynamic array or a field of an object it references, stay
+legal (FPC accepts them too).  Before 2026-10-21 Blaise compiled the field
+write silently and dropped it.
 
 Until 2026-10-21 the form was a parse error, found while closing the arm64
 property gaps.
