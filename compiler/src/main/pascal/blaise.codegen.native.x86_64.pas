@@ -13432,7 +13432,7 @@ begin
     Self.PushIntfArg(AArg, APar.ResolvedType)
   else if (APar <> nil) and APar.IsOpenArray then
   begin
-    if AArg is TArrayLiteralExpr then
+    if IsOALitBlock(AArg) then
       { An open-array literal emitted here would subq its element block in the
         middle of the slot-push sequence and break the caller's popq order.
         Call sites must hoist literals via HoistOALitArgs and push them with
@@ -13877,7 +13877,7 @@ begin
       [TArrayLiteralExpr(AArg).Elements.Count - 1]));
     Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [AHighOff]));
   end
-  else if AArg is TArrayLiteralExpr then
+  else if IsOALitBlock(AArg) then
     raise ENativeCodeGenError.Create(
       'native backend: open-array literal argument was not hoisted')
   else if (AArg.ResolvedType <> nil) and
@@ -22180,7 +22180,7 @@ begin
     if (((Par <> nil) and Par.IsOpenArray) or
         ((PP <> nil) and (PP.TypeDesc <> nil) and
          (PP.TypeDesc.Kind = tyOpenArray))) and
-       (Arg is TArrayLiteralExpr) then
+       IsOALitBlock(Arg) then
     begin
       Result := Result + Self.EmitOpenArrayLiteral(TArrayLiteralExpr(Arg));
       Self.Emit(#9'pushq %rax');
@@ -22786,7 +22786,7 @@ begin
       end
       else if IsOA then
       begin
-        if Arg is TArrayLiteralExpr then
+        if IsOALitBlock(Arg) then
         begin
           { Hoisted in the pre-pass — reload the saved data pointer. }
           Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
@@ -22939,7 +22939,7 @@ begin
       end
       else if IsOA then
       begin
-        if Arg is TArrayLiteralExpr then
+        if IsOALitBlock(Arg) then
         begin
           { Hoisted in the pre-pass — the saved data pointer sits above the
             slot block allocated by the subq just before this loop. }

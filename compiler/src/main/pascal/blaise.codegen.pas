@@ -210,6 +210,11 @@ function IsAggCallValue(AExpr: TASTExpr): Boolean;
   over an l-value) must evaluate such an expression ONCE instead, or it runs
   the call again each time.  An unfamiliar node kind counts as a call:
   evaluating once is always correct. }
+{ True for an open-array literal argument the backends build as an element
+  block in the caller's frame.  A literal whose elements need a managed or
+  wide copy (records, interfaces, closures) is typed by the semantic pass as
+  a dynamic array instead, and passes as any dynamic array does. }
+function IsOALitBlock(AExpr: TASTExpr): Boolean;
 function AccessPathHasCall(AExpr: TASTExpr): Boolean;
 
 { The setter call a property-write statement was lowered to by the semantic
@@ -753,6 +758,13 @@ begin
     Result := FA.IsMethodCall or
               ((FA.PropRead <> nil) and (FA.PropRead.ReadMethod <> ''));
   end;
+end;
+
+function IsOALitBlock(AExpr: TASTExpr): Boolean;
+begin
+  Result := (AExpr is TArrayLiteralExpr) and
+    not ((AExpr.ResolvedType <> nil) and
+         (AExpr.ResolvedType.Kind = tyDynArray));
 end;
 
 function AccessPathHasCall(AExpr: TASTExpr): Boolean;

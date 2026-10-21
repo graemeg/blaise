@@ -14816,6 +14816,13 @@ begin
           (TOpenArrayTypeDesc(AArg.ResolvedType).ElementType =
            TOpenArrayTypeDesc(AParamType).ElementType)) then
     Self.AnalyseArrayLiteralAs(TArrayLiteralExpr(AArg), AParamType, True);
+  { (an already-typed literal skipped the retyping above) }
+  if (AParamType.Kind = tyOpenArray) and
+     (TArrayLiteralExpr(AArg).Elements.Count > 0) and
+     not TArrayLiteralExpr(AArg).IsConstArray and
+     OALitNeedsDynArray(TOpenArrayTypeDesc(AParamType).ElementType) then
+    AArg.ResolvedType := FTable.NewDynArrayType(
+      TOpenArrayTypeDesc(AParamType).ElementType);
 end;
 
 { A call through a procedural-typed field has exactly one candidate signature,
@@ -21589,6 +21596,20 @@ begin
   AExpr.ResolvedType := Result;
 end;
 
+{ True for an open-array element type a literal must build as a temporary
+  dynamic array: one the backends' in-frame element block cannot hold as a
+  single machine word (a record, a static array, a fat interface or closure)
+  -- see AnalyseArrayLiteralAs. }
+function OALitNeedsDynArray(AElem: TTypeDesc): Boolean;
+begin
+  Result := (AElem <> nil) and
+    ((AElem.Kind in [tyRecord, tyInterface, tyStaticArray]) or
+     ((AElem.Kind = tyProcedural) and
+      (TProceduralTypeDesc(AElem).IsMethodPtr or
+       TProceduralTypeDesc(AElem).IsReference))) and
+    not SameText(AElem.Name, 'TVarRec');
+end;
+
 function TSemanticAnalyser.AnalyseArrayLiteralAs(ALit: TArrayLiteralExpr;
   AArrType: TTypeDesc; AAnalysed: Boolean): TTypeDesc;
 var
@@ -21634,6 +21655,15 @@ begin
   end;
   ALit.IsConstArray := False;
   ALit.ResolvedType := AArrType;
+  { An open-array literal of records, interfaces or closures is built as a
+    temporary dynamic array (released after the call) and passed as one:
+    the backends' in-frame element block stores one machine word per
+    element, which garbled a record or a fat interface / closure and never
+    released an owned transient element.  The dynamic-array literal copies
+    each element with its full ARC treatment. }
+  if (AArrType.Kind = tyOpenArray) and (ALit.Elements.Count > 0) and
+     OALitNeedsDynArray(Elem) then
+    ALit.ResolvedType := FTable.NewDynArrayType(Elem);
   Result := AArrType;
 end;
 

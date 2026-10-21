@@ -23,6 +23,11 @@ type
     function  ParseSrc(const ASrc: string): TProgram;
     function  AnalyseSrc(const ASrc: string): TProgram;
   published
+    { an open-array literal of records, interfaces, closures and static
+      arrays is typed as a temporary dynamic array (the backends build an
+      in-frame block only for one-word elements); an Integer literal keeps
+      its block }
+    procedure TestSem_OpenArrayLiteral_RichElementsAreDynArrays;
     { A[I][J] over an open array of static arrays indexes into the element
       in place: x86-64 loaded the element and indexed through its bytes }
     procedure TestCodegen_OpenArrayOfStaticArrays_ElementByAddress;
@@ -822,6 +827,52 @@ begin
     SemanticError(BadSrc) <> '');
 end;
 
+
+procedure TOpenArrayTests.TestSem_OpenArrayLiteral_RichElementsAreDynArrays;
+const
+  Src = '''
+    program P;
+    type
+      IFoo = interface
+        function N(): Integer;
+      end;
+      TRec = record S: string; end;
+      TSA = array[0..1] of Integer;
+      TProc = reference to function(): Integer;
+    procedure SR(const A: array of TRec); begin end;
+    procedure SI(const A: array of IFoo); begin end;
+    procedure SS(const A: array of TSA); begin end;
+    procedure SP(const A: array of TProc); begin end;
+    procedure SN(const A: array of Integer); begin end;
+    var R: TRec; X: IFoo; T: TSA; F: TProc;
+    begin
+      SR([R]);
+      SI([X]);
+      SS([T]);
+      SP([F]);
+      SN([1, 2]);
+    end.
+    ''';
+var
+  Prog: TProgram;
+  I: Integer;
+  Arg: TASTExpr;
+begin
+  Prog := Analyse(Src);
+  try
+    for I := 0 to 3 do
+    begin
+      Arg := TASTExpr(TProcCall(Prog.Block.Stmts[I]).Args.Items[0]);
+      AssertTrue(Format('literal %d is a dynamic array', [I]),
+        (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyDynArray));
+    end;
+    Arg := TASTExpr(TProcCall(Prog.Block.Stmts[4]).Args.Items[0]);
+    AssertTrue('an Integer literal keeps its block',
+      (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyOpenArray));
+  finally
+    Prog.Free();
+  end;
+end;
 
 procedure TOpenArrayTests.TestCodegen_OpenArrayOfStaticArrays_ElementByAddress;
 const

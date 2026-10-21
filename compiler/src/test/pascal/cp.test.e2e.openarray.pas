@@ -25,6 +25,13 @@ type
   protected
     procedure SetUp; override;
   published
+    { an open-array LITERAL of records, interfaces, closures, method
+      pointers and static arrays -- of variables and of call results -- is
+      built as a temporary dynamic array: the in-frame element block stored
+      one machine word per element, garbling all of them on both ISAs and
+      never releasing an owned element.  Through a function, a method, a
+      procedural variable and an interface dispatch }
+    procedure TestRun_OpenArrayLiteral_RichElements;
     { an open array of STATIC arrays indexed twice, A[I][J] (x86-64 loaded
       the element and indexed through its first bytes) }
     procedure TestRun_OpenArray_OfStaticArrays;
@@ -1366,6 +1373,81 @@ begin
     'ABBABB' + #10 + '6.75 4.50' + #10 + 'intdblintdbl' + #10 + 'bab' + #10, 0);
 end;
 
+
+procedure TE2EOpenArrayTests.TestRun_OpenArrayLiteral_RichElements;
+const
+  Src = '''
+    program P;
+    type
+      IFoo = interface
+        function N(): Integer;
+      end;
+      TFoo = class(TObject, IFoo)
+        FN: Integer;
+        constructor Create(A: Integer);
+        destructor Destroy; override;
+        function N(): Integer;
+      end;
+      TRec = record S: string; K: Integer; end;
+      TPt = record X, Y: Integer; end;
+      TSA = array[0..1] of string;
+      TProc = reference to function(): Integer;
+      TM = procedure(A: Integer) of object;
+      TObj = class
+        Tag: string;
+        procedure Hello(A: Integer);
+        procedure Take(const A: array of TRec);
+      end;
+      TTaker = procedure(const A: array of TRec);
+    constructor TFoo.Create(A: Integer); begin FN := A; end;
+    destructor TFoo.Destroy; begin WriteLn('free ', FN); end;
+    function TFoo.N(): Integer; begin Result := FN; end;
+    procedure TObj.Hello(A: Integer); begin WriteLn('hello ', Tag, ' ', A); end;
+    procedure TObj.Take(const A: array of TRec); begin WriteLn('meth ', A[High(A)].S); end;
+    function MkI(A: Integer): IFoo; begin Result := TFoo.Create(A); end;
+    function MkR(A: Integer): TRec; begin Result.S := 'r' + IntToStr(A); Result.K := A; end;
+    function MkP(A: Integer): TProc; begin Result := function(): Integer begin Result := A * 2; end; end;
+    function Pt(X, Y: Integer): TPt; begin Result.X := X; Result.Y := Y; end;
+    procedure SI(const A: array of IFoo); var I: Integer; begin for I := 0 to High(A) do WriteLn('i ', A[I].N()); end;
+    procedure SR(const A: array of TRec); var I: Integer; begin for I := 0 to High(A) do WriteLn('r ', A[I].S, ' ', A[I].K); end;
+    procedure SP(const A: array of TProc); var I: Integer; begin for I := 0 to High(A) do WriteLn('p ', A[I]()); end;
+    procedure SPt(const A: array of TPt); var I, T: Integer; begin T := 0; for I := 0 to High(A) do T := T + A[I].X * A[I].Y; WriteLn('pt ', T); end;
+    procedure SSA(const A: array of TSA); begin WriteLn('sa ', A[1][0], A[0][1]); end;
+    procedure SM(const A: array of TM); var I: Integer; begin for I := 0 to High(A) do A[I](I); end;
+    procedure Plain(const A: array of TRec); begin WriteLn('proc ', A[0].S); end;
+    var
+      O: TObj; T: TTaker; R1: TRec; P1: TProc; X: IFoo; S1, S2: TSA;
+    begin
+      SI([MkI(1), MkI(2)]);
+      SR([MkR(3), MkR(4)]);
+      SP([MkP(5)]);
+      R1 := MkR(6); P1 := MkP(7); X := MkI(8);
+      SR([R1, R1]);
+      SP([P1]);
+      SI([X, X]);
+      SPt([Pt(1, 2), Pt(3, 4)]);
+      S1[0] := 'a'; S1[1] := 'b'; S2[0] := 'c'; S2[1] := 'd';
+      SSA([S1, S2]);
+      O := TObj.Create(); O.Tag := 'o';
+      SM([@O.Hello, @O.Hello]);
+      O.Take([MkR(9), MkR(10)]);
+      T := @Plain;
+      T([MkR(11)]);
+      X := nil;
+      WriteLn('end');
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  AssertRunsOnAll(Src,
+    'i 1' + LE + 'i 2' + LE + 'free 1' + LE + 'free 2' + LE +
+    'r r3 3' + LE + 'r r4 4' + LE + 'p 10' + LE +
+    'r r6 6' + LE + 'r r6 6' + LE + 'p 14' + LE + 'i 8' + LE + 'i 8' + LE +
+    'pt 14' + LE + 'sa cb' + LE + 'hello o 0' + LE + 'hello o 1' + LE +
+    'meth r10' + LE + 'proc r11' + LE + 'free 8' + LE + 'end' + LE, 0);
+end;
 
 procedure TE2EOpenArrayTests.TestRun_OpenArray_OfStaticArrays;
 const

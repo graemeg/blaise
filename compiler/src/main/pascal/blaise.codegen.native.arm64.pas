@@ -14643,7 +14643,7 @@ begin
     begin
       { (ptr, high) pair — two int registers; a literal arg additionally
         reserves its element block in the literal park area }
-      if Arg is TArrayLiteralExpr then
+      if IsOALitBlock(Arg) then
       begin
         ESz := TOpenArrayTypeDesc(
           TMethodParam(ADecl.Params.Items[I]).ResolvedType)
@@ -14928,7 +14928,7 @@ begin
           half takes the next integer register, or else the next 8-byte slot
           of the outgoing area -- the two may split across x7 and the stack,
           which is how the callee prologue reads them back }
-        if Arg is TArrayLiteralExpr then
+        if IsOALitBlock(Arg) then
         begin
           { materialise the element block in the pre-reserved literal
             park area.  The block's address is ABSOLUTE (sp moves as
