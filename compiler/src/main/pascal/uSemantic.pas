@@ -13415,9 +13415,19 @@ begin
       constant or a character of a string field is a VALUE with no storage
       behind it: SetLength(O.Rows[1], N) on an indexed property passed the
       front end and failed in both backends }
-    Exit(not (Fld.IsConstant or Fld.IsMethodCall or (Fld.PropRead <> nil) or
-              Fld.IsStaticPropGet or Fld.IsCharAccess or
-              ((Fld.PropIndexExpr <> nil) and not Fld.IsArrayAccess)));
+    if Fld.IsConstant or Fld.IsMethodCall or (Fld.PropRead <> nil) or
+       Fld.IsStaticPropGet or Fld.IsCharAccess or
+       ((Fld.PropIndexExpr <> nil) and not Fld.IsArrayAccess) then
+      Exit(False);
+    { a field of a record call result (Bump(MkR().X)) is part of a
+      temporary: its address would be written and lost.  An element of a
+      dynamic-array field is shared storage and stays an l-value. }
+    if Self.IsRecordTemporary(Fld.Base) and
+       not (Fld.IsArrayAccess and (Fld.FieldInfo <> nil) and
+            (Fld.FieldInfo.TypeDesc <> nil) and
+            (Fld.FieldInfo.TypeDesc.Kind = tyDynArray)) then
+      Exit(False);
+    Exit(True);
   end;
   { Array element a[i] (a TStringSubscriptExpr over an array base) is a
     valid var/out actual.  String / PChar subscripts yield a char by value,
@@ -13427,6 +13437,11 @@ begin
     if (TStringSubscriptExpr(AExpr).StrExpr.ResolvedType = nil) then
       Exit(False);
     BaseKind := TStringSubscriptExpr(AExpr).StrExpr.ResolvedType.Kind;
+    { an element of a static array that is itself a temporary (a call
+      result, or a field of a record one) has no storage either }
+    if (BaseKind = tyStaticArray) and
+       Self.IsRecordTemporary(TStringSubscriptExpr(AExpr).StrExpr) then
+      Exit(False);
     Exit(BaseKind in [tyStaticArray, tyDynArray, tyOpenArray]);
   end;
   Result := False;

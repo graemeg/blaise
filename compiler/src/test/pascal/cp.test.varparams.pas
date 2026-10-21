@@ -15,7 +15,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TVarParamTests = class(TTestCase)
@@ -24,6 +24,11 @@ type
     function  AnalyseSrc(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { a var argument into a record temporary (Bump(MkR().X), MkR().SA[1],
+      MkSA()[1]) has no storage: an error, as in FPC (it compiled and the
+      write was lost).  An element of the temporary's dynamic-array field is
+      shared storage and stays a variable }
+    procedure TestSemantic_VarArgIntoRecordTemp_IsError;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -498,6 +503,30 @@ begin
         end.
         ''');
   Prog.Free();
+end;
+
+
+procedure TVarParamTests.TestSemantic_VarArgIntoRecordTemp_IsError;
+const
+  Head = '''
+    program P;
+    type
+      TSA = array[0..2] of Integer;
+      TR = record X: Integer; DA: array of Integer; SA: TSA; end;
+    var GR: TR; GS: TSA;
+    procedure Bump(var X: Integer); begin X := X + 10 end;
+    function MkR(): TR; begin Result := GR end;
+    function MkSA(): TSA; begin Result := GS end;
+    ''';
+begin
+  AssertTrue('MkR().X', Pos('must be a variable',
+    SemanticError(Head + 'begin Bump(MkR().X); end.')) >= 0);
+  AssertTrue('MkR().SA[1]', Pos('must be a variable',
+    SemanticError(Head + 'begin Bump(MkR().SA[1]); end.')) >= 0);
+  AssertTrue('MkSA()[1]', Pos('must be a variable',
+    SemanticError(Head + 'begin Bump(MkSA()[1]); end.')) >= 0);
+  AssertEquals('a dynamic-array element through the temporary', '',
+    SemanticError(Head + 'begin Bump(MkR().DA[1]); Bump(GR.X); Bump(GS[0]); end.'));
 end;
 
 initialization
