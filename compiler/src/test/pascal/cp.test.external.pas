@@ -546,8 +546,11 @@ begin
   AsmT := GenAsm(Src, TargetArm64);
   AssertTrue('arm64: lane x in s0', Pos(#9'fcvt s0, d0', AsmT) >= 0);
   AssertTrue('arm64: lane y in s1', Pos(#9'fcvt s1, d1', AsmT) >= 0);
-  { a MIXED float record is not an HFA: still refused on arm64 }
-  AssertCodegenRefused('arm64 mixed', SrcMixed, TargetArm64);
+  { a MIXED float record is not an HFA: AAPCS64 passes any such record of
+    at most 16 bytes as its memory image in x registers }
+  AsmT := GenAsm(SrcMixed, TargetArm64);
+  AssertTrue('arm64 mixed: both halves in x registers',
+    (Pos('ldr x0, [x9]', AsmT) >= 0) and (Pos('ldr x0, [x9, #8]', AsmT) >= 0));
 end;
 
 procedure TExternalTests.AssertCodegenRefused(const AWhat, ASrc,

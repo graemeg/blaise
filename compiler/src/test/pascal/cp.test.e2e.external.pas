@@ -15,7 +15,7 @@ unit cp.test.e2e.external;
 interface
 
 uses
-  blaise.testing, cp.test.e2e.base;
+  Classes, SysUtils, blaise.testing, cp.test.e2e.base;
 
 type
   [Threaded]
@@ -65,6 +65,14 @@ type
     { Apple's __sincos_stret returns two Doubles (arm64: a homogeneous float
       aggregate in d0:d1), __sincosf_stret two Singles (s0:s1). }
     procedure TestRun_ExternalRecordReturn_FloatPair_Arm64;
+    { Records by value to and from a C routine on arm64, against C compiled
+      here with cc: a mixed int/float record of 8 and of 16 bytes (memory
+      image in x registers -- it went by address), a 32-byte record (the
+      address of a private copy the callee may change), and Single HFAs
+      spilling past s7 with Single and HFA arguments after them (Darwin
+      packs them at 4 bytes).  Needs cc; arm64 only (x86-64 still refuses
+      float-field records to C). }
+    procedure TestRun_ExternalRecordShapes_Arm64;
   end;
 
 implementation
@@ -304,6 +312,108 @@ begin
   AssertRunsOnAll(Src, '0.00 1.00' + #10 + '0.00 1.00' + #10 + '1.00' + #10, 0);
 {$ELSE}
   Ignore('__sincos_stret is an Apple arm64 symbol');
+{$ENDIF}
+end;
+
+
+procedure TE2EExternalTests.TestRun_ExternalRecordShapes_Arm64;
+{$IFDEF CPUARM64}
+const
+  CSrc =
+    'typedef struct { int a; float f; double d; } Mixed16;' + #10 +
+    'typedef struct { float x; int n; } Mixed8;' + #10 +
+    'typedef struct { long a, b, c; double d; } Big32;' + #10 +
+    'typedef struct { float x, y, z, w; } V4;' + #10 +
+    'typedef struct { float x, y; } V2;' + #10 +
+    'double abi_mixed16(Mixed16 m) { return m.a + m.f + m.d; }' + #10 +
+    'double abi_mixed8(int k, Mixed8 m) { return k * 1000 + m.x + m.n; }' + #10 +
+    'long abi_big(Big32 b, int k) { long r = b.a + b.b * 10 + b.c * 100 +' +
+    ' (long)b.d * 1000 + k * 10000; b.a = 99; return r; }' + #10 +
+    'double abi_v4spill(double a, double b, double c, double d, double e,' +
+    ' double f, double g, V4 v, double h) { return a+b+c+d+e+f+g + v.x*1000' +
+    ' + v.y*100 + v.z*10 + v.w + h*10000; }' + #10 +
+    'double abi_v2spill(double a, double b, double c, double d, double e,' +
+    ' double f, double g, V2 v, float h, V2 u) { return a+b+c+d+e+f+g +' +
+    ' v.x*1000 + v.y*100 + h*10000 + u.x * 100000 + u.y * 1000000; }' + #10 +
+    'Mixed8 abi_mk8(float x, int n) { Mixed8 r = { x, n }; return r; }' + #10 +
+    'Mixed16 abi_mk16(int a, float f, double d) { Mixed16 r = { a, f, d };' +
+    ' return r; }' + #10;
+  Src = '''
+    program T;
+    type
+      TMixed16 = record A: Integer; F: Single; D: Double; end;
+      TMixed8 = record X: Single; N: Integer; end;
+      TBig32 = record A, B, C: Int64; D: Double; end;
+      TV4 = record X, Y, Z, W: Single; end;
+      TV2 = record X, Y: Single; end;
+    function abi_mixed16(M: TMixed16): Double; cdecl; external 'abi';
+    function abi_mixed8(K: Integer; M: TMixed8): Double; cdecl; external 'abi';
+    function abi_big(B: TBig32; K: Integer): Int64; cdecl; external 'abi';
+    function abi_v4spill(A, B, C, D, E, F, G: Double; V: TV4; H: Double): Double; cdecl; external 'abi';
+    function abi_v2spill(A, B, C, D, E, F, G: Double; V: TV2; H: Single; U: TV2): Double; cdecl; external 'abi';
+    function abi_mk8(X: Single; N: Integer): TMixed8; cdecl; external 'abi';
+    function abi_mk16(A: Integer; F: Single; D: Double): TMixed16; cdecl; external 'abi';
+    var M: TMixed16; M8: TMixed8; B: TBig32; V: TV4; V2, U2: TV2;
+    begin
+      M.A := 1; M.F := 2.5; M.D := 4.25;
+      WriteLn('mixed16 ', abi_mixed16(M):0:2);
+      M8.X := 1.5; M8.N := 7;
+      WriteLn('mixed8 ', abi_mixed8(3, M8):0:2);
+      B.A := 1; B.B := 2; B.C := 3; B.D := 4.0;
+      WriteLn('big ', abi_big(B, 5), ' ', B.A);
+      V.X := 1; V.Y := 2; V.Z := 3; V.W := 4;
+      WriteLn('v4 ', abi_v4spill(0.5, 0, 0, 0, 0, 0, 0, V, 2):0:2);
+      V2.X := 1; V2.Y := 2; U2.X := 3; U2.Y := 4;
+      WriteLn('v2 ', abi_v2spill(0.5, 0, 0, 0, 0, 0, 0, V2, 5, U2):0:2);
+      M8 := abi_mk8(2.5, 9); WriteLn('mk8 ', M8.X:0:2, ' ', M8.N);
+      M := abi_mk16(3, 1.25, 6.5); WriteLn('mk16 ', M.A, ' ', M.F:0:2, ' ', M.D:0:2);
+      WriteLn('pass ', abi_mixed16(abi_mk16(1, 1, 1)):0:2);
+    end.
+    ''';
+var
+  CFile, OFile, Output, Dummy: string;
+  RCode: Integer;
+  SL: TStringList;
+{$ENDIF}
+begin
+{$IFDEF CPUARM64}
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  if RunProc('cc', ['--version'], Dummy) <> 0 then begin Ignore('no cc'); Exit; end;
+  CFile := IncludeTrailingPathDelimiter(FScratch) + 'abi.c';
+  OFile := IncludeTrailingPathDelimiter(FScratch) + 'abi.o';
+  SL := TStringList.Create();
+  try
+    SL.Text := CSrc;
+    SL.SaveToFile(CFile);
+  finally
+    SL.Free();
+  end;
+  AssertEquals('cc -c', 0, RunProc('cc', ['-c', '-o', OFile, CFile], Dummy));
+  AssertEquals('ar', 0, RunProc('ar', ['rcs',
+    IncludeTrailingPathDelimiter(FScratch) + 'libabi.a', OFile], Dummy));
+  { the C side is a static archive the external linker resolves -labi
+    against (the internal Mach-O linker binds unknown libraries to
+    libSystem), so the binary needs no runtime library path }
+  SL := TStringList.Create();
+  try
+    SL.Text := Src;
+    SL.SaveToFile(IncludeTrailingPathDelimiter(FScratch) + 'abi_t.pas');
+  finally
+    SL.Free();
+  end;
+  RCode := RunProc(ProjectRoot() + 'compiler/target/blaise',
+    ['--source', IncludeTrailingPathDelimiter(FScratch) + 'abi_t.pas',
+     '--linker', 'external', '--lib-path', FScratch,
+     '--output', IncludeTrailingPathDelimiter(FScratch) + 'abi_t'], Output);
+  AssertEquals('compile: ' + Output, 0, RCode);
+  RCode := RunProc(IncludeTrailingPathDelimiter(FScratch) + 'abi_t', [], Output);
+  AssertEquals('exit code: ' + Output, 0, RCode);
+  AssertEquals('output',
+    'mixed16 7.75' + #10 + 'mixed8 3008.50' + #10 + 'big 54321 1' + #10 +
+    'v4 21234.50' + #10 + 'v2 4351200.50' + #10 + 'mk8 2.50 9' + #10 +
+    'mk16 3 1.25 6.50' + #10 + 'pass 3.00' + #10, Output);
+{$ELSE}
+  Ignore('x86-64 does not lower float-field records to C yet');
 {$ENDIF}
 end;
 

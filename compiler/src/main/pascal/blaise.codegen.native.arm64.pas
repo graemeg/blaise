@@ -515,6 +515,7 @@ type
     function  StackArgSize(AArg: TASTExpr): Integer;
     function  StackParamSize(APar: TMethodParam): Integer;
     function  AlignTo(AValue, AAlign: Integer): Integer;
+    function  ExtStackAlign(ASize: Integer): Integer;
     function  ComputeStackArgArea(ADecl: TMethodDecl; AArgs: TObjectList;
       ASelfPushed: Boolean): Integer;
     function  ComputeStackArgAreaEx(ADecl: TMethodDecl; AArgs: TObjectList;
@@ -13121,6 +13122,21 @@ begin
     Result := 200 + NDoubles;
     Exit;
   end;
+  { any other int/float record of at most 16 bytes is a MEMORY IMAGE in
+    x0 / x0:x1 -- AAPCS64 has no per-eightbyte class split.  The System V
+    classifier below returns sret for the mixes it cannot place in its
+    registers (an 8-byte int+float record, a 16-byte one whose two halves
+    are both mixed), which on arm64 sent a C callee a pointer where it read
+    the record's bytes }
+  if RecretManagedClean(ARec) and RecretAllIntOrFloatLeaves(ARec) and
+     (ARec.Fields.Count > 0) and (ARec.TotalSize() <= 16) then
+  begin
+    if ARec.TotalSize() <= 8 then
+      Result := 1
+    else
+      Result := 2;
+    Exit;
+  end;
   case Self.ClassifyRecordReturn(ARec) of
     rcSret: Result := 0;
     rcInt1: Result := 1;
@@ -14560,6 +14576,17 @@ begin
   end;
 end;
 
+{ The stack alignment of an ASize-byte (4 or 8) fixed argument lane in a
+  call to a C routine: Darwin packs stack arguments at their natural
+  alignment, standard AAPCS64 (Linux, FreeBSD) gives each an 8-byte slot. }
+function TArm64Backend.ExtStackAlign(ASize: Integer): Integer;
+begin
+  if FTarget.OS = osMacOS then
+    Result := ASize
+  else
+    Result := 8;
+end;
+
 function TArm64Backend.AlignTo(AValue, AAlign: Integer): Integer;
 begin
   Result := (AValue + AAlign - 1) and (not (AAlign - 1));
@@ -14710,7 +14737,9 @@ begin
         29): AAPCS64 does not split an aggregate across registers and the stack
         — if the whole record does not fit in the remaining int/fp registers it
         goes wholly on the stack.  Must stay in lockstep with EmitCall. }
-      if IsRecordCallArg(Arg) then
+      if IsRecordCallArg(Arg) or
+         (ADecl.IsExternal and
+          (RecReturnShape(TRecordTypeDesc(Arg.ResolvedType)) = 0)) then
         Rec := Rec + AlignTo(Arg.ResolvedType.RawSize(), 16);
       case RecReturnShape(TRecordTypeDesc(Arg.ResolvedType)) of
         0, 1:
@@ -14720,7 +14749,16 @@ begin
           if NInt >= 7 then Off := AlignTo(Off, 8) + 16
           else NInt := NInt + 2;
       else
-        if NFloat + HfaCount(RecReturnShape(TRecordTypeDesc(Arg.ResolvedType))) > 8 then
+        if ADecl.IsExternal and
+           (NFloat + HfaCount(RecReturnShape(TRecordTypeDesc(Arg.ResolvedType))) > 8) then
+        begin
+          Sz := HfaStride(RecReturnShape(TRecordTypeDesc(Arg.ResolvedType)));
+          Off := AlignTo(AlignTo(Off, ExtStackAlign(Sz)) +
+            HfaCount(RecReturnShape(TRecordTypeDesc(Arg.ResolvedType))) * Sz,
+            ExtStackAlign(Sz));
+          NFloat := 8;
+        end
+        else if NFloat + HfaCount(RecReturnShape(TRecordTypeDesc(Arg.ResolvedType))) > 8 then
           Off := AlignTo(Off, 8) +
             HfaCount(RecReturnShape(TRecordTypeDesc(Arg.ResolvedType))) * 8
         else
@@ -14737,7 +14775,11 @@ begin
     end;
     if FloatArgIsFloatClass(ADecl, I, Arg) then
     begin
-      if (ADecl.IsVarArgs and (I >= ADecl.Params.Count)) or (NFloat >= 8) then
+      if (not (ADecl.IsVarArgs and (I >= ADecl.Params.Count))) and
+         (NFloat >= 8) and ADecl.IsExternal and
+         FloatArgIsSingle(ADecl, I, Arg) then
+        Off := AlignTo(Off, ExtStackAlign(4)) + ExtStackAlign(4)
+      else if (ADecl.IsVarArgs and (I >= ADecl.Params.Count)) or (NFloat >= 8) then
       begin
         Off := AlignTo(Off, 8) + 8;
       end
@@ -15094,16 +15136,13 @@ begin
          (Arg.ResolvedType.Kind = tyRecord) then
       begin
         Shape := RecReturnShape(TRecordTypeDesc(Arg.ResolvedType));
-        { a C callee: the shapes below already follow AAPCS64 for an
-          all-integer record of at most 16 bytes (x registers, memory image)
-          and a flat Double HFA (d registers).  A Single or mixed float
-          record would need s registers, and a larger one a private copy
-          the callee may scribble on -- not lowered yet. }
-        if ADecl.IsExternal and not ((Shape >= 100) or
-           (Self.ClassifyRecordReturn(TRecordTypeDesc(Arg.ResolvedType)) in
-             [rcInt1, rcInt2])) then
-          NotYet('a record argument of this shape (floating-point fields, ' +
-            'or larger than 16 bytes) to an external routine', Arg);
+        { a C callee: the shapes below follow AAPCS64 -- any non-HFA record
+          of at most 16 bytes travels as its memory image in x registers
+          (float fields included: only an HFA uses the fp registers), an HFA
+          in d/s registers, and a larger record as the address of a private
+          copy the callee may scribble on (shape 0 below).  A spilled HFA
+          and the arguments after it follow the external stack rules
+          (ExtStackAlign). }
         if IsRecordCallArg(Arg) then
         begin
           { record-CALL argument (Foo(MakeRec(x))): the value has no lvalue
@@ -15203,11 +15242,24 @@ begin
               end;
             end;
           else
-            if ADecl.IsExternal and (HfaStride(Shape) = 4) and
-               (NFloat + HfaCount(Shape) > 8) then
-              NotYet('a Single-HFA record argument spilling to the stack ' +
-                'in a call to an external routine', Arg);
-            if NFloat + HfaCount(Shape) > 8 then
+            if (NFloat + HfaCount(Shape) > 8) and ADecl.IsExternal then
+            begin
+              { a C callee: the HFA is copied to the stack as its memory
+                image and no later fp argument goes in a register }
+              StackOff := AlignTo(StackOff, ExtStackAlign(HfaStride(Shape)));
+              for K := 0 to HfaCount(Shape) - 1 do
+              begin
+                EmitAddSubImm('add', 'x9', 'sp',
+                  PopRegs.Count * 16 + RecBase + RecOff);
+                EmitHfaLaneToX0(Shape, K, True);
+                EmitPushX0();
+                PopRegs.Add(Format('m%d_%d', [StackOff, HfaStride(Shape)]));
+                StackOff := StackOff + HfaStride(Shape);
+              end;
+              StackOff := AlignTo(StackOff, ExtStackAlign(HfaStride(Shape)));
+              NFloat := 8;
+            end
+            else if NFloat + HfaCount(Shape) > 8 then
               for K := 0 to HfaCount(Shape) - 1 do
               begin
                 EmitAddSubImm('add', 'x9', 'sp',
@@ -15242,6 +15294,19 @@ begin
               lvalues uniformly — Specs[I] included.  Overflow (leg 29): the
               address travels in an 8-byte stack slot. }
             EmitRecAddrToX0(Arg);
+            if ADecl.IsExternal then
+            begin
+              { a C callee owns the memory it is handed: pass the address of
+                a private copy in the RecBase region, never the variable }
+              Self.Emit(#9'mov x1, x0');
+              EmitAddSubImm('add', 'x0', 'sp',
+                PopRegs.Count * 16 + RecBase + RecOff);
+              EmitIntLiteral('x2', Arg.ResolvedType.RawSize());
+              EmitCallSym('memcpy');
+              EmitAddSubImm('add', 'x0', 'sp',
+                PopRegs.Count * 16 + RecBase + RecOff);
+              RecOff := RecOff + AlignTo(Arg.ResolvedType.RawSize(), 16);
+            end;
             EmitPushX0();
             if NInt >= 8 then
             begin
@@ -15306,11 +15371,21 @@ begin
             (leg 29): all lanes travel as consecutive 8-byte stack slots. }
           EmitRecAddrToX0(Arg);
           Self.Emit(#9'mov x9, x0');
-          if ADecl.IsExternal and (HfaStride(Shape) = 4) and
-             (NFloat + HfaCount(Shape) > 8) then
-            NotYet('a Single-HFA record argument spilling to the stack ' +
-              'in a call to an external routine', Arg);
-          if NFloat + HfaCount(Shape) > 8 then
+          if (NFloat + HfaCount(Shape) > 8) and ADecl.IsExternal then
+          begin
+            { a C callee: memory image on the stack, no later fp register }
+            StackOff := AlignTo(StackOff, ExtStackAlign(HfaStride(Shape)));
+            for K := 0 to HfaCount(Shape) - 1 do
+            begin
+              EmitHfaLaneToX0(Shape, K, True);
+              EmitPushX0();
+              PopRegs.Add(Format('m%d_%d', [StackOff, HfaStride(Shape)]));
+              StackOff := StackOff + HfaStride(Shape);
+            end;
+            StackOff := AlignTo(StackOff, ExtStackAlign(HfaStride(Shape)));
+            NFloat := 8;
+          end
+          else if NFloat + HfaCount(Shape) > 8 then
             for K := 0 to HfaCount(Shape) - 1 do
             begin
               StackOff := AlignTo(StackOff, 8);
@@ -15449,7 +15524,22 @@ begin
         Self.EmitExprToD0OrConvert(Arg);
         Self.Emit(#9'fmov x0, d0');
         EmitPushX0();
-        if IsVariadicArg or (NFloat >= 8) then
+        if (not IsVariadicArg) and (NFloat >= 8) and ADecl.IsExternal and
+           FloatArgIsSingle(ADecl, I, Arg) then
+        begin
+          { a fixed Single on a C callee's stack is its 4-byte value (Darwin
+            packs it at 4, AAPCS64 gives it the low half of an 8-byte slot);
+            the pushed word is the double pattern, so narrow it again }
+          EmitPopTo('x0');
+          Self.Emit(#9'fmov d0, x0');
+          Self.Emit(#9'fcvt s0, d0');
+          Self.Emit(#9'fmov w0, s0');
+          EmitPushX0();
+          StackOff := AlignTo(StackOff, ExtStackAlign(4));
+          PopRegs.Add(Format('m%d_%d', [StackOff, 4]));
+          StackOff := StackOff + ExtStackAlign(4);
+        end
+        else if IsVariadicArg or (NFloat >= 8) then
         begin
           { variadic floats promote to double (8 bytes) }
           StackOff := AlignTo(StackOff, 8);

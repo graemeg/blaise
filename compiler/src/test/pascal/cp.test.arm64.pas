@@ -34,6 +34,12 @@ type
     { last (rightmost) 0-based index of ASub in AStr, or -1 if absent }
     function RPos(const ASub, AStr: string): Integer;
   published
+    { records by value to a C routine follow AAPCS64: a mixed int/float
+      record of at most 16 bytes is its memory image in x registers (no
+      copy, no address), a larger one the address of a private copy
+      (memcpy into the call's record buffer), a Single HFA past s7 4-byte
+      lanes on the stack (Darwin packing).  All three were NotYet. }
+    procedure TestExternalRecordArgs_AAPCS64Shapes;
     { a value cast to a static-array type is its operand's storage }
     procedure TestStaticArrayValueCast_IsTheOperandStorage;
     procedure TestHello_PrologueAndFrameChain;
@@ -9792,6 +9798,47 @@ begin
   A := GenAsm(Src, TargetArm64);
   AssertTrue('Raw is addressed', Pos('_g_Raw@PAGE', A) >= 0);
   AssertTrue('and passed on', Pos(#9'bl _ShowOpen', A) >= 0);
+end;
+
+
+procedure TArm64BackendTests.TestExternalRecordArgs_AAPCS64Shapes;
+const
+  Src = '''
+    program T;
+    type
+      TMixed8 = record X: Single; N: Integer; end;
+      TBig32 = record A, B, C: Int64; D: Double; end;
+      TV4 = record X, Y, Z, W: Single; end;
+    function abi_mixed8(M: TMixed8): Double; cdecl; external 'abi';
+    function abi_big(B: TBig32): Int64; cdecl; external 'abi';
+    function abi_v4(A, B, C, D, E, F, G: Double; V: TV4): Double; cdecl; external 'abi';
+    var M8: TMixed8; B: TBig32; V: TV4; R: Double; N: Int64;
+    begin
+      R := abi_mixed8(M8);
+      N := abi_big(B);
+      R := abi_v4(0, 0, 0, 0, 0, 0, 0, V);
+    end.
+    ''';
+var
+  A, Seg: string;
+  P, Q: Integer;
+begin
+  A := GenAsm(Src, TargetArm64);
+  P := Pos('_g_M8@PAGEOFF', A);
+  Q := Pos('bl _abi_mixed8', A);
+  AssertTrue('the mixed8 call is emitted', (P >= 0) and (Q > P));
+  Seg := Copy(A, P, Q - P);
+  AssertTrue('mixed8 travels as its bytes: ' + Seg,
+    (Pos('ldr x0, [x0]', Seg) >= 0) and (Pos('memcpy', Seg) < 0));
+  P := Q;
+  Q := Pos('bl _abi_big', A);
+  Seg := Copy(A, P, Q - P);
+  AssertTrue('big32 is a private copy: ' + Seg, Pos('bl _memcpy', Seg) >= 0);
+  P := Q;
+  Q := Pos('bl _abi_v4', A);
+  Seg := Copy(A, P, Q - P);
+  AssertTrue('the spilled Single HFA is four 4-byte lanes: ' + Seg,
+    (Pos('str w9, [sp, #', Seg) >= 0) and (Pos('s0', Seg) < 0));
 end;
 
 initialization
