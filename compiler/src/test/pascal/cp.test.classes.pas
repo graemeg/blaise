@@ -107,6 +107,9 @@ type
     { Free built-in                                                        }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_Free_OK;
+    { TC(X).Free() frees X itself: the cast is stripped so the release also
+      nils X's slot (a variable, a field or an element), as X.Free() does }
+    procedure TestSemantic_FreeThroughCast_TargetsTheOperand;
 
     { ------------------------------------------------------------------ }
     { ARC on class variables and fields                                    }
@@ -1294,6 +1297,47 @@ const
 procedure TClassTests.TestSemantic_Free_OK;
 begin
   AnalyseSrc(SrcFree).Free();
+end;
+
+procedure TClassTests.TestSemantic_FreeThroughCast_TargetsTheOperand;
+var
+  Prog: TProgram;
+  S: TMethodCallStmt;
+begin
+  Prog := AnalyseSrc(
+    '''
+    program P;
+    type
+      TC = class Tag: Integer; end;
+      THolder = class F: TObject; end;
+    var
+      O: TObject;
+      H: THolder;
+      A: array of TObject;
+      Ptr: Pointer;
+    begin
+      TC(O).Free();
+      TC(H.F).Free();
+      TC(A[0]).Free();
+      TC(Ptr).Free()
+    end.
+    ''');
+  try
+    S := TMethodCallStmt(Prog.Block.Stmts.Items[0]);
+    AssertTrue('a variable operand becomes the named receiver',
+      (S.ObjExpr = nil) and SameText(S.ObjectName, 'O'));
+    S := TMethodCallStmt(Prog.Block.Stmts.Items[1]);
+    AssertTrue('a field operand becomes the receiver expression',
+      S.ObjExpr is TFieldAccessExpr);
+    S := TMethodCallStmt(Prog.Block.Stmts.Items[2]);
+    AssertTrue('an element operand becomes the receiver expression',
+      S.ObjExpr is TStringSubscriptExpr);
+    S := TMethodCallStmt(Prog.Block.Stmts.Items[3]);
+    AssertTrue('a cast of a non-class operand is kept',
+      S.ObjExpr is TFuncCallExpr);
+  finally
+    Prog.Free();
+  end;
 end;
 
 { ------------------------------------------------------------------ }

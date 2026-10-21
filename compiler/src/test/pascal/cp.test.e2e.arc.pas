@@ -135,6 +135,11 @@ type
       discarded function result, an expression -- frees the receiver
       (x86-64 leaked every one). }
     procedure TestRun_OwnedMethodReceiver_Freed;
+    { TC(X).Free() on a variable, a field of Self, a field and an element:
+      X is released AND nilled, so it no longer aliases the next allocation
+      (the release left X dangling, and scope exit released the new owner's
+      object early) }
+    procedure TestRun_FreeThroughCast_NilsTheOperand;
     { A by-value dyn-array param must keep the buffer alive even when the
       caller's own reference is dropped mid-call
       (BUG-20260721-byval-dynarray-param-no-arc). }
@@ -1001,6 +1006,59 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'hi' + LE + '5' + LE + 'frees 3' + LE, 0);
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EArcTests.TestRun_FreeThroughCast_NilsTheOperand;
+const
+  Src = '''
+    program P;
+    type
+      TC = class
+        Tag: Integer;
+        destructor Destroy(); override;
+      end;
+      THolder = class
+        F: TObject;
+        procedure Drop();
+      end;
+    var Frees: Integer;
+    destructor TC.Destroy(); begin Frees := Frees + 1; inherited Destroy() end;
+    procedure THolder.Drop(); begin TC(F).Free() end;
+    procedure Go();
+    var
+      O: TObject;
+      Y: TC;
+      H: THolder;
+      A: array of TObject;
+    begin
+      O := TC.Create();
+      TC(O).Free();
+      Y := TC.Create();
+      WriteLn('var ', O = nil, ' ', O = TObject(Y));
+      H := THolder.Create();
+      H.F := TC.Create();
+      TC(H.F).Free();
+      WriteLn('field ', H.F = nil);
+      H.F := TC.Create();
+      H.Drop();
+      WriteLn('self field ', H.F = nil);
+      SetLength(A, 1);
+      A[0] := TC.Create();
+      TC(A[0]).Free();
+      WriteLn('element ', A[0] = nil);
+      WriteLn('frees ', Frees)
+    end;
+    begin
+      Go();
+      WriteLn('frees ', Frees)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'var True False' + LE + 'field True' + LE +
+    'self field True' + LE + 'element True' + LE + 'frees 4' + LE +
+    'frees 5' + LE, 0);
   AssertLeakFreeOnAll(Src, '');
 end;
 

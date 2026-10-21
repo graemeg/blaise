@@ -12688,11 +12688,48 @@ var
   ObjType: TTypeDesc;
   FldInfo: TFieldInfo;
   RecvIdent: TIdentExpr;
+  RecvExpr: TASTExpr;
 begin
   { Call on a receiver expression: AProg.UsedUnits.Add(UName) }
   if ACall.ObjExpr <> nil then
   begin
     ObjType := Self.AnalyseExprSlot(ACall.ObjExpr);
+    { TC(X).Free() frees X itself.  The release must also nil X's slot, as
+      X.Free() does -- releasing through the cast left X dangling, aliasing
+      the next same-size allocation, and its later release freed that
+      object's owner early.  Strip the class cast so the receiver is X: a
+      variable takes the named-receiver path, a field or an element keeps
+      the receiver-expression path, whose Free arms nil the slot. }
+    if SameText(ACall.Name, 'Free') and (ACall.Args.Count = 0) and
+       (ACall.ObjExpr is TFuncCallExpr) and
+       (TFuncCallExpr(ACall.ObjExpr).ResolvedDecl = nil) and
+       not TFuncCallExpr(ACall.ObjExpr).IsIndirectCall and
+       (TFuncCallExpr(ACall.ObjExpr).Args.Count = 1) and
+       (ObjType <> nil) and (ObjType.Kind = tyClass) and
+       (FindMethodDecl(TRecordTypeDesc(ObjType).Name, 'Free') = nil) then
+    begin
+      ObjSym := FTable.Lookup(TFuncCallExpr(ACall.ObjExpr).Name);
+      RecvExpr := TASTExpr(TFuncCallExpr(ACall.ObjExpr).Args.Items[0]);
+      if (ObjSym <> nil) and (ObjSym.Kind = skType) and
+         (RecvExpr.ResolvedType <> nil) and
+         (RecvExpr.ResolvedType.Kind = tyClass) and
+         ((RecvExpr is TIdentExpr) or (RecvExpr is TFieldAccessExpr) or
+          (RecvExpr is TStringSubscriptExpr)) then
+      begin
+        TFuncCallExpr(ACall.ObjExpr).Args.Extract(RecvExpr);
+        ACall.ObjExpr.Free();
+        if RecvExpr is TIdentExpr then
+        begin
+          ACall.ObjExpr := nil;
+          ACall.ObjectName := TIdentExpr(RecvExpr).Name;
+          RecvExpr.Free();
+          Self.AnalyseMethodCall(ACall);
+          Exit;
+        end;
+        ACall.ObjExpr := RecvExpr;
+        ObjType := RecvExpr.ResolvedType;
+      end;
+    end;
     { A RECORD receiver is legal when the call is really an invocation of a
       procedural-typed FIELD (O.Inner.F()) or of a record method.  Records
       were rejected outright here, so a closure held in a nested record field
