@@ -849,6 +849,9 @@ type
     { Emit a direct call to a user procedure/function; result (if any) in %eax.
       ADecl is the callee's declaration (needed for var/out param handling);
       nil for type-cast calls. }
+    function ExternalRecordSlotClass(ADecl: TMethodDecl;
+      AIdx, AK: Integer): Integer;
+    procedure EmitRecordBytesToSlots(ASize, ASlotOff: Integer);
     function ExternalRecordArgSlots(ADecl: TMethodDecl; AIdx: Integer;
       AArg: TASTExpr): Integer;
     procedure EmitPushRecordBytes(ASize: Integer);
@@ -22672,6 +22675,13 @@ function TX86_64Backend.ExternalRecordArgSlots(ADecl: TMethodDecl;
 var
   Par: TMethodParam;
 begin
+  { A record passed BY VALUE to an external (C) routine follows the System V
+    ABI, not Blaise's by-reference record convention: its bytes travel as
+    ceil(size / 8) eightbytes -- in integer or xmm registers by class
+    (ExternalRecordSlotClass) when it is at most 16 bytes and they fit, else
+    as a copy on the stack.  Returns that eightbyte count, 0 when argument
+    AIdx is not such an argument
+    (BUG-20261007-x86-extern-record-byval). }
   Result := 0;
   if (ADecl = nil) or not ADecl.IsExternal or (AIdx >= ADecl.Params.Count) then
     Exit;
@@ -22679,14 +22689,57 @@ begin
   if Par.IsVarParam or (Par.ResolvedType = nil) or
      (Par.ResolvedType.Kind <> tyRecord) then
     Exit;
-  case Self.ClassifyRecordReturn(TRecordTypeDesc(Par.ResolvedType)) of
-    rcInt1: Result := 1;
-    rcInt2: Result := 2;
+  Result := (Par.ResolvedType.RawSize() + 7) div 8;
+end;
+
+{ The System V class of eightbyte AK of external record argument AIdx:
+  0 INTEGER, 1 SSE, 2 MEMORY (a record over 16 bytes always travels in
+  memory). }
+function TX86_64Backend.ExternalRecordSlotClass(ADecl: TMethodDecl;
+  AIdx, AK: Integer): Integer;
+var
+  RT: TRecordTypeDesc;
+begin
+  RT := TRecordTypeDesc(TMethodParam(ADecl.Params.Items[AIdx]).ResolvedType);
+  if RT.RawSize() > 16 then
+    Result := 2
+  else if RecretEightbyteIsSSE(RT, AK * 8) then
+    Result := 1
   else
-    raise ENativeCodeGenError.Create(Format(
-      'x86-64: not yet lowered: a record argument of this shape (floating-' +
-      'point fields, or larger than 16 bytes) to external routine ''%s'' ' +
-      'at line %d col %d', [ADecl.Name, AArg.Line, AArg.Col]));
+    Result := 0;
+end;
+
+{ Store the ASize bytes of the record whose address is in %rax into the
+  8-byte slots from ASlotOff(%rsp) up, low eightbyte first; a short last
+  eightbyte is read at its exact width (never past the record). }
+procedure TX86_64Backend.EmitRecordBytesToSlots(ASize, ASlotOff: Integer);
+var
+  Off, N, K: Integer;
+begin
+  Self.Emit(#9'movq %rax, %rcx');
+  Off := 0;
+  while Off < ASize do
+  begin
+    N := ASize - Off;
+    if N > 8 then N := 8;
+    case N of
+      8: Self.Emit(Format(#9'movq %d(%%rcx), %%rax', [Off]));
+      4: Self.Emit(Format(#9'movl %d(%%rcx), %%eax', [Off]));
+      2: Self.Emit(Format(#9'movzwl %d(%%rcx), %%eax', [Off]));
+      1: Self.Emit(Format(#9'movzbl %d(%%rcx), %%eax', [Off]));
+    else
+      begin
+        Self.Emit(#9'xorl %eax, %eax');
+        for K := N - 1 downto 0 do
+        begin
+          Self.Emit(#9'shlq $8, %rax');
+          Self.Emit(Format(#9'movzbl %d(%%rcx), %%edx', [Off + K]));
+          Self.Emit(#9'orq %rdx, %rax');
+        end;
+      end;
+    end;
+    Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [ASlotOff + Off]));
+    Off := Off + 8;
   end;
 end;
 
@@ -22755,6 +22808,8 @@ var
                                      in ascending arg order, for relocation }
   RK, RSrc: Integer;
   HasExtRecord: Boolean;
+  NIntNeed, NSseNeed: Integer;
+  InMem: Boolean;
 begin
   HasExtRecord := False;
   { Detect whether any arg is float-typed.
@@ -22808,13 +22863,10 @@ begin
     OALTotal := Self.EmitArgHoist(nil, nil, True, '', AArgs, OALD, OALK);
   OALPushed := 0;
 
-  if HasExtRecord and (HasFloat or (SlotCount > 6)) then
-    raise ENativeCodeGenError.Create(Format(
-      'x86-64: not yet lowered: a by-value record argument to external ' +
-      'routine ''%s'' alongside floating-point or stack arguments',
-      [ADecl.Name]));
-
-  if (not HasFloat) and (SlotCount <= 6) and not ASretOnStack then
+  { a C record argument goes through the slot strategy below, which places
+    each eightbyte by class -- integer or xmm register, or the stack }
+  if (not HasFloat) and (SlotCount <= 6) and not ASretOnStack and
+     not HasExtRecord then
   begin
     { Pure integer call with ≤6 slots: push/pop strategy.
       Open-array arg A pushes: data ptr first, then high index.
@@ -23026,6 +23078,19 @@ begin
         Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff + 8]));
         Inc(SlotOff, 16);
       end
+      else if Self.ExternalRecordArgSlots(ADecl, I, Arg) > 0 then
+      begin
+        { C by-value record: its bytes fill ExternalRecordArgSlots slots.  A
+          hoisted record call saved its result buffer's address; an lvalue's
+          address is the record expression's value. }
+        if OALK.Get(I) >= akRecCall then
+          Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
+            [AllocSz + OALTotal - OALD.Get(I)]))
+        else
+          Self.EmitExprToEax(Arg);
+        Self.EmitRecordBytesToSlots(ParamType.RawSize(), SlotOff);
+        Inc(SlotOff, 8 * Self.ExternalRecordArgSlots(ADecl, I, Arg));
+      end
       else if (not IsOA) and (OALK.Get(I) >= akRecCall) then
       begin
         { Hoisted record-call or const-string argument — reload the saved
@@ -23187,7 +23252,43 @@ begin
       IsVar := (ADecl <> nil) and (I < ADecl.Params.Count) and
                TMethodParam(ADecl.Params.Items[I]).IsVarParam;
 
-      if IsFloatFamily(ParamType) and not IsOA and not IsVar then
+      RK := Self.ExternalRecordArgSlots(ADecl, I, Arg);
+      if RK > 0 then
+      begin
+        { each eightbyte to the next register of its class -- unless the
+          record is MEMORY class or its eightbytes do not all fit in the
+          registers left, when the whole record goes on the stack and no
+          register is used (System V) }
+        NIntNeed := 0;
+        NSseNeed := 0;
+        InMem := False;
+        for RSrc := 0 to RK - 1 do
+          case Self.ExternalRecordSlotClass(ADecl, I, RSrc) of
+            0: Inc(NIntNeed);
+            1: Inc(NSseNeed);
+          else
+            InMem := True;
+          end;
+        if InMem or (IntIdx + NIntNeed > 6) or (XmmIdx + NSseNeed > 8) then
+          for RSrc := 0 to RK - 1 do
+            OverflowOffs.Add(SlotOff + RSrc * 8)
+        else
+          for RSrc := 0 to RK - 1 do
+            if Self.ExternalRecordSlotClass(ADecl, I, RSrc) = 1 then
+            begin
+              Self.Emit(Format(#9'movq %d(%%rsp), %s',
+                [SlotOff + RSrc * 8, SysVXmmArgRegs[XmmIdx]]));
+              Inc(XmmIdx);
+            end
+            else
+            begin
+              Self.Emit(Format(#9'movq %d(%%rsp), %s',
+                [SlotOff + RSrc * 8, SysVArg64(IntIdx)]));
+              Inc(IntIdx);
+            end;
+        Inc(SlotOff, 8 * RK);
+      end
+      else if IsFloatFamily(ParamType) and not IsOA and not IsVar then
       begin
         if XmmIdx < 8 then
         begin

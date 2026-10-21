@@ -65,14 +65,16 @@ type
     { Apple's __sincos_stret returns two Doubles (arm64: a homogeneous float
       aggregate in d0:d1), __sincosf_stret two Singles (s0:s1). }
     procedure TestRun_ExternalRecordReturn_FloatPair_Arm64;
-    { Records by value to and from a C routine on arm64, against C compiled
-      here with cc: a mixed int/float record of 8 and of 16 bytes (memory
-      image in x registers -- it went by address), a 32-byte record (the
-      address of a private copy the callee may change), and Single HFAs
-      spilling past s7 with Single and HFA arguments after them (Darwin
-      packs them at 4 bytes).  Needs cc; arm64 only (x86-64 still refuses
-      float-field records to C). }
-    procedure TestRun_ExternalRecordShapes_Arm64;
+    { Records by value to and from a C routine, against C compiled here with
+      cc: mixed int/float records of 8 and 16 bytes, a 32-byte record (a
+      private copy the callee may change), float records spilling past the
+      fp registers with float and record arguments after them, double pairs
+      and double+int64 halves, a mixed record pushed past the integer
+      registers, and every shape returned from C and passed straight back.
+      arm64 (AAPCS64: memory images, HFAs, Darwin stack packing) and x86-64
+      (System V eightbyte classes) both refused or misplaced most of them.
+      Needs cc. }
+    procedure TestRun_ExternalRecordShapes;
   end;
 
 implementation
@@ -316,8 +318,7 @@ begin
 end;
 
 
-procedure TE2EExternalTests.TestRun_ExternalRecordShapes_Arm64;
-{$IFDEF CPUARM64}
+procedure TE2EExternalTests.TestRun_ExternalRecordShapes;
 const
   CSrc =
     'typedef struct { int a; float f; double d; } Mixed16;' + #10 +
@@ -325,6 +326,19 @@ const
     'typedef struct { long a, b, c; double d; } Big32;' + #10 +
     'typedef struct { float x, y, z, w; } V4;' + #10 +
     'typedef struct { float x, y; } V2;' + #10 +
+    'typedef struct { double x, y; } D2;' + #10 +
+    'typedef struct { double x; long n; } DL;' + #10 +
+    'double abi_d2(D2 a, D2 b) { return a.x + a.y * 10 + b.x * 100 + b.y * 1000; }' + #10 +
+    'double abi_dl(DL a, int k) { return a.x + a.n * 10 + k * 100; }' + #10 +
+    'long abi_ispill(long a, long b, long c, long d, long e, Mixed16 m, long g)' +
+    ' { return a+b+c+d+e + m.a*1000 + (long)m.d*100 + g*10000; }' + #10 +
+    'V2 abi_mkv2(float x, float y) { V2 r = { x, y }; return r; }' + #10 +
+    'V4 abi_mkv4(float x, float y, float z, float w) { V4 r = { x, y, z, w };' +
+    ' return r; }' + #10 +
+    'D2 abi_mkd2(double x, double y) { D2 r = { x, y }; return r; }' + #10 +
+    'DL abi_mkdl(double x, long n) { DL r = { x, n }; return r; }' + #10 +
+    'Big32 abi_mkbig(long a, double d) { Big32 r = { a, a + 1, a + 2, d };' +
+    ' return r; }' + #10 +
     'double abi_mixed16(Mixed16 m) { return m.a + m.f + m.d; }' + #10 +
     'double abi_mixed8(int k, Mixed8 m) { return k * 1000 + m.x + m.n; }' + #10 +
     'long abi_big(Big32 b, int k) { long r = b.a + b.b * 10 + b.c * 100 +' +
@@ -346,6 +360,16 @@ const
       TBig32 = record A, B, C: Int64; D: Double; end;
       TV4 = record X, Y, Z, W: Single; end;
       TV2 = record X, Y: Single; end;
+      TD2 = record X, Y: Double; end;
+      TDL = record X: Double; N: Int64; end;
+    function abi_d2(A, B: TD2): Double; cdecl; external 'abi';
+    function abi_dl(A: TDL; K: Integer): Double; cdecl; external 'abi';
+    function abi_ispill(A, B, C, D, E: Int64; M: TMixed16; G: Int64): Int64; cdecl; external 'abi';
+    function abi_mkv2(X, Y: Single): TV2; cdecl; external 'abi';
+    function abi_mkv4(X, Y, Z, W: Single): TV4; cdecl; external 'abi';
+    function abi_mkd2(X, Y: Double): TD2; cdecl; external 'abi';
+    function abi_mkdl(X: Double; N: Int64): TDL; cdecl; external 'abi';
+    function abi_mkbig(A: Int64; D: Double): TBig32; cdecl; external 'abi';
     function abi_mixed16(M: TMixed16): Double; cdecl; external 'abi';
     function abi_mixed8(K: Integer; M: TMixed8): Double; cdecl; external 'abi';
     function abi_big(B: TBig32; K: Integer): Int64; cdecl; external 'abi';
@@ -353,7 +377,7 @@ const
     function abi_v2spill(A, B, C, D, E, F, G: Double; V: TV2; H: Single; U: TV2): Double; cdecl; external 'abi';
     function abi_mk8(X: Single; N: Integer): TMixed8; cdecl; external 'abi';
     function abi_mk16(A: Integer; F: Single; D: Double): TMixed16; cdecl; external 'abi';
-    var M: TMixed16; M8: TMixed8; B: TBig32; V: TV4; V2, U2: TV2;
+    var M: TMixed16; M8: TMixed8; B: TBig32; V: TV4; V2, U2: TV2; D2a, D2b: TD2; DL: TDL;
     begin
       M.A := 1; M.F := 2.5; M.D := 4.25;
       WriteLn('mixed16 ', abi_mixed16(M):0:2);
@@ -368,15 +392,24 @@ const
       M8 := abi_mk8(2.5, 9); WriteLn('mk8 ', M8.X:0:2, ' ', M8.N);
       M := abi_mk16(3, 1.25, 6.5); WriteLn('mk16 ', M.A, ' ', M.F:0:2, ' ', M.D:0:2);
       WriteLn('pass ', abi_mixed16(abi_mk16(1, 1, 1)):0:2);
+      D2a.X := 1; D2a.Y := 2; D2b.X := 3; D2b.Y := 4;
+      WriteLn('d2 ', abi_d2(D2a, D2b):0:2);
+      DL.X := 0.5; DL.N := 3;
+      WriteLn('dl ', abi_dl(DL, 2):0:2);
+      M.A := 1; M.F := 2.5; M.D := 4.25;
+      WriteLn('ispill ', abi_ispill(1, 0, 0, 0, 0, M, 2));
+      V2 := abi_mkv2(1.5, 2.5); WriteLn('mkv2 ', V2.X:0:2, ' ', V2.Y:0:2);
+      V := abi_mkv4(1, 2, 3, 4); WriteLn('mkv4 ', V.X:0:1, V.Y:0:1, V.Z:0:1, V.W:0:1);
+      D2a := abi_mkd2(7.5, 8.5); WriteLn('mkd2 ', D2a.X:0:2, ' ', D2a.Y:0:2);
+      DL := abi_mkdl(9.5, 11); WriteLn('mkdl ', DL.X:0:2, ' ', DL.N);
+      B := abi_mkbig(5, 6.5); WriteLn('mkbig ', B.A, B.B, B.C, ' ', B.D:0:2);
     end.
     ''';
 var
   CFile, OFile, Output, Dummy: string;
   RCode: Integer;
   SL: TStringList;
-{$ENDIF}
 begin
-{$IFDEF CPUARM64}
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   if RunProc('cc', ['--version'], Dummy) <> 0 then begin Ignore('no cc'); Exit; end;
   CFile := IncludeTrailingPathDelimiter(FScratch) + 'abi.c';
@@ -411,10 +444,10 @@ begin
   AssertEquals('output',
     'mixed16 7.75' + #10 + 'mixed8 3008.50' + #10 + 'big 54321 1' + #10 +
     'v4 21234.50' + #10 + 'v2 4351200.50' + #10 + 'mk8 2.50 9' + #10 +
-    'mk16 3 1.25 6.50' + #10 + 'pass 3.00' + #10, Output);
-{$ELSE}
-  Ignore('x86-64 does not lower float-field records to C yet');
-{$ENDIF}
+    'mk16 3 1.25 6.50' + #10 + 'pass 3.00' + #10 + 'd2 4321.00' + #10 +
+    'dl 230.50' + #10 + 'ispill 21401' + #10 + 'mkv2 1.50 2.50' + #10 +
+    'mkv4 1.02.03.04.0' + #10 + 'mkd2 7.50 8.50' + #10 + 'mkdl 9.50 11' + #10 +
+    'mkbig 567 6.50' + #10, Output);
 end;
 
 initialization

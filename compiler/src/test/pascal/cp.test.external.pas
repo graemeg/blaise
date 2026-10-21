@@ -12,7 +12,8 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSemantic, cp.test.harness;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, blaise.codegen,
+  blaise.codegen.target, cp.test.harness;
 
 type
   TExternalTests = class(TTestCase)
@@ -66,6 +67,11 @@ type
     procedure TestCodegen_ExternalRecordParam_PassedAsAggregateType;
     procedure TestCodegen_ExternalRecordParam_TwoEightbytes;
     procedure TestCodegen_ExternalRecordParam_FloatShape_NotSilent;
+    { System V record classes: an eightbyte with any integer leaf is
+      INTEGER, one of only floats SSE.  Mixed records of 8 bytes and
+      16-byte records with two INTEGER halves came back sret, and an
+      eightbyte holding an int and a float was called SSE }
+    procedure TestRecretClassify_SystemVMixedRecords;
   end;
 
 implementation
@@ -504,7 +510,7 @@ begin
   AssertTrue('x86-64: first eightbyte loaded', Pos('movq 0(%rcx), %rax', X86) >= 0);
   AssertTrue('x86-64: second eightbyte loaded', Pos('movl 8(%rcx), %eax', X86) >= 0);
   AssertTrue('x86-64: the eightbytes land in rdi and rsi',
-    (Pos('popq %rdi', X86) >= 0) and (Pos('popq %rsi', X86) >= 0));
+    (Pos('movq 0(%rsp), %rdi', X86) >= 0) and (Pos('movq 8(%rsp), %rsi', X86) >= 0));
   AssertTrue('x86-64: the Integer follows in rdx', Pos('%rdx', X86) >= 0);
   AssertTrue('arm64: both halves loaded',
     Pos('ldr x0, [x9, #8]', GenAsm(Src, TargetArm64)) >= 0);
@@ -537,10 +543,11 @@ const
 var
   AsmT: string;
 begin
-  { a float-bearing record needs SSE / s registers: refused, never passed in
-    the wrong registers -- x86-64 has no SSE-class record marshalling for C
-    calls yet }
-  AssertCodegenRefused('x86-64', Src, TargetX86_64);
+  { x86-64: an all-Single 8-byte record is one SSE eightbyte -- its bytes
+    go to xmm0 }
+  AsmT := GenAsm(Src, TargetX86_64);
+  AssertTrue('x86-64: the eightbyte in xmm0',
+    Pos(#9'movq 0(%rsp), %xmm0', AsmT) >= 0);
   { arm64: an all-Single record is an AAPCS64 HFA, passed lane by lane in
     s0/s1 exactly as C expects -- lowered, not refused }
   AsmT := GenAsm(Src, TargetArm64);
@@ -551,6 +558,12 @@ begin
   AsmT := GenAsm(SrcMixed, TargetArm64);
   AssertTrue('arm64 mixed: both halves in x registers',
     (Pos('ldr x0, [x9]', AsmT) >= 0) and (Pos('ldr x0, [x9, #8]', AsmT) >= 0));
+  { x86-64: Single + padding is an SSE eightbyte, the Double another: xmm0
+    and xmm1 }
+  AsmT := GenAsm(SrcMixed, TargetX86_64);
+  AssertTrue('x86-64 mixed: two SSE eightbytes',
+    (Pos(#9'movq 0(%rsp), %xmm0', AsmT) >= 0) and
+    (Pos(#9'movq 8(%rsp), %xmm1', AsmT) >= 0));
 end;
 
 procedure TExternalTests.AssertCodegenRefused(const AWhat, ASrc,
@@ -567,6 +580,60 @@ begin
   end;
   AssertTrue(AWhat + ': unsupported record shape is a code-generation error',
     Raised);
+end;
+
+
+function ClassOfVarType(AProg: TProgram; const AName: string;
+  const ATarget: TTargetDesc): TRecReturnClass;
+var
+  I: Integer;
+  VD: TVarDecl;
+begin
+  Result := rcWin64Agg;
+  for I := 0 to AProg.Block.Decls.Count - 1 do
+  begin
+    if not (TObject(AProg.Block.Decls.Items[I]) is TVarDecl) then
+      Continue;
+    VD := TVarDecl(AProg.Block.Decls.Items[I]);
+    if SameText(VD.TypeName, AName) then
+      Exit(RecretClassify(TRecordTypeDesc(VD.ResolvedType), ATarget));
+  end;
+end;
+
+procedure TExternalTests.TestRecretClassify_SystemVMixedRecords;
+const
+  Src = '''
+    program P;
+    type
+      TM8 = record X: Single; N: Integer; end;
+      TM16 = record A: Integer; F: Single; D: Double; end;
+      TII = record A: Integer; F: Single; B, C: Integer; end;
+      TDL = record X: Double; N: Int64; end;
+      TFF = record X, Y, Z: Single; end;
+    var A: TM8; B: TM16; C: TII; D: TDL; E: TFF;
+    begin
+    end.
+    ''';
+var
+  Prog: TProgram;
+  T: TTargetDesc;
+begin
+  AssertTrue('target', ParseTargetName(TargetX86_64, T));
+  Prog := Analyse(Src);
+  try
+    AssertTrue('8-byte float+int: INTEGER',
+      ClassOfVarType(Prog, 'TM8', T) = rcInt1);
+    AssertTrue('int+float | double: INTEGER, SSE',
+      ClassOfVarType(Prog, 'TM16', T) = rcIntSSE);
+    AssertTrue('int+float | int+int: INTEGER, INTEGER',
+      ClassOfVarType(Prog, 'TII', T) = rcInt2);
+    AssertTrue('double | int64: SSE, INTEGER',
+      ClassOfVarType(Prog, 'TDL', T) = rcSSEInt);
+    AssertTrue('three Singles: SSE, SSE',
+      ClassOfVarType(Prog, 'TFF', T) = rcSSE2);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization

@@ -474,26 +474,49 @@ begin
   Result := True;
 end;
 
-function RecretEightbyteIsSSE(ARec: TRecordTypeDesc; AStartByte: Integer): Boolean;
+{ True when a scalar leaf of AType (laid out from byte ABase) overlaps the
+  eightbyte at AStart and is a float (AFloat) or a non-float (not AFloat).
+  Walks nested records and static arrays. }
+function RecretEightbyteHasLeaf(AType: TTypeDesc; ABase, AStart: Integer;
+  AFloat: Boolean): Boolean;
 var
-  I, Off: Integer;
-  F:      TFieldInfo;
+  I, ESz: Integer;
+  F: TFieldInfo;
+  AT: TStaticArrayTypeDesc;
 begin
   Result := False;
-  if ARec = nil then Exit;
-  for I := 0 to ARec.Fields.Count - 1 do
+  if AType = nil then Exit;
+  if AType.Kind = tyRecord then
   begin
-    F   := TFieldInfo(ARec.Fields.Items[I]);
-    Off := F.Offset;
-    if (Off < AStartByte) or (Off >= AStartByte + 8) then Continue;
-    case F.TypeDesc.Kind of
-      tyDouble, tySingle:
+    for I := 0 to TRecordTypeDesc(AType).Fields.Count - 1 do
+    begin
+      F := TFieldInfo(TRecordTypeDesc(AType).Fields.Items[I]);
+      if RecretEightbyteHasLeaf(F.TypeDesc, ABase + F.Offset, AStart, AFloat) then
         Exit(True);
-      tyRecord:
-        if RecretEightbyteIsSSE(TRecordTypeDesc(F.TypeDesc),
-                          AStartByte - Off) then Exit(True);
     end;
+    Exit;
   end;
+  if AType.Kind = tyStaticArray then
+  begin
+    AT := TStaticArrayTypeDesc(AType);
+    ESz := AT.ElementType.RawSize();
+    for I := 0 to AT.HighBound - AT.LowBound do
+      if RecretEightbyteHasLeaf(AT.ElementType, ABase + I * ESz, AStart, AFloat) then
+        Exit(True);
+    Exit;
+  end;
+  if (ABase + AType.RawSize() <= AStart) or (ABase >= AStart + 8) then
+    Exit;
+  Result := (AType.Kind in [tyDouble, tySingle]) = AFloat;
+end;
+
+{ System V eightbyte class: SSE when every scalar in the eightbyte at
+  AStartByte is a float; one integer leaf makes it INTEGER. }
+function RecretEightbyteIsSSE(ARec: TRecordTypeDesc; AStartByte: Integer): Boolean;
+begin
+  Result := (ARec <> nil) and
+    RecretEightbyteHasLeaf(ARec, 0, AStartByte, True) and
+    not RecretEightbyteHasLeaf(ARec, 0, AStartByte, False);
 end;
 
 function RecretClassify(ARec: TRecordTypeDesc;
@@ -534,13 +557,20 @@ begin
   end;
 
   if not RecretAllIntOrFloatLeaves(ARec) then Exit;
+  { a mixed int/float record: an eightbyte holding any integer is INTEGER
+    class, one holding only floats SSE (System V) }
   case Sz of
+    8:
+      if RecretEightbyteIsSSE(ARec, 0) then Result := rcSSE1
+      else Result := rcInt1;
     9, 10, 11, 12, 13, 14, 15, 16:
       begin
         Eb0SSE := RecretEightbyteIsSSE(ARec, 0);
         Eb1SSE := RecretEightbyteIsSSE(ARec, 8);
         if      (not Eb0SSE) and Eb1SSE then Result := rcIntSSE
-        else if Eb0SSE and (not Eb1SSE) then Result := rcSSEInt;
+        else if Eb0SSE and (not Eb1SSE) then Result := rcSSEInt
+        else if Eb0SSE then Result := rcSSE2
+        else Result := rcInt2;
       end;
   end;
 end;
