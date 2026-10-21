@@ -1169,6 +1169,8 @@ type
     { A scratch slot holding a threadvar's address: an indirect sret destination. }
     function TlsSretDest(const AName: string): string;
     function NewScratchOperand(ASize: Integer): string;
+    function PreEvalCallRecv(AObjExpr: TASTExpr; const AObjectName: string;
+      AArgs: TObjectList): string;
     procedure EmitStaticArrayCallToRax(AExpr: TASTExpr);
     procedure CheckForwardedOpenArrayArg(AArg: TASTExpr);
     { %rax holds the address of an array FIELD (static: inline storage;
@@ -12277,6 +12279,7 @@ var
   HK:            TList<Integer>;
   HTotal:        Integer;
   RecvBufBytes:  Integer;
+  RecvSave:      string;
 begin
   { Interface method dispatch: receiver is an interface fat pointer; route
     through the itab rather than a static method symbol. }
@@ -12475,6 +12478,7 @@ begin
 
   UserSlots  := Self.CountArgSlots(MD.Params);
   TotalSlots := UserSlots + 1;
+  RecvSave := Self.PreEvalCallRecv(ACall.ObjExpr, ACall.ObjectName, ACall.Args);
 
   if TotalSlots <= 6 then
   begin
@@ -12531,6 +12535,8 @@ begin
     end
     else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
       Self.Emit(#9'movq %rbx, %r10')      { record-call receiver address }
+    else if RecvSave <> '' then
+      Self.Emit(Format(#9'movq %s, %%r10', [RecvSave]))
     else if ACall.ObjExpr <> nil then
     begin
       Self.EmitExprToEax(ACall.ObjExpr);
@@ -12604,6 +12610,8 @@ begin
     end
     else if (ACall.ObjExpr <> nil) and (RecvBufBytes > 0) then
       Self.Emit(#9'movq %rbx, %rax')      { record-call receiver address }
+    else if RecvSave <> '' then
+      Self.Emit(Format(#9'movq %s, %%rax', [RecvSave]))
     else if ACall.ObjExpr <> nil then
     begin
       Self.EmitExprToEax(ACall.ObjExpr);
@@ -13221,6 +13229,28 @@ begin
   FFrameTypes.Add(Name, nil);
   FFrameSize := (FFrameBottom + 15) and (-16);
   Result := Format('%d(%%rbp)', [-FFrameBottom]);
+end;
+
+{ A method call's receiver is evaluated before its arguments, as on arm64
+  and in FPC: MkH().Put(N) with MkH changing N passed the OLD N, because the
+  argument pushes come first and the receiver was loaded into %r10 last.  A
+  class receiver expression that contains a call (and so may have side
+  effects) is evaluated here, ahead of the arguments, into a scratch slot the
+  dispatch reads back.  Returns that slot, or '' when the receiver is loaded
+  at dispatch as before (a name, a plain designator, no arguments). }
+function TX86_64Backend.PreEvalCallRecv(AObjExpr: TASTExpr;
+  const AObjectName: string; AArgs: TObjectList): string;
+begin
+  Result := '';
+  if (AObjExpr = nil) or (AObjectName <> '') or (AArgs = nil) or
+     (AArgs.Count = 0) or (AObjExpr.ResolvedType = nil) or
+     (AObjExpr.ResolvedType.Kind <> tyClass) or
+     not AccessPathHasCall(AObjExpr) then
+    Exit;
+  Self.EmitExprToEax(AObjExpr);
+  Self.DeferOwnedClassRecv(AObjExpr);
+  Result := Self.NewScratchOperand(8);
+  Self.Emit(Format(#9'movq %%rax, %s', [Result]));
 end;
 
 procedure TX86_64Backend.EmitStaticArrayCallToRax(AExpr: TASTExpr);
@@ -14120,6 +14150,7 @@ var
   SretRT:        TRecordTypeDesc;
   SretShim:      TMethodCallExpr;
   RecvIdent:     TIdentExpr;
+  RecvSave:      string;
 begin
   { Metaclass-var constructor dispatch in statement position: C.Create(args)
     where C is a 'class of' variable and the result is discarded.  Only the
@@ -14521,6 +14552,7 @@ begin
 
   UserSlots  := Self.CountArgSlots(MD.Params);
   TotalSlots := UserSlots + 1;
+  RecvSave := Self.PreEvalCallRecv(ACall.ObjExpr, ACall.ObjectName, ACall.Args);
 
   if TotalSlots <= 6 then
   begin
@@ -14583,6 +14615,8 @@ begin
       end
       else Self.Emit(Format(#9'movq %s, %%r10', [Self.VarOperand(ACall.ObjectName)]));
     end
+    else if RecvSave <> '' then
+      Self.Emit(Format(#9'movq %s, %%r10', [RecvSave]))
     else if ACall.ObjExpr <> nil then
     begin
       Self.EmitExprToEax(ACall.ObjExpr);
@@ -14647,6 +14681,8 @@ begin
     begin
       Self.Emit(Format(#9'movq %s, %%rax', [Self.VarOperand(ACall.ObjectName)]));
     end
+    else if RecvSave <> '' then
+      Self.Emit(Format(#9'movq %s, %%rax', [RecvSave]))
     else if ACall.ObjExpr <> nil then
     begin
       Self.EmitExprToEax(ACall.ObjExpr);

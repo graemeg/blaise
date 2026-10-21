@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TMethodTests = class(TTestCase)
@@ -21,6 +21,10 @@ type
     function AnalyseSrc(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
   published
+    { a method call's receiver is evaluated BEFORE its arguments, as in FPC:
+      in MkH().Put(N) the receiver call comes first and N is loaded after it
+      (x86-64 pushed the arguments first and loaded the receiver last) }
+    procedure TestCodegen_CallReceiverEvaluatedBeforeArgs;
     { ------------------------------------------------------------------ }
     { Lexer                                                                }
     { ------------------------------------------------------------------ }
@@ -434,6 +438,52 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+
+procedure TMethodTests.TestCodegen_CallReceiverEvaluatedBeforeArgs;
+const
+  Src = '''
+    program P;
+    type
+      TH = class
+      public
+        V: Integer;
+        procedure Put(A: Integer);
+        function Get(A: Integer): Integer;
+      end;
+    var G: TH; N: Integer;
+    procedure TH.Put(A: Integer); begin V := A end;
+    function TH.Get(A: Integer): Integer; begin Result := A end;
+    function MkH(): TH; begin Inc(N); Result := G end;
+    begin
+      MkH().Put(N);
+      N := MkH().Get(N);
+    end.
+    ''';
+
+  function LoadBetween(const AAsm, ACall, AMethod, ALoad: string): Boolean;
+  var
+    P, Q: Integer;
+  begin
+    P := Pos(ACall, AAsm);
+    Q := Pos(AMethod, AAsm);
+    Result := (P >= 0) and (Q > P) and
+      (Pos(ALoad, Copy(AAsm, P, Q - P)) >= 0);
+  end;
+
+var
+  X, A: string;
+begin
+  X := GenAsm(Src, TargetX86_64);
+  A := GenAsm(Src, TargetArm64);
+  AssertTrue('x86-64 statement: N loaded after the receiver call',
+    LoadBetween(X, 'callq MkH', 'callq TH_Put', 'N(%rip)'));
+  AssertTrue('x86-64 expression: N loaded after the receiver call',
+    LoadBetween(Copy(X, Pos('callq TH_Put', X), Length(X)), 'callq MkH',
+      'callq TH_Get', 'N(%rip)'));
+  AssertTrue('arm64 statement: N loaded after the receiver call',
+    LoadBetween(A, 'bl _MkH', 'bl _TH_Put', '_g_N@PAGEOFF'));
 end;
 
 initialization

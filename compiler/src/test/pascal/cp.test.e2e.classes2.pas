@@ -22,6 +22,12 @@ type
   protected
     procedure SetUp; override;
   published
+    { a method call's receiver is evaluated before its arguments, as in FPC
+      and on arm64: a receiver call that changes an argument's variable is
+      seen by the argument, in a statement, an expression, the >6-slot path,
+      a nested call and through a default-property setter (x86-64 evaluated
+      the arguments first) }
+    procedure TestRun_CallReceiverEvaluatedBeforeArgs;
     { metaclass values in static- and dynamic-array elements, written by
       element store and by a literal, read back and compared }
     procedure TestRun_MetaclassArrayElements;
@@ -3622,6 +3628,48 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'TrueTrueTrue' + LE + 'False True True ' + LE, 0);
+end;
+
+
+procedure TE2EClasses2Tests.TestRun_CallReceiverEvaluatedBeforeArgs;
+const
+  Src = '''
+    program P;
+    type
+      TH = class
+      private
+        function GetI(I: Integer): Integer;
+        procedure SetI(I: Integer; A: Integer);
+      public
+        V: Integer;
+        procedure Put(A: Integer);
+        function Get(A: Integer): Integer;
+        procedure Put7(A, B, C, D, E, F, G: Integer);
+        property Items[I: Integer]: Integer read GetI write SetI; default;
+      end;
+    var G: TH; N: Integer;
+    function TH.GetI(I: Integer): Integer; begin Result := V; end;
+    procedure TH.SetI(I: Integer; A: Integer); begin V := A; end;
+    procedure TH.Put(A: Integer); begin V := A; end;
+    function TH.Get(A: Integer): Integer; begin Result := A; end;
+    procedure TH.Put7(A, B, C, D, E, F, G: Integer); begin V := G; end;
+    function MkH(): TH; begin Inc(N); Result := G; end;
+    begin
+      G := TH.Create();
+      N := 0; MkH().Put(N); WriteLn('stmt ', G.V);
+      N := 0; WriteLn('expr ', MkH().Get(N));
+      N := 0; MkH().Put7(0, 0, 0, 0, 0, 0, N); WriteLn('stmt7 ', G.V);
+      N := 0; G.Put(MkH().Get(N) + N); WriteLn('nested ', G.V);
+      N := 0; MkH()[0] := N; WriteLn('setter ', G.V);
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  AssertRunsOnAll(Src,
+    'stmt 1' + LE + 'expr 1' + LE + 'stmt7 1' + LE + 'nested 2' + LE +
+    'setter 1' + LE, 0);
 end;
 
 initialization
