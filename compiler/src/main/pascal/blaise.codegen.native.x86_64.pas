@@ -14236,8 +14236,9 @@ begin
     the ctor through the vtable; without this branch the generic dispatch
     below loads the metaclass typeinfo pointer as the object and calls a
     garbage vtable slot — crashing at runtime.  (A non-metaclass ctor as a
-    statement, TFoo.Create();, is rejected by the semantic pass as 'not a
-    variable', so only the metaclass shape reaches here.)  The instance comes
+    statement, TFoo.Create();, is rewritten by the semantic pass into this
+    shape, with the class-reference value TFoo as the receiver.)  The
+    instance comes
     back from _ClassCreate at refcount 1; the result is discarded, so we
     release it once afterwards to free rather than leak it. }
   if ACall.IsConstructorCall and ACall.IsMetaclassDispatch then

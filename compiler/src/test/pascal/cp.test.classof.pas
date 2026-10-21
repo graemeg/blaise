@@ -63,6 +63,24 @@ type
       expression position: metaclass dispatch on the receiver expression
       (all of these were rejected) }
     procedure TestSemantic_MetaclassExprReceiver_Create_Accepted;
+
+    { TFoo.Create(args); with the result discarded: construction through
+      the class-reference value TFoo (it was "not a static method") }
+    procedure TestSemantic_DiscardedTypeNameCreate_IsMetaclassCtor;
+    procedure TestSemantic_DiscardedTypeNameCreate_AbstractRejected;
+
+    { a static method through a class reference -- a variable, a field, an
+      element, a call result -- in statement and expression position: a
+      static call on the reference's declared class }
+    procedure TestSemantic_StaticMethodViaClassRef_IsStaticCall;
+    procedure TestSemantic_InstanceMethodViaClassRef_Rejected;
+
+    { a constructor called as a method on an instance re-ran it on a live
+      object; only a constructor calling another one on Self is kept }
+    procedure TestSemantic_CtorOnInstance_Rejected;
+    procedure TestSemantic_CtorOnSelfOutsideCtor_Rejected;
+    procedure TestSemantic_BareCtorOutsideCtor_Rejected;
+    procedure TestSemantic_CtorChainingInCtor_Accepted;
   end;
 
 implementation
@@ -451,6 +469,203 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TClassOfTests.TestSemantic_DiscardedTypeNameCreate_IsMetaclassCtor;
+const Src = '''
+    program P;
+    type
+      TFoo = class(TObject)
+        constructor Create(N: Integer);
+      end;
+      TBar = class(TObject) end;
+    constructor TFoo.Create(N: Integer); begin end;
+    begin
+      TFoo.Create(1);
+      TBar.Create()
+    end.
+    ''';
+var
+  Prog: TProgram;
+  I: Integer;
+  S: TMethodCallStmt;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    for I := 0 to 1 do
+    begin
+      S := TMethodCallStmt(Prog.Block.Stmts.Items[I]);
+      AssertTrue('statement ' + IntToStr(I) + ' constructs through the class',
+        S.IsConstructorCall and S.IsMetaclassDispatch and (S.ObjExpr <> nil));
+    end;
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TClassOfTests.TestSemantic_DiscardedTypeNameCreate_AbstractRejected;
+const Src = '''
+    program P;
+    type
+      TShape = class(TObject)
+        function Area(): Integer; virtual; abstract;
+      end;
+    begin
+      TShape.Create()
+    end.
+    ''';
+begin
+  AnalyseExpectErrorMsg(Src, 'Cannot instantiate abstract class');
+end;
+
+procedure TClassOfTests.TestSemantic_StaticMethodViaClassRef_IsStaticCall;
+const Src = '''
+    program P;
+    type
+      TFoo = class(TObject)
+        static function Make(N: Integer): Integer;
+        static procedure Note();
+      end;
+      TFooClass = class of TFoo;
+      THolder = class
+        FCls: TFooClass;
+        procedure Run();
+      end;
+    static function TFoo.Make(N: Integer): Integer; begin Result := N end;
+    static procedure TFoo.Note(); begin end;
+    function GetCls(): TFooClass; begin Result := TFoo end;
+    procedure THolder.Run();
+    var N: Integer;
+    begin
+      FCls.Note();
+      N := FCls.Make(1)
+    end;
+    var C: TFooClass; A: array of TFooClass; H: THolder; N: Integer;
+    begin
+      C.Note();
+      A[0].Note();
+      GetCls().Note();
+      H.FCls.Note();
+      N := C.Make(1);
+      N := A[0].Make(2);
+      N := GetCls().Make(3);
+      N := H.FCls.Make(4)
+    end.
+    ''';
+var
+  Prog: TProgram;
+  I: Integer;
+  S: TMethodCallStmt;
+  E: TMethodCallExpr;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    for I := 0 to 3 do
+    begin
+      S := TMethodCallStmt(Prog.Block.Stmts.Items[I]);
+      AssertTrue('statement ' + IntToStr(I) + ' is a static call',
+        S.IsStaticCall and not S.IsMetaclassDispatch);
+    end;
+    for I := 4 to 7 do
+    begin
+      E := TMethodCallExpr(TAssignment(Prog.Block.Stmts.Items[I]).Expr);
+      AssertTrue('expression ' + IntToStr(I) + ' is a static call',
+        E.IsStaticCall and not E.IsMetaclassDispatch);
+    end;
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TClassOfTests.TestSemantic_InstanceMethodViaClassRef_Rejected;
+const Src = '''
+    program P;
+    type
+      TFoo = class(TObject)
+        procedure Show();
+      end;
+      TFooClass = class of TFoo;
+    procedure TFoo.Show(); begin end;
+    var C: TFooClass;
+    begin
+      C := TFoo;
+      C.Show()
+    end.
+    ''';
+begin
+  AnalyseExpectErrorMsg(Src, 'only constructors and static methods');
+end;
+
+procedure TClassOfTests.TestSemantic_CtorOnInstance_Rejected;
+const Src = '''
+    program P;
+    type
+      TFoo = class(TObject)
+        constructor Create(N: Integer);
+      end;
+    constructor TFoo.Create(N: Integer); begin end;
+    var F: TFoo;
+    begin
+      F := TFoo.Create(1);
+      F.Create(2)
+    end.
+    ''';
+begin
+  AnalyseExpectErrorMsg(Src, 'called on an instance');
+end;
+
+procedure TClassOfTests.TestSemantic_CtorOnSelfOutsideCtor_Rejected;
+const Src = '''
+    program P;
+    type
+      TFoo = class(TObject)
+        constructor Create(N: Integer);
+        procedure Reset();
+      end;
+    constructor TFoo.Create(N: Integer); begin end;
+    procedure TFoo.Reset(); begin Self.Create(0) end;
+    begin
+    end.
+    ''';
+begin
+  AnalyseExpectErrorMsg(Src, 'called on an instance');
+end;
+
+procedure TClassOfTests.TestSemantic_BareCtorOutsideCtor_Rejected;
+const Src = '''
+    program P;
+    type
+      TFoo = class(TObject)
+        constructor Create(N: Integer);
+        procedure Reset();
+      end;
+    constructor TFoo.Create(N: Integer); begin end;
+    procedure TFoo.Reset(); begin Create(0) end;
+    begin
+    end.
+    ''';
+begin
+  AnalyseExpectErrorMsg(Src, 'called on an instance');
+end;
+
+procedure TClassOfTests.TestSemantic_CtorChainingInCtor_Accepted;
+const Src = '''
+    program P;
+    type
+      TFoo = class(TObject)
+        X: Integer;
+        constructor Create(N: Integer); overload;
+        constructor Create(); overload;
+        constructor CreateTwo();
+      end;
+    constructor TFoo.Create(N: Integer); begin X := N end;
+    constructor TFoo.Create(); begin Self.Create(5) end;
+    constructor TFoo.CreateTwo(); begin Create(7) end;
+    begin
+    end.
+    ''';
+begin
+  AnalyseSrc(Src).Free();
 end;
 
 procedure TClassOfTests.TestSemantic_MetaclassVar_BareCreate_RequiresParens;

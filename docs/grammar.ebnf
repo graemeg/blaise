@@ -1596,15 +1596,22 @@ Decimals      = Expr ;
  *
  * IDENT DOT IDENT in Factor:
  *   - Left IDENT resolves to a type symbol → constructor call (TypeName.Create)
- *   - Left IDENT resolves to a metaclass variable and right IDENT is a
- *     constructor name → metaclass constructor dispatch (_ClassCreate +
- *     vtable-indirect call to the most-derived Create body)
+ *   - Left side is a class reference (a metaclass variable, field, element
+ *     or call result) and right IDENT is a constructor name → metaclass
+ *     constructor dispatch (_ClassCreate + vtable-indirect call to the
+ *     most-derived Create body)
+ *   - Left side is a class reference and right IDENT is a static method →
+ *     static call on the reference's declared class (receiver not evaluated)
  *   - Left IDENT resolves to a class variable → class field read
  *   - Left IDENT resolves to a record variable → record field read
  *
  * IDENT DOT IDENT in Stmt:
  *   - Followed by ASSIGN → FieldAssignment (record/class field write)
- *   - Otherwise → MethodCall
+ *   - Otherwise → MethodCall.  TypeName.Create(args); with the result
+ *     discarded constructs and releases (as the class-reference form).  A
+ *     constructor called on an INSTANCE is rejected, except one constructor
+ *     calling another on Self (Self.Create(...) or bare Create(...)) inside
+ *     a constructor body.
  *
  * Generic instantiation vs. comparison:
  *   IDENT LESS ... is disambiguated by two-token lookahead.  LESS is treated

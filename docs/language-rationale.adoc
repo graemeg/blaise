@@ -3194,6 +3194,73 @@ records it (`IsConstructor`, carried in the `.bif`).
 
 ---
 
+== Constructors and Static Methods Through a Receiver
+
+=== Decision
+
+* *A constructor runs through any class reference.*  `Cls.Create(args)`
+  constructs whether `Cls` is a variable, a `var` parameter, a field (of
+  `Self` or of another object), an array element or a call result, in
+  statement and expression position.  Each is the metaclass dispatch of
+  <<_implicit_virtual_constructor_dispatch_via_metaclass>>: the most-derived
+  constructor of the class the reference holds runs.
+* *`TFoo.Create(args);` as a statement is allowed.*  The result is
+  discarded: the object is constructed and released at once, so it survives
+  only if the constructor stored a reference to itself — a self-registering
+  object, kept by its registry.  It lowers exactly as the class-reference
+  statement `Cls.Create(args);`.  An abstract class is rejected, as in
+  expression position.
+* *A static method can be called through a class reference.*  `C.M(args)`
+  is a static call of `M` on `C`'s declared class.  Static methods are not
+  virtual, so the class `C` holds at run time plays no part, and `C` is not
+  evaluated — the same rule as a static method called through an instance.
+  Any other method through a class reference is an error: a class reference
+  calls only constructors and static methods.
+* *A constructor called on an instance is an error* — `Obj.Create(...)`,
+  `Self.Create(...)` or a bare `Create(...)` in an ordinary method.  The one
+  exception is a constructor calling another constructor of its class on
+  `Self`, directly in a constructor body (`Self.Create(0)` or `Create(0)`),
+  which runs that constructor's body on the object under construction.
+  `inherited Create(...)` is unaffected.
+
+=== Rationale
+
+FPC and Delphi accept all of the first three.  Before 2026-10-21 Blaise
+accepted only a class-reference *variable* as a constructor receiver
+(copying a field into a local was the workaround, and a `var` parameter
+compiled but loaded the parameter's address as the class reference), rejected
+the discarded `TFoo.Create();` as "not a static method" although the
+class-reference spelling of the same statement was accepted, and rejected a
+static call through a class reference outright.  Under ARC the discarded
+construction does not leak, which is the usual reason to warn about it in
+Delphi, so no warning is given.
+
+Binding a static call to the declared class is the only reading available:
+Blaise has no virtual static methods (Delphi's `class function ... virtual`),
+so there is no slot to dispatch through.  A factory chosen by the run-time
+class is a constructor's job, which does dispatch through the reference.
+
+A constructor called as a method allocates nothing — it re-runs the body on
+an existing object.  Blaise accepted that on an instance only when the class
+declared its own `Create`, and rejected it when `Create` was inherited from
+`TObject`, so the same statement's meaning depended on an unrelated
+declaration.  Outside constructor chaining it is almost always the slip
+`FChild.Create;` for `FChild := TChild.Create;`, which in Delphi calls the
+constructor with a nil `Self`.  Constructor chaining (`constructor Create;
+begin Create(0) end;`) is a common Delphi idiom and stays legal.
+
+=== Alternatives rejected
+
+* *Warn on a discarded `TFoo.Create();`.*  Rejected: the self-registering
+  constructor is a legitimate pattern, ARC makes the other case harmless,
+  and FPC does not warn either.
+* *Dispatch a static call on the class the reference holds.*  Rejected: it
+  would need virtual static methods, a separate language decision.
+* *Allow a constructor on any instance, as Delphi does.*  Rejected for the
+  reasons above; chaining inside a constructor covers the legitimate use.
+
+---
+
 == `case` Statement on String Selector
 
 === Decision
@@ -6930,8 +6997,11 @@ and is not passed), or bare inside any method of the type, static or not
 (`P := V`, `P[I]`).  A static method called through an instance (`H.M()`)
 likewise takes no `Self`.  Each form lowers to the plain static call or the
 static var, so a value of any kind -- an owned object, a float, a record --
-travels exactly as in an explicit `TFoo.SetP(V)`.  (Delphi accepts the same
-forms for `class` members.  Until 2026-10-21 only the type-name read worked:
+travels exactly as in an explicit `TFoo.SetP(V)`.  A class reference names
+its declared class the same way: `C.M()` with `C: class of TFoo` is
+`TFoo.M()`, whichever class `C` holds at run time, and the receiver is not
+evaluated (see <<_constructors_and_static_methods_through_a_receiver>>).
+(Delphi accepts the same forms for `class` members.  Until 2026-10-21 only the type-name read worked:
 a write through the type name was rejected, a bare use inside a method was
 undeclared, a static-var accessor was taken for a method, and through an
 instance the x86-64 backend passed the instance as a first argument.)

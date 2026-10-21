@@ -211,6 +211,16 @@ type
       expression: the derived virtual constructor runs with its arguments
       (and a defaulted one), and every instance is freed }
     procedure TestRun_MetaclassCreate_ExpressionReceivers;
+    { TFoo.Create(args); discarded: the constructor runs and the object is
+      freed, unless the constructor kept a reference (a self-registering
+      object stays alive in its registry) }
+    procedure TestRun_DiscardedTypeNameCreate;
+    { a static method through a class reference held in a variable, a field,
+      an element and a call result, as a statement and an expression: bound
+      to the reference's declared class }
+    procedure TestRun_StaticMethodViaClassRef;
+    { one constructor calling another on Self, explicitly and bare }
+    procedure TestRun_CtorChaining;
     { Direct TFoo.Create stays static (no vtable dispatch). }
     procedure TestRun_DirectCreate_StaysStatic;
     { ClassCreate builtin still works (backwards compat) and now dispatches
@@ -2668,6 +2678,130 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, Expected, 0);
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EClasses2Tests.TestRun_DiscardedTypeNameCreate;
+const
+  Src = '''
+    program P;
+    type
+      TNote = class
+        constructor Create(const S: string);
+        destructor Destroy(); override;
+      end;
+      TPlugin = class
+        Name: string;
+        constructor Create(const AName: string);
+        destructor Destroy(); override;
+      end;
+    var
+      Registry: array of TPlugin;
+    constructor TNote.Create(const S: string); begin WriteLn('note ', S) end;
+    destructor TNote.Destroy(); begin WriteLn('note gone'); inherited Destroy() end;
+    constructor TPlugin.Create(const AName: string);
+    begin
+      Name := AName;
+      SetLength(Registry, Length(Registry) + 1);
+      Registry[High(Registry)] := Self
+    end;
+    destructor TPlugin.Destroy(); begin WriteLn('plugin gone ', Name); inherited Destroy() end;
+    begin
+      TNote.Create('a');
+      WriteLn('after note');
+      TPlugin.Create('p1');
+      TPlugin.Create('p2');
+      WriteLn('plugins ', Length(Registry), ' ', Registry[0].Name, ' ', Registry[1].Name);
+      SetLength(Registry, 0);
+      WriteLn('end')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'note a' + LE + 'note gone' + LE + 'after note' + LE +
+    'plugins 2 p1 p2' + LE + 'plugin gone p1' + LE + 'plugin gone p2' + LE +
+    'end' + LE, 0);
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EClasses2Tests.TestRun_StaticMethodViaClassRef;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    type
+      TBase = class
+        static function Kind(N: Integer): string;
+        static procedure Note(const S: string);
+      end;
+      TDerived = class(TBase) end;
+      TBaseClass = class of TBase;
+      THolder = class
+        FCls: TBaseClass;
+        procedure Run();
+      end;
+    static function TBase.Kind(N: Integer): string; begin Result := 'base' + IntToStr(N) end;
+    static procedure TBase.Note(const S: string); begin WriteLn('note ', S) end;
+    function GetCls(): TBaseClass; begin Result := TDerived end;
+    procedure THolder.Run();
+    begin
+      FCls.Note('self field');
+      WriteLn(FCls.Kind(1))
+    end;
+    var
+      C: TBaseClass;
+      A: array of TBaseClass;
+      H: THolder;
+    begin
+      C := TDerived;
+      C.Note('var');
+      WriteLn(C.Kind(2));
+      SetLength(A, 1);
+      A[0] := TDerived;
+      A[0].Note('element');
+      WriteLn(A[0].Kind(3));
+      GetCls().Note('call');
+      WriteLn(GetCls().Kind(4));
+      H := THolder.Create();
+      H.FCls := TDerived;
+      H.FCls.Note('field');
+      WriteLn(H.FCls.Kind(5));
+      H.Run()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'note var' + LE + 'base2' + LE +
+    'note element' + LE + 'base3' + LE + 'note call' + LE + 'base4' + LE +
+    'note field' + LE + 'base5' + LE + 'note self field' + LE + 'base1' + LE, 0);
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EClasses2Tests.TestRun_CtorChaining;
+const
+  Src = '''
+    program P;
+    type
+      TPt = class
+        X, Y: Integer;
+        constructor Create(AX, AY: Integer); overload;
+        constructor Create(); overload;
+        constructor CreateDiag(N: Integer);
+      end;
+    constructor TPt.Create(AX, AY: Integer); begin X := AX; Y := AY end;
+    constructor TPt.Create(); begin Self.Create(1, 2); X := X + 10 end;
+    constructor TPt.CreateDiag(N: Integer); begin Create(N, N) end;
+    var Pt: TPt;
+    begin
+      Pt := TPt.Create();
+      WriteLn(Pt.X, ' ', Pt.Y);
+      Pt := TPt.CreateDiag(7);
+      WriteLn(Pt.X, ' ', Pt.Y)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '11 2' + LE + '7 7' + LE, 0);
   AssertLeakFreeOnAll(Src, '');
 end;
 

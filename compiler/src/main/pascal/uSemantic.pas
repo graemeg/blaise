@@ -374,6 +374,22 @@ type
     procedure ResolveMetaclassCtorStmt(ACall: TMethodCallStmt; AMeta: TTypeDesc);
     function  ResolveMetaclassCtorExpr(AExpr: TMethodCallExpr;
       AMeta: TTypeDesc): TTypeDesc;
+    { Cls.M(args) with Cls a class reference (AMeta) and M not a
+      constructor: M must be static, and binds to the reference's DECLARED
+      class -- a static method takes no Self, so the class the reference
+      holds at run time plays no part (as for a call through an instance).
+      The receiver is not evaluated. }
+    procedure ResolveMetaclassStaticStmt(ACall: TMethodCallStmt; AMeta: TTypeDesc);
+    function  ResolveMetaclassStaticExpr(AExpr: TMethodCallExpr;
+      AMeta: TTypeDesc): TTypeDesc;
+    function  MetaclassStaticDecl(AMeta: TTypeDesc; const AName: string;
+      AArgs: TObjectList; ALine, ACol: Integer): TMethodDecl;
+    { A constructor called as an ordinary method (no allocation) runs it
+      again on a live object.  Only one constructor calling another on Self,
+      directly inside a constructor, means that; anywhere else it is the
+      `Obj.Create` slip for `Obj := TFoo.Create()`, so it is rejected. }
+    procedure CheckCtorAsMethod(ADecl: TObject; AOnSelf: Boolean;
+      ALine, ACol: Integer);
     function  IsStringConstExpr(AExpr: TASTExpr): Boolean;
     function  EvalConstStrExpr(AExpr: TASTExpr; ALine, ACol: Integer): string;
     function  ConstExprOrdinalType(AExpr: TASTExpr): TTypeDesc;
@@ -6699,6 +6715,83 @@ begin
   Result := RT;
 end;
 
+procedure TSemanticAnalyser.CheckCtorAsMethod(ADecl: TObject;
+  AOnSelf: Boolean; ALine, ACol: Integer);
+var
+  MD: TMethodDecl;
+begin
+  if not (ADecl is TMethodDecl) then
+    Exit;
+  MD := TMethodDecl(ADecl);
+  if not MD.IsConstructor then
+    Exit;
+  if AOnSelf and (FCurrentMethodDecl <> nil) and
+     FCurrentMethodDecl.IsConstructor then
+    Exit;
+  SemanticError(
+    Format('Constructor ''%s'' called on an instance — to create an object ' +
+      'write X := TClass.%s(...); only a constructor may call another ' +
+      'constructor on Self', [MD.Name, MD.Name]),
+    ALine, ACol);
+end;
+
+function TSemanticAnalyser.MetaclassStaticDecl(AMeta: TTypeDesc;
+  const AName: string; AArgs: TObjectList; ALine, ACol: Integer): TMethodDecl;
+var
+  RT: TRecordTypeDesc;
+begin
+  RT := TRecordTypeDesc(TMetaClassTypeDesc(AMeta).BaseClass);
+  Result := ResolveMethodOverload(RT.Name, AName, AArgs, ALine, ACol);
+  if Result = nil then
+    SemanticError(
+      Format('Class ''%s'' has no method ''%s''', [RT.Name, AName]),
+      ALine, ACol);
+  if not Result.IsStatic then
+    SemanticError(
+      Format('''%s.%s'' is not a static method — a class reference calls ' +
+        'only constructors and static methods', [RT.Name, AName]),
+      ALine, ACol);
+  RetypeSetLiteralArgs(AArgs, Result);
+  CheckConstArgsInRange(AArgs, Result, ALine, ACol);
+  AppendDefaultArgs(AArgs, Result, AName, ALine, ACol);
+  ValidateMethodVarArgs(AArgs, Result, AName, ALine, ACol);
+  EnforceMethodVisible(Result, ALine, ACol);
+end;
+
+procedure TSemanticAnalyser.ResolveMetaclassStaticStmt(ACall: TMethodCallStmt;
+  AMeta: TTypeDesc);
+var
+  MDecl: TMethodDecl;
+  I: Integer;
+begin
+  for I := 0 to ACall.Args.Count - 1 do
+    Self.AnalyseArgSlot(ACall.Args, I);
+  MDecl := Self.MetaclassStaticDecl(AMeta, ACall.Name, ACall.Args,
+    ACall.Line, ACall.Col);
+  ResolveDeferredArrowArgs(ACall.Args, MDecl);
+  ACall.ResolvedClassType := TMetaClassTypeDesc(AMeta).BaseClass;
+  ACall.ResolvedMethod := MDecl;
+  ACall.ResolvedReturnTypeDesc := MDecl.ResolvedReturnType;
+  ACall.IsStaticCall := True;
+end;
+
+function TSemanticAnalyser.ResolveMetaclassStaticExpr(AExpr: TMethodCallExpr;
+  AMeta: TTypeDesc): TTypeDesc;
+var
+  MDecl: TMethodDecl;
+  I: Integer;
+begin
+  for I := 0 to AExpr.Args.Count - 1 do
+    Self.AnalyseListSlot(AExpr.Args, I);
+  MDecl := Self.MetaclassStaticDecl(AMeta, AExpr.Name, AExpr.Args,
+    AExpr.Line, AExpr.Col);
+  AExpr.ResolvedClassType := TMetaClassTypeDesc(AMeta).BaseClass;
+  AExpr.ResolvedMethod := MDecl;
+  AExpr.IsStaticCall := True;
+  Result := MDecl.ResolvedReturnType;
+  AExpr.ResolvedType := Result;
+end;
+
 { A named constant referenced from a constant expression.  While a type's
   member consts are folded (FConstOwner), a bare sibling name resolves to the
   qualified member first, as it does inside the type's methods. }
@@ -12710,6 +12803,11 @@ begin
   else if AStmt is TMethodCallStmt then
   begin
     AnalyseMethodCall(TMethodCallStmt(AStmt));
+    if not TMethodCallStmt(AStmt).IsConstructorCall then
+      Self.CheckCtorAsMethod(TMethodCallStmt(AStmt).ResolvedMethod,
+        SameText(TMethodCallStmt(AStmt).ObjectName, 'Self') and
+          (TMethodCallStmt(AStmt).ObjExpr = nil),
+        AStmt.Line, AStmt.Col);
     { a static method takes no Self, whatever the receiver: H.M() through an
       instance is the same call as THost.M().  Only the class-name form set
       the flag, so x86-64 passed the instance as a first argument (arm64
@@ -12805,6 +12903,11 @@ begin
          ACall.Name) then
     begin
       Self.ResolveMetaclassCtorStmt(ACall, ObjType);
+      Exit;
+    end;
+    if (ObjType <> nil) and (ObjType.Kind = tyMetaClass) then
+    begin
+      Self.ResolveMetaclassStaticStmt(ACall, ObjType);
       Exit;
     end;
     { A RECORD receiver is legal when the call is really an invocation of a
@@ -12906,6 +13009,25 @@ begin
      (ObjSym.TypeDesc.Kind in [tyClass, tyRecord]) then
   begin
     RT := TRecordTypeDesc(ObjSym.TypeDesc);
+    if (RT.Kind = tyClass) and Self.CallsConstructor(RT, ACall.Name) then
+    begin
+      { TFoo.Create(args); with the result discarded: construct through the
+        class-reference value TFoo -- allocate, run the constructor, release.
+        The object survives only if the constructor kept a reference to it
+        (a self-registering object), as FPC and Delphi allow. }
+      if RT.HasAbstractMethods then
+        SemanticError(
+          Format('Cannot instantiate abstract class ''%s''', [RT.Name]),
+          ACall.Line, ACall.Col);
+      RecvIdent := TIdentExpr.Create();
+      RecvIdent.Line := ACall.Line;
+      RecvIdent.Col := ACall.Col;
+      RecvIdent.Name := ACall.ObjectName;
+      ACall.ObjExpr := RecvIdent;
+      ACall.ObjectName := '';
+      Self.AnalyseMethodCall(ACall);
+      Exit;
+    end;
     for I := 0 to ACall.Args.Count - 1 do
       Self.AnalyseArgSlot(ACall.Args, I);
     MDecl := ResolveMethodOverload(RT.Name, ACall.Name, ACall.Args,
@@ -13065,6 +13187,12 @@ begin
     Self.ResolveMetaclassCtorStmt(ACall, ObjSym.TypeDesc);
     ACall.IsGlobal            := ObjSym.IsGlobal;
     ACall.IsVarParam          := RecvSlotHoldsAddress(ObjSym);
+    Exit;
+  end;
+
+  if ObjSym.TypeDesc.Kind = tyMetaClass then
+  begin
+    Self.ResolveMetaclassStaticStmt(ACall, ObjSym.TypeDesc);
     Exit;
   end;
 
@@ -15699,6 +15827,7 @@ begin
       RetypeSetLiteralArgs(ACall.Args, MDecl);
       CheckConstArgsInRange(ACall.Args, MDecl, ACall.Line, ACall.Col);
       AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
+      Self.CheckCtorAsMethod(MDecl, True, ACall.Line, ACall.Col);
       ACall.ResolvedDecl         := MDecl;
       ACall.IsImplicitSelfMethod := True;
       Exit;
@@ -16486,6 +16615,7 @@ begin
       RetypeSetLiteralArgs(AExpr.Args, MDecl);
       CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
       AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
+      Self.CheckCtorAsMethod(MDecl, True, AExpr.Line, AExpr.Col);
       AExpr.ResolvedDecl         := MDecl;
       AExpr.IsImplicitSelfMethod := True;
       Result := MDecl.ResolvedReturnType;
@@ -17363,6 +17493,11 @@ begin
       Result := Self.ResolveMetaclassCtorExpr(AExpr, ObjType);
       Exit;
     end;
+    if ObjType.Kind = tyMetaClass then
+    begin
+      Result := Self.ResolveMetaclassStaticExpr(AExpr, ObjType);
+      Exit;
+    end;
 
     if not (ObjType.Kind in [tyClass, tyInterface, tyRecord]) then
       SemanticError(
@@ -17526,6 +17661,13 @@ begin
           receiver expression just analysed reads the field }
         AExpr.ObjectName := '';
         Result := Self.ResolveMetaclassCtorExpr(AExpr, ObjType);
+        Exit;
+      end;
+      if (ObjType <> nil) and (ObjType.Kind = tyMetaClass) then
+      begin
+        { FCls.M(args) with FCls a class-reference field of Self }
+        AExpr.ObjectName := '';
+        Result := Self.ResolveMetaclassStaticExpr(AExpr, ObjType);
         Exit;
       end;
       if (ObjType = nil) or not (ObjType.Kind in [tyClass, tyInterface]) then
@@ -17793,6 +17935,12 @@ begin
     Result := Self.ResolveMetaclassCtorExpr(AExpr, ObjSym.TypeDesc);
     AExpr.IsGlobal            := ObjSym.IsGlobal;
     AExpr.IsVarParam          := (ObjSym.Kind = skVarParameter);
+    Exit;
+  end;
+
+  if ObjSym.TypeDesc.Kind = tyMetaClass then
+  begin
+    Result := Self.ResolveMetaclassStaticExpr(AExpr, ObjSym.TypeDesc);
     Exit;
   end;
 
