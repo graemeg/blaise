@@ -15032,8 +15032,10 @@ begin
               else if (ElT <> nil) and (ElT.Kind = tyDynArray) then
                 TransShapes := TransShapes + 'D'
               else
-                NotYet('owned transient of this type in an open-array literal',
-                  Arg);
+                { an interface, record or closure literal is a temporary
+                  dynamic array (OALitNeedsDynArray), never a block }
+                InternalError('owned transient of this type in an ' +
+                  'open-array literal block', Arg);
               EmitStoreSlot('x0', StrTransSlot(TransTop + TransN));
               Inc(TransN);
               FStrTransTop := TransTop + TransN;
@@ -15107,7 +15109,9 @@ begin
           PopRegs.Add(Self.NextIntArgDest(NInt, StackOff));
         end
         else
-          NotYet('open-array argument from this expression', Arg);
+          { the semantic pass binds an open-array formal only to a literal,
+            a static array, a dynamic array or an open-array parameter }
+          InternalError('open-array argument from this expression', Arg);
       end
       else if (I < ADecl.Params.Count) and
          TMethodParam(ADecl.Params.Items[I]).IsVarParam then
@@ -15691,7 +15695,9 @@ begin
         end;
       end
       else
-        NotYet('call argument of this type', Arg);
+        { every value type kind has an arm above; C variadic extras are
+          limited to scalars by ValidateVarArgsExtras }
+        InternalError('call argument of this type', Arg);
     end;
     { pop last-pushed-first into each value's pre-assigned register }
     for I := PopRegs.Count - 1 downto 0 do
@@ -16762,7 +16768,8 @@ begin
     { P^: the variable a pointer designates lives at the pointer's value }
     Self.EmitExprToX0(TDerefExpr(Arg).Expr)
   else
-    NotYet('var argument from this expression', Arg);
+    { IsVarArgLValue admits only the forms above }
+    InternalError('var argument from this expression', Arg);
 end;
 
 procedure TArm64Backend.EmitIntfDispatch(const AVarName: string;
