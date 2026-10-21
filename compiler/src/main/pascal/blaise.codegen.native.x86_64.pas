@@ -1144,6 +1144,7 @@ type
     { Evaluate one method-call argument and push it onto the stack.  Scalar and
       var/out params push one value; interface params push two (itab first, then
       obj — reversed so the pop loop restores them in the correct register order). }
+    procedure PushOpenArrayArg(AArg: TASTExpr);
     procedure EmitMethodArgPush(APar: TMethodParam; AArg: TASTExpr);
     { Push an argument for an interface parameter: obj, then itab on top }
     procedure PushIntfArg(AArg: TASTExpr; AIntfType: TTypeDesc);
@@ -1161,6 +1162,8 @@ type
     procedure EmitStaticArrayArgAddrToRax(AArg: TASTExpr);
     function IsOwnedClassOperand(AExpr: TASTExpr): Boolean;
     procedure EmitReleaseParkedClass;
+    function IntfParamIsOpenArray(AIntf: TInterfaceTypeDesc;
+      const AMethName: string; AIndex: Integer): Boolean;
     function IntfParamTypeAt(AIntf: TInterfaceTypeDesc; const AMethName: string;
       AIndex: Integer; AArg: TASTExpr): TTypeDesc;
     function IntfArgSlotClasses(AIntf: TInterfaceTypeDesc;
@@ -1306,6 +1309,9 @@ type
     { Reads the AIndex'th flag of a MethodParamVarFlagsStr-style '1'/'0'
       comma list; False when out of range or empty. }
     function  VarFlagAt(const AFlags: string; AIndex: Integer): Boolean;
+    function  OAFlagAt(const AFlags: string; AIndex: Integer): Boolean;
+    function  IntfHoistFlags(AIntf: TInterfaceTypeDesc;
+      const AMethName, AVarFlags: string): string;
     { Total of the innermost open call frame — used by sret call paths to
       address a dest pointer saved just below the hoist region. }
     function  TopFrameTotal: Integer;
@@ -4385,7 +4391,8 @@ begin
   HD := TList<Integer>.Create();
   HK := TList<Integer>.Create();
   VFlags := AIntf.MethodParamVarFlagsStr(AIntf.MethodIndex(AMethName));
-  HTotal := Self.EmitArgHoist(nil, nil, False, VFlags, AArgs, HD, HK);
+  HTotal := Self.EmitArgHoist(nil, nil, False,
+    Self.IntfHoistFlags(AIntf, AMethName, VFlags), AArgs, HD, HK);
   Pushed := 0;
   { Evaluate args left-to-right and push them.  Interface args push two values
     (obj then itab); all other args push one.  Pass nil as the TMethodParam so
@@ -4406,6 +4413,8 @@ begin
       Self.EmitVarArgAddrToRax(Arg);
       Self.Emit(#9'pushq %rax');
     end
+    else if Self.IntfParamIsOpenArray(AIntf, AMethName, I) then
+      Self.PushOpenArrayArg(Arg)
     else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
     begin
       { a variable or an in-place value (call results were hoisted) }
@@ -4430,8 +4439,9 @@ begin
     { Track bytes pushed so far — hoisted-value reloads are %rsp-relative.
       var positions always occupy one slot, even for interface-typed args. }
     if (HK.Get(I) < akRecCall) and (not Self.VarFlagAt(VFlags, I)) and
-       (Arg.ResolvedType <> nil) and
-       (Arg.ResolvedType.Kind = tyInterface) then
+       (((Arg.ResolvedType <> nil) and
+         (Arg.ResolvedType.Kind = tyInterface)) or
+        Self.IntfParamIsOpenArray(AIntf, AMethName, I)) then
       Pushed := Pushed + 16
     else
       Pushed := Pushed + 8;
@@ -4466,6 +4476,11 @@ begin
       SlotClasses.Add(0)
     else if Self.VarFlagAt(VFlags, I) then
       SlotClasses.Add(0)
+    else if Self.IntfParamIsOpenArray(AIntf, AMethName, I) then
+    begin
+      SlotClasses.Add(0);
+      SlotClasses.Add(0);
+    end
     else if (Arg.ResolvedType <> nil) and
             (Arg.ResolvedType.Kind = tyInterface) then
     begin
@@ -4556,7 +4571,8 @@ begin
   HD := TList<Integer>.Create();
   HK := TList<Integer>.Create();
   VFlags := AIntf.MethodParamVarFlagsStr(AIntf.MethodIndex(AMethName));
-  HTotal := Self.EmitArgHoist(nil, nil, False, VFlags, AArgs, HD, HK);
+  HTotal := Self.EmitArgHoist(nil, nil, False,
+    Self.IntfHoistFlags(AIntf, AMethName, VFlags), AArgs, HD, HK);
   Pushed := 0;
   { Push args left-to-right; interface args push obj then itab (2 slots). }
   for I := 0 to ArgN - 1 do
@@ -4575,6 +4591,8 @@ begin
       Self.EmitVarArgAddrToRax(Arg);
       Self.Emit(#9'pushq %rax');
     end
+    else if Self.IntfParamIsOpenArray(AIntf, AMethName, I) then
+      Self.PushOpenArrayArg(Arg)
     else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
     begin
       { a variable or an in-place value (call results were hoisted) }
@@ -4598,8 +4616,9 @@ begin
     { Track bytes pushed so far — hoisted-value reloads are %rsp-relative.
       var positions always occupy one slot, even for interface-typed args. }
     if (HK.Get(I) < akRecCall) and (not Self.VarFlagAt(VFlags, I)) and
-       (Arg.ResolvedType <> nil) and
-       (Arg.ResolvedType.Kind = tyInterface) then
+       (((Arg.ResolvedType <> nil) and
+         (Arg.ResolvedType.Kind = tyInterface)) or
+        Self.IntfParamIsOpenArray(AIntf, AMethName, I)) then
       Pushed := Pushed + 16
     else
       Pushed := Pushed + 8;
@@ -4626,6 +4645,11 @@ begin
       SlotClasses.Add(0)
     else if Self.VarFlagAt(VFlags, I) then
       SlotClasses.Add(0)
+    else if Self.IntfParamIsOpenArray(AIntf, AMethName, I) then
+    begin
+      SlotClasses.Add(0);
+      SlotClasses.Add(0);
+    end
     else if (Arg.ResolvedType <> nil) and
             (Arg.ResolvedType.Kind = tyInterface) then
     begin
@@ -13140,6 +13164,11 @@ begin
       Result.Add(0)
     else if Self.VarFlagAt(AVFlags, I) then
       Result.Add(0)
+    else if Self.IntfParamIsOpenArray(AIntf, AMethName, I) then
+    begin
+      Result.Add(0);
+      Result.Add(0);
+    end
     else if (Arg.ResolvedType <> nil) and
             (Arg.ResolvedType.Kind = tyInterface) then
     begin
@@ -13151,6 +13180,19 @@ begin
     else
       Result.Add(0);
   end;
+end;
+
+function TX86_64Backend.IntfParamIsOpenArray(AIntf: TInterfaceTypeDesc;
+  const AMethName: string; AIndex: Integer): Boolean;
+var
+  Params: TObjectList;
+begin
+  { an interface method's AIndex'th parameter is a by-value open array: it
+    takes the (data pointer, high) pair, two integer slots }
+  Params := AIntf.MethodParams(AIntf.MethodIndex(AMethName));
+  Result := (Params <> nil) and (AIndex < Params.Count) and
+    TIntfParamInfo(Params.Items[AIndex]).IsOpenArray and
+    not TIntfParamInfo(Params.Items[AIndex]).IsVar;
 end;
 
 function TX86_64Backend.IntfParamTypeAt(AIntf: TInterfaceTypeDesc;
@@ -13420,6 +13462,47 @@ begin
     Self.PushIntfBorrowPair(AArg, True);
 end;
 
+{ Push the (data pointer, high) pair of an open-array argument that is not
+  a literal block: a dynamic array, a static array or a forwarded open-array
+  parameter.  Shared by the direct and interface-dispatch call paths. }
+procedure TX86_64Backend.PushOpenArrayArg(AArg: TASTExpr);
+begin
+  if (AArg.ResolvedType <> nil) and
+     (AArg.ResolvedType.Kind = tyDynArray) then
+  begin
+    { Dynamic array coerced to open-array: push data ptr + (length - 1). }
+    Self.EmitExprToEax(AArg);          { data ptr -> %rax }
+    { an owned transient (Use(MakeArr())): the open array borrows its
+      data, so release it at the statement boundary }
+    Self.DeferOwnedDynArrayBase(AArg);
+    Self.Emit(#9'pushq %rax');         { push ptr }
+    Self.Emit(#9'movq %rax, %rdi');
+    Self.Emit(#9'callq _DynArrayLength');
+    Self.Emit(#9'movslq %eax, %rax');
+    Self.Emit(#9'decq %rax');          { high = length - 1 }
+    Self.Emit(#9'pushq %rax');         { push high }
+  end
+  else if (AArg.ResolvedType <> nil) and
+          (AArg.ResolvedType.Kind = tyStaticArray) then
+  begin
+    Self.EmitStaticArrayArgAddrToRax(AArg);
+    Self.Emit(#9'pushq %rax');
+    Self.Emit(Format(#9'pushq $%d',
+      [TStaticArrayTypeDesc(AArg.ResolvedType).HighBound -
+       TStaticArrayTypeDesc(AArg.ResolvedType).LowBound]));
+  end
+  else
+  begin
+    Self.CheckForwardedOpenArrayArg(AArg);
+    Self.Emit(Format(#9'movq %s, %%rax',
+      [Self.VarOperand(TIdentExpr(AArg).Name)]));
+    Self.Emit(#9'pushq %rax');
+    Self.Emit(Format(#9'movq %s, %%rax',
+      [Self.VarOperand(TIdentExpr(AArg).Name + '_high')]));
+    Self.Emit(#9'pushq %rax');
+  end;
+end;
+
 procedure TX86_64Backend.EmitMethodArgPush(APar: TMethodParam; AArg: TASTExpr);
 begin
   if (APar <> nil) and APar.IsVarParam then
@@ -13439,41 +13522,8 @@ begin
         EmitArgPush. }
       raise ENativeCodeGenError.Create(
         'native backend: open-array literal argument reached EmitMethodArgPush'
-        + ' — call site must hoist it via HoistOALitArgs')
-    else if (AArg.ResolvedType <> nil) and
-            (AArg.ResolvedType.Kind = tyDynArray) then
-    begin
-      { Dynamic array coerced to open-array: push data ptr + (length - 1). }
-      Self.EmitExprToEax(AArg);          { data ptr -> %rax }
-      { an owned transient (Use(MakeArr())): the open array borrows its
-        data, so release it at the statement boundary }
-      Self.DeferOwnedDynArrayBase(AArg);
-      Self.Emit(#9'pushq %rax');         { push ptr }
-      Self.Emit(#9'movq %rax, %rdi');
-      Self.Emit(#9'callq _DynArrayLength');
-      Self.Emit(#9'movslq %eax, %rax');
-      Self.Emit(#9'decq %rax');          { high = length - 1 }
-      Self.Emit(#9'pushq %rax');         { push high }
-    end
-    else if (AArg.ResolvedType <> nil) and
-            (AArg.ResolvedType.Kind = tyStaticArray) then
-    begin
-      Self.EmitStaticArrayArgAddrToRax(AArg);
-      Self.Emit(#9'pushq %rax');
-      Self.Emit(Format(#9'pushq $%d',
-        [TStaticArrayTypeDesc(AArg.ResolvedType).HighBound -
-         TStaticArrayTypeDesc(AArg.ResolvedType).LowBound]));
-    end
-    else
-    begin
-      Self.CheckForwardedOpenArrayArg(AArg);
-      Self.Emit(Format(#9'movq %s, %%rax',
-        [Self.VarOperand(TIdentExpr(AArg).Name)]));
-      Self.Emit(#9'pushq %rax');
-      Self.Emit(Format(#9'movq %s, %%rax',
-        [Self.VarOperand(TIdentExpr(AArg).Name + '_high')]));
-      Self.Emit(#9'pushq %rax');
-    end;
+        + ' — call site must hoist it via HoistOALitArgs');
+    Self.PushOpenArrayArg(AArg);
   end
   else if (APar <> nil) and IsFloatFamily(APar.ResolvedType) then
   begin
@@ -21246,6 +21296,50 @@ begin
   end;
 end;
 
+{ True when position AIndex of a hoist flag string is 'o': a by-value
+  open-array parameter of an interface method (IntfHoistFlags). }
+function TX86_64Backend.OAFlagAt(const AFlags: string; AIndex: Integer): Boolean;
+var
+  I, Idx: Integer;
+begin
+  Result := False;
+  Idx := 0;
+  for I := 0 to Length(AFlags) - 1 do
+  begin
+    if AFlags[I] = ',' then
+      Idx := Idx + 1
+    else if Idx = AIndex then
+      Exit(AFlags[I] = 'o');
+  end;
+end;
+
+{ The flags EmitArgHoist sees for an interface call: the var flags, with
+  each by-value open-array position marked 'o' so an owned dynamic array
+  bound to one is not parked as a single saved word -- the open array needs
+  its (data, high) pair, pushed in the argument loop. }
+function TX86_64Backend.IntfHoistFlags(AIntf: TInterfaceTypeDesc;
+  const AMethName, AVarFlags: string): string;
+var
+  Params: TObjectList;
+  I: Integer;
+begin
+  Params := AIntf.MethodParams(AIntf.MethodIndex(AMethName));
+  if Params = nil then
+    Exit(AVarFlags);
+  Result := '';
+  for I := 0 to Params.Count - 1 do
+  begin
+    if I > 0 then
+      Result := Result + ',';
+    if TIntfParamInfo(Params.Items[I]).IsVar then
+      Result := Result + '1'
+    else if TIntfParamInfo(Params.Items[I]).IsOpenArray then
+      Result := Result + 'o'
+    else
+      Result := Result + '0';
+  end;
+end;
+
 function TX86_64Backend.VarFlagAt(const AFlags: string; AIndex: Integer): Boolean;
 var
   I, Idx: Integer;
@@ -22146,6 +22240,7 @@ var
   Arg: TASTExpr;
   ParamIntf: TTypeDesc;
   IsVarPos: Boolean;
+  IsOAPos: Boolean;
   ConstStr: Boolean;
   ValStr: Boolean;
   PinPlain: Boolean;
@@ -22174,6 +22269,11 @@ begin
     IsVarPos := ((Par <> nil) and Par.IsVarParam) or
                 ((PP <> nil) and PP.IsVarParam) or
                 Self.VarFlagAt(AVarFlags, I);
+    { an interface method's open-array position ('o' in the flags) }
+    IsOAPos := ((Par <> nil) and Par.IsOpenArray) or
+               ((PP <> nil) and (PP.TypeDesc <> nil) and
+                (PP.TypeDesc.Kind = tyOpenArray)) or
+               Self.OAFlagAt(AVarFlags, I);
 
     { Open-array literal: element block + saved data pointer.  A procedural
       signature's param has no IsOpenArray flag; its type says so. }
@@ -22334,9 +22434,7 @@ begin
       (BUG-20261011-owned-dynarray-arg-leak). }
     if (not IsVarPos) and (Arg.ResolvedType <> nil) and
        (Arg.ResolvedType.Kind = tyDynArray) and ArcExprOwnsRef(Arg) and
-       not (((Par <> nil) and Par.IsOpenArray) or
-            ((PP <> nil) and (PP.TypeDesc <> nil) and
-             (PP.TypeDesc.Kind = tyOpenArray))) then
+       not IsOAPos then
     begin
       Self.EmitExprToEax(Arg);
       Self.Emit(#9'pushq %rax');
@@ -24675,7 +24773,8 @@ begin
   HD := TList<Integer>.Create();
   HK := TList<Integer>.Create();
   VFlags := IntfD.MethodParamVarFlagsStr(IntfD.MethodIndex(ACall.Name));
-  HTotal := Self.EmitArgHoist(nil, nil, False, VFlags, ACall.Args, HD, HK);
+  HTotal := Self.EmitArgHoist(nil, nil, False,
+    Self.IntfHoistFlags(IntfD, ACall.Name, VFlags), ACall.Args, HD, HK);
   { Allocate and zero the 16-byte sret buffer. }
   Self.Emit(#9'subq $16, %rsp');
   Self.Emit(#9'movq $0, (%rsp)');
@@ -24700,6 +24799,8 @@ begin
       Self.EmitVarArgAddrToRax(Arg);
       Self.Emit(#9'pushq %rax');
     end
+    else if Self.IntfParamIsOpenArray(IntfD, ACall.Name, I) then
+      Self.PushOpenArrayArg(Arg)
     else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
     begin
       { a variable or an in-place value (call results were hoisted) }
@@ -24723,8 +24824,9 @@ begin
       Self.Emit(#9'pushq %rax');
     end;
     if (HK.Get(I) < akRecCall) and (not Self.VarFlagAt(VFlags, I)) and
-       (Arg.ResolvedType <> nil) and
-       (Arg.ResolvedType.Kind = tyInterface) then
+       (((Arg.ResolvedType <> nil) and
+         (Arg.ResolvedType.Kind = tyInterface)) or
+        Self.IntfParamIsOpenArray(IntfD, ACall.Name, I)) then
       Pushed := Pushed + 16
     else
       Pushed := Pushed + 8;
@@ -24839,7 +24941,8 @@ begin
   HD := TList<Integer>.Create();
   HK := TList<Integer>.Create();
   VFlags := IntfD.MethodParamVarFlagsStr(IntfD.MethodIndex(ACall.Name));
-  HTotal := Self.EmitArgHoist(nil, nil, False, VFlags, ACall.Args, HD, HK);
+  HTotal := Self.EmitArgHoist(nil, nil, False,
+    Self.IntfHoistFlags(IntfD, ACall.Name, VFlags), ACall.Args, HD, HK);
   Pushed := 0;
   { Push args left-to-right; interface args push obj then itab (2 slots). }
   for I := 0 to ArgN - 1 do
@@ -24855,6 +24958,8 @@ begin
       Self.EmitVarArgAddrToRax(Arg);
       Self.Emit(#9'pushq %rax');
     end
+    else if Self.IntfParamIsOpenArray(IntfD, ACall.Name, I) then
+      Self.PushOpenArrayArg(Arg)
     else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
     begin
       { a variable or an in-place value (call results were hoisted) }
@@ -24878,8 +24983,9 @@ begin
       Self.Emit(#9'pushq %rax');
     end;
     if (HK.Get(I) < akRecCall) and (not Self.VarFlagAt(VFlags, I)) and
-       (Arg.ResolvedType <> nil) and
-       (Arg.ResolvedType.Kind = tyInterface) then
+       (((Arg.ResolvedType <> nil) and
+         (Arg.ResolvedType.Kind = tyInterface)) or
+        Self.IntfParamIsOpenArray(IntfD, ACall.Name, I)) then
       Pushed := Pushed + 16
     else
       Pushed := Pushed + 8;

@@ -13624,6 +13624,17 @@ begin
       Continue;
     Slot := TASTExpr(AArgs.Items[I]);
     RetypeBracketLiteralArg(Slot, ParT);
+    { an open-array literal through an interface dispatch is built as a
+      temporary dynamic array: the call has no static callee to lay an
+      element block out against, and a dynamic array passes to an open
+      array on every dispatch path }
+    if (Slot is TArrayLiteralExpr) and (ParT.Kind = tyOpenArray) and
+       not TArrayLiteralExpr(Slot).IsConstArray and
+       (TOpenArrayTypeDesc(ParT).ElementType <> nil) and
+       not ((Slot.ResolvedType <> nil) and
+            (Slot.ResolvedType.Kind = tyDynArray)) then
+      Slot.ResolvedType := FTable.NewDynArrayType(
+        TOpenArrayTypeDesc(ParT).ElementType);
     if Info.IsVar then
       CheckTypesMatch(ParT, Slot.ResolvedType,
         Format('var argument %d of ''%s''', [I + 1, AName]), ALine, ACol)

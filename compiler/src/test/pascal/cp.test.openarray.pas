@@ -28,6 +28,10 @@ type
       in-frame block only for one-word elements); an Integer literal keeps
       its block }
     procedure TestSem_OpenArrayLiteral_RichElementsAreDynArrays;
+    { through an interface dispatch any open-array literal is a temporary
+      dynamic array, and the dispatch passes its (data, high) pair: x86-64
+      passed one word and never read the length }
+    procedure TestCodegen_IntfOpenArrayArg_PassesDataAndHigh;
     { A[I][J] over an open array of static arrays indexes into the element
       in place: x86-64 loaded the element and indexed through its bytes }
     procedure TestCodegen_OpenArrayOfStaticArrays_ElementByAddress;
@@ -872,6 +876,39 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TOpenArrayTests.TestCodegen_IntfOpenArrayArg_PassesDataAndHigh;
+const
+  Src = '''
+    program P;
+    type
+      ISink = interface
+        procedure TakeI(const A: array of Integer);
+      end;
+      TSink = class(TObject, ISink)
+        procedure TakeI(const A: array of Integer);
+      end;
+    procedure TSink.TakeI(const A: array of Integer); begin WriteLn(Length(A)); end;
+    var I: ISink;
+    begin
+      I := TSink.Create();
+      I.TakeI([7, 8, 9]);
+    end.
+    ''';
+var
+  Prog: TProgram;
+begin
+  Prog := Analyse(Src);
+  try
+    AssertTrue('the literal is a dynamic array',
+      TASTExpr(TMethodCallStmt(Prog.Block.Stmts[1]).Args.Items[0]).ResolvedType.Kind
+        = tyDynArray);
+  finally
+    Prog.Free();
+  end;
+  AssertEquals('the high comes from the array length', '',
+    AsmMissing(Src, 'callq _DynArrayLength', '_DynArrayLength'));
 end;
 
 procedure TOpenArrayTests.TestCodegen_OpenArrayOfStaticArrays_ElementByAddress;

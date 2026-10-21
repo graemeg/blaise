@@ -32,6 +32,10 @@ type
       never releasing an owned element.  Through a function, a method, a
       procedural variable and an interface dispatch }
     procedure TestRun_OpenArrayLiteral_RichElements;
+    { an interface method with an open-array parameter, given a dynamic
+      array, a dynamic-array call result and a literal (x86-64 passed one
+      word and a garbage high, or refused the literal) }
+    procedure TestRun_OpenArray_ThroughInterfaceDispatch;
     { an open array of STATIC arrays indexed twice, A[I][J] (x86-64 loaded
       the element and indexed through its first bytes) }
     procedure TestRun_OpenArray_OfStaticArrays;
@@ -1447,6 +1451,61 @@ begin
     'r r6 6' + LE + 'r r6 6' + LE + 'p 14' + LE + 'i 8' + LE + 'i 8' + LE +
     'pt 14' + LE + 'sa cb' + LE + 'hello o 0' + LE + 'hello o 1' + LE +
     'meth r10' + LE + 'proc r11' + LE + 'free 8' + LE + 'end' + LE, 0);
+end;
+
+procedure TE2EOpenArrayTests.TestRun_OpenArray_ThroughInterfaceDispatch;
+const
+  Src = '''
+    program P;
+    type
+      TRec = record S: string; K: Integer; end;
+      ISink = interface
+        procedure Take(const A: array of TRec);
+        procedure TakeI(N: Integer; const A: array of Integer; M: Integer);
+      end;
+      TSink = class(TObject, ISink)
+        procedure Take(const A: array of TRec);
+        procedure TakeI(N: Integer; const A: array of Integer; M: Integer);
+      end;
+      THold = class
+        S: ISink;
+      end;
+    procedure TSink.Take(const A: array of TRec); begin WriteLn('rec ', A[0].S, ' ', Length(A)); end;
+    procedure TSink.TakeI(N: Integer; const A: array of Integer; M: Integer);
+    var I, T: Integer;
+    begin
+      T := 0;
+      for I := 0 to High(A) do T := T + A[I];
+      WriteLn('int ', N, ' ', Length(A), ' ', T, ' ', M);
+    end;
+    function MkA(N: Integer): array of Integer;
+    var I: Integer;
+    begin
+      SetLength(Result, N);
+      for I := 0 to N - 1 do Result[I] := I + 1;
+    end;
+    var I: ISink; H: THold; D: array of TRec; DI: array of Integer;
+    begin
+      I := TSink.Create();
+      SetLength(D, 1); D[0].S := 'x';
+      I.Take(D);
+      SetLength(DI, 2); DI[0] := 4; DI[1] := 5;
+      I.TakeI(1, DI, 2);
+      I.TakeI(3, MkA(4), 5);
+      I.TakeI(6, [7, 8, 9], 10);
+      H := THold.Create();
+      H.S := I;
+      H.S.TakeI(11, MkA(2), 12);
+      H.S.Take([D[0], D[0]]);
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  AssertRunsOnAll(Src,
+    'rec x 1' + LE + 'int 1 2 9 2' + LE + 'int 3 4 10 5' + LE +
+    'int 6 3 24 10' + LE + 'int 11 2 3 12' + LE + 'rec x 2' + LE, 0);
 end;
 
 procedure TE2EOpenArrayTests.TestRun_OpenArray_OfStaticArrays;
