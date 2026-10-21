@@ -10246,8 +10246,9 @@ begin
   Result := Call;
 end;
 
-{ Recv.GetX(Index) for an INTERFACE-typed indexed property read whose
-  receiver is a class instance: the ordinary method-call expression, so the
+{ Recv.GetX(Index) for an INTERFACE-typed indexed property read, or one
+  whose index is a float or an aggregate, whose receiver is a class
+  instance: the ordinary method-call expression, so the
   (obj, itab) result pair and an owned transient receiver are handled exactly
   as for an explicit call.  The hand-written indexed-getter paths in the
   backends returned a single register: arm64 rejected the read (NotYet) and
@@ -10298,8 +10299,16 @@ begin
      (AAccess.PropRead.IndexParamName = '') or
      (AAccess.PropIndexExpr = nil) or (AAccess.PropReadDecl = nil) then
     Exit;
+  { the shapes the hand-written getter paths cannot marshal: an INTERFACE
+    result (an (obj, itab) pair), or an index that does not ride in one
+    integer register -- a FLOAT or an AGGREGATE index (arm64 refused it,
+    x86-64 crashed on a float literal) }
   if (AAccess.ResolvedType = nil) or
-     (AAccess.ResolvedType.Kind <> tyInterface) then
+     not ((AAccess.ResolvedType.Kind = tyInterface) or
+          ((AAccess.PropRead.IndexTypeDesc <> nil) and
+           (AAccess.PropRead.IndexTypeDesc.IsFloat() or
+            (AAccess.PropRead.IndexTypeDesc.Kind in
+               [tyRecord, tyStaticArray])))) then
     Exit;
   MDecl := TMethodDecl(AAccess.PropReadDecl);
   if AAccess.Base <> nil then
@@ -10309,6 +10318,24 @@ begin
       Exit;
     Recv := AAccess.Base;
     AAccess.Base := nil;
+  end
+  else if AAccess.IsImplicitSelf then
+  begin
+    { P[I] / FField.P[I] inside a method: Self, or Self's field holding the
+      receiver }
+    if AAccess.ImplicitBaseInfo <> nil then
+    begin
+      Recv := Self.SelfMemberAccess(AAccess.ImplicitBaseInfo.Name,
+        AAccess.Line, AAccess.Col);
+      Self.AnalyseExprSlot(Recv);
+    end
+    else
+      Recv := Self.AnalysedRecvIdent('Self', AAccess.Line, AAccess.Col);
+    if (Recv.ResolvedType = nil) or (Recv.ResolvedType.Kind <> tyClass) then
+    begin
+      Recv.Free();
+      Exit;
+    end;
   end
   else
   begin

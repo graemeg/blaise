@@ -29,6 +29,11 @@ type
       by SetLength or passed to a var parameter (both reached the backends and
       failed there); a field-backed property and a field still can }
     procedure TestSem_GetterPropertyIsNotAVariable;
+    { an indexed read whose index is a float or a record is the getter CALL
+      (Obj.GetP(I)), so the index travels by its ABI class: the backends'
+      getter paths carried it in one integer register (arm64 refused it,
+      x86-64 crashed on a float literal) }
+    procedure TestSem_FloatAndRecordIndexRead_IsGetterCall;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1006,6 +1011,49 @@ begin
     AssertTrue('a static call', TMethodCallExpr(E).IsStaticCall);
     AssertEquals('getter', 'GetA', TMethodCallExpr(E).Name);
     AssertEquals('index argument', 1, TMethodCallExpr(E).Args.Count);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPropertyTests.TestSem_FloatAndRecordIndexRead_IsGetterCall;
+const
+  Src = '''
+    program P;
+    type
+      TPair = record A, B: Int64; end;
+      TBag = class
+        function GetD(D: Double): Integer;
+        function GetP(const R: TPair): Integer;
+        property ByD[D: Double]: Integer read GetD; default;
+        property ByP[const R: TPair]: Integer read GetP;
+      end;
+    function TBag.GetD(D: Double): Integer; begin Result := Trunc(D) end;
+    function TBag.GetP(const R: TPair): Integer; begin Result := R.A end;
+    var B: TBag; R: TPair; X: Integer;
+    begin
+      X := B.ByD[1.5];
+      X := B.ByP[R];
+      X := B[2.5];
+    end.
+    ''';
+var
+  Prog: TProgram;
+  E: TASTExpr;
+  I: Integer;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    for I := 0 to 2 do
+    begin
+      E := TAssignment(Prog.Block.Stmts[I]).Expr;
+      AssertTrue('statement ' + IntToStr(I) + ' reads through a method call',
+        E is TMethodCallExpr);
+      AssertEquals('statement ' + IntToStr(I) + ' passes the index', 1,
+        TMethodCallExpr(E).Args.Count);
+    end;
+    AssertEquals('getter', 'GetP',
+      TMethodCallExpr(TAssignment(Prog.Block.Stmts[1]).Expr).Name);
   finally
     Prog.Free();
   end;

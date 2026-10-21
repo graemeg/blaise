@@ -27,6 +27,10 @@ type
       with the field, so SetLength on it resizes the field's element; a
       field-backed property passes to a var parameter }
     procedure TestRun_ElementOfPropertyValueIsResizable;
+    { indexed property reads with a Double, Single or record index, through
+      a variable, a call result, Self, a field of Self and the default
+      property: the getter call passes the index by its ABI class }
+    procedure TestRun_FloatAndRecordIndexRead;
     { Inside a method a bare element write through a field-read array property
       (AP[3] := 25, DP[1] := 'd1') writes the backing field; it was rejected as
       "Undeclared variable". }
@@ -1110,6 +1114,75 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     '25 26 25 d1 d1' + LineEnding, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_FloatAndRecordIndexRead;
+const
+  Src = '''
+    program P;
+    type
+      TPair = record A, B: Int64; end;
+      TV2 = record X, Y: Double; end;
+      TBag = class
+        FI: Integer;
+        function GetD(D: Double): Integer;
+        function GetP(const R: TPair): Integer;
+        function GetV(const V: TV2): Double;
+        function GetS(S: Single): Integer;
+        procedure Show;
+        property ByD[D: Double]: Integer read GetD; default;
+        property ByP[const R: TPair]: Integer read GetP;
+        property ByV[const V: TV2]: Double read GetV;
+        property ByS[S: Single]: Integer read GetS;
+      end;
+      THost = class
+        FBag: TBag;
+        procedure Inside;
+      end;
+    function TBag.GetD(D: Double): Integer; begin Result := Trunc(D * 10) + FI; end;
+    function TBag.GetP(const R: TPair): Integer; begin Result := R.A * 10 + R.B + FI; end;
+    function TBag.GetV(const V: TV2): Double; begin Result := V.X + V.Y; end;
+    function TBag.GetS(S: Single): Integer; begin Result := Trunc(S * 2); end;
+    procedure TBag.Show; begin WriteLn('self ', ByD[1.5], ' ', Self[0.5]); end;
+    var G: TBag;
+    function MkB: TBag; begin Result := G; end;
+    function MkP: TPair; begin Result.A := 3; Result.B := 4; end;
+    procedure THost.Inside;
+    var PR: TPair;
+    begin
+      PR.A := 1; PR.B := 2;
+      WriteLn('in ', FBag.ByD[1.5], ' ', FBag.ByP[PR], ' ', FBag[2.5]);
+    end;
+    var
+      B: TBag;
+      H: THost;
+      PR: TPair;
+      V: TV2;
+      D: Double;
+    begin
+      G := TBag.Create();
+      G.FI := 1;
+      B := G;
+      PR.A := 5; PR.B := 6;
+      V.X := 1.25; V.Y := 2.5;
+      D := 0.75;
+      WriteLn(B.ByD[1.25], ' ', B.ByD[D], ' ', B[3.25], ' ', B.ByD[2]);
+      WriteLn(B.ByP[PR], ' ', B.ByP[MkP()], ' ', MkB().ByP[PR]);
+      WriteLn(B.ByV[V]:0:2, ' ', B.ByS[1.5], ' ', MkB().ByD[0.5]);
+      B.Show();
+      H := THost.Create();
+      H.FBag := G;
+      H.Inside();
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '13 8 33 21' + LE + '57 35 57' + LE + '3.75 3 6' + LE +
+    'self 16 6' + LE + 'in 16 13 26' + LE, 0);
 end;
 
 procedure TE2EPropertyTests.TestRun_ElementOfPropertyValueIsResizable;
