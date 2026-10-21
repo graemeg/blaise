@@ -23,6 +23,9 @@ type
     function  ParseSrc(const ASrc: string): TProgram;
     function  AnalyseSrc(const ASrc: string): TProgram;
   published
+    { A[I][J] over an open array of static arrays indexes into the element
+      in place: x86-64 loaded the element and indexed through its bytes }
+    procedure TestCodegen_OpenArrayOfStaticArrays_ElementByAddress;
     { a bracket literal for an open-array formal takes the formal's element
       type when its elements fit: subclasses, metaclasses, integers for a float
       formal.  An overload whose element type the literal already has wins. }
@@ -817,6 +820,32 @@ begin
   AssertEquals('every literal is accepted', '', SemanticError(Src));
   AssertTrue('an element that does not fit is still an error',
     SemanticError(BadSrc) <> '');
+end;
+
+
+procedure TOpenArrayTests.TestCodegen_OpenArrayOfStaticArrays_ElementByAddress;
+const
+  Src = '''
+    program P;
+    type
+      TSI = array[0..1] of Integer;
+    procedure SI(const A: array of TSI); begin WriteLn(A[1][0]); end;
+    var D: array of TSI;
+    begin
+      SetLength(D, 2);
+      SI(D);
+    end.
+    ''';
+var
+  X, Body: string;
+  P: Integer;
+begin
+  X := GenAsm(Src, TargetX86_64);
+  P := Pos('SI:', X);
+  AssertTrue('SI is emitted', P >= 0);
+  Body := Copy(X, P, Pos('ret', Copy(X, P, Length(X))));
+  AssertTrue('the element is not loaded as a pointer: ' + Body,
+    Pos('addq %rcx, %rax' + #10 + #9 + 'movq (%rax), %rax', Body) < 0);
 end;
 
 initialization

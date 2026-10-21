@@ -25,6 +25,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { an open array of STATIC arrays indexed twice, A[I][J] (x86-64 loaded
+      the element and indexed through its first bytes) }
+    procedure TestRun_OpenArray_OfStaticArrays;
     { the elements of a literal typed by its open-array formal arrive as the
       formal's element type: objects dispatch virtually, integers become floats }
     procedure TestRun_ArrayLiteralArg_TakesFormalElementType;
@@ -1361,6 +1364,35 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     'ABBABB' + #10 + '6.75 4.50' + #10 + 'intdblintdbl' + #10 + 'bab' + #10, 0);
+end;
+
+
+procedure TE2EOpenArrayTests.TestRun_OpenArray_OfStaticArrays;
+const
+  Src = '''
+    program P;
+    type
+      TSI = array[0..1] of Integer;
+      TSS = array[0..1] of string;
+    procedure SI(const A: array of TSI); begin WriteLn('si ', A[1][0], ' ', A[0][1], ' ', Length(A)); end;
+    procedure SS(const A: array of TSS); begin WriteLn('ss ', A[1][0], A[0][1]); end;
+    var DI: array of TSI; DS: array of TSS; X: TSI; Y: TSS; SX: array[0..2] of TSI;
+    begin
+      X[0] := 1; X[1] := 2;
+      SetLength(DI, 2); DI[0] := X; DI[1] := X; DI[1][0] := 7;
+      SI(DI);
+      SX[1][0] := 3; SX[0][1] := 4;
+      SI(SX);
+      Y[0] := 'a'; Y[1] := 'b';
+      SetLength(DS, 2); DS[0] := Y; DS[1] := Y; DS[1][0] := 'c';
+      SS(DS);
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  AssertRunsOnAll(Src, 'si 7 2 2' + LE + 'si 3 4 3' + LE + 'ss cb' + LE, 0);
 end;
 
 initialization

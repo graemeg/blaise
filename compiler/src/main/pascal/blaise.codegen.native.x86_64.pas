@@ -10852,11 +10852,16 @@ begin
       [TOpenArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.RawSize()]));
     Self.Emit(#9'popq %rcx');
     Self.Emit(#9'addq %rcx, %rax');
-    { Record and jumbo-set elements evaluate to their address — loading
-      8 bytes here would read the first field / first bitmap bytes instead
-      (BUG-20260721-jumbo-set-in-array-elem). }
-    if (TOpenArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.Kind <> tyRecord) and
-       not IsJumboSet(TOpenArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType) then
+    { Record, static-array, closure and jumbo-set elements evaluate to
+      their address -- loading 8 bytes here would read the first field /
+      element / bitmap bytes instead (BUG-20260721-jumbo-set-in-array-elem).
+      A static-array element is inline storage a further subscript A[I][J]
+      indexes into, as in the dynamic-array arm below; loading it made
+      A[I][J] use the element's first bytes as a pointer. }
+    if not ((TOpenArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType.Kind in
+             [tyRecord, tyStaticArray]) or
+            IsJumboSet(TOpenArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType) or
+            IsMethodPtrType(TOpenArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType)) then
       Self.EmitLoadVar('(%rax)',
         TOpenArrayTypeDesc(SAE.StrExpr.ResolvedType).ElementType);
     Exit;
