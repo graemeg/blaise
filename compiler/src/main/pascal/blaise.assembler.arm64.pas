@@ -12,8 +12,7 @@ unit blaise.assembler.arm64;
   (FA: array of TA64Op), not a string; 0-based indexing is not in question. }
 
 { Self-assembler for the AArch64 backend's GNU-syntax assembly dialect —
-  the arm64 sibling of blaise.assembler.x86_64 (macos-arm64 Phase 1b,
-  docs/macos-arm64-backend-design.adoc).
+  the arm64 sibling of blaise.assembler.x86_64.
 
   Parses the restricted AArch64 subset the (coming) TArm64Backend emits
   and encodes it into a Mach-O MH_OBJECT via the IContainerWriter seam

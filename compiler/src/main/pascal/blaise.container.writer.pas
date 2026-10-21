@@ -20,10 +20,10 @@ unit blaise.container.writer;
 
   IContainerWriter is that surface as an interface, so an assembler holds
   "a writer" without naming the container: TElfObjectWriter
-  (blaise.elfwriter) implements it today; TMachOWriter is the planned
-  sibling (docs/macos-arm64-backend-design.adoc).  Which concrete writer is
-  constructed is the per-target choice, made by the toolkit family — never
-  by conditional compilation or a case statement inside the assembler.
+  (blaise.elfwriter) and TMachOWriter (blaise.machowriter) implement it.
+  Which concrete writer is constructed is the per-target choice, made by
+  the toolkit family — never by conditional compilation or a case statement
+  inside the assembler.
 
   Lifetime: IContainerWriter is ARC-managed (same convention as ICodeGen).
   Assign a freshly-created concrete writer to an IContainerWriter variable

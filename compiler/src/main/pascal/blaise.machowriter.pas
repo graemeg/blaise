@@ -10,7 +10,7 @@ unit blaise.machowriter;
 
 { Mach-O relocatable-object writer for the internal AArch64 assembler —
   the Mach-O sibling of blaise.elfwriter behind the IContainerWriter
-  Bridge (docs/macos-arm64-backend-design.adoc, Phase 1).
+  Bridge.
 
   Creates MH_OBJECT (relocatable) Mach-O 64-bit little-endian arm64
   object files from scratch — the output format `clang -c` produces on

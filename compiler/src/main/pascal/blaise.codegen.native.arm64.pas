@@ -9,8 +9,7 @@
 unit blaise.codegen.native.arm64;
 
 { AArch64 (Apple Silicon macOS) native backend — the second Template-Method
-  leaf of TNativeBackend (macos-arm64 Phase 2,
-  docs/macos-arm64-backend-design.adoc).
+  leaf of TNativeBackend.
 
   Emits AArch64 GNU-syntax assembly text into the inherited FAsm buffer;
   blaise.assembler.arm64 encodes that text into a Mach-O MH_OBJECT.  All
