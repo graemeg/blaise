@@ -625,6 +625,11 @@ type
   TSymbolTable = class
   private
     FScopeStack: TObjectList;   { owned TScope, index 0 = global }
+    { the mangled data labels of every static (class-level) var registered
+      this session, from source or a cached interface: a backend references
+      such a label as a global even when the var's owning unit is another
+      translation unit (arm64 refused a cross-unit TFoo.StaticVar) }
+    FClassVarEmits: TStringList;
     FAllTypes:   TObjectList;   { owned TTypeDesc }
     FGenerics:   TStringList;   { base name → template object (in FGenericTemplates) }
     { Owns a strong reference to every registered generic template.  The
@@ -733,6 +738,9 @@ type
     function NewType(AKind: TTypeKind; const AName: string): TTypeDesc;
     procedure RegisterBuiltins;
   public
+    { Note AName as a static var's mangled data label (see FClassVarEmits). }
+    procedure NoteClassVarEmit(const AName: string);
+    function  IsClassVarEmit(const AName: string): Boolean;
     constructor Create;
     destructor Destroy; override;
 
@@ -1880,9 +1888,21 @@ end;
 { TSymbolTable                                                        }
 { ------------------------------------------------------------------ }
 
+procedure TSymbolTable.NoteClassVarEmit(const AName: string);
+begin
+  if (AName <> '') and (FClassVarEmits.IndexOf(AName) < 0) then
+    FClassVarEmits.Add(AName);
+end;
+
+function TSymbolTable.IsClassVarEmit(const AName: string): Boolean;
+begin
+  Result := (AName <> '') and (FClassVarEmits.IndexOf(AName) >= 0);
+end;
+
 constructor TSymbolTable.Create;
 begin
   inherited Create();
+  FClassVarEmits := TStringList.Create();
   FScopeStack := TObjectList.Create(True);
   FAllTypes   := TObjectList.Create(True);
   FGenerics   := TStringList.Create();

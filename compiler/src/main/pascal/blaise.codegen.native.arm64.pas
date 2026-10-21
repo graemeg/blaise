@@ -12260,6 +12260,10 @@ begin
   if FSymTable = nil then Exit;
   Sym := FSymTable.Lookup(ItabBaseName(AName));
   Result := (Sym <> nil) and (Sym.Kind = skVariable);
+  { a static (class-level) var's mangled label, whose owning unit may be
+    another translation unit (TFoo.StaticVar across units) }
+  if not Result then
+    Result := FSymTable.IsClassVarEmit(ItabBaseName(AName));
 end;
 
 function TArm64Backend.GlobalSym(const AName: string): string;

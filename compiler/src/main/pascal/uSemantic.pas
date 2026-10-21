@@ -8960,6 +8960,7 @@ begin
             dynarray restriction — the store and read paths were already type-
             generic; native teardown already dispatched by type). }
           ClassVarEmit := CurrentUnitPrefix() + TD.Name + '_' + FldName;
+          FTable.NoteClassVarEmit(ClassVarEmit);
           { Single source of truth for codegen: stash the mangled label on the
             field decl (used by both backends to emit the data slot, even for a
             read-only static var that no assignment auto-registers). }

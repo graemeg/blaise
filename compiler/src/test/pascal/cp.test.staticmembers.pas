@@ -598,6 +598,9 @@ type
     procedure TestSem_StaticProp_WriteThroughInstance_StaticSetterCall;
     procedure TestSem_StaticProp_BareInStaticMethod_Resolves;
     procedure TestSem_StaticProp_StaticVarBacked_IsFieldAccessor;
+    { every static var's mangled label is known to the symbol table, so a
+      backend can reference it from another translation unit }
+    procedure TestSem_StaticVar_EmitNameRegistered;
     { static var resolves to a shared global, not an instance field }
     procedure TestSem_StaticVar_BareReadResolves;
     procedure TestSem_StaticVar_NotAnInstanceField;
@@ -1098,6 +1101,30 @@ begin
     AssertEquals('read accessor is the static var', 'FFI', PI.ReadField);
     AssertEquals('write accessor is the static var', 'FFI', PI.WriteField);
     AssertEquals('not a method', '', PI.ReadMethod);
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticMembersSemTests.TestSem_StaticVar_EmitNameRegistered;
+var
+  P: TProgram;
+begin
+  P := AnalyseSrc('''
+    program P;
+    type
+      TC = class
+      public
+        procedure Dummy;
+      public static var
+        SV: Integer;
+      end;
+    procedure TC.Dummy; begin end;
+    begin end.
+    ''');
+  try
+    AssertTrue('TC_SV is a static var label', P.SymbolTable.IsClassVarEmit('TC_SV'));
+    AssertTrue('an unknown name is not', not P.SymbolTable.IsClassVarEmit('TC_NO'));
   finally
     P.Free();
   end;

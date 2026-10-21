@@ -50,6 +50,10 @@ type
       string, object, Double, record and indexed kind, method- or
       static-var-backed; objects stored through them are freed }
     procedure TestRun_StaticProperties_EveryForm;
+    { a static var declared in ANOTHER unit, written and read through the
+      type name: arm64 refused the store/load (its label was not known as a
+      global of this translation unit) }
+    procedure TestRun_StaticVar_CrossUnit;
     { Static members of aggregate type: a record static var's field
       (TC.SB.S), a record / closure static property, a static method returning
       a closure called directly, and `inherited GetT();` for an interface
@@ -1051,6 +1055,46 @@ begin
     'inst v2 2 3.5 7 9 7' + LE + 'free 2' + LE +
     'inside in1 10 1.5 11 12' + LE + 'free 10' + LE +
     'sinside sin 20 21 22' + LE + 'free 20' + LE + 'end' + LE, 0);
+end;
+
+procedure TE2EStaticMembersTests.TestRun_StaticVar_CrossUnit;
+const
+  USrc = '''
+    unit CProps;
+    interface
+    type
+      TC = class
+      public
+        procedure Dummy;
+      public static var
+        SV: Integer;
+        SName: string;
+      end;
+    implementation
+    procedure TC.Dummy; begin end;
+    end.
+    ''';
+  Src = '''
+    program P;
+    uses CProps;
+    begin
+      TC.SV := 4;
+      TC.SName := 'n' + 'x';
+      TC.SV := TC.SV + 1;
+      WriteLn(TC.SV, ' ', TC.SName);
+    end.
+    ''';
+var
+  LE: string;
+  RunOut: string;
+  Code: Integer;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run: ' + RunOut,
+    CompileAndRunWithUnit('CProps', USrc, Src, RunOut, Code));
+  AssertEquals('exit code', 0, Code);
+  AssertEquals('stdout', '5 nx' + LE, RunOut);
 end;
 
 initialization

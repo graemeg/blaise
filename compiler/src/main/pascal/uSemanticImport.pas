@@ -387,6 +387,7 @@ procedure RegisterImportedClassVar(const ATypeName, AFieldName,
 var
   Sym: TSymbol;
 begin
+  ATable.NoteClassVarEmit(AEmitName);
   { Bare name — usable unqualified inside the type's own methods. }
   Sym := TSymbol.Create(AFieldName, skVariable, AFieldType);
   Sym.IsGlobal       := True;
