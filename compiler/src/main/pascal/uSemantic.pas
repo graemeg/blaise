@@ -367,6 +367,13 @@ type
     function  IsFloatConstExpr(AExpr: TASTExpr): Boolean;
     function  LookupConstSym(const AName: string): TSymbol;
     function  CallsConstructor(AType: TTypeDesc; const AName: string): Boolean;
+    { Cls.Create(args) with Cls a class reference (AMeta): resolve the
+      constructor on its base class and flag metaclass dispatch.  The
+      receiver is the call's ObjectName or its ObjExpr; the caller sets the
+      receiver-slot flags. }
+    procedure ResolveMetaclassCtorStmt(ACall: TMethodCallStmt; AMeta: TTypeDesc);
+    function  ResolveMetaclassCtorExpr(AExpr: TMethodCallExpr;
+      AMeta: TTypeDesc): TTypeDesc;
     function  IsStringConstExpr(AExpr: TASTExpr): Boolean;
     function  EvalConstStrExpr(AExpr: TASTExpr; ALine, ACol: Integer): string;
     function  ConstExprOrdinalType(AExpr: TASTExpr): TTypeDesc;
@@ -6632,6 +6639,66 @@ begin
     Result := SameText(AName, 'Create') or (StrPos('Create', AName) = 0);
 end;
 
+procedure TSemanticAnalyser.ResolveMetaclassCtorStmt(ACall: TMethodCallStmt;
+  AMeta: TTypeDesc);
+var
+  RT: TRecordTypeDesc;
+  MDecl: TMethodDecl;
+  I: Integer;
+begin
+  RT := TRecordTypeDesc(TMetaClassTypeDesc(AMeta).BaseClass);
+  HintBareEnumMethodArgs(RT.Name, ACall.Name, ACall.Args);
+  for I := 0 to ACall.Args.Count - 1 do
+    Self.AnalyseArgSlot(ACall.Args, I);
+  MDecl := ResolveMethodOverload(RT.Name, ACall.Name, ACall.Args,
+    ACall.Line, ACall.Col);
+  ResolveDeferredArrowArgs(ACall.Args, MDecl);
+  if MDecl = nil then
+    MDecl := FindMethodDecl(RT.Name, ACall.Name);
+  if MDecl <> nil then
+  begin
+    { as the expression form: a defaulted parameter is filled in here, or
+      the constructor reads a missing argument }
+    RetypeSetLiteralArgs(ACall.Args, MDecl);
+    CheckConstArgsInRange(ACall.Args, MDecl, ACall.Line, ACall.Col);
+    AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
+  end;
+  ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
+  ACall.ResolvedClassType   := RT;
+  ACall.ResolvedMethod      := MDecl;
+  ACall.IsConstructorCall   := True;
+  ACall.IsMetaclassDispatch := True;
+end;
+
+function TSemanticAnalyser.ResolveMetaclassCtorExpr(AExpr: TMethodCallExpr;
+  AMeta: TTypeDesc): TTypeDesc;
+var
+  RT: TRecordTypeDesc;
+  MDecl: TMethodDecl;
+  I: Integer;
+begin
+  RT := TRecordTypeDesc(TMetaClassTypeDesc(AMeta).BaseClass);
+  HintBareEnumMethodArgs(RT.Name, AExpr.Name, AExpr.Args);
+  for I := 0 to AExpr.Args.Count - 1 do
+    Self.AnalyseListSlot(AExpr.Args, I);
+  MDecl := ResolveMethodOverload(RT.Name, AExpr.Name,
+    AExpr.Args, AExpr.Line, AExpr.Col);
+  if MDecl = nil then
+    MDecl := FindMethodDecl(RT.Name, AExpr.Name);
+  if MDecl <> nil then
+  begin
+    RetypeSetLiteralArgs(AExpr.Args, MDecl);
+    CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
+    AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
+  end;
+  ValidateMethodVarArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
+  AExpr.ResolvedMethod      := MDecl;
+  AExpr.ResolvedClassType   := RT;
+  AExpr.IsConstructorCall   := True;
+  AExpr.IsMetaclassDispatch := True;
+  Result := RT;
+end;
+
 { A named constant referenced from a constant expression.  While a type's
   member consts are folded (FConstOwner), a bare sibling name resolves to the
   qualified member first, as it does inside the type's methods. }
@@ -12730,6 +12797,16 @@ begin
         ObjType := RecvExpr.ResolvedType;
       end;
     end;
+    { Cls.Create(args); with Cls a class reference that is not a plain
+      variable -- a field, an element, a call result: metaclass dispatch on
+      the receiver expression's value }
+    if (ObjType <> nil) and (ObjType.Kind = tyMetaClass) and
+       Self.CallsConstructor(TMetaClassTypeDesc(ObjType).BaseClass,
+         ACall.Name) then
+    begin
+      Self.ResolveMetaclassCtorStmt(ACall, ObjType);
+      Exit;
+    end;
     { A RECORD receiver is legal when the call is really an invocation of a
       procedural-typed FIELD (O.Inner.F()) or of a record method.  Records
       were rejected outright here, so a closure held in a nested record field
@@ -12864,6 +12941,21 @@ begin
     ACall.ImplicitBaseInfo :=
       FCurrentClass.FindField(ACall.ObjectName);
     if (ACall.ImplicitBaseInfo <> nil) and
+       (ACall.ImplicitBaseInfo.TypeDesc.Kind = tyMetaClass) then
+    begin
+      { FCls.Create(args); with FCls a class-reference field of Self: the
+        receiver-expression path, which reads the field }
+      RecvIdent := TIdentExpr.Create();
+      RecvIdent.Line := ACall.Line;
+      RecvIdent.Col := ACall.Col;
+      RecvIdent.Name := ACall.ObjectName;
+      ACall.ObjExpr := RecvIdent;
+      ACall.ObjectName := '';
+      ACall.ImplicitBaseInfo := nil;
+      Self.AnalyseMethodCall(ACall);
+      Exit;
+    end;
+    if (ACall.ImplicitBaseInfo <> nil) and
        (ACall.ImplicitBaseInfo.TypeDesc.Kind in [tyClass, tyInterface, tyRecord]) then
     begin
       ACall.IsImplicitSelf := True;
@@ -12970,20 +13062,7 @@ begin
      Self.CallsConstructor(TMetaClassTypeDesc(ObjSym.TypeDesc).BaseClass,
        ACall.Name) then
   begin
-    RT := TRecordTypeDesc(TMetaClassTypeDesc(ObjSym.TypeDesc).BaseClass);
-    HintBareEnumMethodArgs(RT.Name, ACall.Name, ACall.Args);
-    for I := 0 to ACall.Args.Count - 1 do
-      Self.AnalyseArgSlot(ACall.Args, I);
-    MDecl := ResolveMethodOverload(RT.Name, ACall.Name, ACall.Args,
-      ACall.Line, ACall.Col);
-    ResolveDeferredArrowArgs(ACall.Args, MDecl);
-    if MDecl = nil then
-      MDecl := FindMethodDecl(RT.Name, ACall.Name);
-    ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
-    ACall.ResolvedClassType   := RT;
-    ACall.ResolvedMethod      := MDecl;
-    ACall.IsConstructorCall   := True;
-    ACall.IsMetaclassDispatch := True;
+    Self.ResolveMetaclassCtorStmt(ACall, ObjSym.TypeDesc);
     ACall.IsGlobal            := ObjSym.IsGlobal;
     ACall.IsVarParam          := RecvSlotHoldsAddress(ObjSym);
     Exit;
@@ -17275,6 +17354,16 @@ begin
       Exit;
     end;
 
+    { Cls.Create(args) with Cls a class reference that is not a plain
+      variable -- a field, an element, a call result }
+    if (ObjType.Kind = tyMetaClass) and
+       Self.CallsConstructor(TMetaClassTypeDesc(ObjType).BaseClass,
+         AExpr.Name) then
+    begin
+      Result := Self.ResolveMetaclassCtorExpr(AExpr, ObjType);
+      Exit;
+    end;
+
     if not (ObjType.Kind in [tyClass, tyInterface, tyRecord]) then
       SemanticError(
         Format('Receiver of ''.%s'' must be a class, interface, or record', [AExpr.Name]),
@@ -17427,6 +17516,16 @@ begin
         TIdentExpr(AExpr.ObjExpr).Col  := AExpr.Col;
         AExpr.ObjectName := '';
         Result := Self.AnalyseMethodCallExpr(AExpr);
+        Exit;
+      end;
+      if (ObjType <> nil) and (ObjType.Kind = tyMetaClass) and
+         Self.CallsConstructor(TMetaClassTypeDesc(ObjType).BaseClass,
+           AExpr.Name) then
+      begin
+        { FCls.Create(args) with FCls a class-reference field of Self: the
+          receiver expression just analysed reads the field }
+        AExpr.ObjectName := '';
+        Result := Self.ResolveMetaclassCtorExpr(AExpr, ObjType);
         Exit;
       end;
       if (ObjType = nil) or not (ObjType.Kind in [tyClass, tyInterface]) then
@@ -17691,28 +17790,10 @@ begin
      Self.CallsConstructor(TMetaClassTypeDesc(ObjSym.TypeDesc).BaseClass,
        AExpr.Name) then
   begin
-    RT := TRecordTypeDesc(TMetaClassTypeDesc(ObjSym.TypeDesc).BaseClass);
-    HintBareEnumMethodArgs(RT.Name, AExpr.Name, AExpr.Args);
-    for I := 0 to AExpr.Args.Count - 1 do
-      Self.AnalyseListSlot(AExpr.Args, I);
-    MDecl := ResolveMethodOverload(RT.Name, AExpr.Name,
-      AExpr.Args, AExpr.Line, AExpr.Col);
-    if MDecl = nil then
-      MDecl := FindMethodDecl(RT.Name, AExpr.Name);
-    if MDecl <> nil then
-    begin
-      RetypeSetLiteralArgs(AExpr.Args, MDecl);
-      CheckConstArgsInRange(AExpr.Args, MDecl, AExpr.Line, AExpr.Col);
-      AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
-    end;
-    ValidateMethodVarArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
-    AExpr.ResolvedMethod      := MDecl;
-    AExpr.ResolvedClassType   := RT;
-    AExpr.IsConstructorCall   := True;
-    AExpr.IsMetaclassDispatch := True;
+    Result := Self.ResolveMetaclassCtorExpr(AExpr, ObjSym.TypeDesc);
     AExpr.IsGlobal            := ObjSym.IsGlobal;
     AExpr.IsVarParam          := (ObjSym.Kind = skVarParameter);
-    Exit(RT);
+    Exit;
   end;
 
   if not (ObjSym.TypeDesc.Kind in [tyClass, tyInterface, tyRecord]) then

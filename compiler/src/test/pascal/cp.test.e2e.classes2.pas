@@ -206,6 +206,11 @@ type
     { Metaclass-var ctor in statement position (result discarded): allocates,
       dispatches the most-derived ctor, then frees the instance. }
     procedure TestRun_MetaclassCreate_StatementDiscardsResult;
+    { Create through a class reference held in a field of Self, a field, an
+      element, a call result and a var parameter, as a statement and as an
+      expression: the derived virtual constructor runs with its arguments
+      (and a defaulted one), and every instance is freed }
+    procedure TestRun_MetaclassCreate_ExpressionReceivers;
     { Direct TFoo.Create stays static (no vtable dispatch). }
     procedure TestRun_DirectCreate_StaysStatic;
     { ClassCreate builtin still works (backwards compat) and now dispatches
@@ -2568,6 +2573,102 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcMetaclassCreateStatement,
     '4' + LE + '40' + LE + '2' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_MetaclassCreate_ExpressionReceivers;
+const
+  Src = '''
+    program P;
+    type
+      TBase = class
+        N: Integer;
+        constructor Create(AN: Integer; ATag: string = 'd'); virtual;
+        destructor Destroy(); override;
+      end;
+      TDerived = class(TBase)
+        constructor Create(AN: Integer; ATag: string = 'd'); override;
+      end;
+      TBaseClass = class of TBase;
+      THolder = class
+        FCls: TBaseClass;
+        procedure Run();
+      end;
+    var Frees: Integer;
+    constructor TBase.Create(AN: Integer; ATag: string);
+    begin
+      N := AN;
+      WriteLn('base ', AN, ATag)
+    end;
+    destructor TBase.Destroy();
+    begin
+      Frees := Frees + 1;
+      inherited Destroy()
+    end;
+    constructor TDerived.Create(AN: Integer; ATag: string);
+    begin
+      inherited Create(AN * 10, ATag);
+      WriteLn('derived ', AN, ATag)
+    end;
+    function GetCls(): TBaseClass; begin Result := TDerived end;
+    procedure THolder.Run();
+    var X: TBase;
+    begin
+      FCls.Create(1);
+      X := FCls.Create(2, 'x');
+      WriteLn('self field ', X.N)
+    end;
+    procedure ViaVar(var C: TBaseClass);
+    var X: TBase;
+    begin
+      C.Create(6);
+      X := C.Create(7);
+      WriteLn('var ', X.N)
+    end;
+    procedure Go();
+    var
+      H: THolder;
+      A: array of TBaseClass;
+      X: TBase;
+      C: TBaseClass;
+    begin
+      H := THolder.Create();
+      H.FCls := TDerived;
+      H.Run();
+      H.FCls.Create(3);
+      X := H.FCls.Create(3, 'f');
+      WriteLn('field ', X.N);
+      SetLength(A, 1);
+      A[0] := TDerived;
+      A[0].Create(4);
+      X := A[0].Create(4, 'e');
+      WriteLn('element ', X.N);
+      GetCls().Create(5);
+      X := GetCls().Create(5, 'c');
+      WriteLn('call ', X.N);
+      C := TDerived;
+      ViaVar(C)
+    end;
+    begin
+      Go();
+      WriteLn('frees ', Frees)
+    end.
+    ''';
+  Expected =
+    'base 10d' + LE + 'derived 1d' + LE +
+    'base 20x' + LE + 'derived 2x' + LE + 'self field 20' + LE +
+    'base 30d' + LE + 'derived 3d' + LE +
+    'base 30f' + LE + 'derived 3f' + LE + 'field 30' + LE +
+    'base 40d' + LE + 'derived 4d' + LE +
+    'base 40e' + LE + 'derived 4e' + LE + 'element 40' + LE +
+    'base 50d' + LE + 'derived 5d' + LE +
+    'base 50c' + LE + 'derived 5c' + LE + 'call 50' + LE +
+    'base 60d' + LE + 'derived 6d' + LE +
+    'base 70d' + LE + 'derived 7d' + LE + 'var 70' + LE +
+    'frees 10' + LE;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, Expected, 0);
+  AssertLeakFreeOnAll(Src, '');
 end;
 
 procedure TE2EClasses2Tests.TestRun_DirectCreate_StaysStatic;

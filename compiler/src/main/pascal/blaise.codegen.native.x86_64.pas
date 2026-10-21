@@ -588,6 +588,11 @@ type
       local / global / nested-captured variables uniformly. }
     procedure EmitVarBaseToReg(const AName: string; AWantAddress: Boolean;
                                const ADstReg: string);
+    { %rdi := the class reference a metaclass-dispatched constructor runs on:
+      the receiver expression's value, or the named variable's (through a
+      var parameter's address, or a captured variable's storage) }
+    procedure EmitMetaclassRecvToRdi(const AName: string; AObjExpr: TASTExpr;
+      AIsVarParam: Boolean);
     { True when AName is a slot in the current function frame. }
     function IsLocal(const AName: string): Boolean;
     { The AT&T operand addressing AName: "-N(%rbp)" for a frame local,
@@ -5727,6 +5732,20 @@ begin
   Result := ((FCapturedVars <> nil) and (FCapturedVars.IndexOf(AName) >= 0)) or
             ((FEnvVarNames <> nil) and (FEnvVarNames.IndexOf(AName) >= 0)) or
             ((FBlockEnvVarNames <> nil) and (FBlockEnvVarNames.IndexOf(AName) >= 0));
+end;
+
+procedure TX86_64Backend.EmitMetaclassRecvToRdi(const AName: string;
+  AObjExpr: TASTExpr; AIsVarParam: Boolean);
+begin
+  if AObjExpr <> nil then
+    Self.EmitExprToEax(AObjExpr)
+  else
+  begin
+    Self.EmitVarBaseToReg(AName, False, '%rax');
+    if AIsVarParam then
+      Self.Emit(#9'movq (%rax), %rax');
+  end;
+  Self.Emit(#9'movq %rax, %rdi');
 end;
 
 procedure TX86_64Backend.EmitVarBaseToReg(const AName: string;
@@ -12337,7 +12356,8 @@ begin
     RT := TRecordTypeDesc(ACall.ResolvedClassType);
     if ACall.IsMetaclassDispatch then
     begin
-      Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(ACall.ObjectName)]));
+      Self.EmitMetaclassRecvToRdi(ACall.ObjectName, ACall.ObjExpr,
+        ACall.IsVarParam);
       Self.Emit(#9'callq _ClassCreate');
     end
     else
@@ -14224,7 +14244,8 @@ begin
   begin
     RT := TRecordTypeDesc(ACall.ResolvedClassType);
     MD := TMethodDecl(ACall.ResolvedMethod);
-    Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(ACall.ObjectName)]));
+    Self.EmitMetaclassRecvToRdi(ACall.ObjectName, ACall.ObjExpr,
+      ACall.IsVarParam);
     Self.Emit(#9'callq _ClassCreate');
     if MD <> nil then
     begin

@@ -57,6 +57,12 @@ type
       mandatory-parentheses diagnostic, not the misleading
       'is not a record or class' error. }
     procedure TestSemantic_MetaclassVar_BareCreate_RequiresParens;
+
+    { Create through a class reference that is not a plain variable -- a
+      field of Self, a field, an element, a call result -- in statement and
+      expression position: metaclass dispatch on the receiver expression
+      (all of these were rejected) }
+    procedure TestSemantic_MetaclassExprReceiver_Create_Accepted;
   end;
 
 implementation
@@ -390,6 +396,61 @@ const Src = '''
     ''';
 begin
   AnalyseSrc(Src);
+end;
+
+procedure TClassOfTests.TestSemantic_MetaclassExprReceiver_Create_Accepted;
+const Src = '''
+    program P;
+    type
+      TFoo = class(TObject)
+        constructor Create(N: Integer);
+      end;
+      TFooClass = class of TFoo;
+      THolder = class
+        FCls: TFooClass;
+        procedure Run();
+      end;
+    constructor TFoo.Create(N: Integer); begin end;
+    function GetCls(): TFooClass; begin Result := TFoo end;
+    procedure THolder.Run();
+    var F: TFoo;
+    begin
+      FCls.Create(1);
+      F := FCls.Create(2)
+    end;
+    var H: THolder; A: array of TFooClass; F: TFoo;
+    begin
+      H.FCls.Create(3);
+      A[0].Create(4);
+      GetCls().Create(5);
+      F := H.FCls.Create(6);
+      F := A[0].Create(7);
+      F := GetCls().Create(8)
+    end.
+    ''';
+var
+  Prog: TProgram;
+  I: Integer;
+  S: TMethodCallStmt;
+  E: TMethodCallExpr;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    for I := 0 to 2 do
+    begin
+      S := TMethodCallStmt(Prog.Block.Stmts.Items[I]);
+      AssertTrue('statement ' + IntToStr(I) + ' dispatches on the receiver',
+        S.IsConstructorCall and S.IsMetaclassDispatch and (S.ObjExpr <> nil));
+    end;
+    for I := 3 to 5 do
+    begin
+      E := TMethodCallExpr(TAssignment(Prog.Block.Stmts.Items[I]).Expr);
+      AssertTrue('expression ' + IntToStr(I) + ' dispatches on the receiver',
+        E.IsConstructorCall and E.IsMetaclassDispatch and (E.ObjExpr <> nil));
+    end;
+  finally
+    Prog.Free();
+  end;
 end;
 
 procedure TClassOfTests.TestSemantic_MetaclassVar_BareCreate_RequiresParens;

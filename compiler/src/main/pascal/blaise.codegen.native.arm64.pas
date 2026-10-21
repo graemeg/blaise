@@ -353,6 +353,11 @@ type
     procedure EmitForInVarAddr(const AReg: string; AStmt: TForInStmt);
     procedure EmitFatTargetAddr(const AReg: string; AAsgn: TAssignment);
     procedure EmitParenlessCtor(AFA: TFieldAccessExpr);
+    { x0 := the class reference a metaclass-dispatched constructor runs on:
+      the receiver expression's value, or the named variable's (through a
+      var parameter's address, or a captured variable's storage) }
+    procedure EmitMetaclassRecvToX0(const AName: string; AObjExpr: TASTExpr;
+      AIsVarParam: Boolean);
     procedure EmitSetIncludeExclude(ACall: TProcCall; AInclude: Boolean);
     procedure EmitFatFieldStoreStacked(AFld: TFieldInfo; AValueExpr: TASTExpr);
     function  EmitClosureResultToTemp(AExpr: TASTExpr; out ATmp: string): Boolean;
@@ -3417,6 +3422,21 @@ begin
   finally
     MC.Free();
   end;
+end;
+
+procedure TArm64Backend.EmitMetaclassRecvToX0(const AName: string;
+  AObjExpr: TASTExpr; AIsVarParam: Boolean);
+begin
+  if AObjExpr <> nil then
+  begin
+    Self.EmitExprToX0(AObjExpr);
+    Exit;
+  end;
+  if EmitCapturedBase('x0', AName, True, AIsVarParam) then
+    Exit;
+  EmitLoadSlot('x0', AName);
+  if AIsVarParam then
+    Self.Emit(#9'ldr x0, [x0]');
 end;
 
 procedure TArm64Backend.EmitSetIncludeExclude(ACall: TProcCall;
@@ -17617,14 +17637,14 @@ begin
       EmitCallSym('_StringRelease');
     Exit;
   end;
-  if AStmt.IsConstructorCall and AStmt.IsMetaclassDispatch and
-     (AStmt.ObjExpr = nil) and (AStmt.ObjectName <> '') then
+  if AStmt.IsConstructorCall and AStmt.IsMetaclassDispatch then
   begin
     { Cls.Create(args); with the result discarded: _ClassCreate hands back
       the instance at +1, the constructor runs for its side effects (through
       the NEW instance's vtable when virtual), and nothing holds the
-      reference, so it is released straight away (x86-64 parity). }
-    EmitLoadSlot('x0', AStmt.ObjectName);
+      reference, so it is released straight away (x86-64 parity).  Cls is
+      a variable or any class-reference expression. }
+    EmitMetaclassRecvToX0(AStmt.ObjectName, AStmt.ObjExpr, AStmt.IsVarParam);
     EmitCallSym('_ClassCreate');
     MD := TMethodDecl(AStmt.ResolvedMethod);
     if MD <> nil then
@@ -17872,13 +17892,17 @@ begin
       ctor's VTableSlot). }
     if AExpr.IsMetaclassDispatch then
     begin
-      EmitLoadSlot('x0', AExpr.ObjectName);
-      EmitCallSym('_ClassCreate');
+      EmitMetaclassRecvToX0(AExpr.ObjectName, AExpr.ObjExpr, AExpr.IsVarParam);
       if FDebugMode then
       begin
-        EmitLoadSlot('x9', AExpr.ObjectName);  { the typeinfo VALUE }
+        { keep the typeinfo VALUE for the leak tracker's class name }
+        EmitPushX0();
+        EmitCallSym('_ClassCreate');
+        EmitPopTo('x9');
         EmitLeakTrackerRegister('x9', '', AExpr.Line);
-      end;
+      end
+      else
+        EmitCallSym('_ClassCreate');
       MD := TMethodDecl(AExpr.ResolvedMethod);
       { a resolved ctor is CALLED even when Body = nil — imported unit
         interfaces carry declaration stubs; the body lives in the
