@@ -583,11 +583,21 @@ type
       class (Slots[I] := V, Pt.X := V) stores to the shared global, not to a
       symbol under the declared name, which bound to nothing }
     procedure TestCodegen_StaticVar_BareElemAndFieldWrite_SharedGlobal;
+    { a static method called through an INSTANCE (H.M()) is a static call,
+      no Self -- x86-64 passed the instance as a first argument }
+    procedure TestSem_StaticMethodThroughInstance_IsStaticCall;
     { a float static property read compiles on x86-64 (the float arm
       dereferenced the absent FieldInfo: a compiler crash) }
     procedure TestCodegen_StaticFloatPropRead_X86Compiles;
     { a static property read through its getter owns the getter's +1 }
     procedure TestArc_StaticPropGetterRead_Owned;
+    { static properties: written through the type name, an instance, and
+      bare inside an instance or a static method of the type; backed by a
+      static var or by static accessors }
+    procedure TestSem_StaticProp_WriteThroughTypeName_SetterCall;
+    procedure TestSem_StaticProp_WriteThroughInstance_StaticSetterCall;
+    procedure TestSem_StaticProp_BareInStaticMethod_Resolves;
+    procedure TestSem_StaticProp_StaticVarBacked_IsFieldAccessor;
     { static var resolves to a shared global, not an instance field }
     procedure TestSem_StaticVar_BareReadResolves;
     procedure TestSem_StaticVar_NotAnInstanceField;
@@ -886,6 +896,69 @@ begin
   AssertTrue('arm64: stores through TC_Slots', Pos('_g_TC_Slots@', A64) >= 0);
 end;
 
+
+const
+  SrcStaticHost = '''
+    program P;
+    type
+      TBox = class
+        N: Integer;
+      end;
+      THost = class
+      public
+        procedure Dummy;
+      private static var
+        FFI: Integer;
+        FSD: Double;
+        FSO: TBox;
+      public
+        static function GetIx(I: Integer): Integer;
+        static procedure SetIx(I: Integer; AV: Integer);
+        static function GetSD: Double;
+        static procedure SetSD(AV: Double);
+        static function GetSO: TBox;
+        static procedure SetSO(AV: TBox);
+        static procedure Bump;
+        static property Ix[I: Integer]: Integer read GetIx write SetIx;
+        static property SD: Double read GetSD write SetSD;
+        static property SO: TBox read GetSO write SetSO;
+        static property FI: Integer read FFI write FFI;
+      end;
+    procedure THost.Dummy; begin end;
+    static function THost.GetIx(I: Integer): Integer; begin Result := I; end;
+    static procedure THost.SetIx(I: Integer; AV: Integer); begin end;
+    static function THost.GetSD: Double; begin Result := FSD; end;
+    static procedure THost.SetSD(AV: Double); begin FSD := AV; end;
+    static function THost.GetSO: TBox; begin Result := FSO; end;
+    static procedure THost.SetSO(AV: TBox); begin FSO := AV; end;
+    static procedure THost.Bump;
+    begin
+      FI := FI + 1;
+      SD := SD + 1.0;
+      Ix[0] := Ix[1];
+    end;
+    ''';
+
+procedure TStaticMembersSemTests.TestSem_StaticMethodThroughInstance_IsStaticCall;
+var
+  P: TProgram;
+  Call: TMethodCallStmt;
+begin
+  P := AnalyseSrc(SrcStaticHost + '''
+    var H: THost;
+    begin
+      H := THost.Create();
+      H.Bump();
+    end.
+    ''');
+  try
+    Call := TMethodCallStmt(P.Block.Stmts.Items[P.Block.Stmts.Count - 1]);
+    AssertTrue('H.Bump() is a static call', Call.IsStaticCall);
+  finally
+    P.Free();
+  end;
+end;
+
 procedure TStaticMembersSemTests.TestCodegen_StaticFloatPropRead_X86Compiles;
 var
   Code: string;
@@ -941,6 +1014,90 @@ begin
       FA := TFieldAccessExpr(FA.Base);
     AssertTrue('THost.SO is a static getter read', FA.IsStaticPropGet);
     AssertTrue('the getter''s +1 is owned', ArcExprOwnsRef(FA));
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticMembersSemTests.TestSem_StaticProp_WriteThroughTypeName_SetterCall;
+var
+  P: TProgram;
+  FA: TFieldAssignment;
+begin
+  P := AnalyseSrc(SrcStaticHost + '''
+    begin
+      THost.SD := 2.5;
+      THost.Ix[3] := 4;
+      THost.FI := 5;
+    end.
+    ''');
+  try
+    FA := TFieldAssignment(P.Block.Stmts.Items[0]);
+    AssertTrue('THost.SD := V lowers to a setter call', FA.SetterCall is TMethodCallStmt);
+    AssertTrue('a static one', TMethodCallStmt(FA.SetterCall).IsStaticCall);
+    FA := TFieldAssignment(P.Block.Stmts.Items[1]);
+    AssertEquals('THost.Ix[I] := V passes index and value', 2,
+      TMethodCallStmt(FA.SetterCall).Args.Count);
+    FA := TFieldAssignment(P.Block.Stmts.Items[2]);
+    AssertTrue('a static-var-backed one stores to the static var',
+      FA.IsClassVarWrite);
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticMembersSemTests.TestSem_StaticProp_WriteThroughInstance_StaticSetterCall;
+var
+  P: TProgram;
+  FA: TFieldAssignment;
+begin
+  P := AnalyseSrc(SrcStaticHost + '''
+    var H: THost;
+    begin
+      H := THost.Create();
+      H.SD := 2.5;
+      H.FI := 5;
+    end.
+    ''');
+  try
+    FA := TFieldAssignment(P.Block.Stmts.Items[1]);
+    AssertTrue('H.SD := V is the static setter call',
+      (FA.SetterCall is TMethodCallStmt) and
+      TMethodCallStmt(FA.SetterCall).IsStaticCall);
+    FA := TFieldAssignment(P.Block.Stmts.Items[2]);
+    AssertTrue('H.FI := V stores to the static var', FA.IsClassVarWrite);
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticMembersSemTests.TestSem_StaticProp_BareInStaticMethod_Resolves;
+var
+  P: TProgram;
+begin
+  { THost.Bump writes and reads FI, SD and Ix bare inside a STATIC method:
+    it was "Undeclared variable" / "Undeclared identifier" }
+  P := AnalyseSrc(SrcStaticHost + '''
+    begin
+      THost.Bump();
+    end.
+    ''');
+  P.Free();
+end;
+
+procedure TStaticMembersSemTests.TestSem_StaticProp_StaticVarBacked_IsFieldAccessor;
+var
+  P: TProgram;
+  RT: TRecordTypeDesc;
+  PI: TPropertyInfo;
+begin
+  P := AnalyseSrc(SrcStaticHost + 'begin end.');
+  try
+    RT := TRecordTypeDesc(P.SymbolTable.FindType('THost'));
+    PI := RT.FindProperty('FI');
+    AssertEquals('read accessor is the static var', 'FFI', PI.ReadField);
+    AssertEquals('write accessor is the static var', 'FFI', PI.WriteField);
+    AssertEquals('not a method', '', PI.ReadMethod);
   finally
     P.Free();
   end;

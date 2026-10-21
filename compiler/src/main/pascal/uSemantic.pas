@@ -678,6 +678,19 @@ type
     function  AnalysedRecvIdent(const AName: string;
       ALine, ACol: Integer): TASTExpr;
     function  StorageName(ASym: TSymbol; ALine, ACol: Integer): string;
+    function  IsStaticVarOf(const ATypeName, AName: string): Boolean;
+    function  BuildStaticSetterCall(AOwner: TRecordTypeDesc; AProp: TPropertyInfo;
+      AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
+    procedure LowerStaticPropWrite(AAssign: TFieldAssignment;
+      AOwner: TRecordTypeDesc; AProp: TPropertyInfo);
+    function  RetargetStaticPropWrite(AAssign: TFieldAssignment;
+      ARecvType: TRecordTypeDesc; AProp: TPropertyInfo): Boolean;
+    function  LowerStaticPropRead(AAccess: TFieldAccessExpr;
+      ARecvType: TRecordTypeDesc; AProp: TPropertyInfo): TTypeDesc;
+    function  LowerBareStaticPropRead(AIdent: TIdentExpr;
+      AOwner: TRecordTypeDesc): TTypeDesc;
+    procedure LowerBareStaticPropWrite(AAssign: TAssignment;
+      AOwner: TRecordTypeDesc; AProp: TPropertyInfo);
     function  BuildSetterCall(ARecv: TASTExpr; AProp: TPropertyInfo;
       AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
     function  BuildIndexedGetterCall(AAccess: TFieldAccessExpr): TASTExpr;
@@ -9102,9 +9115,15 @@ begin
         PropInfo := TPropertyInfo.Create();
         PropInfo.Name := PropDecl.Name;
         PropInfo.TypeDesc := PropType;
+        { a STATIC property may read / write a static var of its type
+          (static property P: T read FP write FP, FP a static var): that is
+          a field accessor too, reached as the static var TFoo.FP -- it was
+          taken for a method named FP and failed to link }
         if PropDecl.ReadName <> '' then
         begin
-          if RT.FindField(PropDecl.ReadName) <> nil then
+          if (RT.FindField(PropDecl.ReadName) <> nil) or
+             (PropDecl.IsStatic and
+              IsStaticVarOf(TD.Name, PropDecl.ReadName)) then
             PropInfo.ReadField := PropDecl.ReadName
           else
             PropInfo.ReadMethod := DeclaredMethodCase(
@@ -9112,7 +9131,9 @@ begin
         end;
         if PropDecl.WriteName <> '' then
         begin
-          if RT.FindField(PropDecl.WriteName) <> nil then
+          if (RT.FindField(PropDecl.WriteName) <> nil) or
+             (PropDecl.IsStatic and
+              IsStaticVarOf(TD.Name, PropDecl.WriteName)) then
             PropInfo.WriteField := PropDecl.WriteName
           else
             PropInfo.WriteMethod := DeclaredMethodCase(
@@ -9928,6 +9949,16 @@ begin
   end;
 end;
 
+{ True when AName is a static (class-level) var declared by type ATypeName:
+  registered under the qualified key 'TFoo.Name'. }
+function TSemanticAnalyser.IsStaticVarOf(const ATypeName, AName: string): Boolean;
+var
+  Sym: TSymbol;
+begin
+  Sym := FTable.Lookup(ATypeName + '.' + AName);
+  Result := (Sym <> nil) and (Sym.Kind = skVariable) and Sym.IsClassVar;
+end;
+
 { Recv.SetX([Index,] Value) for a property write whose receiver is a CLASS
   instance: the ordinary method-call statement, so the value and receiver are
   marshalled exactly as for an explicit call -- an interface value as its
@@ -9946,9 +9977,23 @@ var
   Call:  TMethodCallStmt;
 begin
   Result := nil;
-  if (ARecv = nil) or (AProp = nil) or AProp.IsStatic or
-     (AProp.WriteMethod = '') then
+  if (ARecv = nil) or (AProp = nil) or (AProp.WriteMethod = '') then
     Exit;
+  { a STATIC property written through an instance (H.SP := V) is the static
+    setter call; the receiver only named the class.  A fresh receiver node
+    (AnalysedRecvIdent) is then unused and freed; one the assignment owns
+    (its ObjExpr) stays with it. }
+  if AProp.IsStatic then
+  begin
+    if (ARecv.ResolvedType <> nil) and
+       (ARecv.ResolvedType.Kind in [tyClass, tyRecord]) then
+      Result := Self.BuildStaticSetterCall(TRecordTypeDesc(ARecv.ResolvedType),
+        AProp, AIndex, AValue, ANode);
+    if not ((ANode is TFieldAssignment) and
+            (TFieldAssignment(ANode).ObjExpr = ARecv)) then
+      ARecv.Free();
+    Exit;
+  end;
   if (ARecv.ResolvedType = nil) or (ARecv.ResolvedType.Kind <> tyClass) then
     Exit;
   MDecl := FindMethodDecl(TRecordTypeDesc(ARecv.ResolvedType).Name,
@@ -9966,6 +10011,150 @@ begin
   Call.ResolvedClassType := ARecv.ResolvedType;
   Call.ResolvedMethod    := MDecl;
   Result := Call;
+end;
+
+{ AOwner.SetX([Index,] Value) for a write to a STATIC property: the plain
+  static-method call, no Self -- marshalled exactly as an explicit
+  TFoo.SetX(...) statement, so an owned transient value is released and a
+  float or record travels by its ABI class.  The hand-written backend paths
+  passed the receiver as a first argument (x86-64 printed garbage through
+  H.SP := V) or refused the indexed form (arm64).  AIndex and AValue are
+  already analysed and shared with the assignment node.  Nil for an
+  unresolved setter. }
+function TSemanticAnalyser.BuildStaticSetterCall(AOwner: TRecordTypeDesc;
+  AProp: TPropertyInfo; AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
+var
+  MDecl: TMethodDecl;
+  Call:  TMethodCallStmt;
+begin
+  Result := nil;
+  if (AOwner = nil) or (AProp = nil) or (AProp.WriteMethod = '') then
+    Exit;
+  MDecl := FindMethodDecl(AOwner.Name, AProp.WriteMethod);
+  if (MDecl = nil) or not MDecl.IsStatic then
+    Exit;
+  Call := TMethodCallStmt.Create();
+  Call.Line       := ANode.Line;
+  Call.Col        := ANode.Col;
+  Call.ObjectName := AOwner.Name;
+  Call.Name       := AProp.WriteMethod;
+  if AIndex <> nil then
+    Call.Args.Add(AIndex);
+  Call.Args.Add(AValue);
+  Call.ResolvedClassType := AOwner;
+  Call.ResolvedMethod    := MDecl;
+  Call.IsStaticCall      := True;
+  Result := Call;
+end;
+
+{ TFoo.SP := V / TFoo.SP[I] := V for a static property SP of TFoo: the
+  static setter call, the index and value analysed against the property's
+  types.  A field-backed SP is the store to its static var, through the
+  TFoo.StaticVar path. }
+procedure TSemanticAnalyser.LowerStaticPropWrite(AAssign: TFieldAssignment;
+  AOwner: TRecordTypeDesc; AProp: TPropertyInfo);
+var
+  IdxType, ValType: TTypeDesc;
+begin
+  if AProp.WriteField <> '' then
+  begin
+    AAssign.FieldName := AProp.WriteField;
+    Self.AnalyseFieldAssignment(AAssign);
+    Exit;
+  end;
+  if AProp.WriteMethod = '' then
+    SemanticError(Format('Property ''%s.%s'' is read-only',
+      [AOwner.Name, AProp.Name]), AAssign.Line, AAssign.Col);
+  if AProp.IndexParamName <> '' then
+  begin
+    if AAssign.PropIndexExpr = nil then
+      SemanticError(
+        Format('Indexed property ''%s'' requires an index expression',
+          [AProp.Name]), AAssign.Line, AAssign.Col);
+    IdxType := Self.AnalyseExprSlot(AAssign.PropIndexExpr);
+    if AProp.IndexTypeDesc <> nil then
+      CheckTypesMatch(AProp.IndexTypeDesc, IdxType, 'property index',
+        AAssign.Line, AAssign.Col);
+  end
+  else if AAssign.PropIndexExpr <> nil then
+    SemanticError(Format('Property ''%s'' is not indexed', [AProp.Name]),
+      AAssign.Line, AAssign.Col);
+  InferArrowFromTarget(AAssign.Expr, AProp.TypeDesc);
+  ResolveDiamond(AAssign.Expr, AProp.TypeDesc);
+  ValType := Self.AnalyseExprHinted(AAssign.Expr, AProp.TypeDesc);
+  Self.CheckConstValueInRange(AProp.TypeDesc, AAssign.Expr,
+    AAssign.Line, AAssign.Col);
+  CheckTypesMatch(AProp.TypeDesc, ValType, 'property assignment',
+    AAssign.Line, AAssign.Col);
+  AAssign.PropWriteInfo := AProp;
+  AAssign.SetterCall := Self.BuildStaticSetterCall(AOwner, AProp,
+    AAssign.PropIndexExpr, AAssign.Expr, AAssign);
+  if AAssign.SetterCall = nil then
+    SemanticError(Format('Property ''%s.%s'' needs a static setter',
+      [AOwner.Name, AProp.Name]), AAssign.Line, AAssign.Col);
+end;
+
+{ R.SP := V / R.SP[I] := V where SP is a STATIC property of R's type: the
+  receiver only names the type, so the write is TFoo.SP := V on SP's
+  declaring type (a field-backed SP then reaches its static var, which
+  exists under the declaring type's name only).  False, and nothing done,
+  for a non-static property.  The receiver expression is dropped, as for a
+  static method called through an instance. }
+function TSemanticAnalyser.RetargetStaticPropWrite(AAssign: TFieldAssignment;
+  ARecvType: TRecordTypeDesc; AProp: TPropertyInfo): Boolean;
+var
+  Owner: TRecordTypeDesc;
+  OwnerTD: TTypeDesc;
+begin
+  Result := False;
+  if (AProp = nil) or not AProp.IsStatic then
+    Exit;
+  Owner := ARecvType;
+  OwnerTD := FTable.FindType(AProp.DeclaringType);
+  if (OwnerTD <> nil) and (OwnerTD.Kind in [tyClass, tyRecord]) then
+    Owner := TRecordTypeDesc(OwnerTD);
+  if AAssign.ObjExpr <> nil then
+  begin
+    AAssign.ObjExpr.Free();
+    AAssign.ObjExpr := nil;
+  end;
+  AAssign.RecordName       := Owner.Name;
+  AAssign.IsImplicitSelf   := False;
+  AAssign.ImplicitBaseInfo := nil;
+  Self.LowerStaticPropWrite(AAssign, Owner, AProp);
+  Result := True;
+end;
+
+{ SP := V inside a method of SP's type, SP a non-indexed STATIC property:
+  the store to its static var, or the static setter call -- never through
+  Self, which a static method does not have (it was "Undeclared
+  variable"). }
+procedure TSemanticAnalyser.LowerBareStaticPropWrite(AAssign: TAssignment;
+  AOwner: TRecordTypeDesc; AProp: TPropertyInfo);
+var
+  ExprType: TTypeDesc;
+begin
+  if AProp.WriteField <> '' then
+  begin
+    AAssign.Name := AProp.WriteField;
+    Self.AnalyseAssignment(AAssign);
+    Exit;
+  end;
+  if AProp.WriteMethod = '' then
+    SemanticError(Format('Property ''%s'' is read-only', [AAssign.Name]),
+      AAssign.Line, AAssign.Col);
+  InferArrowFromTarget(AAssign.Expr, AProp.TypeDesc);
+  ResolveDiamond(AAssign.Expr, AProp.TypeDesc);
+  ExprType := Self.AnalyseExprHinted(AAssign.Expr, AProp.TypeDesc);
+  Self.CheckConstValueInRange(AProp.TypeDesc, AAssign.Expr,
+    AAssign.Line, AAssign.Col);
+  CheckTypesMatch(AProp.TypeDesc, ExprType, 'property assignment',
+    AAssign.Line, AAssign.Col);
+  AAssign.SetterCall := Self.BuildStaticSetterCall(AOwner, AProp, nil,
+    AAssign.Expr, AAssign);
+  if AAssign.SetterCall = nil then
+    SemanticError(Format('Property ''%s'' needs a static setter',
+      [AAssign.Name]), AAssign.Line, AAssign.Col);
 end;
 
 { The index of an interface property access (I.Items[K]): analysed against
@@ -12246,7 +12435,16 @@ begin
   else if AStmt is TAssignment then
     AnalyseAssignment(TAssignment(AStmt))
   else if AStmt is TMethodCallStmt then
-    AnalyseMethodCall(TMethodCallStmt(AStmt))
+  begin
+    AnalyseMethodCall(TMethodCallStmt(AStmt));
+    { a static method takes no Self, whatever the receiver: H.M() through an
+      instance is the same call as THost.M().  Only the class-name form set
+      the flag, so x86-64 passed the instance as a first argument (arm64
+      also tested the method's own IsStatic) }
+    if (TMethodCallStmt(AStmt).ResolvedMethod is TMethodDecl) and
+       TMethodDecl(TMethodCallStmt(AStmt).ResolvedMethod).IsStatic then
+      TMethodCallStmt(AStmt).IsStaticCall := True;
+  end
   else if AStmt is TInheritedCallStmt then
     AnalyseInheritedCall(TInheritedCallStmt(AStmt))
   else if AStmt is TPointerWriteStmt then
@@ -12737,6 +12935,13 @@ begin
       Self.Prop := V.  A field-backed one writes its backing field; a
       method-backed one becomes the call Self.SetProp(V). }
     PropInfo := FCurrentClass.FindProperty(AAssign.Name);
+    { a bare STATIC property (SP := V inside an instance method) }
+    if (PropInfo <> nil) and PropInfo.IsStatic and
+       (PropInfo.IndexParamName = '') then
+    begin
+      Self.LowerBareStaticPropWrite(AAssign, FCurrentClass, PropInfo);
+      Exit;
+    end;
     if (PropInfo <> nil) and not PropInfo.IsStatic and
        (PropInfo.IndexParamName = '') then
     begin
@@ -12764,6 +12969,19 @@ begin
         SemanticError(
           Format('Property ''%s'' cannot be written here', [AAssign.Name]),
           AAssign.Line, AAssign.Col);
+      Exit;
+    end;
+  end;
+  { a bare STATIC property inside a STATIC method of its type: there is no
+    FCurrentClass there (no Self), so resolve it on the method's owner }
+  if (VarSym = nil) and (FCurrentClass = nil) and
+     (FCurrentMethodOwner <> nil) then
+  begin
+    PropInfo := FCurrentMethodOwner.FindProperty(AAssign.Name);
+    if (PropInfo <> nil) and PropInfo.IsStatic and
+       (PropInfo.IndexParamName = '') then
+    begin
+      Self.LowerBareStaticPropWrite(AAssign, FCurrentMethodOwner, PropInfo);
       Exit;
     end;
   end;
@@ -13425,6 +13643,8 @@ begin
         AssertMemberVisibleV(PropInfo.Visibility, PropInfo.DeclaringUnit,
                              PropInfo.DeclaringType, AAssign.FieldName,
                              AAssign.Line, AAssign.Col);
+      if Self.RetargetStaticPropWrite(AAssign, RT, PropInfo) then
+        Exit;
       if ElemWriteThroughProp(PropInfo, AAssign) then
       begin
         { A.B.P[I] := V: the element lives in the read field }
@@ -13517,6 +13737,8 @@ begin
         if FldInfo = nil then
         begin
           PropInfo := RT.FindProperty(AAssign.FieldName);
+          if Self.RetargetStaticPropWrite(AAssign, RT, PropInfo) then
+            Exit;
           if ElemWriteThroughProp(PropInfo, AAssign) then
           begin
             { FInner.P[I] := V: the element lives in the read field }
@@ -13637,6 +13859,19 @@ begin
         AAssign.Line, AAssign.Col);
       Exit;
     end;
+    { 'TFoo.StaticProp := V' / 'TFoo.StaticProp[I] := V': the static setter
+      call (it was "'TFoo' is not a variable"); a field-backed one is the
+      write to its static var }
+    if RecSym.TypeDesc.Kind in [tyClass, tyRecord] then
+    begin
+      PropInfo := TRecordTypeDesc(RecSym.TypeDesc).FindProperty(AAssign.FieldName);
+      if (PropInfo <> nil) and PropInfo.IsStatic then
+      begin
+        Self.LowerStaticPropWrite(AAssign, TRecordTypeDesc(RecSym.TypeDesc),
+          PropInfo);
+        Exit;
+      end;
+    end;
   end;
   if not (RecSym.Kind in [skVariable, skParameter, skVarParameter]) then
     SemanticError(
@@ -13675,6 +13910,8 @@ begin
       AssertMemberVisibleV(PropInfo.Visibility, PropInfo.DeclaringUnit,
                            PropInfo.DeclaringType, AAssign.FieldName,
                            AAssign.Line, AAssign.Col);
+      if Self.RetargetStaticPropWrite(AAssign, RT, PropInfo) then
+        Exit;
       if ElemWriteThroughProp(PropInfo, AAssign) then
       begin
         { O.P[I] := V: the element lives in the read field }
@@ -17319,6 +17556,12 @@ begin
           AExpr.Line, AExpr.Col);
       { Property of current class, method-backed: rewrite to the read method }
       PropInfo := FCurrentClass.FindProperty(TIdentExpr(AExpr).Name);
+      if (PropInfo <> nil) and PropInfo.IsStatic then
+      begin
+        Result := Self.LowerBareStaticPropRead(TIdentExpr(AExpr), FCurrentClass);
+        if Result <> nil then
+          Exit;
+      end;
       if PropInfo <> nil then
       begin
         if PropInfo.ReadMethod <> '' then
@@ -17351,6 +17594,16 @@ begin
           end;
         end;
       end;
+    end;
+    { a bare STATIC property inside a STATIC method of its type (no
+      FCurrentClass there) }
+    if (Sym = nil) and (FCurrentClass = nil) and
+       (FCurrentMethodOwner <> nil) then
+    begin
+      Result := Self.LowerBareStaticPropRead(TIdentExpr(AExpr),
+        FCurrentMethodOwner);
+      if Result <> nil then
+        Exit;
     end;
     if Sym = nil then
     begin
@@ -17510,7 +17763,14 @@ begin
   else if AExpr is TFuncCallExpr then
     Result := AnalyseFuncCallExpr(TFuncCallExpr(AExpr))
   else if AExpr is TMethodCallExpr then
-    Result := AnalyseMethodCallExpr(TMethodCallExpr(AExpr))
+  begin
+    Result := AnalyseMethodCallExpr(TMethodCallExpr(AExpr));
+    { a static method takes no Self, whatever the receiver (see the
+      statement form in AnalyseStmt) }
+    if (TMethodCallExpr(AExpr).ResolvedMethod is TMethodDecl) and
+       TMethodDecl(TMethodCallExpr(AExpr).ResolvedMethod).IsStatic then
+      TMethodCallExpr(AExpr).IsStaticCall := True;
+  end
   else if AExpr is TFieldAccessExpr then
     Result := AnalyseFieldAccess(TFieldAccessExpr(AExpr))
   else if AExpr is TBinaryExpr then
@@ -17661,6 +17921,88 @@ begin
   Result := AnalyseFieldAccess(AAccess);
 end;
 
+{ R.SP / R.SP[I] / TFoo.SP where SP is a STATIC property: the receiver only
+  names the type.  A field-backed SP is re-pointed IN PLACE at its static var
+  (the TFoo.StaticVar read on SP's declaring type); a method-backed one is
+  the static getter call -- the IsStaticPropGet form, or for an indexed SP
+  the lowered call LowerStaticIndexedGet builds.  Through an instance the
+  getter was called with the instance as its first argument (x86-64 read
+  garbage for H.Ix[4], arm64 read 0).  The receiver expression is dropped,
+  as for a static method called through an instance. }
+function TSemanticAnalyser.LowerStaticPropRead(AAccess: TFieldAccessExpr;
+  ARecvType: TRecordTypeDesc; AProp: TPropertyInfo): TTypeDesc;
+var
+  Owner: TRecordTypeDesc;
+  OwnerTD: TTypeDesc;
+  MDecl: TMethodDecl;
+begin
+  Owner := ARecvType;
+  OwnerTD := FTable.FindType(AProp.DeclaringType);
+  if (OwnerTD <> nil) and (OwnerTD.Kind in [tyClass, tyRecord]) then
+    Owner := TRecordTypeDesc(OwnerTD);
+  if AProp.ReadField <> '' then
+  begin
+    if AAccess.Base <> nil then
+    begin
+      AAccess.Base.Free();
+      AAccess.Base := nil;
+    end;
+    AAccess.RecordName     := Owner.Name;
+    AAccess.QualifierUnit  := '';
+    AAccess.FieldName      := AProp.ReadField;
+    AAccess.FieldInfo      := nil;
+    AAccess.IsImplicitSelf := False;
+    AAccess.ImplicitBaseInfo := nil;
+    AAccess.IsClassAccess  := False;
+    AAccess.IsVarParam     := False;
+    Exit(Self.AnalyseFieldAccess(AAccess));
+  end;
+  if AProp.ReadMethod = '' then
+    SemanticError(Format('Static property ''%s.%s'' is write-only',
+      [Owner.Name, AProp.Name]), AAccess.Line, AAccess.Col);
+  MDecl := FindMethodDecl(Owner.Name, AProp.ReadMethod);
+  if (MDecl = nil) or not MDecl.IsStatic then
+    SemanticError(
+      Format('Static property ''%s.%s'' getter ''%s'' is not a static method',
+        [Owner.Name, AProp.Name, AProp.ReadMethod]),
+      AAccess.Line, AAccess.Col);
+  Result := Self.LowerStaticIndexedGet(AAccess, Owner, AProp, MDecl);
+  if Result <> nil then
+    Exit;
+  AAccess.IsStaticPropGet   := True;
+  AAccess.ResolvedMethod    := MDecl;
+  AAccess.ResolvedClassType := Owner;
+  AAccess.ResolvedType      := MDecl.ResolvedReturnType;
+  Result := MDecl.ResolvedReturnType;
+end;
+
+{ SP inside a method of its type, SP a non-indexed STATIC property: the
+  read TFoo.SP (no Self -- a static method has none), built and analysed
+  as the explicit form and swapped into the slot.  Nil when SP is not a
+  static property of AOwner (or is indexed: SP[I] arrives elsewhere). }
+function TSemanticAnalyser.LowerBareStaticPropRead(AIdent: TIdentExpr;
+  AOwner: TRecordTypeDesc): TTypeDesc;
+var
+  PropInfo: TPropertyInfo;
+  FA: TFieldAccessExpr;
+  E: TASTExpr;
+begin
+  Result := nil;
+  PropInfo := AOwner.FindProperty(AIdent.Name);
+  if (PropInfo = nil) or not PropInfo.IsStatic or
+     (PropInfo.IndexParamName <> '') then
+    Exit;
+  FA := TFieldAccessExpr.Create();
+  FA.Line       := AIdent.Line;
+  FA.Col        := AIdent.Col;
+  FA.RecordName := AOwner.Name;
+  FA.FieldName  := PropInfo.Name;
+  E := FA;
+  Result := Self.AnalyseExprSlot(E);
+  AIdent.LoweredExpr  := E;
+  AIdent.ResolvedType := Result;
+end;
+
 { TypeName.StaticProp[I]: an INDEXED static property read is the static
   getter call TypeName.GetX(I), placed in LoweredSubscript for the slot
   helper to swap in.  The static-property-get lowering called the getter with
@@ -17708,6 +18050,7 @@ var
   IntfDesc: TInterfaceTypeDesc;
   MDecl:    TMethodDecl;
   EnumOrd:  Integer;
+  Inner:    TFieldAccessExpr;
 begin
   { Already lowered to a subscript of the property value (re-analysis of a
     node no slot helper has swapped out yet). }
@@ -17745,6 +18088,9 @@ begin
         Exit(Sym.TypeDesc);
       end;
       PropInfo := RT.FindProperty(AAccess.FieldName);
+      if (PropInfo <> nil) and PropInfo.IsStatic and
+         (PropInfo.ReadField <> '') then
+        Exit(Self.LowerStaticPropRead(AAccess, RT, PropInfo));
       if (PropInfo <> nil) and PropInfo.IsStatic then
       begin
         if PropInfo.ReadMethod = '' then
@@ -17828,6 +18174,8 @@ begin
     if FldInfo = nil then
     begin
       PropInfo := RT.FindProperty(AAccess.FieldName);
+      if (PropInfo <> nil) and PropInfo.IsStatic then
+        Exit(Self.LowerStaticPropRead(AAccess, RT, PropInfo));
       if PropInfo <> nil then
         AssertMemberVisibleV(PropInfo.Visibility, PropInfo.DeclaringUnit,
                              PropInfo.DeclaringType, AAccess.FieldName,
@@ -17963,6 +18311,8 @@ begin
         begin
           { Field-backed property on the implicit-Self field's type }
           PropInfo := RT.FindProperty(AAccess.FieldName);
+          if (PropInfo <> nil) and PropInfo.IsStatic then
+            Exit(Self.LowerStaticPropRead(AAccess, RT, PropInfo));
           if PropInfo <> nil then
           begin
             if PropInfo.ReadField <> '' then
@@ -18030,6 +18380,22 @@ begin
         AAccess.RecordName := '';
         Exit(Self.AnalyseFieldAccess(AAccess));
       end;
+    end;
+    { SP.Y inside a STATIC method, SP a static property of the method's
+      type: the chained TFoo.SP.Y (no FCurrentClass there, so the Self
+      forms above never see it) }
+    if (FCurrentClass = nil) and (FCurrentMethodOwner <> nil) and
+       (FCurrentMethodOwner.FindProperty(AAccess.RecordName) <> nil) and
+       FCurrentMethodOwner.FindProperty(AAccess.RecordName).IsStatic then
+    begin
+      Inner := TFieldAccessExpr.Create();
+      Inner.Line       := AAccess.Line;
+      Inner.Col        := AAccess.Col;
+      Inner.RecordName := FCurrentMethodOwner.Name;
+      Inner.FieldName  := AAccess.RecordName;
+      AAccess.Base       := Inner;
+      AAccess.RecordName := '';
+      Exit(Self.AnalyseFieldAccess(AAccess));
     end;
     SemanticError(
       Format('Undeclared identifier ''%s''', [AAccess.RecordName]),
@@ -18132,6 +18498,10 @@ begin
         getters are supported (a field-backed static property would resolve to
         the static var directly). }
       PropInfo := TRecordTypeDesc(RecSym.TypeDesc).FindProperty(AAccess.FieldName);
+      if (PropInfo <> nil) and PropInfo.IsStatic and
+         (PropInfo.ReadField <> '') then
+        Exit(Self.LowerStaticPropRead(AAccess,
+          TRecordTypeDesc(RecSym.TypeDesc), PropInfo));
       if (PropInfo <> nil) and PropInfo.IsStatic then
       begin
         if PropInfo.ReadMethod = '' then
@@ -18276,6 +18646,8 @@ begin
         AAccess.Line, AAccess.Col);
     { Check if this is a property access }
     PropInfo := RT.FindProperty(AAccess.FieldName);
+    if (PropInfo <> nil) and PropInfo.IsStatic then
+      Exit(Self.LowerStaticPropRead(AAccess, RT, PropInfo));
     if PropInfo <> nil then
     begin
       AssertMemberVisibleV(PropInfo.Visibility, PropInfo.DeclaringUnit,
@@ -20073,6 +20445,7 @@ var
   FldAccess: TFieldAccessExpr;
   DefProp:   TPropertyInfo;
   DefFA:     TFieldAccessExpr;
+  Owner:     TRecordTypeDesc;
 begin
   { Idempotency guard: this node rewrites itself in place on the default-property
     and indexed-property paths (StrExpr is swapped for a synthesised field-access,
@@ -20085,21 +20458,34 @@ begin
     Exit(AExpr.ResolvedType);
   { P[I] inside a method, P an INDEXED PROPERTY of the current class (and no
     variable of that name in scope): Self.P[I], so the indexed-property arm
-    below takes it.  As a bare identifier P was read with no index. }
-  if (AExpr.StrExpr is TIdentExpr) and (FCurrentClass <> nil) and
+    below takes it.  As a bare identifier P was read with no index.  A
+    STATIC P is TFoo.P[I] instead -- no Self, and reachable from a static
+    method of the type too (which has no FCurrentClass). }
+  if FCurrentClass <> nil then
+    Owner := FCurrentClass
+  else
+    Owner := FCurrentMethodOwner;
+  if (AExpr.StrExpr is TIdentExpr) and (Owner <> nil) and
      (FTable.Lookup(TIdentExpr(AExpr.StrExpr).Name) = nil) and
-     (FCurrentClass.FindField(TIdentExpr(AExpr.StrExpr).Name) = nil) and
-     (FCurrentClass.FindProperty(TIdentExpr(AExpr.StrExpr).Name) <> nil) and
-     (FCurrentClass.FindProperty(TIdentExpr(AExpr.StrExpr).Name).IndexParamName <> '') then
+     (Owner.FindField(TIdentExpr(AExpr.StrExpr).Name) = nil) and
+     (Owner.FindProperty(TIdentExpr(AExpr.StrExpr).Name) <> nil) and
+     (Owner.FindProperty(TIdentExpr(AExpr.StrExpr).Name).IndexParamName <> '') and
+     ((FCurrentClass <> nil) or
+      Owner.FindProperty(TIdentExpr(AExpr.StrExpr).Name).IsStatic) then
   begin
     DefFA := TFieldAccessExpr.Create();
     DefFA.Line := AExpr.StrExpr.Line;
     DefFA.Col := AExpr.StrExpr.Col;
     DefFA.FieldName := TIdentExpr(AExpr.StrExpr).Name;
-    DefFA.Base := TIdentExpr.Create();
-    TIdentExpr(DefFA.Base).Name := 'Self';
-    DefFA.Base.Line := DefFA.Line;
-    DefFA.Base.Col := DefFA.Col;
+    if Owner.FindProperty(TIdentExpr(AExpr.StrExpr).Name).IsStatic then
+      DefFA.RecordName := Owner.Name
+    else
+    begin
+      DefFA.Base := TIdentExpr.Create();
+      TIdentExpr(DefFA.Base).Name := 'Self';
+      DefFA.Base.Line := DefFA.Line;
+      DefFA.Base.Col := DefFA.Col;
+    end;
     AExpr.StrExpr.Free();
     AExpr.StrExpr := DefFA;
     { the index moves onto the property read, as the indexed arm below
@@ -20462,9 +20848,15 @@ begin
         ValType := AnalyseExprHinted(AStmt.ValueExpr, DefProp.TypeDesc);
         CheckTypesMatch(DefProp.TypeDesc, ValType, 'property assignment',
           AStmt.Line, AStmt.Col);
-        AStmt.SetterCall := BuildSetterCall(
-          AnalysedRecvIdent('Self', AStmt.Line, AStmt.Col),
-          DefProp, AStmt.IndexExpr, AStmt.ValueExpr, AStmt);
+        { a STATIC indexed property is the static setter call: no Self
+          (there is none in a static method) }
+        if DefProp.IsStatic then
+          AStmt.SetterCall := Self.BuildStaticSetterCall(FCurrentClass,
+            DefProp, AStmt.IndexExpr, AStmt.ValueExpr, AStmt)
+        else
+          AStmt.SetterCall := BuildSetterCall(
+            AnalysedRecvIdent('Self', AStmt.Line, AStmt.Col),
+            DefProp, AStmt.IndexExpr, AStmt.ValueExpr, AStmt);
         Exit;
       end;
       { Implicit Self.Field[I] := V where Field is a class with a writable
@@ -20494,6 +20886,26 @@ begin
             DefProp, AStmt.IndexExpr, AStmt.ValueExpr, AStmt);
           Exit;
         end;
+      end;
+    end;
+    { SP[I] := V inside a STATIC method, SP an indexed static property of
+      the method's type: the static setter call (a static method has no
+      FCurrentClass, so the implicit-Self forms above never see it) }
+    if (FCurrentClass = nil) and (FCurrentMethodOwner <> nil) then
+    begin
+      DefProp := FCurrentMethodOwner.FindProperty(AStmt.ArrayName);
+      if (DefProp <> nil) and DefProp.IsStatic and
+         (DefProp.IndexTypeDesc <> nil) and (DefProp.WriteMethod <> '') then
+      begin
+        IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
+        CheckTypesMatch(DefProp.IndexTypeDesc, IdxType, 'property index',
+          AStmt.Line, AStmt.Col);
+        ValType := AnalyseExprHinted(AStmt.ValueExpr, DefProp.TypeDesc);
+        CheckTypesMatch(DefProp.TypeDesc, ValType, 'property assignment',
+          AStmt.Line, AStmt.Col);
+        AStmt.SetterCall := Self.BuildStaticSetterCall(FCurrentMethodOwner,
+          DefProp, AStmt.IndexExpr, AStmt.ValueExpr, AStmt);
+        Exit;
       end;
     end;
     SemanticError(

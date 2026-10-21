@@ -35,12 +35,21 @@ type
       symbol under the declared name: an undefined-symbol link error on
       macOS, a libc lookup and exit 255 on Linux. }
     procedure TestRun_StaticVar_BareWritesInsideMethods;
+    { a static method called through an instance, in expression and
+      statement position: x86-64 passed the instance as a first argument,
+      so the method read it as its first parameter }
+    procedure TestRun_StaticMethodThroughInstance_NoSelf;
     { a float static property read: compiling it crashed the x86-64
       compiler }
     procedure TestRun_StaticFloatProperty_Read;
     { a static getter's object result is released by every consumer: as a
       field base (TFoo.SP.N), an argument, and stored (X := TFoo.SP) }
     procedure TestRun_StaticGetterResult_Released;
+    { static properties through every receiver form -- the type name, an
+      instance, bare in an instance method and in a static method -- of
+      string, object, Double, record and indexed kind, method- or
+      static-var-backed; objects stored through them are freed }
+    procedure TestRun_StaticProperties_EveryForm;
     { Static members of aggregate type: a record static var's field
       (TC.SB.S), a record / closure static property, a static method returning
       a closure called directly, and `inherited GetT();` for an interface
@@ -818,6 +827,42 @@ begin
   AssertEquals('unit form stdout', '9' + LE + '59' + LE, RunOut);
 end;
 
+procedure TE2EStaticMembersTests.TestRun_StaticMethodThroughInstance_NoSelf;
+const
+  Src = '''
+    program P;
+    type
+      THost = class
+      public
+        procedure Dummy;
+      private static var
+        FSS: string;
+      public
+        static function GetIx(I: Integer): Integer;
+        static procedure SetSS(const AV: string);
+        static function GetSS: string;
+      end;
+    procedure THost.Dummy; begin end;
+    static function THost.GetIx(I: Integer): Integer; begin Result := I * 10; end;
+    static procedure THost.SetSS(const AV: string); begin FSS := AV; end;
+    static function THost.GetSS: string; begin Result := FSS; end;
+    var
+      H: THost;
+    begin
+      H := THost.Create();
+      WriteLn(H.GetIx(4));
+      H.SetSS('q');
+      WriteLn(H.GetSS(), ' ', THost.GetIx(2));
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '40' + LE + 'q 20' + LE, 0);
+end;
+
 procedure TE2EStaticMembersTests.TestRun_StaticFloatProperty_Read;
 const
   Src = '''
@@ -896,6 +941,116 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     'show 1' + LE + '1' + LE + 'free 1' + LE + 'after reset' + LE, 0);
+end;
+
+procedure TE2EStaticMembersTests.TestRun_StaticProperties_EveryForm;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    type
+      TItem = class
+        N: Integer;
+        constructor Create(AN: Integer);
+        destructor Destroy; override;
+      end;
+      TPair = record A, B: Int64; end;
+      THost = class
+      private static var
+        FSS: string;
+        FSO: TItem;
+        FSD: Double;
+        FSP: TPair;
+        FArr: array[0..3] of Integer;
+        FFI: Integer;
+      public
+        procedure Inside;
+        static function GetSS: string;
+        static procedure SetSS(const AV: string);
+        static function GetSO: TItem;
+        static procedure SetSO(AV: TItem);
+        static function GetSD: Double;
+        static procedure SetSD(AV: Double);
+        static function GetSP: TPair;
+        static procedure SetSP(const AV: TPair);
+        static function GetIx(I: Integer): Integer;
+        static procedure SetIx(I: Integer; AV: Integer);
+        static property SS: string read GetSS write SetSS;
+        static property SO: TItem read GetSO write SetSO;
+        static property SD: Double read GetSD write SetSD;
+        static property SP: TPair read GetSP write SetSP;
+        static property Ix[I: Integer]: Integer read GetIx write SetIx;
+        static property FI: Integer read FFI write FFI;
+        static procedure SInside;
+      end;
+    constructor TItem.Create(AN: Integer); begin N := AN; end;
+    destructor TItem.Destroy; begin WriteLn('free ', N); end;
+    static function THost.GetSS: string; begin Result := FSS; end;
+    static procedure THost.SetSS(const AV: string); begin FSS := AV; end;
+    static function THost.GetSO: TItem; begin Result := FSO; end;
+    static procedure THost.SetSO(AV: TItem); begin FSO := AV; end;
+    static function THost.GetSD: Double; begin Result := FSD; end;
+    static procedure THost.SetSD(AV: Double); begin FSD := AV; end;
+    static function THost.GetSP: TPair; begin Result := FSP; end;
+    static procedure THost.SetSP(const AV: TPair); begin FSP := AV; end;
+    static function THost.GetIx(I: Integer): Integer; begin Result := FArr[I]; end;
+    static procedure THost.SetIx(I: Integer; AV: Integer); begin FArr[I] := AV; end;
+    procedure THost.Inside;
+    begin
+      SS := 'in' + IntToStr(1);
+      SO := TItem.Create(10);
+      SD := 1.5;
+      Ix[1] := 11;
+      FI := 12;
+      WriteLn('inside ', SS, ' ', SO.N, ' ', SD:0:1, ' ', Ix[1], ' ', FI);
+      SO := nil;
+    end;
+    static procedure THost.SInside;
+    begin
+      SS := 'sin';
+      SO := TItem.Create(20);
+      Ix[2] := 21;
+      FI := 22;
+      WriteLn('sinside ', SS, ' ', SO.N, ' ', Ix[2], ' ', FI);
+      SO := nil;
+    end;
+    function MkS(N: Integer): string; begin Result := 'v' + IntToStr(N); end;
+    function MkP: TPair; begin Result.A := 7; Result.B := 8; end;
+    var
+      H: THost;
+    begin
+      H := THost.Create();
+      THost.SS := MkS(1);
+      THost.SO := TItem.Create(1);
+      THost.SD := 2.5;
+      THost.SP := MkP();
+      THost.Ix[0] := 5;
+      THost.FI := 6;
+      WriteLn('cls ', THost.SS, ' ', THost.SO.N, ' ', THost.SD:0:1, ' ',
+        THost.SP.B, ' ', THost.Ix[0], ' ', THost.FI);
+      H.SS := MkS(2);
+      H.SO := TItem.Create(2);
+      H.SD := 3.5;
+      H.Ix[3] := 9;
+      H.FI := 7;
+      WriteLn('inst ', H.SS, ' ', H.SO.N, ' ', H.SD:0:1, ' ', H.SP.A, ' ',
+        H.Ix[3], ' ', H.FI);
+      H.SO := nil;
+      H.Inside();
+      THost.SInside();
+      WriteLn('end');
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'cls v1 1 2.5 8 5 6' + LE + 'free 1' + LE +
+    'inst v2 2 3.5 7 9 7' + LE + 'free 2' + LE +
+    'inside in1 10 1.5 11 12' + LE + 'free 10' + LE +
+    'sinside sin 20 21 22' + LE + 'free 20' + LE + 'end' + LE, 0);
 end;
 
 initialization

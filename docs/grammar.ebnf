@@ -640,8 +640,11 @@ PropertyDecl
     ;
 
 (* A STATIC property (via the prefix here or an enclosing STATIC section) is
- * sugar over a STATIC getter/setter: it occupies no slot and dispatches with
- * no Self.  A static property's accessors must themselves be static. *)
+ * sugar over a STATIC getter/setter or a static var of its type: it occupies
+ * no slot and dispatches with no Self.  A static property's accessors must
+ * themselves be static (methods) or static vars.  It is reached through the
+ * type name, through an instance (which only names the type), or bare inside
+ * any method of the type. *)
 
 (* If the index parameter is present, the property is indexed:
  *   property Items[Index: Integer]: Pointer read Get write Put;

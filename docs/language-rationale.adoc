@@ -6849,7 +6849,21 @@ occupies a single shared storage slot for the whole type, addressed as a
 global; it does not advance the instance layout and is not copied per object.
 A `static function` / `static procedure` is an ordinary routine that happens to
 be name-qualified by its owning type and may read the type's other `static`
-members. A `static property` is pure sugar over a `static` getter/setter.
+members. A `static property` is pure sugar over a `static` getter/setter, or
+over a `static var` of its type (`static property Count: Int read FCount write
+FCount`, with `FCount` a static var).
+
+A static member is reached the same way whatever names it: through the type
+(`TFoo.P`), through an instance (`H.P` -- the instance only names the type
+and is not passed), or bare inside any method of the type, static or not
+(`P := V`, `P[I]`).  A static method called through an instance (`H.M()`)
+likewise takes no `Self`.  Each form lowers to the plain static call or the
+static var, so a value of any kind -- an owned object, a float, a record --
+travels exactly as in an explicit `TFoo.SetP(V)`.  (Delphi accepts the same
+forms for `class` members.  Until 2026-10-21 only the type-name read worked:
+a write through the type name was rejected, a bare use inside a method was
+undeclared, a static-var accessor was taken for a method, and through an
+instance the x86-64 backend passed the instance as a first argument.)
 
 Inside a record, a method declared `static` is the record's factory /
 namespaced-function form — it takes no hidden `Self` pointer and is called as
