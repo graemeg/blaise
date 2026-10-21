@@ -23,7 +23,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSemantic, uSymbolTable;
+  uLexer, uParser, uAST, uSemantic, uSymbolTable, cp.test.harness;
 
 type
   TStaticMembersParseTests = class(TTestCase)
@@ -578,6 +578,10 @@ type
     { TFoo.StaticArr[I] reads and writes one element (the index was dropped,
       so the whole array was read and written) }
     procedure TestSem_StaticVar_ElementReadWrite;
+    { a BARE element or field write to a static var inside a method of its
+      class (Slots[I] := V, Pt.X := V) stores to the shared global, not to a
+      symbol under the declared name, which bound to nothing }
+    procedure TestCodegen_StaticVar_BareElemAndFieldWrite_SharedGlobal;
     { static var resolves to a shared global, not an instance field }
     procedure TestSem_StaticVar_BareReadResolves;
     procedure TestSem_StaticVar_NotAnInstanceField;
@@ -839,6 +843,41 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TStaticMembersSemTests.TestCodegen_StaticVar_BareElemAndFieldWrite_SharedGlobal;
+const
+  Src = '''
+    program P;
+    type
+      TPt = record X, Y: Integer; end;
+      TC = class
+      private static var
+        Slots: array[0..3] of Integer;
+        Pt: TPt;
+      public
+        static procedure Put(I, V: Integer);
+      end;
+    static procedure TC.Put(I, V: Integer);
+    begin
+      Slots[I] := V;
+      Pt.X := V;
+    end;
+    begin
+      TC.Put(1, 2);
+    end.
+    ''';
+var
+  X86, A64: string;
+begin
+  X86 := GenAsm(Src, TargetX86_64);
+  A64 := GenAsm(Src, TargetArm64);
+  AssertTrue('x86-64: no bare Slots symbol', Pos(' Slots(%rip)', X86) < 0);
+  AssertTrue('x86-64: no bare Pt symbol', Pos(' Pt(%rip)', X86) < 0);
+  AssertTrue('arm64: no bare Slots symbol', Pos('_g_Slots@', A64) < 0);
+  AssertTrue('arm64: no bare Pt symbol', Pos('_g_Pt@', A64) < 0);
+  AssertTrue('x86-64: stores through TC_Slots', Pos('TC_Slots(%rip)', X86) >= 0);
+  AssertTrue('arm64: stores through TC_Slots', Pos('_g_TC_Slots@', A64) >= 0);
 end;
 
 procedure TStaticMembersSemTests.TestSem_StaticVar_ElementReadWrite;

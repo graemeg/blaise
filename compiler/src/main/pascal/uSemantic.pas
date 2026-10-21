@@ -677,6 +677,7 @@ type
       ALine, ACol: Integer): TASTExpr;
     function  AnalysedRecvIdent(const AName: string;
       ALine, ACol: Integer): TASTExpr;
+    function  StorageName(ASym: TSymbol; ALine, ACol: Integer): string;
     function  BuildSetterCall(ARecv: TASTExpr; AProp: TPropertyInfo;
       AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
     function  BuildIndexedGetterCall(AAccess: TFieldAccessExpr): TASTExpr;
@@ -9909,6 +9910,24 @@ begin
   Self.AnalyseExprSlot(Result);
 end;
 
+{ The name codegen addresses variable ASym by, as the BASE of an element or
+  field write (V[I] := X, V.F := X) or a field read.  A static (class-level)
+  var is the single shared global emitted under its mangled GlobalEmitName
+  (Unit_Class_Field), exactly as for a plain assignment and an identifier read;
+  the declared name bound to no symbol at all -- an undefined-symbol link
+  error on macOS, a libc lookup and a crash on Linux.  Visibility is enforced
+  as for the bare form.  Any other variable keeps its declared name. }
+function TSemanticAnalyser.StorageName(ASym: TSymbol; ALine, ACol: Integer): string;
+begin
+  Result := ASym.Name;
+  if ASym.IsClassVar and (ASym.GlobalEmitName <> '') then
+  begin
+    AssertStaticVarVisible(ASym.Visibility, ASym.OwningUnit,
+      ASym.OwnerTypeName, ASym.Name, ALine, ACol);
+    Result := ASym.GlobalEmitName;
+  end;
+end;
+
 { Recv.SetX([Index,] Value) for a property write whose receiver is a CLASS
   instance: the ordinary method-call statement, so the value and receiver are
   marshalled exactly as for an explicit call -- an interface value as its
@@ -13639,7 +13658,7 @@ begin
       Format('''%s'' is not a record or class variable', [AAssign.RecordName]),
       AAssign.Line, AAssign.Col);
 
-  AAssign.RecordName    := RecSym.Name;  { normalise to declared casing }
+  AAssign.RecordName    := StorageName(RecSym, AAssign.Line, AAssign.Col);
   AAssign.IsClassAccess := RecSym.TypeDesc.Kind = tyClass;
   AAssign.IsGlobal      := RecSym.IsGlobal;
   { Treat value record/array params as by-reference at the ABI level. }
@@ -18017,7 +18036,7 @@ begin
       AAccess.Line, AAccess.Col);
   end;
 
-  AAccess.RecordName := RecSym.Name;  { normalise to declared casing }
+  AAccess.RecordName := StorageName(RecSym, AAccess.Line, AAccess.Col);
 
   { Type-qualified enum member: TMyEnum.meValue.  Resolve the member straight
     from the named enum's own member list, so the reference is unambiguous even
@@ -20481,7 +20500,7 @@ begin
       Format('Undeclared variable ''%s''', [AStmt.ArrayName]),
       AStmt.Line, AStmt.Col);
   end;
-  AStmt.ArrayName := Sym.Name;  { normalise to declared casing }
+  AStmt.ArrayName := StorageName(Sym, AStmt.Line, AStmt.Col);
   { Default interface property write: I[K] := V -- the setter call through
     the itab, as for I.Items[K] := V }
   if Sym.TypeDesc.Kind = tyInterface then

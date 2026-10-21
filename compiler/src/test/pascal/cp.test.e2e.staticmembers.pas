@@ -29,6 +29,12 @@ type
     { TFoo.StaticArr[I] reads / writes one element of a static or dynamic
       array, and a default property through a static object }
     procedure TestRun_StaticVar_ElementReadWrite;
+    { BARE element and field writes to static vars inside methods of their
+      class -- array, dynamic array and record static vars, from a static
+      and an instance method, in a program and in a unit.  They stored to a
+      symbol under the declared name: an undefined-symbol link error on
+      macOS, a libc lookup and exit 255 on Linux. }
+    procedure TestRun_StaticVar_BareWritesInsideMethods;
     { Static members of aggregate type: a record static var's field
       (TC.SB.S), a record / closure static property, a static method returning
       a closure called directly, and `inherited GetT();` for an interface
@@ -734,6 +740,76 @@ begin
     CompileAndRunWithRTLDebugOn(beNative, Src, RunOut, Code, True));
   AssertEquals('native exit 0 (output: ' + RunOut + ')', 0, Code);
   AssertTrue('native no leak report, got: ' + RunOut, Pos('leak', RunOut) < 0);
+end;
+
+procedure TE2EStaticMembersTests.TestRun_StaticVar_BareWritesInsideMethods;
+const
+  Decls = '''
+    type
+      TPt = record X, Y: Integer; end;
+      THost = class
+      private static var
+        FSArr: array[0..3] of Integer;
+        FDyn: array of string;
+        FPt: TPt;
+        FN: Integer;
+      public
+        static procedure Put(I, V: Integer);
+        static function Take(I: Integer): Integer;
+        procedure Fill;
+        function Sum: Integer;
+      end;
+    ''';
+  Impl = '''
+    static procedure THost.Put(I, V: Integer);
+    begin
+      FSArr[I] := V;
+      FN := FN + 1;
+    end;
+    static function THost.Take(I: Integer): Integer;
+    begin
+      Result := FSArr[I];
+    end;
+    procedure THost.Fill;
+    begin
+      SetLength(FDyn, 2);
+      FDyn[0] := 'a';
+      FDyn[1] := 'b' + FDyn[0];
+      FPt.X := 3;
+      FPt.Y := FPt.X + 1;
+      FSArr[3] := 40;
+    end;
+    function THost.Sum: Integer;
+    begin
+      Result := FSArr[0] + FSArr[3] + FPt.X + FPt.Y + Length(FDyn[1]) + FN;
+    end;
+    ''';
+  Main = '''
+    var
+      H: THost;
+    begin
+      THost.Put(0, 9);
+      WriteLn(THost.Take(0));
+      H := THost.Create();
+      H.Fill();
+      WriteLn(H.Sum());
+    end.
+    ''';
+var
+  LE: string;
+  RunOut: string;
+  Code: Integer;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('program P;' + LE + Decls + Impl + Main, '9' + LE + '59' + LE, 0);
+  AssertTrue('unit form compile+run: ' + RunOut,
+    CompileAndRunWithUnit('SHost',
+      'unit SHost;' + LE + 'interface' + LE + Decls + 'implementation' + LE +
+      Impl + 'end.' + LE,
+      'program P;' + LE + 'uses SHost;' + LE + Main, RunOut, Code));
+  AssertEquals('unit form exit code', 0, Code);
+  AssertEquals('unit form stdout', '9' + LE + '59' + LE, RunOut);
 end;
 
 initialization
