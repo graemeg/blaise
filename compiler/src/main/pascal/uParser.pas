@@ -4805,6 +4805,20 @@ begin
           MCall := nil;
           Exit(Self.CallChainStmt(Self.ParsePostfixChain(MCallExpr), Line, Col));
         end;
+        { Name.GetObj(args)[I] := V: an element of what the method returns }
+        if Check(tkLBracket) then
+        begin
+          MCallExpr            := TMethodCallExpr.Create();
+          MCallExpr.Line       := Line;
+          MCallExpr.Col        := Col;
+          MCallExpr.ObjectName := MCall.ObjectName;
+          MCallExpr.Name       := MCall.Name;
+          while MCall.Args.Count > 0 do
+            MCallExpr.Args.Add(MCall.Args.Extract(MCall.Args.Items[0]));
+          MCall.Free();
+          MCall := nil;
+          Exit(Self.ChainTailStmt(MCallExpr, Name, Line, Col));
+        end;
         { Post-method chain: Name.Method(args).Field := value or .Method2(args) }
         if Check(tkDot) then
         begin
@@ -4908,6 +4922,10 @@ begin
         { F(args)(more): a call through the procedural value F returns --
           the full postfix chain, which must end in a call }
         Exit(Self.CallChainStmt(Self.ParsePostfixChain(FCallNode), Line, Col));
+      if Check(tkLBracket) then
+        { F(args)[I] := V or F(args)[I].M(): an element of what F returns --
+          a default-property write when F returns a class or record }
+        Exit(Self.ChainTailStmt(FCallNode, Name, Line, Col));
       if Check(tkCaret) then
       begin
         { F(args)^ ... : dereference the returned pointer }

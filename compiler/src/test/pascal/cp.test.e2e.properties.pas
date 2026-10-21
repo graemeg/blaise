@@ -41,6 +41,12 @@ type
       through the cached interface (IFACE v26), and a static property reads
       its PRIVATE backing static var from the other unit }
     procedure TestRun_RecordProperties_InUnit;
+    { F()[I] := V through the default property of what a call returns, as FPC
+      and Delphi accept it: a function, a method, a call as the index and the
+      value, a fresh object (freed after the statement), a managed string
+      value; a record element (storage, so the write sticks) and a record
+      function result (the setter runs on a discarded temporary) }
+    procedure TestRun_DefaultPropWriteOnCallResult;
     { Inside a method a bare element write through a field-read array property
       (AP[3] := 25, DP[1] := 'd1') writes the backing field; it was rejected as
       "Undeclared variable". }
@@ -1371,6 +1377,78 @@ begin
     'free 10' + LE +
     'capt 7 8 n7' + LE +
     'gen 6 xy 0' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_DefaultPropWriteOnCallResult;
+const
+  Src = '''
+    program P;
+    type
+      TSHolder = class
+      private
+        FA: array[0..3] of string;
+        FTag: string;
+        function GetS(I: Integer): string;
+        procedure SetS(I: Integer; const V: string);
+      public
+        constructor Create(const ATag: string);
+        destructor Destroy; override;
+        property S[I: Integer]: string read GetS write SetS; default;
+      end;
+      TRec = record
+        FA: array[0..3] of Integer;
+        function GetI(I: Integer): Integer;
+        procedure SetI(I: Integer; V: Integer);
+        property Items[I: Integer]: Integer read GetI write SetI; default;
+      end;
+      TFac = class
+        H: TSHolder;
+        function Get(): TSHolder;
+      end;
+    var
+      G: TSHolder;
+      F: TFac;
+      RA: array[0..1] of TRec;
+    constructor TSHolder.Create(const ATag: string); begin FTag := ATag; end;
+    destructor TSHolder.Destroy; begin WriteLn('free ', FTag, ' ', FA[3]); end;
+    function TSHolder.GetS(I: Integer): string; begin Result := FA[I]; end;
+    procedure TSHolder.SetS(I: Integer; const V: string); begin FA[I] := V; end;
+    function TRec.GetI(I: Integer): Integer; begin Result := FA[I]; end;
+    procedure TRec.SetI(I: Integer; V: Integer); begin FA[I] := V; WriteLn('rset ', I, ' ', V); end;
+    function TFac.Get(): TSHolder; begin Result := H; end;
+    function MkS(): TSHolder; begin Result := G; end;
+    function MkR(): TRec; begin Result.FA[0] := 0; end;
+    function Idx(): Integer; begin Result := 2; end;
+    begin
+      G := TSHolder.Create('g');
+      F := TFac.Create();
+      F.H := G;
+      MkS()[0] := 'a' + IntToStr(Idx());
+      F.Get()[1] := 'b';
+      F.Get()[Idx()] := MkS()[0] + '!';
+      TSHolder.Create('t')[3] := 'gone';
+      WriteLn(G[0], ' ', G[1], ' ', G[2]);
+      RA[1][2] := 42;
+      WriteLn(RA[1][2], ' ', RA[1].FA[2]);
+      MkR()[3] := 9;
+      F.H := nil;
+      G := nil;
+      WriteLn('end');
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'free t gone' + LE +
+    'a2 b a2!' + LE +
+    'rset 2 42' + LE +
+    '42 42' + LE +
+    'rset 3 9' + LE +
+    'free g ' + LE +
+    'end' + LE, 0);
 end;
 
 procedure TE2EPropertyTests.TestRun_RecordProperties_InUnit;

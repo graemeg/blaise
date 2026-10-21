@@ -1116,6 +1116,7 @@ Stmt
     | ExprCallStmt
     | CallChainStmt
     | StaticSubscriptAssign
+    | CallSubscriptAssign
     | SubscriptFieldAssign
     | SubscriptMethodCall
     | FieldAssignment
@@ -1152,6 +1153,17 @@ BlockVarDeclStmt
 StaticSubscriptAssign
     = IDENT LBRACKET Expr { COMMA Expr } RBRACKET
             { LBRACKET Expr { COMMA Expr } RBRACKET } ASSIGN Expr
+    ;
+
+(* A write through the default indexed property of what a call returns:
+ *   MkList()[0] := 5;        Factory.Get()[I] := V;
+ * The setter runs on the call's result.  On a class result that is the
+ * object itself; on a record result it is a temporary discarded after the
+ * statement, which is accepted (as in FPC and Delphi) with a warning.  The
+ * element may continue as a postfix chain (MkList()[0].Run();). *)
+CallSubscriptAssign
+    = IDENT [ DOT IDENT ] LPAREN [ ArgList ] RPAREN
+      LBRACKET Expr RBRACKET { SubscriptSuffix } ASSIGN Expr
     ;
 
 (* A statement starting with IDENT LBRACKET Expr RBRACKET that is NOT

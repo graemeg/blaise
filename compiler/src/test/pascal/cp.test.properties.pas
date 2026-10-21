@@ -39,6 +39,12 @@ type
       method calls, which take the receiver by address }
     procedure TestParse_RecordProperty;
     procedure TestSem_RecordProperty_AccessIsRecordMethodCall;
+    { F()[I] := V writes through the default property of the class or record
+      F returns (as FPC and Delphi accept it): the setter call on the result.
+      On a record result the setter changes a discarded temporary, so it is
+      legal with a warning; storage (an array element) gets none }
+    procedure TestSem_DefaultPropWriteOnCallResult_IsSetterCall;
+    procedure TestSem_DefaultPropWriteOnRecordTemp_Warns;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1140,6 +1146,77 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+const
+  DefPropCallResultHead = '''
+    program P;
+    type
+      THolder = class
+      private
+        FA: array[0..3] of Integer;
+        function GetI(I: Integer): Integer;
+        procedure SetI(I: Integer; V: Integer);
+      public
+        property Items[I: Integer]: Integer read GetI write SetI; default;
+      end;
+      TRec = record
+        FA: array[0..3] of Integer;
+        function GetI(I: Integer): Integer;
+        procedure SetI(I: Integer; V: Integer);
+        property Items[I: Integer]: Integer read GetI write SetI; default;
+      end;
+      TFac = class
+        function Get(): THolder;
+      end;
+    var G: THolder; F: TFac; RA: array[0..1] of TRec;
+    function THolder.GetI(I: Integer): Integer; begin Result := FA[I] end;
+    procedure THolder.SetI(I: Integer; V: Integer); begin FA[I] := V end;
+    function TRec.GetI(I: Integer): Integer; begin Result := FA[I] end;
+    procedure TRec.SetI(I: Integer; V: Integer); begin FA[I] := V end;
+    function TFac.Get(): THolder; begin Result := G end;
+    function MkH(): THolder; begin Result := G end;
+    function MkR(): TRec; begin Result.FA[0] := 0 end;
+    ''';
+
+procedure TPropertyTests.TestSem_DefaultPropWriteOnCallResult_IsSetterCall;
+var
+  Prog: TProgram;
+  I: Integer;
+  SA: TStaticSubscriptAssign;
+begin
+  Prog := Analyse(DefPropCallResultHead + '''
+    begin
+      MkH()[0] := 1;
+      F.Get()[1] := 2;
+      RA[1][2] := 3;
+    end.
+    ''');
+  try
+    for I := 0 to 2 do
+    begin
+      SA := TStaticSubscriptAssign(Prog.Block.Stmts[I]);
+      AssertTrue(Format('statement %d is the setter call', [I]),
+        SA.SetterCall is TMethodCallStmt);
+      AssertEquals(Format('statement %d calls SetI', [I]), 'SetI',
+        TMethodCallStmt(SA.SetterCall).Name);
+    end;
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPropertyTests.TestSem_DefaultPropWriteOnRecordTemp_Warns;
+var
+  W: string;
+begin
+  W := SemanticWarnings(DefPropCallResultHead +
+    'begin MkR()[0] := 1; end.');
+  AssertTrue('a record temporary warns: ' + W,
+    Pos('temporary ''TRec'' record is discarded', W) >= 0);
+  AssertEquals('a class result and a record element do not warn', '',
+    Trim(SemanticWarnings(DefPropCallResultHead +
+      'begin MkH()[0] := 1; RA[0][1] := 2; end.')));
 end;
 
 procedure TPropertyTests.TestSem_GetterPropertyIsNotAVariable;

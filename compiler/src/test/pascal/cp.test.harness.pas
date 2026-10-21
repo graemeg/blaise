@@ -46,6 +46,8 @@ const
 
 function Analyse(const ASrc: string): TProgram;
 function SemanticError(const ASrc: string): string;
+{ The semantic warnings ASrc raises, one per line ('' for none). }
+function SemanticWarnings(const ASrc: string): string;
 function GenAsm(const ASrc, ATarget: string): string;
 { As GenAsm, with OPDF debug-fact collection on (per-statement line labels). }
 function GenAsmDebug(const ASrc, ATarget: string): string;
@@ -128,6 +130,22 @@ begin
   except
     on E: ESemanticError do
       Result := E.Message;
+  end;
+end;
+
+function SemanticWarnings(const ASrc: string): string;
+var
+  Prog: TProgram;
+  A:    TSemanticAnalyser;
+begin
+  Prog := ParseProgram(ASrc);
+  A := TSemanticAnalyser.Create();
+  try
+    A.Analyse(Prog);
+    Result := A.GetWarnings().Text;
+  finally
+    A.Free();
+    Prog.Free();
   end;
 end;
 

@@ -4319,6 +4319,35 @@ alternative, keeping records property-free so that property syntax implies a
 reference type, buys nothing — the receiver rules above are the record-method
 rules already in force.
 
+=== Writing through a default property on a call result
+
+`F()[I] := V` is a write through the default indexed property of whatever
+`F` returns, lowered to the setter call on that result:
+
+[source,pascal]
+----
+Registry.Current()[Key] := Value;   // class result: the object is updated
+MakeVec()[0] := 5;                  // record result: warning, see below
+----
+
+FPC 3.2.2 accepts both forms in `{$mode delphi}` and `{$mode objfpc}`, and
+Delphi accepts them too, so Blaise does the same.  For a class result the
+write reaches the object the call returned, which is useful when that object
+is also held elsewhere (a singleton, a field returned by a getter).  A fresh
+object nobody else holds is released at the end of the statement, as any
+discarded call result is.
+
+For a record result the setter runs on a temporary that is thrown away
+straight after the statement, so the write can only have side effects
+inside the setter.  It is almost always a mistake, so Blaise accepts it
+with a warning; FPC is silent.  The warning is not issued when the record
+is storage (an array element, `RA[I][J] := V`), where the write sticks.
+A plain field write through a record result (`MakeVec().X := 5`) is not
+changed by this rule.
+
+Until 2026-10-21 the form was a parse error, found while closing the arm64
+property gaps.
+
 == Date and Time RTL — Five-Type Model
 
 The `DateUtils` unit replaces FPC/Delphi's `TDateTime`-as-`Double` with five

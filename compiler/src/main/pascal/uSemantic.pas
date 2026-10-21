@@ -634,6 +634,7 @@ type
       l-value): a variable, a field access, a pointer deref, or an array
       element subscript a[i]. }
     function  IsVarArgLValue(AExpr: TASTExpr): Boolean;
+    function  IsRecordTemporary(AExpr: TASTExpr): Boolean;
     { BUG-001: warn when a bare for-in loop variable is passed where the callee
       mutates it by reference (var/out parameter, Inc/Dec, SetLength, ...) —
       the mutation writes the per-iteration copy and never reaches the
@@ -13431,6 +13432,40 @@ begin
   Result := False;
 end;
 
+{ True when AExpr is a RECORD value with no storage behind it -- a call
+  result, a getter read, or a field / static-array element of one -- so a
+  write into it lands in a temporary that is discarded after the statement.
+  A dynamic array or object reached through such a record is shared, not
+  part of the temporary, and the walk never descends through one. }
+function TSemanticAnalyser.IsRecordTemporary(AExpr: TASTExpr): Boolean;
+var
+  Fld: TFieldAccessExpr;
+  Base: TASTExpr;
+begin
+  Result := False;
+  if (AExpr = nil) or (AExpr.ResolvedType = nil) or
+     not (AExpr.ResolvedType.Kind in [tyRecord, tyStaticArray]) then
+    Exit;
+  if (AExpr is TFuncCallExpr) or (AExpr is TMethodCallExpr) or
+     (AExpr is TIndirectFuncCallExpr) then
+    Exit(True);
+  if AExpr is TFieldAccessExpr then
+  begin
+    Fld := TFieldAccessExpr(AExpr);
+    if Fld.IsMethodCall or Fld.IsStaticPropGet or
+       ((Fld.PropRead <> nil) and (Fld.PropRead.ReadMethod <> '')) then
+      Exit(True);
+    Exit(Self.IsRecordTemporary(Fld.Base));
+  end;
+  if AExpr is TStringSubscriptExpr then
+  begin
+    Base := TStringSubscriptExpr(AExpr).StrExpr;
+    if (Base <> nil) and (Base.ResolvedType <> nil) and
+       (Base.ResolvedType.Kind = tyStaticArray) then
+      Exit(Self.IsRecordTemporary(Base));
+  end;
+end;
+
 procedure TSemanticAnalyser.WarnIfVarArgIsForInLoopVar(AExpr: TASTExpr);
 var
   Sym: TSymbol;
@@ -21134,6 +21169,41 @@ begin
       Self.AnalyseStrByteWrite(AStmt.IndexExpr, AStmt.ValueExpr,
         AStmt.Line, AStmt.Col);
       Exit;
+    end;
+    { F()[I] := V, A[J][I] := V: a write through the default indexed
+      property of the class or record the base yields -- the setter call on
+      that value, as FPC and Delphi accept it.  On a record that is not
+      storage (a function result) the setter runs on a temporary that is
+      discarded straight after, so the write is almost certainly a mistake;
+      it stays legal, with a warning. }
+    if (AStmt.ResolvedArrayType <> nil) and
+       (AStmt.ResolvedArrayType.Kind in [tyClass, tyRecord]) then
+    begin
+      DefProp := TRecordTypeDesc(AStmt.ResolvedArrayType).FindDefaultProperty();
+      if (DefProp <> nil) and (DefProp.WriteMethod <> '') then
+      begin
+        IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
+        if DefProp.IndexTypeDesc <> nil then
+          CheckTypesMatch(DefProp.IndexTypeDesc, IdxType,
+            'default property index', AStmt.Line, AStmt.Col);
+        ValType := AnalyseExprHinted(AStmt.ValueExpr, DefProp.TypeDesc);
+        CheckTypesMatch(DefProp.TypeDesc, ValType,
+          'default property assignment', AStmt.Line, AStmt.Col);
+        if (AStmt.ResolvedArrayType.Kind = tyRecord) and
+           Self.IsRecordTemporary(AStmt.BaseExpr) then
+          SemanticWarning(
+            Format('write through default property ''%s'' of a temporary ' +
+              '''%s'' record is discarded (the setter changes a copy that ' +
+              'is thrown away)', [DefProp.Name, AStmt.ResolvedArrayType.Name]),
+            AStmt.Line, AStmt.Col);
+        AStmt.SetterCall := BuildSetterCall(AStmt.BaseExpr, DefProp,
+          AStmt.IndexExpr, AStmt.ValueExpr, AStmt);
+        if AStmt.SetterCall = nil then
+          SemanticError(
+            Format('Cannot resolve the setter of default property ''%s''',
+              [DefProp.Name]), AStmt.Line, AStmt.Col);
+        Exit;
+      end;
     end;
     if (AStmt.ResolvedArrayType = nil) or
        not (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyDynArray]) then
