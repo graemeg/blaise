@@ -5821,6 +5821,15 @@ end;
 
 procedure TX86_64Backend.EmitVarAddr(const AName: string; const ADstReg: string);
 begin
+  { a variable captured from an enclosing routine (nested routine or
+    closure env): its '_cap_' slot holds the variable's ADDRESS.  Without
+    this arm the name fell to the global arm -- `leaq V(%rip)`, an undefined
+    symbol -- e.g. for a record method called on a captured record. }
+  if Self.IsCaptured(AName) then
+  begin
+    Self.Emit(Format(#9'movq %s, %s', [Self.VarOperand('_cap_' + AName), ADstReg]));
+    Exit;
+  end;
   if Self.IsLocal(AName) then
     Self.Emit(Format(#9'leaq %s, %s', [Self.VarOperand(AName), ADstReg]))
   else
@@ -25354,7 +25363,12 @@ begin
   end;
   for I := 0 to 3 do
     FPromoVars[I] := '';
+  { every capture list ends with its function: a name the PREVIOUS routine's
+    closures shared through their env stayed "captured" into the next one
+    (the main program's own V then went through an undefined _cap_V) }
   FCapturedVars := nil;
+  FEnvVarNames  := nil;
+  FBlockEnvVarNames := nil;
   Self.ClearFrame();
 end;
 

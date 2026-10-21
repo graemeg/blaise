@@ -33,6 +33,10 @@ type
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
   published
+    { x86-64: a record method called on a record captured by a nested routine
+      takes the record's address from its '_cap_' slot (it emitted
+      `leaq V(%rip)`, an undefined global) }
+    procedure TestCodegen_X86_RecordMethodOnCapturedRecord_UsesCapSlot;
     { Parser }
     procedure TestParse_ReferenceToProcedure_TypeDecl;
     procedure TestParse_ReferenceToFunction_ReturnType;
@@ -1711,6 +1715,38 @@ begin
       #9'callq GetM'#10#9'leaq _sacall_0(%rip), %rcx'#10 +
         #9'movq %rax, (%rcx)'#10#9'movq %rdx, 8(%rcx)',
       #9'bl _GetM'#10#9'sub x0, x29, #'));
+end;
+
+procedure TAnonMethodTests.TestCodegen_X86_RecordMethodOnCapturedRecord_UsesCapSlot;
+const
+  Src = '''
+    program P;
+    type
+      TVec = record
+        FX: Integer;
+        procedure SetX(AV: Integer);
+      end;
+    procedure TVec.SetX(AV: Integer); begin FX := AV; end;
+    procedure Run;
+    var
+      V: TVec;
+      procedure Nested;
+      begin
+        V.SetX(7);
+      end;
+    begin
+      Nested();
+    end;
+    begin
+      Run();
+    end.
+    ''';
+var
+  Code: string;
+begin
+  Code := GenAsm(Src, TargetX86_64);
+  AssertTrue('the receiver is not addressed as a global V',
+    Pos('V(%rip)', Code) < 0);
 end;
 
 initialization

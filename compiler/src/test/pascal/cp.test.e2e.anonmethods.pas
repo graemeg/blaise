@@ -85,6 +85,11 @@ type
     procedure TestRun_BlockVar_InitRunsPerIteration;
     procedure TestRun_BlockVar_LoopSnapshotIdiom_012;
     procedure TestRun_LoopCapture_RoutineVar_Still333;
+    { a record method called on a record captured by a nested routine or a
+      closure reaches the captured record (x86-64 took the address of an
+      undefined global), and a same-named global in a later routine is not
+      taken for the captured one (the capture lists outlived their routine) }
+    procedure TestRun_RecordMethodOnCapturedRecord;
     { Phase 5 }
     procedure TestRun_WeakSelf_ReadsNilAfterReceiverDies;
     procedure TestRun_WeakSelf_WorksWhileReceiverAlive;
@@ -3518,6 +3523,50 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '4030' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_RecordMethodOnCapturedRecord;
+const
+  Src = '''
+    program P;
+    type
+      TVec = record
+        FX: Integer;
+        procedure SetX(AV: Integer);
+      end;
+    procedure TVec.SetX(AV: Integer); begin FX := AV; end;
+    procedure Captures;
+    var
+      V: TVec;
+      F: reference to procedure;
+      procedure Nested;
+      begin
+        V.SetX(7);
+      end;
+    begin
+      Nested();
+      WriteLn('nested ', V.FX);
+      F := procedure begin V.SetX(8); end;
+      F();
+      WriteLn('anon ', V.FX);
+    end;
+    var
+      V: TVec;
+    begin
+      Captures();
+      V.SetX(1);
+      WriteLn('global ', V.FX);
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'nested 7' + LE +
+    'anon 8' + LE +
+    'global 1' + LE, 0);
 end;
 
 initialization
