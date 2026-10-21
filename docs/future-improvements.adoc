@@ -613,6 +613,130 @@ the AST starts using it.
 but it is a two-step change gated on a release boundary, and it has no
 correctness pressure behind it — the existing casts are all correct today.
 
+== Compiler — Code Size and Optimisation
+
+Optimisation is deliberately deferred.  While the backends, the ISAs and the
+self-hosting chain are still being built out and stabilised, correctness and
+parity between x86-64 and arm64 take priority over code quality.  Each
+optimisation is a new source of miscompiles that only shows up on some
+shapes, and is harder to find while the underlying lowering is still
+changing.  The entries below record what exists today and what is worth
+doing once the backends have settled.
+
+=== Current optimisation inventory
+
+Blaise has no `-O` levels.  The optimisations that exist are always on,
+except where debug information depends on the unoptimised shape.
+
+[cols="3,1,1,2",options="header"]
+|===
+| Optimisation | x86-64 | arm64 | Under `--debug-opdf`
+
+| Constant folding (semantic pass)
+| yes
+| yes
+| unchanged
+
+| Fused compare-and-branch (`EmitCondBranch`; arm64 materialises 0/1, then `cbz`)
+| yes
+| no
+| unchanged
+
+| `pushq`/`popq` pair folded into one `movq` (peephole)
+| yes
+| n/a
+| unchanged
+
+| Binary-operator LHS held in `%r13` across a call instead of pushed
+| yes
+| no
+| unchanged
+
+| Register promotion: up to two hot scalar locals/params in `%r14`/`%r15`
+| yes
+| no
+| disabled — OPDF has no register location expression
+
+| Inlining of small leaf functions (`IsInlineCandidate`)
+| yes
+| no
+| disabled — keeps exact frames and line info
+|===
+
+`--debug` (runtime leak reporting) has no effect on code generation choices.
+
+The arm64 backend has no compare-branch fusion, register promotion or
+inlining, so porting those three is the first parity item once optimisation
+work begins.  Register
+promotion under `--debug-opdf` would additionally need a register location
+form in the OPDF specification.
+
+=== Dead-code elimination (smart linking)
+
+*Current state.*  Nothing is removed.  Every routine in every unit a program
+uses is compiled and linked whether or not it is reachable, and the runtime
+library is linked as a fixed unit list (`BuildRTLUnitList`).  Neither the
+internal ELF linker nor the internal Mach-O linker discards unreferenced
+sections or symbols, and the `--linker external` path passes neither
+`--gc-sections` nor `-dead_strip`.  Verified 2026-10-21: a program with an
+unused procedure and an unused 80 KB global array keeps both
+(`T _NeverCalled`, `B _g_UnusedGlobal`).
+
+Two properties keep the cost down today:
+
+* Generic instances are emitted only for the type arguments actually used.
+* Unused globals land in BSS, so they cost address space but no file size.
+
+A hello-world is about 230 KB; adding `uses SysUtils` adds about 1.6 KB.
+
+*Why it matters.*  Binary size grows with the size of the units used rather
+than with the code reached.  This becomes visible with large stdlib units,
+GUI toolkits and bindings units, where a program typically touches a small
+fraction of the routines declared.  FPC's smart linking sets the expectation
+for Pascal users.
+
+*Implementation outline.*
+
+. *Granular sections.*  Emit each routine and each global into its own
+  section (`.text.<sym>` / `.data.<sym>` / `.bss.<sym>` on ELF; on Mach-O
+  rely on `MH_SUBSECTIONS_VIA_SYMBOLS`, which the writer already sets, so
+  atoms split at symbol boundaries).
+. *Reachability in the internal linkers.*  Mark from the roots and keep only
+  the sections reachable through relocations; discard the rest before layout.
+. *External linker path.*  Pass `--gc-sections` (ELF) or `-dead_strip`
+  (Mach-O) once the sections are granular.
+
+*Roots that must be kept.*  The hazard is code reached without a direct call.
+Every one of these must count as a root or as a relocation edge, or the
+result is a binary that links cleanly and crashes at run time:
+
+* The entry point and every unit `initialization`/`finalization` routine.
+* Class vtables, interface itabs and the impl lists that reference them.
+* Typeinfo, published-method tables and attribute RTTI tables — reachable
+  from typeinfo rather than from code, and from string lookup at run time
+  (`MethodAddress`, attribute queries), so published methods stay live
+  whenever their class is live.
+* Symbols named by `export`/`exports` in shared objects.
+* Routines reached only through `external name` aliasing inside the RTL.
+* The OPDF section's references under `--debug-opdf` (or skip elimination
+  entirely for debug builds, which is simpler and matches what most
+  toolchains do).
+
+*Interaction with weak symbols.*  Generic instances are emitted weak and
+deduplicated by the linker (BUG-004).  Reachability must run after weak
+resolution, so a discarded duplicate never keeps its referents alive.
+
+*Verification.*  The fixpoints compare a compiler built with and without
+elimination by behaviour; the full e2e suite must pass with elimination on,
+since a missed root shows up only when the program runs.  A size-regression
+guard (hello-world and the compiler itself) would protect the gain once
+landed.
+
+*Assessment.*  Worthwhile and well understood, but the work is concentrated
+in both internal linkers and the object writers, and the failure mode
+(a missing root) is silent until run time.  Best scheduled after the
+backends reach parity and the object/linker layer has stopped changing.
+
 == Migration Analyser
 
 === Flag `TObjectList` usage and recommend `TList<TObject>`
