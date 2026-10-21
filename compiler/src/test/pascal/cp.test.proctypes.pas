@@ -20,6 +20,12 @@ type
     function ParseSrc(const ASrc: string): TProgram;
     function FindTypeDecl(AProg: TProgram; const AName: string): TTypeDecl;
   published
+    { a variable of the enclosing routine read only inside Exit(X) in a
+      nested routine is captured: the walk saw Exit's Value after the
+      analysis had moved it into Result := X, so the capture was missed and
+      both backends took T for a global (x86-64 linked a symbol 'T' and
+      crashed; arm64 refused it) }
+    procedure TestSemantic_NestedCapture_ReadOnlyInExitValue;
     { x86-64: an interface argument through a procedural variable is its
       two-slot fat pointer (BUG-20260924-proctype-interface-arg); a float
       argument to a procedural FIELD is an xmm slot; a by-value interface
@@ -1127,6 +1133,41 @@ begin
             G := @Get
           end.
           ''') <> '');
+end;
+
+
+procedure TProcTypesTests.TestSemantic_NestedCapture_ReadOnlyInExitValue;
+const
+  Src = '''
+    program P;
+    type
+      TT = record Name: string; B: Integer; end;
+    function Use(const X: TT): Integer; begin Result := X.B; end;
+    procedure Run();
+    var T: TT;
+      function Sum(): Integer;
+      begin
+        Exit(Use(T));
+      end;
+    begin
+      WriteLn(Sum());
+    end;
+    begin
+      Run();
+    end.
+    ''';
+var
+  Prog: TProgram;
+  Inner: TMethodDecl;
+begin
+  Prog := Analyse(Src);
+  try
+    Inner := TMethodDecl(TMethodDecl(Prog.Block.ProcDecls.Items[1]).Body.ProcDecls.Items[0]);
+    AssertNotNull('Sum captures something', Inner.CapturedVars);
+    AssertTrue('T is captured', Inner.CapturedVars.IndexOf('T') >= 0);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization

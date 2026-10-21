@@ -11242,7 +11242,14 @@ begin
         else if CurStmt is TRaiseStmt then
           TodoExprs.Add(TRaiseStmt(CurStmt).Expr)
         else if CurStmt is TExitStmt then
-          TodoExprs.Add(TExitStmt(CurStmt).Value)
+        begin
+          { Exit(X) has been rewritten into ResultAssign (Result := X) by
+            the time the walk runs, leaving Value nil: walk the assignment,
+            or a captured variable read only in X was never registered and
+            the backends took it for a global }
+          TodoExprs.Add(TExitStmt(CurStmt).Value);
+          TodoStmts.Add(TExitStmt(CurStmt).ResultAssign);
+        end
         else if CurStmt is TCaseStmt then
         begin
           TodoExprs.Add(TCaseStmt(CurStmt).Selector);

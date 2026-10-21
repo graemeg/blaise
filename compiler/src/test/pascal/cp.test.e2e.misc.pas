@@ -23,6 +23,10 @@ type
   protected
     procedure SetUp; override;
   published
+    { Exit(X) in a nested routine reading the enclosing routine's record:
+      x86-64 linked a symbol named after the variable and crashed, arm64
+      refused it }
+    procedure TestRun_NestedExitReadsCapturedRecord;
     { a const array of an aliased element type (Int16, UInt16, QWord, a user
       alias) stores and reads back elements at the type's true width }
     procedure TestRun_ConstArray_AliasElementWidths;
@@ -4992,6 +4996,34 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '2 20 200 8' + #10 + '-3 30 300 9' + #10, 0);
+end;
+
+
+procedure TE2EMiscTests.TestRun_NestedExitReadsCapturedRecord;
+const
+  Src = '''
+    program P;
+    type
+      TT = record Name: string; B: Integer; end;
+    function Use(const X: TT): Integer; begin Result := Length(X.Name) + X.B; end;
+    procedure Run();
+    var T: TT; K: Integer;
+      function Sum(): Integer;
+      begin
+        if K > 0 then
+          Exit(Use(T) + K);
+        Result := 0;
+      end;
+    begin
+      T.Name := 'abc'; T.B := 4; K := 10;
+      WriteLn(Sum());
+    end;
+    begin
+      Run();
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src, '17' + LineEnding, 0);
 end;
 
 initialization
