@@ -35,6 +35,9 @@ type
       symbol under the declared name: an undefined-symbol link error on
       macOS, a libc lookup and exit 255 on Linux. }
     procedure TestRun_StaticVar_BareWritesInsideMethods;
+    { a float static property read: compiling it crashed the x86-64
+      compiler }
+    procedure TestRun_StaticFloatProperty_Read;
     { Static members of aggregate type: a record static var's field
       (TC.SB.S), a record / closure static property, a static method returning
       a closure called directly, and `inherited GetT();` for an interface
@@ -810,6 +813,35 @@ begin
       'program P;' + LE + 'uses SHost;' + LE + Main, RunOut, Code));
   AssertEquals('unit form exit code', 0, Code);
   AssertEquals('unit form stdout', '9' + LE + '59' + LE, RunOut);
+end;
+
+procedure TE2EStaticMembersTests.TestRun_StaticFloatProperty_Read;
+const
+  Src = '''
+    program P;
+    type
+      THost = class
+      public
+        procedure Dummy;
+        static function GetSD: Double;
+        static property SD: Double read GetSD;
+      end;
+    procedure THost.Dummy; begin end;
+    static function THost.GetSD: Double; begin Result := 2.5; end;
+    var
+      D: Double;
+    begin
+      WriteLn(THost.SD:0:1);
+      D := THost.SD + 1.0;
+      WriteLn(D:0:1);
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2.5' + LE + '3.5' + LE, 0);
 end;
 
 initialization

@@ -23,7 +23,8 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSemantic, uSymbolTable, cp.test.harness;
+  uLexer, uParser, uAST, uSemantic, uSymbolTable, blaise.codegen,
+  cp.test.harness;
 
 type
   TStaticMembersParseTests = class(TTestCase)
@@ -582,6 +583,9 @@ type
       class (Slots[I] := V, Pt.X := V) stores to the shared global, not to a
       symbol under the declared name, which bound to nothing }
     procedure TestCodegen_StaticVar_BareElemAndFieldWrite_SharedGlobal;
+    { a float static property read compiles on x86-64 (the float arm
+      dereferenced the absent FieldInfo: a compiler crash) }
+    procedure TestCodegen_StaticFloatPropRead_X86Compiles;
     { static var resolves to a shared global, not an instance field }
     procedure TestSem_StaticVar_BareReadResolves;
     procedure TestSem_StaticVar_NotAnInstanceField;
@@ -878,6 +882,30 @@ begin
   AssertTrue('arm64: no bare Pt symbol', Pos('_g_Pt@', A64) < 0);
   AssertTrue('x86-64: stores through TC_Slots', Pos('TC_Slots(%rip)', X86) >= 0);
   AssertTrue('arm64: stores through TC_Slots', Pos('_g_TC_Slots@', A64) >= 0);
+end;
+
+procedure TStaticMembersSemTests.TestCodegen_StaticFloatPropRead_X86Compiles;
+var
+  Code: string;
+begin
+  Code := GenAsm('''
+    program P;
+    type
+      THost = class
+      public
+        procedure Dummy;
+        static function GetSD: Double;
+        static property SD: Double read GetSD;
+      end;
+    procedure THost.Dummy; begin end;
+    static function THost.GetSD: Double; begin Result := 2.5; end;
+    var D: Double;
+    begin
+      D := THost.SD;
+      WriteLn(THost.SD:0:1);
+    end.
+    ''', TargetX86_64);
+  AssertTrue('the static getter is called', Pos('callq THost_GetSD', Code) >= 0);
 end;
 
 procedure TStaticMembersSemTests.TestSem_StaticVar_ElementReadWrite;

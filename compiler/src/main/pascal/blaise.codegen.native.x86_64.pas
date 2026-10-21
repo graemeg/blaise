@@ -8076,12 +8076,14 @@ begin
     Exit;
   end;
   if (AExpr is TFieldAccessExpr) and
-     (TFieldAccessExpr(AExpr).PropRead <> nil) and
-     (TFieldAccessExpr(AExpr).PropRead.ReadMethod <> '') then
+     (TFieldAccessExpr(AExpr).IsStaticPropGet or
+      ((TFieldAccessExpr(AExpr).PropRead <> nil) and
+       (TFieldAccessExpr(AExpr).PropRead.ReadMethod <> ''))) then
   begin
-    { a float PROPERTY read (O.P[I], P[I] in a method): the getter call,
-      whose result is already in %xmm0.  The field arm below dereferenced
-      the absent FieldInfo -- a compiler crash. }
+    { a float PROPERTY read (O.P[I], P[I] in a method, a static TFoo.SP):
+      the getter call, whose result is already in %xmm0.  The field arm
+      below dereferenced the absent FieldInfo -- a compiler crash (for a
+      static property it crashed compiling any TFoo.SD read). }
     Self.EmitExprToEax(AExpr);
     Exit;
   end;
