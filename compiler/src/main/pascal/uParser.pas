@@ -2439,6 +2439,7 @@ var
   LocalStatic:      Boolean;
   FieldCountBefore: Integer;
   FieldIdx:         Integer;
+  PropDecl:         TPropertyDecl;
 begin
   Result := TRecordTypeDef.Create();
   CurrStatic     := False;
@@ -2474,7 +2475,8 @@ begin
         CurrStaticBlock := False;
         Advance();  { consume private/protected }
         if Check(tkIdent) and SameText(FCurrent.Value, 'static') and
-           (PeekKind() in [tkVar, tkConst, tkFunction, tkProcedure]) then
+           ((PeekKind() in [tkVar, tkConst, tkFunction, tkProcedure]) or
+            ((PeekKind() = tkIdent) and SameText(PeekValueAt(1), 'property'))) then
         begin
           CurrStatic := True;
           CurrStaticBlock := PeekKind() in [tkVar, tkConst];
@@ -2504,7 +2506,8 @@ begin
         CurrStaticBlock := False;
         Advance();
         if Check(tkIdent) and SameText(FCurrent.Value, 'static') and
-           (PeekKind() in [tkVar, tkConst, tkFunction, tkProcedure]) then
+           ((PeekKind() in [tkVar, tkConst, tkFunction, tkProcedure]) or
+            ((PeekKind() = tkIdent) and SameText(PeekValueAt(1), 'property'))) then
         begin
           CurrStatic := True;
           CurrStaticBlock := PeekKind() in [tkVar, tkConst];
@@ -2529,6 +2532,33 @@ begin
         MethDecl := ParseClassOperatorDecl();
         MethDecl.Visibility := CurrVisibility;
         Result.Methods.Add(MethDecl);
+      end
+      { `property` member (Delphi/FPC advanced records) -- the same
+        declaration as in a class: read/write a field or a method, optionally
+        indexed, `default`, or `static`.  Before the field branch, which would
+        take `property` for a field name. }
+      else if (Check(tkIdent) and SameText(FCurrent.Value, 'property') and
+               (PeekKind() = tkIdent)) or
+              (Check(tkIdent) and SameText(FCurrent.Value, 'static') and
+               (PeekKind() = tkIdent) and SameText(PeekValueAt(1), 'property')) then
+      begin
+        if CurrStatic and CurrStaticBlock then
+        begin
+          { a bare `static var`/`static const` block ends at the first
+            method/property member (BUG-036) }
+          CurrStatic := False;
+          CurrStaticBlock := False;
+        end;
+        LocalStatic := CurrStatic;
+        if Check(tkIdent) and SameText(FCurrent.Value, 'static') then
+        begin
+          LocalStatic := True;
+          Advance();  { consume per-member `static` prefix }
+        end;
+        PropDecl := ParsePropertyDecl();
+        PropDecl.IsStatic := LocalStatic;
+        PropDecl.Visibility := CurrVisibility;
+        Result.Properties.Add(PropDecl);
       end
       { Method declarations — before the field branch so a leading `static`
         prefix is not mistaken for a field name. }

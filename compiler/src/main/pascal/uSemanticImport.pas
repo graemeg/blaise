@@ -700,6 +700,82 @@ begin
   end;
 end;
 
+{ True when AName is a static var of type ATypeName (registered under the
+  qualified key 'TFoo.Name' by RegisterImportedClassVar). }
+function IsImportedStaticVar(ATable: TSymbolTable;
+  const ATypeName, AName: string): Boolean;
+var
+  Sym: TSymbol;
+begin
+  Sym := ATable.Lookup(ATypeName + '.' + AName);
+  Result := (Sym <> nil) and (Sym.Kind = skVariable) and Sym.IsClassVar;
+end;
+
+{ Register the properties AProps of the class or record ATypeName (methods
+  AMethods) on RT -- the cached-interface twin of the property pass in
+  uSemantic.AnalyseTypeDecls.  A static property's accessor may be a static
+  var of its type (a field accessor, as there). }
+procedure ImportProperties(RT: TRecordTypeDesc; AProps, AMethods: TObjectList;
+  ATable: TSymbolTable; const AUnitName, ATypeName: string);
+var
+  I:        Integer;
+  PropDecl: TPropertyDecl;
+  PropInfo: TPropertyInfo;
+  FldSym:   TSymbol;
+  FldType:  TTypeDesc;
+begin
+  for I := 0 to AProps.Count - 1 do
+  begin
+    PropDecl := TPropertyDecl(AProps.Items[I]);
+    PropInfo := TPropertyInfo.Create();
+    PropInfo.Name := PropDecl.Name;
+    FldSym := ATable.Lookup(PropDecl.TypeName);
+    if (FldSym <> nil) and (FldSym.Kind = skType) then
+      PropInfo.TypeDesc := FldSym.TypeDesc
+    else
+    begin
+      FldType := ResolveInlineTypeName(PropDecl.TypeName, ATable);
+      if FldType <> nil then
+        PropInfo.TypeDesc := FldType;
+    end;
+    if PropDecl.ReadName <> '' then
+    begin
+      if (RT.FindField(PropDecl.ReadName) <> nil) or
+         (PropDecl.IsStatic and IsImportedStaticVar(ATable, ATypeName,
+            PropDecl.ReadName)) then
+        PropInfo.ReadField := PropDecl.ReadName
+      else
+        PropInfo.ReadMethod :=
+          DeclaredMethodCaseOf(AMethods, PropDecl.ReadName);
+    end;
+    if PropDecl.WriteName <> '' then
+    begin
+      if (RT.FindField(PropDecl.WriteName) <> nil) or
+         (PropDecl.IsStatic and IsImportedStaticVar(ATable, ATypeName,
+            PropDecl.WriteName)) then
+        PropInfo.WriteField := PropDecl.WriteName
+      else
+        PropInfo.WriteMethod :=
+          DeclaredMethodCaseOf(AMethods, PropDecl.WriteName);
+    end;
+    PropInfo.IndexParamName := PropDecl.IndexParamName;
+    if PropDecl.IndexTypeName <> '' then
+    begin
+      FldSym := ATable.Lookup(PropDecl.IndexTypeName);
+      if (FldSym <> nil) and (FldSym.Kind = skType) then
+        PropInfo.IndexTypeDesc := FldSym.TypeDesc;
+    end;
+    { Static-property facts — TypeName.Prop reads/writes dispatch with no
+      implicit Self.  Mirrors the within-unit pass (PropInfo.IsStatic). }
+    PropInfo.IsDefault := PropDecl.IsDefault;
+    PropInfo.IsStatic  := PropDecl.IsStatic;
+    PropInfo.Visibility    := PropDecl.Visibility;
+    PropInfo.DeclaringUnit := AUnitName;
+    PropInfo.DeclaringType := ATypeName;
+    RT.AddProperty(PropInfo);
+  end;
+end;
+
 procedure RegisterClass(AEntry: TTypeEntry; ATable: TSymbolTable;
                         const AUnitName: string;
                         ASemantic: TSemanticAnalyser = nil);
@@ -859,52 +935,8 @@ begin
   end;
 
   { Properties. }
-  for I := 0 to ClassDef.Properties.Count - 1 do
-  begin
-    PropDecl := TPropertyDecl(ClassDef.Properties.Items[I]);
-    PropInfo := TPropertyInfo.Create();
-    PropInfo.Name := PropDecl.Name;
-    FldSym := ATable.Lookup(PropDecl.TypeName);
-    if (FldSym <> nil) and (FldSym.Kind = skType) then
-      PropInfo.TypeDesc := FldSym.TypeDesc
-    else
-    begin
-      FldType := ResolveInlineTypeName(PropDecl.TypeName, ATable);
-      if FldType <> nil then
-        PropInfo.TypeDesc := FldType;
-    end;
-    if PropDecl.ReadName <> '' then
-    begin
-      if RT.FindField(PropDecl.ReadName) <> nil then
-        PropInfo.ReadField := PropDecl.ReadName
-      else
-        PropInfo.ReadMethod :=
-          DeclaredMethodCaseOf(ClassDef.Methods, PropDecl.ReadName);
-    end;
-    if PropDecl.WriteName <> '' then
-    begin
-      if RT.FindField(PropDecl.WriteName) <> nil then
-        PropInfo.WriteField := PropDecl.WriteName
-      else
-        PropInfo.WriteMethod :=
-          DeclaredMethodCaseOf(ClassDef.Methods, PropDecl.WriteName);
-    end;
-    PropInfo.IndexParamName := PropDecl.IndexParamName;
-    if PropDecl.IndexTypeName <> '' then
-    begin
-      FldSym := ATable.Lookup(PropDecl.IndexTypeName);
-      if (FldSym <> nil) and (FldSym.Kind = skType) then
-        PropInfo.IndexTypeDesc := FldSym.TypeDesc;
-    end;
-    { Static-property facts — TypeName.Prop reads/writes dispatch with no
-      implicit Self.  Mirrors the within-unit pass (PropInfo.IsStatic). }
-    PropInfo.IsDefault := PropDecl.IsDefault;
-    PropInfo.IsStatic  := PropDecl.IsStatic;
-    PropInfo.Visibility    := PropDecl.Visibility;
-    PropInfo.DeclaringUnit := AUnitName;
-    PropInfo.DeclaringType := AEntry.Name;
-    RT.AddProperty(PropInfo);
-  end;
+  ImportProperties(RT, ClassDef.Properties, ClassDef.Methods, ATable,
+    AUnitName, AEntry.Name);
 
   { Class-level `static const` declarations — reachable bare and qualified. }
   RegisterImportedTypeConsts(AEntry.Name, ClassDef.ConstDecls, ATable, AUnitName);
@@ -997,6 +1029,10 @@ begin
         RecDesc.FindField(FldDecl.Names.Strings[J]).DeclaringType := AEntry.Name;
       end;
   end;
+
+  { Record properties (v26) }
+  ImportProperties(RecDesc, RecDef.Properties, RecDef.Methods, ATable,
+    AUnitName, AEntry.Name);
 
   { Record METHODS (instance and static — e.g. TUuid.RandomUuid): register
     the synthesised decls so call sites against the cached interface resolve,

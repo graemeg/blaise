@@ -975,6 +975,8 @@ type
       is registered under its qualified name (TOuter.TInner) and obeys the
       visibility section it was declared in. }
     NestedTypeDecls: TObjectList;
+    Properties: TObjectList;  { owned TPropertyDecl — record properties
+                                (Delphi/FPC advanced records) }
     IsPacked: Boolean;      { True iff declared `packed record` — disables
                               field alignment padding and tail padding;
                               ARC-managed fields (string/class/intf) still
@@ -1566,6 +1568,7 @@ function CloneMethodParam(ASrc: TMethodParam): TMethodParam;
 function CloneTypeDef(ASrc: TASTTypeDef): TASTTypeDef;
 function CloneClassTypeDef(ASrc: TClassTypeDef): TClassTypeDef;
 function CloneAttributeUse(ASrc: TAttributeUse): TAttributeUse;
+function ClonePropertyDecl(ASrc: TPropertyDecl): TPropertyDecl;
 
 implementation
 
@@ -2033,6 +2036,7 @@ begin
   Methods    := TObjectList.Create(True);
   ConstDecls := TObjectList.Create(True);
   NestedTypeDecls := TObjectList.Create(True);
+  Properties := TObjectList.Create(True);
 end;
 
 destructor TRecordTypeDef.Destroy;
@@ -2458,7 +2462,6 @@ end;
 
 function CloneVarDecl(ASrc: TVarDecl): TVarDecl; forward;
 function CloneFieldDecl(ASrc: TFieldDecl): TFieldDecl; forward;
-function ClonePropertyDecl(ASrc: TPropertyDecl): TPropertyDecl; forward;
 { CloneTypeDecl, CloneConstDecl, CloneMethodDecl, CloneMethodParam,
   CloneTypeDef are now declared in the interface section. }
 function CloneRecordTypeDef(ASrc: TRecordTypeDef): TRecordTypeDef; forward;
@@ -3260,6 +3263,8 @@ begin
   for I := 0 to ASrc.NestedTypeDecls.Count - 1 do
     Result.NestedTypeDecls.Add(
       CloneTypeDecl(TTypeDecl(ASrc.NestedTypeDecls.Items[I])));
+  for I := 0 to ASrc.Properties.Count - 1 do
+    Result.Properties.Add(ClonePropertyDecl(TPropertyDecl(ASrc.Properties.Items[I])));
 end;
 
 function CloneGenericRecordDef(ASrc: TGenericRecordDef): TGenericRecordDef;

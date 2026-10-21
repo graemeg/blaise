@@ -260,6 +260,8 @@ type
     { File wrappers. }
     procedure TestRoundTrip_ViaFile;
     procedure TestRoundTrip_Record;
+    { a record's properties round-trip (IFACE v26) }
+    procedure TestRoundTrip_Record_WithProperties;
     procedure TestRoundTrip_Class_WithVirtualMethod;
     procedure TestRoundTrip_Class_WithOverloadedMethods;
     procedure TestRoundTrip_Interface_WithOverloadedMethods;
@@ -2748,7 +2750,8 @@ begin
   Iface := TUnitInterface.Create('U');
   try
     Buf := WriteUnitInterface(Iface);
-    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 23 since
+    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 26 since
+      a record payload carries its property list; it was 23 since
       a CONST entry carries an array const's resolved type, data label and
       elements (v22 since
       an assignment carries its target's unit qualifier ('Unit.Var := ...'),
@@ -2775,7 +2778,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 25', Buf) = 0);
+      Pos('BLAISE-IFACE 26', Buf) = 0);
   finally
     Iface.Free();
   end;
@@ -3148,6 +3151,50 @@ begin
       AssertEquals('X name', 'X', F0.Names.Strings[0]);
       AssertEquals('Y name', 'Y', F1.Names.Strings[0]);
       AssertEquals('X type', 'Integer', F0.TypeName);
+    finally
+      Round.Free();
+    end;
+  finally
+    Iface.Free();
+  end;
+end;
+
+procedure TIfaceIOTests.TestRoundTrip_Record_WithProperties;
+const
+  SRC =
+    'unit U;' + #10 +
+    'interface' + #10 +
+    'type TVec = record' + #10 +
+    '  private FX: Integer; function GetLen: Integer;' + #10 +
+    '  public' + #10 +
+    '    property X: Integer read FX write FX;' + #10 +
+    '    property Len: Integer read GetLen;' + #10 +
+    'end;' + #10 +
+    'implementation' + #10 +
+    'function TVec.GetLen: Integer; begin Result := FX end;' + #10 +
+    'end.' + #10;
+var
+  Iface, Round: TUnitInterface;
+  Buf:          string;
+  E:            TTypeEntry;
+  Def:          TRecordTypeDef;
+  P:            TPropertyDecl;
+begin
+  Iface := ParseAnalyseAndExport(SRC);
+  try
+    Buf   := WriteUnitInterface(Iface);
+    Round := ReadUnitInterface(Buf);
+    try
+      E := Round.FindType('TVec');
+      AssertTrue('TVec present', E <> nil);
+      Def := TRecordTypeDef(E.Def);
+      AssertEquals('2 properties', 2, Def.Properties.Count);
+      P := TPropertyDecl(Def.Properties.Items[0]);
+      AssertEquals('X name', 'X', P.Name);
+      AssertEquals('X read', 'FX', P.ReadName);
+      AssertEquals('X write', 'FX', P.WriteName);
+      P := TPropertyDecl(Def.Properties.Items[1]);
+      AssertEquals('Len getter', 'GetLen', P.ReadName);
     finally
       Round.Free();
     end;

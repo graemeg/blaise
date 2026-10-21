@@ -4283,6 +4283,42 @@ already cover the cases where inheritance is wanted.
 copy-by-value, and the design pressure for it (polymorphism) is satisfied by
 interfaces over classes.
 
+=== Record properties
+
+A record may declare properties exactly as a class does, with the same
+syntax in Delphi and FPC advanced records: read and write through a field
+or a method, an index parameter, `default`, and `static`.
+
+[source,pascal]
+----
+type
+  TVec = record
+  private
+    FX, FY: Int;
+    function GetLength: Float;
+    procedure SetX(AValue: Int);
+  public
+    property X: Int read FX write SetX;
+    property Y: Int read FY write FY;
+    property Length: Float read GetLength;
+  end;
+----
+
+A field-backed property is its field.  A method-backed one is the record
+method call, which takes the receiver by address like any record method: a
+write through `V.X := 5` reaches `V` itself, from a local, a global, a var
+parameter, a captured variable, a record held in a class field, or `Self`
+inside the record's own methods.  Reading through a call result
+(`MakeVec().Length`) works; a write through a record that is itself read
+through a getter is rejected, because the setter would modify a temporary
+copy.
+
+Records had methods but no properties until 2026-10-21, an omission rather
+than a decision (found while working the arm64 property gaps); the rejected
+alternative, keeping records property-free so that property syntax implies a
+reference type, buys nothing — the receiver rules above are the record-method
+rules already in force.
+
 == Date and Time RTL — Five-Type Model
 
 The `DateUtils` unit replaces FPC/Delphi's `TDateTime`-as-`Double` with five

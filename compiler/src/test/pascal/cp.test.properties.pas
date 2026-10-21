@@ -34,6 +34,11 @@ type
       getter paths carried it in one integer register (arm64 refused it,
       x86-64 crashed on a float literal) }
     procedure TestSem_FloatAndRecordIndexRead_IsGetterCall;
+    { properties in records (Delphi/FPC advanced records): parsed into the
+      record's property list; a method-backed read and write are the record
+      method calls, which take the receiver by address }
+    procedure TestParse_RecordProperty;
+    procedure TestSem_RecordProperty_AccessIsRecordMethodCall;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -1054,6 +1059,84 @@ begin
     end;
     AssertEquals('getter', 'GetP',
       TMethodCallExpr(TAssignment(Prog.Block.Stmts[1]).Expr).Name);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPropertyTests.TestParse_RecordProperty;
+var
+  Prog: TProgram;
+  RD: TRecordTypeDef;
+  P: TPropertyDecl;
+begin
+  Prog := ParseSrc('''
+    program P;
+    type
+      TVec = record
+      private
+        FX: Integer;
+        function GetAt(I: Integer): Integer;
+      public
+        property X: Integer read FX write FX;
+        property At[I: Integer]: Integer read GetAt; default;
+        static property Count: Integer read FX;
+        Plain: Integer;
+      end;
+    begin end.
+    ''');
+  try
+    RD := TRecordTypeDef(TTypeDecl(Prog.Block.TypeDecls.Items[0]).Def);
+    AssertEquals('three properties', 3, RD.Properties.Count);
+    AssertEquals('the field after them is still a field', 2, RD.Fields.Count);
+    P := TPropertyDecl(RD.Properties.Items[1]);
+    AssertEquals('indexed', 'I', P.IndexParamName);
+    AssertTrue('default', P.IsDefault);
+    AssertTrue('static', TPropertyDecl(RD.Properties.Items[2]).IsStatic);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPropertyTests.TestSem_RecordProperty_AccessIsRecordMethodCall;
+const
+  Src = '''
+    program P;
+    type
+      TVec = record
+      private
+        FX: Integer;
+        function GetLen: Integer;
+        procedure SetX(AV: Integer);
+      public
+        property X: Integer read FX write SetX;
+        property Len: Integer read GetLen;
+      end;
+    function TVec.GetLen: Integer; begin Result := FX end;
+    procedure TVec.SetX(AV: Integer); begin FX := AV end;
+    var V: TVec; N: Integer;
+    begin
+      V.X := 3;
+      N := V.Len;
+      N := V.X;
+    end.
+    ''';
+var
+  Prog: TProgram;
+  FA: TFieldAssignment;
+  E: TASTExpr;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    FA := TFieldAssignment(Prog.Block.Stmts[0]);
+    AssertTrue('V.X := 3 is the setter call', FA.SetterCall is TMethodCallStmt);
+    AssertTrue('a record method',
+      TMethodDecl(TMethodCallStmt(FA.SetterCall).ResolvedMethod).IsRecordMethod);
+    E := TAssignment(Prog.Block.Stmts[1]).Expr;
+    AssertTrue('V.Len is the getter call', E is TMethodCallExpr);
+    E := TAssignment(Prog.Block.Stmts[2]).Expr;
+    AssertTrue('V.X reads the field', (E is TFieldAccessExpr) and
+      (TFieldAccessExpr(E).FieldInfo <> nil));
   finally
     Prog.Free();
   end;

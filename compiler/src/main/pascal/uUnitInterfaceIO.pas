@@ -54,7 +54,9 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 25; { v25: TRoutineSig / TMethodDecl.IsConstructor after
+  IFACE_VERSION = 26; { v26: a record payload ends with its property list
+                          (record properties, Delphi/FPC advanced records).
+                        v25: TRoutineSig / TMethodDecl.IsConstructor after
                           IsStatic -- a constructor is what is declared one,
                           not inferred from a Create* name.
                         v24: a statement kind 'ecs' -- L[I](args); and
@@ -648,21 +650,6 @@ begin
     Result := Result + EncodeMethodSig(TRoutineSig(AMethods.Items[I]));
 end;
 
-function WriteRecordPayload(AEntry: TTypeEntry): string;
-var
-  Def: TRecordTypeDef;
-begin
-  Def := TRecordTypeDef(AEntry.Def);
-  Result := EncodeBool(Def.IsPacked) +
-            EncodeFieldList(Def.Fields) +
-            { record methods (instance + static), as TRoutineSig — v13. }
-            EncodeMethodList(AEntry.Methods) +
-            { record-level `static const` declarations. }
-            EncodeConstDeclList(Def.ConstDecls) +
-            { nested `type` section (GH #175) }
-            EncodeNestedTypeList(Def.NestedTypeDecls);
-end;
-
 function EncodePropertyList(AList: TObjectList): string;
 var
   I: Integer;
@@ -686,6 +673,23 @@ begin
               { member visibility ordinal }
               EncodeLpstr(IntToStr(Ord(P.Visibility)));
   end;
+end;
+
+function WriteRecordPayload(AEntry: TTypeEntry): string;
+var
+  Def: TRecordTypeDef;
+begin
+  Def := TRecordTypeDef(AEntry.Def);
+  Result := EncodeBool(Def.IsPacked) +
+            EncodeFieldList(Def.Fields) +
+            { record methods (instance + static), as TRoutineSig — v13. }
+            EncodeMethodList(AEntry.Methods) +
+            { record-level `static const` declarations. }
+            EncodeConstDeclList(Def.ConstDecls) +
+            { nested `type` section (GH #175) }
+            EncodeNestedTypeList(Def.NestedTypeDecls) +
+            { record properties -- v26 }
+            EncodePropertyList(Def.Properties);
 end;
 
 function WriteClassPayload(AEntry: TTypeEntry): string;
@@ -2506,6 +2510,7 @@ begin
   ReadMethodList(AText, APos, AEntry.Methods);   { v13 }
   ReadConstDeclList(AText, APos, Def.ConstDecls);
   ReadNestedTypeList(AText, APos, Def.NestedTypeDecls);   { v20 }
+  ReadPropertyList(AText, APos, Def.Properties);          { v26 }
   AEntry.Def := Def;
 end;
 

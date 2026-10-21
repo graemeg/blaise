@@ -5481,6 +5481,9 @@ end;
 
 function TSemanticAnalyser.InstantiateGenericRecord(const ATypeName: string): TRecordTypeDesc;
 var
+  RPDecl:   TPropertyDecl;
+  RPInfo:   TPropertyInfo;
+  RPType:   TTypeDesc;
   BracPos:  Integer;
   BaseName: string;
   ArgsStr:  string;
@@ -5662,6 +5665,50 @@ begin
             0, 0);
         NewMDecl.ResolvedReturnType := ParType;
       end;
+    end;
+
+    { Record properties, their types substituted -- as the generic class
+      path registers its properties. }
+    for J := 0 to Templ.RecordDef.Properties.Count - 1 do
+    begin
+      RPDecl := ClonePropertyDecl(
+        TPropertyDecl(Templ.RecordDef.Properties.Items[J]));
+      RPDecl.TypeName := SubstTypeParam(RPDecl.TypeName, Templ.ParamNames, Args);
+      if RPDecl.IndexTypeName <> '' then
+        RPDecl.IndexTypeName :=
+          SubstTypeParam(RPDecl.IndexTypeName, Templ.ParamNames, Args);
+      ClonedRD.Properties.Add(RPDecl);
+      RPType := FindTypeOrInstantiate(RPDecl.TypeName);
+      if RPType = nil then
+        SemanticError(
+          Format('Unknown type ''%s'' for property ''%s'' in ''%s''',
+            [RPDecl.TypeName, RPDecl.Name, ATypeName]), 0, 0);
+      RPInfo := TPropertyInfo.Create();
+      RPInfo.Name := RPDecl.Name;
+      RPInfo.TypeDesc := RPType;
+      if RPDecl.ReadName <> '' then
+      begin
+        if RT.FindField(RPDecl.ReadName) <> nil then
+          RPInfo.ReadField := RPDecl.ReadName
+        else
+          RPInfo.ReadMethod := DeclaredMethodCase(ClonedRD.Methods, RPDecl.ReadName);
+      end;
+      if RPDecl.WriteName <> '' then
+      begin
+        if RT.FindField(RPDecl.WriteName) <> nil then
+          RPInfo.WriteField := RPDecl.WriteName
+        else
+          RPInfo.WriteMethod := DeclaredMethodCase(ClonedRD.Methods, RPDecl.WriteName);
+      end;
+      RPInfo.IndexParamName := RPDecl.IndexParamName;
+      if RPDecl.IndexTypeName <> '' then
+        RPInfo.IndexTypeDesc := FindTypeOrInstantiate(RPDecl.IndexTypeName);
+      RPInfo.IsDefault := RPDecl.IsDefault;
+      RPInfo.IsStatic := RPDecl.IsStatic;
+      RPInfo.Visibility    := RPDecl.Visibility;
+      RPInfo.DeclaringUnit := FCurrentUnitName;
+      RPInfo.DeclaringType := ATypeName;
+      RT.AddProperty(RPInfo);
     end;
 
     FTable.PushScope();
@@ -8145,6 +8192,8 @@ var
   TD:         TTypeDecl;
   FieldList:  TObjectList;
   ConstList:  TObjectList;   { const members of the class/record being registered }
+  PropList:   TObjectList;   { property declarations of the class/record }
+  PropMethods: TObjectList;  { its methods, for an accessor's declared case }
   MethodList: TObjectList;
   Grp:        TObjectList;
   FDecl:      TFieldDecl;
@@ -9109,11 +9158,24 @@ begin
         end;
       end;
 
-    { Resolve property declarations }
+    { Resolve property declarations -- a class's, or a record's (Delphi/FPC
+      advanced records) }
+    PropList := nil;
+    PropMethods := nil;
     if TD.Def is TClassTypeDef then
-      for J := 0 to TClassTypeDef(TD.Def).Properties.Count - 1 do
+    begin
+      PropList := TClassTypeDef(TD.Def).Properties;
+      PropMethods := TClassTypeDef(TD.Def).Methods;
+    end
+    else if TD.Def is TRecordTypeDef then
+    begin
+      PropList := TRecordTypeDef(TD.Def).Properties;
+      PropMethods := TRecordTypeDef(TD.Def).Methods;
+    end;
+    if PropList <> nil then
+      for J := 0 to PropList.Count - 1 do
       begin
-        PropDecl := TPropertyDecl(TClassTypeDef(TD.Def).Properties.Items[J]);
+        PropDecl := TPropertyDecl(PropList.Items[J]);
         PropType := FTable.FindType(PropDecl.TypeName);
         if PropType = nil then
           SemanticError(
@@ -9135,7 +9197,7 @@ begin
             PropInfo.ReadField := PropDecl.ReadName
           else
             PropInfo.ReadMethod := DeclaredMethodCase(
-              TClassTypeDef(TD.Def).Methods, PropDecl.ReadName);
+              PropMethods, PropDecl.ReadName);
         end;
         if PropDecl.WriteName <> '' then
         begin
@@ -9145,7 +9207,7 @@ begin
             PropInfo.WriteField := PropDecl.WriteName
           else
             PropInfo.WriteMethod := DeclaredMethodCase(
-              TClassTypeDef(TD.Def).Methods, PropDecl.WriteName);
+              PropMethods, PropDecl.WriteName);
         end;
         PropInfo.IndexParamName := PropDecl.IndexParamName;
         if PropDecl.IndexTypeName <> '' then
@@ -9976,13 +10038,14 @@ end;
   transients (an interface property write crashed on both ISAs).  AIndex and
   AValue are already analysed (against the property's types) and are shared
   with the assignment node, as is ARecv when it is the node's ObjExpr.
-  Returns nil -- the caller keeps its own lowering -- for a record receiver
-  (Self is an address there), a static property, or an unresolved setter. }
+  Returns nil -- the caller keeps its own lowering -- for an unresolved
+  setter.  (A static property becomes the static setter call.) }
 function TSemanticAnalyser.BuildSetterCall(ARecv: TASTExpr;
   AProp: TPropertyInfo; AIndex, AValue: TASTExpr; ANode: TASTNode): TASTStmt;
 var
   MDecl: TMethodDecl;
   Call:  TMethodCallStmt;
+  RecvSym: TSymbol;
 begin
   Result := nil;
   if (ARecv = nil) or (AProp = nil) or (AProp.WriteMethod = '') then
@@ -10002,7 +10065,10 @@ begin
       ARecv.Free();
     Exit;
   end;
-  if (ARecv.ResolvedType = nil) or (ARecv.ResolvedType.Kind <> tyClass) then
+  { a CLASS instance, or a RECORD (its setter is a record method, which takes
+    the receiver by address, so the write reaches the record itself) }
+  if (ARecv.ResolvedType = nil) or
+     not (ARecv.ResolvedType.Kind in [tyClass, tyRecord]) then
     Exit;
   MDecl := FindMethodDecl(TRecordTypeDesc(ARecv.ResolvedType).Name,
     AProp.WriteMethod);
@@ -10012,11 +10078,28 @@ begin
   Call.Line    := ANode.Line;
   Call.Col     := ANode.Col;
   Call.Name    := AProp.WriteMethod;
-  Call.ObjExpr := ARecv;
+  { a NAMED record (V.P := X, P := X in a record method): the record-method
+    call on the variable itself -- the ObjectName form an explicit V.SetP(X)
+    takes, where the backends address the record (Self, a var parameter, a
+    captured local); an identifier ObjExpr was addressed as a global }
+  Call.ResolvedClassType := ARecv.ResolvedType;
+  RecvSym := nil;
+  if (ARecv.ResolvedType.Kind = tyRecord) and (ARecv is TIdentExpr) then
+    RecvSym := FTable.Lookup(TIdentExpr(ARecv).Name);
+  if RecvSym <> nil then
+  begin
+    Call.ObjectName := RecvSym.Name;
+    Call.IsGlobal   := RecvSym.IsGlobal;
+    Call.IsVarParam := RecvSlotHoldsAddress(RecvSym);
+    if not ((ANode is TFieldAssignment) and
+            (TFieldAssignment(ANode).ObjExpr = ARecv)) then
+      ARecv.Free();
+  end
+  else
+    Call.ObjExpr := ARecv;
   if AIndex <> nil then
     Call.Args.Add(AIndex);
   Call.Args.Add(AValue);
-  Call.ResolvedClassType := ARecv.ResolvedType;
   Call.ResolvedMethod    := MDecl;
   Result := Call;
 end;
@@ -10063,11 +10146,33 @@ procedure TSemanticAnalyser.LowerStaticPropWrite(AAssign: TFieldAssignment;
   AOwner: TRecordTypeDesc; AProp: TPropertyInfo);
 var
   IdxType, ValType: TTypeDesc;
+  Sym: TSymbol;
 begin
   if AProp.WriteField <> '' then
   begin
-    AAssign.FieldName := AProp.WriteField;
-    Self.AnalyseFieldAssignment(AAssign);
+    { the store to the static var itself -- annotated here rather than
+      re-analysed as TFoo.FVar := V, so a private backing var is not
+      re-checked from outside its unit (the property's visibility governs) }
+    Sym := FTable.Lookup(AOwner.Name + '.' + AProp.WriteField);
+    if (Sym = nil) or not Sym.IsClassVar then
+      SemanticError(Format('Static property ''%s.%s'' writes ''%s'', which ' +
+        'is not a static var of the type', [AOwner.Name, AProp.Name,
+        AProp.WriteField]), AAssign.Line, AAssign.Col);
+    if AAssign.PropIndexExpr <> nil then
+      SemanticError(Format('Property ''%s'' is not indexed', [AProp.Name]),
+        AAssign.Line, AAssign.Col);
+    AAssign.FieldName        := AProp.WriteField;
+    AAssign.IsClassVarWrite  := True;
+    AAssign.ClassVarEmitName := Sym.GlobalEmitName;
+    AAssign.ClassVarLhsType  := Sym.TypeDesc;
+    AAssign.IsGlobal         := True;
+    InferArrowFromTarget(AAssign.Expr, Sym.TypeDesc);
+    ResolveDiamond(AAssign.Expr, Sym.TypeDesc);
+    ValType := Self.AnalyseExprHinted(AAssign.Expr, Sym.TypeDesc);
+    Self.CheckConstValueInRange(Sym.TypeDesc, AAssign.Expr,
+      AAssign.Line, AAssign.Col);
+    CheckTypesMatch(Sym.TypeDesc, ValType, 'property assignment',
+      AAssign.Line, AAssign.Col);
     Exit;
   end;
   if AProp.WriteMethod = '' then
@@ -10266,6 +10371,8 @@ end;
 function TSemanticAnalyser.BuildIndexedGetterCall(
   AAccess: TFieldAccessExpr): TASTExpr;
 var
+  RecProp: Boolean;
+  RecvKind: TTypeKind;
   Recv: TASTExpr;
   MDecl: TMethodDecl;
   Call: TMethodCallExpr;
@@ -10304,25 +10411,35 @@ begin
     Exit(Call);
   end;
   if (AAccess.PropRead = nil) or AAccess.PropRead.IsStatic or
-     (AAccess.PropRead.IndexParamName = '') or
-     (AAccess.PropIndexExpr = nil) or (AAccess.PropReadDecl = nil) then
-    Exit;
-  { the shapes the hand-written getter paths cannot marshal: an INTERFACE
-    result (an (obj, itab) pair), or an index that does not ride in one
-    integer register -- a FLOAT or an AGGREGATE index (arm64 refused it,
-    x86-64 crashed on a float literal) }
-  if (AAccess.ResolvedType = nil) or
-     not ((AAccess.ResolvedType.Kind = tyInterface) or
-          ((AAccess.PropRead.IndexTypeDesc <> nil) and
-           (AAccess.PropRead.IndexTypeDesc.IsFloat() or
-            (AAccess.PropRead.IndexTypeDesc.Kind in
-               [tyRecord, tyStaticArray])))) then
+     (AAccess.PropReadDecl = nil) then
     Exit;
   MDecl := TMethodDecl(AAccess.PropReadDecl);
+  if (AAccess.PropRead.IndexParamName <> '') and (AAccess.PropIndexExpr = nil) then
+    Exit;
+  { A RECORD property's getter is a record method, which takes its receiver
+    by ADDRESS: every method-backed read on a record is the getter call (the
+    hand-written getter paths load a class reference from the receiver). }
+  RecProp := MDecl.IsRecordMethod;
+  if RecProp then
+    RecvKind := tyRecord
+  else
+    RecvKind := tyClass;
+  { For a class: the shapes the hand-written getter paths cannot marshal --
+    an INTERFACE result (an (obj, itab) pair), or an index that does not ride
+    in one integer register, a FLOAT or an AGGREGATE index (arm64 refused
+    it, x86-64 crashed on a float literal). }
+  if not RecProp then
+    if (AAccess.PropIndexExpr = nil) or (AAccess.ResolvedType = nil) or
+       not ((AAccess.ResolvedType.Kind = tyInterface) or
+            ((AAccess.PropRead.IndexTypeDesc <> nil) and
+             (AAccess.PropRead.IndexTypeDesc.IsFloat() or
+              (AAccess.PropRead.IndexTypeDesc.Kind in
+                 [tyRecord, tyStaticArray])))) then
+      Exit;
   if AAccess.Base <> nil then
   begin
     if (AAccess.Base.ResolvedType = nil) or
-       (AAccess.Base.ResolvedType.Kind <> tyClass) then
+       (AAccess.Base.ResolvedType.Kind <> RecvKind) then
       Exit;
     Recv := AAccess.Base;
     AAccess.Base := nil;
@@ -10339,11 +10456,21 @@ begin
     end
     else
       Recv := Self.AnalysedRecvIdent('Self', AAccess.Line, AAccess.Col);
-    if (Recv.ResolvedType = nil) or (Recv.ResolvedType.Kind <> tyClass) then
+    if (Recv.ResolvedType = nil) or (Recv.ResolvedType.Kind <> RecvKind) then
     begin
       Recv.Free();
       Exit;
     end;
+  end
+  else if RecProp then
+  begin
+    { a NAMED record (V.P, Self.P in a record method): the record-method call
+      on the variable itself, the ObjectName form an explicit V.GetP() takes
+      -- the backends address a named record receiver there (Self, a var
+      parameter, a captured local) }
+    if AAccess.RecordName = '' then
+      Exit;
+    Recv := nil;
   end
   else
   begin
@@ -10351,7 +10478,7 @@ begin
       Exit;
     Recv := Self.AnalysedRecvIdent(AAccess.RecordName, AAccess.Line,
       AAccess.Col);
-    if (Recv.ResolvedType = nil) or (Recv.ResolvedType.Kind <> tyClass) then
+    if (Recv.ResolvedType = nil) or (Recv.ResolvedType.Kind <> RecvKind) then
     begin
       Recv.Free();
       Exit;
@@ -10361,10 +10488,22 @@ begin
   Call.Line    := AAccess.Line;
   Call.Col     := AAccess.Col;
   Call.Name    := AAccess.PropRead.ReadMethod;
+  if Recv = nil then
+  begin
+    Call.ObjectName := AAccess.RecordName;
+    Call.IsGlobal   := AAccess.IsGlobal;
+    Call.IsVarParam := AAccess.IsVarParam;
+    Call.ResolvedClassType := TRecordTypeDesc(
+      FindTypeOrInstantiate(TMethodDecl(MDecl).OwnerTypeName));
+    if Call.ResolvedClassType = nil then
+      Call.ResolvedClassType := AAccess.ResolvedClassType;
+  end;
   Call.ObjExpr := Recv;
-  Call.Args.Add(AAccess.PropIndexExpr);
+  if AAccess.PropIndexExpr <> nil then
+    Call.Args.Add(AAccess.PropIndexExpr);
   AAccess.PropIndexExpr := nil;
-  Call.ResolvedClassType := Recv.ResolvedType;
+  if Recv <> nil then
+    Call.ResolvedClassType := Recv.ResolvedType;
   Call.ResolvedMethod    := MDecl;
   Call.ResolvedType      := AAccess.ResolvedType;
   Result := Call;
@@ -10415,6 +10554,9 @@ begin
     IE.LoweredExpr := nil;   { ownership moves to the slot }
     ASlot := Call;
     IE.Free();
+    { the lowered form (Self.P for a bare property P) may lower further --
+      a record property read becomes the record-method call }
+    Self.UnwrapLoweredOperator(ASlot);
     Exit;
   end;
   if (ASlot is TFieldAccessExpr) and
@@ -13633,7 +13775,9 @@ begin
   Result := False;
   if AAssign.PropIndexExpr = nil then
     Exit;
-  if (AMemberType = nil) or (AMemberType.Kind <> tyClass) then
+  { a class member, or a RECORD member (its setter is a record method on the
+    member's own storage) }
+  if (AMemberType = nil) or not (AMemberType.Kind in [tyClass, tyRecord]) then
     Exit;
   DefRT   := TRecordTypeDesc(AMemberType);
   DefProp := DefRT.FindDefaultProperty();
@@ -13649,6 +13793,13 @@ begin
   Inner.RecordName := AAssign.RecordName;
   Inner.FieldName  := AAssign.FieldName;
   AnalyseExpr(Inner);
+  { a record reached through a getter is a copy: the write would be lost }
+  if (AMemberType.Kind = tyRecord) and (Inner.PropRead <> nil) and
+     (Inner.PropRead.ReadMethod <> '') then
+    SemanticError(
+      Format('Cannot write through ''%s'': the record is read through a ' +
+        'getter, so the write would reach a temporary copy',
+        [AAssign.FieldName]), AAssign.Line, AAssign.Col);
   { Re-target the assignment at the default property setter on that result. }
   AAssign.ObjExpr           := Inner;
   AAssign.RecordName        := '';
@@ -13859,7 +14010,7 @@ begin
             ExprType := Self.AnalyseExprSlot(AAssign.Expr);
             CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
               AAssign.Line, AAssign.Col);
-            if BaseType.Kind = tyClass then
+            if BaseType.Kind in [tyClass, tyRecord] then
               AAssign.SetterCall := BuildSetterCall(
                 AnalysedRecvIdent(AAssign.RecordName, AAssign.Line, AAssign.Col),
                 PropInfo, AAssign.PropIndexExpr, AAssign.Expr, AAssign);
@@ -14033,7 +14184,7 @@ begin
         ExprType := Self.AnalyseExprSlot(AAssign.Expr);
         CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
           AAssign.Line, AAssign.Col);
-        if RecSym.TypeDesc.Kind = tyClass then
+        if RecSym.TypeDesc.Kind in [tyClass, tyRecord] then
           AAssign.SetterCall := BuildSetterCall(
             AnalysedRecvIdent(AAssign.RecordName, AAssign.Line, AAssign.Col),
             PropInfo, AAssign.PropIndexExpr, AAssign.Expr, AAssign);
@@ -18075,6 +18226,7 @@ end;
 function TSemanticAnalyser.LowerStaticPropRead(AAccess: TFieldAccessExpr;
   ARecvType: TRecordTypeDesc; AProp: TPropertyInfo): TTypeDesc;
 var
+  Sym: TSymbol;
   Owner: TRecordTypeDesc;
   OwnerTD: TTypeDesc;
   MDecl: TMethodDecl;
@@ -18085,6 +18237,14 @@ begin
     Owner := TRecordTypeDesc(OwnerTD);
   if AProp.ReadField <> '' then
   begin
+    { the read of the static var itself -- annotated here, not re-analysed
+      as TFoo.FVar: the property's own visibility governs the access, and a
+      private backing var must not be re-checked from outside its unit }
+    Sym := FTable.Lookup(Owner.Name + '.' + AProp.ReadField);
+    if (Sym = nil) or not Sym.IsClassVar then
+      SemanticError(Format('Static property ''%s.%s'' reads ''%s'', which ' +
+        'is not a static var of the type', [Owner.Name, AProp.Name,
+        AProp.ReadField]), AAccess.Line, AAccess.Col);
     if AAccess.Base <> nil then
     begin
       AAccess.Base.Free();
@@ -18098,7 +18258,11 @@ begin
     AAccess.ImplicitBaseInfo := nil;
     AAccess.IsClassAccess  := False;
     AAccess.IsVarParam     := False;
-    Exit(Self.AnalyseFieldAccess(AAccess));
+    AAccess.IsClassVarRead   := True;
+    AAccess.IsGlobal         := True;
+    AAccess.ClassVarEmitName := Sym.GlobalEmitName;
+    AAccess.ResolvedType     := Sym.TypeDesc;
+    Exit(Sym.TypeDesc);
   end;
   if AProp.ReadMethod = '' then
     SemanticError(Format('Static property ''%s.%s'' is write-only',
@@ -18575,8 +18739,13 @@ begin
       error when the member is NOT a const.  Rejecting on tyClass alone made
       every record const read fail with the misleading 'Cannot call
       constructor on non-class type' (GH #175 Stage 0). }
+    { ... or a static var or static property of a RECORD (TVec.Count) }
     if (RecSym.TypeDesc.Kind <> tyClass) and
-       not IsTypeConstMember(AAccess.RecordName, AAccess.FieldName) then
+       not IsTypeConstMember(AAccess.RecordName, AAccess.FieldName) and
+       not ((RecSym.TypeDesc.Kind = tyRecord) and
+            (IsStaticVarOf(RecSym.Name, AAccess.FieldName) or
+             ((TRecordTypeDesc(RecSym.TypeDesc).FindProperty(AAccess.FieldName) <> nil) and
+              TRecordTypeDesc(RecSym.TypeDesc).FindProperty(AAccess.FieldName).IsStatic))) then
       SemanticError(
         Format('Cannot call constructor on non-class type ''%s''',
           [AAccess.RecordName]),
@@ -21177,7 +21346,7 @@ begin
       ValType := AnalyseExprHinted(AStmt.ValueExpr, DefProp.TypeDesc);
       CheckTypesMatch(DefProp.TypeDesc, ValType, 'default property assignment',
         AStmt.Line, AStmt.Col);
-      if Sym.TypeDesc.Kind = tyClass then
+      if Sym.TypeDesc.Kind in [tyClass, tyRecord] then
         AStmt.SetterCall := BuildSetterCall(
           AnalysedRecvIdent(AStmt.ArrayName, AStmt.Line, AStmt.Col),
           DefProp, AStmt.IndexExpr, AStmt.ValueExpr, AStmt);

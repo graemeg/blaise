@@ -328,12 +328,17 @@ EnumSubrange
 
 RecordDef
     = [ PACKED ] RECORD
-      { VisibilitySection | FieldDecl | MethodDecl | ClassOperatorDecl
-      | ConstSection | NestedTypeSection }
+      { VisibilitySection | FieldDecl | MethodDecl | PropertyDecl
+      | ClassOperatorDecl | ConstSection | NestedTypeSection }
       END
     ;
 
-(* Records may declare methods alongside fields.  Method bodies are written
+(* Records may declare properties exactly as classes do (PropertyDecl):
+ * read/write through a field or a method, optionally indexed, `default` or
+ * STATIC.  A method-backed property reads and writes through the record
+ * method, so its receiver must be addressable to be written.
+ *
+ * Records may declare methods alongside fields.  Method bodies are written
  * out-of-line as TRecordName.MethodName, identical to classes.  An ordinary
  * record method receives the receiver by pointer (`Self` is a `var` parameter
  * under the hood); the language gives normal value semantics — assignments

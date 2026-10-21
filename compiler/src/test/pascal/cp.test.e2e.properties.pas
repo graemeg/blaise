@@ -31,6 +31,16 @@ type
       a variable, a call result, Self, a field of Self and the default
       property: the getter call passes the index by its ABI class }
     procedure TestRun_FloatAndRecordIndexRead;
+    { properties in records (Delphi/FPC advanced records): field- and
+      method-backed, string, object, Double, indexed default, float index,
+      static; through a local, a global, a var parameter, a call result, a
+      record held in a class field, bare and Self[I] inside a record method,
+      captured by a nested routine and by a closure; a generic record }
+    procedure TestRun_RecordProperties_EveryForm;
+    { the same record declared in a UNIT: its properties reach the program
+      through the cached interface (IFACE v26), and a static property reads
+      its PRIVATE backing static var from the other unit }
+    procedure TestRun_RecordProperties_InUnit;
     { Inside a method a bare element write through a field-read array property
       (AP[3] := 25, DP[1] := 'd1') writes the backing field; it was rejected as
       "Undeclared variable". }
@@ -1221,6 +1231,208 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '4' + LE + '2' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_RecordProperties_EveryForm;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    type
+      TItem = class
+        N: Integer;
+        constructor Create(AN: Integer);
+        destructor Destroy; override;
+      end;
+      TVec = record
+      private
+        FX, FY: Integer;
+        FTag: string;
+        FItem: TItem;
+        FD: Double;
+        function GetLen2: Integer;
+        procedure SetX(AV: Integer);
+        procedure SetItem(AV: TItem);
+        function GetAt(I: Integer): Integer;
+        procedure SetAt(I: Integer; AV: Integer);
+        function GetScaled(F: Double): Double;
+      private static var
+        FCount: Integer;
+      public
+        property X: Integer read FX write SetX;
+        property Y: Integer read FY write FY;
+        property Len2: Integer read GetLen2;
+        property Tag: string read FTag write FTag;
+        property Item: TItem read FItem write SetItem;
+        property D: Double read FD write FD;
+        property At[I: Integer]: Integer read GetAt write SetAt; default;
+        property Scaled[F: Double]: Double read GetScaled;
+        static property Count: Integer read FCount write FCount;
+        procedure Inside;
+      end;
+      THolder = class
+        R: TVec;
+      end;
+      TBox<T> = record
+      private
+        FV: T;
+        function GetV: T;
+        procedure SetV(const AV: T);
+      public
+        property V: T read GetV write SetV;
+      end;
+    constructor TItem.Create(AN: Integer); begin N := AN; end;
+    destructor TItem.Destroy; begin WriteLn('free ', N); end;
+    function TVec.GetLen2: Integer; begin Result := FX * FX + FY * FY; end;
+    procedure TVec.SetX(AV: Integer); begin FX := AV; FCount := FCount + 1; end;
+    procedure TVec.SetItem(AV: TItem); begin FItem := AV; end;
+    function TVec.GetAt(I: Integer): Integer; begin if I = 0 then Result := FX else Result := FY; end;
+    procedure TVec.SetAt(I: Integer; AV: Integer); begin if I = 0 then X := AV else FY := AV; end;
+    function TVec.GetScaled(F: Double): Double; begin Result := FX * F; end;
+    procedure TVec.Inside;
+    begin
+      X := 2;
+      Y := 3;
+      Self[1] := 4;
+      Item := TItem.Create(10);
+      WriteLn('inside ', X, ' ', Y, ' ', Len2, ' ', At[0], ' ', Item.N);
+      Item := nil;
+    end;
+    function TBox<T>.GetV: T; begin Result := FV; end;
+    procedure TBox<T>.SetV(const AV: T); begin FV := AV; end;
+    function MkVec(AX, AY: Integer): TVec; begin Result.FX := AX; Result.FY := AY; end;
+    procedure Bump(var V: TVec); begin V.X := V.X + 1; V[1] := V[1] + 1; end;
+    var
+      G: TVec;
+    procedure Captures;
+    var
+      V: TVec;
+      F: reference to procedure;
+      procedure Nested;
+      begin
+        V.X := 7;
+        V.Tag := 'n' + IntToStr(V.X);
+      end;
+    begin
+      Nested();
+      F := procedure begin V[1] := 8; end;
+      F();
+      WriteLn('capt ', V.X, ' ', V.Y, ' ', V.Tag);
+    end;
+    var
+      V: TVec;
+      H: THolder;
+      B: TBox<Integer>;
+      S: TBox<string>;
+    begin
+      V.X := 3;
+      V.Y := 4;
+      V.Tag := 'v' + IntToStr(V.Len2);
+      V.D := 1.5;
+      WriteLn(V.X, ' ', V.Y, ' ', V.Len2, ' ', V.Tag, ' ', V[0], ' ', V.At[1], ' ', V.D:0:1, ' ', V.Scaled[0.5]:0:1);
+      V[0] := 6;
+      V.Item := TItem.Create(1);
+      V.Item := TItem.Create(2);
+      WriteLn(V.Len2, ' ', MkVec(1, 2).Len2, ' ', MkVec(7, 8)[1], ' ', V.Item.N, ' ', TVec.Count);
+      V.Item := nil;
+      Bump(V);
+      WriteLn('bump ', V.X, ' ', V.Y);
+      G.X := 9;
+      G[1] := 1;
+      WriteLn('glob ', G.Len2);
+      H := THolder.Create;
+      H.R.X := 5;
+      H.R[1] := 12;
+      WriteLn('holder ', H.R.Len2, ' ', H.R[0]);
+      V.Inside();
+      Captures();
+      B.V := 5;
+      B.V := B.V + 1;
+      S.V := 'x';
+      S.V := S.V + 'y';
+      TVec.Count := 0;
+      WriteLn('gen ', B.V, ' ', S.V, ' ', TVec.Count);
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '3 4 25 v25 3 4 1.5 1.5' + LE +
+    'free 1' + LE +
+    '52 5 8 2 2' + LE +
+    'free 2' + LE +
+    'bump 7 5' + LE +
+    'glob 82' + LE +
+    'holder 169 5' + LE +
+    'inside 2 4 20 2 10' + LE +
+    'free 10' + LE +
+    'capt 7 8 n7' + LE +
+    'gen 6 xy 0' + LE, 0);
+end;
+
+procedure TE2EPropertyTests.TestRun_RecordProperties_InUnit;
+const
+  USrc = '''
+    unit RProps;
+    interface
+    type
+      TVec = record
+      private
+        FX, FY: Integer;
+        FTag: string;
+        function GetLen2: Integer;
+        procedure SetX(AV: Integer);
+        function GetAt(I: Integer): Integer;
+        procedure SetAt(I: Integer; AV: Integer);
+      private static var
+        FCount: Integer;
+      public
+        property X: Integer read FX write SetX;
+        property Y: Integer read FY write FY;
+        property Len2: Integer read GetLen2;
+        property Tag: string read FTag write FTag;
+        property At[I: Integer]: Integer read GetAt write SetAt; default;
+        static property Count: Integer read FCount write FCount;
+      end;
+    function MkVec(AX, AY: Integer): TVec;
+    implementation
+    function TVec.GetLen2: Integer; begin Result := FX * FX + FY * FY; end;
+    procedure TVec.SetX(AV: Integer); begin FX := AV; FCount := FCount + 1; end;
+    function TVec.GetAt(I: Integer): Integer; begin if I = 0 then Result := FX else Result := FY; end;
+    procedure TVec.SetAt(I: Integer; AV: Integer); begin if I = 0 then X := AV else FY := AV; end;
+    function MkVec(AX, AY: Integer): TVec; begin Result.FX := AX; Result.FY := AY; end;
+    end.
+    ''';
+  Src = '''
+    program P;
+    uses RProps;
+    var V: TVec;
+    begin
+      V.X := 3;
+      V.Y := 4;
+      V.Tag := 'v';
+      WriteLn(V.X, ' ', V.Y, ' ', V.Len2, ' ', V.Tag, ' ', V[0], ' ', V[1]);
+      V[1] := 5;
+      V[0] := 6;
+      WriteLn(V.Len2, ' ', MkVec(1, 2).Len2, ' ', MkVec(7, 8)[1], ' ', TVec.Count);
+      TVec.Count := 10;
+      WriteLn(TVec.Count);
+    end.
+    ''';
+var
+  LE: string;
+  RunOut: string;
+  Code: Integer;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run: ' + RunOut,
+    CompileAndRunWithUnit('RProps', USrc, Src, RunOut, Code));
+  AssertEquals('exit code', 0, Code);
+  AssertEquals('stdout', '3 4 25 v 3 4' + LE + '61 5 8 2' + LE + '10' + LE, RunOut);
 end;
 
 initialization

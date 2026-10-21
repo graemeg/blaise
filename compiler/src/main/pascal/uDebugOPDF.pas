@@ -566,6 +566,9 @@ begin
   L('    .4byte ' + IntToStr(AType.TotalSize()) + '  # TotalSize');
   EmitStrField(CName);
   EmitFields(AType);
+  { record properties (Delphi/FPC advanced records), recorded exactly as a
+    class's: field offset or getter/setter symbol }
+  EmitProperties(AType);
 end;
 
 function TOPDFEmitter.MangledClassSym(const AClassName: string): string;
