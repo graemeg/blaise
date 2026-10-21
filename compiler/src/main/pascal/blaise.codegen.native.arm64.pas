@@ -3843,7 +3843,8 @@ begin
     field form (Obj.Items[I] := V) and the DEFAULT-property form
     (Obj[I] := V, a TStaticSubscriptAssign carrying PropWriteInfo) }
   if AProp.IsStatic then
-    NotYet('static indexed property write', AStmt);
+    InternalError('static indexed property write was not lowered to its ' +
+      'static setter call', AStmt);
   { a float value needs a d register: every route here with one -- class and
     interface receivers -- is lowered to the setter call by the semantic
     pass (BuildSetterCall / BuildIntfSetterCall) }
@@ -3861,7 +3862,8 @@ begin
           (AIndex is TIntLiteral) or
           ((AIndex.ResolvedType <> nil) and
            (AIndex.ResolvedType.Kind = tyString))) then
-    NotYet('indexed property with a non-integer index', AStmt);
+    InternalError('indexed property write with a non-integer index was not ' +
+      'lowered to its setter call', AStmt);
   if AProp.TypeDesc.Kind = tyRecord then
   begin
     { a record VALUE travels by its AAPCS64 shape: a large one by address,
@@ -3871,7 +3873,8 @@ begin
       registers and stays an honest hole. }
     Shape := RecReturnShape(TRecordTypeDesc(AProp.TypeDesc));
     if (Shape < 0) or (Shape > 2) then
-      NotYet('indexed property of this record shape', AStmt);
+      InternalError('record-valued indexed property write was not lowered ' +
+        'to its setter call', AStmt);
     Self.EmitExprToX0(AIndex);
     EmitPushX0();                          { index arg }
     EmitRecAddrToX0(AValue);
@@ -3910,7 +3913,8 @@ begin
             ArcBuiltinStrArgOwnsRef(AValue);
   if (AProp.TypeDesc.Kind = tyClass) and
      ArcExprOwnsRef(AValue) then
-    NotYet('owned transient as indexed-property value', AStmt);
+    InternalError('owned value into an indexed property was not lowered to ' +
+      'its setter call', AStmt);
   { The borrowed case emits byte-identical code to before (index pushed,
     then value; pop x2=value, x1=index).  For an owned string transient the
     value pointer is captured in x19 (callee-saved, survives the setter
@@ -3963,7 +3967,8 @@ begin
   if AStmt.IsImplicitSelf then
   begin
     if AStmt.ImplicitFieldInfo = nil then
-      NotYet('default-property write on this receiver form', AStmt);
+      InternalError('default-property write on this receiver was not ' +
+        'lowered to its setter call', AStmt);
     EmitLoadSlot('x0', 'Self');
     if AStmt.ImplicitFieldInfo.TypeDesc.Kind = tyRecord then
     begin
@@ -3976,7 +3981,8 @@ begin
     Exit;
   end;
   if IsCaptured(AStmt.ArrayName) then
-    NotYet('default-property write on a captured receiver', AStmt);
+    InternalError('default-property write on a captured receiver was not ' +
+      'lowered to its setter call', AStmt);
   if (AStmt.ResolvedArrayType <> nil) and
      (AStmt.ResolvedArrayType.Kind = tyRecord) then
   begin
@@ -4045,7 +4051,8 @@ begin
       setter(self, index, value) for the indexed form }
     if ((AStmt.ObjExpr <> nil) and ArcExprOwnsRef(AStmt.ObjExpr)) or
        (AStmt.IsImplicitSelf and (AStmt.ImplicitBaseInfo = nil)) then
-      NotYet('property write on this receiver form', AStmt);
+      InternalError('property write on this receiver was not lowered to its ' +
+        'setter call', AStmt);
     if AStmt.PropIndexExpr <> nil then
     begin
       if AStmt.IsElemWrite then
@@ -4087,7 +4094,8 @@ begin
                 ArcBuiltinStrArgOwnsRef(AStmt.Expr);
       if (TPropertyInfo(AStmt.PropWriteInfo).TypeDesc.Kind = tyClass) and
          ArcExprOwnsRef(AStmt.Expr) then
-        NotYet('owned transient as property value', AStmt);
+        InternalError('owned value into a property was not lowered to its ' +
+          'setter call', AStmt);
       Self.EmitExprToX0(AStmt.Expr);
       if RelStr then
       begin
@@ -8185,7 +8193,8 @@ begin
     d0 for floats) — callers pick the register that matches the context.
     An indexed read calls getter(self, index). }
   if (AFld.PropRead.IndexParamName <> '') and (AFld.PropIndexExpr = nil) then
-    NotYet('indexed property read without an index', AFld);
+    InternalError('indexed property read without an index (the front end ' +
+      'requires one)', AFld);
   if AFld.PropRead.IsStatic then
   begin
     { static property: the getter is a class-level routine — no receiver }
@@ -8204,7 +8213,8 @@ begin
             (AFld.PropIndexExpr is TIntLiteral) or
             ((AFld.PropIndexExpr.ResolvedType <> nil) and
              (AFld.PropIndexExpr.ResolvedType.Kind = tyString))) then
-      NotYet('indexed property with a non-integer index', AFld);
+      InternalError('indexed property read with a non-integer index was not ' +
+        'lowered to its getter call', AFld);
     Self.EmitExprToX0(AFld.PropIndexExpr);
     EmitPushX0();
   end;
@@ -10384,7 +10394,8 @@ begin
   begin
     { Obj[I] := V through a `default` indexed property: a setter call }
     if TPropertyInfo(AStmt.PropWriteInfo).WriteMethod = '' then
-      NotYet('default-property write without a setter', AStmt);
+      InternalError('default-property write without a setter (the front end ' +
+        'rejects a read-only property)', AStmt);
     EmitIndexedPropWrite(TPropertyInfo(AStmt.PropWriteInfo),
       AStmt.PropOwnerType, AStmt.PropAccessorVSlot, AStmt.IndexExpr,
       AStmt.ValueExpr, AStmt);
