@@ -586,6 +586,8 @@ type
     { a float static property read compiles on x86-64 (the float arm
       dereferenced the absent FieldInfo: a compiler crash) }
     procedure TestCodegen_StaticFloatPropRead_X86Compiles;
+    { a static property read through its getter owns the getter's +1 }
+    procedure TestArc_StaticPropGetterRead_Owned;
     { static var resolves to a shared global, not an instance field }
     procedure TestSem_StaticVar_BareReadResolves;
     procedure TestSem_StaticVar_NotAnInstanceField;
@@ -906,6 +908,42 @@ begin
     end.
     ''', TargetX86_64);
   AssertTrue('the static getter is called', Pos('callq THost_GetSD', Code) >= 0);
+end;
+
+procedure TStaticMembersSemTests.TestArc_StaticPropGetterRead_Owned;
+var
+  P: TProgram;
+  WL: TProcCall;
+  FA: TFieldAccessExpr;
+begin
+  P := AnalyseSrc('''
+    program P;
+    type
+      TBox = class
+        N: Integer;
+      end;
+      THost = class
+      public
+        procedure Dummy;
+        static function GetSO: TBox;
+        static property SO: TBox read GetSO;
+      end;
+    procedure THost.Dummy; begin end;
+    static function THost.GetSO: TBox; begin Result := nil; end;
+    begin
+      WriteLn(THost.SO.N);
+    end.
+    ''');
+  try
+    WL := TProcCall(P.Block.Stmts.Items[0]);
+    FA := TFieldAccessExpr(TASTExpr(WL.Args.Items[0]));
+    while (FA.Base is TFieldAccessExpr) do
+      FA := TFieldAccessExpr(FA.Base);
+    AssertTrue('THost.SO is a static getter read', FA.IsStaticPropGet);
+    AssertTrue('the getter''s +1 is owned', ArcExprOwnsRef(FA));
+  finally
+    P.Free();
+  end;
 end;
 
 procedure TStaticMembersSemTests.TestSem_StaticVar_ElementReadWrite;

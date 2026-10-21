@@ -38,6 +38,9 @@ type
     { a float static property read: compiling it crashed the x86-64
       compiler }
     procedure TestRun_StaticFloatProperty_Read;
+    { a static getter's object result is released by every consumer: as a
+      field base (TFoo.SP.N), an argument, and stored (X := TFoo.SP) }
+    procedure TestRun_StaticGetterResult_Released;
     { Static members of aggregate type: a record static var's field
       (TC.SB.S), a record / closure static property, a static method returning
       a closure called directly, and `inherited GetT();` for an interface
@@ -842,6 +845,57 @@ begin
   LE := LineEnding;
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '2.5' + LE + '3.5' + LE, 0);
+end;
+
+procedure TE2EStaticMembersTests.TestRun_StaticGetterResult_Released;
+const
+  Src = '''
+    program P;
+    type
+      TItem = class
+        N: Integer;
+        constructor Create(AN: Integer);
+        destructor Destroy; override;
+      end;
+      THost = class
+      public
+        procedure Dummy;
+      private static var
+        FSO: TItem;
+      public
+        static procedure SetSO(AV: TItem);
+        static function GetSO: TItem;
+        static property SO: TItem read GetSO;
+      end;
+    constructor TItem.Create(AN: Integer); begin N := AN; end;
+    destructor TItem.Destroy; begin WriteLn('free ', N); end;
+    procedure THost.Dummy; begin end;
+    static procedure THost.SetSO(AV: TItem); begin FSO := AV; end;
+    static function THost.GetSO: TItem; begin Result := FSO; end;
+    procedure Show(AV: TItem); begin WriteLn('show ', AV.N); end;
+    procedure Run;
+    var
+      X: TItem;
+    begin
+      THost.SetSO(TItem.Create(1));
+      X := THost.SO;
+      X := nil;
+      Show(THost.SO);
+      WriteLn(THost.SO.N);
+      THost.SetSO(nil);
+      WriteLn('after reset');
+    end;
+    begin
+      Run();
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'show 1' + LE + '1' + LE + 'free 1' + LE + 'after reset' + LE, 0);
 end;
 
 initialization

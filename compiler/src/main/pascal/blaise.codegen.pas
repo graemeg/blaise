@@ -642,6 +642,11 @@ begin
     FA := TFieldAccessExpr(AExpr);
     if FA.IsConstructorCall then begin Result := True; Exit end;
     if FA.IsMethodCall then begin Result := True; Exit end;
+    { a STATIC property read through its getter (TFoo.SP, H.SP, SP) is the
+      static getter call, which returns +1 like any function result: not
+      counting it, a consumer retained it again (X := TFoo.SP) or never
+      released it (TFoo.SP.N), leaking the object }
+    if FA.IsStaticPropGet then begin Result := True; Exit end;
     { Method-backed property read (read GetX): the getter returns +1.
       Field-backed reads (read FX) emit a plain load and do NOT own. }
     if (FA.PropRead <> nil) and (FA.PropRead.ReadMethod <> '') then
