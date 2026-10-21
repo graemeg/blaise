@@ -3407,7 +3407,8 @@ var
   MC: TMethodCallExpr;
 begin
   if AFA.Base <> nil then
-    NotYet('parameterless constructor on this receiver form', AFA);
+    InternalError('parameterless constructor on a receiver expression (the ' +
+      'front end requires parentheses there)', AFA);
   MC := TMethodCallExpr.Create();
   try
     MC.Line := AFA.Line;
@@ -17659,7 +17660,9 @@ begin
   if AStmt.IsConstructorCall or AStmt.IsImplicitSelf or
      ((AStmt.ObjectName = '') and (AStmt.ObjExpr = nil)
       and not AStmt.IsStaticCall) then
-    NotYet('this method-call form', AStmt);
+    InternalError('method-call statement with no receiver arm (a ' +
+      'constructor statement is metaclass dispatch; a field of Self ' +
+      'resolves its method or is Free)', AStmt);
   if (TMethodDecl(AStmt.ResolvedMethod) = nil) and
      SameText(AStmt.Name, 'Free') and (AStmt.Args.Count = 0) then
   begin
@@ -17690,7 +17693,8 @@ begin
     begin
       { X.Field.Free(): release AND nil through the field's address }
       if TFieldAccessExpr(AStmt.ObjExpr).FieldInfo = nil then
-        NotYet('Free on this receiver form', AStmt);
+        InternalError('Free on a field access with no field (a getter or ' +
+          'static read is owned and took the arm above)', AStmt);
       if TFieldAccessExpr(AStmt.ObjExpr).Base <> nil then
       begin
         { chained receiver: the base expression yields the instance.  An
@@ -17753,7 +17757,8 @@ begin
       Exit;
     end;
     if AStmt.IsImplicitSelf then
-      NotYet('Free on this receiver form', AStmt);
+      InternalError('Free on an implicit-Self receiver with no field (the ' +
+        'field form took the arm at the top)', AStmt);
     if EmitCapturedBase('x0', AStmt.ObjectName, False, AStmt.IsVarParam) then
     begin
       { a variable captured from the enclosing routine has no frame slot of
@@ -17942,7 +17947,8 @@ begin
           CodegenMangle(TRecordTypeDesc(AExpr.ResolvedClassType).Name);
     end;
     if Sym = '' then
-      NotYet('constructor for class ''' + AExpr.ObjectName + '''', AExpr);
+      InternalError('constructor for class ''' + AExpr.ObjectName +
+        ''' with no resolved class type', AExpr);
     { Allocate, install the vtable, and take the constructor call's OWNED
       reference before the body runs (ArcExprOwnsRef reports a constructor
       call as owning, so the consumer takes it over): an instance under
@@ -17953,7 +17959,7 @@ begin
       EmitIntLiteral('x0',
         TRecordTypeDesc(AExpr.ResolvedClassType).TotalSize())
     else
-      NotYet('constructor for class ''' + AExpr.ObjectName +
+      InternalError('constructor for class ''' + AExpr.ObjectName +
         ''' with no resolved class type', AExpr);
     Self.Emit(Format(#9'adrp x1, %s@PAGE', [FieldCleanupSym(Sym)]));
     Self.Emit(Format(#9'add x1, x1, %s@PAGEOFF', [FieldCleanupSym(Sym)]));
@@ -18031,7 +18037,8 @@ begin
   if AExpr.IsMetaclassDispatch or
      ((AExpr.ObjectName = '') and (AExpr.ObjExpr = nil)
       and not AExpr.IsStaticCall) then
-    NotYet('this method-call form', AExpr);
+    InternalError('method-call expression with no receiver arm (metaclass ' +
+      'dispatch is always a constructor call)', AExpr);
   if (AExpr.ResolvedClassType <> nil) and
      (AExpr.ResolvedClassType.Kind = tyInterface) then
   begin
