@@ -215,6 +215,11 @@ function AccessPathHasCall(AExpr: TASTExpr): Boolean;
 { The setter call a property-write statement was lowered to by the semantic
   pass (TAssignment / TFieldAssignment / TStaticSubscriptAssign.SetterCall),
   or nil.  Every backend emits that call in place of the statement. }
+{ The statement the semantic pass lowered a call statement to -- a call
+  through a getter-backed procedural property (TMethodCallStmt /
+  TProcCall.LoweredCall) -- or nil.  Codegen emits it in place of the
+  original node. }
+function LoweredCallStmt(AStmt: TASTStmt): TASTStmt;
 function LoweredSetterCall(AStmt: TASTStmt): TMethodCallStmt;
 
 { True when AExpr is an ARRAY-ELEMENT l-value — a subscript whose base is a
@@ -697,6 +702,15 @@ begin
   if IsFoldedPropSubscript(AExpr) and
      (TFieldAccessExpr(TStringSubscriptExpr(AExpr).StrExpr).PropRead.ReadMethod <> '') then
     Result := True;
+end;
+
+function LoweredCallStmt(AStmt: TASTStmt): TASTStmt;
+begin
+  Result := nil;
+  if AStmt is TMethodCallStmt then
+    Result := TMethodCallStmt(AStmt).LoweredCall
+  else if AStmt is TProcCall then
+    Result := TProcCall(AStmt).LoweredCall;
 end;
 
 function LoweredSetterCall(AStmt: TASTStmt): TMethodCallStmt;

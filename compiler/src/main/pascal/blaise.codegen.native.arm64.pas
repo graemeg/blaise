@@ -7928,6 +7928,13 @@ begin
     EmitMethodCallStmt(LoweredSetterCall(AStmt));
     Exit;
   end;
+  if LoweredCallStmt(AStmt) <> nil then
+  begin
+    { a call through a getter-backed procedural property, lowered to the
+      call of the value the getter returns }
+    Self.EmitStmt(LoweredCallStmt(AStmt));
+    Exit;
+  end;
   if AStmt is TAssignment then
   begin
     EmitAssignment(TAssignment(AStmt));

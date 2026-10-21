@@ -746,6 +746,13 @@ type
     procedure RejectRecordSelfUse(AThunk: TMethodDecl);
     procedure DrainPendingAnonDecls(ABlock: TBlock);
     procedure CoerceRoutineToTarget(var AExpr: TASTExpr; ATarget: TTypeDesc);
+    function  GetterProcProp(ART: TRecordTypeDesc; const AName: string;
+      ALine, ACol: Integer): TPropertyInfo;
+    function  BuildGetterProcCall(ART: TRecordTypeDesc; AProp: TPropertyInfo;
+      ARecv: TASTExpr; AArgs: TObjectList; ALine,
+      ACol: Integer): TIndirectFuncCallExpr;
+    function  BuildGetterProcStmt(ART: TRecordTypeDesc; AProp: TPropertyInfo;
+      ARecv: TASTExpr; AArgs: TObjectList; ALine, ACol: Integer): TASTStmt;
     function  CallField(ART: TRecordTypeDesc; const AName: string;
       ALine, ACol: Integer): TFieldInfo;
     function  IsRoutineAddr(AExpr: TASTExpr): Boolean;
@@ -10366,6 +10373,7 @@ procedure TSemanticAnalyser.UnwrapLoweredOperator(var ASlot: TASTExpr);
 var
   Bin:  TBinaryExpr;
   Call: TASTExpr;
+  Orig: TASTExpr;
   FA:   TFieldAccessExpr;
   IE:   TIdentExpr;
 begin
@@ -10377,6 +10385,26 @@ begin
       TFuncCallExpr(ASlot).Args.Items[0]));
     ASlot.Free();
     ASlot := Call;
+    Exit;
+  end;
+  { a call through a getter-backed procedural property: the indirect call
+    of the getter's value (BuildGetterProcCall) }
+  if (ASlot is TMethodCallExpr) and (TMethodCallExpr(ASlot).LoweredCall <> nil) then
+  begin
+    Orig := ASlot;
+    Call := TMethodCallExpr(ASlot).LoweredCall;
+    TMethodCallExpr(ASlot).LoweredCall := nil;   { ownership moves to the slot }
+    ASlot := Call;
+    Orig.Free();
+    Exit;
+  end;
+  if (ASlot is TFuncCallExpr) and (TFuncCallExpr(ASlot).LoweredCall <> nil) then
+  begin
+    Orig := ASlot;
+    Call := TFuncCallExpr(ASlot).LoweredCall;
+    TFuncCallExpr(ASlot).LoweredCall := nil;
+    ASlot := Call;
+    Orig.Free();
     Exit;
   end;
   if (ASlot is TIdentExpr) and (TIdentExpr(ASlot).LoweredExpr <> nil) then
@@ -12499,6 +12527,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseMethodCall(ACall: TMethodCallStmt);
 var
+  GProp: TPropertyInfo;
   ObjSym:  TSymbol;
   RT:      TRecordTypeDesc;
   MDecl:   TMethodDecl;
@@ -12555,6 +12584,14 @@ begin
     { Procedural-typed field (Obj.Inner.Handler(..)): detected BEFORE the
       args are analysed so they are typed once against the field signature
       (BUG-20260722-procfield-set-literal-arg). }
+    GProp := GetterProcProp(RT, ACall.Name, ACall.Line, ACall.Col);
+    if GProp <> nil then
+    begin
+      { Obj.Inner.OnEvent(X), OnEvent a getter-backed procedural property }
+      ACall.LoweredCall := Self.BuildGetterProcStmt(RT, GProp, ACall.ObjExpr,
+        ACall.Args, ACall.Line, ACall.Col);
+      Exit;
+    end;
     FldInfo := CallField(RT, ACall.Name, ACall.Line, ACall.Col);
     if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
        (FldInfo.TypeDesc.Kind = tyProcedural) and
@@ -12675,6 +12712,21 @@ begin
         no method 'Handler'").  Make the receiver an explicit expression and
         take the receiver-expression path, which already calls procedural
         fields (Self.R.Handler() went that way). }
+      if GetterProcProp(RT, ACall.Name, ACall.Line, ACall.Col) <> nil then
+      begin
+        { R.OnEvent(X) with R a field of Self: as for a procedural field,
+          the receiver-expression path below }
+        RecvIdent := TIdentExpr.Create();
+        RecvIdent.Line := ACall.Line;
+        RecvIdent.Col := ACall.Col;
+        RecvIdent.Name := ACall.ObjectName;
+        ACall.ObjExpr := RecvIdent;
+        ACall.ObjectName := '';
+        ACall.IsImplicitSelf := False;
+        ACall.ImplicitBaseInfo := nil;
+        Self.AnalyseMethodCall(ACall);
+        Exit;
+      end;
       FldInfo := CallField(RT, ACall.Name, ACall.Line, ACall.Col);
       if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
          (FldInfo.TypeDesc.Kind = tyProcedural) and
@@ -12801,6 +12853,15 @@ begin
     procedural-typed local variable.  Detected BEFORE the args are analysed
     so they are typed once against the field signature
     (BUG-20260722-procfield-set-literal-arg). }
+  GProp := GetterProcProp(RT, ACall.Name, ACall.Line, ACall.Col);
+  if GProp <> nil then
+  begin
+    { V.OnEvent(X), OnEvent a getter-backed procedural property }
+    ACall.LoweredCall := Self.BuildGetterProcStmt(RT, GProp,
+      AnalysedRecvIdent(ObjSym.Name, ACall.Line, ACall.Col), ACall.Args,
+      ACall.Line, ACall.Col);
+    Exit;
+  end;
   FldInfo := CallField(RT, ACall.Name, ACall.Line, ACall.Col);
   if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
      (FldInfo.TypeDesc.Kind = tyProcedural) and
@@ -15204,6 +15265,7 @@ end;
 
 procedure TSemanticAnalyser.AnalyseProcCall(ACall: TProcCall);
 var
+  GProp: TPropertyInfo;
   Sym:     TSymbol;
   MDecl:   TMethodDecl;
   Par:     TMethodParam;
@@ -15282,6 +15344,15 @@ begin
     { No method of that name — an unqualified procedural-typed field of the
       current class (implicit Self.Field) dispatches through its stored
       pointer, mirroring the explicit Self.Field() path. }
+    GProp := GetterProcProp(FCurrentClass, ACall.Name, ACall.Line, ACall.Col);
+    if GProp <> nil then
+    begin
+      { OnEvent(X) inside a method: Self.OnEvent(X) }
+      ACall.LoweredCall := Self.BuildGetterProcStmt(FCurrentClass, GProp,
+        AnalysedRecvIdent('Self', ACall.Line, ACall.Col), ACall.Args,
+        ACall.Line, ACall.Col);
+      Exit;
+    end;
     FldInfo := CallField(FCurrentClass, ACall.Name, ACall.Line, ACall.Col);
     if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
        (FldInfo.TypeDesc.Kind = tyProcedural) then
@@ -15721,6 +15792,7 @@ end;
 
 function TSemanticAnalyser.AnalyseFuncCallExpr(AExpr: TFuncCallExpr): TTypeDesc;
 var
+  GProp: TPropertyInfo;
   Sym:     TSymbol;
   MDecl:   TMethodDecl;
   Par:     TMethodParam;
@@ -16061,6 +16133,17 @@ begin
     { No method of that name — an unqualified procedural-typed field of the
       current class (implicit Self.Field) called as an expression dispatches
       through its stored pointer and yields the signature's return type. }
+    GProp := GetterProcProp(FCurrentClass, AExpr.Name, AExpr.Line, AExpr.Col);
+    if GProp <> nil then
+    begin
+      { OnEvent(X) inside a method, as an expression: Self.OnEvent(X) }
+      AExpr.LoweredCall := Self.BuildGetterProcCall(FCurrentClass, GProp,
+        AnalysedRecvIdent('Self', AExpr.Line, AExpr.Col), AExpr.Args,
+        AExpr.Line, AExpr.Col);
+      Result := AExpr.LoweredCall.ResolvedType;
+      AExpr.ResolvedType := Result;
+      Exit;
+    end;
     FldInfo := CallField(FCurrentClass, AExpr.Name, AExpr.Line, AExpr.Col);
     if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
        (FldInfo.TypeDesc.Kind = tyProcedural) then
@@ -16880,6 +16963,7 @@ end;
 
 function TSemanticAnalyser.AnalyseMethodCallExpr(AExpr: TMethodCallExpr): TTypeDesc;
 var
+  GProp: TPropertyInfo;
   ObjSym:   TSymbol;
   RT:       TRecordTypeDesc;
   MDecl:    TMethodDecl;
@@ -16936,6 +17020,16 @@ begin
     { Procedural-typed field (Obj.Inner.Fn(..)): detected BEFORE the args are
       analysed so they are typed once against the field signature
       (BUG-20260722-procfield-set-literal-arg). }
+    GProp := GetterProcProp(RT, AExpr.Name, AExpr.Line, AExpr.Col);
+    if GProp <> nil then
+    begin
+      { Obj.Inner.OnEvent(X) as an expression }
+      AExpr.LoweredCall := Self.BuildGetterProcCall(RT, GProp, AExpr.ObjExpr,
+        AExpr.Args, AExpr.Line, AExpr.Col);
+      Result := AExpr.LoweredCall.ResolvedType;
+      AExpr.ResolvedType := Result;
+      Exit;
+    end;
     FldInfo := CallField(RT, AExpr.Name, AExpr.Line, AExpr.Col);
     if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
        (FldInfo.TypeDesc.Kind = tyProcedural) and
@@ -17084,6 +17178,16 @@ begin
       { Procedural-typed field: detected BEFORE the args are analysed so they
         are typed once against the field signature
         (BUG-20260722-procfield-set-literal-arg). }
+      GProp := GetterProcProp(RT, AExpr.Name, AExpr.Line, AExpr.Col);
+      if GProp <> nil then
+      begin
+        { Obj.Inner.OnEvent(X) as an expression }
+        AExpr.LoweredCall := Self.BuildGetterProcCall(RT, GProp, AExpr.ObjExpr,
+          AExpr.Args, AExpr.Line, AExpr.Col);
+        Result := AExpr.LoweredCall.ResolvedType;
+        AExpr.ResolvedType := Result;
+        Exit;
+      end;
       FldInfo := CallField(RT, AExpr.Name, AExpr.Line, AExpr.Col);
       if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
          (FldInfo.TypeDesc.Kind = tyProcedural) and
@@ -17368,6 +17472,17 @@ begin
     A procedural-typed field (F.Fn(..)) has one signature, so it is detected
     BEFORE the args are analysed and they are typed once against it
     (BUG-20260722-procfield-set-literal-arg). }
+  GProp := GetterProcProp(RT, AExpr.Name, AExpr.Line, AExpr.Col);
+  if GProp <> nil then
+  begin
+    { V.OnEvent(X) as an expression }
+    AExpr.LoweredCall := Self.BuildGetterProcCall(RT, GProp,
+      AnalysedRecvIdent(ObjSym.Name, AExpr.Line, AExpr.Col), AExpr.Args,
+      AExpr.Line, AExpr.Col);
+    Result := AExpr.LoweredCall.ResolvedType;
+    AExpr.ResolvedType := Result;
+    Exit;
+  end;
   FldInfo := CallField(RT, AExpr.Name, AExpr.Line, AExpr.Col);
   if (FldInfo <> nil) and (FldInfo.TypeDesc <> nil) and
      (FldInfo.TypeDesc.Kind = tyProcedural) and
@@ -20091,11 +20206,86 @@ begin
     Exit;
   AssertMemberVisibleV(PI.Visibility, PI.DeclaringUnit, PI.DeclaringType,
     AName, ALine, ACol);
+  { a getter-backed one (read GetX) has no field to call through: the call
+    sites lower it to a call of the getter's value (GetterProcProp) }
   if PI.ReadField = '' then
-    SemanticError(Format('A call through property ''%s'' needs a field-backed ' +
-      'read; its getter is not supported as a callee yet -- read the property ' +
-      'into a variable and call that', [AName]), ALine, ACol);
+    Exit;
   Result := ART.FindField(PI.ReadField);
+end;
+
+{ The property a call Recv.Name(..) / Name(..) goes through when Name is a
+  GETTER-backed property of procedural type (read GetX, not indexed, not
+  static, no method of the name): the call is the getter's value called
+  (Delphi's event idiom with an accessor).  Nil otherwise. }
+function TSemanticAnalyser.GetterProcProp(ART: TRecordTypeDesc;
+  const AName: string; ALine, ACol: Integer): TPropertyInfo;
+begin
+  Result := nil;
+  if (ART = nil) or (ART.FindField(AName) <> nil) then
+    Exit;
+  Result := ART.FindProperty(AName);
+  if (Result = nil) or (Result.TypeDesc = nil) or
+     (Result.TypeDesc.Kind <> tyProcedural) or
+     (Result.IndexParamName <> '') or Result.IsStatic or
+     (Result.ReadMethod = '') or (Result.ReadField <> '') or
+     (FindMethodDecl(ART.Name, AName) <> nil) then
+    Exit(nil);
+  AssertMemberVisibleV(Result.Visibility, Result.DeclaringUnit,
+    Result.DeclaringType, AName, ALine, ACol);
+end;
+
+{ Recv.Name(Args) through the getter-backed procedural property AProp of
+  ART: the indirect call of the value Recv.GetX returns -- the property read
+  built resolved (as the property-read arm of AnalyseFieldAccess annotates
+  it) on the already-analysed receiver ARecv, and the arguments typed once
+  against the property's signature.  The argument nodes are shared with
+  the original call node. }
+function TSemanticAnalyser.BuildGetterProcCall(ART: TRecordTypeDesc;
+  AProp: TPropertyInfo; ARecv: TASTExpr; AArgs: TObjectList; ALine,
+  ACol: Integer): TIndirectFuncCallExpr;
+var
+  FA: TFieldAccessExpr;
+  PT: TProceduralTypeDesc;
+  I: Integer;
+begin
+  FA := TFieldAccessExpr.Create();
+  FA.Line := ALine;
+  FA.Col := ACol;
+  FA.Base := ARecv;
+  FA.FieldName := AProp.Name;
+  FA.IsClassAccess := ART.Kind = tyClass;
+  FA.PropRead := AProp;
+  FA.PropOwnerType := PropAccessorOwner(ART.Name, AProp.ReadMethod);
+  FA.PropAccessorVSlot := PropAccessorVSlot(ART.Name, AProp.ReadMethod);
+  FA.PropReadDecl := FindMethodDecl(ART.Name, AProp.ReadMethod);
+  FA.ResolvedType := AProp.TypeDesc;
+  PT := TProceduralTypeDesc(AProp.TypeDesc);
+  Result := TIndirectFuncCallExpr.Create();
+  Result.Line := ALine;
+  Result.Col := ACol;
+  Result.CalleeExpr := FA;
+  for I := 0 to AArgs.Count - 1 do
+    Result.Args.Add(AArgs.Items[I]);
+  AnalyseProcTypeCallArgs(Result.Args, PT, AProp.Name, ALine, ACol);
+  Result.ResolvedProcType := PT;
+  if PT.ReturnType <> nil then
+    Result.ResolvedType := PT.ReturnType
+  else
+    Result.ResolvedType := FTable.TypeInteger;
+end;
+
+{ The statement form: a TExprCallStmt around BuildGetterProcCall. }
+function TSemanticAnalyser.BuildGetterProcStmt(ART: TRecordTypeDesc;
+  AProp: TPropertyInfo; ARecv: TASTExpr; AArgs: TObjectList; ALine,
+  ACol: Integer): TASTStmt;
+var
+  S: TExprCallStmt;
+begin
+  S := TExprCallStmt.Create();
+  S.Line := ALine;
+  S.Col := ACol;
+  S.Call := Self.BuildGetterProcCall(ART, AProp, ARecv, AArgs, ALine, ACol);
+  Result := S;
 end;
 
 function TSemanticAnalyser.IsRoutineAddr(AExpr: TASTExpr): Boolean;

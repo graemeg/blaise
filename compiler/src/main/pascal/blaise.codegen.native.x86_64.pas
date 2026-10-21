@@ -16728,6 +16728,13 @@ begin
     Self.EmitMethodCallStmt(LoweredSetterCall(AStmt));
     Exit;
   end;
+  if LoweredCallStmt(AStmt) <> nil then
+  begin
+    { a call through a getter-backed procedural property, lowered to the
+      call of the value the getter returns }
+    Self.EmitStmt(LoweredCallStmt(AStmt));
+    Exit;
+  end;
   if AStmt is TAssignment then
   begin
     Asgn := TAssignment(AStmt);
@@ -21543,6 +21550,8 @@ begin
   { a property write lowered to its setter call is emitted as that call }
   if LoweredSetterCall(AStmt) <> nil then
     Exit(InlineNeedStmtD(LoweredSetterCall(AStmt), ADepth));
+  if LoweredCallStmt(AStmt) <> nil then
+    Exit(InlineNeedStmtD(LoweredCallStmt(AStmt), ADepth));
   if AStmt is TCompoundStmt then
     for I := 0 to TCompoundStmt(AStmt).Stmts.Count - 1 do
     begin

@@ -135,6 +135,12 @@ type
       routine, through a receiver and a chained receiver, statement and
       expression, the property inherited (all were "no method 'OnChange'") }
     procedure TestRun_CallThroughProcProperty;
+    { calls through GETTER-backed properties of procedural type -- plain,
+      'of object' and 'reference to' -- through a variable, a call result,
+      Self and a field of Self, statement and expression; the closure the
+      getter returns is released after each call
+      (BUG-20261020-getter-proc-property-call) }
+    procedure TestRun_CallThroughGetterProcProperty;
 
     { Default parameters }
     procedure TestRun_DefaultParam_OmitLast;
@@ -1485,6 +1491,122 @@ begin
   AssertRunsOnAll(Src, 'hold freed 1' + LE + 'after stmt' + LE + 'hold freed 2' + LE +
     'after expr' + LE + 'c7' + LE + 'hold freed 3' + LE + '125' + LE +
     'hold freed 4' + LE + 'end' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_CallThroughGetterProcProperty;
+const
+  Src = '''
+    program P;
+    type
+      TFn = function(X: Integer): Integer;
+      TProc1 = procedure(X: Integer);
+      TEvent = procedure(X: Integer) of object;
+      TClo = reference to function(X: Integer): Integer;
+      TTrack = class
+        N: Integer;
+        destructor Destroy; override;
+      end;
+      TBox = class
+        FFn: TFn;
+        FProc: TProc1;
+        FEv: TEvent;
+        FClo: TClo;
+        function GetFn: TFn;
+        function GetProc: TProc1;
+        function GetEv: TEvent;
+        function GetClo: TClo;
+        property Fn: TFn read GetFn;
+        property Proc: TProc1 read GetProc;
+        property Ev: TEvent read GetEv;
+        property Clo: TClo read GetClo;
+        procedure Use;
+      end;
+      TSink = class
+        Total: Integer;
+        procedure Take(X: Integer);
+      end;
+      THost = class
+        FBox: TBox;
+        procedure Run;
+      end;
+    destructor TTrack.Destroy; begin WriteLn('free track ', N); end;
+    function TBox.GetFn: TFn; begin Result := FFn; end;
+    function TBox.GetProc: TProc1; begin Result := FProc; end;
+    function TBox.GetEv: TEvent; begin Result := FEv; end;
+    function TBox.GetClo: TClo; begin Result := FClo; end;
+    procedure TSink.Take(X: Integer); begin Total := Total + X; WriteLn('take ', X, ' total ', Total); end;
+    function Dbl(X: Integer): Integer; begin Result := X * 2; end;
+    procedure Shout(X: Integer); begin WriteLn('shout ', X); end;
+    procedure TBox.Use;
+    begin
+      WriteLn('use ', Fn(4), ' ', Clo(4));
+      Proc(5);
+      Ev(6);
+    end;
+    procedure THost.Run;
+    begin
+      WriteLn('host ', FBox.Fn(7));
+      FBox.Proc(8);
+      FBox.Ev(9);
+    end;
+    var G: TBox;
+    function MkB: TBox; begin Result := G; end;
+    procedure MakeClo(B: TBox);
+    var T: TTrack;
+    begin
+      T := TTrack.Create;
+      T.N := 100;
+      B.FClo := function(X: Integer): Integer begin Result := X + T.N; end;
+    end;
+    var
+      B: TBox;
+      S: TSink;
+      H: THost;
+      I, R: Integer;
+    begin
+      G := TBox.Create;
+      B := G;
+      S := TSink.Create;
+      B.FFn := @Dbl;
+      B.FProc := @Shout;
+      B.FEv := @S.Take;
+      MakeClo(B);
+      WriteLn(B.Fn(3), ' ', B.Clo(3), ' ', MkB().Fn(10));
+      B.Fn(3);
+      B.Proc(1);
+      B.Ev(2);
+      MkB().Ev(3);
+      B.Clo(1);
+      R := 0;
+      for I := 1 to 1000 do R := R + B.Clo(1);
+      WriteLn('sum ', R);
+      B.Use();
+      H := THost.Create;
+      H.FBox := B;
+      H.Run();
+      B.FClo := nil;
+      WriteLn('end');
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '6 103 20' + LE +
+    'shout 1' + LE +
+    'take 2 total 2' + LE +
+    'take 3 total 5' + LE +
+    'sum 101000' + LE +
+    'use 8 104' + LE +
+    'shout 5' + LE +
+    'take 6 total 11' + LE +
+    'host 14' + LE +
+    'shout 8' + LE +
+    'take 9 total 20' + LE +
+    'free track 100' + LE +
+    'end' + LE, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_CallThroughProcProperty;

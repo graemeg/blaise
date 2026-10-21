@@ -616,6 +616,10 @@ type
                                      procedural-typed field of the current class
                                      (implicit Self.Field), called as a statement }
     [Unretained] ProcFieldInfo: TFieldInfo; { not owned — the procedural field, when IsProcFieldCall }
+    { set by uSemantic: Name(X) inside a method, Name a GETTER-backed
+      procedural property, lowered to the TExprCallStmt that calls the value
+      the getter returns.  Codegen emits it in place of this node. }
+    LoweredCall: TASTStmt;
     constructor Create;
     destructor Destroy; override;
   end;
@@ -653,6 +657,10 @@ type
     IsIntfConversion:      Boolean; { set by uSemantic — IFoo(X), a checked
                                       conversion to an interface; the slot
                                       unwrap replaces the node by X }
+    { set by uSemantic: Name(X) inside a method, Name a GETTER-backed
+      procedural property -- the TIndirectFuncCallExpr calling the value the
+      getter returns; the slot unwrap replaces the node by it }
+    LoweredCall: TASTExpr;
     constructor Create;
     destructor Destroy; override;
   end;
@@ -719,6 +727,11 @@ type
                                        dispatches indirectly instead of calling a method. }
     [Unretained] ProcFieldInfo:      TFieldInfo;  { not owned — the procedural field, when IsProcFieldCall }
     [Unretained] ResolvedProcType:   TObject;     { TProceduralTypeDesc — not owned; the field's signature }
+    { set by uSemantic: a call through a GETTER-backed procedural property
+      (Obj.OnEvent(X) with read GetOnEvent), lowered to the TExprCallStmt
+      that calls the value the getter returns.  Codegen emits it in place of
+      this node; nil otherwise. }
+    LoweredCall: TASTStmt;
     constructor Create;
     destructor Destroy; override;
   end;
@@ -1282,6 +1295,10 @@ type
     IsProcFieldCall:    Boolean;    { set by uSemantic — Name is a procedural-typed field }
     [Unretained] ProcFieldInfo:      TFieldInfo;  { not owned — the procedural field }
     [Unretained] ResolvedProcType:   TObject;     { TProceduralTypeDesc — not owned }
+    { set by uSemantic: Recv.Name(X), Name a GETTER-backed procedural
+      property -- the TIndirectFuncCallExpr calling the value the getter
+      returns; the slot unwrap replaces the node by it }
+    LoweredCall: TASTExpr;
     constructor Create;
     destructor Destroy; override;
   end;

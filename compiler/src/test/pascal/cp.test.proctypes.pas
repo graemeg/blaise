@@ -50,9 +50,10 @@ type
     procedure TestCodegen_ProcFieldCall_OnCallResultReceiver;
     { Obj.OnChange(Sender) / OnChange(Self): a call through a field-backed
       property of procedural type is a call through its backing field; a
-      getter-backed one is refused with a clear message }
+      getter-backed one calls the value the getter returns
+      (BUG-20261020-getter-proc-property-call) }
     procedure TestSemantic_CallThroughProcProperty_UsesBackingField;
-    procedure TestSemantic_CallThroughGetterProcProperty_Rejected;
+    procedure TestSemantic_CallThroughGetterProcProperty_CallsGetterValue;
     { O.C[I] := K into an array FIELD of closures: a 16-byte copy with the
       Env retained (x86-64 stored 8 bytes; arm64 refused it) }
     procedure TestCodegen_ClosureArrayFieldElemStore_CopiesPair;
@@ -832,24 +833,44 @@ begin
   end;
 end;
 
-procedure TProcTypesTests.TestSemantic_CallThroughGetterProcProperty_Rejected;
+procedure TProcTypesTests.TestSemantic_CallThroughGetterProcProperty_CallsGetterValue;
+var
+  Prog: TProgram;
+  WL: TProcCall;
+  Call: TIndirectFuncCallExpr;
+  Stmt: TMethodCallStmt;
 begin
-  AssertTrue('a getter-backed callee is refused clearly',
-    Pos('needs a field-backed read', SemanticError('''
-      program P;
-      type
-        TFn = function(N: Integer): Integer;
-        TBox = class
-          FFn: TFn;
-          function GetFn: TFn;
-          property Fn: TFn read GetFn;
-        end;
-      function TBox.GetFn: TFn; begin Result := FFn end;
-      var B: TBox;
-      begin
-        WriteLn(B.Fn(1))
-      end.
-      ''')) >= 0);
+  Prog := Analyse('''
+    program P;
+    type
+      TFn = function(N: Integer): Integer;
+      TBox = class
+        FFn: TFn;
+        function GetFn: TFn;
+        property Fn: TFn read GetFn;
+      end;
+    function TBox.GetFn: TFn; begin Result := FFn end;
+    var B: TBox;
+    begin
+      WriteLn(B.Fn(1));
+      B.Fn(2);
+    end.
+    ''');
+  try
+    WL := TProcCall(Prog.Block.Stmts.Items[0]);
+    AssertTrue('the expression is an indirect call',
+      TASTExpr(WL.Args.Items[0]) is TIndirectFuncCallExpr);
+    Call := TIndirectFuncCallExpr(WL.Args.Items[0]);
+    AssertTrue('of the property read through its getter',
+      (Call.CalleeExpr is TFieldAccessExpr) and
+      (TFieldAccessExpr(Call.CalleeExpr).PropReadDecl <> nil));
+    AssertEquals('the argument passed', 1, Call.Args.Count);
+    Stmt := TMethodCallStmt(Prog.Block.Stmts.Items[1]);
+    AssertTrue('the statement is lowered to the same call',
+      Stmt.LoweredCall is TExprCallStmt);
+  finally
+    Prog.Free();
+  end;
 end;
 
 procedure TProcTypesTests.TestCodegen_ClosureArrayFieldElemStore_CopiesPair;

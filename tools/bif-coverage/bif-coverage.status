@@ -368,3 +368,7 @@ TMethodParam.IsOpenArray  serialise
 TMethodParam.DefaultValue  serialise
 TMethodParam.HasDefault  serialise
 
+TMethodCallStmt.LoweredCall  safe
+TProcCall.LoweredCall  safe
+TMethodCallExpr.LoweredCall  safe
+TFuncCallExpr.LoweredCall  safe
