@@ -1012,6 +1012,8 @@ type
       memory-class record; register capture for a register-class one).  Mirrors
       the QBE EmitIntfSretDispatch helper.  ADestIsIndirect: ADest holds a
       pointer to the destination buffer (var/out / Result), not the buffer. }
+    function  IntfStmtCallShim(ACall: TMethodCallStmt;
+      out ARecvIdent: TIdentExpr): TMethodCallExpr;
     procedure EmitIntfRecordSretDispatch(ACall: TMethodCallExpr;
                                          const ADest: string;
                                          ADestIsIndirect: Boolean);
@@ -8874,6 +8876,7 @@ procedure TX86_64Backend.EmitExprToEax(AExpr: TASTExpr);
 var
   BE:  TBinaryExpr;
   FC:  TFuncCallExpr;
+  JDest: string;
   FAE: TFieldAccessExpr;
   SAE: TStringSubscriptExpr;
   MD:  TMethodDecl;
@@ -8945,6 +8948,25 @@ begin
     instead -- F(1).A[1] + F(2).A[1] + F(3).A[1] gave 7, not 9. }
   if (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyRecord) and
      Self.IsNativeRecordCall(AExpr) then
+  begin
+    Self.EmitAggCallToRax(AExpr);
+    Exit;
+  end;
+  { The same for a JUMBO-SET-returning method or inherited call: its bitmap
+    comes back through the hidden result pointer too.  It was emitted as a
+    plain call, so the callee took Self as the result pointer (9 in
+    H.Pair(9, 10) crashed); an interface call (no ResolvedMethod) dispatches
+    through the itab helper EmitRecordCallSretAt selects.  A plain function
+    call takes the FC arm below. }
+  if IsJumboSet(AExpr.ResolvedType) and
+     (((AExpr is TMethodCallExpr) and
+       ((TMethodCallExpr(AExpr).ResolvedMethod <> nil) or
+        ((TMethodCallExpr(AExpr).ResolvedClassType <> nil) and
+         (TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyInterface))) and
+       not TMethodCallExpr(AExpr).IsConstructorCall and
+       not TMethodCallExpr(AExpr).IsProcFieldCall) or
+      ((AExpr is TInheritedCallExpr) and
+       (TInheritedCallExpr(AExpr).ResolvedMethod <> nil))) then
   begin
     Self.EmitAggCallToRax(AExpr);
     Exit;
@@ -10380,6 +10402,20 @@ begin
         IsJumboSet(TMethodDecl(FC.ResolvedDecl).ResolvedReturnType)) then
     begin
       MD := TMethodDecl(FC.ResolvedDecl);
+      if IsJumboSet(FC.ResolvedType) then
+      begin
+        { a jumbo set's value is its bitmap's address: give the callee a
+          per-site FRAME scratch buffer.  The stack buffer below was never
+          released, so an operand the consumer pushed before evaluating this
+          call (7 in F(), F() = G()) was popped from inside the buffer. }
+        JDest := Self.NewScratchOperand(FC.ResolvedType.RawSize());
+        if FC.IsImplicitSelfMethod then
+          Self.EmitFuncCallSret(FC, JDest, False)
+        else
+          Self.EmitSretCall(FuncSymbolOf(FC), MD, FC.Args, JDest, False);
+        Self.Emit(Format(#9'leaq %s, %%rax', [JDest]));
+        Exit;
+      end;
       Self.Emit(Format(#9'subq $%d, %%rsp',
         [(SretRetSize(MD.ResolvedReturnType) + 15) and (-16)]));
       if FC.IsImplicitSelfMethod then
@@ -14421,6 +14457,34 @@ begin
     Exit;
   end;
 
+  { Discarded instance or interface call returning a JUMBO SET or STATIC
+    ARRAY: the callee writes through the hidden result pointer, so it needs
+    a real buffer (the plain call below handed it none, and the callee wrote
+    its result over the receiver object -- K.Pair(1, 2); clobbered K's
+    vtable).  EmitAggCallToRax gives it a frame scratch
+    and releases a managed array's elements at the statement end. }
+  if (ACall.ResolvedReturnTypeDesc <> nil) and
+     (IsJumboSet(ACall.ResolvedReturnTypeDesc) or
+      (ACall.ResolvedReturnTypeDesc.Kind = tyStaticArray)) and
+     (((ACall.ResolvedClassType <> nil) and
+       (ACall.ResolvedClassType.Kind = tyInterface)) or
+      ((ACall.ResolvedMethod <> nil) and
+       not ACall.IsStaticCall and
+       not TMethodDecl(ACall.ResolvedMethod).IsStatic and
+       not ACall.IsConstructorCall and not ACall.IsProcFieldCall)) then
+  begin
+    SretShim := Self.IntfStmtCallShim(ACall, RecvIdent);
+    try
+      Self.EmitAggCallToRax(SretShim);
+    finally
+      SretShim.Args    := nil;   { borrowed — do not free }
+      SretShim.ObjExpr := nil;   { borrowed — do not free }
+      SretShim.Free();
+      RecvIdent.Free();
+    end;
+    Exit;
+  end;
+
   { Discarded interface (itab) method call returning a RECORD: the callee
     follows the record-return ABI (sret pointer for a memory-class record,
     register return for a register-class one).  The plain EmitInterfaceCall
@@ -14450,32 +14514,8 @@ begin
     { EmitIntfRecordSretDispatch takes the expression form; build a transient
       TMethodCallExpr view of this statement node (the relevant fields are the
       same).  Args are borrowed and detached before Free. }
-    SretShim := TMethodCallExpr.Create();
-    RecvIdent := nil;
+    SretShim := Self.IntfStmtCallShim(ACall, RecvIdent);
     try
-      SretShim.ObjectName       := ACall.ObjectName;
-      SretShim.Name             := ACall.Name;
-      SretShim.Args             := ACall.Args;
-      SretShim.ObjExpr          := ACall.ObjExpr;
-      SretShim.ResolvedClassType := ACall.ResolvedClassType;
-      SretShim.ResolvedType     := ACall.ResolvedReturnTypeDesc;
-      SretShim.IsGlobal         := ACall.IsGlobal;
-      SretShim.IsVarParam       := ACall.IsVarParam;
-      if (ACall.ObjExpr = nil) and ACall.IsImplicitSelf and
-         (ACall.ImplicitBaseInfo <> nil) then
-      begin
-        { an interface FIELD of Self (FS.MakeRect(5); inside a method): the
-          expression form carries it as an implicit-Self ident receiver.
-          Passing only ObjectName read a global FS_obj / FS_itab that does
-          not exist and dispatched through garbage. }
-        RecvIdent := TIdentExpr.Create();
-        RecvIdent.Name := ACall.ObjectName;
-        RecvIdent.IsImplicitSelf := True;
-        RecvIdent.ImplicitFieldInfo := ACall.ImplicitBaseInfo;
-        RecvIdent.ResolvedType := ACall.ResolvedClassType;
-        SretShim.ObjExpr := RecvIdent;
-        SretShim.ObjectName := '';
-      end;
       Self.EmitIntfRecordSretDispatch(SretShim, '(%rbx)', False);
     finally
       SretShim.Args    := nil;   { borrowed — do not free }
@@ -15042,6 +15082,49 @@ begin
           Self.Emit(#9'callq _ClassRelease');
         end;
       end;
+    finally
+      if Asgn <> nil then
+      begin
+        Asgn.Expr := nil;      { the shim is freed below }
+        Asgn.Free();
+      end;
+      Shim.Args := nil;        { borrowed -- do not free }
+      Shim.Free();
+    end;
+    Exit;
+  end;
+
+  { A jumbo-set or static-array result also comes back through the hidden
+    result pointer: inside a function it is `Result := inherited F(..)`, as
+    for an interface above; outside one it is discarded into a frame scratch
+    (EmitAggCallToRax, which releases a managed array's elements).  It took
+    the plain call below, so the parent wrote its result over the object
+    through Self -- the next virtual call crashed. }
+  if (MD.ResolvedReturnType <> nil) and
+     (IsJumboSet(MD.ResolvedReturnType) or
+      (MD.ResolvedReturnType.Kind = tyStaticArray)) then
+  begin
+    Shim := TInheritedCallExpr.Create();
+    Asgn := nil;
+    try
+      Shim.Name := ACall.Name;
+      Shim.Args := ACall.Args;
+      Shim.ResolvedMethod := MD;
+      Shim.ResolvedType := MD.ResolvedReturnType;
+      Shim.Line := ACall.Line;
+      Shim.Col := ACall.Col;
+      if Self.IsLocal('Result') then
+      begin
+        Asgn := TAssignment.Create();
+        Asgn.Line := ACall.Line;
+        Asgn.Col := ACall.Col;
+        Asgn.Name := 'Result';
+        Asgn.ResolvedLhsType := MD.ResolvedReturnType;
+        Asgn.Expr := Shim;
+        Self.EmitStmtBody(Asgn);
+      end
+      else
+        Self.EmitAggCallToRax(Shim);
     finally
       if Asgn <> nil then
       begin
@@ -18652,6 +18735,27 @@ begin
         object.  Route through the method-sret machinery into a throwaway
         buffer, then release the fields the callee handed over -- the free-
         function twin is the sret-discard branch below. }
+      if (MD.ResolvedReturnType <> nil) and
+         (IsJumboSet(MD.ResolvedReturnType) or
+          (MD.ResolvedReturnType.Kind = tyStaticArray)) then
+      begin
+        { a jumbo set or static array (Tri(1); inside a method) comes back
+          through the hidden result pointer too: EmitAggCallToRax gives it a
+          frame scratch and releases a managed array's elements at the
+          statement end }
+        DiscMShim := TMethodCallExpr.Create();
+        try
+          DiscMShim.ResolvedMethod := MD;
+          DiscMShim.Name := PC.Name;
+          DiscMShim.Args := PC.Args;
+          DiscMShim.ResolvedType := MD.ResolvedReturnType;
+          Self.EmitAggCallToRax(DiscMShim);
+        finally
+          DiscMShim.Args := nil;   { borrowed — do not free }
+          DiscMShim.Free();
+        end;
+        Exit;
+      end;
       if (MD.ResolvedReturnType <> nil) and
          (MD.ResolvedReturnType.Kind = tyRecord) then
       begin
@@ -22484,7 +22588,21 @@ begin
         Self.Emit(#9'leaq (%rsp), %rax');
       end
       else
-        Self.EmitExprToEax(Arg);        { jumbo set: buffer at %rsp, pointer in %rax }
+      begin
+        { a jumbo-set call: the same explicit stack buffer.  EmitExprToEax
+          used to leave its sret buffer at %rsp, which this region relied on;
+          it now takes a frame scratch (the stray buffer corrupted operands
+          an enclosing expression had pushed), so the hoist allocates its
+          own -- else Count(Fold(Fold(X))) reloaded the wrong slot. }
+        Self.Emit(Format(#9'subq $%d, %%rsp', [Self.RecArgBufBytes(Arg)]));
+        if TFuncCallExpr(Arg).IsImplicitSelfMethod then
+          Self.EmitFuncCallSret(TFuncCallExpr(Arg), '(%rsp)', False)
+        else
+          Self.EmitSretCall(FuncSymbolOf(TFuncCallExpr(Arg)),
+            TMethodDecl(TFuncCallExpr(Arg).ResolvedDecl),
+            TFuncCallExpr(Arg).Args, '(%rsp)', False);
+        Self.Emit(#9'leaq (%rsp), %rax');
+      end;
       { The buffer (RecArgBufBytes, 16-aligned) plus the 8-byte saved pointer
         would leave the hoist region 8 bytes off 16-alignment.  Reserve a
         16-byte slot for the pointer (push + 8-byte pad) so the total stays a
@@ -25126,6 +25244,45 @@ begin
   HK.Free();
 end;
 
+{ The expression-form view of discarded method call ACall, for the
+  aggregate-return dispatch helpers: its Args and ObjExpr are BORROWED (the
+  caller detaches them before Free).  An interface field of Self gets a
+  synthesised implicit-Self receiver ident, returned in ARecvIdent for the
+  caller to free (nil otherwise). }
+function TX86_64Backend.IntfStmtCallShim(ACall: TMethodCallStmt;
+  out ARecvIdent: TIdentExpr): TMethodCallExpr;
+var
+  RecvIdent: TIdentExpr;
+begin
+  Result := TMethodCallExpr.Create();
+  RecvIdent := nil;
+  Result.ObjectName := ACall.ObjectName;
+  Result.Name := ACall.Name;
+  Result.Args := ACall.Args;
+  Result.ObjExpr := ACall.ObjExpr;
+  Result.ResolvedClassType := ACall.ResolvedClassType;
+  Result.ResolvedMethod := ACall.ResolvedMethod;
+  Result.ResolvedType := ACall.ResolvedReturnTypeDesc;
+  Result.IsGlobal := ACall.IsGlobal;
+  Result.IsVarParam := ACall.IsVarParam;
+  if (ACall.ObjExpr = nil) and ACall.IsImplicitSelf and
+     (ACall.ImplicitBaseInfo <> nil) then
+  begin
+    { an interface FIELD of Self (FS.MakeRect(5); inside a method): the
+      expression form carries it as an implicit-Self ident receiver.
+      Passing only ObjectName read a global FS_obj / FS_itab that does
+      not exist and dispatched through garbage. }
+    RecvIdent := TIdentExpr.Create();
+    RecvIdent.Name := ACall.ObjectName;
+    RecvIdent.IsImplicitSelf := True;
+    RecvIdent.ImplicitFieldInfo := ACall.ImplicitBaseInfo;
+    RecvIdent.ResolvedType := ACall.ResolvedClassType;
+    Result.ObjExpr := RecvIdent;
+    Result.ObjectName := '';
+  end;
+  ARecvIdent := RecvIdent;
+end;
+
 procedure TX86_64Backend.EmitIntfRecordSretDispatch(ACall: TMethodCallExpr;
   const ADest: string; ADestIsIndirect: Boolean);
 var
@@ -25140,6 +25297,7 @@ var
   OverflowBytes, ABase: Integer;
   RC: TRecReturnClass;
   RetRec: TRecordTypeDesc;
+  RetSize: Integer;
   SlotClasses: TList<Integer>;
   RecvOnStack: Boolean;
 begin
@@ -25147,7 +25305,19 @@ begin
   { a closure / method pointer is returned as the 16-byte record it is laid
     out as (casting its procedural type to a record read garbage fields) }
   RetRec := AggRetRec(ACall.ResolvedType);
-  RC := ClassifyRecordReturn(RetRec);
+  { a static array or jumbo set is not a record but always comes back
+    through the hidden result pointer, as from a direct call: classifying
+    the nil record crashed the compiler (T := I.Tri()) }
+  if RetRec = nil then
+  begin
+    RC := rcSret;
+    RetSize := ACall.ResolvedType.RawSize();
+  end
+  else
+  begin
+    RC := ClassifyRecordReturn(RetRec);
+    RetSize := RetRec.TotalSize();
+  end;
   ArgN := 0;
   if ACall.Args <> nil then ArgN := ACall.Args.Count;
 
@@ -25261,7 +25431,7 @@ begin
       visible args from %rdx (base index 2).  The dest buffer is %r14. }
     Self.Emit(#9'movq %r14, %rdi');
     Self.Emit(#9'xorl %esi, %esi');
-    Self.Emit(Format(#9'movq $%d, %%rdx', [RetRec.TotalSize()]));
+    Self.Emit(Format(#9'movq $%d, %%rdx', [RetSize]));
     Self.Emit(#9'pushq %r10');           { preserve receiver obj across memset }
     Self.Emit(#9'pushq %r11');           { preserve fptr across memset }
     Self.Emit(#9'callq memset');

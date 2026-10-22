@@ -652,6 +652,10 @@ type
       the whole array on every evaluation }
     procedure EmitDynArrayLengthOf(AArg: TASTExpr);
     function  IsInlineBytesAgg(AType: TTypeDesc): Boolean;
+    { A result the callee writes through x8, so a DISCARDED call still needs
+      a real buffer: a record, interface or closure (IsAggregateReturn) or a
+      static array / jumbo set (IsInlineBytesAgg). }
+    function  NeedsResultBuffer(AType: TTypeDesc): Boolean;
     { x0 := the address of an IsInlineBytesAgg value: a static array's
       storage (variable, field, element, call-result buffer), or a jumbo
       set's bitmap (whose value already evaluates to an address). }
@@ -5027,13 +5031,39 @@ begin
     end;
     Exit;
   end;
+  if IsInlineBytesAgg(AExpr.ResolvedType) and (AExpr is TMethodCallExpr) and
+     (TMethodCallExpr(AExpr).ResolvedClassType <> nil) and
+     (TMethodCallExpr(AExpr).ResolvedClassType.Kind = tyInterface) then
+  begin
+    { the same for an INTERFACE method returning a jumbo set / static array:
+      itab dispatch with the per-site buffer behind x8.  Interface calls
+      have no ResolvedMethod, so the arm below skipped them and the callee
+      wrote its result through whatever x8 held (S.Pair(1, 2) crashed). }
+    JTmp := '__jret_' + IntToStr(FJArgN);
+    FJArgN := FJArgN + 1;
+    if not FFrame.ContainsKey(JTmp) then
+      AddLocal(JTmp, AExpr.ResolvedType.RawSize());
+    EmitIntfDispatch(TMethodCallExpr(AExpr).ObjectName,
+      TInterfaceTypeDesc(TMethodCallExpr(AExpr).ResolvedClassType),
+      TInterfaceTypeDesc(TMethodCallExpr(AExpr).ResolvedClassType).MethodIndex(
+        TMethodCallExpr(AExpr).Name),
+      TMethodCallExpr(AExpr).Args, TMethodCallExpr(AExpr).ObjExpr,
+      TMethodCallExpr(AExpr).IsVarParam, nil, JTmp);
+    EmitSlotAddr('x0', JTmp);
+    DeferAggRelease(AExpr.ResolvedType);
+    Exit;
+  end;
   if IsInlineBytesAgg(AExpr.ResolvedType) and
      (((AExpr is TFuncCallExpr) and
        (TFuncCallExpr(AExpr).ResolvedDecl <> nil)) or
       ((AExpr is TMethodCallExpr) and
        (TMethodCallExpr(AExpr).ResolvedMethod <> nil) and
        not TMethodCallExpr(AExpr).IsConstructorCall and
-       not TMethodCallExpr(AExpr).IsProcFieldCall)) then
+       not TMethodCallExpr(AExpr).IsProcFieldCall) or
+      { inherited Pair(4, 5): EmitRecCallDispatch dispatches it statically;
+        without this arm it was a plain call with no x8 buffer }
+      ((AExpr is TInheritedCallExpr) and
+       (TInheritedCallExpr(AExpr).ResolvedMethod <> nil))) then
   begin
     { a jumbo-set-returning call: the callee fills a per-site frame scratch
       through x8, and -- like every jumbo set value -- the call evaluates to
@@ -8052,9 +8082,11 @@ begin
       Exit;
     end;
     if (MD.ResolvedReturnType <> nil) and
-       IsAggregateReturn(MD.ResolvedReturnType) then
+       NeedsResultBuffer(MD.ResolvedReturnType) and
+       (MD.ResolvedReturnType.Kind <> tyRecord) then
     begin
-      { an interface or closure result: inside the override it is
+      { an interface, closure, static-array or jumbo-set result: inside the
+        override it is
         `Result := inherited F(..)`, through the ordinary assignment and its
         ARC discipline; outside a function it is discarded and what the
         result owns (the obj half, the Env) is dropped }
@@ -8082,6 +8114,10 @@ begin
           if EmitIntfPairToX0X1(InhShim, MD.ResolvedReturnType) then
             EmitCallSym('_ClassRelease');
         end
+        else if IsInlineBytesAgg(MD.ResolvedReturnType) then
+          { the expression arm gives it a per-site x8 buffer and releases a
+            managed array's elements at the statement end }
+          Self.EmitExprToX0(InhShim)
         else
         begin
           if not EmitClosureResultToTemp(InhShim, Tmp) then
@@ -9818,7 +9854,7 @@ begin
   begin
     { bare method call on Self as a statement: Advance(); }
     if (TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType <> nil) and
-       IsAggregateReturn(TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType) then
+       NeedsResultBuffer(TMethodDecl(ACall.ResolvedDecl).ResolvedReturnType) then
     begin
       EmitLoadSlot('x0', 'Self');
       EmitDiscardedRecMethodCall(TMethodDecl(ACall.ResolvedDecl), ACall.Name,
@@ -13118,6 +13154,11 @@ begin
     EmitCallSym('_DynArrayRelease');
     EmitPopTo('x0');
   end;
+end;
+
+function TArm64Backend.NeedsResultBuffer(AType: TTypeDesc): Boolean;
+begin
+  Result := IsAggregateReturn(AType) or IsInlineBytesAgg(AType);
 end;
 
 function TArm64Backend.IsInlineBytesAgg(AType: TTypeDesc): Boolean;
@@ -17323,7 +17364,7 @@ begin
     references the callee handed over (a managed record's fields) must be
     dropped.  The free-function twin is in EmitProcCall.  An interface result
     takes the same x8 contract; its owned obj half is released. }
-  if not IsAggregateReturn(ART) then
+  if not NeedsResultBuffer(ART) then
     InternalError('discarded method call routed to the aggregate path ' +
       'without an aggregate result', ANode);
   Tmp := '__dret_' + IntToStr(FJArgN);
@@ -17350,6 +17391,17 @@ begin
       Self.Emit(#9'ldr x0, [x9, #8]');
       EmitCallSym('_ClassRelease');
     end;
+    Exit;
+  end;
+  if IsInlineBytesAgg(ART) then
+  begin
+    { a static array or jumbo set always comes back through x8; it is not
+      a record, so classifying it as one read a garbage shape (a discarded
+      Obj.Tri(1) crashed).  A managed array's elements are released at the
+      statement end. }
+    EmitPushX0();
+    EmitCall(AMethod, AName, AArgs, Tmp, True, AMethod.VTableSlot);
+    DeferAggRelease(ART);
     Exit;
   end;
   Shape := RecReturnShape(TRecordTypeDesc(ART));
@@ -17398,6 +17450,10 @@ begin
       if EmitIntfPairToX0X1(Shim, RT) then
         EmitCallSym('_ClassRelease');
     end
+    else if IsInlineBytesAgg(RT) then
+      { a static array / jumbo set: the expression arm gives the call its
+        x8 buffer and defers a managed array's element releases }
+      Self.EmitExprToX0(Shim)
     else if not EmitClosureResultToTemp(Shim, Tmp) then
       InternalError('discarded closure-returning call on this receiver',
         AStmt);
@@ -17573,7 +17629,7 @@ begin
       handed the record's first 8 bytes over as Self and crashed.
       EmitImplicitBaseStep makes exactly that choice. }
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
-       IsAggregateReturn(AStmt.ResolvedReturnTypeDesc) then
+       NeedsResultBuffer(AStmt.ResolvedReturnTypeDesc) then
     begin
       EmitLoadSlot('x0', 'Self');
       EmitImplicitBaseStep('x0', AStmt.ImplicitBaseInfo);
@@ -17607,7 +17663,7 @@ begin
       InternalError('interface dispatch on an implicit-Self receiver with ' +
         'no field (Self is a class value, not an interface)', AStmt);
     if (AStmt.ResolvedReturnTypeDesc <> nil) and
-       IsAggregateReturn(AStmt.ResolvedReturnTypeDesc) then
+       NeedsResultBuffer(AStmt.ResolvedReturnTypeDesc) then
     begin
       if AStmt.ResolvedReturnTypeDesc.Kind = tyRecord then
       begin
@@ -17657,6 +17713,23 @@ begin
           Self.Emit(#9'ldr x0, [x9, #8]');
           EmitCallSym('_ClassRelease');
         end;
+        Exit;
+      end;
+      if IsInlineBytesAgg(AStmt.ResolvedReturnTypeDesc) then
+      begin
+        { a discarded jumbo-set / static-array result: the callee still
+          writes through x8, so it needs a real buffer; a managed static
+          array's elements are released at the statement end }
+        Tmp := '__jret_' + IntToStr(FJArgN);
+        FJArgN := FJArgN + 1;
+        if not FFrame.ContainsKey(Tmp) then
+          AddLocal(Tmp, AStmt.ResolvedReturnTypeDesc.RawSize());
+        EmitIntfDispatch(AStmt.ObjectName,
+          TInterfaceTypeDesc(AStmt.ResolvedClassType),
+          TInterfaceTypeDesc(AStmt.ResolvedClassType).MethodIndex(AStmt.Name),
+          AStmt.Args, AStmt.ObjExpr, AStmt.IsVarParam, AStmt.ImplicitBaseInfo,
+          Tmp);
+        DeferAggRelease(AStmt.ResolvedReturnTypeDesc);
         Exit;
       end;
       { a discarded interface result still uses the x8 sret contract; the
@@ -17843,8 +17916,11 @@ begin
     EmitDiscardedPlainCall(MD, AStmt.Name, AStmt.Args);
     Exit;
   end;
+  { a static array or jumbo set result needs its x8 buffer too: without
+    one the callee wrote through whatever x8 held (a discarded K.Tri(3)
+    crashed) }
   IsAgg := (AStmt.ResolvedReturnTypeDesc <> nil) and
-    IsAggregateReturn(AStmt.ResolvedReturnTypeDesc);
+    NeedsResultBuffer(AStmt.ResolvedReturnTypeDesc);
   if IsAgg and (AStmt.ObjExpr <> nil) then
   begin
     EmitDiscardedRecStmtOnExpr(AStmt);

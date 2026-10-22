@@ -24,6 +24,13 @@ uses
 type
   TJumboSetTests = class(TTestCase)
   published
+    { a DISCARDED method call returning a static array still hands the
+      callee a result buffer: x8 on arm64, a frame scratch in %rdi on x86-64
+      (neither got one) }
+    procedure TestCodegen_DiscardedAggMethodCall_GetsBuffer;
+    { x86-64: a jumbo-set call result used as an operand lives in a frame
+      scratch slot, not a buffer left on the stack under a saved operand }
+    procedure TestCodegen_CallResultOperand_FrameScratch;
     procedure TestSmallSet_StillUsesRegister;
     { s := V through a var jumbo-set param: the bitmap is copied into the
       caller's storage the slot points at.  arm64 refused the parameter
@@ -100,6 +107,58 @@ begin
     AsmMissing(Src,
       #9'movq -32(%rbp), %rdi'#10#9'movq $32, %rdx'#10#9'callq memcpy',
       #9'ldur x0, [x29, #-8]'#10#9'movz x2, #32'#10#9'bl _memcpy'));
+end;
+
+procedure TJumboSetTests.TestCodegen_CallResultOperand_FrameScratch;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm('''
+    program P;
+    type
+      TBig = 0..199;
+      TJumbo = set of TBig;
+    function Mine(A, B: Integer): TJumbo; begin Result := [A, B] end;
+    begin
+      WriteLn(7 in Mine(7, 199))
+    end.
+    ''', TargetX86_64);
+  AssertTrue('the result is not addressed at the stack top',
+    Pos(#9'leaq (%rsp), %rax', AsmT) < 0);
+  AssertTrue('the result is addressed in the frame',
+    Pos(#9'leaq -', AsmT) >= 0);
+end;
+
+procedure TJumboSetTests.TestCodegen_DiscardedAggMethodCall_GetsBuffer;
+const
+  Src = '''
+    program P;
+    type
+      TTri = array[0..2] of Int64;
+      TBase = class
+        function Tri(N: Int64): TTri;
+      end;
+    function TBase.Tri(N: Int64): TTri; begin Result[0] := N end;
+    var K: TBase;
+    begin
+      K := TBase.Create();
+      K.Tri(3)
+    end.
+    ''';
+var
+  A64, X86: string;
+  CallPos: Integer;
+begin
+  A64 := GenAsm(Src, TargetArm64);
+  CallPos := Pos(#9'bl _TBase_Tri', A64);
+  AssertTrue('arm64 calls the method', CallPos >= 0);
+  AssertTrue('arm64 sets x8 before the call',
+    Pos(#9'sub x8, x29, #', Copy(A64, 0, CallPos)) >= 0);
+  X86 := GenAsm(Src, TargetX86_64);
+  CallPos := Pos(#9'callq TBase_Tri', X86);
+  AssertTrue('x86-64 calls the method', CallPos >= 0);
+  AssertTrue('x86-64 passes a frame buffer before the call',
+    Pos('(%rbp), %r', Copy(X86, 0, CallPos)) >= 0);
 end;
 
 initialization

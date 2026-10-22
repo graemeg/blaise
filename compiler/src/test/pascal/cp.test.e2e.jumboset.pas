@@ -25,6 +25,16 @@ type
   protected
     procedure SetUp; override;
   published
+    { a jumbo set or static array returned through every call form -- a
+      method on a variable, on Self and bare, inherited, an interface -- as a
+      value and discarded: the callee always gets a real result buffer
+      (several forms handed it none, on one ISA or the other, and it wrote
+      its result over the receiver object or through a stale x8) }
+    procedure TestRun_AggregateResults_EveryCallForm;
+    { a jumbo-set call result as an operand -- of 'in', of '=', twice in
+      one expression: x86-64 left the result buffer on the stack, so an
+      operand saved before the call was popped from inside the buffer }
+    procedure TestRun_CallResultOperands;
     procedure TestRun_GlobalJumboSet_HoldsItsOwnBitmap;
     procedure TestRun_IncludeMembership_AcrossBoundary;
     procedure TestRun_SetOps_UnionInterDiff;
@@ -512,6 +522,107 @@ begin
       if 10  in H.FDyn[0] then WriteLn('e')   else WriteLn('.')
     end.
     ''', 'i' + LE + 'x' + LE + 'k' + LE + 'c' + LE + 'd' + LE + 'e' + LE, 0);
+end;
+
+procedure TE2EJumboSetTests.TestRun_CallResultOperands;
+const
+  Src = '''
+    program JO;
+    type
+      TBig = 0..199;
+      TJumbo = set of TBig;
+      THold = class
+        function Pair(A, B: Integer): TJumbo;
+      end;
+    function Mine(A, B: Integer): TJumbo; begin Result := [A, B] end;
+    function THold.Pair(A, B: Integer): TJumbo; begin Result := [A, B] end;
+    var H: THold; X: TJumbo; I: Integer;
+    begin
+      H := THold.Create();
+      I := 150;
+      WriteLn(7 in Mine(7, 199), ' ', I in Mine(7, 150), ' ', 8 in Mine(7, 199));
+      X := Mine(1, 2) + [100];
+      WriteLn(1 in X, ' ', 100 in X, ' ', 3 in X);
+      WriteLn(Mine(1, 2) = Mine(2, 1), ' ', Mine(1, 2) = Mine(1, 3));
+      WriteLn(9 in H.Pair(9, 10), ' ', I in H.Pair(9, 150), ' ', 11 in H.Pair(9, 10))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'True True False' + LineEnding +
+    'True True False' + LineEnding + 'True False' + LineEnding +
+    'True True False' + LineEnding, 0);
+end;
+
+procedure TE2EJumboSetTests.TestRun_AggregateResults_EveryCallForm;
+const
+  Src = '''
+    program AggForms;
+    type
+      TBig = 0..199;
+      TJumbo = set of TBig;
+      TTri = array[0..2] of string;
+      ISets = interface
+        function Pair(A, B: Integer): TJumbo;
+        function Tri(const S: string): TTri;
+      end;
+      TBase = class(TObject, ISets)
+      public
+        Tag: Integer;
+        function Pair(A, B: Integer): TJumbo; virtual;
+        function Tri(const S: string): TTri; virtual;
+      end;
+      TKid = class(TBase)
+      public
+        function Pair(A, B: Integer): TJumbo; override;
+        procedure Go();
+      end;
+    var Calls: Integer;
+    function TBase.Pair(A, B: Integer): TJumbo; begin Inc(Calls); Result := [A, B] end;
+    function TBase.Tri(const S: string): TTri;
+    begin
+      Inc(Calls); Result[0] := S; Result[1] := S + S; Result[2] := '!'
+    end;
+    function TKid.Pair(A, B: Integer): TJumbo; begin Inc(Calls); Result := [A] end;
+    procedure TKid.Go();
+    var X: TJumbo;
+    begin
+      inherited Pair(1, 2);
+      Pair(3, 4);
+      Self.Pair(5, 6);
+      Tri('a');
+      Self.Tri('b');
+      X := inherited Pair(7, 8);
+      WriteLn('inherited ', 8 in X, ' ', 8 in inherited Pair(7, 8), ' ', 8 in Pair(7, 8))
+    end;
+    procedure Run();
+    var K: TKid; S: ISets; T: TTri;
+    begin
+      K := TKid.Create();
+      K.Tag := 42;
+      S := K;
+      K.Pair(1, 2);
+      K.Tri('c');
+      S.Pair(1, 2);
+      S.Tri('d');
+      K.Go();
+      WriteLn('iface ', 120 in S.Pair(1, 120), ' ', 2 in S.Pair(1, 120));
+      T := S.Tri('ab');
+      WriteLn(T[0], ' ', T[1], ' ', T[2], ' ', S.Tri('z')[1]);
+      WriteLn('tag ', K.Tag, ' calls ', Calls)
+    end;
+    begin
+      Run()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'inherited True True False' + LineEnding +
+    'iface False False' + LineEnding +
+    'ab abab ! zz' + LineEnding +
+    'tag 42 calls 16' + LineEnding, 0);
+  AssertLeakFreeOnAll(Src, '');
 end;
 
 initialization
