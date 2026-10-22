@@ -2874,6 +2874,10 @@ begin
       Sym.IsThreadVar := VDecl.IsThreadVar;
       DefineGlobalLastWins(Sym, VDecl.Line, VDecl.Col);
     end;
+    { fold and check the initialiser, as AnalyseUnit does: without this an
+      expression or named-constant initialiser kept the parser's 0 }
+    if VDecl.InitConst <> nil then
+      Self.AnalyseVarInitializer(VDecl, True);
   end;
 
   { Register interface forward declarations for standalone procs/funcs.
@@ -3002,6 +3006,8 @@ begin
           SemanticError(Format('Duplicate identifier ''%s''', [VDecl.Names.Strings[J]]), VDecl.Line, VDecl.Col);
         end;
       end;
+      if VDecl.InitConst <> nil then
+        Self.AnalyseVarInitializer(VDecl);
     end;
 
     { Register impl decls, skipping class method impls (already linked above) }

@@ -112,6 +112,10 @@ type
       unit it uses: each side's itabs, as-casts and Supports bind to its own
       types (x86-64 failed to link: typeinfo_<Prog>_IGr undefined) }
     procedure TestProgramNamesakeOfUnitIntf_LinksAndRuns;
+    { a unit's initialised variables -- expressions, named constants, a
+      float expression, in the interface and the implementation -- start
+      with their values (each was 0 unless written as a bare literal) }
+    procedure TestUnitVarInitialiserExpressions_HaveTheirValues;
     procedure TestObjectBesideProgram_UsableWithoutSource;
     { Regression (BUG-20260906-openarray-param-bif-roundtrip): a routine taking
       an OPEN ARRAY parameter (`array of T`) became uncallable once its unit
@@ -1252,6 +1256,58 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('namekp exit code', 0, Rc);
   AssertEquals('namekp stdout', '7 3 3 True 0'#10, Captured);
+end;
+
+procedure TSepCompileTests.TestUnitVarInitialiserExpressions_HaveTheirValues;
+const
+  UnitSrc =
+    '''
+    unit InitVU;
+    interface
+    const
+      K = 40;
+    var
+      A: Integer = 2 + 3;
+      B: Integer = K;
+      C: Integer = K * 2 + 1;
+      D: Double = 1.5 * 2;
+      E: Integer = 7;
+    function Hidden(): Integer;
+    implementation
+    var
+      F: Integer = 1 shl 4;
+    function Hidden(): Integer; begin Result := F end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program InitVP;
+    uses InitVU;
+    begin
+      WriteLn(A, ' ', B, ' ', C, ' ', D:0:1, ' ', E, ' ', Hidden())
+    end.
+    ''';
+var
+  Dir, ProgPas, ProgBin: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  Dir := FScratch + '/unit_var_init';
+  ForceDirectories(Dir);
+  ProgPas := Dir + '/initvp.pas';
+  ProgBin := Dir + '/initvp';
+  WriteFile(Dir + '/initvu.pas', UnitSrc);
+  WriteFile(ProgPas, ProgSrc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin], Captured);
+  AssertEquals('blaise exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('initvp exit code', 0, Rc);
+  AssertEquals('initvp stdout', '5 40 81 3.0 7 16'#10, Captured);
 end;
 
 procedure TSepCompileTests.TestUnitBesideProgram_FoundWithoutUnitPath;

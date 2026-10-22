@@ -44,6 +44,10 @@ type
       up in the flat table and emitted itab/typeinfo references to the
       program's type (typeinfo_KP_IGr), which no object defined }
     procedure TestCodegen_UnitIntfTables_IgnoreProgramNamesake;
+    { AnalyseUnitForExport -- the path of a unit compiled with the program
+      that uses it -- folds variable initialisers: it never analysed them,
+      so 'A: Integer = 2 + 3' or '= K' kept the parser's 0 }
+    procedure TestSemantic_ExportPathFoldsVarInitialisers;
     procedure TestParse_Unit_Name;
     procedure TestParse_Unit_IntfHasForwardDecls;
     procedure TestParse_Unit_ForwardDeclHasNilBody;
@@ -703,6 +707,53 @@ begin
     Pos('itab_KU_TCls_KU_IGr:', AsmT) >= 0);
   AssertTrue('nothing names the program''s interface with a unit prefix',
     Pos('KP_IGr', AsmT) < 0);
+end;
+
+procedure TUnitTests.TestSemantic_ExportPathFoldsVarInitialisers;
+var
+  U: TUnit;
+  A: TSemanticAnalyser;
+
+  function InitOf(ABlock: TBlock; const AName: string): TConstDecl;
+  var
+    I: Integer;
+  begin
+    Result := nil;
+    for I := 0 to ABlock.Decls.Count - 1 do
+      if TVarDecl(ABlock.Decls.Items[I]).Names.IndexOf(AName) >= 0 then
+        Exit(TVarDecl(ABlock.Decls.Items[I]).InitConst);
+  end;
+
+begin
+  U := ParseUnit('''
+    unit ua;
+    interface
+    const
+      K = 40;
+    var
+      VA: Integer = 2 + 3;
+      VB: Integer = K;
+      VC: Integer = K * 2 + 1;
+    implementation
+    var
+      VD: Integer = 1 shl 4;
+    end.
+    ''');
+  try
+    A := TSemanticAnalyser.Create();
+    try
+      A.AnalyseUnitForExport(U);
+      AssertEquals('interface 2 + 3', 5, InitOf(U.IntfBlock, 'VA').IntVal);
+      AssertEquals('interface K', 40, InitOf(U.IntfBlock, 'VB').IntVal);
+      AssertEquals('interface K * 2 + 1', 81, InitOf(U.IntfBlock, 'VC').IntVal);
+      AssertEquals('implementation 1 shl 4', 16,
+        InitOf(U.ImplBlock, 'VD').IntVal);
+    finally
+      A.Free();
+    end;
+  finally
+    U.Free();
+  end;
 end;
 
 initialization
