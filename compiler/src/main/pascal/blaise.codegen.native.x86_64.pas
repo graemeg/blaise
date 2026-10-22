@@ -928,6 +928,12 @@ type
     function  CallAliasesDestVar(AExpr: TASTExpr;
                                  const AName: string;
                                  AIsGlobal: Boolean): Boolean;
+    { Float comparison of the left operand in %xmm1 with the right in %xmm0:
+      the ucomis with the operand order the operator needs (swapped for < and
+      <=), and its IEEE-correct 0/1 result in %al -- false whenever a NaN is
+      involved, except for <> }
+    procedure EmitFloatUcomis(AOp: TBinaryOp; AIsSingle: Boolean);
+    procedure EmitFloatCompareToAl(AOp: TBinaryOp; AIsSingle: Boolean);
     { Sret a record-returning call (function or method) into ADest. }
     procedure EmitRecordCallSretAt(AExpr: TASTExpr; const ADest: string;
       AIndirect: Boolean = False);
@@ -7662,6 +7668,53 @@ begin
     'EmitIntfValueOnStack does not lower (' + AExpr.ClassName + ')');
 end;
 
+procedure TX86_64Backend.EmitFloatUcomis(AOp: TBinaryOp; AIsSingle: Boolean);
+var
+  Insn: string;
+begin
+  if AIsSingle then
+    Insn := 'ucomiss'
+  else
+    Insn := 'ucomisd';
+  { ucomis A, B sets the flags for B compared with A.  The natural order
+    (left in %xmm1 vs right in %xmm0) serves =, <>, > and >=; < and <= are
+    asked as right > left / right >= left, so the unordered case -- CF set
+    -- reads false through above / above-or-equal. }
+  if AOp in [boLT, boLE] then
+    Self.Emit(#9 + Insn + ' %xmm1, %xmm0')
+  else
+    Self.Emit(#9 + Insn + ' %xmm0, %xmm1');
+end;
+
+procedure TX86_64Backend.EmitFloatCompareToAl(AOp: TBinaryOp;
+  AIsSingle: Boolean);
+begin
+  { x86-64 float comparisons with a NaN operand: unordered sets ZF, PF and
+    CF at once, so sete / setb / setbe answered TRUE for NaN = X, NaN < X
+    and NaN <= X (and setne answered false for NaN <> NaN).  IEEE 754 makes
+    every ordered comparison with a NaN false and <> true. }
+  Self.EmitFloatUcomis(AOp, AIsSingle);
+  case AOp of
+    boEQ:
+      begin
+        Self.Emit(#9'sete %al');
+        Self.Emit(#9'setnp %cl');
+        Self.Emit(#9'andl %ecx, %eax');  { low byte: %al and %cl }
+      end;
+    boNE:
+      begin
+        Self.Emit(#9'setne %al');
+        Self.Emit(#9'setp %cl');
+        Self.Emit(#9'orl %ecx, %eax');   { low byte: %al or %cl }
+      end;
+    boLT, boGT: Self.Emit(#9'seta %al');
+    boLE, boGE: Self.Emit(#9'setae %al');
+  else
+    raise ENativeCodeGenError.Create(
+      'native backend: unsupported float comparison operator');
+  end;
+end;
+
 procedure TX86_64Backend.EmitRecordCallIntoFieldViaTemp(AExpr: TASTExpr;
   ARec: TRecordTypeDesc);
 var
@@ -8413,15 +8466,7 @@ begin
         boSlash: Self.Emit(#9'divss %xmm0, %xmm1');
         boEQ, boNE, boLT, boGT, boLE, boGE:
           begin
-            Self.Emit(#9'ucomiss %xmm0, %xmm1');  { %xmm1 - %xmm0 }
-            case BE.Op of
-              boEQ: Self.Emit(#9'sete %al');
-              boNE: Self.Emit(#9'setne %al');
-              boLT: Self.Emit(#9'setb %al');   { below (CF set) }
-              boGT: Self.Emit(#9'seta %al');   { above }
-              boLE: Self.Emit(#9'setbe %al');
-              boGE: Self.Emit(#9'setae %al');
-            end;
+            Self.EmitFloatCompareToAl(BE.Op, True);
             Self.Emit(#9'movzbl %al, %eax');
             Self.Emit(#9'movq %rax, %xmm0');  { comparison result as int in %rax then convert? }
             { Actually we need int result for condition tests — put result in %rax,
@@ -8451,15 +8496,7 @@ begin
         boSlash: Self.Emit(#9'divsd %xmm0, %xmm1');
         boEQ, boNE, boLT, boGT, boLE, boGE:
           begin
-            Self.Emit(#9'ucomisd %xmm0, %xmm1');
-            case BE.Op of
-              boEQ: Self.Emit(#9'sete %al');
-              boNE: Self.Emit(#9'setne %al');
-              boLT: Self.Emit(#9'setb %al');
-              boGT: Self.Emit(#9'seta %al');
-              boLE: Self.Emit(#9'setbe %al');
-              boGE: Self.Emit(#9'setae %al');
-            end;
+            Self.EmitFloatCompareToAl(BE.Op, False);
             Self.Emit(#9'movzbl %al, %eax');
             { Float comparisons result in integer 0/1 — return via %rax, not %xmm0. }
             Exit;
@@ -10613,25 +10650,11 @@ begin
       Self.EmitExprToXmm0(BE.Right);
       Self.EmitXmm0WidthAdjust(BE.Right.ResolvedType, IsS);
       if IsS then
-      begin
-        Self.Emit(#9'movss (%rsp), %xmm1');
-        Self.Emit(#9'addq $8, %rsp');
-        Self.Emit(#9'ucomiss %xmm0, %xmm1');
-      end
+        Self.Emit(#9'movss (%rsp), %xmm1')
       else
-      begin
         Self.Emit(#9'movsd (%rsp), %xmm1');
-        Self.Emit(#9'addq $8, %rsp');
-        Self.Emit(#9'ucomisd %xmm0, %xmm1');
-      end;
-      case BE.Op of
-        boEQ: Self.Emit(#9'sete %al');
-        boNE: Self.Emit(#9'setne %al');
-        boLT: Self.Emit(#9'setb %al');   { below (CF set) }
-        boGT: Self.Emit(#9'seta %al');   { above }
-        boLE: Self.Emit(#9'setbe %al');
-        boGE: Self.Emit(#9'setae %al');
-      end;
+      Self.Emit(#9'addq $8, %rsp');
+      Self.EmitFloatCompareToAl(BE.Op, IsS);
       Self.Emit(#9'movzbl %al, %eax');
       Exit;
     end;
@@ -15296,29 +15319,31 @@ begin
       Self.EmitExprToXmm0(BE.Right);
       Self.EmitXmm0WidthAdjust(BE.Right.ResolvedType, IsS);
       if IsS then
-      begin
-        Self.Emit(#9'movss (%rsp), %xmm1');
-        Self.Emit(#9'addq $8, %rsp');
-        Self.Emit(#9'ucomiss %xmm0, %xmm1');
-      end
+        Self.Emit(#9'movss (%rsp), %xmm1')
       else
-      begin
         Self.Emit(#9'movsd (%rsp), %xmm1');
-        Self.Emit(#9'addq $8, %rsp');
-        Self.Emit(#9'ucomisd %xmm0, %xmm1');
-      end;
-      { ucomisd %xmm0, %xmm1 computes xmm1 - xmm0 conceptually for flags.
-        CF=1 means xmm1 < xmm0.  ZF=1 means equal. }
-      case BE.Op of
-        boEQ: begin Self.Emit(#9'je '  + ATrueLabel); end;
-        boNE: begin Self.Emit(#9'jne ' + ATrueLabel); end;
-        boLT: begin Self.Emit(#9'jb '  + ATrueLabel); end;  { below: CF }
-        boGT: begin Self.Emit(#9'ja '  + ATrueLabel); end;  { above: ~CF & ~ZF }
-        boLE: begin Self.Emit(#9'jbe ' + ATrueLabel); end;
-        boGE: begin Self.Emit(#9'jae ' + ATrueLabel); end;
-      else
+      Self.Emit(#9'addq $8, %rsp');
+      { left in %xmm1, right in %xmm0.  An unordered compare (a NaN operand)
+        sets ZF, PF and CF together, so every test must leave it false
+        except <>: = also requires PF clear, and < / <= compare the swapped
+        operands with ja / jae, which are false when CF is set. }
+      if not (BE.Op in [boEQ, boNE, boLT, boGT, boLE, boGE]) then
         raise ENativeCodeGenError.Create(
           'native backend: unsupported float comparison operator');
+      Self.EmitFloatUcomis(BE.Op, IsS);
+      case BE.Op of
+        boEQ:
+          begin
+            Self.Emit(#9'jp ' + AFalseLabel);
+            Self.Emit(#9'je ' + ATrueLabel);
+          end;
+        boNE:
+          begin
+            Self.Emit(#9'jp ' + ATrueLabel);
+            Self.Emit(#9'jne ' + ATrueLabel);
+          end;
+        boLT, boGT: Self.Emit(#9'ja ' + ATrueLabel);
+        boLE, boGE: Self.Emit(#9'jae ' + ATrueLabel);
       end;
       Self.Emit(#9'jmp ' + AFalseLabel);
       Exit;

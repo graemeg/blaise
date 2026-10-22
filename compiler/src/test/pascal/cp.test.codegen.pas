@@ -13,7 +13,7 @@ interface
 uses
   blaise.testing,
   uLexer, uParser, uAST, uSemantic,
-  blaise.codegen.native, blaise.codegen.target;
+  blaise.codegen.native, blaise.codegen.target, cp.test.harness;
 
 type
   TCodeGenTests = class(TTestCase)
@@ -25,6 +25,12 @@ type
 
     { Main function structure }
     procedure TestMain_Native_CallsBlaiseInit;
+
+    { x86-64 float comparisons are IEEE-correct with a NaN operand: = also
+      requires parity clear, <> also accepts parity set, and < / <= compare
+      the swapped operands with above / above-or-equal -- in a value and in
+      a branch condition }
+    procedure TestFloatCompare_X86_NaNSafe;
 
     { WriteLn }
 
@@ -124,6 +130,42 @@ begin
 end;
 
 { Header comment }
+
+procedure TCodeGenTests.TestFloatCompare_X86_NaNSafe;
+const
+  SrcValue = '''
+    program P;
+    var A, B: Double; E, N, L, LE: Boolean;
+    begin
+      E := A = B; N := A <> B; L := A < B; LE := A <= B
+    end.
+    ''';
+  SrcBranch = '''
+    program P;
+    var A, B: Double;
+    begin
+      if A = B then WriteLn(1);
+      if A <> B then WriteLn(2);
+      if A < B then WriteLn(3)
+    end.
+    ''';
+var
+  V, Br: string;
+begin
+  V := GenAsm(SrcValue, TargetX86_64);
+  AssertTrue('= is ZF and not PF', Pos(#9'sete %al' + #10 + #9'setnp %cl' +
+    #10 + #9'andl %ecx, %eax', V) >= 0);
+  AssertTrue('<> is not ZF or PF', Pos(#9'setne %al' + #10 + #9'setp %cl' +
+    #10 + #9'orl %ecx, %eax', V) >= 0);
+  AssertTrue('< and <= compare the swapped operands',
+    Pos(#9'ucomisd %xmm1, %xmm0' + #10 + #9'seta %al', V) >= 0);
+  AssertTrue('no setb / setbe: they are true when unordered',
+    (Pos(#9'setb %al', V) < 0) and (Pos(#9'setbe %al', V) < 0));
+  Br := GenAsm(SrcBranch, TargetX86_64);
+  AssertTrue('= branches false on parity first', Pos(#9'jp .L', Br) >= 0);
+  AssertTrue('no jb / jbe on a float compare',
+    (Pos(#9'jb .L', Br) < 0) and (Pos(#9'jbe .L', Br) < 0));
+end;
 
 initialization
   RegisterTest(TCodeGenTests);

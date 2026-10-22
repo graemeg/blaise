@@ -37,6 +37,11 @@ type
       expression, which failed in the backend; ordinal casts of ordinals
       still work }
     procedure TestRun_FloatToOrdinal_OnlyTruncAndRound;
+    { IEEE 754 comparisons: every ordered comparison with a NaN is false
+      and <> is true, as a value and as a branch, for Double and Single;
+      ordinary values still compare normally (x86-64 answered TRUE for
+      NaN = X, NaN < X and NaN <= X, and FALSE for NaN <> NaN) }
+    procedure TestRun_FloatCompare_NaNAndOrdered;
     { --- Compiler builtins --- }
 
     { Sqrt }
@@ -2065,6 +2070,48 @@ begin
     CompileNativeCLI(SrcXor, False, '', BinFile, ToolOut) <> 0);
   AssertTrue('names the operator: ' + ToolOut,
     Pos('''xor'' requires integer or Boolean operands', ToolOut) >= 0);
+end;
+
+procedure TE2EMathTests.TestRun_FloatCompare_NaNAndOrdered;
+const
+  Src = '''
+    program P;
+    var Z, NaN, A, B: Double; S, T: Single;
+
+    procedure Row(const ATag: string; X, Y: Double);
+    begin
+      Write(ATag, ' ', X = Y, X <> Y, X < Y, X <= Y, X > Y, X >= Y, ' ');
+      if X = Y then Write('E') else Write('e');
+      if X <> Y then Write('N') else Write('n');
+      if X < Y then Write('L') else Write('l');
+      if X <= Y then Write('M') else Write('m');
+      if X > Y then Write('G') else Write('g');
+      if X >= Y then Write('H') else Write('h');
+      WriteLn()
+    end;
+
+    begin
+      Z := 0.0; NaN := Z / Z; A := 1.0; B := 2.0;
+      Row('nan-a', NaN, A);
+      Row('a-nan', A, NaN);
+      Row('nan-nan', NaN, NaN);
+      Row('a-b', A, B);
+      Row('b-a', B, A);
+      Row('a-a', A, A);
+      S := NaN; T := 1.5;
+      WriteLn('single ', S = S, S <> S, S < T, S <= T, T = T, T < 2.0)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'nan-a FalseTrueFalseFalseFalseFalse eNlmgh' + LE +
+    'a-nan FalseTrueFalseFalseFalseFalse eNlmgh' + LE +
+    'nan-nan FalseTrueFalseFalseFalseFalse eNlmgh' + LE +
+    'a-b FalseTrueTrueTrueFalseFalse eNLMgh' + LE +
+    'b-a FalseTrueFalseFalseTrueTrue eNlmGH' + LE +
+    'a-a TrueFalseFalseTrueFalseTrue EnlMgH' + LE +
+    'single FalseTrueFalseFalseTrueTrue' + LE, 0);
 end;
 
 initialization
