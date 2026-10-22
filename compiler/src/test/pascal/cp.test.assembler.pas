@@ -58,6 +58,10 @@ type
     procedure TestJmpIndirectMem_FFSlash4;
     procedure TestEndbr64AndHlt;
     procedure TestSyscall_0F05;
+    { GH #218: rdrand / rdseed (operand size from the register), rdtsc,
+      rdtscp, and the carry-flag spellings setc / setnc / jc / jnc --
+      byte for byte what GNU as emits }
+    procedure TestRdrandRdtsc_AndCarryAliases;
     procedure TestCallPltStripsSuffix;
     procedure TestSse2_PxorAndPabsb;
     procedure TestVex_Vpxor2byte;
@@ -145,6 +149,8 @@ type
       assembled verbatim by the internal assembler and called from Pascal. }
     procedure TestInlineAsm_ReturnsValue;
     procedure TestInlineAsm_AddsTwoArgs;
+    { GH #218: rdtsc / rdrand / setc in an asm body assemble and run }
+    procedure TestInlineAsm_RdtscRdrand;
     { --debug-opdf appends the OPDF section to the SAME assembly text the
       internal assembler consumes.  A string constant whose value contains a
       double-quote or newline used to break the recConstant `.ascii "<val>"`
@@ -300,6 +306,34 @@ begin
   { syscall -> 0f 05 (needed for the FreeBSD direct-syscall stubs). }
   Obj := AssembleToBytes('syscall' + LineEnding);
   AssertTrue('0f 05 missing', ContainsBytes(Obj, Chr($0F) + Chr($05)));
+end;
+
+procedure TAsmEncodingTests.TestRdrandRdtsc_AndCarryAliases;
+
+  procedure Has(const AAsm: string; const ABytes: array of Integer);
+  var
+    Obj, Want: string;
+    I: Integer;
+  begin
+    Obj := AssembleToBytes(AAsm + LineEnding);
+    Want := '';
+    for I := 0 to High(ABytes) do
+      Want := Want + Chr(ABytes[I]);
+    AssertTrue(AAsm + ': bytes missing', ContainsBytes(Obj, Want));
+  end;
+
+begin
+  Has('rdrand %rax', [$48, $0F, $C7, $F0]);
+  Has('rdrand %eax', [$0F, $C7, $F0]);
+  Has('rdrand %r9', [$49, $0F, $C7, $F1]);
+  Has('rdrand %ax', [$66, $0F, $C7, $F0]);
+  Has('rdseed %rcx', [$48, $0F, $C7, $F9]);
+  Has('rdtsc', [$0F, $31]);
+  Has('rdtscp', [$0F, $01, $F9]);
+  Has('setc %cl', [$0F, $92, $C1]);
+  Has('setnc %dl', [$0F, $93, $C2]);
+  Has('jc .L1' + LineEnding + '.L1:', [$0F, $82, 0, 0, 0, 0]);
+  Has('jnc .L1' + LineEnding + '.L1:', [$0F, $83, 0, 0, 0, 0]);
 end;
 
 procedure TAsmEncodingTests.TestCallPltStripsSuffix;
@@ -1529,6 +1563,48 @@ begin
   end;
   AssertEquals(0, EC);
   AssertEquals('2' + LineEnding + 'alpha' + LineEnding + 'beta' + LineEnding, Out_);
+end;
+
+procedure TInternalAsmE2ETests.TestInlineAsm_RdtscRdrand;
+var
+  Out_: string;
+  EC: Integer;
+begin
+  if HostTarget().CPU <> cpuX86_64 then
+  begin
+    Ignore('x86-64 inline asm needs an x86-64 host');
+    Exit;
+  end;
+  { the time-stamp counter only moves forward, and rdrand runs (its value
+    and carry are hardware facts, so only the shape is checked) }
+  if not CompileAndRun(
+    'program test_rdtsc;' + LineEnding +
+    'function Tsc: UInt64; assembler; nostackframe;' + LineEnding +
+    'asm' + LineEnding +
+    '    rdtsc' + LineEnding +
+    '    shlq $32, %rdx' + LineEnding +
+    '    orq %rdx, %rax' + LineEnding +
+    '    ret' + LineEnding +
+    'end;' + LineEnding +
+    'function HwRand: UInt64; assembler; nostackframe;' + LineEnding +
+    'asm' + LineEnding +
+    '    rdrand %rax' + LineEnding +
+    '    setc %cl' + LineEnding +
+    '    ret' + LineEnding +
+    'end;' + LineEnding +
+    'var A, B: UInt64;' + LineEnding +
+    'begin' + LineEnding +
+    '  A := Tsc(); B := Tsc();' + LineEnding +
+    '  HwRand();' + LineEnding +
+    '  WriteLn(B >= A, '' '', A > 0)' + LineEnding +
+    'end.',
+    Out_, EC) then
+  begin
+    Ignore('<toolchain-missing>');
+    Exit;
+  end;
+  AssertEquals(0, EC);
+  AssertEquals('True True' + LineEnding, Out_);
 end;
 
 procedure TInternalAsmE2ETests.TestInlineAsm_ReturnsValue;

@@ -1087,31 +1087,35 @@ function EncodeMovqXmm(var ACB: TCodeBuf; var ACtx: TEncodeContext;
 function EncodeVEX(var ACB: TCodeBuf; var ACtx: TEncodeContext;
   const AMnem: string; const AOp1, AOp2, AOp3: TOperand): string; forward;
 
-{ Returns True if the mnemonic is a conditional or unconditional branch }
-function IsBranch(const AMnem: string): Boolean;
-begin
-  Result := (AMnem = 'jmp') or (AMnem = 'je') or (AMnem = 'jne')
-         or (AMnem = 'jl') or (AMnem = 'jg') or (AMnem = 'jle')
-         or (AMnem = 'jge') or (AMnem = 'ja') or (AMnem = 'jae')
-         or (AMnem = 'jb') or (AMnem = 'jbe') or (AMnem = 'jnz')
-         or (AMnem = 'jz');
-end;
-
 function BranchCondCode(const AMnem: string): Integer;
 begin
   if AMnem = 'jo'  then Result := $0
   else if AMnem = 'jno' then Result := $1
-  else if (AMnem = 'jb') or (AMnem = 'jnae') then Result := $2
-  else if (AMnem = 'jae') or (AMnem = 'jnb') then Result := $3
+  else if (AMnem = 'jb') or (AMnem = 'jnae') or (AMnem = 'jc') then
+    Result := $2
+  else if (AMnem = 'jae') or (AMnem = 'jnb') or (AMnem = 'jnc') then
+    Result := $3
   else if (AMnem = 'je') or (AMnem = 'jz') then Result := $4
   else if (AMnem = 'jne') or (AMnem = 'jnz') then Result := $5
-  else if AMnem = 'jbe' then Result := $6
-  else if AMnem = 'ja'  then Result := $7
-  else if AMnem = 'jl'  then Result := $C
-  else if AMnem = 'jge' then Result := $D
-  else if AMnem = 'jle' then Result := $E
-  else if AMnem = 'jg'  then Result := $F
+  else if (AMnem = 'jbe') or (AMnem = 'jna') then Result := $6
+  else if (AMnem = 'ja') or (AMnem = 'jnbe') then Result := $7
+  else if AMnem = 'js'  then Result := $8
+  else if AMnem = 'jns' then Result := $9
+  else if (AMnem = 'jp') or (AMnem = 'jpe') then Result := $A
+  else if (AMnem = 'jnp') or (AMnem = 'jpo') then Result := $B
+  else if (AMnem = 'jl') or (AMnem = 'jnge') then Result := $C
+  else if (AMnem = 'jge') or (AMnem = 'jnl') then Result := $D
+  else if (AMnem = 'jle') or (AMnem = 'jng') then Result := $E
+  else if (AMnem = 'jg') or (AMnem = 'jnle') then Result := $F
   else Result := -1;
+end;
+
+{ Returns True if the mnemonic is a conditional or unconditional branch:
+  jmp, or any condition BranchCondCode encodes (it named jo / jno / jnae /
+  jnb that this list used to leave out, so they never assembled) }
+function IsBranch(const AMnem: string): Boolean;
+begin
+  Result := (AMnem = 'jmp') or (BranchCondCode(AMnem) >= 0);
 end;
 
 function SetCCOpcode(const AMnem: string): Integer;
@@ -1123,9 +1127,19 @@ begin
   else if AMnem = 'setle' then Result := $9E
   else if AMnem = 'setg'  then Result := $9F
   else if AMnem = 'seta'  then Result := $97
-  else if AMnem = 'setae' then Result := $93
-  else if AMnem = 'setb'  then Result := $92
+  else if (AMnem = 'setae') or (AMnem = 'setnc') or (AMnem = 'setnb') then
+    Result := $93
+  else if (AMnem = 'setb') or (AMnem = 'setc') or (AMnem = 'setnae') then
+    Result := $92
   else if AMnem = 'setbe' then Result := $96
+  else if AMnem = 'setz'  then Result := $94
+  else if AMnem = 'setnz' then Result := $95
+  else if AMnem = 'seto'  then Result := $90
+  else if AMnem = 'setno' then Result := $91
+  else if AMnem = 'sets'  then Result := $98
+  else if AMnem = 'setns' then Result := $99
+  else if (AMnem = 'setp') or (AMnem = 'setpe') then Result := $9A
+  else if (AMnem = 'setnp') or (AMnem = 'setpo') then Result := $9B
   else Result := -1;
 end;
 
@@ -1458,6 +1472,43 @@ begin
   if Mnem = 'cpuid' then
   begin
     CBEmit(CB, $0F); CBEmit(CB, $A2);
+    Result := CB.Data;
+    Exit;
+  end;
+
+  { ---- rdtsc ---- 0F 31; rdtscp ---- 0F 01 F9 (GH #218) }
+  if Mnem = 'rdtsc' then
+  begin
+    CBEmit(CB, $0F); CBEmit(CB, $31);
+    Result := CB.Data;
+    Exit;
+  end;
+  if Mnem = 'rdtscp' then
+  begin
+    CBEmit(CB, $0F); CBEmit(CB, $01); CBEmit(CB, $F9);
+    Result := CB.Data;
+    Exit;
+  end;
+
+  { ---- rdrand / rdseed %reg ---- 0F C7 /6 and /7 (GH #218).  The operand
+    size follows the register, as GAS does: %ax 16-bit (66 prefix), %eax
+    32-bit, %rax 64-bit (REX.W).  The suffixed spellings are accepted too. }
+  if (Mnem = 'rdrand') or (Mnem = 'rdrandw') or (Mnem = 'rdrandl') or
+     (Mnem = 'rdrandq') or (Mnem = 'rdseed') or (Mnem = 'rdseedw') or
+     (Mnem = 'rdseedl') or (Mnem = 'rdseedq') then
+  begin
+    if (Op1.Kind <> opReg) or Op1.IsXmm or
+       not ((Op1.RegW = 16) or (Op1.RegW = 32) or (Op1.RegW = 64)) then
+      raise EAssembler.Create(Mnem + ': expects a 16-, 32- or 64-bit ' +
+        'general register');
+    if Op1.RegW = 16 then
+      CBEmit(CB, $66);
+    EmitRexIfNeeded(CB, Op1.RegW = 64, 0, Op1.Reg, False);
+    CBEmit(CB, $0F); CBEmit(CB, $C7);
+    if Copy(Mnem, 0, 6) = 'rdrand' then
+      CBEmit(CB, MakeModRM(3, 6, Op1.Reg))
+    else
+      CBEmit(CB, MakeModRM(3, 7, Op1.Reg));
     Result := CB.Data;
     Exit;
   end;
