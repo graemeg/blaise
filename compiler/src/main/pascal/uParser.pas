@@ -3850,6 +3850,11 @@ begin
     FldAssign.FieldName := Fld.FieldName;
     FldAssign.ObjExpr := Fld.Base;
     Fld.Base := nil;
+    { ...Field[I] := V: the postfix chain folds a subscript straight after a
+      field name into the field node, so carry the index over -- dropping
+      it assigned V to the whole array field }
+    FldAssign.PropIndexExpr := Fld.PropIndexExpr;
+    Fld.PropIndexExpr := nil;
     Fld.Free();
     FldAssign.Expr := ParseExpr();
     Exit(FldAssign);
@@ -4081,11 +4086,10 @@ begin
     Exit(ParseBlockVarDeclStmt());
   end;
 
-  { A statement that begins with '(' is an assignment whose lvalue is a
-    parenthesised expression, e.g. a typecast target:  (a as TB).FX := V.
-    Parse the parenthesised expression, then require a '.Field := Expr'
-    suffix and build a TFieldAssignment whose receiver is that expression
-    (the same ObjExpr path used for element-field writes). }
+  { A statement that begins with '(' has a parenthesised receiver, as in
+    FPC and Delphi: an assignment through it, (a as TB).FX := V, or a call
+    on it, (O as TChild).Free().  The parenthesised expression is the base
+    of a designator chain, which must continue with at least one link. }
   if Check(tkLParen) then
   begin
     Line := FCurrent.Line;
@@ -4094,29 +4098,15 @@ begin
     ParenExpr := Self.ParseExpr();
     try
       Expect(tkRParen);
-      if not Check(tkDot) then
+      if not (Check(tkDot) or Check(tkLBracket) or Check(tkCaret)) then
         raise EParseError.Create(Format(
-          'Expected ''.'' after parenthesised assignment target at line %d col %d in %s',
+          'Expected ''.'' after parenthesised statement receiver at line %d col %d in %s',
           [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
-      Advance();  { consume '.' }
-      if not Check(tkIdent) then
-        raise EParseError.Create(Format(
-          'Expected field name at line %d col %d in %s',
-          [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
-      SecondIdent := FCurrent.Value;
-      Advance();
-      Expect(tkAssign);
     except
       ParenExpr.Free();
       raise;
     end;
-    FldAssign := TFieldAssignment.Create();
-    FldAssign.Line := Line;
-    FldAssign.Col := Col;
-    FldAssign.FieldName := SecondIdent;
-    FldAssign.ObjExpr := ParenExpr;
-    FldAssign.Expr := Self.ParseExpr();
-    Exit(FldAssign);
+    Exit(Self.ChainTailStmt(ParenExpr, '', Line, Col));
   end;
 
   if not Check(tkIdent) then

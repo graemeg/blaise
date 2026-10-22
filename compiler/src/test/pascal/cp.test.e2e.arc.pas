@@ -140,6 +140,9 @@ type
       (the release left X dangling, and scope exit released the new owner's
       object early) }
     procedure TestRun_FreeThroughCast_NilsTheOperand;
+    { statements on a parenthesised receiver: calls, a field and an element
+      write, a failing as check raising, and (O as TChild).Free() nilling O }
+    procedure TestRun_ParenReceiverStmt_CallWriteAndFree;
     { A by-value dyn-array param must keep the buffer alive even when the
       caller's own reference is dropped mid-call
       (BUG-20260721-byval-dynarray-param-no-arc). }
@@ -1060,6 +1063,63 @@ begin
     'self field True' + LE + 'element True' + LE + 'frees 4' + LE +
     'frees 5' + LE, 0);
   AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EArcTests.TestRun_ParenReceiverStmt_CallWriteAndFree;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    type
+      TBase = class
+      end;
+      TChild = class(TBase)
+        Tag: Integer;
+        Items: array[0..2] of Integer;
+        procedure Bump();
+        destructor Destroy(); override;
+      end;
+    var
+      Frees: Integer;
+    procedure TChild.Bump();
+    begin
+      Tag := Tag + 1
+    end;
+    destructor TChild.Destroy();
+    begin
+      Frees := Frees + 1;
+      inherited Destroy()
+    end;
+    procedure Go();
+    var
+      O, B: TBase;
+    begin
+      O := TChild.Create();
+      (O as TChild).Bump();
+      (O as TChild).Bump();
+      (O as TChild).Items[1] := 5;
+      (TChild(O)).Tag := (O as TChild).Tag + 10;
+      WriteLn((O as TChild).Tag, ' ', (O as TChild).Items[1]);
+      (O as TChild).Free();
+      WriteLn(O = nil, ' ', Frees);
+      B := TBase.Create();
+      try
+        (B as TChild).Bump();
+        WriteLn('no raise')
+      except
+        on E: Exception do WriteLn('bad cast')
+      end
+    end;
+    begin
+      Go();
+      WriteLn('frees ', Frees)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '12 5' + LE + 'True 1' + LE + 'bad cast' + LE +
+    'frees 1' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'bad cast');
 end;
 
 procedure TE2EArcTests.TestRun_RecordCallFieldRead_NoLeak;

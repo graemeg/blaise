@@ -12961,6 +12961,40 @@ begin
         ObjType := RecvExpr.ResolvedType;
       end;
     end;
+    { (X as TC).Free() frees X itself, for the same reason as TC(X).Free():
+      releasing through the cast's result left X dangling.  Free releases X
+      whatever its class, so the as check could only raise; a downcast that
+      might fail is warned about, as the check is not performed. }
+    if SameText(ACall.Name, 'Free') and (ACall.Args.Count = 0) and
+       (ACall.ObjExpr is TAsExpr) and
+       (ObjType <> nil) and (ObjType.Kind = tyClass) and
+       (FindMethodDecl(TRecordTypeDesc(ObjType).Name, 'Free') = nil) then
+    begin
+      RecvExpr := TAsExpr(ACall.ObjExpr).Obj;
+      if (RecvExpr <> nil) and (RecvExpr.ResolvedType <> nil) and
+         (RecvExpr.ResolvedType.Kind = tyClass) and
+         ((RecvExpr is TIdentExpr) or (RecvExpr is TFieldAccessExpr) or
+          (RecvExpr is TStringSubscriptExpr)) then
+      begin
+        if not IsSubtypeOf(RecvExpr.ResolvedType, ObjType) then
+          SemanticWarning(Format(
+            'Free() through ''as %s'' skips the as check: Free releases ' +
+            'the operand whatever its class', [ObjType.Name]),
+            ACall.Line, ACall.Col);
+        TAsExpr(ACall.ObjExpr).Obj := nil;
+        ACall.ObjExpr.Free();
+        if RecvExpr is TIdentExpr then
+        begin
+          ACall.ObjExpr := nil;
+          ACall.ObjectName := TIdentExpr(RecvExpr).Name;
+          RecvExpr.Free();
+          Self.AnalyseMethodCall(ACall);
+          Exit;
+        end;
+        ACall.ObjExpr := RecvExpr;
+        ObjType := RecvExpr.ResolvedType;
+      end;
+    end;
     { Cls.Create(args); with Cls a class reference that is not a plain
       variable -- a field, an element, a call result: metaclass dispatch on
       the receiver expression's value }

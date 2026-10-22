@@ -110,6 +110,10 @@ type
     { TC(X).Free() frees X itself: the cast is stripped so the release also
       nils X's slot (a variable, a field or an element), as X.Free() does }
     procedure TestSemantic_FreeThroughCast_TargetsTheOperand;
+    { a statement may start with a parenthesised receiver: a call on it, an
+      element write through an array field of it, and (X as T).Free(),
+      which frees X itself as TC(X).Free() does }
+    procedure TestParse_ParenReceiverStmt_CallAndElemWrite;
 
     { ------------------------------------------------------------------ }
     { ARC on class variables and fields                                    }
@@ -1335,6 +1339,46 @@ begin
     S := TMethodCallStmt(Prog.Block.Stmts.Items[3]);
     AssertTrue('a cast of a non-class operand is kept',
       S.ObjExpr is TFuncCallExpr);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TClassTests.TestParse_ParenReceiverStmt_CallAndElemWrite;
+var
+  Prog: TProgram;
+  S: TMethodCallStmt;
+  FA: TFieldAssignment;
+begin
+  Prog := AnalyseSrc(
+    '''
+    program P;
+    type
+      TBase = class end;
+      TChild = class(TBase)
+        Items: array[0..2] of Integer;
+        procedure Bump();
+      end;
+    procedure TChild.Bump(); begin end;
+    var
+      O: TBase;
+      C: TChild;
+    begin
+      (O as TChild).Bump();
+      (O as TChild).Items[1] := 5;
+      (C as TChild).Free()
+    end.
+    ''');
+  try
+    S := TMethodCallStmt(Prog.Block.Stmts.Items[0]);
+    AssertTrue('a call on the parenthesised receiver',
+      (S.ObjExpr is TAsExpr) and SameText(S.Name, 'Bump'));
+    FA := TFieldAssignment(Prog.Block.Stmts.Items[1]);
+    AssertTrue('an element write keeps its index',
+      (FA.ObjExpr is TAsExpr) and (FA.PropIndexExpr <> nil));
+    S := TMethodCallStmt(Prog.Block.Stmts.Items[2]);
+    AssertTrue('Free through as targets the operand',
+      (S.ObjExpr = nil) and SameText(S.ObjectName, 'C'));
   finally
     Prog.Free();
   end;

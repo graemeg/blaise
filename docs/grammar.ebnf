@@ -1117,6 +1117,7 @@ Stmt
     | DerefStmt
     | ExprCallStmt
     | CallChainStmt
+    | ParenReceiverStmt
     | StaticSubscriptAssign
     | CallSubscriptAssign
     | SubscriptFieldAssign
@@ -1323,7 +1324,17 @@ CallSuffix
 
 FieldAssignment
     = IDENT DOT IDENT { Selector } ASSIGN Expr
-    | LPAREN Expr RPAREN DOT IDENT { Selector } ASSIGN Expr  (* parenthesised lvalue, e.g. (a as TB).FX := v *)
+    ;
+
+(* A statement on a parenthesised receiver, as in FPC and Delphi:
+ * (a as TB).FX := v,  (a as TB).Items[I] := v,  (O as TChild).Run(X);.
+ * The postfix chain after the parentheses must have at least one link and,
+ * without ':=', must END in a call, as for CallChainStmt.  Until 2026-10-22
+ * only the single-field assignment was accepted.  (X as T).Free() releases
+ * and nils X itself, as TC(X).Free() does; see language-rationale.adoc,
+ * "Free Through a Cast". *)
+ParenReceiverStmt
+    = LPAREN Expr RPAREN CallSuffix { CallSuffix } [ ASSIGN Expr ]
     ;
 
 (* A Selector continues an l-value path after the first member: a further

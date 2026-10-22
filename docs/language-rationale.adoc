@@ -3261,6 +3261,40 @@ begin Create(0) end;`) is a common Delphi idiom and stays legal.
 
 ---
 
+== Free Through a Cast
+
+=== Decision
+
+`TC(X).Free()` and `(X as TC).Free()` release and nil `X` itself, exactly as
+`X.Free()` does, when `X` is a class-typed variable, field or array element.
+A statement may begin with a parenthesised receiver, so `(X as TC).M(args);`
+and `(X as TC).Items[I] := V` are accepted, as in FPC and Delphi.
+
+For the `as` form, the `as` check is not performed.  When the cast is a
+downcast that could fail, the compiler warns that the check is skipped.
+
+=== Rationale
+
+Under ARC, `Free` is an early release of a reference followed by nilling the
+slot that held it.  A cast's result is a borrowed copy of the reference with
+no slot of its own.  Releasing through it gave up a reference the caller
+never owned, so `X` was left pointing at freed memory: the next allocation of
+the same size reused it, and `X`'s later release freed that object instead.
+
+Retargeting the receiver to the operand fixes this.  The class named in the
+cast plays no part in what `Free` does, so the only behaviour lost is the
+`as` check's exception on a wrong-class object.  Keeping that check would
+mean releasing through the operand regardless, so a warning gives the same
+information at compile time without a memory-unsafe fallback.
+
+=== Alternatives Considered
+
+* *Run the as check, then release through the operand.*  This keeps FPC's
+  exception, but it needs a new receiver form in both backends for a shape
+  that has no use beyond porting.  It was rejected in favour of the warning.
+* *Reject `(X as TC).Free()`.*  This would break ported code that is
+  otherwise valid, so it was rejected.
+
 == `case` Statement on String Selector
 
 === Decision
