@@ -1,16 +1,17 @@
 ---
 name: cut-blaise-release
 description: |
-  Cut a new Blaise compiler release. Bumps the version in Blaise.pas + project.xml,
-  rebuilds compiler + RTL + stage-2 binary, verifies the self-hosting
-  fixpoints (native, internal-assembler, warm-cache, binary, init-order), runs the full test
-  suite, commits, tags, archives the NATIVE stage-2 binary under releases/vX.Y.Z/
-  (NOT committed — releases/ is gitignored), renames + refreshes the -pre
-  bootstrap dir to the next cycle, cross-compiles a FreeBSD x86_64 binary, builds
-  self-contained Linux + FreeBSD release tarballs (binary + blaise.cfg + RTL +
-  stdlib source), writes the community post + changelog into releases/, then
-  bumps Blaise.pas + project.xml + uCompilerId.pas to the next -SNAPSHOT version.
-  Use when asked to "cut a release", "release v0.X.Y", "tag a release", or after
+  Cut a new Blaise compiler release from the macOS arm64 development host.
+  Bumps the version in Blaise.pas + project.xml + uCompilerId.pas, builds and
+  verifies every self-hosting fixpoint on macOS, runs the full suite on macOS
+  and on the Linux x86-64 VM, commits, tags, archives the macOS stage-2 binary
+  under releases/vX.Y.Z/ (NOT committed -- releases/ is gitignored), cross-
+  compiles the Linux and FreeBSD x86-64 binaries (the Linux one proven byte-
+  identical to its own Linux self-build), builds self-contained macOS, Linux
+  and FreeBSD release tarballs (binary + blaise.cfg + RTL + stdlib source),
+  renames + refreshes the -pre bootstrap dir, writes the community post +
+  changelog into releases/, then bumps to the next -SNAPSHOT version.  Use
+  when asked to "cut a release", "release v0.X.Y", "tag a release", or after
   the user confirms a fixpoint is achieved.
 allowed-tools:
   - Bash
@@ -22,292 +23,280 @@ allowed-tools:
 
 # Cutting a Blaise release
 
-This skill mirrors the verified release process used for v0.11.0.
-Run every step in order. Stop and surface the failure to the user if any
-step fails — never paper over a missing fixpoint.
+The primary development host is a **macOS arm64** Mac mini (since v0.15.0).
+The release is built and verified there; Linux x86-64 coverage comes from the
+OrbStack VM (`scripts/linux-vm.sh`), and FreeBSD from CI.  Run every step in
+order.  Stop and surface the failure to the user if any step fails -- never
+paper over a missing fixpoint.
 
 ## Inputs
 
-The user will name the release version (e.g. "0.11.0"). If they didn't,
-ask them via AskUserQuestion. The next-dev version is the next minor with
-a `-SNAPSHOT` suffix (0.11.0 → 0.12.0-SNAPSHOT). Confirm with the user if unsure.
+The user names the release version (e.g. "0.15.0").  If they didn't, ask via
+AskUserQuestion.  The next dev version is the next minor with a `-SNAPSHOT`
+suffix (0.15.0 -> 0.16.0-SNAPSHOT).  Confirm with the user if unsure.
+
+## Shipped targets
+
+| Target | How it is built | How it is verified |
+|---|---|---|
+| `macos-arm64` | native stage-2 from `scripts/macos-dev.sh fixpoint` | all fixpoints + full suite on the Mac |
+| `linux-x86_64` | cross-compiled on the Mac | byte-identical to its own Linux self-build (VM) + full suite on the VM |
+| `freebsd-x86_64` | cross-compiled on the Mac | ELF shape + version string here; the master CI `freebsd-crosscheck` job runs the self-host fixpoint and the full suite in a FreeBSD VM |
+
+The compiler also accepts `linux-i386`, `linux-arm64` and `windows-x86_64`.
+They are NOT release targets: no tarball, unless the user asks for one.
+
+The Linux tarball name is a **CI contract**: `bootstrap.yml` cold-starts from
+`blaise-${STAGE1_TAG}-linux-x86_64.tar.gz` on the GitHub release and takes the
+first file named `blaise` inside it.  Never rename that tarball or ship a
+non-Linux binary in it.
 
 ## Preconditions to check before starting
 
-1. Run `git status`. The working tree often carries **unrelated** uncommitted
-   changes (e.g. `compiler/project.xml` and `tools/kanban/project.xml` build-
-   option tweaks, plus many untracked `.txt`/`.adoc` working files). These are
-   NORMAL on this repo and must NOT be swept into the release commit. The root
-   `project.xml` may also carry unrelated edits — you will stage only its
-   version line (see Step 5). If you see uncommitted changes that look like
-   in-progress feature work, ask the user whether to proceed.
-2. The current `Version` constant in `compiler/src/main/pascal/Blaise.pas`
-   should look like `'<X.Y.Z>-SNAPSHOT'` (the dev marker). If it's already a
-   plain non-dev version, ask the user — they may have already cut this release.
-3. All commands run from the project root `/data/devel/new-pascal-compiler`
-   (PasBuild requirement — sub-modules lack the `<version>` field).
-4. The current release binary lives at the newest `releases/v*-pre/blaise` or
-   `releases/v*/blaise`.  Resolve it once:
-   `BLAISE_RELEASE=$(ls -d releases/v*/ | sort -V | tail -1)blaise`.
-   (No QBE binary is needed: the QBE backend was removed in v0.15.0.)
+1. All commands run from the project root, currently **`~/devel/blaise`**.
+   Do the release in the main checkout, not a worktree: `releases/` (the
+   stage-1 binary and the archive) lives there and is gitignored.
+2. `git status` must show no tracked changes.  Untracked working files
+   (`BUGS.md`, `*.txt`, draft `.adoc`) are normal and must NOT be swept into
+   any commit.  If tracked files are modified, ask the user before going on.
+3. The `Version` constant in `compiler/src/main/pascal/Blaise.pas` reads
+   `'<X.Y.Z>-SNAPSHOT'`.  If it is already a plain version, ask the user --
+   they may have cut this release already.
+4. The CI anchor is the previous release: `grep STAGE1_TAG
+   .github/workflows/bootstrap.yml`.
+5. Resolve the stage-1 binary once:
 
-## Step 1 — bump version to release
+   ```bash
+   cd ~/devel/blaise
+   BLAISE_RELEASE="$PWD/$(ls -d releases/v*/ | sort -V | tail -1)blaise"
+   "$BLAISE_RELEASE" --help | head -1
+   ```
 
-Edit `compiler/src/main/pascal/Blaise.pas`. Find the line:
+   macOS `sort -V` orders `v0.15.0-pre` BEFORE `v0.15.0`, so once a release
+   directory exists the newest name wins correctly.  Before then the newest
+   entry is the current `-pre` directory, which is the right stage-1.
+6. The Linux VM is up: `orb list` shows `blaise-x86` (or `$BLAISE_VM`) running.
 
-```pascal
-  Version = '<X.Y.Z>-SNAPSHOT';
-```
+## Step 1 -- bump version to release
 
-and change it to:
+* `compiler/src/main/pascal/Blaise.pas`: `Version = '<X.Y.Z>-SNAPSHOT';` ->
+  `Version = '<X.Y.Z>';`
+* `project.xml` (root): `<version><X.Y.Z>-SNAPSHOT</version>` ->
+  `<version><X.Y.Z></version>`
+* `compiler/src/main/pascal/uCompilerId.pas`:
+  `'blaise-<X.Y.Z>-SNAPSHOT+bif<N>'` -> `'blaise-<X.Y.Z>+bif<N>'` -- drop
+  `-SNAPSHOT`, keep the `+bif<N>` suffix unchanged.
 
-```pascal
-  Version = '<X.Y.Z>';
-```
+The `+bif<N>` suffix is NOT `IFACE_VERSION` (v0.15 cycle: `+bif4` against
+`IFACE_VERSION = 26`).  It is bumped by hand for codegen changes the `.bif`
+alone does not capture; a release does not bump it.
 
-Also edit `project.xml` in the project root. Find the line:
+IMPORTANT (bif-coverage sync): `TestRun_BifCoverage_NoGaps` asserts the
+project.xml base version (with `-SNAPSHOT` stripped) is a substring of
+`COMPILER_ID`.  Both must carry the same base version at all times -- here,
+and again at the dev-cycle bump in Step 8.
 
-```xml
-  <version><X.Y.Z>-SNAPSHOT</version>
-```
+## Step 2 -- build the release compiler; verify every fixpoint
 
-and change it to:
-
-```xml
-  <version><X.Y.Z></version>
-```
-
-Edit `compiler/src/main/pascal/uCompilerId.pas`. The `COMPILER_ID` looks like
-`'blaise-<X.Y.Z>-SNAPSHOT+bif<N>'`. For the release, **drop the `-SNAPSHOT`**
-but **keep the `+bif<N>` tag** → `'blaise-<X.Y.Z>+bif<N>'`. Only bump the
-`+bif<N>` number if the `.bif` interface format actually changed this cycle
-(`IFACE_VERSION` in `uUnitInterfaceIO.pas` — the two must agree).
-
-IMPORTANT (bif-coverage sync): the `bif-coverage` tool's `TestRun_BifCoverage_NoGaps`
-asserts the project.xml base version (with `-SNAPSHOT` stripped) is a substring
-of `COMPILER_ID`. So `COMPILER_ID` and project.xml `<version>` must carry the
-**same base version** at all times — here at release, and again at the dev-cycle
-bump in Step 7. A mismatch silently fails that test.
-
-## Step 2 — build the release compiler and verify the native fixpoint
-
-Build `compiler/target/blaise` (stage-0, now carrying the release version) with
-the latest release binary, then run the native fixpoint on it:
+On macOS, `scripts/macos-dev.sh` drives the compiler builds (it also installs
+`blaise.cfg` beside `compiler/target/blaise`).  PasBuild works on the Mac too,
+but the fixpoint and test steps below use `macos-dev.sh`, as the `macos-check`
+CI job does.
 
 ```bash
-pasbuild clean
-pasbuild compile -m blaise-compiler --compiler "$BLAISE_RELEASE"
-./scripts/fixpoint-native.sh           # must print NATIVE_FIXPOINT_OK
+# stage-1 -> stage-2 -> stage-3, byte-identical; installs stage-2 as
+# compiler/target/blaise.  This stage-2 is the macOS release binary.
+scripts/macos-dev.sh fixpoint --compiler "$BLAISE_RELEASE" --install
+compiler/target/blaise --help | head -1      # Blaise Compiler v<X.Y.Z>
 ```
 
-Note the stage-2 assembly line count it prints ("stage-2 asm: N lines") — you
-quote it in the commit message and the docs.
-
-`fixpoint-native.sh` writes the **native stage-2 binary to `/tmp/fpn_blaise2`**
-— that is the binary we archive and ship (Step 6).  Confirm it prints the right
-version, then rebuild `compiler/target/blaise` from it so the remaining
-fixpoints and the test runner use a stage-2 compiler:
+Then the five fixpoint scripts, all of which run on macOS (each uses
+`compiler/target/blaise` as stage-0):
 
 ```bash
-/tmp/fpn_blaise2 --help | head -1      # must print: Blaise Compiler v<X.Y.Z>
-pasbuild compile -m blaise-compiler --compiler /tmp/fpn_blaise2
-compiler/target/blaise --help | head -1
+./scripts/fixpoint-native.sh           # NATIVE_FIXPOINT_OK
+./scripts/fixpoint-native-internal.sh  # NATIVE_INTERNAL_OK
+./scripts/fixpoint-warmcache.sh        # WARMCACHE_FIXPOINT_OK
+./scripts/fixpoint-binary.sh           # BINARY_FIXPOINT_OK
+./scripts/fixpoint-initorder.sh        # INITORDER_FIXPOINT_OK
 ```
 
-ALWAYS pass `--compiler` to pasbuild — without it, PasBuild falls back to FPC,
-which this project does not use.
+Note the "stage-2 asm: N lines" figure `fixpoint-native.sh` prints -- it is
+the arm64 count, quoted in the commit message and the changelog.
+`fixpoint-native.sh` assembles and links with external `cc` (Xcode Command
+Line Tools) and leaves a cc-linked stage-2 in `/tmp/fpn_blaise2`.  That is a
+cross-check only; the **shipped macOS binary is the internally linked,
+signed stage-2** that `macos-dev.sh fixpoint --install` put in
+`compiler/target/blaise` -- the byte-reproducible one, built exactly as a
+user's compiler links programs.
 
-## Step 3 — verify the remaining fixpoints
+Run them in the foreground with a generous timeout (600000 ms); the whole
+set takes a few minutes on the Mac mini.  If any script does not print its
+OK line, **stop** and show the output.  There is no acceptable "almost
+fixpoint".
 
-Four more fixpoints guard the in-process internal assembler, warm-cache
-(incremental) rebuilds, the linked binary (assembler + linker + container
-writer determinism) and unit initialisation order:
+## Step 3 -- run the full suites (macOS, then Linux)
+
+macOS, with the stage-2 compiler from Step 2:
 
 ```bash
-./scripts/fixpoint-native-internal.sh  # must print NATIVE_INTERNAL_OK
-./scripts/fixpoint-warmcache.sh        # must print WARMCACHE_FIXPOINT_OK
-./scripts/fixpoint-binary.sh           # must print BINARY_FIXPOINT_OK
-./scripts/fixpoint-initorder.sh        # must print INITORDER_FIXPOINT_OK
+scripts/macos-dev.sh test-compile
+compiler/target/TestRunner             # OK (N tests, M ignored)
+scripts/macos-dev.sh stdlib-test       # OK (K tests)
 ```
 
-If any fixpoint does not print its OK line, **stop**. Show the user the output
-and do not proceed. There is no acceptable "almost fixpoint" — any divergence
-means the release is not reproducible.
+Confirm the test count ROSE against the last run you know of: test-compile
+can fail quietly and leave a stale runner that still passes (check its exit
+code).
 
-## Step 4 — run the full test suite with the fixpoint binary
-
-Build the TestRunner with the verified stage-2 binary, then run the whole suite
-(do NOT use `pasbuild test` — build the runner and invoke it directly so you see
-the real total):
+Linux x86-64, from a CLEAN detached worktree of the release commit (the VM
+syncs committed state only).  Do this after Step 4's commit, so the VM tests
+exactly what is tagged:
 
 ```bash
-pasbuild test-compile -m blaise-compiler --compiler /tmp/fpn_blaise2
-compiler/target/TestRunner          # must print: OK (N tests, ...)
+git worktree add --detach ../blaise-wt-relvm v<X.Y.Z>
+mkdir -p ../blaise-wt-relvm/compiler/target
+cp compiler/target/blaise ../blaise-wt-relvm/compiler/target/blaise
+( cd ../blaise-wt-relvm && scripts/linux-vm.sh all )
+git worktree remove --force ../blaise-wt-relvm
 ```
 
-Note the test count N. If any test fails, stop — do not release.
+Expected: OK on both suites, except the one known Rosetta artefact
+`TLinkerE2ETests.TestRun_SyscallHelloWorld` (passes on real Linux).  Any
+other failure: stop.  Record N, the macOS total, for the README and the post.
 
-## Step 5 — commit and tag
-
-Stage `Blaise.pas` whole (its only change is the version), but stage **only the
-version-line hunk** of `project.xml` — it frequently carries unrelated working
-changes that must not enter the release commit:
+## Step 4 -- commit and tag
 
 ```bash
-git add compiler/src/main/pascal/Blaise.pas
-printf '%s\n' 'y' 'n' 'n' | git add -p project.xml   # stage hunk 1 (version) only
-git diff --cached --stat   # MUST show exactly: Blaise.pas | 2 +-  AND  project.xml | 2 +-
+git add compiler/src/main/pascal/Blaise.pas compiler/src/main/pascal/uCompilerId.pas project.xml
+git diff --cached --stat   # exactly three files, one line each
 ```
 
-If `git diff --cached --stat` shows project.xml with more than 2 changed lines,
-you swept in unrelated changes — `git restore --staged project.xml` and redo the
-`git add -p`. (The hunk-selection answers `y n n` assume the version line is the
-first hunk; if project.xml has a different shape, inspect with `git add -p` and
-stage only the `<version>` hunk.)
+If `project.xml` shows more than one changed line, it carried unrelated edits:
+`git restore --staged project.xml`, then `git add -p project.xml` and stage
+only the `<version>` hunk.
 
-Commit with this pattern (HEREDOC for clean formatting):
+Commit (HEREDOC):
 
 ```
 release: v<X.Y.Z>
 
-<one or two sentences: native fixpoint verified on N lines of stage-2
-assembly (all fixpoints green: native, internal-asm, warm-cache, binary,
-init-order), the headline themes
+<one or two sentences: all fixpoints green on macOS arm64 (native on N lines
+of stage-2 assembly, internal-asm, warm-cache, binary, init-order), the Linux
+x86-64 binary byte-identical to its own Linux self-build, the headline themes
 of the cycle, and the test count.>
 ```
-
-Then tag:
 
 ```bash
 git tag v<X.Y.Z>
 ```
 
-**Never reference Claude in the commit message.** **Do not push.**
-The user pushes manually.
+**Never reference Claude in the commit message.**  **Do not push** -- the
+user decides when; the `ci-verify-then-master` skill does it (a `ci/` branch
+first, then master).  The tag is pushed separately (`git push github
+v<X.Y.Z>`), and only when the user asks.
 
-## Step 6 — archive the release binary + refresh the -pre bootstrap binary
+Now run the Linux half of Step 3.
 
-Archive the **native** stage-2 binary (`/tmp/fpn_blaise2` from Step 2):
+## Step 5 -- archive and cross-compile the release binaries
 
-```bash
-mkdir -p releases/v<X.Y.Z>
-cp /tmp/fpn_blaise2 releases/v<X.Y.Z>/blaise       # NATIVE binary from fixpoint-native.sh
-chmod +x releases/v<X.Y.Z>/blaise
-releases/v<X.Y.Z>/blaise --help | head -1          # sanity: Blaise Compiler v<X.Y.Z>
-```
-
-The binary alone is enough. The compiler source-builds the RTL into a
-target-keyed cache beside itself, so no `blaise_rtl.a` accompanies a release
-directory. What a stage-1 bootstrap *does* need is resolvable RTL source —
-which the repo checkout provides.
-
-Now **rename the rolling `-pre` directory to the next cycle** and refresh its
-binary to this verified build, so cold-bootstrap of `master` stays current for
-the dev cycle about to open. `releases/` is gitignored, so this is a plain
-filesystem `mv` (no `git mv`):
+All three binaries are built while the tree is still at `<X.Y.Z>` --
+**before** Step 8's dev bump.  A binary built after the bump reports
+`<next>-SNAPSHOT`.
 
 ```bash
-# The -pre dir from the previous cycle is named v<X.Y.Z>-pre. Rename it to the
-# NEXT minor so the newest releases/v*-pre/ tracks the cycle we are opening.
-mv releases/v<X.Y.Z>-pre releases/v<next-minor>.0-pre   # e.g. v0.12.0-pre -> v0.13.0-pre
-cp /tmp/fpn_blaise2 releases/v<next-minor>.0-pre/blaise
-rm -f releases/v<next-minor>.0-pre/*.bak             # drop any stale backup cruft
-releases/v<next-minor>.0-pre/blaise --help | head -1 # sanity check
+V=<X.Y.Z>
+mkdir -p releases/v$V target/rel/linux target/rel/freebsd
+cp compiler/target/blaise releases/v$V/blaise.new && mv releases/v$V/blaise.new releases/v$V/blaise
+releases/v$V/blaise --help | head -1         # Blaise Compiler v<X.Y.Z>
+codesign -v releases/v$V/blaise && echo signed
 ```
 
-(If no `-pre` directory exists yet, create `releases/v<next-minor>.0-pre/`
-directly. The GitHub Actions CI and `rolling-bootstrap.sh` both look for the
-newest `releases/v*-pre/`, so the name must be the cycle just opened — not the
-one just released.)
+**Copy-then-rename for every macOS binary you replace.**  The kernel caches a
+signed binary's code signature per vnode, so overwriting an existing binary
+in place with different bytes gets every later exec SIGKILLed (exit 137).
+`cp` to a new name and `mv` it over is a new inode.
 
-Update the test count in `README.adoc` (the "Testing: N tests" line in the
-Project Status section) to match the suite total from Step 4, then commit it:
+Cross-compile the two x86-64 binaries with the macOS release binary, using
+the same flags `fixpoint-binary.sh` uses (the output basename must be
+`blaise`):
 
 ```bash
-git add README.adoc
-git commit -m "docs: update test count to <N> for v<X.Y.Z>"
+for T in linux freebsd; do
+  UC=$(mktemp -d)
+  releases/v$V/blaise --source compiler/src/main/pascal/Blaise.pas \
+    --unit-path compiler/src/main/pascal --unit-path stdlib/src/main/pascal \
+    --target $T-x86_64 --backend native --unit-cache "$UC" \
+    --output target/rel/$T/blaise 2>&1 | grep -v 'linker: note: binding'
+  rm -rf "$UC"
+done
+file target/rel/linux/blaise     # ELF 64-bit ... x86-64, version 1 (SYSV), statically linked
+file target/rel/freebsd/blaise   # ELF 64-bit ... x86-64, version 1 (FreeBSD), statically linked
+for T in linux freebsd; do
+  strings target/rel/$T/blaise | grep -q "blaise-$V+" \
+    || { echo "ERROR: $T binary is not v$V"; exit 1; }
+done
 ```
 
-Then cross-compile the FreeBSD binary and build the **self-contained** release
-tarballs for the GitHub Releases page — one for each supported target
-(Linux x86_64 and FreeBSD x86_64).
+(`readelf` is not installed on macOS; `file` reports the ELF OS/ABI.)
 
-**Tarball layout — self-contained, NOT binary-only.** The native backend
-SOURCE-BUILDS the RTL on every link (it does *not* link `blaise_rtl.a`), so a
-binary shipped alone cannot compile anything — it fails with `RTL source
-directory not found`. Each tarball must therefore bundle the RTL + stdlib
-**source** plus a `blaise.cfg` beside the binary so the extracted package works
-with zero flags from any directory:
+**Prove the Linux binary is a Linux fixpoint**: on the VM it must rebuild
+itself byte-for-byte.  The VM sees `/Users`, so it runs the binary in place
+against this checkout:
+
+```bash
+orb -m "${BLAISE_VM:-blaise-x86}" bash -c "cd '$PWD' && rm -rf /tmp/relfp && mkdir -p /tmp/relfp/s2 /tmp/relfp/uc \
+  && target/rel/linux/blaise --help | head -1 \
+  && target/rel/linux/blaise --source compiler/src/main/pascal/Blaise.pas \
+       --unit-path compiler/src/main/pascal --unit-path stdlib/src/main/pascal \
+       --backend native --unit-cache /tmp/relfp/uc --output /tmp/relfp/s2/blaise >/dev/null 2>&1 \
+  && cmp target/rel/linux/blaise /tmp/relfp/s2/blaise && echo LINUX_SELFHOST_IDENTICAL"
+```
+
+It must print `LINUX_SELFHOST_IDENTICAL` (held for the v0.15 cycle,
+checked 2026-10-23).  The Linux binary is freestanding and static -- no glibc
+dependency.  Releases up to v0.14.0 shipped a cc-linked dynamic binary built
+on Linux; say so in the changelog.
+
+The FreeBSD binary cannot run here.  After the release commit reaches
+master, the `freebsd-crosscheck` job (master tier) runs the self-host
+fixpoint and the full suite in a FreeBSD VM.  Check that run is green before
+the user publishes, or have the user try the tarball on a FreeBSD box.
+
+## Step 6 -- release tarballs
+
+**Self-contained, never binary-only.**  The compiler source-builds the RTL on
+every link, so a lone binary cannot compile anything (`RTL source directory
+not found`).  Each tarball bundles the RTL and stdlib source and a
+`blaise.cfg` beside the binary:
 
 ```
-blaise-v<X.Y.Z>-<os>-x86_64/
-  blaise            the target binary (native)
-  blaise.cfg        rtl-src=rtl-src / unit-path=stdlib-src (relative → resolved
-                    against this file's own dir, so it works wherever extracted)
-  rtl-src/          compiler/src/main/pascal/*.pas  (the RTL units)
-  stdlib-src/       stdlib/src/main/pascal/*.pas    (the standard library)
+blaise-v<X.Y.Z>-<os>-<cpu>/
+  blaise            the target binary
+  blaise.cfg        rtl-src=rtl-src / unit-path=stdlib-src (relative paths
+                    resolve against this file's directory)
+  rtl-src/          compiler/src/main/pascal/*.pas
+  stdlib-src/       stdlib/src/main/pascal/*.pas
   hello.pas         a sample program
-  USAGE.txt         quick-start (the `blaise.cfg` means `./blaise --source
-                    hello.pas --output hello` just works)
+  USAGE.txt         quick start
   README.adoc  NOTICE  LICENSE
 ```
 
-`blaise.cfg` recognises only `rtl-src=<dir>` and `unit-path=<dir>` (KEY=VALUE,
-`#` comments); relative values resolve against the config file's directory, `~`
-expands to `$HOME`, absolute paths are used as-is. The compiler reads
-`<bindir>/blaise.cfg` first, then `~/.blaise.cfg`.
-
-First cross-compile the FreeBSD binary with the just-archived NATIVE release
-binary as stage-1 (same invocation the `freebsd-crosscheck` CI job uses —
-`--target freebsd-x86_64` makes a static, freestanding FreeBSD ET_EXEC).
-
-CRITICAL — version timing: the cross-compiled binary bakes in whatever `Version`
-(Blaise.pas) and `COMPILER_ID` (uCompilerId.pas) the WORKING TREE currently
-holds. This step MUST run BEFORE Step 7's dev-version bump, while the tree is
-still at `<X.Y.Z>`. If you build (or rebuild) the FreeBSD tarball AFTER the bump
-— e.g. adding it as an afterthought — the binary will report `<next>-SNAPSHOT`.
-To rebuild correctly after the bump, first restore the two version files to the
-tag, cross-compile, then restore the dev version:
+`blaise.cfg` recognises `rtl-src=<dir>` and `unit-path=<dir>` (KEY=VALUE, `#`
+comments); relative values resolve against the file's directory, `~` expands
+to `$HOME`.  The compiler reads `<bindir>/blaise.cfg` first, then
+`~/.blaise.cfg`.
 
 ```bash
-# Only if the tree has already moved to the -SNAPSHOT dev version:
-git checkout v<X.Y.Z> -- compiler/src/main/pascal/Blaise.pas \
-                         compiler/src/main/pascal/uCompilerId.pas
-# ... run the cross-compile below ...
-# then restore the dev version:
-git checkout HEAD -- compiler/src/main/pascal/Blaise.pas \
-                     compiler/src/main/pascal/uCompilerId.pas
-```
-
-```bash
-mkdir -p target/freebsd-blaise
-releases/v<X.Y.Z>/blaise \
-  --source compiler/src/main/pascal/Blaise.pas \
-  --backend native --target freebsd-x86_64 \
-  --unit-path compiler/src/main/pascal \
-  --unit-path runtime/src/main/pascal \
-  --unit-path stdlib/src/main/pascal \
-  --output target/freebsd-blaise/blaise
-# Must be a FreeBSD (EI_OSABI) executable, or stop:
-readelf -hW target/freebsd-blaise/blaise | awk -F: '/OS\/ABI/{print $2}' | grep -qi FreeBSD \
-  || { echo "ERROR: not a FreeBSD binary"; exit 1; }
-# Must report the RELEASE version, not -SNAPSHOT (guards the version-timing trap):
-strings target/freebsd-blaise/blaise | grep -q 'blaise-<X.Y.Z>+' \
-  || { echo "ERROR: FreeBSD binary is not v<X.Y.Z> — rebuild at the release version"; exit 1; }
-```
-
-Then build both tarballs with a shared packaging function:
-
-```bash
-# make_tarball <binary-path> <os-label>
+# make_tarball <binary-path> <os> <cpu>
 make_tarball() {
-  BIN="$1"; OS="$2"
-  STAGING=$(mktemp -d); DIRNAME="blaise-v<X.Y.Z>-${OS}-x86_64"; D="$STAGING/$DIRNAME"
+  BIN="$1"; OS="$2"; CPU="$3"
+  STAGING=$(mktemp -d); DIRNAME="blaise-v$V-$OS-$CPU"; D="$STAGING/$DIRNAME"
   mkdir -p "$D/rtl-src" "$D/stdlib-src"
-  cp "$BIN"                        "$D/blaise"; chmod +x "$D/blaise"
+  cp "$BIN" "$D/blaise"; chmod +x "$D/blaise"
   cp compiler/src/main/pascal/*.pas "$D/rtl-src/"
   cp stdlib/src/main/pascal/*.pas   "$D/stdlib-src/"
-  cp README.adoc "$D/README.adoc"; cp NOTICE "$D/NOTICE"; cp LICENSE "$D/LICENSE"
+  cp README.adoc NOTICE LICENSE "$D/"
   cat > "$D/blaise.cfg" <<'CFG'
 # Blaise compiler configuration.  Relative paths resolve against this file's
 # directory, so the compiler finds its RTL + stdlib source wherever extracted.
@@ -321,220 +310,187 @@ begin
 end.
 PAS
   cat > "$D/USAGE.txt" <<'TXT'
-Blaise — self-contained toolchain.  From this directory:
+Blaise -- self-contained toolchain.  From this directory:
     ./blaise --source hello.pas --output hello && ./hello
 The bundled blaise.cfg supplies the RTL + stdlib source locations, so no extra
 flags are needed.  If you move `blaise`, keep blaise.cfg / rtl-src/ / stdlib-src/
 beside it, or pass --rtl-src DIR --unit-path DIR explicitly.  See README.adoc.
 TXT
-  tar -czf "releases/blaise-v<X.Y.Z>-${OS}-x86_64.tar.gz" -C "$STAGING" "$DIRNAME"
+  if [ "$OS" = macos ]; then
+    cat >> "$D/USAGE.txt" <<'TXT'
+
+macOS: the binary is ad-hoc signed, not notarised.  If the archive was
+downloaded with a browser and macOS refuses to run `blaise`, clear the
+quarantine flag once:  xattr -dr com.apple.quarantine .
+TXT
+  fi
+  COPYFILE_DISABLE=1 tar -czf "releases/$DIRNAME.tar.gz" -C "$STAGING" "$DIRNAME"
   rm -rf "$STAGING"
-  tar -tzf "releases/blaise-v<X.Y.Z>-${OS}-x86_64.tar.gz" | head   # verify
+  tar -tzf "releases/$DIRNAME.tar.gz" | head -5
 }
 
-make_tarball releases/v<X.Y.Z>/blaise         linux
-make_tarball target/freebsd-blaise/blaise     freebsd
+make_tarball releases/v$V/blaise        macos   arm64
+make_tarball target/rel/linux/blaise    linux   x86_64
+make_tarball target/rel/freebsd/blaise  freebsd x86_64
 ```
 
-Sanity-check each tarball's binary is the right ELF shape (Linux = `UNIX -
-System V` / `GNU`, FreeBSD = `UNIX - FreeBSD`); the FreeBSD binary cannot be
-executed on the Linux host — the user copies that tarball to a FreeBSD box to
-verify. The self-contained layout is validated on the LINUX binary before
-shipping (same driver code, target-agnostic RTL-source resolution):
+`COPYFILE_DISABLE=1` keeps macOS `tar` from adding `._*` AppleDouble files,
+which would otherwise appear in every tarball.
+
+Validate the layout by extracting and compiling `hello.pas` -- natively for
+macOS, on the VM for Linux:
 
 ```bash
-V=$(mktemp -d); tar -xzf releases/blaise-v<X.Y.Z>-linux-x86_64.tar.gz -C "$V"
-( cd "$V/blaise-v<X.Y.Z>-linux-x86_64" && ./blaise --source hello.pas --output /tmp/th && /tmp/th )
-rm -rf "$V"   # must print: Hello from Blaise!
+X=$(mktemp -d); tar -xzf releases/blaise-v$V-macos-arm64.tar.gz -C "$X"
+( cd "$X/blaise-v$V-macos-arm64" && ./blaise --source hello.pas --output "$X/h" && "$X/h" )
+X=$(mktemp -d); tar -xzf releases/blaise-v$V-linux-x86_64.tar.gz -C "$X"
+orb -m "${BLAISE_VM:-blaise-x86}" bash -c "cd '$X/blaise-v$V-linux-x86_64' && ./blaise --source hello.pas --output /tmp/relh && /tmp/relh"
+# each must print: Hello from Blaise!
 ```
 
-**Do not `git add` any binary files or the tarballs.** `releases/` is gitignored
-and the user keeps binaries local on purpose.
+**Never `git add` binaries or tarballs.**  `releases/` and `target/` are
+gitignored; the user keeps binaries local and uploads the tarballs to the
+GitHub release themselves.
 
-## Step 7 — bump to next -dev version
+## Step 7 -- refresh the -pre bootstrap dir and README
 
-Edit `compiler/src/main/pascal/Blaise.pas` again, changing `'<X.Y.Z>'` to
-`'<next-minor>.0-SNAPSHOT'` (e.g. `0.11.0` → `0.12.0-SNAPSHOT`). Use
-`-SNAPSHOT` in BOTH files — the older `-dev` suffix in Blaise.pas was retired so
-the two version strings stay in sync.
-
-Also edit `project.xml`, changing `<version>` to `<next-minor>.0-SNAPSHOT`.
-
-REQUIRED: also bump `compiler/src/main/pascal/uCompilerId.pas` back to the
-`-SNAPSHOT` form for the new base version, keeping the same `+bif<N>` tag →
-`'blaise-<next-minor>.0-SNAPSHOT+bif<N>'`. This keeps `COMPILER_ID` in sync
-with project.xml's base version — otherwise `bif-coverage`'s
-`TestRun_BifCoverage_NoGaps` fails (it checks the project base version is a
-substring of `COMPILER_ID`). Do NOT bump `+bif<N>` here; the `.bif` format
-hasn't changed just by opening a dev cycle.
-
-Stage selectively again (project.xml may still carry unrelated changes):
+Rename the rolling `-pre` directory to the cycle being OPENED and refresh it
+(plain `mv` -- `releases/` is gitignored):
 
 ```bash
-git add compiler/src/main/pascal/Blaise.pas compiler/src/main/pascal/uCompilerId.pas
-printf '%s\n' 'y' 'n' 'n' | git add -p project.xml
-git diff --cached --stat   # Blaise.pas, uCompilerId.pas, project.xml — version lines only
+NEXT=<next-minor>.0                     # e.g. 0.16.0
+mv releases/v$V-pre releases/v$NEXT-pre
+cp releases/v$V/blaise releases/v$NEXT-pre/blaise.new && mv -f releases/v$NEXT-pre/blaise.new releases/v$NEXT-pre/blaise
+cp target/rel/linux/blaise releases/v$NEXT-pre/blaise.linux
+rm -rf releases/v$NEXT-pre/rtl releases/v$NEXT-pre/*.bak
+releases/v$NEXT-pre/blaise --help | head -1
+```
+
+`blaise` is the macOS stage-1 for local cold bootstraps and
+`rolling-bootstrap.sh`; `blaise.linux` is the cross-built Linux compiler kept
+beside it.  Removing `rtl/` makes the next compile rebuild the RTL object
+cache with the new binary (a stale cache gives false failures).  CI does not
+read `releases/`: it cold-starts from the published tarball (Step 8b).
+
+Update `README.adoc`'s Project Status "Testing:" line with the Step 3 total,
+and check its platform wording still matches the shipped targets, then:
+
+```bash
+git add README.adoc
+git commit -m "docs: update test count to <N> for v<X.Y.Z>"
+```
+
+## Step 8 -- bump to the next dev version
+
+* `Blaise.pas`: `'<X.Y.Z>'` -> `'<next-minor>.0-SNAPSHOT'`
+* `project.xml`: `<version>` -> `<next-minor>.0-SNAPSHOT`
+* `uCompilerId.pas`: `'blaise-<next-minor>.0-SNAPSHOT+bif<N>'` (same suffix)
+
+```bash
+git add compiler/src/main/pascal/Blaise.pas compiler/src/main/pascal/uCompilerId.pas project.xml
+git diff --cached --stat   # three files, version lines only
 git commit -m "chore: begin v<next-minor>.0-dev cycle"
 ```
 
-### Step 7b — advance the CI bootstrap anchor (REQUIRED, do not skip)
+### Step 8b -- advance the CI bootstrap anchor (REQUIRED)
 
-**The anchor must always be the release just cut.** Bump `STAGE1_TAG` in
-`.github/workflows/bootstrap.yml` to `v<X.Y.Z>`:
+The anchor must always be the release just cut: set `STAGE1_TAG` in
+`.github/workflows/bootstrap.yml` to `v<X.Y.Z>`, in its own commit.  CI
+downloads that tag's Linux tarball, so this commit lands only **after the
+user has published the GitHub release** (`gh release view v<X.Y.Z>` lists
+`blaise-v<X.Y.Z>-linux-x86_64.tar.gz`).  Prepare the commit and tell the user
+it waits on the upload.  The anchor once drifted (v0.13.0 shipped while CI
+still cold-started from v0.12.0) because this step read as optional.  Never
+move the anchor backwards across v0.13.0, where the RTL archive requirement
+ended.
+
+## Step 9 -- community post and changelog
+
+Write `releases/community-post-v<X.Y.Z>.md` and
+`releases/changelog-v<X.Y.Z>.md` (gitignored working files; never `git add`
+them).  Both cover only `<prev-tag>..v<X.Y.Z>`:
 
 ```bash
-grep -n "STAGE1_TAG:" .github/workflows/bootstrap.yml   # must read v<X.Y.Z>
+PREV=$(git describe --tags --abbrev=0 v<X.Y.Z>^)
+git log $PREV..v<X.Y.Z> --oneline | wc -l
+git log $PREV..v<X.Y.Z> --oneline | grep ' feat'   # features; also ' fix', ' perf'
 ```
 
-This was previously worded as a conditional ("when this release becomes the
-baseline"), which is how the anchor silently drifted: v0.13.0 shipped while CI
-still cold-started from v0.12.0, so every rolling bootstrap replayed a far
-longer commit range than necessary. Treat it as mandatory.
+### community-post
 
-Two reasons it matters beyond replay length:
+- A warm announcement grouped into themes, headline win up top; not a commit
+  log.  Emoji in headings and milestone call-outs; British English.
+- Tiny code examples (3-6 lines) for headline language features.  VERIFY each
+  compiles and runs: write it to the scratchpad and build it with
+  `compiler/target/blaise`; for codegen-sensitive features also cross-compile
+  with `--target linux-x86_64` and run it on the VM.
+- Cover: headline wins, the platforms shipped (macOS arm64 is the primary
+  development host from v0.15.0), language/stdlib additions, hardening, notable
+  internals, the fixpoint line count and test count, and a call to action
+  pointing at the GitHub release.  End with "Onwards to v<next>! 🙌" and point
+  at the changelog.
 
-* The anchor's **published tarball** is what CI downloads. It must exist on the
-  GitHub Releases page (`gh release view v<X.Y.Z>`) before CI can cold-start
-  from it — so this bump lands *after* the release is published, not before.
-* Anchors older than v0.13.0 required a `blaise_rtl.a` beside the binary; from
-  v0.13.0 the binary source-builds the RTL and the tarball ships no archive.
-  Never move the anchor *backwards* across that boundary.
+### changelog
 
-This is a CI-only change and lands in its own commit alongside the release.
+- Grouped by area (Platforms, Native backend, Toolchain, Language,
+  ARC/runtime, stdlib, Codegen, Semantic, Debugging, Performance,
+  Tooling/CI); one concise line per entry.
+- A "Release artefacts" section listing the three tarballs and how each
+  binary was verified (the table under "Shipped targets").
+- Close with the fixpoint line count and the test count.
 
-## Step 8 — write community post and changelog
+## Step 10 -- report to the user
 
-Write two documents into `releases/` (e.g. `releases/community-post-v<X.Y.Z>.md`,
-`releases/changelog-v<X.Y.Z>.md`) — NOT the project root. `releases/` is
-gitignored, so these are naturally untracked; do not `git add` them regardless
-— they are working files the user edits and publishes manually. This is also
-where every past release's post/changelog already lives (e.g.
-`releases/community-post-v0.13.0.md`), so put the new ones alongside them.
-
-Both documents cover **only the commits between the previous release tag and
-the tag being cut now** — the range `<prev-tag>..v<X.Y.Z>`, where `<prev-tag>`
-is the most recent existing release tag before this one. Find it with
-`git describe --tags --abbrev=0 v<X.Y.Z>^` (the latest tag reachable from the
-commit just before the release commit), or `git tag --sort=-v:refname | head`.
-Do NOT summarise the whole history — only this cycle's delta.
-
-Survey the commits first (the `v<X.Y.Z>` tag already exists from Step 5):
-`git log <prev-tag>..v<X.Y.Z> --oneline`, and group by theme. Helpful groupings:
-`git log <prev-tag>..v<X.Y.Z> --oneline | grep ' feat'` (features),
-`... | grep ' fix'` (fixes), `... | grep ' perf'` (performance).
-
-### releases/community-post-v<X.Y.Z>.md
-
-A warm, readable announcement for the Blaise community (forums, mailing lists,
-social media). Style:
-
-- **Not** a commit-by-commit log — group changes into themes with a clear
-  headline win up top.
-- Sprinkle emoji throughout section headings and milestone call-outs.
-- Warm, collaborative voice; British English spelling (see the global writing
-  style guide).
-- Include **tiny code examples** for the headline language features — a 3–6
-  line snippet per feature is far more compelling than prose. VERIFY each
-  snippet actually compiles before publishing: write it to `/tmp/snip.pas` and
-  run `compiler/target/blaise --source /tmp/snip.pas --output /tmp/snip` (for
-  codegen-sensitive features, also cross-compile with `--target macos-arm64`
-  or `--target linux-x86_64` so both ISAs accept it).
-- Cover: headline win(s), language/stdlib additions, bug-fix hardening, notable
-  compiler internals, the fixpoint line count and test count, and a closing
-  call to action pointing at the GitHub release page.
-- End with a forward-looking line ("Onwards to v<next>! 🙌").
-- Reference `changelog-v<X.Y.Z>.md` for full details.
-
-### releases/changelog-v<X.Y.Z>.md
-
-A technical changelog for the GitHub Releases page. Style:
-
-- Grouped by area (Native backend, Toolchain, Language, ARC/runtime, stdlib,
-  Codegen, Semantic, Debugging, Performance, Tooling/CI).
-- Each entry is one concise line: what changed and why it matters. More
-  technical than the community post.
-- A short "Examples" block under the Language section showing the new syntax is
-  welcome (same verify-it-compiles rule applies).
-- Close with the fixpoint IR line count and the test count.
-
-## Step 9 — report to the user
-
-Summarise:
-
-- Tag created (e.g. `v<X.Y.Z>`)
-- Stage-2 IR line count and all four OK lines: "FIXPOINT_OK / NATIVE_FIXPOINT_OK
-  / NATIVE_INTERNAL_OK / WARMCACHE_FIXPOINT_OK"
-- Test count (N tests passing)
-- Binary path: `releases/v<X.Y.Z>/blaise` (note: not in git)
-- `-pre` bootstrap binary refreshed
-- New dev version on master
-- Last 3–4 commit oneliners
-- Community post: `releases/community-post-v<X.Y.Z>.md` (untracked)
-- Changelog: `releases/changelog-v<X.Y.Z>.md` (untracked)
-- Release tarballs (upload both to GitHub Releases):
-  - `releases/blaise-v<X.Y.Z>-linux-x86_64.tar.gz`
-  - `releases/blaise-v<X.Y.Z>-freebsd-x86_64.tar.gz` (cross-compiled; user
-    verifies on a FreeBSD box — self-contained, includes RTL + stdlib source +
-    blaise.cfg)
-
-Mention that the user must `git push --tags` themselves if they want the tag on
-the remote — never push automatically.
+- Tag `v<X.Y.Z>` (local, not pushed); the last 3-4 commits.
+- The OK lines: BINARY_FIXPOINT_OK (macos-dev), NATIVE_FIXPOINT_OK (N lines),
+  NATIVE_INTERNAL_OK, WARMCACHE_FIXPOINT_OK, BINARY_FIXPOINT_OK (script),
+  INITORDER_FIXPOINT_OK, LINUX_SELFHOST_IDENTICAL.
+- Test counts: macOS suite + stdlib; Linux VM suite + stdlib (and the Rosetta
+  artefact).
+- `releases/v<X.Y.Z>/blaise`; the `-pre` dir renamed and refreshed.
+- The three tarballs to upload:
+  `releases/blaise-v<X.Y.Z>-macos-arm64.tar.gz`,
+  `releases/blaise-v<X.Y.Z>-linux-x86_64.tar.gz` (the CI anchor reads this
+  one), `releases/blaise-v<X.Y.Z>-freebsd-x86_64.tar.gz` (verified by the
+  master `freebsd-crosscheck` job, or on a FreeBSD box).
+- The post and changelog paths.
+- What waits on the user: pushing (via `ci-verify-then-master`), pushing the
+  tag, publishing the GitHub release, and only then the Step 8b anchor
+  commit.
 
 ## Common pitfalls
 
-- **Unrelated changes swept into the release commit.** `git add project.xml`
-  stages the WHOLE file, including pre-existing build-option edits. Always
-  `git add -p` and confirm `git diff --cached --stat` shows exactly two
-  one-line changes before committing. (This bit the v0.11.0 cut — the commit had
-  to be reset and redone.)
-- **Archiving the wrong binary.** The shipped/bootstrap binary is
-  `/tmp/fpn_blaise2` (from `fixpoint-native.sh`).  `/tmp/fp_blaise2|3` are
-  leftovers of the removed QBE fixpoint (`fixpoint.sh`, gone since v0.15.0);
-  never archive them.
-- **Shipping a binary-only tarball.** The native backend source-builds the RTL,
-  so a tarball with just `blaise` CANNOT compile
-  anything once extracted — it dies with `RTL source directory not found`. Every
-  release tarball must bundle `rtl-src/` (compiler/src/main/pascal) + `stdlib-src/`
-  (stdlib/src/main/pascal) + a `blaise.cfg` beside the binary (Step 6). Verify by
-  extracting the Linux tarball to a temp dir and compiling `hello.pas` from there
-  — it must print output, not an RTL-not-found error.
-- **Running the FreeBSD binary on the Linux host.** The FreeBSD tarball binary is
-  a FreeBSD ET_EXEC and cannot execute on Linux — only sanity-check its ELF shape
-  (`readelf -hW … | grep FreeBSD`). The self-contained layout is validated on the
-  LINUX binary (same driver code); the user runs the FreeBSD tarball on a FreeBSD
-  box.
-- **FreeBSD binary reports `-SNAPSHOT`.** The cross-compiled binary bakes in the
-  working-tree `Version`/`COMPILER_ID`. The FreeBSD cross-compile (Step 6) MUST
-  run before Step 7's dev-version bump. If you build/rebuild it after the bump,
-  the binary is `<next>-SNAPSHOT`, not the release version. Check the FreeBSD
-  binary can't run locally, so verify with `strings … | grep 'blaise-<X.Y.Z>+'`.
-  To fix: `git checkout v<X.Y.Z> -- Blaise.pas uCompilerId.pas`, re-cross-compile,
-  rebuild the tarball, then `git checkout HEAD -- Blaise.pas uCompilerId.pas`.
-  (The Linux release binary is immune — it's archived from the fixpoint in Step 6
-  before the bump.)
-- **Stale fixpoint binary in /tmp.** A `/tmp/fpn_blaise2` left over from an earlier run can be days old. Always confirm the binary you
-  archive prints the RIGHT version: `<binary> --help | head -1`.
-- **COMPILER_ID out of sync with project.xml → bif-coverage fails.** At release
-  `COMPILER_ID` drops `-SNAPSHOT`; at the dev-cycle bump it must re-gain
-  `-SNAPSHOT` for the NEW base version. The base version in `COMPILER_ID` must
-  always match project.xml's `<version>` base, or `TestRun_BifCoverage_NoGaps`
-  fails. Keep the `+bif<N>` tag unchanged unless the `.bif` format changed.
-- **Forgetting to rename the -pre dir.** The newest `releases/v*-pre/` must name
-  the cycle being OPENED, not the one just released. After cutting v<X.Y.Z>,
-  `mv releases/v<X.Y.Z>-pre releases/v<next-minor>.0-pre` (filesystem move —
-  releases/ is gitignored). CI and rolling-bootstrap pick the newest by name.
-- **`compiler/target/blaise` still on the old version.** The fixpoint scripts
-  do not rebuild it; do the `pasbuild compile` steps in Step 2 before the other
-  fixpoints, or they run against the previous version.
-- **Forgetting `--compiler`.** Every `pasbuild` command must pass
-  `--compiler <blaise-binary>`; without it PasBuild falls back to FPC, which is
-  not part of this toolchain.
-- **Assuming `blaise_rtl.a` must sit beside `--compiler`.** It must not and
-  need not — the compiler source-builds the RTL into `rtl/<target>/` beside
-  itself. There is no `FindRTL`. A relocated binary needs resolvable RTL
-  *source* instead (`--rtl-src DIR` / `$BLAISE_RTL_SRC`), not an archive.
-- **Wrong working directory.** All `pasbuild` commands fail outside the project
-  root with a confusing version error. Stay at `/data/devel/new-pascal-compiler`.
-- **Backgrounded fixpoint output drops.** Run the fixpoint scripts in the
-  foreground with a generous timeout (600000 ms). Self-built compilation of the
-  compiler takes ~2 min per stage.
+- **Overwriting a signed macOS binary in place.**  Exit 137 on every later
+  run of that path.  Copy beside it and `mv` over (Steps 5 and 7).
+- **Shipping the cc-linked `/tmp/fpn_blaise2` on macOS.**  It is the
+  `fixpoint-native.sh` cross-check.  Ship the internally linked stage-2 from
+  `macos-dev.sh fixpoint --install`.
+- **Building a binary after the dev bump.**  The cross-compiled binaries bake
+  in the working tree's `Version`/`COMPILER_ID`.  To rebuild one later:
+  `git checkout v<X.Y.Z> -- compiler/src/main/pascal/Blaise.pas
+  compiler/src/main/pascal/uCompilerId.pas`, rebuild, then `git checkout HEAD
+  -- ` the same two files.  Check with `strings <bin> | grep 'blaise-<X.Y.Z>+'`.
+- **A binary-only tarball.**  It cannot compile anything; Step 6's layout is
+  mandatory.  `._*` files in a tarball mean `COPYFILE_DISABLE=1` was missing.
+- **Renaming the Linux tarball.**  CI's cold start fetches exactly
+  `blaise-<tag>-linux-x86_64.tar.gz`.
+- **Testing a stale runner.**  `macos-dev.sh test-compile` can fail without
+  much noise and leave the previous TestRunner, which still passes.  Check the
+  exit code and that the test count rose.
+- **Testing the Linux VM against uncommitted state.**  `linux-vm.sh sync`
+  resets the VM clone to HEAD (committed state only); run it from a clean
+  detached worktree of the tag.
+- **COMPILER_ID out of sync with project.xml.**  Their base versions must
+  match, or `TestRun_BifCoverage_NoGaps` fails.  Leave `+bif<N>` alone.
+- **Forgetting to rename the `-pre` dir.**  The newest `releases/v*-pre/` must
+  name the cycle being opened.
+- **Missing `timeout` on macOS.**  `fixpoint-native.sh` falls back to
+  `gtimeout` or no guard (fixed 2026-10-23); any other script that calls GNU
+  `timeout`, `readelf` or `stat -c` needs the same treatment before it runs on
+  the Mac.
+- **Forgetting `--compiler` with PasBuild.**  Without it PasBuild falls back
+  to FPC, which never builds Blaise.  (`macos-dev.sh` always names the
+  compiler.)
+- **`blaise_rtl.a` beside a binary.**  Not needed: the compiler source-builds
+  the RTL into `rtl/<target>/` beside itself.  A relocated binary needs
+  resolvable RTL *source* (`blaise.cfg`, `--rtl-src` or `$BLAISE_RTL_SRC`).
