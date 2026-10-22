@@ -1348,7 +1348,7 @@ begin
   S := '';
   for I := 1 to 16 do
     begin
-    S := Copy(HexChars, (V and $F) + 1, 1) + S;
+    S := Copy(HexChars, V and $F, 1) + S;   { Blaise strings are 0-based }
     V := V shr 4;
     end;
   Result := '0x' + S;
