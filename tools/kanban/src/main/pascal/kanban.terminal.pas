@@ -73,11 +73,41 @@ const
   VTIME_IDX = 5;
   NCCS_SIZE = 32;
 {$ENDIF}
+{$IFDEF DARWIN}
+  { macOS ioctl commands for termios (sys/ttycom.h); the struct is 72 bytes,
+    so the size field differs from FreeBSD's. }
+  TIOCGETA   = $40487413;   { _IOR('t', 19, struct termios) }
+  TIOCSETAF  = $80487416;   { _IOW('t', 22, struct termios) -- TCSAFLUSH }
+  TIOCGWINSZ = $40087468;   { _IOR('t', 104, struct winsize) }
+
+  ECHO_  = 8;
+  ICANON = 256;
+  ISIG   = 128;
+  IEXTEN = 1024;
+  ICRNL  = 256;
+  IXON   = 512;
+
+  VMIN_IDX  = 16;
+  VTIME_IDX = 17;
+  NCCS_SIZE = 20;
+{$ENDIF}
 
   IFLAG_MASK = ICRNL or IXON;
   LFLAG_MASK = ECHO_ or ICANON or ISIG or IEXTEN;
 
 type
+{$IFDEF DARWIN}
+  { macOS: tcflag_t and speed_t are unsigned long -- 8 bytes each }
+  TTermios = record
+    IFlag:  Int64;
+    OFlag:  Int64;
+    CFlag:  Int64;
+    LFlag:  Int64;
+    CC:     array[0..NCCS_SIZE - 1] of Byte;
+    ISpeed: Int64;
+    OSpeed: Int64;
+  end;
+{$ELSE}
   TTermios = record
     IFlag:  Integer;
     OFlag:  Integer;
@@ -90,6 +120,7 @@ type
     ISpeed: Integer;
     OSpeed: Integer;
   end;
+{$ENDIF}
   PTermios = ^TTermios;
 
   TWinSize = record
@@ -100,9 +131,16 @@ type
   end;
   PWinSize = ^TWinSize;
 
+{$IFDEF DARWIN}
+{ libSystem's ioctl is C-variadic: on Apple arm64 the argument after the
+  request travels on the stack, so it must be declared varargs. }
+function sys_ioctl(Fd: Integer; Request: Int64): Integer; varargs;
+  external name 'ioctl';
+{$ELSE}
 { ioctl is a direct syscall provided by the runtime. }
 function sys_ioctl(Fd: Integer; Request: Int64; Arg: Pointer): Integer;
   external name 'ioctl';
+{$ENDIF}
 function libc_read(Fd: Integer; Buf: Pointer; Count: Int64): Int64;
   external name 'read';
 
@@ -149,6 +187,9 @@ begin
 {$IFDEF FREEBSD}
   Result := sys_ioctl(Fd, TIOCGETA, T);
 {$ENDIF}
+{$IFDEF DARWIN}
+  Result := sys_ioctl(Fd, TIOCGETA, T);
+{$ENDIF}
 {$IFDEF LINUX}
   Result := sys_ioctl(Fd, TCGETS, T);
 {$ENDIF}
@@ -161,6 +202,9 @@ end;
 function tcsetattr(Fd: Integer; Action: Integer; T: PTermios): Integer;
 begin
 {$IFDEF FREEBSD}
+  Result := sys_ioctl(Fd, TIOCSETAF, T);
+{$ENDIF}
+{$IFDEF DARWIN}
   Result := sys_ioctl(Fd, TIOCSETAF, T);
 {$ENDIF}
 {$IFDEF LINUX}
