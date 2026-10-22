@@ -59,7 +59,17 @@ link_stage() {
   return 0
 }
 
-UNIT_ARGS="--unit-path compiler/src/main/pascal --unit-path runtime/src/main/pascal --unit-path stdlib/src/main/pascal"
+# A 5-minute guard on each self-built stage.  GNU `timeout` is not part of
+# macOS (Homebrew coreutils installs it as `gtimeout`); without either the
+# stage runs unguarded rather than failing with "command not found".
+with_timeout() {
+  if command -v timeout >/dev/null 2>&1; then timeout "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$@"
+  else shift; "$@"
+  fi
+}
+
+UNIT_ARGS="--unit-path compiler/src/main/pascal --unit-path stdlib/src/main/pascal"
 SRC="--source compiler/src/main/pascal/Blaise.pas"
 
 echo "stage-0: $COMPILER"
@@ -77,7 +87,7 @@ link_stage /tmp/fpn_stage1.s /tmp/fpn_blaise1 || {
 }
 
 echo "[3/6] stage-1 -> stage-2 assembly (native, 5min timeout)"
-timeout 300 /tmp/fpn_blaise1 $SRC $UNIT_ARGS --backend native --emit-asm > /tmp/fpn_stage2.s 2>/tmp/fpn_stage2.err
+with_timeout 300 /tmp/fpn_blaise1 $SRC $UNIT_ARGS --backend native --emit-asm > /tmp/fpn_stage2.s 2>/tmp/fpn_stage2.err
 RC=$?
 if [ $RC -eq 124 ]; then echo "STAGE2_TIMEOUT"; exit 4
 elif [ $RC -eq 139 ]; then echo "STAGE2_SEGFAULT"; exit 4
@@ -91,7 +101,7 @@ link_stage /tmp/fpn_stage2.s /tmp/fpn_blaise2 || {
 }
 
 echo "[5/6] stage-2 -> stage-3 assembly (native, 5min timeout)"
-timeout 300 /tmp/fpn_blaise2 $SRC $UNIT_ARGS --backend native --emit-asm > /tmp/fpn_stage3.s 2>/tmp/fpn_stage3.err
+with_timeout 300 /tmp/fpn_blaise2 $SRC $UNIT_ARGS --backend native --emit-asm > /tmp/fpn_stage3.s 2>/tmp/fpn_stage3.err
 RC=$?
 if [ $RC -eq 124 ]; then echo "STAGE3_TIMEOUT"; exit 4
 elif [ $RC -eq 139 ]; then echo "STAGE3_SEGFAULT"; exit 4
