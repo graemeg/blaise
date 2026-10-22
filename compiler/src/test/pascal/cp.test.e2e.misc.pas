@@ -349,6 +349,10 @@ type
       sort-order warnings, which the harness passed to the linker. }
     procedure TestBuildRtlObjects_CollatingLocale_PrintsOnlyObjects;
     procedure TestRun_TestRunner_HelpAndRejectedOptions;
+    { GH #224: statements through a pointer element of an array -- an
+      element of the array it points at, the whole pointee, a field of a
+      record it points at -- written and read back }
+    procedure TestRun_DerefAfterSubscript_Statements;
   end;
 
 implementation
@@ -5024,6 +5028,48 @@ const
     ''';
 begin
   AssertRunsOnAll(Src, '17' + LineEnding, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_DerefAfterSubscript_Statements;
+const
+  Src = '''
+    program P;
+    const BlkSize = 12;
+    type
+      BufBlock = array [0 .. BlkSize - 1] of Integer;
+      PBlock = ^BufBlock;
+      TRec = record A, B: Integer; end;
+      PRec = ^TRec;
+      Buffer = array [0 .. 31] of PBlock;
+    var
+      Buf: Buffer;
+      Blk, Blk2: BufBlock;
+      X, N: Integer;
+      Recs: array of PRec;
+      R: TRec;
+      DP: array[0..1] of ^Integer;
+    begin
+      Blk[0] := 2;
+      Buf[0] := @Blk;
+      Buf[0]^[1] := 12;
+      X := Buf[0]^[1];
+      WriteLn(X, ' ', Blk[1]);
+      Blk2[3] := 9;
+      Buf[0]^ := Blk2;
+      WriteLn(Blk[3], ' ', Buf[0]^[3]);
+      SetLength(Recs, 1);
+      Recs[0] := @R;
+      Recs[0]^.A := 5;
+      Recs[0]^.B := Recs[0]^.A + 1;
+      WriteLn(R.A, ' ', R.B);
+      DP[1] := @N;
+      DP[1]^ := 77;
+      WriteLn(N)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '12 12' + LE + '9 9' + LE + '5 6' + LE + '77' + LE, 0);
 end;
 
 initialization

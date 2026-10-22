@@ -1196,7 +1196,12 @@ SubscriptMethodCall
 SubscriptSuffix
     = DOT IDENT
     | LBRACKET Expr { COMMA Expr } RBRACKET
+    | CARET
     ;
+
+(* CARET dereferences a pointer element: Buf[0]^[1] := V, Buf[0]^ := V,
+ * Recs[I]^.F := V.  A chain ending in CARET is a store through that pointer.
+ * Until 2026-10-22 a CARET after a subscript was a parse error (GH #224). *)
 
 IfStmt
     = IF Expr THEN Stmt [ ELSE Stmt ]

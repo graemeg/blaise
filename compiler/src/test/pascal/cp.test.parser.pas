@@ -28,6 +28,10 @@ type
       O.Rows[I, J].Run(); -- desugars to chained subscripts, as a bare
       variable's A[I, J] does (it was "Expected ']' but got ','") }
     procedure TestParse_CommaIndexAfterField_DesugarsToChain;
+    { GH #224: a statement that dereferences a pointer element --
+      Buf[0]^[1] := V, Buf[0]^ := V, Recs[0]^.A := V -- parses (it was
+      "Expected '.' or ':=' after subscript") }
+    procedure TestParse_DerefAfterSubscript_Statements;
     { FPC/Delphi constructs Blaise deliberately omits are recognised and
       rejected with the Blaise form ("recognise, reject, explain";
       language-rationale.adoc).  They used to fail with an unrelated
@@ -1142,6 +1146,34 @@ begin
       (Sub.IndexExpr <> nil));
     AssertTrue('A.B.Handlers[I](X) is a call through the element',
       Prog.Block.Stmts.Items[2] is TExprCallStmt);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestParse_DerefAfterSubscript_Statements;
+var
+  Prog: TProgram;
+  SA: TStaticSubscriptAssign;
+  PW: TPointerWriteStmt;
+  FA: TFieldAssignment;
+begin
+  Prog := ParseSource(
+    'program P; var Buf, Recs, V: Integer;'
+    + ' begin Buf[0]^[1] := V; Buf[0]^ := V; Recs[0]^.A := V end.');
+  try
+    AssertTrue('Buf[0]^[1] := V is an element write',
+      Prog.Block.Stmts.Items[0] is TStaticSubscriptAssign);
+    SA := TStaticSubscriptAssign(Prog.Block.Stmts.Items[0]);
+    AssertTrue('of the array Buf[0] points at', SA.BaseExpr is TDerefExpr);
+    AssertTrue('Buf[0]^ := V is a pointer write',
+      Prog.Block.Stmts.Items[1] is TPointerWriteStmt);
+    PW := TPointerWriteStmt(Prog.Block.Stmts.Items[1]);
+    AssertTrue('through the element', PW.PtrExpr is TStringSubscriptExpr);
+    AssertTrue('Recs[0]^.A := V is a field write',
+      Prog.Block.Stmts.Items[2] is TFieldAssignment);
+    FA := TFieldAssignment(Prog.Block.Stmts.Items[2]);
+    AssertTrue('on the record Recs[0] points at', FA.ObjExpr is TDerefExpr);
   finally
     Prog.Free();
   end;

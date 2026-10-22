@@ -3845,6 +3845,7 @@ var
   Fld:       TFieldAccessExpr;
   FldAssign: TFieldAssignment;
   SubAssign: TStaticSubscriptAssign;
+  PtrWrite:  TPointerWriteStmt;
 begin
   Chain := Self.ParsePostfixChain(ABase);
   if not Check(tkAssign) then
@@ -3891,6 +3892,18 @@ begin
     Sub.Free();  { frees the detached field node too }
     FldAssign.Expr := ParseExpr();
     Exit(FldAssign);
+  end;
+  if Chain is TDerefExpr then
+  begin
+    { ...^ := V -- a store through the pointer the chain yields }
+    PtrWrite := TPointerWriteStmt.Create();
+    PtrWrite.Line := ALine;
+    PtrWrite.Col := ACol;
+    PtrWrite.PtrExpr := TDerefExpr(Chain).Expr;
+    TDerefExpr(Chain).Expr := nil;
+    Chain.Free();
+    PtrWrite.ValExpr := ParseExpr();
+    Exit(PtrWrite);
   end;
   if Chain is TStringSubscriptExpr then
   begin
@@ -4377,6 +4390,10 @@ begin
             holds (a bare 'Name[I];' stays an error: calls need parentheses) }
           Exit(ParseExprCallStmt(ChainBase, Line, Col));
         end;
+        if Check(tkCaret) then
+          { Name[I]^ ... -- a pointer element dereferenced: Buf[0]^[1] := V,
+            Buf[0]^ := V, Buf[0]^.F := V (GH #224) -- an ordinary chain }
+          Exit(Self.ChainTailStmt(ChainBase, Name, Line, Col));
         if not Check(tkDot) then
           raise EParseError.Create(Format(
             'Expected ''.'' or '':='' after subscript at line %d col %d in %s',
