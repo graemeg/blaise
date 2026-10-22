@@ -90,6 +90,10 @@ type
     DebugMode: Boolean;       { codegen debug / leak tracking }
     OPDFEnabled: Boolean;     { OPDF code shaping }
     OPDFAsmFile: string;      { OPDF sidecar path, if any }
+    EntitlementsFile: string; { --entitlements <plist>: macOS code-signing
+                                entitlements for the internal ad-hoc
+                                signer ('' = none, or get-task-allow for an
+                                --debug-opdf build) }
     UseInternalAsm: Boolean;  { --assembler internal (native backend) }
     AssemblerExplicit: Boolean;  { True when user passed --assembler }
     AssemblerChoiceBad: Boolean;  { a --assembler value was given that is

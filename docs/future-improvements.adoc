@@ -312,22 +312,47 @@ top of it is small.
 
 === Debugger entitlement requirements
 
-*What.* On macOS, a debugger binary must carry the
-`com.apple.security.get-task-allow` entitlement (and, post-SIP, the binary
-it attaches to must carry the same entitlement) before the kernel permits
-`task_for_pid`.  The Blaise debugger will need a documented signing workflow
-for macOS targets.
+*What.* A macOS debugger works through the target's Mach task port,
+obtained with `task_for_pid()`; `ptrace` alone cannot read memory or
+registers.  The kernel checks both sides of that request:
 
-*Why it matters.* Without the entitlement, `ptrace` and Mach exception
-ports are blocked by the kernel even for self-compiled binaries.  Open-source
-users who cannot obtain an Apple Developer certificate ($99/year) need a
-supported path.
+* *The debugger* must be trusted: running as root, Apple-signed with the
+  debugger entitlement (as lldb's `debugserver` is), or authorised by the
+  user through Developer Mode / DevToolsSecurity.
+* *The target* must consent.  A program signed with the hardened runtime
+  refuses unless its signature carries
+  `com.apple.security.get-task-allow`; a program without the hardened
+  runtime does not need it.
+
+Xcode follows that split: Debug builds carry `get-task-allow`, Release
+builds do not.  A macOS port of the Blaise debugger (pdr runs on Linux and
+FreeBSD through `ptrace` today) needs a supported way through both checks.
+
+*Why it matters.* The debugger-side check is the hard one: an ad-hoc-signed
+debugger is not trusted as Apple's `debugserver` is, and open-source users
+who cannot obtain an Apple Developer certificate ($99/year) need a supported
+path.  The target-side check matters as soon as Blaise binaries are signed
+with the hardened runtime, which notarisation requires.
+
+*Status.* The target side is ready (2026-10-22).  The internal ad-hoc
+signer writes entitlements into the signature, in the layout Apple's
+`codesign` uses: the XML plist, its DER form and an empty requirement set,
+each hashed into a CodeDirectory special slot.  A `--debug-opdf` build for
+macOS is signed with `get-task-allow`, following Xcode's Debug convention,
+and `--entitlements <plist>` signs with any plist (internal linker only),
+with no `codesign` re-run.
+
+Today this changes nothing observable: Blaise does not sign with the
+hardened runtime, so its binaries already let a trusted debugger attach,
+and lldb attaches with or without the entitlement.  It takes effect once
+the hardened runtime is enabled.  macOS kills an ad-hoc binary that claims
+a restricted entitlement, whichever tool signed it.  The debugger side --
+the debug-server design below -- remains open.
 
 *Recommended approach.*
 
-. *Ad-hoc signing* — the user self-signs with a locally generated certificate.
-  Works for development; the compiler should emit a post-build `codesign`
-  invocation for debug configurations.
+. *Ad-hoc signing* — done: the compiler signs debug builds itself (see
+  Status).
 
 . *Debug-server architecture* — ship a small, separately signed stub
   (`blaisedbgserver`) that handles `task_for_pid` and communicates over a

@@ -166,6 +166,8 @@ type
     FGlobalNames: TList<string>; { exported/global symbols }
     FGlobalAddrs: TList<Int64>;
     FIdent: string;              { CodeDirectory identifier }
+    FEntXml: string;             { entitlements plist, verbatim; '' = none }
+    FEntDer: string;             { the same entitlements, DER-encoded }
   public
     constructor Create;
     destructor Destroy; override;
@@ -180,6 +182,13 @@ type
     procedure SetEntryTextOffset(AOff: Integer);
     { CodeDirectory identifier (conventionally the binary's name). }
     procedure SetIdentifier(const AName: string);
+    { Sign with the entitlements in the XML plist APlistXml ('' = none).
+      The signature then carries the plist (CSSLOT_ENTITLEMENTS), its DER
+      form (CSSLOT_DER_ENTITLEMENTS) and an empty requirement set, each
+      hashed into the CodeDirectory's special slots -- the layout Apple's
+      codesign produces for an ad-hoc signature with entitlements.  Raises
+      EEntitlements for a plist the DER encoder does not accept. }
+    procedure SetEntitlements(const APlistXml: string);
     { Record a pointer slot at AVmAddr that dyld must slide (rebase). }
     procedure AddRebase(AVmAddr: Int64);
     { Record a pointer slot at AVmAddr bound to libSystem symbol AName. }
@@ -279,7 +288,7 @@ const
 implementation
 
 uses
-  streams, uStrCompat, blaise.sha256;
+  streams, uStrCompat, blaise.sha256, blaise.entitlements;
 
 procedure _mw_memcpy(Dst, Src: Pointer; N: Int64); external name 'memcpy';
 
@@ -1112,6 +1121,14 @@ const
   CS_HASHTYPE_SHA256 = 2;
   CS_PAGE_BITS = 12;      { 4096-byte signature pages }
   CD_HEADER_SIZE = 88;    { version $20400 layout }
+  { entitlements (SetEntitlements): three more blobs in the SuperBlob, and
+    the CodeDirectory hashes them in special slots -1..-7 }
+  CSMAGIC_REQUIREMENTS         = Integer($FADE0C01);
+  CSMAGIC_EMBEDDED_ENTITLEMENTS = Integer($FADE7171);
+  CSMAGIC_EMBEDDED_DER_ENTITLEMENTS = Integer($FADE7172);
+  CSSLOT_REQUIREMENTS = 2;
+  CSSLOT_ENTITLEMENTS = 5;
+  CSSLOT_DER_ENTITLEMENTS = 7;
 
 procedure PushUleb(ABuf: TByteBuf; AVal: Int64);
 var
@@ -1207,6 +1224,14 @@ begin
   FIdent := AName;
 end;
 
+procedure TMachOExecWriter.SetEntitlements(const APlistXml: string);
+begin
+  FEntXml := APlistXml;
+  FEntDer := '';
+  if APlistXml <> '' then
+    FEntDer := EntitlementsDer(APlistXml);
+end;
+
 procedure TMachOExecWriter.AddRebase(AVmAddr: Int64);
 begin
   FRebases.Add(AVmAddr);
@@ -1277,6 +1302,8 @@ var
   SigOff, SigSize: Int64;
   NSlots, PageLen: Integer;
   Unsigned, Blob, Page: string;
+  ReqBlob, EntBlob, DerBlob: string;
+  NSpecial, NBlobs, CdLen, Off: Integer;
   I: Integer;
   A: Int64;
   StrIdx: Integer;
@@ -1376,8 +1403,24 @@ begin
       file up to its own start (codeLimit = SigOff) }
     SigOff := MoAlignUp64(StrOff + StrT.Count, 16);
     NSlots := Integer((SigOff + 4095) div 4096);
-    SigSize := 12 + 8 + CD_HEADER_SIZE + Length(FIdent) + 1
-      + Int64(NSlots) * 32;
+    NSpecial := 0;
+    NBlobs := 1;
+    ReqBlob := '';
+    EntBlob := '';
+    DerBlob := '';
+    if FEntXml <> '' then
+    begin
+      NSpecial := CSSLOT_DER_ENTITLEMENTS;
+      NBlobs := 4;
+      ReqBlob := Be32(CSMAGIC_REQUIREMENTS) + Be32(12) + Be32(0);
+      EntBlob := Be32(CSMAGIC_EMBEDDED_ENTITLEMENTS)
+        + Be32(8 + Length(FEntXml)) + FEntXml;
+      DerBlob := Be32(CSMAGIC_EMBEDDED_DER_ENTITLEMENTS)
+        + Be32(8 + Length(FEntDer)) + FEntDer;
+    end;
+    CdLen := CD_HEADER_SIZE + Length(FIdent) + 1 + (NSpecial + NSlots) * 32;
+    SigSize := 12 + 8 * NBlobs + CdLen
+      + Length(ReqBlob) + Length(EntBlob) + Length(DerBlob);
 
     { ---- header ---- }
     Head.PushU32(MH_MAGIC_64);
@@ -1636,19 +1679,29 @@ begin
       Everything BIG-endian.  The page hashes cover [0, SigOff) of the
       exact bytes emitted above — nothing may change after this point. }
     Unsigned := Head.AsString();
+    Off := 12 + 8 * NBlobs;
     Blob := Be32(CSMAGIC_EMBEDDED_SIGNATURE)
       + Be32(SigSize)
-      + Be32(1)                                { blob count }
+      + Be32(NBlobs)                           { blob count }
       + Be32(0)                                { CSSLOT_CODEDIRECTORY }
-      + Be32(20);                              { its offset }
+      + Be32(Off);                             { its offset }
+    if NBlobs > 1 then
+    begin
+      Off := Off + CdLen;
+      Blob := Blob + Be32(CSSLOT_REQUIREMENTS) + Be32(Off);
+      Off := Off + Length(ReqBlob);
+      Blob := Blob + Be32(CSSLOT_ENTITLEMENTS) + Be32(Off);
+      Off := Off + Length(EntBlob);
+      Blob := Blob + Be32(CSSLOT_DER_ENTITLEMENTS) + Be32(Off);
+    end;
     Blob := Blob
       + Be32(CSMAGIC_CODEDIRECTORY)
-      + Be32(SigSize - 20)                     { CD length }
+      + Be32(CdLen)                            { CD length }
       + Be32($20400)                           { version }
       + Be32(CS_ADHOC)
-      + Be32(CD_HEADER_SIZE + Length(FIdent) + 1)   { hashOffset }
+      + Be32(CD_HEADER_SIZE + Length(FIdent) + 1 + NSpecial * 32) { hashOffset }
       + Be32(CD_HEADER_SIZE)                   { identOffset }
-      + Be32(0)                                { nSpecialSlots }
+      + Be32(NSpecial)                         { nSpecialSlots }
       + Be32(NSlots)                           { nCodeSlots }
       + Be32(SigOff)                           { codeLimit }
       + Chr(32) + Chr(CS_HASHTYPE_SHA256)      { hashSize, hashType }
@@ -1662,6 +1715,18 @@ begin
       + Be64(TextSegFileSize)                  { execSegLimit }
       + Be64(CS_EXECSEG_MAIN_BINARY)           { execSegFlags }
       + FIdent + Chr(0);
+    { special slots, stored from -NSpecial up to -1 just before the code
+      hashes: slot 7 DER entitlements, 5 entitlements, 2 requirements, the
+      unused ones zero }
+    for I := NSpecial downto 1 do
+      if I = CSSLOT_DER_ENTITLEMENTS then
+        Blob := Blob + Sha256(DerBlob)
+      else if I = CSSLOT_ENTITLEMENTS then
+        Blob := Blob + Sha256(EntBlob)
+      else if I = CSSLOT_REQUIREMENTS then
+        Blob := Blob + Sha256(ReqBlob)
+      else
+        Blob := Blob + Be64(0) + Be64(0) + Be64(0) + Be64(0);
     for I := 0 to NSlots - 1 do
     begin
       PageLen := 4096;
@@ -1670,6 +1735,7 @@ begin
       Page := Copy(Unsigned, I * 4096, PageLen);
       Blob := Blob + Sha256(Page);
     end;
+    Blob := Blob + ReqBlob + EntBlob + DerBlob;
 
     Result := Unsigned + Blob;
   finally

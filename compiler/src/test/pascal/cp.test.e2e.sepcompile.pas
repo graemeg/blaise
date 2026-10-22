@@ -126,6 +126,15 @@ type
       dedupe of RTL objects the program already compiled could not read
       Mach-O objects, so the RTL copy was linked too and its _init clashed }
     procedure TestRtlUnitImportedByProgram_MacOSLinksOnce;
+    { macOS: an --debug-opdf build is signed with get-task-allow and an
+      --entitlements build with the given plist; codesign verifies each
+      signature and reads the entitlements back, and both binaries run.
+      (The plist holds real, unrestricted entitlements: macOS kills an
+      ad-hoc binary claiming an arbitrary one, whoever signed it.) }
+    procedure TestEntitlements_MacOSSignatureCarriesThem;
+    { --entitlements is refused for a non-macOS target, a missing file and
+      a plist value the signer does not support }
+    procedure TestEntitlements_Errors;
     { a unit's initialised variables -- expressions, named constants, a
       float expression, in the interface and the implementation -- start
       with their values (each was 0 unless written as a bare literal) }
@@ -1441,6 +1450,124 @@ begin
     AssertEquals('rtlonce exit code', 0, Rc);
     AssertEquals('rtlonce stdout', '144'#10, Captured);
   end;
+end;
+
+procedure TSepCompileTests.TestEntitlements_MacOSSignatureCarriesThem;
+const
+  ProgSrc =
+    '''
+    program EntP;
+    begin
+      WriteLn('signed')
+    end.
+    ''';
+  Plist =
+    '''
+    <?xml version="1.0" encoding="UTF-8"?>
+    <plist version="1.0">
+    <dict>
+      <key>com.apple.security.cs.disable-library-validation</key>
+      <true/>
+      <key>com.apple.security.get-task-allow</key>
+      <true/>
+    </dict>
+    </plist>
+    ''';
+var
+  Dir, ProgPas, Captured: string;
+  Rc: Integer;
+begin
+  if HostTarget().OS <> osMacOS then
+  begin
+    Ignore('needs macOS codesign to read the signature back');
+    Exit
+  end;
+  Dir := FScratch + '/entitlements';
+  ForceDirectories(Dir);
+  ProgPas := Dir + '/entp.pas';
+  WriteFile(ProgPas, ProgSrc);
+  WriteFile(Dir + '/ent.plist', Plist);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/entp_dbg',
+                   '--debug-opdf'], Captured);
+  AssertEquals('--debug-opdf build (out: ' + Captured + ')', 0, Rc);
+  AssertEquals('--debug-opdf signature verifies', 0,
+    RunProc('/usr/bin/codesign', ['--verify', '--strict', Dir + '/entp_dbg'],
+      Captured));
+  RunProc('/usr/bin/codesign', ['-d', '--entitlements', '-', '--xml',
+    Dir + '/entp_dbg'], Captured);
+  AssertTrue('--debug-opdf carries get-task-allow (got: ' + Captured + ')',
+    Pos('com.apple.security.get-task-allow', Captured) >= 0);
+  AssertEquals('--debug-opdf binary runs', 0,
+    RunBinary(Dir + '/entp_dbg', Captured));
+  AssertEquals('--debug-opdf output', 'signed'#10, Captured);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/entp_ent',
+                   '--entitlements', Dir + '/ent.plist'], Captured);
+  AssertEquals('--entitlements build (out: ' + Captured + ')', 0, Rc);
+  AssertEquals('--entitlements signature verifies', 0,
+    RunProc('/usr/bin/codesign', ['--verify', '--strict', Dir + '/entp_ent'],
+      Captured));
+  RunProc('/usr/bin/codesign', ['-d', '--entitlements', '-', '--xml',
+    Dir + '/entp_ent'], Captured);
+  AssertTrue('--entitlements carries the plist (got: ' + Captured + ')',
+    Pos('com.apple.security.cs.disable-library-validation', Captured) >= 0);
+  AssertEquals('--entitlements binary runs', 0,
+    RunBinary(Dir + '/entp_ent', Captured));
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/entp_plain'],
+    Captured);
+  AssertEquals('plain build', 0, Rc);
+  RunProc('/usr/bin/codesign', ['-d', '--entitlements', '-', '--xml',
+    Dir + '/entp_plain'], Captured);
+  AssertTrue('a plain build carries no entitlements (got: ' + Captured + ')',
+    Pos('get-task-allow', Captured) < 0);
+end;
+
+procedure TSepCompileTests.TestEntitlements_Errors;
+const
+  ProgSrc =
+    '''
+    program EntE;
+    begin
+    end.
+    ''';
+var
+  Dir, ProgPas, Captured: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  Dir := FScratch + '/entitlements_err';
+  ForceDirectories(Dir);
+  ProgPas := Dir + '/ente.pas';
+  WriteFile(ProgPas, ProgSrc);
+  WriteFile(Dir + '/bad.plist',
+    '<plist><dict><key>k</key><date>2026-01-01T00:00:00Z</date></dict></plist>');
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/ente',
+                   '--target', 'linux-x86_64',
+                   '--entitlements', Dir + '/bad.plist'], Captured);
+  AssertTrue('non-macOS target refused', Rc <> 0);
+  AssertTrue('non-macOS message (got: ' + Captured + ')',
+    Pos('macOS targets only', Captured) >= 0);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/ente',
+                   '--target', 'macos-arm64',
+                   '--entitlements', Dir + '/missing.plist'], Captured);
+  AssertTrue('missing file refused', Rc <> 0);
+  AssertTrue('missing file message (got: ' + Captured + ')',
+    Pos('file not found', Captured) >= 0);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/ente',
+                   '--target', 'macos-arm64',
+                   '--entitlements', Dir + '/bad.plist'], Captured);
+  AssertTrue('unsupported plist value refused', Rc <> 0);
+  AssertTrue('unsupported value message (got: ' + Captured + ')',
+    Pos('<date>', Captured) >= 0);
 end;
 
 procedure TSepCompileTests.TestUnitVarInitialiserExpressions_HaveTheirValues;

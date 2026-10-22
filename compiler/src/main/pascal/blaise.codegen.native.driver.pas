@@ -105,7 +105,8 @@ uses
   blaise.assembler.arm64,
   blaise.elfreader,
   blaise.linker.elf,
-  blaise.linker.macho;
+  blaise.linker.macho,
+  blaise.entitlements;
 
 { In-process assembly, keyed on the target CPU: x86-64 text goes to the
   ELF-emitting assembler, arm64 text to the Mach-O-emitting one.  Each
@@ -688,6 +689,20 @@ begin
     if Result <> '' then Exit;
     Lk := TMachOLinker.Create();
     try
+      { entitlements: the file --entitlements names, else get-task-allow for
+        an --debug-opdf build -- the target's consent to being debugged, as
+        Xcode signs a Debug build.  Needed only under the hardened runtime,
+        which Blaise does not enable yet. }
+      try
+        if AOpts.EntitlementsFile <> '' then
+          Lk.SetEntitlements(ReadFile(AOpts.EntitlementsFile))
+        else if AOpts.OPDFEnabled then
+          Lk.SetEntitlements(DebugEntitlementsPlist());
+      except
+        on E: Exception do
+          Exit('--entitlements ' + AOpts.EntitlementsFile + ': '
+            + Exception(E).Message);
+      end;
       try
         Lk.AddObjectFile(AObjFile);
         if AExtraObjects <> nil then
@@ -1034,6 +1049,17 @@ begin
     AOpts.UseInternalAsm := True;
   if not AOpts.LinkerExplicit then
     AOpts.UseInternalLinker := True;
+  { entitlements are written by the internal Mach-O signer only }
+  if (Result = '') and (AOpts.EntitlementsFile <> '') then
+  begin
+    if AOpts.Target.OS <> osMacOS then
+      Result := '--entitlements applies to macOS targets only'
+    else if not AOpts.UseInternalLinker then
+      Result := '--entitlements needs the internal linker (the external ' +
+        'link is signed by the system linker; re-sign it with codesign)'
+    else if not FileExists(AOpts.EntitlementsFile) then
+      Result := '--entitlements: file not found: ' + AOpts.EntitlementsFile;
+  end;
 end;
 
 initialization

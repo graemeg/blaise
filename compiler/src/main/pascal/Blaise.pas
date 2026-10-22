@@ -142,7 +142,11 @@ begin
   WriteLn(FormatFlagLine('--debug',
     'Enable runtime memory leak reporting on exit'));
   WriteLn(FormatFlagLine('--debug-opdf',
-    'Emit OPDF debug info (.opdf.s companion file)'));
+    'Emit OPDF debug info (.opdf.s companion file); on macOS also sign'));
+  WriteLn(FormatFlagLine('',
+    'with get-task-allow (consent to debugging, as Xcode Debug builds)'));
+  WriteLn(FormatFlagLine('--entitlements <plist>',
+    'macOS: sign with the entitlements in this XML plist'));
   WriteLn('');
   WriteLn('Configuration:');
   WriteLn('  blaise.cfg (next to the binary, then ~/.blaise.cfg) can set, one');
@@ -286,6 +290,11 @@ begin
       AOpts.DebugMode := True
     else if Arg = '--debug-opdf' then
       AOpts.OPDFEnabled := True
+    else if (Arg = '--entitlements') and (I < ParamCount()) then
+    begin
+      Inc(I);
+      AOpts.EntitlementsFile := ParamStr(I);
+    end
     else if (Arg = '--backend') and (I < ParamCount()) then
     begin
       Inc(I);

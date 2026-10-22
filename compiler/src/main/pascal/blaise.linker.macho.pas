@@ -108,6 +108,9 @@ type
       (the backend's program entry is '_main' — the LC_MAIN contract). }
     function Link(const AEntrySym: string): string;
     procedure LinkToFile(const AEntrySym, AOutPath: string);
+    { Sign the executable with the entitlements in the XML plist
+      APlistXml (TMachOExecWriter.SetEntitlements). }
+    procedure SetEntitlements(const APlistXml: string);
   end;
 
 implementation
@@ -776,6 +779,11 @@ begin
     Integer(DefinedVm(DefIdx) - FLayout.TextVm));
 
   Result := FWriter.Finish();
+end;
+
+procedure TMachOLinker.SetEntitlements(const APlistXml: string);
+begin
+  FWriter.SetEntitlements(APlistXml);
 end;
 
 procedure TMachOLinker.LinkToFile(const AEntrySym, AOutPath: string);
