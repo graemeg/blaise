@@ -277,6 +277,28 @@ begin
     (Pos('^', AMapped) < 0) and (not KnownTypeName(ADeclared, AMapped));
 end;
 
+{ The width in bytes of a Blaise builtin type name, or -1 when it is not a
+  fixed-width builtin (uSymbolTable.RegisterBuiltins). }
+function BuiltinTypeWidth(const AName: string): Integer;
+var
+  U: string;
+begin
+  U := UpperCase(AName);
+  if (U = 'BYTE') or (U = 'UINT8') or (U = 'INT8') or (U = 'BOOLEAN') then
+    Result := 1
+  else if (U = 'SMALLINT') or (U = 'INT16') or (U = 'WORD') or (U = 'UINT16') then
+    Result := 2
+  else if (U = 'INTEGER') or (U = 'INT32') or (U = 'UINT32') or
+          (U = 'CARDINAL') or (U = 'SINGLE') or (U = 'FLOAT32') then
+    Result := 4
+  else if (U = 'INT64') or (U = 'UINT64') or (U = 'QWORD') or (U = 'PTRUINT') or
+          (U = 'INT') or (U = 'UINT') or (U = 'DOUBLE') or (U = 'FLOAT') or
+          (U = 'FLOAT64') or (U = 'POINTER') or (U = 'PCHAR') then
+    Result := 8
+  else
+    Result := -1;
+end;
+
 procedure EmitTypedef(T: TCTypedef; AMapper: TTypeMapper;
   ATypeLines: TStringList; ADeclared: TSet<string>);
 var
@@ -284,6 +306,24 @@ var
 begin
   Mapped := TypedefRhs(T, AMapper);
   if Mapped = '' then Exit;          { typedef of void — meaningless }
+  { A typedef NAMED like a Blaise builtin type -- zconf.h's
+    'typedef unsigned char Byte;' -- cannot be declared: it is a duplicate
+    type name and the whole unit fails to compile.  Every reference to the
+    name then resolves to the builtin, which is the same type when the
+    widths agree; when they do not, say so where the reader will see it. }
+  if Pos(' ' + UpperCase(T.Name) + ' ', BuiltinTypeNames) >= 0 then
+  begin
+    if (BuiltinTypeWidth(Mapped) >= 0) and
+       (BuiltinTypeWidth(Mapped) <> BuiltinTypeWidth(T.Name)) then
+      ATypeLines.Add('  { WARNING: C typedef ''' + T.Name + ''' (' + T.CType +
+        ', ' + IntToStr(BuiltinTypeWidth(Mapped)) + ' bytes) shares its name ' +
+        'with the Blaise builtin (' + IntToStr(BuiltinTypeWidth(T.Name)) +
+        ' bytes); references here use the builtin -- check their layout }')
+    else
+      ATypeLines.Add('  { C typedef ''' + T.Name + ''' (' + T.CType +
+        ') is the Blaise builtin of the same name }');
+    Exit;
+  end;
   { Self-alias — the record/tag already carries the name.  The compare is
     case-INSENSITIVE because Pascal folds identifier case: ncurses declares
     'typedef struct screen SCREEN;', so the opaque 'screen' record and the

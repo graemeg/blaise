@@ -44,6 +44,11 @@ type
     procedure TestEmit_CDeclOrder_Preserved;
     procedure TestEmit_UnknownAliasTarget_DegradesToPointer;
     procedure TestEmit_UnknownTypedefRHS_DegradesToPointer;
+    { zconf.h: 'typedef unsigned char Byte;' names a Blaise builtin type.
+      Re-declaring it ('Byte = UInt8;') is a duplicate type name and the
+      whole binding failed to compile; a same-width builtin is used instead,
+      and a different width keeps the builtin with a visible warning. }
+    procedure TestEmit_Typedef_BuiltinTypeName_Skipped;
     procedure TestEmit_Union_ExactSizeRawArray;
     procedure TestEmit_Union_Uncomputable_Placeholder;
     procedure TestEmit_UnionAccessor_InterfaceAndBody;
@@ -148,6 +153,27 @@ end;
 procedure TEmitTests.TestEmit_Typedef_MappedType;
 begin
   AssertTrue(ContainsStr(Self.Emit(), 'XID = UInt64;'));
+end;
+
+procedure TEmitTests.TestEmit_Typedef_BuiltinTypeName_Skipped;
+var
+  F: TCFunction;
+  Src: string;
+begin
+  FModel.AddTypedef(TCTypedef.Create('Byte', 'unsigned char'));
+  FModel.AddTypedef(TCTypedef.Create('Bytef', 'Byte'));
+  FModel.AddTypedef(TCTypedef.Create('Word', 'unsigned int'));
+  F := TCFunction.Create('crc');
+  F.ReturnCType := 'Word';
+  F.Params.Add(TCParam.Create('buf', 'Bytef *'));
+  FModel.AddFunction(F);
+  Src := Self.Emit();
+  AssertTrue('builtin Byte not redeclared', not ContainsStr(Src, 'Byte = UInt8;'));
+  AssertTrue('typedef of the builtin kept', ContainsStr(Src, 'Bytef = Byte;'));
+  AssertTrue('builtin Word not redeclared', not ContainsStr(Src, 'Word = UInt32;'));
+  AssertTrue('width mismatch flagged', ContainsStr(Src, 'WARNING') and
+    ContainsStr(Src, '''Word'''));
+  AssertTrue('pointer alias still emitted', ContainsStr(Src, 'PBytef = ^Bytef;'));
 end;
 
 procedure TEmitTests.TestEmit_Typedef_CaseInsensitiveSelfAlias_Skipped;
