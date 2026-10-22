@@ -35,6 +35,10 @@ type
     { Parser — structure                                                   }
     { ------------------------------------------------------------------ }
     procedure TestParse_Unit_IsNotProgram;
+    { A variable declared twice in a unit's interface is reported, not a
+      crash: the duplicate's symbol was freed before the message read its
+      name (nil dereference in DefineGlobalLastWins) }
+    procedure TestSemantic_DuplicateInterfaceVar_Reported;
     procedure TestParse_Unit_Name;
     procedure TestParse_Unit_IntfHasForwardDecls;
     procedure TestParse_Unit_ForwardDeclHasNilBody;
@@ -639,6 +643,29 @@ begin
     Parser.Free();
     Lexer.Free();
   end;
+end;
+
+procedure TUnitTests.TestSemantic_DuplicateInterfaceVar_Reported;
+var
+  Msg: string;
+begin
+  Msg := '';
+  try
+    GenAsmWithUnit('''
+      unit ua;
+      interface
+      var
+        X: Integer;
+        X: Integer;
+      implementation
+      end.
+      ''', 'program p; uses ua; begin end.', TargetX86_64);
+  except
+    on E: ESemanticError do
+      Msg := E.Message;
+  end;
+  AssertTrue('duplicate reported: ' + Msg,
+    Pos('Duplicate identifier ''X''', Msg) >= 0);
 end;
 
 initialization

@@ -7854,6 +7854,7 @@ procedure TSemanticAnalyser.DefineGlobalLastWins(ASym: TSymbol;
 var
   RefSym: TSymbol;
   Prev:   TSymbol;
+  DupName: string;
 begin
   if not FTable.Define(ASym) then
   begin
@@ -7866,8 +7867,10 @@ begin
        (RefSym.OwningUnit = '') or
        SameText(RefSym.OwningUnit, ASym.OwningUnit) then
     begin
+      { read the name first: Free releases the symbol AND nils ASym }
+      DupName := ASym.Name;
       ASym.Free();
-      SemanticError(Format('Duplicate identifier ''%s''', [ASym.Name]),
+      SemanticError(Format('Duplicate identifier ''%s''', [DupName]),
         ALine, ACol);
       Exit;
     end;

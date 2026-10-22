@@ -105,6 +105,9 @@ type
       --source was not a search path, so a unit sitting beside the program
       was not found without an explicit --unit-path. }
     procedure TestUnitBesideProgram_FoundWithoutUnitPath;
+    { a variable declared twice in a used unit's interface: the compiler
+      reports the duplicate and exits 1 (it crashed with a segfault) }
+    procedure TestDuplicateUnitInterfaceVar_ReportedNotCrash;
     procedure TestObjectBesideProgram_UsableWithoutSource;
     { Regression (BUG-20260906-openarray-param-bif-roundtrip): a routine taking
       an OPEN ARRAY parameter (`array of T`) became uncallable once its unit
@@ -1139,6 +1142,48 @@ end;
   sitting in the same directory as the program named by --source must be
   found without an explicit --unit-path: the source file's own directory is
   an implicit search path, as it is in every other Pascal compiler. }
+procedure TSepCompileTests.TestDuplicateUnitInterfaceVar_ReportedNotCrash;
+const
+  UnitSrc =
+    '''
+    unit DupVarDep;
+    interface
+    var
+      X: Integer;
+      X: Integer;
+    implementation
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseDupVar;
+    uses DupVarDep;
+    begin
+      WriteLn(X)
+    end.
+    ''';
+var
+  Dir, ProgPas: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  Dir := FScratch + '/dup_intf_var';
+  ForceDirectories(Dir);
+  ProgPas := Dir + '/use_dupvar.pas';
+  WriteFile(Dir + '/dupvardep.pas', UnitSrc);
+  WriteFile(ProgPas, ProgSrc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/use_dupvar'],
+    Captured);
+  AssertEquals('blaise exit code (out: ' + Captured + ')', 1, Rc);
+  AssertTrue('duplicate reported: ' + Captured,
+    Pos('Duplicate identifier ''X''', Captured) >= 0);
+end;
+
 procedure TSepCompileTests.TestUnitBesideProgram_FoundWithoutUnitPath;
 const
   UnitSrc =
