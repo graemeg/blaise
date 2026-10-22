@@ -133,6 +133,13 @@ type
     procedure AssertEquals(AExpected, AActual: Pointer); overload;
     procedure AssertEquals(AMsg: string; AExpected, AActual: Boolean); overload;
     procedure AssertEquals(AExpected, AActual: Boolean); overload;
+    { Floats compare within a tolerance, as FPCUnit's
+      AssertEquals(Expected, Actual, Delta): the assertion holds when the two
+      are equal or differ by at most ADelta.  A NaN on either side fails (a
+      plain Abs(E - A) > Delta test lets it through), and an infinity
+      matches only itself.  Single arguments widen to Double. }
+    procedure AssertEquals(AMsg: string; AExpected, AActual, ADelta: Double); overload;
+    procedure AssertEquals(AExpected, AActual, ADelta: Double); overload;
 
     procedure AssertNotEquals(AMsg: string; AExpected, AActual: Integer); overload;
     procedure AssertNotEquals(AExpected, AActual: Integer); overload;
@@ -380,6 +387,21 @@ begin
   if AExpected <> AActual then
     Self.Fail('Expected: ' + Int64ToStr(AExpected)
               + '  Actual: '  + Int64ToStr(AActual));
+end;
+
+procedure TAssert.AssertEquals(AMsg: string; AExpected, AActual,
+  ADelta: Double);
+begin
+  if AExpected = AActual then
+    Exit;
+  if not (Abs(AExpected - AActual) <= ADelta) then
+    Self.Fail(AMsg + ' Expected: ' + DoubleToStr(AExpected) + '  Actual: ' +
+      DoubleToStr(AActual) + '  Delta: ' + DoubleToStr(ADelta));
+end;
+
+procedure TAssert.AssertEquals(AExpected, AActual, ADelta: Double);
+begin
+  Self.AssertEquals('', AExpected, AActual, ADelta);
 end;
 
 procedure TAssert.AssertEquals(AMsg: string; AExpected, AActual: string);

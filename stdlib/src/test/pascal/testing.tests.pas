@@ -50,6 +50,11 @@ type
     procedure TestSetUpException_BodyDoesNotRun;
     procedure TestSetUpException_TearDownStillRuns;
     procedure TestTearDownException_IsReportedAsError;
+    { GH #216: AssertEquals for floats within a tolerance -- passes within
+      the delta (Double and Single), fails outside it with both values in
+      the message, fails on NaN, and an infinity matches itself }
+    procedure TestFloatAssertEquals_WithinDelta;
+    procedure TestFloatAssertEquals_FailsOutsideDeltaAndOnNaN;
   end;
 
 implementation
@@ -138,6 +143,53 @@ begin
   AssertTrue('body ran', GBodyRan);
   AssertTrue('teardown ran', GTearDownRan);
   AssertEquals('errors', 1, R.NumberOfErrors);
+end;
+
+procedure TFrameworkTests.TestFloatAssertEquals_WithinDelta;
+var
+  S: Single;
+  Inf, Zero: Double;
+begin
+  AssertEquals('exact', 0.5, 0.5, 0.0);
+  AssertEquals('within', 0.1 + 0.2, 0.3, 1e-9);
+  AssertEquals(3.14159, 3.1416, 0.001);
+  S := 2.5;
+  AssertEquals('a Single widens', 2.5, S, 0.0);
+  Zero := 0.0;
+  Inf := 1.0 / Zero;
+  AssertEquals('an infinity matches itself', Inf, Inf, 0.0);
+end;
+
+procedure TFrameworkTests.TestFloatAssertEquals_FailsOutsideDeltaAndOnNaN;
+var
+  Msg: string;
+  Raised: Boolean;
+  NaN, Zero: Double;
+begin
+  Raised := False;
+  try
+    AssertEquals('ctx', 1.0, 1.5, 0.1);
+  except
+    on E: EAssertionFailed do
+    begin
+      Raised := True;
+      Msg := E.Message;
+    end;
+  end;
+  AssertTrue('outside the delta fails', Raised);
+  AssertContains('names the context', 'ctx', Msg);
+  AssertContains('names the expected value', 'Expected: 1', Msg);
+  AssertContains('names the actual value', 'Actual: 1.5', Msg);
+  Zero := 0.0;
+  NaN := Zero / Zero;
+  Raised := False;
+  try
+    AssertEquals(1.0, NaN, 1000.0);
+  except
+    on E: EAssertionFailed do
+      Raised := True;
+  end;
+  AssertTrue('a NaN fails whatever the delta', Raised);
 end;
 
 initialization
