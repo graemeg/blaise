@@ -7018,6 +7018,55 @@ docs/inline-asm-design.adoc for the full design and the design patterns applied.
   a single local variable named `Asm` (renamed), and contextual keywording would
   need parser state the lexer does not have.
 
+== An Implementation Repeats Its Declaration
+
+=== Decision
+
+The out-of-line implementation of a method, constructor, `forward` routine or
+unit-interface routine repeats its declaration's parameter list and result
+type:
+
+* the same number of parameters, with the same types and the same modes
+  (`var`, `out`, `const`, open array);
+* the same result type for a function (an alias of it is the same type), and
+  no result for a procedure.
+
+Parameter names may differ, and default values are written only in the
+declaration.  A mismatch is a compile-time error naming both lists:
+
+----
+Implementation of 'Tcl.methodOne' does not match its declaration at line 5:
+  declared (Integer; Byte), implemented (Byte; Integer)
+----
+
+Generic methods are compared as written, since their parameter types name
+type parameters that resolve only per instantiation.
+
+=== Rationale
+
+Callers are checked against the declaration, and the body was attached to the
+declaration, so an implementation spelling other types silently reread every
+argument: a unit routine declared `Foo(X: Integer)` and implemented
+`Foo(X: Byte)` printed 300 for a `Byte` (GH #215).  Only the parameter count
+was compared before, and for a non-overloaded method not even that.  The
+check found three such implementations in the compiler itself, each leaving
+off trailing parameters that had defaults; the bodies used those parameters
+anyway, through the declaration.
+
+FPC's `objfpc` mode reports the same error ("function header doesn't match
+any method of this class").
+
+=== Alternatives Rejected
+
+* *Delphi's short form*, an implementation with no parameter list at all
+  (`procedure TFoo.Bar;` for a declared `Bar(X: Integer)`).  Rejected
+  (decision 2026-10-22): it is a second spelling of the same implementation,
+  and it hides the parameters a body uses from anyone reading it.  It now gets
+  the mismatch error, which shows the list to write.
+* *Requiring the same parameter names.*  Not needed for correctness: the
+  names are the implementation's own, and the declaration's names document the
+  interface.
+
 == Implementation-section Declarations are Unit-private
 
 === Decision

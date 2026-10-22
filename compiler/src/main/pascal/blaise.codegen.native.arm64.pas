@@ -1883,7 +1883,7 @@ begin
 end;
 
 procedure TArm64Backend.EmitInstBase(const AReg, AInstSlot: string;
-  AInstVarParam: Boolean);
+  AInstVarParam: Boolean; ABaseInfo: TFieldInfo);
 begin
   { the instance pointer for a field store lives in AInstSlot ('Self' or a
     class var).  When that var is CAPTURED from an enclosing routine (leg 19),

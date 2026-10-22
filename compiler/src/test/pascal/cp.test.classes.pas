@@ -120,6 +120,13 @@ type
       (it was rejected: "requires an index expression"); a Grid[I][J] write
       keeps both indices }
     procedure TestParse_IndexedPropertyChainStmt_KeepsIndex;
+    { GH #215: an implementation must repeat its declaration's parameter
+      types and modes and its result -- for a class or record method, a
+      constructor, a forward routine, a generic class method and a generic
+      method (the Delphi form omitting the list is rejected too); parameter
+      names may differ and a result alias is the same type.  Overloaded
+      methods in a generic type get a clear "not supported yet". }
+    procedure TestSemantic_ImplMustMatchDeclaration;
     { an except handler, an attribute use and a getter call carry the class
       descriptor they resolved to, so codegen never re-resolves the name
       (a program type would capture a used unit's namesake) }
@@ -1809,6 +1816,71 @@ begin
       begin
       end.
       ''')) >= 0);
+end;
+
+procedure TClassTests.TestSemantic_ImplMustMatchDeclaration;
+const
+  Mismatch = 'does not match its declaration';
+
+  procedure Rejected(const ASrc, AWant: string);
+  var
+    Err: string;
+  begin
+    Err := SemanticError(ASrc);
+    AssertTrue(ASrc + ' -> ' + Err, Pos(Mismatch, Err) >= 0);
+    AssertTrue('names both lists: ' + Err, Pos(AWant, Err) >= 0);
+  end;
+
+  procedure Accepted(const ASrc: string);
+  begin
+    AssertEquals(ASrc, '', SemanticError(ASrc));
+  end;
+
+begin
+  Rejected('program P; type T = class procedure M(A: Integer; B: Byte); end; ' +
+    'procedure T.M(A: Byte; B: Integer); begin end; begin end.',
+    'declared (Integer; Byte), implemented (Byte; Integer)');
+  Rejected('program P; type T = class procedure M(var A: Integer); end; ' +
+    'procedure T.M(A: Integer); begin end; begin end.',
+    'declared (var Integer), implemented (Integer)');
+  Rejected('program P; type T = class procedure M(const S: string); end; ' +
+    'procedure T.M(S: string); begin end; begin end.',
+    'declared (const string), implemented (string)');
+  Rejected('program P; type T = class procedure M(A: Integer); end; ' +
+    'procedure T.M; begin end; begin end.',
+    'declared (Integer), implemented ()');
+  Rejected('program P; type T = class function M: Integer; end; ' +
+    'function T.M: string; begin end; begin end.',
+    'declared (): Integer, implemented (): string');
+  Rejected('program P; type T = class function M: Integer; end; ' +
+    'procedure T.M; begin end; begin end.', 'implemented ()');
+  Rejected('program P; type T = class constructor Create(A: Integer); end; ' +
+    'constructor T.Create(A: Byte); begin end; begin end.',
+    'declared (Integer), implemented (Byte)');
+  Rejected('program P; type R = record procedure M(A: Integer); end; ' +
+    'procedure R.M(A: Byte); begin end; begin end.',
+    'declared (Integer), implemented (Byte)');
+  Rejected('program P; procedure Foo(X: Integer); forward; ' +
+    'procedure Foo(X: Byte); begin end; begin Foo(1) end.',
+    'declared (Integer), implemented (Byte)');
+  Rejected('program P; type T<X> = class procedure M(A: X; B: Integer); end; ' +
+    'procedure T<X>.M(A: X; B: Byte); begin end; begin end.',
+    'declared (X; Integer), implemented (X; Byte)');
+  Rejected('program P; type T = class function Pick<X>(A: X; B: Integer): X; ' +
+    'end; function T.Pick<X>(A: X; B: Byte): X; begin Result := A end; ' +
+    'begin end.', 'declared (X; Integer): X, implemented (X; Byte): X');
+  Accepted('program P; type TI = Integer; T = class ' +
+    'procedure M(A: Integer; const S: string); function F: Integer; end; ' +
+    'procedure T.M(X: Integer; const Y: string); begin end; ' +
+    'function T.F: TI; begin Result := 1 end; ' +
+    'procedure Foo(X: Integer); forward; ' +
+    'procedure Foo(Y: Integer); begin end; begin Foo(1) end.');
+  AssertTrue('overloaded generic methods are reported, not miscompiled',
+    Pos('Overloaded methods in a generic type are not supported yet',
+      SemanticError('program P; type T<X> = class ' +
+        'procedure M(A: X; B: Integer); overload; procedure M(A: X); ' +
+        'overload; end; procedure T<X>.M(A: X; B: Integer); begin end; ' +
+        'procedure T<X>.M(A: X); begin end; begin end.')) >= 0);
 end;
 
 initialization

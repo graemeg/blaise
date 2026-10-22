@@ -144,6 +144,11 @@ type
       explain" message, its position and file (discussion #230: it was
       "Bare reference to 'with' requires () for a call") }
     procedure TestWithStatement_RejectedWithExplanation;
+    { GH #215: a unit routine implemented with other parameter types than
+      its interface declaration fails the compile, naming both lists (only
+      the parameter count was compared: a Byte implementation read the
+      caller's Integer 300 as 300) }
+    procedure TestUnitImplMismatch_RejectedWithBothLists;
   end;
 
 implementation
@@ -333,6 +338,49 @@ begin
     Pos('name the record or object in each access', Out_) >= 0);
   AssertTrue('points at the statement: ' + Out_,
     Pos('at line 5 col 3', Out_) >= 0);
+end;
+
+procedure TCLIContractTests.TestUnitImplMismatch_RejectedWithBothLists;
+var
+  UnitDir, Src, Out_: string;
+  EC: Integer;
+begin
+  if not CompilerAvailable() then
+  begin
+    Ignore('<toolchain-missing>');
+    Exit;
+  end;
+  UnitDir := FScratch + 'u215/';
+  ForceDirectories(UnitDir);
+  WriteFile(UnitDir + 'uimpl215.pas',
+    'unit uimpl215;' + LineEnding +
+    'interface' + LineEnding +
+    'procedure Foo(X: Integer);' + LineEnding +
+    'implementation' + LineEnding +
+    'procedure Foo(X: Byte);' + LineEnding +
+    'begin' + LineEnding +
+    '  WriteLn(X)' + LineEnding +
+    'end;' + LineEnding +
+    'end.');
+  Src := WriteScratchSource(
+    'program cli_impl215;' + LineEnding +
+    'uses uimpl215;' + LineEnding +
+    'begin' + LineEnding +
+    '  Foo(300)' + LineEnding +
+    'end.');
+  EC := RunCompiler([
+    '--source', Src,
+    '--unit-path', UnitDir,
+    '--unit-path', FRTLPath,
+    '--unit-path', FStdlibPath,
+    '--output', FScratch + 'cli_impl215_bin'
+  ], Out_);
+  AssertTrue('the compile fails: ' + Out_, EC <> 0);
+  AssertTrue('names both parameter lists: ' + Out_,
+    Pos('Implementation of ''Foo'' does not match its declaration at ' +
+      'line 3: declared (Integer), implemented (Byte)', Out_) >= 0);
+  AssertTrue('points at the implementation: ' + Out_,
+    Pos('at line 5 col 1 in uimpl215', Out_) >= 0);
 end;
 
 procedure TCLIContractTests.TestNormalCompileStillWorks;

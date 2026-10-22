@@ -4472,7 +4472,9 @@ procedure TX86_64Backend.EmitInterfaceCall(const AObjName: string;
                                            AIsVarParam: Boolean;
                                            AIntf: TInterfaceTypeDesc;
                                            const AMethName: string;
-                                           AArgs: TObjectList);
+                                           AArgs: TObjectList;
+                                           AObjExpr: TASTExpr;
+                                           ADiscardIntfRet: Boolean);
 var
   I, SlotOff, Ps, ArgN: Integer;
   Arg: TASTExpr;
@@ -4669,7 +4671,8 @@ begin
 end;
 
 procedure TX86_64Backend.EmitInterfaceFieldCall(AFld: TFieldInfo;
-  AIntf: TInterfaceTypeDesc; const AMethName: string; AArgs: TObjectList);
+  AIntf: TInterfaceTypeDesc; const AMethName: string; AArgs: TObjectList;
+  ADiscardIntfRet: Boolean);
 { Dispatch an interface method call through a class field.  The fat pointer
   lives at Self + AFld.Offset (obj) and Self + AFld.Offset + 8 (itab). }
 var

@@ -615,6 +615,10 @@ type
     { Full mangled signature for a TMethodDecl: '$<code1><code2>…'.
       Empty parameter list yields '$' (lone dollar). }
     function  MangleParamSig(ADecl: TMethodDecl): string;
+    procedure CheckImplMatchesDecl(AImpl, ADecl: TMethodDecl;
+      const AImplSig: string);
+    function  ImplSpellingMatches(AImpl, ADecl: TMethodDecl): Boolean;
+    procedure ReportImplSpellingMismatch(AImpl, ADecl: TMethodDecl);
     { Two overloads of one name whose parameters are the same types (an alias
       such as Cardinal is its target type) -- they would share a label. }
     function  SameOverloadSig(A, B: TMethodDecl): Boolean;
@@ -2751,11 +2755,12 @@ begin
           ImplDecl repeats its signature rather than implementing a forward. }
         if MDecl.IsOverload and (MDecl.Body <> nil) then
           ReportDuplicateOverload(ImplDecl, MDecl, ImplDecl.Name);
-        if MDecl.Params.Count <> ImplDecl.Params.Count then
-          SemanticError(
-            Format('Signature mismatch for ''%s'': interface has %d params, implementation has %d',
-              [ImplDecl.Name, MDecl.Params.Count, ImplDecl.Params.Count]),
-            ImplDecl.Line, ImplDecl.Col);
+        { the implementation repeats the interface declaration's parameters
+          and result, as callers in other units were checked against it
+          (GH #215: only the parameter COUNT was compared, so a Byte
+          implementing an Integer parameter read the caller's Integer) }
+        if not MDecl.IsExternal then
+          CheckImplMatchesDecl(ImplDecl, MDecl, MangleParamSig(ImplDecl));
         { Carry mangling forward, then update the index entry.  The impl decl
           must inherit the forward decl's OwningUnit so the later
           IndexOfProcInUnit "has no implementation" check still finds it. }
@@ -3118,11 +3123,12 @@ begin
           ImplDecl repeats its signature rather than implementing a forward. }
         if MDecl.IsOverload and (MDecl.Body <> nil) then
           ReportDuplicateOverload(ImplDecl, MDecl, ImplDecl.Name);
-        if MDecl.Params.Count <> ImplDecl.Params.Count then
-          SemanticError(
-            Format('Signature mismatch for ''%s'': interface has %d params, implementation has %d',
-              [ImplDecl.Name, MDecl.Params.Count, ImplDecl.Params.Count]),
-            ImplDecl.Line, ImplDecl.Col);
+        { the implementation repeats the interface declaration's parameters
+          and result, as callers in other units were checked against it
+          (GH #215: only the parameter COUNT was compared, so a Byte
+          implementing an Integer parameter read the caller's Integer) }
+        if not MDecl.IsExternal then
+          CheckImplMatchesDecl(ImplDecl, MDecl, MangleParamSig(ImplDecl));
         ImplDecl.ResolvedEmitName := MDecl.ResolvedEmitName;
         ImplDecl.IsOverload      := MDecl.IsOverload;
         ImplDecl.OwningUnit      := MDecl.OwningUnit;
@@ -3653,6 +3659,8 @@ begin
             [Decl.Name, Decl.OwnerTypeName]),
           Decl.Line, Decl.Col);
       Match := TMethodDecl(FGenericMethodTemplates.Objects[K]);
+      if not ImplSpellingMatches(Decl, Match) then
+        ReportImplSpellingMismatch(Decl, Match);
       if Match.Body <> nil then
         SemanticError(
           Format('Generic method ''%s.%s'' already has an inline body',
@@ -3708,7 +3716,9 @@ begin
         end
         else
         begin
-          { Non-overloaded: first (and only) match wins }
+          { Non-overloaded: first (and only) match wins -- it must have the
+            declared signature (GH #215: a mismatch compiled silently) }
+          CheckImplMatchesDecl(Decl, CD, ImplSig);
           Match := CD;
           Break;
         end;
@@ -3792,7 +3802,7 @@ end;
 
 procedure TSemanticAnalyser.LinkGenericClassMethodImpls(ABlock: TBlock);
 var
-  I, J: Integer;
+  I, J, K: Integer;
   Decl: TMethodDecl;
   GenObj: TObject;
   Methods: TObjectList;
@@ -3820,13 +3830,31 @@ begin
     if Methods = nil then
       Continue;
     { Find the matching forward declaration in the template }
-    MDecl := nil;
+    { Overloaded methods in a generic type are not supported yet: every
+      overload of an instance would be emitted under one label (see
+      BUGS.md, BUG-20261022-generic-type-method-overloads). }
+    K := 0;
     for J := 0 to Methods.Count - 1 do
       if SameText(TMethodDecl(Methods.Items[J]).Name, Decl.Name) then
+        Inc(K);
+    if K > 1 then
+      SemanticError(
+        Format('Overloaded methods in a generic type are not supported yet: ' +
+          '''%s.%s'' is declared %d times', [Decl.OwnerTypeName, Decl.Name, K]),
+        Decl.Line, Decl.Col);
+    { the declaration must have this parameter list (GH #215) }
+    MDecl := nil;
+    for J := 0 to Methods.Count - 1 do
+      if SameText(TMethodDecl(Methods.Items[J]).Name, Decl.Name) and
+         ImplSpellingMatches(Decl, TMethodDecl(Methods.Items[J])) then
       begin
         MDecl := TMethodDecl(Methods.Items[J]);
         Break;
       end;
+    if MDecl = nil then
+      for J := 0 to Methods.Count - 1 do
+        if SameText(TMethodDecl(Methods.Items[J]).Name, Decl.Name) then
+          ReportImplSpellingMismatch(Decl, TMethodDecl(Methods.Items[J]));
     if MDecl = nil then
       SemanticError(
         Format('Method ''%s'' is not declared in generic type ''%s''',
@@ -11076,6 +11104,12 @@ begin
       if (J >= 0) and (TMethodDecl(FProcIndex.Objects[J]).Body = nil) and
          (not TMethodDecl(FProcIndex.Objects[J]).IsOverload) then
       begin
+        { the body of a forward or unit-interface declaration: callers were
+          checked against that declaration, so it must have the same
+          parameters and result (GH #215) }
+        if not TMethodDecl(FProcIndex.Objects[J]).IsExternal then
+          CheckImplMatchesDecl(ADecl, TMethodDecl(FProcIndex.Objects[J]),
+            MangleParamSig(ADecl));
         ReplaceProcIndexObject(J, ADecl);
         Continue;
       end;
@@ -15028,6 +15062,163 @@ begin
     Par    := TMethodParam(ADecl.Params.Items[I]);
     Result := Result + MangleTypeCode(Par.ResolvedType, Par.IsVarParam);
   end;
+end;
+
+{ An out-of-line method implementation must repeat its declaration's
+  parameter list and result type: the declaration is what callers are
+  checked against, so an implementation reading its parameters as other
+  types silently reinterprets every argument (GH #215; FPC: "function
+  header doesn't match any method of this class").  Compared as the
+  mangled signature overloads are matched by, so parameter modes count and
+  names do not.  A type the mangler cannot spell ('?') is not judged. }
+procedure TSemanticAnalyser.CheckImplMatchesDecl(AImpl, ADecl: TMethodDecl;
+  const AImplSig: string);
+
+  function ParamList(AM: TMethodDecl): string;
+  var
+    I: Integer;
+    P: TMethodParam;
+  begin
+    Result := '';
+    for I := 0 to AM.Params.Count - 1 do
+    begin
+      P := TMethodParam(AM.Params.Items[I]);
+      if Result <> '' then
+        Result := Result + '; ';
+      if P.IsOutParam then
+        Result := Result + 'out '
+      else if P.IsVarParam then
+        Result := Result + 'var '
+      else if P.IsConstParam then
+        Result := Result + 'const ';
+      if P.ResolvedType <> nil then
+        Result := Result + P.ResolvedType.Name
+      else
+        Result := Result + '?';
+    end;
+    Result := '(' + Result + ')';
+  end;
+
+  function ResultText(AM: TMethodDecl): string;
+  begin
+    if AM.ReturnTypeName = '' then
+      Result := ''
+    else
+      Result := ': ' + AM.ReturnTypeName;
+  end;
+
+var
+  DeclSig, QualName: string;
+  ImplRet, DeclRet: TTypeDesc;
+  RetDiffers, ModeDiffers: Boolean;
+  I: Integer;
+  PI, PD: TMethodParam;
+begin
+  DeclSig := MangleParamSig(ADecl);
+  { const and out are not part of the mangled signature }
+  ModeDiffers := False;
+  if AImpl.Params.Count = ADecl.Params.Count then
+    for I := 0 to AImpl.Params.Count - 1 do
+    begin
+      PI := TMethodParam(AImpl.Params.Items[I]);
+      PD := TMethodParam(ADecl.Params.Items[I]);
+      if (PI.IsConstParam <> PD.IsConstParam) or
+         (PI.IsOutParam <> PD.IsOutParam) then
+        ModeDiffers := True;
+    end;
+  { a function implemented as a procedure (or the reverse), or with another
+    result type; an alias of the declared type is the same type }
+  RetDiffers := (AImpl.ReturnTypeName = '') <> (ADecl.ReturnTypeName = '');
+  if not RetDiffers and (AImpl.ReturnTypeName <> '') then
+  begin
+    ImplRet := AImpl.ResolvedReturnType;
+    if ImplRet = nil then
+      ImplRet := FindTypeOrInstantiate(AImpl.ReturnTypeName);
+    DeclRet := ADecl.ResolvedReturnType;
+    if DeclRet = nil then
+      DeclRet := FindTypeOrInstantiate(ADecl.ReturnTypeName);
+    RetDiffers := (ImplRet <> nil) and (DeclRet <> nil) and
+      (ImplRet <> DeclRet) and
+      (MangleTypeCode(ImplRet, False) <> MangleTypeCode(DeclRet, False));
+  end;
+  if ((DeclSig <> AImplSig) and (StrPos('?', DeclSig) < 0) and
+      (StrPos('?', AImplSig) < 0)) or RetDiffers or ModeDiffers then
+  begin
+    if AImpl.OwnerTypeName <> '' then
+      QualName := AImpl.OwnerTypeName + '.' + AImpl.Name
+    else
+      QualName := AImpl.Name;
+    SemanticError(
+      Format('Implementation of ''%s'' does not match its declaration ' +
+        'at line %d: declared %s%s, implemented %s%s',
+        [QualName, ADecl.Line, ParamList(ADecl), ResultText(ADecl),
+         ParamList(AImpl), ResultText(AImpl)]),
+      AImpl.Line, AImpl.Col);
+  end;
+end;
+
+{ The generic form of CheckImplMatchesDecl: a generic method's parameters
+  name type parameters, which cannot be resolved before instantiation, so the
+  implementation is compared with its declaration as written -- the same
+  parameter count, modes and type names, and the same result type name. }
+function TSemanticAnalyser.ImplSpellingMatches(AImpl,
+  ADecl: TMethodDecl): Boolean;
+var
+  I: Integer;
+  PI, PD: TMethodParam;
+begin
+  Result := False;
+  if AImpl.Params.Count <> ADecl.Params.Count then Exit;
+  if not SameText(AImpl.ReturnTypeName, ADecl.ReturnTypeName) then Exit;
+  for I := 0 to AImpl.Params.Count - 1 do
+  begin
+    PI := TMethodParam(AImpl.Params.Items[I]);
+    PD := TMethodParam(ADecl.Params.Items[I]);
+    if (PI.IsVarParam <> PD.IsVarParam) or (PI.IsOutParam <> PD.IsOutParam) or
+       (PI.IsConstParam <> PD.IsConstParam) or
+       (PI.IsOpenArray <> PD.IsOpenArray) or
+       not SameText(PI.TypeName, PD.TypeName) then
+      Exit;
+  end;
+  Result := True;
+end;
+
+procedure TSemanticAnalyser.ReportImplSpellingMismatch(AImpl,
+  ADecl: TMethodDecl);
+
+  function Spelled(AM: TMethodDecl): string;
+  var
+    I: Integer;
+    P: TMethodParam;
+  begin
+    Result := '';
+    for I := 0 to AM.Params.Count - 1 do
+    begin
+      P := TMethodParam(AM.Params.Items[I]);
+      if Result <> '' then
+        Result := Result + '; ';
+      if P.IsOutParam then
+        Result := Result + 'out '
+      else if P.IsVarParam then
+        Result := Result + 'var '
+      else if P.IsConstParam then
+        Result := Result + 'const ';
+      if P.IsOpenArray then
+        Result := Result + 'array of ';
+      Result := Result + P.TypeName;
+    end;
+    Result := '(' + Result + ')';
+    if AM.ReturnTypeName <> '' then
+      Result := Result + ': ' + AM.ReturnTypeName;
+  end;
+
+begin
+  SemanticError(
+    Format('Implementation of ''%s.%s'' does not match its declaration at ' +
+      'line %d: declared %s, implemented %s',
+      [AImpl.OwnerTypeName, AImpl.Name, ADecl.Line, Spelled(ADecl),
+       Spelled(AImpl)]),
+    AImpl.Line, AImpl.Col);
 end;
 
 function TSemanticAnalyser.SameOverloadSig(A, B: TMethodDecl): Boolean;
