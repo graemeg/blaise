@@ -29,6 +29,9 @@ type
     { lo..hi in a set literal outside an assignment: the operand / argument
       is analysed before its set context is known }
     procedure TestSemantic_SetRangeLiteral_AcceptedInEveryContext;
+    { WriteLn/Write of a set is rejected, as in FPC and Delphi: there is no
+      text form (x86-64 printed the raw bitmask, arm64 refused to lower it) }
+    procedure TestSemantic_WriteOfSet_Rejected;
     procedure TestSemantic_RangeInOpenArrayArg_Rejected;
     { ------------------------------------------------------------------ }
     { parse                                                                }
@@ -1595,6 +1598,37 @@ begin
     AsmMissing(Src,
       #9'popq %rax'#10#9'movl %eax, (%rcx)',
       #9'ldr x9, [sp], #16'#10#9'str w0, [x9]'));
+end;
+
+procedure TSetTests.TestSemantic_WriteOfSet_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    type
+      TEn = (eA, eB);
+      TS = set of TEn;
+    var S: TS;
+    begin
+      S := [eA];
+      WriteLn(S)
+    end.
+    ''');
+  AssertTrue('WriteLn of a set reported: ' + Msg,
+    Pos('Cannot pass a value of type ''TS'' to ''WriteLn''', Msg) >= 0);
+  Msg := SemanticError('''
+    program P;
+    type
+      TBig = 0..199;
+      TJ = set of TBig;
+    var J: TJ;
+    begin
+      Write(J)
+    end.
+    ''');
+  AssertTrue('Write of a jumbo set reported: ' + Msg,
+    Pos('to ''Write''', Msg) >= 0);
 end;
 
 initialization

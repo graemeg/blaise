@@ -31,6 +31,9 @@ type
   protected
     procedure SetUp; override;
   published
+    { the compiler rejects WriteLn of a set with a diagnostic and exit 1
+      (x86-64 used to print the raw bitmask; arm64 failed in codegen) }
+    procedure TestCompile_WriteOfSet_Rejected;
     procedure TestRun_Sets_Combined;
     { <= 32-member sets }
     procedure TestRun_Set_Include_Exclude;
@@ -1307,6 +1310,30 @@ begin
     'True False True False' + LE +
     '1 2 3 4 200 ' + LE, 0);
   AssertLeakFreeOnAll(Src, '1 2 3 4 200');
+end;
+
+procedure TE2ESetOpsTests.TestCompile_WriteOfSet_Rejected;
+const
+  Src = '''
+    program P;
+    type
+      TEn = (eA, eB);
+      TS = set of TEn;
+    var S: TS;
+    begin
+      S := [eA];
+      WriteLn(S)
+    end.
+    ''';
+var
+  BinFile, ToolOut: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  Rc := CompileNativeCLI(Src, False, '', BinFile, ToolOut);
+  AssertEquals('compiler exit code (out: ' + ToolOut + ')', 1, Rc);
+  AssertTrue('diagnostic names the set type: ' + ToolOut,
+    Pos('Cannot pass a value of type ''TS'' to ''WriteLn''', ToolOut) >= 0);
 end;
 
 initialization

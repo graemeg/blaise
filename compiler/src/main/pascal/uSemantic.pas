@@ -16162,7 +16162,7 @@ begin
               TASTExpr(ACall.Args.Items[I]).Col)
           else if ArgType.Kind in [tyProcedural, tyRecord, tyClass, tyInterface,
                                    tyMetaClass, tyStaticArray, tyDynArray,
-                                   tyOpenArray, tyPointer, tyNil] then
+                                   tyOpenArray, tyPointer, tyNil, tySet] then
             SemanticError(
               Format('Cannot pass a value of type ''%s'' to ''%s''',
                 [ArgType.Name, ACall.Name]),
