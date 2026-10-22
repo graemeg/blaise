@@ -72,6 +72,9 @@ type
       16-byte records with two INTEGER halves came back sret, and an
       eightbyte holding an int and a float was called SSE }
     procedure TestRecretClassify_SystemVMixedRecords;
+    { an external function returning a jumbo set: the bitmap comes back
+      through a hidden result pointer on both ISAs (arm64 refused it) }
+    procedure TestCodegen_ExternalJumboSetResult_HiddenPointer;
   end;
 
 implementation
@@ -634,6 +637,30 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TExternalTests.TestCodegen_ExternalJumboSetResult_HiddenPointer;
+const
+  Src = '''
+    program P;
+    type
+      TBig = 0..199;
+      TJumbo = set of TBig;
+    function GetJ(N: Integer): TJumbo; external 'libjs';
+    var J: TJumbo;
+    begin
+      J := GetJ(3)
+    end.
+    ''';
+var
+  A64: string;
+begin
+  A64 := GenAsm(Src, TargetArm64);
+  AssertTrue('arm64 hands the callee a result buffer in x8',
+    Pos(#9'sub x8, x29, #', A64) >= 0);
+  AssertTrue('arm64 calls the routine', Pos(#9'bl _GetJ', A64) >= 0);
+  AssertTrue('x86-64 calls the routine',
+    Pos(#9'callq GetJ', GenAsm(Src, TargetX86_64)) >= 0);
 end;
 
 initialization

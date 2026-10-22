@@ -693,44 +693,54 @@ begin
   AssertTrue('equality for if', Pos(#9'cset x0, eq', AsmT) >= 0);
 end;
 
+type
+  { exposes the backend's NotYet to the honesty-contract test }
+  TArm64NotYetProbe = class(TArm64Backend)
+  public
+    procedure Trip(const AWhat: string);
+  end;
+
+procedure TArm64NotYetProbe.Trip(const AWhat: string);
+begin
+  Self.NotYet(AWhat, nil);
+end;
+
 procedure TArm64BackendTests.TestUnsupported_RaisesHonestly;
 var
   Raised: Boolean;
   Msg: string;
+  Probe: TArm64NotYetProbe;
+  T: TTargetDesc;
 begin
+  { A construct the arm64 subset has not reached fails LOUDLY at compile
+    time with a clear message, never silently miscompiling.  This test used
+    to point at such a construct and was repointed seven times as each one
+    landed (a generic record, a jumbo set, record threadvars, a record
+    call's dyn-array field, a procedural-field call on an owned transient,
+    an external jumbo-set call).  P13/P14 (2026-10) left none reachable --
+    every AST node class is dispatched and the rest of the NotYet sites are
+    guards -- so the contract is now checked on NotYet itself. }
   Raised := False;
   Msg := '';
+  MakeTarget(osMacOS, cpuArm64, T);
+  Probe := TArm64NotYetProbe.Create(T);
   try
-    { An EXTERNAL routine returning a jumbo set (S := GetBig()) is the
-      current stand-in for "a construct the arm64 subset has not reached
-      yet".  This has now been repointed six times -- it was a generic
-      RECORD, then a JUMBO SET, then an unmanaged record threadvar, then a
-      managed one, then an element of a record call's dyn-array field, then
-      a procedural-field call on an owned transient receiver, and all of
-      them now lower.  Repoint it again rather than deleting it when this
-      one lands too: the point of the test is that a gap fails LOUDLY at
-      compile time with a clear file/line, never silently miscompiling. }
-    GenAsm(
-      '''
-      program P;
-      type TBig = set of Byte;
-      function GetBig: TBig; external 'libfoo' name 'get_big';
-      var S: TBig;
+    try
+      Probe.Trip('a probe construct');
+    except
+      on E: ENativeCodeGenError do
       begin
-        S := GetBig();
-        WriteLn(5 in S)
-      end.
-      ''', TargetArm64);
-  except
-    on E: ENativeCodeGenError do
-    begin
-      Raised := True;
-      Msg := E.Message;
+        Raised := True;
+        Msg := E.Message;
+      end;
     end;
+  finally
+    Probe.Free();
   end;
   AssertTrue('unsupported construct raises', Raised);
   AssertTrue('message names the arm64 subset',
     Pos('arm64: not yet', Msg) >= 0);
+  AssertTrue('message names the construct', Pos('a probe construct', Msg) >= 0);
 end;
 
 procedure TArm64BackendTests.TestPipeline_AssemblesToMachO;

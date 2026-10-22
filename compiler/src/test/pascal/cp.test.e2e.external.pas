@@ -75,6 +75,9 @@ type
       (System V eightbyte classes) both refused or misplaced most of them.
       Needs cc. }
     procedure TestRun_ExternalRecordShapes;
+    { a C routine returning the bitmap of a jumbo set (a 25-byte struct for
+      set of 0..199): the members it sets are the members Blaise sees }
+    procedure TestRun_ExternalJumboSetResult;
   end;
 
 implementation
@@ -448,6 +451,64 @@ begin
     'dl 230.50' + #10 + 'ispill 21401' + #10 + 'mkv2 1.50 2.50' + #10 +
     'mkv4 1.02.03.04.0' + #10 + 'mkd2 7.50 8.50' + #10 + 'mkdl 9.50 11' + #10 +
     'mkbig 567 6.50' + #10, Output);
+end;
+
+procedure TE2EExternalTests.TestRun_ExternalJumboSetResult;
+const
+  CSrc =
+    'typedef struct { unsigned char b[25]; } Bits200;' + #10 +
+    'Bits200 abi_bits(int a, int b) { Bits200 r; int i;' +
+    ' for (i = 0; i < 25; i++) r.b[i] = 0;' +
+    ' r.b[a / 8] |= 1 << (a % 8); r.b[b / 8] |= 1 << (b % 8); return r; }' + #10;
+  Src = '''
+    program T;
+    type
+      TBig = 0..199;
+      TJumbo = set of TBig;
+    function abi_bits(A, B: Integer): TJumbo; external 'abi';
+    var
+      J: TJumbo;
+    begin
+      J := abi_bits(3, 150);
+      WriteLn(3 in J, ' ', 150 in J, ' ', 4 in J, ' ', 199 in J);
+      WriteLn(7 in abi_bits(7, 199), ' ', 199 in abi_bits(7, 199))
+    end.
+    ''';
+var
+  CFile, OFile, Output, Dummy: string;
+  RCode: Integer;
+  SL: TStringList;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  if RunProc('cc', ['--version'], Dummy) <> 0 then begin Ignore('no cc'); Exit; end;
+  CFile := IncludeTrailingPathDelimiter(FScratch) + 'abij.c';
+  OFile := IncludeTrailingPathDelimiter(FScratch) + 'abij.o';
+  SL := TStringList.Create();
+  try
+    SL.Text := CSrc;
+    SL.SaveToFile(CFile);
+  finally
+    SL.Free();
+  end;
+  AssertEquals('cc -c', 0, RunProc('cc', ['-c', '-o', OFile, CFile], Dummy));
+  AssertEquals('ar', 0, RunProc('ar', ['rcs',
+    IncludeTrailingPathDelimiter(FScratch) + 'libabi.a', OFile], Dummy));
+  SL := TStringList.Create();
+  try
+    SL.Text := Src;
+    SL.SaveToFile(IncludeTrailingPathDelimiter(FScratch) + 'abij_t.pas');
+  finally
+    SL.Free();
+  end;
+  RCode := RunProc(ProjectRoot() + 'compiler/target/blaise',
+    ['--source', IncludeTrailingPathDelimiter(FScratch) + 'abij_t.pas',
+     '--linker', 'external', '--lib-path', FScratch,
+     '--output', IncludeTrailingPathDelimiter(FScratch) + 'abij_t'], Output);
+  AssertEquals('compile: ' + Output, 0, RCode);
+  RCode := RunProc(IncludeTrailingPathDelimiter(FScratch) + 'abij_t', [], Output);
+  AssertEquals('exit code: ' + Output, 0, RCode);
+  AssertEquals('output', 'True True False False' + #10 + 'True True' + #10,
+    Output);
 end;
 
 initialization

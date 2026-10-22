@@ -272,7 +272,6 @@ type
     { True when AParams has any var/out string param (the F(const A; var B)
       alias hazard that forces a plain-local source to pin). }
     function  ParamsHaveVarString(AParams: TObjectList): Boolean;
-    procedure NotYet(const AWhat: string; ANode: TASTNode);
     { A state the front end and the other lowerings rule out -- a compiler
       bug, not a missing feature, so it says so instead of "not yet lowered". }
     procedure InternalError(const AWhat: string; ANode: TASTNode);
@@ -678,6 +677,10 @@ type
     procedure EmitStrLitSection;
     procedure EmitGlobalsSection;
   protected
+    { A construct this backend does not lower yet: a compile-time error
+      naming it, never a silent miscompile.  Protected so the honesty
+      contract can be tested directly once no such construct is reachable. }
+    procedure NotYet(const AWhat: string; ANode: TASTNode);
     procedure EmitProgram(AProg: TProgram); override;
     procedure EmitUnit(AUnit: TUnit); override;
     procedure EmitUnitInit(AUnit: TUnit);
@@ -5029,9 +5032,10 @@ begin
       through x8, and -- like every jumbo set value -- the call evaluates to
       that bitmap's ADDRESS.  Per site, so two such calls in one expression
       (F(A) + F(B)) cannot overwrite each other's result. }
-    if (AExpr is TFuncCallExpr) and
-       TMethodDecl(TFuncCallExpr(AExpr).ResolvedDecl).IsExternal then
-      NotYet('external jumbo-set-returning call', AExpr);
+    { An EXTERNAL one takes the same path: the bitmap is a byte array of
+      more than 8 bytes, which a C routine returns through x8 too (AAPCS64,
+      composites over 16 bytes) -- x86-64 parity, where it is the %rdi
+      buffer. }
     JTmp := '__jret_' + IntToStr(FJArgN);
     FJArgN := FJArgN + 1;
     if not FFrame.ContainsKey(JTmp) then
