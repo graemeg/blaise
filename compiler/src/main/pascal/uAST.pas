@@ -160,6 +160,10 @@ type
     IsClassAccess:     Boolean;       { set by uSemantic — pointer deref needed }
     PropRead:          TPropertyInfo; { non-nil if this is a method-backed property read }
     PropOwnerType:     string;        { class type name for method-backed property calls }
+    [Unretained] PropOwnerDesc: TTypeDesc; { not owned; set by uSemantic -- the class
+                                          PropOwnerType names, so codegen need not
+                                          re-resolve the name (a program type with
+                                          the same name as a unit's would win) }
     PropAccessorVSlot: Integer;       { set by uSemantic — getter vtable slot, -1 = static call }
     [Unretained] PropReadDecl: TObject; { TMethodDecl of the getter — not owned; set by
                                           uSemantic so codegen can sret a record-returning
@@ -421,6 +425,8 @@ type
   public
     VarName:  string;         { bound variable name, or '' }
     TypeName: string;         { exception class name }
+    [Unretained] ResolvedType: TTypeDesc; { not owned; set by uSemantic -- the class
+                                TypeName names, for the handler's typeinfo }
     Body:     TCompoundStmt;  { owned }
     destructor Destroy; override;
   end;
@@ -498,6 +504,7 @@ type
                                 OR (IsElemWrite) the element index into an array-typed field }
     [Unretained] PropWriteInfo: TPropertyInfo;  { non-owned — set by semantic when PropIndexExpr is set }
     PropOwnerType: string;  { owner class name for setter call; valid when PropIndexExpr set }
+    [Unretained] PropOwnerDesc: TTypeDesc;  { not owned; the class PropOwnerType names }
     PropAccessorVSlot: Integer;  { set by uSemantic — setter vtable slot, -1 = static call }
     IsElemWrite: Boolean;   { set by uSemantic — FieldName is an array-typed field and
                               PropIndexExpr selects the element to store into }
@@ -547,6 +554,7 @@ type
       is the index arg, ValueExpr is the value arg. }
     [Unretained] PropWriteInfo: TObject;  { TPropertyInfo — non-owned; nil = plain array write }
     PropOwnerType:     string;  { declaring class of the setter }
+    [Unretained] PropOwnerDesc: TTypeDesc; { not owned; the class PropOwnerType names }
     PropAccessorVSlot: Integer; { setter vtable slot, -1 = static call }
     { A class-receiver SETTER write lowered by uSemantic to the ordinary
       method-call statement Recv.SetX([Index,] Value) -- with the already
@@ -1038,6 +1046,8 @@ type
                                    (suffix convention applied), e.g.
                                    'TestCaseAttribute'; '' when the name is not
                                    a TCustomAttribute class ([Weak] etc.) }
+    [Unretained] ResolvedClassType: TTypeDesc; { not owned; set by uSemantic --
+                                   the class ResolvedClassName names }
     [Unretained] ThunkDecl: TObject; { TMethodDecl — not owned; the synthesised
                                    factory function appended to the enclosing
                                    block's ProcDecls by uSemantic.  Codegen

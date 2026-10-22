@@ -571,7 +571,8 @@ type
       reached; otherwise it is a static call to <ClassSymName>_<method>.  The
       slot is computed by the semantic pass (PropAccessorVSlot).  Mirrors
       EmitPropAccessorCall in the QBE backend. }
-    procedure EmitPropAccessorCallNative(const AOwnerType, AMethod: string;
+    procedure EmitPropAccessorCallNative(const AOwnerType: string;
+      AOwnerDesc: TTypeDesc; const AMethod: string;
       AVSlot: Integer);
     function IntfTypeInfoName(const AIntfName: string): string;
     { The typeinfo/itab name part of interface AIntf, from the type's OWN
@@ -3197,7 +3198,8 @@ begin
 end;
 
 procedure TX86_64Backend.EmitPropAccessorCallNative(
-  const AOwnerType, AMethod: string; AVSlot: Integer);
+  const AOwnerType: string; AOwnerDesc: TTypeDesc; const AMethod: string;
+  AVSlot: Integer);
 begin
   if AVSlot >= 0 then
   begin
@@ -3208,7 +3210,7 @@ begin
     Self.Emit(#9'callq *%rax');
   end
   else
-    Self.Emit(#9'callq ' + Self.ClassSymName(AOwnerType) + '_'
+    Self.Emit(#9'callq ' + Self.ClassSymFor(AOwnerDesc, AOwnerType) + '_'
       + NativeMangle(AMethod));
 end;
 
@@ -3379,7 +3381,8 @@ begin
     begin
       AU := TAttributeUse(ACD.AttrUses.Items[J]);
       if AU.ThunkDecl = nil then Continue;
-      Self.Emit(#9'.quad typeinfo_' + Self.ClassSymName(AU.ResolvedClassName));
+      Self.Emit(#9'.quad typeinfo_' + Self.ClassSymFor(AU.ResolvedClassType,
+        AU.ResolvedClassName));
       Self.Emit(#9'.quad ' + FuncSymbolFromDecl(TMethodDecl(AU.ThunkDecl)));
     end;
     AAttrsStr := 'attrs_' + ACSym;
@@ -3417,7 +3420,8 @@ begin
         AU := TAttributeUse(MD.AttrUses.Items[K]);
         if AU.ThunkDecl = nil then Continue;
         Self.Emit(Format(#9'.quad __cn_%s + 12', [NativeMangle(MD.Name)]));
-        Self.Emit(#9'.quad typeinfo_' + Self.ClassSymName(AU.ResolvedClassName));
+        Self.Emit(#9'.quad typeinfo_' + Self.ClassSymFor(AU.ResolvedClassType,
+        AU.ResolvedClassName));
         Self.Emit(#9'.quad ' + FuncSymbolFromDecl(TMethodDecl(AU.ThunkDecl)));
       end;
     end;
@@ -11364,7 +11368,8 @@ begin
       Self.Emit(#9'popq %rdi');
       Self.Emit(#9'movq %rax, %rsi');
     end;
-    Self.EmitPropAccessorCallNative(FAE.PropOwnerType, FAE.PropRead.ReadMethod,
+    Self.EmitPropAccessorCallNative(FAE.PropOwnerType, FAE.PropOwnerDesc,
+      FAE.PropRead.ReadMethod,
       FAE.PropAccessorVSlot);
     if (FAE.ResolvedType <> nil) and
        not IsIntFamily(FAE.ResolvedType) and
@@ -16836,7 +16841,8 @@ begin
 
       { _IsInstance(obj, typeinfo): returns non-zero if obj is an instance of the type. }
       Self.Emit(#9'movq %r15, %rdi');
-      Self.Emit(#9'leaq typeinfo_' + Self.ClassSymName(H.TypeName) + '(%rip), %rsi');
+      Self.Emit(#9'leaq typeinfo_' + Self.ClassSymFor(H.ResolvedType, H.TypeName) +
+        '(%rip), %rsi');
       Self.Emit(#9'callq _IsInstance');
       Self.Emit(#9'testl %eax, %eax');
       Self.Emit(#9'jnz ' + LblBody);
@@ -19215,7 +19221,7 @@ begin
       end
       else
         Self.Emit(#9'popq %rsi');
-      Self.EmitPropAccessorCallNative(FA.PropOwnerType,
+      Self.EmitPropAccessorCallNative(FA.PropOwnerType, FA.PropOwnerDesc,
         FA.PropWriteInfo.WriteMethod, FA.PropAccessorVSlot);
       if PropRelStr then
       begin
@@ -20296,7 +20302,7 @@ begin
       end;
       Self.Emit(#9'popq %rsi');                { index }
       Self.Emit(#9'popq %rdx');                { value }
-      Self.EmitPropAccessorCallNative(SSA.PropOwnerType,
+      Self.EmitPropAccessorCallNative(SSA.PropOwnerType, SSA.PropOwnerDesc,
         TPropertyInfo(SSA.PropWriteInfo).WriteMethod, SSA.PropAccessorVSlot);
       if PropRelStr then
       begin

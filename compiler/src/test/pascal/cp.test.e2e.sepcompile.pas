@@ -112,6 +112,15 @@ type
       unit it uses: each side's itabs, as-casts and Supports bind to its own
       types (x86-64 failed to link: typeinfo_<Prog>_IGr undefined) }
     procedure TestProgramNamesakeOfUnitIntf_LinksAndRuns;
+    { a program declaring an exception class, an attribute class and a class
+      with a property getter under the same names as a unit's: handlers,
+      attribute tables, getter calls, constructors, is / as and class
+      references each bind to their own side's type -- so the program's
+      TagAttribute is not the attribute the unit's TTagged carries (the
+      unit's handler and
+      attribute typeinfo failed to link; the program's TGauge.Create took the
+      unit's vtable slot and crashed) }
+    procedure TestProgramNamesakeOfUnitClasses_EachBindsItsOwn;
     { a unit's initialised variables -- expressions, named constants, a
       float expression, in the interface and the implementation -- start
       with their values (each was 0 unless written as a bare literal) }
@@ -1256,6 +1265,138 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('namekp exit code', 0, Rc);
   AssertEquals('namekp stdout', '7 3 3 True 0'#10, Captured);
+end;
+
+procedure TSepCompileTests.TestProgramNamesakeOfUnitClasses_EachBindsItsOwn;
+const
+  UnitSrc =
+    '''
+    unit NameCU;
+    interface
+    uses SysUtils;
+    type
+      EMine = class(Exception)
+      end;
+      TagAttribute = class(TCustomAttribute)
+      public
+        constructor Create();
+      end;
+      [Tag]
+      TTagged = class
+      end;
+      TGauge = class
+      private
+        FV: Integer;
+        function GetV: Integer;
+      public
+        constructor Create();
+        property V: Integer read GetV;
+      end;
+    procedure RunUnit();
+    implementation
+    constructor TagAttribute.Create();
+    begin
+    end;
+    constructor TGauge.Create();
+    begin
+      FV := 7;
+    end;
+    function TGauge.GetV: Integer;
+    begin
+      Result := FV * 10;
+    end;
+    procedure RunUnit();
+    var G: TGauge;
+    begin
+      try
+        raise EMine.Create('unit mine');
+      except
+        on E: EMine do WriteLn('unit caught ', E.Message);
+      end;
+      G := TGauge.Create();
+      WriteLn('unit gauge ', G.V);
+      WriteLn('unit tagged ', HasClassAttribute(TTagged, TagAttribute));
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program NameCP;
+    uses SysUtils, NameCU;
+    type
+      EMine = class(Exception)
+      end;
+      TagAttribute = class(TCustomAttribute)
+      public
+        constructor Create();
+      end;
+      TGauge = class
+      private
+        FX: Integer;
+        function GetV: Integer;
+      public
+        property V: Integer read GetV;
+      end;
+    constructor TagAttribute.Create();
+    begin
+    end;
+    function TGauge.GetV: Integer;
+    begin
+      Result := -1;
+    end;
+    var G: TGauge; O: TObject; C: TClass;
+    begin
+      RunUnit();
+      try
+        raise EMine.Create('prog mine');
+      except
+        on E: EMine do WriteLn('prog caught ', E.Message);
+      end;
+      try
+        raise NameCU.EMine.Create('unit kind');
+      except
+        on E: EMine do WriteLn('wrong handler');
+        on E: Exception do WriteLn('prog saw ', E.Message);
+      end;
+      G := TGauge.Create();
+      WriteLn('prog gauge ', G.V);
+      WriteLn('prog tagged ', HasClassAttribute(TTagged, TagAttribute));
+      O := NameCU.EMine.Create('u');
+      WriteLn('is ', O is EMine, ' ', O is Exception, ' ', G is TGauge);
+      O.Free();
+      O := G;
+      WriteLn('as ', (O as TGauge).V);
+      C := TGauge;
+      WriteLn('ref ', G.ClassType = C, ' ', G.ClassName)
+    end.
+    ''';
+var
+  Dir, ProgPas, ProgBin: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  Dir := FScratch + '/class_namesake';
+  ForceDirectories(Dir);
+  ProgPas := Dir + '/namecp.pas';
+  ProgBin := Dir + '/namecp';
+  WriteFile(Dir + '/namecu.pas', UnitSrc);
+  WriteFile(ProgPas, ProgSrc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-path', ProjectRoot() + 'stdlib/src/main/pascal'],
+                  Captured);
+  AssertEquals('blaise exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('namecp exit code', 0, Rc);
+  AssertEquals('namecp stdout',
+    'unit caught unit mine'#10 + 'unit gauge 70'#10 + 'unit tagged True'#10 +
+    'prog caught prog mine'#10 + 'prog saw unit kind'#10 + 'prog gauge -1'#10 +
+    'prog tagged False'#10 + 'is False True True'#10 + 'as -1'#10 +
+    'ref True TGauge'#10, Captured);
 end;
 
 procedure TSepCompileTests.TestUnitVarInitialiserExpressions_HaveTheirValues;

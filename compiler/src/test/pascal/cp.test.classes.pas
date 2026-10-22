@@ -114,6 +114,10 @@ type
       element write through an array field of it, and (X as T).Free(),
       which frees X itself as TC(X).Free() does }
     procedure TestParse_ParenReceiverStmt_CallAndElemWrite;
+    { an except handler, an attribute use and a getter call carry the class
+      descriptor they resolved to, so codegen never re-resolves the name
+      (a program type would capture a used unit's namesake) }
+    procedure TestSemantic_TypeRefs_CarryDescriptors;
 
     { ------------------------------------------------------------------ }
     { ARC on class variables and fields                                    }
@@ -1379,6 +1383,64 @@ begin
     S := TMethodCallStmt(Prog.Block.Stmts.Items[2]);
     AssertTrue('Free through as targets the operand',
       (S.ObjExpr = nil) and SameText(S.ObjectName, 'C'));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TClassTests.TestSemantic_TypeRefs_CarryDescriptors;
+var
+  Prog: TProgram;
+  I: Integer;
+  TES: TTryExceptStmt;
+  H: TExceptHandlerClause;
+  AU: TAttributeUse;
+  TD: TTypeDecl;
+  WL: TProcCall;
+  FA: TFieldAccessExpr;
+begin
+  Prog := AnalyseSrc(
+    '''
+    program P;
+    type
+      EMine = class(TObject) end;
+      TagAttribute = class(TCustomAttribute) end;
+      TBase = class
+        function GetV(): Integer;
+        property V: Integer read GetV;
+      end;
+      [Tag]
+      TChild = class(TBase) end;
+    function TBase.GetV(): Integer; begin Result := 1 end;
+    var C: TChild;
+    begin
+      try
+        C := TChild.Create();
+      except
+        on E: EMine do ;
+      end;
+      WriteLn(C.V)
+    end.
+    ''');
+  try
+    TES := TTryExceptStmt(Prog.Block.Stmts.Items[0]);
+    H := TExceptHandlerClause(TES.Handlers.Items[0]);
+    AssertTrue('handler type resolved',
+      (H.ResolvedType <> nil) and SameText(H.ResolvedType.Name, 'EMine'));
+    AU := nil;
+    for I := 0 to Prog.Block.TypeDecls.Count - 1 do
+    begin
+      TD := TTypeDecl(Prog.Block.TypeDecls.Items[I]);
+      if SameText(TD.Name, 'TChild') then
+        AU := TAttributeUse(TClassTypeDef(TD.Def).AttrUses.Items[0]);
+    end;
+    AssertTrue('attribute class resolved', (AU <> nil) and
+      (AU.ResolvedClassType <> nil) and
+      SameText(AU.ResolvedClassType.Name, 'TagAttribute'));
+    WL := TProcCall(Prog.Block.Stmts.Items[1]);
+    FA := TFieldAccessExpr(WL.Args.Items[0]);
+    AssertTrue('getter owner is the declaring class',
+      (FA.PropOwnerDesc <> nil) and SameText(FA.PropOwnerDesc.Name, 'TBase'));
   finally
     Prog.Free();
   end;

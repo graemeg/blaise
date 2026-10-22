@@ -332,7 +332,8 @@ type
       const ASlot: string; ASpOff: Integer);
     procedure EmitPropRecvToX0(AStmt: TFieldAssignment);
     procedure EmitIndexedPropWrite(AProp: TPropertyInfo; const AOwner: string;
-      AVSlot: Integer; AIndex, AValue: TASTExpr; AStmt: TASTStmt);
+      AOwnerDesc: TTypeDesc; AVSlot: Integer; AIndex, AValue: TASTExpr;
+      AStmt: TASTStmt);
     procedure EmitSubscriptPropRecvToX0(AStmt: TStaticSubscriptAssign);
     { Materialise an anonymous-method literal into its hidden 16-byte value slot
       (Code at +0, Env at +8) and leave the slot ADDRESS in x0 — the fat value
@@ -692,7 +693,11 @@ type
       const ASym: string; ARegistry: TStringList; AReleaseUnit: TUnit);
     procedure EmitUnitGlobalReleases(ABlock: TBlock);
     function  ClassPrefixOwner(const AOwner: string): string;
-    function  PropAccessorSym(const AOwnerType, AMethod: string): string;
+    function  PropAccessorSym(const AOwnerType: string; AOwnerDesc: TTypeDesc;
+      const AMethod: string): string;
+    { typeinfo symbol for a class the semantic pass resolved to ADesc; falls
+      back to the name lookup of TypeinfoSymFor when ADesc is nil }
+    function  TypeinfoSymForDesc(ADesc: TTypeDesc; const ATypeName: string): string;
     function  ClassSym(ATD: TTypeDecl): string;
     function  ClassDescOf(ATD: TTypeDecl): TRecordTypeDesc;
     procedure EmitClassCleanupFns;
@@ -765,8 +770,11 @@ type
     function  EmitIntfRecvPair(const AObjName: string; AObjExpr: TASTExpr;
       AVarParam: Boolean; AImplicitBase: TFieldInfo; ANode: TASTNode;
       AIntf: TTypeDesc): Boolean;
-    function  IntfItabSym(const AClassName, AIntfName: string): string;
-    procedure EmitTypeinfoAddr(const AReg, ATypeName: string);
+    function  IntfItabSym(AClass: TTypeDesc;
+      const AClassName, AIntfName: string): string;
+    { as EmitTypeinfoAddr, for a type the semantic pass resolved to ADesc }
+    procedure EmitTypeinfoAddrDesc(const AReg: string; ADesc: TTypeDesc;
+      const ATypeName: string);
     procedure EmitVarArgAddrToX0(Arg: TASTExpr);
     function  IsIntfArg(ADecl: TMethodDecl; AIndex: Integer;
       AArg: TASTExpr): Boolean;
@@ -3868,8 +3876,8 @@ begin
 end;
 
 procedure TArm64Backend.EmitIndexedPropWrite(AProp: TPropertyInfo;
-  const AOwner: string; AVSlot: Integer; AIndex, AValue: TASTExpr;
-  AStmt: TASTStmt);
+  const AOwner: string; AOwnerDesc: TTypeDesc; AVSlot: Integer;
+  AIndex, AValue: TASTExpr; AStmt: TASTStmt);
 var
   RelStr: Boolean;
   Shape: Integer;
@@ -3933,7 +3941,8 @@ begin
       Self.Emit(#9'blr x9');
     end
     else
-      Self.Emit(Format(#9'bl %s', [PropAccessorSym(AOwner, AProp.WriteMethod)]));
+      Self.Emit(Format(#9'bl %s', [PropAccessorSym(AOwner, AOwnerDesc,
+        AProp.WriteMethod)]));
     Exit;
   end;
   { An OWNED managed STRING value (a concat / call-result transient) is
@@ -3984,7 +3993,7 @@ begin
   end
   else
     Self.Emit(Format(#9'bl %s',
-      [PropAccessorSym(AOwner,
+      [PropAccessorSym(AOwner, AOwnerDesc,
         AProp.WriteMethod)]));
   if RelStr then
   begin
@@ -4094,7 +4103,8 @@ begin
         InternalError('element write through a method-backed property (the ' +
           'front end routes it to the read field)', AStmt);
       EmitIndexedPropWrite(TPropertyInfo(AStmt.PropWriteInfo),
-        AStmt.PropOwnerType, AStmt.PropAccessorVSlot, AStmt.PropIndexExpr,
+        AStmt.PropOwnerType, AStmt.PropOwnerDesc, AStmt.PropAccessorVSlot,
+        AStmt.PropIndexExpr,
         AStmt.Expr, AStmt);
       Exit;
     end;
@@ -4106,7 +4116,7 @@ begin
       else
         Self.EmitExprToX0(AStmt.Expr);
       Self.Emit(Format(#9'bl %s',
-        [PropAccessorSym(AStmt.PropOwnerType,
+        [PropAccessorSym(AStmt.PropOwnerType, AStmt.PropOwnerDesc,
           TPropertyInfo(AStmt.PropWriteInfo).WriteMethod)]));
       Exit;
     end;
@@ -4152,7 +4162,7 @@ begin
     end
     else
       Self.Emit(Format(#9'bl %s',
-        [PropAccessorSym(AStmt.PropOwnerType,
+        [PropAccessorSym(AStmt.PropOwnerType, AStmt.PropOwnerDesc,
           TPropertyInfo(AStmt.PropWriteInfo).WriteMethod)]));
     if RelStr then
     begin
@@ -5180,7 +5190,7 @@ begin
   if (AExpr is TIdentExpr) and TIdentExpr(AExpr).IsMetaclassRef then
   begin
     { bare class name as a value: the typeinfo address IS the metaclass }
-    EmitTypeinfoAddr('x0', TIdentExpr(AExpr).Name);
+    EmitTypeinfoAddrDesc('x0', AExpr.ResolvedType, TIdentExpr(AExpr).Name);
     Exit;
   end;
   if (AExpr is TIdentExpr) and TIdentExpr(AExpr).IsImplicitSelf and
@@ -6847,7 +6857,8 @@ begin
       the test is made -- it leaked }
     if Self.IsOwnedClassOperand(TIsExpr(AExpr).Obj) then
       EmitPushX0();
-    EmitTypeinfoAddr('x1', TIsExpr(AExpr).TypeName);
+    EmitTypeinfoAddrDesc('x1', TIsExpr(AExpr).ResolvedTargetType,
+      TIsExpr(AExpr).TypeName);
     if (TIsExpr(AExpr).ResolvedTargetType <> nil) and
        (TIsExpr(AExpr).ResolvedTargetType.Kind = tyInterface) then
       EmitCallSym('_ImplementsInterface')
@@ -6865,7 +6876,7 @@ begin
     CondName := NewLabel('asok');
     Self.EmitExprToX0(TAsExpr(AExpr).Obj);
     EmitPushX0();
-    EmitTypeinfoAddr('x1', TAsExpr(AExpr).TypeName);
+    EmitTypeinfoAddrDesc('x1', AExpr.ResolvedType, TAsExpr(AExpr).TypeName);
     EmitCallSym('_IsInstance');
     Self.Emit(Format(#9'cbnz x0, %s', [CondName]));
     EmitRaiseInvalidCast();
@@ -7060,7 +7071,8 @@ begin
       Self.EmitExprToX0(TSupportsExpr(AExpr).Obj);
       if Owned then
         EmitPushX0();
-      EmitTypeinfoAddr('x1', IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName));
+      EmitTypeinfoAddrDesc('x1', TSupportsExpr(AExpr).ResolvedIntfType,
+      IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName));
       EmitCallSym('_GetItab');
       Self.Emit(#9'cmp x0, #0');
       Self.Emit(#9'cset x0, ne');
@@ -7070,7 +7082,8 @@ begin
     end;
     Self.EmitExprToX0(TSupportsExpr(AExpr).Obj);
     EmitPushX0();                                    { [obj] }
-    EmitTypeinfoAddr('x1', IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName));
+    EmitTypeinfoAddrDesc('x1', TSupportsExpr(AExpr).ResolvedIntfType,
+      IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName));
     EmitCallSym('_GetItab');
     EmitPushX0();                                    { [obj][itab] }
     CondName := NewLabel('supno');
@@ -8271,7 +8284,8 @@ begin
     if ASret <> '' then
       EmitSlotAddr('x8', ASret);
     Self.Emit(Format(#9'bl %s',
-      [PropAccessorSym(AFld.PropOwnerType, AFld.PropRead.ReadMethod)]));
+      [PropAccessorSym(AFld.PropOwnerType, AFld.PropOwnerDesc,
+        AFld.PropRead.ReadMethod)]));
     Exit;
   end;
   if AFld.PropIndexExpr <> nil then
@@ -8356,7 +8370,8 @@ begin
   end
   else
     Self.Emit(Format(#9'bl %s',
-      [PropAccessorSym(AFld.PropOwnerType, AFld.PropRead.ReadMethod)]));
+      [PropAccessorSym(AFld.PropOwnerType, AFld.PropOwnerDesc,
+        AFld.PropRead.ReadMethod)]));
 end;
 
 function TArm64Backend.RecordPropRead(AExpr: TASTExpr): TFieldAccessExpr;
@@ -8511,7 +8526,8 @@ begin
   if (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyClass) then
   begin
     { narrowing a class value: the itab is known statically }
-    ItabSym := IntfItabSym(TRecordTypeDesc(AExpr.ResolvedType).Name,
+    ItabSym := IntfItabSym(AExpr.ResolvedType,
+      TRecordTypeDesc(AExpr.ResolvedType).Name,
       AIntfType.Name);
     Self.EmitExprToX0(AExpr);
     Result := ArcExprOwnsRef(AExpr);
@@ -8533,7 +8549,7 @@ begin
     Result := ArcExprOwnsRef(TAsExpr(AExpr).Obj);
     Self.EmitExprToX0(TAsExpr(AExpr).Obj);
     EmitPushX0();                     { the obj value }
-    EmitTypeinfoAddr('x1', TAsExpr(AExpr).TypeName);
+    EmitTypeinfoAddrDesc('x1', AExpr.ResolvedType, TAsExpr(AExpr).TypeName);
     EmitCallSym('_GetItab');          { x0 = itab or nil }
     ItabSym := NewLabel('asok');
     Self.Emit(Format(#9'cbnz x0, %s', [ItabSym]));
@@ -10201,7 +10217,7 @@ begin
       BodyL := NewLabel('hbody');
       NextL := NewLabel('hnext');
       Self.Emit(#9'ldr x0, [sp]');
-      EmitTypeinfoAddr('x1', H.TypeName);
+      EmitTypeinfoAddrDesc('x1', H.ResolvedType, H.TypeName);
       EmitCallSym('_IsInstance');
       Self.Emit(Format(#9'cbz w0, %s', [NextL]));
       Self.Emit(BodyL + ':');
@@ -10472,7 +10488,8 @@ begin
       InternalError('default-property write without a setter (the front end ' +
         'rejects a read-only property)', AStmt);
     EmitIndexedPropWrite(TPropertyInfo(AStmt.PropWriteInfo),
-      AStmt.PropOwnerType, AStmt.PropAccessorVSlot, AStmt.IndexExpr,
+      AStmt.PropOwnerType, AStmt.PropOwnerDesc, AStmt.PropAccessorVSlot,
+      AStmt.IndexExpr,
       AStmt.ValueExpr, AStmt);
     Exit;
   end;
@@ -16139,46 +16156,48 @@ begin
   Result := CodegenMangle(AOwner) + '_';
 end;
 
-function TArm64Backend.PropAccessorSym(const AOwnerType,
-  AMethod: string): string;
+function TArm64Backend.PropAccessorSym(const AOwnerType: string;
+  AOwnerDesc: TTypeDesc; const AMethod: string): string;
 var
   D: TTypeDesc;
   Pfx: string;
 begin
-  { mirror of TCodeGenQBE.PropAccessorTarget's direct-call arm }
+  { mirror of TCodeGenQBE.PropAccessorTarget's direct-call arm.  The owner
+    comes from its descriptor: a name lookup would find a program type with
+    the same name as the unit's (BUG-20261022-x86-name-only-type-refs). }
   Pfx := '';
-  if FSymTable <> nil then
-  begin
+  D := AOwnerDesc;
+  if (D = nil) and (FSymTable <> nil) then
     D := FSymTable.FindType(AOwnerType);
-    { The prefix must be spelled exactly as the method DEFINITION's name is:
-      that comes from the semantic pass's MangleUnitPrefix, which turns a
-      DOTTED unit's dots into underscores ('async.fibers' -> 'async_fibers_').
-      ClassPrefixOwner keeps the dot (right for typeinfo / class-name
-      symbols, wrong here), so the getter reference dangled -- the Mach-O
-      linker bound it to libSystem and dyld aborted at launch
-      (TTimerHeap.Count in the fiber scheduler).  ClassPrefixOwner still
-      decides WHETHER a prefix applies (program / System / RTL units: none). }
-    if (D <> nil) and (ClassPrefixOwner(D.OwningUnit) <> '') then
-      Pfx := MangleUnitPrefix(D.OwningUnit);
-  end;
+  { The prefix must be spelled exactly as the method DEFINITION's name is:
+    that comes from the semantic pass's MangleUnitPrefix, which turns a
+    DOTTED unit's dots into underscores ('async.fibers' -> 'async_fibers_').
+    ClassPrefixOwner keeps the dot (right for typeinfo / class-name
+    symbols, wrong here), so the getter reference dangled -- the Mach-O
+    linker bound it to libSystem and dyld aborted at launch
+    (TTimerHeap.Count in the fiber scheduler).  ClassPrefixOwner still
+    decides WHETHER a prefix applies (program / System / RTL units: none). }
+  if (D <> nil) and (ClassPrefixOwner(D.OwningUnit) <> '') then
+    Pfx := MangleUnitPrefix(D.OwningUnit);
   Result := DarwinSym(Pfx + CodegenMangle(AOwnerType) + '_' +
     CodegenMangle(AMethod));
 end;
 
-procedure TArm64Backend.EmitTypeinfoAddr(const AReg, ATypeName: string);
+procedure TArm64Backend.EmitTypeinfoAddrDesc(const AReg: string;
+  ADesc: TTypeDesc; const ATypeName: string);
 var
   Sym: string;
 begin
-  { single source of truth for the typeinfo symbol (TypeinfoSymFor): prefixed
-    for a plain class/interface, bare for a generic instance — so this reference
-    always matches the definition and the impllist (LINK-1). }
-  Sym := TypeinfoSymFor(ATypeName);
+  { the reference is named from the descriptor, exactly as the definition
+    is (ClassSym), so it always matches the definition and the impllist
+    (LINK-1) -- and a program type never captures a unit's namesake }
+  Sym := TypeinfoSymForDesc(ADesc, ATypeName);
   Self.Emit(Format(#9'adrp %s, %s@PAGE', [AReg, Sym]));
   Self.Emit(Format(#9'add %s, %s, %s@PAGEOFF', [AReg, AReg, Sym]));
 end;
 
-function TArm64Backend.IntfItabSym(const AClassName,
-  AIntfName: string): string;
+function TArm64Backend.IntfItabSym(AClass: TTypeDesc;
+  const AClassName, AIntfName: string): string;
 var
   D: TTypeDesc;
   Pfx: string;
@@ -16191,13 +16210,14 @@ begin
   if Pos('<', AClassName) >= 0 then
     Exit(DarwinSym('itab_' + CodegenMangle(AClassName) + '_' +
       CodegenMangle(AIntfName)));
+  { the owner comes from the class's descriptor: a name lookup would find a
+    program class with the same name as the unit's }
   Pfx := '';
-  if FSymTable <> nil then
-  begin
+  D := AClass;
+  if (D = nil) and (FSymTable <> nil) then
     D := FSymTable.FindType(AClassName);
-    if D <> nil then
-      Pfx := ClassPrefixOwner(D.OwningUnit);
-  end;
+  if D <> nil then
+    Pfx := ClassPrefixOwner(D.OwningUnit);
   Result := DarwinSym('itab_' + Pfx + CodegenMangle(AClassName) + '_' +
     CodegenMangle(AIntfName));
 end;
@@ -16487,6 +16507,19 @@ begin
   Result := TypeinfoSym(Pfx + CodegenMangle(ATypeName));
 end;
 
+function TArm64Backend.TypeinfoSymForDesc(ADesc: TTypeDesc;
+  const ATypeName: string): string;
+begin
+  if (ADesc is TMetaClassTypeDesc) and
+     (TMetaClassTypeDesc(ADesc).BaseClass <> nil) then
+    ADesc := TMetaClassTypeDesc(ADesc).BaseClass;
+  if (ADesc = nil) or (ADesc.Name = '') or (Pos('<', ADesc.Name) >= 0) or
+     not (ADesc.Kind in [tyClass, tyInterface]) then
+    Exit(TypeinfoSymFor(ATypeName));
+  Result := TypeinfoSym(ClassPrefixOwner(ADesc.OwningUnit) +
+    CodegenMangle(ADesc.Name));
+end;
+
 procedure TArm64Backend.EmitAttrTables(ACD: TClassTypeDef;
   const ACSym: string; out AAttrsRef, AMethAttrsRef: string);
 var
@@ -16516,7 +16549,8 @@ begin
     begin
       AU := TAttributeUse(ACD.AttrUses.Items[J]);
       if AU.ThunkDecl = nil then Continue;
-      Self.Emit(Format(#9'.quad %s', [TypeinfoSymFor(AU.ResolvedClassName)]));
+      Self.Emit(Format(#9'.quad %s', [TypeinfoSymForDesc(AU.ResolvedClassType,
+        AU.ResolvedClassName)]));
       Self.Emit(Format(#9'.quad %s',
         [RoutineSym(TMethodDecl(AU.ThunkDecl), '')]));
     end;
@@ -16570,7 +16604,8 @@ begin
       AU := TAttributeUse(MD.AttrUses.Items[K]);
       if AU.ThunkDecl = nil then Continue;
       Self.Emit(Format(#9'.quad __ma_%s_%d', [ACSym, N]));
-      Self.Emit(Format(#9'.quad %s', [TypeinfoSymFor(AU.ResolvedClassName)]));
+      Self.Emit(Format(#9'.quad %s', [TypeinfoSymForDesc(AU.ResolvedClassType,
+        AU.ResolvedClassName)]));
       Self.Emit(Format(#9'.quad %s',
         [RoutineSym(TMethodDecl(AU.ThunkDecl), '')]));
       N := N + 1;
@@ -17037,10 +17072,10 @@ begin
       link (LINK-1: typeinfo_Streams_IReaderFrom).  A unit-mangled owner keeps
       it .globl; an unmangled RTL unit's copy binds weak so per-object copies
       collapse (GH #174 parity). }
-    ISym := TypeinfoSymFor(ITD.Name);
     IDesc := TTypeDesc(ITD.ResolvedDesc);
     if (IDesc = nil) and (FSymTable <> nil) then
       IDesc := FSymTable.FindType(ITD.Name);
+    ISym := TypeinfoSymForDesc(IDesc, ITD.Name);
     Self.Emit('.balign 8');
     if (IDesc <> nil) and IsUnmangledUnit(IDesc.OwningUnit) then
       EmitWeakDef(ISym)
@@ -17120,7 +17155,7 @@ begin
         { a GENERIC INTERFACE instance's typeinfo is now emitted weak by the
           FGenericIntfInstances loop above, so the impllist's typeinfo_<inst>
           reference resolves (leg 41) — no longer an honest hole. }
-        ISym := IntfItabSym(TD.Name, ID.Name);
+        ISym := IntfItabSym(ClassDescOf(TD), TD.Name, ID.Name);
         Self.Emit('.balign 8');
         if IsBareVis then
           EmitWeakDef(ISym)
@@ -17153,8 +17188,9 @@ begin
         ID := TInterfaceTypeDesc(Intfs.Items[J]);
         { the SAME symbol the typeinfo is DEFINED under (TypeinfoSymFor) — a bare
           CodegenMangle here mismatched a prefixed definition/reference (LINK-1). }
-        Self.Emit(Format(#9'.quad %s', [TypeinfoSymFor(ID.Name)]));
-        Self.Emit(Format(#9'.quad %s', [IntfItabSym(TD.Name, ID.Name)]));
+        Self.Emit(Format(#9'.quad %s', [TypeinfoSymForDesc(ID, ID.Name)]));
+        Self.Emit(Format(#9'.quad %s', [IntfItabSym(ClassDescOf(TD), TD.Name,
+          ID.Name)]));
       end;
       Self.Emit(#9'.quad 0');
     finally
@@ -18048,27 +18084,29 @@ begin
       Exit;
     end;
     Sym := '';
-    for I := 0 to FClassDecls.Count - 1 do
+    if AExpr.ResolvedClassType is TRecordTypeDesc then
     begin
-      TD := TTypeDecl(FClassDecls.Items[I]);
-      if SameText(TD.Name, AExpr.ObjectName) then
-      begin
-        Sym := ClassSym(TD);
-        Break;
-      end;
-    end;
-    if (Sym = '') and (AExpr.ResolvedClassType is TRecordTypeDesc) then
-    begin
-      { class declared in ANOTHER unit (or later in this one with no
-        local decl entry): mangle from the resolved desc — the owning
-        unit's own emission defines the typeinfo/vtable symbols }
+      { mangle from the resolved desc, as the class's own emission does
+        (ClassSym) -- matching a declaration by NAME picked a unit's class
+        over a program class of the same name.  The owning unit's emission
+        defines the typeinfo/vtable symbols. }
       if Pos('<', TRecordTypeDesc(AExpr.ResolvedClassType).Name) >= 0 then
         Sym := CodegenMangle(TRecordTypeDesc(AExpr.ResolvedClassType).Name)
       else
         Sym := ClassPrefixOwner(
           TRecordTypeDesc(AExpr.ResolvedClassType).OwningUnit) +
           CodegenMangle(TRecordTypeDesc(AExpr.ResolvedClassType).Name);
-    end;
+    end
+    else
+      for I := 0 to FClassDecls.Count - 1 do
+      begin
+        TD := TTypeDecl(FClassDecls.Items[I]);
+        if SameText(TD.Name, AExpr.ObjectName) then
+        begin
+          Sym := ClassSym(TD);
+          Break;
+        end;
+      end;
     if Sym = '' then
       InternalError('constructor for class ''' + AExpr.ObjectName +
         ''' with no resolved class type', AExpr);

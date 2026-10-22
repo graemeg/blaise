@@ -272,6 +272,10 @@ type
 
     { Generic type instantiation: resolves 'TBox<Integer>' on demand. }
     function  FindTypeOrInstantiate(const AName: string): TTypeDesc;
+    { The 'class of' metaclass descriptor for the class ABase, created on
+      first use.  Keyed on the descriptor, not the name: a program class
+      with the same name as a used unit's gets its own metaclass. }
+    function  MetaClassFor(ABase: TTypeDesc): TTypeDesc;
 
     { Resolves a parameter's type, handling both plain types and open arrays.
       For IsOpenArray params, creates and registers a TOpenArrayTypeDesc. }
@@ -846,6 +850,11 @@ type
       whose getter/setter lives in a parent, the call site must target the
       parent's symbol, not the child's (which never gets emitted). }
     function  PropAccessorOwner(const ATypeName, AMethodName: string): string;
+    { The class PropAccessorOwner names, found by walking ART's own parent
+      chain, so codegen can name the accessor from a descriptor rather than
+      re-resolving a type name. }
+    function  PropAccessorOwnerDesc(ART: TRecordTypeDesc;
+      const AMethodName: string): TRecordTypeDesc;
     { Returns the vtable slot of property accessor AMethodName as seen from
       the static receiver type ATypeName, or -1 when the accessor is not
       virtual (a static call).  A virtual accessor must dispatch through the
@@ -4569,6 +4578,34 @@ begin
   end;
 end;
 
+function TSemanticAnalyser.MetaClassFor(ABase: TTypeDesc): TTypeDesc;
+var
+  CanonName: string;
+  Key:       string;
+  Sym:       TSymbol;
+begin
+  CanonName := 'class of ' + ABase.Name;
+  Result := FTable.FindType(CanonName);
+  if (Result is TMetaClassTypeDesc) and
+     (TMetaClassTypeDesc(Result).BaseClass = ABase) then
+    Exit;
+  { The name is not unique: the first-registered 'class of TFoo' may belong
+    to another unit's TFoo.  A namesake's metaclass is registered under a
+    unit-qualified key; the descriptor keeps the plain name. }
+  Key := CanonName;
+  if Result <> nil then
+  begin
+    Key := CanonName + '@' + ABase.OwningUnit;
+    Result := FTable.FindType(Key);
+    if (Result is TMetaClassTypeDesc) and
+       (TMetaClassTypeDesc(Result).BaseClass = ABase) then
+      Exit;
+  end;
+  Sym := TSymbol.Create(Key, skType, FTable.NewMetaClassType(CanonName, ABase));
+  FTable.DefineGlobal(Sym);
+  Result := Sym.TypeDesc;
+end;
+
 function TSemanticAnalyser.FindTypeOrInstantiate(const AName: string): TTypeDesc;
 var
   BaseName: string;
@@ -4803,17 +4840,7 @@ begin
     BaseName := StrCopyTail(AName, 9);
     BaseType := FindTypeOrInstantiate(BaseName);
     if (BaseType <> nil) and (BaseType.Kind = tyClass) then
-    begin
-      CanonName := 'class of ' + BaseType.Name;
-      Result    := FTable.FindType(CanonName);
-      if Result = nil then
-      begin
-        Sym := TSymbol.Create(CanonName, skType,
-          FTable.NewMetaClassType(CanonName, BaseType));
-        FTable.DefineGlobal(Sym);
-        Result := Sym.TypeDesc;
-      end;
-    end;
+      Result := Self.MetaClassFor(BaseType);
     Exit;
   end;
   { Inline set type: 'set of TypeName' — create on demand.  The element type
@@ -8954,6 +8981,7 @@ begin
         Resolved := ResolveCustomAttrName(AttrUse.Name);
         if Resolved = '' then Continue;
         AttrUse.ResolvedClassName := Resolved;
+        AttrUse.ResolvedClassType := FTable.FindType(Resolved);
         SynthesiseAttrThunk(AttrUse,
           '__attr_' + TD.Name + '_c' + IntToStr(AttrIdx));
       end;
@@ -9307,6 +9335,7 @@ begin
                       AttrUse.Name, AttrUse.Name]),
               AttrUse.Line, AttrUse.Col);
           AttrUse.ResolvedClassName := Resolved;
+          AttrUse.ResolvedClassType := FTable.FindType(Resolved);
           if MDecl.IsPublished then
             SynthesiseAttrThunk(AttrUse,
               '__attr_' + TD.Name + '_m' + IntToStr(J) + '_' + IntToStr(AttrIdx));
@@ -9819,8 +9848,18 @@ begin
               Result := TMethodDecl(Grp.Items[K]);
               Break;
             end;
+        { Only the namesake declares it: a program TGauge without a Create
+          bound TGauge.Create to a used unit's TGauge.Create, whose vtable
+          slot lay past the end of the program class's vtable.  The resolved
+          type's own descriptor records every method it declares, so when
+          it has none of this name, look in its parent instead. }
+        if not SameText(Result.OwningUnit, OwnerUnit) and
+           (Sym.TypeDesc is TRecordTypeDesc) and
+           (TRecordTypeDesc(Sym.TypeDesc).FindMethodSym(AMethodName) = '') then
+          Result := nil;
       end;
-      Exit;
+      if Result <> nil then
+        Exit;
     end;
     { Walk to parent }
     Sym := FTable.Lookup(CurrName);
@@ -9868,6 +9907,21 @@ begin
   Result := ATypeName;
 end;
 
+function TSemanticAnalyser.PropAccessorOwnerDesc(ART: TRecordTypeDesc;
+  const AMethodName: string): TRecordTypeDesc;
+var
+  Walk: TRecordTypeDesc;
+begin
+  Walk := ART;
+  while Walk <> nil do
+  begin
+    if FMethodIndex.IndexOf(Walk.Name + '.' + AMethodName) >= 0 then
+      Exit(Walk);
+    Walk := Walk.Parent;
+  end;
+  Result := ART;
+end;
+
 function TSemanticAnalyser.PropAccessorVSlot(
   const ATypeName, AMethodName: string): Integer;
 var
@@ -9897,6 +9951,9 @@ var
   TotalCnt:    Integer;
   Arity:       Integer;
   SawHiding:   Boolean;
+  LevelSym:    TSymbol;
+  LevelOwner:  string;
+  HasOwn:      Boolean;
 begin
   Result    := nil;
   { Consume the one-shot receiver owner hint set by the caller. }
@@ -9912,10 +9969,33 @@ begin
       Key := CurrName + '.' + AMethodName;
       Grp := GroupOf(FMethodGroups, Key);
       SawHiding := False;
+      { The group is keyed by type NAME, so it also holds the methods of a
+        same-named type in another unit (a program TGauge and a used unit's
+        TGauge).  Keep only the candidates of the type this level resolves
+        to: its own unit's, or -- when it declares no method of this name --
+        none at all, so the walk moves on to its parent.  At the receiver's
+        own level an owner hint is authoritative (a qualified tcb.TShape is
+        not the flat-table TShape), and the hint filter below applies. }
+      LevelOwner := '';
+      HasOwn := False;
+      LevelSym := nil;
+      if not ((OwnerHint <> '') and SameText(CurrName, ATypeName)) then
+        LevelSym := FTable.Lookup(CurrName);
+      if LevelSym <> nil then
+        LevelOwner := LevelSym.OwningUnit;
+      if (Grp <> nil) and (LevelOwner <> '') then
+        for K := 0 to Grp.Count - 1 do
+          if SameText(TMethodDecl(Grp.Items[K]).OwningUnit, LevelOwner) then
+            HasOwn := True;
       if Grp <> nil then
         for K := 0 to Grp.Count - 1 do
         begin
           Cand := TMethodDecl(Grp.Items[K]);
+          if (LevelOwner <> '') and (Cand.OwningUnit <> '') and
+             not SameText(Cand.OwningUnit, LevelOwner) and
+             (HasOwn or ((LevelSym.TypeDesc is TRecordTypeDesc) and
+               (TRecordTypeDesc(LevelSym.TypeDesc).FindMethodSym(AMethodName) = ''))) then
+            Continue;
           { Cross-unit last-wins: at the receiver's OWN type level the group can
             also hold a same-named method on another used unit's same-named type.
             Bind to the receiver's actual unit (the hint) — a name re-lookup
@@ -12804,6 +12884,7 @@ begin
           SemanticError(
             Format('Exception handler type must be a class, got ''%s''', [H.TypeName]),
             AStmt.Line, AStmt.Col);
+        H.ResolvedType := CondType;
         if H.VarName <> '' then
         begin
           { Inject a synthetic local so EmitVarAllocs allocates a stack slot.
@@ -14218,6 +14299,7 @@ begin
   AAssign.FieldName         := DefProp.Name;
   AAssign.PropWriteInfo     := DefProp;
   AAssign.PropOwnerType     := PropAccessorOwner(DefRT.Name, DefProp.WriteMethod);
+  AAssign.PropOwnerDesc := PropAccessorOwnerDesc(DefRT, DefProp.WriteMethod);
   AAssign.PropAccessorVSlot := PropAccessorVSlot(DefRT.Name, DefProp.WriteMethod);
   IdxType := Self.AnalyseExprSlot(AAssign.PropIndexExpr);
   if DefProp.IndexTypeDesc <> nil then
@@ -14335,6 +14417,7 @@ begin
         AAssign.PropWriteInfo := PropInfo;
         AAssign.PropOwnerType :=
           PropAccessorOwner(RT.Name, PropInfo.WriteMethod);
+        AAssign.PropOwnerDesc := PropAccessorOwnerDesc(RT, PropInfo.WriteMethod);
         AAssign.PropAccessorVSlot :=
           PropAccessorVSlot(RT.Name, PropInfo.WriteMethod);
         ExprType := Self.AnalyseExprSlot(AAssign.Expr);
@@ -14436,6 +14519,7 @@ begin
             AAssign.PropWriteInfo := PropInfo;
             AAssign.PropOwnerType :=
               PropAccessorOwner(RT.Name, PropInfo.WriteMethod);
+            AAssign.PropOwnerDesc := PropAccessorOwnerDesc(RT, PropInfo.WriteMethod);
             AAssign.PropAccessorVSlot :=
               PropAccessorVSlot(RT.Name, PropInfo.WriteMethod);
             ExprType := Self.AnalyseExprSlot(AAssign.Expr);
@@ -14610,6 +14694,7 @@ begin
         AAssign.PropWriteInfo := PropInfo;
         AAssign.PropOwnerType :=
           PropAccessorOwner(RT.Name, PropInfo.WriteMethod);
+        AAssign.PropOwnerDesc := PropAccessorOwnerDesc(RT, PropInfo.WriteMethod);
         AAssign.PropAccessorVSlot :=
           PropAccessorVSlot(RT.Name, PropInfo.WriteMethod);
         ExprType := Self.AnalyseExprSlot(AAssign.Expr);
@@ -17945,7 +18030,10 @@ begin
       has no method table, so the lookup silently missed the user ctor and
       TAlias.Create() allocated WITHOUT running the constructor body.
       Generic instances are unaffected (their symbol and descriptor names
-      agree). }
+      agree).  The owner hint binds to the descriptor's own unit, not to a
+      same-named class elsewhere (a program TGauge without a constructor
+      took a used unit's TGauge.Create). }
+    FMethodOwnerHint := TRecordTypeDesc(ObjSym.TypeDesc).OwningUnit;
     MDecl := ResolveMethodOverload(TRecordTypeDesc(ObjSym.TypeDesc).Name,
       AExpr.Name, AExpr.Args, AExpr.Line, AExpr.Col);
     if MDecl = nil then
@@ -17972,6 +18060,7 @@ begin
         Format node is new — analyse it so its string ResolvedType is set
         before overload resolution matches it against Create(string) }
       AnalyseExpr(FmtCall);
+      FMethodOwnerHint := TRecordTypeDesc(ObjSym.TypeDesc).OwningUnit;
       MDecl := ResolveMethodOverload(TRecordTypeDesc(ObjSym.TypeDesc).Name,
         'Create', AExpr.Args, AExpr.Line, AExpr.Col);
       if MDecl = nil then
@@ -18496,7 +18585,7 @@ begin
        (Sym.TypeDesc.Kind = tyClass) then
     begin
       TIdentExpr(AExpr).IsMetaclassRef := True;
-      Result := FindTypeOrInstantiate('class of ' + Sym.TypeDesc.Name);
+      Result := Self.MetaClassFor(Sym.TypeDesc);
       if Result = nil then Result := FTable.TypePointer;
       AExpr.ResolvedType := Result;
       Exit;
@@ -18976,6 +19065,7 @@ begin
         AAccess.PropRead := PropInfo;
         AAccess.PropOwnerType :=
           PropAccessorOwner(RT.Name, PropInfo.ReadMethod);
+        AAccess.PropOwnerDesc := PropAccessorOwnerDesc(RT, PropInfo.ReadMethod);
         AAccess.PropAccessorVSlot :=
           PropAccessorVSlot(RT.Name, PropInfo.ReadMethod);
         AAccess.PropReadDecl := FindMethodDecl(RT.Name, PropInfo.ReadMethod);
@@ -19111,6 +19201,7 @@ begin
               AAccess.PropRead := PropInfo;
               AAccess.PropOwnerType :=
                 PropAccessorOwner(RT.Name, PropInfo.ReadMethod);
+              AAccess.PropOwnerDesc := PropAccessorOwnerDesc(RT, PropInfo.ReadMethod);
               AAccess.PropAccessorVSlot :=
                 PropAccessorVSlot(RT.Name, PropInfo.ReadMethod);
               { as on the leaf and chained arms: the native aggregate-result
@@ -19456,6 +19547,7 @@ begin
         AAccess.PropRead := PropInfo;
         AAccess.PropOwnerType :=
           PropAccessorOwner(RT.Name, PropInfo.ReadMethod);
+        AAccess.PropOwnerDesc := PropAccessorOwnerDesc(RT, PropInfo.ReadMethod);
         AAccess.PropAccessorVSlot :=
           PropAccessorVSlot(RT.Name, PropInfo.ReadMethod);
         AAccess.PropReadDecl := FindMethodDecl(RT.Name, PropInfo.ReadMethod);
@@ -19563,6 +19655,7 @@ begin
       AAccess.PropRead      := PropInfo;
       AAccess.PropOwnerType := PropAccessorOwner(
         TRecordTypeDesc(AFldType).Name, PropInfo.ReadMethod);
+      AAccess.PropOwnerDesc := PropAccessorOwnerDesc(TRecordTypeDesc(AFldType), PropInfo.ReadMethod);
       AAccess.PropAccessorVSlot := PropAccessorVSlot(
         TRecordTypeDesc(AFldType).Name, PropInfo.ReadMethod);
       { Resolve the getter DECL too, not just the property.  The native
@@ -20887,6 +20980,7 @@ begin
   FA.IsClassAccess := ART.Kind = tyClass;
   FA.PropRead := AProp;
   FA.PropOwnerType := PropAccessorOwner(ART.Name, AProp.ReadMethod);
+  FA.PropOwnerDesc := PropAccessorOwnerDesc(ART, AProp.ReadMethod);
   FA.PropAccessorVSlot := PropAccessorVSlot(ART.Name, AProp.ReadMethod);
   FA.PropReadDecl := FindMethodDecl(ART.Name, AProp.ReadMethod);
   FA.ResolvedType := AProp.TypeDesc;
@@ -21755,6 +21849,7 @@ begin
           AStmt.PropWriteInfo     := DefProp;
           AStmt.PropOwnerType     := PropAccessorOwner(
             TRecordTypeDesc(BaseInfo.TypeDesc).Name, DefProp.WriteMethod);
+          AStmt.PropOwnerDesc := PropAccessorOwnerDesc(TRecordTypeDesc(BaseInfo.TypeDesc), DefProp.WriteMethod);
           AStmt.PropAccessorVSlot := PropAccessorVSlot(
             TRecordTypeDesc(BaseInfo.TypeDesc).Name, DefProp.WriteMethod);
           IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
@@ -21833,6 +21928,7 @@ begin
       AStmt.PropWriteInfo := DefProp;
       AStmt.PropOwnerType :=
         PropAccessorOwner(TRecordTypeDesc(Sym.TypeDesc).Name, DefProp.WriteMethod);
+      AStmt.PropOwnerDesc := PropAccessorOwnerDesc(TRecordTypeDesc(Sym.TypeDesc), DefProp.WriteMethod);
       AStmt.PropAccessorVSlot :=
         PropAccessorVSlot(TRecordTypeDesc(Sym.TypeDesc).Name, DefProp.WriteMethod);
       IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
