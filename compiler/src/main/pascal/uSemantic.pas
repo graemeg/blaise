@@ -539,6 +539,8 @@ type
       addresses so the backends lower a plain RTL call. }
     procedure AnalyseRawMemOperand(ACall: TProcCall; AIndex: Integer;
       const ARoutine, APosition, AVerb, ARemedy: string; AWritten: Boolean);
+    function  AnalyseIntegerArg(AArgs: TObjectList; AIndex: Integer;
+      const ARoutine, ARole: string; ALine, ACol: Integer): TTypeDesc;
     function  AnalyseRawMemInteger(ACall: TProcCall; AIndex: Integer;
       const ARoutine, ARole, AHint: string): TTypeDesc;
     procedure AnalyseMoveCall(ACall: TProcCall);
@@ -1253,6 +1255,16 @@ implementation
 
 uses
   blaise.codegen;
+
+{ The name of the float operand of a binary operator (the left one when both
+  are), for an integer-only operator's diagnostic. }
+function FloatOperandName(ALeft, ARight: TTypeDesc): string;
+begin
+  if ALeft.IsFloat() then
+    Result := ALeft.Name
+  else
+    Result := ARight.Name;
+end;
 
 { Float<->string conversion uses the RTL's pure-Pascal _DoubleToStr / _StrToDouble,
   NOT libc's snprintf / strtod.  snprintf is a genuinely variadic function;
@@ -14351,8 +14363,8 @@ var
   ValType: TTypeDesc;
 begin
   IdxType := Self.AnalyseExprSlot(AIndex);
-  if not IdxType.IsNumeric() then
-    SemanticError('String subscript index must be numeric', ALine, ACol);
+  if not IdxType.IsNumeric() or IdxType.IsFloat() then
+    SemanticError('String subscript index must be an integer', ALine, ACol);
   ValType := Self.AnalyseExprSlot(AValue);
   if not (ValType.IsNumeric() or (ValType.Kind = tyString)) then
     SemanticError(
@@ -16056,6 +16068,23 @@ begin
     WarnIfVarArgIsForInLoopVar(AoE.Expr);
 end;
 
+{ An argument a built-in needs as an integer (a count, an index, a code):
+  analysed, and rejected when it is a float -- the backends would read the
+  float's bit pattern as the integer (Chr(D), SetLength(S, D)) or find no
+  integer lowering for a float expression.  Returns its type. }
+function TSemanticAnalyser.AnalyseIntegerArg(AArgs: TObjectList;
+  AIndex: Integer; const ARoutine, ARole: string;
+  ALine, ACol: Integer): TTypeDesc;
+begin
+  Result := Self.AnalyseListSlot(AArgs, AIndex);
+  if (Result <> nil) and Result.IsFloat() then
+    SemanticError(
+      Format('%s argument of ''%s'' must be an integer, not ''%s'' (use ' +
+        'Trunc or Round to convert a float to an integer)',
+        [ARole, ARoutine, Result.Name]),
+      ALine, ACol);
+end;
+
 { An integer-typed argument of a raw-memory intrinsic; returns its type. }
 function TSemanticAnalyser.AnalyseRawMemInteger(ACall: TProcCall;
   AIndex: Integer; const ARoutine, ARole, AHint: string): TTypeDesc;
@@ -16346,10 +16375,16 @@ begin
         SemanticError(
           Format('''%s'' requires 1 or 2 arguments', [ACall.Name]),
           ACall.Line, ACall.Col);
-      Self.AnalyseListSlot(ACall.Args, 0);
+      ArgType := Self.AnalyseListSlot(ACall.Args, 0);
+      if (ArgType <> nil) and ArgType.IsFloat() then
+        SemanticError(
+          Format('''%s'' needs an ordinal or pointer variable, not ''%s''',
+            [ACall.Name, ArgType.Name]),
+          ACall.Line, ACall.Col);
       WarnIfVarArgIsForInLoopVar(TASTExpr(ACall.Args.Items[0]));
       if ACall.Args.Count = 2 then
-        Self.AnalyseListSlot(ACall.Args, 1);
+        Self.AnalyseIntegerArg(ACall.Args, 1, ACall.Name, 'Second',
+          ACall.Line, ACall.Col);
     end
     else
     { Include(S, elem) / Exclude(S, elem): validate arg count and types }
@@ -16412,8 +16447,10 @@ begin
         SemanticError('First argument of ''Delete'' must be an assignable string',
           ACall.Line, ACall.Col);
       WarnIfVarArgIsForInLoopVar(TASTExpr(ACall.Args.Items[0]));
-      Self.AnalyseListSlot(ACall.Args, 1);
-      Self.AnalyseListSlot(ACall.Args, 2);
+      Self.AnalyseIntegerArg(ACall.Args, 1, 'Delete', 'Index', ACall.Line,
+        ACall.Col);
+      Self.AnalyseIntegerArg(ACall.Args, 2, 'Delete', 'Count', ACall.Line,
+        ACall.Col);
     end
     else
     if SameText(ACall.Name, 'SetLength') then
@@ -16434,7 +16471,8 @@ begin
         SemanticError('First argument of ''SetLength'' must be an assignable variable',
           ACall.Line, ACall.Col);
       WarnIfVarArgIsForInLoopVar(TASTExpr(ACall.Args.Items[0]));
-      Self.AnalyseListSlot(ACall.Args, 1);
+      Self.AnalyseIntegerArg(ACall.Args, 1, 'SetLength', 'Length',
+        ACall.Line, ACall.Col);
     end
     else
     if SameText(ACall.Name, 'Move') then
@@ -16447,7 +16485,8 @@ begin
     begin
       if ACall.Args.Count <> 1 then
         SemanticError('Sleep requires exactly 1 argument', ACall.Line, ACall.Col);
-      Self.AnalyseListSlot(ACall.Args, 0);
+      Self.AnalyseIntegerArg(ACall.Args, 0, 'Sleep', 'The', ACall.Line,
+        ACall.Col);
     end
     else
     begin
@@ -16456,6 +16495,15 @@ begin
       for I := 0 to ACall.Args.Count - 1 do
       begin
         ArgType := Self.AnalyseListSlot(ACall.Args, I);
+        { Halt(Code): the exit code is an integer (Halt(D) exited with the
+          float's bit pattern) }
+        if SameText(ACall.Name, 'Halt') and (ArgType <> nil) and
+           ArgType.IsFloat() then
+          SemanticError(
+            Format('The exit code of ''Halt'' must be an integer, not ''%s'' ' +
+              '(use Trunc or Round to convert a float to an integer)',
+              [ArgType.Name]),
+            ACall.Line, ACall.Col);
         if SameText(ACall.Name, 'WriteLn') or SameText(ACall.Name, 'Write') then
         begin
           if (ArgType = nil) or (ArgType.Kind = tyVoid) then
@@ -17024,7 +17072,18 @@ begin
       SemanticError(
         Format('Type cast ''%s'' expects exactly one argument', [AExpr.Name]),
         AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
+    { an ordinal cast of a float is no conversion at all -- the backends
+      would reinterpret its bit pattern (Integer(3.7) was -1717986918) or,
+      for a float expression, find no integer lowering.  FPC and Delphi
+      reject it; Trunc and Round are the conversions. }
+    if (Sym.TypeDesc <> nil) and Sym.TypeDesc.IsOrdinal() and
+       (ArgType <> nil) and ArgType.IsFloat() then
+      SemanticError(
+        Format('Illegal type conversion from ''%s'' to ''%s'' (use Trunc ' +
+          'or Round to convert a float to an integer)',
+          [ArgType.Name, Sym.TypeDesc.Name]),
+        AExpr.Line, AExpr.Col);
     { Byte(','), Word('A'), ...: an integer cast of a string LITERAL
       means the character code (Ord semantics).  Without this fold the
       backends reinterpret the literal's pointer — silent garbage.
@@ -17077,8 +17136,11 @@ begin
       SemanticError(
         'ReallocMem requires exactly 2 arguments (pointer, new byte count)',
         AExpr.Line, AExpr.Col);
-    for I := 0 to AExpr.Args.Count - 1 do
+    for I := 0 to AExpr.Args.Count - 2 do
       Self.AnalyseListSlot(AExpr.Args, I);
+    if AExpr.Args.Count > 0 then
+      Self.AnalyseIntegerArg(AExpr.Args, AExpr.Args.Count - 1, AExpr.Name,
+        'The byte count', AExpr.Line, AExpr.Col);
     Result := FTable.TypePointer;
     AExpr.ResolvedType := Result;
     Exit;
@@ -17126,8 +17188,10 @@ begin
     if AExpr.Args.Count <> 3 then
       SemanticError('Copy requires exactly three arguments', AExpr.Line, AExpr.Col);
     Self.AnalyseListSlot(AExpr.Args, 0);
-    Self.AnalyseListSlot(AExpr.Args, 1);
-    Self.AnalyseListSlot(AExpr.Args, 2);
+    Self.AnalyseIntegerArg(AExpr.Args, 1, 'Copy', 'Index', AExpr.Line,
+      AExpr.Col);
+    Self.AnalyseIntegerArg(AExpr.Args, 2, 'Copy', 'Count', AExpr.Line,
+      AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -17159,7 +17223,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('IntToStr requires exactly one argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseIntegerArg(AExpr.Args, 0, 'IntToStr', 'The', AExpr.Line,
+      AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -17456,7 +17521,13 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('Ord requires exactly 1 argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
+    { a float has no ordinal: Ord(D) returned its bit pattern }
+    if (ArgType <> nil) and ArgType.IsFloat() then
+      SemanticError(
+        Format('Ord expects an ordinal value, not ''%s'' (use Trunc or ' +
+          'Round to convert a float to an integer)', [ArgType.Name]),
+        AExpr.Line, AExpr.Col);
     Result := FTable.TypeInteger;
     AExpr.ResolvedType := Result;
     Exit;
@@ -17466,7 +17537,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('Chr requires exactly 1 argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseIntegerArg(AExpr.Args, 0, 'Chr', 'The', AExpr.Line,
+      AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -17538,7 +17610,8 @@ begin
   begin
     if AExpr.Args.Count <> 1 then
       SemanticError('ParamStr requires exactly 1 argument', AExpr.Line, AExpr.Col);
-    Self.AnalyseListSlot(AExpr.Args, 0);
+    Self.AnalyseIntegerArg(AExpr.Args, 0, 'ParamStr', 'The', AExpr.Line,
+      AExpr.Col);
     Result := FTable.TypeString;
     AExpr.ResolvedType := Result;
     Exit;
@@ -19782,11 +19855,35 @@ function TSemanticAnalyser.AnalyseFieldSubscript(AAccess: TFieldAccessExpr;
 var
   PropInfo: TPropertyInfo;
   Inner: TFieldAccessExpr;
+
+  { the index of a string or array element: an integer (an ordinal for a
+    static array), never a float -- the backends would scale its bit
+    pattern as the offset }
+  procedure AnalyseElementIndex(const AWhat: string; AStatic: Boolean);
+  var
+    IdxType: TTypeDesc;
+  begin
+    IdxType := Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+    if (IdxType <> nil) and
+       ((AStatic and not IdxType.IsArrayIndex()) or
+        (not AStatic and (not IdxType.IsNumeric() or IdxType.IsFloat()))) then
+      if AStatic then
+        SemanticError(
+          Format('%s index must be an ordinal type, got ''%s''',
+            [AWhat, IdxType.Name]),
+          AAccess.Line, AAccess.Col)
+      else
+        SemanticError(
+          Format('%s index must be an integer, got ''%s''',
+            [AWhat, IdxType.Name]),
+          AAccess.Line, AAccess.Col);
+  end;
+
 begin
   Result := nil;
   if AFldType.IsString() then
   begin
-    Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+    AnalyseElementIndex('String subscript', False);
     AAccess.IsCharAccess := True;
     Result := FTable.TypeInteger;
   end
@@ -19843,13 +19940,13 @@ begin
   end
   else if AFldType.Kind = tyDynArray then
   begin
-    Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+    AnalyseElementIndex('Dynamic array', False);
     AAccess.IsArrayAccess := True;
     Result := TDynArrayTypeDesc(AFldType).ElementType;
   end
   else if AFldType.Kind = tyStaticArray then
   begin
-    Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+    AnalyseElementIndex('Static array', True);
     Self.CheckConstArrayIndexInRange(AAccess.PropIndexExpr,
       AFldType, AAccess.FieldName, AAccess.Line, AAccess.Col);
     AAccess.IsArrayAccess := True;
@@ -19857,7 +19954,7 @@ begin
   end
   else if AFldType.Kind = tyOpenArray then
   begin
-    Self.AnalyseExprSlot(AAccess.PropIndexExpr);
+    AnalyseElementIndex('Open-array', False);
     AAccess.IsArrayAccess := True;
     Result := TOpenArrayTypeDesc(AFldType).ElementType;
   end;
@@ -19995,6 +20092,13 @@ begin
     { Bitwise or/and for integer types }
     if LType.IsNumeric() and RType.IsNumeric() then
     begin
+      { a float has no bits to combine: the backends used its bit pattern
+        (I xor D) or had no lowering at all (I or 2.5) }
+      if LType.IsFloat() or RType.IsFloat() then
+        SemanticError(
+          Format('''%s'' requires integer or Boolean operands, not ''%s''',
+            [BinaryOpName(ABin.Op), FloatOperandName(LType, RType)]),
+          ABin.Line, ABin.Col);
       if ((LType.Kind = tyInt64) and (RType.Kind = tyUInt64)) or
          ((LType.Kind = tyUInt64) and (RType.Kind = tyInt64)) then
         SemanticError(
@@ -20125,6 +20229,11 @@ begin
           Format('Shift amount of ''%s'' must be numeric, got ''%s''',
             [BinaryOpName(ABin.Op), RType.Name]),
           ABin.Line, ABin.Col);
+      if LType.IsFloat() or RType.IsFloat() then
+        SemanticError(
+          Format('''%s'' requires integer operands, not ''%s''',
+            [BinaryOpName(ABin.Op), FloatOperandName(LType, RType)]),
+          ABin.Line, ABin.Col);
       Result := LType;
       ABin.ResolvedType := Result;
       Exit;
@@ -20154,6 +20263,11 @@ begin
     if (ABin.Op = boDiv) and (LType.IsFloat() or RType.IsFloat()) then
       SemanticError(
         '''div'' requires integer operands; use ''/'' for real division',
+        ABin.Line, ABin.Col);
+    if (ABin.Op = boMod) and (LType.IsFloat() or RType.IsFloat()) then
+      SemanticError(
+        Format('''mod'' requires integer operands, not ''%s''',
+          [FloatOperandName(LType, RType)]),
         ABin.Line, ABin.Col);
     { `/` is real division: always yields a float, even with Integer operands.
       Result is Single when both operands are Single, Double otherwise. }
@@ -21645,9 +21759,9 @@ begin
   if StrType.Kind = tyOpenArray then
   begin
     IdxType := Self.AnalyseExprSlot(AExpr.IndexExpr);
-    if not IdxType.IsNumeric() then
+    if not IdxType.IsNumeric() or IdxType.IsFloat() then
       SemanticError(
-        Format('Open-array index must be numeric, got ''%s''', [IdxType.Name]),
+        Format('Open-array index must be an integer, got ''%s''', [IdxType.Name]),
         AExpr.Line, AExpr.Col);
     Result := TOpenArrayTypeDesc(StrType).ElementType;
     AExpr.ResolvedType := Result;
@@ -21657,9 +21771,9 @@ begin
   if StrType.Kind = tyDynArray then
   begin
     IdxType := Self.AnalyseExprSlot(AExpr.IndexExpr);
-    if not IdxType.IsNumeric() then
+    if not IdxType.IsNumeric() or IdxType.IsFloat() then
       SemanticError(
-        Format('Dynamic array index must be numeric, got ''%s''', [IdxType.Name]),
+        Format('Dynamic array index must be an integer, got ''%s''', [IdxType.Name]),
         AExpr.Line, AExpr.Col);
     Result := TDynArrayTypeDesc(StrType).ElementType;
     AExpr.ResolvedType := Result;
@@ -21669,9 +21783,9 @@ begin
   if StrType.Kind = tyPChar then
   begin
     IdxType := Self.AnalyseExprSlot(AExpr.IndexExpr);
-    if not IdxType.IsNumeric() then
+    if not IdxType.IsNumeric() or IdxType.IsFloat() then
       SemanticError(
-        Format('PChar subscript index must be numeric, got ''%s''', [IdxType.Name]),
+        Format('PChar subscript index must be an integer, got ''%s''', [IdxType.Name]),
         AExpr.Line, AExpr.Col);
     Result := FTable.TypeInteger;
     AExpr.ResolvedType := Result;
@@ -21711,9 +21825,9 @@ begin
         [StrType.Name]),
       AExpr.Line, AExpr.Col);
   IdxType := Self.AnalyseExprSlot(AExpr.IndexExpr);
-  if not IdxType.IsNumeric() then
+  if not IdxType.IsNumeric() or IdxType.IsFloat() then
     SemanticError(
-      Format('String subscript index must be numeric, got ''%s''', [IdxType.Name]),
+      Format('String subscript index must be an integer, got ''%s''', [IdxType.Name]),
       AExpr.Line, AExpr.Col);
   Result := FTable.TypeInteger;
   AExpr.ResolvedType := Result;
@@ -22123,8 +22237,8 @@ begin
     AStmt.IsVarParam := Sym.Kind = skVarParameter;
     AStmt.ResolvedArrayType := FTable.TypePChar;
     IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
-    if not IdxType.IsNumeric() then
-      SemanticError('PChar subscript index must be numeric', AStmt.Line, AStmt.Col);
+    if not IdxType.IsNumeric() or IdxType.IsFloat() then
+      SemanticError('PChar subscript index must be an integer', AStmt.Line, AStmt.Col);
     Self.AnalyseExprSlot(AStmt.ValueExpr);
     Exit;
   end;
@@ -22155,8 +22269,8 @@ begin
     AStmt.IsVarParam        := Sym.Kind = skVarParameter;
     AStmt.ResolvedArrayType := Sym.TypeDesc;
     IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
-    if not IdxType.IsNumeric() then
-      SemanticError('Dynamic array index must be numeric', AStmt.Line, AStmt.Col);
+    if not IdxType.IsNumeric() or IdxType.IsFloat() then
+      SemanticError('Dynamic array index must be an integer', AStmt.Line, AStmt.Col);
     ValType := AnalyseExprHinted(AStmt.ValueExpr,
       TDynArrayTypeDesc(Sym.TypeDesc).ElementType);
     Self.CheckConstValueInRange(TDynArrayTypeDesc(Sym.TypeDesc).ElementType, AStmt.ValueExpr,
@@ -22180,8 +22294,8 @@ begin
     AStmt.IsVarParam        := True;
     AStmt.ResolvedArrayType := Sym.TypeDesc;
     IdxType := Self.AnalyseExprSlot(AStmt.IndexExpr);
-    if not IdxType.IsNumeric() then
-      SemanticError('Open array index must be numeric', AStmt.Line, AStmt.Col);
+    if not IdxType.IsNumeric() or IdxType.IsFloat() then
+      SemanticError('Open array index must be an integer', AStmt.Line, AStmt.Col);
     ValType := AnalyseExprHinted(AStmt.ValueExpr,
       TOpenArrayTypeDesc(Sym.TypeDesc).ElementType);
     Self.CheckConstValueInRange(TOpenArrayTypeDesc(Sym.TypeDesc).ElementType, AStmt.ValueExpr,

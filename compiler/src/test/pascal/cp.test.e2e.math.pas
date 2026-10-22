@@ -31,6 +31,12 @@ type
   published
     procedure TestRun_MathGaps_VarParamsIndirectRecordSingleTrig;
     procedure TestRun_MinMaxSign;
+    { a float reaches an integer only through Trunc / Round: the compiler
+      rejects Integer(D), Ord(D), IntToStr(D) and I xor D, which ran and
+      printed the float's bit pattern, and an ordinal cast of a float
+      expression, which failed in the backend; ordinal casts of ordinals
+      still work }
+    procedure TestRun_FloatToOrdinal_OnlyTruncAndRound;
     { --- Compiler builtins --- }
 
     { Sqrt }
@@ -1995,6 +2001,70 @@ begin
     '7 -3' + LE +
     '0.5211 1.1276 0.4621 0.4636 0.5236 1.0472' + LE +
     '0.1411 1024 3.0 3.0 1.5' + LE, 0);
+end;
+
+procedure TE2EMathTests.TestRun_FloatToOrdinal_OnlyTruncAndRound;
+const
+  SrcOk = '''
+    program P;
+    type TC = (cA, cB, cC);
+    var D: Double; I: Integer; E: TC;
+    begin
+      D := 3.7; I := 7; E := cC;
+      WriteLn(Trunc(D), ' ', Round(D), ' ', Trunc(I / 2), ' ',
+        Integer(E), ' ', Byte(I + 250), ' ', Double(I) / 2:0:1)
+    end.
+    ''';
+  SrcCast = '''
+    program P;
+    var D: Double; I: Integer;
+    begin
+      D := 3.7; I := Integer(D); WriteLn(I)
+    end.
+    ''';
+  SrcOrd = '''
+    program P;
+    var I: Integer;
+    begin
+      I := 7; WriteLn(Ord(I / 2))
+    end.
+    ''';
+  SrcIntToStr = '''
+    program P;
+    uses SysUtils;
+    var D: Double;
+    begin
+      D := 2.5; WriteLn(IntToStr(D))
+    end.
+    ''';
+  SrcXor = '''
+    program P;
+    var I: Integer; D: Double;
+    begin
+      I := 1; D := 2.5; WriteLn(I xor D)
+    end.
+    ''';
+var
+  BinFile, ToolOut: string;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(SrcOk, '3 4 3 2 1 3.5' + LE, 0);
+  AssertTrue('Integer(D) is rejected',
+    CompileNativeCLI(SrcCast, False, '', BinFile, ToolOut) <> 0);
+  AssertTrue('names the conversion: ' + ToolOut,
+    Pos('Illegal type conversion from ''Double'' to ''Integer''', ToolOut) >= 0);
+  AssertTrue('Ord(I / 2) is rejected',
+    CompileNativeCLI(SrcOrd, False, '', BinFile, ToolOut) <> 0);
+  AssertTrue('names Ord: ' + ToolOut,
+    Pos('Ord expects an ordinal value', ToolOut) >= 0);
+  AssertTrue('IntToStr(D) is rejected',
+    CompileNativeCLI(SrcIntToStr, False, '', BinFile, ToolOut) <> 0);
+  AssertTrue('names the argument: ' + ToolOut,
+    Pos('argument of ''IntToStr'' must be an integer', ToolOut) >= 0);
+  AssertTrue('I xor D is rejected',
+    CompileNativeCLI(SrcXor, False, '', BinFile, ToolOut) <> 0);
+  AssertTrue('names the operator: ' + ToolOut,
+    Pos('''xor'' requires integer or Boolean operands', ToolOut) >= 0);
 end;
 
 initialization

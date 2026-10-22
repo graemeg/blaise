@@ -111,6 +111,20 @@ type
     { var/const open-array element write (issue #130 bug5) }
     procedure TestVarOpenArray_ElementWrite_OK;
     procedure TestConstOpenArray_ElementWrite_RaisesError;
+
+    { an ordinal cast of a float and Ord of a float are errors (FPC and
+      Delphi agree): the backends reinterpreted a float variable's bits
+      (Integer(3.7) was -1717986918) and had no lowering for a float
+      expression.  Ordinal casts of ordinals and Double(I) still compile. }
+    procedure TestSemantic_OrdinalCastOfFloat_Rejected;
+    procedure TestSemantic_OrdOfFloat_Rejected;
+    { a float is rejected wherever an integer is required: the operands of
+      and/or/xor, the shifts and mod; the integer arguments of Inc/Dec,
+      SetLength, Chr, IntToStr, Copy, Delete, Halt, GetMem, ReallocMem,
+      Sleep and ParamStr; string, PChar and array indices, including an
+      array field's.  Each compiled and used the float's bit pattern, or
+      reached a backend with no integer lowering. }
+    procedure TestSemantic_FloatWhereIntegerRequired_Rejected;
   end;
 
 implementation
@@ -885,6 +899,91 @@ begin
   AssertTrue('a call result', Pos('Cannot take the address', SemanticError(SrcCall)) >= 0);
   AssertTrue('an operator', Pos('Cannot take the address', SemanticError(SrcExpr)) >= 0);
   AssertTrue('a constant', Pos('Cannot take the address', SemanticError(SrcConst)) >= 0);
+end;
+
+procedure TSemanticTests.TestSemantic_OrdinalCastOfFloat_Rejected;
+const
+  Pre = 'program P; type TC = (cA, cB); var I: Integer; B: Byte; ' +
+    'D: Double; S: Single; E: TC; Ok: Boolean; begin ';
+begin
+  AssertTrue('a float variable',
+    Pos('Illegal type conversion from ''Double'' to ''Integer''',
+      SemanticError(Pre + 'I := Integer(D) end.')) >= 0);
+  AssertTrue('a float expression',
+    Pos('use Trunc or Round',
+      SemanticError(Pre + 'I := Integer(I / 2) end.')) >= 0);
+  AssertTrue('a float literal',
+    Pos('Illegal type conversion', SemanticError(Pre + 'B := Byte(2.5) end.')) >= 0);
+  AssertTrue('a Single into Int64',
+    Pos('from ''Single'' to ''Int64''',
+      SemanticError(Pre + 'WriteLn(Int64(S)) end.')) >= 0);
+  AssertTrue('an enum target',
+    Pos('Illegal type conversion', SemanticError(Pre + 'E := TC(D) end.')) >= 0);
+  AssertTrue('a Boolean target',
+    Pos('Illegal type conversion', SemanticError(Pre + 'Ok := Boolean(D) end.')) >= 0);
+  AssertEquals('ordinal casts and float conversions still compile', '',
+    SemanticError(Pre + 'I := Integer(E) + Byte(I) + Ord(Ok); ' +
+      'D := Double(I); S := Single(D); I := Trunc(D) + Round(S) end.'));
+end;
+
+procedure TSemanticTests.TestSemantic_OrdOfFloat_Rejected;
+begin
+  AssertTrue('a float variable',
+    Pos('Ord expects an ordinal value, not ''Double''', SemanticError(
+      'program P; var D: Double; begin WriteLn(Ord(D)) end.')) >= 0);
+  AssertTrue('a float expression',
+    Pos('Ord expects an ordinal value', SemanticError(
+      'program P; var I: Integer; begin WriteLn(Ord(I / 2)) end.')) >= 0);
+end;
+
+procedure TSemanticTests.TestSemantic_FloatWhereIntegerRequired_Rejected;
+const
+  Pre = 'program P; type TR = record DA: array of Integer; ' +
+    'SA: array[0..2] of Integer; end; var I, J: Integer; D: Double; ' +
+    'S: string; DA: array of Integer; Pt: Pointer; R: TR; PC: PChar; begin ';
+
+  procedure Rejected(const ABody, AMsg: string);
+  var
+    Err: string;
+  begin
+    Err := SemanticError(Pre + ABody + ' end.');
+    AssertTrue(ABody + ': ' + Err, Pos(AMsg, Err) >= 0);
+  end;
+
+begin
+  Rejected('J := I and D', '''and'' requires integer or Boolean operands');
+  Rejected('J := I or 2.5', '''or'' requires integer or Boolean operands');
+  Rejected('J := I xor (I / 2)', '''xor'' requires integer or Boolean');
+  Rejected('J := I shl D', '''shl'' requires integer operands');
+  Rejected('J := I mod 2.0', '''mod'' requires integer operands');
+  Rejected('Inc(J, D)', 'Second argument of ''Inc'' must be an integer');
+  Rejected('Dec(J, I / 2)', 'Second argument of ''Dec'' must be an integer');
+  Rejected('Inc(D)', '''Inc'' needs an ordinal or pointer variable');
+  Rejected('SetLength(S, D)', 'Length argument of ''SetLength''');
+  Rejected('SetLength(DA, D)', 'Length argument of ''SetLength''');
+  Rejected('S := Chr(D)', 'argument of ''Chr'' must be an integer');
+  Rejected('S := IntToStr(D)', 'argument of ''IntToStr'' must be an integer');
+  Rejected('S := Copy(S, D, 1)', 'Index argument of ''Copy''');
+  Rejected('S := Copy(S, 0, D)', 'Count argument of ''Copy''');
+  Rejected('Delete(S, 0, D)', 'Count argument of ''Delete''');
+  Rejected('Halt(D)', 'exit code of ''Halt'' must be an integer');
+  Rejected('Pt := GetMem(D)', 'byte count argument of ''GetMem''');
+  Rejected('Pt := ReallocMem(Pt, D)', 'byte count argument of ''ReallocMem''');
+  Rejected('Sleep(D)', 'argument of ''Sleep'' must be an integer');
+  Rejected('S := ParamStr(D)', 'argument of ''ParamStr'' must be an integer');
+  Rejected('J := S[D]', 'String subscript index must be an integer');
+  Rejected('S[D] := 65', 'String subscript index must be an integer');
+  Rejected('J := DA[D]', 'Dynamic array index must be an integer');
+  Rejected('DA[D] := 1', 'Dynamic array index must be an integer');
+  Rejected('J := PC[D]', 'PChar subscript index must be an integer');
+  Rejected('J := R.DA[D]', 'Dynamic array index must be an integer');
+  Rejected('J := R.SA[D]', 'Static array index must be an ordinal type');
+  AssertEquals('the integer forms still compile', '', SemanticError(Pre +
+    'SetLength(DA, 3); SetLength(S, 2); J := (I shl 2) + (I and 3) + ' +
+    'I mod 2 + DA[I] + S[I] + R.SA[1]; Inc(J, 2); Dec(J); ' +
+    'S := Chr(65) + IntToStr(I) + Copy(S, 0, 1); Delete(S, 0, 1); ' +
+    'Pt := GetMem(8); Pt := ReallocMem(Pt, 16); Sleep(0); ' +
+    'S := ParamStr(0); if (I > 0) or (J > 0) then Halt(0) end.'));
 end;
 
 initialization

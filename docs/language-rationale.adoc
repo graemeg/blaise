@@ -5467,6 +5467,65 @@ matches the C math library signatures the builtins lower to.
   mantissa).  Precision should not silently depend on the argument's
   declared integer width.
 
+== A Float Never Stands In for an Integer
+
+=== Decision
+
+A float is a compile-time error wherever an integer is required.  It becomes
+an integer only through `Trunc` or `Round`, which say how the fraction is
+dropped.  The rule covers:
+
+* ordinal typecasts of a float -- `Integer(D)`, `Byte(2.5)`, `TColor(S)`,
+  `Boolean(D)` -- and `Ord` of a float;
+* the operands of `and`, `or`, `xor`, `shl`, `shr` and `mod` (`div` already
+  required integers);
+* the integer arguments of the built-ins: the delta of `Inc`/`Dec` (and a
+  float variable as their target), the length of `SetLength`, `Chr`,
+  `IntToStr`, the index and count of `Copy` and `Delete`, `Halt`, the byte
+  count of `GetMem`/`ReallocMem`, `Sleep` and `ParamStr`;
+* the index of a string, `PChar` or array element, including an array
+  field's (`R.DA[D]`).
+
+The message names the type and points at the conversions:
+
+----
+Illegal type conversion from 'Double' to 'Integer' (use Trunc or Round to
+convert a float to an integer)
+Length argument of 'SetLength' must be an integer, not 'Double' (use Trunc
+or Round to convert a float to an integer)
+----
+
+The opposite direction is unchanged: `Double(I)` and `Single(I)` convert
+numerically (see _Implicit Integer→Float Widening_ above), and an indexed
+property whose index parameter is a float still takes one.
+
+=== Rationale
+
+Before the rule these forms compiled to something nobody asked for.  A float
+variable in an integer context was read as its bit pattern --
+`Integer(3.7)` printed `-1717986918` (the low half of the IEEE-754
+encoding) on both backends, `Ord(D)`, `IntToStr(D)` and `I xor D` used the
+whole 64-bit pattern, and `SetLength(S, D)` asked for a length of about
+4.6 * 10^18 -- while a float *expression* such as `Integer(I / 2)` or
+`I or 2.5` reached the code generators, which have no integer lowering for
+it, and failed with an internal message.  None of these is a numeric
+conversion, and none can be what the programmer meant.
+
+FPC ("Illegal type conversion", "Ordinal expression expected",
+"Incompatible types") and Delphi ("Invalid typecast", "Incompatible types")
+reject the same forms, so the rule costs no portability.
+
+=== Alternatives Rejected
+
+* *Convert numerically, truncating (as C's `(int)d` does).* -- rejected: it
+  silently picks one rounding rule where Pascal makes the programmer choose
+  between `Trunc` and `Round`, and it would make `Integer(D)` mean something
+  different in Blaise than in FPC and Delphi.
+* *Keep the bit reinterpretation as a documented escape hatch.* -- rejected:
+  the cast reads like a conversion, and code that genuinely wants a float's
+  bits can say so through a typed pointer (`type PI64 = ^Int64;` then
+  `PI64(@D)^`), which is explicit about reinterpreting memory.
+
 == Interface Properties
 
 === Decision
