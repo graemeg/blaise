@@ -154,6 +154,7 @@ uses
   cp.test.classof,
   cp.test.staticmembers,
   cp.test.e2e.staticmembers,
+  cp.test.e2e.retiredbugs,
   cp.test.visibility,
   cp.test.publishedrtti,
   cp.test.attributes,
