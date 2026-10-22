@@ -1462,6 +1462,13 @@ end;
 
 procedure TArm64Backend.EmitTlvAddr(const ASym: string);
 begin
+  { The sequence below is Mach-O's TLV descriptor call.  An ELF arm64 target
+    (linux-arm64, freebsd-arm64) needs the TLS-descriptor or local-exec
+    (tpidr_el0) model instead; emitting the Mach-O shape there was a silent
+    miscompile, so refuse it until that model lands. }
+  if FTarget.OS <> osMacOS then
+    NotYet('threadvar access on an ELF arm64 target (needs the ELF TLS ' +
+      'model; the Mach-O TLV sequence is all this backend emits)', nil);
   { Mach-O TLV access: get the descriptor's address, load its thunk (dyld
     resolved it to _tlv_get_addr at bind time) and call it with x0 =
     &descriptor; the thunk returns the per-thread address in x0.  Clobbers
@@ -6194,7 +6201,9 @@ begin
     if TFuncCallExpr(AExpr).IsIndirectCall or
        TFuncCallExpr(AExpr).IsImplicitSelfMethod or
        (TFuncCallExpr(AExpr).ResolvedDecl = nil) then
-      NotYet('this call form (''' + TFuncCallExpr(AExpr).Name + ''')', AExpr);
+      InternalError('call ''' + TFuncCallExpr(AExpr).Name + ''' with no ' +
+        'lowering (indirect, implicit-Self and built-in calls are handled ' +
+        'above)', AExpr);
     if IsFloatExpr(AExpr) then
       FloatCallInIntegerContext('call', AExpr);
     if (AExpr.ResolvedType <> nil) and
@@ -6358,7 +6367,7 @@ begin
           Self.Emit(#9'cset x0, eq');
         end;
       else
-        NotYet('this set operation', AExpr);
+        InternalError('set operator the front end does not allow', AExpr);
       end;
       Exit;
     end;
@@ -6452,7 +6461,7 @@ begin
     if ((BE.Left.ResolvedType <> nil) and BE.Left.ResolvedType.IsString())
        or ((BE.Right.ResolvedType <> nil) and
            BE.Right.ResolvedType.IsString()) then
-      NotYet('string operator', AExpr);
+      InternalError('string operator the front end does not allow', AExpr);
     { float COMPARISON in integer/boolean context: fcmp + cset }
     if (BE.Op in [boEQ, boNE, boLT, boGT, boLE, boGE]) and
        (IsFloatExpr(BE.Left) or IsFloatExpr(BE.Right)) then
@@ -9023,7 +9032,8 @@ begin
   begin
     { data-pointer ARC, mirroring the string discipline }
     if AAsgn.IsWeakLhs then
-      NotYet('dyn-array assignment to a [Weak] target', AAsgn);
+      InternalError('[Weak] dynamic-array target (the front end allows ' +
+        '[Weak] only on class and interface types)', AAsgn);
     if AAsgn.ImplicitSelfField <> nil then
     begin
       { bare dyn-array field := value inside a method: the instance-field
@@ -9062,7 +9072,9 @@ begin
      (AAsgn.ResolvedLhsType.Kind = tyClass) then
   begin
     if AAsgn.ImplicitSelfField <> nil then
-      NotYet('implicit-Self class-field assignment via TAssignment', AAsgn);
+      InternalError('implicit-Self class field reached the variable arm (a ' +
+        'strong field took EmitImplicitSelfStore; a [Weak] one is not ' +
+        'flagged IsWeakLhs)', AAsgn);
     if AAsgn.IsWeakLhs then
     begin
       { weak slot: registered in the weak table, no refcount held.  An
@@ -9270,7 +9282,7 @@ begin
      not (AAsgn.ResolvedLhsType.Kind in [tyBoolean, tyMetaClass,
                                          tyPointer, tyPChar, tySet,
                                          tyProcedural]) then
-    NotYet('assignment to non-integer variable', AAsgn);
+    InternalError('assignment to a variable of an unhandled type', AAsgn);
   Self.EmitExprToX0(AAsgn.Expr);
   { Wrap the value to the target's own width and signedness before it lands.
     A frame slot / scalar global is 8 bytes and read back 64-bit wide, so an
@@ -9890,7 +9902,8 @@ begin
     EmitStoreByWidth('x0', 'x9', TASTExpr(ACall.Args.Items[0]).ResolvedType);
     Exit;
   end;
-  NotYet('call to ''' + ACall.Name + '''', ACall);
+  InternalError('procedure call ''' + ACall.Name + ''' with no lowering ' +
+    '(every built-in and resolved routine is handled above)', ACall);
 end;
 
 procedure TArm64Backend.EmitWrite(ACall: TProcCall; ANewline: Boolean);
@@ -9982,7 +9995,8 @@ begin
       EmitCallSym('_SysWriteInt');
     end
     else
-      NotYet('Write/WriteLn argument of this type', Arg);
+      InternalError('Write/WriteLn argument of a type with no text form ' +
+        '(the front end rejects it)', Arg);
   end;
   if ANewline then
   begin
@@ -11133,7 +11147,8 @@ begin
     if AStmt.IsOpenArrayIter and
        not ((AStmt.CollExpr is TIdentExpr) and
             IsLocal(TIdentExpr(AStmt.CollExpr).Name + '_high')) then
-      NotYet('for-in over an open array without a local high slot', AStmt);
+      InternalError('for-in over an open array without a local high slot ' +
+        '(a captured one is copied into the nested frame)', AStmt);
     if AStmt.IsArrayIter then
       Elem := TStaticArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType
     else if AStmt.IsOpenArrayIter then
@@ -11445,7 +11460,8 @@ begin
   MN := TMethodDecl(AStmt.MoveNextDecl);
   Cur := TMethodDecl(AStmt.CurrentDecl);
   if (GetE = nil) or (MN = nil) or (Cur = nil) then
-    NotYet('for-in over this collection', AStmt);
+    InternalError('for-in over a class with no resolved enumerator ' +
+      '(the front end resolves GetEnumerator/MoveNext/Current)', AStmt);
   CollOwned := ArcExprOwnsRef(AStmt.CollExpr);
   EmptyArgs := TObjectList.Create(False);
   try
@@ -12172,7 +12188,8 @@ begin
   if AStmt.ResultAssign <> nil then
     Self.EmitStmt(AStmt.ResultAssign)
   else if AStmt.Value <> nil then
-    NotYet('exit with a value in this position', AStmt);
+    InternalError('Exit with a value but no Result assignment (the front ' +
+      'end builds one for every function)', AStmt);
   { leaving through try regions runs their finally bodies on the way out }
   EmitExcUnwindTo(0);
   Self.Emit(Format(#9'b %s', [FExitLabel]));
@@ -12441,12 +12458,14 @@ begin
   { Integer, float, string and static-array initialisers become .data
     entries; const-expression initialisers stay honest holes. }
   if AVD.InitConst.ConstParts <> nil then
-    NotYet('initialised global of this form', AVD);
+    InternalError('initialised global with named-constant string parts (the ' +
+      'front end rejects them on variables)', AVD);
   if AVD.InitConst.IsArrayConst then
   begin
     if (AVD.ResolvedType = nil) or
        (AVD.ResolvedType.Kind <> tyStaticArray) then
-      NotYet('initialised global of this form', AVD);
+      InternalError('parenthesised initialiser on a non-array global (the ' +
+        'front end requires a static array type)', AVD);
     { multi-dim const arrays are nested static-array types: the directive
       is governed by the INNERMOST scalar element and the flat row-major
       element list already matches the contiguous layout }
@@ -12455,7 +12474,7 @@ begin
           (SAT.ElementType.Kind = tyStaticArray) do
       SAT := TStaticArrayTypeDesc(SAT.ElementType);
     if SAT.ElementType = nil then
-      NotYet('initialised global of this form', AVD);
+      InternalError('initialised static array with no element type', AVD);
     Lines := '';
     if SAT.ElementType.Kind = tyString then
     begin
@@ -13570,7 +13589,8 @@ begin
                                             tyPointer, tyPChar,
                                             tyMetaClass, tyInterface,
                                             tyStaticArray, tySet]))) then
-          NotYet('var parameter ''' + Par.ParamName + ''' of this type', ADecl);
+          InternalError('var parameter ''' + Par.ParamName + ''' of a ' +
+            'type that cannot be declared', ADecl);
         AddLocal(Par.ParamName, 8);
         FFrameVarParams.Add(Par.ParamName);
         Continue;
@@ -13648,7 +13668,8 @@ begin
                 or ((Par.ResolvedType <> nil) and
                     (Par.ResolvedType.Kind = tySet) and
                     not TSetTypeDesc(Par.ResolvedType).IsJumbo())) then
-          NotYet('parameter ''' + Par.ParamName + ''' of this type', ADecl);
+          InternalError('parameter ''' + Par.ParamName + ''' of a type ' +
+            'that cannot be declared', ADecl);
         AddLocal(Par.ParamName, 8);
         { a BY-VALUE string param is the callee's own copy: retained in the
           prologue, released with the string locals at scope exit.  A const
@@ -13718,7 +13739,7 @@ begin
                    IsSmallSetType(ADecl.ResolvedReturnType) or
                    { a plain procedure pointer is one code word }
                    IsPlainProcType(ADecl.ResolvedReturnType)) then
-        NotYet('function result of this type', ADecl)
+        InternalError('function result of a type that cannot be declared', ADecl)
       else
         { a string/class/dyn-array Result is a plain 8-byte pointer slot.
           It is deliberately NOT in FStrLocals/FObjLocals/FDynLocals: the +1
@@ -13738,7 +13759,7 @@ begin
                                        tyMetaClass, tyStaticArray,
                                        tyDynArray, tySet, tyPointer,
                                        tyPChar, tyProcedural]))) then
-      NotYet('local variable of this type', VD);
+      InternalError('local variable of a type that cannot be declared', VD);
     { A JUMBO set (> 64 members) is an inline byte-array bitmap, so its slot is
       sized from RawSize() -- see the jumbo arm below; it does NOT fall out of
       the generic 8-byte default.  The operations on it go through the _Set*
@@ -18145,7 +18166,8 @@ begin
         either — their INSTANCES arrive monomorphised via the
         GenericInstances lists }
     else if not (TDcl.Def is TRecordTypeDef) then
-      NotYet('non-record type declarations', nil)
+      InternalError('type declaration of an unknown kind (' +
+        TDcl.Def.ClassName + ')', nil)
     else if TRecordTypeDef(TDcl.Def).Methods.Count > 0 then
       { A record with methods: collect it so the bodies emit with the class
         bodies below.  The record itself needs no metadata — no typeinfo, no
@@ -18165,7 +18187,7 @@ begin
                                        tyMetaClass, tyStaticArray,
                                        tyDynArray, tySet,
                                        tyPointer, tyPChar, tyProcedural]))) then
-      NotYet('program variable of this type', VD);
+      InternalError('program variable of a type that cannot be declared', VD);
     { A JUMBO set (> 64 members) is an inline byte-array bitmap, so its slot is
       sized from RawSize() -- see the jumbo arm below; it does NOT fall out of
       the generic 8-byte default.  The operations on it go through the _Set*
@@ -18692,7 +18714,8 @@ var
          (UDcl.Def is TGenericProcDef) then
         { declaration-only, same set the program path accepts }
       else if not (UDcl.Def is TRecordTypeDef) then
-        NotYet('non-record type declarations in unit ' + AUnit.Name, nil)
+        InternalError('type declaration of an unknown kind (' +
+          UDcl.Def.ClassName + ') in unit ' + AUnit.Name, nil)
       else if TRecordTypeDef(UDcl.Def).Methods.Count > 0 then
       begin
         { Emit the record's method bodies HERE, in this unit's context, exactly
@@ -19099,7 +19122,7 @@ begin
                                        tyDynArray, tySet,
                                        tyPointer, tyPChar,
                                        tyProcedural]))) then
-      NotYet('unit variable of this type', VD);
+      InternalError('unit variable of a type that cannot be declared', VD);
     { A JUMBO set (> 64 members) is an inline byte-array bitmap, so its slot is
       sized from RawSize() -- see the jumbo arm below; it does NOT fall out of
       the generic 8-byte default.  The operations on it go through the _Set*
