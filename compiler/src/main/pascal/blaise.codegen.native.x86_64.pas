@@ -15550,7 +15550,12 @@ begin
       begin
         Self.Emit(#9'movq %rax, %rsi');
         Self.Emit(Format(#9'movl %s, %%edi', [FdLit]));
-        Self.Emit(#9'callq _SysWriteStr');
+        { a PChar has no length header unless it is a literal: write up to
+          its NUL }
+        if (K = tyPChar) and not (ArgExpr is TStringLiteral) then
+          Self.Emit(#9'callq _SysWritePChar')
+        else
+          Self.Emit(#9'callq _SysWriteStr');
       end;
     end
     else if K = tyDouble then

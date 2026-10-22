@@ -267,6 +267,7 @@ function  _Exec(const Cmd: string): Integer;
 
 { Console I/O }
 procedure _SysWriteStr(Fd: Integer; S: Pointer);
+procedure _SysWritePChar(Fd: Integer; P: PChar);
 procedure _SysWriteInt(Fd: Integer; N: Integer);
 procedure _SysWriteInt64(Fd: Integer; N: Int64);
 procedure _SysWriteUInt64(Fd: Integer; N: UInt64);
@@ -1429,6 +1430,19 @@ end;
 procedure _SysWriteStr(Fd: Integer; S: Pointer);
 begin
   GRtlPlatform.SysWriteStr(Fd, S);
+end;
+
+{ Write/WriteLn of a PChar: the bytes up to its NUL.  A PChar need not point
+  into a Blaise string, so there is no length header in front of it to read
+  (that is _SysWriteStr's contract). }
+procedure _SysWritePChar(Fd: Integer; P: PChar);
+var
+  Len: Integer;
+begin
+  if P = nil then Exit;
+  Len := Integer(libc_strlen(P));
+  if Len > 0 then
+    WriteAllToFd(Fd, P, Len);
 end;
 
 procedure _SysWriteInt(Fd: Integer; N: Integer);

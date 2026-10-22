@@ -10033,7 +10033,12 @@ begin
       begin
         Self.Emit(#9'mov x1, x0');
         Self.Emit(FdMov);
-        EmitCallSym('_SysWriteStr');
+        { a PChar has no length header unless it is a literal: write up to
+          its NUL }
+        if (K = tyPChar) and not (Arg is TStringLiteral) then
+          EmitCallSym('_SysWritePChar')
+        else
+          EmitCallSym('_SysWriteStr');
       end;
     end
     else if K in [tyDouble, tySingle] then

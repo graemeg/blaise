@@ -104,9 +104,28 @@ type
       the new string is stored through the field's ADDRESS.  arm64 refused
       it ("load of variable 'FS'"). }
     procedure TestCodegen_Delete_ImplicitSelfField_StoresThroughAddress;
+    { Write/WriteLn of a PChar writes up to its NUL through _SysWritePChar.
+      It went to _SysWriteStr, which reads a Blaise string's length header
+      in front of the pointer -- right for PChar(S), garbage for C memory. }
+    procedure TestCodegen_WritePChar_UsesNulTerminatedWrite;
   end;
 
 implementation
+
+procedure TStringOpsTests.TestCodegen_WritePChar_UsesNulTerminatedWrite;
+const
+  Src = '''
+    program P;
+    var B: array[0..2] of Byte; Q: PChar;
+    begin
+      B[0] := 104; B[1] := 105; B[2] := 0;
+      Q := PChar(@B[0]);
+      WriteLn(Q)
+    end.
+    ''';
+begin
+  AssertEquals('', AsmMissing(Src, 'callq _SysWritePChar', 'bl __SysWritePChar'));
+end;
 
 { ------------------------------------------------------------------ }
 { Helpers                                                              }

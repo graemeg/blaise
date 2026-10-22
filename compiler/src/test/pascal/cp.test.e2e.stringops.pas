@@ -84,6 +84,11 @@ type
     procedure TestRun_Int64_Comparison;
     procedure TestRun_Int64_ForLoop;
     procedure TestRun_StringLiteral_HighByteSurvives;
+    { a PChar that does not point into a Blaise string (no length header in
+      front of it) writes exactly up to its NUL, to stdout and stderr: arm64
+      wrote nothing and x86-64 wrote on past the NUL through whatever memory
+      followed (a getenv result printed the whole environment) }
+    procedure TestRun_WritePChar_StopsAtNul;
   end;
 
 implementation
@@ -799,6 +804,29 @@ begin
   AssertRunsOnAll(SrcStringRelational,
     'lt:T' + LE + 'lt2:F' + LE + 'gt:T' + LE + 'gt2:F' + LE +
     'le:T' + LE + 'ge:T' + LE + 'empty:T' + LE, 0);
+end;
+
+procedure TE2EStringOpsTests.TestRun_WritePChar_StopsAtNul;
+const
+  Src = '''
+    program P;
+    var B: array[0..7] of Byte; Q, N: PChar; S: string;
+    begin
+      B[0] := 104; B[1] := 105; B[2] := 0; B[3] := 120; B[4] := 120; B[5] := 0;
+      Q := PChar(@B[0]);
+      N := nil;
+      WriteLn('[', Q, ']');
+      Write('[', Q, '|', N, ']');
+      WriteLn();
+      S := 'str';
+      WriteLn('[', PChar(S), ']');
+      WriteLn(StdErr, Q)
+    end.
+    ''';
+begin
+  { the harness captures stdout and stderr together }
+  AssertRunsOnAll(Src, '[hi]' + LineEnding + '[hi|]' + LineEnding +
+    '[str]' + LineEnding + 'hi' + LineEnding, 0);
 end;
 
 procedure TE2EStringOpsTests.TestRun_StringLiteral_HighByteSurvives;
