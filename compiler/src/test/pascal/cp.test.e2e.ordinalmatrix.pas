@@ -99,6 +99,12 @@ begin
     Add('C := 0; for ' + AV + ' := Low(T) + 2 downto Low(T) do begin C := C + 1; ' +
       'if C > 70000 then Break; end; Chk(C = 3, ''for-down'');');
   end;
+  { a completed loop steps once past its end, and the counter stays a value
+    of its type: High(T) + 1 wraps, as Inc does (arm64 left a Byte local
+    holding 256 in its 8-byte slot) }
+  if IsInt then
+    Add('for ' + AV + ' := High(T) - 1 to High(T) do C := C + 1; Chk(' + AV +
+      ' = Low(T), ''for-up-wraps'');');
   Add('C := 0; for ' + AV + ' := High(T) to Low(T) do C := C + 1; for ' + AV +
     ' := Low(T) downto High(T) do C := C + 1; Chk(C = 0, ''for-empty'');');
   Add(AV + ' := Pred(High(T)); Inc(' + AV + '); Chk(' + AV +

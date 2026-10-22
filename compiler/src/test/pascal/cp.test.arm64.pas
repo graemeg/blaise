@@ -56,6 +56,10 @@ type
     procedure TestCall_ArgsPoppedIntoRegisters;
     procedure TestRecursion_Compiles;
     procedure TestForLoop_BoundEvaluatedOnce;
+    { the step that ends a loop over a narrow counter wraps it to the
+      counter's type before it lands in the 8-byte slot (a Byte counter
+      ending at 255 was left holding 256) }
+    procedure TestForLoop_NarrowCounterWrappedInSlot;
     procedure TestPipeline_FunctionsAssembleToMachO;
     { slice 3: Double — literals, arithmetic, comparisons, d-register
       call ABI with independent int/float sequences }
@@ -831,6 +835,32 @@ begin
   AssertTrue('32-bit compare against the bound', Pos(#9'cmp w0, w1', AsmT) >= 0);
   AssertTrue('entry guard on greater', Pos(#9'b.gt Lfend', AsmT) >= 0);
   AssertTrue('equality exit before the step', Pos(#9'b.eq Lflast', AsmT) >= 0);
+end;
+
+procedure TArm64BackendTests.TestForLoop_NarrowCounterWrappedInSlot;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    procedure Run;
+    var
+      B: Byte;
+      C: Integer;
+    begin
+      for B := 250 to 255 do
+        C := C + 1;
+      WriteLn(B, ' ', C)
+    end;
+    begin
+      Run()
+    end.
+    ''', TargetArm64);
+  { the step: truncate to 8 bits, then store the slot }
+  AssertTrue('the step wraps the Byte before the store',
+    Pos(#9'add x0, x0, #1' + LF + #9'lsl x0, x0, #56' + LF +
+      #9'lsr x0, x0, #56' + LF + #9'stur x0', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestPipeline_FunctionsAssembleToMachO;

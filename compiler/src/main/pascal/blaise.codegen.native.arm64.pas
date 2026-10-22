@@ -10926,7 +10926,14 @@ var
       end;
     end
     else
+    begin
+      { the 8-byte slot is read back 64-bit wide, so the final step past a
+        narrow counter's limit is wrapped to its type first (a Byte counter
+        ending at 255 was left holding 256) }
+      if IsIntFam(AStmt.VarType) then
+        EmitNarrowX0(AStmt.VarType);
       EmitStoreSlot('x0', AStmt.VarName);
+    end;
   end;
 
   procedure StepCounter;
