@@ -41,6 +41,10 @@ type
     procedure TestSpecialize_NamesTheRule;
     procedure TestGeneric_NamesTheRule;
     procedure TestGenericAndSpecialize_AsIdentifiers_StillParse;
+    { with R do ... was "Bare reference to 'with' requires () for a call"
+      (discussion #230); with stays an ordinary identifier }
+    procedure TestWith_NamesTheRule;
+    procedure TestWith_AsIdentifier_StillParses;
     procedure TestParse_WriteFieldWidth_BecomesWriteFmt;
     procedure TestParse_WriteFieldWidth_InExpressionCallForm;
     procedure TestParse_ColonOutsideWrite_IsAnError;
@@ -1070,6 +1074,37 @@ begin
     'begin end.');
   AssertTrue('generic before a routine names the rule, got: ' + Msg,
     Pos('''generic'' is not needed in Blaise', Msg) >= 0);
+end;
+
+procedure TParserTests.TestWith_NamesTheRule;
+const
+  Shapes: array[0..4] of string = (
+    'program P; var R: Integer; begin with R do R := 1; end.',
+    'program P; procedure F(); var A, B: Integer; begin with A, B do ; end; begin end.',
+    'program P; type TC = class N: Integer; procedure M(); end; procedure TC.M(); begin with Self do N := 1; end; begin end.',
+    'program P; var R: Integer; begin if R = 0 then with R do R := 2; end.',
+    'program P; var R: Integer; begin begin with R.X.Y do ; end; end.');
+var
+  I: Integer;
+  Msg: string;
+begin
+  for I := 0 to High(Shapes) do
+  begin
+    Msg := ParseErrorMsg(Shapes[I]);
+    AssertTrue('shape ' + IntToStr(I) + ' names the rule, got: ' + Msg,
+      Pos('''with'' is not supported in Blaise', Msg) >= 0);
+    AssertTrue('and the replacement, got: ' + Msg,
+      Pos('name the record or object in each access', Msg) >= 0);
+  end;
+end;
+
+procedure TParserTests.TestWith_AsIdentifier_StillParses;
+begin
+  AssertEquals('with is an ordinary identifier', '',
+    ParseErrorMsg(
+      'program P; var with: Integer; ' +
+      'procedure F(with: Integer); begin end; ' +
+      'begin with := 1; F(with); with := with + 1; end.'));
 end;
 
 procedure TParserTests.TestGenericAndSpecialize_AsIdentifiers_StillParse;

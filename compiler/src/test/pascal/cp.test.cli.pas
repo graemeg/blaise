@@ -140,6 +140,10 @@ type
       selection accepts. }
     procedure TestBackendEnv_Native_AcceptsNativeOnlyFlag;
     procedure TestBackendEnv_InvalidValue_WarnsAndFallsBack;
+    { a `with` statement fails the compile with the "recognise, reject,
+      explain" message, its position and file (discussion #230: it was
+      "Bare reference to 'with' requires () for a call") }
+    procedure TestWithStatement_RejectedWithExplanation;
   end;
 
 implementation
@@ -296,6 +300,39 @@ begin
   AssertEquals('--help exits 0', 0, EC);
   AssertTrue('usage banner present',
     Pos('Usage:', Out_) >= 0);
+end;
+
+procedure TCLIContractTests.TestWithStatement_RejectedWithExplanation;
+var
+  Src, Out_: string;
+  EC: Integer;
+begin
+  if not CompilerAvailable() then
+  begin
+    Ignore('<toolchain-missing>');
+    Exit;
+  end;
+  Src := WriteScratchSource(
+    'program cli_with;' + LineEnding +
+    'type TR = record A, B: Integer; end;' + LineEnding +
+    'var R: TR;' + LineEnding +
+    'begin' + LineEnding +
+    '  with R do' + LineEnding +
+    '    A := 1' + LineEnding +
+    'end.');
+  EC := RunCompiler([
+    '--source', Src,
+    '--unit-path', FRTLPath,
+    '--unit-path', FStdlibPath,
+    '--output', FScratch + 'cli_with_bin'
+  ], Out_);
+  AssertTrue('the compile fails: ' + Out_, EC <> 0);
+  AssertTrue('names the construct: ' + Out_,
+    Pos('''with'' is not supported in Blaise', Out_) >= 0);
+  AssertTrue('gives the Blaise form: ' + Out_,
+    Pos('name the record or object in each access', Out_) >= 0);
+  AssertTrue('points at the statement: ' + Out_,
+    Pos('at line 5 col 3', Out_) >= 0);
 end;
 
 procedure TCLIContractTests.TestNormalCompileStillWorks;

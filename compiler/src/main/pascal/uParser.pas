@@ -870,6 +870,7 @@ end;
 
     goto <number|identifier>         label <number|identifier>
     specialize <identifier>          generic <identifier|procedure|function>
+    with <identifier>
 
   Called where the keyword would otherwise be consumed as a name, and from
   Expect, so a construct met in a declaration section is caught too. }
@@ -892,6 +893,11 @@ begin
       'Blaise, because there is no goto: use Exit (or Exit(Value)) to leave a ' +
       'routine, Break or Continue in a loop' + Where +
       ' (see language-rationale.adoc, "goto and label")');
+  if SameText(Kw, 'with') and (PeekKind() = tkIdent) then
+    raise EParseError.Create('''with'' is not supported in Blaise: name the ' +
+      'record or object in each access (R.Field), assigning a long ' +
+      'expression to a local variable first' + Where +
+      ' (see language-rationale.adoc, "Recognise, Reject, Explain")');
   if SameText(Kw, 'specialize') and (PeekKind() = tkIdent) then
     raise EParseError.Create(Format('''specialize'' is not needed in Blaise: ' +
       'generics use the Delphi syntax, so write ''%s<...>'' without the ' +

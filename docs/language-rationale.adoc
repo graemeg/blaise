@@ -8321,14 +8321,30 @@ it with a message that says it is not part of Blaise and gives the Blaise form.
 | `FillChar(X, Count, Value)`
 | `FillByte(X, Count, Value)`: Blaise has no `Char` type, and the routine
   fills bytes (see "`Move` and `FillByte` — Intrinsics for Unmanaged Data")
+
+| `with R do ...`, `with A, B do ...`
+| naming the record or object in each access (`R.Field`); a long receiver
+  expression goes into a local variable first (see below)
 |===
 
 The keywords are ordinary identifiers in Blaise, so a variable named `label`,
-`goto`, `generic` or `specialize` keeps working.  Each message fires only on a
-following token that no identifier use allows: a number or identifier after
-`goto` or `label`, an identifier after `specialize`, and an identifier,
-`function` or `procedure` after `generic`.  A program that declares its own
-`TInterfacedObject` class gets an ordinary parent class, not the message.
+`goto`, `generic`, `specialize` or `with` keeps working.  Each message fires
+only on a following token that no identifier use allows: a number or
+identifier after `goto` or `label`, an identifier after `specialize` and
+`with`, and an identifier, `function` or `procedure` after `generic`.  A
+program that declares its own `TInterfacedObject` class gets an ordinary
+parent class, not the message.
+
+`with` is left out because it makes a name's meaning depend on the fields of
+a type declared elsewhere.  Inside `with R do`, a bare `Name` is `R.Name` if
+the record has such a field and a local or global otherwise; adding a field
+to the record later silently re-binds existing code, and nested or
+comma-separated `with` lists make the search order harder still for a reader
+(and for tools: a debugger cannot evaluate a `with`-relative name without
+re-creating the scope).  The explicit `R.Field` costs a few characters and
+always says which storage is meant; a long receiver expression gets a short
+local variable, which also evaluates it once, as `with` did.  (Discussion
+#230, 2026-10-22.)
 
 === Rationale
 
