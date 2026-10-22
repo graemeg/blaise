@@ -26,6 +26,11 @@ type
       field-backed property and a static variable -- each copy-on-write, so
       a string shared with another variable keeps its own bytes }
     procedure TestRun_ByteWriteIntoStringFieldsAndElements;
+    { S[N] := B on a string a nested routine or a closure captures, and on a
+      var parameter a nested routine captures -- copy-on-write, so the copy
+      taken before the write keeps its bytes (arm64 refused the captured
+      forms: "address of variable 'S'") }
+    procedure TestRun_ByteWriteIntoCapturedString;
     { @S[N] points at one byte of the string, made unique first: a literal-backed
       local, a shared string (the other holder keeps its value), an object field,
       a record field, a var parameter and a captured variable.  Neither backend
@@ -986,6 +991,46 @@ begin
   AssertRunsOnAll(Src,
     'Hello hello World Obj oRec pQop Stat' + LE + 'OBC PQop RRec' + LE +
     'rVc' + LE, 0);
+end;
+
+procedure TE2EStringOpsTests.TestRun_ByteWriteIntoCapturedString;
+const
+  Src = '''
+    program P;
+    procedure ByVar(var V: string);
+      procedure Poke;
+      begin
+        V[1] := 113
+      end;
+    begin
+      Poke()
+    end;
+    procedure Outer;
+    var
+      S, T, U: string;
+      Cl: reference to procedure;
+      procedure Inner;
+      begin
+        S[0] := 122
+      end;
+    begin
+      S := 'ab';
+      T := S;
+      Inner();
+      U := 'cd';
+      Cl := procedure begin U[1] := 119 end;
+      Cl();
+      WriteLn(S, ' ', T, ' ', U);
+      ByVar(T);
+      WriteLn(S, ' ', T, ' ', U)
+    end;
+    begin
+      Outer()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'zb ab cw' + LE + 'zb aq cw' + LE, 0);
 end;
 
 initialization

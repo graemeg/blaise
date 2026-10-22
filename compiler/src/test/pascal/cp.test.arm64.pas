@@ -390,6 +390,9 @@ type
       nested routine stores into it at the variable's width (a full 8-byte
       store into a 4-byte Integer field overwrote its neighbour) }
     procedure TestNestedRoutine_StoreIntoClosureEnvField_ExactWidth;
+    { S[N] := B on a captured string reaches the variable through '_cap_'
+      and makes it unique there (it was "not yet lowered") }
+    procedure TestNestedRoutine_ByteWriteIntoCapturedString;
     { leg 17 regression: when captures + register args exceed 8, the outgoing
       stack area MUST be reserved — ComputeStackArgAreaEx counts the capture
       pointer args (in lockstep with EmitCall) so the caller reserves a region
@@ -8819,6 +8822,38 @@ begin
     Pos(#9'str w0, [x9]', Body) >= 0);
   AssertTrue('Init never stores 8 bytes into a 4-byte env field',
     Pos(#9'str x0, [x9]', Body) < 0);
+end;
+
+procedure TArm64BackendTests.TestNestedRoutine_ByteWriteIntoCapturedString;
+var
+  AsmT, Body: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    procedure Outer;
+    var
+      S: string;
+      procedure Inner;
+      begin
+        S[0] := 122
+      end;
+    begin
+      S := 'ab';
+      Inner();
+      WriteLn(S)
+    end;
+    begin
+      Outer()
+    end.
+    ''', TargetArm64);
+  Body := Copy(AsmT, Pos('_Outer_Inner:', AsmT), Length(AsmT));
+  Body := Copy(Body, 0, Pos(#9'ret', Body));
+  { the capture pointer (spilled at x29-8) is the slot's address }
+  AssertTrue('the slot address comes from the capture pointer',
+    Pos(#9'ldur x19, [x29, #-8]', Body) >= 0);
+  AssertTrue('the string is made unique before the byte store',
+    Pos('_StringUnique', Body) >= 0);
 end;
 
 procedure TArm64BackendTests.TestNestedRoutine_CaptureString_ARCThroughCap;

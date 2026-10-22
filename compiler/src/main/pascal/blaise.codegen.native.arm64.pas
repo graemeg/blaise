@@ -10547,6 +10547,12 @@ begin
       EmitLValueAddrToX0(AStmt.BaseExpr);
       Self.Emit(#9'mov x19, x0');
     end
+    else if EmitCapturedBase('x19', AStmt.ArrayName, False,
+              AStmt.IsVarParam) then
+    begin
+      { a captured string: '_cap_' holds the variable's address (a captured
+        var param's storage holds the caller's) -- x19 = &slot }
+    end
     else
     begin
       EmitSlotAddr('x19', AStmt.ArrayName);        { x19 = &slot }
