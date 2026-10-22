@@ -302,6 +302,7 @@ function GCHashOf(AValue: Integer): Integer; overload;
 function GCHashOf(AValue: Int64): Integer; overload;
 function GCHashOf(AValue: Pointer): Integer; overload;
 function GCHashOf(AValue: Boolean): Integer; overload;
+function GCHashOf(AValue: Double): Integer; overload;
 
 const
   { Below this size a linear scan beats building a hash table.  Interface
@@ -347,6 +348,21 @@ begin
     Result := 1
   else
     Result := 0;
+end;
+
+type
+  PGCDoubleBits = ^Int64;
+
+function GCHashOf(AValue: Double): Integer; overload;
+begin
+  { The containers compare keys with '=', under which +0.0 and -0.0 are
+    equal although their bits differ, so both hash as zero.  Any other value
+    hashes its IEEE-754 bit pattern.  (A NaN key is never equal to itself,
+    as with '=' anywhere, so it can be added but not found.)  A Single key
+    widens to Double exactly, so it shares this overload. }
+  if AValue = 0.0 then
+    Exit(0);
+  Result := GCHashOf(PGCDoubleBits(@AValue)^);
 end;
 
 { ------------------------------------------------------------------ }

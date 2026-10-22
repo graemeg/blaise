@@ -140,6 +140,13 @@ type
     procedure TestOrdDict_GetKey_OutOfRangeRaises;
     procedure TestOrdDict_GetValue_OutOfRangeRaises;
     procedure TestOrdDict_InRangePositionalAccessStillWorks;
+
+    { --- float keys: a Double / Single key has a hash (it had none, so
+      TDictionary<Double, V> did not compile).  Past the hash threshold,
+      +0.0 and -0.0 are one key, as '=' says. --- }
+    procedure TestDict_DoubleKeys_HashedLookup;
+    procedure TestDict_SingleKeys;
+    procedure TestSet_DoubleZeroSignsAreOneMember;
   end;
 
 implementation
@@ -1301,6 +1308,52 @@ begin
   AssertEquals('key 1', 'b', D.Keys[1]);
   AssertEquals('value 0', 1, D.Values[0]);
   AssertEquals('value 1', 2, D.Values[1]);
+end;
+
+procedure TCollectionsTests.TestDict_DoubleKeys_HashedLookup;
+var
+  D: TDictionary<Double, Integer>;
+  I: Integer;
+  Z: Double;
+begin
+  D := TDictionary<Double, Integer>.Create();
+  for I := 0 to 99 do
+    D.Add(I * 0.5, I);
+  AssertEquals('count', 100, D.Count);
+  AssertEquals('a half-step key', 25, D[12.5]);
+  AssertFalse('a key never added', D.ContainsKey(13.25));
+  Z := 0.0;
+  Z := -Z;
+  AssertEquals('-0.0 finds the 0.0 key', 0, D[Z]);
+end;
+
+procedure TCollectionsTests.TestDict_SingleKeys;
+var
+  D: TDictionary<Single, string>;
+begin
+  D := TDictionary<Single, string>.Create();
+  D.Add(1.5, 'a');
+  D.Add(2.25, 'b');
+  AssertEquals('first', 'a', D[1.5]);
+  AssertEquals('second', 'b', D[2.25]);
+end;
+
+procedure TCollectionsTests.TestSet_DoubleZeroSignsAreOneMember;
+var
+  S: TSet<Double>;
+  I: Integer;
+  Z: Double;
+begin
+  S := TSet<Double>.Create();
+  for I := 1 to 20 do
+    S.Include(I * 1.25);   { past the hash threshold }
+  Z := 0.0;
+  Z := -Z;
+  S.Include(Z);
+  S.Include(0.0);
+  AssertEquals('twenty values and one zero', 21, S.Count);
+  AssertTrue('the +0.0 probe finds the -0.0 member', S.Contains(0.0));
+  AssertTrue('a hashed member', S.Contains(12.5));
 end;
 
 initialization
