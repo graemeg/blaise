@@ -72,6 +72,10 @@ const
     a call (see ReservePendRelSlots).  A single call rarely passes more than a
     few owned string transients; overflow is a NotYet, not silent corruption. }
   STRTRANS_SLOTS = 8;
+  { FHandlerVars entry that opens a routine's own handlers: a routine
+    emitted while another's handler is open (a closure thunk) does not
+    inherit that handler }
+  HANDLER_ROUTINE_MARK = '<routine>';
 
 type
   TArm64Backend = class(TNativeBackend)
@@ -211,6 +215,10 @@ type
     FEnvCaps: TStringList;       { owned: CapturedVars + EnvCaptured merged for
                                    a routine with a closure env (FCapturedVars
                                    points here while it is emitted) }
+    FHandlerVars: TStringList;   { owned: one entry per open exception
+                                   handler, innermost last -- the variable it
+                                   binds, '' for none; HANDLER_ROUTINE_MARK
+                                   opens each routine's own run }
     FParentPacked: TStringList;  { borrowed: while an enclosing routine's
                                    nested routines are emitted, every name
                                    that lives in a PACKED env of that routine
@@ -1031,12 +1039,14 @@ begin
   FCapturedVars := nil;   { borrowed ref to ADecl.CapturedVars; not owned }
   FEnvCaps := TStringList.Create();
   FEnvPacked := TStringList.Create();
+  FHandlerVars := TStringList.Create();
 end;
 
 destructor TArm64Backend.Destroy;
 begin
   FEnvCaps.Free();
   FEnvPacked.Free();
+  FHandlerVars.Free();
   FGlobalSize.Free();
   FRecGlobals.Free();
   FRecLocals.Free();
@@ -10252,8 +10262,10 @@ begin
         Self.Emit(#9'ldr x0, [sp]');
         EmitStoreSlot('x0', H.VarName);
       end;
+      FHandlerVars.Add(H.VarName);
       for J := 0 to H.Body.Stmts.Count - 1 do
         EmitStmt(TASTStmt(H.Body.Stmts.Items[J]));
+      FHandlerVars.Delete(FHandlerVars.Count - 1);
       { A handler with NO variable disposes of the exception: it drops the
         in-flight reference (BUG-20260720-exception-object-leak; the pointer
         is still at [sp]) }
@@ -10268,8 +10280,10 @@ begin
     end;
     if AStmt.ElseBody <> nil then
     begin
+      FHandlerVars.Add('');
       for J := 0 to AStmt.ElseBody.Stmts.Count - 1 do
         EmitStmt(TASTStmt(AStmt.ElseBody.Stmts.Items[J]));
+      FHandlerVars.Delete(FHandlerVars.Count - 1);
       { else HANDLES without a variable — drop the in-flight reference (the
         re-raise path below forwards it and must NOT). }
       Self.Emit(#9'ldr x0, [sp]');
@@ -10291,8 +10305,10 @@ begin
     EmitCallSym('_CurrentException');
     Self.Emit(#9'str x0, [sp, #-16]!');
     EmitCallSym('_PopExcFrame');
+    FHandlerVars.Add('');
     for I := 0 to AStmt.ExceptBody.Stmts.Count - 1 do
       EmitStmt(TASTStmt(AStmt.ExceptBody.Stmts.Items[I]));
+    FHandlerVars.Delete(FHandlerVars.Count - 1);
     Self.Emit(#9'ldr x0, [sp]');
     EmitCallSym('_ClassRelease');
     Self.Emit(#9'add sp, sp, #16');
@@ -10719,11 +10735,37 @@ begin
 end;
 
 procedure TArm64Backend.EmitRaise(AStmt: TRaiseStmt);
+var
+  SkipL: string;
 begin
   if AStmt.Expr = nil then
   begin
-    { bare re-raise: the in-flight exception }
+    { bare re-raise: the in-flight exception.  Inside a handler that binds
+      a variable, the variable OWNS the exception (the binding moved the
+      in-flight reference into it), so the reference moves back out: the
+      variable is cleared, unreleased, before the re-raise.  Left in place,
+      an outer handler of this routine rebinding a same-named variable
+      released the object (a use-after-free), and a differently named one
+      shared the reference (released twice at scope exit).  A re-raise that
+      leaves the routine never runs its scope-exit release, so an added
+      reference would leak there instead.  A variable the handler body
+      reassigned no longer holds the exception and is left alone.  A
+      handler with no variable forwards its own in-flight reference. }
     EmitCallSym('_CurrentException');
+    if (FHandlerVars.Count > 0) and
+       (FHandlerVars[FHandlerVars.Count - 1] <> '') and
+       (FHandlerVars[FHandlerVars.Count - 1] <> HANDLER_ROUTINE_MARK) then
+    begin
+      SkipL := NewLabel('rrkeep');
+      EmitPushX0();
+      EmitLoadSlot('x9', FHandlerVars[FHandlerVars.Count - 1]);
+      Self.Emit(#9'ldr x0, [sp]');
+      Self.Emit(#9'cmp x9, x0');
+      Self.Emit(Format(#9'b.ne %s', [SkipL]));
+      EmitStoreSlot('xzr', FHandlerVars[FHandlerVars.Count - 1]);
+      Self.Emit(SkipL + ':');
+      EmitPopTo('x0');
+    end;
     EmitCallSym('_Reraise');
     Exit;
   end;
@@ -13966,6 +14008,9 @@ begin
     '_cap_' points at a field as wide as the variable's type, not at an
     8-byte frame slot.  An enclosing routine's own variable of the same name
     is not among its captures, so a shadowing declaration drops out here. }
+  { a routine's handlers are its own: one emitted while an enclosing
+    routine's handler is open (a closure thunk) does not inherit it }
+  FHandlerVars.Add(HANDLER_ROUTINE_MARK);
   OuterPacked := TStringList.Create();
   if (FParentPacked <> nil) and (ADecl.CapturedVars <> nil) then
     for I := 0 to ADecl.CapturedVars.Count - 1 do
@@ -14737,6 +14782,7 @@ begin
   FCapturedVars := nil;   { leg 17: end the capture window for this routine }
   FCurEnvCaptured := nil;
   OuterPacked.Free();
+  FHandlerVars.Delete(FHandlerVars.Count - 1);
 end;
 
 function TArm64Backend.StackArgSize(AArg: TASTExpr): Integer;

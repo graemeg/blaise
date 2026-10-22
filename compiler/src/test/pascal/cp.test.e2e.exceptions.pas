@@ -74,6 +74,14 @@ type
       method must desugar to Create(Format(fmt, [args])) — before the fix
       the args were silently dropped and Message came back empty. }
     procedure TestRun_CreateFmt_FormatsMessage;
+
+    { BUG-20260721-reraise-shared-var-overretain: a bare raise out of a
+      handler that binds a variable, caught by an outer handler binding the
+      SAME name (the exception was destroyed first -- the outer handler read
+      freed memory), a different name (both variables released one
+      reference), with no variable, and twice up the chain.  The exception
+      is destroyed exactly once, after its last use, and nothing leaks. }
+    procedure TestRun_ReraiseFromBoundHandler_OwnsItsReference;
   end;
 
 implementation
@@ -882,6 +890,87 @@ begin
     'outer again' + LE +
     'S=world' + LE +
     'ac' + LE, 0);
+end;
+
+procedure TE2EExceptionTests.TestRun_ReraiseFromBoundHandler_OwnsItsReference;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    type
+      EMy = class(Exception)
+        Tag: Integer;
+        destructor Destroy; override;
+      end;
+    destructor EMy.Destroy;
+    begin
+      WriteLn('destroy ', Tag);
+      inherited Destroy()
+    end;
+    procedure SameName;
+    begin
+      try
+        try
+          raise EMy.Create('a')
+        except
+          on E: EMy do begin E.Tag := 1; raise end
+        end
+      except
+        on E: EMy do WriteLn('same [', E.Message, '] ', E.Tag)
+      end
+    end;
+    procedure OtherName;
+    begin
+      try
+        try
+          raise EMy.Create('b')
+        except
+          on E: EMy do begin E.Tag := 2; raise end
+        end
+      except
+        on F: EMy do WriteLn('other [', F.Message, '] ', F.Tag)
+      end
+    end;
+    procedure NoVar;
+    begin
+      try
+        try
+          raise EMy.Create('c')
+        except
+          on EMy do raise
+        end
+      except
+        on E: EMy do begin E.Tag := 3; WriteLn('novar [', E.Message, ']') end
+      end
+    end;
+    procedure Chain;
+    begin
+      try
+        try
+          try
+            raise EMy.Create('d')
+          except
+            on E: EMy do begin E.Tag := 4; raise end
+          end
+        except
+          on E: Exception do raise
+        end
+      except
+        on E: EMy do WriteLn('chain [', E.Message, '] ', E.Tag)
+      end
+    end;
+    begin
+      SameName();
+      OtherName();
+      NoVar();
+      Chain();
+      WriteLn('end')
+    end.
+    ''';
+begin
+  AssertLeakFreeOnAll(Src, 'same [a] 1' + LE + 'destroy 1' + LE +
+    'other [b] 2' + LE + 'destroy 2' + LE + 'novar [c]' + LE + 'destroy 3' +
+    LE + 'chain [d] 4' + LE + 'destroy 4' + LE + 'end' + LE);
 end;
 
 initialization

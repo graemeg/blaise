@@ -14,7 +14,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TExceptionTests = class(TTestCase)
@@ -110,6 +110,11 @@ type
     procedure TestSemantic_TypedExcept_NonClassType_RaisesError;
     procedure TestSemantic_TypedExcept_WithElse_OK;
     procedure TestSemantic_TypedExcept_HandlerVarUsableInBody;
+    { a bare raise inside a handler that binds a variable moves the
+      reference back out of the variable (clears it, unreleased, when it
+      still holds the exception); inside a handler with no variable it
+      forwards the in-flight reference unchanged }
+    procedure TestCodegen_ReraiseFromBoundHandler_MovesRefOut;
   end;
 
 implementation
@@ -686,6 +691,46 @@ begin
           end
         end.
         ''').Free();
+end;
+
+procedure TExceptionTests.TestCodegen_ReraiseFromBoundHandler_MovesRefOut;
+const
+  SrcBound = '''
+    program P;
+    type EX = class end;
+    begin
+      try
+        raise EX.Create()
+      except
+        on E: EX do raise
+      end
+    end.
+    ''';
+  SrcNoVar = '''
+    program P;
+    type EX = class end;
+    begin
+      try
+        raise EX.Create()
+      except
+        on EX do raise
+      end
+    end.
+    ''';
+begin
+  AssertEquals('bound handler: the variable is compared and cleared', '',
+    AsmMissing(SrcBound,
+      #9'callq _CurrentException' + #10 + #9'cmpq E(%rip), %rax' + #10 +
+        #9'jne .Lrrkeep',
+      #9'cmp x9, x0' + #10 + #9'b.ne Lrrkeep'));
+  AssertEquals('bound handler: cleared without a release', '',
+    AsmMissing(SrcBound, #9'movq $0, E(%rip)',
+      #9'str xzr, [x9, _g_E@PAGEOFF]'));
+  AssertEquals('no-variable handler: the in-flight reference is forwarded',
+    '', AsmMissing(SrcNoVar,
+      #9'callq _CurrentException' + #10 + #9'movq %rax, %rdi' + #10 +
+        #9'callq _Reraise',
+      #9'bl __CurrentException' + #10 + #9'bl __Reraise'));
 end;
 
 initialization

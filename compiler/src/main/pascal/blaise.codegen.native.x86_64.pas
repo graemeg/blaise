@@ -317,6 +317,10 @@ type
       pre-count saw (finally bodies are emitted more than once). }
     FFrameBottom: Integer;
     FFinallyStack: TList<TCompoundStmt>;
+    FHandlerVars: TStringList; { one entry per open exception handler,
+                               innermost last -- the variable it binds, ''
+                               for none; '<routine>' opens each routine's
+                               own run }
     FForEndNext: Integer;
     { Stack of open-array-literal call frames; top = innermost call currently
       having its arguments pushed.  Owned (frames freed by EndCallArgs). }
@@ -1706,6 +1710,7 @@ begin
   FDataGlobals         := TOrderedDictionary<string, TTypeDesc>.Create();
   FGlobalOwners        := TDictionary<string, string>.Create();
   FModuleVarNames      := TStringList.Create();
+  FHandlerVars         := TStringList.Create();
   FDynElemHooks        := TObjectList.Create(False);
   FModuleVarNames.CaseSensitive := True;
   FModuleVarNames.Sorted := True;
@@ -1784,6 +1789,7 @@ begin
   FUnitInitNames.Free();
   FOALFrames.Free();
   FFinallyStack.Free();
+  FHandlerVars.Free();
   FContinueExcDepths.Free();
   FBreakExcDepths.Free();
   FContinueLabels.Free();
@@ -16859,7 +16865,9 @@ begin
         Self.Emit(#9'callq _ClassRelease');
         Self.Emit(Format(#9'movq %%r15, %s', [Self.VarOperand(H.VarName)]));
       end;
+      FHandlerVars.Add(H.VarName);
       Self.EmitStmtList(H.Body.Stmts);
+      FHandlerVars.Delete(FHandlerVars.Count - 1);
       { A handler with NO variable disposes of the exception: it drops the
         in-flight reference (BUG-20260720-exception-object-leak; %r15 holds
         the exception, callee-saved across the body). }
@@ -16876,7 +16884,9 @@ begin
     { No handler matched: run else body if any, otherwise re-raise. }
     if AStmt.ElseBody <> nil then
     begin
+      FHandlerVars.Add('');
       Self.EmitStmtList(AStmt.ElseBody.Stmts);
+      FHandlerVars.Delete(FHandlerVars.Count - 1);
       { The else branch HANDLES without a variable — drop the in-flight
         reference.  (The re-raise path below forwards it — must NOT.) }
       Self.Emit(#9'movq %r15, %rdi');
@@ -16899,7 +16909,9 @@ begin
     Self.Emit(#9'callq _CurrentException');
     Self.Emit(#9'movq %rax, %r15');
     Self.EmitPopExcFrame();
+    FHandlerVars.Add('');
     Self.EmitStmtList(AStmt.ExceptBody.Stmts);
+    FHandlerVars.Delete(FHandlerVars.Count - 1);
     Self.Emit(#9'movq %r15, %rdi');
     Self.Emit(#9'callq _ClassRelease');
     Self.Emit(#9'popq %r15');
@@ -16910,6 +16922,8 @@ begin
 end;
 
 procedure TX86_64Backend.EmitRaiseStmt(AStmt: TRaiseStmt);
+var
+  SkipL: string;
 begin
   if AStmt.Expr <> nil then
   begin
@@ -16940,8 +16954,31 @@ begin
   end
   else
   begin
-    { Bare re-raise: retrieve the current exception then re-raise it. }
+    { Bare re-raise: retrieve the current exception then re-raise it.
+      Inside a handler that binds a variable, the variable OWNS the
+      exception (the binding moved the in-flight reference into it), so the
+      reference moves back out: the variable is cleared, unreleased, before
+      the re-raise.  Left in place, an outer handler of this routine
+      rebinding a same-named variable released the object (a
+      use-after-free), and a differently named one shared the reference
+      (released twice at scope exit).  A re-raise that leaves the routine
+      never runs its scope-exit release, so an added reference would leak
+      there instead.  A variable the handler body reassigned no longer
+      holds the exception and is left alone.  A handler with no variable
+      forwards its own in-flight reference. }
     Self.Emit(#9'callq _CurrentException');
+    if (FHandlerVars.Count > 0) and
+       (FHandlerVars[FHandlerVars.Count - 1] <> '') and
+       (FHandlerVars[FHandlerVars.Count - 1] <> '<routine>') then
+    begin
+      SkipL := Self.NewLabel('rrkeep');
+      Self.Emit(Format(#9'cmpq %s, %%rax',
+        [Self.VarOperand(FHandlerVars[FHandlerVars.Count - 1])]));
+      Self.Emit(#9'jne ' + SkipL);
+      Self.Emit(Format(#9'movq $0, %s',
+        [Self.VarOperand(FHandlerVars[FHandlerVars.Count - 1])]));
+      Self.Emit(SkipL + ':');
+    end;
     Self.Emit(#9'movq %rax, %rdi');
     Self.Emit(#9'callq _Reraise');
   end;
@@ -25896,6 +25933,9 @@ begin
     FPromoVars[I] := '';
     FPromoAvail[I] := False;
   end;
+  { a routine's handlers are its own: one emitted while an enclosing
+    routine's handler is open (a closure thunk) does not inherit it }
+  FHandlerVars.Add('<routine>');
   Self.EmitFunctionCore(ADecl, AExported);
   { Two-pass register promotion: each pool register whose absence from
     the unpromoted text proves no scratch-window collision is available;
@@ -25932,6 +25972,7 @@ begin
   FEnvVarNames  := nil;
   FBlockEnvVarNames := nil;
   Self.ClearFrame();
+  FHandlerVars.Delete(FHandlerVars.Count - 1);
 end;
 
 procedure TX86_64Backend.EmitFunctionCore(ADecl: TMethodDecl; AExported: Boolean);
