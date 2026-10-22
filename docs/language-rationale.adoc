@@ -5953,6 +5953,12 @@ as follows:
   initialisers are not yet supported (Blaise has no record-constant
   infrastructure) and are rejected with a clear diagnostic rather than
   silently mis-emitted.
+* *nil for references.*  `P: Pointer = nil` is accepted for every type nil
+  may be assigned to: pointers, PChar, classes, interfaces, metaclasses,
+  procedural types and dynamic arrays.  It documents intent and eases porting
+  from FPC and Delphi, which accept it.  Because every variable is already
+  zero-initialised, the initialiser is type-checked and then dropped; it never
+  reaches the data section.  `N: Integer = nil` is rejected.
 * *The same in a unit.*  A unit's initialisers are folded and checked on every
   path, including the normal build where the unit is compiled with the program
   that uses it.  Until 2026-10-22 that path skipped them: an expression or

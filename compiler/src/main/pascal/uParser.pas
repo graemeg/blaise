@@ -3701,7 +3701,13 @@ begin
       Decl.InitConst.TypeName := Decl.TypeName;
       if Copy(Decl.TypeName, 0, 6) = 'array[' then
         Decl.InitConst.IsArrayConst := True;
-      Self.ParseConstValue(Decl.InitConst);
+      { `= nil` is not a constant the const scanner knows; carry it as the
+        value expression so the semantic pass can check the declared type
+        is pointer-like (and then drop it -- the variable is zeroed). }
+      if Check(tkNil) then
+        Decl.InitConst.IntValueExpr := Self.ParseExpr()
+      else
+        Self.ParseConstValue(Decl.InitConst);
     end;
     Expect(tkSemicolon);
     ABlock.Decls.Add(Decl);

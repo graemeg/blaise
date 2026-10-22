@@ -869,9 +869,11 @@ ThreadVarSection
  * initialiser uses the same value grammar as a typed constant (scalar,
  * string, set, or parenthesised aggregate list) and is folded at compile
  * time, then emitted into the data section.  An initialised declaration may
- * declare only a single name (IdentList must be one IDENT). *)
+ * declare only a single name (IdentList must be one IDENT).  NIL initialises
+ * a pointer, PChar, class, interface, metaclass, procedural or dynamic-array
+ * variable; it is checked and emits nothing, as every variable starts zeroed. *)
 VarDecl
-    = IdentList COLON TypeName [ EQUALS ConstValue ] SEMICOLON
+    = IdentList COLON TypeName [ EQUALS ( ConstValue | NIL ) ] SEMICOLON
     ;
 
 

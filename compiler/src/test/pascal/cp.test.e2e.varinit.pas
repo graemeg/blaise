@@ -36,6 +36,8 @@ type
       64-member set, a jumbo set and the empty set hold exactly their
       members (rejected in a program; silently empty in a unit) }
     procedure TestRun_SetInit_ProgramAndUnit;
+    { `= nil` on every pointer-like kind, in a program and a unit interface }
+    procedure TestRun_NilInit_ProgramAndUnit;
     procedure TestRun_FloatConstFold_Parens;
     procedure TestRun_FloatConstFold_NegativeMul;
   end;
@@ -275,6 +277,62 @@ begin
     'True True True False' + LineEnding +
     'True True True False' + LineEnding +
     'False True' + LineEnding, Outp);
+end;
+
+procedure TE2EVarInitTests.TestRun_NilInit_ProgramAndUnit;
+const
+  UnitSrc =
+    '''
+    unit NilInitU;
+    interface
+    var
+      UP: Pointer = nil;
+      UO: TObject = nil;
+    implementation
+    var
+      HiddenA: array of Integer = nil;
+    function HiddenLen: Integer;
+    begin
+      Result := Length(HiddenA)
+    end;
+    end.
+    ''';
+  Src =
+    '''
+    program P;
+    uses NilInitU;
+    type
+      TProc = procedure;
+      TClassRef = class of TObject;
+      IThing = interface end;
+    var
+      Ptr: Pointer = nil;
+      O: TObject = nil;
+      C: TClassRef = nil;
+      F: TProc = nil;
+      I: IThing = nil;
+      A: array of Integer = nil;
+    begin
+      WriteLn(Ptr = nil, ' ', O = nil, ' ', C = nil, ' ', Assigned(F), ' ',
+        I = nil, ' ', Length(A));
+      WriteLn(UP = nil, ' ', UO = nil);
+      O := TObject.Create();
+      SetLength(A, 3);
+      WriteLn(O = nil, ' ', Length(A))
+    end.
+    ''';
+var
+  Outp: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compiles and runs',
+    CompileAndRunWithUnit('NilInitU', UnitSrc, Src, Outp, Rc));
+  AssertEquals('exit code', 0, Rc);
+  AssertEquals('stdout',
+    'True True True False True 0' + LineEnding +
+    'True True' + LineEnding +
+    'False 3' + LineEnding, Outp);
 end;
 
 initialization

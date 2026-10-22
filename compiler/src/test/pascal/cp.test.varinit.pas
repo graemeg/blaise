@@ -40,6 +40,11 @@ type
     procedure TestSemantic_SetInit_FoldsBitmask;
     procedure TestSemantic_SetInit_JumboFoldsBytes;
     procedure TestSemantic_SetInit_WrongEnum_Rejected;
+    { nil initialises a pointer, class, interface, metaclass, procedural or
+      dynamic-array variable; the variable is zeroed already, so the
+      initialiser is checked and dropped.  nil into an Integer is reported. }
+    procedure TestSemantic_NilInit_PointerLikeAccepted;
+    procedure TestSemantic_NilInit_Integer_Rejected;
   end;
 
 implementation
@@ -250,6 +255,51 @@ begin
     on E: ESemanticError do Raised := True;
   end;
   AssertTrue('member of another enum rejected', Raised);
+end;
+
+procedure TVarInitTests.TestSemantic_NilInit_PointerLikeAccepted;
+var
+  Prog: TProgram;
+begin
+  Prog := AnalysedProg('''
+    program X;
+    type
+      TProc = procedure;
+      TClassRef = class of TObject;
+      IThing = interface end;
+    var
+      P: Pointer = nil;
+      O: TObject = nil;
+      C: TClassRef = nil;
+      F: TProc = nil;
+      I: IThing = nil;
+      A: array of Integer = nil;
+    begin
+    end.
+    ''');
+  try
+    AssertTrue('pointer initialiser dropped', VarInitOf(Prog, 'P') = nil);
+    AssertTrue('class initialiser dropped', VarInitOf(Prog, 'O') = nil);
+    AssertTrue('metaclass initialiser dropped', VarInitOf(Prog, 'C') = nil);
+    AssertTrue('procedural initialiser dropped', VarInitOf(Prog, 'F') = nil);
+    AssertTrue('interface initialiser dropped', VarInitOf(Prog, 'I') = nil);
+    AssertTrue('dynamic array initialiser dropped', VarInitOf(Prog, 'A') = nil);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TVarInitTests.TestSemantic_NilInit_Integer_Rejected;
+var
+  Raised: Boolean;
+begin
+  Raised := False;
+  try
+    AnalyseSrc('program X; var N: Integer = nil; begin end.');
+  except
+    on E: ESemanticError do Raised := True;
+  end;
+  AssertTrue('nil into an Integer rejected', Raised);
 end;
 
 initialization

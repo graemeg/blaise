@@ -12032,6 +12032,19 @@ begin
     Exit;
   end;
 
+  { `= nil`: allowed wherever nil may be assigned.  Every variable starts
+    zeroed, so once checked the initialiser has nothing to emit. }
+  if CD.IntValueExpr is TNilLiteral then
+  begin
+    if not (Typ.Kind in [tyPointer, tyPChar, tyClass, tyInterface,
+                         tyMetaClass, tyProcedural, tyDynArray]) then
+      SemanticError(Format(
+        'nil cannot initialise a variable of type ''%s''', [ADecl.TypeName]),
+        CD.Line, CD.Col);
+    ADecl.InitConst := nil;
+    Exit;
+  end;
+
   if Typ.Kind = tyRecord then
     SemanticError(
       'Record variable initialisers are not yet supported',
