@@ -24,6 +24,11 @@ type
     { an interface or metaclass field read off a call result (MkObj().FI,
       MkObj().FC): arm64 stopped with 'read of a field of this type' }
     procedure TestCodegen_IntfAndMetaclassFieldOfCallResult;
+    { a var/out interface parameter is ONE pointer register: the frame
+      layout counted it as a two-register fat value, so the parameters after
+      it were mapped one slot late and the last register parameter was
+      spilled over the caller's frame at 16(%rbp) }
+    procedure TestCodegen_VarIntfParam_TakesOneRegister;
     procedure TestCodegen_ProcFieldCall_AggregateResult;
     procedure TestCodegen_AsCast_IntoFieldAndVarParam;
     procedure TestCodegen_StackSpilledIntfArg_ClassValueUsesClassItab;
@@ -1434,6 +1439,24 @@ const
 begin
   AssertEquals('weak interface field stores register the slot', '',
     AsmMissing(Src, 'callq _WeakAssign', 'bl __WeakAssign'));
+end;
+
+procedure TInterfaceTests.TestCodegen_VarIntfParam_TakesOneRegister;
+var
+  AsmT: string;
+begin
+  AsmT := GenAsm('''
+    program P;
+    type
+      IGr = interface function Hi(): Integer; end;
+    procedure Q(A: IGr; B: IGr; var C: IGr; out D: IGr); begin end;
+    begin
+    end.
+    ''', TargetX86_64);
+  AssertTrue('D is spilled from %r9 into its own frame slot',
+    Pos(#9'movq %r9, -', AsmT) >= 0);
+  AssertTrue('nothing is spilled over the caller''s frame',
+    Pos(#9'movq %r9, 16(%rbp)', AsmT) < 0);
 end;
 
 initialization

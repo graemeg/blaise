@@ -25,6 +25,10 @@ type
     { interface and metaclass fields read off a call result: the value
       outlives the transient object, which is freed once, after the statement }
     procedure TestRun_IntfAndMetaclassFieldOfCallResult;
+    { var and out interface parameters after two by-value interfaces, in a
+      procedure and a method: every parameter arrives in its own slot (x86-64
+      mapped the out parameter over the caller's frame and crashed) }
+    procedure TestRun_VarOutIntfParams_AfterFatParams;
     { a procedural field whose result comes back through the hidden result
       buffer (an interface, a record over 16 bytes), called on an explicit
       receiver and on implicit Self, into every consumer }
@@ -2647,6 +2651,54 @@ begin
   AssertRunsOnAll(Src,
     'gone' + LE + 'plain False' + LE + 'captured weak 7' + LE + 'gone' + LE +
     'False' + LE + 'False' + LE + 'gone' + LE + 'end outer' + LE, 0);
+end;
+
+procedure TE2EInterfaceTests.TestRun_VarOutIntfParams_AfterFatParams;
+const
+  Src = '''
+    program P;
+    type
+      IGr = interface function Hi(): Integer; end;
+      TCls = class(TObject, IGr)
+      public
+        V: Integer;
+        constructor Create(AV: Integer);
+        function Hi(): Integer;
+      end;
+      THost = class
+        procedure Swap(A: IGr; B: IGr; var C: IGr; out D: IGr);
+      end;
+    constructor TCls.Create(AV: Integer); begin V := AV end;
+    function TCls.Hi(): Integer; begin Result := V end;
+    procedure Swap(A: IGr; B: IGr; var C: IGr; out D: IGr);
+    begin
+      D := C;
+      C := TCls.Create(A.Hi() + B.Hi())
+    end;
+    procedure THost.Swap(A: IGr; B: IGr; var C: IGr; out D: IGr);
+    begin
+      D := C;
+      C := TCls.Create(A.Hi() * B.Hi())
+    end;
+    procedure Go();
+    var G1, G2, G3, G4: IGr; H: THost;
+    begin
+      G1 := TCls.Create(2); G2 := TCls.Create(3); G3 := TCls.Create(4);
+      Swap(G1, G2, G3, G4);
+      WriteLn(G3.Hi(), ' ', G4.Hi());
+      H := THost.Create();
+      H.Swap(G1, G2, G3, G4);
+      WriteLn(G3.Hi(), ' ', G4.Hi())
+    end;
+    begin
+      Go();
+      WriteLn('done')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '5 4' + LE + '6 5' + LE + 'done' + LE, 0);
+  AssertLeakFreeOnAll(Src, '');
 end;
 
 initialization

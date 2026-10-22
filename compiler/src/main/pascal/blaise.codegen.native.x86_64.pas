@@ -6388,12 +6388,17 @@ begin
         end;
         Inc(IntIdx2);
       end
-      else if (P.ResolvedType <> nil) and (P.ResolvedType.Kind = tyInterface) then
+      else if (P.ResolvedType <> nil) and (P.ResolvedType.Kind = tyInterface) and
+              not P.IsVarParam then
       begin
         { Interface param: fat pointer = two consecutive integer register slots.
           Allocate a single 16-byte slot (obj at base, itab at base+8) so that
           IntfObjOperand/IntfItabOperand can address both halves.  Two IntIdx
-          increments mirror the register-passing convention. }
+          increments mirror the register-passing convention.  A var/out
+          interface param is ONE pointer (the caller's fat value's address),
+          as the prologue and every caller pass it: counting it as two mapped
+          each later param one slot late, the last register param onto the
+          caller's frame at +16(%rbp). }
         if IntIdx2 < 6 then
         begin
           Self.AddSlot(P.ParamName, P.ResolvedType, Offset);
@@ -13625,8 +13630,9 @@ begin
     P := TMethodParam(AParams.Items[I]);
     if P.IsOpenArray then
       Inc(Result, 2)
-    else if (P.ResolvedType <> nil) and (P.ResolvedType.Kind = tyInterface) then
-      Inc(Result, 2)
+    else if (P.ResolvedType <> nil) and (P.ResolvedType.Kind = tyInterface) and
+            not P.IsVarParam then
+      Inc(Result, 2)     { a var/out interface is one pointer }
     else
       Inc(Result);
   end;
