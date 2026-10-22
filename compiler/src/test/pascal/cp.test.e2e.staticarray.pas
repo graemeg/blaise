@@ -107,6 +107,11 @@ type
     procedure TestRun_MultiDim_ThreeDimensions;
     procedure TestRun_MultiDim_StringElements_ARC;
     procedure TestRun_MultiDim_MixedNotation;
+    { the comma form through fields: a record field, an object field, a
+      field one link down, an element method call and an element Free
+      (which nils the element), read back in both notations (a comma after
+      a field's first index was a parse error) }
+    procedure TestRun_MultiDim_CommaForm_ThroughFields;
 
     { self-cross-compile leg 16: read AND write of an element of an
       implicit-Self STATIC-array field (array[0..N] of string) — the
@@ -2621,6 +2626,57 @@ begin
     '3123' + LE + 's0s1c0c1' + LE + 'dropped' + LE + 'gone k0' + LE +
     'gone k1' + LE + 'gone L1' + LE + 'TrueTrue' + LE + 'hello 7' + LE +
     'gone L2' + LE + 'end' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_MultiDim_CommaForm_ThroughFields;
+const
+  Src = '''
+    program P;
+    type
+      TR = record G: array[0..1, 0..1] of Integer; end;
+      TOb = class
+        G: array[0..1, 0..1] of Integer;
+        R: TR;
+        Objs: array[0..1, 0..1] of TOb;
+        Sub: TOb;
+        N: Integer;
+        procedure Fill();
+        procedure Show();
+      end;
+    procedure TOb.Show(); begin WriteLn('show ', N) end;
+    procedure TOb.Fill(); begin Self.G[1, 0] := 3; R.G[0, 0] := 4 end;
+    var
+      R: TR;
+      O: TOb;
+    begin
+      O := TOb.Create();
+      O.Sub := TOb.Create();
+      R.G[1, 1] := 2;
+      O.G[0, 1] := 5;
+      O.R.G[1, 0] := 6;
+      O.Sub.G[0, 1] := 7;
+      O.Sub.R.G[1, 1] := 8;
+      O.Fill();
+      WriteLn(R.G[1, 1], R.G[1][1], ' ', O.G[0, 1], O.G[0][1], ' ',
+        O.R.G[1, 0], ' ', O.Sub.G[0, 1], O.Sub.R.G[1, 1], ' ', O.G[1, 0],
+        O.R.G[0, 0]);
+      O.Objs[1, 0] := O.Sub;
+      O.Sub.N := 9;
+      O.Objs[1, 0].Show();
+      O.Objs[1, 0].N := 1;
+      O.Objs[1][0].Show();
+      O.Sub := nil;
+      O.Objs[1, 0].Free();
+      WriteLn(O.Objs[1][0] = nil)
+    end.
+    ''';
+var
+  LE: string;
+begin
+  LE := LineEnding;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '22 55 6 78 34' + LE + 'show 9' + LE + 'show 1' + LE +
+    'True' + LE, 0);
 end;
 
 initialization

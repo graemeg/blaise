@@ -209,6 +209,9 @@ type
     function  ChainTailStmt(ABase: TASTExpr; const ARootName: string;
       ALine, ACol: Integer): TASTStmt;
     function  FoldFieldSubscript(ASub: TStringSubscriptExpr): TASTExpr;
+    function  ParseIndexTail(ABase: TASTExpr): TASTExpr;
+    function  FieldIndexChainStmt(AAssign: TFieldAssignment;
+      const ARootName: string; ALine, ACol: Integer): TASTStmt;
   public
     constructor Create(ALexer: TLexer);
     destructor Destroy; override;
@@ -3935,6 +3938,54 @@ begin
   Result := Fld;
 end;
 
+function TParser.ParseIndexTail(ABase: TASTExpr): TASTExpr;
+{ The rest of a bracket whose first index is already attached to ABase (a
+  field's PropIndexExpr, or a subscript's IndexExpr): each further comma
+  index opens a subscript on the previous result -- Rec.G[I, J] reads as
+  Rec.G[I][J], as a bare variable's A[I, J] does -- and the closing ']' is
+  consumed.  Takes ownership of ABase. }
+var
+  Sub: TStringSubscriptExpr;
+begin
+  Result := ABase;
+  while Check(tkComma) do
+  begin
+    Advance();  { consume ',' }
+    Sub := TStringSubscriptExpr.Create();
+    Sub.Line := FCurrent.Line;
+    Sub.Col := FCurrent.Col;
+    Sub.StrExpr := Result;
+    Result := Sub;
+    Sub.IndexExpr := ParseExpr();
+  end;
+  Expect(tkRBracket);
+end;
+
+function TParser.FieldIndexChainStmt(AAssign: TFieldAssignment;
+  const ARootName: string; ALine, ACol: Integer): TASTStmt;
+{ A field statement whose bracket goes on past its first index
+  (R.G[I, J] := V, O.Rows[I, J].Run();), the parser standing on the ','.
+  AAssign holds the field (RecordName or ObjExpr) and the first index; the
+  field node is rebuilt with that index, the remaining indices desugar as in
+  an expression and the rest of the statement is an ordinary chain.  Takes
+  ownership of AAssign. }
+var
+  Fld: TFieldAccessExpr;
+begin
+  Fld := TFieldAccessExpr.Create();
+  Fld.Line := ALine;
+  Fld.Col := ACol;
+  Fld.RecordName := AAssign.RecordName;
+  Fld.Base := AAssign.ObjExpr;
+  Fld.FieldName := AAssign.FieldName;
+  Fld.PropIndexExpr := AAssign.PropIndexExpr;
+  AAssign.ObjExpr := nil;
+  AAssign.PropIndexExpr := nil;
+  AAssign.Free();
+  Result := Self.ChainTailStmt(Self.ParseIndexTail(Fld), ARootName, ALine,
+    ACol);
+end;
+
 function TParser.CallChainStmt(AExpr: TASTExpr; ALine, ACol: Integer): TASTStmt;
 { A statement made of a postfix chain (GetFn()(X); GetFn()(X).Run();): the
   last link must be a call -- a call through the value the chain yields, or
@@ -4471,6 +4522,8 @@ begin
       begin
         Advance();
         FldAssign.PropIndexExpr := ParseExpr();
+        if Check(tkComma) then
+          Exit(Self.FieldIndexChainStmt(FldAssign, Name, Line, Col));
         Expect(tkRBracket);
       end;
       Expect(tkAssign);
@@ -4522,6 +4575,11 @@ begin
       SubNode.Col        := Col;
       SubNode.StrExpr    := FldNode;
       SubNode.IndexExpr  := ParseExpr();
+      if Check(tkComma) then
+        { Ident.Field[I, J] ... -- the rest is an ordinary chain }
+        Exit(Self.ChainTailStmt(
+          Self.ParseIndexTail(Self.FoldFieldSubscript(SubNode)), Name, Line,
+          Col));
       Expect(tkRBracket);
       if Check(tkAssign) then
       begin
@@ -4605,6 +4663,13 @@ begin
               SubNode.StrExpr := ChainBase;
               ChainBase := SubNode;
               SubNode.IndexExpr := ParseExpr();
+              if Check(tkComma) then
+              begin
+                { …Field[I, J] … -- the rest is an ordinary chain }
+                ChainBase := Self.ParseIndexTail(
+                  Self.FoldFieldSubscript(SubNode));
+                Exit(Self.ChainTailStmt(ChainBase, Name, Line, Col));
+              end;
               Expect(tkRBracket);
               { A subscript-terminated chain can itself be an assignment target
                 (GH #187): Aouter.ora[x].innerOneArr[c] := V.  Mirror the
@@ -4735,6 +4800,8 @@ begin
             MCall.Free();
             MCall := nil;
             FldAssign.PropIndexExpr := ParseExpr();
+            if Check(tkComma) then
+              Exit(Self.FieldIndexChainStmt(FldAssign, Name, Line, Col));
             Expect(tkRBracket);
             if not Check(tkAssign) then
             begin
@@ -5024,6 +5091,8 @@ begin
             FldNode.Free();
             CastRcv := nil;
             FldAssign.PropIndexExpr := ParseExpr();
+            if Check(tkComma) then
+              Exit(Self.FieldIndexChainStmt(FldAssign, Name, Line, Col));
             Expect(tkRBracket);
             Expect(tkAssign);
             FldAssign.Expr := ParseExpr();
@@ -6544,7 +6613,7 @@ begin
             begin
               Advance();
               FldNode.PropIndexExpr := ParseExpr();
-              Expect(tkRBracket);
+              Result := Self.ParseIndexTail(FldNode);
             end;
             { Chained access: A.B.C.D ... — wrap each subsequent '.IDENT' }
             while Check(tkDot) and (PeekKind() = tkIdent) do
@@ -6587,7 +6656,7 @@ begin
                 begin
                   Advance();
                   FldNode.PropIndexExpr := ParseExpr();
-                  Expect(tkRBracket);
+                  Result := Self.ParseIndexTail(FldNode);
                 end;
               end;
             end;
@@ -6666,7 +6735,7 @@ begin
                 with its index in one place. }
               Advance();
               FldNode.PropIndexExpr := ParseExpr();
-              Expect(tkRBracket);
+              Result := Self.ParseIndexTail(FldNode);
             end;
           end;
         end
@@ -6828,7 +6897,7 @@ begin
         begin
           Advance();
           FldNode.PropIndexExpr := ParseExpr();
-          Expect(tkRBracket);
+          Result := Self.ParseIndexTail(FldNode);
         end;
       end;
     end

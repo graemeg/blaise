@@ -1182,7 +1182,7 @@ CallSubscriptAssign
  * StaticSubscriptAssign. *)
 SubscriptFieldAssign
     = IDENT LBRACKET Expr RBRACKET { SubscriptSuffix }
-      DOT IDENT [ LBRACKET Expr RBRACKET ] ASSIGN Expr
+      DOT IDENT [ LBRACKET Expr { COMMA Expr } RBRACKET ] ASSIGN Expr
     ;
 
 SubscriptMethodCall
@@ -1299,8 +1299,8 @@ CallChainStmt
 ExprCallStmt
     = IDENT LBRACKET Expr { COMMA Expr } RBRACKET { SubscriptSuffix }
       LPAREN [ ArgList ] RPAREN
-    | IDENT DOT IDENT { Selector } LBRACKET Expr RBRACKET { SubscriptSuffix }
-      LPAREN [ ArgList ] RPAREN       (* A.B.Handlers[I](X); *)
+    | IDENT DOT IDENT { Selector } LBRACKET Expr { COMMA Expr } RBRACKET
+      { SubscriptSuffix } LPAREN [ ArgList ] RPAREN   (* A.B.Handlers[I](X); *)
     | IDENT CARET LPAREN [ ArgList ] RPAREN
     | IDENT LPAREN [ ArgList ] RPAREN LPAREN [ ArgList ] RPAREN { CallSuffix }
     | IDENT DOT IDENT LPAREN [ ArgList ] RPAREN LPAREN [ ArgList ] RPAREN
@@ -1346,9 +1346,14 @@ ParenReceiverStmt
  * baf5079.  See language-rationale.adoc "Chained l-value assignment". *)
 Selector
     = DOT IDENT
-    | LBRACKET Expr RBRACKET
+    | LBRACKET Expr { COMMA Expr } RBRACKET
     | DOT IDENT LPAREN [ ArgList ] RPAREN
     ;
+
+(* A comma index list is the chained form spelt shorter, after a field as
+ * after a variable: R.G[I, J] := V is R.G[I][J] := V.  Until 2026-10-22 a
+ * comma after a field's first index was a parse error, in a statement and in
+ * an expression alike. *)
 
 (* Any sequence of Selectors may follow the first member, including a field
  * or a further subscript after an element: A.B.Arr[I].F := V and
@@ -1440,7 +1445,7 @@ Factor
     | NOT Factor                                       (* Boolean or bitwise NOT *)
     | INHERITED IDENT LPAREN [ ArgList ] RPAREN        (* inherited function call in expr position; parens mandatory *)
     | "Supports" LPAREN Expr COMMA IDENT [ COMMA IDENT ] RPAREN  (* compiler intrinsic *)
-    | IDENT DOT IDENT [ LBRACKET Expr RBRACKET ]      (* indexed property read *)
+    | IDENT DOT IDENT [ LBRACKET Expr { COMMA Expr } RBRACKET ]  (* indexed property / element read *)
                LPAREN [ ArgList ] RPAREN               (* constructor/method call *)
     | IDENT DOT IDENT                                  (* field read *)
     | IDENT LESS TypeArgList GREATER LPAREN [ ArgList ] RPAREN   (* generic func call *)

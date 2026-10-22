@@ -24,6 +24,10 @@ type
     { a chained base's field element may be followed by more chain: a field
       write, a further subscript, or a call through the element }
     procedure TestParse_ChainPastFieldElement;
+    { a comma index list after a field name -- R.G[I, J] read and written,
+      O.Rows[I, J].Run(); -- desugars to chained subscripts, as a bare
+      variable's A[I, J] does (it was "Expected ']' but got ','") }
+    procedure TestParse_CommaIndexAfterField_DesugarsToChain;
     { FPC/Delphi constructs Blaise deliberately omits are recognised and
       rejected with the Blaise form ("recognise, reject, explain";
       language-rationale.adoc).  They used to fail with an unrelated
@@ -1103,6 +1107,43 @@ begin
       (Sub.IndexExpr <> nil));
     AssertTrue('A.B.Handlers[I](X) is a call through the element',
       Prog.Block.Stmts.Items[2] is TExprCallStmt);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestParse_CommaIndexAfterField_DesugarsToChain;
+var
+  Prog: TProgram;
+  Sub:  TStaticSubscriptAssign;
+  MC:   TMethodCallStmt;
+  PC:   TProcCall;
+  Rd:   TStringSubscriptExpr;
+begin
+  Prog := ParseSource(
+    'program P; var R, O, V: Integer;'
+    + ' begin R.G[0, 1] := V; O.B.G[1, 0] := V; O.Rows[1, 2].Run();'
+    + ' WriteLn(R.G[1, 1]) end.');
+  try
+    AssertTrue('R.G[I, J] := V is an element write',
+      Prog.Block.Stmts.Items[0] is TStaticSubscriptAssign);
+    Sub := TStaticSubscriptAssign(Prog.Block.Stmts.Items[0]);
+    AssertTrue('of the row R.G[I]', (Sub.BaseExpr is TFieldAccessExpr) and
+      (TFieldAccessExpr(Sub.BaseExpr).PropIndexExpr <> nil));
+    AssertTrue('a chained base too',
+      Prog.Block.Stmts.Items[1] is TStaticSubscriptAssign);
+    AssertTrue('O.Rows[I, J].Run() is a call on the element',
+      Prog.Block.Stmts.Items[2] is TMethodCallStmt);
+    MC := TMethodCallStmt(Prog.Block.Stmts.Items[2]);
+    AssertTrue('the receiver is Rows[I][J]',
+      (MC.ObjExpr is TStringSubscriptExpr) and
+      (TStringSubscriptExpr(MC.ObjExpr).StrExpr is TFieldAccessExpr));
+    PC := TProcCall(Prog.Block.Stmts.Items[3]);
+    AssertTrue('a read desugars the same way',
+      TASTExpr(PC.Args.Items[0]) is TStringSubscriptExpr);
+    Rd := TStringSubscriptExpr(PC.Args.Items[0]);
+    AssertTrue('on R.G[I]', (Rd.StrExpr is TFieldAccessExpr) and
+      (TFieldAccessExpr(Rd.StrExpr).PropIndexExpr <> nil));
   finally
     Prog.Free();
   end;
