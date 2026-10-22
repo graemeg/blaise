@@ -320,6 +320,12 @@ type
     procedure TestImport_FunctionRoutine_DefinedAsSkFunction;
     procedure TestImport_GlobalVar_MarkedIsGlobal;
     procedure TestImport_Record_FieldsImportedWithOffsets;
+    { An inline array type whose bound is a constant EXPRESSION
+      (array[0..N - 1] of Byte) is exported with literal bounds, so the
+      import -- which has no constants in scope -- rebuilds it.  It exported
+      the source spelling and every warm rebuild failed with "'N-1' is not a
+      valid integer value". }
+    procedure TestImport_Record_ConstExprArrayBound;
     procedure TestImport_Class_ImplicitTObjectParent;
     procedure TestImport_Class_FieldOffsetAfterParentVptr;
     procedure TestImport_Class_ExplicitParentChain;
@@ -2232,6 +2238,47 @@ begin
     AssertEquals('X offset', 0, Fx.Offset);
     AssertEquals('Y offset', 4, Fy.Offset);
     AssertTrue('X type Integer', Fx.TypeDesc = Tab.FindType('Integer'));
+  finally
+    Tab.Free();
+    Iface.Free();
+  end;
+end;
+
+procedure TImportRoundTripTests.TestImport_Record_ConstExprArrayBound;
+const
+  SRC =
+    'unit U;' + #10 +
+    'interface' + #10 +
+    'const N = 4;' + #10 +
+    'type TR = record A: Integer; CC: array[0..N - 1] of Byte;' + #10 +
+    '  M: array[1..N * 2] of array[0..N - 2] of Integer; end;' + #10 +
+    'var G: array[-1..N] of Word;' + #10 +
+    'implementation' + #10 +
+    'end.' + #10;
+var
+  Iface: TUnitInterface;
+  Tab:   TSymbolTable;
+  Rec:   TRecordTypeDesc;
+  Fld:   TFieldInfo;
+  Sym:   TSymbol;
+begin
+  Iface := ParseAnalyseAndExport(SRC);
+  Tab   := FreshTableWithBuiltins();
+  try
+    ImportUnitInterface(Iface, Tab);
+    Rec := TRecordTypeDesc(Tab.FindType('TR'));
+    AssertTrue('TR defined', Rec <> nil);
+    Fld := Rec.FindField('CC');
+    AssertTrue('CC imported with a type', (Fld <> nil) and (Fld.TypeDesc <> nil));
+    AssertEquals('CC spelling', 'array[0..3] of Byte', Fld.TypeDesc.Name);
+    AssertEquals('CC offset', 4, Fld.Offset);
+    Fld := Rec.FindField('M');
+    AssertTrue('M imported with a type', (Fld <> nil) and (Fld.TypeDesc <> nil));
+    AssertEquals('M spelling', 'array[1..8] of array[0..2] of Integer',
+      Fld.TypeDesc.Name);
+    Sym := Tab.Lookup('G');
+    AssertTrue('G imported with a type', (Sym <> nil) and (Sym.TypeDesc <> nil));
+    AssertEquals('G spelling', 'array[-1..4] of Word', Sym.TypeDesc.Name);
   finally
     Tab.Free();
     Iface.Free();

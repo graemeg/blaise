@@ -112,6 +112,7 @@ var
   Lo, Hi: Integer;
   ElemSym: TSymbol;
   BaseSym: TSymbol;
+  ElemType: TTypeDesc;
 begin
   Result := nil;
   if Length(ATypeName) < 2 then Exit;
@@ -138,7 +139,15 @@ begin
     Hi := StrToInt(HighStr);
     ElemSym := ATable.Lookup(ElemName);
     if (ElemSym <> nil) and (ElemSym.Kind = skType) then
-      Result := ATable.NewStaticArrayType(ElemSym.TypeDesc, Lo, Hi);
+      Result := ATable.NewStaticArrayType(ElemSym.TypeDesc, Lo, Hi)
+    else
+    begin
+      { an array of arrays (array[1..8] of array[0..2] of Integer): the
+        element is itself an inline type with no symbol of its own }
+      ElemType := ResolveInlineTypeName(ElemName, ATable);
+      if ElemType <> nil then
+        Result := ATable.NewStaticArrayType(ElemType, Lo, Hi);
+    end;
     Exit;
   end;
 

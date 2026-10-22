@@ -55,6 +55,37 @@ function ExportUnitInterface(AUnit:        TUnit;
 
 implementation
 
+uses
+  SysUtils;
+
+{ An inline static-array type spelled in the source -- array[0..N - 1] of
+  Byte -- as the analysed type's own name, which NewStaticArrayType spells
+  with LITERAL bounds (array[0..3] of Byte).  The importer parses the bounds
+  as integers and has no constants in scope at that point, so a bound
+  written as a constant expression made every warm rebuild of the declaring
+  unit fail ("'N_SIZE-1' is not a valid integer value").  Any other type
+  name is returned unchanged. }
+function ExportTypeSpelling(const ATypeName: string; ATD: TTypeDesc): string;
+begin
+  Result := ATypeName;
+  if (ATD <> nil) and (ATD.Kind = tyStaticArray) and
+     SameText(Copy(ATypeName, 0, 6), 'array[') and
+     SameText(Copy(ATD.Name, 0, 6), 'array[') then
+    Result := ATD.Name;
+end;
+
+{ Rewrite the cloned field list's inline array types (see ExportTypeSpelling);
+  ASrc is the analysed source list, AClone its parallel copy. }
+procedure CanonicaliseFieldTypes(ASrc, AClone: TObjectList);
+var
+  I: Integer;
+begin
+  if (ASrc = nil) or (AClone = nil) or (ASrc.Count <> AClone.Count) then Exit;
+  for I := 0 to ASrc.Count - 1 do
+    TFieldDecl(AClone.Items[I]).TypeName := ExportTypeSpelling(
+      TFieldDecl(ASrc.Items[I]).TypeName, TFieldDecl(ASrc.Items[I]).ResolvedType);
+end;
+
 { ----- Type-reference resolution ---------------------------------
 
   Given a type name appearing in a declaration, figure out which unit
@@ -277,6 +308,12 @@ begin
     new .bif field is needed.  Mutating Result.Def is safe — it is a clone,
     not the AST node. }
   ResolveEnumSubrangeAliasForExport(Result, AIface);
+  if ASrc.Def is TRecordTypeDef then
+    CanonicaliseFieldTypes(TRecordTypeDef(ASrc.Def).Fields,
+      TRecordTypeDef(Result.Def).Fields)
+  else if ASrc.Def is TClassTypeDef then
+    CanonicaliseFieldTypes(TClassTypeDef(ASrc.Def).Fields,
+      TClassTypeDef(Result.Def).Fields);
 
   if ASrc.Def is TClassTypeDef then
     PopulateClassEntry(Result, TClassTypeDef(ASrc.Def), AIface, ADeps, ASymbolTable)
@@ -484,7 +521,8 @@ begin
     begin
       Entry := TVarEntry.Create();
       Entry.Name        := Decl.Names.Strings[J];
-      Entry.TypeRef     := ResolveTypeRef(Decl.TypeName, AIface, ADeps);
+      Entry.TypeRef     := ResolveTypeRef(
+        ExportTypeSpelling(Decl.TypeName, Decl.ResolvedType), AIface, ADeps);
       Entry.IsThreadVar := Decl.IsThreadVar;
       AIface.AddVar(Entry);
     end;

@@ -289,6 +289,11 @@ type
     procedure TestIncrementalRebuild_InterfaceTypedScalarConsts_Warm;
     { Constructor identity crosses the .bif: `constructor Init` constructs
       and a static factory named Create* is a plain call, from the cache. }
+    { An interface type or variable whose array bound is a constant
+      expression rebuilds warm: the cached interface carried the source
+      spelling (array[0..N - 1] of Byte), the import could not parse it, and
+      the second build failed while the stale binary was left in place. }
+    procedure TestIncrementalRebuild_ConstExprArrayBound_Warm;
     procedure TestIncrementalRebuild_CtorIdentity_Warm;
     procedure TestDebugOpdf_PerUnitSection_InDependencyObject;
     { Regression (GH #231): a UNIT passed as --source with --debug-opdf
@@ -3942,6 +3947,78 @@ begin
     AssertEquals(Format('build%d stdout', [Pass]),
       '6 1 2 True True' + #10 + '40000000000 5.00 vw' + #10 +
       'int colour colour bool int64 ' + #10, Captured);
+  end;
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_ConstExprArrayBound_Warm;
+const
+  LibSrc =
+    '''
+    unit ArrBounds;
+    interface
+    const
+      N = 4;
+    type
+      TR = record
+        A: Integer;
+        CC: array[0..N - 1] of Byte;
+        M: array[1..N * 2] of array[0..N - 2] of Integer;
+      end;
+      TC = class
+        Buf: array[0..N + 1] of Byte;
+      end;
+    var
+      G: array[-1..N] of Word;
+    procedure Fill(var R: TR);
+    implementation
+    procedure Fill(var R: TR);
+    begin
+      R.CC[N - 1] := 7;
+      R.M[N * 2][N - 2] := 9;
+      G[-1] := 11
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseArrBounds;
+    uses ArrBounds;
+    var R: TR; C: TC;
+    begin
+      Fill(R);
+      C := TC.Create();
+      C.Buf[N + 1] := 122;
+      WriteLn(SizeOf(TR), ' ', R.CC[3], ' ', R.M[8][2], ' ', G[-1], ' ',
+        High(G), ' ', C.Buf[5])
+    end.
+    ''';
+var
+  LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc, Pass: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  LibPas   := FScratch + '/ArrBounds.pas';
+  ProgPas  := FScratch + '/use_arrbounds.pas';
+  ProgBin  := FScratch + '/use_arrbounds';
+  CacheDir := FScratch + '/units-arrbounds';
+  WriteFile(LibPas, LibSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+  for Pass := 0 to 1 do
+  begin
+    DeleteFile(ProgBin);
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch], Captured);
+    AssertEquals(Format('build%d exit code (out: %s)', [Pass, Captured]), 0, Rc);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
+    AssertEquals(Format('build%d stdout', [Pass]),
+      '104 7 9 11 4 122' + #10, Captured);
   end;
 end;
 
