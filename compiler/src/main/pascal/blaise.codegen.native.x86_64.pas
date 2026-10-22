@@ -13750,7 +13750,10 @@ end;
 
 procedure TX86_64Backend.EmitMethodArgPush(APar: TMethodParam; AArg: TASTExpr);
 begin
-  if (APar <> nil) and APar.IsVarParam then
+  { a var or out OPEN array is the (data, high) pair like a by-value one --
+    the callee writes through the data pointer; pushing only the address
+    left the callee's two pops a word short (a method call segfaulted) }
+  if (APar <> nil) and APar.IsVarParam and not APar.IsOpenArray then
   begin
     Self.EmitVarArgAddrToRax(AArg);
     Self.Emit(#9'pushq %rax');

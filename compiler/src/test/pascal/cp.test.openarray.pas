@@ -122,6 +122,10 @@ type
       stored at the block's width.  It went through the integer emitter:
       a float literal was refused, an operator or a call stored garbage }
     procedure TestCodegen_LiteralFloatElements_StoredAsFloats;
+    { a var open-array argument of a METHOD call is the (data, high) pair, as
+      for a standalone routine: x86-64 pushed only the address while the call
+      popped two words, so the call segfaulted }
+    procedure TestCodegen_VarOpenArrayMethodArg_PassesHigh;
   end;
 
 implementation
@@ -728,6 +732,30 @@ begin
     AsmMissing(Src,
       #9'callq Mk'#10#9'movq %rax, _pendrel_0(%rip)',
       #9'bl _Mk'#10#9'stur x0, [x29, #-'));
+end;
+
+procedure TOpenArrayTests.TestCodegen_VarOpenArrayMethodArg_PassesHigh;
+const
+  Src = '''
+    program P;
+    type
+      TSvc = class
+        function Total(var A: array of Integer): Integer;
+      end;
+    function TSvc.Total(var A: array of Integer): Integer;
+    begin
+      Result := High(A)
+    end;
+    var T: TSvc; Arr: array[0..2] of Integer; N: Integer;
+    begin
+      N := T.Total(Arr)
+    end.
+    ''';
+begin
+  AssertEquals('the high travels after the data pointer', '',
+    AsmMissing(Src, 'pushq %rax' + #10#9 + 'pushq $2',
+      'movz x0, #2' + #10#9 + 'str x0, [sp, #-16]!' + #10#9 +
+      'ldr x2, [sp], #16'));
 end;
 
 procedure TOpenArrayTests.TestCodegen_LiteralFloatElements_StoredAsFloats;

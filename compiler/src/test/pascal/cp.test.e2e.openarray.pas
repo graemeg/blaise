@@ -117,6 +117,11 @@ type
       Both backends refused the literals, stored garbage for operators and
       calls (inf, -2D, 0), and arm64 refused the call forms }
     procedure TestRun_LiteralFloatElements_EveryForm;
+    { a var open array through every call path: routine, procedure
+      variable, record method, constructor, method (direct, method pointer,
+      past the register slots) and static method.  x86-64 passed only the
+      address to a method, and the call segfaulted }
+    procedure TestRun_VarOpenArray_EveryCallPath;
   end;
 
 implementation
@@ -1193,6 +1198,60 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertLeakFreeOnAll(Src, 'gcc -o f2 f20 7');
+end;
+
+procedure TE2EOpenArrayTests.TestRun_VarOpenArray_EveryCallPath;
+const
+  Src = '''
+    program P;
+    type
+      TTot = function(var A: array of Integer): Integer;
+      TTotM = function(var A: array of Integer): Integer of object;
+      TRec = record
+        K: Integer;
+        function Tot(var A: array of Integer): Integer;
+      end;
+      TC = class
+        S: Integer;
+        constructor Create(var A: array of Integer);
+        function Tot(var A: array of Integer): Integer;
+        function Many(P1, P2, P3, P4: Integer; var A: array of Integer;
+          P5: Integer): Integer;
+        static function STot(var A: array of Integer): Integer;
+      end;
+    function Sum(var A: array of Integer): Integer;
+    var I: Integer;
+    begin
+      Result := 0;
+      for I := 0 to High(A) do Result := Result + A[I]
+    end;
+    function TRec.Tot(var A: array of Integer): Integer; begin Result := Sum(A) + K end;
+    constructor TC.Create(var A: array of Integer); begin S := Sum(A); A[0] := 100 end;
+    function TC.Tot(var A: array of Integer): Integer; begin Result := Sum(A) end;
+    function TC.Many(P1, P2, P3, P4: Integer; var A: array of Integer;
+      P5: Integer): Integer;
+    begin
+      Result := P1 + P2 + P3 + P4 + P5 + Sum(A)
+    end;
+    static function TC.STot(var A: array of Integer): Integer; begin Result := Sum(A) * 2 end;
+    var F: TTot; M: TTotM; R: TRec; C: TC;
+      Arr: array[0..2] of Integer; D: array of Integer;
+    begin
+      Arr[0] := 1; Arr[1] := 2; Arr[2] := 3;
+      F := @Sum; WriteLn(F(Arr));
+      R.K := 10; WriteLn(R.Tot(Arr));
+      C := TC.Create(Arr); WriteLn(C.S, ' ', Arr[0]);
+      Arr[0] := 1;
+      M := @C.Tot; WriteLn(M(Arr));
+      WriteLn(C.Tot(Arr), ' ', C.Many(1, 2, 3, 4, Arr, 5), ' ', TC.STot(Arr));
+      SetLength(D, 3); D[0] := 7; D[1] := 8; D[2] := 9;
+      WriteLn(C.Tot(D), ' ', C.Many(0, 0, 0, 0, D, 1))
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src,
+    '6' + LineEnding + '16' + LineEnding + '6 100' + LineEnding +
+    '6' + LineEnding + '6 21 12' + LineEnding + '24 25' + LineEnding, 0);
 end;
 
 procedure TE2EOpenArrayTests.TestRun_LiteralFloatElements_EveryForm;
