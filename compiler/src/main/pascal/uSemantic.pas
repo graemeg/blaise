@@ -91,6 +91,10 @@ type
                                            analysis; drained in module scope by
                                            DrainPendingAnonDecls after the
                                            enclosing bodies complete }
+    FNestedRoutineAddrs:  TObjectList;   { non-owning — every '@Nested' of a
+                                           nested routine; checked by
+                                           CheckNestedRoutineAddrs once all
+                                           capture lists are final (BUG-032) }
     FEnvTypeCount:        Integer;       { per-compilation counter for
                                             synthetic '__env_<n>' records }
     FAnonMethodCount:     Integer;       { per-compilation counter for
@@ -789,6 +793,7 @@ type
     procedure PromoteAnonCaptures(AThunk: TMethodDecl);
     procedure RejectRecordSelfUse(AThunk: TMethodDecl);
     procedure DrainPendingAnonDecls(ABlock: TBlock);
+    procedure CheckNestedRoutineAddrs();
     procedure CoerceRoutineToTarget(var AExpr: TASTExpr; ATarget: TTypeDesc);
     function  GetterProcProp(ART: TRecordTypeDesc; const AName: string;
       ALine, ACol: Integer): TPropertyInfo;
@@ -1401,6 +1406,7 @@ begin
   FPendingGenericRecordInstances := TObjectList.Create(False);
   FPendingGenericIntfInstances   := TObjectList.Create(False);
   FPendingAnonDecls     := TObjectList.Create(False);
+  FNestedRoutineAddrs   := TObjectList.Create(False);
   FAnonMethodCount      := 0;
   FEnvTypeCount         := 0;
   FLoopDepth            := 0;
@@ -1409,6 +1415,8 @@ end;
 destructor TSemanticAnalyser.Destroy;
 begin
   FPendingGenericIntfInstances.Free();
+  FPendingAnonDecls.Free();
+  FNestedRoutineAddrs.Free();
   FPendingGenericRecordInstances.Free();
   FPendingGenericInstances.Free();
   FUnavailCallers.Free();
@@ -2500,6 +2508,7 @@ begin
   for I := 0 to AProg.UsedUnits.Count - 1 do
     DefineModuleName(AProg.UsedUnits.Strings[I]);
   AnalyseBlock(AProg.Block, True);
+  CheckNestedRoutineAddrs();
   { Transfer symbol table ownership to the program so that TTypeDesc
     objects (referenced by ResolvedType pointers on AST nodes) outlive
     this analyser. }
@@ -2842,6 +2851,7 @@ begin
       bodies still see unit globals, and before codegen walks
       ImplBlock.ProcDecls. }
     DrainPendingAnonDecls(AUnit.ImplBlock);
+    CheckNestedRoutineAddrs();
   finally
     FTable.PopScope();
   end;
@@ -3209,6 +3219,7 @@ begin
       bodies still see unit globals, and before codegen walks
       ImplBlock.ProcDecls. }
     DrainPendingAnonDecls(AUnit.ImplBlock);
+    CheckNestedRoutineAddrs();
   finally
     FTable.PopScope();
   end;
@@ -21331,6 +21342,31 @@ begin
   AThunk.EnvType := Env;
 end;
 
+procedure TSemanticAnalyser.CheckNestedRoutineAddrs();
+{ BUG-032: '@Inner' is a bare code pointer, and a nested routine that uses
+  its enclosing routine's variables (Self included) receives them as hidden
+  by-pointer capture parameters no plain procedural call supplies -- calling
+  it read garbage.  Run once every capture list is final: a routine's list is
+  complete only after its own body, so '@Inner' taken inside Inner (or in a
+  routine nested in it) cannot be judged where it appears. }
+var
+  AoE: TAddrOfExpr;
+  MD:  TMethodDecl;
+  I:   Integer;
+begin
+  for I := 0 to FNestedRoutineAddrs.Count - 1 do
+  begin
+    AoE := TAddrOfExpr(FNestedRoutineAddrs.Get(I));
+    MD := TMethodDecl(AoE.ResolvedFreeRoutine);
+    if (MD.CapturedVars <> nil) and (MD.CapturedVars.Count > 0) then
+      SemanticError(Format('''%s'' uses variables of its enclosing routine ' +
+        '(''%s''), so ''@%s'' cannot be a plain procedure pointer -- write ' +
+        'it as an anonymous method assigned to a ''reference to'' variable',
+        [MD.Name, MD.CapturedVars.Strings[0], MD.Name]), AoE.Line, AoE.Col);
+  end;
+  FNestedRoutineAddrs.Clear();
+end;
+
 procedure TSemanticAnalyser.DrainPendingAnonDecls(ABlock: TBlock);
 { Register and analyse every lifted anonymous-method thunk queued during
   body analysis.  Runs in MODULE scope (the enclosing routine's locals are
@@ -21543,6 +21579,12 @@ begin
   if not IsRefProcType(ATarget) or not IsRoutineAddr(AExpr) then Exit;
   Sym := FTable.Lookup(TIdentExpr(TAddrOfExpr(AExpr).Expr).Name);
   MD := TMethodDecl(Sym.Decl);
+  { the adapter is analysed in module scope, where a nested routine is not
+    visible -- and an anonymous method cannot call one yet }
+  if MD.EnclosingDecl <> nil then
+    SemanticError(Format('''@%s'': a nested routine cannot become a ' +
+      '''reference to'' value yet -- write its body as an anonymous method ' +
+      'instead', [MD.Name]), AExpr.Line, AExpr.Col);
 
   AME      := TAnonMethodExpr.Create();
   AME.Line := AExpr.Line;
@@ -21663,6 +21705,8 @@ begin
         without touching every reference site. }
       AExpr.ResolvedFreeRoutine := MD;
       AExpr.ResolvedType := Result;
+      if MD.EnclosingDecl <> nil then
+        FNestedRoutineAddrs.Add(AExpr);
       Exit;
     end;
   end;

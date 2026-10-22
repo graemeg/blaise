@@ -104,6 +104,10 @@ type
       backends (they previously miscompiled on v0.12.0 and segfaulted the
       native codegen afterwards). }
     procedure TestRun_NestedRoutineInMethod_CapturesLocal;
+    { BUG-032: a nested routine that uses nothing from its enclosing routine
+      runs through a plain procedure pointer; one that captures is refused at
+      compile time (it used to run and print garbage, or segfault). }
+    procedure TestRun_NestedRoutineAddr_PlainRunsCapturingRejected;
     { BUG-008 remaining gap: Self inside a nested routine of a method —
       captured and threaded as a hidden by-pointer param like other outer
       vars.  Covers explicit Self.Field/Self.Method(), implicit member
@@ -1001,6 +1005,62 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '21' + LineEnding + '42' + LineEnding, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_NestedRoutineAddr_PlainRunsCapturingRejected;
+const
+  SrcOk = '''
+    program P;
+    type
+      TF = function(X: Integer): Integer;
+    procedure Apply(F: TF; X: Integer);
+    begin
+      WriteLn(F(X))
+    end;
+    procedure Outer();
+      function Twice(X: Integer): Integer;
+      begin
+        Result := X * 2
+      end;
+    var Fn: TF;
+    begin
+      Fn := @Twice;
+      WriteLn(Fn(21));
+      Apply(@Twice, 50)
+    end;
+    begin
+      Outer()
+    end.
+    ''';
+  SrcCapture = '''
+    program P;
+    type
+      TP = procedure;
+    procedure Outer();
+    var V: Integer;
+      procedure Inner();
+      begin
+        WriteLn(V)
+      end;
+    var Pr: TP;
+    begin
+      V := 42;
+      Pr := @Inner;
+      Pr()
+    end;
+    begin
+      Outer()
+    end.
+    ''';
+var
+  BinFile, ToolOut: string;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(SrcOk, '42' + LineEnding + '100' + LineEnding, 0);
+  AssertTrue('@Inner of a capturing nested routine is rejected',
+    CompileNativeCLI(SrcCapture, False, '', BinFile, ToolOut) <> 0);
+  AssertTrue('explains the capture: ' + ToolOut,
+    Pos('''Inner'' uses variables of its enclosing routine', ToolOut) >= 0);
 end;
 
 procedure TE2EAnonMethodTests.TestRun_NestedRoutineInMethod_CapturesLocal;

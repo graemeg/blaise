@@ -147,6 +147,15 @@ type
       method pointer -- x86-64 built one and called S with the object in
       its first parameter }
     procedure TestSemantic_AddrOfStaticMethod_Rejected;
+    { BUG-032: '@Inner' of a nested routine that uses its enclosing routine's
+      variables (or a method's Self) yields a bare code pointer with no way to
+      carry them -- calling it read garbage.  Rejected; a nested routine that
+      uses nothing from outside is still a plain routine and stays legal. }
+    procedure TestSemantic_AddrOfCapturingNestedRoutine_Rejected;
+    { '@Nested' into a 'reference to' target cannot build its adapter yet (the
+      adapter is analysed in module scope): a clear error, not an
+      "Undeclared function" from inside the generated adapter }
+    procedure TestSemantic_AddrOfNestedRoutineIntoReference_Rejected;
     { a literal inside a RECORD method may capture the method's locals and
       params but not Self: it captured the caller's record by address (and
       typed the env slot as the record, corrupting it) }
@@ -1572,6 +1581,88 @@ begin
   AssertTrue('@Static inside a method',
     Pos('is a static method: it has no receiver', SemanticError(Head +
       'procedure TImp.Run; var K: TM; begin K := @S end; begin end.')) >= 0);
+end;
+
+procedure TAnonMethodTests.TestSemantic_AddrOfCapturingNestedRoutine_Rejected;
+const
+  Head = '''
+    program Prg;
+    type
+      TP = procedure;
+      TF = function(X: Integer): Integer;
+      TC = class
+        F: Integer;
+        procedure Run();
+      end;
+    var C: TC;
+    ''';
+  Msg = 'uses variables of its enclosing routine';
+begin
+  AssertTrue('captures a local',
+    Pos(Msg, SemanticError(Head +
+      'procedure TC.Run(); begin end; ' +
+      'procedure Outer(); var V: Integer; ' +
+      '  procedure Inner(); begin WriteLn(V) end; ' +
+      'var P: TP; begin P := @Inner; P() end; begin end.')) >= 0);
+  AssertTrue('names the captured variable',
+    Pos('''V''', SemanticError(Head +
+      'procedure TC.Run(); begin end; ' +
+      'procedure Outer(); var V: Integer; ' +
+      '  procedure Inner(); begin WriteLn(V) end; ' +
+      'var P: TP; begin P := @Inner end; begin end.')) >= 0);
+  AssertTrue('captures a parameter, passed as an argument',
+    Pos(Msg, SemanticError(Head +
+      'procedure TC.Run(); begin end; ' +
+      'procedure Take(P: TP); begin end; ' +
+      'procedure Outer(K: Integer); ' +
+      '  procedure Inner(); begin WriteLn(K) end; ' +
+      'begin Take(@Inner) end; begin end.')) >= 0);
+  AssertTrue('captures Self in a method',
+    Pos(Msg, SemanticError(Head +
+      'procedure TC.Run(); ' +
+      '  function Inner(X: Integer): Integer; begin Result := X + F end; ' +
+      'var Fn: TF; begin Fn := @Inner end; begin end.')) >= 0);
+  AssertTrue('taken inside its own body',
+    Pos(Msg, SemanticError(Head +
+      'procedure TC.Run(); begin end; ' +
+      'procedure Outer(); var V: Integer; ' +
+      '  procedure Inner(); var P: TP; begin P := @Inner; WriteLn(V) end; ' +
+      'begin end; begin end.')) >= 0);
+  AssertTrue('captures through a sibling it calls',
+    Pos(Msg, SemanticError(Head +
+      'procedure TC.Run(); begin end; ' +
+      'procedure Outer(); var V: Integer; ' +
+      '  procedure Leaf(); begin WriteLn(V) end; ' +
+      '  procedure Mid(); begin Leaf() end; ' +
+      'var P: TP; begin P := @Mid end; begin end.')) >= 0);
+  AssertEquals('a nested routine that captures nothing is a plain routine', '',
+    SemanticError(Head +
+      'procedure TC.Run(); begin end; ' +
+      'procedure Outer(); ' +
+      '  function Twice(X: Integer): Integer; begin Result := X * 2 end; ' +
+      'var Fn: TF; begin Fn := @Twice; WriteLn(Fn(4)) end; begin end.'));
+end;
+
+procedure TAnonMethodTests.TestSemantic_AddrOfNestedRoutineIntoReference_Rejected;
+const
+  Src = '''
+    program Prg;
+    type TR = reference to function(X: Integer): Integer;
+    procedure Outer();
+      function Twice(X: Integer): Integer; begin Result := X * 2 end;
+    var R: TR;
+    begin
+      R := @Twice
+    end;
+    begin end.
+    ''';
+var
+  Msg: string;
+begin
+  Msg := SemanticError(Src);
+  AssertTrue('clear diagnostic: ' + Msg, Pos('nested routine', Msg) >= 0);
+  AssertTrue('not the adapter''s undeclared-function error: ' + Msg,
+    Pos('Undeclared', Msg) < 0);
 end;
 
 procedure TAnonMethodTests.TestSemantic_RecordMethodClosure_SelfUseRejected;

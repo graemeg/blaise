@@ -2188,14 +2188,49 @@ accident).  The rule now is:
 
 - Self-contained nested routines, and captures of the method's ordinary
   locals and parameters, are fully supported on both backends.
-- `Self` — implicit or explicit — is not available inside a nested routine
-  of a method: there is no Self plumbing for nested routines, so the
-  compiler rejects it (`Self cannot be used inside nested routine ... —
-  use an anonymous method instead`).  Anonymous-method literals are the
-  supported vehicle for Self-capturing local behaviour; they carry the
-  receiver in their environment with defined (strong or `[Weak]`)
-  lifetime semantics.  Implicit member access simply fails to resolve,
-  because the nested body is analysed without the enclosing class context.
+- `Self`, implicit or explicit, is captured like any other outer variable:
+  it reaches the nested routine as a hidden by-pointer capture parameter, so
+  fields, methods, properties and `inherited` calls all resolve against the
+  enclosing class.
+- An anonymous method declared inside a nested routine of a method cannot
+  capture `Self` yet (the env-fill machinery has no path from the hidden
+  capture parameter to a heap env field); that case is rejected.
+
+=== The address of a nested routine
+
+`@Inner` is a bare code pointer.  A nested routine that uses its enclosing
+routine's variables, `Self` included, receives them as hidden capture
+parameters that no plain procedural call supplies, so calling such a pointer
+read garbage (BUG-032).  The rule:
+
+- `@Inner` of a nested routine that captures nothing is an ordinary routine
+  address and is accepted for any procedural target.
+- `@Inner` of a capturing nested routine is rejected:
+  `'Inner' uses variables of its enclosing routine ('V'), so '@Inner' cannot
+  be a plain procedure pointer`.  The capture may be indirect, through a
+  sibling nested routine that `Inner` calls.
+- `@Inner` into a `reference to` target is rejected for now, capturing or
+  not.  The `@Routine` adapter is an anonymous method, and anonymous-method
+  bodies are analysed at module scope, where nested routines are not visible.
+
+The recommended form in both rejected cases is an anonymous method assigned
+to a `reference to` variable.  It carries its captures in a heap environment
+with defined lifetime, which a procedure pointer has no room for.
+
+Delphi (E2094) and FPC both reject the address of *any* local routine for an
+ordinary procedural type; FPC accepts it only for its `is nested` procedural
+types.  Blaise is deliberately looser for the capture-free case: such a
+routine needs no hidden parameters, so its address is exactly that of a
+top-level routine, and rejecting it would only force the routine to be moved
+out of the scope it belongs in.
+
+Alternatives considered:
+
+- *Reject every nested-routine address, as Delphi and FPC do.*  This is
+  safe, but it refuses code that is correct by construction.
+- *Accept capturing routines and pass a static link (FPC's `is nested`
+  procedural types).*  This needs a new procedural-type kind and a second
+  calling convention for one corner case that closures already cover.
 
 === Closure and method-pointer parameter passing (Phase 7)
 
