@@ -372,6 +372,70 @@ fragile toolchain coupling without benefit for a self-hosted debugger.
 *Effort.* Small (documentation + build-system integration for `codesign`);
 moderate for the debug-server architecture.
 
+== arm64 — Beyond the macOS Backend
+
+The macOS arm64 backend reached parity with x86-64 on 2026-10-22: every
+"not yet lowered" site is lowered or proven unreachable.  The items below
+lie outside that scope -- other arm64 targets, and changes Apple may require
+of the Mach-O output later -- and are recorded here so they are not lost.
+
+=== Thread-local storage for ELF arm64 targets
+
+*What.* `EmitTlvAddr` in the arm64 backend emits only the Mach-O
+thread-local sequence: the address of a `__thread_vars` descriptor, then a
+call through its thunk.  An ELF arm64 target (linux-arm64, freebsd-arm64)
+needs the ELF TLS model instead -- local-exec through `tpidr_el0` for an
+executable, or TLS descriptors for position-independent code -- together
+with the matching relocations in the internal assembler and linker.
+
+*Why it matters.* Threadvars, and the RTL state built on them, are
+required by any program that uses threads.  Without the ELF model a
+linux-arm64 or freebsd-arm64 backend cannot compile them.
+
+*Status.* Neither ELF arm64 target has a native backend yet.  Since
+2026-10-22 the backend refuses a threadvar on a non-macOS target ("needs the
+ELF TLS model") instead of emitting the Mach-O sequence, so adding a target
+cannot silently miscompile it.
+
+*Effort.* Moderate: the instruction sequence is short, but the TLS
+relocations, the PT_TLS segment and the thread-pointer offset rules must be
+added to the ELF writer for arm64, and verified on real hardware or an
+emulator.
+
+=== Mach-O chained fixups
+
+*What.* The Mach-O writer describes rebasing and symbol binding with the
+legacy `LC_DYLD_INFO_ONLY` bind and rebase opcodes.  Newer toolchains emit
+`LC_DYLD_CHAINED_FIXUPS` together with `LC_DYLD_EXPORTS_TRIE`.
+
+*Why it matters.* Current macOS still loads the legacy form for an
+`MH_EXECUTE` image, so nothing needs to change today.  The migration
+becomes necessary if a macOS release stops accepting the legacy form, or
+when the compiler gains shared-library (`MH_DYLIB`) output.
+
+*Status.* Watch item only.  The fixpoint scripts compare linked Mach-O
+binaries byte for byte, so a change to the writer is guarded once made.
+
+*Effort.* Moderate: a new fixup encoder in the Mach-O writer, keeping the
+image deterministic for the linked-binary fixpoint.
+
+=== arm64e (pointer authentication)
+
+*What.* arm64e is the Apple ABI variant that signs return addresses and
+code pointers (pointer authentication, `pac*`/`aut*` instructions).
+Supporting it would mean signed function pointers, vtables and return
+addresses throughout the generated code and the RTL.
+
+*Why it matters.* It is not needed to run on Apple Silicon: third-party
+executables run as plain arm64.  It would matter only for code that must
+load into an arm64e process, such as system extensions.
+
+*Status.* Not planned.  If it is ever done it should be a separately
+registered toolkit (`macos-arm64e`), not a flag on `macos-arm64`, because
+the ABI differs throughout.
+
+*Effort.* Large.
+
 == Concurrency
 
 === Threading and modern concurrency models
