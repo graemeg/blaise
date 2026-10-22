@@ -39,6 +39,11 @@ type
       crash: the duplicate's symbol was freed before the message read its
       name (nil dereference in DefineGlobalLastWins) }
     procedure TestSemantic_DuplicateInterfaceVar_Reported;
+    { A unit's interface tables name the unit's OWN interface, not a
+      same-named interface of the program using it: x86-64 looked the name
+      up in the flat table and emitted itab/typeinfo references to the
+      program's type (typeinfo_KP_IGr), which no object defined }
+    procedure TestCodegen_UnitIntfTables_IgnoreProgramNamesake;
     procedure TestParse_Unit_Name;
     procedure TestParse_Unit_IntfHasForwardDecls;
     procedure TestParse_Unit_ForwardDeclHasNilBody;
@@ -666,6 +671,38 @@ begin
   end;
   AssertTrue('duplicate reported: ' + Msg,
     Pos('Duplicate identifier ''X''', Msg) >= 0);
+end;
+
+procedure TUnitTests.TestCodegen_UnitIntfTables_IgnoreProgramNamesake;
+const
+  UnitSrc = '''
+    unit KU;
+    interface
+    type
+      IGr = interface function Hi(): Integer; end;
+      TCls = class(TObject, IGr) public function Hi(): Integer; end;
+    implementation
+    function TCls.Hi(): Integer; begin Result := 7 end;
+    end.
+    ''';
+  ProgSrc = '''
+    program KP;
+    uses KU;
+    type
+      IGr = interface function Hi(): Integer; end;
+      TMine = class(TObject, IGr) public function Hi(): Integer; end;
+    function TMine.Hi(): Integer; begin Result := 3 end;
+    begin
+    end.
+    ''';
+var
+  AsmT: string;
+begin
+  AsmT := GenAsmWithUnit(UnitSrc, ProgSrc, TargetX86_64);
+  AssertTrue('the unit''s itab names the unit''s interface',
+    Pos('itab_KU_TCls_KU_IGr:', AsmT) >= 0);
+  AssertTrue('nothing names the program''s interface with a unit prefix',
+    Pos('KP_IGr', AsmT) < 0);
 end;
 
 initialization

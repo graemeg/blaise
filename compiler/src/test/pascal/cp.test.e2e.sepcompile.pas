@@ -108,6 +108,10 @@ type
     { a variable declared twice in a used unit's interface: the compiler
       reports the duplicate and exits 1 (it crashed with a segfault) }
     procedure TestDuplicateUnitInterfaceVar_ReportedNotCrash;
+    { a program declaring an interface and a class with the same names as a
+      unit it uses: each side's itabs, as-casts and Supports bind to its own
+      types (x86-64 failed to link: typeinfo_<Prog>_IGr undefined) }
+    procedure TestProgramNamesakeOfUnitIntf_LinksAndRuns;
     procedure TestObjectBesideProgram_UsableWithoutSource;
     { Regression (BUG-20260906-openarray-param-bif-roundtrip): a routine taking
       an OPEN ARRAY parameter (`array of T`) became uncallable once its unit
@@ -1182,6 +1186,72 @@ begin
   AssertEquals('blaise exit code (out: ' + Captured + ')', 1, Rc);
   AssertTrue('duplicate reported: ' + Captured,
     Pos('Duplicate identifier ''X''', Captured) >= 0);
+end;
+
+procedure TSepCompileTests.TestProgramNamesakeOfUnitIntf_LinksAndRuns;
+const
+  UnitSrc =
+    '''
+    unit NameKU;
+    interface
+    type
+      IGr = interface function Hi(): Integer; end;
+      TCls = class(TObject, IGr) public function Hi(): Integer; end;
+    function MakeGr(): IGr;
+    function UnitSees(O: TObject): Integer;
+    implementation
+    function TCls.Hi(): Integer; begin Result := 7 end;
+    function MakeGr(): IGr; begin Result := TCls.Create() end;
+    function UnitSees(O: TObject): Integer;
+    var G: IGr;
+    begin
+      Result := 0;
+      if Supports(O, IGr, G) then
+        Result := (O as IGr).Hi() + G.Hi()
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program NameKP;
+    uses NameKU;
+    type
+      IGr = interface function Hi(): Integer; end;
+      TCls = class(TObject, IGr) public function Hi(): Integer; end;
+    function TCls.Hi(): Integer; begin Result := 3 end;
+    var
+      A: NameKU.IGr;
+      B: IGr;
+      O: TObject;
+    begin
+      A := MakeGr();
+      B := TCls.Create();
+      O := TCls.Create();
+      WriteLn(A.Hi(), ' ', B.Hi(), ' ', (O as IGr).Hi(), ' ',
+        Supports(O, IGr), ' ', UnitSees(O))
+    end.
+    ''';
+var
+  Dir, ProgPas, ProgBin: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  Dir := FScratch + '/intf_namesake';
+  ForceDirectories(Dir);
+  ProgPas := Dir + '/namekp.pas';
+  ProgBin := Dir + '/namekp';
+  WriteFile(Dir + '/nameku.pas', UnitSrc);
+  WriteFile(ProgPas, ProgSrc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin], Captured);
+  AssertEquals('blaise exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('namekp exit code', 0, Rc);
+  AssertEquals('namekp stdout', '7 3 3 True 0'#10, Captured);
 end;
 
 procedure TSepCompileTests.TestUnitBesideProgram_FoundWithoutUnitPath;

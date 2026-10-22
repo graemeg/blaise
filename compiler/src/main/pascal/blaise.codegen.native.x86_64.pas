@@ -574,6 +574,25 @@ type
     procedure EmitPropAccessorCallNative(const AOwnerType, AMethod: string;
       AVSlot: Integer);
     function IntfTypeInfoName(const AIntfName: string): string;
+    { The typeinfo/itab name part of interface AIntf, from the type's OWN
+      declaring unit.  IntfTypeInfoName re-looked the NAME up in the flat
+      symbol table, so a unit's itab and impllist named a same-named
+      interface of the program that uses it (typeinfo_<Prog>_IGr): the unit
+      object referenced a symbol nothing defined, and was cached that way. }
+    { The symbol stem of class/record type AType (typeinfo_, vtable_,
+      _FieldCleanup_, itab_ ...), from the type's OWN declaring unit.
+      ClassSymName re-looks a NAME up in the flat symbol table, where a
+      program's same-named type wins: a unit's code then referenced the
+      program's symbols (vtable_<Prog>_TCls), which no object defined.  Use
+      this wherever the type is known. }
+    function ClassSymOf(AType: TTypeDesc): string;
+    { ClassSymOf(AType) when the front end resolved the type, else the
+      flat lookup of AName }
+    function ClassSymFor(AType: TTypeDesc; const AName: string): string;
+    function IntfTypeInfoSym(AIntf: TTypeDesc): string;
+    { IntfTypeInfoSym of AResolved when the front end resolved the
+      interface, else the source name's lookup (IntfRefName's fallback) }
+    function IntfRefSym(AResolved: TTypeDesc; const ASourceName: string): string;
     { True when AName is a captured outer-scope variable in the current
       nested function (accessed via an implicit pointer param). }
     function IsCaptured(const AName: string): Boolean;
@@ -3176,6 +3195,45 @@ begin
     Result := Self.ClassSymName(AIntfName);
 end;
 
+function TX86_64Backend.ClassSymOf(AType: TTypeDesc): string;
+begin
+  if Pos('<', AType.Name) >= 0 then
+    Result := NativeMangle(AType.Name)
+  else
+    Result := ClassOwnerPrefix(AType.OwningUnit) + NativeMangle(AType.Name);
+end;
+
+function TX86_64Backend.ClassSymFor(AType: TTypeDesc;
+  const AName: string): string;
+begin
+  if (AType is TMetaClassTypeDesc) and
+     (TMetaClassTypeDesc(AType).BaseClass <> nil) then
+    AType := TMetaClassTypeDesc(AType).BaseClass;
+  if (AType <> nil) and (AType.Kind in [tyClass, tyInterface, tyRecord]) and
+     (AType.Name <> '') then
+    Result := Self.ClassSymOf(AType)
+  else
+    Result := Self.ClassSymName(AName);
+end;
+
+function TX86_64Backend.IntfTypeInfoSym(AIntf: TTypeDesc): string;
+begin
+  if Pos('<', AIntf.Name) >= 0 then
+    Result := NativeMangle(AIntf.Name)
+  else
+    Result := ClassOwnerPrefix(AIntf.OwningUnit) + NativeMangle(AIntf.Name);
+end;
+
+function TX86_64Backend.IntfRefSym(AResolved: TTypeDesc;
+  const ASourceName: string): string;
+begin
+  if (AResolved <> nil) and (AResolved.Kind = tyInterface) and
+     (AResolved.Name <> '') then
+    Result := Self.IntfTypeInfoSym(AResolved)
+  else
+    Result := Self.IntfTypeInfoName(ASourceName);
+end;
+
 function FindMethodInClassDef(AClassDef: TClassTypeDef;
   const AName: string): TMethodDecl;
 var
@@ -3931,7 +3989,12 @@ begin
       owned impl-private class always resolves. }
     if (ASymTable <> nil) and (FCurrentUnitName <> '') then
       ASymTable.DefineOwningUnit := FCurrentUnitName;
-    TDesc := ASymTable.FindType(TD.Name);
+    { the descriptor of THIS declaration: by name, a same-named type of the
+      program (or another unit) that won the flat slot would be emitted in
+      its place -- with its own interfaces, fields and parent }
+    TDesc := TTypeDesc(TD.ResolvedDesc);
+    if TDesc = nil then
+      TDesc := ASymTable.FindType(TD.Name);
     if (TDesc = nil) or not (TDesc is TRecordTypeDesc) then Continue;
     RT := TRecordTypeDesc(TDesc);
     CD := TClassTypeDef(TD.Def);
@@ -4035,13 +4098,18 @@ begin
   begin
     TD := TTypeDecl(ATypeDecls.Items[I]);
     if not (TD.Def is TClassTypeDef) then Continue;
-    TDesc := ASymTable.FindType(TD.Name);
+    { the descriptor of THIS declaration: by name, a same-named type of the
+      program (or another unit) that won the flat slot would be emitted in
+      its place -- with its own interfaces, fields and parent }
+    TDesc := TTypeDesc(TD.ResolvedDesc);
+    if TDesc = nil then
+      TDesc := ASymTable.FindType(TD.Name);
     if (TDesc = nil) or not (TDesc is TRecordTypeDesc) then Continue;
     RT := TRecordTypeDesc(TDesc);
     CSym := Self.ClassSymNameForDecl(TD);
 
     if RT.Parent <> nil then
-      ParentStr := 'typeinfo_' + Self.ClassSymName(RT.Parent.Name)
+      ParentStr := 'typeinfo_' + Self.ClassSymOf(RT.Parent)
     else
       ParentStr := '0';
     { Point at the impllist when this class OR any ancestor implements an
@@ -4094,7 +4162,7 @@ begin
     RT := TRecordTypeDesc(GI.TypeDesc);
     MName := Self.ClassSymName(GI.TypeName);
     if RT.Parent <> nil then
-      ParentStr := 'typeinfo_' + Self.ClassSymName(RT.Parent.Name)
+      ParentStr := 'typeinfo_' + Self.ClassSymOf(RT.Parent)
     else
       ParentStr := '0';
     if RT.ImplementsCount() > 0 then
@@ -4126,7 +4194,12 @@ begin
   begin
     TD := TTypeDecl(ATypeDecls.Items[I]);
     if not (TD.Def is TClassTypeDef) then Continue;
-    TDesc := ASymTable.FindType(TD.Name);
+    { the descriptor of THIS declaration: by name, a same-named type of the
+      program (or another unit) that won the flat slot would be emitted in
+      its place -- with its own interfaces, fields and parent }
+    TDesc := TTypeDesc(TD.ResolvedDesc);
+    if TDesc = nil then
+      TDesc := ASymTable.FindType(TD.Name);
     if (TDesc = nil) or not (TDesc is TRecordTypeDesc) then Continue;
     RT := TRecordTypeDesc(TDesc);
     Self.EmitFieldCleanupFn(Self.ClassSymNameForDecl(TD), RT, BareClass);
@@ -4162,7 +4235,12 @@ begin
   begin
     TD := TTypeDecl(ATypeDecls.Items[I]);
     if not (TD.Def is TClassTypeDef) then Continue;
-    TDesc := ASymTable.FindType(TD.Name);
+    { the descriptor of THIS declaration: by name, a same-named type of the
+      program (or another unit) that won the flat slot would be emitted in
+      its place -- with its own interfaces, fields and parent }
+    TDesc := TTypeDesc(TD.ResolvedDesc);
+    if TDesc = nil then
+      TDesc := ASymTable.FindType(TD.Name);
     if (TDesc = nil) or not (TDesc is TRecordTypeDesc) then Continue;
     RT := TRecordTypeDesc(TDesc);
     if not RT.HasVTable() then Continue;
@@ -4248,8 +4326,8 @@ begin
       Self.DeferNativeClassRelease();
     Self.Emit(#9'movq %rax, %r10');
     Self.Emit(Format(#9'leaq itab_%s_%s(%%rip), %%rax',
-      [Self.ClassSymName(TRecordTypeDesc(AObjExpr.ResolvedType).Name),
-       Self.IntfTypeInfoName(AIntf.Name)]));
+      [Self.ClassSymOf(AObjExpr.ResolvedType),
+       Self.IntfTypeInfoSym(AIntf)]));
     Exit;
   end;
   { A named (non-Self-field) ident receiver resolves through its name, the
@@ -4922,7 +5000,12 @@ begin
   begin
     TD := TTypeDecl(ATypeDecls.Items[I]);
     if not (TD.Def is TClassTypeDef) then Continue;
-    TDesc := ASymTable.FindType(TD.Name);
+    { the descriptor of THIS declaration: by name, a same-named type of the
+      program (or another unit) that won the flat slot would be emitted in
+      its place -- with its own interfaces, fields and parent }
+    TDesc := TTypeDesc(TD.ResolvedDesc);
+    if TDesc = nil then
+      TDesc := ASymTable.FindType(TD.Name);
     if (TDesc = nil) or not (TDesc is TRecordTypeDesc) then Continue;
     ClassRT := TRecordTypeDesc(TDesc);
     { Skip only when neither this class NOR any ancestor implements an interface
@@ -4960,10 +5043,10 @@ begin
         IntfDesc := TInterfaceTypeDesc(EmitIntfs.Items[J]);
         Self.Emit('.balign 8');
         if BareClass then
-          Self.Emit('.weak itab_' + CSym + '_' + Self.IntfTypeInfoName(IntfDesc.Name))
+          Self.Emit('.weak itab_' + CSym + '_' + Self.IntfTypeInfoSym(IntfDesc))
         else
-          Self.Emit('.globl itab_' + CSym + '_' + Self.IntfTypeInfoName(IntfDesc.Name));
-        Self.Emit('itab_' + CSym + '_' + Self.IntfTypeInfoName(IntfDesc.Name) + ':');
+          Self.Emit('.globl itab_' + CSym + '_' + Self.IntfTypeInfoSym(IntfDesc));
+        Self.Emit('itab_' + CSym + '_' + Self.IntfTypeInfoSym(IntfDesc) + ':');
         for K := 0 to IntfDesc.MethodCount() - 1 do
         begin
           MethName := IntfDesc.MethodName(K);
@@ -4989,8 +5072,8 @@ begin
       for J := 0 to EmitIntfs.Count - 1 do
       begin
         IntfDesc := TInterfaceTypeDesc(EmitIntfs.Items[J]);
-        Self.Emit(#9'.quad typeinfo_' + Self.IntfTypeInfoName(IntfDesc.Name));
-        Self.Emit(#9'.quad itab_' + CSym + '_' + Self.IntfTypeInfoName(IntfDesc.Name));
+        Self.Emit(#9'.quad typeinfo_' + Self.IntfTypeInfoSym(IntfDesc));
+        Self.Emit(#9'.quad itab_' + CSym + '_' + Self.IntfTypeInfoSym(IntfDesc));
       end;
       Self.Emit(#9'.quad 0');
     finally
@@ -5013,7 +5096,7 @@ begin
     for J := 0 to EmitIntfs.Count - 1 do
     begin
       IntfDesc := TInterfaceTypeDesc(EmitIntfs.Items[J]);
-      CSym := Self.IntfTypeInfoName(IntfDesc.Name);
+      CSym := Self.IntfTypeInfoSym(IntfDesc);
       Self.Emit('.balign 8');
       Self.Emit('.weak itab_' + MName + '_' + CSym);
       Self.Emit('itab_' + MName + '_' + CSym + ':');
@@ -5042,8 +5125,8 @@ begin
     for J := 0 to EmitIntfs.Count - 1 do
     begin
       IntfDesc := TInterfaceTypeDesc(EmitIntfs.Items[J]);
-      Self.Emit(#9'.quad typeinfo_' + Self.IntfTypeInfoName(IntfDesc.Name));
-      Self.Emit(#9'.quad itab_' + MName + '_' + Self.IntfTypeInfoName(IntfDesc.Name));
+      Self.Emit(#9'.quad typeinfo_' + Self.IntfTypeInfoSym(IntfDesc));
+      Self.Emit(#9'.quad itab_' + MName + '_' + Self.IntfTypeInfoSym(IntfDesc));
     end;
     Self.Emit(#9'.quad 0');
     finally
@@ -5212,7 +5295,7 @@ begin
      (AAsgn.Expr.ResolvedType.Kind = tyClass) then
   begin
     ClassRT := TRecordTypeDesc(AAsgn.Expr.ResolvedType);
-    ItabSym := 'itab_' + Self.ClassSymName(ClassRT.Name) + '_' + Self.IntfTypeInfoName(Intf.Name);
+    ItabSym := 'itab_' + Self.ClassSymOf(ClassRT) + '_' + Self.IntfTypeInfoSym(Intf);
     Self.EmitExprToEax(AAsgn.Expr);       { new obj -> %rax }
     Self.Emit(#9'pushq %rax');
     { an owned +1 (a call result) is consumed, not retained again }
@@ -5306,8 +5389,8 @@ begin
       Self.EmitExprToEax(AExpr);
       Owned := NativeExprOwnsRef(AExpr);
       Self.Emit(Format(#9'leaq itab_%s_%s(%%rip), %%rcx',
-        [Self.ClassSymName(TRecordTypeDesc(AExpr.ResolvedType).Name),
-         Self.IntfTypeInfoName(Intf.Name)]));
+        [Self.ClassSymOf(AExpr.ResolvedType),
+         Self.IntfTypeInfoSym(Intf)]));
       Self.Emit(#9'pushq %rcx');
       Self.Emit(#9'pushq %rax');
     end
@@ -5352,7 +5435,7 @@ begin
   else if (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tyClass) then
   begin
     ClassRT := TRecordTypeDesc(AExpr.ResolvedType);
-    ItabSym := 'itab_' + Self.ClassSymName(ClassRT.Name) + '_' + Self.IntfTypeInfoName(Intf.Name);
+    ItabSym := 'itab_' + Self.ClassSymOf(ClassRT) + '_' + Self.IntfTypeInfoSym(Intf);
     Self.EmitExprToEax(AExpr);
     Self.Emit(#9'pushq %rax');
     { an owned +1 (a call result) is consumed, not retained again }
@@ -7449,7 +7532,7 @@ begin
     Self.Emit(#9'pushq %rax');            { obj }
     Self.Emit(#9'movq %rax, %rdi');
     Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
-      [Self.IntfTypeInfoName(TAsExpr(AExpr).TypeName)]));
+      [Self.IntfRefSym(AExpr.ResolvedType, TAsExpr(AExpr).TypeName)]));
     Self.Emit(#9'callq _GetItab');
     LOk := Self.NewLabel('as_ok');
     Self.Emit(#9'testq %rax, %rax');
@@ -8873,7 +8956,7 @@ begin
         the typeinfo address (same pointer vtable[0] holds at runtime),
         mirroring the QBE backend's `copy $typeinfo_<T>`. }
       Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rax',
-        [Self.ClassSymName(TIdentExpr(AExpr).Name)]));
+        [Self.ClassSymFor(AExpr.ResolvedType, TIdentExpr(AExpr).Name)]));
       Exit;
     end;
     if TIdentExpr(AExpr).IsImplicitSelfMethod and
@@ -12027,13 +12110,13 @@ begin
     Self.Emit(Format(#9'movq $%d, %%rdi',
       [TRecordTypeDesc(FAE.ResolvedType).TotalSize()]));
     Self.Emit(Format(#9'leaq _FieldCleanup_%s(%%rip), %%rsi',
-      [Self.ClassSymName(FAE.ResolvedType.Name)]));
+      [Self.ClassSymOf(FAE.ResolvedType)]));
     Self.Emit(#9'callq _ClassAlloc');
     { Store vtable pointer at offset 0 if the class has virtual methods. }
     if TRecordTypeDesc(FAE.ResolvedType).HasVTable() then
     begin
       Self.Emit(Format(#9'leaq vtable_%s(%%rip), %%rcx',
-        [Self.ClassSymName(FAE.ResolvedType.Name)]));
+        [Self.ClassSymOf(FAE.ResolvedType)]));
       Self.Emit(#9'movq %rcx, (%rax)');
     end;
     { the constructor call's OWNED reference, taken before the body runs
@@ -12048,7 +12131,7 @@ begin
       Self.Emit(#9'movq %rax, %rbx');
       Self.Emit(#9'movq %rbx, %rdi');
       Self.Emit(Format(#9'movq typeinfo_%s+16(%%rip), %%rsi',
-        [Self.ClassSymName(FAE.ResolvedType.Name)]));
+        [Self.ClassSymOf(FAE.ResolvedType)]));
       SetI := FStrLits.IndexOf(FCurrentUnitName);
       if SetI < 0 then SetI := FStrLits.Add(FCurrentUnitName);
       Self.Emit(Format(#9'leaq __s%d+12(%%rip), %%rdx', [SetI]));
@@ -12187,13 +12270,13 @@ begin
        (TIsExpr(AExpr).ResolvedTargetType.Kind = tyInterface) then
     begin
       Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
-        [Self.ClassSymName(TIsExpr(AExpr).TypeName)]));
+        [Self.ClassSymFor(TIsExpr(AExpr).ResolvedTargetType, TIsExpr(AExpr).TypeName)]));
       Self.Emit(#9'callq _ImplementsInterface');
     end
     else
     begin
       Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
-        [Self.ClassSymName(TIsExpr(AExpr).TypeName)]));
+        [Self.ClassSymFor(TIsExpr(AExpr).ResolvedTargetType, TIsExpr(AExpr).TypeName)]));
       Self.Emit(#9'callq _IsInstance');
     end;
     if Self.IsOwnedClassOperand(TIsExpr(AExpr).Obj) then
@@ -12210,7 +12293,7 @@ begin
     Self.Emit(#9'pushq %rax');
     Self.Emit(#9'movq %rax, %rdi');
     Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
-      [Self.ClassSymName(TAsExpr(AExpr).TypeName)]));
+      [Self.ClassSymFor(AExpr.ResolvedType, TAsExpr(AExpr).TypeName)]));
     Self.Emit(#9'callq _IsInstance');
     Self.Emit(#9'testl %eax, %eax');
     Self.Emit(#9'jnz ' + ScEndLbl);
@@ -12241,7 +12324,7 @@ begin
       end;
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
-        [Self.IntfTypeInfoName(IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName))]));
+        [Self.IntfRefSym(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName)]));
       Self.Emit(#9'callq _ImplementsInterface');
       if SuppOwned then
       begin
@@ -12257,7 +12340,7 @@ begin
     Self.Emit(#9'pushq %rax');               { (obj) }
     Self.Emit(#9'movq %rax, %rdi');
     Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
-      [Self.IntfTypeInfoName(IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName))]));
+      [Self.IntfRefSym(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName)]));
     Self.Emit(#9'callq _ImplementsInterface');
     LSuppNo  := Self.NewLabel('supports_no');
     LSuppEnd := Self.NewLabel('supports_end');
@@ -12269,7 +12352,7 @@ begin
       Self.AddGlobal(SuppOut, TSupportsExpr(AExpr).ResolvedIntfType);
     Self.Emit(#9'movq (%rsp), %rdi');        { obj }
     Self.Emit(Format(#9'leaq typeinfo_%s(%%rip), %%rsi',
-      [Self.IntfTypeInfoName(IntfRefName(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName))]));
+      [Self.IntfRefSym(TSupportsExpr(AExpr).ResolvedIntfType, TSupportsExpr(AExpr).IntfTypeName)]));
     Self.Emit(#9'callq _GetItab');           { itab -> %rax }
     Self.Emit(#9'pushq %rax');               { (itab, obj) }
     { ARC: retain new obj (an owned one is consumed), release the out-var's
@@ -12368,11 +12451,11 @@ begin
     else
     begin
       Self.Emit(Format(#9'movq $%d, %%rdi', [RT.TotalSize()]));
-      Self.Emit(Format(#9'leaq _FieldCleanup_%s(%%rip), %%rsi', [Self.ClassSymName(RT.Name)]));
+      Self.Emit(Format(#9'leaq _FieldCleanup_%s(%%rip), %%rsi', [Self.ClassSymOf(RT)]));
       Self.Emit(#9'callq _ClassAlloc');
       if RT.HasVTable() then
       begin
-        Self.Emit(Format(#9'leaq vtable_%s(%%rip), %%rcx', [Self.ClassSymName(RT.Name)]));
+        Self.Emit(Format(#9'leaq vtable_%s(%%rip), %%rcx', [Self.ClassSymOf(RT)]));
         Self.Emit(#9'movq %rcx, (%rax)');
       end;
       { the constructor call's OWNED reference (ArcExprOwnsRef reports a
@@ -12392,7 +12475,7 @@ begin
       Self.Emit(#9'movq %rax, %rbx');
       Self.Emit(#9'movq %rbx, %rdi');
       Self.Emit(Format(#9'movq typeinfo_%s+16(%%rip), %%rsi',
-        [Self.ClassSymName(RT.Name)]));
+        [Self.ClassSymOf(RT)]));
       SetI := FStrLits.IndexOf(FCurrentUnitName);
       if SetI < 0 then SetI := FStrLits.Add(FCurrentUnitName);
       Self.Emit(Format(#9'leaq __s%d+12(%%rip), %%rdx', [SetI]));
@@ -13464,7 +13547,7 @@ begin
   begin
     { Class expression → interface: emit obj, look up static itab. }
     ClassRT := TRecordTypeDesc(AArg.ResolvedType);
-    ItabSym := 'itab_' + Self.ClassSymName(ClassRT.Name) + '_' + Self.IntfTypeInfoName(IntfDesc.Name);
+    ItabSym := 'itab_' + Self.ClassSymOf(ClassRT) + '_' + Self.IntfTypeInfoSym(IntfDesc);
     Self.EmitExprToEax(AArg);          { obj -> %rax }
     Self.Emit(#9'pushq %rax');         { push obj }
     Self.Emit(Format(#9'leaq %s(%%rip), %%rax', [ItabSym]));
@@ -22440,8 +22523,8 @@ begin
         ParamIntf := PP.TypeDesc;
       Self.EmitExprToEax(Arg);
       Self.Emit(Format(#9'leaq itab_%s_%s(%%rip), %%rcx',
-        [Self.ClassSymName(TRecordTypeDesc(Arg.ResolvedType).Name),
-         Self.IntfTypeInfoName(ParamIntf.Name)]));
+        [Self.ClassSymOf(Arg.ResolvedType),
+         Self.IntfTypeInfoSym(ParamIntf)]));
       Self.Emit(#9'pushq %rcx');            { save itab }
       Self.Emit(#9'pushq %rax');            { save obj (on top) }
       Result := Result + 16;
