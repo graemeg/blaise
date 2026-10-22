@@ -19,8 +19,10 @@ unit rtl.platform.layout.darwin;
 // 16-bit mode_t at byte 4 (nlink_t occupies bytes 6-7, so a 32-bit read
 // would fold nlink into the mode — StatMode reads exactly 16 bits),
 // st_mtimespec.tv_sec at byte 48, st_size at byte 96, sizeof = 144.
-// CONFIRM these against the SDK headers during the Phase 6 MacBook bring-up
-// before trusting file sizes/dates on real hardware.
+// Confirmed against the SDK headers (offsetof / sizeof, macOS 27 arm64,
+// 2026-10-22); cp.test.platformlayout.darwin pins them and
+// TE2ESysUtilsTests.TestRun_StatKnownFile_SizeMtimeMode checks them against
+// a kernel-filled struct.
 //
 // The O_* creation flags share FreeBSD's values (both BSD-derived); the
 // CLOCK_* ids and the socket-layer constants have Darwin-specific values.

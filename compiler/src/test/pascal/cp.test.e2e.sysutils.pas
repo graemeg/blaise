@@ -54,6 +54,13 @@ type
     procedure TestRun_PlatformConstants;
     procedure TestRun_GetCurrentDir_ReturnsNonEmpty;
     procedure TestRun_FileAge_ReturnsTimestamp;
+    { stat a known file through the RTL and check the struct stat accessors
+      against a kernel-filled buffer: ReadFile's length (st_size) is the
+      file's size, FileAge (st_mtime) matches the system stat tool, and
+      DirectoryExists (st_mode) tells the file from its directory.  Runs
+      natively, so each host checks its own layout (the sentinel tests in
+      cp.test.platformlayout.* cover the foreign ones). }
+    procedure TestRun_StatKnownFile_SizeMtimeMode;
     procedure TestRun_StrToIntDef_ValidAndInvalid;
     procedure TestRun_StrToInt64Def_ValidAndInvalid;
     procedure TestRun_StrToInt_RaisesOnInvalid;
@@ -814,6 +821,57 @@ begin
       Lines.Text := Trim(Output);
       AssertEquals('existing file age > 0', 'True', Lines.Strings[0]);
       AssertEquals('missing file age = -1', '-1', Lines.Strings[1]);
+    finally
+      Lines.Free();
+    end;
+  finally
+    if FileExists(TmpFile) then DeleteFile(TmpFile);
+  end;
+end;
+
+procedure TE2ESysUtilsTests.TestRun_StatKnownFile_SizeMtimeMode;
+const
+  Src =
+    '''
+        program P;
+        var F, D: string;
+        begin
+          F := ParamStr(1);
+          D := ParamStr(2);
+          WriteLn(Length(ReadFile(F)));
+          WriteLn(FileAge(F));
+          WriteLn(DirectoryExists(F), ' ', DirectoryExists(D))
+        end.
+        ''';
+var
+  Output, StatOut, Content: string;
+  RCode, I: Integer;
+  Dir, TmpFile: string;
+  Lines: TStringList;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  Dir := FScratch + '/statfile';
+  ForceDirectories(Dir);
+  TmpFile := Dir + '/known.dat';
+  Content := '';
+  for I := 1 to 5000 do
+    Content := Content + Chr(48 + I mod 10);
+  WriteFile(TmpFile, Content);
+  { the expected mtime from the system tool: GNU stat -c %Y, else BSD /
+    macOS stat -f %m (GNU's -f is --file-system, so it must not go first) }
+  if RunProc('/usr/bin/stat', ['-c', '%Y', TmpFile], StatOut) <> 0 then
+    AssertEquals('stat -f %m', 0,
+      RunProc('/usr/bin/stat', ['-f', '%m', TmpFile], StatOut));
+  try
+    AssertTrue('compile+run',
+      CompileAndRun(Src, Output, RCode, [TmpFile, Dir]));
+    AssertEquals('exit code', 0, RCode);
+    Lines := TStringList.Create();
+    try
+      Lines.Text := Trim(Output);
+      AssertEquals('st_size', '5000', Lines.Strings[0]);
+      AssertEquals('st_mtime', Trim(StatOut), Lines.Strings[1]);
+      AssertEquals('st_mode', 'False True', Lines.Strings[2]);
     finally
       Lines.Free();
     end;
