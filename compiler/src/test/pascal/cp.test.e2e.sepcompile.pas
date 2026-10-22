@@ -121,6 +121,11 @@ type
       attribute typeinfo failed to link; the program's TGauge.Create took the
       unit's vtable slot and crashed) }
     procedure TestProgramNamesakeOfUnitClasses_EachBindsItsOwn;
+    { a macos-arm64 program that imports an RTL unit with an initialization
+      section (rtl.platform.layout.darwin) links it once: the link-time
+      dedupe of RTL objects the program already compiled could not read
+      Mach-O objects, so the RTL copy was linked too and its _init clashed }
+    procedure TestRtlUnitImportedByProgram_MacOSLinksOnce;
     { a unit's initialised variables -- expressions, named constants, a
       float expression, in the interface and the implementation -- start
       with their values (each was 0 unless written as a bare literal) }
@@ -1397,6 +1402,45 @@ begin
     'prog caught prog mine'#10 + 'prog saw unit kind'#10 + 'prog gauge -1'#10 +
     'prog tagged False'#10 + 'is False True True'#10 + 'as -1'#10 +
     'ref True TGauge'#10, Captured);
+end;
+
+procedure TSepCompileTests.TestRtlUnitImportedByProgram_MacOSLinksOnce;
+const
+  ProgSrc =
+    '''
+    program RtlOnce;
+    uses rtl.platform.layout.darwin;
+    var L: TPlatformLayoutDarwinArm64;
+    begin
+      L := TPlatformLayoutDarwinArm64.Create();
+      WriteLn(L.StatBufSize())
+    end.
+    ''';
+var
+  Dir, ProgPas, ProgBin, Captured: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  Dir := FScratch + '/rtlonce';
+  ForceDirectories(Dir);
+  ProgPas := Dir + '/rtlonce.pas';
+  ProgBin := Dir + '/rtlonce';
+  WriteFile(ProgPas, ProgSrc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--target', 'macos-arm64',
+                   '--unit-path', ProjectRoot() + 'compiler/src/main/pascal'],
+                  Captured);
+  AssertEquals('macos-arm64 link exit code (out: ' + Captured + ')', 0, Rc);
+  if HostTarget().OS = osMacOS then
+  begin
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals('rtlonce exit code', 0, Rc);
+    AssertEquals('rtlonce stdout', '144'#10, Captured);
+  end;
 end;
 
 procedure TSepCompileTests.TestUnitVarInitialiserExpressions_HaveTheirValues;

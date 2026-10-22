@@ -381,6 +381,8 @@ uses
   SysUtils,
   Process,
   blaise.elfreader,
+  blaise.machoreader,
+  uStrCompat,
   uToolchain,
   uUnitInterfaceIO;   { EffectiveCompilerId / ContentHashFnv1a64 — RTL cache key }
 
@@ -480,10 +482,42 @@ end;
   the caller then falls back to supplying its copy, which is always safe. }
 procedure CollectDefinedSymbols(const AObjPath: string; ADest: TStringList);
 var
-  Obj: TElfObjectFile;
-  I:   Integer;
-  Sym: TRdSymbol;
+  Obj:   TElfObjectFile;
+  I:     Integer;
+  Sym:   TRdSymbol;
+  Bytes: string;
+  Mo:    TMachOFile;
+  MoSym: TMoSymbol;
 begin
+  { A Mach-O object (macOS targets): the ELF reader rejected it, so no RTL
+    object was ever recognised as already provided and a program that
+    compiled an RTL unit itself linked it twice -- harmless for the weak RTL
+    routines, a duplicate-symbol link error for a unit with an
+    initialization section (rtl.platform.layout.darwin_init). }
+  Bytes := ReadFile(AObjPath);
+  if (Length(Bytes) >= 4) and (StrAt(Bytes, 0) = $CF) and
+     (StrAt(Bytes, 1) = $FA) and (StrAt(Bytes, 2) = $ED) and
+     (StrAt(Bytes, 3) = $FE) then
+  begin
+    Mo := nil;
+    try
+      try
+        Mo := ParseMachO(Bytes, AObjPath);
+      except
+        Exit;  { not a readable Mach-O object -- be conservative }
+      end;
+      for I := 0 to Mo.Symbols.Count - 1 do
+      begin
+        MoSym := Mo.Symbols.Items[I];
+        if (MoSym.Name <> '') and MoSym.IsExt() and not MoSym.IsUndef() then
+          if ADest.IndexOf(MoSym.Name) < 0 then
+            ADest.Add(MoSym.Name);
+      end;
+    finally
+      Mo.Free();
+    end;
+    Exit;
+  end;
   Obj := nil;
   try
     try
