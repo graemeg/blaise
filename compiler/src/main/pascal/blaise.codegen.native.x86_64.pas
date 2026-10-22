@@ -931,6 +931,10 @@ type
     { Sret a record-returning call (function or method) into ADest. }
     procedure EmitRecordCallSretAt(AExpr: TASTExpr; const ADest: string;
       AIndirect: Boolean = False);
+    { A record-returning call stored into the record FIELD whose address is in
+      %rbx, through a zeroed stack temp: the call may read the field itself }
+    procedure EmitRecordCallIntoFieldViaTemp(AExpr: TASTExpr;
+      ARec: TRecordTypeDesc);
     { A property read as the getter call it stands for (a borrowing shim;
       FreeGetterCallShim releases it) }
     function  BuildGetterCallShim(AFAE: TFieldAccessExpr;
@@ -7653,6 +7657,40 @@ begin
   raise ENativeCodeGenError.Create(
     'native backend: internal error: IsIntfStackValue accepted a form ' +
     'EmitIntfValueOnStack does not lower (' + AExpr.ClassName + ')');
+end;
+
+procedure TX86_64Backend.EmitRecordCallIntoFieldViaTemp(AExpr: TASTExpr;
+  ARec: TRecordTypeDesc);
+var
+  Sz, Buf: Integer;
+begin
+  { Field := RecordCall(), the field's address in %rbx (callee-saved).  The
+    call may READ that field -- a record method on it, a getter whose body
+    reads it, the field passed as an argument -- so it must not be handed
+    the field as its sret destination: the sret path zeroes the destination
+    before the call runs (BUG-20260722-native-recfield-sret-alias printed
+    zeros).  The call fills a zeroed stack temp (address in callee-saved
+    %r14); then the field's old managed fields are released and the result
+    copied over, its +1 references transferring.  The plain-variable
+    aliasing arm does the same; a field is routed this way always, since a
+    getter can read any part of the object graph. }
+  Sz := ARec.TotalSize();
+  Buf := (Sz + 15) and (-16);
+  Self.Emit(#9'pushq %r14');
+  Self.Emit(Format(#9'subq $%d, %%rsp', [Buf]));
+  Self.Emit(#9'movq %rsp, %r14');
+  Self.Emit(#9'movq %r14, %rdi');
+  Self.Emit(#9'xorl %esi, %esi');
+  Self.Emit(Format(#9'movq $%d, %%rdx', [Sz]));
+  Self.Emit(#9'callq memset');
+  Self.EmitRecordCallSretAt(AExpr, '(%r14)', False);
+  Self.EmitRecordFieldReleases(ARec, '%rbx');
+  Self.Emit(#9'movq %rbx, %rdi');
+  Self.Emit(#9'movq %r14, %rsi');
+  Self.Emit(Format(#9'movq $%d, %%rdx', [Sz]));
+  Self.Emit(#9'callq memcpy');
+  Self.Emit(Format(#9'addq $%d, %%rsp', [Buf]));
+  Self.Emit(#9'popq %r14');
 end;
 
 procedure TX86_64Backend.EmitRecordCallSretAt(AExpr: TASTExpr; const ADest: string;
@@ -19650,8 +19688,10 @@ begin
       if FA.FieldInfo.Offset > 0 then
         Self.Emit(Format(#9'addq $%d, %%rbx', [FA.FieldInfo.Offset]));
       if FA.FieldInfo.TypeDesc.Kind = tyRecord then
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(FA.FieldInfo.TypeDesc), '%rbx');
-      Self.EmitMethodSretCall(TMethodCallExpr(FA.Expr), '(%rbx)', False);
+        Self.EmitRecordCallIntoFieldViaTemp(FA.Expr,
+          TRecordTypeDesc(FA.FieldInfo.TypeDesc))
+      else
+        Self.EmitMethodSretCall(TMethodCallExpr(FA.Expr), '(%rbx)', False);
       Self.Emit(#9'popq %rbx');
       Exit;
     end;
@@ -19702,8 +19742,10 @@ begin
       if FA.FieldInfo.Offset > 0 then
         Self.Emit(Format(#9'addq $%d, %%rbx', [FA.FieldInfo.Offset]));
       if FA.FieldInfo.TypeDesc.Kind = tyRecord then
-        Self.EmitRecordFieldReleases(TRecordTypeDesc(FA.FieldInfo.TypeDesc), '%rbx');
-      Self.EmitFuncCallSret(TFuncCallExpr(FA.Expr), '(%rbx)', False);
+        Self.EmitRecordCallIntoFieldViaTemp(FA.Expr,
+          TRecordTypeDesc(FA.FieldInfo.TypeDesc))
+      else
+        Self.EmitFuncCallSret(TFuncCallExpr(FA.Expr), '(%rbx)', False);
       Self.Emit(#9'popq %rbx');
       Exit;
     end;
@@ -19750,8 +19792,8 @@ begin
       end;
       if FA.FieldInfo.Offset > 0 then
         Self.Emit(Format(#9'addq $%d, %%rbx', [FA.FieldInfo.Offset]));
-      Self.EmitRecordFieldReleases(TRecordTypeDesc(FA.FieldInfo.TypeDesc), '%rbx');
-      Self.EmitRecordCallSretAt(FA.Expr, '(%rbx)', False);
+      Self.EmitRecordCallIntoFieldViaTemp(FA.Expr,
+        TRecordTypeDesc(FA.FieldInfo.TypeDesc));
       Self.Emit(#9'popq %rbx');
       Exit;
     end;

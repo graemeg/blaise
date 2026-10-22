@@ -287,6 +287,12 @@ type
     { Reading a record-returning indexed getter on a list held in a CLASS FIELD
       (Obj.ListField[I]) — the receiver is the field, not the outer object. }
     procedure TestRun_IndexedRecordGetter_OnClassField;
+    { BUG-20260722-native-recfield-sret-alias: a record-returning call
+      assigned into a record FIELD that the call itself reads -- a record
+      method on that field, a getter whose body reads it, the same through a
+      var parameter, and a function given the field as an argument.  x86-64
+      zeroed the field before the call ran and printed zeros. }
+    procedure TestRun_RecordFieldFromCall_ThatReadsTheField;
   end;
 
 implementation
@@ -2940,6 +2946,74 @@ begin
   AssertRunsOnAll(Src,
     '4 5 6' + LineEnding +
     '7 8' + LineEnding, 0);
+end;
+
+procedure TE2ERecordReturnTests.TestRun_RecordFieldFromCall_ThatReadsTheField;
+const
+  Src = '''
+    program P;
+    type
+      TBig = record A, B, C: Integer; end;
+      TH = record
+        V: TBig;
+        function Scaled(K: Integer): TBig;
+      end;
+      TW = record Tag: Integer; Payload: TH; end;
+      TPay = record N: Integer; S: string; end;
+      TWrap = record Payload: TPay; end;
+      TBox = class
+        FWrap: TWrap;
+        function GetP: TPay;
+        property PayloadProp: TPay read GetP;
+      end;
+      TIn = record
+        S: string;
+        C: Integer;
+        function Grow(const X: string): TIn;
+      end;
+      TZ = record Inner: TIn; end;
+    function TH.Scaled(K: Integer): TBig;
+    begin
+      Result.A := V.A * K; Result.B := V.B * K; Result.C := V.C * K
+    end;
+    function TBox.GetP: TPay; begin Result := FWrap.Payload end;
+    function TIn.Grow(const X: string): TIn;
+    begin
+      Result.S := S + X; Result.C := C + 1
+    end;
+    function Bump(const R: TPay): TPay;
+    begin
+      Result.N := R.N + 1; Result.S := R.S + '+'
+    end;
+    procedure Pr(var Z: TZ);
+    begin
+      Z.Inner := Z.Inner.Grow('!');
+      Z.Inner := Z.Inner.Grow('?')
+    end;
+    var
+      W: TW;
+      B: TBox;
+      Z: TZ;
+    begin
+      W.Payload.V.A := 3; W.Payload.V.B := 5; W.Payload.V.C := 7;
+      W.Payload.V := W.Payload.Scaled(2);
+      WriteLn(W.Payload.V.A, ' ', W.Payload.V.B, ' ', W.Payload.V.C);
+      B := TBox.Create();
+      B.FWrap.Payload.N := 42; B.FWrap.Payload.S := 'x' + IntToStr(1);
+      B.FWrap.Payload := B.PayloadProp;
+      WriteLn(B.FWrap.Payload.N, ' ', B.FWrap.Payload.S);
+      B.FWrap.Payload := Bump(B.FWrap.Payload);
+      WriteLn(B.FWrap.Payload.N, ' ', B.FWrap.Payload.S);
+      Z.Inner.S := 'ab'; Z.Inner.C := 5;
+      Pr(Z);
+      WriteLn(Z.Inner.S, ' ', Z.Inner.C)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src,
+    '6 10 14' + LineEnding + '42 x1' + LineEnding + '43 x1+' + LineEnding +
+    'ab!? 7' + LineEnding);
 end;
 
 initialization

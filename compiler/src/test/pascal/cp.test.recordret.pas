@@ -76,6 +76,10 @@ type
     { ... and a VIRTUAL one dispatches through the vtable: x86-64 called the
       declaring class's body, so an override never ran }
     procedure TestCodegen_ImplicitSelfFloatCall_Virtual_DispatchesThroughVtable;
+    { a record-returning call stored into a record field goes through a stack
+      temp on x86-64 -- the call may read the field, and the sret path zeroes
+      its destination first (BUG-20260722-native-recfield-sret-alias) }
+    procedure TestCodegen_RecordFieldFromCall_ThroughTemp;
   end;
 
 implementation
@@ -525,6 +529,37 @@ begin
     AsmMissing(Src, 'leaq _sacall_3(%rip), %rax', 'bl _TObj_MkRec'));
   AssertTrue('x86-64: three plain calls, three scratches',
     Pos('leaq _sacall_2(%rip), %rax', GenAsm(Src, TargetX86_64)) >= 0);
+end;
+
+procedure TRecordReturnTests.TestCodegen_RecordFieldFromCall_ThroughTemp;
+const
+  Src = '''
+    program P;
+    type
+      TBig = record A, B, C: Integer; end;
+      TH = record
+        V: TBig;
+        function Scaled(K: Integer): TBig;
+      end;
+    function TH.Scaled(K: Integer): TBig;
+    begin
+      Result.A := V.A * K; Result.B := V.B * K; Result.C := V.C * K
+    end;
+    var H: TH;
+    begin
+      H.V := H.Scaled(2)
+    end.
+    ''';
+var
+  AsmT, Main: string;
+begin
+  AsmT := GenAsm(Src, TargetX86_64);
+  Main := Copy(AsmT, Pos(#10'main:', AsmT), Length(AsmT));
+  AssertTrue('the call fills a stack temp',
+    Pos(#9'movq %rsp, %r14', Main) >= 0);
+  AssertTrue('the temp is copied over the field after the call',
+    Pos(#9'movq %r14, %rsi' + #10 + #9'movq $12, %rdx' + #10 +
+      #9'callq memcpy', Main) >= 0);
 end;
 
 initialization
