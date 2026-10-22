@@ -6101,6 +6101,7 @@ var
   I, J:        Integer;
   Sym:         TSymbol;
   GFI:         TGenericFuncInstance;
+  Instances:   TObjectList;
 begin
   Result := nil;
 
@@ -6110,6 +6111,21 @@ begin
 
   BaseName := StrHead(AInstName, BracPos);
   ArgsStr  := StrCopyFrom(AInstName, BracPos + 1, Length(AInstName) - BracPos - 2);
+
+  { Already instantiated in this program or unit: every call site asks again,
+    and a second instance registered the same name twice ("Ambiguous
+    overload of 'Twice<Integer>'" on the second call). }
+  if FCurrentUnit <> nil then
+    Instances := FCurrentUnit.GenericFuncInstances
+  else if FProg <> nil then
+    Instances := FProg.GenericFuncInstances
+  else
+    Instances := nil;
+  if Instances <> nil then
+    for I := 0 to Instances.Count - 1 do
+      if SameText(TGenericFuncInstance(Instances.Items[I]).InstName,
+           AInstName) then
+        Exit(TGenericFuncInstance(Instances.Items[I]).MethodDecl);
 
   { Check both the in-unit template index and any imported templates
     registered through the symbol table.  Imports landed via

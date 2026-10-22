@@ -84,6 +84,9 @@ type
       array as the value type (x86-64 failed to assemble the instance:
       its symbols carried the '[0..3]' of the array type) }
     procedure TestRun_Dictionary_NumericAndStaticArrayTypeArgs;
+    { a generic function instance called more than once ("Ambiguous
+      overload" on the second call) }
+    procedure TestRun_GenericFunc_CalledTwice;
   end;
 
 implementation
@@ -1147,6 +1150,27 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '0 10 20 30 40 ' + LE + '128' + LE + 'lo hi' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericFunc_CalledTwice;
+const
+  Src = '''
+    program P;
+    function Twice<T>(a: T): T;
+    begin
+      Result := a + a
+    end;
+    var I: Integer; S: string;
+    begin
+      I := Twice<Integer>(4);
+      I := Twice<Integer>(I);
+      S := Twice<string>('ab');
+      WriteLn(I, ' ', Twice<Integer>(1), ' ', S, ' ', Twice<string>(S))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '16 2 abab abababab' + LE, 0);
 end;
 
 initialization

@@ -60,6 +60,10 @@ type
     procedure TestSemantic_GenericMethod_ConstParamFlagPreserved;
     procedure TestCodegen_GenericClass_ConstStringParam_NoKeyARC;
     procedure TestCodegen_GenericClass_ByValStringParam_HasARC;
+    { a generic function instance called a second time is the same instance
+      (the second call instantiated it again and reported "Ambiguous
+      overload of 'Twice<Integer>'") }
+    procedure TestSemantic_GenericFunc_SecondCallReusesInstance;
   end;
 
 implementation
@@ -508,6 +512,23 @@ procedure TGenericFuncTests.TestCodegen_GenericClass_ByValStringParam_HasARC;
 begin
   AssertProbeARC(SrcGenericByValParam, TargetX86_64, False);
   AssertProbeARC(SrcGenericByValParam, TargetArm64, False);
+end;
+
+procedure TGenericFuncTests.TestSemantic_GenericFunc_SecondCallReusesInstance;
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc(
+    'program X; function Twice<T>(a: T): T; begin Result := a + a end; ' +
+    'var I: Integer; S: string; ' +
+    'begin I := Twice<Integer>(4); I := Twice<Integer>(I); ' +
+    'S := Twice<string>(''a''); S := Twice<string>(S) end.');
+  try
+    AssertEquals('one instance per type argument list', 2,
+      Prog.GenericFuncInstances.Count);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization
