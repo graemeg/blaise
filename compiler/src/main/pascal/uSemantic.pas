@@ -14040,6 +14040,7 @@ begin
       ACall.Line, ACall.Col);
   end;
 
+  AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
   if ACall.Args.Count <> MDecl.Params.Count then
     SemanticError(
       Format('Method ''%s.%s'' expects %d argument(s) but got %d',
@@ -14356,6 +14357,7 @@ begin
         [ACall.Name]),
       ACall.Line, ACall.Col);
 
+  AppendDefaultArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
   if ACall.Args.Count <> MDecl.Params.Count then
     SemanticError(
       Format('Method ''%s.%s'' expects %d argument(s) but got %d',
@@ -18679,6 +18681,7 @@ begin
     { Validate the call arguments against the monomorphised signature — the
       instance body was analysed, but the call site's args still need checking
       (unlike the overload path, this path bypasses ResolveMethodOverload). }
+    AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
     if AExpr.Args.Count <> MDecl.Params.Count then
       SemanticError(
         Format('Method ''%s.%s'' expects %d argument(s) but got %d',
@@ -18734,6 +18737,7 @@ begin
         [RT.Name, AExpr.Name]),
       AExpr.Line, AExpr.Col);
 
+  AppendDefaultArgs(AExpr.Args, MDecl, AExpr.Name, AExpr.Line, AExpr.Col);
   if AExpr.Args.Count <> MDecl.Params.Count then
     SemanticError(
       Format('Method ''%s.%s'' expects %d argument(s) but got %d',

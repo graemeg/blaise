@@ -21,15 +21,70 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing, uStrCompat,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, cp.test.harness;
 
 type
   TDefaultArgsTests = class(TTestCase)
   private
   published
+    { a FUNCTION method called through a receiver (Self.F(1), X.F(1)), a
+      generic method, and an inherited call -- statement or expression --
+      fill omitted trailing arguments from the declared defaults, as a bare
+      F(1) and a procedure statement already did; they reported "expects 2
+      argument(s) but got 1" }
+    procedure TestSemantic_DefaultArgs_EveryMethodCallForm;
   end;
 
 implementation
+
+procedure TDefaultArgsTests.TestSemantic_DefaultArgs_EveryMethodCallForm;
+const
+  Head = '''
+    program P;
+    type
+      TBase = class
+        function F(A: Integer; B: Integer = 5): Integer; virtual;
+        procedure Q(A: Integer; B: Integer = 5); virtual;
+      end;
+      TA = class(TBase)
+        function F(A: Integer; B: Integer = 5): Integer; override;
+        procedure Q(A: Integer; B: Integer = 5); override;
+        function G<T>(A: T; B: Integer = 7): Integer;
+        procedure Run();
+      end;
+    var X: TA; N: Integer;
+    function TBase.F(A: Integer; B: Integer): Integer; begin Result := A + B end;
+    procedure TBase.Q(A: Integer; B: Integer); begin end;
+    function TA.G<T>(A: T; B: Integer): Integer; begin Result := B end;
+    ''';
+begin
+  AssertEquals('Self.F(1)', '', SemanticError(Head +
+    'function TA.F(A: Integer; B: Integer): Integer; begin Result := Self.F(1) end; ' +
+    'procedure TA.Q(A: Integer; B: Integer); begin end; ' +
+    'procedure TA.Run(); begin end; begin end.'));
+  AssertEquals('X.F(1)', '', SemanticError(Head +
+    'function TA.F(A: Integer; B: Integer): Integer; begin Result := A end; ' +
+    'procedure TA.Q(A: Integer; B: Integer); begin end; ' +
+    'procedure TA.Run(); begin end; begin N := X.F(1) end.'));
+  AssertEquals('X.G<Integer>(1)', '', SemanticError(Head +
+    'function TA.F(A: Integer; B: Integer): Integer; begin Result := A end; ' +
+    'procedure TA.Q(A: Integer; B: Integer); begin end; ' +
+    'procedure TA.Run(); begin end; begin N := X.G<Integer>(1) end.'));
+  AssertEquals('inherited F(1) as an expression', '', SemanticError(Head +
+    'function TA.F(A: Integer; B: Integer): Integer; ' +
+    '  begin Result := inherited F(A) end; ' +
+    'procedure TA.Q(A: Integer; B: Integer); begin end; ' +
+    'procedure TA.Run(); begin end; begin end.'));
+  AssertEquals('inherited Q(1) as a statement', '', SemanticError(Head +
+    'function TA.F(A: Integer; B: Integer): Integer; begin Result := A end; ' +
+    'procedure TA.Q(A: Integer; B: Integer); begin inherited Q(A) end; ' +
+    'procedure TA.Run(); begin end; begin end.'));
+  AssertTrue('a missing argument with no default still fails',
+    Pos('TA.F', SemanticError(Head +
+    'function TA.F(A: Integer; B: Integer): Integer; begin Result := A end; ' +
+    'procedure TA.Q(A: Integer; B: Integer); begin end; ' +
+    'procedure TA.Run(); begin end; begin N := X.F() end.')) >= 0);
+end;
 
 initialization
   RegisterTest(TDefaultArgsTests);

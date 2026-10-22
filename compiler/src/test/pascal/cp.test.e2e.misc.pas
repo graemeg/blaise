@@ -149,6 +149,10 @@ type
     { Default parameters }
     procedure TestRun_DefaultParam_OmitLast;
     procedure TestRun_DefaultParam_OmitMultiple;
+    { a function method through a receiver (Self.F(1), X.F(1)), a generic
+      method and inherited calls take their omitted trailing arguments from
+      the declared defaults (they failed to compile) }
+    procedure TestRun_DefaultParam_MethodCallForms;
 
     { var / const params }
     procedure TestRun_VarParam_SwapIntegers;
@@ -1684,6 +1688,54 @@ procedure TE2EMiscTests.TestRun_DefaultParam_OmitLast;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcDefaultParam, '15' + LE + '25' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_DefaultParam_MethodCallForms;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    type
+      TBase = class
+        function F(A: Integer; B: Integer = 5): Integer; virtual;
+        procedure Q(A: Integer; B: Integer = 5); virtual;
+      end;
+      TA = class(TBase)
+        function F(A: Integer; B: Integer = 50): Integer; override;
+        procedure Q(A: Integer; B: Integer = 50); override;
+        function G<T>(A: T; B: Integer = 7): Integer;
+        function H(A: Integer; S: string = 'dflt'): string;
+        procedure Run();
+      end;
+    function TBase.F(A: Integer; B: Integer): Integer; begin Result := A + B end;
+    procedure TBase.Q(A: Integer; B: Integer); begin WriteLn('base q ', A + B) end;
+    function TA.F(A: Integer; B: Integer): Integer;
+    begin
+      Result := inherited F(A) * 100 + B
+    end;
+    procedure TA.Q(A: Integer; B: Integer);
+    begin
+      inherited Q(A);
+      WriteLn('q ', A + B)
+    end;
+    function TA.G<T>(A: T; B: Integer): Integer; begin Result := B end;
+    function TA.H(A: Integer; S: string): string; begin Result := S + IntToStr(A) end;
+    procedure TA.Run();
+    begin
+      WriteLn(Self.F(1), ' ', Self.H(2), ' ', Self.H(3, 'x'))
+    end;
+    var X: TA;
+    begin
+      X := TA.Create();
+      X.Run();
+      WriteLn(X.F(2), ' ', X.F(2, 3), ' ', X.G<Integer>(1), ' ', X.H(4));
+      X.Q(1)
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src,
+    '650 dflt2 x3' + LineEnding + '750 703 7 dflt4' + LineEnding +
+    'base q 6' + LineEnding + 'q 51' + LineEnding, 0);
 end;
 
 procedure TE2EMiscTests.TestRun_DefaultParam_OmitMultiple;
