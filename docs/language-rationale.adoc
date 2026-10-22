@@ -3747,6 +3747,12 @@ them): when the last reference to the array goes, every element is released.
 A nil pointer (zero value) represents an unassigned array.  The variable slot
 is 8 bytes on all platforms (a pointer).
 
+Because an empty array is nil, `nil` is a dynamic-array value, as in FPC and
+Delphi: `A := nil` drops this variable's reference exactly as
+`SetLength(A, 0)` does, `nil` may be passed or returned where a dynamic
+array is expected, and `A = nil` / `A <> nil` test for emptiness.  A static
+array is storage rather than a reference, so it still rejects `nil`.
+
 Supported built-ins::
 * `SetLength(A, N)` — resize the array to `N` elements, keeping the first
   `min(old, N)`.  Shrinking releases the dropped elements; `SetLength(A, 0)`

@@ -2098,8 +2098,9 @@ begin
       ALine, ACol);
   if AExpected = nil then
     Exit;
-  { nil is compatible with any class, interface, pointer, PChar, or string type }
-  if (AActual.Kind = tyNil) and (AExpected.Kind in [tyClass, tyInterface, tyPointer, tyPChar, tyString, tyProcedural]) then
+  { nil is compatible with any class, interface, pointer, PChar, string,
+    procedural or dynamic-array type (nil empties a dynamic array) }
+  if (AActual.Kind = tyNil) and (AExpected.Kind in [tyClass, tyInterface, tyPointer, tyPChar, tyString, tyProcedural, tyDynArray]) then
     Exit;
   { Two pointer types are compatible when:
       - either is untyped (Pointer), or
@@ -19766,7 +19767,8 @@ begin
         Format('Operator ''%s'' is not defined for static-array type ''%s''',
           [BinaryOpName(ABin.Op), OpType.Name])));
     end;
-    { nil can be compared with class, interface, pointer, or PChar types }
+    { nil can be compared with class, interface, pointer, PChar or
+      dynamic-array types (an empty dynamic array is nil) }
     if not (
       (LType = RType) or
       { Float comparisons: Single/Double are compatible with each other }
@@ -19774,8 +19776,8 @@ begin
       { Integer/float mixing in comparisons is allowed (integer promotes) }
       (LType.IsFloat() and RType.IsNumeric()) or
       (RType.IsFloat() and LType.IsNumeric()) or
-      ((LType.Kind = tyNil) and (RType.Kind in [tyClass, tyInterface, tyPointer, tyPChar])) or
-      ((RType.Kind = tyNil) and (LType.Kind in [tyClass, tyInterface, tyPointer, tyPChar])) or
+      ((LType.Kind = tyNil) and (RType.Kind in [tyClass, tyInterface, tyPointer, tyPChar, tyDynArray])) or
+      ((RType.Kind = tyNil) and (LType.Kind in [tyClass, tyInterface, tyPointer, tyPChar, tyDynArray])) or
       ((LType.Kind = tyPointer) and (RType.Kind = tyPointer)) or
       { Class comparisons: allow subtype on either side }
       ((LType.Kind = tyClass) and (RType.Kind = tyClass) and

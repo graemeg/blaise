@@ -72,6 +72,11 @@ type
     { ------------------------------------------------------------------ }
     procedure TestCodegen_DynArray_VarParamStore_ReleasesThroughAddress;
     procedure TestCodegen_DynArray_SubscriptOfCallResult_ReleasesIt;
+
+    { nil empties a dynamic array: assignment, argument, result and
+      comparison; a static array still rejects nil }
+    procedure TestSemantic_DynArray_NilAssignCompare_Accepted;
+    procedure TestSemantic_StaticArray_NilAssign_Rejected;
   end;
 
 implementation
@@ -444,6 +449,39 @@ begin
     AsmMissing(Src, #9'callq _DynArraySetLengthM', #9'bl __DynArraySetLengthM'));
   AssertEquals('borrowed element retained', '',
     AsmMissing(Src, #9'callq _StringAddRef', #9'bl __StringAddRef'));
+end;
+
+procedure TDynArrayTests.TestSemantic_DynArray_NilAssignCompare_Accepted;
+var Prog: TProgram;
+begin
+  Prog := AnalyseSrc('''
+      program Prg;
+      type TIA = array of Integer;
+      var A: TIA; B: Boolean;
+      function Count(X: TIA): Integer; begin Result := Length(X) end;
+      function None: TIA; begin Result := nil end;
+      begin
+        A := nil;
+        B := (A = nil) or (nil <> A);
+        Count(nil);
+        A := None();
+      end.
+      ''');
+  AssertNotNil('nil accepted for a dynamic array', Prog);
+  Prog.Free();
+end;
+
+procedure TDynArrayTests.TestSemantic_StaticArray_NilAssign_Rejected;
+var Raised: Boolean;
+begin
+  Raised := False;
+  try
+    AnalyseSrc('program Prg; var A: array[0..2] of Integer; ' +
+      'begin A := nil end.').Free();
+  except
+    on E: ESemanticError do Raised := True;
+  end;
+  AssertTrue('nil into a static array rejected', Raised);
 end;
 
 initialization

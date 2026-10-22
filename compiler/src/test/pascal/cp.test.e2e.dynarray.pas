@@ -107,6 +107,10 @@ type
       The --debug tracker cannot see these: a fresh array is tracked only on
       its 0 -> 1 retain. }
     procedure TestRun_OwnedDynArrayTransients_Released;
+    { A := nil releases the array (and its managed elements) and leaves it
+      empty, through every storage form; nil is also an argument, a result
+      and a comparison operand }
+    procedure TestRun_DynArray_NilAssign_EveryForm;
   end;
 
 implementation
@@ -1285,6 +1289,85 @@ begin
   AssertRunsOnAll(Src,
     'ints 2' + #10 + 'strs 3' + #10 + 'pair 7' + #10 + 'trio 9' + #10 +
     'a' + #10 + 'b' + #10, 0);
+end;
+
+procedure TE2EDynArrayTests.TestRun_DynArray_NilAssign_EveryForm;
+const
+  Src =
+    '''
+    program P;
+    type
+      TIA = array of Integer;
+      TSA = array of string;
+      THolder = class
+        F: TSA;
+      end;
+      TRec = record
+        R: TIA;
+      end;
+    var
+      G: TIA;
+      GS: TSA;
+      H: THolder;
+      Rc: TRec;
+      Nested: array of TIA;
+
+    function Count(A: TIA): Integer;
+    begin
+      Result := Length(A)
+    end;
+
+    function MakeNil(N: Integer): TIA;
+    begin
+      SetLength(Result, N);
+      Result := nil
+    end;
+
+    procedure Clear(var A: TSA);
+    begin
+      A := nil
+    end;
+
+    procedure Local;
+    var L: TSA;
+    begin
+      SetLength(L, 2);
+      L[0] := 'x' + IntToStr(1);
+      L := nil;
+      WriteLn('local ', Length(L))
+    end;
+
+    begin
+      SetLength(G, 3);
+      G := nil;
+      WriteLn(Length(G), ' ', G = nil, ' ', nil <> G);
+      SetLength(GS, 2);
+      GS[1] := 'abc' + IntToStr(2);
+      Clear(GS);
+      WriteLn(Length(GS));
+      WriteLn(Count(nil), ' ', Length(MakeNil(4)));
+      H := THolder.Create();
+      SetLength(H.F, 5);
+      H.F := nil;
+      WriteLn(Length(H.F));
+      SetLength(Rc.R, 2);
+      Rc.R := nil;
+      WriteLn(Length(Rc.R));
+      SetLength(Nested, 2);
+      SetLength(Nested[1], 3);
+      Nested[1] := nil;
+      WriteLn(Length(Nested[1]), ' ', Length(Nested));
+      Local();
+      SetLength(G, 1);
+      WriteLn(G <> nil)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '0 True False' + #10 + '0' + #10 + '0 0' + #10 + '0' + #10 + '0' + #10 +
+    '0 2' + #10 + 'local 0' + #10 + 'True' + #10, 0);
+  AssertLeakFreeOnAll(Src, 'local 0');
 end;
 
 initialization
