@@ -87,6 +87,10 @@ type
     { a generic function instance called more than once ("Ambiguous
       overload" on the second call) }
     procedure TestRun_GenericFunc_CalledTwice;
+    { GH #217: generic procedures and a discarded generic function called as
+      statements -- one and two type parameters, var parameters, after
+      `if` -- (it was "Bare reference to 'GenericProc' requires ()") }
+    procedure TestRun_GenericProcedure_CalledAsStatement;
   end;
 
 implementation
@@ -1171,6 +1175,51 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '16 2 abab abababab' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericProcedure_CalledAsStatement;
+const
+  Src = '''
+    program P;
+    type
+      TPair<K, V> = record Key: K; Val: V; end;
+    procedure GenericProc<T>(a, b: T);
+    begin
+      WriteLn(a, ' ', b)
+    end;
+    procedure Swap<T>(var a, b: T);
+    var t: T;
+    begin
+      t := a; a := b; b := t
+    end;
+    function Twice<T>(a: T): T;
+    begin
+      Result := a + a
+    end;
+    procedure Show<K, V>(const P: TPair<K, V>);
+    begin
+      WriteLn(P.Key, '=', P.Val)
+    end;
+    var X, Y: Integer; S1, S2: string; Pr: TPair<string, Integer>;
+    begin
+      GenericProc<Integer>(10, 11);
+      GenericProc<string>('x', 'y');
+      X := 1; Y := 2;
+      Swap<Integer>(X, Y);
+      S1 := 'a'; S2 := 'b';
+      Swap<string>(S1, S2);
+      WriteLn(X, Y, S1, S2);
+      Twice<Integer>(4);
+      WriteLn(Twice<Integer>(4));
+      Pr.Key := 'k'; Pr.Val := 9;
+      Show<string, Integer>(Pr);
+      if X > 1 then GenericProc<Integer>(7, 8)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '10 11' + LE + 'x y' + LE + '21ba' + LE + '8' + LE +
+    'k=9' + LE + '7 8' + LE, 0);
 end;
 
 initialization

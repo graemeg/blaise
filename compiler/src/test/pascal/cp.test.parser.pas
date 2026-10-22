@@ -32,6 +32,9 @@ type
       Buf[0]^[1] := V, Buf[0]^ := V, Recs[0]^.A := V -- parses (it was
       "Expected '.' or ':=' after subscript") }
     procedure TestParse_DerefAfterSubscript_Statements;
+    { GH #217: a statement calling a generic routine keeps the type
+      arguments in the call's name, as an expression does }
+    procedure TestParse_GenericCallStatement_KeepsTypeArgs;
     { FPC/Delphi constructs Blaise deliberately omits are recognised and
       rejected with the Blaise form ("recognise, reject, explain";
       language-rationale.adoc).  They used to fail with an unrelated
@@ -1146,6 +1149,25 @@ begin
       (Sub.IndexExpr <> nil));
     AssertTrue('A.B.Handlers[I](X) is a call through the element',
       Prog.Block.Stmts.Items[2] is TExprCallStmt);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestParse_GenericCallStatement_KeepsTypeArgs;
+var
+  Prog: TProgram;
+begin
+  Prog := ParseSource(
+    'program P; var A: Integer;'
+    + ' begin GenericProc<Integer>(A, 2); Show<string, Integer>(A) end.');
+  try
+    AssertTrue('a call statement',
+      Prog.Block.Stmts.Items[0] is TProcCall);
+    AssertEquals('one type argument', 'GenericProc<Integer>',
+      TProcCall(Prog.Block.Stmts.Items[0]).Name);
+    AssertEquals('two type arguments', 'Show<string,Integer>',
+      TProcCall(Prog.Block.Stmts.Items[1]).Name);
   finally
     Prog.Free();
   end;

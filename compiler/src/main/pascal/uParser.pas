@@ -5015,6 +5015,26 @@ begin
       or chained Ident(arg).Field.Method(args). Detect by peeking for
       '(' followed by a '.' after the paren closure — parse directly
       into a TFuncCallExpr receiver so the inner arg lives on. }
+    if GenericArgsAhead(0) then
+    begin
+      { a generic routine called as a statement, GenericProc<Integer>(1, 2);
+        -- the type arguments join the name, as in an expression, and the
+        semantic pass instantiates it (GH #217: "Bare reference to
+        'GenericProc' requires ()") }
+      Advance();  { consume '<' }
+      Name := Name + '<' + Self.ParseTypeName();
+      while Check(tkComma) do
+      begin
+        Advance();
+        Name := Name + ',' + Self.ParseTypeName();
+      end;
+      Expect(tkGreaterThan);
+      Name := Name + '>';
+      if not Check(tkLParen) then
+        raise EParseError.Create(Format(
+          'Expected ''('' after generic type arguments at line %d col %d in %s',
+          [FCurrent.Line, FCurrent.Col, FLexer.Filename]));
+    end;
     if Check(tkLParen) then
     begin
       FCallNode      := TFuncCallExpr.Create();
