@@ -2342,16 +2342,17 @@ required.
 
 == Iteration
 
-=== `for..in` Loop — Class-Based Enumerators
+=== `for..in` Loop — Enumerators
 
 ==== Decision
 
 Blaise supports `for X in Collection do` iteration via the _GetEnumerator
 protocol_, matching FPC and Delphi semantics exactly:
 
-. The collection expression must be a class instance.
-. The class must have a zero-argument method `GetEnumerator` returning a class.
-. The returned enumerator class must have a `MoveNext: Boolean` method and a
+. The collection expression must be a class, record or interface instance.
+. It must have a zero-argument method `GetEnumerator` returning a class, a
+  record or an interface.
+. The enumerator must have a `MoveNext: Boolean` method and a
   `Current: T` property whose getter yields the element type.
 . The loop variable must be compatible with the element type `T`.
 
@@ -2372,11 +2373,25 @@ The synthetic `__enum` variable is injected into the enclosing function's
 local variable scope by the semantic pass so that ARC scope-exit cleanup
 releases the enumerator automatically.
 
+A record enumerator is the allocation-free idiom: the enumerator lives in
+the synthetic variable itself, so a loop over a record collection with a
+record enumerator touches no heap at all.  An interface enumerator is
+released by ARC like any other interface reference.  Record and interface
+enumerators (and record or interface collections) are lowered by the
+semantic pass to exactly the loop above, built from ordinary assignment,
+method-call and `while` nodes (`TForInStmt.Lowered`), so both backends
+emit them with no enumerator-specific code.  A class collection with a
+class enumerator keeps its dedicated lowering.  Until 2026-10-22 only
+class collections with class enumerators were accepted.
+
 ==== What is supported
 
 * Class-based enumerators (Step 7a): any class with `GetEnumerator` /
   `MoveNext` / `Current` property — covers `TStringList`, `TObjectList`,
   and user-defined collections.
+* Record and interface enumerators, and record or interface collections:
+  any combination of a class, record or interface collection with a class,
+  record or interface enumerator.
 * Static arrays (Step 7b): `for X in Arr do` where `Arr: array[L..H] of T`
   uses index-based iteration; non-zero-based ranges are supported.
 * String byte iteration (Step 7c): `for B in S do` iterates the raw UTF-8

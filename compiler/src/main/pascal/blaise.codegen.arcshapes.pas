@@ -261,7 +261,7 @@ begin
     if ASet.IndexOf(TForInStmt(AStmt).VarName) < 0 then
       ASet.Add(TForInStmt(AStmt).VarName);
     CollectAddressTakenExpr(TForInStmt(AStmt).CollExpr, ASet);
-    CollectAddressTakenStmt(TForInStmt(AStmt).Body, ASet);
+    CollectAddressTakenStmt(TForInStmt(AStmt).WalkBody(), ASet);
   end
   else if AStmt is TAssignment then
     CollectAddressTakenExpr(TAssignment(AStmt).Expr, ASet)

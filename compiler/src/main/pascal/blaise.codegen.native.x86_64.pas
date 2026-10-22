@@ -16593,7 +16593,7 @@ begin
     Exit;
   end;
   if AStmt is TForInStmt then
-    Exit(Self.CountTryStmts(TForInStmt(AStmt).Body));
+    Exit(Self.CountTryStmts(TForInStmt(AStmt).WalkBody()));
   if AStmt is TCaseStmt then
   begin
     for I := 0 to TCaseStmt(AStmt).Branches.Count - 1 do
@@ -16671,7 +16671,7 @@ begin
     Exit;
   end;
   if AStmt is TForInStmt then
-    Exit(Self.CountForStmts(TForInStmt(AStmt).Body));
+    Exit(Self.CountForStmts(TForInStmt(AStmt).WalkBody()));
   if AStmt is TCaseStmt then
   begin
     for I := 0 to TCaseStmt(AStmt).Branches.Count - 1 do
@@ -18298,7 +18298,11 @@ begin
 
   if AStmt is TForInStmt then
   begin
-    Self.EmitForInStmt(TForInStmt(AStmt));
+    { a record / interface enumerator loop was lowered to a while loop }
+    if TForInStmt(AStmt).Lowered <> nil then
+      Self.EmitStmt(TForInStmt(AStmt).Lowered)
+    else
+      Self.EmitForInStmt(TForInStmt(AStmt));
     Exit;
   end;
 
@@ -21980,7 +21984,7 @@ begin
   else if AStmt is TForInStmt then
   begin
     Result := InlineNeedExprD(TForInStmt(AStmt).CollExpr, ADepth);
-    N := InlineNeedStmtD(TForInStmt(AStmt).Body, ADepth);
+    N := InlineNeedStmtD(TForInStmt(AStmt).WalkBody(), ADepth);
     if N > Result then Result := N;
   end
   else if AStmt is TAssignment then

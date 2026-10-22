@@ -8232,7 +8232,11 @@ begin
   end;
   if AStmt is TForInStmt then
   begin
-    EmitForIn(TForInStmt(AStmt));
+    { a record / interface enumerator loop was lowered to a while loop }
+    if TForInStmt(AStmt).Lowered <> nil then
+      Self.EmitStmt(TForInStmt(AStmt).Lowered)
+    else
+      EmitForIn(TForInStmt(AStmt));
     Exit;
   end;
   if AStmt is TPointerWriteStmt then
@@ -13396,7 +13400,7 @@ begin
   end;
   if AStmt is TForInStmt then
   begin
-    RegisterForSlots(TForInStmt(AStmt).Body);
+    RegisterForSlots(TForInStmt(AStmt).WalkBody());
     Exit;
   end;
   { try bodies can hold for statements too — skipping them here would
@@ -13513,7 +13517,7 @@ begin
     if N > Result then Result := N;
   end
   else if AStmt is TForInStmt then
-    Result := MaxManagedRecRet(TForInStmt(AStmt).Body)
+    Result := MaxManagedRecRet(TForInStmt(AStmt).WalkBody())
   else if AStmt is TTryFinallyStmt then
   begin
     { an undersized __rret for an assignment inside a try body would be a

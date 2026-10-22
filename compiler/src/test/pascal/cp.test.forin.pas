@@ -129,6 +129,19 @@ type
     procedure TestSemantic_StringForIn_NonOrdinalVar_RaisesError;
     procedure TestSemantic_StringForIn_WordVar_RaisesError;
     procedure TestSemantic_StringForIn_SmallIntVar_RaisesError;
+
+    { ------------------------------------------------------------------ }
+    { Record and interface enumerators                                     }
+    { ------------------------------------------------------------------ }
+    { a record collection with a record enumerator, and a class whose
+      GetEnumerator returns an interface, are lowered to a while loop over
+      a synthetic enumerator (TForInStmt.Lowered); a record without
+      GetEnumerator is reported; a write to the loop variable in a lowered
+      loop is still diagnosed }
+    procedure TestSemantic_RecordEnumerator_Lowered;
+    procedure TestSemantic_InterfaceEnumerator_Lowered;
+    procedure TestSemantic_RecordWithoutGetEnumerator_RaisesError;
+    procedure TestSemantic_LoweredLoopVarWrite_Warns;
   end;
 
 implementation
@@ -844,6 +857,98 @@ begin
             N := 0
         end.
         ''');
+end;
+
+const
+  SrcRecordEnumHead =
+    '''
+        program P;
+        type
+          TRangeEnum = record
+            Cur, Last: Integer;
+            function MoveNext(): Boolean;
+            function GetCurrent(): Integer;
+            property Current: Integer read GetCurrent;
+          end;
+          TRange = record
+            Lo, Hi: Integer;
+            function GetEnumerator(): TRangeEnum;
+          end;
+        function TRangeEnum.MoveNext(): Boolean; begin Cur := Cur + 1; Result := Cur <= Last end;
+        function TRangeEnum.GetCurrent(): Integer; begin Result := Cur end;
+        function TRange.GetEnumerator(): TRangeEnum; begin Result.Cur := Lo - 1; Result.Last := Hi end;
+        var R: TRange; X: Integer;
+        begin
+          for X in R do
+    ''';
+  SrcRecordEnumTail = LineEnding + 'end.';
+
+procedure TForInTests.TestSemantic_RecordEnumerator_Lowered;
+var
+  Prog: TProgram;
+  FI: TForInStmt;
+begin
+  Prog := AnalyseSrc(SrcRecordEnumHead + 'WriteLn(X)' + SrcRecordEnumTail);
+  try
+    FI := TForInStmt(Prog.Block.Stmts.Items[0]);
+    AssertNotNil('record enumerator loop is lowered', FI.Lowered);
+    AssertEquals('loop variable type', 'Integer', FI.ResolvedVarType.Name);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TForInTests.TestSemantic_InterfaceEnumerator_Lowered;
+var
+  Prog: TProgram;
+  FI: TForInStmt;
+begin
+  Prog := AnalyseSrc(
+    '''
+        program P;
+        type
+          IIntEnum = interface
+            function MoveNext(): Boolean;
+            function GetCurrent(): Integer;
+            property Current: Integer read GetCurrent;
+          end;
+          TIntColl = class
+            function GetEnumerator(): IIntEnum;
+          end;
+        function TIntColl.GetEnumerator(): IIntEnum; begin Result := nil end;
+        var C: TIntColl; X: Integer;
+        begin
+          for X in C do
+            WriteLn(X)
+        end.
+        ''');
+  try
+    FI := TForInStmt(Prog.Block.Stmts.Items[0]);
+    AssertNotNil('interface enumerator loop is lowered', FI.Lowered);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TForInTests.TestSemantic_RecordWithoutGetEnumerator_RaisesError;
+begin
+  AnalyseExpectError(
+    '''
+        program P;
+        type TR = record A: Integer; end;
+        var R: TR; X: Integer;
+        begin
+          for X in R do
+            WriteLn(X)
+        end.
+        ''');
+end;
+
+procedure TForInTests.TestSemantic_LoweredLoopVarWrite_Warns;
+begin
+  AssertTrue('write to the loop variable is diagnosed',
+    Pos('loop variable', AnalyseWarnings(
+      SrcRecordEnumHead + 'X := 0' + SrcRecordEnumTail)) >= 0);
 end;
 
 { ------------------------------------------------------------------ }

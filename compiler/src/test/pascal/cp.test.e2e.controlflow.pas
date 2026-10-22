@@ -30,6 +30,11 @@ type
       array is held for the loop, so the body may resize the original. }
     procedure TestRun_ForIn_CollectionThroughCall_EvaluatedOnce;
     procedure TestRun_ForIn_AllCollectionKinds;
+    { for-in over a record with a record enumerator (nested, through a
+      call, empty), a class with an interface enumerator (Continue, managed
+      Current), a record enumerator with a managed field reached through an
+      interface collection, at program level and in a procedure; leak-free }
+    procedure TestRun_ForIn_RecordAndInterfaceEnumerators;
     procedure TestRun_Case_SelectsBranch;
     procedure TestRun_BreakAndExit;
     procedure TestRun_Repeat_BodyRunsBeforeTest;
@@ -1036,6 +1041,136 @@ begin
     '0 2 ' + LE +
     'item-1 item-2 item-3 ' + LE, 0);
   AssertLeakFreeOnAll(Src, 'item-3');
+end;
+
+procedure TE2EControlFlowTests.TestRun_ForIn_RecordAndInterfaceEnumerators;
+const
+  Src = '''
+    program P;
+    type
+      TRangeEnum = record
+        Cur, Last: Integer;
+        function MoveNext(): Boolean;
+        function GetCurrent(): Integer;
+        property Current: Integer read GetCurrent;
+      end;
+      TRange = record
+        Lo, Hi: Integer;
+        function GetEnumerator(): TRangeEnum;
+      end;
+      IWordEnum = interface
+        function MoveNext(): Boolean;
+        function GetCurrent(): string;
+        property Current: string read GetCurrent;
+      end;
+      TWordEnum = class(TObject, IWordEnum)
+        Words: array of string;
+        N: Integer;
+        function MoveNext(): Boolean;
+        function GetCurrent(): string;
+      end;
+      TWords = class
+        Items: array of string;
+        function GetEnumerator(): IWordEnum;
+      end;
+      { a record enumerator carrying a managed field }
+      TTagEnum = record
+        Prefix: string;
+        N: Integer;
+        function MoveNext(): Boolean;
+        function GetCurrent(): string;
+        property Current: string read GetCurrent;
+      end;
+      ITagged = interface
+        function GetEnumerator(): TTagEnum;
+      end;
+      TTagged = class(TObject, ITagged)
+        function GetEnumerator(): TTagEnum;
+      end;
+    var
+      Calls: Integer;
+
+    function TRangeEnum.MoveNext(): Boolean; begin Cur := Cur + 1; Result := Cur <= Last end;
+    function TRangeEnum.GetCurrent(): Integer; begin Result := Cur end;
+    function TRange.GetEnumerator(): TRangeEnum; begin Result.Cur := Lo - 1; Result.Last := Hi end;
+    function TWordEnum.MoveNext(): Boolean; begin N := N + 1; Result := N <= Length(Words) end;
+    function TWordEnum.GetCurrent(): string; begin Result := Words[N - 1] + '!' end;
+    function TWords.GetEnumerator(): IWordEnum;
+    var E: TWordEnum;
+    begin
+      E := TWordEnum.Create();
+      E.Words := Items;
+      Result := E
+    end;
+    function TTagEnum.MoveNext(): Boolean; begin N := N + 1; Result := N <= 3 end;
+    function TTagEnum.GetCurrent(): string; begin Result := Prefix + IntToStr(N) end;
+    function TTagged.GetEnumerator(): TTagEnum; begin Result.Prefix := 'tag' + '-'; Result.N := 0 end;
+
+    function MakeRange(L, H: Integer): TRange;
+    begin
+      Calls := Calls + 1;
+      Result.Lo := L;
+      Result.Hi := H
+    end;
+
+    procedure InProc(W: TWords);
+    var S: string; X: Integer; T: ITagged;
+    begin
+      for S in W do
+      begin
+        if S = 'b!' then Continue;
+        Write(S, ' ')
+      end;
+      WriteLn();
+      for X in MakeRange(1, 9) do
+      begin
+        if X > 3 then Break;
+        Write(X, ' ')
+      end;
+      WriteLn('calls ', Calls);
+      T := TTagged.Create();
+      for S in T do Write(S, ' ');
+      WriteLn()
+    end;
+
+    var
+      R: TRange;
+      X, Y: Integer;
+      W: TWords;
+      S: string;
+    begin
+      R.Lo := 2;
+      R.Hi := 4;
+      for X in R do Write(X, ' ');
+      WriteLn();
+      for X in R do
+        for Y in MakeRange(10, 11) do
+          Write(X * 100 + Y, ' ');
+      WriteLn();
+      W := TWords.Create();
+      SetLength(W.Items, 3);
+      W.Items[0] := 'a';
+      W.Items[1] := 'b';
+      W.Items[2] := 'c';
+      for S in W do Write(S, ' ');
+      WriteLn();
+      InProc(W);
+      R.Hi := 1;
+      for X in R do Write('never');
+      WriteLn('done')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '2 3 4 ' + LE +
+    '210 211 310 311 410 411 ' + LE +
+    'a! b! c! ' + LE +
+    'a! c! ' + LE +
+    '1 2 3 calls 4' + LE +
+    'tag-1 tag-2 tag-3 ' + LE +
+    'done' + LE, 0);
+  AssertLeakFreeOnAll(Src, 'done');
 end;
 
 procedure TE2EControlFlowTests.TestRun_ForIn_CollectionThroughCall_EvaluatedOnce;

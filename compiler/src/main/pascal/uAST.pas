@@ -409,6 +409,14 @@ type
     SetIsJumbo:           Boolean;   { True when the set is >64 members: the slot
                                        holds a pointer and membership is tested via
                                        the _SetIn RTL helper, not a register shift }
+    { Record / interface enumerator path: the semantic pass lowers the loop
+      to  E := Coll.GetEnumerator(); while E.MoveNext() do begin
+      X := E.Current; Body end  over a synthetic enumerator variable, and
+      codegen emits that instead.  Body is shared with the lowered tree. }
+    Lowered:              TASTStmt;  { owned -- nil on every other path }
+    { The statement a tree walker should visit for this loop: the lowered
+      form when there is one (it holds the enumerator calls too), else Body. }
+    function WalkBody: TASTStmt;
     destructor Destroy; override;
   end;
 
@@ -1727,6 +1735,14 @@ begin
 end;
 
 { TForInStmt }
+
+function TForInStmt.WalkBody: TASTStmt;
+begin
+  if Lowered <> nil then
+    Result := Lowered
+  else
+    Result := Body;
+end;
 
 destructor TForInStmt.Destroy;
 begin

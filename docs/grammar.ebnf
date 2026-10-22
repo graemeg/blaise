@@ -1214,8 +1214,9 @@ ForStmt
 (* FOR IDENT IN Expr is an enhanced for loop.  The element type depends on
  * the collection expression:
  *   - Static array (array[L..H] of T):  IDENT must be compatible with T.
- *   - Class with GetEnumerator protocol: IDENT must be compatible with
- *     the Current property type of the enumerator.
+ *   - Class, record or interface with the GetEnumerator protocol (the
+ *     enumerator itself a class, record or interface): IDENT must be
+ *     compatible with the Current property type of the enumerator.
  *   - String: IDENT type selects iteration mode:
  *       * Byte — iterates raw UTF-8 bytes (one byte per iteration).
  *       * Integer — iterates Unicode codepoints (one codepoint per

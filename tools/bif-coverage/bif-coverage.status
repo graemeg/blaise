@@ -165,6 +165,7 @@ TForInStmt.IsSetIter  safe
 TForInStmt.SetBitCount  safe
 TForInStmt.SetMaskVarName  safe
 TForInStmt.SetIsJumbo  safe
+TForInStmt.Lowered  safe
 
 # TTryFinallyStmt (uAST.pas:407)
 TTryFinallyStmt.TryBody  serialise

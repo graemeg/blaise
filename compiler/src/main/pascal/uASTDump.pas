@@ -498,7 +498,9 @@ begin
     Inc(IndentLevel);
     DumpExpr(TForInStmt(AStmt).CollExpr);
     Dec(IndentLevel);
-    DumpStmt(TForInStmt(AStmt).Body);
+    if TForInStmt(AStmt).Lowered <> nil then
+      Line('Lowered:');
+    DumpStmt(TForInStmt(AStmt).WalkBody());
     Dec(IndentLevel);
     Exit;
   end;

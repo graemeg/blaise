@@ -494,6 +494,14 @@ type
     procedure AnalyseVarInitializer(ADecl: TVarDecl; AIsInterface: Boolean = False);
     function  SynthAnonEnum(const AMemberList: string): TEnumTypeDesc;
     procedure AnalyseStmts(ABlock: TBlock);
+    { for X in C over a record or interface collection, or a class whose
+      GetEnumerator returns a record or interface: lower the loop to
+      E := C.GetEnumerator(); while E.MoveNext() do begin X := E.Current;
+      Body end  (TForInStmt.Lowered) and analyse that.  AColl is an
+      unanalysed copy of the collection expression.  False when the loop
+      takes another path (a class enumerator, an array, a string, a set). }
+    function LowerForInEnumerator(AStmt: TForInStmt; ACollType: TTypeDesc;
+      AColl: TASTExpr): Boolean;
     procedure AnalyseStmt(AStmt: TASTStmt);
     procedure AnalyseStmtCore(AStmt: TASTStmt);
     { Generic-instance availability (see FUnavailCallers).  NoteRoutineUse
@@ -12223,6 +12231,161 @@ begin
   end;
 end;
 
+function TSemanticAnalyser.LowerForInEnumerator(AStmt: TForInStmt;
+  ACollType: TTypeDesc; AColl: TASTExpr): Boolean;
+var
+  EnumType:   TTypeDesc;
+  GetE:       TMethodDecl;
+  Intf:       TInterfaceTypeDesc;
+  Idx:        Integer;
+  EnumName:   string;
+  SynthDecl:  TVarDecl;
+  Sym:        TSymbol;
+  VarSym:     TSymbol;
+  GetCall:    TMethodCallExpr;
+  MoveCall:   TMethodCallExpr;
+  CurRead:    TFieldAccessExpr;
+  InitAssign: TAssignment;
+  CurAssign:  TAssignment;
+  Loop:       TWhileStmt;
+  LoopBody:   TCompoundStmt;
+  Outer:      TCompoundStmt;
+  CondType:   TTypeDesc;
+begin
+  Result := False;
+  EnumType := nil;
+  if ACollType.Kind in [tyRecord, tyClass] then
+  begin
+    GetE := FindMethodDecl(TRecordTypeDesc(ACollType).Name, 'GetEnumerator');
+    if GetE <> nil then
+      EnumType := GetE.ResolvedReturnType;
+  end
+  else if ACollType.Kind = tyInterface then
+  begin
+    Intf := TInterfaceTypeDesc(ACollType);
+    while (Intf <> nil) and (EnumType = nil) do
+    begin
+      Idx := Intf.MethodIndex('GetEnumerator');
+      if (Idx >= 0) and (Intf.MethodReturnTypeName(Idx) <> '') then
+        EnumType := FindTypeOrInstantiate(Intf.MethodReturnTypeName(Idx));
+      Intf := Intf.Parent;
+    end;
+  end
+  else
+    Exit;
+  { a class collection with a class enumerator keeps its dedicated path,
+    which also reports a missing GetEnumerator }
+  if (ACollType.Kind = tyClass) and
+     ((EnumType = nil) or (EnumType.Kind = tyClass)) then
+    Exit;
+  if EnumType = nil then
+    SemanticError(
+      Format('''%s'' does not have a GetEnumerator method', [ACollType.Name]),
+      AStmt.Line, AStmt.Col);
+  if not (EnumType.Kind in [tyClass, tyRecord, tyInterface]) then
+    SemanticError(
+      Format('GetEnumerator on ''%s'' must return a class, record or interface',
+        [ACollType.Name]), AStmt.Line, AStmt.Col);
+
+  VarSym := FTable.Lookup(AStmt.VarName);
+  if VarSym = nil then
+    SemanticError(
+      Format('Undeclared loop variable ''%s''', [AStmt.VarName]),
+      AStmt.Line, AStmt.Col);
+  AStmt.VarName := VarSym.Name;  { normalise to declared casing }
+  if VarSym.Kind <> skVariable then
+    SemanticError(
+      Format('''%s'' is not a variable', [AStmt.VarName]),
+      AStmt.Line, AStmt.Col);
+  if FCurrentLocalBlock = nil then
+    SemanticError('for-in over an enumerator is not supported here',
+      AStmt.Line, AStmt.Col);
+
+  { The enumerator lives in a synthetic variable: a global at program level
+    (as the class-enumerator path's slot is), a local otherwise.  Its scope
+    exit releases it, or its managed fields for a record enumerator. }
+  EnumName := '__forin_' + IntToStr(FForInCounter);
+  Inc(FForInCounter);
+  SynthDecl := TVarDecl.Create();
+  SynthDecl.Line := AStmt.Line;
+  SynthDecl.Col := AStmt.Col;
+  SynthDecl.Names.Add(EnumName);
+  SynthDecl.TypeName := EnumType.Name;
+  SynthDecl.ResolvedType := EnumType;
+  SynthDecl.IsGlobal := FScopeDepth = 1;
+  FCurrentLocalBlock.Decls.Add(SynthDecl);
+  Sym := TSymbol.Create(EnumName, skVariable, EnumType);
+  Sym.IsGlobal := SynthDecl.IsGlobal;
+  if not FTable.Define(Sym) then
+    Sym.Free();
+
+  { E := Coll.GetEnumerator() }
+  GetCall := TMethodCallExpr.Create();
+  GetCall.Line := AStmt.Line;
+  GetCall.Col := AStmt.Col;
+  GetCall.ObjExpr := AColl;
+  GetCall.Name := 'GetEnumerator';
+  InitAssign := TAssignment.Create();
+  InitAssign.Line := AStmt.Line;
+  InitAssign.Col := AStmt.Col;
+  InitAssign.Name := EnumName;
+  InitAssign.Expr := GetCall;
+  { while E.MoveNext() do }
+  MoveCall := TMethodCallExpr.Create();
+  MoveCall.Line := AStmt.Line;
+  MoveCall.Col := AStmt.Col;
+  MoveCall.ObjectName := EnumName;
+  MoveCall.Name := 'MoveNext';
+  { X := E.Current }
+  CurRead := TFieldAccessExpr.Create();
+  CurRead.Line := AStmt.Line;
+  CurRead.Col := AStmt.Col;
+  CurRead.RecordName := EnumName;
+  CurRead.FieldName := 'Current';
+  CurAssign := TAssignment.Create();
+  CurAssign.Line := AStmt.Line;
+  CurAssign.Col := AStmt.Col;
+  CurAssign.Name := AStmt.VarName;
+  CurAssign.Expr := CurRead;
+  LoopBody := TCompoundStmt.Create();
+  LoopBody.Line := AStmt.Line;
+  LoopBody.Col := AStmt.Col;
+  LoopBody.Stmts.Add(CurAssign);
+  LoopBody.Stmts.Add(AStmt.Body);
+  Loop := TWhileStmt.Create();
+  Loop.Line := AStmt.Line;
+  Loop.Col := AStmt.Col;
+  Loop.Condition := MoveCall;
+  Loop.Body := LoopBody;
+  Outer := TCompoundStmt.Create();
+  Outer.Line := AStmt.Line;
+  Outer.Col := AStmt.Col;
+  Outer.Stmts.Add(InitAssign);
+  Outer.Stmts.Add(Loop);
+  AStmt.Lowered := Outer;
+
+  { Analyse the pieces in place of the while statement, so the loop
+    variable is tracked (a write to it in the body is diagnosed) only
+    around the user's body, not the synthesised X := E.Current. }
+  Self.AnalyseStmt(InitAssign);
+  CondType := Self.AnalyseExprSlot(MoveCall);
+  if (CondType = nil) or (CondType.Kind <> tyBoolean) then
+    SemanticError(
+      Format('MoveNext on enumerator ''%s'' must return Boolean',
+        [EnumType.Name]), AStmt.Line, AStmt.Col);
+  Self.AnalyseStmt(CurAssign);
+  AStmt.ResolvedVarType := CurRead.ResolvedType;
+  Inc(FLoopDepth);
+  FForInLoopVars.Add(AStmt.VarName);
+  try
+    Self.AnalyseStmt(AStmt.Body);
+  finally
+    FForInLoopVars.Delete(FForInLoopVars.Count - 1);
+    Dec(FLoopDepth);
+  end;
+  Result := True;
+end;
+
 procedure TSemanticAnalyser.AnalyseStmt(AStmt: TASTStmt);
 begin
   Self.AnalyseStmtCore(AStmt);
@@ -12346,6 +12509,7 @@ var
   SavedBlockSite: TObject;
   ForS:   TForStmt;
   ForInS: TForInStmt;
+  CollClone: TASTExpr;
   WS:     TWhileStmt;
   RS:     TRepeatStmt;
   TFS:    TTryFinallyStmt;
@@ -12421,6 +12585,8 @@ begin
   else if AStmt is TForInStmt then
   begin
     ForInS := TForInStmt(AStmt);
+    { an unanalysed copy, for an enumerator loop that is lowered }
+    CollClone := CloneExpr(ForInS.CollExpr);
 
     { 1. Analyse the collection expression }
     CollType := Self.AnalyseExprSlot(ForInS.CollExpr);
@@ -12428,7 +12594,9 @@ begin
       SemanticError('for-in collection has unknown type',
         ForInS.Line, ForInS.Col);
 
-    if CollType.Kind = tyStaticArray then
+    if Self.LowerForInEnumerator(ForInS, CollType, CollClone) then
+      { record / interface enumerator: lowered and analysed, body included }
+    else if CollType.Kind = tyStaticArray then
     begin
       { ---- Static array iteration path ---- }
       ElemType := TStaticArrayTypeDesc(CollType).ElementType;
@@ -12748,20 +12916,23 @@ begin
     end
     else
       SemanticError(
-        'for-in collection must be a class instance, static array, dynamic array, open array, string, or set',
+        'for-in collection must be a class, record or interface instance, static array, dynamic array, open array, string, or set',
         ForInS.Line, ForInS.Col);
 
-    Inc(FLoopDepth);
-    { Track the loop variable so a write to it inside the body is diagnosed
-      (BUG-001): the mutation goes to a per-iteration copy and is discarded.
-      Nested for-in loops push/pop, so an inner loop's variable does not mask
-      an outer one. }
-    FForInLoopVars.Add(ForInS.VarName);
-    try
-      AnalyseStmt(ForInS.Body);
-    finally
-      FForInLoopVars.Delete(FForInLoopVars.Count - 1);
-      Dec(FLoopDepth);
+    if ForInS.Lowered = nil then
+    begin
+      Inc(FLoopDepth);
+      { Track the loop variable so a write to it inside the body is diagnosed
+        (BUG-001): the mutation goes to a per-iteration copy and is discarded.
+        Nested for-in loops push/pop, so an inner loop's variable does not mask
+        an outer one. }
+      FForInLoopVars.Add(ForInS.VarName);
+      try
+        AnalyseStmt(ForInS.Body);
+      finally
+        FForInLoopVars.Delete(FForInLoopVars.Count - 1);
+        Dec(FLoopDepth);
+      end;
     end;
   end
   else if AStmt is TWhileStmt then
