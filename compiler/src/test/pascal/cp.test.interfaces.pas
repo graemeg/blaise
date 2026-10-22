@@ -138,6 +138,10 @@ type
     { a program-level interface global is DEFINED even when its only use is
       a var argument (x86-64 left <Name>_obj undefined) }
     procedure TestCodegen_ProgramIntfGlobal_DefinedWithoutAssignment;
+    { BUG-013: a class argument to an INTERFACE parameter of an interface
+      call is narrowed through the class's static itab, on both ISAs --
+      x86-64 pushed the bare object, and the callee read it as the pair }
+    procedure TestCodegen_IntfCall_ClassArgNarrowedToParamIntf;
   end;
 
 implementation
@@ -1167,6 +1171,32 @@ const
 begin
   AssertEquals('both reads compile', '',
     AsmMissing(Src, 'callq MkObj', 'bl _MkObj'));
+end;
+
+procedure TInterfaceTests.TestCodegen_IntfCall_ClassArgNarrowedToParamIntf;
+const
+  Src = '''
+      program P;
+      type
+        IName = interface
+          function Name(): string;
+        end;
+        TNamed = class(TObject, IName)
+          function Name(): string;
+        end;
+        ISvc = interface
+          procedure Greet(N: IName);
+        end;
+      function TNamed.Name(): string; begin Result := 'n' end;
+      var S: ISvc; N: TNamed;
+      begin
+        S.Greet(N)
+      end.
+      ''';
+begin
+  AssertEquals('the only narrowing is the argument', '',
+    AsmMissing(Src, 'leaq itab_TNamed_IName(%rip)',
+      '_itab_TNamed_IName@PAGEOFF'));
 end;
 
 procedure TInterfaceTests.TestCodegen_ProcFieldCall_AggregateResult;

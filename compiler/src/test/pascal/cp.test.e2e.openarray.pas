@@ -117,10 +117,11 @@ type
       Both backends refused the literals, stored garbage for operators and
       calls (inf, -2D, 0), and arm64 refused the call forms }
     procedure TestRun_LiteralFloatElements_EveryForm;
-    { a var open array through every call path: routine, procedure
+    { a var or out open array through every call path: routine, procedure
       variable, record method, constructor, method (direct, method pointer,
-      past the register slots) and static method.  x86-64 passed only the
-      address to a method, and the call segfaulted }
+      past the register slots), static method, and an interface call.
+      x86-64 passed only the address to a method (the call segfaulted) and
+      to an interface call (the callee saw the wrong length) }
     procedure TestRun_VarOpenArray_EveryCallPath;
   end;
 
@@ -1219,6 +1220,14 @@ const
           P5: Integer): Integer;
         static function STot(var A: array of Integer): Integer;
       end;
+      ISvc = interface
+        function Total(var A: array of Integer): Integer;
+        procedure Fill(out A: array of Integer; V: Integer);
+      end;
+      TSvc = class(TObject, ISvc)
+        function Total(var A: array of Integer): Integer;
+        procedure Fill(out A: array of Integer; V: Integer);
+      end;
     function Sum(var A: array of Integer): Integer;
     var I: Integer;
     begin
@@ -1234,7 +1243,18 @@ const
       Result := P1 + P2 + P3 + P4 + P5 + Sum(A)
     end;
     static function TC.STot(var A: array of Integer): Integer; begin Result := Sum(A) * 2 end;
-    var F: TTot; M: TTotM; R: TRec; C: TC;
+    function TSvc.Total(var A: array of Integer): Integer;
+    var I: Integer;
+    begin
+      Result := 0;
+      for I := 0 to High(A) do begin Result := Result + A[I]; A[I] := 0 end
+    end;
+    procedure TSvc.Fill(out A: array of Integer; V: Integer);
+    var I: Integer;
+    begin
+      for I := 0 to High(A) do A[I] := V + I
+    end;
+    var F: TTot; M: TTotM; R: TRec; C: TC; S: ISvc;
       Arr: array[0..2] of Integer; D: array of Integer;
     begin
       Arr[0] := 1; Arr[1] := 2; Arr[2] := 3;
@@ -1245,13 +1265,21 @@ const
       M := @C.Tot; WriteLn(M(Arr));
       WriteLn(C.Tot(Arr), ' ', C.Many(1, 2, 3, 4, Arr, 5), ' ', TC.STot(Arr));
       SetLength(D, 3); D[0] := 7; D[1] := 8; D[2] := 9;
-      WriteLn(C.Tot(D), ' ', C.Many(0, 0, 0, 0, D, 1))
+      WriteLn(C.Tot(D), ' ', C.Many(0, 0, 0, 0, D, 1));
+      S := TSvc.Create();
+      WriteLn(S.Total(Arr), ' ', Arr[2]);
+      SetLength(D, 4);
+      S.Fill(D, 10);
+      WriteLn(D[0], ' ', D[3], ' ', S.Total(D));
+      S.Fill(Arr, 5);
+      WriteLn(Arr[0], ' ', Arr[2])
     end.
     ''';
 begin
   AssertRunsOnAll(Src,
     '6' + LineEnding + '16' + LineEnding + '6 100' + LineEnding +
-    '6' + LineEnding + '6 21 12' + LineEnding + '24 25' + LineEnding, 0);
+    '6' + LineEnding + '6 21 12' + LineEnding + '24 25' + LineEnding +
+    '6 0' + LineEnding + '10 13 46' + LineEnding + '5 7' + LineEnding, 0);
 end;
 
 procedure TE2EOpenArrayTests.TestRun_LiteralFloatElements_EveryForm;

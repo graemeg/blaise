@@ -1213,6 +1213,13 @@ type
     function IntfArgSlotClasses(AIntf: TInterfaceTypeDesc;
       const AMethName: string; AArgs: TObjectList; const AVFlags: string;
       AHK: TList<Integer>): TList<Integer>;
+    function IntfArgIsPair(AIntf: TInterfaceTypeDesc; const AMethName: string;
+      AArgs: TObjectList; AIndex: Integer; const AVFlags: string;
+      AHK: TList<Integer>): Boolean;
+    function PushIntfCallArgs(AIntf: TInterfaceTypeDesc;
+      const AMethName: string; AArgs: TObjectList; const AVFlags: string;
+      AHD: TList<Integer>; AHK: TList<Integer>; AHTotal: Integer;
+      AHoistBase: Integer): Integer;
     { A scratch slot holding a threadvar's address: an indirect sret destination. }
     function TlsSretDest(const AName: string): string;
     function NewScratchOperand(ASize: Integer): string;
@@ -1307,10 +1314,13 @@ type
       construction, so the Emit wrap pad (which would shift genuine stack
       arguments) never fires for those calls. }
     function AlignFreshBytes(ASlots: Integer): Integer;
+    { AIntfParams: an itab call's declared parameters (TIntfParamInfo), which
+      it has in place of AParams / AProcParams; nil for every other call }
     function EmitArgHoist(AParams: TObjectList; AProcParams: TObjectList;
                           AKnownSig: Boolean; const AVarFlags: string;
                           AArgs: TObjectList;
-                          ADepths: TList<Integer>; AKinds: TList<Integer>): Integer;
+                          ADepths: TList<Integer>; AKinds: TList<Integer>;
+                          AIntfParams: TObjectList): Integer;
     { Phase C — post-call epilogue: releases pinned/consumed const-string
       values and the managed fields of hoisted record temporaries, preserving
       the call's return registers (%rax/%rdx/%xmm0/%xmm1), then reclaims
@@ -4525,60 +4535,10 @@ begin
   HK := TList<Integer>.Create();
   VFlags := AIntf.MethodParamVarFlagsStr(AIntf.MethodIndex(AMethName));
   HTotal := Self.EmitArgHoist(nil, nil, False,
-    Self.IntfHoistFlags(AIntf, AMethName, VFlags), AArgs, HD, HK);
-  Pushed := 0;
-  { Evaluate args left-to-right and push them.  Interface args push two values
-    (obj then itab); all other args push one.  Pass nil as the TMethodParam so
-    EmitMethodArgPush falls through to scalar for non-interface args. }
-  for I := 0 to ArgN - 1 do
-  begin
-    Arg := TASTExpr(AArgs.Items[I]);
-    if HK.Get(I) >= akRecCall then
-    begin
-      { Hoisted record-call or string argument — reload the saved value. }
-      Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [HTotal - HD.Get(I) + Pushed]));
-      Self.Emit(#9'pushq %rax');
-    end
-    else if Self.VarFlagAt(VFlags, I) then
-    begin
-      { var/out position: pass the slot ADDRESS — same rule as direct
-        calls; covers managed types (string, dynarray) the callee rebinds. }
-      Self.EmitVarArgAddrToRax(Arg);
-      Self.Emit(#9'pushq %rax');
-    end
-    else if Self.IntfParamIsOpenArray(AIntf, AMethName, I) then
-      Self.PushOpenArrayArg(Arg)
-    else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
-    begin
-      { a variable or an in-place value (call results were hoisted) }
-      Self.PushIntfBorrowPair(Arg, True);
-    end
-    else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
-    begin
-      { Float scalar argument: materialise to %xmm0 and push its 8-byte bit
-        pattern as one slot; EmitIntfRegArgs routes it into an xmm register
-        instead of an integer one. }
-      Self.EmitExprToXmm0(Arg);
-      Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
-        Self.IntfParamTypeAt(AIntf, AMethName, I, Arg).Kind = tySingle);
-      Self.Emit(#9'subq $8, %rsp');
-      Self.Emit(#9'movsd %xmm0, 0(%rsp)');
-    end
-    else
-    begin
-      Self.EmitExprToEax(Arg);
-      Self.Emit(#9'pushq %rax');
-    end;
-    { Track bytes pushed so far — hoisted-value reloads are %rsp-relative.
-      var positions always occupy one slot, even for interface-typed args. }
-    if (HK.Get(I) < akRecCall) and (not Self.VarFlagAt(VFlags, I)) and
-       (((Arg.ResolvedType <> nil) and
-         (Arg.ResolvedType.Kind = tyInterface)) or
-        Self.IntfParamIsOpenArray(AIntf, AMethName, I)) then
-      Pushed := Pushed + 16
-    else
-      Pushed := Pushed + 8;
-  end;
+    Self.IntfHoistFlags(AIntf, AMethName, VFlags), AArgs, HD, HK,
+    AIntf.MethodParams(AIntf.MethodIndex(AMethName)));
+  Pushed := Self.PushIntfCallArgs(AIntf, AMethName, AArgs, VFlags, HD, HK,
+    HTotal, 0);
   { Load obj (Self) into %r10 and the itab into %rax, then index the itab.
     For a field receiver the fat pointer is contiguous (obj at the field
     address, itab at +8); EmitInterfaceFieldAddr leaves that address in %r10.
@@ -4601,30 +4561,8 @@ begin
   { Classify the pushed slots for the register-load phase, mirroring the
     push loop above: hoist-reloaded and var slots are integer; interface
     args are two integer slots (obj + itab); float args are xmm slots. }
-  SlotClasses := TList<Integer>.Create();
-  for I := 0 to ArgN - 1 do
-  begin
-    Arg := TASTExpr(AArgs.Items[I]);
-    if HK.Get(I) >= akRecCall then
-      SlotClasses.Add(0)
-    else if Self.VarFlagAt(VFlags, I) then
-      SlotClasses.Add(0)
-    else if Self.IntfParamIsOpenArray(AIntf, AMethName, I) then
-    begin
-      SlotClasses.Add(0);
-      SlotClasses.Add(0);
-    end
-    else if (Arg.ResolvedType <> nil) and
-            (Arg.ResolvedType.Kind = tyInterface) then
-    begin
-      SlotClasses.Add(0);
-      SlotClasses.Add(0);
-    end
-    else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
-      SlotClasses.Add(1)
-    else
-      SlotClasses.Add(0);
-  end;
+  SlotClasses := Self.IntfArgSlotClasses(AIntf, AMethName, AArgs, VFlags,
+    HK);
   if ADiscardIntfRet then
   begin
     { sret convention: %rdi = buffer, %rsi = Self, visible args from %rdx.
@@ -4706,57 +4644,10 @@ begin
   HK := TList<Integer>.Create();
   VFlags := AIntf.MethodParamVarFlagsStr(AIntf.MethodIndex(AMethName));
   HTotal := Self.EmitArgHoist(nil, nil, False,
-    Self.IntfHoistFlags(AIntf, AMethName, VFlags), AArgs, HD, HK);
-  Pushed := 0;
-  { Push args left-to-right; interface args push obj then itab (2 slots). }
-  for I := 0 to ArgN - 1 do
-  begin
-    Arg := TASTExpr(AArgs.Items[I]);
-    if HK.Get(I) >= akRecCall then
-    begin
-      { Hoisted record-call or string argument — reload the saved value. }
-      Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [HTotal - HD.Get(I) + Pushed]));
-      Self.Emit(#9'pushq %rax');
-    end
-    else if Self.VarFlagAt(VFlags, I) then
-    begin
-      { var/out position: pass the slot ADDRESS — same rule as direct
-        calls; covers managed types (string, dynarray) the callee rebinds. }
-      Self.EmitVarArgAddrToRax(Arg);
-      Self.Emit(#9'pushq %rax');
-    end
-    else if Self.IntfParamIsOpenArray(AIntf, AMethName, I) then
-      Self.PushOpenArrayArg(Arg)
-    else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
-    begin
-      { a variable or an in-place value (call results were hoisted) }
-      Self.PushIntfBorrowPair(Arg, True);
-    end
-    else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
-    begin
-      { Float scalar argument: push its 8-byte xmm bit pattern as one slot;
-        EmitIntfRegArgs routes it into an xmm register. }
-      Self.EmitExprToXmm0(Arg);
-      Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
-        Self.IntfParamTypeAt(AIntf, AMethName, I, Arg).Kind = tySingle);
-      Self.Emit(#9'subq $8, %rsp');
-      Self.Emit(#9'movsd %xmm0, 0(%rsp)');
-    end
-    else
-    begin
-      Self.EmitExprToEax(Arg);
-      Self.Emit(#9'pushq %rax');
-    end;
-    { Track bytes pushed so far — hoisted-value reloads are %rsp-relative.
-      var positions always occupy one slot, even for interface-typed args. }
-    if (HK.Get(I) < akRecCall) and (not Self.VarFlagAt(VFlags, I)) and
-       (((Arg.ResolvedType <> nil) and
-         (Arg.ResolvedType.Kind = tyInterface)) or
-        Self.IntfParamIsOpenArray(AIntf, AMethName, I)) then
-      Pushed := Pushed + 16
-    else
-      Pushed := Pushed + 8;
-  end;
+    Self.IntfHoistFlags(AIntf, AMethName, VFlags), AArgs, HD, HK,
+    AIntf.MethodParams(AIntf.MethodIndex(AMethName)));
+  Pushed := Self.PushIntfCallArgs(AIntf, AMethName, AArgs, VFlags, HD, HK,
+    HTotal, 0);
   { Load Self and compute field base; use %r11 for base pointer. }
   Self.Emit(Format(#9'movq %s, %%r11', [Self.VarOperand('Self')]));
   if AFld.Offset > 0 then
@@ -4771,30 +4662,8 @@ begin
     Self.Emit(Format(#9'movq %d(%%rax), %%r11', [SlotOff]));
   { Classify the pushed slots for the register-load phase, mirroring the
     push loop above (see EmitInterfaceCall). }
-  SlotClasses := TList<Integer>.Create();
-  for I := 0 to ArgN - 1 do
-  begin
-    Arg := TASTExpr(AArgs.Items[I]);
-    if HK.Get(I) >= akRecCall then
-      SlotClasses.Add(0)
-    else if Self.VarFlagAt(VFlags, I) then
-      SlotClasses.Add(0)
-    else if Self.IntfParamIsOpenArray(AIntf, AMethName, I) then
-    begin
-      SlotClasses.Add(0);
-      SlotClasses.Add(0);
-    end
-    else if (Arg.ResolvedType <> nil) and
-            (Arg.ResolvedType.Kind = tyInterface) then
-    begin
-      SlotClasses.Add(0);
-      SlotClasses.Add(0);
-    end
-    else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
-      SlotClasses.Add(1)
-    else
-      SlotClasses.Add(0);
-  end;
+  SlotClasses := Self.IntfArgSlotClasses(AIntf, AMethName, AArgs, VFlags,
+    HK);
   if ADiscardIntfRet then
   begin
     { sret convention: %rdi = buffer, %rsi = Self, visible args from %rdx.
@@ -12653,7 +12522,7 @@ begin
         Self.Emit(#9'movq %rax, %rbx');
         HD := TList<Integer>.Create();
         HK := TList<Integer>.Create();
-        HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
+        HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK, nil);
         OverflowSlots := TotalSlots - 6;
         AllocSz := ((TotalSlots * 8 + 15) and (-16));
         Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
@@ -12859,7 +12728,7 @@ begin
     AllocSz := ((TotalSlots * 8 + 15) and (-16));
     HD := TList<Integer>.Create();
     HK := TList<Integer>.Create();
-    HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
+    HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK, nil);
     Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
 
     Self.EmitArgsToSlots(ACall.Args, MD.Params, AllocSz, HTotal, HD, HK, 1);
@@ -12929,7 +12798,7 @@ begin
   AllocSz := (((Self.CountArgSlots(MD.Params) + 1) * 8 + 15) and (-16));
   HD := TList<Integer>.Create();
   HK := TList<Integer>.Create();
-  HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', AArgs, HD, HK);
+  HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', AArgs, HD, HK, nil);
   Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
   Self.EmitArgsToSlots(AArgs, MD.Params, AllocSz, HTotal, HD, HK, 1);
   { Self into slot 0. }
@@ -13389,6 +13258,48 @@ begin
   Self.Emit(#9'addq $16, %rsp');
 end;
 
+{ The declared interface type of an itab call's AIndex'th by-value
+  parameter (AParams: TIntfParamInfo list), or nil when that parameter is not
+  an interface or its declaration is unknown. }
+function DeclaredIntfParamAt(AParams: TObjectList; AIndex: Integer): TTypeDesc;
+var
+  Info: TIntfParamInfo;
+begin
+  Result := nil;
+  if (AParams = nil) or (AIndex >= AParams.Count) then
+    Exit;
+  Info := TIntfParamInfo(AParams.Items[AIndex]);
+  if (Info.TypeDesc <> nil) and (Info.TypeDesc.Kind = tyInterface) and
+     not Info.IsVar then
+    Result := Info.TypeDesc;
+end;
+
+function TX86_64Backend.IntfArgIsPair(AIntf: TInterfaceTypeDesc;
+  const AMethName: string; AArgs: TObjectList; AIndex: Integer;
+  const AVFlags: string; AHK: TList<Integer>): Boolean;
+var
+  Arg: TASTExpr;
+begin
+  { whether an itab call's AIndex'th argument occupies TWO integer slots: an
+    open array (data, high), or an interface (obj, itab) -- by the DECLARED
+    parameter type, so a class or nil bound to an interface parameter is a
+    pair too (BUG-013).  A hoisted interface value is reloaded as its saved
+    pair; any other hoisted value and a var position are one slot. }
+  Arg := TASTExpr(AArgs.Items[AIndex]);
+  if AHK.Get(AIndex) = akIntfConsume then
+    Exit(True);
+  if AHK.Get(AIndex) >= akRecCall then
+    Exit(False);
+  if Self.IntfParamIsOpenArray(AIntf, AMethName, AIndex) then
+    Exit(True);
+  if Self.VarFlagAt(AVFlags, AIndex) then
+    Exit(False);
+  if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
+    Exit(True);
+  Result := DeclaredIntfParamAt(
+    AIntf.MethodParams(AIntf.MethodIndex(AMethName)), AIndex) <> nil;
+end;
+
 function TX86_64Backend.IntfArgSlotClasses(AIntf: TInterfaceTypeDesc;
   const AMethName: string; AArgs: TObjectList; const AVFlags: string;
   AHK: TList<Integer>): TList<Integer>;
@@ -13397,33 +13308,108 @@ var
   Arg: TASTExpr;
 begin
   { the register class of each pushed slot of an itab call, in push order
-    (0 = integer, 1 = xmm) -- mirrors the push loops: a hoisted value and a
-    var position are one integer slot, an interface two, a float one xmm }
+    (0 = integer, 1 = xmm) -- mirrors PushIntfCallArgs: a pair is two
+    integer slots, a float one xmm, anything else one integer slot }
   Result := TList<Integer>.Create();
   if AArgs = nil then
     Exit;
   for I := 0 to AArgs.Count - 1 do
   begin
     Arg := TASTExpr(AArgs.Items[I]);
-    if AHK.Get(I) >= akRecCall then
-      Result.Add(0)
-    else if Self.VarFlagAt(AVFlags, I) then
-      Result.Add(0)
-    else if Self.IntfParamIsOpenArray(AIntf, AMethName, I) then
+    if Self.IntfArgIsPair(AIntf, AMethName, AArgs, I, AVFlags, AHK) then
     begin
       Result.Add(0);
       Result.Add(0);
     end
-    else if (Arg.ResolvedType <> nil) and
-            (Arg.ResolvedType.Kind = tyInterface) then
-    begin
-      Result.Add(0);
-      Result.Add(0);
-    end
-    else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
+    else if (AHK.Get(I) < akRecCall) and not Self.VarFlagAt(AVFlags, I) and
+            IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
       Result.Add(1)
     else
       Result.Add(0);
+  end;
+end;
+
+function TX86_64Backend.PushIntfCallArgs(AIntf: TInterfaceTypeDesc;
+  const AMethName: string; AArgs: TObjectList; const AVFlags: string;
+  AHD: TList<Integer>; AHK: TList<Integer>; AHTotal: Integer;
+  AHoistBase: Integer): Integer;
+var
+  I, Off: Integer;
+  Arg: TASTExpr;
+  ParamIntf: TTypeDesc;
+begin
+  { Push an itab call's arguments left to right, each at its DECLARED
+    parameter type, the one argument loop every interface dispatch path
+    shares.  A pair pushes its low word first (obj, data) and its high word
+    on top; IntfArgSlotClasses classifies the slots identically.  AHoistBase
+    is the distance from %rsp to the hoist region before the first push (an
+    sret buffer between them); the result is the bytes pushed. }
+  Result := 0;
+  if AArgs = nil then
+    Exit;
+  for I := 0 to AArgs.Count - 1 do
+  begin
+    Arg := TASTExpr(AArgs.Items[I]);
+    Off := AHoistBase + AHTotal - AHD.Get(I) + Result;
+    if AHK.Get(I) = akIntfConsume then
+    begin
+      { a hoisted interface (or narrowed class) call result: its saved pair,
+        obj on top -- reloaded as one word, the callee read garbage as the
+        itab.  The hoist epilogue releases the obj after the call. }
+      Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [Off]));
+      Self.Emit(Format(#9'movq %d(%%rsp), %%rcx', [Off + 8]));
+      Self.Emit(#9'pushq %rax');
+      Self.Emit(#9'pushq %rcx');
+    end
+    else if AHK.Get(I) >= akRecCall then
+    begin
+      { a hoisted record-call, string or class value: one saved word }
+      Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [Off]));
+      Self.Emit(#9'pushq %rax');
+    end
+    else if Self.IntfParamIsOpenArray(AIntf, AMethName, I) then
+      { by value, var or out: the (data, high) pair }
+      Self.PushOpenArrayArg(Arg)
+    else if Self.VarFlagAt(AVFlags, I) then
+    begin
+      { var/out position: pass the slot ADDRESS -- same rule as direct
+        calls; covers managed types (string, dynarray) the callee rebinds. }
+      Self.EmitVarArgAddrToRax(Arg);
+      Self.Emit(#9'pushq %rax');
+    end
+    else if (Arg.ResolvedType <> nil) and
+            (Arg.ResolvedType.Kind = tyInterface) then
+      { a variable or an in-place value (call results were hoisted) }
+      Self.PushIntfBorrowPair(Arg, True)
+    else if Self.IntfArgIsPair(AIntf, AMethName, AArgs, I, AVFlags, AHK) then
+    begin
+      { a class or nil bound to an interface parameter: narrowed to the
+        declared interface through the class's static itab (an owned class
+        transient was hoisted as a pair above) }
+      ParamIntf := DeclaredIntfParamAt(
+        AIntf.MethodParams(AIntf.MethodIndex(AMethName)), I);
+      Self.PushIntfArg(Arg, ParamIntf);
+    end
+    else if IsFloatFamily(Self.IntfParamTypeAt(AIntf, AMethName, I, Arg)) then
+    begin
+      { Float scalar argument: materialise to %xmm0 at the declared
+        parameter's width and push its 8-byte bit pattern as one slot;
+        EmitIntfRegArgs routes it into an xmm register. }
+      Self.EmitExprToXmm0(Arg);
+      Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
+        Self.IntfParamTypeAt(AIntf, AMethName, I, Arg).Kind = tySingle);
+      Self.Emit(#9'subq $8, %rsp');
+      Self.Emit(#9'movsd %xmm0, 0(%rsp)');
+    end
+    else
+    begin
+      Self.EmitExprToEax(Arg);
+      Self.Emit(#9'pushq %rax');
+    end;
+    if Self.IntfArgIsPair(AIntf, AMethName, AArgs, I, AVFlags, AHK) then
+      Result := Result + 16
+    else
+      Result := Result + 8;
   end;
 end;
 
@@ -13432,12 +13418,12 @@ function TX86_64Backend.IntfParamIsOpenArray(AIntf: TInterfaceTypeDesc;
 var
   Params: TObjectList;
 begin
-  { an interface method's AIndex'th parameter is a by-value open array: it
-    takes the (data pointer, high) pair, two integer slots }
+  { an interface method's AIndex'th parameter is an open array: it takes
+    the (data pointer, high) pair, two integer slots -- a var or out one
+    too, whose callee writes through the data pointer }
   Params := AIntf.MethodParams(AIntf.MethodIndex(AMethName));
   Result := (Params <> nil) and (AIndex < Params.Count) and
-    TIntfParamInfo(Params.Items[AIndex]).IsOpenArray and
-    not TIntfParamInfo(Params.Items[AIndex]).IsVar;
+    TIntfParamInfo(Params.Items[AIndex]).IsOpenArray;
 end;
 
 function TX86_64Backend.IntfParamTypeAt(AIntf: TInterfaceTypeDesc;
@@ -14507,7 +14493,7 @@ begin
         Self.Emit(#9'movq %rax, %rbx');
         HD := TList<Integer>.Create();
         HK := TList<Integer>.Create();
-        HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
+        HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK, nil);
         OverflowSlots := TotalSlots - 6;
         AllocSz := ((TotalSlots * 8 + 15) and (-16));
         Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
@@ -14954,7 +14940,7 @@ begin
     AllocSz := ((TotalSlots * 8 + 15) and (-16));
     HD := TList<Integer>.Create();
     HK := TList<Integer>.Create();
-    HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
+    HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK, nil);
     Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
 
     Self.EmitArgsToSlots(ACall.Args, MD.Params, AllocSz, HTotal, HD, HK, 1);
@@ -15088,7 +15074,7 @@ begin
     AllocSz := ((TotalSlots * 8 + 15) and (-16));
     HD := TList<Integer>.Create();
     HK := TList<Integer>.Create();
-    HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', AArgs, HD, HK);
+    HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', AArgs, HD, HK, nil);
     Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
     Self.EmitArgsToSlots(AArgs, MD.Params, AllocSz, HTotal, HD, HK, 1);
     { Self into slot 0 (the implicit first integer arg). }
@@ -18953,7 +18939,7 @@ begin
       PCAllocSz := ((PCTotalSlots * 8 + 15) and (-16));
       PCHD := TList<Integer>.Create();
       PCHK := TList<Integer>.Create();
-      PCHTotal := Self.EmitArgHoist(MD.Params, nil, True, '', PC.Args, PCHD, PCHK);
+      PCHTotal := Self.EmitArgHoist(MD.Params, nil, True, '', PC.Args, PCHD, PCHK, nil);
       Self.Emit(Format(#9'subq $%d, %%rsp', [PCAllocSz]));
       Self.EmitArgsToSlots(PC.Args, MD.Params, PCAllocSz, PCHTotal, PCHD, PCHK, 1);
       { Self into slot 0 -> %rdi. }
@@ -21692,10 +21678,10 @@ begin
   begin
     if I > 0 then
       Result := Result + ',';
-    if TIntfParamInfo(Params.Items[I]).IsVar then
-      Result := Result + '1'
-    else if TIntfParamInfo(Params.Items[I]).IsOpenArray then
+    if TIntfParamInfo(Params.Items[I]).IsOpenArray then
       Result := Result + 'o'
+    else if TIntfParamInfo(Params.Items[I]).IsVar then
+      Result := Result + '1'
     else
       Result := Result + '0';
   end;
@@ -22593,7 +22579,8 @@ end;
 function TX86_64Backend.EmitArgHoist(AParams: TObjectList;
   AProcParams: TObjectList; AKnownSig: Boolean; const AVarFlags: string;
   AArgs: TObjectList;
-  ADepths: TList<Integer>; AKinds: TList<Integer>): Integer;
+  ADepths: TList<Integer>; AKinds: TList<Integer>;
+  AIntfParams: TObjectList): Integer;
 var
   I: Integer;
   Par: TMethodParam;
@@ -22767,21 +22754,24 @@ begin
       by-value class parameter retains on entry and releases on exit), so the
       caller must release it after the call -- it leaked one object per call.
       arm64 parks the same shape for a post-call release (shape 'C'). }
+    ParamIntf := nil;
+    if (Par <> nil) and (Par.ResolvedType <> nil) and
+       (Par.ResolvedType.Kind = tyInterface) then
+      ParamIntf := Par.ResolvedType
+    else if (PP <> nil) and (PP.TypeDesc <> nil) and
+            (PP.TypeDesc.Kind = tyInterface) then
+      ParamIntf := PP.TypeDesc
+    else
+      ParamIntf := DeclaredIntfParamAt(AIntfParams, I);
     if (not IsVarPos) and (Arg.ResolvedType <> nil) and
        (Arg.ResolvedType.Kind = tyClass) and ArcExprOwnsRef(Arg) and
-       (((Par <> nil) and (Par.ResolvedType <> nil) and
-         (Par.ResolvedType.Kind = tyInterface)) or
-        ((PP <> nil) and (PP.TypeDesc <> nil) and
-         (PP.TypeDesc.Kind = tyInterface))) then
+       (ParamIntf <> nil) then
     begin
       { ... narrowed to an INTERFACE parameter (Use(MakeObj()) where Use
-        takes an IFoo): the argument occupies two slots, obj and the class's
-        static itab.  Hoisted as one class slot, only the obj was pushed and
-        the callee read it as the itab too. }
-      if Par <> nil then
-        ParamIntf := Par.ResolvedType
-      else
-        ParamIntf := PP.TypeDesc;
+        takes an IFoo, or an itab call's declared IFoo): the argument
+        occupies two slots, obj and the class's static itab.  Hoisted as one
+        class slot, only the obj was pushed and the callee read it as the
+        itab too. }
       Self.EmitExprToEax(Arg);
       Self.Emit(Format(#9'leaq itab_%s_%s(%%rip), %%rcx',
         [Self.ClassSymOf(Arg.ResolvedType),
@@ -22997,7 +22987,7 @@ var
 begin
   F := TOALCallFrame.Create();
   F.Args := AArgs;
-  F.Total := Self.EmitArgHoist(AParams, nil, True, '', AArgs, F.Depths, F.Kinds);
+  F.Total := Self.EmitArgHoist(AParams, nil, True, '', AArgs, F.Depths, F.Kinds, nil);
   FOALFrames.Add(F);
 end;
 
@@ -23230,9 +23220,9 @@ begin
   OALK := TList<Integer>.Create();
   OverflowOffs := TList<Integer>.Create();
   if ADecl <> nil then
-    OALTotal := Self.EmitArgHoist(ADecl.Params, nil, True, '', AArgs, OALD, OALK)
+    OALTotal := Self.EmitArgHoist(ADecl.Params, nil, True, '', AArgs, OALD, OALK, nil)
   else
-    OALTotal := Self.EmitArgHoist(nil, nil, True, '', AArgs, OALD, OALK);
+    OALTotal := Self.EmitArgHoist(nil, nil, True, '', AArgs, OALD, OALK, nil);
   OALPushed := 0;
 
   { a C record argument goes through the slot strategy below, which places
@@ -23893,7 +23883,7 @@ begin
   HK := TList<Integer>.Create();
   IsFloatSlot := TList<Integer>.Create();
   OvSlots := TList<Integer>.Create();
-  HTotal := Self.EmitArgHoist(nil, PParams, True, '', AArgs, HD, HK);
+  HTotal := Self.EmitArgHoist(nil, PParams, True, '', AArgs, HD, HK, nil);
   { The function pointer is loaded into %r10 only AFTER all argument
     evaluation: %r10 is caller-saved, so any call emitted while evaluating
     an argument (or the hoist pre-pass above) would clobber it.
@@ -24806,7 +24796,7 @@ begin
     %xmm0.. and relocates the overflow below the block. }
   HD := TList<Integer>.Create();
   HK := TList<Integer>.Create();
-  HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
+  HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK, nil);
   AllocSz := (((Self.CountArgSlots(MD.Params) + 2) * 8 + 15) and (-16));
   Self.Emit(Format(#9'subq $%d, %%rsp', [AllocSz]));
   Self.EmitArgsToSlots(ACall.Args, MD.Params, AllocSz, HTotal, HD, HK, 2);
@@ -25144,7 +25134,7 @@ begin
     keep their `fat pointer at (%rsp), addq $16` contract. }
   HD := TList<Integer>.Create();
   HK := TList<Integer>.Create();
-  HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
+  HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK, nil);
   { Allocate the 16-byte sret buffer on the stack and zero it. }
   Self.Emit(#9'subq $16, %rsp');
   Self.Emit(#9'movq $0, (%rsp)');
@@ -25247,63 +25237,14 @@ begin
   HK := TList<Integer>.Create();
   VFlags := IntfD.MethodParamVarFlagsStr(IntfD.MethodIndex(ACall.Name));
   HTotal := Self.EmitArgHoist(nil, nil, False,
-    Self.IntfHoistFlags(IntfD, ACall.Name, VFlags), ACall.Args, HD, HK);
+    Self.IntfHoistFlags(IntfD, ACall.Name, VFlags), ACall.Args, HD, HK,
+    IntfD.MethodParams(IntfD.MethodIndex(ACall.Name)));
   { Allocate and zero the 16-byte sret buffer. }
   Self.Emit(#9'subq $16, %rsp');
   Self.Emit(#9'movq $0, (%rsp)');
   Self.Emit(#9'movq $0, 8(%rsp)');
-  Pushed := 0;
-  { Push args left-to-right; interface args push obj then itab (2 slots). }
-  for I := 0 to ArgN - 1 do
-  begin
-    Arg := TASTExpr(ACall.Args.Items[I]);
-    if HK.Get(I) >= akRecCall then
-    begin
-      { Hoisted record-call or string argument — reload the saved value
-        (+16 for the sret buffer between %rsp and the hoist region). }
-      Self.Emit(Format(#9'movq %d(%%rsp), %%rax',
-        [16 + HTotal - HD.Get(I) + Pushed]));
-      Self.Emit(#9'pushq %rax');
-    end
-    else if Self.VarFlagAt(VFlags, I) then
-    begin
-      { var/out position: pass the slot ADDRESS — same rule as direct
-        calls; covers managed types (string, dynarray) the callee rebinds. }
-      Self.EmitVarArgAddrToRax(Arg);
-      Self.Emit(#9'pushq %rax');
-    end
-    else if Self.IntfParamIsOpenArray(IntfD, ACall.Name, I) then
-      Self.PushOpenArrayArg(Arg)
-    else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
-    begin
-      { a variable or an in-place value (call results were hoisted) }
-      Self.PushIntfBorrowPair(Arg, True);
-    end
-    else if IsFloatFamily(Self.IntfParamTypeAt(IntfD, ACall.Name, I, Arg)) then
-    begin
-      { float argument: its 8-byte xmm bit pattern as one slot, at the
-        declared parameter's width; EmitIntfRegArgs routes it to an xmm
-        register (it was evaluated into %rax, and a float literal could not
-        be lowered at all) }
-      Self.EmitExprToXmm0(Arg);
-      Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
-        Self.IntfParamTypeAt(IntfD, ACall.Name, I, Arg).Kind = tySingle);
-      Self.Emit(#9'subq $8, %rsp');
-      Self.Emit(#9'movsd %xmm0, 0(%rsp)');
-    end
-    else
-    begin
-      Self.EmitExprToEax(Arg);
-      Self.Emit(#9'pushq %rax');
-    end;
-    if (HK.Get(I) < akRecCall) and (not Self.VarFlagAt(VFlags, I)) and
-       (((Arg.ResolvedType <> nil) and
-         (Arg.ResolvedType.Kind = tyInterface)) or
-        Self.IntfParamIsOpenArray(IntfD, ACall.Name, I)) then
-      Pushed := Pushed + 16
-    else
-      Pushed := Pushed + 8;
-  end;
+  Pushed := Self.PushIntfCallArgs(IntfD, ACall.Name, ACall.Args, VFlags, HD,
+    HK, HTotal, 16);
   { Resolve the receiver: obj into %r10, itab into %rax. }
   if RecvOnStack then
   begin
@@ -25319,18 +25260,6 @@ begin
     Self.Emit(#9'movq (%rax), %r11')
   else
     Self.Emit(Format(#9'movq %d(%%rax), %%r11', [SlotOff]));
-  { Pop args shifted by 2: %rdi = sret buffer, %rsi = receiver obj.
-    var positions take one slot. }
-  SlotOff := 0;
-  for I := 0 to ArgN - 1 do
-  begin
-    Arg := TASTExpr(ACall.Args.Items[I]);
-    if (not Self.VarFlagAt(VFlags, I)) and (Arg.ResolvedType <> nil) and
-       (Arg.ResolvedType.Kind = tyInterface) then
-      Inc(SlotOff, 2)
-    else
-      Inc(SlotOff);
-  end;
   { Consume args (base 2: %rdi = sret buffer, %rsi = receiver obj); spill
     overflow slots beyond the 4 remaining registers to the stack. }
   SlotClasses := Self.IntfArgSlotClasses(IntfD, ACall.Name, ACall.Args,
@@ -25467,54 +25396,10 @@ begin
   HK := TList<Integer>.Create();
   VFlags := IntfD.MethodParamVarFlagsStr(IntfD.MethodIndex(ACall.Name));
   HTotal := Self.EmitArgHoist(nil, nil, False,
-    Self.IntfHoistFlags(IntfD, ACall.Name, VFlags), ACall.Args, HD, HK);
-  Pushed := 0;
-  { Push args left-to-right; interface args push obj then itab (2 slots). }
-  for I := 0 to ArgN - 1 do
-  begin
-    Arg := TASTExpr(ACall.Args.Items[I]);
-    if HK.Get(I) >= akRecCall then
-    begin
-      Self.Emit(Format(#9'movq %d(%%rsp), %%rax', [HTotal - HD.Get(I) + Pushed]));
-      Self.Emit(#9'pushq %rax');
-    end
-    else if Self.VarFlagAt(VFlags, I) then
-    begin
-      Self.EmitVarArgAddrToRax(Arg);
-      Self.Emit(#9'pushq %rax');
-    end
-    else if Self.IntfParamIsOpenArray(IntfD, ACall.Name, I) then
-      Self.PushOpenArrayArg(Arg)
-    else if (Arg.ResolvedType <> nil) and (Arg.ResolvedType.Kind = tyInterface) then
-    begin
-      { a variable or an in-place value (call results were hoisted) }
-      Self.PushIntfBorrowPair(Arg, True);
-    end
-    else if IsFloatFamily(Self.IntfParamTypeAt(IntfD, ACall.Name, I, Arg)) then
-    begin
-      { float argument: its 8-byte xmm bit pattern as one slot, at the
-        declared parameter's width; EmitIntfRegArgs routes it to an xmm
-        register (it was evaluated into %rax, and a float literal could not
-        be lowered at all) }
-      Self.EmitExprToXmm0(Arg);
-      Self.EmitXmm0WidthAdjust(Arg.ResolvedType,
-        Self.IntfParamTypeAt(IntfD, ACall.Name, I, Arg).Kind = tySingle);
-      Self.Emit(#9'subq $8, %rsp');
-      Self.Emit(#9'movsd %xmm0, 0(%rsp)');
-    end
-    else
-    begin
-      Self.EmitExprToEax(Arg);
-      Self.Emit(#9'pushq %rax');
-    end;
-    if (HK.Get(I) < akRecCall) and (not Self.VarFlagAt(VFlags, I)) and
-       (((Arg.ResolvedType <> nil) and
-         (Arg.ResolvedType.Kind = tyInterface)) or
-        Self.IntfParamIsOpenArray(IntfD, ACall.Name, I)) then
-      Pushed := Pushed + 16
-    else
-      Pushed := Pushed + 8;
-  end;
+    Self.IntfHoistFlags(IntfD, ACall.Name, VFlags), ACall.Args, HD, HK,
+    IntfD.MethodParams(IntfD.MethodIndex(ACall.Name)));
+  Pushed := Self.PushIntfCallArgs(IntfD, ACall.Name, ACall.Args, VFlags, HD,
+    HK, HTotal, 0);
   { Resolve the receiver: obj into %r10, itab into %rax. }
   if RecvOnStack then
   begin
@@ -25530,18 +25415,6 @@ begin
     Self.Emit(#9'movq (%rax), %r11')
   else
     Self.Emit(Format(#9'movq %d(%%rax), %%r11', [SlotOff]));
-
-  { Count the arg SLOTS (var positions one slot; interface args two). }
-  Slots := 0;
-  for I := 0 to ArgN - 1 do
-  begin
-    Arg := TASTExpr(ACall.Args.Items[I]);
-    if (not Self.VarFlagAt(VFlags, I)) and (Arg.ResolvedType <> nil) and
-       (Arg.ResolvedType.Kind = tyInterface) then
-      Inc(Slots, 2)
-    else
-      Inc(Slots);
-  end;
 
   SlotClasses := Self.IntfArgSlotClasses(IntfD, ACall.Name, ACall.Args,
     VFlags, HK);
@@ -25629,7 +25502,7 @@ begin
     UserSlots := Self.CountArgSlots(MD.Params);
     HD := TList<Integer>.Create();
     HK := TList<Integer>.Create();
-    HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
+    HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK, nil);
     Self.Emit(#9'subq $16, %rsp');
     Self.Emit(#9'movq $0, (%rsp)');
     Self.Emit(#9'movq $0, 8(%rsp)');
@@ -25677,7 +25550,7 @@ begin
     EmitIntfSretCall. }
   HD := TList<Integer>.Create();
   HK := TList<Integer>.Create();
-  HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK);
+  HTotal := Self.EmitArgHoist(MD.Params, nil, True, '', ACall.Args, HD, HK, nil);
   Self.Emit(#9'subq $16, %rsp');
   Self.Emit(#9'movq $0, (%rsp)');
   Self.Emit(#9'movq $0, 8(%rsp)');

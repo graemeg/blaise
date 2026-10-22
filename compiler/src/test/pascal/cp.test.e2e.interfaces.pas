@@ -197,6 +197,14 @@ type
       assignment, so this one was never defined: the call linked against an
       undefined <Name>_obj and the program died with no output. }
     procedure TestRun_ProgramGlobals_ReachedOnlyThroughVarArg;
+    { BUG-013: an interface call takes each argument at its DECLARED
+      parameter type.  On x86-64 the argument loops classified by the
+      argument's own type: a class passed to an interface parameter went as
+      one word where the callee reads (obj, itab), and a hoisted call result
+      (MkI(..), MkN(..)) was reloaded as one word -- every shape segfaulted.
+      Covers the statement, field-receiver, discarded-result and
+      expression-position dispatch paths, plus nil and float neighbours. }
+    procedure TestRun_IntfCall_ArgsTakeDeclaredParamType;
   end;
 
 implementation
@@ -2698,6 +2706,93 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '5 4' + LE + '6 5' + LE + 'done' + LE, 0);
+  AssertLeakFreeOnAll(Src, '');
+end;
+
+procedure TE2EInterfaceTests.TestRun_IntfCall_ArgsTakeDeclaredParamType;
+const
+  Src = '''
+    program P;
+    type
+      IName = interface
+        function Name(): string;
+      end;
+      TNamed = class(TObject, IName)
+        FTag: string;
+        function Name(): string;
+      end;
+      ISvc = interface
+        procedure Greet(N: IName);
+        procedure Two(I: Integer; N: IName; D: Double);
+        function Back(N: IName): IName;
+        function Len(N: IName): Integer;
+      end;
+      TSvc = class(TObject, ISvc)
+        procedure Greet(N: IName);
+        procedure Two(I: Integer; N: IName; D: Double);
+        function Back(N: IName): IName;
+        function Len(N: IName): Integer;
+      end;
+      THolder = class
+        FSvc: ISvc;
+        procedure Run(N: TNamed);
+      end;
+    function TNamed.Name(): string; begin Result := FTag end;
+    procedure TSvc.Greet(N: IName);
+    begin
+      if N = nil then WriteLn('hello nobody') else WriteLn('hello ', N.Name())
+    end;
+    procedure TSvc.Two(I: Integer; N: IName; D: Double);
+    begin
+      WriteLn(I, ' ', N.Name(), ' ', D:0:1)
+    end;
+    function TSvc.Back(N: IName): IName; begin Result := N end;
+    function TSvc.Len(N: IName): Integer; begin Result := Length(N.Name()) end;
+    function MkN(const T: string): TNamed;
+    begin
+      Result := TNamed.Create(); Result.FTag := T
+    end;
+    function MkI(const T: string): IName; begin Result := MkN(T) end;
+    procedure THolder.Run(N: TNamed);
+    begin
+      FSvc.Greet(N);
+      FSvc.Greet(MkN('fld-tmp'));
+      FSvc.Two(3, N, 1.5)
+    end;
+    procedure Go();
+    var S: ISvc; N: TNamed; NI, R: IName; H: THolder;
+    begin
+      S := TSvc.Create();
+      N := MkN('n'); NI := N;
+      S.Greet(NI);
+      S.Greet(MkI('i-tmp'));
+      S.Greet(S.Back(NI));
+      S.Greet(N);
+      S.Greet(MkN('c-tmp'));
+      S.Greet(nil);
+      S.Two(1, N, 2.5);
+      S.Two(2, MkN('c2'), 0.5);
+      S.Back(N);
+      S.Back(MkN('gone'));
+      R := S.Back(MkN('xy'));
+      WriteLn(R.Name());
+      WriteLn(S.Back(N).Name(), ' ', S.Back(MkN('chain')).Name());
+      WriteLn(S.Len(N), ' ', S.Len(MkN('four')), ' ', S.Len(MkI('fives')));
+      H := THolder.Create(); H.FSvc := S;
+      H.Run(N)
+    end;
+    begin
+      Go();
+      WriteLn('done')
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'hello n' + LE + 'hello i-tmp' + LE + 'hello n' + LE + 'hello n' + LE +
+    'hello c-tmp' + LE + 'hello nobody' + LE + '1 n 2.5' + LE +
+    '2 c2 0.5' + LE + 'xy' + LE + 'n chain' + LE + '1 4 5' + LE +
+    'hello n' + LE + 'hello fld-tmp' + LE + '3 n 1.5' + LE + 'done' + LE, 0);
   AssertLeakFreeOnAll(Src, '');
 end;
 
