@@ -1582,7 +1582,9 @@ begin
     Self.Emit(Format(#9'ldr %s, [x9, _g_%s@PAGEOFF]', [AReg, Sym]));
     Exit;
   end;
-  NotYet('load of variable ''' + AName + '''', nil);
+  InternalError('load of ''' + AName + ''', which is neither a frame slot ' +
+    'nor a global (a captured name is reached through its ''_cap_'' slot)',
+    nil);
 end;
 
 procedure TArm64Backend.EmitStoreByWidth(const AValReg, AAddrReg: string;
@@ -1721,7 +1723,9 @@ begin
     Self.Emit(Format(#9'str %s, [x9, _g_%s@PAGEOFF]', [AReg, Sym]));
     Exit;
   end;
-  NotYet('store to variable ''' + AName + '''', nil);
+  InternalError('store to ''' + AName + ''', which is neither a frame slot ' +
+    'nor a global (a captured name is reached through its ''_cap_'' slot)',
+    nil);
 end;
 
 procedure TArm64Backend.EmitSlotAddr(const AReg, AName: string);
@@ -1748,7 +1752,9 @@ begin
     Self.Emit(Format(#9'add %s, %s, _g_%s@PAGEOFF', [AReg, AReg, Sym]));
     Exit;
   end;
-  NotYet('address of variable ''' + AName + '''', nil);
+  InternalError('address of ''' + AName + ''', which is neither a frame ' +
+    'slot nor a global (a captured name is reached through its ''_cap_'' ' +
+    'slot)', nil);
 end;
 
 procedure TArm64Backend.EmitRecIdentAddr(const AReg: string; AE: TIdentExpr);
@@ -1807,7 +1813,9 @@ begin
     Exit;
   end;
   if AFA.FieldInfo = nil then
-    NotYet('address of an unresolved field', AFA);
+    InternalError('address of a field access with no field (properties ' +
+      'and static reads are handled above; the front end resolves the rest)',
+      AFA);
   { record-typed ELEMENT of an array field (Obj.ArrField[I] as an rvalue, e.g.
     Sec.Relocs[J]): the field itself is an array, not the record — its element
     address needs the subscript scaled in AND, for a dynarray field, the data
@@ -4185,7 +4193,8 @@ begin
       is routed to EmitFieldElemAssign instead — the field-store machinery
       here would drop the index and write the value over the array slot. }
     if AStmt.FieldInfo = nil then
-      NotYet('unresolved field assignment', AStmt);
+      InternalError('chained field assignment with no field (a property ' +
+        'write is routed above)', AStmt);
     if (AStmt.ObjExpr.ResolvedType <> nil) and
        (AStmt.ObjExpr.ResolvedType.Kind = tyRecord) then
     begin
@@ -4223,7 +4232,8 @@ begin
     InternalError('subscripted field write that is neither an element nor '
       + 'a property write', AStmt);
   if AStmt.FieldInfo = nil then
-    NotYet('unresolved field assignment', AStmt);
+    InternalError('field assignment with no field (a property write is ' +
+      'routed above; the front end resolves the rest)', AStmt);
   if AStmt.IsImplicitSelf then
   begin
     { A nested path (Self.FIntermediate.SubField := V) resolves FieldInfo to
@@ -4394,20 +4404,15 @@ begin
     while a by-value/local/global slot is addressed inline.  Element container:
     dyn-array (field slot holds the data pointer — deref) or static array (the
     field storage IS the array).
-    Still NotYet:
-      * ObjExpr <> nil        — a chained object base (A.B.Arr[i]) needs the
-        base expression evaluated, not a slot+offset.
-      * IsImplicitSelf        — needs Self + ImplicitBaseInfo.Offset, which the
-        plain slot+offset path does not account for.
-      * IsVarParam and IsClassAccess — a var-param CLASS receiver's element
-        write needs an extra deref (the slot holds &instance) that the
-        IsClassAccess address arm below does not add; keep it honest until a
-        var-param class base is wired end-to-end. }
+    A chained object base (A.B.Arr[i]), an implicit-Self field and a
+    var-param class receiver are all handled below (probed on both ISAs,
+    2026-10-22). }
   if AStmt.IsImplicitSelf and (AStmt.ObjExpr <> nil) then
     InternalError('array-field element write with both implicit Self and ' +
       'an object base', AStmt);
   if AStmt.FieldInfo = nil then
-    NotYet('unresolved field element write', AStmt);
+    InternalError('array-field element write with no field (the front end ' +
+      'resolves the field)', AStmt);
   if AStmt.FieldInfo.TypeDesc.IsString() then
   begin
     { R.S[I] := B on a string field: copy-on-write in the field's own slot,
@@ -6635,14 +6640,17 @@ begin
         Self.Emit(Format(#9'cset x0, %s', [CondName]));
       end;
     else
-      NotYet('binary operator ' + IntToStr(Ord(BE.Op)), AExpr);
+      InternalError('binary operator ' + IntToStr(Ord(BE.Op)) + ' in an ' +
+        'integer context (the front end rejects a float there; set ' +
+        'membership is lowered above)', AExpr);
     end;
     Exit;
   end;
   if AExpr is TInheritedCallExpr then
   begin
     if TInheritedCallExpr(AExpr).ResolvedMethod = nil then
-      NotYet('unresolved inherited call', AExpr);
+      InternalError('inherited call with no resolved method (the front ' +
+        'end rejects a missing one)', AExpr);
     if IsFloatExpr(AExpr) then
       FloatCallInIntegerContext('inherited call', AExpr);
     EmitLoadSlot('x0', 'Self');
@@ -7467,7 +7475,8 @@ begin
     EmitElemLoad(TFieldAccessExpr(AExpr).FieldInfo.TypeDesc);
     Exit;
   end;
-  NotYet('expression ' + AExpr.ClassName, AExpr);
+  InternalError('expression ' + AExpr.ClassName + ' in an integer context ' +
+    '(every integer-valued form is lowered above)', AExpr);
 end;
 
 procedure TArm64Backend.EmitStrDisposeX0(AExpr: TASTExpr);
@@ -8257,7 +8266,8 @@ begin
   if AStmt is TBreakStmt then
   begin
     if FBreakLbls.Count = 0 then
-      NotYet('break outside a loop', AStmt);
+      InternalError('break outside a loop (the front end rejects it)',
+        AStmt);
     if FLoopExcDepth.Count > 0 then
       EmitExcUnwindTo(StrToInt(
         FLoopExcDepth.Strings[FLoopExcDepth.Count - 1]));
@@ -8267,14 +8277,16 @@ begin
   if AStmt is TContinueStmt then
   begin
     if FContLbls.Count = 0 then
-      NotYet('continue outside a loop', AStmt);
+      InternalError('continue outside a loop (the front end rejects it)',
+        AStmt);
     if FLoopExcDepth.Count > 0 then
       EmitExcUnwindTo(StrToInt(
         FLoopExcDepth.Strings[FLoopExcDepth.Count - 1]));
     Self.Emit(Format(#9'b %s', [FContLbls.Strings[FContLbls.Count - 1]]));
     Exit;
   end;
-  NotYet('statement ' + AStmt.ClassName, AStmt);
+  InternalError('statement ' + AStmt.ClassName + ' (every statement class ' +
+    'is lowered above)', AStmt);
 end;
 
 procedure TArm64Backend.EmitPropReadCall(AFld: TFieldAccessExpr;
@@ -11231,7 +11243,7 @@ begin
     else
       Elem := TDynArrayTypeDesc(AStmt.CollExpr.ResolvedType).ElementType;
     if Elem = nil then
-      NotYet('unresolved element type', AStmt);
+      InternalError('for-in over an array with no element type', AStmt);
     ESz := Elem.RawSize();
     { a call collection: once, into a slot }
     Tmp := '';
@@ -12102,7 +12114,8 @@ begin
     happens only after the new value holds its own reference (a self-
     assign through the pointer stays safe). }
   if AStmt.BaseTy = nil then
-    NotYet('pointer write with unresolved base type', AStmt);
+    InternalError('pointer write with no pointee type (the front end ' +
+      'resolves P^)', AStmt);
   { String, class and dynamic-array pointees share one retain/release shape —
     a single refcounted word — differing only in the RTL entry points. }
   if AStmt.BaseTy.IsString() or (AStmt.BaseTy.Kind = tyClass) or
@@ -13116,9 +13129,9 @@ end;
 
 procedure TArm64Backend.EmitElemLoad(AElem: TTypeDesc);
 begin
-  { load the element at [x0] into x0, width by element kind.  Signed
-    2-byte loads need ldrsh (no assembler encoding yet) — NotYet. }
-  if AElem = nil then NotYet('unresolved element type', nil);
+  { load the element at [x0] into x0, width by element kind }
+  if AElem = nil then
+    InternalError('element load with no element type', nil);
   { a jumbo set's VALUE is its bitmap's ADDRESS (every jumbo consumer --
     assignment, operators, membership, arguments -- takes it so), and x0
     already holds that address: there is nothing to load.  Loading it as a
@@ -15063,7 +15076,8 @@ begin
   NFloat := 0;
   StackOff := 0;
   if ADecl = nil then
-    NotYet('call to unresolved routine ''' + AName + '''', nil);
+    InternalError('call to ''' + AName + ''' with no resolved routine (the ' +
+      'front end resolves every call it lets through)', nil);
   { a method receiver was pushed by the caller BEFORE this call: it is the
     first int-class value, popped last into x0 }
   if ASelfPushed then
@@ -16295,7 +16309,8 @@ begin
   if (D = nil) and (FSymTable <> nil) then
     D := FSymTable.FindType(ATD.Name);
   if (D = nil) or not (D is TRecordTypeDesc) then
-    NotYet('unresolved class ''' + ATD.Name + '''', nil);
+    InternalError('class ''' + ATD.Name + ''' with no class descriptor',
+      nil);
   Result := TRecordTypeDesc(D);
 end;
 
@@ -17579,7 +17594,8 @@ begin
     Exit;
   end;
   if AExpr.ObjectName = '' then
-    NotYet('built-in method without a receiver', AExpr);
+    InternalError('built-in method with no receiver (the front end ' +
+      'rejects a bare InheritsFrom / ToString)', AExpr);
   if not EmitCapturedBase('x0', AExpr.ObjectName, True, AExpr.IsVarParam) then
   begin
     EmitLoadSlot('x0', AExpr.ObjectName);
@@ -18010,7 +18026,8 @@ begin
   end;
   MD := TMethodDecl(AStmt.ResolvedMethod);
   if MD = nil then
-    NotYet('unresolved method ''' + AStmt.Name + '''', AStmt);
+    InternalError('method call ''' + AStmt.Name + ''' with no resolved ' +
+      'method (interface calls and Free are lowered above)', AStmt);
   if AStmt.IsStaticCall or MD.IsStatic then
   begin
     EmitDiscardedPlainCall(MD, AStmt.Name, AStmt.Args);
@@ -18279,7 +18296,8 @@ begin
   end;
   MD := TMethodDecl(AExpr.ResolvedMethod);
   if MD = nil then
-    NotYet('unresolved method ''' + AExpr.Name + '''', AExpr);
+    InternalError('method call ''' + AExpr.Name + ''' with no resolved ' +
+      'method (interface calls are lowered above)', AExpr);
   if AExpr.IsStaticCall or MD.IsStatic then
   begin
     { static (class-level) call: no Self, plain call to the mangled name }
