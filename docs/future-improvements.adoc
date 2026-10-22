@@ -372,6 +372,53 @@ fragile toolchain coupling without benefit for a self-hosted debugger.
 *Effort.* Small (documentation + build-system integration for `codesign`);
 moderate for the debug-server architecture.
 
+=== Source-level debugging of macOS arm64 programs with pdr
+
+*What.* pdr cannot debug a macOS arm64 program yet.  Checked on
+2026-10-22, both halves are missing:
+
+* *The compiler drops the debug payload.*  A `--debug-opdf` build emits
+  `__DATA,__opdf` into each object file, but the internal Mach-O linker
+  maps that section to `smDropped` (`TMachOLinker.StreamOfSection` in
+  `blaise.linker.macho.pas`) together with the embedded `.bif` interface,
+  so the executable carries no OPDF data.  The binary itself is fine: it
+  runs, and it is signed with `get-task-allow`.
+* *pdr does not build on macOS arm64.*  `pdr_macos_mach.pas` was written
+  from the XNU headers before Blaise targeted macOS and is marked
+  untested.  It covers x86-64 only, and FPC 3.2.2 (aarch64-darwin) stops
+  at six errors: an undefined `PMachPortT`, the x86 thread-state flavours
+  and a thread-state record declared only under `CPUX86_64`.  The
+  architecture-neutral parts are ready: `TRegisters` has an AArch64 layout,
+  `TArchAArch64Adapter` exists, and `pdr_binary.pas` reads Mach-O,
+  including fat binaries.
+
+*Recommended approach.*
+
+. *Keep the payload.*  Map `__opdf` into the executable in a segment of
+  its own (not loaded, or read-only), mirroring the ELF `.opdf` section.
+  The CodeDirectory then hashes it like any other page, so the signature
+  stays valid.  Keep dropping `__blaise_iface`.
+. *Port the Mach adapter to arm64.*
+.. Registers: `ARM_THREAD_STATE64` (flavour 6) for X0-X28, FP, LR, SP,
+   PC and CPSR, and `ARM_NEON_STATE64` for the float registers.
+.. Breakpoints: a software breakpoint is the 4-byte `BRK #0`
+   (`0xD4200000`), not a 1-byte `INT3`.  `TBreakpointInfo.OriginalByte`
+   becomes a 4-byte original instruction, and on a hit the PC already
+   points at the `BRK`, so it is not rewound.
+.. Single step: set `MDSCR_EL1.SS` through `ARM_DEBUG_STATE64`
+   (flavour 15).
+.. Watchpoints: program the `WVR`/`WCR` pairs in the same debug state.
+.. Write breakpoints with `mach_vm_protect` (adding `VM_PROT_COPY`)
+   before `mach_vm_write`, because text pages are mapped read-execute.
+. *Trust the debugger.*  See the entitlement section above: while
+  developing, run pdr with `sudo` or under Developer Mode, then move to
+  the debug-server design.
+
+*Effort.* Small for the linker change.  Moderate for the Mach adapter:
+the exception-port loop is shared with x86-64, and the work is in the
+arm64 register, breakpoint and step primitives.  Verify with pdr's
+integration suite (`tests/integration`) on the Mac mini.
+
 == arm64 — Beyond the macOS Backend
 
 The macOS arm64 backend reached parity with x86-64 on 2026-10-22: every
