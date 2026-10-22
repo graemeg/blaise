@@ -114,6 +114,12 @@ type
       element write through an array field of it, and (X as T).Free(),
       which frees X itself as TC(X).Free() does }
     procedure TestParse_ParenReceiverStmt_CallAndElemWrite;
+    { a statement chain that goes on past an indexed property -- a call on
+      H.Items[0], a field write through it, the same one link further
+      down -- keeps the index on the property, as the expression form does
+      (it was rejected: "requires an index expression"); a Grid[I][J] write
+      keeps both indices }
+    procedure TestParse_IndexedPropertyChainStmt_KeepsIndex;
     { an except handler, an attribute use and a getter call carry the class
       descriptor they resolved to, so codegen never re-resolves the name
       (a program type would capture a used unit's namesake) }
@@ -1383,6 +1389,60 @@ begin
     S := TMethodCallStmt(Prog.Block.Stmts.Items[2]);
     AssertTrue('Free through as targets the operand',
       (S.ObjExpr = nil) and SameText(S.ObjectName, 'C'));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TClassTests.TestParse_IndexedPropertyChainStmt_KeepsIndex;
+var
+  Prog: TProgram;
+  S: TMethodCallStmt;
+  FA: TFieldAssignment;
+  SA: TStaticSubscriptAssign;
+begin
+  Prog := AnalyseSrc(
+    '''
+    program P;
+    type
+      TA = class N: Integer; procedure Show(); end;
+      THolder = class
+        FA: TA;
+        Sub: THolder;
+        Grid: array[0..1] of array[0..1] of Integer;
+        function GetItem(I: Integer): TA;
+        property Items[I: Integer]: TA read GetItem;
+      end;
+    procedure TA.Show(); begin end;
+    function THolder.GetItem(I: Integer): TA; begin Result := FA end;
+    var
+      H: THolder;
+    begin
+      H.Items[0].Show();
+      H.Items[1].N := 5;
+      H.Sub.Items[2].Show();
+      H.Grid[1][0] := 7
+    end.
+    ''');
+  try
+    S := TMethodCallStmt(Prog.Block.Stmts.Items[0]);
+    AssertTrue('a call through the property keeps its index',
+      (S.ObjExpr is TFieldAccessExpr) and
+      (TFieldAccessExpr(S.ObjExpr).PropIndexExpr <> nil));
+    FA := TFieldAssignment(Prog.Block.Stmts.Items[1]);
+    AssertTrue('a field write through it keeps the index',
+      (FA.ObjExpr is TFieldAccessExpr) and
+      (TFieldAccessExpr(FA.ObjExpr).PropIndexExpr <> nil) and
+      SameText(FA.FieldName, 'N'));
+    S := TMethodCallStmt(Prog.Block.Stmts.Items[2]);
+    AssertTrue('one link further down',
+      (S.ObjExpr is TFieldAccessExpr) and
+      (TFieldAccessExpr(S.ObjExpr).PropIndexExpr <> nil));
+    SA := TStaticSubscriptAssign(Prog.Block.Stmts.Items[3]);
+    AssertTrue('Grid[1][0] := V keeps the first index on the field',
+      (SA.BaseExpr is TFieldAccessExpr) and
+      (TFieldAccessExpr(SA.BaseExpr).PropIndexExpr <> nil) and
+      (SA.IndexExpr <> nil));
   finally
     Prog.Free();
   end;

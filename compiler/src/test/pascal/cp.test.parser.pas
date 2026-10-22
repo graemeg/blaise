@@ -1090,11 +1090,17 @@ begin
       Prog.Block.Stmts.Items[0] is TFieldAssignment);
     Fld := TFieldAssignment(Prog.Block.Stmts.Items[0]);
     AssertEquals('final field', 'Y', Fld.FieldName);
-    AssertTrue('on the element', Fld.ObjExpr is TStringSubscriptExpr);
+    { the index stays on the field node, as in the expression form
+      (FoldFieldSubscript), so an indexed property reads alike }
+    AssertTrue('on the element', (Fld.ObjExpr is TFieldAccessExpr) and
+      (TFieldAccessExpr(Fld.ObjExpr).PropIndexExpr <> nil));
     AssertTrue('A.B.Grid[I][J] := V is an element write',
       Prog.Block.Stmts.Items[1] is TStaticSubscriptAssign);
     Sub := TStaticSubscriptAssign(Prog.Block.Stmts.Items[1]);
-    AssertTrue('of the row the chain yields', Sub.BaseExpr is TStringSubscriptExpr);
+    AssertTrue('of the row the chain yields',
+      (Sub.BaseExpr is TFieldAccessExpr) and
+      (TFieldAccessExpr(Sub.BaseExpr).PropIndexExpr <> nil) and
+      (Sub.IndexExpr <> nil));
     AssertTrue('A.B.Handlers[I](X) is a call through the element',
       Prog.Block.Stmts.Items[2] is TExprCallStmt);
   finally

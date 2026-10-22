@@ -120,6 +120,11 @@ type
       receiver shape, bare P[I] reads and writes in a method, a default
       property on a record's class FIELD, and Double / Single reads }
     procedure TestRun_IndexedPropertyForms;
+    { statements that go on past an indexed property: a call on H.Items[0],
+      field and element writes through it, the same one link further down,
+      and writes past array-field elements in the same chains (the property
+      forms were rejected: "requires an index expression") }
+    procedure TestRun_StatementChainPastIndexedProperty;
   end;
 
 implementation
@@ -1511,6 +1516,58 @@ begin
     CompileAndRunWithUnit('RProps', USrc, Src, RunOut, Code));
   AssertEquals('exit code', 0, Code);
   AssertEquals('stdout', '3 4 25 v 3 4' + LE + '61 5 8 2' + LE + '10' + LE, RunOut);
+end;
+
+procedure TE2EPropertyTests.TestRun_StatementChainPastIndexedProperty;
+const
+  Src = '''
+    program P;
+    type
+      TA = class N: Integer; Arr: array[0..2] of Integer; procedure Show(); end;
+      TRec = record V: Integer; G: array[0..1] of array[0..1] of Integer; end;
+      THolder = class
+        FA: TA;
+        Recs: array[0..1] of TRec;
+        Objs: array of TA;
+        Grid: array[0..1] of array[0..1] of Integer;
+        Sub: THolder;
+        function GetItem(I: Integer): TA;
+        procedure SetItem(I: Integer; V: TA);
+        property Items[I: Integer]: TA read GetItem write SetItem;
+      end;
+    procedure TA.Show(); begin WriteLn('show ', N, ' ', Arr[1]) end;
+    function THolder.GetItem(I: Integer): TA; begin Result := FA end;
+    procedure THolder.SetItem(I: Integer; V: TA); begin FA := V end;
+    var H: THolder;
+    begin
+      H := THolder.Create(); H.FA := TA.Create(); H.FA.N := 5;
+      H.Sub := H;
+      SetLength(H.Objs, 2); H.Objs[1] := H.FA;
+      H.Items[0].Show();
+      H.Items[0].N := 6;
+      H.Items[0].Arr[1] := 7;
+      H.Items[0].Show();
+      H.Sub.Items[0].N := 8;
+      H.Sub.Items[1].Show();
+      H.Recs[1].V := 9;
+      H.Recs[1].G[1][0] := 10;
+      H.Grid[1][1] := 12;
+      H.Sub.Grid[1][0] := 14;
+      H.Sub.Recs[0].V := 15;
+      H.Objs[1].N := 16;
+      H.Sub.Objs[1].Arr[1] := 17;
+      H.Sub.Objs[1].Show();
+      H.Items[0] := H.FA;
+      H.Sub := nil;
+      WriteLn(H.Recs[1].V, ' ', H.Recs[1].G[1][0], ' ', H.Grid[1][1], ' ',
+        H.Grid[1][0], ' ', H.Recs[0].V)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'show 5 0' + LE + 'show 6 7' + LE + 'show 8 7' + LE + 'show 16 17' + LE +
+    '9 10 12 14 15' + LE, 0);
 end;
 
 initialization

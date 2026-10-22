@@ -17903,6 +17903,18 @@ begin
       if TFieldAccessExpr(AStmt.ObjExpr).FieldInfo = nil then
         InternalError('Free on a field access with no field (a getter or ' +
           'static read is owned and took the arm above)', AStmt);
+      if TFieldAccessExpr(AStmt.ObjExpr).IsArrayAccess then
+      begin
+        { X.Arr[I].Free(): release AND nil the ELEMENT the index selects
+          (the field's own address is element 0) }
+        EmitFieldElemAddr(TFieldAccessExpr(AStmt.ObjExpr));
+        EmitPushX0();
+        Self.Emit(#9'ldr x0, [x0]');
+        EmitCallSym('_ClassRelease');
+        EmitPopTo('x9');
+        Self.Emit(#9'str xzr, [x9]');
+        Exit;
+      end;
       if TFieldAccessExpr(AStmt.ObjExpr).Base <> nil then
       begin
         { chained receiver: the base expression yields the instance.  An

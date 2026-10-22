@@ -208,6 +208,7 @@ type
     function  CallChainStmt(AExpr: TASTExpr; ALine, ACol: Integer): TASTStmt;
     function  ChainTailStmt(ABase: TASTExpr; const ARootName: string;
       ALine, ACol: Integer): TASTStmt;
+    function  FoldFieldSubscript(ASub: TStringSubscriptExpr): TASTExpr;
   public
     constructor Create(ALexer: TLexer);
     destructor Destroy; override;
@@ -3860,10 +3861,14 @@ begin
     Exit(FldAssign);
   end;
   if (Chain is TStringSubscriptExpr) and
-     (TStringSubscriptExpr(Chain).StrExpr is TFieldAccessExpr) then
+     (TStringSubscriptExpr(Chain).StrExpr is TFieldAccessExpr) and
+     (TFieldAccessExpr(TStringSubscriptExpr(Chain).StrExpr).PropIndexExpr =
+        nil) then
   begin
     { ...Field[I] := V -- an element of an array-typed field (or an indexed
-      property write; the semantic pass tells them apart) }
+      property write; the semantic pass tells them apart).  A field that
+      already holds an index (Grid[I][J] := V) is the element-of-element
+      case below. }
     Sub := TStringSubscriptExpr(Chain);
     Fld := TFieldAccessExpr(Sub.StrExpr);
     FldAssign := TFieldAssignment.Create();
@@ -3903,6 +3908,31 @@ begin
   raise EParseError.Create(Format(
     'Invalid assignment target at line %d col %d in %s',
     [ALine, ACol, FLexer.Filename]));
+end;
+
+function TParser.FoldFieldSubscript(ASub: TStringSubscriptExpr): TASTExpr;
+{ A statement chain that goes on past Field[I] (H.Items[0].Show();
+  O.Arr[1].N := V) holds the subscript in the field node's PropIndexExpr,
+  the shape the expression parser builds for the same designator: the
+  semantic pass then reads it as an array element or an indexed property
+  alike.  As a separate subscript node an indexed property was analysed
+  without its index ("requires an index expression").  Returns ASub
+  unchanged when its base is not a field still free to take the index;
+  otherwise frees it and returns the field node. }
+var
+  Fld: TFieldAccessExpr;
+begin
+  Result := ASub;
+  if not (ASub.StrExpr is TFieldAccessExpr) then
+    Exit;
+  Fld := TFieldAccessExpr(ASub.StrExpr);
+  if Fld.PropIndexExpr <> nil then
+    Exit;
+  Fld.PropIndexExpr := ASub.IndexExpr;
+  ASub.IndexExpr := nil;
+  ASub.StrExpr := nil;
+  ASub.Free();
+  Result := Fld;
 end;
 
 function TParser.CallChainStmt(AExpr: TASTExpr; ALine, ACol: Integer): TASTStmt;
@@ -4519,7 +4549,7 @@ begin
       begin
         { Chain after subscript: Self.FStack[I].Count := ... or
           Self.FStack[I].Method(args) }
-        ChainBase := SubNode;
+        ChainBase := Self.FoldFieldSubscript(SubNode);
         SubNode := nil;
         try
           repeat
@@ -4582,7 +4612,8 @@ begin
                 unconditional raise below rejects the '.:=' as "after chain". }
               if Check(tkAssign) then
               begin
-                if SubNode.StrExpr is TFieldAccessExpr then
+                if (SubNode.StrExpr is TFieldAccessExpr) and
+                   (TFieldAccessExpr(SubNode.StrExpr).PropIndexExpr = nil) then
                 begin
                   { …Field[idx] := value — element write into an array-typed
                     field; rebuild as a TFieldAssignment with the subscript as
@@ -4623,6 +4654,7 @@ begin
                   raise;
                 end;
               end;
+              ChainBase := Self.FoldFieldSubscript(SubNode);
             end
             else
               Break;
@@ -4707,21 +4739,18 @@ begin
             if not Check(tkAssign) then
             begin
               { the chain goes on past the element -- A.B.Arr[I].F := V,
-                A.B.Grid[I][J] := V, A.B.Handlers[I](X); }
+                A.B.Grid[I][J] := V, A.B.Handlers[I](X), A.B.Items[I].M();
+                the index stays on the field node (FoldFieldSubscript) }
               FldNode := TFieldAccessExpr.Create();
               FldNode.Line := Line;
               FldNode.Col := Col;
               FldNode.Base := FldAssign.ObjExpr;
               FldNode.FieldName := FldAssign.FieldName;
               FldAssign.ObjExpr := nil;
-              SubNode := TStringSubscriptExpr.Create();
-              SubNode.Line := Line;
-              SubNode.Col := Col;
-              SubNode.StrExpr := FldNode;
-              SubNode.IndexExpr := FldAssign.PropIndexExpr;
+              FldNode.PropIndexExpr := FldAssign.PropIndexExpr;
               FldAssign.PropIndexExpr := nil;
               FldAssign.Free();
-              Exit(Self.ChainTailStmt(SubNode, Name, Line, Col));
+              Exit(Self.ChainTailStmt(FldNode, Name, Line, Col));
             end;
             Expect(tkAssign);
             FldAssign.Expr := ParseExpr();
