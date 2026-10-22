@@ -946,7 +946,7 @@ end;
 
 function CodegenMangle(const AName: string): string;
 var
-  I, C: Integer;
+  I, C, Depth: Integer;
   Clean: Boolean;
 begin
   { Fast path: the overwhelming majority of names contain none of the mangled
@@ -957,7 +957,7 @@ begin
   begin
     C := StrAt(AName, I);
     if (C = 60) or (C = 62) or (C = 44) or (C = 36) or (C = 64) or
-       (C = 94) or (C = 32) then
+       (C = 94) or (C = 32) or (C = 91) then
     begin
       Clean := False;
       break;
@@ -966,9 +966,37 @@ begin
   if Clean then
     Exit(AName);
   Result := '';
+  Depth := 0;
   for I := 0 to Length(AName) - 1 do
   begin
     C := StrAt(AName, I);
+    { the bounds of a static-array type argument (TBox<array[-1..3] of
+      Integer> -> TBox_array_m1_3_of_Integer): '[' opens them, '..' becomes
+      one '_', a minus sign 'm', ']' closes them.  Outside brackets a '.'
+      is left alone, so no existing symbol changes (GH #228: the x86-64
+      internal assembler rejected the bracketed names) }
+    if (C = 91) then
+    begin
+      Result := Result + '_';
+      Inc(Depth);
+      Continue;
+    end;
+    if (Depth > 0) and (C = 93) then
+    begin
+      Dec(Depth);
+      Continue;
+    end;
+    if (Depth > 0) and (C = 46) then
+    begin
+      if (I = 0) or (StrAt(AName, I - 1) <> 46) then
+        Result := Result + '_';
+      Continue;
+    end;
+    if (Depth > 0) and (C = 45) then
+    begin
+      Result := Result + 'm';
+      Continue;
+    end;
     case C of
       60:  Result := Result + '_';    { '<' }
       62:  ;                          { '>' — skip }

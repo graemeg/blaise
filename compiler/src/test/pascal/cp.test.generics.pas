@@ -113,6 +113,11 @@ type
     procedure TestSemantic_Diamond_TwoArgs_InfersType;
     procedure TestCodegen_Diamond_SingleArg_EmitsSameIR;
     procedure TestCodegen_Diamond_TwoArgs_EmitsSameIR;
+    { GH #228: a static-array type argument (TBox<array[-1..3] of Integer>)
+      mangles to an assembler-safe symbol -- '[', '..', ']' and a negative
+      bound's '-' became part of the instance's symbols, which the x86-64
+      internal assembler rejected }
+    procedure TestCodegen_StaticArrayTypeArg_MangledSymbols;
   end;
 
 implementation
@@ -1292,6 +1297,37 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TGenericsTests.TestCodegen_StaticArrayTypeArg_MangledSymbols;
+const
+  Src = '''
+    program P;
+    type
+      TArr = array[-1..3] of Integer;
+      TBox<T> = class
+        V: T;
+        procedure Put(const A: T);
+      end;
+    procedure TBox<T>.Put(const A: T); begin V := A end;
+    var B: TBox<TArr>; A: TArr;
+    begin
+      B := TBox<TArr>.Create();
+      B.Put(A)
+    end.
+    ''';
+var
+  AsmX, AsmA: string;
+begin
+  AsmX := GenAsm(Src, TargetX86_64);
+  AsmA := GenAsm(Src, TargetArm64);
+  AssertEquals('the instance symbols use the mangled argument', '',
+    AsmMissing(Src, 'TBox_array_m1_3_of_Integer_Put:',
+      'TBox_array_m1_3_of_Integer_Put:'));
+  AssertTrue('no bracket in an x86-64 symbol',
+    Pos('TBox_array[', AsmX) < 0);
+  AssertTrue('no bracket in an arm64 symbol',
+    Pos('TBox_array[', AsmA) < 0);
 end;
 
 initialization

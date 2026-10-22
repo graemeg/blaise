@@ -80,6 +80,10 @@ type
     { Member visibility survives import of a generic }
     procedure TestRun_GenericImport_PrivateMethodIsRejected;
     procedure TestRun_GenericImport_PublicMethodStillReachable;
+    { GH #228: TDictionary with numeric keys and values, and with a static
+      array as the value type (x86-64 failed to assemble the instance:
+      its symbols carried the '[0..3]' of the array type) }
+    procedure TestRun_Dictionary_NumericAndStaticArrayTypeArgs;
   end;
 
 implementation
@@ -1099,6 +1103,50 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '2yy2' + LE + '7' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_Dictionary_NumericAndStaticArrayTypeArgs;
+const
+  Src = '''
+    program P;
+    uses Generics.Collections;
+    type
+      Tar = array[0..3] of Integer;
+      TNeg = array[-2..1] of string;
+    var
+      D1: TDictionary<Byte, Tar>;
+      D2: TDictionary<Byte, Integer>;
+      D3: TDictionary<Integer, TNeg>;
+      A: Tar;
+      N: TNeg;
+      X: Byte;
+    begin
+      D1 := TDictionary<Byte, Tar>.Create();
+      for X := 0 to 4 do
+      begin
+        A[3] := X * 10;
+        D1.Add(X, A)
+      end;
+      for X := 0 to 4 do
+      begin
+        A := D1[X];
+        Write(A[3], ' ')
+      end;
+      WriteLn();
+      D2 := TDictionary<Byte, Integer>.Create();
+      for X := 0 to 4 do
+        D2.Add(X, 32 * X);
+      WriteLn(D2[4]);
+      D3 := TDictionary<Integer, TNeg>.Create();
+      N[-2] := 'lo';
+      N[1] := 'hi';
+      D3.Add(-7, N);
+      WriteLn(D3[-7][-2], ' ', D3[-7][1])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '0 10 20 30 40 ' + LE + '128' + LE + 'lo hi' + LE, 0);
 end;
 
 initialization
