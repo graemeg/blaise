@@ -10,7 +10,6 @@
   </build>
 
   <modules>
-    <module activeByDefault="false">runtime</module>
     <module activeByDefault="false">stdlib</module>
     <module activeByDefault="false">bindings</module>
     <module>compiler</module>
