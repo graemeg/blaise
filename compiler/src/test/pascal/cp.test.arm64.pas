@@ -386,6 +386,10 @@ type
     procedure TestNestedRoutine_NoCapture_SiblingSymbol;
     procedure TestNestedRoutine_CaptureScalar_ReadWrite;
     procedure TestNestedRoutine_CaptureString_ARCThroughCap;
+    { a variable a closure ALSO captures lives in the packed closure env, so a
+      nested routine stores into it at the variable's width (a full 8-byte
+      store into a 4-byte Integer field overwrote its neighbour) }
+    procedure TestNestedRoutine_StoreIntoClosureEnvField_ExactWidth;
     { leg 17 regression: when captures + register args exceed 8, the outgoing
       stack area MUST be reserved — ComputeStackArgAreaEx counts the capture
       pointer args (in lockstep with EmitCall) so the caller reserves a region
@@ -8782,6 +8786,39 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64BackendTests.TestNestedRoutine_StoreIntoClosureEnvField_ExactWidth;
+var
+  AsmT, Body: string;
+begin
+  AsmT := GenAsm(
+    '''
+    program P;
+    procedure Outer;
+    var
+      I, J: Integer;
+      Cl: reference to procedure;
+      procedure Init;
+      begin
+        I := 1;
+        J := 2
+      end;
+    begin
+      Init();
+      Cl := procedure begin WriteLn(I, ' ', J) end;
+      Cl()
+    end;
+    begin
+      Outer()
+    end.
+    ''', TargetArm64);
+  Body := Copy(AsmT, Pos('_Outer_Init:', AsmT), Length(AsmT));
+  Body := Copy(Body, 0, Pos(#9'ret', Body));
+  AssertTrue('Init stores the Integer at its own width',
+    Pos(#9'str w0, [x9]', Body) >= 0);
+  AssertTrue('Init never stores 8 bytes into a 4-byte env field',
+    Pos(#9'str x0, [x9]', Body) < 0);
 end;
 
 procedure TArm64BackendTests.TestNestedRoutine_CaptureString_ARCThroughCap;

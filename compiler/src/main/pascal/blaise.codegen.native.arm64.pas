@@ -211,6 +211,10 @@ type
     FEnvCaps: TStringList;       { owned: CapturedVars + EnvCaptured merged for
                                    a routine with a closure env (FCapturedVars
                                    points here while it is emitted) }
+    FParentPacked: TStringList;  { borrowed: while an enclosing routine's
+                                   nested routines are emitted, every name
+                                   that lives in a PACKED env of that routine
+                                   or one further out }
     FFrameVarParams: TStringList; { the current routine's own var/out params
                                    (their slot holds the caller's address) }
     FCapVarParams: TStringList;  { names, among the current routine's
@@ -1131,11 +1135,12 @@ begin
     EmitSlotAddr(AReg, AName);
 end;
 
-{ True when AName is captured into a closure env record.  Unlike a
-  nested-routine capture -- whose '_cap_' points at an 8-byte frame slot --
-  an env field is packed at its declared width, so a store into it must be
-  width-exact (an 8-byte store into a 4-byte Integer field overwrote the
-  next field). }
+{ True when AName lives in a closure env record: this routine's own env, or
+  -- in a nested routine -- an enclosing routine's (EmitFunctionDef adds those
+  from FParentPacked).  Unlike a plain nested-routine capture, whose '_cap_'
+  points at an 8-byte frame slot, an env field is packed at its declared
+  width, so a store into it must be width-exact (an 8-byte store into a
+  4-byte Integer field overwrote the next field). }
 function TArm64Backend.IsEnvCaptured(const AName: string): Boolean;
 begin
   Result := (FCurEnvCaptured <> nil) and
@@ -13904,6 +13909,7 @@ var
   Par: TMethodParam;
   SavedArmNodes: TStringList;
   SavedArmPos: Integer;
+  OuterPacked, ChildPacked, SavedParent: TStringList;
 begin
   Sym := RoutineSym(ADecl, ADecl.Name);
   { nostackframe: the body is an inline-asm block that owns the entire
@@ -13928,6 +13934,17 @@ begin
     EmitStmtList(ADecl.Body.Stmts);
     Exit;
   end;
+  { The captures this routine reaches through '_cap_' that live in a PACKED
+    closure env of an enclosing routine: a variable both a closure and a
+    nested routine capture is hoisted into the env, so the nested routine's
+    '_cap_' points at a field as wide as the variable's type, not at an
+    8-byte frame slot.  An enclosing routine's own variable of the same name
+    is not among its captures, so a shadowing declaration drops out here. }
+  OuterPacked := TStringList.Create();
+  if (FParentPacked <> nil) and (ADecl.CapturedVars <> nil) then
+    for I := 0 to ADecl.CapturedVars.Count - 1 do
+      if FParentPacked.IndexOf(ADecl.CapturedVars[I]) >= 0 then
+        OuterPacked.Add(ADecl.CapturedVars[I]);
   { Emit nested routines declared inside this body FIRST, as sibling
     top-level symbols mangled OuterName_InnerName (leg 17).  This runs
     before any of THIS routine's frame state is built, and each recursive
@@ -13938,6 +13955,14 @@ begin
     emission below.  Mirrors x86-64 EmitFunctionDef (:20800-20812/:20841). }
   if ADecl.Body <> nil then
   begin
+    ChildPacked := TStringList.Create();
+    ChildPacked.AddStrings(OuterPacked);
+    if ADecl.EnvCaptured <> nil then
+      ChildPacked.AddStrings(ADecl.EnvCaptured);
+    if ADecl.BlockEnvCaptured <> nil then
+      ChildPacked.AddStrings(ADecl.BlockEnvCaptured);
+    SavedParent := FParentPacked;
+    FParentPacked := ChildPacked;
     for I := 0 to ADecl.Body.ProcDecls.Count - 1 do
     begin
       if TMethodDecl(ADecl.Body.ProcDecls.Items[I]).Body = nil then
@@ -13959,6 +13984,8 @@ begin
       Self.EmitFunctionDef(
         TMethodDecl(ADecl.Body.ProcDecls.Items[I]), AWeakBind);
     end;
+    FParentPacked := SavedParent;
+    ChildPacked.Free();
   end;
   FCapturedVars := ADecl.CapturedVars;
   FCurEnvCaptured := ADecl.EnvCaptured;
@@ -13982,6 +14009,13 @@ begin
       FEnvPacked.AddStrings(ADecl.BlockEnvCaptured);
     end;
     FCapturedVars := FEnvCaps;
+    FCurEnvCaptured := FEnvPacked;
+  end;
+  if OuterPacked.Count > 0 then
+  begin
+    if FCurEnvCaptured <> FEnvPacked then
+      FEnvPacked.Clear();
+    FEnvPacked.AddStrings(OuterPacked);
     FCurEnvCaptured := FEnvPacked;
   end;
   FIsFunction := ADecl.ResolvedReturnType <> nil;
@@ -14676,6 +14710,7 @@ begin
   FFrameSize := 0;
   FCapturedVars := nil;   { leg 17: end the capture window for this routine }
   FCurEnvCaptured := nil;
+  OuterPacked.Free();
 end;
 
 function TArm64Backend.StackArgSize(AArg: TASTExpr): Integer;

@@ -263,6 +263,11 @@ type
     procedure TestRun_TMethodCastOfCallResult;
     { a cast of a call result as a method-pointer / closure argument }
     procedure TestRun_FatCastOfCallResult_AsArgument;
+    { variables a closure and nested routines both capture (one level down
+      and two): the nested routines' assignments, Inc/Dec and for-loop
+      counter store into the packed env fields at each variable's width
+      (arm64 stored 8 bytes and clobbered the neighbouring fields) }
+    procedure TestRun_NestedRoutineWritesClosureEnvFields;
   end;
 
 implementation
@@ -3567,6 +3572,64 @@ begin
     'nested 7' + LE +
     'anon 8' + LE +
     'global 1' + LE, 0);
+end;
+
+procedure TE2EAnonMethodTests.TestRun_NestedRoutineWritesClosureEnvFields;
+const
+  Src = '''
+    program P;
+    procedure Outer;
+    var
+      B: Byte;
+      S: SmallInt;
+      I, J: Integer;
+      L: Int64;
+      Ok: Boolean;
+      K: Integer;
+      Cl: reference to procedure;
+      procedure Init;
+      begin
+        B := 200; S := -3; I := -1; J := 2; L := -5; Ok := True
+      end;
+      procedure Bump;
+      begin
+        Inc(I); Dec(J, 4); Inc(B, 100); S := S * 1000
+      end;
+      procedure Loop;
+      begin
+        for K := 1 to 3 do
+          L := L + K
+      end;
+      procedure Mid;
+        procedure Deep;
+        begin
+          Inc(I, 10); J := J * 3
+        end;
+      begin
+        Deep()
+      end;
+    begin
+      Init();
+      Cl := procedure
+        begin
+          WriteLn(B, ' ', S, ' ', I, ' ', J, ' ', L, ' ', Ok)
+        end;
+      Cl();
+      Bump();
+      Loop();
+      Mid();
+      Cl();
+      WriteLn(B, ' ', S, ' ', I, ' ', J, ' ', L, ' ', Ok)
+    end;
+    begin
+      Outer()
+    end.
+    ''';
+begin
+  AssertRunsOnAll(Src,
+    '200 -3 -1 2 -5 True' + LineEnding +
+    '44 -3000 10 -6 1 True' + LineEnding +
+    '44 -3000 10 -6 1 True' + LineEnding, 0);
 end;
 
 initialization
