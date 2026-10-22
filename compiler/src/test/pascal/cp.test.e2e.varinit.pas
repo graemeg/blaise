@@ -32,6 +32,10 @@ type
     procedure TestRun_ArrayInit_NonZeroBased;
     procedure TestRun_MultipleInits;
     procedure TestRun_InitThenReassign;
+    { set initialisers on program and unit variables: a small set, a
+      64-member set, a jumbo set and the empty set hold exactly their
+      members (rejected in a program; silently empty in a unit) }
+    procedure TestRun_SetInit_ProgramAndUnit;
     procedure TestRun_FloatConstFold_Parens;
     procedure TestRun_FloatConstFold_NegativeMul;
   end;
@@ -216,6 +220,61 @@ const Src =
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '-3' + LineEnding, 0);
+end;
+
+procedure TE2EVarInitTests.TestRun_SetInit_ProgramAndUnit;
+const
+  UnitSrc =
+    '''
+    unit SetInitU;
+    interface
+    type
+      TBig = 0..199;
+      TJumbo = set of TBig;
+      TWide = 0..63;
+      TWideSet = set of TWide;
+    var
+      UJ: TJumbo = [1, 150, 199];
+      UW: TWideSet = [0, 40, 63];
+    implementation
+    end.
+    ''';
+  Src =
+    '''
+    program P;
+    uses SetInitU;
+    type
+      TEn = (eA, eB, eC, eD);
+      TS = set of TEn;
+    var
+      S: TS = [eA, eC..eD];
+      E: TS = [];
+      J: TJumbo = [2, 100];
+    var I: Integer;
+    begin
+      WriteLn(eA in S, ' ', eB in S, ' ', eC in S, ' ', eD in S, ' ', E = []);
+      WriteLn(2 in J, ' ', 3 in J, ' ', 100 in J);
+      WriteLn(1 in UJ, ' ', 150 in UJ, ' ', 199 in UJ, ' ', 2 in UJ);
+      WriteLn(0 in UW, ' ', 40 in UW, ' ', 63 in UW, ' ', 41 in UW);
+      S := S - [eA];
+      Include(UJ, 7);
+      WriteLn(eA in S, ' ', 7 in UJ)
+    end.
+    ''';
+var
+  Outp: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertTrue('compiles and runs',
+    CompileAndRunWithUnit('SetInitU', UnitSrc, Src, Outp, Rc));
+  AssertEquals('exit code', 0, Rc);
+  AssertEquals('stdout',
+    'True False True True True' + LineEnding +
+    'True False True' + LineEnding +
+    'True True True False' + LineEnding +
+    'True True True False' + LineEnding +
+    'False True' + LineEnding, Outp);
 end;
 
 initialization

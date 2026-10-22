@@ -17,7 +17,7 @@ interface
 
 uses
   blaise.testing,
-  uLexer, uParser, uAST, uSemantic, uSymbolTable;
+  Classes, SysUtils, uLexer, uParser, uAST, uSemantic, uSymbolTable;
 
 type
   TVarInitTests = class(TTestCase)
@@ -34,6 +34,12 @@ type
     procedure TestSemantic_TypeMismatch_StringIntoInteger_Rejected;
     procedure TestSemantic_LocalInit_Rejected;
     procedure TestSemantic_RecordInit_Rejected;
+    { a set initialiser folds to the bitmask (small set) or byte bitmap
+      (jumbo set) of the variable's own set type; a member of another enum
+      is reported (set initialisers were rejected as not yet supported) }
+    procedure TestSemantic_SetInit_FoldsBitmask;
+    procedure TestSemantic_SetInit_JumboFoldsBytes;
+    procedure TestSemantic_SetInit_WrongEnum_Rejected;
   end;
 
 implementation
@@ -150,6 +156,100 @@ begin
     on E: ESemanticError do Raised := True;
   end;
   AssertTrue('record initialiser rejected', Raised);
+end;
+
+function VarInitOf(AProg: TProgram; const AName: string): TConstDecl;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to AProg.Block.Decls.Count - 1 do
+    if TVarDecl(AProg.Block.Decls.Items[I]).Names.IndexOf(AName) >= 0 then
+      Exit(TVarDecl(AProg.Block.Decls.Items[I]).InitConst);
+end;
+
+function AnalysedProg(const ASrc: string): TProgram;
+var
+  L: TLexer;
+  P: TParser;
+  A: TSemanticAnalyser;
+begin
+  L := TLexer.Create(ASrc);
+  P := TParser.Create(L);
+  try
+    Result := P.Parse();
+  finally
+    P.Free(); L.Free();
+  end;
+  A := TSemanticAnalyser.Create();
+  try
+    A.Analyse(Result);
+  finally
+    A.Free();
+  end;
+end;
+
+procedure TVarInitTests.TestSemantic_SetInit_FoldsBitmask;
+var
+  Prog: TProgram;
+begin
+  Prog := AnalysedProg('''
+    program X;
+    type
+      TEn = (eA, eB, eC, eD);
+      TS = set of TEn;
+    var
+      S: TS = [eA, eC..eD];
+      E: TS = [];
+    begin
+    end.
+    ''');
+  try
+    AssertEquals('[eA, eC..eD] bitmask', Int64(13), VarInitOf(Prog, 'S').IntVal);
+    AssertEquals('[] bitmask', Int64(0), VarInitOf(Prog, 'E').IntVal);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TVarInitTests.TestSemantic_SetInit_JumboFoldsBytes;
+var
+  Prog: TProgram;
+  CD: TConstDecl;
+begin
+  Prog := AnalysedProg('''
+    program X;
+    type
+      TBig = 0..199;
+      TJ = set of TBig;
+    var
+      J: TJ = [1, 9, 150];
+    begin
+    end.
+    ''');
+  try
+    CD := VarInitOf(Prog, 'J');
+    AssertTrue('byte bitmap built', CD.ConstSetBytes <> nil);
+    AssertEquals('byte 0 holds member 1', '2', CD.ConstSetBytes[0]);
+    AssertEquals('byte 1 holds member 9', '2', CD.ConstSetBytes[1]);
+    AssertEquals('byte 18 holds member 150', '64', CD.ConstSetBytes[18]);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TVarInitTests.TestSemantic_SetInit_WrongEnum_Rejected;
+var
+  Raised: Boolean;
+begin
+  Raised := False;
+  try
+    AnalyseSrc('program X; type TA = (a1, a2); TB = (b1, b2); ' +
+      'TSA = set of TA; var S: TSA = [b1]; begin end.');
+  except
+    on E: ESemanticError do Raised := True;
+  end;
+  AssertTrue('member of another enum rejected', Raised);
 end;
 
 initialization

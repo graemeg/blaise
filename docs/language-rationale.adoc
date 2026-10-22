@@ -5928,6 +5928,7 @@ var
   G: Integer = 42;
   S: string = 'hello';
   A: array[0..2] of Integer = (10, 20, 30);
+  F: TFlags = [fRead, fWrite];
 ----
 
 The value is folded at compile time and emitted directly into the data
@@ -5945,11 +5946,18 @@ as follows:
 * *Single name.*  `var A, B: Integer = 1` is a parse error — an initialiser
   applies to exactly one variable, avoiding the ambiguity of whether the value
   is shared or per-name.
-* *Arrays only for aggregates.*  Array initialisers reuse the existing
-  array-constant machinery.  Record and inline-set initialisers are not yet
-  supported (Blaise has no record-constant infrastructure, and a set
-  initialiser would collide with the const-symbol the set folder defines); both
-  are rejected with a clear diagnostic rather than silently mis-emitted.
+* *Arrays and sets for aggregates.*  Array initialisers reuse the existing
+  array-constant machinery.  A set initialiser folds exactly as a set constant
+  does (members and ranges resolved against the variable's own set type), to a
+  bitmask for a small set or a byte bitmap for a jumbo set.  Record
+  initialisers are not yet supported (Blaise has no record-constant
+  infrastructure) and are rejected with a clear diagnostic rather than
+  silently mis-emitted.
+* *The same in a unit.*  A unit's initialisers are folded and checked on every
+  path, including the normal build where the unit is compiled with the program
+  that uses it.  Until 2026-10-22 that path skipped them: an expression or
+  named-constant initialiser silently started at 0, and a set initialiser
+  compiled to an empty set where a program rejected it.
 
 === Rationale
 
@@ -5970,8 +5978,11 @@ code is generated; the loader provides the value.
 * *Allow local initialisers (assignment at scope entry).*  Deferred.  It is a
   reasonable future extension but mixes two emission models; the global
   data-section path is the clean baseline.
-* *Support record/set initialisers now.*  Deferred until record-constant
-  infrastructure exists; rejecting them keeps the feature honest.
+* *Support record initialisers now.*  Deferred until record-constant
+  infrastructure exists; rejecting them keeps the feature honest.  (Set
+  initialisers were deferred on the same grounds until 2026-10-22: the set
+  folder defined a constant symbol that would clash with the variable.  The
+  folding is now separate from defining the symbol.)
 
 == Inline Set Types
 

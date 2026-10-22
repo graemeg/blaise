@@ -12486,6 +12486,28 @@ begin
     FGlobalInits.Add(ASym, Lines);
     Exit;
   end;
+  if AVD.InitConst.IsSet and (AVD.ResolvedType <> nil) and
+     (AVD.ResolvedType.Kind = tySet) then
+  begin
+    { a set initialiser: the jumbo byte bitmap padded to the storage size,
+      else the small-set bitmask (one 8-byte data word, as for integers) }
+    if TSetTypeDesc(AVD.ResolvedType).IsJumbo() then
+    begin
+      Lines := '';
+      for J := 0 to AVD.InitConst.ConstSetBytes.Count - 1 do
+      begin
+        if J > 0 then Lines := Lines + #10;
+        Lines := Lines + #9'.byte ' + AVD.InitConst.ConstSetBytes.Strings[J];
+      end;
+      if AVD.ResolvedType.RawSize() > AVD.InitConst.ConstSetBytes.Count then
+        Lines := Lines + #10 + Format(#9'.zero %d',
+          [AVD.ResolvedType.RawSize() - AVD.InitConst.ConstSetBytes.Count]);
+      FGlobalInits.Add(ASym, Lines);
+    end
+    else
+      FGlobalInits.Add(ASym, Format(#9'.quad %d', [AVD.InitConst.IntVal]));
+    Exit;
+  end;
   if AVD.InitConst.IsString then
   begin
     { the global points at an immortal blob emitted beside the .data

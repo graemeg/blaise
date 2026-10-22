@@ -332,6 +332,8 @@ type
     { Resolve a set-valued const decl (IsSet): fold the member bitmask into
       CD.IntVal and register the const symbol with its tySet type. }
     procedure AnalyseSetConstDecl(ACD: TConstDecl; AIsInterface: Boolean = False);
+    function  ResolveSetConstValue(ACD: TConstDecl; AIsInterface: Boolean;
+      AVarSet: TTypeDesc): TSetTypeDesc;
     function  ResolveSetMemberOrd(const AMember: string; ACD: TConstDecl;
                                   var AEnumDesc: TEnumTypeDesc): Integer;
     procedure AnalyseArrayConstDecls(ABlock: TBlock; AIsInterface: Boolean = False);
@@ -7542,7 +7544,14 @@ begin
   Result := Integer(Ref.Ordinal);
 end;
 
-procedure TSemanticAnalyser.AnalyseSetConstDecl(ACD: TConstDecl; AIsInterface: Boolean);
+{ The value of set literal ACD: resolve its members, settle its set type --
+  AVarSet (a variable's declared set type), else the constant's written
+  type, else the canonical set of the members' enum -- and store the bitmask
+  in ACD.IntVal (small set) or the byte bitmap in ACD.ConstSetBytes (jumbo
+  set).  Nil when an error was reported.  Shared by set constants and
+  set-variable initialisers. }
+function TSemanticAnalyser.ResolveSetConstValue(ACD: TConstDecl;
+  AIsInterface: Boolean; AVarSet: TTypeDesc): TSetTypeDesc;
 var
   I:         Integer;
   Mask:      Int64;
@@ -7553,12 +7562,12 @@ var
   DeclTD:    TTypeDesc;
   CanonName: string;
   ExistTD:   TTypeDesc;
-  Sym:       TSymbol;
   Ords:      TStringList;
   Ord, BIdx, NB, BVal: Integer;
   DotPos, Lo, Hi: Integer;
   LoStr, HiStr: string;
 begin
+  Result   := nil;
   Mask     := 0;
   EnumDesc := nil;
   Ords     := TStringList.Create();
@@ -7591,7 +7600,20 @@ begin
   end;
 
   { Determine the set type descriptor. }
-  if ACD.TypeName <> '' then
+  if AVarSet <> nil then
+  begin
+    { a variable's initialiser: the variable's own set type }
+    SetDesc := TSetTypeDesc(AVarSet);
+    if (EnumDesc <> nil) and (SetDesc.BaseType <> EnumDesc) then
+    begin
+      SemanticError(Format(
+        'Initialiser members of ''%s'' are ''%s'' but its type is set of ''%s''',
+        [ACD.Name, EnumDesc.Name, SetDesc.BaseType.Name]),
+        ACD.Line, ACD.Col);
+      Exit;
+    end;
+  end
+  else if ACD.TypeName <> '' then
   begin
     { Declared set type: const X: TSomeSet = [...].  Must be a set, and its
       base enum must match the members. }
@@ -7636,10 +7658,9 @@ begin
     Exit;
   end;
 
-  Sym := TSymbol.Create(ACD.Name, skConstant, SetDesc);
   if SetDesc.IsJumbo() then
   begin
-    { Jumbo set const: build a byte-array bitmap; the mask can't fit in Int64. }
+    { Jumbo set: build a byte-array bitmap; the mask can't fit in Int64. }
     NB := SetDesc.RawByteSize();
     ACD.ConstSetBytes := TStringList.Create();
     for I := 0 to NB - 1 do
@@ -7651,6 +7672,30 @@ begin
       BVal := StrToInt(ACD.ConstSetBytes.Strings[BIdx]) or (1 shl (Ord and 7));
       ACD.ConstSetBytes.Put(BIdx, IntToStr(BVal));
     end;
+    ACD.IntVal := 0;
+  end
+  else
+  begin
+    { Small set: pack into the Int64 bitmask (existing fast path). }
+    for I := 0 to Ords.Count - 1 do
+      Mask := Mask or (Int64(1) shl StrToInt(Ords.Strings[I]));
+    ACD.IntVal := Mask;
+  end;
+  Result := SetDesc;
+end;
+
+procedure TSemanticAnalyser.AnalyseSetConstDecl(ACD: TConstDecl; AIsInterface: Boolean);
+var
+  SetDesc: TSetTypeDesc;
+  Sym:     TSymbol;
+  I:       Integer;
+begin
+  SetDesc := Self.ResolveSetConstValue(ACD, AIsInterface, nil);
+  if SetDesc = nil then
+    Exit;
+  Sym := TSymbol.Create(ACD.Name, skConstant, SetDesc);
+  if SetDesc.IsJumbo() then
+  begin
     Sym.ConstSetBytes := TStringList.Create();
     for I := 0 to ACD.ConstSetBytes.Count - 1 do
       Sym.ConstSetBytes.Add(ACD.ConstSetBytes.Strings[I]);
@@ -7662,17 +7707,10 @@ begin
     if ACD.ResolvedSetEmitName = '' then
       ACD.ResolvedSetEmitName := Self.NewArrayConstLabel(ACD.Name, AIsInterface);
     Sym.ConstSetLabel := ACD.ResolvedSetEmitName;
-    ACD.IntVal     := 0;
     Sym.ConstValue := 0;
   end
   else
-  begin
-    { Small set: pack into the Int64 bitmask (existing fast path). }
-    for I := 0 to Ords.Count - 1 do
-      Mask := Mask or (Int64(1) shl StrToInt(Ords.Strings[I]));
-    ACD.IntVal     := Mask;
-    Sym.ConstValue := Mask;
-  end;
+    Sym.ConstValue := ACD.IntVal;
   if not FTable.Define(Sym) then
     Sym.Free();   { duplicate — cross-unit shadowing tolerated, like scalar consts }
 end;
@@ -11999,13 +12037,18 @@ begin
       'Record variable initialisers are not yet supported',
       CD.Line, CD.Col);
 
-  { Set initialiser: not yet supported on variables (AnalyseSetConstDecl also
-    defines a const symbol, which would clash with the variable symbol).  Use a
-    named set constant for now. }
+  { Set initialiser: the value a set constant would have (ResolveSetConstValue,
+    without defining a constant symbol, which would clash with the variable);
+    the folded bitmask / byte bitmap becomes the variable's initial data. }
   if CD.IsSet then
-    SemanticError(
-      'Set variable initialisers are not yet supported; use a named constant',
-      CD.Line, CD.Col);
+  begin
+    if Typ.Kind <> tySet then
+      SemanticError(Format(
+        'A set initialiser needs a set type, not ''%s''', [ADecl.TypeName]),
+        CD.Line, CD.Col);
+    Self.ResolveSetConstValue(CD, AIsInterface, Typ);
+    Exit;
+  end;
 
   { Scalar / string initialiser. }
   if CD.IsString and (CD.ConstParts <> nil) then

@@ -2573,6 +2573,29 @@ begin
     Exit;
   end;
 
+  { Set initialiser: the jumbo byte bitmap (padded to the storage size), or
+    the small-set bitmask at the set's own width -- a 33..64-member set is 8
+    bytes, which the 32-bit scalar arm below would truncate. }
+  if CD.IsSet and (AType.Kind = tySet) then
+  begin
+    Self.Emit('.balign 8');
+    if Copy(AName, 0, 2) <> '.L' then
+      Self.Emit(Self.GlobalBindDir(AName) + AName);
+    Self.Emit(AName + ':');
+    if TSetTypeDesc(AType).IsJumbo() then
+    begin
+      for J := 0 to CD.ConstSetBytes.Count - 1 do
+        Self.Emit(#9'.byte ' + CD.ConstSetBytes[J]);
+      if AType.RawSize() > CD.ConstSetBytes.Count then
+        Self.Emit(Format(#9'.skip %d', [AType.RawSize() - CD.ConstSetBytes.Count]));
+    end
+    else if AType.RawSize() > 4 then
+      Self.Emit(Format(#9'.quad %d', [CD.IntVal]))
+    else
+      Self.Emit(Format(#9'.long %d', [CD.IntVal]));
+    Exit;
+  end;
+
   { String scalar: point at an immortal static string header (__sN + 12). }
   if AType.IsString() then
   begin
