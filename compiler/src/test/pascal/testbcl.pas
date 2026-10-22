@@ -37,13 +37,13 @@ type
 
 procedure TSampleTests.TestPassing;
 begin
-  Self.AssertEquals(2, 1 + 1, 'integer addition');
-  Self.AssertTrue(True, 'true is true');
+  Self.AssertEquals('integer addition', 2, 1 + 1);
+  Self.AssertTrue('true is true', True);
 end;
 
 procedure TSampleTests.TestFailing;
 begin
-  Self.AssertEquals(42, 1 + 1, 'deliberate failure');
+  Self.AssertEquals('deliberate failure', 42, 1 + 1);
 end;
 
 begin

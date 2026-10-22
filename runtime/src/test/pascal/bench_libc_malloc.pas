@@ -64,28 +64,28 @@ begin
   WriteLn('====================');
 
   { 1. Small alloc/free churn }
-  BenchStart;
+  BenchStart();
   for I := 0 to SMALL_COUNT - 1 do
   begin
     P := _libc_malloc(32);
     _libc_free(P);
   end;
-  Elapsed := BenchElapsedMs;
+  Elapsed := BenchElapsedMs();
   PrintResult('Small alloc/free (1M x 32B)', Elapsed);
 
   { 2. Mixed sizes }
-  BenchStart;
+  BenchStart();
   for I := 0 to MIXED_COUNT - 1 do
   begin
     J := I mod 5;
     P := _libc_malloc(Sizes[J]);
     _libc_free(P);
   end;
-  Elapsed := BenchElapsedMs;
+  Elapsed := BenchElapsedMs();
   PrintResult('Mixed sizes (500k x 8-2048B)', Elapsed);
 
   { 3. Realloc growth }
-  BenchStart;
+  BenchStart();
   for I := 0 to REALLOC_COUNT - 1 do
   begin
     P := _libc_malloc(16);
@@ -95,26 +95,26 @@ begin
     P := _libc_realloc(P, 256);
     _libc_free(P);
   end;
-  Elapsed := BenchElapsedMs;
+  Elapsed := BenchElapsedMs();
   PrintResult('Realloc growth (100k x 5 steps)', Elapsed);
 
   { 4. Large alloc/free }
-  BenchStart;
+  BenchStart();
   for I := 0 to LARGE_COUNT - 1 do
   begin
     P := _libc_malloc(65536);
     _libc_free(P);
   end;
-  Elapsed := BenchElapsedMs;
+  Elapsed := BenchElapsedMs();
   PrintResult('Large alloc/free (10k x 64KB)', Elapsed);
 
   { 5. Alloc-retain-free-all }
-  BenchStart;
+  BenchStart();
   for I := 0 to RETAIN_COUNT - 1 do
     Blocks[I] := _libc_malloc(64);
   for I := 0 to RETAIN_COUNT - 1 do
     _libc_free(Blocks[I]);
-  Elapsed := BenchElapsedMs;
+  Elapsed := BenchElapsedMs();
   PrintResult('Retain+free-all (100k x 64B)', Elapsed);
 
   WriteLn('====================');

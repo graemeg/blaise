@@ -78,28 +78,28 @@ begin
   WriteLn('====================');
 
   { 1. Small alloc/free churn }
-  BenchStart;
+  BenchStart();
   for I := 0 to SMALL_COUNT - 1 do
   begin
     P := GetMem(32);
     FreeMem(P);
   end;
-  Elapsed := BenchElapsedMs;
+  Elapsed := BenchElapsedMs();
   PrintResult('Small alloc/free (1M x 32B)', Elapsed);
 
   { 2. Mixed sizes }
-  BenchStart;
+  BenchStart();
   for I := 0 to MIXED_COUNT - 1 do
   begin
     J := I mod 5;
     P := GetMem(Sizes[J]);
     FreeMem(P);
   end;
-  Elapsed := BenchElapsedMs;
+  Elapsed := BenchElapsedMs();
   PrintResult('Mixed sizes (500k x 8-2048B)', Elapsed);
 
   { 3. Realloc growth }
-  BenchStart;
+  BenchStart();
   for I := 0 to REALLOC_COUNT - 1 do
   begin
     P := GetMem(16);
@@ -109,26 +109,26 @@ begin
     P := ReallocMem(P, 256);
     FreeMem(P);
   end;
-  Elapsed := BenchElapsedMs;
+  Elapsed := BenchElapsedMs();
   PrintResult('Realloc growth (100k x 5 steps)', Elapsed);
 
   { 4. Large alloc/free }
-  BenchStart;
+  BenchStart();
   for I := 0 to LARGE_COUNT - 1 do
   begin
     P := GetMem(65536);
     FreeMem(P);
   end;
-  Elapsed := BenchElapsedMs;
+  Elapsed := BenchElapsedMs();
   PrintResult('Large alloc/free (10k x 64KB)', Elapsed);
 
   { 5. Alloc-retain-free-all }
-  BenchStart;
+  BenchStart();
   for I := 0 to RETAIN_COUNT - 1 do
     Blocks[I] := GetMem(64);
   for I := 0 to RETAIN_COUNT - 1 do
     FreeMem(Blocks[I]);
-  Elapsed := BenchElapsedMs;
+  Elapsed := BenchElapsedMs();
   PrintResult('Retain+free-all (100k x 64B)', Elapsed);
 
   WriteLn('====================');
