@@ -48,9 +48,9 @@ full source-level debugging of incrementally-compiled multi-unit programs.
 == 🚀 Project Status
 
 * **Self-Hosting:** Yes. Blaise bootstraps and recompiles itself with byte-for-byte fixpoint. FPC is no longer required — the entire toolchain runs on Blaise alone.
-* **Testing:** 4977+ tests and growing (Test-Driven Development from day one). The test suite itself compiles under Blaise, and runs in CI on both Linux and FreeBSD.
+* **Testing:** 5161+ compiler tests and 389 stdlib tests, and growing (Test-Driven Development from day one). The test suite itself compiles under Blaise, and runs in CI on Linux, FreeBSD and macOS.
 * **Backends:** A direct native code generator for x86-64 and arm64.  Blaise started out on https://c9x.me/compile/[QBE], which got it running with the least effort while the native backend was built; as planned, QBE was removed in v0.15.0 once the native backend had caught up (see link:docs/toolchain-independence.adoc[docs/toolchain-independence.adoc]).
-* **Targets:** Two targets — Linux x86_64 and FreeBSD x86_64 — with cross-compilation between them in either direction using no external tools or packages: the internal assembler and linker produce the foreign binary directly, and the self-hosting fixpoint is verified on both operating systems.
+* **Targets:** Three targets — macOS arm64 (the primary development host since v0.15.0), Linux x86_64 and FreeBSD x86_64 — with cross-compilation between them using no external tools or packages: the internal assembler and linker produce the foreign binary directly, and the self-hosting fixpoint is verified on all three operating systems.
 * **Standard library:** A growing opt-in stdlib — generics collections, JSON (DOM + parser + writer), SHA-1 and Base64, RFC 4122 UUIDs, TCP sockets, WebSockets, a minimal HTTP/1.1 server, and a `blaise.testing` unit-test framework.
 
 
@@ -92,7 +92,7 @@ full source-level debugging of incrementally-compiled multi-unit programs.
 
 | 9
 | Windows + macOS ARM64 targets
-| Planned
+| macOS ARM64 complete ✅ (v0.15.0); Windows planned
 
 | 10
 | LSP + VS Code extension
