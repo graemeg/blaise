@@ -489,7 +489,11 @@ type
     procedure AnalyseStandaloneDecls(ABlock: TBlock);
     procedure AnalyseStandaloneBodies(ABlock: TBlock);
     procedure AnalyseStandaloneDecl(ADecl: TMethodDecl);
-    procedure CollectCaptures(ADecl: TMethodDecl; AOuterDecl: TMethodDecl);
+    { AWithResult: an enclosing function's Result is capturable -- true
+      for a nested routine, false for an anonymous method, whose captures
+      move to a heap environment that a function result cannot live in }
+    procedure CollectCaptures(ADecl: TMethodDecl; AOuterDecl: TMethodDecl;
+                              AWithResult: Boolean = True);
     { Add AName to ADecl.CapturedVars if it names an enclosing variable
       (member of AOuterVars) not already recorded. }
     procedure MaybeCaptureName(ADecl: TMethodDecl; AOuterVars: TStringList;
@@ -11367,7 +11371,8 @@ begin
   ADecl.CapturedVars.Add(AName);
 end;
 
-procedure TSemanticAnalyser.CollectCaptures(ADecl: TMethodDecl; AOuterDecl: TMethodDecl);
+procedure TSemanticAnalyser.CollectCaptures(ADecl: TMethodDecl; AOuterDecl: TMethodDecl;
+                                            AWithResult: Boolean);
 { Walk ADecl's body statements/expressions to find every reference to a variable
   belonging to the enclosing proc AOuterDecl — its locals AND its parameters
   (a `var` record parameter captured by a nested proc is the case that broke
@@ -11435,6 +11440,12 @@ begin
           end;
         end;
       end;
+      { ... and a FUNCTION level's implicit Result: a nested routine may
+        read or assign its enclosing function's result, as in FPC and Delphi.
+        Innermost-first, so the nearest enclosing function's Result wins. }
+      if AWithResult and (ChainDecl.ReturnTypeName <> '') and
+         (OuterVars.IndexOf('Result') < 0) then
+        OuterVars.Add('Result');
       ChainDecl := ChainDecl.EnclosingDecl;
     end;
     { Nested-of-method: the enclosing method's Self is capturable like any
@@ -11481,6 +11492,9 @@ begin
            SameText(OuterVars.Strings[K], VName + '_high') then
           OuterVars.Delete(K);
     end;
+    { a nested FUNCTION's Result is its own }
+    if (ADecl.ReturnTypeName <> '') and (OuterVars.IndexOf('Result') >= 0) then
+      OuterVars.Delete(OuterVars.IndexOf('Result'));
     if OuterVars.Count = 0 then Exit;
 
     { Seed work-list with all statements in the inner body }
@@ -21155,7 +21169,7 @@ begin
     InMethod := False;
   end;
 
-  CollectCaptures(AThunk, Encl);
+  CollectCaptures(AThunk, Encl, False);
   { An anonymous method inside a CLASSIC NESTED ROUTINE of a method cannot
     capture Self yet: the nested routine holds Self behind a hidden by-
     pointer capture param (BUG-008), and the env-fill machinery has no path
@@ -21452,7 +21466,7 @@ begin
   AThunk.CapturedVars := nil;
   FInNestedOfMethod := True;
   try
-    CollectCaptures(AThunk, TMethodDecl(AThunk.RecordMethodHost));
+    CollectCaptures(AThunk, TMethodDecl(AThunk.RecordMethodHost), False);
     UsesSelf := (AThunk.CapturedVars <> nil) and
             (AThunk.CapturedVars.IndexOf('Self') >= 0);
   finally

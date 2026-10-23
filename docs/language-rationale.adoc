@@ -4163,6 +4163,41 @@ semantic pass rewrites it into a synthesised `Result := X` assignment (so it
 reuses the full assignment-analysis path) which codegen emits immediately
 before the normal exit jump.  A bare `Exit` is unchanged.
 
+==== `Result` inside a nested routine
+
+A nested routine may read and assign the `Result` of its enclosing function,
+as in FPC and Delphi (both modes of FPC accept it):
+
+[source,pascal]
+----
+function Build: TArr;
+
+  procedure Fill;
+  begin
+    Result[0] := 1;     // the enclosing function's result
+  end;
+
+begin
+  Fill();
+end;
+----
+
+`Result` is captured like any other outer local: the nested routine receives
+its address as a hidden by-pointer parameter.  The nearest enclosing
+*function* supplies it, through any intermediate procedures, and a nested
+function's own `Result` shadows it.  For a function whose result is returned
+through a caller-supplied buffer (a static array, or a record too large for
+registers), the captured address is that buffer.
+
+An *anonymous method* cannot capture `Result`, and that is rejected, as in
+Delphi.  Its captures are moved into a heap environment that outlives the
+call, and a function's result cannot live there.  A nested routine never
+outlives its enclosing call, so it needs no environment.
+
+Until 2026-10-23 the semantic pass accepted `Result` in a nested routine, but
+never captured it: x86-64 linked it as an external C symbol named `Result`
+and crashed, and arm64 stopped with an internal error.
+
 == Typed Constants
 
 === Decision

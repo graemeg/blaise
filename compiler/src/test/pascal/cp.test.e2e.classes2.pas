@@ -185,6 +185,10 @@ type
     procedure TestRun_VarParamClass_FieldReadWrite;
     { Nested proc with captured vars AND regular params: signature emission. }
     procedure TestRun_NestedProc_CaptureAndParams;
+    { a nested routine reads and writes its enclosing function's Result --
+      Integer, a static array and a managed sret record -- including two
+      levels down and a nested function's own Result beside it }
+    procedure TestRun_NestedRoutine_EnclosingResult;
     { var Double param (pointer arrives in an int register, not xmm) and
       captured float read/write through the _cap_ slot. }
     procedure TestRun_VarParamFloat_CapturedFloat;
@@ -2211,6 +2215,44 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcVarParamClass,
     '99' + LE + '99' + LE + '198' + LE + '500' + LE, 0);
+end;
+
+procedure TE2EClasses2Tests.TestRun_NestedRoutine_EnclosingResult;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll('''
+    program NR;
+    type
+      TArr = array[0..1] of Integer;
+      TBig = record A: array[0..9] of Int64; S: string; end;
+    function G: Integer;
+      procedure Inner; begin result := result + 5 end;
+    begin Result := 1; Inner(); Inner() end;
+    function A1: TArr;
+      procedure Inner; begin Result[0] := 1; Result[1] := 14 end;
+    begin Inner() end;
+    function B1: TBig;
+      procedure Inner; begin Result.A[9] := 99; Result.S := 'big' end;
+    begin Inner(); Result.A[0] := 1 end;
+    function Deep: TArr;
+      procedure Mid;
+        procedure Leaf; begin Result[1] := 77 end;
+      begin Result[0] := 66; Leaf() end;
+    begin Mid() end;
+    function Mix: Integer;
+      function Helper: Integer;
+        procedure Leaf; begin Result := 3 end;
+      begin Leaf(); Result := Result * 10 end;
+    begin Result := Helper() + 1 end;
+    var a: TArr; b: TBig;
+    begin
+      WriteLn(G());
+      a := A1(); WriteLn(a[0], ' ', a[1]);
+      b := B1(); WriteLn(b.A[0], ' ', b.A[9], ' ', b.S);
+      a := Deep(); WriteLn(a[0], ' ', a[1]);
+      WriteLn(Mix())
+    end.
+    ''', '11' + LE + '1 14' + LE + '1 99 big' + LE + '66 77' + LE + '31' + LE, 0);
 end;
 
 procedure TE2EClasses2Tests.TestRun_NestedProc_CaptureAndParams;

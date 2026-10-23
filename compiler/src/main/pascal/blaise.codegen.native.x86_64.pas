@@ -5877,7 +5877,9 @@ begin
     Exit;
   end;
   if Self.IsLocal(AName) then
-    Self.Emit(Format(#9'leaq %s, %s', [Self.VarOperand(AName), ADstReg]))
+    { the sret Result's slot holds the caller's buffer pointer, which IS the
+      variable's address (EmitLocalRecordBase) }
+    Self.EmitLocalRecordBase(AName, ADstReg)
   else
     Self.EmitLeaqGlobal(AName, ADstReg);
 end;

@@ -26,6 +26,17 @@ type
       both backends took T for a global (x86-64 linked a symbol 'T' and
       crashed; arm64 refused it) }
     procedure TestSemantic_NestedCapture_ReadOnlyInExitValue;
+    { a nested routine reaches its enclosing FUNCTION's Result, as in FPC and
+      Delphi: Result is captured -- from the nearest enclosing function,
+      through an intermediate procedure -- and a nested function's own
+      Result is not (both backends took Result for a global: x86-64 linked
+      a C symbol 'Result' and crashed, arm64 refused it; found probing
+      GH #239) }
+    procedure TestSemantic_NestedRoutine_CapturesEnclosingResult;
+    { an anonymous method still cannot capture Result (Delphi's rule too):
+      its captures move to a heap environment a function result cannot
+      live in }
+    procedure TestSemantic_AnonMethod_ResultNotCapturable;
     { x86-64: an interface argument through a procedural variable is its
       two-slot fat pointer (BUG-20260924-proctype-interface-arg); a float
       argument to a procedural FIELD is an xmm slot; a by-value interface
@@ -723,6 +734,57 @@ begin
     ''');
   AssertNotNull('analysed', Prog);
   Prog.Free();
+end;
+
+procedure TProcTypesTests.TestSemantic_NestedRoutine_CapturesEnclosingResult;
+var
+  Prog: TProgram;
+  F, Mid, Leaf, Own: TMethodDecl;
+begin
+  Prog := Analyse('''
+    program P;
+    function F: Integer;
+      procedure Mid;
+        procedure Leaf; begin result := 3 end;
+      begin Leaf() end;
+      function Own(X: Integer): Integer; begin Result := X end;
+    begin Mid(); Result := Result + Own(1) end;
+    begin
+    end.
+    ''');
+  try
+    F := TMethodDecl(Prog.Block.ProcDecls.Items[0]);
+    Mid := TMethodDecl(F.Body.ProcDecls.Items[0]);
+    Leaf := TMethodDecl(Mid.Body.ProcDecls.Items[0]);
+    Own := TMethodDecl(F.Body.ProcDecls.Items[1]);
+    AssertTrue('Leaf captures F''s Result',
+      (Leaf.CapturedVars <> nil) and (Leaf.CapturedVars.IndexOf('Result') >= 0));
+    AssertTrue('Mid forwards it',
+      (Mid.CapturedVars <> nil) and (Mid.CapturedVars.IndexOf('Result') >= 0));
+    AssertTrue('a nested function''s Result is its own',
+      (Own.CapturedVars = nil) or (Own.CapturedVars.IndexOf('Result') < 0));
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TProcTypesTests.TestSemantic_AnonMethod_ResultNotCapturable;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    type TProc = reference to procedure;
+    function F: Integer;
+    var Q: TProc;
+    begin
+      Q := procedure begin Result := 42 end;
+      Q()
+    end;
+    begin
+    end.
+    ''');
+  AssertTrue('rejected, naming Result: ' + Msg, Pos('Result', Msg) >= 0);
 end;
 
 procedure TProcTypesTests.TestSemantic_IndirectCallCallee_IsCaptured;
