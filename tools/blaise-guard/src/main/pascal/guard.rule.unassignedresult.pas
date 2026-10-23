@@ -22,7 +22,8 @@
   finding from this rule is always real.
 
   Recognised as assigning the result:
-    * Result := ...            (including compound targets like Result.Field)
+    * Result := ...            (including compound targets like Result.Field
+                                and chains like Result.Date.Year)
     * Exit(value)
     * Result passed to ANY call -- SetLength(Result, N), FillChar(Result, ...)
       and every var/out parameter write the result in place.  The rule cannot
@@ -115,6 +116,25 @@ begin
   FDepth := FDepth - 1;
 end;
 
+{ The variable a field-chain receiver is rooted at: 'Result' for the
+  Result.Date of Result.Date.Year := ..., or '' when the chain starts at
+  something other than a plain name (a call, a typecast). }
+function ReceiverRootName(AExpr: TASTExpr): string;
+var
+  E: TASTExpr;
+begin
+  Result := '';
+  E := AExpr;
+  while E is TFieldAccessExpr do
+  begin
+    if TFieldAccessExpr(E).Base = nil then
+      Exit(TFieldAccessExpr(E).RecordName);
+    E := TFieldAccessExpr(E).Base;
+  end;
+  if E is TIdentExpr then
+    Result := TIdentExpr(E).Name;
+end;
+
 procedure TUnassignedResultRule.VisitStmtEnter(AStmt: TASTStmt; ADepth: Integer);
 var
   A:  TAssignment;
@@ -157,7 +177,9 @@ begin
   begin
     F := TFieldAssignment(AStmt);
     if SameText(F.RecordName, 'Result') then
-      FAssigned := True;
+      FAssigned := True
+    else if (F.ObjExpr <> nil) and SameText(ReceiverRootName(F.ObjExpr), 'Result') then
+      FAssigned := True;   { Result.Date.Year := ... }
     Exit;
   end;
 

@@ -28,6 +28,8 @@ type
     procedure TestExitValueIsSilent;
     procedure TestSetLengthIsSilent;
     procedure TestProcedureIsSilent;
+    procedure TestNestedFieldAssignIsSilent;
+    procedure TestOtherNestedFieldStillFlags;
   end;
 
 implementation
@@ -147,6 +149,50 @@ begin
     'end.'                  + NL;
   R := RunUR(Src);
   AssertEquals('procedures have no Result', 0, CountForRule(R, RULE_ID));
+end;
+
+procedure TUnassignedResultTests.TestNestedFieldAssignIsSilent;
+var
+  Src: string;
+  R:   TReport;
+begin
+  { Result.Date.Year := ... writes Result through a field chain (the shape of
+    dateutils' ToUtcDateTime). }
+  Src :=
+    'program T;'                                    + NL +
+    'type'                                          + NL +
+    '  TD = record Year: Integer; end;'             + NL +
+    '  TDT = record Date: TD; end;'                 + NL +
+    'function F: TDT;'                              + NL +
+    'begin'                                         + NL +
+    '  Result.Date.Year := 1'                       + NL +
+    'end;'                                          + NL +
+    'begin'                                         + NL +
+    'end.'                                          + NL;
+  R := RunUR(Src);
+  AssertEquals('Result.Date.Year assigns', 0, CountForRule(R, RULE_ID));
+end;
+
+procedure TUnassignedResultTests.TestOtherNestedFieldStillFlags;
+var
+  Src: string;
+  R:   TReport;
+begin
+  { A chain rooted at some OTHER variable does not write Result. }
+  Src :=
+    'program T;'                                    + NL +
+    'type'                                          + NL +
+    '  TD = record Year: Integer; end;'             + NL +
+    '  TDT = record Date: TD; end;'                 + NL +
+    'var G: TDT;'                                   + NL +
+    'function F: TDT;'                              + NL +
+    'begin'                                         + NL +
+    '  G.Date.Year := 1'                            + NL +
+    'end;'                                          + NL +
+    'begin'                                         + NL +
+    'end.'                                          + NL;
+  R := RunUR(Src);
+  AssertEquals('G.Date.Year is not Result', 1, CountForRule(R, RULE_ID));
 end;
 
 initialization
