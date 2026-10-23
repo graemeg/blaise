@@ -26,8 +26,10 @@
       }
     }
 
-  A rule absent from the file gets a default-enabled TRuleConfig (Null Object),
-  so rules never have to nil-check. *)
+  The file is layered OVER the built-in defaults (TGuardConfig.Default), so a
+  rule absent from it behaves as it would with no config at all: on, unless
+  the defaults switch it off (BL-1004).  Every rule still gets a usable
+  TRuleConfig (Null Object), so rules never have to nil-check. *)
 
 unit Guard.Config;
 
@@ -87,12 +89,12 @@ type
       defaults to True (every rule on unless turned off). }
     property DefaultEnabled: Boolean read FDefaultEnabled write FDefaultEnabled;
 
-    { Build the default (empty) configuration: every rule enabled at its own
-      built-in threshold and severity. }
+    { Build the default configuration: every rule at its own built-in
+      threshold and severity, enabled except the ones that ship off. }
     static function Default: TGuardConfig;
 
-    { Parse a blaise-guard.json document.  Raises EGuardConfigError on
-      malformed JSON or an unexpected shape. }
+    { Parse a blaise-guard.json document over the defaults.  Raises
+      EGuardConfigError on malformed JSON or an unexpected shape. }
     static function LoadFromString(const AJson: string): TGuardConfig;
     static function LoadFromFile(const APath: string): TGuardConfig;
   end;
@@ -218,7 +220,7 @@ var
   I, P:     Integer;
   RuleId:   string;
 begin
-  Cfg := TGuardConfig.Create();
+  Cfg := TGuardConfig.Default();
   try
     Root := GetJSON(AJson);
   except

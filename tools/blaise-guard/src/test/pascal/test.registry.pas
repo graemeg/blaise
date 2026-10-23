@@ -17,6 +17,7 @@ interface
 uses
   Guard.Rules.All,               { registers all rules }
   Guard.Domain.Tests,
+  Guard.Config.Tests,
   Guard.Rule.MaxLineLength.Tests,
   Guard.Rule.MaxFunctionLines.Tests,
   Guard.Rule.DeepNesting.Tests,
