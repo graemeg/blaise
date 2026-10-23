@@ -1362,8 +1362,7 @@ begin
     { Everything is dropped — kept part is zero, dropped is the whole magnitude
       conceptually padded out to DropCount places. }
     SetLength(Keep, 0);
-    DropBase := Mag;
-    DropCount := DropCount   { half comparison below uses 10^DropCount }
+    DropBase := Mag   { DropCount is unchanged: the half comparison below uses 10^DropCount }
   end
   else
   begin

@@ -473,6 +473,7 @@ var
   G: TTaskGroup;
 begin
   G := TTaskGroup(AArg);
+  { blaise-guard: ignore BL-2005 - a cancelled fiber ends here by design. }
   try
     FiberSleep(G.FDeadlineMs);
     TaskGroupTripDeadline(G);
@@ -496,6 +497,7 @@ begin
   G := Box.Group;
   Failed := False;
   Msg := '';
+  { blaise-guard: ignore BL-2005 - a cancelled fiber ends here by design. }
   try
     Box.Proc();
   except
@@ -529,6 +531,7 @@ begin
   UserArg := C^.Arg;
   Failed := False;
   Msg := '';
+  { blaise-guard: ignore BL-2005 - a cancelled fiber ends here by design. }
   try
     UserProc(UserArg);
   except
