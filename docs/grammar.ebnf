@@ -918,11 +918,20 @@ QualIdent
  *
  * Each bound is a ConstArithExpr — an integer literal, a named integer
  * constant, or a compile-time integer expression (e.g. N-1, 2*K).  The
- * semantic pass resolves the bound text to an integer value. *)
+ * semantic pass resolves the bound text to an integer value.
+ *
+ * A dimension may instead NAME an ordinal index type (IDENT), in any
+ * position of the comma form: array[Boolean, 0..1], array[0..2, TColor],
+ * array[Byte, TIdx].  A single-dimension array and every dimension of a
+ * multi-dimensional one admit the same index types (below).  Until
+ * 2026-10-23 a multi-dimensional IDENT dimension had to be an enumeration. *)
 ArrayType
-    = ARRAY LBRACKET ArrayBound DOTDOT ArrayBound
-            { COMMA ArrayBound DOTDOT ArrayBound } RBRACKET OF TypeName
-    | ARRAY LBRACKET IDENT RBRACKET OF TypeName   (* ordinal-indexed *)
+    = ARRAY LBRACKET ArrayIndex { COMMA ArrayIndex } RBRACKET OF TypeName
+    ;
+
+ArrayIndex
+    = ArrayBound DOTDOT ArrayBound
+    | IDENT                                       (* ordinal-indexed *)
     ;
 
 (* The IDENT form names an ORDINAL index type.  Three ordinal kinds are admitted:

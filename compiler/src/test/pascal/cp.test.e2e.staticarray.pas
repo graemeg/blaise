@@ -146,6 +146,9 @@ type
     procedure TestRun_BooleanIndex_VarDecl;
     { GH #208 — the same index type in a typed CONSTANT, inline and named. }
     procedure TestRun_BooleanIndex_ConstDecl;
+    { multi-dimensional arrays indexed by Boolean, Byte, Int8 and an integer
+      subrange, in either position: sizes, bounds, and element round trips }
+    procedure TestRun_MultiDim_TypeIndexes;
     { Reading a RECORD element out of a static/dynamic array — the element is a
       value used by reference (whole-record copy, field read).  arm64 leg 32
       hardened its element-read path; this guards the behaviour on QBE + native. }
@@ -1177,6 +1180,29 @@ begin
       WriteLn(C[North]); WriteLn(C[West])
     end.
     ''', '1' + LE + '4' + LE, 0);
+end;
+
+procedure TE2EStaticArrayTests.TestRun_MultiDim_TypeIndexes;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll('''
+    program P;
+    type
+      TIdx = 3..5;
+      TFlags = array[Boolean, 0..1] of Integer;
+    var
+      F: TFlags;
+      G: array[0..1, Boolean] of Integer;
+      H: array[Byte, Boolean] of Byte;
+      K: array[TIdx, Int8] of Byte;
+    begin
+      F[True, 1] := 7; G[1, False] := 8; H[255, True] := 9; K[5, -128] := 10;
+      WriteLn(SizeOf(F), ' ', SizeOf(G), ' ', SizeOf(H), ' ', SizeOf(K));
+      WriteLn(Low(K), ' ', High(K), ' ', Low(K[3]), ' ', High(K[3]));
+      WriteLn(F[True, 1], ' ', G[1, False], ' ', H[255, True], ' ', K[5, -128])
+    end.
+    ''', '16 16 512 768' + LineEnding + '3 5 -128 127' + LineEnding +
+    '7 8 9 10' + LineEnding, 0);
 end;
 
 procedure TE2EStaticArrayTests.TestRun_BooleanIndex_TypeDecl;

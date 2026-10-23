@@ -450,6 +450,15 @@ type
       that duplication is how BUG-20260922-explicit-ordinal-enum-array-
       bounds drifted — every caller must use this. }
     procedure EnumIndexBounds(AIdxType: TTypeDesc; out ALo, AHi: Integer);
+    { The index range of ANY type that may index an array -- enum,
+      enum or integer subrange, Boolean, or an 8-/16-bit integer type.
+      False for a type that cannot.  The single-dimension array[T] branch
+      and the multi-dimensional array[T1, T2] bounds both ask this, so the
+      two forms accept the same index types. }
+    function  OrdinalIndexRange(AIdxType: TTypeDesc; out ALo, AHi: Integer): Boolean;
+    { Raise the error for AName (resolving to AIdxType, nil if unknown)
+      used as an array index type when OrdinalIndexRange said no. }
+    procedure RejectArrayIndexType(const AName: string; AIdxType: TTypeDesc);
     { Warn when an enum's declared ordinals are so sparse that indexing an
       array by it allocates far more slots than the enum has members.  The
       span is correct but easy to reach unintentionally: (HTTP_OK = 200,
@@ -4689,7 +4698,6 @@ var
   CanonName: string;
   LVal, HVal: Integer;
   IdxTD: TTypeDesc;
-  EnumDesc: TEnumTypeDesc;
   SAT: TStaticArrayTypeDesc;
   DAT: TDynArrayTypeDesc;
   I, LtPos, DotPos: Integer;
@@ -4766,20 +4774,19 @@ begin
     ElemName := StrCopyTail(AName, OfPos + 4);
     IdxTD    := FTable.FindType(IdxName);
     BaseType := FindTypeOrInstantiate(ElemName);
-    if (IdxTD <> nil) and (IdxTD.Kind = tyEnum) and (not IdxTD.IsSubrange) and
-       (BaseType <> nil) then
+    { The index type supplies the range (OrdinalIndexRange): a full enum
+      spans its MIN..MAX declared ordinal, NOT 0..N-1, which mis-sized the
+      array whenever ordinals were assigned explicitly
+      (BUG-20260922-explicit-ordinal-enum-array-bounds); an enum or integer
+      subrange its own bounds (GH #182); Boolean 0..1 (GH #181); an 8- or
+      16-bit integer type its whole range.  Fold to array[lo..hi] of T. }
+    if not Self.OrdinalIndexRange(IdxTD, LVal, HVal) then
+      Self.RejectArrayIndexType(IdxName, IdxTD);
+    if BaseType <> nil then
     begin
-      { A full enum index (array[TEnum] of T) spans the enum's MIN..MAX
-        declared ordinal — NOT 0..N-1, which mis-sized the array whenever
-        ordinals were assigned explicitly, because a member used as an index
-        folds to its real ordinal (BUG-20260922-explicit-ordinal-enum-array-
-        bounds).  For the common contiguous 0-based enum this is identical to
-        0..Count-1, so layout is unchanged.  An ENUM-SUBRANGE index
-        (IsSubrange) falls through to the subrange branch below (GH #182). }
-      EnumDesc := TEnumTypeDesc(IdxTD);
-      Self.EnumIndexBounds(EnumDesc, LVal, HVal);
-      Self.WarnIfEnumIndexSparse(EnumDesc,
-        Format('array[%s]', [EnumDesc.Name]), 0, 0);
+      if (IdxTD.Kind = tyEnum) and not IdxTD.IsSubrange then
+        Self.WarnIfEnumIndexSparse(IdxTD,
+          Format('array[%s]', [IdxTD.Name]), 0, 0);
       CanonName := Format('array[%d..%d] of %s', [LVal, HVal, BaseType.Name]);
       Result    := FTable.FindType(CanonName);
       if Result = nil then
@@ -4789,70 +4796,7 @@ begin
         FTable.DefineGlobal(Sym);
         Result := SAT;
       end;
-    end
-    else if (IdxTD <> nil) and (IdxTD.Kind = tyBoolean) and (BaseType <> nil) then
-    begin
-      { Boolean index (array[Boolean] of T): a 2-element ordinal indexed by
-        False (0) and True (1).  Fold to array[0..1] of T, parallel to the
-        enum branch (GH #181). }
-      CanonName := Format('array[0..1] of %s', [BaseType.Name]);
-      Result    := FTable.FindType(CanonName);
-      if Result = nil then
-      begin
-        SAT := FTable.NewStaticArrayType(BaseType, 0, 1);
-        Sym := TSymbol.Create(CanonName, skType, SAT);
-        FTable.DefineGlobal(Sym);
-        Result := SAT;
-      end;
-    end
-    else if (IdxTD <> nil) and IdxTD.IsSubrange and (BaseType <> nil) then
-    begin
-      { Named integer subrange index (type TIdx = lo..hi; array[TIdx] of T):
-        the subrange supplies the index range; fold to array[lo..hi] of T,
-        exactly parallel to the enum branch's array[0..N-1]. }
-      LVal := IdxTD.SubrangeLow;
-      HVal := IdxTD.SubrangeHigh;
-      CanonName := Format('array[%d..%d] of %s', [LVal, HVal, BaseType.Name]);
-      Result    := FTable.FindType(CanonName);
-      if Result = nil then
-      begin
-        SAT := FTable.NewStaticArrayType(BaseType, LVal, HVal);
-        Sym := TSymbol.Create(CanonName, skType, SAT);
-        FTable.DefineGlobal(Sym);
-        Result := SAT;
-      end;
-    end
-    else if (IdxTD <> nil) and (BaseType <> nil) and
-            (IdxTD.Kind in [tyInt8, tyByte, tySmallInt, tyWord]) then
-    begin
-      { an 8- or 16-bit integer type indexes its whole range
-        (array[Byte] of T is array[0..255] of T), as in FPC and Delphi;
-        wider integer types would be gigabytes and stay rejected }
-      case IdxTD.Kind of
-        tyInt8:     begin LVal := -128;   HVal := 127;   end;
-        tyByte:     begin LVal := 0;      HVal := 255;   end;
-        tySmallInt: begin LVal := -32768; HVal := 32767; end;
-      else
-        begin LVal := 0; HVal := 65535; end;
-      end;
-      CanonName := Format('array[%d..%d] of %s', [LVal, HVal, BaseType.Name]);
-      Result    := FTable.FindType(CanonName);
-      if Result = nil then
-      begin
-        SAT := FTable.NewStaticArrayType(BaseType, LVal, HVal);
-        Sym := TSymbol.Create(CanonName, skType, SAT);
-        FTable.DefineGlobal(Sym);
-        Result := SAT;
-      end;
-    end
-    else if IdxTD = nil then
-      SemanticError(Format('Unknown index type ''%s''', [IdxName]), 0, 0)
-    else if (IdxTD.Kind <> tyEnum) and (IdxTD.Kind <> tyBoolean) and
-            (not IdxTD.IsSubrange) then
-      SemanticError(Format(
-        '''%s'' is not a valid array index type (expected an enumeration, '
-        + 'Boolean, an 8- or 16-bit integer type, or an integer subrange)',
-        [IdxName]), 0, 0);
+    end;
     Exit;
   end;
   { Range-indexed static array: 'array[L..H] of TypeName' — create on demand.
@@ -7207,6 +7151,42 @@ begin
   end;
 end;
 
+function TSemanticAnalyser.OrdinalIndexRange(AIdxType: TTypeDesc;
+                                             out ALo, AHi: Integer): Boolean;
+begin
+  ALo := 0;
+  AHi := 0;
+  Result := True;
+  if AIdxType = nil then
+    Exit(False);
+  if AIdxType.IsSubrange or (AIdxType.Kind = tyEnum) then
+    Self.EnumIndexBounds(AIdxType, ALo, AHi)
+  else
+    case AIdxType.Kind of
+      tyBoolean:  begin ALo := 0;      AHi := 1;     end;
+      { an 8- or 16-bit integer type indexes its whole range (array[Byte]
+        of T is array[0..255] of T), as in FPC and Delphi; wider integer
+        types would be gigabytes and stay rejected }
+      tyInt8:     begin ALo := -128;   AHi := 127;   end;
+      tyByte:     begin ALo := 0;      AHi := 255;   end;
+      tySmallInt: begin ALo := -32768; AHi := 32767; end;
+      tyWord:     begin ALo := 0;      AHi := 65535; end;
+    else
+      Result := False;
+    end;
+end;
+
+procedure TSemanticAnalyser.RejectArrayIndexType(const AName: string;
+                                                 AIdxType: TTypeDesc);
+begin
+  if AIdxType = nil then
+    SemanticError(Format('Unknown index type ''%s''', [AName]), 0, 0);
+  SemanticError(Format(
+    '''%s'' is not a valid array index type (expected an enumeration, '
+    + 'Boolean, an 8- or 16-bit integer type, or an integer subrange)',
+    [AName]), 0, 0);
+end;
+
 procedure TSemanticAnalyser.WarnIfEnumIndexSparse(AIdxType: TTypeDesc;
   const ADescr: string; ALine, ACol: Integer);
 var
@@ -7435,6 +7415,8 @@ var
   Expr: TASTExpr;
   Sym: TSymbol;
   EnumRef: TEnumMemberRef;
+  IdxName: string;
+  IdxType: TTypeDesc;
 begin
   if IsPlainInt(ABoundText) then
     Exit(Integer(StrToInt(ABoundText)));
@@ -7445,41 +7427,22 @@ begin
     bounds for the full-enum case).  EnumIndexBounds is the single source of
     that rule.  The bare '@TEnum' form (legacy high-only encoding) is still
     accepted for backward compatibility. }
-  if (Length(ABoundText) >= 3) and (Copy(ABoundText, 0, 3) = '@L:') then
-  begin
-    Sym := FTable.Lookup(Copy(ABoundText, 3, Length(ABoundText) - 3));
-    if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) and
-       (Sym.TypeDesc.Kind = tyEnum) then
-    begin
-      Self.EnumIndexBounds(Sym.TypeDesc, ELo, EHi);
-      Exit(ELo);
-    end;
-    SemanticError(Format('Unknown enum type ''%s'' in array dimension',
-      [Copy(ABoundText, 3, Length(ABoundText) - 3)]), 0, 0);
-  end;
-  if (Length(ABoundText) >= 3) and (Copy(ABoundText, 0, 3) = '@H:') then
-  begin
-    Sym := FTable.Lookup(Copy(ABoundText, 3, Length(ABoundText) - 3));
-    if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) and
-       (Sym.TypeDesc.Kind = tyEnum) then
-    begin
-      Self.EnumIndexBounds(Sym.TypeDesc, ELo, EHi);
-      Exit(EHi);
-    end;
-    SemanticError(Format('Unknown enum type ''%s'' in array dimension',
-      [Copy(ABoundText, 3, Length(ABoundText) - 3)]), 0, 0);
-  end;
+  { a dimension named by an index TYPE: any type OrdinalIndexRange accepts,
+    so array[Boolean, 0..1] and array[TIdx, Byte] take the same types as
+    the single-dimension array[T] }
   if (Length(ABoundText) > 0) and (ABoundText[0] = '@') then
   begin
-    Sym := FTable.Lookup(Copy(ABoundText, 1, Length(ABoundText) - 1));
-    if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) and
-       (Sym.TypeDesc.Kind = tyEnum) then
-    begin
-      Self.EnumIndexBounds(Sym.TypeDesc, ELo, EHi);
-      Exit(EHi);
-    end;
-    SemanticError(Format('Unknown enum type ''%s'' in array dimension',
-      [Copy(ABoundText, 1, Length(ABoundText) - 1)]), 0, 0);
+    if (Length(ABoundText) >= 3) and ((Copy(ABoundText, 0, 3) = '@L:') or
+                                      (Copy(ABoundText, 0, 3) = '@H:')) then
+      IdxName := Copy(ABoundText, 3, Length(ABoundText) - 3)
+    else
+      IdxName := Copy(ABoundText, 1, Length(ABoundText) - 1);
+    IdxType := FTable.FindType(IdxName);
+    if not Self.OrdinalIndexRange(IdxType, ELo, EHi) then
+      Self.RejectArrayIndexType(IdxName, IdxType);
+    if Copy(ABoundText, 0, 3) = '@L:' then
+      Exit(ELo);
+    Exit(EHi);
   end;
   Sym := FTable.Lookup(ABoundText);
   if (Sym <> nil) and (Sym.Kind = skConstant) then

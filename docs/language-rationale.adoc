@@ -6005,6 +6005,15 @@ Because the comma forms desugar to the nested forms before semantic
 analysis, both notations are interchangeable in every position: a value
 declared with one form can be indexed with the other.
 
+Every dimension takes the same index types as a single-dimension array: an
+integer range, an enumeration or enum subrange, Boolean, an 8- or 16-bit
+integer type, or a named integer subrange (`array[Boolean, 0..1]`,
+`array[Byte, TColor]`).  One function in the semantic pass,
+`OrdinalIndexRange`, gives the bounds of an index type for both forms, so
+the two cannot drift.  They had drifted: until 2026-10-23 a
+multi-dimensional dimension named by a type had to be an enumeration, and
+`array[Boolean, 0..1]` was rejected with "Unknown enum type 'Boolean'".
+
 === Alternatives considered
 
 * *A dedicated multi-dimensional array type descriptor carrying a list of

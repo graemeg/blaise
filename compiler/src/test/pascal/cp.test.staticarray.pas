@@ -142,6 +142,12 @@ type
       Delphi; a 32-bit one is rejected (found by the ordinal matrix) }
     procedure TestSemantic_SmallIntTypeIndex_Bounds;
     procedure TestSemantic_Int32TypeIndex_Rejected;
+    { a MULTI-dimensional array takes the same index types as a
+      single-dimensional one: Boolean, Byte, Int8 and an integer subrange in
+      any position (only enum dimensions worked: "Unknown enum type
+      'boolean' in array dimension"; found probing GH #240) }
+    procedure TestSemantic_MultiDim_TypeIndexes_Bounds;
+    procedure TestSemantic_MultiDim_Int32Index_Rejected;
     { GH #239: an sret function's Result passed to a var parameter is the
       caller's buffer: x86-64 passed the SLOT holding that pointer, so the
       callee's write clobbered the pointer and the next Result write
@@ -950,6 +956,63 @@ begin
   finally
     P.Free();
   end;
+end;
+
+procedure TStaticArrayTests.TestSemantic_MultiDim_TypeIndexes_Bounds;
+var P: TProgram;
+
+  procedure CheckDecl(AIdx, ALo, AHi, AInnerLo, AInnerHi: Integer;
+                      const AWhat: string);
+  var Outer, Inner: TStaticArrayTypeDesc;
+  begin
+    Outer := TStaticArrayTypeDesc(TVarDecl(P.Block.Decls.Items[AIdx]).ResolvedType);
+    Inner := TStaticArrayTypeDesc(Outer.ElementType);
+    AssertEquals(AWhat + ' low', ALo, Outer.LowBound);
+    AssertEquals(AWhat + ' high', AHi, Outer.HighBound);
+    AssertEquals(AWhat + ' inner low', AInnerLo, Inner.LowBound);
+    AssertEquals(AWhat + ' inner high', AInnerHi, Inner.HighBound);
+  end;
+
+begin
+  P := AnalyseSrc('''
+    program P;
+    type TC = (cRed, cGreen, cBlue); TMid = cGreen..cBlue; TIdx = 3..5;
+    var
+      A: array[Boolean, 0..1] of Integer;
+      B: array[0..1, Boolean] of Integer;
+      C: array[Byte, TC] of Byte;
+      D: array[TIdx, Int8] of Byte;
+      E: array[TMid, Boolean] of Integer;
+    begin end.
+    ''');
+  try
+    CheckDecl(0, 0, 1, 0, 1, 'Boolean, 0..1');
+    CheckDecl(1, 0, 1, 0, 1, '0..1, Boolean');
+    CheckDecl(2, 0, 255, 0, 2, 'Byte, TC');
+    CheckDecl(3, 3, 5, -128, 127, 'TIdx, Int8');
+    CheckDecl(4, 1, 2, 0, 1, 'TMid, Boolean');
+  finally
+    P.Free();
+  end;
+end;
+
+procedure TStaticArrayTests.TestSemantic_MultiDim_Int32Index_Rejected;
+var Msg: string;
+begin
+  Msg := SemanticError('''
+    program P;
+    var A: array[Integer, 0..1] of Byte;
+    begin end.
+    ''');
+  AssertTrue('Integer dimension rejected: ' + Msg,
+    Pos('not a valid array index type', Msg) >= 0);
+  Msg := SemanticError('''
+    program P;
+    var A: array[0..1, TNope] of Byte;
+    begin end.
+    ''');
+  AssertTrue('unknown dimension type named: ' + Msg,
+    Pos('Unknown index type ''TNope''', Msg) >= 0);
 end;
 
 procedure TStaticArrayTests.TestNative_SretResultAsVarArg_PassesBuffer;
