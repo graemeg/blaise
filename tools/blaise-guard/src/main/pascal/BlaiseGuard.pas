@@ -144,6 +144,8 @@ begin
   case AFailOn of
     foWarning: if AReport.HasAtLeast(sevWarning) then Result := 1;
     foError:   if AReport.HasAtLeast(sevError)   then Result := 1;
+  else
+    { foNever: the exit code stays 0 }
   end;
 end;
 

@@ -400,6 +400,8 @@ begin
           share the element refs without retain/release
           (BUG-20260721-recretclean-static-array-of-managed). }
         if ArcTypeHasManagedContent(F.TypeDesc) then Exit;
+    else
+      { every other kind is unmanaged: it does not block a register return }
     end;
   end;
   Result := True;

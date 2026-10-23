@@ -836,6 +836,8 @@ begin
         Result := 2;
         Exit;
       end;
+  else
+    { raRun: fall through and run the tests }
   end;
   R := RunFilteredTests(Filters, Verbose, ExclCat);
   PrintSummary(R);

@@ -3332,6 +3332,8 @@ begin
       tyString:   EmitCallSym('_StringAddRef');
       tyClass:    if not F.IsWeak then EmitCallSym('_ClassAddRef');
       tyDynArray: EmitCallSym('_DynArrayAddRef');
+    else
+      { every other kind is unmanaged, or held inline and retained by the copy above }
     end;
   end;
 end;
@@ -3354,6 +3356,8 @@ begin
         I := FDynElemHooks.Add(AElem);
       Result := DarwinSym('__DynElems_' + IntToStr(I));
     end;
+  else
+    { arkNone: an unmanaged element needs no hook }
   end;
 end;
 
@@ -5416,6 +5420,8 @@ begin
         tyUInt32:   EmitIntLiteral('x0', 4294967295);
         tyInt64:    EmitIntLiteral('x0', 9223372036854775807);
         tyUInt64:   EmitIntLiteral('x0', -1);   { all-ones bit pattern }
+      else
+        { unreachable: the guard above admits only these kinds }
       end
     else
       { Low: enum = MIN stored ordinal (may be negative); byte/bool/word/unsigned
@@ -7056,6 +7062,8 @@ begin
           Self.Emit(#9'add x0, x0, x1');
           Exit;
         end;
+      else
+        { any other base takes the general address path below }
       end;
     end;
     { @V where V is a var / out parameter: its slot already holds the
@@ -9587,6 +9595,8 @@ begin
     case TASTExpr(ACall.Args.Items[1]).ResolvedType.Kind of
       tyInteger, tySmallInt, tyInt8: Self.Emit(#9'sxtw x0, w0');
       tyUInt32, tyWord, tyByte: Self.Emit(#9'mov w0, w0');
+    else
+      { 64-bit counts are already full width }
     end;
     EmitPushX0();
     Self.EmitExprToX0(TASTExpr(ACall.Args.Items[2]));
@@ -12825,6 +12835,8 @@ begin
       boAdd: EmitCallSym('_SetUnion');
       boMul: EmitCallSym('_SetInter');
       boSub: EmitCallSym('_SetDiff');
+    else
+      { unreachable: jumbo sets combine only with + * - }
     end;
     EmitSlotAddr('x0', '_jset_scratch');  { the result bitmap's address }
   end;
@@ -18885,6 +18897,8 @@ begin
       end;
     arkAggregate:
       Self.EmitManagedReleaseAt(Ty, 'x19', True);
+  else
+    { arkNone: an unmanaged threadvar needs no release }
   end;
   Self.Emit(#9'ldr x19, [sp], #16');
   Self.Emit(#9'ldp x29, x30, [sp], #16');
@@ -19281,6 +19295,8 @@ begin
             Self.EmitManagedReleaseAt(VD.ResolvedType, 'x19', False);
             Self.Emit(#9'ldr x19, [sp], #16');
           end;
+      else
+        { arkNone: an unmanaged global needs no release }
       end;
       FFiniReleased.Add(N);
     end;
