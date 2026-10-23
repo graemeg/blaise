@@ -51,6 +51,7 @@ type
     procedure TestParse_Compound_StmtCount;
     procedure TestParse_If_ThenIsCompound;
     procedure TestParse_IfElse_ElseIsCompound;
+    procedure TestParse_Case_EmptyElse_HasElseStmt;
 
     { ------------------------------------------------------------------ }
     { Semantic                                                             }
@@ -321,6 +322,30 @@ begin
   try
     S := TIfStmt(Prog.Block.Stmts[1]);
     AssertNotNull('else stmt present', S.ElseStmt);
+  finally Prog.Free(); end;
+end;
+
+{ An else holding nothing but a comment still makes the case total: the AST
+  must record it (as an empty compound, like an empty branch), or a tool
+  reading the AST - BlaiseGuard's BL-3002 - sees a case with no else. }
+procedure TControlTests.TestParse_Case_EmptyElse_HasElseStmt;
+var Prog: TProgram; S: TCaseStmt;
+begin
+  Prog := ParseSrc(
+    'program P;' + LineEnding +
+    'var I: Integer;' + LineEnding +
+    'begin' + LineEnding +
+    '  case I of' + LineEnding +
+    '    1: I := 2;' + LineEnding +
+    '  else' + LineEnding +
+    '    { nothing to do }' + LineEnding +
+    '  end' + LineEnding +
+    'end.');
+  try
+    S := TCaseStmt(Prog.Block.Stmts[0]);
+    AssertNotNull('empty else recorded', S.ElseStmt);
+    AssertTrue('as an empty compound', S.ElseStmt is TCompoundStmt);
+    AssertEquals('with no statements', 0, TCompoundStmt(S.ElseStmt).Stmts.Count);
   finally Prog.Free(); end;
 end;
 

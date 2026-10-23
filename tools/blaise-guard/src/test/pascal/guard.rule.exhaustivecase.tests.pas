@@ -26,6 +26,7 @@ type
     procedure TestFlagsMissingMember;
     procedure TestExhaustiveIsSilent;
     procedure TestElseClauseIsSilent;
+    procedure TestCommentOnlyElseIsSilent;
     procedure TestIntegerCaseIsSilent;
     procedure TestUnknownEnumIsSilent;
   end;
@@ -118,6 +119,31 @@ begin
     'end.'                        + NL;
   R := RunEC(Src);
   AssertEquals('else covers the rest', 0, CountForRule(R, RULE_ID));
+end;
+
+procedure TExhaustiveCaseTests.TestCommentOnlyElseIsSilent;
+var
+  Src: string;
+  R:   TReport;
+begin
+  { An else holding only a comment is still an else: the unhandled members
+    deliberately do nothing (the shape of arm64's EmitNarrowX0). }
+  Src :=
+    'program T;'                  + NL +
+    'type'                        + NL +
+    '  EK = (ekA, ekB, ekC);'     + NL +
+    'var'                         + NL +
+    '  k: EK;'                    + NL +
+    'begin'                       + NL +
+    '  k := ekA;'                 + NL +
+    '  case k of'                 + NL +
+    '    ekA: WriteLn(1);'        + NL +
+    '  else'                      + NL +
+    '    { the rest need nothing }' + NL +
+    '  end;'                      + NL +
+    'end.'                        + NL;
+  R := RunEC(Src);
+  AssertEquals('comment-only else covers the rest', 0, CountForRule(R, RULE_ID));
 end;
 
 procedure TExhaustiveCaseTests.TestIntegerCaseIsSilent;

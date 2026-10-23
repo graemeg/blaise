@@ -3351,7 +3351,6 @@ begin
     for I := 0 to ParsedCount - 1 do
     begin
       PL := Parsed[I];
-      { blaise-guard: ignore BL-3002 - lkEmpty (blank/comment line) is handled by the else arm below; an empty else has no AST statement to detect. }
       case PL.Kind of
         lkLabel:
         begin
@@ -3407,7 +3406,6 @@ begin
     for I := 0 to ParsedCount - 1 do
     begin
       PL := Parsed[I];
-      { blaise-guard: ignore BL-3002 - lkEmpty (blank/comment line) is handled by the else arm below; an empty else has no AST statement to detect. }
       case PL.Kind of
         lkLabel:
         begin

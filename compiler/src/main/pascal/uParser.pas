@@ -5666,7 +5666,15 @@ begin
           CmpElse.Stmts.Add(ParseStmt());
           if Check(tkSemicolon) then Advance();
         end;
-        if CmpElse.Stmts.Count = 1 then
+        if (CmpElse.Stmts.Count = 1) and (CmpElse.Stmts.Items[0] = nil) then
+        begin
+          { An empty else ('else end', or only a comment): keep it as an
+            empty compound, like an empty branch, so the AST still records
+            that the case has an else arm. }
+          CmpElse.Stmts.Clear();
+          Result.ElseStmt := CmpElse;
+        end
+        else if CmpElse.Stmts.Count = 1 then
         begin
           { Unwrap single-item compound for simplicity }
           Result.ElseStmt := TASTStmt(CmpElse.Stmts.Extract(CmpElse.Stmts.Items[0]));

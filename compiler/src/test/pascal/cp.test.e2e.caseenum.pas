@@ -23,6 +23,7 @@ type
   published
     procedure TestRun_Case_IntegerBranch;
     procedure TestRun_Case_ElseBranch;
+    procedure TestRun_Case_EmptyElse_NoMatchFallsThrough;
     procedure TestRun_Enum_OrdinalValues;
     procedure TestRun_Enum_InCase;
     procedure TestRun_Enum_ExplicitOrdinals;
@@ -131,6 +132,37 @@ procedure TE2ECaseEnumTests.TestRun_Case_ElseBranch;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcCaseElse, '99' + LineEnding, 0);
+end;
+
+{ An empty else (with or without a comment) is a do-nothing arm: an unmatched
+  selector runs nothing and execution continues after the case. }
+procedure TE2ECaseEnumTests.TestRun_Case_EmptyElse_NoMatchFallsThrough;
+const
+  Src =
+    'program P;' + LineEnding +
+    'type TC = (cRed, cGreen, cBlue);' + LineEnding +
+    'var C: TC; I: Integer;' + LineEnding +
+    'begin' + LineEnding +
+    '  C := cBlue;' + LineEnding +
+    '  case C of' + LineEnding +
+    '    cRed: WriteLn(''red'');' + LineEnding +
+    '  else' + LineEnding +
+    '    { nothing }' + LineEnding +
+    '  end;' + LineEnding +
+    '  I := 7;' + LineEnding +
+    '  case I of' + LineEnding +
+    '    1: WriteLn(''one'');' + LineEnding +
+    '  else' + LineEnding +
+    '  end;' + LineEnding +
+    '  case I of' + LineEnding +
+    '    7: WriteLn(''seven'');' + LineEnding +
+    '  else' + LineEnding +
+    '  end;' + LineEnding +
+    '  WriteLn(''done'')' + LineEnding +
+    'end.';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'seven' + LineEnding + 'done' + LineEnding, 0);
 end;
 
 procedure TE2ECaseEnumTests.TestRun_Enum_OrdinalValues;
