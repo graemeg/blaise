@@ -669,8 +669,15 @@ linker finds `lib<name>.dylib` or the SDK text stub `lib<name>.tbd` in the
 (`blaise.linker.macho.dylib`).  Each library gets one `LC_LOAD_DYLIB` under
 its install name, and each import is bound to the ordinal of the library
 that exports it, read from the dylib's export trie or the stub's symbol
-lists.  An import no bound library exports stays on libSystem with a note.
-A library that re-exports others is bound by flat lookup.  A library that
+lists.  An import no bound library exports is checked against libSystem's
+real export set, read from the SDK's `libSystem.tbd` (which carries every
+re-exported child, `libsystem_kernel`, `libsystem_c` and the rest): an
+import nobody exports is a link error naming the symbol, as with `ld`.  The
+stub is read only when an import falls outside the RTL's own libSystem
+imports, so most links skip it.  With no SDK installed (a cross-compile)
+nothing can be checked, and an unfamiliar import is bound to libSystem
+with a note.  A library that re-exports others without carrying them in
+its own stub is bound by flat lookup.  A library that
 cannot be found is a link error naming the search path.  Until then every
 such import was bound to libSystem and dyld aborted at launch.
 

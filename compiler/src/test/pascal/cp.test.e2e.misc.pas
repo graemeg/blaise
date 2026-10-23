@@ -160,6 +160,9 @@ type
       _zlibVersion").  A library that cannot be found is a link error naming
       the search path, not a launch-time abort. }
     procedure TestRun_MacOS_ExternalCLibrary_InternalLinker;
+    { libSystem imports are checked against the SDK's real export list: a
+      real function links silently, a mis-spelt one fails the link }
+    procedure TestRun_MacOS_LibSystemImports_CheckedAgainstSdk;
 
     { var / const params }
     procedure TestRun_VarParam_SwapIntegers;
@@ -1733,6 +1736,49 @@ begin
   AssertTrue('names the library and the fix: ' + ToolOut,
     (Pos('''blaisenosuchlib'' not found', ToolOut) >= 0) and
     (Pos('--lib-path', ToolOut) >= 0));
+end;
+
+procedure TE2EMiscTests.TestRun_MacOS_LibSystemImports_CheckedAgainstSdk;
+const
+  Src = '''
+    program P;
+    function kqueue(): Int32; external name 'kqueue';
+    function close(Fd: Int32): Int32; external name 'close';
+    var Q: Int32;
+    begin
+      Q := kqueue();
+      WriteLn(Q >= 0, ' ', close(Q))
+    end.
+    ''';
+  SrcBad = '''
+    program P;
+    function kqeueu(): Int32; external name 'kqeueu';
+    begin
+      WriteLn(kqeueu())
+    end.
+    ''';
+var
+  BinFile, ToolOut: string;
+begin
+  if HostTarget().OS <> osMacOS then
+  begin
+    Ignore('Mach-O libSystem binding: macOS only');
+    Exit;
+  end;
+  if not FileExists('/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/libSystem.tbd') then
+  begin
+    Ignore('no macOS SDK text stubs');
+    Exit;
+  end;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertEquals('links', 0, CompileNativeCLI(Src, False, '', BinFile, ToolOut));
+  AssertTrue('no libSystem note for real functions: ' + ToolOut,
+    Pos('macho linker: note', ToolOut) < 0);
+  AssertRunsOnAll(Src, 'True 0' + LineEnding, 0);
+  AssertTrue('a mis-spelt libSystem import fails the link',
+    CompileNativeCLI(SrcBad, False, '', BinFile, ToolOut) <> 0);
+  AssertTrue('names the symbol: ' + ToolOut,
+    (Pos('undefined symbol ''_kqeueu''', ToolOut) >= 0));
 end;
 
 procedure TE2EMiscTests.TestRun_DefaultParam_MethodCallForms;

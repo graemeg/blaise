@@ -23,8 +23,10 @@
     live only in the dyld shared cache and have no file on disk
     (/usr/lib/libz.1.dylib): its install-name and symbol lists.
 
-  A library that re-exports others has exports this reader does not follow;
-  its symbols are then bound by flat lookup (dyld searches every image). }
+  A library that re-exports others is complete only when its stub carries
+  every re-exported child as a document of its own (the SDK's libSystem
+  stub does).  Otherwise its symbols are bound by flat lookup (dyld
+  searches every image). }
 unit blaise.linker.macho.dylib;
 
 interface
@@ -58,6 +60,26 @@ procedure BuildMachOLibSearchDirs(AExtra: TStringList; AOut: TStringList);
 function ResolveMachODylib(const ALinkName: string;
   ADirs: TStringList): TMachODylib;
 
+{ libSystem's own export set, read from the SDK's libSystem.tbd in ADirs --
+  every re-exported child (libsystem_kernel, libsystem_c, ...) included.  nil
+  when no SDK stub is found or its export set is incomplete; the caller then
+  cannot check a libSystem import. }
+function LoadLibSystemExports(ADirs: TStringList): TMachODylib;
+
+const
+  { ChooseBindOrdinal: no bound library and not libSystem exports the name,
+    so dyld would abort at launch. }
+  MACHO_BIND_UNDEFINED = 0;
+
+{ The two-level ordinal an import binds to: 2.. for the bound library in
+  ADylibs that exports it, 1 for libSystem, BIND_SPECIAL_DYLIB_FLAT_LOOKUP
+  when AFlatFallback (a bound library re-exports others, so its exports are
+  not all known), else MACHO_BIND_UNDEFINED.  With ALibSystem nil nothing can
+  be checked: the name is bound to libSystem and AUnverified is set. }
+function ChooseBindOrdinal(const AName: string; ADylibs: TList<TMachODylib>;
+  ALibSystem: TMachODylib; AFlatFallback: Boolean;
+  out AUnverified: Boolean): Integer;
+
 { Fill ADylib from a dylib image (fat or thin arm64). }
 procedure ReadDylibImage(const ABytes: string; ADylib: TMachODylib);
 { Fill ADylib from a text-based stub (.tbd) document. }
@@ -73,7 +95,7 @@ type
 implementation
 
 uses
-  uStrCompat, streams;
+  uStrCompat, streams, blaise.machowriter;
 
 const
   MH_MAGIC_64 = Integer($FEEDFACF);
@@ -254,18 +276,103 @@ end;
 { A symbol token of a .tbd list: up to a delimiter, quotes stripped. }
 function TbdToken(const AText: string; var APos: Integer): string;
 var
-  B: Integer;
+  B, Start, Stop: Integer;
 begin
-  Result := '';
+  Start := APos;
   while APos < Length(AText) do
   begin
     B := StrAt(AText, APos);
     if (B = Ord(',')) or (B = Ord(']')) or (B = Ord(' ')) or (B = 10) or
        (B = 13) or (B = 9) then
       Break;
-    if B <> Ord('''') then
-      Result := Result + Chr(B);
     APos := APos + 1;
+  end;
+  { one Copy, not a byte-at-a-time build: libSystem's stub has ~10k
+    symbols and is read on every macOS link }
+  Stop := APos;
+  if (Start < Stop) and (StrAt(AText, Start) = Ord('''')) then
+    Start := Start + 1;
+  if (Stop > Start) and (StrAt(AText, Stop - 1) = Ord('''')) then
+    Stop := Stop - 1;
+  Result := Copy(AText, Start, Stop - Start);
+end;
+
+{ The first index >= AFrom where ASub occurs in AText, or -1. }
+function PosFrom(const ASub, AText: string; AFrom: Integer): Integer;
+var
+  I, J, N, M: Integer;
+begin
+  N := Length(AText);
+  M := Length(ASub);
+  I := AFrom;
+  while I + M <= N do
+  begin
+    J := 0;
+    while (J < M) and (StrAt(AText, I + J) = StrAt(ASub, J)) do
+      J := J + 1;
+    if J = M then
+      Exit(I);
+    I := I + 1;
+  end;
+  Result := -1;
+end;
+
+{ The quoted or bare scalar after a key at APos, to the end of the line. }
+function TbdScalarAt(const AText: string; APos: Integer): string;
+var
+  P, Q: Integer;
+begin
+  P := APos;
+  while (P < Length(AText)) and ((StrAt(AText, P) = Ord(' ')) or
+        (StrAt(AText, P) = Ord(''''))) do
+    P := P + 1;
+  Q := P;
+  while (Q < Length(AText)) and (StrAt(AText, Q) <> Ord('''')) and
+        (StrAt(AText, Q) <> 10) and (StrAt(AText, Q) <> 13) do
+    Q := Q + 1;
+  Result := Trim(Copy(AText, P, Q - P));
+end;
+
+{ Every token of the '[ a, b, ... ]' list after APos (which may span lines),
+  added to AOut. }
+procedure ReadTbdList(const AText: string; APos: Integer; AOut: TList<string>);
+var
+  P, B: Integer;
+  Tok: string;
+begin
+  P := APos;
+  while (P < Length(AText)) and (StrAt(AText, P) <> Ord('[')) do
+    P := P + 1;
+  P := P + 1;
+  while P < Length(AText) do
+  begin
+    B := StrAt(AText, P);
+    if B = Ord(']') then Break;
+    if (B = Ord(',')) or (B = Ord(' ')) or (B = 10) or (B = 13) or
+       (B = 9) then
+    begin
+      P := P + 1;
+      Continue;
+    end;
+    Tok := TbdToken(AText, P);
+    if Tok <> '' then
+      AOut.Add(Tok);
+  end;
+end;
+
+{ Every '<AKey> [ ... ]' list in AText, added to AOut.  An occurrence
+  preceded by '-' is skipped, so 'libraries:' does not also match
+  'reexported-libraries:' and 'symbols:' does not match 'weak-symbols:'. }
+procedure ReadTbdLists(const AText, AKey: string; AOut: TList<string>);
+var
+  P: Integer;
+begin
+  P := PosFrom(AKey, AText, 0);
+  while P >= 0 do
+  begin
+    if (P = 0) or (StrAt(AText, P - 1) <> Ord('-')) then
+      ReadTbdList(AText, P + Length(AKey), AOut);
+    P := PosFrom(AKey, AText, P + Length(AKey));
   end;
 end;
 
@@ -274,56 +381,87 @@ const
   LISTS: array[0..2] of string = ('symbols:', 'weak-symbols:',
     'thread-local-symbols:');
 var
-  P, K, Q, B: Integer;
-  Tok: string;
+  P, K, I: Integer;
+  Names: TSet<string>;
+  Toks: TList<string>;
 begin
   { install-name: '/usr/lib/libz.1.dylib' -- the first one names this
     library; later documents of the stub describe re-exported children }
-  P := Pos('install-name:', AText);
+  P := PosFrom('install-name:', AText, 0);
   if P < 0 then
     raise EMachODylib.Create('text stub has no install-name');
-  P := P + Length('install-name:');
-  while (P < Length(AText)) and ((StrAt(AText, P) = Ord(' ')) or
-        (StrAt(AText, P) = Ord(''''))) do
-    P := P + 1;
-  Q := P;
-  while (Q < Length(AText)) and (StrAt(AText, Q) <> Ord('''')) and
-        (StrAt(AText, Q) <> 10) and (StrAt(AText, Q) <> 13) do
-    Q := Q + 1;
-  ADylib.InstallName := Trim(Copy(AText, P, Q - P));
-  if Pos('reexported-libraries:', AText) >= 0 then
-    ADylib.ExportsKnown := False;
-  { every '<list>: [ a, b, ... ]' of an exports section }
-  for K := 0 to High(LISTS) do
+  ADylib.InstallName := TbdScalarAt(AText, P + Length('install-name:'));
+  { every '<list>: [ a, b, ... ]' of an exports section, in every document }
+  Toks := TList<string>.Create();
+  try
+    for K := 0 to High(LISTS) do
+      ReadTbdLists(AText, LISTS[K], Toks);
+    for I := 0 to Toks.Count - 1 do
+      ADylib.ExportSet.Include(Toks.Get(I));
+  finally
+    Toks.Free();
+  end;
+  { A library that re-exports others has a complete export set only when
+    each re-exported child is a document of this same stub -- as the SDK's
+    libSystem.B.tbd carries libsystem_kernel, libsystem_c and the rest. }
+  if PosFrom('reexported-libraries:', AText, 0) >= 0 then
   begin
-    P := Pos(LISTS[K], AText);
-    while P >= 0 do
-    begin
-      P := P + Length(LISTS[K]);
-      while (P < Length(AText)) and (StrAt(AText, P) <> Ord('[')) do
-        P := P + 1;
-      P := P + 1;
-      while P < Length(AText) do
+    Names := TSet<string>.Create();
+    Toks := TList<string>.Create();
+    try
+      P := PosFrom('install-name:', AText, 0);
+      while P >= 0 do
       begin
-        B := StrAt(AText, P);
-        if B = Ord(']') then Break;
-        if (B = Ord(',')) or (B = Ord(' ')) or (B = 10) or (B = 13) or
-           (B = 9) then
-        begin
-          P := P + 1;
-          Continue;
-        end;
-        Tok := TbdToken(AText, P);
-        if Tok <> '' then
-          ADylib.ExportSet.Include(Tok);
+        Names.Include(TbdScalarAt(AText, P + Length('install-name:')));
+        P := PosFrom('install-name:', AText, P + Length('install-name:'));
       end;
-      Q := Pos(LISTS[K], Copy(AText, P, Length(AText) - P));
-      if Q < 0 then
-        P := -1
-      else
-        P := P + Q;
+      ReadTbdLists(AText, 'libraries:', Toks);
+      if Toks.Count = 0 then
+        ADylib.ExportsKnown := False;
+      for I := 0 to Toks.Count - 1 do
+        if not Names.Contains(Toks.Get(I)) then
+          ADylib.ExportsKnown := False;
+    finally
+      Toks.Free();
+      Names.Free();
     end;
   end;
+end;
+
+function LoadLibSystemExports(ADirs: TStringList): TMachODylib;
+begin
+  Result := nil;
+  try
+    Result := ResolveMachODylib('System', ADirs);
+  except
+    on E: EMachODylib do
+      Exit(nil);
+  end;
+  if not Result.ExportsKnown then
+  begin
+    Result.Free();
+    Result := nil;
+  end;
+end;
+
+function ChooseBindOrdinal(const AName: string; ADylibs: TList<TMachODylib>;
+  ALibSystem: TMachODylib; AFlatFallback: Boolean;
+  out AUnverified: Boolean): Integer;
+var
+  I: Integer;
+begin
+  AUnverified := False;
+  for I := 0 to ADylibs.Count - 1 do
+    if ADylibs.Get(I).ExportSet.Contains(AName) then
+      Exit(I + 2);
+  if (ALibSystem <> nil) and ALibSystem.ExportSet.Contains(AName) then
+    Exit(1);
+  if AFlatFallback then
+    Exit(BIND_SPECIAL_DYLIB_FLAT_LOOKUP);
+  if ALibSystem <> nil then
+    Exit(MACHO_BIND_UNDEFINED);
+  AUnverified := True;
+  Result := 1;
 end;
 
 function ReadDylibFile(const APath: string): string;

@@ -711,12 +711,14 @@ begin
           beyond libSystem: one LC_LOAD_DYLIB each, imports bound to the
           library that exports them.  They were never loaded at all -- every
           such import was bound to libSystem and dyld aborted at launch. }
-        if (AOpts.LinkLibs <> nil) and (AOpts.LinkLibs.Count > 0) then
-        begin
-          LibDirs := TStringList.Create();
-          Seen := TStringList.Create();
-          try
-            BuildMachOLibSearchDirs(AOpts.LibPaths, LibDirs);
+        LibDirs := TStringList.Create();
+        Seen := TStringList.Create();
+        try
+          BuildMachOLibSearchDirs(AOpts.LibPaths, LibDirs);
+          { libSystem's real exports, from the SDK stub, so an import nobody
+            exports fails the link rather than dyld at launch }
+          Lk.SetLibSystemSearchDirs(LibDirs);
+          if AOpts.LinkLibs <> nil then
             for I := 0 to AOpts.LinkLibs.Count - 1 do
             begin
               LibName := AOpts.LinkLibs.Strings[I];
@@ -726,10 +728,9 @@ begin
               Seen.Add(LowerCase(LibName));
               Lk.AddDylib(ResolveMachODylib(LibName, LibDirs));
             end;
-          finally
-            Seen.Free();
-            LibDirs.Free();
-          end;
+        finally
+          Seen.Free();
+          LibDirs.Free();
         end;
         Lk.AddObjectFile(AObjFile);
         if AExtraObjects <> nil then

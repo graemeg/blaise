@@ -85,6 +85,8 @@ type
     FLayout: TMachOExecLayout;
     FDylibs: TList<TMachODylib>;       { owned; ordinals 2.. in this order }
     FFlatFallback: Boolean;            { a dylib whose exports are unread }
+    FLibSystem: TMachODylib;           { owned; nil = no SDK stub to check against }
+    FLibSystemDirs: TStringList;       { owned; where to find it, read on first need }
     procedure MergeSections;
     procedure CollectSymbols;
     procedure CollectImports;
@@ -110,6 +112,11 @@ type
     { Bind against ADylib (takes ownership): one LC_LOAD_DYLIB, and every
       import it exports bound to its ordinal.  Call before Link. }
     procedure AddDylib(ADylib: TMachODylib);
+    { Where to find the SDK's libSystem.tbd (LoadLibSystemExports).  It is
+      read only when an import falls outside the RTL's known libSystem
+      surface; with it, an import nobody exports is a link error instead of
+      a dyld abort at launch.  Call before Link. }
+    procedure SetLibSystemSearchDirs(ADirs: TStringList);
     { Link everything into an MH_EXECUTE image.  AEntrySym must resolve
       (the backend's program entry is '_main' — the LC_MAIN contract). }
     function Link(const AEntrySym: string): string;
@@ -192,7 +199,19 @@ begin
   for I := 0 to FDylibs.Count - 1 do
     FDylibs.Get(I).Free();
   FDylibs.Free();
+  FLibSystem.Free();
+  FLibSystemDirs.Free();
   inherited Destroy();
+end;
+
+procedure TMachOLinker.SetLibSystemSearchDirs(ADirs: TStringList);
+var
+  I: Integer;
+begin
+  FLibSystemDirs.Free();
+  FLibSystemDirs := TStringList.Create();
+  for I := 0 to ADirs.Count - 1 do
+    FLibSystemDirs.Add(ADirs.Strings[I]);
 end;
 
 procedure TMachOLinker.AddDylib(ADylib: TMachODylib);
@@ -363,11 +382,12 @@ begin
 end;
 
 { The libSystem surface the RTL legitimately imports, plus the dyld TLV
-  thunk.  NOT an allow-list — user `external name` imports may reference
-  anything — but an unknown name gets a loud build-time NOTE, because a
-  compiler-side wrong symbol otherwise surfaces only as a baffling
-  dyld abort at launch (see SMOKE_MAC_DYLD_HANDOVER.md: a mis-named RTL
-  routine was silently bound to libSystem as __UpperCase). }
+  thunk.  The FALLBACK check, used only when no SDK libSystem.tbd gives the
+  real export set (BindOrdinalOf): NOT an allow-list -- user `external name`
+  imports may reference anything -- but an unknown name gets a loud
+  build-time NOTE, because a compiler-side wrong symbol otherwise surfaces
+  only as a baffling dyld abort at launch (a mis-named RTL routine was once
+  silently bound to libSystem as __UpperCase). }
 function IsKnownLibSystemImport(const AName: string): Boolean;
 const
   KNOWN: array[0..45] of string = (
@@ -407,17 +427,17 @@ begin
   Result := AName;
 end;
 
-{ The two-level dylib ordinal an import binds to: the bound library that
-  exports it (2..), else libSystem (1).  An unknown name is still bound to
-  libSystem with a loud note -- user externals may name any libSystem export,
-  but a mis-spelled RTL or external symbol otherwise surfaces only as a
-  baffling dyld abort at launch.  When a bound library re-exports others
-  (its exports are not all read), an unmatched name is bound by flat lookup
-  instead: dyld searches every loaded image. }
+{ The two-level dylib ordinal an import binds to (ChooseBindOrdinal).  An
+  import that neither libSystem nor any bound library exports is a link
+  error: dyld would abort at launch, and a mis-spelt RTL or external symbol
+  otherwise surfaces only that way.  Without the SDK's libSystem stub
+  (a cross-compile) nothing can be checked, so a name outside the RTL's
+  known imports gets a note instead. }
 function TMachOLinker.BindOrdinalOf(const AName: string): Integer;
 var
-  I: Integer;
   CName: string;
+  Unverified: Boolean;
+  I: Integer;
 begin
   for I := 0 to FDylibs.Count - 1 do
     if FDylibs.Get(I).ExportSet.Contains(AName) then
@@ -425,16 +445,28 @@ begin
   CName := AName;
   if (CName <> '') and (Copy(CName, 0, 1) = '_') then
     CName := Copy(CName, 1, Length(CName) - 1);
+  { The RTL's own imports are known libSystem exports: bind them without
+    reading the ~250 KB stub, which would add ~50 ms to every link. }
   if IsKnownLibSystemImport(CName) then
     Exit(1);
-  if FFlatFallback then
-    Exit(BIND_SPECIAL_DYLIB_FLAT_LOOKUP);
-  WriteLn(StdErr, 'macho linker: note: binding ''', AName,
-    ''' from libSystem (C name ''', CName,
-    ''') — if that is not a real libSystem export, dyld will abort ' +
-    'at launch (a mis-spelled RTL/external symbol looks exactly ' +
-    'like this)');
-  Result := 1;
+  if (FLibSystem = nil) and (FLibSystemDirs <> nil) then
+  begin
+    FLibSystem := LoadLibSystemExports(FLibSystemDirs);
+    FLibSystemDirs.Free();
+    FLibSystemDirs := nil;
+  end;
+  Result := ChooseBindOrdinal(AName, FDylibs, FLibSystem, FFlatFallback,
+    Unverified);
+  if Result = MACHO_BIND_UNDEFINED then
+    raise EMachOLinker.Create('macho linker: undefined symbol ''' + AName +
+      ''' (C name ''' + CName + '''): libSystem does not export it and ' +
+      'neither does any library the program binds -- check the name, or ' +
+      'declare its library with external ''<lib>''');
+  if Unverified then
+    WriteLn(StdErr, 'macho linker: note: binding ''', AName,
+      ''' from libSystem (C name ''', CName,
+      ''') unchecked: no macOS SDK libSystem.tbd was found to check it ' +
+      'against.  If libSystem does not export it, dyld will abort at launch');
 end;
 
 function TMachOLinker.ImportOf(const AName: string): Integer;

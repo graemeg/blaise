@@ -79,6 +79,12 @@ type
   published
     procedure TestTbdStub_InstallNameAndSymbols;
     procedure TestTbdStub_ReexportsMarkExportsUnknown;
+    procedure TestTbdStub_InlinedReexportsKeepExportsKnown;
+    { libSystem's real export set, from the SDK stub; skipped without
+      Xcode Command Line Tools }
+    procedure TestLibSystemExports_FromSdk;
+    procedure TestBindOrdinal_KnownLibSystem;
+    procedure TestBindOrdinal_NoLibSystemStub;
     procedure TestExportTrie_EveryTerminalNamed;
     procedure TestDylibImage_FatArm64SliceIdAndTrie;
     procedure TestLibSystemLinkNames;
@@ -827,6 +833,142 @@ begin
     AssertTrue('exports not all read', not D.ExportsKnown);
   finally
     D.Free();
+  end;
+end;
+
+{ libSystem.B.tbd lists its re-exported children AND carries a document for
+  each of them in the same file: the export set is then complete. }
+procedure TMachODylibTests.TestTbdStub_InlinedReexportsKeepExportsKnown;
+const
+  Stub = '--- !tapi-tbd' + #10 +
+    'install-name:    ''/usr/lib/libSystem.B.dylib''' + #10 +
+    'reexported-libraries:' + #10 +
+    '  - targets:         [ arm64e-macos ]' + #10 +
+    '    libraries:       [ ''/usr/lib/system/libsystem_kernel.dylib'', ' + #10 +
+    '                       ''/usr/lib/system/libsystem_c.dylib'' ]' + #10 +
+    'exports:' + #10 +
+    '  - targets:         [ arm64e-macos ]' + #10 +
+    '    symbols:         [ _mach_init_routine ]' + #10 +
+    '--- !tapi-tbd' + #10 +
+    'install-name:    ''/usr/lib/system/libsystem_kernel.dylib''' + #10 +
+    'exports:' + #10 +
+    '  - targets:         [ arm64e-macos ]' + #10 +
+    '    symbols:         [ _kevent, _kqueue ]' + #10 +
+    '--- !tapi-tbd' + #10 +
+    'install-name:    ''/usr/lib/system/libsystem_c.dylib''' + #10 +
+    'exports:' + #10 +
+    '  - targets:         [ arm64e-macos ]' + #10 +
+    '    symbols:         [ _strlen ]' + #10 +
+    '...' + #10;
+var
+  D: TMachODylib;
+begin
+  D := TMachODylib.Create();
+  try
+    ReadTbdStub(Stub, D);
+    AssertEquals('/usr/lib/libSystem.B.dylib', D.InstallName);
+    AssertTrue('every re-export is inlined: exports known', D.ExportsKnown);
+    AssertTrue('own symbol', D.ExportSet.Contains('_mach_init_routine'));
+    AssertTrue('child symbol', D.ExportSet.Contains('_kevent'));
+    AssertTrue('other child symbol', D.ExportSet.Contains('_strlen'));
+    AssertTrue('a library path is not a symbol',
+      not D.ExportSet.Contains('/usr/lib/system/libsystem_c.dylib'));
+  finally
+    D.Free();
+  end;
+end;
+
+procedure TMachODylibTests.TestLibSystemExports_FromSdk;
+const
+  Sdk = '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib';
+var
+  Dirs: TStringList;
+  D: TMachODylib;
+begin
+  if not FileExists(Sdk + '/libSystem.tbd') then
+  begin
+    Ignore('no macOS SDK text stubs');
+    Exit;
+  end;
+  Dirs := TStringList.Create();
+  try
+    Dirs.Add(Sdk);
+    D := LoadLibSystemExports(Dirs);
+    AssertNotNull('libSystem stub found', D);
+    try
+      AssertTrue('complete export set', D.ExportsKnown);
+      { real libSystem functions the old hard-coded list did not name }
+      AssertTrue('_kevent', D.ExportSet.Contains('_kevent'));
+      AssertTrue('_kqueue', D.ExportSet.Contains('_kqueue'));
+      AssertTrue('_socketpair', D.ExportSet.Contains('_socketpair'));
+      { what the RTL imports }
+      AssertTrue('___error', D.ExportSet.Contains('___error'));
+      AssertTrue('__tlv_bootstrap', D.ExportSet.Contains('__tlv_bootstrap'));
+      AssertTrue('_write', D.ExportSet.Contains('_write'));
+      AssertTrue('not a symbol', not D.ExportSet.Contains('_blaise_no_such_fn'));
+    finally
+      D.Free();
+    end;
+  finally
+    Dirs.Free();
+  end;
+end;
+
+function DylibWith(const AInstall: string; const ASyms: array of string;
+  AKnown: Boolean): TMachODylib;
+var
+  I: Integer;
+begin
+  Result := TMachODylib.Create();
+  Result.InstallName := AInstall;
+  Result.ExportsKnown := AKnown;
+  for I := 0 to High(ASyms) do
+    Result.ExportSet.Include(ASyms[I]);
+end;
+
+procedure TMachODylibTests.TestBindOrdinal_KnownLibSystem;
+var
+  Libs: TList<TMachODylib>;
+  Sys: TMachODylib;
+  Unverified: Boolean;
+begin
+  Libs := TList<TMachODylib>.Create();
+  Sys := DylibWith('/usr/lib/libSystem.B.dylib', ['_kevent', '_write'], True);
+  try
+    Libs.Add(DylibWith('/usr/lib/libz.1.dylib', ['_crc32'], True));
+    AssertEquals('bound library', 2,
+      ChooseBindOrdinal('_crc32', Libs, Sys, False, Unverified));
+    AssertEquals('libSystem', 1,
+      ChooseBindOrdinal('_kevent', Libs, Sys, False, Unverified));
+    AssertTrue('checked against the real exports', not Unverified);
+    AssertEquals('exported by nobody', MACHO_BIND_UNDEFINED,
+      ChooseBindOrdinal('_blaise_no_such_fn', Libs, Sys, False, Unverified));
+    AssertEquals('a re-exporting library: flat lookup instead',
+      BIND_SPECIAL_DYLIB_FLAT_LOOKUP,
+      ChooseBindOrdinal('_blaise_no_such_fn', Libs, Sys, True, Unverified));
+  finally
+    Libs.Get(0).Free();
+    Libs.Free();
+    Sys.Free();
+  end;
+end;
+
+procedure TMachODylibTests.TestBindOrdinal_NoLibSystemStub;
+var
+  Libs: TList<TMachODylib>;
+  Unverified: Boolean;
+begin
+  { No SDK (a cross-compile from Linux): nothing can be checked, so an
+    unmatched name is bound to libSystem and flagged as unverified. }
+  Libs := TList<TMachODylib>.Create();
+  try
+    AssertEquals('assumed libSystem', 1,
+      ChooseBindOrdinal('_kevent', Libs, nil, False, Unverified));
+    AssertTrue('unverified', Unverified);
+    AssertEquals('flat lookup still wins', BIND_SPECIAL_DYLIB_FLAT_LOOKUP,
+      ChooseBindOrdinal('_kevent', Libs, nil, True, Unverified));
+  finally
+    Libs.Free();
   end;
 end;
 
