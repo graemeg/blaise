@@ -107,9 +107,53 @@ type
       AppendDefaultArgs would fail on the unfilled parameter that has no
       default. }
     procedure TestSemantic_ConstructorOverload_PicksCorrectArity;
+    { a program's own routine shadows a used unit's routine of the same
+      name, and a unit-qualified call still reaches the unit's: the bare
+      call targets the program's label, the qualified one the unit's (it
+      was "Duplicate identifier", then -- once defined -- "Ambiguous
+      overload", and a qualified call lost its qualifier) }
+    procedure TestCodegen_ProgramRoutineShadowsUnit_QualifiedReachesUnit;
   end;
 
 implementation
+
+procedure TOverloadTests.TestCodegen_ProgramRoutineShadowsUnit_QualifiedReachesUnit;
+const
+  USrc = '''
+    unit UA;
+    interface
+    function Foo(): Integer;
+    procedure Bar(N: Integer);
+    implementation
+    function Foo(): Integer; begin Result := 1 end;
+    procedure Bar(N: Integer); begin end;
+    end.
+    ''';
+  PSrc = '''
+    program P;
+    uses UA;
+    var N: Integer;
+    function Foo(): Integer; begin Result := 2 end;
+    procedure Bar(N: Integer); begin end;
+    begin
+      N := Foo() + UA.Foo();
+      Bar(N); UA.Bar(N)
+    end.
+    ''';
+var
+  X, A: string;
+begin
+  X := GenAsmWithUnit(USrc, PSrc, TargetX86_64);
+  A := GenAsmWithUnit(USrc, PSrc, TargetArm64);
+  AssertTrue('x86-64 bare call', Pos(#9'callq Foo' + #10, X) >= 0);
+  AssertTrue('x86-64 qualified call', Pos(#9'callq UA_Foo' + #10, X) >= 0);
+  AssertTrue('x86-64 bare proc', Pos(#9'callq Bar' + #10, X) >= 0);
+  AssertTrue('x86-64 qualified proc', Pos(#9'callq UA_Bar' + #10, X) >= 0);
+  AssertTrue('arm64 bare call', Pos(#9'bl _Foo' + #10, A) >= 0);
+  AssertTrue('arm64 qualified call', Pos(#9'bl _UA_Foo' + #10, A) >= 0);
+  AssertTrue('arm64 bare proc', Pos(#9'bl _Bar' + #10, A) >= 0);
+  AssertTrue('arm64 qualified proc', Pos(#9'bl _UA_Bar' + #10, A) >= 0);
+end;
 
 { ------------------------------------------------------------------ }
 { Helpers                                                             }

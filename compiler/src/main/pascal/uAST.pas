@@ -623,6 +623,9 @@ type
   public
     Name:         string;
     Args:         TObjectList;  { owned TASTExpr items }
+    QualifierUnit: string;      { set by the parser -- the unit of a qualified
+                                  call 'Unit.Proc(..)'; only that unit's
+                                  routines are candidates }
     [Unretained] ResolvedDecl: TObject;      { TMethodDecl — not owned; set by uSemantic for user-defined procs }
     IsImplicitSelfMethod: Boolean; { set by uSemantic — call is on Self }
     IsIndirectCall:       Boolean; { set by uSemantic — Name is a procedural-typed variable }
@@ -644,6 +647,9 @@ type
   public
     Name:         string;
     Args:         TObjectList;  { owned TASTExpr items }
+    QualifierUnit: string;      { set by the parser -- the unit of a qualified
+                                  call 'Unit.Func(..)'; only that unit's
+                                  routines are candidates }
     [Unretained] ResolvedDecl: TObject;      { TMethodDecl — not owned; set by uSemantic }
     IsImplicitSelfMethod: Boolean; { set by uSemantic — call is on Self }
     IsIndirectCall:       Boolean; { set by uSemantic — Name resolves to a
@@ -2658,6 +2664,7 @@ begin
   begin
     FCE := TFuncCallExpr.Create();
     FCE.Name := TFuncCallExpr(AExpr).Name;
+    FCE.QualifierUnit := TFuncCallExpr(AExpr).QualifierUnit;
     for I := 0 to TFuncCallExpr(AExpr).Args.Count - 1 do
       FCE.Args.Add(CloneExpr(TASTExpr(TFuncCallExpr(AExpr).Args.Items[I])));
     Result := FCE;
@@ -2889,6 +2896,7 @@ begin
   begin
     PC_ := TProcCall.Create();
     PC_.Name := TProcCall(AStmt).Name;
+    PC_.QualifierUnit := TProcCall(AStmt).QualifierUnit;
     for I := 0 to TProcCall(AStmt).Args.Count - 1 do
       PC_.Args.Add(CloneExpr(TASTExpr(TProcCall(AStmt).Args.Items[I])));
     Result := PC_;

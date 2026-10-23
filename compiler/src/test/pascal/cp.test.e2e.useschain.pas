@@ -52,6 +52,16 @@ type
     { Cross-unit interface VAR shadowing: two used units export the same var
       name; the unit later in `uses` wins a bare reference (last-in-uses), and
       reversing the order flips the winner — mirrors the const last-wins rule. }
+    { Two used units export routines of the same names (a function and a
+      procedure): the last in 'uses' answers a bare call and Unit.Name
+      reaches either, cold and from the unit cache, in both orders.  The
+      second unit failed with "Duplicate identifier"; a warm build kept the
+      FIRST unit's routine. }
+    procedure TestRun_CrossUnitRoutine_LastWins_QualifiedReachesBoth;
+    { A program's own routine shadows a used unit's routine of the same name
+      (FPC/Delphi scoping); the unit's stays reachable as Unit.Name.  It was
+      "Duplicate identifier 'PadRight'" beside StrUtils.PadRight. }
+    procedure TestRun_ProgramRoutine_ShadowsUnitRoutine;
     procedure TestRun_CrossUnitVar_LastWins;
     procedure TestRun_CrossUnitVar_LastWins_Reversed;
     { Unit-qualified VAR disambiguation: 'Unit.V' references that specific
@@ -423,6 +433,84 @@ const
     implementation
     end.
     ''';
+
+const
+  URA_Routine = '''
+    unit ura;
+    interface
+    function Who(): string;
+    procedure Say(N: Integer);
+    implementation
+    function Who(): string; begin Result := 'A' end;
+    procedure Say(N: Integer); begin WriteLn('ura ', N) end;
+    end.
+    ''';
+  URB_Routine = '''
+    unit urb;
+    interface
+    function Who(): string;
+    procedure Say(N: Integer);
+    implementation
+    function Who(): string; begin Result := 'B' end;
+    procedure Say(N: Integer); begin WriteLn('urb ', N) end;
+    end.
+    ''';
+
+procedure TE2EUsesChainTests.TestRun_CrossUnitRoutine_LastWins_QualifiedReachesBoth;
+const
+  ProgAB = '''
+    program P;
+    uses ura, urb;
+    begin
+      WriteLn(Who(), ura.Who(), urb.Who());
+      Say(1); ura.Say(2); urb.Say(3)
+    end.
+    ''';
+  ProgBA = '''
+    program P;
+    uses urb, ura;
+    begin
+      WriteLn(Who(), ura.Who(), urb.Who());
+      Say(1); ura.Say(2); urb.Say(3)
+    end.
+    ''';
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('cold: ' + Output,
+    CompileAndRunWithUnits(URA_Routine, URB_Routine, ProgAB, Output, RCode));
+  AssertEquals('cold: last-in-uses (urb) wins',
+    'BAB' + LE + 'urb 1' + LE + 'ura 2' + LE + 'urb 3' + LE, Output);
+  AssertTrue('warm, reversed: ' + Output,
+    CompileAndRunWithUnits(URA_Routine, URB_Routine, ProgBA, Output, RCode));
+  AssertEquals('warm: last-in-uses (ura) wins',
+    'AAB' + LE + 'ura 1' + LE + 'ura 2' + LE + 'urb 3' + LE, Output);
+end;
+
+procedure TE2EUsesChainTests.TestRun_ProgramRoutine_ShadowsUnitRoutine;
+const
+  Prog = '''
+    program P;
+    uses ura;
+    function Who(): string; begin Result := 'P' end;
+    procedure Say(N: Integer); begin WriteLn('prog ', N) end;
+    begin
+      WriteLn(Who(), ura.Who());
+      Say(1); ura.Say(2)
+    end.
+    ''';
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('cold: ' + Output,
+    CompileAndRunWithUnits(URA_Routine, URB_Routine, Prog, Output, RCode));
+  AssertEquals('cold: the program''s own routine wins',
+    'PA' + LE + 'prog 1' + LE + 'ura 2' + LE, Output);
+  AssertTrue('warm: ' + Output,
+    CompileAndRunWithUnits(URA_Routine, URB_Routine, Prog, Output, RCode));
+  AssertEquals('warm: the program''s own routine wins',
+    'PA' + LE + 'prog 1' + LE + 'ura 2' + LE, Output);
+end;
 
 procedure TE2EUsesChainTests.TestRun_CrossUnitVar_LastWins;
 const

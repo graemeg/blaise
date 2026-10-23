@@ -1519,7 +1519,18 @@ begin
 
     Sym.OwningUnit := AIface.Name;
     if not ATable.Define(Sym) then
-      Sym.Free();
+    begin
+      { Cross-unit collision (last-wins), as for consts and vars: a later
+        unit's routine takes the flat slot and the earlier one stays
+        reachable as Unit.Name through the per-unit cache.  Overload-marked
+        routines on both sides were already chained by Define.  It kept the
+        FIRST unit's routine, so a warm build resolved a bare call to a
+        different routine than the cold build did. }
+      ATable.ExtractLocal(Sym.Name);
+      ATable.Define(Sym);
+      if ASemantic <> nil then
+        ASemantic.NoteShadowedRoutine(Sym.Name);
+    end;
   end;
 end;
 

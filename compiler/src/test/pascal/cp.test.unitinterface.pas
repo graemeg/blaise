@@ -2797,7 +2797,8 @@ begin
   Iface := TUnitInterface.Create('U');
   try
     Buf := WriteUnitInterface(Iface);
-    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 26 since
+    { Blaise Pos is 0-based; match-at-start returns 0.  Version is 27 since
+      a function or procedure call carries its unit qualifier; 26 since
       a record payload carries its property list; it was 23 since
       a CONST entry carries an array const's resolved type, data label and
       elements (v22 since
@@ -2825,7 +2826,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 26', Buf) = 0);
+      Pos('BLAISE-IFACE 27', Buf) = 0);
   finally
     Iface.Free();
   end;

@@ -153,6 +153,10 @@ type
                                            folded: a bare sibling name resolves }
     FContestedGlobals:     TStringList;  { module var names exported by more than one
                                             unit in scope (a last-wins collision) }
+    FShadowedRoutines:     TStringList;  { routine names whose flat slot a later
+                                           declaration took from another unit's
+                                           (DefineRoutineLastWins): only the
+                                           winner's own routines are candidates }
     FForInLoopVars:        TStringList;  { stack of active for-in loop-variable names (nested loops
                                            push/pop); a write to one of these is diagnosed — the
                                            mutation goes to a per-iteration copy and is discarded }
@@ -556,9 +560,11 @@ type
       returns the highest-scoring candidate.  Raises ESemanticError on
       "no matching overload" or ambiguous ties.  AArgs may be nil for
       a pure arity probe (used when args are not yet analysed). }
+    { AQualUnit: the unit of a qualified call, whose routines alone are
+      candidates ('' = every visible routine of the name). }
     function  ResolveStandaloneOverload(const AName: string;
       AArity: Integer; AArgs: TObjectList;
-      ALine, ACol: Integer): TMethodDecl;
+      ALine, ACol: Integer; const AQualUnit: string = ''): TMethodDecl;
     { Class-method overload resolution.  Walks the inheritance chain
       starting at ATypeName, collecting candidates whose method name
       matches AMethodName.  Filters by arity, scores by argument type
@@ -942,6 +948,9 @@ type
     { Record that two units in scope export module var AName (the cached-
       interface import path's last-wins collision). }
     procedure NoteContestedGlobal(const AName: string);
+    { Record that routine AName in the flat slot shadows another unit's (the
+      cached-interface import path's last-wins collision). }
+    procedure NoteShadowedRoutine(const AName: string);
     procedure Analyse(AProg: TProgram);
     procedure AnalyseUnit(AUnit: TUnit);
     { Like AnalyseUnit but promotes interface-section symbols to the global
@@ -999,6 +1008,8 @@ type
       materialised, and by the source-side Define wrapper for the
       unit being analysed.  Task #44 step 9. }
     procedure RegisterUnitSymbol(const AUnitName: string; ASym: TSymbol);
+    function  DefineRoutineLastWins(ASym: TSymbol): Boolean;
+    function  ShadowWinnerUnit(const AName: string): string;
 
     { Look up a per-unit symbol by (AUnitName, ASymName).  Returns
       nil when not registered.  Used by LookupViaUsesChain to walk
@@ -1393,8 +1404,11 @@ begin
   FGenericSourceUnits.Sorted := True;
   FForInLoopVars        := TStringList.Create();
   FContestedGlobals     := TStringList.Create();
+  FShadowedRoutines     := TStringList.Create();
   FDeferredConsts       := TObjectList.Create(False);
   FContestedGlobals.Sorted := True;
+  FShadowedRoutines.Sorted := True;
+  FShadowedRoutines.Duplicates := dupIgnore;
   FContestedGlobals.Duplicates := dupIgnore;
   FForInLoopVars.CaseSensitive := False;
   FWarnings             := TStringList.Create();
@@ -1426,6 +1440,7 @@ begin
   FActiveTypeParams.Free();
   FForInLoopVars.Free();
   FContestedGlobals.Free();
+  FShadowedRoutines.Free();
   FDeferredConsts.Free();
   FWarnings.Free();
   FSparseEnumWarned.Free();
@@ -2627,7 +2642,7 @@ begin
         Sym := TSymbol.Create(MDecl.Name, skProcedure, nil);
       Sym.IsOverload := MDecl.IsOverload;
       Sym.Decl       := MDecl;
-      if not FTable.Define(Sym) then
+      if not DefineRoutineLastWins(Sym) then
       begin
         Sym.Free();
         { Two units may each export the same external C binding (e.g.
@@ -2794,7 +2809,7 @@ begin
           Sym := TSymbol.Create(ImplDecl.Name, skProcedure, nil);
         Sym.IsOverload := ImplDecl.IsOverload;
         Sym.Decl       := ImplDecl;
-        if not FTable.Define(Sym) then
+        if not DefineRoutineLastWins(Sym) then
         begin
           Sym.Free();
           SemanticError(Format('Duplicate identifier ''%s''', [ImplDecl.Name]),
@@ -2972,7 +2987,7 @@ begin
       Sym := TSymbol.Create(MDecl.Name, skProcedure, nil);
     Sym.IsOverload := MDecl.IsOverload;
     Sym.Decl       := MDecl;
-    if not FTable.Define(Sym) then
+    if not DefineRoutineLastWins(Sym) then
     begin
       Sym.Free();
       { Same-external collapse — see the note on the parallel AnalyseUnit
@@ -3160,7 +3175,7 @@ begin
           Sym := TSymbol.Create(ImplDecl.Name, skProcedure, nil);
         Sym.IsOverload := ImplDecl.IsOverload;
         Sym.Decl       := ImplDecl;
-        if not FTable.Define(Sym) then
+        if not DefineRoutineLastWins(Sym) then
         begin
           Sym.Free();
           SemanticError(Format('Duplicate identifier ''%s''', [ImplDecl.Name]),
@@ -8043,6 +8058,50 @@ begin
   FContestedGlobals.Add(AName);
 end;
 
+procedure TSemanticAnalyser.NoteShadowedRoutine(const AName: string);
+begin
+  FShadowedRoutines.Add(AName);
+end;
+
+{ Define routine symbol ASym.  A routine of the same name that ANOTHER unit
+  exports is shadowed, as a type, constant or variable already is
+  (cross-unit last-wins): its symbol moves to that unit's per-unit cache, so
+  Unit.Name still reaches it, and ASym takes the flat slot -- a program's own
+  PadRight beside StrUtils.PadRight, or two used units exporting one name.
+  Overload-marked routines on both sides still merge into one set (the
+  scope chains them).  False, with ASym NOT freed, for a genuine duplicate:
+  a module marker, a builtin, or a redeclaration within the same unit. }
+function TSemanticAnalyser.DefineRoutineLastWins(ASym: TSymbol): Boolean;
+var
+  Prev: TSymbol;
+begin
+  if FTable.Define(ASym) then
+    Exit(True);
+  Prev := FTable.CurrentScope.LookupLocal(ASym.Name);
+  if (Prev = nil) or not (Prev.Kind in [skProcedure, skFunction]) or
+     (Prev.OwningUnit = '') or SameText(Prev.OwningUnit, ASym.OwningUnit) then
+    Exit(False);
+  Prev := FTable.ExtractLocal(ASym.Name);
+  RegisterUnitSymbol(Prev.OwningUnit, Prev);
+  FShadowedRoutines.Add(ASym.Name);
+  Result := FTable.Define(ASym);
+end;
+
+{ The unit whose routines answer a bare call to AName once a shadowing
+  collision has happened for that name: the owner of the flat-slot winner.
+  '' when AName was never shadowed (every same-named routine is a candidate,
+  as before). }
+function TSemanticAnalyser.ShadowWinnerUnit(const AName: string): string;
+var
+  Win: TSymbol;
+begin
+  Result := '';
+  if FShadowedRoutines.IndexOf(AName) < 0 then Exit;
+  Win := FTable.Lookup(AName);
+  if (Win <> nil) and (Win.Decl is TMethodDecl) then
+    Result := TMethodDecl(Win.Decl).OwningUnit;
+end;
+
 function TSemanticAnalyser.ContestedVarEmitName(ASym: TSymbol;
   AQualified: Boolean): string;
 var
@@ -11171,7 +11230,7 @@ begin
     Sym.IsOverload := ADecl.IsOverload;
     Sym.Decl       := ADecl;
 
-    if not FTable.Define(Sym) then
+    if not DefineRoutineLastWins(Sym) then
     begin
       Sym.Free();
       SemanticError(
@@ -16044,7 +16103,8 @@ begin
 end;
 
 function TSemanticAnalyser.ResolveStandaloneOverload(const AName: string;
-  AArity: Integer; AArgs: TObjectList; ALine, ACol: Integer): TMethodDecl;
+  AArity: Integer; AArgs: TObjectList; ALine, ACol: Integer;
+  const AQualUnit: string): TMethodDecl;
 var
   I, J:        Integer;
   Cand:        TMethodDecl;
@@ -16065,9 +16125,16 @@ var
   S1, S2:      Integer;
   FixedN:      Integer;
   DefaultedN:  Integer;
+  WinUnit:     string;
 begin
   Result    := nil;
   TotalCnt  := 0;
+  { once AName has been shadowed, only the winning unit's routines answer a
+    bare call -- the shadowed unit's are reached as Unit.Name }
+  if AQualUnit <> '' then
+    WinUnit := AQualUnit
+  else
+    WinUnit := ShadowWinnerUnit(AName);
   ArityMatch := TObjectList.Create(False);
   try
     Grp := GroupOf(FProcGroups, AName);
@@ -16085,6 +16152,8 @@ begin
         if Cand.IsImplOnly and (Cand.OwningUnit <> '') and
            (FCurrentUnitName <> '') and
            not SameText(Cand.OwningUnit, FCurrentUnitName) then
+          Continue;
+        if (WinUnit <> '') and not SameText(Cand.OwningUnit, WinUnit) then
           Continue;
         Inc(TotalCnt);
         { A varargs external accepts any argument count >= its fixed
@@ -16532,7 +16601,7 @@ begin
       Self.AnalyseArgSlot(ACall.Args, I);
 
     MDecl := ResolveStandaloneOverload(ACall.Name, ACall.Args.Count,
-      ACall.Args, ACall.Line, ACall.Col);
+      ACall.Args, ACall.Line, ACall.Col, ACall.QualifierUnit);
     ResolveDeferredArrowArgs(ACall.Args, MDecl);
     if MDecl = nil then
       SemanticError(
@@ -18063,7 +18132,7 @@ begin
     Self.AnalyseArgSlot(AExpr.Args, I);
 
   MDecl := ResolveStandaloneOverload(AExpr.Name, AExpr.Args.Count,
-    AExpr.Args, AExpr.Line, AExpr.Col);
+    AExpr.Args, AExpr.Line, AExpr.Col, AExpr.QualifierUnit);
   if MDecl = nil then
     SemanticError(
       Format('No matching overload for ''%s'' with %d argument(s)',

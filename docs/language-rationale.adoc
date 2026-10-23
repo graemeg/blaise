@@ -6967,6 +6967,54 @@ case, while keeping resolution simple.
   final identifier covers the motivating real-world code without that
   machinery, and can be tightened later without changing the syntax.
 
+== Same-Named Routines Across Units — the Nearest Declaration Wins
+
+=== Decision
+
+A program or unit may declare a routine with the same name as one exported
+by a unit it uses, and two used units may export routines of the same name.
+A bare call resolves to the *nearest* declaration: the compilation's own
+routine first, then the last unit in the `uses` clause that exports the
+name.  A unit-qualified call, `StrUtils.PadRight(S, 10)` or `ura.Say(2)`,
+reaches the named unit's routine whatever shadows it.  Routines marked
+`overload` on both sides still form one overload set, as before.
+
+----
+program Report;
+uses StrUtils;
+function PadRight(const S: string; W: Integer): string;   { the program's own }
+begin ... end;
+begin
+  WriteLn(PadRight('x', 3), StrUtils.PadRight('y', 3))
+end.
+----
+
+This is the rule Blaise already applied to types, constants and variables
+(cross-unit last-wins, with the shadowed symbol kept reachable through its
+unit's qualifier).  Routines were the exception: the second declaration
+failed with "Duplicate identifier", and a routine imported from the unit
+cache silently kept the *first* unit's version, so a warm build could call
+a different routine than a cold one.  A qualified call also lost its
+qualifier in the parser, so `Unit.Proc(..)` resolved like a bare call.
+
+=== Rationale
+
+FPC and Delphi both scope this way, and it is what makes adding a routine
+to a library unit safe: `tests/bench_lists.pas` stopped compiling the day
+StrUtils gained a `PadRight`, through no change of its own.  One rule for
+every kind of symbol is also easier to state and to trust than a rule with
+a routine-shaped hole in it.
+
+=== Alternatives considered
+
+* *Keep rejecting the clash.* Rejected: every new stdlib export becomes a
+  potential compile break for user code, and the error names a symbol the
+  user never declared twice.
+* *Merge same-signature routines from different units into one overload
+  set.* Rejected: two unrelated routines that happen to share a signature
+  are not overloads of each other; the call would become ambiguous instead
+  of resolving to the nearer declaration.
+
 == Chained L-value Assignment — `Self.F[i].Sub := value`
 
 === Decision

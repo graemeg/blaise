@@ -54,7 +54,9 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 26; { v26: a record payload ends with its property list
+  IFACE_VERSION = 27; { v27: TFuncCallExpr / TProcCall carry QualifierUnit
+                          after their arguments (a unit-qualified call).
+                        v26: a record payload ends with its property list
                           (record properties, Delphi/FPC advanced records).
                         v25: TRoutineSig / TMethodDecl.IsConstructor after
                           IsStatic -- a constructor is what is declared one,
@@ -1189,7 +1191,8 @@ begin
   else if AE is TFuncCallExpr then
     Result := EncodeLpstr('call') +
               EncodeLpstr(TFuncCallExpr(AE).Name) +
-              EncodeExprList(TFuncCallExpr(AE).Args)
+              EncodeExprList(TFuncCallExpr(AE).Args) +
+              EncodeLpstr(TFuncCallExpr(AE).QualifierUnit)
   else if AE is TMethodCallExpr then
     Result := EncodeLpstr('mcall') +
               EncodeLpstr(TMethodCallExpr(AE).ObjectName) +
@@ -1382,7 +1385,8 @@ begin
   else if AStmt is TProcCall then
     Result := EncodeLpstr('pcall') +
               EncodeLpstr(TProcCall(AStmt).Name) +
-              EncodeExprList(TProcCall(AStmt).Args)
+              EncodeExprList(TProcCall(AStmt).Args) +
+              EncodeLpstr(TProcCall(AStmt).QualifierUnit)
   else if AStmt is TExprCallStmt then
     Result := EncodeLpstr('ecs') +
               EncodeExpr(TExprCallStmt(AStmt).Call)
@@ -1953,6 +1957,7 @@ begin
     FCE := TFuncCallExpr.Create();
     FCE.Name := ReadLpstrAt(AText, APos);
     ReadExprList(AText, APos, FCE.Args);
+    FCE.QualifierUnit := ReadLpstrAt(AText, APos);
     Result := FCE;
   end
   else if Kind = 'mcall' then
@@ -2242,6 +2247,7 @@ begin
     PCn := TProcCall.Create();
     PCn.Name := ReadLpstrAt(AText, APos);
     ReadExprList(AText, APos, PCn.Args);
+    PCn.QualifierUnit := ReadLpstrAt(AText, APos);
     Result := PCn;
   end
   else if Kind = 'ecs' then

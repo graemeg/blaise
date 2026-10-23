@@ -5041,6 +5041,7 @@ begin
       FCallNode.Line := Line;
       FCallNode.Col  := Col;
       FCallNode.Name := Name;
+      FCallNode.QualifierUnit := QualUnit;
       Advance();  { '(' }
       if not Check(tkRParen) then
       begin
@@ -5179,6 +5180,7 @@ begin
       Call.Line := Line;
       Call.Col  := Col;
       Call.Name := Name;
+      Call.QualifierUnit := FCallNode.QualifierUnit;
       while FCallNode.Args.Count > 0 do
         Call.Args.Add(FCallNode.Args.Extract(FCallNode.Args.Items[0]));
       FCallNode.Free();
@@ -6712,6 +6714,7 @@ begin
           FCallNode.Line := Line;
           FCallNode.Col  := Col;
           FCallNode.Name := Name;
+          FCallNode.QualifierUnit := QualUnit;
           Advance();  { consume '(' }
           if not Check(tkRParen) then
           begin
