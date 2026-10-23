@@ -53,12 +53,51 @@ type
     { SetLength on a var-param string — resizes the caller's string through the
       slot address (arm64 leg 34; also the AddRef-the-rc0-result ARC fix). }
     procedure TestRun_SetLengthVarParamString;
+    { GH #239: an sret function's Result (a static array, or a record too
+      big for registers) passed to a var or out parameter: x86-64 handed
+      the callee the slot holding the result pointer, so the callee's write
+      clobbered it and the next Result write crashed }
+    procedure TestRun_SretResultAsVarOutArg;
   end;
 
 implementation
 
 const
   LE = #10;
+
+procedure TE2EVarParamTests.TestRun_SretResultAsVarOutArg;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll('''
+    program P;
+    type
+      TArr = array[0..1] of Integer;
+      TBigRec = record A: array[0..9] of Int64; end;
+      TSRec = record S: string; N: Integer; X: array[0..5] of Int64; end;
+    procedure Clear(var A: TArr); begin A[0] := 0 end;
+    procedure OutA(out A: TArr); begin A[0] := 5; A[1] := 0 end;
+    procedure ClrBR(var R: TBigRec); begin R.A[0] := 4 end;
+    procedure SetS(var R: TSRec); begin R.S := 'hi'; R.N := 3 end;
+    function NewArr: TArr;
+    begin
+      Clear(Result);
+      WriteLn('before');
+      Result[0] := 7;
+      WriteLn('after')
+    end;
+    function FO: TArr; begin OutA(Result); Result[1] := 50 end;
+    function FB: TBigRec; begin ClrBR(Result); Result.A[1] := 40 end;
+    function FS: TSRec; begin SetS(Result); Result.X[5] := 9 end;
+    var a: TArr; b: TBigRec; s: TSRec;
+    begin
+      a := NewArr(); WriteLn(a[0]);
+      a := FO(); WriteLn(a[0], ' ', a[1]);
+      b := FB(); WriteLn(b.A[0], ' ', b.A[1]);
+      s := FS(); WriteLn(s.S, ' ', s.N, ' ', s.X[5])
+    end.
+    ''', 'before' + LE + 'after' + LE + '7' + LE + '5 50' + LE + '4 40' + LE +
+    'hi 3 9' + LE, 0);
+end;
 
 procedure TE2EVarParamTests.SetUp;
 begin

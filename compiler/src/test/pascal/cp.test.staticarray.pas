@@ -142,6 +142,12 @@ type
       Delphi; a 32-bit one is rejected (found by the ordinal matrix) }
     procedure TestSemantic_SmallIntTypeIndex_Bounds;
     procedure TestSemantic_Int32TypeIndex_Rejected;
+    { GH #239: an sret function's Result passed to a var parameter is the
+      caller's buffer: x86-64 passed the SLOT holding that pointer, so the
+      callee's write clobbered the pointer and the next Result write
+      crashed.  arm64 keeps Result in a local buffer, whose address is
+      right. }
+    procedure TestNative_SretResultAsVarArg_PassesBuffer;
 
     { ------------------------------------------------------------------ }
     { BUG-20260921-const-array-index-out-of-bounds — a CONSTANT index    }
@@ -944,6 +950,32 @@ begin
   finally
     P.Free();
   end;
+end;
+
+procedure TStaticArrayTests.TestNative_SretResultAsVarArg_PassesBuffer;
+const
+  Src = '''
+    program P;
+    type TArr = array[0..1] of Integer;
+    procedure Clear(var A: TArr); begin A[0] := 0 end;
+    function NewArr: TArr;
+    begin
+      Clear(Result);
+      Result[0] := 7
+    end;
+    var R: TArr;
+    begin
+      R := NewArr()
+    end.
+    ''';
+begin
+  { x86-64: the slot at -8 holds the caller's buffer pointer -- load it,
+    never leaq the slot; arm64: the local Result buffer at x29-8 }
+  AssertEquals('Clear(Result) passes the buffer', '',
+    AsmMissing(Src,
+      #9'movq -8(%rbp), %rax' + #10 + #9'movq %rax, %rdi' + #10 +
+        #9'callq Clear',
+      #9'sub x0, x29, #8' + #10 + #9'str x0, [sp, #-16]!'));
 end;
 
 procedure TStaticArrayTests.TestSemantic_SmallIntTypeIndex_Bounds;

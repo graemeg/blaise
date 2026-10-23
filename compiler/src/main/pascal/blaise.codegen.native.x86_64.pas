@@ -13137,8 +13137,11 @@ begin
         [TFieldInfo(TIdentExpr(AArg).ImplicitFieldInfo).Offset]));
   end
   else if (AArg is TIdentExpr) and Self.IsLocal(TIdentExpr(AArg).Name) then
-    Self.Emit(Format(#9'leaq %s, %%rax',
-      [Self.VarOperand(TIdentExpr(AArg).Name)]))
+    { a local's slot is its storage -- except an sret function's Result,
+      whose slot holds the caller's buffer POINTER (Clear(Result), GH #239:
+      a leaq handed the callee the slot, and its write clobbered the
+      pointer) }
+    Self.EmitLocalRecordBase(TIdentExpr(AArg).Name, '%rax')
   else if (AArg is TIdentExpr) and (TIdentExpr(AArg).ConstArraySymbol <> '') then
     Self.Emit(Format(#9'leaq %s(%%rip), %%rax',
       [NativeMangle(TIdentExpr(AArg).ConstArraySymbol)]))
