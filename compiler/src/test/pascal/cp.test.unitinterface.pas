@@ -326,6 +326,12 @@ type
       the source spelling and every warm rebuild failed with "'N-1' is not a
       valid integer value". }
     procedure TestImport_Record_ConstExprArrayBound;
+    { A NAMED type for an inline array indexed by a type or by non-literal
+      bounds (array[Boolean], array[TEnum], array[Byte], array[False..True],
+      array[Boolean, 0..1]) is exported with literal bounds.  It exported the
+      source spelling, which the import cannot parse: "Type alias TArr =
+      array[@boolean] of integer: base not found" (GH #240). }
+    procedure TestImport_Alias_TypeIndexedArray;
     procedure TestImport_Class_ImplicitTObjectParent;
     procedure TestImport_Class_FieldOffsetAfterParentVptr;
     procedure TestImport_Class_ExplicitParentChain;
@@ -2238,6 +2244,51 @@ begin
     AssertEquals('X offset', 0, Fx.Offset);
     AssertEquals('Y offset', 4, Fy.Offset);
     AssertTrue('X type Integer', Fx.TypeDesc = Tab.FindType('Integer'));
+  finally
+    Tab.Free();
+    Iface.Free();
+  end;
+end;
+
+procedure TImportRoundTripTests.TestImport_Alias_TypeIndexedArray;
+const
+  SRC =
+    '''
+    unit U;
+    interface
+    type
+      TC = (cRed, cGreen, cBlue);
+      TB = array[boolean] of Integer;
+      TE = array[TC] of Integer;
+      TY = array[Byte] of Word;
+      TL = array[False..True] of Int64;
+      TM = array[Boolean, 0..1] of Integer;
+    implementation
+    end.
+    ''';
+var
+  Iface: TUnitInterface;
+  Tab:   TSymbolTable;
+
+  procedure Check(const AName, ASpelling: string);
+  var
+    TD: TTypeDesc;
+  begin
+    TD := Tab.FindType(AName);
+    AssertTrue(AName + ' imported', TD <> nil);
+    AssertEquals(AName + ' spelling', ASpelling, TD.Name);
+  end;
+
+begin
+  Iface := ParseAnalyseAndExport(SRC);
+  Tab   := FreshTableWithBuiltins();
+  try
+    ImportUnitInterface(Iface, Tab);
+    Check('TB', 'array[0..1] of Integer');
+    Check('TE', 'array[0..2] of Integer');
+    Check('TY', 'array[0..255] of Word');
+    Check('TL', 'array[0..1] of Int64');
+    Check('TM', 'array[0..1] of array[0..1] of Integer');
   finally
     Tab.Free();
     Iface.Free();

@@ -281,6 +281,7 @@ function BuildTypeEntry(ASrc:         TTypeDecl;
 var
   GenDef:   TGenericTypeDef;
   GenRecDef: TGenericRecordDef;
+  AliasDesc: TTypeDesc;
 begin
   Result := TTypeEntry.Create();
   Result.Name := ASrc.Name;
@@ -308,6 +309,19 @@ begin
     new .bif field is needed.  Mutating Result.Def is safe — it is a clone,
     not the AST node. }
   ResolveEnumSubrangeAliasForExport(Result, AIface);
+  { A type that NAMES an inline array -- TArr = array[Boolean] of Integer,
+    array[TEnum], array[Byte], array[False..True] -- is written with the
+    analysed type's literal bounds too, as a field's is: the importer parses
+    only integer bounds, so the source spelling failed every warm rebuild
+    ("Type alias TArr = array[@boolean] of integer: base not found", GH #240). }
+  if Result.Def is TTypeAliasDef then
+  begin
+    AliasDesc := TTypeDesc(ASrc.ResolvedDesc);
+    if (AliasDesc = nil) and (ASymbolTable <> nil) then
+      AliasDesc := ASymbolTable.FindType(ASrc.Name);
+    TTypeAliasDef(Result.Def).TypeName := ExportTypeSpelling(
+      TTypeAliasDef(Result.Def).TypeName, AliasDesc);
+  end;
   if ASrc.Def is TRecordTypeDef then
     CanonicaliseFieldTypes(TRecordTypeDef(ASrc.Def).Fields,
       TRecordTypeDef(Result.Def).Fields)

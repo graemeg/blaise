@@ -294,6 +294,10 @@ type
       spelling (array[0..N - 1] of Byte), the import could not parse it, and
       the second build failed while the stale binary was left in place. }
     procedure TestIncrementalRebuild_ConstExprArrayBound_Warm;
+    { A unit's named type for an array indexed by Boolean, an enum, Byte or
+      False..True rebuilds warm (GH #240: "Type alias TArr =
+      array[@boolean] of integer: base not found" on every second build). }
+    procedure TestIncrementalRebuild_TypeIndexedArrayAlias_Warm;
     procedure TestIncrementalRebuild_CtorIdentity_Warm;
     procedure TestDebugOpdf_PerUnitSection_InDependencyObject;
     { Regression (GH #231): a UNIT passed as --source with --debug-opdf
@@ -4019,6 +4023,69 @@ begin
     AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
     AssertEquals(Format('build%d stdout', [Pass]),
       '104 7 9 11 4 122' + #10, Captured);
+  end;
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_TypeIndexedArrayAlias_Warm;
+const
+  LibSrc =
+    '''
+    unit IdxArrs;
+    interface
+    type
+      TC = (cRed, cGreen, cBlue);
+      TArr = array[boolean] of integer;
+      TByC = array[TC] of Integer;
+      TByB = array[Byte] of Byte;
+      TFT = array[False..True] of Int64;
+      TGrid = array[Boolean, TC] of Word;
+    implementation
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseIdxArrs;
+    uses IdxArrs;
+    var
+      R: TArr; C: TByC; B: TByB; F: TFT; G: TGrid;
+    begin
+      R[FALSE] := 7;
+      C[cBlue] := 8;
+      B[255] := 9;
+      F[True] := 10;
+      G[True, cGreen] := 11;
+      WriteLn(R[FALSE], ' ', C[cBlue], ' ', B[255], ' ', F[True], ' ',
+        G[True, cGreen], ' ', SizeOf(TArr), ' ', SizeOf(TByC), ' ',
+        SizeOf(TByB), ' ', SizeOf(TGrid))
+    end.
+    ''';
+var
+  LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc, Pass: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  LibPas   := FScratch + '/IdxArrs.pas';
+  ProgPas  := FScratch + '/use_idxarrs.pas';
+  ProgBin  := FScratch + '/use_idxarrs';
+  CacheDir := FScratch + '/units-idxarrs';
+  WriteFile(LibPas, LibSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+  for Pass := 0 to 1 do
+  begin
+    DeleteFile(ProgBin);
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch], Captured);
+    AssertEquals(Format('build%d exit code (out: %s)', [Pass, Captured]), 0, Rc);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
+    AssertEquals(Format('build%d stdout', [Pass]),
+      '7 8 9 10 11 8 12 256 12' + #10, Captured);
   end;
 end;
 
