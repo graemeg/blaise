@@ -96,6 +96,7 @@ uses
   cp.test.e2e.arrayofconst,
   cp.test.e2e.base,
   cp.test.bif_coverage,
+  cp.test.flag_coverage,
   cp.test.e2e.exceptions,
   cp.test.e2e.arc,
   cp.test.e2e.leakcheck,
