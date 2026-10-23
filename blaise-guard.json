@@ -66,15 +66,13 @@
     "BL-2005": { "enabled": true, "severity": "warning" },
 
     "_BL-2006": [
-      "OFF for v0.15 in this project only; it stays on in the built-in",
-      "defaults, where it is the users' advance notice of the classic-type",
-      "removal (docs/type-standardisation-design.adoc, D11).  Here it reports",
-      "4526 findings in compiler/ and 1752 in stdlib/ (4260 of the compiler's",
-      "are Integer), which drowns every other info finding while the codebase",
-      "cannot migrate yet.  Turn it back on when the v0.16 cycle opens, as",
-      "the work list for the Phase 6 migration."
+      "ON again from the v0.16 cycle (it was off for v0.15 only).  Its",
+      "findings are the work list for the Phase 6 classic-type migration",
+      "(docs/type-standardisation-design.adoc): 4529 in compiler/ and 1751 in",
+      "stdlib/ at v0.15.0, 4263 of the compiler's Integer.  Kept at info until",
+      "the migration is done, so it does not drown the other findings."
     ],
-    "BL-2006": { "enabled": false, "severity": "info" },
+    "BL-2006": { "enabled": true, "severity": "info" },
 
     "_BL-3001": [
       "minTokens raised 30 -> 120.  At 30 the compiler reports 6855 findings.",
