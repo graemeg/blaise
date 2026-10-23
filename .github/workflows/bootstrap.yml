@@ -51,7 +51,7 @@ env:
   # the binary SOURCE-BUILDS the RTL, so no blaise_rtl.a is involved anywhere
   # in the chain. Always keep this anchor pinned to the latest published
   # release — see the "Cutting a Blaise release" skill, Step 7b.
-  STAGE1_TAG: v0.14.0
+  STAGE1_TAG: v0.15.0
 
 jobs:
   bootstrap:
