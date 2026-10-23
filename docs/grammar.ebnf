@@ -1124,6 +1124,7 @@ Stmt
     | BlockVarDeclStmt
     | PointerWriteStmt
     | DerefStmt
+    | DerefSubscriptStmt
     | ExprCallStmt
     | CallChainStmt
     | ParenReceiverStmt
@@ -1279,6 +1280,16 @@ CompoundStmt
 PointerWriteStmt
     = IDENT CARET ASSIGN Expr
     | IDENT LPAREN [ ArgList ] RPAREN CARET ASSIGN Expr
+    ;
+
+(* An element of the array a pointer addresses, as a statement target:
+ * P^[I] := V, P^[I, J] := V, P^[I].F := V, P^[I][J] := V -- the postfix
+ * chain of SubscriptSuffix after the dereference, ending in an assignment
+ * or a call through it.  Until 2026-10-23 P^[I] parsed as an expression but
+ * not as a statement target. *)
+DerefSubscriptStmt
+    = IDENT CARET LBRACKET Expr { COMMA Expr } RBRACKET { SubscriptSuffix }
+      ( ASSIGN Expr | LPAREN [ ArgList ] RPAREN )
     ;
 
 (* Statements through a dereferenced pointer: a field write or a method call

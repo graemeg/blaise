@@ -68,9 +68,40 @@ type
     procedure TestRun_Move_CopiesAndHandlesOverlap;
     procedure TestRun_Move_MethodNamedMoveStillCalled;
     procedure TestRun_FillByte_FillsAndTruncatesValue;
+    { writes through P^[I]: an element, a record element's field, a
+      multi-dimensional and a chained element, in a loop and through Inc --
+      the statement form did not parse }
+    procedure TestRun_SubscriptAfterDeref_Writes;
   end;
 
 implementation
+
+procedure TE2EPointersTests.TestRun_SubscriptAfterDeref_Writes;
+const
+  Src = '''
+    program PD;
+    type
+      TPt = record X, Y: Integer; end;
+      TArr = array[0..3] of Integer;
+      TPts = array[0..1] of TPt;
+      PArr = ^TArr; PPts = ^TPts;
+      TGrid = array[0..1, 0..2] of Integer; PGrid = ^TGrid;
+    var a: TArr; P: PArr; pts: TPts; Q: PPts; g: TGrid; G2: PGrid; I: Integer;
+    begin
+      P := @a; Q := @pts; G2 := @g;
+      P^[0] := 9; P^[3] := P^[0] + 1;
+      for I := 1 to 2 do P^[I] := I * 100;
+      Q^[1].Y := 42; Q^[0].X := 7;
+      G2^[1, 2] := 5; G2^[0][1] := 6;
+      Inc(P^[3]);
+      WriteLn(a[0], ' ', a[1], ' ', a[2], ' ', a[3], ' ', pts[1].Y, ' ',
+        pts[0].X, ' ', g[1, 2], ' ', g[0, 1])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '9 100 200 11 42 7 5 6' + LineEnding, 0);
+end;
 
 procedure TE2EPointersTests.TestRun_AddrOfVarParam_IsCallersVariable;
 const

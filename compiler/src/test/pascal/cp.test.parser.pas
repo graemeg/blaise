@@ -32,6 +32,10 @@ type
       Buf[0]^[1] := V, Buf[0]^ := V, Recs[0]^.A := V -- parses (it was
       "Expected '.' or ':=' after subscript") }
     procedure TestParse_DerefAfterSubscript_Statements;
+    { a statement that subscripts a dereferenced pointer -- P^[1] := V,
+      P^[0].A := V, P^[1, 2] := V -- parses as FPC and Delphi accept it (it
+      was "Expected ':=' but got '['"; found while probing GH #239) }
+    procedure TestParse_SubscriptAfterDeref_Statements;
     { GH #217: a statement calling a generic routine keeps the type
       arguments in the call's name, as an expression does }
     procedure TestParse_GenericCallStatement_KeepsTypeArgs;
@@ -1168,6 +1172,28 @@ begin
       TProcCall(Prog.Block.Stmts.Items[0]).Name);
     AssertEquals('two type arguments', 'Show<string,Integer>',
       TProcCall(Prog.Block.Stmts.Items[1]).Name);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TParserTests.TestParse_SubscriptAfterDeref_Statements;
+var
+  Prog: TProgram;
+  SA: TStaticSubscriptAssign;
+begin
+  Prog := ParseSource(
+    'program P; var P1, V: Integer;'
+    + ' begin P1^[1] := V; P1^[0].A := V; P1^[1, 2] := V end.');
+  try
+    AssertTrue('P1^[1] := V is an element write',
+      Prog.Block.Stmts.Items[0] is TStaticSubscriptAssign);
+    SA := TStaticSubscriptAssign(Prog.Block.Stmts.Items[0]);
+    AssertTrue('of the array P1 points at', SA.BaseExpr is TDerefExpr);
+    AssertTrue('P1^[0].A := V is a field write',
+      Prog.Block.Stmts.Items[1] is TFieldAssignment);
+    AssertTrue('P1^[1, 2] := V is an element write',
+      Prog.Block.Stmts.Items[2] is TStaticSubscriptAssign);
   finally
     Prog.Free();
   end;

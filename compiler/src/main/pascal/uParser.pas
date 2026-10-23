@@ -4478,6 +4478,20 @@ begin
       DerefNode.Expr   := PtrIdNode;
       Exit(ParseExprCallStmt(DerefNode, Line, Col));
     end;
+    if Check(tkLBracket) then
+    begin
+      { Ident^[I] := V, Ident^[I].F := V -- an element of the array a pointer
+        addresses: an ordinary chain, as for Buf[0]^[1] := V }
+      PtrIdNode        := TIdentExpr.Create();
+      PtrIdNode.Line   := Line;
+      PtrIdNode.Col    := Col;
+      PtrIdNode.Name   := Name;
+      DerefNode        := TDerefExpr.Create();
+      DerefNode.Line   := Line;
+      DerefNode.Col    := Col;
+      DerefNode.Expr   := PtrIdNode;
+      Exit(Self.ChainTailStmt(DerefNode, Name, Line, Col));
+    end;
     if Check(tkDot) then
     begin
       { Deref-then-field assignment: Ident^.Field := Expr
