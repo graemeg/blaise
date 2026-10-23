@@ -431,6 +431,11 @@ git add README.adoc
 git commit -m "docs: update test count to <N> for v<X.Y.Z>"
 ```
 
+zsh (the macOS login shell) aborts a whole command when a glob matches
+nothing, so `rm -rf releases/v$NEXT-pre/rtl releases/v$NEXT-pre/*.bak`
+removes nothing at all when there is no `.bak` file.  Check that `rtl/` is
+gone.
+
 ## Step 8 -- bump to the next dev version
 
 * `Blaise.pas`: `'<X.Y.Z>'` -> `'<next-minor>.0-SNAPSHOT'`
