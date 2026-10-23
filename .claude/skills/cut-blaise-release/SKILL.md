@@ -165,6 +165,57 @@ Expected: OK on both suites, except the one known Rosetta artefact
 `TLinkerE2ETests.TestRun_SyscallHelloWorld` (passes on real Linux).  Any
 other failure: stop.  Record N, the macOS total, for the README and the post.
 
+### Step 3b -- build and run every program in the repository (macOS)
+
+The suites only compile what they reference.  Tools, benchmarks and test
+programs that nothing references rot quietly: the v0.15 sweep found kanban
+without macOS terminal support, bindgen output that would not compile, punit
+printing wrong hex, five programs broken by newer language rules, and the
+internal linker unable to load any C library beyond libSystem.  So before
+tagging, build and RUN everything, with the stage-2 compiler from Step 2.
+Work in a scratch directory, never `/tmp` (stale `.o` files there get linked
+in), and give each program its own `--unit-cache`.
+
+1. **Every default PasBuild module** (compiler, migration-analyser, kanban,
+   bif-coverage, flag-coverage, blaise-guard, bindgen), from the repo root:
+
+   ```bash
+   pasbuild test --compiler "$PWD/compiler/target/blaise"   # every module OK
+   ```
+
+   Then run each tool for real:
+
+   - `tools/bif-coverage/target/bif-coverage` and
+     `tools/flag-coverage/target/flag-coverage` both print OK;
+   - `tools/blaise-guard/target/blaise-guard` scans `stdlib/src/main/pascal`
+     without crashing;
+   - kanban: its CLI commands, plus the full-screen TUI under a pty
+     (`script -q /dev/null tools/kanban/target/kanban ...`);
+   - bindgen: generate bindings for a real header (zlib), compile a small
+     program against them and run it;
+   - `tools/migration-analyser/target/cp-migrate` runs and exits 0 (still a
+     placeholder that prints a greeting).
+
+2. **Standalone programs** -- compile and run each:
+
+   - `tests/*.pas` (milestones, `bench_lists`);
+   - `tools/performance/bench_*.pas` (or `run-benchmarks.sh`);
+   - `runtime/src/test/pascal/*.pas` -- the punit tests must pass; the
+     must-fail cases must fail the same way on both ISAs.
+     `bench_async_http` is a load benchmark, so request failures under load
+     are expected;
+   - the debugger fixtures in `compiler/src/it/` (they only need to compile
+     and run; pdr cannot debug macOS arm64 yet);
+   - the three TLS loopback programs (`stdlib/src/test/pascal/*loopback.pas`),
+     linked with the default internal linker against Homebrew OpenSSL.  The
+     server certificate needs `subjectAltName=DNS:localhost,IP:127.0.0.1`;
+   - `bindings/examples/x11_window.pas` only if XQuartz is installed;
+     otherwise note it as not run.
+
+Every program must build and behave as its source says.  A failure here is
+a release blocker like any suite failure: fix it with a test (unit + e2e),
+then re-run Steps 2-3.
+
 ## Step 4 -- commit and tag
 
 ```bash
