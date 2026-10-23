@@ -153,6 +153,13 @@ type
       method and inherited calls take their omitted trailing arguments from
       the declared defaults (they failed to compile) }
     procedure TestRun_DefaultParam_MethodCallForms;
+    { macOS: a program binding a C library (external 'z') links with the
+      internal Mach-O linker and runs -- the library gets its own
+      LC_LOAD_DYLIB and its imports its ordinal.  Every import used to be
+      bound to libSystem, and dyld aborted at launch ("Symbol not found:
+      _zlibVersion").  A library that cannot be found is a link error naming
+      the search path, not a launch-time abort. }
+    procedure TestRun_MacOS_ExternalCLibrary_InternalLinker;
 
     { var / const params }
     procedure TestRun_VarParam_SwapIntegers;
@@ -362,7 +369,7 @@ type
 implementation
 
 uses
-  classes, sysutils;
+  classes, sysutils, blaise.codegen.target;
 
 procedure TE2EMiscTests.SetUp;
 begin
@@ -1688,6 +1695,44 @@ procedure TE2EMiscTests.TestRun_DefaultParam_OmitLast;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcDefaultParam, '15' + LE + '25' + LE, 0);
+end;
+
+procedure TE2EMiscTests.TestRun_MacOS_ExternalCLibrary_InternalLinker;
+const
+  Src = '''
+    program P;
+    function zlibVersion(): PChar; external 'z' name 'zlibVersion';
+    function crc32(Crc: UInt64; Buf: Pointer; Len: UInt32): UInt64;
+      external 'z' name 'crc32';
+    var S: string;
+    begin
+      S := 'The quick brown fox jumps over the lazy dog';
+      WriteLn(Length(string(zlibVersion())) > 0, ' ',
+        crc32(0, PChar(S), Length(S)))
+    end.
+    ''';
+  SrcMissing = '''
+    program P;
+    procedure nope(); external 'blaisenosuchlib' name 'nope';
+    begin
+      nope()
+    end.
+    ''';
+var
+  BinFile, ToolOut: string;
+begin
+  if HostTarget().OS <> osMacOS then
+  begin
+    Ignore('Mach-O dylib binding: macOS only');
+    Exit;
+  end;
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, 'True 1095738169' + LineEnding, 0);
+  AssertTrue('a missing library fails the link',
+    CompileNativeCLI(SrcMissing, False, '', BinFile, ToolOut) <> 0);
+  AssertTrue('names the library and the fix: ' + ToolOut,
+    (Pos('''blaisenosuchlib'' not found', ToolOut) >= 0) and
+    (Pos('--lib-path', ToolOut) >= 0));
 end;
 
 procedure TE2EMiscTests.TestRun_DefaultParam_MethodCallForms;

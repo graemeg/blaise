@@ -661,6 +661,19 @@ internally assembled binaries.
   `libSystem.B.dylib`, two-level namespace, code signing requirements on
   Apple Silicon.
 
+*Status (2026-10-23).* Shipped.  A program that binds a C library beyond
+libSystem (`external 'z'`, `external 'ssl'`) links internally too: the
+linker finds `lib<name>.dylib` or the SDK text stub `lib<name>.tbd` in the
+`--lib-path` directories, `$LIBRARY_PATH`, `/opt/homebrew/lib`,
+`/usr/local/lib` and the macOS SDK's `usr/lib`
+(`blaise.linker.macho.dylib`).  Each library gets one `LC_LOAD_DYLIB` under
+its install name, and each import is bound to the ordinal of the library
+that exports it, read from the dylib's export trie or the stub's symbol
+lists.  An import no bound library exports stays on libSystem with a note.
+A library that re-exports others is bound by flat lookup.  A library that
+cannot be found is a link error naming the search path.  Until then every
+such import was bound to libSystem and dyld aborted at launch.
+
 === Phase 6 — Linux libc independence (long term)
 
 The first two libc-removal tiers from _C Library Strategy_, Linux only

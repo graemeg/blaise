@@ -163,6 +163,13 @@ type
     FRebases:   TList<Int64>;    { vm addresses needing slide }
     FBindAddrs: TList<Int64>;    { vm addresses of dylib-bound pointers }
     FBindNames: TList<string>;   { parallel: bound symbol names }
+    FBindOrds:  TList<Integer>;  { parallel: two-level dylib ordinal (1 =
+                                   libSystem, 2.. = AddDylib order) or
+                                   BIND_SPECIAL_DYLIB_FLAT_LOOKUP }
+    FDylibs:    TList<string>;   { install names of the dylibs after
+                                   libSystem, in ordinal order }
+    FLayoutTaken: Boolean;       { TextVmAddr / ComputeLayout has answered:
+                                   the load commands may no longer grow }
     FGlobalNames: TList<string>; { exported/global symbols }
     FGlobalAddrs: TList<Int64>;
     FIdent: string;              { CodeDirectory identifier }
@@ -191,8 +198,18 @@ type
     procedure SetEntitlements(const APlistXml: string);
     { Record a pointer slot at AVmAddr that dyld must slide (rebase). }
     procedure AddRebase(AVmAddr: Int64);
-    { Record a pointer slot at AVmAddr bound to libSystem symbol AName. }
-    procedure AddBind(AVmAddr: Int64; const AName: string);
+    { Load the dylib whose install name is AInstallName after libSystem; the
+      result is its two-level ordinal for AddBind.  Must precede any layout
+      query (TextVmAddr), because each load command moves __TEXT. }
+    function AddDylib(const AInstallName: string): Integer;
+    { Record a pointer slot at AVmAddr bound to symbol AName of the dylib
+      with ordinal AOrdinal (1 = libSystem; BIND_SPECIAL_DYLIB_FLAT_LOOKUP
+      lets dyld search every loaded image). }
+    procedure AddBind(AVmAddr: Int64; const AName: string;
+      AOrdinal: Integer = 1);
+    { The load commands' total size: fixed for the v1 configuration plus
+      one LC_LOAD_DYLIB per AddDylib. }
+    function ExecSizeOfCmds: Integer;
     { Record a defined global for the symbol table. }
     procedure AddGlobal(const AName: string; AVmAddr: Int64);
     { Virtual address the __text payload starts at (fixed for the v1
@@ -230,6 +247,9 @@ const
   REBASE_OPCODE_DONE                         = $00;
   BIND_TYPE_POINTER                          = 1;
   BIND_OPCODE_SET_DYLIB_ORDINAL_IMM          = $10;
+  BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB         = $20;
+  BIND_OPCODE_SET_DYLIB_SPECIAL_IMM          = $30;
+  BIND_SPECIAL_DYLIB_FLAT_LOOKUP             = -2;
   BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM  = $40;
   BIND_OPCODE_SET_TYPE_IMM                   = $50;
   BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB    = $70;
@@ -1165,6 +1185,8 @@ begin
   FRebases := TList<Int64>.Create();
   FBindAddrs := TList<Int64>.Create();
   FBindNames := TList<string>.Create();
+  FBindOrds := TList<Integer>.Create();
+  FDylibs := TList<string>.Create();
   FGlobalNames := TList<string>.Create();
   FGlobalAddrs := TList<Int64>.Create();
 end;
@@ -1174,6 +1196,8 @@ begin
   FRebases.Free();
   FBindAddrs.Free();
   FBindNames.Free();
+  FBindOrds.Free();
+  FDylibs.Free();
   FGlobalNames.Free();
   FGlobalAddrs.Free();
   inherited Destroy();
@@ -1237,10 +1261,37 @@ begin
   FRebases.Add(AVmAddr);
 end;
 
-procedure TMachOExecWriter.AddBind(AVmAddr: Int64; const AName: string);
+function TMachOExecWriter.AddDylib(const AInstallName: string): Integer;
+begin
+  if FLayoutTaken then
+    raise EMachOWriter.Create('machowriter: AddDylib after the layout was ' +
+      'queried (the load commands would move __TEXT under resolved code)');
+  FDylibs.Add(AInstallName);
+  Result := FDylibs.Count + 1;
+end;
+
+procedure TMachOExecWriter.AddBind(AVmAddr: Int64; const AName: string;
+  AOrdinal: Integer);
 begin
   FBindAddrs.Add(AVmAddr);
   FBindNames.Add(AName);
+  FBindOrds.Add(AOrdinal);
+end;
+
+{ LC_LOAD_DYLIB: 24-byte dylib_command, then the NUL-terminated install
+  name, padded to 8. }
+function DylibCmdSize(const AInstallName: string): Integer;
+begin
+  Result := MoAlignUp(24 + Length(AInstallName) + 1, 8);
+end;
+
+function TMachOExecWriter.ExecSizeOfCmds: Integer;
+var
+  I: Integer;
+begin
+  Result := EXEC_SIZEOFCMDS;
+  for I := 0 to FDylibs.Count - 1 do
+    Result := Result + DylibCmdSize(FDylibs.Get(I));
 end;
 
 procedure TMachOExecWriter.AddGlobal(const AName: string; AVmAddr: Int64);
@@ -1251,8 +1302,9 @@ end;
 
 function TMachOExecWriter.TextVmAddr: Int64;
 begin
+  FLayoutTaken := True;
   Result := MACHO_EXEC_BASE
-    + MoAlignUp(MACH_HEADER_SIZE + EXEC_SIZEOFCMDS, 16);
+    + MoAlignUp(MACH_HEADER_SIZE + ExecSizeOfCmds(), 16);
 end;
 
 function TMachOExecWriter.ComputeLayout: TMachOExecLayout;
@@ -1260,7 +1312,8 @@ var
   TextOff, ConstOff: Integer;
   TextSegFileSize, DataOff: Int64;
 begin
-  TextOff := MoAlignUp(MACH_HEADER_SIZE + EXEC_SIZEOFCMDS, 16);
+  FLayoutTaken := True;
+  TextOff := MoAlignUp(MACH_HEADER_SIZE + ExecSizeOfCmds(), 16);
   ConstOff := MoAlignUp(TextOff + Length(FText), 16);
   TextSegFileSize := MoAlignUp64(ConstOff + Length(FConst), MACHO_PAGE_SIZE);
   DataOff := TextSegFileSize;
@@ -1309,6 +1362,7 @@ var
   StrIdx: Integer;
   NSectOf: Integer;
   HdrFlags: Integer;
+  Ord_: Integer;
 begin
   if FIdent = '' then
     FIdent := 'blaise';
@@ -1351,16 +1405,35 @@ begin
         Reb.PushByte(0);
     end;
 
-    { ---- bind opcodes (dylib ordinal 1 = libSystem) ---- }
+    { ---- bind opcodes (dylib ordinal 1 = libSystem, 2.. = AddDylib) ----
+      The ordinal is state in the opcode stream: set it only where it
+      changes. }
     if FBindAddrs.Count > 0 then
     begin
-      Bind.PushByte(BIND_OPCODE_SET_DYLIB_ORDINAL_IMM or 1);
-      Bind.PushByte(BIND_OPCODE_SET_TYPE_IMM or BIND_TYPE_POINTER);
+      Ord_ := 0;
       for I := 0 to FBindAddrs.Count - 1 do
       begin
         A := FBindAddrs.Get(I);
         if (A < DataVm) or (A >= DataVm + DataSegVmSize) then
           raise EMachOWriter.Create('machowriter: bind target outside __DATA');
+        if (I = 0) or (FBindOrds.Get(I) <> Ord_) then
+        begin
+          Ord_ := FBindOrds.Get(I);
+          if Ord_ = BIND_SPECIAL_DYLIB_FLAT_LOOKUP then
+            Bind.PushByte(BIND_OPCODE_SET_DYLIB_SPECIAL_IMM or
+              (BIND_SPECIAL_DYLIB_FLAT_LOOKUP and $F))
+          else if Ord_ <= 15 then
+            Bind.PushByte(BIND_OPCODE_SET_DYLIB_ORDINAL_IMM or Ord_)
+          else
+          begin
+            Bind.PushByte(BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB);
+            PushUleb(Bind, Ord_);
+          end;
+          { the bind type is stream state too: once, after the first
+            ordinal (the layout ld64 writes) }
+          if I = 0 then
+            Bind.PushByte(BIND_OPCODE_SET_TYPE_IMM or BIND_TYPE_POINTER);
+        end;
         Bind.PushByte(BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM or 0);
         Bind.AppendBytes(FBindNames.Get(I));
         Bind.PushByte(0);
@@ -1427,8 +1500,8 @@ begin
     Head.PushU32(CPU_TYPE_ARM64);
     Head.PushU32(CPU_SUBTYPE_ARM64_ALL);
     Head.PushU32(MH_EXECUTE);
-    Head.PushU32(EXEC_NCMDS);
-    Head.PushU32(EXEC_SIZEOFCMDS);
+    Head.PushU32(EXEC_NCMDS + FDylibs.Count);
+    Head.PushU32(ExecSizeOfCmds());
     HdrFlags := MH_NOUNDEFS or MH_DYLDLINK or MH_TWOLEVEL or MH_PIE;
     if Length(FTvars) > 0 then
       HdrFlags := HdrFlags or MH_HAS_TLV_DESCRIPTORS;
@@ -1628,6 +1701,20 @@ begin
     Head.PushByte(0);
     while (Head.Count mod 8) <> 0 do
       Head.PushByte(0);
+    { ---- LC_LOAD_DYLIB per bound library, ordinals 2.. ---- }
+    for I := 0 to FDylibs.Count - 1 do
+    begin
+      Head.PushU32(LC_LOAD_DYLIB);
+      Head.PushU32(DylibCmdSize(FDylibs.Get(I)));
+      Head.PushU32(24);          { name offset }
+      Head.PushU32(2);           { timestamp, as ld64 writes it }
+      Head.PushU32($00010000);   { current_version 1.0 }
+      Head.PushU32($00010000);   { compatibility_version 1.0: the minimum }
+      Head.AppendBytes(FDylibs.Get(I));
+      Head.PushByte(0);
+      while (Head.Count mod 8) <> 0 do
+        Head.PushByte(0);
+    end;
 
     { ---- LC_MAIN ---- }
     Head.PushU32(LC_MAIN);
@@ -1652,10 +1739,10 @@ begin
     Head.PushU32(Integer(SigOff));
     Head.PushU32(Integer(SigSize));
 
-    if Head.Count <> MACH_HEADER_SIZE + EXEC_SIZEOFCMDS then
+    if Head.Count <> MACH_HEADER_SIZE + ExecSizeOfCmds() then
       raise EMachOWriter.Create('machowriter: exec load-command size mismatch: '
         + IntToStr(Head.Count) + ' vs '
-        + IntToStr(MACH_HEADER_SIZE + EXEC_SIZEOFCMDS));
+        + IntToStr(MACH_HEADER_SIZE + ExecSizeOfCmds()));
 
     { ---- payloads ---- }
     Head.PadTo(TextOff);

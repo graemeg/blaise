@@ -18,8 +18,10 @@ unit cp.test.macho;
 interface
 
 uses
-  SysUtils, blaise.testing, uStrCompat, blaise.container.writer,
-  blaise.machowriter, blaise.machoreader, blaise.sha256;
+  SysUtils, Classes, Generics.Collections, blaise.testing, uStrCompat,
+  blaise.container.writer,
+  blaise.machowriter, blaise.machoreader, blaise.sha256,
+  blaise.linker.macho.dylib;
 
 type
   TMachOWriterTests = class(TTestCase)
@@ -62,6 +64,28 @@ type
     procedure TestRebaseStream_OpcodesDecode;
     procedure TestBindStream_NamesLibSystemSymbol;
     procedure TestGlobals_InSymtab;
+    { a library beyond libSystem gets its own LC_LOAD_DYLIB (ordinal 2),
+      the load commands grow by it, and each bind carries its library's
+      ordinal -- set in the opcode stream only where it changes; a
+      flat-lookup bind uses the special ordinal }
+    procedure TestExtraDylib_LoadCommandAndBindOrdinals;
+    { AddDylib after a layout query would move __TEXT under code already
+      resolved against the old address: refused }
+    procedure TestExtraDylib_AfterLayoutRefused;
+  end;
+
+  { blaise.linker.macho.dylib: what a bound C library exports }
+  TMachODylibTests = class(TTestCase)
+  published
+    procedure TestTbdStub_InstallNameAndSymbols;
+    procedure TestTbdStub_ReexportsMarkExportsUnknown;
+    procedure TestExportTrie_EveryTerminalNamed;
+    procedure TestDylibImage_FatArm64SliceIdAndTrie;
+    procedure TestLibSystemLinkNames;
+    { the SDK's text stub resolves -lz to the shared-cache install name;
+      skipped without Xcode Command Line Tools }
+    procedure TestResolve_SdkLibz;
+    procedure TestResolve_MissingLibraryNamesTheSearch;
   end;
 
   TSha256Tests = class(TTestCase)
@@ -675,6 +699,278 @@ begin
   end;
 end;
 
+procedure TMachOExecWriterTests.TestExtraDylib_LoadCommandAndBindOrdinals;
+var
+  W: TMachOExecWriter;
+  F: TMachOFile;
+  LC: TMoLoadCmd;
+  Buf, Bind: string;
+  Base: Int64;
+  I, NDylibs, BindOff, BindSize, PZ, PC: Integer;
+begin
+  W := TMachOExecWriter.Create();
+  try
+    W.SetText(Chr($C0) + Chr($03) + Chr($5F) + Chr($D6));
+    Buf := '';
+    for I := 0 to 31 do
+      Buf := Buf + Chr(0);
+    W.SetData(Buf);
+    W.SetEntryTextOffset(0);
+    AssertEquals('ordinal of the first extra dylib', 2,
+      W.AddDylib('/usr/lib/libz.1.dylib'));
+    Base := $100000000 + $4000;
+    W.AddBind(Base, '_environ');
+    W.AddBind(Base + 8, '_crc32', 2);
+    W.AddBind(Base + 16, '_zlibVersion', 2);
+    W.AddBind(Base + 24, '_anything', BIND_SPECIAL_DYLIB_FLAT_LOOKUP);
+    AssertEquals('load commands grew by the dylib command',
+      1176 + 48, W.ExecSizeOfCmds());
+    W.AddGlobal('_main', W.TextVmAddr());
+    Buf := W.Finish();
+  finally
+    W.Free();
+  end;
+  F := ParseMachO(Buf, 'probe_dylib');
+  try
+    NDylibs := 0;
+    for I := 0 to F.LoadCmds.Count - 1 do
+    begin
+      LC := F.LoadCmds.Get(I);
+      if LC.Cmd = LC_LOAD_DYLIB then
+      begin
+        NDylibs := NDylibs + 1;
+        if NDylibs = 2 then
+          AssertTrue('second dylib is libz',
+            Pos('/usr/lib/libz.1.dylib', Copy(F.Raw, LC.Offset, LC.CmdSize)) >= 0);
+      end;
+    end;
+    AssertEquals('libSystem + libz', 2, NDylibs);
+    LC := F.FindLoadCmd(LC_DYLD_INFO_ONLY);
+    BindOff := RdU32At(F.Raw, LC.Offset + 16);
+    BindSize := RdU32At(F.Raw, LC.Offset + 20);
+    Bind := Copy(F.Raw, BindOff, BindSize);
+    PC := Pos('_crc32', Bind);
+    PZ := Pos('_zlibVersion', Bind);
+    AssertTrue('libSystem ordinal before _environ',
+      Pos(Chr($11), Copy(Bind, 0, Pos('_environ', Bind))) >= 0);
+    AssertTrue('ordinal 2 set before _crc32',
+      Pos(Chr($12), Copy(Bind, Pos('_environ', Bind), PC - Pos('_environ', Bind))) >= 0);
+    AssertTrue('ordinal not re-set between two libz binds',
+      Pos(Chr($12), Copy(Bind, PC, PZ - PC)) < 0);
+    AssertTrue('flat lookup before _anything (SET_DYLIB_SPECIAL_IMM -2)',
+      Pos(Chr($3E), Copy(Bind, PZ, Pos('_anything', Bind) - PZ)) >= 0);
+  finally
+    F.Free();
+  end;
+end;
+
+procedure TMachOExecWriterTests.TestExtraDylib_AfterLayoutRefused;
+var
+  W: TMachOExecWriter;
+  Raised: Boolean;
+begin
+  W := TMachOExecWriter.Create();
+  try
+    W.TextVmAddr();
+    Raised := False;
+    try
+      W.AddDylib('/usr/lib/libz.1.dylib');
+    except
+      on E: EMachOWriter do Raised := True;
+    end;
+    AssertTrue('refused', Raised);
+  finally
+    W.Free();
+  end;
+end;
+
+{ ---- TMachODylibTests ---- }
+
+procedure TMachODylibTests.TestTbdStub_InstallNameAndSymbols;
+const
+  Stub = '--- !tapi-tbd' + #10 +
+    'tbd-version:     4' + #10 +
+    'targets:         [ x86_64-macos, arm64-macos ]' + #10 +
+    'install-name:    ''/usr/lib/libz.1.dylib''' + #10 +
+    'exports:' + #10 +
+    '  - targets:         [ x86_64-macos, arm64-macos ]' + #10 +
+    '    symbols:         [ _adler32, _crc32,' + #10 +
+    '                       _zlibVersion ]' + #10 +
+    '    weak-symbols:    [ _zWeak ]' + #10 +
+    '...' + #10;
+var
+  D: TMachODylib;
+begin
+  D := TMachODylib.Create();
+  try
+    ReadTbdStub(Stub, D);
+    AssertEquals('/usr/lib/libz.1.dylib', D.InstallName);
+    AssertTrue('exports known', D.ExportsKnown);
+    AssertTrue('_crc32', D.ExportSet.Contains('_crc32'));
+    AssertTrue('_zlibVersion (continued line)', D.ExportSet.Contains('_zlibVersion'));
+    AssertTrue('weak symbol', D.ExportSet.Contains('_zWeak'));
+    AssertTrue('not a target name', not D.ExportSet.Contains('arm64-macos'));
+  finally
+    D.Free();
+  end;
+end;
+
+procedure TMachODylibTests.TestTbdStub_ReexportsMarkExportsUnknown;
+var
+  D: TMachODylib;
+begin
+  D := TMachODylib.Create();
+  try
+    ReadTbdStub('install-name: ''/usr/lib/libSystem.B.dylib''' + #10 +
+      'reexported-libraries:' + #10 + '  - libraries: [ /usr/lib/system/libc.dylib ]' + #10, D);
+    AssertEquals('/usr/lib/libSystem.B.dylib', D.InstallName);
+    AssertTrue('exports not all read', not D.ExportsKnown);
+  finally
+    D.Free();
+  end;
+end;
+
+{ A trie node: <terminal size uleb> [terminal info] <child count> then per
+  child <edge NUL> <child offset uleb>. }
+function TrieOf(): string;
+begin
+  { node  0 (bytes 0..4):   not terminal, 1 child '_' -> 5
+    node  5 (bytes 5..12):  not terminal, 2 children 'a' -> 13, 'b' -> 17
+    node 13 (bytes 13..16): terminal (2 info bytes), 0 children
+    node 17 (bytes 17..23): terminal (2 info bytes), 1 child 'c' -> 24
+    node 24 (bytes 24..27): terminal (2 info bytes), 0 children }
+  Result := Chr(0) + Chr(1) + '_' + Chr(0) + Chr(5) +
+    Chr(0) + Chr(2) + 'a' + Chr(0) + Chr(13) + 'b' + Chr(0) + Chr(17) +
+    Chr(2) + Chr(0) + Chr(0) + Chr(0) +
+    Chr(2) + Chr(0) + Chr(0) + Chr(1) + 'c' + Chr(0) + Chr(24) +
+    Chr(2) + Chr(0) + Chr(0) + Chr(0);
+end;
+
+procedure TMachODylibTests.TestExportTrie_EveryTerminalNamed;
+var
+  S: TSet<string>;
+  T: string;
+begin
+  T := TrieOf();
+  AssertEquals('trie size', 28, Length(T));
+  S := TSet<string>.Create();
+  try
+    ReadExportTrie('xx' + T, 2, Length(T), S);
+    AssertEquals('three symbols', 3, S.Count);
+    AssertTrue('_a', S.Contains('_a'));
+    AssertTrue('_b', S.Contains('_b'));
+    AssertTrue('_bc', S.Contains('_bc'));
+    AssertTrue('the bare prefix is not a symbol', not S.Contains('_'));
+  finally
+    S.Free();
+  end;
+end;
+
+function Le32(V: Integer): string;
+begin
+  Result := Chr(V and $FF) + Chr((V shr 8) and $FF) + Chr((V shr 16) and $FF) +
+    Chr((V shr 24) and $FF);
+end;
+
+function Be32Of(V: Integer): string;
+begin
+  Result := Chr((V shr 24) and $FF) + Chr((V shr 16) and $FF) +
+    Chr((V shr 8) and $FF) + Chr(V and $FF);
+end;
+
+procedure TMachODylibTests.TestDylibImage_FatArm64SliceIdAndTrie;
+var
+  Thin, Name, Trie, Fat: string;
+  IdCmd, TrieCmd: string;
+  D: TMachODylib;
+  TrieOff: Integer;
+begin
+  Name := '/opt/x/libdemo.1.dylib' + Chr(0);
+  while (Length(Name) mod 8) <> 0 do Name := Name + Chr(0);
+  IdCmd := Le32($0D) + Le32(24 + Length(Name)) + Le32(24) + Le32(0) +
+    Le32($10000) + Le32($10000) + Name;
+  Trie := TrieOf();
+  TrieOff := 32 + Length(IdCmd) + 16;
+  TrieCmd := Le32(Integer($80000033)) + Le32(16) + Le32(TrieOff) + Le32(Length(Trie));
+  Thin := Le32(Integer($FEEDFACF)) + Le32($0100000C) + Le32(0) + Le32(6) +
+    Le32(2) + Le32(Length(IdCmd) + Length(TrieCmd)) + Le32(0) + Le32(0) +
+    IdCmd + TrieCmd + Trie;
+  { a fat wrapper: an x86_64 entry first (must be skipped), then arm64 }
+  Fat := Be32Of(Integer($CAFEBABE)) + Be32Of(2) +
+    Be32Of($01000007) + Be32Of(3) + Be32Of(64) + Be32Of(4) + Be32Of(0) +
+    Be32Of($0100000C) + Be32Of(0) + Be32Of(64) + Be32Of(Length(Thin)) + Be32Of(0);
+  while Length(Fat) < 64 do Fat := Fat + Chr(0);
+  Fat := Fat + Thin;
+  D := TMachODylib.Create();
+  try
+    ReadDylibImage(Fat, D);
+    AssertEquals('/opt/x/libdemo.1.dylib', D.InstallName);
+    AssertTrue('_bc from the trie', D.ExportSet.Contains('_bc'));
+    AssertTrue('exports known', D.ExportsKnown);
+  finally
+    D.Free();
+  end;
+end;
+
+procedure TMachODylibTests.TestLibSystemLinkNames;
+begin
+  AssertTrue('c', IsLibSystemLib('c'));
+  AssertTrue('pthread', IsLibSystemLib('pthread'));
+  AssertTrue('m', IsLibSystemLib('M'));
+  AssertTrue('z is its own library', not IsLibSystemLib('z'));
+  AssertTrue('ssl is its own library', not IsLibSystemLib('ssl'));
+end;
+
+procedure TMachODylibTests.TestResolve_SdkLibz;
+const
+  Sdk = '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib';
+var
+  Dirs: TStringList;
+  D: TMachODylib;
+begin
+  if not FileExists(Sdk + '/libz.tbd') then
+  begin
+    Ignore('no macOS SDK text stubs');
+    Exit;
+  end;
+  Dirs := TStringList.Create();
+  try
+    Dirs.Add(Sdk);
+    D := ResolveMachODylib('z', Dirs);
+    try
+      AssertEquals('/usr/lib/libz.1.dylib', D.InstallName);
+      AssertTrue('exports _crc32', D.ExportSet.Contains('_crc32'));
+    finally
+      D.Free();
+    end;
+  finally
+    Dirs.Free();
+  end;
+end;
+
+procedure TMachODylibTests.TestResolve_MissingLibraryNamesTheSearch;
+var
+  Dirs: TStringList;
+  Msg: string;
+begin
+  Dirs := TStringList.Create();
+  try
+    Dirs.Add('/nonexistent-blaise-dir');
+    Msg := '';
+    try
+      ResolveMachODylib('nosuchlib', Dirs).Free();
+    except
+      on E: EMachODylib do Msg := E.Message;
+    end;
+    AssertTrue('names the library: ' + Msg, Pos('''nosuchlib''', Msg) >= 0);
+    AssertTrue('names the search path: ' + Msg,
+      Pos('/nonexistent-blaise-dir', Msg) >= 0);
+    AssertTrue('suggests --lib-path: ' + Msg, Pos('--lib-path', Msg) >= 0);
+  finally
+    Dirs.Free();
+  end;
+end;
+
 { ---- TSha256Tests ---- }
 
 procedure TSha256Tests.TestFipsVectors;
@@ -757,5 +1053,6 @@ initialization
   RegisterTest(TSha256Tests);
   RegisterTest(TMachOWriterTests);
   RegisterTest(TMachOExecWriterTests);
+  RegisterTest(TMachODylibTests);
 
 end.

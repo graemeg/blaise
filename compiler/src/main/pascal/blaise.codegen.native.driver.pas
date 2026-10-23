@@ -106,6 +106,7 @@ uses
   blaise.elfreader,
   blaise.linker.elf,
   blaise.linker.macho,
+  blaise.linker.macho.dylib,
   blaise.entitlements;
 
 { In-process assembly, keyed on the target CPU: x86-64 text goes to the
@@ -675,6 +676,8 @@ function TNativeBackendDriver.LinkViaMachOLinker(
 var
   Lk: TMachOLinker;
   RTLObjs: TStringList;
+  LibDirs, Seen: TStringList;
+  LibName: string;
   I: Integer;
 begin
   Result := '';
@@ -704,6 +707,30 @@ begin
             + Exception(E).Message);
       end;
       try
+        { the C libraries the program binds (external 'z', 'ssl', ...),
+          beyond libSystem: one LC_LOAD_DYLIB each, imports bound to the
+          library that exports them.  They were never loaded at all -- every
+          such import was bound to libSystem and dyld aborted at launch. }
+        if (AOpts.LinkLibs <> nil) and (AOpts.LinkLibs.Count > 0) then
+        begin
+          LibDirs := TStringList.Create();
+          Seen := TStringList.Create();
+          try
+            BuildMachOLibSearchDirs(AOpts.LibPaths, LibDirs);
+            for I := 0 to AOpts.LinkLibs.Count - 1 do
+            begin
+              LibName := AOpts.LinkLibs.Strings[I];
+              if IsLibSystemLib(LibName) or
+                 (Seen.IndexOf(LowerCase(LibName)) >= 0) then
+                Continue;
+              Seen.Add(LowerCase(LibName));
+              Lk.AddDylib(ResolveMachODylib(LibName, LibDirs));
+            end;
+          finally
+            Seen.Free();
+            LibDirs.Free();
+          end;
+        end;
         Lk.AddObjectFile(AObjFile);
         if AExtraObjects <> nil then
           for I := 0 to AExtraObjects.Count - 1 do

@@ -28,11 +28,12 @@ unit Net.Tls.Provider;
 // deliberately loud in the API.
 //
 // LINKING: because this unit references `external 'ssl'`/`external 'crypto'`
-// symbols, ANY program that (transitively) uses it MUST be compiled with
-// `--linker external` (gcc).  The default `--linker internal` CANNOT resolve an
-// external library and errors out.  TLS is therefore opt-in and available only
-// in the dynamic, libc-linked build profile; the static/libc-free build has no
-// TLS until a pure-Pascal provider exists.
+// symbols, a program that (transitively) uses it binds libssl and libcrypto.
+// The internal linker handles that on Linux (AUTO link mode flips to dynamic
+// and records each library as DT_NEEDED) and on macOS (one LC_LOAD_DYLIB per
+// library; Homebrew's /opt/homebrew/lib is searched, or pass --lib-path).  TLS
+// is therefore unavailable only in the static/libc-free build, until a
+// pure-Pascal provider exists.
 //
 // NATIVE BACKEND ONLY (the pump uses async.io -> async.fibers, an inline-asm
 // context leaf the QBE backend rejects).  Linux + OpenSSL 3.x for now.

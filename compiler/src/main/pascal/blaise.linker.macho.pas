@@ -52,7 +52,7 @@ interface
 
 uses
   SysUtils, Classes, Generics.Collections,
-  blaise.machoreader, blaise.machowriter;
+  blaise.machoreader, blaise.machowriter, blaise.linker.macho.dylib;
 
 type
   EMachOLinker = class(Exception);
@@ -83,6 +83,8 @@ type
     FGotBase: Int64;                   { offset of got slot 0 within FData }
     FWriter: TMachOExecWriter;
     FLayout: TMachOExecLayout;
+    FDylibs: TList<TMachODylib>;       { owned; ordinals 2.. in this order }
+    FFlatFallback: Boolean;            { a dylib whose exports are unread }
     procedure MergeSections;
     procedure CollectSymbols;
     procedure CollectImports;
@@ -94,6 +96,7 @@ type
     function DefinedVm(AIdx: Integer): Int64;
     function ImportOf(const AName: string): Integer;
     function BindNameOf(const AName: string): string;
+    function BindOrdinalOf(const AName: string): Integer;
     procedure PatchStream(AStream: Integer; AOff: Int64; ASize: Integer;
       AValue: Int64);
     function ReadStream(AStream: Integer; AOff: Int64;
@@ -104,6 +107,9 @@ type
     { Takes ownership of AObj. }
     procedure AddObject(AObj: TMachOFile);
     procedure AddObjectFile(const APath: string);
+    { Bind against ADylib (takes ownership): one LC_LOAD_DYLIB, and every
+      import it exports bound to its ordinal.  Call before Link. }
+    procedure AddDylib(ADylib: TMachODylib);
     { Link everything into an MH_EXECUTE image.  AEntrySym must resolve
       (the backend's program entry is '_main' — the LC_MAIN contract). }
     function Link(const AEntrySym: string): string;
@@ -161,6 +167,7 @@ begin
   FImpGot := TList<Integer>.Create();
   FImpIndex := TDictionary<string, Integer>.Create();
   FWriter := TMachOExecWriter.Create();
+  FDylibs := TList<TMachODylib>.Create();
 end;
 
 destructor TMachOLinker.Destroy;
@@ -182,7 +189,18 @@ begin
   FImpGot.Free();
   FImpIndex.Free();
   FWriter.Free();
+  for I := 0 to FDylibs.Count - 1 do
+    FDylibs.Get(I).Free();
+  FDylibs.Free();
   inherited Destroy();
+end;
+
+procedure TMachOLinker.AddDylib(ADylib: TMachODylib);
+begin
+  FDylibs.Add(ADylib);
+  FWriter.AddDylib(ADylib.InstallName);
+  if not ADylib.ExportsKnown then
+    FFlatFallback := True;
 end;
 
 procedure TMachOLinker.AddObject(AObj: TMachOFile);
@@ -380,27 +398,43 @@ begin
 end;
 
 function TMachOLinker.BindNameOf(const AName: string): string;
-var
-  CName: string;
 begin
   { IDENTITY — see the unit comment.  The backend applies the Darwin '_' prefix
     itself (DarwinSym), to external names as well as Pascal ones, so an import
     already arrives spelled the way dyld exports it: _getpid, ___cxa_atexit,
     __tlv_bootstrap.  Adding another '_' here would double every one of them.
-    The diagnostic is still worth keeping: strip the prefix to recover the C
-    name and warn when it is not a libSystem export we recognise, because a
-    mis-spelled RTL or external symbol reaches dyld looking exactly like a
-    genuine import and aborts only at launch. }
+    The diagnostic for an unrecognised name lives in BindOrdinalOf. }
   Result := AName;
+end;
+
+{ The two-level dylib ordinal an import binds to: the bound library that
+  exports it (2..), else libSystem (1).  An unknown name is still bound to
+  libSystem with a loud note -- user externals may name any libSystem export,
+  but a mis-spelled RTL or external symbol otherwise surfaces only as a
+  baffling dyld abort at launch.  When a bound library re-exports others
+  (its exports are not all read), an unmatched name is bound by flat lookup
+  instead: dyld searches every loaded image. }
+function TMachOLinker.BindOrdinalOf(const AName: string): Integer;
+var
+  I: Integer;
+  CName: string;
+begin
+  for I := 0 to FDylibs.Count - 1 do
+    if FDylibs.Get(I).ExportSet.Contains(AName) then
+      Exit(I + 2);
   CName := AName;
   if (CName <> '') and (Copy(CName, 0, 1) = '_') then
     CName := Copy(CName, 1, Length(CName) - 1);
-  if not IsKnownLibSystemImport(CName) then
-    WriteLn(StdErr, 'macho linker: note: binding ''', AName,
-      ''' from libSystem (C name ''', CName,
-      ''') — if that is not a real libSystem export, dyld will abort ' +
-      'at launch (a mis-spelled RTL/external symbol looks exactly ' +
-      'like this)');
+  if IsKnownLibSystemImport(CName) then
+    Exit(1);
+  if FFlatFallback then
+    Exit(BIND_SPECIAL_DYLIB_FLAT_LOOKUP);
+  WriteLn(StdErr, 'macho linker: note: binding ''', AName,
+    ''' from libSystem (C name ''', CName,
+    ''') — if that is not a real libSystem export, dyld will abort ' +
+    'at launch (a mis-spelled RTL/external symbol looks exactly ' +
+    'like this)');
+  Result := 1;
 end;
 
 function TMachOLinker.ImportOf(const AName: string): Integer;
@@ -563,7 +597,7 @@ begin
   for I := 0 to FImpNames.Count - 1 do
     if FImpGot.Get(I) >= 0 then
       FWriter.AddBind(FLayout.DataVm + FGotBase + Int64(FImpGot.Get(I)) * 8,
-        BindNameOf(FImpNames.Get(I)));
+        BindNameOf(FImpNames.Get(I)), BindOrdinalOf(FImpNames.Get(I)));
 
   { stub bodies: adrp x16, got@page / ldr x16, [x16, got&fff] / br x16 }
   for I := 0 to FImpNames.Count - 1 do
@@ -636,7 +670,8 @@ begin
               { direct data bind at the site (e.g. a TLV descriptor's
                 thunk pointer to __tlv_bootstrap) }
               PatchStream(Strm, SiteOff, 8, 0);
-              FWriter.AddBind(SiteVm, BindNameOf(Sym.Name));
+              FWriter.AddBind(SiteVm, BindNameOf(Sym.Name),
+                BindOrdinalOf(Sym.Name));
             end
             else if (Strm = smTvars) and
                     ((FSecStream.Get(FSecFirst.Get(I) + (Sym.Sect - 1))
