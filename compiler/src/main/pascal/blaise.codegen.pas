@@ -648,7 +648,6 @@ end;
 function ArcExprOwnsRef(AExpr: TASTExpr): Boolean;
 var
   FA: TFieldAccessExpr;
-  MC: TMethodCallExpr;
   IE: TIdentExpr;
 begin
   Result := False;

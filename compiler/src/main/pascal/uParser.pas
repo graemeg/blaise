@@ -6408,7 +6408,6 @@ var
   Line, Col:  Integer;
   ZeroNode:   TIntLiteral;
   NegNode:    TBinaryExpr;
-  SubNode:       TStringSubscriptExpr;
   ArrNode:       TArrayLiteralExpr;
   ParseIntV:    Int64;
   ParseIntFlag: Boolean;

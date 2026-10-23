@@ -97,7 +97,6 @@ var
   I, Start, Len: Integer;
   Line: string;
   R: string;
-  B: Byte;
 begin
   R := '';
   Len := Length(ABody);

@@ -385,7 +385,6 @@ var
   FS:        TFileInputStream;
   ShtBuf:    string;
   StrBuf:    string;
-  Entry:     string;
   I:         Integer;
   StrOff:    Int64;
   StrSize:   Int64;

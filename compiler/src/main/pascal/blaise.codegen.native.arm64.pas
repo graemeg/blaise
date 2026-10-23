@@ -1930,7 +1930,7 @@ procedure TArm64Backend.EmitInstanceFieldStore(AFld: TFieldInfo;
   AValueExpr: TASTExpr; const AInstSlot: string; AInstVarParam: Boolean;
   ABaseInfo: TFieldInfo);
 var
-  I, Shape: Integer;
+  Shape: Integer;
   Off: Integer;
 begin
   { The base register already includes the intermediate (EmitInstBase applied
@@ -2494,7 +2494,7 @@ end;
 
 function TArm64Backend.EmitRecCallToRretSlot(AExpr: TASTExpr): string;
 var
-  Shape, K: Integer;
+  Shape: Integer;
   Tmp: string;
 begin
   { materialise a record-returning call into a scratch and leave the
@@ -5002,7 +5002,7 @@ var
   CmpUnsigned: Boolean;
   CondName: string;
   Lit: string;
-  Idx, I: Integer;
+  Idx: Integer;
   EmptyArgs: TObjectList;
   Owned: Boolean;
 begin
@@ -7548,7 +7548,6 @@ var
   BE: TBinaryExpr;
   Idx: Integer;
   Lit: string;
-  CondName: string;
   RtlMathSym: string;
 begin
   if AExpr is TFloatLiteral then
@@ -8433,7 +8432,7 @@ end;
 
 function TArm64Backend.EmitRecPropToTemp(AFld: TFieldAccessExpr): string;
 var
-  Shape, K: Integer;
+  Shape: Integer;
   Tmp: string;
 begin
   { a record-typed property getter's value, materialised like a record
@@ -8458,7 +8457,6 @@ end;
 
 procedure TArm64Backend.EmitInterfaceAssign(AAsgn: TAssignment);
 var
-  ItabSym: string;
   Owned: Boolean;
 begin
   { fat-pointer stores: the obj half co-owns the backing instance (retain
@@ -8893,8 +8891,6 @@ end;
 
 procedure TArm64Backend.EmitAssignment(AAsgn: TAssignment);
 var
-  I, Shape: Integer;
-  RD: TMethodDecl;
   ManagedAgg: Boolean;
 begin
   { a method pointer / closure target -- a 16-byte (Code, Data / Env)
@@ -9420,10 +9416,7 @@ end;
 
 procedure TArm64Backend.EmitProcCallStmt(ACall: TProcCall);
 var
-  I: Integer;
-  Arg: TASTExpr;
   Tmp: string;
-  RT: TTypeDesc;
   IncLVal: TAddrOfExpr;
 begin
   if ACall.IsProcFieldCall then

@@ -152,7 +152,6 @@ end;
 function HeadOrBody(const AArticle: string; AWantHead: Boolean): string;
 var
   I, Len, LineStart: Integer;
-  B: Byte;
 begin
   Len := Length(AArticle);
   LineStart := 0;

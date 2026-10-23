@@ -794,13 +794,10 @@ var
   ParentRT: TRecordTypeDesc;
   ParentName: string;
   Sym:      TSymbol;
-  FldSym:   TSymbol;
   FldDecl:  TFieldDecl;
   FldType:  TTypeDesc;
   FldInfo:  TFieldInfo;
   MDecl:    TMethodDecl;
-  PropDecl: TPropertyDecl;
-  PropInfo: TPropertyInfo;
   I, J:     Integer;
   SavedOwner: string;
 begin
@@ -1119,7 +1116,6 @@ var
   AliasDef:   TTypeAliasDef;
   AliasName:  string;
   BaseSym:    TSymbol;
-  BaseType:   TTypeDesc;
   AliasDesc:  TTypeDesc;
   Sym:        TSymbol;
   SubEnum:    TEnumTypeDesc;

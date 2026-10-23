@@ -116,7 +116,6 @@ var
   Uri: TUri;
   Host, Path, Key, Req, RespHead, Chunk, ExpectedAccept, HdrLower: string;
   Port, Colon: Integer;
-  Lines: array of string;
   I, LineStart, N: Integer;
   Line: string;
   GotAccept: Boolean;

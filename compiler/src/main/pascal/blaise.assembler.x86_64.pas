@@ -1418,8 +1418,6 @@ var
   Mnem: string;
   Op1, Op2, Op3: TOperand;
   DispOff: Integer;
-  Dummy: Boolean;
-  TargetOff: Integer;
   RelDisp: Int64;
   CC: Integer;
   Info: TLabelInfo;

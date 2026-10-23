@@ -3172,7 +3172,6 @@ function CloneTypeDef(ASrc: TASTTypeDef): TASTTypeDef;
 var
   TA: TTypeAliasDef;
   ST: TSetTypeDef;
-  RT: TRecordTypeDef;
   ET: TEnumTypeDef;
   I:  Integer;
 begin

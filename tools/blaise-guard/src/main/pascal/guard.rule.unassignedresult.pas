@@ -228,7 +228,6 @@ procedure TUnassignedResultRule.VisitExpr(AExpr: TASTExpr);
 var
   FC: TFuncCallExpr;
   MC: TMethodCallExpr;
-  I:  Integer;
 
   procedure ScanArgs(AArgs: TObjectList);
   var

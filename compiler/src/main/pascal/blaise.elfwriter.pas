@@ -746,7 +746,7 @@ var
   NumRelaSecs: Integer;
   SymtabIdx, StrtabIdx, ShstrtabIdx, NoteIdx: Integer;
   TotalShNum: Integer;
-  I, J, K: Integer;
+  I, J: Integer;
   Sec: TElfWriterSection;
   Sym: TElfWriterSym;
   R: TContainerReloc;
@@ -769,7 +769,6 @@ var
   RelaBuf: array[0..MaxSecOrder] of TByteBuf;
   RelaCount: array[0..MaxSecOrder] of Integer;
   SymRemapIdx: array of Integer;
-  LocalSymCount, GlobalSymCount: Integer;
   LocalSyms, GlobalSyms: TList<Integer>;
   OutBuf: TByteBuf;
 

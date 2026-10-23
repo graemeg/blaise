@@ -999,7 +999,6 @@ function NormalisePlain(const S: string): string;
 var
   L: Integer;
   DotPos: Integer;
-  I: Integer;
   EndPos: Integer;
 begin
   Result := S;

@@ -2792,11 +2792,6 @@ var
   RefStr:   string;
   RefUnit:  string;
   RefType:  string;
-  J, K:     Integer;
-  Sig:      TRoutineSig;
-  MD:       TMethodDecl;
-  SrcPar:   TMethodParam;
-  NewPar:   TMethodParam;
 begin
   Def := TGenericTypeDef.Create();
   ReadTypeParamList(AText, APos, Def.ParamNames, Def.ParamConstraints);

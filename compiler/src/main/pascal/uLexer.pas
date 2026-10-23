@@ -533,7 +533,7 @@ end;
 
 function TLexer.ProcessTextBlock(const ARaw: string): string;
 var
-  Len, I, C, Margin, LineStart, LineLen, Skip: Integer;
+  Len, I, C, Margin, Skip: Integer;
   Body: string;
 begin
   Len := Length(ARaw);

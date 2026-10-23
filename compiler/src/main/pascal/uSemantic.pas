@@ -2141,8 +2141,6 @@ end;
 
 procedure TSemanticAnalyser.CheckTypesMatch(AExpected, AActual: TTypeDesc;
   const AContext: string; ALine, ACol: Integer);
-var
-  RT:   TRecordTypeDesc;
 begin
   if AExpected = AActual then
     Exit;
@@ -5171,7 +5169,6 @@ var
   PropInfo: TPropertyInfo;
   RT:       TRecordTypeDesc;
   GI:        TGenericInstance;
-  Subst:     string;
   ConcrType: TTypeDesc;
   IntfDesc:  TInterfaceTypeDesc;
   ParentSym: TSymbol;
@@ -6124,7 +6121,7 @@ var
   ParTypeName: string;
   RetTypeName: string;
   SubstType:   TTypeDesc;
-  I, J:        Integer;
+  I: Integer;
   Sym:         TSymbol;
   GFI:         TGenericFuncInstance;
   Instances:   TObjectList;
@@ -6310,7 +6307,7 @@ var
   OwnerSym:    TSymbol;
   OwnerRT:     TRecordTypeDesc;
   GMI:         TGenericMethodInstance;
-  I, J:        Integer;
+  I: Integer;
 begin
   Result := nil;
   BracPos := StrPos('<', AInstName);
@@ -7674,7 +7671,6 @@ var
   I:         Integer;
   Mask:      Int64;
   MemName:   string;
-  MemSym:    TSymbol;
   EnumDesc:  TEnumTypeDesc;
   SetDesc:   TSetTypeDesc;
   DeclTD:    TTypeDesc;
@@ -11104,7 +11100,6 @@ var
   I, J:    Integer;
   ADecl:   TMethodDecl;
   Par:     TMethodParam;
-  ParType: TTypeDesc;
   RetType: TTypeDesc;
   Sym:     TSymbol;
   CurUnit:  string;
@@ -13297,8 +13292,6 @@ var
   ObjSym:  TSymbol;
   RT:      TRecordTypeDesc;
   MDecl:   TMethodDecl;
-  Par:     TMethodParam;
-  ArgType: TTypeDesc;
   I:       Integer;
   ObjType: TTypeDesc;
   FldInfo: TFieldInfo;
@@ -14628,7 +14621,6 @@ var
   PropInfo: TPropertyInfo;
   ExprType: TTypeDesc;
   ObjType:  TTypeDesc;
-  IntfDesc: TInterfaceTypeDesc;
   VarSym:   TSymbol;
   BaseE:    TASTExpr;
 begin

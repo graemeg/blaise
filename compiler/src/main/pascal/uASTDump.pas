@@ -824,8 +824,6 @@ begin
 end;
 
 procedure DumpProgram(AProg: TProgram);
-var
-  I: Integer;
 begin
   IndentLevel := 0;
   WriteLn('=== AST Dump: program ' + AProg.Name + ' ===');

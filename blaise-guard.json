@@ -32,8 +32,14 @@
     ],
     "BL-1003": { "enabled": true, "severity": "warning", "params": { "maxDepth": 6 } },
 
-    "_BL-1004": "Off by default upstream: closures and shadowing keep it heuristic.",
-    "BL-1004": { "enabled": false, "severity": "warning", "params": { "checkParameters": false } },
+    "_BL-1004": [
+      "ON here, although it ships off by default: closures and shadowing make",
+      "it heuristic, but its error is to miss an unused local, never to invent",
+      "one.  Turned on 2026-10-23, when its 76 findings across compiler/,",
+      "stdlib/ and tools/ were removed.  Parameters stay unchecked: an override",
+      "or interface method must keep its signature even when it ignores one."
+    ],
+    "BL-1004": { "enabled": true, "severity": "warning", "params": { "checkParameters": false } },
 
     "BL-1005": { "enabled": true, "severity": "warning" },
     "BL-1006": { "enabled": true, "severity": "warning" },

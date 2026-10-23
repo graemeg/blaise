@@ -4492,8 +4492,7 @@ procedure TX86_64Backend.EmitInterfaceCall(const AObjName: string;
                                            AObjExpr: TASTExpr;
                                            ADiscardIntfRet: Boolean);
 var
-  I, SlotOff, Ps, ArgN: Integer;
-  Arg: TASTExpr;
+  SlotOff, Ps, ArgN: Integer;
   HD: TList<Integer>;
   HK: TList<Integer>;
   HTotal, Pushed: Integer;
@@ -4620,8 +4619,7 @@ procedure TX86_64Backend.EmitInterfaceFieldCall(AFld: TFieldInfo;
 { Dispatch an interface method call through a class field.  The fat pointer
   lives at Self + AFld.Offset (obj) and Self + AFld.Offset + 8 (itab). }
 var
-  I, SlotOff, ArgN: Integer;
-  Arg: TASTExpr;
+  SlotOff, ArgN: Integer;
   HD: TList<Integer>;
   HK: TList<Integer>;
   HTotal, Pushed: Integer;
@@ -12413,10 +12411,8 @@ var
   UserSlots:     Integer;
   TotalSlots:    Integer;
   AllocSz:       Integer;
-  SlotOff:       Integer;
   CleanUp:       Integer;
   OverflowSlots: Integer;
-  Dest:          Integer;
   HD:            TList<Integer>;
   HK:            TList<Integer>;
   HTotal:        Integer;
@@ -12788,8 +12784,7 @@ end;
 procedure TX86_64Backend.EmitImplicitSelfCallOverflow(MD: TMethodDecl;
   AArgs: TObjectList; const ASym: string);
 var
-  I, AllocSz, CleanUp, Dest: Integer;
-  Arg: TASTExpr;
+  AllocSz, CleanUp: Integer;
   HD, HK: TList<Integer>;
   HTotal: Integer;
 begin
@@ -14427,8 +14422,8 @@ var
   MD:       TMethodDecl;
   Sym:      string;
   Arg:      TASTExpr;
-  UserSlots, TotalSlots, AllocSz, SlotOff, CleanUp: Integer;
-  OverflowSlots, Dest: Integer;
+  UserSlots, TotalSlots, AllocSz, CleanUp: Integer;
+  OverflowSlots: Integer;
   HD:       TList<Integer>;
   HK:       TList<Integer>;
   HTotal:   Integer;
@@ -15038,8 +15033,7 @@ var
   I:   Integer;
   Sym: string;
   Par: TMethodParam;
-  UserSlots, TotalSlots, OverflowSlots, AllocSz, CleanUp, Dest, HTotal: Integer;
-  Arg: TASTExpr;
+  UserSlots, TotalSlots, OverflowSlots, AllocSz, CleanUp, HTotal: Integer;
   HD, HK: TList<Integer>;
 begin
   Sym        := MethodEmitNameNative(MD, MD.OwnerTypeName, AName);
@@ -16752,7 +16746,7 @@ end;
   finally body inline.  try/except frames have a nil FFinallyStack entry. }
 procedure TX86_64Backend.EmitExcUnwind(ATargetDepth: Integer);
 var
-  I, J:    Integer;
+  I: Integer;
   FinBody: TCompoundStmt;
 begin
   for I := FExcDepth downto ATargetDepth + 1 do
@@ -17119,7 +17113,7 @@ var
   SetLValAddr: TAddrOfExpr;
   SetWide:     Boolean;
   ISFld:   TFieldInfo;
-  PCUserSlots, PCTotalSlots, PCOverflow, PCCleanUp, PCAllocSz, PCDest: Integer;
+  PCUserSlots, PCTotalSlots, PCOverflow, PCCleanUp, PCAllocSz: Integer;
   PCHD, PCHK: TList<Integer>;
   PCHTotal: Integer;
   AliasBuf: Integer;
@@ -23166,7 +23160,6 @@ var
   IntIdx, XmmIdx: Integer;
   AllocSz, SlotOff: Integer;
   OverflowBytes:  Integer;
-  CleanUp:        Integer;
   OALD:           TList<Integer>;
   OALK:           TList<Integer>;
   OALTotal:       Integer;
@@ -25216,14 +25209,12 @@ end;
 
 procedure TX86_64Backend.EmitIntfSretMethodCall(ACall: TMethodCallExpr);
 var
-  I, SlotOff, ArgN: Integer;
-  Arg: TASTExpr;
+  SlotOff, ArgN: Integer;
   IntfD: TInterfaceTypeDesc;
   HD: TList<Integer>;
   HK: TList<Integer>;
   HTotal, Pushed: Integer;
   VFlags: string;
-  IE: TIdentExpr;
   OverflowBytes: Integer;
   SlotClasses: TList<Integer>;
   RecvOnStack: Boolean;
@@ -25340,14 +25331,12 @@ end;
 procedure TX86_64Backend.EmitIntfRecordSretDispatch(ACall: TMethodCallExpr;
   const ADest: string; ADestIsIndirect: Boolean);
 var
-  I, SlotOff, ArgN, Slots: Integer;
-  Arg: TASTExpr;
+  SlotOff, ArgN: Integer;
   IntfD: TInterfaceTypeDesc;
   HD: TList<Integer>;
   HK: TList<Integer>;
   HTotal, Pushed: Integer;
   VFlags: string;
-  IE: TIdentExpr;
   OverflowBytes, ABase: Integer;
   RC: TRecReturnClass;
   RetRec: TRecordTypeDesc;

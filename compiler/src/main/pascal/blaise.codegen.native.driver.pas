@@ -530,7 +530,7 @@ end;
 procedure ResolveLibNeeded(const AName: string; ADirs, ANeeded,
   AVisited: TStringList; const ATarget: TTargetDesc);
 var
-  Path, Bytes, Soname, Tok, InnerName: string;
+  Path, Bytes, Soname, Tok: string;
   Scr: TStringList;
   J: Integer;
 begin

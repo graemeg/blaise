@@ -299,7 +299,7 @@ end;
 
 function TImapClient.Select(const AMailbox: string): Boolean;
 var
-  I, J: Integer;
+  I: Integer;
   U, DataLine: string;
 begin
   FExists := 0;

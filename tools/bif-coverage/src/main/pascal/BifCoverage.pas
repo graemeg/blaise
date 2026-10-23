@@ -323,7 +323,7 @@ end;
    (it's not a comment) but precedes the field name. *)
 function StripAttrs(const ALine: string): string;
 var
-  I, Len, C: Integer;
+  I, Len: Integer;
 begin
   Result := ALine;
   Len := Length(Result);
@@ -540,7 +540,7 @@ end;
    counting on begin/case/record/try). *)
 function ExtractFunctionBody(ALines: TList<String>; const AFName: string): string;
 var
-  I, J, P, Depth: Integer;
+  I, P, Depth: Integer;
   Line, Tok: string;
   InFn, InBody: Boolean;
   Header: string;
@@ -793,7 +793,6 @@ end;
    if the file or tag isn't readable. *)
 function ReadProjectVersion(): string;
 var
-  Raw: string;
   Lines: TStringList;
   I, OpenP, CloseP: Integer;
   Line: string;
