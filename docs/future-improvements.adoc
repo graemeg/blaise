@@ -648,6 +648,44 @@ note" for the full reconciliation.
   semantic, codegen transforms) that warrants its own design document and
   phased implementation.  Estimated 4–6 weeks post-v0.6.0.
 
+== Tools — Portability to Windows
+
+=== Replace the `find` shell-out in BlaiseGuard with a stdlib directory walker
+
+*Target.* v0.16, before the Windows x86-64 target lands.
+
+*What.* `TDirectoryScanSource.Collect` in
+`tools/blaise-guard/src/main/pascal/guard.sources.pas` lists the sources
+to analyse by running `sh -c "find <root> -type f -name '*.pas'"` through
+`TProcess`.  Windows has neither `sh` nor a POSIX `find` (its `find.exe`
+searches text in files), so `blaise-guard --scan` and `--project` would
+find no sources there.  The unit comment says the RTL exposes no readdir;
+that is no longer true.  The `ListDir` builtin (added for GH #194,
+`TRtlPlatform.ListDir`) returns a directory's entry names.
+
+BindGen has the same dependency in one place: `BindGen.pas` runs clang
+through `sh -c` when errors are allowed, only to send its stderr to
+`/dev/null`.
+
+*Recommended approach.*
+
+. Add a recursive file finder to stdlib, for example
+  `FindFiles(const ARoot, APattern: string): TList<string>` in
+  `sysutils`, built on `ListDir`, `DirectoryExists` and a simple wildcard
+  match.  Return the paths sorted, so a report's file order does not
+  depend on the directory order a file system happens to use.
+. Use it in `TDirectoryScanSource.Collect`, and drop the `TProcess` use
+  from `guard.sources.pas`.
+. In BindGen, run clang directly and discard its stderr through
+  `TProcess` (or read and ignore it), with no shell.
+. When the Windows platform unit is written, `ListDir` gets a
+  `FindFirstFileW`/`FindNextFileW` implementation; nothing above it
+  changes.
+
+*Effort.* Small.  Test `FindFiles` in the stdlib suite (nested
+directories, a pattern that excludes some files, an empty tree), and keep
+BlaiseGuard's existing scan behaviour covered by its own tests.
+
 == Compiler — Backend Architecture
 
 === Route generic class instances through the ordinary class emitters
