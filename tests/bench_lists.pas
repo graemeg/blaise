@@ -63,9 +63,9 @@ var
   Now: TInstant;
   D:   TDuration;
 begin
-  Now    := InstantNow;
+  Now    := InstantNow();
   D      := Now.Subtract(Start);
-  Result := D.TotalMilliseconds
+  Result := D.TotalMilliseconds()
 end;
 
 function PadRight(const S: string; Width: Integer): string;
@@ -113,13 +113,13 @@ begin
 
   { 1. Bulk insert }
   SL := TStringList.Create;
-  T0 := InstantNow;
+  T0 := InstantNow();
   for I := 0 to N_BIG - 1 do
     SL.Add('item_' + IntToStr(I));
   Report('insert 1_000_000', ElapsedMs(T0));
 
   { 2. Sequential read }
-  T0  := InstantNow;
+  T0  := InstantNow();
   Sum := 0;
   for I := 0 to SL.Count - 1 do
   begin
@@ -131,43 +131,43 @@ begin
 
   { 3. Random read }
   SeedRand(42);
-  T0  := InstantNow;
+  T0  := InstantNow();
   Sum := 0;
   for I := 0 to N_RANDOM - 1 do
   begin
-    Idx := NextRand mod N_BIG;
+    Idx := NextRand() mod N_BIG;
     S   := SL.Get(Idx);
     Sum := Sum + Length(S)
   end;
   Report('random  Get(i)  x 1_000_000', ElapsedMs(T0));
 
   { 5. for..in iterate }
-  T0  := InstantNow;
+  T0  := InstantNow();
   Sum := 0;
   for S in SL do
     Sum := Sum + Length(S);
   Report('for..in over 1_000_000 (sum=' + IntToStr(Sum) + ')',
     ElapsedMs(T0));
 
-  SL.Free;
+  SL.Free();
 
   { 4. Linear search on a 100k list }
   SL := TStringList.Create;
   for I := 0 to N_MID - 1 do
     SL.Add('item_' + IntToStr(I));
   SeedRand(7);
-  T0   := InstantNow;
+  T0   := InstantNow();
   Hits := 0;
   for I := 0 to N_SEARCH - 1 do
   begin
-    Idx := NextRand mod N_MID;
+    Idx := NextRand() mod N_MID;
     if SL.IndexOf('item_' + IntToStr(Idx)) >= 0 then
       Hits := Hits + 1
   end;
   Report('IndexOf x 1000 (hits=' + IntToStr(Hits) + ')',
     ElapsedMs(T0));
-  SL.Free;
-  WriteLn
+  SL.Free();
+  WriteLn()
 end;
 
 procedure BenchGenericListString;
@@ -186,13 +186,13 @@ begin
 
   { 1. Bulk insert }
   L  := TList<String>.Create;
-  T0 := InstantNow;
+  T0 := InstantNow();
   for I := 0 to N_BIG - 1 do
     L.Add('item_' + IntToStr(I));
   Report('insert 1_000_000', ElapsedMs(T0));
 
   { 2. Sequential read }
-  T0  := InstantNow;
+  T0  := InstantNow();
   Sum := 0;
   for I := 0 to L.Count - 1 do
   begin
@@ -204,36 +204,36 @@ begin
 
   { 3. Random read }
   SeedRand(42);
-  T0  := InstantNow;
+  T0  := InstantNow();
   Sum := 0;
   for I := 0 to N_RANDOM - 1 do
   begin
-    Idx := NextRand mod N_BIG;
+    Idx := NextRand() mod N_BIG;
     S   := L.Get(Idx);
     Sum := Sum + Length(S)
   end;
   Report('random  Get(i)  x 1_000_000', ElapsedMs(T0));
 
   { 5. for..in iterate }
-  T0  := InstantNow;
+  T0  := InstantNow();
   Sum := 0;
   for S in L do
     Sum := Sum + Length(S);
   Report('for..in over 1_000_000 (sum=' + IntToStr(Sum) + ')',
     ElapsedMs(T0));
 
-  L.Free;
+  L.Free();
 
   { 4. Linear search — TList<T> has no IndexOf, hand-rolled scan }
   L := TList<String>.Create;
   for I := 0 to N_MID - 1 do
     L.Add('item_' + IntToStr(I));
   SeedRand(7);
-  T0   := InstantNow;
+  T0   := InstantNow();
   Hits := 0;
   for I := 0 to N_SEARCH - 1 do
   begin
-    Idx := NextRand mod N_MID;
+    Idx := NextRand() mod N_MID;
     S   := 'item_' + IntToStr(Idx);
     Found := False;
     for J := 0 to L.Count - 1 do
@@ -247,8 +247,8 @@ begin
   end;
   Report('hand-rolled scan x 1000 (hits=' + IntToStr(Hits) + ')',
     ElapsedMs(T0));
-  L.Free;
-  WriteLn
+  L.Free();
+  WriteLn()
 end;
 
 procedure BenchTObjectList;
@@ -266,7 +266,7 @@ begin
 
   { 1. Bulk insert }
   OL := TObjectList.Create(True);
-  T0 := InstantNow;
+  T0 := InstantNow();
   for I := 0 to N_BIG - 1 do
   begin
     Item := TItem.Create;
@@ -276,7 +276,7 @@ begin
   Report('insert 1_000_000', ElapsedMs(T0));
 
   { 2. Sequential read }
-  T0  := InstantNow;
+  T0  := InstantNow();
   Sum := 0;
   for I := 0 to OL.Count - 1 do
   begin
@@ -288,11 +288,11 @@ begin
 
   { 3. Random read }
   SeedRand(42);
-  T0  := InstantNow;
+  T0  := InstantNow();
   Sum := 0;
   for I := 0 to N_RANDOM - 1 do
   begin
-    Idx  := NextRand mod N_BIG;
+    Idx  := NextRand() mod N_BIG;
     Item := TItem(OL.Get(Idx));
     Sum  := Sum + Item.FValue
   end;
@@ -300,11 +300,11 @@ begin
 
   { 4. IndexOf — search for known objects (pointer-equality match) }
   SeedRand(7);
-  T0   := InstantNow;
+  T0   := InstantNow();
   Hits := 0;
   for I := 0 to N_SEARCH - 1 do
   begin
-    Idx    := NextRand mod N_BIG;
+    Idx    := NextRand() mod N_BIG;
     Needle := TItem(OL.Get(Idx));
     if OL.IndexOf(Needle) >= 0 then
       Hits := Hits + 1
@@ -312,8 +312,8 @@ begin
   Report('IndexOf x 1000 (hits=' + IntToStr(Hits) + ')',
     ElapsedMs(T0));
 
-  OL.Free;
-  WriteLn
+  OL.Free();
+  WriteLn()
 end;
 
 procedure BenchGenericListObject;
@@ -334,7 +334,7 @@ begin
 
   { 1. Bulk insert }
   L  := TList<TObject>.Create;
-  T0 := InstantNow;
+  T0 := InstantNow();
   for I := 0 to N_BIG - 1 do
   begin
     Item := TItem.Create;
@@ -344,7 +344,7 @@ begin
   Report('insert 1_000_000', ElapsedMs(T0));
 
   { 2. Sequential read }
-  T0  := InstantNow;
+  T0  := InstantNow();
   Sum := 0;
   for I := 0 to L.Count - 1 do
   begin
@@ -356,11 +356,11 @@ begin
 
   { 3. Random read }
   SeedRand(42);
-  T0  := InstantNow;
+  T0  := InstantNow();
   Sum := 0;
   for I := 0 to N_RANDOM - 1 do
   begin
-    Idx  := NextRand mod N_BIG;
+    Idx  := NextRand() mod N_BIG;
     Item := TItem(L.Get(Idx));
     Sum  := Sum + Item.FValue
   end;
@@ -368,11 +368,11 @@ begin
 
   { 4. Hand-rolled IndexOf — pointer equality }
   SeedRand(7);
-  T0   := InstantNow;
+  T0   := InstantNow();
   Hits := 0;
   for I := 0 to N_SEARCH - 1 do
   begin
-    Idx    := NextRand mod N_BIG;
+    Idx    := NextRand() mod N_BIG;
     Needle := L.Get(Idx);
     Found  := False;
     for J := 0 to L.Count - 1 do
@@ -391,10 +391,10 @@ begin
   for I := 0 to L.Count - 1 do
   begin
     Obj := L.Get(I);
-    Obj.Free
+    Obj.Free()
   end;
-  L.Free;
-  WriteLn
+  L.Free();
+  WriteLn()
 end;
 
 begin
@@ -403,9 +403,9 @@ begin
           '  N_MID=' + IntToStr(N_MID) +
           '  N_RANDOM=' + IntToStr(N_RANDOM) +
           '  N_SEARCH=' + IntToStr(N_SEARCH));
-  WriteLn;
-  BenchTStringList;
-  BenchGenericListString;
-  BenchTObjectList;
-  BenchGenericListObject
+  WriteLn();
+  BenchTStringList();
+  BenchGenericListString();
+  BenchTObjectList();
+  BenchGenericListObject()
 end.
