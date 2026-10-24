@@ -79,6 +79,7 @@ type
     procedure TestCodegen_DiscardedRecordMethodResult_FieldsReleased;
     procedure TestCodegen_InheritedAndIntfRecordReturn_Lowered;
     procedure TestCodegen_RecordCallOnOwnedReceiver_ReleasesIt;
+    procedure TestSemantic_BareRecordFieldReceiver_InMethod_OK;
   end;
 
 implementation
@@ -1078,6 +1079,46 @@ const
 begin
   AssertEquals('the source string is retained', '',
     AsmMissing(Src, 'callq _StringAddRef', 'bl __StringAddRef'));
+end;
+
+{ A record-typed FIELD named bare as a method receiver inside a class or
+  record method (R.Get(), X.Bump(1)) resolves through implicit Self.  Once
+  rejected as "Undeclared identifier 'R'"
+  (BUG-20261009-implicit-record-field-method-call). }
+procedure TRecordTests.TestSemantic_BareRecordFieldReceiver_InMethod_OK;
+begin
+  AssertEquals('accepted', '', SemanticError('''
+      program RF;
+      type
+        TInner = record
+          A: Integer;
+          function Get: Integer;
+          procedure Bump(N: Integer);
+        end;
+        TBox = class
+          R: TInner;
+          function Peek: Integer;
+          procedure Poke;
+        end;
+        TPair = record
+          X: TInner;
+          function Sum: Integer;
+        end;
+      function TInner.Get: Integer; begin Result := A end;
+      procedure TInner.Bump(N: Integer); begin A := A + N end;
+      function TBox.Peek: Integer; begin Result := R.Get() end;
+      procedure TBox.Poke; begin R.Bump(5) end;
+      function TPair.Sum: Integer; begin X.Bump(1); Result := X.Get() + 100 end;
+      var B: TBox; P: TPair;
+      begin
+        B := TBox.Create();
+        B.R.A := High(Integer) - 5;
+        B.Poke();
+        WriteLn(B.Peek());
+        P.X.A := -1;
+        WriteLn(P.Sum(), ' ', P.X.A)
+      end.
+      '''));
 end;
 
 initialization

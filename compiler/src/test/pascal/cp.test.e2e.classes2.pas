@@ -189,6 +189,7 @@ type
       Integer, a static array and a managed sret record -- including two
       levels down and a nested function's own Result beside it }
     procedure TestRun_NestedRoutine_EnclosingResult;
+    procedure TestRun_BareRecordFieldReceiver_InMethod;
     procedure TestRun_NestedPointerAlias_ToLaterRecord;
     { var Double param (pointer arrives in an int register, not xmm) and
       captured float read/write through the _cap_ slot. }
@@ -2261,6 +2262,47 @@ const Src = '''
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '2147483647 2147483637' + LE, 0);
+end;
+
+{ BUG-20261009-implicit-record-field-method-call: a bare record field as a
+  method receiver gets Self + offset as the record method's Self, so the
+  callee's writes land in the field. }
+procedure TE2EClasses2Tests.TestRun_BareRecordFieldReceiver_InMethod;
+const Src = '''
+    program RF;
+    type
+      TInner = record
+        A: Integer;
+        function Get: Integer;
+        procedure Bump(N: Integer);
+      end;
+      TBox = class
+        R: TInner;
+        function Peek: Integer;
+        procedure Poke;
+      end;
+      TPair = record
+        X: TInner;
+        function Sum: Integer;
+      end;
+    function TInner.Get: Integer; begin Result := A end;
+    procedure TInner.Bump(N: Integer); begin A := A + N end;
+    function TBox.Peek: Integer; begin Result := R.Get() end;
+    procedure TBox.Poke; begin R.Bump(5) end;
+    function TPair.Sum: Integer; begin X.Bump(1); Result := X.Get() + 100 end;
+    var B: TBox; P: TPair;
+    begin
+      B := TBox.Create();
+      B.R.A := High(Integer) - 5;
+      B.Poke();
+      WriteLn(B.Peek());
+      P.X.A := -1;
+      WriteLn(P.Sum(), ' ', P.X.A)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2147483647' + LE + '100 0' + LE, 0);
 end;
 
 procedure TE2EClasses2Tests.TestRun_NestedRoutine_EnclosingResult;
