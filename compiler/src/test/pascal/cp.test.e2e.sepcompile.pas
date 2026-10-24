@@ -299,6 +299,7 @@ type
       array[@boolean] of integer: base not found" on every second build). }
     procedure TestIncrementalRebuild_TypeIndexedArrayAlias_Warm;
     procedure TestIncrementalRebuild_NestedPointerAlias_Warm;
+    procedure TestIncrementalRebuild_NoFinalNewline_StaysCached;
     procedure TestIncrementalRebuild_CtorIdentity_Warm;
     procedure TestDebugOpdf_PerUnitSection_InDependencyObject;
     { Regression (GH #231): a UNIT passed as --source with --debug-opdf
@@ -4030,6 +4031,58 @@ end;
 { BUG-20260921-nested-forward-pointer-alias: the warm build failed with
   "Class TList1 field type PNode unresolved" -- the .bif dropped nested
   plain aliases, in either declaration order. }
+{ The cache validator hashed a unit's source through TStringList.Text,
+  which normalises line endings and appends a final newline; the writer
+  hashed the raw bytes.  A file with no final newline, or with CRLF
+  endings, never validated, so it was recompiled on every build -- the
+  compiler's own blaise.codegen.pas was, twice per build. }
+procedure TSepCompileTests.TestIncrementalRebuild_NoFinalNewline_StaysCached;
+const
+  ProgSrc =
+    '''
+    program usenl;
+    uses unonl, ucrlf;
+    begin
+      WriteLn(A() + B())
+    end.
+    ''';
+var
+  ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc, Pass: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  ProgPas  := FScratch + '/usenl.pas';
+  ProgBin  := FScratch + '/usenl';
+  CacheDir := FScratch + '/units-usenl';
+  WriteFile(FScratch + '/unonl.pas',
+    'unit unonl;' + #10 + 'interface' + #10 + 'function A: Integer;' + #10 +
+    'implementation' + #10 + 'function A: Integer; begin Result := 40 end;' +
+    #10 + 'end.');
+  WriteFile(FScratch + '/ucrlf.pas',
+    'unit ucrlf;' + #13#10 + 'interface' + #13#10 + 'function B: Integer;' +
+    #13#10 + 'implementation' + #13#10 +
+    'function B: Integer; begin Result := 2 end;' + #13#10 + 'end.' + #13#10);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+  for Pass := 0 to 1 do
+  begin
+    DeleteFile(ProgBin);
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch], Captured);
+    AssertEquals(Format('build%d exit code (out: %s)', [Pass, Captured]), 0, Rc);
+    if Pass = 1 then
+      AssertTrue('the warm build reuses both units: ' + Captured,
+        Pos('recompiling from source', Captured) < 0);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(Format('build%d stdout', [Pass]), '42' + #10, Captured);
+  end;
+end;
+
 procedure TSepCompileTests.TestIncrementalRebuild_NestedPointerAlias_Warm;
 const
   LibSrc =

@@ -262,7 +262,6 @@ function TUnitLoader.ValidateIface(AIface: TUnitInterface;
                                    const AName: string): Boolean;
 var
   SrcPath: string;
-  Src:     TStringList;
   Cur:     string;
 begin
   Result := False;
@@ -280,21 +279,15 @@ begin
               '.o iface has no source hash; recompiling from source');
       Exit;
     end;
-    Src := TStringList.Create();
     try
-      try
-        Src.LoadFromFile(SrcPath);
-        { Must mirror the writer exactly (WriteUnitInterfaceToFile): the hash
-          covers the source text AND every file it embeds, so editing an
-          embedded asset invalidates this entry.  FDefines is passed because
-          discovery lexes the source -- without the same -d set, a
-          define-gated embed is missed and never invalidates. }
-        Cur := SourceHashWithEmbeds(Src.Text, SrcPath, FDefines);
-      except
-        Cur := '';
-      end;
-    finally
-      Src.Free();
+      { Must mirror the writer exactly (WriteUnitInterfaceToFile): the hash
+        covers the source text AND every file it embeds, so editing an
+        embedded asset invalidates this entry.  FDefines is passed because
+        discovery lexes the source -- without the same -d set, a
+        define-gated embed is missed and never invalidates. }
+      Cur := SourceFileHash(SrcPath, FDefines);
+    except
+      Cur := '';
     end;
     if Cur = '' then Exit;
     if not SameText(Cur, AIface.SourceHash) then
@@ -492,7 +485,6 @@ function TUnitLoader.SourceHashOf(const AName: string): string;
 var
   Idx:     Integer;
   SrcPath: string;
-  Src:     TStringList;
 begin
   for Idx := 0 to FHashMemo.Count - 1 do
     if SameText(DepPairName(FHashMemo.Strings[Idx]), AName) then
@@ -502,19 +494,13 @@ begin
   SrcPath := Locate(AName);
   if SrcPath <> '' then
   begin
-    Src := TStringList.Create();
     try
-      try
-        Src.LoadFromFile(SrcPath);
-        { Must match the writer (WriteUnitInterfaceToFile) exactly — same
-          helper, same defines — or the two disagree about which IFDEF
-          branches, and so which embedded files, are live. }
-        Result := SourceHashWithEmbeds(Src.Text, SrcPath, FDefines);
-      except
-        Result := '';
-      end;
-    finally
-      Src.Free();
+      { Must match the writer (WriteUnitInterfaceToFile) exactly — same
+        helper, same defines — or the two disagree about which IFDEF
+        branches, and so which embedded files, are live. }
+      Result := SourceFileHash(SrcPath, FDefines);
+    except
+      Result := '';
     end;
   end;
   FHashMemo.Add(AName + '=' + Result);

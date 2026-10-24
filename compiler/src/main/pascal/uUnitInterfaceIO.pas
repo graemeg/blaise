@@ -280,6 +280,13 @@ function ContentHashFnv1a64(const AContent: string): string;
   this, so the two sides stay symmetric by construction. }
 function SourceHashWithEmbeds(const ASourceText, ASourcePath: string;
                               ADefines: TStringList): string;
+{ SourceHashWithEmbeds over the file at APath, read as RAW bytes.  Every
+  writer and validator of a cached unit's source hash goes through this one
+  reader: a TStringList round-trip normalises line endings and appends a
+  final newline, so a file without one (or with CRLF endings) hashed
+  differently on the two sides and its cache entry never validated.
+  Raises on an IO failure; callers decide what that means. }
+function SourceFileHash(const APath: string; ADefines: TStringList): string;
 
 { The -d/--define set in force for this compilation.
 
@@ -3228,6 +3235,34 @@ begin
   Result := ContentHashFnv1a64(Acc);
 end;
 
+function SourceFileHash(const APath: string; ADefines: TStringList): string;
+var
+  FIn:  TFileInputStream;
+  Text: string;
+  N:    Integer;
+  Got:  Integer;
+  R:    Integer;
+begin
+  FIn := TFileInputStream.Create(APath);
+  try
+    N := Integer(FIn.Size());
+    SetLength(Text, N);
+    { a single read(2) may return fewer bytes than asked }
+    Got := 0;
+    while Got < N do
+    begin
+      R := FIn.Read(PChar(Text) + Got, N - Got);
+      if R <= 0 then Break;
+      Got := Got + R;
+    end;
+    if Got < N then
+      SetLength(Text, Got);
+  finally
+    FIn.Free();
+  end;
+  Result := SourceHashWithEmbeds(Text, APath, ADefines);
+end;
+
 var
   GEffectiveCompilerId: string = '';   { memoised — see EffectiveCompilerId }
   GActiveDefines: TStringList;         { not owned — see SetActiveDefines }
@@ -3325,7 +3360,6 @@ var
   Entries: TStringList;
   DepName: string;
   Cand:    string;
-  Src:     TStringList;
   Hash:    string;
 begin
   for I := 0 to AIface.GenericDepHashes.Count - 1 do
@@ -3362,17 +3396,10 @@ begin
         Cand := ASourceDir + DepName + '.pas';
     end;
     if Cand = '' then Continue;
-    Hash := '';
-    Src := TStringList.Create();
     try
-      try
-        Src.LoadFromFile(Cand);
-        Hash := SourceHashWithEmbeds(Src.Text, Cand, GActiveDefines);
-      except
-        Hash := '';
-      end;
-    finally
-      Src.Free();
+      Hash := SourceFileHash(Cand, GActiveDefines);
+    except
+      Hash := '';
     end;
     { Rewrite through a local, not
       `AIface.GenericDepHashes.Strings[I] := ...`.  An indexed-property WRITE
@@ -3390,8 +3417,6 @@ end;
 procedure WriteUnitInterfaceToFile(AIface: TUnitInterface; const APath: string);
 var
   Bytes: string;
-  Src:   string;
-  FIn:   TFileInputStream;
   FOut:  TFileOutputStream;
 begin
   { Populate source-content hash from disk if SourceFile is set and
@@ -3401,20 +3426,11 @@ begin
   if (AIface.SourceFile <> '') and FileExists(AIface.SourceFile) then
   begin
     try
-      FIn := TFileInputStream.Create(AIface.SourceFile);
-      try
-        SetLength(Src, Integer(FIn.Size()));
-        if Length(Src) > 0 then
-          FIn.Read(PChar(Src), Length(Src));
-      finally
-        FIn.Free();
-      end;
       { Hash covers the source AND anything it embeds, so an asset edit
         invalidates the cached .o just as a source edit does.  The active
         defines must match the validator's, or the two disagree on which
         IFDEF branches (and so which embeds) are live. }
-      AIface.SourceHash := SourceHashWithEmbeds(Src, AIface.SourceFile,
-                                                GActiveDefines);
+      AIface.SourceHash := SourceFileHash(AIface.SourceFile, GActiveDefines);
     except
       { Swallow IO failure — best-effort population. }
       AIface.SourceHash := '';
