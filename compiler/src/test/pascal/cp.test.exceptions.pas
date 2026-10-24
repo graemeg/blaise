@@ -115,6 +115,7 @@ type
       still holds the exception); inside a handler with no variable it
       forwards the in-flight reference unchanged }
     procedure TestCodegen_ReraiseFromBoundHandler_MovesRefOut;
+    procedure TestSemantic_NoVarHandlers_GetHiddenVariables;
   end;
 
 implementation
@@ -718,19 +719,73 @@ const
     end.
     ''';
 begin
-  AssertEquals('bound handler: the variable is compared and cleared', '',
+  { The re-raised exception is the one the handler's variable holds -- not
+    the RTL's current exception, which is the LAST one raised and so the
+    wrong (already released) object after a nested try/except in the body
+    had handled its own.  The variable is then cleared, unreleased: its
+    reference moves into the re-raise. }
+  AssertEquals('bound handler: the variable is re-raised', '',
     AsmMissing(SrcBound,
-      #9'callq _CurrentException' + #10 + #9'cmpq E(%rip), %rax' + #10 +
-        #9'jne .Lrrkeep',
-      #9'cmp x9, x0' + #10 + #9'b.ne Lrrkeep'));
+      #9'movq E(%rip), %rax' + #10 + #9'testq %rax, %rax' + #10 +
+        #9'jnz .Lrrvar',
+      #9'ldr x0, [x9, _g_E@PAGEOFF]' + #10 + #9'cbnz x0, Lrrvar'));
   AssertEquals('bound handler: cleared without a release', '',
-    AsmMissing(SrcBound, #9'movq $0, E(%rip)',
-      #9'str xzr, [x9, _g_E@PAGEOFF]'));
-  AssertEquals('no-variable handler: the in-flight reference is forwarded',
-    '', AsmMissing(SrcNoVar,
-      #9'callq _CurrentException' + #10 + #9'movq %rax, %rdi' + #10 +
-        #9'callq _Reraise',
-      #9'bl __CurrentException' + #10 + #9'bl __Reraise'));
+    AsmMissing(SrcBound, #9'movq $0, E(%rip)' + #10 + #9'movq %rax, %rdi' +
+        #10 + #9'callq _Reraise',
+      #9'str xzr, [x9, _g_E@PAGEOFF]' + #10 + #9'ldr x0, [sp], #16' + #10 +
+        #9'bl __Reraise'));
+  { A handler with no variable gets a hidden one (BUG-20260721-novar-
+    handler-nonlocal-exit-leak), so it re-raises the same way. }
+  AssertEquals('no-variable handler: its hidden variable is re-raised', '',
+    AsmMissing(SrcNoVar,
+      #9'movq __excv_1(%rip), %rax' + #10 + #9'testq %rax, %rax',
+      #9'ldr x0, [x9, _g___excv_1@PAGEOFF]' + #10 + #9'cbnz x0, Lrrvar'));
+end;
+
+{ BUG-20260721-novar-handler-nonlocal-exit-leak: every way of handling an
+  exception without naming it becomes a handler with a hidden variable of
+  its own, which the scope-exit release disposes of on every exit path. }
+procedure TExceptionTests.TestSemantic_NoVarHandlers_GetHiddenVariables;
+var
+  Prog: TProgram;
+  TES: TTryExceptStmt;
+
+  function H(AIdx: Integer): TExceptHandlerClause;
+  begin
+    Result := TExceptHandlerClause(TES.Handlers.Items[AIdx]);
+  end;
+
+begin
+  Prog := Analyse('''
+      program P;
+      type E1 = class end;
+      begin
+        try raise E1.Create() except WriteLn('a') end;
+        try raise E1.Create() except on E1 do WriteLn('b'); on X: E1 do ;
+          else WriteLn('c') end
+      end.
+      ''');
+  try
+    TES := TTryExceptStmt(Prog.Block.Stmts[0]);
+    AssertTrue('bare except is now a handler', TES.ExceptBody = nil);
+    AssertEquals('one catch-all handler', 1, TES.Handlers.Count);
+    AssertEquals('catches TObject', 'TObject', H(0).TypeName);
+    AssertEquals('hidden variable', '__excv_1', H(0).VarName);
+    TES := TTryExceptStmt(Prog.Block.Stmts[1]);
+    AssertTrue('else is now a handler', TES.ElseBody = nil);
+    AssertEquals('three handlers', 3, TES.Handlers.Count);
+    AssertEquals('on E1 do: hidden variable', '__excv_2', H(0).VarName);
+    AssertEquals('a named variable is kept', 'X', H(1).VarName);
+    AssertEquals('else: a TObject catch-all, last', 'TObject', H(2).TypeName);
+    AssertEquals('else: hidden variable', '__excv_3', H(2).VarName);
+    { each body releases its variable on every way out }
+    AssertTrue('named handler body wrapped in try/finally',
+      (H(1).Body.Stmts.Count = 1) and (H(1).Body.Stmts[0] is TTryFinallyStmt));
+    AssertTrue('the finally clears X', TAssignment(TTryFinallyStmt(
+      H(1).Body.Stmts[0]).FinallyBody.Stmts[0]).Expr is TNilLiteral);
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization

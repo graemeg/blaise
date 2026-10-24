@@ -10756,24 +10756,30 @@ begin
       released the object (a use-after-free), and a differently named one
       shared the reference (released twice at scope exit).  A re-raise that
       leaves the routine never runs its scope-exit release, so an added
-      reference would leak there instead.  A variable the handler body
-      reassigned no longer holds the exception and is left alone.  A
-      handler with no variable forwards its own in-flight reference. }
-    EmitCallSym('_CurrentException');
+      reference would leak there instead.
+
+      The exception re-raised is the one the VARIABLE holds, not the RTL's
+      current exception: that is the LAST one raised, so after a nested
+      try/except in the handler body had handled its own exception, a bare
+      `raise;` re-raised the inner one -- already released -- and the
+      program aborted.  Every handler has a variable (the semantic pass
+      gives a variable-less one a hidden __excv_<n>).  One the body set to
+      nil falls back to the current exception. }
     if (FHandlerVars.Count > 0) and
        (FHandlerVars[FHandlerVars.Count - 1] <> '') and
        (FHandlerVars[FHandlerVars.Count - 1] <> HANDLER_ROUTINE_MARK) then
     begin
-      SkipL := NewLabel('rrkeep');
-      EmitPushX0();
-      EmitLoadSlot('x9', FHandlerVars[FHandlerVars.Count - 1]);
-      Self.Emit(#9'ldr x0, [sp]');
-      Self.Emit(#9'cmp x9, x0');
-      Self.Emit(Format(#9'b.ne %s', [SkipL]));
-      EmitStoreSlot('xzr', FHandlerVars[FHandlerVars.Count - 1]);
+      SkipL := NewLabel('rrvar');
+      EmitLoadSlot('x0', FHandlerVars[FHandlerVars.Count - 1]);
+      Self.Emit(Format(#9'cbnz x0, %s', [SkipL]));
+      EmitCallSym('_CurrentException');
       Self.Emit(SkipL + ':');
+      EmitPushX0();
+      EmitStoreSlot('xzr', FHandlerVars[FHandlerVars.Count - 1]);
       EmitPopTo('x0');
-    end;
+    end
+    else
+      EmitCallSym('_CurrentException');
     EmitCallSym('_Reraise');
     Exit;
   end;

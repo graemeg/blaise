@@ -119,6 +119,8 @@ type
       native release-dest step used to zero + orphan the +1-retained field). }
     procedure TestDebug_ManagedRecordSelfAssign_NoLeak;
     procedure TestDebug_ExceptionNoVarHandler_NoLeak;
+    procedure TestDebug_ExceptionNoVarHandler_NonLocalExit_NoLeak;
+    procedure TestRun_BareReraise_AfterNestedHandledException;
     procedure TestDebug_ConstructorWithArgs_NoDoubleAddRef;
     procedure TestDebug_LeakedObject_ReportedOnExit;
     procedure TestDebug_MultipleLeaks_AllReported;
@@ -3232,6 +3234,124 @@ begin
       try raise EFoo.Create('x') except on Exception do WriteLn('caught') end
     end.
     ''', 'caught');
+end;
+
+{ BUG-20260721-novar-handler-nonlocal-exit-leak: a handler with no
+  variable whose body leaves by Exit, or by raising a NEW exception, leaked
+  the caught one -- every form: bare except, on T do, else. }
+procedure TE2ELeakCheckTests.TestDebug_ExceptionNoVarHandler_NonLocalExit_NoLeak;
+begin
+  AssertLeakFreeOnAll(
+    '''
+    program P;
+    uses SysUtils;
+    type
+      E1 = class(Exception);
+      E2 = class(Exception);
+    procedure BareExit;
+    begin
+      try raise E1.Create('a') except Exit end;
+      WriteLn('not here')
+    end;
+    procedure TypedExit;
+    begin
+      try raise E1.Create('b') except on E1 do Exit; end;
+      WriteLn('not here')
+    end;
+    function ElseExit: Integer;
+    begin
+      Result := 1;
+      try
+        raise E2.Create('c')
+      except
+        on E1 do Result := 2;
+      else
+        begin Result := 3; Exit end;
+      end;
+      Result := 4
+    end;
+    procedure RaiseNew;
+    begin
+      try raise E1.Create('d') except raise E2.Create('e') end
+    end;
+    procedure TypedRaiseNew;
+    begin
+      try raise E1.Create('f') except on E1 do raise E2.Create('g'); end
+    end;
+    var I: Integer;
+    begin
+      BareExit();
+      TypedExit();
+      WriteLn(ElseExit());
+      for I := 1 to 3 do
+        try RaiseNew() except on E: E2 do WriteLn(E.Message) end;
+      try TypedRaiseNew() except on E: E2 do WriteLn(E.Message) end
+    end.
+    ''', '3' + LineEnding + 'e' + LineEnding + 'e' + LineEnding + 'e' +
+      LineEnding + 'g');
+end;
+
+{ A bare `raise;` re-raised the RTL's current exception -- the LAST one
+  raised.  After a nested try/except in the handler body had handled its
+  own exception, that was the inner one, already released, and the program
+  aborted (rc 134), with or without a handler variable. }
+procedure TE2ELeakCheckTests.TestRun_BareReraise_AfterNestedHandledException;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    type
+      E1 = class(Exception);
+      E2 = class(Exception);
+    procedure Inner;
+    begin
+      try raise E2.Create('inner') except on E2 do ; end
+    end;
+    procedure NoVar;
+    begin
+      try
+        raise E1.Create('no var')
+      except
+        on E1 do
+        begin
+          try raise E2.Create('x') except on E2 do WriteLn('inner handled') end;
+          raise
+        end;
+      end
+    end;
+    procedure WithVar;
+    begin
+      try
+        raise E1.Create('with var')
+      except
+        on X: E1 do
+        begin
+          Inner();
+          raise
+        end;
+      end
+    end;
+    procedure CatchAll;
+    begin
+      try
+        raise E1.Create('catch-all')
+      except
+        try raise E2.Create('y') except WriteLn('inner handled') end;
+        raise
+      end
+    end;
+    begin
+      try NoVar() except on E: E1 do WriteLn('outer got ', E.Message) end;
+      try WithVar() except on E: E1 do WriteLn('outer got ', E.Message) end;
+      try CatchAll() except on E: E1 do WriteLn('outer got ', E.Message) end
+    end.
+    ''';
+begin
+  AssertLeakFreeOnAll(Src, 'outer got catch-all');
+  AssertRunsOnAll(Src,
+    'inner handled' + LineEnding + 'outer got no var' + LineEnding +
+    'outer got with var' + LineEnding + 'inner handled' + LineEnding +
+    'outer got catch-all' + LineEnding, 0);
 end;
 
 procedure TE2ELeakCheckTests.TestDebug_OwnedTransientSetterValues_NoLeak;

@@ -2159,11 +2159,17 @@ const
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { A handler releases its exception when the handler is left, on every
+    path (BUG-20260721-novar-handler-nonlocal-exit-leak) -- as Delphi frees
+    it.  So E's object goes as soon as E := nil drops the last reference,
+    and each caught exception goes at the end of its handler.  Before, a
+    handler variable kept its exception until it was rebound or the routine
+    ended ('freed 1' printed after 'inner 3', 'freed 4' after 'end'). }
   AssertRTLRunsOnAll(Src, 'caught 1' + LineEnding + 'still held 1' + LineEnding +
-    'bare' + LineEnding + 'freed 2' + LineEnding + 'inner 3' + LineEnding +
-    'freed 1' + LineEnding + 'outer 3' + LineEnding + 'finally' + LineEnding +
-    'freed 3' + LineEnding + 'after finally 4' + LineEnding + 'end' + LineEnding +
-    'freed 4' + LineEnding, 0);
+    'freed 1' + LineEnding + 'bare' + LineEnding + 'freed 2' + LineEnding +
+    'inner 3' + LineEnding + 'outer 3' + LineEnding + 'freed 3' + LineEnding +
+    'finally' + LineEnding + 'after finally 4' + LineEnding + 'freed 4' +
+    LineEnding + 'end' + LineEnding, 0);
 end;
 
 procedure TE2EArcTests.TestRun_RecordVarField_OwnedStore_NoLeak;

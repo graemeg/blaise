@@ -17022,22 +17022,31 @@ begin
       use-after-free), and a differently named one shared the reference
       (released twice at scope exit).  A re-raise that leaves the routine
       never runs its scope-exit release, so an added reference would leak
-      there instead.  A variable the handler body reassigned no longer
-      holds the exception and is left alone.  A handler with no variable
-      forwards its own in-flight reference. }
-    Self.Emit(#9'callq _CurrentException');
+      there instead.
+
+      The exception re-raised is the one the VARIABLE holds, not the RTL's
+      current exception: that is the LAST one raised, so after a nested
+      try/except in the handler body had handled its own exception, a bare
+      `raise;` re-raised the inner one -- already released -- and the
+      program aborted.  Every handler has a variable (the semantic pass
+      gives a variable-less one a hidden __excv_<n>).  One the body set to
+      nil falls back to the current exception. }
     if (FHandlerVars.Count > 0) and
        (FHandlerVars[FHandlerVars.Count - 1] <> '') and
        (FHandlerVars[FHandlerVars.Count - 1] <> '<routine>') then
     begin
-      SkipL := Self.NewLabel('rrkeep');
-      Self.Emit(Format(#9'cmpq %s, %%rax',
+      SkipL := Self.NewLabel('rrvar');
+      Self.Emit(Format(#9'movq %s, %%rax',
         [Self.VarOperand(FHandlerVars[FHandlerVars.Count - 1])]));
-      Self.Emit(#9'jne ' + SkipL);
+      Self.Emit(#9'testq %rax, %rax');
+      Self.Emit(#9'jnz ' + SkipL);
+      Self.Emit(#9'callq _CurrentException');
+      Self.Emit(SkipL + ':');
       Self.Emit(Format(#9'movq $0, %s',
         [Self.VarOperand(FHandlerVars[FHandlerVars.Count - 1])]));
-      Self.Emit(SkipL + ':');
-    end;
+    end
+    else
+      Self.Emit(#9'callq _CurrentException');
     Self.Emit(#9'movq %rax, %rdi');
     Self.Emit(#9'callq _Reraise');
   end;

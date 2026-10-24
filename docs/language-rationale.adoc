@@ -1050,8 +1050,15 @@ removes the whole class: an object under construction cannot reach 0.
 
 An exception follows the same rule: the in-flight exception owns one
 reference.  `raise` hands an owned operand's reference over (or retains a
-borrowed one, `raise E`), a handler variable takes it over, and a handler
-without a variable releases it.
+borrowed one, `raise E`), and the handler that catches it takes it over.
+A handler without a variable gets a hidden one, so every handler owns its
+exception the same way.  The handler releases the reference however it is
+left: falling off its end, `Exit`, `Break`, a new `raise`, or an exception
+escaping a call it makes.  So an exception is freed when its handler ends,
+as in Delphi, unless the program kept another reference.  A bare `raise;`
+moves the handler's reference back out and re-raises the exception that
+handler caught, even after a nested `try ... except` in its body has
+handled an exception of its own.
 
 ==== Known limitation: reference cycles
 

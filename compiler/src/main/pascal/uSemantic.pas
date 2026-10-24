@@ -95,6 +95,8 @@ type
     FPendingGenericRecordInstances: TObjectList; { TGenericRecordInstance — not owned }
     FPendingGenericIntfInstances:   TObjectList; { TGenericInterfaceInstance — not owned }
     FGenericFuncTemplates: TStringList;  { base name → TMethodDecl template (not owned) }
+    FHiddenExcVarCount:   Integer;       { names __excv_<n> -- see
+                                           BindHandlersToHiddenVars }
     FAnonNestedRoutines:  TObjectList;   { owned TAnonNestedRoutines: per lifted
                                            thunk, the nested routines in scope
                                            where the literal was written.  Its
@@ -830,6 +832,8 @@ type
     procedure RejectRecordSelfUse(AThunk: TMethodDecl);
     procedure DrainPendingAnonDecls(ABlock: TBlock);
     procedure RecordAnonNestedRoutines(AThunk: TMethodDecl);
+    procedure BindHandlersToHiddenVars(ATry: TTryExceptStmt);
+    function  HandlerBodyReleasesVar(H: TExceptHandlerClause): Boolean;
     function  CapturingNestedCallee(ADecl: TMethodDecl; AResolved: TObject;
                                     const AName: string): TMethodDecl;
     function  FrameOwnsName(ADecl: TMethodDecl; const AName: string): Boolean;
@@ -13300,6 +13304,7 @@ begin
   begin
     TES := TTryExceptStmt(AStmt);
     AnalyseCompoundBody(TES.TryBody);
+    Self.BindHandlersToHiddenVars(TES);
     if TES.Handlers.Count > 0 then
     begin
       for I := 0 to TES.Handlers.Count - 1 do
@@ -21672,6 +21677,102 @@ begin
     if MD.RecordMethodHost <> nil then
       RejectRecordSelfUse(MD);
   end;
+end;
+
+{ Every exception handler ends up owning its exception through a variable,
+  released on EVERY way out of the handler
+  (BUG-20260721-novar-handler-nonlocal-exit-leak):
+
+  - A handler that names no variable -- `on T do`, a bare `except ... end`,
+    the `else` branch -- gets a hidden one of its own: `on __excv_<n>: T do`
+    (the catch-alls as `on __excv_<n>: TObject do`).  One per handler, so a
+    handler nested in another's body cannot release the outer exception by
+    rebinding a shared slot.
+  - Every handler body becomes `try <body> finally <var> := nil end`, so
+    the release also runs when the body leaves by `Exit`, `Break`, a new
+    `raise`, or an exception escaping a call.  A routine left by an
+    exception never runs its scope-exit release, so before this a handler
+    variable leaked whenever an exception left its handler, and the
+    variable-less forms -- which dropped the reference after the body --
+    leaked on `Exit` too.  A bare `raise;` clears the variable before it
+    re-raises, so the finally then has nothing to release.
+
+  Idempotent: a re-analysed body keeps its names and its wrapper. }
+procedure TSemanticAnalyser.BindHandlersToHiddenVars(ATry: TTryExceptStmt);
+var
+  H:    TExceptHandlerClause;
+  I:    Integer;
+  TFS:  TTryFinallyStmt;
+  Asn:  TAssignment;
+  Wrap: TCompoundStmt;
+begin
+  if (ATry.Handlers.Count = 0) and (ATry.ExceptBody <> nil) then
+  begin
+    H := TExceptHandlerClause.Create();
+    H.TypeName := 'TObject';
+    H.Body := ATry.ExceptBody;
+    ATry.ExceptBody := nil;
+    ATry.Handlers.Add(H);
+  end
+  else if ATry.ElseBody <> nil then
+  begin
+    H := TExceptHandlerClause.Create();
+    H.TypeName := 'TObject';
+    H.Body := ATry.ElseBody;
+    ATry.ElseBody := nil;
+    ATry.Handlers.Add(H);
+  end;
+  for I := 0 to ATry.Handlers.Count - 1 do
+  begin
+    H := TExceptHandlerClause(ATry.Handlers.Items[I]);
+    if H.VarName = '' then
+    begin
+      FHiddenExcVarCount := FHiddenExcVarCount + 1;
+      H.VarName := '__excv_' + IntToStr(FHiddenExcVarCount);
+    end;
+    if (H.Body = nil) or Self.HandlerBodyReleasesVar(H) then
+      Continue;
+    Asn := TAssignment.Create();
+    Asn.Line := H.Body.Line;
+    Asn.Col := H.Body.Col;
+    Asn.Name := H.VarName;
+    Asn.Expr := TNilLiteral.Create();
+    Asn.Expr.Line := H.Body.Line;
+    Asn.Expr.Col := H.Body.Col;
+    TFS := TTryFinallyStmt.Create();
+    TFS.Line := H.Body.Line;
+    TFS.Col := H.Body.Col;
+    TFS.TryBody := H.Body;
+    TFS.FinallyBody := TCompoundStmt.Create();
+    TFS.FinallyBody.Line := H.Body.Line;
+    TFS.FinallyBody.Col := H.Body.Col;
+    TFS.FinallyBody.Stmts.Add(Asn);
+    Wrap := TCompoundStmt.Create();
+    Wrap.Line := H.Body.Line;
+    Wrap.Col := H.Body.Col;
+    Wrap.Stmts.Add(TFS);
+    H.Body := Wrap;
+  end;
+end;
+
+{ True when H's body is already the `try ... finally <var> := nil end`
+  wrapper BindHandlersToHiddenVars builds. }
+function TSemanticAnalyser.HandlerBodyReleasesVar(H: TExceptHandlerClause): Boolean;
+var
+  TFS: TTryFinallyStmt;
+  Asn: TASTStmt;
+begin
+  Result := False;
+  if (H.Body.Stmts.Count <> 1) or
+     not (TObject(H.Body.Stmts.Items[0]) is TTryFinallyStmt) then
+    Exit;
+  TFS := TTryFinallyStmt(H.Body.Stmts.Items[0]);
+  if (TFS.FinallyBody = nil) or (TFS.FinallyBody.Stmts.Count <> 1) then
+    Exit;
+  Asn := TASTStmt(TFS.FinallyBody.Stmts.Items[0]);
+  Result := (Asn is TAssignment) and
+            SameText(TAssignment(Asn).Name, H.VarName) and
+            (TAssignment(Asn).Expr is TNilLiteral);
 end;
 
 { Called when a literal is lifted, while its enclosing routines are still in
