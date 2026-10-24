@@ -694,6 +694,33 @@ begin
   AIface.HasFinalization := UnitNeedsFini(AUnit);
 end;
 
+{ The units AUnit's analysis reached through the uses-chain leak, less any
+  it does list (a chain lookup can miss a unit that IS used, when its
+  per-unit symbol cache was not populated -- the in-process harness path).
+  See TUnitInterface.ImplicitDeps. }
+procedure CopyImplicitDeps(AUnit: TUnit; AIface: TUnitInterface;
+                           ASymbolTable: TSymbolTable);
+var
+  Leaked: TStringList;
+  I: Integer;
+  Dep: string;
+begin
+  Leaked := TStringList.Create();
+  try
+    ASymbolTable.LeakedDepsOf(AUnit.Name, Leaked);
+    for I := 0 to Leaked.Count - 1 do
+    begin
+      Dep := Leaked.Strings[I];
+      if (AIface.UsedUnits.IndexOf(Dep) < 0) and
+         (AIface.ImplUsedUnits.IndexOf(Dep) < 0) and
+         (AIface.ImplicitDeps.IndexOf(Dep) < 0) then
+        AIface.ImplicitDeps.Add(Dep);
+    end;
+  finally
+    Leaked.Free();
+  end;
+end;
+
 { ----- Top-level ------------------------------------------------- }
 
 function ExportUnitInterface(AUnit:        TUnit;
@@ -709,6 +736,8 @@ begin
     source or stdin and never had a backing file. }
 
   CopyUsedUnits(AUnit, Result);
+  if ASymbolTable <> nil then
+    CopyImplicitDeps(AUnit, Result, ASymbolTable);
 
   { Types FIRST — subsequent passes' ResolveTypeRef calls need to be
     able to find local types in the index. }

@@ -234,6 +234,7 @@ type
       a dropped fini flag means a cached unit's <Unit>_fini is never called
       (finalization skipped, globals leak). }
     procedure TestRoundTrip_InitFiniFlagsPreserved;
+    procedure TestRoundTrip_ImplicitDepsPreserved;
     { External-library link deps (LinkLibs) round-trip via the META block. }
     procedure TestRoundTrip_LinkLibsPreserved;
     { Int const round-trips. }
@@ -2935,7 +2936,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 28', Buf) = 0);
+      Pos('BLAISE-IFACE 29', Buf) = 0);
   finally
     Iface.Free();
   end;
@@ -2952,6 +2953,35 @@ begin
     Dst := ReadUnitInterface(Buf);
     try
       AssertEquals('unit name', 'MyUnit', Dst.Name);
+    finally
+      Dst.Free();
+    end;
+  finally
+    Src.Free();
+  end;
+end;
+
+{ BUG-20261004-warmcache-overload-lost-after-dep-edit: the units a unit
+  reached without a uses clause travel in the .bif (IFACE 29). }
+procedure TIfaceIOTests.TestRoundTrip_ImplicitDepsPreserved;
+var
+  Src, Dst: TUnitInterface;
+  Buf:      string;
+begin
+  Src := TUnitInterface.Create('MyUnit');
+  try
+    Src.UsedUnits.Add('SysUtils');
+    Src.ImplicitDeps.Add('Classes');
+    Src.ImplicitDeps.Add('Contnrs');
+    Src.HasInitialization := True;
+    Buf := WriteUnitInterface(Src);
+    Dst := ReadUnitInterface(Buf);
+    try
+      AssertEquals('count', 2, Dst.ImplicitDeps.Count);
+      AssertEquals('first', 'Classes', Dst.ImplicitDeps.Strings[0]);
+      AssertEquals('second', 'Contnrs', Dst.ImplicitDeps.Strings[1]);
+      AssertEquals('uses kept apart', 1, Dst.UsedUnits.Count);
+      AssertTrue('later META fields still read', Dst.HasInitialization);
     finally
       Dst.Free();
     end;

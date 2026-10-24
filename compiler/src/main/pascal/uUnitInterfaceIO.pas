@@ -54,7 +54,12 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 28; { v28: a nested type list carries plain aliases
+  IFACE_VERSION = 29; { v29: the META block carries ImplicitDeps after
+                          GenericDepHashes -- units reached without a uses
+                          clause, so a cached dependent is rebuilt when one
+                          recompiles (BUG-20261004-warmcache-overload-lost-
+                          after-dep-edit).
+                        v28: a nested type list carries plain aliases
                           (kind 'a', PNode = ^TNode), which it used to drop,
                           so a cached unit lost them
                           (BUG-20260921-nested-forward-pointer-alias).
@@ -1135,6 +1140,7 @@ begin
            EncodeStringList(AIface.ImplUsedUnits) +
            EncodeStringList(AIface.LinkLibs) +
            EncodeStringList(AIface.GenericDepHashes) +
+           EncodeStringList(AIface.ImplicitDeps) +
            EncodeBool(AIface.HasInitialization) +
            EncodeBool(AIface.HasFinalization));
     SB.AppendLine('END');
@@ -2706,6 +2712,9 @@ begin
   C := DecodeCount(AText, APos);
   for I := 1 to C do
     AIface.GenericDepHashes.Add(ReadLpstrAt(AText, APos));
+  C := DecodeCount(AText, APos);
+  for I := 1 to C do
+    AIface.ImplicitDeps.Add(ReadLpstrAt(AText, APos));
   AIface.HasInitialization := ReadLpstrAt(AText, APos) = '1';
   AIface.HasFinalization := ReadLpstrAt(AText, APos) = '1';
   if ReadTag(AText, APos) <> 'END' then

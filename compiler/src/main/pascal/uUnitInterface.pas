@@ -214,6 +214,12 @@ type
                                     that loads this unit from its cached .bif
                                     still pulls in (and links) impl-only
                                     dependencies. }
+    ImplicitDeps:    TStringList; { owned — units whose symbols this one
+                                    resolved WITHOUT listing them in a uses
+                                    clause (BUG-20261005-unit-symbol-leak).
+                                    Not used for loading or init order; only
+                                    for cache validity, so a cached unit is
+                                    rebuilt when one of them recompiles. }
     { Source hashes of the units this one MONOMORPHISED a generic from, as
       Name=Hash pairs (the hash being that unit's SourceHash when this unit was
       compiled).  Empty when this unit instantiated no generic.
@@ -464,6 +470,8 @@ begin
   Name      := AName;
   UsedUnits := TStringList.Create();
   ImplUsedUnits := TStringList.Create();
+  ImplicitDeps := TStringList.Create();
+  ImplicitDeps.CaseSensitive := False;
   GenericDepHashes := TStringList.Create();
   GenericDepHashes.CaseSensitive := False;
   LinkLibs  := TStringList.Create();
@@ -499,6 +507,7 @@ begin
 
   LinkLibs.Free();
   GenericDepHashes.Free();
+  ImplicitDeps.Free();
   ImplUsedUnits.Free();
   UsedUnits.Free();
   inherited Destroy();

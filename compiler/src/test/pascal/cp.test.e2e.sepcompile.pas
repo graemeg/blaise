@@ -299,6 +299,7 @@ type
       array[@boolean] of integer: base not found" on every second build). }
     procedure TestIncrementalRebuild_TypeIndexedArrayAlias_Warm;
     procedure TestIncrementalRebuild_NestedPointerAlias_Warm;
+    procedure TestIncrementalRebuild_LeakedDependencyEdited;
     procedure TestIncrementalRebuild_NoFinalNewline_StaysCached;
     procedure TestIncrementalRebuild_CtorIdentity_Warm;
     procedure TestDebugOpdf_PerUnitSection_InDependencyObject;
@@ -4031,6 +4032,87 @@ end;
 { BUG-20260921-nested-forward-pointer-alias: the warm build failed with
   "Class TList1 field type PNode unresolved" -- the .bif dropped nested
   plain aliases, in either declaration order. }
+{ BUG-20261004-warmcache-overload-lost-after-dep-edit: umid names ubase's
+  TBag without `uses ubase` (it sees it through the open unit-symbol leak,
+  BUG-20261005-unit-symbol-leak).  Editing ubase recompiled it while umid
+  kept its cached iface, whose TBag no longer matched the caller's, and the
+  warm build failed: "No matching overload for 'TLinker.Collect'".  The
+  compiler's own blaise.linker.elf hit exactly this after any edit to
+  classes.pas. }
+procedure TSepCompileTests.TestIncrementalRebuild_LeakedDependencyEdited;
+const
+  BaseSrc =
+    '''
+    unit ubase;
+    interface
+    type
+      TBag = class
+        N: Integer;
+      end;
+    implementation
+    end.
+    ''';
+  MidSrc =
+    '''
+    unit umid;
+    interface
+    type
+      TLinker = class
+        function Collect(ADest: TBag): Integer;
+      end;
+    implementation
+    function TLinker.Collect(ADest: TBag): Integer;
+    begin
+      ADest.N := ADest.N + 1;
+      Result := ADest.N
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program useleak;
+    uses ubase, umid;
+    var L: TLinker; B: TBag;
+    begin
+      L := TLinker.Create();
+      B := TBag.Create();
+      B.N := High(Integer) - 1;
+      WriteLn(L.Collect(B))
+    end.
+    ''';
+var
+  BasePas, ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc, Pass: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  BasePas  := FScratch + '/ubase.pas';
+  ProgPas  := FScratch + '/useleak.pas';
+  ProgBin  := FScratch + '/useleak';
+  CacheDir := FScratch + '/units-useleak';
+  WriteFile(BasePas, BaseSrc);
+  WriteFile(FScratch + '/umid.pas', MidSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+  for Pass := 0 to 1 do
+  begin
+    { the second build follows an edit to ubase alone }
+    if Pass = 1 then
+      WriteFile(BasePas, BaseSrc + '{ edited }' + #10);
+    DeleteFile(ProgBin);
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch], Captured);
+    AssertEquals(Format('build%d exit code (out: %s)', [Pass, Captured]), 0, Rc);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
+    AssertEquals(Format('build%d stdout', [Pass]), '2147483647' + #10, Captured);
+  end;
+end;
+
 { The cache validator hashed a unit's source through TStringList.Text,
   which normalises line endings and appends a final newline; the writer
   hashed the raw bytes.  A file with no final newline, or with CRLF

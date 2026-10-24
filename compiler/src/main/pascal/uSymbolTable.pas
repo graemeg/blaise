@@ -700,6 +700,13 @@ type
       retrieve the canonical TSymbol — without this flag we'd loop. }
     FBypassUsesChain: Boolean;
 
+    { 'Unit'#1'OtherUnit' for every symbol a unit resolved that is owned by a
+      unit NOT in its uses chain -- the BUG-20261005-unit-symbol-leak path.
+      Exported as the unit's implicit dependencies, so a cached unit is
+      invalidated when a unit it silently relies on is recompiled.  Sorted,
+      duplicates ignored. }
+    FLeakedDeps: TStringList;
+
     FInCodegen: Boolean;             { True while a backend is emitting code.
                                        Disables the Layer-6 impl-private
                                        suppression in Lookup: that guard exists
@@ -794,6 +801,10 @@ type
 
     { Set by a backend for the duration of code emission; see FInCodegen. }
     property InCodegen: Boolean read FInCodegen write FInCodegen;
+
+    { The units AUnit reached through the uses-chain leak (see FLeakedDeps),
+      appended to ADest. }
+    procedure LeakedDepsOf(const AUnit: string; ADest: TStringList);
 
     { Type lookup — case-insensitive, returns nil if not found }
     { True when a dotted name's qualifier names a TYPE, not a unit — see the
@@ -1922,6 +1933,10 @@ begin
   FGenericRoutines.CaseSensitive := False;
   FGenericRoutineDeclUnits := TStringList.Create();
   FImportedDecls   := TObjectList.Create(True);
+  FLeakedDeps := TStringList.Create();
+  FLeakedDeps.Sorted := True;
+  FLeakedDeps.Duplicates := dupIgnore;
+  FLeakedDeps.CaseSensitive := False;
   { Global scope — parent = nil }
   FScopeStack.Add(TScope.Create(nil));
   RegisterBuiltins();
@@ -1929,6 +1944,7 @@ end;
 
 destructor TSymbolTable.Destroy;
 begin
+  FLeakedDeps.Free();
   FImportedDecls.Free();
   FGenericRoutines.Free();
   { FGenerics, FGenericTemplates, FScopeStack, FAllTypes are owned class fields — released by
@@ -2604,6 +2620,8 @@ begin
   Result := CurrentScope.ExtractLocal(AName);
 end;
 
+function IsPlainIdentName(const AName: string): Boolean; forward;
+
 function TSymbolTable.Lookup(const AName: string): TSymbol;
 var
   I: Integer;
@@ -2702,7 +2720,52 @@ begin
     Result := nil;
     Exit;
   end;
+  { Another unit's symbol that the uses chain did not supply: the unit being
+    analysed depends on that unit without importing it.  Record it so the
+    unit cache sees the dependency (BUG-20261004-warmcache-overload-lost-
+    after-dep-edit).  Main-thread analysis only: codegen workers carry their
+    own view, and emission (FInCodegen) resolves for other reasons. }
+  if (Sym <> nil) and (Sym.OwningUnit <> '') and (DOU <> '')
+     and (FUsesChainProvider <> nil) and not Bypass and not FInCodegen
+     and (Self.ThreadView() = nil)
+     and not SameText(Sym.OwningUnit, DOU)
+     and IsPlainIdentName(AName) then
+    FLeakedDeps.Add(DOU + #1 + Sym.OwningUnit);
   Result := Sym;
+end;
+
+{ True for a declared name; False for a synthesised type spelling -- a
+  generic instance (TList<Int64>), a pointer (^string), an inline array.
+  Those are shared, owned by whichever unit created them first, so reusing
+  one is not a dependency on that unit. }
+function IsPlainIdentName(const AName: string): Boolean;
+var
+  I, B: Integer;
+begin
+  Result := AName <> '';
+  for I := 0 to Length(AName) - 1 do
+  begin
+    B := AName[I];
+    if not (((B >= Ord('A')) and (B <= Ord('Z'))) or
+            ((B >= Ord('a')) and (B <= Ord('z'))) or
+            ((B >= Ord('0')) and (B <= Ord('9'))) or
+            (B = Ord('_'))) then
+      Exit(False);
+  end;
+end;
+
+procedure TSymbolTable.LeakedDepsOf(const AUnit: string; ADest: TStringList);
+var
+  I, Sep: Integer;
+  E: string;
+begin
+  for I := 0 to FLeakedDeps.Count - 1 do
+  begin
+    E := FLeakedDeps.Strings[I];
+    Sep := StrPos(#1, E);
+    if (Sep > 0) and SameText(Copy(E, 0, Sep), AUnit) then
+      ADest.Add(StrCopyTail(E, Sep + 1));
+  end;
 end;
 
 { For a plain dotted identifier path 'A.B.C' (every component an identifier,

@@ -478,6 +478,16 @@ begin
     if (FSourceLoadedNames.IndexOf(AIface.ImplUsedUnits.Strings[I]) >= 0) or
        WouldRecompileFromSource(AIface.ImplUsedUnits.Strings[I]) then
       Exit;
+  { And units this one relied on WITHOUT a uses clause.  blaise.linker.elf
+    declared CollectUnresolvedExternals(ADest: TStringList) with no
+    `uses Classes`: after an edit to classes.pas, Classes recompiled while
+    the linker kept its cached iface, whose TStringList no longer matched
+    the caller's, and the warm build failed with "No matching overload"
+    (BUG-20261004-warmcache-overload-lost-after-dep-edit). }
+  for I := 0 to AIface.ImplicitDeps.Count - 1 do
+    if (FSourceLoadedNames.IndexOf(AIface.ImplicitDeps.Strings[I]) >= 0) or
+       WouldRecompileFromSource(AIface.ImplicitDeps.Strings[I]) then
+      Exit;
   Result := False;
 end;
 
