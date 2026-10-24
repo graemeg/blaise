@@ -298,6 +298,7 @@ type
       False..True rebuilds warm (GH #240: "Type alias TArr =
       array[@boolean] of integer: base not found" on every second build). }
     procedure TestIncrementalRebuild_TypeIndexedArrayAlias_Warm;
+    procedure TestIncrementalRebuild_NestedPointerAlias_Warm;
     procedure TestIncrementalRebuild_CtorIdentity_Warm;
     procedure TestDebugOpdf_PerUnitSection_InDependencyObject;
     { Regression (GH #231): a UNIT passed as --source with --debug-opdf
@@ -4023,6 +4024,95 @@ begin
     AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
     AssertEquals(Format('build%d stdout', [Pass]),
       '104 7 9 11 4 122' + #10, Captured);
+  end;
+end;
+
+{ BUG-20260921-nested-forward-pointer-alias: the warm build failed with
+  "Class TList1 field type PNode unresolved" -- the .bif dropped nested
+  plain aliases, in either declaration order. }
+procedure TSepCompileTests.TestIncrementalRebuild_NestedPointerAlias_Warm;
+const
+  LibSrc =
+    '''
+    unit NestPtrs;
+    interface
+    type
+      TList1 = class
+        type
+          PNode = ^TNode;
+          TNode = record
+            Val: Integer;
+            Next: PNode;
+          end;
+        var
+          Head: PNode;
+        function Count: Integer;
+      end;
+      TList2 = class
+        type
+          TItem = record
+            Val: Integer;
+          end;
+          PItem = ^TItem;
+        var
+          First: PItem;
+      end;
+    implementation
+    function TList1.Count: Integer;
+    var Q: PNode;
+    begin
+      Result := 0;
+      Q := Head;
+      while Q <> nil do begin Inc(Result); Q := Q^.Next end
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseNestPtrs;
+    uses NestPtrs;
+    var
+      L: TList1;
+      N1, N2: TList1.TNode;
+      L2: TList2;
+      It: TList2.TItem;
+    begin
+      N2.Val := 2; N2.Next := nil;
+      N1.Val := 1; N1.Next := @N2;
+      L := TList1.Create();
+      L.Head := @N1;
+      It.Val := 9;
+      L2 := TList2.Create();
+      L2.First := @It;
+      WriteLn(L.Count(), ' ', L.Head^.Next^.Val, ' ', L2.First^.Val)
+    end.
+    ''';
+var
+  LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc, Pass: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  LibPas   := FScratch + '/NestPtrs.pas';
+  ProgPas  := FScratch + '/use_nestptrs.pas';
+  ProgBin  := FScratch + '/use_nestptrs';
+  CacheDir := FScratch + '/units-nestptrs';
+  WriteFile(LibPas, LibSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+  for Pass := 0 to 1 do
+  begin
+    DeleteFile(ProgBin);
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir,
+                     '--unit-path', FScratch], Captured);
+    AssertEquals(Format('build%d exit code (out: %s)', [Pass, Captured]), 0, Rc);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
+    AssertEquals(Format('build%d stdout', [Pass]), '2 2 9' + #10, Captured);
   end;
 end;
 

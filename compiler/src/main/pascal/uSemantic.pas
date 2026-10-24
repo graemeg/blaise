@@ -8425,6 +8425,8 @@ var
   FldType:    TTypeDesc;
   QName:      string;
   I, J, K:    Integer;
+  Progress:   Boolean;
+  Pending:    Integer;
 begin
   { The two-branch selector is deliberate: gating this on TClassTypeDef alone
     is the Stage 0 bug, which left record consts never registered at all. }
@@ -8482,20 +8484,9 @@ begin
                        AliasDef.SubrangeLow, AliasDef.SubrangeHigh);
       end
       else
-      begin
-        BaseSym := FTable.Lookup(AliasDef.TypeName);
-        if (BaseSym <> nil) and (BaseSym.Kind = skType) then
-          AliasDesc := BaseSym.TypeDesc
-        else
-          AliasDesc := FindTypeOrInstantiate(AliasDef.TypeName);
-        if AliasDesc = nil then
-        begin
-          SemanticError(
-            Format('Unknown type ''%s'' in nested type alias',
-              [AliasDef.TypeName]), ND.Line, ND.Col);
-          Continue;
-        end;
-      end;
+        { A plain alias (PNode = ^TNode) may name a sibling declared LATER,
+          so it is resolved in phase A2, once every record is defined. }
+        Continue;
     end
     else
     begin
@@ -8517,6 +8508,53 @@ begin
       Sym.Free();
     ND.ResolvedDesc := AliasDesc;
   end;
+
+  { Phase A2 — the plain aliases.  Their target may be a later sibling
+    record or another alias, so sweep until a pass resolves nothing new;
+    whatever is still unresolved then is genuinely unknown
+    (BUG-20260921-nested-forward-pointer-alias). }
+  repeat
+    Progress := False;
+    Pending := 0;
+    for I := 0 to NestedList.Count - 1 do
+    begin
+      ND := TTypeDecl(NestedList.Items[I]);
+      if not (ND.Def is TTypeAliasDef) or (ND.ResolvedDesc <> nil) then
+        Continue;
+      AliasDef := TTypeAliasDef(ND.Def);
+      if AliasDef.IsSubrange and (AliasDef.SubrangeLowName = '') then
+        Continue;
+      BaseSym := FTable.Lookup(AliasDef.TypeName);
+      if (BaseSym <> nil) and (BaseSym.Kind = skType) then
+        AliasDesc := BaseSym.TypeDesc
+      else
+        AliasDesc := Self.FindTypeOrInstantiate(AliasDef.TypeName);
+      if AliasDesc = nil then
+      begin
+        Inc(Pending);
+        Continue;
+      end;
+      Sym := TSymbol.Create(AOwnerName + '.' + ND.Name, skType, AliasDesc);
+      Sym.Visibility := ND.Visibility;
+      Sym.OwnerTypeName := AOwnerName;
+      Sym.OwningUnit := FCurrentUnitName;
+      if not FTable.Define(Sym) then
+        Sym.Free();
+      ND.ResolvedDesc := AliasDesc;
+      Progress := True;
+    end;
+  until not Progress;
+  if Pending > 0 then
+    for I := 0 to NestedList.Count - 1 do
+    begin
+      ND := TTypeDecl(NestedList.Items[I]);
+      if (ND.Def is TTypeAliasDef) and (ND.ResolvedDesc = nil) and
+         not (TTypeAliasDef(ND.Def).IsSubrange and
+              (TTypeAliasDef(ND.Def).SubrangeLowName = '')) then
+        SemanticError(
+          Format('Unknown type ''%s'' in nested type alias',
+            [TTypeAliasDef(ND.Def).TypeName]), ND.Line, ND.Col);
+    end;
 
   { Phase B — resolve each nested record's own fields, now that every
     sibling name is defined. }

@@ -72,6 +72,7 @@ type
     procedure TestSemantic_ClassNestedType_ReferencesEnclosingClass_OK;
     procedure TestSemantic_ClassNestedType_UnknownFieldType_Rejected;
     procedure TestSemantic_ClassNestedType_MutualReference_OK;
+    procedure TestSemantic_NestedAlias_ToLaterSibling_OK;
     procedure TestSemantic_ClassNestedType_SameNameInTwoClasses_OK;
     procedure TestSemantic_ClassNestedType_BareFromOwnMethod_OK;
     procedure TestSemantic_ClassNestedType_BareFromDescendantMethod_OK;
@@ -927,6 +928,59 @@ begin
       end;
     begin end.
     ''');
+end;
+
+{ BUG-20260921-nested-forward-pointer-alias: a nested alias may name a
+  sibling declared after it, as at top level -- a pointer to a later record,
+  and an alias of a later alias.  An unknown target is still rejected. }
+procedure TClassTests.TestSemantic_NestedAlias_ToLaterSibling_OK;
+var
+  Msg: string;
+begin
+  AssertEquals('later siblings', '', SemanticError('''
+      program P;
+      type
+        TOuter = class
+          type
+            PP = PNode;
+            PNode = ^TNode;
+            TNode = record
+              Val: Integer;
+              Next: PP;
+            end;
+          var
+            Head: PNode;
+        end;
+        TRec = record
+          type
+            PItem = ^TItem;
+            TItem = record Val: Integer; end;
+          var
+            First: PItem;
+        end;
+      var
+        O: TOuter;
+        N: TOuter.TNode;
+        R: TRec;
+      begin
+        O := TOuter.Create();
+        O.Head := @N;
+        N.Next := O.Head;
+        WriteLn(O.Head^.Next^.Val, R.First^.Val)
+      end.
+      '''));
+  Msg := SemanticError('''
+      program P;
+      type
+        TOuter = class
+          type
+            PBad = ^TMissing;
+        end;
+      begin
+      end.
+      ''');
+  AssertTrue('unknown target still rejected: ' + Msg,
+    Pos('Unknown type ''^TMissing'' in nested type alias', Msg) >= 0);
 end;
 
 procedure TClassTests.TestSemantic_ClassNestedType_MutualReference_OK;

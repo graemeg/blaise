@@ -466,6 +466,34 @@ end;
   visibility and declaring unit, so the enclosing type is a namespace on the
   warm path too.  Runs BEFORE the enclosing type's own fields are resolved,
   because a field may be declared with a nested type. }
+{ A nested plain alias's target, nil while it is not yet registered.  A
+  sibling is registered qualified only, so a bare name is retried under the
+  owner, and so is the base of a pointer -- ResolveInlineTypeName would build
+  a pointer with a NIL base for a base it cannot see yet. }
+function ResolveNestedAliasTarget(const ATypeName, AOwner: string;
+                                  ATable: TSymbolTable): TTypeDesc;
+var
+  Sym:  TSymbol;
+  Base: TTypeDesc;
+begin
+  Result := nil;
+  if ATypeName = '' then Exit;
+  if StrAt(ATypeName, 0) = Ord('^') then
+  begin
+    Base := ResolveNestedAliasTarget(StrCopyTail(ATypeName, 1), AOwner, ATable);
+    if Base <> nil then
+      Result := ATable.NewPointerType('', Base);
+    Exit;
+  end;
+  { Bare first, then the owner's sibling: the cold path's order, so a cold
+    and a warm build bind the same type. }
+  Result := ATable.FindType(ATypeName);
+  if Result <> nil then Exit;
+  Sym := ATable.Lookup(AOwner + '.' + ATypeName);
+  if (Sym <> nil) and (Sym.Kind = skType) then
+    Result := Sym.TypeDesc;
+end;
+
 procedure RegisterImportedNestedTypes(const ATypeName: string;
                                       ANested: TObjectList;
                                       ATable: TSymbolTable;
@@ -483,6 +511,7 @@ var
   FldType:  TTypeDesc;
   Sym:      TSymbol;
   QName:    string;
+  Progress: Boolean;
 begin
   if ANested = nil then Exit;
   { Phase A — define every nested name, so siblings resolve in either order. }
@@ -496,14 +525,13 @@ begin
     else if ND.Def is TTypeAliasDef then
     begin
       AD := TTypeAliasDef(ND.Def);
+      { A plain alias may name a later sibling: phase A2 below. }
+      if not AD.IsSubrange then Continue;
       BaseSym := ATable.Lookup(AD.TypeName);
       if (BaseSym = nil) or (BaseSym.Kind <> skType) or
          (BaseSym.TypeDesc = nil) then Continue;
-      if AD.IsSubrange then
-        Desc := ATable.NewSubrangeType(QName, BaseSym.TypeDesc,
-                                       AD.SubrangeLow, AD.SubrangeHigh)
-      else
-        Desc := BaseSym.TypeDesc;
+      Desc := ATable.NewSubrangeType(QName, BaseSym.TypeDesc,
+                                     AD.SubrangeLow, AD.SubrangeHigh);
     end;
     if Desc = nil then Continue;
     Sym := TSymbol.Create(QName, skType, Desc);
@@ -513,6 +541,29 @@ begin
     if not ATable.Define(Sym) then Sym.Free();
     ND.ResolvedDesc := Desc;
   end;
+  { Phase A2 — plain aliases, mirroring uSemantic.RegisterNestedTypes: the
+    target may be a later sibling record or another alias, so sweep until a
+    pass resolves nothing new (BUG-20260921-nested-forward-pointer-alias). }
+  repeat
+    Progress := False;
+    for J := 0 to ANested.Count - 1 do
+    begin
+      ND := TTypeDecl(ANested.Items[J]);
+      if not (ND.Def is TTypeAliasDef) or (ND.ResolvedDesc <> nil) then
+        Continue;
+      AD := TTypeAliasDef(ND.Def);
+      if AD.IsSubrange then Continue;
+      Desc := ResolveNestedAliasTarget(AD.TypeName, ATypeName, ATable);
+      if Desc = nil then Continue;
+      Sym := TSymbol.Create(ATypeName + '.' + ND.Name, skType, Desc);
+      Sym.Visibility := ND.Visibility;
+      Sym.OwnerTypeName := ATypeName;
+      Sym.OwningUnit := AUnitName;
+      if not ATable.Define(Sym) then Sym.Free();
+      ND.ResolvedDesc := Desc;
+      Progress := True;
+    end;
+  until not Progress;
   { Phase B — fill in each nested record's fields. }
   for J := 0 to ANested.Count - 1 do
   begin

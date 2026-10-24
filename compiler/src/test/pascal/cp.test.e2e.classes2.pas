@@ -189,6 +189,7 @@ type
       Integer, a static array and a managed sret record -- including two
       levels down and a nested function's own Result beside it }
     procedure TestRun_NestedRoutine_EnclosingResult;
+    procedure TestRun_NestedPointerAlias_ToLaterRecord;
     { var Double param (pointer arrives in an int register, not xmm) and
       captured float read/write through the _cap_ slot. }
     procedure TestRun_VarParamFloat_CapturedFloat;
@@ -2215,6 +2216,51 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(SrcVarParamClass,
     '99' + LE + '99' + LE + '198' + LE + '500' + LE, 0);
+end;
+
+{ BUG-20260921-nested-forward-pointer-alias: a linked list declared with
+  its pointer type ahead of the record, inside the class. }
+procedure TE2EClasses2Tests.TestRun_NestedPointerAlias_ToLaterRecord;
+const Src = '''
+    program P;
+    type
+      TList1 = class
+        type
+          PNode = ^TNode;
+          TNode = record
+            Val: Integer;
+            Next: PNode;
+          end;
+        var
+          Head: PNode;
+        function Sum: Integer;
+      end;
+    function TList1.Sum: Integer;
+    var Q: PNode;
+    begin
+      Result := 0;
+      Q := Head;
+      while Q <> nil do
+      begin
+        Result := Result + Q^.Val;
+        Q := Q^.Next
+      end
+    end;
+    var
+      L: TList1;
+      N1, N2, N3: TList1.TNode;
+    begin
+      N3.Val := High(Integer) - 10; N3.Next := nil;
+      N2.Val := 7; N2.Next := @N3;
+      N1.Val := 3; N1.Next := @N2;
+      L := TList1.Create();
+      L.Head := @N1;
+      WriteLn(L.Sum(), ' ', L.Head^.Next^.Next^.Val)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2147483647 2147483637' + LE, 0);
 end;
 
 procedure TE2EClasses2Tests.TestRun_NestedRoutine_EnclosingResult;

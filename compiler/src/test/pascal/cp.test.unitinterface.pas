@@ -332,6 +332,7 @@ type
       source spelling, which the import cannot parse: "Type alias TArr =
       array[@boolean] of integer: base not found" (GH #240). }
     procedure TestImport_Alias_TypeIndexedArray;
+    procedure TestImport_NestedPlainAlias;
     procedure TestImport_Class_ImplicitTObjectParent;
     procedure TestImport_Class_FieldOffsetAfterParentVptr;
     procedure TestImport_Class_ExplicitParentChain;
@@ -2295,6 +2296,63 @@ begin
   end;
 end;
 
+{ BUG-20260921-nested-forward-pointer-alias: a nested plain alias was never
+  written to the .bif, so a cached unit lost it whatever the order. }
+procedure TImportRoundTripTests.TestImport_NestedPlainAlias;
+const
+  SRC =
+    '''
+    unit U;
+    interface
+    type
+      TOuter = class
+        type
+          PP = PNode;
+          PNode = ^TNode;
+          TNode = record
+            Val: Integer;
+            Next: PP;
+          end;
+          TCount = Integer;
+        var
+          Head: PNode;
+      end;
+    implementation
+    end.
+    ''';
+var
+  Exported, Iface: TUnitInterface;
+  Tab:   TSymbolTable;
+  Node, P, PP, Cnt: TTypeDesc;
+begin
+  { Through the .bif TEXT, not the in-memory interface: the encoder is
+    where the aliases were dropped. }
+  Exported := ParseAnalyseAndExport(SRC);
+  try
+    Iface := ReadUnitInterface(WriteUnitInterface(Exported));
+  finally
+    Exported.Free();
+  end;
+  Tab   := FreshTableWithBuiltins();
+  try
+    ImportUnitInterface(Iface, Tab);
+    Node := Tab.FindType('TOuter.TNode');
+    P    := Tab.FindType('TOuter.PNode');
+    PP   := Tab.FindType('TOuter.PP');
+    Cnt  := Tab.FindType('TOuter.TCount');
+    AssertTrue('TNode imported', Node <> nil);
+    AssertTrue('PNode imported as a pointer',
+      (P <> nil) and (P.Kind = tyPointer));
+    AssertTrue('PNode points at TNode',
+      TPointerTypeDesc(P).BaseType = Node);
+    AssertTrue('PP aliases PNode', PP = P);
+    AssertTrue('TCount aliases Integer', Cnt = Tab.FindType('Integer'));
+  finally
+    Tab.Free();
+    Iface.Free();
+  end;
+end;
+
 procedure TImportRoundTripTests.TestImport_Record_ConstExprArrayBound;
 const
   SRC =
@@ -2877,7 +2935,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 27', Buf) = 0);
+      Pos('BLAISE-IFACE 28', Buf) = 0);
   finally
     Iface.Free();
   end;

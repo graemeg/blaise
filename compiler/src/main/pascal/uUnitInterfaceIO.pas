@@ -54,7 +54,11 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 27; { v27: TFuncCallExpr / TProcCall carry QualifierUnit
+  IFACE_VERSION = 28; { v28: a nested type list carries plain aliases
+                          (kind 'a', PNode = ^TNode), which it used to drop,
+                          so a cached unit lost them
+                          (BUG-20260921-nested-forward-pointer-alias).
+                        v27: TFuncCallExpr / TProcCall carry QualifierUnit
                           after their arguments (a unit-qualified call).
                         v26: a record payload ends with its property list
                           (record properties, Delphi/FPC advanced records).
@@ -565,9 +569,7 @@ begin
     for I := 0 to ANested.Count - 1 do
     begin
       ND := TTypeDecl(ANested.Items[I]);
-      if (ND.Def is TRecordTypeDef) or
-         ((ND.Def is TTypeAliasDef) and TTypeAliasDef(ND.Def).IsSubrange and
-          (TTypeAliasDef(ND.Def).SubrangeLowName = '')) then
+      if (ND.Def is TRecordTypeDef) or (ND.Def is TTypeAliasDef) then
         Inc(Kept);
     end;
   Result := EncodeCount(Kept);
@@ -592,7 +594,15 @@ begin
                 EncodeLpstr(AD.TypeName) +
                 EncodeInt64(AD.SubrangeLow) +
                 EncodeInt64(AD.SubrangeHigh);
-    end;
+    end
+    else if ND.Def is TTypeAliasDef then
+      { v28: a plain alias (PNode = ^TNode), kept in its source spelling;
+        the importer resolves it against the owner's other nested types. }
+      Result := Result +
+                EncodeLpstr(ND.Name) +
+                EncodeLpstr('a') +
+                EncodeLpstr(IntToStr(Ord(ND.Visibility))) +
+                EncodeLpstr(TTypeAliasDef(ND.Def).TypeName);
   end;
 end;
 
@@ -2404,6 +2414,12 @@ begin
       RD := TRecordTypeDef.Create();
       ReadFieldList(AText, APos, RD.Fields);
       ND.Def := RD;
+    end
+    else if Kind = 'a' then
+    begin
+      AD := TTypeAliasDef.Create();
+      AD.TypeName := ReadLpstrAt(AText, APos);
+      ND.Def := AD;
     end
     else
     begin
