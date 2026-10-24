@@ -165,6 +165,7 @@ type
       has no value type" — on EVERY set type, not just jumbo ones. }
     procedure TestSemantic_ImplicitSelfSetField_EmptyLiteral;
     procedure TestSemantic_SetArrayElement_LiteralAssign;
+    procedure TestSemantic_SetRangeInCallArg_Accepted;
     { S <= T / S >= T on small sets: "A and not B = 0" (subset) and "B and
       not A = 0" (superset).  arm64 refused both ("this set operation"). }
     procedure TestCodegen_SmallSet_SubsetSuperset;
@@ -1238,6 +1239,44 @@ begin
     'end;'                                                  + #10 +
     'begin'                                                 + #10 +
     'end.');
+end;
+
+{ BUG-20260722-set-range-in-call-arg: a lo..hi range inside a set-literal
+  ARGUMENT was "expected 'TCs' but got 'array of TC'" -- overload scoring
+  only recognised a literal of bare enum members as a set constructor. }
+procedure TSetTests.TestSemantic_SetRangeInCallArg_Accepted;
+const
+  Head = '''
+      program P;
+      type
+        TC = (cRed, cGreen, cBlue, cWhite);
+        TCs = set of TC;
+        TD = (dX, dY);
+        TDs = set of TD;
+        TBox = class
+          procedure Chk(S: TCs; C: TC);
+          static function SCard(S: TCs): Integer;
+        end;
+      procedure TBox.Chk(S: TCs; C: TC); begin end;
+      static function TBox.SCard(S: TCs): Integer; begin Result := 0 end;
+      procedure Chk(S: TCs; C: TC); begin end;
+      function Card(S: TCs): Integer; overload; begin Result := 1 end;
+      function Card(S: TDs): Integer; overload; begin Result := 2 end;
+      var B: TBox; N: Integer;
+      begin
+      ''';
+var
+  Msg: string;
+begin
+  SemanticOK(Head +
+    '  Chk([cRed..cBlue], cGreen);' + #10 +
+    '  B.Chk([cRed, cGreen..cWhite], cBlue);' + #10 +
+    '  N := TBox.SCard([cWhite..cWhite]);' + #10 +
+    '  N := Card([cRed..cWhite]) + Card([dX..dY])' + #10 +
+    'end.');
+  Msg := SemanticError(Head + '  N := Card([cRed..dY])' + #10 + 'end.');
+  AssertTrue('a range across two enums matches no set: ' + Msg,
+    Pos('No matching overload for ''Card''', Msg) >= 0);
 end;
 
 procedure TSetTests.TestSemantic_SetArrayElement_LiteralAssign;

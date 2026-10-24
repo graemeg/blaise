@@ -96,6 +96,7 @@ type
       native codegen rejected it (QBE happened to tolerate it)
       (BUG-20260722-native-set-literal-arg). }
     procedure TestRun_SetLiteralArg_MethodCalls;
+    procedure TestRun_SetLiteralArg_WithRange;
     { The same bracket literal passed to a QUALIFIED procedural-field call
       (B.FP([..]), R.FF([..]), B.Inner.FP([..]), Self.FF([..])): the
       proc-field arms bound the field and exited without typing the args
@@ -956,6 +957,61 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'ok' + LE + 'y' + LE + 'y' + LE + 'ok' + LE +
     'y' + LE + 'ok' + LE + 'ok' + LE + 'y' + LE + 'y' + LE + 'ok' + LE, 0);
+end;
+
+{ BUG-20260722-set-range-in-call-arg: ranges in set-literal arguments, to
+  free routines, methods, static methods and an overload set, at the
+  enum's boundary members. }
+procedure TE2ESetOpsTests.TestRun_SetLiteralArg_WithRange;
+const Src = '''
+    program P;
+    type
+      TC = (cRed, cGreen, cBlue, cWhite);
+      TCs = set of TC;
+      TD = (dX, dY);
+      TDs = set of TD;
+      TBox = class
+        procedure Chk(S: TCs; C: TC);
+        static function SCard(S: TCs): Integer;
+      end;
+    function Card(S: TCs): Integer; overload;
+    var C: TC;
+    begin
+      Result := 0;
+      for C in S do Result := Result + 1
+    end;
+    function Card(S: TDs): Integer; overload;
+    begin
+      Result := 100
+    end;
+    procedure Chk(S: TCs; C: TC);
+    begin
+      WriteLn(C in S)
+    end;
+    procedure TBox.Chk(S: TCs; C: TC);
+    begin
+      WriteLn(C in S)
+    end;
+    static function TBox.SCard(S: TCs): Integer;
+    begin
+      Result := Card(S)
+    end;
+    var B: TBox;
+    begin
+      Chk([cRed..cBlue], cGreen);
+      Chk([cGreen..cWhite], cRed);
+      B := TBox.Create();
+      B.Chk([cRed, cGreen..cBlue], cBlue);
+      B.Chk([cRed, cGreen..cBlue], cWhite);
+      WriteLn(Card([cRed..cWhite]), ' ', Card([cWhite..cWhite]), ' ',
+        Card([dX..dY]), ' ', TBox.SCard([cRed, cBlue..cWhite]))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'True' + LE + 'False' + LE + 'True' + LE + 'False' + LE +
+    '4 1 100 3' + LE, 0);
 end;
 
 procedure TE2ESetOpsTests.TestRun_SetLiteralArg_MethodCalls;

@@ -15787,28 +15787,46 @@ function TSemanticAnalyser.SetLiteralBaseEnum(AExpr: TArrayLiteralExpr): TTypeDe
 var
   I:    Integer;
   Elem: TASTExpr;
-  Ref:  TEnumMemberRef;
+  Base: TTypeDesc;
+
+  { Fold one member name into Base; False when it is not a member of the
+    literal's enum.  Each name is resolved against the enum pinned by the
+    first one, so a member name shared by several enums follows the rest of
+    the literal. }
+  function Member(AName: TASTExpr): Boolean;
+  var
+    Ref: TEnumMemberRef;
+  begin
+    Result := False;
+    if not (AName is TIdentExpr) then Exit;
+    Ref := ResolveEnumMember(TIdentExpr(AName).Name, Base);
+    if Ref = nil then Exit;
+    if Base = nil then
+      Base := Ref.EnumDesc
+    else if Ref.EnumDesc <> Base then
+      Exit;   { mixed enums — not a clean set constructor }
+    Result := True;
+  end;
+
 begin
   Result := nil;
+  Base := nil;
   if AExpr.Elements.Count = 0 then Exit;
   for I := 0 to AExpr.Elements.Count - 1 do
   begin
     Elem := TASTExpr(AExpr.Elements.Items[I]);
-    if not (Elem is TIdentExpr) then
-      Exit(nil);
-    { Resolve each element against the enum pinned by the first one, so a
-      member name shared by several enums follows the rest of the literal. }
-    Ref := ResolveEnumMember(TIdentExpr(Elem).Name, Result);
-    if Ref = nil then
-      Exit(nil);
-    if Result = nil then
-      Result := Ref.EnumDesc
-    else if Ref.EnumDesc <> Result then
+    { a range lo..hi names a member at each end
+      (BUG-20260722-set-range-in-call-arg) }
+    if Elem is TSetRangeExpr then
     begin
-      Result := nil;   { mixed enums — not a clean set constructor }
-      Exit;
-    end;
+      if not (Member(TSetRangeExpr(Elem).LowExpr) and
+              Member(TSetRangeExpr(Elem).HighExpr)) then
+        Exit(nil);
+    end
+    else if not Member(Elem) then
+      Exit(nil);
   end;
+  Result := Base;
 end;
 
 function TSemanticAnalyser.LiteralNarrowsVariable(AElem: TTypeDesc;
