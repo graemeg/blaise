@@ -205,6 +205,7 @@ type
       Covers the statement, field-receiver, discarded-result and
       expression-position dispatch paths, plus nil and float neighbours. }
     procedure TestRun_IntfCall_ArgsTakeDeclaredParamType;
+    procedure TestRun_IntfResult_FromArrayFieldElement;
     procedure TestCompile_CyclicIntfInheritance_ReportsNotHangs;
   end;
 
@@ -2744,6 +2745,49 @@ begin
     CompileNativeCLI(Src, False, '', BinFile, ToolOut) <> 0);
   AssertTrue('names the chain: ' + ToolOut,
     Pos('Cyclic interface inheritance: IB -> IA -> IB', ToolOut) >= 0);
+end;
+
+{ Result := FSlots[I] -- an interface element of a static-array field --
+  was "unsupported sret interface Result assignment RHS" on x86-64
+  (BUG-20261011-x86-intf-result-from-field-elem).  It no longer
+  reproduces on either ISA; no test held it. }
+procedure TE2EInterfaceTests.TestRun_IntfResult_FromArrayFieldElement;
+const
+  Src = '''
+    program P;
+    type
+      IThing = interface
+        function Val: Integer;
+      end;
+      TThing = class(TObject, IThing)
+        V: Integer;
+        function Val: Integer;
+      end;
+      THolder = class
+        FSlots: array[0..1] of IThing;
+        function GetSlot(I: Integer): IThing;
+        property Slot[I: Integer]: IThing read GetSlot;
+      end;
+    function TThing.Val: Integer; begin Result := V end;
+    function THolder.GetSlot(I: Integer): IThing;
+    begin
+      Result := FSlots[I]
+    end;
+    var H: THolder; T: TThing; X: IThing;
+    begin
+      H := THolder.Create();
+      T := TThing.Create();
+      T.V := High(Integer);
+      H.FSlots[1] := T;
+      WriteLn(H.GetSlot(1).Val());
+      X := H.Slot[1];
+      WriteLn(X.Val() - 1, ' ', H.GetSlot(0) = nil)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertLeakFreeOnAll(Src, '2147483647');
+  AssertRunsOnAll(Src, '2147483647' + LE + '2147483646 True' + LE, 0);
 end;
 
 procedure TE2EInterfaceTests.TestRun_IntfCall_ArgsTakeDeclaredParamType;
