@@ -33,6 +33,7 @@ type
     procedure TestRun_QualifiedSystem_CallExprAndStmt;
     procedure TestRun_QualifiedUnit_CallAndVar;
     procedure TestRun_DottedQualifiedUnit_CallAndVar;
+    procedure TestRun_IsAs_QualifiedType_UnitNamesake;
     { Cross-unit const shadowing: two used units export the same const name;
       the unit later in the `uses` clause wins (last-in-uses), and reversing
       the order flips the winner. }
@@ -216,6 +217,61 @@ begin
     CompileAndRunWithUnit('qsym', UnitSrc, DrvSrc, Output, RCode));
   AssertEquals('exit 0', 0, RCode);
   AssertEquals('Add3(10) = 13', '13' + LE, Output);
+end;
+
+{ BUG-20261022-is-as-qualified-type: O is nsq.TMine tests for the unit's
+  class, not the program's namesake, for classes and interfaces alike. }
+procedure TE2EUsesChainTests.TestRun_IsAs_QualifiedType_UnitNamesake;
+const
+  UnitSrc = '''
+    unit nsq;
+    interface
+    type
+      IHi = interface
+        function Hi(): Integer;
+      end;
+      TMine = class(TObject, IHi)
+        Tag: Integer;
+        function Hi(): Integer;
+      end;
+    implementation
+    function TMine.Hi(): Integer;
+    begin
+      Result := Tag + 1
+    end;
+    end.
+    ''';
+  DrvSrc = '''
+    program P;
+    uses nsq;
+    type
+      IHi = interface
+        function Hi(): Integer;
+      end;
+      TMine = class
+        Tag: Integer;
+      end;
+    var
+      O, Q: TObject;
+      M: nsq.TMine;
+    begin
+      M := nsq.TMine.Create();
+      M.Tag := 41;
+      O := M;
+      Q := TMine.Create();
+      WriteLn(O is nsq.TMine, ' ', O is TMine, ' ', Q is nsq.TMine, ' ', Q is TMine);
+      WriteLn(O is nsq.IHi, ' ', O is IHi);
+      WriteLn((O as nsq.TMine).Tag, ' ', (O as nsq.IHi).Hi())
+    end.
+    ''';
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+link+run',
+    CompileAndRunWithUnit('nsq', UnitSrc, DrvSrc, Output, RCode));
+  AssertEquals('exit 0', 0, RCode);
+  AssertEquals('qualified operands bind the unit''s types',
+    'True False False True' + LE + 'True False' + LE + '41 42' + LE, Output);
 end;
 
 procedure TE2EUsesChainTests.TestRun_DottedQualifiedUnit_CallAndVar;

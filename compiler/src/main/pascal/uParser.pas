@@ -94,6 +94,7 @@ type
     function  Check(AKind: TTokenKind): Boolean;
     function  CheckUnitNamePart: Boolean;
     function  ParseTypeName: string;  { reads Ident optionally followed by '<' ArgList '>' }
+    function  ParseQualifiedIdent: string;  { Ident ('.' Ident)* -- an is/as type operand }
     function  SubrangeAhead: Boolean; { current token starts an integer-literal subrange: IntLit.. or -IntLit.. }
     function  ParseIntegerSubrangeBaseType(out ALo, AHi: Int64): string; { parse lo..hi, return narrowest fitting standard integer type and the bounds }
     function  ReadConstBoundText: string;  { read an array bound: literal, ident, or expr }
@@ -6069,6 +6070,21 @@ begin
   Result := Range;
 end;
 
+{ The type operand of 'is' / 'as': a type name, optionally qualified by a
+  (possibly dotted) unit or an enclosing type -- O is nsu.EMine.  The dotted
+  form is carried through whole; FindType resolves the qualifier. }
+function TParser.ParseQualifiedIdent: string;
+begin
+  Result := FCurrent.Value;
+  Expect(tkIdent);
+  while Check(tkDot) and (PeekKind() = tkIdent) do
+  begin
+    Advance();  { consume '.' }
+    Result := Result + '.' + FCurrent.Value;
+    Advance();
+  end;
+end;
+
 function TParser.ParseExpr: TASTExpr;
 var
   Right:    TASTExpr;
@@ -6125,8 +6141,7 @@ begin
     IsNode.Col      := FCurrent.Col;
     Advance();
     IsNode.Obj      := Result;
-    IsNode.TypeName := FCurrent.Value;
-    Expect(tkIdent);
+    IsNode.TypeName := Self.ParseQualifiedIdent();
     Result := IsNode;
   end
   else if Check(tkAs) then
@@ -6134,8 +6149,7 @@ begin
     Advance();
     AsNode          := TAsExpr.Create();
     AsNode.Obj      := Result;
-    AsNode.TypeName := FCurrent.Value;
-    Expect(tkIdent);
+    AsNode.TypeName := Self.ParseQualifiedIdent();
     Result := AsNode;
   end;
 end;

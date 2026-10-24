@@ -1437,10 +1437,12 @@ ArgList
  * ═══════════════════════════════════════════════════════════════════════════ *)
 
 Expr
-    = Comparison [ ( IS | AS ) IDENT ]
+    = Comparison [ ( IS | AS ) QualIdent ]
     ;
 
-(* IS and AS have the lowest precedence.  IDENT is the target type name. *)
+(* IS and AS have the lowest precedence.  QualIdent is the target type name,
+ * optionally unit-qualified (O is nsu.EMine) so a program can test for a used
+ * unit's class when it declares a namesake of its own. *)
 
 (* A Comparison of two records is a call of the record's declared comparison
  * operator (Equal, NotEqual, LessThan, ...); with no such operator it is a

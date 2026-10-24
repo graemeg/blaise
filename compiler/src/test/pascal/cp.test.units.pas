@@ -44,6 +44,7 @@ type
       up in the flat table and emitted itab/typeinfo references to the
       program's type (typeinfo_KP_IGr), which no object defined }
     procedure TestCodegen_UnitIntfTables_IgnoreProgramNamesake;
+    procedure TestCodegen_IsAs_QualifiedType_BindsUnitsNamesake;
     { AnalyseUnitForExport -- the path of a unit compiled with the program
       that uses it -- folds variable initialisers: it never analysed them,
       so 'A: Integer = 2 + 3' or '= K' kept the parser's 0 }
@@ -707,6 +708,46 @@ begin
     Pos('itab_KU_TCls_KU_IGr:', AsmT) >= 0);
   AssertTrue('nothing names the program''s interface with a unit prefix',
     Pos('KP_IGr', AsmT) < 0);
+end;
+
+{ BUG-20261022-is-as-qualified-type: O is KU.TMine tests for the UNIT's
+  class even though the program declares its own TMine. }
+procedure TUnitTests.TestCodegen_IsAs_QualifiedType_BindsUnitsNamesake;
+const
+  UnitSrc = '''
+    unit KU;
+    interface
+    type
+      TMine = class end;
+    implementation
+    end.
+    ''';
+  ProgSrc = '''
+    program KP;
+    uses KU;
+    type
+      TMine = class end;
+    var
+      O: TObject;
+      B: Boolean;
+    begin
+      B := O is KU.TMine;
+      O := O as KU.TMine
+    end.
+    ''';
+var
+  AsmX, AsmA: string;
+begin
+  AsmX := GenAsmWithUnit(UnitSrc, ProgSrc, TargetX86_64);
+  AsmA := GenAsmWithUnit(UnitSrc, ProgSrc, TargetArm64);
+  AssertTrue('x86-64: is/as load the unit''s typeinfo',
+    Pos('leaq typeinfo_KU_TMine(%rip)', AsmX) >= 0);
+  AssertTrue('x86-64: nothing tests for the program''s TMine',
+    Pos('leaq typeinfo_TMine(%rip)', AsmX) < 0);
+  AssertTrue('arm64: is/as load the unit''s typeinfo',
+    Pos('typeinfo_KU_TMine@PAGE', AsmA) >= 0);
+  AssertTrue('arm64: nothing tests for the program''s TMine',
+    Pos('typeinfo_TMine@PAGE', AsmA) < 0);
 end;
 
 procedure TUnitTests.TestSemantic_ExportPathFoldsVarInitialisers;

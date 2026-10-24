@@ -7011,6 +7011,18 @@ case, while keeping resolution simple.
   final identifier covers the motivating real-world code without that
   machinery, and can be tightened later without changing the syntax.
 
+=== The type operand of `is` and `as`
+
+The right-hand operand of `is` and `as` accepts the same qualified form, e.g.
+`O is nsu.EMine`.  This matters most when a program declares a class with
+the same name as one in a used unit: the bare name binds the program's own
+class, and the qualified name is the only way to test for the unit's.  The
+operand resolves like any other qualified type reference, so the unit's own
+export is found first, before the bare-name fallback.
+
+Accepting only a bare identifier, as Blaise did before, made the unit's class
+unreachable in that case.  Delphi and FPC both accept a qualified operand.
+
 == Same-Named Routines Across Units — the Nearest Declaration Wins
 
 === Decision

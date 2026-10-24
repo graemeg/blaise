@@ -20609,7 +20609,10 @@ begin
         [ObjType.Name]),
       AExpr.Line, AExpr.Col);
 
-  TargetType := FTable.FindType(AExpr.TypeName);
+  { FindTypeOrInstantiate, not FTable.FindType: a unit-qualified operand
+    (O is nsu.EMine) must reach that unit's type even when the program
+    declares a namesake, which the flat lookup would bind instead. }
+  TargetType := Self.FindTypeOrInstantiate(AExpr.TypeName);
   if (TargetType = nil) or
      ((TargetType.Kind <> tyClass) and (TargetType.Kind <> tyInterface)) then
     SemanticError(
@@ -20633,7 +20636,10 @@ begin
         [ObjType.Name]),
       AExpr.Line, AExpr.Col);
 
-  TargetType := FTable.FindType(AExpr.TypeName);
+  { FindTypeOrInstantiate, not FTable.FindType: a unit-qualified operand
+    (O is nsu.EMine) must reach that unit's type even when the program
+    declares a namesake, which the flat lookup would bind instead. }
+  TargetType := Self.FindTypeOrInstantiate(AExpr.TypeName);
   if (TargetType = nil) or
      ((TargetType.Kind <> tyClass) and (TargetType.Kind <> tyInterface)) then
     SemanticError(

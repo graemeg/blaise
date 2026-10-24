@@ -40,6 +40,7 @@ type
     { ------------------------------------------------------------------ }
     procedure TestParse_AsExpr_NodeKind;
     procedure TestParse_AsExpr_TypeName;
+    procedure TestParse_IsAs_UnitQualifiedTypeName;
 
     { ------------------------------------------------------------------ }
     { Semantic                                                             }
@@ -218,6 +219,29 @@ begin
     AE := TAsExpr(TAssignment(Prog.Block.Stmts[1]).Expr);
     AssertEquals('as type name', 'TDog', AE.TypeName);
   finally Prog.Free(); end;
+end;
+
+{ BUG-20261022-is-as-qualified-type: the type operand may be qualified. }
+procedure TTypeTestTests.TestParse_IsAs_UnitQualifiedTypeName;
+var
+  Prog: TProgram;
+begin
+  Prog := ParseSrc('''
+      program P;
+      var O: TObject; B: Boolean;
+      begin
+        B := O is nsu.EMine;
+        O := O as Sys.Utils.TFoo
+      end.
+      ''');
+  try
+    AssertEquals('is operand', 'nsu.EMine',
+      TIsExpr(TAssignment(Prog.Block.Stmts[0]).Expr).TypeName);
+    AssertEquals('as operand, dotted unit', 'Sys.Utils.TFoo',
+      TAsExpr(TAssignment(Prog.Block.Stmts[1]).Expr).TypeName);
+  finally
+    Prog.Free();
+  end;
 end;
 
 { ------------------------------------------------------------------ }
