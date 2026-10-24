@@ -108,6 +108,7 @@ type
       runs through a plain procedure pointer; one that captures is refused at
       compile time (it used to run and print garbage, or segfault). }
     procedure TestRun_NestedRoutineAddr_PlainRunsCapturingRejected;
+    procedure TestRun_AnonMethod_CallsNestedRoutines;
     { BUG-008 remaining gap: Self inside a nested routine of a method —
       captured and threaded as a hidden by-pointer param like other outer
       vars.  Covers explicit Self.Field/Self.Method(), implicit member
@@ -1005,6 +1006,120 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
   AssertRunsOnAll(Src, '21' + LineEnding + '42' + LineEnding, 0);
+end;
+
+{ BUG-20261022-anon-calls-nested-routine: an anonymous method calls the
+  nested routines in scope where it is written -- capture-free and
+  capturing ones, from a closure that outlives its routine, one with a var
+  parameter, a nested routine of a METHOD (arm64 linked a bare '_Scaled'),
+  and through '@Nested' adapters. }
+procedure TE2EAnonMethodTests.TestRun_AnonMethod_CallsNestedRoutines;
+const Src = '''
+    program P;
+    type
+      TF = reference to function(X: Integer): Integer;
+      TBox = class
+        V: Integer;
+        function Make: TF;
+      end;
+
+    procedure Outer;
+    var
+      R: TF;
+      K: Integer;
+      function Twice(X: Integer): Integer;
+      begin
+        Result := X * 2
+      end;
+      function AddK(X: Integer): Integer;
+      begin
+        Result := X + K
+      end;
+    begin
+      K := 100;
+      R := function(X: Integer): Integer
+           begin
+             Result := Twice(X) + 1
+           end;
+      WriteLn(R(20));
+      R := function(X: Integer): Integer
+           begin
+             Result := AddK(X)
+           end;
+      K := High(Integer) - 5;
+      WriteLn(R(5))
+    end;
+
+    function MakeAdder(Base: Integer): TF;
+    var
+      Count: Integer;
+      function Step(X: Integer): Integer;
+      begin
+        Count := Count + 1;
+        Result := X + Base + Count
+      end;
+      procedure Bump(var N: Integer);
+      begin
+        N := N * 10
+      end;
+    begin
+      Count := 0;
+      Result := function(X: Integer): Integer
+                var T: Integer;
+                begin
+                  T := X;
+                  Bump(T);
+                  Result := Step(T)
+                end
+    end;
+
+    function TBox.Make: TF;
+      function Scaled(X: Integer): Integer;
+      begin
+        Result := X * V
+      end;
+    begin
+      Result := function(X: Integer): Integer
+                begin
+                  Result := Scaled(X) + 1
+                end
+    end;
+
+    function Adapt(K: Integer): TF;
+      function AddK(X: Integer): Integer;
+      begin
+        Result := X + K
+      end;
+      function Twice(X: Integer): Integer;
+      begin
+        Result := X * 2
+      end;
+    var R: TF;
+    begin
+      R := @Twice;
+      WriteLn(R(21));
+      Result := @AddK
+    end;
+
+    var F: TF; B: TBox;
+    begin
+      Outer();
+      F := MakeAdder(100);
+      WriteLn(F(1), ' ', F(2));
+      B := TBox.Create();
+      B.V := 3;
+      F := B.Make();
+      B.V := 4;
+      WriteLn(F(5));
+      F := Adapt(1000);
+      WriteLn(F(5))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '41' + LineEnding + '2147483647' + LineEnding + '111 122' + LineEnding +
+    '21' + LineEnding + '42' + LineEnding + '1005' + LineEnding, 0);
 end;
 
 procedure TE2EAnonMethodTests.TestRun_NestedRoutineAddr_PlainRunsCapturingRejected;

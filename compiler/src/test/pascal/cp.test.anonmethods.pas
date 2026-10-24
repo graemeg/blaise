@@ -155,7 +155,9 @@ type
     { '@Nested' into a 'reference to' target cannot build its adapter yet (the
       adapter is analysed in module scope): a clear error, not an
       "Undeclared function" from inside the generated adapter }
-    procedure TestSemantic_AddrOfNestedRoutineIntoReference_Rejected;
+    procedure TestSemantic_AddrOfNestedRoutineIntoReference_Accepted;
+    procedure TestSemantic_AnonMethod_CallsNestedRoutine;
+    procedure TestSemantic_AnonMethod_CrossLevelCapture_Rejected;
     { a literal inside a RECORD method may capture the method's locals and
       params but not Self: it captured the caller's record by address (and
       typed the env slot as the record, corrupting it) }
@@ -1643,26 +1645,120 @@ begin
       'var Fn: TF; begin Fn := @Twice; WriteLn(Fn(4)) end; begin end.'));
 end;
 
-procedure TAnonMethodTests.TestSemantic_AddrOfNestedRoutineIntoReference_Rejected;
+{ BUG-20261022-anon-calls-nested-routine: '@Nested' into a 'reference to'
+  target was rejected outright, because its adapter -- an anonymous method --
+  could not see the nested routine.  It is accepted, capturing or not. }
+procedure TAnonMethodTests.TestSemantic_AddrOfNestedRoutineIntoReference_Accepted;
 const
   Src = '''
     program Prg;
     type TR = reference to function(X: Integer): Integer;
-    procedure Outer();
+    function Outer(K: Integer): TR;
       function Twice(X: Integer): Integer; begin Result := X * 2 end;
+      function AddK(X: Integer): Integer; begin Result := X + K end;
     var R: TR;
     begin
-      R := @Twice
+      R := @Twice;
+      Result := @AddK
+    end;
+    begin end.
+    ''';
+begin
+  AssertEquals('accepted', '', SemanticError(Src));
+end;
+
+{ BUG-20261022-anon-calls-nested-routine: a literal's body may call the
+  nested routines in scope where it is written, and one that calls a
+  CAPTURING nested routine captures that routine's variables too. }
+procedure TAnonMethodTests.TestSemantic_AnonMethod_CallsNestedRoutine;
+const
+  Src = '''
+    program Prg;
+    type TF = reference to function(X: Integer): Integer;
+    procedure Outer();
+    var
+      R: TF;
+      K: Integer;
+      function Twice(X: Integer): Integer; begin Result := X * 2 end;
+      function AddK(X: Integer): Integer; begin Result := X + K end;
+    begin
+      R := function(X: Integer): Integer begin Result := Twice(X) end;
+      R := function(X: Integer): Integer begin Result := AddK(X) end
     end;
     begin end.
     ''';
 var
+  Prog: TProgram;
+  Outer, Thunk: TMethodDecl;
+  I: Integer;
+begin
+  Prog := Analyse(Src);
+  try
+    Outer := nil;
+    Thunk := nil;
+    for I := 0 to Prog.Block.ProcDecls.Count - 1 do
+    begin
+      if SameText(TMethodDecl(Prog.Block.ProcDecls.Items[I]).Name, 'Outer') then
+        Outer := TMethodDecl(Prog.Block.ProcDecls.Items[I]);
+      if TMethodDecl(Prog.Block.ProcDecls.Items[I]).IsAnonThunk then
+        Thunk := TMethodDecl(Prog.Block.ProcDecls.Items[I]);
+    end;
+    AssertTrue('Outer found', Outer <> nil);
+    AssertTrue('the AddK literal captures K, which AddK forwards',
+      (Thunk <> nil) and (Thunk.EnvCaptured <> nil) and
+      (Thunk.EnvCaptured.IndexOf('K') >= 0));
+    AssertTrue('K lives in Outer''s environment',
+      (Outer.EnvCaptured <> nil) and (Outer.EnvCaptured.IndexOf('K') >= 0));
+  finally
+    Prog.Free();
+  end;
+end;
+
+{ A literal inside a nested routine capturing a variable of a routine
+  further out was a silent miscompile: the env held a copy, so the write was
+  lost.  Rejected until environments chain across routine levels. }
+procedure TAnonMethodTests.TestSemantic_AnonMethod_CrossLevelCapture_Rejected;
+var
   Msg: string;
 begin
-  Msg := SemanticError(Src);
-  AssertTrue('clear diagnostic: ' + Msg, Pos('nested routine', Msg) >= 0);
-  AssertTrue('not the adapter''s undeclared-function error: ' + Msg,
-    Pos('Undeclared', Msg) < 0);
+  Msg := SemanticError('''
+    program Prg;
+    type TP = reference to procedure;
+    procedure Outer();
+    var G: Integer;
+      procedure Mid();
+      var P: TP;
+        procedure Inc2(); begin G := G + 2 end;
+      begin
+        P := procedure begin G := G + 1 end;
+        P()
+      end;
+    begin
+      Mid()
+    end;
+    begin end.
+    ''');
+  AssertTrue('direct use rejected: ' + Msg,
+    Pos('An anonymous method cannot capture ''G'' here', Msg) >= 0);
+  Msg := SemanticError('''
+    program Prg;
+    type TP = reference to procedure;
+    procedure Outer();
+    var G: Integer;
+      procedure Mid();
+      var P: TP;
+        procedure Inc2(); begin G := G + 2 end;
+      begin
+        P := procedure begin Inc2() end;
+        P()
+      end;
+    begin
+      Mid()
+    end;
+    begin end.
+    ''');
+  AssertTrue('through a nested routine, rejected too: ' + Msg,
+    Pos('An anonymous method cannot capture ''G'' here', Msg) >= 0);
 end;
 
 procedure TAnonMethodTests.TestSemantic_RecordMethodClosure_SelfUseRejected;

@@ -2196,6 +2196,39 @@ accident).  The rule now is:
   capture `Self` yet (the env-fill machinery has no path from the hidden
   capture parameter to a heap env field); that case is rejected.
 
+=== Calling a nested routine from an anonymous method
+
+An anonymous method may call any nested routine in scope where it is
+written, as in Delphi.  The literal's body is lifted into a module-level
+thunk and analysed after its enclosing routine, so the nested routines that
+were in scope are made visible to it again.
+
+A nested routine that captures variables receives their addresses as hidden
+parameters, so the literal captures those variables too: they move into the
+heap environment, shared by the routine, the nested routine and the closure.
+A closure that outlives its routine therefore still calls the nested routine
+safely.
+
+The variables must belong to the routine that declares the literal.  One
+that belongs to a routine further out is reached there only through a hidden
+pointer.  An environment built from it would hold a copy, so the closure's
+writes would be lost.  That case is rejected until environments can be
+chained across routine levels:
+
+----
+procedure Outer;
+var G: Integer;
+  procedure Mid;
+  var P: TProc;
+  begin
+    P := procedure begin G := G + 2 end;   { rejected: G belongs to Outer }
+    P()
+  end;
+begin ... end;
+----
+
+Before 2026-10-24 this compiled, and `G` was left unchanged.
+
 === The address of a nested routine
 
 `@Inner` is a bare code pointer.  A nested routine that uses its enclosing
@@ -2209,11 +2242,11 @@ read garbage (BUG-032).  The rule:
   `'Inner' uses variables of its enclosing routine ('V'), so '@Inner' cannot
   be a plain procedure pointer`.  The capture may be indirect, through a
   sibling nested routine that `Inner` calls.
-- `@Inner` into a `reference to` target is rejected for now, capturing or
-  not.  The `@Routine` adapter is an anonymous method, and anonymous-method
-  bodies are analysed at module scope, where nested routines are not visible.
+- `@Inner` into a `reference to` target is accepted, capturing or not.  The
+  `@Routine` adapter is an anonymous method whose body calls `Inner`, so it
+  follows the rule below.
 
-The recommended form in both rejected cases is an anonymous method assigned
+The recommended form for the rejected case is an anonymous method assigned
 to a `reference to` variable.  It carries its captures in a heap environment
 with defined lifetime, which a procedure pointer has no room for.
 

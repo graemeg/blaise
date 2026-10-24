@@ -37,6 +37,15 @@ type
     Order:    Integer;
   end;
 
+  { The nested routines an anonymous-method literal can call: those of every
+    routine enclosing it, innermost first.  Owned by
+    TSemanticAnalyser.FAnonNestedRoutines. }
+  TAnonNestedRoutines = class
+    [Unretained] Thunk: TMethodDecl;
+    Routines: TObjectList;   { non-owning TMethodDecl }
+    constructor Create(AThunk: TMethodDecl);
+  end;
+
   TSemanticAnalyser = class(TUsesChainProvider)
   private
     FTable:                TSymbolTable;
@@ -86,6 +95,13 @@ type
     FPendingGenericRecordInstances: TObjectList; { TGenericRecordInstance — not owned }
     FPendingGenericIntfInstances:   TObjectList; { TGenericInterfaceInstance — not owned }
     FGenericFuncTemplates: TStringList;  { base name → TMethodDecl template (not owned) }
+    FAnonNestedRoutines:  TObjectList;   { owned TAnonNestedRoutines: per lifted
+                                           thunk, the nested routines in scope
+                                           where the literal was written.  Its
+                                           body may call them, but it is
+                                           analysed in module scope, where they
+                                           are not (BUG-20261022-anon-calls-
+                                           nested-routine) }
     FPendingAnonDecls:    TObjectList;   { non-owning — lifted anonymous-method
                                            thunks awaiting registration + body
                                            analysis; drained in module scope by
@@ -813,6 +829,11 @@ type
     procedure PromoteAnonCaptures(AThunk: TMethodDecl);
     procedure RejectRecordSelfUse(AThunk: TMethodDecl);
     procedure DrainPendingAnonDecls(ABlock: TBlock);
+    procedure RecordAnonNestedRoutines(AThunk: TMethodDecl);
+    function  CapturingNestedCallee(ADecl: TMethodDecl; AResolved: TObject;
+                                    const AName: string): TMethodDecl;
+    function  FrameOwnsName(ADecl: TMethodDecl; const AName: string): Boolean;
+    function  AnonNestedRoutinesOf(AThunk: TMethodDecl): TObjectList;
     procedure CheckNestedRoutineAddrs();
     procedure CoerceRoutineToTarget(var AExpr: TASTExpr; ATarget: TTypeDesc);
     function  GetterProcProp(ART: TRecordTypeDesc; const AName: string;
@@ -1290,6 +1311,13 @@ implementation
 uses
   blaise.codegen;
 
+constructor TAnonNestedRoutines.Create(AThunk: TMethodDecl);
+begin
+  inherited Create();
+  Thunk := AThunk;
+  Routines := TObjectList.Create(False);
+end;
+
 { The name of the float operand of a binary operator (the left one when both
   are), for an integer-only operator's diagnostic. }
 function FloatOperandName(ALeft, ARight: TTypeDesc): string;
@@ -1434,6 +1462,7 @@ begin
   FPendingGenericRecordInstances := TObjectList.Create(False);
   FPendingGenericIntfInstances   := TObjectList.Create(False);
   FPendingAnonDecls     := TObjectList.Create(False);
+  FAnonNestedRoutines   := TObjectList.Create(True);
   FNestedRoutineAddrs   := TObjectList.Create(False);
   FAnonMethodCount      := 0;
   FEnvTypeCount         := 0;
@@ -1444,6 +1473,7 @@ destructor TSemanticAnalyser.Destroy;
 begin
   FPendingGenericIntfInstances.Free();
   FPendingAnonDecls.Free();
+  FAnonNestedRoutines.Free();
   FNestedRoutineAddrs.Free();
   FPendingGenericRecordInstances.Free();
   FPendingGenericInstances.Free();
@@ -11233,6 +11263,20 @@ begin
       ADecl.ResolvedEmitName := ADecl.Name + '$' + MangleParamSig(ADecl)
     else
       ADecl.ResolvedEmitName := ADecl.Name;
+    { A nested routine's symbol is its enclosing routine's plus its own name
+      ('TBox_Make_Scaled'), as both backends derive it when they emit the
+      enclosing routine.  Set it here as well, so a call emitted BEFORE that
+      -- from an anonymous method's thunk, which arm64 emits ahead of class
+      methods -- names the right symbol (BUG-20261022-anon-calls-nested-
+      routine; arm64 linked against a bare '_Scaled'). }
+    if (FCurrentEnclosingDecl <> nil) and (FCurrentEnclosingDecl <> ADecl) then
+    begin
+      if FCurrentEnclosingDecl.ResolvedEmitName <> '' then
+        ADecl.ResolvedEmitName :=
+          FCurrentEnclosingDecl.ResolvedEmitName + '_' + ADecl.Name
+      else
+        ADecl.ResolvedEmitName := FCurrentEnclosingDecl.Name + '_' + ADecl.Name;
+    end;
 
     { Index for call resolution — overloaded names appear multiple times.
       Nested procs (those inside another routine's body) are resolved via the
@@ -11435,6 +11479,60 @@ begin
   ADecl.CapturedVars.Add(AName);
 end;
 
+{ The nested routine a call in ADecl's body names, when that routine
+  captures variables (whose addresses the call forwards, so the caller must
+  capture them too); nil otherwise.  An anonymous method's body is walked
+  BEFORE it is analysed, so its calls have no ResolvedDecl yet: resolve the
+  name among the nested routines in scope where the literal was written. }
+{ True when AName is a slot of ADecl's OWN frame: a parameter (or an open
+  array's companion '<Name>_high'), a local, its own Result, or Self. }
+function TSemanticAnalyser.FrameOwnsName(ADecl: TMethodDecl;
+  const AName: string): Boolean;
+var
+  I: Integer;
+  PName: string;
+begin
+  Result := True;
+  if SameText(AName, 'Self') then Exit;
+  if SameText(AName, 'Result') and (ADecl.ReturnTypeName <> '') then Exit;
+  for I := 0 to ADecl.Params.Count - 1 do
+  begin
+    PName := TMethodParam(ADecl.Params.Items[I]).ParamName;
+    if SameText(PName, AName) or SameText(PName + '_high', AName) then Exit;
+  end;
+  if ADecl.Body <> nil then
+    for I := 0 to ADecl.Body.Decls.Count - 1 do
+      if (TObject(ADecl.Body.Decls.Items[I]) is TVarDecl) and
+         (TVarDecl(ADecl.Body.Decls.Items[I]).Names.IndexOf(AName) >= 0) then
+        Exit;
+  Result := False;
+end;
+
+function TSemanticAnalyser.CapturingNestedCallee(ADecl: TMethodDecl;
+  AResolved: TObject; const AName: string): TMethodDecl;
+var
+  Nested: TObjectList;
+  I: Integer;
+begin
+  Result := nil;
+  if AResolved is TMethodDecl then
+    Result := TMethodDecl(AResolved)
+  else if (AResolved = nil) and ADecl.IsAnonThunk then
+  begin
+    Nested := Self.AnonNestedRoutinesOf(ADecl);
+    if Nested <> nil then
+      for I := 0 to Nested.Count - 1 do
+        if SameText(TMethodDecl(Nested.Items[I]).Name, AName) then
+        begin
+          Result := TMethodDecl(Nested.Items[I]);
+          Break;
+        end;
+  end;
+  if (Result <> nil) and
+     ((Result.EnclosingDecl = nil) or (Result.CapturedVars = nil)) then
+    Result := nil;
+end;
+
 procedure TSemanticAnalyser.CollectCaptures(ADecl: TMethodDecl; AOuterDecl: TMethodDecl;
                                             AWithResult: Boolean);
 { Walk ADecl's body statements/expressions to find every reference to a variable
@@ -11453,6 +11551,7 @@ var
   CurExpr:   TASTExpr;
   CurStmt:   TASTStmt;
   ChainDecl: TMethodDecl;
+  Callee:    TMethodDecl;
 begin
   if ADecl.Body = nil then Exit;
   if AOuterDecl = nil then Exit;
@@ -11633,15 +11732,11 @@ begin
             names that belong to the shared enclosing scope fold in (the
             OuterVars filter inside MaybeCaptureName).  Siblings are analysed
             in declaration order, so the callee's capture set is final here. }
-          if (TProcCall(CurStmt).ResolvedDecl <> nil) and
-             (TProcCall(CurStmt).ResolvedDecl is TMethodDecl) and
-             (TMethodDecl(TProcCall(CurStmt).ResolvedDecl).EnclosingDecl <> nil) and
-             (TMethodDecl(TProcCall(CurStmt).ResolvedDecl).CapturedVars <> nil) then
-            for J := 0 to TMethodDecl(TProcCall(CurStmt).ResolvedDecl)
-                            .CapturedVars.Count - 1 do
-              MaybeCaptureName(ADecl, OuterVars,
-                TMethodDecl(TProcCall(CurStmt).ResolvedDecl)
-                  .CapturedVars.Strings[J]);
+          Callee := Self.CapturingNestedCallee(ADecl,
+            TProcCall(CurStmt).ResolvedDecl, TProcCall(CurStmt).Name);
+          if Callee <> nil then
+            for J := 0 to Callee.CapturedVars.Count - 1 do
+              MaybeCaptureName(ADecl, OuterVars, Callee.CapturedVars.Strings[J]);
           for J := 0 to TProcCall(CurStmt).Args.Count - 1 do
             TodoExprs.Add(TProcCall(CurStmt).Args.Items[J]);
         end
@@ -11805,15 +11900,11 @@ begin
           MaybeCaptureName(ADecl, OuterVars, TFuncCallExpr(CurExpr).Name);
           { Sibling nested-routine call: fold the callee's captures into the
             caller (BUG-031) — see the TProcCall branch. }
-          if (TFuncCallExpr(CurExpr).ResolvedDecl <> nil) and
-             (TFuncCallExpr(CurExpr).ResolvedDecl is TMethodDecl) and
-             (TMethodDecl(TFuncCallExpr(CurExpr).ResolvedDecl).EnclosingDecl <> nil) and
-             (TMethodDecl(TFuncCallExpr(CurExpr).ResolvedDecl).CapturedVars <> nil) then
-            for J := 0 to TMethodDecl(TFuncCallExpr(CurExpr).ResolvedDecl)
-                            .CapturedVars.Count - 1 do
-              MaybeCaptureName(ADecl, OuterVars,
-                TMethodDecl(TFuncCallExpr(CurExpr).ResolvedDecl)
-                  .CapturedVars.Strings[J]);
+          Callee := Self.CapturingNestedCallee(ADecl,
+            TFuncCallExpr(CurExpr).ResolvedDecl, TFuncCallExpr(CurExpr).Name);
+          if Callee <> nil then
+            for J := 0 to Callee.CapturedVars.Count - 1 do
+              MaybeCaptureName(ADecl, OuterVars, Callee.CapturedVars.Strings[J]);
           for J := 0 to TFuncCallExpr(CurExpr).Args.Count - 1 do
             TodoExprs.Add(TFuncCallExpr(CurExpr).Args.Items[J]);
         end
@@ -21129,6 +21220,7 @@ begin
       MD.WantsWeakSelf := True;
     end;
     FPendingAnonDecls.Add(MD);
+    Self.RecordAnonNestedRoutines(MD);
     { Phase 2/3: capture promotion.  Runs NOW, while the enclosing frame's
       scope is live, so captured names can be typed from their symbols.
       Standalone routines (Phase 2) and instance-method bodies (Phase 3 —
@@ -21301,6 +21393,24 @@ begin
           if VDecl.Names.IndexOf(Name) >= 0 then Own := True;
         end;
       if Own then AThunk.CapturedVars.Delete(I);
+    end;
+  { A variable of a routine OUTSIDE the enclosing one -- reached by that
+    routine through a hidden pointer, never in its own frame -- cannot be
+    put in the enclosing frame's environment: the env would hold a COPY, so
+    the literal's writes were lost and its reads went stale, silently
+    (Outer2's G, written from a literal inside Outer2.Mid, kept its old
+    value on both ISAs).  It needs environments chained across routines.
+    Reject it rather than miscompile. }
+  if (AThunk.CapturedVars <> nil) and not Encl.IsAnonThunk then
+    for I := 0 to AThunk.CapturedVars.Count - 1 do
+    begin
+      Name := AThunk.CapturedVars.Strings[I];
+      if not Self.FrameOwnsName(Encl, Name) then
+        SemanticError(Format('An anonymous method cannot capture ''%s'' ' +
+          'here: it belongs to a routine enclosing ''%s'', and capturing ' +
+          'across two routine levels is not supported yet -- declare the ' +
+          'literal in that routine, or pass the value in', [Name, Encl.Name]),
+          AThunk.Line, AThunk.Col);
     end;
   { A literal nested in another literal: one that captures nothing needs no
     environment and is an ordinary closure value.  Capturing the enclosing
@@ -21508,6 +21618,9 @@ var
   MD:      TMethodDecl;
   Par:     TMethodParam;
   RetType: TTypeDesc;
+  Nested:  TObjectList;
+  ND:      TMethodDecl;
+  Sym:     TSymbol;
   I:       Integer;
 begin
   while FPendingAnonDecls.Count > 0 do
@@ -21531,10 +21644,84 @@ begin
     end;
     MD.ResolvedEmitName := CurrentUnitPrefix() + MD.Name;
     ABlock.ProcDecls.Add(MD);
-    AnalyseStandaloneDecl(MD);
+    { The enclosing routines' nested routines, visible again for the body
+      (BUG-20261022-anon-calls-nested-routine). }
+    Nested := Self.AnonNestedRoutinesOf(MD);
+    if Nested <> nil then
+    begin
+      FTable.PushScope();
+      for I := Nested.Count - 1 downto 0 do
+      begin
+        ND := TMethodDecl(Nested.Items[I]);
+        if ND.ReturnTypeName <> '' then
+          Sym := TSymbol.Create(ND.Name, skFunction, ND.ResolvedReturnType)
+        else
+          Sym := TSymbol.Create(ND.Name, skProcedure, nil);
+        Sym.IsOverload := ND.IsOverload;
+        Sym.Decl := ND;
+        if not FTable.Define(Sym) then
+          Sym.Free();
+      end;
+    end;
+    try
+      AnalyseStandaloneDecl(MD);
+    finally
+      if Nested <> nil then
+        FTable.PopScope();
+    end;
     if MD.RecordMethodHost <> nil then
       RejectRecordSelfUse(MD);
   end;
+end;
+
+{ Called when a literal is lifted, while its enclosing routines are still in
+  scope: remember their nested routines, innermost routine first, so the
+  thunk's body can call them when DrainPendingAnonDecls analyses it in
+  module scope.  A name an inner routine declares shadows an outer one. }
+procedure TSemanticAnalyser.RecordAnonNestedRoutines(AThunk: TMethodDecl);
+var
+  Entry: TAnonNestedRoutines;
+  E:     TMethodDecl;
+  ND:    TMethodDecl;
+  Seen:  TStringList;
+  I:     Integer;
+begin
+  Entry := nil;
+  Seen := TStringList.Create();
+  Seen.CaseSensitive := False;
+  try
+    E := FCurrentEnclosingDecl;
+    while E <> nil do
+    begin
+      if E.Body <> nil then
+        for I := 0 to E.Body.ProcDecls.Count - 1 do
+        begin
+          ND := TMethodDecl(E.Body.ProcDecls.Items[I]);
+          if ND.IsAnonThunk or (Seen.IndexOf(ND.Name) >= 0) then
+            Continue;
+          Seen.Add(ND.Name);
+          if Entry = nil then
+          begin
+            Entry := TAnonNestedRoutines.Create(AThunk);
+            FAnonNestedRoutines.Add(Entry);
+          end;
+          Entry.Routines.Add(ND);
+        end;
+      E := E.EnclosingDecl;
+    end;
+  finally
+    Seen.Free();
+  end;
+end;
+
+function TSemanticAnalyser.AnonNestedRoutinesOf(AThunk: TMethodDecl): TObjectList;
+var
+  I: Integer;
+begin
+  for I := 0 to FAnonNestedRoutines.Count - 1 do
+    if TAnonNestedRoutines(FAnonNestedRoutines.Items[I]).Thunk = AThunk then
+      Exit(TAnonNestedRoutines(FAnonNestedRoutines.Items[I]).Routines);
+  Result := nil;
 end;
 
 procedure TSemanticAnalyser.RejectRecordSelfUse(AThunk: TMethodDecl);
@@ -21711,10 +21898,6 @@ begin
   MD := TMethodDecl(Sym.Decl);
   { the adapter is analysed in module scope, where a nested routine is not
     visible -- and an anonymous method cannot call one yet }
-  if MD.EnclosingDecl <> nil then
-    SemanticError(Format('''@%s'': a nested routine cannot become a ' +
-      '''reference to'' value yet -- write its body as an anonymous method ' +
-      'instead', [MD.Name]), AExpr.Line, AExpr.Col);
 
   AME      := TAnonMethodExpr.Create();
   AME.Line := AExpr.Line;
