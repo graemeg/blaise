@@ -459,6 +459,7 @@ type
     { Raise the error for AName (resolving to AIdxType, nil if unknown)
       used as an array index type when OrdinalIndexRange said no. }
     procedure RejectArrayIndexType(const AName: string; AIdxType: TTypeDesc);
+    procedure RejectCyclicIntfParent(AIntf: TInterfaceTypeDesc; ALine, ACol: Integer);
     { Warn when an enum's declared ordinals are so sparse that indexing an
       array by it allocates far more slots than the enum has members.  The
       span is correct but easy to reach unintentionally: (HTTP_OK = 200,
@@ -5921,6 +5922,7 @@ begin
           Format('Unknown parent interface ''%s'' for ''%s''',
             [ParentName, ATypeName]), 0, 0);
       Result.Parent := TInterfaceTypeDesc(ParentDesc);
+      Self.RejectCyclicIntfParent(Result, 0, 0);
       for I := 0 to Result.Parent.MethodCount() - 1 do
         Result.AddMethod(Result.Parent.MethodName(I),
           Result.Parent.MethodReturnTypeName(I),
@@ -7189,6 +7191,29 @@ begin
     '''%s'' is not a valid array index type (expected an enumeration, '
     + 'Boolean, an 8- or 16-bit integer type, or an integer subrange)',
     [AName]), 0, 0);
+end;
+
+{ Called once AIntf.Parent is set.  Every parent assignment runs this check,
+  so a cycle is caught when its closing link is made, and the walk always
+  meets AIntf before it could loop.  Without it, method inheritance and every
+  later walk up the Parent chain spun forever
+  (BUG-20260920-cyclic-intf-inheritance-hangs). }
+procedure TSemanticAnalyser.RejectCyclicIntfParent(AIntf: TInterfaceTypeDesc;
+  ALine, ACol: Integer);
+var
+  P:     TInterfaceTypeDesc;
+  Chain: string;
+begin
+  Chain := AIntf.Name;
+  P := AIntf.Parent;
+  while P <> nil do
+  begin
+    Chain := Chain + ' -> ' + P.Name;
+    if P = AIntf then
+      SemanticError(Format('Cyclic interface inheritance: %s', [Chain]),
+        ALine, ACol);
+    P := P.Parent;
+  end;
 end;
 
 procedure TSemanticAnalyser.WarnIfEnumIndexSparse(AIdxType: TTypeDesc;
@@ -8941,6 +8966,7 @@ begin
               [ITD.ParentName, TD.Name]),
             TD.Line, TD.Col);
         IntfDesc.Parent := TInterfaceTypeDesc(Sym.TypeDesc);
+        Self.RejectCyclicIntfParent(IntfDesc, TD.Line, TD.Col);
         { Inherit parent methods (propagate var-param flags too) }
         for J := 0 to IntfDesc.Parent.MethodCount() - 1 do
           IntfDesc.AddMethod(IntfDesc.Parent.MethodName(J),

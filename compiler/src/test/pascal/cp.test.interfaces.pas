@@ -75,6 +75,8 @@ type
     procedure TestSemantic_IsExpr_Interface_ResultIsBoolean;
     procedure TestSemantic_AsExpr_Interface_OK;
     procedure TestSemantic_AsExpr_Interface_ResultType;
+    procedure TestSemantic_CyclicIntfInheritance_Rejected;
+    procedure TestSemantic_CyclicGenericIntfInheritance_Rejected;
 
     { ------------------------------------------------------------------ }
     { Semantic — IInterface built-in                                       }
@@ -684,6 +686,93 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+{ BUG-20260920-cyclic-intf-inheritance-hangs: a cycle in the parent chain
+  hung the compiler; it is a semantic error naming the chain. }
+procedure TInterfaceTests.TestSemantic_CyclicIntfInheritance_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+      program P;
+      type
+        IA = interface(IB)
+          function GetA: Integer;
+        end;
+        IB = interface(IA)
+          function GetB: Integer;
+        end;
+        TImpl = class(IA)
+          function GetA: Integer;
+          begin Result := 1 end;
+          function GetB: Integer;
+          begin Result := 2 end;
+        end;
+      var
+        X: IA;
+      begin
+        X := TImpl.Create();
+        WriteLn(X.GetA())
+      end.
+      ''');
+  AssertTrue('two-link cycle: ' + Msg,
+    Pos('Cyclic interface inheritance: IB -> IA -> IB', Msg) >= 0);
+  Msg := SemanticError('''
+      program P;
+      type
+        IA = interface(IA)
+          function GetA: Integer;
+        end;
+      begin
+      end.
+      ''');
+  AssertTrue('self-parent: ' + Msg,
+    Pos('Cyclic interface inheritance: IA -> IA', Msg) >= 0);
+  Msg := SemanticError('''
+      program P;
+      type
+        IA = interface(IC) end;
+        IB = interface(IA) end;
+        IC = interface(IB) end;
+      begin
+      end.
+      ''');
+  AssertTrue('three-link cycle: ' + Msg,
+    Pos('Cyclic interface inheritance: IC -> IB -> IA -> IC', Msg) >= 0);
+  AssertEquals('an acyclic chain is still accepted', '', SemanticError('''
+      program P;
+      type
+        IA = interface function GetA: Integer; end;
+        IB = interface(IA) function GetB: Integer; end;
+        IC = interface(IB) end;
+      begin
+      end.
+      '''));
+end;
+
+procedure TInterfaceTests.TestSemantic_CyclicGenericIntfInheritance_Rejected;
+var
+  Msg: string;
+begin
+  Msg := SemanticError('''
+      program P;
+      type
+        IA<T> = interface(IB<T>)
+          function GetA: T;
+        end;
+        IB<T> = interface(IA<T>)
+          function GetB: T;
+        end;
+      var
+        X: IA<Integer>;
+      begin
+        X := nil
+      end.
+      ''');
+  AssertTrue('generic cycle: ' + Msg, Pos(
+    'Cyclic interface inheritance: IA<Integer> -> IB<Integer> -> IA<Integer>',
+    Msg) >= 0);
 end;
 
 { ------------------------------------------------------------------ }

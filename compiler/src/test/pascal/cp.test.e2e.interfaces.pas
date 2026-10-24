@@ -205,6 +205,7 @@ type
       Covers the statement, field-receiver, discarded-result and
       expression-position dispatch paths, plus nil and float neighbours. }
     procedure TestRun_IntfCall_ArgsTakeDeclaredParamType;
+    procedure TestCompile_CyclicIntfInheritance_ReportsNotHangs;
   end;
 
 implementation
@@ -2707,6 +2708,42 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '5 4' + LE + '6 5' + LE + 'done' + LE, 0);
   AssertLeakFreeOnAll(Src, '');
+end;
+
+{ BUG-20260920-cyclic-intf-inheritance-hangs: the compiler binary spun
+  forever on a cyclic parent chain; it must exit with the diagnostic. }
+procedure TE2EInterfaceTests.TestCompile_CyclicIntfInheritance_ReportsNotHangs;
+const
+  Src = '''
+    program T;
+    type
+      IA = interface(IB)
+        function GetA: Integer;
+      end;
+      IB = interface(IA)
+        function GetB: Integer;
+      end;
+      TImpl = class(IA)
+        function GetA: Integer;
+        begin Result := 1 end;
+        function GetB: Integer;
+        begin Result := 2 end;
+      end;
+    var
+      X: IA;
+    begin
+      X := TImpl.Create();
+      WriteLn(X.GetA())
+    end.
+    ''';
+var
+  BinFile, ToolOut: string;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('the cycle is rejected',
+    CompileNativeCLI(Src, False, '', BinFile, ToolOut) <> 0);
+  AssertTrue('names the chain: ' + ToolOut,
+    Pos('Cyclic interface inheritance: IB -> IA -> IB', ToolOut) >= 0);
 end;
 
 procedure TE2EInterfaceTests.TestRun_IntfCall_ArgsTakeDeclaredParamType;
