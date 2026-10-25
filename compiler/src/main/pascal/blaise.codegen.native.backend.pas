@@ -62,6 +62,10 @@ type
       objects), so a whole-program build that appends several modules to one
       buffer would otherwise define the same label twice. }
     FEmittedGenericFuncs: TStringList;
+    { --debug allocation-site unit override while emitting a generic clone
+      whose Line fields refer to the template's declaring unit; '' = the
+      unit being emitted. }
+    FLeakSiteUnit: string;
     function ClaimGenericFuncEmit(ADecl: TMethodDecl): Boolean;
 
     { Append one line of assembly (a newline is added).  Virtual so a target

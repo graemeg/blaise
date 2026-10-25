@@ -5883,6 +5883,7 @@ begin
     GRI.TypeName  := ATypeName;
     GRI.RecordDef := ClonedRD;
     GRI.TypeDesc  := RT;
+    GRI.DefUnitName := Templ.DefUnitName;
     if FCurrentUnit <> nil then
       FCurrentUnit.GenericRecordInstances.Add(GRI)
     else if FProg <> nil then
@@ -6291,6 +6292,9 @@ begin
     GFI            := TGenericFuncInstance.Create();
     GFI.InstName   := AInstName;
     GFI.MethodDecl := NewMDecl;
+    GFI.DefUnitName := FTable.GenericRoutineDeclUnit(BaseName);
+    if GFI.DefUnitName = '<program>' then
+      GFI.DefUnitName := '';
     if FCurrentUnit <> nil then
       FCurrentUnit.GenericFuncInstances.Add(GFI)
     else
@@ -8783,6 +8787,7 @@ begin
     end
     else if TD.Def is TGenericRecordDef then
     begin
+      TGenericRecordDef(TD.Def).DefUnitName := FCurrentUnitName;
       CheckedRegisterGeneric(TD);
       Continue;
     end

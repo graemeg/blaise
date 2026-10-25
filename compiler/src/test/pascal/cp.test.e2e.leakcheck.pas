@@ -189,6 +189,9 @@ type
       to the unit that DECLARES the template (the line number already
       refers to the template source), not the instantiating unit. }
     procedure TestDebug_GenericAllocSite_ReportsDefiningUnit_Native;
+    { The same for generic RECORD methods and generic FUNCTIONS
+      (BUG-014) }
+    procedure TestDebug_GenericRecordAndFuncAllocSite_ReportsDefiningUnit;
     { An interface-returning call passed directly as an argument — Show(Make())
       — hands the callee an owned (+1) fat pointer it borrows; the caller must
       release it after the call or one instance leaks. }
@@ -979,6 +982,75 @@ begin
     Pos(' at Generics.Collections:', Output) >= 0);
   AssertTrue('instantiating program NOT in report, got: ' + Output,
     Pos(' at LeakGen:', Output) < 0);
+end;
+
+procedure TE2ELeakCheckTests.TestDebug_GenericRecordAndFuncAllocSite_ReportsDefiningUnit;
+const
+  UnitSrc = '''
+    unit gleaks;
+    interface
+    uses runtime.arc;
+    type
+      TRecLeak = class
+        V: Integer;
+      end;
+      TFnLeak = class
+        V: Integer;
+      end;
+      TMaker<T> = record
+        X: T;
+        function Make(): Integer;
+      end;
+    function Spawn<T>(A: T): Integer;
+    implementation
+    function TMaker<T>.Make(): Integer;
+    var
+      O: TRecLeak;
+    begin
+      O := TRecLeak.Create();
+      _ClassAddRef(Pointer(O));
+      Result := 1
+    end;
+    function Spawn<T>(A: T): Integer;
+    var
+      O: TFnLeak;
+    begin
+      O := TFnLeak.Create();
+      _ClassAddRef(Pointer(O));
+      Result := 2
+    end;
+    end.
+    ''';
+  ProgSrc = '''
+    program UseGLeaks;
+    uses gleaks;
+    var
+      M: TMaker<Integer>;
+    begin
+      WriteLn(M.Make() + Spawn<Integer>(5))
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode, P: Integer;
+begin
+  { Both instances are monomorphised in the program, but their bodies (and
+    the line numbers in the report) are the unit's source. }
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  ExitCode := RunUnitFiniDebug('native', UnitSrc, '', ProgSrc, Output);
+  AssertEquals('exit 0, got: ' + Output, 0, ExitCode);
+  AssertTrue('leak header, got: ' + Output,
+    Pos('Blaise leak report', Output) >= 0);
+  AssertTrue('record-method allocation under the unit, got: ' + Output,
+    Pos('TRecLeak', Output) >= 0);
+  AssertTrue('function allocation reported, got: ' + Output,
+    Pos('TFnLeak', Output) >= 0);
+  P := Pos(' at gleaks:', Output);
+  AssertTrue('first under the declaring unit, got: ' + Output, P >= 0);
+  AssertTrue('second under the declaring unit, got: ' + Output,
+    Pos(' at gleaks:', Copy(Output, P + 1, Length(Output))) >= 0);
+  AssertTrue('instantiating program NOT in report, got: ' + Output,
+    Pos(' at UseGLeaks:', Output) < 0);
 end;
 
 procedure TE2ELeakCheckTests.TestDebug_NoLeak_NoReport;

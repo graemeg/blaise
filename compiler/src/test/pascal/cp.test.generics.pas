@@ -84,6 +84,7 @@ type
     { ------------------------------------------------------------------ }
     procedure TestCodegen_UnitGeneric_InstanceSymbolsBareAndWeak;
     procedure TestCodegen_UnitGenericFunc_OneInstancePerBuffer;
+    procedure TestSem_RecordAndFuncInstances_RecordDeclaringUnit;
 
     { ------------------------------------------------------------------ }
     { Bare (unmangled-unit) class data must be WEAK — an rtl.* / runtime.* }
@@ -955,6 +956,66 @@ begin
     CountAsmOccurrences(X86, #10 + 'Twice_Integer:'));
   AssertEquals('arm64: Twice<Integer> defined once', 1,
     CountAsmOccurrences(A64, #10 + '_Twice_Integer:'));
+end;
+
+procedure TGenericsTests.TestSem_RecordAndFuncInstances_RecordDeclaringUnit;
+const
+  UnitSrc = '''
+    unit gdecl;
+    interface
+    type
+      TMaker<T> = record
+        X: T;
+        function Get(): T;
+      end;
+    function Twice<T>(A: T): T;
+    implementation
+    function TMaker<T>.Get(): T; begin Result := X end;
+    function Twice<T>(A: T): T; begin Result := A + A end;
+    end.
+    ''';
+  ProgSrc = '''
+    program pdecl;
+    uses gdecl;
+    var M: TMaker<Integer>;
+    begin
+      WriteLn(M.Get(), Twice<Integer>(2))
+    end.
+    ''';
+var
+  L: TLexer;
+  P: TParser;
+  U: TUnit;
+  Prog: TProgram;
+  A: TSemanticAnalyser;
+begin
+  { BUG-014: a generic record or function instance's body is the declaring
+    unit's source, so --debug leak reports must name that unit; the instance
+    records it as generic class instances already did. }
+  L := TLexer.Create(UnitSrc);
+  P := TParser.Create(L);
+  try
+    U := P.ParseUnit();
+  finally
+    P.Free();
+    L.Free();
+  end;
+  Prog := ParseSrc(ProgSrc);
+  A := TSemanticAnalyser.Create();
+  try
+    A.AnalyseUnitForExport(U);
+    A.Analyse(Prog);
+    AssertEquals('record instances', 1, Prog.GenericRecordInstances.Count);
+    AssertEquals('record instance declaring unit', 'gdecl',
+      TGenericRecordInstance(Prog.GenericRecordInstances.Items[0]).DefUnitName);
+    AssertEquals('function instances', 1, Prog.GenericFuncInstances.Count);
+    AssertEquals('function instance declaring unit', 'gdecl',
+      TGenericFuncInstance(Prog.GenericFuncInstances.Items[0]).DefUnitName);
+  finally
+    A.Free();
+    Prog.Free();
+    U.Free();
+  end;
 end;
 
 procedure TGenericsTests.TestCodegen_UnmangledUnitClass_WeakSymbols;

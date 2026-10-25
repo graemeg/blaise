@@ -591,6 +591,11 @@ type
       program's symbols (vtable_<Prog>_TCls), which no object defined.  Use
       this wherever the type is known. }
     function ClassSymOf(AType: TTypeDesc): string;
+    { The unit a --debug allocation site is reported under. }
+    function LeakSiteUnit: string;
+    { Each generic function instance's body, reporting its allocations
+      under the template's declaring unit. }
+    procedure EmitGenericFuncInstances(AInstances: TObjectList);
     { ClassSymOf(AType) when the front end resolved the type, else the
       flat lookup of AName }
     function ClassSymFor(AType: TTypeDesc; const AName: string): string;
@@ -3248,6 +3253,29 @@ begin
     Result := Self.ClassSymName(AIntfName);
 end;
 
+function TX86_64Backend.LeakSiteUnit: string;
+begin
+  if FLeakSiteUnit <> '' then
+    Result := FLeakSiteUnit
+  else
+    Result := FCurrentUnitName;
+end;
+
+procedure TX86_64Backend.EmitGenericFuncInstances(AInstances: TObjectList);
+var
+  I: Integer;
+  GFI: TGenericFuncInstance;
+begin
+  for I := 0 to AInstances.Count - 1 do
+  begin
+    GFI := TGenericFuncInstance(AInstances.Items[I]);
+    if not Self.ClaimGenericFuncEmit(GFI.MethodDecl) then Continue;
+    FLeakSiteUnit := GFI.DefUnitName;
+    Self.EmitFunctionDef(GFI.MethodDecl, True);
+  end;
+  FLeakSiteUnit := '';
+end;
+
 function TX86_64Backend.ClassSymOf(AType: TTypeDesc): string;
 begin
   if Pos('<', AType.Name) >= 0 then
@@ -5654,6 +5682,8 @@ begin
   for I := 0 to AGenericRecordInstances.Count - 1 do
   begin
     GRI := TGenericRecordInstance(AGenericRecordInstances.Items[I]);
+    { the clone's Line fields refer to the template's declaring unit }
+    FLeakSiteUnit := GRI.DefUnitName;
     for J := 0 to GRI.RecordDef.Methods.Count - 1 do
     begin
       Decl := TMethodDecl(GRI.RecordDef.Methods.Items[J]);
@@ -5661,6 +5691,7 @@ begin
       Self.EmitFunctionDef(Decl, True);
     end;
   end;
+  FLeakSiteUnit := '';
 
   { Generic METHOD instances (method-level <T>): each monomorphised body.  Its
     ResolvedEmitName encodes <Owner>_<Method><args> and OwnerTypeName is set, so
@@ -12135,8 +12166,8 @@ begin
       Self.Emit(#9'movq %rbx, %rdi');
       Self.Emit(Format(#9'movq typeinfo_%s+16(%%rip), %%rsi',
         [Self.ClassSymOf(FAE.ResolvedType)]));
-      SetI := FStrLits.IndexOf(FCurrentUnitName);
-      if SetI < 0 then SetI := FStrLits.Add(FCurrentUnitName);
+      SetI := FStrLits.IndexOf(Self.LeakSiteUnit());
+      if SetI < 0 then SetI := FStrLits.Add(Self.LeakSiteUnit());
       Self.Emit(Format(#9'leaq __s%d+12(%%rip), %%rdx', [SetI]));
       Self.Emit(Format(#9'movq $%d, %%rcx', [FAE.Line]));
       Self.Emit(#9'callq _LeakTrackerRegister');
@@ -12477,8 +12508,8 @@ begin
       Self.Emit(#9'movq %rbx, %rdi');
       Self.Emit(Format(#9'movq typeinfo_%s+16(%%rip), %%rsi',
         [Self.ClassSymOf(RT)]));
-      SetI := FStrLits.IndexOf(FCurrentUnitName);
-      if SetI < 0 then SetI := FStrLits.Add(FCurrentUnitName);
+      SetI := FStrLits.IndexOf(Self.LeakSiteUnit());
+      if SetI < 0 then SetI := FStrLits.Add(Self.LeakSiteUnit());
       Self.Emit(Format(#9'leaq __s%d+12(%%rip), %%rdx', [SetI]));
       Self.Emit(Format(#9'movq $%d, %%rcx', [ACall.Line]));
       Self.Emit(#9'callq _LeakTrackerRegister');
@@ -26771,11 +26802,7 @@ begin
   end;
 
   { Concrete generic function instances. }
-  for I := 0 to AProg.GenericFuncInstances.Count - 1 do
-    if Self.ClaimGenericFuncEmit(
-         TGenericFuncInstance(AProg.GenericFuncInstances.Items[I]).MethodDecl) then
-      Self.EmitFunctionDef(
-        TGenericFuncInstance(AProg.GenericFuncInstances.Items[I]).MethodDecl, True);
+  Self.EmitGenericFuncInstances(AProg.GenericFuncInstances);
 
   { Pre-count try stmts in the program body so VarOperand resolves
     _exc_frame_N as globals (FFrame is nil in main, so the global path is
@@ -27001,11 +27028,7 @@ begin
   end;
 
   { Concrete generic function instances declared in this unit. }
-  for I := 0 to AUnit.GenericFuncInstances.Count - 1 do
-    if Self.ClaimGenericFuncEmit(
-         TGenericFuncInstance(AUnit.GenericFuncInstances.Items[I]).MethodDecl) then
-      Self.EmitFunctionDef(
-        TGenericFuncInstance(AUnit.GenericFuncInstances.Items[I]).MethodDecl, True);
+  Self.EmitGenericFuncInstances(AUnit.GenericFuncInstances);
 
   { Initialization section: emit as a function <Unit>_init that the program's
     $main calls before the program body.  (Finalization is not yet wired into

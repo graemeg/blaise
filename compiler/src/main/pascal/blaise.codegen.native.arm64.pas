@@ -147,9 +147,6 @@ type
     FGenericDefUnits: TStringList; { program generic-instance wrappers: Strings
                                    = the template's declaring unit, Objects =
                                    the wrapper TTypeDecl (borrowed) }
-    FLeakSiteUnit: string;       { --debug allocation-site unit override while
-                                   emitting a generic clone whose Line fields
-                                   refer to the declaring unit }
     FObjLocals:   TStringList;   { class-typed locals — released at scope exit }
     FWeakLocals:  TStringList;   { [Weak] class/interface locals — the obj slot is
                                    deregistered (_WeakClear) at scope exit }
@@ -545,6 +542,9 @@ type
     procedure EmitExit(AStmt: TExitStmt);
     procedure EmitFunctionDef(ADecl: TMethodDecl;
       AWeakBind: Boolean = False);
+    { Each generic function instance's body, reporting its allocations
+      under the template's declaring unit. }
+    procedure EmitGenericFuncInstances(AInstances: TObjectList);
     function  StackArgSize(AArg: TASTExpr): Integer;
     function  StackParamSize(APar: TMethodParam): Integer;
     function  AlignTo(AValue, AAlign: Integer): Integer;
@@ -14204,6 +14204,21 @@ begin
     RegisterForSlots(TASTStmt(ABody.Stmts.Items[I]));
 end;
 
+procedure TArm64Backend.EmitGenericFuncInstances(AInstances: TObjectList);
+var
+  I: Integer;
+  GFI: TGenericFuncInstance;
+begin
+  for I := 0 to AInstances.Count - 1 do
+  begin
+    GFI := TGenericFuncInstance(AInstances.Items[I]);
+    if not ClaimGenericFuncEmit(GFI.MethodDecl) then Continue;
+    FLeakSiteUnit := GFI.DefUnitName;
+    EmitFunctionDef(GFI.MethodDecl, True);
+  end;
+  FLeakSiteUnit := '';
+end;
+
 procedure TArm64Backend.EmitFunctionDef(ADecl: TMethodDecl;
   AWeakBind: Boolean);
 var
@@ -18786,12 +18801,7 @@ begin
 
   { Generic function instances: concrete monomorphised bodies, weak-bound
     like every other instance symbol. }
-  for I := 0 to AProg.GenericFuncInstances.Count - 1 do
-    if ClaimGenericFuncEmit(
-         TGenericFuncInstance(AProg.GenericFuncInstances.Items[I]).MethodDecl) then
-      EmitFunctionDef(
-        TGenericFuncInstance(AProg.GenericFuncInstances.Items[I]).MethodDecl,
-        True);
+  EmitGenericFuncInstances(AProg.GenericFuncInstances);
 
   { Generic RECORD instances: each monomorphised clone's method bodies.  A
     record instance needs no typeinfo or vtable, so unlike a generic CLASS
@@ -18802,6 +18812,9 @@ begin
   begin
     GRDef := TGenericRecordInstance(
                AProg.GenericRecordInstances.Items[I]).RecordDef;
+    { the clone's Line fields refer to the template's declaring unit }
+    FLeakSiteUnit := TGenericRecordInstance(
+                       AProg.GenericRecordInstances.Items[I]).DefUnitName;
     for J := 0 to GRDef.Methods.Count - 1 do
     begin
       Decl := TMethodDecl(GRDef.Methods.Items[J]);
@@ -18809,6 +18822,7 @@ begin
       EmitFunctionDef(Decl, True);
     end;
   end;
+  FLeakSiteUnit := '';
 
   { Generic METHOD instances (leg 37): a method with its own <T> monomorphised
     at a call site.  Its MethodDecl is a fully concrete method (mangled name via
@@ -19260,6 +19274,8 @@ begin
   begin
     URGDef := TGenericRecordInstance(
                 AUnit.GenericRecordInstances.Items[I]).RecordDef;
+    FLeakSiteUnit := TGenericRecordInstance(
+                       AUnit.GenericRecordInstances.Items[I]).DefUnitName;
     for J := 0 to URGDef.Methods.Count - 1 do
     begin
       Decl := TMethodDecl(URGDef.Methods.Items[J]);
@@ -19267,6 +19283,7 @@ begin
       EmitFunctionDef(Decl, True);
     end;
   end;
+  FLeakSiteUnit := '';
   for I := 0 to AUnit.GenericInstances.Count - 1 do
   begin
     { interface-implementing instances flow through too — their itab +
@@ -19293,12 +19310,7 @@ begin
     dangling at link. }
   for I := 0 to AUnit.GenericIntfInstances.Count - 1 do
     FGenericIntfInstances.Add(AUnit.GenericIntfInstances.Items[I]);
-  for I := 0 to AUnit.GenericFuncInstances.Count - 1 do
-    if ClaimGenericFuncEmit(
-         TGenericFuncInstance(AUnit.GenericFuncInstances.Items[I]).MethodDecl) then
-      EmitFunctionDef(
-        TGenericFuncInstance(AUnit.GenericFuncInstances.Items[I]).MethodDecl,
-        True);
+  EmitGenericFuncInstances(AUnit.GenericFuncInstances);
   { generic METHOD instances (leg 37) — weak-bound like the func instances }
   for I := 0 to AUnit.GenericMethodInstances.Count - 1 do
     if TGenericMethodInstance(

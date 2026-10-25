@@ -876,6 +876,8 @@ type
     function  RegisterGenericRoutine(const AName: string; ATempl: TObject;
                                      const ADeclUnit: string): string;
     function  FindGenericRoutine(const AName: string): TObject;
+    { Declaring unit of generic routine AName as registered ('' if unknown). }
+    function  GenericRoutineDeclUnit(const AName: string): string;
     { Take ownership of a synthesised TMethodDecl produced during
       .bif import.  Lifetime tracks the symbol table; callers do
       not free.  Returns the same pointer for caller convenience. }
@@ -2157,6 +2159,17 @@ begin
     Result := FGenericRoutines.Objects[Idx]
   else
     Result := nil;
+end;
+
+function TSymbolTable.GenericRoutineDeclUnit(const AName: string): string;
+var
+  Idx: Integer;
+begin
+  Idx := FGenericRoutines.IndexOf(AName);
+  if Idx >= 0 then
+    Result := FGenericRoutineDeclUnits.Strings[Idx]
+  else
+    Result := '';
 end;
 
 function TSymbolTable.OwnImportedDecl(ADecl: TObject): TObject;

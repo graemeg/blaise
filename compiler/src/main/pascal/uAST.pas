@@ -1387,6 +1387,8 @@ type
   public
     InstName:   string;       { raw name e.g. 'Identity<Integer>' }
     MethodDecl: TMethodDecl;  { owned — concrete method decl with substituted types }
+    DefUnitName: string;      { unit that DECLARES the template; body Line fields
+                                refer to that unit's source }
     constructor Create;
     destructor Destroy; override;
   end;
@@ -1443,6 +1445,8 @@ type
     ParamNames:       TStringList;      { owned — type parameter names, e.g. ['T'] }
     ParamConstraints: TStringList;      { owned — parallel to ParamNames; '' = unconstrained }
     RecordDef:        TRecordTypeDef;   { owned — template record body with unresolved param types }
+    DefUnitName:      string;           { unit (or '' for the program) that declares the
+                                          template — see TGenericTypeDef.DefUnitName }
     constructor Create;
     destructor Destroy; override;
   end;
@@ -1468,6 +1472,8 @@ type
     TypeName:  string;          { raw e.g. 'TMyVal<Integer>' }
     RecordDef: TRecordTypeDef;  { owned — cloned record body with substituted type names }
     [Unretained] TypeDesc: TTypeDesc;  { non-owned — points to TRecordTypeDesc in SymbolTable }
+    DefUnitName: string;        { unit that DECLARES the template; method-body Line
+                                  fields refer to that unit's source }
     constructor Create;
     destructor Destroy; override;
   end;

@@ -1270,10 +1270,12 @@ begin
     if Entry.IsGeneric or (Entry.Def is TGenericInterfaceDef) or
        (Entry.Def is TGenericProcDef) then
     begin
-      { Record the declaring unit on class templates so allocation sites
+      { Record the declaring unit on class and record templates so allocation sites
         inside cloned method bodies are attributed to the template source. }
       if Entry.Def is TGenericTypeDef then
         TGenericTypeDef(Entry.Def).DefUnitName := AIface.Name;
+      if Entry.Def is TGenericRecordDef then
+        TGenericRecordDef(Entry.Def).DefUnitName := AIface.Name;
       PrevUnit := ATable.RegisterGeneric(Entry.Name, Entry.Def, AIface.Name);
       if PrevUnit <> '' then
         raise EImportError.Create(
