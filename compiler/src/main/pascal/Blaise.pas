@@ -680,6 +680,7 @@ begin
         try
           if Self.Opts.Target.CPU = cpuArm64 then
             WOPDF.TargetArch := 4;      { opdf_types archAArch64 }
+          WOPDF.DarwinSymbols := Self.Opts.Target.OS = osMacOS;
           WOPDF.SetFacts(WFacts);
           WIR := WIR + LineEnding + WOPDF.GetOutput();
         finally
@@ -1365,6 +1366,7 @@ begin
         try
           if Opts.Target.CPU = cpuArm64 then
             OE.TargetArch := 4;         { opdf_types archAArch64 }
+          OE.DarwinSymbols := Opts.Target.OS = osMacOS;
           { Native backend: codegen collected exact debug facts (frame
             offsets, per-statement labels, function end labels).  Append the
             OPDF section to the SAME assembly text — local labels resolve in

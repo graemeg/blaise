@@ -13,9 +13,11 @@ unit uDebugOPDF;
   the ELF .opdf section.  The existing pdr debugger reads that section without
   modification.
 
-  Platform note: section and relocation syntax targets Linux x86_64 (ELF).
-  For macOS arm64 (Mach-O) change the .section directive to
-  ".section __DATA,__opdf" and review .quad relocation constraints. }
+  Platform note: the `.section .opdf` directive is accepted by both internal
+  assemblers.  On macOS arm64 it lands in (__OPDF,__opdf) of each object and
+  the Mach-O linker keeps it in a read-only __OPDF segment, its pointers at
+  their link-time addresses (no rebase -- the debugger adds the ASLR slide).
+  DarwinSymbols gives every .quad symbol the platform's leading '_'. }
 
 interface
 
@@ -41,7 +43,15 @@ type
       archAArch64 = 4.  Set by the driver from the build target; the debugger
       picks its architecture adapter from it. }
     FTargetArch:  Byte;
+    { Darwin targets: every assembly symbol the backend emits carries one
+      leading '_' (TArm64Backend.DarwinSym), so each .quad <symbol> here must
+      too.  Record NAMES stay unprefixed -- they are what the user types. }
+    FDarwinSymbols: Boolean;
 
+    function  AsmSym(const AName: string): string;
+    function  DisplayName(const ASymbol: string): string;
+    function  GlobalVarSym(const AVarName: string; AType: TTypeDesc;
+      AIsClassVar: Boolean): string;
     function  FNV1a32(const S: string): Cardinal;
     function  GetOrAllocTypeID(const AName: string): Cardinal;
     function  HasBeenEmitted(const AName: string): Boolean;
@@ -59,7 +69,8 @@ type
     procedure EmitRecord(AType: TRecordTypeDesc);
     procedure EmitClass(AType: TRecordTypeDesc);
     procedure EmitUtf8Str;
-    procedure EmitGlobalVar(const AVarName: string; AType: TTypeDesc);
+    procedure EmitGlobalVar(const AVarName: string; AType: TTypeDesc;
+      AIsClassVar: Boolean = False);
     procedure EmitFunctionScope(AMethod: TMethodDecl; AScopeID: Integer;
                                 ADeclIdx: Integer; const ANextLabel: string;
                                 const ALabel: string);
@@ -110,6 +121,9 @@ type
                               const ASourceFile: string);
     { Header TargetArch code; defaults to archX86_64 (2). }
     property TargetArch: Byte read FTargetArch write FTargetArch;
+    { Set for a Darwin (Mach-O) target: symbol references get the platform's
+      leading underscore. }
+    property DarwinSymbols: Boolean read FDarwinSymbols write FDarwinSymbols;
     { Optional codegen facts: when set, scopes/locals/lines are emitted
       from exact backend data instead of the approximate AST walk. }
     procedure SetFacts(AFacts: TDbgFacts);
@@ -182,6 +196,7 @@ begin
   FUnitDirRecCountIdx := -1;
   FDone               := False;
   FTargetArch         := 2;
+  FDarwinSymbols      := False;
 end;
 
 constructor TOPDFEmitter.CreateForUnit(AUnit: TUnit; ASymTable: TSymbolTable;
@@ -204,6 +219,7 @@ begin
   FUnitDirRecCountIdx := -1;
   FDone               := False;
   FTargetArch         := 2;
+  FDarwinSymbols      := False;
 end;
 
 { Escape a raw string value for a GNU-as / internal-assembler `.ascii "..."`
@@ -650,7 +666,7 @@ begin
   L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
   L('    .4byte ' + IntToStr(ParentID) + '  # ParentTypeID');
   if AType.HasVTable() then
-    L('    .quad vtable_' + MangledClassSym(CName) + '  # VMTAddress')
+    L('    .quad ' + AsmSym('vtable_' + MangledClassSym(CName)) + '  # VMTAddress')
   else
     L('    .quad 0  # VMTAddress (no vtable)');
   L('    .4byte ' + IntToStr(AType.TotalSize()) + '  # InstanceSize');
@@ -660,7 +676,48 @@ begin
   EmitProperties(AType);
 end;
 
-procedure TOPDFEmitter.EmitGlobalVar(const AVarName: string; AType: TTypeDesc);
+{ The assembly name of symbol AName on the build target. }
+function TOPDFEmitter.AsmSym(const AName: string): string;
+begin
+  if FDarwinSymbols then
+    Result := '_' + AName
+  else
+    Result := AName;
+end;
+
+{ The user-facing name of an emitted symbol: AsmSym undone. }
+function TOPDFEmitter.DisplayName(const ASymbol: string): string;
+begin
+  Result := ASymbol;
+  if FDarwinSymbols and (Length(ASymbol) > 1) and (Copy(ASymbol, 0, 1) = '_') then
+    Result := Copy(ASymbol, 1, Length(ASymbol) - 1);
+end;
+
+{ The storage symbol of a global (or class) variable, as the backend names it.
+  x86-64: the bare name (an interface global's object half is Name_obj).
+  arm64: '_g_' + the owner-prefixed name on every OS (TArm64Backend.GlobalSym
+  and EmitGlobalsSection) -- never DarwinSym'd; an interface global's object
+  half is the '_g_' symbol itself, its itab half '<sym>_itab' follows it. }
+function TOPDFEmitter.GlobalVarSym(const AVarName: string; AType: TTypeDesc;
+  AIsClassVar: Boolean): string;
+begin
+  if FTargetArch = 4 then
+  begin
+    if (not AIsClassVar) and (FUnit <> nil) then
+      Result := '_g_' + MangleUnitPrefix(FUnit.Name) + AVarName
+    else
+      Result := '_g_' + AVarName;
+  end
+  else if (AType <> nil) and (AType.Kind = tyInterface) then
+    { Interface globals are two labels, Name_obj + Name_itab -- there is no
+      bare Name symbol.  Point the record at the object-pointer half. }
+    Result := AVarName + '_obj'
+  else
+    Result := AVarName;
+end;
+
+procedure TOPDFEmitter.EmitGlobalVar(const AVarName: string; AType: TTypeDesc;
+  AIsClassVar: Boolean);
 var
   CName: string;
   RecSize: Integer;
@@ -679,12 +736,8 @@ begin
   L('    # recGlobalVar: ' + AVarName);
   EmitRecHdr(REC_GLOBALVAR, RecSize);
   L('    .4byte ' + IntToStr(GetOrAllocTypeID(CName)) + '  # TypeID');
-  if (AType <> nil) and (AType.Kind = tyInterface) then
-    { Interface globals are two labels, Name_obj + Name_itab — there is no
-      bare Name symbol.  Point the record at the object-pointer half. }
-    L('    .quad ' + AVarName + '_obj  # Address (linker-resolved)')
-  else
-    L('    .quad ' + AVarName + '  # Address (linker-resolved)');
+  L('    .quad ' + GlobalVarSym(AVarName, AType, AIsClassVar) +
+    '  # Address (linker-resolved)');
   EmitStrField(AVarName);
 end;
 
@@ -705,9 +758,9 @@ begin
   L('    # recFunctionScope: ' + FuncName);
   EmitRecHdr(REC_FUNCSCOPE, RecSize);
   L('    .4byte ' + IntToStr(AScopeID) + '  # ScopeID');
-  L('    .quad ' + Label_ + '  # LowPC');
+  L('    .quad ' + AsmSym(Label_) + '  # LowPC');
   if ANextLabel <> '' then
-    L('    .quad ' + ANextLabel + '  # HighPC (approx: next function start)')
+    L('    .quad ' + AsmSym(ANextLabel) + '  # HighPC (approx: next function start)')
   else
     L('    .quad 0  # HighPC (last function)');
   L('    .2byte ' + IntToStr(ADeclIdx) + '  # DeclIndex');
@@ -724,7 +777,7 @@ begin
   L('    # recRuntimeHelper: ' + ASymbol);
   EmitRecHdr(REC_RUNTIMEHELPER, 9);
   L('    .byte ' + IntToStr(AKind) + '  # Kind');
-  L('    .quad ' + ASymbol + '  # Address (linker-resolved)');
+  L('    .quad ' + AsmSym(ASymbol) + '  # Address (linker-resolved)');
 end;
 
 procedure TOPDFEmitter.EmitRuntimeHelpers;
@@ -862,7 +915,7 @@ begin
   L('    # recFunctionScope: ' + ProgName);
   EmitRecHdr(REC_FUNCSCOPE, RecSize);
   L('    .4byte ' + IntToStr(AScopeID) + '  # ScopeID');
-  L('    .quad main  # LowPC (program entry point)');
+  L('    .quad ' + AsmSym('main') + '  # LowPC (program entry point)');
   L('    .quad 0  # HighPC (last scope)');
   L('    .2byte ' + IntToStr(ADeclIdx) + '  # DeclIndex');
   EmitStrField(ProgName);
@@ -1147,7 +1200,7 @@ begin
         L('    .quad 0  # ReadAddr (field not found)');
     end
     else if ReadType = PAT_METHOD then
-      L('    .quad ' + MangledClassSym(AClass.Name) + '_' + PI.ReadMethod + '  # ReadAddr (getter)')
+      L('    .quad ' + AsmSym(ReadMethSym) + '  # ReadAddr (getter)')
     else
       L('    .quad 0  # ReadAddr (none)');
 
@@ -1161,7 +1214,7 @@ begin
         L('    .quad 0  # WriteAddr (field not found)');
     end
     else if WriteType = PAT_METHOD then
-      L('    .quad ' + MangledClassSym(AClass.Name) + '_' + PI.WriteMethod + '  # WriteAddr (setter)')
+      L('    .quad ' + AsmSym(WriteMethSym) + '  # WriteAddr (setter)')
     else
       L('    .quad 0  # WriteAddr (none)');
 
@@ -1357,6 +1410,9 @@ begin
   begin
     V := TVarDecl(AList.Items[I]);
     if not V.IsGlobal then Continue;
+    { an arm64 threadvar is a Mach-O TLV with no '_g_' storage symbol; the
+      record would point at nothing }
+    if V.IsThreadVar and (FTargetArch = 4) then Continue;
     for J := 0 to V.Names.Count - 1 do
       EmitGlobalVar(V.Names.Strings[J], V.ResolvedType);
   end;
@@ -1394,7 +1450,7 @@ begin
           Nm := FDecl.ClassVarEmitName
         else
           Continue;  { multi-name static vars carry no per-name emit label yet }
-        EmitGlobalVar(Nm, FDecl.ResolvedType);
+        EmitGlobalVar(Nm, FDecl.ResolvedType, True);
       end;
     end;
   end;
@@ -1507,7 +1563,7 @@ begin
     F := TDbgFunc(FFacts.Funcs.Items[I]);
     ScopeID := ScopeID + 1;
 
-    RecSize := 24 + Length(F.SymbolName);
+    RecSize := 24 + Length(DisplayName(F.SymbolName));
     L('');
     L('    # recFunctionScope: ' + F.SymbolName);
     EmitRecHdr(REC_FUNCSCOPE, RecSize);
@@ -1518,7 +1574,7 @@ begin
     else
       L('    .quad 0  # HighPC (no end label recorded)');
     L('    .2byte ' + IntToStr(DeclIdx) + '  # DeclIndex');
-    EmitStrField(F.SymbolName);
+    EmitStrField(DisplayName(F.SymbolName));
     DeclIdx := DeclIdx + 1;
 
     ParamIdx := 0;
@@ -1724,7 +1780,7 @@ begin
       L('');
       L('    # recLineInfo: line ' + Lines.Strings[I] + ' in ' + AFuncName);
       EmitRecHdr(REC_LINEINFO, RecSize);
-      L('    .quad ' + AFuncLabel + '  # Address (function start; per-stmt addr needs QBE label support)');
+      L('    .quad ' + AsmSym(AFuncLabel) + '  # Address (function start; per-stmt addr needs QBE label support)');
       L('    .4byte ' + IntToStr(LineNum) + '  # LineNumber');
       L('    .2byte ' + IntToStr(ColNum) + '  # ColumnNumber');
       EmitStrField(FSourceFile);

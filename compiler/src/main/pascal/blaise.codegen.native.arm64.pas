@@ -46,7 +46,7 @@ interface
 uses
   SysUtils, Classes, contnrs, Generics.Collections, uAST, uSymbolTable,
   uStrCompat, blaise.codegen, blaise.codegen.native.backend, strutils,
-  blaise.codegen.target;
+  blaise.codegen.target, uDebugFacts;
 
 const
   VIRT_NONE = -1;   { EmitCall: no virtual dispatch — direct bl }
@@ -83,6 +83,17 @@ type
     FFrame:       TDictionary<string, Integer>;  { local -> POSITIVE byte
                                                    distance below x29 }
     FFrameSize:   Integer;
+    { OPDF debug facts (--debug-opdf), the x86-64 backend's counterpart: the
+      emitted label per routine (LowPC), an end label after its final ret
+      (HighPC), every named frame slot at its signed x29 offset, and a
+      .Ldbg_N label before each statement.  nil when debug info is off. }
+    [Unretained] FDbgFacts: TDbgFacts;
+    [Unretained] FDbgCur: TDbgFunc;   { facts entry for the routine being emitted }
+    FDbgSeq: Integer;                 { .Ldbg_N label counter }
+    { enclosing routine while its nested routines are emitted, so
+      DbgMarkParams can type a nested routine's captured outer variables }
+    [Unretained] FDbgOuterDecl: TMethodDecl;
+    FDbgSrcFile: string;              { .pas of the unit being emitted; '' = program }
     FGlobalNames: TStringList;                   { program-level int globals }
     FStrLits:     TStringList;
     FLabelN:      Integer;
@@ -298,6 +309,12 @@ type
     { ---- frame + operands ---- }
     procedure AddIntfLocal(const AName: string);
     procedure AddLocal(const AName: string; ASize: Integer);
+    procedure DbgBeginFunc(const ASymbol: string);
+    procedure DbgRecordSlot(const AName: string; AOffset: Integer);
+    procedure DbgMarkParams(ADecl: TMethodDecl);
+    function  DbgOuterVarType(const AName: string): TTypeDesc;
+    procedure DbgStmtLabel(AStmt: TASTStmt);
+    procedure DbgEndFunc;
     function  IsLocal(const AName: string): Boolean;
     { Deferred class-release (BUG-048): reserve the initial PENDREL_SLOTS
       frame slots, record a base pointer (in x0) for release at statement end
@@ -850,6 +867,7 @@ type
       AHasInit: Boolean); override;
     procedure NoteDepFiniUnit(const AUnitName: string;
       AHasFini: Boolean); override;
+    procedure SetDebugFacts(AFacts: TDbgFacts); override;
   end;
 
 implementation
@@ -1229,6 +1247,210 @@ begin
   Sz := (Sz + 7) and (not 7);
   FFrameSize := FFrameSize + Sz;
   FFrame.Add(AName, FFrameSize);   { distance below x29 }
+  { the slot's lowest byte -- where its value starts -- is x29 - FFrameSize }
+  Self.DbgRecordSlot(AName, -FFrameSize);
+end;
+
+{ ---- OPDF debug facts ---------------------------------------------------- }
+
+procedure TArm64Backend.SetDebugFacts(AFacts: TDbgFacts);
+begin
+  FDbgFacts := AFacts;
+end;
+
+procedure TArm64Backend.DbgBeginFunc(const ASymbol: string);
+begin
+  if FDbgFacts = nil then Exit;
+  FDbgCur := FDbgFacts.BeginFunc(ASymbol);
+  FDbgCur.SourceFile := FDbgSrcFile;
+end;
+
+procedure TArm64Backend.DbgRecordSlot(const AName: string; AOffset: Integer);
+begin
+  if FDbgCur = nil then Exit;
+  { Internal bookkeeping slots ('__sret', '__pptr_X', '__rtmp_N', '_pendrel_N',
+    open-array '_high' companions, ...) are not variables.  '_cap_' capture
+    pointers are kept: DbgMarkParams presents each AS the outer variable.
+    Types are filled in by DbgMarkParams -- AddLocal knows only a size. }
+  if AName = '' then Exit;
+  if (AName[0] = '_') and (Copy(AName, 0, 5) <> '_cap_') then Exit;
+  if (Length(AName) > 5) and (Copy(AName, Length(AName) - 5, 5) = '_high') then Exit;
+  FDbgCur.AddVar(AName, nil, AOffset);
+end;
+
+{ Give every recorded slot of ADecl its type and location kind, mirroring
+  TX86_64Backend.DbgMarkParams.  On arm64 every parameter -- register- or
+  stack-passed -- is copied into its own x29-relative slot in the prologue,
+  and a by-value record keeps its inline copy in the parameter's own slot,
+  so no '_data' shadow is needed. }
+procedure TArm64Backend.DbgMarkParams(ADecl: TMethodDecl);
+var
+  I, J, Off: Integer;
+  P: TMethodParam;
+  V: TDbgVar;
+  VD: TVarDecl;
+  Sym: TSymbol;
+  MDEncl: TMethodDecl;
+begin
+  if (FDbgCur = nil) or (ADecl = nil) then Exit;
+  V := FDbgCur.FindVar('Self');
+  if V <> nil then
+  begin
+    V.IsParam := ADecl.OwnerTypeName <> '';
+    { the slot holds the instance pointer; typing it as the class lets the
+      debugger drill its fields.  A nested routine's captured method Self
+      takes the enclosing method's class. }
+    MDEncl := ADecl;
+    while (MDEncl <> nil) and (MDEncl.OwnerTypeName = '') do
+      if MDEncl = ADecl then
+        MDEncl := FDbgOuterDecl
+      else
+        MDEncl := TMethodDecl(MDEncl.EnclosingDecl);
+    if (MDEncl <> nil) and (FSymTable <> nil) then
+    begin
+      Sym := FSymTable.Lookup(MDEncl.OwnerTypeName);
+      if (Sym <> nil) and (Sym.TypeDesc <> nil) then
+        V.TypeDesc := Sym.TypeDesc;
+    end;
+  end;
+  V := FDbgCur.FindVar('Result');
+  if (V <> nil) and (ADecl.ResolvedReturnType <> nil) then
+    V.TypeDesc := ADecl.ResolvedReturnType;
+  if ADecl.Body <> nil then
+    for I := 0 to ADecl.Body.Decls.Count - 1 do
+    begin
+      VD := TVarDecl(ADecl.Body.Decls.Items[I]);
+      for J := 0 to VD.Names.Count - 1 do
+      begin
+        V := FDbgCur.FindVar(VD.Names.Strings[J]);
+        if V <> nil then
+          V.TypeDesc := VD.ResolvedType;
+      end;
+    end;
+  for I := 0 to ADecl.Params.Count - 1 do
+  begin
+    P := TMethodParam(ADecl.Params.Items[I]);
+    V := FDbgCur.FindVar(P.ParamName);
+    if V = nil then Continue;
+    V.IsParam := True;
+    V.IsVarParam := P.IsVarParam;
+    V.IsConstParam := P.IsConstParam;
+    V.TypeDesc := P.ResolvedType;
+    if P.IsOpenArray then
+    begin
+      { the slot holds the data pointer; the element count is High+1, with
+        High in the '<name>_high' companion slot }
+      V.IsOpenArray := True;
+      if FFrame.TryGetValue(P.ParamName + '_high', Off) then
+        V.HighRbpOffset := -Off
+      else
+        V.HighRbpOffset := 0;
+    end
+    else if P.IsVarParam then
+      { var/out: the slot holds the ADDRESS of the caller's variable }
+      V.Indirect := True;
+  end;
+  { Captured outer locals: each '_cap_<Name>' slot holds a pointer to the
+    outer variable -- present it as the variable via the indirect location.
+    A captured method Self has a REAL 'Self' slot (typed above), so its raw
+    capture pointer is dropped. }
+  if ADecl.CapturedVars <> nil then
+    for I := 0 to ADecl.CapturedVars.Count - 1 do
+    begin
+      V := FDbgCur.FindVar('_cap_' + ADecl.CapturedVars.Strings[I]);
+      if V = nil then Continue;
+      if (ADecl.CapturedVars.Strings[I] = 'Self') or
+         (FDbgCur.FindVar(ADecl.CapturedVars.Strings[I]) <> nil) then
+      begin
+        { Self, or a captured open array copied into a slot of its own }
+        FDbgCur.Vars.Delete(FDbgCur.Vars.IndexOf(V));
+        Continue;
+      end;
+      V.Name := ADecl.CapturedVars.Strings[I];
+      V.Indirect := True;
+      V.TypeDesc := Self.DbgOuterVarType(ADecl.CapturedVars.Strings[I]);
+    end;
+  { Env-promoted captures (anonymous methods): the promoted local's ordinary
+    slot is DEAD -- every access goes through '_cap_<Name>', which holds the
+    heap env field's address.  Show the live env-backed value. }
+  if ADecl.EnvCaptured <> nil then
+    for I := 0 to ADecl.EnvCaptured.Count - 1 do
+    begin
+      V := FDbgCur.FindVar('_cap_' + ADecl.EnvCaptured.Strings[I]);
+      if V = nil then Continue;
+      if FDbgCur.FindVar(ADecl.EnvCaptured.Strings[I]) <> nil then
+        FDbgCur.Vars.Delete(
+          FDbgCur.Vars.IndexOf(FDbgCur.FindVar(ADecl.EnvCaptured.Strings[I])));
+      V.Name := ADecl.EnvCaptured.Strings[I];
+      V.Indirect := True;
+      if (V.TypeDesc = nil) and (ADecl.EnvType <> nil) and
+         (TRecordTypeDesc(ADecl.EnvType).FindField(
+            ADecl.EnvCaptured.Strings[I]) <> nil) then
+        V.TypeDesc := TRecordTypeDesc(ADecl.EnvType).FindField(
+          ADecl.EnvCaptured.Strings[I]).TypeDesc;
+    end;
+  { a slot still untyped is a capture pointer of a kind not modelled above
+    (block-env captures): leave it out rather than show a raw pointer }
+  for I := FDbgCur.Vars.Count - 1 downto 0 do
+    if (TDbgVar(FDbgCur.Vars.Items[I]).TypeDesc = nil) and
+       (Copy(TDbgVar(FDbgCur.Vars.Items[I]).Name, 0, 5) = '_cap_') then
+      FDbgCur.Vars.Delete(I);
+end;
+
+{ The type of a captured outer variable, from the enclosing routine's local
+  var declarations and parameters (nil when unknown). }
+function TArm64Backend.DbgOuterVarType(const AName: string): TTypeDesc;
+var
+  I, J: Integer;
+  VD: TVarDecl;
+  P: TMethodParam;
+begin
+  Result := nil;
+  if FDbgOuterDecl = nil then Exit;
+  if FDbgOuterDecl.Body <> nil then
+    for I := 0 to FDbgOuterDecl.Body.Decls.Count - 1 do
+    begin
+      VD := TVarDecl(FDbgOuterDecl.Body.Decls.Items[I]);
+      for J := 0 to VD.Names.Count - 1 do
+        if SameText(VD.Names.Strings[J], AName) then
+          Exit(VD.ResolvedType);
+    end;
+  for I := 0 to FDbgOuterDecl.Params.Count - 1 do
+  begin
+    P := TMethodParam(FDbgOuterDecl.Params.Items[I]);
+    if SameText(P.ParamName, AName) then
+      Exit(P.ResolvedType);
+  end;
+end;
+
+procedure TArm64Backend.DbgStmtLabel(AStmt: TASTStmt);
+var
+  L: TDbgLine;
+begin
+  if (FDbgCur = nil) or (AStmt = nil) then Exit;
+  if AStmt.Line <= 0 then Exit;
+  { structural containers re-dispatch to their children; labelling them
+    would duplicate the first child's line }
+  if AStmt is TCompoundStmt then Exit;
+  L := TDbgLine.Create();
+  L.LabelName := Format('.Ldbg_%d', [FDbgSeq]);
+  L.Line := AStmt.Line;
+  L.Col := AStmt.Col;
+  Inc(FDbgSeq);
+  FDbgCur.Lines.Add(L);
+  Self.Emit(L.LabelName + ':');
+end;
+
+procedure TArm64Backend.DbgEndFunc;
+var
+  EndLbl: string;
+begin
+  if FDbgCur = nil then Exit;
+  EndLbl := Format('.Ldbg_end_%d', [FDbgSeq]);
+  Inc(FDbgSeq);
+  Self.Emit(EndLbl + ':');
+  FDbgCur.EndLabel := EndLbl;
+  FDbgCur := nil;
 end;
 
 function TArm64Backend.IsLocal(const AName: string): Boolean;
@@ -8011,6 +8233,7 @@ begin
     single post-body flush here would only release the last iteration's
     deferred base). }
   Mark := FPendingRelCount;
+  Self.DbgStmtLabel(AStmt);
   Self.EmitStmtBody(AStmt);
   Self.FlushNativePendingReleases(Mark);
 end;
@@ -13994,8 +14217,13 @@ var
   SavedArmNodes: TStringList;
   SavedArmPos: Integer;
   OuterPacked, ChildPacked, SavedParent: TStringList;
+  SavedOuterDecl: TMethodDecl;
+  SavedDbgCur: TDbgFunc;
 begin
   Sym := RoutineSym(ADecl, ADecl.Name);
+  { a routine emitted while another is being emitted (a closure thunk) must
+    not end the outer routine's facts entry }
+  SavedDbgCur := FDbgCur;
   { nostackframe: the body is an inline-asm block that owns the entire
     frame (prologue, args-from-registers, ret).  No compiler prologue/
     epilogue, no frame registration, no param spill, no ARC — the
@@ -14014,8 +14242,11 @@ begin
       EmitWeakDef(Sym)
     else
       EmitGloblDef(Sym);
+    Self.DbgBeginFunc(Sym);
     Self.Emit(Sym + ':');
     EmitStmtList(ADecl.Body.Stmts);
+    Self.DbgEndFunc();
+    FDbgCur := SavedDbgCur;
     Exit;
   end;
   { The captures this routine reaches through '_cap_' that live in a PACKED
@@ -14050,6 +14281,8 @@ begin
       ChildPacked.AddStrings(ADecl.BlockEnvCaptured);
     SavedParent := FParentPacked;
     FParentPacked := ChildPacked;
+    SavedOuterDecl := FDbgOuterDecl;
+    FDbgOuterDecl := ADecl;
     for I := 0 to ADecl.Body.ProcDecls.Count - 1 do
     begin
       if TMethodDecl(ADecl.Body.ProcDecls.Items[I]).Body = nil then
@@ -14072,6 +14305,7 @@ begin
         TMethodDecl(ADecl.Body.ProcDecls.Items[I]), AWeakBind);
     end;
     FParentPacked := SavedParent;
+    FDbgOuterDecl := SavedOuterDecl;
     ChildPacked.Free();
   end;
   FCapturedVars := ADecl.CapturedVars;
@@ -14120,7 +14354,9 @@ begin
                        use the x8 sret path }
   FExitLabel := NewLabel('rexit');
   FForN := 0;
+  Self.DbgBeginFunc(Sym);
   RegisterFrameSlots(ADecl, ADecl.Body);
+  Self.DbgMarkParams(ADecl);
   FForN := 0;   { reset so EmitFor consumes slots in registration order }
   FrameAligned := (FFrameSize + 15) and (not 15);
 
@@ -14780,6 +15016,8 @@ begin
   Self.Emit(#9'mov sp, x29');
   Self.Emit(#9'ldp x29, x30, [sp], #16');
   Self.Emit(#9'ret');
+  Self.DbgEndFunc();
+  FDbgCur := SavedDbgCur;
   TvArmEnd(SavedArmNodes, SavedArmPos);
   FAsm := SavedAsm;
   FrameAligned := (FFrameSize + 15) and (not 15);
@@ -18406,6 +18644,7 @@ var
 begin
   FProgramName := AProg.Name;
   FCurrentUnitName := '';
+  FDbgSrcFile := '';
   for I := 0 to AProg.Block.TypeDecls.Count - 1 do
   begin
     TDcl := TTypeDecl(AProg.Block.TypeDecls.Items[I]);
@@ -18636,6 +18875,7 @@ begin
   FFrame.Clear();
   FFrameSize := 0;
   FForN := 0;
+  Self.DbgBeginFunc('_main');   { the label emitted below }
   AddLocal('__iret', 16);   { interface-returning call scratch }
   { __rret: always >= 16 (register-shape record-call field reads); larger
     if a managed-record assignment needs it }
@@ -18742,6 +18982,7 @@ begin
   Self.Emit(#9'mov sp, x29');
   Self.Emit(#9'ldp x29, x30, [sp], #16');
   Self.Emit(#9'ret');
+  Self.DbgEndFunc();
   TvArmEnd(SavedArmNodes, SavedArmPos);
   FAsm := SavedAsm;
   FrameAligned := (FFrameSize + 15) and (not 15);
@@ -19001,6 +19242,7 @@ begin
     call sites need nothing here — RoutineSym mangles through the
     semantic pass's ResolvedEmitName on both the definition and the call. }
   FCurrentUnitName := AUnit.Name;
+  FDbgSrcFile := AUnit.SourceFile;
   RegisterUnitVars(AUnit.IntfBlock);
   RegisterUnitVars(AUnit.ImplBlock);
   RegisterClassVars(AUnit.IntfBlock.TypeDecls);

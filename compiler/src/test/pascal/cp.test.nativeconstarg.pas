@@ -56,6 +56,10 @@ type
     { --debug-opdf facts: the backend emits per-statement .Ldbg labels and
       records exact frame offsets; normal builds stay label-free. }
     procedure TestOpdf_StatementLabels_AndFacts;
+    { arm64 records the same facts: the Darwin routine label, statement and
+      end labels, every named slot at its signed x29 offset (params spilled
+      below the frame pointer), a var param as an indirect slot }
+    procedure TestOpdf_Arm64_StatementLabels_AndFacts;
     procedure TestOpdf_Off_NoDbgLabels;
     { Self is typed as the owning class; value record params present the
       '_data' shadow slot (the inline copy) so field drilldown works. }
@@ -521,6 +525,73 @@ begin
   V := F.FindVar('H');
   AssertNotNil('local H recorded', V);
   AssertTrue('H not a param', not V.IsParam);
+  Prog.Free();
+  CG.Free();
+end;
+
+procedure TNativeConstArgTests.TestOpdf_Arm64_StatementLabels_AndFacts;
+var
+  L:    TLexer;
+  P:    TParser;
+  Prog: TProgram;
+  A:    TSemanticAnalyser;
+  CG:   TCodeGenNative;
+  T:    TTargetDesc;
+  Asm_: string;
+  F:    TDbgFunc;
+  V:    TDbgVar;
+begin
+  L := TLexer.Create('''
+      program P;
+      procedure Twice(X: Integer; var R: Integer);
+      var H: Integer;
+      begin
+        H := X * 2;
+        R := H;
+      end;
+      var G: Integer;
+      begin
+        Twice(4, G);
+        WriteLn(G);
+      end.
+      ''');
+  P := TParser.Create(L);
+  Prog := P.Parse();
+  P.Free(); L.Free();
+  A := TSemanticAnalyser.Create();
+  A.Analyse(Prog);
+  A.Free();
+  AssertTrue('target', ParseTargetName('macos-arm64', T));
+  CG := TCodeGenNative.Create();
+  CG.SetTarget(T);
+  CG.SetOpdfMode(True);
+  CG.Generate(Prog);
+  Asm_ := CG.GetOutput();
+  AssertTrue('statement labels emitted', Pos('.Ldbg_0:', Asm_) > 0);
+  AssertTrue('end label emitted', Pos('.Ldbg_end_', Asm_) > 0);
+  AssertEquals('two functions recorded (Twice + main)',
+    2, CG.GetDebugFacts().Funcs.Count);
+  F := TDbgFunc(CG.GetDebugFacts().Funcs.Items[0]);
+  AssertEquals('Darwin routine label', '_Twice', F.SymbolName);
+  AssertTrue('end label recorded', F.EndLabel <> '');
+  AssertEquals('one line per statement', 2, F.Lines.Count);
+  V := F.FindVar('X');
+  AssertNotNil('param X recorded', V);
+  AssertTrue('X marked as param', V.IsParam);
+  AssertEquals('X spilled to the first slot below x29', -8, V.RbpOffset);
+  AssertNotNil('X typed', V.TypeDesc);
+  V := F.FindVar('R');
+  AssertNotNil('var param R recorded', V);
+  AssertTrue('R is a var param', V.IsVarParam);
+  AssertTrue('R slot holds the address', V.Indirect);
+  V := F.FindVar('H');
+  AssertNotNil('local H recorded', V);
+  AssertTrue('H not a param', not V.IsParam);
+  AssertTrue('H below x29', V.RbpOffset < 0);
+  AssertNotNil('H typed', V.TypeDesc);
+  AssertTrue('internal slots are not variables', F.FindVar('__iret') = nil);
+  F := TDbgFunc(CG.GetDebugFacts().Funcs.Items[1]);
+  AssertEquals('program entry', '_main', F.SymbolName);
   Prog.Free();
   CG.Free();
 end;
