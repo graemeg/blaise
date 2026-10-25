@@ -118,6 +118,13 @@ type
       bound's '-' became part of the instance's symbols, which the x86-64
       internal assembler rejected }
     procedure TestCodegen_StaticArrayTypeArg_MangledSymbols;
+    { BUG-20261022-generic-type-method-overloads: each overload of a generic
+      instance gets its own symbol, carrying the substituted signature, even
+      when substitution makes two of them identical }
+    procedure TestCodegen_InstanceOverloads_DistinctSymbols;
+    { an override of one overload spelt without `overload` matched no slot,
+      and was dropped silently }
+    procedure TestSem_InstanceOverrideOfOverload_NeedsOverload;
   end;
 
 implementation
@@ -1328,6 +1335,63 @@ begin
     Pos('TBox_array[', AsmX) < 0);
   AssertTrue('no bracket in an arm64 symbol',
     Pos('TBox_array[', AsmA) < 0);
+end;
+
+procedure TGenericsTests.TestCodegen_InstanceOverloads_DistinctSymbols;
+const
+  Src = '''
+    program P;
+    type
+      TBox<T> = class
+        procedure Put(A: T); overload;
+        procedure Put(A: T; B: Integer); overload;
+        procedure Put(A: Integer); overload;
+      end;
+    procedure TBox<T>.Put(A: T); begin end;
+    procedure TBox<T>.Put(A: T; B: Integer); begin end;
+    procedure TBox<T>.Put(A: Integer); begin end;
+    var B: TBox<Integer>;
+    begin
+      B := TBox<Integer>.Create();
+      B.Put(1, 2)
+    end.
+    ''';
+begin
+  AssertEquals('two-argument overload', '',
+    AsmMissing(Src, 'TBox_Integer_Put_D_ii:', 'TBox_Integer_Put_D_ii:'));
+  AssertEquals('one-argument overload', '',
+    AsmMissing(Src, 'TBox_Integer_Put_D_i:', 'TBox_Integer_Put_D_i:'));
+  AssertEquals('the overload identical after substitution', '',
+    AsmMissing(Src, 'TBox_Integer_Put_D_i_D_2:', 'TBox_Integer_Put_D_i_D_2:'));
+end;
+
+procedure TGenericsTests.TestSem_InstanceOverrideOfOverload_NeedsOverload;
+const
+  Base = '''
+    program P;
+    type
+      TBase<T> = class
+        function D(): string; overload; virtual;
+        function D(const S: string): string; overload; virtual;
+      end;
+      TKid<T> = class(TBase<T>)
+        function D(const S: string): string; %s
+      end;
+    function TBase<T>.D(): string; begin Result := '' end;
+    function TBase<T>.D(const S: string): string; begin Result := S end;
+    function TKid<T>.D(const S: string): string; begin Result := S end;
+    var K: TKid<Integer>;
+    begin
+    end.
+    ''';
+var
+  Err: string;
+begin
+  Err := SemanticError(Format(Base, ['override;']));
+  AssertTrue('rejected: ' + Err,
+    Pos('marked override but no matching virtual base method', Err) >= 0);
+  AssertEquals('accepted with overload', '',
+    SemanticError(Format(Base, ['overload; override;'])));
 end;
 
 initialization

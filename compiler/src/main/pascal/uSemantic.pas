@@ -657,6 +657,7 @@ type
     { Full mangled signature for a TMethodDecl: '$<code1><code2>…'.
       Empty parameter list yields '$' (lone dollar). }
     function  MangleParamSig(ADecl: TMethodDecl): string;
+    function  InstanceMethodKey(AMethods: TObjectList; AIndex: Integer): string;
     procedure CheckImplMatchesDecl(AImpl, ADecl: TMethodDecl;
       const AImplSig: string);
     function  ImplSpellingMatches(AImpl, ADecl: TMethodDecl): Boolean;
@@ -3902,18 +3903,6 @@ begin
     if Methods = nil then
       Continue;
     { Find the matching forward declaration in the template }
-    { Overloaded methods in a generic type are not supported yet: every
-      overload of an instance would be emitted under one label (see
-      BUGS.md, BUG-20261022-generic-type-method-overloads). }
-    K := 0;
-    for J := 0 to Methods.Count - 1 do
-      if SameText(TMethodDecl(Methods.Items[J]).Name, Decl.Name) then
-        Inc(K);
-    if K > 1 then
-      SemanticError(
-        Format('Overloaded methods in a generic type are not supported yet: ' +
-          '''%s.%s'' is declared %d times', [Decl.OwnerTypeName, Decl.Name, K]),
-        Decl.Line, Decl.Col);
     { the declaration must have this parameter list (GH #215) }
     MDecl := nil;
     for J := 0 to Methods.Count - 1 do
@@ -5139,6 +5128,7 @@ var
   NewFDecl: TFieldDecl;
   MDecl:    TMethodDecl;
   NewMDecl: TMethodDecl;
+  MangledKey: string;
   Par:      TMethodParam;
   NewPar:   TMethodParam;
   PDecl:    TPropertyDecl;
@@ -5269,6 +5259,9 @@ begin
       NewMDecl.IsStatic      := MDecl.IsStatic;
       NewMDecl.IsConstructor := MDecl.IsConstructor;
       NewMDecl.IsOperator    := MDecl.IsOperator;
+      NewMDecl.IsOverload    := MDecl.IsOverload;
+      NewMDecl.Line          := MDecl.Line;
+      NewMDecl.Col           := MDecl.Col;
       NewMDecl.OperatorKind  := MDecl.OperatorKind;
       NewMDecl.Visibility    := MDecl.Visibility;
       { A generic METHOD on a generic class (TBox<T>.MapTo<R>) keeps its own
@@ -5382,20 +5375,21 @@ begin
     begin
       NewMDecl := TMethodDecl(ClonedCD.Methods.Items[J]);
       if NewMDecl.TypeParams <> nil then Continue;  { generic method — no slot }
+      MangledKey := InstanceMethodKey(ClonedCD.Methods, J);
       if NewMDecl.IsVirtual then
-        RT.AddVTableSlot(NewMDecl.Name, '$' + ATypeName + '_' + NewMDecl.Name)
+        RT.AddVTableSlot(MangledKey, '$' + ATypeName + '_' + MangledKey)
       else if NewMDecl.IsOverride then
         RT.OverrideVTableSlot(
-          RT.FindVTableSlot(NewMDecl.Name),
-          '$' + ATypeName + '_' + NewMDecl.Name)
+          RT.FindVTableSlot(MangledKey),
+          '$' + ATypeName + '_' + MangledKey)
       else if NewMDecl.IsConstructor and
               (not NewMDecl.IsVirtual) and (not NewMDecl.IsOverride) then
       begin
-        if RT.FindVTableSlot(NewMDecl.Name) >= 0 then
-          RT.OverrideVTableSlot(RT.FindVTableSlot(NewMDecl.Name),
-            '$' + ATypeName + '_' + NewMDecl.Name)
+        if RT.FindVTableSlot(MangledKey) >= 0 then
+          RT.OverrideVTableSlot(RT.FindVTableSlot(MangledKey),
+            '$' + ATypeName + '_' + MangledKey)
         else
-          RT.AddVTableSlot(NewMDecl.Name, '$' + ATypeName + '_' + NewMDecl.Name);
+          RT.AddVTableSlot(MangledKey, '$' + ATypeName + '_' + MangledKey);
       end;
     end;
 
@@ -5444,7 +5438,10 @@ begin
         it here would make every private member of an imported generic look
         same-unit and therefore visible. }
       NewMDecl.VisibilityUnit := Templ.DefUnitName;
-      NewMDecl.ResolvedEmitName := ATypeName + '_' + NewMDecl.Name;
+      { An overload carries its substituted parameter signature, as a
+        non-generic overload does, so each one gets its own symbol. }
+      MangledKey := InstanceMethodKey(ClonedCD.Methods, J);
+      NewMDecl.ResolvedEmitName := ATypeName + '_' + MangledKey;
       { Record the emitted symbol on the descriptor so a DESCENDANT instance
         that inherits a non-virtual interface method can resolve it: such a
         method has no vtable slot, and the descendant's own class def does not
@@ -5463,7 +5460,18 @@ begin
       end;
 
       if NewMDecl.IsVirtual or NewMDecl.IsOverride or NewMDecl.IsConstructor then
-        NewMDecl.VTableSlot := RT.FindVTableSlot(NewMDecl.Name);
+      begin
+        NewMDecl.VTableSlot := RT.FindVTableSlot(MangledKey);
+        { As for a non-generic class.  Without it the override was dropped
+          silently and every call dispatched to the base method -- the usual
+          way here being an override of one overload spelt without
+          `overload`, whose key then lacks the signature. }
+        if NewMDecl.IsOverride and (NewMDecl.VTableSlot < 0) then
+          SemanticError(
+            Format('Method ''%s'' marked override but no matching virtual ' +
+              'base method found in ''%s''', [NewMDecl.Name, ATypeName]),
+            NewMDecl.Line, NewMDecl.Col);
+      end;
 
       for K := 0 to NewMDecl.Params.Count - 1 do
       begin
@@ -5686,6 +5694,7 @@ begin
       NewMDecl.Name          := MDecl.Name;
       NewMDecl.OwnerTypeName := ATypeName;
       NewMDecl.IsRecordMethod := True;
+      NewMDecl.IsOverload    := MDecl.IsOverload;
       NewMDecl.Visibility    := MDecl.Visibility;
       if (MDecl.Body <> nil) and (not DeferBodies) then
       begin
@@ -5749,7 +5758,7 @@ begin
       AddGroupEntry(FMethodGroups, Key, NewMDecl);
       NewMDecl.OwningUnit      := Sym.OwningUnit;
       { Bare, like class instances — see InstantiateGeneric (BUG-004). }
-      NewMDecl.ResolvedEmitName := ATypeName + '_' + NewMDecl.Name;
+      NewMDecl.ResolvedEmitName := ATypeName + '_' + InstanceMethodKey(ClonedRD.Methods, J);
 
       for K := 0 to NewMDecl.Params.Count - 1 do
       begin
@@ -15279,6 +15288,53 @@ begin
     Par    := TMethodParam(ADecl.Params.Items[I]);
     Result := Result + MangleTypeCode(Par.ResolvedType, Par.IsVarParam);
   end;
+end;
+
+{ The per-type key of a generic instance's method AMethods[AIndex]: its
+  name, plus the substituted parameter signature when it is an overload --
+  the key a non-generic class gives the same method, so its symbol and
+  vtable slot are distinct from its siblings'.  The signature needs the
+  parameter types, so an overload's are resolved here; resolving them again
+  later is harmless.
+
+  Substitution can make two overloads identical (Put(A: T) and
+  Put(A: Integer) in TBox<Integer>).  As in Delphi the instance is still
+  valid and only a call is ambiguous, so the later sibling is told apart by
+  its position; both bodies are then emitted under distinct symbols. }
+function TSemanticAnalyser.InstanceMethodKey(AMethods: TObjectList;
+  AIndex: Integer): string;
+
+  function KeyOf(ADecl: TMethodDecl): string;
+  var
+    I:   Integer;
+    Par: TMethodParam;
+  begin
+    Result := ADecl.Name;
+    if not ADecl.IsOverload then Exit;
+    for I := 0 to ADecl.Params.Count - 1 do
+    begin
+      Par := TMethodParam(ADecl.Params.Items[I]);
+      if Par.ResolvedType = nil then
+        Par.ResolvedType := ResolveParamType(Par, ADecl.Line, ADecl.Col);
+    end;
+    Result := Result + '$' + MangleParamSig(ADecl);
+  end;
+
+var
+  I:    Integer;
+  Decl: TMethodDecl;
+begin
+  Decl := TMethodDecl(AMethods.Items[AIndex]);
+  Result := KeyOf(Decl);
+  if not Decl.IsOverload then Exit;
+  for I := 0 to AIndex - 1 do
+    if (TMethodDecl(AMethods.Items[I]).TypeParams = nil) and
+       TMethodDecl(AMethods.Items[I]).IsOverload and
+       SameText(KeyOf(TMethodDecl(AMethods.Items[I])), Result) then
+    begin
+      Result := Result + '$' + IntToStr(AIndex);
+      Exit;
+    end;
 end;
 
 { An out-of-line method implementation must repeat its declaration's

@@ -3001,6 +3001,27 @@ the same parent-method lookup and the same static-dispatch call
 sequence (`EmitInheritedCallSeq` on native, `EmitInheritedCallExpr` on
 QBE).
 
+=== Overloads in generic types
+
+Methods, constructors and virtual methods of a generic class or record may
+be overloaded under the same rules as a non-generic type.  Each overload of
+an instance is keyed by its parameter list *after* substitution, so
+`TBox<Integer>.Put(A: T)` and `TBox<string>.Put(A: T)` are told apart
+from each other and from their siblings exactly as hand-written overloads
+would be.
+
+Substitution can make two overloads identical: `Put(A: T)` and
+`Put(A: Integer)` in `TBox<Integer>`.  As in Delphi, the instance is still
+valid and only a call that cannot choose between them is an "ambiguous
+overload" error; `TBox<string>` keeps both overloads callable.  Rejecting
+the instance instead would make a generic's validity depend on which
+argument it is given for reasons the generic's author cannot see.
+
+Overriding one overload of a generic base needs `overload; override;`, as
+for a non-generic class.  An override that matches no virtual slot is an
+error in a generic instance too; before this rule it was dropped silently,
+and every call went to the base method.
+
 === Overload resolution and tie-break
 
 The arity filter in `ResolveStandaloneOverload` and

@@ -26,6 +26,11 @@ type
     { array-of-T fields of a generic class and record hold managed and plain
       elements }
     procedure TestRun_ArrayOfTypeParamFields;
+    { BUG-20261022-generic-type-method-overloads: overloaded methods,
+      constructors and virtual methods of generic classes and records, the
+      generic declared in a unit; one virtual overload is overridden, and
+      TBox<Integer> holds two overloads substitution made identical }
+    procedure TestRun_GenericTypeOverloads;
     procedure TestRun_TwoInstances_SelfCallReachesOwnInstance;
     procedure TestRun_GenericForIn_UserEnumerator;
     procedure TestRun_IMap_OneCallSiteBothImplementations;
@@ -1110,6 +1115,77 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '2yy2' + LE + '7' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericTypeOverloads;
+const
+  UnitSrc = '''
+    unit gover;
+    interface
+    type
+      TBase<T> = class
+        FV: T;
+        constructor Create(); overload;
+        constructor Create(const A: T); overload;
+        function Describe(): string; overload; virtual;
+        function Describe(const P: string): string; overload; virtual;
+      end;
+      TKid<T> = class(TBase<T>)
+        function Describe(const P: string): string; overload; override;
+      end;
+      TPair<T> = record
+        A: T;
+        function Get(): T; overload;
+        function Get(D: Integer): Integer; overload;
+      end;
+      TBox<T> = class
+        procedure Put(A: T); overload;
+        procedure Put(A: Integer); overload;
+      end;
+    implementation
+    constructor TBase<T>.Create(); begin end;
+    constructor TBase<T>.Create(const A: T); begin FV := A end;
+    function TBase<T>.Describe(): string; begin Result := 'base0' end;
+    function TBase<T>.Describe(const P: string): string; begin Result := 'base1 ' + P end;
+    function TKid<T>.Describe(const P: string): string; begin Result := 'kid ' + P end;
+    function TPair<T>.Get(): T; begin Result := A end;
+    function TPair<T>.Get(D: Integer): Integer; begin Result := D * 2 end;
+    procedure TBox<T>.Put(A: T); begin WriteLn('T') end;
+    procedure TBox<T>.Put(A: Integer); begin WriteLn('Int') end;
+    end.
+    ''';
+  Src = '''
+    program UseGOver;
+    uses gover;
+    var B: TBase<string>; K: TBase<Integer>; P: TPair<string>;
+      BS: TBox<string>; BI: TBox<Integer>;
+    begin
+      B := TBase<string>.Create('hi');
+      WriteLn(B.FV, ' ', B.Describe(), ' ', B.Describe('x'));
+      K := TKid<Integer>.Create(7);
+      WriteLn(K.FV, ' ', K.Describe(), ' ', K.Describe('y'));
+      K := TKid<Integer>.Create();
+      WriteLn(K.FV);
+      P.A := 'pa';
+      WriteLn(P.Get(), ' ', P.Get(21));
+      BS := TBox<string>.Create();
+      BS.Put('a');
+      BS.Put(1);
+      BI := TBox<Integer>.Create();
+      WriteLn(BI <> nil)
+    end.
+    ''';
+var
+  Output: string;
+  ExitCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile + run', CompileAndRunWithUnit('gover', UnitSrc, Src,
+    Output, ExitCode));
+  AssertEquals('exit code', 0, ExitCode);
+  AssertEquals('stdout', 'hi base0 base1 x' + #10 + '7 base0 kid y' + #10 +
+    '0' + #10 + 'pa 42' + #10 + 'T' + #10 + 'Int' + #10 + 'True' + #10,
+    Output);
 end;
 
 procedure TE2EGenericsTests.TestRun_Dictionary_NumericAndStaticArrayTypeArgs;

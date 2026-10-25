@@ -1929,12 +1929,12 @@ begin
     'function T.F: TI; begin Result := 1 end; ' +
     'procedure Foo(X: Integer); forward; ' +
     'procedure Foo(Y: Integer); begin end; begin Foo(1) end.');
-  AssertTrue('overloaded generic methods are reported, not miscompiled',
-    Pos('Overloaded methods in a generic type are not supported yet',
-      SemanticError('program P; type T<X> = class ' +
-        'procedure M(A: X; B: Integer); overload; procedure M(A: X); ' +
-        'overload; end; procedure T<X>.M(A: X; B: Integer); begin end; ' +
-        'procedure T<X>.M(A: X); begin end; begin end.')) >= 0);
+  { each overload's body links to its own declaration
+    (BUG-20261022-generic-type-method-overloads) }
+  Accepted('program P; type T<X> = class ' +
+    'procedure M(A: X; B: Integer); overload; procedure M(A: X); ' +
+    'overload; end; procedure T<X>.M(A: X; B: Integer); begin end; ' +
+    'procedure T<X>.M(A: X); begin end; var V: T<Byte>; begin end.');
 end;
 
 initialization
