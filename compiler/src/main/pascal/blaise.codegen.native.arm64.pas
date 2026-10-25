@@ -18787,9 +18787,11 @@ begin
   { Generic function instances: concrete monomorphised bodies, weak-bound
     like every other instance symbol. }
   for I := 0 to AProg.GenericFuncInstances.Count - 1 do
-    EmitFunctionDef(
-      TGenericFuncInstance(AProg.GenericFuncInstances.Items[I]).MethodDecl,
-      True);
+    if ClaimGenericFuncEmit(
+         TGenericFuncInstance(AProg.GenericFuncInstances.Items[I]).MethodDecl) then
+      EmitFunctionDef(
+        TGenericFuncInstance(AProg.GenericFuncInstances.Items[I]).MethodDecl,
+        True);
 
   { Generic RECORD instances: each monomorphised clone's method bodies.  A
     record instance needs no typeinfo or vtable, so unlike a generic CLASS
@@ -19292,9 +19294,11 @@ begin
   for I := 0 to AUnit.GenericIntfInstances.Count - 1 do
     FGenericIntfInstances.Add(AUnit.GenericIntfInstances.Items[I]);
   for I := 0 to AUnit.GenericFuncInstances.Count - 1 do
-    EmitFunctionDef(
-      TGenericFuncInstance(AUnit.GenericFuncInstances.Items[I]).MethodDecl,
-      True);
+    if ClaimGenericFuncEmit(
+         TGenericFuncInstance(AUnit.GenericFuncInstances.Items[I]).MethodDecl) then
+      EmitFunctionDef(
+        TGenericFuncInstance(AUnit.GenericFuncInstances.Items[I]).MethodDecl,
+        True);
   { generic METHOD instances (leg 37) — weak-bound like the func instances }
   for I := 0 to AUnit.GenericMethodInstances.Count - 1 do
     if TGenericMethodInstance(

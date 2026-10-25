@@ -83,6 +83,7 @@ type
     { Codegen — generic class declared in a unit, instantiated by program  }
     { ------------------------------------------------------------------ }
     procedure TestCodegen_UnitGeneric_InstanceSymbolsBareAndWeak;
+    procedure TestCodegen_UnitGenericFunc_OneInstancePerBuffer;
 
     { ------------------------------------------------------------------ }
     { Bare (unmangled-unit) class data must be WEAK — an rtl.* / runtime.* }
@@ -903,6 +904,57 @@ begin
     Pos('UPair_TPair_Integer_Integer_Create', A64) < 0);
   AssertTrue('x86-64: no raw angle-bracket symbol', not AngleBracketSymbol(X86));
   AssertTrue('arm64: no raw angle-bracket symbol', not AngleBracketSymbol(A64));
+end;
+
+function CountAsmOccurrences(const AHay, ANeedle: string): Integer;
+var
+  P: Integer;
+  Rest: string;
+begin
+  Result := 0;
+  Rest := AHay;
+  P := Pos(ANeedle, Rest);
+  while P >= 0 do
+  begin
+    Inc(Result);
+    Rest := Copy(Rest, P + Length(ANeedle), Length(Rest));
+    P := Pos(ANeedle, Rest);
+  end;
+end;
+
+procedure TGenericsTests.TestCodegen_UnitGenericFunc_OneInstancePerBuffer;
+const
+  UnitSrc = '''
+    unit gfb;
+    interface
+    function Twice<T>(A: T): T;
+    function UseOwn: Integer;
+    implementation
+    function Twice<T>(A: T): T; begin Result := A + A end;
+    function UseOwn: Integer; begin Result := Twice<Integer>(4) end;
+    end.
+    ''';
+  ProgSrc = '''
+    program pgf;
+    uses gfb;
+    begin
+      WriteLn(Twice<Integer>(21), UseOwn())
+    end.
+    ''';
+var
+  X86, A64: string;
+begin
+  { BUG-034: a unit compiled from source never registered its generic
+    function templates, so neither the unit nor the program could
+    instantiate them.  Both now do, each owning its own (weak) instance;
+    a whole-program build appends both modules to one buffer, which must
+    define the instance label once. }
+  X86 := GenAsmWithUnit(UnitSrc, ProgSrc, TargetX86_64);
+  A64 := GenAsmWithUnit(UnitSrc, ProgSrc, TargetArm64);
+  AssertEquals('x86-64: Twice<Integer> defined once', 1,
+    CountAsmOccurrences(X86, #10 + 'Twice_Integer:'));
+  AssertEquals('arm64: Twice<Integer> defined once', 1,
+    CountAsmOccurrences(A64, #10 + '_Twice_Integer:'));
 end;
 
 procedure TGenericsTests.TestCodegen_UnmangledUnitClass_WeakSymbols;

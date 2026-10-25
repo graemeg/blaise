@@ -506,6 +506,7 @@ type
     procedure AnalyseMethodBodies(ABlock: TBlock);
     procedure AnalyseMethodDecl(AMethod: TMethodDecl; AClassType: TRecordTypeDesc);
     procedure AnalyseStandaloneDecls(ABlock: TBlock);
+    procedure RegisterGenericFuncTemplate(ADecl: TMethodDecl);
     procedure AnalyseStandaloneBodies(ABlock: TBlock);
     procedure AnalyseStandaloneDecl(ADecl: TMethodDecl);
     { AWithResult: an enclosing function's Result is capturable -- true
@@ -3141,9 +3142,12 @@ begin
       ImplDecl := TMethodDecl(AUnit.ImplBlock.ProcDecls.Items[I]);
       if ImplDecl.OwnerTypeName <> '' then Continue;  { class method — already handled }
       { Generic free routines defer all param/return resolution to
-        instantiation time; AnalyseStandaloneDecl below registers
-        the template. }
-      if ImplDecl.TypeParams <> nil then Continue;
+        instantiation time; only the template is registered here. }
+      if ImplDecl.TypeParams <> nil then
+      begin
+        RegisterGenericFuncTemplate(ImplDecl);
+        Continue;
+      end;
 
       for J := 0 to ImplDecl.Params.Count - 1 do
       begin
@@ -6278,7 +6282,10 @@ begin
       Sym := TSymbol.Create(AInstName, skFunction, NewMDecl.ResolvedReturnType)
     else
       Sym := TSymbol.Create(AInstName, skProcedure, nil);
-    FTable.DefineGlobal(Sym);
+    { Another module may already hold the global symbol for this instance;
+      both describe the same signature. }
+    if not FTable.DefineGlobal(Sym) then
+      Sym.Free();
 
     { Store for codegen }
     GFI            := TGenericFuncInstance.Create();
@@ -11185,6 +11192,26 @@ begin
   ABin.ResolvedType := Result;
 end;
 
+{ Registers a generic free routine as a template for on-demand
+  instantiation, mirrored on FTable so imported units (uSemanticImport)
+  share the same lookup surface as in-unit templates. }
+procedure TSemanticAnalyser.RegisterGenericFuncTemplate(ADecl: TMethodDecl);
+var
+  CurUnit:  string;
+  PrevUnit: string;
+begin
+  FGenericFuncTemplates.AddObject(ADecl.Name, ADecl);
+  if FCurrentUnitName <> '' then
+    CurUnit := FCurrentUnitName
+  else
+    CurUnit := '<program>';
+  PrevUnit := FTable.RegisterGenericRoutine(ADecl.Name, ADecl, CurUnit);
+  if PrevUnit <> '' then
+    SemanticError(
+      GenericCollisionMsg('Generic routine', ADecl.Name, PrevUnit, CurUnit),
+      ADecl.Line, ADecl.Col);
+end;
+
 procedure TSemanticAnalyser.AnalyseStandaloneDecls(ABlock: TBlock);
 var
   I, J:    Integer;
@@ -11192,8 +11219,6 @@ var
   Par:     TMethodParam;
   RetType: TTypeDesc;
   Sym:     TSymbol;
-  CurUnit:  string;
-  PrevUnit: string;
   Fwd:     TMethodDecl;
 begin
   for I := 0 to ABlock.ProcDecls.Count - 1 do
@@ -11206,16 +11231,7 @@ begin
       the same lookup surface as in-unit templates. }
     if ADecl.TypeParams <> nil then
     begin
-      FGenericFuncTemplates.AddObject(ADecl.Name, ADecl);
-      if FCurrentUnitName <> '' then
-        CurUnit := FCurrentUnitName
-      else
-        CurUnit := '<program>';
-      PrevUnit := FTable.RegisterGenericRoutine(ADecl.Name, ADecl, CurUnit);
-      if PrevUnit <> '' then
-        SemanticError(
-          GenericCollisionMsg('Generic routine', ADecl.Name, PrevUnit, CurUnit),
-          ADecl.Line, ADecl.Col);
+      RegisterGenericFuncTemplate(ADecl);
       Continue;
     end;
 
@@ -16469,6 +16485,12 @@ begin
            not SameText(Cand.OwningUnit, FCurrentUnitName) then
           Continue;
         if (WinUnit <> '') and not SameText(Cand.OwningUnit, WinUnit) then
+          Continue;
+        { A generic function instance belongs to the module that
+          instantiated it: each module emits its own weak copy, so another
+          module's same-named instance is not a second candidate. }
+        if (StrPos('<', Cand.Name) >= 0) and
+           not SameText(Cand.OwningUnit, FCurrentUnitName) then
           Continue;
         Inc(TotalCnt);
         { A varargs external accepts any argument count >= its fixed

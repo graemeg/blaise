@@ -395,10 +395,12 @@ type
       analysis and on the cached-.bif import path alike. }
     procedure TestCollidingGenerics_TwoSourceUnits_Rejected;
     procedure TestCollidingGenerics_CachedIface_Rejected;
-    { NOTE: drives the cached-.bif path only — a cross-unit generic FUNCTION
-      call cannot resolve on the whole-program source path at all (BUGS.md
-      BUG-034); extend to the source path when that gap is fixed. }
+    { Colliding generic free routines: cached-.bif path and source path }
     procedure TestCollidingGenericRoutines_CachedIface_Rejected;
+    procedure TestCollidingGenericRoutines_FromSource_Rejected;
+    { BUG-034: generic functions from units compiled from source, called by
+      the units themselves and by the program, in every build mode }
+    procedure TestGenericFuncFromSourceUnits_EveryBuildMode;
   end;
 
 implementation
@@ -5578,6 +5580,135 @@ begin
              Pos('TBox', Captured) >= 0);
   AssertTrue('error says declared in both, out: ' + Captured,
              Pos('is declared in both', Captured) >= 0)
+end;
+
+procedure TSepCompileTests.TestCollidingGenericRoutines_FromSource_Rejected;
+const
+  UnitASrc =
+    '''
+    unit GfsA;
+    interface
+    function Pick<T>(AVal: T): T;
+    implementation
+    function Pick<T>(AVal: T): T;
+    begin
+      Result := AVal
+    end;
+    end.
+    ''';
+  UnitBSrc =
+    '''
+    unit GfsB;
+    interface
+    function Pick<T>(AVal: T): T;
+    implementation
+    function Pick<T>(AVal: T): T;
+    begin
+      Result := AVal
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseFs;
+    uses GfsA, GfsB;
+    begin
+      WriteLn(Pick<Integer>(7))
+    end.
+    ''';
+var
+  Dir, ProgPas, Captured: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  Dir := FScratch + '/gfscoll';
+  ForceDirectories(Dir);
+  WriteFile(Dir + '/GfsA.pas', UnitASrc);
+  WriteFile(Dir + '/GfsB.pas', UnitBSrc);
+  ProgPas := Dir + '/use_fs.pas';
+  WriteFile(ProgPas, ProgSrc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/use_fs',
+                   '--unit-path', Dir], Captured);
+  AssertTrue('compile must FAIL (colliding generic routine Pick), out: '
+             + Captured, Rc <> 0);
+  AssertTrue('error says declared in both, out: ' + Captured,
+             Pos('is declared in both', Captured) >= 0)
+end;
+
+procedure TSepCompileTests.TestGenericFuncFromSourceUnits_EveryBuildMode;
+const
+  BSrc =
+    '''
+    unit gfb;
+    interface
+    function Twice<T>(A: T): T;
+    function UseOwn: Integer;
+    implementation
+    function Helper(A: Integer): Integer; begin Result := A end;
+    function Twice<T>(A: T): T; begin Result := A + A end;
+    function UseOwn: Integer; begin Result := Helper(Twice<Integer>(4)) end;
+    end.
+    ''';
+  CSrc =
+    '''
+    unit gfc;
+    interface
+    uses gfb;
+    function FromC: string;
+    implementation
+    function FromC: string; begin Result := Twice<string>('ab') end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program pgf;
+    uses gfb, gfc;
+    begin
+      WriteLn(Twice<Integer>(21), ' ', UseOwn(), ' ', FromC(), ' ',
+        Twice<string>('x'))
+    end.
+    ''';
+  Expected = '42 8 abab xx' + #10;
+var
+  Dir, ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc, Leg: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  Dir := FScratch + '/gfsrc';
+  ForceDirectories(Dir);
+  WriteFile(Dir + '/gfb.pas', BSrc);
+  WriteFile(Dir + '/gfc.pas', CSrc);
+  ProgPas := Dir + '/pgf.pas';
+  ProgBin := Dir + '/pgf';
+  WriteFile(ProgPas, ProgSrc);
+  { whole-program: every module in one object, so a shared instance must be
+    defined once }
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--no-incremental', '--unit-path', Dir], Captured);
+  AssertEquals('whole-program build (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('whole-program run exit code', 0, Rc);
+  AssertEquals('whole-program stdout', Expected, Captured);
+  { incremental: cold cache, then warm cache (units loaded from .bif) }
+  CacheDir := Dir + '/cache';
+  for Leg := 0 to 1 do
+  begin
+    Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                     '--unit-cache', CacheDir, '--unit-path', Dir], Captured);
+    AssertEquals('incremental build ' + IntToStr(Leg) + ' (out: ' +
+      Captured + ')', 0, Rc);
+    Rc := RunBinary(ProgBin, Captured);
+    AssertEquals('incremental run exit code ' + IntToStr(Leg), 0, Rc);
+    AssertEquals('incremental stdout ' + IntToStr(Leg), Expected, Captured);
+  end;
 end;
 
 procedure TSepCompileTests.TestCollidingGenericRoutines_CachedIface_Rejected;

@@ -57,6 +57,12 @@ type
       O(N^2) final concat) is the right structure — the same approach the QBE
       backend's TIRBuffer uses. }
     FAsm:      TStringBuilder;
+    { Generic function instances already emitted into FAsm, by instance
+      name.  Every module monomorphises its own copy (weak-bound across
+      objects), so a whole-program build that appends several modules to one
+      buffer would otherwise define the same label twice. }
+    FEmittedGenericFuncs: TStringList;
+    function ClaimGenericFuncEmit(ADecl: TMethodDecl): Boolean;
 
     { Append one line of assembly (a newline is added).  Virtual so a target
       backend can observe the emitted stream (the x86-64 backend tracks the
@@ -262,12 +268,23 @@ begin
   FTarget   := ATarget;
   FSymTable := nil;
   FAsm      := TStringBuilder.Create();
+  FEmittedGenericFuncs := TStringList.Create();
+  FEmittedGenericFuncs.CaseSensitive := True;
 end;
 
 destructor TNativeBackend.Destroy;
 begin
   FAsm.Free();
+  FEmittedGenericFuncs.Free();
   inherited Destroy();
+end;
+
+{ True the first time ADecl's instance is emitted into this buffer. }
+function TNativeBackend.ClaimGenericFuncEmit(ADecl: TMethodDecl): Boolean;
+begin
+  Result := FEmittedGenericFuncs.IndexOf(ADecl.Name) < 0;
+  if Result then
+    FEmittedGenericFuncs.Add(ADecl.Name);
 end;
 
 procedure TNativeBackend.SetSymbolTable(ASymTable: TSymbolTable);

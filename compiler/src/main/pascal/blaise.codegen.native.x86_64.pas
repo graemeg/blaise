@@ -26772,8 +26772,10 @@ begin
 
   { Concrete generic function instances. }
   for I := 0 to AProg.GenericFuncInstances.Count - 1 do
-    Self.EmitFunctionDef(
-      TGenericFuncInstance(AProg.GenericFuncInstances.Items[I]).MethodDecl, True);
+    if Self.ClaimGenericFuncEmit(
+         TGenericFuncInstance(AProg.GenericFuncInstances.Items[I]).MethodDecl) then
+      Self.EmitFunctionDef(
+        TGenericFuncInstance(AProg.GenericFuncInstances.Items[I]).MethodDecl, True);
 
   { Pre-count try stmts in the program body so VarOperand resolves
     _exc_frame_N as globals (FFrame is nil in main, so the global path is
@@ -27000,8 +27002,10 @@ begin
 
   { Concrete generic function instances declared in this unit. }
   for I := 0 to AUnit.GenericFuncInstances.Count - 1 do
-    Self.EmitFunctionDef(
-      TGenericFuncInstance(AUnit.GenericFuncInstances.Items[I]).MethodDecl, True);
+    if Self.ClaimGenericFuncEmit(
+         TGenericFuncInstance(AUnit.GenericFuncInstances.Items[I]).MethodDecl) then
+      Self.EmitFunctionDef(
+        TGenericFuncInstance(AUnit.GenericFuncInstances.Items[I]).MethodDecl, True);
 
   { Initialization section: emit as a function <Unit>_init that the program's
     $main calls before the program body.  (Finalization is not yet wired into
