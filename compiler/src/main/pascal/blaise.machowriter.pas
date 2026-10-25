@@ -148,6 +148,7 @@ type
     TbssVm:  Int64;   { __DATA,__thread_bss (zerofill, follows tdata so
                         the TLV content region tdata..tbss is contiguous) }
     BssVm:   Int64;   { __DATA,__bss }
+    OpdfVm:  Int64;   { __OPDF,__opdf (0 when the image carries no OPDF) }
   end;
 
   TMachOExecWriter = class
@@ -159,6 +160,7 @@ type
     FTdata:     string;   { __DATA,__thread_data bytes }
     FTbssSize:  Int64;    { __DATA,__thread_bss zerofill size }
     FBssSize:   Int64;    { __DATA,__bss zerofill size }
+    FOpdf:      string;   { __OPDF,__opdf bytes ('' = no __OPDF segment) }
     FEntryTextOff: Integer;      { entry offset within __text }
     FRebases:   TList<Int64>;    { vm addresses needing slide }
     FBindAddrs: TList<Int64>;    { vm addresses of dylib-bound pointers }
@@ -185,6 +187,13 @@ type
     procedure SetTdata(const ABytes: string);
     procedure SetTbssSize(ASize: Int64);
     procedure SetBssSize(ASize: Int64);
+    { OPDF debug payload (--debug-opdf).  Non-empty adds a read-only __OPDF
+      segment between __DATA and __LINKEDIT holding one __opdf section, so
+      the debug info ships inside the signed image like the ELF .opdf
+      section.  Its pointers hold LINK-TIME addresses and are never rebased:
+      dyld does not touch the segment, the debugger adds the ASLR slide.
+      Must be set before the layout is queried (it adds a load command). }
+    procedure SetOpdf(const ABytes: string);
     { Entry point, as an offset into the __text payload. }
     procedure SetEntryTextOffset(AOff: Integer);
     { CodeDirectory identifier (conventionally the binary's name). }
@@ -1238,6 +1247,14 @@ begin
   FBssSize := ASize;
 end;
 
+procedure TMachOExecWriter.SetOpdf(const ABytes: string);
+begin
+  if FLayoutTaken and ((FOpdf = '') <> (ABytes = '')) then
+    raise EMachOWriter.Create('machowriter: SetOpdf after the layout was ' +
+      'queried (the __OPDF load command would move __TEXT)');
+  FOpdf := ABytes;
+end;
+
 procedure TMachOExecWriter.SetEntryTextOffset(AOff: Integer);
 begin
   FEntryTextOff := AOff;
@@ -1290,6 +1307,8 @@ var
   I: Integer;
 begin
   Result := EXEC_SIZEOFCMDS;
+  if FOpdf <> '' then
+    Result := Result + SEGMENT_CMD_SIZE + SECTION_64_SIZE;
   for I := 0 to FDylibs.Count - 1 do
     Result := Result + DylibCmdSize(FDylibs.Get(I));
 end;
@@ -1327,6 +1346,11 @@ begin
     the plain bss }
   Result.TbssVm := Result.TdataVm + Length(FTdata);
   Result.BssVm := MoAlignUp64(Result.TbssVm + FTbssSize, 8);
+  { __OPDF follows the __DATA segment's page-rounded VM extent }
+  Result.OpdfVm := 0;
+  if FOpdf <> '' then
+    Result.OpdfVm := Result.DataVm
+      + MoAlignUp64(Result.BssVm + FBssSize - Result.DataVm, MACHO_PAGE_SIZE);
 end;
 
 function Be32(AVal: Int64): string;
@@ -1351,6 +1375,7 @@ var
   DataOff, TvarsOff, TdataOff, DataFileEnd: Int64;
   DataVm, BssVm, DataSegVmSize, DataSegFileSize: Int64;
   LinkOff, LinkVm: Int64;
+  OpdfOff, OpdfSegSize: Int64;
   RebOff, BindOff, SymOff, StrOff: Int64;
   SigOff, SigSize: Int64;
   NSlots, PageLen: Integer;
@@ -1380,6 +1405,15 @@ begin
   DataSegVmSize := MoAlignUp64(BssVm + FBssSize - DataVm, MACHO_PAGE_SIZE);
   LinkOff := DataOff + DataSegFileSize;
   LinkVm := DataVm + DataSegVmSize;
+  { optional __OPDF segment between __DATA and __LINKEDIT }
+  OpdfOff := LinkOff;
+  OpdfSegSize := 0;
+  if FOpdf <> '' then
+  begin
+    OpdfSegSize := MoAlignUp64(Length(FOpdf), MACHO_PAGE_SIZE);
+    LinkOff := LinkOff + OpdfSegSize;
+    LinkVm := LinkVm + OpdfSegSize;
+  end;
 
   Head := TByteBuf.Create();
   Reb := TByteBuf.Create();
@@ -1500,7 +1534,10 @@ begin
     Head.PushU32(CPU_TYPE_ARM64);
     Head.PushU32(CPU_SUBTYPE_ARM64_ALL);
     Head.PushU32(MH_EXECUTE);
-    Head.PushU32(EXEC_NCMDS + FDylibs.Count);
+    if FOpdf <> '' then
+      Head.PushU32(EXEC_NCMDS + 1 + FDylibs.Count)
+    else
+      Head.PushU32(EXEC_NCMDS + FDylibs.Count);
     Head.PushU32(ExecSizeOfCmds());
     HdrFlags := MH_NOUNDEFS or MH_DYLDLINK or MH_TWOLEVEL or MH_PIE;
     if Length(FTvars) > 0 then
@@ -1632,6 +1669,34 @@ begin
     Head.PushU32(0);
     Head.PushU32(0);
 
+    { ---- __OPDF (debug payload; read-only, never rebased) ---- }
+    if FOpdf <> '' then
+    begin
+      Head.PushU32(LC_SEGMENT_64);
+      Head.PushU32(SEGMENT_CMD_SIZE + SECTION_64_SIZE);
+      PushName16(Head, '__OPDF');
+      Head.PushU64(L.OpdfVm);
+      Head.PushU64(OpdfSegSize);
+      Head.PushU64(OpdfOff);
+      Head.PushU64(OpdfSegSize);
+      Head.PushU32(1);   { r-- }
+      Head.PushU32(1);
+      Head.PushU32(1);
+      Head.PushU32(0);
+      PushName16(Head, '__opdf');
+      PushName16(Head, '__OPDF');
+      Head.PushU64(L.OpdfVm);
+      Head.PushU64(Length(FOpdf));
+      Head.PushU32(Integer(OpdfOff));
+      Head.PushU32(0);   { byte-aligned stream }
+      Head.PushU32(0);
+      Head.PushU32(0);
+      Head.PushU32(S_REGULAR);
+      Head.PushU32(0);
+      Head.PushU32(0);
+      Head.PushU32(0);
+    end;
+
     { ---- __LINKEDIT ---- }
     Head.PushU32(LC_SEGMENT_64);
     Head.PushU32(SEGMENT_CMD_SIZE);
@@ -1755,6 +1820,11 @@ begin
     Head.AppendBytes(FTvars);
     Head.PadTo(Integer(TdataOff));
     Head.AppendBytes(FTdata);
+    if FOpdf <> '' then
+    begin
+      Head.PadTo(Integer(OpdfOff));
+      Head.AppendBytes(FOpdf);
+    end;
     Head.PadTo(Integer(LinkOff));
     Head.AppendBuf(Reb);
     Head.AppendBuf(Bind);

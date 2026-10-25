@@ -72,6 +72,10 @@ type
     { AddDylib after a layout query would move __TEXT under code already
       resolved against the old address: refused }
     procedure TestExtraDylib_AfterLayoutRefused;
+    { --debug-opdf: the OPDF payload rides in a read-only __OPDF segment of
+      its own between __DATA and __LINKEDIT, byte for byte; an image
+      without one carries no __OPDF segment at all }
+    procedure TestOpdf_OwnReadOnlySegment;
   end;
 
   { blaise.linker.macho.dylib: what a bound C library exports }
@@ -787,6 +791,57 @@ begin
     AssertTrue('refused', Raised);
   finally
     W.Free();
+  end;
+end;
+
+procedure TMachOExecWriterTests.TestOpdf_OwnReadOnlySegment;
+var
+  W: TMachOExecWriter;
+  F: TMachOFile;
+  S, D, LE: TMoSegment;
+  O: TMoSection;
+  Payload, Buf: string;
+  I: Integer;
+begin
+  F := BuildExec();
+  try
+    AssertTrue('no OPDF, no __OPDF segment', F.FindSegment('__OPDF') = nil);
+  finally
+    F.Free();
+  end;
+  Payload := 'OPDF';
+  for I := 0 to 99 do
+    Payload := Payload + Chr(I);
+  W := TMachOExecWriter.Create();
+  try
+    W.SetText(Chr($C0) + Chr($03) + Chr($5F) + Chr($D6));   { ret }
+    W.SetData(Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0) + Chr(0));
+    W.SetBssSize(64);
+    W.SetOpdf(Payload);
+    AssertTrue('layout places it', W.ComputeLayout().OpdfVm <> 0);
+    Buf := W.Finish();
+  finally
+    W.Free();
+  end;
+  F := ParseMachO(Buf, 'probe_opdf');
+  try
+    S := F.FindSegment('__OPDF');
+    D := F.FindSegment('__DATA');
+    LE := F.FindSegment('__LINKEDIT');
+    AssertTrue('__OPDF segment', S <> nil);
+    AssertEquals('r--', 1, S.InitProt);
+    AssertEquals('r-- max', 1, S.MaxProt);
+    AssertTrue('after __DATA (vm)', S.VmAddr >= D.VmAddr + D.VmSize);
+    AssertTrue('before __LINKEDIT (vm)', S.VmAddr + S.VmSize <= LE.VmAddr);
+    AssertTrue('before __LINKEDIT (file)', S.FileOff + S.FileSize <= LE.FileOff);
+    O := F.FindSection('__OPDF', '__opdf');
+    AssertTrue('__opdf section', O <> nil);
+    AssertEquals(Length(Payload), Integer(O.Size));
+    AssertTrue('vmaddr = segment start', O.Addr = S.VmAddr);
+    AssertEquals('payload bytes in the file', Payload,
+      Copy(F.Raw, O.Offset, Length(Payload)));
+  finally
+    F.Free();
   end;
 end;
 

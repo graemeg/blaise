@@ -62,6 +62,7 @@ type
     FObjs: TList<TMachOFile>;          { owned }
     { merged output streams (indices into these are pre-layout offsets) }
     FText, FConst, FData, FTvars, FTdata: string;
+    FOpdf: string;                     { merged __opdf debug payload }
     FTbssSize, FBssSize: Int64;
     { per input section (flat, in FSecFirst[obj]+sectIdx order):
       which stream (-1 = dropped) and the base offset inside it }
@@ -139,6 +140,7 @@ const
   smTdata = 4;
   smTbss = 5;
   smBss = 6;
+  smOpdf = 7;       { OPDF debug payload: own read-only segment, never rebased }
   smDropped = -1;
 
   STUB_SIZE = 12;   { adrp x16 / ldr x16 / br x16 }
@@ -259,11 +261,15 @@ begin
     Exit(smTbss);
   if (ASect.SegName = '__DATA') and (ASect.SectName = '__bss') then
     Exit(smBss);
-  { metadata sections an executable does not carry (embedded iface,
-    OPDF debug payloads) are dropped; anything else is a hard error so
-    a new section kind cannot silently vanish }
-  if (ASect.SectName = '__blaise_iface') or (ASect.SegName = '__BLAISE')
-     or (ASect.SectName = '__opdf') then
+  { OPDF debug payload (--debug-opdf): kept, in an __OPDF segment of its
+    own, so the debugger finds it inside the executable the way it finds the
+    ELF .opdf section }
+  if ASect.SectName = '__opdf' then
+    Exit(smOpdf);
+  { metadata an executable does not carry (the embedded unit interface) is
+    dropped; anything else is a hard error so a new section kind cannot
+    silently vanish }
+  if (ASect.SectName = '__blaise_iface') or (ASect.SegName = '__BLAISE') then
     Exit(smDropped);
   raise EMachOLinker.Create('macho linker: unmapped input section ' +
     ASect.SegName + ',' + ASect.SectName);
@@ -328,6 +334,13 @@ begin
           FBssSize := AlignUp(FBssSize, Align);
           FSecBase.Add(FBssSize);
           FBssSize := FBssSize + Sec.Size;
+        end;
+        smOpdf:
+        begin
+          { each unit's block is a self-contained, magic-headed OPDF stream
+            the reader walks byte by byte: concatenate with no padding }
+          FSecBase.Add(Length(FOpdf));
+          FOpdf := FOpdf + Sec.Data;
         end;
       else
         FSecBase.Add(0);
@@ -497,6 +510,9 @@ begin
     for J := 0 to Obj.Sections.Count - 1 do
     begin
       Sec := Obj.Sections.Get(J);
+      { debug-info pointers never import: an unresolved one is left zero
+        (ApplyFixups), it must not drag a dyld bind into the image }
+      if StreamOfSection(Sec) = smOpdf then Continue;
       for K := 0 to Sec.Relocs.Count - 1 do
       begin
         R := Sec.Relocs.Get(K);
@@ -547,6 +563,7 @@ begin
     smTdata: Result := FLayout.TdataVm;
     smTbss:  Result := FLayout.TbssVm;
     smBss:   Result := FLayout.BssVm;
+    smOpdf:  Result := FLayout.OpdfVm;
   else
     raise EMachOLinker.Create('macho linker: address of dropped section');
   end;
@@ -580,6 +597,7 @@ begin
     smData:  PutInto(FData);
     smTvars: PutInto(FTvars);
     smTdata: PutInto(FTdata);
+    smOpdf:  PutInto(FOpdf);
   else
     raise EMachOLinker.Create('macho linker: patch into zerofill section');
   end;
@@ -606,6 +624,7 @@ begin
     smData:  Result := GetFrom(FData);
     smTvars: Result := GetFrom(FTvars);
     smTdata: Result := GetFrom(FTdata);
+    smOpdf:  Result := GetFrom(FOpdf);
   else
     raise EMachOLinker.Create('macho linker: read from zerofill section');
   end;
@@ -697,7 +716,24 @@ begin
             if R.Length_ <> 3 then
               raise EMachOLinker.Create(
                 'macho linker: non-8-byte absolute relocation');
-            if IsImport then
+            if Strm = smOpdf then
+            begin
+              { debug info: the LINK-TIME address, no rebase -- the debugger
+                adds the ASLR slide, exactly as it does for an ELF PIE.  A
+                symbol no object defines leaves the field zero (the debugger
+                treats it as unknown) rather than failing the build. }
+              if IsImport then
+              begin
+                PatchStream(Strm, SiteOff, 8, 0);
+                WriteLn(StdErr, 'macho linker: note: OPDF debug info ',
+                  'references undefined symbol ''', Sym.Name,
+                  '''; its address is left 0');
+              end
+              else
+                PatchStream(Strm, SiteOff, 8,
+                  Target + ReadStream(Strm, SiteOff, 8));
+            end
+            else if IsImport then
             begin
               { direct data bind at the site (e.g. a TLV descriptor's
                 thunk pointer to __tlv_bootstrap) }
@@ -824,6 +860,7 @@ begin
   FWriter.SetTdata(FTdata);
   FWriter.SetTbssSize(FTbssSize);
   FWriter.SetBssSize(FBssSize);
+  FWriter.SetOpdf(FOpdf);
   FLayout := FWriter.ComputeLayout();
 
   ApplyFixups();
@@ -835,6 +872,7 @@ begin
   FWriter.SetData(FData);
   FWriter.SetTvars(FTvars);
   FWriter.SetTdata(FTdata);
+  FWriter.SetOpdf(FOpdf);
 
   for I := 0 to FDefNames.Count - 1 do
     FWriter.AddGlobal(FDefNames.Get(I), DefinedVm(I));
