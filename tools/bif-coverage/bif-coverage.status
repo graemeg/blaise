@@ -364,6 +364,8 @@ TUnitInterface.GenericDepHashes  serialise
 TUnitInterface.LinkLibs  serialise
 TUnitInterface.HasInitialization  serialise
 TUnitInterface.HasFinalization  serialise
+TUnitInterface.Target  serialise
+TUnitInterface.ImplicitDeps  serialise
 
 # TMethodParam (uAST.pas:1074)
 TMethodParam.ParamName  serialise
