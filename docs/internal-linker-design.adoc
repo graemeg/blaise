@@ -521,6 +521,15 @@ Write the final ELF executable file:
   generated `.interp`, `.plt`, `.got`, `.dynamic`, `.dynsym`, `.dynstr`,
   `.hash`, `.rela.dyn`, `.rela.plt`, and pass-through `.opdf.*`.
 * **Section headers** — for tooling (objdump, readelf, strip).
+* **Symbol table** — non-allocated `.symtab` + `.strtab`, for `nm`, `objdump`,
+  debuggers, profilers and crash symbolication.  Every named definition in a
+  laid-out section is listed: locals as `STB_LOCAL` (assembler `.L` labels
+  excepted), and each global once, by the same strong-over-weak rule symbol
+  resolution applies.  The internal assembler records no symbol sizes, so a
+  symbol's `st_size` is the distance to the next symbol in its section, and a
+  `NOTYPE` label takes `FUNC` or `OBJECT` from its section's flags.  A TLS
+  symbol holds its offset within the TLS segment.  The table is always
+  written, as the Mach-O writer always writes `LC_SYMTAB`; `strip` removes it.
 
 The `.dynamic` section contains:
 

@@ -69,6 +69,10 @@ type
       INCLUDING the alignment gap between them; PT_TLS p_memsz (and with it
       every TPOFF) was the bare sum of the two sizes, 8 bytes short here }
     procedure TestTls_BlockSizeCoversTheAlignmentGap;
+    { .symtab / .strtab for nm, objdump and debuggers
+      (BUG-20260725-internal-linker-no-symtab) }
+    procedure TestExe_SymtabListsDefinitionsWithSizes;
+    procedure TestTls_SymtabHoldsSegmentOffsets;
   end;
 
   TLinkerE2ETests = class(TTestCase)
@@ -147,6 +151,7 @@ type
       (the section-name table landed on its offset), and every thread
       started from zeros }
     procedure TestDyn_TdataImageWrittenAndLoaded;
+    procedure TestDyn_SymtabEmitted;
     { The export list is opt-in per target: a Linux dynamic link must not grow
       .dynsym entries (and so must stay byte-identical to before). }
     procedure TestDyn_LinuxTarget_ExportsNothing;
@@ -208,6 +213,7 @@ type
       with no external tools.  The binary cannot run on the Linux host, so this
       asserts the emitted ELF shape only. }
     procedure TestCompile_FreeBSDTarget_EmitsStaticFreeBSDExe;
+    procedure TestCompile_LinuxTarget_ExeHasSymbolTable;
   end;
 
 implementation
@@ -677,6 +683,51 @@ begin
   end;
 end;
 
+{ Look AName up in a linked image's .symtab, reached through the section
+  header table.  AIndex is the symbol's index and AFirstGlobal the section's
+  sh_info (the index of the first non-local symbol). }
+function FindSymtabSym(const ABytes, AName: string; out AIndex, AInfo,
+  AShndx, AFirstGlobal: Integer; out AValue, ASize: Int64): Boolean;
+var
+  ShOff, ShNum, J, E, K, StrOff, NameOff, Ent: Integer;
+  SymOff, SymSize: Int64;
+begin
+  Result := False;
+  AIndex := -1;
+  AInfo := 0;
+  AShndx := 0;
+  AFirstGlobal := 0;
+  AValue := 0;
+  ASize := 0;
+  ShOff := Integer(LeAt(ABytes, 40, 8));
+  ShNum := Integer(LeAt(ABytes, 60, 2));
+  for J := 0 to ShNum - 1 do
+  begin
+    E := ShOff + J * 64;
+    if LeAt(ABytes, E + 4, 4) <> 2 then Continue;   { SHT_SYMTAB }
+    SymOff := LeAt(ABytes, E + 24, 8);
+    SymSize := LeAt(ABytes, E + 32, 8);
+    AFirstGlobal := Integer(LeAt(ABytes, E + 44, 4));
+    StrOff := Integer(LeAt(ABytes,
+      ShOff + Integer(LeAt(ABytes, E + 40, 4)) * 64 + 24, 8));
+    for K := 0 to Integer(SymSize div 24) - 1 do
+    begin
+      Ent := Integer(SymOff) + K * 24;
+      NameOff := StrOff + Integer(LeAt(ABytes, Ent, 4));
+      if (Copy(ABytes, NameOff, Length(AName)) = AName) and
+         (OrdAt(ABytes, NameOff + Length(AName)) = 0) then
+      begin
+        AIndex := K;
+        AInfo := OrdAt(ABytes, Ent + 4);
+        AShndx := Integer(LeAt(ABytes, Ent + 6, 2));
+        AValue := LeAt(ABytes, Ent + 8, 8);
+        ASize := LeAt(ABytes, Ent + 16, 8);
+        Exit(True);
+      end;
+    end;
+  end;
+end;
+
 { True when some PT_LOAD maps file bytes [AOff, AOff + ALen) from the file. }
 function FileRangeLoaded(const ABytes: string; AOff, ALen: Int64): Boolean;
 var
@@ -1100,6 +1151,116 @@ begin
     AssertTrue('has PT_TLS', FindPhdr(Bytes, 7, Off, VAddr, FileSz, MemSz));
     AssertEquals('p_filesz is .tdata', Int64(4), FileSz);
     AssertEquals('p_memsz spans .tdata, the gap and .tbss', Int64(24), MemSz);
+  finally
+    Lk.Free();
+  end;
+end;
+
+procedure TLinkerTests.TestExe_SymtabListsDefinitionsWithSizes;
+const
+  Src =
+    '.text' + LineEnding +
+    '.globl _start' + LineEnding +
+    '_start:' + LineEnding +
+    '  call helper' + LineEnding +
+    '  ret' + LineEnding +
+    'helper:' + LineEnding +
+    '.Linner:' + LineEnding +
+    '  nop' + LineEnding +
+    '  ret' + LineEnding +
+    '.data' + LineEnding +
+    '.globl gv' + LineEnding +
+    'gv:' + LineEnding +
+    '  .quad 7' + LineEnding;
+var
+  Lk: TLinker;
+  Bytes: string;
+  Idx, Info, Shndx, FirstGlobal: Integer;
+  Value, Size, StartAddr: Int64;
+begin
+  { The assembler records no sizes, so each comes from the next symbol in
+    the section (or the section end); NOTYPE labels take FUNC or OBJECT from
+    their section; .L labels stay out. }
+  Lk := LinkObjs([Src], '_start', Bytes);
+  try
+    StartAddr := Lk.AddrOfSymbol('_start');
+    AssertTrue('_start listed', FindSymtabSym(Bytes, '_start', Idx, Info,
+      Shndx, FirstGlobal, Value, Size));
+    AssertEquals('_start GLOBAL FUNC', (1 shl 4) or 2, Info);
+    AssertEquals('_start value', StartAddr, Value);
+    AssertEquals('_start size: call + ret', Int64(6), Size);
+    AssertTrue('_start among the globals', Idx >= FirstGlobal);
+    AssertEquals('_start in .text (section 1)', 1, Shndx);
+
+    AssertTrue('helper listed', FindSymtabSym(Bytes, 'helper', Idx, Info,
+      Shndx, FirstGlobal, Value, Size));
+    AssertEquals('helper LOCAL FUNC', 2, Info);
+    AssertEquals('helper value', StartAddr + 6, Value);
+    AssertEquals('helper size: nop + ret', Int64(2), Size);
+    AssertTrue('helper among the locals', (Idx > 0) and (Idx < FirstGlobal));
+
+    AssertFalse('.L label left out', FindSymtabSym(Bytes, '.Linner', Idx,
+      Info, Shndx, FirstGlobal, Value, Size));
+
+    AssertTrue('gv listed', FindSymtabSym(Bytes, 'gv', Idx, Info, Shndx,
+      FirstGlobal, Value, Size));
+    AssertEquals('gv GLOBAL OBJECT', (1 shl 4) or 1, Info);
+    AssertEquals('gv value', Lk.AddrOfSymbol('gv'), Value);
+    AssertEquals('gv size', Int64(8), Size);
+  finally
+    Lk.Free();
+  end;
+end;
+
+procedure TLinkerTests.TestTls_SymtabHoldsSegmentOffsets;
+var
+  Lk: TLinker;
+  Bytes: string;
+  Idx, Info, Shndx, FirstGlobal: Integer;
+  Value, Size: Int64;
+begin
+  { An executable's STT_TLS symbol holds its offset in the TLS segment, not
+    a virtual address: ta opens .tdata, tb sits 8-aligned in .tbss. }
+  Lk := LinkObjs([TlsAsm], '_start', Bytes);
+  try
+    AssertTrue('ta listed', FindSymtabSym(Bytes, 'ta', Idx, Info, Shndx,
+      FirstGlobal, Value, Size));
+    AssertEquals('ta GLOBAL TLS', (1 shl 4) or 6, Info);
+    AssertEquals('ta offset', Int64(0), Value);
+    AssertTrue('tb listed', FindSymtabSym(Bytes, 'tb', Idx, Info, Shndx,
+      FirstGlobal, Value, Size));
+    AssertEquals('tb GLOBAL TLS', (1 shl 4) or 6, Info);
+    AssertEquals('tb offset', Int64(8), Value);
+    AssertEquals('tb size', Int64(12), Size);
+  finally
+    Lk.Free();
+  end;
+end;
+
+procedure TDynLinkerTests.TestDyn_SymtabEmitted;
+const
+  MainAsm =
+    '.text' + LineEnding +
+    '.globl main' + LineEnding +
+    'main:' + LineEnding +
+    '  xorl %eax, %eax' + LineEnding +
+    '  ret' + LineEnding;
+var
+  Lk: TLinker;
+  Bytes: string;
+  Idx, Info, Shndx, FirstGlobal: Integer;
+  Value, Size: Int64;
+begin
+  Lk := TLinker.Create();
+  try
+    Lk.SetDynamic(True);
+    Lk.AddOwnedObject(ParseElfObject(AssembleToBytes(MainAsm), 'main.o'));
+    Bytes := Lk.LinkToBytes('main');
+    AssertTrue('main listed in .symtab', FindSymtabSym(Bytes, 'main', Idx,
+      Info, Shndx, FirstGlobal, Value, Size));
+    AssertEquals('main GLOBAL FUNC', (1 shl 4) or 2, Info);
+    AssertEquals('main value', Lk.AddrOfSymbol('main'), Value);
+    AssertEquals('main size: xorl + ret', Int64(3), Size);
   finally
     Lk.Free();
   end;
@@ -2538,6 +2699,57 @@ begin
     if PType = 3 then FoundInterp := True;
   end;
   AssertFalse('freestanding FreeBSD exe must have no PT_INTERP', FoundInterp);
+end;
+
+procedure TInternalLinkerE2ETests.TestCompile_LinuxTarget_ExeHasSymbolTable;
+var
+  SrcFile, OutFile, CompOut, Bytes: string;
+  Rc, Idx, Info, Shndx, FirstGlobal: Integer;
+  Value, Size: Int64;
+begin
+  if not Self.CompilerAvailable() then
+  begin
+    Ignore('<toolchain-missing>');
+    Exit;
+  end;
+
+  FCounter := FCounter + 1;
+  SrcFile := FScratch + 'test_symtab_' + IntToStr(FCounter) + '.pas';
+  OutFile := FScratch + 'test_symtab_' + IntToStr(FCounter);
+  WriteFile(SrcFile,
+    'program test_symtab;' + LineEnding +
+    'procedure Greet;' + LineEnding +
+    'begin' + LineEnding +
+    '  WriteLn(''Hello'')' + LineEnding +
+    'end;' + LineEnding +
+    'begin' + LineEnding +
+    '  Greet()' + LineEnding +
+    'end.');
+  { A whole compile and internal link of a real program: its routines must
+    be listed with sizes, so nm, objdump and crash symbolication work on a
+    natively linked binary (BUG-20260725-internal-linker-no-symtab). }
+  Rc := Self.RunProc(FCompiler, [
+    '--source', SrcFile,
+    '--unit-path', FRTLPath,
+    '--unit-path', FStdlibPath,
+    '--output', OutFile,
+    '--backend', 'native',
+    '--assembler', 'internal',
+    '--linker', 'internal',
+    '--target', 'linux-x86_64'
+  ], CompOut);
+  if Rc <> 0 then
+    Fail('--target linux-x86_64 compile failed (rc=' + IntToStr(Rc) + '): ' +
+         CompOut);
+  Bytes := ReadWholeFile(OutFile);
+  AssertTrue('Greet listed', FindSymtabSym(Bytes, 'Greet', Idx, Info, Shndx,
+    FirstGlobal, Value, Size));
+  AssertEquals('Greet is a FUNC', 2, Info and 15);
+  AssertTrue('Greet has a size', Size > 0);
+  AssertTrue('main listed', FindSymtabSym(Bytes, 'main', Idx, Info, Shndx,
+    FirstGlobal, Value, Size));
+  AssertTrue('an RTL routine listed', FindSymtabSym(Bytes, '_StringRelease',
+    Idx, Info, Shndx, FirstGlobal, Value, Size));
 end;
 
 initialization

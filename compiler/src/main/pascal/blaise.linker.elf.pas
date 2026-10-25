@@ -49,7 +49,8 @@ unit blaise.linker.elf;
 interface
 
 uses
-  SysUtils, Generics.Collections, streams, blaise.elfreader;
+  SysUtils, Generics.Collections, streams, blaise.elfreader,
+  blaise.container.writer;
 
 type
   ELinker = class(Exception);
@@ -178,6 +179,17 @@ type
     Value:     Int64;     { resolved absolute address (0 for weak-undef) }
   end;
 
+  { One entry of the executable's .symtab (BuildSymtab). }
+  TOutSym = class
+  public
+    Name:  string;
+    Value: Int64;
+    Size:  Int64;    { 0 = derive from the next symbol in the section }
+    Bind:  Integer;
+    SType: Integer;
+    SecNo: Integer;  { output section header index }
+  end;
+
   { Linker: merge → layout → resolve symbols → relocate → emit.
 
     In static mode (default): non-PIE ET_EXEC, PC-relative relocations
@@ -259,6 +271,10 @@ type
     procedure ApplyRelocations;
     function ResolveSymbolAddr(AObj: TElfObjectFile; ASymIdx: Integer;
       const AContext: string): Int64;
+    function OutSectionIndex(AMerged: TMergedSection): Integer;
+    function BuildSymtab(out ASymTab, AStrTab: string): Integer;
+    procedure EmitSymtabHeaders(var ABuf: string; ASymName, AStrName,
+      ASymOff, ASymSize, AStrOff, AStrSize, AStrIndex, AFirstGlobal: Integer);
     function EmitExecutable(AEntry: Int64): string;
 
     { Phase C methods }
@@ -2108,6 +2124,231 @@ end;
   headers (exec run, write run), section payloads at file offsets that
   match (vaddr - base), then a minimal section-header table so
   readelf/objdump can inspect the result. }
+{ Output section header index of AMerged: the merged sections follow the
+  NULL header in layout order.  0 when AMerged was not laid out. }
+function TLinker.OutSectionIndex(AMerged: TMergedSection): Integer;
+var
+  I: Integer;
+begin
+  for I := 0 to FSecAddr.Count - 1 do
+    if FSecAddr.Get(I) = AMerged then
+      Exit(I + 1);
+  Result := 0;
+end;
+
+type
+  TInt64Arr = array of Int64;
+
+procedure LkSiftDown(var A: TInt64Arr; ARoot, AEnd: Integer);
+var
+  Root, Child: Integer;
+  T: Int64;
+begin
+  Root := ARoot;
+  while 2 * Root + 1 <= AEnd do
+  begin
+    Child := 2 * Root + 1;
+    if (Child < AEnd) and (A[Child] < A[Child + 1]) then
+      Inc(Child);
+    if A[Root] >= A[Child] then Exit;
+    T := A[Root];
+    A[Root] := A[Child];
+    A[Child] := T;
+    Root := Child;
+  end;
+end;
+
+{ In-place heapsort of the first ACount keys: O(n log n) without recursion,
+  for the tens of thousands of symbols a self-hosted compiler links. }
+procedure LkSortInt64(var A: TInt64Arr; ACount: Integer);
+var
+  I: Integer;
+  T: Int64;
+begin
+  for I := ACount div 2 - 1 downto 0 do
+    LkSiftDown(A, I, ACount - 1);
+  for I := ACount - 1 downto 1 do
+  begin
+    T := A[0];
+    A[0] := A[I];
+    A[I] := T;
+    LkSiftDown(A, 0, I - 1);
+  end;
+end;
+
+const
+  { BuildSymtab sorts symbols by (section, address) packed into one key. }
+  LK_SYMKEY_SHIFT = 44;
+
+{ The executable's .symtab and .strtab, for nm, objdump, profilers and crash
+  symbolication; the loader never reads them.  Every named definition in a
+  laid-out section is listed: locals as STB_LOCAL (assembler .L labels
+  excepted), globals once each under the strong-over-weak rule BuildSymbols
+  applies.  A NOTYPE symbol takes FUNC or OBJECT from its section, and a symbol
+  the assembler gave no size gets the distance to the next symbol in its
+  section, so nm -S and per-function size comparisons work.  Returns the index
+  of the first global symbol (the .symtab sh_info). }
+function TLinker.BuildSymtab(out ASymTab, AStrTab: string): Integer;
+var
+  Oi, Si, I, N, Lo, Hi, Mid, Idx: Integer;
+  Obj: TElfObjectFile;
+  Sym: TRdSymbol;
+  M: TMergedSection;
+  Base, Key, Mask, Value: Int64;
+  All, Locals, Globals: TList<TOutSym>;
+  GlobalIdx: TDictionary<string, Integer>;
+  OS: TOutSym;
+  Keys: TInt64Arr;
+  SymBuf, StrBuf: TByteBuf;
+begin
+  All := TList<TOutSym>.Create();
+  Locals := TList<TOutSym>.Create();
+  Globals := TList<TOutSym>.Create();
+  GlobalIdx := TDictionary<string, Integer>.Create();
+  SymBuf := TByteBuf.Create();
+  StrBuf := TByteBuf.Create();
+  try
+    for Oi := 0 to FObjects.Count - 1 do
+    begin
+      Obj := FObjects.Get(Oi);
+      for Si := 0 to Obj.Symbols.Count - 1 do
+      begin
+        Sym := Obj.Symbols.Get(Si);
+        if Sym.Name = '' then Continue;
+        if (Sym.SymType <> STT_NOTYPE) and (Sym.SymType <> STT_FUNC) and
+           (Sym.SymType <> STT_OBJECT) and (Sym.SymType <> STT_TLS) then
+          Continue;
+        if (Sym.Shndx = SHN_UNDEF) or (Sym.Shndx = SHN_ABS) or
+           (Sym.Shndx = SHN_COMMON) then
+          Continue;
+        if (Sym.Bind = STB_LOCAL) and (Copy(Sym.Name, 0, 2) = '.L') then
+          Continue;
+        M := Self.SectionOfPlacement(Oi, Sym.Shndx);
+        if M = nil then Continue;
+        Base := Self.PlacementBaseAddr(Oi, Sym.Shndx);
+        if Base < 0 then Continue;
+        if Sym.Bind = STB_LOCAL then
+        begin
+          OS := TOutSym.Create();
+          All.Add(OS);
+          Locals.Add(OS);
+        end
+        else if GlobalIdx.TryGetValue(Sym.Name, Idx) then
+        begin
+          OS := Globals.Get(Idx);
+          { a strong definition replaces a weak one; otherwise the first
+            definition stands, as in BuildSymbols }
+          if (Sym.Bind <> STB_GLOBAL) or (OS.Bind = STB_GLOBAL) then
+            Continue;
+        end
+        else
+        begin
+          OS := TOutSym.Create();
+          All.Add(OS);
+          GlobalIdx.Add(Sym.Name, Globals.Count);
+          Globals.Add(OS);
+        end;
+        OS.Name := Sym.Name;
+        OS.Value := Base + Sym.Value;
+        OS.Size := Sym.Size;
+        OS.Bind := Sym.Bind;
+        OS.SecNo := Self.OutSectionIndex(M);
+        if (M.Flags and SHF_TLS) <> 0 then
+          OS.SType := STT_TLS
+        else if Sym.SymType <> STT_NOTYPE then
+          OS.SType := Sym.SymType
+        else if (M.Flags and SHF_EXECINSTR) <> 0 then
+          OS.SType := STT_FUNC
+        else
+          OS.SType := STT_OBJECT;
+      end;
+    end;
+
+    { Sizes: the gap to the next symbol in the same section, or to the end of
+      the section for the last one. }
+    Mask := (Int64(1) shl LK_SYMKEY_SHIFT) - 1;
+    N := All.Count;
+    SetLength(Keys, N);
+    for I := 0 to N - 1 do
+      Keys[I] := (Int64(All.Get(I).SecNo) shl LK_SYMKEY_SHIFT) or
+        All.Get(I).Value;
+    LkSortInt64(Keys, N);
+    for I := 0 to N - 1 do
+    begin
+      OS := All.Get(I);
+      if OS.Size > 0 then Continue;
+      Key := (Int64(OS.SecNo) shl LK_SYMKEY_SHIFT) or OS.Value;
+      { first key strictly greater than this one }
+      Lo := 0;
+      Hi := N;
+      while Lo < Hi do
+      begin
+        Mid := (Lo + Hi) div 2;
+        if Keys[Mid] <= Key then
+          Lo := Mid + 1
+        else
+          Hi := Mid;
+      end;
+      if (Lo < N) and ((Keys[Lo] shr LK_SYMKEY_SHIFT) = OS.SecNo) then
+        OS.Size := (Keys[Lo] and Mask) - OS.Value
+      else
+      begin
+        M := FSecAddr.Get(OS.SecNo - 1);
+        OS.Size := Self.MergedAddr(M) + M.Size - OS.Value;
+      end;
+    end;
+
+    { Entry 0 is the null symbol; string offset 0 the empty name. }
+    SymBuf.PadTo(ELF64_SYM_SIZE);
+    StrBuf.PushByte(0);
+    for I := 0 to Locals.Count + Globals.Count - 1 do
+    begin
+      if I < Locals.Count then
+        OS := Locals.Get(I)
+      else
+        OS := Globals.Get(I - Locals.Count);
+      Value := OS.Value;
+      { an executable's TLS symbol holds its offset in the TLS segment }
+      if OS.SType = STT_TLS then
+        Value := Value - FTlsAddr;
+      SymBuf.PushU32(StrBuf.Count);
+      StrBuf.AppendBytes(OS.Name);
+      StrBuf.PushByte(0);
+      SymBuf.PushByte((OS.Bind shl 4) or OS.SType);
+      SymBuf.PushByte(0);
+      SymBuf.PushU16(OS.SecNo);
+      SymBuf.PushU64(Value);
+      SymBuf.PushU64(OS.Size);
+    end;
+    ASymTab := SymBuf.AsString();
+    AStrTab := StrBuf.AsString();
+    Result := 1 + Locals.Count;
+  finally
+    for I := 0 to All.Count - 1 do
+      All.Get(I).Free();
+    StrBuf.Free();
+    SymBuf.Free();
+    GlobalIdx.Free();
+    Globals.Free();
+    Locals.Free();
+    All.Free();
+  end;
+end;
+
+{ The .symtab and .strtab section headers.  AStrIndex is the .strtab
+  section's header index (the .symtab sh_link). }
+procedure TLinker.EmitSymtabHeaders(var ABuf: string; ASymName, AStrName,
+  ASymOff, ASymSize, AStrOff, AStrSize, AStrIndex, AFirstGlobal: Integer);
+begin
+  ABuf := ABuf + LkLE(ASymName, 4) + LkLE(SHT_SYMTAB, 4) + LkLE(0, 8)
+    + LkLE(0, 8) + LkLE(ASymOff, 8) + LkLE(ASymSize, 8)
+    + LkLE(AStrIndex, 4) + LkLE(AFirstGlobal, 4) + LkLE(8, 8)
+    + LkLE(ELF64_SYM_SIZE, 8);
+  ABuf := ABuf + LkLE(AStrName, 4) + LkLE(SHT_STRTAB, 4) + LkLE(0, 8)
+    + LkLE(0, 8) + LkLE(AStrOff, 8) + LkLE(AStrSize, 8)
+    + LkLE(0, 4) + LkLE(0, 4) + LkLE(1, 8) + LkLE(0, 8);
+end;
+
 function TLinker.EmitExecutable(AEntry: Int64): string;
 var
   Buf: string;
@@ -2121,6 +2362,8 @@ var
   ShStrOff: TList<Integer>;
   SecCount, ShTabOff: Integer;
   NamePos: Integer;
+  SymTab, StrTab: string;
+  SymTabOff, StrTabOff, FirstGlobal, SymNamePos, StrNamePos: Integer;
 begin
   Base := FTarget.BaseAddr;
   PageSz := FTarget.PageSize;
@@ -2227,8 +2470,17 @@ begin
       LkCopyInto(Buf, Self.FileOffset(A), M.Data);
   end;
 
+  { ---- symbol table (for tooling; not loaded) ---- }
+  FirstGlobal := Self.BuildSymtab(SymTab, StrTab);
+  while (Length(Buf) and 7) <> 0 do Buf := Buf + Chr(0);
+  SymTabOff := Length(Buf);
+  Buf := Buf + SymTab;
+  StrTabOff := Length(Buf);
+  Buf := Buf + StrTab;
+
   { ---- section header table (for tooling) ---- }
-  { .shstrtab: NULL, one name per laid-out section, then .shstrtab. }
+  { .shstrtab: NULL, one name per laid-out section, .symtab, .strtab, then
+    .shstrtab. }
   ShStr := Chr(0);
   ShStrOff := TList<Integer>.Create();
   try
@@ -2237,13 +2489,18 @@ begin
       ShStrOff.Add(Length(ShStr));
       ShStr := ShStr + FSecAddr.Get(I).Name + Chr(0);
     end;
+    SymNamePos := Length(ShStr);
+    ShStr := ShStr + '.symtab' + Chr(0);
+    StrNamePos := Length(ShStr);
+    ShStr := ShStr + '.strtab' + Chr(0);
     NamePos := Length(ShStr);
     ShStr := ShStr + '.shstrtab' + Chr(0);
 
     ShTabOff := Length(Buf);
     Buf := Buf + ShStr;
 
-    SecCount := FSecAddr.Count + 2;     { NULL + sections + .shstrtab }
+    { NULL + sections + .symtab + .strtab + .shstrtab }
+    SecCount := FSecAddr.Count + 4;
     while (Length(Buf) and 7) <> 0 do Buf := Buf + Chr(0);
 
     { Patch e_shoff / e_shnum / e_shstrndx now that the table offset is
@@ -2273,6 +2530,10 @@ begin
       Buf := Buf + LkLE(M.Align, 8);            { sh_addralign }
       Buf := Buf + LkLE(0, 8);                  { sh_entsize }
     end;
+
+    Self.EmitSymtabHeaders(Buf, SymNamePos, StrNamePos, SymTabOff,
+      Length(SymTab), StrTabOff, Length(StrTab), FSecAddr.Count + 2,
+      FirstGlobal);
 
     { .shstrtab section header. }
     Buf := Buf + LkLE(NamePos, 4);
@@ -2319,6 +2580,8 @@ var
   LkName: TList<string>;
   LkType, LkFlags, LkAddr, LkSize, LkLink, LkInfo, LkAlign, LkEnt: TList<Int64>;
   LkBase, LkIdxDynSym, LkIdxDynStr, LkIdxGot: Integer;
+  SymTab, StrTab: string;
+  SymTabOff, StrTabOff, FirstGlobal, SymNamePos, StrNamePos: Integer;
 begin
   { Compute extents for each loadable segment.
     RO: headers + linker metadata + .rodata + .eh_frame etc.
@@ -2702,13 +2965,26 @@ begin
       ShStrOff.Add(Length(ShStr));
       ShStr := ShStr + LkName.Get(I) + Chr(0);
     end;
+    SymNamePos := Length(ShStr);
+    ShStr := ShStr + '.symtab' + Chr(0);
+    StrNamePos := Length(ShStr);
+    ShStr := ShStr + '.strtab' + Chr(0);
     NamePos := Length(ShStr);
     ShStr := ShStr + '.shstrtab' + Chr(0);
+
+    { symbol table (for tooling; not loaded) }
+    FirstGlobal := Self.BuildSymtab(SymTab, StrTab);
+    while (Length(Buf) and 7) <> 0 do Buf := Buf + Chr(0);
+    SymTabOff := Length(Buf);
+    Buf := Buf + SymTab;
+    StrTabOff := Length(Buf);
+    Buf := Buf + StrTab;
 
     ShTabOff := Length(Buf);
     Buf := Buf + ShStr;
 
-    SecCount := FSecAddr.Count + LkName.Count + 2;
+    { NULL + merged + linker-made + .symtab + .strtab + .shstrtab }
+    SecCount := FSecAddr.Count + LkName.Count + 4;
     while (Length(Buf) and 7) <> 0 do Buf := Buf + Chr(0);
 
     LkCopyInto(Buf, 40, LkLE(Length(Buf), 8));
@@ -2751,6 +3027,10 @@ begin
       Buf := Buf + LkLE(LkAlign.Get(I), 8);
       Buf := Buf + LkLE(LkEnt.Get(I), 8);
     end;
+
+    Self.EmitSymtabHeaders(Buf, SymNamePos, StrNamePos, SymTabOff,
+      Length(SymTab), StrTabOff, Length(StrTab),
+      FSecAddr.Count + LkName.Count + 2, FirstGlobal);
 
     Buf := Buf + LkLE(NamePos, 4);
     Buf := Buf + LkLE(SHT_STRTAB, 4);
