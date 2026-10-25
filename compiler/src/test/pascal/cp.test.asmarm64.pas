@@ -54,6 +54,10 @@ type
     procedure TestHashLineComment_IgnoredButImmediatesKept;
     procedure TestDataDirectives_QuadSymbolReloc;
     procedure TestAsciiWithSemicolonAndSlashes;
+    { a '#' after a string's closing quote, or after a float literal, is a
+      trailing comment (the OPDF companion's `.ascii "A"  # Value`); a '#'
+      inside the string is data }
+    procedure TestAsciiAndDouble_TrailingHashComment;
     procedure TestExplicitWidthDataDirectives;
     procedure TestDataDirective_LabelDifference;
     procedure TestCsetAndConditionals;
@@ -475,6 +479,33 @@ begin
     AssertEquals('first slash preserved', Ord('/'), StrAt(D.Data, 2));
     AssertEquals('second slash preserved', Ord('/'), StrAt(D.Data, 3));
     AssertEquals('b', Ord('b'), StrAt(D.Data, 4));
+  finally
+    F.Free();
+  end;
+end;
+
+procedure TArm64AsmTests.TestAsciiAndDouble_TrailingHashComment;
+var
+  F: TMachOFile;
+  D: TMoSection;
+begin
+  TextWords(
+    'nop' + LineEnding +
+    '.data' + LineEnding +
+    'lbl:' + LineEnding +
+    '.ascii "A"  # Value' + LineEnding +
+    '.ascii "#x"  # Name' + LineEnding +
+    '.double 1.5  # Value' + LineEnding, F);
+  try
+    D := F.FindSection('__DATA', '__data');
+    AssertTrue(D <> nil);
+    AssertEquals('"A" + "#x" + one double', 1 + 2 + 8, Integer(D.Size));
+    AssertEquals('A', Ord('A'), StrAt(D.Data, 0));
+    AssertEquals('in-string # kept', Ord('#'), StrAt(D.Data, 1));
+    AssertEquals('x', Ord('x'), StrAt(D.Data, 2));
+    { 1.5 = $3FF8000000000000: top byte $3F, next $F8 }
+    AssertEquals('double high byte', $3F, StrAt(D.Data, 10));
+    AssertEquals('double next byte', $F8, StrAt(D.Data, 9));
   finally
     F.Free();
   end;

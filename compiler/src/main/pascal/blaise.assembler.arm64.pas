@@ -482,6 +482,30 @@ begin
       (Result.Mnemonic = '.word') or (Result.Mnemonic = '.quad')) and
      (Pos('#', Result.Args) >= 0) then
     Result.Args := TrimS(Copy(Result.Args, 0, Pos('#', Result.Args)));
+  { the same for a float literal, and for a string directive -- but there
+    only AFTER the closing quote (`.ascii "A"  # Value`), since a '#' inside
+    the string is data.  Without this the OPDF companion's string and real
+    constants assembled with their comment text appended. }
+  if ((Result.Mnemonic = '.double') or (Result.Mnemonic = '.float')) and
+     (Pos('#', Result.Args) >= 0) then
+    Result.Args := TrimS(Copy(Result.Args, 0, Pos('#', Result.Args)));
+  if ((Result.Mnemonic = '.ascii') or (Result.Mnemonic = '.asciz')) and
+     (Length(Result.Args) > 0) and (StrAt(Result.Args, 0) = Ord('"')) then
+  begin
+    P := 1;
+    while P < Length(Result.Args) do
+    begin
+      C := StrAt(Result.Args, P);
+      if C = Ord('\') then
+        P := P + 1
+      else if C = Ord('"') then
+      begin
+        Result.Args := Copy(Result.Args, 0, P + 1);
+        Break;
+      end;
+      P := P + 1;
+    end;
+  end;
   if StrAt(S, 0) = Ord('.') then
   begin
     { 'b.cond' is an instruction, not a directive — but it starts 'b.' }
