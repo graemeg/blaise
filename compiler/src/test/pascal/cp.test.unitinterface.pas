@@ -235,6 +235,7 @@ type
       (finalization skipped, globals leak). }
     procedure TestRoundTrip_InitFiniFlagsPreserved;
     procedure TestRoundTrip_ImplicitDepsPreserved;
+    procedure TestRoundTrip_TargetPreserved;
     { External-library link deps (LinkLibs) round-trip via the META block. }
     procedure TestRoundTrip_LinkLibsPreserved;
     { Int const round-trips. }
@@ -2936,7 +2937,7 @@ begin
       integer subranges, v7's LinkLibs, v6's `overload` directive, v5's member
       Visibility, v4's TRoutineSig.IsStatic, and v3's static-member facts). }
     AssertTrue('starts with magic',
-      Pos('BLAISE-IFACE 29', Buf) = 0);
+      Pos('BLAISE-IFACE 30', Buf) = 0);
   finally
     Iface.Free();
   end;
@@ -2982,6 +2983,30 @@ begin
       AssertEquals('second', 'Contnrs', Dst.ImplicitDeps.Strings[1]);
       AssertEquals('uses kept apart', 1, Dst.UsedUnits.Count);
       AssertTrue('later META fields still read', Dst.HasInitialization);
+    finally
+      Dst.Free();
+    end;
+  finally
+    Src.Free();
+  end;
+end;
+
+{ BUG-20261004-unit-cache-not-keyed-by-os: the target a cached unit was
+  compiled for travels in the .bif (IFACE 30). }
+procedure TIfaceIOTests.TestRoundTrip_TargetPreserved;
+var
+  Src, Dst: TUnitInterface;
+  Buf:      string;
+begin
+  Src := TUnitInterface.Create('MyUnit');
+  try
+    Src.Target := 'freebsd-x86_64';
+    Src.HasFinalization := True;
+    Buf := WriteUnitInterface(Src);
+    Dst := ReadUnitInterface(Buf);
+    try
+      AssertEquals('target', 'freebsd-x86_64', Dst.Target);
+      AssertTrue('later META fields still read', Dst.HasFinalization);
     finally
       Dst.Free();
     end;

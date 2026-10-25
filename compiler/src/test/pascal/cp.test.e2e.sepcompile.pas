@@ -249,6 +249,7 @@ type
     procedure TestInheritedMethodStmtCall_FromCachedUnit_PassesSelf;
     procedure TestUnitCache_MissingDirectory_IsCreated;
     procedure TestCachedObject_FromAnotherTarget_IsRebuilt;
+    procedure TestCachedObject_SameContainerOtherOS_IsRebuilt;
     { Regression (warm --unit-cache set-of-enum literal): the cached-.bif
       importer registered an enum's members as symbols but never populated the
       analyser's enum-member reverse index (FEnumMemberIndex).  ArgMatchScore
@@ -3351,6 +3352,60 @@ begin
   AssertEquals('cross build into the same directory (out: ' + Captured + ')',
     0, Rc);
   AssertTrue('the stale object was reported, not linked',
+    Pos('built for another target', Captured) >= 0);
+end;
+
+procedure TSepCompileTests.TestCachedObject_SameContainerOtherOS_IsRebuilt;
+const
+  { BUG-20261004-unit-cache-not-keyed-by-os: FreeBSD and Linux x86-64 both
+    use ELF, so the container check passed a FreeBSD-built object to a
+    Linux link.  The .bif records the target; another target's entry is
+    rebuilt.  Both builds cross-compile, so this runs on every host. }
+  UnitSrc =
+    '''
+    unit xos.u;
+    interface
+    function Twice(X: Integer): Integer;
+    implementation
+    function Twice(X: Integer): Integer; begin Result := X * 2 end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseXos;
+    uses xos.u;
+    begin
+      WriteLn(Twice(21))
+    end.
+    ''';
+var
+  Dir, ProgPas, Captured: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  Dir := FScratch + '/xos';
+  ForceDirectories(Dir);
+  WriteFile(Dir + '/xos.u.pas', UnitSrc);
+  ProgPas := Dir + '/use_xos.pas';
+  WriteFile(ProgPas, ProgSrc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/use_xos_bsd',
+                   '--target', 'freebsd-x86_64', '--unit-path', Dir], Captured);
+  AssertEquals('freebsd build exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/use_xos_lnx',
+                   '--target', 'linux-x86_64', '--unit-path', Dir], Captured);
+  AssertEquals('linux build into the same directory (out: ' + Captured + ')',
+    0, Rc);
+  AssertTrue('the FreeBSD object was reported, not linked (out: ' +
+    Captured + ')', Pos('built for another target', Captured) >= 0);
+  { and the reverse direction, now that the Linux object is cached }
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/use_xos_bsd',
+                   '--target', 'freebsd-x86_64', '--unit-path', Dir], Captured);
+  AssertEquals('freebsd rebuild exit code (out: ' + Captured + ')', 0, Rc);
+  AssertTrue('the Linux object was reported, not linked',
     Pos('built for another target', Captured) >= 0);
 end;
 

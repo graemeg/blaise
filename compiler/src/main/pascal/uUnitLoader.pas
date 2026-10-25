@@ -266,6 +266,16 @@ var
 begin
   Result := False;
   if AIface = nil then Exit;
+  { The object cache is not keyed by --target, and LocateObject's container
+    check cannot tell a FreeBSD ELF object from a Linux one.  An entry for
+    another target is never usable, with or without source. }
+  if (AIface.Target <> '') and
+     not SameText(AIface.Target, TargetName(GTarget)) then
+  begin
+    WriteLn(StdErr, 'note: ', AName, '.o was built for another target (',
+            AIface.Target, '); recompiling from source');
+    Exit;
+  end;
   SrcPath := Locate(AName);
   if SrcPath <> '' then
   begin

@@ -37,7 +37,7 @@ interface
 
 uses
   Classes, Contnrs, uAST, uSymbolTable, uUnitInterface, uCompilerId,
-  uUnitInterfaceIO, blaise.codegen;
+  uUnitInterfaceIO, blaise.codegen, blaise.codegen.target;
 
 { Build a TUnitInterface from AUnit.  AUnit must have been semantically
   analysed already.  ADeps holds the already-exported interfaces of
@@ -730,6 +730,7 @@ begin
   Result := TUnitInterface.Create(AUnit.Name);
   Result.SourceFile    := AUnit.SourceFile;
   Result.CompilerId    := EffectiveCompilerId();
+  Result.Target := TargetName(GTarget);
   { mtime + hash get populated by the iface writer once it has a
     handle on the source path on disk.  Doing it here from AUnit
     alone is unsafe — AUnit may have been parsed from a string

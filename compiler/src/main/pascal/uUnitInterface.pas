@@ -207,6 +207,11 @@ type
                                     iface.  When source is unavailable, an
                                     exact CompilerId match is the only signal
                                     that the iface is safe to trust. }
+    Target:          string;      { TargetName of the --target this unit was
+                                    compiled for ('' = written before IFACE
+                                    30).  FreeBSD and Linux share the ELF
+                                    container, so the object's magic alone
+                                    cannot tell their objects apart. }
 
     UsedUnits:       TStringList; { owned — interface-section uses, in order }
     ImplUsedUnits:   TStringList; { owned — implementation-section uses, in

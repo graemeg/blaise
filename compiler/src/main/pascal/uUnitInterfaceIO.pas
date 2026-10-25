@@ -54,7 +54,12 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 29; { v29: the META block carries ImplicitDeps after
+  IFACE_VERSION = 30; { v30: the META block carries the Target the unit
+                          was compiled for, after ImplicitDeps, so a cached
+                          unit built for another OS on the same container
+                          is rebuilt (BUG-20261004-unit-cache-not-keyed-by-
+                          os).
+                        v29: the META block carries ImplicitDeps after
                           GenericDepHashes -- units reached without a uses
                           clause, so a cached dependent is rebuilt when one
                           recompiles (BUG-20261004-warmcache-overload-lost-
@@ -1141,6 +1146,7 @@ begin
            EncodeStringList(AIface.LinkLibs) +
            EncodeStringList(AIface.GenericDepHashes) +
            EncodeStringList(AIface.ImplicitDeps) +
+           EncodeLpstr(AIface.Target) +
            EncodeBool(AIface.HasInitialization) +
            EncodeBool(AIface.HasFinalization));
     SB.AppendLine('END');
@@ -2715,6 +2721,7 @@ begin
   C := DecodeCount(AText, APos);
   for I := 1 to C do
     AIface.ImplicitDeps.Add(ReadLpstrAt(AText, APos));
+  AIface.Target := ReadLpstrAt(AText, APos);
   AIface.HasInitialization := ReadLpstrAt(AText, APos) = '1';
   AIface.HasFinalization := ReadLpstrAt(AText, APos) = '1';
   if ReadTag(AText, APos) <> 'END' then
