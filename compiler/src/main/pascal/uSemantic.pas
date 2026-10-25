@@ -2571,6 +2571,20 @@ begin
   DefineModuleName(AProg.Name);
   for I := 0 to AProg.UsedUnits.Count - 1 do
     DefineModuleName(AProg.UsedUnits.Strings[I]);
+  { A program may not share its name with a unit in the build, directly
+    used or not, as in FPC and Delphi.  The name tags the program's own
+    globals, so the backends took them for that unit's and never defined
+    them: on x86-64 every program global was an unresolved symbol. }
+  for I := 0 to AProg.UsedUnits.Count - 1 do
+    if SameText(AProg.UsedUnits.Strings[I], AProg.Name) then
+      SemanticError(Format('Program ''%s'' has the same name as the unit ' +
+        '''%s'' it uses', [AProg.Name, AProg.UsedUnits.Strings[I]]),
+        AProg.Line, AProg.Col);
+  I := FUnitIfaces.IndexOf(AProg.Name);
+  if I >= 0 then
+    SemanticError(Format('Program ''%s'' has the same name as the unit ' +
+      '''%s'' in the build', [AProg.Name, FUnitIfaces.Strings[I]]),
+      AProg.Line, AProg.Col);
   AnalyseBlock(AProg.Block, True);
   CheckNestedRoutineAddrs();
   { Transfer symbol table ownership to the program so that TTypeDesc

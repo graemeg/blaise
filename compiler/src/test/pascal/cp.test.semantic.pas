@@ -77,6 +77,9 @@ type
     procedure TestModuleName_LocalShadow_OK;
     procedure TestModuleName_NotUsableAsExpression_RaisesError;
     procedure TestUsedUnitName_RedeclaredAsVar_RaisesError;
+    { a program named after a unit it uses: on x86-64 its globals were taken
+      for the unit's and never defined }
+    procedure TestProgramName_SameAsUsedUnit_RaisesError;
 
     { Expression type inference }
     procedure TestExpr_IntLiteral_TypeIsInteger;
@@ -332,6 +335,14 @@ begin
     'program P; procedure Q; var P: Integer; begin P := 1; end; ' +
     'begin Q(); end.'
   ).Free();
+end;
+
+procedure TSemanticTests.TestProgramName_SameAsUsedUnit_RaisesError;
+var
+  Err: string;
+begin
+  Err := SemanticError('program sysutils; uses SysUtils; begin end.');
+  AssertTrue(Err, Pos('has the same name as the unit', Err) >= 0);
 end;
 
 procedure TSemanticTests.TestModuleName_NotUsableAsExpression_RaisesError;

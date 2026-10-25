@@ -250,6 +250,10 @@ type
     procedure TestUnitCache_MissingDirectory_IsCreated;
     procedure TestCachedObject_FromAnotherTarget_IsRebuilt;
     procedure TestCachedObject_SameContainerOtherOS_IsRebuilt;
+    { a program named after a unit in the build -- here one it reaches only
+      through another unit -- is rejected: the x86-64 link left every
+      program global unresolved }
+    procedure TestProgramNamedAfterUnitInBuild_IsRejected;
     { Regression (warm --unit-cache set-of-enum literal): the cached-.bif
       importer registered an enum's members as symbols but never populated the
       analyser's enum-member reverse index (FEnumMemberIndex).  ArgMatchScore
@@ -3407,6 +3411,59 @@ begin
   AssertEquals('freebsd rebuild exit code (out: ' + Captured + ')', 0, Rc);
   AssertTrue('the Linux object was reported, not linked',
     Pos('built for another target', Captured) >= 0);
+end;
+
+procedure TSepCompileTests.TestProgramNamedAfterUnitInBuild_IsRejected;
+const
+  LeafSrc =
+    '''
+    unit pcleaf;
+    interface
+    function Twice(X: Integer): Integer;
+    implementation
+    function Twice(X: Integer): Integer; begin Result := X * 2 end;
+    end.
+    ''';
+  MidSrc =
+    '''
+    unit pcmid;
+    interface
+    uses pcleaf;
+    function Four(X: Integer): Integer;
+    implementation
+    function Four(X: Integer): Integer; begin Result := Twice(Twice(X)) end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program pcleaf;
+    uses pcmid;
+    var G: Integer;
+    begin
+      G := Four(10);
+      WriteLn(G)
+    end.
+    ''';
+var
+  Dir, ProgPas, Captured: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  Dir := FScratch + '/pclash';
+  ForceDirectories(Dir);
+  WriteFile(Dir + '/pcleaf.pas', LeafSrc);
+  WriteFile(Dir + '/pcmid.pas', MidSrc);
+  ProgPas := Dir + '/prog.pas';
+  WriteFile(ProgPas, ProgSrc);
+  Rc := RunBlaise(['--source', ProgPas, '--output', Dir + '/prog',
+                   '--unit-path', Dir], Captured);
+  AssertTrue('rejected (out: ' + Captured + ')', Rc <> 0);
+  AssertTrue('names the clash (out: ' + Captured + ')',
+    Pos('has the same name as the unit', Captured) >= 0);
 end;
 
 procedure TSepCompileTests.TestUnitCache_MissingDirectory_IsCreated;

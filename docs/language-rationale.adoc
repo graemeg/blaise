@@ -5861,6 +5861,15 @@ This matches Delphi and FPC, both of which reject the redeclaration with
 `Duplicate identifier` (Delphi error E2004 documents exactly this case:
 `program Tests; var Tests: Integer;`).
 
+A program may not share its name with any unit in the build, whether it uses
+that unit directly or only through another unit:
+`program SysUtils; uses SysUtils;` is rejected with "Program 'SysUtils' has
+the same name as the unit 'SysUtils' it uses".  FPC and Delphi reject the
+direct case as a duplicate identifier.  The indirect case is rejected too,
+because the module name tags the program's own globals: a unit of the same
+name anywhere in the build made the backend take those globals for the
+unit's, and the x86-64 link left every one of them unresolved.
+
 === Rationale
 
 Before this rule (issue #84), Blaise accepted:
