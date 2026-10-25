@@ -30,6 +30,10 @@ type
       array is held for the loop, so the body may resize the original. }
     procedure TestRun_ForIn_CollectionThroughCall_EvaluatedOnce;
     procedure TestRun_ForIn_AllCollectionKinds;
+    { BUG-029: the writes the for-in diagnostics call discarded leave the
+      collection unchanged, and the ones they stay quiet about (through a
+      dynamic-array or class link) reach it }
+    procedure TestRun_ForIn_WritesThroughLoopVar_WhereTheyLand;
     { for-in over a record with a record enumerator (nested, through a
       call, empty), a class with an interface enumerator (Continue, managed
       Current), a record enumerator with a managed field reached through an
@@ -1041,6 +1045,42 @@ begin
     '0 2 ' + LE +
     'item-1 item-2 item-3 ' + LE, 0);
   AssertLeakFreeOnAll(Src, 'item-3');
+end;
+
+procedure TE2EControlFlowTests.TestRun_ForIn_WritesThroughLoopVar_WhereTheyLand;
+const
+  Src = '''
+    program P;
+    type
+      TIn = record X: Integer; end;
+      TC = class F: Integer; end;
+      TSA = array[0..1] of Integer;
+      TR = record F: Integer; Arr: array[0..1] of TIn;
+        D: array of TIn; C: TC; end;
+    procedure Mut(var V: Integer); begin V := 9 end;
+    var A: array of TR; r: TR; S: array of string; t: string;
+      SA: array of TSA; sa1: TSA;
+    begin
+      SetLength(A, 1);
+      SetLength(A[0].D, 1);
+      A[0].C := TC.Create();
+      SetLength(S, 1);
+      S[0] := 'ab';
+      SetLength(SA, 1);
+      for r in A do Mut(r.F);
+      for r in A do Mut(r.Arr[0].X);
+      for t in S do t[0] := 'x';
+      for sa1 in SA do sa1[0] := 2;
+      for sa1 in SA do Mut(sa1[1]);
+      WriteLn(A[0].F, ' ', A[0].Arr[0].X, ' ', S[0], ' ', SA[0][0], ' ', SA[0][1]);
+      for r in A do r.D[0].X := 5;
+      for r in A do Mut(r.C.F);
+      WriteLn(A[0].D[0].X, ' ', A[0].C.F)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '0 0 ab 0 0' + #10 + '5 9' + #10, 0);
 end;
 
 procedure TE2EControlFlowTests.TestRun_ForIn_RecordAndInterfaceEnumerators;

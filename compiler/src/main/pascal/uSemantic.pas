@@ -726,6 +726,8 @@ type
       the mutation writes the per-iteration copy and never reaches the
       collection element.  Call at each site that accepts a by-ref actual. }
     procedure WarnIfVarArgIsForInLoopVar(AExpr: TASTExpr);
+    function  ForInCopyRoot(AExpr: TASTExpr): string;
+    procedure WarnIfForInElementWrite(AStmt: TStaticSubscriptAssign);
     { Enforce the lvalue constraint on every var/out actual of a resolved method
       call, and emit the BUG-001 for-in warning for each.  Method-call paths
       (unlike standalone-proc calls) historically skipped IsVarArgLValue, so a
@@ -13414,7 +13416,10 @@ begin
   else if AStmt is TExprCallStmt then
     Self.AnalyseExprSlot(TExprCallStmt(AStmt).Call)
   else if AStmt is TStaticSubscriptAssign then
-    AnalyseStaticSubscriptAssign(TStaticSubscriptAssign(AStmt))
+  begin
+    AnalyseStaticSubscriptAssign(TStaticSubscriptAssign(AStmt));
+    WarnIfForInElementWrite(TStaticSubscriptAssign(AStmt))
+  end
   else if AStmt is TProcCall then
     AnalyseProcCall(TProcCall(AStmt))
   else if AStmt is TCaseStmt then
@@ -14358,16 +14363,26 @@ end;
 
 procedure TSemanticAnalyser.WarnIfVarArgIsForInLoopVar(AExpr: TASTExpr);
 var
-  Sym: TSymbol;
+  Sym:  TSymbol;
+  Root: string;
 begin
   { BUG-001, by-ref arm: passing a for-in loop variable to a var/out parameter
     (or a mutating built-in such as Inc/SetLength) writes the per-iteration
     copy, so the mutation never reaches the collection element.  Mirrors the
-    direct-assignment diagnostic in AnalyseAssignment.  Only the bare-ident
-    form is diagnosed here; a field of a record loop variable passed by ref
-    is covered by neither arm yet (documented follow-up). }
+    direct-assignment diagnostic in AnalyseAssignment.  A PART of the copy
+    passed by ref -- a field of a record loop variable, an element of a
+    static-array or string one -- is discarded the same way (BUG-029). }
   if not (AExpr is TIdentExpr) then
+  begin
+    Root := Self.ForInCopyRoot(AExpr);
+    if Root <> '' then
+      SemanticWarning(
+        Format('by-ref mutation of part of for-in loop variable ''%s'' is '
+          + 'discarded (the loop variable is a per-iteration copy) — use an '
+          + 'indexed ''for'' loop to mutate the collection', [Root]),
+        AExpr.Line, AExpr.Col);
     Exit;
+  end;
   if FForInLoopVars.IndexOf(TIdentExpr(AExpr).Name) < 0 then
     Exit;
   Sym := FTable.Lookup(TIdentExpr(AExpr).Name);
@@ -14377,6 +14392,99 @@ begin
         + '(the loop variable is a per-iteration copy) — use an indexed '
         + '''for'' loop to mutate the collection', [TIdentExpr(AExpr).Name]),
       AExpr.Line, AExpr.Col);
+end;
+
+{ The for-in loop variable whose per-iteration copy the analysed l-value
+  AExpr lies inside, or ''.  Only VALUE links are followed -- a record field,
+  a static-array element, a string byte -- because those are part of the
+  copy.  A class, interface, pointer or dynamic-array link leads to storage
+  the copy shares with the collection, where a write is not discarded, so the
+  walk gives up there.  The root must be a record, static-array or string
+  loop variable; a bare loop variable is diagnosed by its callers. }
+function TSemanticAnalyser.ForInCopyRoot(AExpr: TASTExpr): string;
+var
+  E:    TASTExpr;
+  FA:   TFieldAccessExpr;
+  Name: string;
+  Sym:  TSymbol;
+begin
+  Result := '';
+  E := AExpr;
+  Name := '';
+  while Name = '' do
+  begin
+    if E is TIdentExpr then
+      Name := TIdentExpr(E).Name
+    else if E is TFieldAccessExpr then
+    begin
+      FA := TFieldAccessExpr(E);
+      if FA.IsClassAccess or FA.IsImplicitSelf or FA.IsMethodCall or
+         FA.IsConstant or (FA.PropRead <> nil) then
+        Exit;
+      { R.Arr[I]: the element is part of the copy only in a static array }
+      if FA.IsArrayAccess and
+         ((FA.FieldInfo = nil) or (FA.FieldInfo.TypeDesc = nil) or
+          (FA.FieldInfo.TypeDesc.Kind <> tyStaticArray)) then
+        Exit;
+      if FA.Base = nil then
+        Name := FA.RecordName
+      else
+      begin
+        if (FA.Base.ResolvedType = nil) or
+           (FA.Base.ResolvedType.Kind <> tyRecord) then
+          Exit;
+        E := FA.Base;
+      end;
+    end
+    else if E is TStringSubscriptExpr then
+    begin
+      E := TStringSubscriptExpr(E).StrExpr;
+      if (E = nil) or (E.ResolvedType = nil) or
+         not (E.ResolvedType.Kind in [tyStaticArray, tyString]) then
+        Exit;
+    end
+    else
+      Exit;
+  end;
+  if FForInLoopVars.IndexOf(Name) < 0 then
+    Exit;
+  Sym := FTable.Lookup(Name);
+  if (Sym <> nil) and (Sym.Kind = skVariable) and (Sym.TypeDesc <> nil) and
+     (Sym.TypeDesc.Kind in [tyRecord, tyStaticArray, tyString]) then
+    Result := Name;
+end;
+
+{ BUG-029: L[I] := V on a static-array or string loop variable, or on a
+  static array or string inside a record one, writes the per-iteration
+  copy. }
+procedure TSemanticAnalyser.WarnIfForInElementWrite(AStmt: TStaticSubscriptAssign);
+var
+  Root: string;
+  Sym:  TSymbol;
+begin
+  if AStmt.SetterCall <> nil then
+    Exit;
+  Root := '';
+  if AStmt.BaseExpr <> nil then
+  begin
+    if (AStmt.ResolvedArrayType <> nil) and
+       (AStmt.ResolvedArrayType.Kind in [tyStaticArray, tyString]) then
+      Root := Self.ForInCopyRoot(AStmt.BaseExpr);
+  end
+  else if (not AStmt.IsImplicitSelf) and
+          (FForInLoopVars.IndexOf(AStmt.ArrayName) >= 0) then
+  begin
+    Sym := FTable.Lookup(AStmt.ArrayName);
+    if (Sym <> nil) and (Sym.Kind = skVariable) and (Sym.TypeDesc <> nil) and
+       (Sym.TypeDesc.Kind in [tyStaticArray, tyString]) then
+      Root := AStmt.ArrayName;
+  end;
+  if Root <> '' then
+    SemanticWarning(
+      Format('write to an element of for-in loop variable ''%s'' is '
+        + 'discarded (the loop variable is a per-iteration copy) — use an '
+        + 'indexed ''for'' loop to mutate the collection', [Root]),
+      AStmt.Line, AStmt.Col);
 end;
 
 procedure TSemanticAnalyser.ValidateMethodVarArgs(AArgs: TObjectList;
@@ -14767,8 +14875,8 @@ var
   PropInfo: TPropertyInfo;
   ExprType: TTypeDesc;
   ObjType:  TTypeDesc;
+  ForInRoot: string;
   VarSym:   TSymbol;
-  BaseE:    TASTExpr;
 begin
   { ObjExpr path: receiver is an arbitrary expression (e.g. typecast result) }
   if AAssign.ObjExpr <> nil then
@@ -14792,24 +14900,14 @@ begin
       the walk stops there and no warning is issued. }
     if ObjType.Kind = tyRecord then
     begin
-      BaseE := AAssign.ObjExpr;
-      while (BaseE is TFieldAccessExpr) and
-            (BaseE.ResolvedType <> nil) and
-            (BaseE.ResolvedType.Kind = tyRecord) do
-        BaseE := TFieldAccessExpr(BaseE).Base;
-      if (BaseE is TIdentExpr) and
-         (FForInLoopVars.IndexOf(TIdentExpr(BaseE).Name) >= 0) then
-      begin
-        VarSym := FTable.Lookup(TIdentExpr(BaseE).Name);
-        if (VarSym <> nil) and (VarSym.Kind = skVariable) and
-           (VarSym.TypeDesc <> nil) and (VarSym.TypeDesc.Kind = tyRecord) then
-          SemanticWarning(
-            Format('write to field ''%s'' of for-in loop variable ''%s'' is '
-              + 'discarded (the loop variable is a per-iteration copy) — use '
-              + 'an indexed ''for'' loop to mutate the collection',
-              [AAssign.FieldName, TIdentExpr(BaseE).Name]),
-            AAssign.Line, AAssign.Col);
-      end;
+      ForInRoot := Self.ForInCopyRoot(AAssign.ObjExpr);
+      if ForInRoot <> '' then
+        SemanticWarning(
+          Format('write to field ''%s'' of for-in loop variable ''%s'' is '
+            + 'discarded (the loop variable is a per-iteration copy) — use '
+            + 'an indexed ''for'' loop to mutate the collection',
+            [AAssign.FieldName, ForInRoot]),
+          AAssign.Line, AAssign.Col);
     end;
     RT      := TRecordTypeDesc(ObjType);
     FldInfo := RT.FindField(AAssign.FieldName);

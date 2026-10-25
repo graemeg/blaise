@@ -68,6 +68,13 @@ type
     procedure TestSemantic_ForIn_ValueParamArg_NoWarn;
     procedure TestSemantic_ForIn_NestedRecordFieldWrite_Warns;
     procedure TestSemantic_ForIn_ClassNestedRecordWrite_NoWarn;
+    { BUG-029: a PART of the copy written by ref, or an element of a
+      static-array or string loop variable written, is discarded too }
+    procedure TestSemantic_ForIn_PartOfCopyByRef_Warns;
+    procedure TestSemantic_ForIn_ElementOfCopyWrite_Warns;
+    { a write through a dynamic-array or class link reaches the collection:
+      r.D[0].X := 5 with D a dynamic array used to warn falsely }
+    procedure TestSemantic_ForIn_SharedStorageWrite_NoWarn;
 
     { ------------------------------------------------------------------ }
     { Codegen — class enumerator                                           }
@@ -615,6 +622,74 @@ begin
         ''');
   AssertEquals('record field write through a class for-in loop variable must not warn',
     '', Trim(W));
+end;
+
+const
+  ForInPartsDecls = '''
+    program P;
+    type
+      TIn = record X: Integer; end;
+      TC = class F: Integer; end;
+      TSA = array[0..1] of Integer;
+      TR = record F: Integer; S: string; Arr: array[0..1] of TIn;
+        D: array of TIn; C: TC; end;
+    procedure Mut(var V: Integer); begin V := 1 end;
+    var A: array of TR; r: TR; S: array of string; t: string;
+      SA: array of TSA; sa1: TSA;
+    begin
+    ''';
+
+procedure TForInTests.TestSemantic_ForIn_PartOfCopyByRef_Warns;
+
+  procedure Check(const AStmt, AWhat: string);
+  var W: string;
+  begin
+    W := AnalyseWarnings(ForInPartsDecls + AStmt + LineEnding + 'end.');
+    AssertTrue(AWhat + ': ' + W,
+      Pos('by-ref mutation of part of for-in loop variable', W) >= 0);
+  end;
+
+begin
+  Check('for r in A do Mut(r.F);', 'record field');
+  Check('for r in A do Mut(r.Arr[0].X);', 'field of a static-array element');
+  Check('for sa1 in SA do Mut(sa1[1]);', 'static-array element');
+  Check('for sa1 in SA do Inc(sa1[0]);', 'built-in on an element');
+end;
+
+procedure TForInTests.TestSemantic_ForIn_ElementOfCopyWrite_Warns;
+
+  procedure Check(const AStmt, AWhat: string);
+  var W: string;
+  begin
+    W := AnalyseWarnings(ForInPartsDecls + AStmt + LineEnding + 'end.');
+    AssertTrue(AWhat + ': ' + W,
+      Pos('write to an element of for-in loop variable', W) >= 0);
+  end;
+
+begin
+  Check('for t in S do t[0] := 120;', 'string byte');
+  Check('for sa1 in SA do sa1[0] := 2;', 'static-array element');
+  { already diagnosed, as a write to field S, before BUG-029 }
+  AssertTrue('byte of a string field',
+    Pos('is discarded', AnalyseWarnings(ForInPartsDecls +
+      'for r in A do r.S[0] := 120;' + LineEnding + 'end.')) >= 0);
+end;
+
+procedure TForInTests.TestSemantic_ForIn_SharedStorageWrite_NoWarn;
+
+  procedure Check(const AStmt, AWhat: string);
+  var W: string;
+  begin
+    W := AnalyseWarnings(ForInPartsDecls + AStmt + LineEnding + 'end.');
+    AssertTrue(AWhat + ' must not warn: ' + W,
+      Pos('for-in loop variable', W) < 0);
+  end;
+
+begin
+  Check('for r in A do r.D[0].X := 5;', 'dynamic-array field element');
+  Check('for r in A do Mut(r.D[0].X);', 'dynamic-array element by ref');
+  Check('for r in A do r.C.F := 5;', 'class field');
+  Check('for r in A do Mut(r.C.F);', 'class field by ref');
 end;
 
 { ------------------------------------------------------------------ }
