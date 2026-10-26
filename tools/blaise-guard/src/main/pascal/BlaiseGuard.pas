@@ -34,6 +34,7 @@ uses
   Guard.Format.Xml,
   Guard.Format.Html,
   Guard.Cli,
+  IO.Files,          { EDirectoryNotFound }
   Guard.Rules.All;   { pulls every rule unit in so they self-register }
 
 const
@@ -47,7 +48,7 @@ begin
   if AOpt.HasScan then
     Result := AOpt.ScanPath
   else if AOpt.HasProject then
-    Result := ExtractFileDir(AOpt.ProjectPath)
+    Result := ProjectDir(AOpt.ProjectPath)
   else if AOpt.FilePath <> '' then
     Result := ExtractFileDir(AOpt.FilePath)
   else
@@ -103,7 +104,7 @@ begin
   else if AOpt.HasProject then
     { MVP: analyse every source under the project file's directory.  Parsing
       the project's explicit unitPaths is a later refinement. }
-    Result := TDirectoryScanSource.Create(ExtractFileDir(AOpt.ProjectPath))
+    Result := TDirectoryScanSource.Create(ProjectDir(AOpt.ProjectPath))
   else if FileExists(AOpt.FilePath) then
     Result := TSingleFileSource.Create(AOpt.FilePath)
   else
@@ -156,6 +157,7 @@ var
   Engine:    TAnalysisEngine;
   Report:    TReport;
   Formatter: IReportFormatter;
+  InputError: string;
 begin
   Opt := ParseCommandLine();
 
@@ -173,6 +175,13 @@ begin
     Halt(2);
   end;
 
+  InputError := CheckInput(Opt);
+  if InputError <> '' then
+  begin
+    WriteLn('error: ' + InputError);
+    Halt(2);
+  end;
+
   try
     Config := BuildConfig(Opt);
   except
@@ -185,7 +194,16 @@ begin
 
   Provider  := BuildProvider(Opt);
   Engine    := TAnalysisEngine.Create(Config);
-  Report    := Engine.Run(Provider);
+  try
+    Report := Engine.Run(Provider);
+  except
+    { CheckInput vetted the root, but it can vanish before the scan runs. }
+    on E: EDirectoryNotFound do
+    begin
+      WriteLn('error: ' + E.Message);
+      Halt(2);
+    end;
+  end;
   Formatter := BuildFormatter(Opt);
 
   WriteOutput(Formatter.Render(Report), Opt.OutputPath);

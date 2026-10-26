@@ -51,6 +51,14 @@ function ParseCommandLine: TCliOptions;
 { The --help / usage text. }
 function UsageText: string;
 
+{ The directory a --project file lives in, the root of its scan.  A bare
+  'project.xml' has no directory part; that is the current directory, '.'. }
+function ProjectDir(const AProjectPath: string): string;
+
+{ '' when the input AOpt names exists, otherwise the error to report: a
+  missing input is a usage error, never an empty or bogus report. }
+function CheckInput(AOpt: TCliOptions): string;
+
 implementation
 
 uses
@@ -211,6 +219,33 @@ begin
   end;
 
   Result := Opt;
+end;
+
+function ProjectDir(const AProjectPath: string): string;
+begin
+  Result := ExtractFileDir(AProjectPath);
+  if Result = '' then
+    Result := '.';
+end;
+
+function CheckInput(AOpt: TCliOptions): string;
+begin
+  Result := '';
+  if AOpt.HasScan then
+  begin
+    if not DirectoryExists(AOpt.ScanPath) then
+      Result := 'Directory not found: ' + AOpt.ScanPath;
+  end
+  else if AOpt.HasProject then
+  begin
+    if DirectoryExists(AOpt.ProjectPath) or not FileExists(AOpt.ProjectPath) then
+      Result := 'Project file not found: ' + AOpt.ProjectPath;
+  end
+  else if AOpt.HasFile then
+  begin
+    if not (FileExists(AOpt.FilePath) or DirectoryExists(AOpt.FilePath)) then
+      Result := 'No such file or directory: ' + AOpt.FilePath;
+  end;
 end;
 
 function UsageText: string;

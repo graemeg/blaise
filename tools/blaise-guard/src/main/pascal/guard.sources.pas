@@ -15,10 +15,10 @@
     * TSingleFileSource   - one explicit .pas file.
     * TDirectoryScanSource - every *.pas under a directory tree.
 
-  The directory adapter shells out to `find` (the RTL currently exposes no
-  readdir), which is fine on the Linux/BSD targets BlaiseGuard builds for.
-  Isolating that behind the port means a future native directory walker is a
-  drop-in replacement with no change to the engine. }
+  The directory adapter walks the tree with IO.Files.FindFiles: recursive,
+  in a stable order, and no shell or `find` (which Windows lacks, and whose
+  error text a shell-out once returned as a "source file" -- discussion
+  #241). }
 
 unit Guard.Sources;
 
@@ -26,7 +26,6 @@ interface
 
 uses
   SysUtils,
-  Classes,
   Generics.Collections;
 
 type
@@ -50,7 +49,10 @@ type
   private
     FRoot: string;
   public
+    { An empty ARoot is the current directory. }
     constructor Create(const ARoot: string);
+    { Every *.pas under the root.  Raises EDirectoryNotFound (IO.Files) when
+      the root is not a directory. }
     function Collect: TList<string>;
     function Describe: string;
   end;
@@ -58,7 +60,7 @@ type
 implementation
 
 uses
-  Process;
+  IO.Files;
 
 { ---- TSingleFileSource ---- }
 
@@ -85,41 +87,14 @@ end;
 constructor TDirectoryScanSource.Create(const ARoot: string);
 begin
   inherited Create();
-  FRoot := ExcludeTrailingPathDelimiter(ARoot);
+  FRoot := ARoot;
+  if FRoot = '' then
+    FRoot := '.';
 end;
 
 function TDirectoryScanSource.Collect: TList<string>;
-var
-  Proc:   TProcess;
-  Chunk:  string;
-  Output: string;
-  Lines:  TStringList;
-  I:      Integer;
-  Line:   string;
 begin
-  Result := TList<string>.Create();
-
-  { find <root> -type f -name '*.pas' - one path per line on stdout. }
-  Proc := TProcess.Create(nil);
-  Proc.Executable := 'sh';
-  Proc.Parameters.Add('-c');
-  Proc.Parameters.Add('find ''' + FRoot + ''' -type f -name ''*.pas''');
-  Proc.Execute();
-  Output := '';
-  repeat
-    Chunk  := Proc.ReadOutput();
-    Output := Output + Chunk;
-  until (Chunk = '') and (not Proc.Running);
-  Proc.WaitOnExit();
-
-  Lines := TStringList.Create();
-  Lines.Text := Output;
-  for I := 0 to Lines.Count - 1 do
-  begin
-    Line := Trim(Lines[I]);
-    if Line <> '' then
-      Result.Add(Line);
-  end;
+  Result := FindFiles(FRoot, '*.pas');
 end;
 
 function TDirectoryScanSource.Describe: string;
