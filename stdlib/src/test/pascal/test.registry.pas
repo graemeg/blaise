@@ -56,6 +56,7 @@ uses
   Ftp.Tests,
   Nntp.Tests,
   Regex.Tests,
+  IOFiles.Tests,
   ClassicPascalTypes.Tests;
 
 implementation

@@ -38,6 +38,8 @@ type
 
     function S_IFMT:  Integer; override;
     function S_IFDIR: Integer; override;
+    function S_IFREG: Integer; override;
+    function S_IFLNK: Integer; override;
 
     function SEEK_SET: Integer; override;
     function SEEK_CUR: Integer; override;
@@ -131,6 +133,8 @@ function TPlatformLayoutLinuxX86_64.O_APPEND: Integer; begin Result := $400;  en
 
 function TPlatformLayoutLinuxX86_64.S_IFMT:  Integer; begin Result := $F000; end;
 function TPlatformLayoutLinuxX86_64.S_IFDIR: Integer; begin Result := $4000; end;
+function TPlatformLayoutLinuxX86_64.S_IFREG: Integer; begin Result := $8000; end;
+function TPlatformLayoutLinuxX86_64.S_IFLNK: Integer; begin Result := $A000; end;
 
 function TPlatformLayoutLinuxX86_64.SEEK_SET: Integer; begin Result := 0; end;
 function TPlatformLayoutLinuxX86_64.SEEK_CUR: Integer; begin Result := 1; end;

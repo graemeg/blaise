@@ -65,6 +65,8 @@ function fstat(Fd: Integer; Buf: Pointer): Integer;
   fstatat(AT_FDCWD, path, buf, 0).  This wrapper sets up that call so the bare
   `stat` symbol posix imports still resolves. }
 function stat(Path: PChar; Buf: Pointer): Integer;
+{ lstat likewise: fstatat(AT_FDCWD, path, buf, AT_SYMLINK_NOFOLLOW). }
+function lstat(Path: PChar; Buf: Pointer): Integer;
 function mkdir(Path: PChar; Mode: Integer): Integer;
 function rmdir(Path: PChar): Integer;
 function unlink(Path: PChar): Integer;
@@ -376,6 +378,23 @@ asm
     jae  .Lok_stat
     negq %rax
 .Lok_stat:
+    ret
+end;
+
+{ lstat(path, buf) -> fstatat(AT_FDCWD, path, buf, AT_SYMLINK_NOFOLLOW); the
+  same shuffle as stat above, with flag $200 so a link is not followed. }
+function lstat(Path: PChar; Buf: Pointer): Integer;
+  assembler; nostackframe;
+asm
+    movq %rsi, %rdx          { buf   -> arg3 }
+    movq %rdi, %rsi          { path  -> arg2 }
+    movq $-100, %rdi         { AT_FDCWD -> arg1 (dirfd) }
+    movq $512, %r10          { AT_SYMLINK_NOFOLLOW -> arg4 }
+    movq $552, %rax          { SYS_fstatat (ino64) }
+    syscall
+    jae  .Lok_lstat
+    negq %rax
+.Lok_lstat:
     ret
 end;
 

@@ -50,6 +50,7 @@ type
 
     { Directory operations }
     function DirectoryExists(const APath: string): Boolean; override;
+    function PathKind(const APath: string; AFollowLinks: Boolean): Integer; override;
     function ForceDirectories(const APath: string): Boolean; override;
     function RemoveDir(const APath: string): Boolean; override;
     function GetCurrentDir: string; override;
@@ -182,6 +183,7 @@ function  libc_lseek(Fd: Integer; Offset: Int64; Whence: Integer): Int64;   exte
 function  libc_close(Fd: Integer): Integer;                                  external name 'close';
 function  libc_fstat(Fd: Integer; Buf: Pointer): Integer;                   external name 'fstat';
 function  libc_stat(Path: PChar; Buf: Pointer): Integer;                    external name 'stat';
+function  libc_lstat(Path: PChar; Buf: Pointer): Integer;                   external name 'lstat';
 function  libc_mkdir(Path: PChar; Mode: Integer): Integer;                   external name 'mkdir';
 function  libc_rmdir(Path: PChar): Integer;                                  external name 'rmdir';
 function  libc_unlink(Path: PChar): Integer;                                 external name 'unlink';
@@ -250,6 +252,8 @@ function  _FileAge(const Path: string): Int64;
 
 { Directory operations }
 function  _DirectoryExists(const Path: string): Integer;
+{ Not a compiler builtin: stdlib's IO.Files imports it via `external name`. }
+function  _PathKind(const Path: string; FollowLinks: Integer): Integer;
 function  _ForceDirectories(const Path: string): Integer;
 procedure _RemoveDir(const Path: string);
 function  _GetCurrentDir: Pointer;
@@ -550,6 +554,28 @@ var
 begin
   if libc_stat(StrData(Pointer(APath)), @St) <> 0 then begin Result := False; Exit end;
   Result := (GPlatformLayout.StatMode(@St) and GPlatformLayout.S_IFMT()) = GPlatformLayout.S_IFDIR();
+end;
+
+function TRtlPlatformPosix.PathKind(const APath: string; AFollowLinks: Boolean): Integer;
+var
+  St:   TStatBuf;
+  Rc:   Integer;
+  Mode: Integer;
+begin
+  if AFollowLinks then
+    Rc := libc_stat(StrData(Pointer(APath)), @St)
+  else
+    Rc := libc_lstat(StrData(Pointer(APath)), @St);
+  if Rc <> 0 then begin Result := 0; Exit end;
+  Mode := GPlatformLayout.StatMode(@St) and GPlatformLayout.S_IFMT();
+  if Mode = GPlatformLayout.S_IFREG() then
+    Result := 1
+  else if Mode = GPlatformLayout.S_IFDIR() then
+    Result := 2
+  else if Mode = GPlatformLayout.S_IFLNK() then
+    Result := 3
+  else
+    Result := 4;
 end;
 
 function TRtlPlatformPosix.ForceDirectories(const APath: string): Boolean;
@@ -1365,6 +1391,11 @@ end;
 function _DirectoryExists(const Path: string): Integer;
 begin
   if GRtlPlatform.DirectoryExists(Path) then Result := 1 else Result := 0;
+end;
+
+function _PathKind(const Path: string; FollowLinks: Integer): Integer;
+begin
+  Result := GRtlPlatform.PathKind(Path, FollowLinks <> 0);
 end;
 
 function _ForceDirectories(const Path: string): Integer;

@@ -42,6 +42,12 @@ type
 
     { Directory operations }
     function DirectoryExists(const APath: string): Boolean; virtual; abstract;
+    { What kind of file-system entry APath is: 0 missing (or not stat-able),
+      1 regular file, 2 directory, 3 symbolic link, 4 anything else (FIFO,
+      socket, device).  With AFollowLinks a link reports its target's kind
+      (stat); without it the link itself (lstat), so 3 is only seen then.
+      Unlike FileExists it never opens the path -- opening a FIFO blocks. }
+    function PathKind(const APath: string; AFollowLinks: Boolean): Integer; virtual; abstract;
     function ForceDirectories(const APath: string): Boolean; virtual; abstract;
     function RemoveDir(const APath: string): Boolean; virtual; abstract;
     function GetCurrentDir: string; virtual; abstract;
@@ -145,6 +151,8 @@ type
     { ---- stat mode bits ---- }
     function S_IFMT:  Integer; virtual; abstract;
     function S_IFDIR: Integer; virtual; abstract;
+    function S_IFREG: Integer; virtual; abstract;
+    function S_IFLNK: Integer; virtual; abstract;
 
     { ---- lseek whence ---- }
     function SEEK_SET: Integer; virtual; abstract;

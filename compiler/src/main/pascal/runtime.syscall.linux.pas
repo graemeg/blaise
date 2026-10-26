@@ -49,6 +49,7 @@ function lseek(Fd: Integer; Offset: Int64; Whence: Integer): Int64;
 { Filesystem. }
 function fstat(Fd: Integer; Buf: Pointer): Integer;
 function stat(Path: PChar; Buf: Pointer): Integer;
+function lstat(Path: PChar; Buf: Pointer): Integer;
 function mkdir(Path: PChar; Mode: Integer): Integer;
 function rmdir(Path: PChar): Integer;
 function unlink(Path: PChar): Integer;
@@ -165,6 +166,7 @@ const
   SYS_close         = 3;
   SYS_stat          = 4;
   SYS_fstat         = 5;
+  SYS_lstat         = 6;
   SYS_lseek         = 8;
   SYS_mmap          = 9;
   SYS_munmap        = 11;
@@ -254,6 +256,14 @@ function stat(Path: PChar; Buf: Pointer): Integer;
   assembler; nostackframe;
 asm
     movq $4, %rax        { SYS_stat }
+    syscall
+    ret
+end;
+
+function lstat(Path: PChar; Buf: Pointer): Integer;
+  assembler; nostackframe;
+asm
+    movq $6, %rax        { SYS_lstat }
     syscall
     ret
 end;

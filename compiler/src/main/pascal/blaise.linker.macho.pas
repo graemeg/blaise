@@ -403,10 +403,10 @@ end;
   silently bound to libSystem as __UpperCase). }
 function IsKnownLibSystemImport(const AName: string): Boolean;
 const
-  KNOWN: array[0..45] of string = (
+  KNOWN: array[0..46] of string = (
     'abort', 'chdir', 'chmod', 'clock_gettime', 'close', 'dup2',
     'execvp', 'exit', '_exit', 'fork', 'fstat', 'getcwd', 'getenv',
-    'getpid', 'gmtime_r', 'localtime_r', 'lseek', 'memcmp', 'memcpy',
+    'getpid', 'gmtime_r', 'localtime_r', 'lseek', 'lstat', 'memcmp', 'memcpy',
     'memmove', 'memset', 'mkdir', 'mkstemp', 'mmap', 'munmap',
     'nanosleep', 'open', 'pipe', 'pthread_create', 'pthread_join',
     'pthread_key_create', 'pthread_mutex_destroy', 'pthread_mutex_init',
@@ -424,7 +424,7 @@ begin
      (AName = 'pthread_cond_wait') or (AName = 'pthread_cond_broadcast') or
      (AName = 'pthread_cond_timedwait_relative_np') then
     Exit(True);
-  for I := 0 to 45 do
+  for I := 0 to 46 do
     if AName = KNOWN[I] then
       Exit(True);
   Result := False;
