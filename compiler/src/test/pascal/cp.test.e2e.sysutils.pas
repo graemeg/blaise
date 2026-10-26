@@ -41,6 +41,10 @@ type
       then DirectoryExists confirms the tree was created.  Exercises the
       statement-context lowering (distinct from the expression form above). }
     procedure TestRun_ForceDirectories_Statement_CreatesTree;
+    { any value-returning builtin called as a bare statement: its side effect
+      happens, and a discarded managed result is released (no leak) }
+    procedure TestRun_BuiltinFunctions_AsStatements;
+    procedure TestRun_BuiltinFunctions_AsStatements_LeakFree;
     procedure TestRun_Sleep_DoesNotCrash;
     procedure TestRun_ProcessBuiltins_CapturesOutput;
     procedure TestRun_ProcessBuiltins_ExitCode;
@@ -213,6 +217,48 @@ const
           Dir := ParamStr(1);
           ForceDirectories(Dir);
           WriteLn(DirectoryExists(Dir))
+        end.
+        ''';
+
+  { Value-returning builtins in statement position.  Before the semantic pass
+    lowered these to their expression form, every one of them was an internal
+    error in both native backends (only ForceDirectories / RemoveDir had a
+    hand-written statement arm). }
+  SrcBuiltinFunctionStmts =
+    '''
+        program P;
+        var Dir: string;
+        begin
+          Dir := ParamStr(1);
+          ForceDirectories(Dir);
+          Exec('echo hi > ' + Dir + '/a.txt');
+          RenameFile(Dir + '/a.txt', Dir + '/b.txt');
+          WriteLn(FileExists(Dir + '/a.txt'), ' ', FileExists(Dir + '/b.txt'));
+          SetCurrentDir(Dir);
+          WriteLn(FileExists('b.txt'));
+          Length(Dir);
+          Pos('x', Dir);
+          DirectoryExists(Dir);
+          WriteLn('done')
+        end.
+        ''';
+
+  { Discarded STRING results, many times over: each must be released. }
+  SrcBuiltinFunctionStmtsLeak =
+    '''
+        program P;
+        var I: Integer; S: string;
+        begin
+          S := 'dir/name.pas';
+          for I := 0 to 99 do
+          begin
+            GetTempDir();
+            ExtractFileName(S);
+            ChangeFileExt(S, '.bak');
+            IntToStr(I);
+            Copy(S, 0, 3)
+          end;
+          WriteLn('ok')
         end.
         ''';
 
@@ -534,6 +580,32 @@ begin
     RemoveDir(ExtractFilePath(ExcludeTrailingPathDelimiter(
       ExtractFilePath(ExcludeTrailingPathDelimiter(Dir)))));
   end;
+end;
+
+procedure TE2ESysUtilsTests.TestRun_BuiltinFunctions_AsStatements;
+var
+  Output: string;
+  RCode: Integer;
+  Dir: string;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  Dir := IncludeTrailingPathDelimiter(GetTempDir()) +
+         'blaise_bifstmt_' + IntToStr(GetProcessID());
+  try
+    AssertTrue('compile+run',
+      CompileAndRun(SrcBuiltinFunctionStmts, Output, RCode, [Dir]));
+    AssertEquals('exit code 0', 0, RCode);
+    AssertEquals('side effects happened',
+      'False True' + LineEnding + 'True' + LineEnding + 'done', Trim(Output));
+  finally
+    DeleteFile(Dir + '/b.txt');
+    RemoveDir(Dir);
+  end;
+end;
+
+procedure TE2ESysUtilsTests.TestRun_BuiltinFunctions_AsStatements_LeakFree;
+begin
+  AssertLeakFreeOnAll(SrcBuiltinFunctionStmtsLeak, 'ok');
 end;
 
 procedure TE2ESysUtilsTests.TestRun_Sleep_DoesNotCrash;

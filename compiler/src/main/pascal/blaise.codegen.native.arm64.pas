@@ -409,6 +409,9 @@ type
     procedure EmitProcFieldAddr(const AObjectName: string; AObjExpr: TASTExpr;
       AIsVarParam, AImplicitSelf: Boolean; AReceiver: TTypeDesc;
       AField: TFieldInfo; ANode: TASTNode);
+    { Run a builtin function call whose result nobody consumes, releasing an
+      owned managed result. }
+    procedure EmitDiscardedBuiltinCall(ACall: TASTExpr);
     procedure EmitDiscardedProcResult(APT: TProceduralTypeDesc);
     procedure EmitProcFieldCall(const AObjectName: string; AObjExpr: TASTExpr;
       AIsVarParam, AImplicitSelf: Boolean; AReceiver: TTypeDesc;
@@ -3916,6 +3919,27 @@ begin
   EmitProcFieldCall(ME.ObjectName, ME.ObjExpr, ME.IsVarParam, False,
     ME.ResolvedClassType, ME.ProcFieldInfo, ME.Args, AExpr, ASretDest,
     ASretSpOff);
+end;
+
+procedure TArm64Backend.EmitDiscardedBuiltinCall(ACall: TASTExpr);
+var
+  RT: TTypeDesc;
+begin
+  RT := ACall.ResolvedType;
+  if (RT <> nil) and RT.IsFloat() then
+  begin
+    EmitExprToD0(ACall);
+    Exit;
+  end;
+  EmitExprToX0(ACall);
+  { builtin results come back owned (rc=1), as from a direct call }
+  if RT = nil then Exit;
+  if RT.IsString() then
+    EmitCallSym('_StringRelease')
+  else if RT.Kind = tyClass then
+    EmitCallSym('_ClassRelease')
+  else if RT.Kind = tyDynArray then
+    EmitCallSym('_DynArrayRelease');
 end;
 
 procedure TArm64Backend.EmitDiscardedProcResult(APT: TProceduralTypeDesc);
@@ -8292,6 +8316,14 @@ begin
   if AStmt is TMethodCallStmt then
   begin
     EmitMethodCallStmt(TMethodCallStmt(AStmt));
+    Exit;
+  end;
+  if (AStmt is TExprCallStmt) and
+     not (TExprCallStmt(AStmt).Call is TIndirectFuncCallExpr) then
+  begin
+    { Exec(Cmd); -- a builtin function as a statement (lowered by the
+      semantic pass): evaluate it, then drop an owned managed result. }
+    EmitDiscardedBuiltinCall(TExprCallStmt(AStmt).Call);
     Exit;
   end;
   if AStmt is TExprCallStmt then

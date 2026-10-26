@@ -19231,6 +19231,21 @@ begin
     Exit;
   end;
 
+  if (AStmt is TExprCallStmt) and
+     not (TExprCallStmt(AStmt).Call is TIndirectFuncCallExpr) then
+  begin
+    { Exec(Cmd); -- a builtin function as a statement (lowered by the
+      semantic pass): evaluate it, then drop an owned managed result. }
+    RetT := TExprCallStmt(AStmt).Call.ResolvedType;
+    if (RetT <> nil) and RetT.IsFloat() then
+      Self.EmitExprToXmm0(TExprCallStmt(AStmt).Call)
+    else
+    begin
+      Self.EmitExprToEax(TExprCallStmt(AStmt).Call);
+      Self.EmitDiscardedRegResult(RetT);
+    end;
+    Exit;
+  end;
   if AStmt is TExprCallStmt then
   begin
     { L[I](args); / P^(args);  The call runs as the expression it is; an

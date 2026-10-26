@@ -3406,6 +3406,46 @@ information at compile time without a memory-unsafe fallback.
 * *Reject `(X as TC).Free()`.*  This would break ported code that is
   otherwise valid, so it was rejected.
 
+== A Builtin Function Called as a Statement
+
+=== Decision
+
+A builtin function may be called as a statement, its result discarded,
+exactly as a user-defined function may: `Exec(Cmd);`, `SetCurrentDir(D);`,
+`RenameFile(A, B);`.  The semantic pass lowers the statement to its
+expression form (`TProcCall.LoweredCall`, a `TExprCallStmt` of the analysed
+`TFuncCallExpr`), so the call gets the expression path's argument checks,
+and every backend lowers it with its existing expression code.  An owned
+managed result (a string, an object, a dynamic array) is released at once.
+
+`GetMem` and `ReallocMem` stay errors as statements: there, discarding the
+result is always a mistake (the classic two-argument procedure form), not a
+choice.
+
+=== Rationale
+
+Delphi and FPC (in its default extended-syntax mode) allow any function
+result to be discarded, and Blaise already did for user functions.  For
+builtins the statement was accepted by the semantic pass but reached each
+backend as a procedure call; only the few builtins with a hand-written
+statement arm (`ForceDirectories`, `RemoveDir`) compiled, and every other
+one -- `Exec`, `SetCurrentDir`, even `Length` -- was an internal error on
+both native backends.  The statement form also skipped the builtin's
+argument checks, which live in the expression analyser.  Lowering to the
+expression form fixes both, for every builtin at once, with no per-name
+statement arms to keep in step.
+
+=== Alternatives rejected
+
+* *A statement arm per builtin in each backend.*  Rejected: dozens of
+  cases per ISA, each a copy of the expression lowering, and a new builtin
+  is broken as a statement until someone remembers both arms.
+* *Reject discarding the result of a pure builtin* (`Length(S);`).
+  Rejected for now: it is harmless, and a "result unused" hint belongs to a
+  general warning that would cover user functions too.
+
+---
+
 == `case` Statement on String Selector
 
 === Decision

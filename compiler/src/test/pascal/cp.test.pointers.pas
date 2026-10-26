@@ -25,7 +25,6 @@ type
     function ParseSrc(const ASrc: string): TProgram;
     function AnalyseSrc(const ASrc: string): TProgram;
     procedure AnalyseExpectError(const ASrc: string);
-    procedure GenNativeExpectCodeGenError(const ASrc: string);
   published
     { P^ := Row through a pointer to a static array copies the row; a managed
       row retains the source's elements (x86-64 stored the row's ADDRESS,
@@ -61,7 +60,7 @@ type
     { A builtin FUNCTION in statement position that semantic still lets
       through must raise the backend's clean 'Unknown procedure' error on
       BOTH backends — never dereference the nil decl. }
-    procedure TestNative_BuiltinFuncStatement_RaisesCleanly;
+    procedure TestNative_BuiltinFuncStatement_Compiles;
 
     { ------------------------------------------------------------------ }
     { Codegen — emit malloc / free / load / store / pointer arithmetic     }
@@ -228,34 +227,6 @@ begin
     on E: ESemanticError do ; { expected }
   end;
 end;
-
-procedure TPointerTests.GenNativeExpectCodeGenError(const ASrc: string);
-var
-  CG:   TCodeGenNative;
-  Prog: TProgram;
-begin
-  Prog := AnalyseSrc(ASrc);
-  try
-    CG := TCodeGenNative.Create();
-    try
-      CG.SetTarget(HostTarget());
-      try
-        CG.Generate(Prog);
-        Fail('Expected ENativeCodeGenError');
-      except
-        on E: ENativeCodeGenError do ; { expected }
-      end;
-    finally
-      CG.Free();
-    end;
-  finally
-    Prog.Free();
-  end;
-end;
-
-{ ------------------------------------------------------------------ }
-{ Parser tests                                                         }
-{ ------------------------------------------------------------------ }
 
 procedure TPointerTests.TestParse_PointerTypeName_Caret;
 var
@@ -478,13 +449,9 @@ begin
         ''');
 end;
 
-procedure TPointerTests.TestNative_BuiltinFuncStatement_RaisesCleanly;
-begin
-  { Length is a builtin FUNCTION; in statement position the semantic pass
-    lets it through and no codegen case matches.  The backend must raise a
-    clean 'Unknown procedure' error — the nil-ResolvedDecl fall-through
-    used to segfault the compiler (BUG-035). }
-  GenNativeExpectCodeGenError(
+procedure TPointerTests.TestNative_BuiltinFuncStatement_Compiles;
+const
+  Src =
     '''
         program Prg;
         var S: String;
@@ -492,7 +459,14 @@ begin
           S := 'x';
           Length(S)
         end.
-        ''');
+        ''';
+begin
+  { Length is a builtin FUNCTION.  As a statement it reached the backend as a
+    procedure call with no lowering: first a compiler segfault (BUG-035),
+    then a clean 'Unknown procedure' error.  The semantic pass now lowers it
+    to its expression form, so it compiles on both ISAs. }
+  AssertTrue('x86-64', GenAsm(Src, TargetX86_64) <> '');
+  AssertTrue('arm64', GenAsm(Src, TargetArm64) <> '');
 end;
 
 { ------------------------------------------------------------------ }

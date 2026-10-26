@@ -610,13 +610,15 @@ type
     destructor Destroy; override;
   end;
 
-  { A call through a procedural VALUE an expression yields, as a statement:
-    L[I](args); and P^(args); (a procedural array element or a dereferenced
-    pointer to a procedural variable).  Call is a TIndirectFuncCallExpr whose
-    result, if any, is discarded. }
+  { A call expression run as a statement, its result (if any) discarded.
+    Call is either a TIndirectFuncCallExpr -- a call through a procedural
+    VALUE: L[I](args); and P^(args); (a procedural array element or a
+    dereferenced pointer to a procedural variable) -- or a TFuncCallExpr of a
+    builtin function used as a statement, e.g. Exec(Cmd); (built by the
+    semantic pass as TProcCall.LoweredCall). }
   TExprCallStmt = class(TASTStmt)
   public
-    Call: TASTExpr;  { owned — the TIndirectFuncCallExpr }
+    Call: TASTExpr;  { owned }
   end;
 
   TProcCall = class(TASTStmt)

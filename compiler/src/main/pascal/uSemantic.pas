@@ -851,6 +851,9 @@ type
       ACol: Integer): TIndirectFuncCallExpr;
     function  BuildGetterProcStmt(ART: TRecordTypeDesc; AProp: TPropertyInfo;
       ARecv: TASTExpr; AArgs: TObjectList; ALine, ACol: Integer): TASTStmt;
+    { A builtin function called as a statement, as the TExprCallStmt of its
+      analysed expression form. }
+    function  BuildBuiltinFuncStmt(ACall: TProcCall): TASTStmt;
     function  CallField(ART: TRecordTypeDesc; const AName: string;
       ALine, ACol: Integer): TFieldInfo;
     function  IsRoutineAddr(AExpr: TASTExpr): Boolean;
@@ -16999,6 +17002,16 @@ begin
     if SameText(ACall.Name, 'FreeMem') and (ACall.Args.Count <> 1) then
       SemanticError('FreeMem requires exactly 1 argument',
         ACall.Line, ACall.Col);
+    { Any other builtin FUNCTION used as a statement -- Exec(Cmd);,
+      SetCurrentDir(D);, Length(S); -- runs as the expression it is, its
+      result discarded.  Lowering it here gives the call the expression
+      path's argument checks, and every backend its expression lowering
+      (both backends raised an internal error on the statement form). }
+    if (Sym.Kind = skFunction) and (Sym.Decl = nil) then
+    begin
+      ACall.LoweredCall := Self.BuildBuiltinFuncStmt(ACall);
+      Exit;
+    end;
     { Inc(x) / Inc(x, n) / Dec(x) / Dec(x, n) — in-place add/sub }
     if SameText(ACall.Name, 'Inc') or SameText(ACall.Name, 'Dec') then
     begin
@@ -22151,6 +22164,29 @@ begin
   S.Line := ALine;
   S.Col := ACol;
   S.Call := Self.BuildGetterProcCall(ART, AProp, ARecv, AArgs, ALine, ACol);
+  Result := S;
+end;
+
+function TSemanticAnalyser.BuildBuiltinFuncStmt(ACall: TProcCall): TASTStmt;
+var
+  S: TExprCallStmt;
+  Call: TFuncCallExpr;
+  I: Integer;
+begin
+  { The statement Name(Args) as the expression-call statement of the
+    expression Name(Args).  The argument nodes are shared, as in
+    BuildGetterProcCall; codegen only ever emits the lowered form. }
+  Call := TFuncCallExpr.Create();
+  Call.Line := ACall.Line;
+  Call.Col := ACall.Col;
+  Call.Name := ACall.Name;
+  for I := 0 to ACall.Args.Count - 1 do
+    Call.Args.Add(ACall.Args.Items[I]);
+  Self.AnalyseExpr(Call);
+  S := TExprCallStmt.Create();
+  S.Line := ACall.Line;
+  S.Col := ACall.Col;
+  S.Call := Call;
   Result := S;
 end;
 

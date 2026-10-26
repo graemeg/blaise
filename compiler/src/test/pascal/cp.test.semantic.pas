@@ -121,6 +121,11 @@ type
       expression.  Ordinal casts of ordinals and Double(I) still compile. }
     procedure TestSemantic_OrdinalCastOfFloat_Rejected;
     procedure TestSemantic_OrdOfFloat_Rejected;
+    { a value-returning builtin called as a statement (result discarded) is
+      lowered to its expression form, so it gets the expression path's
+      argument checks and every backend's existing expression lowering }
+    procedure TestBuiltinFunctionStatement_LowersToExpressionCall;
+    procedure TestBuiltinFunctionStatement_ChecksArguments;
     { a float is rejected wherever an integer is required: the operands of
       and/or/xor, the shifts and mod; the integer arguments of Inc/Dec,
       SetLength, Chr, IntToStr, Copy, Delete, Halt, GetMem, ReallocMem,
@@ -995,6 +1000,40 @@ begin
     'S := Chr(65) + IntToStr(I) + Copy(S, 0, 1); Delete(S, 0, 1); ' +
     'Pt := GetMem(8); Pt := ReallocMem(Pt, 16); Sleep(0); ' +
     'S := ParamStr(0); if (I > 0) or (J > 0) then Halt(0) end.'));
+end;
+
+procedure TSemanticTests.TestBuiltinFunctionStatement_LowersToExpressionCall;
+var
+  Prog: TProgram;
+  PC: TProcCall;
+  Call: TASTExpr;
+begin
+  Prog := Analyse('program P; begin Exec(''true'') end.');
+  try
+    AssertTrue('a procedure-call statement',
+      Prog.Block.Stmts.Items[0] is TProcCall);
+    PC := TProcCall(Prog.Block.Stmts.Items[0]);
+    AssertTrue('lowered to an expression-call statement',
+      PC.LoweredCall is TExprCallStmt);
+    Call := TExprCallStmt(PC.LoweredCall).Call;
+    AssertTrue('of the builtin function call', Call is TFuncCallExpr);
+    AssertEquals('name', 'Exec', TFuncCallExpr(Call).Name);
+    AssertEquals('argument', 1, Integer(TFuncCallExpr(Call).Args.Count));
+    AssertNotNull('analysed', Call.ResolvedType);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TSemanticTests.TestBuiltinFunctionStatement_ChecksArguments;
+begin
+  AssertTrue('Exec arity', Pos('Exec requires exactly 1 argument',
+    SemanticError('program P; begin Exec(''a'', ''b'') end.')) >= 0);
+  AssertTrue('Ord of a float', Pos('Ord expects an ordinal value',
+    SemanticError('program P; var D: Double; begin Ord(D) end.')) >= 0);
+  AssertEquals('valid statement forms still compile', '', SemanticError(
+    'program P; var S: string; begin Exec(''true''); Length(S); ' +
+    'Pos(''a'', S); FileExists(S); GetTempDir(); ExtractFileName(S) end.'));
 end;
 
 initialization
