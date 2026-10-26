@@ -82,6 +82,77 @@ revisiting the directive.
 grows resource-tree generation (that also needs the resource tree folded into
 the unit-cache key, in the same way `{$EMBED}` dependencies already are).
 
+=== Type helpers (methods on existing types, e.g. string helpers)
+
+*What.* A type helper adds methods to a type the programmer does not own --
+including a simple type such as `string` or `Integer` -- so they can be
+called with member syntax:
+
+[source,pascal]
+----
+type
+  TStringHelper = record helper for string
+    function StartsWith(const AValue: string): Boolean;
+    function EndsWith(const AValue: string): Boolean;
+    function IndexOf(const AValue: string): Integer;
+    function Contains(const AValue: string): Boolean;
+    function Split(ASeparator: Char): TList<string>;
+  end;
+
+if Path.EndsWith('.pas') then ...
+Files := FindFiles(Root, P -> P.EndsWith('.pas'));
+----
+
+Blaise has no helpers today.  `S.EndsWith(X)` is rejected with "'S' is not a
+class, interface, or record variable", so string tests are written with the
+free functions (`Pos`, `Copy`, `ExtractFileExt`).  This came up while
+designing `IO.Files.FindFiles`: the natural predicate `P -> P.EndsWith(Ext)`
+does not compile.
+
+*Prior art.*
+
+* *Delphi* has `class helper for` and `record helper for`.  Since XE3 a
+  record helper may extend a simple type, and `System.SysUtils` ships
+  `TStringHelper`, `TIntegerHelper` and friends.  `TStringHelper` is
+  *0-based* (`IndexOf` returns -1 when not found), which matches Blaise's
+  string conventions exactly.  Only one helper per type is active in a
+  scope: the nearest one wins.
+* *FPC* supports the same `class helper` / `record helper` forms, plus
+  `type helper for` (FPC 3.0, under `{$modeswitch typehelpers}` in
+  objfpc mode), and its `SysUtils` provides a Delphi-compatible
+  `TStringHelper`.  `{$modeswitch multihelpers}` (FPC 3.2) lets several
+  helpers for one type be active together.
+* *C#* extension methods and *Swift* extensions are the same idea.  Swift's
+  extensions may also add protocol conformance.
+
+*Design questions to settle first.*
+
+. *Syntax.*  FPC and Delphi differ (`type helper` vs `record helper` for
+  simple types), so this is one of the cases where the dialect is chosen
+  explicitly before implementation.
+. *Several helpers for one type.*  Delphi's "nearest helper wins" silently
+  hides the methods of every other helper in scope.  Merging all helpers in
+  scope (FPC's `multihelpers`, C#, Swift), with an ambiguity error on a
+  clash, is the friendlier rule.
+. *Helpers versus built-ins.*  Should a method name be allowed to shadow a
+  builtin of the same name (`S.Length` beside `Length(S)`), and are the
+  standard string helpers stdlib code or compiler intrinsics?
+. *Enums.*  Helpers would give enums methods (`Status.IsSuccess`), so this
+  overlaps the *Enhanced Enumerations* section below.  The two should be
+  designed together.
+
+*Implementation sketch.*  Semantic: when member lookup on a value finds no
+field or method of its own type, it falls back to the helper methods in
+scope for that type.  A helper method is lowered as a standalone routine
+whose `Self` is the receiver (by `const` for a simple type, by `var` for a
+record, as Delphi does), so no new calling convention is needed.  Helpers
+must round-trip through the `.bif` interface, since a unit exports them,
+and need a review of `uDebugOPDF.pas`.
+
+*Effort.*  Moderate.  The parser and semantic work is contained, but helper
+resolution touches every member-access path, including generics, chained
+access and the backends' flag-driven arms (see flag-coverage).
+
 === If Conditional Operator (Ternary Conditional Operator)
 
 More details here: https://en.wikipedia.org/wiki/Ternary_conditional_operator
@@ -650,41 +721,25 @@ note" for the full reconciliation.
 
 == Tools — Portability to Windows
 
-=== Replace the `find` shell-out in BlaiseGuard with a stdlib directory walker
+=== Run clang without a shell in BindGen
 
-*Target.* v0.16, before the Windows x86-64 target lands.
+*Target.* Before the Windows x86-64 target lands.
 
-*What.* `TDirectoryScanSource.Collect` in
-`tools/blaise-guard/src/main/pascal/guard.sources.pas` lists the sources
-to analyse by running `sh -c "find <root> -type f -name '*.pas'"` through
-`TProcess`.  Windows has neither `sh` nor a POSIX `find` (its `find.exe`
-searches text in files), so `blaise-guard --scan` and `--project` would
-find no sources there.  The unit comment says the RTL exposes no readdir;
-that is no longer true.  The `ListDir` builtin (added for GH #194,
-`TRtlPlatform.ListDir`) returns a directory's entry names.
+*What.* `BindGen.pas` runs clang through `sh -c` when errors are allowed,
+only so that clang's stderr can be sent to `/dev/null`.  Windows has no
+`sh`, so that path would fail there.
 
-BindGen has the same dependency in one place: `BindGen.pas` runs clang
-through `sh -c` when errors are allowed, only to send its stderr to
-`/dev/null`.
+*Recommended approach.* Run clang directly through `TProcess` and read and
+ignore its stderr, with no shell.
 
-*Recommended approach.*
+*Effort.* Small.
 
-. Add a recursive file finder to stdlib, for example
-  `FindFiles(const ARoot, APattern: string): TList<string>` in
-  `sysutils`, built on `ListDir`, `DirectoryExists` and a simple wildcard
-  match.  Return the paths sorted, so a report's file order does not
-  depend on the directory order a file system happens to use.
-. Use it in `TDirectoryScanSource.Collect`, and drop the `TProcess` use
-  from `guard.sources.pas`.
-. In BindGen, run clang directly and discard its stderr through
-  `TProcess` (or read and ignore it), with no shell.
-. When the Windows platform unit is written, `ListDir` gets a
-  `FindFirstFileW`/`FindNextFileW` implementation; nothing above it
-  changes.
-
-*Effort.* Small.  Test `FindFiles` in the stdlib suite (nested
-directories, a pattern that excludes some files, an empty tree), and keep
-BlaiseGuard's existing scan behaviour covered by its own tests.
+The BlaiseGuard half of this item is done: its directory scan uses
+`IO.Files.FindFiles` (stdlib), a recursive walker built on the `ListDir`
+and `PathKind` RTL entry points, so `--scan` and `--project` no longer run
+`find`.  When the Windows platform unit is written, `ListDir` gets a
+`FindFirstFileW`/`FindNextFileW` implementation and `PathKind` a
+`GetFileAttributesW` one; nothing above them changes.
 
 == Compiler — Backend Architecture
 
