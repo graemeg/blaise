@@ -1014,6 +1014,7 @@ type
       the source position and, when known, the current unit name — mirroring
       SemanticError's message shape. }
     procedure SemanticWarning(const AMsg: string; ALine, ACol: Integer);
+    procedure WarnIfUnsignedDowntoZero(AFor: TForStmt; AVarType: TTypeDesc);
     procedure CheckTypesMatch(AExpected, AActual: TTypeDesc;
       const AContext: string; ALine, ACol: Integer);
     { Returns True if AActual is AExpected or a subclass of AExpected. }
@@ -1651,6 +1652,29 @@ begin
   if PrevUnit <> '' then
     SemanticError(GenericCollisionMsg('Generic type', ATD.Name, PrevUnit, CurUnit),
       ATD.Line, ATD.Col);
+end;
+
+{ D6 of the type standardisation: `for U := Count - 1 downto 0` with an
+  unsigned U does not end when Count is 0 -- the start wraps to High(T), and
+  the loop runs High(T) + 1 times.  A constant start is never negative, so
+  only a computed one warns. }
+procedure TSemanticAnalyser.WarnIfUnsignedDowntoZero(AFor: TForStmt;
+  AVarType: TTypeDesc);
+var
+  V: Int64;
+begin
+  if not AFor.IsDownTo then Exit;
+  if (AVarType = nil) or
+     not (AVarType.Kind in [tyByte, tyWord, tyUInt32, tyUInt64]) then
+    Exit;
+  if not Self.TryEvalConstIntExpr(AFor.EndExpr, V) or (V <> 0) then Exit;
+  if Self.TryEvalConstIntExpr(AFor.StartExpr, V) then Exit;
+  SemanticWarning(Format(
+    'loop variable ''%s'' is unsigned (''%s''): ''downto 0'' from a start '
+    + 'of -1 (Count - 1 on an empty collection) wraps to High(%s) and the '
+    + 'loop runs High(%s) + 1 times; declare it as Int',
+    [AFor.VarName, AVarType.Name, AVarType.Name, AVarType.Name]),
+    AFor.Line, AFor.Col);
 end;
 
 procedure TSemanticAnalyser.SemanticWarning(const AMsg: string; ALine, ACol: Integer);
@@ -13369,6 +13393,7 @@ begin
       EndType := Self.AnalyseExprSlot(ForS.EndExpr);
     CheckTypesMatch(VarSym.TypeDesc, EndType,
       'for-loop end expression', ForS.Line, ForS.Col);
+    Self.WarnIfUnsignedDowntoZero(ForS, VarSym.TypeDesc);
     Inc(FLoopDepth);
     try
       AnalyseStmt(ForS.Body);

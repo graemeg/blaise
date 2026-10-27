@@ -50,6 +50,14 @@ type
     procedure TestSemantic_For_NonOrdinalVar_RaisesError;
     procedure TestSemantic_For_StartTypeMismatch_RaisesError;
     procedure TestSemantic_For_EndTypeMismatch_RaisesError;
+    { D6 (type standardisation): `downto 0` over an unsigned counter from a
+      non-constant start wraps when the start is -1 (Count - 1 on an empty
+      collection), and the loop then runs High(T) + 1 times }
+    procedure TestSemantic_ForDownto0_UnsignedVar_Warns;
+    procedure TestSemantic_ForDownto0_ConstStart_NoWarning;
+    procedure TestSemantic_ForDownto0_SignedVar_NoWarning;
+    procedure TestSemantic_ForTo0_UnsignedVar_NoWarning;
+    procedure TestSemantic_ForDownto1_UnsignedVar_NoWarning;
 
     { ------------------------------------------------------------------ }
     { Codegen                                                              }
@@ -380,6 +388,46 @@ begin
   AssertTrue('no 4-byte store of the counter',
     Pos('movl %eax, I(%rip)', Code) < 0);
 end;
+
+const
+  DowntoHead = 'program P; var U: UInt32; W: Word; I, C: Integer; ' +
+    'begin C := 0; ';
+
+procedure TForTests.TestSemantic_ForDownto0_UnsignedVar_Warns;
+var
+  W: string;
+begin
+  W := SemanticWarnings(DowntoHead + 'for U := C - 1 downto 0 do I := 1 end.');
+  AssertTrue('warns: ' + W, Pos('unsigned', W) >= 0);
+  AssertTrue('names the variable: ' + W, Pos(#39 + 'U' + #39, W) >= 0);
+  W := SemanticWarnings(DowntoHead + 'for W := C downto 0 do I := 1 end.');
+  AssertTrue('Word as well: ' + W, Pos('unsigned', W) >= 0);
+end;
+
+procedure TForTests.TestSemantic_ForDownto0_ConstStart_NoWarning;
+begin
+  AssertEquals('a constant start cannot be negative', '',
+    SemanticWarnings(DowntoHead + 'for U := 9 downto 0 do I := 1 end.'));
+end;
+
+procedure TForTests.TestSemantic_ForDownto0_SignedVar_NoWarning;
+begin
+  AssertEquals('', SemanticWarnings(DowntoHead +
+    'for I := C - 1 downto 0 do C := 1 end.'));
+end;
+
+procedure TForTests.TestSemantic_ForTo0_UnsignedVar_NoWarning;
+begin
+  AssertEquals('', SemanticWarnings(DowntoHead +
+    'for U := C to 0 do I := 1 end.'));
+end;
+
+procedure TForTests.TestSemantic_ForDownto1_UnsignedVar_NoWarning;
+begin
+  AssertEquals('', SemanticWarnings(DowntoHead +
+    'for U := C downto 1 do I := 1 end.'));
+end;
+
 
 initialization
   RegisterTest(TForTests);
