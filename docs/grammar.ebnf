@@ -686,6 +686,7 @@ DefaultValue
     | StrLiteral
     | NIL
     | IDENT                                  (* must resolve to a named constant *)
+    | MINUS ( IntLiteral | FloatLiteral | IDENT )   (* a negated number: -1, -0.5, -K *)
     ;
 
 (* VAR marks a by-reference parameter; OUT marks a write-only by-reference
@@ -1470,6 +1471,7 @@ Factor
     | AnonMethod                                       (* anonymous-method (closure) literal *)
     | AddrOf
     | NOT Factor                                       (* Boolean or bitwise NOT *)
+    | MINUS Factor                                     (* unary minus: IEEE negation; a record's Negative operator *)
     | INHERITED IDENT LPAREN [ ArgList ] RPAREN        (* inherited function call in expr position; parens mandatory *)
     | "Supports" LPAREN Expr COMMA IDENT [ COMMA IDENT ] RPAREN  (* compiler intrinsic *)
     | IDENT DOT IDENT [ LBRACKET Expr { COMMA Expr } RBRACKET ]  (* indexed property / element read *)

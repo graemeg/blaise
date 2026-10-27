@@ -54,7 +54,12 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 30; { v30: the META block carries the Target the unit
+  IFACE_VERSION = 31; { v31: unary minus is its own expression node, 'neg'
+                          (TNegExpr), where it was the binary 0 - X, so a
+                          negated default value or inline/generic body
+                          written by v30 decodes differently
+                          (BUG-20261026-float-neg-signed-zero).
+                        v30: the META block carries the Target the unit
                           was compiled for, after ImplicitDeps, so a cached
                           unit built for another OS on the same container
                           is rebuilt (BUG-20261004-unit-cache-not-keyed-by-
@@ -1217,6 +1222,9 @@ begin
   else if AE is TNotExpr then
     Result := EncodeLpstr('not') +
               EncodeExpr(TNotExpr(AE).Expr)
+  else if AE is TNegExpr then
+    Result := EncodeLpstr('neg') +
+              EncodeExpr(TNegExpr(AE).Expr)
   else if AE is TFuncCallExpr then
     Result := EncodeLpstr('call') +
               EncodeLpstr(TFuncCallExpr(AE).Name) +
@@ -1922,6 +1930,7 @@ var
   IE:   TIdentExpr;
   BE:   TBinaryExpr;
   NE:   TNotExpr;
+  NgE:  TNegExpr;
   FCE:  TFuncCallExpr;
   ICE:  TIndirectFuncCallExpr;
   MCE:  TMethodCallExpr;
@@ -1980,6 +1989,12 @@ begin
     NE := TNotExpr.Create();
     NE.Expr := ReadExpr(AText, APos);
     Result := NE;
+  end
+  else if Kind = 'neg' then
+  begin
+    NgE := TNegExpr.Create();
+    NgE.Expr := ReadExpr(AText, APos);
+    Result := NgE;
   end
   else if Kind = 'call' then
   begin

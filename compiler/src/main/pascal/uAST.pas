@@ -282,6 +282,20 @@ type
     destructor Destroy; override;
   end;
 
+  { Unary minus, -Expr.  Its own node rather than the binary 0 - Expr the
+    parser used to synthesise: IEEE 754 negation flips the sign bit, so
+    -(+0.0) is -0.0 while 0.0 - 0.0 is +0.0, and a record operand means the
+    unary `class operator Negative`, not Subtract(Integer, T).  As for
+    TBinaryExpr, uSemantic lowers a resolved operator into LoweredCall (which
+    takes ownership of Expr, moved into its Args). }
+  TNegExpr = class(TASTExpr)
+  public
+    Expr: TASTExpr;  { owned — numeric, or a record/class with Negative }
+    [Unretained] ResolvedOperator: TObject;  { TMethodDecl — not owned }
+    LoweredCall: TASTExpr;                   { owned — nil for built-in negation }
+    destructor Destroy; override;
+  end;
+
   { ------------------------------------------------------------------ }
   {  Statements                                                         }
   { ------------------------------------------------------------------ }
@@ -1856,6 +1870,14 @@ begin
   inherited Destroy();
 end;
 
+{ TNegExpr }
+
+destructor TNegExpr.Destroy;
+begin
+  { Owned class fields released by ARC field cleanup. }
+  inherited Destroy();
+end;
+
 { TAssignment }
 
 destructor TAssignment.Destroy;
@@ -2553,6 +2575,7 @@ var
   SuE: TSupportsExpr;
   BE:  TBinaryExpr;
   NE:  TNotExpr;
+  NgE: TNegExpr;
   FCE: TFuncCallExpr;
   DE:  TDerefExpr;
   AoE: TAddrOfExpr;
@@ -2667,6 +2690,12 @@ begin
     NE := TNotExpr.Create();
     NE.Expr := CloneExpr(TNotExpr(AExpr).Expr);
     Result := NE;
+  end
+  else if AExpr is TNegExpr then
+  begin
+    NgE := TNegExpr.Create();
+    NgE.Expr := CloneExpr(TNegExpr(AExpr).Expr);
+    Result := NgE;
   end
   else if AExpr is TFuncCallExpr then
   begin

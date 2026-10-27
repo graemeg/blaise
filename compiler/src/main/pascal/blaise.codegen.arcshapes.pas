@@ -184,6 +184,8 @@ begin
   end
   else if AExpr is TNotExpr then
     CollectAddressTakenExpr(TNotExpr(AExpr).Expr, ASet)
+  else if AExpr is TNegExpr then
+    CollectAddressTakenExpr(TNegExpr(AExpr).Expr, ASet)
   else if AExpr is TFieldAccessExpr then
   begin
     FA := TFieldAccessExpr(AExpr);

@@ -7159,6 +7159,26 @@ begin
     EmitPopTo('x0');
     Exit;
   end;
+  if (AExpr is TNegExpr) and (TNegExpr(AExpr).LoweredCall <> nil) then
+  begin
+    Self.EmitExprToX0(TNegExpr(AExpr).LoweredCall);
+    Exit;
+  end;
+  if AExpr is TNegExpr then
+  begin
+    { -Expr: a 64-bit neg, bit-identical to the 0 - Expr subtraction it
+      replaced.  A float-typed negation reaching here is materialised as
+      its bit pattern. }
+    if IsFloatExpr(AExpr) then
+    begin
+      Self.EmitExprToD0(AExpr);
+      Self.Emit(#9'fmov x0, d0');
+      Exit;
+    end;
+    Self.EmitExprToX0(TNegExpr(AExpr).Expr);
+    Self.Emit(#9'neg x0, x0');
+    Exit;
+  end;
   if AExpr is TNotExpr then
   begin
     Self.EmitExprToX0(TNotExpr(AExpr).Expr);
@@ -8192,6 +8212,20 @@ begin
       InternalError('float-typed binary operator ' + IntToStr(Ord(BE.Op)),
         AExpr);
     end;
+    Exit;
+  end;
+  if (AExpr is TNegExpr) and (TNegExpr(AExpr).LoweredCall <> nil) then
+  begin
+    Self.EmitExprToD0(TNegExpr(AExpr).LoweredCall);
+    Exit;
+  end;
+  if AExpr is TNegExpr then
+  begin
+    { IEEE negation flips the sign bit: -(+0.0) is -0.0 and a NaN's sign
+      flips too, where 0.0 - x gave +0.0.  d0 holds a Single as its exact
+      double image, so one fneg serves both widths. }
+    Self.EmitExprToD0OrConvert(TNegExpr(AExpr).Expr);
+    Self.Emit(#9'fneg d0, d0');
     Exit;
   end;
   if AExpr is TDerefExpr then

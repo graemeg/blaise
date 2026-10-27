@@ -326,6 +326,9 @@ begin
   else if AExpr is TNotExpr then
     WalkExpr(TNotExpr(AExpr).Expr)
 
+  else if AExpr is TNegExpr then
+    WalkExpr(TNegExpr(AExpr).Expr)
+
   else if AExpr is TFieldAccessExpr then
     WalkExpr(TFieldAccessExpr(AExpr).Base)
 

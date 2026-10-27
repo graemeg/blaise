@@ -827,6 +827,9 @@ begin
          AccessPathHasCall(TBinaryExpr(AExpr).Right));
   if AExpr is TNotExpr then
     Exit(AccessPathHasCall(TNotExpr(AExpr).Expr));
+  if AExpr is TNegExpr then
+    Exit((TNegExpr(AExpr).LoweredCall <> nil) or
+         AccessPathHasCall(TNegExpr(AExpr).Expr));
   Result := True;
 end;
 
@@ -865,6 +868,8 @@ begin
               ExprMayDeferTransientBase(TBinaryExpr(AExpr).Right)
   else if AExpr is TNotExpr then
     Result := ExprMayDeferTransientBase(TNotExpr(AExpr).Expr)
+  else if AExpr is TNegExpr then
+    Result := ExprMayDeferTransientBase(TNegExpr(AExpr).Expr)
   else if AExpr is TIsExpr then
     Result := ExprMayDeferTransientBase(TIsExpr(AExpr).Obj)
   else if AExpr is TAsExpr then

@@ -6434,8 +6434,7 @@ var
   SecondName: string;
   QualUnit:   string;
   Line, Col:  Integer;
-  ZeroNode:   TIntLiteral;
-  NegNode:    TBinaryExpr;
+  NegNode:    TNegExpr;
   ArrNode:       TArrayLiteralExpr;
   ParseIntV:    Int64;
   ParseIntFlag: Boolean;
@@ -6508,19 +6507,14 @@ begin
       end;
     tkMinus:
       begin
-        { Unary minus: synthesise as 0 - Factor }
-        ZeroNode       := TIntLiteral.Create();
-        ZeroNode.Line  := FCurrent.Line;
-        ZeroNode.Col   := FCurrent.Col;
-        ZeroNode.Value := 0;
-        NegNode        := TBinaryExpr.Create();
-        NegNode.Line   := FCurrent.Line;
-        NegNode.Col    := FCurrent.Col;
-        NegNode.Op     := boSub;
-        NegNode.Left   := ZeroNode;
+        { Unary minus: its own node, never 0 - Factor -- IEEE negation flips
+          the sign bit, and 0.0 - 0.0 is +0.0 }
+        NegNode      := TNegExpr.Create();
+        NegNode.Line := FCurrent.Line;
+        NegNode.Col  := FCurrent.Col;
         Advance();  { consume '-' }
-        NegNode.Right  := Self.ParseFactor();  { Self. forces recursive call, not result-var read }
-        Result         := NegNode;
+        NegNode.Expr := Self.ParseFactor();  { Self. forces recursive call, not result-var read }
+        Result       := NegNode;
       end;
     tkNil:
       begin

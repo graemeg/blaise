@@ -1548,6 +1548,15 @@ procedure TArm64Assembler.EncodeInstr;
       EmitW(Wd);
       Exit;
     end;
+    if FL.Mnemonic = 'fneg' then
+    begin
+      { FNEG (scalar): 0x1E214000, ftype bit 22 for a d register }
+      NeedOps(2);
+      Wd := Integer($1E214000) or (FA[1].Reg shl 5) or FA[0].Reg;
+      if FA[0].Is64 then Wd := Wd or (1 shl 22);
+      EmitW(Wd);
+      Exit;
+    end;
     if FL.Mnemonic = 'fcmp' then
     begin
       NeedOps(2);

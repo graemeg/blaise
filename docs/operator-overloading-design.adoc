@@ -110,12 +110,10 @@ end;
 
 Two facts from the parser (`uParser.pas`) are load-bearing for the unary cases:
 
-* *Unary minus is desugared at parse time* into `0 - Factor`: `ParseFactor`
-  builds a `TBinaryExpr` with `Op = boSub`, a `TIntLiteral(0)` on the left, and
-  the operand on the right. *There is no dedicated negation node.* This means
-  unary `-` on a user type would arrive at the semantic pass as
-  `0 - A` — a binary `boSub` with an integer-literal left operand and a
-  record/class right operand. The design handles this (§6.4).
+* *Unary minus is its own node*, `TNegExpr`: `ParseFactor` builds it with the
+  operand in `Expr`.  (It was once desugared into `0 - Factor`; see §6.4.)  A
+  unary `-` on a user type therefore reaches the semantic pass as a
+  negation, not as a subtraction from an integer literal.
 * `not` is a real `TNotExpr` node.
 
 Every `TASTExpr` carries `[Unretained] ResolvedType: TTypeDesc`, filled by the
@@ -365,7 +363,7 @@ function (§7.2).
 | Binary arithmetic `+ - * /` | *yes* | The motivating case. Each maps to one operator name.
 | Integer `div` / `mod`       | *no (v1)* | `div`/`mod` are integer-only by definition in Blaise; a user record that wanted them is exotic. Deferring keeps `boDiv`/`boMod` semantics simple. Trivial to add later (reserve names `IntDivide`, `Modulus`).
 | Comparison `= <> < > <= >=` | *yes* | Needed for `if A < B`, sorting, and the `IComparer`/`IEqualityComparer` bridge (§7.4).
-| Unary `-` (`Negative`)      | *yes* | Natural for numerics; handled via the desugared `0 - A` form (§6.4).
+| Unary `-` (`Negative`)      | *yes* | Natural for numerics; resolved from the `TNegExpr` node (§6.4).
 | Unary `not`                 | *no (v1)* | `not` is Boolean-only in Blaise; a `not` on a user type has no compelling case yet. `TNotExpr` is a separate node, so adding it later is isolated.
 | `in`, `shl`/`shr`/`sar`, `and`/`or`/`xor` | *no* | Bit/set/membership semantics are intrinsic; not overloadable.
 | Conversion `Implicit`/`Explicit` | *no (v1), designed for v2* | Powerful but risky for resolution (they interact with every assignment and argument bind). v1 ships without them; §5.2 records the v2 design so the AST/`.bif` reserve room.
@@ -587,32 +585,21 @@ identity before adding to the candidate list).
                                                                   Best.ReturnType
 ----
 
-=== Unary minus: the `0 - A` problem
+=== Unary minus: the `Negative` operator
 
-Because the parser desugars `-A` into `TBinaryExpr(boSub, IntLit(0), A)`
-(`uParser.pas` `ParseFactor`, `tkMinus` branch), a unary minus on a record
-*arrives as a binary subtraction* `0 - A`. The semantic pass must recognise
-this shape so it can dispatch to the *unary* `Negative` operator rather than
-fruitlessly looking for `class operator Subtract(Integer, TDecimal)`.
+Unary minus is its own AST node, `TNegExpr` (`uParser.pas` `ParseFactor`,
+`tkMinus` branch).  Earlier revisions desugared `-A` into
+`TBinaryExpr(boSub, IntLit(0), A)`, which would have required recognising the
+synthesised zero by its source position; that shape no longer exists.
 
-Rule, applied at the start of the operator fallback when
-`ABin.Op = boSub`:
-
-* If `ABin.Left` is a `TIntLiteral` with `Value = 0` *and* the synthesised
-  zero's source position equals the operator's (the desugaring stamps both with
-  the `-` token's line/col, distinguishing it from an authored `0 - A`), *and*
-  `RType` is a record/class that declares a `Negative` operator, then resolve to
-  the `Negative` operator with `RType` as the single operand. Otherwise fall
-  through to normal binary `Subtract` resolution.
-
-[NOTE]
-====
-A cleaner long-term fix is to give unary minus its own AST node
-(`TUnaryExpr` / `TNegExpr`) so the desugaring no longer fabricates a literal
-zero. That is a small, separable refactor recorded as an alternative in §11; the
-`0 - A` recognition above keeps v1 self-contained without touching the parser's
-existing numeric-folding behaviour.
-====
+`AnalyseNegExpr` analyses the operand and, when it is a record or class,
+resolves `okNegative` on the operand type (and its ancestors) through
+`ResolveOperatorOverload`.  A match lowers the node into a synthesised
+`TMethodCallExpr` held in `TNegExpr.LoweredCall`, exactly as `TryLowerOperator`
+does for a binary operator, and `UnwrapLoweredOperator` rebinds the owning slot
+to that call.  No match is an error naming the operator to declare
+(`declare class operator Negative`); a `Subtract(Integer, T)` operator is
+never consulted for a unary minus.
 
 `not` (a real `TNotExpr`) is *not* overloadable in v1 (§4), so `AnalyseExpr`'s
 `TNotExpr` branch is unchanged.
@@ -1053,9 +1040,9 @@ independently testable and lands behind its own tests (TDD).
   battle-tested `ArgMatchScore`/tie-breakers; genuine ties are a hard error, not
   an arbitrary pick. No implicit conversions in v1, so the scoring surface stays
   small.
-| *Unary-minus `0 - A` misfire* | Recognition is gated on the synthesised
-  literal's position matching the operator token; authored `0 - A` still means
-  subtraction. Long-term: a dedicated `TUnaryExpr` node (§11).
+| *Unary-minus `0 - A` misfire* | Resolved: unary minus is a dedicated
+  `TNegExpr` node, so an authored `0 - A` is always a subtraction and `-A`
+  always a negation (§6.4).
 | *`.bif` format drift between writer and reader* | Single ordered append after
   `IsOverload`, version bump, dedicated round-trip test; mirrors prior
   `IsStatic`/`IsOverload` additions.
@@ -1082,9 +1069,10 @@ independently testable and lands behind its own tests (TDD).
   rejected for v1 because it silently changes identity-based comparisons and
   collection lookups. Records get operator equality (no built-in to conflict
   with); classes keep identity unless the author opts in explicitly.
-. *Dedicated `TUnaryExpr` / `TNegExpr` AST node* — preferable long-term to the
-  `0 - A` desugaring, but a parser refactor with its own constant-folding
-  ripple. Deferred; the `0 - A` recognition makes v1 self-contained.
+. *Dedicated `TNegExpr` AST node* — ADOPTED (2026-10-27) in place of the
+  `0 - A` desugaring and its position-gated recognition.  It also fixed the
+  sign of a negated float zero and the `Double` typing of `-S` for a
+  `Single`; see `docs/language-rationale.adoc`, "Unary Minus".
 . *A `Numeric`/`Comparable` constraint required on generic type parameters* —
   rejected: reified generics already report missing-operator errors at
   instantiation, so a constraint is ergonomic sugar, not a correctness need.

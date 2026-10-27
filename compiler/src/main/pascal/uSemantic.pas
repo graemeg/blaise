@@ -758,6 +758,7 @@ type
     function  AnalyseExpr(AExpr: TASTExpr): TTypeDesc;
     function  AnalyseExprCore(AExpr: TASTExpr): TTypeDesc;
     function  AnalyseBinaryExpr(ABin: TBinaryExpr): TTypeDesc;
+    function  AnalyseNegExpr(ANeg: TNegExpr): TTypeDesc;
     function  AnalyseFieldAccess(AAccess: TFieldAccessExpr): TTypeDesc;
     function  AnalyseFieldSubscript(AAccess: TFieldAccessExpr;
       AFldType: TTypeDesc): TTypeDesc;
@@ -6709,6 +6710,8 @@ begin
 
   if AExpr is TNotExpr then
     Exit(not EvalConstIntExpr(TNotExpr(AExpr).Expr, ALine, ACol));
+  if AExpr is TNegExpr then
+    Exit(-EvalConstIntExpr(TNegExpr(AExpr).Expr, ALine, ACol));
 
   { An ordinal TYPECAST — `UInt64(1)`, `Byte(300)` — parses as a one-argument
     call whose name is a type, not as a distinct cast node.  Without this arm,
@@ -7056,6 +7059,8 @@ begin
          Self.ConstExprAwaitsTypes(TBinaryExpr(AExpr).Right));
   if AExpr is TNotExpr then
     Exit(Self.ConstExprAwaitsTypes(TNotExpr(AExpr).Expr));
+  if AExpr is TNegExpr then
+    Exit(Self.ConstExprAwaitsTypes(TNegExpr(AExpr).Expr));
   if AExpr is TFuncCallExpr then
   begin
     if not SameText(TFuncCallExpr(AExpr).Name, 'Ord') and
@@ -7091,6 +7096,8 @@ begin
       Exit(True);
     Exit;
   end;
+  if AExpr is TNegExpr then
+    Exit(IsFloatConstExpr(TNegExpr(AExpr).Expr));
   if AExpr is TBinaryExpr then
   begin
     Bin := TBinaryExpr(AExpr);
@@ -7145,6 +7152,13 @@ begin
       Exit(True);
     end;
     Exit;
+  end;
+
+  if AExpr is TNegExpr then
+  begin
+    if not Self.TryEvalConstIntExpr(TNegExpr(AExpr).Expr, L) then Exit;
+    AValue := -L;
+    Exit(True);
   end;
 
   if AExpr is TBinaryExpr then
@@ -7446,6 +7460,10 @@ begin
     fold it as Int64. }
   if AExpr is TNotExpr then
     Exit(IntToStr(EvalConstIntExpr(AExpr, ALine, ACol)));
+
+  if AExpr is TNegExpr then
+    Exit(RawDoubleToStr(
+      -RawStrToDouble(EvalConstFloatExpr(TNegExpr(AExpr).Expr, ALine, ACol))));
 
   if AExpr is TBinaryExpr then
   begin
@@ -11122,6 +11140,16 @@ begin
     end;
     Exit;
   end;
+  if (ASlot is TNegExpr) and (TNegExpr(ASlot).LoweredCall <> nil) then
+  begin
+    { -R through the record's class operator Negative }
+    Orig := ASlot;
+    Call := TNegExpr(ASlot).LoweredCall;
+    TNegExpr(ASlot).LoweredCall := nil;   { ownership moves to the slot }
+    ASlot := Call;
+    Orig.Free();
+    Exit;
+  end;
   if not (ASlot is TBinaryExpr) then Exit;
   Bin := TBinaryExpr(ASlot);
   if Bin.LoweredCall = nil then Exit;
@@ -11941,6 +11969,8 @@ begin
         end
         else if CurExpr is TNotExpr then
           TodoExprs.Add(TNotExpr(CurExpr).Expr)
+        else if CurExpr is TNegExpr then
+          TodoExprs.Add(TNegExpr(CurExpr).Expr)
         else if CurExpr is TFuncCallExpr then
         begin
           { A bare function call that resolved to a method of the enclosing
@@ -12080,6 +12110,12 @@ begin
   if AExpr is TNotExpr then
   begin
     Exit(ExprRejectsInline(TNotExpr(AExpr).Expr, ASelfDecl));
+  end;
+  if AExpr is TNegExpr then
+  begin
+    { a record operand's Negative operator is a method call }
+    if TNegExpr(AExpr).LoweredCall <> nil then begin Result := True; Exit; end;
+    Exit(ExprRejectsInline(TNegExpr(AExpr).Expr, ASelfDecl));
   end;
 end;
 
@@ -15743,12 +15779,24 @@ begin
           (APar.DefaultValue is TFloatLiteral)  or
           (APar.DefaultValue is TStringLiteral) or
           (APar.DefaultValue is TNilLiteral)    or
-          (APar.DefaultValue is TIdentExpr)) then
+          (APar.DefaultValue is TIdentExpr)     or
+          { a negated number: -1, -0.5, -K }
+          ((APar.DefaultValue is TNegExpr) and
+           ((TNegExpr(APar.DefaultValue).Expr is TIntLiteral) or
+            (TNegExpr(APar.DefaultValue).Expr is TFloatLiteral) or
+            (TNegExpr(APar.DefaultValue).Expr is TIdentExpr)))) then
     SemanticError(
       Format('Default value for parameter ''%s'' must be a literal or named constant',
         [APar.ParamName]),
       ALine, ACol);
   T := Self.AnalyseExprSlot(APar.DefaultValue);
+  if (APar.DefaultValue is TNegExpr) and
+     (TNegExpr(APar.DefaultValue).Expr is TIdentExpr) and
+     not TIdentExpr(TNegExpr(APar.DefaultValue).Expr).IsConstant then
+    SemanticError(
+      Format('Default value for parameter ''%s'' must be a constant expression',
+        [APar.ParamName]),
+      ALine, ACol);
   if APar.DefaultValue is TIdentExpr then
     if not TIdentExpr(APar.DefaultValue).IsConstant then
       SemanticError(
@@ -15769,6 +15817,7 @@ var
   SLit: TStringLiteral;
   Ident: TIdentExpr;
   SrcId: TIdentExpr;
+  NegE:  TNegExpr;
 begin
   Result := nil;
   if ASrc = nil then Exit;
@@ -15820,6 +15869,15 @@ begin
     Ident.Col         := SrcId.Col;
     Ident.ResolvedType := SrcId.ResolvedType;
     Result := Ident;
+  end
+  else if ASrc is TNegExpr then
+  begin
+    NegE      := TNegExpr.Create();
+    NegE.Expr := Self.CloneDefaultExprNode(TNegExpr(ASrc).Expr);
+    NegE.Line := ASrc.Line;
+    NegE.Col  := ASrc.Col;
+    NegE.ResolvedType := ASrc.ResolvedType;
+    Result := NegE;
   end
   else
     SemanticError(
@@ -19558,6 +19616,8 @@ begin
         Format('''not'' requires a Boolean or integer operand, got ''%s''', [Result.Name]),
         AExpr.Line, AExpr.Col);
   end
+  else if AExpr is TNegExpr then
+    Result := Self.AnalyseNegExpr(TNegExpr(AExpr))
   else
     SemanticError('Unknown expression node', AExpr.Line, AExpr.Col);
 
@@ -20952,6 +21012,75 @@ begin
       else
         Result := LType;
     end;
+  end;
+end;
+
+{ Unary minus.  A numeric operand keeps the result type 0 - X had while the
+  parser desugared it that way -- the narrow integer kinds widen to Integer,
+  Int64 and UInt64 keep their own -- except that a float keeps its width:
+  -S of a Single is a Single, where the Integer 0 promoted it to Double.  A
+  record or class operand resolves its `class operator Negative` and lowers
+  to that call, as TryLowerOperator does for a binary operator.  See
+  docs/language-rationale.adoc, "Unary minus". }
+function TSemanticAnalyser.AnalyseNegExpr(ANeg: TNegExpr): TTypeDesc;
+var
+  T:     TTypeDesc;
+  Args:  TObjectList;
+  MDecl: TMethodDecl;
+  Call:  TMethodCallExpr;
+  What:  string;
+begin
+  if ANeg.LoweredCall <> nil then
+  begin
+    { Already lowered (a re-analysed generic body may revisit the node). }
+    Exit(ANeg.LoweredCall.ResolvedType);
+  end;
+  T := Self.AnalyseExprSlot(ANeg.Expr);
+  if (T <> nil) and (T.Kind in [tyRecord, tyClass]) then
+  begin
+    Args := TObjectList.Create(False);
+    try
+      Args.Add(ANeg.Expr);
+      MDecl := Self.ResolveOperatorOverload(okNegative, T, nil, Args,
+        ANeg.Line, ANeg.Col);
+    finally
+      Args.Free();
+    end;
+    if MDecl = nil then
+    begin
+      if T.Kind = tyRecord then What := 'record' else What := 'class';
+      SemanticError(
+        Format('Operator ''-'' is not defined for %s type ''%s''; '
+               + 'declare class operator Negative', [What, T.Name]),
+        ANeg.Line, ANeg.Col);
+    end;
+    Call            := TMethodCallExpr.Create();
+    Call.Line       := ANeg.Line;
+    Call.Col        := ANeg.Col;
+    Call.ObjectName := MDecl.OwnerTypeName;
+    Call.Name       := MDecl.Name;
+    Call.Args.Add(ANeg.Expr);
+    { Ownership of the operand moves into the call's arg list. }
+    ANeg.Expr := nil;
+    ANeg.LoweredCall := Call;
+    ANeg.ResolvedOperator := MDecl;
+    Exit(AnalyseExpr(Call));
+  end;
+  if (T = nil) or not T.IsNumeric() then
+  begin
+    if T <> nil then What := T.Name else What := '<nil>';
+    SemanticError(
+      Format('Operand of unary ''-'' must be numeric, got ''%s''', [What]),
+      ANeg.Line, ANeg.Col);
+  end;
+  case T.Kind of
+    tyDouble: Result := FTable.TypeDouble;
+    tySingle: Result := FTable.TypeSingle;
+    tyInt64:  Result := FTable.TypeInt64;
+    tyUInt64: Result := FTable.TypeUInt64;
+  else
+    CheckTypesMatch(FTable.TypeInteger, T, 'unary minus', ANeg.Line, ANeg.Col);
+    Result := FTable.TypeInteger;
   end;
 end;
 

@@ -6132,6 +6132,9 @@ begin
     AValue := TIntLiteral(AExpr).Value
   else if AExpr is TNilLiteral then
     AValue := 0
+  else if (AExpr is TNegExpr) and (TNegExpr(AExpr).Expr is TIntLiteral) and
+          not IsFloatFamily(AExpr.ResolvedType) then
+    AValue := -TIntLiteral(TNegExpr(AExpr).Expr).Value
   else if (AExpr is TStringLiteral) and TStringLiteral(AExpr).IsCharCoerce then
     AValue := TStringLiteral(AExpr).CharOrdValue
   else if (AExpr is TIdentExpr) and TIdentExpr(AExpr).IsConstant and
@@ -8406,6 +8409,37 @@ begin
           'native backend: unsupported float binary operator');
       end;
       Self.Emit(#9'movapd %xmm1, %xmm0');
+    end;
+    Exit;
+  end;
+
+  if (AExpr is TNegExpr) and (TNegExpr(AExpr).LoweredCall <> nil) then
+  begin
+    Self.EmitExprToXmm0(TNegExpr(AExpr).LoweredCall);
+    Exit;
+  end;
+  if AExpr is TNegExpr then
+  begin
+    { IEEE negation flips the sign bit: -(+0.0) is -0.0 and a NaN's sign
+      flips too, where 0.0 - x gave +0.0.  Flipped through a GP register,
+      since xorpd/xorps with a memory mask needs 16-byte alignment.  An
+      integer-typed operand arrives converted (Double), so it is narrowed to
+      the operation width first, as the binary arm does. }
+    IsS := (AExpr.ResolvedType <> nil) and (AExpr.ResolvedType.Kind = tySingle);
+    Self.EmitExprToXmm0(TNegExpr(AExpr).Expr);
+    Self.EmitXmm0WidthAdjust(TNegExpr(AExpr).Expr.ResolvedType, IsS);
+    if IsS then
+    begin
+      Self.Emit(#9'movd %xmm0, %eax');
+      Self.Emit(#9'xorl $-2147483648, %eax');
+      Self.Emit(#9'movd %eax, %xmm0');
+    end
+    else
+    begin
+      Self.Emit(#9'movq %xmm0, %rax');
+      Self.Emit(#9'movabsq $-9223372036854775808, %rcx');
+      Self.Emit(#9'xorq %rcx, %rax');
+      Self.Emit(#9'movq %rax, %xmm0');
     end;
     Exit;
   end;
@@ -12113,6 +12147,30 @@ begin
       Self.Emit(#9'movq %rax, %rcx');
       Self.EmitLoadVar('(%rcx)', AExpr.ResolvedType);
     end;
+    Exit;
+  end;
+
+  { -Expr: a 64-bit neg, bit-identical to the 0 - Expr subtraction it
+    replaced (the operand is extended to 64 bits in %rax).  A float-typed
+    negation reaching here is materialised as its bit pattern. }
+  if (AExpr is TNegExpr) and (TNegExpr(AExpr).LoweredCall <> nil) then
+  begin
+    Self.EmitExprToEax(TNegExpr(AExpr).LoweredCall);
+    Exit;
+  end;
+  if AExpr is TNegExpr then
+  begin
+    if IsFloatFamily(AExpr.ResolvedType) then
+    begin
+      Self.EmitExprToXmm0(AExpr);
+      if AExpr.ResolvedType.Kind = tySingle then
+        Self.Emit(#9'movd %xmm0, %eax')
+      else
+        Self.Emit(#9'movq %xmm0, %rax');
+      Exit;
+    end;
+    Self.EmitExprToEax(TNegExpr(AExpr).Expr);
+    Self.Emit(#9'negq %rax');
     Exit;
   end;
 
@@ -22061,6 +22119,10 @@ begin
   end
   else if AExpr is TNotExpr then
     Result := InlineNeedExprD(TNotExpr(AExpr).Expr, ADepth)
+  else if (AExpr is TNegExpr) and (TNegExpr(AExpr).LoweredCall <> nil) then
+    Result := InlineNeedExprD(TNegExpr(AExpr).LoweredCall, ADepth)
+  else if AExpr is TNegExpr then
+    Result := InlineNeedExprD(TNegExpr(AExpr).Expr, ADepth)
   else if AExpr is TFieldAccessExpr then
   begin
     Result := InlineNeedExprD(TFieldAccessExpr(AExpr).Base, ADepth);

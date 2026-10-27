@@ -225,6 +225,21 @@ begin
     Exit;
   end;
 
+  if AExpr is TNegExpr then
+  begin
+    Indent();
+    Write('Neg');
+    DumpFlags(AExpr);
+    WriteLn();
+    Inc(IndentLevel);
+    if TNegExpr(AExpr).LoweredCall <> nil then
+      DumpExpr(TNegExpr(AExpr).LoweredCall)
+    else
+      DumpExpr(TNegExpr(AExpr).Expr);
+    Dec(IndentLevel);
+    Exit;
+  end;
+
   if AExpr is TStringSubscriptExpr then
   begin
     Indent();

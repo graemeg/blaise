@@ -7883,10 +7883,77 @@ implicit `Self` and takes its operands as explicit parameters.
   `class operator` inside a generic record or class is a parse error.
   Operator *use* inside a generic body is unaffected and resolves per
   monomorphised instantiation, exactly as method calls on `T` already do.
-* *A dedicated unary-negation AST node* — the parser currently desugars `-A`
-  into `0 - A`, so a `Negative` operator must be recognised from that shape.
-  The name is reserved and the arity enforced; wiring the recognition is
-  deferred with the rest of the unary work.
+* *Recognising `Negative` from a desugared `0 - A`* — rejected.  The parser
+  once rewrote `-A` as `0 - A`, which would have required the semantic pass to
+  spot a synthesised zero by its source position and to tell it apart from a
+  written `0 - A`.  Unary minus is instead its own node (see "Unary Minus"),
+  so `-R` on a record resolves `class operator Negative` directly, and a
+  record without one is rejected with a message naming `Negative` rather than
+  silently running a `Subtract(Integer, TRec)` operator.
+
+== Unary Minus — Its Own Node, IEEE Negation
+
+`-X` is a unary negation (`TNegExpr`), not the subtraction `0 - X`.
+
+[source,pascal]
+----
+var Z, N: Double;
+begin
+  Z := 0.0;
+  N := -Z;              { -0.0 }
+  WriteLn(N, ' ', 1.0 / N);   { prints: -0 -inf }
+end.
+----
+
+The rules:
+
+* *Floats* negate by flipping the sign bit, as IEEE 754 defines negation:
+  `-(+0.0)` is `-0.0`, `-(-0.0)` is `+0.0`, and the sign of a NaN flips.  The
+  result keeps the operand's width: `-S` of a `Single` is a `Single`.
+* *Integers* keep exactly the result type and value `0 - X` gave: `Byte`,
+  `Word`, `Int8`, `SmallInt`, `UInt32` and `Integer` operands yield
+  `Integer`; `Int64` and `UInt64` keep their type and wrap at the boundary
+  (`-Low(Int64)` is `Low(Int64)`, `-UInt64(1)` is `High(UInt64)`).
+* *Records and classes* negate only through a declared
+  `class operator Negative`; without one, `-R` is an error naming the operator
+  to declare.
+* *Default values* may be a negated literal or named constant:
+  `procedure F(A: Integer = -1; B: Double = -0.5)`.
+
+=== Rationale
+
+* *`0 - X` is not negation for floats.* Under round-to-nearest, `0.0 - 0.0`
+  is `+0.0`, so the subtraction lost the sign of a zero, and it left a NaN's
+  sign bit unchanged.  Signed zero carries meaning in exactly the code that
+  cares about it: `1/x` (`-inf` against `+inf`), `ArcTan2` and the branch cuts
+  of complex functions, and values round-tripped through text.  Printing was
+  never the problem -- `WriteLn`, `DoubleToStr` and `Format` already showed a
+  genuine `-0.0` as `-0` -- only producing one with a minus sign was.  Every C
+  compiler, FPC and Delphi emit a sign flip for unary minus.
+* *For integers the two are bit-identical*, so the integer rules are chosen to
+  match the old typing exactly; no integer program changes meaning.
+* *`-S` stays `Single`.* The old desugaring typed `-S` as `Double`, because
+  the synthesised `0` was an `Integer` and `Integer - Single` promotes.  That
+  silently selected a `Double` overload for `F(-S)`.  A negation has one
+  operand, so it keeps that operand's width.
+* *One node, one meaning.* A synthesised zero had to be recognised wherever
+  negation mattered (the `Negative` operator, constant folding, default
+  values), and it could not be told apart from a written `0 - X` except by
+  comparing source positions.  A dedicated node removes the special case
+  from every consumer.
+* *Negated defaults.* `= -1` is among the most common default values in
+  Pascal code.  It was rejected only because the desugared `0 - 1` was not a
+  literal; as a negation of a literal it is plainly a constant.
+
+=== Alternatives considered
+
+* *Keep `0 - X` and special-case floats in the backends* -- rejected: it
+  fixes the sign of zero but leaves `-S` typed as `Double`, leaves `Negative`
+  needing the synthesised-zero recognition, and keeps negated defaults
+  rejected.
+* *Desugar to `-1 * X`* -- rejected: it produces the right sign for floats
+  but is a multiplication in the emitted code and has the same typing and
+  operator problems as `0 - X`.
 
 == Embedded Resources — `{$EMBED}` / `{$EMBEDSTR}`, Not FPC's `{$R}`
 

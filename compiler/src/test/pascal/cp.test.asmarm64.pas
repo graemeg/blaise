@@ -282,6 +282,9 @@ begin
   AssertWord('fmov d0, x1', Integer($9E670020));
   AssertWord('fmov x0, d1', Integer($9E660020));
   AssertWord('fmov d0, d1', Integer($1E604020));
+  { unary minus on a float flips the sign bit (Apple `as`) }
+  AssertWord('fneg d0, d1', Integer($1E614020));
+  AssertWord('fneg s2, s3', Integer($1E214062));
   { precision conversions + 32-bit fp load/store (Single support) }
   AssertWord('fcvt d0, s1', Integer($1E22C020));
   AssertWord('fcvt s2, d3', Integer($1E624062));
