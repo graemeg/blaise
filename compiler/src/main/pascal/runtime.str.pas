@@ -1039,9 +1039,15 @@ begin
     OutBuf := PChar(Pointer(Val));
     Exit(StrLen(Pointer(Val)));
   end;
-  { Integer (Tag = 0) — render decimal into a small heap buffer. }
+  { Integer (Tag = 0) — render decimal into a small heap buffer.  %u reads
+    the 64-bit argument as unsigned, so a UInt64 above High(Int64) prints
+    as itself (a negative signed argument prints its 64-bit two's
+    complement; the argument record carries no narrower width). }
   Buf := PChar(_BlaiseGetMem(24));
-  N := WriteDecimal(Val, Buf);
+  if Conv = 117 then
+    N := WriteDecimalU(UInt64(Val), Buf)
+  else
+    N := WriteDecimal(Val, Buf);
   Buf[N] := 0;
   OutBuf := Buf;
   Result := N;
@@ -1169,6 +1175,7 @@ begin
 
       { Recognised conversions consume one argument. }
       if (Conv = 100) or (Conv = 115) or          { d s }
+         (Conv = 117) or                          { u }
          (Conv = 102) or (Conv = 70) or           { f F }
          (Conv = 101) or (Conv = 69) or           { e E }
          (Conv = 103) or (Conv = 71) then          { g G }

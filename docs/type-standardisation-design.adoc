@@ -744,10 +744,20 @@ VM), and each lands on master through a `ci/**` branch.
 
 *4.1 — D6 diagnostic (non-breaking).*  A warning for `downto` with an
 unsigned loop variable and a lower bound of 0.  Independent of everything
-else; lands first to give it soak time.
+else; lands first to give it soak time.  Done 2026-10-27: the warning fires
+for a `Byte`, `Word`, `UInt32` or `UInt64` counter, `downto` a constant 0,
+from a start that is not a constant (a constant start is never negative).
+Since GH #237 such a loop ends correctly at 0; the trap is a start of
+`Count - 1` with `Count = 0`, which wraps to `High(T)`.  Tests in
+`cp.test.forloop`.
 
 *4.2 — `Format('%u')`.*  The unsigned decimal specifier, so `UInt`/`UInt64`
-values above `High(Int64)` format correctly.  stdlib tests only.
+values above `High(Int64)` format correctly.  Done 2026-10-27, in
+`runtime.str` (the Format RTL is part of the compiler's RTL, not the
+stdlib), with an e2e test in `cp.test.e2e.typestd`.  `%u` reads the 64-bit
+argument as unsigned: the argument record does not carry the original
+width, so a negative `Integer` prints its 64-bit two's complement where
+Delphi prints the 32-bit one.
 
 *4.3 — literal default (D4).*  Change the unhinted default from `Integer` to
 `Int` at both typing sites.  Before committing, measure the effect on the

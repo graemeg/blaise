@@ -49,6 +49,10 @@ type
       SmallInt reach Integer over Int64 and Double, a Byte reaches Word over
       SmallInt, an Integer reaches Int64 over Double -- routines and methods }
     procedure TestRun_NarrowArg_ReachesClosestOverload;
+    { Phase 4.2: Format('%u') prints its argument unsigned, so a UInt64
+      above High(Int64) and a UInt32 above High(Int32) format correctly;
+      %d of the same UInt64 shows why it is needed }
+    procedure TestRun_Format_U_Unsigned;
   end;
 
 implementation
@@ -357,6 +361,31 @@ begin
   AssertRunsOnAll(Src,
     'Integer' + #10 + 'Integer' + #10 + 'Integer' + #10 +
     'Word' + #10 + 'Int64' + #10 + 'm Integer -1' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_Format_U_Unsigned;
+const
+  Src = '''
+    program P;
+    uses SysUtils;
+    var Q: UInt64; U: UInt32; I: Integer;
+    begin
+      Q := High(UInt64);
+      U := High(UInt32);
+      I := 42;
+      WriteLn(Format('%u', [Q]));
+      WriteLn(Format('%d', [Q]));
+      WriteLn(Format('[%u] [%5u] [%-5u]', [U, I, I]));
+      WriteLn(Format('%u%%', [I]))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '18446744073709551615' + #10 +
+    '-1' + #10 +
+    '[4294967295] [   42] [42   ]' + #10 +
+    '42%' + #10, 0);
 end;
 
 initialization
