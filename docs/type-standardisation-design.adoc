@@ -599,7 +599,12 @@ the project's test rules.
 * `Length`/`Pos`/`SetLength`/`IndexOf`/`Count` et al. move to `Int` (D5) in
   one coordinated change. Full layout-change protocol: stage-2 rebuild,
   `-pre` refresh, IFACE bump, OPDF offsets, warm-cache fixpoint attention.
-* Loop-variable inference and the D6 unsigned-`downto` diagnostic.
+* The D6 unsigned-`downto` diagnostic.
+* 64-bit string and dynamic-array length headers, lifting the 2^31^
+  storage ceiling.
+* `MaxInt` becomes `High(Int)`; an opt-in narrowing warning.
+
+The detailed commit plan is in <<phase4-plan>>.
 
 *Phase 5 — mechanical rename of Blaise's own source.*
 
@@ -626,3 +631,173 @@ the project's test rules.
 * BlaiseGuard and migration-analyser self-check over the tree; FreeBSD
   full-tier dispatch; refresh `-pre`; fold this document's decisions into the
   language rationale as the permanent record.
+
+[#phase4-plan]
+== Phase 4 implementation plan
+
+Status: ACCEPTED 2026-10-27.  The open questions were resolved the same
+day; see <<phase4-decisions>>.
+
+=== Findings that shape the plan
+
+The following were established against master `9b709994` while preparing
+this plan.
+
+[cols="1,3",options="header"]
+|===
+| Area | Finding
+
+| Implicit narrowing
+| Assigning or passing a wider integer to a narrower one is accepted
+  silently and truncates (`I := L`).  Widening a builtin's return type is
+  therefore source-compatible: no existing call site stops compiling.  The
+  parameter route did not truncate on arm64
+  (`BUG-20261027-int64-arg-to-integer-param-not-narrowed`, fixed before
+  Phase 4 starts); after the fix both routes agree.
+
+| Intermediate width
+| Neither backend wraps an overflowing `Integer` expression consistently
+  (`BUG-20261027-int32-overflow-not-wrapped`).  With `I = High(Integer)`,
+  `(I + 1) div 2` is `1073741824` on both ISAs, and `WriteLn(I + 1)` prints
+  `-2147483648` on x86-64 but `2147483648` on arm64; `I + 1 < 0` is `True`
+  on both.  The expression is typed `Integer`, but the 64-bit register
+  value reaches some consumers unnarrowed.  Phase 4 changes which
+  expressions are 32-bit, so this has to be settled first (see 4.0).
+
+| Literal typing
+| Two sites implement the magnitude rule: `AnalyseExpr` for a
+  `TIntLiteral` (`uSemantic.pas`, ~19274) and the untyped-constant typer
+  (~7997).  A literal next to a typed operand already takes that operand's
+  type: `I + 1` with `I: Integer` is `Integer`, and `F(I + 1)` picks
+  `F(Integer)` over `F(Int64)`.  `F(42)` against that overload pair is
+  reported as ambiguous today.
+
+| Builtin results
+| `Length`, `Pos`, `PosEx`, `SizeOf`, `Ord`, and `High`/`Low` of strings and
+  arrays return `FTable.TypeInteger`.  `Copy` and `SetLength` check their
+  count arguments with `AnalyseIntegerArg`.  `MaxInt` is a 32-bit builtin
+  constant.
+
+| Storage
+| The string header is 12 bytes: three 4-byte fields, RefCount, Length and
+  Capacity (`runtime.str.pas`, `HDR_SIZE = 12`).  The dynamic-array length is
+  a 4-byte field at offset -4.  Widening the *type* `Length` returns does not
+  lift the 2^31^ ceiling; only widening these headers does.
+
+| Collections
+| `generics.collections` holds `FCount`/`FCapacity: Integer` in at least six
+  classes; `Classes.TStringList` likewise.  Widening them changes field
+  layout.
+|===
+
+=== Literal typing rule (D4, made precise)
+
+"Context-typed" is adopted in the Go sense, which keeps the blast radius
+small:
+
+. A literal with a type hint (assignment target, parameter, typed constant,
+  array index, case label) takes the hinted type when the value fits.  This
+  is today's behaviour.
+. A literal that is one operand of a binary operator whose other operand has
+  an integer type takes that type when the value fits.  This is today's
+  behaviour, now stated as a rule.  `I + 1` stays `Int32` arithmetic.
+. Otherwise the literal is `Int` (the only change), or `UInt64` above
+  `High(Int64)`.  An untyped constant (`const N = 42;`) follows the same
+  default.
+
+What changes in practice is limited to fully unhinted positions:
+`F(42)` against `F(Int32)`/`F(Int64)` resolves to `F(Int64)` instead of
+being ambiguous; `1 shl 40` is unchanged (already `Int64` by magnitude) but
+`1 shl 31` becomes positive; generic argument inference from a bare literal
+yields `Int`; `WriteLn(42)` and `Format('%d', [42])` route through the
+64-bit writer.
+
+=== Commit sequence
+
+Each step is one or more commits, each fully verified (the five fixpoints
+and the full suite built by stage-2, on macOS arm64 and the Linux x86-64
+VM), and each lands on master through a `ci/**` branch.
+
+*4.0 — prerequisites (no language change).*
+
+* Fix `BUG-20261027-warm-rebuild-arm64-backend-fieldcleanup`: Phase 4 work
+  is a long run of incremental rebuilds, and editing the arm64 backend
+  currently breaks a warm build.  Add an edit-one-unit leg to
+  `fixpoint-warmcache.sh`.
+* Fix `BUG-20261027-int32-overflow-not-wrapped`: a 32-bit-typed
+  expression must yield the same value on both ISAs, whatever consumes it.
+  Add a cross-ISA e2e matrix of `High(T) + 1`, `div`, `shr`, comparisons
+  and `WriteLn`/`IntToStr` per integer kind (extending
+  `cp.test.e2e.ordinalmatrix`).
+
+*4.1 — D6 diagnostic (non-breaking).*  A warning for `downto` with an
+unsigned loop variable and a lower bound of 0.  Independent of everything
+else; lands first to give it soak time.
+
+*4.2 — `Format('%u')`.*  The unsigned decimal specifier, so `UInt`/`UInt64`
+values above `High(Int64)` format correctly.  stdlib tests only.
+
+*4.3 — literal default (D4).*  Change the unhinted default from `Integer` to
+`Int` at both typing sites.  Before committing, measure the effect on the
+compiler's own code by diffing the stage-2 assembly against the previous
+stage-2: every changed function is an unhinted literal whose width changed,
+and each needs a look.  Expected test churn: assertions on the resolved type
+of a bare literal, and overload-ambiguity tests that now resolve.
+
+*4.4 — builtin results (D5, part 1).*  `Length`, `Pos`, `PosEx`, `SizeOf`,
+`Ord`, and `High`/`Low` of strings and arrays return `Int`; `Copy` and
+`SetLength` accept `Int`.  Storage is still 32-bit at this step, so
+`SetLength` and the string allocators reject a length above `High(Int32)`
+with a run-time error rather than truncating; 4.5 removes that limit.  No
+layout change.  Audit wraparound-dependent code (hash functions in
+particular) for `shr`, `div`, `mod` and comparisons whose operand silently
+widens; `+`, `-` and `*` produce the same low 32 bits either way.
+
+*4.5 — 64-bit length headers.*  The string header's Length and Capacity
+fields and the dynamic-array length field become 64-bit, lifting the
+2^31^ ceiling.  The header layout (24 bytes with a 64-bit RefCount for
+natural alignment, or a 4-byte RefCount plus padding) is settled at the
+start of the step by measuring both.  Affected: the RTL string and
+dynamic-array routines, both backends' inline header reads
+(`Length`, bounds checks, `for-in` over strings and arrays), string and
+array literal emission in data sections, the internal assembler's literal
+data, OPDF type records and pdr's string and array decoding.  A layout
+change: full stage-2 rebuild protocol, `-pre` refresh, IFACE bump if any
+`.bif` content encodes an offset, and the 4.4 run-time limit removed.
+
+*4.6 — collections (D5, part 2).*  `Count`, `Capacity`, indices and their
+fields move to `Int` in `generics.collections`, `Classes` and `Contnrs`.
+This is a field-layout change, so the full protocol applies: stage-2
+rebuild before trusting anything, `-pre` refresh, `bif-coverage` and
+`flag-coverage` baselines, and a pdr check that a `TList<T>` still prints
+correctly.  No IFACE bump is expected (field types are serialised by name),
+but confirm it with the warm-cache fixpoint.
+
+*4.7 — `MaxInt`.*  Redefine `MaxInt` as `High(Int)`.  Audit its uses in
+the compiler, RTL and stdlib: every use as a "to end of string" count in
+`Copy` keeps working once 4.4 accepts an `Int` count; a use stored into a
+32-bit variable would truncate to `-1` and must be retyped.
+
+*4.8 — narrowing warning (opt-in).*  An opt-in warning,
+`--warn-narrowing`, for an implicit integer narrowing on assignment or
+argument passing (`I := Length(S)` with `I: Int32`).  It is opt-in because
+the compiler's own source would produce thousands of instances until
+Phase 5 retypes its index variables; Phase 5 uses it as a worklist, and it
+may become a default warning after Phase 6.
+
+[#phase4-decisions]
+=== Decisions on the open questions (2026-10-27)
+
+. *64-bit string and array headers — part of Phase 4 (step 4.5).*  A
+  64-bit `Length` result that cannot exceed 2^31^ would give a misleading
+  answer to the question the widening is meant to settle, so the storage
+  change belongs with the API change.
+. *`MaxInt` — becomes `High(Int)` (step 4.7).*  The name refers to `Int`,
+  so its value follows `Int`.  FPC familiarity is a weaker argument than a
+  name that states its meaning.
+. *Narrowing diagnostics — an opt-in warning (step 4.8).*  Silent
+  narrowing remains the language rule; the warning is a migration aid.
+. *Loop variables — the inference bullet is dropped.*  Blaise has no inline
+  `var`, so a loop variable always has a declared type and Phase 5 retypes
+  index variables to `Int`.  The question is revisited if inline `var` is
+  ever adopted (undecided).
