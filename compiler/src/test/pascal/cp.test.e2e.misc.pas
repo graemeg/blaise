@@ -2409,7 +2409,9 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertTrue('compile+run', CompileAndRun(Src, Output, RCode));
   AssertEquals('exit code 0', 0, RCode);
-  AssertEquals('output', '-1' + LE, Output);
+  { not keeps its operand's type: a Byte complement (see "Integer
+    Expression Width") }
+  AssertEquals('output', '255' + LE, Output);
 end;
 
 procedure TE2EMiscTests.TestRun_BitwiseNot_Int64;

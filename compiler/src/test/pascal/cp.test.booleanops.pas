@@ -35,7 +35,7 @@ type
     procedure TestSemantic_And_IntOperand_RaisesError;
     procedure TestSemantic_Not_IntOperand_TypeIsInteger;
     procedure TestSemantic_Not_Int64Operand_TypeIsInt64;
-    procedure TestSemantic_Not_ByteOperand_TypeIsInteger;
+    procedure TestSemantic_Not_ByteOperand_TypeIsByte;
     procedure TestSemantic_Not_FloatOperand_RaisesError;
     procedure TestSemantic_Xor_TypeIsBoolean;
   end;
@@ -232,7 +232,7 @@ begin
     TNotExpr(Assn.Expr).ResolvedType.Name);
 end;
 
-procedure TBooleanOpsTests.TestSemantic_Not_ByteOperand_TypeIsInteger;
+procedure TBooleanOpsTests.TestSemantic_Not_ByteOperand_TypeIsByte;
 var Prog: TProgram; Assn: TAssignment;
 begin
   Prog := AnalyseSrc('''
@@ -244,7 +244,8 @@ begin
       end.
       ''');
   Assn := TAssignment(Prog.Block.Stmts[1]);
-  AssertEquals('type is Integer', 'Integer',
+  { not keeps its operand's type (see "Integer expression width") }
+  AssertEquals('type is Byte', 'Byte',
     TNotExpr(Assn.Expr).ResolvedType.Name);
 end;
 

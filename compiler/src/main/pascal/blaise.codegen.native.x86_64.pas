@@ -1657,6 +1657,13 @@ const
   bitmask and must load/widen zero-extended — a movslq of a 4-byte set
   with bit 31 set would smear bits 32..63 when it flows into a 64-bit
   set destination (BUG-20260721-qbe-set-into-dynarray-elem review). }
+{ True when a shift's result type is 32 bits wide: the shift then wraps at
+  32 bits (8- and 16-bit operands are promoted to 32 by the semantic pass). }
+function Is32BitShift(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and (AType.Kind in [tyInteger, tyUInt32]);
+end;
+
 function IsUnsignedInt(AType: TTypeDesc): Boolean;
 begin
   if AType = nil then
@@ -10987,20 +10994,41 @@ begin
         else
           Self.Emit(#9'xorq %rcx, %rax');
       boShl:
-        if HasImm then
-          Self.Emit(#9'shlq $' + IntToStr(ImmV and 63) + ', %rax')
-        else
-          Self.Emit(#9'shlq %cl, %rax');
+        begin
+          if HasImm then
+            Self.Emit(#9'shlq $' + IntToStr(ImmV and 63) + ', %rax')
+          else
+            Self.Emit(#9'shlq %cl, %rax');
+          { a 32-bit shift wraps at 32 bits: re-extend the result from its
+            type, so the register holds the value the type says (see
+            "Integer expression width" in docs/language-rationale.adoc) }
+          if Is32BitShift(BE.ResolvedType) then
+            Self.EmitNarrowToType(BE.ResolvedType);
+        end;
       boShr:
-        if HasImm then
-          Self.Emit(#9'shrq $' + IntToStr(ImmV and 63) + ', %rax')
-        else
-          Self.Emit(#9'shrq %cl, %rax');
+        begin
+          { shr is logical at the operand's width: a negative Integer shifts
+            in zeros at bit 31, not bit 63, so drop the sign extension first }
+          if Is32BitShift(BE.ResolvedType) then
+            Self.Emit(#9'movl %eax, %eax');
+          if HasImm then
+            Self.Emit(#9'shrq $' + IntToStr(ImmV and 63) + ', %rax')
+          else
+            Self.Emit(#9'shrq %cl, %rax');
+          if Is32BitShift(BE.ResolvedType) then
+            Self.EmitNarrowToType(BE.ResolvedType);
+        end;
       boSar:
-        if HasImm then
-          Self.Emit(#9'sarq $' + IntToStr(ImmV and 63) + ', %rax')
-        else
-          Self.Emit(#9'sarq %cl, %rax');
+        begin
+          if Is32BitShift(BE.ResolvedType) then
+            Self.EmitNarrowToType(BE.ResolvedType);
+          if HasImm then
+            Self.Emit(#9'sarq $' + IntToStr(ImmV and 63) + ', %rax')
+          else
+            Self.Emit(#9'sarq %cl, %rax');
+          if Is32BitShift(BE.ResolvedType) then
+            Self.EmitNarrowToType(BE.ResolvedType);
+        end;
       boEQ, boNE, boLT, boGT, boLE, boGE:
         begin
           if (BE.Left.ResolvedType <> nil) and
@@ -12208,7 +12236,12 @@ begin
             (AExpr.ResolvedType.Kind in [tyInt64, tyUInt64]) then
       Self.Emit(#9'notq %rax')
     else
+    begin
       Self.Emit(#9'notl %eax');
+      { not keeps its operand's type: re-extend from that width (notl left
+        a Byte's bits 8..31 set, and an Integer zero-extended) }
+      Self.EmitNarrowToType(AExpr.ResolvedType);
+    end;
     Exit;
   end;
 

@@ -796,6 +796,7 @@ type
     function  AnalyseIndirectFuncCallExpr(AExpr: TIndirectFuncCallExpr): TTypeDesc;
     function  AnalyseExpr(AExpr: TASTExpr): TTypeDesc;
     function  AnalyseExprCore(AExpr: TASTExpr): TTypeDesc;
+    function  PromotedIntType(AExpr: TASTExpr): TTypeDesc;
     function  AnalyseBinaryExpr(ABin: TBinaryExpr): TTypeDesc;
     function  AnalyseNegExpr(ANeg: TNegExpr): TTypeDesc;
     function  AnalyseFieldAccess(AAccess: TFieldAccessExpr): TTypeDesc;
@@ -1378,6 +1379,14 @@ type
     Pins:       TStringList;   { this view's type-argument pins (owned) }
     PinSyms:    TObjectList;   { owns the pinned TSymbols }
   end;
+
+{ An integer type narrower than 64 bits (enums excluded): the operands that
+  arithmetic promotes to Int64.  See "Integer expression width". }
+function IsNarrowInt(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and
+    (AType.Kind in [tyInteger, tyUInt32, tySmallInt, tyWord, tyInt8, tyByte]);
+end;
 
 constructor TAnonNestedRoutines.Create(AThunk: TMethodDecl);
 begin
@@ -20051,8 +20060,9 @@ begin
         Result := FTable.TypeUInt64
       else if Result.Kind = tyInt64 then
         Result := FTable.TypeInt64
-      else
+      else if not IsNarrowInt(Result) then
         Result := FTable.TypeInteger;
+      { a narrow integer keeps its type: not of a Byte is a Byte }
     end
     else
       SemanticError(
@@ -21115,6 +21125,20 @@ begin
   AAccess.ResolvedType := Result;
 end;
 
+{ The type of a promoted integer operation: Int64, except that a constant
+  expression is typed like a literal, by magnitude (Integer when the value
+  fits), so `LT_BUCKETS - 1` still mixes with a UInt64 as an Integer did. }
+function TSemanticAnalyser.PromotedIntType(AExpr: TASTExpr): TTypeDesc;
+var
+  V: Int64;
+begin
+  if Self.TryEvalConstIntExpr(AExpr, V) and (V >= Low(Integer)) and
+     (V <= High(Integer)) then
+    Result := FTable.TypeInteger
+  else
+    Result := FTable.TypeInt64;
+end;
+
 function TSemanticAnalyser.AnalyseBinaryExpr(ABin: TBinaryExpr): TTypeDesc;
 var
   LType, RType: TTypeDesc;
@@ -21264,6 +21288,10 @@ begin
         Result := FTable.TypeUInt64
       else if (LType.Kind = tyInt64) or (RType.Kind = tyInt64) then
         Result := FTable.TypeInt64
+      else if IsNarrowInt(LType) and IsNarrowInt(RType) then
+        { promoted like arithmetic: a mixed Int32/UInt32 pair kept its sign
+          bit only by luck as Integer.  See "Integer expression width". }
+        Result := Self.PromotedIntType(ABin)
       else
         Result := FTable.TypeInteger;
       Exit;
@@ -21389,7 +21417,15 @@ begin
           Format('''%s'' requires integer operands, not ''%s''',
             [BinaryOpName(ABin.Op), FloatOperandName(LType, RType)]),
           ABin.Line, ABin.Col);
-      Result := LType;
+      { An 8- or 16-bit left operand shifts as 32 bits, so B shl 8 keeps its
+        bits; a 32- or 64-bit one keeps its type and wraps at its width.  See
+        docs/language-rationale.adoc, "Integer expression width". }
+      if LType.Kind in [tyByte, tyWord] then
+        Result := FTable.TypeUInt32
+      else if LType.Kind in [tyInt8, tySmallInt] then
+        Result := FTable.TypeInteger
+      else
+        Result := LType;
       ABin.ResolvedType := Result;
       Exit;
     end;
@@ -21458,15 +21494,21 @@ begin
         Result := FTable.TypeUInt64
       else if (LType.Kind = tyInt64) or (RType.Kind = tyInt64) then
         Result := FTable.TypeInt64
+      else if IsNarrowInt(LType) and IsNarrowInt(RType) then
+        { Operands narrower than 64 bits are promoted: the operation is
+          evaluated in, and typed, Int64, so High(Integer) + 1 is 2147483648
+          whatever consumes it (BUG-20261027-int32-overflow-not-wrapped).
+          See docs/language-rationale.adoc, "Integer expression width". }
+        Result := Self.PromotedIntType(ABin)
       else
         Result := LType;
     end;
   end;
 end;
 
-{ Unary minus.  A numeric operand keeps the result type 0 - X had while the
-  parser desugared it that way -- the narrow integer kinds widen to Integer,
-  Int64 and UInt64 keep their own -- except that a float keeps its width:
+{ Unary minus.  A numeric operand narrower than 64 bits is promoted to Int64
+  like binary arithmetic (a constant is typed by magnitude), Int64 and UInt64
+  keep their own, and a float keeps its width:
   -S of a Single is a Single, where the Integer 0 promoted it to Double.  A
   record or class operand resolves its `class operator Negative` and lowers
   to that call, as TryLowerOperator does for a binary operator.  See
@@ -21529,7 +21571,11 @@ begin
     tyUInt64: Result := FTable.TypeUInt64;
   else
     CheckTypesMatch(FTable.TypeInteger, T, 'unary minus', ANeg.Line, ANeg.Col);
-    Result := FTable.TypeInteger;
+    { promoted like binary arithmetic (-Low(Integer) does not fit Integer) }
+    if IsNarrowInt(T) then
+      Result := Self.PromotedIntType(ANeg)
+    else
+      Result := FTable.TypeInteger;
   end;
 end;
 

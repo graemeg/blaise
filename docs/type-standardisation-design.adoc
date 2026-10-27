@@ -675,8 +675,8 @@ this plan.
 | Two sites implement the magnitude rule: `AnalyseExpr` for a
   `TIntLiteral` (`uSemantic.pas`, ~19274) and the untyped-constant typer
   (~7997).  A literal next to a typed operand already takes that operand's
-  type: `I + 1` with `I: Integer` is `Integer`, and `F(I + 1)` picks
-  `F(Integer)` over `F(Int64)`.  `F(42)` against that overload pair is
+  type.  (Since 4.0 the *operation* `I + 1` is promoted to `Int64`; see
+  below.)  `F(42)` against an `F(Integer)`/`F(Int64)` overload pair is
   reported as ambiguous today.
 
 | Builtin results
@@ -707,7 +707,10 @@ small:
   is today's behaviour.
 . A literal that is one operand of a binary operator whose other operand has
   an integer type takes that type when the value fits.  This is today's
-  behaviour, now stated as a rule.  `I + 1` stays `Int32` arithmetic.
+  behaviour, now stated as a rule.  The literal's type is then irrelevant to
+  the result: since 4.0, arithmetic on two operands narrower than 64 bits
+  is evaluated in `Int64` (see "Integer Expression Width" in the language
+  rationale).
 . Otherwise the literal is `Int` (the only change), or `UInt64` above
   `High(Int64)`.  An untyped constant (`const N = 42;`) follows the same
   default.
@@ -725,17 +728,19 @@ Each step is one or more commits, each fully verified (the five fixpoints
 and the full suite built by stage-2, on macOS arm64 and the Linux x86-64
 VM), and each lands on master through a `ci/**` branch.
 
-*4.0 — prerequisites (no language change).*
+*4.0 — prerequisites.*  Both done on 2026-10-27.
 
 * Fix `BUG-20261027-warm-rebuild-arm64-backend-fieldcleanup`: Phase 4 work
   is a long run of incremental rebuilds, and editing the arm64 backend
   currently breaks a warm build.  Add an edit-one-unit leg to
   `fixpoint-warmcache.sh`.
-* Fix `BUG-20261027-int32-overflow-not-wrapped`: a 32-bit-typed
-  expression must yield the same value on both ISAs, whatever consumes it.
-  Add a cross-ISA e2e matrix of `High(T) + 1`, `div`, `shr`, comparisons
-  and `WriteLn`/`IntToStr` per integer kind (extending
-  `cp.test.e2e.ordinalmatrix`).
+* Fix `BUG-20261027-int32-overflow-not-wrapped`.  This needed a language
+  decision, taken after comparing FPC, Delphi, Java, Rust, Swift and Go:
+  arithmetic (`+ - * div mod`, unary minus, `and or xor`) on operands
+  narrower than 64 bits is promoted to `Int64` (the FPC rule); shifts
+  promote 8/16-bit operands to 32 bits and otherwise keep their width; `not`
+  keeps its operand's type.  Recorded in the language rationale, "Integer
+  Expression Width".  Tests: `cp.test.intwidth`, `cp.test.e2e.intwidth`.
 
 *4.1 — D6 diagnostic (non-breaking).*  A warning for `downto` with an
 unsigned loop variable and a lower bound of 0.  Independent of everything

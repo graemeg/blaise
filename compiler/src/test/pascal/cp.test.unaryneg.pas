@@ -153,11 +153,14 @@ end;
 
 procedure TUnaryNegTests.TestSem_Neg_ResultTypes;
 begin
-  AssertEquals('Integer', 'Integer', Self.NegType('Integer'));
-  AssertEquals('Byte widens as 0 - B did', 'Integer', Self.NegType('Byte'));
-  AssertEquals('Int8', 'Integer', Self.NegType('Int8'));
-  AssertEquals('SmallInt', 'Integer', Self.NegType('SmallInt'));
-  AssertEquals('Word', 'Integer', Self.NegType('Word'));
+  { narrow operands are promoted, as 0 - X is (see "Integer Expression
+    Width") }
+  AssertEquals('Integer', 'Int64', Self.NegType('Integer'));
+  AssertEquals('Byte', 'Int64', Self.NegType('Byte'));
+  AssertEquals('Int8', 'Int64', Self.NegType('Int8'));
+  AssertEquals('SmallInt', 'Int64', Self.NegType('SmallInt'));
+  AssertEquals('Word', 'Int64', Self.NegType('Word'));
+  AssertEquals('UInt32', 'Int64', Self.NegType('UInt32'));
   AssertEquals('Int64', 'Int64', Self.NegType('Int64'));
   AssertEquals('UInt64', 'UInt64', Self.NegType('UInt64'));
   AssertEquals('Double', 'Double', Self.NegType('Double'));

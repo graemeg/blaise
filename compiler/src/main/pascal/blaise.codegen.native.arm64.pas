@@ -917,6 +917,13 @@ end;
   IsUnsignedInt).  Byte/Word/UInt32/UInt64 are unsigned; Boolean and Enum
   hold non-negative ordinals; a small set is a bitmask.  Used to pick
   udiv over sdiv — see the boDiv/boMod arm. }
+{ True when a shift's result type is 32 bits wide (see the x86-64 unit's
+  Is32BitShift). }
+function Is32BitShiftA64(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and (AType.Kind in [tyInteger, tyUInt32]);
+end;
+
 function IsUnsignedIntA64(AType: TTypeDesc): Boolean;
 begin
   Result := (AType <> nil) and
@@ -6917,9 +6924,33 @@ begin
       boAnd: Self.Emit(#9'and x0, x0, x1');
       boOr:  Self.Emit(#9'orr x0, x0, x1');
       boXor: Self.Emit(#9'eor x0, x0, x1');
-      boShl: Self.Emit(#9'lsl x0, x0, x1');
-      boShr: Self.Emit(#9'lsr x0, x0, x1');
-      boSar: Self.Emit(#9'asr x0, x0, x1');
+      { A 32-bit shift wraps at 32 bits (8- and 16-bit operands are promoted
+        to 32 by the semantic pass): shr drops the operand's sign extension
+        first, so it is logical at bit 31, and every result is re-extended
+        from its type.  See "Integer expression width" in
+        docs/language-rationale.adoc. }
+      boShl:
+      begin
+        Self.Emit(#9'lsl x0, x0, x1');
+        if Is32BitShiftA64(BE.ResolvedType) then
+          Self.EmitNarrowX0(BE.ResolvedType);
+      end;
+      boShr:
+      begin
+        if Is32BitShiftA64(BE.ResolvedType) then
+          Self.Emit(#9'mov w0, w0');
+        Self.Emit(#9'lsr x0, x0, x1');
+        if Is32BitShiftA64(BE.ResolvedType) then
+          Self.EmitNarrowX0(BE.ResolvedType);
+      end;
+      boSar:
+      begin
+        if Is32BitShiftA64(BE.ResolvedType) then
+          Self.EmitNarrowX0(BE.ResolvedType);
+        Self.Emit(#9'asr x0, x0, x1');
+        if Is32BitShiftA64(BE.ResolvedType) then
+          Self.EmitNarrowX0(BE.ResolvedType);
+      end;
       boEQ, boNE, boLT, boGT, boLE, boGE:
       begin
         { Unsigned when EITHER operand is an unsigned integer, or the left
@@ -7242,6 +7273,10 @@ begin
       { bitwise NOT: eor with all-ones (no mvn/orn in the assembler) }
       Self.Emit(#9'movn x1, #0');
       Self.Emit(#9'eor x0, x0, x1');
+      { not keeps its operand's type: re-extend from that width }
+      if (AExpr.ResolvedType <> nil) and
+         not (AExpr.ResolvedType.Kind in [tyInt64, tyUInt64]) then
+        Self.EmitNarrowX0(AExpr.ResolvedType);
     end;
     Exit;
   end;

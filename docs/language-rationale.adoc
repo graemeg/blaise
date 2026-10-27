@@ -4785,6 +4785,124 @@ but read less naturally next to Pascal's other keyword operators
 (`shl`, `shr`, `and`, `or`).  Three-letter mnemonic keywords match the
 established Pascal style.
 
+== Integer Expression Width
+
+=== Decision
+
+The width an integer expression is evaluated in, and therefore its type,
+follows three rules:
+
+* *Arithmetic is promoted.*  `+`, `-`, `*`, `div`, `mod`, unary minus and
+  the bitwise `and`, `or` and `xor`, applied to operands that are both
+  narrower than 64 bits (`Int8`, `Byte`, `SmallInt`, `Word`, `Integer`,
+  `UInt32`), are evaluated in, and typed, `Int64`.
+  `High(Integer) + 1` is `2147483648`, and `Byte(255) + Byte(1)` is `256`.
+  An operation with a 64-bit operand keeps the existing rule (`Int64`, or
+  `UInt64` when an operand is `UInt64`).
+* *Shifts keep their width.*  `shl`, `shr` and `sar` promote an 8- or
+  16-bit left operand to 32 bits (`UInt32` for an unsigned operand, `Integer`
+  for a signed one), so `B shl 8` keeps its bits.  A 32- or 64-bit left
+  operand keeps its type, and the shift wraps at that width:
+  `Integer(1) shl 31` is `Low(Integer)`, and `shr` of a negative `Integer`
+  shifts zeros in at bit 31 (`-1 shr 1` is `2147483647`).
+* *`not` keeps its operand's type.*  `not Byte(200)` is the `Byte` `55`.
+
+A constant expression is typed like a literal, by magnitude: `N - 1` with
+`const N = 64` is `Integer`, and `2147483647 + 1` is `Int64`.  A
+promoted value stored into a narrower variable or passed to a narrower
+parameter is truncated, as any implicit narrowing is.
+
+Every integer value in a register holds the sign- or zero-extension of its
+own type's bits, so the value of an expression does not depend on what
+consumes it.
+
+=== Rationale
+
+Before this rule the semantic pass typed `I + 1` as `Integer` while both
+backends computed it in a 64-bit register and narrowed it only at some
+consumers.  The same expression printed `-2147483648` on x86-64 and
+`2147483648` on arm64, while `(I + 1) div 2` was `1073741824` on both
+(BUG-20261027-int32-overflow-not-wrapped).  Either a consistent 32-bit wrap
+or a consistent promotion fixes that; the comparison below decided between
+them.
+
+[cols="1,2,2,2",options="header"]
+|===
+| Language | `Int32 + Int32` | 8/16-bit operands | 32-bit shift
+
+| FPC (64-bit target)
+| promoted to `Int64`
+| promoted
+| promoted to 32 bits, wraps at 32
+
+| Delphi
+| stays 32-bit, wraps
+| promoted to `Integer`
+| promoted to 32 bits, wraps at 32
+
+| Java, C#, C
+| stays 32-bit, wraps
+| promoted to `int`
+| stays 32-bit, wraps
+
+| Rust
+| same type required; overflow panics (debug) or wraps
+| no promotion
+| keeps its type
+
+| Swift
+| same type required; overflow traps
+| no promotion
+| keeps its type
+
+| Go
+| wraps at the type
+| no promotion, wraps at the type
+| keeps its type
+|===
+
+Arithmetic concerns numeric value, so promotion gives the answer the
+programmer meant: an intermediate such as `(A * B) div C` cannot overflow
+32 bits, `High(Integer) + 1 > High(Integer)` holds, and a comparison or
+`WriteLn` of an expression sees its true value.  It costs nothing on a
+64-bit target, matches FPC, which most ported code was written for, and
+agrees with the `Int`-by-default direction of the type standardisation
+(`docs/type-standardisation-design.adoc`, Phase 4).
+
+Shifts concern bit layout, and every language in the table agrees that a
+32-bit shift stays 32 bits.  A 32-bit rotate, `(H shl 13) or (H shr 19)`,
+and the hash functions built from such steps depend on it.  Promoting
+8- and 16-bit operands to 32 bits is the Java/C/FPC/Delphi rule, and it
+keeps the Pascal byte-packing idiom `(B shl 8) or C` working.
+
+=== Consequences
+
+* Overload resolution follows the promoted type: with `F(Integer)` and
+  `F(Int64)` overloads, `F(I + 1)` calls `F(Int64)`.
+* Code that relied on 32-bit wraparound through `+`, `-` or `*` keeps the
+  same low 32 bits when the result is stored into a 32-bit variable; only a
+  consumer that reads the full value first (`div`, `mod`, `shr`, a
+  comparison, `WriteLn`) sees the difference.  Such code masks or stores
+  explicitly.
+* `UInt32 * UInt32` can exceed `High(Int64)`, and then wraps in `Int64`.
+
+=== Alternatives Rejected
+
+*Wrap at 32 bits (Delphi, Java)* — consistent, but an overflow in an
+intermediate is silent, and it diverges from FPC for code ported from it.
+It also requires a narrowing instruction after every 32-bit operation on
+both ISAs.
+
+*No promotion (Rust, Swift, Go)* — each operation wraps at its operand
+type, so `Byte(255) + Byte(1)` is `0`.  Correct for a language designed
+around it with overflow traps and explicit widening casts; surprising in a
+Pascal dialect, where narrow arithmetic has always been promoted.
+
+*Promote the shifts as well* — one rule for every operator, but no
+mainstream language widens a 32-bit shift, and `shr` of a negative
+`Integer` would then yield `9223372036854775807` instead of
+`2147483647`.
+
 == `/` vs `div` — Real Division and Integer Division
 
 === Decision
@@ -5232,8 +5350,7 @@ The `not` operator accepts both Boolean and integer operands:
   is `Boolean`.
 * On an integer operand (`Byte`, `SmallInt`, `Word`, `Integer`, `Int64`,
   `UInt64`), `not` performs bitwise complement — every bit is inverted.
-  The result type is `Integer` for operands narrower than 64 bits, or
-  `Int64` / `UInt64` for 64-bit operands.
+  The result has the operand's type: `not Byte(200)` is the `Byte` `55`.
 * On a floating-point operand (`Single`, `Double`), `not` is a semantic
   error.
 
@@ -5247,10 +5364,16 @@ Bitwise complement is essential for bitmask patterns such as
 integers, the programmer must use `xor` with a hand-computed all-ones
 constant — error-prone and width-dependent.
 
-Narrower-than-32-bit operands widen to `Integer` because the complement
-of a `Byte` value is meaningful as a 32-bit mask, not as a byte that
-wraps modulo 256.  This follows the same integer-promotion rule that
-Blaise applies to other arithmetic on narrow types.
+The result keeps the operand's type, as in FPC (verified: `not M` with
+`M: Byte = $0F` is `240`, in both objfpc and delphi modes), Delphi ("the
+result of a not operation is of the same type as the operand"), Rust
+(`!`), Swift (`~`) and Go (`^`).  C and Java alone promote the operand to
+`int` first.  An earlier revision of this section widened narrow operands
+to `Integer`, so that `Flags and (not M)` acted as a full-width mask, and
+stated that this matched Delphi and FPC; it did not, and it also turned
+`not` of a `UInt32` into a negative `Integer`.  It changed with the
+integer expression width rules (see "Integer Expression Width").  To
+complement at full width, widen first: `Flags and not Integer(M)`.
 
 === Alternatives Rejected
 
@@ -8015,10 +8138,12 @@ The rules:
 * *Floats* negate by flipping the sign bit, as IEEE 754 defines negation:
   `-(+0.0)` is `-0.0`, `-(-0.0)` is `+0.0`, and the sign of a NaN flips.  The
   result keeps the operand's width: `-S` of a `Single` is a `Single`.
-* *Integers* keep exactly the result type and value `0 - X` gave: `Byte`,
-  `Word`, `Int8`, `SmallInt`, `UInt32` and `Integer` operands yield
-  `Integer`; `Int64` and `UInt64` keep their type and wrap at the boundary
-  (`-Low(Int64)` is `Low(Int64)`, `-UInt64(1)` is `High(UInt64)`).
+* *Integers* keep the result type and value `0 - X` gives: `Byte`,
+  `Word`, `Int8`, `SmallInt`, `UInt32` and `Integer` operands are promoted
+  to `Int64` (so `-Low(Integer)` is `2147483648`; a negated literal is a
+  constant and is typed by magnitude), and `Int64` and `UInt64` keep their
+  type and wrap at the boundary (`-Low(Int64)` is `Low(Int64)`,
+  `-UInt64(1)` is `High(UInt64)`).  See "Integer Expression Width".
 * *Records and classes* negate only through a declared
   `class operator Negative`; without one, `-R` is an error naming the operator
   to declare.
