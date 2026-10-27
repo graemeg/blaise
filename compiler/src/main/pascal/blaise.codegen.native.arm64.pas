@@ -534,6 +534,7 @@ type
     procedure EmitForInAssignAddr(AStmt: TForInStmt; AOwned: Boolean);
     procedure EmitPointerWrite(AStmt: TPointerWriteStmt);
     procedure EmitNarrowX0(AType: TTypeDesc);
+    procedure EmitExtendParamReg(const ANum: string; AType: TTypeDesc);
     procedure EmitBuiltinStrCall1(AArg: TASTExpr; const ASym: string);
     procedure EmitFormatCall(AArgs: TObjectList);
     procedure EmitRecCallToSlot(AExpr: TASTExpr; const ASlot: string;
@@ -10362,6 +10363,15 @@ begin
       Self.Emit(FdMov);
       EmitCallSym('_SysWriteUInt64');
     end
+    else if K = tyUInt32 then
+    begin
+      { the unsigned writer on the low 32 bits, zero-extended: a value above
+        High(Int32) printed negative through _SysWriteInt.  Mirrors x86-64. }
+      Self.EmitExprToX0(Arg);
+      Self.Emit(#9'mov w1, w0');
+      Self.Emit(FdMov);
+      EmitCallSym('_SysWriteUInt64');
+    end
     else if IsIntFam(Arg.ResolvedType) or (Arg is TIntLiteral) then
     begin
       Self.EmitExprToX0(Arg);
@@ -12409,6 +12419,32 @@ begin
     EmitPopTo('x0');
   end;
   Self.Emit(#9'add sp, sp, #32');
+end;
+
+{ Extend a by-value integer parameter arriving in x<ANum> from its own width
+  before the prologue spills it.  Integer slots are 8 bytes and read back at
+  full width, but the register's upper bits are not ours to trust: a caller
+  may pass a wider value, AAPCS64 leaves the bits above a 32-bit argument
+  unspecified, and a stack argument is loaded with a zero-extending ldr
+  (BUG-20261027-int64-arg-to-integer-param-not-narrowed). }
+procedure TArm64Backend.EmitExtendParamReg(const ANum: string; AType: TTypeDesc);
+
+  procedure ShiftPair(const AShr: string; ABits: Integer);
+  begin
+    Self.Emit(Format(#9'lsl x%s, x%s, #%d', [ANum, ANum, ABits]));
+    Self.Emit(Format(#9'%s x%s, x%s, #%d', [AShr, ANum, ANum, ABits]));
+  end;
+
+begin
+  if AType = nil then Exit;
+  case AType.Kind of
+    tyInteger, tyEnum: Self.Emit(Format(#9'sxtw x%s, w%s', [ANum, ANum]));
+    tyUInt32: Self.Emit(Format(#9'mov w%s, w%s', [ANum, ANum]));
+    tySmallInt: ShiftPair('asr', 48);
+    tyWord: ShiftPair('lsr', 48);
+    tyInt8: ShiftPair('asr', 56);
+    tyByte: ShiftPair('lsr', 56);
+  end;
 end;
 
 procedure TArm64Backend.EmitNarrowX0(AType: TTypeDesc);
@@ -14749,11 +14785,13 @@ begin
           Self.Emit(Format(#9'ldr w9, [x29, #%d]', [16 + SPOff]))
         else
           Self.Emit(Format(#9'ldr x9, [x29, #%d]', [16 + SPOff]));
+        EmitExtendParamReg('9', Par.ResolvedType);
         EmitStoreSlot('x9', Par.ParamName);
         SPOff := SPOff + SPSz;
       end
       else
       begin
+        EmitExtendParamReg(IntToStr(J), Par.ResolvedType);
         EmitStoreSlot('x' + IntToStr(J), Par.ParamName);
         J := J + 1;
       end;
