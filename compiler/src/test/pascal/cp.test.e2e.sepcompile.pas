@@ -413,6 +413,16 @@ type
       must be numeric") because the operator flags were not serialised
       (BUG-20261028-operators-lost-on-warm-build). }
     procedure TestIncrementalRebuild_ClassOperators_Warm;
+    { A stale unit reached only through implementation-section uses of
+      cached units (Prog -> Drv impl-uses Tk impl-uses Arm).  The link-only
+      collector printed "recompiling from source" for the stale Arm, then
+      neither compiled nor linked it, so the warm build failed with an
+      undefined __FieldCleanup_Arm_TArmBackend -- and kept Tk's cached code
+      even though a dependency had changed. }
+    procedure TestIncrementalRebuild_StaleImplOnlyDep_Warm;
+    { The same chain with the leaf's cached object deleted: an impl-only dep
+      with source but no object was dropped from the link outright. }
+    procedure TestIncrementalRebuild_MissingImplOnlyDepObject_Warm;
   end;
 
 implementation
@@ -6237,6 +6247,186 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('build2 run exit code', 0, Rc);
   AssertEquals('build2 stdout', Expected, Captured)
+end;
+
+const
+  ImplChainBaseSrc =
+    '''
+    unit IcBase;
+    interface
+    type
+      TBaseBackend = class
+        FName: string;
+        constructor Create(const AName: string);
+        function Describe(): string; virtual;
+      end;
+    implementation
+    constructor TBaseBackend.Create(const AName: string);
+    begin
+      FName := AName
+    end;
+    function TBaseBackend.Describe(): string;
+    begin
+      Result := 'base ' + FName
+    end;
+    end.
+    ''';
+  ImplChainArmSrc =
+    '''
+    unit IcArm;
+    interface
+    uses IcBase;
+    type
+      TArmBackend = class(TBaseBackend)
+        FExtra: string;
+        function Describe(): string; override;
+      end;
+    implementation
+    function TArmBackend.Describe(): string;
+    begin
+      Result := 'arm ' + FName
+    end;
+    end.
+    ''';
+  { the leaf with only its method BODY changed }
+  ImplChainArm2Src =
+    '''
+    unit IcArm;
+    interface
+    uses IcBase;
+    type
+      TArmBackend = class(TBaseBackend)
+        FExtra: string;
+        function Describe(): string; override;
+      end;
+    implementation
+    function TArmBackend.Describe(): string;
+    begin
+      Result := 'ARM2 ' + FName
+    end;
+    end.
+    ''';
+  ImplChainTkSrc =
+    '''
+    unit IcTk;
+    interface
+    uses IcBase;
+    function MakeBackend(): TBaseBackend;
+    implementation
+    uses IcArm;
+    function MakeBackend(): TBaseBackend;
+    begin
+      Result := TArmBackend.Create('x')
+    end;
+    end.
+    ''';
+  ImplChainDrvSrc =
+    '''
+    unit IcDrv;
+    interface
+    function Run(): string;
+    implementation
+    uses IcBase, IcTk;
+    function Run(): string;
+    begin
+      Result := MakeBackend().Describe()
+    end;
+    end.
+    ''';
+  ImplChainProgSrc =
+    '''
+    program UseImplChain;
+    uses IcDrv;
+    begin
+      WriteLn(Run())
+    end.
+    ''';
+
+procedure TSepCompileTests.TestIncrementalRebuild_StaleImplOnlyDep_Warm;
+var
+  ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  ProgPas  := FScratch + '/use_implchain.pas';
+  ProgBin  := FScratch + '/use_implchain';
+  CacheDir := FScratch + '/units-implchain';
+  WriteFile(FScratch + '/IcBase.pas', ImplChainBaseSrc);
+  WriteFile(FScratch + '/IcArm.pas', ImplChainArmSrc);
+  WriteFile(FScratch + '/IcTk.pas', ImplChainTkSrc);
+  WriteFile(FScratch + '/IcDrv.pas', ImplChainDrvSrc);
+  WriteFile(ProgPas, ImplChainProgSrc);
+  ForceDirectories(CacheDir);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('build1 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build1 stdout', 'arm x' + #10, Captured);
+
+  { edit only the leaf's BODY }
+  WriteFile(FScratch + '/IcArm.pas', ImplChainArm2Src);
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build2 run exit code', 0, Rc);
+  AssertEquals('build2 stdout (edited body)', 'ARM2 x' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_MissingImplOnlyDepObject_Warm;
+var
+  ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  ProgPas  := FScratch + '/use_implchain2.pas';
+  ProgBin  := FScratch + '/use_implchain2';
+  CacheDir := FScratch + '/units-implchain2';
+  WriteFile(FScratch + '/IcBase.pas', ImplChainBaseSrc);
+  WriteFile(FScratch + '/IcArm.pas', ImplChainArmSrc);
+  WriteFile(FScratch + '/IcTk.pas', ImplChainTkSrc);
+  WriteFile(FScratch + '/IcDrv.pas', ImplChainDrvSrc);
+  WriteFile(ProgPas, ImplChainProgSrc);
+  ForceDirectories(CacheDir);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('build1 exit code (out: ' + Captured + ')', 0, Rc);
+
+  AssertTrue('leaf object existed', FileExists(CacheDir + '/icarm.o'));
+  DeleteFile(CacheDir + '/icarm.o');
+  AssertFalse('leaf object deleted', FileExists(CacheDir + '/icarm.o'));
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build2 run exit code', 0, Rc);
+  AssertEquals('build2 stdout', 'arm x' + #10, Captured)
 end;
 
 initialization

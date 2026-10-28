@@ -135,6 +135,7 @@ type
       iface.  Units already loaded normally are skipped — they are linked
       via FPrebuiltObjectPaths / the source-compiled worker objects. }
     procedure CollectLinkOnlyObject(const AName: string);
+    procedure LoadLinkOnlyFromSource(const AName: string);
     { Decide whether to trust a freshly-loaded .bif.  Hash-compares
       against the source .pas if present on the search path; falls
       back to a CompilerId match when source is unavailable. }
@@ -414,15 +415,35 @@ begin
   if FLinkOnlySeen.IndexOf(AName) >= 0 then Exit;
   FLinkOnlySeen.Add(AName);
 
+  { A dep whose cached object cannot be used -- none, unreadable, or stale
+    against its source -- was simply skipped here, after ValidateIface had
+    already announced "recompiling from source": it was neither compiled nor
+    linked, so a warm build that edited a unit reached only through
+    implementation-section uses failed to link (an undefined vtable_ /
+    _FieldCleanup_ of its class).  With source on the path it is now loaded
+    the normal way, which compiles and links it.  Without source the cache is
+    the only option, as before. }
   ObjPath := LocateObject(AName);
-  if ObjPath = '' then Exit;  { no cached object — nothing to link }
+  if ObjPath = '' then
+  begin
+    if Locate(AName) <> '' then
+      LoadLinkOnlyFromSource(AName);
+    Exit;
+  end;
   Iface := LoadIfaceFromObject(ObjPath);
-  if Iface = nil then Exit;   { unreadable iface — the source-load path
-                                elsewhere will have handled this unit }
+  if Iface = nil then
+  begin
+    if Locate(AName) <> '' then
+      LoadLinkOnlyFromSource(AName);
+    Exit;
+  end;
   try
-    if not ValidateIface(Iface, AName) then Exit;
-    if FLinkOnlyObjects.IndexOf(ObjPath) < 0 then
-      FLinkOnlyObjects.Add(ObjPath);
+    if not ValidateIface(Iface, AName) then
+    begin
+      if Locate(AName) <> '' then
+        LoadLinkOnlyFromSource(AName);
+      Exit;
+    end;
     { Recurse FIRST so this dep's own dependencies are linked — and recorded
       for init — ahead of it.  The recursion is what makes FLinkOnlyInitUnits
       dependency-ordered: a unit is appended only after everything it uses. }
@@ -430,6 +451,18 @@ begin
       CollectLinkOnlyObject(Iface.UsedUnits.Strings[I]);
     for I := 0 to Iface.ImplUsedUnits.Count - 1 do
       CollectLinkOnlyObject(Iface.ImplUsedUnits.Strings[I]);
+    { Staleness propagation, exactly as LoadTransitive's cached path does: if
+      a dependency of this unit had to be recompiled (by the recursion above
+      or elsewhere), this unit's cached object may hold code built against the
+      old dependency -- a constructor sequence, field offsets, vtable slots, a
+      monomorphisation -- so it is recompiled too rather than linked as is. }
+    if DependsOnSourceLoaded(Iface) and (Locate(AName) <> '') then
+    begin
+      LoadLinkOnlyFromSource(AName);
+      Exit;
+    end;
+    if FLinkOnlyObjects.IndexOf(ObjPath) < 0 then
+      FLinkOnlyObjects.Add(ObjPath);
     { An impl-only dep is LINKED but never semantically imported, so no other
       path registers its <Unit>_init.  Record it here or the object ships with
       an initialization section that is never called — the unit's globals stay
@@ -449,6 +482,27 @@ begin
       end;
   finally
     Iface.Free();
+  end;
+end;
+
+{ Loads an implementation-only dependency the normal way, from source, when
+  its cached object cannot be linked as is (see CollectLinkOnlyObject).  It is
+  reached through implementation-section uses, so it gets a FRESH interface
+  chain, as LoadTransitive's own impl-section walk does: a unit's
+  implementation may use a unit whose interface uses it back, and that
+  back-edge is not a cycle. }
+procedure TUnitLoader.LoadLinkOnlyFromSource(const AName: string);
+var
+  SavedChain: TStringList;
+begin
+  SavedChain  := FIfaceChain;
+  FIfaceChain := TStringList.Create();
+  FIfaceChain.CaseSensitive := False;
+  try
+    LoadTransitive(AName);
+  finally
+    FIfaceChain.Free();
+    FIfaceChain := SavedChain;
   end;
 end;
 
