@@ -6278,8 +6278,28 @@ begin
       NewMDecl.Params.Add(NewPar);
     end;
 
-    { Analyse the shared body with concrete types in scope }
-    AnalyseStandaloneDecl(NewMDecl);
+    { Analyse the body with concrete types in scope.  The type params are
+      bound as scoped type aliases, as InstantiateGeneric and
+      InstantiateGenericMethod do, so body references such as
+      TBox<T>.Create(), SizeOf(T) and T(X) resolve to the concrete type --
+      without them TBox<T> was instantiated over a literal T. }
+    FTable.PushScope();
+    for I := 0 to Templ.TypeParams.Count - 1 do
+      FActiveTypeParams.Add(Templ.TypeParams.Strings[I]);
+    try
+      for I := 0 to Templ.TypeParams.Count - 1 do
+      begin
+        SubstType := FindTypeOrInstantiate(Args.Strings[I]);
+        if SubstType <> nil then
+          FTable.Define(TSymbol.Create(Templ.TypeParams.Strings[I],
+            skType, SubstType));
+      end;
+      AnalyseStandaloneDecl(NewMDecl);
+    finally
+      for I := 0 to Templ.TypeParams.Count - 1 do
+        FActiveTypeParams.Delete(FActiveTypeParams.Count - 1);
+      FTable.PopScope();
+    end;
 
     { Register in proc index and global symbol table }
     RegisterProcDecl(AInstName, NewMDecl);

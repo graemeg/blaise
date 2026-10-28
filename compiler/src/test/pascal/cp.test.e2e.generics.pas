@@ -96,6 +96,11 @@ type
       statements -- one and two type parameters, var parameters, after
       `if` -- (it was "Bare reference to 'GenericProc' requires ()") }
     procedure TestRun_GenericProcedure_CalledAsStatement;
+    { The type parameter is in scope in a generic function's body: a
+      generic class constructed over T (TBox<T>.Create()) and SizeOf(T)
+      (they failed with "Unknown type '^T' for field in 'TList<T>'" and
+      "Undeclared identifier 'T'") }
+    procedure TestRun_GenericFunc_BodyUsesTypeParam;
   end;
 
 implementation
@@ -1296,6 +1301,47 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '10 11' + LE + 'x y' + LE + '21ba' + LE + '8' + LE +
     'k=9' + LE + '7 8' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_GenericFunc_BodyUsesTypeParam;
+const
+  Src = '''
+    program P;
+    uses Generics.Collections;
+    type
+      TBox<T> = class
+        Items: TList<T>;
+        constructor Create(A: TList<T>);
+      end;
+    constructor TBox<T>.Create(A: TList<T>);
+    begin
+      Items := A
+    end;
+    function Wrap<T>(A: TList<T>): TBox<T>;
+    begin
+      Result := TBox<T>.Create(A)
+    end;
+    function Single<T>(V: T): TList<T>;
+    begin
+      Result := TList<T>.Create();
+      Result.Add(V)
+    end;
+    function Size<T>(): Integer;
+    begin
+      Result := SizeOf(T)
+    end;
+    var L: TList<Integer>;
+    begin
+      L := TList<Integer>.Create();
+      L.Add(5); L.Add(6);
+      WriteLn(Wrap<Integer>(L).Items.Count);
+      WriteLn(Single<string>('s')[0]);
+      WriteLn(Size<Int64>(), ' ', Size<Byte>())
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '2' + LE + 's' + LE + '8 1' + LE, 0);
 end;
 
 initialization

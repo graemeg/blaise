@@ -401,6 +401,12 @@ type
     { BUG-034: generic functions from units compiled from source, called by
       the units themselves and by the program, in every build mode }
     procedure TestGenericFuncFromSourceUnits_EveryBuildMode;
+    { A generic free function exported from a cached unit whose signature
+      names a generic class over its type parameter (TPtrBox<T>).  The
+      importer resolved the signature like a plain routine's, instantiating
+      TPtrBox over a literal T, so the warm build failed with "Unknown type
+      '^T' for field in 'TPtrBox<T>'" while the cold build succeeded. }
+    procedure TestIncrementalRebuild_GenericFuncSigOverTypeParam_Warm;
   end;
 
 implementation
@@ -6034,6 +6040,80 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('use_bigset_native exit code', 0, Rc);
   AssertEquals('use_bigset_native stdout', 'TrueTrueTrueFalse' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_GenericFuncSigOverTypeParam_Warm;
+const
+  LibSrc =
+    '''
+    unit GenSig;
+    interface
+    type
+      TPtrBox<T> = class
+        F: ^T;
+        N: Integer;
+      end;
+    function Make<T>(): TPtrBox<T>;
+    function Same<T>(A: TPtrBox<T>): TPtrBox<T>;
+    implementation
+    function Make<T>(): TPtrBox<T>;
+    begin
+      Result := TPtrBox<T>.Create();
+      Result.N := 9
+    end;
+    function Same<T>(A: TPtrBox<T>): TPtrBox<T>;
+    begin
+      Result := A
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseGenSig;
+    uses GenSig;
+    begin
+      WriteLn(Same<Integer>(Make<Integer>()).N)
+    end.
+    ''';
+var
+  LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  LibPas   := FScratch + '/GenSig.pas';
+  ProgPas  := FScratch + '/use_gensig.pas';
+  ProgBin  := FScratch + '/use_gensig';
+  CacheDir := FScratch + '/units-gensig';
+
+  WriteFile(LibPas, LibSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('build1 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build1 run exit code', 0, Rc);
+  AssertEquals('build1 stdout', '9' + #10, Captured);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build2 run exit code', 0, Rc);
+  AssertEquals('build2 stdout', '9' + #10, Captured)
 end;
 
 initialization

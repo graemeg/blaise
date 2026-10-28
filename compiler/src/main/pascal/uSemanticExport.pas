@@ -569,6 +569,11 @@ begin
   for I := 0 to AUnit.IntfBlock.ProcDecls.Count - 1 do
   begin
     Decl := TMethodDecl(AUnit.IntfBlock.ProcDecls.Items[I]);
+    { A generic free routine travels as a template in GENROUT, and each
+      instantiation resolves its own signature.  Exported here as well, the
+      importer resolved the signature like a plain routine's and
+      instantiated a type such as TBox<T> over a literal T. }
+    if Decl.TypeParams <> nil then Continue;
     AIface.AddRoutine(BuildRoutineSig(Decl, AIface, ADeps));
   end;
 end;

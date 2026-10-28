@@ -64,6 +64,12 @@ type
       (the second call instantiated it again and reported "Ambiguous
       overload of 'Twice<Integer>'") }
     procedure TestSemantic_GenericFunc_SecondCallReusesInstance;
+    { The type parameter is bound inside the function BODY, not only in the
+      signature and local var declarations: TBox<T>.Create() instantiated
+      TBox<T> with a literal T ("Unknown type '^T' for field in
+      'TPtrBox<T>'"), and SizeOf(T) was "Undeclared identifier 'T'". }
+    procedure TestSemantic_GenericFunc_BodyConstructsGenericOfT;
+    procedure TestSemantic_GenericFunc_BodySizeOfT;
   end;
 
 implementation
@@ -525,6 +531,67 @@ begin
     'S := Twice<string>(''a''); S := Twice<string>(S) end.');
   try
     AssertEquals('one instance per type argument list', 2,
+      Prog.GenericFuncInstances.Count);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericFuncTests.TestSemantic_GenericFunc_BodyConstructsGenericOfT;
+var
+  Prog:    TProgram;
+  I:       Integer;
+  Names:   string;
+begin
+  Prog := AnalyseSrc(
+    '''
+        program P;
+        type
+          TPtrBox<T> = class
+            F: ^T;
+            N: Integer;
+          end;
+        function Make<T>(): TPtrBox<T>;
+        begin
+          Result := TPtrBox<T>.Create()
+        end;
+        var B: TPtrBox<Integer>;
+        begin
+          B := Make<Integer>()
+        end.
+        ''');
+  try
+    Names := '';
+    for I := 0 to Prog.GenericInstances.Count - 1 do
+      Names := Names + TGenericInstance(Prog.GenericInstances.Items[I]).TypeName + ' ';
+    AssertTrue('TPtrBox<Integer> is instantiated: ' + Names,
+      Pos('TPtrBox<Integer>', Names) >= 0);
+    AssertTrue('no instance over the bare type parameter: ' + Names,
+      Pos('TPtrBox<T>', Names) < 0);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TGenericFuncTests.TestSemantic_GenericFunc_BodySizeOfT;
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc(
+    '''
+        program P;
+        function Size<T>(): Integer;
+        begin
+          Result := SizeOf(T)
+        end;
+        var I: Integer;
+        begin
+          I := Size<Int64>();
+          I := Size<Byte>()
+        end.
+        ''');
+  try
+    AssertEquals('one instance per type argument', 2,
       Prog.GenericFuncInstances.Count);
   finally
     Prog.Free();
