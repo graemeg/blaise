@@ -70,6 +70,12 @@ type
       'TPtrBox<T>'"), and SizeOf(T) was "Undeclared identifier 'T'". }
     procedure TestSemantic_GenericFunc_BodyConstructsGenericOfT;
     procedure TestSemantic_GenericFunc_BodySizeOfT;
+    { T(X), a value cast to the type parameter, narrows like the concrete
+      cast on both ISAs, in a generic class method and a generic function.
+      arm64 rejected it: "call 'T' with no lowering"
+      (BUG-20261028-arm64-typeparam-cast). }
+    procedure TestCodegen_GenericClass_TypeParamCast_Narrows;
+    procedure TestCodegen_GenericFunc_TypeParamCast_Narrows;
   end;
 
 implementation
@@ -596,6 +602,46 @@ begin
   finally
     Prog.Free();
   end;
+end;
+
+procedure TGenericFuncTests.TestCodegen_GenericClass_TypeParamCast_Narrows;
+const
+  Src = '''
+        program P;
+        type
+          TConv<T> = class
+            function Conv(X: Integer): T;
+          end;
+        function TConv<T>.Conv(X: Integer): T;
+        begin
+          Result := T(X)
+        end;
+        var B: Byte;
+        begin
+          B := TConv<Byte>.Create().Conv(300)
+        end.
+        ''';
+begin
+  AssertEquals('T(X) at T = Byte narrows to a byte', '',
+    AsmMissing(Src, 'movzbq %al, %rax', 'lsr x0, x0, #56'));
+end;
+
+procedure TGenericFuncTests.TestCodegen_GenericFunc_TypeParamCast_Narrows;
+const
+  Src = '''
+        program P;
+        function Conv<T>(X: Integer): T;
+        begin
+          Result := T(X)
+        end;
+        var B: Byte;
+        begin
+          B := Conv<Byte>(300)
+        end.
+        ''';
+begin
+  AssertEquals('T(X) at T = Byte narrows to a byte', '',
+    AsmMissing(Src, 'movzbq %al, %rax', 'lsr x0, x0, #56'));
 end;
 
 initialization

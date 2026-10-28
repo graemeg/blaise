@@ -101,6 +101,11 @@ type
       (they failed with "Unknown type '^T' for field in 'TList<T>'" and
       "Undeclared identifier 'T'") }
     procedure TestRun_GenericFunc_BodyUsesTypeParam;
+    { T(X), a value cast to the type parameter, at every integer kind and an
+      enum, with boundary values, in a generic class method and a generic
+      function -- the result matches the concrete cast.  arm64 failed to
+      compile it (BUG-20261028-arm64-typeparam-cast). }
+    procedure TestRun_TypeParamCast_EveryIntegerKind;
   end;
 
 implementation
@@ -1342,6 +1347,47 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '2' + LE + 's' + LE + '8 1' + LE, 0);
+end;
+
+procedure TE2EGenericsTests.TestRun_TypeParamCast_EveryIntegerKind;
+const
+  Src = '''
+    program P;
+    type
+      TColour = (cRed, cGreen, cBlue);
+      TConv<T> = class
+        function Conv(X: Int64): T;
+      end;
+    function TConv<T>.Conv(X: Int64): T;
+    begin
+      Result := T(X)
+    end;
+    function Conv<T>(X: Int64): T;
+    begin
+      Result := T(X)
+    end;
+    begin
+      WriteLn(TConv<Byte>.Create().Conv(300), ' ',
+              TConv<Int8>.Create().Conv(200), ' ',
+              TConv<SmallInt>.Create().Conv(40000), ' ',
+              TConv<Word>.Create().Conv(70000));
+      WriteLn(TConv<Integer>.Create().Conv(4294967297), ' ',
+              TConv<UInt32>.Create().Conv(-1), ' ',
+              TConv<Int64>.Create().Conv(-5), ' ',
+              TConv<UInt64>.Create().Conv(4294967297), ' ',
+              Ord(TConv<TColour>.Create().Conv(2)));
+      WriteLn(Conv<Byte>(300), ' ', Conv<Int8>(200), ' ',
+              Conv<SmallInt>(40000), ' ', Conv<Word>(70000));
+      WriteLn(Conv<Integer>(4294967297), ' ', Conv<UInt32>(-1), ' ',
+              Conv<Int64>(-5), ' ', Conv<UInt64>(4294967297), ' ',
+              Ord(Conv<TColour>(2)))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '44 -56 -25536 4464' + LE + '1 4294967295 -5 4294967297 2' + LE +
+    '44 -56 -25536 4464' + LE + '1 4294967295 -5 4294967297 2' + LE, 0);
 end;
 
 initialization

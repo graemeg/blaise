@@ -17794,6 +17794,12 @@ begin
       SemanticError(
         Format('Type cast ''%s'' expects exactly one argument', [AExpr.Name]),
         AExpr.Line, AExpr.Col);
+    { T(X) in a generic instance body: name the cast by the concrete type,
+      as if Byte(X) had been written.  The type-param alias is a scoped
+      symbol that is gone by codegen, so a backend resolving the cast's name
+      found no type 'T' (BUG-20261028-arm64-typeparam-cast). }
+    if (Sym.TypeDesc <> nil) and (FActiveTypeParams.IndexOf(Sym.Name) >= 0) then
+      AExpr.Name := Sym.TypeDesc.Name;
     ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
     { an ordinal cast of a float is no conversion at all -- the backends
       would reinterpret its bit pattern (Integer(3.7) was -1717986918) or,
