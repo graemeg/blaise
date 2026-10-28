@@ -230,6 +230,100 @@ Open design questions:
 
 Wherever it lands, the rule must be recorded in `docs/language-rationale.adoc`.
 
+=== Loop-scoped control variables (`for var`)
+
+*What.* Delphi-style declaration of a `for` loop's control variable in the
+loop header, scoped to the loop statement:
+
+[source,pascal]
+----
+for var I := 0 to Lines.Count - 1 do
+  WriteLn(I, ': ', Lines[I].Name);
+
+for var Line in Lines do
+  WriteLn(Line.Name);
+
+for var I: Integer := 0 to 9 do ...       // explicit type, also accepted
+----
+
+The variable is visible only inside the loop body.  Reading it after the
+loop is a compile error, rather than reading a stale or undefined value.
+
+*Why.* A routine-level loop variable outlives its loop: it stays in scope
+to the end of the routine, where a later statement may read a leftover
+value by mistake.  `for..in` removes the index counter but not the
+problem, because the element variable (`for Line in Lines`) must still be
+declared in the routine's `var` section.  Loop variables are by far the
+most common case raised in favour of general block-scoped declarations.
+This form solves that case with a small, closed change: the variable's
+lifetime is exactly the statement that declares it, with no new
+declaration position in arbitrary blocks.
+
+Closures are not a full substitute here.  Inside a `ForEach` lambda,
+`Exit` returns from the lambda rather than from the routine, and `Break` /
+`Continue` cannot stop or skip iterations, so early-exit searches and hot
+loops still want a plain `for` loop.
+
+*Current state.*  `for var I := ...` is a parse error ("Expected loop
+variable").  The Phase 4 block-scoped `var` statement already gives the
+same lifetime, at the cost of an extra `begin .. end`:
+
+[source,pascal]
+----
+begin
+  var I: Integer;
+  for I := 0 to 2 do WriteLn(I);
+end;
+----
+
+*Prior art.*
+
+* *Delphi* 10.3 Rio added `for var I := ...` and `for var X in ...`, with
+  the type inferred from the bounds or the enumerator's `Current`, or
+  given explicitly (`for var I: Integer := ...`).
+* *C#* `for (var i = 0; ...)` / `foreach (var x in xs)`, *Java*
+  `for (int i = 0; ...)` / `for (var x : xs)`, and *Go*, *Rust* and *Swift*
+  `for x in xs`, all scope the loop variable to the loop.
+* *C# 5* changed `foreach` to give each iteration a fresh variable, after
+  the shared variable proved a frequent closure-capture bug.
+
+*Design questions to settle first.*
+
+. *Type inference.*  Phase 4 block vars require an explicit named type.  A
+  loop variable's type is unambiguous (the ordinal type of the bounds, or
+  the type of `Current`), so inference here is low-risk and is what makes
+  the form worth having.  Decide whether to allow inference only for loop
+  variables, and what the type of `for var I := 0 to N` is when the bounds
+  are untyped integer literals (`Integer`, or `Int` per the planned
+  context-typed literals in `type-standardisation-design.adoc`).
+. *Closure capture.*  Whether a closure created in the body captures one
+  variable shared by all iterations, or a fresh binding per iteration.  A
+  fresh binding per iteration matches the Phase 4 per-execution
+  environment rule (and C# 5's `foreach` fix) and avoids the `3, 3, 3`
+  trap.  Record the decision in `language-rationale.adoc`.
+. *Shadowing.*  Apply the Phase 4 rule: the name may not shadow an
+  existing local or parameter.
+. *Assignment in the body.*  Whether the control variable of a `to` /
+  `downto` loop may be assigned inside the body (FPC and Delphi reject
+  it).  Making it read-only is simpler to reason about.
+. *Program main body.*  Phase 4 block vars are not allowed in the program
+  main body.  Decide whether `for var` follows that rule or is allowed
+  there, since a loop in the main body is common in small programs.
+
+*Implementation sketch.*  Parser: in `ForStmt`, accept an optional `VAR`
+after `FOR`, then `IDENT [ COLON TypeName ]`, before `ASSIGN` or `IN`.
+Semantic: desugar to the existing Phase 4 machinery, i.e. a block-scoped
+var declaration wrapping the loop statement, so ARC finalisation, scoping,
+exception unwinding and per-execution capture are reused rather than
+reimplemented.  The inferred type comes from the already-resolved bound or
+`Current` type.  The `.bif` interface is unaffected because the variable
+is never exported.  `uDebugOPDF.pas` needs the loop scope recorded so a
+debugger shows the variable only inside the loop.
+
+*Effort.*  Small to moderate.  The parser change is contained.  Most of
+the work is type inference and the capture decision, both of which reuse
+Phase 4 paths.
+
 
 == Language — Features Required to Complete the punit Port
 
