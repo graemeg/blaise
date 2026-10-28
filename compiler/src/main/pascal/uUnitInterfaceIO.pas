@@ -54,7 +54,11 @@ uses
 
 const
   IFACE_MAGIC   = 'BLAISE-IFACE';
-  IFACE_VERSION = 31; { v31: unary minus is its own expression node, 'neg'
+  IFACE_VERSION = 32; { v32: a method sig carries IsOperator and the
+                          OperatorKind ordinal after its visibility, so a
+                          cached unit's `class operator`s are found again
+                          (BUG-20261028-operators-lost-on-warm-build).
+                        v31: unary minus is its own expression node, 'neg'
                           (TNegExpr), where it was the binary 0 - X, so a
                           negated default value or inline/generic body
                           written by v30 decodes differently
@@ -653,6 +657,9 @@ begin
     EncodeBool (AR.IsOverload) +
     { member visibility ordinal }
     EncodeLpstr(IntToStr(Ord(AR.Visibility))) +
+    { `class operator` flag and operator-kind ordinal (v32) }
+    EncodeBool (AR.IsOperator) +
+    EncodeLpstr(IntToStr(Ord(AR.OperatorKind))) +
     { generic-method type params (Phase 10) — nil means not generic }
     EncodeBool (AR.TypeParams <> nil);
   if AR.TypeParams <> nil then
@@ -2522,6 +2529,9 @@ begin
   Result.IsConstructor := DecodeBool(AText, APos);
   Result.IsOverload  := DecodeBool(AText, APos);
   Result.Visibility  := TMemberVisibility(StrToInt(ReadLpstrAt(AText, APos)));
+  { v32: operator flag and kind follow the visibility. }
+  Result.IsOperator  := DecodeBool(AText, APos);
+  Result.OperatorKind := TOperatorKind(StrToInt(ReadLpstrAt(AText, APos)));
   { Generic-method type params (Phase 10). }
   if DecodeBool(AText, APos) then
   begin
@@ -2792,6 +2802,8 @@ begin
     MD.IsStatic       := Sig.IsStatic;
     MD.IsConstructor  := Sig.IsConstructor;
     MD.IsOverload     := Sig.IsOverload;
+    MD.IsOperator     := Sig.IsOperator;
+    MD.OperatorKind   := Sig.OperatorKind;
     { Visibility likewise — the sig has carried it since v5, but dropping it
       here left the rebuilt decl at its zero value (mvPublic), so a `private`
       method on an imported GENERIC was callable from any unit while the same

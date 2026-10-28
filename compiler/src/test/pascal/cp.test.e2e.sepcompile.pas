@@ -407,6 +407,12 @@ type
       TPtrBox over a literal T, so the warm build failed with "Unknown type
       '^T' for field in 'TPtrBox<T>'" while the cold build succeeded. }
     procedure TestIncrementalRebuild_GenericFuncSigOverTypeParam_Warm;
+    { A unit's `class operator`s survive the cached interface: binary,
+      mixed-type, comparison and Negative operators on a record, and an
+      operator on a class.  The warm build lost them ("Left operand of '*'
+      must be numeric") because the operator flags were not serialised
+      (BUG-20261028-operators-lost-on-warm-build). }
+    procedure TestIncrementalRebuild_ClassOperators_Warm;
   end;
 
 implementation
@@ -6114,6 +6120,123 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('build2 run exit code', 0, Rc);
   AssertEquals('build2 stdout', '9' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestIncrementalRebuild_ClassOperators_Warm;
+const
+  LibSrc =
+    '''
+    unit OpVec;
+    interface
+    type
+      TVec = record
+        X: Integer;
+        class operator Add(const A, B: TVec): TVec;
+        class operator Multiply(const A: TVec; B: Integer): TVec;
+        class operator Multiply(A: Integer; const B: TVec): TVec;
+        class operator Negative(const A: TVec): TVec;
+        class operator Equal(const A, B: TVec): Boolean;
+        class operator LessThan(const A, B: TVec): Boolean;
+      end;
+      TBag = class
+        N: Integer;
+        constructor Create(AN: Integer);
+        class operator Add(const A, B: TBag): TBag;
+      end;
+    function Vec(AX: Integer): TVec;
+    implementation
+    function Vec(AX: Integer): TVec;
+    begin
+      Result.X := AX
+    end;
+    class operator TVec.Add(const A, B: TVec): TVec;
+    begin
+      Result.X := A.X + B.X
+    end;
+    class operator TVec.Multiply(const A: TVec; B: Integer): TVec;
+    begin
+      Result.X := A.X * B
+    end;
+    class operator TVec.Multiply(A: Integer; const B: TVec): TVec;
+    begin
+      Result.X := A * B.X
+    end;
+    class operator TVec.Negative(const A: TVec): TVec;
+    begin
+      Result.X := -A.X
+    end;
+    class operator TVec.Equal(const A, B: TVec): Boolean;
+    begin
+      Result := A.X = B.X
+    end;
+    class operator TVec.LessThan(const A, B: TVec): Boolean;
+    begin
+      Result := A.X < B.X
+    end;
+    constructor TBag.Create(AN: Integer);
+    begin
+      N := AN
+    end;
+    class operator TBag.Add(const A, B: TBag): TBag;
+    begin
+      Result := TBag.Create(A.N + B.N)
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseOpVec;
+    uses OpVec;
+    var
+      A, B: TVec;
+    begin
+      A := Vec(2);
+      B := Vec(5);
+      WriteLn((A + B * 3).X, ' ', (2 * A).X, ' ', (-A).X);
+      WriteLn(A = Vec(2), ' ', A < B, ' ', B < A);
+      WriteLn((TBag.Create(3) + TBag.Create(4)).N)
+    end.
+    ''';
+  Expected = '17 4 -2' + #10 + 'True True False' + #10 + '7' + #10;
+var
+  LibPas, ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  LibPas   := FScratch + '/OpVec.pas';
+  ProgPas  := FScratch + '/use_opvec.pas';
+  ProgBin  := FScratch + '/use_opvec';
+  CacheDir := FScratch + '/units-opvec';
+
+  WriteFile(LibPas, LibSrc);
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('build1 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build1 run exit code', 0, Rc);
+  AssertEquals('build1 stdout', Expected, Captured);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir,
+                   '--unit-path', FScratch], Captured);
+  AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build2 run exit code', 0, Rc);
+  AssertEquals('build2 stdout', Expected, Captured)
 end;
 
 initialization

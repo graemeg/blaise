@@ -1496,6 +1496,10 @@ begin
     an imported overload as overloadable — otherwise an overload set split
     across an imported class and its ancestor is truncated to the derived level. }
   Result.IsOverload := ASig.IsOverload;
+  { Carry operator-ness: operator resolution only considers methods flagged
+    IsOperator with the matching OperatorKind. }
+  Result.IsOperator   := ASig.IsOperator;
+  Result.OperatorKind := ASig.OperatorKind;
   { Carry visibility so cross-unit private/protected method access is enforced. }
   Result.Visibility := ASig.Visibility;
   for J := 0 to ASig.Params.Count - 1 do

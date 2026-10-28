@@ -422,6 +422,9 @@ begin
     are split across an imported class and its ancestor is not truncated by
     ResolveMethodOverload's hiding walk (which stops at a non-overload). }
   Result.IsOverload   := ASrc.IsOverload;
+  { Carry operator-ness: operator resolution filters on it. }
+  Result.IsOperator   := ASrc.IsOperator;
+  Result.OperatorKind := ASrc.OperatorKind;
   { Generic-method type params survive the .bif so the importer clones a
     real template (Phase 10: TList<T>.Map<R>). }
   if ASrc.TypeParams <> nil then

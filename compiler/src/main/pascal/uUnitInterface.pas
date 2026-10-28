@@ -104,6 +104,12 @@ type
                                    across an imported class and its ancestor is
                                    truncated to the more-derived level. }
     Visibility:   TMemberVisibility; { member access scope; default mvPublic }
+    IsOperator:   Boolean;       { declared `class operator`.  Operator
+                                   resolution only considers methods with this
+                                   flag, so it must survive the .bif or a
+                                   cached unit's operators are never found
+                                   (BUG-20261028-operators-lost-on-warm-build). }
+    OperatorKind: TOperatorKind; { okNone unless IsOperator }
     TypeParams:   TStringList;   { owned; nil = not a generic method.  A
                                    generic METHOD on a (possibly generic)
                                    class keeps its own type-parameter list

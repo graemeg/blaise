@@ -344,6 +344,8 @@ TRoutineSig.IsConstructor  serialise
 TRoutineSig.IsStatic  serialise
 TRoutineSig.IsOverload  serialise
 TRoutineSig.Visibility  serialise
+TRoutineSig.IsOperator  serialise
+TRoutineSig.OperatorKind  serialise
 TRoutineSig.TypeParams  serialise
 TRoutineSig.TypeParamConstraints  serialise
 
