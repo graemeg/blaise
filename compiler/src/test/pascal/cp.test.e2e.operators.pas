@@ -51,6 +51,11 @@ type
     procedure TestRun_Operator_BuiltinsUnaffected;
     { managed-field operator called repeatedly in a loop }
     procedure TestRun_Operator_ManagedField_InLoop;
+    { Same-named members: two Multiply operators told apart by signature
+      with no `overload`, and an Add operator beside an Add method of the
+      same record, each reaching its own body.  Both were "Duplicate method
+      ... (missing 'overload' directive?)". }
+    procedure TestRun_Operator_SameNamedMembers;
   end;
 
 implementation
@@ -460,6 +465,54 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'True False' + LE + '1' + LE, 0);
+end;
+
+procedure TE2EOperatorTests.TestRun_Operator_SameNamedMembers;
+const
+  Src = '''
+    program P;
+    type
+      TNum = record
+        V: Integer;
+        S: string;
+        function Add(const B: TNum): TNum;
+        class operator Add(const A, B: TNum): TNum;
+        class operator Multiply(const A: TNum; B: Integer): TNum;
+        class operator Multiply(A: Integer; const B: TNum): TNum;
+      end;
+    function TNum.Add(const B: TNum): TNum;
+    begin
+      Result.V := V + B.V;
+      Result.S := 'method'
+    end;
+    class operator TNum.Add(const A, B: TNum): TNum;
+    begin
+      Result.V := A.V + B.V;
+      Result.S := 'operator'
+    end;
+    class operator TNum.Multiply(const A: TNum; B: Integer): TNum;
+    begin
+      Result.V := A.V * B;
+      Result.S := 'num*int'
+    end;
+    class operator TNum.Multiply(A: Integer; const B: TNum): TNum;
+    begin
+      Result.V := A * B.V * 10;
+      Result.S := 'int*num'
+    end;
+    var X, Y, Z: TNum;
+    begin
+      X.V := 2; Y.V := 3;
+      Z := X + Y;     WriteLn(Z.V, ' ', Z.S);
+      Z := X.Add(Y);  WriteLn(Z.V, ' ', Z.S);
+      Z := X * 4;     WriteLn(Z.V, ' ', Z.S);
+      Z := 4 * X;     WriteLn(Z.V, ' ', Z.S)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '5 operator' + LE + '5 method' + LE + '8 num*int' + LE +
+    '80 int*num' + LE, 0);
 end;
 
 initialization

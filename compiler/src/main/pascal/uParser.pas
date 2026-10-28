@@ -3070,6 +3070,11 @@ begin
       Result.IsOperator := True;
       Result.IsStatic   := True;   { operators receive no Self }
       IsFunction        := True;   { a return type is mandatory }
+      { Operators sharing a name (Multiply for TVec * Integer and
+        Integer * TVec) are told apart by signature, as the design
+        specifies, so every operator is implicitly `overload`: no directive
+        is needed, and each gets a signature-mangled symbol. }
+      Result.IsOverload := True;
     end
     else if IsFunction then
       Expect(tkFunction)

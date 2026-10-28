@@ -70,6 +70,13 @@ type
     procedure TestSem_NoOperator_StillErrors;
     procedure TestSem_BuiltinSet_Unaffected;
     procedure TestSem_ClassIdentityEqual_Preserved;
+    { Same-named members, as the design specifies: two operators sharing a
+      name are told apart by signature with no `overload` directive, and an
+      operator may share its name with an ordinary method of the type.  Both
+      were "Duplicate method ... (missing 'overload' directive?)". }
+    procedure TestSem_SameNamedOperators_NoDirective;
+    procedure TestSem_OperatorBesideSameNamedMethod;
+    procedure TestSem_SameSignatureOperators_StillRejected;
     { --- Phase 2: IR --- }
   end;
 
@@ -862,6 +869,89 @@ begin
     Pos('''TBag<TQ>.HasBoth'' is not available', Msg) >= 0);
   AssertTrue('the reason names the operator: ' + Msg,
     Pos('class operator Equal', Msg) >= 0);
+end;
+
+procedure TOperatorTests.TestSem_SameNamedOperators_NoDirective;
+const
+  Src = '''
+      program P;
+      type
+        TVec = record
+          X: Integer;
+          class operator Multiply(const A: TVec; B: Integer): TVec;
+          class operator Multiply(A: Integer; const B: TVec): TVec;
+        end;
+      class operator TVec.Multiply(const A: TVec; B: Integer): TVec;
+      begin
+        Result.X := A.X * B
+      end;
+      class operator TVec.Multiply(A: Integer; const B: TVec): TVec;
+      begin
+        Result.X := A * B.X
+      end;
+      var V: TVec;
+      begin
+        V := V * 2;
+        V := 3 * V
+      end.
+      ''';
+var
+  Prog: TProgram;
+begin
+  Prog := Self.AnalyseSrc(Src);
+  Prog.Free();
+end;
+
+procedure TOperatorTests.TestSem_OperatorBesideSameNamedMethod;
+const
+  Src = '''
+      program P;
+      type
+        TNum = record
+          V: Integer;
+          function Add(const B: TNum): TNum;
+          class operator Add(const A, B: TNum): TNum;
+        end;
+      function TNum.Add(const B: TNum): TNum;
+      begin
+        Result.V := V + B.V
+      end;
+      class operator TNum.Add(const A, B: TNum): TNum;
+      begin
+        Result := A.Add(B)
+      end;
+      var X, Y, Z: TNum;
+      begin
+        Z := X + Y;
+        Z := X.Add(Y)
+      end.
+      ''';
+var
+  Prog: TProgram;
+begin
+  Prog := Self.AnalyseSrc(Src);
+  Prog.Free();
+end;
+
+procedure TOperatorTests.TestSem_SameSignatureOperators_StillRejected;
+const
+  Src = '''
+      program P;
+      type
+        TVec = record
+          X: Integer;
+          class operator Add(const A, B: TVec): TVec;
+          class operator Add(const A, B: TVec): TVec;
+        end;
+      class operator TVec.Add(const A, B: TVec): TVec;
+      begin
+        Result.X := A.X + B.X
+      end;
+      begin
+      end.
+      ''';
+begin
+  Self.AnalyseExpectError(Src);
 end;
 
 initialization

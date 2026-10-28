@@ -3803,6 +3803,10 @@ begin
         if (CD.OwningUnit <> '') and (FCurrentUnitName <> '') and
            not SameText(CD.OwningUnit, FCurrentUnitName) then
           Continue;
+        { an operator body implements an operator, a method body a method --
+          they may share a name (class operator Add beside method Add) }
+        if CD.IsOperator <> Decl.IsOperator then
+          Continue;
         if CD.IsOverload then
         begin
           if MangleParamSig(CD) = ImplSig then
@@ -3827,6 +3831,8 @@ begin
         for K := 0 to Grp.Count - 1 do
         begin
           CD := TMethodDecl(Grp.Items[K]);
+          if CD.IsOperator <> Decl.IsOperator then
+            Continue;
           if CD.IsOverload then
           begin
             if MangleParamSig(CD) = ImplSig then
@@ -9631,6 +9637,13 @@ begin
               types coexist under cross-unit last-wins. }
             if not SameText(TMethodDecl(Grp.Items[K]).OwningUnit,
                             MDecl.OwningUnit) then
+              Continue;
+            { An operator and a same-named ordinary method (TDecimal's
+              `class operator Add` beside its `Add` method) are different
+              kinds of member: an operator is reached only through operator
+              resolution and has its own signature-mangled symbol, so the
+              method needs no `overload` directive. }
+            if MDecl.IsOperator <> TMethodDecl(Grp.Items[K]).IsOperator then
               Continue;
             if (not MDecl.IsOverload) or
                (not TMethodDecl(Grp.Items[K]).IsOverload) then

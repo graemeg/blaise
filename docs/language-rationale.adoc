@@ -7799,6 +7799,16 @@ identifiers, recognised only after `class operator`; a field or method named
 `Operator` or `Add` is unaffected.  `Implicit` and `Explicit` conversion
 operators are deliberately *not* accepted.
 
+Operators that share a name are told apart by their full signature, with no
+`overload` directive: `Multiply(const A: TVec; B: Integer)` and
+`Multiply(A: Integer; const B: TVec)` may both be declared, and each
+out-of-line body is matched to its declaration by signature.  An operator may
+also share its name with an ordinary method of the same type (`TDecimal`'s
+`class operator Add` beside its `Add` method).  They are different kinds of
+member: an operator is reached only through operator resolution and is
+emitted under a signature-mangled symbol, so neither needs `overload`, and an
+operator body never implements the method or the reverse.
+
 An operator declaration is a *static method* declaration: it receives no
 implicit `Self` and takes its operands as explicit parameters.
 
