@@ -63,6 +63,13 @@ type
     { --- Type errors --- }
     procedure TestSemantic_FromStr_WrongArgType_Error;
     procedure TestSemantic_AssignMoneyToInt_Error;
+
+    { --- Operators --- }
+    procedure TestSemantic_Operators_OK;
+    { Only meaningful combinations exist: no money / anything, and no
+      money + decimal (an amount plus a bare number has no currency). }
+    procedure TestSemantic_DivideOperator_Error;
+    procedure TestSemantic_MoneyPlusDecimal_Error;
   end;
 
 implementation
@@ -318,6 +325,36 @@ begin
   AnalyseExpectError(
     'program P; uses Numerics.Money; var M: TMoney; I: Integer; ' +
     'begin M := MoneyFromInt(1, ''USD''); I := M end.');
+end;
+
+procedure TMoneyIRTests.TestSemantic_Operators_OK;
+begin
+  SemanticOK(
+    'program P; uses Numerics.Money, Numerics.Decimal; ' +
+    'var A, B, C: TMoney; R: TDecimal; Q: Boolean; ' +
+    'begin A := MoneyFromInt(1, ''USD''); B := MoneyFromInt(2, ''USD''); ' +
+    'R := DecFromInt(2); ' +
+    'C := A + B; C := A - B; C := -A; C := A * R; C := R * A; ' +
+    'C := A * 3; C := 3 * A; ' +
+    'Q := A = B; Q := A <> B; Q := A < B; Q := A > B; Q := A <= B; ' +
+    'Q := A >= B end.');
+end;
+
+procedure TMoneyIRTests.TestSemantic_DivideOperator_Error;
+begin
+  AnalyseExpectError(
+    'program P; uses Numerics.Money; var A, B, C: TMoney; ' +
+    'begin A := MoneyFromInt(1, ''USD''); B := MoneyFromInt(2, ''USD''); ' +
+    'C := A / B end.');
+end;
+
+procedure TMoneyIRTests.TestSemantic_MoneyPlusDecimal_Error;
+begin
+  AnalyseExpectError(
+    'program P; uses Numerics.Money, Numerics.Decimal; ' +
+    'var A, C: TMoney; R: TDecimal; ' +
+    'begin A := MoneyFromInt(1, ''USD''); R := DecFromInt(2); ' +
+    'C := A + R end.');
 end;
 
 initialization

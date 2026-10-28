@@ -38,8 +38,9 @@ if A < B then ...
 if A = B then ...
 ----
 
-`docs/future-improvements.adoc` (§ "Operator overloading for `TDecimal`")
-records that operator overloading "is a compiler feature in its own right and
+`docs/future-improvements.adoc` (§ "Operator overloading for `TDecimal`",
+since removed: `TDecimal` and `TMoney` now declare their operators) recorded
+that operator overloading "is a compiler feature in its own right and
 warrants a separate design document". *This is that document.* It specifies a
 build-ready design: a fresh engineer should be able to read it and implement
 the feature.

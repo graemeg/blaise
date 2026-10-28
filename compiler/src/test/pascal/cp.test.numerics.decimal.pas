@@ -74,6 +74,12 @@ type
     { --- Type errors --- }
     procedure TestSemantic_FromInt_WrongArgType_Error;
     procedure TestSemantic_AssignDecimalToInt_Error;
+
+    { --- Operators --- }
+    procedure TestSemantic_Operators_OK;
+    { No `/`: a division needs an explicit scale and rounding mode, so it
+      stays the Divide method. }
+    procedure TestSemantic_DivideOperator_Error;
   end;
 
 implementation
@@ -367,6 +373,23 @@ begin
   AnalyseExpectError(
     'program P; uses Numerics.Decimal; var A: TDecimal; N: Integer; ' +
     'begin A := DecFromInt(5); N := A end.');
+end;
+
+procedure TDecimalIRTests.TestSemantic_Operators_OK;
+begin
+  SemanticOK(
+    'program P; uses Numerics.Decimal; var A, B, C: TDecimal; Q: Boolean; ' +
+    'begin A := DecFromInt(1); B := DecFromInt(2); ' +
+    'C := A + B; C := A - B; C := A * B; C := A * 3; C := 3 * A; C := -A; ' +
+    'Q := A = B; Q := A <> B; Q := A < B; Q := A > B; Q := A <= B; ' +
+    'Q := A >= B end.');
+end;
+
+procedure TDecimalIRTests.TestSemantic_DivideOperator_Error;
+begin
+  AnalyseExpectError(
+    'program P; uses Numerics.Decimal; var A, B, C: TDecimal; ' +
+    'begin A := DecFromInt(1); B := DecFromInt(2); C := A / B end.');
 end;
 
 initialization

@@ -47,7 +47,9 @@ unit Numerics.Money;
 
   Construction uses free functions (MoneyFromStr / MoneyFromDecimal /
   MoneyFromInt / MoneyZero), following the Numerics.Decimal and DateUtils
-  house style.  Queries and arithmetic are record methods. }
+  house style.  Queries and arithmetic are record methods; the arithmetic
+  and comparisons are also available as operators (Total := Price * 2 + Fee),
+  which delegate to those methods. }
 
 interface
 
@@ -154,6 +156,31 @@ type
     { Amount followed by a space and the currency code (e.g. '19.99 USD').
       @returns the formatted monetary string. }
     function ToString: string;
+
+    { Operators.  Each delegates to the method of the same meaning, with
+      banker's rounding where the method takes a rounding mode; use the
+      methods for any other mode or strategy.
+        + -              same currency, else EMoneyMismatch (as Add/Subtract)
+        unary -          Negate
+        *                by a TDecimal factor or an Integer quantity, either
+                         order (as Multiply / MultiplyInt)
+        < > <= >=        same currency, else EMoneyMismatch (as Compare)
+        = <>             currency AND amount; never raise (as Equals)
+      There is no `/`: splitting an amount needs an explicit rounding policy,
+      and adding a bare number to an amount has no currency. }
+    class operator Add(const A, B: TMoney): TMoney;
+    class operator Subtract(const A, B: TMoney): TMoney;
+    class operator Negative(const A: TMoney): TMoney;
+    class operator Multiply(const A: TMoney; const B: TDecimal): TMoney;
+    class operator Multiply(const A: TDecimal; const B: TMoney): TMoney;
+    class operator Multiply(const A: TMoney; B: Integer): TMoney;
+    class operator Multiply(A: Integer; const B: TMoney): TMoney;
+    class operator Equal(const A, B: TMoney): Boolean;
+    class operator NotEqual(const A, B: TMoney): Boolean;
+    class operator LessThan(const A, B: TMoney): Boolean;
+    class operator GreaterThan(const A, B: TMoney): Boolean;
+    class operator LessThanOrEqual(const A, B: TMoney): Boolean;
+    class operator GreaterThanOrEqual(const A, B: TMoney): Boolean;
   end;
 
 { ------------------------------------------------------------------ }
@@ -434,6 +461,75 @@ end;
 function TMoney.ToString: string;
 begin
   Result := Self.FAmount.ToString() + ' ' + Self.FCurrency;
+end;
+
+{ ------------------------------------------------------------------ }
+{ Operators                                                            }
+{ ------------------------------------------------------------------ }
+
+class operator TMoney.Add(const A, B: TMoney): TMoney;
+begin
+  Result := A.Add(B);
+end;
+
+class operator TMoney.Subtract(const A, B: TMoney): TMoney;
+begin
+  Result := A.Subtract(B);
+end;
+
+class operator TMoney.Negative(const A: TMoney): TMoney;
+begin
+  Result := A.Negate();
+end;
+
+class operator TMoney.Multiply(const A: TMoney; const B: TDecimal): TMoney;
+begin
+  Result := A.Multiply(B);
+end;
+
+class operator TMoney.Multiply(const A: TDecimal; const B: TMoney): TMoney;
+begin
+  Result := B.Multiply(A);
+end;
+
+class operator TMoney.Multiply(const A: TMoney; B: Integer): TMoney;
+begin
+  Result := A.MultiplyInt(B);
+end;
+
+class operator TMoney.Multiply(A: Integer; const B: TMoney): TMoney;
+begin
+  Result := B.MultiplyInt(A);
+end;
+
+class operator TMoney.Equal(const A, B: TMoney): Boolean;
+begin
+  Result := A.Equals(B);
+end;
+
+class operator TMoney.NotEqual(const A, B: TMoney): Boolean;
+begin
+  Result := not A.Equals(B);
+end;
+
+class operator TMoney.LessThan(const A, B: TMoney): Boolean;
+begin
+  Result := A.Compare(B) < 0;
+end;
+
+class operator TMoney.GreaterThan(const A, B: TMoney): Boolean;
+begin
+  Result := A.Compare(B) > 0;
+end;
+
+class operator TMoney.LessThanOrEqual(const A, B: TMoney): Boolean;
+begin
+  Result := A.Compare(B) <= 0;
+end;
+
+class operator TMoney.GreaterThanOrEqual(const A, B: TMoney): Boolean;
+begin
+  Result := A.Compare(B) >= 0;
 end;
 
 end.

@@ -430,17 +430,10 @@ The exact-decimal type (`TDecimal` in `Numerics.Decimal`) and the currency-aware
 wrapper (`TMoney` in `Numerics.Money`) are both implemented; the design
 decisions are recorded in `docs/language-rationale.adoc` ("Decimal Arithmetic —
 One `TDecimal`, No `Currency` Primitive" and "Currency Amounts — `TMoney` Wraps
-`TDecimal`, Currency Is a String Tag").  The following numeric items remain
-genuinely future work.
-
-=== Operator overloading for `TDecimal`
-
-`TDecimal` currently exposes arithmetic as named methods (`A.Add(B)`,
-`A.Multiply(B)`, `A.Divide(B, Scale, Mode)`) because operator overloading is not
-yet a language feature.  Once it lands, `A + B` / `A * B` / comparisons can layer
-on additively (division stays a named method — it requires an explicit scale and
-rounding mode).  Operator overloading is a compiler feature in its own right and
-warrants a separate design document.
+`TDecimal`, Currency Is a String Tag").  Both types provide arithmetic and
+comparison operators (`class operator`) that delegate to their named methods;
+division stays a named method, since it needs an explicit scale and rounding
+mode.  The following numeric items remain genuinely future work.
 
 === Migration-analyser rule for legacy numeric types
 

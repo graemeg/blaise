@@ -79,6 +79,12 @@ type
 
     { --- A small realistic flow --- }
     procedure TestRun_Invoice_LineItemsAndTax;
+
+    { --- Operators --- }
+    procedure TestRun_Operators_Arithmetic;
+    procedure TestRun_Operators_Comparisons;
+    procedure TestRun_Operators_MismatchRaises;
+    procedure TestRun_Operators_Invoice;
   end;
 
 implementation
@@ -657,6 +663,120 @@ begin
       Subtotal := LineA.Add(MoneyFromStr('4.50', 'USD'));
       WriteLn('subtotal ', Subtotal.ToString());
       Total := Subtotal.Multiply(DecFromStr('1.08'));
+      WriteLn('total ', Total.ToString())
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('invoice',
+    'subtotal 24.48 USD' + #10 + 'total 26.44 USD', Trim(Output));
+end;
+
+procedure TE2EMoneyTests.TestRun_Operators_Arithmetic;
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { 2.50 x 4 = 10.00; 10% off = 9.00; 3 x 2.50 + 0.10 x 2.50 = 7.75;
+    accumulating 0.25 three times = 0.75. }
+  AssertTrue('compile+run', CompileAndRunWithRTL(
+    '''
+    program P; uses Numerics.Money, Numerics.Decimal;
+    var Price, Gross, Net, Q, Total: TMoney; R: TDecimal; I: Integer;
+    begin
+      Price := MoneyFromStr('2.50', 'GBP');
+      R := DecFromStr('0.10');
+      Gross := Price * 4;
+      Net := Gross - Gross * R;
+      WriteLn(Gross.ToString(), ' ', Net.ToString());
+      Q := 3 * Price + R * Price;
+      WriteLn(Q.ToString(), ' ', (-Q).ToString());
+      Total := MoneyZero('GBP');
+      for I := 1 to 3 do
+        Total := Total + MoneyFromStr('0.25', 'GBP');
+      Total := Total - Price * R;
+      WriteLn(Total.ToString())
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('arithmetic',
+    '10.00 GBP 9.00 GBP' + #10 + '7.75 GBP -7.75 GBP' + #10 + '0.50 GBP',
+    Trim(Output));
+end;
+
+procedure TE2EMoneyTests.TestRun_Operators_Comparisons;
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { = and <> compare currency and amount and never raise; the ordering
+    operators compare amounts in one currency. }
+  AssertTrue('compile+run', CompileAndRunWithRTL(
+    '''
+    program P; uses Numerics.Money;
+    var A, B, U: TMoney;
+    begin
+      A := MoneyFromStr('1.00', 'USD');
+      B := MoneyFromStr('2.50', 'USD');
+      U := MoneyFromStr('1.00', 'EUR');
+      WriteLn(A = MoneyFromStr('1', 'USD'), ' ', A <> B, ' ', A < B, ' ',
+              A > B, ' ', A <= A, ' ', B >= A);
+      WriteLn(A = U, ' ', A <> U)
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('comparisons',
+    'TRUE TRUE TRUE FALSE TRUE TRUE' + #10 + 'FALSE TRUE',
+    UpperCase(Trim(Output)));
+end;
+
+procedure TE2EMoneyTests.TestRun_Operators_MismatchRaises;
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compile+run', CompileAndRunWithRTL(
+    '''
+    program P; uses Numerics.Money;
+    var A, B, C: TMoney; Q: Boolean;
+    begin
+      A := MoneyFromStr('1.00', 'USD');
+      B := MoneyFromStr('100', 'JPY');
+      try
+        C := A + B;
+        WriteLn('no-raise')
+      except
+        on E: EMoneyMismatch do WriteLn('add mismatch')
+      end;
+      try
+        C := A - B;
+        WriteLn('no-raise')
+      except
+        on E: EMoneyMismatch do WriteLn('subtract mismatch')
+      end;
+      try
+        Q := A < B;
+        WriteLn('no-raise')
+      except
+        on E: EMoneyMismatch do WriteLn('compare mismatch')
+      end
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('raises',
+    'add mismatch' + #10 + 'subtract mismatch' + #10 + 'compare mismatch',
+    Trim(Output));
+end;
+
+procedure TE2EMoneyTests.TestRun_Operators_Invoice;
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { TestRun_Invoice_LineItemsAndTax with operators: same results. }
+  AssertTrue('compile+run', CompileAndRunWithRTL(
+    '''
+    program P; uses Numerics.Money, Numerics.Decimal;
+    var Subtotal, Total: TMoney;
+    begin
+      Subtotal := MoneyFromStr('9.99', 'USD') * 2 + MoneyFromStr('4.50', 'USD');
+      WriteLn('subtotal ', Subtotal.ToString());
+      Total := Subtotal * DecFromStr('1.08');
       WriteLn('total ', Total.ToString())
     end.
     ''', Output, RCode));

@@ -95,6 +95,10 @@ type
     procedure TestRun_StripTrailingZeros_Fraction;
     procedure TestRun_StripTrailingZeros_KeepsIntegerZeros;
     procedure TestRun_ToInt64_TruncatesTowardZero;
+
+    { --- Operators (dual-backend) --- }
+    procedure TestRun_Operators_Arithmetic;
+    procedure TestRun_Operators_Comparisons;
   end;
 
 implementation
@@ -903,6 +907,58 @@ begin
     ''', Output, RCode));
   AssertEquals('exit code', 0, RCode);
   AssertEquals('trunc toward zero', '42 -7', Trim(Output));
+end;
+
+procedure TE2EDecimalTests.TestRun_Operators_Arithmetic;
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { Each operator matches the method it delegates to.  The self-assigning
+    and accumulating forms (S := S + A) are the common use. }
+  AssertTrue('compile+run', CompileAndRunWithRTL(
+    '''
+    program P; uses Numerics.Decimal;
+    var A, B, S: TDecimal; I: Integer;
+    begin
+      A := DecFromStr('1.25');
+      B := DecFromStr('0.5');
+      WriteLn((A + B).ToString(), ' ', (A - B).ToString(), ' ',
+              (A * B).ToString(), ' ', (-A).ToString());
+      WriteLn((A * 3).ToString(), ' ', (3 * A).ToString(), ' ',
+              (A + B * DecFromInt(2)).ToString());
+      S := DecFromInt(0);
+      for I := 1 to 4 do
+        S := S + A;
+      S := S * S;
+      WriteLn(S.ToString())
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('arithmetic',
+    '1.75 0.75 0.625 -1.25' + #10 + '3.75 3.75 2.25' + #10 + '25.0000',
+    Trim(Output));
+end;
+
+procedure TE2EDecimalTests.TestRun_Operators_Comparisons;
+var Output: string; RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { Comparison is by value: 2.0 and 2.00 are equal. }
+  AssertTrue('compile+run', CompileAndRunWithRTL(
+    '''
+    program P; uses Numerics.Decimal;
+    var A, B, C: TDecimal;
+    begin
+      A := DecFromStr('2.0');
+      B := DecFromStr('2.00');
+      C := DecFromStr('-3');
+      WriteLn(A = B, ' ', A <> B, ' ', C < A, ' ', C > A, ' ',
+              A <= B, ' ', A >= C, ' ', A < B)
+    end.
+    ''', Output, RCode));
+  AssertEquals('exit code', 0, RCode);
+  AssertEquals('comparisons', 'TRUE FALSE TRUE FALSE TRUE TRUE FALSE',
+    UpperCase(Trim(Output)));
 end;
 
 initialization

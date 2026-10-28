@@ -292,6 +292,24 @@ type
       @returns the integer part.
       @raises EDecimalOverflow if the integer part does not fit in Int64. }
     function ToInt64: Int64;
+
+    { Operators.  Each delegates to the method of the same meaning, so the
+      two forms always agree: A + B is A.Add(B), A < B is A.Compare(B) < 0.
+      Comparison is by value (2.0 = 2.00), as Compare and Equals are.
+      There is deliberately no `/`: a division needs an explicit target scale
+      and rounding mode, so it stays the Divide method. }
+    class operator Add(const A, B: TDecimal): TDecimal;
+    class operator Subtract(const A, B: TDecimal): TDecimal;
+    class operator Multiply(const A, B: TDecimal): TDecimal;
+    class operator Multiply(const A: TDecimal; B: Integer): TDecimal;
+    class operator Multiply(A: Integer; const B: TDecimal): TDecimal;
+    class operator Negative(const A: TDecimal): TDecimal;
+    class operator Equal(const A, B: TDecimal): Boolean;
+    class operator NotEqual(const A, B: TDecimal): Boolean;
+    class operator LessThan(const A, B: TDecimal): Boolean;
+    class operator GreaterThan(const A, B: TDecimal): Boolean;
+    class operator LessThanOrEqual(const A, B: TDecimal): Boolean;
+    class operator GreaterThanOrEqual(const A, B: TDecimal): Boolean;
   end;
 
 { ------------------------------------------------------------------ }
@@ -1639,6 +1657,70 @@ begin
 
   { MakeFromMagDigits picks compact vs inflated and tolerates leading zeros. }
   Result := MakeFromMagDigits(MagStr, Neg, Scale)
+end;
+
+{ ------------------------------------------------------------------ }
+{ Operators                                                            }
+{ ------------------------------------------------------------------ }
+
+class operator TDecimal.Add(const A, B: TDecimal): TDecimal;
+begin
+  Result := A.Add(B);
+end;
+
+class operator TDecimal.Subtract(const A, B: TDecimal): TDecimal;
+begin
+  Result := A.Subtract(B);
+end;
+
+class operator TDecimal.Multiply(const A, B: TDecimal): TDecimal;
+begin
+  Result := A.Multiply(B);
+end;
+
+class operator TDecimal.Multiply(const A: TDecimal; B: Integer): TDecimal;
+begin
+  Result := A.Multiply(DecFromInt(B));
+end;
+
+class operator TDecimal.Multiply(A: Integer; const B: TDecimal): TDecimal;
+begin
+  Result := DecFromInt(A).Multiply(B);
+end;
+
+class operator TDecimal.Negative(const A: TDecimal): TDecimal;
+begin
+  Result := A.Negate();
+end;
+
+class operator TDecimal.Equal(const A, B: TDecimal): Boolean;
+begin
+  Result := A.Equals(B);
+end;
+
+class operator TDecimal.NotEqual(const A, B: TDecimal): Boolean;
+begin
+  Result := not A.Equals(B);
+end;
+
+class operator TDecimal.LessThan(const A, B: TDecimal): Boolean;
+begin
+  Result := A.Compare(B) < 0;
+end;
+
+class operator TDecimal.GreaterThan(const A, B: TDecimal): Boolean;
+begin
+  Result := A.Compare(B) > 0;
+end;
+
+class operator TDecimal.LessThanOrEqual(const A, B: TDecimal): Boolean;
+begin
+  Result := A.Compare(B) <= 0;
+end;
+
+class operator TDecimal.GreaterThanOrEqual(const A, B: TDecimal): Boolean;
+begin
+  Result := A.Compare(B) >= 0;
 end;
 
 end.
