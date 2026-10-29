@@ -71,6 +71,8 @@ type
     SourceFile: string;  { .pas file the function's body lives in; empty
                            means the emitter falls back to the program's
                            main source file }
+    ParentSymbol: string; { SymbolName of the enclosing routine of a nested
+                            one; empty for a top-level routine }
     Vars: TObjectList;   { owned TDbgVar }
     Lines: TObjectList;  { owned TDbgLine }
     constructor Create;

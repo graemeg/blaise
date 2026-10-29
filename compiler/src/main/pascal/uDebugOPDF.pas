@@ -752,7 +752,7 @@ begin
     equals the bare name for plain functions. }
   FuncName := ALabel;
   Label_   := ALabel;
-  RecSize  := 24 + Length(FuncName);
+  RecSize  := 28 + Length(FuncName);
 
   L('');
   L('    # recFunctionScope: ' + FuncName);
@@ -765,6 +765,8 @@ begin
     L('    .quad 0  # HighPC (last function)');
   L('    .2byte ' + IntToStr(ADeclIdx) + '  # DeclIndex');
   EmitStrField(FuncName);
+  { the AST walk emits top-level routines and methods only }
+  L('    .4byte 0  # ParentScopeID');
 end;
 
 procedure TOPDFEmitter.EmitRuntimeHelper(AKind: Integer; const ASymbol: string);
@@ -901,11 +903,14 @@ begin
     'OPDF' magic headers (the next unit's block).  This is what makes per-unit
     .opdf sections concatenate cleanly at link time.  pdr ignores this field. }
   L('    .4byte 0                        # TotalRecords (0 = stream-terminated)');
-  { Flags: HAS_DIRECTORY (1) or LEN64 (4) -- a string's and a dynamic
-    array's Length is an Int64 at data_ptr - 8 (type standardisation 4.5).
-    LEN64 replaces DYNARRAY_LEN32 (2), the Int32 dynamic-array length at
-    data_ptr - 4 that earlier compilers set. }
-  L('    .4byte 5                        # Flags: HAS_DIRECTORY or LEN64');
+  { Flags: HAS_DIRECTORY (1) or LEN64 (4) or SCOPE_PARENT (8).  LEN64: a
+    string's and a dynamic array's Length is an Int64 at data_ptr - 8 (type
+    standardisation 4.5); it replaces DYNARRAY_LEN32 (2), the Int32
+    dynamic-array length at data_ptr - 4 that earlier compilers set.
+    SCOPE_PARENT: every recFunctionScope ends with the ScopeID of its
+    enclosing routine (0 for a top-level one), so the debugger looks up an
+    outer variable in the real parent rather than guessing. }
+  L('    .4byte 13                       # Flags: HAS_DIRECTORY or LEN64 or SCOPE_PARENT');
 end;
 
 procedure TOPDFEmitter.EmitFunctionScope_Main(AScopeID, ADeclIdx: Integer);
@@ -914,7 +919,7 @@ var
   RecSize: Integer;
 begin
   ProgName := FProgram.Name;
-  RecSize  := 24 + Length(ProgName);
+  RecSize  := 28 + Length(ProgName);
   L('');
   L('    # recFunctionScope: ' + ProgName);
   EmitRecHdr(REC_FUNCSCOPE, RecSize);
@@ -923,6 +928,7 @@ begin
   L('    .quad 0  # HighPC (last scope)');
   L('    .2byte ' + IntToStr(ADeclIdx) + '  # DeclIndex');
   EmitStrField(ProgName);
+  L('    .4byte 0  # ParentScopeID');
   EmitLineInfoForBlock(FProgram.Block, 'main', ProgName);
 end;
 
@@ -1554,7 +1560,7 @@ end;
   work at statement granularity. }
 procedure TOPDFEmitter.EmitFunctionScopesFromFacts;
 var
-  I, J, ScopeID, DeclIdx, ParamIdx, RecSize: Integer;
+  I, J, ScopeID, DeclIdx, ParamIdx, RecSize, ParentID: Integer;
   F: TDbgFunc;
   V: TDbgVar;
   LineF: TDbgLine;
@@ -1566,8 +1572,18 @@ begin
   begin
     F := TDbgFunc(FFacts.Funcs.Items[I]);
     ScopeID := ScopeID + 1;
+    { the I-th function is ScopeID I + 1; a nested routine may be emitted
+      before the routine enclosing it, so search the whole list }
+    ParentID := 0;
+    if F.ParentSymbol <> '' then
+      for J := 0 to FFacts.Funcs.Count - 1 do
+        if TDbgFunc(FFacts.Funcs.Items[J]).SymbolName = F.ParentSymbol then
+        begin
+          ParentID := J + 1;
+          Break;
+        end;
 
-    RecSize := 24 + Length(DisplayName(F.SymbolName));
+    RecSize := 28 + Length(DisplayName(F.SymbolName));
     L('');
     L('    # recFunctionScope: ' + F.SymbolName);
     EmitRecHdr(REC_FUNCSCOPE, RecSize);
@@ -1579,6 +1595,7 @@ begin
       L('    .quad 0  # HighPC (no end label recorded)');
     L('    .2byte ' + IntToStr(DeclIdx) + '  # DeclIndex');
     EmitStrField(DisplayName(F.SymbolName));
+    L('    .4byte ' + IntToStr(ParentID) + '  # ParentScopeID');
     DeclIdx := DeclIdx + 1;
 
     ParamIdx := 0;

@@ -26150,6 +26150,8 @@ var
 begin
   Sym := FuncSymbolFromDecl(ADecl);
   Self.DbgBeginFunc(Sym);
+  if (FDbgCur <> nil) and (ADecl.EnclosingDecl <> nil) then
+    FDbgCur.ParentSymbol := FuncSymbolFromDecl(ADecl.EnclosingDecl);
   Self.BuildFrame(ADecl);
   Self.DbgMarkParams(ADecl);
 

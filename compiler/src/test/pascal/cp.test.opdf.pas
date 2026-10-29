@@ -46,6 +46,10 @@ type
     procedure TestOPDF_FunctionScope_RecType;
     procedure TestOPDF_MethodScope_Emitted;
     procedure TestOPDF_DestructorScope_Emitted;
+    { each function scope ends with the ScopeID of its enclosing routine
+      (0 for a top-level one), resolved even when the nested routine is
+      emitted before its parent; the record size counts the field }
+    procedure TestOPDF_Facts_ParentScopeID;
     { Facts-driven emission (native backend): exact HighPC end labels, real
       RBP offsets, per-statement line records. }
     procedure TestOPDF_Facts_ExactScopeAndLocals;
@@ -285,8 +289,8 @@ begin
   AssertTrue('RefCountOffset -12', Contains(IR, '.2byte -12  # RefCountOffset'));
   AssertTrue('LengthOffset -8', Contains(IR, '.2byte -8  # LengthOffset'));
   AssertTrue('CapacityOffset -24', Contains(IR, '.2byte -24  # CapacityOffset'));
-  AssertTrue('header flags HAS_DIRECTORY or LEN64',
-    Contains(IR, '.4byte 5                        # Flags: HAS_DIRECTORY or LEN64'));
+  AssertTrue('header flags HAS_DIRECTORY or LEN64 or SCOPE_PARENT',
+    Contains(IR, '.4byte 13                       # Flags: HAS_DIRECTORY or LEN64 or SCOPE_PARENT'));
 end;
 
 procedure TOPDFTests.TestOPDF_StringConst_SpecialChars_Escaped;
@@ -1038,6 +1042,67 @@ begin
     AssertTrue('param record for By', Pos('recParameter: By', O) > 0);
     AssertTrue('local with real offset', Pos('.2byte -24  # LocationData', O) > 0);
     AssertTrue('param locatable too (Self at -8)', Pos('.2byte -8  # LocationData', O) > 0);
+  finally
+    Facts.Free();
+    A.Free();
+    Pr.Free();
+    P.Free();
+    L.Free();
+  end;
+end;
+
+procedure TOPDFTests.TestOPDF_Facts_ParentScopeID;
+var
+  L:  TLexer;
+  P:  TParser;
+  Pr: TProgram;
+  A:  TSemanticAnalyser;
+  E:  TOPDFEmitter;
+  Facts: TDbgFacts;
+  F: TDbgFunc;
+  O: string;
+
+  { the text of the recFunctionScope record for ASym }
+  function ScopeRec(const ASym: string): string;
+  var
+    S: Integer;
+  begin
+    S := Pos('# recFunctionScope: ' + ASym + #10, O);
+    AssertTrue('scope record for ' + ASym, S > 0);
+    Result := Copy(O, S, 400);
+    if Pos('# rec', Copy(Result, 2, 400)) > 0 then
+      Result := Copy(Result, 0, Pos('# rec', Copy(Result, 2, 400)));
+  end;
+
+begin
+  L  := TLexer.Create('program P; begin end.');
+  P  := TParser.Create(L);
+  Pr := P.Parse();
+  A  := TSemanticAnalyser.Create();
+  Facts := TDbgFacts.Create();
+  try
+    F := Facts.BeginFunc('Outer_Inner');
+    F.ParentSymbol := 'Outer';
+    Facts.BeginFunc('Outer');
+    Facts.BeginFunc('Other');
+    A.Analyse(Pr);
+    E := TOPDFEmitter.Create(Pr, 'test.pas');
+    try
+      E.SetFacts(Facts);
+      O := E.GetOutput();
+    finally
+      E.Free();
+    end;
+    AssertTrue('Inner links Outer (scope 2)',
+      Pos('.4byte 2  # ParentScopeID', ScopeRec('Outer_Inner')) > 0);
+    AssertTrue('Outer is top-level',
+      Pos('.4byte 0  # ParentScopeID', ScopeRec('Outer')) > 0);
+    AssertTrue('Other is top-level',
+      Pos('.4byte 0  # ParentScopeID', ScopeRec('Other')) > 0);
+    { 4 ScopeID + 8 LowPC + 8 HighPC + 2 DeclIndex + 2 NameLen + name +
+      4 ParentScopeID, with an 11-byte name }
+    AssertTrue('record size counts ParentScopeID',
+      Pos('.4byte 39  # RecSize', ScopeRec('Outer_Inner')) > 0);
   finally
     Facts.Free();
     A.Free();

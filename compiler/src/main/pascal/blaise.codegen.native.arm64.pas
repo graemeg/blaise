@@ -307,6 +307,8 @@ type
     procedure AddIntfLocal(const AName: string);
     procedure AddLocal(const AName: string; ASize: Integer);
     procedure DbgBeginFunc(const ASymbol: string);
+    { name ADecl's enclosing routine on its facts entry (nested routines) }
+    procedure DbgSetParent(ADecl: TMethodDecl);
     procedure DbgRecordSlot(const AName: string; AOffset: Integer);
     procedure DbgMarkParams(ADecl: TMethodDecl);
     function  DbgOuterVarType(const AName: string): TTypeDesc;
@@ -1289,6 +1291,13 @@ begin
   if FDbgFacts = nil then Exit;
   FDbgCur := FDbgFacts.BeginFunc(ASymbol);
   FDbgCur.SourceFile := FDbgSrcFile;
+end;
+
+procedure TArm64Backend.DbgSetParent(ADecl: TMethodDecl);
+begin
+  if (FDbgCur <> nil) and (ADecl.EnclosingDecl <> nil) then
+    FDbgCur.ParentSymbol := RoutineSym(ADecl.EnclosingDecl,
+      ADecl.EnclosingDecl.Name);
 end;
 
 procedure TArm64Backend.DbgRecordSlot(const AName: string; AOffset: Integer);
@@ -14504,6 +14513,7 @@ begin
     else
       EmitGloblDef(Sym);
     Self.DbgBeginFunc(Sym);
+    Self.DbgSetParent(ADecl);
     Self.Emit(Sym + ':');
     EmitStmtList(ADecl.Body.Stmts);
     Self.DbgEndFunc();
@@ -14616,6 +14626,7 @@ begin
   FExitLabel := NewLabel('rexit');
   FForN := 0;
   Self.DbgBeginFunc(Sym);
+  Self.DbgSetParent(ADecl);
   RegisterFrameSlots(ADecl, ADecl.Body);
   Self.DbgMarkParams(ADecl);
   FForN := 0;   { reset so EmitFor consumes slots in registration order }

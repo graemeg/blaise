@@ -60,6 +60,10 @@ type
       end labels, every named slot at its signed x29 offset (params spilled
       below the frame pointer), a var param as an indirect slot }
     procedure TestOpdf_Arm64_StatementLabels_AndFacts;
+    { a nested routine's facts name its enclosing routine (a standalone
+      procedure or a method), so OPDF can link the scopes; a top-level
+      routine names none.  Both backends. }
+    procedure TestOpdf_NestedRoutine_RecordsParent;
     procedure TestOpdf_Off_NoDbgLabels;
     { Self is typed as the owning class; value record params present the
       '_data' shadow slot (the inline copy) so field drilldown works. }
@@ -594,6 +598,99 @@ begin
   AssertEquals('program entry', '_main', F.SymbolName);
   Prog.Free();
   CG.Free();
+end;
+
+procedure TNativeConstArgTests.TestOpdf_NestedRoutine_RecordsParent;
+const
+  Src = '''
+    program P;
+    type
+      TK = class
+        procedure M;
+      end;
+    procedure Other;
+    var Q: Integer;
+    begin
+      Q := 7; WriteLn(Q)
+    end;
+    procedure Outer;
+    var X: Integer;
+      procedure Inner;
+      begin
+        WriteLn(X)
+      end;
+    begin
+      X := 42;
+      Inner()
+    end;
+    procedure TK.M;
+      procedure Helper;
+      begin
+        WriteLn(1)
+      end;
+    begin
+      Helper()
+    end;
+    begin
+      Other();
+      Outer();
+      TK.Create().M()
+    end.
+    ''';
+
+  procedure Check(const ATarget, APre: string);
+  var
+    L:    TLexer;
+    P:    TParser;
+    Prog: TProgram;
+    A:    TSemanticAnalyser;
+    CG:   TCodeGenNative;
+    T:    TTargetDesc;
+    F:    TDbgFunc;
+
+    { the ParentSymbol recorded for ASym; '?' when ASym has no facts }
+    function ParentOf(const ASym: string): string;
+    var
+      I: Integer;
+    begin
+      for I := 0 to CG.GetDebugFacts().Funcs.Count - 1 do
+      begin
+        F := TDbgFunc(CG.GetDebugFacts().Funcs.Items[I]);
+        if F.SymbolName = ASym then
+          Exit(F.ParentSymbol);
+      end;
+      Result := '?';
+    end;
+
+  begin
+    L := TLexer.Create(Src);
+    P := TParser.Create(L);
+    Prog := P.Parse();
+    P.Free(); L.Free();
+    A := TSemanticAnalyser.Create();
+    A.Analyse(Prog);
+    A.Free();
+    AssertTrue('target', ParseTargetName(ATarget, T));
+    CG := TCodeGenNative.Create();
+    try
+      CG.SetTarget(T);
+      CG.SetOpdfMode(True);
+      CG.Generate(Prog);
+      AssertEquals(ATarget + ' Inner names Outer', APre + 'Outer',
+        ParentOf(APre + 'Outer_Inner'));
+      AssertEquals(ATarget + ' a method''s nested routine names the method',
+        APre + 'TK_M', ParentOf(APre + 'TK_M_Helper'));
+      AssertEquals(ATarget + ' Other is top-level', '', ParentOf(APre + 'Other'));
+      AssertEquals(ATarget + ' Outer is top-level', '', ParentOf(APre + 'Outer'));
+    finally
+      Prog.Free();
+      CG.Free();
+    end;
+  end;
+
+begin
+  Check('linux-x86_64', '');
+  Check('macos-arm64', '_');
 end;
 
 procedure TNativeConstArgTests.TestOpdf_Off_NoDbgLabels;
