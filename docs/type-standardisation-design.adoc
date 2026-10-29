@@ -927,9 +927,11 @@ Done 2026-10-29, in three commits.
   old offsets, so the RTL it links must keep the old layout.  The 4.5
   compiler predefines `BLAISE_HDR64`, and the RTL's layout blocks select on
   it: the RTL an older compiler builds is old-layout (consistent with that
-  compiler's code), the RTL the 4.5 compiler builds is new-layout.  4.5c
-  removes the old branch, which only the 4.5b binary (already
-  new-layout) ever builds.
+  compiler's code), the RTL the 4.5 compiler builds is new-layout.  Only a
+  compiler that predates 4.5b ever builds the old branch: the 4.5a binary
+  does so when it builds 4.5b.  4.5c, a separate commit built by the 4.5b
+  binary, removes the old branch and the predefine (teach in one commit,
+  use in the next).
 
 Tests: a dynamic array and a string of 2^31^ + 16 bytes are built, indexed
 past 2^31^, measured and released

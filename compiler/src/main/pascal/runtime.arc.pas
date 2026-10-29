@@ -114,7 +114,6 @@ implementation
   unit of constants: a new RTL unit is unknown to the previous compiler's
   BuildRTLUnitList), so a layout change edits each copy alike.  Offsets are
   from the data pointer. }
-{$IFDEF BLAISE_HDR64}
 const
   { String: Capacity, pad, RefCount, Length; data 8-aligned }
   STR_HDR_SIZE = 24;
@@ -132,24 +131,6 @@ type
   PStrLen = ^TStrLen;
   TDaLen  = Int64;     { the width of a dynamic-array header's Length }
   PDaLen  = ^TDaLen;
-{$ELSE}
-{ The 32-bit layout, for an RTL built by a compiler that predates 4.5 (it
-  emits code for this layout); see BLAISE_HDR64 in uLexer. }
-const
-  STR_HDR_SIZE = 12;   { RefCount, Length, Capacity }
-  STR_RC_OFS   = -12;
-  STR_LEN_OFS  = -8;
-  STR_CAP_OFS  = -4;
-  DA_HDR_SIZE  = 16;   { element hook, RefCount, Length }
-  DA_HOOK_OFS  = -16;
-  DA_RC_OFS    = -8;
-  DA_LEN_OFS   = -4;
-type
-  TStrLen = Integer;
-  PStrLen = ^TStrLen;
-  TDaLen  = Integer;
-  PDaLen  = ^TDaLen;
-{$ENDIF}
 
 const
   IMMORTAL  = -1;

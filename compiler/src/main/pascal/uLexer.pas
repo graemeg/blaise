@@ -249,13 +249,6 @@ end;
 procedure TLexer.SeedPredefines;
 begin
   Self.DefineSymbol('BLAISE');
-  { The RTL's string and dynamic-array headers have 64-bit lengths
-    (type standardisation 4.5).  The RTL selects its header layout with
-    this symbol, so the RTL a previous compiler builds keeps the layout
-    that compiler's code expects: every binary in the bootstrap chain is
-    self-consistent.  Retired once no supported bootstrap compiler
-    predates it. }
-  Self.DefineSymbol('BLAISE_HDR64');
   { CPU seed must track the host this binary was BUILT for, exactly like the
     OS seed below — a macOS build is arm64, everything else we target is
     x86-64.  Hardcoding CPUX86_64 made a macos-arm64-built compiler seed
