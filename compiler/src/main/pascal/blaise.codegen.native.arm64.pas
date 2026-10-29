@@ -534,6 +534,8 @@ type
     procedure EmitForInAssignAddr(AStmt: TForInStmt; AOwned: Boolean);
     procedure EmitPointerWrite(AStmt: TPointerWriteStmt);
     procedure EmitNarrowX0(AType: TTypeDesc);
+    { The header of an immortal string literal of ALen bytes. }
+    procedure EmitStrLitHeader(ALen: Int64);
     { Evaluate an integer argument the RTL takes as Int64 (a Copy, PosEx,
       Delete or SetLength count, a GetMem size) into x0, extended from its
       own width. }
@@ -3650,7 +3652,7 @@ begin
     Self.Emit(#9'stp x19, x22, [sp, #16]');
     Self.Emit(#9'str x23, [sp, #32]');
     Self.Emit(#9'mov x19, x0');
-    Self.Emit(#9'sxtw x22, w1');
+    Self.Emit(#9'mov x22, x1');
     Self.Emit(#9'mov w23, w2');
     Self.Emit(LLoop + ':');
     Self.Emit(#9'cmp x22, #0');
@@ -5109,7 +5111,7 @@ begin
     _StringLength / StrLen, which return 0 for nil. }
   NilL := NewLabel('slen0');
   Self.Emit(Format(#9'cbz %s, %s', [AReg, NilL]));
-  Self.Emit(Format(#9'ldur w0, [%s, #-8]', [AReg]));
+  Self.Emit(Format(#9'ldur x0, [%s, #%d]', [AReg, STR_LEN_OFS]));
   if AReg <> 'x0' then
     Self.Emit(Format(#9'mov %s, x0', [AReg]));
   Self.Emit(Format(#9'b %s_done', [NilL]));
@@ -5153,11 +5155,11 @@ begin
   Idx := FStrLits.IndexOf(AValue);
   if Idx < 0 then
     Idx := FStrLits.Add(AValue);
-  { pointer = blob + 12 (past the refcnt/len/cap header — same immutable
+  { pointer = blob + STR_LIT_HDR (past the header — the same immutable
     string layout the x86-64 backend emits) }
   Self.Emit(Format(#9'adrp x0, __s%d@PAGE', [Idx]));
   Self.Emit(Format(#9'add x0, x0, __s%d@PAGEOFF', [Idx]));
-  Self.Emit(#9'add x0, x0, #12');
+  Self.Emit(Format(#9'add x0, x0, #%d', [STR_LIT_HDR]));
 end;
 
 procedure TArm64Backend.EmitLeakTrackerRegister(const ATypeinfoReg,
@@ -5513,7 +5515,7 @@ begin
         Idx := FStrLits.Add(TIdentExpr(AExpr).ConstString);
       Self.Emit(Format(#9'adrp x0, __s%d@PAGE', [Idx]));
       Self.Emit(Format(#9'add x0, x0, __s%d@PAGEOFF', [Idx]));
-      Self.Emit(#9'add x0, x0, #12');
+      Self.Emit(Format(#9'add x0, x0, #%d', [STR_LIT_HDR]));
       Exit;
     end;
     if (TIdentExpr(AExpr).ConstArraySymbol <> '') and
@@ -6229,7 +6231,6 @@ begin
     begin
       EmitBuiltinStrCall2(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]), '_StringPos');
-      Self.Emit(#9'sxtw x0, w0');   { Int (D5): -1 when not found }
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'SameText') then
@@ -6263,7 +6264,7 @@ begin
         EmitPushX0();                   { parked for the release }
       end;
       EmitPushX0();
-      Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
+      EmitInt64ArgToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
       Self.Emit(#9'mov x1, x0');
       EmitPopTo('x0');
       EmitCallSym('_OrdAt');
@@ -6331,7 +6332,6 @@ begin
     else
     begin
       EmitCallSym('_StringPosEx');
-      Self.Emit(#9'sxtw x0, w0');   { Int (D5): -1 when not found }
     end;
     EmitPushX0();
     if ArcBuiltinStrArgOwnsRef(
@@ -7596,7 +7596,7 @@ begin
         Idx := FStrLits.Add(TFieldAccessExpr(AExpr).ConstString);
       Self.Emit(Format(#9'adrp x0, __s%d@PAGE', [Idx]));
       Self.Emit(Format(#9'add x0, x0, __s%d@PAGEOFF', [Idx]));
-      Self.Emit(#9'add x0, x0, #12');
+      Self.Emit(Format(#9'add x0, x0, #%d', [STR_LIT_HDR]));
       Exit;
     end;
     EmitIntLiteral('x0', TFieldAccessExpr(AExpr).ConstValue);
@@ -11868,7 +11868,7 @@ begin
       not fault on [nil-8] — see EmitStrLen. }
     NilLenL := NewLabel('flen0');
     Self.Emit(Format(#9'cbz x0, %s', [NilLenL]));
-    Self.Emit(#9'ldur w1, [x0, #-8]');
+    Self.Emit(Format(#9'ldur x1, [x0, #%d]', [STR_LEN_OFS]));
     Self.Emit(Format(#9'b %s_done', [NilLenL]));
     Self.Emit(NilLenL + ':');
     Self.Emit(#9'movz x1, #0');
@@ -12572,6 +12572,17 @@ begin
     tyInt8:     begin Self.Emit(#9'lsl x1, x1, #56'); Self.Emit(#9'asr x1, x1, #56') end;
     tyByte:     begin Self.Emit(#9'lsl x1, x1, #56'); Self.Emit(#9'lsr x1, x1, #56') end;
   end;
+end;
+
+{ The header of an immortal string literal, in runtime.str's layout:
+  Capacity, pad, RefCount -1, Length.  The data follows at label +
+  STR_LIT_HDR. }
+procedure TArm64Backend.EmitStrLitHeader(ALen: Int64);
+begin
+  Self.Emit(Format(#9'.quad %d', [ALen]));    { capacity }
+  Self.Emit(#9'.word 0');
+  Self.Emit(#9'.word -1');                     { refcount = immortal }
+  Self.Emit(Format(#9'.quad %d', [ALen]));    { length }
 end;
 
 procedure TArm64Backend.EmitInt64ArgToX0(AExpr: TASTExpr);
@@ -13714,7 +13725,6 @@ begin
   if Owned then
     EmitPushX0();                    { the array, released below }
   EmitCallSym('_DynArrayLength');
-  Self.Emit(#9'sxtw x0, w0');        { an Integer result, read as Int (D5) }
   if Owned then
   begin
     Self.Emit(#9'ldr x1, [sp]');
@@ -16645,11 +16655,9 @@ begin
   for I := 0 to FStrLits.Count - 1 do
   begin
     Len := Length(FStrLits.Strings[I]);
-    Self.Emit('.balign 4');
+    Self.Emit('.balign 8');
     Self.Emit(Format('__s%d:', [I]));
-    Self.Emit(#9'.word -1');                    { refcnt = immortal }
-    Self.Emit(Format(#9'.word %d', [Len]));     { length }
-    Self.Emit(Format(#9'.word %d', [Len]));     { capacity }
+    Self.EmitStrLitHeader(Len);
     if Len > 0 then
       Self.Emit(Format(#9'.ascii "%s"', [AsmEscape(FStrLits.Strings[I])]));
     Self.Emit(#9'.byte 0');
@@ -16740,17 +16748,15 @@ begin
   end;
   if FGlobalStrInits.Count > 0 then
   begin
-    { immortal blobs for string-initialised globals: refcnt -1, length,
-      capacity, bytes, NUL — the __gi_<sym>_d label sits AT the data so
+    { immortal blobs for string-initialised globals: the header
+      (EmitStrLitHeader), bytes, NUL — the __gi_<sym>_d label sits AT the data so
       the .data pointer needs no symbol arithmetic }
     Self.Emit(SecRodata());
     for I := 0 to FGlobalStrInits.Count - 1 do
     begin
-      Self.Emit('.balign 4');
+      Self.Emit('.balign 8');
       Self.Emit(Format('__gi_%s_h:', [FGlobalStrInits.Strings[I]]));
-      Self.Emit(#9'.word -1');
-      Self.Emit(Format(#9'.word %d', [Length(FGlobalStrVals.Strings[I])]));
-      Self.Emit(Format(#9'.word %d', [Length(FGlobalStrVals.Strings[I])]));
+      Self.EmitStrLitHeader(Length(FGlobalStrVals.Strings[I]));
       Self.Emit(Format('__gi_%s_d:', [FGlobalStrInits.Strings[I]]));
       if Length(FGlobalStrVals.Strings[I]) > 0 then
         Self.Emit(Format(#9'.ascii "%s"',
@@ -16979,13 +16985,9 @@ var
       Self.Emit(SecRodata());
       for E := 0 to ACD.ArrayElements.Count - 1 do
       begin
-        Self.Emit('.balign 4');
+        Self.Emit('.balign 8');
         Self.Emit(Format('__bce_%s_%d_h:', [ALbl, E]));
-        Self.Emit(#9'.word -1');
-        Self.Emit(Format(#9'.word %d',
-          [Length(ACD.ArrayElements.Strings[E])]));
-        Self.Emit(Format(#9'.word %d',
-          [Length(ACD.ArrayElements.Strings[E])]));
+        Self.EmitStrLitHeader(Length(ACD.ArrayElements.Strings[E]));
         Self.Emit(Format('__bce_%s_%d:', [ALbl, E]));
         if Length(ACD.ArrayElements.Strings[E]) > 0 then
           Self.Emit(Format(#9'.ascii "%s"',
@@ -17199,11 +17201,9 @@ begin
     for K := 0 to MD.AttrUses.Count - 1 do
     begin
       if TAttributeUse(MD.AttrUses.Items[K]).ThunkDecl = nil then Continue;
-      Self.Emit('.balign 4');
+      Self.Emit('.balign 8');
       Self.Emit(Format('__ma_%s_%d_h:', [ACSym, N]));
-      Self.Emit(#9'.word -1');
-      Self.Emit(Format(#9'.word %d', [Length(MD.Name)]));
-      Self.Emit(Format(#9'.word %d', [Length(MD.Name)]));
+      Self.EmitStrLitHeader(Length(MD.Name));
       Self.Emit(Format('__ma_%s_%d:', [ACSym, N]));
       Self.Emit(Format(#9'.ascii "%s"', [MD.Name]));
       Self.Emit(#9'.byte 0');
@@ -17296,22 +17296,18 @@ begin
   begin
     MD := TMethodDecl(ACD.Methods.Items[J]);
     if not MD.IsPublished then Continue;
-    Self.Emit('.balign 4');
+    Self.Emit('.balign 8');
     Self.Emit(Format('__pm_%s_%d_h:', [ACSym, N]));
-    Self.Emit(#9'.word -1');
-    Self.Emit(Format(#9'.word %d', [Length(MD.Name)]));
-    Self.Emit(Format(#9'.word %d', [Length(MD.Name)]));
+    Self.EmitStrLitHeader(Length(MD.Name));
     Self.Emit(Format('__pm_%s_%d:', [ACSym, N]));
     Self.Emit(Format(#9'.ascii "%s"', [MD.Name]));
     Self.Emit(#9'.byte 0');
     Sig := Arm64MethodParamSig(MD);
     if Sig <> '' then
     begin
-      Self.Emit('.balign 4');
+      Self.Emit('.balign 8');
       Self.Emit(Format('__ps_%s_%d_h:', [ACSym, N]));
-      Self.Emit(#9'.word -1');
-      Self.Emit(Format(#9'.word %d', [Length(Sig)]));
-      Self.Emit(Format(#9'.word %d', [Length(Sig)]));
+      Self.EmitStrLitHeader(Length(Sig));
       Self.Emit(Format('__ps_%s_%d:', [ACSym, N]));
       Self.Emit(Format(#9'.ascii "%s"', [Sig]));
       Self.Emit(#9'.byte 0');
@@ -17352,11 +17348,9 @@ begin
     TObject_ToString resolve from the RTL at link time. }
   Self.Emit('');
   Self.Emit(SecRodata());
-  Self.Emit('.balign 4');
+  Self.Emit('.balign 8');
   Self.Emit('__cn_TObject_h:');
-  Self.Emit(#9'.word -1');
-  Self.Emit(#9'.word 7');
-  Self.Emit(#9'.word 7');
+  Self.EmitStrLitHeader(7);
   Self.Emit('__cn_TObject:');
   Self.Emit(#9'.ascii "TObject"');
   Self.Emit(#9'.byte 0');
@@ -17384,11 +17378,9 @@ begin
   { TCustomAttribute base stubs: attribute classes declare it as their
     parent, so the typeinfo chain needs a real symbol here }
   Self.Emit(SecRodata());
-  Self.Emit('.balign 4');
+  Self.Emit('.balign 8');
   Self.Emit('__cn_TCustomAttribute_h:');
-  Self.Emit(#9'.word -1');
-  Self.Emit(#9'.word 16');
-  Self.Emit(#9'.word 16');
+  Self.EmitStrLitHeader(16);
   Self.Emit('__cn_TCustomAttribute:');
   Self.Emit(#9'.ascii "TCustomAttribute"');
   Self.Emit(#9'.byte 0');
@@ -17417,11 +17409,9 @@ begin
     RT := ClassDescOf(TD);
     Sym := ClassSym(TD);
     Self.Emit(SecRodata());
-    Self.Emit('.balign 4');
+    Self.Emit('.balign 8');
     Self.Emit(Format('__cn_%s_h:', [Sym]));
-    Self.Emit(#9'.word -1');
-    Self.Emit(Format(#9'.word %d', [Length(TD.Name)]));
-    Self.Emit(Format(#9'.word %d', [Length(TD.Name)]));
+    Self.EmitStrLitHeader(Length(TD.Name));
     Self.Emit(Format('__cn_%s:', [Sym]));
     Self.Emit(Format(#9'.ascii "%s"', [TD.Name]));
     Self.Emit(#9'.byte 0');

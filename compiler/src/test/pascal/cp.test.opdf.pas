@@ -279,6 +279,14 @@ begin
   IR := GenOPDF('program P; begin end.');
   AssertTrue('recUtf8Str present', Contains(IR, '# recUtf8Str'));
   AssertTrue('Utf8String name emitted', Contains(IR, '.ascii "Utf8String"'));
+  { the 64-bit length header (type standardisation 4.5): RefCount -12,
+    Length -8, Capacity -24, and the LEN64 header flag (4) instead of
+    DYNARRAY_LEN32 (2) }
+  AssertTrue('RefCountOffset -12', Contains(IR, '.2byte -12  # RefCountOffset'));
+  AssertTrue('LengthOffset -8', Contains(IR, '.2byte -8  # LengthOffset'));
+  AssertTrue('CapacityOffset -24', Contains(IR, '.2byte -24  # CapacityOffset'));
+  AssertTrue('header flags HAS_DIRECTORY or LEN64',
+    Contains(IR, '.4byte 5                        # Flags: HAS_DIRECTORY or LEN64'));
 end;
 
 procedure TOPDFTests.TestOPDF_StringConst_SpecialChars_Escaped;

@@ -77,7 +77,7 @@ function  _Int64ToStr(N: Int64): Pointer;
 function  _UInt64ToStr(N: UInt64): Pointer;
 function  _StrToInt(S: Pointer): Integer;
 function  _StrToInt64(S: Pointer): Int64;
-function  _OrdAt(S: Pointer; I: Integer): Integer;
+function  _OrdAt(S: Pointer; I: Int64): Integer;
 function  _Chr(N: Integer): Pointer;
 function  _UpCase(N: Integer): Pointer;
 function  _StringCompare(S1, S2: Pointer): Integer;
@@ -92,7 +92,7 @@ function  _StringFromPChar(P: PChar): Pointer;
   Returns a packed Int64: low 21 bits = codepoint value (0..U+10FFFF),
   bits 32..33 = byte count consumed (1..4).
   Caller extracts: CodePoint = Result and $1FFFFF; Advance = Result shr 32. }
-function _Utf8DecodeAt(S: Pointer; Idx: Integer): Int64;
+function _Utf8DecodeAt(S: Pointer; Idx: Int64): Int64;
 
 { ------------------------------------------------------------------ }
 { Dynamic array RTL                                                    }
@@ -156,40 +156,44 @@ implementation
   unit of constants: a new RTL unit is unknown to the previous compiler's
   BuildRTLUnitList), so a layout change edits each copy alike.  Offsets are
   from the data pointer. }
+{$IFDEF BLAISE_HDR64}
+const
+  { String: Capacity, pad, RefCount, Length; data 8-aligned }
+  STR_HDR_SIZE = 24;
+  STR_RC_OFS   = -12;  { Int32; -1 = immortal }
+  STR_LEN_OFS  = -8;
+  STR_CAP_OFS  = -24;
+  { Dynamic array: pad, element hook, pad, RefCount, Length; elements stay
+    16-aligned }
+  DA_HDR_SIZE  = 32;
+  DA_HOOK_OFS  = -24;
+  DA_RC_OFS    = -12;  { Int32; -1 = immortal }
+  DA_LEN_OFS   = -8;
+type
+  TStrLen = Int64;     { the width of a string header's Length and Capacity }
+  PStrLen = ^TStrLen;
+  TDaLen  = Int64;     { the width of a dynamic-array header's Length }
+  PDaLen  = ^TDaLen;
+{$ELSE}
+{ The 32-bit layout, for an RTL built by a compiler that predates 4.5 (it
+  emits code for this layout); see BLAISE_HDR64 in uLexer. }
 const
   STR_HDR_SIZE = 12;   { RefCount, Length, Capacity }
-  STR_RC_OFS   = -12;  { Int32; -1 = immortal }
+  STR_RC_OFS   = -12;
   STR_LEN_OFS  = -8;
   STR_CAP_OFS  = -4;
   DA_HDR_SIZE  = 16;   { element hook, RefCount, Length }
   DA_HOOK_OFS  = -16;
-  DA_RC_OFS    = -8;   { Int32; -1 = immortal }
+  DA_RC_OFS    = -8;
   DA_LEN_OFS   = -4;
 type
-  TStrLen = Integer;   { the width of a string header's Length and Capacity }
+  TStrLen = Integer;
   PStrLen = ^TStrLen;
-  TDaLen  = Integer;   { the width of a dynamic-array header's Length }
+  TDaLen  = Integer;
   PDaLen  = ^TDaLen;
+{$ENDIF}
 
-const
-  STDERR_FD = 2;
-
-function  _libc_write(Fd: Integer; Buf: Pointer; Count: Int64): Int64; external name 'write';
-procedure _libc_abort; external name 'abort';
-
-{ A length is an Int (type standardisation, D5), but the string and
-  dynamic-array headers still store 32 bits, so a length above High(Int32)
-  is a run-time error rather than a silent truncation. }
-procedure CheckLengthFits(N: Int64; Msg: Pointer; MsgLen: Integer);
-var
-  NL: Byte;
-begin
-  if N <= 2147483647 then Exit;
-  _libc_write(STDERR_FD, Msg, Int64(MsgLen));
-  NL := 10;
-  _libc_write(STDERR_FD, @NL, 1);
-  _libc_abort();
-end;
+procedure _libc_memset(Dst: Pointer; Val: Integer; N: Int64); external name 'memset';
 
 { ------------------------------------------------------------------ }
 { Memory helpers                                                        }
@@ -235,7 +239,6 @@ var
   LN, CP: PStrLen;
   NulPtr: PChar;
 begin
-  CheckLengthFits(Len, 'Runtime error: string length above High(Int32)', 46);
   Base := _BlaiseGetMem(STR_HDR_SIZE + Len + 1);
   if Base = nil then
   begin
@@ -467,10 +470,9 @@ end;
 
 function _StringSetLength(S: Pointer; N: Int64): Pointer;
 var
-  OldLen, CopyLen, I: Int64;
+  OldLen, CopyLen: Int64;
   Data, ResData:      PChar;
 begin
-  CheckLengthFits(N, 'Runtime error: SetLength: length above High(Int32)', 50);
   if N < 0 then N := 0;
   Result := StrAlloc(N);
   if (Result = nil) or (N = 0) then Exit;
@@ -482,8 +484,8 @@ begin
     Data := StrData(S);
     MemCopy(ResData, Data, CopyLen);
   end;
-  for I := CopyLen to N - 1 do
-    ResData[I] := #0;
+  if N > CopyLen then
+    _libc_memset(ResData + CopyLen, 0, N - CopyLen);
 end;
 
 { ------------------------------------------------------------------ }
@@ -859,7 +861,7 @@ end;
 { _OrdAt                                                               }
 { ------------------------------------------------------------------ }
 
-function _OrdAt(S: Pointer; I: Integer): Integer;
+function _OrdAt(S: Pointer; I: Int64): Integer;
 var
   Len:  Int64;
   Data: PChar;
@@ -987,7 +989,7 @@ end;
 { _Utf8DecodeAt                                                        }
 { ------------------------------------------------------------------ }
 
-function _Utf8DecodeAt(S: Pointer; Idx: Integer): Int64;
+function _Utf8DecodeAt(S: Pointer; Idx: Int64): Int64;
 var
   P: PChar;
   B0, B1, B2, B3: Integer;
@@ -1476,7 +1478,7 @@ end;
 { ------------------------------------------------------------------ }
 
 type
-  TDynElemHook = procedure(Data: Pointer; Count, ARetain: Integer);
+  TDynElemHook = procedure(Data: Pointer; Count: Int64; ARetain: Integer);
 
 function _DynArrayLength(Ptr: Pointer): Int64;
 var
@@ -1498,14 +1500,12 @@ var
   DataSz:   Int64;
   OldLen:   Int64;
   CopyLen:  Int64;
-  ZI:       Int64;
   LenPtr:   PDaLen;
   HookSlot: ^Pointer;
   RC:       ^Integer;
   Shared:   Boolean;
   H:        TDynElemHook;
 begin
-  CheckLengthFits(NewLen, 'Runtime error: SetLength: length above High(Int32)', 50);
   { No hook of the caller's own (an unmanaged element, or code from an older
     compiler): keep the one the existing block carries. }
   if (Hook = nil) and (Ptr <> nil) then
@@ -1529,12 +1529,7 @@ begin
   RC^       := 1;
   LenPtr    := Pointer(NewData) + DA_LEN_OFS;
   LenPtr^   := NewLen;
-  ZI := 0;
-  while ZI < NewLen * ElemSize do
-  begin
-    NewData[ZI] := 0;
-    ZI := ZI + 1;
-  end;
+  _libc_memset(NewData, 0, NewLen * ElemSize);
   if Ptr <> nil then
   begin
     OldLen := _DynArrayLength(Ptr);

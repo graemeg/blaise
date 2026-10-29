@@ -53,11 +53,11 @@ procedure _DynArrayRelease(Ptr: Pointer);
   array's header records it (see _DynArraySetLengthM in runtime.str) and
   _DynArrayRelease runs it when the last reference goes.  The backends emit
   their own hook for a record / static-array element with managed fields. }
-procedure _DynElemsString(Data: Pointer; Count, ARetain: Integer);
-procedure _DynElemsClass(Data: Pointer; Count, ARetain: Integer);
-procedure _DynElemsDynArray(Data: Pointer; Count, ARetain: Integer);
-procedure _DynElemsIntf(Data: Pointer; Count, ARetain: Integer);
-procedure _DynElemsRefEnv(Data: Pointer; Count, ARetain: Integer);
+procedure _DynElemsString(Data: Pointer; Count: Int64; ARetain: Integer);
+procedure _DynElemsClass(Data: Pointer; Count: Int64; ARetain: Integer);
+procedure _DynElemsDynArray(Data: Pointer; Count: Int64; ARetain: Integer);
+procedure _DynElemsIntf(Data: Pointer; Count: Int64; ARetain: Integer);
+procedure _DynElemsRefEnv(Data: Pointer; Count: Int64; ARetain: Integer);
 function  _StringEquals(S1, S2: Pointer): Integer;
 function  _StringConcat(S1, S2: Pointer): Pointer;
 procedure TObject_Destroy(Self: Pointer);
@@ -114,20 +114,42 @@ implementation
   unit of constants: a new RTL unit is unknown to the previous compiler's
   BuildRTLUnitList), so a layout change edits each copy alike.  Offsets are
   from the data pointer. }
+{$IFDEF BLAISE_HDR64}
+const
+  { String: Capacity, pad, RefCount, Length; data 8-aligned }
+  STR_HDR_SIZE = 24;
+  STR_RC_OFS   = -12;  { Int32; -1 = immortal }
+  STR_LEN_OFS  = -8;
+  STR_CAP_OFS  = -24;
+  { Dynamic array: pad, element hook, pad, RefCount, Length; elements stay
+    16-aligned }
+  DA_HDR_SIZE  = 32;
+  DA_HOOK_OFS  = -24;
+  DA_RC_OFS    = -12;  { Int32; -1 = immortal }
+  DA_LEN_OFS   = -8;
+type
+  TStrLen = Int64;     { the width of a string header's Length and Capacity }
+  PStrLen = ^TStrLen;
+  TDaLen  = Int64;     { the width of a dynamic-array header's Length }
+  PDaLen  = ^TDaLen;
+{$ELSE}
+{ The 32-bit layout, for an RTL built by a compiler that predates 4.5 (it
+  emits code for this layout); see BLAISE_HDR64 in uLexer. }
 const
   STR_HDR_SIZE = 12;   { RefCount, Length, Capacity }
-  STR_RC_OFS   = -12;  { Int32; -1 = immortal }
+  STR_RC_OFS   = -12;
   STR_LEN_OFS  = -8;
   STR_CAP_OFS  = -4;
   DA_HDR_SIZE  = 16;   { element hook, RefCount, Length }
   DA_HOOK_OFS  = -16;
-  DA_RC_OFS    = -8;   { Int32; -1 = immortal }
+  DA_RC_OFS    = -8;
   DA_LEN_OFS   = -4;
 type
-  TStrLen = Integer;   { the width of a string header's Length and Capacity }
+  TStrLen = Integer;
   PStrLen = ^TStrLen;
-  TDaLen  = Integer;   { the width of a dynamic-array header's Length }
+  TDaLen  = Integer;
   PDaLen  = ^TDaLen;
+{$ENDIF}
 
 const
   IMMORTAL  = -1;
@@ -548,7 +570,7 @@ end;
   Blocks are built by _DynArraySetLengthM in runtime.str. }
 
 type
-  TDynElemHook = procedure(Data: Pointer; Count, ARetain: Integer);
+  TDynElemHook = procedure(Data: Pointer; Count: Int64; ARetain: Integer);
 
 procedure _DynArrayAddRef(Ptr: Pointer);
 var
@@ -590,9 +612,9 @@ begin
   end;
 end;
 
-procedure _DynElemsString(Data: Pointer; Count, ARetain: Integer);
+procedure _DynElemsString(Data: Pointer; Count: Int64; ARetain: Integer);
 var
-  I: Integer;
+  I: Int64;
   P: ^Pointer;
 begin
   P := Data;
@@ -603,9 +625,9 @@ begin
   end;
 end;
 
-procedure _DynElemsClass(Data: Pointer; Count, ARetain: Integer);
+procedure _DynElemsClass(Data: Pointer; Count: Int64; ARetain: Integer);
 var
-  I: Integer;
+  I: Int64;
   P: ^Pointer;
 begin
   P := Data;
@@ -616,9 +638,9 @@ begin
   end;
 end;
 
-procedure _DynElemsDynArray(Data: Pointer; Count, ARetain: Integer);
+procedure _DynElemsDynArray(Data: Pointer; Count: Int64; ARetain: Integer);
 var
-  I: Integer;
+  I: Int64;
   P: ^Pointer;
 begin
   P := Data;
@@ -629,9 +651,9 @@ begin
   end;
 end;
 
-procedure _DynElemsIntf(Data: Pointer; Count, ARetain: Integer);
+procedure _DynElemsIntf(Data: Pointer; Count: Int64; ARetain: Integer);
 var
-  I: Integer;
+  I: Int64;
   P: ^Pointer;
 begin
   { an interface element is the 16-byte (obj, itab) pair; only the obj
@@ -644,9 +666,9 @@ begin
   end;
 end;
 
-procedure _DynElemsRefEnv(Data: Pointer; Count, ARetain: Integer);
+procedure _DynElemsRefEnv(Data: Pointer; Count: Int64; ARetain: Integer);
 var
-  I: Integer;
+  I: Int64;
   P: ^Pointer;
 begin
   { a 'reference to' closure element is (Code, Env); the Env at +8 is the

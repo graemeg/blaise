@@ -5,7 +5,7 @@
 
 Status: ACCEPTED — all design decisions signed off 2026-10-19.  Phases 0–3
 implemented 2026-10-19/20 and released in v0.15.0; Phase 4 in progress,
-steps 4.0–4.4 done (see <<progress>>). +
+steps 4.0–4.5 done (see <<progress>>). +
 Release placement: phases 0–3 (additive, non-breaking) target *v0.15.0*;
 phases 4–7 (breaking) open the *v0.16* development cycle. +
 Scope: surface type system (builtin type names), stdlib API signatures,
@@ -549,7 +549,10 @@ The announcement in discussion #106 is revised on the following points:
   results are `Int`; `Copy`, `Delete` and `SetLength` take `Int` counts; an
   `Int` that cannot be negative mixes with `UInt64`.  Found on the way:
   `PosEx`, `Ord` and the arm64 dynamic-array `Length` read their 32-bit
-  result without extending it.  Next: 4.5, 64-bit length headers.
+  result without extending it.  4.5: 64-bit string and dynamic-array
+  lengths (24- and 32-byte headers); found on the way: a 1 GiB ceiling in
+  the string release check, 32-bit `GetMem` sizes and a single-`read`
+  `ReadFile`.  Next: 4.6, collections.
 |===
 
 [#timeline]
@@ -888,6 +891,51 @@ array literal emission in data sections, the internal assembler's literal
 data, OPDF type records and pdr's string and array decoding.  A layout
 change: full stage-2 rebuild protocol, `-pre` refresh, IFACE bump if any
 `.bif` content encodes an offset, and the 4.4 run-time limit removed.
+
+Done 2026-10-29, in three commits.
+
+* Layout, settled at the start of the step.  Both refcount widths give the
+  same 24-byte string header and the same atomic cost, so the choice was
+  made on other grounds: the refcount stays a 32-bit atomic at
+  `data_ptr − 12`, shared with the class refcount helpers (2^31^ live
+  references to one string are not reachable), and Length moves to an
+  `Int64` at its old offset `data_ptr − 8`.  String: Capacity at −24, pad,
+  RefCount at −12, Length at −8 (24 bytes; data 8-aligned, up from 4).
+  Dynamic array: pad, hook at −24, pad, RefCount at −12, Length at −8 (32
+  bytes, so element 0 stays 16-aligned as the 16-byte header kept it).
+* 4.5a, a refactor with no layout change: the seven RTL units that spelled
+  header offsets out (three header-size constants and literal offsets)
+  declare one named block of offsets and length types, and the RTL's
+  lengths, positions and allocation sizes are `Int64`.  Found on the way and
+  fixed: `_StringRelease` bounded a length by 1 GiB as a corruption check,
+  so releasing a larger string aborted; `GetMem` / `ReallocMem` passed a
+  32-bit size; the large-block header stored the size in 32 bits;
+  `ReadFile` issued one `read`, which Linux caps near 2 GiB; the stdlib
+  bound libc `memcpy` with an `Integer` count.
+* 4.5b, the switch.  Both backends emit literal headers through one helper
+  (`EmitStrLitHeader`, `.balign 8`) with the data at label +
+  `STR_LIT_HDR` (24), read Length as 64 bits inline, take the RTL's
+  `Int64` length and position results unextended, run `for-in` over a
+  string or array with an `Int64` index, and pass element-hook counts and
+  `_OrdAt` / `_Utf8DecodeAt` indices in 64 bits.  OPDF sets a new header
+  flag, `LEN64` (4), in place of `DYNARRAY_LEN32`, and the string record
+  carries the new offsets; pdr reads both.  `SetLength` zeroes new memory
+  with `memset` instead of a byte loop.  `COMPILER_ID` is bumped; no IFACE
+  bump was needed (no `.bif` content encodes a header offset).
+* Bootstrap.  The rolling bootstrap builds each commit once with the
+  previous commit's binary, and that binary's own code reads headers at the
+  old offsets, so the RTL it links must keep the old layout.  The 4.5
+  compiler predefines `BLAISE_HDR64`, and the RTL's layout blocks select on
+  it: the RTL an older compiler builds is old-layout (consistent with that
+  compiler's code), the RTL the 4.5 compiler builds is new-layout.  4.5c
+  removes the old branch, which only the 4.5b binary (already
+  new-layout) ever builds.
+
+Tests: a dynamic array and a string of 2^31^ + 16 bytes are built, indexed
+past 2^31^, measured and released
+(`TE2ETypeStdTests.TestRun_LengthAboveInt32_Works`), and a 1.1 GiB string
+is released (`TestRun_StringAbove1GiB_Releases`); the tests that read a
+header offset or matched its instructions moved to the new layout.
 
 *4.6 — collections (D5, part 2).*  `Count`, `Capacity`, indices and their
 fields move to `Int` in `generics.collections`, `Classes` and `Contnrs`.

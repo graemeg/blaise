@@ -321,20 +321,42 @@ implementation
   unit of constants: a new RTL unit is unknown to the previous compiler's
   BuildRTLUnitList), so a layout change edits each copy alike.  Offsets are
   from the data pointer. }
+{$IFDEF BLAISE_HDR64}
+const
+  { String: Capacity, pad, RefCount, Length; data 8-aligned }
+  STR_HDR_SIZE = 24;
+  STR_RC_OFS   = -12;  { Int32; -1 = immortal }
+  STR_LEN_OFS  = -8;
+  STR_CAP_OFS  = -24;
+  { Dynamic array: pad, element hook, pad, RefCount, Length; elements stay
+    16-aligned }
+  DA_HDR_SIZE  = 32;
+  DA_HOOK_OFS  = -24;
+  DA_RC_OFS    = -12;  { Int32; -1 = immortal }
+  DA_LEN_OFS   = -8;
+type
+  TStrLen = Int64;     { the width of a string header's Length and Capacity }
+  PStrLen = ^TStrLen;
+  TDaLen  = Int64;     { the width of a dynamic-array header's Length }
+  PDaLen  = ^TDaLen;
+{$ELSE}
+{ The 32-bit layout, for an RTL built by a compiler that predates 4.5 (it
+  emits code for this layout); see BLAISE_HDR64 in uLexer. }
 const
   STR_HDR_SIZE = 12;   { RefCount, Length, Capacity }
-  STR_RC_OFS   = -12;  { Int32; -1 = immortal }
+  STR_RC_OFS   = -12;
   STR_LEN_OFS  = -8;
   STR_CAP_OFS  = -4;
   DA_HDR_SIZE  = 16;   { element hook, RefCount, Length }
   DA_HOOK_OFS  = -16;
-  DA_RC_OFS    = -8;   { Int32; -1 = immortal }
+  DA_RC_OFS    = -8;
   DA_LEN_OFS   = -4;
 type
-  TStrLen = Integer;   { the width of a string header's Length and Capacity }
+  TStrLen = Integer;
   PStrLen = ^TStrLen;
-  TDaLen  = Integer;   { the width of a dynamic-array header's Length }
+  TDaLen  = Integer;
   PDaLen  = ^TDaLen;
+{$ENDIF}
 
 const
   NS_PER_SEC = 1000000000;

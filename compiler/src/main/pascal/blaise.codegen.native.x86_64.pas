@@ -479,7 +479,7 @@ type
     procedure EmitArrayConstData(ABlock: TBlock; const APrefix: string);
     { Escape a Pascal string for use inside an AS .ascii directive. }
     function AsmEscapeString(const AStr: string): string;
-    { Emit a leaq __sN+12(%rip), %rax for the string literal AValue,
+    { Emit a leaq __sN+STR_LIT_HDR(%rip), %rax for the string literal AValue,
       registering a new .rodata blob if not yet seen. }
     procedure EmitStrLitAddr(const AValue: string);
     { Emit an initialised global's data slot from its folded const value
@@ -1131,6 +1131,8 @@ type
       signedness — used after a call (whose ABI return is 32-bit) and to
       implement an explicit narrowing/widening type cast. }
     procedure EmitNarrowToType(AType: TTypeDesc);
+    { The header of an immortal string literal of ALen bytes. }
+    procedure EmitStrLitHeader(ALen: Int64);
     { Evaluate an integer argument the RTL takes as Int64 (a Copy, PosEx,
       Delete or SetLength count, a GetMem size) into %rax, extended from
       its own width. }
@@ -2212,7 +2214,7 @@ begin
     Self.Emit(#9'pushq %r13');
     Self.Emit(#9'pushq %r14');
     Self.Emit(#9'movq %rdi, %rbx');
-    Self.Emit(#9'movslq %esi, %r12');
+    Self.Emit(#9'movq %rsi, %r12');
     Self.Emit(#9'movl %edx, %r13d');
     Self.Emit(LLoop + ':');
     Self.Emit(#9'testq %r12, %r12');
@@ -2605,7 +2607,7 @@ begin
       for J := 0 to CD.ArrayElements.Count - 1 do
       begin
         Idx := FStrLits.IndexOf(CD.ArrayElements[J]);
-        Self.Emit(Format(#9'.quad __s%d + 12', [Idx]));
+        Self.Emit(Format(#9'.quad __s%d + %d', [Idx, STR_LIT_HDR]));
       end;
       Exit;
     end;
@@ -2646,7 +2648,8 @@ begin
     Exit;
   end;
 
-  { String scalar: point at an immortal static string header (__sN + 12). }
+  { String scalar: point at an immortal static string's data
+    (__sN + STR_LIT_HDR). }
   if AType.IsString() then
   begin
     if FStrLits.IndexOf(CD.StrVal) < 0 then
@@ -2656,7 +2659,7 @@ begin
     if Copy(AName, 0, 2) <> '.L' then
       Self.Emit(Self.GlobalBindDir(AName) + AName);
     Self.Emit(AName + ':');
-    Self.Emit(Format(#9'.quad __s%d + 12', [Idx]));
+    Self.Emit(Format(#9'.quad __s%d + %d', [Idx, STR_LIT_HDR]));
     Exit;
   end;
 
@@ -2893,7 +2896,7 @@ begin
 end;
 
 { Evaluate a string literal: register it in the pool if new, then emit
-  leaq __sN+12(%rip), %rax so %rax holds the Blaise data pointer. }
+  leaq __sN+STR_LIT_HDR(%rip), %rax so %rax holds the Blaise data pointer. }
 { Assembler data directive for one non-string array-const element of the named
   element type.  Honours the element's real width (Boolean/Byte -> .byte,
   Int64/pointer -> .quad, ...) so the emitted stride matches the subscript-read
@@ -2944,7 +2947,7 @@ begin
       for K := 0 to CD.ArrayElements.Count - 1 do
       begin
         Idx := FStrLits.IndexOf(CD.ArrayElements[K]);
-        Self.Emit(Format(#9'.quad __s%d + 12', [Idx]));
+        Self.Emit(Format(#9'.quad __s%d + %d', [Idx, STR_LIT_HDR]));
       end;
     end
     else
@@ -3022,7 +3025,7 @@ begin
       for J := 0 to CD.ArrayElements.Count - 1 do
       begin
         Idx := FStrLits.IndexOf(CD.ArrayElements[J]);
-        Self.Emit(Format(#9'.quad __s%d + 12', [Idx]));
+        Self.Emit(Format(#9'.quad __s%d + %d', [Idx, STR_LIT_HDR]));
       end;
     end
     else
@@ -3062,7 +3065,7 @@ begin
         for K := 0 to CD.ArrayElements.Count - 1 do
         begin
           Idx := FStrLits.IndexOf(CD.ArrayElements[K]);
-          Self.Emit(Format(#9'.quad __s%d + 12', [Idx]));
+          Self.Emit(Format(#9'.quad __s%d + %d', [Idx, STR_LIT_HDR]));
         end;
       end
       else
@@ -3126,7 +3129,7 @@ begin
           for M := 0 to CD.ArrayElements.Count - 1 do
           begin
             Idx := FStrLits.IndexOf(CD.ArrayElements[M]);
-            Self.Emit(Format(#9'.quad __s%d + 12', [Idx]));
+            Self.Emit(Format(#9'.quad __s%d + %d', [Idx, STR_LIT_HDR]));
           end;
         end
         else
@@ -3150,13 +3153,22 @@ begin
   Idx := FStrLits.IndexOf(AValue);
   if Idx < 0 then
     Idx := FStrLits.Add(AValue);
-  Self.Emit(Format(#9'leaq __s%d + 12(%%rip), %%rax', [Idx]));
+  Self.Emit(Format(#9'leaq __s%d + %d(%%rip), %%rax', [Idx, STR_LIT_HDR]));
 end;
 
-{ Emit all accumulated string literal blobs to .rodata.
-  Each blob: 4-byte refcnt=-1 (immortal), 4-byte length, 4-byte capacity,
-  then the ASCII bytes, then a NUL terminator.
-  The Blaise string data pointer convention: str_ptr = &header + 12. }
+{ The header of an immortal string literal, in runtime.str's layout:
+  Capacity, pad, RefCount -1, Length.  The data follows at label +
+  STR_LIT_HDR. }
+procedure TX86_64Backend.EmitStrLitHeader(ALen: Int64);
+begin
+  Self.Emit(Format(#9'.quad %d', [ALen]));    { capacity }
+  Self.Emit(#9'.long 0');
+  Self.Emit(#9'.long -1');                     { refcount = immortal }
+  Self.Emit(Format(#9'.quad %d', [ALen]));    { length }
+end;
+
+{ Emit all accumulated string literal blobs to .rodata: each a header
+  (EmitStrLitHeader), the bytes and a NUL terminator. }
 procedure TX86_64Backend.EmitStrLitSection;
 var
   I:   Integer;
@@ -3167,11 +3179,9 @@ begin
   for I := 0 to FStrLits.Count - 1 do
   begin
     Len := Length(FStrLits.Strings[I]);
-    Self.Emit('.balign 4');
+    Self.Emit('.balign 8');
     Self.Emit(Format('__s%d:', [I]));
-    Self.Emit(Format(#9'.long -1', []));       { refcnt = immortal }
-    Self.Emit(Format(#9'.long %d', [Len]));    { length }
-    Self.Emit(Format(#9'.long %d', [Len]));    { capacity }
+    Self.EmitStrLitHeader(Len);
     if Len > 0 then
       Self.Emit(Format(#9'.ascii "%s"', [Self.AsmEscapeString(FStrLits.Strings[I])]));
     Self.Emit(#9'.byte 0');                    { NUL terminator }
@@ -3411,18 +3421,16 @@ var
   Len:     Integer;
 begin
   Mangled := NativeMangle(ASymName);
-  Result  := '__cn_' + Mangled + ' + 12';
+  Result  := '__cn_' + Mangled + ' + ' + IntToStr(STR_LIT_HDR);
   { Idempotent: skip if already emitted (MethodAddress and class section may
     both request the same name string). }
   if FClassNameEmitted.ContainsKey(Mangled) then
     Exit;
   FClassNameEmitted.Add(Mangled, True);
   Len := Length(AText);
-  Self.Emit('.balign 4');
+  Self.Emit('.balign 8');
   Self.Emit('__cn_' + Mangled + ':');
-  Self.Emit(#9'.long -1');
-  Self.Emit(Format(#9'.long %d', [Len]));
-  Self.Emit(Format(#9'.long %d', [Len]));
+  Self.EmitStrLitHeader(Len);
   Self.Emit(Format(#9'.ascii "%s"', [AText]));
   Self.Emit(#9'.byte 0');
 end;
@@ -3489,7 +3497,7 @@ begin
       begin
         AU := TAttributeUse(MD.AttrUses.Items[K]);
         if AU.ThunkDecl = nil then Continue;
-        Self.Emit(Format(#9'.quad __cn_%s + 12', [NativeMangle(MD.Name)]));
+        Self.Emit(Format(#9'.quad __cn_%s + %d', [NativeMangle(MD.Name), STR_LIT_HDR]));
         Self.Emit(#9'.quad typeinfo_' + Self.ClassSymFor(AU.ResolvedClassType,
         AU.ResolvedClassName));
         Self.Emit(#9'.quad ' + FuncSymbolFromDecl(TMethodDecl(AU.ThunkDecl)));
@@ -4139,11 +4147,11 @@ begin
       begin
         MD := TMethodDecl(CD.Methods.Items[J]);
         if not MD.IsPublished then Continue;
-        Self.Emit(Format(#9'.quad __cn_%s + 12', [NativeMangle(MD.Name)]));
+        Self.Emit(Format(#9'.quad __cn_%s + %d', [NativeMangle(MD.Name), STR_LIT_HDR]));
         Self.Emit(Format(#9'.quad %s', [MethodEmitNameNative(MD, TD.Name, MD.Name)]));
         if MethodParamSig(MD) <> '' then
-          Self.Emit(Format(#9'.quad __cn_%s + 12',
-            [NativeMangle('__sig_' + TD.Name + '_' + MD.Name)]))
+          Self.Emit(Format(#9'.quad __cn_%s + %d',
+            [NativeMangle('__sig_' + TD.Name + '_' + MD.Name), STR_LIT_HDR]))
         else
           Self.Emit(#9'.quad 0');
       end;
@@ -4171,7 +4179,7 @@ begin
     Self.Emit('typeinfo_TObject:');
     Self.Emit(#9'.quad 0');          { parent = nil }
     Self.Emit(#9'.quad 0');          { impllist = nil }
-    Self.Emit(#9'.quad __cn_TObject + 12');
+    Self.Emit(Format(#9'.quad __cn_TObject + %d', [STR_LIT_HDR]));
     Self.Emit(#9'.quad 0');          { methods = nil }
     Self.Emit(#9'.quad 8');          { size = 8 (vptr only) }
     Self.Emit(#9'.quad _FieldCleanup_TObject');
@@ -4184,7 +4192,7 @@ begin
     Self.Emit('typeinfo_TCustomAttribute:');
     Self.Emit(#9'.quad typeinfo_TObject');
     Self.Emit(#9'.quad 0');
-    Self.Emit(#9'.quad __cn_TCustomAttribute + 12');
+    Self.Emit(Format(#9'.quad __cn_TCustomAttribute + %d', [STR_LIT_HDR]));
     Self.Emit(#9'.quad 0');
     Self.Emit(#9'.quad 8');
     Self.Emit(#9'.quad _FieldCleanup_TCustomAttribute');
@@ -4243,7 +4251,7 @@ begin
     Self.Emit('typeinfo_' + CSym + ':');
     Self.Emit(#9'.quad ' + ParentStr);
     Self.Emit(#9'.quad ' + ImplStr);
-    Self.Emit(Format(#9'.quad __cn_%s + 12', [NativeMangle(CSym)]));
+    Self.Emit(Format(#9'.quad __cn_%s + %d', [NativeMangle(CSym), STR_LIT_HDR]));
     Self.Emit(#9'.quad ' + MethStr);
     Self.Emit(Format(#9'.quad %d', [RT.TotalSize()]));
     Self.Emit(#9'.quad _FieldCleanup_' + CSym);
@@ -4273,7 +4281,7 @@ begin
     Self.Emit('typeinfo_' + MName + ':');
     Self.Emit(#9'.quad ' + ParentStr);
     Self.Emit(#9'.quad ' + ImplStr);
-    Self.Emit(Format(#9'.quad __cn_%s + 12', [MName]));
+    Self.Emit(Format(#9'.quad __cn_%s + %d', [MName, STR_LIT_HDR]));
     Self.Emit(#9'.quad 0');
     Self.Emit(Format(#9'.quad %d', [RT.TotalSize()]));
     Self.Emit(#9'.quad _FieldCleanup_' + MName);
@@ -7804,7 +7812,6 @@ begin
   end;
   Self.Emit(#9'movq %rax, %rdi');
   Self.Emit(#9'callq _DynArrayLength');
-  Self.Emit(#9'movslq %eax, %rax');
   if Owned then
   begin
     Self.Emit(#9'movq %rax, (%rsp)');    { the length }
@@ -9226,8 +9233,9 @@ begin
         __cn_ blob directly; variable/call expressions evaluate to a managed
         string whose value is already the data pointer. }
       if TASTExpr(FC.Args.Items[1]) is TStringLiteral then
-        Self.Emit(Format(#9'leaq __cn_%s + 12(%%rip), %%rsi',
-          [NativeMangle(TStringLiteral(TASTExpr(FC.Args.Items[1])).Value)]))
+        Self.Emit(Format(#9'leaq __cn_%s + %d(%%rip), %%rsi',
+          [NativeMangle(TStringLiteral(TASTExpr(FC.Args.Items[1])).Value),
+           STR_LIT_HDR]))
       else
       begin
         Self.EmitExprToEax(TASTExpr(FC.Args.Items[1]));
@@ -9325,7 +9333,6 @@ begin
           { (through the builtin-string path, which disposes a transient
             argument, as Length does) }
           Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StringLength');
-          Self.Emit(#9'movslq %eax, %rax');
           Self.Emit(#9'decq %rax');
         end;
       else
@@ -9417,7 +9424,6 @@ begin
       else
         { String: delegate to RTL. }
         Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StringLength');
-        Self.Emit(#9'movslq %eax, %rax');
       end;
       Exit;
     end;
@@ -9425,7 +9431,6 @@ begin
     begin
       Self.EmitBuiltinStrCall2(TASTExpr(FC.Args.Items[0]),
         TASTExpr(FC.Args.Items[1]), '_StringPos');
-      Self.Emit(#9'movslq %eax, %rax');
       Exit;
     end;
     if SameText(FC.Name, 'Copy') and (FC.Args.Count = 3) then
@@ -9819,7 +9824,6 @@ begin
         Self.Emit(#9'movq (%rsp), %rdi');
         Self.Emit(#9'movq 8(%rsp), %rsi');
         Self.Emit(#9'callq _StringPosEx');
-        Self.Emit(#9'movslq %eax, %rax');
         Self.Emit(#9'movq %rax, 16(%rsp)');
         if ArcBuiltinStrArgOwnsRef(TASTExpr(FC.Args.Items[0])) then
           Self.EmitStrDisposeFromSlot(TASTExpr(FC.Args.Items[0]), '(%rsp)');
@@ -9838,7 +9842,6 @@ begin
       Self.Emit(#9'popq %rsi');
       Self.Emit(#9'popq %rdi');
       Self.Emit(#9'callq _StringPosEx');
-      Self.Emit(#9'movslq %eax, %rax');
       Exit;
     end;
     if SameText(FC.Name, 'UpCase') and (FC.Args.Count = 1) then
@@ -9924,8 +9927,8 @@ begin
         Self.Emit(#9'movq %rax, %rdi');
         Self.Emit(#9'callq _StringAddRef');
       end;
-      Self.EmitExprToEax(TASTExpr(FC.Args.Items[1]));
-      Self.Emit(#9'movl %eax, %esi');
+      Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[1]));
+      Self.Emit(#9'movq %rax, %rsi');
       Self.Emit(#9'movq (%rsp), %rdi');
       Self.Emit(#9'callq _OrdAt');
       Self.Emit(#9'movq %rax, (%rsp)');    { the byte }
@@ -9939,8 +9942,8 @@ begin
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'pushq %rax');
-      Self.EmitExprToEax(TASTExpr(FC.Args.Items[1]));
-      Self.Emit(#9'movl %eax, %esi');
+      Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[1]));
+      Self.Emit(#9'movq %rax, %rsi');
       Self.Emit(#9'popq %rdi');
       Self.Emit(#9'callq _OrdAt');
       Exit;
@@ -11261,8 +11264,8 @@ begin
     SAE := TStringSubscriptExpr(AExpr);
     Self.EmitExprToEax(SAE.StrExpr);
     Self.Emit(#9'pushq %rax');
-    Self.EmitExprToEax(SAE.IndexExpr);
-    Self.Emit(#9'movl %eax, %esi');
+    Self.EmitInt64ArgToRax(SAE.IndexExpr);
+    Self.Emit(#9'movq %rax, %rsi');
     Self.Emit(#9'popq %rdi');
     Self.Emit(#9'callq _OrdAt');
     Self.Emit(#9'movslq %eax, %rax');
@@ -12337,7 +12340,7 @@ begin
         [Self.ClassSymOf(FAE.ResolvedType)]));
       SetI := FStrLits.IndexOf(Self.LeakSiteUnit());
       if SetI < 0 then SetI := FStrLits.Add(Self.LeakSiteUnit());
-      Self.Emit(Format(#9'leaq __s%d+12(%%rip), %%rdx', [SetI]));
+      Self.Emit(Format(#9'leaq __s%d+%d(%%rip), %%rdx', [SetI, STR_LIT_HDR]));
       Self.Emit(Format(#9'movq $%d, %%rcx', [FAE.Line]));
       Self.Emit(#9'callq _LeakTrackerRegister');
       Self.Emit(#9'movq %rbx, %rax');
@@ -12679,7 +12682,7 @@ begin
         [Self.ClassSymOf(RT)]));
       SetI := FStrLits.IndexOf(Self.LeakSiteUnit());
       if SetI < 0 then SetI := FStrLits.Add(Self.LeakSiteUnit());
-      Self.Emit(Format(#9'leaq __s%d+12(%%rip), %%rdx', [SetI]));
+      Self.Emit(Format(#9'leaq __s%d+%d(%%rip), %%rdx', [SetI, STR_LIT_HDR]));
       Self.Emit(Format(#9'movq $%d, %%rcx', [ACall.Line]));
       Self.Emit(#9'callq _LeakTrackerRegister');
       Self.Emit(#9'movq %rbx, %rax');
@@ -13909,7 +13912,6 @@ begin
     Self.Emit(#9'pushq %rax');         { push ptr }
     Self.Emit(#9'movq %rax, %rdi');
     Self.Emit(#9'callq _DynArrayLength');
-    Self.Emit(#9'movslq %eax, %rax');
     Self.Emit(#9'decq %rax');          { high = length - 1 }
     Self.Emit(#9'pushq %rax');         { push high }
   end
@@ -14379,7 +14381,6 @@ begin
     Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [ADataOff]));
     Self.Emit(#9'movq %rax, %rdi');
     Self.Emit(#9'callq _DynArrayLength');
-    Self.Emit(#9'movslq %eax, %rax');
     Self.Emit(#9'decq %rax');
     Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [AHighOff]));
   end
@@ -16202,7 +16203,7 @@ begin
       end;
       Self.Emit(Format(#9'movq %%rax, %s', [CollTmp]));
     end;
-    Self.Emit(Format(#9'movl $0, %s', [IdxOp]));
+    Self.Emit(Format(#9'movq $0, %s', [IdxOp]));
 
     Self.Emit(LCond + ':');
     if AStmt.IsOpenArrayIter then
@@ -16210,7 +16211,7 @@ begin
       { inclusive bound; an empty open array carries High = -1 }
       Self.Emit(Format(#9'movq %s, %%rcx',
         [Self.VarOperand(TIdentExpr(AStmt.CollExpr).Name + '_high')]));
-      Self.Emit(Format(#9'movslq %s, %%rax', [IdxOp]));
+      Self.Emit(Format(#9'movq %s, %%rax', [IdxOp]));
       Self.Emit(#9'cmpq %rcx, %rax');
       Self.Emit(#9'jle ' + LBody);
     end
@@ -16223,9 +16224,9 @@ begin
         Self.EmitExprToEax(AStmt.CollExpr);
       Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq _DynArrayLength');
-      Self.Emit(#9'movl %eax, %ecx');
-      Self.Emit(Format(#9'movl %s, %%eax', [IdxOp]));
-      Self.Emit(#9'cmpl %ecx, %eax');
+      Self.Emit(#9'movq %rax, %rcx');
+      Self.Emit(Format(#9'movq %s, %%rax', [IdxOp]));
+      Self.Emit(#9'cmpq %rcx, %rax');
       Self.Emit(#9'jl ' + LBody);
     end;
     Self.Emit(#9'jmp ' + LEnd);
@@ -16246,7 +16247,7 @@ begin
     else
       Self.EmitExprToEax(AStmt.CollExpr);
     Self.Emit(#9'movq %rax, %rcx');
-    Self.Emit(Format(#9'movslq %s, %%rax', [IdxOp]));
+    Self.Emit(Format(#9'movq %s, %%rax', [IdxOp]));
     Self.Emit(Format(#9'imulq $%d, %%rax, %%rax', [ElemSize]));
     Self.Emit(#9'addq %rcx, %rax');
     if (ElemT.Kind = tyRecord) or (ElemT.RawSize() > 8) then
@@ -16276,9 +16277,9 @@ begin
     FBreakLabels.Pop();
 
     Self.Emit(LNext + ':');
-    Self.Emit(Format(#9'movl %s, %%eax', [IdxOp]));
-    Self.Emit(#9'addl $1, %eax');
-    Self.Emit(Format(#9'movl %%eax, %s', [IdxOp]));
+    Self.Emit(Format(#9'movq %s, %%rax', [IdxOp]));
+    Self.Emit(#9'addq $1, %rax');
+    Self.Emit(Format(#9'movq %%rax, %s', [IdxOp]));
     Self.Emit(#9'jmp ' + LCond);
     Self.Emit(LEnd + ':');
     if CollTmp <> '' then
@@ -16303,7 +16304,7 @@ begin
     LEnd  := Self.NewLabel('fiend');
 
     StrTmp := Self.EmitForInStrOnce(AStmt);
-    Self.Emit(Format(#9'movl $0, %s', [IdxOp]));
+    Self.Emit(Format(#9'movq $0, %s', [IdxOp]));
 
     Self.Emit(LCond + ':');
     Self.EmitForInStrToRax(AStmt, StrTmp);
@@ -16312,10 +16313,10 @@ begin
     Self.Emit(#9'xorl %ecx, %ecx');
     Self.Emit(#9'testq %rax, %rax');
     Self.Emit(#9'je ' + LCond + '_nil');
-    Self.Emit(#9'movl -8(%rax), %ecx');
+    Self.Emit(Format(#9'movq %d(%%rax), %%rcx', [STR_LEN_OFS]));
     Self.Emit(LCond + '_nil:');
-    Self.Emit(Format(#9'movl %s, %%eax', [IdxOp]));
-    Self.Emit(#9'cmpl %ecx, %eax');
+    Self.Emit(Format(#9'movq %s, %%rax', [IdxOp]));
+    Self.Emit(#9'cmpq %rcx, %rax');
     Self.Emit(#9'jl ' + LBody);
     Self.Emit(#9'jmp ' + LEnd);
 
@@ -16327,7 +16328,7 @@ begin
 
     Self.EmitForInStrToRax(AStmt, StrTmp);
     Self.Emit(#9'movq %rax, %rdi');
-    Self.Emit(Format(#9'movl %s, %%esi', [IdxOp]));
+    Self.Emit(Format(#9'movq %s, %%rsi', [IdxOp]));
     Self.Emit(#9'callq _Utf8DecodeAt');
     Self.Emit(Format(#9'movl %%eax, %s', [Self.VarOperand(AStmt.VarName)]));
     Self.Emit(#9'shrq $32, %rax');
@@ -16340,9 +16341,10 @@ begin
     FBreakLabels.Pop();
 
     Self.Emit(LNext + ':');
-    Self.Emit(Format(#9'movl %s, %%eax', [IdxOp]));
-    Self.Emit(Format(#9'addl %s, %%eax', [Self.VarOperand(AStmt.AdvVarName)]));
-    Self.Emit(Format(#9'movl %%eax, %s', [IdxOp]));
+    Self.Emit(Format(#9'movq %s, %%rax', [IdxOp]));
+    Self.Emit(Format(#9'movslq %s, %%rcx', [Self.VarOperand(AStmt.AdvVarName)]));
+    Self.Emit(#9'addq %rcx, %rax');
+    Self.Emit(Format(#9'movq %%rax, %s', [IdxOp]));
     Self.Emit(#9'jmp ' + LCond);
     Self.Emit(LEnd + ':');
     Self.EmitForInStrRelease(StrTmp);
@@ -16353,7 +16355,7 @@ begin
   begin
     { ---- String byte-iteration ----
       String data pointer layout: [data...]
-      Length at data_ptr - 8 (4-byte integer).
+      Length at data_ptr + STR_LEN_OFS (an Int64).
       idx runs 0..length-1.  Element = byte at data_ptr + idx. }
     IdxOp := Self.VarOperand(AStmt.IdxVarName);
     LCond := Self.NewLabel('ficond');
@@ -16362,7 +16364,7 @@ begin
     LEnd  := Self.NewLabel('fiend');
 
     StrTmp := Self.EmitForInStrOnce(AStmt);
-    Self.Emit(Format(#9'movl $0, %s', [IdxOp]));
+    Self.Emit(Format(#9'movq $0, %s', [IdxOp]));
 
     Self.Emit(LCond + ':');
     { Load string length from data_ptr - 8 }
@@ -16372,10 +16374,10 @@ begin
     Self.Emit(#9'xorl %ecx, %ecx');
     Self.Emit(#9'testq %rax, %rax');
     Self.Emit(#9'je ' + LCond + '_nil');
-    Self.Emit(#9'movl -8(%rax), %ecx');
+    Self.Emit(Format(#9'movq %d(%%rax), %%rcx', [STR_LEN_OFS]));
     Self.Emit(LCond + '_nil:');
-    Self.Emit(Format(#9'movl %s, %%eax', [IdxOp]));
-    Self.Emit(#9'cmpl %ecx, %eax');
+    Self.Emit(Format(#9'movq %s, %%rax', [IdxOp]));
+    Self.Emit(#9'cmpq %rcx, %rax');
     Self.Emit(#9'jl ' + LBody);
     Self.Emit(#9'jmp ' + LEnd);
 
@@ -16388,7 +16390,7 @@ begin
     { Load byte at data_ptr + idx }
     Self.EmitForInStrToRax(AStmt, StrTmp);
     Self.Emit(#9'movq %rax, %rcx');
-    Self.Emit(Format(#9'movslq %s, %%rax', [IdxOp]));
+    Self.Emit(Format(#9'movq %s, %%rax', [IdxOp]));
     Self.Emit(#9'addq %rcx, %rax');
     Self.Emit(#9'movzbq (%rax), %rax');
     Self.EmitForInAssignElem(AStmt);
@@ -16400,9 +16402,9 @@ begin
     FBreakLabels.Pop();
 
     Self.Emit(LNext + ':');
-    Self.Emit(Format(#9'movl %s, %%eax', [IdxOp]));
-    Self.Emit(#9'addl $1, %eax');
-    Self.Emit(Format(#9'movl %%eax, %s', [IdxOp]));
+    Self.Emit(Format(#9'movq %s, %%rax', [IdxOp]));
+    Self.Emit(#9'addq $1, %rax');
+    Self.Emit(Format(#9'movq %%rax, %s', [IdxOp]));
     Self.Emit(#9'jmp ' + LCond);
     Self.Emit(LEnd + ':');
     Self.EmitForInStrRelease(StrTmp);
@@ -23534,7 +23536,6 @@ begin
           Self.Emit(#9'pushq %rax');         { push ptr }
           Self.Emit(#9'movq %rax, %rdi');
           Self.Emit(#9'callq _DynArrayLength');
-          Self.Emit(#9'movslq %eax, %rax');
           Self.Emit(#9'decq %rax');          { high = length - 1 }
           Self.Emit(#9'pushq %rax');         { push high }
         end
@@ -23701,7 +23702,6 @@ begin
           Inc(SlotOff, 8);
           Self.Emit(#9'movq %rax, %rdi');
           Self.Emit(#9'callq _DynArrayLength');
-          Self.Emit(#9'movslq %eax, %rax');
           Self.Emit(#9'decq %rax');          { high = length - 1 }
           Self.Emit(Format(#9'movq %%rax, %d(%%rsp)', [SlotOff]));
           Inc(SlotOff, 8);

@@ -498,14 +498,14 @@ procedure TOPDFEmitter.EmitUtf8Str;
 const
   CNAME    = 'Utf8String';
   { Data-pointer convention: variable holds pointer to char data.
-    The 12-byte header lives before it at negative offsets:
-      data_ptr − 12 = RefCount
-      data_ptr −  8 = Length    (byte count = character count for ASCII range)
-      data_ptr −  4 = Capacity
+    The 24-byte header lives before it at negative offsets (runtime.str):
+      data_ptr − 24 = Capacity  (Int64)
+      data_ptr − 12 = RefCount  (Int32)
+      data_ptr −  8 = Length    (Int64; byte count; the LEN64 header flag)
     Encoding is always UTF-8; no code-page or element-size fields. }
   RC_OFFSET  = -12;
   LEN_OFFSET = -8;
-  CAP_OFFSET = -4;
+  CAP_OFFSET = -24;
 var
   RecSize: Integer;
 begin
@@ -513,7 +513,7 @@ begin
   MarkEmitted(CNAME);
   RecSize := 12 + Length(CNAME);   { TDefUtf8String fixed part = 12 bytes }
   L('');
-  L('    # recUtf8Str: Utf8String (data_ptr-12=RC, data_ptr-8=Len, data_ptr-4=Cap, data_ptr+0=chars)');
+  L('    # recUtf8Str: Utf8String (data_ptr-24=Cap, data_ptr-12=RC, data_ptr-8=Len, data_ptr+0=chars)');
   EmitRecHdr(REC_UTF8STR, RecSize);
   L('    .4byte ' + IntToStr(GetOrAllocTypeID(CNAME)) + '  # TypeID');
   L('    .2byte ' + IntToStr(RC_OFFSET)  + '  # RefCountOffset');
@@ -901,7 +901,11 @@ begin
     'OPDF' magic headers (the next unit's block).  This is what makes per-unit
     .opdf sections concatenate cleanly at link time.  pdr ignores this field. }
   L('    .4byte 0                        # TotalRecords (0 = stream-terminated)');
-  L('    .4byte 3                        # Flags: HAS_DIRECTORY or DYNARRAY_LEN32');
+  { Flags: HAS_DIRECTORY (1) or LEN64 (4) -- a string's and a dynamic
+    array's Length is an Int64 at data_ptr - 8 (type standardisation 4.5).
+    LEN64 replaces DYNARRAY_LEN32 (2), the Int32 dynamic-array length at
+    data_ptr - 4 that earlier compilers set. }
+  L('    .4byte 5                        # Flags: HAS_DIRECTORY or LEN64');
 end;
 
 procedure TOPDFEmitter.EmitFunctionScope_Main(AScopeID, ADeclIdx: Integer);

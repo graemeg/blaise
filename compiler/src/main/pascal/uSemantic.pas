@@ -13751,8 +13751,8 @@ begin
       begin
         SynthDecl := TVarDecl.Create();
         SynthDecl.Names.Add(ForInS.IdxVarName);
-        SynthDecl.TypeName    := 'Integer';
-        SynthDecl.ResolvedType := FTable.TypeInteger;
+        SynthDecl.TypeName    := 'Int64';
+        SynthDecl.ResolvedType := FTable.TypeInt64;
         SynthDecl.IsGlobal    := False;
         FCurrentLocalBlock.Decls.Add(SynthDecl);
       end;
@@ -13854,15 +13854,15 @@ begin
       ForInS.IsDynArrayIter := True;
       ForInS.ResolvedVarType := ElemType;
 
-      { Inject synthetic index slot __idx_N (Integer) }
+      { Inject synthetic index slot __idx_N (Int64) }
       ForInS.IdxVarName := '__idx_' + IntToStr(FForInCounter);
       Inc(FForInCounter);
       if FCurrentLocalBlock <> nil then
       begin
         SynthDecl := TVarDecl.Create();
         SynthDecl.Names.Add(ForInS.IdxVarName);
-        SynthDecl.TypeName    := 'Integer';
-        SynthDecl.ResolvedType := FTable.TypeInteger;
+        SynthDecl.TypeName    := 'Int64';
+        SynthDecl.ResolvedType := FTable.TypeInt64;
         SynthDecl.IsGlobal    := False;
         FCurrentLocalBlock.Decls.Add(SynthDecl);
       end;
@@ -13900,8 +13900,8 @@ begin
       begin
         SynthDecl := TVarDecl.Create();
         SynthDecl.Names.Add(ForInS.IdxVarName);
-        SynthDecl.TypeName    := 'Integer';
-        SynthDecl.ResolvedType := FTable.TypeInteger;
+        SynthDecl.TypeName    := 'Int64';
+        SynthDecl.ResolvedType := FTable.TypeInt64;
         SynthDecl.IsGlobal    := False;
         FCurrentLocalBlock.Decls.Add(SynthDecl);
       end;

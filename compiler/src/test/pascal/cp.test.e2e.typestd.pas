@@ -75,9 +75,10 @@ type
       value intact: Pos's -1, Ord of a negative Integer, High of an empty
       string.  Copy and SetLength take an Int count without truncating it. }
     procedure TestRun_BuiltinResults_AreInt;
-    { Phase 4.4: storage is still 32-bit, so SetLength rejects a length
-      above High(Int32) with a run-time error instead of truncating it }
-    procedure TestRun_SetLength_AboveInt32_RunTimeError;
+    { Phase 4.5: the headers store 64-bit lengths, so a dynamic array and
+      a string above 2^31 elements are built, indexed past 2^31, measured
+      and released }
+    procedure TestRun_LengthAboveInt32_Works;
     { Phase 4.4: Length, SizeOf and Ord of an unsigned ordinal cannot be
       negative, so they mix with a UInt64 without a cast, as the Integer
       they were did -- an FNV-1a hash over Ord of each character }
@@ -655,27 +656,30 @@ begin
     '4' + #10, 0);
 end;
 
-procedure TE2ETypeStdTests.TestRun_SetLength_AboveInt32_RunTimeError;
+procedure TE2ETypeStdTests.TestRun_LengthAboveInt32_Works;
 const
   Src = '''
     program P;
-    var A: array of Byte; N: Int64;
+    var A: array of Byte; S: string; N: Int64;
     begin
-      N := (Int64(1) shl 32) + 1;
+      N := (Int64(1) shl 31) + 16;
       SetLength(A, N);
-      WriteLn('not reached ', Length(A))
+      A[N - 1] := 7;
+      WriteLn(Length(A), ' ', High(A), ' ', A[High(A)], ' ', A[0]);
+      SetLength(A, 0);
+      SetLength(S, N);
+      S[N - 1] := 'y';
+      WriteLn(Length(S), ' ', Copy(S, N - 1, 1));
+      S := '';
+      WriteLn('released')
     end.
     ''';
-var
-  Output: string;
-  RCode: Integer;
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
-  AssertTrue('compiles', CompileAndRun(Src, Output, RCode));
-  AssertTrue('exit code is non-zero', RCode <> 0);
-  AssertTrue('reports the limit: ' + Output,
-    Pos('SetLength: length above High(Int32)', Output) >= 0);
-  AssertTrue('does not truncate: ' + Output, Pos('not reached', Output) < 0);
+  AssertRunsOnAll(Src,
+    '2147483664 2147483663 7 0' + #10 +
+    '2147483664 y' + #10 +
+    'released' + #10, 0);
 end;
 
 procedure TE2ETypeStdTests.TestRun_NonNegativeInt_MixesWithUInt64;

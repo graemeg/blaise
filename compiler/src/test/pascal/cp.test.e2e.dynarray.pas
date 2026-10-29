@@ -1065,7 +1065,7 @@ begin
     end;
     function RC: Integer;
     begin
-      Result := PInt32(Pointer(@G[0]) - 8)^;
+      Result := PInt32(Pointer(@G[0]) - 12)^;   { the header's RefCount }
     end;
     procedure UseArr(A: TIntArr); begin end;
     procedure UseConst(const A: TIntArr); begin end;

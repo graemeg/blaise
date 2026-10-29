@@ -39,6 +39,14 @@ uses
   SysUtils, Classes, contnrs, uAST, uSymbolTable, blaise.codegen, strutils,
   blaise.codegen.target, uDebugFacts;
 
+const
+  { The string header the RTL lays out (runtime.str's layout block):
+    Capacity (8), pad (4), RefCount (4, -1 = immortal), Length (8), then
+    the data.  STR_LIT_HDR is the bytes from an immortal literal's label
+    to its data pointer. }
+  STR_LIT_HDR = 24;
+  STR_LEN_OFS = -8;    { the Int64 Length, from the data pointer }
+
 type
   ENativeCodeGenError = class(Exception);
 

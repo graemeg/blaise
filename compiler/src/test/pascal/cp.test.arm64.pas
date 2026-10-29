@@ -641,9 +641,10 @@ begin
     immortal string header (refcnt/len/cap — same layout as x86-64). }
   AssertTrue('adrp page', Pos('adrp x0, __s0@PAGE', AsmT) >= 0);
   AssertTrue('add pageoff', Pos('add x0, x0, __s0@PAGEOFF', AsmT) >= 0);
-  AssertTrue('data pointer past the 12-byte header',
-    Pos(#9'add x0, x0, #12', AsmT) >= 0);
-  AssertTrue('immortal refcnt', Pos(#9'.word -1', AsmT) >= 0);
+  AssertTrue('data pointer past the 24-byte header',
+    Pos(#9'add x0, x0, #24', AsmT) >= 0);
+  AssertTrue('immortal refcnt after the capacity and pad',
+    Pos(#9'.quad 8'#10#9'.word 0'#10#9'.word -1'#10#9'.quad 8', AsmT) >= 0);
 end;
 
 procedure TArm64BackendTests.TestHello_RtlCallsAndEpilogue;
@@ -4181,7 +4182,7 @@ begin
   Body := Copy(AsmT, P, Length(AsmT) - P);
 
   { the length header read is present ... }
-  LdurP := Pos(#9'ldur w0, [x0, #-8]', Body);
+  LdurP := Pos(#9'ldur x0, [x0, #-8]', Body);
   AssertTrue('the length header read is emitted', LdurP >= 0);
 
   { ... and it is preceded by a cbz nil guard (the guard branches around the
@@ -6966,7 +6967,7 @@ begin
   { dyn-array iteration re-reads the length each pass }
   AssertTrue('dyn length', Pos(#9'bl __DynArrayLength', AsmT) >= 0);
   { string byte-iteration: length at dataptr-8, byte loads }
-  AssertTrue('string length read', Pos(#9'ldur w1, [x0, #-8]', AsmT) >= 0);
+  AssertTrue('string length read', Pos(#9'ldur x1, [x0, #-8]', AsmT) >= 0);
   AssertTrue('string byte load', Pos(#9'ldrb w0, [x0]', AsmT) >= 0);
   { set iteration: mask bit test per ordinal }
   AssertTrue('set bit test', Pos(#9'lsr x0, x0, x1', AsmT) >= 0);
