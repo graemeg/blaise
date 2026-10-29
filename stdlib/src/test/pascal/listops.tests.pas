@@ -194,7 +194,7 @@ end;
 procedure TListOpsTests.TestBinarySearch_HitAndMiss;
 var
   L: TList<Integer>;
-  Idx: Integer;
+  Idx: Int;
 begin
   L := MakeInts(1, 2, 3);
   L.Add(5);

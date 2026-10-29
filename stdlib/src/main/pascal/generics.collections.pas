@@ -25,9 +25,9 @@ type
     MoveNext advances the cursor; Current returns the element at the cursor. }
   TListEnumerator<T> = class
     FData:  ^T;
-    FIndex: Integer;
-    FCount: Integer;
-    constructor Create(AData: ^T; ACount: Integer);
+    FIndex: Int;
+    FCount: Int;
+    constructor Create(AData: ^T; ACount: Int);
     function MoveNext: Boolean;
     function GetCurrent: T;
     property Current: T read GetCurrent;
@@ -35,8 +35,8 @@ type
 
   TList<T> = class
     FData:     ^T;
-    FCount:    Integer;
-    FCapacity: Integer;
+    FCount:    Int;
+    FCapacity: Int;
     procedure Grow;
     { Build a list from a literal, so a fixed sequence reads as one
       expression instead of a Create plus a run of Add calls:
@@ -48,10 +48,10 @@ type
       every occurrence.  The result is an ordinary mutable list. }
     static function From(const AItems: array of T): TList<T>;
     procedure Add(Value: T);
-    function  Get(AIndex: Integer): T;
-    procedure SetItem(AIndex: Integer; Value: T);
-    function  IndexOf(const Value: T): Integer;
-    procedure Delete(AIndex: Integer);
+    function  Get(AIndex: Int): T;
+    procedure SetItem(AIndex: Int; Value: T);
+    function  IndexOf(const Value: T): Int;
+    procedure Delete(AIndex: Int);
     procedure Clear;
     destructor Destroy; override;
     function  GetEnumerator: TListEnumerator<T>;
@@ -70,21 +70,21 @@ type
       the same comparison. }
     procedure Sort(C: TComparison<T>);
     function  BinarySearch(AItem: T; C: TComparison<T>;
-                           out AIndex: Integer): Boolean;
+                           out AIndex: Int): Boolean;
     { True when the container holds nothing.  Clearer at a call site than
       `Count = 0`, and the guard the raising accessors expect you to use. }
     function  IsEmpty: Boolean;
-    property Count: Integer read FCount;
+    property Count: Int read FCount;
     { Default array property — enables List[i] for read and write. }
-    property Items[AIndex: Integer]: T read Get write SetItem; default;
+    property Items[AIndex: Int]: T read Get write SetItem; default;
   end;
 
   { Generic LIFO stack backed by a dynamic array.  Push/Pop/Peek operate on
     the top of the stack; Count reflects the number of items currently held. }
   TStack<T> = class
     FData:     ^T;
-    FCount:    Integer;
-    FCapacity: Integer;
+    FCount:    Int;
+    FCapacity: Int;
     procedure Grow;
     procedure Push(Value: T);
     function  Pop: T;
@@ -94,7 +94,7 @@ type
     { True when the container holds nothing.  Clearer at a call site than
       `Count = 0`, and the guard the raising accessors expect you to use. }
     function  IsEmpty: Boolean;
-    property Count: Integer read FCount;
+    property Count: Int read FCount;
   end;
 
   { Generic FIFO queue backed by a dynamic circular-buffer array.
@@ -102,10 +102,10 @@ type
     The buffer doubles when full, preserving insertion order. }
   TQueue<T> = class
     FData:     ^T;
-    FCount:    Integer;
-    FCapacity: Integer;
-    FHead:     Integer;
-    FTail:     Integer;
+    FCount:    Int;
+    FCapacity: Int;
+    FHead:     Int;
+    FTail:     Int;
     procedure Grow;
     procedure ReleaseElements;
     procedure Enqueue(Value: T);
@@ -116,7 +116,7 @@ type
     { True when the container holds nothing.  Clearer at a call site than
       `Count = 0`, and the guard the raising accessors expect you to use. }
     function  IsEmpty: Boolean;
-    property Count: Integer read FCount;
+    property Count: Int read FCount;
   end;
 
   { Generic unordered set backed by a dynamic array.  Membership tests use a
@@ -125,15 +125,15 @@ type
     present; Exclude removes it. }
   TSet<T> = class
     FData:      ^T;
-    FCount:     Integer;
-    FCapacity:  Integer;
-    FHashSlots: ^Integer;
-    FHashCap:   Integer;
+    FCount:     Int;
+    FCapacity:  Int;
+    FHashSlots: ^Int;
+    FHashCap:   Int;
     procedure Grow;
     procedure HashInvalidate;
-    procedure HashInsertIdx(AIdx: Integer);
+    procedure HashInsertIdx(AIdx: Int);
     procedure HashRebuild;
-    function  IndexOf(const Value: T): Integer;
+    function  IndexOf(const Value: T): Int;
     procedure Include(Value: T);
     procedure Exclude(Value: T);
     function  Contains(const Value: T): Boolean;
@@ -156,7 +156,7 @@ type
     { True when the container holds nothing.  Clearer at a call site than
       `Count = 0`, and the guard the raising accessors expect you to use. }
     function  IsEmpty: Boolean;
-    property Count: Integer read FCount;
+    property Count: Int read FCount;
   end;
 
   { Generic map interface: common contract for dictionary-like types. }
@@ -174,7 +174,7 @@ type
     function  TryGetValue(const Key: K; var Value: V): Boolean;
     function  ContainsKey(const Key: K): Boolean;
     procedure Remove(const Key: K);
-    function  GetCount: Integer;
+    function  GetCount: Int;
   end;
 
   { Generic dictionary backed by two parallel arrays (insertion-ordered
@@ -186,15 +186,15 @@ type
   TDictionary<K, V> = class(IMap<K, V>)
     FKeys:      ^K;
     FValues:    ^V;
-    FCount:     Integer;
-    FCapacity:  Integer;
-    FHashSlots: ^Integer;
-    FHashCap:   Integer;
+    FCount:     Int;
+    FCapacity:  Int;
+    FHashSlots: ^Int;
+    FHashCap:   Int;
     procedure Grow;
     procedure HashInvalidate;
-    procedure HashInsertIdx(AIdx: Integer);
+    procedure HashInsertIdx(AIdx: Int);
     procedure HashRebuild;
-    function  FindKey(const Key: K): Integer;
+    function  FindKey(const Key: K): Int;
     procedure ReleaseEntries;
     { Build a map from two PARALLEL literals -- keys and values positionally
       paired:
@@ -221,12 +221,12 @@ type
     procedure Remove(const Key: K);
     { Drop all entries; keeps the allocated capacity for reuse. }
     procedure Clear;
-    function  GetCount: Integer;
+    function  GetCount: Int;
     destructor Destroy; override;
     { True when the container holds nothing.  Clearer at a call site than
       `Count = 0`, and the guard the raising accessors expect you to use. }
     function  IsEmpty: Boolean;
-    property Count: Integer read FCount;
+    property Count: Int read FCount;
     property Items[Key: K]: V read GetItem write SetItem; default;
   end;
 
@@ -238,15 +238,15 @@ type
   TOrderedDictionary<K, V> = class(IMap<K, V>)
     FKeys:      ^K;
     FValues:    ^V;
-    FCount:     Integer;
-    FCapacity:  Integer;
-    FHashSlots: ^Integer;
-    FHashCap:   Integer;
+    FCount:     Int;
+    FCapacity:  Int;
+    FHashSlots: ^Int;
+    FHashCap:   Int;
     procedure Grow;
     procedure HashInvalidate;
-    procedure HashInsertIdx(AIdx: Integer);
+    procedure HashInsertIdx(AIdx: Int);
     procedure HashRebuild;
-    function  FindKey(const Key: K): Integer;
+    function  FindKey(const Key: K): Int;
     procedure ReleaseEntries;
     { Build a map from two PARALLEL literals -- keys and values positionally
       paired:
@@ -273,17 +273,17 @@ type
     function  TryGetValue(const Key: K; var Value: V): Boolean;
     function  ContainsKey(const Key: K): Boolean;
     procedure Remove(const Key: K);
-    function  GetKey(AIndex: Integer): K;
-    function  GetValue(AIndex: Integer): V;
-    function  GetCount: Integer;
+    function  GetKey(AIndex: Int): K;
+    function  GetValue(AIndex: Int): V;
+    function  GetCount: Int;
     destructor Destroy; override;
     { True when the container holds nothing.  Clearer at a call site than
       `Count = 0`, and the guard the raising accessors expect you to use. }
     function  IsEmpty: Boolean;
-    property Count: Integer read FCount;
+    property Count: Int read FCount;
     property Items[Key: K]: V read GetItem write SetItem; default;
-    property Keys[Index: Integer]: K read GetKey;
-    property Values[Index: Integer]: V read GetValue;
+    property Keys[Index: Int]: K read GetKey;
+    property Values[Index: Int]: V read GetValue;
   end;
 
 { Key hashing for the generic containers.  Monomorphisation resolves
@@ -318,7 +318,7 @@ implementation
 
 function GCHashOf(const AValue: string): Integer; overload;
 var
-  I: Integer;
+  I: Int;
 begin
   { FNV-1a over the bytes; case-sensitive to match '=' on strings. }
   Result := -2128831035;   { FNV offset basis 2166136261 as signed 32-bit }
@@ -371,8 +371,8 @@ end;
 
 procedure TList<T>.Grow;
 var
-  NewCap: Integer;
-  OldCap: Integer;
+  NewCap: Int;
+  OldCap: Int;
 begin
   OldCap := Self.FCapacity;
   if OldCap = 0 then
@@ -386,7 +386,7 @@ end;
 
 function TList<T>.Map<R>(F: TFunc<T, R>): TList<R>;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TList<R>.Create();
   for I := 0 to FCount - 1 do
@@ -395,7 +395,7 @@ end;
 
 function TList<T>.Where(P: TPredicate<T>): TList<T>;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TList<T>.Create();
   for I := 0 to FCount - 1 do
@@ -405,7 +405,7 @@ end;
 
 function TList<T>.Reduce<R>(AInit: R; F: TFunc2<R, T, R>): R;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := AInit;
   for I := 0 to FCount - 1 do
@@ -414,7 +414,7 @@ end;
 
 procedure TList<T>.ForEach(A: TAction<T>);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to FCount - 1 do
     A(Get(I));
@@ -422,7 +422,7 @@ end;
 
 function TList<T>.Any(P: TPredicate<T>): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := False;
   for I := 0 to FCount - 1 do
@@ -432,7 +432,7 @@ end;
 
 function TList<T>.All(P: TPredicate<T>): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := True;
   for I := 0 to FCount - 1 do
@@ -442,7 +442,7 @@ end;
 
 function TList<T>.Find(P: TPredicate<T>; out AValue: T): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := False;
   for I := 0 to FCount - 1 do
@@ -455,7 +455,7 @@ end;
 
 procedure TList<T>.Sort(C: TComparison<T>);
 var
-  I, J: Integer;
+  I, J: Int;
   Cur: T;
 begin
   { Straight insertion: stable (equal keys keep their relative order because
@@ -474,9 +474,10 @@ begin
 end;
 
 function TList<T>.BinarySearch(AItem: T; C: TComparison<T>;
-                               out AIndex: Integer): Boolean;
+                               out AIndex: Int): Boolean;
 var
-  Lo, Hi, Mid, Cmp: Integer;
+  Lo, Hi, Mid: Int;
+  Cmp: Integer;
 begin
   Result := False;
   Lo := 0;
@@ -500,7 +501,7 @@ end;
 
 static function TList<T>.From(const AItems: array of T): TList<T>;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TList<T>.Create();
   for I := Low(AItems) to High(AItems) do
@@ -518,7 +519,7 @@ begin
   Self.FCount := Self.FCount + 1
 end;
 
-function TList<T>.Get(AIndex: Integer): T;
+function TList<T>.Get(AIndex: Int): T;
 var
   Src: ^T;
 begin
@@ -530,7 +531,7 @@ begin
   Result := Src^
 end;
 
-procedure TList<T>.SetItem(AIndex: Integer; Value: T);
+procedure TList<T>.SetItem(AIndex: Int; Value: T);
 var
   Dest: ^T;
 begin
@@ -542,9 +543,9 @@ begin
   Dest^ := Value
 end;
 
-function TList<T>.IndexOf(const Value: T): Integer;
+function TList<T>.IndexOf(const Value: T): Int;
 var
-  I:   Integer;
+  I:   Int;
   Ptr: ^T;
 begin
   Result := -1;
@@ -561,11 +562,11 @@ begin
   end
 end;
 
-procedure TList<T>.Delete(AIndex: Integer);
+procedure TList<T>.Delete(AIndex: Int);
 var
   Src:   ^T;
   Dst:   ^T;
-  I:     Integer;
+  I:     Int;
   Empty: T;
 begin
   { Guard BEFORE the shift: an out-of-range Delete still decremented FCount
@@ -590,7 +591,7 @@ end;
 
 procedure TList<T>.Clear;
 var
-  I:     Integer;
+  I:     Int;
   Slot:  ^T;
   Empty: T;
 begin
@@ -612,7 +613,7 @@ end;
 
 destructor TList<T>.Destroy;
 var
-  I:     Integer;
+  I:     Int;
   Slot:  ^T;
   Empty: T;
 begin
@@ -642,7 +643,7 @@ end;
 { TListEnumerator<T>                                                   }
 { ------------------------------------------------------------------ }
 
-constructor TListEnumerator<T>.Create(AData: ^T; ACount: Integer);
+constructor TListEnumerator<T>.Create(AData: ^T; ACount: Int);
 begin
   Self.FData  := AData;
   Self.FIndex := -1;
@@ -669,8 +670,8 @@ end;
 
 procedure TStack<T>.Grow;
 var
-  NewCap: Integer;
-  OldCap: Integer;
+  NewCap: Int;
+  OldCap: Int;
 begin
   OldCap := Self.FCapacity;
   if OldCap = 0 then
@@ -727,7 +728,7 @@ end;
 
 procedure TStack<T>.Clear;
 var
-  I:     Integer;
+  I:     Int;
   Slot:  ^T;
   Empty: T;
 begin
@@ -750,7 +751,7 @@ end;
 
 destructor TStack<T>.Destroy;
 var
-  I:     Integer;
+  I:     Int;
   Slot:  ^T;
   Empty: T;
 begin
@@ -773,10 +774,10 @@ end;
 
 procedure TQueue<T>.Grow;
 var
-  NewCap: Integer;
-  OldCap: Integer;
+  NewCap: Int;
+  OldCap: Int;
   NewData: ^T;
-  I: Integer;
+  I: Int;
   Src: ^T;
   Dst: ^T;
   Empty: T;
@@ -853,7 +854,7 @@ end;
   (FHead + I) mod FCapacity for I in 0..FCount-1 — not 0..FCount-1. }
 procedure TQueue<T>.ReleaseElements;
 var
-  I:     Integer;
+  I:     Int;
   Slot:  ^T;
   Empty: T;
 begin
@@ -898,8 +899,8 @@ end;
 
 procedure TSet<T>.Grow;
 var
-  NewCap: Integer;
-  OldCap: Integer;
+  NewCap: Int;
+  OldCap: Int;
 begin
   OldCap := Self.FCapacity;
   if OldCap = 0 then
@@ -921,17 +922,17 @@ begin
   Self.FHashCap := 0;
 end;
 
-procedure TSet<T>.HashInsertIdx(AIdx: Integer);
+procedure TSet<T>.HashInsertIdx(AIdx: Int);
 var
-  Slot:  Integer;
-  SlotP: ^Integer;
+  Slot:  Int;
+  SlotP: ^Int;
   EPtr:  ^T;
 begin
   EPtr := Self.FData + AIdx * SizeOf(T);
   Slot := GCHashOf(EPtr^) and (Self.FHashCap - 1);
   while True do
   begin
-    SlotP := Self.FHashSlots + Slot * SizeOf(Integer);
+    SlotP := Self.FHashSlots + Slot * SizeOf(Int);
     if SlotP^ = -1 then
     begin
       SlotP^ := AIdx;
@@ -943,32 +944,32 @@ end;
 
 procedure TSet<T>.HashRebuild;
 var
-  Cap: Integer;
-  I:   Integer;
-  P:   ^Integer;
+  Cap: Int;
+  I:   Int;
+  P:   ^Int;
 begin
   Cap := 16;
   while Cap < Self.FCount * 2 do
     Cap := Cap * 2;
   if Self.FHashSlots <> nil then
     FreeMem(Self.FHashSlots);
-  Self.FHashSlots := GetMem(Cap * SizeOf(Integer));
+  Self.FHashSlots := GetMem(Cap * SizeOf(Int));
   Self.FHashCap   := Cap;
   for I := 0 to Cap - 1 do
   begin
-    P  := Self.FHashSlots + I * SizeOf(Integer);
+    P  := Self.FHashSlots + I * SizeOf(Int);
     P^ := -1;
   end;
   for I := 0 to Self.FCount - 1 do
     Self.HashInsertIdx(I);
 end;
 
-function TSet<T>.IndexOf(const Value: T): Integer;
+function TSet<T>.IndexOf(const Value: T): Int;
 var
-  I:     Integer;
+  I:     Int;
   Ptr:   ^T;
-  Slot:  Integer;
-  SlotP: ^Integer;
+  Slot:  Int;
+  SlotP: ^Int;
 begin
   if Self.FCount >= GCHashThreshold then
   begin
@@ -977,7 +978,7 @@ begin
     Slot := GCHashOf(Value) and (Self.FHashCap - 1);
     while True do
     begin
-      SlotP := Self.FHashSlots + Slot * SizeOf(Integer);
+      SlotP := Self.FHashSlots + Slot * SizeOf(Int);
       if SlotP^ = -1 then
         Exit(-1);
       Ptr := Self.FData + SlotP^ * SizeOf(T);
@@ -1022,8 +1023,8 @@ end;
 
 procedure TSet<T>.Exclude(Value: T);
 var
-  Idx:   Integer;
-  I:     Integer;
+  Idx:   Int;
+  I:     Int;
   Dst:   ^T;
   Src:   ^T;
   Empty: T;
@@ -1055,7 +1056,7 @@ end;
 
 static function TSet<T>.From(const AItems: array of T): TSet<T>;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TSet<T>.Create();
   { Include, not a raw append: the literal may repeat a value and a set
@@ -1067,7 +1068,7 @@ end;
 
 procedure TSet<T>.Clear;
 var
-  I:     Integer;
+  I:     Int;
   Slot:  ^T;
   Empty: T;
 begin
@@ -1089,7 +1090,7 @@ end;
 
 destructor TSet<T>.Destroy;
 var
-  I:     Integer;
+  I:     Int;
   Slot:  ^T;
   Empty: T;
 begin
@@ -1113,8 +1114,8 @@ end;
 
 procedure TDictionary<K, V>.Grow;
 var
-  NewCap: Integer;
-  OldCap: Integer;
+  NewCap: Int;
+  OldCap: Int;
 begin
   OldCap := Self.FCapacity;
   if OldCap = 0 then
@@ -1138,17 +1139,17 @@ begin
   Self.FHashCap := 0;
 end;
 
-procedure TDictionary<K, V>.HashInsertIdx(AIdx: Integer);
+procedure TDictionary<K, V>.HashInsertIdx(AIdx: Int);
 var
-  Slot:  Integer;
-  SlotP: ^Integer;
+  Slot:  Int;
+  SlotP: ^Int;
   KPtr:  ^K;
 begin
   KPtr := Self.FKeys + AIdx * SizeOf(K);
   Slot := GCHashOf(KPtr^) and (Self.FHashCap - 1);
   while True do
   begin
-    SlotP := Self.FHashSlots + Slot * SizeOf(Integer);
+    SlotP := Self.FHashSlots + Slot * SizeOf(Int);
     if SlotP^ = -1 then
     begin
       SlotP^ := AIdx;
@@ -1162,32 +1163,32 @@ end;
   an empty slot terminates every probe chain. }
 procedure TDictionary<K, V>.HashRebuild;
 var
-  Cap: Integer;
-  I:   Integer;
-  P:   ^Integer;
+  Cap: Int;
+  I:   Int;
+  P:   ^Int;
 begin
   Cap := 16;
   while Cap < Self.FCount * 2 do
     Cap := Cap * 2;
   if Self.FHashSlots <> nil then
     FreeMem(Self.FHashSlots);
-  Self.FHashSlots := GetMem(Cap * SizeOf(Integer));
+  Self.FHashSlots := GetMem(Cap * SizeOf(Int));
   Self.FHashCap   := Cap;
   for I := 0 to Cap - 1 do
   begin
-    P  := Self.FHashSlots + I * SizeOf(Integer);
+    P  := Self.FHashSlots + I * SizeOf(Int);
     P^ := -1;
   end;
   for I := 0 to Self.FCount - 1 do
     Self.HashInsertIdx(I);
 end;
 
-function TDictionary<K, V>.FindKey(const Key: K): Integer;
+function TDictionary<K, V>.FindKey(const Key: K): Int;
 var
-  I:     Integer;
+  I:     Int;
   Ptr:   ^K;
-  Slot:  Integer;
-  SlotP: ^Integer;
+  Slot:  Int;
+  SlotP: ^Int;
 begin
   if Self.FCount >= GCHashThreshold then
   begin
@@ -1196,7 +1197,7 @@ begin
     Slot := GCHashOf(Key) and (Self.FHashCap - 1);
     while True do
     begin
-      SlotP := Self.FHashSlots + Slot * SizeOf(Integer);
+      SlotP := Self.FHashSlots + Slot * SizeOf(Int);
       if SlotP^ = -1 then
         Exit(-1);
       Ptr := Self.FKeys + SlotP^ * SizeOf(K);
@@ -1222,7 +1223,7 @@ end;
 static function TDictionary<K, V>.From(const AKeys: array of K;
                                        const AValues: array of V): TDictionary<K, V>;
 var
-  I, N: Integer;
+  I, N: Int;
 begin
   Result := TDictionary<K, V>.Create();
   { Pair up to the SHORTER array: a mismatched literal drops the unpaired
@@ -1240,7 +1241,7 @@ end;
 
 procedure TDictionary<K, V>.Add(Key: K; Value: V);
 var
-  Idx:  Integer;
+  Idx:  Int;
   KPtr: ^K;
   VPtr: ^V;
 begin
@@ -1275,7 +1276,7 @@ end;
 
 function TDictionary<K, V>.TryGetValue(const Key: K; var Value: V): Boolean;
 var
-  Idx:  Integer;
+  Idx:  Int;
   VPtr: ^V;
   Zero: V;
 begin
@@ -1311,8 +1312,8 @@ end;
 
 procedure TDictionary<K, V>.Remove(const Key: K);
 var
-  Idx:      Integer;
-  I:        Integer;
+  Idx:      Int;
+  I:        Int;
   KDst:     ^K;
   KSrc:     ^K;
   VDst:     ^V;
@@ -1356,7 +1357,7 @@ end;
 
 function TDictionary<K, V>.GetItem(const Key: K): V;
 var
-  Idx:  Integer;
+  Idx:  Int;
   VPtr: ^V;
 begin
   Idx := Self.FindKey(Key);
@@ -1378,7 +1379,7 @@ begin
   Self.Add(Key, Value)
 end;
 
-function TDictionary<K, V>.GetCount: Integer;
+function TDictionary<K, V>.GetCount: Int;
 begin
   Result := Self.FCount
 end;
@@ -1387,7 +1388,7 @@ end;
   TDictionary<String, TFoo> holds a managed ref on each side. }
 procedure TDictionary<K, V>.ReleaseEntries;
 var
-  I:        Integer;
+  I:        Int;
   KSlot:    ^K;
   VSlot:    ^V;
   EmptyKey: K;
@@ -1427,8 +1428,8 @@ end;
 
 procedure TOrderedDictionary<K, V>.Grow;
 var
-  NewCap: Integer;
-  OldCap: Integer;
+  NewCap: Int;
+  OldCap: Int;
 begin
   OldCap := Self.FCapacity;
   if OldCap = 0 then
@@ -1452,17 +1453,17 @@ begin
   Self.FHashCap := 0;
 end;
 
-procedure TOrderedDictionary<K, V>.HashInsertIdx(AIdx: Integer);
+procedure TOrderedDictionary<K, V>.HashInsertIdx(AIdx: Int);
 var
-  Slot:  Integer;
-  SlotP: ^Integer;
+  Slot:  Int;
+  SlotP: ^Int;
   KPtr:  ^K;
 begin
   KPtr := Self.FKeys + AIdx * SizeOf(K);
   Slot := GCHashOf(KPtr^) and (Self.FHashCap - 1);
   while True do
   begin
-    SlotP := Self.FHashSlots + Slot * SizeOf(Integer);
+    SlotP := Self.FHashSlots + Slot * SizeOf(Int);
     if SlotP^ = -1 then
     begin
       SlotP^ := AIdx;
@@ -1474,32 +1475,32 @@ end;
 
 procedure TOrderedDictionary<K, V>.HashRebuild;
 var
-  Cap: Integer;
-  I:   Integer;
-  P:   ^Integer;
+  Cap: Int;
+  I:   Int;
+  P:   ^Int;
 begin
   Cap := 16;
   while Cap < Self.FCount * 2 do
     Cap := Cap * 2;
   if Self.FHashSlots <> nil then
     FreeMem(Self.FHashSlots);
-  Self.FHashSlots := GetMem(Cap * SizeOf(Integer));
+  Self.FHashSlots := GetMem(Cap * SizeOf(Int));
   Self.FHashCap   := Cap;
   for I := 0 to Cap - 1 do
   begin
-    P  := Self.FHashSlots + I * SizeOf(Integer);
+    P  := Self.FHashSlots + I * SizeOf(Int);
     P^ := -1;
   end;
   for I := 0 to Self.FCount - 1 do
     Self.HashInsertIdx(I);
 end;
 
-function TOrderedDictionary<K, V>.FindKey(const Key: K): Integer;
+function TOrderedDictionary<K, V>.FindKey(const Key: K): Int;
 var
-  I:     Integer;
+  I:     Int;
   Ptr:   ^K;
-  Slot:  Integer;
-  SlotP: ^Integer;
+  Slot:  Int;
+  SlotP: ^Int;
 begin
   if Self.FCount >= GCHashThreshold then
   begin
@@ -1508,7 +1509,7 @@ begin
     Slot := GCHashOf(Key) and (Self.FHashCap - 1);
     while True do
     begin
-      SlotP := Self.FHashSlots + Slot * SizeOf(Integer);
+      SlotP := Self.FHashSlots + Slot * SizeOf(Int);
       if SlotP^ = -1 then
         Exit(-1);
       Ptr := Self.FKeys + SlotP^ * SizeOf(K);
@@ -1534,7 +1535,7 @@ end;
 static function TOrderedDictionary<K, V>.From(const AKeys: array of K;
                                               const AValues: array of V): TOrderedDictionary<K, V>;
 var
-  I, N: Integer;
+  I, N: Int;
 begin
   Result := TOrderedDictionary<K, V>.Create();
   N := High(AKeys) - Low(AKeys) + 1;
@@ -1546,7 +1547,7 @@ end;
 
 procedure TOrderedDictionary<K, V>.Add(Key: K; Value: V);
 var
-  Idx:  Integer;
+  Idx:  Int;
   KPtr: ^K;
   VPtr: ^V;
 begin
@@ -1577,7 +1578,7 @@ end;
 
 function TOrderedDictionary<K, V>.TryGetValue(const Key: K; var Value: V): Boolean;
 var
-  Idx:  Integer;
+  Idx:  Int;
   VPtr: ^V;
   Zero: V;
 begin
@@ -1603,8 +1604,8 @@ end;
 
 procedure TOrderedDictionary<K, V>.Remove(const Key: K);
 var
-  Idx:      Integer;
-  I:        Integer;
+  Idx:      Int;
+  I:        Int;
   KDst:     ^K;
   KSrc:     ^K;
   VDst:     ^V;
@@ -1638,7 +1639,7 @@ begin
   end
 end;
 
-function TOrderedDictionary<K, V>.GetKey(AIndex: Integer): K;
+function TOrderedDictionary<K, V>.GetKey(AIndex: Int): K;
 var
   Ptr: ^K;
 begin
@@ -1651,7 +1652,7 @@ begin
   Result := Ptr^
 end;
 
-function TOrderedDictionary<K, V>.GetValue(AIndex: Integer): V;
+function TOrderedDictionary<K, V>.GetValue(AIndex: Int): V;
 var
   Ptr: ^V;
 begin
@@ -1664,7 +1665,7 @@ end;
 
 function TOrderedDictionary<K, V>.GetItem(const Key: K): V;
 var
-  Idx:  Integer;
+  Idx:  Int;
   VPtr: ^V;
 begin
   Idx := Self.FindKey(Key);
@@ -1686,7 +1687,7 @@ begin
   Self.Add(Key, Value)
 end;
 
-function TOrderedDictionary<K, V>.GetCount: Integer;
+function TOrderedDictionary<K, V>.GetCount: Int;
 begin
   Result := Self.FCount
 end;
@@ -1694,7 +1695,7 @@ end;
 { Release every live key AND value (see TDictionary<K,V>.ReleaseEntries). }
 procedure TOrderedDictionary<K, V>.ReleaseEntries;
 var
-  I:        Integer;
+  I:        Int;
   KSlot:    ^K;
   VSlot:    ^V;
   EmptyKey: K;

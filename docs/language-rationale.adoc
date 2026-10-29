@@ -684,7 +684,11 @@ cycle, because each one changes the meaning of existing code:
   `High`/`Low` of strings and arrays return `Int`, and `Copy`, `Delete`
   and `SetLength` take `Int` counts; the string and dynamic-array headers
   store 64-bit lengths (Phase 4.5), so a string or array may exceed 2^31^
-  elements.  The collections follow.
+  elements.  The collections are delivered (Phase 4.6): `Count`,
+  `Capacity`, indices and index parameters of `TList<T>`, `TStack<T>`,
+  `TQueue<T>`, `TSet<T>`, `TDictionary<K, V>`, `TOrderedDictionary<K, V>`,
+  `IMap<K, V>`, `TStringList`, `TComponent` and `TObjectList` are `Int`.
+  Hash values and comparison results stay `Integer`.
 * *Counts stay signed.*  `Length` and `Count` return the signed `Int`, so
   `for I := Count - 1 downto 0` cannot underflow — the reason Go made
   `len()` signed.  `UInt` and the unsigned fixed-width names are for bit
@@ -1226,6 +1230,44 @@ for enforcing it later.
 A future lint pass could warn when an `out` parameter is read before it
 has been assigned within the callee, and could zero-initialise `out`
 parameters on entry. Both are now unblocked by the `IsOutParam` flag.
+
+---
+
+=== `var` and `out` Argument Width
+
+==== Decision
+
+A numeric or `Boolean` argument passed to a `var` or `out` parameter
+must have the parameter's width.  Passing an `Int64` variable where the
+parameter is `var X: Integer`, or a `Byte` where it is `var X: Integer`,
+is a compile-time error:
+
+[source,pascal]
+----
+procedure SetI(var X: Integer);
+var L: Int64;
+begin
+  SetI(L);   { error: var argument 1 of 'SetI' is Int64 but the
+               parameter is Integer }
+end;
+----
+
+An alias of the parameter's type is the same type and is accepted:
+`Int32` for `Integer`, and `Int` for `Int64` on a 64-bit target.
+
+==== Rationale
+
+The callee writes the parameter's width through the address it is given.
+Before the check, a wider argument kept a stale upper half (an `Int64`
+holding -1 read back as -4294967291 after the callee stored 5), and a
+narrower one had the bytes after it overwritten.  FPC and Delphi require a
+`var` argument to match the parameter's type exactly; Blaise checks the
+width, which is the property the memory layout depends on, and leaves the
+wider identity rule to a later decision.
+
+The rule became visible with the type standardisation work (Phase 4.6):
+`TStringList.Find` and `TList<T>.BinarySearch` return their index through
+an `Int` parameter, so a caller's index variable is declared `Int`.
 
 ---
 
@@ -3840,7 +3882,7 @@ type
     function  TryGetValue(Key: K; var Value: V): Boolean;
     function  ContainsKey(Key: K): Boolean;
     procedure Remove(Key: K);
-    function  GetCount: Integer;
+    function  GetCount: Int;
   end;
 ----
 

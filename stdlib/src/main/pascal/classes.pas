@@ -54,19 +54,19 @@ type
       Destroy and crashing. }
     [Unretained] FOwner: TComponent;
     FChildren: ^Pointer;
-    FChildCap: Integer;
-    FChildCnt: Integer;
+    FChildCap: Int;
+    FChildCnt: Int;
     procedure GrowChildren;
     procedure AddComponent(AComp: TComponent);
     procedure RemoveComponent(AComp: TComponent);
-    function  GetComponent(AIndex: Integer): TComponent;
+    function  GetComponent(AIndex: Int): TComponent;
   public
     constructor Create(AOwner: TComponent);
     destructor Destroy; override;
     property Name:           string     read FName     write FName;
     property Owner:          TComponent read FOwner;
-    property ComponentCount: Integer    read FChildCnt;
-    property Components[Index: Integer]: TComponent read GetComponent;
+    property ComponentCount: Int    read FChildCnt;
+    property Components[Index: Int]: TComponent read GetComponent;
   end;
 
   { ------------------------------------------------------------------ }
@@ -145,7 +145,7 @@ type
 
   TStringListEnumerator = class
     FList:  TStringList;
-    FIndex: Integer;
+    FIndex: Int;
     constructor Create(AList: TStringList);
     function MoveNext: Boolean;
     function GetCurrent: string;
@@ -159,8 +159,8 @@ type
   TStringList = class
     FStrings:       ^string;
     FObjects:       ^Pointer;
-    FCount:         Integer;
-    FCapacity:      Integer;
+    FCount:         Int;
+    FCapacity:      Int;
     FCaseSensitive: Boolean;
     FSorted:        Boolean;
     FDuplicates:    TDuplicates;
@@ -171,22 +171,22 @@ type
       (Delete, Insert, Put, Clear, sort, case-sensitivity change)
       invalidates it; appends update it in place.  Sorted lists never use
       it — they binary-search. }
-    FHashSlots:     ^Integer;   { slot -> list index; -1 = empty }
-    FHashCap:       Integer;    { power of two; 0 = index not built }
-    FHashUsed:      Integer;    { occupied slots (excludes duplicate keys) }
+    FHashSlots:     ^Int;   { slot -> list index; -1 = empty }
+    FHashCap:       Int;    { power of two; 0 = index not built }
+    FHashUsed:      Int;    { occupied slots (excludes duplicate keys) }
     procedure Grow;
     function  Compare(const S1: string; const S2: string): Integer;
-    function  FindSorted(const S: string; var Idx: Integer): Boolean;
+    function  FindSorted(const S: string; var Idx: Int): Boolean;
     function  HashOf(const S: string): Integer;
     function  KeyEquals(const S1: string; const S2: string): Boolean;
     procedure HashInvalidate;
-    procedure HashInsertIdx(AIdx: Integer);
+    procedure HashInsertIdx(AIdx: Int);
     procedure HashRebuild;
     procedure SetSorted(AValue: Boolean);
     procedure SetCaseSensitive(AValue: Boolean);
     constructor Create;
     destructor Destroy; override;
-    function    Add(S: string): Integer;
+    function    Add(S: string): Int;
     { Objects[] is NON-OWNING by design: slots hold raw, untyped pointers
       with no ARC retain/release.  Callers commonly store integer payloads
       cast to pointers (TObject(PtrUInt(N))), which makes blind retention
@@ -195,15 +195,15 @@ type
       TObjectList keep-alive) — see docs/language-rationale.adoc,
       "Collection Ownership". }
     procedure   AddObject(S: string; AObject: Pointer);
-    function    Find(const S: string; var Index: Integer): Boolean;
-    function    IndexOf(const S: string): Integer;
-    function    Get(AIndex: Integer): string;
-    procedure   Put(AIndex: Integer; S: string);
-    function    GetObject(AIndex: Integer): Pointer;
-    procedure   SetObject(AIndex: Integer; AObject: Pointer);
-    procedure   Delete(AIndex: Integer);
+    function    Find(const S: string; var Index: Int): Boolean;
+    function    IndexOf(const S: string): Int;
+    function    Get(AIndex: Int): string;
+    procedure   Put(AIndex: Int; S: string);
+    function    GetObject(AIndex: Int): Pointer;
+    procedure   SetObject(AIndex: Int; AObject: Pointer);
+    procedure   Delete(AIndex: Int);
     procedure   Clear;
-    procedure   Insert(AIndex: Integer; S: string);
+    procedure   Insert(AIndex: Int; S: string);
     procedure   AddStrings(ASource: TStringList);
     function    GetText: string;
     procedure   SetText(AText: string);
@@ -217,14 +217,14 @@ type
     procedure   Sort;
     function    GetCommaText: string;
     procedure   SetCommaText(const S: string);
-    property Count:         Integer read FCount;
+    property Count:         Int read FCount;
     property CaseSensitive: Boolean read FCaseSensitive write SetCaseSensitive;
     property Sorted:        Boolean read FSorted        write SetSorted;
     property Duplicates:    TDuplicates read FDuplicates write FDuplicates;
     property Text:          string  read GetText        write SetText;
     property CommaText:     string  read GetCommaText   write SetCommaText;
-    property Strings[Index: Integer]: string  read Get  write Put; default;
-    property Objects[Index: Integer]: Pointer read GetObject write SetObject;
+    property Strings[Index: Int]: string  read Get  write Put; default;
+    property Objects[Index: Int]: Pointer read GetObject write SetObject;
   end;
 
 procedure SplitIntoList(const S: string; ASep: Integer; AList: TStringList);
@@ -237,8 +237,8 @@ implementation
 
 procedure TComponent.GrowChildren;
 var
-  NewCap: Integer;
-  OldCap: Integer;
+  NewCap: Int;
+  OldCap: Int;
 begin
   OldCap := Self.FChildCap;
   if OldCap = 0 then
@@ -270,7 +270,7 @@ end;
 
 procedure TComponent.RemoveComponent(AComp: TComponent);
 var
-  I:   Integer;
+  I:   Int;
   Dst: ^Pointer;
   Src: ^Pointer;
 begin
@@ -296,7 +296,7 @@ begin
   end
 end;
 
-function TComponent.GetComponent(AIndex: Integer): TComponent;
+function TComponent.GetComponent(AIndex: Int): TComponent;
 var
   Slot: ^Pointer;
 begin
@@ -351,8 +351,8 @@ end;
 
 procedure SplitIntoList(const S: string; ASep: Integer; AList: TStringList);
 var
-  I:     Integer;
-  Start: Integer;
+  I:     Int;
+  Start: Int;
 begin
   { Line-splitter for TStringList.Text / LoadFromFile.  Each segment between
     separators is added verbatim — leading and trailing whitespace is part of
@@ -382,8 +382,8 @@ end;
 
 procedure TStringList.Grow;
 var
-  NewCap: Integer;
-  OldCap: Integer;
+  NewCap: Int;
+  OldCap: Int;
 begin
   OldCap := Self.FCapacity;
   if OldCap = 0 then
@@ -420,7 +420,7 @@ end;
   case-insensitive so equal-modulo-case keys land in the same bucket. }
 function TStringList.HashOf(const S: string): Integer;
 var
-  I: Integer;
+  I: Int;
   C: Integer;
 begin
   Result := -2128831035;   { FNV offset basis 2166136261 as signed 32-bit }
@@ -447,10 +447,10 @@ end;
 { Insert list index AIdx into the hash table.  A slot already holding an
   equal key is left untouched so IndexOf keeps returning the first-added
   occurrence (overload registration relies on this). }
-procedure TStringList.HashInsertIdx(AIdx: Integer);
+procedure TStringList.HashInsertIdx(AIdx: Int);
 var
-  Slot:  Integer;
-  SlotP: ^Integer;
+  Slot:  Int;
+  SlotP: ^Int;
   SPtr:  ^string;
   NPtr:  ^string;
 begin
@@ -458,7 +458,7 @@ begin
   Slot := Self.HashOf(NPtr^) and (Self.FHashCap - 1);
   while True do
   begin
-    SlotP := Self.FHashSlots + Slot * SizeOf(Integer);
+    SlotP := Self.FHashSlots + Slot * SizeOf(Int);
     if SlotP^ = -1 then
     begin
       SlotP^ := AIdx;
@@ -476,21 +476,21 @@ end;
   probe loop in Find always terminates on an empty slot. }
 procedure TStringList.HashRebuild;
 var
-  Cap: Integer;
-  I:   Integer;
-  P:   ^Integer;
+  Cap: Int;
+  I:   Int;
+  P:   ^Int;
 begin
   Cap := 16;
   while Cap < Self.FCount * 2 do
     Cap := Cap * 2;
   if Self.FHashSlots <> nil then
     FreeMem(Self.FHashSlots);
-  Self.FHashSlots := GetMem(Cap * SizeOf(Integer));
+  Self.FHashSlots := GetMem(Cap * SizeOf(Int));
   Self.FHashCap   := Cap;
   Self.FHashUsed  := 0;
   for I := 0 to Cap - 1 do
   begin
-    P  := Self.FHashSlots + I * SizeOf(Integer);
+    P  := Self.FHashSlots + I * SizeOf(Int);
     P^ := -1;
   end;
   for I := 0 to Self.FCount - 1 do
@@ -542,11 +542,11 @@ begin
   end;
 end;
 
-function TStringList.FindSorted(const S: string; var Idx: Integer): Boolean;
+function TStringList.FindSorted(const S: string; var Idx: Int): Boolean;
 var
-  Lo:   Integer;
-  Hi:   Integer;
-  Mid:  Integer;
+  Lo:   Int;
+  Hi:   Int;
+  Mid:  Int;
   Cmp:  Integer;
   Ptr:  ^string;
 begin
@@ -588,7 +588,7 @@ end;
 
 destructor TStringList.Destroy;
 var
-  I:   Integer;
+  I:   Int;
   Ptr: ^string;
 begin
   { Release all strings before freeing the backing store }
@@ -608,9 +608,9 @@ begin
   Self.HashInvalidate()
 end;
 
-function TStringList.Add(S: string): Integer;
+function TStringList.Add(S: string): Int;
 var
-  Idx:  Integer;
+  Idx:  Int;
   StrP: ^string;
   ObjP: ^Pointer;
 begin
@@ -655,7 +655,7 @@ end;
 
 procedure TStringList.AddObject(S: string; AObject: Pointer);
 var
-  Idx:  Integer;
+  Idx:  Int;
   ObjP: ^Pointer;
 begin
   Idx  := Self.Add(S);
@@ -663,14 +663,14 @@ begin
   ObjP^ := AObject
 end;
 
-function TStringList.Find(const S: string; var Index: Integer): Boolean;
+function TStringList.Find(const S: string; var Index: Int): Boolean;
 const
   cHashThreshold = 16;   { below this a linear scan beats building a table }
 var
-  I:     Integer;
+  I:     Int;
   Ptr:   ^string;
-  Slot:  Integer;
-  SlotP: ^Integer;
+  Slot:  Int;
+  SlotP: ^Int;
 begin
   if Self.FSorted then
     Result := Self.FindSorted(S, Index)
@@ -684,7 +684,7 @@ begin
     Slot := Self.HashOf(S) and (Self.FHashCap - 1);
     while True do
     begin
-      SlotP := Self.FHashSlots + Slot * SizeOf(Integer);
+      SlotP := Self.FHashSlots + Slot * SizeOf(Int);
       if SlotP^ = -1 then
       begin
         Index := -1;
@@ -719,9 +719,9 @@ begin
   end
 end;
 
-function TStringList.IndexOf(const S: string): Integer;
+function TStringList.IndexOf(const S: string): Int;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   if Self.Find(S, Idx) then
     Result := Idx
@@ -729,7 +729,7 @@ begin
     Result := -1
 end;
 
-function TStringList.Get(AIndex: Integer): string;
+function TStringList.Get(AIndex: Int): string;
 var
   Ptr: ^string;
 begin
@@ -737,7 +737,7 @@ begin
   Result := Ptr^
 end;
 
-procedure TStringList.Put(AIndex: Integer; S: string);
+procedure TStringList.Put(AIndex: Int; S: string);
 var
   Ptr: ^string;
 begin
@@ -746,7 +746,7 @@ begin
   Self.HashInvalidate()
 end;
 
-function TStringList.GetObject(AIndex: Integer): Pointer;
+function TStringList.GetObject(AIndex: Int): Pointer;
 var
   Ptr: ^Pointer;
 begin
@@ -754,7 +754,7 @@ begin
   Result := Ptr^
 end;
 
-procedure TStringList.SetObject(AIndex: Integer; AObject: Pointer);
+procedure TStringList.SetObject(AIndex: Int; AObject: Pointer);
 var
   Ptr: ^Pointer;
 begin
@@ -762,9 +762,9 @@ begin
   Ptr^ := AObject
 end;
 
-procedure TStringList.Delete(AIndex: Integer);
+procedure TStringList.Delete(AIndex: Int);
 var
-  I:    Integer;
+  I:    Int;
   SDst: ^string;
   SSrc: ^string;
   ODst: ^Pointer;
@@ -792,7 +792,7 @@ end;
 
 procedure TStringList.Clear;
 var
-  I:   Integer;
+  I:   Int;
   Ptr: ^string;
 begin
   I := 0;
@@ -806,9 +806,9 @@ begin
   Self.HashInvalidate()
 end;
 
-procedure TStringList.Insert(AIndex: Integer; S: string);
+procedure TStringList.Insert(AIndex: Int; S: string);
 var
-  I:    Integer;
+  I:    Int;
   SDst: ^string;
   SSrc: ^string;
   ODst: ^Pointer;
@@ -844,7 +844,7 @@ end;
 
 procedure TStringList.AddStrings(ASource: TStringList);
 var
-  I: Integer;
+  I: Int;
 begin
   I := 0;
   while I < ASource.FCount do
@@ -857,7 +857,7 @@ end;
 function TStringList.GetText: string;
 var
   SB:  TStringBuilder;
-  I:   Integer;
+  I:   Int;
   Ptr: ^string;
 begin
   SB := TStringBuilder.Create();
@@ -899,17 +899,17 @@ end;
 procedure TStringList.CustomSort(ACompare: TStringListSortCompare);
 var
   { Iterative bottom-up merge sort on the string+object arrays }
-  Width:  Integer;
-  Lo:     Integer;
-  Mid:    Integer;
-  Hi:     Integer;
-  N:      Integer;
+  Width:  Int;
+  Lo:     Int;
+  Mid:    Int;
+  Hi:     Int;
+  N:      Int;
   { merge workspace }
   TmpStr: ^string;
   TmpObj: ^Pointer;
-  I:      Integer;
-  J:      Integer;
-  K:      Integer;
+  I:      Int;
+  J:      Int;
+  K:      Int;
   SA:     ^string;
   SB:     ^string;
   OA:     ^Pointer;
@@ -1017,10 +1017,10 @@ end;
 function TStringList.GetCommaText: string;
 var
   SB:   TStringBuilder;
-  I:    Integer;
+  I:    Int;
   Item: string;
   Need: Boolean;
-  J:    Integer;
+  J:    Int;
   Ch:   Integer;
 begin
   SB := TStringBuilder.Create();
@@ -1074,8 +1074,8 @@ end;
 
 procedure TStringList.SetCommaText(const S: string);
 var
-  I:    Integer;
-  N:    Integer;
+  I:    Int;
+  N:    Int;
   Item: string;
   InQ:  Boolean;
   Ch:   Integer;

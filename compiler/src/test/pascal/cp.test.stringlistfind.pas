@@ -195,7 +195,7 @@ end;
 procedure TStringListFindTests.TestFind_ReturnsSameIndexAsIndexOf;
 var
   L: TStringList;
-  Idx: Integer;
+  Idx: Int;
 begin
   L := MakeList(False, 100);
   try

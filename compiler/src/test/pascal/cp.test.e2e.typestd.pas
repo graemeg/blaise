@@ -87,6 +87,10 @@ type
       release's header sanity check rejected any length above 1 GiB as a
       corrupted header }
     procedure TestRun_StringAbove1GiB_Releases;
+    { Phase 4.6: the collections' Count, Capacity, indices and index
+      parameters are Int -- each result reaches the Int64 overload, a var
+      index is declared Int, and a Count above 2^31 reads back whole }
+    procedure TestRun_CollectionCounts_AreInt;
   end;
 
 implementation
@@ -739,6 +743,62 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, '1100000000' + #10 + 'True' + #10 + 'released 0' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_CollectionCounts_AreInt;
+const
+  Src = '''
+    program P;
+    uses Generics.Collections, Classes, contnrs;
+    procedure F(X: Integer); overload; begin WriteLn('Integer ', X) end;
+    procedure F(X: Int64); overload; begin WriteLn('Int ', X) end;
+    var
+      L: TList<Integer>; St: TStack<Integer>; Q: TQueue<Integer>;
+      S: TSet<Integer>; D: TDictionary<string, Integer>;
+      OD: TOrderedDictionary<string, Integer>; M: IMap<string, Integer>;
+      SL: TStringList; OL: TObjectList; C: TComponent; Idx: Int;
+    begin
+      L := TList<Integer>.Create;
+      L.Add(3); L.Add(5);
+      F(L.Count);
+      F(L.IndexOf(5));
+      if L.BinarySearch(5, (A, B) -> A - B, Idx) then F(Idx);
+      L.FCount := 5000000000;
+      WriteLn(L.Count);
+      L.FCount := 2;
+      St := TStack<Integer>.Create; St.Push(1);
+      F(St.Count);
+      Q := TQueue<Integer>.Create; Q.Enqueue(1);
+      F(Q.Count);
+      S := TSet<Integer>.Create; S.Include(1);
+      F(S.Count);
+      D := TDictionary<string, Integer>.Create; D.Add('a', 1);
+      F(D.Count);
+      M := D;
+      F(M.GetCount);
+      OD := TOrderedDictionary<string, Integer>.Create; OD.Add('a', 1);
+      F(OD.Count);
+      SL := TStringList.Create;
+      F(SL.Add('b'));
+      F(SL.Count);
+      F(SL.IndexOf('b'));
+      SL.Sorted := True;
+      if SL.Find('b', Idx) then F(Idx);
+      OL := TObjectList.Create(False);
+      F(OL.Add(nil));
+      F(OL.Count);
+      C := TComponent.Create(nil);
+      F(C.ComponentCount)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'Int 2' + #10 + 'Int 1' + #10 + 'Int 1' + #10 + '5000000000' + #10 +
+    'Int 1' + #10 + 'Int 1' + #10 + 'Int 1' + #10 + 'Int 1' + #10 +
+    'Int 1' + #10 + 'Int 1' + #10 +
+    'Int 0' + #10 + 'Int 1' + #10 + 'Int 0' + #10 + 'Int 0' + #10 +
+    'Int 0' + #10 + 'Int 1' + #10 + 'Int 0' + #10, 0);
 end;
 
 initialization

@@ -25,7 +25,7 @@ type
 
   TObjectListEnumerator = class
     FList:  TObjectList;
-    FIndex: Integer;
+    FIndex: Int;
     constructor Create(AList: TObjectList);
     function MoveNext: Boolean;
     function GetCurrent: Pointer;
@@ -38,23 +38,23 @@ type
 
   TObjectList = class
     FData:        ^Pointer;
-    FCount:       Integer;
-    FCapacity:    Integer;
+    FCount:       Int;
+    FCapacity:    Int;
     FOwnsObjects: Boolean;
     procedure Grow;
     constructor Create(AOwnsObjects: Boolean);
     destructor Destroy; override;
-    function    Add(AObject: Pointer): Integer;
-    function    Get(AIndex: Integer): Pointer;
-    procedure   Put(AIndex: Integer; AObject: Pointer);
-    function    IndexOf(AObject: Pointer): Integer;
-    procedure   Delete(AIndex: Integer);
-    function    Remove(AObject: Pointer): Integer;
+    function    Add(AObject: Pointer): Int;
+    function    Get(AIndex: Int): Pointer;
+    procedure   Put(AIndex: Int; AObject: Pointer);
+    function    IndexOf(AObject: Pointer): Int;
+    procedure   Delete(AIndex: Int);
+    function    Remove(AObject: Pointer): Int;
     function    Extract(AObject: Pointer): Pointer;
     procedure   Clear;
     function    GetEnumerator: TObjectListEnumerator;
-    property Count: Integer read FCount;
-    property Items[Index: Integer]: Pointer read Get write Put; default;
+    property Count: Int read FCount;
+    property Items[Index: Int]: Pointer read Get write Put; default;
   end;
 
 implementation
@@ -65,7 +65,7 @@ implementation
 
 procedure TObjectList.Grow;
 var
-  NewCap: Integer;
+  NewCap: Int;
 begin
   if Self.FCapacity = 0 then
     NewCap := 4
@@ -82,7 +82,7 @@ end;
 
 destructor TObjectList.Destroy;
 var
-  I:   Integer;
+  I:   Int;
   Src: ^Pointer;
 begin
   I := 0;
@@ -98,7 +98,7 @@ begin
   Self.FCapacity := 0
 end;
 
-function TObjectList.Add(AObject: Pointer): Integer;
+function TObjectList.Add(AObject: Pointer): Int;
 var
   Dest: ^Pointer;
 begin
@@ -111,7 +111,7 @@ begin
   Result      := Self.FCount - 1
 end;
 
-function TObjectList.Get(AIndex: Integer): Pointer;
+function TObjectList.Get(AIndex: Int): Pointer;
 var
   Src: ^Pointer;
 begin
@@ -119,7 +119,7 @@ begin
   Result := Src^
 end;
 
-procedure TObjectList.Put(AIndex: Integer; AObject: Pointer);
+procedure TObjectList.Put(AIndex: Int; AObject: Pointer);
 var
   Dest: ^Pointer;
   Old:  Pointer;
@@ -131,9 +131,9 @@ begin
   _ClassRelease(Old)
 end;
 
-function TObjectList.IndexOf(AObject: Pointer): Integer;
+function TObjectList.IndexOf(AObject: Pointer): Int;
 var
-  I:   Integer;
+  I:   Int;
   Src: ^Pointer;
 begin
   I      := 0;
@@ -150,9 +150,9 @@ begin
   end
 end;
 
-procedure TObjectList.Delete(AIndex: Integer);
+procedure TObjectList.Delete(AIndex: Int);
 var
-  I:   Integer;
+  I:   Int;
   Dst: ^Pointer;
   Src: ^Pointer;
 begin
@@ -172,7 +172,7 @@ end;
 { Find AObject and delete it, returning the index it was found at (or -1 if it
   was not present).  Delete releases the list's reference, so when the list owns
   its objects the removed object is freed; matches TFPObjectList.Remove. }
-function TObjectList.Remove(AObject: Pointer): Integer;
+function TObjectList.Remove(AObject: Pointer): Int;
 begin
   Result := Self.IndexOf(AObject);
   if Result >= 0 then
@@ -181,7 +181,7 @@ end;
 
 procedure TObjectList.Clear;
 var
-  I:   Integer;
+  I:   Int;
   Src: ^Pointer;
 begin
   I := 0;
@@ -196,10 +196,10 @@ end;
 
 function TObjectList.Extract(AObject: Pointer): Pointer;
 var
-  I:   Integer;
+  I:   Int;
   Src: ^Pointer;
   Dst: ^Pointer;
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := Self.IndexOf(AObject);
   if Idx < 0 then

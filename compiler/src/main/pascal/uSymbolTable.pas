@@ -1251,7 +1251,7 @@ end;
 
 function TRecordTypeDesc.FindField(const AName: string): TFieldInfo;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   if FKeys.Find(AName, Idx) then
     Result := TFieldInfo(FKeys.Objects[Idx])
@@ -1737,7 +1737,7 @@ end;
 
 function TScope.Define(ASymbol: TSymbol): Boolean;
 var
-  Idx: Integer;
+  Idx: Int;
   Existing, Tail: TSymbol;
 begin
   if FKeys.Find(ASymbol.Name, Idx) then
@@ -1767,7 +1767,7 @@ end;
 
 function TScope.ExtractLocal(const AName: string): TSymbol;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Result := nil;
   if not FKeys.Find(AName, Idx) then Exit;
@@ -1778,7 +1778,7 @@ end;
 
 function TScope.LookupLocal(const AName: string): TSymbol;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   if FKeys.Find(AName, Idx) then
     Result := TSymbol(FKeys.Objects[Idx])

@@ -29,6 +29,13 @@ type
       write was lost).  An element of the temporary's dynamic-array field is
       shared storage and stays a variable }
     procedure TestSemantic_VarArgIntoRecordTemp_IsError;
+    { a var or out argument narrower or wider than its parameter is an
+      error: the callee writes the parameter's width, so an Int64 lost its
+      high half and a Byte had three bytes beyond it overwritten.  Checked on
+      every call path (standalone, method, interface, procedural variable,
+      inherited, generic class); an alias of the parameter's type is
+      accepted }
+    procedure TestSemantic_VarArgWidth_MustMatch;
     { ------------------------------------------------------------------ }
     { Parser                                                               }
     { ------------------------------------------------------------------ }
@@ -527,6 +534,65 @@ begin
     SemanticError(Head + 'begin Bump(MkSA()[1]); end.')) >= 0);
   AssertEquals('a dynamic-array element through the temporary', '',
     SemanticError(Head + 'begin Bump(MkR().DA[1]); Bump(GR.X); Bump(GS[0]); end.'));
+end;
+
+procedure TVarParamTests.TestSemantic_VarArgWidth_MustMatch;
+const
+  Head = '''
+    program P;
+    type
+      IK = interface procedure Put(var X: Integer); end;
+      TK = class(IK)
+        procedure Put(var X: Integer);
+        procedure Own;
+      end;
+      TPP = procedure(var X: Integer);
+      TB = class procedure Put2(var X: Integer); end;
+      TC = class(TB) procedure Call; end;
+      TG<T> = class procedure Put3(var X: Integer); end;
+    procedure SetI(var X: Integer); begin X := 1 end;
+    procedure OutI(out X: Integer); begin X := 2 end;
+    procedure SetL(var X: Int64); begin X := 3 end;
+    function GetI(var X: Integer): Integer; begin Result := X end;
+    procedure TK.Put(var X: Integer); begin X := 4 end;
+    procedure TB.Put2(var X: Integer); begin X := 5 end;
+    procedure TG<T>.Put3(var X: Integer); begin X := 6 end;
+    ''';
+  Tail = '''
+    var
+      L: Int64; B: Byte; I: Integer; I32: Int32; N: Int;
+      K: TK; IntfK: IK; PP: TPP; G: TG<Integer>;
+    ''';
+  OwnOk = 'procedure TK.Own; var X: Integer; begin Put(X) end;';
+  CallOk = 'procedure TC.Call; var X: Integer; begin inherited Put2(X) end;';
+
+  procedure Rejects(const ALabel, ABody: string);
+  begin
+    AssertTrue(ALabel, Pos('must have the parameter''s type',
+      SemanticError(Head + OwnOk + CallOk + Tail + 'begin ' + ABody + ' end.')) > 0);
+  end;
+
+begin
+  Rejects('Int64 into var Integer', 'SetI(L)');
+  Rejects('Byte into var Integer', 'SetI(B)');
+  Rejects('Integer into var Int64', 'SetL(I)');
+  Rejects('Int64 into out Integer', 'OutI(L)');
+  Rejects('function in an expression', 'I := GetI(L)');
+  Rejects('method', 'K := TK.Create; K.Put(L)');
+  Rejects('interface method', 'IntfK := TK.Create; IntfK.Put(L)');
+  Rejects('procedural variable', 'PP := @SetI; PP(L)');
+  AssertEquals('an alias of the parameter type is accepted', '',
+    SemanticError(Head + OwnOk + CallOk + Tail +
+      'begin SetI(I32); SetL(N); OutI(I) end.'));
+  AssertTrue('unqualified method call inside the class', Pos(
+    'must have the parameter''s type', SemanticError(Head +
+      'procedure TK.Own; var X: Int64; begin Put(X) end;' + CallOk + Tail +
+      'begin end.')) > 0);
+  AssertTrue('inherited call', Pos(
+    'must have the parameter''s type', SemanticError(Head + OwnOk +
+      'procedure TC.Call; var X: Int64; begin inherited Put2(X) end;' +
+      Tail + 'begin end.')) > 0);
+  Rejects('generic class method', 'G := TG<Integer>.Create(); G.Put3(L)');
 end;
 
 initialization

@@ -140,7 +140,7 @@ end;
 
 function BinarySearchKeyword(const AText: string): Boolean;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Result := KwList.Find(AText, Idx)
 end;

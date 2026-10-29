@@ -5,7 +5,7 @@
 
 Status: ACCEPTED — all design decisions signed off 2026-10-19.  Phases 0–3
 implemented 2026-10-19/20 and released in v0.15.0; Phase 4 in progress,
-steps 4.0–4.5 done (see <<progress>>). +
+steps 4.0–4.6 done (see <<progress>>). +
 Release placement: phases 0–3 (additive, non-breaking) target *v0.15.0*;
 phases 4–7 (breaking) open the *v0.16* development cycle. +
 Scope: surface type system (builtin type names), stdlib API signatures,
@@ -552,7 +552,10 @@ The announcement in discussion #106 is revised on the following points:
   result without extending it.  4.5: 64-bit string and dynamic-array
   lengths (24- and 32-byte headers); found on the way: a 1 GiB ceiling in
   the string release check, 32-bit `GetMem` sizes and a single-`read`
-  `ReadFile`.  Next: 4.6, collections.
+  `ReadFile`.  4.6: collection counts, capacities and indices are `Int`;
+  found on the way: a `var` or `out` argument of a different width than
+  its parameter was accepted and the callee wrote past or short of it.
+  Next: 4.7, `MaxInt`.
 |===
 
 [#timeline]
@@ -946,6 +949,44 @@ rebuild before trusting anything, `-pre` refresh, `bif-coverage` and
 `flag-coverage` baselines, and a pdr check that a `TList<T>` still prints
 correctly.  No IFACE bump is expected (field types are serialised by name),
 but confirm it with the warm-cache fixpoint.
+
+Done 2026-10-29.
+
+* Surface.  In `generics.collections`, `Classes` and `Contnrs`, every
+  count, capacity, index, index parameter, cursor and hash slot is `Int`:
+  `TList<T>`, `TStack<T>`, `TQueue<T>`, `TSet<T>`, `TDictionary<K, V>`,
+  `TOrderedDictionary<K, V>`, `IMap<K, V>.GetCount`, `TStringList`,
+  `TComponent.ComponentCount`/`Components[]` and `TObjectList`, with their
+  enumerators.  Hash values (`GCHashOf`, `TStringList.HashOf`), comparison
+  results (`TComparison<T>`, `TStringListSortCompare`, `Compare`) and
+  character codes stay `Integer`: they are 32-bit by definition, not
+  counts.  The hash slot tables hold `Int` entry indices, so a hashed
+  container has no 2^31^ ceiling of its own; on a 32-bit target `Int` keeps
+  them 4 bytes.  Other stdlib types with a `Count` (`json.types`,
+  `xml.types`, `async.fibers`, `blaise.testing`) are retyped in Phase 5.
+* Breaking.  The `var`/`out` index parameters (`TStringList.Find`,
+  `TList<T>.BinarySearch`) take an `Int`, so a caller's index variable is
+  declared `Int`; seven such locals in the compiler were retyped.
+* Bug fixed on the way.  A `var` or `out` argument was checked like a
+  value argument, so one of a different width was accepted and the callee
+  wrote the parameter's width through its address: an `Int64` kept a stale
+  upper half, a `Byte` had three bytes after it overwritten.  A numeric or
+  `Boolean` `var`/`out` argument must now have its parameter's width, on
+  every call path (standalone, method, interface, procedural variable,
+  inherited, generic).  The compiler, RTL and stdlib held no such call; the
+  retyped `Find` callers were the first.
+* Protocol.  No compiler code knows a collection's field layout, so the
+  change is one commit.  The warm-cache fixpoint confirmed no IFACE bump;
+  `bif-coverage` and `flag-coverage` pass unchanged; pdr prints a
+  `TList<Integer>`, a `TStringList` and a `TDictionary` with the widened
+  fields.
+
+Tests: each collection's `Count`, index result and index parameter reaches
+the `Int64` overload, a `var` index declared `Int` is accepted, and a
+`Count` above 2^31^ reads back whole
+(`TE2ETypeStdTests.TestRun_CollectionCounts_AreInt`); a mismatched-width
+`var`/`out` argument is rejected on each call path and an alias accepted
+(`TVarParamTests.TestSemantic_VarArgWidth_MustMatch`).
 
 *4.7 — `MaxInt`.*  Redefine `MaxInt` as `High(Int)`.  Audit its uses in
 the compiler, RTL and stdlib: every use as a "to end of string" count in

@@ -302,7 +302,7 @@ end;
 
 function TOPDFEmitter.GetOrAllocTypeID(const AName: string): Cardinal;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   if FTypeNames.Find(AName, Idx) then
     Result := Cardinal(PtrUInt(FTypeNames.Objects[Idx]))
@@ -315,7 +315,7 @@ end;
 
 function TOPDFEmitter.HasBeenEmitted(const AName: string): Boolean;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Result := FEmitted.Find(AName, Idx);
 end;

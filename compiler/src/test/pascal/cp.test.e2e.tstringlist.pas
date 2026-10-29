@@ -354,7 +354,7 @@ const
     '''
     program P;
     uses Classes;
-    var L: TStringList; Idx: Integer; Found: Boolean;
+    var L: TStringList; Idx: Int; Found: Boolean;
     begin
       L := TStringList.Create();
       L.Sorted := True;
@@ -848,7 +848,7 @@ const
   Src = '''
     program P;
     uses Classes;
-    var L: TStringList; Idx: Integer;
+    var L: TStringList; Idx: Int;
     procedure Show(L: TStringList);
     var I: Integer; S: string;
     begin
@@ -954,7 +954,7 @@ const
       TTag = class
         N: Integer;
       end;
-    var L: TStringList; A, B: TTag; Idx: Integer;
+    var L: TStringList; A, B: TTag; Idx: Int;
     begin
       A := TTag.Create(); A.N := 1;
       B := TTag.Create(); B.N := 2;

@@ -760,6 +760,10 @@ type
       l-value): a variable, a field access, a pointer deref, or an array
       element subscript a[i]. }
     function  IsVarArgLValue(AExpr: TASTExpr): Boolean;
+    { A var/out argument must have its parameter's width: the callee
+      writes the parameter's width through the address. }
+    procedure CheckVarArgWidth(AFormal: TTypeDesc; AArg: TASTExpr;
+      AIndex: Integer; const AName: string; ALine, ACol: Integer);
     function  IsRecordTemporary(AExpr: TASTExpr): Boolean;
     { BUG-001: warn when a bare for-in loop variable is passed where the callee
       mutates it by reference (var/out parameter, Inc/Dec, SetLength, ...) —
@@ -14996,6 +15000,27 @@ begin
   ACall.ResolvedMethod     := MDecl;
 end;
 
+{ A scalar var or out argument narrower or wider than its parameter would
+  have the callee write the parameter's width into it: an Int64 kept a stale
+  high half, a Byte had the three bytes after it overwritten.  An alias of
+  the parameter's type shares its descriptor and passes. }
+procedure TSemanticAnalyser.CheckVarArgWidth(AFormal: TTypeDesc;
+  AArg: TASTExpr; AIndex: Integer; const AName: string; ALine, ACol: Integer);
+var
+  Actual: TTypeDesc;
+begin
+  Actual := AArg.ResolvedType;
+  if (AFormal = nil) or (Actual = nil) then Exit;
+  if not ((AFormal.IsNumeric() or (AFormal.Kind = tyBoolean)) and
+          (Actual.IsNumeric() or (Actual.Kind = tyBoolean))) then
+    Exit;
+  if AFormal.ByteSize() <> Actual.ByteSize() then
+    SemanticError(Format(
+      'var argument %d of ''%s'' is %s but the parameter is %s: a var ' +
+      'argument must have the parameter''s type',
+      [AIndex + 1, AName, Actual.Name, AFormal.Name]), ALine, ACol);
+end;
+
 function TSemanticAnalyser.IsVarArgLValue(AExpr: TASTExpr): Boolean;
 var
   BaseKind: TTypeKind;
@@ -15226,6 +15251,8 @@ begin
         SemanticError(
           Format('var argument %d of ''%s'' must be a variable', [I + 1, AName]),
           ALine, ACol);
+      CheckVarArgWidth(Par.ResolvedType, TASTExpr(AArgs.Items[I]),
+        I, AName, ALine, ACol);
       WarnIfVarArgIsForInLoopVar(TASTExpr(AArgs.Items[I]));
     end;
   end;
@@ -15337,8 +15364,11 @@ begin
       Slot.ResolvedType := FTable.NewDynArrayType(
         TOpenArrayTypeDesc(ParT).ElementType);
     if Info.IsVar then
+    begin
+      CheckVarArgWidth(ParT, Slot, I, AName, ALine, ACol);
       CheckTypesMatch(ParT, Slot.ResolvedType,
         Format('var argument %d of ''%s''', [I + 1, AName]), ALine, ACol)
+    end
     else
       CheckTypesMatch(ParT, Slot.ResolvedType,
         Format('argument %d of ''%s''', [I + 1, AName]), ALine, ACol);
@@ -16816,7 +16846,10 @@ begin
         Format('var argument %d of ''%s'' must be a variable', [I + 1, AName]),
         ALine, ACol);
     if PPar.IsVarParam then
+    begin
+      CheckVarArgWidth(PPar.TypeDesc, Slot, I, AName, ALine, ACol);
       WarnIfVarArgIsForInLoopVar(Slot);
+    end;
     CheckValueMatches(PPar.TypeDesc, Slot, ArgType,
       Format('argument %d of ''%s''', [I + 1, AName]),
       ALine, ACol);
@@ -17598,6 +17631,8 @@ begin
               Format('var argument %d of ''%s'' must be a variable',
                 [I + 1, ACall.Name]),
               ACall.Line, ACall.Col);
+          CheckVarArgWidth(Par.ResolvedType, TASTExpr(ACall.Args.Items[I]),
+            I, ACall.Name, ACall.Line, ACall.Col);
           ArgType := TASTExpr(ACall.Args.Items[I]).ResolvedType;
           CheckValueMatches(Par.ResolvedType, TASTExpr(ACall.Args.Items[I]), ArgType,
             Format('var argument %d of ''%s''', [I + 1, ACall.Name]),
@@ -17734,6 +17769,8 @@ begin
             Format('var argument %d of ''%s'' must be a variable',
               [I + 1, ACall.Name]),
             ACall.Line, ACall.Col);
+        CheckVarArgWidth(Par.ResolvedType, TASTExpr(ACall.Args.Items[I]),
+          I, ACall.Name, ACall.Line, ACall.Col);
         WarnIfVarArgIsForInLoopVar(TASTExpr(ACall.Args.Items[I]));
         ArgType := TASTExpr(ACall.Args.Items[I]).ResolvedType;
         CheckValueMatches(Par.ResolvedType, TASTExpr(ACall.Args.Items[I]), ArgType,
@@ -18419,6 +18456,8 @@ begin
               Format('var argument %d of ''%s'' must be a variable',
                 [I + 1, AExpr.Name]),
               AExpr.Line, AExpr.Col);
+          CheckVarArgWidth(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]),
+            I, AExpr.Name, AExpr.Line, AExpr.Col);
           ArgType := TASTExpr(AExpr.Args.Items[I]).ResolvedType;
           CheckValueMatches(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]), ArgType,
             Format('var argument %d of ''%s''', [I + 1, AExpr.Name]),
@@ -19237,6 +19276,8 @@ begin
             Format('var argument %d of ''%s'' must be a variable',
               [I + 1, AExpr.Name]),
             AExpr.Line, AExpr.Col);
+        CheckVarArgWidth(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]),
+          I, AExpr.Name, AExpr.Line, AExpr.Col);
         ArgType := TASTExpr(AExpr.Args.Items[I]).ResolvedType;
         CheckValueMatches(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]), ArgType,
           Format('var argument %d of ''%s''', [I + 1, AExpr.Name]),
@@ -19288,6 +19329,8 @@ begin
           Format('var argument %d of ''%s'' must be a variable',
             [I + 1, AExpr.Name]),
           AExpr.Line, AExpr.Col);
+      CheckVarArgWidth(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]),
+        I, AExpr.Name, AExpr.Line, AExpr.Col);
       WarnIfVarArgIsForInLoopVar(TASTExpr(AExpr.Args.Items[I]));
       ArgType := TASTExpr(AExpr.Args.Items[I]).ResolvedType;
       CheckValueMatches(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]), ArgType,
@@ -19607,6 +19650,8 @@ begin
               Format('var argument %d of ''%s'' must be a variable',
                 [I + 1, AExpr.Name]),
               AExpr.Line, AExpr.Col);
+          CheckVarArgWidth(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]),
+            I, AExpr.Name, AExpr.Line, AExpr.Col);
           ArgType := TASTExpr(AExpr.Args.Items[I]).ResolvedType;
           CheckValueMatches(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]), ArgType,
             Format('var argument %d of ''%s''', [I + 1, AExpr.Name]),
