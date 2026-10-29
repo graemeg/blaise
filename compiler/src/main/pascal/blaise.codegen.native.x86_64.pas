@@ -1131,6 +1131,11 @@ type
       signedness — used after a call (whose ABI return is 32-bit) and to
       implement an explicit narrowing/widening type cast. }
     procedure EmitNarrowToType(AType: TTypeDesc);
+    { The cmp of a comparison whose left operand is in %rax and right in %rcx
+      (or the immediate AImm when AHasImm).  64-bit when either operand is
+      64-bit or pointer-like, after re-extending a narrower integer operand
+      from its own type; otherwise 32-bit. }
+    procedure EmitCompareCmp(BE: TBinaryExpr; AHasImm: Boolean; AImm: Int64);
     { Inc(x)/Dec(x) with support for simple variables, implicit-Self fields,
       var params, and field-access expressions. }
     procedure EmitLValueSlotAddr(AExpr: TASTExpr);
@@ -6707,6 +6712,53 @@ end;
   holds a value consistent with that type.  Narrowing masks/truncates to the
   low N bits; widening sign- or zero-extends.  A no-op for a value already
   consistent with a 4- or 8-byte type, but harmless to apply. }
+function IsWideCmpOperand(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and
+    (AType.Kind in [tyInt64, tyUInt64, tyClass, tyPointer, tyInterface,
+                    tyString, tyDynArray, tyProcedural]);
+end;
+
+function IsNarrowCmpInt(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and
+    (AType.Kind in [tyInteger, tyUInt32, tySmallInt, tyWord, tyInt8, tyByte]);
+end;
+
+procedure TX86_64Backend.EmitCompareCmp(BE: TBinaryExpr; AHasImm: Boolean;
+  AImm: Int64);
+var
+  RT: TTypeDesc;
+begin
+  { The width used to follow the left operand alone, so Integer < Int64 was
+    a cmpl that dropped the Int64's upper half. }
+  if IsWideCmpOperand(BE.Left.ResolvedType) or
+     IsWideCmpOperand(BE.Right.ResolvedType) then
+  begin
+    if IsNarrowCmpInt(BE.Left.ResolvedType) then
+      Self.EmitNarrowToType(BE.Left.ResolvedType);
+    RT := BE.Right.ResolvedType;
+    if (not AHasImm) and IsNarrowCmpInt(RT) then
+      case IntByteSize(RT) of
+        1: if IsUnsignedInt(RT) then Self.Emit(#9'movzbq %cl, %rcx')
+           else Self.Emit(#9'movsbq %cl, %rcx');
+        2: if IsUnsignedInt(RT) then Self.Emit(#9'movzwq %cx, %rcx')
+           else Self.Emit(#9'movswq %cx, %rcx');
+      else
+        if IsUnsignedInt(RT) then Self.Emit(#9'movl %ecx, %ecx')
+        else Self.Emit(#9'movslq %ecx, %rcx');
+      end;
+    if AHasImm then
+      Self.Emit(#9'cmpq $' + IntToStr(AImm) + ', %rax')
+    else
+      Self.Emit(#9'cmpq %rcx, %rax');
+  end
+  else if AHasImm then
+    Self.Emit(#9'cmpl $' + IntToStr(AImm) + ', %eax')
+  else
+    Self.Emit(#9'cmpl %ecx, %eax');
+end;
+
 procedure TX86_64Backend.EmitNarrowToType(AType: TTypeDesc);
 begin
   if AType = nil then Exit;
@@ -11031,22 +11083,7 @@ begin
         end;
       boEQ, boNE, boLT, boGT, boLE, boGE:
         begin
-          if (BE.Left.ResolvedType <> nil) and
-             (BE.Left.ResolvedType.Kind in [tyInt64, tyUInt64, tyClass,
-                tyPointer, tyInterface, tyString, tyDynArray, tyProcedural]) then
-          begin
-            if HasImm then
-              Self.Emit(#9'cmpq $' + IntToStr(ImmV) + ', %rax')
-            else
-              Self.Emit(#9'cmpq %rcx, %rax');
-          end
-          else
-          begin
-            if HasImm then
-              Self.Emit(#9'cmpl $' + IntToStr(ImmV) + ', %eax')
-            else
-              Self.Emit(#9'cmpl %ecx, %eax');
-          end;
+          Self.EmitCompareCmp(BE, HasImm, ImmV);
           Unsigned := IsUnsignedInt(BE.Left.ResolvedType) or
                       IsUnsignedInt(BE.Right.ResolvedType) or
                       ((BE.Left.ResolvedType <> nil) and
@@ -15541,22 +15578,7 @@ begin
       end;
       { Width + signedness selection mirrors the materialising comparison
         path in EmitExprToEax — the two must stay in lockstep. }
-      if (BE.Left.ResolvedType <> nil) and
-         (BE.Left.ResolvedType.Kind in [tyInt64, tyUInt64, tyClass,
-            tyPointer, tyInterface, tyString, tyDynArray, tyProcedural]) then
-      begin
-        if HasImm then
-          Self.Emit(#9'cmpq $' + IntToStr(ImmV) + ', %rax')
-        else
-          Self.Emit(#9'cmpq %rcx, %rax');
-      end
-      else
-      begin
-        if HasImm then
-          Self.Emit(#9'cmpl $' + IntToStr(ImmV) + ', %eax')
-        else
-          Self.Emit(#9'cmpl %ecx, %eax');
-      end;
+      Self.EmitCompareCmp(BE, HasImm, ImmV);
       Unsigned := IsUnsignedInt(BE.Left.ResolvedType) or
                   IsUnsignedInt(BE.Right.ResolvedType) or
                   ((BE.Left.ResolvedType <> nil) and

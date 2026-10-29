@@ -18707,7 +18707,12 @@ begin
         Format('Ord expects an ordinal value, not ''%s'' (use Trunc or ' +
           'Round to convert a float to an integer)', [ArgType.Name]),
         AExpr.Line, AExpr.Col);
-    Result := FTable.TypeInteger;
+    { An argument whose values do not all fit in Integer keeps its type:
+      typed Integer, Ord(High(UInt32)) read as -1 to a 64-bit comparison. }
+    if (ArgType <> nil) and (ArgType.Kind in [tyUInt32, tyInt64, tyUInt64]) then
+      Result := ArgType
+    else
+      Result := FTable.TypeInteger;
     AExpr.ResolvedType := Result;
     Exit;
   end;

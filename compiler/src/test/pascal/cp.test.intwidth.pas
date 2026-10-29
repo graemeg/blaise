@@ -48,6 +48,10 @@ type
     procedure TestAsm_IntegerShr_ZeroExtendsFirst;
     procedure TestAsm_IntegerShl_ResultSignExtended;
     procedure TestAsm_NotByte_ResultZeroExtended;
+    procedure TestAsm_IntegerVsInt64Compare_Extends;
+    { Ord keeps a UInt32 / Int64 / UInt64 argument's type: as Integer,
+      Ord(High(UInt32)) was -1 to a 64-bit comparison }
+    procedure TestSemantic_OrdOfWideArg_KeepsType;
   end;
 
 implementation
@@ -178,6 +182,24 @@ begin
   AssertEquals('not of a Byte is re-extended from 8 bits', '',
     AsmMissing(Src, 'notl %eax'#10#9'movzbq %al, %rax',
       'eor x0, x0, x1'#10#9'lsl x0, x0, #56'#10#9'lsr x0, x0, #56'));
+end;
+
+procedure TIntWidthTests.TestSemantic_OrdOfWideArg_KeepsType;
+begin
+  AssertEquals('UInt32', TypeOf('Ord(U)'));
+  AssertEquals('Int64', TypeOf('Ord(L)'));
+  AssertEquals('UInt64', TypeOf('Ord(Q)', 'UInt64'));
+  AssertEquals('Integer', TypeOf('Ord(I)'));
+end;
+
+procedure TIntWidthTests.TestAsm_IntegerVsInt64Compare_Extends;
+const
+  Src = 'program P; var I: Integer; L: Int64; begin I := 0; L := 7; ' +
+    'WriteLn(I < L) end.';
+begin
+  AssertEquals('an Integer beside an Int64 is sign-extended, compared 64-bit',
+    '', AsmMissing(Src, 'movslq %eax, %rax'#10#9'cmpq %rcx, %rax',
+      'sxtw x0, w0'#10#9'cmp x0, x1'));
 end;
 
 initialization

@@ -534,6 +534,8 @@ type
     procedure EmitForInAssignAddr(AStmt: TForInStmt; AOwned: Boolean);
     procedure EmitPointerWrite(AStmt: TPointerWriteStmt);
     procedure EmitNarrowX0(AType: TTypeDesc);
+    { Re-extend x1 from AType's width and signedness (a narrow integer). }
+    procedure EmitExtendX1(AType: TTypeDesc);
     procedure EmitExtendParamReg(const ANum: string; AType: TTypeDesc);
     procedure EmitBuiltinStrCall1(AArg: TASTExpr; const ASym: string);
     procedure EmitFormatCall(AArgs: TObjectList);
@@ -945,6 +947,13 @@ begin
   Result := (AType <> nil) and
     (AType.Kind in [tyInteger, tyUInt32, tyByte, tyInt8, tySmallInt, tyWord,
                     tyBoolean, tyEnum]);
+end;
+
+{ An integer narrower than 64 bits: the operand a 64-bit compare re-extends. }
+function IsNarrowCmpIntA64(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and
+    (AType.Kind in [tyInteger, tyUInt32, tySmallInt, tyWord, tyInt8, tyByte]);
 end;
 
 { A method-pointer ('of object') or closure ('reference to') procedural type —
@@ -6978,7 +6987,15 @@ begin
            IsNarrow32Ord(BE.Right.ResolvedType) then
           Self.Emit(#9'cmp w0, w1')
         else
+        begin
+          { a narrow integer beside a 64-bit operand is re-extended from its
+            own type first: its upper half is non-canonical }
+          if IsNarrowCmpIntA64(BE.Left.ResolvedType) then
+            Self.EmitNarrowX0(BE.Left.ResolvedType);
+          if IsNarrowCmpIntA64(BE.Right.ResolvedType) then
+            Self.EmitExtendX1(BE.Right.ResolvedType);
           Self.Emit(#9'cmp x0, x1');
+        end;
         Self.Emit(Format(#9'cset x0, %s', [CondName]));
       end;
     else
@@ -12527,6 +12544,18 @@ begin
     tyWord: ShiftPair('lsr', 48);
     tyInt8: ShiftPair('asr', 56);
     tyByte: ShiftPair('lsr', 56);
+  end;
+end;
+
+procedure TArm64Backend.EmitExtendX1(AType: TTypeDesc);
+begin
+  case AType.Kind of
+    tyInteger:  Self.Emit(#9'sxtw x1, w1');
+    tyUInt32:   Self.Emit(#9'mov w1, w1');
+    tySmallInt: begin Self.Emit(#9'lsl x1, x1, #48'); Self.Emit(#9'asr x1, x1, #48') end;
+    tyWord:     begin Self.Emit(#9'lsl x1, x1, #48'); Self.Emit(#9'lsr x1, x1, #48') end;
+    tyInt8:     begin Self.Emit(#9'lsl x1, x1, #56'); Self.Emit(#9'asr x1, x1, #56') end;
+    tyByte:     begin Self.Emit(#9'lsl x1, x1, #56'); Self.Emit(#9'lsr x1, x1, #56') end;
   end;
 end;
 

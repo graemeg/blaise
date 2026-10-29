@@ -40,6 +40,11 @@ type
     procedure TestRun_MixedSign_Bitwise;
     { overload resolution follows the promoted type }
     procedure TestRun_Overload_FollowsPromotedType;
+    { a narrow integer compared with an Int64 / UInt64 operand, on either
+      side, is extended from its own type first: x86-64 took the compare
+      width from the left operand alone, so Integer < Int64 compared 32
+      bits of the Int64 }
+    procedure TestRun_MixedWidthCompare_ExtendsNarrowSide;
   end;
 
 implementation
@@ -223,6 +228,45 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     'Int32 2147483647' + LE + 'Int64 2147483648' + LE + 'Int32 4' + LE, 0);
+end;
+
+procedure TE2EIntWidthTests.TestRun_MixedWidthCompare_ExtendsNarrowSide;
+const
+  Src = '''
+    program P;
+    var
+      I: Integer; L: Int64; U: UInt32; Q: UInt64; S: SmallInt; W: Word;
+      B: Byte; E: Int8;
+    function Neg(X: Integer): Integer; begin Result := -X end;
+    begin
+      I := 0; L := Int64(1) shl 32;
+      WriteLn(I < L, ' ', I = L, ' ', I <> L, ' ', L > I, ' ', L = I);
+      if I < L then WriteLn('branch lt') else WriteLn('branch ge');
+      if I = L then WriteLn('branch eq') else WriteLn('branch ne');
+      I := Neg(5); L := -5;
+      WriteLn(I = L, ' ', I < L + 1, ' ', L = I);
+      I := ($FE shl 24) or $ED; L := -33554195;
+      WriteLn(I = L, ' ', L = I);
+      U := $FFFFFFFF; Q := UInt64(1) shl 32;
+      WriteLn(U < Q, ' ', U = Q, ' ', Q > U);
+      L := Int64(1) shl 40;
+      S := -1; W := $FFFF; B := 255; E := -1;
+      WriteLn(S < L, ' ', W < L, ' ', B < L, ' ', E < L);
+      L := -1;
+      WriteLn(S = L, ' ', W = L, ' ', B = L, ' ', E = L)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'True False True True False' + #10 +
+    'branch lt' + #10 +
+    'branch ne' + #10 +
+    'True True True' + #10 +
+    'True True' + #10 +
+    'True False True' + #10 +
+    'True True True True' + #10 +
+    'True False False True' + #10, 0);
 end;
 
 initialization
