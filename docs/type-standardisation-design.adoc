@@ -4,7 +4,8 @@
 :sectnums:
 
 Status: ACCEPTED — all design decisions signed off 2026-10-19.  Phases 0–3
-implemented 2026-10-19/20 (see <<progress>>). +
+implemented 2026-10-19/20 and released in v0.15.0; Phase 4 in progress,
+steps 4.0–4.2 done (see <<progress>>). +
 Release placement: phases 0–3 (additive, non-breaking) target *v0.15.0*;
 phases 4–7 (breaking) open the *v0.16* development cycle. +
 Scope: surface type system (builtin type names), stdlib API signatures,
@@ -536,6 +537,13 @@ The announcement in discussion #106 is revised on the following points:
 | 3
 | Language rationale (D1–D12 and the planned Phase 4 changes), grammar
   notes, README.
+
+| 4 (in progress)
+| 4.0: arithmetic on operands narrower than 64 bits is promoted to `Int64`
+  (language rationale, "Integer Expression Width"); a warm rebuild after an
+  edit to a unit reached only through implementation-section uses links
+  correctly.  4.1: the D6 `downto 0` warning for an unsigned counter.
+  4.2: `Format('%u')`.  Next: 4.3, the literal default.
 |===
 
 [#timeline]
