@@ -4917,6 +4917,14 @@ A constant expression is typed like a literal, by magnitude: `N - 1` with
 promoted value stored into a narrower variable or passed to a narrower
 parameter is truncated, as any implicit narrowing is.
 
+Implicit narrowing is the language rule and is silent by default.  The
+opt-in `--warn-narrowing` flag reports every non-constant value of a wider
+integer type stored into a narrower one -- an assignment, a value argument
+or a `for`-loop bound -- as a migration aid for code that stores a `Length`,
+a `Count` or a promoted expression into an `Integer`.  An explicit
+conversion (`Integer(L)`) states the intent and is not reported, nor is a
+constant that fits its destination.
+
 Every integer value in a register holds the sign- or zero-extension of its
 own type's bits, so the value of an expression does not depend on what
 consumes it.

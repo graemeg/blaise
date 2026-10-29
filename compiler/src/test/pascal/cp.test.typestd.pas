@@ -58,6 +58,14 @@ type
     { Phase 4.7: MaxInt is High(Int) -- typed Int, valued High(Int64) on
       every current (64-bit) target }
     procedure TestSem_MaxInt_IsHighInt;
+    { Phase 4.8: --warn-narrowing reports an implicit integer narrowing on
+      every store -- assignment, field, element, pointer write, property,
+      Result, Exit(X), argument (standalone, method, overloaded, interface,
+      procedural variable, constructor, inherited) and for-loop bound -- and stays
+      quiet by default, for a constant that fits, for a widening and for
+      an alias of the same type }
+    procedure TestSem_WarnNarrowing_EveryStore;
+    procedure TestSem_WarnNarrowing_QuietCases;
   end;
 
 implementation
@@ -373,6 +381,100 @@ begin
     AssertTrue('MaxInt = High(Int64)', Sym.ConstValue = High(Int64));
   finally
     Prog.Free();
+  end;
+end;
+
+const
+  NarrowHead = '''
+    program p;
+    type
+      IK = interface procedure Put(X: Integer); end;
+      TK = class(IK)
+        F: Integer;
+        FP: Integer;
+        constructor Create(X: Integer);
+        procedure Put(X: Integer);
+        procedure Ov(X: Integer); overload;
+        procedure Ov(X: string); overload;
+        property P: Integer read FP write FP;
+      end;
+      TPP = procedure(X: Integer);
+    constructor TK.Create(X: Integer); begin F := X end;
+    procedure TK.Put(X: Integer); begin F := X end;
+    procedure TK.Ov(X: Integer); begin F := X end;
+    procedure TK.Ov(X: string); begin end;
+    procedure Take(X: Integer); begin end;
+    var
+      L: Int64; I: Integer; B: Byte; W: Word; U: UInt64; N: Int;
+      SA: array[0..3] of Integer; DA: array of Integer; PI: ^Integer;
+      K: TK; IntfK: IK; PP: TPP; S: string;
+    ''';
+
+function NarrowWarnings(const ABody: string): string;
+begin
+  GWarnNarrowing := True;
+  try
+    Result := SemanticWarnings(NarrowHead + 'begin ' + ABody + ' end.');
+  finally
+    GWarnNarrowing := False;
+  end;
+end;
+
+procedure TTypeStdTests.TestSem_WarnNarrowing_EveryStore;
+
+  procedure Warns(const ALabel, ABody: string);
+  begin
+    AssertTrue(ALabel, Pos('implicit narrowing', NarrowWarnings(ABody)) >= 0);
+  end;
+
+begin
+  AssertTrue('message names both types', Pos(
+    'implicit narrowing from Int64 to Integer', NarrowWarnings('I := L')) >= 0);
+  Warns('Integer to Byte', 'B := I');
+  Warns('Length to Word', 'W := Length(S)');
+  Warns('field', 'K := TK.Create(0); K.F := L');
+  Warns('static array element', 'SA[1] := L');
+  Warns('dynamic array element', 'SetLength(DA, 2); DA[0] := L');
+  Warns('pointer write', 'PI := @I; PI^ := L');
+  Warns('property', 'K := TK.Create(0); K.P := L');
+  Warns('standalone argument', 'Take(L)');
+  Warns('method argument', 'K := TK.Create(0); K.Put(L)');
+  Warns('overloaded method argument', 'K := TK.Create(0); K.Ov(L)');
+  Warns('interface argument', 'IntfK := TK.Create(0); IntfK.Put(L)');
+  Warns('procedural variable argument', 'PP := @Take; PP(L)');
+  Warns('constructor argument', 'K := TK.Create(L)');
+  Warns('for-loop bound', 'for I := 0 to Length(S) - 1 do B := 0');
+  GWarnNarrowing := True;
+  try
+    AssertTrue('Result in a function body', Pos('implicit narrowing',
+      SemanticWarnings('program p; function Back(L: Int64): Integer; ' +
+        'begin Result := L end; begin end.')) >= 0);
+    AssertTrue('inherited argument', Pos('implicit narrowing',
+      SemanticWarnings('program p; type TA = class procedure Put(X: Integer); ' +
+        'end; TB = class(TA) procedure Put(X: Integer); procedure Call; end; ' +
+        'procedure TA.Put(X: Integer); begin end; ' +
+        'procedure TB.Put(X: Integer); begin end; ' +
+        'procedure TB.Call; var L: Int64; begin L := 1; inherited Put(L) end; ' +
+        'begin end.')) >= 0);
+    AssertTrue('Exit(X)', Pos('implicit narrowing',
+      SemanticWarnings('program p; function Back(L: Int64): Integer; ' +
+        'begin Exit(L) end; begin end.')) >= 0);
+  finally
+    GWarnNarrowing := False;
+  end;
+end;
+
+procedure TTypeStdTests.TestSem_WarnNarrowing_QuietCases;
+begin
+  AssertEquals('off by default', '',
+    SemanticWarnings(NarrowHead + 'begin I := L end.'));
+  GWarnNarrowing := True;
+  try
+    AssertEquals('quiet program', '', SemanticWarnings(NarrowHead +
+      'begin B := 200; I := 2 * 3; I := High(Int32); L := I; N := L; ' +
+      'Take(7); I := B; I := Integer(L); Take(Integer(L)) end.'));
+  finally
+    GWarnNarrowing := False;
   end;
 end;
 

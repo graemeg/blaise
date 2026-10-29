@@ -764,6 +764,8 @@ type
       writes the parameter's width through the address. }
     procedure CheckVarArgWidth(AFormal: TTypeDesc; AArg: TASTExpr;
       AIndex: Integer; const AName: string; ALine, ACol: Integer);
+    procedure WarnIfNarrowing(ADestType: TTypeDesc; AExpr: TASTExpr;
+      ALine, ACol: Integer);
     function  IsRecordTemporary(AExpr: TASTExpr): Boolean;
     { BUG-001: warn when a bare for-in loop variable is passed where the callee
       mutates it by reference (var/out parameter, Inc/Dec, SetLength, ...) —
@@ -1390,6 +1392,14 @@ type
     function IsUnitInViewChain(const AUnit: string): Boolean; override;
     function LookupViaOuterChains(const AName: string): TSymbol; override;
   end;
+
+
+var
+  { --warn-narrowing (type standardisation 4.8): warn on an implicit integer
+    narrowing -- a non-constant value of a wider integer type stored into a
+    narrower one, which keeps its low bits.  Opt-in: silent narrowing is the
+    language rule, and the warning is a migration aid (Phase 5's worklist). }
+  GWarnNarrowing: Boolean;
 
 implementation
 
@@ -8026,6 +8036,27 @@ begin
     ALine, ACol);
 end;
 
+{ --warn-narrowing: AExpr, of a wider integer type than ADestType, is stored
+  into it and keeps only its low bits.  A constant that fits keeps its value
+  and is not reported; a widening and a change of signedness at the same
+  width are not narrowings. }
+procedure TSemanticAnalyser.WarnIfNarrowing(ADestType: TTypeDesc;
+  AExpr: TASTExpr; ALine, ACol: Integer);
+var
+  Actual: TTypeDesc;
+  V: Int64;
+begin
+  Actual := AExpr.ResolvedType;
+  if not (IsIntKindType(ADestType) and IsIntKindType(Actual)) then Exit;
+  if Actual.ByteSize() <= ADestType.ByteSize() then Exit;
+  if Self.TryEvalConstIntExpr(AExpr, V) and ValueFitsIntType(V, ADestType) then
+    Exit;
+  SemanticWarning(Format('implicit narrowing from %s to %s keeps the low ' +
+    '%d bits; convert explicitly with %s(...) if that is intended',
+    [Actual.Name, ADestType.Name, ADestType.ByteSize() * 8, ADestType.Name]),
+    ALine, ACol);
+end;
+
 procedure TSemanticAnalyser.CheckConstValueInRange(ADestType: TTypeDesc;
                                                    AExpr: TASTExpr;
                                                    ALine, ACol: Integer);
@@ -8035,6 +8066,10 @@ var
 begin
   if (ADestType = nil) or (AExpr = nil) then
     Exit;
+  { every store of a value into a typed slot passes here, so the opt-in
+    narrowing warning rides along }
+  if GWarnNarrowing then
+    Self.WarnIfNarrowing(ADestType, AExpr, ALine, ACol);
   { Only a destination whose range is narrower than its storage is checkable:
     a named subrange, or an enum.  A plain Byte/Word/Integer is NOT checked
     here — that would be a far broader ruling than this bug covers. }
@@ -13570,6 +13605,13 @@ begin
       EndType := Self.AnalyseExprSlot(ForS.EndExpr);
     CheckValueMatches(VarSym.TypeDesc, ForS.EndExpr, EndType,
       'for-loop end expression', ForS.Line, ForS.Col);
+    { a bound wider than the loop variable is narrowed to it: a Length
+      above 2^31 would end the loop early }
+    if GWarnNarrowing then
+    begin
+      Self.WarnIfNarrowing(VarSym.TypeDesc, ForS.StartExpr, ForS.Line, ForS.Col);
+      Self.WarnIfNarrowing(VarSym.TypeDesc, ForS.EndExpr, ForS.Line, ForS.Col);
+    end;
     Self.WarnIfUnsignedDowntoZero(ForS, VarSym.TypeDesc);
     Inc(FLoopDepth);
     try
@@ -14993,6 +15035,9 @@ begin
     CheckValueMatches(Par.ResolvedType, TASTExpr(ACall.Args.Items[I]), ArgType,
       Format('argument %d of inherited ''%s''', [I + 1, ACall.Name]),
       ACall.Line, ACall.Col);
+    if GWarnNarrowing and not Par.IsVarParam then
+      Self.WarnIfNarrowing(Par.ResolvedType, TASTExpr(ACall.Args.Items[I]),
+        ACall.Line, ACall.Col);
   end;
   ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
 
@@ -15370,8 +15415,12 @@ begin
         Format('var argument %d of ''%s''', [I + 1, AName]), ALine, ACol)
     end
     else
+    begin
       CheckTypesMatch(ParT, Slot.ResolvedType,
         Format('argument %d of ''%s''', [I + 1, AName]), ALine, ACol);
+      if GWarnNarrowing then
+        Self.WarnIfNarrowing(ParT, Slot, ALine, ACol);
+    end;
   end;
 end;
 
@@ -15439,6 +15488,9 @@ begin
     CheckValueMatches(Par.ResolvedType, TASTExpr(ACall.Args.Items[I]), ArgType,
       Format('argument %d of inherited ''%s''', [I + 1, ACall.Name]),
       ACall.Line, ACall.Col);
+    if GWarnNarrowing and not Par.IsVarParam then
+      Self.WarnIfNarrowing(Par.ResolvedType, TASTExpr(ACall.Args.Items[I]),
+        ACall.Line, ACall.Col);
   end;
   ValidateMethodVarArgs(ACall.Args, MDecl, ACall.Name, ACall.Line, ACall.Col);
 
@@ -16853,6 +16905,8 @@ begin
     CheckValueMatches(PPar.TypeDesc, Slot, ArgType,
       Format('argument %d of ''%s''', [I + 1, AName]),
       ALine, ACol);
+    if GWarnNarrowing and not PPar.IsVarParam then
+      Self.WarnIfNarrowing(PPar.TypeDesc, Slot, ALine, ACol);
   end;
 end;
 

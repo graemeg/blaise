@@ -141,6 +141,10 @@ begin
     'Print the resolved AST to stdout after semantic analysis'));
   WriteLn(FormatFlagLine('--debug',
     'Enable runtime memory leak reporting on exit'));
+  WriteLn(FormatFlagLine('--warn-narrowing',
+    'Warn on an implicit integer narrowing (a wider value stored into a'));
+  WriteLn(FormatFlagLine('',
+    'narrower integer keeps its low bits)'));
   WriteLn(FormatFlagLine('--debug-opdf',
     'Emit OPDF debug info (.opdf.s companion file); on macOS also sign'));
   WriteLn(FormatFlagLine('',
@@ -288,6 +292,8 @@ begin
       AFront.DumpAST := True
     else if Arg = '--debug' then
       AOpts.DebugMode := True
+    else if Arg = '--warn-narrowing' then
+      GWarnNarrowing := True
     else if Arg = '--debug-opdf' then
       AOpts.OPDFEnabled := True
     else if (Arg = '--entitlements') and (I < ParamCount()) then

@@ -5,7 +5,7 @@
 
 Status: ACCEPTED — all design decisions signed off 2026-10-19.  Phases 0–3
 implemented 2026-10-19/20 and released in v0.15.0; Phase 4 in progress,
-steps 4.0–4.7 done (see <<progress>>). +
+Phase 4 (steps 4.0–4.8) done (see <<progress>>). +
 Release placement: phases 0–3 (additive, non-breaking) target *v0.15.0*;
 phases 4–7 (breaking) open the *v0.16* development cycle. +
 Scope: surface type system (builtin type names), stdlib API signatures,
@@ -538,7 +538,7 @@ The announcement in discussion #106 is revised on the following points:
 | Language rationale (D1–D12 and the planned Phase 4 changes), grammar
   notes, README.
 
-| 4 (in progress)
+| 4
 | 4.0: arithmetic on operands narrower than 64 bits is promoted to `Int64`
   (language rationale, "Integer Expression Width"); a warm rebuild after an
   edit to a unit reached only through implementation-section uses links
@@ -555,7 +555,7 @@ The announcement in discussion #106 is revised on the following points:
   `ReadFile`.  4.6: collection counts, capacities and indices are `Int`;
   found on the way: a `var` or `out` argument of a different width than
   its parameter was accepted and the callee wrote past or short of it.
-  4.7: `MaxInt` is `High(Int)`.  Next: 4.8, the narrowing warning.
+  4.7: `MaxInt` is `High(Int)`.  4.8: `--warn-narrowing`.  Next: Phase 5.
 |===
 
 [#timeline]
@@ -1012,6 +1012,25 @@ argument passing (`I := Length(S)` with `I: Int32`).  It is opt-in because
 the compiler's own source would produce thousands of instances until
 Phase 5 retypes its index variables; Phase 5 uses it as a worklist, and it
 may become a default warning after Phase 6.
+
+Done 2026-10-29.  `--warn-narrowing` reports a non-constant value of a
+wider integer type stored into a narrower one: an assignment (variable,
+field, array element, pointer write, property, `Result`, `Exit(X)`), a
+value argument on every call path (standalone, method, overloaded,
+constructor, interface, procedural variable, inherited), and a `for`-loop
+bound, whose narrowing would end a loop over more than 2^31^ elements
+early.  The check rides on `CheckConstValueInRange`, which every store
+already passes through; the interface and procedural-variable paths, which
+bypass it, call it directly.  Not reported: a constant that fits (`B :=
+200`), a widening, a change of signedness at the same width, an explicit
+conversion (`Integer(L)`), and a var argument (an error since 4.6).
+
+On the compiler's own source it reports 3,219 narrowings, 3,190 of them
+`Int64` to `Integer` (a `Length` or `Count`, or 4.0-promoted arithmetic,
+stored into an `Integer`): Phase 5's worklist.  Units served from the unit
+cache are not re-analysed and report nothing; a cold build reports all.
+Tests: `TTypeStdTests.TestSem_WarnNarrowing_EveryStore` and
+`TestSem_WarnNarrowing_QuietCases`.
 
 [#phase4-decisions]
 === Decisions on the open questions (2026-10-27)
