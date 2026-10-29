@@ -2426,10 +2426,11 @@ begin
   Sym.ConstValue := 0;
   Define(Sym);
 
-  { Integer range constants — MaxInt is the 32-bit maximum; all Copy(S,N,MaxInt)
-    uses mean "rest of string" which works for strings shorter than 2 GB. }
-  Sym := TSymbol.Create('MaxInt', skConstant, FTypeInteger);
-  Sym.ConstValue := 2147483647;
+  { MaxInt is High(Int) (type standardisation 4.7): typed Int and valued
+    after it, the Int64 maximum on every current target.  As a Copy or
+    Delete count it means "to the end" at any string length. }
+  Sym := TSymbol.Create('MaxInt', skConstant, FTypeInt64);
+  Sym.ConstValue := High(Int64);
   Define(Sym);
 
   { Platform constants — values derived from the compilation target (GTarget).

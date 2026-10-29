@@ -3722,7 +3722,7 @@ begin
     'True True' + LE +
     '0 True' + LE +
     'test.bak ls /usr/bin/ /usr/bin/' + LE +
-    '2147483647 cdef' + LE +
+    '9223372036854775807 cdef' + LE +
     'TA TB' + LE, 3);
 end;
 

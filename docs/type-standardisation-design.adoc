@@ -5,7 +5,7 @@
 
 Status: ACCEPTED — all design decisions signed off 2026-10-19.  Phases 0–3
 implemented 2026-10-19/20 and released in v0.15.0; Phase 4 in progress,
-steps 4.0–4.6 done (see <<progress>>). +
+steps 4.0–4.7 done (see <<progress>>). +
 Release placement: phases 0–3 (additive, non-breaking) target *v0.15.0*;
 phases 4–7 (breaking) open the *v0.16* development cycle. +
 Scope: surface type system (builtin type names), stdlib API signatures,
@@ -555,7 +555,7 @@ The announcement in discussion #106 is revised on the following points:
   `ReadFile`.  4.6: collection counts, capacities and indices are `Int`;
   found on the way: a `var` or `out` argument of a different width than
   its parameter was accepted and the callee wrote past or short of it.
-  Next: 4.7, `MaxInt`.
+  4.7: `MaxInt` is `High(Int)`.  Next: 4.8, the narrowing warning.
 |===
 
 [#timeline]
@@ -992,6 +992,19 @@ the `Int64` overload, a `var` index declared `Int` is accepted, and a
 the compiler, RTL and stdlib: every use as a "to end of string" count in
 `Copy` keeps working once 4.4 accepts an `Int` count; a use stored into a
 32-bit variable would truncate to `-1` and must be retyped.
+
+Done 2026-10-29.  `MaxInt` is typed `Int` with the value `High(Int64)`,
+the `Int` maximum on every current target.  The audit found three uses in
+the compiler (`uToolchain`, `uStrCompat`, `uSymbolTable`), all
+"to the end" `Copy` counts, none in the RTL or stdlib, and no use stored
+into a 32-bit variable, so nothing was retyped.  `_StringCopy` and
+`_StringDelete` already compare a count against the remaining length, so
+the largest count cannot overflow.  No two-step is needed: a compiler
+built with the old 32-bit `MaxInt` behaves the same on every string below
+2^31^ bytes.  Tests: `TTypeStdTests.TestSem_MaxInt_IsHighInt` (type and
+value) and `TE2ETypeStdTests.TestRun_MaxInt_IsHighInt` (printed value,
+`= High(Int)`, the `Int64` overload, `Copy` and `Delete` to the end); the
+expected output of `TE2EMiscTests` moved to the new value.
 
 *4.8 — narrowing warning (opt-in).*  An opt-in warning,
 `--warn-narrowing`, for an implicit integer narrowing on assignment or

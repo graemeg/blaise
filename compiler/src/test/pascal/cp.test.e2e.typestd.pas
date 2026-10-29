@@ -91,6 +91,9 @@ type
       parameters are Int -- each result reaches the Int64 overload, a var
       index is declared Int, and a Count above 2^31 reads back whole }
     procedure TestRun_CollectionCounts_AreInt;
+    { Phase 4.7: MaxInt is High(Int), reaches the Int64 overload, and still
+      means "to the end" as a Copy or Delete count }
+    procedure TestRun_MaxInt_IsHighInt;
   end;
 
 implementation
@@ -799,6 +802,30 @@ begin
     'Int 1' + #10 + 'Int 1' + #10 +
     'Int 0' + #10 + 'Int 1' + #10 + 'Int 0' + #10 + 'Int 0' + #10 +
     'Int 0' + #10 + 'Int 1' + #10 + 'Int 0' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_MaxInt_IsHighInt;
+const
+  Src = '''
+    program P;
+    procedure F(X: Integer); overload; begin WriteLn('Integer ', X) end;
+    procedure F(X: Int64); overload; begin WriteLn('Int ', X) end;
+    var S: string;
+    begin
+      WriteLn(MaxInt);
+      WriteLn(MaxInt = High(Int));
+      F(MaxInt);
+      S := 'abcdef';
+      WriteLn(Copy(S, 2, MaxInt));
+      Delete(S, 3, MaxInt);
+      WriteLn(S)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '9223372036854775807' + #10 + 'True' + #10 +
+    'Int 9223372036854775807' + #10 + 'cdef' + #10 + 'abc' + #10, 0);
 end;
 
 initialization

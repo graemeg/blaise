@@ -812,20 +812,23 @@ language.
 
 ==== Built-in constant
 
-`MaxInt: Integer = 2147483647` is a compiler built-in constant.  It
-represents the maximum value of a 32-bit signed integer (2^31 − 1).  In
-Blaise source it is used exclusively as a sentinel meaning "copy to end of
-string" in `Copy(S, N, MaxInt)` calls; every such call passes `2147483647`
-as the `count` argument to the RTL's `_StringCopy`, which clamps any count
-≥ remaining length to the actual remainder.
+`MaxInt` is a compiler built-in constant equal to `High(Int)`, typed
+`Int`: 9223372036854775807 on every current (64-bit) target.  Its common
+use is the "to the end of the string" count in `Copy(S, N, MaxInt)` and
+`Delete(S, N, MaxInt)`; the RTL clamps any count beyond the remaining
+length to the remainder, comparing against `Length - N` so that the
+largest count cannot overflow.
 
-This differs from FPC, where `MaxInt = High(SizeInt) = 9223372036854775807`
-(the 64-bit maximum on 64-bit targets).  The Blaise value is deliberately
-kept 32-bit: the compiler's Integer type is 32-bit, `Copy`'s `count`
-parameter is `Integer`, and passing a 64-bit literal through the QBE `w`
-calling convention truncated it to −1, causing `_StringCopy` to return an
-empty string.  The 32-bit value avoids this without loss of expressiveness
-for any realistic string length.
+The name refers to `Int`, so its value follows `Int` (type
+standardisation, Phase 4.7).  This matches FPC, where `MaxInt` is
+`High(SizeInt)`.  Until Phase 4.7 it was the 32-bit maximum,
+2147483647, because `Copy`'s count parameter was a 32-bit `Integer`;
+Phase 4.4 widened the count to `Int`, and Phase 4.5 lifted the string
+length beyond 2^31^, where a 32-bit "to the end" would stop short.
+
+Storing `MaxInt` into a 32-bit variable truncates to -1 under the
+implicit narrowing rule.  Declare the variable `Int`, or use
+`High(Int32)` for the 32-bit maximum.
 
 ==== Conversion built-ins
 

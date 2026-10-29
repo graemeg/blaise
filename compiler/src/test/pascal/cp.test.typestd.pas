@@ -55,6 +55,9 @@ type
     { Phase 4.5: the allocator takes an Int64 size, so GetMem of an Integer
       extends it (x86-64 passed its low 32 bits; arm64 its register as is) }
     procedure TestAsm_GetMemSize_Extended;
+    { Phase 4.7: MaxInt is High(Int) -- typed Int, valued High(Int64) on
+      every current (64-bit) target }
+    procedure TestSem_MaxInt_IsHighInt;
   end;
 
 implementation
@@ -354,6 +357,23 @@ const
     ''';
 begin
   AssertEquals('', '', AsmMissing(Src, 'movsbq', 'asr x0, x0, #56'));
+end;
+
+procedure TTypeStdTests.TestSem_MaxInt_IsHighInt;
+var
+  Prog: TProgram;
+  Sym: TSymbol;
+begin
+  Prog := Analyse(NamesSrc);
+  try
+    Sym := Prog.SymbolTable.Lookup('MaxInt');
+    AssertNotNull('MaxInt is defined', Sym);
+    AssertTrue('MaxInt is typed Int',
+      Sym.TypeDesc = Prog.SymbolTable.FindType('Int'));
+    AssertTrue('MaxInt = High(Int64)', Sym.ConstValue = High(Int64));
+  finally
+    Prog.Free();
+  end;
 end;
 
 initialization
