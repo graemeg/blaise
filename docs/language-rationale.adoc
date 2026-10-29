@@ -1736,6 +1736,16 @@ keeps the compiler's own pervasive `Kind in [...]` token tests off the jumbo
 path and avoids a latent miscompile that the old fixed-`l` representation hid
 (any listed ordinal ≥ 64 was silently dropped).
 
+An integer left operand takes the literal as a `set of Byte` constructor, as in
+FPC and Delphi: `I in [1, 2, 5..6, J]` for any integer type. The literal is
+sized the same way, by its largest constant member. A non-constant member keeps
+the full 0..255 width. A constant member outside 0..255 is a semantic error,
+since it could never be a member. The membership test treats a left value
+outside the set's width, negative included, as not a member. It compares
+unsigned, at the operand's width, on every set size; for a jumbo set the
+compare guards the `_SetIn` call, which would otherwise index outside the
+bitmap.
+
 ==== Set literals and disambiguation
 
 Set literals use the same `[elem, ...]` bracket notation as array literals.

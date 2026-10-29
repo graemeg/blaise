@@ -8921,6 +8921,7 @@ var
    SuppOwned: Boolean;
   LSuppNo: string;
   LSuppEnd: string;
+  NotMemL, DoneL: string;
   SCAT: TStaticArrayTypeDesc;
 begin
   if AExpr is TNilLiteral then
@@ -10673,7 +10674,23 @@ begin
         Self.EmitExprToEax(BE.Right);        { set bitmap addr -> %rax }
         Self.Emit(#9'movq %rax, %rdi');
         Self.Emit(#9'popq %rsi');
+        { An ordinal outside the bitmap is not a member, and must not reach
+          _SetIn, which indexes the bitmap with it.  One unsigned compare, at
+          the operand's width, rejects negatives and values past the end. }
+        NotMemL := NewLabel('jsetout');
+        DoneL := NewLabel('jsetdone');
+        if BE.Left.ResolvedType.RawSize() > 4 then
+          Self.Emit(Format(#9'cmpq $%d, %%rsi',
+            [TSetTypeDesc(BE.Right.ResolvedType).BitCount]))
+        else
+          Self.Emit(Format(#9'cmpl $%d, %%esi',
+            [TSetTypeDesc(BE.Right.ResolvedType).BitCount]));
+        Self.Emit(#9'jae ' + NotMemL);
         Self.Emit(#9'callq _SetIn');
+        Self.Emit(#9'jmp ' + DoneL);
+        Self.Emit(NotMemL + ':');
+        Self.Emit(#9'xorl %eax, %eax');
+        Self.Emit(DoneL + ':');
         Exit;
       end;
       { Evaluate the ordinal and SAVE IT ON THE STACK, not in %ecx: the RHS set
@@ -10700,9 +10717,15 @@ begin
         tested element's ordinal is larger; x86 shift counts wrap mod 32/64, so
         the raw shift result for an out-of-range ordinal is meaningless and
         must be masked out.  %edx = (ord < BitCount) ? 1 : 0. }
-      Self.Emit(Format(#9'cmpl $%d, %%ecx',
-        [TSetTypeDesc(BE.Right.ResolvedType).BitCount]));
-      Self.Emit(#9'setl %dl');
+      { Unsigned, at the operand's width: a negative ordinal is not a member,
+        and an Int64 ordinal is not judged by its low 32 bits. }
+      if BE.Left.ResolvedType.RawSize() > 4 then
+        Self.Emit(Format(#9'cmpq $%d, %%rcx',
+          [TSetTypeDesc(BE.Right.ResolvedType).BitCount]))
+      else
+        Self.Emit(Format(#9'cmpl $%d, %%ecx',
+          [TSetTypeDesc(BE.Right.ResolvedType).BitCount]));
+      Self.Emit(#9'setb %dl');
       Self.Emit(#9'movzbl %dl, %edx');
       Self.Emit(#9'andl %edx, %eax');
       Exit;

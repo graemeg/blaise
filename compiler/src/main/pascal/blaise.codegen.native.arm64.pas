@@ -5249,6 +5249,7 @@ var
   CmpUnsigned: Boolean;
   CondName: string;
   Lit: string;
+  NotMemL, DoneL: string;
   Idx: Integer;
   EmptyArgs: TObjectList;
   Owned: Boolean;
@@ -6604,6 +6605,12 @@ begin
         materialises a stack bitmap (EmitJumboSetLiteral lowers sp); a
         non-literal RHS (a set variable) evaluates to its bitmap address
         directly.  The ordinal is parked across the RHS eval. }
+      { An ordinal outside the bitmap is not a member, and must not reach
+        _SetIn, which indexes the bitmap with it (an Int64 5000000000 or a
+        negative value read far outside it).  One unsigned compare rejects both
+        ends; the RHS is still evaluated, for its side effects. }
+      NotMemL := NewLabel('jsetout');
+      DoneL := NewLabel('jsetdone');
       Self.EmitExprToX0(BE.Left);         { ordinal }
       EmitPushX0();                       { [ord] — survives the RHS eval }
       if (BE.Right is TArrayLiteralExpr) then
@@ -6611,7 +6618,17 @@ begin
         EmitJumboSetLiteral(TArrayLiteralExpr(BE.Right));  { x0 = bitmap, sp lowered }
         Self.Emit(Format(#9'ldr x1, [sp, #%d]',
           [JumboSetLiteralBytes(BE.Right)]));              { the parked ord }
+        EmitIntLiteral('x2', TSetTypeDesc(BE.Right.ResolvedType).BitCount);
+        if BE.Left.ResolvedType.RawSize() > 4 then
+          Self.Emit(#9'cmp x1, x2')
+        else
+          Self.Emit(#9'cmp w1, w2');
+        Self.Emit(Format(#9'b.hs %s', [NotMemL]));
         EmitCallSym('_SetIn');
+        Self.Emit(Format(#9'b %s', [DoneL]));
+        Self.Emit(NotMemL + ':');
+        Self.Emit(#9'movz x0, #0');
+        Self.Emit(DoneL + ':');
         EmitAddSubImm('add', 'sp', 'sp', JumboSetLiteralBytes(BE.Right));
         Self.Emit(#9'add sp, sp, #16');   { drop the parked ord }
       end
@@ -6619,7 +6636,17 @@ begin
       begin
         Self.EmitExprToX0(BE.Right);      { bitmap address }
         EmitPopTo('x1');                  { the parked ord }
+        EmitIntLiteral('x2', TSetTypeDesc(BE.Right.ResolvedType).BitCount);
+        if BE.Left.ResolvedType.RawSize() > 4 then
+          Self.Emit(#9'cmp x1, x2')
+        else
+          Self.Emit(#9'cmp w1, w2');
+        Self.Emit(Format(#9'b.hs %s', [NotMemL]));
         EmitCallSym('_SetIn');
+        Self.Emit(Format(#9'b %s', [DoneL]));
+        Self.Emit(NotMemL + ':');
+        Self.Emit(#9'movz x0, #0');
+        Self.Emit(DoneL + ':');
       end;
       Exit;
     end;
@@ -6636,8 +6663,13 @@ begin
       Self.Emit(#9'and x0, x0, x2');
       EmitIntLiteral('x2',
         TSetTypeDesc(BE.Right.ResolvedType).BitCount);
-      Self.Emit(#9'cmp x1, x2');
-      Self.Emit(#9'cset x2, lt');
+      { unsigned, at the operand's width: a negative ordinal is not a member
+        either, and an Int64 ordinal is judged whole }
+      if BE.Left.ResolvedType.RawSize() > 4 then
+        Self.Emit(#9'cmp x1, x2')
+      else
+        Self.Emit(#9'cmp w1, w2');
+      Self.Emit(#9'cset x2, lo');
       Self.Emit(#9'and x0, x0, x2');
       Exit;
     end;

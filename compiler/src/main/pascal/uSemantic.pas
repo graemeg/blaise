@@ -947,6 +947,8 @@ type
       literal: largest listed member ordinal + 1 when every element is a
       compile-time enum constant; otherwise the full base-enum member count
       (conservative).  Keeps low-ordinal membership tests off the jumbo path. }
+    { The anonymous set of Byte for 'I in [...]' with an integer left operand. }
+    function  AnalyseIntegerInLiteral(AExpr: TArrayLiteralExpr): TTypeDesc;
     function  SetLiteralBitCount(AExpr: TArrayLiteralExpr;
                                  ABaseEnum: TEnumTypeDesc): Integer;
     procedure CoerceToCharOrd(ALit: TStringLiteral);
@@ -21160,7 +21162,13 @@ begin
       RType := AnalyseSetLiteralExpr(TArrayLiteralExpr(ABin.Right), TmpSet);
       TmpSet.BitCount := SetLiteralBitCount(TArrayLiteralExpr(ABin.Right),
         TEnumTypeDesc(LType));
-    end;
+    end
+    else if (ABin.Right is TArrayLiteralExpr) and (LType <> nil) and
+            (LType.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tyByte,
+                            tyInt8, tySmallInt, tyWord]) then
+      { 'I in [1, 2]' with an integer left operand: the literal is a set of
+        Byte constructor, as in FPC and Delphi. }
+      RType := AnalyseIntegerInLiteral(TArrayLiteralExpr(ABin.Right));
     if RType.Kind <> tySet then
       SemanticError(
         Format('Right operand of ''in'' must be a set type, got ''%s''', [RType.Name]),
@@ -23897,6 +23905,44 @@ begin
      OALitNeedsDynArray(Elem) then
     ALit.ResolvedType := FTable.NewDynArrayType(Elem);
   Result := AArrType;
+end;
+
+function TSemanticAnalyser.AnalyseIntegerInLiteral(AExpr: TArrayLiteralExpr): TTypeDesc;
+var
+  TmpSet: TSetTypeDesc;
+  I:      Integer;
+  V, MaxOrd: Int64;
+  AllConst:  Boolean;
+begin
+  { Analysed as a full 0..255 set of Byte first (ranges expanded and checked
+    against those bounds), then narrowed to the largest constant member so a
+    small literal stays a register set -- the enum in-literal sizing rule.  A
+    non-constant member keeps the full width.  The membership test's range
+    guard makes any left value outside the set's width, negative included,
+    not a member. }
+  TmpSet := FTable.NewOrdinalSetType('', FTable.TypeByte, 256);
+  Result := AnalyseSetLiteralExpr(AExpr, TmpSet);
+  MaxOrd := -1;
+  AllConst := True;
+  for I := 0 to AExpr.Elements.Count - 1 do
+    if TryEvalConstIntExpr(TASTExpr(AExpr.Elements.Items[I]), V) then
+    begin
+      if (V < 0) or (V > 255) then
+        SemanticError(Format(
+          'Set element %d is out of range for a set of Byte (0..255)', [V]),
+          AExpr.Line, AExpr.Col);
+      if V > MaxOrd then
+        MaxOrd := V;
+    end
+    else
+      AllConst := False;
+  if AllConst then
+  begin
+    if MaxOrd < 0 then
+      TmpSet.BitCount := 1
+    else
+      TmpSet.BitCount := Integer(MaxOrd) + 1;
+  end;
 end;
 
 function TSemanticAnalyser.SetLiteralBitCount(AExpr: TArrayLiteralExpr;

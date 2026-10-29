@@ -6908,10 +6908,11 @@ begin
     ''', TargetArm64);
   { const literal folds to an immediate mask (Mon|Wed = bits 0,2 = 5) }
   AssertTrue('folded mask', Pos(#9'movz x0, #5', AsmT) >= 0);
-  { membership: shift + bit test + range guard }
+  { membership: shift + bit test + range guard (unsigned, so a negative
+    ordinal is not a member) }
   AssertTrue('bit shift', Pos(#9'lsr x0, x0, x1', AsmT) >= 0);
   AssertTrue('bit test', Pos(#9'and x0, x0, x2', AsmT) >= 0);
-  AssertTrue('range guard', Pos(#9'cset x2, lt', AsmT) >= 0);
+  AssertTrue('range guard', Pos(#9'cset x2, lo', AsmT) >= 0);
   { set ops: or / and / and-not }
   AssertTrue('union', Pos(#9'orr x0, x0, x1', AsmT) >= 0);
   AssertTrue('difference complement', Pos(#9'movn x2, #0', AsmT) >= 0);

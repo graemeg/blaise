@@ -35,6 +35,10 @@ type
       (x86-64 used to print the raw bitmask; arm64 failed in codegen) }
     procedure TestCompile_WriteOfSet_Rejected;
     procedure TestRun_Sets_Combined;
+    { I in [1, 2] with an integer left operand: constants, ranges and a
+      variable element; values outside the literal -- negative, above 255,
+      above the largest member -- are not members. }
+    procedure TestRun_IntegerInSetLiteral;
     { <= 32-member sets }
     procedure TestRun_Set_Include_Exclude;
     procedure TestRun_Set_IncludeExcludeOnField;
@@ -1264,6 +1268,36 @@ begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src,
     'n' + LE + 'y' + LE + 'y' + LE + 'n' + LE + '32' + LE, 0);
+end;
+
+procedure TE2ESetOpsTests.TestRun_IntegerInSetLiteral;
+const
+  Src = '''
+    program P;
+    var I, J: Integer; N: Int64; W: Word; S: SmallInt;
+    begin
+      J := 7;
+      for I := -1 to 9 do
+        if I in [1, 2, 5..6, J] then Write(I, ' ');
+      WriteLn();
+      I := 300;  WriteLn(I in [1, 2], ' ', I in [0..255]);
+      I := 44;   WriteLn(I in [1, 2], ' ', I in [0..255], ' ', I in [44]);
+      N := 5000000000; WriteLn(N in [0..255]);
+      N := 200;  WriteLn(N in [3..5, 200]);
+      W := 65535; WriteLn(W in [255]);
+      S := -2;   WriteLn(S in [0..255], ' ', (S + 3) in [1])
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    '1 2 5 6 7 ' + LineEnding +
+    'False False' + LineEnding +
+    'False True True' + LineEnding +
+    'False' + LineEnding +
+    'True' + LineEnding +
+    'False' + LineEnding +
+    'False True' + LineEnding, 0);
 end;
 
 procedure TE2ESetOpsTests.TestRun_Sets_Combined;

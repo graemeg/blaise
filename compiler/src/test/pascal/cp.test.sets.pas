@@ -32,6 +32,10 @@ type
     { WriteLn/Write of a set is rejected, as in FPC and Delphi: there is no
       text form (x86-64 printed the raw bitmask, arm64 refused to lower it) }
     procedure TestSemantic_WriteOfSet_Rejected;
+    { An integer tested against a bracket literal (I in [1, 2]) takes the
+      literal as a set of Byte constructor, as FPC and Delphi do; a constant
+      element outside 0..255 cannot be a member and is rejected. }
+    procedure TestSemantic_IntegerInSetLiteral;
     procedure TestSemantic_RangeInOpenArrayArg_Rejected;
     { ------------------------------------------------------------------ }
     { parse                                                                }
@@ -1637,6 +1641,41 @@ begin
     AsmMissing(Src,
       #9'popq %rax'#10#9'movl %eax, (%rcx)',
       #9'ldr x9, [sp], #16'#10#9'str w0, [x9]'));
+end;
+
+procedure TSetTests.TestSemantic_IntegerInSetLiteral;
+var
+  Msg: string;
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc('''
+    program P;
+    var I: Integer; N: Int64; W: Word; B: Boolean;
+    begin
+      I := 2; N := 3; W := 4;
+      B := (I in [1, 2]) or (N in [3..5, 200]) or (W in [I, 9]) or
+           ((I + 1) in [0..255])
+    end.
+    ''');
+  Prog.Free();
+  Msg := SemanticError('''
+    program P;
+    var I: Integer; B: Boolean;
+    begin
+      B := I in [1, 300]
+    end.
+    ''');
+  AssertTrue('element above 255 reported: ' + Msg,
+    Pos('300', Msg) >= 0);
+  Msg := SemanticError('''
+    program P;
+    var I: Integer; B: Boolean;
+    begin
+      B := I in [-1, 2]
+    end.
+    ''');
+  AssertTrue('negative element reported: ' + Msg,
+    Pos('-1', Msg) >= 0);
 end;
 
 procedure TSetTests.TestSemantic_WriteOfSet_Rejected;
