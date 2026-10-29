@@ -333,7 +333,7 @@ Migration Analyser should flag.
 
 `Low(S)` always returns the constant `0`.  `High(S)` returns
 `Length(S) - 1`, i.e. the index of the last valid byte.  Both return
-`Integer`.  For an empty string, `High(S)` returns `-1`; a standard
+`Int`.  For an empty string, `High(S)` returns `-1`; a standard
 `for I := Low(S) to High(S)` loop executes zero iterations, which is the
 correct behaviour.
 
@@ -670,7 +670,12 @@ cycle, because each one changes the meaning of existing code:
   and counts widen to the pointer-sized integer, lifting the
   2^31^-element ceiling on strings, `RawBytes` and collections.  All of them
   move together; a surface where `Length` is 64-bit but `Count` is 32-bit
-  would be permanently inconsistent.
+  would be permanently inconsistent.  The builtins are delivered (v0.16,
+  Phase 4.4): `Length`, `Pos`, `PosEx`, `SizeOf`, `Ord` and the index
+  `High`/`Low` of strings and arrays return `Int`, and `Copy`, `Delete`
+  and `SetLength` take `Int` counts.  Until the string and dynamic-array
+  headers store 64-bit lengths, a length above `High(Int32)` is a run-time
+  error rather than a truncation.  The collections follow.
 * *Counts stay signed.*  `Length` and `Count` return the signed `Int`, so
   `for I := Count - 1 downto 0` cannot underflow — the reason Go made
   `len()` signed.  `UInt` and the unsigned fixed-width names are for bit
@@ -694,8 +699,17 @@ A compile-time constant is the exception: a non-negative integer constant
 converts to `UInt64` implicitly (`U := 1`, `F(5)` for a `UInt64`
 parameter, `V and (Buckets - 1)`), because its value is known to fit.
 Without it, making unhinted literals `Int` would have required a cast on
-every unsigned 64-bit constant.  A non-constant `Int64` still needs the
-cast.
+every unsigned 64-bit constant.
+
+An `Int` that cannot be negative by construction converts the same way:
+`Length`, `SizeOf`, and `Ord` of an unsigned ordinal (`Byte`, `Word`,
+`UInt32`, `Boolean`, a character `S[I]`, an enumeration with no negative
+ordinal).  These were `Integer` before they became `Int`, and an `Integer`
+widens into `UInt64`, so a hash such as `H := (H xor Ord(S[I])) * Prime`
+over a `UInt64` keeps compiling.  The exception covers the call itself,
+not an expression built from it: `Length(S) - 1` may be negative.  `Pos`,
+`PosEx` and `High` return `-1` for "none", so they, `Ord` of a signed
+value and every other non-constant `Int64` still need the cast.
 
 ==== 16-bit integer types: SmallInt / Word
 

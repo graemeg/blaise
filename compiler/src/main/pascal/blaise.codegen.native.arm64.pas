@@ -534,6 +534,9 @@ type
     procedure EmitForInAssignAddr(AStmt: TForInStmt; AOwned: Boolean);
     procedure EmitPointerWrite(AStmt: TPointerWriteStmt);
     procedure EmitNarrowX0(AType: TTypeDesc);
+    { Evaluate an integer argument the RTL takes as Int64 (a Copy, PosEx,
+      Delete or SetLength count) into x0, extended from its own width. }
+    procedure EmitInt64ArgToX0(AExpr: TASTExpr);
     { Re-extend x1 from AType's width and signedness (a narrow integer). }
     procedure EmitExtendX1(AType: TTypeDesc);
     procedure EmitExtendParamReg(const ANum: string; AType: TTypeDesc);
@@ -6225,6 +6228,7 @@ begin
     begin
       EmitBuiltinStrCall2(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]),
         TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]), '_StringPos');
+      Self.Emit(#9'sxtw x0, w0');   { Int (D5): -1 when not found }
       Exit;
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'SameText') then
@@ -6312,16 +6316,22 @@ begin
       string transients — full parking bracket like the 2-arg helper }
     Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
     EmitPushX0();
-    Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
+    if SameText(TFuncCallExpr(AExpr).Name, 'Copy') then
+      EmitInt64ArgToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]))
+    else
+      Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
     EmitPushX0();
-    Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[2]));
+    EmitInt64ArgToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[2]));
     Self.Emit(#9'mov x2, x0');
     Self.Emit(#9'ldr x1, [sp]');
     Self.Emit(#9'ldr x0, [sp, #16]');
     if SameText(TFuncCallExpr(AExpr).Name, 'Copy') then
       EmitCallSym('_StringCopy')
     else
+    begin
       EmitCallSym('_StringPosEx');
+      Self.Emit(#9'sxtw x0, w0');   { Int (D5): -1 when not found }
+    end;
     EmitPushX0();
     if ArcBuiltinStrArgOwnsRef(
          TASTExpr(TFuncCallExpr(AExpr).Args.Items[1])) then
@@ -6394,6 +6404,10 @@ begin
       Exit;
     end;
     Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+    { Ord is Int (D5): extend the ordinal from the argument's width }
+    if (TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType <> nil) and
+       not TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType.IsString() then
+      EmitNarrowX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]).ResolvedType);
     Exit;
   end;
   if (AExpr is TFuncCallExpr) and
@@ -9857,7 +9871,7 @@ begin
       TStringBuilder.ToString (2026-07-23).  It looked like an allocator fault
       but the allocator was simply handed a preposterous request. }
     Self.Emit(#9'str x19, [sp, #-16]!');
-    Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
+    EmitInt64ArgToX0(TASTExpr(ACall.Args.Items[1]));
     EmitPushX0();                                { [N] }
     { x19 (callee-saved) = the address that holds the string pointer — survives
       the three RTL calls below. }
@@ -9899,7 +9913,7 @@ begin
        (TIdentExpr(TASTExpr(ACall.Args.Items[0])).IsImplicitSelf and
         (TIdentExpr(TASTExpr(ACall.Args.Items[0])).ImplicitFieldInfo <> nil)) then
     begin
-      Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
+      EmitInt64ArgToX0(TASTExpr(ACall.Args.Items[1]));
       EmitPushX0();                                       { [N] }
       EmitLValueAddrToX0(TASTExpr(ACall.Args.Items[0]));
       EmitPushX0();                                       { [N][addr] }
@@ -9912,7 +9926,7 @@ begin
       Self.Emit(#9'add sp, sp, #32');
       Exit;
     end;
-    Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
+    EmitInt64ArgToX0(TASTExpr(ACall.Args.Items[1]));
     EmitPushX0();
     EmitLoadSlot('x0', TIdentExpr(TASTExpr(ACall.Args.Items[0])).Name);
     EmitPopTo('x1');
@@ -10032,9 +10046,9 @@ begin
       refused FS inside a method }
     EmitVarArgAddrToX0(TASTExpr(ACall.Args.Items[0]));
     EmitPushX0();                                  { [&S] }
-    Self.EmitExprToX0(TASTExpr(ACall.Args.Items[1]));
+    EmitInt64ArgToX0(TASTExpr(ACall.Args.Items[1]));
     EmitPushX0();                                  { [&S][I] }
-    Self.EmitExprToX0(TASTExpr(ACall.Args.Items[2]));
+    EmitInt64ArgToX0(TASTExpr(ACall.Args.Items[2]));
     Self.Emit(#9'mov x2, x0');
     EmitPopTo('x1');
     Self.Emit(#9'ldr x9, [sp]');
@@ -12559,6 +12573,12 @@ begin
   end;
 end;
 
+procedure TArm64Backend.EmitInt64ArgToX0(AExpr: TASTExpr);
+begin
+  Self.EmitExprToX0(AExpr);
+  EmitNarrowX0(AExpr.ResolvedType);
+end;
+
 procedure TArm64Backend.EmitNarrowX0(AType: TTypeDesc);
 begin
   { normalise x0 to AType's width: truncate + re-extend so the 64-bit
@@ -13693,6 +13713,7 @@ begin
   if Owned then
     EmitPushX0();                    { the array, released below }
   EmitCallSym('_DynArrayLength');
+  Self.Emit(#9'sxtw x0, w0');        { an Integer result, read as Int (D5) }
   if Owned then
   begin
     Self.Emit(#9'ldr x1, [sp]');

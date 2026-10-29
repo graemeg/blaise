@@ -49,9 +49,10 @@ type
     procedure TestAsm_IntegerShl_ResultSignExtended;
     procedure TestAsm_NotByte_ResultZeroExtended;
     procedure TestAsm_IntegerVsInt64Compare_Extends;
-    { Ord keeps a UInt32 / Int64 / UInt64 argument's type: as Integer,
-      Ord(High(UInt32)) was -1 to a 64-bit comparison }
-    procedure TestSemantic_OrdOfWideArg_KeepsType;
+    { Ord is Int (D5) whatever the argument's width, except that a UInt64
+      argument keeps UInt64: as Integer, Ord(High(UInt32)) was -1 to a
+      64-bit comparison }
+    procedure TestSemantic_Ord_IsIntExceptUInt64;
   end;
 
 implementation
@@ -189,12 +190,12 @@ begin
       'eor x0, x0, x1'#10#9'lsl x0, x0, #56'#10#9'lsr x0, x0, #56'));
 end;
 
-procedure TIntWidthTests.TestSemantic_OrdOfWideArg_KeepsType;
+procedure TIntWidthTests.TestSemantic_Ord_IsIntExceptUInt64;
 begin
-  AssertEquals('UInt32', TypeOf('Ord(U)'));
+  AssertEquals('Int64', TypeOf('Ord(U)'));
   AssertEquals('Int64', TypeOf('Ord(L)'));
   AssertEquals('UInt64', TypeOf('Ord(Q)', 'UInt64'));
-  AssertEquals('Integer', TypeOf('Ord(I)'));
+  AssertEquals('Int64', TypeOf('Ord(I)'));
 end;
 
 procedure TIntWidthTests.TestAsm_IntegerVsInt64Compare_Extends;

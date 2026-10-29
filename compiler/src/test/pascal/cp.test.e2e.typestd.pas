@@ -70,6 +70,18 @@ type
       method) and nested function.  x86-64 lays the elements out at the
       literal's own width unless the literal is retyped to the formal. }
     procedure TestRun_OpenArrayLiteral_EveryCallShape;
+    { Phase 4.4 (D5): Length, Pos, PosEx, SizeOf, Ord and the index-bound
+      High/Low are Int, so each reaches F(Int64) over F(Integer) with its
+      value intact: Pos's -1, Ord of a negative Integer, High of an empty
+      string.  Copy and SetLength take an Int count without truncating it. }
+    procedure TestRun_BuiltinResults_AreInt;
+    { Phase 4.4: storage is still 32-bit, so SetLength rejects a length
+      above High(Int32) with a run-time error instead of truncating it }
+    procedure TestRun_SetLength_AboveInt32_RunTimeError;
+    { Phase 4.4: Length, SizeOf and Ord of an unsigned ordinal cannot be
+      negative, so they mix with a UInt64 without a cast, as the Integer
+      they were did -- an FNV-1a hash over Ord of each character }
+    procedure TestRun_NonNegativeInt_MixesWithUInt64;
   end;
 
 implementation
@@ -553,6 +565,153 @@ begin
     'nested-in-method 123' + #10 +
     'nested-proc 456' + #10 +
     'nested-func 789' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_BuiltinResults_AreInt;
+const
+  Src = '''
+    program P;
+    type
+      TE = (eA, eB, eC);
+      TN = (nNeg = -3, nZero = 0);
+    procedure F(X: Integer); overload; begin WriteLn('Integer ', X) end;
+    procedure F(X: Int64); overload; begin WriteLn('Int64 ', X) end;
+    procedure OA(const X: array of Integer);
+    begin
+      F(Length(X));
+      F(High(X))
+    end;
+    var
+      S, Empty: string; A: array of Integer; SA: array[1..5] of Byte;
+      I: Integer; B: Byte; E: TE; EN: TN; L, N: Int64;
+    begin
+      S := 'hello';
+      Empty := '';
+      SetLength(A, 3);
+      F(Length(S));
+      F(Length(A));
+      F(Length(SA));
+      F(High(S));
+      F(High(Empty));
+      F(High(A));
+      F(Low(SA));
+      F(Pos('l', S));
+      F(Pos('z', S));
+      F(PosEx('l', S, 3));
+      F(PosEx('z', S, 0));
+      F(SizeOf(I));
+      I := -5;
+      F(Ord(I));
+      B := 200;
+      F(Ord(B));
+      E := eC;
+      F(Ord(E));
+      EN := nNeg;
+      F(Ord(EN));
+      F(Ord(True));
+      OA([1, 2, 3]);
+      F(High(Integer));
+      L := Ord(I) * 1000000000;
+      WriteLn(L);
+      N := (Int64(1) shl 32) + 2;
+      WriteLn(Copy(S, 1, N));
+      N := 4;
+      SetLength(A, N);
+      WriteLn(Length(A));
+      SetLength(S, N);
+      WriteLn(Length(S))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'Int64 5' + #10 +
+    'Int64 3' + #10 +
+    'Int64 5' + #10 +
+    'Int64 4' + #10 +
+    'Int64 -1' + #10 +
+    'Int64 2' + #10 +
+    'Int64 1' + #10 +
+    'Int64 2' + #10 +
+    'Int64 -1' + #10 +
+    'Int64 3' + #10 +
+    'Int64 -1' + #10 +
+    'Int64 4' + #10 +
+    'Int64 -5' + #10 +
+    'Int64 200' + #10 +
+    'Int64 2' + #10 +
+    'Int64 -3' + #10 +
+    'Int64 1' + #10 +
+    'Int64 3' + #10 +
+    'Int64 2' + #10 +
+    'Integer 2147483647' + #10 +
+    '-5000000000' + #10 +
+    'ello' + #10 +
+    '4' + #10 +
+    '4' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_SetLength_AboveInt32_RunTimeError;
+const
+  Src = '''
+    program P;
+    var A: array of Byte; N: Int64;
+    begin
+      N := (Int64(1) shl 32) + 1;
+      SetLength(A, N);
+      WriteLn('not reached ', Length(A))
+    end.
+    ''';
+var
+  Output: string;
+  RCode: Integer;
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertTrue('compiles', CompileAndRun(Src, Output, RCode));
+  AssertTrue('exit code is non-zero', RCode <> 0);
+  AssertTrue('reports the limit: ' + Output,
+    Pos('SetLength: length above High(Int32)', Output) >= 0);
+  AssertTrue('does not truncate: ' + Output, Pos('not reached', Output) < 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_NonNegativeInt_MixesWithUInt64;
+const
+  Src = '''
+    program P;
+    type
+      TE = (eA, eB, eC);
+    procedure Q(X: UInt64); begin WriteLn('Q ', X) end;
+    var
+      H: UInt64; S: string; I: Integer; B: Byte; E: TE; A: array of Word;
+    begin
+      S := 'hello';
+      H := 14695981039346656037;
+      for I := 0 to Length(S) - 1 do
+        H := (H xor Ord(S[I])) * 1099511628211;
+      WriteLn(H);
+      B := 200;
+      H := Ord(B) + H;
+      WriteLn(H);
+      E := eC;
+      H := Ord(E);
+      WriteLn(H);
+      SetLength(A, 3);
+      H := Length(A);
+      H := H + SizeOf(I);
+      WriteLn(H);
+      Q(Length(S));
+      WriteLn(H > Length(S))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '11831194018420276491' + #10 +
+    '11831194018420276691' + #10 +
+    '2' + #10 +
+    '7' + #10 +
+    'Q 5' + #10 +
+    'True' + #10, 0);
 end;
 
 initialization

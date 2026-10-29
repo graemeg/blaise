@@ -5,7 +5,7 @@
 
 Status: ACCEPTED — all design decisions signed off 2026-10-19.  Phases 0–3
 implemented 2026-10-19/20 and released in v0.15.0; Phase 4 in progress,
-steps 4.0–4.3 done (see <<progress>>). +
+steps 4.0–4.4 done (see <<progress>>). +
 Release placement: phases 0–3 (additive, non-breaking) target *v0.15.0*;
 phases 4–7 (breaking) open the *v0.16* development cycle. +
 Scope: surface type system (builtin type names), stdlib API signatures,
@@ -545,8 +545,11 @@ The announcement in discussion #106 is revised on the following points:
   correctly.  4.1: the D6 `downto 0` warning for an unsigned counter.
   4.2: `Format('%u')`.  4.3: unhinted literals and untyped constants are
   `Int`, with the hint and typed-operand rules implemented; found on the
-  way: mixed-width comparisons and `Ord` of wide arguments.  Next: 4.4,
-  builtin results.
+  way: mixed-width comparisons and `Ord` of wide arguments.  4.4: builtin
+  results are `Int`; `Copy`, `Delete` and `SetLength` take `Int` counts; an
+  `Int` that cannot be negative mixes with `UInt64`.  Found on the way:
+  `PosEx`, `Ord` and the arm64 dynamic-array `Length` read their 32-bit
+  result without extending it.  Next: 4.5, 64-bit length headers.
 |===
 
 [#timeline]
@@ -830,6 +833,49 @@ with a run-time error rather than truncating; 4.5 removes that limit.  No
 layout change.  Audit wraparound-dependent code (hash functions in
 particular) for `shr`, `div`, `mod` and comparisons whose operand silently
 widens; `+`, `-` and `*` produce the same low 32 bits either way.
+
+Done 2026-10-29.  The semantic change is the result types; the work was in
+what had relied on them being 32-bit:
+
+* Results.  `Length`, `Pos`, `PosEx`, `SizeOf`, `Ord` and `High`/`Low` of
+  a string or array are `Int`.  The ordinal forms `High(T)`/`Low(T)` keep
+  their argument's type, and `Ord` of a `UInt64` keeps `UInt64`, whose
+  values do not all fit in `Int`.
+* Extension.  A result typed `Int` must be a canonical 64-bit value.
+  x86-64 already sign-extended `Length` and `Pos`, but not `PosEx`, so
+  `PosEx`'s `-1` read as 4294967295; arm64 extended neither `Pos`, `PosEx`
+  nor the dynamic-array `Length`.  `Ord` passed its argument through
+  unextended on both; it now extends from the argument's width (an enum
+  sign-extends, since an explicit ordinal may be negative).
+* Counts.  `_StringCopy`, `_StringDelete`, `_StringPosEx`,
+  `_StringSetLength` and `_DynArraySetLength(M)` take `Int64` counts, and
+  both backends pass the count extended from its own width; before, x86-64
+  passed the low 32 bits, so `Copy(S, 1, (1 shl 32) + 2)` copied two
+  characters.  `Delete` was added to the step: it takes the same "to the
+  end" count as `Copy`, which 4.7 makes 64-bit.  `SetLength` and the string
+  allocator abort with "Runtime error: ... length above High(Int32)"
+  until 4.5 widens the headers.
+* Decided with the step: an `Int` that is non-negative by construction
+  (`Length`, `SizeOf`, `Ord` of an unsigned ordinal, a character or an
+  enum with no negative ordinal) converts implicitly to `UInt64`, in
+  assignment, argument, arithmetic, bitwise and comparison operands, as a
+  non-negative constant does.  Otherwise every `UInt64` hash over `Ord(C)`
+  needed a cast: these results were `Integer`, which widens into `UInt64`.
+  `Pos`, `PosEx`, `High` and expressions built from these results still
+  need the cast.
+
+Wraparound audit, by the same measurement as 4.3 (stage-2 assembly of the
+compiler before and after): arm64, 275 of 10,068 functions changed,
+x86-64 306 of 9,534.  Every change falls in one of a few classes: an
+`Integer` compared with an `Int` result is extended and compared in 64
+bits; two `Int` results compare in 64 bits; the added result extensions
+above; counts passed in 64 bits; an extension no longer needed where an
+`Int64` meets a result that used to be `Integer`; `IntToStr` of an `Int`
+result routed to `Int64ToStr`.  There is no `shr`, `div` or `mod` change:
+since 4.0 the arithmetic around these results was already 64-bit.  No
+computed value changed.  The compiler, RTL and stdlib needed no source
+change.  Test churn: nine assertions on the resolved type of a builtin, and
+one arm64 code-shape test that now includes the `Length` extension.
 
 *4.5 — 64-bit length headers.*  The string header's Length and Capacity
 fields and the dynamic-array length field become 64-bit, lifting the

@@ -1019,12 +1019,17 @@ type
       SemanticError's message shape. }
     procedure SemanticWarning(const AMsg: string; ALine, ACol: Integer);
     procedure WarnIfUnsignedDowntoZero(AFor: TForStmt; AVarType: TTypeDesc);
-    { True when AExpr is a compile-time integer constant that adapts to
-      AExpected (D4, rule 1): a non-negative Int constant fits a UInt64. }
     { True when ALit's value lies in AType's range (an integer type). }
     function LiteralFitsIntType(ALit: TIntLiteral; AType: TTypeDesc): Boolean;
     { True when AExpr is an integer constant whose value lies in AType's range. }
     function ConstFitsIntType(AExpr: TASTExpr; AType: TTypeDesc): Boolean;
+    { True when AExpr is an Int that cannot be negative by construction:
+      the builtin Length or SizeOf, or Ord of an unsigned ordinal. }
+    function IsNonNegativeInt(AExpr: TASTExpr): Boolean;
+    { True when AExpr adapts to AExpected (D4, rule 1): a non-negative Int
+      constant, or an Int that is non-negative by construction, fits a
+      UInt64; a bracket literal of constants fits an open array of another
+      integer type. }
     function ConstAdaptsTo(AExpected: TTypeDesc; AExpr: TASTExpr;
       AActual: TTypeDesc): Boolean;
     { CheckTypesMatch for a value AExpr of type AActual flowing into a slot
@@ -2395,6 +2400,32 @@ begin
     Result := AType.Kind = tyUInt64;
 end;
 
+function TSemanticAnalyser.IsNonNegativeInt(AExpr: TASTExpr): Boolean;
+var
+  FC: TFuncCallExpr;
+  ArgType: TTypeDesc;
+begin
+  Result := False;
+  if not (AExpr is TFuncCallExpr) then Exit;
+  FC := TFuncCallExpr(AExpr);
+  if (FC.ResolvedDecl <> nil) or (FC.Args = nil) or (FC.Args.Count <> 1) or
+     (FC.ResolvedType = nil) or (FC.ResolvedType.Kind <> tyInt64) then
+    Exit;
+  if SameText(FC.Name, 'Length') or SameText(FC.Name, 'SizeOf') then
+    Exit(True);
+  if not SameText(FC.Name, 'Ord') then Exit;
+  { a character of a string, Ord(S[I]): a byte, typed Integer }
+  if (TASTExpr(FC.Args.Items[0]) is TStringSubscriptExpr) and
+     (TStringSubscriptExpr(FC.Args.Items[0]).StrExpr.ResolvedType <> nil) and
+     TStringSubscriptExpr(FC.Args.Items[0]).StrExpr.ResolvedType.IsString() then
+    Exit(True);
+  ArgType := TASTExpr(FC.Args.Items[0]).ResolvedType;
+  if ArgType = nil then Exit;
+  if ArgType.Kind = tyEnum then
+    Exit(TEnumTypeDesc(ArgType).MinOrdinal() >= 0);
+  Result := ArgType.Kind in [tyByte, tyBoolean, tyWord, tyUInt32, tyString];
+end;
+
 function TSemanticAnalyser.ConstAdaptsTo(AExpected: TTypeDesc;
   AExpr: TASTExpr; AActual: TTypeDesc): Boolean;
 var
@@ -2403,7 +2434,8 @@ var
 begin
   Result := (AExpected <> nil) and (AActual <> nil) and (AExpr <> nil) and
     (AExpected.Kind = tyUInt64) and (AActual.Kind = tyInt64) and
-    Self.TryEvalConstIntExpr(AExpr, V) and (V >= 0);
+    ((Self.TryEvalConstIntExpr(AExpr, V) and (V >= 0)) or
+     Self.IsNonNegativeInt(AExpr));
   if Result or (AExpected = nil) or (AActual = nil) then Exit;
   { a bracket literal of integer constants bound for an open array of
     another integer type: each element adapts when it fits }
@@ -18196,7 +18228,7 @@ begin
   end;
 
   { SizeOf(TypeName) or SizeOf(expression) — compile-time byte size,
-    returns Integer.  The codegen reads Args[0].ResolvedType.ByteSize and
+    returns Int (D5).  The codegen reads Args[0].ResolvedType.ByteSize and
     emits a literal, so the argument is never evaluated at runtime. }
   if SameText(AExpr.Name, 'SizeOf') then
   begin
@@ -18212,7 +18244,7 @@ begin
     if TASTExpr(AExpr.Args.Items[0]).ResolvedType = nil then
       SemanticError('SizeOf argument must be a type or typed expression',
         AExpr.Line, AExpr.Col);
-    Result := FTable.TypeInteger;
+    Result := FTable.TypeInt64;
     AExpr.ResolvedType := Result;
     Exit;
   end;
@@ -18314,8 +18346,8 @@ begin
         AExpr.Line, AExpr.Col);
     if ArgType.Kind in [tyOpenArray, tyStaticArray, tyDynArray, tyString] then
     begin
-      { Index-bound form: result is Integer (existing behaviour). }
-      Result := FTable.TypeInteger;
+      { Index-bound form: an index, so Int (D5). }
+      Result := FTable.TypeInt64;
       AExpr.ResolvedType := Result;
       Exit;
     end;
@@ -18540,7 +18572,7 @@ begin
     ArgType := Self.AnalyseListSlot(AExpr.Args, 0);
     if not (ArgType.Kind in [tyString, tyOpenArray, tyStaticArray, tyDynArray]) then
       SemanticError('Length argument must be a string or array', AExpr.Line, AExpr.Col);
-    Result := FTable.TypeInteger;
+    Result := FTable.TypeInt64;
     AExpr.ResolvedType := Result;
     Exit;
   end;
@@ -18551,7 +18583,7 @@ begin
       SemanticError('Pos requires exactly two arguments', AExpr.Line, AExpr.Col);
     Self.AnalyseListSlot(AExpr.Args, 0);
     Self.AnalyseListSlot(AExpr.Args, 1);
-    Result := FTable.TypeInteger;
+    Result := FTable.TypeInt64;
     AExpr.ResolvedType := Result;
     Exit;
   end;
@@ -18562,8 +18594,9 @@ begin
       SemanticError('PosEx requires exactly three arguments', AExpr.Line, AExpr.Col);
     Self.AnalyseListSlot(AExpr.Args, 0);
     Self.AnalyseListSlot(AExpr.Args, 1);
-    Self.AnalyseListSlot(AExpr.Args, 2);
-    Result := FTable.TypeInteger;
+    Self.AnalyseIntegerArg(AExpr.Args, 2, 'PosEx', 'Third', AExpr.Line,
+      AExpr.Col);
+    Result := FTable.TypeInt64;
     AExpr.ResolvedType := Result;
     Exit;
   end;
@@ -18913,12 +18946,12 @@ begin
         Format('Ord expects an ordinal value, not ''%s'' (use Trunc or ' +
           'Round to convert a float to an integer)', [ArgType.Name]),
         AExpr.Line, AExpr.Col);
-    { An argument whose values do not all fit in Integer keeps its type:
-      typed Integer, Ord(High(UInt32)) read as -1 to a 64-bit comparison. }
-    if (ArgType <> nil) and (ArgType.Kind in [tyUInt32, tyInt64, tyUInt64]) then
+    { Int (D5); a UInt64 argument keeps its type, whose values do not all
+      fit in Int. }
+    if (ArgType <> nil) and (ArgType.Kind = tyUInt64) then
       Result := ArgType
     else
-      Result := FTable.TypeInteger;
+      Result := FTable.TypeInt64;
     AExpr.ResolvedType := Result;
     Exit;
   end;
@@ -21407,7 +21440,8 @@ end;
 
 { A constant operand takes the type of the other operand when its value
   fits (D4, rule 2): a non-negative constant beside a UInt64 is a UInt64,
-  so `V and (LT_BUCKETS - 1)` needs no cast now that the constant is Int. }
+  so `V and (LT_BUCKETS - 1)` needs no cast now that the constant is Int.
+  So is an Int that cannot be negative (D5): `H xor Ord(C)` in a hash. }
 procedure TSemanticAnalyser.AdoptUInt64ForConst(ABin: TBinaryExpr;
   var LType, RType: TTypeDesc);
 var
@@ -21415,10 +21449,12 @@ var
 begin
   if (LType = nil) or (RType = nil) then Exit;
   if (LType.Kind = tyUInt64) and (RType.Kind = tyInt64) and
-     Self.TryEvalConstIntExpr(ABin.Right, V) and (V >= 0) then
+     ((Self.TryEvalConstIntExpr(ABin.Right, V) and (V >= 0)) or
+      Self.IsNonNegativeInt(ABin.Right)) then
     RType := FTable.TypeUInt64
   else if (RType.Kind = tyUInt64) and (LType.Kind = tyInt64) and
-     Self.TryEvalConstIntExpr(ABin.Left, V) and (V >= 0) then
+     ((Self.TryEvalConstIntExpr(ABin.Left, V) and (V >= 0)) or
+      Self.IsNonNegativeInt(ABin.Left)) then
     LType := FTable.TypeUInt64;
 end;
 
@@ -21638,6 +21674,9 @@ begin
         Format('Operator ''%s'' is not defined for static-array type ''%s''',
           [BinaryOpName(ABin.Op), OpType.Name])));
     end;
+    { H > Length(S) with H: UInt64 -- a non-negative Int compares with a
+      UInt64 as a non-negative constant does }
+    Self.AdoptUInt64ForConst(ABin, LType, RType);
     { nil can be compared with class, interface, pointer, PChar or
       dynamic-array types (an empty dynamic array is nil) }
     if not (
@@ -21767,11 +21806,13 @@ begin
     end
     else
     begin
+      { before the type check: SizeOf(X) beside a UInt64 is not folded by
+        the constant-operand rule, but adapts all the same }
+      Self.AdoptUInt64ForConst(ABin, LType, RType);
       CheckTypesMatch(LType, RType, 'binary expression', ABin.Line, ABin.Col);
       { Int64 / UInt64 wins over narrower integer types so codegen emits
         l-typed instructions and the high bits are preserved.  Signed and
         unsigned 64-bit types cannot be mixed without an explicit cast. }
-      Self.AdoptUInt64ForConst(ABin, LType, RType);
       if ((LType.Kind = tyInt64) and (RType.Kind = tyUInt64)) or
          ((LType.Kind = tyUInt64) and (RType.Kind = tyInt64)) then
         SemanticError(

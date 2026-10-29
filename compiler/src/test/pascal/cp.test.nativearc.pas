@@ -936,7 +936,8 @@ begin
       #9'callq _DynArrayLength'#10#9'movslq %eax, %rax'#10 +
         #9'movq %rax, (%rsp)'#10#9'movq 8(%rsp), %rdi'#10 +
         #9'callq _DynArrayRelease',
-      #9'bl __DynArrayLength'#10#9'ldr x1, [sp]'#10#9'str x0, [sp]'#10 +
+      #9'bl __DynArrayLength'#10#9'sxtw x0, w0'#10#9'ldr x1, [sp]'#10 +
+        #9'str x0, [sp]'#10 +
         #9'mov x0, x1'#10#9'bl __DynArrayRelease'));
 end;
 

@@ -51,7 +51,7 @@ type
 
     { PosEx }
     procedure TestSemantic_PosEx_OK;
-    procedure TestSemantic_PosEx_ReturnsInteger;
+    procedure TestSemantic_PosEx_ReturnsInt;
 
     { IndexStr / IndexText }
     procedure TestSemantic_IndexStr_OK;
@@ -382,7 +382,7 @@ begin
     ''');
 end;
 
-procedure TStrUtilsTests.TestSemantic_PosEx_ReturnsInteger;
+procedure TStrUtilsTests.TestSemantic_PosEx_ReturnsInt;
 var
   Lexer:       TLexer;
   Parser:      TParser;
@@ -410,8 +410,8 @@ begin
       Semantic.AnalyseUnitForExport(TUnit(Units.Items[I]));
     Semantic.Analyse(Prog);
     Assign := TAssignment(Prog.Block.Stmts[0]);
-    AssertEquals('PosEx returns Integer',
-      Ord(tyInteger), Ord(Assign.Expr.ResolvedType.Kind));
+    AssertEquals('PosEx is Int (D5)',
+      Ord(tyInt64), Ord(Assign.Expr.ResolvedType.Kind));
   finally
     Semantic.Free();
     Units.Free(); Loader.Free(); SearchPaths.Free();

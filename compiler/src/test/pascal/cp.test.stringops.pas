@@ -32,13 +32,13 @@ type
     { ------------------------------------------------------------------ }
     procedure TestSemantic_Length_StringArg_OK;
     procedure TestSemantic_Length_IntArg_Error;
-    procedure TestSemantic_Length_ReturnsInteger;
+    procedure TestSemantic_Length_ReturnsInt;
 
     { ------------------------------------------------------------------ }
     { Pos                                                                  }
     { ------------------------------------------------------------------ }
     procedure TestSemantic_Pos_TwoStringArgs_OK;
-    procedure TestSemantic_Pos_ReturnsInteger;
+    procedure TestSemantic_Pos_ReturnsInt;
 
     { ------------------------------------------------------------------ }
     { Copy                                                                 }
@@ -98,8 +98,8 @@ type
     { ------------------------------------------------------------------ }
     procedure TestSemantic_Low_StringArg_OK;
     procedure TestSemantic_High_StringArg_OK;
-    procedure TestSemantic_Low_StringArg_ReturnsInteger;
-    procedure TestSemantic_High_StringArg_ReturnsInteger;
+    procedure TestSemantic_Low_StringArg_Accepted;
+    procedure TestSemantic_High_StringArg_Accepted;
     { Delete(FS, I, N) on an implicit-Self string field (and any l-value):
       the new string is stored through the field's ADDRESS.  arm64 refused
       it ("load of variable 'FS'"). }
@@ -283,7 +283,7 @@ begin
         ''');
 end;
 
-procedure TStringOpsTests.TestSemantic_Length_ReturnsInteger;
+procedure TStringOpsTests.TestSemantic_Length_ReturnsInt;
 var
   L:  TLexer;
   P:  TParser;
@@ -299,8 +299,8 @@ begin
     A.Analyse(Pr);
     Assign := TAssignment(Pr.Block.Stmts[0]);
     AssertNotNull('expr resolved', Assign.Expr.ResolvedType);
-    AssertEquals('Length returns Integer',
-      Ord(tyInteger), Ord(Assign.Expr.ResolvedType.Kind));
+    AssertEquals('Length is Int (D5)',
+      Ord(tyInt64), Ord(Assign.Expr.ResolvedType.Kind));
   finally
     A.Free();
     Pr.Free();
@@ -318,7 +318,7 @@ begin
   SemanticOK(SrcPos);
 end;
 
-procedure TStringOpsTests.TestSemantic_Pos_ReturnsInteger;
+procedure TStringOpsTests.TestSemantic_Pos_ReturnsInt;
 var
   L:  TLexer;
   P:  TParser;
@@ -333,8 +333,8 @@ begin
   try
     A.Analyse(Pr);
     Assign := TAssignment(Pr.Block.Stmts[0]);
-    AssertEquals('Pos returns Integer',
-      Ord(tyInteger), Ord(Assign.Expr.ResolvedType.Kind));
+    AssertEquals('Pos is Int (D5)',
+      Ord(tyInt64), Ord(Assign.Expr.ResolvedType.Kind));
   finally
     A.Free();
     Pr.Free();
@@ -707,7 +707,7 @@ begin
     'begin I := High(S) end.');
 end;
 
-procedure TStringOpsTests.TestSemantic_Low_StringArg_ReturnsInteger;
+procedure TStringOpsTests.TestSemantic_Low_StringArg_Accepted;
 var
   L: TLexer;
   P: TParser;
@@ -715,14 +715,14 @@ var
   A: TSemanticAnalyser;
   Expr: TASTExpr;
 begin
-  { Parse and analyse: just check no exception and type is Integer }
+  { Parse and analyse: the Int result narrows into an Integer variable }
   SemanticOK(
     'program P;'          + LineEnding +
     'var S: string; I: Integer;' + LineEnding +
     'begin I := Low(S) end.');
 end;
 
-procedure TStringOpsTests.TestSemantic_High_StringArg_ReturnsInteger;
+procedure TStringOpsTests.TestSemantic_High_StringArg_Accepted;
 begin
   SemanticOK(
     'program P;'          + LineEnding +

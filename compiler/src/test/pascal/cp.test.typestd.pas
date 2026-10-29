@@ -44,6 +44,14 @@ type
       untyped constant N resolve against an Int32 / Int64 pair instead of
       being ambiguous, and a lone Int32 parameter still takes the literal }
     procedure TestSem_UnhintedLiteral_ResolvesToInt;
+    { Phase 4.4 (D5): Length, Pos, PosEx, SizeOf, Ord and the index-bound
+      High/Low of strings and arrays are Int; the ordinal High/Low keep
+      their argument's type, and Ord of a UInt64 keeps UInt64 }
+    procedure TestSem_BuiltinResults_AreInt;
+    { Phase 4.4: only an Int that cannot be negative (Length, SizeOf, Ord
+      of an unsigned ordinal) mixes with a UInt64 without a cast; Pos and
+      High may be -1, and Ord of a signed value may be negative }
+    procedure TestSem_MayBeNegativeInt_NeedsCastForUInt64;
   end;
 
 implementation
@@ -231,6 +239,73 @@ begin
       G(42)
     end.
     '''));
+end;
+
+procedure TTypeStdTests.TestSem_BuiltinResults_AreInt;
+const
+  Src = '''
+    program p;
+    type TE = (eA, eB);
+    var
+      L: Int64; S: string; A: array of Byte; SA: array[1..3] of Byte;
+      I: Integer; B: Byte; E: TE; U: UInt64;
+    begin
+      L := Length(S);
+      L := Length(A);
+      L := Length(SA);
+      L := Pos('a', S);
+      L := PosEx('a', S, 1);
+      L := SizeOf(I);
+      L := Ord(I);
+      L := Ord(B);
+      L := Ord(E);
+      L := Ord(True);
+      L := High(S);
+      L := High(A);
+      L := Low(SA);
+      L := High(I);
+      U := Ord(U)
+    end.
+    ''';
+  Expected: array[0..14] of TTypeKind = (tyInt64, tyInt64, tyInt64,
+    tyInt64, tyInt64, tyInt64, tyInt64, tyInt64, tyInt64, tyInt64,
+    tyInt64, tyInt64, tyInt64, tyInteger, tyUInt64);
+var
+  Prog: TProgram;
+  K: Integer;
+  Asg: TAssignment;
+begin
+  Prog := Analyse(Src);
+  try
+    for K := 0 to High(Expected) do
+    begin
+      Asg := TAssignment(Prog.Block.Stmts.Items[K]);
+      AssertEquals('statement ' + IntToStr(K + 1), Ord(Expected[K]),
+        Ord(TASTExpr(Asg.Expr).ResolvedType.Kind));
+    end;
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TTypeStdTests.TestSem_MayBeNegativeInt_NeedsCastForUInt64;
+
+  function Probe(const AStmt: string): string;
+  begin
+    Result := SemanticError(
+      'program p; type TN = (nNeg = -1, nZero); var H: UInt64; S: string; ' +
+      'I: Integer; EN: TN; begin ' + AStmt + ' end.');
+  end;
+
+begin
+  AssertTrue('Pos', Pos('Cannot mix', Probe('H := H xor Pos(''a'', S)')) >= 0);
+  AssertTrue('High', Probe('H := High(S)') <> '');
+  AssertTrue('Ord of an Integer', Probe('H := H + Ord(I)') <> '');
+  AssertTrue('Ord of an enum with a negative ordinal',
+    Probe('H := Ord(EN)') <> '');
+  AssertTrue('Length - 1 may be negative', Probe('H := Length(S) - 1') <> '');
+  AssertEquals('Length, SizeOf and Ord of a Char adapt', '',
+    Probe('H := Length(S); H := H + SizeOf(I); H := H xor Ord(S[0])'));
 end;
 
 procedure TTypeStdTests.TestSem_Int8AndByte_DistinctOverloads;

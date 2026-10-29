@@ -2471,11 +2471,11 @@ begin
   { Built-in string operations }
   Sym := TSymbol.Create('Format',    skFunction, FTypeString);
   Define(Sym);
-  Sym := TSymbol.Create('Length',    skFunction, FTypeInteger);
+  Sym := TSymbol.Create('Length',    skFunction, FTypeInt64);
   Define(Sym);
-  Sym := TSymbol.Create('Pos',       skFunction, FTypeInteger);
+  Sym := TSymbol.Create('Pos',       skFunction, FTypeInt64);
   Define(Sym);
-  Sym := TSymbol.Create('PosEx',     skFunction, FTypeInteger);
+  Sym := TSymbol.Create('PosEx',     skFunction, FTypeInt64);
   Define(Sym);
   Sym := TSymbol.Create('Copy',      skFunction, FTypeString);
   Define(Sym);
@@ -2509,7 +2509,7 @@ begin
   Define(Sym);
   Sym := TSymbol.Create('OrdAt',       skFunction, FTypeInteger);
   Define(Sym);
-  Sym := TSymbol.Create('Ord',         skFunction, FTypeInteger);
+  Sym := TSymbol.Create('Ord',         skFunction, FTypeInt64);
   Define(Sym);
   Sym := TSymbol.Create('Chr',         skFunction, FTypeString);
   Define(Sym);

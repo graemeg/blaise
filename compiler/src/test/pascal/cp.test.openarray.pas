@@ -55,8 +55,8 @@ type
     { ------------------------------------------------------------------ }
     procedure TestSemantic_OpenArray_ResolvesToOpenArrayKind;
     procedure TestSemantic_OpenArray_ElementType;
-    procedure TestSemantic_High_ReturnsInteger;
-    procedure TestSemantic_Low_ReturnsInteger;
+    procedure TestSemantic_High_ReturnsInt;
+    procedure TestSemantic_Low_ReturnsInt;
 
     { ------------------------------------------------------------------ }
     { Codegen                                                              }
@@ -330,7 +330,7 @@ begin
   finally P.Free(); end;
 end;
 
-procedure TOpenArrayTests.TestSemantic_High_ReturnsInteger;
+procedure TOpenArrayTests.TestSemantic_High_ReturnsInt;
 var P: TProgram; MD: TMethodDecl; Assign: TAssignment; FCall: TFuncCallExpr;
 begin
   P := AnalyseSrc(SrcHighLow);
@@ -340,11 +340,11 @@ begin
     Assign := TAssignment(MD.Body.Stmts[0]);
     FCall  := TFuncCallExpr(Assign.Expr);
     AssertNotNull('High resolved type set', FCall.ResolvedType);
-    AssertEquals('High returns tyInteger', Ord(tyInteger), Ord(FCall.ResolvedType.Kind));
+    AssertEquals('High of an array is Int (D5)', Ord(tyInt64), Ord(FCall.ResolvedType.Kind));
   finally P.Free(); end;
 end;
 
-procedure TOpenArrayTests.TestSemantic_Low_ReturnsInteger;
+procedure TOpenArrayTests.TestSemantic_Low_ReturnsInt;
 var P: TProgram; MD: TMethodDecl; Assign: TAssignment; FCall: TFuncCallExpr;
 begin
   P := AnalyseSrc(SrcHighLow);
@@ -354,7 +354,7 @@ begin
     Assign := TAssignment(MD.Body.Stmts[1]);
     FCall  := TFuncCallExpr(Assign.Expr);
     AssertNotNull('Low resolved type set', FCall.ResolvedType);
-    AssertEquals('Low returns tyInteger', Ord(tyInteger), Ord(FCall.ResolvedType.Kind));
+    AssertEquals('Low of an array is Int (D5)', Ord(tyInt64), Ord(FCall.ResolvedType.Kind));
   finally P.Free(); end;
 end;
 

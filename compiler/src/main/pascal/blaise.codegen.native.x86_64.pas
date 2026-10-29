@@ -1131,6 +1131,9 @@ type
       signedness — used after a call (whose ABI return is 32-bit) and to
       implement an explicit narrowing/widening type cast. }
     procedure EmitNarrowToType(AType: TTypeDesc);
+    { Evaluate an integer argument the RTL takes as Int64 (a Copy, PosEx or
+      SetLength count) into %rax, extended from its own width. }
+    procedure EmitInt64ArgToRax(AExpr: TASTExpr);
     { The cmp of a comparison whose left operand is in %rax and right in %rcx
       (or the immediate AImm when AHasImm).  64-bit when either operand is
       64-bit or pointer-like, after re-extending a narrower integer operand
@@ -6759,6 +6762,12 @@ begin
     Self.Emit(#9'cmpl %ecx, %eax');
 end;
 
+procedure TX86_64Backend.EmitInt64ArgToRax(AExpr: TASTExpr);
+begin
+  Self.EmitExprToEax(AExpr);
+  Self.EmitNarrowToType(AExpr.ResolvedType);
+end;
+
 procedure TX86_64Backend.EmitNarrowToType(AType: TTypeDesc);
 begin
   if AType = nil then Exit;
@@ -9428,12 +9437,11 @@ begin
         Self.Emit(#9'subq $16, %rsp');
         Self.Emit(#9'movq %rax, (%rsp)');
         Self.Emit(#9'pushq %rax');
-        Self.EmitExprToEax(TASTExpr(FC.Args.Items[1]));
+        Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[1]));
         Self.Emit(#9'pushq %rax');
-        Self.EmitExprToEax(TASTExpr(FC.Args.Items[2]));
-        Self.Emit(#9'movl %eax, %edx');
-        Self.Emit(#9'popq %rax');
-        Self.Emit(#9'movl %eax, %esi');
+        Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[2]));
+        Self.Emit(#9'movq %rax, %rdx');
+        Self.Emit(#9'popq %rsi');
         Self.Emit(#9'popq %rdi');
         Self.Emit(#9'callq _StringCopy');
         Self.Emit(#9'movq %rax, 8(%rsp)');
@@ -9444,12 +9452,11 @@ begin
       end;
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'pushq %rax');
-      Self.EmitExprToEax(TASTExpr(FC.Args.Items[1]));
+      Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[1]));
       Self.Emit(#9'pushq %rax');
-      Self.EmitExprToEax(TASTExpr(FC.Args.Items[2]));
-      Self.Emit(#9'movl %eax, %edx');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movl %eax, %esi');
+      Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[2]));
+      Self.Emit(#9'movq %rax, %rdx');
+      Self.Emit(#9'popq %rsi');
       Self.Emit(#9'popq %rdi');
       Self.Emit(#9'callq _StringCopy');
       Exit;
@@ -9581,6 +9588,7 @@ begin
     end;
     if SameText(FC.Name, 'Ord') and (FC.Args.Count = 1) then
     begin
+      { Ord is Int (D5): the ordinal is extended from the argument's width }
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
          (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tyString) then
@@ -9588,7 +9596,14 @@ begin
         Self.Emit(#9'movq %rax, %rdi');
         Self.Emit(#9'xorl %esi, %esi');
         Self.Emit(#9'callq _OrdAt');
-      end;
+        Self.Emit(#9'movslq %eax, %rax');
+      end
+      else if (TASTExpr(FC.Args.Items[0]).ResolvedType <> nil) and
+              (TASTExpr(FC.Args.Items[0]).ResolvedType.Kind = tyEnum) then
+        { an enum's ordinal may be negative (TE = (A = -3, B)) }
+        Self.Emit(#9'movslq %eax, %rax')
+      else
+        Self.EmitNarrowToType(TASTExpr(FC.Args.Items[0]).ResolvedType);
       Exit;
     end;
     if (SameText(FC.Name, 'Succ') or SameText(FC.Name, 'Pred')) and
@@ -9798,11 +9813,12 @@ begin
         Self.Emit(#9'movq %rax, (%rsp)');
         Self.EmitExprToEax(TASTExpr(FC.Args.Items[1]));
         Self.Emit(#9'movq %rax, 8(%rsp)');
-        Self.EmitExprToEax(TASTExpr(FC.Args.Items[2]));
-        Self.Emit(#9'movl %eax, %edx');
+        Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[2]));
+        Self.Emit(#9'movq %rax, %rdx');
         Self.Emit(#9'movq (%rsp), %rdi');
         Self.Emit(#9'movq 8(%rsp), %rsi');
         Self.Emit(#9'callq _StringPosEx');
+        Self.Emit(#9'movslq %eax, %rax');
         Self.Emit(#9'movq %rax, 16(%rsp)');
         if ArcBuiltinStrArgOwnsRef(TASTExpr(FC.Args.Items[0])) then
           Self.EmitStrDisposeFromSlot(TASTExpr(FC.Args.Items[0]), '(%rsp)');
@@ -9816,11 +9832,12 @@ begin
       Self.Emit(#9'pushq %rax');
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[1]));
       Self.Emit(#9'pushq %rax');
-      Self.EmitExprToEax(TASTExpr(FC.Args.Items[2]));
-      Self.Emit(#9'movl %eax, %edx');
+      Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[2]));
+      Self.Emit(#9'movq %rax, %rdx');
       Self.Emit(#9'popq %rsi');
       Self.Emit(#9'popq %rdi');
       Self.Emit(#9'callq _StringPosEx');
+      Self.Emit(#9'movslq %eax, %rax');
       Exit;
     end;
     if SameText(FC.Name, 'UpCase') and (FC.Args.Count = 1) then
@@ -18610,12 +18627,11 @@ begin
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
       Self.Emit(#9'pushq %rax');
-      Self.EmitExprToEax(TASTExpr(PC.Args.Items[1]));
+      Self.EmitInt64ArgToRax(TASTExpr(PC.Args.Items[1]));
       Self.Emit(#9'pushq %rax');
-      Self.EmitExprToEax(TASTExpr(PC.Args.Items[2]));
-      Self.Emit(#9'movl %eax, %edx');
-      Self.Emit(#9'popq %rax');
-      Self.Emit(#9'movl %eax, %esi');
+      Self.EmitInt64ArgToRax(TASTExpr(PC.Args.Items[2]));
+      Self.Emit(#9'movq %rax, %rdx');
+      Self.Emit(#9'popq %rsi');
       Self.Emit(#9'popq %rdi');
       Self.Emit(#9'callq _StringDelete');
       { Assign result back: addref new, release old, store.  Mirrors the string
@@ -18674,8 +18690,8 @@ begin
           (e.g. SetLength(Result, Length(A)) lowers Length(A) to a
           _DynArrayLength call) which clobbers %rdi, so the array pointer must
           be loaded into %rdi only after this expression is fully evaluated. }
-        Self.EmitExprToEax(TASTExpr(PC.Args.Items[1]));
-        Self.Emit(#9'movl %eax, %esi');
+        Self.EmitInt64ArgToRax(TASTExpr(PC.Args.Items[1]));
+        Self.Emit(#9'movq %rax, %rsi');
         { Load current data ptr into %rdi (after N is evaluated). }
         Self.Emit(Format(#9'movq %s, %%rdi', [Self.VarOperand(FDynArgName)]));
         { Element size into %edx. }
@@ -18692,11 +18708,11 @@ begin
           TDynArrayTypeDesc(TASTExpr(PC.Args.Items[0]).ResolvedType).ElementType.RawSize();
         Self.EmitLValueSlotAddr(TASTExpr(PC.Args.Items[0]));
         Self.Emit(#9'pushq %rdx');
-        Self.EmitExprToEax(TASTExpr(PC.Args.Items[1]));
+        Self.EmitInt64ArgToRax(TASTExpr(PC.Args.Items[1]));
         Self.Emit(#9'popq %rdx');
         Self.Emit(#9'pushq %rdx');
         Self.Emit(#9'subq $8, %rsp');   { keep calls 16-byte aligned }
-        Self.Emit(#9'movl %eax, %esi');
+        Self.Emit(#9'movq %rax, %rsi');
         Self.Emit(#9'movq (%rdx), %rdi');
         Self.EmitDynSetLengthCall(
           TDynArrayTypeDesc(TASTExpr(PC.Args.Items[0]).ResolvedType).ElementType);
@@ -18713,8 +18729,8 @@ begin
     begin
       Self.EmitExprToEax(TASTExpr(PC.Args.Items[0]));
       Self.Emit(#9'pushq %rax');
-      Self.EmitExprToEax(TASTExpr(PC.Args.Items[1]));
-      Self.Emit(#9'movl %eax, %esi');
+      Self.EmitInt64ArgToRax(TASTExpr(PC.Args.Items[1]));
+      Self.Emit(#9'movq %rax, %rsi');
       Self.Emit(#9'popq %rdi');
       Self.Emit(#9'callq _StringSetLength');
       if (TASTExpr(PC.Args.Items[0]) is TIdentExpr) and

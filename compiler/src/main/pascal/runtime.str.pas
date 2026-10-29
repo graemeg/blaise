@@ -63,11 +63,11 @@ function  _FormatFloatSpec(V: Double; Spec: Integer; Prec: Integer): Pointer;
 { ------------------------------------------------------------------ }
 function  _StringLength(S: Pointer): Integer;
 function  _StringPos(Sub, S: Pointer): Integer;
-function  _StringPosEx(Sub, S: Pointer; StartPos: Integer): Integer;
-function  _StringCopy(S: Pointer; From, Count: Integer): Pointer;
+function  _StringPosEx(Sub, S: Pointer; StartPos: Int64): Integer;
+function  _StringCopy(S: Pointer; From, Count: Int64): Pointer;
 function  _StringUnique(S: Pointer): Pointer;
-function  _StringDelete(S: Pointer; Idx, Count: Integer): Pointer;
-function  _StringSetLength(S: Pointer; N: Integer): Pointer;
+function  _StringDelete(S: Pointer; Idx, Count: Int64): Pointer;
+function  _StringSetLength(S: Pointer; N: Int64): Pointer;
 function  _StringUpperCase(S: Pointer): Pointer;
 function  _StringLowerCase(S: Pointer): Pointer;
 function  _StringTrim(S: Pointer): Pointer;
@@ -111,9 +111,10 @@ function _Utf8DecodeAt(S: Pointer; Idx: Integer): Int64;
   _DynArrayLength(Ptr) → length (0 for nil).
   Refcount helpers (_DynArrayAddRef / _DynArrayRelease) and the element
   hooks live in runtime.arc alongside the other ARC primitives. }
-function _DynArraySetLengthM(Ptr: Pointer; NewLen, ElemSize: Integer;
+function _DynArraySetLengthM(Ptr: Pointer; NewLen: Int64; ElemSize: Integer;
   Hook: Pointer): Pointer;
-function _DynArraySetLength(Ptr: Pointer; NewLen, ElemSize: Integer): Pointer;
+function _DynArraySetLength(Ptr: Pointer; NewLen: Int64;
+  ElemSize: Integer): Pointer;
 function _DynArrayLength(Ptr: Pointer): Integer;
 
 { File-path manipulation — pure string operations, no OS calls }
@@ -152,6 +153,24 @@ implementation
 
 const
   HDR_SIZE = 12;  { 3 x 4-byte integers: RefCount, Length, Capacity }
+  STDERR_FD = 2;
+
+function  _libc_write(Fd: Integer; Buf: Pointer; Count: Int64): Int64; external name 'write';
+procedure _libc_abort; external name 'abort';
+
+{ A length is an Int (type standardisation, D5), but the string and
+  dynamic-array headers still store 32 bits, so a length above High(Int32)
+  is a run-time error rather than a silent truncation. }
+procedure CheckLengthFits(N: Int64; Msg: Pointer; MsgLen: Integer);
+var
+  NL: Byte;
+begin
+  if N <= 2147483647 then Exit;
+  _libc_write(STDERR_FD, Msg, Int64(MsgLen));
+  NL := 10;
+  _libc_write(STDERR_FD, @NL, 1);
+  _libc_abort();
+end;
 
 { ------------------------------------------------------------------ }
 { Memory helpers                                                        }
@@ -190,14 +209,15 @@ end;
 { Allocate a new Blaise string of exactly Len bytes plus NUL.
   RefCount = 0 (unowned); caller must call _StringAddRef.
   Returns DATA POINTER (= base + HDR_SIZE). }
-function StrAlloc(Len: Integer): Pointer;
+function StrAlloc(Len: Int64): Pointer;
 var
   TotalL: Int64;
   Base:   Pointer;
   RC, LN, CP: ^Integer;
   NulPtr: PChar;
 begin
-  TotalL := Int64(HDR_SIZE) + Int64(Len) + 1;
+  CheckLengthFits(Len, 'Runtime error: string length above High(Int32)', 46);
+  TotalL := Int64(HDR_SIZE) + Len + 1;
   Base   := _BlaiseGetMem(Integer(TotalL));
   if Base = nil then
   begin
@@ -274,7 +294,7 @@ end;
 { the given 0-based position.  Returns -1 if not found.              }
 { ------------------------------------------------------------------ }
 
-function _StringPosEx(Sub, S: Pointer; StartPos: Integer): Integer;
+function _StringPosEx(Sub, S: Pointer; StartPos: Int64): Integer;
 var
   SLen, SubLen: Integer;
   SData, SubData: PChar;
@@ -294,7 +314,7 @@ begin
   SData   := StrData(S);
   SubData := StrData(Sub);
   if StartPos < 0 then StartPos := 0;
-  I := StartPos;
+  I := Integer(StartPos);
   while I <= SLen - SubLen do
   begin
     Match := True;
@@ -321,7 +341,7 @@ end;
 { _StringCopy(S, From, Count) : string  — 0-based From               }
 { ------------------------------------------------------------------ }
 
-function _StringCopy(S: Pointer; From, Count: Integer): Pointer;
+function _StringCopy(S: Pointer; From, Count: Int64): Pointer;
 var
   SLen:  Integer;
   Data:  PChar;
@@ -390,7 +410,7 @@ end;
 { and addref the result, exactly as for _StringCopy.                   }
 { ------------------------------------------------------------------ }
 
-function _StringDelete(S: Pointer; Idx, Count: Integer): Pointer;
+function _StringDelete(S: Pointer; Idx, Count: Int64): Pointer;
 var
   SLen, RemoveCount, NewLen: Integer;
   Data, ResData: PChar;
@@ -403,9 +423,12 @@ begin
       MemCopy(StrData(Result), StrData(S), SLen);
     Exit;
   end;
-  RemoveCount := Count;
-  if Idx + RemoveCount > SLen then
-    RemoveCount := SLen - Idx;
+  { compared as SLen - Idx so a huge Count (Delete(S, I, MaxInt)) is not
+    truncated to 32 bits first }
+  if Count > SLen - Idx then
+    RemoveCount := SLen - Idx
+  else
+    RemoveCount := Count;
   NewLen := SLen - RemoveCount;
   Result := StrAlloc(NewLen);
   if Result = nil then Exit;
@@ -424,11 +447,12 @@ end;
 { pads with NUL bytes if N is larger.  Caller owns the result.         }
 { ------------------------------------------------------------------ }
 
-function _StringSetLength(S: Pointer; N: Integer): Pointer;
+function _StringSetLength(S: Pointer; N: Int64): Pointer;
 var
   OldLen, CopyLen, I: Integer;
   Data, ResData:      PChar;
 begin
+  CheckLengthFits(N, 'Runtime error: SetLength: length above High(Int32)', 50);
   if N < 0 then N := 0;
   Result := StrAlloc(N);
   if (Result = nil) or (N = 0) then Exit;
@@ -1450,7 +1474,7 @@ begin
   P^ := V;
 end;
 
-function _DynArraySetLengthM(Ptr: Pointer; NewLen, ElemSize: Integer;
+function _DynArraySetLengthM(Ptr: Pointer; NewLen: Int64; ElemSize: Integer;
   Hook: Pointer): Pointer;
 var
   NewBase:  Pointer;
@@ -1465,6 +1489,7 @@ var
   Shared:   Boolean;
   H:        TDynElemHook;
 begin
+  CheckLengthFits(NewLen, 'Runtime error: SetLength: length above High(Int32)', 50);
   { No hook of the caller's own (an unmanaged element, or code from an older
     compiler): keep the one the existing block carries. }
   if (Hook = nil) and (Ptr <> nil) then
@@ -1524,7 +1549,8 @@ begin
   Result := NewData;
 end;
 
-function _DynArraySetLength(Ptr: Pointer; NewLen, ElemSize: Integer): Pointer;
+function _DynArraySetLength(Ptr: Pointer; NewLen: Int64;
+  ElemSize: Integer): Pointer;
 begin
   Result := _DynArraySetLengthM(Ptr, NewLen, ElemSize, nil);
 end;

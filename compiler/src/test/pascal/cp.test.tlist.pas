@@ -33,8 +33,8 @@ type
     { ------------------------------------------------------------------ }
     { Semantic — SizeOf, nil/Pointer compat, ^T substitution             }
     { ------------------------------------------------------------------ }
-    procedure TestSemantic_SizeOf_Integer;
-    procedure TestSemantic_SizeOf_Pointer;
+    procedure TestSemantic_SizeOf_Integer_IsInt;
+    procedure TestSemantic_SizeOf_Pointer_IsInt;
     procedure TestSemantic_NilAssign_ToTypedPointer;
     procedure TestSemantic_Pointer_AssignToTypedPointer;
     procedure TestSemantic_TList_Instantiation;
@@ -288,7 +288,7 @@ end;
 { Semantic tests                                                        }
 { ------------------------------------------------------------------ }
 
-procedure TTListTests.TestSemantic_SizeOf_Integer;
+procedure TTListTests.TestSemantic_SizeOf_Integer_IsInt;
 var
   Prog:   TProgram;
   Assign: TAssignment;
@@ -296,14 +296,14 @@ begin
   Prog := AnalyseSrc(SrcSizeOfInteger);
   try
     Assign := TAssignment(Prog.Block.Stmts[0]);
-    AssertEquals('SizeOf(Integer) resolves to Integer type',
-      Ord(tyInteger), Ord(Assign.Expr.ResolvedType.Kind));
+    AssertEquals('SizeOf(Integer) is Int (D5)',
+      Ord(tyInt64), Ord(Assign.Expr.ResolvedType.Kind));
   finally
     Prog.Free();
   end;
 end;
 
-procedure TTListTests.TestSemantic_SizeOf_Pointer;
+procedure TTListTests.TestSemantic_SizeOf_Pointer_IsInt;
 var
   Prog:   TProgram;
   Assign: TAssignment;
@@ -311,8 +311,8 @@ begin
   Prog := AnalyseSrc(SrcSizeOfInt64);
   try
     Assign := TAssignment(Prog.Block.Stmts[0]);
-    AssertEquals('SizeOf(Int64) resolves to Integer type',
-      Ord(tyInteger), Ord(Assign.Expr.ResolvedType.Kind));
+    AssertEquals('SizeOf(Int64) is Int (D5)',
+      Ord(tyInt64), Ord(Assign.Expr.ResolvedType.Kind));
   finally
     Prog.Free();
   end;
