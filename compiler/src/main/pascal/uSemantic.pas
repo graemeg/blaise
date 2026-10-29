@@ -797,6 +797,10 @@ type
     function  AnalyseExpr(AExpr: TASTExpr): TTypeDesc;
     function  AnalyseExprCore(AExpr: TASTExpr): TTypeDesc;
     function  PromotedIntType(AExpr: TASTExpr): TTypeDesc;
+    procedure AdoptUInt64ForConst(ABin: TBinaryExpr;
+      var LType, RType: TTypeDesc);
+    procedure AdoptConstOperandType(ABin: TBinaryExpr;
+      var LType, RType: TTypeDesc);
     function  AnalyseBinaryExpr(ABin: TBinaryExpr): TTypeDesc;
     function  AnalyseNegExpr(ANeg: TNegExpr): TTypeDesc;
     function  AnalyseFieldAccess(AAccess: TFieldAccessExpr): TTypeDesc;
@@ -1015,6 +1019,20 @@ type
       SemanticError's message shape. }
     procedure SemanticWarning(const AMsg: string; ALine, ACol: Integer);
     procedure WarnIfUnsignedDowntoZero(AFor: TForStmt; AVarType: TTypeDesc);
+    { True when AExpr is a compile-time integer constant that adapts to
+      AExpected (D4, rule 1): a non-negative Int constant fits a UInt64. }
+    { True when ALit's value lies in AType's range (an integer type). }
+    function LiteralFitsIntType(ALit: TIntLiteral; AType: TTypeDesc): Boolean;
+    { True when AExpr is an integer constant whose value lies in AType's range. }
+    function ConstFitsIntType(AExpr: TASTExpr; AType: TTypeDesc): Boolean;
+    function ConstAdaptsTo(AExpected: TTypeDesc; AExpr: TASTExpr;
+      AActual: TTypeDesc): Boolean;
+    { CheckTypesMatch for a value AExpr of type AActual flowing into a slot
+      of type AExpected, letting a constant adapt to the slot. }
+    function RetypeHintedConst(AExpected: TTypeDesc; AExpr: TASTExpr;
+      AActual: TTypeDesc): Boolean;
+    procedure CheckValueMatches(AExpected: TTypeDesc; AExpr: TASTExpr;
+      AActual: TTypeDesc; const AContext: string; ALine, ACol: Integer);
     procedure CheckTypesMatch(AExpected, AActual: TTypeDesc;
       const AContext: string; ALine, ACol: Integer);
     { Returns True if AActual is AExpected or a subclass of AExpected. }
@@ -1808,7 +1826,15 @@ begin
   else if TryResolveBareEnumIdent(AExpr, AExpectedType) then
     Result := AExpr.ResolvedType
   else
+  begin
     Result := AnalyseExpr(AExpr);
+    { a constant takes the hinted type when it fits (D4, rule 1): a simple
+      constant's node is retyped; a compound one keeps its own type, so it
+      is still evaluated as written, and only the check adapts }
+    if Self.RetypeHintedConst(AExpectedType, AExpr, Result) or
+       Self.ConstAdaptsTo(AExpectedType, AExpr, Result) then
+      Result := AExpectedType;
+  end;
 end;
 
 function TSemanticAnalyser.EnumMemberCandidateCount(const AName: string): Integer;
@@ -2312,6 +2338,125 @@ begin
   { a 'reference to' procedural type }
   Result := (AType <> nil) and (AType.Kind = tyProcedural) and
             TProceduralTypeDesc(AType).IsReference;
+end;
+
+function IsIntKindType(AType: TTypeDesc): Boolean;
+begin
+  Result := (AType <> nil) and
+    (AType.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tyInt8, tySmallInt,
+                    tyWord, tyByte]);
+end;
+
+{ A literal, a constant identifier, or a negated literal: an operand whose
+  node can take another integer type without changing what it computes. }
+function IsSimpleIntConst(AExpr: TASTExpr): Boolean;
+begin
+  Result := (AExpr is TIntLiteral) or
+    ((AExpr is TIdentExpr) and TIdentExpr(AExpr).IsConstant) or
+    ((AExpr is TNegExpr) and (TNegExpr(AExpr).Expr is TIntLiteral));
+end;
+
+{ True when V lies in the range of AType (an integer type; any other type
+  is True, as before). }
+function ValueFitsIntType(V: Int64; AType: TTypeDesc): Boolean;
+begin
+  case AType.Kind of
+    tyInt8:     Result := (V >= -128) and (V <= 127);
+    tyByte:     Result := (V >= 0) and (V <= 255);
+    tySmallInt: Result := (V >= -32768) and (V <= 32767);
+    tyWord:     Result := (V >= 0) and (V <= 65535);
+    tyInteger:  Result := (V >= -2147483648) and (V <= 2147483647);
+    tyUInt32:   Result := (V >= 0) and (V <= 4294967295);
+    tyUInt64:   Result := V >= 0;
+  else
+    Result := True;
+  end;
+end;
+
+function TSemanticAnalyser.LiteralFitsIntType(ALit: TIntLiteral;
+  AType: TTypeDesc): Boolean;
+begin
+  if ALit.IsUInt64 then
+    Exit(AType.Kind = tyUInt64);
+  Result := ValueFitsIntType(ALit.Value, AType);
+end;
+
+function TSemanticAnalyser.ConstFitsIntType(AExpr: TASTExpr;
+  AType: TTypeDesc): Boolean;
+var
+  V: Int64;
+begin
+  if AExpr is TIntLiteral then
+    Exit(Self.LiteralFitsIntType(TIntLiteral(AExpr), AType));
+  Result := Self.TryEvalConstIntExpr(AExpr, V) and ValueFitsIntType(V, AType);
+  { a UInt64-typed constant above High(Int64) reads back negative }
+  if Result and (AExpr.ResolvedType <> nil) and
+     (AExpr.ResolvedType.Kind = tyUInt64) and (V < 0) then
+    Result := AType.Kind = tyUInt64;
+end;
+
+function TSemanticAnalyser.ConstAdaptsTo(AExpected: TTypeDesc;
+  AExpr: TASTExpr; AActual: TTypeDesc): Boolean;
+var
+  V: Int64;
+  I: Integer;
+begin
+  Result := (AExpected <> nil) and (AActual <> nil) and (AExpr <> nil) and
+    (AExpected.Kind = tyUInt64) and (AActual.Kind = tyInt64) and
+    Self.TryEvalConstIntExpr(AExpr, V) and (V >= 0);
+  if Result or (AExpected = nil) or (AActual = nil) then Exit;
+  { a bracket literal of integer constants bound for an open array of
+    another integer type: each element adapts when it fits }
+  if (AExpr is TArrayLiteralExpr) and (AExpected.Kind = tyOpenArray) and
+     (AActual.Kind = tyOpenArray) and
+     IsIntKindType(TOpenArrayTypeDesc(AExpected).ElementType) and
+     IsIntKindType(TOpenArrayTypeDesc(AActual).ElementType) and
+     (TArrayLiteralExpr(AExpr).Elements.Count > 0) then
+  begin
+    { a lo..hi literal is let through: the bracket-literal retyping
+      reports it as a range outside a set literal }
+    if Self.LiteralHasRange(TArrayLiteralExpr(AExpr)) then
+      Exit(True);
+    for I := 0 to TArrayLiteralExpr(AExpr).Elements.Count - 1 do
+      if not (Self.TryEvalConstIntExpr(
+                TASTExpr(TArrayLiteralExpr(AExpr).Elements.Items[I]), V) and
+              ValueFitsIntType(V, TOpenArrayTypeDesc(AExpected).ElementType)) then
+        Exit(False);
+    Result := True;
+  end;
+end;
+
+procedure TSemanticAnalyser.CheckValueMatches(AExpected: TTypeDesc;
+  AExpr: TASTExpr; AActual: TTypeDesc; const AContext: string;
+  ALine, ACol: Integer);
+begin
+  if Self.RetypeHintedConst(AExpected, AExpr, AActual) then Exit;
+  if Self.ConstAdaptsTo(AExpected, AExpr, AActual) then
+  begin
+    { a bracket literal that adapts is retyped to the formal, so its element
+      block is laid out at the formal's element width: x86-64 sizes it from
+      the literal's own type, and an 'array of Int64' literal read as
+      'array of Integer' gave every other element }
+    if AExpr is TArrayLiteralExpr then
+      Self.RetypeBracketLiteralArg(AExpr, AExpected);
+    Exit;
+  end;
+  Self.CheckTypesMatch(AExpected, AActual, AContext, ALine, ACol);
+end;
+
+{ D4, rule 1: a simple integer constant with a hint takes the hinted integer
+  type when its value fits -- the node itself, so `N := 42` with N: Integer
+  holds an Integer literal.  A compound constant keeps Int and is narrowed
+  on store, which gives the same value. }
+function TSemanticAnalyser.RetypeHintedConst(AExpected: TTypeDesc;
+  AExpr: TASTExpr; AActual: TTypeDesc): Boolean;
+begin
+  Result := (AExpected <> nil) and (AActual <> nil) and
+    (AExpected <> AActual) and IsSimpleIntConst(AExpr) and
+    IsIntKindType(AExpected) and IsIntKindType(AActual) and
+    Self.ConstFitsIntType(AExpr, AExpected);
+  if Result then
+    AExpr.ResolvedType := AExpected;
 end;
 
 procedure TSemanticAnalyser.CheckTypesMatch(AExpected, AActual: TTypeDesc;
@@ -8451,16 +8596,12 @@ begin
     Result := FTable.TypeDouble
   else if OrdType <> nil then
     Result := OrdType
-  { Untyped integer constant: pick the width by magnitude so a value that does
-    not fit in 32 bits is NOT silently truncated to Integer (issue #133).  A
-    UInt64-range bit pattern (above High(Int64)) types as UInt64; a value
-    outside the signed 32-bit range types as Int64; otherwise Integer. }
+  { Untyped integer constant: Int, like an unhinted literal (D4), or UInt64
+    for a bit pattern above High(Int64). }
   else if CD.IsUInt64 then
     Result := FTable.TypeUInt64
-  else if (CD.IntVal > 2147483647) or (CD.IntVal < -2147483648) then
-    Result := FTable.TypeInt64
   else
-    Result := FTable.TypeInteger;
+    Result := FTable.TypeInt64;
 end;
 
 procedure TSemanticAnalyser.AnalyseConstDecls(ABlock: TBlock);
@@ -11335,7 +11476,7 @@ begin
     ExprType := AAssign.Expr.ResolvedType
   else
     ExprType := Self.AnalyseExprSlot(AAssign.Expr);
-  CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
+  CheckValueMatches(PropInfo.TypeDesc, AAssign.Expr, ExprType, 'property assignment',
     AAssign.Line, AAssign.Col);
   AAssign.FieldName := PropInfo.WriteMethod;
   AAssign.SetterCall := Self.BuildIntfSetterCall(AAssign.ObjExpr, ARecvSym,
@@ -13385,13 +13526,13 @@ begin
       StartType := ForS.StartExpr.ResolvedType
     else
       StartType := Self.AnalyseExprSlot(ForS.StartExpr);
-    CheckTypesMatch(VarSym.TypeDesc, StartType,
+    CheckValueMatches(VarSym.TypeDesc, ForS.StartExpr, StartType,
       'for-loop start expression', ForS.Line, ForS.Col);
     if TryResolveBareEnumIdent(ForS.EndExpr, VarSym.TypeDesc) then
       EndType := ForS.EndExpr.ResolvedType
     else
       EndType := Self.AnalyseExprSlot(ForS.EndExpr);
-    CheckTypesMatch(VarSym.TypeDesc, EndType,
+    CheckValueMatches(VarSym.TypeDesc, ForS.EndExpr, EndType,
       'for-loop end expression', ForS.Line, ForS.Col);
     Self.WarnIfUnsignedDowntoZero(ForS, VarSym.TypeDesc);
     Inc(FLoopDepth);
@@ -14584,7 +14725,7 @@ begin
         ExprType := Self.AnalyseExprSlot(AAssign.Expr);
       Self.CheckConstValueInRange(FldInfo.TypeDesc, AAssign.Expr,
         AAssign.Line, AAssign.Col);
-      CheckTypesMatch(FldInfo.TypeDesc, ExprType, 'assignment', AAssign.Line, AAssign.Col);
+      CheckValueMatches(FldInfo.TypeDesc, AAssign.Expr, ExprType, 'assignment', AAssign.Line, AAssign.Col);
       Exit;
     end;
     { A bare PROPERTY of the current class (Prop := V inside a method):
@@ -14731,7 +14872,7 @@ begin
     ExprType := Self.AnalyseExprSlot(AAssign.Expr);
   Self.CheckConstValueInRange(VarSym.TypeDesc, AAssign.Expr,
     AAssign.Line, AAssign.Col);
-  CheckTypesMatch(VarSym.TypeDesc, ExprType, 'assignment', AAssign.Line, AAssign.Col);
+  CheckValueMatches(VarSym.TypeDesc, AAssign.Expr, ExprType, 'assignment', AAssign.Line, AAssign.Col);
 end;
 
 procedure TSemanticAnalyser.AnalyseInheritedCall(ACall: TInheritedCallStmt);
@@ -14813,7 +14954,7 @@ begin
       if TASTExpr(ACall.Args.Items[I]) is TArrayLiteralExpr then
         ArgType := TASTExpr(ACall.Args.Items[I]).ResolvedType;
     end;
-    CheckTypesMatch(Par.ResolvedType, ArgType,
+    CheckValueMatches(Par.ResolvedType, TASTExpr(ACall.Args.Items[I]), ArgType,
       Format('argument %d of inherited ''%s''', [I + 1, ACall.Name]),
       ACall.Line, ACall.Col);
   end;
@@ -15233,7 +15374,7 @@ begin
       if TASTExpr(ACall.Args.Items[I]) is TArrayLiteralExpr then
         ArgType := TASTExpr(ACall.Args.Items[I]).ResolvedType;
     end;
-    CheckTypesMatch(Par.ResolvedType, ArgType,
+    CheckValueMatches(Par.ResolvedType, TASTExpr(ACall.Args.Items[I]), ArgType,
       Format('argument %d of inherited ''%s''', [I + 1, ACall.Name]),
       ACall.Line, ACall.Col);
   end;
@@ -15403,7 +15544,7 @@ begin
     CheckTypesMatch(DefProp.IndexTypeDesc, IdxType, 'default property index',
       AAssign.Line, AAssign.Col);
   ValType := Self.AnalyseExprSlot(AAssign.Expr);
-  CheckTypesMatch(DefProp.TypeDesc, ValType, 'default property assignment',
+  CheckValueMatches(DefProp.TypeDesc, AAssign.Expr, ValType, 'default property assignment',
     AAssign.Line, AAssign.Col);
   AAssign.SetterCall := BuildSetterCall(AAssign.ObjExpr, DefProp,
     AAssign.PropIndexExpr, AAssign.Expr, AAssign);
@@ -15507,7 +15648,7 @@ begin
         AAssign.PropAccessorVSlot :=
           PropAccessorVSlot(RT.Name, PropInfo.WriteMethod);
         ExprType := Self.AnalyseExprSlot(AAssign.Expr);
-        CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
+        CheckValueMatches(PropInfo.TypeDesc, AAssign.Expr, ExprType, 'property assignment',
           AAssign.Line, AAssign.Col);
         AAssign.SetterCall := BuildSetterCall(AAssign.ObjExpr, PropInfo,
           AAssign.PropIndexExpr, AAssign.Expr, AAssign);
@@ -15609,7 +15750,7 @@ begin
             AAssign.PropAccessorVSlot :=
               PropAccessorVSlot(RT.Name, PropInfo.WriteMethod);
             ExprType := Self.AnalyseExprSlot(AAssign.Expr);
-            CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
+            CheckValueMatches(PropInfo.TypeDesc, AAssign.Expr, ExprType, 'property assignment',
               AAssign.Line, AAssign.Col);
             if BaseType.Kind in [tyClass, tyRecord] then
               AAssign.SetterCall := BuildSetterCall(
@@ -15696,7 +15837,7 @@ begin
       ExprType := Self.AnalyseExprSlot(AAssign.Expr);
       Self.CheckConstValueInRange(VarSym.TypeDesc, AAssign.Expr,
         AAssign.Line, AAssign.Col);
-      CheckTypesMatch(VarSym.TypeDesc, ExprType, 'static var assignment',
+      CheckValueMatches(VarSym.TypeDesc, AAssign.Expr, ExprType, 'static var assignment',
         AAssign.Line, AAssign.Col);
       Exit;
     end;
@@ -15784,7 +15925,7 @@ begin
         AAssign.PropAccessorVSlot :=
           PropAccessorVSlot(RT.Name, PropInfo.WriteMethod);
         ExprType := Self.AnalyseExprSlot(AAssign.Expr);
-        CheckTypesMatch(PropInfo.TypeDesc, ExprType, 'property assignment',
+        CheckValueMatches(PropInfo.TypeDesc, AAssign.Expr, ExprType, 'property assignment',
           AAssign.Line, AAssign.Col);
         if RecSym.TypeDesc.Kind in [tyClass, tyRecord] then
           AAssign.SetterCall := BuildSetterCall(
@@ -15845,7 +15986,7 @@ begin
   else
     ExprType := Self.AnalyseExprSlot(AAssign.Expr);
   Self.CheckConstValueInRange(ATarget, AAssign.Expr, AAssign.Line, AAssign.Col);
-  CheckTypesMatch(ATarget, ExprType, 'field assignment', AAssign.Line, AAssign.Col);
+  CheckValueMatches(ATarget, AAssign.Expr, ExprType, 'field assignment', AAssign.Line, AAssign.Col);
 end;
 
 function TSemanticAnalyser.MangleTypeCode(AType: TTypeDesc;
@@ -16274,7 +16415,7 @@ begin
         Format('Default value for parameter ''%s'' must be a constant expression',
           [APar.ParamName]),
         ALine, ACol);
-  CheckTypesMatch(APar.ResolvedType, T,
+  CheckValueMatches(APar.ResolvedType, APar.DefaultValue, T,
     Format('default value of parameter ''%s'' (%s)', [APar.ParamName, AContext]),
     ALine, ACol);
   Self.CheckConstValueInRange(APar.ResolvedType, APar.DefaultValue,
@@ -16516,6 +16657,10 @@ end;
 
 procedure TSemanticAnalyser.RetypeBracketLiteralArg(AArg: TASTExpr;
   AParamType: TTypeDesc);
+var
+  I:    Integer;
+  Elem: TASTExpr;
+  V:    Int64;
 begin
   if (AParamType = nil) or not (AArg is TArrayLiteralExpr) then
     Exit;
@@ -16547,6 +16692,18 @@ begin
   begin
     TArrayLiteralExpr(AArg).IsConstArray := True;
     AArg.ResolvedType := AParamType;
+    { an integer constant that fits 32 bits travels as vtInteger, as in FPC
+      and Delphi, although its own type is Int (D4): code reading
+      'array of const' commonly handles vtInteger alone }
+    for I := 0 to TArrayLiteralExpr(AArg).Elements.Count - 1 do
+    begin
+      Elem := TASTExpr(TArrayLiteralExpr(AArg).Elements.Items[I]);
+      if IsSimpleIntConst(Elem) and (Elem.ResolvedType <> nil) and
+         (Elem.ResolvedType.Kind = tyInt64) and
+         Self.TryEvalConstIntExpr(Elem, V) and
+         ValueFitsIntType(V, FTable.TypeInteger) then
+        Elem.ResolvedType := FTable.TypeInteger;
+    end;
   end;
   { Empty bracket literal [] bound to a plain open-array formal: pin its type
     to the formal so codegen emits a zero-length open array (data=nil, high=-1)
@@ -16628,7 +16785,7 @@ begin
         ALine, ACol);
     if PPar.IsVarParam then
       WarnIfVarArgIsForInLoopVar(Slot);
-    CheckTypesMatch(PPar.TypeDesc, ArgType,
+    CheckValueMatches(PPar.TypeDesc, Slot, ArgType,
       Format('argument %d of ''%s''', [I + 1, AName]),
       ALine, ACol);
   end;
@@ -16725,10 +16882,37 @@ function TSemanticAnalyser.ArgWideningCost(AParam: TTypeDesc;
 var
   ArgInt:   Boolean;
   ParamInt: Boolean;
+  I:        Integer;
 begin
   Result := 0;
   if (AParam = nil) or (AArg = nil) then Exit;
+  { an integer constant matches every integer formal holding its value
+    exactly; rank those by distance from the constant's own type, unsigned
+    after signed, so F(42) reaches Int64 before Int32 and F(5) Integer
+    before Byte }
+  if IsSimpleIntConst(AArgExpr) and IsIntKindType(AArg) and
+     IsIntKindType(AParam) and Self.ConstFitsIntType(AArgExpr, AParam) then
+  begin
+    Result := Abs(AParam.RawSize() - AArg.RawSize());
+    if AParam.Kind in [tyUInt32, tyUInt64, tyWord, tyByte] then
+      Inc(Result);
+    if AParam.Kind = AArg.Kind then
+      Result := 0;
+    Exit;
+  end;
   if Self.ArgMatchScore(AParam, AArg, AArgExpr) = 2 then Exit;
+  { a bracket literal costs what its elements cost against the formal's
+    element type, so [1, 2] picks 'array of Integer' over 'array of Byte' }
+  if (AArgExpr is TArrayLiteralExpr) and (AParam.Kind = tyOpenArray) and
+     (TOpenArrayTypeDesc(AParam).ElementType <> nil) then
+  begin
+    for I := 0 to TArrayLiteralExpr(AArgExpr).Elements.Count - 1 do
+      Result := Result + Self.ArgWideningCost(
+        TOpenArrayTypeDesc(AParam).ElementType,
+        TASTExpr(TArrayLiteralExpr(AArgExpr).Elements.Items[I]).ResolvedType,
+        TASTExpr(TArrayLiteralExpr(AArgExpr).Elements.Items[I]));
+    Exit;
+  end;
   ArgInt := AArg.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tyInt8,
     tySmallInt, tyWord, tyByte];
   ParamInt := AParam.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64, tyInt8,
@@ -16860,14 +17044,24 @@ begin
     mirrors Pascal's treatment of untyped integer constants.  Floating-point
     params score 1 (widening) so an Integer overload beats a Double overload
     when both are candidates. }
-  if (AArgExpr is TIntLiteral) and AParam.IsNumeric() then
+  if IsSimpleIntConst(AArgExpr) and IsIntKindType(AArg) and
+     (IsIntKindType(AParam) or AParam.IsFloat()) then
   begin
-    if AParam.Kind in [tyInteger, tyInt64, tyUInt32, tyUInt64,
-                       tyInt8, tySmallInt, tyWord, tyByte] then
-      Result := 2
-    else
-      Result := 1;  { Double, Single — widening }
-    Exit;
+    { An integer constant (literal, negated literal, constant identifier)
+      matches every integer formal that holds its value exactly -- Pascal's
+      untyped constant -- and a float formal as a conversion.  A formal too
+      narrow for the value is no match, so F(300) cannot pick F(Byte) and
+      truncate.  Among exact matches ArgWideningCost prefers the constant's
+      own type: Int for a literal (D4), so F(42) reaches F(Int64). }
+    if IsIntKindType(AParam) then
+    begin
+      if Self.ConstFitsIntType(AArgExpr, AParam) then
+        Exit(2);
+      Exit(0);
+    end;
+    if AParam.IsFloat() then
+      Exit(1);
+    { any other formal (an enum, ...) takes the general rules below }
   end;
   if AParam = AArg then
   begin
@@ -16913,6 +17107,8 @@ begin
   begin
     if AArg.IsFloat() and not AParam.IsFloat() then
       Exit(0);
+    if Self.ConstAdaptsTo(AParam, AArgExpr, AArg) then
+      Exit(1);
     if ((AParam.Kind = tyInt64) and (AArg.Kind = tyUInt64)) or
        ((AParam.Kind = tyUInt64) and (AArg.Kind = tyInt64)) then
       Exit(0);
@@ -16924,6 +17120,12 @@ begin
   if IsRoutineAddr(AArgExpr) and IsRefProcType(AParam) and
      (AArg <> nil) and (AArg.Kind = tyProcedural) and
      TProceduralTypeDesc(AParam).SignatureMatches(TProceduralTypeDesc(AArg)) then
+    Exit(1);
+  { A lo..hi literal against an open array is bound so the retyping can
+    report it as a range outside a set literal (before D4 it matched an
+    'array of Integer' formal by element type). }
+  if (AParam.Kind = tyOpenArray) and (AArgExpr is TArrayLiteralExpr) and
+     Self.LiteralHasRange(TArrayLiteralExpr(AArgExpr)) then
     Exit(1);
   { Fall-through: probe full assignability via CheckTypesMatch.  This
     covers nil-literal, class subtypes, untyped-Pointer compatibility,
@@ -17365,7 +17567,7 @@ begin
                 [I + 1, ACall.Name]),
               ACall.Line, ACall.Col);
           ArgType := TASTExpr(ACall.Args.Items[I]).ResolvedType;
-          CheckTypesMatch(Par.ResolvedType, ArgType,
+          CheckValueMatches(Par.ResolvedType, TASTExpr(ACall.Args.Items[I]), ArgType,
             Format('var argument %d of ''%s''', [I + 1, ACall.Name]),
             ACall.Line, ACall.Col);
           WarnIfVarArgIsForInLoopVar(TASTExpr(ACall.Args.Items[I]));
@@ -17457,6 +17659,10 @@ begin
     for I := 0 to ACall.Args.Count - 1 do
       Self.AnalyseArgSlot(ACall.Args, I);
     ResolveDeferredArrowArgs(ACall.Args, MDecl);
+    { a bracket literal takes the formal's type, as for any other call: an
+      'array of Int' literal bound for 'array of Integer' was laid out at 8
+      bytes an element on x86-64 }
+    RetypeSetLiteralArgs(ACall.Args, MDecl);
     ACall.ResolvedDecl := MDecl;
     Exit;
   end;
@@ -17498,7 +17704,7 @@ begin
             ACall.Line, ACall.Col);
         WarnIfVarArgIsForInLoopVar(TASTExpr(ACall.Args.Items[I]));
         ArgType := TASTExpr(ACall.Args.Items[I]).ResolvedType;
-        CheckTypesMatch(Par.ResolvedType, ArgType,
+        CheckValueMatches(Par.ResolvedType, TASTExpr(ACall.Args.Items[I]), ArgType,
           Format('var argument %d of ''%s''', [I + 1, ACall.Name]),
           ACall.Line, ACall.Col);
       end;
@@ -18182,7 +18388,7 @@ begin
                 [I + 1, AExpr.Name]),
               AExpr.Line, AExpr.Col);
           ArgType := TASTExpr(AExpr.Args.Items[I]).ResolvedType;
-          CheckTypesMatch(Par.ResolvedType, ArgType,
+          CheckValueMatches(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]), ArgType,
             Format('var argument %d of ''%s''', [I + 1, AExpr.Name]),
             AExpr.Line, AExpr.Col);
           WarnIfVarArgIsForInLoopVar(TASTExpr(AExpr.Args.Items[I]));
@@ -18999,7 +19205,7 @@ begin
               [I + 1, AExpr.Name]),
             AExpr.Line, AExpr.Col);
         ArgType := TASTExpr(AExpr.Args.Items[I]).ResolvedType;
-        CheckTypesMatch(Par.ResolvedType, ArgType,
+        CheckValueMatches(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]), ArgType,
           Format('var argument %d of ''%s''', [I + 1, AExpr.Name]),
           AExpr.Line, AExpr.Col);
         WarnIfVarArgIsForInLoopVar(TASTExpr(AExpr.Args.Items[I]));
@@ -19051,7 +19257,7 @@ begin
           AExpr.Line, AExpr.Col);
       WarnIfVarArgIsForInLoopVar(TASTExpr(AExpr.Args.Items[I]));
       ArgType := TASTExpr(AExpr.Args.Items[I]).ResolvedType;
-      CheckTypesMatch(Par.ResolvedType, ArgType,
+      CheckValueMatches(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]), ArgType,
         Format('var argument %d of ''%s''', [I + 1, AExpr.Name]),
         AExpr.Line, AExpr.Col);
     end;
@@ -19369,7 +19575,7 @@ begin
                 [I + 1, AExpr.Name]),
               AExpr.Line, AExpr.Col);
           ArgType := TASTExpr(AExpr.Args.Items[I]).ResolvedType;
-          CheckTypesMatch(Par.ResolvedType, ArgType,
+          CheckValueMatches(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]), ArgType,
             Format('var argument %d of ''%s''', [I + 1, AExpr.Name]),
             AExpr.Line, AExpr.Col);
           WarnIfVarArgIsForInLoopVar(TASTExpr(AExpr.Args.Items[I]));
@@ -19723,7 +19929,7 @@ begin
         TSetTypeDesc(Par.ResolvedType))
     else
       ArgType := Self.AnalyseListSlot(AExpr.Args, I);
-    CheckTypesMatch(Par.ResolvedType, ArgType,
+    CheckValueMatches(Par.ResolvedType, TASTExpr(AExpr.Args.Items[I]), ArgType,
       Format('argument %d of ''%s''', [I + 1, AExpr.Name]),
       AExpr.Line, AExpr.Col);
   end;
@@ -19753,14 +19959,14 @@ var
 begin
   if AExpr is TNilLiteral then
     Result := FTable.TypeNil
+  { An unhinted integer literal is Int (D4); a UInt64-range bit pattern
+    above High(Int64) is UInt64.  A hinted literal takes its context's type
+    at the hinting site, not here. }
   else if AExpr is TIntLiteral then
     if TIntLiteral(AExpr).IsUInt64 then
       Result := FTable.TypeUInt64
-    else if (TIntLiteral(AExpr).Value < -2147483648) or
-            (TIntLiteral(AExpr).Value > 2147483647) then
-      Result := FTable.TypeInt64
     else
-      Result := FTable.TypeInteger
+      Result := FTable.TypeInt64
   else if AExpr is TFloatLiteral then
     Result := FTable.TypeDouble   { float literals default to Double }
   else if AExpr is TStringLiteral then
@@ -21169,6 +21375,53 @@ begin
     Result := FTable.TypeInt64;
 end;
 
+{ D4, rule 2: a simple constant beside a typed integer operand takes that
+  operand's type when its value fits, so I = 5 stays a comparison of two
+  Integers (a 32-bit compare) and U = 1 one of two UInt32s.  Not for a shift,
+  whose right operand is a count, nor for 'in'. }
+procedure TSemanticAnalyser.AdoptConstOperandType(ABin: TBinaryExpr;
+  var LType, RType: TTypeDesc);
+var
+  V: Int64;
+begin
+  if ABin.Op in [boShl, boShr, boSar, boIn] then Exit;
+  if not (IsIntKindType(LType) and IsIntKindType(RType)) then Exit;
+  if LType = RType then Exit;
+  if IsSimpleIntConst(ABin.Right) and not IsSimpleIntConst(ABin.Left) and
+     Self.TryEvalConstIntExpr(ABin.Right, V) and
+     not ((ABin.Right is TIntLiteral) and TIntLiteral(ABin.Right).IsUInt64) and
+     ValueFitsIntType(V, LType) then
+  begin
+    ABin.Right.ResolvedType := LType;
+    RType := LType;
+  end
+  else if IsSimpleIntConst(ABin.Left) and not IsSimpleIntConst(ABin.Right) and
+     Self.TryEvalConstIntExpr(ABin.Left, V) and
+     not ((ABin.Left is TIntLiteral) and TIntLiteral(ABin.Left).IsUInt64) and
+     ValueFitsIntType(V, RType) then
+  begin
+    ABin.Left.ResolvedType := RType;
+    LType := RType;
+  end;
+end;
+
+{ A constant operand takes the type of the other operand when its value
+  fits (D4, rule 2): a non-negative constant beside a UInt64 is a UInt64,
+  so `V and (LT_BUCKETS - 1)` needs no cast now that the constant is Int. }
+procedure TSemanticAnalyser.AdoptUInt64ForConst(ABin: TBinaryExpr;
+  var LType, RType: TTypeDesc);
+var
+  V: Int64;
+begin
+  if (LType = nil) or (RType = nil) then Exit;
+  if (LType.Kind = tyUInt64) and (RType.Kind = tyInt64) and
+     Self.TryEvalConstIntExpr(ABin.Right, V) and (V >= 0) then
+    RType := FTable.TypeUInt64
+  else if (RType.Kind = tyUInt64) and (LType.Kind = tyInt64) and
+     Self.TryEvalConstIntExpr(ABin.Left, V) and (V >= 0) then
+    LType := FTable.TypeUInt64;
+end;
+
 function TSemanticAnalyser.AnalyseBinaryExpr(ABin: TBinaryExpr): TTypeDesc;
 var
   LType, RType: TTypeDesc;
@@ -21295,6 +21548,8 @@ begin
     Exit;
   end;
 
+  Self.AdoptConstOperandType(ABin, LType, RType);
+
   { Logical AND / OR / XOR — both operands must be Boolean or both numeric. }
   if ABin.Op in [boAnd, boOr, boXor] then
   begin
@@ -21308,6 +21563,7 @@ begin
           Format('''%s'' requires integer or Boolean operands, not ''%s''',
             [BinaryOpName(ABin.Op), FloatOperandName(LType, RType)]),
           ABin.Line, ABin.Col);
+      Self.AdoptUInt64ForConst(ABin, LType, RType);
       if ((LType.Kind = tyInt64) and (RType.Kind = tyUInt64)) or
          ((LType.Kind = tyUInt64) and (RType.Kind = tyInt64)) then
         SemanticError(
@@ -21515,6 +21771,7 @@ begin
       { Int64 / UInt64 wins over narrower integer types so codegen emits
         l-typed instructions and the high bits are preserved.  Signed and
         unsigned 64-bit types cannot be mixed without an explicit cast. }
+      Self.AdoptUInt64ForConst(ABin, LType, RType);
       if ((LType.Kind = tyInt64) and (RType.Kind = tyUInt64)) or
          ((LType.Kind = tyUInt64) and (RType.Kind = tyInt64)) then
         SemanticError(
@@ -23450,12 +23707,12 @@ begin
           ValType := AnalyseExpr(TSetRangeExpr(Branch.Values.Items[J]).LowExpr)
         else
           ValType := TSetRangeExpr(Branch.Values.Items[J]).LowExpr.ResolvedType;
-        CheckTypesMatch(SelType, ValType, 'case range low', AStmt.Line, AStmt.Col);
+        CheckValueMatches(SelType, TSetRangeExpr(Branch.Values.Items[J]).LowExpr, ValType, 'case range low', AStmt.Line, AStmt.Col);
         if not TryResolveBareEnumIdent(TSetRangeExpr(Branch.Values.Items[J]).HighExpr, SelType) then
           ValType := AnalyseExpr(TSetRangeExpr(Branch.Values.Items[J]).HighExpr)
         else
           ValType := TSetRangeExpr(Branch.Values.Items[J]).HighExpr.ResolvedType;
-        CheckTypesMatch(SelType, ValType, 'case range high', AStmt.Line, AStmt.Col);
+        CheckValueMatches(SelType, TSetRangeExpr(Branch.Values.Items[J]).HighExpr, ValType, 'case range high', AStmt.Line, AStmt.Col);
       end
       else
       begin
@@ -23464,7 +23721,7 @@ begin
           ValType := TASTExpr(Branch.Values.Items[J]).ResolvedType
         else
           ValType := AnalyseExpr(TASTExpr(Branch.Values.Items[J]));
-        CheckTypesMatch(SelType, ValType, 'case value', AStmt.Line, AStmt.Col);
+        CheckValueMatches(SelType, TASTExpr(Branch.Values.Items[J]), ValType, 'case value', AStmt.Line, AStmt.Col);
       end;
     end;
     AnalyseStmt(Branch.Stmt);

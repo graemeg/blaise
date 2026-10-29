@@ -5,7 +5,7 @@
 
 Status: ACCEPTED — all design decisions signed off 2026-10-19.  Phases 0–3
 implemented 2026-10-19/20 and released in v0.15.0; Phase 4 in progress,
-steps 4.0–4.2 done (see <<progress>>). +
+steps 4.0–4.3 done (see <<progress>>). +
 Release placement: phases 0–3 (additive, non-breaking) target *v0.15.0*;
 phases 4–7 (breaking) open the *v0.16* development cycle. +
 Scope: surface type system (builtin type names), stdlib API signatures,
@@ -543,7 +543,10 @@ The announcement in discussion #106 is revised on the following points:
   (language rationale, "Integer Expression Width"); a warm rebuild after an
   edit to a unit reached only through implementation-section uses links
   correctly.  4.1: the D6 `downto 0` warning for an unsigned counter.
-  4.2: `Format('%u')`.  Next: 4.3, the literal default.
+  4.2: `Format('%u')`.  4.3: unhinted literals and untyped constants are
+  `Int`, with the hint and typed-operand rules implemented; found on the
+  way: mixed-width comparisons and `Ord` of wide arguments.  Next: 4.4,
+  builtin results.
 |===
 
 [#timeline]
@@ -714,8 +717,9 @@ small:
   array index, case label) takes the hinted type when the value fits.  This
   is today's behaviour.
 . A literal that is one operand of a binary operator whose other operand has
-  an integer type takes that type when the value fits.  This is today's
-  behaviour, now stated as a rule.  The literal's type is then irrelevant to
+  an integer type takes that type when the value fits.  (Before 4.3 this
+  held only because both were `Integer`; 4.3 implements it, shifts
+  excepted.)  The literal's type is then irrelevant to
   the result: since 4.0, arithmetic on two operands narrower than 64 bits
   is evaluated in `Int64` (see "Integer Expression Width" in the language
   rationale).
@@ -726,9 +730,10 @@ small:
 What changes in practice is limited to fully unhinted positions:
 `F(42)` against `F(Int32)`/`F(Int64)` resolves to `F(Int64)` instead of
 being ambiguous; `1 shl 40` is unchanged (already `Int64` by magnitude) but
-`1 shl 31` becomes positive; generic argument inference from a bare literal
-yields `Int`; `WriteLn(42)` and `Format('%d', [42])` route through the
-64-bit writer.
+`1 shl 31` becomes positive; `WriteLn(42)` routes through the 64-bit
+writer.  (Generic arguments are not inferred from call arguments, so the
+default has no effect there yet.)
+(`Format('%d', [42])` does not: see step 4.3.)
 
 === Commit sequence
 
@@ -773,6 +778,49 @@ compiler's own code by diffing the stage-2 assembly against the previous
 stage-2: every changed function is an unhinted literal whose width changed,
 and each needs a look.  Expected test churn: assertions on the resolved type
 of a bare literal, and overload-ambiguity tests that now resolve.
+
+Done 2026-10-29.  Rules 1 and 2 of the literal typing rule turned out not to
+be implemented as rules: they held only because a literal and an `Integer`
+operand had the same type.  4.3 implements them (see "Integer literal
+typing" in the language rationale for the user-facing statement):
+
+* Rule 1 (hint): a simple constant (literal, negated literal, constant
+  identifier) is retyped to the hinted integer type when it fits, at every
+  value site (assignment, argument, `for` bound, `case` label, default
+  parameter, element store).  A constant expression keeps `Int` and is
+  narrowed on store.
+* Rule 2 (typed operand): in a binary operator other than a shift or `in`,
+  a simple constant takes the other integer operand's type when it fits.
+  Without it, `I = 5` became a 64-bit compare of a 32-bit value, and the
+  arm64 backend relies on `w` compares for 32-bit ordinals (their upper
+  halves are non-canonical).
+* Decided with the step: a non-negative constant converts implicitly to
+  `UInt64` (assignment, argument, operand).  Otherwise `U := 1` and the
+  RTL's `V and (LT_BUCKETS - 1)` needed a cast; a non-constant `Int64` still
+  does.
+* Overloads: a constant scores as an exact match for every integer formal
+  that holds it, ranked by distance from its own type (signed first); a
+  formal too narrow for it is no match.  A bracket literal ranks element by
+  element.
+* `array of const`: an integer constant that fits 32 bits is still passed
+  as `vtInteger`, as in FPC and Delphi.  This revises the plan's
+  expectation that `Format('%d', [42])` would take the 64-bit path: code
+  that handles `vtInteger` alone (the test suite had three such programs)
+  would otherwise lose every literal argument.
+
+Found on the way and fixed first (`7e3cc4c7`): x86-64 took a comparison's
+width from its left operand, so `Integer < Int64` compared 32 bits, and
+arm64 compared a narrow operand with a 64-bit one without re-extending it;
+`Ord` of a `UInt32`, `Int64` or `UInt64` was typed `Integer`.
+
+Measured effect on the compiler's own code (stage-2 assembly of the
+compiler, before and after): arm64, 114 of 10,064 functions changed, x86-64
+31 of 9,530.  Almost every change removes a sign extension of a literal
+compared with an `Int64`; the rest are `not` of a literal computed in 64
+bits, `IntToStr` of a constant expression routed to `Int64ToStr`, and one
+`Length(...) < 32 * 16` that is now a 64-bit compare.  No computed value
+changed.  Test churn: assertions on the type of a literal or constant
+expression (nine) and the overload tests that now resolve.
 
 *4.4 — builtin results (D5, part 1).*  `Length`, `Pos`, `PosEx`, `SizeOf`,
 `Ord`, and `High`/`Low` of strings and arrays return `Int`; `Copy` and

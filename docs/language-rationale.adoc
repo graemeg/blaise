@@ -659,15 +659,13 @@ cycle would delay the removal by a whole release for little benefit.
 Migration guidance comes from tooling instead: BlaiseGuard rule BL-2006
 reports every classic type name with its replacement as a quick-fix.
 
-*Planned with the retirement.*  Three changes are decided and follow in the
-next release cycle, because each one changes the meaning of existing code:
+*Planned with the retirement.*  Three changes are decided for the v0.16
+cycle, because each one changes the meaning of existing code:
 
-* *Context-typed integer literals.*  A literal will take its type from its
-  context (`var B: UInt8 = 255` needs no cast) and default to `Int` where
-  the context gives none, replacing the magnitude rule below.  Because
-  Blaise has no inline `var` and no variable type inference, the default is
-  visible mainly in overload resolution, generic argument inference and the
-  width of intermediate arithmetic (`1 shl 40`).
+* *Context-typed integer literals* (delivered in v0.16, Phase 4.3).  A
+  literal takes its type from its context and defaults to `Int` where the
+  context gives none, replacing the magnitude rule.  See _Integer literal
+  typing_ below.
 * *`Length`, `Count`, `SetLength`, `IndexOf` and friends use `Int`.*  Lengths
   and counts widen to the pointer-sized integer, lifting the
   2^31^-element ceiling on strings, `RawBytes` and collections.  All of them
@@ -692,6 +690,13 @@ negative `Int64` becomes a huge `UInt64` (or vice versa) without
 warning.  All narrower integer types (`Integer`, `UInt32`, `Byte`) widen
 implicitly into both `Int64` and `UInt64`.
 
+A compile-time constant is the exception: a non-negative integer constant
+converts to `UInt64` implicitly (`U := 1`, `F(5)` for a `UInt64`
+parameter, `V and (Buckets - 1)`), because its value is known to fit.
+Without it, making unhinted literals `Int` would have required a cast on
+every unsigned 64-bit constant.  A non-constant `Int64` still needs the
+cast.
+
 ==== 16-bit integer types: SmallInt / Word
 
 `SmallInt` (16-bit signed, range −32768..32767) and `Word` (16-bit
@@ -710,18 +715,47 @@ aliases for `SmallInt` and `Word` respectively.
 
 ==== Integer literal typing
 
-Untyped integer literals are typed by magnitude:
+An integer literal, and an untyped integer constant (`const N = 42;`), is
+typed by its context, in the manner of Go's untyped constants:
 
-* `[MinInt32..MaxInt32]` → `Integer`
-* outside Int32 range but in `[MinInt64..MaxInt64]` → `Int64`
-* in `(MaxInt64..MaxUInt64]` → `UInt64`
+. *A hint.*  With an assignment target, a parameter, a typed constant, an
+  array element, a `for` bound or a `case` label to go by, a literal takes
+  that integer type when its value fits: `B := 200` with `B: Byte` holds a
+  `Byte` literal.  A constant expression (`N - 1`) keeps `Int` and is
+  narrowed on store, which gives the same value.
+. *A typed operand.*  Beside a typed integer operand of a binary operator,
+  a literal, a negated literal or a constant identifier takes that
+  operand's type when its value fits, so `I = 5` with `I: Integer` compares
+  two `Integer` values.  A shift is excluded: its right operand is a count,
+  not a peer, so `1 shl N` is a 64-bit shift whatever `N` is.
+. *Otherwise `Int`*, or `UInt64` for a value above `High(Int64)`.
 
-The bit pattern is preserved in every case; the literal type only
-selects which signed/unsigned interpretation the surrounding expression
-sees.
+The effects of the default are confined to positions with no context:
+`F(42)` against `F(Int32)` and `F(Int64)` reaches `F(Int64)` (it used to be
+ambiguous), `1 shl 31` is `2147483648`, `-1 shr 1` shifts 64 bits, and
+`SizeOf(N)` of an untyped constant is 8.
 
-This rule is due to be replaced by context-typed literals defaulting to
-`Int` (see _Platform-honest type names_ above).
+*Overloads.*  A constant matches every integer parameter that can hold its
+value equally well, like an untyped constant in Pascal; among those, the
+one closest to the constant's own type wins, signed before unsigned.  So
+`F(42)` picks `Int64` over `Int32`, `F(5)` picks `Integer` over `Byte`, and
+`AssertEquals('n', 1, L.Count)` picks the `Integer` overload because
+`L.Count` is exact there.  A parameter too narrow for the value is no
+match: `F(300)` cannot choose `F(Byte)` and truncate.  A bracket literal
+of constants ranks the same way, element by element, so `[1, 2]` reaches
+`array of Integer` before `array of Byte`.
+
+*`array of const`.*  An integer constant that fits in 32 bits is passed as
+`vtInteger`, as in FPC and Delphi, although its type is `Int`: code that
+reads an `array of const` commonly handles `vtInteger` alone, and a ported
+`Format` or logging helper would otherwise lose every literal argument.
+
+FPC and Delphi instead type a constant by the smallest type that holds
+it.  A single default, the platform's natural integer, is easier to
+predict, and the hint and operand rules leave the meaning of existing
+`Integer` code unchanged: on the compiler's own source the change altered
+no computed value, only the width of a few constant comparisons and
+conversions (`docs/type-standardisation-design.adoc`, step 4.3).
 
 ==== Radix prefixes
 

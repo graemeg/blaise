@@ -53,6 +53,23 @@ type
       above High(Int64) and a UInt32 above High(Int32) format correctly;
       %d of the same UInt64 shows why it is needed }
     procedure TestRun_Format_U_Unsigned;
+    { Phase 4.3 (D4): an unhinted integer literal, and an untyped integer
+      constant, is Int.  F(42) against an Int32 / Int64 pair reaches Int64,
+      1 shl 31 is positive and -1 shr 1 shifts 64 bits; a literal with a
+      hint (typed operand, parameter, assignment target) keeps that type }
+    procedure TestRun_UnhintedLiteral_IsInt;
+    { Phase 4.3: a constant adapts to its context -- a non-negative constant
+      to UInt64 (assignment, argument, operand); among integer overloads the
+      one closest to the constant's own type, never one too narrow for it;
+      vtInteger in an 'array of const'; and an Integer compared with a
+      literal on either side }
+    procedure TestRun_Constants_AdaptToContext;
+    { Phase 4.3: a bracket literal of Int constants reaches an 'array of
+      Integer' formal at 4 bytes an element through every call shape --
+      routine, method, constructor, nested procedure (in a routine and in a
+      method) and nested function.  x86-64 lays the elements out at the
+      literal's own width unless the literal is retyped to the formal. }
+    procedure TestRun_OpenArrayLiteral_EveryCallShape;
   end;
 
 implementation
@@ -386,6 +403,156 @@ begin
     '-1' + #10 +
     '[4294967295] [   42] [42   ]' + #10 +
     '42%' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_UnhintedLiteral_IsInt;
+const
+  Src = '''
+    program P;
+    const
+      N = 42;
+    procedure F(X: Integer); overload; begin WriteLn('Integer ', X) end;
+    procedure F(X: Int64); overload; begin WriteLn('Int64 ', X) end;
+    procedure G(X: Byte); begin WriteLn('Byte ', X) end;
+    var
+      I: Integer; B: Byte;
+    begin
+      F(42);
+      F(N);
+      WriteLn(SizeOf(N));
+      WriteLn(1 shl 31);
+      WriteLn(-1 shr 1);
+      I := 7;
+      F(I);
+      G(200);
+      B := 255;
+      WriteLn(B + 1);
+      F(High(Integer));
+      WriteLn(I + 1 = 8)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'Int64 42' + #10 +
+    'Int64 42' + #10 +
+    '8' + #10 +
+    '2147483648' + #10 +
+    '9223372036854775807' + #10 +
+    'Integer 7' + #10 +
+    'Byte 200' + #10 +
+    '256' + #10 +
+    'Integer 2147483647' + #10 +
+    'True' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_Constants_AdaptToContext;
+const
+  Src = '''
+    program P;
+    const
+      Buckets = 4096;
+    procedure Q(X: UInt64); begin WriteLn('Q ', X) end;
+    procedure F(X: Byte); overload; begin WriteLn('Byte ', X) end;
+    procedure F(X: Integer); overload; begin WriteLn('Integer ', X) end;
+    procedure Pair(const S: string; A, B: Integer); overload;
+    begin WriteLn(S, ' Integer ', A + B) end;
+    procedure Pair(const S: string; A, B: Int64); overload;
+    begin WriteLn(S, ' Int64 ', A + B) end;
+    procedure Tags(const Args: array of const);
+    var I: Integer;
+    begin
+      for I := 0 to High(Args) do
+        if Args[I].VType = vtInteger then
+          Write(Integer(Args[I].VValue), ' ')
+        else
+          Write('tag', Args[I].VType, ' ');
+      WriteLn()
+    end;
+    var
+      U: UInt64; V: UInt64; I, K: Integer;
+    begin
+      U := 1;
+      V := UInt64(1) shl 40 + 4097;
+      WriteLn(U, ' ', V and (Buckets - 1), ' ', U + 2);
+      Q(5);
+      Q(Buckets);
+      F(5);
+      F(300);
+      K := 7;
+      Pair('mixed', 1, K);
+      Tags([42, -1, Buckets, 5000000000]);
+      I := ($FE shl 24) or $ED;
+      WriteLn(I = -33554195, ' ', -33554195 = I, ' ', I < 0, ' ', 0 > I)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    '1 1 3' + #10 +
+    'Q 5' + #10 +
+    'Q 4096' + #10 +
+    'Integer 5' + #10 +
+    'Integer 300' + #10 +
+    'mixed Integer 8' + #10 +
+    '42 -1 4096 tag16 ' + #10 +
+    'True True True True' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_OpenArrayLiteral_EveryCallShape;
+const
+  Src = '''
+    program P;
+    function Total(const A: array of Integer): Integer;
+    var I: Integer;
+    begin
+      Result := 0;
+      for I := 0 to High(A) do Result := Result * 10 + A[I]
+    end;
+    type
+      TC = class
+        S: Integer;
+        constructor Create(const A: array of Integer);
+        function Sum(const A: array of Integer): Integer;
+        procedure Run;
+      end;
+    constructor TC.Create(const A: array of Integer);
+    begin S := Total(A) end;
+    function TC.Sum(const A: array of Integer): Integer;
+    begin Result := Total(A) end;
+    procedure TC.Run;
+      procedure Show(const AName: string; const A: array of Integer);
+      begin WriteLn(AName, ' ', Total(A)) end;
+    begin
+      Show('nested-in-method', [1, 2, 3])
+    end;
+    procedure Outer;
+      procedure Show(const A: array of Integer);
+      begin WriteLn('nested-proc ', Total(A)) end;
+      function Calc(const A: array of Integer): Integer;
+      begin Result := Total(A) end;
+    begin
+      Show([4, 5, 6]);
+      WriteLn('nested-func ', Calc([7, 8, 9]))
+    end;
+    var O: TC;
+    begin
+      WriteLn('routine ', Total([1, 2, 3]));
+      O := TC.Create([3, 2, 1]);
+      WriteLn('ctor ', O.S, ' method ', O.Sum([6, 5, 4]));
+      O.Run();
+      O.Free();
+      Outer()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src,
+    'routine 123' + #10 +
+    'ctor 321 method 654' + #10 +
+    'nested-in-method 123' + #10 +
+    'nested-proc 456' + #10 +
+    'nested-func 789' + #10, 0);
 end;
 
 initialization

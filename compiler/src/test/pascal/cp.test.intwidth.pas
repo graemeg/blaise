@@ -34,8 +34,8 @@ type
     procedure TestSemantic_UInt32TimesUInt32_IsInt64;
     procedure TestSemantic_IntegerDivInteger_IsInt64;
     procedure TestSemantic_NegInteger_IsInt64;
-    procedure TestSemantic_NegLiteral_IsInteger;
-    procedure TestSemantic_ConstExpr_TypedByMagnitude;
+    procedure TestSemantic_NegLiteral_TakesHint;
+    procedure TestSemantic_ConstExpr_IsInt;
     procedure TestSemantic_IntegerAndUInt32_IsInt64;
     procedure TestSemantic_Int64Operand_Unchanged;
     procedure TestSemantic_UInt64Operand_Unchanged;
@@ -98,15 +98,20 @@ begin
   AssertEquals('Int64', TypeOf('-I'));
 end;
 
-procedure TIntWidthTests.TestSemantic_NegLiteral_IsInteger;
+procedure TIntWidthTests.TestSemantic_NegLiteral_TakesHint;
 begin
-  AssertEquals('Integer', TypeOf('-5'));
+  { a negated literal takes its assignment target's type (D4, rule 1) }
+  AssertEquals('Int64', TypeOf('-5'));
+  AssertEquals('Integer', TypeOf('-5', 'Integer'));
 end;
 
-procedure TIntWidthTests.TestSemantic_ConstExpr_TypedByMagnitude;
+procedure TIntWidthTests.TestSemantic_ConstExpr_IsInt;
 begin
-  AssertEquals('fits Integer', 'Integer', TypeOf('5 - 1'));
-  AssertEquals('does not fit', 'Int64', TypeOf('2147483647 + 1'));
+  { a constant expression is Int whatever its magnitude (D4), and keeps
+    that type under a narrower hint: it is narrowed on store }
+  AssertEquals('small', 'Int64', TypeOf('5 - 1'));
+  AssertEquals('large', 'Int64', TypeOf('2147483647 + 1'));
+  AssertEquals('hinted', 'Int64', TypeOf('5 - 1', 'Integer'));
 end;
 
 procedure TIntWidthTests.TestSemantic_IntegerAndUInt32_IsInt64;

@@ -221,13 +221,16 @@ const
       I := High(Integer);
       F(I);
       F(I + 1);
-      F(5 - 1)
+      F(5 - 1);
+      F(I - 3)
     end.
     ''';
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  { F(5 - 1) is a constant expression with no hint, so Int (D4) }
   AssertRunsOnAll(Src,
-    'Int32 2147483647' + LE + 'Int64 2147483648' + LE + 'Int32 4' + LE, 0);
+    'Int32 2147483647' + LE + 'Int64 2147483648' + LE + 'Int64 4' + LE +
+    'Int64 2147483644' + LE, 0);
 end;
 
 procedure TE2EIntWidthTests.TestRun_MixedWidthCompare_ExtendsNarrowSide;

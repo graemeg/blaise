@@ -430,8 +430,8 @@ begin
     'program P; var n: Integer; begin n := 1 + 2 end.');
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
-    AssertEquals('Add result is Integer',
-      Ord(tyInteger), Ord(Bin.ResolvedType.Kind));
+    AssertEquals('Add result is Int (a constant expression, D4)',
+      Ord(tyInt64), Ord(Bin.ResolvedType.Kind));
   finally
     Prog.Free();
   end;
@@ -452,8 +452,8 @@ begin
     'program P; var n: Integer; begin n := 10 - 3 end.');
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
-    AssertEquals('Sub is Integer',
-      Ord(tyInteger), Ord(Bin.ResolvedType.Kind));
+    AssertEquals('Sub is Int (a constant expression, D4)',
+      Ord(tyInt64), Ord(Bin.ResolvedType.Kind));
   finally
     Prog.Free();
   end;
@@ -468,8 +468,8 @@ begin
     'program P; var n: Integer; begin n := 3 * 4 end.');
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
-    AssertEquals('Mul is Integer',
-      Ord(tyInteger), Ord(Bin.ResolvedType.Kind));
+    AssertEquals('Mul is Int (a constant expression, D4)',
+      Ord(tyInt64), Ord(Bin.ResolvedType.Kind));
   finally
     Prog.Free();
   end;
@@ -484,8 +484,8 @@ begin
     'program P; var n: Integer; begin n := 8 div 2 end.');
   try
     Bin := TBinaryExpr(TAssignment(Prog.Block.Stmts.Items[0]).Expr);
-    AssertEquals('Div is Integer',
-      Ord(tyInteger), Ord(Bin.ResolvedType.Kind));
+    AssertEquals('Div is Int (a constant expression, D4)',
+      Ord(tyInt64), Ord(Bin.ResolvedType.Kind));
   finally
     Prog.Free();
   end;

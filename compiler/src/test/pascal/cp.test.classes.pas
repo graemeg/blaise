@@ -1764,7 +1764,7 @@ begin
     AssertEquals('KF type', 'Double', RhsOf(0).ResolvedType.Name);
     AssertEquals('KF text', '2.5', RhsOf(0).ConstString);
     AssertEquals('KS type', 'Single', RhsOf(1).ResolvedType.Name);
-    AssertEquals('KSum type', 'Integer', RhsOf(2).ResolvedType.Name);
+    AssertEquals('KSum type (untyped, so Int)', 'Int64', RhsOf(2).ResolvedType.Name);
     AssertEquals('KSum value', 14, Integer(RhsOf(2).ConstValue));
     AssertEquals('KB type', 'Boolean', RhsOf(3).ResolvedType.Name);
     AssertEquals('KBig type', 'Int64', RhsOf(4).ResolvedType.Name);

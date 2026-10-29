@@ -40,6 +40,10 @@ type
     procedure TestSem_Int8AndByte_DistinctOverloads;
     { an Int8 read sign-extends on both ISAs (movsbq / the lsl-asr pair) }
     procedure TestAsm_Int8Read_SignExtends;
+    { Phase 4.3 (D4): an unhinted literal is Int, so F(42) and F(N) with an
+      untyped constant N resolve against an Int32 / Int64 pair instead of
+      being ambiguous, and a lone Int32 parameter still takes the literal }
+    procedure TestSem_UnhintedLiteral_ResolvesToInt;
   end;
 
 implementation
@@ -206,6 +210,27 @@ begin
         X := 127
       end.
       '''));
+end;
+
+procedure TTypeStdTests.TestSem_UnhintedLiteral_ResolvesToInt;
+begin
+  AssertEquals('F(42) and F(N) resolve', '', SemanticError('''
+    program p;
+    const N = 42;
+    procedure F(X: Int32); overload; begin end;
+    procedure F(X: Int64); overload; begin end;
+    begin
+      F(42);
+      F(N)
+    end.
+    '''));
+  AssertEquals('a lone Int32 parameter takes the literal', '', SemanticError('''
+    program p;
+    procedure G(X: Int32); begin end;
+    begin
+      G(42)
+    end.
+    '''));
 end;
 
 procedure TTypeStdTests.TestSem_Int8AndByte_DistinctOverloads;

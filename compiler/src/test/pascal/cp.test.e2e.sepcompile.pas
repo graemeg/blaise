@@ -4172,6 +4172,7 @@ const
     '''
     program UseScalConsts;
     uses ScalConsts;
+    { an untyped constant is Int (D4): Show(Alias) reaches Int64 }
     procedure Show(X: Integer); overload; begin Write('int ') end;
     procedure Show(X: Int64); overload; begin Write('int64 ') end;
     procedure Show(X: TColour); overload; begin Write('colour ') end;
@@ -4218,7 +4219,7 @@ begin
     AssertEquals(Format('build%d run exit code', [Pass]), 0, Rc);
     AssertEquals(Format('build%d stdout', [Pass]),
       '6 1 2 True True' + #10 + '40000000000 5.00 vw' + #10 +
-      'int colour colour bool int64 ' + #10, Captured);
+      'int64 colour colour bool int64 ' + #10, Captured);
   end;
 end;
 
