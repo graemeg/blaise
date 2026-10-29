@@ -1131,8 +1131,9 @@ type
       signedness — used after a call (whose ABI return is 32-bit) and to
       implement an explicit narrowing/widening type cast. }
     procedure EmitNarrowToType(AType: TTypeDesc);
-    { Evaluate an integer argument the RTL takes as Int64 (a Copy, PosEx or
-      SetLength count) into %rax, extended from its own width. }
+    { Evaluate an integer argument the RTL takes as Int64 (a Copy, PosEx,
+      Delete or SetLength count, a GetMem size) into %rax, extended from
+      its own width. }
     procedure EmitInt64ArgToRax(AExpr: TASTExpr);
     { The cmp of a comparison whose left operand is in %rax and right in %rcx
       (or the immediate AImm when AHasImm).  64-bit when either operand is
@@ -9476,11 +9477,11 @@ begin
       Self.EmitBuiltinStrCall1(TASTExpr(FC.Args.Items[0]), '_StringTrim');
       Exit;
     end;
-    { GetMem(N) → _BlaiseGetMem(N) → pointer.  Size arg is Integer (32-bit). }
+    { GetMem(N) → _BlaiseGetMem(N) → pointer.  The size is an Int64. }
     if SameText(FC.Name, 'GetMem') and (FC.Args.Count = 1) then
     begin
-      Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
-      Self.Emit(#9'movl %eax, %edi');
+      Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[0]));
+      Self.Emit(#9'movq %rax, %rdi');
       Self.Emit(#9'callq _BlaiseGetMem');
       Exit;
     end;
@@ -9489,8 +9490,8 @@ begin
     begin
       Self.EmitExprToEax(TASTExpr(FC.Args.Items[0]));
       Self.Emit(#9'pushq %rax');
-      Self.EmitExprToEax(TASTExpr(FC.Args.Items[1]));
-      Self.Emit(#9'movl %eax, %esi');
+      Self.EmitInt64ArgToRax(TASTExpr(FC.Args.Items[1]));
+      Self.Emit(#9'movq %rax, %rsi');
       Self.Emit(#9'popq %rdi');
       Self.Emit(#9'callq _BlaiseReallocMem');
       Exit;

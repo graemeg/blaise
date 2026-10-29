@@ -109,12 +109,32 @@ function _libc_cxa_atexit(Fn, Arg, DsoHandle: Pointer): Integer;
 
 implementation
 
+{ String and dynamic-array header layout.  Every RTL unit that reads or
+  writes a header declares this same block (the RTL units cannot share a
+  unit of constants: a new RTL unit is unknown to the previous compiler's
+  BuildRTLUnitList), so a layout change edits each copy alike.  Offsets are
+  from the data pointer. }
+const
+  STR_HDR_SIZE = 12;   { RefCount, Length, Capacity }
+  STR_RC_OFS   = -12;  { Int32; -1 = immortal }
+  STR_LEN_OFS  = -8;
+  STR_CAP_OFS  = -4;
+  DA_HDR_SIZE  = 16;   { element hook, RefCount, Length }
+  DA_HOOK_OFS  = -16;
+  DA_RC_OFS    = -8;   { Int32; -1 = immortal }
+  DA_LEN_OFS   = -4;
+type
+  TStrLen = Integer;   { the width of a string header's Length and Capacity }
+  PStrLen = ^TStrLen;
+  TDaLen  = Integer;   { the width of a dynamic-array header's Length }
+  PDaLen  = ^TDaLen;
+
 const
   IMMORTAL  = -1;
-  HDR_SIZE  = 12;   { string header: RefCount + Length + Capacity }
   CLASS_HDR = 16;   { class header:  RefCount + pad + cleanup ptr }
   STDERR_FD = 2;
-  MAX_1GIB  = 1073741824;
+  { a length or capacity beyond any address space: a corrupted header }
+  MAX_STR_LEN = Int64(1) shl 48;
 
 procedure _libc_memcpy(Dst, Src: Pointer; N: Int64);       external name 'memcpy';
 function  _libc_memcmp(P1, P2: Pointer; N: Int64): Integer; external name 'memcmp';
@@ -122,7 +142,7 @@ procedure _libc_memset(Dst: Pointer; Val: Integer; N: Int64); external name 'mem
 function  _libc_write(Fd: Integer; Buf: Pointer; Count: Int64): Int64; external name 'write';
 procedure _libc_abort; external name 'abort';
 
-function  _BlaiseGetMem(Size: Integer): Pointer; external name '_BlaiseGetMem';
+function  _BlaiseGetMem(Size: Int64): Pointer; external name '_BlaiseGetMem';
 procedure _BlaiseFreeMem(Ptr: Pointer);          external name '_BlaiseFreeMem';
 procedure _WeakZeroSlots(Target: Pointer);       external name '_WeakZeroSlots';
 
@@ -131,13 +151,13 @@ function  _AtomicAddInt32(Ptr: PInteger; Delta: Integer): Integer;
 function  _AtomicSubInt32(Ptr: PInteger; Delta: Integer): Integer;
             external name '_AtomicSubInt32';
 
-procedure MemCopy(Dst, Src: Pointer; N: Integer);
+procedure MemCopy(Dst, Src: Pointer; N: Int64);
 begin
   if N > 0 then
     _libc_memcpy(Dst, Src, N);
 end;
 
-function MemCompare(P1, P2: Pointer; N: Integer): Integer;
+function MemCompare(P1, P2: Pointer; N: Int64): Integer;
 begin
   if N = 0 then
     Result := 0
@@ -305,11 +325,11 @@ end;
 
 procedure WriteStrSlot(DataPtr: Pointer);
 var
-  LenSlot: ^Integer;
-  Len: Integer;
+  LenSlot: PStrLen;
+  Len: Int64;
 begin
   if DataPtr = nil then begin WriteStr('(unknown)', 9); Exit end;
-  LenSlot := DataPtr - 8;
+  LenSlot := DataPtr + STR_LEN_OFS;
   Len := LenSlot^;
   if (Len > 0) and (Len < 256) then
     WriteStr(DataPtr, Len)
@@ -353,13 +373,13 @@ begin
       if ClassName = GLTTagString then
       begin
         WriteStr('string', 6);
-        RCSlot := Slot^ - HDR_SIZE;
+        RCSlot := Slot^ + STR_RC_OFS;
         RC := RCSlot^;
       end
       else if ClassName = GLTTagDynArray then
       begin
         WriteStr('dynarray', 8);
-        RCSlot := Slot^ - 8;
+        RCSlot := Slot^ + DA_RC_OFS;
         RC := RCSlot^;
       end
       else
@@ -487,7 +507,7 @@ var
   OldRC: Integer;
 begin
   if Ptr = nil then Exit;
-  RC := PInteger(Ptr - HDR_SIZE);
+  RC := PInteger(Ptr + STR_RC_OFS);
   if RC^ = IMMORTAL then Exit;
   OldRC := _AtomicAddInt32(RC, 1);
   if (OldRC = 0) and GLTEnabled then
@@ -496,41 +516,36 @@ end;
 
 procedure _StringRelease(Ptr: Pointer);
 var
-  Base: Pointer;
   RC: PInteger;
-  LN, CP: ^Integer;
+  LN, CP: PStrLen;
   OldRC: Integer;
 begin
   if Ptr = nil then Exit;
-  Base := Ptr - HDR_SIZE;
-  RC := PInteger(Base);
+  RC := PInteger(Ptr + STR_RC_OFS);
   if RC^ = IMMORTAL then Exit;
-  LN := Base + 4;
-  CP := Base + 8;
+  LN := Ptr + STR_LEN_OFS;
+  CP := Ptr + STR_CAP_OFS;
   { Header sanity checks inlined — this is the hottest runtime function
     (one call per string release, ~350M per compiler self-compile) and the
     out-of-line _StringReleaseCheck call doubled its cost.  DiagAbort is
     the cold path. }
   if RC^ < -1 then
     DiagAbort('blaise: _StringRelease double-free (refcount < -1)', 51);
-  if (LN^ < 0) or (LN^ > MAX_1GIB) then
+  if (LN^ < 0) or (LN^ > MAX_STR_LEN) then
     DiagAbort('blaise: _StringRelease corrupted header (bad length)', 55);
-  if (CP^ < LN^) or (CP^ > MAX_1GIB) then
+  if (CP^ < LN^) or (CP^ > MAX_STR_LEN) then
     DiagAbort('blaise: _StringRelease corrupted header (bad capacity)', 57);
   OldRC := _AtomicSubInt32(RC, 1);
   if OldRC = 1 then
   begin
     if GLTEnabled then LTDelete(Ptr);
-    _BlaiseFreeMem(Base);
+    _BlaiseFreeMem(Ptr - STR_HDR_SIZE);
   end;
 end;
 
-{ Dynamic-array block: [element hook:8][refcount:4][length:4][elements].
-  The data pointer points at element 0, so the refcount is at Ptr - 8, the
-  length at Ptr - 4 (both unchanged from the 8-byte header the hook was
-  added in front of -- code emitted by older compilers, and the debugger,
-  read them there) and the hook at Ptr - 16.  Layout is defined by
-  _DynArraySetLengthM in runtime.str. }
+{ Dynamic-array block: the element hook, refcount and length sit before
+  element 0, at DA_HOOK_OFS, DA_RC_OFS and DA_LEN_OFS from the data pointer.
+  Blocks are built by _DynArraySetLengthM in runtime.str. }
 
 type
   TDynElemHook = procedure(Data: Pointer; Count, ARetain: Integer);
@@ -541,7 +556,7 @@ var
   OldRC: Integer;
 begin
   if Ptr = nil then Exit;
-  RC := PInteger(Ptr - 8);
+  RC := PInteger(Ptr + DA_RC_OFS);
   if RC^ = IMMORTAL then Exit;
   OldRC := _AtomicAddInt32(RC, 1);
   if (OldRC = 0) and GLTEnabled then
@@ -553,25 +568,25 @@ var
   RC:     PInteger;
   OldRC:  Integer;
   HookP:  ^Pointer;
-  LenP:   PInteger;
+  LenP:   PDaLen;
   Hook:   TDynElemHook;
 begin
   if Ptr = nil then Exit;
-  RC := PInteger(Ptr - 8);
+  RC := PInteger(Ptr + DA_RC_OFS);
   if RC^ = IMMORTAL then Exit;
   OldRC := _AtomicSubInt32(RC, 1);
   if OldRC = 1 then
   begin
     if GLTEnabled then LTDelete(Ptr);
     { the last reference: release the managed elements first }
-    HookP := Ptr - 16;
+    HookP := Ptr + DA_HOOK_OFS;
     if HookP^ <> nil then
     begin
-      LenP := PInteger(Ptr - 4);
+      LenP := PDaLen(Ptr + DA_LEN_OFS);
       Hook := TDynElemHook(HookP^);
       Hook(Ptr, LenP^, 0);
     end;
-    _BlaiseFreeMem(Ptr - 16);
+    _BlaiseFreeMem(Ptr - DA_HDR_SIZE);
   end;
 end;
 
@@ -646,8 +661,8 @@ end;
 
 function _StringEquals(S1, S2: Pointer): Integer;
 var
-  Len1, Len2: Integer;
-  LN:         ^Integer;
+  Len1, Len2: Int64;
+  LN:         PStrLen;
   C1, C2:     PChar;
 begin
   if S1 = S2 then
@@ -658,14 +673,14 @@ begin
     Len1 := 0
   else
   begin
-    LN   := S1 - 8;   { Length at data_ptr − 8 }
+    LN   := S1 + STR_LEN_OFS;
     Len1 := LN^;
   end;
   if S2 = nil then
     Len2 := 0
   else
   begin
-    LN   := S2 - 8;
+    LN   := S2 + STR_LEN_OFS;
     Len2 := LN^;
   end;
   if Len1 <> Len2 then
@@ -686,36 +701,37 @@ end;
 
 function _StringConcat(S1, S2: Pointer): Pointer;
 var
-  Len1, Len2, Total: Integer;
-  LN:                ^Integer;
+  Len1, Len2, Total: Int64;
+  LN:                PStrLen;
   Base:              Pointer;
-  RC, LenF, CapF:    ^Integer;
+  RC:                ^Integer;
+  LenF, CapF:        PStrLen;
   Dst:               PChar;
 begin
   if S1 = nil then
     Len1 := 0
   else
   begin
-    LN   := S1 - 8;   { Length at data_ptr − 8 }
+    LN   := S1 + STR_LEN_OFS;
     Len1 := LN^;
   end;
   if S2 = nil then
     Len2 := 0
   else
   begin
-    LN   := S2 - 8;
+    LN   := S2 + STR_LEN_OFS;
     Len2 := LN^;
   end;
   Total  := Len1 + Len2;
-  Base   := _BlaiseGetMem(HDR_SIZE + Total + 1);
+  Base   := _BlaiseGetMem(STR_HDR_SIZE + Total + 1);
   if Base = nil then Exit;
-  RC    := Base;             { RefCount at base+0 }
+  Result := Base + STR_HDR_SIZE; { DATA POINTER }
+  RC    := Result + STR_RC_OFS;
   RC^   := 0;
-  LenF  := Base + 4;
+  LenF  := Result + STR_LEN_OFS;
   LenF^ := Total;
-  CapF  := Base + 8;
+  CapF  := Result + STR_CAP_OFS;
   CapF^ := Total;
-  Result := Base + HDR_SIZE; { DATA POINTER }
   Dst    := PChar(Result);
   if Len1 > 0 then
     MemCopy(Dst, PChar(S1), Len1);

@@ -148,7 +148,7 @@ type
   TPCharArray = ^PChar;
 
 { Memory }
-function  _BlaiseGetMem(Size: Integer): Pointer; external name '_BlaiseGetMem';
+function  _BlaiseGetMem(Size: Int64): Pointer; external name '_BlaiseGetMem';
 procedure _BlaiseFreeMem(Ptr: Pointer);          external name '_BlaiseFreeMem';
 { Bootstrap fallback for GPlatformLayout: defined WEAK by the linked target's
   concrete layout unit (rtl.platform.layout.<os>).  The current codegen assigns
@@ -316,9 +316,27 @@ implementation
 { Constants                                                            }
 { ------------------------------------------------------------------ }
 
+{ String and dynamic-array header layout.  Every RTL unit that reads or
+  writes a header declares this same block (the RTL units cannot share a
+  unit of constants: a new RTL unit is unknown to the previous compiler's
+  BuildRTLUnitList), so a layout change edits each copy alike.  Offsets are
+  from the data pointer. }
 const
-  BLAISE_STR_HDR = 12;
+  STR_HDR_SIZE = 12;   { RefCount, Length, Capacity }
+  STR_RC_OFS   = -12;  { Int32; -1 = immortal }
+  STR_LEN_OFS  = -8;
+  STR_CAP_OFS  = -4;
+  DA_HDR_SIZE  = 16;   { element hook, RefCount, Length }
+  DA_HOOK_OFS  = -16;
+  DA_RC_OFS    = -8;   { Int32; -1 = immortal }
+  DA_LEN_OFS   = -4;
+type
+  TStrLen = Integer;   { the width of a string header's Length and Capacity }
+  PStrLen = ^TStrLen;
+  TDaLen  = Integer;   { the width of a dynamic-array header's Length }
+  PDaLen  = ^TDaLen;
 
+const
   NS_PER_SEC = 1000000000;
 
   { O_* / S_* / SEEK_* / CLOCK_REALTIME / WNOHANG and the struct stat layout
@@ -329,30 +347,31 @@ const
 { Shared string helpers                                                }
 { ------------------------------------------------------------------ }
 
-function StrAlloc(Len: Integer): Pointer;
+function StrAlloc(Len: Int64): Pointer;
 var
   Base:       PChar;
-  RC, LN, CP: ^Integer;
+  RC:         ^Integer;
+  LN, CP:     PStrLen;
   NulPtr:     PChar;
 begin
-  Base := _BlaiseGetMem(BLAISE_STR_HDR + Len + 1);
+  Base := _BlaiseGetMem(STR_HDR_SIZE + Len + 1);
   if Base = nil then begin Result := nil; Exit end;
-  RC  := Pointer(Base);      RC^ := 0;
-  LN  := Pointer(Base + 4);  LN^ := Len;
-  CP  := Pointer(Base + 8);  CP^ := Len;
-  NulPtr := PChar(Base + BLAISE_STR_HDR);
+  NulPtr := PChar(Base + STR_HDR_SIZE);
+  RC  := Pointer(NulPtr) + STR_RC_OFS;   RC^ := 0;
+  LN  := Pointer(NulPtr) + STR_LEN_OFS;  LN^ := Len;
+  CP  := Pointer(NulPtr) + STR_CAP_OFS;  CP^ := Len;
   NulPtr[Len] := #0;
-  Result := Base + BLAISE_STR_HDR;
+  Result := NulPtr;
 end;
 
 function StrFromCStr(S: PChar): Pointer;
 var
-  Len: Integer;
+  Len: Int64;
   R:   PChar;
-  I:   Integer;
+  I:   Int64;
 begin
   if S = nil then begin Result := StrAlloc(0); Exit end;
-  Len := Integer(libc_strlen(S));
+  Len := libc_strlen(S);
   R := StrAlloc(Len);
   if (R <> nil) and (Len > 0) then
     for I := 0 to Len - 1 do R[I] := S[I];
@@ -370,18 +389,18 @@ var
 begin
   Result := '';
   if P = nil then Exit;
-  RC := Pointer(PChar(P) - BLAISE_STR_HDR);
+  RC := Pointer(P) + STR_RC_OFS;
   RC^ := 1;
   Slot := Pointer(@Result);
   Slot^ := P;
 end;
 
-function StrLen(DataPtr: Pointer): Integer;
+function StrLen(DataPtr: Pointer): Int64;
 var
-  LPtr: ^Integer;
+  LPtr: PStrLen;
 begin
   if DataPtr = nil then begin Result := 0; Exit end;
-  LPtr := Pointer(PChar(DataPtr) - 8);
+  LPtr := DataPtr + STR_LEN_OFS;
   Result := LPtr^;
 end;
 
@@ -404,14 +423,14 @@ begin
   Result := Buf;
 end;
 
-procedure WriteAllToFd(Fd: Integer; Data: PChar; Len: Integer);
+procedure WriteAllToFd(Fd: Integer; Data: PChar; Len: Int64);
 var
   P: PChar;
   Rem: Int64;
   Written: Int64;
 begin
   P := Data;
-  Rem := Int64(Len);
+  Rem := Len;
   while Rem > 0 do
   begin
     Written := libc_write(Fd, P, Rem);
@@ -492,28 +511,35 @@ var
   St:   TStatBuf;
   Sz:   Int64;
   R:    PChar;
-  Got:  Int64;
-  LPtr: ^Integer;
+  Got, N: Int64;
+  LPtr: PStrLen;
 begin
   Fd := libc_open2(StrData(Pointer(APath)), GPlatformLayout.O_RDONLY());
   if Fd < 0 then begin Result := ''; Exit end;
   if libc_fstat(Fd, @St) < 0 then begin libc_close(Fd); Result := ''; Exit end;
   Sz := GPlatformLayout.StatSize(@St);
   if Sz < 0 then begin libc_close(Fd); Result := ''; Exit end;
-  R := StrAlloc(Integer(Sz));
+  R := StrAlloc(Sz);
   if R = nil then begin libc_close(Fd); Result := ''; Exit end;
-  Got := libc_read(Fd, R, Sz);
+  { one read() may return less than asked (Linux caps a call near 2 GiB) }
+  Got := 0;
+  while Got < Sz do
+  begin
+    N := libc_read(Fd, R + Got, Sz - Got);
+    if N <= 0 then Break;
+    Got := Got + N;
+  end;
   libc_close(Fd);
-  LPtr  := Pointer(PChar(R) - 8);  LPtr^ := Integer(Got);
-  LPtr  := Pointer(PChar(R) - 4);  LPtr^ := Integer(Got);
-  R[Integer(Got)] := #0;
+  LPtr  := Pointer(R) + STR_LEN_OFS;  LPtr^ := Got;
+  LPtr  := Pointer(R) + STR_CAP_OFS;  LPtr^ := Got;
+  R[Got] := #0;
   Result := StrAdopt(R);
 end;
 
 procedure TRtlPlatformPosix.WriteFile(const APath, AContent: string);
 var
   Fd:  Integer;
-  Len: Integer;
+  Len: Int64;
 begin
   Fd := libc_open(StrData(Pointer(APath)), GPlatformLayout.O_WRONLY() or GPlatformLayout.O_CREAT() or GPlatformLayout.O_TRUNC(), 420);
   if Fd < 0 then Exit;
@@ -526,7 +552,7 @@ end;
 procedure TRtlPlatformPosix.AppendFile(const APath, AContent: string);
 var
   Fd:  Integer;
-  Len: Integer;
+  Len: Int64;
 begin
   Fd := libc_open(StrData(Pointer(APath)), GPlatformLayout.O_WRONLY() or GPlatformLayout.O_CREAT() or GPlatformLayout.O_APPEND(), 420);
   if Fd < 0 then Exit;
@@ -885,12 +911,10 @@ end;
 
 procedure TRtlPlatformPosix.SysWriteStr(Fd: Integer; S: Pointer);
 var
-  LPtr: ^Integer;
-  Len: Integer;
+  Len: Int64;
 begin
   if S = nil then Exit;
-  LPtr := S - 8;
-  Len := LPtr^;
+  Len := StrLen(S);
   if Len = 0 then Exit;
   WriteAllToFd(Fd, PChar(S), Len);
 end;
@@ -906,13 +930,11 @@ end;
 procedure TRtlPlatformPosix.SysWriteInt(Fd: Integer; N: Integer);
 var
   S: Pointer;
-  LPtr: ^Integer;
-  Len: Integer;
+  Len: Int64;
 begin
   S := _IntToStr(N);
   _StringAddRef(S);
-  LPtr := S - 8;
-  Len := LPtr^;
+  Len := StrLen(S);
   WriteAllToFd(Fd, PChar(S), Len);
   _StringRelease(S);
 end;
@@ -920,13 +942,11 @@ end;
 procedure TRtlPlatformPosix.SysWriteInt64(Fd: Integer; N: Int64);
 var
   S: Pointer;
-  LPtr: ^Integer;
-  Len: Integer;
+  Len: Int64;
 begin
   S := _Int64ToStr(N);
   _StringAddRef(S);
-  LPtr := S - 8;
-  Len := LPtr^;
+  Len := StrLen(S);
   WriteAllToFd(Fd, PChar(S), Len);
   _StringRelease(S);
 end;
@@ -934,13 +954,11 @@ end;
 procedure TRtlPlatformPosix.SysWriteUInt64(Fd: Integer; N: UInt64);
 var
   S: Pointer;
-  LPtr: ^Integer;
-  Len: Integer;
+  Len: Int64;
 begin
   S := _UInt64ToStr(N);
   _StringAddRef(S);
-  LPtr := S - 8;
-  Len := LPtr^;
+  Len := StrLen(S);
   WriteAllToFd(Fd, PChar(S), Len);
   _StringRelease(S);
 end;
@@ -948,13 +966,11 @@ end;
 procedure TRtlPlatformPosix.SysWriteDouble(Fd: Integer; V: Double);
 var
   S: Pointer;
-  LPtr: ^Integer;
-  Len: Integer;
+  Len: Int64;
 begin
   S := _DoubleToStr(V);
   _StringAddRef(S);
-  LPtr := S - 8;
-  Len := LPtr^;
+  Len := StrLen(S);
   WriteAllToFd(Fd, PChar(S), Len);
   _StringRelease(S);
 end;
@@ -962,13 +978,11 @@ end;
 procedure TRtlPlatformPosix.SysWriteSingle(Fd: Integer; V: Single);
 var
   S: Pointer;
-  LPtr: ^Integer;
-  Len: Integer;
+  Len: Int64;
 begin
   S := _SingleToStr(V);
   _StringAddRef(S);
-  LPtr := S - 8;
-  Len := LPtr^;
+  Len := StrLen(S);
   WriteAllToFd(Fd, PChar(S), Len);
   _StringRelease(S);
 end;

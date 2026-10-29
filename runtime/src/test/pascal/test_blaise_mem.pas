@@ -720,8 +720,9 @@ end;
 
 { ------------------------------------------------------------------ }
 { Large-block owner tid (phase 4 — the munmap-on-foreign-free path).   }
-{ TLargeHeader = TotalMapped:Int64, AllocSize:4, Flags:4, OwnerTid:8   }
-{ = 24 bytes; the user pointer is Base+24, so OwnerTid sits at Ptr-8.  }
+{ TLargeHeader = TotalMapped:8, AllocSize:8, Pad:4, Flags:4,          }
+{ OwnerTid:8 = 32 bytes; the user pointer is Base+32, so OwnerTid sits }
+{ at Ptr-8.                                                            }
 { Every large-alloc path must stamp the allocating thread's tid so     }
 { LargeFreeMem can distinguish a local free (cache) from a foreign     }
 { free (munmap).                                                       }

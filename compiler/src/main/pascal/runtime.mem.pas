@@ -64,9 +64,9 @@ interface
 uses
   runtime.atomic;
 
-function  _BlaiseGetMem(Size: Integer): Pointer;
+function  _BlaiseGetMem(Size: Int64): Pointer;
 procedure _BlaiseFreeMem(Ptr: Pointer);
-function  _BlaiseReallocMem(Ptr: Pointer; NewSize: Integer): Pointer;
+function  _BlaiseReallocMem(Ptr: Pointer; NewSize: Int64): Pointer;
 { Move(Source, Dest, Count): the semantic pass passes the two operands'
   addresses in Pascal order (Source first).  Overlap-safe; a Count of zero
   or less copies nothing, as in FPC and Delphi. }
@@ -194,7 +194,7 @@ const
   ARENA_SIZE      = 65536;
   LARGE_THRESHOLD = 2048;
   HEADER_SIZE     = 16;
-  LARGE_HEADER    = 24;
+  LARGE_HEADER    = 32;
   LARGE_CACHE_MAX = 32;
 
 { CROSS-LAYOUT INVARIANT (concurrent-allocator-design.adoc, §Data
@@ -204,7 +204,7 @@ const
   distance from the user pointer:
 
     small: Ptr - 16 + 4  = Ptr - 12
-    large: Ptr - 24 + 12 = Ptr - 12
+    large: Ptr - 32 + 20 = Ptr - 12
 
   New fields must therefore be appended AFTER Flags in both records;
   reordering either silently breaks every free.  The invariant is pinned
@@ -223,7 +223,8 @@ type
   PLargeHeader = ^TLargeHeader;
   TLargeHeader = record
     TotalMapped: Int64;
-    AllocSize:   Integer;
+    AllocSize:   Int64;    { a large block may exceed 2 GiB }
+    Pad:         Integer;  { keeps Flags at Ptr - 12 (the invariant above) }
     Flags:       Integer;
     OwnerTid:    Int64;  { allocating thread's tid (MyTid).  LargeFreeMem
                            caches on a local free and munmaps on a
@@ -923,7 +924,7 @@ begin
     RemoteFreePush(Arena, Ptr, Idx);
 end;
 
-function LargeGetMem(Size: Integer): Pointer;
+function LargeGetMem(Size: Int64): Pointer;
 var
   Total: Int64;
   Base: Pointer;
@@ -1002,7 +1003,7 @@ begin
   Result := Hdr^.Flags = FLAG_LARGE;
 end;
 
-function GetAllocSize(Ptr: Pointer): Integer;
+function GetAllocSize(Ptr: Pointer): Int64;
 var
   SmallHdr: PBlockHeader;
   LargeHdr: PLargeHeader;
@@ -1076,7 +1077,7 @@ end;
 { Public API                                                           }
 { ------------------------------------------------------------------ }
 
-function _BlaiseGetMem(Size: Integer): Pointer;
+function _BlaiseGetMem(Size: Int64): Pointer;
 begin
   if Size <= 0 then
   begin
@@ -1109,9 +1110,9 @@ begin
     SmallFreeMem(Ptr);
 end;
 
-function _BlaiseReallocMem(Ptr: Pointer; NewSize: Integer): Pointer;
+function _BlaiseReallocMem(Ptr: Pointer; NewSize: Int64): Pointer;
 var
-  OldSize, CopySize: Integer;
+  OldSize, CopySize: Int64;
   Hdr: PBlockHeader;
   LHdr: PLargeHeader;
   OldMapped, NewMapped: Int64;
@@ -1153,7 +1154,7 @@ begin
     CopySize := OldSize
   else
     CopySize := NewSize;
-  _libc_memcpy(Result, Ptr, Int64(CopySize));
+  _libc_memcpy(Result, Ptr, CopySize);
   _BlaiseFreeMem(Ptr);
 end;
 

@@ -75,7 +75,7 @@ type
     Next: PWeakEntry;
   end;
 
-function _BlaiseGetMem(Size: Integer): Pointer; external name '_BlaiseGetMem';
+function _BlaiseGetMem(Size: Int64): Pointer; external name '_BlaiseGetMem';
 procedure _BlaiseFreeMem(Ptr: Pointer); external name '_BlaiseFreeMem';
 function pthread_mutex_init(Mutex: Pointer; Attr: Pointer): Integer;
   external name 'pthread_mutex_init';

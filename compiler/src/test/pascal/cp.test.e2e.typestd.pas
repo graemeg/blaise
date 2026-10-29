@@ -82,6 +82,10 @@ type
       negative, so they mix with a UInt64 without a cast, as the Integer
       they were did -- an FNV-1a hash over Ord of each character }
     procedure TestRun_NonNegativeInt_MixesWithUInt64;
+    { Phase 4.5: a string above 1 GiB is built, written and released; the
+      release's header sanity check rejected any length above 1 GiB as a
+      corrupted header }
+    procedure TestRun_StringAbove1GiB_Releases;
   end;
 
 implementation
@@ -712,6 +716,25 @@ begin
     '7' + #10 +
     'Q 5' + #10 +
     'True' + #10, 0);
+end;
+
+procedure TE2ETypeStdTests.TestRun_StringAbove1GiB_Releases;
+const
+  Src = '''
+    program P;
+    var S: string;
+    begin
+      SetLength(S, 1100000000);
+      S[High(S)] := 'x';
+      WriteLn(Length(S));
+      WriteLn(S[High(S)] = 'x');
+      S := '';
+      WriteLn('released ', Length(S))
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '1100000000' + #10 + 'True' + #10 + 'released 0' + #10, 0);
 end;
 
 initialization

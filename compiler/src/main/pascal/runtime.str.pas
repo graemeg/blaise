@@ -42,9 +42,9 @@ procedure _libc_memcpy(Dst, Src: Pointer; N: Int64);                   external 
   'uses blaise_mem' because that would pull blaise_mem's implementation-
   section _libc_memcpy declaration into our namespace and conflict with
   the one above. }
-function  _BlaiseGetMem(Size: Integer): Pointer; external name '_BlaiseGetMem';
+function  _BlaiseGetMem(Size: Int64): Pointer;   external name '_BlaiseGetMem';
 procedure _BlaiseFreeMem(Ptr: Pointer);          external name '_BlaiseFreeMem';
-function  _BlaiseReallocMem(Ptr: Pointer; NewSize: Integer): Pointer;
+function  _BlaiseReallocMem(Ptr: Pointer; NewSize: Int64): Pointer;
   external name '_BlaiseReallocMem';
 
 { ARC primitive from blaise_arc — used by _StringUnique to drop the old
@@ -61,9 +61,9 @@ function  _FormatFloatSpec(V: Double; Spec: Integer; Prec: Integer): Pointer;
 { ------------------------------------------------------------------ }
 { String RTL public interface                                          }
 { ------------------------------------------------------------------ }
-function  _StringLength(S: Pointer): Integer;
-function  _StringPos(Sub, S: Pointer): Integer;
-function  _StringPosEx(Sub, S: Pointer; StartPos: Int64): Integer;
+function  _StringLength(S: Pointer): Int64;
+function  _StringPos(Sub, S: Pointer): Int64;
+function  _StringPosEx(Sub, S: Pointer; StartPos: Int64): Int64;
 function  _StringCopy(S: Pointer; From, Count: Int64): Pointer;
 function  _StringUnique(S: Pointer): Pointer;
 function  _StringDelete(S: Pointer; Idx, Count: Int64): Pointer;
@@ -115,7 +115,7 @@ function _DynArraySetLengthM(Ptr: Pointer; NewLen: Int64; ElemSize: Integer;
   Hook: Pointer): Pointer;
 function _DynArraySetLength(Ptr: Pointer; NewLen: Int64;
   ElemSize: Integer): Pointer;
-function _DynArrayLength(Ptr: Pointer): Integer;
+function _DynArrayLength(Ptr: Pointer): Int64;
 
 { File-path manipulation — pure string operations, no OS calls }
 function _ChangeFileExt(Path, Ext: Pointer): Pointer;
@@ -151,8 +151,27 @@ function _StringFormatVarRecs(Fmt: Pointer; VarRecs: Pointer;
 
 implementation
 
+{ String and dynamic-array header layout.  Every RTL unit that reads or
+  writes a header declares this same block (the RTL units cannot share a
+  unit of constants: a new RTL unit is unknown to the previous compiler's
+  BuildRTLUnitList), so a layout change edits each copy alike.  Offsets are
+  from the data pointer. }
 const
-  HDR_SIZE = 12;  { 3 x 4-byte integers: RefCount, Length, Capacity }
+  STR_HDR_SIZE = 12;   { RefCount, Length, Capacity }
+  STR_RC_OFS   = -12;  { Int32; -1 = immortal }
+  STR_LEN_OFS  = -8;
+  STR_CAP_OFS  = -4;
+  DA_HDR_SIZE  = 16;   { element hook, RefCount, Length }
+  DA_HOOK_OFS  = -16;
+  DA_RC_OFS    = -8;   { Int32; -1 = immortal }
+  DA_LEN_OFS   = -4;
+type
+  TStrLen = Integer;   { the width of a string header's Length and Capacity }
+  PStrLen = ^TStrLen;
+  TDaLen  = Integer;   { the width of a dynamic-array header's Length }
+  PDaLen  = ^TDaLen;
+
+const
   STDERR_FD = 2;
 
 function  _libc_write(Fd: Integer; Buf: Pointer; Count: Int64): Int64; external name 'write';
@@ -176,7 +195,7 @@ end;
 { Memory helpers                                                        }
 { ------------------------------------------------------------------ }
 
-procedure MemCopy(Dst, Src: Pointer; N: Integer);
+procedure MemCopy(Dst, Src: Pointer; N: Int64);
 begin
   if N > 0 then
     _libc_memcpy(Dst, Src, N);
@@ -186,16 +205,16 @@ end;
 { Internal helpers                                                     }
 { ------------------------------------------------------------------ }
 
-{ StrLen: Ptr is the DATA pointer; length lives at Ptr-8 }
-function StrLen(Ptr: Pointer): Integer;
+{ StrLen: Ptr is the DATA pointer; nil is the empty string }
+function StrLen(Ptr: Pointer): Int64;
 var
-  P: ^Integer;
+  P: PStrLen;
 begin
   if Ptr = nil then
     Result := 0
   else
   begin
-    P := Ptr - 8;   { Length field at data_ptr − 8 }
+    P := Ptr + STR_LEN_OFS;
     Result := P^;
   end;
 end;
@@ -208,28 +227,27 @@ end;
 
 { Allocate a new Blaise string of exactly Len bytes plus NUL.
   RefCount = 0 (unowned); caller must call _StringAddRef.
-  Returns DATA POINTER (= base + HDR_SIZE). }
+  Returns DATA POINTER (= base + STR_HDR_SIZE). }
 function StrAlloc(Len: Int64): Pointer;
 var
-  TotalL: Int64;
   Base:   Pointer;
-  RC, LN, CP: ^Integer;
+  RC:     ^Integer;
+  LN, CP: PStrLen;
   NulPtr: PChar;
 begin
   CheckLengthFits(Len, 'Runtime error: string length above High(Int32)', 46);
-  TotalL := Int64(HDR_SIZE) + Len + 1;
-  Base   := _BlaiseGetMem(Integer(TotalL));
+  Base := _BlaiseGetMem(STR_HDR_SIZE + Len + 1);
   if Base = nil then
   begin
     Exit(nil);
   end;
-  RC  := Base;        { RefCount at base+0 }
+  Result := Base + STR_HDR_SIZE;   { DATA POINTER }
+  RC  := Result + STR_RC_OFS;
   RC^ := 0;
-  LN  := Base + 4;    { Length at base+4 }
+  LN  := Result + STR_LEN_OFS;
   LN^ := Len;
-  CP  := Base + 8;    { Capacity at base+8 }
+  CP  := Result + STR_CAP_OFS;
   CP^ := Len;
-  Result := Base + HDR_SIZE;   { DATA POINTER }
   NulPtr        := PChar(Result);
   NulPtr[Len]   := 0;          { NUL terminator at data+Len }
 end;
@@ -238,7 +256,7 @@ end;
 { _StringLength                                                        }
 { ------------------------------------------------------------------ }
 
-function _StringLength(S: Pointer): Integer;
+function _StringLength(S: Pointer): Int64;
 begin
   Result := StrLen(S);
 end;
@@ -247,11 +265,11 @@ end;
 { _StringPos(Sub, S) : Integer  — 0-based; -1 if not found           }
 { ------------------------------------------------------------------ }
 
-function _StringPos(Sub, S: Pointer): Integer;
+function _StringPos(Sub, S: Pointer): Int64;
 var
-  SLen, SubLen: Integer;
+  SLen, SubLen: Int64;
   SData, SubData: PChar;
-  I, J: Integer;
+  I, J: Int64;
   Match: Boolean;
 begin
   SLen   := StrLen(S);
@@ -294,11 +312,11 @@ end;
 { the given 0-based position.  Returns -1 if not found.              }
 { ------------------------------------------------------------------ }
 
-function _StringPosEx(Sub, S: Pointer; StartPos: Int64): Integer;
+function _StringPosEx(Sub, S: Pointer; StartPos: Int64): Int64;
 var
-  SLen, SubLen: Integer;
+  SLen, SubLen: Int64;
   SData, SubData: PChar;
-  I, J: Integer;
+  I, J: Int64;
   Match: Boolean;
 begin
   SLen   := StrLen(S);
@@ -314,7 +332,7 @@ begin
   SData   := StrData(S);
   SubData := StrData(Sub);
   if StartPos < 0 then StartPos := 0;
-  I := Integer(StartPos);
+  I := StartPos;
   while I <= SLen - SubLen do
   begin
     Match := True;
@@ -343,7 +361,7 @@ end;
 
 function _StringCopy(S: Pointer; From, Count: Int64): Pointer;
 var
-  SLen:  Integer;
+  SLen:  Int64;
   Data:  PChar;
 begin
   SLen := StrLen(S);
@@ -384,10 +402,10 @@ end;
 function _StringUnique(S: Pointer): Pointer;
 var
   RC:   ^Integer;
-  SLen: Integer;
+  SLen: Int64;
 begin
   if S = nil then Exit(nil);
-  RC := Pointer(S) - HDR_SIZE;      { RefCount at data_ptr - 12 }
+  RC := Pointer(S) + STR_RC_OFS;
   if RC^ = 1 then Exit(S);          { already uniquely owned & mutable }
 
   { Immortal (-1) or shared (>1): make a private, writable rc=1 copy. }
@@ -395,7 +413,7 @@ begin
   Result := StrAlloc(SLen);
   if (Result <> nil) and (SLen > 0) then
     MemCopy(StrData(Result), StrData(S), SLen);
-  RC := Pointer(Result) - HDR_SIZE;
+  RC := Pointer(Result) + STR_RC_OFS;
   RC^ := 1;                         { the caller's slot owns this ref }
   _StringRelease(S);                { drop the old reference }
 end;
@@ -412,7 +430,7 @@ end;
 
 function _StringDelete(S: Pointer; Idx, Count: Int64): Pointer;
 var
-  SLen, RemoveCount, NewLen: Integer;
+  SLen, RemoveCount, NewLen: Int64;
   Data, ResData: PChar;
 begin
   SLen := StrLen(S);
@@ -449,7 +467,7 @@ end;
 
 function _StringSetLength(S: Pointer; N: Int64): Pointer;
 var
-  OldLen, CopyLen, I: Integer;
+  OldLen, CopyLen, I: Int64;
   Data, ResData:      PChar;
 begin
   CheckLengthFits(N, 'Runtime error: SetLength: length above High(Int32)', 50);
@@ -474,10 +492,10 @@ end;
 
 function _StringUpperCase(S: Pointer): Pointer;
 var
-  Len:     Integer;
+  Len:     Int64;
   SrcData: PChar;
   DstData: PChar;
-  I, C:    Integer;
+  I, C:    Int64;
 begin
   Len    := StrLen(S);
   Result := StrAlloc(Len);
@@ -500,10 +518,10 @@ end;
 
 function _StringLowerCase(S: Pointer): Pointer;
 var
-  Len:     Integer;
+  Len:     Int64;
   SrcData: PChar;
   DstData: PChar;
-  I, C:    Integer;
+  I, C:    Int64;
 begin
   Len    := StrLen(S);
   Result := StrAlloc(Len);
@@ -526,10 +544,10 @@ end;
 
 function _StringTrim(S: Pointer): Pointer;
 var
-  Len:    Integer;
+  Len:    Int64;
   Data:   PChar;
-  Lo, Hi: Integer;
-  NewLen: Integer;
+  Lo, Hi: Int64;
+  NewLen: Int64;
 begin
   Len  := StrLen(S);
   Data := StrData(S);
@@ -560,9 +578,9 @@ end;
 
 function _StringSameText(S1, S2: Pointer): Integer;
 var
-  Len1, Len2, I: Integer;
+  Len1, Len2, I: Int64;
   D1, D2:        PChar;
-  C1, C2:        Integer;
+  C1, C2:        Int64;
 begin
   Len1 := StrLen(S1);
   Len2 := StrLen(S2);
@@ -843,7 +861,7 @@ end;
 
 function _OrdAt(S: Pointer; I: Integer): Integer;
 var
-  Len:  Integer;
+  Len:  Int64;
   Data: PChar;
 begin
   Len  := StrLen(S);
@@ -889,9 +907,9 @@ end;
 
 function _StringCompare(S1, S2: Pointer): Integer;
 var
-  Len1, Len2, Len: Integer;
+  Len1, Len2, Len: Int64;
   D1, D2:          PChar;
-  I, C1, C2:       Integer;
+  I, C1, C2:       Int64;
 begin
   Len1 := StrLen(S1);
   Len2 := StrLen(S2);
@@ -907,7 +925,10 @@ begin
       Exit(C1 - C2);
     end;
   end;
-  Result := Len1 - Len2;
+  { the sign of the length difference, which need not fit an Integer }
+  if Len1 < Len2 then Result := -1
+  else if Len1 > Len2 then Result := 1
+  else Result := 0;
 end;
 
 { ------------------------------------------------------------------ }
@@ -916,9 +937,9 @@ end;
 
 function _StringCompareText(S1, S2: Pointer): Integer;
 var
-  Len1, Len2, Len: Integer;
+  Len1, Len2, Len: Int64;
   D1, D2:          PChar;
-  I, C1, C2:       Integer;
+  I, C1, C2:       Int64;
 begin
   Len1 := StrLen(S1);
   Len2 := StrLen(S2);
@@ -936,7 +957,10 @@ begin
       Exit(C1 - C2);
     end;
   end;
-  Result := Len1 - Len2;
+  { the sign of the length difference, which need not fit an Integer }
+  if Len1 < Len2 then Result := -1
+  else if Len1 > Len2 then Result := 1
+  else Result := 0;
 end;
 
 { ------------------------------------------------------------------ }
@@ -945,7 +969,7 @@ end;
 
 function _StringFromPChar(P: PChar): Pointer;
 var
-  Len: Integer;
+  Len: Int64;
 begin
   if P = nil then
   begin
@@ -1032,10 +1056,10 @@ end;
     Conv   : ASCII code of the conversion letter ('d','s','f','e','g',...).
     Prec   : precision (-1 = default). }
 function RenderFmtArg(Tag: Integer; Val: Int64; Conv: Integer; Prec: Integer;
-  out OutBuf: PChar; out OutFree: Boolean): Integer;
+  out OutBuf: PChar; out OutFree: Boolean): Int64;
 var
   Buf: PChar;
-  N:   Integer;
+  N:   Int64;
   FStr: Pointer;
   V:    Double;
   VP:   ^Double;
@@ -1052,7 +1076,7 @@ begin
     if N > 0 then
       MemCopy(Buf, PChar(FStr), N);
     Buf[N] := 0;
-    _BlaiseFreeMem(Pointer(Pointer(FStr) - HDR_SIZE));
+    _BlaiseFreeMem(Pointer(Pointer(FStr) - STR_HDR_SIZE));
     OutBuf := Buf;
     Exit(N);
   end;
@@ -1081,10 +1105,10 @@ end;
   Out / OutLen / OutCap, growing it as needed.  Returns the (possibly
   reallocated) buffer; the caller writes back OutLen and OutCap from the
   var parameters. }
-function FmtAppend(OutB: PChar; var OutLen: Integer; var OutCap: Integer;
-  Src: PChar; Len: Integer): PChar;
+function FmtAppend(OutB: PChar; var OutLen: Int64; var OutCap: Int64;
+  Src: PChar; Len: Int64): PChar;
 var
-  NewCap: Integer;
+  NewCap: Int64;
 begin
   if OutLen + Len > OutCap then
   begin
@@ -1101,10 +1125,10 @@ begin
 end;
 
 { Append Count copies of byte B (used for field-width space padding). }
-function FmtAppendFill(OutB: PChar; var OutLen: Integer; var OutCap: Integer;
-  B: Integer; Count: Integer): PChar;
+function FmtAppendFill(OutB: PChar; var OutLen: Int64; var OutCap: Int64;
+  B: Int64; Count: Int64): PChar;
 var
-  K: Integer;
+  K: Int64;
 begin
   if OutLen + Count > OutCap then
   begin
@@ -1125,17 +1149,18 @@ end;
 function _StringFormatN(Fmt: Pointer; Args: Pointer; Count: Integer): Pointer;
 var
   F, Dst:  PChar;
-  FLen, I, ArgIdx, Tag: Integer;
+  FLen, I: Int64;
+  ArgIdx, Tag: Integer;
   Val:     Int64;
   AP:      Pointer;
   TagPtr, ValPtr: ^Int64;
   OutB:    PChar;        { growable output buffer (raw bytes, no header) }
-  OutLen, OutCap: Integer;
+  OutLen, OutCap: Int64;
   Width, Prec, Conv: Integer;
   LeftJust: Boolean;
   ArgBuf:  PChar;
   ArgFree: Boolean;
-  ArgLen, Pad: Integer;
+  ArgLen, Pad: Int64;
   ByteBuf: array[0..1] of Byte;
 begin
   F := StrData(Fmt);
@@ -1316,7 +1341,7 @@ end;
 function _ChangeFileExt(Path, Ext: Pointer): Pointer;
 var
   P, E: PChar;
-  PLen, ELen, I, DotPos, StemLen: Integer;
+  PLen, ELen, I, DotPos, StemLen: Int64;
 begin
   P := StrData(Path);
   E := StrData(Ext);
@@ -1340,7 +1365,7 @@ end;
 function _ExtractFileName(Path: Pointer): Pointer;
 var
   P: PChar;
-  PLen, I, Start: Integer;
+  PLen, I, Start: Int64;
 begin
   P := StrData(Path);
   PLen := StrLen(Path);
@@ -1355,7 +1380,7 @@ end;
 function _ExtractFilePath(Path: Pointer): Pointer;
 var
   P: PChar;
-  PLen, I, SlashPos: Integer;
+  PLen, I, SlashPos: Int64;
 begin
   P := StrData(Path);
   PLen := StrLen(Path);
@@ -1373,7 +1398,7 @@ end;
 function _ExtractFileDir(Path: Pointer): Pointer;
 var
   P: PChar;
-  PLen, I, SlashPos: Integer;
+  PLen, I, SlashPos: Int64;
 begin
   P := StrData(Path);
   PLen := StrLen(Path);
@@ -1391,8 +1416,8 @@ end;
 function _ExtractFileExt(Path: Pointer): Pointer;
 var
   P: PChar;
-  PLen, I, LastDot, LastSep: Integer;
-  ExtLen: Integer;
+  PLen, I, LastDot, LastSep: Int64;
+  ExtLen: Int64;
 begin
   P := StrData(Path);
   PLen := StrLen(Path);
@@ -1416,7 +1441,7 @@ end;
 function _IncludeTrailingPathDelimiter(Path: Pointer): Pointer;
 var
   P, DP: PChar;
-  PLen: Integer;
+  PLen: Int64;
 begin
   P := StrData(Path);
   PLen := StrLen(Path);
@@ -1436,7 +1461,7 @@ end;
 function _ExcludeTrailingPathDelimiter(Path: Pointer): Pointer;
 var
   P: PChar;
-  PLen: Integer;
+  PLen: Int64;
 begin
   P := StrData(Path);
   PLen := StrLen(Path);
@@ -1450,28 +1475,19 @@ end;
 { Dynamic array RTL                                                    }
 { ------------------------------------------------------------------ }
 
-const
-  DA_HDR = 16;  { [hook:8][refcount:4][length:4] before element 0 }
-
 type
   TDynElemHook = procedure(Data: Pointer; Count, ARetain: Integer);
 
-function _DynArrayLength(Ptr: Pointer): Integer;
+function _DynArrayLength(Ptr: Pointer): Int64;
 var
-  LenPtr: ^Integer;
+  LenPtr: PDaLen;
 begin
   if Ptr = nil then
   begin
     Exit(0);
   end;
-  { length is stored at offset −4 from data pointer }
-  LenPtr := Ptr - 4;
+  LenPtr := Ptr + DA_LEN_OFS;
   Result := LenPtr^;
-end;
-
-procedure DaWriteInt32(P: ^Integer; V: Integer);
-begin
-  P^ := V;
 end;
 
 function _DynArraySetLengthM(Ptr: Pointer; NewLen: Int64; ElemSize: Integer;
@@ -1479,11 +1495,11 @@ function _DynArraySetLengthM(Ptr: Pointer; NewLen: Int64; ElemSize: Integer;
 var
   NewBase:  Pointer;
   NewData:  PChar;
-  DataSz:   Integer;
-  OldLen:   Integer;
-  CopyLen:  Integer;
-  ZI:       Integer;
-  HdrPtr:   ^Integer;
+  DataSz:   Int64;
+  OldLen:   Int64;
+  CopyLen:  Int64;
+  ZI:       Int64;
+  LenPtr:   PDaLen;
   HookSlot: ^Pointer;
   RC:       ^Integer;
   Shared:   Boolean;
@@ -1494,7 +1510,7 @@ begin
     compiler): keep the one the existing block carries. }
   if (Hook = nil) and (Ptr <> nil) then
   begin
-    HookSlot := Ptr - 16;
+    HookSlot := Ptr + DA_HOOK_OFS;
     Hook := HookSlot^;
   end;
   { SetLength(A, 0) drops THIS reference -- other holders keep the block --
@@ -1504,15 +1520,15 @@ begin
     _DynArrayRelease(Ptr);
     Exit(nil);
   end;
-  DataSz  := DA_HDR + NewLen * ElemSize;
+  DataSz  := DA_HDR_SIZE + NewLen * ElemSize;
   NewBase := _BlaiseGetMem(DataSz);
-  HookSlot  := NewBase;
+  NewData := PChar(NewBase) + DA_HDR_SIZE;
+  HookSlot  := Pointer(NewData) + DA_HOOK_OFS;
   HookSlot^ := Hook;
-  HdrPtr    := NewBase + 8;
-  DaWriteInt32(HdrPtr, 1);           { refcount }
-  HdrPtr    := NewBase + 12;
-  DaWriteInt32(HdrPtr, NewLen);      { length }
-  NewData := PChar(NewBase) + DA_HDR;
+  RC        := Pointer(NewData) + DA_RC_OFS;
+  RC^       := 1;
+  LenPtr    := Pointer(NewData) + DA_LEN_OFS;
+  LenPtr^   := NewLen;
   ZI := 0;
   while ZI < NewLen * ElemSize do
   begin
@@ -1525,7 +1541,7 @@ begin
     if OldLen < NewLen then CopyLen := OldLen else CopyLen := NewLen;
     if CopyLen > 0 then
       MemCopy(NewData, PChar(Ptr), CopyLen * ElemSize);
-    RC := Ptr - 8;
+    RC := Ptr + DA_RC_OFS;
     Shared := RC^ <> 1;
     if Hook <> nil then
       H := TDynElemHook(Hook);
@@ -1543,7 +1559,7 @@ begin
         did not come along, then the old block goes without its hook }
       if (Hook <> nil) and (OldLen > NewLen) then
         H(Ptr + NewLen * ElemSize, OldLen - NewLen, 0);
-      _BlaiseFreeMem(Ptr - DA_HDR);
+      _BlaiseFreeMem(Ptr - DA_HDR_SIZE);
     end;
   end;
   Result := NewData;

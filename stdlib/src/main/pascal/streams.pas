@@ -377,11 +377,11 @@ procedure _FdClose(Fd: Integer); external name '_FdClose';
   mmap-backed allocator (_BlaiseGetMem/_BlaiseFreeMem/_BlaiseReallocMem) rather
   than libc, so the memory streams carry no libc dependency and link into a
   --static (libc-free) build. }
-function memcpy(Dst, Src: Pointer; Count: Integer): Pointer;
+function memcpy(Dst, Src: Pointer; Count: Int64): Pointer;
   external name 'memcpy';
-function malloc(Count: Integer): Pointer; external name '_BlaiseGetMem';
+function malloc(Count: Int64): Pointer; external name '_BlaiseGetMem';
 procedure free(P: Pointer); external name '_BlaiseFreeMem';
-function realloc(P: Pointer; Count: Integer): Pointer;
+function realloc(P: Pointer; Count: Int64): Pointer;
   external name '_BlaiseReallocMem';
 
 { CopyStream — transfer all readable bytes from Src to Dst.

@@ -52,6 +52,9 @@ type
       of an unsigned ordinal) mixes with a UInt64 without a cast; Pos and
       High may be -1, and Ord of a signed value may be negative }
     procedure TestSem_MayBeNegativeInt_NeedsCastForUInt64;
+    { Phase 4.5: the allocator takes an Int64 size, so GetMem of an Integer
+      extends it (x86-64 passed its low 32 bits; arm64 its register as is) }
+    procedure TestAsm_GetMemSize_Extended;
   end;
 
 implementation
@@ -306,6 +309,23 @@ begin
   AssertTrue('Length - 1 may be negative', Probe('H := Length(S) - 1') <> '');
   AssertEquals('Length, SizeOf and Ord of a Char adapt', '',
     Probe('H := Length(S); H := H + SizeOf(I); H := H xor Ord(S[0])'));
+end;
+
+procedure TTypeStdTests.TestAsm_GetMemSize_Extended;
+const
+  Src = '''
+    program p;
+    var N: Integer; Q: Pointer;
+    begin
+      N := 64;
+      Q := GetMem(N);
+      FreeMem(Q)
+    end.
+    ''';
+begin
+  AssertEquals('', '', AsmMissing(Src,
+    'movslq %eax, %rax'#10#9'movq %rax, %rdi'#10#9'callq _BlaiseGetMem',
+    'sxtw x0, w0'#10#9'bl __BlaiseGetMem'));
 end;
 
 procedure TTypeStdTests.TestSem_Int8AndByte_DistinctOverloads;

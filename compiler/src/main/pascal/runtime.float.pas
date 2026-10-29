@@ -43,30 +43,49 @@ function _FormatFloatSpec(V: Double; Spec: Integer; Prec: Integer): Pointer;
 
 implementation
 
+{ String and dynamic-array header layout.  Every RTL unit that reads or
+  writes a header declares this same block (the RTL units cannot share a
+  unit of constants: a new RTL unit is unknown to the previous compiler's
+  BuildRTLUnitList), so a layout change edits each copy alike.  Offsets are
+  from the data pointer. }
 const
-  BLAISE_STR_HDR = 12;
+  STR_HDR_SIZE = 12;   { RefCount, Length, Capacity }
+  STR_RC_OFS   = -12;  { Int32; -1 = immortal }
+  STR_LEN_OFS  = -8;
+  STR_CAP_OFS  = -4;
+  DA_HDR_SIZE  = 16;   { element hook, RefCount, Length }
+  DA_HOOK_OFS  = -16;
+  DA_RC_OFS    = -8;   { Int32; -1 = immortal }
+  DA_LEN_OFS   = -4;
+type
+  TStrLen = Integer;   { the width of a string header's Length and Capacity }
+  PStrLen = ^TStrLen;
+  TDaLen  = Integer;   { the width of a dynamic-array header's Length }
+  PDaLen  = ^TDaLen;
 
-function _BlaiseGetMem(Size: Integer): Pointer; external name '_BlaiseGetMem';
+
+function _BlaiseGetMem(Size: Int64): Pointer; external name '_BlaiseGetMem';
 procedure _BlaiseFreeMem(Ptr: Pointer); external name '_BlaiseFreeMem';
 procedure libc_memcpy(Dst, Src: Pointer; N: Int64); external name 'memcpy';
 
-function BlaiseAllocStr(Src: PChar; Len: Integer): Pointer;
+function BlaiseAllocStr(Src: PChar; Len: Int64): Pointer;
 var
-  Cap: Integer;
+  Cap: Int64;
   Base: Pointer;
-  RC, LN, CP: ^Integer;
+  RC: ^Integer;
+  LN, CP: PStrLen;
   Data: PChar;
 begin
   Cap := Len + 1;
-  Base := _BlaiseGetMem(BLAISE_STR_HDR + Cap);
+  Base := _BlaiseGetMem(STR_HDR_SIZE + Cap);
   if Base = nil then
   begin
     Exit(nil);
   end;
-  RC := Base;        RC^ := 1;
-  LN := Base + 4;    LN^ := Len;
-  CP := Base + 8;    CP^ := Cap;
-  Data := PChar(Base + BLAISE_STR_HDR);
+  Data := PChar(Base + STR_HDR_SIZE);
+  RC := Pointer(Data) + STR_RC_OFS;    RC^ := 1;
+  LN := Pointer(Data) + STR_LEN_OFS;   LN^ := Len;
+  CP := Pointer(Data) + STR_CAP_OFS;   CP^ := Cap;
   if Len > 0 then
     libc_memcpy(Data, Src, Len);
   Data[Len] := 0;

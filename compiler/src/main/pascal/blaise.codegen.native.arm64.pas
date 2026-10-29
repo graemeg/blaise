@@ -535,7 +535,8 @@ type
     procedure EmitPointerWrite(AStmt: TPointerWriteStmt);
     procedure EmitNarrowX0(AType: TTypeDesc);
     { Evaluate an integer argument the RTL takes as Int64 (a Copy, PosEx,
-      Delete or SetLength count) into x0, extended from its own width. }
+      Delete or SetLength count, a GetMem size) into x0, extended from its
+      own width. }
     procedure EmitInt64ArgToX0(AExpr: TASTExpr);
     { Re-extend x1 from AType's width and signedness (a narrow integer). }
     procedure EmitExtendX1(AType: TTypeDesc);
@@ -5993,7 +5994,7 @@ begin
     end;
     if SameText(TFuncCallExpr(AExpr).Name, 'GetMem') then
     begin
-      Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
+      EmitInt64ArgToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitCallSym('_BlaiseGetMem');
       Exit;
     end;
@@ -6298,7 +6299,7 @@ begin
     begin
       Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[0]));
       EmitPushX0();
-      Self.EmitExprToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
+      EmitInt64ArgToX0(TASTExpr(TFuncCallExpr(AExpr).Args.Items[1]));
       Self.Emit(#9'mov x1, x0');
       EmitPopTo('x0');
       EmitCallSym('_BlaiseReallocMem');

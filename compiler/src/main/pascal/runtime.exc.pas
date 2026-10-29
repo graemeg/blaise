@@ -61,6 +61,27 @@ procedure _CheckNil(Obj: Pointer);
 
 implementation
 
+{ String and dynamic-array header layout.  Every RTL unit that reads or
+  writes a header declares this same block (the RTL units cannot share a
+  unit of constants: a new RTL unit is unknown to the previous compiler's
+  BuildRTLUnitList), so a layout change edits each copy alike.  Offsets are
+  from the data pointer. }
+const
+  STR_HDR_SIZE = 12;   { RefCount, Length, Capacity }
+  STR_RC_OFS   = -12;  { Int32; -1 = immortal }
+  STR_LEN_OFS  = -8;
+  STR_CAP_OFS  = -4;
+  DA_HDR_SIZE  = 16;   { element hook, RefCount, Length }
+  DA_HOOK_OFS  = -16;
+  DA_RC_OFS    = -8;   { Int32; -1 = immortal }
+  DA_LEN_OFS   = -4;
+type
+  TStrLen = Integer;   { the width of a string header's Length and Capacity }
+  PStrLen = ^TStrLen;
+  TDaLen  = Integer;   { the width of a dynamic-array header's Length }
+  PDaLen  = ^TDaLen;
+
+
 const
   { These MUST clear the end of the target's jmp_buf (runtime.setjmp).  They
     were sized for the 64-byte x86-64 buffer and never revisited when the
@@ -85,7 +106,7 @@ type
 
 procedure _blaise_longjmp(Buf: Pointer; Val: Integer); external name '_blaise_longjmp';
 
-function  _BlaiseGetMem(Size: Integer): Pointer; external name '_BlaiseGetMem';
+function  _BlaiseGetMem(Size: Int64): Pointer; external name '_BlaiseGetMem';
 function  _libc_write(Fd: Integer; Buf: Pointer; Count: Int64): Int64; external name 'write';
 procedure _libc_abort; external name 'abort';
 
@@ -96,23 +117,24 @@ threadvar
 function ExcStrEmpty: Pointer;
 var
   Base: Pointer;
-  RC, LN, CP: ^Integer;
+  RC: ^Integer;
+  LN, CP: PStrLen;
   Data: PChar;
 begin
-  Base := _BlaiseGetMem(13);
+  Base := _BlaiseGetMem(STR_HDR_SIZE + 1);
   if Base = nil then
   begin
     Exit(nil);
   end;
-  RC := Base;
+  Result := Base + STR_HDR_SIZE;
+  RC := Result + STR_RC_OFS;
   RC^ := 0;
-  LN := Base + 4;
+  LN := Result + STR_LEN_OFS;
   LN^ := 0;
-  CP := Base + 8;
+  CP := Result + STR_CAP_OFS;
   CP^ := 0;
-  Data := PChar(Base + 12);
+  Data := PChar(Result);
   Data[0] := #0;
-  Result := Base + 12;
 end;
 
 procedure _PushExcFrame(Frame: Pointer);
