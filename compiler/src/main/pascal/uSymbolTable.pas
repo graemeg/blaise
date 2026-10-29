@@ -768,6 +768,9 @@ type
     procedure SetBypassUsesChain(AValue: Boolean);
     function NewType(AKind: TTypeKind; const AName: string): TTypeDesc;
     procedure RegisterBuiltins;
+    { Define each of ANames as the canonical ^ABase pointer type (the very
+      descriptor a '^Base' spelling resolves to), creating it when absent. }
+    procedure DefinePointerAliases(const ANames: array of string; ABase: TTypeDesc);
   public
     { Note AName as a static var's mangled data label (see FClassVarEmits). }
     procedure NoteClassVarEmit(const AName: string);
@@ -2243,6 +2246,34 @@ begin
   Result := ADecl;
 end;
 
+procedure TSymbolTable.DefinePointerAliases(const ANames: array of string;
+                                            ABase: TTypeDesc);
+var
+  CanonName: string;
+  Sym:       TSymbol;
+  PT:        TTypeDesc;
+  I:         Integer;
+begin
+  CanonName := '^' + ABase.Name;
+  Sym := TScope(FScopeStack.Items[0]).LookupLocal(CanonName);
+  if Sym <> nil then
+    PT := Sym.TypeDesc
+  else
+  begin
+    PT := NewPointerType(CanonName, ABase);
+    Define(TSymbol.Create(CanonName, skType, PT));
+  end;
+  for I := 0 to High(ANames) do
+  begin
+    { Owned by System, like FPC's and Delphi's: a unit that declares its own
+      PInteger takes the flat slot for itself and its users, while the uses
+      chain (System is always in it) still reaches this one. }
+    Sym := TSymbol.Create(ANames[I], skType, PT);
+    Sym.OwningUnit := 'System';
+    Define(Sym);
+  end;
+end;
+
 procedure TSymbolTable.RegisterBuiltins;
 var
   Sym:              TSymbol;
@@ -2303,6 +2334,28 @@ begin
   Define(TSymbol.Create('Float',   skType, FTypeDouble));
   Define(TSymbol.Create('Float32', skType, FTypeSingle));
   Define(TSymbol.Create('Float64', skType, FTypeDouble));
+
+  { System's pointer aliases: P + each builtin type name.  Each is the same
+    type as its ^Base form, so PInteger and ^Integer interchange freely, and
+    the aliases of one type (PInteger, PInt32) share one descriptor.  A unit
+    or program may still declare its own same-named alias (see
+    DefinePointerAliases).  The classic names among them (PInteger, PCardinal,
+    PSmallInt, PWord, PQWord, PPtrUInt, PSingle, PDouble) move to
+    ClassicPascalTypes together with their base names when those builtins are
+    retired (docs/type-standardisation-design.adoc, D8). }
+  DefinePointerAliases(['PInt32', 'PInteger'], FTypeInteger);
+  DefinePointerAliases(['PUInt32', 'PCardinal'], FTypeUInt32);
+  DefinePointerAliases(['PInt64', 'PInt'], FTypeInt64);
+  DefinePointerAliases(['PUInt64', 'PUInt', 'PQWord', 'PPtrUInt'], FTypeUInt64);
+  DefinePointerAliases(['PInt16', 'PSmallInt'], FTypeSmallInt);
+  DefinePointerAliases(['PUInt16', 'PWord'], FTypeWord);
+  DefinePointerAliases(['PUInt8', 'PByte'], FTypeByte);
+  DefinePointerAliases(['PInt8'], FTypeInt8);
+  DefinePointerAliases(['PBoolean'], FTypeBoolean);
+  DefinePointerAliases(['PFloat64', 'PFloat', 'PDouble'], FTypeDouble);
+  DefinePointerAliases(['PFloat32', 'PSingle'], FTypeSingle);
+  DefinePointerAliases(['PPointer'], FTypePointer);
+  DefinePointerAliases(['PPChar'], FTypePChar);
 
   { TObject — root of the class hierarchy; no fields, no parent }
   TObjectDesc := NewClassType('TObject');

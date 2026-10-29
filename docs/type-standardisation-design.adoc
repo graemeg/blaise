@@ -422,6 +422,13 @@ Key points:
   `QWord`, `PtrUInt`, `Single`, `Double`) move into the unit in Phase 6, in
   the same commit that removes them as builtins.  Code that uses the unit
   sees the full classic set at every point in between.
+* Pointer aliases follow their base names.  `System` provides `P` + each
+  builtin name (`PInt32`, `PUInt8`, `PInt`, `PFloat64`, ... and, while those
+  names are builtins, `PInteger`, `PCardinal`, `PSmallInt`, `PWord`, `PQWord`,
+  `PPtrUInt`, `PSingle`, `PDouble`); the unit provides the pointer aliases of
+  its own names (`PLongInt`, `PShortInt`, `PReal`, ...).  Each is the same type
+  as its `^Base` form.  The classic `System` pointer aliases move into the unit
+  in Phase 6, with their base names.
 
 === D9. The C interop false-friend
 

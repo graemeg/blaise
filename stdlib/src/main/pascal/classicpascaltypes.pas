@@ -25,8 +25,10 @@
     Real      is Float64 (it already is, in practice, in FPC and Delphi).
 
   Integer, Cardinal, SmallInt, Word, QWord, PtrUInt, Single and Double are
-  still builtin names, so they are not declared here; they move into this unit
-  when the builtins are retired.  See docs/type-standardisation-design.adoc. }
+  still builtin names, so they are not declared here, nor are their pointer
+  aliases (PInteger, PCardinal, ...), which System provides; they move into
+  this unit when the builtins are retired.  See
+  docs/type-standardisation-design.adoc. }
 
 unit ClassicPascalTypes;
 
@@ -42,6 +44,18 @@ type
   Real = Float64;
   Extended = Float64;
   Comp = Int64;
+
+  { Their pointer aliases -- each the same type as the pointer to the Blaise
+    type it maps to (PLongInt is ^Int32, so it is System's PInt32). }
+  PShortInt = ^ShortInt;
+  PLongInt = ^LongInt;
+  PLongWord = ^LongWord;
+  PNativeInt = ^NativeInt;
+  PNativeUInt = ^NativeUInt;
+  PPtrInt = ^PtrInt;
+  PReal = ^Real;
+  PExtended = ^Extended;
+  PComp = ^Comp;
 
 implementation
 

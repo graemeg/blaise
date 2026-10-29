@@ -95,6 +95,10 @@ type
     procedure TestUsesVisibility_GenericFuncBodySeesDeclaringUnitUses;
     { ...while the consumer's own type arguments still resolve. }
     procedure TestUsesVisibility_GenericOverConsumerType;
+    { A loaded unit that declares its own PInteger takes the flat slot; a
+      program that does not use it still gets System's PInteger, and one that
+      does gets the unit's. }
+    procedure TestUsesVisibility_UnitShadowsSystemPointerAlias;
   end;
 
 implementation
@@ -1120,6 +1124,69 @@ const
 begin
   AssertEquals('type arguments declared by the consumer still resolve', '',
     AnalyseUnitsAndProg([VisHelpSrc, VisGenSrc], ProgSrc));
+end;
+
+procedure TMultifileTests.TestUsesVisibility_UnitShadowsSystemPointerAlias;
+const
+  OwnSrc =
+    '''
+        unit VisOwnPtr;
+        interface
+        type
+          PInteger = ^Byte;
+        function Peek(P: PInteger): Integer;
+        implementation
+        function Peek(P: PInteger): Integer;
+        begin
+          Result := P^
+        end;
+        end.
+        ''';
+  MidSrc =
+    '''
+        unit VisPtrMid;
+        interface
+        function MidPeek(): Integer;
+        implementation
+        uses VisOwnPtr;
+        function MidPeek(): Integer;
+        var
+          B: Byte;
+        begin
+          B := 3;
+          Result := Peek(@B)
+        end;
+        end.
+        ''';
+  NotUsingSrc =
+    '''
+        program P;
+        uses VisPtrMid;
+        var
+          I: Integer;
+          Q: PInteger;
+        begin
+          Q := @I;
+          Q^ := MidPeek()
+        end.
+        ''';
+  UsingSrc =
+    '''
+        program P;
+        uses VisOwnPtr;
+        var
+          B: Byte;
+          Q: PInteger;
+        begin
+          Q := @B;
+          B := Peek(Q)
+        end.
+        ''';
+begin
+  AssertEquals('System''s PInteger despite a hidden unit''s own', '',
+    AnalyseUnitsAndProg([OwnSrc, MidSrc], NotUsingSrc));
+  AssertEquals('the used unit''s PInteger wins over System''s', '',
+    AnalyseUnitsAndProg([OwnSrc], UsingSrc));
 end;
 
 initialization

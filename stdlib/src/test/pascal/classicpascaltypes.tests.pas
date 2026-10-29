@@ -30,6 +30,9 @@ type
     procedure TestRealAndExtended_AreFloat64;
     { Comp is a 64-bit integer, as it always was }
     procedure TestComp_IsInt64;
+    { Each classic name has its pointer alias, and it is the same type as
+      the pointer to the modern name it maps to. }
+    procedure TestPointerAliases;
   end;
 
 implementation
@@ -132,6 +135,38 @@ begin
   C := C * 2;
   L := C;
   AssertTrue('Comp holds 64-bit integers', L = 10000000000);
+end;
+
+procedure TClassicPascalTypesTests.TestPointerAliases;
+var
+  L: LongInt;
+  S: ShortInt;
+  W: LongWord;
+  R: Real;
+  PL: PLongInt;
+  PS: PShortInt;
+  PW: PLongWord;
+  PR: PReal;
+  PE: PExtended;
+  PC: PComp;
+  PN: PNativeInt;
+  PNU: PNativeUInt;
+  PPI: PPtrInt;
+  P32: PInt32;
+begin
+  PL := @L; PS := @S; PW := @W; PR := @R;
+  PL^ := -5; PS^ := -6; PW^ := 7; PR^ := 1.5;
+  AssertEquals('PLongInt', -5, L);
+  AssertEquals('PShortInt', -6, S);
+  AssertEquals('PLongWord', 7, W);
+  AssertTrue('PReal', R = 1.5);
+  P32 := PL;          { PLongInt is ^Int32 }
+  PE := PR;           { PExtended and PReal are ^Float64 }
+  AssertEquals('via PInt32', -5, P32^);
+  AssertTrue('via PExtended', PE^ = 1.5);
+  PC := nil; PN := nil; PNU := nil; PPI := nil;
+  AssertTrue('remaining aliases declared',
+    (PC = nil) and (PN = nil) and (PNU = nil) and (PPI = nil));
 end;
 
 initialization

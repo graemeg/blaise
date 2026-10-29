@@ -47,6 +47,12 @@ type
     procedure TestSemantic_FreeMem_IsCallable;
     procedure TestSemantic_Deref_ResolvedType;
     procedure TestSemantic_PointerWrite_AcceptsMatchingType;
+    { System's pointer aliases (PInteger, PByte, PInt64, ...) need no uses
+      entry, and each is the very type its ^Base spelling names. }
+    procedure TestSemantic_SystemPointerAliases_BaseTypes;
+    procedure TestSemantic_SystemPointerAlias_IsCaretType;
+    { A program or unit may still declare its own same-named alias. }
+    procedure TestSemantic_SystemPointerAlias_Redeclarable;
 
     { ------------------------------------------------------------------ }
     { BUG-035 — unsupported memory-builtin forms must be rejected cleanly }
@@ -319,6 +325,102 @@ begin
     PtrDesc := TPointerTypeDesc(Decl.ResolvedType);
     AssertNotNull('Typed pointer should have BaseType', PtrDesc.BaseType);
     AssertEquals('BaseType should be Integer', 'Integer', PtrDesc.BaseType.Name);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPointerTests.TestSemantic_SystemPointerAliases_BaseTypes;
+const
+  Src =
+    '''
+    program P;
+    var
+      A: PInteger; B: PCardinal; C: PByte; D: PWord; E: PSmallInt;
+      F: PInt64; G: PUInt64; H: PQWord; I: PBoolean; J: PDouble;
+      K: PSingle; L: PPointer; M: PInt8; N: PInt16; O: PInt32;
+      Q: PUInt8; R: PUInt16; S: PUInt32; T: PPChar; U: PPtrUInt;
+      V: PInt; W: PUInt; X: PFloat; Y: PFloat32; Z: PFloat64;
+    begin
+    end.
+    ''';
+  Bases: array[0..24] of string = ('Integer', 'UInt32', 'Byte', 'Word',
+    'SmallInt', 'Int64', 'UInt64', 'UInt64', 'Boolean', 'Double', 'Single',
+    'Pointer', 'Int8', 'SmallInt', 'Integer', 'Byte', 'Word', 'UInt32',
+    'PChar', 'UInt64', 'Int64', 'UInt64', 'Double', 'Single', 'Double');
+var
+  Prog: TProgram;
+  Decl: TVarDecl;
+  I:    Integer;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    for I := 0 to High(Bases) do
+    begin
+      Decl := TVarDecl(Prog.Block.Decls[I]);
+      AssertTrue(Decl.TypeName + ' is a typed pointer',
+        Decl.ResolvedType is TPointerTypeDesc);
+      AssertEquals(Decl.TypeName + ' base type', Bases[I],
+        TPointerTypeDesc(Decl.ResolvedType).BaseType.Name);
+    end;
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPointerTests.TestSemantic_SystemPointerAlias_IsCaretType;
+const
+  Src =
+    '''
+    program P;
+    var
+      A: PInteger;
+      B: ^Integer;
+      C: PCardinal;
+      D: PUInt32;
+    begin
+      A := B;
+      B := A;
+      C := D
+    end.
+    ''';
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    AssertTrue('PInteger and ^Integer are one type',
+      TVarDecl(Prog.Block.Decls[0]).ResolvedType =
+      TVarDecl(Prog.Block.Decls[1]).ResolvedType);
+    AssertTrue('PCardinal and PUInt32 are one type',
+      TVarDecl(Prog.Block.Decls[2]).ResolvedType =
+      TVarDecl(Prog.Block.Decls[3]).ResolvedType);
+  finally
+    Prog.Free();
+  end;
+end;
+
+procedure TPointerTests.TestSemantic_SystemPointerAlias_Redeclarable;
+const
+  Src =
+    '''
+    program P;
+    type
+      PInteger = ^Integer;
+      PByte = ^Integer;
+    var
+      A: PInteger;
+      B: PByte;
+    begin
+    end.
+    ''';
+var
+  Prog: TProgram;
+begin
+  Prog := AnalyseSrc(Src);
+  try
+    AssertEquals('own PByte wins', 'Integer',
+      TPointerTypeDesc(TVarDecl(Prog.Block.Decls[1]).ResolvedType).BaseType.Name);
   finally
     Prog.Free();
   end;

@@ -1477,6 +1477,9 @@ begin
 end;
 
 constructor TSemanticAnalyser.Create;
+var
+  Scope: TScope;
+  I:     Integer;
 begin
   inherited Create();
   FTable                := TSymbolTable.Create();
@@ -1537,6 +1540,14 @@ begin
   FAnonMethodCount      := 0;
   FEnvTypeCount         := 0;
   FLoopDepth            := 0;
+  { The builtin table owns some of System's names (its pointer aliases).  Index
+    them under System as RegisterUnitIface does for a loaded unit, so the uses
+    chain still reaches them after a unit's own same-named type takes the
+    flat slot. }
+  Scope := FTable.GlobalScope();
+  for I := 0 to Scope.SymbolCount() - 1 do
+    if (Scope.SymbolAt(I) <> nil) and SameText(Scope.SymbolAt(I).OwningUnit, 'System') then
+      RegisterUnitSymbol('System', Scope.SymbolAt(I));
 end;
 
 destructor TSemanticAnalyser.Destroy;

@@ -30,6 +30,8 @@ type
     procedure TestRun_AddrOfVarParam_IsCallersVariable;
     procedure TestRun_CastToUnitLocalPointerType;
     procedure TestRun_Pointer_GetMem_WriteRead_FreeMem;
+    { System's pointer aliases read and write through, with no uses clause. }
+    procedure TestRun_SystemPointerAliases;
     procedure TestRun_Pointer_TypedPointer_Deref;
     procedure TestRun_Pointer_NilCheck;
     procedure TestRun_PCharSubscript_ChrAssignment;
@@ -496,6 +498,28 @@ const
       WriteLn(D)
     end.
     ''';
+
+procedure TE2EPointersTests.TestRun_SystemPointerAliases;
+const
+  Src = '''
+    program P;
+    var
+      I: Integer; B: Byte; W: Word; L: Int64; D: Double; F: Boolean;
+      PI: PInteger; PB: PByte; PW: PWord; PL: PInt64; PD: PDouble;
+      PF: PBoolean; PP: PPointer; Raw: Pointer;
+    begin
+      PI := @I; PB := @B; PW := @W; PL := @L; PD := @D; PF := @F;
+      PI^ := -7; PB^ := 200; PW^ := 60000; PL^ := 5000000000; PD^ := 2.5;
+      PF^ := True;
+      Raw := PI; PP := @Raw;
+      WriteLn(I, ' ', B, ' ', W, ' ', L, ' ', D:0:1, ' ', F, ' ',
+        PInteger(PP^)^)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src, '-7 200 60000 5000000000 2.5 True -7' + LineEnding, 0);
+end;
 
 procedure TE2EPointersTests.TestRun_Pointer_GetMem_WriteRead_FreeMem;
 var Output: string; RCode: Integer;
