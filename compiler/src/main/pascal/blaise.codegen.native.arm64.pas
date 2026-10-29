@@ -5559,6 +5559,22 @@ begin
       EmitCapturedLoad(TIdentExpr(AExpr));
       Exit;
     end;
+    { A 1- or 2-byte integer is loaded at its declared width and sign, as a
+      captured one is (EmitCapturedLoad).  Its variable has an 8-byte slot, but
+      a store through a pointer (P := @V; P^ := -6) writes only the declared
+      width, so a whole-slot read kept the stale upper bytes: Int8 -6 read back
+      as 250.  The write cannot be re-widened where it happens (the pointer may
+      alias anything), so the read is made exact instead. }
+    if (AExpr.ResolvedType <> nil) and IsIntFam(AExpr.ResolvedType) and
+       (AExpr.ResolvedType.RawSize() <= 2) then
+    begin
+      if TIdentExpr(AExpr).ParamMode = pmVar then
+        EmitLoadSlot('x0', TIdentExpr(AExpr).Name)   { slot holds the address }
+      else
+        EmitSlotAddr('x0', TIdentExpr(AExpr).Name);
+      EmitElemLoad(AExpr.ResolvedType);
+      Exit;
+    end;
     EmitLoadSlot('x0', TIdentExpr(AExpr).Name);
     if TIdentExpr(AExpr).ParamMode = pmVar then
       Self.Emit(#9'ldr x0, [x0]');   { var param: slot holds the address }

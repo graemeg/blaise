@@ -32,6 +32,11 @@ type
     procedure TestRun_Pointer_GetMem_WriteRead_FreeMem;
     { System's pointer aliases read and write through, with no uses clause. }
     procedure TestRun_SystemPointerAliases;
+    { A 1- or 2-byte integer written through a pointer reads back at its own
+      width and sign.  The variable's 8-byte slot was read whole, so the
+      narrow store left stale upper bytes: Int8 -6 read as 250, SmallInt -300
+      as 65236 -- globals, locals and var params alike. }
+    procedure TestRun_NarrowIntThroughPointer_ReadsBack;
     procedure TestRun_Pointer_TypedPointer_Deref;
     procedure TestRun_Pointer_NilCheck;
     procedure TestRun_PCharSubscript_ChrAssignment;
@@ -498,6 +503,49 @@ const
       WriteLn(D)
     end.
     ''';
+
+procedure TE2EPointersTests.TestRun_NarrowIntThroughPointer_ReadsBack;
+const
+  Src = '''
+    program P;
+    var
+      A: Int8; B: SmallInt; C: Byte; D: Word;
+      PA: ^Int8; PB: ^SmallInt; PC: PByte; PD: PWord;
+    procedure Poke(var X: Int8; var Y: SmallInt);
+    var
+      QX: ^Int8; QY: ^SmallInt;
+    begin
+      QX := @X; QY := @Y;
+      QX^ := -9; QY^ := -400;
+      WriteLn('var ', X, ' ', Y)
+    end;
+    procedure Loc();
+    var
+      LA: Int8; LB: SmallInt; QA: ^Int8; QB: ^SmallInt;
+    begin
+      LA := 1; LB := 1;
+      QA := @LA; QB := @LB;
+      QA^ := -6; QB^ := -300;
+      WriteLn('local ', LA, ' ', LB, ' ', LA + LB, ' ', LA < 0);
+      Poke(LA, LB);
+      WriteLn('after ', LA, ' ', LB)
+    end;
+    begin
+      A := 1; B := 1; C := 255; D := 65535;
+      PA := @A; PB := @B; PC := @C; PD := @D;
+      PA^ := -6; PB^ := -300; PC^ := 7; PD^ := 8;
+      WriteLn('global ', A, ' ', B, ' ', C, ' ', D, ' ', Int64(A) * 2);
+      Loc()
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit end;
+  AssertRunsOnAll(Src,
+    'global -6 -300 7 8 -12' + LineEnding +
+    'local -6 -300 -306 True' + LineEnding +
+    'var -9 -400' + LineEnding +
+    'after -9 -400' + LineEnding, 0);
+end;
 
 procedure TE2EPointersTests.TestRun_SystemPointerAliases;
 const
