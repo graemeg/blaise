@@ -15,7 +15,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, uUnitLoader, cp.test.harness;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, uUnitLoader, cp.test.harness, Contnrs;
 
 type
   TUnitTests = class(TTestCase)

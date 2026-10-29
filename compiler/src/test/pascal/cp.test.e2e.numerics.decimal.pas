@@ -851,7 +851,7 @@ begin
   { The exact path exposes the binary tail — it must NOT equal a clean 0.1. }
   AssertTrue('compile+run', CompileAndRunWithRTL(
     '''
-    program P; uses Numerics.Decimal;
+    program P; uses SysUtils, Numerics.Decimal;
     var A, Clean: TDecimal;
     begin
       A := DecFromFloatExact(0.1);

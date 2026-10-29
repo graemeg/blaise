@@ -26,7 +26,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing, uStrCompat,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, Contnrs;
 
 type
   TOperatorTests = class(TTestCase)

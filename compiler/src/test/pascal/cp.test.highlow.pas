@@ -21,7 +21,7 @@ interface
 
 uses
   blaise.testing, cp.test.e2e.base,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, SysUtils;
 
 type
   THighLowTests = class(TTestCase)

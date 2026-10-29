@@ -33,7 +33,7 @@ unit blaise.codegen.arcshapes;
 interface
 
 uses
-  Classes, SysUtils, uAST, uSymbolTable;
+  Classes, SysUtils, contnrs, uAST, uSymbolTable;
 
 type
   TConstArgMode = (camPin, camBorrowed, camConsume);

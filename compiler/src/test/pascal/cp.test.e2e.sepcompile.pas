@@ -31,7 +31,7 @@ interface
 
 uses
   classes, sysutils, process, streams, blaise.testing,
-  cp.test.e2e.base, blaise.codegen.target;
+  cp.test.e2e.base, blaise.codegen.target, uStrCompat;
 
 type
   TSepCompileTests = class(TE2ETestCase)
@@ -304,6 +304,9 @@ type
       array[@boolean] of integer: base not found" on every second build). }
     procedure TestIncrementalRebuild_TypeIndexedArrayAlias_Warm;
     procedure TestIncrementalRebuild_NestedPointerAlias_Warm;
+    { Editing a unit rebuilds the cached unit that depends on it.  umid once
+      named ubase's TBag without using ubase (the "leaked" dependency); that
+      is now rejected (GH #248), so umid uses ubase. }
     procedure TestIncrementalRebuild_LeakedDependencyEdited;
     procedure TestIncrementalRebuild_NoFinalNewline_StaysCached;
     procedure TestIncrementalRebuild_CtorIdentity_Warm;
@@ -423,6 +426,21 @@ type
     { The same chain with the leaf's cached object deleted: an impl-only dep
       with source but no object was dropped from the link outright. }
     procedure TestIncrementalRebuild_MissingImplOnlyDepObject_Warm;
+    { GH #248: a program that names a type of a unit it does not use (only a
+      used unit uses it) is rejected, cold and with the units cached; the
+      same program with the unit added to its uses compiles and runs. }
+    procedure TestUsesVisibility_TransitiveType_ColdAndWarm;
+    { A generic body binds the names of its DECLARING unit's uses, not
+      same-named declarations of the program that instantiates it.  The
+      program's own Hello/Greet silently replaced the unit's in the instance. }
+    procedure TestGenericBody_NotCapturedByConsumer_ColdAndWarm;
+    { A generic whose body names an implementation-uses unit of its declaring
+      unit, instantiated by a program that uses neither, from source and from
+      the cached interface. }
+    procedure TestGenericBody_ImplUsesOfDeclaringUnit_Warm;
+    { The consumer's type argument shares its name with a type the generic's
+      declaring unit can see: the instance must use the CONSUMER's type. }
+    procedure TestGenericBody_TypeArgShadowsDeclaringUnitName;
   end;
 
 implementation
@@ -4192,6 +4210,7 @@ const
     '''
     unit umid;
     interface
+    uses ubase;
     type
       TLinker = class
         function Collect(ADest: TBag): Integer;
@@ -6427,6 +6446,347 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('build2 run exit code', 0, Rc);
   AssertEquals('build2 stdout', 'arm x' + #10, Captured)
+end;
+
+const
+  VisTypesUnitSrc =
+    '''
+    unit VisTypes;
+    interface
+    type
+      TUnitRec = record
+        One: Integer;
+      end;
+    implementation
+    end.
+    ''';
+  VisBaseUnitSrc =
+    '''
+    unit VisBase;
+    interface
+    uses VisTypes;
+    var
+      Ur: TUnitRec;
+    implementation
+    initialization
+      Ur.One := 1;
+    end.
+    ''';
+
+procedure TSepCompileTests.TestUsesVisibility_TransitiveType_ColdAndWarm;
+const
+  BadSrc =
+    '''
+    program VisBad;
+    uses VisBase;
+    var
+      Pr: TUnitRec;
+    begin
+      Pr.One := 2;
+      WriteLn(Pr.One)
+    end.
+    ''';
+  GoodSrc =
+    '''
+    program VisGood;
+    uses VisBase, VisTypes;
+    var
+      Pr: TUnitRec;
+    begin
+      Pr.One := 2;
+      WriteLn(Pr.One + Ur.One)
+    end.
+    ''';
+var
+  BadPas, GoodPas, Bin, CacheDir, Captured: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  WriteFile(FScratch + '/VisTypes.pas', VisTypesUnitSrc);
+  WriteFile(FScratch + '/VisBase.pas', VisBaseUnitSrc);
+  BadPas   := FScratch + '/visbad.pas';
+  GoodPas  := FScratch + '/visgood.pas';
+  Bin      := FScratch + '/visprog';
+  CacheDir := FScratch + '/units-vis';
+  WriteFile(BadPas, BadSrc);
+  WriteFile(GoodPas, GoodSrc);
+  ForceDirectories(CacheDir);
+
+  Rc := RunBlaise(['--source', BadPas, '--output', Bin,
+                   '--unit-cache', CacheDir, '--unit-path', FScratch], Captured);
+  AssertTrue('cold: rejected (out: ' + Captured + ')', Rc <> 0);
+  AssertTrue('cold: names the missing unit (out: ' + Captured + ')',
+    Pos('declared in unit ''VisTypes''', Captured) >= 0);
+
+  Rc := RunBlaise(['--source', GoodPas, '--output', Bin,
+                   '--unit-cache', CacheDir, '--unit-path', FScratch], Captured);
+  AssertEquals('good build exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Bin, Captured);
+  AssertEquals('good run stdout', '3' + #10, Captured);
+
+  { Units now cached: the bad program must still be rejected. }
+  Rc := RunBlaise(['--source', BadPas, '--output', Bin,
+                   '--unit-cache', CacheDir, '--unit-path', FScratch], Captured);
+  AssertTrue('warm: rejected (out: ' + Captured + ')', Rc <> 0);
+  AssertTrue('warm: names the missing unit (out: ' + Captured + ')',
+    Pos('declared in unit ''VisTypes''', Captured) >= 0)
+end;
+
+procedure TSepCompileTests.TestGenericBody_NotCapturedByConsumer_ColdAndWarm;
+const
+  HelpSrc =
+    '''
+    unit CapHelp;
+    interface
+    const
+      Hello = 'unit-const';
+    function Greet(): string;
+    implementation
+    function Greet(): string;
+    begin
+      Result := 'unit-func'
+    end;
+    end.
+    ''';
+  BoxSrc =
+    '''
+    unit CapBox;
+    interface
+    uses CapHelp;
+    type
+      TCapBox<T> = class
+        function Get(): string;
+      end;
+    function CapGet<T>(const A: T): string;
+    implementation
+    function TCapBox<T>.Get(): string;
+    begin
+      Result := Hello + ' ' + Greet()
+    end;
+    function CapGet<T>(const A: T): string;
+    begin
+      Result := Greet() + ' ' + Hello
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program CapProg;
+    uses CapBox;
+    const
+      Hello = 'PROG-CONST';
+    function Greet(): string;
+    begin
+      Result := 'PROG-FUNC'
+    end;
+    procedure Run();
+    var
+      B: TCapBox<Integer>;
+    begin
+      B := TCapBox<Integer>.Create();
+      WriteLn(B.Get());
+      WriteLn(CapGet<Integer>(1));
+      WriteLn(Hello, ' ', Greet())
+    end;
+    begin
+      Run()
+    end.
+    ''';
+  Expected = 'unit-const unit-func' + #10 + 'unit-func unit-const' + #10 +
+             'PROG-CONST PROG-FUNC' + #10;
+var
+  ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  WriteFile(FScratch + '/CapHelp.pas', HelpSrc);
+  WriteFile(FScratch + '/CapBox.pas', BoxSrc);
+  ProgPas  := FScratch + '/capprog.pas';
+  ProgBin  := FScratch + '/capprog';
+  CacheDir := FScratch + '/units-cap';
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir, '--unit-path', FScratch], Captured);
+  AssertEquals('build1 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build1 stdout', Expected, Captured);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir, '--unit-path', FScratch], Captured);
+  AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build2 stdout', Expected, Captured)
+end;
+
+procedure TSepCompileTests.TestGenericBody_ImplUsesOfDeclaringUnit_Warm;
+const
+  LeafSrc =
+    '''
+    unit IuLeaf;
+    interface
+    const
+      LeafBase = 40;
+    function LeafAdd(N: Integer): Integer;
+    implementation
+    function LeafAdd(N: Integer): Integer;
+    begin
+      Result := N + LeafBase
+    end;
+    end.
+    ''';
+  GenSrc =
+    '''
+    unit IuGen;
+    interface
+    type
+      TIuBox<T> = class
+        FValue: T;
+        function Total(): Integer;
+      end;
+    implementation
+    uses IuLeaf;
+    function TIuBox<T>.Total(): Integer;
+    begin
+      Result := LeafAdd(SizeOf(T)) + LeafBase
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program IuProg;
+    uses IuGen;
+    var
+      B: TIuBox<Int64>;
+    begin
+      B := TIuBox<Int64>.Create();
+      WriteLn(B.Total())
+    end.
+    ''';
+var
+  ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  WriteFile(FScratch + '/IuLeaf.pas', LeafSrc);
+  WriteFile(FScratch + '/IuGen.pas', GenSrc);
+  ProgPas  := FScratch + '/iuprog.pas';
+  ProgBin  := FScratch + '/iuprog';
+  CacheDir := FScratch + '/units-iu';
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir, '--unit-path', FScratch], Captured);
+  AssertEquals('build1 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build1 stdout', '88' + #10, Captured);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir, '--unit-path', FScratch], Captured);
+  AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build2 stdout', '88' + #10, Captured)
+end;
+
+procedure TSepCompileTests.TestGenericBody_TypeArgShadowsDeclaringUnitName;
+const
+  HelpSrc =
+    '''
+    unit TaHelp;
+    interface
+    type
+      TRec = record
+        X: Integer;
+      end;
+    implementation
+    end.
+    ''';
+  BoxSrc =
+    '''
+    unit TaBox;
+    interface
+    uses TaHelp;
+    type
+      TTaBox<T> = class
+        FValue: T;
+        function Size(): Integer;
+      end;
+    function TaSize<T>(const A: T): Integer;
+    implementation
+    function TTaBox<T>.Size(): Integer;
+    var
+      Tmp: T;
+    begin
+      Tmp := FValue;
+      Result := SizeOf(Tmp)
+    end;
+    function TaSize<T>(const A: T): Integer;
+    var
+      Tmp: T;
+    begin
+      Tmp := A;
+      Result := SizeOf(Tmp)
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program TaProg;
+    uses TaBox;
+    type
+      TRec = record
+        A, B, C: Int64;
+      end;
+    var
+      Bx: TTaBox<TRec>;
+      R: TRec;
+    begin
+      Bx := TTaBox<TRec>.Create();
+      Bx.FValue.C := 9;
+      R.C := 4;
+      WriteLn(Bx.Size(), ' ', TaSize<TRec>(R), ' ', Bx.FValue.C)
+    end.
+    ''';
+var
+  ProgPas, ProgBin, CacheDir, Captured: string;
+  Rc: Integer;
+begin
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+  WriteFile(FScratch + '/TaHelp.pas', HelpSrc);
+  WriteFile(FScratch + '/TaBox.pas', BoxSrc);
+  ProgPas  := FScratch + '/taprog.pas';
+  ProgBin  := FScratch + '/taprog';
+  CacheDir := FScratch + '/units-ta';
+  WriteFile(ProgPas, ProgSrc);
+  ForceDirectories(CacheDir);
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir, '--unit-path', FScratch], Captured);
+  AssertEquals('build1 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build1 stdout', '24 24 9' + #10, Captured);
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir, '--unit-path', FScratch], Captured);
+  AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build2 stdout', '24 24 9' + #10, Captured)
 end;
 
 initialization

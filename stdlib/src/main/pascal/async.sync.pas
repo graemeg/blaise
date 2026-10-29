@@ -34,7 +34,7 @@ unit async.sync;
 interface
 
 uses
-  SysUtils, generics.collections, async.fibers;
+  SysUtils, generics.collections, async.fibers, async.fibers.context;
 
 type
   { A FIFO of parked fibers, guarded by the owning object's lock.  Backed by

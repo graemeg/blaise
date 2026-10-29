@@ -16,7 +16,7 @@ interface
 uses
   Classes, SysUtils, blaise.testing,
   uLexer, uParser, uAST, uSymbolTable, uSemantic,
-  blaise.codegen.native, blaise.codegen.target, cp.test.harness;
+  blaise.codegen.native, blaise.codegen.target, cp.test.harness, Contnrs;
 
 type
   TSetTests = class(TTestCase)

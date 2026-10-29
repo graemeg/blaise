@@ -14,7 +14,7 @@ unit Sockets.Tests;
 interface
 
 uses
-  blaise.testing, Classes, SysUtils, Net.Sockets;
+  blaise.testing, Classes, SysUtils, Net.Sockets, StrUtils;
 
 type
   TSocketsTests = class(TTestCase)

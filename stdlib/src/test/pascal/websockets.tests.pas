@@ -14,7 +14,7 @@ unit WebSockets.Tests;
 interface
 
 uses
-  blaise.testing, Net.WebSockets;
+  blaise.testing, Net.WebSockets, StrUtils;
 
 type
   TWebSocketsTests = class(TTestCase)

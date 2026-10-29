@@ -155,7 +155,7 @@ procedure InstallOpenSSLProvider;
 implementation
 
 uses
-  async.io;
+  async.io, Net.Sockets;
 
 { ---------------------------------------------------------------------------
   libssl / libcrypto bindings  (FUNCTIONS ONLY - opaque structs survive skew)

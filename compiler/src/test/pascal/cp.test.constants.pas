@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils, blaise.testing,
-  uLexer, uParser, uAST, uSemantic, cp.test.harness;
+  uLexer, uParser, uAST, uSemantic, cp.test.harness, uSymbolTable;
 
 type
   TConstTests = class(TTestCase)

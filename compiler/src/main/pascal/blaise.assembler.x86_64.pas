@@ -30,7 +30,7 @@ unit blaise.assembler.x86_64;
 interface
 
 uses
-  SysUtils, Generics.Collections, blaise.container.writer, blaise.elfwriter;
+  SysUtils, Generics.Collections, streams, blaise.container.writer, blaise.elfwriter;
 
 type
   EAssembler = class(Exception);

@@ -49,7 +49,7 @@ unit blaise.linker.elf;
 interface
 
 uses
-  SysUtils, Generics.Collections, streams, blaise.elfreader,
+  SysUtils, Classes, Generics.Collections, streams, blaise.elfreader,
   blaise.container.writer;
 
 type

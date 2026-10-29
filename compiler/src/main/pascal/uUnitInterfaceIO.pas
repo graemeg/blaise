@@ -49,7 +49,7 @@ unit uUnitInterfaceIO;
 interface
 
 uses
-  Classes, SysUtils, streams, strutils, uAST, uUnitInterface, uStrCompat,
+  Classes, SysUtils, contnrs, streams, strutils, uAST, uSymbolTable, uUnitInterface, uStrCompat,
   uLexer, uCompilerId;
 
 const

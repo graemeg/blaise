@@ -12,7 +12,7 @@ interface
 
 uses
   blaise.testing,
-  uLexer, uStrCompat;
+  uLexer, uStrCompat, SysUtils;
 
 type
   TLexerTests = class(TTestCase)

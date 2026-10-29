@@ -7325,9 +7325,8 @@ section is visible only inside that unit. It is never visible to a unit or
 program that `uses` the declaring unit, even when both sit on the same unit
 path. Only `interface`-section declarations are exported.
 
-Cross-unit visibility otherwise follows the standard Pascal transitive rule:
-a unit A sees a name from unit C when A `uses` B and B's *interface* section
-`uses` C. Implementation-section `uses` of B are private to B.
+Interface-section declarations are visible only to code that names the
+declaring unit in its own `uses` clause; see "Uses-clause Visibility" below.
 
 === Rationale
 
@@ -7361,14 +7360,100 @@ the reference and definition sites would disagree.
   Pascal contract nor sound: it let a class declared in one unit's
   implementation section resolve inside an unrelated unit that never used it.
 * *Suppress all cross-unit symbols not reachable through `uses` (interface
-  symbols included), enforcing strict Delphi visibility everywhere.* A larger
-  correctness improvement, but it surfaces every pre-existing missing-`uses`
-  in the tree at once (each its own fix). Deferred; only the
-  implementation-section leak — the concrete defect — is closed here.
+  symbols included), enforcing strict Delphi visibility everywhere.* Deferred
+  at first, because it surfaced every pre-existing missing `uses` in the tree
+  at once. Since adopted; see "Uses-clause Visibility".
 * *Give code generation a dedicated per-unit symbol table instead of a viewing
   context.* Heavier plumbing for the same effect; the analyser already owns one
   shared table that carries every unit's symbols, so scoping the *view* to the
   emitted unit is the smaller, sufficient change.
+
+== Uses-clause Visibility
+
+=== Decision
+
+A unit or program sees the names of a unit only when that unit appears in its
+own `uses` clause. Using unit B does not make visible the units B uses, whether
+B uses them in its interface or its implementation section. The rule applies to
+bare and unit-qualified names alike: `VisTypes.TUnitRec` is rejected unless
+`VisTypes` is in the `uses` clause.
+
+A unit's implementation-section `uses` are visible to that unit's
+implementation, and to nothing else.
+
+A value whose type comes from an unlisted unit may still be used without
+naming the type: a variable, a function result, a field, or a member inherited
+from a base class declared in that unit.
+
+The error names the unit to add:
+
+----
+Unknown type 'TUnitRec' ('TUnitRec' is declared in unit 'VisTypes', which is
+not in the uses clause)
+----
+
+A generic's bodies, signatures and fields resolve their names as written in the
+generic's declaring unit: its own declarations, then its `uses` chain
+(interface and implementation). The program that instantiates a generic
+therefore does not need the generic's dependencies in its own `uses` clause,
+and its own declarations cannot replace the ones the generic was written
+against.
+
+A type argument keeps the meaning it has where the instantiation is written.
+In `TBox<TRec>`, `TRec` is the instantiating program's type, even when the
+generic's declaring unit can also see a `TRec`. A type argument is subject to
+the same visibility rule as any other name: `TList<TUnitRec>` is rejected when
+`TUnitRec`'s unit is not in the `uses` clause.
+
+=== Rationale
+
+This is the Pascal contract that FPC and Delphi implement. A unit's
+dependencies are part of its implementation, not of its public surface. Code
+that relies on a transitive unit compiles only until that intermediate unit
+drops the dependency, and it hides the real dependency from the reader.
+
+The compiler interns every unit's symbols into one shared table. Before this
+rule was enforced, the last-resort lookup layer returned any unit's symbol
+from that table, so a name from any loaded unit resolved (GH #248). The same
+fallback made generic bodies resolve in the instantiating context: a program
+that declared its own `Hello` silently replaced the `Hello` that a generic
+method in another unit was written against, and the instance printed the
+program's value.
+
+`TSymbolTable.Lookup` now refuses a symbol whose owning unit is neither the
+current unit nor in its `uses` chain. While a generic is instantiated, the
+analyser opens a generic view. It first resolves the type arguments in the
+instantiating context and pins them. The lookup order is then: the instance's
+own scopes, the pinned type arguments, the declaring unit, the declaring
+unit's `uses` chain, and only then the instantiating context. Instantiation
+substitutes type arguments into the cloned template by name, so the pins are
+what keep a substituted `TRec` meaning the instantiating program's `TRec`.
+Every type argument is resolved before any type parameter is bound, so an
+argument spelled like one of the generic's own parameters (`TPair<V, K>` inside
+a `K, V` generic) keeps its outer meaning.
+
+Inside a generic view the visibility check does not apply to that later
+fallback. A body reaches its type arguments through it, and an argument may
+name any type: an instance imported from a cached unit carries arguments that
+only the unit which wrote the instantiation could see. The declaring unit's
+own names still take priority, so the fallback cannot replace them.
+
+=== Alternatives considered
+
+* *Keep transitive visibility through interface-section `uses`.* Rejected: it
+  is not how FPC or Delphi behave, so code written for Blaise would not port
+  back, and an intermediate unit's dependency would remain part of its public
+  surface.
+* *Warn instead of reject.* Rejected: a warning keeps the hidden dependency,
+  and with it the generic-capture miscompile, which a warning cannot fix.
+* *Resolve generic bodies only in the declaring unit.* Not possible today:
+  instantiation substitutes type arguments into the cloned template by name,
+  so those names must keep their instantiating-context meaning. Pinning the
+  resolved arguments does that without letting the rest of the instantiating
+  context shadow the template's own names. One ambiguity remains: a template
+  that itself names a type spelled exactly like one of its type arguments now
+  binds the argument. Substituting resolved types instead of names would
+  remove it.
 
 == `static` Class Members — One Keyword, No `class`-Keyword Overload
 

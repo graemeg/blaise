@@ -21,7 +21,7 @@ interface
 
 uses
   SysUtils, Classes, contnrs, blaise.testing,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, uUnitLoader;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, uUnitLoader, cp.test.harness;
 
 type
   TMathTests = class(TTestCase)

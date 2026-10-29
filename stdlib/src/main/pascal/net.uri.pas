@@ -35,7 +35,7 @@ unit Net.Uri;
 interface
 
 uses
-  SysUtils, Generics.Collections;
+  SysUtils, Generics.Collections, StrUtils;
 
 type
   { A parsed URI.  Fields are populated by Parse; ToString reconstructs a URL

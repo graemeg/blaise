@@ -2796,6 +2796,7 @@ const
     'end.' + #10;
   MAIN_SRC =
     'program M;' + #10 +
+    'uses DepU;' + #10 +
     'var X: Integer;' + #10 +
     'begin X := K; end.' + #10;
 var
@@ -2832,6 +2833,7 @@ const
     'end.' + #10;
   MAIN_SRC =
     'program M;' + #10 +
+    'uses DepU;' + #10 +
     'var F: TFoo;' + #10 +
     'begin F := nil; end.' + #10;
 var

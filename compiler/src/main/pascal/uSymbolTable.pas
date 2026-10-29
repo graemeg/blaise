@@ -603,6 +603,17 @@ type
   TUsesChainProvider = class
   public
     function LookupViaUsesChain(const AName: string): TSymbol; virtual;
+    { True when a symbol owned by AUnit may be named by the code being
+      analysed: AUnit is the current unit, is in its uses chain, or (inside a
+      generic instantiation) is visible from the generic's declaring unit or
+      from an enclosing instantiation's context. }
+    function IsUnitVisible(const AUnit: string): Boolean; virtual;
+    { Inside a generic instantiation: True when AUnit is in the uses chain of
+      the generic's declaring unit. }
+    function IsUnitInViewChain(const AUnit: string): Boolean; virtual;
+    { Inside a generic instantiation: the uses-chain walk of the contexts the
+      instantiation was entered from (innermost first). }
+    function LookupViaOuterChains(const AName: string): TSymbol; virtual;
   end;
 
   { A thread's private copy of a symbol table's lookup context.  Incremental
@@ -707,6 +718,19 @@ type
       duplicates ignored. }
     FLeakedDeps: TStringList;
 
+    { Generic view (see SetGenericView).  FGenericViewFloor is the scope-stack
+      depth at which the instantiation was entered; 0 when no view is active. }
+    FGenericViewUnit: string;
+    FGenericViewFloor: Integer;
+    [Unretained] FGenericViewPins: TStringList;  { type-argument spelling ->
+                                                   TSymbol, owned by the analyser }
+    FSuppressVisibility: Integer;  { > 0: GH #248 visibility not enforced }
+
+    { The last plain name Lookup refused because its owning unit is not
+      visible (GH #248); lets the analyser's error say which unit to use. }
+    FLastHiddenName: string;
+    FLastHiddenUnit: string;
+
     FInCodegen: Boolean;             { True while a backend is emitting code.
                                        Disables the Layer-6 impl-private
                                        suppression in Lookup: that guard exists
@@ -801,6 +825,32 @@ type
 
     { Set by a backend for the duration of code emission; see FInCodegen. }
     property InCodegen: Boolean read FInCodegen write FInCodegen;
+
+    { Generic view.  While a generic is instantiated its bodies resolve names
+      as written in the generic's DECLARING unit: the scopes pushed since the
+      instantiation began, then that unit's own symbols, then its uses chain
+      (the provider's active chain).  Only then does lookup fall back to the
+      instantiating context -- the scopes below AFloor and the outer chains --
+      which a body reaches through its type arguments' names.  Without the
+      view a consumer's same-named declaration silently replaced the one the
+      body was written against.  AFloor = 0 clears the view. }
+    procedure SetGenericView(const AUnit: string; AFloor: Integer;
+                             APins: TStringList);
+    property GenericViewUnit: string read FGenericViewUnit;
+    property GenericViewFloor: Integer read FGenericViewFloor;
+    property GenericViewPins: TStringList read FGenericViewPins;
+
+    { While > 0, names of units outside the uses chain resolve as before GH
+      #248.  Used when re-resolving the type arguments of an instance that a
+      cached unit wrote -- that unit already checked them. }
+    property SuppressVisibility: Integer read FSuppressVisibility
+                                         write FSuppressVisibility;
+
+    { See FLastHiddenName.  ClearLastHidden forgets it. }
+    property LastHiddenName: string read FLastHiddenName;
+    property LastHiddenUnit: string read FLastHiddenUnit;
+    procedure ClearLastHidden;
+    procedure NoteHidden(const AName, AUnit: string);
 
     { The units AUnit reached through the uses-chain leak (see FLeakedDeps),
       appended to ADest. }
@@ -943,6 +993,21 @@ begin
   { Base impl never matches; descendants override.  Provided so a
     standalone TSymbolTable (no analyser attached) still behaves
     sensibly if a provider isn't wired. }
+  Result := nil;
+end;
+
+function TUsesChainProvider.IsUnitVisible(const AUnit: string): Boolean;
+begin
+  Result := True;
+end;
+
+function TUsesChainProvider.IsUnitInViewChain(const AUnit: string): Boolean;
+begin
+  Result := False;
+end;
+
+function TUsesChainProvider.LookupViaOuterChains(const AName: string): TSymbol;
+begin
   Result := nil;
 end;
 
@@ -2638,9 +2703,11 @@ function IsPlainIdentName(const AName: string): Boolean; forward;
 function TSymbolTable.Lookup(const AName: string): TSymbol;
 var
   I: Integer;
+  Top: Integer;
   Sym: TSymbol;
   DOU: string;
   Bypass: Boolean;
+  ViewOn: Boolean;
 begin
   { Resolution layers, highest to lowest priority:
 
@@ -2657,8 +2724,66 @@ begin
          (today) any flat-merged unit symbols not caught by layer 3
          or 4.  The flat residue goes away in step 9. }
 
+  Bypass := Self.GetBypassUsesChain();
+  DOU := Self.GetDefineOwningUnit();
+  ViewOn := (FGenericViewFloor > 0) and (FUsesChainProvider <> nil)
+            and not FInCodegen and (Self.ThreadView() = nil);
+  Top := FScopeStack.Count - 1;
+
+  { Generic view (see SetGenericView): the body's own scopes, its declaring
+    unit, then that unit's uses chain -- before anything of the instantiating
+    context. }
+  if ViewOn and not Bypass then
+  begin
+    for I := FScopeStack.Count - 1 downto FGenericViewFloor do
+    begin
+      Result := TScope(FScopeStack.Items[I]).LookupLocal(AName);
+      if Result <> nil then
+      begin
+        if Result.Kind = skModule then
+          Result := nil;
+        Exit;
+      end;
+    end;
+    { The instance's type arguments, as resolved where the instantiation was
+      written.  Instantiation substitutes them into the template by name, so
+      they must keep that meaning here, ahead of the declaring unit's names. }
+    if FGenericViewPins <> nil then
+    begin
+      I := FGenericViewPins.IndexOf(AName);
+      if I >= 0 then
+      begin
+        Result := TSymbol(FGenericViewPins.Objects[I]);
+        Exit;
+      end;
+    end;
+    Top := FGenericViewFloor - 1;
+    Sym := TScope(FScopeStack.Items[0]).LookupLocal(AName);
+    if (Sym <> nil) and (Sym.Kind <> skModule)
+       and SameText(Sym.OwningUnit, FGenericViewUnit) then
+      Result := Sym
+    else
+    begin
+      Result := FUsesChainProvider.LookupViaUsesChain(AName);
+      if (Result = nil) and (Sym <> nil) and (Sym.Kind <> skModule)
+         and (Sym.OwningUnit <> '')
+         and FUsesChainProvider.IsUnitInViewChain(Sym.OwningUnit) then
+        Result := Sym;
+    end;
+    if Result <> nil then
+    begin
+      { The body's code lands in the instantiating unit's object, so that unit
+        now depends on the unit that owns the symbol. }
+      if (Result.OwningUnit <> '') and (DOU <> '')
+         and not SameText(Result.OwningUnit, DOU)
+         and IsPlainIdentName(AName) then
+        FLeakedDeps.Add(DOU + #1 + Result.OwningUnit);
+      Exit;
+    end;
+  end;
+
   { Layer 1. }
-  for I := FScopeStack.Count - 1 downto 1 do
+  for I := Top downto 1 do
   begin
     Result := TScope(FScopeStack.Items[I]).LookupLocal(AName);
     if Result <> nil then
@@ -2679,9 +2804,6 @@ begin
     symbols in a dedicated pool.  Builtins (OwningUnit = '') and
     symbols owned by other units fall through to later layers. }
   Sym := TScope(FScopeStack.Items[0]).LookupLocal(AName);
-  { This thread's lookup context (its own view, if it entered one). }
-  DOU := Self.GetDefineOwningUnit();
-  Bypass := Self.GetBypassUsesChain();
   { Module-name marker at global scope: same rule as layer 1 — the
     name is reserved, resolves to nothing, and blocks lower layers. }
   if (Sym <> nil) and (Sym.Kind = skModule) then
@@ -2701,7 +2823,10 @@ begin
     us back to retrieve a canonical TSymbol. }
   if (FUsesChainProvider <> nil) and not Bypass then
   begin
-    Result := FUsesChainProvider.LookupViaUsesChain(AName);
+    if ViewOn then
+      Result := FUsesChainProvider.LookupViaOuterChains(AName)
+    else
+      Result := FUsesChainProvider.LookupViaUsesChain(AName);
     if Result <> nil then Exit;
   end;
 
@@ -2728,8 +2853,32 @@ begin
     the class's typeinfo, leaving a dangling symbol the linker binds to garbage. }
   if (Sym <> nil) and Sym.IsImplPrivate and (DOU <> '')
      and not Bypass and not FInCodegen
-     and not SameText(Sym.OwningUnit, DOU) then
+     and not SameText(Sym.OwningUnit, DOU)
+     and not (ViewOn and SameText(Sym.OwningUnit, FGenericViewUnit)) then
   begin
+    Result := nil;
+    Exit;
+  end;
+  { Another unit's symbol that the uses chain did not supply.  When its unit
+    is not visible from here at all -- not this unit, not in its uses (GH
+    #248) -- the name does not resolve, exactly as in FPC and Delphi: a unit
+    used only BY a used unit contributes no names.  Remember it so the error
+    can name the unit to add.
+
+    Not inside a generic view: there the fallback is how a body reaches its
+    type arguments, which may name any type -- an instance imported from a
+    cached unit carries arguments that only the unit which wrote it could
+    see.  The view already gives the declaring unit's own names priority. }
+  if (Sym <> nil) and (Sym.OwningUnit <> '') and (DOU <> '') and not ViewOn
+     and (FSuppressVisibility = 0)
+     and (FUsesChainProvider <> nil) and not Bypass and not FInCodegen
+     and (Self.ThreadView() = nil)
+     and not SameText(Sym.OwningUnit, DOU)
+     and IsPlainIdentName(AName)
+     and not FUsesChainProvider.IsUnitVisible(Sym.OwningUnit) then
+  begin
+    FLastHiddenName := AName;
+    FLastHiddenUnit := Sym.OwningUnit;
     Result := nil;
     Exit;
   end;
@@ -2765,6 +2914,26 @@ begin
             (B = Ord('_'))) then
       Exit(False);
   end;
+end;
+
+procedure TSymbolTable.SetGenericView(const AUnit: string; AFloor: Integer;
+                                      APins: TStringList);
+begin
+  FGenericViewUnit := AUnit;
+  FGenericViewFloor := AFloor;
+  FGenericViewPins := APins;
+end;
+
+procedure TSymbolTable.NoteHidden(const AName, AUnit: string);
+begin
+  FLastHiddenName := AName;
+  FLastHiddenUnit := AUnit;
+end;
+
+procedure TSymbolTable.ClearLastHidden;
+begin
+  FLastHiddenName := '';
+  FLastHiddenUnit := '';
 end;
 
 procedure TSymbolTable.LeakedDepsOf(const AUnit: string; ADest: TStringList);

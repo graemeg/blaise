@@ -42,7 +42,7 @@ unit uUnitInterface;
 interface
 
 uses
-  Classes, Contnrs, uAST;
+  Classes, Contnrs, uAST, uSymbolTable;
 
 const
   { Sentinel unit-name values for TQualTypeRef.UnitName. }

@@ -39,7 +39,7 @@ unit uParser;
 interface
 
 uses
-  SysUtils, Classes, contnrs, uLexer, uAST, uStrCompat;
+  SysUtils, Classes, contnrs, uLexer, uAST, uSymbolTable, uStrCompat;
 
 type
   EParseError = class(Exception);

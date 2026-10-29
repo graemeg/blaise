@@ -55,6 +55,9 @@ procedure ParseIntOrUInt64Literal(const S: string;
 
 implementation
 
+uses
+  SysUtils;   { EConvertError }
+
 function StrAt(const S: string; I: Integer): Integer;
 begin
   Result := OrdAt(S, I);

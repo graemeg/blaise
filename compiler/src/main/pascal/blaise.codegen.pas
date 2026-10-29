@@ -26,7 +26,7 @@ unit blaise.codegen;
 interface
 
 uses
-  SysUtils, Classes, uAST, uSymbolTable, uDebugFacts, blaise.codegen.target,
+  SysUtils, Classes, contnrs, uAST, uSymbolTable, uDebugFacts, blaise.codegen.target,
   uStrCompat;
 
 type

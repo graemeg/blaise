@@ -29,7 +29,7 @@ unit uDebugFacts;
 interface
 
 uses
-  Classes, uSymbolTable;
+  Classes, contnrs, uSymbolTable;
 
 type
   { One frame slot: a parameter or local with its resolved %rbp offset.

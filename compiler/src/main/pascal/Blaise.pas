@@ -24,7 +24,7 @@ program Blaise;
 
 uses
   SysUtils, Classes, contnrs,
-  uLexer, uParser, uAST, uSemantic, blaise.codegen,
+  uLexer, uParser, uAST, uSymbolTable, uStrCompat, uSemantic, blaise.codegen,
   blaise.codegen.target,
   blaise.codegen.driver,
   blaise.codegen.native.driver,

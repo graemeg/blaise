@@ -27,6 +27,10 @@ type
     function  MakeSearchPaths: TStringList;
     function  ParseProg(const ASrc: string): TProgram;
     function  ParseUnitSrc(const ASrc: string): TUnit;
+    { Analyse AUnitSrcs (in dependency order) then AProgSrc in one analyser.
+      Returns '' when analysis succeeds, else the semantic error message. }
+    function  AnalyseUnitsAndProg(const AUnitSrcs: array of string;
+                                  const AProgSrc: string): string;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -64,6 +68,33 @@ type
       any program that binds a libc symbol async.io also binds privately (e.g.
       getsockopt) failed to compile. }
     procedure TestSemanticAnalyser_ProgramExternalShadowsUnitPrivateExternal;
+    { ------------------------------------------------------------------ }
+    { Uses-clause visibility (GH #248)                                     }
+    { ------------------------------------------------------------------ }
+    { A program sees only the units in its own uses clause.  A type, const,
+      routine or variable of a unit that is merely used BY a used unit is not
+      visible, bare or unit-qualified -- the same rule FPC and Delphi apply.
+      Blaise resolved them through the flat global symbol table. }
+    procedure TestUsesVisibility_TransitiveTypeRejected;
+    procedure TestUsesVisibility_TransitiveQualifiedTypeRejected;
+    procedure TestUsesVisibility_TransitiveRoutineRejected;
+    procedure TestUsesVisibility_TransitiveConstRejected;
+    { ...and as a generic type argument. }
+    procedure TestUsesVisibility_TransitiveTypeArgRejected;
+    procedure TestUsesVisibility_ImplUsesNotReExported;
+    { A unit's implementation-section uses are visible to that unit's own
+      implementation. }
+    procedure TestUsesVisibility_ImplUsesVisibleInImplementation;
+    { A transitive unit's type may still be USED without being named: through
+      a variable, a function result, or an inherited member. }
+    procedure TestUsesVisibility_TransitiveTypeReachedThroughValues;
+    procedure TestUsesVisibility_InheritedFromTransitiveClass;
+    { A generic body resolves names in its DECLARING unit's uses, so a
+      consumer need not use those units itself. }
+    procedure TestUsesVisibility_GenericBodySeesDeclaringUnitUses;
+    procedure TestUsesVisibility_GenericFuncBodySeesDeclaringUnitUses;
+    { ...while the consumer's own type arguments still resolve. }
+    procedure TestUsesVisibility_GenericOverConsumerType;
   end;
 
 implementation
@@ -130,6 +161,38 @@ begin
   finally
     P.Free();
     L.Free();
+  end;
+end;
+
+function TMultifileTests.AnalyseUnitsAndProg(const AUnitSrcs: array of string;
+                                             const AProgSrc: string): string;
+var
+  Units: TObjectList;
+  Prog:  TProgram;
+  SA:    TSemanticAnalyser;
+  I:     Integer;
+begin
+  Result := '';
+  Units := TObjectList.Create(True);
+  Prog  := nil;
+  SA    := TSemanticAnalyser.Create();
+  try
+    try
+      for I := 0 to High(AUnitSrcs) do
+      begin
+        Units.Add(ParseUnitSrc(AUnitSrcs[I]));
+        SA.AnalyseUnitForExport(TUnit(Units.Items[Units.Count - 1]));
+      end;
+      Prog := ParseProg(AProgSrc);
+      SA.Analyse(Prog);
+    except
+      on E: ESemanticError do
+        Result := E.Message;
+    end;
+  finally
+    SA.Free();
+    Prog.Free();
+    Units.Free();
   end;
 end;
 
@@ -682,6 +745,381 @@ begin
     Prog.Free();
     U.Free();
   end;
+end;
+
+{ ------------------------------------------------------------------ }
+{ Uses-clause visibility (GH #248)                                     }
+{ ------------------------------------------------------------------ }
+
+const
+  VisTypesSrc =
+    '''
+        unit VisTypes;
+        interface
+        type
+          TUnitRec = record
+            One: Integer;
+            Two: Integer;
+          end;
+          TBaseObj = class
+            function Hello(): Integer;
+          end;
+        const
+          VisAnswer = 42;
+        function VisTwice(N: Integer): Integer;
+        implementation
+        function TBaseObj.Hello(): Integer;
+        begin
+          Result := 7
+        end;
+        function VisTwice(N: Integer): Integer;
+        begin
+          Result := N * 2
+        end;
+        end.
+        ''';
+  VisBaseSrc =
+    '''
+        unit VisBase;
+        interface
+        uses VisTypes;
+        type
+          TDerivedObj = class(TBaseObj)
+          end;
+        var
+          Ur: TUnitRec;
+        function MakeRec(): TUnitRec;
+        implementation
+        function MakeRec(): TUnitRec;
+        begin
+          Result.One := 5
+        end;
+        end.
+        ''';
+
+procedure TMultifileTests.TestUsesVisibility_TransitiveTypeRejected;
+const
+  ProgSrc =
+    '''
+        program P;
+        uses VisBase;
+        var
+          Ur: TUnitRec;
+        begin
+          Ur.One := 1
+        end.
+        ''';
+var
+  Msg: string;
+begin
+  Msg := AnalyseUnitsAndProg([VisTypesSrc, VisBaseSrc], ProgSrc);
+  AssertTrue('rejected, naming the type: ' + Msg, Pos('TUnitRec', Msg) >= 0);
+  AssertTrue('names the unit to add to uses: ' + Msg,
+    Pos('declared in unit ''VisTypes''', Msg) >= 0);
+  AssertTrue('mentions the uses clause: ' + Msg,
+    Pos('not in the uses clause', Msg) >= 0);
+end;
+
+procedure TMultifileTests.TestUsesVisibility_TransitiveQualifiedTypeRejected;
+const
+  ProgSrc =
+    '''
+        program P;
+        uses VisBase;
+        var
+          R: VisTypes.TUnitRec;
+        begin
+          R.One := 1
+        end.
+        ''';
+var
+  Msg: string;
+begin
+  Msg := AnalyseUnitsAndProg([VisTypesSrc, VisBaseSrc], ProgSrc);
+  AssertTrue('qualified name of an unused unit rejected: ' + Msg,
+    Pos('TUnitRec', Msg) >= 0);
+  AssertTrue('names the unit to add: ' + Msg,
+    Pos('''TUnitRec'' is declared in unit ''VisTypes''', Msg) >= 0);
+end;
+
+procedure TMultifileTests.TestUsesVisibility_TransitiveRoutineRejected;
+const
+  ProgSrc =
+    '''
+        program P;
+        uses VisBase;
+        var
+          N: Integer;
+        begin
+          N := VisTwice(3)
+        end.
+        ''';
+var
+  Msg: string;
+begin
+  Msg := AnalyseUnitsAndProg([VisTypesSrc, VisBaseSrc], ProgSrc);
+  AssertTrue('routine of an unused unit rejected: ' + Msg,
+    Pos('VisTwice', Msg) >= 0);
+end;
+
+procedure TMultifileTests.TestUsesVisibility_TransitiveConstRejected;
+const
+  ProgSrc =
+    '''
+        program P;
+        uses VisBase;
+        var
+          N: Integer;
+        begin
+          N := VisAnswer
+        end.
+        ''';
+var
+  Msg: string;
+begin
+  Msg := AnalyseUnitsAndProg([VisTypesSrc, VisBaseSrc], ProgSrc);
+  AssertTrue('const of an unused unit rejected: ' + Msg,
+    Pos('VisAnswer', Msg) >= 0);
+end;
+
+procedure TMultifileTests.TestUsesVisibility_ImplUsesNotReExported;
+const
+  MidSrc =
+    '''
+        unit VisMid;
+        interface
+        function MidValue(): Integer;
+        implementation
+        uses VisTypes;
+        function MidValue(): Integer;
+        begin
+          Result := VisAnswer
+        end;
+        end.
+        ''';
+  ProgSrc =
+    '''
+        program P;
+        uses VisMid;
+        var
+          N: Integer;
+        begin
+          N := MidValue() + VisTwice(1)
+        end.
+        ''';
+var
+  Msg: string;
+begin
+  Msg := AnalyseUnitsAndProg([VisTypesSrc, MidSrc], ProgSrc);
+  AssertTrue('implementation uses are private to the unit: ' + Msg,
+    Pos('VisTwice', Msg) >= 0);
+end;
+
+procedure TMultifileTests.TestUsesVisibility_ImplUsesVisibleInImplementation;
+const
+  MidSrc =
+    '''
+        unit VisMid;
+        interface
+        function MidValue(): Integer;
+        implementation
+        uses VisTypes;
+        type
+          TLocalBox = record
+            R: TUnitRec;
+          end;
+        var
+          Box: TLocalBox;
+        function MidValue(): Integer;
+        var
+          O: TBaseObj;
+        begin
+          O := TBaseObj.Create();
+          Box.R.One := VisTwice(VisAnswer);
+          Result := Box.R.One + O.Hello()
+        end;
+        end.
+        ''';
+  ProgSrc =
+    '''
+        program P;
+        uses VisMid;
+        var
+          N: Integer;
+        begin
+          N := MidValue()
+        end.
+        ''';
+begin
+  AssertEquals('implementation uses resolve inside the unit', '',
+    AnalyseUnitsAndProg([VisTypesSrc, MidSrc], ProgSrc));
+end;
+
+procedure TMultifileTests.TestUsesVisibility_TransitiveTypeReachedThroughValues;
+const
+  ProgSrc =
+    '''
+        program P;
+        uses VisBase;
+        var
+          N: Integer;
+        begin
+          Ur.One := 1;
+          VisBase.Ur.Two := 2;
+          N := MakeRec().One + Ur.Two
+        end.
+        ''';
+begin
+  AssertEquals('values of a transitive type need no uses entry', '',
+    AnalyseUnitsAndProg([VisTypesSrc, VisBaseSrc], ProgSrc));
+end;
+
+procedure TMultifileTests.TestUsesVisibility_InheritedFromTransitiveClass;
+const
+  ProgSrc =
+    '''
+        program P;
+        uses VisBase;
+        var
+          D: TDerivedObj;
+          N: Integer;
+        begin
+          D := TDerivedObj.Create();
+          N := D.Hello()
+        end.
+        ''';
+begin
+  AssertEquals('inherited member of a transitive base class', '',
+    AnalyseUnitsAndProg([VisTypesSrc, VisBaseSrc], ProgSrc));
+end;
+
+const
+  VisHelpSrc =
+    '''
+        unit VisHelp;
+        interface
+        const
+          HelpBase = 100;
+        function HelpAdd(N: Integer): Integer;
+        implementation
+        function HelpAdd(N: Integer): Integer;
+        begin
+          Result := N + HelpBase
+        end;
+        end.
+        ''';
+  VisGenSrc =
+    '''
+        unit VisGen;
+        interface
+        uses VisHelp;
+        type
+          TGenBox<T> = class
+            FValue: T;
+            function Bumped(): Integer;
+          end;
+        function GenBump<T>(const A: T): Integer;
+        implementation
+        function TGenBox<T>.Bumped(): Integer;
+        begin
+          Result := HelpAdd(HelpBase)
+        end;
+        function GenBump<T>(const A: T): Integer;
+        begin
+          Result := HelpAdd(SizeOf(A))
+        end;
+        end.
+        ''';
+
+procedure TMultifileTests.TestUsesVisibility_TransitiveTypeArgRejected;
+const
+  ProgSrc =
+    '''
+        program P;
+        uses VisBase, VisGen;
+        var
+          B: TGenBox<TUnitRec>;
+        begin
+          B := TGenBox<TUnitRec>.Create()
+        end.
+        ''';
+var
+  Msg: string;
+begin
+  Msg := AnalyseUnitsAndProg([VisTypesSrc, VisBaseSrc, VisHelpSrc, VisGenSrc], ProgSrc);
+  AssertTrue('type argument of an unused unit rejected: ' + Msg,
+    Pos('TUnitRec', Msg) >= 0);
+  AssertTrue('names the unit to add: ' + Msg,
+    Pos('declared in unit ''VisTypes''', Msg) >= 0);
+end;
+
+procedure TMultifileTests.TestUsesVisibility_GenericBodySeesDeclaringUnitUses;
+const
+  ProgSrc =
+    '''
+        program P;
+        uses VisGen;
+        var
+          B: TGenBox<Integer>;
+          N: Integer;
+        begin
+          B := TGenBox<Integer>.Create();
+          N := B.Bumped()
+        end.
+        ''';
+begin
+  AssertEquals('generic class body resolves in its declaring unit', '',
+    AnalyseUnitsAndProg([VisHelpSrc, VisGenSrc], ProgSrc));
+end;
+
+procedure TMultifileTests.TestUsesVisibility_GenericFuncBodySeesDeclaringUnitUses;
+const
+  ProgSrc =
+    '''
+        program P;
+        uses VisGen;
+        var
+          N: Integer;
+        begin
+          N := GenBump<Integer>(3)
+        end.
+        ''';
+begin
+  AssertEquals('generic function body resolves in its declaring unit', '',
+    AnalyseUnitsAndProg([VisHelpSrc, VisGenSrc], ProgSrc));
+end;
+
+procedure TMultifileTests.TestUsesVisibility_GenericOverConsumerType;
+const
+  ProgSrc =
+    '''
+        program P;
+        uses VisGen;
+        type
+          TProgRec = record
+            A: Integer;
+          end;
+        procedure Run();
+        type
+          TLocalRec = record
+            B: Integer;
+          end;
+        var
+          B1: TGenBox<TProgRec>;
+          B2: TGenBox<TLocalRec>;
+          N: Integer;
+        begin
+          B1 := TGenBox<TProgRec>.Create();
+          B2 := TGenBox<TLocalRec>.Create();
+          N := B1.Bumped() + B2.Bumped() + GenBump<TProgRec>(B1.FValue)
+        end;
+        begin
+          Run()
+        end.
+        ''';
+begin
+  AssertEquals('type arguments declared by the consumer still resolve', '',
+    AnalyseUnitsAndProg([VisHelpSrc, VisGenSrc], ProgSrc));
 end;
 
 initialization

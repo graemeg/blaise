@@ -219,6 +219,16 @@ type
                                            source order.  Lookup walks this list right-to-left
                                            ("last in uses wins"); System is the final fallback.
                                            Empty during pure import phases. }
+    FUnitChains:           TStringList;  { owned (case-insensitive) — unit names,
+                                           parallel to FUnitChainLists. }
+    FUnitChainLists:       TObjectList;  { owned — per unit, the uses chain its own
+                                           implementation sees: System, interface
+                                           uses, implementation uses.  A generic
+                                           instantiated elsewhere resolves its body
+                                           against its declaring unit's entry. }
+    FGenericViews:         TObjectList;  { owned — TGenericViewFrame stack, one per
+                                           generic instantiation in progress whose
+                                           declaring unit's chain is active. }
     FEnumMemberIndex:      TStringList;  { owned (case-insensitive, dupAccept) — reverse
                                            index of enum member names.  Strings[I] is a
                                            member name, Objects[I] a TEnumMemberRef giving
@@ -307,9 +317,38 @@ type
       For IsOpenArray params, creates and registers a TOpenArrayTypeDesc. }
     function  ResolveParamType(APar: TMethodParam;
                 ALoc: Integer; ACol: Integer): TTypeDesc;
+    { Each Instantiate* runs its *Core inside the generic view of the
+      template's declaring unit (see EnterGenericView). }
     function  InstantiateGeneric(const ATypeName: string): TRecordTypeDesc;
     function  InstantiateGenericRecord(const ATypeName: string): TRecordTypeDesc;
     function  InstantiateGenericInterface(const ATypeName: string): TInterfaceTypeDesc;
+    function  InstantiateGenericCore(const ATypeName: string): TRecordTypeDesc;
+    function  InstantiateGenericRecordCore(const ATypeName: string): TRecordTypeDesc;
+    function  InstantiateGenericInterfaceCore(const ATypeName: string): TInterfaceTypeDesc;
+    function  InstantiateGenericProcTypeCore(const ATypeName: string): TProceduralTypeDesc;
+    function  InstantiateGenericFuncCore(const AInstName: string): TMethodDecl;
+    function  InstantiateGenericMethodCore(const AOwnerType, AInstName: string): TMethodDecl;
+    { Record the uses chain AUnit's own implementation sees. }
+    procedure RegisterUnitChain(const AUnit: string; AIntfUses, AImplUses: TStringList);
+    { Make ADeclUnit's uses chain the active one and open a generic view of it
+      in the symbol table, so a generic body binds the names its declaring
+      unit binds.  False (and nothing to undo) when ADeclUnit is unknown or a
+      program.  A True result must be paired with LeaveGenericView. }
+    function  EnterGenericView(const ADeclUnit, AInstName: string;
+                               AStrict: Boolean; out AHidden: Boolean): Boolean;
+    procedure LeaveGenericView;
+    { Bind each type parameter to its argument's type in the current scope.
+      Every argument is resolved before any parameter is bound, so an argument
+      spelled like one of the parameters (TPair<V, K> inside a K, V generic)
+      keeps its outer meaning. }
+    procedure BindTypeParams(AParamNames, AArgs: TStringList);
+    { True when AQualifier is the exact name of a unit known to this
+      compilation that the current code may not see (GH #248).  Unknown
+      qualifiers (a namespace spelling such as System.SysUtils) are not
+      judged here. }
+    function  IsHiddenUnitQualifier(const AQualifier: string): Boolean;
+    { The unit-chain walk LookupViaUsesChain does, over AChain. }
+    function  LookupInChain(AChain: TStringList; const AName: string): TSymbol;
     { Generic procedural-type instantiation: resolves 'TGetter<Integer>' on
       demand from a TGenericProcDef template.  Pure type metadata — defines a
       TProceduralTypeDesc symbol, emits nothing. }
@@ -1316,12 +1355,27 @@ type
       Overrides TUsesChainProvider so TSymbolTable.Lookup can call
       us back through the abstract base (step 7). }
     function LookupViaUsesChain(const AName: string): TSymbol; override;
+    function IsUnitVisible(const AUnit: string): Boolean; override;
+    function IsUnitInViewChain(const AUnit: string): Boolean; override;
+    function LookupViaOuterChains(const AName: string): TSymbol; override;
   end;
 
 implementation
 
 uses
   blaise.codegen;
+
+type
+  { One open generic view: the analyser state EnterGenericView replaced. }
+  TGenericViewFrame = class
+  public
+    SavedChain: TStringList;   { the context's uses chain (owned while saved) }
+    SavedUnit:  string;        { the table's previous view unit }
+    SavedFloor: Integer;       { the table's previous view floor }
+    SavedPins:  TStringList;   { the table's previous view pins (not owned) }
+    Pins:       TStringList;   { this view's type-argument pins (owned) }
+    PinSyms:    TObjectList;   { owns the pinned TSymbols }
+  end;
 
 constructor TAnonNestedRoutines.Create(AThunk: TMethodDecl);
 begin
@@ -1446,6 +1500,10 @@ begin
   FGenericMethodTemplates.CaseSensitive := False;
   FCurrentUsesChain     := TStringList.Create();
   FCurrentUsesChain.CaseSensitive := False;
+  FUnitChains           := TStringList.Create();
+  FUnitChains.CaseSensitive := False;
+  FUnitChainLists       := TObjectList.Create(True);
+  FGenericViews         := TObjectList.Create(True);
   FUnitIfaces           := TStringList.Create();
   FUnitIfaces.CaseSensitive := False;
   FUnitSymbols          := TStringList.Create();
@@ -1502,6 +1560,9 @@ begin
   FSparseEnumWarned.Free();
   FUnitSymbols.Free();
   FUnitIfaces.Free();
+  FGenericViews.Free();
+  FUnitChainLists.Free();
+  FUnitChains.Free();
   FCurrentUsesChain.Free();
   FGenericFuncTemplates.Free();
   FGenericMethodTemplates.Free();
@@ -1519,11 +1580,23 @@ begin
 end;
 
 procedure TSemanticAnalyser.SemanticError(const AMsg: string; ALine, ACol: Integer);
+var
+  Msg: string;
 begin
+  Msg := AMsg;
+  { A name that failed only because its unit is not in the uses clause (GH
+    #248): say which unit declares it. }
+  if (FTable <> nil) and (FTable.LastHiddenName <> '')
+     and (Pos(LowerCase(FTable.LastHiddenName), LowerCase(Msg)) >= 0) then
+    Msg := Msg + Format(' (''%s'' is declared in unit ''%s'', which is not in the uses clause)',
+      [FTable.LastHiddenName, FTable.LastHiddenUnit]);
+  { Not cleared here: a probe whose error is caught must not erase the note
+    before the real error is raised.  The hint is only added when the message
+    names the hidden symbol, so a stale note is harmless. }
   if FCurrentUnitName <> '' then
-    raise ESemanticError.Create(Format('%s at line %d col %d in %s', [AMsg, ALine, ACol, FCurrentUnitName]))
+    raise ESemanticError.Create(Format('%s at line %d col %d in %s', [Msg, ALine, ACol, FCurrentUnitName]))
   else
-    raise ESemanticError.Create(Format('%s at line %d col %d', [AMsg, ALine, ACol]));
+    raise ESemanticError.Create(Format('%s at line %d col %d', [Msg, ALine, ACol]));
 end;
 
 procedure TSemanticAnalyser.CheckedRegisterGeneric(ATD: TTypeDecl);
@@ -2962,6 +3035,7 @@ begin
   FGenericSourceUnits.Clear();
   FlushPendingGenericInstances();
   BuildUsesChain(AUnit.UsedUnits);
+  RegisterUnitChain(AUnit.Name, AUnit.UsedUnits, AUnit.ImplUsedUnits);
   FTable.UsesChainProvider := Self;
   { Auto-tag every global Define within this unit's analysis with the
     unit name — populates TSymbol.OwningUnit for the source-compiled-
@@ -3088,6 +3162,12 @@ begin
     suppression); LinkClassMethodImpls needs only the types.  An impl-section
     type that sizes itself on an impl-section const is not currently supported
     and would report "Unknown type" — no codebase unit relies on it. }
+  { From here on the implementation is analysed: its own uses clause joins
+    the chain (it is private to this unit -- never exported). }
+  for I := 0 to AUnit.ImplUsedUnits.Count - 1 do
+    if FCurrentUsesChain.IndexOf(AUnit.ImplUsedUnits.Strings[I]) < 0 then
+      FCurrentUsesChain.Add(AUnit.ImplUsedUnits.Strings[I]);
+
   FTable.DefineImplPrivate := True;
   try
     AnalyseTypeDecls(AUnit.ImplBlock);
@@ -3342,6 +3422,7 @@ var
   Sym:     TSymbol;
 begin
   if AIface = nil then Exit;
+  RegisterUnitChain(AIface.Name, AIface.UsedUnits, AIface.ImplUsedUnits);
   Idx := FUnitIfaces.IndexOf(AIface.Name);
   if Idx >= 0 then
     FUnitIfaces.Objects[Idx] := AIface
@@ -3419,6 +3500,14 @@ begin
   Result := nil;
   if (AUnit = '') or (FTable = nil) then Exit;
 
+  { 0. A unit qualifier must name a unit this code may see (GH #248): the
+        current unit or one in its uses chain.  Naming a unit does not import
+        it. }
+  if IsHiddenUnitQualifier(AUnit) then
+  begin
+    FTable.NoteHidden(AName, AUnit);
+    Exit;
+  end;
   { 1. Per-unit cache: direct keyed retrieval — the symbol AUnit defined.
        This is what disambiguates two units exporting the same name (a
        collision winner is evicted from the flat table but kept here). }
@@ -3464,6 +3553,223 @@ begin
 end;
 
 function TSemanticAnalyser.LookupViaUsesChain(const AName: string): TSymbol;
+begin
+  Result := LookupInChain(FCurrentUsesChain, AName);
+end;
+
+function TSemanticAnalyser.LookupViaOuterChains(const AName: string): TSymbol;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := FGenericViews.Count - 1 downto 0 do
+  begin
+    Result := LookupInChain(TGenericViewFrame(FGenericViews.Items[I]).SavedChain, AName);
+    if Result <> nil then Exit;
+  end;
+end;
+
+function TSemanticAnalyser.IsUnitVisible(const AUnit: string): Boolean;
+var
+  I: Integer;
+  F: TGenericViewFrame;
+begin
+  Result := SameText(AUnit, FCurrentUnitName)
+            or (FCurrentUsesChain.IndexOf(AUnit) >= 0);
+  if Result then Exit;
+  if FTable <> nil then
+    Result := (FTable.GenericViewUnit <> '') and SameText(AUnit, FTable.GenericViewUnit);
+  for I := FGenericViews.Count - 1 downto 0 do
+  begin
+    if Result then Exit;
+    F := TGenericViewFrame(FGenericViews.Items[I]);
+    Result := (F.SavedChain.IndexOf(AUnit) >= 0)
+              or ((F.SavedUnit <> '') and SameText(AUnit, F.SavedUnit));
+  end;
+end;
+
+function TSemanticAnalyser.IsHiddenUnitQualifier(const AQualifier: string): Boolean;
+var
+  Sym: TSymbol;
+begin
+  Result := False;
+  { Inside a generic instantiation qualified names are not judged -- see the
+    visibility note in TSymbolTable.Lookup. }
+  if (FGenericViews.Count > 0) or (FTable.SuppressVisibility > 0) then Exit;
+  if (AQualifier = '') or (FUnitChains.IndexOf(AQualifier) < 0) then Exit;
+  if IsUnitVisible(AQualifier) then Exit;
+  { A type of the same name qualifies its own members. }
+  Sym := FTable.Lookup(AQualifier);
+  Result := (Sym = nil) or (Sym.Kind <> skType);
+end;
+
+function TSemanticAnalyser.IsUnitInViewChain(const AUnit: string): Boolean;
+begin
+  Result := (FGenericViews.Count > 0) and (FCurrentUsesChain.IndexOf(AUnit) >= 0);
+end;
+
+procedure TSemanticAnalyser.RegisterUnitChain(const AUnit: string;
+                                              AIntfUses, AImplUses: TStringList);
+var
+  Chain: TStringList;
+  Idx, I: Integer;
+begin
+  if AUnit = '' then Exit;
+  { FUnitChains and FUnitChainLists are parallel: same index, same unit. }
+  Idx := FUnitChains.IndexOf(AUnit);
+  if Idx >= 0 then
+  begin
+    Chain := TStringList(FUnitChainLists.Items[Idx]);
+    Chain.Clear();
+  end
+  else
+  begin
+    Chain := TStringList.Create();
+    Chain.CaseSensitive := False;
+    FUnitChainLists.Add(Chain);
+    FUnitChains.Add(AUnit);
+  end;
+  if not SameText(AUnit, 'System') then
+    Chain.Add('System');
+  if AIntfUses <> nil then
+    for I := 0 to AIntfUses.Count - 1 do
+      if Chain.IndexOf(AIntfUses.Strings[I]) < 0 then
+        Chain.Add(AIntfUses.Strings[I]);
+  if AImplUses <> nil then
+    for I := 0 to AImplUses.Count - 1 do
+      if Chain.IndexOf(AImplUses.Strings[I]) < 0 then
+        Chain.Add(AImplUses.Strings[I]);
+end;
+
+function TSemanticAnalyser.EnterGenericView(const ADeclUnit, AInstName: string;
+                                            AStrict: Boolean;
+                                            out AHidden: Boolean): Boolean;
+var
+  Idx, I, BrOpen: Integer;
+  F:        TGenericViewFrame;
+  Src:      TStringList;
+  Args:     TStringList;
+  ArgsPart: string;
+  ArgType:  TTypeDesc;
+  PinSym:   TSymbol;
+  SavedHiddenName, SavedHiddenUnit: string;
+begin
+  Result := False;
+  AHidden := False;
+  if (ADeclUnit = '') or (ADeclUnit = '<program>') or (FTable = nil) then Exit;
+  Idx := FUnitChains.IndexOf(ADeclUnit);
+  if Idx < 0 then Exit;
+  F := TGenericViewFrame.Create();
+  F.Pins := TStringList.Create();
+  F.Pins.CaseSensitive := False;
+  F.PinSyms := TObjectList.Create(True);
+  { Resolve the type arguments HERE, where the instantiation was written, before
+    the view changes what their names mean.  Split exactly as the
+    Instantiate*Core routines split them, so the pins match their spellings. }
+  BrOpen := StrPos('<', AInstName);
+  if BrOpen >= 0 then
+  begin
+    ArgsPart := StrCopyFrom(AInstName, BrOpen + 1, Length(AInstName) - BrOpen - 2);
+    Args := TStringList.Create();
+    try
+      while ArgsPart <> '' do
+      begin
+        I := StrPos(',', ArgsPart);
+        if I >= 0 then
+        begin
+          Args.Add(Trim(StrHead(ArgsPart, I)));
+          ArgsPart := Trim(StrCopyTail(ArgsPart, I + 1));
+        end
+        else
+        begin
+          Args.Add(Trim(ArgsPart));
+          ArgsPart := '';
+        end;
+      end;
+      if not AStrict then
+        FTable.SuppressVisibility := FTable.SuppressVisibility + 1;
+      try
+        for I := 0 to Args.Count - 1 do
+        begin
+          if F.Pins.IndexOf(Args.Strings[I]) >= 0 then Continue;
+          SavedHiddenName := FTable.LastHiddenName;
+          SavedHiddenUnit := FTable.LastHiddenUnit;
+          FTable.ClearLastHidden();
+          ArgType := FindTypeOrInstantiate(Args.Strings[I]);
+          if (ArgType <> nil) or (FTable.LastHiddenName = '') then
+            FTable.NoteHidden(SavedHiddenName, SavedHiddenUnit);
+          if ArgType <> nil then
+          begin
+            PinSym := TSymbol.Create(Args.Strings[I], skType, ArgType);
+            F.PinSyms.Add(PinSym);
+            F.Pins.AddObject(Args.Strings[I], PinSym);
+          end
+          else if AStrict and (FTable.LastHiddenName <> '') then
+            { A type argument from a unit this code does not use (GH #248). }
+            AHidden := True;
+        end;
+      finally
+        if not AStrict then
+          FTable.SuppressVisibility := FTable.SuppressVisibility - 1;
+      end;
+    finally
+      Args.Free();
+    end;
+  end;
+  if AHidden then
+  begin
+    F.Pins.Free();
+    F.PinSyms.Free();
+    F.Free();
+    Exit;
+  end;
+  F.SavedChain := FCurrentUsesChain;
+  F.SavedUnit  := FTable.GenericViewUnit;
+  F.SavedFloor := FTable.GenericViewFloor;
+  F.SavedPins  := FTable.GenericViewPins;
+  FGenericViews.Add(F);
+  FCurrentUsesChain := TStringList.Create();
+  FCurrentUsesChain.CaseSensitive := False;
+  Src := TStringList(FUnitChainLists.Items[Idx]);
+  for I := 0 to Src.Count - 1 do
+    FCurrentUsesChain.Add(Src.Strings[I]);
+  FTable.SetGenericView(ADeclUnit, FTable.ScopeDepth, F.Pins);
+  Result := True;
+end;
+
+procedure TSemanticAnalyser.LeaveGenericView;
+var
+  F: TGenericViewFrame;
+begin
+  F := TGenericViewFrame(FGenericViews.Items[FGenericViews.Count - 1]);
+  FCurrentUsesChain.Free();
+  FCurrentUsesChain := F.SavedChain;
+  FTable.SetGenericView(F.SavedUnit, F.SavedFloor, F.SavedPins);
+  F.Pins.Free();
+  F.PinSyms.Free();
+  FGenericViews.Delete(FGenericViews.Count - 1);
+end;
+
+procedure TSemanticAnalyser.BindTypeParams(AParamNames, AArgs: TStringList);
+var
+  K: Integer;
+  Types: TObjectList;
+begin
+  Types := TObjectList.Create(False);
+  try
+    for K := 0 to AParamNames.Count - 1 do
+      Types.Add(FindTypeOrInstantiate(AArgs.Strings[K]));
+    for K := 0 to AParamNames.Count - 1 do
+      if Types.Items[K] <> nil then
+        FTable.Define(TSymbol.Create(AParamNames.Strings[K], skType,
+          TTypeDesc(Types.Items[K])));
+  finally
+    Types.Free();
+  end;
+end;
+
+function TSemanticAnalyser.LookupInChain(AChain: TStringList;
+                                         const AName: string): TSymbol;
 var
   I:        Integer;
   UnitName: string;
@@ -3471,13 +3777,13 @@ var
   Sym:      TSymbol;
 begin
   Result := nil;
-  if FTable = nil then Exit;
+  if (FTable = nil) or (AChain = nil) then Exit;
   { Right-to-left walk = "last in uses wins". }
   FTable.BypassUsesChain := True;
   try
-    for I := FCurrentUsesChain.Count - 1 downto 0 do
+    for I := AChain.Count - 1 downto 0 do
     begin
-      UnitName := FCurrentUsesChain.Strings[I];
+      UnitName := AChain.Strings[I];
 
       { Prefer the per-unit symbol cache — direct keyed lookup, no
         flat-global filtering needed.  Populated by uSemanticImport
@@ -4013,6 +4319,7 @@ var
   Sym:       TSymbol;
   RT:        TRecordTypeDesc;
   RepairedIndices: TStringList;
+  Viewed, Hidden: Boolean;
 begin
   Instances := nil;
   if FCurrentUnit <> nil then
@@ -4073,19 +4380,13 @@ begin
             end;
             ParamNames := TGenericRecordDef(FTable.FindGeneric(BaseName)).ParamNames;
             RT := TRecordTypeDesc(GRI.TypeDesc);
+            Viewed := EnterGenericView(GRI.DefUnitName, GRI.TypeName, False,
+              Hidden);
             FTable.PushScope();
             for K := 0 to ParamNames.Count - 1 do
               FActiveTypeParams.Add(ParamNames.Strings[K]);
             try
-              for K := 0 to ParamNames.Count - 1 do
-              begin
-                ConcrType := FindTypeOrInstantiate(Args.Strings[K]);
-                if ConcrType <> nil then
-                begin
-                  Sym := TSymbol.Create(ParamNames.Strings[K], skType, ConcrType);
-                  FTable.Define(Sym);
-                end;
-              end;
+              BindTypeParams(ParamNames, Args);
               for J := 0 to RepairedIndices.Count - 1 do
               begin
                 MIdx := StrToInt(RepairedIndices.Strings[J]);
@@ -4097,6 +4398,8 @@ begin
               for K := 0 to ParamNames.Count - 1 do
                 FActiveTypeParams.Delete(FActiveTypeParams.Count - 1);
               FTable.PopScope();
+              if Viewed then
+                LeaveGenericView();
             end;
           finally
             Args.Free();
@@ -4167,19 +4470,13 @@ begin
             end;
             ParamNames := TGenericTypeDef(FTable.FindGeneric(BaseName)).ParamNames;
             RT := TRecordTypeDesc(GI.TypeDesc);
+            Viewed := EnterGenericView(GI.DefUnitName, GI.TypeName, False,
+              Hidden);
             FTable.PushScope();
             for K := 0 to ParamNames.Count - 1 do
               FActiveTypeParams.Add(ParamNames.Strings[K]);
             try
-              for K := 0 to ParamNames.Count - 1 do
-              begin
-                ConcrType := FindTypeOrInstantiate(Args.Strings[K]);
-                if ConcrType <> nil then
-                begin
-                  Sym := TSymbol.Create(ParamNames.Strings[K], skType, ConcrType);
-                  FTable.Define(Sym);
-                end;
-              end;
+              BindTypeParams(ParamNames, Args);
               for J := 0 to RepairedIndices.Count - 1 do
               begin
                 MIdx := StrToInt(RepairedIndices.Strings[J]);
@@ -4191,6 +4488,8 @@ begin
               for K := 0 to ParamNames.Count - 1 do
                 FActiveTypeParams.Delete(FActiveTypeParams.Count - 1);
               FTable.PopScope();
+              if Viewed then
+                LeaveGenericView();
             end;
           finally
             Args.Free();
@@ -4778,6 +5077,13 @@ begin
     if StrAt(AName, I) = Ord('.') then DotPos := I;
   if DotPos >= 0 then
   begin
+    { A qualifier naming a unit this code does not use resolves nothing --
+      every fallback below would strip it and bind the bare tail (GH #248). }
+    if IsHiddenUnitQualifier(Copy(AName, 0, DotPos)) then
+    begin
+      FTable.NoteHidden(StrCopyTail(AName, DotPos + 1), Copy(AName, 0, DotPos));
+      Exit(nil);
+    end;
     Sym := ResolveQualified(Copy(AName, 0, DotPos),
                             StrCopyTail(AName, DotPos + 1));
     if (Sym <> nil) and (Sym.Kind = skType) and (Sym.TypeDesc <> nil) then
@@ -5145,7 +5451,120 @@ begin
   end;
 end;
 
+{ The unit that declares generic type ATypeName ('TBox<Integer>' -> TBox's). }
+function GenericTypeBaseName(const ATypeName: string): string;
+var
+  BracPos: Integer;
+begin
+  BracPos := StrPos('<', ATypeName);
+  if BracPos < 0 then
+    Result := ATypeName
+  else
+    Result := StrHead(ATypeName, BracPos);
+end;
+
 function TSemanticAnalyser.InstantiateGeneric(const ATypeName: string): TRecordTypeDesc;
+var
+  Viewed, Hidden: Boolean;
+begin
+  Viewed := EnterGenericView(FTable.GenericDeclUnit(GenericTypeBaseName(ATypeName)), ATypeName, True, Hidden);
+  if Hidden then
+    Exit(nil);
+  try
+    Result := InstantiateGenericCore(ATypeName);
+  finally
+    if Viewed then
+      LeaveGenericView();
+  end;
+end;
+
+function TSemanticAnalyser.InstantiateGenericRecord(const ATypeName: string): TRecordTypeDesc;
+var
+  Viewed, Hidden: Boolean;
+begin
+  Viewed := EnterGenericView(FTable.GenericDeclUnit(GenericTypeBaseName(ATypeName)), ATypeName, True, Hidden);
+  if Hidden then
+    Exit(nil);
+  try
+    Result := InstantiateGenericRecordCore(ATypeName);
+  finally
+    if Viewed then
+      LeaveGenericView();
+  end;
+end;
+
+function TSemanticAnalyser.InstantiateGenericInterface(const ATypeName: string): TInterfaceTypeDesc;
+var
+  Viewed, Hidden: Boolean;
+begin
+  Viewed := EnterGenericView(FTable.GenericDeclUnit(GenericTypeBaseName(ATypeName)), ATypeName, True, Hidden);
+  if Hidden then
+    Exit(nil);
+  try
+    Result := InstantiateGenericInterfaceCore(ATypeName);
+  finally
+    if Viewed then
+      LeaveGenericView();
+  end;
+end;
+
+function TSemanticAnalyser.InstantiateGenericProcType(
+  const ATypeName: string): TProceduralTypeDesc;
+var
+  Viewed, Hidden: Boolean;
+begin
+  Viewed := EnterGenericView(FTable.GenericDeclUnit(GenericTypeBaseName(ATypeName)), ATypeName, True, Hidden);
+  if Hidden then
+    Exit(nil);
+  try
+    Result := InstantiateGenericProcTypeCore(ATypeName);
+  finally
+    if Viewed then
+      LeaveGenericView();
+  end;
+end;
+
+function TSemanticAnalyser.InstantiateGenericFunc(const AInstName: string): TMethodDecl;
+var
+  Viewed, Hidden: Boolean;
+begin
+  Viewed := EnterGenericView(
+    FTable.GenericRoutineDeclUnit(GenericTypeBaseName(AInstName)), AInstName,
+    True, Hidden);
+  if Hidden then
+    Exit(nil);
+  try
+    Result := InstantiateGenericFuncCore(AInstName);
+  finally
+    if Viewed then
+      LeaveGenericView();
+  end;
+end;
+
+function TSemanticAnalyser.InstantiateGenericMethod(
+  const AOwnerType, AInstName: string): TMethodDecl;
+var
+  Viewed, Hidden: Boolean;
+  TemplIdx: Integer;
+  DeclUnit: string;
+begin
+  DeclUnit := '';
+  TemplIdx := FGenericMethodTemplates.IndexOf(
+    AOwnerType + '.' + GenericTypeBaseName(AInstName));
+  if TemplIdx >= 0 then
+    DeclUnit := TMethodDecl(FGenericMethodTemplates.Objects[TemplIdx]).OwningUnit;
+  Viewed := EnterGenericView(DeclUnit, AInstName, True, Hidden);
+  if Hidden then
+    Exit(nil);
+  try
+    Result := InstantiateGenericMethodCore(AOwnerType, AInstName);
+  finally
+    if Viewed then
+      LeaveGenericView();
+  end;
+end;
+
+function TSemanticAnalyser.InstantiateGenericCore(const ATypeName: string): TRecordTypeDesc;
 var
   BracPos:  Integer;
   BaseName: string;
@@ -5578,15 +5997,7 @@ begin
     for K := 0 to Templ.ParamNames.Count - 1 do
       FActiveTypeParams.Add(Templ.ParamNames.Strings[K]);
     try
-      for K := 0 to Templ.ParamNames.Count - 1 do
-      begin
-        ConcrType := FindTypeOrInstantiate(Args.Strings[K]);
-        if ConcrType <> nil then
-        begin
-          Sym := TSymbol.Create(Templ.ParamNames.Strings[K], skType, ConcrType);
-          FTable.Define(Sym);
-        end;
-      end;
+      BindTypeParams(Templ.ParamNames, Args);
       for J := 0 to ClonedCD.Methods.Count - 1 do
       begin
         NewMDecl := TMethodDecl(ClonedCD.Methods.Items[J]);
@@ -5631,7 +6042,7 @@ begin
   end;
 end;
 
-function TSemanticAnalyser.InstantiateGenericRecord(const ATypeName: string): TRecordTypeDesc;
+function TSemanticAnalyser.InstantiateGenericRecordCore(const ATypeName: string): TRecordTypeDesc;
 var
   RPDecl:   TPropertyDecl;
   RPInfo:   TPropertyInfo;
@@ -5868,15 +6279,7 @@ begin
     for K := 0 to Templ.ParamNames.Count - 1 do
       FActiveTypeParams.Add(Templ.ParamNames.Strings[K]);
     try
-      for K := 0 to Templ.ParamNames.Count - 1 do
-      begin
-        ConcrType := FindTypeOrInstantiate(Args.Strings[K]);
-        if ConcrType <> nil then
-        begin
-          Sym := TSymbol.Create(Templ.ParamNames.Strings[K], skType, ConcrType);
-          FTable.Define(Sym);
-        end;
-      end;
+      BindTypeParams(Templ.ParamNames, Args);
       for J := 0 to ClonedRD.Methods.Count - 1 do
       begin
         NewMDecl := TMethodDecl(ClonedRD.Methods.Items[J]);
@@ -5907,7 +6310,7 @@ begin
   end;
 end;
 
-function TSemanticAnalyser.InstantiateGenericInterface(const ATypeName: string): TInterfaceTypeDesc;
+function TSemanticAnalyser.InstantiateGenericInterfaceCore(const ATypeName: string): TInterfaceTypeDesc;
 var
   BracPos:     Integer;
   BaseName:    string;
@@ -6037,7 +6440,7 @@ begin
   end;
 end;
 
-function TSemanticAnalyser.InstantiateGenericProcType(
+function TSemanticAnalyser.InstantiateGenericProcTypeCore(
   const ATypeName: string): TProceduralTypeDesc;
 var
   BracPos:  Integer;
@@ -6131,7 +6534,7 @@ begin
   end;
 end;
 
-function TSemanticAnalyser.InstantiateGenericFunc(const AInstName: string): TMethodDecl;
+function TSemanticAnalyser.InstantiateGenericFuncCore(const AInstName: string): TMethodDecl;
 var
   BracPos:     Integer;
   BaseName:    string;
@@ -6293,13 +6696,7 @@ begin
     for I := 0 to Templ.TypeParams.Count - 1 do
       FActiveTypeParams.Add(Templ.TypeParams.Strings[I]);
     try
-      for I := 0 to Templ.TypeParams.Count - 1 do
-      begin
-        SubstType := FindTypeOrInstantiate(Args.Strings[I]);
-        if SubstType <> nil then
-          FTable.Define(TSymbol.Create(Templ.TypeParams.Strings[I],
-            skType, SubstType));
-      end;
+      BindTypeParams(Templ.TypeParams, Args);
       AnalyseStandaloneDecl(NewMDecl);
     finally
       for I := 0 to Templ.TypeParams.Count - 1 do
@@ -6336,7 +6733,7 @@ begin
   end;
 end;
 
-function TSemanticAnalyser.InstantiateGenericMethod(
+function TSemanticAnalyser.InstantiateGenericMethodCore(
   const AOwnerType, AInstName: string): TMethodDecl;
 { AInstName is the method name with type args, e.g. 'Pick<Integer>'.  Mirrors
   InstantiateGenericFunc but preserves the implicit Self: the instance is
@@ -6496,13 +6893,7 @@ begin
     for I := 0 to Templ.TypeParams.Count - 1 do
       FActiveTypeParams.Add(Templ.TypeParams.Strings[I]);
     try
-      for I := 0 to Templ.TypeParams.Count - 1 do
-      begin
-        SubstType := FindTypeOrInstantiate(Args.Strings[I]);
-        if SubstType <> nil then
-          FTable.Define(TSymbol.Create(Templ.TypeParams.Strings[I],
-            skType, SubstType));
-      end;
+      BindTypeParams(Templ.TypeParams, Args);
       AnalyseMethodDecl(NewMDecl, OwnerRT);
     finally
       for I := 0 to Templ.TypeParams.Count - 1 do

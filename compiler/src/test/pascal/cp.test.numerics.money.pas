@@ -19,7 +19,7 @@ interface
 
 uses
   blaise.testing, strutils,
-  uLexer, uParser, uAST, uSymbolTable, uSemantic, uUnitLoader;
+  uLexer, uParser, uAST, uSymbolTable, uSemantic, uUnitLoader, Contnrs, Classes, SysUtils;
 
 type
   TMoneyIRTests = class(TTestCase)

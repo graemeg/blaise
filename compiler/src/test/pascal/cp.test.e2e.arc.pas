@@ -1928,6 +1928,7 @@ const
     program UnretCast;
     uses Contnrs;
     type
+      PInteger = ^Integer;
       TT = class N: Integer; end;
       TBase = class public [Unretained] F: TT; [Weak] W: TT; end;
       TSub = class(TBase) G: Integer; end;
