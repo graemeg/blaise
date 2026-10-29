@@ -75,7 +75,7 @@ trap 'rm -rf "$WORK"' EXIT
 echo "compiler (stage-1): $STAGE1"
 echo "unit-cache:         $UC"
 
-echo "[1/5] BUILD 1 — compile whole compiler into a FRESH (empty) unit-cache"
+echo "[1/6] BUILD 1 — compile whole compiler into a FRESH (empty) unit-cache"
 set +e
 "$STAGE1" --source compiler/src/main/pascal/Blaise.pas \
   --output "$STAGE2A" --unit-cache "$UC" $UNIT_PATHS \
@@ -109,7 +109,7 @@ restore_edit() { cp "$WORK/edit_unit.bak" "$EDIT_UNIT" 2>/dev/null || true; rm -
 trap restore_edit EXIT
 printf '\n{ warmcache-fixpoint content-edit probe }\n' >> "$EDIT_UNIT"
 
-echo "[2/5] BUILD 2 — edit a dependency unit, then recompile into the SAME cache"
+echo "[2/6] BUILD 2 — edit a dependency unit, then recompile into the SAME cache"
 # Path under test: the edited unit is stale (recompiled from source); its
 # cached dependents must propagate that and recompile too, and unedited
 # dependency units still load from cached .bif/.o.
@@ -137,7 +137,7 @@ fi
 SIZE2=$(file_size "$STAGE2B")
 echo "      build2 ok — stage-2b size = $SIZE2 bytes"
 
-echo "[3/5] size sanity — warm-cache binary must not be drastically smaller"
+echo "[3/6] size sanity — warm-cache binary must not be drastically smaller"
 # A truncated/broken warm-cache rebuild was ~1.9 MB vs a ~2.8 MB clean build.
 # Require stage-2b to be at least 90% of stage-2a's size.
 MIN_SIZE=$(( SIZE1 * 90 / 100 ))
@@ -148,7 +148,7 @@ if [ "$SIZE2" -lt "$MIN_SIZE" ]; then
 fi
 echo "      ok — stage-2b is within 10% of stage-2a"
 
-echo "[4/5] behavioural check — both stage-2 binaries compile + run hello-world"
+echo "[4/6] behavioural check — both stage-2 binaries compile + run hello-world"
 HELLO="$WORK/hello.pas"
 printf 'program hello;\nbegin\n  WriteLn(%s);\nend.\n' "'Hello'" > "$HELLO"
 
@@ -190,7 +190,7 @@ check_binary() {
 check_binary "stage2a" "$STAGE2A"
 check_binary "stage2b" "$STAGE2B"
 
-echo "[5/5] generic-body edit — a warm rebuild must pick up the NEW body"
+echo "[5/6] generic-body edit — a warm rebuild must pick up the NEW body"
 # Every leg above edits a unit and checks the rebuilt binary is CORRECT.  None
 # of them can see this failure mode: a generic's method bodies are cloned and
 # RE-ANALYSED in the CONSUMER, so the monomorphisation is emitted into the
@@ -294,6 +294,93 @@ if [ "$GB_OUT2" != "222" ]; then
   exit 1
 fi
 echo "      ok — warm rebuild picked up the edited generic body (111 -> 222)"
+
+echo "[6/6] impl-only chain edit — a stale impl-only dependency must be rebuilt"
+# A unit reached ONLY through implementation-section uses of a cached unit is
+# collected as a link-only object.  Two levels deep (main -> IOMid -impl->
+# IOHelper -impl-> IOLeaf), the collector found IOLeaf's object stale and
+# dropped it: the unit was neither linked nor recompiled, and the link failed
+# with an undefined symbol.  The compiler has this shape (blaise.codegen.toolkit
+# impl-uses the arm64 backend), so editing the arm64 backend broke every warm
+# rebuild (BUG-20261027-warm-rebuild-arm64-backend-fieldcleanup).  The edit
+# leg above cannot see it: blaise.codegen.driver is reached through interface
+# uses.
+IWORK="$WORK/implonly"
+mkdir -p "$IWORK/src" "$IWORK/cache"
+cat > "$IWORK/src/ioleaf.pas" <<'EOF'
+unit IOLeaf;
+interface
+function LeafVal: Integer;
+implementation
+function LeafVal: Integer;
+begin
+  Result := 42
+end;
+end.
+EOF
+cat > "$IWORK/src/iohelper.pas" <<'EOF'
+unit IOHelper;
+interface
+function HelperVal: Integer;
+implementation
+uses IOLeaf;
+function HelperVal: Integer;
+begin
+  Result := LeafVal() + 1
+end;
+end.
+EOF
+cat > "$IWORK/src/iomid.pas" <<'EOF'
+unit IOMid;
+interface
+function MidVal: Integer;
+implementation
+uses IOHelper;
+function MidVal: Integer;
+begin
+  Result := HelperVal() + 1
+end;
+end.
+EOF
+cat > "$IWORK/src/iomain.pas" <<'EOF'
+program iomain;
+uses IOMid;
+begin
+  WriteLn(MidVal())
+end.
+EOF
+
+io_build() {
+  local out="$1"
+  set +e
+  "$STAGE2A" --source "$IWORK/src/iomain.pas" --output "$out" \
+    --unit-cache "$IWORK/cache" --unit-path "$IWORK/src" \
+    $RT_UNIT_PATHS > "$IWORK/build.log" 2>&1
+  local rc=$?
+  set -e
+  if [ "$rc" -ne 0 ] || [ ! -x "$out" ]; then
+    echo "IMPLONLY_COMPILE_FAIL (exit=$rc)"
+    tail -10 "$IWORK/build.log"
+    exit 1
+  fi
+}
+
+io_build "$IWORK/i1"
+IO_OUT1="$("$IWORK/i1")"
+if [ "$IO_OUT1" != "44" ]; then
+  echo "IMPLONLY_SETUP_FAIL — expected 44 from the cold build, got '$IO_OUT1'"
+  exit 1
+fi
+sed -i.bak 's/Result := 42/Result := 50/' "$IWORK/src/ioleaf.pas"
+rm -f "$IWORK/src/ioleaf.pas.bak"
+io_build "$IWORK/i2"
+IO_OUT2="$("$IWORK/i2")"
+if [ "$IO_OUT2" != "52" ]; then
+  echo "STALE_IMPLONLY_DEP — warm rebuild did not pick up the edited unit"
+  echo "  expected 52 after the edit, got '$IO_OUT2'"
+  exit 1
+fi
+echo "      ok — warm rebuild recompiled the edited impl-only dependency (44 -> 52)"
 
 echo "WARMCACHE_FIXPOINT_OK"
 exit 0

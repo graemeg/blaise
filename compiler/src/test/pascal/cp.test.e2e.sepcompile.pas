@@ -212,6 +212,9 @@ type
       (the compiler rebuilt itself incrementally into a populated cache and
       lost ~880 KB of impl-only-dependency code). }
     procedure TestIncrementalRebuild_ImplOnlyUses_LinksDependency;
+    { Regression (BUG-20261027-warm-rebuild-arm64-backend-fieldcleanup): the
+      impl-only dependency EDITED between builds must be recompiled. }
+    procedure TestIncrementalRebuild_ImplOnlyDepEdited_Recompiles;
     { Regression (BUG-20260918-generic-body-edit-skips-consumer-rebuild):
       editing the BODY of a generic reached through a consumer's
       IMPLEMENTATION-section uses must rebuild that consumer, or it keeps a
@@ -3006,6 +3009,114 @@ begin
   Rc := RunBinary(ProgBin, Captured);
   AssertEquals('build2 run exit code (impl-only dep must be linked)', 0, Rc);
   AssertEquals('build2 stdout', '43' + #10, Captured)
+end;
+
+{ BUG-20261027-warm-rebuild-arm64-backend-fieldcleanup.
+
+  A TWO-level implementation-only chain: MidE impl-uses HelperE, which
+  impl-uses LeafE.  After LeafE is edited, MidE and HelperE are unchanged.
+  MidE loads from its cache, so HelperE is collected as a link-only object,
+  and the collector recursed into LeafE, found its object stale and simply
+  dropped it: LeafE was neither linked nor recompiled, and the link failed
+  with an undefined LeafE symbol.  (In the compiler this is
+  blaise.codegen.toolkit, itself reached link-only, impl-using the arm64
+  backend.)  One level deep, the cached consumer's staleness check already
+  caught it, which is why the single-level test above never saw this. }
+procedure TSepCompileTests.TestIncrementalRebuild_ImplOnlyDepEdited_Recompiles;
+const
+  LeafSrcV1 =
+    '''
+    unit LeafE;
+    interface
+    function LeafVal: Integer;
+    implementation
+    function LeafVal: Integer;
+    begin Result := 42 end;
+    end.
+    ''';
+  LeafSrcV2 =
+    '''
+    unit LeafE;
+    interface
+    function LeafVal: Integer;
+    implementation
+    function LeafVal: Integer;
+    begin Result := 50 end;
+    end.
+    ''';
+  HelperSrc =
+    '''
+    unit HelperE;
+    interface
+    function HelperVal: Integer;
+    implementation
+    uses LeafE;
+    function HelperVal: Integer;
+    begin Result := LeafVal() + 1 end;
+    end.
+    ''';
+  MidSrc =
+    '''
+    unit MidE;
+    interface
+    function MidVal: Integer;
+    implementation
+    uses HelperE;
+    function MidVal: Integer;
+    begin Result := HelperVal() + 1 end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program UseMidE;
+    uses MidE;
+    begin
+      WriteLn(MidVal())
+    end.
+    ''';
+var
+  Dir, LeafPas, ProgPas, ProgBin, CacheDir: string;
+  Captured: string;
+  Rc: Integer;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  Dir := FScratch + '/implonly_edit';
+  ForceDirectories(Dir);
+  LeafPas := Dir + '/leafe.pas';
+  ProgPas := Dir + '/use_mide.pas';
+  ProgBin := Dir + '/use_mide';
+  CacheDir := Dir + '/units';
+  ForceDirectories(CacheDir);
+
+  WriteFile(LeafPas, LeafSrcV1);
+  WriteFile(Dir + '/helpere.pas', HelperSrc);
+  WriteFile(Dir + '/mide.pas', MidSrc);
+  WriteFile(ProgPas, ProgSrc);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir, '--unit-path', Dir], Captured);
+  AssertEquals('build1 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build1 stdout', '44' + #10, Captured);
+
+  WriteFile(LeafPas, LeafSrcV2);
+  Rc := RunBlaise(['--source', ProgPas, '--output', ProgBin,
+                   '--unit-cache', CacheDir, '--unit-path', Dir], Captured);
+  AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(ProgBin, Captured);
+  AssertEquals('build2 run exit code', 0, Rc);
+  AssertEquals('build2 runs the edited impl-only dependency', '52' + #10,
+    Captured)
 end;
 
 { BUG-20260918-generic-body-edit-skips-consumer-rebuild.
