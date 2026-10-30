@@ -204,8 +204,6 @@ in), and give each program its own `--unit-cache`.
      must-fail cases must fail the same way on both ISAs.
      `bench_async_http` is a load benchmark, so request failures under load
      are expected;
-   - the debugger fixtures in `compiler/src/it/` (they only need to compile
-     and run; pdr cannot debug macOS arm64 yet);
    - the three TLS loopback programs (`stdlib/src/test/pascal/*loopback.pas`),
      linked with the default internal linker against Homebrew OpenSSL.  The
      server certificate needs `subjectAltName=DNS:localhost,IP:127.0.0.1`;
