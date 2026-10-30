@@ -1074,9 +1074,13 @@ procedure TArm64Assembler.HandleDirective;
             V := Self.LabelDifference(Sy)
           else
             V := ParseImmediate(Sy);
-          if FL.Mnemonic = '.byte' then FW.AppendByte(FSection, Int32(V))
-          else if FL.Mnemonic = '.hword' then FW.AppendWord(FSection, Int32(V))
-          else if FL.Mnemonic = '.word' then FW.AppendDWord(FSection, Int32(V))
+          if ((FL.Mnemonic = '.byte') and not FieldFits(V, 8)) or
+             ((FL.Mnemonic = '.hword') and not FieldFits(V, 16)) or
+             ((FL.Mnemonic = '.word') and not FieldFits(V, 32)) then
+            LineError(FL.Mnemonic + ' value out of range: ' + IntToStr(V));
+          if FL.Mnemonic = '.byte' then FW.AppendByte(FSection, V)
+          else if FL.Mnemonic = '.hword' then FW.AppendWord(FSection, V)
+          else if FL.Mnemonic = '.word' then FW.AppendDWord(FSection, V)
           else FW.AppendQWord(FSection, V);
         end;
       finally

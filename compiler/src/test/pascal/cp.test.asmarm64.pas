@@ -50,6 +50,9 @@ type
       +-1 MiB, tbz +-32 KiB) is relaxed to the inverted branch over a b,
       instead of encoding a wrapped offset. }
     procedure TestFarConditionalBranches_Relaxed;
+    { A data directive's value must fit its width, read as signed or
+      unsigned; a wider one is an error, not truncated. }
+    procedure TestDataDirective_ValueTooWide_Raises;
     procedure TestBlUndefined_EmitsBranch26;
     procedure TestAdrpAddPair_EmitsPageRelocs;
     procedure TestGotAndTlvRelocs;
@@ -355,6 +358,16 @@ begin
   finally
     F.Free();
   end;
+end;
+
+procedure TArm64AsmTests.TestDataDirective_ValueTooWide_Raises;
+begin
+  AssembleArm64ToBytes('.data' + LineEnding + '.byte 255, -128' + LineEnding +
+    '.hword 65535, -1' + LineEnding + '.word 4294967295, -1' + LineEnding);
+  AssertAsmRaises('.data' + LineEnding + '.byte 256');
+  AssertAsmRaises('.data' + LineEnding + '.hword 65536');
+  AssertAsmRaises('.data' + LineEnding + '.word 4294967296');
+  AssertAsmRaises('.data' + LineEnding + '.word -2147483649');
 end;
 
 procedure TArm64AsmTests.TestBlUndefined_EmitsBranch26;

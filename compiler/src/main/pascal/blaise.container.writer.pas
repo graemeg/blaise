@@ -194,18 +194,25 @@ type
     procedure WriteToFile(const APath: string);
   end;
 
-{ Raise EContainerField unless AVal fits an ABits-bit field (8, 16 or 32),
-  read as signed or unsigned: -1 and $FFFFFFFF both fill a 32-bit field.  A
-  count or an offset that has outgrown its field is an error, not a silent
-  truncation. }
+{ True when AVal fits an ABits-bit field (8, 16 or 32), read as signed or
+  unsigned: -1 and $FFFFFFFF both fill a 32-bit field. }
+function FieldFits(AVal: Int; ABits: Int): Boolean;
+
+{ Raise EContainerField unless FieldFits(AVal, ABits).  A count or an offset
+  that has outgrown its field is an error, not a silent truncation. }
 procedure CheckFieldFits(AVal: Int; ABits: Int);
 
 implementation
 
+function FieldFits(AVal: Int; ABits: Int): Boolean;
+begin
+  Result := (AVal >= -(Int64(1) shl (ABits - 1))) and
+            (AVal <= (Int64(1) shl ABits) - 1);
+end;
+
 procedure CheckFieldFits(AVal: Int; ABits: Int);
 begin
-  if (AVal < -(Int64(1) shl (ABits - 1))) or
-     (AVal > (Int64(1) shl ABits) - 1) then
+  if not FieldFits(AVal, ABits) then
     raise EContainerField.Create(Format(
       'value %d does not fit a %d-bit object-file field', [AVal, ABits]));
 end;

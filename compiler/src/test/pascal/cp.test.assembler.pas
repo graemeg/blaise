@@ -42,6 +42,9 @@ type
     procedure TestBranchUndefined_EmitsReloc;
     procedure TestNoteGnuStack_Present;
     procedure TestUnknownDirective_Raises;
+    { A data directive's value must fit its width, read as signed or
+      unsigned; a wider one is an error, not truncated. }
+    procedure TestDataDirective_ValueTooWide_Raises;
     procedure TestExplicitWidthDataDirectives;
     procedure TestDuplicateLabel_Raises;
     procedure TestRexX_ExtendedIndexImmStore;
@@ -611,6 +614,28 @@ begin
       Raised := True;
   end;
   AssertTrue('unknown directive must raise EAssembler', Raised);
+end;
+
+procedure TAsmEncodingTests.TestDataDirective_ValueTooWide_Raises;
+
+  function Raises(const AAsm: string): Boolean;
+  begin
+    Result := False;
+    try
+      AssembleToBytes('.data' + LineEnding + AAsm + LineEnding);
+    except
+      on E: EAssembler do
+        Result := True;
+    end;
+  end;
+
+begin
+  AssertTrue('in range', not Raises('.byte 255, -128' + LineEnding +
+    '.word 65535, -1' + LineEnding + '.long 4294967295, -1'));
+  AssertTrue('.byte 256', Raises('.byte 256'));
+  AssertTrue('.word 65536', Raises('.word 65536'));
+  AssertTrue('.long 4294967296', Raises('.long 4294967296'));
+  AssertTrue('.long -2147483649', Raises('.long -2147483649'));
 end;
 
 procedure TAsmEncodingTests.TestDuplicateLabel_Raises;

@@ -3052,7 +3052,10 @@ begin
         P := P + 1;
       if P >= Len then break;
       Val := ParseInt(Args, P);
-      AWriter.AppendByte(ASection, Int32(Val));
+      if not FieldFits(Val, 8) then
+        AsmLineError(AParsed.LineNum, AParsed.RawLine,
+          '.byte value out of range: ' + IntToStr(Val));
+      AWriter.AppendByte(ASection, Val);
     end;
     Exit;
   end;
@@ -3068,7 +3071,10 @@ begin
         P := P + 1;
       if P >= Len then break;
       Val := ParseInt(Args, P);
-      AWriter.AppendWord(ASection, Int32(Val));
+      if not FieldFits(Val, 16) then
+        AsmLineError(AParsed.LineNum, AParsed.RawLine,
+          '.word value out of range: ' + IntToStr(Val));
+      AWriter.AppendWord(ASection, Val);
     end;
     Exit;
   end;
@@ -3116,7 +3122,12 @@ begin
       AWriter.AppendDWord(ASection, 0);
     end
     else if DataOp.Kind = opImm then
-      AWriter.AppendDWord(ASection, Int32(DataOp.Imm))
+    begin
+      if not FieldFits(DataOp.Imm, 32) then
+        AsmLineError(AParsed.LineNum, AParsed.RawLine,
+          '.long value out of range: ' + IntToStr(DataOp.Imm));
+      AWriter.AppendDWord(ASection, DataOp.Imm);
+    end
     else
       raise EAssembler.Create('.long: unsupported operand: ' + Args);
     Exit;
