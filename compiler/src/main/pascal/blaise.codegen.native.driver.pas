@@ -189,7 +189,7 @@ var
   Args:     TStringList;
   AsmText:  TStringList;
   Msg:      string;
-  ExitCode: Integer;
+  ExitCode: Int;
 begin
   Result := '';
   { For the native backend the "IR file" already IS the x86-64 assembly the
@@ -288,13 +288,13 @@ end;
 { Little-endian byte readers over a raw byte string (0-based offsets).  Local
   to this unit so they do not collide with the private RdU* in blaise.elfreader
   / blaise.machoreader.  StrAt(S, I) is the 0-based ordinal byte accessor. }
-function DrvU16(const ABuf: string; AOff: Integer): Integer;
+function DrvU16(const ABuf: string; AOff: Int): Int;
 begin
   Result := (StrAt(ABuf, AOff) and $FF)
          or ((StrAt(ABuf, AOff + 1) and $FF) shl 8);
 end;
 
-function DrvU32(const ABuf: string; AOff: Integer): Integer;
+function DrvU32(const ABuf: string; AOff: Int): Int;
 begin
   Result := (StrAt(ABuf, AOff) and $FF)
          or ((StrAt(ABuf, AOff + 1) and $FF) shl 8)
@@ -302,7 +302,7 @@ begin
          or ((StrAt(ABuf, AOff + 3) and $FF) shl 24);
 end;
 
-function DrvU64(const ABuf: string; AOff: Integer): Int64;
+function DrvU64(const ABuf: string; AOff: Int): Int64;
 var Lo, Hi: Int64;
 begin
   Lo := Int64(DrvU32(ABuf, AOff)) and $FFFFFFFF;
@@ -311,8 +311,8 @@ begin
 end;
 
 { NUL-terminated string at a 0-based offset. }
-function DrvStrZ(const ABuf: string; AOff: Integer): string;
-var P, N: Integer;
+function DrvStrZ(const ABuf: string; AOff: Int): string;
+var P, N: Int;
 begin
   Result := '';
   P := AOff;
@@ -332,7 +332,7 @@ end;
 procedure BuildLibSearchDirs(AExtra: TStringList; AOut: TStringList;
   const ATarget: TTargetDesc);
   procedure AddColonList(const AList: string);
-  var Seg: string; K, N, B: Integer;
+  var Seg: string; K, N, B: Int;
   begin
     if AList = '' then Exit;
     Seg := '';
@@ -353,7 +353,7 @@ procedure BuildLibSearchDirs(AExtra: TStringList; AOut: TStringList;
     if (Seg <> '') and (AOut.IndexOf(Seg) < 0) then AOut.Add(Seg);
   end;
 var
-  I: Integer;
+  I: Int;
 begin
   if AExtra <> nil then
     for I := 0 to AExtra.Count - 1 do
@@ -379,9 +379,9 @@ end;
   little-endian ELFCLASS64 shared object or carry no DT_SONAME. }
 function ReadElfSoname(const ABytes: string): string;
 var
-  EType, PhEntSize, PhNum, I: Integer;
+  EType, PhEntSize, PhNum, I: Int;
   PhOff, EntOff, DynOff, DynSz, StrTabVaddr, StrTabOff, DEnt, DTag, DVal: Int64;
-  PType: Integer;
+  PType: Int;
   StrLoad: Int64;
   SonameOff: Int64;
 begin
@@ -452,7 +452,7 @@ end;
   filenames are kept verbatim. }
 function ParseLinkerScript(const AText: string; ATokens: TStringList): Boolean;
 var
-  I, N, B: Integer;
+  I, N, B: Int;
   Tok: string;
   InParen: Boolean;
 begin
@@ -499,7 +499,7 @@ end;
 function FindLibFile(const AName: string; ADirs: TStringList;
   const ATarget: TTargetDesc): string;
 var
-  I: Integer;
+  I: Int;
   Cand: string;
 begin
   Result := '';
@@ -532,7 +532,7 @@ procedure ResolveLibNeeded(const AName: string; ADirs, ANeeded,
 var
   Path, Bytes, Soname, Tok: string;
   Scr: TStringList;
-  J: Integer;
+  J: Int;
 begin
   if AVisited.IndexOf(AName) >= 0 then Exit;
   AVisited.Add(AName);
@@ -609,7 +609,7 @@ end;
 { Comma-join a string list for diagnostics ('ssl, crypto'). }
 function JoinNames(AList: TStringList): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := '';
   if AList = nil then Exit;
@@ -640,7 +640,7 @@ const
 
 function IsCompilerEmittedSymbol(const ASymbol: string): Boolean;
 var
-  I: Integer;
+  I: Int;
   P: string;
 begin
   Result := True;
@@ -658,7 +658,7 @@ end;
   rest.  Returns True when any compiler-emitted symbol was found. }
 function SplitCompilerSymbols(AList, ADest: TStringList): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := False;
   if (AList = nil) or (ADest = nil) then Exit;
@@ -678,7 +678,7 @@ var
   RTLObjs: TStringList;
   LibDirs, Seen: TStringList;
   LibName: string;
-  I: Integer;
+  I: Int;
 begin
   Result := '';
   RTLObjs := TStringList.Create();
@@ -765,10 +765,10 @@ var
   LibDirs, Needed, Visited: TStringList;
   Unresolved: TStringList;
   OurSyms:    TStringList;
-  I: Integer;
+  I: Int;
   EffDynamic: Boolean;
   HasUserLibs: Boolean;
-  Attempt: Integer;
+  Attempt: Int;
   Done: Boolean;
 begin
   Result := '';

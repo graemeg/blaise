@@ -39,7 +39,7 @@ type
   public
     Name: string;
     [Unretained] TypeDesc: TTypeDesc;  { non-owned — symbol table pool }
-    RbpOffset: Integer;
+    RbpOffset: Int;
     IsParam: Boolean;
     IsVarParam: Boolean;
     IsConstParam: Boolean;
@@ -52,7 +52,7 @@ type
       stack slot at HighRbpOffset.  Emitted as LocationExpr=5 'open-array'
       with the companion offset trailing the LocationData. }
     IsOpenArray: Boolean;
-    HighRbpOffset: Integer;
+    HighRbpOffset: Int;
   end;
 
   { One statement-level line marker: the backend emitted LabelName ('.Ldbg_N')
@@ -60,8 +60,8 @@ type
   TDbgLine = class
   public
     LabelName: string;
-    Line: Integer;
-    Col: Integer;
+    Line: Int;
+    Col: Int;
   end;
 
   TDbgFunc = class
@@ -77,7 +77,7 @@ type
     Lines: TObjectList;  { owned TDbgLine }
     constructor Create;
     function AddVar(const AName: string; AType: TTypeDesc;
-                    AOffset: Integer): TDbgVar;
+                    AOffset: Int): TDbgVar;
     function FindVar(const AName: string): TDbgVar;
   end;
 
@@ -100,7 +100,7 @@ begin
 end;
 
 function TDbgFunc.AddVar(const AName: string; AType: TTypeDesc;
-  AOffset: Integer): TDbgVar;
+  AOffset: Int): TDbgVar;
 begin
   Result := TDbgVar.Create();
   Result.Name := AName;
@@ -111,7 +111,7 @@ end;
 
 function TDbgFunc.FindVar(const AName: string): TDbgVar;
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to Vars.Count - 1 do
   begin

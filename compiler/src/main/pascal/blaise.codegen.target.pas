@@ -48,7 +48,7 @@ procedure MakeTarget(AOS: TTargetOS; ACPU: TTargetCPU; out ATarget: TTargetDesc)
 function HostTarget: TTargetDesc;
 
 { Pointer size in bytes for the target (8 for 64-bit, 4 for 32-bit). }
-function PtrSize(const ATarget: TTargetDesc): Integer;
+function PtrSize(const ATarget: TTargetDesc): Int;
 
 { Parse a CLI target identifier of the form "<os>-<cpu>", e.g.
   "linux-x86_64".  Returns False on an unknown/unsupported identifier;
@@ -141,7 +141,7 @@ begin
 {$ENDIF}
 end;
 
-function PtrSize(const ATarget: TTargetDesc): Integer;
+function PtrSize(const ATarget: TTargetDesc): Int;
 begin
   if ATarget.CPU = cpuI386 then
     Result := 4

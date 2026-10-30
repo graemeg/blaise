@@ -80,23 +80,23 @@ const
 type
   TArm64Backend = class(TNativeBackend)
   private
-    FFrame:       TDictionary<string, Integer>;  { local -> POSITIVE byte
+    FFrame:       TDictionary<string, Int>;  { local -> POSITIVE byte
                                                    distance below x29 }
-    FFrameSize:   Integer;
+    FFrameSize:   Int;
     { OPDF debug facts (--debug-opdf), the x86-64 backend's counterpart: the
       emitted label per routine (LowPC), an end label after its final ret
       (HighPC), every named frame slot at its signed x29 offset, and a
       .Ldbg_N label before each statement.  nil when debug info is off. }
     [Unretained] FDbgFacts: TDbgFacts;
     [Unretained] FDbgCur: TDbgFunc;   { facts entry for the routine being emitted }
-    FDbgSeq: Integer;                 { .Ldbg_N label counter }
+    FDbgSeq: Int;                 { .Ldbg_N label counter }
     { enclosing routine while its nested routines are emitted, so
       DbgMarkParams can type a nested routine's captured outer variables }
     [Unretained] FDbgOuterDecl: TMethodDecl;
     FDbgSrcFile: string;              { .pas of the unit being emitted; '' = program }
     FGlobalNames: TStringList;                   { program-level int globals }
     FStrLits:     TStringList;
-    FLabelN:      Integer;
+    FLabelN:      Int;
     FProgramName: string;
     FIsFunction:  Boolean;       { current routine returns a value }
     FResultFloat: Boolean;       { ...and that value is a Double (d0) }
@@ -104,7 +104,7 @@ type
     FExitLabel:   string;        { current routine's epilogue label }
     FBreakLbls:   TStringList;   { innermost-last loop end labels }
     FContLbls:    TStringList;   { innermost-last loop continue labels }
-    FForN:        Integer;       { hidden for-loop end-slot counter }
+    FForN:        Int;       { hidden for-loop end-slot counter }
     FFloatLits:   TStringList;   { .rodata double-literal texts }
     FStrLocals:   TStringList;   { string locals of the current routine —
                                    released at the shared exit label }
@@ -143,7 +143,7 @@ type
                                    through the ordinary class machinery }
     FDynElemHooks: TObjectList;  { borrowed TTypeDesc per generated dyn-array
                                    element hook (__DynElems_<n>) }
-    FDynElemHooksDone: Integer;  { how many of them are already emitted }
+    FDynElemHooksDone: Int;  { how many of them are already emitted }
     FGenericDefUnits: TStringList; { program generic-instance wrappers: Strings
                                    = the template's declaring unit, Objects =
                                    the wrapper TTypeDecl (borrowed) }
@@ -152,7 +152,7 @@ type
                                    deregistered (_WeakClear) at scope exit }
     FObjGlobals:  TStringList;   { class-typed globals — released at program exit }
     FTlvGlobals:  TStringList;   { threadvar globals — Mach-O TLV descriptors }
-    FTlvSize:     TDictionary<string, Integer>;  { per-thread storage bytes }
+    FTlvSize:     TDictionary<string, Int>;  { per-thread storage bytes }
     FGlobalWeak:  TStringList;   { globals bound weak: RTL-unit-owned copies
                                    collapse across per-unit objects (GH #174) }
     FIntfDecls:   TObjectList;   { not owned — program-level interface TTypeDecls }
@@ -163,8 +163,8 @@ type
                                    resolves and cross-unit copies dedup }
     FIntfLocals:  TStringList;   { interface locals (base name) — obj released at exit }
     FIntfGlobals: TStringList;   { interface globals (prefixed base name) }
-    FExcDepth:    Integer;       { active exception frames at emission point }
-    FExcSlotN:    Integer;       { next _excf_N frame slot ordinal }
+    FExcDepth:    Int;       { active exception frames at emission point }
+    FExcSlotN:    Int;       { next _excf_N frame slot ordinal }
     FFinallyBodies: TObjectList; { not owned — TCompoundStmt per frame (nil =
                                    except frame); mirrors the runtime stack }
     FLoopExcDepth: TStringList;  { FExcDepth at each enclosing loop's entry —
@@ -188,17 +188,17 @@ type
     FRefLocals:   TStringList;   { 'reference to' closure locals — the Env half
                                    (+8) is _ClassRelease'd at scope exit (arkRefEnv) }
     FRefGlobals:  TStringList;   { 'reference to' closure program globals }
-    FGlobalSize:  TDictionary<string, Integer>;  { bss size per global }
+    FGlobalSize:  TDictionary<string, Int>;  { bss size per global }
     FFloatNames:  TStringList;   { program-level float globals (parallel
                                    subset of FGlobalNames' world) }
-    FPendingRelCount: Integer;   { live statement-scoped deferred class
+    FPendingRelCount: Int;   { live statement-scoped deferred class
                                    releases (BUG-048/BUG-049) — also the next
                                    free _pendrel_N slot index }
     FPendingRelSyms: array of string;
     { non-nil: the slot holds the ADDRESS of an aggregate of this type (a
       static-array result scratch) whose managed content the flush releases }
     FPendingRelTypes: array of TTypeDesc;
-    FPendRelSlots: Integer;      { _pendrel_N slots this frame has (grows) }
+    FPendRelSlots: Int;      { _pendrel_N slots this frame has (grows) }
                                  { the RTL release routine for each live
                                    _pendrel_N slot (_ClassRelease or
                                    _DynArrayRelease) }
@@ -206,13 +206,13 @@ type
                                    _pendrel slots are zeroed at entry }
     FIndirectSlot: string;       { VIRT_INDIRECT: frame slot holding the
                                    address of the procedural value to call }
-    FJArgN: Integer;             { counter for '__jarg_<n>' jumbo-set
+    FJArgN: Int;             { counter for '__jarg_<n>' jumbo-set
                                    argument snapshots }
-    FStrTransTop: Integer;       { '__strtrans_<n>' park slots in use by the
+    FStrTransTop: Int;       { '__strtrans_<n>' park slots in use by the
                                    calls currently being emitted -- a call
                                    nested in an argument parks ABOVE its
                                    enclosing call's slots }
-    FFretN: Integer;             { counter for '__fret_<n>' closure-result
+    FFretN: Int;             { counter for '__fret_<n>' closure-result
                                    scratch slots (one per call site) }
     FCurEnvCaptured: TStringList; { borrowed: the current routine's
                                    EnvCaptured -- names living in a PACKED env
@@ -305,11 +305,11 @@ type
 
     { ---- frame + operands ---- }
     procedure AddIntfLocal(const AName: string);
-    procedure AddLocal(const AName: string; ASize: Integer);
+    procedure AddLocal(const AName: string; ASize: Int);
     procedure DbgBeginFunc(const ASymbol: string);
     { name ADecl's enclosing routine on its facts entry (nested routines) }
     procedure DbgSetParent(ADecl: TMethodDecl);
-    procedure DbgRecordSlot(const AName: string; AOffset: Integer);
+    procedure DbgRecordSlot(const AName: string; AOffset: Int);
     procedure DbgMarkParams(ADecl: TMethodDecl);
     function  DbgOuterVarType(const AName: string): TTypeDesc;
     procedure DbgStmtLabel(AStmt: TASTStmt);
@@ -320,14 +320,14 @@ type
       (growing the pool when it is full), and flush the pending releases back
       down to a saved mark. }
     procedure ReservePendRelSlots;
-    function StrTransSlot(AIdx: Integer): string;
-    function NextIntArgDest(var ANInt, AStackOff: Integer): string;
+    function StrTransSlot(AIdx: Int): string;
+    function NextIntArgDest(var ANInt, AStackOff: Int): string;
     function IsOwnedClassOperand(AExpr: TASTExpr): Boolean;
     procedure EmitReleaseParkedClass;
     procedure DeferNativeClassRelease;
     function  DeferAggRelease(AType: TTypeDesc): Boolean;
     procedure DeferNativeRelease(const AReleaseSym: string);
-    procedure FlushNativePendingReleases(AMark: Integer);
+    procedure FlushNativePendingReleases(AMark: Int);
     procedure EmitPendRelSlotsZero;
     { Load a captured var's field-access base / method receiver through its
       hidden '_cap_' slot (leg 19).  Returns True when AName was captured. }
@@ -352,15 +352,15 @@ type
     procedure EmitRecAddrToX0(AExpr: TASTExpr);
     procedure EmitRecCallToRret(AExpr: TASTExpr);
     function EmitRecCallToRretSlot(AExpr: TASTExpr): string;
-    function FloatArgIsFloatClass(ADecl: TMethodDecl; AIdx: Integer;
+    function FloatArgIsFloatClass(ADecl: TMethodDecl; AIdx: Int;
       AArg: TASTExpr): Boolean;
     procedure EmitRecCallFieldReadCleanup(ART: TRecordTypeDesc;
       const ATmp: string; AFieldType: TTypeDesc);
     procedure EmitRecTempFieldReleases(ART: TRecordTypeDesc;
-      const ASlot: string; ASpOff: Integer);
+      const ASlot: string; ASpOff: Int);
     procedure EmitPropRecvToX0(AStmt: TFieldAssignment);
     procedure EmitIndexedPropWrite(AProp: TPropertyInfo; const AOwner: string;
-      AOwnerDesc: TTypeDesc; AVSlot: Integer; AIndex, AValue: TASTExpr;
+      AOwnerDesc: TTypeDesc; AVSlot: Int; AIndex, AValue: TASTExpr;
       AStmt: TASTStmt);
     procedure EmitSubscriptPropRecvToX0(AStmt: TStaticSubscriptAssign);
     { Materialise an anonymous-method literal into its hidden 16-byte value slot
@@ -403,11 +403,11 @@ type
       expression yields (Fns[I](), GetFn()(X)).  Result in x0 / d0, or for
       an aggregate in ASret / the sp buffer at ASretSpOff, as for EmitCall. }
     procedure EmitIndirectFuncCallExpr(AExpr: TIndirectFuncCallExpr;
-      const ASret: string = ''; ASretSpOff: Integer = SRET_NO_BUF);
+      const ASret: string = ''; ASretSpOff: Int = SRET_NO_BUF);
     { ASretDest / ASretSpOff: where a record result goes, as for EmitCall }
     procedure EmitFatPtrCall(const AAddrReg: string; AProcType: TProceduralTypeDesc;
       AArgs: TObjectList; AIsFat: Boolean = True;
-      const ASretDest: string = ''; ASretSpOff: Integer = SRET_NO_BUF);
+      const ASretDest: string = ''; ASretSpOff: Int = SRET_NO_BUF);
     procedure EmitProcFieldAddr(const AObjectName: string; AObjExpr: TASTExpr;
       AIsVarParam, AImplicitSelf: Boolean; AReceiver: TTypeDesc;
       AField: TFieldInfo; ANode: TASTNode);
@@ -418,9 +418,9 @@ type
     procedure EmitProcFieldCall(const AObjectName: string; AObjExpr: TASTExpr;
       AIsVarParam, AImplicitSelf: Boolean; AReceiver: TTypeDesc;
       AField: TFieldInfo; AArgs: TObjectList; ANode: TASTNode;
-      const ASretDest: string = ''; ASretSpOff: Integer = SRET_NO_BUF);
+      const ASretDest: string = ''; ASretSpOff: Int = SRET_NO_BUF);
     procedure EmitProcFieldCallExpr(AExpr: TASTExpr; const ASretDest: string;
-      ASretSpOff: Integer = SRET_NO_BUF);
+      ASretSpOff: Int = SRET_NO_BUF);
     { Release an owned-transient STRING value in x0 by shape, mirroring
       EmitCall's post-call disposal: a concat/rc=0 unowned transient
       (ArcExprIsUnownedStrTransient) needs AddRef+Release (0->1->0 frees once);
@@ -440,7 +440,7 @@ type
       expression is materialised so a value that reallocates the field's
       dyn-array cannot leave a stale data pointer. }
     procedure EmitFieldElemAddrToX0(AStmt: TFieldAssignment; AElem: TTypeDesc;
-      AIsDyn: Boolean; ALow: Integer);
+      AIsDyn: Boolean; ALow: Int);
     { x0 := the address of the field AStmt writes (Rec.Field, Obj.Field,
       A.B.Field, FInner.Field): the receiver per its shape plus the field's
       offset.  An owned receiver's release is deferred to the statement end. }
@@ -448,7 +448,7 @@ type
 
     { ---- expression lowering (result in x0) ---- }
     procedure EmitExprToX0(AExpr: TASTExpr);
-    procedure EmitAddSubImm(const AOp, ADst, ASrc: string; AImm: Integer);
+    procedure EmitAddSubImm(const AOp, ADst, ASrc: string; AImm: Int);
     procedure EmitPushX0;
     procedure EmitPopTo(const AReg: string);
     procedure EmitIntLiteral(const AReg: string; AValue: Int64);
@@ -471,7 +471,7 @@ type
       ATypeinfoReg names a register holding the class's typeinfo, or is ''
       to address ATypeinfoSym; the class-name pointer sits at typeinfo+16. }
     procedure EmitLeakTrackerRegister(const ATypeinfoReg, ATypeinfoSym: string;
-      ALine: Integer);
+      ALine: Int);
     { Emit the RHS of a BYTE store (strb) into x0 as a raw ordinal.
 
       Chr(N) must NOT be lowered through the normal _Chr call here: Chr returns
@@ -497,7 +497,7 @@ type
       VValue at +8) at [sp, #AOffset].  AOffset is sp-relative and stable
       across the element evaluation (no net sp change).  Mirrors x86-64
       EmitConstArrayLiteral's per-element boxing. }
-    procedure EmitConstArrayElemToVarRec(AElem: TASTExpr; AOffset: Integer);
+    procedure EmitConstArrayElemToVarRec(AElem: TASTExpr; AOffset: Int);
     { Evaluate a condition/selector/operand expression to x0 and flush any
       class-field-on-transient bases it deferred, so the borrowed field value
       is consumed and its transient released within this evaluation — the
@@ -516,7 +516,7 @@ type
     procedure EmitWhile(AStmt: TWhileStmt);
     function  NewExcFrameSlot: string;
     procedure EmitExcPrologue(const AFrameSlot, AExcLbl, ATryLbl: string);
-    procedure EmitExcUnwindTo(ATargetDepth: Integer);
+    procedure EmitExcUnwindTo(ATargetDepth: Int);
     procedure EmitTryFinally(AStmt: TTryFinallyStmt);
     procedure EmitTryExcept(AStmt: TTryExceptStmt);
     procedure EmitStaticElemAssign(AStmt: TStaticSubscriptAssign);
@@ -550,7 +550,7 @@ type
     procedure EmitRecCallToSlot(AExpr: TASTExpr; const ASlot: string;
       ART: TRecordTypeDesc; ANode: TASTNode);
     procedure EmitRecCallDispatch(AExpr: TASTExpr; const ADest: string;
-      ASretSpOff: Integer = SRET_NO_BUF);
+      ASretSpOff: Int = SRET_NO_BUF);
     procedure EmitBuiltinStrCall2(AArg0, AArg1: TASTExpr;
       const ASym: string);
     procedure EmitExit(AStmt: TExitStmt);
@@ -559,29 +559,29 @@ type
     { Each generic function instance's body, reporting its allocations
       under the template's declaring unit. }
     procedure EmitGenericFuncInstances(AInstances: TObjectList);
-    function  StackArgSize(AArg: TASTExpr): Integer;
-    function  StackParamSize(APar: TMethodParam): Integer;
-    function  AlignTo(AValue, AAlign: Integer): Integer;
-    function  ExtStackAlign(ASize: Integer): Integer;
+    function  StackArgSize(AArg: TASTExpr): Int;
+    function  StackParamSize(APar: TMethodParam): Int;
+    function  AlignTo(AValue, AAlign: Int): Int;
+    function  ExtStackAlign(ASize: Int): Int;
     function  ComputeStackArgArea(ADecl: TMethodDecl; AArgs: TObjectList;
-      ASelfPushed: Boolean): Integer;
+      ASelfPushed: Boolean): Int;
     function  ComputeStackArgAreaEx(ADecl: TMethodDecl; AArgs: TObjectList;
-      ASelfPushed: Boolean; out ALitBase: Integer;
-      out ATransBase: Integer; out ARecBase: Integer): Integer;
+      ASelfPushed: Boolean; out ALitBase: Int;
+      out ATransBase: Int; out ARecBase: Int): Int;
     function  IsRecordCallArg(AArg: TASTExpr): Boolean;
     function  IsIntfRecordCall(AExpr: TASTExpr): Boolean;
-    procedure DecodeMemArg(const AEntry: string; out AOff, ASize: Integer);
+    procedure DecodeMemArg(const AEntry: string; out AOff, ASize: Int);
     procedure EmitCall(ADecl: TMethodDecl; const AName: string;
       AArgs: TObjectList; const ASretDest: string = '';
-      ASelfPushed: Boolean = False; AVirtSlot: Integer = VIRT_NONE;
+      ASelfPushed: Boolean = False; AVirtSlot: Int = VIRT_NONE;
       { >=0: the callee's x8 indirect-result buffer lives at sp+this,
         measured at OUR entry (before our own outgoing-area sub sp).  Used
         for a >16B record-returning call whose destination is a caller
         scratch buffer with no slot name, so ASretDest cannot name it. }
-      ASretSpOff: Integer = SRET_NO_BUF);
+      ASretSpOff: Int = SRET_NO_BUF);
     { Pre-pass: register every local/param/hidden slot a routine body needs
       so the frame size is final before the prologue's sub sp. }
-    function  MaxManagedRecRet(AStmt: TASTStmt): Integer;
+    function  MaxManagedRecRet(AStmt: TASTStmt): Int;
     procedure RegisterFrameSlots(ADecl: TMethodDecl; ABody: TBlock);
     procedure RegisterForSlots(AStmt: TASTStmt);
     { THE DARWIN UNDERSCORE RULE — the single seam that applies the Mach-O C
@@ -669,7 +669,7 @@ type
     procedure EmitSmallSetLiteral(AExpr: TArrayLiteralExpr);
     procedure EmitJumboSetOp(ABE: TBinaryExpr);
     procedure EmitJumboSetLiteral(AExpr: TArrayLiteralExpr);
-    function  JumboSetLiteralBytes(AExpr: TASTExpr): Integer;
+    function  JumboSetLiteralBytes(AExpr: TASTExpr): Int;
     function  IsJumboSetType(AType: TTypeDesc): Boolean;
     procedure EmitStaticElemAddr(ASub: TStringSubscriptExpr);
     { x0 := address of the inline storage of a STATIC-array-valued
@@ -713,14 +713,14 @@ type
     procedure EmitDynSetLengthCall(AElem: TTypeDesc);
     { Emit the generated element hooks registered since the last call. }
     procedure EmitDynElemHooks;
-    function  RecReturnShape(ARec: TRecordTypeDesc): Integer;
-    procedure EmitRecRegsStore(AShape, ASize: Integer);
+    function  RecReturnShape(ARec: TRecordTypeDesc): Int;
+    procedure EmitRecRegsStore(AShape, ASize: Int);
     { True when StrToInt/StrToInt64 should call the validating SysUtils
       wrapper (raises EConvertError) instead of the lenient runtime routine:
       SysUtils is in scope and is not the unit being emitted (the wrapper
       itself calls StrToInt).  Twin of the x86-64 StrToIntChecked. }
     function StrToIntChecked(): Boolean;
-    procedure EmitHfaLaneToX0(AShape, AIdx: Integer; ASpill: Boolean);
+    procedure EmitHfaLaneToX0(AShape, AIdx: Int; ASpill: Boolean);
 
     procedure EmitStrLitSection;
     procedure EmitGlobalsSection;
@@ -806,7 +806,7 @@ type
     procedure EmitAggCallScalarToX0(AExpr: TASTExpr);
     { Store an interface value into the 16-byte (obj, itab) pair at
       [base + AOff], the base on TOP of the stack (consumed). }
-    procedure EmitIntfStoreStacked(AOff: Integer; AValueExpr: TASTExpr;
+    procedure EmitIntfStoreStacked(AOff: Int; AValueExpr: TASTExpr;
       AIntfType: TTypeDesc; AWeak: Boolean = False;
       AUnretained: Boolean = False);
     { x0/x1 := the (obj, itab) pair of an interface method-call RECEIVER }
@@ -819,10 +819,10 @@ type
     procedure EmitTypeinfoAddrDesc(const AReg: string; ADesc: TTypeDesc;
       const ATypeName: string);
     procedure EmitVarArgAddrToX0(Arg: TASTExpr);
-    function  IsIntfArg(ADecl: TMethodDecl; AIndex: Integer;
+    function  IsIntfArg(ADecl: TMethodDecl; AIndex: Int;
       AArg: TASTExpr): Boolean;
     procedure EmitIntfDispatch(const AVarName: string; AIntf: TInterfaceTypeDesc;
-      AIdx: Integer;
+      AIdx: Int;
       AArgs: TObjectList; AObjExpr: TASTExpr = nil; AVarParam: Boolean = False;
       AImplicitBase: TFieldInfo = nil; const ASret: string = '');
     procedure EmitIntfMetaSections;
@@ -851,18 +851,18 @@ type
       element scratch (x86 %r14); both callee-saved, saved as a 16-byte
       pair so sp alignment holds across the per-element runtime calls. }
     function  ArcNestedBaseReg: string; override;
-    procedure ArcPushNestedBase(AOffset: Integer;
+    procedure ArcPushNestedBase(AOffset: Int;
                                 const ABaseReg: string); override;
     procedure ArcPopNestedBase; override;
-    procedure EmitWeakClearAt(AOffset: Integer;
+    procedure EmitWeakClearAt(AOffset: Int;
                               const ABaseReg: string); override;
-    procedure EmitReleaseSlotAt(AType: TTypeDesc; AOffset: Integer;
+    procedure EmitReleaseSlotAt(AType: TTypeDesc; AOffset: Int;
                                 const ABaseReg: string;
                                 AZero: Boolean); override;
-    procedure EmitRetainSlotAt(AType: TTypeDesc; AOffset: Integer;
+    procedure EmitRetainSlotAt(AType: TTypeDesc; AOffset: Int;
                                const ABaseReg: string); override;
     procedure ArcEnterArrayWalk(const ABaseReg: string); override;
-    procedure ArcArrayElemAddr(AByteOffset: Integer); override;
+    procedure ArcArrayElemAddr(AByteOffset: Int); override;
     function  ArcArrayElemReg: string; override;
     procedure ArcLeaveArrayWalk; override;
   public
@@ -893,12 +893,12 @@ implementation
   An AAPCS64 homogeneous float aggregate puts each lane in its own fp
   register; the lane width (and so the memory stride) follows the element
   type.  These helpers keep every consumer agnostic of which HFA it has. }
-function HfaCount(AShape: Integer): Integer;
+function HfaCount(AShape: Int): Int;
 begin
   Result := AShape mod 100;
 end;
 
-function HfaStride(AShape: Integer): Integer;
+function HfaStride(AShape: Int): Int;
 begin
   if AShape >= 200 then
     Result := 4
@@ -906,7 +906,7 @@ begin
     Result := 8;
 end;
 
-function HfaReg(AShape, AIdx: Integer): string;
+function HfaReg(AShape, AIdx: Int): string;
 begin
   if AShape >= 200 then
     Result := 's' + IntToStr(AIdx)
@@ -1030,7 +1030,7 @@ end;
 constructor TArm64Backend.Create(const ATarget: TTargetDesc);
 begin
   inherited Create(ATarget);
-  FFrame       := TDictionary<string, Integer>.Create();
+  FFrame       := TDictionary<string, Int>.Create();
   FGlobalNames := TStringList.Create();
   FStrLits     := TStringList.Create();
   FBreakLbls   := TStringList.Create();
@@ -1061,7 +1061,7 @@ begin
   FWeakLocals  := TStringList.Create();
   FObjGlobals  := TStringList.Create();
   FTlvGlobals  := TStringList.Create();
-  FTlvSize     := TDictionary<string, Integer>.Create();
+  FTlvSize     := TDictionary<string, Int>.Create();
   FGlobalWeak  := TStringList.Create();
   FIntfDecls   := TObjectList.Create(False);
   FGenericIntfInstances := TObjectList.Create(False);
@@ -1078,7 +1078,7 @@ begin
   FRecGlobals  := TStringList.Create();
   FRefLocals   := TStringList.Create();
   FRefGlobals  := TStringList.Create();
-  FGlobalSize  := TDictionary<string, Integer>.Create();
+  FGlobalSize  := TDictionary<string, Int>.Create();
   FFrameSize   := 0;
   FLabelN      := 0;
   FForN        := 0;
@@ -1265,9 +1265,9 @@ begin
   FFrame.Add(AName + '_itab', FFrameSize - 8);
 end;
 
-procedure TArm64Backend.AddLocal(const AName: string; ASize: Integer);
+procedure TArm64Backend.AddLocal(const AName: string; ASize: Int);
 var
-  Sz: Integer;
+  Sz: Int;
 begin
   Sz := ASize;
   if Sz < 8 then Sz := 8;
@@ -1300,7 +1300,7 @@ begin
       ADecl.EnclosingDecl.Name);
 end;
 
-procedure TArm64Backend.DbgRecordSlot(const AName: string; AOffset: Integer);
+procedure TArm64Backend.DbgRecordSlot(const AName: string; AOffset: Int);
 begin
   if FDbgCur = nil then Exit;
   { Internal bookkeeping slots ('__sret', '__pptr_X', '__rtmp_N', '_pendrel_N',
@@ -1320,7 +1320,7 @@ end;
   so no '_data' shadow is needed. }
 procedure TArm64Backend.DbgMarkParams(ADecl: TMethodDecl);
 var
-  I, J, Off: Integer;
+  I, J, Off: Int;
   P: TMethodParam;
   V: TDbgVar;
   VD: TVarDecl;
@@ -1436,7 +1436,7 @@ end;
   var declarations and parameters (nil when unknown). }
 function TArm64Backend.DbgOuterVarType(const AName: string): TTypeDesc;
 var
-  I, J: Integer;
+  I, J: Int;
   VD: TVarDecl;
   P: TMethodParam;
 begin
@@ -1490,7 +1490,7 @@ end;
 
 function TArm64Backend.IsLocal(const AName: string): Boolean;
 var
-  Off: Integer;
+  Off: Int;
 begin
   Result := FFrame.TryGetValue(AName, Off);
 end;
@@ -1514,7 +1514,7 @@ end;
 
 function TArm64Backend.ParamsHaveVarString(AParams: TObjectList): Boolean;
 var
-  I: Integer;
+  I: Int;
   P: TMethodParam;
 begin
   Result := False;
@@ -1575,7 +1575,7 @@ end;
 
 procedure TArm64Backend.ReservePendRelSlots;
 var
-  I: Integer;
+  I: Int;
 begin
   { one 8-byte frame slot per PENDREL_SLOTS, reserved in every frame.  Called
     from RegisterFrameSlots and the _main/init/final frame setup so the
@@ -1627,7 +1627,7 @@ begin
   EmitPopTo('x0');
 end;
 
-function TArm64Backend.NextIntArgDest(var ANInt, AStackOff: Integer): string;
+function TArm64Backend.NextIntArgDest(var ANInt, AStackOff: Int): string;
 begin
   { the destination of the next 8-byte int-class argument value in EmitCall's
     pop walk: register x<ANInt> while one is free, else the next 8-byte slot
@@ -1645,7 +1645,7 @@ begin
   end;
 end;
 
-function TArm64Backend.StrTransSlot(AIdx: Integer): string;
+function TArm64Backend.StrTransSlot(AIdx: Int): string;
 begin
   { the AIdx'th owned-transient park slot of this frame.  The first
     STRTRANS_SLOTS are reserved up front; a call with more owned transient
@@ -1701,7 +1701,7 @@ end;
 
 procedure TArm64Backend.EmitPendRelSlotsZero;
 var
-  I: Integer;
+  I: Int;
 begin
   { A deferred release is armed only when the expression that defers runs,
     but the statement-end flush is unconditional -- `(I > 2) and
@@ -1715,7 +1715,7 @@ begin
     EmitStoreSlot('xzr', Format('_pendrel_%d', [I]));
 end;
 
-procedure TArm64Backend.FlushNativePendingReleases(AMark: Integer);
+procedure TArm64Backend.FlushNativePendingReleases(AMark: Int);
 var
   SkipLbl: string;
 begin
@@ -1820,7 +1820,7 @@ end;
 
 procedure TArm64Backend.EmitLoadSlot(const AReg, AName: string);
 var
-  Off: Integer;
+  Off: Int;
   Sym: string;
 begin
   if FFrame.TryGetValue(AName, Off) then
@@ -1857,7 +1857,7 @@ end;
 procedure TArm64Backend.EmitStoreByWidth(const AValReg, AAddrReg: string;
   AType: TTypeDesc);
 var
-  W: Integer;
+  W: Int;
 begin
   { A frame SLOT is always 8 bytes, so a store into one can be full width.
     Storage that is only as wide as its declared type cannot: writing 8 bytes
@@ -1905,8 +1905,8 @@ end;
 procedure TArm64Backend.EmitNormaliseNarrowSlot(const AName: string;
   AType: TTypeDesc);
 var
-  W: Integer;
-  Sh: Integer;
+  W: Int;
+  Sh: Int;
 begin
   { A frame slot (and a scalar global — both are 8 bytes, .balign 8/.zero 8) is
     READ 64-bit wide by EmitLoadSlot, but a callee writing through a var/out
@@ -1958,7 +1958,7 @@ end;
 
 procedure TArm64Backend.EmitStoreSlot(const AReg, AName: string);
 var
-  Off: Integer;
+  Off: Int;
   Sym: string;
 begin
   if FFrame.TryGetValue(AName, Off) then
@@ -1997,7 +1997,7 @@ end;
 
 procedure TArm64Backend.EmitSlotAddr(const AReg, AName: string);
 var
-  Off: Integer;
+  Off: Int;
   Sym: string;
 begin
   if FFrame.TryGetValue(AName, Off) then
@@ -2187,8 +2187,8 @@ procedure TArm64Backend.EmitInstanceFieldStore(AFld: TFieldInfo;
   AValueExpr: TASTExpr; const AInstSlot: string; AInstVarParam: Boolean;
   ABaseInfo: TFieldInfo);
 var
-  Shape: Integer;
-  Off: Integer;
+  Shape: Int;
+  Off: Int;
 begin
   { The base register already includes the intermediate (EmitInstBase applied
     EmitImplicitBaseStep), so only the sub-field's own offset remains. }
@@ -2345,8 +2345,8 @@ end;
 procedure TArm64Backend.EmitInstanceFieldStoreStacked(AFld: TFieldInfo;
   AValueExpr: TASTExpr);
 var
-  NB:    Integer;
-  Shape: Integer;
+  NB:    Int;
+  Shape: Int;
   Rec:   TRecordTypeDesc;
 begin
   { like EmitInstanceFieldStore, but the instance pointer is on TOP of the
@@ -2725,7 +2725,7 @@ begin
 end;
 
 procedure TArm64Backend.EmitRecTempFieldReleases(ART: TRecordTypeDesc;
-  const ASlot: string; ASpOff: Integer);
+  const ASlot: string; ASpOff: Int);
 begin
   { Release the managed fields of a record call-result temp once the call that
     used it as a receiver has returned.  The temp holds the producing call's
@@ -2751,7 +2751,7 @@ end;
 
 function TArm64Backend.EmitRecCallToRretSlot(AExpr: TASTExpr): string;
 var
-  Shape: Integer;
+  Shape: Int;
   Tmp: string;
 begin
   { materialise a record-returning call into a scratch and leave the
@@ -3414,7 +3414,7 @@ var
   F: TFieldInfo;
   Name: string;
   T: TTypeDesc;
-  I: Integer;
+  I: Int;
 begin
   if AStmt.IsEnvAllocSite then
   begin
@@ -3484,7 +3484,7 @@ end;
 procedure TArm64Backend.EmitEnvPrologue(ADecl: TMethodDecl);
 var
   Env: TRecordTypeDesc;
-  I: Integer;
+  I: Int;
   F: TFieldInfo;
   Name: string;
   P: TMethodParam;
@@ -3597,7 +3597,7 @@ end;
 
 function TArm64Backend.DynElemHookSym(AElem: TTypeDesc): string;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := '';
   case ArcScopeExitReleaseKind(AElem) of
@@ -3751,7 +3751,7 @@ procedure TArm64Backend.EmitSetIncludeExclude(ACall: TProcCall;
 var
   SetT: TSetTypeDesc;
   LVal: TAddrOfExpr;
-  W: Integer;
+  W: Int;
 begin
   { Include(S, E) / Exclude(S, E), mirroring x86-64: the set lvalue is
     addressed through a transient @-wrapper, so a plain variable, a field and
@@ -3917,7 +3917,7 @@ end;
 procedure TArm64Backend.EmitProcFieldCall(const AObjectName: string;
   AObjExpr: TASTExpr; AIsVarParam, AImplicitSelf: Boolean;
   AReceiver: TTypeDesc; AField: TFieldInfo; AArgs: TObjectList;
-  ANode: TASTNode; const ASretDest: string; ASretSpOff: Integer);
+  ANode: TASTNode; const ASretDest: string; ASretSpOff: Int);
 var
   PT: TProceduralTypeDesc;
 begin
@@ -3935,7 +3935,7 @@ begin
 end;
 
 procedure TArm64Backend.EmitProcFieldCallExpr(AExpr: TASTExpr;
-  const ASretDest: string; ASretSpOff: Integer);
+  const ASretDest: string; ASretSpOff: Int);
 var
   ME: TMethodCallExpr;
 begin
@@ -3988,7 +3988,7 @@ begin
 end;
 
 procedure TArm64Backend.EmitIndirectFuncCallExpr(AExpr: TIndirectFuncCallExpr;
-  const ASret: string; ASretSpOff: Integer);
+  const ASret: string; ASretSpOff: Int);
 var
   PT: TProceduralTypeDesc;
   Slot: string;
@@ -4051,9 +4051,9 @@ end;
 
 procedure TArm64Backend.EmitFatPtrCall(const AAddrReg: string;
   AProcType: TProceduralTypeDesc; AArgs: TObjectList; AIsFat: Boolean;
-  const ASretDest: string; ASretSpOff: Integer);
+  const ASretDest: string; ASretSpOff: Int);
 var
-  I: Integer;
+  I: Int;
   Decl: TMethodDecl;
   Par: TMethodParam;
   Info: TProcParamInfo;
@@ -4181,11 +4181,11 @@ begin
 end;
 
 procedure TArm64Backend.EmitIndexedPropWrite(AProp: TPropertyInfo;
-  const AOwner: string; AOwnerDesc: TTypeDesc; AVSlot: Integer;
+  const AOwner: string; AOwnerDesc: TTypeDesc; AVSlot: Int;
   AIndex, AValue: TASTExpr; AStmt: TASTStmt);
 var
   RelStr: Boolean;
-  Shape: Integer;
+  Shape: Int;
 begin
   { setter(self, index, value) for an indexed property write, shared by the
     field form (Obj.Items[I] := V) and the DEFAULT-property form
@@ -4686,8 +4686,8 @@ procedure TArm64Backend.EmitFieldElemAssign(AStmt: TFieldAssignment);
 var
   Elem: TTypeDesc;
   IsDyn: Boolean;
-  Low: Integer;
-  NB: Integer;
+  Low: Int;
+  NB: Int;
 begin
   { Rec.Field[Index] := value.  Handled leaf base shapes: a plain
     local/global record, a by-value record param, and (leg 28) a TRUE var/out
@@ -4944,7 +4944,7 @@ begin
 end;
 
 procedure TArm64Backend.EmitFieldElemAddrToX0(AStmt: TFieldAssignment;
-  AElem: TTypeDesc; AIsDyn: Boolean; ALow: Integer);
+  AElem: TTypeDesc; AIsDyn: Boolean; ALow: Int);
 begin
   { x0 := address of Rec.Field[Index].  Evaluated AFTER the value expression
     (its caller parks the value), so a value that reallocates the dyn-array
@@ -5007,7 +5007,7 @@ end;
 { ---- expressions --------------------------------------------------------- }
 
 procedure TArm64Backend.EmitAddSubImm(const AOp, ADst, ASrc: string;
-  AImm: Integer);
+  AImm: Int);
 begin
   { add/sub immediates encode 12 bits; larger deltas (big frames — a
     4 KiB local buffer) materialise through x16 (IP0, the linker
@@ -5035,8 +5035,8 @@ end;
 procedure TArm64Backend.EmitIntLiteral(const AReg: string; AValue: Int64);
 var
   U: Int64;
-  Shift: Integer;
-  Chunk: Integer;
+  Shift: Int;
+  Chunk: Int;
   First: Boolean;
 begin
   if (AValue >= 0) and (AValue <= $FFFF) then
@@ -5054,7 +5054,7 @@ begin
   First := True;
   for Shift := 0 to 3 do
   begin
-    Chunk := Integer((U shr (Shift * 16)) and $FFFF);
+    Chunk := Int((U shr (Shift * 16)) and $FFFF);
     if (Chunk = 0) and (not First or (Shift < 3)) and not (First and (Shift = 3)) then
       Continue;
     if First then
@@ -5080,7 +5080,7 @@ end;
   byte round-trips regardless of what follows it. }
 function TArm64Backend.AsmEscape(const AValue: string): string;
 var
-  I, C: Integer;
+  I, C: Int;
 begin
   Result := '';
   for I := 0 to Length(AValue) - 1 do
@@ -5159,7 +5159,7 @@ end;
 
 procedure TArm64Backend.EmitStrLitAddr(AValue: string);
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   Idx := FStrLits.IndexOf(AValue);
   if Idx < 0 then
@@ -5172,7 +5172,7 @@ begin
 end;
 
 procedure TArm64Backend.EmitLeakTrackerRegister(const ATypeinfoReg,
-  ATypeinfoSym: string; ALine: Integer);
+  ATypeinfoSym: string; ALine: Int);
 var
   UnitName: string;
 begin
@@ -5204,10 +5204,10 @@ begin
 end;
 
 procedure TArm64Backend.EmitConstArrayElemToVarRec(AElem: TASTExpr;
-  AOffset: Integer);
+  AOffset: Int);
 var
   EK: TTypeKind;
-  Tag: Integer;
+  Tag: Int;
 begin
   EK := AElem.ResolvedType.Kind;
   if EK in [tyDouble, tySingle] then
@@ -5256,7 +5256,7 @@ end;
 
 procedure TArm64Backend.EmitCondToX0Flushed(AExpr: TASTExpr);
 var
-  Mark: Integer;
+  Mark: Int;
 begin
   Mark := FPendingRelCount;
   Self.EmitExprToX0(AExpr);
@@ -5281,7 +5281,7 @@ var
   CondName: string;
   Lit: string;
   NotMemL, DoneL: string;
-  Idx: Integer;
+  Idx: Int;
   EmptyArgs: TObjectList;
   Owned: Boolean;
 begin
@@ -7916,7 +7916,7 @@ end;
 procedure TArm64Backend.EmitFloatConstToD0(const ALit: string;
   ASingle: Boolean);
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   { a folded float constant's source text, as a .rodata double addressed
     via an adrp/PAGEOFF pair -- the same pool as a TFloatLiteral }
@@ -7937,7 +7937,7 @@ end;
 procedure TArm64Backend.EmitExprToD0(AExpr: TASTExpr);
 var
   BE: TBinaryExpr;
-  Idx: Integer;
+  Idx: Int;
   Lit: string;
   RtlMathSym: string;
 begin
@@ -8393,7 +8393,7 @@ end;
 
 procedure TArm64Backend.EmitStmtList(AStmts: TObjectList);
 var
-  I: Integer;
+  I: Int;
 begin
   for I := 0 to AStmts.Count - 1 do
     Self.EmitStmt(TASTStmt(AStmts.Items[I]));
@@ -8401,7 +8401,7 @@ end;
 
 procedure TArm64Backend.EmitStmt(AStmt: TASTStmt);
 var
-  Mark: Integer;
+  Mark: Int;
 begin
   { Statement-scoped deferred-release boundary (BUG-048/BUG-049).  A class
     field read on an owned transient base spills that base to a _pendrel slot
@@ -8846,7 +8846,7 @@ end;
 
 function TArm64Backend.EmitRecPropToTemp(AFld: TFieldAccessExpr): string;
 var
-  Shape: Integer;
+  Shape: Int;
   Tmp: string;
 begin
   { a record-typed property getter's value, materialised like a record
@@ -9207,7 +9207,7 @@ begin
     'does not produce', AExpr);
 end;
 
-procedure TArm64Backend.EmitIntfStoreStacked(AOff: Integer;
+procedure TArm64Backend.EmitIntfStoreStacked(AOff: Int;
   AValueExpr: TASTExpr; AIntfType: TTypeDesc; AWeak, AUnretained: Boolean);
 var
   Owned: Boolean;
@@ -10408,10 +10408,10 @@ end;
 
 procedure TArm64Backend.EmitWrite(ACall: TProcCall; ANewline: Boolean);
 var
-  I: Integer;
+  I: Int;
   Arg: TASTExpr;
   K: TTypeKind;
-  StartIdx: Integer;
+  StartIdx: Int;
   FdMov: string;
 begin
   { WriteLn(StdErr, ...): the leading StdErr selects fd 2 and is not itself
@@ -10580,9 +10580,9 @@ begin
   Self.Emit(ATryLbl + ':');
 end;
 
-procedure TArm64Backend.EmitExcUnwindTo(ATargetDepth: Integer);
+procedure TArm64Backend.EmitExcUnwindTo(ATargetDepth: Int);
 var
-  I, J: Integer;
+  I, J: Int;
   FinBody: TCompoundStmt;
 begin
   { non-local exit (Exit/Break/Continue) crossing try regions: pop each
@@ -10602,7 +10602,7 @@ end;
 
 procedure TArm64Backend.EmitTryFinally(AStmt: TTryFinallyStmt);
 var
-  I, FinForN: Integer;
+  I, FinForN: Int;
   FrameSlot, ExcL, TryL, EndL: string;
 begin
   FrameSlot := NewExcFrameSlot();
@@ -10649,7 +10649,7 @@ end;
 
 procedure TArm64Backend.EmitTryExcept(AStmt: TTryExceptStmt);
 var
-  I, J: Integer;
+  I, J: Int;
   H: TExceptHandlerClause;
   FrameSlot, ExcL, TryL, EndL, BodyL, NextL: string;
 begin
@@ -10756,7 +10756,7 @@ procedure TArm64Backend.EmitElemStoreStacked(AElem: TTypeDesc; AValue: TASTExpr;
   ANode: TASTNode);
 var
   Elem: TTypeDesc;
-  NL: Integer;
+  NL: Int;
 begin
   Elem := AElem;
   if Elem.Kind = tyInterface then
@@ -11250,10 +11250,10 @@ end;
 
 procedure TArm64Backend.EmitCase(AStmt: TCaseStmt);
 var
-  I, J: Integer;
+  I, J: Int;
   Br: TCaseBranch;
   EndL, NextL, BodyL, SkipL: string;
-  CaseMark: Integer;
+  CaseMark: Int;
 begin
   { chained compares — selector evaluated ONCE and kept on the stack
     across the branch tests (a value expression can be a call).  Ordinal
@@ -11386,7 +11386,7 @@ procedure TArm64Backend.EmitFor(AStmt: TForStmt);
 var
   TopL, EndL, ContL, LastL: string;
   EndSlot: string;
-  ForMark: Integer;
+  ForMark: Int;
 
   { the counter is a plain slot, unless a closure or nested routine captured
     it: then it lives behind its '_cap_' pointer (in a packed env, at its
@@ -11686,10 +11686,10 @@ procedure TArm64Backend.EmitForIn(AStmt: TForInStmt);
 var
   IsAgg: Boolean;
   Tmp: string;
-  Shape: Integer;
+  Shape: Int;
   CondL, NextL, EndL, NilLenL: string;
   Elem: TTypeDesc;
-  ESz: Integer;
+  ESz: Int;
   GetE, MN, Cur: TMethodDecl;
   EmptyArgs: TObjectList;
   CollOwned: Boolean;
@@ -12158,7 +12158,7 @@ end;
 procedure TArm64Backend.EmitRecCallToSlot(AExpr: TASTExpr;
   const ASlot: string; ART: TRecordTypeDesc; ANode: TASTNode);
 var
-  Shape: Integer;
+  Shape: Int;
 begin
   { Slot := <record-returning call>, the slot a plain (non-var-param) local or
     global.  Shared by the assignment and by the statement form of
@@ -12199,7 +12199,7 @@ begin
 end;
 
 procedure TArm64Backend.EmitRecCallDispatch(AExpr: TASTExpr;
-  const ADest: string; ASretSpOff: Integer);
+  const ADest: string; ASretSpOff: Int);
 var
   ME: TMethodCallExpr;
   MD: TMethodDecl;
@@ -12387,7 +12387,7 @@ end;
 
 procedure TArm64Backend.EmitFormatCall(AArgs: TObjectList);
 var
-  I, FmtCount, TotalSize: Integer;
+  I, FmtCount, TotalSize: Int;
   Arg: TASTExpr;
   Elems: TObjectList;
   IsIntArg: Boolean;
@@ -12553,7 +12553,7 @@ end;
   (BUG-20261027-int64-arg-to-integer-param-not-narrowed). }
 procedure TArm64Backend.EmitExtendParamReg(const ANum: string; AType: TTypeDesc);
 
-  procedure ShiftPair(const AShr: string; ABits: Integer);
+  procedure ShiftPair(const AShr: string; ABits: Int);
   begin
     Self.Emit(Format(#9'lsl x%s, x%s, #%d', [ANum, ANum, ABits]));
     Self.Emit(Format(#9'%s x%s, x%s, #%d', [AShr, ANum, ANum, ABits]));
@@ -12640,7 +12640,7 @@ end;
 
 procedure TArm64Backend.EmitPointerWrite(AStmt: TPointerWriteStmt);
 var
-  NB: Integer;
+  NB: Int;
   Owned: Boolean;
 begin
   { P^ := V.  Value first, then pointer — evaluating the value cannot
@@ -13041,7 +13041,7 @@ end;
 
 procedure TArm64Backend.NoteTlvTouch(const AName, ABase: string);
 var
-  I: Integer;
+  I: Int;
   Ty: TTypeDesc;
   Sym: TSymbol;
 begin
@@ -13075,7 +13075,7 @@ procedure TArm64Backend.RegisterGlobalInit(const ASym: string; AVD: TVarDecl);
 var
   SAT: TStaticArrayTypeDesc;
   ElemDir, Lines, ElemSym: string;
-  J: Integer;
+  J: Int;
 begin
   { Integer, float, string and static-array initialisers become .data
     entries; const-expression initialisers stay honest holes. }
@@ -13171,7 +13171,7 @@ end;
 procedure TArm64Backend.EmitDynArrayLiteral(AExpr: TArrayLiteralExpr);
 var
   Elem: TTypeDesc;
-  I:    Integer;
+  I:    Int;
 begin
   { x0 := a fresh array (refcount 1) of the elements.  SetLength from nil
     allocates them zeroed, so each element store sees an empty slot: a
@@ -13200,7 +13200,7 @@ end;
 procedure TArm64Backend.EmitSmallSetLiteral(AExpr: TArrayLiteralExpr);
 var
   Mask: Int64;
-  I: Integer;
+  I: Int;
   Elem: TASTExpr;
   HasRuntime: Boolean;
 begin
@@ -13238,7 +13238,7 @@ end;
 
 procedure TArm64Backend.EmitJumboSetOp(ABE: TBinaryExpr);
 var
-  NBytes, NL, NR: Integer;
+  NBytes, NL, NR: Int;
   ARef: string;
 begin
   { Jumbo set operators.  A jumbo set VALUE is its bitmap ADDRESS (in x0), so
@@ -13327,7 +13327,7 @@ end;
 
 procedure TArm64Backend.EmitJumboSetLiteral(AExpr: TArrayLiteralExpr);
 var
-  I, NBytes: Integer;
+  I, NBytes: Int;
   Elem: TASTExpr;
 begin
   { jumbo set literal (>64 members): materialise the bitmap in a fresh
@@ -13361,7 +13361,7 @@ begin
   Result := (AType is TSetTypeDesc) and TSetTypeDesc(AType).IsJumbo();
 end;
 
-function TArm64Backend.JumboSetLiteralBytes(AExpr: TASTExpr): Integer;
+function TArm64Backend.JumboSetLiteralBytes(AExpr: TASTExpr): Int;
 begin
   { the sp delta EmitJumboSetLiteral consumed, for the caller's restore }
   Result := 0;
@@ -13374,7 +13374,7 @@ end;
 
 procedure TArm64Backend.EmitStaticElemAddr(ASub: TStringSubscriptExpr);
 var
-  ESz: Integer;
+  ESz: Int;
 begin
   { x0 := &base[index].  The base must be a plain local/global array
     identifier or an array CONST (semantic hands us its data label);
@@ -13507,7 +13507,7 @@ end;
 
 procedure TArm64Backend.EmitDynElemAddr(ASub: TStringSubscriptExpr);
 var
-  ESz: Integer;
+  ESz: Int;
 begin
   { x0 := dataptr + index*elemsize — the base VALUE is the element-0
     pointer (dyn-array header sits below it; an open-array param slot
@@ -13576,7 +13576,7 @@ end;
 
 procedure TArm64Backend.EmitFieldElemAddr(AFAE: TFieldAccessExpr);
 var
-  ESz, LowB: Integer;
+  ESz, LowB: Int;
 begin
   { x0 := address of AFAE (an array-typed field element: Obj.Arr[I]).
     Mirrors x86-64 @Rec.Arr[I] (:9765-9827).  First materialise the record/
@@ -13783,9 +13783,9 @@ begin
             (AType.Kind in [tyRecord, tyStaticArray]);
 end;
 
-function TArm64Backend.RecReturnShape(ARec: TRecordTypeDesc): Integer;
+function TArm64Backend.RecReturnShape(ARec: TRecordTypeDesc): Int;
 var
-  I, NDoubles: Integer;
+  I, NDoubles: Int;
   F: TFieldInfo;
   AllDouble, AllSingle: Boolean;
 begin
@@ -13848,9 +13848,9 @@ end;
   x0:x1 wholesale wrote past the end of a small record -- harmless only while
   alignment padding happened to follow it.  x10 is the scratch; x0/x1 and the
   fp lanes are left intact. }
-procedure TArm64Backend.EmitRecRegsStore(AShape, ASize: Integer);
+procedure TArm64Backend.EmitRecRegsStore(AShape, ASize: Int);
 
-  procedure StorePart(const AReg: string; AOff, ANum: Integer);
+  procedure StorePart(const AReg: string; AOff, ANum: Int);
   begin
     if ANum >= 8 then
     begin
@@ -13880,7 +13880,7 @@ procedure TArm64Backend.EmitRecRegsStore(AShape, ASize: Integer);
   end;
 
 var
-  K: Integer;
+  K: Int;
 begin
   if AShape >= 100 then
   begin
@@ -13902,7 +13902,7 @@ end;
   pushes it.  A register-bound lane travels as its DOUBLE bit pattern (the pop
   walk rebuilds d(N) and, for an 's' entry, narrows it); a spilled lane is
   the raw value in an 8-byte slot, a Single in the low half. }
-procedure TArm64Backend.EmitHfaLaneToX0(AShape, AIdx: Integer; ASpill: Boolean);
+procedure TArm64Backend.EmitHfaLaneToX0(AShape, AIdx: Int; ASpill: Boolean);
 begin
   if HfaStride(AShape) = 8 then
     Self.Emit(Format(#9'ldr x0, [x9, #%d]', [AIdx * 8]))
@@ -13925,7 +13925,7 @@ end;
 
 procedure TArm64Backend.RegisterForSlots(AStmt: TASTStmt);
 var
-  I: Integer;
+  I: Int;
 begin
   if AStmt = nil then Exit;
   if AStmt is TCompoundStmt then
@@ -13990,9 +13990,9 @@ begin
   end;
 end;
 
-function TArm64Backend.MaxManagedRecRet(AStmt: TASTStmt): Integer;
+function TArm64Backend.MaxManagedRecRet(AStmt: TASTStmt): Int;
 var
-  I, N: Integer;
+  I, N: Int;
   Elem: TTypeDesc;
 begin
   { largest RawSize among managed-record-returning call assignments — the
@@ -14111,7 +14111,7 @@ end;
 
 procedure TArm64Backend.RegisterFrameSlots(ADecl: TMethodDecl; ABody: TBlock);
 var
-  I, J: Integer;
+  I, J: Int;
   VD: TVarDecl;
   Par: TMethodParam;
 begin
@@ -14461,7 +14461,7 @@ end;
 
 procedure TArm64Backend.EmitGenericFuncInstances(AInstances: TObjectList);
 var
-  I: Integer;
+  I: Int;
   GFI: TGenericFuncInstance;
 begin
   for I := 0 to AInstances.Count - 1 do
@@ -14477,15 +14477,15 @@ end;
 procedure TArm64Backend.EmitFunctionDef(ADecl: TMethodDecl;
   AWeakBind: Boolean);
 var
-  I, J, K, FIdx: Integer;
-  SPOff, SPSz: Integer;
+  I, J, K, FIdx: Int;
+  SPOff, SPSz: Int;
   SavedAsm, BodyBuf: TStringBuilder;
-  FrameAligned: Integer;
+  FrameAligned: Int;
   Sym: string;
-  RecShape, ParShape: Integer;
+  RecShape, ParShape: Int;
   Par: TMethodParam;
   SavedArmNodes: TStringList;
-  SavedArmPos: Integer;
+  SavedArmPos: Int;
   OuterPacked, ChildPacked, SavedParent: TStringList;
   SavedOuterDecl: TMethodDecl;
   SavedDbgCur: TDbgFunc;
@@ -15313,7 +15313,7 @@ begin
   FHandlerVars.Delete(FHandlerVars.Count - 1);
 end;
 
-function TArm64Backend.StackArgSize(AArg: TASTExpr): Integer;
+function TArm64Backend.StackArgSize(AArg: TASTExpr): Int;
 begin
   { An argument beyond the declared parameters is a VARIADIC one.  Apple's
     arm64 ABI passes every anonymous variadic argument on the stack in its
@@ -15324,7 +15324,7 @@ begin
   Result := 8;
 end;
 
-function TArm64Backend.StackParamSize(APar: TMethodParam): Integer;
+function TArm64Backend.StackParamSize(APar: TMethodParam): Int;
 begin
   { natural size for a FIXED param passed on the stack.  Floats stay 8
     (a deliberate simplification also applied on the callee side —
@@ -15343,7 +15343,7 @@ end;
 { The stack alignment of an ASize-byte (4 or 8) fixed argument lane in a
   call to a C routine: Darwin packs stack arguments at their natural
   alignment, standard AAPCS64 (Linux, FreeBSD) gives each an 8-byte slot. }
-function TArm64Backend.ExtStackAlign(ASize: Integer): Integer;
+function TArm64Backend.ExtStackAlign(ASize: Int): Int;
 begin
   if FTarget.OS = osMacOS then
     Result := ASize
@@ -15351,7 +15351,7 @@ begin
     Result := 8;
 end;
 
-function TArm64Backend.AlignTo(AValue, AAlign: Integer): Integer;
+function TArm64Backend.AlignTo(AValue, AAlign: Int): Int;
 begin
   Result := (AValue + AAlign - 1) and (not (AAlign - 1));
 end;
@@ -15393,18 +15393,18 @@ begin
 end;
 
 function TArm64Backend.ComputeStackArgArea(ADecl: TMethodDecl;
-  AArgs: TObjectList; ASelfPushed: Boolean): Integer;
+  AArgs: TObjectList; ASelfPushed: Boolean): Int;
 var
-  LB, TB, RB: Integer;
+  LB, TB, RB: Int;
 begin
   Result := ComputeStackArgAreaEx(ADecl, AArgs, ASelfPushed, LB, TB, RB);
 end;
 
 function TArm64Backend.ComputeStackArgAreaEx(ADecl: TMethodDecl;
-  AArgs: TObjectList; ASelfPushed: Boolean; out ALitBase: Integer;
-  out ATransBase: Integer; out ARecBase: Integer): Integer;
+  AArgs: TObjectList; ASelfPushed: Boolean; out ALitBase: Int;
+  out ATransBase: Int; out ARecBase: Int): Int;
 var
-  I, H, NInt, NFloat, Off, Sz, Trans, Lit, ESz, Rec: Integer;
+  I, H, NInt, NFloat, Off, Sz, Trans, Lit, ESz, Rec: Int;
   Arg: TASTExpr;
 begin
   { dry-run of the classification walk in EmitCall — must stay in
@@ -15570,9 +15570,9 @@ begin
 end;
 
 procedure TArm64Backend.DecodeMemArg(const AEntry: string;
-  out AOff, ASize: Integer);
+  out AOff, ASize: Int);
 var
-  P: Integer;
+  P: Int;
 begin
   { entry shape: m<offset>_<size> }
   P := Pos('_', AEntry);
@@ -15585,7 +15585,7 @@ end;
   parameter must be narrowed, and a Single value passed to a Double parameter
   must stay widened in a d register.  Arguments beyond the declared
   parameters (variadic) fall back to their own type. }
-function FloatArgIsSingle(ADecl: TMethodDecl; AIdx: Integer;
+function FloatArgIsSingle(ADecl: TMethodDecl; AIdx: Int;
   AArg: TASTExpr): Boolean;
 var
   PT: TTypeDesc;
@@ -15604,7 +15604,7 @@ end;
   put them in x0/x1 and shifted every later float argument down a register
   (x86-64 makes the same decision in OverflowArgIsFloat). }
 function TArm64Backend.FloatArgIsFloatClass(ADecl: TMethodDecl;
-  AIdx: Integer; AArg: TASTExpr): Boolean;
+  AIdx: Int; AArg: TASTExpr): Boolean;
 var
   P: TMethodParam;
 begin
@@ -15619,25 +15619,25 @@ end;
 
 procedure TArm64Backend.EmitCall(ADecl: TMethodDecl; const AName: string;
   AArgs: TObjectList; const ASretDest: string;
-  ASelfPushed: Boolean; AVirtSlot: Integer; ASretSpOff: Integer);
+  ASelfPushed: Boolean; AVirtSlot: Int; ASretSpOff: Int);
 var
-  I, K, Shape: Integer;
+  I, K, Shape: Int;
   Arg: TASTExpr;
-  NInt, NFloat: Integer;
+  NInt, NFloat: Int;
   PopRegs: TStringList;
   Reg: string;
-  StackOff, StackArea, ASz: Integer;
-  TransBase, TransN, TransTop: Integer;
+  StackOff, StackArea, ASz: Int;
+  TransBase, TransN, TransTop: Int;
   TransShapes: string;
   IsVariadicArg: Boolean;
-  LitBase, LitOff, ESz, N: Integer;
-  RecBase, RecOff: Integer;
+  LitBase, LitOff, ESz, N: Int;
+  RecBase, RecOff: Int;
   RecSaved: Boolean;
   NarrowFix: Boolean;
   JTmp: string;
   FatParTy: TTypeDesc;
   ElT: TTypeDesc;
-  JNB: Integer;
+  JNB: Int;
   IndSlot: string;
   IntfT: TTypeDesc;
 begin
@@ -16659,7 +16659,7 @@ end;
 
 procedure TArm64Backend.EmitStrLitSection;
 var
-  I, Len: Integer;
+  I, Len: Int;
 begin
   if FStrLits.Count = 0 then Exit;
   Self.Emit(SecRodata());
@@ -16677,7 +16677,7 @@ end;
 
 procedure TArm64Backend.EmitFloatLitSection;
 var
-  I: Integer;
+  I: Int;
 begin
   if FFloatLits.Count = 0 then Exit;
   Self.Emit(SecRodata());
@@ -16691,7 +16691,7 @@ end;
 
 procedure TArm64Backend.EmitGlobalsSection;
 var
-  I, J: Integer;
+  I, J: Int;
   Directive: string;
   AnyBss, AnyData: Boolean;
 begin
@@ -16886,7 +16886,7 @@ end;
 
 procedure TArm64Backend.EmitClassCleanupFns;
 var
-  I: Integer;
+  I: Int;
   TD: TTypeDecl;
   RT, Walk: TRecordTypeDesc;
   Sym: string;
@@ -16950,7 +16950,7 @@ end;
 
 procedure TArm64Backend.EmitArrayConstData(ABlock: TBlock);
 var
-  I, J, K: Integer;
+  I, J, K: Int;
   CD: TConstDecl;
   Decl: TMethodDecl;
   Lbl, Dir: string;
@@ -16958,7 +16958,7 @@ var
 
   procedure EmitOne(ACD: TConstDecl; const ALbl: string);
   var
-    E: Integer;
+    E: Int;
     IsFloat: Boolean;
   begin
     { A unit's INTERFACE-section const is referenced from other separately-
@@ -17109,7 +17109,7 @@ function TArm64Backend.TypeinfoSymFor(const ATypeName: string): string;
 var
   D: TTypeDesc;
   Pfx: string;
-  I: Integer;
+  I: Int;
 begin
   { typeinfo symbol for a class/interface NAME — the SINGLE source of truth for
     both the definition and every reference (so they always agree; a mismatch
@@ -17156,7 +17156,7 @@ end;
 procedure TArm64Backend.EmitAttrTables(ACD: TClassTypeDef;
   const ACSym: string; out AAttrsRef, AMethAttrsRef: string);
 var
-  J, K, N, Count: Integer;
+  J, K, N, Count: Int;
   AU: TAttributeUse;
   MD: TMethodDecl;
 begin
@@ -17251,7 +17251,7 @@ end;
   keeps its own copy today). }
 function Arm64MethodParamSig(AMD: TMethodDecl): string;
 var
-  I:   Integer;
+  I:   Int;
   Par: TMethodParam;
 begin
   Result := '';
@@ -17282,7 +17282,7 @@ end;
 procedure TArm64Backend.EmitMethodsTable(ACD: TClassTypeDef;
   const ACSym: string; out AMethodsRef: string);
 var
-  J, N, Count: Integer;
+  J, N, Count: Int;
   MD:  TMethodDecl;
   Sig: string;
 begin
@@ -17348,7 +17348,7 @@ end;
 
 procedure TArm64Backend.EmitClassMetaSections;
 var
-  I, S: Integer;
+  I, S: Int;
   TD: TTypeDecl;
   RT: TRecordTypeDesc;
   E: TVTableEntry;
@@ -17482,7 +17482,7 @@ begin
   end;
 end;
 
-function TArm64Backend.IsIntfArg(ADecl: TMethodDecl; AIndex: Integer;
+function TArm64Backend.IsIntfArg(ADecl: TMethodDecl; AIndex: Int;
   AArg: TASTExpr): Boolean;
 begin
   { an argument travels as an (obj, itab) pair when its value is an
@@ -17537,17 +17537,17 @@ begin
 end;
 
 procedure TArm64Backend.EmitIntfDispatch(const AVarName: string;
-  AIntf: TInterfaceTypeDesc; AIdx: Integer; AArgs: TObjectList;
+  AIntf: TInterfaceTypeDesc; AIdx: Int; AArgs: TObjectList;
   AObjExpr: TASTExpr; AVarParam: Boolean; AImplicitBase: TFieldInfo;
   const ASret: string);
 var
-  I: Integer;
+  I: Int;
   Arg: TASTExpr;
   Decl: TMethodDecl;
   Par: TMethodParam;
   Slot, RecvSlot: string;
   Owned: Boolean;
-  NInt, NFloat: Integer;
+  NInt, NFloat: Int;
   Params: TObjectList;
   AllDeclared: Boolean;
 begin
@@ -17668,7 +17668,7 @@ end;
 
 procedure TArm64Backend.EmitIntfMetaSections;
 var
-  I, J, K: Integer;
+  I, J, K: Int;
   ITD, TD: TTypeDecl;
   ID: TInterfaceTypeDesc;
   Intfs: TObjectList;                    { collected TInterfaceTypeDesc; not owned }
@@ -17822,7 +17822,7 @@ end;
 
 function TArm64Backend.ClassImplementsAny(ATD: TTypeDecl): Boolean;
 var
-  J: Integer;
+  J: Int;
   Walk: TClassTypeDef;
   WalkName: string;
 begin
@@ -17850,7 +17850,7 @@ end;
 function TArm64Backend.FindClassMethodImpl(ATD: TTypeDecl;
   const AName: string): TMethodDecl;
 var
-  J, K: Integer;
+  J, K: Int;
   Walk: TClassTypeDef;
   WalkName: string;
   MD: TMethodDecl;
@@ -17884,7 +17884,7 @@ end;
 function TArm64Backend.IsAbstractClassMethod(AClassRT: TRecordTypeDesc;
   const AMethName: string): Boolean;
 var
-  Slot: Integer;
+  Slot: Int;
 begin
   Result := False;
   if AClassRT = nil then Exit;
@@ -17896,7 +17896,7 @@ end;
 function TArm64Backend.ItabMethodRefArm64(AClassRT: TRecordTypeDesc;
   ATD: TTypeDecl; const AMethName: string): string;
 var
-  Slot: Integer;
+  Slot: Int;
   E: TVTableEntry;
   Impl: TMethodDecl;
   AncRT: TRecordTypeDesc;
@@ -18013,7 +18013,7 @@ procedure TArm64Backend.EmitDiscardedRecMethodCall(AMethod: TMethodDecl;
   const AName: string; AArgs: TObjectList; ART: TTypeDesc; ANode: TASTNode);
 var
   Tmp: string;
-  Shape: Integer;
+  Shape: Int;
 begin
   { A method call statement whose RECORD result is discarded (L.Next();),
     receiver already in x0.  An sret result still needs a real buffer for the
@@ -18173,7 +18173,7 @@ procedure TArm64Backend.EmitMethodCallOnExpr(AMethod: TMethodDecl;
   const AName: string; AArgs: TObjectList; AObjExpr: TASTExpr);
 var
   Owned: Boolean;
-  Sz: Integer;
+  Sz: Int;
 begin
   if AMethod.IsRecordMethod and (AObjExpr.ResolvedType <> nil) and
      (AObjExpr.ResolvedType.Kind = tyRecord) and
@@ -18233,7 +18233,7 @@ var
   PT: TProceduralTypeDesc;
   IsAgg: Boolean;
   Tmp, Dest: string;
-  Shape: Integer;
+  Shape: Int;
 begin
   if AStmt.IsProcFieldCall then
   begin
@@ -18645,7 +18645,7 @@ end;
 procedure TArm64Backend.EmitClassCreate(AExpr: TFuncCallExpr);
 var
   CtorArgs: TObjectList;
-  I: Integer;
+  I: Int;
 begin
   Self.EmitExprToX0(TASTExpr(AExpr.Args.Items[0]));
   if FDebugMode then
@@ -18676,7 +18676,7 @@ procedure TArm64Backend.EmitMethodCallExpr(AExpr: TMethodCallExpr);
 var
   MD: TMethodDecl;
   TD: TTypeDecl;
-  I: Integer;
+  I: Int;
   Sym: string;
   Owned: Boolean;
 begin
@@ -18883,10 +18883,10 @@ end;
 
 procedure TArm64Backend.EmitProgram(AProg: TProgram);
 var
-  I, J: Integer;
+  I, J: Int;
   VD:   TVarDecl;
   Decl: TMethodDecl;
-  FrameAligned: Integer;
+  FrameAligned: Int;
   TDcl: TTypeDecl;
   CDef: TClassTypeDef;
   RDef: TRecordTypeDef;
@@ -18894,7 +18894,7 @@ var
   GI: TGenericInstance;
   SavedAsm, BodyBuf: TStringBuilder;
   SavedArmNodes: TStringList;
-  SavedArmPos: Integer;
+  SavedArmPos: Int;
 begin
   FProgramName := AProg.Name;
   FCurrentUnitName := '';
@@ -19260,7 +19260,7 @@ end;
 
 procedure TArm64Backend.EmitTlvSections;
 var
-  I, Sz: Integer;
+  I, Sz: Int;
   Directive: string;
   AnyInit: Boolean;
 
@@ -19412,7 +19412,7 @@ end;
 
 procedure TArm64Backend.EmitUnit(AUnit: TUnit);
 var
-  I, J: Integer;
+  I, J: Int;
   Decl: TMethodDecl;
   UTD: TTypeDecl;
   GI: TGenericInstance;
@@ -19422,7 +19422,7 @@ var
 
   procedure CheckTypeSubset(ATypeDecls: TObjectList);
   var
-    K, M: Integer;
+    K, M: Int;
     UDcl: TTypeDecl;
     UDef: TClassTypeDef;
     URDef: TRecordTypeDef;
@@ -19649,11 +19649,11 @@ end;
 procedure TArm64Backend.EmitUnitSection(AUnit: TUnit; AStmts: TObjectList;
   const ASym: string; ARegistry: TStringList; AReleaseUnit: TUnit);
 var
-  I, J: Integer;
-  FrameAligned: Integer;
+  I, J: Int;
+  FrameAligned: Int;
   SavedAsm, BodyBuf: TStringBuilder;
   SavedArmNodes: TStringList;
-  SavedArmPos: Integer;
+  SavedArmPos: Int;
 begin
   ARegistry.Add(ASym);
   FIsFunction := False;
@@ -19741,7 +19741,7 @@ end;
   program-exit lists, and _main must not release them a second time. }
 procedure TArm64Backend.EmitUnitGlobalReleases(ABlock: TBlock);
 var
-  I, J: Integer;
+  I, J: Int;
   VD: TVarDecl;
   N: string;
 begin
@@ -19808,7 +19808,7 @@ end;
   Managed kinds join the program-exit release lists like any global. }
 procedure TArm64Backend.RegisterClassVars(ATypeDecls: TObjectList);
 var
-  I, J: Integer;
+  I, J: Int;
   TD: TTypeDecl;
   Fields: TObjectList;
   FDecl: TFieldDecl;
@@ -19866,7 +19866,7 @@ end;
 
 procedure TArm64Backend.RegisterUnitVars(ABlock: TBlock);
 var
-  I, J: Integer;
+  I, J: Int;
   VD: TVarDecl;
   N: string;
 begin
@@ -19968,7 +19968,7 @@ begin
   Result := 'x20';
 end;
 
-procedure TArm64Backend.ArcPushNestedBase(AOffset: Integer;
+procedure TArm64Backend.ArcPushNestedBase(AOffset: Int;
   const ABaseReg: string);
 begin
   { Save the nested-base scratch as a full 16-byte slot (sp alignment holds
@@ -19985,7 +19985,7 @@ begin
   Self.Emit(#9'ldr x20, [sp], #16');
 end;
 
-procedure TArm64Backend.EmitWeakClearAt(AOffset: Integer;
+procedure TArm64Backend.EmitWeakClearAt(AOffset: Int;
   const ABaseReg: string);
 begin
   if AOffset > 0 then
@@ -19995,7 +19995,7 @@ begin
   EmitCallSym('_WeakClear');
 end;
 
-procedure TArm64Backend.EmitReleaseSlotAt(AType: TTypeDesc; AOffset: Integer;
+procedure TArm64Backend.EmitReleaseSlotAt(AType: TTypeDesc; AOffset: Int;
   const ABaseReg: string; AZero: Boolean);
 begin
   Self.Emit(Format(#9'ldr x0, [%s, #%d]', [ABaseReg, AOffset]));
@@ -20010,7 +20010,7 @@ begin
     Self.Emit(Format(#9'str xzr, [%s, #%d]', [ABaseReg, AOffset]));
 end;
 
-procedure TArm64Backend.EmitRetainSlotAt(AType: TTypeDesc; AOffset: Integer;
+procedure TArm64Backend.EmitRetainSlotAt(AType: TTypeDesc; AOffset: Int;
   const ABaseReg: string);
 begin
   Self.Emit(Format(#9'ldr x0, [%s, #%d]', [ABaseReg, AOffset]));
@@ -20030,7 +20030,7 @@ begin
   Self.Emit(Format(#9'mov x21, %s', [ABaseReg]));
 end;
 
-procedure TArm64Backend.ArcArrayElemAddr(AByteOffset: Integer);
+procedure TArm64Backend.ArcArrayElemAddr(AByteOffset: Int);
 begin
   { The element offset is unbounded — an array of 6000 managed elements walks
     past 48000 bytes — but an add-immediate encodes only 12 bits.  Go through

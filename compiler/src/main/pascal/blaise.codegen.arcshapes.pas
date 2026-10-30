@@ -59,7 +59,7 @@ procedure MarkIntfVarArgs(AIntf: TTypeDesc; const AMethName: string;
   AArgs: TObjectList; ASet: TStringList);
 var
   It: TInterfaceTypeDesc;
-  MI, I: Integer;
+  MI, I: Int;
 begin
   if (AIntf = nil) or (AIntf.Kind <> tyInterface) or (AArgs = nil) then Exit;
   It := TInterfaceTypeDesc(AIntf);
@@ -82,7 +82,7 @@ procedure MarkProcTypeVarArgs(AProcType: TObject; AArgs: TObjectList;
   ASet: TStringList);
 var
   PT: TProceduralTypeDesc;
-  I: Integer;
+  I: Int;
 begin
   if (AProcType = nil) or (AArgs = nil) then Exit;
   PT := TProceduralTypeDesc(AProcType);
@@ -95,7 +95,7 @@ end;
 
 procedure CollectAddressTakenExpr(AExpr: TASTExpr; ASet: TStringList);
 var
-  I: Integer;
+  I: Int;
   FC: TFuncCallExpr;
   MC: TMethodCallExpr;
   FA: TFieldAccessExpr;
@@ -213,7 +213,7 @@ end;
 
 procedure CollectAddressTakenStmt(AStmt: TASTStmt; ASet: TStringList);
 var
-  I:      Integer;
+  I:      Int;
   TryE:   TTryExceptStmt;
   TryF:   TTryFinallyStmt;
   RaiseS: TRaiseStmt;
@@ -381,7 +381,7 @@ end;
 
 function CollectAddressTaken(ABlock: TBlock): TStringList;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TStringList.Create();
   Result.CaseSensitive := True;

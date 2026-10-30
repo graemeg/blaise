@@ -146,7 +146,7 @@ function RecretAllFloatLeaves(ARec: TRecordTypeDesc): Boolean;
 function RecretAllIntOrFloatLeaves(ARec: TRecordTypeDesc): Boolean;
 { True when the eightbyte starting at AStartByte holds any float leaf — i.e.
   the eightbyte is SSE-classified under the SysV mixed-class rules. }
-function RecretEightbyteIsSSE(ARec: TRecordTypeDesc; AStartByte: Integer): Boolean;
+function RecretEightbyteIsSSE(ARec: TRecordTypeDesc; AStartByte: Int): Boolean;
 { Classify ARec's return-passing for ATarget's OS. }
 { Type of the outer variable AName captured by nested routine ADecl: walks
   the EnclosingDecl chain's local var decls and parameters.  nil when the
@@ -377,7 +377,7 @@ end;
 
 function RecretManagedClean(ARec: TRecordTypeDesc): Boolean;
 var
-  I: Integer;
+  I: Int;
   F: TFieldInfo;
 begin
   Result := False;
@@ -409,7 +409,7 @@ end;
 
 function RecretAllIntegerLeaves(ARec: TRecordTypeDesc): Boolean;
 var
-  I: Integer;
+  I: Int;
   F: TFieldInfo;
 begin
   Result := False;
@@ -433,7 +433,7 @@ end;
 
 function RecretAllFloatLeaves(ARec: TRecordTypeDesc): Boolean;
 var
-  I: Integer;
+  I: Int;
   F: TFieldInfo;
 begin
   Result := False;
@@ -454,7 +454,7 @@ end;
 
 function RecretAllIntOrFloatLeaves(ARec: TRecordTypeDesc): Boolean;
 var
-  I: Integer;
+  I: Int;
   F: TFieldInfo;
 begin
   Result := False;
@@ -479,10 +479,10 @@ end;
 { True when a scalar leaf of AType (laid out from byte ABase) overlaps the
   eightbyte at AStart and is a float (AFloat) or a non-float (not AFloat).
   Walks nested records and static arrays. }
-function RecretEightbyteHasLeaf(AType: TTypeDesc; ABase, AStart: Integer;
+function RecretEightbyteHasLeaf(AType: TTypeDesc; ABase, AStart: Int;
   AFloat: Boolean): Boolean;
 var
-  I, ESz: Integer;
+  I, ESz: Int;
   F: TFieldInfo;
   AT: TStaticArrayTypeDesc;
 begin
@@ -514,7 +514,7 @@ end;
 
 { System V eightbyte class: SSE when every scalar in the eightbyte at
   AStartByte is a float; one integer leaf makes it INTEGER. }
-function RecretEightbyteIsSSE(ARec: TRecordTypeDesc; AStartByte: Integer): Boolean;
+function RecretEightbyteIsSSE(ARec: TRecordTypeDesc; AStartByte: Int): Boolean;
 begin
   Result := (ARec <> nil) and
     RecretEightbyteHasLeaf(ARec, 0, AStartByte, True) and
@@ -524,7 +524,7 @@ end;
 function RecretClassify(ARec: TRecordTypeDesc;
   const ATarget: TTargetDesc): TRecReturnClass;
 var
-  Sz:               Integer;
+  Sz:               Int;
   Eb0SSE, Eb1SSE:   Boolean;
 begin
   Result := rcSret;
@@ -614,7 +614,7 @@ end;
 
 function UnitBlockHasManagedGlobals(ABlock: TBlock): Boolean;
 var
-  I:  Integer;
+  I:  Int;
   VD: TVarDecl;
 begin
   Result := False;
@@ -844,7 +844,7 @@ end;
 function ExprMayDeferTransientBase(AExpr: TASTExpr): Boolean;
 var
   FA: TFieldAccessExpr;
-  I: Integer;
+  I: Int;
 begin
   Result := False;
   if AExpr = nil then Exit;
@@ -952,7 +952,7 @@ end;
 
 function CodegenMangle(const AName: string): string;
 var
-  I, C, Depth: Integer;
+  I, C, Depth: Int;
   Clean: Boolean;
 begin
   { Fast path: the overwhelming majority of names contain none of the mangled
@@ -1034,7 +1034,7 @@ function NestedCapturedVarType(ADecl: TMethodDecl;
   const AName: string): TTypeDesc;
 var
   Encl: TMethodDecl;
-  I, J: Integer;
+  I, J: Int;
   VD:   TVarDecl;
 begin
   Result := nil;

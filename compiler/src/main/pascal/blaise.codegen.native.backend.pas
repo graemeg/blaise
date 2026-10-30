@@ -86,10 +86,10 @@ type
     { Roll-back support for two-pass function emission (stage-1 register
       promotion): mark the buffer, emit a function, inspect the emitted
       region, and optionally truncate back to the mark and re-emit. }
-    function  AsmMark: Integer;
-    procedure AsmRollback(AMark: Integer);
-    function  AsmContainsFrom(AMark: Integer; const ANeedle: string): Boolean;
-    function  AsmCountFrom(AMark: Integer; const ANeedle: string): Integer;
+    function  AsmMark: Int;
+    procedure AsmRollback(AMark: Int);
+    function  AsmContainsFrom(AMark: Int; const ANeedle: string): Boolean;
+    function  AsmCountFrom(AMark: Int; const ANeedle: string): Int;
 
     { ---- managed threadvar arming ----
 
@@ -103,10 +103,10 @@ type
       is still live.  Scopes nest: a routine emitted while another is open
       (a nested or lifted body) saves and restores the outer state. }
     FTvArmNodes: TStringList;   { nodes the open routine arms; nil = none open }
-    FTvArmPos: Integer;         { splice offset in FAsm; -1 = not marked yet }
-    procedure TvArmBegin(var ASavedNodes: TStringList; var ASavedPos: Integer);
+    FTvArmPos: Int;         { splice offset in FAsm; -1 = not marked yet }
+    procedure TvArmBegin(var ASavedNodes: TStringList; var ASavedPos: Int);
     procedure TvArmMark;
-    procedure TvArmEnd(ASavedNodes: TStringList; ASavedPos: Integer);
+    procedure TvArmEnd(ASavedNodes: TStringList; ASavedPos: Int);
     procedure NoteTvArm(const ANode: string);
     { The ISA's call sequence _ThreadVarArm(@ANode), as assembly lines. }
     function  TvArmCallText(const ANode: string): string; virtual; abstract;
@@ -115,7 +115,7 @@ type
     function IsRecordAllIntegerLeaves(ARec: TRecordTypeDesc): Boolean;
     function IsRecordAllFloatLeaves(ARec: TRecordTypeDesc): Boolean;
     function IsRecordAllIntOrFloatLeaves(ARec: TRecordTypeDesc): Boolean;
-    function EightbyteIsSSE(ARec: TRecordTypeDesc; AStartByte: Integer): Boolean;
+    function EightbyteIsSSE(ARec: TRecordTypeDesc; AStartByte: Int): Boolean;
     function ClassifyRecordReturn(ARec: TRecordTypeDesc): TRecReturnClass;
 
     { ---- ARC field-kind walk (Template Method) ----
@@ -170,7 +170,7 @@ type
       user alias -- gets its real width; builtin names map directly when
       there is no table.  Unknown names default to 4 (an Integer). }
     function  ConstElemSize(const AElemType: string;
-                            out AIsFloat: Boolean): Integer;
+                            out AIsFloat: Boolean): Int;
 
     { ---- ARC walk primitives (abstract per-CPU leaves) ---- }
 
@@ -179,30 +179,30 @@ type
     function  ArcNestedBaseReg: string; virtual; abstract;
     { Save the nested-base scratch register and derive ABaseReg+AOffset into
       it (the recursion base must survive the recursive walk's calls). }
-    procedure ArcPushNestedBase(AOffset: Integer;
+    procedure ArcPushNestedBase(AOffset: Int;
                                 const ABaseReg: string); virtual; abstract;
     { Restore the nested-base scratch register. }
     procedure ArcPopNestedBase; virtual; abstract;
     { Clear a weak reference slot at ABaseReg+AOffset (call _WeakClear with
       the SLOT ADDRESS). }
-    procedure EmitWeakClearAt(AOffset: Integer;
+    procedure EmitWeakClearAt(AOffset: Int;
                               const ABaseReg: string); virtual; abstract;
     { Load the managed pointer at ABaseReg+AOffset, call the release helper
       AType selects (_StringRelease/_DynArrayRelease/_ClassRelease), and
       zero the slot when AZero is set. }
-    procedure EmitReleaseSlotAt(AType: TTypeDesc; AOffset: Integer;
+    procedure EmitReleaseSlotAt(AType: TTypeDesc; AOffset: Int;
                                 const ABaseReg: string;
                                 AZero: Boolean); virtual; abstract;
     { Load the managed pointer at ABaseReg+AOffset and call the retain helper
       AType selects (_StringAddRef/_DynArrayAddRef/_ClassAddRef). }
-    procedure EmitRetainSlotAt(AType: TTypeDesc; AOffset: Integer;
+    procedure EmitRetainSlotAt(AType: TTypeDesc; AOffset: Int;
                                const ABaseReg: string); virtual; abstract;
     { Begin a static-array element walk: save two callee-saved scratch
       registers and anchor the array base (x86-64: %r15 base, %r14 element). }
     procedure ArcEnterArrayWalk(const ABaseReg: string); virtual; abstract;
     { Derive the element address at AByteOffset from the anchored array base
       into the element scratch register. }
-    procedure ArcArrayElemAddr(AByteOffset: Integer); virtual; abstract;
+    procedure ArcArrayElemAddr(AByteOffset: Int); virtual; abstract;
     { The element scratch register ArcArrayElemAddr targets. }
     function  ArcArrayElemReg: string; virtual; abstract;
     { End the static-array element walk (restore the scratch registers). }
@@ -324,30 +324,30 @@ begin
   FAsm.AppendLine();
 end;
 
-function TNativeBackend.AsmMark: Integer;
+function TNativeBackend.AsmMark: Int;
 begin
   Result := FAsm.Length;
 end;
 
-procedure TNativeBackend.AsmRollback(AMark: Integer);
+procedure TNativeBackend.AsmRollback(AMark: Int);
 begin
   FAsm.Truncate(AMark);
 end;
 
-function TNativeBackend.AsmContainsFrom(AMark: Integer;
+function TNativeBackend.AsmContainsFrom(AMark: Int;
   const ANeedle: string): Boolean;
 begin
   Result := FAsm.ContainsFrom(AMark, ANeedle);
 end;
 
-function TNativeBackend.AsmCountFrom(AMark: Integer;
-  const ANeedle: string): Integer;
+function TNativeBackend.AsmCountFrom(AMark: Int;
+  const ANeedle: string): Int;
 begin
   Result := FAsm.CountFrom(AMark, ANeedle);
 end;
 
 procedure TNativeBackend.TvArmBegin(var ASavedNodes: TStringList;
-  var ASavedPos: Integer);
+  var ASavedPos: Int);
 begin
   ASavedNodes := FTvArmNodes;
   ASavedPos := FTvArmPos;
@@ -366,9 +366,9 @@ begin
     FTvArmNodes.Add(ANode);
 end;
 
-procedure TNativeBackend.TvArmEnd(ASavedNodes: TStringList; ASavedPos: Integer);
+procedure TNativeBackend.TvArmEnd(ASavedNodes: TStringList; ASavedPos: Int);
 var
-  I: Integer;
+  I: Int;
   S, Calls: string;
 begin
   if (FTvArmNodes.Count > 0) and (FTvArmPos >= 0) then
@@ -410,7 +410,7 @@ begin
 end;
 
 function TNativeBackend.EightbyteIsSSE(ARec: TRecordTypeDesc;
-  AStartByte: Integer): Boolean;
+  AStartByte: Int): Boolean;
 begin
   Result := RecretEightbyteIsSSE(ARec, AStartByte);
 end;
@@ -436,7 +436,7 @@ end;
 procedure TNativeBackend.EmitRecordFieldReleases(ART: TRecordTypeDesc;
   const ABaseReg: string; AZero: Boolean);
 var
-  I: Integer;
+  I: Int;
   F: TFieldInfo;
 begin
   if ART = nil then Exit;
@@ -533,7 +533,7 @@ end;
 procedure TNativeBackend.EmitStaticArrayReleaseElems(
   AType: TStaticArrayTypeDesc; const ABaseReg: string; AZero: Boolean);
 var
-  I, ElemSize: Integer;
+  I, ElemSize: Int;
 begin
   if (AType = nil) or (AType.ElementType = nil) then Exit;
   ElemSize := AType.ElementType.RawSize();
@@ -550,7 +550,7 @@ end;
 procedure TNativeBackend.EmitRecordFieldRetains(ART: TRecordTypeDesc;
   const ABaseReg: string);
 var
-  I: Integer;
+  I: Int;
   F: TFieldInfo;
 begin
   if ART = nil then Exit;
@@ -625,7 +625,7 @@ end;
 procedure TNativeBackend.EmitStaticArrayAddRefElems(
   AType: TStaticArrayTypeDesc; const ABaseReg: string);
 var
-  I, ElemSize: Integer;
+  I, ElemSize: Int;
 begin
   if (AType = nil) or (AType.ElementType = nil) then Exit;
   ElemSize := AType.ElementType.RawSize();
@@ -639,7 +639,7 @@ begin
 end;
 
 function TNativeBackend.ConstElemSize(const AElemType: string;
-  out AIsFloat: Boolean): Integer;
+  out AIsFloat: Boolean): Int;
 var
   TD: TTypeDesc;
 begin

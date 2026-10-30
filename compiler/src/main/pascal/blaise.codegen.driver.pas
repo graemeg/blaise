@@ -280,7 +280,7 @@ type
   drivers; exposed because the lowering steps run from worker threads
   as well as the main compile path. }
 function RunProcess(const AExe: string; AArgs: TStringList;
-  out AOutput: string): Integer;
+  out AOutput: string): Int;
 
 { Build the leaf-first RTL unit list for a target.  The base list is shared;
   the OS-specific bits are selected from AOS:
@@ -394,8 +394,8 @@ uses
   directory.  Declared directly rather than via GRtlPlatform to avoid a
   unit-initialisation-order dependency (this unit may run before the platform
   layer assigns GRtlPlatform). }
-function _driver_getpid: Integer; external name 'getpid';
-function _driver_rmdir(APath: PChar): Integer; external name 'rmdir';
+function _driver_getpid: Int32; external name 'getpid';
+function _driver_rmdir(APath: PChar): Int32; external name 'rmdir';
 
 { Short key identifying the COMPILER that produced a cached RTL object.
 
@@ -444,7 +444,7 @@ end;
 
 function RTLSourceKey(const ASrcDir: string; AUnits: TStringList): string;
 var
-  I: Integer;
+  I: Int;
   Path, Acc: string;
 begin
   Acc := '';
@@ -462,7 +462,7 @@ end;
 
 function NewestRTLSourceAge(const ASrcDir: string; AUnits: TStringList): Int64;
 var
-  I: Integer;
+  I: Int;
   Age: Int64;
 begin
   { A missing source yields FileAge = -1 and is simply skipped; EnsureRTLObjects
@@ -487,7 +487,7 @@ end;
 procedure CollectDefinedSymbols(const AObjPath: string; ADest: TStringList);
 var
   Obj:   TElfObjectFile;
-  I:     Integer;
+  I:     Int;
   Sym:   TRdSymbol;
   Bytes: string;
   Mo:    TMachOFile;
@@ -592,7 +592,7 @@ function TBackendDriver.ToolPath(const AName: string;
   const ATarget: TTargetDesc): string;
 var
   Specs: TToolSpecArray;
-  I:     Integer;
+  I:     Int;
 begin
   Result := '';
   Specs := Self.DescribeTools(ATarget);
@@ -661,7 +661,7 @@ const
 function BuildRTLUnitList(AStatic: Boolean; AOS: TTargetOS;
   ACPU: TTargetCPU): TStringList;
 var
-  I: Integer;
+  I: Int;
   OS: string;
 begin
   OS := RTLOSSuffix(AOS);
@@ -723,7 +723,7 @@ function TBackendDriver.EnsureRTLObjects(AOpts: TBackendOpts;
 var
   SrcDir, CacheDir, BuildDir, BlaiseBin: string;
   SrcFile, ObjFile, TmpObj: string;
-  I, J, ExitCode: Integer;
+  I, J, ExitCode: Int;
   NewestSrc: Int64;
   Args: TStringList;
   Msg: string;
@@ -898,8 +898,8 @@ var
   Args: TStringList;
   RTLObjs: TStringList;
   Msg, RTLErr: string;
-  ExitCode: Integer;
-  I: Integer;
+  ExitCode: Int;
+  I: Int;
 begin
   Result := '';
   { Every Blaise program links the implicit RTL units (runtime.* +
@@ -967,7 +967,7 @@ const
   Indent = '  ';
   FlagFieldWidth = 18;
 var
-  Pad: Integer;
+  Pad: Int;
 begin
   Result := Indent + AFlag;
   Pad := FlagFieldWidth - Length(AFlag);
@@ -987,11 +987,11 @@ begin
 end;
 
 function RunProcess(const AExe: string; AArgs: TStringList;
-  out AOutput: string): Integer;
+  out AOutput: string): Int;
 var
   Proc: TProcess;
   Chunk: string;
-  I: Integer;
+  I: Int;
 begin
   Proc := TProcess.Create(nil);
   try
@@ -1027,7 +1027,7 @@ end;
 
 function RegisteredBackendNames: TStringList;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := TStringList.Create();
   for I := 0 to Ord(High(TBackendKind)) do
@@ -1037,7 +1037,7 @@ end;
 
 function ParseBackendName(const AName: string; out AKind: TBackendKind): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   Result := False;
   for I := 0 to Ord(High(TBackendKind)) do

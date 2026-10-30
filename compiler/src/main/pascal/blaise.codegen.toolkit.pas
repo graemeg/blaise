@@ -180,7 +180,7 @@ end;
 
 destructor TTargetRegistry.Destroy;
 var
-  I:  Integer;
+  I:  Int;
   Tk: TTargetToolkit;
 begin
   if FByName <> nil then
