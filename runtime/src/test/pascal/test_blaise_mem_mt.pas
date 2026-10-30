@@ -246,14 +246,15 @@ begin
 
   _BlaiseFreeMem(GLargePtr);              { FOREIGN large free }
 
-  { Probe: allocate a much smaller large block.  8192 + 24 rounds to
-    12288 mapped bytes; a buggy cache capture would return the foreign
-    256 KiB mapping instead. }
+  { Probe: allocate a much smaller large block.  8192 plus the 32-byte
+    large header rounds to 12288 mapped bytes; a buggy cache capture would
+    return the foreign 256 KiB mapping instead.  TotalMapped is the
+    header's first field, 32 bytes before the user pointer. }
   Q := _BlaiseGetMem(8192);
   GLargeProbeOk := 0;
   if Q <> nil then
     GLargeProbeOk := 1;
-  MappedP := Pointer(UInt(Q) - 24);
+  MappedP := Pointer(UInt(Q) - 32);
   GLargeProbeMapped := MappedP^;
   _BlaiseFreeMem(Q);                       { local free — cached here }
 end;
