@@ -37,16 +37,16 @@ type
 
   TLabelInfo = record
     Section: TContainerSectionKind;
-    Offset:  Integer;
+    Offset:  Int;
     Defined: Boolean;
   end;
 
   TLabelMap = class
   private
-    FIndex: TDictionary<string, Integer>;
+    FIndex: TDictionary<string, Int>;
     FKeys:  array of string;
     FVals:  array of TLabelInfo;
-    FCount: Integer;
+    FCount: Int;
   public
     constructor Create;
     destructor Destroy; override;
@@ -54,9 +54,9 @@ type
     procedure Remove(const AKey: string);
     function ContainsKey(const AKey: string): Boolean;
     function TryGetValue(const AKey: string; var AVal: TLabelInfo): Boolean;
-    function GetKey(AIdx: Integer): string;
-    function GetVal(AIdx: Integer): TLabelInfo;
-    property Count: Integer read FCount;
+    function GetKey(AIdx: Int): string;
+    function GetVal(AIdx: Int): TLabelInfo;
+    property Count: Int read FCount;
   end;
 
 procedure AssembleToObject(const AAsmText: string; const AOutputPath: string);
@@ -77,9 +77,9 @@ begin
   Result := P^;
 end;
 
-function SingleBits(V: Float32): Integer;
+function SingleBits(V: Float32): Int32;
 var
-  P: ^Integer;
+  P: ^Int32;
 begin
   P := Pointer(@V);
   Result := P^;
@@ -107,7 +107,7 @@ const
     'r12b', 'r13b', 'r14b', 'r15b'
   );
 
-  RegCodes: array[0..99] of Integer = (
+  RegCodes: array[0..99] of Int32 = (
     0, 1, 2, 3, 4, 5, 6, 7,
     8, 9, 10, 11, 12, 13, 14, 15,
     0, 1, 2, 3, 4, 5, 6, 7,
@@ -124,7 +124,7 @@ const
     12, 13, 14, 15
   );
 
-  RegWidths: array[0..99] of Integer = (
+  RegWidths: array[0..99] of Int32 = (
     64, 64, 64, 64, 64, 64, 64, 64,
     64, 64, 64, 64, 64, 64, 64, 64,
     32, 32, 32, 32, 32, 32, 32, 32,
@@ -141,7 +141,7 @@ const
     8, 8, 8, 8
   );
 
-  RegIsXmm: array[0..99] of Integer = (
+  RegIsXmm: array[0..99] of Int32 = (
     0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0,
@@ -174,14 +174,14 @@ type
 
   TOperand = record
     Kind:    TOperandKind;
-    Reg:     Integer;      { register code (0-15) }
-    RegW:    Integer;      { register width }
+    Reg:     Int32;      { register code (0-15) }
+    RegW:    Int32;      { register width }
     IsXmm:  Boolean;
     Imm:     Int64;        { immediate value }
     Disp:    Int64;        { memory displacement }
-    Base:    Integer;      { base register code (-1 = none) }
-    Index:   Integer;      { index register code (-1 = none) }
-    Scale:   Integer;      { 1, 2, 4, or 8 }
+    Base:    Int32;      { base register code (-1 = none) }
+    Index:   Int32;      { index register code (-1 = none) }
+    Scale:   Int32;      { 1, 2, 4, or 8 }
     Sym:     string;       { symbol name (for RIP-rel, labels, TLS) }
     SymDisp: Int64;        { addend to symbol (sym + N) }
     TpOff:   Boolean;      { sym@tpoff — emit R_X86_64_TPOFF32 relocation }
@@ -200,38 +200,38 @@ type
     Kind:      TLineKind;
     Mnemonic:  string;     { instruction mnemonic or directive name }
     Op1, Op2, Op3: TOperand; { up to three operands (Op3 for VEX/imm forms) }
-    NumOps:    Integer;
+    NumOps:    Int;
     RawLine:   string;     { original line text }
-    LineNum:   Integer;
+    LineNum:   Int;
     HasLock:   Boolean;    { a `lock` prefix preceded the mnemonic }
   end;
 
   { Internal assembler state for a single section }
   TSectionState = record
     Kind:   TContainerSectionKind;
-    Offset: Integer;       { current offset within section }
+    Offset: Int;       { current offset within section }
   end;
 
 
 { ---- String helpers --------------------------------------------------- }
 
-function IsDigit(C: Integer): Boolean;
+function IsDigit(C: Int32): Boolean;
 begin
   Result := (C >= Ord('0')) and (C <= Ord('9'));
 end;
 
-function IsAlpha(C: Integer): Boolean;
+function IsAlpha(C: Int32): Boolean;
 begin
   Result := ((C >= Ord('a')) and (C <= Ord('z'))) or
             ((C >= Ord('A')) and (C <= Ord('Z'))) or (C = Ord('_'));
 end;
 
-function IsAlnum(C: Integer): Boolean;
+function IsAlnum(C: Int32): Boolean;
 begin
   Result := IsDigit(C) or IsAlpha(C);
 end;
 
-function IsHexDigit(C: Integer): Boolean;
+function IsHexDigit(C: Int32): Boolean;
 begin
   Result := IsDigit(C) or ((C >= Ord('a')) and (C <= Ord('f'))) or
             ((C >= Ord('A')) and (C <= Ord('F')));
@@ -239,7 +239,7 @@ end;
 
 function TrimStr(const S: string): string;
 var
-  Lo, Hi: Integer;
+  Lo, Hi: Int;
 begin
   Lo := 0;
   Hi := Length(S) - 1;
@@ -255,7 +255,7 @@ end;
 
 function StartsWithStr(const S, Prefix: string): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   if Length(Prefix) > Length(S) then
   begin
@@ -275,12 +275,12 @@ begin
   Result := True;
 end;
 
-function ParseInt(const S: string; var APos: Integer): Int64;
+function ParseInt(const S: string; var APos: Int): Int64;
 var
   Neg: Boolean;
-  Base: Integer;
-  C: Integer;
-  Digit: Integer;
+  Base: Int32;
+  C: Int32;
+  Digit: Int;
 begin
   Result := 0;
   Neg := False;
@@ -321,10 +321,10 @@ end;
 
 { ---- Register lookup -------------------------------------------------- }
 
-function LookupReg(const AName: string; var ACode: Integer;
-  var AWidth: Integer; var AIsXmm: Boolean): Boolean;
+function LookupReg(const AName: string; var ACode: Int32;
+  var AWidth: Int32; var AIsXmm: Boolean): Boolean;
 var
-  I: Integer;
+  I: Int;
 begin
   I := 0;
   while I <= High(RegNames) do
@@ -344,14 +344,14 @@ end;
 
 { ---- Operand parser --------------------------------------------------- }
 
-function ParseOperand(const S: string; APos: Integer;
-  var AEnd: Integer): TOperand;
+function ParseOperand(const S: string; APos: Int;
+  var AEnd: Int): TOperand;
 var
-  P: Integer;
+  P: Int;
   RegName: string;
   SymName: string;
   SymDisp: Int64;
-  IdxW: Integer;
+  IdxW: Int32;
   IdxXmm: Boolean;
 begin
   Result.Kind   := opNone;
@@ -527,7 +527,7 @@ begin
           begin
             P := P + 1;
             while (P < Length(S)) and ((S[P]= Ord(' ')) or (S[P]= 9)) do P := P + 1;
-            Result.Scale := Integer(ParseInt(S, P));
+            Result.Scale := Int32(ParseInt(S, P));
           end;
         end;
         if (P < Length(S)) and (S[P]= Ord(')')) then
@@ -657,10 +657,10 @@ end;
 
 { ---- Line parser ------------------------------------------------------ }
 
-function ParseLine(const ALine: string; ALineNum: Integer): TParsedLine;
+function ParseLine(const ALine: string; ALineNum: Int): TParsedLine;
 var
   S: string;
-  P, Q, OpEnd: Integer;
+  P, Q, OpEnd: Int;
   Mnemonic: string;
   TmpOp: TOperand;
 begin
@@ -857,7 +857,7 @@ end;
   R = extends ModRM.reg
   X = extends SIB.index
   B = extends ModRM.rm or SIB.base }
-function MakeRex(AW, AR, AX, AB: Boolean): Integer;
+function MakeRex(AW, AR, AX, AB: Boolean): Int32;
 begin
   Result := $40;
   if AW then Result := Result or $08;
@@ -866,21 +866,21 @@ begin
   if AB then Result := Result or $01;
 end;
 
-function NeedsRex(ACode: Integer): Boolean;
+function NeedsRex(ACode: Int32): Boolean;
 begin
   Result := ACode >= 8;
 end;
 
 { ModRM byte: mod(2) reg(3) rm(3) }
-function MakeModRM(AMod, AReg, ARM: Integer): Integer;
+function MakeModRM(AMod, AReg, ARM: Int32): Int32;
 begin
   Result := ((AMod and 3) shl 6) or ((AReg and 7) shl 3) or (ARM and 7);
 end;
 
 { SIB byte: scale(2) index(3) base(3) }
-function MakeSIB(AScale, AIndex, ABase: Integer): Integer;
+function MakeSIB(AScale, AIndex, ABase: Int32): Int32;
 var
-  SS: Integer;
+  SS: Int32;
 begin
   case AScale of
     1: SS := 0;
@@ -896,7 +896,7 @@ end;
 type
   TCodeBuf = record
     Data: string;
-    Len:  Integer;
+    Len:  Int;
   end;
 
 procedure CBInit(var ACB: TCodeBuf);
@@ -905,7 +905,7 @@ begin
   ACB.Len := 0;
 end;
 
-procedure CBEmit(var ACB: TCodeBuf; AByte: Integer);
+procedure CBEmit(var ACB: TCodeBuf; AByte: Int32);
 begin
   ACB.Data := ACB.Data + Chr(AByte and $FF);
   ACB.Len := ACB.Len + 1;
@@ -914,13 +914,13 @@ end;
 { Insert a byte at the front of the buffer.  Used for legacy prefixes
   (segment overrides) that must precede REX, which the caller has
   already emitted. }
-procedure CBPrepend(var ACB: TCodeBuf; AByte: Integer);
+procedure CBPrepend(var ACB: TCodeBuf; AByte: Int32);
 begin
   ACB.Data := Chr(AByte and $FF) + ACB.Data;
   ACB.Len := ACB.Len + 1;
 end;
 
-procedure CBPatch32(var ACB: TCodeBuf; AOffset: Integer; AVal: Integer);
+procedure CBPatch32(var ACB: TCodeBuf; AOffset: Int; AVal: Int32);
 var
   P: PChar;
 begin
@@ -931,13 +931,13 @@ begin
   P[AOffset + 3] := Chr((AVal shr 24) and $FF);
 end;
 
-procedure CBEmit16(var ACB: TCodeBuf; AVal: Integer);
+procedure CBEmit16(var ACB: TCodeBuf; AVal: Int32);
 begin
   CBEmit(ACB, AVal and $FF);
   CBEmit(ACB, (AVal shr 8) and $FF);
 end;
 
-procedure CBEmit32(var ACB: TCodeBuf; AVal: Integer);
+procedure CBEmit32(var ACB: TCodeBuf; AVal: Int32);
 begin
   CBEmit(ACB, AVal and $FF);
   CBEmit(ACB, (AVal shr 8) and $FF);
@@ -947,8 +947,8 @@ end;
 
 procedure CBEmit64(var ACB: TCodeBuf; AVal: Int64);
 begin
-  CBEmit32(ACB, Integer(AVal and $FFFFFFFF));
-  CBEmit32(ACB, Integer((AVal shr 32) and $FFFFFFFF));
+  CBEmit32(ACB, Int32(AVal and $FFFFFFFF));
+  CBEmit32(ACB, Int32((AVal shr 32) and $FFFFFFFF));
 end;
 
 { Emit ModRM + optional SIB + displacement for a memory operand.
@@ -956,13 +956,13 @@ end;
   ABase, AIndex, AScale, ADisp describe the memory address.
   Returns True if a 32-bit displacement was emitted at the end
   (for relocation patching). }
-function EmitModRMMem(var ACB: TCodeBuf; AReg: Integer;
-  ABase, AIndex, AScale: Integer; ADisp: Int64;
-  out ADispOffset: Integer): Boolean;
+function EmitModRMMem(var ACB: TCodeBuf; AReg: Int32;
+  ABase, AIndex, AScale: Int32; ADisp: Int64;
+  out ADispOffset: Int): Boolean;
 var
-  ModBits: Integer;
+  ModBits: Int32;
   NeedSIB: Boolean;
-  BaseEnc: Integer;
+  BaseEnc: Int32;
 begin
   Result := False;
   ADispOffset := 0;
@@ -978,7 +978,7 @@ begin
     else
       CBEmit(ACB, MakeSIB(1, 4, 5));
     ADispOffset := ACB.Len;
-    CBEmit32(ACB, Integer(ADisp));
+    CBEmit32(ACB, Int32(ADisp));
     Result := True;
     Exit;
   end;
@@ -1004,19 +1004,19 @@ begin
     CBEmit(ACB, MakeModRM(ModBits, AReg, ABase));
 
   if ModBits = 1 then
-    CBEmit(ACB, Integer(ADisp) and $FF)
+    CBEmit(ACB, Int32(ADisp) and $FF)
   else if ModBits = 2 then
   begin
     ADispOffset := ACB.Len;
-    CBEmit32(ACB, Integer(ADisp));
+    CBEmit32(ACB, Int32(ADisp));
     Result := True;
   end;
 end;
 
 { Emit ModRM for RIP-relative addressing.  The 32-bit displacement
   placeholder is always emitted (filled in by relocation). }
-procedure EmitModRMRip(var ACB: TCodeBuf; AReg: Integer;
-  out ADispOffset: Integer);
+procedure EmitModRMRip(var ACB: TCodeBuf; AReg: Int32;
+  out ADispOffset: Int);
 begin
   CBEmit(ACB, MakeModRM(0, AReg, 5));
   ADispOffset := ACB.Len;
@@ -1035,7 +1035,7 @@ end;
 type
   TRelocRequest = record
     Section:  TContainerSectionKind;
-    Offset:   Integer;
+    Offset:   Int;
     Symbol:   string;
     RType:    TContainerRelocKind;
     Addend:   Int64;
@@ -1043,18 +1043,18 @@ type
 
   TEncodeContext = record
     Section:  TContainerSectionKind;
-    Offset:   Integer;
+    Offset:   Int;
     Relocs:      array of TRelocRequest;
-    RelocCount:  Integer;
+    RelocCount:  Int;
     Labels:   TLabelMap;
-    Pass:     Integer;
+    Pass:     Int;
     { Number of immediate bytes the current instruction emits AFTER the
       RIP-relative displacement field.  PC-relative fixups are relative
       to the END of the instruction, so both the in-section patch and
       the relocation addend must account for these trailing bytes.
       Set by imm->mem encoders before EncodeMemOperand; reset per
       instruction. }
-    ImmTail:  Integer;
+    ImmTail:  Int;
   end;
 
 function EncodeInstruction(var ACtx: TEncodeContext;
@@ -1087,7 +1087,7 @@ function EncodeMovqXmm(var ACB: TCodeBuf; var ACtx: TEncodeContext;
 function EncodeVEX(var ACB: TCodeBuf; var ACtx: TEncodeContext;
   const AMnem: string; const AOp1, AOp2, AOp3: TOperand): string; forward;
 
-function BranchCondCode(const AMnem: string): Integer;
+function BranchCondCode(const AMnem: string): Int32;
 begin
   if AMnem = 'jo'  then Result := $0
   else if AMnem = 'jno' then Result := $1
@@ -1118,7 +1118,7 @@ begin
   Result := (AMnem = 'jmp') or (BranchCondCode(AMnem) >= 0);
 end;
 
-function SetCCOpcode(const AMnem: string): Integer;
+function SetCCOpcode(const AMnem: string): Int32;
 begin
   if AMnem = 'sete'  then Result := $94
   else if AMnem = 'setne' then Result := $95
@@ -1153,7 +1153,7 @@ end;
 constructor TLabelMap.Create;
 begin
   inherited Create();
-  FIndex := TDictionary<string, Integer>.Create();
+  FIndex := TDictionary<string, Int>.Create();
   SetLength(FKeys, 0);
   SetLength(FVals, 0);
   FCount := 0;
@@ -1169,7 +1169,7 @@ end;
 
 procedure TLabelMap.Add(const AKey: string; AVal: TLabelInfo);
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   if FIndex.TryGetValue(AKey, Idx) then
   begin
@@ -1200,7 +1200,7 @@ end;
 
 function TLabelMap.TryGetValue(const AKey: string; var AVal: TLabelInfo): Boolean;
 var
-  Idx: Integer;
+  Idx: Int;
 begin
   if FIndex.TryGetValue(AKey, Idx) then
   begin
@@ -1211,18 +1211,18 @@ begin
     Result := False;
 end;
 
-function TLabelMap.GetKey(AIdx: Integer): string;
+function TLabelMap.GetKey(AIdx: Int): string;
 begin
   Result := FKeys[AIdx];
 end;
 
-function TLabelMap.GetVal(AIdx: Integer): TLabelInfo;
+function TLabelMap.GetVal(AIdx: Int): TLabelInfo;
 begin
   Result := FVals[AIdx];
 end;
 
 { Add a relocation request to the context }
-procedure AddRelocReq(var ACtx: TEncodeContext; AOffset: Integer;
+procedure AddRelocReq(var ACtx: TEncodeContext; AOffset: Int;
   const ASym: string; ARType: TContainerRelocKind; AAddend: Int64);
 var
   R: TRelocRequest;
@@ -1240,20 +1240,20 @@ end;
 
 { Encode a RIP-relative memory operand, emitting a relocation. }
 procedure EncodeRipRelOperand(var ACB: TCodeBuf; var ACtx: TEncodeContext;
-  const AOp: TOperand; AReg: Integer);
+  const AOp: TOperand; AReg: Int32);
 var
-  DispOff: Integer;
+  DispOff: Int;
   LabelInf: TLabelInfo;
-  PcRelDisp: Integer;
+  PcRelDisp: Int;
 begin
   EmitModRMRip(ACB, AReg, DispOff);
   if (ACtx.Pass = 2) and (AOp.Sym <> '') and
      ACtx.Labels.TryGetValue(AOp.Sym, LabelInf) and
      (LabelInf.Section = ACtx.Section) then
   begin
-    PcRelDisp := (LabelInf.Offset + Integer(AOp.SymDisp))
+    PcRelDisp := (LabelInf.Offset + Int(AOp.SymDisp))
                  - (ACtx.Offset + DispOff + 4 + ACtx.ImmTail);
-    CBPatch32(ACB, DispOff, PcRelDisp);
+    CBPatch32(ACB, DispOff, Int32(PcRelDisp));
   end
   else
     AddRelocReq(ACtx, ACtx.Offset + DispOff, AOp.Sym, crkPC32,
@@ -1262,9 +1262,9 @@ end;
 
 { Encode a TLS memory operand (%fs:sym@tpoff or %fs:disp). }
 procedure EncodeTLSOperand(var ACB: TCodeBuf; var ACtx: TEncodeContext;
-  const AOp: TOperand; AReg: Integer);
+  const AOp: TOperand; AReg: Int32);
 var
-  DispOff: Integer;
+  DispOff: Int;
 begin
   CBPrepend(ACB, $64);
   CBEmit(ACB, MakeModRM(0, AReg, 4));
@@ -1276,14 +1276,14 @@ begin
     AddRelocReq(ACtx, ACtx.Offset + DispOff, AOp.Sym, crkTPOFF32, 0);
   end
   else
-    CBEmit32(ACB, Integer(AOp.Disp));
+    CBEmit32(ACB, Int32(AOp.Disp));
 end;
 
 { Encode a memory or RIP-relative or TLS source/dest operand. }
 procedure EncodeMemOperand(var ACB: TCodeBuf; var ACtx: TEncodeContext;
-  const AOp: TOperand; AReg: Integer);
+  const AOp: TOperand; AReg: Int32);
 var
-  DispOff: Integer;
+  DispOff: Int;
   Dummy: Boolean;
 begin
   case AOp.Kind of
@@ -1325,7 +1325,7 @@ end;
 { Emit REX prefix if needed for a reg-reg or reg-mem instruction.
   AW = 64-bit operand size, AReg/ARM are register codes (may be >= 8). }
 procedure EmitRexIfNeeded(var ACB: TCodeBuf; AW: Boolean;
-  AReg, ARM: Integer; AForce8BitRex: Boolean);
+  AReg, ARM: Int32; AForce8BitRex: Boolean);
 var
   NeedRex: Boolean;
 begin
@@ -1335,7 +1335,7 @@ begin
 end;
 
 procedure EmitRexWithIndex(var ACB: TCodeBuf; AW: Boolean;
-  AReg, AIndex, ABase: Integer);
+  AReg, AIndex, ABase: Int32);
 var
   NeedRex: Boolean;
 begin
@@ -1349,10 +1349,10 @@ end;
   must use this (or EmitRexWithIndex) — computing REX from the base
   register alone silently mis-encodes r8-r15 index registers as their
   low-3-bit twins. }
-procedure EmitRexForMem(var ACB: TCodeBuf; AW: Boolean; AReg: Integer;
+procedure EmitRexForMem(var ACB: TCodeBuf; AW: Boolean; AReg: Int32;
   const AMem: TOperand; AForce8BitRex: Boolean);
 var
-  BaseReg: Integer;
+  BaseReg: Int32;
   NeedRex: Boolean;
 begin
   BaseReg := AMem.Base;
@@ -1365,7 +1365,7 @@ end;
 
 { Is this an 8-bit register that requires REX prefix for uniform encoding?
   (spl, bpl, sil, dil need REX to distinguish from ah/ch/dh/bh) }
-function NeedsRex8(ARegCode: Integer; AWidth: Integer): Boolean;
+function NeedsRex8(ARegCode: Int32; AWidth: Int32): Boolean;
 begin
   Result := (AWidth = 8) and (ARegCode >= 4) and (ARegCode <= 7);
 end;
@@ -1378,7 +1378,7 @@ end;
 function NormalizeMnemonic(const AMnem: string;
   const AOp1, AOp2: TOperand): string;
 var
-  W: Integer;
+  W: Int32;
   Suffix: string;
 begin
   Result := AMnem;
@@ -1417,9 +1417,9 @@ var
   CB: TCodeBuf;
   Mnem: string;
   Op1, Op2, Op3: TOperand;
-  DispOff: Integer;
+  DispOff: Int;
   RelDisp: Int64;
-  CC: Integer;
+  CC: Int32;
   Info: TLabelInfo;
 begin
   CBInit(CB);
@@ -1558,12 +1558,12 @@ begin
       if (Op1.Imm >= -128) and (Op1.Imm <= 127) then
       begin
         CBEmit(CB, $6A);
-        CBEmit(CB, Integer(Op1.Imm) and $FF);
+        CBEmit(CB, Int32(Op1.Imm) and $FF);
       end
       else
       begin
         CBEmit(CB, $68);
-        CBEmit32(CB, Integer(Op1.Imm));
+        CBEmit32(CB, Int32(Op1.Imm));
       end;
     end
     else if IsMemLike(Op1) then
@@ -1613,7 +1613,7 @@ begin
         if Info.Defined and (Info.Section = ACtx.Section) then
         begin
           RelDisp := Int64(Info.Offset) - Int64(ACtx.Offset + CB.Len);
-          CBPatch32(CB, DispOff, Integer(RelDisp));
+          CBPatch32(CB, DispOff, Int32(RelDisp));
         end
         else
           AddRelocReq(ACtx, ACtx.Offset + DispOff, Op1.Sym, crkPLT32, -4);
@@ -1656,7 +1656,7 @@ begin
          and (Info.Section = ACtx.Section) then
       begin
         RelDisp := Int64(Info.Offset) - Int64(ACtx.Offset + CB.Len);
-        CBPatch32(CB, DispOff, Integer(RelDisp));
+        CBPatch32(CB, DispOff, Int32(RelDisp));
       end
       else
         { External or other-section target: emit a relocation rather
@@ -1930,7 +1930,7 @@ begin
     if (Op1.Kind = opImm) and (Op2.Kind = opReg) and (Op3.Kind = opReg) then
     begin
       EmitSSERegReg(CB, $66, False, $70, -1, Op2.Reg, Op3.Reg);
-      CBEmit(CB, Integer(Op1.Imm) and $FF);
+      CBEmit(CB, Int32(Op1.Imm) and $FF);
     end
     else
       raise EAssembler.Create('pshufd: unsupported operands');
@@ -1960,7 +1960,7 @@ function EncodeMovGeneric(var ACB: TCodeBuf; var ACtx: TEncodeContext;
   const AMnem: string; const ASrc, ADst: TOperand): string;
 var
   W64: Boolean;
-  OpSize: Integer;
+  OpSize: Int32;
   Force8Rex: Boolean;
 begin
   W64 := (AMnem = 'movq');
@@ -1994,19 +1994,19 @@ begin
     begin
       CBEmit(ACB, $C6);
       CBEmit(ACB, MakeModRM(3, 0, ADst.Reg));
-      CBEmit(ACB, Integer(ASrc.Imm) and $FF);
+      CBEmit(ACB, Int32(ASrc.Imm) and $FF);
     end
     else if OpSize = 16 then
     begin
       CBEmit(ACB, $C7);
       CBEmit(ACB, MakeModRM(3, 0, ADst.Reg));
-      CBEmit16(ACB, Integer(ASrc.Imm));
+      CBEmit16(ACB, Int32(ASrc.Imm));
     end
     else
     begin
       CBEmit(ACB, $C7);
       CBEmit(ACB, MakeModRM(3, 0, ADst.Reg));
-      CBEmit32(ACB, Integer(ASrc.Imm));
+      CBEmit32(ACB, Int32(ASrc.Imm));
     end;
     Result := ACB.Data;
     Exit;
@@ -2052,21 +2052,21 @@ begin
       CBEmit(ACB, $C6);
       ACtx.ImmTail := 1;
       EncodeMemOperand(ACB, ACtx, ADst, 0);
-      CBEmit(ACB, Integer(ASrc.Imm) and $FF);
+      CBEmit(ACB, Int32(ASrc.Imm) and $FF);
     end
     else if OpSize = 16 then
     begin
       CBEmit(ACB, $C7);
       ACtx.ImmTail := 2;
       EncodeMemOperand(ACB, ACtx, ADst, 0);
-      CBEmit16(ACB, Integer(ASrc.Imm));
+      CBEmit16(ACB, Int32(ASrc.Imm));
     end
     else
     begin
       CBEmit(ACB, $C7);
       ACtx.ImmTail := 4;
       EncodeMemOperand(ACB, ACtx, ADst, 0);
-      CBEmit32(ACB, Integer(ASrc.Imm));
+      CBEmit32(ACB, Int32(ASrc.Imm));
     end;
     ACtx.ImmTail := 0;
     Result := ACB.Data;
@@ -2078,7 +2078,7 @@ end;
 
 { ---- ALU encoder (add/sub/and/or/xor/cmp/test) ----------------------- }
 
-function ALUGroup(const AMnem: string): Integer;
+function ALUGroup(const AMnem: string): Int32;
 begin
   if (AMnem = 'addq') or (AMnem = 'addl') then Result := 0
   else if (AMnem = 'orq') or (AMnem = 'orl') then Result := 1
@@ -2093,7 +2093,7 @@ end;
 function EncodeALU(var ACB: TCodeBuf; var ACtx: TEncodeContext;
   const AMnem: string; const ASrc, ADst: TOperand): string;
 var
-  Grp: Integer;
+  Grp: Int32;
   W64: Boolean;
   IsTest: Boolean;
 begin
@@ -2110,33 +2110,33 @@ begin
       if ADst.Reg = 0 then
       begin
         CBEmit(ACB, $A9);
-        CBEmit32(ACB, Integer(ASrc.Imm));
+        CBEmit32(ACB, Int32(ASrc.Imm));
       end
       else
       begin
         CBEmit(ACB, $F7);
         CBEmit(ACB, MakeModRM(3, 0, ADst.Reg));
-        CBEmit32(ACB, Integer(ASrc.Imm));
+        CBEmit32(ACB, Int32(ASrc.Imm));
       end;
     end
     else if (ASrc.Imm >= -128) and (ASrc.Imm <= 127) then
     begin
       CBEmit(ACB, $83);
       CBEmit(ACB, MakeModRM(3, Grp, ADst.Reg));
-      CBEmit(ACB, Integer(ASrc.Imm) and $FF);
+      CBEmit(ACB, Int32(ASrc.Imm) and $FF);
     end
     else
     begin
       if ADst.Reg = 0 then
       begin
         CBEmit(ACB, Grp * 8 + 5);
-        CBEmit32(ACB, Integer(ASrc.Imm));
+        CBEmit32(ACB, Int32(ASrc.Imm));
       end
       else
       begin
         CBEmit(ACB, $81);
         CBEmit(ACB, MakeModRM(3, Grp, ADst.Reg));
-        CBEmit32(ACB, Integer(ASrc.Imm));
+        CBEmit32(ACB, Int32(ASrc.Imm));
       end;
     end;
     Result := ACB.Data;
@@ -2191,21 +2191,21 @@ begin
       CBEmit(ACB, $F7);
       ACtx.ImmTail := 4;
       EncodeMemOperand(ACB, ACtx, ADst, 0);
-      CBEmit32(ACB, Integer(ASrc.Imm));
+      CBEmit32(ACB, Int32(ASrc.Imm));
     end
     else if (ASrc.Imm >= -128) and (ASrc.Imm <= 127) then
     begin
       CBEmit(ACB, $83);
       ACtx.ImmTail := 1;
       EncodeMemOperand(ACB, ACtx, ADst, Grp);
-      CBEmit(ACB, Integer(ASrc.Imm) and $FF);
+      CBEmit(ACB, Int32(ASrc.Imm) and $FF);
     end
     else
     begin
       CBEmit(ACB, $81);
       ACtx.ImmTail := 4;
       EncodeMemOperand(ACB, ACtx, ADst, Grp);
-      CBEmit32(ACB, Integer(ASrc.Imm));
+      CBEmit32(ACB, Int32(ASrc.Imm));
     end;
     ACtx.ImmTail := 0;
     Result := ACB.Data;
@@ -2305,13 +2305,13 @@ begin
     begin
       CBEmit(ACB, $6B);
       CBEmit(ACB, MakeModRM(3, ADst.Reg, ADst.Reg));
-      CBEmit(ACB, Integer(ASrc.Imm) and $FF);
+      CBEmit(ACB, Int32(ASrc.Imm) and $FF);
     end
     else
     begin
       CBEmit(ACB, $69);
       CBEmit(ACB, MakeModRM(3, ADst.Reg, ADst.Reg));
-      CBEmit32(ACB, Integer(ASrc.Imm));
+      CBEmit32(ACB, Int32(ASrc.Imm));
     end;
     Result := ACB.Data;
     Exit;
@@ -2337,7 +2337,7 @@ function EncodeShift(var ACB: TCodeBuf; var ACtx: TEncodeContext;
   const AMnem: string; const ASrc, ADst: TOperand): string;
 var
   W64: Boolean;
-  ShiftOp: Integer;
+  ShiftOp: Int32;
 begin
   W64 := (AMnem = 'shlq') or (AMnem = 'shrq') or (AMnem = 'sarq');
   { ModRM /digit selects the shift: /4 = shl, /5 = shr (logical, zero-fill),
@@ -2361,7 +2361,7 @@ begin
     begin
       CBEmit(ACB, $C1);
       CBEmit(ACB, MakeModRM(3, ShiftOp, ADst.Reg));
-      CBEmit(ACB, Integer(ASrc.Imm) and $FF);
+      CBEmit(ACB, Int32(ASrc.Imm) and $FF);
     end;
     Result := ACB.Data;
     Exit;
@@ -2540,7 +2540,7 @@ end;
 { ---- VEX (AVX/AVX2) helpers ----------------------------------------- }
 
 { pp (mandatory-prefix) field: 0=none, 1=66, 2=F3, 3=F2. }
-function VexPP(APrefix: Integer): Integer;
+function VexPP(APrefix: Int32): Int32;
 begin
   case APrefix of
     $66: Result := 1;
@@ -2557,10 +2557,10 @@ end;
   two-operand forms).  AL256 selects the 256-bit (ymm) form (VEX.L).  AW is
   VEX.W.  The 2-byte form (C5) is used when X=B=0, map=1 and W=0; otherwise the
   3-byte form (C4) is required. }
-procedure EmitVexRR(var ACB: TCodeBuf; APrefix, AMap: Integer;
-  AW, AL256: Boolean; AOpcode, ADstReg, AVvvv, ARmReg: Integer);
+procedure EmitVexRR(var ACB: TCodeBuf; APrefix, AMap: Int32;
+  AW, AL256: Boolean; AOpcode, ADstReg, AVvvv, ARmReg: Int32);
 var
-  R, X, B, PP, Byte2, Byte3: Integer;
+  R, X, B, PP, Byte2, Byte3: Int32;
 begin
   R := Ord(ADstReg >= 8);   { ModRM.reg extension }
   X := 0;
@@ -2591,10 +2591,10 @@ end;
 
 { As EmitVexRR but the r/m operand is memory. }
 procedure EmitVexRM(var ACB: TCodeBuf; var ACtx: TEncodeContext;
-  APrefix, AMap: Integer; AW, AL256: Boolean;
-  AOpcode, ADstReg, AVvvv: Integer; const AMem: TOperand);
+  APrefix, AMap: Int32; AW, AL256: Boolean;
+  AOpcode, ADstReg, AVvvv: Int32; const AMem: TOperand);
 var
-  R, X, B, PP, Byte2, Byte3, BaseReg: Integer;
+  R, X, B, PP, Byte2, Byte3, BaseReg: Int32;
 begin
   BaseReg := AMem.Base;
   if BaseReg < 0 then BaseReg := 0;
@@ -2625,9 +2625,9 @@ end;
 
 { ---- SSE/FP helpers -------------------------------------------------- }
 
-procedure EmitSSERegReg(var ACB: TCodeBuf; APrefix: Integer;
-  ANeedRexW: Boolean; AOpcode1: Integer; AOpcode2: Integer;
-  ASrcReg: Integer; ADstReg: Integer);
+procedure EmitSSERegReg(var ACB: TCodeBuf; APrefix: Int32;
+  ANeedRexW: Boolean; AOpcode1: Int32; AOpcode2: Int32;
+  ASrcReg: Int32; ADstReg: Int32);
 begin
   if APrefix > 0 then CBEmit(ACB, APrefix);
   if ANeedRexW then
@@ -2641,10 +2641,10 @@ begin
 end;
 
 procedure EmitSSERegMem(var ACB: TCodeBuf; var ACtx: TEncodeContext;
-  APrefix: Integer; ANeedRexW: Boolean; AOpcode1: Integer; AOpcode2: Integer;
-  ARegCode: Integer; const AMem: TOperand);
+  APrefix: Int32; ANeedRexW: Boolean; AOpcode1: Int32; AOpcode2: Int32;
+  ARegCode: Int32; const AMem: TOperand);
 var
-  BaseReg: Integer;
+  BaseReg: Int32;
 begin
   BaseReg := AMem.Base;
   if BaseReg < 0 then BaseReg := 0;
@@ -2663,8 +2663,8 @@ end;
 function EncodeSSE(var ACB: TCodeBuf; var ACtx: TEncodeContext;
   const AMnem: string; const ASrc, ADst: TOperand): string;
 var
-  Prefix: Integer;
-  Opcode1, Opcode2: Integer;
+  Prefix: Int32;
+  Opcode1, Opcode2: Int32;
   NeedRexW: Boolean;
 begin
   Prefix := 0;
@@ -2765,9 +2765,9 @@ end;
 function EncodeVEX(var ACB: TCodeBuf; var ACtx: TEncodeContext;
   const AMnem: string; const AOp1, AOp2, AOp3: TOperand): string;
 var
-  Prefix, Map, Opc: Integer;
+  Prefix, Map, Opc: Int32;
   W, L: Boolean;
-  ShiftSub: Integer;   { /n in ModRM.reg for the imm-shift forms, else -1 }
+  ShiftSub: Int32;   { /n in ModRM.reg for the imm-shift forms, else -1 }
 begin
   { vzeroupper: C5 F8 77, no operands (vvvv=1111, L=0, pp=0). }
   if AMnem = 'vzeroupper' then
@@ -2819,7 +2819,7 @@ begin
     if (AOp1.Kind = opImm) and (AOp2.Kind = opReg) and (AOp3.Kind = opReg) then
     begin
       EmitVexRR(ACB, Prefix, Map, W, L, Opc, ShiftSub, AOp3.Reg, AOp2.Reg);
-      CBEmit(ACB, Integer(AOp1.Imm) and $FF);
+      CBEmit(ACB, Int32(AOp1.Imm) and $FF);
     end
     else
       raise EAssembler.Create(AMnem + ': bad shift operands');
@@ -2837,7 +2837,7 @@ begin
     if (AOp1.Kind = opImm) and (AOp2.Kind = opReg) and (AOp3.Kind = opReg) then
     begin
       EmitVexRR(ACB, Prefix, Map, W, L, Opc, AOp3.Reg, 0, AOp2.Reg);
-      CBEmit(ACB, Integer(AOp1.Imm) and $FF);
+      CBEmit(ACB, Int32(AOp1.Imm) and $FF);
     end
     else
       raise EAssembler.Create(AMnem + ': bad operands');
@@ -2851,7 +2851,7 @@ begin
     begin
       { ymm src is in ModRM.reg, xmm dst in r/m; L=1 (256-bit source). }
       EmitVexRR(ACB, Prefix, Map, W, True, Opc, AOp2.Reg, 0, AOp3.Reg);
-      CBEmit(ACB, Integer(AOp1.Imm) and $FF);
+      CBEmit(ACB, Int32(AOp1.Imm) and $FF);
     end
     else
       raise EAssembler.Create(AMnem + ': bad operands');
@@ -2914,7 +2914,7 @@ end;
 
 { Re-raise an assembler error annotated with the source line number and
   raw line text.  Without this, failures surface with zero diagnostics. }
-procedure AsmLineError(ALineNum: Integer; const ARawLine, AMsg: string);
+procedure AsmLineError(ALineNum: Int; const ARawLine, AMsg: string);
 begin
   raise EAssembler.Create('line ' + IntToStr(ALineNum) + ': ' + AMsg
     + ' [' + TrimStr(ARawLine) + ']');
@@ -2930,18 +2930,18 @@ procedure HandleDirective(const AParsed: TParsedLine;
   var ACtx: TEncodeContext);
 var
   Dir, Args: string;
-  P: Integer;
+  P: Int;
   Val: Int64;
   Buf: string;
-  I, Len: Integer;
-  C: Integer;
+  I, Len: Int;
+  C: Int32;
   SymName: string;
   TypeStr: string;
   DVal: Float64;
   FVal: Float32;
   DataOp: TOperand;
-  OpEnd: Integer;
-  Count, Size, FillVal, J: Integer;
+  OpEnd: Int;
+  Count, Size, FillVal, J: Int;
 begin
   Dir := AParsed.Mnemonic;
   { Explicit-width data directives, identical on every GNU target -- unlike
@@ -3034,7 +3034,7 @@ begin
   begin
     P := 0;
     Val := ParseInt(Args, P);
-    AWriter.AlignSection(ASection, Integer(Val));
+    AWriter.AlignSection(ASection, Int(Val));
     Exit;
   end;
 
@@ -3052,7 +3052,7 @@ begin
         P := P + 1;
       if P >= Len then break;
       Val := ParseInt(Args, P);
-      AWriter.AppendByte(ASection, Integer(Val));
+      AWriter.AppendByte(ASection, Int32(Val));
     end;
     Exit;
   end;
@@ -3068,7 +3068,7 @@ begin
         P := P + 1;
       if P >= Len then break;
       Val := ParseInt(Args, P);
-      AWriter.AppendWord(ASection, Integer(Val));
+      AWriter.AppendWord(ASection, Int32(Val));
     end;
     Exit;
   end;
@@ -3083,17 +3083,17 @@ begin
     Len := Length(Args);
     while (P < Len) and ((Args[P] = Ord(' ')) or (Args[P] = Ord(#9))) do P := P + 1;
     Val := ParseInt(Args, P);              { count }
-    Count := Integer(Val);
+    Count := Int(Val);
     Size := 1; FillVal := 0;
     while (P < Len) and ((Args[P] = Ord(' ')) or (Args[P] = Ord(#9)) or
                          (Args[P] = Ord(','))) do P := P + 1;
     if P < Len then
     begin
-      Size := Integer(ParseInt(Args, P));  { size }
+      Size := Int(ParseInt(Args, P));  { size }
       while (P < Len) and ((Args[P] = Ord(' ')) or (Args[P] = Ord(#9)) or
                            (Args[P] = Ord(','))) do P := P + 1;
       if P < Len then
-        FillVal := Integer(ParseInt(Args, P));  { value }
+        FillVal := Int32(ParseInt(Args, P));  { value }
     end;
     for I := 0 to Count - 1 do
       for J := 0 to Size - 1 do
@@ -3116,7 +3116,7 @@ begin
       AWriter.AppendDWord(ASection, 0);
     end
     else if DataOp.Kind = opImm then
-      AWriter.AppendDWord(ASection, Integer(DataOp.Imm))
+      AWriter.AppendDWord(ASection, Int32(DataOp.Imm))
     else
       raise EAssembler.Create('.long: unsupported operand: ' + Args);
     Exit;
@@ -3147,8 +3147,8 @@ begin
   begin
     DVal := _StrToDouble(PChar(Args));
     Val := DoubleBits(DVal);
-    AWriter.AppendDWord(ASection, Integer(Val and $FFFFFFFF));
-    AWriter.AppendDWord(ASection, Integer((Val shr 32) and $FFFFFFFF));
+    AWriter.AppendDWord(ASection, Int32(Val and $FFFFFFFF));
+    AWriter.AppendDWord(ASection, Int32((Val shr 32) and $FFFFFFFF));
     Exit;
   end;
 
@@ -3211,7 +3211,7 @@ begin
                   else Val := Val + 10 + Ord(C) - Ord('A');
                 end;
               end;
-              Buf := Buf + Chr(Integer(Val));
+              Buf := Buf + Chr(Int32(Val));
             end
             else if IsDigit(C) then
             begin
@@ -3227,7 +3227,7 @@ begin
                   Val := Val * 8 + (Ord(Args[I]) - Ord('0'));
                 end;
               end;
-              Buf := Buf + Chr(Integer(Val));
+              Buf := Buf + Chr(Int32(Val));
             end
             else
               Buf := Buf + Chr(C);
@@ -3246,7 +3246,7 @@ begin
   begin
     P := 0;
     Val := ParseInt(Args, P);
-    AWriter.AppendZeros(ASection, Integer(Val));
+    AWriter.AppendZeros(ASection, Int(Val));
     Exit;
   end;
 
@@ -3254,7 +3254,7 @@ begin
   begin
     P := 0;
     Val := ParseInt(Args, P);
-    AWriter.AlignSection(ASection, 1 shl Integer(Val));
+    AWriter.AlignSection(ASection, 1 shl Int(Val));
     Exit;
   end;
 
@@ -3271,8 +3271,8 @@ end;
 
 procedure SplitLines(const AText: string; ALines: TList<string>);
 var
-  I, Start, Len: Integer;
-  C: Integer;
+  I, Start, Len: Int;
+  C: Int32;
 begin
   Len := Length(AText);
   Start := 0;
@@ -3295,20 +3295,20 @@ function DoAssemble(const AAsmText: string): string;
 var
   Lines: TList<string>;
   Parsed: array of TParsedLine;
-  ParsedCount: Integer;
+  ParsedCount: Int;
   Labels: TLabelMap;
   Globals: TDictionary<string, Boolean>;
   Weaks: TDictionary<string, Boolean>;
   Types: TDictionary<string, TContainerSymType>;
   Writer: IContainerWriter;
-  I: Integer;
+  I: Int;
   PL: TParsedLine;
   Section: TContainerSectionKind;
   Info: TLabelInfo;
   Ctx: TEncodeContext;
   Encoded: string;
   R: TRelocRequest;
-  SymIdx: Integer;
+  SymIdx: Int;
   Bind: TContainerSymBind;
   SType: TContainerSymType;
   LabelKey: string;

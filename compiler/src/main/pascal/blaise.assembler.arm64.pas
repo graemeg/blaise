@@ -58,12 +58,12 @@ type
 
   TA64Op = record
     Kind:     TA64OpKind;
-    Reg:      Integer;   { 0..31; 31 = sp or zr per context }
+    Reg:      Int32;   { 0..31; 31 = sp or zr per context }
     Is64:     Boolean;   { x/d vs w/s }
     IsFP:     Boolean;
     IsSP:     Boolean;   { named sp (vs xzr, both encode 31) }
     Imm:      Int64;
-    Base:     Integer;   { mem: base register }
+    Base:     Int32;   { mem: base register }
     MemImm:   Int64;     { mem: offset }
     PreIdx:   Boolean;   { [xN, #i]! }
     PostIdx:  Boolean;   { [xN], #i }
@@ -81,12 +81,12 @@ type
     Cond:     string;    { b.<cond> condition part }
     Args:     string;    { raw operand text }
     RawLine:  string;
-    LineNum:  Integer;
+    LineNum:  Int;
   end;
 
   TLabelInfo = record
     Section: TContainerSectionKind;
-    Offset:  Integer;
+    Offset:  Int;
   end;
 
   { The assembler as a class: shared state lives in fields and the encode
@@ -98,39 +98,39 @@ type
   private
     FW: TMachOObjectWriter;
     FSection: TContainerSectionKind;
-    FPassNo: Integer;
+    FPassNo: Int;
     { two parallel maps, not TDictionary<string, RECORD> — a record value
       type in a generic dictionary instance crashed at runtime (candidate
       new bug; minimise separately) }
-    FLabelSec: TDictionary<string, Integer>;   { Ord(section kind) }
-    FLabelOff: TDictionary<string, Integer>;
+    FLabelSec: TDictionary<string, Int>;   { Ord(section kind) }
+    FLabelOff: TDictionary<string, Int>;
     FGlobals: TDictionary<string, Boolean>;
     FWeaks: TDictionary<string, Boolean>;
-    FCurOff: Integer;
+    FCurOff: Int;
     FL: TA64Line;
     FA: array of TA64Op;
-    FNOps: Integer;
+    FNOps: Int;
     { Branch relaxation.  FLineIdx is the line being encoded; FLong holds the
       conditional branches whose target is beyond their reach, encoded as
       the inverted branch over a b.  Pass 1 repeats until it marks none;
       FPrevOff keeps the previous pass's label offsets so a forward target
       can be measured, and FRelaxed records a new mark in this pass. }
-    FLineIdx: Integer;
-    FLong: TDictionary<Integer, Boolean>;
-    FPrevOff: TDictionary<string, Integer>;
+    FLineIdx: Int;
+    FLong: TDictionary<Int, Boolean>;
+    FPrevOff: TDictionary<string, Int>;
     FRelaxed: Boolean;
     { the smallest reach among this pass's branches to a target not yet
       placed (0 = none): pass 1 repeats only if the text outgrows it }
-    FUnplacedReach: Integer;
-    procedure EmitW(AVal: Integer);
+    FUnplacedReach: Int;
+    procedure EmitW(AVal: Int32);
     procedure LineError(const AMsg: string);
     function LabelDifference(const AExpr: string): Int64;
     function BranchDelta(const ASym: string; AKind: TContainerRelocKind;
-      out AIsLocal: Boolean): Integer;
-    function IsFarBranch(const ASym: string; AReach: Integer): Boolean;
+      out AIsLocal: Boolean): Int;
+    function IsFarBranch(const ASym: string; AReach: Int): Boolean;
     procedure EmitFarTail(const ASym: string);
     procedure SymReloc(const ASym: string; ARef: TSymRef);
-    procedure NeedOps(AN: Integer);
+    procedure NeedOps(AN: Int);
     procedure HandleDirective;
     procedure EncodeInstr;
   public
@@ -156,17 +156,17 @@ begin
   Result := P^;
 end;
 
-function SingleBits(V: Float32): Integer;
+function SingleBits(V: Float32): Int32;
 var
-  P: ^Integer;
+  P: ^Int32;
 begin
   P := Pointer(@V);
   Result := P^;
 end;
 
-function CondCode(const AName: string): Integer;
+function CondCode(const AName: string): Int32;
 var
-  I: Integer;
+  I: Int32;
 begin
   for I := 0 to 15 do
     if CondNames[I] = AName then
@@ -181,21 +181,21 @@ begin
 end;
 
 { Invert a condition code (cset lowers to csinc with the inverse). }
-function CondInvert(ACode: Integer): Integer;
+function CondInvert(ACode: Int32): Int32;
 begin
   Result := ACode xor 1;
 end;
 
 { ---- lexing helpers ---------------------------------------------------- }
 
-function IsSpaceC(C: Integer): Boolean;
+function IsSpaceC(C: Int): Boolean;
 begin
   Result := (C = 32) or (C = 9);
 end;
 
 function TrimS(const S: string): string;
 var
-  A, B: Integer;
+  A, B: Int;
 begin
   A := 0;
   B := Length(S) - 1;
@@ -212,7 +212,7 @@ end;
 { Split ATxt on top-level commas (not inside [] brackets). }
 procedure SplitOperands(const ATxt: string; AOut: TList<string>);
 var
-  I, Depth, Start, C: Integer;
+  I, Depth, Start, C: Int;
 begin
   Depth := 0;
   Start := 0;
@@ -232,10 +232,10 @@ begin
 end;
 
 { Parse a register name.  Returns True and fills the fields on match. }
-function TryParseReg(const S: string; out AReg: Integer; out AIs64: Boolean;
+function TryParseReg(const S: string; out AReg: Int32; out AIs64: Boolean;
   out AIsFP: Boolean; out AIsSP: Boolean): Boolean;
 var
-  N: Integer;
+  N: Int32;
   Body: string;
 begin
   Result := False;
@@ -283,7 +283,7 @@ end;
 { Split 'name@SUFFIX' into symbol + reference kind. }
 procedure ParseSymRef(const S: string; out ASym: string; out ARef: TSymRef);
 var
-  P: Integer;
+  P: Int;
   Suf: string;
 begin
   P := Pos('@', S);
@@ -321,11 +321,11 @@ end;
 
 function ParseOperand(const S: string): TA64Op;
 var
-  R: Integer;
+  R: Int32;
   Is64, IsFP, IsSP: Boolean;
   Inner, BasePart, OffPart: string;
-  P: Integer;
-  C0: Integer;
+  P: Int;
+  C0: Int;
 begin
   Result.Kind := okNone;
   Result.SymRef := srNone;
@@ -411,10 +411,10 @@ end;
 
 { ---- line parsing ------------------------------------------------------ }
 
-function ParseLine(const ALine: string; ANum: Integer): TA64Line;
+function ParseLine(const ALine: string; ANum: Int): TA64Line;
 var
   S: string;
-  P, C: Integer;
+  P, C: Int;
   InStr: Boolean;
 begin
   Result.RawLine := ALine;
@@ -537,16 +537,16 @@ end;
 
 { ---- encoding ----------------------------------------------------------- }
 
-function SfBit(AIs64: Boolean): Integer;
+function SfBit(AIs64: Boolean): Int32;
 begin
   if AIs64 then Result := 1 else Result := 0;
 end;
 
 { add/sub immediate.  AOp: 0=add, 1=sub; ASetFlags for subs/adds/cmp/cmn. }
 function EncAddSubImm(AIs64: Boolean; ASub, ASetFlags: Boolean;
-  ARd, ARn: Integer; AImm: Int64): Integer;
+  ARd, ARn: Int32; AImm: Int64): Int32;
 var
-  W: Integer;
+  W: Int32;
   Shifted: Boolean;
 begin
   { AArch64 add/sub (immediate) carries a 12-bit immediate plus an `sh` bit
@@ -568,14 +568,14 @@ begin
   if ASub then W := W or (1 shl 30);
   if ASetFlags then W := W or (1 shl 29);
   if Shifted then W := W or (1 shl 22);
-  Result := W or (Integer(AImm) shl 10) or (ARn shl 5) or ARd;
+  Result := W or (Int32(AImm) shl 10) or (ARn shl 5) or ARd;
 end;
 
 { add/sub shifted register (no shift). }
 function EncAddSubReg(AIs64: Boolean; ASub, ASetFlags: Boolean;
-  ARd, ARn, ARm: Integer): Integer;
+  ARd, ARn, ARm: Int32): Int32;
 var
-  W: Integer;
+  W: Int32;
 begin
   W := (SfBit(AIs64) shl 31) or ($0B000000);
   if ASub then W := W or (1 shl 30);
@@ -596,9 +596,9 @@ end;
   leaving their locals below sp to be overwritten by the next callee's
   prologue push — the macOS arm64 failure of 2026-07-23. }
 function EncAddSubExtReg(AIs64: Boolean; ASub, ASetFlags: Boolean;
-  ARd, ARn, ARm: Integer): Integer;
+  ARd, ARn, ARm: Int32): Int32;
 var
-  W: Integer;
+  W: Int32;
 begin
   W := (SfBit(AIs64) shl 31) or ($0B200000);
   if ASub then W := W or (1 shl 30);
@@ -614,10 +614,10 @@ end;
   value is replicated to 64 bits first, which forces E <= 32 as the w form
   requires.  Returns False when the value has no encoding. }
 function EncodeBitmaskImm(AValue: Int64; AIs64: Boolean;
-  out AN, AImmR, AImmS: Integer): Boolean;
+  out AN, AImmR, AImmS: Int32): Boolean;
 var
   V, EMask, Elem, Run, Rot, HalfMask: UInt64;
-  E, Half, S, R, I: Integer;
+  E, Half, S, R, I: Int32;
 begin
   Result := False;
   AN := 0;
@@ -666,15 +666,15 @@ begin
 end;
 
 { and/orr/eor/ands with a bitmask immediate. }
-function EncLogicImm(AIs64: Boolean; AOpc, AN, AImmR, AImmS: Integer;
-  ARd, ARn: Integer): Integer;
+function EncLogicImm(AIs64: Boolean; AOpc, AN, AImmR, AImmS: Int32;
+  ARd, ARn: Int32): Int32;
 begin
   Result := (SfBit(AIs64) shl 31) or (AOpc shl 29) or $12000000
     or (AN shl 22) or (AImmR shl 16) or (AImmS shl 10) or (ARn shl 5) or ARd;
 end;
 
-function EncLogicReg(AIs64: Boolean; AOpc: Integer;
-  ARd, ARn, ARm: Integer): Integer;
+function EncLogicReg(AIs64: Boolean; AOpc: Int32;
+  ARd, ARn, ARm: Int32): Int32;
 begin
   Result := (SfBit(AIs64) shl 31) or (AOpc shl 29) or $0A000000
     or (ARm shl 16) or (ARn shl 5) or ARd;
@@ -682,9 +682,9 @@ end;
 
 { madd/msub (mul = madd with ra=31). }
 function EncMulAdd(AIs64: Boolean; ASubtract: Boolean;
-  ARd, ARn, ARm, ARa: Integer): Integer;
+  ARd, ARn, ARm, ARa: Int32): Int32;
 var
-  W: Integer;
+  W: Int32;
 begin
   W := (SfBit(AIs64) shl 31) or $1B000000
     or (ARm shl 16) or (ARa shl 10) or (ARn shl 5) or ARd;
@@ -693,9 +693,9 @@ begin
 end;
 
 function EncDiv(AIs64: Boolean; ASigned: Boolean;
-  ARd, ARn, ARm: Integer): Integer;
+  ARd, ARn, ARm: Int32): Int32;
 var
-  W: Integer;
+  W: Int32;
 begin
   W := (SfBit(AIs64) shl 31) or $1AC00800 or (ARm shl 16)
     or (ARn shl 5) or ARd;
@@ -704,8 +704,8 @@ begin
 end;
 
 { variable shifts: lslv op2=8, lsrv 9, asrv 10 (<<10). }
-function EncShiftVar(AIs64: Boolean; AOp2: Integer;
-  ARd, ARn, ARm: Integer): Integer;
+function EncShiftVar(AIs64: Boolean; AOp2: Int32;
+  ARd, ARn, ARm: Int32): Int32;
 begin
   Result := (SfBit(AIs64) shl 31) or $1AC00000 or (ARm shl 16)
     or (AOp2 shl 10) or (ARn shl 5) or ARd;
@@ -713,9 +713,9 @@ end;
 
 { ubfm/sbfm for immediate shifts. }
 function EncBitfield(AIs64: Boolean; ASigned: Boolean;
-  ARd, ARn, AImmR, AImmS: Integer): Integer;
+  ARd, ARn, AImmR, AImmS: Int32): Int32;
 var
-  Base, W: Integer;
+  Base, W: Int32;
 begin
   { ubfm = opc 10 ($53...), sbfm = opc 00 ($13...); N mirrors sf. }
   if ASigned then Base := $13000000 else Base := $53000000;
@@ -726,21 +726,21 @@ begin
 end;
 
 { movz/movk/movn: AOpc 2=movz, 3=movk, 0=movn. }
-function EncMovWide(AIs64: Boolean; AOpc: Integer;
-  ARd: Integer; AImm: Int64; AShift: Integer): Integer;
+function EncMovWide(AIs64: Boolean; AOpc: Int32;
+  ARd: Int32; AImm: Int64; AShift: Int32): Int32;
 begin
   if (AImm < 0) or (AImm > $FFFF) then
     raise EArm64Assembler.Create('mov immediate out of 16-bit range');
   Result := (SfBit(AIs64) shl 31) or (AOpc shl 29) or $12800000
-    or ((AShift div 16) shl 21) or (Integer(AImm) shl 5) or ARd;
+    or ((AShift div 16) shl 21) or (Int32(AImm) shl 5) or ARd;
 end;
 
 { load/store register, unsigned scaled 12-bit offset.
   ASize: 0=b,1=h,2=w,3=x; AOpcBits: load/store + signedness variants. }
-function EncLdStUImm(ASize: Integer; AV: Boolean; AOpc: Integer;
-  ARt, ARn: Integer; AImm: Int64): Integer;
+function EncLdStUImm(ASize: Int32; AV: Boolean; AOpc: Int32;
+  ARt, ARn: Int32; AImm: Int64): Int32;
 var
-  Scale, W: Integer;
+  Scale, W: Int32;
   Scaled: Int64;
 begin
   Scale := ASize;
@@ -751,47 +751,47 @@ begin
   if Scaled > 4095 then
     raise EArm64Assembler.Create('load-store offset out of range');
   W := (ASize shl 30) or $39000000 or (AOpc shl 22)
-    or (Integer(Scaled) shl 10) or (ARn shl 5) or ARt;
+    or (Int32(Scaled) shl 10) or (ARn shl 5) or ARt;
   if AV then W := W or (1 shl 26);
   Result := W;
 end;
 
 { ldur/stur: unscaled signed 9-bit. }
-function EncLdStUnscaled(ASize: Integer; AV: Boolean; AOpc: Integer;
-  ARt, ARn: Integer; AImm: Int64): Integer;
+function EncLdStUnscaled(ASize: Int32; AV: Boolean; AOpc: Int32;
+  ARt, ARn: Int32; AImm: Int64): Int32;
 var
-  W: Integer;
+  W: Int32;
 begin
   if (AImm < -256) or (AImm > 255) then
     raise EArm64Assembler.Create('ldur/stur offset out of range [-256..255]');
   W := (ASize shl 30) or $38000000 or (AOpc shl 22)
-    or ((Integer(AImm) and $1FF) shl 12) or (ARn shl 5) or ARt;
+    or ((Int32(AImm) and $1FF) shl 12) or (ARn shl 5) or ARt;
   if AV then W := W or (1 shl 26);
   Result := W;
 end;
 
 { ldr/str with writeback.  APre selects pre-index ([xN, #i]!) vs
   post-index ([xN], #i); signed 9-bit immediate. }
-function EncodeLdStPrePost(ASize: Integer; AV: Boolean; AOpc: Integer;
-  APre: Boolean; ARt, ARn: Integer; AImm: Int64): Integer;
+function EncodeLdStPrePost(ASize: Int32; AV: Boolean; AOpc: Int32;
+  APre: Boolean; ARt, ARn: Int32; AImm: Int64): Int32;
 var
-  W, Mode: Integer;
+  W, Mode: Int32;
 begin
   if (AImm < -256) or (AImm > 255) then
     raise EArm64Assembler.Create('pre/post-index offset out of range [-256..255]');
   if APre then Mode := 3 else Mode := 1;
   W := (ASize shl 30) or $38000000 or (AOpc shl 22)
-    or ((Integer(AImm) and $1FF) shl 12) or (Mode shl 10)
+    or ((Int32(AImm) and $1FF) shl 12) or (Mode shl 10)
     or (ARn shl 5) or ARt;
   if AV then W := W or (1 shl 26);
   Result := W;
 end;
 
 { ldp/stp.  AMode: 0=signed offset, 1=pre-index, 2=post-index. }
-function EncLdStPair(AIs64: Boolean; ALoad: Boolean; AMode: Integer;
-  ARt, ARt2, ARn: Integer; AImm: Int64): Integer;
+function EncLdStPair(AIs64: Boolean; ALoad: Boolean; AMode: Int32;
+  ARt, ARt2, ARn: Int32; AImm: Int64): Int32;
 var
-  Scale, W: Integer;
+  Scale, W: Int32;
   Scaled: Int64;
 begin
   if AIs64 then Scale := 3 else Scale := 2;
@@ -800,14 +800,14 @@ begin
   Scaled := AImm div (Int64(1) shl Scale);
   if (Scaled < -64) or (Scaled > 63) then
     raise EArm64Assembler.Create('ldp/stp offset out of range');
-  W := $28000000 or (Integer(Ord(AIs64)) shl 31);
+  W := $28000000 or (Int32(Ord(AIs64)) shl 31);
   case AMode of
     0: W := W or (2 shl 23);   { signed offset }
     1: W := W or (3 shl 23);   { pre-index }
     2: W := W or (1 shl 23);   { post-index }
   end;
   if ALoad then W := W or (1 shl 22);
-  Result := W or ((Integer(Scaled) and $7F) shl 15) or (ARt2 shl 10)
+  Result := W or ((Int32(Scaled) and $7F) shl 15) or (ARt2 shl 10)
     or (ARn shl 5) or ARt;
 end;
 
@@ -815,7 +815,7 @@ end;
 
 procedure SplitLines(const AText: string; ALines: TList<string>);
 var
-  I, Start, Len, C: Integer;
+  I, Start, Len, C: Int;
 begin
   Len := Length(AText);
   Start := 0;
@@ -834,7 +834,7 @@ begin
     ALines.Add(Copy(AText, Start, Len - Start));
 end;
 
-procedure TArm64Assembler.EmitW(AVal: Integer);
+procedure TArm64Assembler.EmitW(AVal: Int32);
   begin
     FW.AppendDWord(FSection, AVal);
   end;
@@ -847,7 +847,7 @@ procedure TArm64Assembler.EmitW(AVal: Integer);
   ParseImmediate fallback used to do to every OPDF RecordOffset). }
 function TArm64Assembler.LabelDifference(const AExpr: string): Int64;
 var
-  P, SecA, SecB, OffA, OffB: Integer;
+  P, SecA, SecB, OffA, OffB: Int;
   LA, LB: string;
 begin
   Result := 0;
@@ -888,10 +888,10 @@ procedure TArm64Assembler.LineError(const AMsg: string);
   baked offsets stayed valid there and the bug was invisible to every internally
   linked build, which is all the fixpoints and the whole self-hosting path. }
 function TArm64Assembler.BranchDelta(const ASym: string;
-  AKind: TContainerRelocKind; out AIsLocal: Boolean): Integer;
+  AKind: TContainerRelocKind; out AIsLocal: Boolean): Int;
   var
-    LSec, LOff: Integer;
-    SymIdx: Integer;
+    LSec, LOff: Int;
+    SymIdx: Int;
   begin
     Result := 0;
     { FGlobals/FWeaks are filled in pass 1 and persist, so by pass 2 this test
@@ -925,9 +925,9 @@ function TArm64Assembler.BranchDelta(const ASym: string;
   converge.  Pass 2 encodes the marks, and reports a short branch still out of
   reach rather than wrapping its offset. }
 function TArm64Assembler.IsFarBranch(const ASym: string;
-  AReach: Integer): Boolean;
+  AReach: Int): Boolean;
   var
-    Target: Integer;
+    Target: Int;
     Known:  Boolean;
   begin
     Result := FLong.ContainsKey(FLineIdx);
@@ -955,18 +955,18 @@ function TArm64Assembler.IsFarBranch(const ASym: string;
   the inverted branch. }
 procedure TArm64Assembler.EmitFarTail(const ASym: string);
   var
-    Delta:   Integer;
+    Delta:   Int;
     IsLocal: Boolean;
   begin
     FCurOff := FCurOff + 4;
     Delta := BranchDelta(ASym, crkNone, IsLocal);
-    EmitW(Integer($14000000) or ((Delta div 4) and $3FFFFFF));
+    EmitW(Int32($14000000) or ((Delta div 4) and $3FFFFFF));
   end;
 
   { Emit a symbol reloc for the current instruction word (pass 2). }
 procedure TArm64Assembler.SymReloc(const ASym: string; ARef: TSymRef);
   var
-    SymIdx: Integer;
+    SymIdx: Int;
   begin
     if FPassNo <> 2 then Exit;
     SymIdx := FW.FindSymbol(ASym);
@@ -975,7 +975,7 @@ procedure TArm64Assembler.SymReloc(const ASym: string; ARef: TSymRef);
     FW.AddReloc(FSection, FCurOff, SymIdx, SymRefToReloc(ARef), 0);
   end;
 
-procedure TArm64Assembler.NeedOps(AN: Integer);
+procedure TArm64Assembler.NeedOps(AN: Int);
   begin
     if FNOps <> AN then
       LineError('expected ' + IntToStr(AN) + ' operands, got '
@@ -985,14 +985,14 @@ procedure TArm64Assembler.NeedOps(AN: Integer);
 procedure TArm64Assembler.HandleDirective;
   var
     Vals: TList<string>;
-    K: Integer;
+    K: Int;
     V: Int64;
     Sy: string;
     Ref: TSymRef;
-    SymIdx: Integer;
+    SymIdx: Int;
     Txt: string;
-    OctV: Integer;   { accumulated value of an octal .ascii escape }
-    OctN: Integer;   { digits consumed so far (gas caps octal at three) }
+    OctV: Int;   { accumulated value of an octal .ascii escape }
+    OctN: Int;   { digits consumed so far (gas caps octal at three) }
   begin
     if FL.Mnemonic = '.text' then begin FSection := cskText; Exit; end;
     if FL.Mnemonic = '.data' then begin FSection := cskData; Exit; end;
@@ -1041,7 +1041,7 @@ procedure TArm64Assembler.HandleDirective;
       V := ParseImmediate(TrimS(FL.Args));
       if FL.Mnemonic = '.p2align' then
         V := Int64(1) shl V;
-      FW.AlignSection(FSection, Integer(V));
+      FW.AlignSection(FSection, Int(V));
       Exit;
     end;
     if (FL.Mnemonic = '.byte') or (FL.Mnemonic = '.hword')
@@ -1074,9 +1074,9 @@ procedure TArm64Assembler.HandleDirective;
             V := Self.LabelDifference(Sy)
           else
             V := ParseImmediate(Sy);
-          if FL.Mnemonic = '.byte' then FW.AppendByte(FSection, Integer(V))
-          else if FL.Mnemonic = '.hword' then FW.AppendWord(FSection, Integer(V))
-          else if FL.Mnemonic = '.word' then FW.AppendDWord(FSection, Integer(V))
+          if FL.Mnemonic = '.byte' then FW.AppendByte(FSection, Int32(V))
+          else if FL.Mnemonic = '.hword' then FW.AppendWord(FSection, Int32(V))
+          else if FL.Mnemonic = '.word' then FW.AppendDWord(FSection, Int32(V))
           else FW.AppendQWord(FSection, V);
         end;
       finally
@@ -1151,9 +1151,9 @@ procedure TArm64Assembler.HandleDirective;
     begin
       V := ParseImmediate(TrimS(FL.Args));
       if (FSection = cskBss) or (FSection = cskTbss) then
-        FW.ReserveBss(FSection, Integer(V))
+        FW.ReserveBss(FSection, Int(V))
       else
-        FW.AppendZeros(FSection, Integer(V));
+        FW.AppendZeros(FSection, Int(V));
       Exit;
     end;
     if (FL.Mnemonic = '.file') or (FL.Mnemonic = '.size')
@@ -1165,28 +1165,29 @@ procedure TArm64Assembler.HandleDirective;
 
 procedure TArm64Assembler.EncodeInstr;
   var
-    Delta: Integer;
+    Delta: Int;
     IsLocal: Boolean;
-    Sz, Opc: Integer;
-    Wd: Integer;
-    ShiftAmt: Integer;
-    WidthM1: Integer;
-    LN, LImmR, LImmS: Integer;
+    Sz, Opc: Int32;
+    Wd: Int32;
+    ShiftAmt: Int32;
+    WidthM1: Int32;
+    LN, LImmR, LImmS: Int32;
+    HashPos: Int;
   begin
     { zero-operand }
-    if FL.Mnemonic = 'nop' then begin EmitW(Integer($D503201F)); Exit; end;
-    if FL.Mnemonic = 'ret' then begin EmitW(Integer($D65F03C0)); Exit; end;
+    if FL.Mnemonic = 'nop' then begin EmitW(Int32($D503201F)); Exit; end;
+    if FL.Mnemonic = 'ret' then begin EmitW(Int32($D65F03C0)); Exit; end;
 
     if FL.Mnemonic = 'brk' then
     begin
       NeedOps(1);
-      EmitW(Integer($D4200000) or (Integer(FA[0].Imm and $FFFF) shl 5));
+      EmitW(Int32($D4200000) or (Int32(FA[0].Imm and $FFFF) shl 5));
       Exit;
     end;
     if FL.Mnemonic = 'svc' then
     begin
       NeedOps(1);
-      EmitW(Integer($D4000001) or (Integer(FA[0].Imm and $FFFF) shl 5));
+      EmitW(Int32($D4000001) or (Int32(FA[0].Imm and $FFFF) shl 5));
       Exit;
     end;
 
@@ -1194,9 +1195,9 @@ procedure TArm64Assembler.EncodeInstr;
     begin
       NeedOps(1);
       if FL.Mnemonic = 'br' then
-        EmitW(Integer($D61F0000) or (FA[0].Reg shl 5))
+        EmitW(Int32($D61F0000) or (FA[0].Reg shl 5))
       else
-        EmitW(Integer($D63F0000) or (FA[0].Reg shl 5));
+        EmitW(Int32($D63F0000) or (FA[0].Reg shl 5));
       Exit;
     end;
 
@@ -1204,8 +1205,8 @@ procedure TArm64Assembler.EncodeInstr;
     begin
       NeedOps(1);
       Delta := BranchDelta(FA[0].Sym, crkArm64Branch26, IsLocal);
-      Wd := Integer($14000000);
-      if FL.Mnemonic = 'bl' then Wd := Integer($94000000);
+      Wd := Int32($14000000);
+      if FL.Mnemonic = 'bl' then Wd := Int32($94000000);
       if IsLocal then
         Wd := Wd or ((Delta div 4) and $3FFFFFF);
       EmitW(Wd);
@@ -1223,11 +1224,11 @@ procedure TArm64Assembler.EncodeInstr;
       { beyond +-1 MiB: b.<inverse> over the next word, then b target }
       if IsFarBranch(FA[0].Sym, $100000) then
       begin
-        EmitW(Integer($54000000) or (2 shl 5) or CondInvert(CondCode(FL.Cond)));
+        EmitW(Int32($54000000) or (2 shl 5) or CondInvert(CondCode(FL.Cond)));
         EmitFarTail(FA[0].Sym);
         Exit;
       end;
-      EmitW(Integer($54000000) or (((Delta div 4) and $7FFFF) shl 5)
+      EmitW(Int32($54000000) or (((Delta div 4) and $7FFFF) shl 5)
         or CondCode(FL.Cond));
       Exit;
     end;
@@ -1238,7 +1239,7 @@ procedure TArm64Assembler.EncodeInstr;
       Delta := BranchDelta(FA[1].Sym, crkNone, IsLocal);
       if (not IsLocal) and (FPassNo = 2) then
         LineError('cbz/cbnz target must be a local label');
-      Wd := Integer($34000000) or (SfBit(FA[0].Is64) shl 31);
+      Wd := Int32($34000000) or (SfBit(FA[0].Is64) shl 31);
       if FL.Mnemonic = 'cbnz' then Wd := Wd or $01000000;
       { beyond +-1 MiB: the opposite test over the next word, then b target }
       if IsFarBranch(FA[1].Sym, $100000) then
@@ -1257,10 +1258,10 @@ procedure TArm64Assembler.EncodeInstr;
       Delta := BranchDelta(FA[2].Sym, crkNone, IsLocal);
       if (not IsLocal) and (FPassNo = 2) then
         LineError('tbz/tbnz target must be a local label');
-      Wd := Integer($36000000);
+      Wd := Int32($36000000);
       if FL.Mnemonic = 'tbnz' then Wd := Wd or $01000000;
-      Wd := Wd or ((Integer(FA[1].Imm) and $20) shl 26)   { b5 -> bit 31 }
-        or ((Integer(FA[1].Imm) and $1F) shl 19) or FA[0].Reg;
+      Wd := Wd or ((Int32(FA[1].Imm) and $20) shl 26)   { b5 -> bit 31 }
+        or ((Int32(FA[1].Imm) and $1F) shl 19) or FA[0].Reg;
       { beyond +-32 KiB: the opposite test over the next word, then b target }
       if IsFarBranch(FA[2].Sym, $8000) then
       begin
@@ -1279,7 +1280,7 @@ procedure TArm64Assembler.EncodeInstr;
         if not (FA[1].SymRef in [srGotPage, srTlvPage]) then
           LineError('adrp needs @PAGE/@GOTPAGE/@TLVPPAGE operand');
       SymReloc(FA[1].Sym, FA[1].SymRef);
-      EmitW(Integer($90000000) or FA[0].Reg);
+      EmitW(Int32($90000000) or FA[0].Reg);
       Exit;
     end;
 
@@ -1290,11 +1291,11 @@ procedure TArm64Assembler.EncodeInstr;
       if FNOps = 3 then
       begin
         { third operand is 'lsl #N' — extract the amount after '#' }
-        Wd := Pos('#', FA[2].Sym);
-        if Wd < 0 then
+        HashPos := Pos('#', FA[2].Sym);
+        if HashPos < 0 then
           LineError('movz/movk shift operand must be lsl #N');
-        ShiftAmt := Integer(ParseImmediate(
-          TrimS(Copy(FA[2].Sym, Wd, Length(FA[2].Sym) - Wd))));
+        ShiftAmt := Int32(ParseImmediate(
+          TrimS(Copy(FA[2].Sym, HashPos, Length(FA[2].Sym) - HashPos))));
       end
       else
         NeedOps(2);
@@ -1437,7 +1438,7 @@ procedure TArm64Assembler.EncodeInstr;
         EmitW(EncShiftVar(FA[0].Is64, Opc, FA[0].Reg, FA[1].Reg, FA[2].Reg));
         Exit;
       end;
-      ShiftAmt := Integer(FA[2].Imm);
+      ShiftAmt := Int32(FA[2].Imm);
       if FL.Mnemonic = 'lsl' then
         EmitW(EncBitfield(FA[0].Is64, False, FA[0].Reg, FA[1].Reg,
           (WidthM1 + 1 - ShiftAmt) and WidthM1, WidthM1 - ShiftAmt))
@@ -1453,7 +1454,7 @@ procedure TArm64Assembler.EncodeInstr;
     if FL.Mnemonic = 'sxtw' then
     begin
       NeedOps(2);
-      EmitW(Integer($93407C00) or (FA[1].Reg shl 5) or FA[0].Reg);
+      EmitW(Int32($93407C00) or (FA[1].Reg shl 5) or FA[0].Reg);
       Exit;
     end;
 
@@ -1578,13 +1579,13 @@ procedure TArm64Assembler.EncodeInstr;
         LineError('LSE atomics take a plain [Xn] operand');
       if FL.Mnemonic = 'casal' then
       begin
-        if FA[0].Is64 then Wd := Integer($C8E0FC00)
-        else Wd := Integer($88E0FC00);
+        if FA[0].Is64 then Wd := Int32($C8E0FC00)
+        else Wd := Int32($88E0FC00);
       end
       else
       begin
-        if FA[0].Is64 then Wd := Integer($F8E00000)
-        else Wd := Integer($B8E00000);
+        if FA[0].Is64 then Wd := Int32($F8E00000)
+        else Wd := Int32($B8E00000);
         if FL.Mnemonic = 'swpal' then Wd := Wd or $8000;
       end;
       EmitW(Wd or (FA[0].Reg shl 16) or (FA[2].Base shl 5) or FA[1].Reg);
@@ -1621,7 +1622,7 @@ procedure TArm64Assembler.EncodeInstr;
       else if FL.Mnemonic = 'fsub' then Opc := $3
       else if FL.Mnemonic = 'fmul' then Opc := $0
       else Opc := $1;
-      Wd := Integer($1E200800) or (Opc shl 12)
+      Wd := Int32($1E200800) or (Opc shl 12)
         or (FA[2].Reg shl 16) or (FA[1].Reg shl 5) or FA[0].Reg;
       if FA[0].Is64 then Wd := Wd or (1 shl 22);
       EmitW(Wd);
@@ -1631,7 +1632,7 @@ procedure TArm64Assembler.EncodeInstr;
     begin
       { FNEG (scalar): 0x1E214000, ftype bit 22 for a d register }
       NeedOps(2);
-      Wd := Integer($1E214000) or (FA[1].Reg shl 5) or FA[0].Reg;
+      Wd := Int32($1E214000) or (FA[1].Reg shl 5) or FA[0].Reg;
       if FA[0].Is64 then Wd := Wd or (1 shl 22);
       EmitW(Wd);
       Exit;
@@ -1639,7 +1640,7 @@ procedure TArm64Assembler.EncodeInstr;
     if FL.Mnemonic = 'fcmp' then
     begin
       NeedOps(2);
-      Wd := Integer($1E202000) or (FA[0].Reg shl 5);
+      Wd := Int32($1E202000) or (FA[0].Reg shl 5);
       if FA[0].Is64 then Wd := Wd or (1 shl 22);
       if FA[1].Kind = okFImm then
         Wd := Wd or 8
@@ -1652,7 +1653,7 @@ procedure TArm64Assembler.EncodeInstr;
     begin
       NeedOps(2);
       { int -> fp: scvtf dD, xN }
-      Wd := Integer($1E220000) or (FA[1].Reg shl 5) or FA[0].Reg;
+      Wd := Int32($1E220000) or (FA[1].Reg shl 5) or FA[0].Reg;
       if FA[0].Is64 then Wd := Wd or (1 shl 22);       { double dest }
       if FA[1].Is64 then Wd := Wd or (1 shl 31);       { 64-bit source }
       EmitW(Wd);
@@ -1669,9 +1670,9 @@ procedure TArm64Assembler.EncodeInstr;
       if FA[0].Is64 = FA[1].Is64 then
         LineError('fcvt needs one single and one double register');
       if FA[0].Is64 then
-        Wd := Integer($1E22C000) or (FA[1].Reg shl 5) or FA[0].Reg
+        Wd := Int32($1E22C000) or (FA[1].Reg shl 5) or FA[0].Reg
       else
-        Wd := Integer($1E624000) or (FA[1].Reg shl 5) or FA[0].Reg;
+        Wd := Int32($1E624000) or (FA[1].Reg shl 5) or FA[0].Reg;
       EmitW(Wd);
       Exit;
     end;
@@ -1681,9 +1682,9 @@ procedure TArm64Assembler.EncodeInstr;
         to even (rmode 00) -- the Round builtin }
       NeedOps(2);
       if FL.Mnemonic = 'fcvtzs' then
-        Wd := Integer($1E380000) or (FA[1].Reg shl 5) or FA[0].Reg
+        Wd := Int32($1E380000) or (FA[1].Reg shl 5) or FA[0].Reg
       else
-        Wd := Integer($1E200000) or (FA[1].Reg shl 5) or FA[0].Reg;
+        Wd := Int32($1E200000) or (FA[1].Reg shl 5) or FA[0].Reg;
       if FA[1].Is64 then Wd := Wd or (1 shl 22);       { double source }
       if FA[0].Is64 then Wd := Wd or (1 shl 31);       { 64-bit dest }
       EmitW(Wd);
@@ -1694,17 +1695,17 @@ procedure TArm64Assembler.EncodeInstr;
       NeedOps(2);
       if FA[0].IsFP and FA[1].IsFP then
       begin
-        Wd := Integer($1E204000) or (FA[1].Reg shl 5) or FA[0].Reg;
+        Wd := Int32($1E204000) or (FA[1].Reg shl 5) or FA[0].Reg;
         if FA[0].Is64 then Wd := Wd or (1 shl 22);
         EmitW(Wd);
         Exit;
       end;
       if FA[0].IsFP then
         { fmov dN, xM }
-        EmitW(Integer($9E670000) or (FA[1].Reg shl 5) or FA[0].Reg)
+        EmitW(Int32($9E670000) or (FA[1].Reg shl 5) or FA[0].Reg)
       else
         { fmov xN, dM }
-        EmitW(Integer($9E660000) or (FA[1].Reg shl 5) or FA[0].Reg);
+        EmitW(Int32($9E660000) or (FA[1].Reg shl 5) or FA[0].Reg);
       Exit;
     end;
 
@@ -1715,18 +1716,18 @@ function TArm64Assembler.Assemble(const AAsmText: string): string;
 var
   Lines: TList<string>;
   Parsed: array of TA64Line;
-  I, J, PassIdx, LSec, LOff: Integer;
+  I, J, PassIdx, LSec, LOff: Int;
   Ops: TList<string>;
   Bind: TContainerSymBind;
 
 begin
   Lines := TList<string>.Create();
-  FLabelSec := TDictionary<string, Integer>.Create();
-  FLabelOff := TDictionary<string, Integer>.Create();
+  FLabelSec := TDictionary<string, Int>.Create();
+  FLabelOff := TDictionary<string, Int>.Create();
   FGlobals := TDictionary<string, Boolean>.Create();
   FWeaks := TDictionary<string, Boolean>.Create();
-  FLong := TDictionary<Integer, Boolean>.Create();
-  FPrevOff := TDictionary<string, Integer>.Create();
+  FLong := TDictionary<Int, Boolean>.Create();
+  FPrevOff := TDictionary<string, Int>.Create();
   FW := TMachOObjectWriter.Create();
   try
     SplitLines(AAsmText, Lines);
@@ -1820,7 +1821,7 @@ begin
       begin
         FPrevOff.Free();
         FPrevOff := FLabelOff;
-        FLabelOff := TDictionary<string, Integer>.Create();
+        FLabelOff := TDictionary<string, Int>.Create();
         FLabelSec.Clear();
         FW.Free();
         FW := TMachOObjectWriter.Create();
