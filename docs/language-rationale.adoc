@@ -1274,32 +1274,31 @@ an `Int` parameter, so a caller's index variable is declared `Int`.
 
 ==== Decision
 
-Blaise supports open-array parameters using the standard two-register ABI
-inherited from FPC and Delphi:
+Blaise supports open-array parameters using the two-value ABI inherited
+from FPC and Delphi.  An open-array parameter `A` is passed as two
+consecutive integer arguments:
 
-* `l %_par_A` — pointer to the first element (a `l` / pointer-width value).
-* `l %_par_A_high` — the high index (count − 1); negative means the array
+* the data pointer -- the address of the first element;
+* the high index (count − 1), a pointer-width `Int`; `-1` means the array
   is empty.
 
-Both registers are passed as separate QBE parameters and allocated to local
-variables (`%_var_A` and `%_var_A_high`) at function entry.
+At entry the callee stores them in two frame slots: the parameter's own
+slot and its `A_high` companion.
 
-The `const` qualifier is syntactically required for open-array parameters
-in the current implementation. It is advisory only: no mutation check is
+A `const` qualifier is accepted but advisory: no mutation check is
 performed. This matches FPC's treatment, where `const` on an open array
 prevents re-assignment of the parameter variable but does not enforce deep
 immutability of the referenced elements.
 
-`Low(A)` always returns the constant `0`. `High(A)` loads and truncates
-`%_var_A_high` to `Integer` (`w` in QBE).
+`Low(A)` always returns the constant `0`. `High(A)` reads the high slot and
+is an `Int`; `Length(A)` is `High(A) + 1`.
 
-Element access `A[I]` computes `base + I × sizeof(element)` using QBE
-pointer arithmetic and emits the appropriate load instruction for the
-element type.
+Element access `A[I]` computes `base + I × SizeOf(element)` and loads the
+element at its own width.
 
 ==== ABI rationale
 
-The two-register layout matches FPC/Delphi so that Blaise can eventually
+The two-value layout matches FPC/Delphi so that Blaise can eventually
 call RTL functions that accept open arrays, and so that ABI knowledge
 transfers directly from existing Pascal documentation.
 
@@ -1310,8 +1309,8 @@ from the established Pascal ABI without benefit.
 ==== Forwarding
 
 Passing an open-array parameter `A` to another open-array formal forwards
-both `%_var_A` (data pointer) and `%_var_A_high` (high index) as two
-separate QBE arguments, preserving the ABI invariant.
+both the data pointer and the high index as two separate arguments,
+preserving the ABI invariant.
 
 ==== For-in iteration
 
@@ -5444,8 +5443,8 @@ Blaise retains exactly three names, one per concept:
 that added no meaning — two names for the same value is a maintenance trap, not
 backwards compatibility.
 
-All three constants are defined in `system.pas` and pre-seeded as compiler
-built-ins in `RegisterBuiltins`.  Their values are derived from the compilation
+All three constants belong to the implicit `System` unit, whose symbols
+the compiler defines itself in `RegisterBuiltins`.  Their values are derived from the compilation
 target (`GTarget` in `blaise.codegen.target`), so cross-compilation to a
 different OS produces the correct constants without conditional compilation.
 
