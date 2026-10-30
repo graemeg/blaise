@@ -95,6 +95,7 @@ type
       means "to the end" as a Copy or Delete count }
     procedure TestRun_MaxInt_IsHighInt;
     procedure TestRun_ImplementsGenericInterface_AliasArgument;
+    procedure TestRun_GenericReceiver_AliasArgument;
   end;
 
 implementation
@@ -866,6 +867,31 @@ const
 begin
   if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
   AssertRunsOnAll(Src, 'True False' + #10 + 'True' + #10, 0);
+end;
+
+{ A generic instance spelt with an alias argument, at any depth, is a valid
+  receiver: TBox<TBox<Int32>>.Create() and TBox<Int32>.Create() resolve to
+  the instances of TBox<TBox<Integer>> and TBox<Integer>. }
+procedure TE2ETypeStdTests.TestRun_GenericReceiver_AliasArgument;
+const
+  Src = '''
+    program P;
+    type
+      TBox<T> = class
+        V: T;
+      end;
+    var
+      B: TBox<TBox<Int32>>;
+    begin
+      B := TBox<TBox<Int32>>.Create();
+      B.V := TBox<Int32>.Create();
+      B.V.V := 41;
+      WriteLn(B.V.V + 1)
+    end.
+    ''';
+begin
+  if not ToolchainAvailable() then begin Ignore('toolchain unavailable'); Exit; end;
+  AssertRunsOnAll(Src, '42' + #10, 0);
 end;
 
 initialization

@@ -364,6 +364,7 @@ type
       Returns the canonical name (e.g. 'TGenEnum<Integer>') suitable for
       FindTypeOrInstantiate. Has no effect on names without '<'. }
     function  ResolveScopeBoundTypeParams(const ATypeName: string): string;
+    function  InstanceSymbol(const AName: string): TSymbol;
     { True inside a method when ASym -- what AName resolved to -- is a GLOBAL
       variable and the class has a record / class field of that name: the
       field shadows the global, as it does for a bare identifier. }
@@ -4904,6 +4905,20 @@ begin
   FI := FCurrentClass.FindField(AName);
   Result := (FI <> nil) and (FI.TypeDesc <> nil) and
             (FI.TypeDesc.Kind in [tyRecord, tyClass]);
+end;
+
+{ The type symbol of generic instance AName, instantiating it first.  The
+  instance is registered under its canonical name, so an argument spelt with
+  an alias at any depth (TBox<TBox<Int32>> for TBox<TBox<Integer>>) is found
+  through the descriptor the instantiation returns, not the spelling. }
+function TSemanticAnalyser.InstanceSymbol(const AName: string): TSymbol;
+var
+  TD: TTypeDesc;
+begin
+  TD := FindTypeOrInstantiate(AName);
+  Result := FTable.Lookup(AName);
+  if (Result = nil) and (TD <> nil) then
+    Result := FTable.Lookup(TD.Name);
 end;
 
 function TSemanticAnalyser.ResolveScopeBoundTypeParams(const ATypeName: string): string;
@@ -19649,8 +19664,7 @@ begin
   if (ObjSym = nil) and (StrPos('<', AExpr.ObjectName) >= 0) then
   begin
     ResolvedObjName := ResolveScopeBoundTypeParams(AExpr.ObjectName);
-    FindTypeOrInstantiate(ResolvedObjName);
-    ObjSym := FTable.Lookup(ResolvedObjName);
+    ObjSym := Self.InstanceSymbol(ResolvedObjName);
   end;
   if ObjSym = nil then
   begin
@@ -21006,8 +21020,7 @@ begin
   if (RecSym = nil) and (StrPos('<', AAccess.RecordName) >= 0) then
   begin
     AAccess.RecordName := ResolveScopeBoundTypeParams(AAccess.RecordName);
-    FindTypeOrInstantiate(AAccess.RecordName);
-    RecSym := FTable.Lookup(AAccess.RecordName);
+    RecSym := Self.InstanceSymbol(AAccess.RecordName);
   end;
   if RecSym = nil then
   begin
