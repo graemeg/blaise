@@ -1424,7 +1424,18 @@ type
 
   { One concrete instantiation produced by monomorphization — stored on TProgram.
     Codegen iterates this list to emit typeinfo, vtables, and method bodies. }
-  TGenericInstance = class
+  { Common to a generic class, record or interface instance: the instances
+    its methods and fields refer to, found or created while it was
+    instantiated.  A unit that emits this instance emits them too.  Plain
+    pointers, so two instances that refer to each other do not keep each
+    other alive. }
+  TGenericInstanceBase = class
+  public
+    Deps: array of Pointer;
+    procedure AddDep(AInst: TGenericInstanceBase);
+  end;
+
+  TGenericInstance = class(TGenericInstanceBase)
   public
     TypeName: string;        { raw e.g. 'TBox<Integer>' }
     ClassDef: TClassTypeDef; { owned — cloned class body with substituted type names }
@@ -1483,7 +1494,7 @@ type
 
   { One concrete instantiation of a generic record — stored on TProgram.
     Codegen iterates this list to emit method bodies and field cleanup. }
-  TGenericRecordInstance = class
+  TGenericRecordInstance = class(TGenericInstanceBase)
   public
     TypeName:  string;          { raw e.g. 'TMyVal<Integer>' }
     RecordDef: TRecordTypeDef;  { owned — cloned record body with substituted type names }
@@ -1496,7 +1507,7 @@ type
 
   { One concrete instantiation of a generic interface — stored on TProgram.
     Codegen iterates this list to emit typeinfo data. }
-  TGenericInterfaceInstance = class
+  TGenericInterfaceInstance = class(TGenericInstanceBase)
   public
     InstName: string;          { mangled name e.g. 'IEqualityComparer_Integer' }
     IntfDef:  TInterfaceTypeDef; { owned — cloned with substituted type names }
@@ -2367,6 +2378,17 @@ constructor TGenericInstance.Create;
 begin
   inherited Create();
   ClassDef := TClassTypeDef.Create();
+end;
+
+procedure TGenericInstanceBase.AddDep(AInst: TGenericInstanceBase);
+var
+  I: Int;
+begin
+  if Pointer(AInst) = Pointer(Self) then Exit;
+  for I := 0 to Length(Deps) - 1 do
+    if Deps[I] = Pointer(AInst) then Exit;
+  SetLength(Deps, Length(Deps) + 1);
+  Deps[Length(Deps) - 1] := Pointer(AInst);
 end;
 
 destructor TGenericInstance.Destroy;

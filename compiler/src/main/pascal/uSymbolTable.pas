@@ -92,6 +92,11 @@ type
     IsSubrange: Boolean;
     SubrangeLow: Int64;
     SubrangeHigh: Int64;
+    { The TGenericInstance (uAST) this descriptor was instantiated as, or nil
+      for a type that is not a generic instance.  Set by uSemantic; lets a
+      lookup that returns the type report the instance as used (see
+      TUsesChainProvider.NoteInstanceUse). }
+    GenericInst: TObject;
     function IsNumeric: Boolean;
     function IsFloat: Boolean;
     function IsString: Boolean;
@@ -614,6 +619,11 @@ type
     { Inside a generic instantiation: the uses-chain walk of the contexts the
       instantiation was entered from (innermost first). }
     function LookupViaOuterChains(const AName: string): TSymbol; virtual;
+    { A lookup returned a generic instance's type (AInst is its
+      TGenericInstance).  The analyser makes the instance part of the unit
+      being analysed, so each unit that uses an instance emits its own weak
+      copy rather than relying on another unit's. }
+    procedure NoteInstanceUse(AInst: TObject); virtual;
   end;
 
   { A thread's private copy of a symbol table's lookup context.  Incremental
@@ -792,6 +802,7 @@ type
     { Detach a symbol from the current scope without freeing it (see
       TScope.ExtractLocal).  Returns the detached symbol or nil. }
     function ExtractLocal(const AName: string): TSymbol;
+    function LookupCore(const AName: string): TSymbol;
     function Lookup(const AName: string): TSymbol;
 
     { Auto-OwningUnit context.  When set, Define()/DefineGlobal() will
@@ -1012,6 +1023,10 @@ end;
 function TUsesChainProvider.LookupViaOuterChains(const AName: string): TSymbol;
 begin
   Result := nil;
+end;
+
+procedure TUsesChainProvider.NoteInstanceUse(AInst: TObject);
+begin
 end;
 
 { ------------------------------------------------------------------ }
@@ -2754,7 +2769,18 @@ end;
 
 function IsPlainIdentName(const AName: string): Boolean; forward;
 
+{ Lookup, reporting a generic instance's type to the analyser as used by the
+  code being analysed (never during codegen, which walks the instance lists). }
 function TSymbolTable.Lookup(const AName: string): TSymbol;
+begin
+  Result := Self.LookupCore(AName);
+  if (Result <> nil) and (Result.Kind = skType) and (Result.TypeDesc <> nil)
+     and (Result.TypeDesc.GenericInst <> nil)
+     and (FUsesChainProvider <> nil) and not FInCodegen then
+    FUsesChainProvider.NoteInstanceUse(Result.TypeDesc.GenericInst);
+end;
+
+function TSymbolTable.LookupCore(const AName: string): TSymbol;
 var
   I: Int;
   Top: Int;

@@ -221,6 +221,9 @@ type
       monomorphisation of the OLD body and the program silently runs stale
       code. }
     procedure TestIncrementalRebuild_ImplOnlyGenericBodyEdit_Rebuilds;
+    { Two units use one generic instance; the first stops using it and the
+      second comes from the cache: the second must still carry the instance. }
+    procedure TestIncrementalRebuild_SharedGenericInstance_OtherUserDrops;
     { Regression (BUG-20260720-unit-iface-static-array-bif-roundtrip): a unit
       INTERFACE var of an anonymous array type — `array[0..2] of string` or
       `array of string` — broke the warm rebuild.  The .bif stored the type as
@@ -3247,6 +3250,128 @@ begin
   Rc := RunBinary(Bin2, Captured);
   AssertEquals('build2 run exit code', 0, Rc);
   AssertEquals('build2 must run the NEW generic body', '222' + #10, Captured)
+end;
+
+{ A generic instance used by two units was emitted only by the first unit
+  compiled: the second found it in the program's symbol table and referenced
+  the first unit's copy.  When the first unit stopped using the generic, a
+  warm build recompiled it, reused the second unit's cached object, and the
+  link failed on the instance's undefined methods
+  (BUG-20261030-generic-instance-owner-cache).  Each unit that uses an
+  instance now emits its own weak copy. }
+procedure TSepCompileTests.TestIncrementalRebuild_SharedGenericInstance_OtherUserDrops;
+const
+  BoxSrc =
+    '''
+    unit SBox;
+    interface
+    type
+      TSBox<T> = class
+        V: T;
+        procedure Put(A: T);
+      end;
+    implementation
+    procedure TSBox<T>.Put(A: T);
+    begin
+      V := A
+    end;
+    end.
+    ''';
+  FirstV1 =
+    '''
+    unit SFirst;
+    interface
+    function First(): Int32;
+    implementation
+    uses SBox;
+    function First(): Int32;
+    var B: TSBox<Int32>;
+    begin
+      B := TSBox<Int32>.Create();
+      B.Put(1);
+      Result := B.V
+    end;
+    end.
+    ''';
+  FirstV2 =
+    '''
+    unit SFirst;
+    interface
+    function First(): Int32;
+    implementation
+    function First(): Int32;
+    begin
+      Result := 10
+    end;
+    end.
+    ''';
+  SecondSrc =
+    '''
+    unit SSecond;
+    interface
+    function Second(): Int32;
+    implementation
+    uses SBox;
+    function Second(): Int32;
+    var B: TSBox<Int32>;
+    begin
+      B := TSBox<Int32>.Create();
+      B.Put(2);
+      Result := B.V
+    end;
+    end.
+    ''';
+  ProgSrc =
+    '''
+    program SharedInst;
+    uses SFirst, SSecond;
+    begin
+      WriteLn(First() + Second())
+    end.
+    ''';
+var
+  Dir, CacheDir, FirstPas, ProgPas, Bin1, Bin2, Captured: string;
+  Rc: Int;
+begin
+  if not ToolchainAvailable() then
+  begin
+    Fail('toolchain missing — compiler or RTL not found');
+    Exit
+  end;
+  if not FileExists(BlaisePath()) then
+  begin
+    Fail('blaise binary missing at ' + BlaisePath());
+    Exit
+  end;
+
+  Dir      := FScratch + '/shared_instance';
+  ForceDirectories(Dir);
+  CacheDir := Dir + '/units';
+  ForceDirectories(CacheDir);
+  FirstPas := Dir + '/sfirst.pas';
+  ProgPas  := Dir + '/sharedinst.pas';
+  Bin1     := Dir + '/sharedinst1';
+  Bin2     := Dir + '/sharedinst2';
+  WriteFile(Dir + '/sbox.pas', BoxSrc);
+  WriteFile(FirstPas, FirstV1);
+  WriteFile(Dir + '/ssecond.pas', SecondSrc);
+  WriteFile(ProgPas, ProgSrc);
+
+  Rc := RunBlaise(['--source', ProgPas, '--output', Bin1,
+                   '--unit-cache', CacheDir, '--unit-path', Dir], Captured);
+  AssertEquals('build1 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Bin1, Captured);
+  AssertEquals('build1 stdout', '3' + #10, Captured);
+
+  { SFirst no longer uses the generic; SSecond is untouched and is reused
+    from the cache. }
+  WriteFile(FirstPas, FirstV2);
+  Rc := RunBlaise(['--source', ProgPas, '--output', Bin2,
+                   '--unit-cache', CacheDir, '--unit-path', Dir], Captured);
+  AssertEquals('build2 exit code (out: ' + Captured + ')', 0, Rc);
+  Rc := RunBinary(Bin2, Captured);
+  AssertEquals('build2 run exit code', 0, Rc);
+  AssertEquals('build2 stdout', '12' + #10, Captured)
 end;
 
 procedure TSepCompileTests.TestIncrementalRebuild_UnitIfaceAnonArrayVar;

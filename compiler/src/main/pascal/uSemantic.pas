@@ -94,6 +94,9 @@ type
     FInNestedOfMethod: Boolean;
     FPendingGenericRecordInstances: TObjectList; { TGenericRecordInstance — not owned }
     FPendingGenericIntfInstances:   TObjectList; { TGenericInterfaceInstance — not owned }
+    { One collector (a TGenericInstanceBase) per instantiation in progress,
+      innermost last: the instances it finds or creates become its Deps. }
+    FInstDeps: TObjectList;
     FGenericFuncTemplates: TStringList;  { base name → TMethodDecl template (not owned) }
     FHiddenExcVarCount:   Int;       { names __excv_<n> -- see
                                            BindHandlersToHiddenVars }
@@ -1391,6 +1394,11 @@ type
     function IsUnitVisible(const AUnit: string): Boolean; override;
     function IsUnitInViewChain(const AUnit: string): Boolean; override;
     function LookupViaOuterChains(const AName: string): TSymbol; override;
+    procedure NoteInstanceUse(AInst: TObject); override;
+  private
+    procedure BeginInstanceDeps;
+    procedure EndInstanceDeps(AResult: TTypeDesc);
+    procedure TakeInstanceDeps(AInst: TGenericInstanceBase);
   end;
 
 
@@ -1583,6 +1591,7 @@ begin
   FDiscardedNodes       := TObjectList.Create(True);
   FPendingGenericRecordInstances := TObjectList.Create(False);
   FPendingGenericIntfInstances   := TObjectList.Create(False);
+  FInstDeps                      := TObjectList.Create(True);
   FPendingAnonDecls     := TObjectList.Create(False);
   FAnonNestedRoutines   := TObjectList.Create(True);
   FNestedRoutineAddrs   := TObjectList.Create(False);
@@ -1601,7 +1610,13 @@ end;
 
 destructor TSemanticAnalyser.Destroy;
 begin
+  { An analysis that failed keeps its table here, its provider reference
+    (unretained) still naming this analyser: withdraw it, so a lookup
+    afterwards does not call back into a freed analyser. }
+  if (FTable <> nil) and (FTable.UsesChainProvider = Self) then
+    FTable.UsesChainProvider := nil;
   FPendingGenericIntfInstances.Free();
+  FInstDeps.Free();
   FPendingAnonDecls.Free();
   FAnonNestedRoutines.Free();
   FNestedRoutineAddrs.Free();
@@ -2904,7 +2919,9 @@ begin
   CheckNestedRoutineAddrs();
   { Transfer symbol table ownership to the program so that TTypeDesc
     objects (referenced by ResolvedType pointers on AST nodes) outlive
-    this analyser. }
+    this analyser.  Analysis is over, so the table stops calling back into
+    this analyser, which the program outlives. }
+  FTable.UsesChainProvider := nil;
   AProg.SymbolTable := FTable;
   FTable := nil;
 end;
@@ -3248,6 +3265,9 @@ begin
   finally
     FTable.PopScope();
   end;
+  { The unit keeps the table; analysis is over, so it stops calling back
+    into this analyser, which the unit outlives. }
+  FTable.UsesChainProvider := nil;
   AUnit.SymbolTable := FTable;
   FTable := nil;
   FCurrentUnit := nil;
@@ -4504,6 +4524,64 @@ begin
   end;
 end;
 
+{ A lookup returned AInst's type.  Make AInst part of the unit (or program)
+  being analysed, together with the instances it refers to, so its object
+  carries a weak copy of each: the program has one symbol table, so without
+  this only the first unit to instantiate a generic emitted it, and a cached
+  object of another unit that used it broke once that first unit stopped
+  (BUG-20261030-generic-instance-owner-cache).  The innermost instantiation
+  in progress records AInst as a dependency. }
+procedure TSemanticAnalyser.NoteInstanceUse(AInst: TObject);
+var
+  List: TObjectList;
+  Inst: TGenericInstanceBase;
+  I:    Int;
+begin
+  Inst := TGenericInstanceBase(AInst);
+  if FInstDeps.Count > 0 then
+    TGenericInstanceBase(FInstDeps.Items[FInstDeps.Count - 1]).AddDep(Inst);
+  List := nil;
+  if FCurrentUnit <> nil then
+  begin
+    if AInst is TGenericInstance then List := FCurrentUnit.GenericInstances
+    else if AInst is TGenericRecordInstance then List := FCurrentUnit.GenericRecordInstances
+    else if AInst is TGenericInterfaceInstance then List := FCurrentUnit.GenericIntfInstances;
+  end
+  else if FProg <> nil then
+  begin
+    if AInst is TGenericInstance then List := FProg.GenericInstances
+    else if AInst is TGenericRecordInstance then List := FProg.GenericRecordInstances
+    else if AInst is TGenericInterfaceInstance then List := FProg.GenericIntfInstances;
+  end;
+  if (List = nil) or (List.IndexOf(AInst) >= 0) then Exit;
+  List.Add(AInst);
+  for I := 0 to Length(Inst.Deps) - 1 do
+    NoteInstanceUse(TObject(Inst.Deps[I]));
+end;
+
+{ An instantiation starts: collect the instances it finds or creates. }
+procedure TSemanticAnalyser.BeginInstanceDeps;
+begin
+  FInstDeps.Add(TGenericInstanceBase.Create());
+end;
+
+{ An instantiation ends: drop its collector, and report the instance it
+  produced to the enclosing one (and to the unit, which already lists it). }
+procedure TSemanticAnalyser.EndInstanceDeps(AResult: TTypeDesc);
+begin
+  FInstDeps.Delete(FInstDeps.Count - 1);
+  if (AResult <> nil) and (AResult.GenericInst <> nil) then
+    NoteInstanceUse(AResult.GenericInst);
+end;
+
+{ AInst, just created, refers to the instances its instantiation (the
+  innermost in progress) has found or created. }
+procedure TSemanticAnalyser.TakeInstanceDeps(AInst: TGenericInstanceBase);
+begin
+  if FInstDeps.Count > 0 then
+    AInst.Deps := TGenericInstanceBase(FInstDeps.Items[FInstDeps.Count - 1]).Deps;
+end;
+
 procedure TSemanticAnalyser.FlushPendingGenericInstances;
 var
   I: Int;
@@ -5707,9 +5785,11 @@ begin
   Viewed := EnterGenericView(FTable.GenericDeclUnit(GenericTypeBaseName(ATypeName)), ATypeName, True, Hidden);
   if Hidden then
     Exit(nil);
+  BeginInstanceDeps();
   try
     Result := InstantiateGenericCore(ATypeName);
   finally
+    EndInstanceDeps(Result);
     if Viewed then
       LeaveGenericView();
   end;
@@ -5722,9 +5802,11 @@ begin
   Viewed := EnterGenericView(FTable.GenericDeclUnit(GenericTypeBaseName(ATypeName)), ATypeName, True, Hidden);
   if Hidden then
     Exit(nil);
+  BeginInstanceDeps();
   try
     Result := InstantiateGenericRecordCore(ATypeName);
   finally
+    EndInstanceDeps(Result);
     if Viewed then
       LeaveGenericView();
   end;
@@ -5737,9 +5819,11 @@ begin
   Viewed := EnterGenericView(FTable.GenericDeclUnit(GenericTypeBaseName(ATypeName)), ATypeName, True, Hidden);
   if Hidden then
     Exit(nil);
+  BeginInstanceDeps();
   try
     Result := InstantiateGenericInterfaceCore(ATypeName);
   finally
+    EndInstanceDeps(Result);
     if Viewed then
       LeaveGenericView();
   end;
@@ -6263,6 +6347,8 @@ begin
     GI.ClassDef := ClonedCD;
     GI.TypeDesc := RT;
     GI.DefUnitName := Templ.DefUnitName;
+    TakeInstanceDeps(GI);
+    RT.GenericInst := GI;
     if FCurrentUnit <> nil then
       FCurrentUnit.GenericInstances.Add(GI)
     else if FProg <> nil then
@@ -6534,6 +6620,8 @@ begin
     GRI.RecordDef := ClonedRD;
     GRI.TypeDesc  := RT;
     GRI.DefUnitName := Templ.DefUnitName;
+    TakeInstanceDeps(GRI);
+    RT.GenericInst := GRI;
     if FCurrentUnit <> nil then
       FCurrentUnit.GenericRecordInstances.Add(GRI)
     else if FProg <> nil then
@@ -6666,6 +6754,8 @@ begin
     GII.InstName := MangledName;
     GII.IntfDef  := nil;
     GII.TypeDesc := Result;
+    TakeInstanceDeps(GII);
+    Result.GenericInst := GII;
     if FCurrentUnit <> nil then
       FCurrentUnit.GenericIntfInstances.Add(GII)
     else if FProg <> nil then
