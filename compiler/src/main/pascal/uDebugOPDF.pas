@@ -35,9 +35,9 @@ type
     FOutput:     TStringList;
     FTypeNames:  TStringList;   { sorted; Objects[i] = Pointer(PtrUInt(TypeID)) }
     FEmitted:    TStringList;   { sorted canonical names already written }
-    FRecordCount:       Integer;
-    FTotRecIdx:         Integer;  { FOutput line index of the TotalRecords placeholder }
-    FUnitDirRecCountIdx: Integer;  { FOutput line index of the UnitDirectory RecordCount placeholder }
+    FRecordCount:       Int;
+    FTotRecIdx:         Int;  { FOutput line index of the TotalRecords placeholder }
+    FUnitDirRecCountIdx: Int;  { FOutput line index of the UnitDirectory RecordCount placeholder }
     FDone:        Boolean;
     { OPDF header TargetArch (opdf_types.TTargetArch): archX86_64 = 2,
       archAArch64 = 4.  Set by the driver from the build target; the debugger
@@ -57,7 +57,7 @@ type
     function  HasBeenEmitted(const AName: string): Boolean;
     procedure MarkEmitted(const AName: string);
     procedure L(const AText: string);
-    procedure EmitRecHdr(ARecType: Byte; ARecSize: Integer);
+    procedure EmitRecHdr(ARecType: Byte; ARecSize: Int);
     procedure EmitNameLen(const AStr: string);
     procedure EmitNameData(const AStr: string);
     procedure EmitStrField(const AStr: string);
@@ -71,14 +71,14 @@ type
     procedure EmitUtf8Str;
     procedure EmitGlobalVar(const AVarName: string; AType: TTypeDesc;
       AIsClassVar: Boolean = False);
-    procedure EmitFunctionScope(AMethod: TMethodDecl; AScopeID: Integer;
-                                ADeclIdx: Integer; const ANextLabel: string;
+    procedure EmitFunctionScope(AMethod: TMethodDecl; AScopeID: Int;
+                                ADeclIdx: Int; const ANextLabel: string;
                                 const ALabel: string);
     procedure EmitParameters(AMethod: TMethodDecl);
-    procedure EmitLocalVars(ABlock: TBlock; AScopeID: Integer);
-    procedure EmitFunctionScope_Main(AScopeID, ADeclIdx: Integer);
+    procedure EmitLocalVars(ABlock: TBlock; AScopeID: Int);
+    procedure EmitFunctionScope_Main(AScopeID, ADeclIdx: Int);
     procedure EmitUnitDirectory;
-    procedure EmitRuntimeHelper(AKind: Integer; const ASymbol: string);
+    procedure EmitRuntimeHelper(AKind: Int; const ASymbol: string);
     procedure EmitRuntimeHelpers;
     procedure EmitPointer(AType: TPointerTypeDesc);
     procedure EmitOpaquePointer(AType: TTypeDesc);
@@ -97,9 +97,9 @@ type
     function MangledClassSym(const AClassName: string): string;
     procedure EmitFactsTypes;
     procedure EmitFunctionScopesFromFacts;
-    procedure EmitFactParameter(AVar: TDbgVar; var ADeclIdx: Integer);
-    procedure EmitFactLocalVar(AVar: TDbgVar; AScopeID: Integer;
-      var ADeclIdx: Integer);
+    procedure EmitFactParameter(AVar: TDbgVar; var ADeclIdx: Int);
+    procedure EmitFactLocalVar(AVar: TDbgVar; AScopeID: Int;
+      var ADeclIdx: Int);
     procedure CollectStmtLines(AStmt: TASTStmt; ALines: TStringList);
     procedure EmitLineInfoForBlock(ABlock: TBlock; const AFuncLabel, AFuncName: string);
     procedure EmitLineInfoForScope(AMethod: TMethodDecl);
@@ -108,7 +108,7 @@ type
     procedure DoEmit;
     function  FuncLabel(AMethod: TMethodDecl): string;
     function  CanonicalName(AType: TTypeDesc): string;
-    function  FieldsPayloadSize(ARec: TRecordTypeDesc): Integer;
+    function  FieldsPayloadSize(ARec: TRecordTypeDesc): Int;
     procedure EmitFields(ARec: TRecordTypeDesc);
     function  ActiveSymTable: TSymbolTable;
   public
@@ -232,7 +232,7 @@ end;
   reproduces exactly, so escaping does not change the emitted byte length. }
 function EscapeAsciiStr(const S: string): string;
 var
-  I, B: Integer;
+  I, B: Int;
 begin
   Result := '';
   for I := 0 to Length(S) - 1 do
@@ -326,7 +326,7 @@ begin
     FEmitted.Add(AName);
 end;
 
-procedure TOPDFEmitter.EmitRecHdr(ARecType: Byte; ARecSize: Integer);
+procedure TOPDFEmitter.EmitRecHdr(ARecType: Byte; ARecSize: Int);
 begin
   L('    .byte ' + IntToStr(ARecType) + '  # RecType');
   L('    .4byte ' + IntToStr(ARecSize) + '  # RecSize');
@@ -392,9 +392,9 @@ begin
   end;
 end;
 
-function TOPDFEmitter.FieldsPayloadSize(ARec: TRecordTypeDesc): Integer;
+function TOPDFEmitter.FieldsPayloadSize(ARec: TRecordTypeDesc): Int;
 var
-  I: Integer;
+  I: Int;
   F: TFieldInfo;
 begin
   Result := 0;
@@ -407,7 +407,7 @@ end;
 
 procedure TOPDFEmitter.EmitFields(ARec: TRecordTypeDesc);
 var
-  I: Integer;
+  I: Int;
   F: TFieldInfo;
   FTypeName: string;
 begin
@@ -463,8 +463,8 @@ end;
 procedure TOPDFEmitter.EmitPrimitive(AType: TTypeDesc);
 var
   CName: string;
-  SubKind, IsSigned, SzB: Byte;
-  RecSize: Integer;
+  SubKind, IsSigned: Byte;
+  SzB, RecSize: Int;
 begin
   CName := CanonicalName(AType);
   if HasBeenEmitted(CName) then Exit;
@@ -507,7 +507,7 @@ const
   LEN_OFFSET = -8;
   CAP_OFFSET = -24;
 var
-  RecSize: Integer;
+  RecSize: Int;
 begin
   if HasBeenEmitted(CNAME) then Exit;
   MarkEmitted(CNAME);
@@ -525,7 +525,7 @@ end;
 procedure TOPDFEmitter.EmitEnum(AType: TEnumTypeDesc);
 var
   CName: string;
-  RecSize, MembSize, I: Integer;
+  RecSize, MembSize, I: Int;
 begin
   CName := AType.Name;
   if HasBeenEmitted(CName) then Exit;
@@ -558,7 +558,7 @@ end;
 procedure TOPDFEmitter.EmitRecord(AType: TRecordTypeDesc);
 var
   CName: string;
-  RecSize, I: Integer;
+  RecSize, I: Int;
   F: TFieldInfo;
 begin
   CName := AType.Name;
@@ -591,7 +591,7 @@ function TOPDFEmitter.MangledClassSym(const AClassName: string): string;
 var
   Sym:   TSymbol;
   Owner: string;
-  I:     Integer;
+  I:     Int;
   Ch:    string;
   Pfx:   string;
 begin
@@ -632,7 +632,7 @@ procedure TOPDFEmitter.EmitClass(AType: TRecordTypeDesc);
 var
   CName, ParentName: string;
   ParentID: UInt32;
-  RecSize, I: Integer;
+  RecSize, I: Int;
   F: TFieldInfo;
 begin
   CName := AType.Name;
@@ -720,7 +720,7 @@ procedure TOPDFEmitter.EmitGlobalVar(const AVarName: string; AType: TTypeDesc;
   AIsClassVar: Boolean);
 var
   CName: string;
-  RecSize: Integer;
+  RecSize: Int;
 begin
   if AType <> nil then
   begin
@@ -741,11 +741,11 @@ begin
   EmitStrField(AVarName);
 end;
 
-procedure TOPDFEmitter.EmitFunctionScope(AMethod: TMethodDecl; AScopeID: Integer;
-  ADeclIdx: Integer; const ANextLabel: string; const ALabel: string);
+procedure TOPDFEmitter.EmitFunctionScope(AMethod: TMethodDecl; AScopeID: Int;
+  ADeclIdx: Int; const ANextLabel: string; const ALabel: string);
 var
   FuncName, Label_: string;
-  RecSize: Integer;
+  RecSize: Int;
 begin
   { The record name doubles as the symbol a debugger resolves for
     break-by-function-name — use the qualified label (TThing_Bump), which
@@ -769,7 +769,7 @@ begin
   L('    .4byte 0  # ParentScopeID');
 end;
 
-procedure TOPDFEmitter.EmitRuntimeHelper(AKind: Integer; const ASymbol: string);
+procedure TOPDFEmitter.EmitRuntimeHelper(AKind: Int; const ASymbol: string);
 begin
   { recRuntimeHelper: 1-byte kind + 8-byte linker-resolved RTL entry-point
     address.  Lets the debugger inject a call to the RTL release routine for a
@@ -793,10 +793,10 @@ end;
 
 procedure TOPDFEmitter.EmitParameters(AMethod: TMethodDecl);
 var
-  I: Integer;
+  I: Int;
   P: TMethodParam;
   CName: string;
-  RecSize: Integer;
+  RecSize: Int;
 begin
   for I := 0 to AMethod.Params.Count - 1 do
   begin
@@ -823,13 +823,13 @@ begin
   end;
 end;
 
-procedure TOPDFEmitter.EmitLocalVars(ABlock: TBlock; AScopeID: Integer);
+procedure TOPDFEmitter.EmitLocalVars(ABlock: TBlock; AScopeID: Int);
 var
-  DeclIdx, RBPOffset: Integer;
-  I, J: Integer;
+  DeclIdx, RBPOffset: Int;
+  I, J: Int;
   V: TVarDecl;
   CName, VarName: string;
-  RawSz, RecSize: Integer;
+  RawSz, RecSize: Int;
 begin
   DeclIdx   := 0;
   RBPOffset := 0;
@@ -913,10 +913,10 @@ begin
   L('    .4byte 13                       # Flags: HAS_DIRECTORY or LEN64 or SCOPE_PARENT');
 end;
 
-procedure TOPDFEmitter.EmitFunctionScope_Main(AScopeID, ADeclIdx: Integer);
+procedure TOPDFEmitter.EmitFunctionScope_Main(AScopeID, ADeclIdx: Int);
 var
   ProgName: string;
-  RecSize: Integer;
+  RecSize: Int;
 begin
   ProgName := FProgram.Name;
   RecSize  := 28 + Length(ProgName);
@@ -935,7 +935,7 @@ end;
 procedure TOPDFEmitter.EmitUnitDirectory;
 var
   DirName: string;
-  RecSize: Integer;
+  RecSize: Int;
 begin
   DirName := FProgram.Name;
   RecSize := 14 + Length(DirName);  { 4(UnitCount)+4(Offset)+4(Count)+2(NameLen) }
@@ -955,7 +955,7 @@ procedure TOPDFEmitter.EmitPointer(AType: TPointerTypeDesc);
 var
   CName: string;
   TargetID: UInt32;
-  RecSize: Integer;
+  RecSize: Int;
 begin
   CName := CanonicalName(AType);
   if HasBeenEmitted(CName) then Exit;
@@ -981,7 +981,7 @@ end;
 procedure TOPDFEmitter.EmitOpaquePointer(AType: TTypeDesc);
 var
   CName: string;
-  RecSize: Integer;
+  RecSize: Int;
 begin
   { tyPChar is an opaque C pointer with no tracked element type (see
     uSymbolTable.pas) — emit it as a recPointer with TargetTypeID = 0,
@@ -1004,7 +1004,7 @@ var
   CName, ElemName: string;
   ElemID: UInt32;
   SA: TStaticArrayTypeDesc;
-  IsDyn, RecSize: Integer;
+  IsDyn, RecSize: Int;
 begin
   CName := CanonicalName(AType);
   if HasBeenEmitted(CName) then Exit;
@@ -1070,7 +1070,7 @@ procedure TOPDFEmitter.EmitSet(AType: TSetTypeDesc);
 var
   CName: string;
   BaseID: UInt32;
-  SzB, RecSize: Integer;
+  SzB, RecSize: Int;
 begin
   CName := AType.Name;
   if CName = '' then CName := 'set of ' + AType.BaseType.Name;
@@ -1097,7 +1097,7 @@ procedure TOPDFEmitter.EmitInterface(AType: TInterfaceTypeDesc);
 var
   CName: string;
   ParentID: UInt32;
-  I, MethodRecSize, RecSize: Integer;
+  I, MethodRecSize, RecSize: Int;
   MName: string;
 begin
   CName := AType.Name;
@@ -1140,11 +1140,11 @@ end;
 
 procedure TOPDFEmitter.EmitProperties(AClass: TRecordTypeDesc);
 var
-  I: Integer;
+  I: Int;
   PI: TPropertyInfo;
   PropTypeID, ClassTypeID: UInt32;
-  ReadType, WriteType: Integer;
-  RecSize: Integer;
+  ReadType, WriteType: Int;
+  RecSize: Int;
   RF: TFieldInfo;
   ReadMethSym, WriteMethSym: string;
 begin
@@ -1241,10 +1241,10 @@ end;
 
 procedure TOPDFEmitter.EmitConstantsFromList(AList: TObjectList);
 var
-  I: Integer;
+  I: Int;
   C: TConstDecl;
   TypeID: UInt32;
-  RecSize: Integer;
+  RecSize: Int;
 begin
   for I := 0 to AList.Count - 1 do
   begin
@@ -1317,7 +1317,7 @@ end;
 
 procedure TOPDFEmitter.EmitTypesFromBlock(ABlock: TBlock);
 var
-  I, J: Integer;
+  I, J: Int;
   TD: TTypeDecl;
   TDesc: TTypeDesc;
   ST: TSymbolTable;
@@ -1354,7 +1354,7 @@ end;
 
 procedure TOPDFEmitter.EmitAllTypes;
 var
-  I: Integer;
+  I: Int;
   GI: TGenericInstance;
   ST: TSymbolTable;
   GIList: TObjectList;
@@ -1394,7 +1394,7 @@ end;
 
 procedure TOPDFEmitter.EmitFactsTypes;
 var
-  I, J: Integer;
+  I, J: Int;
   F: TDbgFunc;
   V: TDbgVar;
 begin
@@ -1413,7 +1413,7 @@ end;
 
 procedure TOPDFEmitter.EmitGlobalVarsFromList(AList: TObjectList);
 var
-  I, J: Integer;
+  I, J: Int;
   V: TVarDecl;
 begin
   for I := 0 to AList.Count - 1 do
@@ -1434,7 +1434,7 @@ end;
   under its mangled ClassVarEmitName so a debugger can print TFoo.FInstance. }
 procedure TOPDFEmitter.EmitStaticVarsFromBlock(ABlock: TBlock);
 var
-  I, K, N: Integer;
+  I, K, N: Int;
   TD:      TTypeDecl;
   Flds:    TObjectList;
   FDecl:   TFieldDecl;
@@ -1487,10 +1487,10 @@ begin
   FFacts := AFacts;
 end;
 
-procedure TOPDFEmitter.EmitFactParameter(AVar: TDbgVar; var ADeclIdx: Integer);
+procedure TOPDFEmitter.EmitFactParameter(AVar: TDbgVar; var ADeclIdx: Int);
 var
   CName: string;
-  RecSize: Integer;
+  RecSize: Int;
 begin
   if AVar.TypeDesc <> nil then
     CName := CanonicalName(AVar.TypeDesc)
@@ -1515,11 +1515,11 @@ begin
   ADeclIdx := ADeclIdx + 1;
 end;
 
-procedure TOPDFEmitter.EmitFactLocalVar(AVar: TDbgVar; AScopeID: Integer;
-  var ADeclIdx: Integer);
+procedure TOPDFEmitter.EmitFactLocalVar(AVar: TDbgVar; AScopeID: Int;
+  var ADeclIdx: Int);
 var
   CName: string;
-  RecSize: Integer;
+  RecSize: Int;
 begin
   if AVar.TypeDesc <> nil then
     CName := CanonicalName(AVar.TypeDesc)
@@ -1560,7 +1560,7 @@ end;
   work at statement granularity. }
 procedure TOPDFEmitter.EmitFunctionScopesFromFacts;
 var
-  I, J, ScopeID, DeclIdx, ParamIdx, RecSize, ParentID: Integer;
+  I, J, ScopeID, DeclIdx, ParamIdx, RecSize, ParentID: Int;
   F: TDbgFunc;
   V: TDbgVar;
   LineF: TDbgLine;
@@ -1636,7 +1636,7 @@ end;
 
 procedure TOPDFEmitter.EmitFunctionScopes;
 var
-  I, J, ScopeID, DeclIdx: Integer;
+  I, J, ScopeID, DeclIdx: Int;
   M: TMethodDecl;
   Decls: TObjectList;
   Labels: TStringList;
@@ -1736,7 +1736,7 @@ end;
 
 procedure TOPDFEmitter.CollectStmtLines(AStmt: TASTStmt; ALines: TStringList);
 var
-  I: Integer;
+  I: Int;
   Key: string;
 begin
   if AStmt = nil then Exit;
@@ -1786,7 +1786,7 @@ procedure TOPDFEmitter.EmitLineInfoForBlock(ABlock: TBlock;
   const AFuncLabel, AFuncName: string);
 var
   Lines: TStringList;
-  I, LineNum, ColNum, RecSize: Integer;
+  I, LineNum, ColNum, RecSize: Int;
 begin
   Lines := TStringList.Create();
   try
@@ -1797,7 +1797,7 @@ begin
     for I := 0 to Lines.Count - 1 do
     begin
       LineNum := StrToInt(Lines.Strings[I]);
-      ColNum := Integer(UInt(Lines.Objects[I]));
+      ColNum := Int(UInt(Lines.Objects[I]));
       L('');
       L('    # recLineInfo: line ' + Lines.Strings[I] + ' in ' + AFuncName);
       EmitRecHdr(REC_LINEINFO, RecSize);
