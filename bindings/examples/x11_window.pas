@@ -44,7 +44,7 @@ const
 
 var
   Dpy: PDisplay;
-  Scr: Integer;
+  Scr: Int32;
   Win: Window;
   Gfx: GC;
   WmDelete: Atom;
@@ -53,7 +53,7 @@ var
   Running: Boolean;
   AutoClose: Boolean;
   Exposed: Boolean;
-  Clicks: Integer;
+  Clicks: Int;
   Msg: string;
 
 procedure DrawContents;
